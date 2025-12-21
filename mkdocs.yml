@@ -1,0 +1,8 @@
+site_name: eso-s3-openapi-webapp
+theme:
+  name: readthedocs
+nav:
+  - Home: docs/index.md
+  - Configuration: docs/configuration.md
+  - Deployment: docs/deployment.md
+  - Troubleshooting: docs/troubleshooting.md

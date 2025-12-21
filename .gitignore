@@ -1,0 +1,30 @@
+# Build artifacts and binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+*.a
+*.o
+
+# Go workspace caches
+*.cover
+*.prof
+*.log
+coverage.*
+
+# Local build directories
+/bin/
+/build/
+/dist/
+/tmp/
+/out/
+/.tmp/
+
+# Editor and OS cruft
+.DS_Store
+.idea/
+.vscode/
+
