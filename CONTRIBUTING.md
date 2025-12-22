@@ -1,8 +1,3 @@
-**Explanation**
-
-It covers project scope, how to set up the repo (including submodules), common `make` targets, coding style, tests, and licensing of contributions.
-
-```markdown
 # Contributing to `drs-server`
 
 Thank you for your interest in contributing to `drs-server`, a lightweight reference implementation of a GA4GH Data Repository Service (DRS) server in Go.
