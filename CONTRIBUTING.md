@@ -1,8 +1,3 @@
-**Explanation**
-
-It covers project scope, how to set up the repo (including submodules), common `make` targets, coding style, tests, and licensing of contributions.
-
-```markdown
 # Contributing to `drs-server`
 
 Thank you for your interest in contributing to `drs-server`, a lightweight reference implementation of a GA4GH Data Repository Service (DRS) server in Go.
@@ -51,37 +46,7 @@ Use short, descriptive names, e.g. `feature/add-service-info`, `fix/healthz-hand
 
 ## Development workflow
 
-### Prerequisites
-
-* Go \>= 1\.24
-* Docker (for OpenAPI generation and docs)
-* Git (with submodule support)
-
-### Common `make` targets
-
-* Generate API stubs:
-
-  ```bash
-  make gen
-  ```
-
-* Run tests:
-
-  ```bash
-  make test
-  ```
-
-* Run the server:
-
-  ```bash
-  make serve
-  ```
-
-* Serve documentation (MkDocs in Docker):
-
-  ```bash
-  make docs
-  ```
+See QUICKSTART.md for details on common tasks.
 
 ### Updating the OpenAPI spec
 
@@ -119,8 +84,6 @@ gofmt -w ./cmd ./internal
 go test ./...
 ```
 
-🧪🧪🧪🧪 Update the docs/ 
-
 ### Generated code
 
 * Do not manually edit files under `internal/apigen`.
@@ -134,6 +97,8 @@ go test ./...
 * For new endpoints or behaviors, include tests that cover both success and error paths.
 
 ## Documentation
+
+> 🧪🧪🧪🧪 Update the docs/
 
 * Update `README.md` or docs (served via `make mkdocs`) when public behavior or endpoints change.
 * Keep examples minimal, accurate, and aligned with the DRS spec.
