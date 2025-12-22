@@ -1,57 +1,41 @@
 SHELL := /bin/bash
 OPENAPI ?= ga4gh/data-repository-service-schemas/openapi/data_repository_service.openapi.yaml
-OPENAPI_NORM ?= ga4gh/data-repository-service-schemas/openapi/data_repository_service.openapi.normalized.yaml
 OAG_IMAGE ?= openapitools/openapi-generator-cli:latest
-OPENAPI_BUNDLE ?= ga4gh/data-repository-service-schemas/openapi/openapi.bundled.yaml
-
-.PHONY: tools
-tools:
-	go install github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.5.1
-	go mod tidy
-
-
-.PHONY: gen-oag
-gen-oag:
-	@mkdir -p .tmp internal/apigen
-	# OpenAPI Generator (Go server stub)
-	#  Skips the default behavior of validating an input specification.
-	#  Skips overwriting existing files that were previously generated.
-
-	rm -f internal/apigen/main.go
-	docker run --rm \
-	  -v "$(PWD):/local" \
-	  $(OAG_IMAGE) generate \
-		-g go-gin-server \
-		--skip-validate-spec \
-		--skip-overwrite \
-		--git-repo-id drs-server \
-		--git-user-id calypr \
-		-i /local/$(OPENAPI_BUNDLE) \
-		-o /local/internal/apigen \
-		-c /local/openapi/openapi-generator.yaml
+MKDOCS_IMAGE ?= squidfunk/mkdocs-material:latest
 
 .PHONY: gen
 gen:
 	@mkdir -p .tmp internal/apigen
-
-	# Normalize OpenAPI spec
-	go run ./cmd/openapi-normalize -in $(OPENAPI) -out $(OPENAPI_NORM)
-	# Bundle OpenAPI spec
-	#go run ./cmd/openapi-bundle -in $(OPENAPI_NORM) -out $(OPENAPI_BUNDLE)
-
-	oapi-codegen -package apigen -generate types,chi-server,spec -o internal/apigen/openapi.gen.go $(OPENAPI_NORM)
-
-	go run ./cmd/openapi-testgen \
-	  -in $(OPENAPI_NORM) \
-	  -out internal/apigen/openapi_generated_test.go \
-	  -pkg apigen
-
-.PHONY: fetch
-fetch:
-	@if [ -z "$(OPENAPI_URL)" ]; then echo "Set OPENAPI_URL=..."; exit 2; fi
-	go run ./cmd/openapi-fetchgen -url "$(OPENAPI_URL)" -out "$(OPENAPI)" -with-refs
-	$(MAKE) gen OPENAPI="$(OPENAPI)"
+	# OpenAPI Generator (Go server stub)
+	# delete previous generated code
+	rm -rf internal/apigen
+	# generate new code
+	docker run --rm \
+	  -v "$(PWD):/local" \
+	  $(OAG_IMAGE) generate \
+	  -g go-gin-server \
+	  --skip-validate-spec \
+	  --git-repo-id drs-server \
+	  --git-user-id calypr \
+	  -i /local/$(OPENAPI) \
+	  -o /local/internal/apigen
+	# a bundle is created at internal/apigen/openapi.yaml, remove examples from it
+	# as many are not compliant with the spec or seem to be randomly generated
+	go run ./cmd/openapi-remove-examples
 
 .PHONY: test
 test:
-	go test ./...
+	go clean -testcache
+	go test -v ./...
+
+.PHONY: serve
+serve:
+	go run ./cmd/server $(ARGS)
+
+.PHONY: docs
+docs:
+	docker run --rm -it \
+	  -v "$(PWD):/docs" \
+	  -p 8000:8000 \
+	  $(MKDOCS_IMAGE) \
+	  serve -a 0.0.0.0:8000

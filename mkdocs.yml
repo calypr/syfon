@@ -1,8 +1,8 @@
-site_name: eso-s3-openapi-webapp
+site_name: drs-server
 theme:
   name: readthedocs
 nav:
-  - Home: docs/index.md
-  - Configuration: docs/configuration.md
-  - Deployment: docs/deployment.md
-  - Troubleshooting: docs/troubleshooting.md
+  - Home: index.md
+  - Configuration: configuration.md
+  - Deployment: deployment.md
+  - Troubleshooting: troubleshooting.md

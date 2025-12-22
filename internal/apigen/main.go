@@ -12,32 +12,19 @@ package main
 
 import (
 	"log"
-	"os"
 
 	// WARNING!
 	// Pass --git-repo-id and --git-user-id properties when generating the code
 	//
-	sw "github.com/calypr/drs-server"
-	//sw "github.com/kellrott/drs-server/go"
+	sw "github.com/calypr/drs-server/go"
 )
 
-const defaultSpecPath = "openapi/openapi.yaml"
-
 func main() {
-	specPath := os.Getenv("OPENAPI_SPEC")
-	if specPath == "" {
-		specPath = defaultSpecPath
-	}
-
-	validator, err := newSpecValidator(specPath)
-	if err != nil {
-		log.Fatalf("openapi validator: %v", err)
-	}
-
 	routes := sw.ApiHandleFunctions{}
-	router := sw.NewRouter(routes)
-	router.Use(validator)
 
 	log.Printf("Server started")
+
+	router := sw.NewRouter(routes)
+
 	log.Fatal(router.Run(":8080"))
 }
