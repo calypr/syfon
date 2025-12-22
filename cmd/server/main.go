@@ -86,6 +86,10 @@ func main() {
 	// actual endpoint handlers.
 	r.Use(validator)
 
+	// Add middleware AFTER NewRouter (it returns *gin.Engine)
+	var requestLogger = RequestLogRedactingAuth()
+	r.Use(requestLogger)
+
 	// Register HTTP routes on the Gin engine.
 
 	// Health endpoint: typically used by Kubernetes or other systems to
