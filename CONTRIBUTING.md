@@ -51,37 +51,7 @@ Use short, descriptive names, e.g. `feature/add-service-info`, `fix/healthz-hand
 
 ## Development workflow
 
-### Prerequisites
-
-* Go \>= 1\.24
-* Docker (for OpenAPI generation and docs)
-* Git (with submodule support)
-
-### Common `make` targets
-
-* Generate API stubs:
-
-  ```bash
-  make gen
-  ```
-
-* Run tests:
-
-  ```bash
-  make test
-  ```
-
-* Run the server:
-
-  ```bash
-  make serve
-  ```
-
-* Serve documentation (MkDocs in Docker):
-
-  ```bash
-  make docs
-  ```
+See QUICKSTART.md for details on common tasks.
 
 ### Updating the OpenAPI spec
 
@@ -119,7 +89,7 @@ gofmt -w ./cmd ./internal
 go test ./...
 ```
 
-🧪🧪🧪🧪 Update the docs/ 
+🧪🧪🧪🧪 Update the docs/
 
 ### Generated code
 
