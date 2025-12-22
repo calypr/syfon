@@ -15,21 +15,20 @@ GA4GH DRS is a standard API for describing and accessing data objects in cloud o
 This project consumes the official GA4GH `data-repository-service-schemas` as a Git submodule and generates a Go HTTP server from the DRS OpenAPI spec.
 
 
-## Key files
-
 ```mermaid
 graph TD
+  0[ga4gh/data-repository-service-schemas DRS OpenAPI spec submodule] --> B
   A[Makefile] --> B[make gen]
-  A --> C[make serve]
+  A --> C2[cmd/server]
   A --> D[make test]
-  A --> E[make docs]
+  A --> E[make docs/]
 
-  B --> F[ga4gh/data-repository-service-schemas<br/>(DRS OpenAPI spec submodule)]
-  B --> G[internal/apigen<br/>(generated DRS server code)]
-  B --> H[cmd/openapi-remove-examples<br/>(clean OpenAPI helper)]
+  B --> G[internal/apigen generated DRS server code]
+  B --> H[cmd/openapi-remove-examples clean OpenAPI helper] --> H2[internal/apigen/api/openapi.yaml]
 
-  C --> I[cmd/server<br/>(main HTTP server using gin-gonic/gin)]
-
+  H2 --> C2
+  D --> C2
+  G --> C2
 ```
 
 * Makefile - targets for generation, tests, docs, and running the server.
