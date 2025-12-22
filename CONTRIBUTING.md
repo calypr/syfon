@@ -84,8 +84,6 @@ gofmt -w ./cmd ./internal
 go test ./...
 ```
 
-🧪🧪🧪🧪 Update the docs/
-
 ### Generated code
 
 * Do not manually edit files under `internal/apigen`.
@@ -99,6 +97,8 @@ go test ./...
 * For new endpoints or behaviors, include tests that cover both success and error paths.
 
 ## Documentation
+
+> 🧪🧪🧪🧪 Update the docs/
 
 * Update `README.md` or docs (served via `make mkdocs`) when public behavior or endpoints change.
 * Keep examples minimal, accurate, and aligned with the DRS spec.
