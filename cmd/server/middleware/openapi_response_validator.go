@@ -91,11 +91,11 @@ func NewOpenAPIResponseValidator(cfg ResponseValidatorConfig) gin.HandlerFunc {
 		if bw.tooLarge {
 			msg := fmt.Sprintf("response body exceeded max buffer (%d bytes)", cfg.MaxBodyBytes)
 			logOpenAPIResponseIssue(c, cfg, msg, status, bw.header, bw.body.Bytes())
-			// Return 413 Payload Too Large instead of committing truncated response
+			// Return 413 Content Too Large instead of committing truncated response
 			c.Writer = bw.underlying // restore
 			c.Status(http.StatusRequestEntityTooLarge) // 413
 			c.Header("Content-Type", "application/json")
-			c.Writer.Write([]byte(fmt.Sprintf(`{"error":"response too large","detail":%q}`, msg)))
+			c.Writer.Write([]byte(fmt.Sprintf(`{"error":"content too large","detail":%q}`, msg)))
 			return
 		}
 
