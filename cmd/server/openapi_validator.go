@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
 
 	"github.com/getkin/kin-openapi/openapi3"
@@ -32,6 +33,26 @@ func newSpecValidator(specPath string, lenientRoutes bool) (gin.HandlerFunc, err
 		return nil, fmt.Errorf("load spec %q: %w", specPath, err)
 	}
 
+	//
+	if len(spec.Servers) > 0 {
+		for _, server := range spec.Servers {
+			log.Printf("Loaded OpenAPI server URL: %s", server.URL)
+		}
+		spec.Servers = openapi3.Servers{{URL: "/"}} // accept any host, root base path
+		log.Printf("Neutralize servers so route matching isn’t constrained e.g. /")
+	}
+	// Log all paths loaded from the spec for visibility.
+	if spec.Paths != nil {
+		for path := range spec.Paths.Map() {
+			log.Printf("Loaded OpenAPI path: %s", path)
+		}
+	}
+	// spot check service-info
+	if pi := spec.Paths.Find("/service-info"); pi != nil {
+		log.Printf("/service-info GET defined? %v", pi.Get != nil)
+		log.Printf("/service-info POST defined? %v", pi.Post != nil)
+	}
+
 	// Validate the spec once at startup. Some specs with extensions may warn/fail;
 	// adjust as needed (e.g., log warning instead of returning error).
 	if err := spec.Validate(context.Background()); err != nil {
@@ -50,6 +71,7 @@ func newSpecValidator(specPath string, lenientRoutes bool) (gin.HandlerFunc, err
 			// Lenient mode: if lenientRoutes is true, skip OpenAPI validation
 			// for unknown routes and continue the handler chain.
 			if lenientRoutes {
+				log.Printf("error finding route %s, but lenientRoutes - proceeding: %v", c.Request.URL.Path, err)
 				c.Next()
 				return
 			}
@@ -61,6 +83,10 @@ func newSpecValidator(specPath string, lenientRoutes bool) (gin.HandlerFunc, err
 			return
 		}
 
+		// Attach route and path params to context for downstream handlers
+		c.Set("oapi.route", route)
+		c.Set("oapi.pathParams", pathParams)
+
 		// Validate request against the OpenAPI operation schema
 		in := &openapi3filter.RequestValidationInput{
 			Request:    c.Request,
@@ -69,7 +95,7 @@ func newSpecValidator(specPath string, lenientRoutes bool) (gin.HandlerFunc, err
 			Options: &openapi3filter.Options{
 				// If you want spec-defined security enforcement, plug in:
 				// AuthenticationFunc: yourAuthFunc,
-				AuthenticationFunc: nil,
+				AuthenticationFunc: allowAllAuth,
 			},
 		}
 
@@ -83,4 +109,11 @@ func newSpecValidator(specPath string, lenientRoutes bool) (gin.HandlerFunc, err
 
 		c.Next()
 	}, nil
+}
+
+// Replace this with real auth logic (e.g., checking Authorization headers, API keys, etc.).
+func allowAllAuth(ctx context.Context, input *openapi3filter.AuthenticationInput) error {
+	// input.SecurityScheme and input.Scopes describe what the spec requires.
+	// Implement your checks here. Return nil on success, or an error on failure.
+	return nil
 }

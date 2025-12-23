@@ -63,15 +63,22 @@ func main() {
 	// Ensure any buffered log entries are flushed before the process exits.
 	defer func() { _ = log.Sync() }()
 
-	// Build the OpenAPI validator middleware using the resolved spec path.
+	// Build the OpenAPI requestValidator middleware using the resolved spec path.
 	// The second argument (true) can be used to enable strict mode or
 	// similar behavior, depending on newSpecValidator's implementation.
-	// If the validator fails to initialize, the server cannot safely start,
+	// If the requestValidator fails to initialize, the server cannot safely start,
 	// so the process is terminated with a fatal log.
-	validator, err := newSpecValidator(specPath, true)
+	requestValidator, err := newSpecValidator(specPath, true)
 	if err != nil {
-		log.Fatal("openapi validator", zap.Error(err))
+		log.Fatal("openapi requestValidator", zap.Error(err))
 	}
+
+	// build the response validator middleware
+	// using default config
+	// If the responseValidator fails to initialize, the server cannot safely start,
+	respCfg := DefaultResponseValidatorConfig()
+	respCfg.Mode = ResponseValidationAudit // prod default; use Enforce in CI
+	responseValidator := NewOpenAPIResponseValidator(respCfg)
 
 	// Create a new Gin engine instance. Gin provides routing, middleware,
 	// and HTTP handler abstractions.
@@ -81,14 +88,15 @@ func main() {
 	// handlers from crashing the server by recovering and returning a 500.
 	r.Use(gin.Recovery())
 
-	// Attach the OpenAPI validator middleware so that all incoming requests
+	// Attach the OpenAPI requestValidator middleware so that all incoming requests
 	// are validated against the OpenAPI specification before reaching the
 	// actual endpoint handlers.
-	r.Use(validator)
+	r.Use(requestValidator)
+	r.Use(responseValidator)
 
 	// Add middleware AFTER NewRouter (it returns *gin.Engine)
-	var requestLogger = RequestLogRedactingAuth()
-	r.Use(requestLogger)
+	//var requestLogger = RequestLogRedactingAuth()
+	//r.Use(requestLogger)
 
 	// Register HTTP routes on the Gin engine.
 
