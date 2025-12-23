@@ -95,7 +95,7 @@ func NewOpenAPIResponseValidator(cfg ResponseValidatorConfig) gin.HandlerFunc {
 			c.Writer = bw.underlying // restore
 			c.Status(http.StatusRequestEntityTooLarge) // 413
 			c.Header("Content-Type", "application/json")
-			c.Writer.Write([]byte(fmt.Sprintf(`{"error":"content too large","detail":%q}`, msg)))
+			c.Writer.Write([]byte(fmt.Sprintf(`{"error":"response body too large","detail":%q}`, msg)))
 			return
 		}
 
