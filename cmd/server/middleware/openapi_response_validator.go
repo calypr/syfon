@@ -87,21 +87,15 @@ func NewOpenAPIResponseValidator(cfg ResponseValidatorConfig) gin.HandlerFunc {
 			return
 		}
 
-		// If response too large to buffer, decide policy
+		// If response too large to buffer, return 413 Content Too Large
 		if bw.tooLarge {
-			msg := fmt.Sprintf("response body exceeded max buffer (%d bytes); skipping OpenAPI response validation", cfg.MaxBodyBytes)
-			if cfg.Mode == ResponseValidationEnforce {
-				// In enforce mode, safest is to fail closed *before committing*.
-				// We can still send a 500 because we haven’t committed yet.
-				c.Writer = bw.underlying // restore
-				c.Status(http.StatusInternalServerError)
-				c.Header("Content-Type", "application/json")
-				c.Writer.Write([]byte(fmt.Sprintf(`{"error":"openapi response validation failed","detail":%q}`, msg)))
-				return
-			}
-			// audit mode: commit and log
+			msg := fmt.Sprintf("response body exceeded max buffer (%d bytes)", cfg.MaxBodyBytes)
 			logOpenAPIResponseIssue(c, cfg, msg, status, bw.header, bw.body.Bytes())
-			_ = bw.commit()
+			// Return 413 Payload Too Large instead of committing truncated response
+			c.Writer = bw.underlying // restore
+			c.Status(http.StatusRequestEntityTooLarge) // 413
+			c.Header("Content-Type", "application/json")
+			c.Writer.Write([]byte(fmt.Sprintf(`{"error":"response too large","detail":%q}`, msg)))
 			return
 		}
 
