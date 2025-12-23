@@ -32,7 +32,7 @@ type ResponseValidatorConfig struct {
 func DefaultResponseValidatorConfig() ResponseValidatorConfig {
 	return ResponseValidatorConfig{
 		Mode:             ResponseValidationAudit,
-		MaxBodyBytes:     2 << 20, // 2MiB
+		MaxBodyBytes:     2 * 1024 * 1024, // 2MiB
 		LogHeaders:       false,
 		RedactHeaders:    []string{"authorization", "x-api-key", "x-amz-security-token"},
 		AllowEmptyOn204:  true,
