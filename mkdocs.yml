@@ -19,7 +19,6 @@ nav:
 
 plugins:
   - search
-  - mermaid2
 
 
 markdown_extensions:
