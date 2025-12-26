@@ -75,18 +75,13 @@ func main() {
 		log.Fatal("openapi requestValidator", zap.Error(err))
 	}
 
-	// build the response validator middleware
-	// using default config
+	// Build the response validator middleware using the default configuration.
+	// The validator runs in audit mode by default (use Enforce in CI).
 	// If the responseValidator fails to initialize, the server cannot safely start,
 	respCfg := middleware.DefaultResponseValidatorConfig()
 	respCfg.Mode = middleware.ResponseValidationAudit // prod default; use Enforce in CI
 	responseValidator := middleware.NewOpenAPIResponseValidator(respCfg)
 
-	// Build the response validator middleware using the default configuration.
-	// The validator runs in audit mode by default (use Enforce in CI).
-	respCfg := DefaultResponseValidatorConfig()
-	respCfg.Mode = ResponseValidationAudit // prod default; use Enforce in CI
-	responseValidator := NewOpenAPIResponseValidator(respCfg)
 	// Create a new Gin engine instance. Gin provides routing, middleware,
 	// and HTTP handler abstractions.
 	r := gin.New()
