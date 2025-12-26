@@ -6,6 +6,8 @@ import (
 	"os"
 	"time"
 
+	"github.com/calypr/drs-server/cmd/server/handlers"
+	"github.com/calypr/drs-server/cmd/server/middleware"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )
@@ -68,10 +70,17 @@ func main() {
 	// similar behavior, depending on newSpecValidator's implementation.
 	// If the requestValidator fails to initialize, the server cannot safely start,
 	// so the process is terminated with a fatal log.
-	requestValidator, err := newSpecValidator(specPath, true)
+	requestValidator, err := middleware.NewSpecValidator(specPath, true)
 	if err != nil {
 		log.Fatal("openapi requestValidator", zap.Error(err))
 	}
+
+	// build the response validator middleware
+	// using default config
+	// If the responseValidator fails to initialize, the server cannot safely start,
+	respCfg := middleware.DefaultResponseValidatorConfig()
+	respCfg.Mode = middleware.ResponseValidationAudit // prod default; use Enforce in CI
+	responseValidator := middleware.NewOpenAPIResponseValidator(respCfg)
 
 	// Build the response validator middleware using the default configuration.
 	// The validator runs in audit mode by default (use Enforce in CI).
@@ -100,11 +109,11 @@ func main() {
 
 	// Health endpoint: typically used by Kubernetes or other systems to
 	// check if the service is alive and ready to receive traffic.
-	registerHealthzRoute(r)
+	handlers.RegisterHealthzRoute(r)
 
 	// Service info endpoint: exposes basic metadata about the service,
 	// such as name, version, and current timestamp.
-	registerServiceInfoRoute(r)
+	handlers.RegisterServiceInfoRoute(r)
 
 	// Construct the HTTP server using the Gin engine as the handler.
 	// ReadHeaderTimeout limits the time allowed to read request headers,

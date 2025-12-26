@@ -1,4 +1,4 @@
-package main
+package handlers
 
 import (
 	"net/http"
@@ -11,7 +11,7 @@ import (
 // This endpoint is typically used by load balancers, orchestration systems
 // (such as Kubernetes), or monitoring tools to verify that the service is
 // running and able to respond to HTTP requests.
-func registerHealthzRoute(r *gin.Engine) {
+func RegisterHealthzRoute(r *gin.Engine) {
 	// Register a handler for HTTP GET requests on the `/healthz` path.
 	// For each incoming request that matches this route, Gin will call
 	// the anonymous function below.

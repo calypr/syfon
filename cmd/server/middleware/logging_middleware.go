@@ -1,7 +1,7 @@
 // Package main contains the HTTP server entrypoint and middleware, including
 // logging middleware that redacts sensitive authentication headers and logs
 // both request and response metadata.
-package main
+package middleware
 
 import (
 	"bytes"

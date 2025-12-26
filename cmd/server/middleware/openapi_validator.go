@@ -1,4 +1,4 @@
-package main
+package middleware
 
 import (
 	"context"
@@ -12,11 +12,6 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// Convenience wrapper: default lenientRoutes to true.
-func newDefaultSpecValidator(specPath string) (gin.HandlerFunc, error) {
-	return newSpecValidator(specPath, true)
-}
-
 // newSpecValidator builds a Gin middleware that validates incoming requests
 // against an OpenAPI 3.x document.
 //
@@ -24,7 +19,7 @@ func newDefaultSpecValidator(specPath string) (gin.HandlerFunc, error) {
 // - If the request path+method does not exist in the spec => 404 (strict).
 // - If it exists but the request doesn't conform => 400 with detail.
 // - Security validation is not enforced unless you plug in AuthenticationFunc.
-func newSpecValidator(specPath string, lenientRoutes bool) (gin.HandlerFunc, error) {
+func NewSpecValidator(specPath string, lenientRoutes bool) (gin.HandlerFunc, error) {
 	loader := openapi3.NewLoader()
 	loader.IsExternalRefsAllowed = true
 

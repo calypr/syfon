@@ -1,4 +1,4 @@
-package main
+package handlers
 
 import (
 	"net/http"
@@ -9,7 +9,7 @@ import (
 // registerServiceInfoRoute adds the `/service-info` endpoint to the provided
 // Gin router. The endpoint returns basic metadata about the running service
 // as a JSON payload, which can be used for diagnostics and observability.
-func registerServiceInfoRoute(r *gin.Engine) {
+func RegisterServiceInfoRoute(r *gin.Engine) {
 
 	var serviceInfoResponse = map[string]any{
 		"id":   "drs-example",
