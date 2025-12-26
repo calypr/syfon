@@ -77,10 +77,13 @@ graph TD
 sequenceDiagram
     participant U as User
     participant P as Passport Broker
+    participant A as Arborist
     participant D as DRS
     participant S as Storage
 
     U->>P: Authenticate & request Passport
+    P-->>A: Authenticate, get Roles
+    P->P: Translate Roles -> Visas
     P-->>U: Passport-ControlledAccessGrants
 
     U->>D: POST /objects/{object_id} + Passport

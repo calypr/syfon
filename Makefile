@@ -1,7 +1,8 @@
 SHELL := /bin/bash
 OPENAPI ?= ga4gh/data-repository-service-schemas/openapi/data_repository_service.openapi.yaml
 OAG_IMAGE ?= openapitools/openapi-generator-cli:latest
-MKDOCS_IMAGE ?= squidfunk/mkdocs-material:latest
+MKDOCS_IMAGE ?= mkdocs-material-mermaid:latest
+
 
 .PHONY: gen
 gen:
@@ -31,6 +32,11 @@ test:
 .PHONY: serve
 serve:
 	go run ./cmd/server $(ARGS)
+
+
+.PHONY: docs-image
+docs-image:
+	docker build -f Dockerfile.mkdocs -t mkdocs-material-mermaid:latest .
 
 .PHONY: docs
 docs:

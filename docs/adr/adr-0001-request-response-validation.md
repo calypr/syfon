@@ -31,27 +31,25 @@ Implement OpenAPI validation middleware using **kin-openapi** (`openapi3filter`)
 
 Black-box contract testing complements runtime validation in CI.
 
-## Mermaid diagram
+## OpenAPI usage
 
 ```mermaid
 flowchart TB
-    Client[Client] -->|HTTP Request| Gin[gin Engine]
-
-    subgraph MiddlewareChain[Middleware Chain]
-        LogReq[Request Logging redact auth] --> ReqVal[OpenAPI Request Validation enforce]
-        ReqVal --> Handler[Application Handlers generated]
-        Handler --> RespVal[OpenAPI Response Validation audit or enforce]
-        RespVal --> Commit[Late Commit Writer buffered]
-    end
-
-    Gin --> MiddlewareChain -->|HTTP Response| Client
-
-    Spec[OpenAPI Spec local or embedded] --> ReqVal
-    Spec --> RespVal
-
-    CI[CI Pipeline] --> Contract[Contract Tests]
+    Spec[OpenAPI Spec local or embedded] --> CI
+    CI[CI make gen] --> Contract[Contract Tests]
     Spec --> Contract
+    Spec --> MiddlewareChain
     Contract --> Report[Fail build on violations]
+ 
+    subgraph MiddlewareChain[Middleware Chain]
+        LogReq[Logging redact auth] --> ReqVal[OpenAPI Request Validation enforce]
+        ReqVal --> Handler
+        Handler --> RespVal[OpenAPI Response Validation audit or enforce]
+        RespVal --> Commit
+    end
+    
+    MiddlewareChain --> Gin[GIN HTTP Server]
+
 
 ```
 

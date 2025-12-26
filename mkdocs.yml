@@ -12,6 +12,11 @@ nav:
           - ADR 0001 - openapi request/response validation: adr/adr-0001-request-response-validation.md
           - ADR 0002 - ga4gh passports for authorization: adr/adr-0002-passports-ControlledAccessGrants.md
 
+plugins:
+  - search
+  - mermaid2
+
+
 markdown_extensions:
   - admonition
   - toc:
@@ -21,7 +26,3 @@ markdown_extensions:
         - name: mermaid
           class: mermaid
           format: !!python/name:pymdownx.superfences.fence_code_format
-
-extra_javascript:
-  - https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js
-  - js/mermaid-init.js
