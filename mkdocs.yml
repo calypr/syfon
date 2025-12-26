@@ -1,13 +1,25 @@
 site_name: drs-server
 theme:
-  name: readthedocs
-  custom_dir: overrides
+  name: material
+  features:
+    - content.code.annotate
+
+plugins:
+  - search
+
 markdown_extensions:
+  - admonition
+  - toc:
+      permalink: true
   - pymdownx.superfences:
       custom_fences:
         - name: mermaid
           class: mermaid
           format: !!python/name:pymdownx.superfences.fence_code_format
+
+extra_javascript:
+  - https://unpkg.com/mermaid@10/dist/mermaid.min.js
+
 nav:
   - Home: index.md
   - Configuration: configuration.md
