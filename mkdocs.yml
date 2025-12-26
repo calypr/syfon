@@ -1,6 +1,7 @@
 site_name: drs-server
 theme:
   name: material
+  custom_dir: overrides
   features:
     - content.code.annotate
 
@@ -16,9 +17,6 @@ markdown_extensions:
         - name: mermaid
           class: mermaid
           format: !!python/name:pymdownx.superfences.fence_code_format
-
-extra_javascript:
-  - https://unpkg.com/mermaid@10/dist/mermaid.min.js
 
 nav:
   - Home: index.md

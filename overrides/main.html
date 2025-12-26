@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+
+{% block scripts %}
+  {{ super() }}
+  <script src="https://unpkg.com/mermaid@10/dist/mermaid.min.js" integrity="sha384-OLBgp1GsljhM2TJ+sbHjaiH9txEUvgdDTAzHv2P24donTt6/529l+9Ua0vFImLlb" crossorigin="anonymous"></script>
+  <script>
+    mermaid.initialize({ startOnLoad: true });
+  </script>
+{% endblock %}
