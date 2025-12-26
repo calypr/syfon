@@ -2,7 +2,7 @@
 # ADR-002: GA4GH Passports, DRS Authorization, ControlledAccessGrants, and Signed Access
 
 ## Status
-Accepted
+For discussion
 
 ## Context
 
