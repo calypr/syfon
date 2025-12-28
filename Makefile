@@ -45,3 +45,11 @@ docs:
 	  -p 8000:8000 \
 	  $(MKDOCS_IMAGE) \
 	  serve -a 0.0.0.0:8000
+
+.PHONY: docs-build
+docs-build:
+	docker run --rm -it \
+	  -v "$(PWD):/docs" \
+	  -p 8000:8000 \
+	  $(MKDOCS_IMAGE) \
+	  build
