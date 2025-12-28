@@ -13,16 +13,21 @@ nav:
   - Troubleshooting: troubleshooting.md
   - Architecture:
       - Overview: adr/index.md
-      - ADRs:
-          - ADR 0001 - openapi request/response validation: adr/adr-0001-request-response-validation.md
-          - ADR 0002 - ga4gh passports for authorization: adr/adr-0002-passports-ControlledAccessGrants.md
+      - Topics:
+          - openapi request/response validation: adr/adr-0001-request-response-validation.md
+          - ga4gh passports for authorization: adr/adr-0002-passports-ControlledAccessGrants.md
 
 plugins:
   - search
-
+  - mermaid2
 
 markdown_extensions:
   - admonition
   - toc:
       permalink: true
   - pymdownx.superfences
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
