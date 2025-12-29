@@ -1,7 +1,8 @@
 site_name: drs-server
 theme:
   name: material
-  custom_dir: overrides
+  # In MkDocs, the `overrides/` directory is used to customize the HTML templates and assets provided by the theme without modifying the theme itself.
+  custom_dir: docs/overrides
   features:
     - content.code.annotate
 
@@ -16,6 +17,7 @@ nav:
       - Topics:
           - openapi request/response validation: adr/adr-0001-request-response-validation.md
           - ga4gh passports for authorization: adr/adr-0002-passports-ControlledAccessGrants.md
+          - persistence layer design: adr/adr-0003-persistence-layer-design.md
 
 plugins:
   - search
@@ -25,7 +27,6 @@ markdown_extensions:
   - admonition
   - toc:
       permalink: true
-  - pymdownx.superfences
   - pymdownx.superfences:
       custom_fences:
         - name: mermaid
