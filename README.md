@@ -6,6 +6,7 @@ A lightweight reference implementation of a GA4GH Data Repository Service (DRS) 
 - [Overview](#overview)
 - [Quickstart](QUICKSTART.md)
 - [Contributing](CONTRIBUTING.md)
+- [GitHub Pages](https://calypr.github.io/drs-server/)
 - [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 
