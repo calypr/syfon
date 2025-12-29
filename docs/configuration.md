@@ -2,8 +2,8 @@
 
 ## Environment variables
 
-Describe any environment variables used by `cmd/server` here.
+🚧 TODO: Describe any environment variables used by `cmd/server` here.
 
 ## Command\-line flags
 
-Document flags accepted by `make serve` / `cmd/server` here.
+🚧 TODO: Document flags accepted by `make serve` / `cmd/server` here.
