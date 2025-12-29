@@ -31,14 +31,17 @@ Implement OpenAPI validation middleware using **kin-openapi** (`openapi3filter`)
 
 Black-box contract testing complements runtime validation in CI.
 
+## Implementation
+
+See https://github.com/calypr/drs-server/pull/2
+
 ## OpenAPI usage
 
 ```mermaid
 flowchart TB
-    Spec[OpenAPI Spec local or embedded] --> CI
-    CI[CI make gen] --> Contract[Contract Tests]
-    Spec --> Contract
-    Spec --> MiddlewareChain
+    Spec[OpenAPI Spec] --> CI
+    CI[CI make gen] --> Contract[Bundle Spec, Model, Handler stubs]
+    Contract --> MiddlewareChain
     Contract --> Report[Fail build on violations]
  
     subgraph MiddlewareChain[Middleware Chain]
