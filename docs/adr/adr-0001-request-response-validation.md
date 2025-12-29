@@ -39,7 +39,7 @@ See https://github.com/calypr/drs-server/pull/2
 
 ```mermaid
 flowchart TB
-    Spec[OpenAPI Spec] --> CI
+    Spec[OpenAPI Spec Git Submodule] --> CI
     CI[CI make gen] --> Contract[Bundle Spec, Model, Handler stubs]
     Contract --> MiddlewareChain
     Contract --> Report[Fail build on violations]
