@@ -16,28 +16,31 @@ This project consumes the official GA4GH `data-repository-service-schemas` as a 
 
 
 ```mermaid
-graph TD
-  0[ga4gh/data-repository-service-schemas DRS OpenAPI spec submodule] --> B
-  A[Makefile] --> B[make gen]
-  A --> C2[cmd/server]
-  A --> D[make test]
-  A --> E[make docs/]
+flowchart TB
+  Spec[OpenAPI Spec Git Submodule] --> CI
+  CI[CI make gen] --> Contract[Bundle Spec, Model, Handler stubs]
+  Contract --> MiddlewareChain
+  Contract --> Report[Fail build on violations]
 
-  B --> G[internal/apigen generated DRS server code]
-  B --> H[cmd/openapi-remove-examples clean OpenAPI helper] --> H2[internal/apigen/api/openapi.yaml]
+  subgraph MiddlewareChain[Middleware Chain]
+    LogReq[Logging redact auth] --> ReqVal[OpenAPI Request Validation enforce]
+    ReqVal --> Handler
+    Handler --> RespVal[OpenAPI Response Validation audit or enforce]
+    RespVal --> Commit
+  end
 
-  H2 --> C2
-  D --> C2
-  G --> C2
+  MiddlewareChain --> Gin[GIN HTTP Server]
+
+
 ```
 
-* Makefile - targets for generation, tests, docs, and running the server.
-  * `make gen` - generates the DRS server code from the OpenAPI spec.
-    * ga4gh/data-repository-service-schemas - GA4GH DRS OpenAPI spec (Git submodule).
-    * internal/apigen - generated DRS server code.
-    * cmd/openapi-remove-examples - helper to clean the bundled OpenAPI.
-  * `make serve` - runs the DRS server.
-    * cmd/server - main HTTP server (uses gin-gonic/gin).
-  * `make test` - launches server, runs integration tests.
-  * `make docs` - serves documentation with MkDocs.
-
+* Makefile \- targets for generation, tests, docs, and running the server.
+  * `make gen` \- generates the DRS server code from the OpenAPI spec and cleans bundled examples.
+    * `ga4gh/data-repository-service-schemas` \- GA4GH DRS OpenAPI spec (Git submodule).
+    * `internal/apigen` \- generated DRS server code.
+    * `cmd/openapi-remove-examples` \- helper to clean the bundled OpenAPI.
+  * `make serve` \- runs the DRS server (`cmd/server`) with optional `ARGS` passed through.
+  * `make test` \- cleans the Go test cache and runs all tests with verbose output.
+  * `make docs-image` \- builds the Docker image used for MkDocs docs (`Dockerfile.mkdocs` to `mkdocs-material-mermaid:latest`).
+  * `make docs` \- serves the documentation locally with MkDocs in Docker on port `8000`.
+  * `make docs-build` \- builds the static MkDocs site into the local `site` directory using Docker.
