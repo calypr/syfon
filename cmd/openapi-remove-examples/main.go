@@ -20,7 +20,7 @@ import (
 func main() {
 	// Define a `-file` flag with a default path to the OpenAPI spec.
 	// `path` is a pointer to a string that will hold the flag value.
-	path := flag.String("file", "internal/apigen/api/openapi.yaml", "path to OpenAPI YAML file")
+	path := flag.String("file", "apigen/api/openapi.yaml", "path to OpenAPI YAML file")
 
 	// Parse command\-line flags. After this call, `*path` contains the final value.
 	flag.Parse()

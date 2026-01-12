@@ -5,23 +5,25 @@ MKDOCS_IMAGE ?= squidfunk/mkdocs-material:latest
 
 .PHONY: gen
 gen:
-	@mkdir -p .tmp internal/apigen
+	@mkdir -p .tmp apigen
 	# OpenAPI Generator (Go server stub)
 	# delete previous generated code
-	rm -rf internal/apigen
+	rm -rf apigen
 	# generate new code
 	docker run --rm \
+	  --user "$$(id -u):$$(id -g)" \
 	  -v "$(PWD):/local" \
 	  $(OAG_IMAGE) generate \
-	  -g go-gin-server \
+	  -g go-server \
 	  --skip-validate-spec \
 	  --git-repo-id drs-server \
 	  --git-user-id calypr \
 	  -i /local/$(OPENAPI) \
-	  -o /local/internal/apigen
-	# a bundle is created at internal/apigen/openapi.yaml, remove examples from it
+	  -o /local/apigen \
+	  --additional-properties outputAsLibrary=true,sourceFolder=drs,packageName=drs
+	# a bundle is created at apigen/openapi.yaml, remove examples from it
 	# as many are not compliant with the spec or seem to be randomly generated
-	go run ./cmd/openapi-remove-examples
+	# go run ./cmd/openapi-remove-examples
 
 .PHONY: test
 test:
@@ -36,6 +38,7 @@ serve:
 docs:
 	docker run --rm -it \
 	  -v "$(PWD):/docs" \
+	  --user "$$(id -u):$$(id -g)" \
 	  -p 8000:8000 \
 	  $(MKDOCS_IMAGE) \
 	  serve -a 0.0.0.0:8000
