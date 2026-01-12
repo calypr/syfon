@@ -9,11 +9,12 @@ import (
 type serviceInfoResponse struct {
 	Name      string `json:"name"`
 	Version   string `json:"version"`
-	Timestamp string `json:"timestamp"`
+	CreatedAt string `json:"createdAt"`
+	UpdatedAt string `json:"updatedAt"`
 }
 
 func TestServiceInfoFromMainBinary(t *testing.T) {
-	resp, err := http.Get(baseURL + "/service-info")
+	resp, err := http.Get(baseURL + "/ga4gh/drs/v1/service-info")
 	if err != nil {
 		t.Fatalf("failed to GET /service-info: %v\nstdout:\n%s\nstderr:\n%s",
 			err, testStdout.String(), testStderr.String())
@@ -35,8 +36,8 @@ func TestServiceInfoFromMainBinary(t *testing.T) {
 		t.Fatalf("expected non-empty name, got empty\nstdout:\n%s\nstderr:\n%s",
 			testStdout.String(), testStderr.String())
 	}
-	if body.Timestamp == "" {
-		t.Fatalf("expected non-empty timestamp, got empty\nstdout:\n%s\nstderr:\n%s",
+	if body.CreatedAt == "" {
+		t.Fatalf("expected non-empty created_at, got empty\nstdout:\n%s\nstderr:\n%s",
 			testStdout.String(), testStderr.String())
 	}
 }

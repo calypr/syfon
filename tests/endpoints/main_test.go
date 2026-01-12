@@ -34,7 +34,7 @@ func TestMain(m *testing.M) {
 		panic("could not find go.mod from " + startDir)
 	}
 
-	cmd := exec.CommandContext(ctx, "go", "run", "./cmd/server")
+	cmd := exec.CommandContext(ctx, "go", "run", ".", "serve")
 	cmd.Dir = rootDir
 
 	// Put the child in its own process group so we can kill the whole tree.

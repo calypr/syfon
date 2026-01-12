@@ -9,7 +9,9 @@ import (
 	"github.com/calypr/drs-server/apigen/drs"
 )
 
-// InMemoryDB implements drs.DatabaseInterface
+// InMemoryDB implements DatabaseInterface
+var _ DatabaseInterface = (*InMemoryDB)(nil)
+
 type InMemoryDB struct {
 	mu      sync.RWMutex
 	objects map[string]*drs.DrsObject

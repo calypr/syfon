@@ -5,7 +5,7 @@ import (
 	"log"
 	"net/http"
 
-	openapi "github.com/calypr/drs-server/apigen/drs"
+	"github.com/calypr/drs-server/apigen/drs"
 	"github.com/calypr/drs-server/db"
 	"github.com/calypr/drs-server/service"
 	"github.com/spf13/cobra"
@@ -22,10 +22,15 @@ var Cmd = &cobra.Command{
 		service := service.NewObjectsAPIService(database)
 
 		// Init Controller
-		controller := openapi.NewObjectsAPIController(service)
+		objectsController := drs.NewObjectsAPIController(service)
+		serviceInfoController := drs.NewServiceInfoAPIController(service)
 
 		// Init Router
-		router := openapi.NewRouter(controller)
+		router := drs.NewRouter(objectsController, serviceInfoController)
+		router.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("OK"))
+		})
 
 		addr := ":8080"
 		fmt.Printf("Server starting on %s\n", addr)

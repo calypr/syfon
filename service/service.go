@@ -10,10 +10,10 @@ import (
 )
 
 type ObjectsAPIService struct {
-	db *db.InMemoryDB
+	db db.DatabaseInterface
 }
 
-func NewObjectsAPIService(db *db.InMemoryDB) drs.ObjectsAPIServicer {
+func NewObjectsAPIService(db db.DatabaseInterface) *ObjectsAPIService {
 	return &ObjectsAPIService{db: db}
 }
 
@@ -83,4 +83,12 @@ func (s *ObjectsAPIService) GetObjectsByChecksum(ctx context.Context, checksum s
 
 func (s *ObjectsAPIService) BulkUpdateAccessMethods(ctx context.Context, req drs.BulkAccessMethodUpdateRequest) (drs.ImplResponse, error) {
 	return drs.ImplResponse{Code: http.StatusNotImplemented, Body: nil}, errors.New("method not implemented")
+}
+
+func (s *ObjectsAPIService) GetServiceInfo(ctx context.Context) (drs.ImplResponse, error) {
+	info, err := s.db.GetServiceInfo(ctx)
+	if err != nil {
+		return drs.ImplResponse{Code: http.StatusInternalServerError, Body: drs.Error{Msg: err.Error(), StatusCode: http.StatusInternalServerError}}, err
+	}
+	return drs.ImplResponse{Code: http.StatusOK, Body: info}, nil
 }

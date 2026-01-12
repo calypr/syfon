@@ -29,3 +29,5 @@ coverage.*
 .vscode/
 
 site/
+
+drs-server
