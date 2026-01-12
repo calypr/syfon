@@ -7,14 +7,18 @@ import (
 
 	"github.com/calypr/drs-server/apigen/drs"
 	"github.com/calypr/drs-server/db"
+	"github.com/calypr/drs-server/urlmanager"
 )
 
+// ObjectsAPIService implements the Objects API service.
 type ObjectsAPIService struct {
-	db db.DatabaseInterface
+	db         db.DatabaseInterface
+	urlManager urlmanager.UrlManager
 }
 
-func NewObjectsAPIService(db db.DatabaseInterface) *ObjectsAPIService {
-	return &ObjectsAPIService{db: db}
+// NewObjectsAPIService creates a new ObjectsAPIService.
+func NewObjectsAPIService(db db.DatabaseInterface, urlManager urlmanager.UrlManager) *ObjectsAPIService {
+	return &ObjectsAPIService{db: db, urlManager: urlManager}
 }
 
 func (s *ObjectsAPIService) GetObject(ctx context.Context, id string, expand bool) (drs.ImplResponse, error) {
@@ -58,7 +62,38 @@ func (s *ObjectsAPIService) RegisterObjects(ctx context.Context, req drs.Registe
 }
 
 func (s *ObjectsAPIService) GetAccessURL(ctx context.Context, objectID string, accessID string) (drs.ImplResponse, error) {
-	return drs.ImplResponse{Code: http.StatusNotImplemented, Body: nil}, errors.New("method not implemented")
+	obj, err := s.db.GetObject(ctx, objectID)
+	if err != nil {
+		return drs.ImplResponse{Code: http.StatusNotFound, Body: drs.Error{Msg: err.Error(), StatusCode: http.StatusNotFound}}, err
+	}
+
+	var selectedAccessMethod *drs.AccessMethod
+	for _, method := range obj.AccessMethods {
+		if method.AccessId == accessID {
+			selectedAccessMethod = &method
+			break
+		}
+	}
+
+	if selectedAccessMethod == nil {
+		return drs.ImplResponse{Code: http.StatusNotFound, Body: drs.Error{Msg: "access_id not found", StatusCode: http.StatusNotFound}}, nil
+	}
+
+	if selectedAccessMethod.AccessUrl.Url == "" {
+		return drs.ImplResponse{Code: http.StatusInternalServerError, Body: drs.Error{Msg: "access method has no URL", StatusCode: http.StatusInternalServerError}}, nil
+	}
+
+	signedURL, err := s.urlManager.SignURL(ctx, accessID, selectedAccessMethod.AccessUrl.Url)
+	if err != nil {
+		return drs.ImplResponse{Code: http.StatusInternalServerError, Body: drs.Error{Msg: err.Error(), StatusCode: http.StatusInternalServerError}}, err
+	}
+
+	return drs.ImplResponse{
+		Code: http.StatusOK,
+		Body: drs.AccessMethodAccessUrl{
+			Url: signedURL,
+		},
+	}, nil
 }
 
 func (s *ObjectsAPIService) PostAccessURL(ctx context.Context, objectID string, accessID string, req drs.PostAccessUrlRequest) (drs.ImplResponse, error) {
