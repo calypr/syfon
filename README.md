@@ -1,43 +1,68 @@
 # drs-server
 
-A lightweight reference implementation of a GA4GH Data Repository Service (DRS) server in Go.
+A lightweight, production-grade implementation of a GA4GH Data Repository Service (DRS) server in Go.
 
-## Table of Contents
-- [Overview](#overview)
-- [Quickstart](QUICKSTART.md)
-- [Contributing](CONTRIBUTING.md)
-- [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+## Purpose
 
+The `drs-server` provides a robust implementation of the [GA4GH DRS API](https://ga4gh.github.io/data-repository-service-schemas/). It is designed to manage metadata for data objects and provide secure access via signed URLs.
 
-## Overview
+### Key Features
+- **GA4GH DRS Compliance**: Implements the standard DRS API for describing and accessing data objects.
+- **Database Flexibility**: Supports both **SQLite** and **PostgreSQL** backends with a modular driver architecture.
+- **S3 Integration**: Native support for Amazon S3 (and compatible storage like MinIO) with signed URL generation for downloads and multipart uploads.
+- **Gen3 Compatibility Layers**:
+    - **Fence Compatibility**: Supports Fence-style `/data/download` and multipart upload endpoints.
+    - **Indexd Compatibility**: Provides Indexd-style metadata management for integration with `git-drs`.
 
-GA4GH DRS is a standard API for describing and accessing data objects in cloud or on‑premise repositories.  
-This project consumes the official GA4GH `data-repository-service-schemas` as a Git submodule and generates a Go HTTP server from the DRS OpenAPI spec.
+## Configuration
 
+The server is configured via a YAML or JSON file. Use the following structure to set up your environment:
 
-```mermaid
-graph TD
-  0[ga4gh/data-repository-service-schemas DRS OpenAPI spec submodule] --> B
-  A[Makefile] --> B[make gen]
-  A --> C2[cmd/server]
-  A --> D[make test]
-  A --> E[make docs/]
+```yaml
+port: 8080
 
-  B --> G[internal/apigen generated DRS server code]
-  B --> H[cmd/openapi-remove-examples clean OpenAPI helper] --> H2[internal/apigen/api/openapi.yaml]
+database:
+  sqlite:
+    file: "drs.db"
+  # Or use PostgreSQL:
+  # postgres:
+  #   host: "localhost"
+  #   port: 5432
+  #   user: "user"
+  #   password: "password"
+  #   database: "drs"
+  #   sslmode: "disable"
 
-  H2 --> C2
-  D --> C2
-  G --> C2
+s3_credentials:
+  - bucket: "my-test-bucket"
+    region: "us-east-1"
+    access_key: "AKIAXXXXXXXXXXXXXXXX"
+    secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+    endpoint: "s3.amazonaws.com" # Optional: set for MinIO or custom backends
 ```
 
-* Makefile - targets for generation, tests, docs, and running the server.
-  * `make gen` - generates the DRS server code from the OpenAPI spec.
-    * ga4gh/data-repository-service-schemas - GA4GH DRS OpenAPI spec (Git submodule).
-    * internal/apigen - generated DRS server code.
-    * cmd/openapi-remove-examples - helper to clean the bundled OpenAPI.
-  * `make serve` - runs the DRS server.
-    * cmd/server - main HTTP server (uses gin-gonic/gin).
-  * `make test` - launches server, runs integration tests.
-  * `make docs` - serves documentation with MkDocs.
+## Running Integration Tests
+
+You can run integration tests using your own config file:
+
+```bash
+go test ./cmd/server -v -count=1 -testConfig=config.yaml
+```
+
+## Architecture
+
+The project follows a modular structure to ensure maintainability:
+- `db/core`: Core interfaces and models.
+- `db/sqlite`, `db/postgres`: Database implementation drivers.
+- `internal/api`: Subpackages for different API contexts (Admin, Fence, Gen3).
+- `service`: High-level business logic implementing the DRS service.
+- `urlmanager`: Logic for interacting with cloud storage providers.
+
+## Development
+
+The project uses a Makefile for common tasks:
+- `make gen`: Generates the DRS server code from the official GA4GH OpenAPI spec (Git submodule).
+- `make test`: Runs all unit and integration tests.
+- `make serve`: Starts the DRS server.
+
 

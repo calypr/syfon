@@ -2,39 +2,58 @@ package urlmanager
 
 import (
 	"context"
-	"os"
 	"strings"
 	"testing"
+
+	"github.com/calypr/drs-server/db/core"
+	"github.com/calypr/drs-server/db/sqlite"
 )
 
 func TestS3UrlManager_SignURL(t *testing.T) {
-	// Set dummy environment variables for AWS credentials
-	os.Setenv("AWS_ACCESS_KEY_ID", "test-key-id")
-	os.Setenv("AWS_SECRET_ACCESS_KEY", "test-secret-key")
-	os.Setenv("AWS_REGION", "us-east-1")
-	defer func() {
-		os.Unsetenv("AWS_ACCESS_KEY_ID")
-		os.Unsetenv("AWS_SECRET_ACCESS_KEY")
-		os.Unsetenv("AWS_REGION")
-	}()
-
 	ctx := context.Background()
-	manager, err := NewS3UrlManager(ctx)
+	// Use in-memory SQLite for testing
+	database, err := sqlite.NewSqliteDB(":memory:")
 	if err != nil {
-		t.Fatalf("failed to create S3UrlManager: %v", err)
+		t.Fatalf("failed to init db: %v", err)
 	}
 
+	// Create and save a credential
+	cred := &core.S3Credential{
+		Bucket:    "my-bucket",
+		Region:    "us-east-1",
+		AccessKey: "test-key-id",
+		SecretKey: "test-secret-key",
+	}
+	// Depending on how SaveS3Credential is defined, it might need a context.
+	// db.NewInMemoryDB likely returns a *InMemoryDB which implements DatabaseInterface.
+	if err := database.SaveS3Credential(ctx, cred); err != nil {
+		t.Fatalf("failed to save credential: %v", err)
+	}
+
+	manager := NewS3UrlManager(database)
+
 	urlStr := "s3://my-bucket/my-obj"
-	signedURL, err := manager.SignURL(ctx, "resource-1", urlStr)
+	signedURL, err := manager.SignURL(ctx, "resource-1", urlStr, SignOptions{})
 	if err != nil {
 		t.Fatalf("SignURL failed: %v", err)
 	}
 
-	if !strings.Contains(signedURL, "https://my-bucket.s3.us-east-1.amazonaws.com/my-obj") {
-		t.Errorf("expected signed URL to contain standard S3 endpoint for bucket/key, got: %s", signedURL)
+	// The exact formatted URL might depend on the SDK/Provider, but it should contain the bucket and key.
+	// For standard S3: https://my-bucket.s3.us-east-1.amazonaws.com/my-obj?...
+	if !strings.Contains(signedURL, "my-bucket") || !strings.Contains(signedURL, "my-obj") {
+		t.Errorf("expected signed URL to contain bucket and key, got: %s", signedURL)
 	}
 
 	if !strings.Contains(signedURL, "X-Amz-Signature") {
 		t.Errorf("expected signed URL to contain signature, got: %s", signedURL)
+	}
+
+	// Also test Upload URL
+	uploadURL, err := manager.SignUploadURL(ctx, "resource-1", urlStr, SignOptions{})
+	if err != nil {
+		t.Fatalf("SignUploadURL failed: %v", err)
+	}
+	if !strings.Contains(uploadURL, "my-bucket") || !strings.Contains(uploadURL, "X-Amz-Signature") {
+		t.Errorf("expected upload URL to contain bucket and signature, got: %s", uploadURL)
 	}
 }

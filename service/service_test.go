@@ -2,50 +2,15 @@ package service
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"github.com/calypr/drs-server/apigen/drs"
+	"github.com/calypr/drs-server/testutils"
 )
-
-// MockDatabase implements db.DatabaseInterface for testing
-type MockDatabase struct {
-	Objects map[string]*drs.DrsObject
-}
-
-func (m *MockDatabase) GetServiceInfo(ctx context.Context) (*drs.Service, error) {
-	return nil, nil
-}
-
-func (m *MockDatabase) GetObject(ctx context.Context, id string) (*drs.DrsObject, error) {
-	if obj, ok := m.Objects[id]; ok {
-		return obj, nil
-	}
-	return nil, errors.New("object not found")
-}
-
-func (m *MockDatabase) DeleteObject(ctx context.Context, id string) error {
-	return nil
-}
-
-func (m *MockDatabase) CreateObject(ctx context.Context, obj *drs.DrsObject) error {
-	return nil
-}
-
-func (m *MockDatabase) GetObjectsByChecksum(ctx context.Context, checksum string) ([]drs.DrsObject, error) {
-	return nil, nil
-}
-
-// MockUrlManager implements urlmanager.UrlManager for testing
-type MockUrlManager struct{}
-
-func (m *MockUrlManager) SignURL(ctx context.Context, resourceName string, url string) (string, error) {
-	return url + "?signed=true", nil
-}
 
 func TestGetAccessURL(t *testing.T) {
 	// Setup mock DB
-	mockDB := &MockDatabase{
+	mockDB := &testutils.MockDatabase{
 		Objects: map[string]*drs.DrsObject{
 			"test-obj-id": {
 				Id: "test-obj-id",
@@ -63,7 +28,7 @@ func TestGetAccessURL(t *testing.T) {
 	}
 
 	// Setup mock UrlManager
-	mockUrlManager := &MockUrlManager{}
+	mockUrlManager := &testutils.MockUrlManager{}
 
 	// Create service
 	service := NewObjectsAPIService(mockDB, mockUrlManager)
@@ -87,5 +52,93 @@ func TestGetAccessURL(t *testing.T) {
 	expectedURL := "s3://bucket/key?signed=true"
 	if accessURL.Url != expectedURL {
 		t.Errorf("expected URL %s, got %s", expectedURL, accessURL.Url)
+	}
+}
+
+func TestPostAccessURL(t *testing.T) {
+	mockDB := &testutils.MockDatabase{
+		Objects: map[string]*drs.DrsObject{
+			"test-obj-id": {
+				Id: "test-obj-id",
+				AccessMethods: []drs.AccessMethod{
+					{
+						AccessId: "test-access-id",
+						Type:     "s3",
+						AccessUrl: drs.AccessMethodAccessUrl{
+							Url: "s3://bucket/key",
+						},
+					},
+				},
+			},
+		},
+	}
+	mockUrlManager := &testutils.MockUrlManager{}
+	service := NewObjectsAPIService(mockDB, mockUrlManager)
+
+	ctx := context.Background()
+	resp, err := service.PostAccessURL(ctx, "test-obj-id", "test-access-id", drs.PostAccessUrlRequest{})
+	if err != nil {
+		t.Fatalf("PostAccessURL failed: %v", err)
+	}
+	if resp.Code != 200 {
+		t.Errorf("expected 200, got %d", resp.Code)
+	}
+}
+
+func TestRegisterObjects(t *testing.T) {
+	mockDB := &testutils.MockDatabase{}
+	mockUM := &testutils.MockUrlManager{}
+	service := NewObjectsAPIService(mockDB, mockUM)
+
+	req := drs.RegisterObjectsRequest{
+		Candidates: []drs.DrsObjectCandidate{
+			{Name: "new-obj", Size: 100},
+		},
+	}
+	resp, err := service.RegisterObjects(context.Background(), req)
+	if err != nil {
+		t.Fatalf("RegisterObjects failed: %v", err)
+	}
+	if resp.Code != 200 {
+		t.Errorf("expected 200, got %d", resp.Code)
+	}
+}
+func TestGetObject(t *testing.T) {
+	mockDB := &testutils.MockDatabase{
+		Objects: map[string]*drs.DrsObject{
+			"test-obj": {Id: "test-obj", Size: 500},
+		},
+	}
+	service := NewObjectsAPIService(mockDB, &testutils.MockUrlManager{})
+
+	resp, err := service.GetObject(context.Background(), "test-obj", false)
+	if err != nil {
+		t.Fatalf("GetObject failed: %v", err)
+	}
+	if resp.Code != 200 {
+		t.Errorf("expected 200, got %d", resp.Code)
+	}
+}
+
+func TestBulkUpdateAccessMethods(t *testing.T) {
+	mockDB := &testutils.MockDatabase{}
+	service := NewObjectsAPIService(mockDB, &testutils.MockUrlManager{})
+
+	req := drs.BulkAccessMethodUpdateRequest{
+		Updates: []drs.BulkAccessMethodUpdateRequestUpdatesInner{
+			{
+				ObjectId: "obj-1",
+				AccessMethods: []drs.AccessMethod{
+					{Type: "s3", AccessUrl: drs.AccessMethodAccessUrl{Url: "s3://b/k"}},
+				},
+			},
+		},
+	}
+	resp, err := service.BulkUpdateAccessMethods(context.Background(), req)
+	if err != nil {
+		t.Fatalf("BulkUpdateAccessMethods failed: %v", err)
+	}
+	if resp.Code != 200 {
+		t.Errorf("expected 200, got %d", resp.Code)
 	}
 }
