@@ -1,0 +1,5 @@
+# Dependencies required for build preview on Netlify
+mkdocs
+mkdocs-material
+pymdown-extensions
+
