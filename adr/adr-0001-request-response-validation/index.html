@@ -1,0 +1,915 @@
+
+<!DOCTYPE html>
+
+<html class="no-js" lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width,initial-scale=1" name="viewport"/>
+<link href="../" rel="prev"/>
+<link href="../adr-0002-passports-ControlledAccessGrants/" rel="next"/>
+<link href="../../assets/images/favicon.png" rel="icon"/>
+<meta content="mkdocs-1.6.1, mkdocs-material-9.7.1" name="generator"/>
+<title>openapi request/response validation - drs-server</title>
+<link href="../../assets/stylesheets/main.484c7ddc.min.css" rel="stylesheet"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&amp;display=fallback" rel="stylesheet"/>
+<style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+<script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+</head>
+<body dir="ltr">
+<input autocomplete="off" class="md-toggle" data-md-toggle="drawer" id="__drawer" type="checkbox"/>
+<input autocomplete="off" class="md-toggle" data-md-toggle="search" id="__search" type="checkbox"/>
+<label class="md-overlay" for="__drawer"></label>
+<div data-md-component="skip">
+<a class="md-skip" href="#adr-0001-openapi-request-and-response-validation-in-gin">
+          Skip to content
+        </a>
+</div>
+<div data-md-component="announce">
+</div>
+<header class="md-header md-header--shadow" data-md-component="header">
+<nav aria-label="Header" class="md-header__inner md-grid">
+<a aria-label="drs-server" class="md-header__button md-logo" data-md-component="logo" href="../.." title="drs-server">
+<svg viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"></path></svg>
+</a>
+<label class="md-header__button md-icon" for="__drawer">
+<svg viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"></path></svg>
+</label>
+<div class="md-header__title" data-md-component="header-title">
+<div class="md-header__ellipsis">
+<div class="md-header__topic">
+<span class="md-ellipsis">
+            drs-server
+          </span>
+</div>
+<div class="md-header__topic" data-md-component="header-topic">
+<span class="md-ellipsis">
+            
+              openapi request/response validation
+            
+          </span>
+</div>
+</div>
+</div>
+<script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+<label class="md-header__button md-icon" for="__search">
+<svg viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"></path></svg>
+</label>
+<div class="md-search" data-md-component="search" role="dialog">
+<label class="md-search__overlay" for="__search"></label>
+<div class="md-search__inner" role="search">
+<form class="md-search__form" name="search">
+<input aria-label="Search" autocapitalize="off" autocomplete="off" autocorrect="off" class="md-search__input" data-md-component="search-query" name="query" placeholder="Search" required="" spellcheck="false" type="text"/>
+<label class="md-search__icon md-icon" for="__search">
+<svg viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"></path></svg>
+<svg viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"></path></svg>
+</label>
+<nav aria-label="Search" class="md-search__options">
+<button aria-label="Clear" class="md-search__icon md-icon" tabindex="-1" title="Clear" type="reset">
+<svg viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"></path></svg>
+</button>
+</nav>
+</form>
+<div class="md-search__output">
+<div class="md-search__scrollwrap" data-md-scrollfix="" tabindex="0">
+<div class="md-search-result" data-md-component="search-result">
+<div class="md-search-result__meta">
+            Initializing search
+          </div>
+<ol class="md-search-result__list" role="presentation"></ol>
+</div>
+</div>
+</div>
+</div>
+</div>
+</nav>
+</header>
+<div class="md-container" data-md-component="container">
+<main class="md-main" data-md-component="main">
+<div class="md-main__inner md-grid">
+<div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation">
+<div class="md-sidebar__scrollwrap">
+<div class="md-sidebar__inner">
+<nav aria-label="Navigation" class="md-nav md-nav--primary" data-md-level="0">
+<label class="md-nav__title" for="__drawer">
+<a aria-label="drs-server" class="md-nav__button md-logo" data-md-component="logo" href="../.." title="drs-server">
+<svg viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"></path></svg>
+</a>
+    drs-server
+  </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../..">
+<span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../configuration/">
+<span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../deployment/">
+<span class="md-ellipsis">
+    
+  
+    Deployment
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../troubleshooting/">
+<span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item md-nav__item--active md-nav__item--nested">
+<input checked="" class="md-nav__toggle md-toggle" id="__nav_5" type="checkbox"/>
+<label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="true" aria-labelledby="__nav_5_label" class="md-nav" data-md-level="1">
+<label class="md-nav__title" for="__nav_5">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    Architecture
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../">
+<span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item md-nav__item--active md-nav__item--nested">
+<input checked="" class="md-nav__toggle md-toggle" id="__nav_5_2" type="checkbox"/>
+<label class="md-nav__link" for="__nav_5_2" id="__nav_5_2_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    Topics
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="true" aria-labelledby="__nav_5_2_label" class="md-nav" data-md-level="2">
+<label class="md-nav__title" for="__nav_5_2">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    Topics
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item md-nav__item--active">
+<input class="md-nav__toggle md-toggle" id="__toc" type="checkbox"/>
+<label class="md-nav__link md-nav__link--active" for="__toc">
+<span class="md-ellipsis">
+    
+  
+    openapi request/response validation
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<a class="md-nav__link md-nav__link--active" href="./">
+<span class="md-ellipsis">
+    
+  
+    openapi request/response validation
+  
+
+    
+  </span>
+</a>
+<nav aria-label="Table of contents" class="md-nav md-nav--secondary">
+<label class="md-nav__title" for="__toc">
+<span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+<ul class="md-nav__list" data-md-component="toc" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#status">
+<span class="md-ellipsis">
+      
+        Status
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#date">
+<span class="md-ellipsis">
+      
+        Date
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#context">
+<span class="md-ellipsis">
+      
+        Context
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#decision">
+<span class="md-ellipsis">
+      
+        Decision
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#implementation">
+<span class="md-ellipsis">
+      
+        Implementation
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#openapi-usage">
+<span class="md-ellipsis">
+      
+        OpenAPI usage
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#configuration-and-feature-gating">
+<span class="md-ellipsis">
+      
+        Configuration and feature gating
+      
+    </span>
+</a>
+<nav aria-label="Configuration and feature gating" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#should-validation-be-configurable">
+<span class="md-ellipsis">
+      
+        Should validation be configurable?
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#recommended-configuration-shape">
+<span class="md-ellipsis">
+      
+        Recommended configuration shape
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#guardrails-what-not-to-do">
+<span class="md-ellipsis">
+      
+        Guardrails (what not to do)
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#suggested-default-behavior">
+<span class="md-ellipsis">
+      
+        Suggested default behavior
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#alternatives-considered">
+<span class="md-ellipsis">
+      
+        Alternatives Considered
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#consequences">
+<span class="md-ellipsis">
+      
+        Consequences
+      
+    </span>
+</a>
+<nav aria-label="Consequences" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#positive">
+<span class="md-ellipsis">
+      
+        Positive
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#negative">
+<span class="md-ellipsis">
+      
+        Negative
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#references">
+<span class="md-ellipsis">
+      
+        References
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#implementation_1">
+<span class="md-ellipsis">
+      
+        Implementation
+      
+    </span>
+</a>
+<nav aria-label="Implementation" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#the-flow">
+<span class="md-ellipsis">
+      
+        The flow
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#what-you-need-to-ensure">
+<span class="md-ellipsis">
+      
+        What you need to ensure
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#if-you-want-response-validation-without-request-validation">
+<span class="md-ellipsis">
+      
+        If you want response validation without request validation
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#follow-up-actions">
+<span class="md-ellipsis">
+      
+        Follow-up Actions
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../adr-0002-passports-ControlledAccessGrants/">
+<span class="md-ellipsis">
+    
+  
+    ga4gh passports for authorization
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../adr-0003-persistence-layer-design/">
+<span class="md-ellipsis">
+    
+  
+    persistence layer design
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+</ul>
+</nav>
+</li>
+</ul>
+</nav>
+</div>
+</div>
+</div>
+<div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc">
+<div class="md-sidebar__scrollwrap">
+<div class="md-sidebar__inner">
+<nav aria-label="Table of contents" class="md-nav md-nav--secondary">
+<label class="md-nav__title" for="__toc">
+<span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+<ul class="md-nav__list" data-md-component="toc" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#status">
+<span class="md-ellipsis">
+      
+        Status
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#date">
+<span class="md-ellipsis">
+      
+        Date
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#context">
+<span class="md-ellipsis">
+      
+        Context
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#decision">
+<span class="md-ellipsis">
+      
+        Decision
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#implementation">
+<span class="md-ellipsis">
+      
+        Implementation
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#openapi-usage">
+<span class="md-ellipsis">
+      
+        OpenAPI usage
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#configuration-and-feature-gating">
+<span class="md-ellipsis">
+      
+        Configuration and feature gating
+      
+    </span>
+</a>
+<nav aria-label="Configuration and feature gating" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#should-validation-be-configurable">
+<span class="md-ellipsis">
+      
+        Should validation be configurable?
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#recommended-configuration-shape">
+<span class="md-ellipsis">
+      
+        Recommended configuration shape
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#guardrails-what-not-to-do">
+<span class="md-ellipsis">
+      
+        Guardrails (what not to do)
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#suggested-default-behavior">
+<span class="md-ellipsis">
+      
+        Suggested default behavior
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#alternatives-considered">
+<span class="md-ellipsis">
+      
+        Alternatives Considered
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#consequences">
+<span class="md-ellipsis">
+      
+        Consequences
+      
+    </span>
+</a>
+<nav aria-label="Consequences" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#positive">
+<span class="md-ellipsis">
+      
+        Positive
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#negative">
+<span class="md-ellipsis">
+      
+        Negative
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#references">
+<span class="md-ellipsis">
+      
+        References
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#implementation_1">
+<span class="md-ellipsis">
+      
+        Implementation
+      
+    </span>
+</a>
+<nav aria-label="Implementation" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#the-flow">
+<span class="md-ellipsis">
+      
+        The flow
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#what-you-need-to-ensure">
+<span class="md-ellipsis">
+      
+        What you need to ensure
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#if-you-want-response-validation-without-request-validation">
+<span class="md-ellipsis">
+      
+        If you want response validation without request validation
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#follow-up-actions">
+<span class="md-ellipsis">
+      
+        Follow-up Actions
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</div>
+</div>
+</div>
+<div class="md-content" data-md-component="content">
+<article class="md-content__inner md-typeset">
+<h1 id="adr-0001-openapi-request-and-response-validation-in-gin">ADR-0001: OpenAPI Request and Response Validation in Gin<a class="headerlink" href="#adr-0001-openapi-request-and-response-validation-in-gin" title="Permanent link">¶</a></h1>
+<h2 id="status">Status<a class="headerlink" href="#status" title="Permanent link">¶</a></h2>
+<p>Implemented</p>
+<h2 id="date">Date<a class="headerlink" href="#date" title="Permanent link">¶</a></h2>
+<p>2025-12-22</p>
+<h2 id="context">Context<a class="headerlink" href="#context" title="Permanent link">¶</a></h2>
+<p>The DRS server is implemented in Go (Gin) with server scaffolding generated from OpenAPI. Contract correctness matters for interoperability and operational safety. The OpenAPI spec includes deep schemas and recursive references (e.g., <code>DrsObject → ContentsObject → DrsObject</code>), making “generator-only correctness” insufficient.</p>
+<p>We need:</p>
+<ul>
+<li>Strong request/response contract guarantees</li>
+<li>Clear operational visibility into contract drift</li>
+<li>A safe rollout path (audit-first in prod)</li>
+<li>CI enforcement to prevent regressions</li>
+</ul>
+<h2 id="decision">Decision<a class="headerlink" href="#decision" title="Permanent link">¶</a></h2>
+<p>Implement OpenAPI validation middleware using <strong>kin-openapi</strong> (<code>openapi3filter</code>) as the validation engine.</p>
+<ul>
+<li><strong>Request validation</strong>: enforce at runtime by default (reject invalid requests)</li>
+<li>
+<p><strong>Response validation</strong>: buffering + late-commit middleware with two modes:</p>
+<ul>
+<li><strong>Audit mode</strong> (default in production): log/metrics on violations, allow response</li>
+<li><strong>Enforce mode</strong> (CI / pre-prod): block invalid responses (fail closed with 500)</li>
+</ul>
+</li>
+</ul>
+<p>Black-box contract testing complements runtime validation in CI.</p>
+<h2 id="implementation">Implementation<a class="headerlink" href="#implementation" title="Permanent link">¶</a></h2>
+<p>See https://github.com/calypr/drs-server/pull/2</p>
+<h2 id="openapi-usage">OpenAPI usage<a class="headerlink" href="#openapi-usage" title="Permanent link">¶</a></h2>
+<pre class="mermaid"><code>flowchart TB
+    Spec[OpenAPI Spec Git Submodule] --&gt; CI
+    CI[CI make gen] --&gt; Contract[Bundle Spec, Model, Handler stubs]
+    Contract --&gt; MiddlewareChain
+    Contract --&gt; Report[Fail build on violations]
+
+    subgraph MiddlewareChain[Middleware Chain]
+        LogReq[Logging redact auth] --&gt; ReqVal[OpenAPI Request Validation enforce]
+        ReqVal --&gt; Handler
+        Handler --&gt; RespVal[OpenAPI Response Validation audit or enforce]
+        RespVal --&gt; Commit
+    end
+
+    MiddlewareChain --&gt; Gin[GIN HTTP Server]
+
+</code></pre>
+<h2 id="configuration-and-feature-gating">Configuration and feature gating<a class="headerlink" href="#configuration-and-feature-gating" title="Permanent link">¶</a></h2>
+<h3 id="should-validation-be-configurable">Should validation be configurable?<a class="headerlink" href="#should-validation-be-configurable" title="Permanent link">¶</a></h3>
+<p>Yes—<strong>validation must be configurable</strong>, but with guardrails.</p>
+<p>Reasons:</p>
+<ul>
+<li>Response validation has real operational tradeoffs (buffering, streaming endpoints, large payloads)</li>
+<li>Production rollout should support “audit-first” to avoid outages</li>
+<li>Different environments need different strictness (dev vs CI vs prod)</li>
+<li>Some endpoints may need opt-out (SSE, downloads, websocket/hijack)</li>
+</ul>
+<h3 id="recommended-configuration-shape">Recommended configuration shape<a class="headerlink" href="#recommended-configuration-shape" title="Permanent link">¶</a></h3>
+<p>A single config block controlling both request and response validation:</p>
+<ul>
+<li><code>validation.enabled</code> (master switch)</li>
+<li><code>validation.request.mode</code> = <code>off | enforce</code></li>
+<li><code>validation.response.mode</code> = <code>off | audit | enforce</code></li>
+<li><code>validation.response.maxBodyBytes</code></li>
+<li><code>validation.response.skipContentTypes</code> (e.g., <code>text/event-stream</code>)</li>
+<li><code>validation.excludeRoutes</code> (optional allowlist/denylist)</li>
+</ul>
+<p>Example (YAML):</p>
+<div class="highlight"><pre><span></span><code><span class="nt">validation</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">  </span><span class="nt">request</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">enforce</span>
+<span class="w">  </span><span class="nt">response</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">audit</span><span class="w">        </span><span class="c1"># audit in prod, enforce in CI</span>
+<span class="w">    </span><span class="nt">maxBodyBytes</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2097152</span>
+<span class="w">    </span><span class="nt">skipContentTypes</span><span class="p">:</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">text/event-stream</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">application/octet-stream</span>
+</code></pre></div>
+<p>Environment mapping:</p>
+<ul>
+<li><strong>CI</strong>: request=enforce, response=enforce</li>
+<li><strong>Dev</strong>: request=enforce, response=audit (or enforce)</li>
+<li><strong>Prod</strong>: request=enforce, response=audit</li>
+</ul>
+<h3 id="guardrails-what-not-to-do">Guardrails (what <em>not</em> to do)<a class="headerlink" href="#guardrails-what-not-to-do" title="Permanent link">¶</a></h3>
+<ul>
+<li>Do not ship prod with validation silently disabled by default.</li>
+<li>Do not make “off” the default for request validation unless you have strong external gateways that already validate.</li>
+<li>Do not enforce response validation on endpoints that stream or return huge bodies without explicit handling.</li>
+</ul>
+<h3 id="suggested-default-behavior">Suggested default behavior<a class="headerlink" href="#suggested-default-behavior" title="Permanent link">¶</a></h3>
+<ul>
+<li>Default <code>validation.enabled=true</code></li>
+<li>Default <code>request.mode=enforce</code></li>
+<li>Default <code>response.mode=audit</code></li>
+<li>Default <code>maxBodyBytes=2MiB</code></li>
+<li>Default <code>skipContentTypes</code> includes SSE and known streaming types</li>
+</ul>
+<h2 id="alternatives-considered">Alternatives Considered<a class="headerlink" href="#alternatives-considered" title="Permanent link">¶</a></h2>
+<ol>
+<li>Generator-only validation: rejected (does not validate runtime behavior; fragile with recursion)</li>
+<li>Fully dereferenced spec + codegen: rejected (can explode recursion and break generators)</li>
+<li>CI-only contract testing: insufficient alone (doesn’t protect runtime deployments)</li>
+</ol>
+<h2 id="consequences">Consequences<a class="headerlink" href="#consequences" title="Permanent link">¶</a></h2>
+<h3 id="positive">Positive<a class="headerlink" href="#positive" title="Permanent link">¶</a></h3>
+<ul>
+<li>Strong contract guarantees with realistic deployment posture</li>
+<li>Audit-first rollout for response validation</li>
+<li>CI enforcement prevents regressions</li>
+<li>Metrics/logs provide contract drift visibility</li>
+</ul>
+<h3 id="negative">Negative<a class="headerlink" href="#negative" title="Permanent link">¶</a></h3>
+<ul>
+<li>Response validation requires buffering and careful exclusions</li>
+<li>Some endpoints must be skipped or handled specially (streaming/hijack)</li>
+<li>Adds some latency and memory overhead proportional to buffered bodies</li>
+</ul>
+<h2 id="references">References<a class="headerlink" href="#references" title="Permanent link">¶</a></h2>
+<ul>
+<li>kin-openapi: <a href="https://github.com/getkin/kin-openapi">https://github.com/getkin/kin-openapi</a>
+  openapi3filter docs: <a href="https://pkg.go.dev/github.com/getkin/kin-openapi/openapi3filter">https://pkg.go.dev/github.com/getkin/kin-openapi/openapi3filter</a></li>
+<li>oapi-codegen middleware patterns (net/http): <a href="https://github.com/oapi-codegen/oapi-codegen/tree/main/pkg/middleware/nethttp">https://github.com/oapi-codegen/oapi-codegen/tree/main/pkg/middleware/nethttp</a></li>
+<li>Dredd: <a href="https://dredd.org/en/latest/">https://dredd.org/en/latest/</a></li>
+<li>Schemathesis: <a href="https://schemathesis.readthedocs.io/">https://schemathesis.readthedocs.io/</a></li>
+<li>
+<p>Background reading:</p>
+<ul>
+<li><a href="https://medium.com/@tamas.szabo/validating-openapi-requests-and-responses-in-go-3e2b1c7e5a73">https://medium.com/@tamas.szabo/validating-openapi-requests-and-responses-in-go-3e2b1c7e5a73</a></li>
+<li><a href="https://apisyouwonthate.com/blog/api-contract-testing-vs-runtime-validation/">https://apisyouwonthate.com/blog/api-contract-testing-vs-runtime-validation/</a></li>
+</ul>
+</li>
+</ul>
+<h2 id="implementation_1">Implementation<a class="headerlink" href="#implementation_1" title="Permanent link">¶</a></h2>
+<p>NewOpenAPIResponseValidator <strong>doesn’t</strong> load the YAML itself.</p>
+<p><code>NewOpenAPIResponseValidator</code> validates against the <strong>OpenAPI spec object that was already loaded by the request validator</strong>, indirectly, via the <strong>matched route</strong> stored in Gin’s context.</p>
+<h3 id="the-flow">The flow<a class="headerlink" href="#the-flow" title="Permanent link">¶</a></h3>
+<ol>
+<li>
+<p><strong>Request validator loads the YAML</strong> at startup:</p>
+<ul>
+<li><code>loader.LoadFromFile(specPath)</code> → <code>*openapi3.T</code></li>
+<li>
+<p>It builds an OpenAPI router from that spec:</p>
+</li>
+<li>
+<p><code>gorillamux.NewRouter(spec)</code></p>
+</li>
+<li>
+<p>For each request, it finds the matching OpenAPI operation:</p>
+</li>
+<li>
+<p><code>route, pathParams := r.FindRoute(req)</code></p>
+</li>
+<li>
+<p>It <strong>stores that route</strong> on the Gin context:</p>
+</li>
+<li>
+<p><code>c.Set("oapi.route", route)</code></p>
+</li>
+<li><code>c.Set("oapi.pathParams", pathParams)</code></li>
+<li>
+<p><strong>Response validator reads those values</strong>:</p>
+</li>
+<li>
+<p><code>route := c.MustGet("oapi.route").(routers.Route)</code></p>
+</li>
+<li><code>pathParams := c.MustGet("oapi.pathParams").(map[string]string)</code></li>
+<li>
+<p>Then it calls:</p>
+</li>
+<li>
+<p><code>openapi3filter.ValidateResponse(ctx, ResponseValidationInput{ Route: route, ... })</code></p>
+</li>
+</ul>
+</li>
+</ol>
+<p>That <code>route</code> object contains the operation metadata tied to the spec that was loaded in step 1, so the response validator is effectively validating against the same loaded spec—without reloading YAML.</p>
+<h3 id="what-you-need-to-ensure">What you need to ensure<a class="headerlink" href="#what-you-need-to-ensure" title="Permanent link">¶</a></h3>
+<ul>
+<li>The <strong>request validator middleware must run before</strong> the response validator middleware.</li>
+<li>The request validator must <strong>store <code>oapi.route</code> and <code>oapi.pathParams</code></strong>.</li>
+</ul>
+<h3 id="if-you-want-response-validation-without-request-validation">If you want response validation without request validation<a class="headerlink" href="#if-you-want-response-validation-without-request-validation" title="Permanent link">¶</a></h3>
+<p>You’d need to have the response validator:</p>
+<ul>
+<li>load the spec itself, and/or</li>
+<li>match the route again (<code>FindRoute</code>) using its own OpenAPI router.</li>
+</ul>
+<p>But in practice, sharing the matched route from request validation is the cleanest and fastest approach.</p>
+<h2 id="follow-up-actions">Follow-up Actions<a class="headerlink" href="#follow-up-actions" title="Permanent link">¶</a></h2>
+<ul>
+<li>Add Prometheus counters for request/response violations</li>
+<li>Add CI job that runs response validation in enforce mode</li>
+<li>Document excluded endpoints (streaming, downloads) and why</li>
+<li>Add dashboards for validation failures by route/status</li>
+</ul>
+</article>
+</div>
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+</div>
+</main>
+<footer class="md-footer">
+<div class="md-footer-meta md-typeset">
+<div class="md-footer-meta__inner md-grid">
+<div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" rel="noopener" target="_blank">
+      Material for MkDocs
+    </a>
+</div>
+</div>
+</div>
+</footer>
+</div>
+<div class="md-dialog" data-md-component="dialog">
+<div class="md-dialog__inner md-typeset"></div>
+</div>
+<script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["content.code.annotate"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+<script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+</body>
+</html>

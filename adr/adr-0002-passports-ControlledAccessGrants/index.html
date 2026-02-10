@@ -1,0 +1,2219 @@
+
+<!DOCTYPE html>
+
+<html class="no-js" lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width,initial-scale=1" name="viewport"/>
+<link href="../adr-0001-request-response-validation/" rel="prev"/>
+<link href="../adr-0003-persistence-layer-design/" rel="next"/>
+<link href="../../assets/images/favicon.png" rel="icon"/>
+<meta content="mkdocs-1.6.1, mkdocs-material-9.7.1" name="generator"/>
+<title>ga4gh passports for authorization - drs-server</title>
+<link href="../../assets/stylesheets/main.484c7ddc.min.css" rel="stylesheet"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&amp;display=fallback" rel="stylesheet"/>
+<style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+<script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+</head>
+<body dir="ltr">
+<input autocomplete="off" class="md-toggle" data-md-toggle="drawer" id="__drawer" type="checkbox"/>
+<input autocomplete="off" class="md-toggle" data-md-toggle="search" id="__search" type="checkbox"/>
+<label class="md-overlay" for="__drawer"></label>
+<div data-md-component="skip">
+<a class="md-skip" href="#adr-002-ga4gh-passports-drs-authorization-controlledaccessgrants-and-signed-access">
+          Skip to content
+        </a>
+</div>
+<div data-md-component="announce">
+</div>
+<header class="md-header md-header--shadow" data-md-component="header">
+<nav aria-label="Header" class="md-header__inner md-grid">
+<a aria-label="drs-server" class="md-header__button md-logo" data-md-component="logo" href="../.." title="drs-server">
+<svg viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"></path></svg>
+</a>
+<label class="md-header__button md-icon" for="__drawer">
+<svg viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"></path></svg>
+</label>
+<div class="md-header__title" data-md-component="header-title">
+<div class="md-header__ellipsis">
+<div class="md-header__topic">
+<span class="md-ellipsis">
+            drs-server
+          </span>
+</div>
+<div class="md-header__topic" data-md-component="header-topic">
+<span class="md-ellipsis">
+            
+              ga4gh passports for authorization
+            
+          </span>
+</div>
+</div>
+</div>
+<script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+<label class="md-header__button md-icon" for="__search">
+<svg viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"></path></svg>
+</label>
+<div class="md-search" data-md-component="search" role="dialog">
+<label class="md-search__overlay" for="__search"></label>
+<div class="md-search__inner" role="search">
+<form class="md-search__form" name="search">
+<input aria-label="Search" autocapitalize="off" autocomplete="off" autocorrect="off" class="md-search__input" data-md-component="search-query" name="query" placeholder="Search" required="" spellcheck="false" type="text"/>
+<label class="md-search__icon md-icon" for="__search">
+<svg viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"></path></svg>
+<svg viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"></path></svg>
+</label>
+<nav aria-label="Search" class="md-search__options">
+<button aria-label="Clear" class="md-search__icon md-icon" tabindex="-1" title="Clear" type="reset">
+<svg viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"></path></svg>
+</button>
+</nav>
+</form>
+<div class="md-search__output">
+<div class="md-search__scrollwrap" data-md-scrollfix="" tabindex="0">
+<div class="md-search-result" data-md-component="search-result">
+<div class="md-search-result__meta">
+            Initializing search
+          </div>
+<ol class="md-search-result__list" role="presentation"></ol>
+</div>
+</div>
+</div>
+</div>
+</div>
+</nav>
+</header>
+<div class="md-container" data-md-component="container">
+<main class="md-main" data-md-component="main">
+<div class="md-main__inner md-grid">
+<div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation">
+<div class="md-sidebar__scrollwrap">
+<div class="md-sidebar__inner">
+<nav aria-label="Navigation" class="md-nav md-nav--primary" data-md-level="0">
+<label class="md-nav__title" for="__drawer">
+<a aria-label="drs-server" class="md-nav__button md-logo" data-md-component="logo" href="../.." title="drs-server">
+<svg viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"></path></svg>
+</a>
+    drs-server
+  </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../..">
+<span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../configuration/">
+<span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../deployment/">
+<span class="md-ellipsis">
+    
+  
+    Deployment
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../troubleshooting/">
+<span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item md-nav__item--active md-nav__item--nested">
+<input checked="" class="md-nav__toggle md-toggle" id="__nav_5" type="checkbox"/>
+<label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="true" aria-labelledby="__nav_5_label" class="md-nav" data-md-level="1">
+<label class="md-nav__title" for="__nav_5">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    Architecture
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../">
+<span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item md-nav__item--active md-nav__item--nested">
+<input checked="" class="md-nav__toggle md-toggle" id="__nav_5_2" type="checkbox"/>
+<label class="md-nav__link" for="__nav_5_2" id="__nav_5_2_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    Topics
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="true" aria-labelledby="__nav_5_2_label" class="md-nav" data-md-level="2">
+<label class="md-nav__title" for="__nav_5_2">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    Topics
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../adr-0001-request-response-validation/">
+<span class="md-ellipsis">
+    
+  
+    openapi request/response validation
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item md-nav__item--active">
+<input class="md-nav__toggle md-toggle" id="__toc" type="checkbox"/>
+<label class="md-nav__link md-nav__link--active" for="__toc">
+<span class="md-ellipsis">
+    
+  
+    ga4gh passports for authorization
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<a class="md-nav__link md-nav__link--active" href="./">
+<span class="md-ellipsis">
+    
+  
+    ga4gh passports for authorization
+  
+
+    
+  </span>
+</a>
+<nav aria-label="Table of contents" class="md-nav md-nav--secondary">
+<label class="md-nav__title" for="__toc">
+<span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+<ul class="md-nav__list" data-md-component="toc" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#status">
+<span class="md-ellipsis">
+      
+        Status
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#context">
+<span class="md-ellipsis">
+      
+        Context
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#key-concepts">
+<span class="md-ellipsis">
+      
+        Key Concepts
+      
+    </span>
+</a>
+<nav aria-label="Key Concepts" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#passports">
+<span class="md-ellipsis">
+      
+        Passports
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#controlledaccessgrants">
+<span class="md-ellipsis">
+      
+        ControlledAccessGrants
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#drs-objects">
+<span class="md-ellipsis">
+      
+        DRS Objects
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#signed-urls-sts">
+<span class="md-ellipsis">
+      
+        Signed URLs / STS
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#decision">
+<span class="md-ellipsis">
+      
+        Decision
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#architecture-diagram">
+<span class="md-ellipsis">
+      
+        Architecture Diagram
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#sequence-diagram">
+<span class="md-ellipsis">
+      
+        Sequence Diagram
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#authorization-logic">
+<span class="md-ellipsis">
+      
+        Authorization Logic
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#interaction-with-signed-urls-sts">
+<span class="md-ellipsis">
+      
+        Interaction with Signed URLs / STS
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#consequences">
+<span class="md-ellipsis">
+      
+        Consequences
+      
+    </span>
+</a>
+<nav aria-label="Consequences" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#positive">
+<span class="md-ellipsis">
+      
+        Positive
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#negative">
+<span class="md-ellipsis">
+      
+        Negative
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#invariants">
+<span class="md-ellipsis">
+      
+        Invariants
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#alternatives-considered">
+<span class="md-ellipsis">
+      
+        Alternatives Considered
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#references">
+<span class="md-ellipsis">
+      
+        References
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#1-what-depends-on-what">
+<span class="md-ellipsis">
+      
+        1) What depends on what
+      
+    </span>
+</a>
+<nav aria-label="1) What depends on what" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#passports-aai-layer-used-by-drs-data-access-layer">
+<span class="md-ellipsis">
+      
+        Passports (AAI layer) → used by DRS (data access layer)
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#passport-brokerui-are-issuersaggregators-not-drs-features">
+<span class="md-ellipsis">
+      
+        Passport Broker/UI are issuers/aggregators, not “DRS features”
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#2-where-the-join-points-are-primary-keys-identifiers">
+<span class="md-ellipsis">
+      
+        2) Where the “join points” are (primary keys / identifiers)
+      
+    </span>
+</a>
+<nav aria-label="2) Where the “join points” are (primary keys / identifiers)" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#a-user-identity-key-passport-side">
+<span class="md-ellipsis">
+      
+        A) User identity key (Passport-side)
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#b-object-key-drs-side">
+<span class="md-ellipsis">
+      
+        B) Object key (DRS-side)
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#c-issuer-discovery-key-drs-passport-trust-alignment">
+<span class="md-ellipsis">
+      
+        C) Issuer discovery key (DRS ↔ Passport trust alignment)
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#3-how-drs-knows-passport-is-required-and-how-clients-discover-it">
+<span class="md-ellipsis">
+      
+        3) How DRS “knows” Passport is required (and how clients discover it)
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#4-how-authorization-of-drs-objects-usually-works-with-visas">
+<span class="md-ellipsis">
+      
+        4) How “authorization of DRS objects” usually works with Visas
+      
+    </span>
+</a>
+<nav aria-label="4) How “authorization of DRS objects” usually works with Visas" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#key-takeaway">
+<span class="md-ellipsis">
+      
+        Key takeaway
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#5-minimal-dependency-map-you-can-drop-into-docs">
+<span class="md-ellipsis">
+      
+        5) Minimal dependency map you can drop into docs
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#6-useful-links">
+<span class="md-ellipsis">
+      
+        6) Useful links
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#deep-dive">
+<span class="md-ellipsis">
+      
+        Deep Dive
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#1-what-controlledaccessgrants-is-and-is-not">
+<span class="md-ellipsis">
+      
+        1. What ControlledAccessGrants is (and is not)
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#2-canonical-structure-of-a-controlledaccessgrants-visa">
+<span class="md-ellipsis">
+      
+        2. Canonical structure of a ControlledAccessGrants Visa
+      
+    </span>
+</a>
+<nav aria-label="2. Canonical structure of a ControlledAccessGrants Visa" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#semantics-of-the-important-fields">
+<span class="md-ellipsis">
+      
+        Semantics of the important fields
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#3-the-critical-design-choice-dataset-level-grants-not-object-level">
+<span class="md-ellipsis">
+      
+        3. The critical design choice: dataset-level grants, not object-level
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#4-how-a-drs-server-uses-controlledaccessgrants">
+<span class="md-ellipsis">
+      
+        4. How a DRS server uses ControlledAccessGrants
+      
+    </span>
+</a>
+<nav aria-label="4. How a DRS server uses ControlledAccessGrants" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#step-1-drs-object-is-mapped-to-a-dataset">
+<span class="md-ellipsis">
+      
+        Step 1: DRS object is mapped to a dataset
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#step-2-client-discovers-auth-requirements">
+<span class="md-ellipsis">
+      
+        Step 2: Client discovers auth requirements
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#step-3-client-presents-passport">
+<span class="md-ellipsis">
+      
+        Step 3: Client presents Passport
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#step-4-drs-validates-the-visa-clearinghouse-role">
+<span class="md-ellipsis">
+      
+        Step 4: DRS validates the Visa (Clearinghouse role)
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#step-5-authorization-decision-this-is-the-key-part">
+<span class="md-ellipsis">
+      
+        Step 5: Authorization decision (this is the key part)
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#5-why-the-value-must-be-an-exact-stable-identifier">
+<span class="md-ellipsis">
+      
+        5. Why the value must be an exact, stable identifier
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#6-multiple-datasets-multiple-grants">
+<span class="md-ellipsis">
+      
+        6. Multiple datasets, multiple grants
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#7-what-controlledaccessgrants-deliberately-avoids">
+<span class="md-ellipsis">
+      
+        7. What ControlledAccessGrants deliberately avoids
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#8-mental-model-summary-one-paragraph">
+<span class="md-ellipsis">
+      
+        8. Mental model summary (one paragraph)
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#1-separation-of-concerns-the-core-principle">
+<span class="md-ellipsis">
+      
+        1. Separation of concerns (the core principle)
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#2-end-to-end-flow-with-signed-urls">
+<span class="md-ellipsis">
+      
+        2. End-to-end flow with signed URLs
+      
+    </span>
+</a>
+<nav aria-label="2. End-to-end flow with signed URLs" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#step-1-user-authenticates-and-presents-passport">
+<span class="md-ellipsis">
+      
+        Step 1: User authenticates and presents Passport
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#step-2-drs-authorizes-the-object">
+<span class="md-ellipsis">
+      
+        Step 2: DRS authorizes the object
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#step-3-drs-mints-ephemeral-access">
+<span class="md-ellipsis">
+      
+        Step 3: DRS mints ephemeral access
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#step-4-client-accesses-storage-directly">
+<span class="md-ellipsis">
+      
+        Step 4: Client accesses storage directly
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#3-why-passport-is-not-used-at-the-storage-layer">
+<span class="md-ellipsis">
+      
+        3. Why Passport is not used at the storage layer
+      
+    </span>
+</a>
+<nav aria-label="3. Why Passport is not used at the storage layer" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#security-reasons">
+<span class="md-ellipsis">
+      
+        Security reasons
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#scalability-reasons">
+<span class="md-ellipsis">
+      
+        Scalability reasons
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#governance-reasons">
+<span class="md-ellipsis">
+      
+        Governance reasons
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#4-key-invariants-you-must-maintain">
+<span class="md-ellipsis">
+      
+        4. Key invariants you must maintain
+      
+    </span>
+</a>
+<nav aria-label="4. Key invariants you must maintain" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#invariant-1-signed-urls-must-never-outlive-authorization-intent">
+<span class="md-ellipsis">
+      
+        Invariant 1: Signed URLs must never outlive authorization intent
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#invariant-2-signed-urls-must-be-non-escalating">
+<span class="md-ellipsis">
+      
+        Invariant 2: Signed URLs must be non-escalating
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#invariant-3-drs-is-the-only-mint">
+<span class="md-ellipsis">
+      
+        Invariant 3: DRS is the only mint
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#5-how-revocation-actually-works-important">
+<span class="md-ellipsis">
+      
+        5. How revocation actually works (important)
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#6-multiple-objects-same-dataset">
+<span class="md-ellipsis">
+      
+        6. Multiple objects, same dataset
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#7-what-happens-if-a-dataset-mixes-public-and-protected-objects">
+<span class="md-ellipsis">
+      
+        7. What happens if a dataset mixes public and protected objects?
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#8-mental-model-keep-this-in-your-head">
+<span class="md-ellipsis">
+      
+        8. Mental model (keep this in your head)
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#9-common-anti-patterns-avoid-these">
+<span class="md-ellipsis">
+      
+        9. Common anti-patterns (avoid these)
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../adr-0003-persistence-layer-design/">
+<span class="md-ellipsis">
+    
+  
+    persistence layer design
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+</ul>
+</nav>
+</li>
+</ul>
+</nav>
+</div>
+</div>
+</div>
+<div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc">
+<div class="md-sidebar__scrollwrap">
+<div class="md-sidebar__inner">
+<nav aria-label="Table of contents" class="md-nav md-nav--secondary">
+<label class="md-nav__title" for="__toc">
+<span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+<ul class="md-nav__list" data-md-component="toc" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#status">
+<span class="md-ellipsis">
+      
+        Status
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#context">
+<span class="md-ellipsis">
+      
+        Context
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#key-concepts">
+<span class="md-ellipsis">
+      
+        Key Concepts
+      
+    </span>
+</a>
+<nav aria-label="Key Concepts" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#passports">
+<span class="md-ellipsis">
+      
+        Passports
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#controlledaccessgrants">
+<span class="md-ellipsis">
+      
+        ControlledAccessGrants
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#drs-objects">
+<span class="md-ellipsis">
+      
+        DRS Objects
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#signed-urls-sts">
+<span class="md-ellipsis">
+      
+        Signed URLs / STS
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#decision">
+<span class="md-ellipsis">
+      
+        Decision
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#architecture-diagram">
+<span class="md-ellipsis">
+      
+        Architecture Diagram
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#sequence-diagram">
+<span class="md-ellipsis">
+      
+        Sequence Diagram
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#authorization-logic">
+<span class="md-ellipsis">
+      
+        Authorization Logic
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#interaction-with-signed-urls-sts">
+<span class="md-ellipsis">
+      
+        Interaction with Signed URLs / STS
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#consequences">
+<span class="md-ellipsis">
+      
+        Consequences
+      
+    </span>
+</a>
+<nav aria-label="Consequences" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#positive">
+<span class="md-ellipsis">
+      
+        Positive
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#negative">
+<span class="md-ellipsis">
+      
+        Negative
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#invariants">
+<span class="md-ellipsis">
+      
+        Invariants
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#alternatives-considered">
+<span class="md-ellipsis">
+      
+        Alternatives Considered
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#references">
+<span class="md-ellipsis">
+      
+        References
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#1-what-depends-on-what">
+<span class="md-ellipsis">
+      
+        1) What depends on what
+      
+    </span>
+</a>
+<nav aria-label="1) What depends on what" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#passports-aai-layer-used-by-drs-data-access-layer">
+<span class="md-ellipsis">
+      
+        Passports (AAI layer) → used by DRS (data access layer)
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#passport-brokerui-are-issuersaggregators-not-drs-features">
+<span class="md-ellipsis">
+      
+        Passport Broker/UI are issuers/aggregators, not “DRS features”
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#2-where-the-join-points-are-primary-keys-identifiers">
+<span class="md-ellipsis">
+      
+        2) Where the “join points” are (primary keys / identifiers)
+      
+    </span>
+</a>
+<nav aria-label="2) Where the “join points” are (primary keys / identifiers)" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#a-user-identity-key-passport-side">
+<span class="md-ellipsis">
+      
+        A) User identity key (Passport-side)
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#b-object-key-drs-side">
+<span class="md-ellipsis">
+      
+        B) Object key (DRS-side)
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#c-issuer-discovery-key-drs-passport-trust-alignment">
+<span class="md-ellipsis">
+      
+        C) Issuer discovery key (DRS ↔ Passport trust alignment)
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#3-how-drs-knows-passport-is-required-and-how-clients-discover-it">
+<span class="md-ellipsis">
+      
+        3) How DRS “knows” Passport is required (and how clients discover it)
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#4-how-authorization-of-drs-objects-usually-works-with-visas">
+<span class="md-ellipsis">
+      
+        4) How “authorization of DRS objects” usually works with Visas
+      
+    </span>
+</a>
+<nav aria-label="4) How “authorization of DRS objects” usually works with Visas" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#key-takeaway">
+<span class="md-ellipsis">
+      
+        Key takeaway
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#5-minimal-dependency-map-you-can-drop-into-docs">
+<span class="md-ellipsis">
+      
+        5) Minimal dependency map you can drop into docs
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#6-useful-links">
+<span class="md-ellipsis">
+      
+        6) Useful links
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#deep-dive">
+<span class="md-ellipsis">
+      
+        Deep Dive
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#1-what-controlledaccessgrants-is-and-is-not">
+<span class="md-ellipsis">
+      
+        1. What ControlledAccessGrants is (and is not)
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#2-canonical-structure-of-a-controlledaccessgrants-visa">
+<span class="md-ellipsis">
+      
+        2. Canonical structure of a ControlledAccessGrants Visa
+      
+    </span>
+</a>
+<nav aria-label="2. Canonical structure of a ControlledAccessGrants Visa" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#semantics-of-the-important-fields">
+<span class="md-ellipsis">
+      
+        Semantics of the important fields
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#3-the-critical-design-choice-dataset-level-grants-not-object-level">
+<span class="md-ellipsis">
+      
+        3. The critical design choice: dataset-level grants, not object-level
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#4-how-a-drs-server-uses-controlledaccessgrants">
+<span class="md-ellipsis">
+      
+        4. How a DRS server uses ControlledAccessGrants
+      
+    </span>
+</a>
+<nav aria-label="4. How a DRS server uses ControlledAccessGrants" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#step-1-drs-object-is-mapped-to-a-dataset">
+<span class="md-ellipsis">
+      
+        Step 1: DRS object is mapped to a dataset
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#step-2-client-discovers-auth-requirements">
+<span class="md-ellipsis">
+      
+        Step 2: Client discovers auth requirements
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#step-3-client-presents-passport">
+<span class="md-ellipsis">
+      
+        Step 3: Client presents Passport
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#step-4-drs-validates-the-visa-clearinghouse-role">
+<span class="md-ellipsis">
+      
+        Step 4: DRS validates the Visa (Clearinghouse role)
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#step-5-authorization-decision-this-is-the-key-part">
+<span class="md-ellipsis">
+      
+        Step 5: Authorization decision (this is the key part)
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#5-why-the-value-must-be-an-exact-stable-identifier">
+<span class="md-ellipsis">
+      
+        5. Why the value must be an exact, stable identifier
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#6-multiple-datasets-multiple-grants">
+<span class="md-ellipsis">
+      
+        6. Multiple datasets, multiple grants
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#7-what-controlledaccessgrants-deliberately-avoids">
+<span class="md-ellipsis">
+      
+        7. What ControlledAccessGrants deliberately avoids
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#8-mental-model-summary-one-paragraph">
+<span class="md-ellipsis">
+      
+        8. Mental model summary (one paragraph)
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#1-separation-of-concerns-the-core-principle">
+<span class="md-ellipsis">
+      
+        1. Separation of concerns (the core principle)
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#2-end-to-end-flow-with-signed-urls">
+<span class="md-ellipsis">
+      
+        2. End-to-end flow with signed URLs
+      
+    </span>
+</a>
+<nav aria-label="2. End-to-end flow with signed URLs" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#step-1-user-authenticates-and-presents-passport">
+<span class="md-ellipsis">
+      
+        Step 1: User authenticates and presents Passport
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#step-2-drs-authorizes-the-object">
+<span class="md-ellipsis">
+      
+        Step 2: DRS authorizes the object
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#step-3-drs-mints-ephemeral-access">
+<span class="md-ellipsis">
+      
+        Step 3: DRS mints ephemeral access
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#step-4-client-accesses-storage-directly">
+<span class="md-ellipsis">
+      
+        Step 4: Client accesses storage directly
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#3-why-passport-is-not-used-at-the-storage-layer">
+<span class="md-ellipsis">
+      
+        3. Why Passport is not used at the storage layer
+      
+    </span>
+</a>
+<nav aria-label="3. Why Passport is not used at the storage layer" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#security-reasons">
+<span class="md-ellipsis">
+      
+        Security reasons
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#scalability-reasons">
+<span class="md-ellipsis">
+      
+        Scalability reasons
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#governance-reasons">
+<span class="md-ellipsis">
+      
+        Governance reasons
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#4-key-invariants-you-must-maintain">
+<span class="md-ellipsis">
+      
+        4. Key invariants you must maintain
+      
+    </span>
+</a>
+<nav aria-label="4. Key invariants you must maintain" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#invariant-1-signed-urls-must-never-outlive-authorization-intent">
+<span class="md-ellipsis">
+      
+        Invariant 1: Signed URLs must never outlive authorization intent
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#invariant-2-signed-urls-must-be-non-escalating">
+<span class="md-ellipsis">
+      
+        Invariant 2: Signed URLs must be non-escalating
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#invariant-3-drs-is-the-only-mint">
+<span class="md-ellipsis">
+      
+        Invariant 3: DRS is the only mint
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#5-how-revocation-actually-works-important">
+<span class="md-ellipsis">
+      
+        5. How revocation actually works (important)
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#6-multiple-objects-same-dataset">
+<span class="md-ellipsis">
+      
+        6. Multiple objects, same dataset
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#7-what-happens-if-a-dataset-mixes-public-and-protected-objects">
+<span class="md-ellipsis">
+      
+        7. What happens if a dataset mixes public and protected objects?
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#8-mental-model-keep-this-in-your-head">
+<span class="md-ellipsis">
+      
+        8. Mental model (keep this in your head)
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#9-common-anti-patterns-avoid-these">
+<span class="md-ellipsis">
+      
+        9. Common anti-patterns (avoid these)
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</div>
+</div>
+</div>
+<div class="md-content" data-md-component="content">
+<article class="md-content__inner md-typeset">
+<h1 id="adr-002-ga4gh-passports-drs-authorization-controlledaccessgrants-and-signed-access">ADR-002: GA4GH Passports, DRS Authorization, ControlledAccessGrants, and Signed Access<a class="headerlink" href="#adr-002-ga4gh-passports-drs-authorization-controlledaccessgrants-and-signed-access" title="Permanent link">¶</a></h1>
+<h2 id="status">Status<a class="headerlink" href="#status" title="Permanent link">¶</a></h2>
+<p>Proposed</p>
+<h2 id="context">Context<a class="headerlink" href="#context" title="Permanent link">¶</a></h2>
+<p>This ADR documents the interaction between <strong>GA4GH Passports</strong>, <strong>Data Repository Service (DRS)</strong>,
+<strong>ControlledAccessGrants</strong>, and <strong>signed URLs / short-lived credentials (STS)</strong>.</p>
+<p>The goal is to clearly separate:
+- Authentication
+- Authorization
+- Data-plane access</p>
+<p>while remaining compliant with GA4GH standards and scalable for large controlled-access datasets.</p>
+<hr/>
+<h2 id="key-concepts">Key Concepts<a class="headerlink" href="#key-concepts" title="Permanent link">¶</a></h2>
+<h3 id="passports">Passports<a class="headerlink" href="#passports" title="Permanent link">¶</a></h3>
+<p>GA4GH Passports are JWT bundles containing Visas. They represent <strong>who the user is</strong> and
+<strong>what they are authorized to access</strong>.</p>
+<p>Identity is defined by:
+- <code>iss</code> (issuer)
+- <code>sub</code> (subject)</p>
+<h3 id="controlledaccessgrants">ControlledAccessGrants<a class="headerlink" href="#controlledaccessgrants" title="Permanent link">¶</a></h3>
+<p>A <code>ControlledAccessGrants</code> Visa represents an affirmative authorization decision issued by a DAC.
+It authorizes access to a <strong>protected dataset</strong>, not individual files.</p>
+<p>The Visa <code>value</code> is the <strong>dataset identifier</strong> and must exactly match the identifier used by DRS policy.</p>
+<h3 id="drs-objects">DRS Objects<a class="headerlink" href="#drs-objects" title="Permanent link">¶</a></h3>
+<p>DRS exposes immutable objects identified by <code>object_id</code>.
+Each protected object must be mapped internally to a dataset identifier.</p>
+<h3 id="signed-urls-sts">Signed URLs / STS<a class="headerlink" href="#signed-urls-sts" title="Permanent link">¶</a></h3>
+<p>Signed URLs or short-lived credentials provide <strong>temporary data-plane access</strong> to object storage.
+They are:
+- Time-limited
+- Object-scoped
+- Identity-agnostic</p>
+<hr/>
+<h2 id="decision">Decision<a class="headerlink" href="#decision" title="Permanent link">¶</a></h2>
+<ol>
+<li><strong>Authorization is enforced at the DRS layer using Passports</strong></li>
+<li><strong>ControlledAccessGrants are evaluated at dataset level</strong></li>
+<li><strong>DRS mints short-lived credentials only after successful authorization</strong></li>
+<li><strong>Object storage never evaluates Passport or identity claims</strong></li>
+</ol>
+<hr/>
+<h2 id="architecture-diagram">Architecture Diagram<a class="headerlink" href="#architecture-diagram" title="Permanent link">¶</a></h2>
+<pre class="mermaid"><code>graph TD
+    User --&gt;|OAuth/OIDC| PassportBroker
+    PassportBroker --&gt;|Passport JWT| User
+    User --&gt;|POST /objects/id| DRS
+    DRS --&gt;|Authorize via ControlledAccessGrants| PolicyEngine
+    PolicyEngine --&gt;|Allow| DRS
+    DRS --&gt;|Signed URL / STS| User
+    User --&gt;|Direct GET| ObjectStorage</code></pre>
+<hr/>
+<h2 id="sequence-diagram">Sequence Diagram<a class="headerlink" href="#sequence-diagram" title="Permanent link">¶</a></h2>
+<pre class="mermaid"><code>sequenceDiagram
+    participant U as User
+    participant P as Passport Broker
+    participant A as Arborist
+    participant D as DRS
+    participant S as Storage
+
+    U-&gt;&gt;P: Authenticate &amp; request Passport
+    P--&gt;&gt;A: Authenticate, get Roles
+    P-&gt;P: Translate Roles -&gt; Visas
+    P--&gt;&gt;U: Passport-ControlledAccessGrants
+
+    U-&gt;&gt;D: POST /objects/{object_id} + Passport
+    D-&gt;&gt;D: Validate Passport &amp; Visas
+    D-&gt;&gt;D: object_id -&gt; dataset_id
+    D-&gt;&gt;D: Check ControlledAccessGrants
+    D--&gt;&gt;U: Signed URL / STS (short-lived)
+
+    U-&gt;&gt;S: GET object (signed)
+    S--&gt;&gt;U: Object bytes</code></pre>
+<hr/>
+<h2 id="authorization-logic">Authorization Logic<a class="headerlink" href="#authorization-logic" title="Permanent link">¶</a></h2>
+<p>Authorization succeeds if:
+- Passport contains a valid <code>ControlledAccessGrants</code> Visa
+- <code>visa.value == dataset_id</code>
+- <code>visa.iss</code> is trusted
+- <code>visa.exp</code> is not expired</p>
+<p>Failure returns <code>403 Forbidden</code>.</p>
+<hr/>
+<h2 id="interaction-with-signed-urls-sts">Interaction with Signed URLs / STS<a class="headerlink" href="#interaction-with-signed-urls-sts" title="Permanent link">¶</a></h2>
+<ul>
+<li>Signed URLs are minted <strong>only after authorization</strong></li>
+<li>Lifetime must be <strong>shorter than Visa lifetime</strong></li>
+<li>URLs are <strong>read-only</strong> and <strong>object-scoped</strong></li>
+<li>Revocation occurs by:<ul>
+<li>Visa expiration</li>
+<li>DRS refusal to mint new credentials</li>
+</ul>
+</li>
+</ul>
+<hr/>
+<h2 id="consequences">Consequences<a class="headerlink" href="#consequences" title="Permanent link">¶</a></h2>
+<h3 id="positive">Positive<a class="headerlink" href="#positive" title="Permanent link">¶</a></h3>
+<ul>
+<li>Clear separation of governance and storage</li>
+<li>Scales to large datasets</li>
+<li>Minimizes trust surface of object storage</li>
+</ul>
+<h3 id="negative">Negative<a class="headerlink" href="#negative" title="Permanent link">¶</a></h3>
+<ul>
+<li>Signed URLs cannot be revoked mid-lifetime</li>
+<li>Requires strict lifetime management</li>
+</ul>
+<hr/>
+<h2 id="invariants">Invariants<a class="headerlink" href="#invariants" title="Permanent link">¶</a></h2>
+<ul>
+<li>Passport authorizes <em>whether</em></li>
+<li>DRS authorizes <em>what</em></li>
+<li>Signed URLs authorize <em>how long</em></li>
+</ul>
+<hr/>
+<h2 id="alternatives-considered">Alternatives Considered<a class="headerlink" href="#alternatives-considered" title="Permanent link">¶</a></h2>
+<ul>
+<li>Passing Passport to storage (rejected)</li>
+<li>Dataset-wide storage credentials (rejected)</li>
+<li>Long-lived signed URLs (rejected)</li>
+</ul>
+<hr/>
+<h2 id="references">References<a class="headerlink" href="#references" title="Permanent link">¶</a></h2>
+<ul>
+<li>GA4GH Passports Specification</li>
+<li>GA4GH DRS Specification</li>
+<li>GA4GH ControlledAccessGrants Visa Profile</li>
+</ul>
+<hr/>
+<p>Below is a practical “wiring diagram” of how <strong>GA4GH Passports</strong> relate to <strong>DRS</strong>, what data “keys” they share, and how <strong>authorization of DRS objects</strong> typically works.</p>
+<h2 id="1-what-depends-on-what">1) What depends on what<a class="headerlink" href="#1-what-depends-on-what" title="Permanent link">¶</a></h2>
+<h3 id="passports-aai-layer-used-by-drs-data-access-layer">Passports (AAI layer) → used by DRS (data access layer)<a class="headerlink" href="#passports-aai-layer-used-by-drs-data-access-layer" title="Permanent link">¶</a></h3>
+<ul>
+<li><strong>GA4GH Passports</strong> define how to represent a researcher’s identity + permissions as <strong>Visas</strong> (signed JWTs) bundled into a <strong>Passport claim</strong> (<code>ga4gh_passport_v1</code>). (<a href="https://ga4gh.github.io/data-security/ga4gh-passport" title="GA4GH Passport | GA4GH Data Security">GA4GH</a>)</li>
+<li><strong>DRS</strong> is a <em>read-only</em> object access API that can <em>optionally</em> use Passports (or bearer/basic tokens) to authorize calls. (<a href="https://ga4gh.github.io/data-repository-service-schemas/preview/develop/docs/" title="Data Repository Service">GA4GH</a>)</li>
+</ul>
+<h3 id="passport-brokerui-are-issuersaggregators-not-drs-features">Passport Broker/UI are <em>issuers/aggregators</em>, not “DRS features”<a class="headerlink" href="#passport-brokerui-are-issuersaggregators-not-drs-features" title="Permanent link">¶</a></h3>
+<ul>
+<li>DRS docs explicitly note it’s <strong>not DRS’s job to return a Passport</strong>; issuing/aggregating Passports is the broker’s responsibility. (<a href="https://ga4gh.github.io/data-repository-service-schemas/preview/develop/docs/" title="Data Repository Service">GA4GH</a>)</li>
+<li>Starter Kit Passport UI/Broker exist to help users obtain a Passport JWT (and the UI is built to work with other passport microservices). (<a href="https://starterkit.ga4gh.org/docs/starter-kit-apis/passport/passport_ui_overview?utm_source=chatgpt.com" title="Starter Kit Passport UI Overview">GA4GH Starter Kit</a>)</li>
+<li>Starter Kit DRS explicitly calls out <strong>“Passport mediated auth to DRS objects”</strong> and an <strong>“Auth info”</strong> feature to discover brokers/visas for controlled-access objects. (<a href="https://github.com/ga4gh/ga4gh-starter-kit-drs" title="GitHub - ga4gh/ga4gh-starter-kit-drs: Open, extensible server implementation of the GA4GH Data Repository Service (DRS) specification">GitHub</a>)</li>
+</ul>
+<h2 id="2-where-the-join-points-are-primary-keys-identifiers">2) Where the “join points” are (primary keys / identifiers)<a class="headerlink" href="#2-where-the-join-points-are-primary-keys-identifiers" title="Permanent link">¶</a></h2>
+<p>There isn’t one single universal primary key shared by both specs; instead you typically join across three axes:</p>
+<h3 id="a-user-identity-key-passport-side">A) <strong>User identity key</strong> (Passport-side)<a class="headerlink" href="#a-user-identity-key-passport-side" title="Permanent link">¶</a></h3>
+<ul>
+<li>
+<p>A Visa’s user identity is the pair <strong>{<code>sub</code>, <code>iss</code>}</strong> (“Visa Identity”). (<a href="https://ga4gh.github.io/data-security/ga4gh-passport" title="GA4GH Passport | GA4GH Data Security">GA4GH</a>)</p>
+</li>
+<li>
+<p><code>iss</code> = issuer (OIDC / Visa Issuer / Broker depending on flow)</p>
+</li>
+<li><code>sub</code> = subject identifier within that issuer</li>
+</ul>
+<p>This is what your DRS authorization layer ultimately answers: <em>“does the user represented by (<code>iss</code>,<code>sub</code>) have the right visas?”</em></p>
+<h3 id="b-object-key-drs-side">B) <strong>Object key</strong> (DRS-side)<a class="headerlink" href="#b-object-key-drs-side" title="Permanent link">¶</a></h3>
+<ul>
+<li>
+<p>The “thing being protected” is the <strong>DRS object id</strong> (<code>object_id</code>, <code>drs_object_id</code>) used in:</p>
+</li>
+<li>
+<p><code>GET /objects/{object_id}</code></p>
+</li>
+<li><code>POST /objects/{object_id}</code> (Passport-bearing)</li>
+<li><code>GET /objects/{object_id}/access/{access_id}</code> (and Passport-bearing variants) (<a href="https://ga4gh.github.io/data-repository-service-schemas/preview/develop/docs/" title="Data Repository Service">GA4GH</a>)</li>
+</ul>
+<h3 id="c-issuer-discovery-key-drs-passport-trust-alignment">C) <strong>Issuer discovery key</strong> (DRS ↔ Passport trust alignment)<a class="headerlink" href="#c-issuer-discovery-key-drs-passport-trust-alignment" title="Permanent link">¶</a></h3>
+<p>DRS exposes <em>which auth modes and issuers apply</em> via OPTIONS “auth discovery”:</p>
+<ul>
+<li>
+<p><code>OPTIONS /objects/{object_id}</code> returns an <code>Authorizations</code> structure including:</p>
+</li>
+<li>
+<p><code>supported_types</code> (e.g., None/Basic/Bearer/Passport)</p>
+</li>
+<li><code>passport_auth_issuers</code></li>
+<li><code>bearer_auth_issuers</code> (<a href="https://ga4gh.github.io/data-repository-service-schemas/preview/develop/docs/" title="Data Repository Service">GA4GH</a>)</li>
+</ul>
+<p>This is a key interoperability point: the issuer strings in <code>passport_auth_issuers</code> must align with what your Passport clearinghouse layer trusts/accepts (typically Visa <code>iss</code>, and/or broker/issuer metadata).</p>
+<h2 id="3-how-drs-knows-passport-is-required-and-how-clients-discover-it">3) How DRS “knows” Passport is required (and how clients discover it)<a class="headerlink" href="#3-how-drs-knows-passport-is-required-and-how-clients-discover-it" title="Permanent link">¶</a></h2>
+<p>DRS supports multiple auth modes, and they can vary per object. The spec recommends indicating required auth via the <strong>OptionsObject</strong> API and via access methods. (<a href="https://ga4gh.github.io/data-repository-service-schemas/preview/develop/docs/" title="Data Repository Service">GA4GH</a>)</p>
+<p>Concretely:</p>
+<ul>
+<li><code>GET /objects/{object_id}</code> may allow <code>None</code>, <code>BasicAuth</code>, or <code>BearerAuth</code> (depending on the object and server policy). (<a href="https://ga4gh.github.io/data-repository-service-schemas/preview/develop/docs/" title="Data Repository Service">GA4GH</a>)</li>
+<li>
+<p>If Passport is required/allowed, the pattern is:</p>
+</li>
+<li>
+<p>client calls <code>OPTIONS /objects/{object_id}</code> → sees <code>supported_types</code> and <code>passport_auth_issuers</code></p>
+</li>
+<li>client then calls <code>POST /objects/{object_id}</code> and includes Passport token(s) in the request body (PassportAuth is defined that way). (<a href="https://ga4gh.github.io/data-repository-service-schemas/preview/develop/docs/" title="Data Repository Service">GA4GH</a>)</li>
+</ul>
+<h2 id="4-how-authorization-of-drs-objects-usually-works-with-visas">4) How “authorization of DRS objects” usually works with Visas<a class="headerlink" href="#4-how-authorization-of-drs-objects-usually-works-with-visas" title="Permanent link">¶</a></h2>
+<p>Think of DRS as the enforcement point, with Passport acting as the portable “proof”:</p>
+<ol>
+<li>
+<p><strong>DRS object has a policy</strong> (out of band / implementation-defined)</p>
+</li>
+<li>
+<p>Example: object X requires a <strong>ControlledAccessGrants</strong> visa whose <code>value</code> points at dataset/resource Y, and issuer must be trusted.</p>
+</li>
+<li>
+<p>Client obtains Passport (UI/Broker flow) containing Visa JWT(s)</p>
+</li>
+<li>
+<p>Passports carry <code>ga4gh_passport_v1</code> with embedded visas. (<a href="https://ga4gh.github.io/data-security/ga4gh-passport" title="GA4GH Passport | GA4GH Data Security">GA4GH</a>)</p>
+</li>
+<li>
+<p>Client calls DRS using Passport-bearing endpoints</p>
+</li>
+<li>
+<p>PassportAuth is explicitly modeled as a POST-body token mechanism in DRS. (<a href="https://ga4gh.github.io/data-repository-service-schemas/preview/develop/docs/" title="Data Repository Service">GA4GH</a>)</p>
+</li>
+<li>
+<p>DRS acts as (or delegates to) a <strong>Passport Clearinghouse</strong></p>
+</li>
+<li>
+<p>It validates Visa signatures/expiry/trust chain per GA4GH AAI/Passport rules, then evaluates Visa content.</p>
+</li>
+<li>
+<p>Visas include required JWT claims (<code>iss</code>, <code>sub</code>, <code>iat</code>, <code>exp</code>) and a structured <code>ga4gh_visa_v1</code> object (<code>type</code>, <code>asserted</code>, <code>value</code>, <code>source</code>, etc.). (<a href="https://ga4gh.github.io/data-security/ga4gh-passport" title="GA4GH Passport | GA4GH Data Security">GA4GH</a>)</p>
+</li>
+<li>
+<p>DRS matches visas to its object policy</p>
+</li>
+<li>
+<p>For dataset/object entitlements, the standard Visa type <strong>ControlledAccessGrants</strong> encodes “access granted” and its <code>value</code> is a URL identifying the dataset/object being granted. (<a href="https://ga4gh.github.io/data-security/ga4gh-passport" title="GA4GH Passport | GA4GH Data Security">GA4GH</a>)</p>
+</li>
+<li>The spec also notes how <code>value</code> must be matched/validated (case-sensitive full match unless the Visa type defines safe partitioning). (<a href="https://ga4gh.github.io/data-security/ga4gh-passport" title="GA4GH Passport | GA4GH Data Security">GA4GH</a>)</li>
+</ol>
+<h3 id="key-takeaway">Key takeaway<a class="headerlink" href="#key-takeaway" title="Permanent link">¶</a></h3>
+<p><strong>Authorization is fundamentally:</strong></p>
+<ul>
+<li><code>DRS object_id</code> → mapped (by your DRS implementation) to required Visa types/values/issuers</li>
+<li><code>Passport</code> → proves the caller’s (<code>iss</code>,<code>sub</code>) and includes Visa assertions</li>
+<li><code>OPTIONS /objects/{id}</code> → tells clients what to present (and from which issuers) (<a href="https://ga4gh.github.io/data-repository-service-schemas/preview/develop/docs/" title="Data Repository Service">GA4GH</a>)</li>
+</ul>
+<h2 id="5-minimal-dependency-map-you-can-drop-into-docs">5) Minimal dependency map you can drop into docs<a class="headerlink" href="#5-minimal-dependency-map-you-can-drop-into-docs" title="Permanent link">¶</a></h2>
+<ul>
+<li><strong>Passport UI/Broker</strong>: obtains Passport JWT(s) with visa claims (<code>ga4gh_passport_v1</code>). (<a href="https://github.com/ga4gh/ga4gh-starter-kit-passport-ui" title="GitHub - ga4gh/ga4gh-starter-kit-passport-ui: Central UI server connecting to other Passport-related microservices (ory hydra, ory kratos)">GitHub</a>)</li>
+<li><strong>DRS</strong>: protects <code>DrsObject</code>s; may require Bearer/Basic headers or Passport POST depending on object; exposes auth discovery via OPTIONS. (<a href="https://ga4gh.github.io/data-repository-service-schemas/preview/develop/docs/" title="Data Repository Service">GA4GH</a>)</li>
+<li>
+<p><strong>Shared “keys”</strong>:</p>
+</li>
+<li>
+<p>user: <code>{sub, iss}</code> (Visa Identity) (<a href="https://ga4gh.github.io/data-security/ga4gh-passport" title="GA4GH Passport | GA4GH Data Security">GA4GH</a>)</p>
+</li>
+<li>object: <code>object_id</code> / <code>drs_object_id</code> (<a href="https://ga4gh.github.io/data-repository-service-schemas/preview/develop/docs/" title="Data Repository Service">GA4GH</a>)</li>
+<li>trust: DRS <code>passport_auth_issuers</code> ↔ Visa/issuer/broker trust configuration (<a href="https://ga4gh.github.io/data-repository-service-schemas/preview/develop/docs/" title="Data Repository Service">GA4GH</a>)</li>
+</ul>
+<h2 id="6-useful-links">6) Useful links<a class="headerlink" href="#6-useful-links" title="Permanent link">¶</a></h2>
+<hr/>
+<h2 id="deep-dive">Deep Dive<a class="headerlink" href="#deep-dive" title="Permanent link">¶</a></h2>
+<p>Below is a <strong>deep dive on <code>ControlledAccessGrants</code></strong> and how it is <em>actually</em> used to authorize access to <strong>DRS objects that belong to a protected dataset</strong>, written from an implementer’s point of view (DRS + Passport + policy engine).</p>
+<hr/>
+<h2 id="1-what-controlledaccessgrants-is-and-is-not">1. What <code>ControlledAccessGrants</code> is (and is not)<a class="headerlink" href="#1-what-controlledaccessgrants-is-and-is-not" title="Permanent link">¶</a></h2>
+<p><strong><code>ControlledAccessGrants</code> is a <em>Visa type</em></strong> defined by <strong>GA4GH Passports</strong>.</p>
+<p>It represents <strong>an affirmative authorization decision</strong>:</p>
+<blockquote>
+<p><em>“The bearer is allowed to access a specific controlled-access resource.”</em></p>
+</blockquote>
+<p>Key clarifications:</p>
+<ul>
+<li>It <strong>does not identify the user</strong> → identity comes from <code>iss + sub</code></li>
+<li>It <strong>does not authenticate the request</strong> → OAuth / OIDC / Bearer token does that</li>
+<li>It <strong>does not describe the data object directly</strong> → it references a <em>policy resource</em> (usually a dataset)</li>
+</ul>
+<p>It is a <strong>portable entitlement</strong>, not an ACL.</p>
+<hr/>
+<h2 id="2-canonical-structure-of-a-controlledaccessgrants-visa">2. Canonical structure of a <code>ControlledAccessGrants</code> Visa<a class="headerlink" href="#2-canonical-structure-of-a-controlledaccessgrants-visa" title="Permanent link">¶</a></h2>
+<p>At minimum (simplified):</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"iss"</span><span class="p">:</span><span class="w"> </span><span class="s2">"https://dac.example.org"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"sub"</span><span class="p">:</span><span class="w"> </span><span class="s2">"user-123"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"iat"</span><span class="p">:</span><span class="w"> </span><span class="mi">1710000000</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"exp"</span><span class="p">:</span><span class="w"> </span><span class="mi">1712600000</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"ga4gh_visa_v1"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"ControlledAccessGrants"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"asserted"</span><span class="p">:</span><span class="w"> </span><span class="mi">1709999000</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"value"</span><span class="p">:</span><span class="w"> </span><span class="s2">"https://datasets.example.org/datasets/DS-001"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"source"</span><span class="p">:</span><span class="w"> </span><span class="s2">"https://dac.example.org"</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+<h3 id="semantics-of-the-important-fields">Semantics of the important fields<a class="headerlink" href="#semantics-of-the-important-fields" title="Permanent link">¶</a></h3>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>type</code></td>
+<td>Must be exactly <code>ControlledAccessGrants</code></td>
+</tr>
+<tr>
+<td><code>value</code></td>
+<td><strong>The protected resource identifier</strong> (most often a dataset URL)</td>
+</tr>
+<tr>
+<td><code>iss</code></td>
+<td>Who issued the grant (DAC / authorization authority)</td>
+</tr>
+<tr>
+<td><code>sub</code></td>
+<td>Who the grant applies to</td>
+</tr>
+<tr>
+<td><code>exp</code></td>
+<td>When the authorization expires</td>
+</tr>
+<tr>
+<td><code>source</code></td>
+<td>Human/traceable provenance (often same as <code>iss</code>)</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>🔑 <strong>The <code>value</code> is the join key between Passport and DRS policy.</strong></p>
+</blockquote>
+<hr/>
+<h2 id="3-the-critical-design-choice-dataset-level-grants-not-object-level">3. The critical design choice: <em>dataset-level</em> grants, not object-level<a class="headerlink" href="#3-the-critical-design-choice-dataset-level-grants-not-object-level" title="Permanent link">¶</a></h2>
+<p>In practice, <strong><code>ControlledAccessGrants</code> almost always point to a dataset</strong>, not to individual files or DRS object IDs.</p>
+<p>Why?</p>
+<ul>
+<li>Datasets are <strong>stable, reviewable, governance-level entities</strong></li>
+<li>Files come and go (reprocessing, new versions, re-partitioning)</li>
+<li>DAC approvals are granted <strong>for a dataset under a use agreement</strong></li>
+</ul>
+<p>So you get this hierarchy:</p>
+<div class="highlight"><pre><span></span><code>Dataset (protected, DAC-approved)
+ ├── DRS Object A (bam)
+ ├── DRS Object B (vcf)
+ ├── DRS Object C (index)
+ └── DRS Object D (metadata)
+</code></pre></div>
+<p><strong>One Visa → many DRS objects</strong></p>
+<hr/>
+<h2 id="4-how-a-drs-server-uses-controlledaccessgrants">4. How a DRS server uses <code>ControlledAccessGrants</code><a class="headerlink" href="#4-how-a-drs-server-uses-controlledaccessgrants" title="Permanent link">¶</a></h2>
+<h3 id="step-1-drs-object-is-mapped-to-a-dataset">Step 1: DRS object is mapped to a dataset<a class="headerlink" href="#step-1-drs-object-is-mapped-to-a-dataset" title="Permanent link">¶</a></h3>
+<p>This mapping is <strong>implementation-defined</strong>, but must exist.</p>
+<p>Common patterns:</p>
+<ul>
+<li>DRS object metadata includes <code>dataset_id</code></li>
+<li>Indexd / metadata store has <code>dataset</code> or <code>program/project</code> tags</li>
+<li>Object URL structure encodes dataset identity</li>
+</ul>
+<p>Example internal model:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">drs_object_id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">drs://repo/abc123</span>
+<span class="nt">dataset_id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://datasets.example.org/datasets/DS-001</span>
+</code></pre></div>
+<hr/>
+<h3 id="step-2-client-discovers-auth-requirements">Step 2: Client discovers auth requirements<a class="headerlink" href="#step-2-client-discovers-auth-requirements" title="Permanent link">¶</a></h3>
+<p>Client calls:</p>
+<div class="highlight"><pre><span></span><code>OPTIONS /objects/{object_id}
+</code></pre></div>
+<p>DRS responds with something like:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"supported_types"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"PassportAuth"</span><span class="p">],</span>
+<span class="w">  </span><span class="nt">"passport_auth_issuers"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="s2">"https://dac.example.org"</span>
+<span class="w">  </span><span class="p">]</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>This tells the client:</p>
+<ul>
+<li>Passport is required</li>
+<li>Visas must be issued by this DAC</li>
+</ul>
+<hr/>
+<h3 id="step-3-client-presents-passport">Step 3: Client presents Passport<a class="headerlink" href="#step-3-client-presents-passport" title="Permanent link">¶</a></h3>
+<p>Client calls:</p>
+<div class="highlight"><pre><span></span><code>POST /objects/{object_id}
+</code></pre></div>
+<p>with:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"passport"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="s2">"&lt;base64url-encoded Visa JWT&gt;"</span><span class="p">,</span>
+<span class="w">    </span><span class="s2">"&lt;optional additional visas&gt;"</span>
+<span class="w">  </span><span class="p">]</span>
+<span class="p">}</span>
+</code></pre></div>
+<hr/>
+<h3 id="step-4-drs-validates-the-visa-clearinghouse-role">Step 4: DRS validates the Visa (Clearinghouse role)<a class="headerlink" href="#step-4-drs-validates-the-visa-clearinghouse-role" title="Permanent link">¶</a></h3>
+<p>DRS (or a delegated clearinghouse) must:</p>
+<ol>
+<li>Verify JWT signature</li>
+<li>Verify <code>exp</code>, <code>nbf</code>, <code>iat</code></li>
+<li>Verify <code>iss</code> is trusted</li>
+<li>Extract <code>type</code>, <code>value</code>, <code>sub</code></li>
+</ol>
+<p>This is <strong>pure Passport validation</strong> — no dataset logic yet.</p>
+<hr/>
+<h3 id="step-5-authorization-decision-this-is-the-key-part">Step 5: Authorization decision (this is the key part)<a class="headerlink" href="#step-5-authorization-decision-this-is-the-key-part" title="Permanent link">¶</a></h3>
+<p>For the requested DRS object:</p>
+<div class="highlight"><pre><span></span><code>Required dataset = DS-001
+</code></pre></div>
+<p>DRS checks:</p>
+<blockquote>
+<p>Does the Passport contain <strong>at least one</strong> valid
+<code>ControlledAccessGrants</code> Visa where:</p>
+<ul>
+<li><code>visa.type == "ControlledAccessGrants"</code></li>
+<li><code>visa.value == dataset_id</code></li>
+<li><code>visa.iss</code> is trusted</li>
+<li><code>visa.exp</code> is valid</li>
+</ul>
+</blockquote>
+<p>If <strong>yes</strong> → access allowed
+If <strong>no</strong> → <code>403 Forbidden</code></p>
+<hr/>
+<h2 id="5-why-the-value-must-be-an-exact-stable-identifier">5. Why the <code>value</code> must be an exact, stable identifier<a class="headerlink" href="#5-why-the-value-must-be-an-exact-stable-identifier" title="Permanent link">¶</a></h2>
+<p>The Passport spec is very explicit:</p>
+<ul>
+<li><code>value</code> matching is <strong>exact string match</strong></li>
+<li>No globbing</li>
+<li>No prefix matching</li>
+<li>No implied hierarchy (unless the Visa type explicitly defines it)</li>
+</ul>
+<p>So <strong>this is a contract</strong>:</p>
+<blockquote>
+<p>Whatever string your DAC puts in <code>value</code>
+must be exactly what your DRS policy engine checks.</p>
+</blockquote>
+<p>That’s why most deployments choose:</p>
+<ul>
+<li>A <strong>dataset URL</strong></li>
+<li>Or a <strong>stable dataset UUID URL</strong></li>
+</ul>
+<p>Example good choices:</p>
+<div class="highlight"><pre><span></span><code>https://datasets.example.org/datasets/DS-001
+urn:uuid:3f1b8d2e-...
+</code></pre></div>
+<p>Bad choices:</p>
+<div class="highlight"><pre><span></span><code>/projects/foo
+dataset-1
+"controlled"
+</code></pre></div>
+<hr/>
+<h2 id="6-multiple-datasets-multiple-grants">6. Multiple datasets, multiple grants<a class="headerlink" href="#6-multiple-datasets-multiple-grants" title="Permanent link">¶</a></h2>
+<p>A Passport can (and often does) contain <strong>multiple ControlledAccessGrants</strong>:</p>
+<div class="highlight"><pre><span></span><code>User has access to:
+- DS-001
+- DS-017
+- DS-042
+</code></pre></div>
+<p>DRS authorization is then:</p>
+<div class="highlight"><pre><span></span><code>object.dataset_id ∈ { visa.value }
+</code></pre></div>
+<p>No per-object logic required.</p>
+<hr/>
+<h2 id="7-what-controlledaccessgrants-deliberately-avoids">7. What <code>ControlledAccessGrants</code> deliberately avoids<a class="headerlink" href="#7-what-controlledaccessgrants-deliberately-avoids" title="Permanent link">¶</a></h2>
+<p>This is by design:</p>
+<p>❌ It does <em>not</em> encode:</p>
+<ul>
+<li>File paths</li>
+<li>DRS object IDs</li>
+<li>Bucket names</li>
+<li>Access methods (S3 vs HTTPS)</li>
+<li>Read vs write (DRS is read-only)</li>
+</ul>
+<p>Those remain <strong>local enforcement details</strong>.</p>
+<hr/>
+<h2 id="8-mental-model-summary-one-paragraph">8. Mental model summary (one paragraph)<a class="headerlink" href="#8-mental-model-summary-one-paragraph" title="Permanent link">¶</a></h2>
+<blockquote>
+<p><strong><code>ControlledAccessGrants</code> is the bridge between governance and storage.</strong>
+A DAC issues a Visa saying “this person may access dataset X.”
+A DRS server maps each protected object to dataset X and enforces that rule by requiring a Passport containing a matching Visa before returning object metadata or access URLs.</p>
+</blockquote>
+<hr/>
+<p>This is the part that usually causes confusion, so let’s be very explicit and concrete.</p>
+<p><strong>TL;DR</strong>
+<code>ControlledAccessGrants</code> authorize <em>whether</em> a user may access a protected dataset.
+<strong>Signed URLs / short-lived credentials control <em>how</em> that access is temporarily exercised.</strong>
+They are complementary and intentionally decoupled.</p>
+<hr/>
+<h2 id="1-separation-of-concerns-the-core-principle">1. Separation of concerns (the core principle)<a class="headerlink" href="#1-separation-of-concerns-the-core-principle" title="Permanent link">¶</a></h2>
+<p>Think in <strong>three layers</strong>, each with a different trust boundary and lifetime:</p>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>Responsibility</th>
+<th>Lifetime</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Passport / ControlledAccessGrants</strong></td>
+<td><em>Authorization decision</em> (is user allowed?)</td>
+<td>Hours → months</td>
+</tr>
+<tr>
+<td><strong>DRS server</strong></td>
+<td><em>Policy enforcement &amp; mediation</em></td>
+<td>Request-scoped</td>
+</tr>
+<tr>
+<td><strong>Signed URL / temp creds</strong></td>
+<td><em>Data plane access</em></td>
+<td>Seconds → minutes</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Passports never grant direct storage access.</strong>
+They only allow the DRS server to <em>mint</em> temporary access.</p>
+<hr/>
+<h2 id="2-end-to-end-flow-with-signed-urls">2. End-to-end flow with signed URLs<a class="headerlink" href="#2-end-to-end-flow-with-signed-urls" title="Permanent link">¶</a></h2>
+<h3 id="step-1-user-authenticates-and-presents-passport">Step 1: User authenticates and presents Passport<a class="headerlink" href="#step-1-user-authenticates-and-presents-passport" title="Permanent link">¶</a></h3>
+<ul>
+<li>Client authenticates with OAuth/OIDC</li>
+<li>Client includes Passport (with <code>ControlledAccessGrants</code>) when calling DRS</li>
+</ul>
+<div class="highlight"><pre><span></span><code>POST /objects/{object_id}
+</code></pre></div>
+<p>DRS verifies:</p>
+<ul>
+<li>Passport signature</li>
+<li>Trusted issuer</li>
+<li><code>ControlledAccessGrants.value == dataset_id</code></li>
+<li>Visa is unexpired</li>
+</ul>
+<p>👉 <strong>Authorization happens here and only here</strong></p>
+<hr/>
+<h3 id="step-2-drs-authorizes-the-object">Step 2: DRS authorizes the object<a class="headerlink" href="#step-2-drs-authorizes-the-object" title="Permanent link">¶</a></h3>
+<p>DRS maps:</p>
+<div class="highlight"><pre><span></span><code>object_id → dataset_id
+</code></pre></div>
+<p>Checks:</p>
+<div class="highlight"><pre><span></span><code>dataset_id ∈ ControlledAccessGrants.value
+</code></pre></div>
+<p>If authorized → proceed
+If not → <code>403 Forbidden</code></p>
+<hr/>
+<h3 id="step-3-drs-mints-ephemeral-access">Step 3: DRS mints <em>ephemeral</em> access<a class="headerlink" href="#step-3-drs-mints-ephemeral-access" title="Permanent link">¶</a></h3>
+<p>Only <strong>after authorization succeeds</strong>, DRS generates one of:</p>
+<ul>
+<li>A <strong>pre-signed URL</strong> (S3, GCS, Azure)</li>
+<li>A <strong>short-lived access token</strong></li>
+<li>Temporary cloud credentials (STS-style)</li>
+</ul>
+<p>Examples:</p>
+<ul>
+<li>S3 presigned GET (5–15 minutes)</li>
+<li>GCS signed URL</li>
+<li>Azure SAS token</li>
+</ul>
+<p>These credentials:</p>
+<ul>
+<li>Are <strong>scoped to a single object</strong></li>
+<li>Are <strong>time-limited</strong></li>
+<li>Are <strong>not reusable across objects</strong></li>
+<li>Are <strong>not tied to user identity</strong></li>
+</ul>
+<hr/>
+<h3 id="step-4-client-accesses-storage-directly">Step 4: Client accesses storage directly<a class="headerlink" href="#step-4-client-accesses-storage-directly" title="Permanent link">¶</a></h3>
+<p>Client downloads from object storage <strong>without Passport</strong>, <strong>without OAuth</strong>, <strong>without identity</strong>:</p>
+<div class="highlight"><pre><span></span><code>GET https://bucket.s3.amazonaws.com/object?...signature...
+</code></pre></div>
+<p>At this point:</p>
+<ul>
+<li>Storage layer has <strong>no idea who the user is</strong></li>
+<li>Storage only verifies cryptographic validity + expiry</li>
+</ul>
+<p>This is intentional.</p>
+<hr/>
+<h2 id="3-why-passport-is-not-used-at-the-storage-layer">3. Why Passport is <em>not</em> used at the storage layer<a class="headerlink" href="#3-why-passport-is-not-used-at-the-storage-layer" title="Permanent link">¶</a></h2>
+<h3 id="security-reasons">Security reasons<a class="headerlink" href="#security-reasons" title="Permanent link">¶</a></h3>
+<ul>
+<li>Object stores don’t understand GA4GH Passports</li>
+<li>JWT validation inside storage is infeasible</li>
+<li>Storage credentials must be revocable by time, not identity</li>
+</ul>
+<h3 id="scalability-reasons">Scalability reasons<a class="headerlink" href="#scalability-reasons" title="Permanent link">¶</a></h3>
+<ul>
+<li>Avoid per-request auth checks on multi-GB downloads</li>
+<li>Avoid holding auth state open for hours</li>
+<li>CDN compatibility</li>
+</ul>
+<h3 id="governance-reasons">Governance reasons<a class="headerlink" href="#governance-reasons" title="Permanent link">¶</a></h3>
+<ul>
+<li>Access review happens <em>before</em> access is granted</li>
+<li>Download is treated as execution of an already-approved decision</li>
+</ul>
+<hr/>
+<h2 id="4-key-invariants-you-must-maintain">4. Key invariants you must maintain<a class="headerlink" href="#4-key-invariants-you-must-maintain" title="Permanent link">¶</a></h2>
+<h3 id="invariant-1-signed-urls-must-never-outlive-authorization-intent">Invariant 1: <strong>Signed URLs must never outlive authorization intent</strong><a class="headerlink" href="#invariant-1-signed-urls-must-never-outlive-authorization-intent" title="Permanent link">¶</a></h3>
+<p>Best practice:</p>
+<div class="highlight"><pre><span></span><code>Visa lifetime  &gt;&gt;  signed URL lifetime
+</code></pre></div>
+<p>Example:</p>
+<ul>
+<li>Visa valid for 7 days</li>
+<li>Signed URL valid for 5 minutes</li>
+</ul>
+<p>Never reverse this.</p>
+<hr/>
+<h3 id="invariant-2-signed-urls-must-be-non-escalating">Invariant 2: <strong>Signed URLs must be non-escalating</strong><a class="headerlink" href="#invariant-2-signed-urls-must-be-non-escalating" title="Permanent link">¶</a></h3>
+<p>A signed URL:</p>
+<ul>
+<li>Must only allow <strong>read</strong></li>
+<li>Must only allow <strong>that object</strong></li>
+<li>Must not allow listing, overwrite, or delete</li>
+</ul>
+<p>If your URL allows more than what DRS authorized → that’s a bug.</p>
+<hr/>
+<h3 id="invariant-3-drs-is-the-only-mint">Invariant 3: <strong>DRS is the only mint</strong><a class="headerlink" href="#invariant-3-drs-is-the-only-mint" title="Permanent link">¶</a></h3>
+<p>Clients must <strong>never</strong>:</p>
+<ul>
+<li>Exchange Passport directly for cloud creds</li>
+<li>Reuse creds across objects</li>
+<li>Cache creds beyond expiry</li>
+</ul>
+<p>All minting goes through DRS.</p>
+<hr/>
+<h2 id="5-how-revocation-actually-works-important">5. How revocation actually works (important)<a class="headerlink" href="#5-how-revocation-actually-works-important" title="Permanent link">¶</a></h2>
+<p>You <strong>cannot revoke a signed URL once issued</strong>.</p>
+<p>So revocation happens at <strong>two earlier points</strong>:</p>
+<ol>
+<li>
+<p><strong>Visa expiry</strong></p>
+</li>
+<li>
+<p>DAC revokes access by shortening Visa lifetime or not reissuing</p>
+</li>
+<li>
+<p><strong>DRS mint refusal</strong></p>
+</li>
+<li>
+<p>After revocation, new signed URLs cannot be minted</p>
+</li>
+</ol>
+<p>This is why short lifetimes matter.</p>
+<hr/>
+<h2 id="6-multiple-objects-same-dataset">6. Multiple objects, same dataset<a class="headerlink" href="#6-multiple-objects-same-dataset" title="Permanent link">¶</a></h2>
+<p>This is the sweet spot of <code>ControlledAccessGrants</code>.</p>
+<p>User wants 1,000 files from dataset DS-001:</p>
+<ul>
+<li><strong>One Visa</strong></li>
+<li><strong>1,000 DRS calls</strong></li>
+<li><strong>1,000 short-lived signed URLs</strong></li>
+</ul>
+<p>No re-approval. No per-file DAC logic.</p>
+<hr/>
+<h2 id="7-what-happens-if-a-dataset-mixes-public-and-protected-objects">7. What happens if a dataset mixes public and protected objects?<a class="headerlink" href="#7-what-happens-if-a-dataset-mixes-public-and-protected-objects" title="Permanent link">¶</a></h2>
+<p>DRS logic becomes:</p>
+<div class="highlight"><pre><span></span><code>if object.public:
+    return access immediately (no Passport)
+else:
+    require ControlledAccessGrants
+</code></pre></div>
+<p>This is surfaced cleanly via:</p>
+<div class="highlight"><pre><span></span><code>OPTIONS /objects/{object_id}
+</code></pre></div>
+<p>Clients know <em>beforehand</em> whether Passport is required.</p>
+<hr/>
+<h2 id="8-mental-model-keep-this-in-your-head">8. Mental model (keep this in your head)<a class="headerlink" href="#8-mental-model-keep-this-in-your-head" title="Permanent link">¶</a></h2>
+<blockquote>
+<p><strong>Passport answers “may you?”</strong>
+<strong>DRS answers “here’s how (temporarily).”</strong>
+<strong>Signed URLs answer “prove this cryptographic token right now.”</strong></p>
+</blockquote>
+<p>Each layer trusts the one above it and never looks sideways.</p>
+<hr/>
+<h2 id="9-common-anti-patterns-avoid-these">9. Common anti-patterns (avoid these)<a class="headerlink" href="#9-common-anti-patterns-avoid-these" title="Permanent link">¶</a></h2>
+<p>❌ Long-lived signed URLs
+❌ Passing Passport to S3/GCS
+❌ Dataset-wide bucket credentials
+❌ Reusing signed URLs across users
+❌ Letting object storage enforce GA4GH policy</p>
+<hr/>
+</article>
+</div>
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+</div>
+</main>
+<footer class="md-footer">
+<div class="md-footer-meta md-typeset">
+<div class="md-footer-meta__inner md-grid">
+<div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" rel="noopener" target="_blank">
+      Material for MkDocs
+    </a>
+</div>
+</div>
+</div>
+</footer>
+</div>
+<div class="md-dialog" data-md-component="dialog">
+<div class="md-dialog__inner md-typeset"></div>
+</div>
+<script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["content.code.annotate"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+<script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+</body>
+</html>
