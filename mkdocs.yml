@@ -27,6 +27,9 @@ markdown_extensions:
   - admonition
   - toc:
       permalink: true
+  - pymdownx.details
+  - pymdownx.tasklist:
+      custom_checkbox: true
   - pymdownx.superfences:
       custom_fences:
         - name: mermaid

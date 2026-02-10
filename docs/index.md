@@ -18,3 +18,30 @@ graph LR
     B --> C[Data Storage]
     B --> D[Metadata DB]
 ```
+
+## Quick Start ⚡️
+
+!!! warning
+    Add steps that actually interact with the **DRS Server**:
+
+    - [ ] Listing
+    - [ ] Registering
+    - [ ] Retrieving/Resolving DRS URI's → files
+
+```sh
+# TODO: Change to latest tag when stable
+# docker run -p 8080:8080 ghcr.io/calypr/drs-server:latest
+
+➜ docker run -p 8080:8080 ghcr.io/calypr/drs-server:feature-actions
+{
+  "level": "info",
+  "caller": "server/main.go:123",
+  "msg": "listening",
+  "addr": ":8080"
+}
+
+➜ curl localhost:8080/healthz
+{
+  "status": "ok"
+}
+```
