@@ -4,7 +4,7 @@ FROM golang:1.24-alpine AS builder
 # Set the working directory
 WORKDIR /app
 
-# Install git and make for submodule operations and building
+# Install git for submodule operations
 RUN apk add --no-cache git
 
 # Copy go mod files
