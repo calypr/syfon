@@ -5,7 +5,7 @@ FROM golang:1.24-alpine AS builder
 WORKDIR /app
 
 # Install git and make for submodule operations and building
-RUN apk add --no-cache git make docker
+RUN apk add --no-cache git
 
 # Copy go mod files
 COPY go.mod go.sum ./

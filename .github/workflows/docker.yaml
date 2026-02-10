@@ -26,6 +26,13 @@ jobs:
             runner: ubuntu-22.04-arm
     runs-on: ${{ matrix.runner || 'ubuntu-22.04' }}
     steps:
+      # Checkout with submodules enabled
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+          fetch-depth: 0
+
       - name: Prepare
         run: |
           platform=${{ matrix.platform }}
