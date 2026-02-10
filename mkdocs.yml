@@ -1,15 +1,34 @@
 site_name: drs-server
 theme:
-  name: readthedocs
-  custom_dir: overrides
-markdown_extensions:
-  - pymdownx.superfences:
-      custom_fences:
-        - name: mermaid
-          class: mermaid
-          format: !!python/name:pymdownx.superfences.fence_code_format
+  name: material
+  # In MkDocs, the `overrides/` directory is used to customize the HTML templates and assets provided by the theme without modifying the theme itself.
+  custom_dir: docs/overrides
+  features:
+    - content.code.annotate
+
+
 nav:
   - Home: index.md
   - Configuration: configuration.md
   - Deployment: deployment.md
   - Troubleshooting: troubleshooting.md
+  - Architecture:
+      - Overview: adr/index.md
+      - Topics:
+          - openapi request/response validation: adr/adr-0001-request-response-validation.md
+          - ga4gh passports for authorization: adr/adr-0002-passports-ControlledAccessGrants.md
+          - persistence layer design: adr/adr-0003-persistence-layer-design.md
+
+plugins:
+  - search
+  - mermaid2
+
+markdown_extensions:
+  - admonition
+  - toc:
+      permalink: true
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format

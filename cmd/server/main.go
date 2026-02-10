@@ -6,6 +6,8 @@ import (
 	"os"
 	"time"
 
+	"github.com/calypr/drs-server/cmd/server/handlers"
+	"github.com/calypr/drs-server/cmd/server/middleware"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )
@@ -63,15 +65,22 @@ func main() {
 	// Ensure any buffered log entries are flushed before the process exits.
 	defer func() { _ = log.Sync() }()
 
-	// Build the OpenAPI validator middleware using the resolved spec path.
+	// Build the OpenAPI requestValidator middleware using the resolved spec path.
 	// The second argument (true) can be used to enable strict mode or
 	// similar behavior, depending on newSpecValidator's implementation.
-	// If the validator fails to initialize, the server cannot safely start,
+	// If the requestValidator fails to initialize, the server cannot safely start,
 	// so the process is terminated with a fatal log.
-	validator, err := newSpecValidator(specPath, true)
+	requestValidator, err := middleware.NewSpecValidator(specPath, true)
 	if err != nil {
-		log.Fatal("openapi validator", zap.Error(err))
+		log.Fatal("openapi requestValidator", zap.Error(err))
 	}
+
+	// Build the response validator middleware using the default configuration.
+	// The validator runs in audit mode by default (use Enforce in CI).
+	// If the responseValidator fails to initialize, the server cannot safely start,
+	respCfg := middleware.DefaultResponseValidatorConfig()
+	respCfg.Mode = middleware.ResponseValidationAudit // prod default; use Enforce in CI
+	responseValidator := middleware.NewOpenAPIResponseValidator(respCfg)
 
 	// Create a new Gin engine instance. Gin provides routing, middleware,
 	// and HTTP handler abstractions.
@@ -81,20 +90,25 @@ func main() {
 	// handlers from crashing the server by recovering and returning a 500.
 	r.Use(gin.Recovery())
 
-	// Attach the OpenAPI validator middleware so that all incoming requests
+	// Attach the OpenAPI requestValidator middleware so that all incoming requests
 	// are validated against the OpenAPI specification before reaching the
 	// actual endpoint handlers.
-	r.Use(validator)
+	r.Use(requestValidator)
+	r.Use(responseValidator)
+
+	// Add middleware AFTER NewRouter (it returns *gin.Engine)
+	//var requestLogger = RequestLogRedactingAuth()
+	//r.Use(requestLogger)
 
 	// Register HTTP routes on the Gin engine.
 
 	// Health endpoint: typically used by Kubernetes or other systems to
 	// check if the service is alive and ready to receive traffic.
-	registerHealthzRoute(r)
+	handlers.RegisterHealthzRoute(r)
 
 	// Service info endpoint: exposes basic metadata about the service,
 	// such as name, version, and current timestamp.
-	registerServiceInfoRoute(r)
+	handlers.RegisterServiceInfoRoute(r)
 
 	// Construct the HTTP server using the Gin engine as the handler.
 	// ReadHeaderTimeout limits the time allowed to read request headers,
