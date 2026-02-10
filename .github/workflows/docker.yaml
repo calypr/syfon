@@ -21,18 +21,11 @@ jobs:
       matrix:
         include:
           - platform: linux/amd64
-            runner: ubuntu-22.04
+            runner: ubuntu-24.04
           - platform: linux/arm64
-            runner: ubuntu-22.04-arm
-    runs-on: ${{ matrix.runner || 'ubuntu-22.04' }}
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     steps:
-      # Checkout with submodules enabled
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          submodules: true
-          fetch-depth: 0
-
       - name: Prepare
         run: |
           platform=${{ matrix.platform }}

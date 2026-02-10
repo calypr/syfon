@@ -16,9 +16,6 @@ RUN go mod download
 # Copy source code
 COPY . .
 
-# Initialize git submodules
-RUN git submodule update --init --recursive
-
 # Build the application
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o drs-server ./cmd/server
 
