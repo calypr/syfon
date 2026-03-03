@@ -119,3 +119,59 @@ func TestHandleFenceMultipartInit(t *testing.T) {
 		t.Errorf("expected mock-upload-id, got %v", resp.UploadID)
 	}
 }
+
+func TestHandleFenceMultipartUpload(t *testing.T) {
+	mockDB := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}
+	mockUM := &testutils.MockUrlManager{}
+
+	reqBody := fenceMultipartUploadRequest{
+		Key:        "hash-key",
+		UploadID:   "mock-upload-id",
+		PartNumber: 1,
+	}
+	body, _ := json.Marshal(reqBody)
+	req, err := http.NewRequest("POST", "/user/data/multipart/upload", bytes.NewBuffer(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rr := httptest.NewRecorder()
+	handleFenceMultipartUpload(rr, req, mockDB, mockUM)
+
+	if status := rr.Code; status != http.StatusOK {
+		t.Fatalf("handler returned wrong status code: got %v want %v", status, http.StatusOK)
+	}
+
+	var resp fenceMultipartUploadResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.PresignedURL == "" {
+		t.Fatal("expected presigned_url to be set")
+	}
+}
+
+func TestHandleFenceMultipartComplete(t *testing.T) {
+	mockDB := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}
+	mockUM := &testutils.MockUrlManager{}
+
+	reqBody := fenceMultipartCompleteRequest{
+		Key:      "hash-key",
+		UploadID: "mock-upload-id",
+		Parts: []fenceMultipartPart{
+			{PartNumber: 1, ETag: "etag1"},
+		},
+	}
+	body, _ := json.Marshal(reqBody)
+	req, err := http.NewRequest("POST", "/user/data/multipart/complete", bytes.NewBuffer(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rr := httptest.NewRecorder()
+	handleFenceMultipartComplete(rr, req, mockDB, mockUM)
+
+	if status := rr.Code; status != http.StatusOK {
+		t.Fatalf("handler returned wrong status code: got %v want %v", status, http.StatusOK)
+	}
+}

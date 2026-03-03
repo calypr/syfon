@@ -17,7 +17,7 @@ func TestSqliteDB_CRUD(t *testing.T) {
 	}
 
 	obj := &drs.DrsObject{
-		Id:          "test-obj-1",
+		Id:          "abc",
 		Size:        123,
 		CreatedTime: time.Now(),
 		UpdatedTime: time.Now(),
@@ -37,12 +37,12 @@ func TestSqliteDB_CRUD(t *testing.T) {
 	}
 
 	// Create
-	if err := db.CreateObject(ctx, obj); err != nil {
+	if err := db.CreateObject(ctx, obj, []string{}); err != nil {
 		t.Fatalf("CreateObject failed: %v", err)
 	}
 
 	// Get
-	fetched, err := db.GetObject(ctx, "test-obj-1")
+	fetched, err := db.GetObject(ctx, "abc")
 	if err != nil {
 		t.Fatalf("GetObject failed: %v", err)
 	}
@@ -58,17 +58,17 @@ func TestSqliteDB_CRUD(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetObjectsByChecksum failed: %v", err)
 	}
-	if len(objs) != 1 || objs[0].Id != "test-obj-1" {
-		t.Errorf("expected 1 object with id test-obj-1, got %v", objs)
+	if len(objs) != 1 || objs[0].Id != "abc" {
+		t.Errorf("expected 1 object with id abc, got %v", objs)
 	}
 
 	// Delete
-	if err := db.DeleteObject(ctx, "test-obj-1"); err != nil {
+	if err := db.DeleteObject(ctx, "abc"); err != nil {
 		t.Fatalf("DeleteObject failed: %v", err)
 	}
 
 	// Verify Deleted
-	_, err = db.GetObject(ctx, "test-obj-1")
+	_, err = db.GetObject(ctx, "abc")
 	if err == nil {
 		t.Fatal("expected error getting deleted object, got nil")
 	}
@@ -118,9 +118,9 @@ func TestSqliteDB_BulkOperations(t *testing.T) {
 	ctx := context.Background()
 	db, _ := NewSqliteDB(":memory:")
 
-	objects := []drs.DrsObject{
-		{Id: "bulk-1", Size: 10},
-		{Id: "bulk-2", Size: 20},
+	objects := []core.DrsObjectWithAuthz{
+		{DrsObject: drs.DrsObject{Id: "bulk-1", Size: 10}},
+		{DrsObject: drs.DrsObject{Id: "bulk-2", Size: 20}},
 	}
 
 	if err := db.RegisterObjects(ctx, objects); err != nil {
@@ -142,7 +142,9 @@ func TestSqliteDB_UpdateAccessMethods(t *testing.T) {
 	db, _ := NewSqliteDB(":memory:")
 
 	obj := &drs.DrsObject{Id: "update-me"}
-	db.CreateObject(ctx, obj)
+	if err := db.CreateObject(ctx, obj, []string{}); err != nil {
+		t.Fatalf("CreateObject failed: %v", err)
+	}
 
 	newMethods := []drs.AccessMethod{
 		{Type: "s3", AccessUrl: drs.AccessMethodAccessUrl{Url: "s3://new/path"}},
@@ -152,7 +154,10 @@ func TestSqliteDB_UpdateAccessMethods(t *testing.T) {
 		t.Fatalf("UpdateObjectAccessMethods failed: %v", err)
 	}
 
-	fetched, _ := db.GetObject(ctx, "update-me")
+	fetched, err := db.GetObject(ctx, "update-me")
+	if err != nil {
+		t.Fatalf("GetObject failed: %v", err)
+	}
 	if len(fetched.AccessMethods) != 1 || fetched.AccessMethods[0].AccessUrl.Url != "s3://new/path" {
 		t.Errorf("expected updated access method, got %v", fetched.AccessMethods)
 	}

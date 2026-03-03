@@ -2,15 +2,17 @@ package fence
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/calypr/drs-server/apigen/drs"
 	"github.com/calypr/drs-server/db/core"
 	"github.com/calypr/drs-server/urlmanager"
-	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 )
 
@@ -40,6 +42,8 @@ type fenceMultipartInitResponse struct {
 }
 
 type fenceMultipartUploadRequest struct {
+	Key        string `json:"key"`
+	Bucket     string `json:"bucket,omitempty"`
 	UploadID   string `json:"uploadId"`
 	PartNumber int32  `json:"partNumber"`
 }
@@ -49,52 +53,95 @@ type fenceMultipartUploadResponse struct {
 }
 
 type fenceMultipartPart struct {
-	PartNumber int32  `json:"partNumber"`
-	ETag       string `json:"etag"`
+	PartNumber int32  `json:"PartNumber"`
+	ETag       string `json:"ETag"`
 }
 
 type fenceMultipartCompleteRequest struct {
+	Key      string               `json:"key"`
+	Bucket   string               `json:"bucket,omitempty"`
 	UploadID string               `json:"uploadId"`
 	Parts    []fenceMultipartPart `json:"parts"`
 }
 
-type fenceBucketInfo struct {
-	Name   string `json:"name"`
-	Region string `json:"region"`
+type fenceBucketMetadata struct {
+	EndpointURL string   `json:"endpoint_url"`
+	Region      string   `json:"region"`
+	Programs    []string `json:"programs,omitempty"`
 }
 
+type fenceBucketsResponse struct {
+	S3Buckets map[string]fenceBucketMetadata `json:"S3_BUCKETS"`
+}
+
+type multipartSession struct {
+	Bucket string
+	Key    string
+}
+
+var multipartUploadSessions sync.Map // uploadID -> multipartSession
+
 func RegisterFenceRoutes(router *mux.Router, database core.DatabaseInterface, uM urlmanager.UrlManager) {
-	// Download
-	router.HandleFunc("/data/download/{file_id}", func(w http.ResponseWriter, r *http.Request) {
+	for _, p := range []string{"/data", "/user/data"} {
+		registerFenceDataRoutes(router, p, database, uM)
+	}
+	// Legacy multipart paths retained for backwards compatibility.
+	registerFenceMultipartRoutes(router, "", database, uM)
+}
+
+func registerFenceDataRoutes(router *mux.Router, base string, database core.DatabaseInterface, uM urlmanager.UrlManager) {
+	router.Handle(base+"/download/{file_id}", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handleFenceDownload(w, r, database, uM)
-	}).Methods(http.MethodGet)
+	}), "FenceDownload")).Methods(http.MethodGet)
 
-	// Upload
-	router.HandleFunc("/data/upload", func(w http.ResponseWriter, r *http.Request) {
+	router.Handle(base+"/upload", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handleFenceUploadBlank(w, r, database, uM)
-	}).Methods(http.MethodPost)
+	}), "FenceUploadBlank")).Methods(http.MethodPost)
 
-	router.HandleFunc("/data/upload/{file_id}", func(w http.ResponseWriter, r *http.Request) {
+	router.Handle(base+"/upload/{file_id}", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handleFenceUploadURL(w, r, database, uM)
-	}).Methods(http.MethodGet)
+	}), "FenceUploadURL")).Methods(http.MethodGet)
 
-	// Multipart
-	router.HandleFunc("/multipart/init", func(w http.ResponseWriter, r *http.Request) {
+	router.Handle(base+"/multipart/init", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handleFenceMultipartInit(w, r, database, uM)
-	}).Methods(http.MethodPost)
+	}), "FenceMultipartInit")).Methods(http.MethodPost)
 
-	router.HandleFunc("/multipart/upload", func(w http.ResponseWriter, r *http.Request) {
+	router.Handle(base+"/multipart/upload", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handleFenceMultipartUpload(w, r, database, uM)
-	}).Methods(http.MethodPost)
+	}), "FenceMultipartUpload")).Methods(http.MethodPost)
 
-	router.HandleFunc("/multipart/complete", func(w http.ResponseWriter, r *http.Request) {
+	router.Handle(base+"/multipart/complete", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handleFenceMultipartComplete(w, r, database, uM)
-	}).Methods(http.MethodPost)
+	}), "FenceMultipartComplete")).Methods(http.MethodPost)
 
-	// Buckets
-	router.HandleFunc("/data/buckets", func(w http.ResponseWriter, r *http.Request) {
+	router.Handle(base+"/buckets", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handleFenceBuckets(w, r, database)
-	}).Methods(http.MethodGet)
+	}), "FenceBuckets")).Methods(http.MethodGet)
+}
+
+func registerFenceMultipartRoutes(router *mux.Router, base string, database core.DatabaseInterface, uM urlmanager.UrlManager) {
+	router.Handle(base+"/multipart/init", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handleFenceMultipartInit(w, r, database, uM)
+	}), "FenceMultipartInitLegacy")).Methods(http.MethodPost)
+
+	router.Handle(base+"/multipart/upload", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handleFenceMultipartUpload(w, r, database, uM)
+	}), "FenceMultipartUploadLegacy")).Methods(http.MethodPost)
+
+	router.Handle(base+"/multipart/complete", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handleFenceMultipartComplete(w, r, database, uM)
+	}), "FenceMultipartCompleteLegacy")).Methods(http.MethodPost)
+}
+
+func resolveBucket(ctx *http.Request, database core.DatabaseInterface, requested string) (string, error) {
+	if requested != "" {
+		return requested, nil
+	}
+	creds, err := database.ListS3Credentials(ctx.Context())
+	if err != nil || len(creds) == 0 {
+		return "", fmt.Errorf("no bucket configured")
+	}
+	return creds[0].Bucket, nil
 }
 
 func handleFenceDownload(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface, uM urlmanager.UrlManager) {
@@ -152,7 +199,8 @@ func handleFenceUploadBlank(w http.ResponseWriter, r *http.Request, database cor
 
 	guid := req.GUID
 	if guid == "" {
-		guid = uuid.New().String()
+		http.Error(w, "guid is required", http.StatusBadRequest)
+		return
 	}
 
 	// Check if exists
@@ -171,7 +219,7 @@ func handleFenceUploadBlank(w http.ResponseWriter, r *http.Request, database cor
 		// If authz provided
 		_ = req.Authz // Reserved for future use
 
-		if err := database.CreateObject(r.Context(), obj); err != nil {
+		if err := database.CreateObject(r.Context(), obj, req.Authz); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -251,17 +299,14 @@ func handleFenceMultipartInit(w http.ResponseWriter, r *http.Request, database c
 
 	guid := req.GUID
 	if guid == "" {
-		guid = uuid.New().String()
-	}
-
-	bucket := req.Bucket
-	if bucket == "" {
-		creds, _ := database.ListS3Credentials(r.Context())
-		if len(creds) > 0 {
-			bucket = creds[0].Bucket
+		if req.FileName == "" {
+			http.Error(w, "guid or file_name is required", http.StatusBadRequest)
+			return
 		}
+		guid = req.FileName
 	}
 
+	bucket, err := resolveBucket(r, database, req.Bucket)
 	if bucket == "" {
 		http.Error(w, "No bucket configured for upload", http.StatusInternalServerError)
 		return
@@ -277,6 +322,7 @@ func handleFenceMultipartInit(w http.ResponseWriter, r *http.Request, database c
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	multipartUploadSessions.Store(uploadID, multipartSession{Bucket: bucket, Key: fileName})
 
 	// Create blank record if not exists
 	_, err = database.GetObject(r.Context(), guid)
@@ -289,7 +335,7 @@ func handleFenceMultipartInit(w http.ResponseWriter, r *http.Request, database c
 			Version:     "1",
 			Name:        fileName,
 		}
-		database.CreateObject(r.Context(), obj)
+		database.CreateObject(r.Context(), obj, []string{})
 	}
 
 	w.WriteHeader(http.StatusCreated)
@@ -302,41 +348,55 @@ func handleFenceMultipartInit(w http.ResponseWriter, r *http.Request, database c
 
 func handleFenceMultipartUpload(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface, uM urlmanager.UrlManager) {
 	var req fenceMultipartUploadRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
 		http.Error(w, "Invalid request", http.StatusBadRequest)
 		return
 	}
+	q := r.URL.Query()
+	if req.Key == "" {
+		req.Key = q.Get("key")
+	}
+	if req.UploadID == "" {
+		req.UploadID = q.Get("uploadId")
+		if req.UploadID == "" {
+			req.UploadID = q.Get("upload_id")
+		}
+	}
+	if req.PartNumber <= 0 {
+		if raw := q.Get("partNumber"); raw != "" {
+			if v, err := strconv.Atoi(raw); err == nil {
+				req.PartNumber = int32(v)
+			}
+		}
+	}
+	if req.Bucket == "" {
+		req.Bucket = q.Get("bucket")
+	}
+	if req.UploadID != "" && (req.Key == "" || req.Bucket == "") {
+		if raw, ok := multipartUploadSessions.Load(req.UploadID); ok {
+			if session, ok := raw.(multipartSession); ok {
+				if req.Key == "" {
+					req.Key = session.Key
+				}
+				if req.Bucket == "" {
+					req.Bucket = session.Bucket
+				}
+			}
+		}
+	}
 
-	// We need to know which bucket/key this upload ID belongs to.
-	// Fence usually gets file_id in some way but this POST has no file_id in path.
-	// Indexd records might store it, but for now let's assume one default bucket
-	// or we need a way to look up the uploadId.
-	// Actually, Fence doesn't pass guid here. This is a bit problematic for a stateless server.
-	// However, we can use the GUID from the query? No.
-	// I'll assume standard bucket/key for now as a POC if not provided.
-	// Wait, Fence Swagger says it takes uploadId and partNumber.
-	// I'll use a hardcoded bucket if not found? No.
-	// Better: I'll require a query param or something?
-	// Actually, I'll look for first bucket.
-	creds, _ := database.ListS3Credentials(r.Context())
-	if len(creds) == 0 {
+	if req.Key == "" || req.UploadID == "" || req.PartNumber <= 0 {
+		http.Error(w, "key, uploadId, and positive partNumber are required", http.StatusBadRequest)
+		return
+	}
+
+	bucket, err := resolveBucket(r, database, req.Bucket)
+	if err != nil || bucket == "" {
 		http.Error(w, "No bucket configured", http.StatusInternalServerError)
 		return
 	}
-	bucket := creds[0].Bucket
 
-	// How to get the key? Usually it's the GUID.
-	// I'll try to find an object that might be associated?
-	// This is where a real Fence stores state.
-	// For now, I'll use a placeholder and hope the user provides guid in query.
-	key := r.URL.Query().Get("key")
-	if key == "" {
-		// Fallback: try to guess? No.
-		http.Error(w, "Query parameter 'key' (GUID) required for multipart upload part signing in this implementation", http.StatusBadRequest)
-		return
-	}
-
-	signedURL, err := uM.SignMultipartPart(r.Context(), bucket, key, req.UploadID, req.PartNumber)
+	signedURL, err := uM.SignMultipartPart(r.Context(), bucket, req.Key, req.UploadID, req.PartNumber)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -348,23 +408,46 @@ func handleFenceMultipartUpload(w http.ResponseWriter, r *http.Request, database
 
 func handleFenceMultipartComplete(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface, uM urlmanager.UrlManager) {
 	var req fenceMultipartCompleteRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
 		http.Error(w, "Invalid request", http.StatusBadRequest)
 		return
 	}
+	q := r.URL.Query()
+	if req.Key == "" {
+		req.Key = q.Get("key")
+	}
+	if req.UploadID == "" {
+		req.UploadID = q.Get("uploadId")
+		if req.UploadID == "" {
+			req.UploadID = q.Get("upload_id")
+		}
+	}
+	if req.Bucket == "" {
+		req.Bucket = q.Get("bucket")
+	}
+	if req.UploadID != "" && (req.Key == "" || req.Bucket == "") {
+		if raw, ok := multipartUploadSessions.Load(req.UploadID); ok {
+			if session, ok := raw.(multipartSession); ok {
+				if req.Key == "" {
+					req.Key = session.Key
+				}
+				if req.Bucket == "" {
+					req.Bucket = session.Bucket
+				}
+			}
+		}
+	}
 
-	key := r.URL.Query().Get("key")
-	if key == "" {
-		http.Error(w, "Query parameter 'key' (GUID) required", http.StatusBadRequest)
+	if req.Key == "" || req.UploadID == "" {
+		http.Error(w, "key and uploadId are required", http.StatusBadRequest)
 		return
 	}
 
-	creds, _ := database.ListS3Credentials(r.Context())
-	if len(creds) == 0 {
+	bucket, err := resolveBucket(r, database, req.Bucket)
+	if err != nil || bucket == "" {
 		http.Error(w, "No bucket configured", http.StatusInternalServerError)
 		return
 	}
-	bucket := creds[0].Bucket
 
 	var parts []urlmanager.MultipartPart
 	for _, p := range req.Parts {
@@ -374,11 +457,12 @@ func handleFenceMultipartComplete(w http.ResponseWriter, r *http.Request, databa
 		})
 	}
 
-	err := uM.CompleteMultipartUpload(r.Context(), bucket, key, req.UploadID, parts)
+	err = uM.CompleteMultipartUpload(r.Context(), bucket, req.Key, req.UploadID, parts)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	multipartUploadSessions.Delete(req.UploadID)
 
 	w.WriteHeader(http.StatusOK)
 }
@@ -390,14 +474,15 @@ func handleFenceBuckets(w http.ResponseWriter, r *http.Request, database core.Da
 		return
 	}
 
-	var infos []fenceBucketInfo
+	resp := fenceBucketsResponse{
+		S3Buckets: make(map[string]fenceBucketMetadata, len(creds)),
+	}
 	for _, c := range creds {
-		infos = append(infos, fenceBucketInfo{
-			Name:   c.Bucket,
+		resp.S3Buckets[c.Bucket] = fenceBucketMetadata{
 			Region: c.Region,
-		})
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(infos)
+	json.NewEncoder(w).Encode(resp)
 }

@@ -11,13 +11,14 @@ type DatabaseInterface interface {
 	GetServiceInfo(ctx context.Context) (*drs.Service, error)
 	GetObject(ctx context.Context, id string) (*drs.DrsObject, error)
 	DeleteObject(ctx context.Context, id string) error
-	CreateObject(ctx context.Context, obj *drs.DrsObject) error
+	CreateObject(ctx context.Context, obj *drs.DrsObject, authz []string) error
 	GetObjectsByChecksum(ctx context.Context, checksum string) ([]drs.DrsObject, error)
+	GetObjectsByChecksums(ctx context.Context, checksums []string) (map[string][]drs.DrsObject, error)
 
 	// New Bulk Operations
 	GetBulkObjects(ctx context.Context, ids []string) ([]drs.DrsObject, error)
 	BulkDeleteObjects(ctx context.Context, ids []string) error
-	RegisterObjects(ctx context.Context, objects []drs.DrsObject) error // Bulk Create
+	RegisterObjects(ctx context.Context, objects []DrsObjectWithAuthz) error // Bulk Create
 
 	// Access Methods
 	UpdateObjectAccessMethods(ctx context.Context, objectID string, accessMethods []drs.AccessMethod) error

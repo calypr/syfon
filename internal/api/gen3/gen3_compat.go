@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/calypr/drs-server/apigen/drs"
@@ -30,10 +31,15 @@ type IndexdRecord struct {
 	Uploader    string                 `json:"uploader,omitempty"`
 }
 
+// ListRecordsResponse represents the wrapper for listing records in Indexd.
+type ListRecordsResponse struct {
+	Records []IndexdRecord `json:"records"`
+}
+
 // RegisterGen3Routes registers the Indexd-compatible routes on the router.
 func RegisterGen3Routes(router *mux.Router, database core.DatabaseInterface) {
 	// Indexd Endpoints
-	router.HandleFunc("/index/index", func(w http.ResponseWriter, r *http.Request) {
+	router.Handle("/index/index", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
 			handleIndexdList(w, r, database)
@@ -42,9 +48,11 @@ func RegisterGen3Routes(router *mux.Router, database core.DatabaseInterface) {
 		default:
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}
-	}).Methods(http.MethodGet, http.MethodPost)
+	}), "IndexdIndex")).Methods(http.MethodGet, http.MethodPost)
 
-	router.HandleFunc("/index/index/{id}", func(w http.ResponseWriter, r *http.Request) {
+	router.Handle("/index/index/bulk/hashes", drs.Logger(handleIndexdBulkHashes(database), "IndexdBulkHashes")).Methods(http.MethodPost)
+
+	router.Handle("/index/index/{id}", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
 			handleIndexdGet(w, r, database)
@@ -55,7 +63,48 @@ func RegisterGen3Routes(router *mux.Router, database core.DatabaseInterface) {
 		default:
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}
-	}).Methods(http.MethodGet, http.MethodPut, http.MethodDelete)
+	}), "IndexdDetail")).Methods(http.MethodGet, http.MethodPut, http.MethodDelete)
+}
+
+// handleIndexdBulkHashes allows looking up multiple records by their hashes.
+func handleIndexdBulkHashes(database core.DatabaseInterface) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Hashes []string `json:"hashes"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid request body", http.StatusBadRequest)
+			return
+		}
+
+		// Normalize hashes
+		targetHashes := make([]string, len(req.Hashes))
+		for i, h := range req.Hashes {
+			if parts := strings.SplitN(h, ":", 2); len(parts) == 2 {
+				targetHashes[i] = parts[1]
+			} else {
+				targetHashes[i] = h
+			}
+		}
+
+		objsMap, err := database.GetObjectsByChecksums(r.Context(), targetHashes)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Error looking up hashes: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		// Convert back to IndexdRecord results
+		// Gen3 Indexd usually returns a mapping or a list. Let's return a list of records found.
+		results := make([]IndexdRecord, 0)
+		for _, objs := range objsMap {
+			for _, o := range objs {
+				results = append(results, drsToIndexd(&o))
+			}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(ListRecordsResponse{Records: results})
+	}
 }
 
 // Helper to convert internal DrsObject to Gen3 IndexdRecord
@@ -64,30 +113,16 @@ func drsToIndexd(obj *drs.DrsObject) IndexdRecord {
 	for _, c := range obj.Checksums {
 		hashes[c.Type] = c.Checksum
 	}
+	if len(hashes) == 0 && obj.Id != "" {
+		hashes["sha256"] = obj.Id
+	}
 
 	var urls []string
-	var authz []string
+	authz := append([]string(nil), obj.Authorizations...)
 	if len(obj.AccessMethods) > 0 {
 		for _, am := range obj.AccessMethods {
 			if am.AccessUrl.Url != "" {
 				urls = append(urls, am.AccessUrl.Url)
-			}
-			// Workaround: Store authz in BearerAuthIssuers[0]
-			if len(am.Authorizations.BearerAuthIssuers) > 0 {
-				val := am.Authorizations.BearerAuthIssuers[0]
-				if val != "" {
-					// Avoid duplicates
-					found := false
-					for _, a := range authz {
-						if a == val {
-							found = true
-							break
-						}
-					}
-					if !found {
-						authz = append(authz, val)
-					}
-				}
 			}
 		}
 	}
@@ -132,12 +167,13 @@ func handleIndexdCreate(w http.ResponseWriter, r *http.Request, database core.Da
 	// Map to DrsObject
 	now := time.Now()
 	obj := drs.DrsObject{
-		Id:          req.DID, // User provided ID (often UUID based on hash)
-		SelfUri:     "drs://generated/" + req.DID,
-		Size:        req.Size,
-		CreatedTime: now,
-		UpdatedTime: now,
-		Name:        req.FileName,
+		Id:             req.DID, // User provided ID (often UUID based on hash)
+		SelfUri:        "drs://generated/" + req.DID,
+		Size:           req.Size,
+		CreatedTime:    now,
+		UpdatedTime:    now,
+		Name:           req.FileName,
+		Authorizations: append([]string(nil), req.Authz...),
 	}
 
 	// Checksums
@@ -153,33 +189,10 @@ func handleIndexdCreate(w http.ResponseWriter, r *http.Request, database core.Da
 			AccessUrl: drs.AccessMethodAccessUrl{Url: u},
 			Region:    "us-east-1", // Default
 		}
-
-		// Map Authz to AccessMethod Authorizations as this is how we store project info
-		// git-drs passes authz list. We attach it to the access method so it persists.
-		if len(req.Authz) > 0 {
-			// Store in BearerAuthIssuers as workaround
-			am.Authorizations = drs.AccessMethodAuthorizations{
-				BearerAuthIssuers: []string{req.Authz[0]},
-			}
-		}
 		obj.AccessMethods = append(obj.AccessMethods, am)
 	}
 
-	if len(req.URLs) == 0 && len(req.Authz) > 0 {
-		// Create a placeholder AM to store Authz?
-		// git-drs often registers metadata-only first.
-		// We'll create a dummy "https" access method with no URL to carry the authz info.
-		am := drs.AccessMethod{
-			Type: "https",
-			// No URL
-			Authorizations: drs.AccessMethodAuthorizations{
-				BearerAuthIssuers: []string{req.Authz[0]},
-			},
-		}
-		obj.AccessMethods = append(obj.AccessMethods, am)
-	}
-
-	if err := database.CreateObject(r.Context(), &obj); err != nil {
+	if err := database.CreateObject(r.Context(), &obj, req.Authz); err != nil {
 		http.Error(w, fmt.Sprintf("Failed to create object: %v", err), http.StatusInternalServerError)
 		return
 	}
@@ -202,8 +215,7 @@ func handleIndexdUpdate(w http.ResponseWriter, r *http.Request, database core.Da
 	}
 
 	// Fetch existing first to check existence
-	obj, err := database.GetObject(r.Context(), id)
-	if err != nil {
+	if _, err := database.GetObject(r.Context(), id); err != nil {
 		http.Error(w, "Object not found", http.StatusNotFound)
 		return
 	}
@@ -219,14 +231,6 @@ func handleIndexdUpdate(w http.ResponseWriter, r *http.Request, database core.Da
 			Type:      "s3",
 			AccessUrl: drs.AccessMethodAccessUrl{Url: u},
 			Region:    "us-east-1",
-		}
-		if len(req.Authz) > 0 {
-			am.Authorizations = drs.AccessMethodAuthorizations{
-				BearerAuthIssuers: []string{req.Authz[0]},
-			}
-		} else if len(obj.AccessMethods) > 0 && len(obj.AccessMethods[0].Authorizations.BearerAuthIssuers) > 0 {
-			// Preserve existing authz
-			am.Authorizations = obj.AccessMethods[0].Authorizations
 		}
 		newAccessMethods = append(newAccessMethods, am)
 	}
@@ -270,9 +274,10 @@ func handleIndexdList(w http.ResponseWriter, r *http.Request, database core.Data
 	// hash_type := r.URL.Query().Get("hash_type") // We can assume sha256 or iterate, current db method only takes value (naive)
 
 	if hash != "" {
-		// This is a lookup by hash
-		// Note: The DB interface `GetObjectsByChecksum` expects just the checksum value assuming uniqueness or similar?
-		// Wait, different checksum types might collide? Ideally we should filter by type too, but for now we trust the DB to find matching checksums.
+		// Parse "TYPE:VALUE" if present (e.g. from IndexdClient)
+		if parts := strings.SplitN(hash, ":", 2); len(parts) == 2 {
+			hash = parts[1]
+		}
 
 		objs, err := database.GetObjectsByChecksum(r.Context(), hash)
 		if err != nil {
@@ -285,8 +290,12 @@ func handleIndexdList(w http.ResponseWriter, r *http.Request, database core.Data
 			records = append(records, drsToIndexd(&o))
 		}
 
+		response := ListRecordsResponse{
+			Records: records,
+		}
+
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(records)
+		json.NewEncoder(w).Encode(response)
 		return
 	}
 

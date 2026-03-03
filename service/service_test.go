@@ -92,7 +92,13 @@ func TestRegisterObjects(t *testing.T) {
 
 	req := drs.RegisterObjectsRequest{
 		Candidates: []drs.DrsObjectCandidate{
-			{Name: "new-obj", Size: 100},
+			{
+				Name: "new-obj",
+				Size: 100,
+				Checksums: []drs.Checksum{
+					{Type: "sha256", Checksum: "abc123"},
+				},
+			},
 		},
 	}
 	resp, err := service.RegisterObjects(context.Background(), req)

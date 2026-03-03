@@ -23,7 +23,7 @@ import (
 
 // ObjectsAPIController binds http requests to an api service and writes the service results to the http response
 type ObjectsAPIController struct {
-	service ObjectsAPIServicer
+	service      ObjectsAPIServicer
 	errorHandler ErrorHandler
 }
 
@@ -105,13 +105,13 @@ func (c *ObjectsAPIController) Routes() Routes {
 		"GetAccessURL": Route{
 			"GetAccessURL",
 			strings.ToUpper("Get"),
-			"/ga4gh/drs/v1/objects/{object_id}/access/{access_id}",
+			"/ga4gh/drs/v1/objects/{object_id}/access/{access_id:.+}",
 			c.GetAccessURL,
 		},
 		"PostAccessURL": Route{
 			"PostAccessURL",
 			strings.ToUpper("Post"),
-			"/ga4gh/drs/v1/objects/{object_id}/access/{access_id}",
+			"/ga4gh/drs/v1/objects/{object_id}/access/{access_id:.+}",
 			c.PostAccessURL,
 		},
 		"GetBulkAccessURL": Route{
@@ -145,6 +145,30 @@ func (c *ObjectsAPIController) Routes() Routes {
 func (c *ObjectsAPIController) OrderedRoutes() []Route {
 	return []Route{
 		Route{
+			"RegisterObjects",
+			strings.ToUpper("Post"),
+			"/ga4gh/drs/v1/objects/register",
+			c.RegisterObjects,
+		},
+		Route{
+			"GetBulkObjects",
+			strings.ToUpper("Post"),
+			"/ga4gh/drs/v1/objects",
+			c.GetBulkObjects,
+		},
+		Route{
+			"OptionsBulkObject",
+			strings.ToUpper("Options"),
+			"/ga4gh/drs/v1/objects",
+			c.OptionsBulkObject,
+		},
+		Route{
+			"GetBulkAccessURL",
+			strings.ToUpper("Post"),
+			"/ga4gh/drs/v1/objects/access",
+			c.GetBulkAccessURL,
+		},
+		Route{
 			"GetObject",
 			strings.ToUpper("Get"),
 			"/ga4gh/drs/v1/objects/{object_id}",
@@ -175,40 +199,16 @@ func (c *ObjectsAPIController) OrderedRoutes() []Route {
 			c.BulkDeleteObjects,
 		},
 		Route{
-			"GetBulkObjects",
-			strings.ToUpper("Post"),
-			"/ga4gh/drs/v1/objects",
-			c.GetBulkObjects,
-		},
-		Route{
-			"OptionsBulkObject",
-			strings.ToUpper("Options"),
-			"/ga4gh/drs/v1/objects",
-			c.OptionsBulkObject,
-		},
-		Route{
-			"RegisterObjects",
-			strings.ToUpper("Post"),
-			"/ga4gh/drs/v1/objects/register",
-			c.RegisterObjects,
-		},
-		Route{
 			"GetAccessURL",
 			strings.ToUpper("Get"),
-			"/ga4gh/drs/v1/objects/{object_id}/access/{access_id}",
+			"/ga4gh/drs/v1/objects/{object_id}/access/{access_id:.+}",
 			c.GetAccessURL,
 		},
 		Route{
 			"PostAccessURL",
 			strings.ToUpper("Post"),
-			"/ga4gh/drs/v1/objects/{object_id}/access/{access_id}",
+			"/ga4gh/drs/v1/objects/{object_id}/access/{access_id:.+}",
 			c.PostAccessURL,
-		},
-		Route{
-			"GetBulkAccessURL",
-			strings.ToUpper("Post"),
-			"/ga4gh/drs/v1/objects/access",
-			c.GetBulkAccessURL,
 		},
 		Route{
 			"UpdateObjectAccessMethods",
@@ -230,8 +230,6 @@ func (c *ObjectsAPIController) OrderedRoutes() []Route {
 		},
 	}
 }
-
-
 
 // GetObject - Get info about a DrsObject.
 func (c *ObjectsAPIController) GetObject(w http.ResponseWriter, r *http.Request) {
@@ -458,7 +456,7 @@ func (c *ObjectsAPIController) OptionsBulkObject(w http.ResponseWriter, r *http.
 func (c *ObjectsAPIController) RegisterObjects(w http.ResponseWriter, r *http.Request) {
 	var bodyParam RegisterObjectsRequest
 	d := json.NewDecoder(r.Body)
-	d.DisallowUnknownFields()
+	// d.DisallowUnknownFields()
 	if err := d.Decode(&bodyParam); err != nil {
 		c.errorHandler(w, r, &ParsingError{Err: err}, nil)
 		return

@@ -3,6 +3,7 @@ package server
 import (
 	"fmt"
 	"log"
+	"log/slog"
 	"net/http"
 
 	"github.com/calypr/drs-server/apigen/drs"
@@ -13,6 +14,7 @@ import (
 	"github.com/calypr/drs-server/internal/api/admin"
 	"github.com/calypr/drs-server/internal/api/fence"
 	"github.com/calypr/drs-server/internal/api/gen3"
+	"github.com/calypr/drs-server/internal/api/middleware"
 	"github.com/calypr/drs-server/service"
 	"github.com/calypr/drs-server/urlmanager"
 	"github.com/spf13/cobra"
@@ -89,6 +91,16 @@ var Cmd = &cobra.Command{
 
 		// Init Router
 		router := drs.NewRouter(objectsController, serviceInfoController)
+
+		// Init AuthZ Middleware
+		// We use a standard slog.Logger for data-client compatibility
+		slogLogger := slog.New(slog.NewTextHandler(log.Writer(), &slog.HandlerOptions{Level: slog.LevelDebug}))
+		slog.SetDefault(slogLogger)
+		authzMiddleware := middleware.NewAuthzMiddleware(slogLogger)
+
+		// Apply Middlewares
+		router.Use(authzMiddleware.Middleware)
+
 		router.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte("OK"))

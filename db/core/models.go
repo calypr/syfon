@@ -2,6 +2,8 @@ package core
 
 import (
 	"time"
+
+	"github.com/calypr/drs-server/apigen/drs"
 )
 
 // DrsObjectRecord represents the internal database record for a DRS Object
@@ -14,6 +16,13 @@ type DrsObjectRecord struct {
 	Version     string    `db:"version"`
 	Name        string    `db:"name"`
 	MimeType    string    `db:"mime_type"`
+}
+
+// DrsObjectWithAuthz is a wrapper around the generated DrsObject that includes Authz metadata.
+// Used for registration and bulk operations.
+type DrsObjectWithAuthz struct {
+	drs.DrsObject
+	Authz []string
 }
 
 // DrsObjectAccessMethod represents the internal database record for a DRS Access Method (URL)

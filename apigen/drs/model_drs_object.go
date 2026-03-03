@@ -11,12 +11,9 @@
 
 package drs
 
-
 import (
 	"time"
 )
-
-
 
 type DrsObject struct {
 
@@ -44,8 +41,11 @@ type DrsObject struct {
 	// A string providing the mime-type of the `DrsObject`.
 	MimeType string `json:"mime_type,omitempty"`
 
-	// The checksum of the `DrsObject`. At least one checksum must be provided. For blobs, the checksum is computed over the bytes in the blob. For bundles, the checksum is computed over a sorted concatenation of the checksums of its top-level contained objects (not recursive, names not included). The list of checksums is sorted alphabetically (hex-code) before concatenation and a further checksum is performed on the concatenated checksum value. For example, if a bundle contains blobs with the following checksums: md5(blob1) = 72794b6d md5(blob2) = 5e089d29 Then the checksum of the bundle is: md5( concat( sort( md5(blob1), md5(blob2) ) ) ) = md5( concat( sort( 72794b6d, 5e089d29 ) ) ) = md5( concat( 5e089d29, 72794b6d ) ) = md5( 5e089d2972794b6d ) = f7a29a04
-	Checksums []Checksum `json:"checksums"`
+	// Internal checksum metadata. Canonical checksum identity is represented by `id`.
+	Checksums []Checksum `json:"-"`
+
+	// Object-level authorization resources.
+	Authorizations []string `json:"authorizations,omitempty"`
 
 	// The list of access methods that can be used to fetch the `DrsObject`. Required for single blobs; optional for bundles.
 	AccessMethods []AccessMethod `json:"access_methods,omitempty"`
@@ -63,11 +63,10 @@ type DrsObject struct {
 // AssertDrsObjectRequired checks if the required fields are not zero-ed
 func AssertDrsObjectRequired(obj DrsObject) error {
 	elements := map[string]interface{}{
-		"id": obj.Id,
-		"self_uri": obj.SelfUri,
-		"size": obj.Size,
+		"id":           obj.Id,
+		"self_uri":     obj.SelfUri,
+		"size":         obj.Size,
 		"created_time": obj.CreatedTime,
-		"checksums": obj.Checksums,
 	}
 	for name, el := range elements {
 		if isZero := IsZeroValue(el); isZero {
@@ -75,11 +74,6 @@ func AssertDrsObjectRequired(obj DrsObject) error {
 		}
 	}
 
-	for _, el := range obj.Checksums {
-		if err := AssertChecksumRequired(el); err != nil {
-			return err
-		}
-	}
 	for _, el := range obj.AccessMethods {
 		if err := AssertAccessMethodRequired(el); err != nil {
 			return err
@@ -95,11 +89,6 @@ func AssertDrsObjectRequired(obj DrsObject) error {
 
 // AssertDrsObjectConstraints checks if the values respects the defined constraints
 func AssertDrsObjectConstraints(obj DrsObject) error {
-	for _, el := range obj.Checksums {
-		if err := AssertChecksumConstraints(el); err != nil {
-			return err
-		}
-	}
 	for _, el := range obj.AccessMethods {
 		if err := AssertAccessMethodConstraints(el); err != nil {
 			return err

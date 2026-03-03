@@ -4,12 +4,13 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/calypr/drs-server/apigen/drs"
 	"github.com/calypr/drs-server/db/core"
 	"github.com/calypr/drs-server/urlmanager"
-	"github.com/google/uuid"
 )
 
 // ObjectsAPIService implements the Objects API service.
@@ -60,11 +61,23 @@ func (s *ObjectsAPIService) OptionsBulkObject(ctx context.Context, req drs.BulkO
 }
 
 func (s *ObjectsAPIService) RegisterObjects(ctx context.Context, req drs.RegisterObjectsRequest) (drs.ImplResponse, error) {
-	var objects []drs.DrsObject
+	var objects []core.DrsObjectWithAuthz
 	now := time.Now()
+	registered := make([]drs.DrsObject, 0, len(req.Candidates))
 
-	for _, c := range req.Candidates {
-		id := uuid.New().String()
+	for i, c := range req.Candidates {
+		primaryChecksum, ok := canonicalSHA256(c.Checksums)
+		if !ok {
+			return drs.ImplResponse{
+				Code: http.StatusBadRequest,
+				Body: drs.Error{
+					Msg:        "candidate[" + strconv.Itoa(i) + "] must include a sha256 checksum",
+					StatusCode: http.StatusBadRequest,
+				},
+			}, nil
+		}
+		id := primaryChecksum
+
 		obj := drs.DrsObject{
 			Id:          id,
 			Name:        c.Name,
@@ -74,26 +87,62 @@ func (s *ObjectsAPIService) RegisterObjects(ctx context.Context, req drs.Registe
 			Version:     "1",
 			Description: c.Description,
 			Aliases:     c.Aliases,
-			Checksums:   c.Checksums,
 			SelfUri:     "drs://" + id,
 		}
+		obj.Checksums = []drs.Checksum{{Type: "sha256", Checksum: primaryChecksum}}
 
-		// Convert candidates access methods to drs objects access methods
+		seenAccess := make(map[string]struct{})
+		seenAuthz := make(map[string]struct{})
+		authz := make([]string, 0)
 		for _, am := range c.AccessMethods {
+			if am.AccessUrl.Url == "" {
+				continue
+			}
+			accessKey := am.Type + "|" + am.AccessUrl.Url
+			if _, exists := seenAccess[accessKey]; exists {
+				continue
+			}
+			seenAccess[accessKey] = struct{}{}
+
+			accessID := am.AccessId
+			if accessID == "" {
+				accessID = am.Type
+			}
 			obj.AccessMethods = append(obj.AccessMethods, drs.AccessMethod{
 				Type:      am.Type,
 				AccessUrl: am.AccessUrl,
+				AccessId:  accessID,
 				Region:    am.Region,
 			})
+			for _, issuer := range am.Authorizations.BearerAuthIssuers {
+				if issuer == "" {
+					continue
+				}
+				if _, ok := seenAuthz[issuer]; ok {
+					continue
+				}
+				seenAuthz[issuer] = struct{}{}
+				authz = append(authz, issuer)
+			}
 		}
-		objects = append(objects, obj)
+		obj.Authorizations = authz
+		objects = append(objects, core.DrsObjectWithAuthz{DrsObject: obj, Authz: authz})
+		registered = append(registered, obj)
 	}
 
 	if err := s.db.RegisterObjects(ctx, objects); err != nil {
 		return drs.ImplResponse{Code: http.StatusInternalServerError, Body: drs.Error{Msg: err.Error(), StatusCode: http.StatusInternalServerError}}, err
 	}
 
-	return drs.ImplResponse{Code: http.StatusOK, Body: objects}, nil
+	return drs.ImplResponse{Code: http.StatusOK, Body: registered}, nil
+}
+
+func (s *ObjectsAPIService) GetObjectsByChecksums(ctx context.Context, checksums []string) (drs.ImplResponse, error) {
+	objsMap, err := s.db.GetObjectsByChecksums(ctx, checksums)
+	if err != nil {
+		return drs.ImplResponse{Code: http.StatusInternalServerError, Body: drs.Error{Msg: err.Error(), StatusCode: http.StatusInternalServerError}}, err
+	}
+	return drs.ImplResponse{Code: http.StatusOK, Body: objsMap}, nil
 }
 
 func (s *ObjectsAPIService) GetAccessURL(ctx context.Context, objectID string, accessID string) (drs.ImplResponse, error) {
@@ -157,11 +206,34 @@ func (s *ObjectsAPIService) UpdateObjectAccessMethods(ctx context.Context, objec
 }
 
 func (s *ObjectsAPIService) GetObjectsByChecksum(ctx context.Context, checksum string) (drs.ImplResponse, error) {
-	objs, err := s.db.GetObjectsByChecksum(ctx, checksum)
+	objs, err := s.db.GetObjectsByChecksum(ctx, normalizeChecksum(checksum))
 	if err != nil {
 		return drs.ImplResponse{Code: http.StatusInternalServerError, Body: drs.Error{Msg: err.Error(), StatusCode: http.StatusInternalServerError}}, err
 	}
-	return drs.ImplResponse{Code: http.StatusOK, Body: objs}, nil
+	if len(objs) == 0 {
+		return drs.ImplResponse{Code: http.StatusNotFound, Body: drs.Error{Msg: "object not found for checksum", StatusCode: http.StatusNotFound}}, nil
+	}
+	return drs.ImplResponse{Code: http.StatusOK, Body: objs[0]}, nil
+}
+
+func normalizeChecksum(cs string) string {
+	if parts := strings.SplitN(cs, ":", 2); len(parts) == 2 {
+		return parts[1]
+	}
+	return cs
+}
+
+func canonicalSHA256(checksums []drs.Checksum) (string, bool) {
+	for _, cs := range checksums {
+		checksumType := strings.ToLower(strings.TrimSpace(cs.Type))
+		if checksumType == "sha256" || checksumType == "sha-256" {
+			normalized := normalizeChecksum(strings.TrimSpace(cs.Checksum))
+			if normalized != "" {
+				return normalized, true
+			}
+		}
+	}
+	return "", false
 }
 
 func (s *ObjectsAPIService) BulkUpdateAccessMethods(ctx context.Context, req drs.BulkAccessMethodUpdateRequest) (drs.ImplResponse, error) {

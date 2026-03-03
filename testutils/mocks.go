@@ -30,7 +30,7 @@ func (m *MockDatabase) DeleteObject(ctx context.Context, id string) error {
 	return nil
 }
 
-func (m *MockDatabase) CreateObject(ctx context.Context, obj *drs.DrsObject) error {
+func (m *MockDatabase) CreateObject(ctx context.Context, obj *drs.DrsObject, authz []string) error {
 	if m.Objects == nil {
 		m.Objects = make(map[string]*drs.DrsObject)
 	}
@@ -42,7 +42,15 @@ func (m *MockDatabase) GetObjectsByChecksum(ctx context.Context, checksum string
 	return nil, nil
 }
 
-func (m *MockDatabase) RegisterObjects(ctx context.Context, objects []drs.DrsObject) error {
+func (m *MockDatabase) GetObjectsByChecksums(ctx context.Context, checksums []string) (map[string][]drs.DrsObject, error) {
+	out := make(map[string][]drs.DrsObject, len(checksums))
+	for _, cs := range checksums {
+		out[cs] = nil
+	}
+	return out, nil
+}
+
+func (m *MockDatabase) RegisterObjects(ctx context.Context, objects []core.DrsObjectWithAuthz) error {
 	return nil
 }
 

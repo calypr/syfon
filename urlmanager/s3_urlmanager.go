@@ -3,6 +3,7 @@ package urlmanager
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"strings"
 	"sync"
@@ -82,6 +83,7 @@ func (m *S3UrlManager) getBucket(ctx context.Context, bucketName string) (*s3Cac
 		}
 	})
 
+	slog.Debug("opening s3 bucket", "bucket", bucketName)
 	// Open bucket using s3blob
 	bucket, err := s3blob.OpenBucket(ctx, client, bucketName, nil)
 	if err != nil {
@@ -94,6 +96,7 @@ func (m *S3UrlManager) getBucket(ctx context.Context, bucketName string) (*s3Cac
 		S3Client: client,
 	}
 	m.cache.Store(bucketName, item)
+	slog.Debug("cached s3 bucket", "bucket", bucketName)
 
 	return item, nil
 }
