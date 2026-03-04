@@ -74,12 +74,56 @@ type fenceBucketsResponse struct {
 	S3Buckets map[string]fenceBucketMetadata `json:"S3_BUCKETS"`
 }
 
+type fencePutBucketRequest struct {
+	Bucket    string `json:"bucket"`
+	Region    string `json:"region"`
+	AccessKey string `json:"access_key"`
+	SecretKey string `json:"secret_key"`
+	Endpoint  string `json:"endpoint"`
+}
+
 type multipartSession struct {
 	Bucket string
 	Key    string
 }
 
 var multipartUploadSessions sync.Map // uploadID -> multipartSession
+
+const bucketAdminResource = "/services/fence/buckets"
+
+func writeAuthError(w http.ResponseWriter, r *http.Request) {
+	code := http.StatusForbidden
+	if core.IsGen3Mode(r.Context()) && !core.HasAuthHeader(r.Context()) {
+		code = http.StatusUnauthorized
+	}
+	http.Error(w, "Unauthorized", code)
+}
+
+func writeDBError(w http.ResponseWriter, r *http.Request, err error) {
+	switch {
+	case errors.Is(err, core.ErrUnauthorized):
+		writeAuthError(w, r)
+	case errors.Is(err, core.ErrNotFound):
+		http.Error(w, "File not found", http.StatusNotFound)
+	default:
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+func hasAnyMethodAccess(ctx *http.Request, resources []string, methods ...string) bool {
+	if !core.IsGen3Mode(ctx.Context()) {
+		return true
+	}
+	if len(resources) == 0 {
+		return true
+	}
+	for _, m := range methods {
+		if core.HasMethodAccess(ctx.Context(), m, resources) {
+			return true
+		}
+	}
+	return false
+}
 
 func RegisterFenceRoutes(router *mux.Router, database core.DatabaseInterface, uM urlmanager.UrlManager) {
 	for _, p := range []string{"/data", "/user/data"} {
@@ -115,8 +159,23 @@ func registerFenceDataRoutes(router *mux.Router, base string, database core.Data
 	}), "FenceMultipartComplete")).Methods(http.MethodPost)
 
 	router.Handle(base+"/buckets", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		handleFenceBuckets(w, r, database)
-	}), "FenceBuckets")).Methods(http.MethodGet)
+		switch r.Method {
+		case http.MethodGet:
+			handleFenceBuckets(w, r, database)
+		case http.MethodPut:
+			handleFencePutBucket(w, r, database)
+		default:
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	}), "FenceBuckets")).Methods(http.MethodGet, http.MethodPut)
+
+	router.Handle(base+"/buckets/{bucket}", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			handleFenceDeleteBucket(w, r, database)
+			return
+		}
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}), "FenceBucketDetail")).Methods(http.MethodDelete)
 }
 
 func registerFenceMultipartRoutes(router *mux.Router, base string, database core.DatabaseInterface, uM urlmanager.UrlManager) {
@@ -150,7 +209,11 @@ func handleFenceDownload(w http.ResponseWriter, r *http.Request, database core.D
 
 	obj, err := database.GetObject(r.Context(), fileID)
 	if err != nil {
-		http.Error(w, "File not found", http.StatusNotFound)
+		writeDBError(w, r, err)
+		return
+	}
+	if !hasAnyMethodAccess(r, obj.Authorizations, "read") {
+		writeAuthError(w, r)
 		return
 	}
 
@@ -204,11 +267,25 @@ func handleFenceUploadBlank(w http.ResponseWriter, r *http.Request, database cor
 	}
 
 	// Check if exists
-	_, err := database.GetObject(r.Context(), guid)
+	targetResources := req.Authz
+	existing, err := database.GetObject(r.Context(), guid)
 	if err == nil {
-		// Found existing. If they provided a GUID, that's fine.
+		if len(existing.Authorizations) > 0 {
+			targetResources = existing.Authorizations
+		}
 	} else {
+		if !errors.Is(err, core.ErrNotFound) {
+			writeDBError(w, r, err)
+			return
+		}
 		// Not found, create blank
+		if len(targetResources) == 0 {
+			targetResources = []string{"/data_file"}
+		}
+		if !hasAnyMethodAccess(r, targetResources, "file_upload", "create", "update") {
+			writeAuthError(w, r)
+			return
+		}
 		now := time.Now()
 		obj := &drs.DrsObject{
 			Id:          guid,
@@ -223,6 +300,10 @@ func handleFenceUploadBlank(w http.ResponseWriter, r *http.Request, database cor
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+	}
+	if err == nil && !hasAnyMethodAccess(r, targetResources, "file_upload", "create", "update") {
+		writeAuthError(w, r)
+		return
 	}
 
 	// Generate a signed upload URL to a default bucket (the first one)
@@ -240,8 +321,8 @@ func handleFenceUploadBlank(w http.ResponseWriter, r *http.Request, database cor
 		return
 	}
 
-	w.WriteHeader(http.StatusCreated)
 	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(fenceUploadBlankResponse{
 		GUID: guid,
 		URL:  signedURL,
@@ -251,6 +332,21 @@ func handleFenceUploadBlank(w http.ResponseWriter, r *http.Request, database cor
 func handleFenceUploadURL(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface, uM urlmanager.UrlManager) {
 	vars := mux.Vars(r)
 	fileID := vars["file_id"]
+	targetResources := []string{"/data_file"}
+	if fileID != "" {
+		if obj, err := database.GetObject(r.Context(), fileID); err == nil {
+			if len(obj.Authorizations) > 0 {
+				targetResources = obj.Authorizations
+			}
+		} else if errors.Is(err, core.ErrUnauthorized) {
+			writeDBError(w, r, err)
+			return
+		}
+	}
+	if !hasAnyMethodAccess(r, targetResources, "file_upload", "create", "update") {
+		writeAuthError(w, r)
+		return
+	}
 
 	bucket := r.URL.Query().Get("bucket")
 	fileName := r.URL.Query().Get("file_name")
@@ -317,6 +413,20 @@ func handleFenceMultipartInit(w http.ResponseWriter, r *http.Request, database c
 		fileName = guid
 	}
 
+	targetResources := []string{"/data_file"}
+	if guid != "" {
+		if obj, err := database.GetObject(r.Context(), guid); err == nil && len(obj.Authorizations) > 0 {
+			targetResources = obj.Authorizations
+		} else if err != nil && !errors.Is(err, core.ErrNotFound) {
+			writeDBError(w, r, err)
+			return
+		}
+	}
+	if !hasAnyMethodAccess(r, targetResources, "file_upload", "create", "update") {
+		writeAuthError(w, r)
+		return
+	}
+
 	uploadID, err := uM.InitMultipartUpload(r.Context(), bucket, fileName)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -335,11 +445,14 @@ func handleFenceMultipartInit(w http.ResponseWriter, r *http.Request, database c
 			Version:     "1",
 			Name:        fileName,
 		}
-		database.CreateObject(r.Context(), obj, []string{})
+		if err := database.CreateObject(r.Context(), obj, []string{}); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 	}
 
-	w.WriteHeader(http.StatusCreated)
 	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(fenceMultipartInitResponse{
 		GUID:     guid,
 		UploadID: uploadID,
@@ -387,6 +500,19 @@ func handleFenceMultipartUpload(w http.ResponseWriter, r *http.Request, database
 
 	if req.Key == "" || req.UploadID == "" || req.PartNumber <= 0 {
 		http.Error(w, "key, uploadId, and positive partNumber are required", http.StatusBadRequest)
+		return
+	}
+	targetResources := []string{"/data_file"}
+	if req.Key != "" {
+		if obj, err := database.GetObject(r.Context(), req.Key); err == nil && len(obj.Authorizations) > 0 {
+			targetResources = obj.Authorizations
+		} else if err != nil && !errors.Is(err, core.ErrNotFound) {
+			writeDBError(w, r, err)
+			return
+		}
+	}
+	if !hasAnyMethodAccess(r, targetResources, "file_upload", "create", "update") {
+		writeAuthError(w, r)
 		return
 	}
 
@@ -442,6 +568,19 @@ func handleFenceMultipartComplete(w http.ResponseWriter, r *http.Request, databa
 		http.Error(w, "key and uploadId are required", http.StatusBadRequest)
 		return
 	}
+	targetResources := []string{"/data_file"}
+	if req.Key != "" {
+		if obj, err := database.GetObject(r.Context(), req.Key); err == nil && len(obj.Authorizations) > 0 {
+			targetResources = obj.Authorizations
+		} else if err != nil && !errors.Is(err, core.ErrNotFound) {
+			writeDBError(w, r, err)
+			return
+		}
+	}
+	if !hasAnyMethodAccess(r, targetResources, "file_upload", "create", "update") {
+		writeAuthError(w, r)
+		return
+	}
 
 	bucket, err := resolveBucket(r, database, req.Bucket)
 	if err != nil || bucket == "" {
@@ -468,6 +607,10 @@ func handleFenceMultipartComplete(w http.ResponseWriter, r *http.Request, databa
 }
 
 func handleFenceBuckets(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface) {
+	if !hasAnyMethodAccess(r, []string{bucketAdminResource}, "read") {
+		writeAuthError(w, r)
+		return
+	}
 	creds, err := database.ListS3Credentials(r.Context())
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -485,4 +628,49 @@ func handleFenceBuckets(w http.ResponseWriter, r *http.Request, database core.Da
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
+}
+
+func handleFencePutBucket(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface) {
+	if !hasAnyMethodAccess(r, []string{bucketAdminResource}, "create", "update") {
+		writeAuthError(w, r)
+		return
+	}
+	var req fencePutBucketRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+	if req.Bucket == "" || req.AccessKey == "" || req.SecretKey == "" {
+		http.Error(w, "bucket, access_key and secret_key are required", http.StatusBadRequest)
+		return
+	}
+	cred := &core.S3Credential{
+		Bucket:    req.Bucket,
+		Region:    req.Region,
+		AccessKey: req.AccessKey,
+		SecretKey: req.SecretKey,
+		Endpoint:  req.Endpoint,
+	}
+	if err := database.SaveS3Credential(r.Context(), cred); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusCreated)
+}
+
+func handleFenceDeleteBucket(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface) {
+	if !hasAnyMethodAccess(r, []string{bucketAdminResource}, "delete") {
+		writeAuthError(w, r)
+		return
+	}
+	bucket := mux.Vars(r)["bucket"]
+	if bucket == "" {
+		http.Error(w, "bucket is required", http.StatusBadRequest)
+		return
+	}
+	if err := database.DeleteS3Credential(r.Context(), bucket); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

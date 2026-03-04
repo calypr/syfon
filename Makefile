@@ -30,6 +30,22 @@ test:
 	go clean -testcache
 	go test -v ./...
 
+.PHONY: test-unit
+test-unit:
+	go clean -testcache
+	@PKGS=$$(go list ./... | grep -Ev '/cmd/server$$|/tests/endpoints$$'); \
+	  go test -v -count=1 $$PKGS
+
+.PHONY: coverage
+coverage:
+	chmod +x ./scripts/run_coverage.sh
+	./scripts/run_coverage.sh
+
+.PHONY: coverage-full
+coverage-full:
+	chmod +x ./scripts/run_coverage.sh
+	COVERAGE_SCOPE=full ./scripts/run_coverage.sh
+
 .PHONY: serve
 serve:
 	go run ./cmd/server $(ARGS)

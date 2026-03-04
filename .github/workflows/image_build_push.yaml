@@ -1,0 +1,68 @@
+name: Build and publish drs-server image
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Login to Quay.io
+        uses: docker/login-action@v3
+        with:
+          registry: quay.io
+          username: ${{ secrets.QUAY_USERNAME }}
+          password: ${{ secrets.QUAY_ROBOT_TOKEN }}
+
+      - name: Build and Push Architecture-Specific Image
+        run: |
+          set -euo pipefail
+          BRANCH=$(echo "${GITHUB_REF#refs/*/}" | tr '/[:upper:]' '_[:lower:]')
+          REPO=quay.io/ohsu-comp-bio/drs-server
+          TAG="$REPO:$BRANCH-${{ matrix.arch }}"
+
+          docker build \
+            --build-arg TARGETOS=linux \
+            --build-arg TARGETARCH=${{ matrix.arch }} \
+            -t "$TAG" .
+          docker push "$TAG"
+
+  create-manifest:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Login to Quay.io
+        uses: docker/login-action@v3
+        with:
+          registry: quay.io
+          username: ${{ secrets.QUAY_USERNAME }}
+          password: ${{ secrets.QUAY_ROBOT_TOKEN }}
+
+      - name: Create and Push Multi-Arch Manifest
+        run: |
+          set -euo pipefail
+          BRANCH=$(echo "${GITHUB_REF#refs/*/}" | tr '/[:upper:]' '_[:lower:]')
+          REPO=quay.io/ohsu-comp-bio/drs-server
+
+          docker manifest create "$REPO:$BRANCH" \
+            "$REPO:$BRANCH-amd64" \
+            "$REPO:$BRANCH-arm64"
+          docker manifest push "$REPO:$BRANCH"
+
+          if [[ "$BRANCH" == "main" ]]; then
+            docker manifest create "$REPO:latest" \
+              "$REPO:main-amd64" \
+              "$REPO:main-arm64"
+            docker manifest push "$REPO:latest"
+          fi

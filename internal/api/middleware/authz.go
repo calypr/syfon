@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"crypto/subtle"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -17,23 +18,46 @@ import (
 )
 
 type AuthzMiddleware struct {
-	logger *slog.Logger
+	logger    *slog.Logger
+	mode      string
+	basicUser string
+	basicPass string
 }
 
-func NewAuthzMiddleware(logger *slog.Logger) *AuthzMiddleware {
+func NewAuthzMiddleware(logger *slog.Logger, mode, basicUser, basicPass string) *AuthzMiddleware {
 	return &AuthzMiddleware{
-		logger: logger,
+		logger:    logger,
+		mode:      strings.ToLower(strings.TrimSpace(mode)),
+		basicUser: basicUser,
+		basicPass: basicPass,
 	}
 }
 
 // Middleware returns a mux middleware that extracts the token and fetches user info.
 func (m *AuthzMiddleware) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		authHeader := r.Header.Get("Authorization")
-		if authHeader == "" {
-			next.ServeHTTP(w, r)
+		ctx := context.WithValue(r.Context(), core.AuthHeaderPresentKey, false)
+		ctx = context.WithValue(ctx, core.AuthModeKey, m.mode)
+		if m.mode != "gen3" {
+			if m.basicUser != "" || m.basicPass != "" {
+				user, pass, ok := r.BasicAuth()
+				if !ok ||
+					subtle.ConstantTimeCompare([]byte(user), []byte(m.basicUser)) != 1 ||
+					subtle.ConstantTimeCompare([]byte(pass), []byte(m.basicPass)) != 1 {
+					w.Header().Set("WWW-Authenticate", `Basic realm="drs-server"`)
+					http.Error(w, "Unauthorized", http.StatusUnauthorized)
+					return
+				}
+			}
+			next.ServeHTTP(w, r.WithContext(ctx))
 			return
 		}
+		authHeader := r.Header.Get("Authorization")
+		if authHeader == "" {
+			next.ServeHTTP(w, r.WithContext(ctx))
+			return
+		}
+		ctx = context.WithValue(ctx, core.AuthHeaderPresentKey, true)
 
 		tokenString := strings.TrimPrefix(authHeader, "Bearer ")
 		tokenString = strings.TrimSpace(tokenString)
@@ -42,7 +66,7 @@ func (m *AuthzMiddleware) Middleware(next http.Handler) http.Handler {
 		apiEndpoint, _, err := m.parseToken(tokenString)
 		if err != nil {
 			m.logger.Debug("failed to parse token", "error", err)
-			next.ServeHTTP(w, r)
+			next.ServeHTTP(w, r.WithContext(ctx))
 			return
 		}
 
@@ -63,13 +87,14 @@ func (m *AuthzMiddleware) Middleware(next http.Handler) http.Handler {
 		privs, err := fenceClient.CheckPrivileges(r.Context())
 		if err != nil {
 			m.logger.Debug("failed to check privileges with fence", "error", err)
-			next.ServeHTTP(w, r)
+			next.ServeHTTP(w, r.WithContext(ctx))
 			return
 		}
 
-		// 4. Map privileges to authorized resources
-		authorizedResources := m.extractResources(privs)
-		ctx := context.WithValue(r.Context(), core.UserAuthzKey, authorizedResources)
+		// 4. Map privileges to authorized resources + methods
+		authorizedResources, privileges := m.extractPrivileges(privs)
+		ctx = context.WithValue(ctx, core.UserAuthzKey, authorizedResources)
+		ctx = context.WithValue(ctx, core.UserPrivilegesKey, privileges)
 
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
@@ -100,10 +125,33 @@ func (m *AuthzMiddleware) parseToken(tokenString string) (endpoint string, exp f
 	return endpoint, exp, nil
 }
 
-func (m *AuthzMiddleware) extractResources(privs map[string]any) []string {
+func (m *AuthzMiddleware) extractPrivileges(privs map[string]any) ([]string, map[string]map[string]bool) {
 	resources := make([]string, 0, len(privs))
-	for path := range privs {
+	out := make(map[string]map[string]bool, len(privs))
+	for path, raw := range privs {
 		resources = append(resources, path)
+		methods := map[string]bool{}
+		entries, ok := raw.([]any)
+		if !ok {
+			out[path] = methods
+			continue
+		}
+		for _, entry := range entries {
+			mm, ok := entry.(map[string]any)
+			if !ok {
+				continue
+			}
+			service, _ := mm["service"].(string)
+			if service != "" && service != "indexd" && service != "drs" && service != "*" {
+				continue
+			}
+			method, _ := mm["method"].(string)
+			if method == "" {
+				continue
+			}
+			methods[method] = true
+		}
+		out[path] = methods
 	}
-	return resources
+	return resources, out
 }

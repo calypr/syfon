@@ -2,6 +2,64 @@
 
 A lightweight, production-grade implementation of a GA4GH Data Repository Service (DRS) server in Go.
 
+## Quickstart
+
+### Prerequisites
+
+- Go 1.24+
+- SQLite3 CLI (`sqlite3`)
+- Git
+
+### 1. Clone and enter the repo
+
+```bash
+git clone <your-repo-url>
+cd drs-server
+```
+
+### 2. Run tests
+
+```bash
+go test ./... -count=1
+```
+
+### 3. Start in local mode (SQLite, no gen3 authz)
+
+Create `config.local.yaml`:
+
+```yaml
+port: 8080
+auth:
+  mode: local
+database:
+  sqlite:
+    file: "drs_local.db"
+s3_credentials:
+  - bucket: "local-bucket"
+    region: "us-east-1"
+    access_key: "minioadmin"
+    secret_key: "minioadmin"
+    endpoint: "http://localhost:9000"
+```
+
+Run:
+
+```bash
+./db/scripts/init_sqlite_db.sh drs_local.db
+go run . serve --config config.local.yaml
+```
+
+Smoke test:
+
+```bash
+curl -s http://localhost:8080/healthz
+```
+
+Notes:
+- `auth.mode` is required and must be `local` or `gen3`.
+- Local development should run `auth.mode: local` with SQLite only.
+- `gen3` mode is for deployed environments and requires PostgreSQL.
+
 ## Purpose
 
 The `drs-server` provides a robust implementation of the [GA4GH DRS API](https://ga4gh.github.io/data-repository-service-schemas/). It is designed to manage metadata for data objects and provide secure access via signed URLs.
@@ -20,6 +78,11 @@ The server is configured via a YAML or JSON file. Use the following structure to
 
 ```yaml
 port: 8080
+auth:
+  mode: "local" # required: "local" or "gen3"
+  # basic:
+  #   username: "user"
+  #   password: "pass"
 
 database:
   sqlite:
@@ -41,6 +104,27 @@ s3_credentials:
     endpoint: "s3.amazonaws.com" # Optional: set for MinIO or custom backends
 ```
 
+In `gen3` mode, PostgreSQL is required.
+
+## Gen3/PostgreSQL Schema Initialization
+
+For deployment environments using PostgreSQL, schema initialization is managed by the Helm chart (`helm/drs-server/templates/postgres-schema-configmap.yaml` + init Job).
+This repository intentionally does not ship a separate Postgres init SQL script.
+
+## Local Development Workflow
+
+```bash
+go test ./... -count=1
+./db/scripts/init_sqlite_db.sh drs_local.db
+go run . serve --config config.local.yaml
+```
+
+Useful endpoints:
+- `GET /healthz`
+- `GET /service-info`
+- `GET /index/index/{id}` (gen3 compatibility)
+- `GET /data/download/{id}` (fence compatibility)
+
 ## Running Integration Tests
 
 You can run integration tests using your own config file:
@@ -58,11 +142,14 @@ The project follows a modular structure to ensure maintainability:
 - `service`: High-level business logic implementing the DRS service.
 - `urlmanager`: Logic for interacting with cloud storage providers.
 
+See DB table details and relationships in [db/README.md](db/README.md).
+
 ## Development
 
 The project uses a Makefile for common tasks:
 - `make gen`: Generates the DRS server code from the official GA4GH OpenAPI spec (Git submodule).
 - `make test`: Runs all unit and integration tests.
+- `make test-unit`: Runs unit tests only (excludes integration packages).
+- `make coverage`: Runs coverage for core production packages (db/service/middleware/url signing) and writes `coverage/coverage.out`, `coverage/coverage.txt`, and `coverage/coverage.html`.
+- `make coverage-full`: Runs broader compatibility-layer coverage (includes gen3/fence/admin packages).
 - `make serve`: Starts the DRS server.
-
-

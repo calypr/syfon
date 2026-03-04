@@ -38,6 +38,8 @@ func TestS3Integration(t *testing.T) {
 		// Create a temporary config for testing if none provided
 		content := `
 port: 8081
+auth:
+  mode: local
 database:
   sqlite:
     file: "test_integration.db"

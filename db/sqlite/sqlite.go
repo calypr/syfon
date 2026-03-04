@@ -3,8 +3,8 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/calypr/drs-server/apigen/drs"
@@ -122,7 +122,7 @@ func (db *SqliteDB) GetObject(ctx context.Context, id string) (*drs.DrsObject, e
 		&r.ID, &r.Size, &r.CreatedTime, &r.UpdatedTime, &r.Name, &r.Version, &r.Description,
 	)
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("object not found")
+		return nil, fmt.Errorf("%w: object not found", core.ErrNotFound)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch record: %w", err)
@@ -183,6 +183,9 @@ func (db *SqliteDB) GetObject(ctx context.Context, id string) (*drs.DrsObject, e
 			AccessUrl: drs.AccessMethodAccessUrl{Url: u},
 			Type:      t,
 			AccessId:  t,
+			Authorizations: drs.AccessMethodAuthorizations{
+				BearerAuthIssuers: recordResources,
+			},
 		}
 		obj.AccessMethods = append(obj.AccessMethods, am)
 	}
@@ -207,17 +210,12 @@ func (db *SqliteDB) GetObject(ctx context.Context, id string) (*drs.DrsObject, e
 		obj.Checksums = append(obj.Checksums, drs.Checksum{Type: t, Checksum: v})
 	}
 
-	// 5. RBAC Check
-	userVal := ctx.Value(core.UserAuthzKey)
-	if userVal != nil {
+	// 5. RBAC Check (gen3 mode only)
+	if core.IsGen3Mode(ctx) {
 		userResources := core.GetUserAuthz(ctx)
 		if !core.CheckAccess(recordResources, userResources) {
-			return nil, fmt.Errorf("unauthorized access to object")
+			return nil, fmt.Errorf("%w: access to object denied", core.ErrUnauthorized)
 		}
-	} else {
-		// If auth header is missing completely, we allow access in this implementation
-		// to facilitate local testing/no-auth mode.
-		// In a strictly enforced environment, we would return an error here if recordResources is not empty.
 	}
 
 	return obj, nil
@@ -367,10 +365,31 @@ func (db *SqliteDB) GetObjectsByChecksums(ctx context.Context, checksums []strin
 	return result, nil
 }
 
+func (db *SqliteDB) ListObjectIDsByResourcePrefix(ctx context.Context, resourcePrefix string) ([]string, error) {
+	rows, err := db.db.QueryContext(ctx, `
+		SELECT DISTINCT object_id
+		FROM drs_object_authz
+		WHERE resource = ? OR resource LIKE ?`, resourcePrefix, resourcePrefix+"/%")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	ids := make([]string, 0)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
 func (db *SqliteDB) GetObjectsByChecksum(ctx context.Context, checksum string) ([]drs.DrsObject, error) {
 	obj, err := db.GetObject(ctx, checksum)
 	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, core.ErrNotFound) {
 			return []drs.DrsObject{}, nil
 		}
 		return nil, err

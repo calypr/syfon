@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -14,6 +15,7 @@ type Config struct {
 	Port          int            `json:"port" yaml:"port"`
 	Database      DatabaseConfig `json:"database" yaml:"database"`
 	S3Credentials []S3Config     `json:"s3_credentials" yaml:"s3_credentials"`
+	Auth          AuthConfig     `json:"auth" yaml:"auth"`
 }
 
 type DatabaseConfig struct {
@@ -42,11 +44,27 @@ type S3Config struct {
 	Endpoint  string `json:"endpoint,omitempty" yaml:"endpoint,omitempty"`
 }
 
+type AuthConfig struct {
+	Mode  string          `json:"mode" yaml:"mode"`
+	Basic BasicAuthConfig `json:"basic" yaml:"basic"`
+}
+
+const (
+	AuthModeLocal = "local"
+	AuthModeGen3  = "gen3"
+)
+
+type BasicAuthConfig struct {
+	Username string `json:"username" yaml:"username"`
+	Password string `json:"password" yaml:"password"`
+}
+
 func LoadConfig(configFile string) (*Config, error) {
 	// 1. Default Config
 	cfg := &Config{
 		Port:     8080,
 		Database: DatabaseConfig{},
+		Auth:     AuthConfig{},
 	}
 
 	// 2. Load from file if provided
@@ -79,6 +97,15 @@ func LoadConfig(configFile string) (*Config, error) {
 		}
 		cfg.Port = p
 	}
+	if mode := os.Getenv("DRS_AUTH_MODE"); mode != "" {
+		cfg.Auth.Mode = mode
+	}
+	if user := os.Getenv("DRS_BASIC_AUTH_USER"); user != "" {
+		cfg.Auth.Basic.Username = user
+	}
+	if pass := os.Getenv("DRS_BASIC_AUTH_PASSWORD"); pass != "" {
+		cfg.Auth.Basic.Password = pass
+	}
 
 	// DB Env Vars overrides
 	// If Postgres env vars are provided, we assume Postgres.
@@ -100,9 +127,10 @@ func LoadConfig(configFile string) (*Config, error) {
 		}
 		if v := os.Getenv("DRS_DB_PORT"); v != "" {
 			p, err := strconv.Atoi(v)
-			if err == nil {
-				cfg.Database.Postgres.Port = p
+			if err != nil {
+				return nil, fmt.Errorf("invalid DRS_DB_PORT: %s", v)
 			}
+			cfg.Database.Postgres.Port = p
 		}
 		if v := os.Getenv("DRS_DB_USER"); v != "" {
 			cfg.Database.Postgres.User = v
@@ -161,6 +189,19 @@ func LoadConfig(configFile string) (*Config, error) {
 		if cred.SecretKey == "" {
 			return nil, fmt.Errorf("s3_credentials[%d]: secret_key is required", i)
 		}
+	}
+	cfg.Auth.Mode = strings.ToLower(strings.TrimSpace(cfg.Auth.Mode))
+	if cfg.Auth.Mode == "" {
+		return nil, fmt.Errorf("auth.mode is required and must be one of %q or %q", AuthModeLocal, AuthModeGen3)
+	}
+	if cfg.Auth.Mode != AuthModeLocal && cfg.Auth.Mode != AuthModeGen3 {
+		return nil, fmt.Errorf("invalid auth.mode %q: expected %q or %q", cfg.Auth.Mode, AuthModeLocal, AuthModeGen3)
+	}
+	if cfg.Auth.Mode == AuthModeGen3 && cfg.Database.Postgres == nil {
+		return nil, fmt.Errorf("auth.mode %q requires postgres database", cfg.Auth.Mode)
+	}
+	if (cfg.Auth.Basic.Username == "") != (cfg.Auth.Basic.Password == "") {
+		return nil, fmt.Errorf("both auth.basic.username and auth.basic.password must be set together")
 	}
 
 	return cfg, nil

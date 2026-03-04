@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -67,7 +68,7 @@ func (db *PostgresDB) GetObject(ctx context.Context, id string) (*drs.DrsObject,
 		&r.ID, &r.Size, &r.CreatedTime, &r.UpdatedTime, &r.Name, &r.Version, &r.Description,
 	)
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("object not found")
+		return nil, fmt.Errorf("%w: object not found", core.ErrNotFound)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch record: %w", err)
@@ -146,8 +147,18 @@ func (db *PostgresDB) GetObject(ctx context.Context, id string) (*drs.DrsObject,
 		seenAuthz[res] = struct{}{}
 		obj.Authorizations = append(obj.Authorizations, res)
 	}
+	for i := range obj.AccessMethods {
+		obj.AccessMethods[i].Authorizations = drs.AccessMethodAuthorizations{
+			BearerAuthIssuers: obj.Authorizations,
+		}
+	}
 
-	// 5. RBAC Check (optimized in SQL)
+	// 5. RBAC Check (gen3 mode only)
+	if !core.IsGen3Mode(ctx) {
+		return obj, nil
+	}
+
+	// Optimized in SQL for gen3 mode.
 	userResources := core.GetUserAuthz(ctx)
 
 	var count int
@@ -162,7 +173,7 @@ func (db *PostgresDB) GetObject(ctx context.Context, id string) (*drs.DrsObject,
 		return nil, fmt.Errorf("authorization check failed: %w", err)
 	}
 	if count == 0 {
-		return nil, fmt.Errorf("unauthorized access to object")
+		return nil, fmt.Errorf("%w: access to object denied", core.ErrUnauthorized)
 	}
 
 	return obj, nil
@@ -334,7 +345,7 @@ func (db *PostgresDB) GetBulkObjects(ctx context.Context, ids []string) ([]drs.D
 func (db *PostgresDB) GetObjectsByChecksum(ctx context.Context, checksum string) ([]drs.DrsObject, error) {
 	obj, err := db.GetObject(ctx, checksum)
 	if err != nil {
-		if err.Error() == "object not found" {
+		if errors.Is(err, core.ErrNotFound) {
 			return []drs.DrsObject{}, nil
 		}
 		return nil, err
@@ -357,6 +368,27 @@ func (db *PostgresDB) GetObjectsByChecksums(ctx context.Context, checksums []str
 		}
 	}
 	return result, nil
+}
+
+func (db *PostgresDB) ListObjectIDsByResourcePrefix(ctx context.Context, resourcePrefix string) ([]string, error) {
+	rows, err := db.db.QueryContext(ctx, `
+		SELECT DISTINCT object_id
+		FROM drs_object_authz
+		WHERE resource = $1 OR resource LIKE $2`, resourcePrefix, resourcePrefix+"/%")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	ids := make([]string, 0)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, nil
 }
 
 func (db *PostgresDB) BulkDeleteObjects(ctx context.Context, ids []string) error {

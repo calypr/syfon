@@ -7,10 +7,10 @@ require (
 	github.com/aws/aws-sdk-go-v2/config v1.32.7
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.7
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.95.1
+	github.com/calypr/data-client v0.0.0-20260303175750-028f806839a3
 	github.com/getkin/kin-openapi v0.133.0
 	github.com/gin-gonic/gin v1.11.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
-	github.com/google/uuid v1.6.0
 	github.com/gorilla/mux v1.8.0
 	github.com/lib/pq v1.11.1
 	github.com/mattn/go-sqlite3 v1.14.33
@@ -20,11 +20,7 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 )
 
-replace github.com/calypr/data-client => ../data-client
-
 require (
-	github.com/VividCortex/ewma v1.2.0 // indirect
-	github.com/acarl005/stripansi v0.0.0-20180116102854-5a71ef0e047d // indirect
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.4 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.18.17 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/s3/manager v1.20.3 // indirect
@@ -43,9 +39,6 @@ require (
 	github.com/aws/smithy-go v1.24.0 // indirect
 	github.com/bytedance/sonic v1.14.0 // indirect
 	github.com/bytedance/sonic/loader v0.3.0 // indirect
-	github.com/calypr/data-client v0.0.0-00010101000000-000000000000 // indirect
-	github.com/clipperhouse/stringish v0.1.1 // indirect
-	github.com/clipperhouse/uax29/v2 v2.3.0 // indirect
 	github.com/cloudwego/base64x v0.1.6 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/gabriel-vasile/mimetype v1.4.8 // indirect
@@ -59,6 +52,7 @@ require (
 	github.com/go-playground/validator/v10 v10.27.0 // indirect
 	github.com/goccy/go-json v0.10.2 // indirect
 	github.com/goccy/go-yaml v1.18.0 // indirect
+	github.com/google/uuid v1.6.0 // indirect
 	github.com/google/wire v0.7.0 // indirect
 	github.com/googleapis/gax-go/v2 v2.15.0 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
@@ -73,7 +67,6 @@ require (
 	github.com/leodido/go-urn v1.4.0 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
-	github.com/mattn/go-runewidth v0.0.19 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/mohae/deepcopy v0.0.0-20170929034955-c48cc78d4826 // indirect
@@ -87,7 +80,6 @@ require (
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/ugorji/go/codec v1.3.0 // indirect
-	github.com/vbauerster/mpb/v8 v8.11.2 // indirect
 	github.com/woodsbury/decimal128 v1.3.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
 	go.opentelemetry.io/otel v1.37.0 // indirect

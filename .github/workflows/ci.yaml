@@ -1,0 +1,55 @@
+name: DRS Server CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: "${{ github.workflow }} @ ${{ github.event.pull_request.head.label || github.head_ref || github.ref }}"
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Go Test and Vet
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Run unit tests
+        run: make test-unit
+
+      - name: Run coverage
+        run: make coverage
+
+      - name: Upload coverage artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: |
+            coverage/coverage.out
+            coverage/coverage.txt
+            coverage/coverage.html
+
+      - name: Run go vet
+        run: go vet ./...
+
+  docker-build-smoke:
+    name: Docker Build Smoke Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Build container image
+        run: docker build -t drs-server:ci .

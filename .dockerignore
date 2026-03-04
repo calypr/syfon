@@ -1,0 +1,10 @@
+.git
+.gitmodules
+.github
+.gocache
+*.db
+*.log
+coverage.out
+drs
+drs-server
+

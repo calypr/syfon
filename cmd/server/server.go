@@ -31,6 +31,9 @@ var Cmd = &cobra.Command{
 		if err != nil {
 			log.Fatalf("Failed to load config: %v", err)
 		}
+		if cfg.Auth.Mode == config.AuthModeGen3 && cfg.Database.Postgres == nil {
+			log.Fatal("auth.mode=gen3 requires postgres database")
+		}
 
 		// Init DB
 		var database core.DatabaseInterface
@@ -96,7 +99,12 @@ var Cmd = &cobra.Command{
 		// We use a standard slog.Logger for data-client compatibility
 		slogLogger := slog.New(slog.NewTextHandler(log.Writer(), &slog.HandlerOptions{Level: slog.LevelDebug}))
 		slog.SetDefault(slogLogger)
-		authzMiddleware := middleware.NewAuthzMiddleware(slogLogger)
+		authzMiddleware := middleware.NewAuthzMiddleware(
+			slogLogger,
+			cfg.Auth.Mode,
+			cfg.Auth.Basic.Username,
+			cfg.Auth.Basic.Password,
+		)
 
 		// Apply Middlewares
 		router.Use(authzMiddleware.Middleware)

@@ -14,6 +14,7 @@ type DatabaseInterface interface {
 	CreateObject(ctx context.Context, obj *drs.DrsObject, authz []string) error
 	GetObjectsByChecksum(ctx context.Context, checksum string) ([]drs.DrsObject, error)
 	GetObjectsByChecksums(ctx context.Context, checksums []string) (map[string][]drs.DrsObject, error)
+	ListObjectIDsByResourcePrefix(ctx context.Context, resourcePrefix string) ([]string, error)
 
 	// New Bulk Operations
 	GetBulkObjects(ctx context.Context, ids []string) ([]drs.DrsObject, error)

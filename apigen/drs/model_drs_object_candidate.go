@@ -40,6 +40,12 @@ type DrsObjectCandidate struct {
 
 	// A list of strings that can be used to find other metadata about this `DrsObject` from external metadata sources. These aliases can be used to represent secondary accession numbers or external GUIDs.
 	Aliases []string `json:"aliases,omitempty"`
+
+	// Logical organization/program identifier used to derive authorization scope.
+	Organization string `json:"organization,omitempty"`
+
+	// Logical project identifier used with organization to derive authorization scope.
+	Project string `json:"project,omitempty"`
 }
 
 // AssertDrsObjectCandidateRequired checks if the required fields are not zero-ed

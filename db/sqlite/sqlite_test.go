@@ -162,3 +162,109 @@ func TestSqliteDB_UpdateAccessMethods(t *testing.T) {
 		t.Errorf("expected updated access method, got %v", fetched.AccessMethods)
 	}
 }
+
+func TestSqliteDB_GetObjectsByChecksumsAndListByPrefix(t *testing.T) {
+	ctx := context.Background()
+	db, _ := NewSqliteDB(":memory:")
+
+	now := time.Now()
+	objects := []core.DrsObjectWithAuthz{
+		{
+			DrsObject: drs.DrsObject{
+				Id:          "sha-x",
+				CreatedTime: now,
+				UpdatedTime: now,
+				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: "sha-x"}},
+			},
+			Authz: []string{"/programs/a/projects/b"},
+		},
+		{
+			DrsObject: drs.DrsObject{
+				Id:          "sha-y",
+				CreatedTime: now,
+				UpdatedTime: now,
+				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: "sha-y"}},
+			},
+			Authz: []string{"/programs/a/projects/c"},
+		},
+	}
+	if err := db.RegisterObjects(ctx, objects); err != nil {
+		t.Fatalf("RegisterObjects failed: %v", err)
+	}
+
+	byChecksums, err := db.GetObjectsByChecksums(ctx, []string{"sha-x", "sha-y", "missing"})
+	if err != nil {
+		t.Fatalf("GetObjectsByChecksums failed: %v", err)
+	}
+	if len(byChecksums["sha-x"]) != 1 || byChecksums["sha-x"][0].Id != "sha-x" {
+		t.Fatalf("unexpected checksum result for sha-x: %+v", byChecksums["sha-x"])
+	}
+	if len(byChecksums["missing"]) != 0 {
+		t.Fatalf("expected empty results for missing checksum")
+	}
+
+	ids, err := db.ListObjectIDsByResourcePrefix(ctx, "/programs/a/projects/b")
+	if err != nil {
+		t.Fatalf("ListObjectIDsByResourcePrefix failed: %v", err)
+	}
+	if len(ids) != 1 || ids[0] != "sha-x" {
+		t.Fatalf("unexpected ids for prefix query: %+v", ids)
+	}
+}
+
+func TestSqliteDB_BulkUpdateAccessMethods(t *testing.T) {
+	ctx := context.Background()
+	db, _ := NewSqliteDB(":memory:")
+
+	now := time.Now()
+	if err := db.RegisterObjects(ctx, []core.DrsObjectWithAuthz{
+		{
+			DrsObject: drs.DrsObject{
+				Id:          "obj-a",
+				CreatedTime: now,
+				UpdatedTime: now,
+			},
+		},
+		{
+			DrsObject: drs.DrsObject{
+				Id:          "obj-b",
+				CreatedTime: now,
+				UpdatedTime: now,
+			},
+		},
+	}); err != nil {
+		t.Fatalf("RegisterObjects failed: %v", err)
+	}
+
+	err := db.BulkUpdateAccessMethods(ctx, map[string][]drs.AccessMethod{
+		"obj-a": {
+			{Type: "s3", AccessUrl: drs.AccessMethodAccessUrl{Url: "s3://bucket/a"}},
+		},
+		"obj-b": {
+			{Type: "s3", AccessUrl: drs.AccessMethodAccessUrl{Url: "s3://bucket/b"}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("BulkUpdateAccessMethods failed: %v", err)
+	}
+
+	a, _ := db.GetObject(ctx, "obj-a")
+	if len(a.AccessMethods) != 1 || a.AccessMethods[0].AccessUrl.Url != "s3://bucket/a" {
+		t.Fatalf("unexpected access methods for obj-a: %+v", a.AccessMethods)
+	}
+}
+
+func TestSqliteDB_GetServiceInfo(t *testing.T) {
+	ctx := context.Background()
+	db, err := NewSqliteDB(":memory:")
+	if err != nil {
+		t.Fatalf("failed to create db: %v", err)
+	}
+	info, err := db.GetServiceInfo(ctx)
+	if err != nil {
+		t.Fatalf("GetServiceInfo failed: %v", err)
+	}
+	if info == nil || info.Name == "" {
+		t.Fatalf("expected non-empty service info, got %+v", info)
+	}
+}
