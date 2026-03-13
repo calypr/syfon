@@ -25,6 +25,24 @@ gen:
 	# as many are not compliant with the spec or seem to be randomly generated
 	# go run ./cmd/openapi-remove-examples
 
+gen-client:
+	@mkdir -p .tmp apigen-client
+	# OpenAPI Generator (Go client)
+	# delete previous generated code
+	rm -rf apigen-client
+	# generate new code
+	docker run --rm \
+	  --user "$$(id -u):$$(id -g)" \
+	  -v "$(PWD):/local" \
+	  $(OAG_IMAGE) generate \
+	  -g go \
+	  --skip-validate-spec \
+	  --git-repo-id drs-server \
+	  --git-user-id calypr \
+	  -i /local/$(OPENAPI) \
+	  -o /local/apigen/drsclient \
+	  --additional-properties packageName=drsclient,withGoMod=false,isGoSubmodule=true
+
 .PHONY: test
 test:
 	go clean -testcache
