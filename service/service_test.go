@@ -595,19 +595,19 @@ func TestUpdateObjectAccessMethods_Success(t *testing.T) {
 }
 
 func TestErrorResponseForDBError(t *testing.T) {
-	resp := errorResponseForDBError(context.Background(), core.ErrNotFound)
+	resp := errorResponseForDBError(context.Background(), "test.notfound", core.ErrNotFound)
 	if resp.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d", resp.Code)
 	}
 
 	ctx := context.WithValue(context.Background(), core.AuthModeKey, "gen3")
 	ctx = context.WithValue(ctx, core.AuthHeaderPresentKey, false)
-	resp = errorResponseForDBError(ctx, core.ErrUnauthorized)
+	resp = errorResponseForDBError(ctx, "test.unauthorized", core.ErrUnauthorized)
 	if resp.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d", resp.Code)
 	}
 
-	resp = errorResponseForDBError(context.Background(), errors.New("boom"))
+	resp = errorResponseForDBError(context.Background(), "test.internal", errors.New("boom"))
 	if resp.Code != http.StatusInternalServerError {
 		t.Fatalf("expected 500, got %d", resp.Code)
 	}
@@ -624,7 +624,7 @@ func TestAuthorizationsForObjectFallback(t *testing.T) {
 			},
 		},
 	}
-	auth := authorizationsForObject(obj)
+	auth := authorizationsForObject(&core.InternalObject{DrsObject: *obj})
 	if len(auth.BearerAuthIssuers) != 1 {
 		t.Fatalf("expected deduped issuers, got %+v", auth.BearerAuthIssuers)
 	}
@@ -646,6 +646,84 @@ func TestPostObjectDelegatesToGetObject(t *testing.T) {
 	}
 	if resp.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.Code)
+	}
+}
+
+func TestPostUploadRequest_ReturnsSignedS3Method(t *testing.T) {
+	mockDB := &testutils.MockDatabase{
+		Credentials: map[string]core.S3Credential{
+			"upload-bucket": {Bucket: "upload-bucket", Region: "us-west-2"},
+		},
+	}
+	service := NewObjectsAPIService(mockDB, &testutils.MockUrlManager{})
+
+	req := drs.UploadRequest{
+		Requests: []drs.UploadRequestObject{
+			{
+				Name:     "sample.bin",
+				Size:     123,
+				MimeType: "application/octet-stream",
+				Checksums: []drs.Checksum{
+					{Type: "sha256", Checksum: "abc123"},
+				},
+			},
+		},
+	}
+	resp, err := service.PostUploadRequest(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.Code)
+	}
+	body, ok := resp.Body.(drs.UploadResponse)
+	if !ok {
+		t.Fatalf("expected UploadResponse body, got %T", resp.Body)
+	}
+	if len(body.Responses) != 1 {
+		t.Fatalf("expected 1 response object, got %d", len(body.Responses))
+	}
+	if len(body.Responses[0].UploadMethods) != 1 {
+		t.Fatalf("expected 1 upload method, got %d", len(body.Responses[0].UploadMethods))
+	}
+	method := body.Responses[0].UploadMethods[0]
+	if method.Type != "s3" {
+		t.Fatalf("expected s3 upload method, got %s", method.Type)
+	}
+	if method.Region != "us-west-2" {
+		t.Fatalf("expected region us-west-2, got %s", method.Region)
+	}
+	if method.AccessUrl.Url == "" {
+		t.Fatal("expected signed upload URL")
+	}
+}
+
+func TestPostUploadRequest_Gen3Unauthorized(t *testing.T) {
+	mockDB := &testutils.MockDatabase{
+		Credentials: map[string]core.S3Credential{
+			"upload-bucket": {Bucket: "upload-bucket", Region: "us-east-1"},
+		},
+	}
+	service := NewObjectsAPIService(mockDB, &testutils.MockUrlManager{})
+
+	req := drs.UploadRequest{
+		Requests: []drs.UploadRequestObject{
+			{
+				Name:      "sample.bin",
+				Size:      10,
+				MimeType:  "application/octet-stream",
+				Checksums: []drs.Checksum{{Type: "sha256", Checksum: "deadbeef"}},
+			},
+		},
+	}
+	ctx := context.WithValue(context.Background(), core.AuthModeKey, "gen3")
+	ctx = context.WithValue(ctx, core.AuthHeaderPresentKey, false)
+	resp, err := service.PostUploadRequest(ctx, req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", resp.Code)
 	}
 }
 

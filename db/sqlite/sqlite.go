@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/calypr/drs-server/apigen/drs"
@@ -108,12 +109,12 @@ func (db *SqliteDB) DeleteObject(ctx context.Context, id string) error {
 		return err
 	}
 	if rows == 0 {
-		return fmt.Errorf("object not found")
+		return fmt.Errorf("%w: object not found", core.ErrNotFound)
 	}
 	return nil
 }
 
-func (db *SqliteDB) GetObject(ctx context.Context, id string) (*drs.DrsObject, error) {
+func (db *SqliteDB) GetObject(ctx context.Context, id string) (*core.InternalObject, error) {
 	// 1. Fetch main record
 	var r core.DrsObjectRecord
 	err := db.db.QueryRowContext(ctx, `
@@ -128,15 +129,17 @@ func (db *SqliteDB) GetObject(ctx context.Context, id string) (*drs.DrsObject, e
 		return nil, fmt.Errorf("failed to fetch record: %w", err)
 	}
 
-	obj := &drs.DrsObject{
-		Id:          r.ID,
-		Size:        r.Size,
-		CreatedTime: r.CreatedTime,
-		UpdatedTime: r.UpdatedTime,
-		Version:     r.Version,
-		Description: r.Description,
-		Name:        r.Name,
-		SelfUri:     "drs://" + r.ID,
+	obj := &core.InternalObject{
+		DrsObject: drs.DrsObject{
+			Id:          r.ID,
+			Size:        r.Size,
+			CreatedTime: r.CreatedTime,
+			UpdatedTime: r.UpdatedTime,
+			Version:     r.Version,
+			Description: r.Description,
+			Name:        r.Name,
+			SelfUri:     "drs://" + r.ID,
+		},
 	}
 
 	// 2. Fetch Authz (record-level). Read and close before subsequent queries when
@@ -221,7 +224,7 @@ func (db *SqliteDB) GetObject(ctx context.Context, id string) (*drs.DrsObject, e
 	return obj, nil
 }
 
-func (db *SqliteDB) CreateObject(ctx context.Context, obj *drs.DrsObject, authz []string) error {
+func (db *SqliteDB) CreateObject(ctx context.Context, obj *core.InternalObject) error {
 	tx, err := db.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -250,7 +253,7 @@ func (db *SqliteDB) CreateObject(ctx context.Context, obj *drs.DrsObject, authz 
 	}
 
 	// Insert Authz
-	for _, res := range authz {
+	for _, res := range obj.Authorizations {
 		_, err = tx.ExecContext(ctx, `INSERT INTO drs_object_authz (object_id, resource) VALUES (?, ?)`, obj.Id, res)
 		if err != nil {
 			return fmt.Errorf("failed to insert authz: %w", err)
@@ -260,33 +263,27 @@ func (db *SqliteDB) CreateObject(ctx context.Context, obj *drs.DrsObject, authz 
 	return tx.Commit()
 }
 
-func (db *SqliteDB) RegisterObjects(ctx context.Context, objects []core.DrsObjectWithAuthz) error {
+func (db *SqliteDB) RegisterObjects(ctx context.Context, objects []core.InternalObject) error {
+	if len(objects) == 0 {
+		return nil
+	}
+
 	tx, err := db.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	for _, obj := range objects {
-		_, err = tx.ExecContext(ctx, `
-			INSERT OR REPLACE INTO drs_object (id, size, created_time, updated_time, name, version, description)
-			VALUES (?, ?, ?, ?, ?, ?, ?)`,
-			obj.Id, obj.Size, obj.CreatedTime, obj.UpdatedTime, obj.Name, obj.Version, obj.Description,
-		)
-		if err != nil {
-			return fmt.Errorf("failed to upsert drs_object for %s: %w", obj.Id, err)
-		}
+	ids := make([]string, 0, len(objects))
+	mainArgs := make([]interface{}, 0, len(objects)*7)
 
-		// Replace child collections atomically to avoid duplicate rows across re-registrations.
-		if _, err = tx.ExecContext(ctx, `DELETE FROM drs_object_access_method WHERE object_id = ?`, obj.Id); err != nil {
-			return fmt.Errorf("failed to clear access methods for %s: %w", obj.Id, err)
-		}
-		if _, err = tx.ExecContext(ctx, `DELETE FROM drs_object_checksum WHERE object_id = ?`, obj.Id); err != nil {
-			return fmt.Errorf("failed to clear checksums for %s: %w", obj.Id, err)
-		}
-		if _, err = tx.ExecContext(ctx, `DELETE FROM drs_object_authz WHERE object_id = ?`, obj.Id); err != nil {
-			return fmt.Errorf("failed to clear authz for %s: %w", obj.Id, err)
-		}
+	accessArgs := make([]interface{}, 0)
+	checksumArgs := make([]interface{}, 0)
+	authzArgs := make([]interface{}, 0)
+
+	for _, obj := range objects {
+		ids = append(ids, obj.Id)
+		mainArgs = append(mainArgs, obj.Id, obj.Size, obj.CreatedTime, obj.UpdatedTime, obj.Name, obj.Version, obj.Description)
 
 		seenAccess := make(map[string]struct{})
 		for _, am := range obj.AccessMethods {
@@ -298,10 +295,7 @@ func (db *SqliteDB) RegisterObjects(ctx context.Context, objects []core.DrsObjec
 				continue
 			}
 			seenAccess[key] = struct{}{}
-			_, err = tx.ExecContext(ctx, `INSERT INTO drs_object_access_method (object_id, url, type) VALUES (?, ?, ?)`, obj.Id, am.AccessUrl.Url, am.Type)
-			if err != nil {
-				return fmt.Errorf("failed to insert url for %s: %w", obj.Id, err)
-			}
+			accessArgs = append(accessArgs, obj.Id, am.AccessUrl.Url, am.Type)
 		}
 
 		seenChecksum := make(map[string]struct{})
@@ -311,55 +305,130 @@ func (db *SqliteDB) RegisterObjects(ctx context.Context, objects []core.DrsObjec
 				continue
 			}
 			seenChecksum[key] = struct{}{}
-			_, err = tx.ExecContext(ctx, `INSERT INTO drs_object_checksum (object_id, type, checksum) VALUES (?, ?, ?)`, obj.Id, cs.Type, cs.Checksum)
-			if err != nil {
-				return fmt.Errorf("failed to insert checksum for %s: %w", obj.Id, err)
-			}
+			checksumArgs = append(checksumArgs, obj.Id, cs.Type, cs.Checksum)
 		}
 
 		seenAuthz := make(map[string]struct{})
-		for _, res := range obj.Authz {
+		for _, res := range obj.Authorizations {
 			if _, ok := seenAuthz[res]; ok {
 				continue
 			}
 			seenAuthz[res] = struct{}{}
-			_, err = tx.ExecContext(ctx, `INSERT INTO drs_object_authz (object_id, resource) VALUES (?, ?)`, obj.Id, res)
-			if err != nil {
-				return fmt.Errorf("failed to insert authz for %s: %w", obj.Id, err)
-			}
+			authzArgs = append(authzArgs, obj.Id, res)
+		}
+	}
+
+	mainPrefix := `INSERT INTO drs_object (id, size, created_time, updated_time, name, version, description) VALUES `
+	mainSuffix := ` ON CONFLICT(id) DO UPDATE SET
+		size=excluded.size,
+		created_time=excluded.created_time,
+		updated_time=excluded.updated_time,
+		name=excluded.name,
+		version=excluded.version,
+		description=excluded.description`
+	if err := execSQLiteBulkInsert(tx, mainPrefix, "(?, ?, ?, ?, ?, ?, ?)", 7, mainArgs, mainSuffix); err != nil {
+		return fmt.Errorf("failed bulk upsert drs_object: %w", err)
+	}
+
+	if err := execSQLiteDeleteByIDs(tx, "drs_object_access_method", ids); err != nil {
+		return fmt.Errorf("failed bulk clear access methods: %w", err)
+	}
+	if err := execSQLiteDeleteByIDs(tx, "drs_object_checksum", ids); err != nil {
+		return fmt.Errorf("failed bulk clear checksums: %w", err)
+	}
+	if err := execSQLiteDeleteByIDs(tx, "drs_object_authz", ids); err != nil {
+		return fmt.Errorf("failed bulk clear authz: %w", err)
+	}
+
+	if len(accessArgs) > 0 {
+		if err := execSQLiteBulkInsert(
+			tx,
+			"INSERT INTO drs_object_access_method (object_id, url, type) VALUES ",
+			"(?, ?, ?)",
+			3,
+			accessArgs,
+			"",
+		); err != nil {
+			return fmt.Errorf("failed bulk insert access methods: %w", err)
+		}
+	}
+	if len(checksumArgs) > 0 {
+		if err := execSQLiteBulkInsert(
+			tx,
+			"INSERT INTO drs_object_checksum (object_id, type, checksum) VALUES ",
+			"(?, ?, ?)",
+			3,
+			checksumArgs,
+			"",
+		); err != nil {
+			return fmt.Errorf("failed bulk insert checksums: %w", err)
+		}
+	}
+	if len(authzArgs) > 0 {
+		if err := execSQLiteBulkInsert(
+			tx,
+			"INSERT INTO drs_object_authz (object_id, resource) VALUES ",
+			"(?, ?)",
+			2,
+			authzArgs,
+			"",
+		); err != nil {
+			return fmt.Errorf("failed bulk insert authz: %w", err)
 		}
 	}
 
 	return tx.Commit()
 }
 
-func (db *SqliteDB) GetBulkObjects(ctx context.Context, ids []string) ([]drs.DrsObject, error) {
+func (db *SqliteDB) GetBulkObjects(ctx context.Context, ids []string) ([]core.InternalObject, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
-	var objects []drs.DrsObject
+	objectsByID, err := db.fetchObjectsByIDsOrChecksums(ctx, ids, nil)
+	if err != nil {
+		return nil, err
+	}
+	objects := make([]core.InternalObject, 0, len(ids))
+	seen := make(map[string]struct{}, len(ids))
 	for _, id := range ids {
-		obj, err := db.GetObject(ctx, id)
-		if err != nil {
+		if _, ok := seen[id]; ok {
 			continue
 		}
-		objects = append(objects, *obj)
+		seen[id] = struct{}{}
+		if obj, ok := objectsByID[id]; ok {
+			objects = append(objects, *obj)
+		}
 	}
 	return objects, nil
 }
 
-func (db *SqliteDB) GetObjectsByChecksums(ctx context.Context, checksums []string) (map[string][]drs.DrsObject, error) {
+func (db *SqliteDB) GetObjectsByChecksums(ctx context.Context, checksums []string) (map[string][]core.InternalObject, error) {
 	if len(checksums) == 0 {
 		return nil, nil
 	}
-	result := make(map[string][]drs.DrsObject, len(checksums))
-	for _, cs := range checksums {
-		objs, err := db.GetObjectsByChecksum(ctx, cs)
-		if err != nil {
-			return nil, err
+	objectsByID, err := db.fetchObjectsByIDsOrChecksums(ctx, nil, checksums)
+	if err != nil {
+		return nil, err
+	}
+	index := make(map[string][]core.InternalObject, len(objectsByID)*2)
+	for _, obj := range objectsByID {
+		index[obj.Id] = append(index[obj.Id], *obj)
+		for _, cs := range obj.Checksums {
+			value := strings.TrimSpace(cs.Checksum)
+			if value == "" {
+				continue
+			}
+			index[value] = append(index[value], *obj)
 		}
-		if len(objs) > 0 {
-			result[cs] = objs
+	}
+	result := make(map[string][]core.InternalObject, len(checksums))
+	for _, cs := range checksums {
+		normalized := strings.TrimSpace(cs)
+		if normalized == "" {
+			continue
+		}
+		if objs := index[normalized]; len(objs) > 0 {
+			result[normalized] = uniqueObjectsByID(objs)
 		}
 	}
 	return result, nil
@@ -386,31 +455,256 @@ func (db *SqliteDB) ListObjectIDsByResourcePrefix(ctx context.Context, resourceP
 	return ids, nil
 }
 
-func (db *SqliteDB) GetObjectsByChecksum(ctx context.Context, checksum string) ([]drs.DrsObject, error) {
+func (db *SqliteDB) GetObjectsByChecksum(ctx context.Context, checksum string) ([]core.InternalObject, error) {
 	obj, err := db.GetObject(ctx, checksum)
 	if err != nil {
 		if errors.Is(err, core.ErrNotFound) {
-			return []drs.DrsObject{}, nil
+			return []core.InternalObject{}, nil
 		}
 		return nil, err
 	}
-	return []drs.DrsObject{*obj}, nil
+	return []core.InternalObject{*obj}, nil
 }
 
 func (db *SqliteDB) BulkDeleteObjects(ctx context.Context, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
 	tx, err := db.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
+	placeholders := makePlaceholders(len(ids))
+	args := make([]interface{}, 0, len(ids))
 	for _, id := range ids {
-		_, err := tx.ExecContext(ctx, "DELETE FROM drs_object WHERE id = ?", id)
-		if err != nil {
+		args = append(args, id)
+	}
+	query := fmt.Sprintf("DELETE FROM drs_object WHERE id IN (%s)", placeholders)
+	if _, err := tx.ExecContext(ctx, query, args...); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (db *SqliteDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []string, checksums []string) (map[string]*core.InternalObject, error) {
+	if len(ids) == 0 && len(checksums) == 0 {
+		return map[string]*core.InternalObject{}, nil
+	}
+
+	conditions := make([]string, 0, 2)
+	args := make([]interface{}, 0, len(ids)+len(checksums))
+	if len(ids) > 0 {
+		conditions = append(conditions, fmt.Sprintf("o.id IN (%s)", makePlaceholders(len(ids))))
+		for _, id := range ids {
+			args = append(args, id)
+		}
+	}
+	if len(checksums) > 0 {
+		conditions = append(conditions, fmt.Sprintf("(o.id IN (%s) OR EXISTS (SELECT 1 FROM drs_object_checksum c2 WHERE c2.object_id = o.id AND c2.checksum IN (%s)))", makePlaceholders(len(checksums)), makePlaceholders(len(checksums))))
+		for _, cs := range checksums {
+			args = append(args, cs)
+		}
+		for _, cs := range checksums {
+			args = append(args, cs)
+		}
+	}
+
+	query := fmt.Sprintf(`
+		SELECT
+			o.id,
+			o.size,
+			o.created_time,
+			o.updated_time,
+			o.name,
+			o.version,
+			o.description,
+			am.url,
+			am.type,
+			cs.type,
+			cs.checksum,
+			oa.resource
+		FROM drs_object o
+		LEFT JOIN drs_object_access_method am ON am.object_id = o.id
+		LEFT JOIN drs_object_checksum cs ON cs.object_id = o.id
+		LEFT JOIN drs_object_authz oa ON oa.object_id = o.id
+		WHERE %s`, strings.Join(conditions, " OR "))
+
+	rows, err := db.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch bulk objects: %w", err)
+	}
+	defer rows.Close()
+
+	objectsByID := make(map[string]*core.InternalObject)
+	seenAccess := make(map[string]map[string]struct{})
+	seenChecksum := make(map[string]map[string]struct{})
+	seenAuthz := make(map[string]map[string]struct{})
+
+	for rows.Next() {
+		var (
+			id, name, version, description              string
+			size                                        int64
+			createdTime, updatedTime                    time.Time
+			accessURL, accessType, checksumType, sumVal sql.NullString
+			authzResource                               sql.NullString
+		)
+		if err := rows.Scan(
+			&id, &size, &createdTime, &updatedTime, &name, &version, &description,
+			&accessURL, &accessType, &checksumType, &sumVal, &authzResource,
+		); err != nil {
+			return nil, err
+		}
+
+		obj, ok := objectsByID[id]
+		if !ok {
+			obj = &core.InternalObject{
+				DrsObject: drs.DrsObject{
+					Id:          id,
+					Size:        size,
+					CreatedTime: createdTime,
+					UpdatedTime: updatedTime,
+					Name:        name,
+					Version:     version,
+					Description: description,
+					SelfUri:     "drs://" + id,
+				},
+			}
+			objectsByID[id] = obj
+			seenAccess[id] = make(map[string]struct{})
+			seenChecksum[id] = make(map[string]struct{})
+			seenAuthz[id] = make(map[string]struct{})
+		}
+
+		if accessURL.Valid && accessType.Valid {
+			key := accessType.String + "|" + accessURL.String
+			if _, exists := seenAccess[id][key]; !exists {
+				seenAccess[id][key] = struct{}{}
+				obj.DrsObject.AccessMethods = append(obj.DrsObject.AccessMethods, drs.AccessMethod{
+					AccessUrl: drs.AccessMethodAccessUrl{Url: accessURL.String},
+					Type:      accessType.String,
+					AccessId:  accessType.String,
+				})
+			}
+		}
+		if checksumType.Valid && sumVal.Valid {
+			key := checksumType.String + "|" + sumVal.String
+			if _, exists := seenChecksum[id][key]; !exists {
+				seenChecksum[id][key] = struct{}{}
+				obj.DrsObject.Checksums = append(obj.DrsObject.Checksums, drs.Checksum{Type: checksumType.String, Checksum: sumVal.String})
+			}
+		}
+		if authzResource.Valid && strings.TrimSpace(authzResource.String) != "" {
+			res := authzResource.String
+			if _, exists := seenAuthz[id][res]; !exists {
+				seenAuthz[id][res] = struct{}{}
+				obj.Authorizations = append(obj.Authorizations, res)
+			}
+		}
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Apply gen3 RBAC filtering to mimic GetObject behavior.
+	if core.IsGen3Mode(ctx) {
+		userResources := core.GetUserAuthz(ctx)
+		for id, obj := range objectsByID {
+			if !core.CheckAccess(obj.Authorizations, userResources) {
+				delete(objectsByID, id)
+				continue
+			}
+		}
+	}
+
+	for _, obj := range objectsByID {
+		for i := range obj.DrsObject.AccessMethods {
+			obj.DrsObject.AccessMethods[i].Authorizations = drs.AccessMethodAuthorizations{
+				BearerAuthIssuers: obj.Authorizations,
+			}
+		}
+	}
+
+	return objectsByID, nil
+}
+
+func makePlaceholders(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	parts := make([]string, n)
+	for i := range parts {
+		parts[i] = "?"
+	}
+	return strings.Join(parts, ",")
+}
+
+func uniqueObjectsByID(objs []core.InternalObject) []core.InternalObject {
+	seen := make(map[string]struct{}, len(objs))
+	out := make([]core.InternalObject, 0, len(objs))
+	for _, o := range objs {
+		if _, ok := seen[o.Id]; ok {
+			continue
+		}
+		seen[o.Id] = struct{}{}
+		out = append(out, o)
+	}
+	return out
+}
+
+func execSQLiteDeleteByIDs(tx *sql.Tx, table string, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	for start := 0; start < len(ids); start += sqliteMaxParams {
+		end := start + sqliteMaxParams
+		if end > len(ids) {
+			end = len(ids)
+		}
+		chunk := ids[start:end]
+		args := make([]interface{}, 0, len(chunk))
+		for _, id := range chunk {
+			args = append(args, id)
+		}
+		query := fmt.Sprintf("DELETE FROM %s WHERE object_id IN (%s)", table, makePlaceholders(len(chunk)))
+		if _, err := tx.Exec(query, args...); err != nil {
 			return err
 		}
 	}
-	return tx.Commit()
+	return nil
+}
+
+const sqliteMaxParams = 900
+
+func execSQLiteBulkInsert(tx *sql.Tx, prefix string, rowPlaceholder string, rowArity int, args []interface{}, suffix string) error {
+	if len(args) == 0 {
+		return nil
+	}
+	rows := len(args) / rowArity
+	maxRowsPerStmt := sqliteMaxParams / rowArity
+	if maxRowsPerStmt < 1 {
+		maxRowsPerStmt = 1
+	}
+
+	for rowStart := 0; rowStart < rows; rowStart += maxRowsPerStmt {
+		rowEnd := rowStart + maxRowsPerStmt
+		if rowEnd > rows {
+			rowEnd = rows
+		}
+		stmtRows := rowEnd - rowStart
+		stmtArgs := args[rowStart*rowArity : rowEnd*rowArity]
+		values := make([]string, stmtRows)
+		for i := 0; i < stmtRows; i++ {
+			values[i] = rowPlaceholder
+		}
+		query := prefix + strings.Join(values, ",") + suffix
+		if _, err := tx.Exec(query, stmtArgs...); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (db *SqliteDB) UpdateObjectAccessMethods(ctx context.Context, objectID string, accessMethods []drs.AccessMethod) error {

@@ -100,7 +100,7 @@ s3_credentials:
   - bucket: "my-test-bucket"
     region: "us-east-1"
     access_key: "AKIAXXXXXXXXXXXXXXXX"
-    secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+    secret_key: "SECRETKEY"
     endpoint: "s3.amazonaws.com" # Optional: set for MinIO or custom backends
 ```
 
@@ -121,8 +121,11 @@ go run . serve --config config.local.yaml
 
 Useful endpoints:
 - `GET /healthz`
+- `GET /swagger` (Swagger UI)
+- `GET /openapi.yaml` (OpenAPI spec)
 - `GET /service-info`
 - `GET /index/index/{id}` (gen3 compatibility)
+- `POST /index/index/bulk/sha256/validity` (bulk sha validity map for git-lfs style flows)
 - `GET /data/download/{id}` (fence compatibility)
 
 ## Running Integration Tests

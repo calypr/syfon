@@ -10,6 +10,8 @@ import (
 	"sort"
 	"testing"
 
+	datahash "github.com/calypr/data-client/hash"
+	dataindexd "github.com/calypr/data-client/indexd"
 	"github.com/calypr/drs-server/apigen/drs"
 	"github.com/calypr/drs-server/db/core"
 	"github.com/calypr/drs-server/testutils"
@@ -28,12 +30,14 @@ func TestIndexdCreateGetAndUpdate(t *testing.T) {
 	router, _ := newGen3Router(t)
 
 	create := IndexdRecord{
-		DID:      "sha-a",
-		Size:     10,
-		Hashes:   map[string]string{"sha256": "sha-a"},
-		URLs:     []string{"s3://bucket/a"},
-		Authz:    []string{"/programs/p/projects/q"},
-		FileName: "a.bin",
+		IndexdRecord: dataindexd.IndexdRecord{
+			Did:      "sha-a",
+			Size:     10,
+			Hashes:   datahash.HashInfo{SHA256: "sha-a"},
+			URLs:     []string{"s3://bucket/a"},
+			Authz:    []string{"/programs/p/projects/q"},
+			FileName: "a.bin",
+		},
 	}
 	body, _ := json.Marshal(create)
 	req := httptest.NewRequest(http.MethodPost, "/index/index", bytes.NewReader(body))
@@ -49,21 +53,23 @@ func TestIndexdCreateGetAndUpdate(t *testing.T) {
 	if getRR.Code != http.StatusOK {
 		t.Fatalf("get status=%d body=%s", getRR.Code, getRR.Body.String())
 	}
-	var got IndexdRecord
+	var got IndexdRecordResponse
 	if err := json.NewDecoder(getRR.Body).Decode(&got); err != nil {
 		t.Fatal(err)
 	}
-	if got.DID != "sha-a" || got.Hashes["sha256"] != "sha-a" {
+	if got.Did != "sha-a" || got.Hashes.SHA256 != "sha-a" {
 		t.Fatalf("unexpected get record: %+v", got)
 	}
 
 	update := IndexdRecord{
-		DID:      "sha-a",
-		Size:     42,
-		Hashes:   map[string]string{"sha256": "sha-a", "md5": "deadbeef"},
-		URLs:     []string{"s3://bucket/a-new"},
-		Authz:    []string{"/programs/new/projects/new"},
-		FileName: "a-new.bin",
+		IndexdRecord: dataindexd.IndexdRecord{
+			Did:      "sha-a",
+			Size:     42,
+			Hashes:   datahash.HashInfo{SHA256: "sha-a", MD5: "deadbeef"},
+			URLs:     []string{"s3://bucket/a-new"},
+			Authz:    []string{"/programs/new/projects/new"},
+			FileName: "a-new.bin",
+		},
 	}
 	updateBody, _ := json.Marshal(update)
 	updateReq := httptest.NewRequest(http.MethodPut, "/index/index/sha-a", bytes.NewReader(updateBody))
@@ -79,7 +85,7 @@ func TestIndexdCreateGetAndUpdate(t *testing.T) {
 	if getRR2.Code != http.StatusOK {
 		t.Fatalf("get after update status=%d body=%s", getRR2.Code, getRR2.Body.String())
 	}
-	var got2 IndexdRecord
+	var got2 IndexdRecordResponse
 	if err := json.NewDecoder(getRR2.Body).Decode(&got2); err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +98,7 @@ func TestIndexdCreateGetAndUpdate(t *testing.T) {
 	if len(got2.Authz) != 1 || got2.Authz[0] != "/programs/new/projects/new" {
 		t.Fatalf("unexpected authz after update: %+v", got2.Authz)
 	}
-	if got2.Hashes["md5"] != "deadbeef" {
+	if got2.Hashes.MD5 != "deadbeef" {
 		t.Fatalf("expected md5 checksum after update, got: %+v", got2.Hashes)
 	}
 }
@@ -102,12 +108,14 @@ func TestIndexdBulkHashesAndDocuments(t *testing.T) {
 
 	for _, id := range []string{"sha-b", "sha-c"} {
 		rec := IndexdRecord{
-			DID:      id,
-			Size:     5,
-			Hashes:   map[string]string{"sha256": id},
-			URLs:     []string{"s3://bucket/" + id},
-			Authz:    []string{"/programs/p/projects/q"},
-			FileName: id + ".bin",
+			IndexdRecord: dataindexd.IndexdRecord{
+				Did:      id,
+				Size:     5,
+				Hashes:   datahash.HashInfo{SHA256: id},
+				URLs:     []string{"s3://bucket/" + id},
+				Authz:    []string{"/programs/p/projects/q"},
+				FileName: id + ".bin",
+			},
 		}
 		body, _ := json.Marshal(rec)
 		req := httptest.NewRequest(http.MethodPost, "/index/index", bytes.NewReader(body))
@@ -134,7 +142,7 @@ func TestIndexdBulkHashesAndDocuments(t *testing.T) {
 	if len(hashesResp.Records) != 2 {
 		t.Fatalf("expected 2 records from bulk hashes, got %d", len(hashesResp.Records))
 	}
-	dids := []string{hashesResp.Records[0].DID, hashesResp.Records[1].DID}
+	dids := []string{hashesResp.Records[0].Did, hashesResp.Records[1].Did}
 	sort.Strings(dids)
 	if dids[0] != "sha-b" || dids[1] != "sha-c" {
 		t.Fatalf("unexpected dids from bulk hashes: %+v", dids)
@@ -147,12 +155,98 @@ func TestIndexdBulkHashesAndDocuments(t *testing.T) {
 	if docRR.Code != http.StatusOK {
 		t.Fatalf("bulk documents status=%d body=%s", docRR.Code, docRR.Body.String())
 	}
-	var docs []IndexdRecord
+	var docs []IndexdRecordResponse
 	if err := json.NewDecoder(docRR.Body).Decode(&docs); err != nil {
 		t.Fatal(err)
 	}
-	if len(docs) != 1 || docs[0].DID != "sha-c" {
+	if len(docs) != 1 || docs[0].Did != "sha-c" {
 		t.Fatalf("unexpected bulk documents response: %+v", docs)
+	}
+}
+
+func TestIndexdBulkSHA256Validity(t *testing.T) {
+	router, db := newGen3Router(t)
+	db.Credentials = map[string]core.S3Credential{
+		"valid-bucket": {Bucket: "valid-bucket", Region: "us-east-1"},
+	}
+	db.Objects = map[string]*drs.DrsObject{
+		"sha-valid": {
+			Id: "sha-valid",
+			AccessMethods: []drs.AccessMethod{
+				{Type: "s3", AccessUrl: drs.AccessMethodAccessUrl{Url: "s3://valid-bucket/path/to/object"}},
+			},
+		},
+		"sha-bad-bucket": {
+			Id: "sha-bad-bucket",
+			AccessMethods: []drs.AccessMethod{
+				{Type: "s3", AccessUrl: drs.AccessMethodAccessUrl{Url: "s3://missing-bucket/path/to/object"}},
+			},
+		},
+		"sha-bad-url": {
+			Id: "sha-bad-url",
+			AccessMethods: []drs.AccessMethod{
+				{Type: "s3", AccessUrl: drs.AccessMethodAccessUrl{Url: "https://valid-bucket/path/to/object"}},
+			},
+		},
+	}
+
+	reqBody, _ := json.Marshal(map[string][]string{
+		"sha256": []string{"sha-valid", "sha-bad-bucket", "sha-bad-url", "sha-missing"},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/index/index/bulk/sha256/validity", bytes.NewReader(reqBody))
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("bulk sha validity status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var resp map[string]bool
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if !resp["sha-valid"] {
+		t.Fatalf("expected sha-valid to be true: %+v", resp)
+	}
+	if resp["sha-bad-bucket"] {
+		t.Fatalf("expected sha-bad-bucket to be false: %+v", resp)
+	}
+	if resp["sha-bad-url"] {
+		t.Fatalf("expected sha-bad-url to be false: %+v", resp)
+	}
+	if resp["sha-missing"] {
+		t.Fatalf("expected sha-missing to be false: %+v", resp)
+	}
+}
+
+func TestIndexdBulkSHA256Validity_AcceptsHashesAlias(t *testing.T) {
+	router, db := newGen3Router(t)
+	db.Credentials = map[string]core.S3Credential{
+		"valid-bucket": {Bucket: "valid-bucket", Region: "us-east-1"},
+	}
+	db.Objects = map[string]*drs.DrsObject{
+		"sha-prefixed": {
+			Id: "sha-prefixed",
+			AccessMethods: []drs.AccessMethod{
+				{Type: "s3", AccessUrl: drs.AccessMethodAccessUrl{Url: "s3://valid-bucket/key"}},
+			},
+		},
+	}
+
+	reqBody, _ := json.Marshal(map[string][]string{
+		"hashes": []string{"sha256:sha-prefixed"},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/index/index/bulk/sha256/validity", bytes.NewReader(reqBody))
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("bulk sha validity status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp map[string]bool
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if !resp["sha-prefixed"] {
+		t.Fatalf("expected prefixed hash to be normalized and valid: %+v", resp)
 	}
 }
 
@@ -187,10 +281,12 @@ func TestIndexdBulkCreateGen3Unauthorized(t *testing.T) {
 	body, _ := json.Marshal(IndexdBulkCreateRequest{
 		Records: []IndexdRecord{
 			{
-				DID:      "sha-z",
-				Hashes:   map[string]string{"sha256": "sha-z"},
-				Authz:    []string{"/programs/p/projects/q"},
-				FileName: "z.bin",
+				IndexdRecord: dataindexd.IndexdRecord{
+					Did:      "sha-z",
+					Hashes:   datahash.HashInfo{SHA256: "sha-z"},
+					Authz:    []string{"/programs/p/projects/q"},
+					FileName: "z.bin",
+				},
 			},
 		},
 	})
@@ -237,7 +333,7 @@ func TestIndexdListAndDeleteByOrganizationProject(t *testing.T) {
 	if err := json.NewDecoder(getRR.Body).Decode(&listResp); err != nil {
 		t.Fatal(err)
 	}
-	if len(listResp.Records) != 1 || listResp.Records[0].DID != "sha-1" {
+	if len(listResp.Records) != 1 || listResp.Records[0].Did != "sha-1" {
 		t.Fatalf("unexpected list response: %+v", listResp.Records)
 	}
 	if listResp.Records[0].Organization != "cbds" || listResp.Records[0].Project != "p1" {
@@ -336,30 +432,46 @@ func TestWriteDBErrorBranches(t *testing.T) {
 }
 
 func TestCanonicalIDAndIndexdToDrsHelpers(t *testing.T) {
-	if got := canonicalIDFromIndexd(IndexdRecord{DID: "did"}); got != "did" {
+	if got := canonicalIDFromIndexd(IndexdRecord{IndexdRecord: dataindexd.IndexdRecord{Did: "did"}}); got != "did" {
 		t.Fatalf("expected did, got %q", got)
 	}
-	if got := canonicalIDFromIndexd(IndexdRecord{Hashes: map[string]string{"sha-256": "abc"}}); got != "abc" {
-		t.Fatalf("expected sha-256 fallback, got %q", got)
+	if got := canonicalIDFromIndexd(IndexdRecord{IndexdRecord: dataindexd.IndexdRecord{Hashes: datahash.HashInfo{SHA256: "abc"}}}); got != "abc" {
+		t.Fatalf("expected sha256 fallback, got %q", got)
 	}
 	if got := canonicalIDFromIndexd(IndexdRecord{}); got != "" {
 		t.Fatalf("expected empty id, got %q", got)
 	}
 
-	if _, _, err := indexdToDrs(IndexdRecord{}); err == nil {
+	if _, err := indexdToDrs(IndexdRecord{}); err == nil {
 		t.Fatal("expected validation error for missing did/hash")
 	}
-	obj, authz, err := indexdToDrs(IndexdRecord{
-		Hashes:       map[string]string{"sha256": "x"},
+	obj, err := indexdToDrs(IndexdRecord{
+		IndexdRecord: dataindexd.IndexdRecord{Hashes: datahash.HashInfo{SHA256: "x"}},
 		Organization: "cbds",
 		Project:      "p1",
-		URLs:         []string{"s3://bucket/x"},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if obj.Id != "x" || len(authz) != 1 || authz[0] != "/programs/cbds/projects/p1" {
-		t.Fatalf("unexpected mapping output: obj=%+v authz=%+v", obj, authz)
+	if obj.Id != "x" || len(obj.Authorizations) != 1 || obj.Authorizations[0] != "/programs/cbds/projects/p1" {
+		t.Fatalf("unexpected mapping output: obj=%+v", obj)
+	}
+}
+
+func TestIndexdToDrsWithScopeFromEmbeddedRecord(t *testing.T) {
+	obj, err := indexdToDrs(IndexdRecord{
+		IndexdRecord: dataindexd.IndexdRecord{
+			Hashes: datahash.HashInfo{SHA256: "x2"},
+			URLs:   []string{"s3://bucket/x2"},
+		},
+		Organization: "cbds",
+		Project:      "p1",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if obj.Id != "x2" || len(obj.Authorizations) != 1 || obj.Authorizations[0] != "/programs/cbds/projects/p1" {
+		t.Fatalf("unexpected mapping output: obj=%+v", obj)
 	}
 }
 

@@ -1236,8 +1236,8 @@ paths:
   /objects/checksum/{checksum}:
     get:
       description: |-
-        Returns a single canonical `DrsObject` for a given checksum.
-        Canonical behavior for this service uses the checksum (sha256) as the object ID.
+        Returns an array of `DRSObjects` that match a given checksum.
+        The checksum type is not provide, the checksum check is done against all checksum types.
       operationId: GetObjectsByChecksum
       parameters:
       - description: A `checksum` value from the `checksums` list of a `DrsObject`
@@ -1251,8 +1251,8 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DrsObject"
-          description: The canonical `DrsObject` was found successfully
+                $ref: "#/components/schemas/GetBulkObjects_200_response"
+          description: The `DrsObjects` were found successfully
         "202":
           description: |
             The operation is delayed and will continue asynchronously. The client should retry this same request after the delay specified by Retry-After header.
@@ -2477,7 +2477,7 @@ components:
         id: id
       properties:
         id:
-          description: Canonical object identifier. In this service this MUST be the sha256 checksum value.
+          description: An identifier unique to this `DrsObject`
           type: string
         name:
           description: |-
@@ -2517,6 +2517,24 @@ components:
           description: A string providing the mime-type of the `DrsObject`.
           example: application/json
           type: string
+        checksums:
+          description: |-
+            The checksum of the `DrsObject`. At least one checksum must be provided.
+            For blobs, the checksum is computed over the bytes in the blob.
+            For bundles, the checksum is computed over a sorted concatenation of the checksums of its top-level contained objects (not recursive, names not included). The list of checksums is sorted alphabetically (hex-code) before concatenation and a further checksum is performed on the concatenated checksum value.
+            For example, if a bundle contains blobs with the following checksums:
+            md5(blob1) = 72794b6d
+            md5(blob2) = 5e089d29
+            Then the checksum of the bundle is:
+            md5( concat( sort( md5(blob1), md5(blob2) ) ) )
+            = md5( concat( sort( 72794b6d, 5e089d29 ) ) )
+            = md5( concat( 5e089d29, 72794b6d ) )
+            = md5( 5e089d2972794b6d )
+            = f7a29a04
+          items:
+            $ref: "#/components/schemas/Checksum"
+          minItems: 1
+          type: array
         access_methods:
           description: |-
             The list of access methods that can be used to fetch the `DrsObject`.
@@ -2542,12 +2560,8 @@ components:
           items:
             type: string
           type: array
-        authorizations:
-          description: Object-level authorization resource paths.
-          items:
-            type: string
-          type: array
       required:
+      - checksums
       - created_time
       - id
       - self_uri
@@ -3141,8 +3155,16 @@ components:
           url: url
         available: true
         authorizations:
+          passport_auth_issuers:
+          - passport_auth_issuers
+          - passport_auth_issuers
           bearer_auth_issuers:
-          - /programs/{program}/projects/{project}
+          - bearer_auth_issuers
+          - bearer_auth_issuers
+          supported_types:
+          - None
+          - None
+          drs_object_id: drs_object_id
         access_id: access_id
         type: s3
         region: us-east-1
@@ -4326,17 +4348,22 @@ components:
         headers: "Authorization: Basic Z2E0Z2g6ZHJz"
         url: url
     AccessMethod_authorizations:
-      description: Authorization metadata for an access method.
-      type: object
-      properties:
-        bearer_auth_issuers:
-          description: List of authorization resource paths allowed to access this object.
-          items:
-            type: string
-          type: array
+      allOf:
+      - $ref: "#/components/schemas/Authorizations"
+      - description: "When `access_id` is provided, `authorizations` provides information\
+          \ about how to authorize the `/access` method."
+        type: object
       example:
+        passport_auth_issuers:
+        - passport_auth_issuers
+        - passport_auth_issuers
         bearer_auth_issuers:
-        - /programs/{program}/projects/{project}
+        - bearer_auth_issuers
+        - bearer_auth_issuers
+        supported_types:
+        - None
+        - None
+        drs_object_id: drs_object_id
     UploadMethod_access_url:
       allOf:
       - $ref: "#/components/schemas/AccessURL"

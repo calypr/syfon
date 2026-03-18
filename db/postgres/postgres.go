@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/calypr/drs-server/apigen/drs"
@@ -54,12 +55,12 @@ func (db *PostgresDB) DeleteObject(ctx context.Context, id string) error {
 		return err
 	}
 	if rows == 0 {
-		return fmt.Errorf("object not found")
+		return fmt.Errorf("%w: object not found", core.ErrNotFound)
 	}
 	return nil
 }
 
-func (db *PostgresDB) GetObject(ctx context.Context, id string) (*drs.DrsObject, error) {
+func (db *PostgresDB) GetObject(ctx context.Context, id string) (*core.InternalObject, error) {
 	// 1. Fetch main record
 	var r core.DrsObjectRecord
 	err := db.db.QueryRowContext(ctx, `
@@ -74,15 +75,17 @@ func (db *PostgresDB) GetObject(ctx context.Context, id string) (*drs.DrsObject,
 		return nil, fmt.Errorf("failed to fetch record: %w", err)
 	}
 
-	obj := &drs.DrsObject{
-		Id:          r.ID,
-		Size:        r.Size,
-		CreatedTime: r.CreatedTime,
-		UpdatedTime: r.UpdatedTime,
-		Version:     r.Version,
-		Description: r.Description,
-		Name:        r.Name,
-		SelfUri:     "drs://" + r.ID,
+	obj := &core.InternalObject{
+		DrsObject: drs.DrsObject{
+			Id:          r.ID,
+			Size:        r.Size,
+			CreatedTime: r.CreatedTime,
+			UpdatedTime: r.UpdatedTime,
+			Version:     r.Version,
+			Description: r.Description,
+			Name:        r.Name,
+			SelfUri:     "drs://" + r.ID,
+		},
 	}
 
 	// 2. Fetch URLs (Access Methods)
@@ -179,7 +182,7 @@ func (db *PostgresDB) GetObject(ctx context.Context, id string) (*drs.DrsObject,
 	return obj, nil
 }
 
-func (db *PostgresDB) CreateObject(ctx context.Context, obj *drs.DrsObject, authz []string) error {
+func (db *PostgresDB) CreateObject(ctx context.Context, obj *core.InternalObject) error {
 	tx, err := db.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -208,7 +211,7 @@ func (db *PostgresDB) CreateObject(ctx context.Context, obj *drs.DrsObject, auth
 	}
 
 	// Insert Authz
-	for _, res := range authz {
+	for _, res := range obj.Authorizations {
 		_, err = tx.ExecContext(ctx, `INSERT INTO drs_object_authz (object_id, resource) VALUES ($1, $2)`, obj.Id, res)
 		if err != nil {
 			return fmt.Errorf("failed to insert authz: %w", err)
@@ -218,41 +221,44 @@ func (db *PostgresDB) CreateObject(ctx context.Context, obj *drs.DrsObject, auth
 	return tx.Commit()
 }
 
-func (db *PostgresDB) RegisterObjects(ctx context.Context, objects []core.DrsObjectWithAuthz) error {
-	// Simple loop-based transaction for bulk registration
+func (db *PostgresDB) RegisterObjects(ctx context.Context, objects []core.InternalObject) error {
+	if len(objects) == 0 {
+		return nil
+	}
+
 	tx, err := db.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	for _, obj := range objects {
-		_, err = tx.ExecContext(ctx, `
-			INSERT INTO drs_object (id, size, created_time, updated_time, name, version, description)
-			VALUES ($1, $2, $3, $4, $5, $6, $7)
-			ON CONFLICT (id) DO UPDATE SET
-				size = EXCLUDED.size,
-				created_time = EXCLUDED.created_time,
-				updated_time = EXCLUDED.updated_time,
-				name = EXCLUDED.name,
-				version = EXCLUDED.version,
-				description = EXCLUDED.description`,
-			obj.Id, obj.Size, obj.CreatedTime, obj.UpdatedTime, obj.Name, obj.Version, obj.Description,
-		)
-		if err != nil {
-			return fmt.Errorf("failed to insert drs_object for %s: %w", obj.Id, err)
-		}
+	ids := make([]string, 0, len(objects))
+	sizes := make([]int64, 0, len(objects))
+	createdTimes := make([]time.Time, 0, len(objects))
+	updatedTimes := make([]time.Time, 0, len(objects))
+	names := make([]string, 0, len(objects))
+	versions := make([]string, 0, len(objects))
+	descriptions := make([]string, 0, len(objects))
 
-		// Replace child collections atomically to avoid duplicate rows across re-registrations.
-		if _, err = tx.ExecContext(ctx, `DELETE FROM drs_object_access_method WHERE object_id = $1`, obj.Id); err != nil {
-			return fmt.Errorf("failed to clear access methods for %s: %w", obj.Id, err)
-		}
-		if _, err = tx.ExecContext(ctx, `DELETE FROM drs_object_checksum WHERE object_id = $1`, obj.Id); err != nil {
-			return fmt.Errorf("failed to clear checksums for %s: %w", obj.Id, err)
-		}
-		if _, err = tx.ExecContext(ctx, `DELETE FROM drs_object_authz WHERE object_id = $1`, obj.Id); err != nil {
-			return fmt.Errorf("failed to clear authz for %s: %w", obj.Id, err)
-		}
+	accessObjectIDs := make([]string, 0)
+	accessURLs := make([]string, 0)
+	accessTypes := make([]string, 0)
+
+	checksumObjectIDs := make([]string, 0)
+	checksumTypes := make([]string, 0)
+	checksumValues := make([]string, 0)
+
+	authzObjectIDs := make([]string, 0)
+	authzResources := make([]string, 0)
+
+	for _, obj := range objects {
+		ids = append(ids, obj.Id)
+		sizes = append(sizes, obj.Size)
+		createdTimes = append(createdTimes, obj.CreatedTime)
+		updatedTimes = append(updatedTimes, obj.UpdatedTime)
+		names = append(names, obj.Name)
+		versions = append(versions, obj.Version)
+		descriptions = append(descriptions, obj.Description)
 
 		seenAccess := make(map[string]struct{})
 		for _, am := range obj.AccessMethods {
@@ -264,10 +270,9 @@ func (db *PostgresDB) RegisterObjects(ctx context.Context, objects []core.DrsObj
 				continue
 			}
 			seenAccess[key] = struct{}{}
-			_, err = tx.ExecContext(ctx, `INSERT INTO drs_object_access_method (object_id, url, type) VALUES ($1, $2, $3)`, obj.Id, am.AccessUrl.Url, am.Type)
-			if err != nil {
-				return fmt.Errorf("failed to insert url for %s: %w", obj.Id, err)
-			}
+			accessObjectIDs = append(accessObjectIDs, obj.Id)
+			accessURLs = append(accessURLs, am.AccessUrl.Url)
+			accessTypes = append(accessTypes, am.Type)
 		}
 
 		seenChecksum := make(map[string]struct{})
@@ -277,94 +282,141 @@ func (db *PostgresDB) RegisterObjects(ctx context.Context, objects []core.DrsObj
 				continue
 			}
 			seenChecksum[key] = struct{}{}
-			_, err = tx.ExecContext(ctx, `INSERT INTO drs_object_checksum (object_id, type, checksum) VALUES ($1, $2, $3)`, obj.Id, cs.Type, cs.Checksum)
-			if err != nil {
-				return fmt.Errorf("failed to insert checksum for %s: %w", obj.Id, err)
-			}
+			checksumObjectIDs = append(checksumObjectIDs, obj.Id)
+			checksumTypes = append(checksumTypes, cs.Type)
+			checksumValues = append(checksumValues, cs.Checksum)
 		}
 
 		seenAuthz := make(map[string]struct{})
-		for _, res := range obj.Authz {
+		for _, res := range obj.Authorizations {
 			if _, ok := seenAuthz[res]; ok {
 				continue
 			}
 			seenAuthz[res] = struct{}{}
-			_, err = tx.ExecContext(ctx, `INSERT INTO drs_object_authz (object_id, resource) VALUES ($1, $2)`, obj.Id, res)
-			if err != nil {
-				return fmt.Errorf("failed to insert authz for %s: %w", obj.Id, err)
-			}
+			authzObjectIDs = append(authzObjectIDs, obj.Id)
+			authzResources = append(authzResources, res)
+		}
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO drs_object (id, size, created_time, updated_time, name, version, description)
+		SELECT * FROM UNNEST($1::text[], $2::bigint[], $3::timestamp[], $4::timestamp[], $5::text[], $6::text[], $7::text[])
+		ON CONFLICT (id) DO UPDATE SET
+			size = EXCLUDED.size,
+			created_time = EXCLUDED.created_time,
+			updated_time = EXCLUDED.updated_time,
+			name = EXCLUDED.name,
+			version = EXCLUDED.version,
+			description = EXCLUDED.description`,
+		pq.Array(ids), pq.Array(sizes), pq.Array(createdTimes), pq.Array(updatedTimes),
+		pq.Array(names), pq.Array(versions), pq.Array(descriptions),
+	); err != nil {
+		return fmt.Errorf("failed bulk upsert drs_object: %w", err)
+	}
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM drs_object_access_method WHERE object_id = ANY($1)`, pq.Array(ids)); err != nil {
+		return fmt.Errorf("failed bulk clear access methods: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM drs_object_checksum WHERE object_id = ANY($1)`, pq.Array(ids)); err != nil {
+		return fmt.Errorf("failed bulk clear checksums: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM drs_object_authz WHERE object_id = ANY($1)`, pq.Array(ids)); err != nil {
+		return fmt.Errorf("failed bulk clear authz: %w", err)
+	}
+
+	if len(accessObjectIDs) > 0 {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO drs_object_access_method (object_id, url, type)
+			SELECT * FROM UNNEST($1::text[], $2::text[], $3::text[])`,
+			pq.Array(accessObjectIDs), pq.Array(accessURLs), pq.Array(accessTypes),
+		); err != nil {
+			return fmt.Errorf("failed bulk insert access methods: %w", err)
+		}
+	}
+
+	if len(checksumObjectIDs) > 0 {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO drs_object_checksum (object_id, type, checksum)
+			SELECT * FROM UNNEST($1::text[], $2::text[], $3::text[])`,
+			pq.Array(checksumObjectIDs), pq.Array(checksumTypes), pq.Array(checksumValues),
+		); err != nil {
+			return fmt.Errorf("failed bulk insert checksums: %w", err)
+		}
+	}
+
+	if len(authzObjectIDs) > 0 {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO drs_object_authz (object_id, resource)
+			SELECT * FROM UNNEST($1::text[], $2::text[])`,
+			pq.Array(authzObjectIDs), pq.Array(authzResources),
+		); err != nil {
+			return fmt.Errorf("failed bulk insert authz: %w", err)
 		}
 	}
 
 	return tx.Commit()
 }
 
-func (db *PostgresDB) GetBulkObjects(ctx context.Context, ids []string) ([]drs.DrsObject, error) {
+func (db *PostgresDB) GetBulkObjects(ctx context.Context, ids []string) ([]core.InternalObject, error) {
 	if len(ids) == 0 {
-		return []drs.DrsObject{}, nil
+		return []core.InternalObject{}, nil
 	}
-
-	userResources := core.GetUserAuthz(ctx)
-
-	// Fetch authorized IDs
-	rows, err := db.db.QueryContext(ctx, `
-		SELECT o.id FROM drs_object o
-		WHERE o.id = ANY($1) AND (
-			NOT EXISTS (SELECT 1 FROM drs_object_authz a WHERE a.object_id = o.id)
-			OR EXISTS (SELECT 1 FROM drs_object_authz a WHERE a.object_id = o.id AND a.resource = ANY($2))
-		)`, pq.Array(ids), pq.Array(userResources))
+	objectsByID, err := db.fetchObjectsByIDsOrChecksums(ctx, ids, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch authorized IDs: %w", err)
+		return nil, err
 	}
-	defer rows.Close()
-
-	var authorizedIDs []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		authorizedIDs = append(authorizedIDs, id)
-	}
-
-	var objects []drs.DrsObject
-	for _, id := range authorizedIDs {
-		// Use GetObject but skip redundant auth check since we already filtered?
-		// Actually GetObject still does auth check. We can keep it or refactor.
-		// For simplicity and correctness, we call GetObject.
-		// Since we already filtered IDs, GetObject should succeed.
-		obj, err := db.GetObject(ctx, id)
-		if err != nil {
+	objects := make([]core.InternalObject, 0, len(ids))
+	seen := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		if _, ok := seen[id]; ok {
 			continue
 		}
-		objects = append(objects, *obj)
+		seen[id] = struct{}{}
+		if obj, ok := objectsByID[id]; ok {
+			objects = append(objects, *obj)
+		}
 	}
 	return objects, nil
 }
 
-func (db *PostgresDB) GetObjectsByChecksum(ctx context.Context, checksum string) ([]drs.DrsObject, error) {
+func (db *PostgresDB) GetObjectsByChecksum(ctx context.Context, checksum string) ([]core.InternalObject, error) {
 	obj, err := db.GetObject(ctx, checksum)
 	if err != nil {
 		if errors.Is(err, core.ErrNotFound) {
-			return []drs.DrsObject{}, nil
+			return []core.InternalObject{}, nil
 		}
 		return nil, err
 	}
-	return []drs.DrsObject{*obj}, nil
+	return []core.InternalObject{*obj}, nil
 }
 
-func (db *PostgresDB) GetObjectsByChecksums(ctx context.Context, checksums []string) (map[string][]drs.DrsObject, error) {
+func (db *PostgresDB) GetObjectsByChecksums(ctx context.Context, checksums []string) (map[string][]core.InternalObject, error) {
 	if len(checksums) == 0 {
 		return nil, nil
 	}
-	result := make(map[string][]drs.DrsObject, len(checksums))
-	for _, cs := range checksums {
-		objs, err := db.GetObjectsByChecksum(ctx, cs)
-		if err != nil {
-			return nil, err
+	objectsByID, err := db.fetchObjectsByIDsOrChecksums(ctx, nil, checksums)
+	if err != nil {
+		return nil, err
+	}
+	index := make(map[string][]core.InternalObject, len(objectsByID)*2)
+	for _, obj := range objectsByID {
+		index[obj.Id] = append(index[obj.Id], *obj)
+		for _, cs := range obj.Checksums {
+			value := strings.TrimSpace(cs.Checksum)
+			if value == "" {
+				continue
+			}
+			index[value] = append(index[value], *obj)
 		}
-		if len(objs) > 0 {
-			result[cs] = objs
+	}
+	result := make(map[string][]core.InternalObject, len(checksums))
+	for _, cs := range checksums {
+		normalized := strings.TrimSpace(cs)
+		if normalized == "" {
+			continue
+		}
+		if objs := index[normalized]; len(objs) > 0 {
+			result[normalized] = uniqueObjectsByID(objs)
 		}
 	}
 	return result, nil
@@ -392,19 +444,163 @@ func (db *PostgresDB) ListObjectIDsByResourcePrefix(ctx context.Context, resourc
 }
 
 func (db *PostgresDB) BulkDeleteObjects(ctx context.Context, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
 	tx, err := db.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	for _, id := range ids {
-		_, err := tx.ExecContext(ctx, "DELETE FROM drs_object WHERE id = $1", id)
-		if err != nil {
-			return err
-		}
+	if _, err := tx.ExecContext(ctx, "DELETE FROM drs_object WHERE id = ANY($1)", pq.Array(ids)); err != nil {
+		return err
 	}
 	return tx.Commit()
+}
+
+func (db *PostgresDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []string, checksums []string) (map[string]*core.InternalObject, error) {
+	if len(ids) == 0 && len(checksums) == 0 {
+		return map[string]*core.InternalObject{}, nil
+	}
+
+	userResources := core.GetUserAuthz(ctx)
+	rows, err := db.db.QueryContext(ctx, `
+		SELECT
+			o.id,
+			o.size,
+			o.created_time,
+			o.updated_time,
+			o.name,
+			o.version,
+			o.description,
+			am.url,
+			am.type,
+			cs.type,
+			cs.checksum,
+			oa.resource
+		FROM drs_object o
+		LEFT JOIN drs_object_access_method am ON am.object_id = o.id
+		LEFT JOIN drs_object_checksum cs ON cs.object_id = o.id
+		LEFT JOIN drs_object_authz oa ON oa.object_id = o.id
+		WHERE (
+			(COALESCE(array_length($1::text[], 1), 0) > 0 AND o.id = ANY($1))
+			OR
+			(COALESCE(array_length($2::text[], 1), 0) > 0 AND (
+				o.id = ANY($2)
+				OR EXISTS (
+					SELECT 1
+					FROM drs_object_checksum c2
+					WHERE c2.object_id = o.id AND c2.checksum = ANY($2)
+				)
+			))
+		)
+		AND (
+			NOT EXISTS (SELECT 1 FROM drs_object_authz a WHERE a.object_id = o.id)
+			OR EXISTS (SELECT 1 FROM drs_object_authz a WHERE a.object_id = o.id AND a.resource = ANY($3))
+		)`,
+		pq.Array(ids), pq.Array(checksums), pq.Array(userResources),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch bulk objects: %w", err)
+	}
+	defer rows.Close()
+
+	objectsByID := make(map[string]*core.InternalObject)
+	seenAccess := make(map[string]map[string]struct{})
+	seenChecksum := make(map[string]map[string]struct{})
+	seenAuthz := make(map[string]map[string]struct{})
+
+	for rows.Next() {
+		var (
+			id, name, version, description              string
+			size                                        int64
+			createdTime, updatedTime                    time.Time
+			accessURL, accessType, checksumType, sumVal sql.NullString
+			authzResource                               sql.NullString
+		)
+		if err := rows.Scan(
+			&id, &size, &createdTime, &updatedTime, &name, &version, &description,
+			&accessURL, &accessType, &checksumType, &sumVal, &authzResource,
+		); err != nil {
+			return nil, err
+		}
+
+		obj, ok := objectsByID[id]
+		if !ok {
+			obj = &core.InternalObject{
+				DrsObject: drs.DrsObject{
+					Id:          id,
+					Size:        size,
+					CreatedTime: createdTime,
+					UpdatedTime: updatedTime,
+					Name:        name,
+					Version:     version,
+					Description: description,
+					SelfUri:     "drs://" + id,
+				},
+			}
+			objectsByID[id] = obj
+			seenAccess[id] = make(map[string]struct{})
+			seenChecksum[id] = make(map[string]struct{})
+			seenAuthz[id] = make(map[string]struct{})
+		}
+
+		if accessURL.Valid && accessType.Valid {
+			key := accessType.String + "|" + accessURL.String
+			if _, exists := seenAccess[id][key]; !exists {
+				seenAccess[id][key] = struct{}{}
+				obj.DrsObject.AccessMethods = append(obj.DrsObject.AccessMethods, drs.AccessMethod{
+					AccessUrl: drs.AccessMethodAccessUrl{Url: accessURL.String},
+					Type:      accessType.String,
+					AccessId:  accessType.String,
+				})
+			}
+		}
+
+		if checksumType.Valid && sumVal.Valid {
+			key := checksumType.String + "|" + sumVal.String
+			if _, exists := seenChecksum[id][key]; !exists {
+				seenChecksum[id][key] = struct{}{}
+				obj.DrsObject.Checksums = append(obj.DrsObject.Checksums, drs.Checksum{Type: checksumType.String, Checksum: sumVal.String})
+			}
+		}
+
+		if authzResource.Valid && strings.TrimSpace(authzResource.String) != "" {
+			res := authzResource.String
+			if _, exists := seenAuthz[id][res]; !exists {
+				seenAuthz[id][res] = struct{}{}
+				obj.Authorizations = append(obj.Authorizations, res)
+			}
+		}
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	for _, obj := range objectsByID {
+		for i := range obj.DrsObject.AccessMethods {
+			obj.DrsObject.AccessMethods[i].Authorizations = drs.AccessMethodAuthorizations{
+				BearerAuthIssuers: obj.Authorizations,
+			}
+		}
+	}
+
+	return objectsByID, nil
+}
+
+func uniqueObjectsByID(objs []core.InternalObject) []core.InternalObject {
+	seen := make(map[string]struct{}, len(objs))
+	out := make([]core.InternalObject, 0, len(objs))
+	for _, o := range objs {
+		if _, ok := seen[o.Id]; ok {
+			continue
+		}
+		seen[o.Id] = struct{}{}
+		out = append(out, o)
+	}
+	return out
 }
 
 func (db *PostgresDB) UpdateObjectAccessMethods(ctx context.Context, objectID string, accessMethods []drs.AccessMethod) error {

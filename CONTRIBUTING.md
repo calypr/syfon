@@ -4,17 +4,13 @@ Thank you for your interest in contributing to `drs-server`, a lightweight refer
 
 This document outlines how to set up your environment, make changes, and submit them.
 
-## Code of conduct
-
-Be respectful and constructive. Assume good faith in discussions and reviews.
-
 ## Project overview
 
 `drs-server`:
 
 * Implements a GA4GH DRS\-compatible HTTP API in Go.
 * Uses the official GA4GH DRS OpenAPI spec via a Git submodule at `ga4gh/data-repository-service-schemas`.
-* Generates server stubs into `internal/apigen` from that OpenAPI spec.
+* Generates server stubs into `apigen` from that OpenAPI spec.
 
 ## Getting started
 
@@ -86,7 +82,7 @@ go test ./...
 
 ### Generated code
 
-* Do not manually edit files under `internal/apigen`.
+* Do not manually edit files under `apigen`.
 * Regenerate using `make gen` when the OpenAPI spec changes.
 * Commit the regenerated files along with the spec or handler changes.
 

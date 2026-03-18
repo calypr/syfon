@@ -12,6 +12,7 @@ import (
 	"github.com/calypr/drs-server/db/postgres"
 	"github.com/calypr/drs-server/db/sqlite"
 	"github.com/calypr/drs-server/internal/api/admin"
+	"github.com/calypr/drs-server/internal/api/docs"
 	"github.com/calypr/drs-server/internal/api/fence"
 	"github.com/calypr/drs-server/internal/api/gen3"
 	"github.com/calypr/drs-server/internal/api/middleware"
@@ -91,9 +92,10 @@ var Cmd = &cobra.Command{
 		// Init Controller
 		objectsController := drs.NewObjectsAPIController(service)
 		serviceInfoController := drs.NewServiceInfoAPIController(service)
+		uploadRequestController := drs.NewUploadRequestAPIController(service)
 
 		// Init Router
-		router := drs.NewRouter(objectsController, serviceInfoController)
+		router := drs.NewRouter(objectsController, serviceInfoController, uploadRequestController)
 
 		// Init AuthZ Middleware
 		// We use a standard slog.Logger for data-client compatibility
@@ -105,8 +107,10 @@ var Cmd = &cobra.Command{
 			cfg.Auth.Basic.Username,
 			cfg.Auth.Basic.Password,
 		)
+		requestIDMiddleware := middleware.NewRequestIDMiddleware(slogLogger)
 
 		// Apply Middlewares
+		router.Use(requestIDMiddleware.Middleware)
 		router.Use(authzMiddleware.Middleware)
 
 		router.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -116,6 +120,7 @@ var Cmd = &cobra.Command{
 
 		// Register Admin Routes
 		admin.RegisterAdminRoutes(router, database, uM)
+		docs.RegisterSwaggerRoutes(router)
 
 		// Register Gen3 Compatibility Routes (for git-drs)
 		gen3.RegisterGen3Routes(router, database)

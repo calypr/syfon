@@ -1,16 +1,44 @@
 SHELL := /bin/bash
+.DEFAULT_GOAL := build
 OPENAPI ?= ga4gh/data-repository-service-schemas/openapi/data_repository_service.openapi.yaml
 OAG_IMAGE ?= openapitools/openapi-generator-cli:latest
 MKDOCS_IMAGE ?= squidfunk/mkdocs-material:latest
+GEN_OUT ?= .tmp/apigen.gen
+SCHEMAS_SUBMODULE ?= ga4gh/data-repository-service-schemas
+AUTO_INIT_SUBMODULE ?= 0
+GOCACHE ?= $(PWD)/.gocache
+
+.PHONY: init-schemas
+init-schemas:
+	@git submodule update --init --recursive --depth 1 "$(SCHEMAS_SUBMODULE)"
+
+.PHONY: build
+build:
+	GOCACHE="$(GOCACHE)" go build ./...
 
 .PHONY: gen
 gen:
-	@mkdir -p .tmp apigen
-	# OpenAPI Generator (Go server stub)
-	# delete previous generated code
-	rm -rf apigen
-	# generate new code
-	docker run --rm \
+	@set -euo pipefail; \
+	mkdir -p .tmp; \
+	spec="$(OPENAPI)"; \
+	if [[ ! -f "$$spec" ]]; then \
+	  if [[ "$(AUTO_INIT_SUBMODULE)" == "1" ]]; then \
+	    echo "OpenAPI spec '$$spec' not found. Initializing submodule..."; \
+	    git submodule update --init --recursive --depth 1 "$(SCHEMAS_SUBMODULE)" || true; \
+	  fi; \
+	fi; \
+	if [[ ! -f "$$spec" ]]; then \
+	  echo "ERROR: OpenAPI spec '$$spec' not found."; \
+	  echo "Run: make init-schemas"; \
+	  echo "Or: make gen AUTO_INIT_SUBMODULE=1"; \
+	  exit 1; \
+	fi; \
+	if ! command -v docker >/dev/null 2>&1; then \
+	  echo "ERROR: docker is required for 'make gen'."; \
+	  exit 1; \
+	fi; \
+	rm -rf "$(GEN_OUT)"; \
+	docker run --rm --pull=missing \
 	  --user "$$(id -u):$$(id -g)" \
 	  -v "$(PWD):/local" \
 	  $(OAG_IMAGE) generate \
@@ -18,23 +46,28 @@ gen:
 	  --skip-validate-spec \
 	  --git-repo-id drs-server \
 	  --git-user-id calypr \
-	  -i /local/$(OPENAPI) \
-	  -o /local/apigen \
-	  --additional-properties outputAsLibrary=true,sourceFolder=drs,packageName=drs
-	# a bundle is created at apigen/openapi.yaml, remove examples from it
-	# as many are not compliant with the spec or seem to be randomly generated
-	# go run ./cmd/openapi-remove-examples
+	  -i /local/$$spec \
+	  -o /local/$(GEN_OUT) \
+	  --additional-properties outputAsLibrary=true,sourceFolder=drs,packageName=drs; \
+	if [[ ! -f "$(GEN_OUT)/drs/api.go" ]]; then \
+	  echo "ERROR: generation did not produce expected file: $(GEN_OUT)/drs/api.go"; \
+	  exit 1; \
+	fi; \
+	rm -rf .tmp/apigen.prev; \
+	if [[ -d apigen ]]; then mv apigen .tmp/apigen.prev; fi; \
+	mv "$(GEN_OUT)" apigen; \
+	echo "Generated OpenAPI server stubs into ./apigen"
 
 .PHONY: test
 test:
-	go clean -testcache
-	go test -v ./...
+	GOCACHE="$(GOCACHE)" go clean -testcache
+	GOCACHE="$(GOCACHE)" go test -v ./...
 
 .PHONY: test-unit
 test-unit:
-	go clean -testcache
+	GOCACHE="$(GOCACHE)" go clean -testcache
 	@PKGS=$$(go list ./... | grep -Ev '/cmd/server$$|/tests/endpoints$$'); \
-	  go test -v -count=1 $$PKGS
+	  GOCACHE="$(GOCACHE)" go test -v -count=1 $$PKGS
 
 .PHONY: coverage
 coverage:

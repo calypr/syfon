@@ -1,18 +1,34 @@
 package gen3
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
+	datadrs "github.com/calypr/data-client/drs"
+	datahash "github.com/calypr/data-client/hash"
+	dataindexd "github.com/calypr/data-client/indexd"
 	"github.com/calypr/drs-server/apigen/drs"
 	"github.com/calypr/drs-server/db/core"
 	"github.com/gorilla/mux"
 )
+
+func writeHTTPError(w http.ResponseWriter, r *http.Request, status int, msg string, err error) {
+	requestID := core.GetRequestID(r.Context())
+	if err != nil {
+		slog.Error("gen3 request failed", "request_id", requestID, "method", r.Method, "path", r.URL.Path, "status", status, "msg", msg, "err", err)
+	} else {
+		slog.Warn("gen3 request rejected", "request_id", requestID, "method", r.Method, "path", r.URL.Path, "status", status, "msg", msg)
+	}
+	http.Error(w, msg, status)
+}
 
 func writeDBError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
@@ -21,38 +37,32 @@ func writeDBError(w http.ResponseWriter, r *http.Request, err error) {
 		if core.IsGen3Mode(r.Context()) && !core.HasAuthHeader(r.Context()) {
 			code = http.StatusUnauthorized
 		}
-		http.Error(w, "Unauthorized", code)
+		writeHTTPError(w, r, code, "Unauthorized", err)
 	case errors.Is(err, core.ErrNotFound):
-		http.Error(w, "Object not found", http.StatusNotFound)
+		writeHTTPError(w, r, http.StatusNotFound, "Object not found", err)
 	default:
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeHTTPError(w, r, http.StatusInternalServerError, err.Error(), err)
 	}
 }
 
-// IndexdRecord represents the JSON structure of a Gen3 Indexd record.
-// This is a simplified version tailored to what git-drs expects.
 type IndexdRecord struct {
-	DID          string                 `json:"did"`
-	BaseID       string                 `json:"baseid,omitempty"`
-	Rev          string                 `json:"rev,omitempty"`
-	Size         int64                  `json:"size"`
-	Hashes       map[string]string      `json:"hashes"`
-	URLs         []string               `json:"urls"`
-	ACL          []string               `json:"acl"`
-	Authz        []string               `json:"authz"`
-	Organization string                 `json:"organization,omitempty"`
-	Project      string                 `json:"project,omitempty"`
-	FileName     string                 `json:"file_name,omitempty"`
-	Metadata     map[string]interface{} `json:"metadata,omitempty"`
-	CreatedDate  string                 `json:"created_date,omitempty"`
-	UpdatedDate  string                 `json:"updated_date,omitempty"`
-	Version      string                 `json:"version,omitempty"`
-	Uploader     string                 `json:"uploader,omitempty"`
+	dataindexd.IndexdRecord
+	Organization string `json:"organization,omitempty"`
+	Project      string `json:"project,omitempty"`
+}
+
+type IndexdRecordResponse struct {
+	IndexdRecord
+	BaseID      string `json:"baseid,omitempty"`
+	Rev         string `json:"rev,omitempty"`
+	CreatedDate string `json:"created_date,omitempty"`
+	UpdatedDate string `json:"updated_date,omitempty"`
+	Uploader    string `json:"uploader,omitempty"`
 }
 
 // ListRecordsResponse represents the wrapper for listing records in Indexd.
 type ListRecordsResponse struct {
-	Records []IndexdRecord `json:"records"`
+	Records []IndexdRecordResponse `json:"records"`
 }
 
 type IndexdBulkCreateRequest struct {
@@ -71,11 +81,12 @@ func RegisterGen3Routes(router *mux.Router, database core.DatabaseInterface) {
 		case http.MethodDelete:
 			handleIndexdDeleteByQuery(w, r, database)
 		default:
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			writeHTTPError(w, r, http.StatusMethodNotAllowed, "Method not allowed", nil)
 		}
 	}), "IndexdIndex")).Methods(http.MethodGet, http.MethodPost, http.MethodDelete)
 
 	router.Handle("/index/index/bulk/hashes", drs.Logger(handleIndexdBulkHashes(database), "IndexdBulkHashes")).Methods(http.MethodPost)
+	router.Handle("/index/index/bulk/sha256/validity", drs.Logger(handleIndexdBulkSHA256Validity(database), "IndexdBulkSHA256Validity")).Methods(http.MethodPost)
 	router.Handle("/index/index/bulk", drs.Logger(handleIndexdBulkCreate(database), "IndexdBulkCreate")).Methods(http.MethodPost)
 	router.Handle("/bulk/documents", drs.Logger(handleIndexdBulkDocuments(database), "IndexdBulkDocuments")).Methods(http.MethodPost)
 
@@ -88,40 +99,36 @@ func RegisterGen3Routes(router *mux.Router, database core.DatabaseInterface) {
 		case http.MethodDelete:
 			handleIndexdDelete(w, r, database)
 		default:
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			writeHTTPError(w, r, http.StatusMethodNotAllowed, "Method not allowed", nil)
 		}
 	}), "IndexdDetail")).Methods(http.MethodGet, http.MethodPut, http.MethodDelete)
 }
 
 func canonicalIDFromIndexd(req IndexdRecord) string {
-	if req.DID != "" {
-		return req.DID
+	if req.Did != "" {
+		return req.Did
 	}
-	if v := req.Hashes["sha256"]; v != "" {
-		return v
-	}
-	if v := req.Hashes["sha-256"]; v != "" {
+	if v := req.Hashes.SHA256; v != "" {
 		return v
 	}
 	return ""
 }
 
-func indexdToDrs(req IndexdRecord) (*drs.DrsObject, []string, error) {
+func indexdToDrs(req IndexdRecord) (*core.InternalObject, error) {
 	id := canonicalIDFromIndexd(req)
 	if id == "" {
-		return nil, nil, fmt.Errorf("did or sha256 hash is required")
+		return nil, fmt.Errorf("did or sha256 hash is required")
 	}
 	now := time.Now()
 	obj := &drs.DrsObject{
-		Id:             id,
-		SelfUri:        "drs://" + id,
-		Size:           req.Size,
-		CreatedTime:    now,
-		UpdatedTime:    now,
-		Name:           req.FileName,
-		Authorizations: append([]string(nil), req.Authz...),
+		Id:          id,
+		SelfUri:     "drs://" + id,
+		Size:        req.Size,
+		CreatedTime: now,
+		UpdatedTime: now,
+		Name:        req.FileName,
 	}
-	for t, v := range req.Hashes {
+	for t, v := range datahash.ConvertHashInfoToMap(req.Hashes) {
 		obj.Checksums = append(obj.Checksums, drs.Checksum{Type: t, Checksum: v})
 	}
 	if len(obj.Checksums) == 0 {
@@ -141,34 +148,33 @@ func indexdToDrs(req IndexdRecord) (*drs.DrsObject, []string, error) {
 			authz = append(authz, path)
 		}
 	}
-	obj.Authorizations = append([]string(nil), authz...)
 	for i := range obj.AccessMethods {
 		obj.AccessMethods[i].Authorizations = drs.AccessMethodAuthorizations{
 			BearerAuthIssuers: authz,
 		}
 	}
-	return obj, authz, nil
+	return &core.InternalObject{DrsObject: *obj, Authorizations: authz}, nil
 }
 
 func handleIndexdBulkCreate(database core.DatabaseInterface) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req IndexdBulkCreateRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "Invalid request body", http.StatusBadRequest)
+			writeHTTPError(w, r, http.StatusBadRequest, "Invalid request body", nil)
 			return
 		}
 		if len(req.Records) == 0 {
-			http.Error(w, "records cannot be empty", http.StatusBadRequest)
+			writeHTTPError(w, r, http.StatusBadRequest, "records cannot be empty", nil)
 			return
 		}
-		results := make([]IndexdRecord, 0, len(req.Records))
+		results := make([]IndexdRecordResponse, 0, len(req.Records))
 		for i, rec := range req.Records {
-			obj, authz, err := indexdToDrs(rec)
+			obj, err := indexdToDrs(rec)
 			if err != nil {
-				http.Error(w, fmt.Sprintf("record[%d]: %v", i, err), http.StatusBadRequest)
+				writeHTTPError(w, r, http.StatusBadRequest, fmt.Sprintf("record[%d]: %v", i, err), err)
 				return
 			}
-			targetResources := authz
+			targetResources := obj.Authorizations
 			if len(targetResources) == 0 {
 				targetResources = []string{"/data_file"}
 				if !core.HasMethodAccess(r.Context(), "file_upload", targetResources) && !core.HasMethodAccess(r.Context(), "create", targetResources) {
@@ -180,15 +186,17 @@ func handleIndexdBulkCreate(database core.DatabaseInterface) http.HandlerFunc {
 				return
 			}
 
-			if err := database.CreateObject(r.Context(), obj, authz); err != nil {
-				http.Error(w, fmt.Sprintf("record[%d]: %v", i, err), http.StatusInternalServerError)
+			if err := database.CreateObject(r.Context(), obj); err != nil {
+				writeDBError(w, r, err)
 				return
 			}
 			results = append(results, drsToIndexd(obj))
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		_ = json.NewEncoder(w).Encode(ListRecordsResponse{Records: results})
+		if err := json.NewEncoder(w).Encode(ListRecordsResponse{Records: results}); err != nil {
+			slog.Error("gen3 encode response failed", "request_id", core.GetRequestID(r.Context()), "method", r.Method, "path", r.URL.Path, "err", err)
+		}
 	}
 }
 
@@ -196,7 +204,7 @@ func handleIndexdBulkDocuments(database core.DatabaseInterface) http.HandlerFunc
 	return func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
-			http.Error(w, "Invalid request body", http.StatusBadRequest)
+			writeHTTPError(w, r, http.StatusBadRequest, "Invalid request body", nil)
 			return
 		}
 		var dids []string
@@ -206,7 +214,7 @@ func handleIndexdBulkDocuments(database core.DatabaseInterface) http.HandlerFunc
 				DIDs []string `json:"dids"`
 			}
 			if err2 := json.Unmarshal(body, &wrapper); err2 != nil {
-				http.Error(w, "Invalid request body", http.StatusBadRequest)
+				writeHTTPError(w, r, http.StatusBadRequest, "Invalid request body", nil)
 				return
 			}
 			if len(wrapper.DIDs) > 0 {
@@ -216,7 +224,7 @@ func handleIndexdBulkDocuments(database core.DatabaseInterface) http.HandlerFunc
 			}
 		}
 		if len(dids) == 0 {
-			http.Error(w, "No ids provided", http.StatusBadRequest)
+			writeHTTPError(w, r, http.StatusBadRequest, "No ids provided", nil)
 			return
 		}
 		objs, err := database.GetBulkObjects(r.Context(), dids)
@@ -224,7 +232,7 @@ func handleIndexdBulkDocuments(database core.DatabaseInterface) http.HandlerFunc
 			writeDBError(w, r, err)
 			return
 		}
-		out := make([]IndexdRecord, 0, len(objs))
+		out := make([]IndexdRecordResponse, 0, len(objs))
 		for i := range objs {
 			if len(objs[i].Authorizations) > 0 && !core.HasMethodAccess(r.Context(), "read", objs[i].Authorizations) {
 				continue
@@ -232,7 +240,9 @@ func handleIndexdBulkDocuments(database core.DatabaseInterface) http.HandlerFunc
 			out = append(out, drsToIndexd(&objs[i]))
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(out)
+		if err := json.NewEncoder(w).Encode(out); err != nil {
+			slog.Error("gen3 encode response failed", "request_id", core.GetRequestID(r.Context()), "method", r.Method, "path", r.URL.Path, "err", err)
+		}
 	}
 }
 
@@ -243,18 +253,14 @@ func handleIndexdBulkHashes(database core.DatabaseInterface) http.HandlerFunc {
 			Hashes []string `json:"hashes"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "Invalid request body", http.StatusBadRequest)
+			writeHTTPError(w, r, http.StatusBadRequest, "Invalid request body", nil)
 			return
 		}
 
 		// Normalize hashes
 		targetHashes := make([]string, len(req.Hashes))
 		for i, h := range req.Hashes {
-			if parts := strings.SplitN(h, ":", 2); len(parts) == 2 {
-				targetHashes[i] = parts[1]
-			} else {
-				targetHashes[i] = h
-			}
+			targetHashes[i] = normalizeHashQueryValue(h)
 		}
 
 		objsMap, err := database.GetObjectsByChecksums(r.Context(), targetHashes)
@@ -265,7 +271,7 @@ func handleIndexdBulkHashes(database core.DatabaseInterface) http.HandlerFunc {
 
 		// Convert back to IndexdRecord results
 		// Gen3 Indexd usually returns a mapping or a list. Let's return a list of records found.
-		results := make([]IndexdRecord, 0)
+		results := make([]IndexdRecordResponse, 0)
 		for _, objs := range objsMap {
 			for _, o := range objs {
 				if len(o.Authorizations) > 0 && !core.HasMethodAccess(r.Context(), "read", o.Authorizations) {
@@ -276,13 +282,136 @@ func handleIndexdBulkHashes(database core.DatabaseInterface) http.HandlerFunc {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(ListRecordsResponse{Records: results})
+		if err := json.NewEncoder(w).Encode(ListRecordsResponse{Records: results}); err != nil {
+			slog.Error("gen3 encode response failed", "request_id", core.GetRequestID(r.Context()), "method", r.Method, "path", r.URL.Path, "err", err)
+		}
 	}
 }
 
+func handleIndexdBulkSHA256Validity(database core.DatabaseInterface) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			SHA256 []string `json:"sha256"`
+			Hashes []string `json:"hashes"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeHTTPError(w, r, http.StatusBadRequest, "Invalid request body", nil)
+			return
+		}
+
+		input := req.SHA256
+		if len(input) == 0 {
+			input = req.Hashes
+		}
+		if len(input) == 0 {
+			writeHTTPError(w, r, http.StatusBadRequest, "No sha256 values provided", nil)
+			return
+		}
+
+		targets := make([]string, 0, len(input))
+		seen := make(map[string]struct{}, len(input))
+		for _, raw := range input {
+			sha := normalizeSHA(raw)
+			if sha == "" {
+				continue
+			}
+			if _, ok := seen[sha]; ok {
+				continue
+			}
+			seen[sha] = struct{}{}
+			targets = append(targets, sha)
+		}
+		if len(targets) == 0 {
+			writeHTTPError(w, r, http.StatusBadRequest, "No valid sha256 values provided", nil)
+			return
+		}
+
+		bucketSet, err := getRegisteredBucketSet(r.Context(), database)
+		if err != nil {
+			writeHTTPError(w, r, http.StatusInternalServerError, fmt.Sprintf("failed to load registered buckets: %v", err), err)
+			return
+		}
+
+		objsMap, err := database.GetObjectsByChecksums(r.Context(), targets)
+		if err != nil {
+			writeDBError(w, r, err)
+			return
+		}
+
+		resp := make(map[string]bool, len(targets))
+		for _, sha := range targets {
+			resp[sha] = false
+			for _, obj := range objsMap[sha] {
+				if hasValidRegisteredS3Target(obj, bucketSet) {
+					resp[sha] = true
+					break
+				}
+			}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(resp); err != nil {
+			slog.Error("gen3 encode response failed", "request_id", core.GetRequestID(r.Context()), "method", r.Method, "path", r.URL.Path, "err", err)
+		}
+	}
+}
+
+func getRegisteredBucketSet(ctx context.Context, database core.DatabaseInterface) (map[string]struct{}, error) {
+	creds, err := database.ListS3Credentials(ctx)
+	if err != nil {
+		return nil, err
+	}
+	registered := make(map[string]struct{}, len(creds))
+	for _, c := range creds {
+		bucket := strings.TrimSpace(c.Bucket)
+		if bucket == "" {
+			continue
+		}
+		registered[bucket] = struct{}{}
+	}
+	return registered, nil
+}
+
+func hasValidRegisteredS3Target(obj core.InternalObject, registeredBuckets map[string]struct{}) bool {
+	for _, method := range obj.AccessMethods {
+		if !strings.EqualFold(method.Type, "s3") {
+			continue
+		}
+		bucket, key, ok := parseS3URL(method.AccessUrl.Url)
+		if !ok || key == "" {
+			continue
+		}
+		if _, found := registeredBuckets[bucket]; !found {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+func parseS3URL(raw string) (bucket string, key string, ok bool) {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return "", "", false
+	}
+	if !strings.EqualFold(u.Scheme, "s3") {
+		return "", "", false
+	}
+	bucket = strings.TrimSpace(u.Host)
+	key = strings.TrimSpace(strings.TrimPrefix(u.Path, "/"))
+	if bucket == "" || key == "" {
+		return "", "", false
+	}
+	return bucket, key, true
+}
+
+func normalizeSHA(raw string) string {
+	return strings.TrimSpace(datadrs.NormalizeOid(strings.TrimSpace(raw)))
+}
+
 // Helper to convert internal DrsObject to Gen3 IndexdRecord
-func drsToIndexd(obj *drs.DrsObject) IndexdRecord {
-	hashes := make(map[string]string)
+func drsToIndexd(obj *core.InternalObject) IndexdRecordResponse {
+	hashes := make(map[string]string, len(obj.Checksums))
 	for _, c := range obj.Checksums {
 		hashes[c.Type] = c.Checksum
 	}
@@ -300,17 +429,21 @@ func drsToIndexd(obj *drs.DrsObject) IndexdRecord {
 		}
 	}
 
-	return IndexdRecord{
-		DID:          obj.Id,
-		Size:         obj.Size,
-		Hashes:       hashes,
-		URLs:         urls,
-		Authz:        authz,
-		Organization: core.ParseResourcePath(firstAuthz(authz)).Organization,
-		Project:      core.ParseResourcePath(firstAuthz(authz)).Project,
-		CreatedDate:  obj.CreatedTime.Format(time.RFC3339),
-		UpdatedDate:  obj.UpdatedTime.Format(time.RFC3339),
-		FileName:     obj.Name, // Using Name as file_name
+	return IndexdRecordResponse{
+		IndexdRecord: IndexdRecord{
+			IndexdRecord: dataindexd.IndexdRecord{
+				Did:      obj.Id,
+				Size:     obj.Size,
+				Hashes:   datahash.ConvertStringMapToHashInfo(hashes),
+				URLs:     urls,
+				Authz:    authz,
+				FileName: obj.Name, // Using Name as file_name
+			},
+			Organization: core.ParseResourcePath(firstAuthz(authz)).Organization,
+			Project:      core.ParseResourcePath(firstAuthz(authz)).Project,
+		},
+		CreatedDate: obj.CreatedTime.Format(time.RFC3339),
+		UpdatedDate: obj.UpdatedTime.Format(time.RFC3339),
 	}
 }
 
@@ -334,30 +467,34 @@ func handleIndexdGet(w http.ResponseWriter, r *http.Request, database core.Datab
 
 	record := drsToIndexd(obj)
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(record)
+	if err := json.NewEncoder(w).Encode(record); err != nil {
+		slog.Error("gen3 encode response failed", "request_id", core.GetRequestID(r.Context()), "method", r.Method, "path", r.URL.Path, "err", err)
+	}
 }
 
 // handleIndexdCreate creates a new record.
 func handleIndexdCreate(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface) {
 	var req IndexdRecord
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		writeHTTPError(w, r, http.StatusBadRequest, "Invalid request body", nil)
 		return
 	}
-	obj, authz, err := indexdToDrs(req)
+	obj, err := indexdToDrs(req)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeHTTPError(w, r, http.StatusBadRequest, err.Error(), err)
 		return
 	}
-	if err := database.CreateObject(r.Context(), obj, authz); err != nil {
-		http.Error(w, fmt.Sprintf("Failed to create object: %v", err), http.StatusInternalServerError)
+	if err := database.CreateObject(r.Context(), obj); err != nil {
+		writeDBError(w, r, err)
 		return
 	}
 
 	response := drsToIndexd(obj)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated) // 201
-	json.NewEncoder(w).Encode(response)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		slog.Error("gen3 encode response failed", "request_id", core.GetRequestID(r.Context()), "method", r.Method, "path", r.URL.Path, "err", err)
+	}
 }
 
 // handleIndexdUpdate updates an existing record.
@@ -367,7 +504,7 @@ func handleIndexdUpdate(w http.ResponseWriter, r *http.Request, database core.Da
 
 	var req IndexdRecord
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		writeHTTPError(w, r, http.StatusBadRequest, "Invalid request body", nil)
 		return
 	}
 
@@ -377,8 +514,8 @@ func handleIndexdUpdate(w http.ResponseWriter, r *http.Request, database core.Da
 		writeDBError(w, r, err)
 		return
 	}
-	if req.DID != "" && req.DID != id {
-		http.Error(w, "did cannot be changed", http.StatusBadRequest)
+	if req.Did != "" && req.Did != id {
+		writeHTTPError(w, r, http.StatusBadRequest, "did cannot be changed", nil)
 		return
 	}
 
@@ -404,14 +541,12 @@ func handleIndexdUpdate(w http.ResponseWriter, r *http.Request, database core.Da
 		}
 	}
 
-	authz := existing.Authorizations
 	if req.Authz != nil {
-		authz = append([]string(nil), req.Authz...)
 		updated.Authorizations = append([]string(nil), req.Authz...)
 	}
-	if req.Hashes != nil {
+	if req.Hashes != (datahash.HashInfo{}) {
 		updated.Checksums = nil
-		for t, v := range req.Hashes {
+		for t, v := range datahash.ConvertHashInfoToMap(req.Hashes) {
 			updated.Checksums = append(updated.Checksums, drs.Checksum{Type: t, Checksum: v})
 		}
 		if len(updated.Checksums) == 0 {
@@ -419,10 +554,10 @@ func handleIndexdUpdate(w http.ResponseWriter, r *http.Request, database core.Da
 		}
 	}
 
-	if err := database.RegisterObjects(r.Context(), []core.DrsObjectWithAuthz{
-		{DrsObject: updated, Authz: authz},
+	if err := database.RegisterObjects(r.Context(), []core.InternalObject{
+		updated,
 	}); err != nil {
-		http.Error(w, fmt.Sprintf("Failed to update object: %v", err), http.StatusInternalServerError)
+		writeHTTPError(w, r, http.StatusInternalServerError, fmt.Sprintf("Failed to update object: %v", err), err)
 		return
 	}
 
@@ -435,7 +570,9 @@ func handleIndexdUpdate(w http.ResponseWriter, r *http.Request, database core.Da
 
 	response := drsToIndexd(updatedObj)
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		slog.Error("gen3 encode response failed", "request_id", core.GetRequestID(r.Context()), "method", r.Method, "path", r.URL.Path, "err", err)
+	}
 }
 
 // handleIndexdDelete deletes a record.
@@ -444,8 +581,7 @@ func handleIndexdDelete(w http.ResponseWriter, r *http.Request, database core.Da
 	id := vars["id"]
 
 	if err := database.DeleteObject(r.Context(), id); err != nil {
-		// If delete fails, it might be not found, or other error.
-		http.Error(w, fmt.Sprintf("Failed to delete object: %v", err), http.StatusInternalServerError)
+		writeDBError(w, r, err)
 		return
 	}
 
@@ -457,7 +593,7 @@ func writeAuthError(w http.ResponseWriter, r *http.Request) {
 	if core.IsGen3Mode(r.Context()) && !core.HasAuthHeader(r.Context()) {
 		code = http.StatusUnauthorized
 	}
-	http.Error(w, "Unauthorized", code)
+	writeHTTPError(w, r, code, "Unauthorized", nil)
 }
 
 func parseScopeQuery(r *http.Request) (string, bool, error) {
@@ -483,11 +619,11 @@ func parseScopeQuery(r *http.Request) (string, bool, error) {
 func handleIndexdDeleteByQuery(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface) {
 	scopePrefix, hasScope, err := parseScopeQuery(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeHTTPError(w, r, http.StatusBadRequest, err.Error(), err)
 		return
 	}
 	if !hasScope {
-		http.Error(w, "organization/project or authz query is required", http.StatusBadRequest)
+		writeHTTPError(w, r, http.StatusBadRequest, "organization/project or authz query is required", nil)
 		return
 	}
 	if core.IsGen3Mode(r.Context()) && !core.HasAuthHeader(r.Context()) {
@@ -497,7 +633,7 @@ func handleIndexdDeleteByQuery(w http.ResponseWriter, r *http.Request, database 
 
 	ids, err := database.ListObjectIDsByResourcePrefix(r.Context(), scopePrefix)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("failed to list records: %v", err), http.StatusInternalServerError)
+		writeHTTPError(w, r, http.StatusInternalServerError, fmt.Sprintf("failed to list records: %v", err), err)
 		return
 	}
 	toDelete := make([]string, 0, len(ids))
@@ -522,12 +658,14 @@ func handleIndexdDeleteByQuery(w http.ResponseWriter, r *http.Request, database 
 	}
 	if len(toDelete) > 0 {
 		if err := database.BulkDeleteObjects(r.Context(), toDelete); err != nil {
-			http.Error(w, fmt.Sprintf("failed to delete records: %v", err), http.StatusInternalServerError)
+			writeHTTPError(w, r, http.StatusInternalServerError, fmt.Sprintf("failed to delete records: %v", err), err)
 			return
 		}
 	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]int{"deleted": len(toDelete)})
+	if err := json.NewEncoder(w).Encode(map[string]int{"deleted": len(toDelete)}); err != nil {
+		slog.Error("gen3 encode response failed", "request_id", core.GetRequestID(r.Context()), "method", r.Method, "path", r.URL.Path, "err", err)
+	}
 }
 
 // handleIndexdList handles listing, primarily to support lookup by hash.
@@ -537,10 +675,7 @@ func handleIndexdList(w http.ResponseWriter, r *http.Request, database core.Data
 	// hash_type := r.URL.Query().Get("hash_type") // We can assume sha256 or iterate, current db method only takes value (naive)
 
 	if hash != "" {
-		// Parse "TYPE:VALUE" if present (e.g. from IndexdClient)
-		if parts := strings.SplitN(hash, ":", 2); len(parts) == 2 {
-			hash = parts[1]
-		}
+		hash = normalizeHashQueryValue(hash)
 
 		objs, err := database.GetObjectsByChecksum(r.Context(), hash)
 		if err != nil {
@@ -548,7 +683,7 @@ func handleIndexdList(w http.ResponseWriter, r *http.Request, database core.Data
 			return
 		}
 
-		var records []IndexdRecord
+		var records []IndexdRecordResponse
 		for _, o := range objs {
 			records = append(records, drsToIndexd(&o))
 		}
@@ -558,12 +693,14 @@ func handleIndexdList(w http.ResponseWriter, r *http.Request, database core.Data
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			slog.Error("gen3 encode response failed", "request_id", core.GetRequestID(r.Context()), "method", r.Method, "path", r.URL.Path, "err", err)
+		}
 		return
 	}
 	scopePrefix, hasScope, err := parseScopeQuery(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeHTTPError(w, r, http.StatusBadRequest, err.Error(), err)
 		return
 	}
 	if hasScope {
@@ -573,17 +710,17 @@ func handleIndexdList(w http.ResponseWriter, r *http.Request, database core.Data
 		}
 		ids, err := database.ListObjectIDsByResourcePrefix(r.Context(), scopePrefix)
 		if err != nil {
-			http.Error(w, fmt.Sprintf("Error listing records: %v", err), http.StatusInternalServerError)
+			writeHTTPError(w, r, http.StatusInternalServerError, fmt.Sprintf("Error listing records: %v", err), err)
 			return
 		}
-		records := make([]IndexdRecord, 0, len(ids))
+		records := make([]IndexdRecordResponse, 0, len(ids))
 		for _, id := range ids {
 			obj, err := database.GetObject(r.Context(), id)
 			if err != nil {
 				if errors.Is(err, core.ErrUnauthorized) || errors.Is(err, core.ErrNotFound) {
 					continue
 				}
-				http.Error(w, fmt.Sprintf("Error fetching object %s: %v", id, err), http.StatusInternalServerError)
+				writeHTTPError(w, r, http.StatusInternalServerError, fmt.Sprintf("Error fetching object %s: %v", id, err), err)
 				return
 			}
 			if len(obj.Authorizations) > 0 && !core.HasMethodAccess(r.Context(), "read", obj.Authorizations) {
@@ -592,11 +729,20 @@ func handleIndexdList(w http.ResponseWriter, r *http.Request, database core.Data
 			records = append(records, drsToIndexd(obj))
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(ListRecordsResponse{Records: records})
+		if err := json.NewEncoder(w).Encode(ListRecordsResponse{Records: records}); err != nil {
+			slog.Error("gen3 encode response failed", "request_id", core.GetRequestID(r.Context()), "method", r.Method, "path", r.URL.Path, "err", err)
+		}
 		return
 	}
 
 	// If no hash, maybe valid list?
 	// Not strictly required for the test case described (which uses GetObjectByHash), but good to return empty list or not implemented.
-	http.Error(w, "Listing not fully implemented without query params", http.StatusNotImplemented)
+	writeHTTPError(w, r, http.StatusNotImplemented, "Listing not fully implemented without query params", nil)
+}
+
+func normalizeHashQueryValue(raw string) string {
+	if parts := strings.SplitN(strings.TrimSpace(raw), ":", 2); len(parts) == 2 {
+		return strings.TrimSpace(parts[1])
+	}
+	return strings.TrimSpace(raw)
 }

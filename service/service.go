@@ -3,11 +3,14 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/calypr/drs-server/adapter/drsmap"
 	"github.com/calypr/drs-server/apigen/drs"
 	"github.com/calypr/drs-server/db/core"
 	"github.com/calypr/drs-server/urlmanager"
@@ -24,17 +27,21 @@ func NewObjectsAPIService(db core.DatabaseInterface, urlManager urlmanager.UrlMa
 	return &ObjectsAPIService{db: db, urlManager: urlManager}
 }
 
-func errorResponseForDBError(ctx context.Context, err error) drs.ImplResponse {
+func errorResponseForDBError(ctx context.Context, op string, err error) drs.ImplResponse {
+	requestID := core.GetRequestID(ctx)
 	switch {
 	case errors.Is(err, core.ErrUnauthorized):
 		code := http.StatusForbidden
 		if core.IsGen3Mode(ctx) && !core.HasAuthHeader(ctx) {
 			code = http.StatusUnauthorized
 		}
+		slog.Warn("service db unauthorized", "op", op, "request_id", requestID, "status", code, "err", err)
 		return drs.ImplResponse{Code: code, Body: drs.Error{Msg: "unauthorized", StatusCode: int32(code)}}
 	case errors.Is(err, core.ErrNotFound):
+		slog.Info("service db not found", "op", op, "request_id", requestID, "status", http.StatusNotFound, "err", err)
 		return drs.ImplResponse{Code: http.StatusNotFound, Body: drs.Error{Msg: "not found", StatusCode: http.StatusNotFound}}
 	default:
+		slog.Error("service db failure", "op", op, "request_id", requestID, "status", http.StatusInternalServerError, "err", err)
 		return drs.ImplResponse{Code: http.StatusInternalServerError, Body: drs.Error{Msg: err.Error(), StatusCode: http.StatusInternalServerError}}
 	}
 }
@@ -46,10 +53,19 @@ func unauthorizedStatus(ctx context.Context) int {
 	return http.StatusForbidden
 }
 
+func forbiddenResponse(ctx context.Context, msg string) drs.ImplResponse {
+	code := unauthorizedStatus(ctx)
+	slog.Warn("service forbidden", "request_id", core.GetRequestID(ctx), "status", code, "reason", msg)
+	return drs.ImplResponse{
+		Code: code,
+		Body: drs.Error{Msg: msg, StatusCode: int32(code)},
+	}
+}
+
 func (s *ObjectsAPIService) GetObject(ctx context.Context, id string, expand bool) (drs.ImplResponse, error) {
 	obj, err := s.db.GetObject(ctx, id)
 	if err != nil {
-		resp := errorResponseForDBError(ctx, err)
+		resp := errorResponseForDBError(ctx, "GetObject", err)
 		return resp, err
 	}
 	return drs.ImplResponse{Code: http.StatusOK, Body: obj}, nil
@@ -62,7 +78,7 @@ func (s *ObjectsAPIService) PostObject(ctx context.Context, id string, req drs.P
 func (s *ObjectsAPIService) OptionsObject(ctx context.Context, id string) (drs.ImplResponse, error) {
 	obj, err := s.db.GetObject(ctx, id)
 	if err != nil {
-		resp := errorResponseForDBError(ctx, err)
+		resp := errorResponseForDBError(ctx, "OptionsObject", err)
 		return resp, err
 	}
 	return drs.ImplResponse{Code: http.StatusOK, Body: authorizationsForObject(obj)}, nil
@@ -71,7 +87,7 @@ func (s *ObjectsAPIService) OptionsObject(ctx context.Context, id string) (drs.I
 func (s *ObjectsAPIService) DeleteObject(ctx context.Context, id string, req drs.DeleteRequest) (drs.ImplResponse, error) {
 	obj, err := s.db.GetObject(ctx, id)
 	if err != nil {
-		resp := errorResponseForDBError(ctx, err)
+		resp := errorResponseForDBError(ctx, "DeleteObject.GetObject", err)
 		return resp, err
 	}
 	targetResources := obj.Authorizations
@@ -79,12 +95,13 @@ func (s *ObjectsAPIService) DeleteObject(ctx context.Context, id string, req drs
 		targetResources = []string{"/data_file"}
 	}
 	if !core.HasMethodAccess(ctx, "delete", targetResources) {
-		return drs.ImplResponse{Code: http.StatusForbidden, Body: drs.Error{Msg: "forbidden: missing delete permission", StatusCode: http.StatusForbidden}}, nil
+		return forbiddenResponse(ctx, "forbidden: missing delete permission"), nil
 	}
 
 	err = s.db.DeleteObject(ctx, id)
 	if err != nil {
-		return drs.ImplResponse{Code: http.StatusNotFound, Body: drs.Error{Msg: err.Error(), StatusCode: http.StatusNotFound}}, err
+		resp := errorResponseForDBError(ctx, "DeleteObject.DeleteObject", err)
+		return resp, err
 	}
 	return drs.ImplResponse{Code: http.StatusNoContent, Body: nil}, nil
 }
@@ -96,7 +113,7 @@ func (s *ObjectsAPIService) BulkDeleteObjects(ctx context.Context, req drs.BulkD
 	for _, id := range req.BulkObjectIds {
 		obj, err := s.db.GetObject(ctx, id)
 		if err != nil {
-			resp := errorResponseForDBError(ctx, err)
+			resp := errorResponseForDBError(ctx, "BulkDeleteObjects.GetObject", err)
 			return resp, err
 		}
 		targetResources := obj.Authorizations
@@ -104,7 +121,7 @@ func (s *ObjectsAPIService) BulkDeleteObjects(ctx context.Context, req drs.BulkD
 			targetResources = []string{"/data_file"}
 		}
 		if !core.HasMethodAccess(ctx, "delete", targetResources) {
-			return drs.ImplResponse{Code: http.StatusForbidden, Body: drs.Error{Msg: "forbidden: missing delete permission", StatusCode: http.StatusForbidden}}, nil
+			return forbiddenResponse(ctx, "forbidden: missing delete permission"), nil
 		}
 	}
 	if err := s.db.BulkDeleteObjects(ctx, req.BulkObjectIds); err != nil {
@@ -121,17 +138,20 @@ func (s *ObjectsAPIService) GetBulkObjects(ctx context.Context, req drs.GetBulkO
 		obj, err := s.db.GetObject(ctx, id)
 		if err != nil {
 			if errors.Is(err, core.ErrUnauthorized) {
+				slog.Warn("bulk get denied", "request_id", core.GetRequestID(ctx), "id", id, "err", err)
 				denied = append(denied, id)
 				continue
 			}
+			slog.Info("bulk get unresolved", "request_id", core.GetRequestID(ctx), "id", id, "err", err)
 			missing = append(missing, id)
 			continue
 		}
 		if len(obj.Authorizations) > 0 && !core.HasMethodAccess(ctx, "read", obj.Authorizations) {
+			slog.Warn("bulk get denied by access check", "request_id", core.GetRequestID(ctx), "id", id)
 			denied = append(denied, id)
 			continue
 		}
-		resolved = append(resolved, *obj)
+		resolved = append(resolved, obj.DrsObject)
 	}
 	out := drs.GetBulkObjects200Response{
 		Summary: drs.Summary{
@@ -164,13 +184,16 @@ func (s *ObjectsAPIService) OptionsBulkObject(ctx context.Context, req drs.BulkO
 		obj, err := s.db.GetObject(ctx, id)
 		if err != nil {
 			if errors.Is(err, core.ErrUnauthorized) {
+				slog.Warn("options bulk denied", "request_id", core.GetRequestID(ctx), "id", id, "err", err)
 				denied = append(denied, id)
 				continue
 			}
+			slog.Info("options bulk unresolved", "request_id", core.GetRequestID(ctx), "id", id, "err", err)
 			missing = append(missing, id)
 			continue
 		}
 		if len(obj.Authorizations) > 0 && !core.HasMethodAccess(ctx, "read", obj.Authorizations) {
+			slog.Warn("options bulk denied by access check", "request_id", core.GetRequestID(ctx), "id", id)
 			denied = append(denied, id)
 			continue
 		}
@@ -202,7 +225,7 @@ func (s *ObjectsAPIService) OptionsBulkObject(ctx context.Context, req drs.BulkO
 }
 
 func (s *ObjectsAPIService) RegisterObjects(ctx context.Context, req drs.RegisterObjectsRequest) (drs.ImplResponse, error) {
-	var objects []core.DrsObjectWithAuthz
+	var objects []core.InternalObject
 	now := time.Now()
 	registered := make([]drs.DrsObject, 0, len(req.Candidates))
 
@@ -294,26 +317,14 @@ func (s *ObjectsAPIService) RegisterObjects(ctx context.Context, req drs.Registe
 		if len(targetResources) == 0 {
 			targetResources = []string{"/data_file"}
 			if !core.HasMethodAccess(ctx, "file_upload", targetResources) && !core.HasMethodAccess(ctx, "create", targetResources) {
-				return drs.ImplResponse{
-					Code: http.StatusForbidden,
-					Body: drs.Error{
-						Msg:        "forbidden: missing file_upload/create permission on /data_file",
-						StatusCode: http.StatusForbidden,
-					},
-				}, nil
+				return forbiddenResponse(ctx, "forbidden: missing file_upload/create permission on /data_file"), nil
 			}
 		} else if !core.HasMethodAccess(ctx, "create", targetResources) {
 			if !core.HasMethodAccess(ctx, "file_upload", []string{"/data_file"}) {
-				return drs.ImplResponse{
-					Code: http.StatusForbidden,
-					Body: drs.Error{
-						Msg:        "forbidden: missing create permission",
-						StatusCode: http.StatusForbidden,
-					},
-				}, nil
+				return forbiddenResponse(ctx, "forbidden: missing create permission"), nil
 			}
 		}
-		objects = append(objects, core.DrsObjectWithAuthz{DrsObject: obj, Authz: authz})
+		objects = append(objects, drsmap.WrapExternal(obj, authz))
 		registered = append(registered, obj)
 	}
 
@@ -334,13 +345,14 @@ func (s *ObjectsAPIService) GetObjectsByChecksums(ctx context.Context, checksums
 	if err != nil {
 		return drs.ImplResponse{Code: http.StatusInternalServerError, Body: drs.Error{Msg: err.Error(), StatusCode: http.StatusInternalServerError}}, err
 	}
-	return drs.ImplResponse{Code: http.StatusOK, Body: objsMap}, nil
+	out := drsmap.ToExternalMap(objsMap)
+	return drs.ImplResponse{Code: http.StatusOK, Body: out}, nil
 }
 
 func (s *ObjectsAPIService) GetAccessURL(ctx context.Context, objectID string, accessID string) (drs.ImplResponse, error) {
 	obj, err := s.db.GetObject(ctx, objectID)
 	if err != nil {
-		resp := errorResponseForDBError(ctx, err)
+		resp := errorResponseForDBError(ctx, "GetAccessURL.GetObject", err)
 		return resp, err
 	}
 	if len(obj.Authorizations) > 0 && !core.HasMethodAccess(ctx, "read", obj.Authorizations) {
@@ -432,14 +444,15 @@ func (s *ObjectsAPIService) GetBulkAccessURL(ctx context.Context, req drs.BulkOb
 func (s *ObjectsAPIService) UpdateObjectAccessMethods(ctx context.Context, objectID string, req drs.AccessMethodUpdateRequest) (drs.ImplResponse, error) {
 	existing, err := s.db.GetObject(ctx, objectID)
 	if err != nil {
-		return drs.ImplResponse{Code: http.StatusNotFound, Body: drs.Error{Msg: err.Error(), StatusCode: http.StatusNotFound}}, err
+		resp := errorResponseForDBError(ctx, "UpdateObjectAccessMethods.GetObject", err)
+		return resp, err
 	}
 	targetResources := existing.Authorizations
 	if len(targetResources) == 0 {
 		targetResources = []string{"/data_file"}
 	}
 	if !core.HasMethodAccess(ctx, "update", targetResources) {
-		return drs.ImplResponse{Code: http.StatusForbidden, Body: drs.Error{Msg: "forbidden: missing update permission", StatusCode: http.StatusForbidden}}, nil
+		return forbiddenResponse(ctx, "forbidden: missing update permission"), nil
 	}
 
 	if err := s.db.UpdateObjectAccessMethods(ctx, objectID, req.AccessMethods); err != nil {
@@ -449,7 +462,7 @@ func (s *ObjectsAPIService) UpdateObjectAccessMethods(ctx context.Context, objec
 	if err != nil {
 		return drs.ImplResponse{Code: http.StatusInternalServerError, Body: drs.Error{Msg: err.Error(), StatusCode: http.StatusInternalServerError}}, err
 	}
-	return drs.ImplResponse{Code: http.StatusOK, Body: updated}, nil
+	return drs.ImplResponse{Code: http.StatusOK, Body: drsmap.ToExternal(*updated)}, nil
 }
 
 func (s *ObjectsAPIService) GetObjectsByChecksum(ctx context.Context, checksum string) (drs.ImplResponse, error) {
@@ -460,7 +473,7 @@ func (s *ObjectsAPIService) GetObjectsByChecksum(ctx context.Context, checksum s
 	if len(objs) == 0 {
 		return drs.ImplResponse{Code: http.StatusNotFound, Body: drs.Error{Msg: "object not found for checksum", StatusCode: http.StatusNotFound}}, nil
 	}
-	return drs.ImplResponse{Code: http.StatusOK, Body: objs[0]}, nil
+	return drs.ImplResponse{Code: http.StatusOK, Body: drsmap.ToExternal(objs[0])}, nil
 }
 
 func normalizeChecksum(cs string) string {
@@ -489,7 +502,7 @@ func (s *ObjectsAPIService) BulkUpdateAccessMethods(ctx context.Context, req drs
 	for _, u := range req.Updates {
 		obj, err := s.db.GetObject(ctx, u.ObjectId)
 		if err != nil {
-			resp := errorResponseForDBError(ctx, err)
+			resp := errorResponseForDBError(ctx, "BulkUpdateAccessMethods.GetObject", err)
 			return resp, err
 		}
 		targetResources := obj.Authorizations
@@ -513,9 +526,10 @@ func (s *ObjectsAPIService) BulkUpdateAccessMethods(ctx context.Context, req drs
 	for _, u := range req.Updates {
 		obj, err := s.db.GetObject(ctx, u.ObjectId)
 		if err != nil {
+			slog.Warn("bulk access method update post-fetch failed", "request_id", core.GetRequestID(ctx), "object_id", u.ObjectId, "err", err)
 			continue
 		}
-		updated = append(updated, *obj)
+		updated = append(updated, obj.DrsObject)
 	}
 	return drs.ImplResponse{Code: http.StatusOK, Body: drs.BulkUpdateAccessMethods200Response{Objects: updated}}, nil
 }
@@ -528,7 +542,72 @@ func (s *ObjectsAPIService) GetServiceInfo(ctx context.Context) (drs.ImplRespons
 	return drs.ImplResponse{Code: http.StatusOK, Body: info}, nil
 }
 
-func authorizationsForObject(obj *drs.DrsObject) drs.Authorizations {
+func (s *ObjectsAPIService) PostUploadRequest(ctx context.Context, uploadRequest drs.UploadRequest) (drs.ImplResponse, error) {
+	targetResources := []string{"/data_file"}
+	if core.IsGen3Mode(ctx) && !core.HasMethodAccess(ctx, "file_upload", targetResources) && !core.HasMethodAccess(ctx, "create", targetResources) {
+		code := unauthorizedStatus(ctx)
+		return drs.ImplResponse{
+			Code: code,
+			Body: drs.Error{Msg: "forbidden: missing file_upload/create permission on /data_file", StatusCode: int32(code)},
+		}, nil
+	}
+
+	creds, err := s.db.ListS3Credentials(ctx)
+	if err != nil {
+		return drs.ImplResponse{Code: http.StatusInternalServerError, Body: drs.Error{Msg: err.Error(), StatusCode: http.StatusInternalServerError}}, err
+	}
+	if len(creds) == 0 || strings.TrimSpace(creds[0].Bucket) == "" {
+		return drs.ImplResponse{
+			Code: http.StatusInternalServerError,
+			Body: drs.Error{Msg: "no bucket credentials configured for upload", StatusCode: http.StatusInternalServerError},
+		}, nil
+	}
+	bucket := strings.TrimSpace(creds[0].Bucket)
+	region := strings.TrimSpace(creds[0].Region)
+	if region == "" {
+		region = "us-east-1"
+	}
+
+	out := drs.UploadResponse{
+		Responses: make([]drs.UploadResponseObject, 0, len(uploadRequest.Requests)),
+	}
+	for i, req := range uploadRequest.Requests {
+		key := uploadObjectKey(req, i)
+		s3URL := fmt.Sprintf("s3://%s/%s", bucket, key)
+		signedURL, signErr := s.urlManager.SignUploadURL(ctx, "", s3URL, urlmanager.SignOptions{})
+		if signErr != nil {
+			return drs.ImplResponse{
+				Code: http.StatusInternalServerError,
+				Body: drs.Error{Msg: signErr.Error(), StatusCode: http.StatusInternalServerError},
+			}, signErr
+		}
+
+		respObj := drs.UploadResponseObject{
+			Name:        req.Name,
+			Size:        req.Size,
+			MimeType:    req.MimeType,
+			Checksums:   req.Checksums,
+			Description: req.Description,
+			Aliases:     req.Aliases,
+			UploadMethods: []drs.UploadMethod{
+				{
+					Type:      "s3",
+					AccessUrl: drs.UploadMethodAccessUrl{Url: signedURL},
+					Region:    region,
+					UploadDetails: map[string]interface{}{
+						"bucket": bucket,
+						"key":    key,
+					},
+				},
+			},
+		}
+		out.Responses = append(out.Responses, respObj)
+	}
+
+	return drs.ImplResponse{Code: http.StatusOK, Body: out}, nil
+}
+
+func authorizationsForObject(obj *core.DrsObjectWithAuthz) drs.Authorizations {
 	authz := uniqueStrings(obj.Authorizations)
 	if len(authz) == 0 {
 		for _, am := range obj.AccessMethods {
@@ -556,4 +635,16 @@ func uniqueStrings(values []string) []string {
 		out = append(out, v)
 	}
 	return out
+}
+
+func uploadObjectKey(req drs.UploadRequestObject, index int) string {
+	if sha, ok := canonicalSHA256(req.Checksums); ok {
+		return "uploads/" + sha
+	}
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		return fmt.Sprintf("uploads/request-%d-%d", time.Now().UnixNano(), index)
+	}
+	name = strings.ReplaceAll(name, " ", "_")
+	return "uploads/" + name
 }

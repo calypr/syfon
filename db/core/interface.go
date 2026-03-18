@@ -9,17 +9,17 @@ import (
 // DatabaseInterface defines the methods required for a database backend
 type DatabaseInterface interface {
 	GetServiceInfo(ctx context.Context) (*drs.Service, error)
-	GetObject(ctx context.Context, id string) (*drs.DrsObject, error)
+	GetObject(ctx context.Context, id string) (*InternalObject, error)
 	DeleteObject(ctx context.Context, id string) error
-	CreateObject(ctx context.Context, obj *drs.DrsObject, authz []string) error
-	GetObjectsByChecksum(ctx context.Context, checksum string) ([]drs.DrsObject, error)
-	GetObjectsByChecksums(ctx context.Context, checksums []string) (map[string][]drs.DrsObject, error)
+	CreateObject(ctx context.Context, obj *InternalObject) error
+	GetObjectsByChecksum(ctx context.Context, checksum string) ([]InternalObject, error)
+	GetObjectsByChecksums(ctx context.Context, checksums []string) (map[string][]InternalObject, error)
 	ListObjectIDsByResourcePrefix(ctx context.Context, resourcePrefix string) ([]string, error)
 
 	// New Bulk Operations
-	GetBulkObjects(ctx context.Context, ids []string) ([]drs.DrsObject, error)
+	GetBulkObjects(ctx context.Context, ids []string) ([]InternalObject, error)
 	BulkDeleteObjects(ctx context.Context, ids []string) error
-	RegisterObjects(ctx context.Context, objects []DrsObjectWithAuthz) error // Bulk Create
+	RegisterObjects(ctx context.Context, objects []InternalObject) error // Bulk Create
 
 	// Access Methods
 	UpdateObjectAccessMethods(ctx context.Context, objectID string, accessMethods []drs.AccessMethod) error

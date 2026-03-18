@@ -11,7 +11,11 @@
 
 package drs
 
+
+
+
 type AccessMethodAuthorizations struct {
+
 	DrsObjectId string `json:"drs_object_id,omitempty"`
 
 	// An Optional list of support authorization types. More than one can be supported and tried in sequence. Defaults to `None` if empty or missing.

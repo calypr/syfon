@@ -18,11 +18,18 @@ type DrsObjectRecord struct {
 	MimeType    string    `db:"mime_type"`
 }
 
-// DrsObjectWithAuthz is a wrapper around the generated DrsObject that includes Authz metadata.
-// Used for registration and bulk operations.
-type DrsObjectWithAuthz struct {
+// InternalObject is the internal DRS domain model used by the fast/internal API
+// and storage layer. The official GA4GH DRS schema object lives in `drs.DrsObject`.
+type InternalObject struct {
 	drs.DrsObject
-	Authz []string
+	Authorizations []string
+}
+
+// DrsObjectWithAuthz is retained as a compatibility alias while code migrates to InternalObject.
+type DrsObjectWithAuthz = InternalObject
+
+func (o InternalObject) External() drs.DrsObject {
+	return o.DrsObject
 }
 
 // DrsObjectAccessMethod represents the internal database record for a DRS Access Method (URL)

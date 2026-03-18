@@ -12,7 +12,7 @@
 package drs
 
 import (
-	"log"
+	"log/slog"
 	"net/http"
 	"time"
 )
@@ -30,17 +30,18 @@ func (r *statusRecorder) WriteHeader(status int) {
 func Logger(inner http.Handler, name string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		recorder := &statusRecorder{ResponseWriter: w, status: 200}
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 
-		inner.ServeHTTP(recorder, r)
+		inner.ServeHTTP(rec, r)
 
-		log.Printf(
-			"%s %s %s %d %s",
-			r.Method,
-			r.RequestURI,
-			name,
-			recorder.status,
-			time.Since(start),
+		slog.Info(
+			"http request",
+			"method", r.Method,
+			"path", r.RequestURI,
+			"handler", name,
+			"request_id", r.Header.Get("X-Request-Id"),
+			"status", rec.status,
+			"duration_ms", time.Since(start).Milliseconds(),
 		)
 	})
 }

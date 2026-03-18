@@ -37,7 +37,7 @@ func TestSqliteDB_CRUD(t *testing.T) {
 	}
 
 	// Create
-	if err := db.CreateObject(ctx, obj, []string{}); err != nil {
+	if err := db.CreateObject(ctx, &core.InternalObject{DrsObject: *obj, Authorizations: []string{}}); err != nil {
 		t.Fatalf("CreateObject failed: %v", err)
 	}
 
@@ -118,7 +118,7 @@ func TestSqliteDB_BulkOperations(t *testing.T) {
 	ctx := context.Background()
 	db, _ := NewSqliteDB(":memory:")
 
-	objects := []core.DrsObjectWithAuthz{
+	objects := []core.InternalObject{
 		{DrsObject: drs.DrsObject{Id: "bulk-1", Size: 10}},
 		{DrsObject: drs.DrsObject{Id: "bulk-2", Size: 20}},
 	}
@@ -142,7 +142,7 @@ func TestSqliteDB_UpdateAccessMethods(t *testing.T) {
 	db, _ := NewSqliteDB(":memory:")
 
 	obj := &drs.DrsObject{Id: "update-me"}
-	if err := db.CreateObject(ctx, obj, []string{}); err != nil {
+	if err := db.CreateObject(ctx, &core.InternalObject{DrsObject: *obj, Authorizations: []string{}}); err != nil {
 		t.Fatalf("CreateObject failed: %v", err)
 	}
 
@@ -168,7 +168,7 @@ func TestSqliteDB_GetObjectsByChecksumsAndListByPrefix(t *testing.T) {
 	db, _ := NewSqliteDB(":memory:")
 
 	now := time.Now()
-	objects := []core.DrsObjectWithAuthz{
+	objects := []core.InternalObject{
 		{
 			DrsObject: drs.DrsObject{
 				Id:          "sha-x",
@@ -176,7 +176,7 @@ func TestSqliteDB_GetObjectsByChecksumsAndListByPrefix(t *testing.T) {
 				UpdatedTime: now,
 				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: "sha-x"}},
 			},
-			Authz: []string{"/programs/a/projects/b"},
+			Authorizations: []string{"/programs/a/projects/b"},
 		},
 		{
 			DrsObject: drs.DrsObject{
@@ -185,7 +185,7 @@ func TestSqliteDB_GetObjectsByChecksumsAndListByPrefix(t *testing.T) {
 				UpdatedTime: now,
 				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: "sha-y"}},
 			},
-			Authz: []string{"/programs/a/projects/c"},
+			Authorizations: []string{"/programs/a/projects/c"},
 		},
 	}
 	if err := db.RegisterObjects(ctx, objects); err != nil {
@@ -217,7 +217,7 @@ func TestSqliteDB_BulkUpdateAccessMethods(t *testing.T) {
 	db, _ := NewSqliteDB(":memory:")
 
 	now := time.Now()
-	if err := db.RegisterObjects(ctx, []core.DrsObjectWithAuthz{
+	if err := db.RegisterObjects(ctx, []core.InternalObject{
 		{
 			DrsObject: drs.DrsObject{
 				Id:          "obj-a",

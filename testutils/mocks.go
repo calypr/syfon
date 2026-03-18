@@ -13,6 +13,7 @@ import (
 // MockDatabase implements core.DatabaseInterface for testing
 type MockDatabase struct {
 	Objects      map[string]*drs.DrsObject
+	ObjectAuthz  map[string][]string
 	Credentials  map[string]core.S3Credential
 	GetObjectErr error
 }
@@ -21,12 +22,18 @@ func (m *MockDatabase) GetServiceInfo(ctx context.Context) (*drs.Service, error)
 	return nil, nil
 }
 
-func (m *MockDatabase) GetObject(ctx context.Context, id string) (*drs.DrsObject, error) {
+func (m *MockDatabase) GetObject(ctx context.Context, id string) (*core.InternalObject, error) {
 	if m.GetObjectErr != nil {
 		return nil, m.GetObjectErr
 	}
 	if obj, ok := m.Objects[id]; ok {
-		return obj, nil
+		wrapped := core.InternalObject{DrsObject: *obj}
+		if authz, ok := m.ObjectAuthz[id]; ok {
+			wrapped.Authorizations = append([]string(nil), authz...)
+		} else {
+			wrapped.Authorizations = append([]string(nil), obj.Authorizations...)
+		}
+		return &wrapped, nil
 	}
 	return nil, fmt.Errorf("%w: object not found", core.ErrNotFound)
 }
@@ -38,33 +45,48 @@ func (m *MockDatabase) DeleteObject(ctx context.Context, id string) error {
 	return nil
 }
 
-func (m *MockDatabase) CreateObject(ctx context.Context, obj *drs.DrsObject, authz []string) error {
+func (m *MockDatabase) CreateObject(ctx context.Context, obj *core.InternalObject) error {
 	if m.Objects == nil {
 		m.Objects = make(map[string]*drs.DrsObject)
 	}
-	m.Objects[obj.Id] = obj
+	copyObj := obj.DrsObject
+	m.Objects[obj.Id] = &copyObj
+	if len(obj.Authorizations) > 0 {
+		if m.ObjectAuthz == nil {
+			m.ObjectAuthz = make(map[string][]string)
+		}
+		m.ObjectAuthz[obj.Id] = append([]string(nil), obj.Authorizations...)
+	}
 	return nil
 }
 
-func (m *MockDatabase) GetObjectsByChecksum(ctx context.Context, checksum string) ([]drs.DrsObject, error) {
+func (m *MockDatabase) GetObjectsByChecksum(ctx context.Context, checksum string) ([]core.InternalObject, error) {
 	if m.Objects == nil {
-		return []drs.DrsObject{}, nil
+		return []core.InternalObject{}, nil
 	}
 	if obj, ok := m.Objects[checksum]; ok {
-		return []drs.DrsObject{*obj}, nil
+		wrapped := core.InternalObject{DrsObject: *obj}
+		if authz, ok := m.ObjectAuthz[checksum]; ok {
+			wrapped.Authorizations = append([]string(nil), authz...)
+		}
+		return []core.InternalObject{wrapped}, nil
 	}
-	return []drs.DrsObject{}, nil
+	return []core.InternalObject{}, nil
 }
 
-func (m *MockDatabase) GetObjectsByChecksums(ctx context.Context, checksums []string) (map[string][]drs.DrsObject, error) {
-	out := make(map[string][]drs.DrsObject, len(checksums))
+func (m *MockDatabase) GetObjectsByChecksums(ctx context.Context, checksums []string) (map[string][]core.InternalObject, error) {
+	out := make(map[string][]core.InternalObject, len(checksums))
 	for _, cs := range checksums {
 		if m.Objects == nil {
 			out[cs] = nil
 			continue
 		}
 		if obj, ok := m.Objects[cs]; ok {
-			out[cs] = []drs.DrsObject{*obj}
+			wrapped := core.InternalObject{DrsObject: *obj}
+			if authz, ok := m.ObjectAuthz[cs]; ok {
+				wrapped.Authorizations = append([]string(nil), authz...)
+			}
+			out[cs] = []core.InternalObject{wrapped}
 			continue
 		}
 		out[cs] = nil
@@ -75,7 +97,13 @@ func (m *MockDatabase) GetObjectsByChecksums(ctx context.Context, checksums []st
 func (m *MockDatabase) ListObjectIDsByResourcePrefix(ctx context.Context, resourcePrefix string) ([]string, error) {
 	ids := make([]string, 0)
 	for id, obj := range m.Objects {
-		for _, r := range obj.Authorizations {
+		authz := obj.Authorizations
+		if m.ObjectAuthz != nil {
+			if v, ok := m.ObjectAuthz[id]; ok {
+				authz = v
+			}
+		}
+		for _, r := range authz {
 			if r == resourcePrefix || strings.HasPrefix(r, resourcePrefix+"/") {
 				ids = append(ids, id)
 				break
@@ -85,22 +113,30 @@ func (m *MockDatabase) ListObjectIDsByResourcePrefix(ctx context.Context, resour
 	return ids, nil
 }
 
-func (m *MockDatabase) RegisterObjects(ctx context.Context, objects []core.DrsObjectWithAuthz) error {
+func (m *MockDatabase) RegisterObjects(ctx context.Context, objects []core.InternalObject) error {
 	if m.Objects == nil {
 		m.Objects = make(map[string]*drs.DrsObject)
 	}
 	for _, obj := range objects {
 		copyObj := obj.DrsObject
 		m.Objects[obj.Id] = &copyObj
+		if m.ObjectAuthz == nil {
+			m.ObjectAuthz = make(map[string][]string)
+		}
+		m.ObjectAuthz[obj.Id] = append([]string(nil), obj.Authorizations...)
 	}
 	return nil
 }
 
-func (m *MockDatabase) GetBulkObjects(ctx context.Context, ids []string) ([]drs.DrsObject, error) {
-	out := make([]drs.DrsObject, 0, len(ids))
+func (m *MockDatabase) GetBulkObjects(ctx context.Context, ids []string) ([]core.InternalObject, error) {
+	out := make([]core.InternalObject, 0, len(ids))
 	for _, id := range ids {
 		if obj, ok := m.Objects[id]; ok {
-			out = append(out, *obj)
+			wrapped := core.InternalObject{DrsObject: *obj}
+			if authz, ok := m.ObjectAuthz[id]; ok {
+				wrapped.Authorizations = append([]string(nil), authz...)
+			}
+			out = append(out, wrapped)
 		}
 	}
 	return out, nil

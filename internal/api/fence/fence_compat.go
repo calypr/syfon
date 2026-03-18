@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"sync"
@@ -91,12 +92,22 @@ var multipartUploadSessions sync.Map // uploadID -> multipartSession
 
 const bucketAdminResource = "/services/fence/buckets"
 
+func writeHTTPError(w http.ResponseWriter, r *http.Request, status int, msg string, err error) {
+	requestID := core.GetRequestID(r.Context())
+	if err != nil {
+		slog.Error("fence request failed", "request_id", requestID, "method", r.Method, "path", r.URL.Path, "status", status, "msg", msg, "err", err)
+	} else {
+		slog.Warn("fence request rejected", "request_id", requestID, "method", r.Method, "path", r.URL.Path, "status", status, "msg", msg)
+	}
+	http.Error(w, msg, status)
+}
+
 func writeAuthError(w http.ResponseWriter, r *http.Request) {
 	code := http.StatusForbidden
 	if core.IsGen3Mode(r.Context()) && !core.HasAuthHeader(r.Context()) {
 		code = http.StatusUnauthorized
 	}
-	http.Error(w, "Unauthorized", code)
+	writeHTTPError(w, r, code, "Unauthorized", nil)
 }
 
 func writeDBError(w http.ResponseWriter, r *http.Request, err error) {
@@ -104,9 +115,9 @@ func writeDBError(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, core.ErrUnauthorized):
 		writeAuthError(w, r)
 	case errors.Is(err, core.ErrNotFound):
-		http.Error(w, "File not found", http.StatusNotFound)
+		writeHTTPError(w, r, http.StatusNotFound, "File not found", err)
 	default:
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeHTTPError(w, r, http.StatusInternalServerError, err.Error(), err)
 	}
 }
 
@@ -165,7 +176,7 @@ func registerFenceDataRoutes(router *mux.Router, base string, database core.Data
 		case http.MethodPut:
 			handleFencePutBucket(w, r, database)
 		default:
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			writeHTTPError(w, r, http.StatusMethodNotAllowed, "Method not allowed", nil)
 		}
 	}), "FenceBuckets")).Methods(http.MethodGet, http.MethodPut)
 
@@ -174,7 +185,7 @@ func registerFenceDataRoutes(router *mux.Router, base string, database core.Data
 			handleFenceDeleteBucket(w, r, database)
 			return
 		}
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		writeHTTPError(w, r, http.StatusMethodNotAllowed, "Method not allowed", nil)
 	}), "FenceBucketDetail")).Methods(http.MethodDelete)
 }
 
@@ -227,7 +238,7 @@ func handleFenceDownload(w http.ResponseWriter, r *http.Request, database core.D
 	}
 
 	if s3URL == "" {
-		http.Error(w, "No S3 location found for this file", http.StatusNotFound)
+		writeHTTPError(w, r, http.StatusNotFound, "No S3 location found for this file", nil)
 		return
 	}
 
@@ -240,7 +251,7 @@ func handleFenceDownload(w http.ResponseWriter, r *http.Request, database core.D
 
 	signedURL, err := uM.SignURL(r.Context(), "", s3URL, opts)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeHTTPError(w, r, http.StatusInternalServerError, err.Error(), err)
 		return
 	}
 
@@ -250,19 +261,21 @@ func handleFenceDownload(w http.ResponseWriter, r *http.Request, database core.D
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(fenceSignedURL{URL: signedURL})
+	if err := json.NewEncoder(w).Encode(fenceSignedURL{URL: signedURL}); err != nil {
+		slog.Error("fence encode response failed", "request_id", core.GetRequestID(r.Context()), "method", r.Method, "path", r.URL.Path, "err", err)
+	}
 }
 
 func handleFenceUploadBlank(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface, uM urlmanager.UrlManager) {
 	var req fenceUploadBlankRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request", http.StatusBadRequest)
+		writeHTTPError(w, r, http.StatusBadRequest, "Invalid request", nil)
 		return
 	}
 
 	guid := req.GUID
 	if guid == "" {
-		http.Error(w, "guid is required", http.StatusBadRequest)
+		writeHTTPError(w, r, http.StatusBadRequest, "guid is required", nil)
 		return
 	}
 
@@ -296,8 +309,11 @@ func handleFenceUploadBlank(w http.ResponseWriter, r *http.Request, database cor
 		// If authz provided
 		_ = req.Authz // Reserved for future use
 
-		if err := database.CreateObject(r.Context(), obj, req.Authz); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+		if err := database.CreateObject(r.Context(), &core.InternalObject{
+			DrsObject:      *obj,
+			Authorizations: append([]string(nil), req.Authz...),
+		}); err != nil {
+			writeHTTPError(w, r, http.StatusInternalServerError, err.Error(), err)
 			return
 		}
 	}
@@ -309,7 +325,7 @@ func handleFenceUploadBlank(w http.ResponseWriter, r *http.Request, database cor
 	// Generate a signed upload URL to a default bucket (the first one)
 	creds, err := database.ListS3Credentials(r.Context())
 	if err != nil || len(creds) == 0 {
-		http.Error(w, "No buckets configured for upload", http.StatusInternalServerError)
+		writeHTTPError(w, r, http.StatusInternalServerError, "No buckets configured for upload", nil)
 		return
 	}
 	bucket := creds[0].Bucket
@@ -317,16 +333,18 @@ func handleFenceUploadBlank(w http.ResponseWriter, r *http.Request, database cor
 
 	signedURL, err := uM.SignUploadURL(r.Context(), "", s3URL, urlmanager.SignOptions{})
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeHTTPError(w, r, http.StatusInternalServerError, err.Error(), err)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(fenceUploadBlankResponse{
+	if err := json.NewEncoder(w).Encode(fenceUploadBlankResponse{
 		GUID: guid,
 		URL:  signedURL,
-	})
+	}); err != nil {
+		slog.Error("fence encode response failed", "request_id", core.GetRequestID(r.Context()), "method", r.Method, "path", r.URL.Path, "err", err)
+	}
 }
 
 func handleFenceUploadURL(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface, uM urlmanager.UrlManager) {
@@ -363,7 +381,7 @@ func handleFenceUploadURL(w http.ResponseWriter, r *http.Request, database core.
 	}
 
 	if bucket == "" {
-		http.Error(w, "No bucket specified or configured", http.StatusBadRequest)
+		writeHTTPError(w, r, http.StatusBadRequest, "No bucket specified or configured", nil)
 		return
 	}
 
@@ -378,25 +396,27 @@ func handleFenceUploadURL(w http.ResponseWriter, r *http.Request, database core.
 
 	signedURL, err := uM.SignUploadURL(r.Context(), "", s3URL, opts)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeHTTPError(w, r, http.StatusInternalServerError, err.Error(), err)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(fenceSignedURL{URL: signedURL})
+	if err := json.NewEncoder(w).Encode(fenceSignedURL{URL: signedURL}); err != nil {
+		slog.Error("fence encode response failed", "request_id", core.GetRequestID(r.Context()), "method", r.Method, "path", r.URL.Path, "err", err)
+	}
 }
 
 func handleFenceMultipartInit(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface, uM urlmanager.UrlManager) {
 	var req fenceMultipartInitRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request", http.StatusBadRequest)
+		writeHTTPError(w, r, http.StatusBadRequest, "Invalid request", nil)
 		return
 	}
 
 	guid := req.GUID
 	if guid == "" {
 		if req.FileName == "" {
-			http.Error(w, "guid or file_name is required", http.StatusBadRequest)
+			writeHTTPError(w, r, http.StatusBadRequest, "guid or file_name is required", nil)
 			return
 		}
 		guid = req.FileName
@@ -404,7 +424,7 @@ func handleFenceMultipartInit(w http.ResponseWriter, r *http.Request, database c
 
 	bucket, err := resolveBucket(r, database, req.Bucket)
 	if bucket == "" {
-		http.Error(w, "No bucket configured for upload", http.StatusInternalServerError)
+		writeHTTPError(w, r, http.StatusInternalServerError, "No bucket configured for upload", nil)
 		return
 	}
 
@@ -429,7 +449,7 @@ func handleFenceMultipartInit(w http.ResponseWriter, r *http.Request, database c
 
 	uploadID, err := uM.InitMultipartUpload(r.Context(), bucket, fileName)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeHTTPError(w, r, http.StatusInternalServerError, err.Error(), err)
 		return
 	}
 	multipartUploadSessions.Store(uploadID, multipartSession{Bucket: bucket, Key: fileName})
@@ -445,24 +465,29 @@ func handleFenceMultipartInit(w http.ResponseWriter, r *http.Request, database c
 			Version:     "1",
 			Name:        fileName,
 		}
-		if err := database.CreateObject(r.Context(), obj, []string{}); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+		if err := database.CreateObject(r.Context(), &core.InternalObject{
+			DrsObject:      *obj,
+			Authorizations: []string{},
+		}); err != nil {
+			writeHTTPError(w, r, http.StatusInternalServerError, err.Error(), err)
 			return
 		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(fenceMultipartInitResponse{
+	if err := json.NewEncoder(w).Encode(fenceMultipartInitResponse{
 		GUID:     guid,
 		UploadID: uploadID,
-	})
+	}); err != nil {
+		slog.Error("fence encode response failed", "request_id", core.GetRequestID(r.Context()), "method", r.Method, "path", r.URL.Path, "err", err)
+	}
 }
 
 func handleFenceMultipartUpload(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface, uM urlmanager.UrlManager) {
 	var req fenceMultipartUploadRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
-		http.Error(w, "Invalid request", http.StatusBadRequest)
+		writeHTTPError(w, r, http.StatusBadRequest, "Invalid request", nil)
 		return
 	}
 	q := r.URL.Query()
@@ -499,7 +524,7 @@ func handleFenceMultipartUpload(w http.ResponseWriter, r *http.Request, database
 	}
 
 	if req.Key == "" || req.UploadID == "" || req.PartNumber <= 0 {
-		http.Error(w, "key, uploadId, and positive partNumber are required", http.StatusBadRequest)
+		writeHTTPError(w, r, http.StatusBadRequest, "key, uploadId, and positive partNumber are required", nil)
 		return
 	}
 	targetResources := []string{"/data_file"}
@@ -518,24 +543,26 @@ func handleFenceMultipartUpload(w http.ResponseWriter, r *http.Request, database
 
 	bucket, err := resolveBucket(r, database, req.Bucket)
 	if err != nil || bucket == "" {
-		http.Error(w, "No bucket configured", http.StatusInternalServerError)
+		writeHTTPError(w, r, http.StatusInternalServerError, "No bucket configured", nil)
 		return
 	}
 
 	signedURL, err := uM.SignMultipartPart(r.Context(), bucket, req.Key, req.UploadID, req.PartNumber)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeHTTPError(w, r, http.StatusInternalServerError, err.Error(), err)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(fenceMultipartUploadResponse{PresignedURL: signedURL})
+	if err := json.NewEncoder(w).Encode(fenceMultipartUploadResponse{PresignedURL: signedURL}); err != nil {
+		slog.Error("fence encode response failed", "request_id", core.GetRequestID(r.Context()), "method", r.Method, "path", r.URL.Path, "err", err)
+	}
 }
 
 func handleFenceMultipartComplete(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface, uM urlmanager.UrlManager) {
 	var req fenceMultipartCompleteRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
-		http.Error(w, "Invalid request", http.StatusBadRequest)
+		writeHTTPError(w, r, http.StatusBadRequest, "Invalid request", nil)
 		return
 	}
 	q := r.URL.Query()
@@ -565,7 +592,7 @@ func handleFenceMultipartComplete(w http.ResponseWriter, r *http.Request, databa
 	}
 
 	if req.Key == "" || req.UploadID == "" {
-		http.Error(w, "key and uploadId are required", http.StatusBadRequest)
+		writeHTTPError(w, r, http.StatusBadRequest, "key and uploadId are required", nil)
 		return
 	}
 	targetResources := []string{"/data_file"}
@@ -584,7 +611,7 @@ func handleFenceMultipartComplete(w http.ResponseWriter, r *http.Request, databa
 
 	bucket, err := resolveBucket(r, database, req.Bucket)
 	if err != nil || bucket == "" {
-		http.Error(w, "No bucket configured", http.StatusInternalServerError)
+		writeHTTPError(w, r, http.StatusInternalServerError, "No bucket configured", nil)
 		return
 	}
 
@@ -598,7 +625,7 @@ func handleFenceMultipartComplete(w http.ResponseWriter, r *http.Request, databa
 
 	err = uM.CompleteMultipartUpload(r.Context(), bucket, req.Key, req.UploadID, parts)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeHTTPError(w, r, http.StatusInternalServerError, err.Error(), err)
 		return
 	}
 	multipartUploadSessions.Delete(req.UploadID)
@@ -613,7 +640,7 @@ func handleFenceBuckets(w http.ResponseWriter, r *http.Request, database core.Da
 	}
 	creds, err := database.ListS3Credentials(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeHTTPError(w, r, http.StatusInternalServerError, err.Error(), err)
 		return
 	}
 
@@ -627,7 +654,9 @@ func handleFenceBuckets(w http.ResponseWriter, r *http.Request, database core.Da
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		slog.Error("fence encode response failed", "request_id", core.GetRequestID(r.Context()), "method", r.Method, "path", r.URL.Path, "err", err)
+	}
 }
 
 func handleFencePutBucket(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface) {
@@ -637,11 +666,11 @@ func handleFencePutBucket(w http.ResponseWriter, r *http.Request, database core.
 	}
 	var req fencePutBucketRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request", http.StatusBadRequest)
+		writeHTTPError(w, r, http.StatusBadRequest, "Invalid request", nil)
 		return
 	}
 	if req.Bucket == "" || req.AccessKey == "" || req.SecretKey == "" {
-		http.Error(w, "bucket, access_key and secret_key are required", http.StatusBadRequest)
+		writeHTTPError(w, r, http.StatusBadRequest, "bucket, access_key and secret_key are required", nil)
 		return
 	}
 	cred := &core.S3Credential{
@@ -652,7 +681,7 @@ func handleFencePutBucket(w http.ResponseWriter, r *http.Request, database core.
 		Endpoint:  req.Endpoint,
 	}
 	if err := database.SaveS3Credential(r.Context(), cred); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeHTTPError(w, r, http.StatusInternalServerError, err.Error(), err)
 		return
 	}
 	w.WriteHeader(http.StatusCreated)
@@ -665,11 +694,11 @@ func handleFenceDeleteBucket(w http.ResponseWriter, r *http.Request, database co
 	}
 	bucket := mux.Vars(r)["bucket"]
 	if bucket == "" {
-		http.Error(w, "bucket is required", http.StatusBadRequest)
+		writeHTTPError(w, r, http.StatusBadRequest, "bucket is required", nil)
 		return
 	}
 	if err := database.DeleteS3Credential(r.Context(), bucket); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeHTTPError(w, r, http.StatusInternalServerError, err.Error(), err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
