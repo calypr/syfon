@@ -74,6 +74,49 @@ func TestSqliteDB_CRUD(t *testing.T) {
 	}
 }
 
+func TestSqliteDB_GetObjectsByChecksum_WhenIDDiffers(t *testing.T) {
+	ctx := context.Background()
+	db, err := NewSqliteDB(":memory:")
+	if err != nil {
+		t.Fatalf("failed to create db: %v", err)
+	}
+	checksum := "47454ac45ec9e9d88d76ba2dc8dff527ba6899a0f4189eb67dfcb2da0aa7d125"
+
+	obj := &drs.DrsObject{
+		Id:          "did-123",
+		Size:        10,
+		CreatedTime: time.Now(),
+		UpdatedTime: time.Now(),
+		Version:     "1.0",
+		Name:        "oid-object",
+		AccessMethods: []drs.AccessMethod{
+			{
+				Type: "s3",
+				AccessUrl: drs.AccessMethodAccessUrl{
+					Url: "s3://bucket/cbds/end_to_end_test/" + checksum,
+				},
+			},
+		},
+		Checksums: []drs.Checksum{
+			{Type: "sha256", Checksum: checksum},
+		},
+	}
+	if err := db.CreateObject(ctx, &core.InternalObject{DrsObject: *obj, Authorizations: []string{}}); err != nil {
+		t.Fatalf("CreateObject failed: %v", err)
+	}
+
+	objs, err := db.GetObjectsByChecksum(ctx, checksum)
+	if err != nil {
+		t.Fatalf("GetObjectsByChecksum failed: %v", err)
+	}
+	if len(objs) != 1 {
+		t.Fatalf("expected 1 object, got %d", len(objs))
+	}
+	if objs[0].Id != "did-123" {
+		t.Fatalf("expected object id did-123, got %s", objs[0].Id)
+	}
+}
+
 func TestSqliteDB_S3Credentials(t *testing.T) {
 	ctx := context.Background()
 	db, err := NewSqliteDB(":memory:")

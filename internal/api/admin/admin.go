@@ -51,10 +51,28 @@ func listCredentials(w http.ResponseWriter, r *http.Request, database core.Datab
 }
 
 func putCredential(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface) {
-	var cred core.S3Credential
-	if err := json.NewDecoder(r.Body).Decode(&cred); err != nil {
+	var req struct {
+		Bucket          string `json:"bucket"`
+		BucketLegacy    string `json:"Bucket"`
+		Region          string `json:"region"`
+		RegionLegacy    string `json:"Region"`
+		AccessKey       string `json:"access_key"`
+		AccessKeyLegacy string `json:"AccessKey"`
+		SecretKey       string `json:"secret_key"`
+		SecretKeyLegacy string `json:"SecretKey"`
+		Endpoint        string `json:"endpoint"`
+		EndpointLegacy  string `json:"Endpoint"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
+	}
+	cred := core.S3Credential{
+		Bucket:    firstNonEmpty(req.Bucket, req.BucketLegacy),
+		Region:    firstNonEmpty(req.Region, req.RegionLegacy),
+		AccessKey: firstNonEmpty(req.AccessKey, req.AccessKeyLegacy),
+		SecretKey: firstNonEmpty(req.SecretKey, req.SecretKeyLegacy),
+		Endpoint:  firstNonEmpty(req.Endpoint, req.EndpointLegacy),
 	}
 	// Basic validation
 	if cred.Bucket == "" || cred.AccessKey == "" || cred.SecretKey == "" {
@@ -67,6 +85,15 @@ func putCredential(w http.ResponseWriter, r *http.Request, database core.Databas
 		return
 	}
 	w.WriteHeader(http.StatusOK)
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func deleteCredential(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface) {

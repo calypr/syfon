@@ -90,6 +90,31 @@ func TestLFSBatchUploadReturnsActionsWithoutPlaceholder(t *testing.T) {
 	}
 }
 
+func TestResolveObjectForOIDFallsBackToChecksum(t *testing.T) {
+	db := &testutils.MockDatabase{
+		Objects: map[string]*drs.DrsObject{},
+	}
+	oid := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	did := "did:example:bbbb"
+	db.Objects[oid] = &drs.DrsObject{
+		Id: did,
+		AccessMethods: []drs.AccessMethod{
+			{
+				Type:      "s3",
+				AccessUrl: drs.AccessMethodAccessUrl{Url: "s3://test-bucket-1/cbds/end_to_end_test/" + oid},
+			},
+		},
+	}
+
+	obj, err := resolveObjectForOID(context.Background(), db, oid)
+	if err != nil {
+		t.Fatalf("expected checksum fallback object, got error: %v", err)
+	}
+	if obj == nil || obj.Id != did {
+		t.Fatalf("expected object id %s, got %+v", did, obj)
+	}
+}
+
 func TestLFSMetadataThenVerifyRegistersObject(t *testing.T) {
 	router, db := newLFSRouter()
 	oid := "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"

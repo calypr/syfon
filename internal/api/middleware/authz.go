@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 
 	"github.com/calypr/data-client/conf"
@@ -23,6 +24,14 @@ type AuthzMiddleware struct {
 	mode      string
 	basicUser string
 	basicPass string
+	mock      mockAuthConfig
+}
+
+type mockAuthConfig struct {
+	Enabled           bool
+	RequireAuthHeader bool
+	Resources         []string
+	Methods           []string
 }
 
 func NewAuthzMiddleware(logger *slog.Logger, mode, basicUser, basicPass string) *AuthzMiddleware {
@@ -31,6 +40,7 @@ func NewAuthzMiddleware(logger *slog.Logger, mode, basicUser, basicPass string) 
 		mode:      strings.ToLower(strings.TrimSpace(mode)),
 		basicUser: basicUser,
 		basicPass: basicPass,
+		mock:      loadMockAuthConfigFromEnv(),
 	}
 }
 
@@ -50,6 +60,30 @@ func (m *AuthzMiddleware) Middleware(next http.Handler) http.Handler {
 					return
 				}
 			}
+			next.ServeHTTP(w, r.WithContext(ctx))
+			return
+		}
+		if m.mock.Enabled {
+			if m.mock.RequireAuthHeader && !core.HasAuthHeader(ctx) {
+				next.ServeHTTP(w, r.WithContext(ctx))
+				return
+			}
+			// In mock mode, mark auth header as present so gen3 authorization checks
+			// in service/DB layers evaluate injected privileges.
+			if !core.HasAuthHeader(ctx) {
+				ctx = context.WithValue(ctx, core.AuthHeaderPresentKey, true)
+			}
+			resources := append([]string(nil), m.mock.Resources...)
+			privs := make(map[string]map[string]bool, len(resources))
+			for _, resource := range resources {
+				methods := make(map[string]bool, len(m.mock.Methods))
+				for _, method := range m.mock.Methods {
+					methods[method] = true
+				}
+				privs[resource] = methods
+			}
+			ctx = context.WithValue(ctx, core.UserAuthzKey, resources)
+			ctx = context.WithValue(ctx, core.UserPrivilegesKey, privs)
 			next.ServeHTTP(w, r.WithContext(ctx))
 			return
 		}
@@ -102,6 +136,59 @@ func (m *AuthzMiddleware) Middleware(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+func loadMockAuthConfigFromEnv() mockAuthConfig {
+	enabled := parseBoolEnv("DRS_AUTH_MOCK_ENABLED", false)
+	if !enabled {
+		return mockAuthConfig{}
+	}
+	resources := splitCSV(os.Getenv("DRS_AUTH_MOCK_RESOURCES"))
+	if len(resources) == 0 {
+		resources = []string{"/data_file"}
+	}
+	methods := splitCSV(os.Getenv("DRS_AUTH_MOCK_METHODS"))
+	if len(methods) == 0 {
+		methods = []string{"*"}
+	}
+	return mockAuthConfig{
+		Enabled:           true,
+		RequireAuthHeader: parseBoolEnv("DRS_AUTH_MOCK_REQUIRE_AUTH_HEADER", false),
+		Resources:         resources,
+		Methods:           methods,
+	}
+}
+
+func parseBoolEnv(name string, def bool) bool {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return def
+	}
+	switch strings.ToLower(raw) {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return def
+	}
+}
+
+func splitCSV(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
 }
 
 func (m *AuthzMiddleware) parseToken(tokenString string) (endpoint string, exp float64, err error) {

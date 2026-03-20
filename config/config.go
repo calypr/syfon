@@ -246,7 +246,7 @@ func LoadConfig(configFile string) (*Config, error) {
 	if cfg.Auth.Mode != AuthModeLocal && cfg.Auth.Mode != AuthModeGen3 {
 		return nil, fmt.Errorf("invalid auth.mode %q: expected %q or %q", cfg.Auth.Mode, AuthModeLocal, AuthModeGen3)
 	}
-	if cfg.Auth.Mode == AuthModeGen3 && cfg.Database.Postgres == nil {
+	if cfg.Auth.Mode == AuthModeGen3 && cfg.Database.Postgres == nil && !isMockAuthEnabledFromEnv() {
 		return nil, fmt.Errorf("auth.mode %q requires postgres database", cfg.Auth.Mode)
 	}
 	if (cfg.Auth.Basic.Username == "") != (cfg.Auth.Basic.Password == "") {
@@ -266,4 +266,14 @@ func LoadConfig(configFile string) (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func isMockAuthEnabledFromEnv() bool {
+	raw := strings.TrimSpace(os.Getenv("DRS_AUTH_MOCK_ENABLED"))
+	switch strings.ToLower(raw) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }

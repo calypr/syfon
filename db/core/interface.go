@@ -37,6 +37,7 @@ type DatabaseInterface interface {
 
 	// LFS pending metadata lifecycle.
 	SavePendingLFSMeta(ctx context.Context, entries []PendingLFSMeta) error
+	GetPendingLFSMeta(ctx context.Context, oid string) (*PendingLFSMeta, error)
 	PopPendingLFSMeta(ctx context.Context, oid string) (*PendingLFSMeta, error)
 
 	// File usage metrics lifecycle.

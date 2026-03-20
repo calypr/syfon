@@ -1,6 +1,7 @@
 package fence
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -191,11 +192,59 @@ func resolveBucket(ctx *http.Request, database core.DatabaseInterface, requested
 	return creds[0].Bucket, nil
 }
 
+func resolveObjectS3Key(database core.DatabaseInterface, ctx *http.Request, objectID string, bucket string) (string, bool) {
+	if strings.TrimSpace(objectID) == "" || strings.TrimSpace(bucket) == "" {
+		return "", false
+	}
+	obj, err := database.GetObject(ctx.Context(), objectID)
+	if err != nil {
+		return "", false
+	}
+	targetBucket := strings.TrimSpace(bucket)
+	for _, am := range obj.AccessMethods {
+		raw := strings.TrimSpace(am.AccessUrl.Url)
+		if raw == "" {
+			continue
+		}
+		u, err := url.Parse(raw)
+		if err != nil || !strings.EqualFold(u.Scheme, "s3") {
+			continue
+		}
+		if !strings.EqualFold(strings.TrimSpace(u.Host), targetBucket) {
+			continue
+		}
+		key := strings.TrimPrefix(strings.TrimSpace(u.Path), "/")
+		if key != "" {
+			return key, true
+		}
+	}
+	return "", false
+}
+
+func resolveObjectByIDOrChecksum(database core.DatabaseInterface, ctx context.Context, objectID string) (*core.InternalObject, error) {
+	obj, err := database.GetObject(ctx, objectID)
+	if err == nil {
+		return obj, nil
+	}
+	if !errors.Is(err, core.ErrNotFound) {
+		return nil, err
+	}
+	byChecksum, err := database.GetObjectsByChecksum(ctx, objectID)
+	if err != nil {
+		return nil, err
+	}
+	if len(byChecksum) == 0 {
+		return nil, core.ErrNotFound
+	}
+	objCopy := byChecksum[0]
+	return &objCopy, nil
+}
+
 func handleFenceDownload(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface, uM urlmanager.UrlManager) {
 	vars := mux.Vars(r)
 	fileID := vars["file_id"]
 
-	obj, err := database.GetObject(r.Context(), fileID)
+	obj, err := resolveObjectByIDOrChecksum(database, r.Context(), fileID)
 	if err != nil {
 		writeDBError(w, r, err)
 		return
@@ -354,7 +403,11 @@ func handleFenceUploadURL(w http.ResponseWriter, r *http.Request, database core.
 	}
 
 	if fileName == "" {
-		fileName = fileID
+		if resolvedKey, ok := resolveObjectS3Key(database, r, fileID, bucket); ok {
+			fileName = resolvedKey
+		} else {
+			fileName = fileID
+		}
 	}
 
 	if bucket == "" {
@@ -407,7 +460,11 @@ func handleFenceMultipartInit(w http.ResponseWriter, r *http.Request, database c
 
 	fileName := req.GetFileName()
 	if fileName == "" {
-		fileName = guid
+		if resolvedKey, ok := resolveObjectS3Key(database, r, guid, bucket); ok {
+			fileName = resolvedKey
+		} else {
+			fileName = guid
+		}
 	}
 
 	targetResources := []string{"/data_file"}

@@ -280,6 +280,17 @@ func (db *SqliteDB) CreateObject(ctx context.Context, obj *core.InternalObject) 
 		}
 	}
 
+	// Insert Checksums
+	for _, cs := range obj.Checksums {
+		if strings.TrimSpace(cs.Type) == "" || strings.TrimSpace(cs.Checksum) == "" {
+			continue
+		}
+		_, err = tx.ExecContext(ctx, `INSERT INTO drs_object_checksum (object_id, type, checksum) VALUES (?, ?, ?)`, obj.Id, cs.Type, cs.Checksum)
+		if err != nil {
+			return fmt.Errorf("failed to insert checksum: %w", err)
+		}
+	}
+
 	// Insert Authz
 	for _, res := range obj.Authorizations {
 		_, err = tx.ExecContext(ctx, `INSERT INTO drs_object_authz (object_id, resource) VALUES (?, ?)`, obj.Id, res)
@@ -484,14 +495,22 @@ func (db *SqliteDB) ListObjectIDsByResourcePrefix(ctx context.Context, resourceP
 }
 
 func (db *SqliteDB) GetObjectsByChecksum(ctx context.Context, checksum string) ([]core.InternalObject, error) {
-	obj, err := db.GetObject(ctx, checksum)
+	checksum = strings.TrimSpace(checksum)
+	if checksum == "" {
+		return []core.InternalObject{}, nil
+	}
+	objectsByID, err := db.fetchObjectsByIDsOrChecksums(ctx, nil, []string{checksum})
 	if err != nil {
-		if errors.Is(err, core.ErrNotFound) {
-			return []core.InternalObject{}, nil
-		}
 		return nil, err
 	}
-	return []core.InternalObject{*obj}, nil
+	if len(objectsByID) == 0 {
+		return []core.InternalObject{}, nil
+	}
+	out := make([]core.InternalObject, 0, len(objectsByID))
+	for _, obj := range objectsByID {
+		out = append(out, *obj)
+	}
+	return uniqueObjectsByID(out), nil
 }
 
 func (db *SqliteDB) BulkDeleteObjects(ctx context.Context, ids []string) error {
@@ -955,6 +974,40 @@ func (db *SqliteDB) SavePendingLFSMeta(ctx context.Context, entries []core.Pendi
 		}
 	}
 	return tx.Commit()
+}
+
+func (db *SqliteDB) GetPendingLFSMeta(ctx context.Context, oid string) (*core.PendingLFSMeta, error) {
+	if _, err := db.db.ExecContext(ctx, `DELETE FROM lfs_pending_metadata WHERE expires_time <= ?`, time.Now().UTC()); err != nil {
+		return nil, fmt.Errorf("failed to prune expired pending metadata: %w", err)
+	}
+
+	var (
+		raw       string
+		createdAt time.Time
+		expiresAt time.Time
+	)
+	if err := db.db.QueryRowContext(ctx, `
+		SELECT candidate_json, created_time, expires_time
+		FROM lfs_pending_metadata
+		WHERE oid = ? AND expires_time > ?
+	`, oid, time.Now().UTC()).Scan(&raw, &createdAt, &expiresAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("%w: pending metadata not found", core.ErrNotFound)
+		}
+		return nil, fmt.Errorf("failed to load pending metadata for oid %s: %w", oid, err)
+	}
+
+	var c drs.DrsObjectCandidate
+	if err := json.Unmarshal([]byte(raw), &c); err != nil {
+		return nil, fmt.Errorf("failed to parse pending metadata candidate for oid %s: %w", oid, err)
+	}
+
+	return &core.PendingLFSMeta{
+		OID:       oid,
+		Candidate: c,
+		CreatedAt: createdAt,
+		ExpiresAt: expiresAt,
+	}, nil
 }
 
 func (db *SqliteDB) PopPendingLFSMeta(ctx context.Context, oid string) (*core.PendingLFSMeta, error) {

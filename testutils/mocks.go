@@ -67,32 +67,38 @@ func (m *MockDatabase) GetObjectsByChecksum(ctx context.Context, checksum string
 	if m.Objects == nil {
 		return []core.InternalObject{}, nil
 	}
-	if obj, ok := m.Objects[checksum]; ok {
-		wrapped := core.InternalObject{DrsObject: *obj}
-		if authz, ok := m.ObjectAuthz[checksum]; ok {
-			wrapped.Authorizations = append([]string(nil), authz...)
+	out := make([]core.InternalObject, 0, 1)
+	for id, obj := range m.Objects {
+		if id == checksum || obj.Id == checksum {
+			wrapped := core.InternalObject{DrsObject: *obj}
+			if authz, ok := m.ObjectAuthz[id]; ok {
+				wrapped.Authorizations = append([]string(nil), authz...)
+			}
+			out = append(out, wrapped)
+			continue
 		}
-		return []core.InternalObject{wrapped}, nil
+		for _, c := range obj.Checksums {
+			if strings.EqualFold(strings.TrimSpace(c.Checksum), strings.TrimSpace(checksum)) {
+				wrapped := core.InternalObject{DrsObject: *obj}
+				if authz, ok := m.ObjectAuthz[id]; ok {
+					wrapped.Authorizations = append([]string(nil), authz...)
+				}
+				out = append(out, wrapped)
+				break
+			}
+		}
 	}
-	return []core.InternalObject{}, nil
+	return out, nil
 }
 
 func (m *MockDatabase) GetObjectsByChecksums(ctx context.Context, checksums []string) (map[string][]core.InternalObject, error) {
 	out := make(map[string][]core.InternalObject, len(checksums))
 	for _, cs := range checksums {
-		if m.Objects == nil {
-			out[cs] = nil
-			continue
+		matches, err := m.GetObjectsByChecksum(ctx, cs)
+		if err != nil {
+			return nil, err
 		}
-		if obj, ok := m.Objects[cs]; ok {
-			wrapped := core.InternalObject{DrsObject: *obj}
-			if authz, ok := m.ObjectAuthz[cs]; ok {
-				wrapped.Authorizations = append([]string(nil), authz...)
-			}
-			out[cs] = []core.InternalObject{wrapped}
-			continue
-		}
-		out[cs] = nil
+		out[cs] = matches
 	}
 	return out, nil
 }
@@ -268,6 +274,17 @@ func (m *MockDatabase) SavePendingLFSMeta(ctx context.Context, entries []core.Pe
 		m.PendingMeta[e.OID] = e
 	}
 	return nil
+}
+
+func (m *MockDatabase) GetPendingLFSMeta(ctx context.Context, oid string) (*core.PendingLFSMeta, error) {
+	if m.PendingMeta == nil {
+		return nil, fmt.Errorf("%w: pending metadata not found", core.ErrNotFound)
+	}
+	e, ok := m.PendingMeta[oid]
+	if !ok {
+		return nil, fmt.Errorf("%w: pending metadata not found", core.ErrNotFound)
+	}
+	return &e, nil
 }
 
 func (m *MockDatabase) PopPendingLFSMeta(ctx context.Context, oid string) (*core.PendingLFSMeta, error) {

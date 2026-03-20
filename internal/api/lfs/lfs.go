@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"mime"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -183,8 +184,12 @@ func handleVerify(database core.DatabaseInterface) http.HandlerFunc {
 				writeLFSError(w, r, unauthorizedStatus(r), "Unauthorized", unauthorizedStatus(r) == http.StatusUnauthorized)
 				return
 			}
-			if recErr := database.RecordFileUpload(r.Context(), oid); recErr != nil {
-				slog.Debug("failed to record file upload metric", "request_id", core.GetRequestID(r.Context()), "oid", oid, "err", recErr)
+			usageObjectID := oid
+			if strings.TrimSpace(obj.Id) != "" {
+				usageObjectID = strings.TrimSpace(obj.Id)
+			}
+			if recErr := database.RecordFileUpload(r.Context(), usageObjectID); recErr != nil {
+				slog.Debug("failed to record file upload metric", "request_id", core.GetRequestID(r.Context()), "oid", oid, "object_id", usageObjectID, "err", recErr)
 			}
 			w.WriteHeader(http.StatusOK)
 			return
@@ -220,8 +225,12 @@ func handleVerify(database core.DatabaseInterface) http.HandlerFunc {
 			writeLFSError(w, r, http.StatusInternalServerError, regErr.Error(), false)
 			return
 		}
-		if recErr := database.RecordFileUpload(r.Context(), oid); recErr != nil {
-			slog.Debug("failed to record file upload metric", "request_id", core.GetRequestID(r.Context()), "oid", oid, "err", recErr)
+		usageObjectID := oid
+		if strings.TrimSpace(internalObj.Id) != "" {
+			usageObjectID = strings.TrimSpace(internalObj.Id)
+		}
+		if recErr := database.RecordFileUpload(r.Context(), usageObjectID); recErr != nil {
+			slog.Debug("failed to record file upload metric", "request_id", core.GetRequestID(r.Context()), "oid", oid, "object_id", usageObjectID, "err", recErr)
 		}
 		w.WriteHeader(http.StatusOK)
 	}
@@ -310,15 +319,19 @@ func prepareDownloadActions(r *http.Request, database core.DatabaseInterface, uM
 	if err != nil {
 		return nil, &lfsapi.ObjectError{Code: int32(http.StatusInternalServerError), Message: err.Error()}
 	}
-	if recErr := database.RecordFileDownload(r.Context(), oid); recErr != nil {
-		slog.Debug("failed to record file download metric", "request_id", core.GetRequestID(r.Context()), "oid", oid, "err", recErr)
+	usageObjectID := oid
+	if strings.TrimSpace(obj.Id) != "" {
+		usageObjectID = strings.TrimSpace(obj.Id)
+	}
+	if recErr := database.RecordFileDownload(r.Context(), usageObjectID); recErr != nil {
+		slog.Debug("failed to record file download metric", "request_id", core.GetRequestID(r.Context()), "oid", oid, "object_id", usageObjectID, "err", recErr)
 	}
 	action := lfsapi.Action{Href: signed}
 	return &lfsapi.BatchActions{Download: &action}, nil
 }
 
 func prepareUploadActions(r *http.Request, database core.DatabaseInterface, uM urlmanager.UrlManager, oid string, reqSize int64) (*lfsapi.BatchActions, int64, *lfsapi.ObjectError) {
-	existing, err := database.GetObject(r.Context(), oid)
+	existing, err := resolveObjectForOID(r.Context(), database, oid)
 	if err == nil {
 		if len(existing.Authorizations) > 0 && !hasMethodAccess(r, "read", existing.Authorizations) {
 			return nil, existing.Size, &lfsapi.ObjectError{Code: int32(unauthorizedStatus(r)), Message: "unauthorized"}
@@ -356,6 +369,26 @@ func prepareUploadActions(r *http.Request, database core.DatabaseInterface, uM u
 	}, size, nil
 }
 
+func resolveObjectForOID(ctx context.Context, database core.DatabaseInterface, oid string) (*core.InternalObject, error) {
+	if obj, err := database.GetObject(ctx, oid); err == nil {
+		return obj, nil
+	} else if !isNotFound(err) {
+		return nil, err
+	}
+
+	// Some flows register by DRS DID while OID is only checksum.
+	// Fall back to checksum lookup to keep upload/download key resolution consistent.
+	byChecksum, err := database.GetObjectsByChecksum(ctx, oid)
+	if err != nil {
+		return nil, err
+	}
+	if len(byChecksum) == 0 {
+		return nil, fmt.Errorf("%w: object not found", core.ErrNotFound)
+	}
+	obj := byChecksum[0]
+	return &obj, nil
+}
+
 func handleUploadProxy(database core.DatabaseInterface, uM urlmanager.UrlManager) http.HandlerFunc {
 	const multipartPartSize = 64 * 1024 * 1024 // 64 MiB
 
@@ -380,7 +413,24 @@ func handleUploadProxy(database core.DatabaseInterface, uM urlmanager.UrlManager
 			return
 		}
 		bucket := strings.TrimSpace(creds[0].Bucket)
-		key := oid // CAS key
+		key := oid // default CAS key
+		usageObjectID := oid
+		if obj, getErr := resolveObjectForOID(r.Context(), database, oid); getErr == nil {
+			if strings.TrimSpace(obj.Id) != "" {
+				usageObjectID = strings.TrimSpace(obj.Id)
+			}
+			if resolvedKey, ok := s3KeyFromObjectForBucket(obj, bucket); ok {
+				key = resolvedKey
+			}
+		} else if isNotFound(getErr) {
+			// When upload arrives before verify, object may be only staged in pending metadata.
+			// Use staged access_method key so upload and later download resolve the same S3 object key.
+			if pending, pErr := database.GetPendingLFSMeta(r.Context(), oid); pErr == nil {
+				if resolvedKey, ok := s3KeyFromCandidateForBucket(pending.Candidate, bucket); ok {
+					key = resolvedKey
+				}
+			}
+		}
 
 		// 0-byte object: single signed PUT is simpler than multipart.
 		if r.ContentLength == 0 {
@@ -388,8 +438,8 @@ func handleUploadProxy(database core.DatabaseInterface, uM urlmanager.UrlManager
 				writeHTTPError(w, r, http.StatusBadGateway, "upload failed", err)
 				return
 			}
-			if recErr := database.RecordFileUpload(r.Context(), oid); recErr != nil {
-				slog.Debug("failed to record file upload metric", "request_id", core.GetRequestID(r.Context()), "oid", oid, "err", recErr)
+			if recErr := database.RecordFileUpload(r.Context(), usageObjectID); recErr != nil {
+				slog.Debug("failed to record file upload metric", "request_id", core.GetRequestID(r.Context()), "oid", oid, "object_id", usageObjectID, "err", recErr)
 			}
 			w.WriteHeader(http.StatusOK)
 			return
@@ -442,8 +492,8 @@ func handleUploadProxy(database core.DatabaseInterface, uM urlmanager.UrlManager
 				writeHTTPError(w, r, http.StatusBadGateway, "upload failed", err)
 				return
 			}
-			if recErr := database.RecordFileUpload(r.Context(), oid); recErr != nil {
-				slog.Debug("failed to record file upload metric", "request_id", core.GetRequestID(r.Context()), "oid", oid, "err", recErr)
+			if recErr := database.RecordFileUpload(r.Context(), usageObjectID); recErr != nil {
+				slog.Debug("failed to record file upload metric", "request_id", core.GetRequestID(r.Context()), "oid", oid, "object_id", usageObjectID, "err", recErr)
 			}
 			w.WriteHeader(http.StatusOK)
 			return
@@ -453,11 +503,64 @@ func handleUploadProxy(database core.DatabaseInterface, uM urlmanager.UrlManager
 			writeHTTPError(w, r, http.StatusBadGateway, "failed to complete multipart upload", err)
 			return
 		}
-		if recErr := database.RecordFileUpload(r.Context(), oid); recErr != nil {
-			slog.Debug("failed to record file upload metric", "request_id", core.GetRequestID(r.Context()), "oid", oid, "err", recErr)
+		if recErr := database.RecordFileUpload(r.Context(), usageObjectID); recErr != nil {
+			slog.Debug("failed to record file upload metric", "request_id", core.GetRequestID(r.Context()), "oid", oid, "object_id", usageObjectID, "err", recErr)
 		}
 		w.WriteHeader(http.StatusOK)
 	}
+}
+
+func s3KeyFromCandidateForBucket(candidate drs.DrsObjectCandidate, bucket string) (string, bool) {
+	targetBucket := strings.TrimSpace(bucket)
+	if targetBucket == "" {
+		return "", false
+	}
+	for _, am := range candidate.AccessMethods {
+		raw := strings.TrimSpace(am.AccessUrl.Url)
+		if raw == "" {
+			continue
+		}
+		u, err := url.Parse(raw)
+		if err != nil || !strings.EqualFold(u.Scheme, "s3") {
+			continue
+		}
+		if strings.TrimSpace(u.Host) != targetBucket {
+			continue
+		}
+		key := strings.TrimPrefix(strings.TrimSpace(u.Path), "/")
+		if key != "" {
+			return key, true
+		}
+	}
+	return "", false
+}
+
+func s3KeyFromObjectForBucket(obj *core.InternalObject, bucket string) (string, bool) {
+	if obj == nil {
+		return "", false
+	}
+	targetBucket := strings.TrimSpace(bucket)
+	if targetBucket == "" {
+		return "", false
+	}
+	for _, am := range obj.AccessMethods {
+		raw := strings.TrimSpace(am.AccessUrl.Url)
+		if raw == "" {
+			continue
+		}
+		u, err := url.Parse(raw)
+		if err != nil || !strings.EqualFold(u.Scheme, "s3") {
+			continue
+		}
+		if strings.TrimSpace(u.Host) != targetBucket {
+			continue
+		}
+		key := strings.TrimPrefix(strings.TrimSpace(u.Path), "/")
+		if key != "" {
+			return key, true
+		}
+	}
+	return "", false
 }
 
 func proxySinglePut(r *http.Request, uM urlmanager.UrlManager, bucket, key string) error {

@@ -168,3 +168,53 @@ func TestExtractBearerLikeToken(t *testing.T) {
 		}
 	})
 }
+
+func TestGen3MockAuthInjectsPrivileges(t *testing.T) {
+	t.Setenv("DRS_AUTH_MOCK_ENABLED", "true")
+	t.Setenv("DRS_AUTH_MOCK_RESOURCES", "/data_file,/programs/cbds/projects/end_to_end_test")
+	t.Setenv("DRS_AUTH_MOCK_METHODS", "read,file_upload,create,update,delete")
+
+	m := NewAuthzMiddleware(slog.Default(), "gen3", "", "")
+	handler := m.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !core.IsGen3Mode(r.Context()) {
+			t.Fatalf("expected gen3 mode")
+		}
+		if !core.HasMethodAccess(r.Context(), "read", []string{"/data_file"}) {
+			t.Fatalf("expected read on /data_file")
+		}
+		if !core.HasMethodAccess(r.Context(), "create", []string{"/programs/cbds/projects/end_to_end_test"}) {
+			t.Fatalf("expected create on project resource")
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+}
+
+func TestGen3MockAuthRequireHeader(t *testing.T) {
+	t.Setenv("DRS_AUTH_MOCK_ENABLED", "true")
+	t.Setenv("DRS_AUTH_MOCK_REQUIRE_AUTH_HEADER", "true")
+	t.Setenv("DRS_AUTH_MOCK_RESOURCES", "/data_file")
+	t.Setenv("DRS_AUTH_MOCK_METHODS", "read")
+
+	m := NewAuthzMiddleware(slog.Default(), "gen3", "", "")
+	handler := m.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Without header, mock privileges should not be injected.
+		if core.HasMethodAccess(r.Context(), "read", []string{"/data_file"}) {
+			t.Fatalf("did not expect read access without auth header")
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+}

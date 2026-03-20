@@ -60,6 +60,23 @@ Notes:
 - Local development should run `auth.mode: local` with SQLite only.
 - `gen3` mode is for deployed environments and requires PostgreSQL.
 
+### Local Gen3 Mock Auth (no redeploy loop)
+
+For local integration testing of Gen3 authorization behavior without Fence/Arborist and without PostgreSQL, run with mock auth:
+
+```bash
+DRS_AUTH_MODE=gen3 \
+DRS_AUTH_MOCK_ENABLED=true \
+DRS_AUTH_MOCK_RESOURCES="/data_file,/programs/cbds/projects/end_to_end_test" \
+DRS_AUTH_MOCK_METHODS="read,file_upload,create,update,delete" \
+go run . serve --config config.local.yaml
+```
+
+Optional:
+- `DRS_AUTH_MOCK_REQUIRE_AUTH_HEADER=true` requires an `Authorization` header before mock privileges are injected.
+- If `DRS_AUTH_MOCK_RESOURCES` is omitted, default is `"/data_file"`.
+- If `DRS_AUTH_MOCK_METHODS` is omitted, default is `"*"` (full method access).
+
 ## Purpose
 
 The `drs-server` provides a robust implementation of the [GA4GH DRS API](https://ga4gh.github.io/data-repository-service-schemas/). It is designed to manage metadata for data objects and provide secure access via signed URLs.
@@ -104,7 +121,7 @@ s3_credentials:
     endpoint: "s3.amazonaws.com" # Optional: set for MinIO or custom backends
 ```
 
-In `gen3` mode, PostgreSQL is required.
+In `gen3` mode, PostgreSQL is required unless `DRS_AUTH_MOCK_ENABLED=true` is set for local mock-auth testing.
 
 ## Gen3/PostgreSQL Schema Initialization
 

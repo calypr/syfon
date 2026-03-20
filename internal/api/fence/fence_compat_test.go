@@ -59,6 +59,53 @@ func TestHandleFenceDownload(t *testing.T) {
 	}
 }
 
+func TestHandleFenceDownload_ResolvesByChecksum(t *testing.T) {
+	const (
+		did = "did-123"
+		oid = "sha256-abc"
+	)
+	mockDB := &testutils.MockDatabase{
+		Objects: map[string]*drs.DrsObject{
+			did: {
+				Id: did,
+				Checksums: []drs.Checksum{
+					{Type: "sha256", Checksum: oid},
+				},
+				AccessMethods: []drs.AccessMethod{
+					{
+						Type: "s3",
+						AccessUrl: drs.AccessMethodAccessUrl{
+							Url: "s3://bucket/cbds/end_to_end_test/" + did + "/" + oid,
+						},
+					},
+				},
+			},
+		},
+	}
+	mockUM := &testutils.MockUrlManager{}
+
+	req, err := http.NewRequest("GET", "/data/download/"+oid, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req = mux.SetURLVars(req, map[string]string{"file_id": oid})
+
+	rr := httptest.NewRecorder()
+	handleFenceDownload(rr, req, mockDB, mockUM)
+
+	if status := rr.Code; status != http.StatusOK {
+		t.Errorf("handler returned wrong status code: got %v want %v body=%s", status, http.StatusOK, rr.Body.String())
+	}
+
+	var resp internalapi.FenceSignedURL
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(resp.GetUrl(), "/"+did+"/"+oid) {
+		t.Fatalf("expected signed url to include DID-backed key, got %s", resp.GetUrl())
+	}
+}
+
 func TestHandleFenceUploadBlank(t *testing.T) {
 	mockDB := &testutils.MockDatabase{
 		Objects: map[string]*drs.DrsObject{},

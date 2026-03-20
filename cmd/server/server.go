@@ -44,7 +44,7 @@ var Cmd = &cobra.Command{
 		if err != nil {
 			log.Fatalf("Failed to load config: %v", err)
 		}
-		if cfg.Auth.Mode == config.AuthModeGen3 && cfg.Database.Postgres == nil {
+		if cfg.Auth.Mode == config.AuthModeGen3 && cfg.Database.Postgres == nil && !isMockAuthEnabled() {
 			log.Fatal("auth.mode=gen3 requires postgres database")
 		}
 
@@ -195,6 +195,16 @@ var Cmd = &cobra.Command{
 
 func init() {
 	Cmd.Flags().StringVar(&configFile, "config", "", "Path to configuration file (json/yaml)")
+}
+
+func isMockAuthEnabled() bool {
+	raw := strings.TrimSpace(os.Getenv("DRS_AUTH_MOCK_ENABLED"))
+	switch strings.ToLower(raw) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 func registerControllerRoutes(router *mux.Router, api drs.Router) {

@@ -280,6 +280,17 @@ func (db *PostgresDB) CreateObject(ctx context.Context, obj *core.InternalObject
 		}
 	}
 
+	// Insert checksums
+	for _, cs := range obj.Checksums {
+		if strings.TrimSpace(cs.Type) == "" || strings.TrimSpace(cs.Checksum) == "" {
+			continue
+		}
+		_, err = tx.ExecContext(ctx, `INSERT INTO drs_object_checksum (object_id, type, checksum) VALUES ($1, $2, $3)`, obj.Id, cs.Type, cs.Checksum)
+		if err != nil {
+			return fmt.Errorf("failed to insert checksum: %w", err)
+		}
+	}
+
 	// Insert Authz
 	for _, res := range obj.Authorizations {
 		_, err = tx.ExecContext(ctx, `INSERT INTO drs_object_authz (object_id, resource) VALUES ($1, $2)`, obj.Id, res)
@@ -450,14 +461,22 @@ func (db *PostgresDB) GetBulkObjects(ctx context.Context, ids []string) ([]core.
 }
 
 func (db *PostgresDB) GetObjectsByChecksum(ctx context.Context, checksum string) ([]core.InternalObject, error) {
-	obj, err := db.GetObject(ctx, checksum)
+	checksum = strings.TrimSpace(checksum)
+	if checksum == "" {
+		return []core.InternalObject{}, nil
+	}
+	objectsByID, err := db.fetchObjectsByIDsOrChecksums(ctx, nil, []string{checksum})
 	if err != nil {
-		if errors.Is(err, core.ErrNotFound) {
-			return []core.InternalObject{}, nil
-		}
 		return nil, err
 	}
-	return []core.InternalObject{*obj}, nil
+	if len(objectsByID) == 0 {
+		return []core.InternalObject{}, nil
+	}
+	out := make([]core.InternalObject, 0, len(objectsByID))
+	for _, obj := range objectsByID {
+		out = append(out, *obj)
+	}
+	return uniqueObjectsByID(out), nil
 }
 
 func (db *PostgresDB) GetObjectsByChecksums(ctx context.Context, checksums []string) (map[string][]core.InternalObject, error) {
@@ -894,6 +913,40 @@ func (db *PostgresDB) SavePendingLFSMeta(ctx context.Context, entries []core.Pen
 		}
 	}
 	return tx.Commit()
+}
+
+func (db *PostgresDB) GetPendingLFSMeta(ctx context.Context, oid string) (*core.PendingLFSMeta, error) {
+	if _, err := db.db.ExecContext(ctx, `DELETE FROM lfs_pending_metadata WHERE expires_time <= NOW()`); err != nil {
+		return nil, fmt.Errorf("failed to prune expired pending metadata: %w", err)
+	}
+
+	var (
+		raw       string
+		createdAt time.Time
+		expiresAt time.Time
+	)
+	if err := db.db.QueryRowContext(ctx, `
+		SELECT candidate_json::text, created_time, expires_time
+		FROM lfs_pending_metadata
+		WHERE oid = $1 AND expires_time > NOW()
+	`, oid).Scan(&raw, &createdAt, &expiresAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("%w: pending metadata not found", core.ErrNotFound)
+		}
+		return nil, fmt.Errorf("failed to load pending metadata for oid %s: %w", oid, err)
+	}
+
+	var c drs.DrsObjectCandidate
+	if err := json.Unmarshal([]byte(raw), &c); err != nil {
+		return nil, fmt.Errorf("failed to parse pending metadata candidate for oid %s: %w", oid, err)
+	}
+
+	return &core.PendingLFSMeta{
+		OID:       oid,
+		Candidate: c,
+		CreatedAt: createdAt,
+		ExpiresAt: expiresAt,
+	}, nil
 }
 
 func (db *PostgresDB) PopPendingLFSMeta(ctx context.Context, oid string) (*core.PendingLFSMeta, error) {

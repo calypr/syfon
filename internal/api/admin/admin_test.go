@@ -52,6 +52,36 @@ func TestAdminCredentialsFlow(t *testing.T) {
 	}
 }
 
+func TestAdminCredentialsPutSnakeCasePayload(t *testing.T) {
+	mockDB := &testutils.MockDatabase{}
+	mockUM := &testutils.MockUrlManager{}
+	router := mux.NewRouter()
+	RegisterAdminRoutes(router, mockDB, mockUM)
+
+	body := bytes.NewBufferString(`{
+		"bucket":"admin-bucket-snake",
+		"region":"us-east-1",
+		"access_key":"snake-key",
+		"secret_key":"snake-secret",
+		"endpoint":"https://example-s3.local"
+	}`)
+	req, _ := http.NewRequest(http.MethodPut, "/admin/credentials", body)
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	cred, err := mockDB.GetS3Credential(req.Context(), "admin-bucket-snake")
+	if err != nil {
+		t.Fatalf("expected saved credential, got error: %v", err)
+	}
+	if cred.AccessKey != "snake-key" || cred.SecretKey != "snake-secret" {
+		t.Fatalf("unexpected credential values: %+v", cred)
+	}
+}
+
 func TestAdminSignURL(t *testing.T) {
 	mockDB := &testutils.MockDatabase{}
 	mockUM := &testutils.MockUrlManager{}
