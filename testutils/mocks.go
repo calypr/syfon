@@ -16,6 +16,7 @@ type MockDatabase struct {
 	Objects        map[string]*drs.DrsObject
 	ObjectAuthz    map[string][]string
 	Credentials    map[string]core.S3Credential
+	BucketScopes   map[string]core.BucketScope
 	PendingMeta    map[string]core.PendingLFSMeta
 	Usage          map[string]core.FileUsage
 	NoDefaultCreds bool
@@ -214,6 +215,49 @@ func (m *MockDatabase) ListS3Credentials(ctx context.Context) ([]core.S3Credenti
 	return []core.S3Credential{
 		{Bucket: "test-bucket-1", Region: "us-east-1"},
 	}, nil
+}
+
+func bucketScopeKey(org, project string) string {
+	return strings.TrimSpace(org) + "|" + strings.TrimSpace(project)
+}
+
+func (m *MockDatabase) CreateBucketScope(ctx context.Context, scope *core.BucketScope) error {
+	if scope == nil {
+		return fmt.Errorf("scope is required")
+	}
+	if m.BucketScopes == nil {
+		m.BucketScopes = make(map[string]core.BucketScope)
+	}
+	k := bucketScopeKey(scope.Organization, scope.ProjectID)
+	if existing, ok := m.BucketScopes[k]; ok {
+		if existing.Bucket == scope.Bucket && strings.Trim(existing.PathPrefix, "/") == strings.Trim(scope.PathPrefix, "/") {
+			return nil
+		}
+		return fmt.Errorf("%w: scope already exists", core.ErrConflict)
+	}
+	m.BucketScopes[k] = *scope
+	return nil
+}
+
+func (m *MockDatabase) GetBucketScope(ctx context.Context, organization, projectID string) (*core.BucketScope, error) {
+	if m.BucketScopes == nil {
+		return nil, fmt.Errorf("%w: bucket scope not found", core.ErrNotFound)
+	}
+	k := bucketScopeKey(organization, projectID)
+	s, ok := m.BucketScopes[k]
+	if !ok {
+		return nil, fmt.Errorf("%w: bucket scope not found", core.ErrNotFound)
+	}
+	cp := s
+	return &cp, nil
+}
+
+func (m *MockDatabase) ListBucketScopes(ctx context.Context) ([]core.BucketScope, error) {
+	out := make([]core.BucketScope, 0, len(m.BucketScopes))
+	for _, s := range m.BucketScopes {
+		out = append(out, s)
+	}
+	return out, nil
 }
 
 func (m *MockDatabase) SavePendingLFSMeta(ctx context.Context, entries []core.PendingLFSMeta) error {

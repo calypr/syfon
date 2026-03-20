@@ -28,6 +28,7 @@ tags:
 - name: Authorization & Authentication
 - name: Objects
 - name: Upload Request
+- name: Access Method Updates
 - name: Service Info
 - description: |
     <SchemaDefinition schemaRef="#/components/schemas/AccessMethod" />
@@ -102,7 +103,6 @@ tags:
 - name: Upload Requests and Object Registration
 - name: Object Deletion
 - name: Access Method Update
-- name: Checksum Additions
 paths:
   /service-info:
     get:
@@ -121,11 +121,11 @@ paths:
         : \"1.5\"\n    }\n    ...\n    \"drs\":{\n      \"maxBulkRequestLength\":\
         \ 200,\n      \"objectCount\": 774560,\n      \"totalObjectSize\": 4018437188907752,\n\
         \      \"uploadRequestSupported\": true,\n      \"objectRegistrationSupported\"\
-        : true,\n      \"supportedUploadMethodTypes\": [\"s3\", \"https\", \"gs\"\
-        ],\n      \"maxUploadSize\": 5368709120,\n      \"maxUploadRequestLength\"\
-        : 50,\n      \"validateChecksums\": true,\n      \"validateFileSizes\": false,\n\
-        \      \"relatedFileStorageSupported\": true,\n      \"deleteSupported\":\
-        \ true,\n      \"maxBulkDeleteLength\": 100,\n      \"deleteStorageDataSupported\"\
+        : true,\n      \"supportedUploadMethods\": [\"s3\", \"https\", \"gs\"],\n\
+        \      \"maxUploadSize\": 5368709120,\n      \"maxUploadRequestLength\": 50,\n\
+        \      \"validateUploadChecksums\": true,\n      \"validateUploadFileSizes\"\
+        : false,\n      \"relatedFileStorageSupported\": true,\n      \"deleteSupported\"\
+        : true,\n      \"maxBulkDeleteLength\": 100,\n      \"deleteStorageDataSupported\"\
         : true\n    }\n}\n```\n\n**Example 2: Read-only server (no upload or delete)**\n\
         ```\n{\n    \"id\": \"com.example.readonly-drs\",\n    \"description\": \"\
         Read-only DRS service\",\n    ...\n    \"type\": {\n        \"group\": \"\
@@ -346,12 +346,293 @@ paths:
       tags:
       - Objects
       x-swagger-router-controller: ga4gh.drs.server
+  /objects/{object_id}/delete:
+    post:
+      description: |-
+        **Optional Endpoint**: This endpoint is not required for DRS server implementations.  Not all DRS servers support delete functionality.
+        Deletes a DRS object by ID. This operation removes the DRS object metadata and optionally  attempts to delete the underlying storage data based on the delete_storage_data parameter and server capabilities.
+        By default, only DRS object metadata is deleted while preserving underlying storage data. To attempt storage data deletion, clients must explicitly set delete_storage_data to true and the  server must support storage data deletion (advertised via `deleteStorageDataSupported` in service-info). Servers will make a best effort attempt to delete storage data, but success is not guaranteed.
+        This endpoint uses POST method to accommodate GA4GH Passport authentication in the request body, ensuring compatibility across all HTTP clients and proxies.
+        **Important**: HTTP responses (204 No Content) indicate metadata deletion success only,  not storage deletion success (which are not guaranteed to complete synchronously if they occur at all)
+      operationId: DeleteObject
+      parameters:
+      - description: '`DrsObject` identifier'
+        in: path
+        name: object_id
+        required: true
+        schema:
+          type: string
+      requestBody:
+        $ref: "#/components/requestBodies/DeleteBody"
+      responses:
+        "204":
+          description: "All DRS objects were successfully deleted. For bulk operations,\
+            \ this indicates that  the entire atomic transaction completed successfully\
+            \ - all requested objects have been  deleted. Storage data deletion (if\
+            \ requested) was attempted but success is not guaranteed."
+        "400":
+          content:
+            application/json:
+              examples:
+                unsupported_storage_deletion:
+                  description: Client requested storage data deletion but server doesn't
+                    support it
+                  summary: Storage data deletion not supported
+                  value:
+                    msg: Server does not support storage data deletion. Set delete_storage_data
+                      to false or omit the parameter.
+                    status_code: 400
+                invalid_request_format:
+                  description: Request body contains invalid JSON or missing required
+                    fields
+                  summary: Malformed request body
+                  value:
+                    msg: "Invalid request body: bulk_object_ids is required for bulk\
+                      \ delete operations"
+                    status_code: 400
+                empty_object_list:
+                  description: Bulk delete request with empty object ID array
+                  summary: Empty object ID list
+                  value:
+                    msg: bulk_object_ids cannot be empty
+                    status_code: 400
+              schema:
+                $ref: "#/components/schemas/Error"
+          description: "The delete request is malformed or contains unsupported parameters\
+            \ (e.g., delete_storage_data: true when server doesn't support storage\
+            \ data deletion)."
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+          description: The request is unauthorized.
+        "403":
+          content:
+            application/json:
+              examples:
+                insufficient_permissions:
+                  description: Client lacks permission to delete the specified object
+                  summary: Insufficient delete permissions
+                  value:
+                    msg: Client lacks delete permission for object drs_object_123456
+                    status_code: 403
+                invalid_passport:
+                  description: Provided GA4GH Passport is invalid or expired
+                  summary: Invalid GA4GH Passport
+                  value:
+                    msg: Invalid or expired GA4GH Passport provided
+                    status_code: 403
+                missing_visa:
+                  description: GA4GH Passport lacks required visa for delete operation
+                  summary: Missing required visa
+                  value:
+                    msg: GA4GH Passport does not contain required visa for delete
+                      operation on this object
+                    status_code: 403
+              schema:
+                $ref: "#/components/schemas/Error"
+          description: The client is not authorized to delete the requested DRS object.
+        "404":
+          content:
+            application/json:
+              examples:
+                object_not_found:
+                  description: The specified DRS object does not exist
+                  summary: DRS object not found
+                  value:
+                    msg: DRS object drs_object_123456 does not exist
+                    status_code: 404
+                delete_not_supported:
+                  description: This server does not support delete operations
+                  summary: Delete operations not supported
+                  value:
+                    msg: Delete operations are not supported by this server
+                    status_code: 404
+                endpoint_not_found:
+                  description: Delete endpoints are not implemented on this server
+                  summary: Delete endpoint not available
+                  value:
+                    msg: The requested endpoint /objects/delete is not available on
+                      this server
+                    status_code: 404
+              schema:
+                $ref: "#/components/schemas/Error"
+          description: "The requested DRS object for deletion wasn't found, or delete\
+            \ endpoints are not supported by this server."
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+          description: An unexpected error occurred.
+      security:
+      - {}
+      - BasicAuth: []
+      - BearerAuth: []
+      - PassportAuth: []
+      summary: Delete a DRS object (optional endpoint)
+      tags:
+      - Objects
+      x-swagger-router-controller: ga4gh.drs.server
+      x-codegen-request-body-name: body
+  /objects/delete:
+    post:
+      description: |-
+        **Optional Endpoint**: This endpoint is not required for DRS server implementations.  Not all DRS servers support delete functionality.
+        Delete multiple DRS objects in a single atomic transaction. If ANY object fails to be deleted,  the ENTIRE request fails and NO objects are deleted. This ensures data consistency and prevents  partial deletion scenarios.
+        **RECOMMENDED - Transactional Behavior**:  Deletion operations SHOULD be atomic transactions. If ANY object fails validation or deletion,  the ENTIRE request SHOULD fail and NO objects SHOULD be deleted. Servers SHOULD implement this as an  all-or-nothing operation to ensure data consistency, but MAY implement partial deletion with  appropriate error reporting if transactional behavior is not feasible.
+        **Authentication**: GA4GH Passports can be provided in the request body for authorization.
+        **Storage Data Deletion**: The `delete_storage_data` parameter controls whether the server will attempt to delete underlying storage files along with DRS metadata. This defaults to false for safety. Servers will make a best effort attempt to delete storage data, but success is not guaranteed.
+        **Server Responsibilities**: - SHOULD treat deletion as an atomic transaction (all succeed or all fail) - SHOULD validate ALL object IDs exist and are accessible before deleting ANY - SHOULD roll back any partial changes if any object fails deletion - SHOULD return 400 if any object ID is invalid or inaccessible when using transactional behavior
+        **Client Responsibilities**: - Provide valid object IDs for all objects to be deleted - Handle potential failure of entire batch if any single object cannot be deleted - Check service-info for `maxBulkDeleteLength` limits before making requests
+      operationId: bulkDeleteObjects
+      requestBody:
+        $ref: "#/components/requestBodies/BulkDeleteBody"
+      responses:
+        "204":
+          description: "All DRS objects were successfully deleted. For bulk operations,\
+            \ this indicates that  the entire atomic transaction completed successfully\
+            \ - all requested objects have been  deleted. Storage data deletion (if\
+            \ requested) was attempted but success is not guaranteed."
+        "400":
+          content:
+            application/json:
+              examples:
+                unsupported_storage_deletion:
+                  description: Client requested storage data deletion but server doesn't
+                    support it
+                  summary: Storage data deletion not supported
+                  value:
+                    msg: Server does not support storage data deletion. Set delete_storage_data
+                      to false or omit the parameter.
+                    status_code: 400
+                invalid_request_format:
+                  description: Request body contains invalid JSON or missing required
+                    fields
+                  summary: Malformed request body
+                  value:
+                    msg: "Invalid request body: bulk_object_ids is required for bulk\
+                      \ delete operations"
+                    status_code: 400
+                empty_object_list:
+                  description: Bulk delete request with empty object ID array
+                  summary: Empty object ID list
+                  value:
+                    msg: bulk_object_ids cannot be empty
+                    status_code: 400
+              schema:
+                $ref: "#/components/schemas/Error"
+          description: "The delete request is malformed or contains unsupported parameters\
+            \ (e.g., delete_storage_data: true when server doesn't support storage\
+            \ data deletion)."
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+          description: The request is unauthorized.
+        "403":
+          content:
+            application/json:
+              examples:
+                insufficient_permissions:
+                  description: Client lacks permission to delete the specified object
+                  summary: Insufficient delete permissions
+                  value:
+                    msg: Client lacks delete permission for object drs_object_123456
+                    status_code: 403
+                invalid_passport:
+                  description: Provided GA4GH Passport is invalid or expired
+                  summary: Invalid GA4GH Passport
+                  value:
+                    msg: Invalid or expired GA4GH Passport provided
+                    status_code: 403
+                missing_visa:
+                  description: GA4GH Passport lacks required visa for delete operation
+                  summary: Missing required visa
+                  value:
+                    msg: GA4GH Passport does not contain required visa for delete
+                      operation on this object
+                    status_code: 403
+              schema:
+                $ref: "#/components/schemas/Error"
+          description: The client is not authorized to delete the requested DRS object.
+        "404":
+          content:
+            application/json:
+              examples:
+                object_not_found:
+                  description: The specified DRS object does not exist
+                  summary: DRS object not found
+                  value:
+                    msg: DRS object drs_object_123456 does not exist
+                    status_code: 404
+                delete_not_supported:
+                  description: This server does not support delete operations
+                  summary: Delete operations not supported
+                  value:
+                    msg: Delete operations are not supported by this server
+                    status_code: 404
+                endpoint_not_found:
+                  description: Delete endpoints are not implemented on this server
+                  summary: Delete endpoint not available
+                  value:
+                    msg: The requested endpoint /objects/delete is not available on
+                      this server
+                    status_code: 404
+              schema:
+                $ref: "#/components/schemas/Error"
+          description: "The requested DRS object for deletion wasn't found, or delete\
+            \ endpoints are not supported by this server."
+        "413":
+          content:
+            application/json:
+              examples:
+                bulk_limit_exceeded:
+                  description: Request contains more objects than server's maximum
+                    bulk delete limit
+                  summary: Bulk delete limit exceeded
+                  value:
+                    msg: Bulk delete request contains 150 objects but server maximum
+                      is 100. Check maxBulkDeleteLength in service-info.
+                    status_code: 413
+                request_size_too_large:
+                  description: The overall request payload exceeds server limits
+                  summary: Request payload too large
+                  value:
+                    msg: Request payload size exceeds server limit of 1MB
+                    status_code: 413
+              schema:
+                $ref: "#/components/schemas/Error"
+          description: The bulk request is too large.
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+          description: An unexpected error occurred.
+      security:
+      - {}
+      - BasicAuth: []
+      - BearerAuth: []
+      - PassportAuth: []
+      summary: Delete multiple DRS objects
+      tags:
+      - Objects
+      x-codegen-request-body-name: body
   /objects:
     options:
       description: Returns a structure that contains for each DrsObjects a list of
         `Authorizations` that can be used to determine how to authorize requests to
         `GetObject` or `PostObject` (or bulk equivalents).
       operationId: OptionsBulkObject
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BulkObjectIdNoPassport"
+        required: true
       responses:
         "200":
           content:
@@ -502,6 +783,161 @@ paths:
       tags:
       - Objects
       x-swagger-router-controller: ga4gh.drs.server
+  /objects/register:
+    post:
+      description: "**Optional Endpoint**: This endpoint is not required for DRS server\
+        \ implementations.  Not all DRS servers support object registration.    \n\
+        Registers one or more \"candidate\" DRS objects with the server. If it accepts\
+        \ the request, the server will create  unique object IDs for each registered\
+        \ object and return them in fully-formed DRS objects in response.\nThis endpoint\
+        \ can be used after uploading files using methods negotiated with the `/upload-request`\
+        \ endpoint  to register the uploaded files as DRS objects, or to register\
+        \ existinf data. The request body should contain candidate  DRS objects with\
+        \ all required metadata including access methods that correspond  to the upload\
+        \ methods used during file upload.\n**RECOMMENDED - Transactional Behavior**:\
+        \  Registration operations SHOULD be atomic transactions. If ANY candidate\
+        \ object fails validation  or registration, the ENTIRE request SHOULD fail\
+        \ and NO objects SHOULD be registered. Servers SHOULD  implement this as an\
+        \ all-or-nothing operation to ensure data consistency, but MAY implement partial\
+        \  registration with appropriate error reporting if transactional behavior\
+        \ is not feasible.\n**Authentication**: GA4GH Passports can be provided in\
+        \ the request body for authorization. Bearer tokens can be supplied in headers.\n\
+        **Server Responsibilities**: - SHOULD treat registration as an atomic transaction\
+        \ (all succeed or all fail) - SHOULD validate ALL candidate objects before\
+        \ registering ANY - Create unique object IDs for each registered object -\
+        \ Add timestamps (created_time, updated_time) - SHOULD roll back any partial\
+        \ changes if any candidate fails validation\n**Client Responsibilities**:\
+        \ - Provide required DRS object metadata for all candidates - Include access\
+        \ methods corresponding to uploaded file locations - Ensure checksums match\
+        \ uploaded file content - Handle potential failure of entire batch if any\
+        \ single object is invalid"
+      operationId: RegisterObjects
+      requestBody:
+        $ref: "#/components/requestBodies/RegisterObjectsBody"
+      responses:
+        "201":
+          content:
+            application/json:
+              examples:
+                single_object_created:
+                  description: Response after registering one DRS object
+                  summary: Single object registered
+                  value:
+                    objects:
+                    - id: drs_obj_a1b2c3d4e5f6
+                      self_uri: drs://drs.example.org/drs_obj_a1b2c3d4e5f6
+                      name: sample_data.vcf
+                      size: 1048576
+                      mime_type: text/plain
+                      created_time: 2024-01-15T10:30:00Z
+                      updated_time: 2024-01-15T10:30:00Z
+                      version: "1.0"
+                      checksums:
+                      - checksum: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+                        type: sha-256
+                      access_methods:
+                      - type: s3
+                        access_url:
+                          url: s3://my-bucket/uploads/sample_data.vcf
+                      description: Variant call format file for sample analysis
+                multiple_objects_created:
+                  description: Response after registering multiple DRS objects
+                  summary: Multiple objects registered
+                  value:
+                    objects:
+                    - id: drs_obj_a1b2c3d4e5f6
+                      self_uri: drs://drs.example.org/drs_obj_a1b2c3d4e5f6
+                      name: genome_assembly.fasta
+                      size: 3221225472
+                      mime_type: text/plain
+                      created_time: 2024-01-15T09:00:00Z
+                      updated_time: 2024-01-15T09:00:00Z
+                      version: "1.0"
+                      checksums:
+                      - checksum: a665a45920422f9d417e4867efdc4fb8a04a1f3fff1fa07e998e86f7f7a27ae3
+                        type: sha-256
+                      access_methods:
+                      - type: s3
+                        access_url:
+                          url: s3://genomics-bucket/assemblies/hg38.fasta
+                      description: Human genome reference assembly
+                    - id: drs_obj_f6e5d4c3b2a1
+                      self_uri: drs://drs.example.org/drs_obj_f6e5d4c3b2a1
+                      name: annotations.gff3
+                      size: 524288000
+                      mime_type: text/plain
+                      created_time: 2024-01-15T09:15:00Z
+                      updated_time: 2024-01-15T09:15:00Z
+                      version: "1.0"
+                      checksums:
+                      - checksum: b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9
+                        type: sha-256
+                      access_methods:
+                      - type: https
+                        access_url:
+                          url: https://data.example.org/files/annotations.gff3
+                      description: Gene annotations in GFF3 format
+              schema:
+                $ref: "#/components/schemas/RegisterObjects_201_response"
+          description: "DRS objects were successfully registered as an atomic transaction.\
+            \ Returns the complete DRS objects with server-minted IDs and timestamps.\
+            \ All candidate objects were validated and registered together - if any\
+            \ had failed, none would have been registered."
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+          description: The request is malformed.
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+          description: The request is unauthorized.
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+          description: The requester is not authorized to perform this action.
+        "413":
+          content:
+            application/json:
+              examples:
+                bulk_limit_exceeded:
+                  description: Request contains more objects than server's maximum
+                    bulk delete limit
+                  summary: Bulk delete limit exceeded
+                  value:
+                    msg: Bulk delete request contains 150 objects but server maximum
+                      is 100. Check maxBulkDeleteLength in service-info.
+                    status_code: 413
+                request_size_too_large:
+                  description: The overall request payload exceeds server limits
+                  summary: Request payload too large
+                  value:
+                    msg: Request payload size exceeds server limit of 1MB
+                    status_code: 413
+              schema:
+                $ref: "#/components/schemas/Error"
+          description: The bulk request is too large.
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+          description: An unexpected error occurred.
+      security:
+      - {}
+      - BasicAuth: []
+      - BearerAuth: []
+      - PassportAuth: []
+      summary: Register DRS objects
+      tags:
+      - Objects
+      x-swagger-router-controller: ga4gh.drs.server
+      x-codegen-request-body-name: body
   /objects/{object_id}/access/{access_id}:
     get:
       description: |-
@@ -734,163 +1170,8 @@ paths:
       tags:
       - Objects
       x-swagger-router-controller: ga4gh.drs.server
-  /objects/register:
-    post:
-      description: "**Optional Endpoint**: This endpoint is not required for DRS server\
-        \ implementations.  Not all DRS servers support object registration.    \n\
-        Registers one or more \"candidate\" DRS objects with the server. If it accepts\
-        \ the request, the server will create  unique object IDs for each registered\
-        \ object and return them in fully-formed DRS objects in response.\nThis endpoint\
-        \ can be used after uploading files using methods negotiated with the `/upload-request`\
-        \ endpoint  to register the uploaded files as DRS objects, or to register\
-        \ existing data. The request body should contain candidate  DRS objects with\
-        \ all required metadata including access methods that correspond  to the upload\
-        \ methods used during file upload.\n**RECOMMENDED - Transactional Behavior**:\
-        \  Registration operations SHOULD be atomic transactions. If ANY candidate\
-        \ object fails validation  or registration, the ENTIRE request SHOULD fail\
-        \ and NO objects SHOULD be registered. Servers SHOULD  implement this as an\
-        \ all-or-nothing operation to ensure data consistency, but MAY implement partial\
-        \  registration with appropriate error reporting if transactional behavior\
-        \ is not feasible.\n**Authentication**: GA4GH Passports can be provided in\
-        \ the request body for authorization. Bearer tokens can be supplied in headers.\n\
-        **Server Responsibilities**: - SHOULD treat registration as an atomic transaction\
-        \ (all succeed or all fail) - SHOULD validate ALL candidate objects before\
-        \ registering ANY - Create unique object IDs for each registered object -\
-        \ Add timestamps (created_time, updated_time) - SHOULD roll back any partial\
-        \ changes if any candidate fails validation\n**Client Responsibilities**:\
-        \ - Provide required DRS object metadata for all candidates - Include access\
-        \ methods corresponding to uploaded file locations - Ensure checksums match\
-        \ uploaded file content - Handle potential failure of entire batch if any\
-        \ single object is invalid"
-      operationId: RegisterObjects
-      requestBody:
-        $ref: "#/components/requestBodies/RegisterObjectsBody"
-      responses:
-        "201":
-          content:
-            application/json:
-              examples:
-                single_object_created:
-                  description: Response after registering one DRS object
-                  summary: Single object registered
-                  value:
-                    objects:
-                    - id: drs_obj_a1b2c3d4e5f6
-                      self_uri: drs://drs.example.org/drs_obj_a1b2c3d4e5f6
-                      name: sample_data.vcf
-                      size: 1048576
-                      mime_type: text/plain
-                      created_time: 2024-01-15T10:30:00Z
-                      updated_time: 2024-01-15T10:30:00Z
-                      version: "1.0"
-                      checksums:
-                      - checksum: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
-                        type: sha-256
-                      access_methods:
-                      - type: s3
-                        access_url:
-                          url: s3://my-bucket/uploads/sample_data.vcf
-                      description: Variant call format file for sample analysis
-                multiple_objects_created:
-                  description: Response after registering multiple DRS objects
-                  summary: Multiple objects registered
-                  value:
-                    objects:
-                    - id: drs_obj_a1b2c3d4e5f6
-                      self_uri: drs://drs.example.org/drs_obj_a1b2c3d4e5f6
-                      name: genome_assembly.fasta
-                      size: 3221225472
-                      mime_type: text/plain
-                      created_time: 2024-01-15T09:00:00Z
-                      updated_time: 2024-01-15T09:00:00Z
-                      version: "1.0"
-                      checksums:
-                      - checksum: a665a45920422f9d417e4867efdc4fb8a04a1f3fff1fa07e998e86f7f7a27ae3
-                        type: sha-256
-                      access_methods:
-                      - type: s3
-                        access_url:
-                          url: s3://genomics-bucket/assemblies/hg38.fasta
-                      description: Human genome reference assembly
-                    - id: drs_obj_f6e5d4c3b2a1
-                      self_uri: drs://drs.example.org/drs_obj_f6e5d4c3b2a1
-                      name: annotations.gff3
-                      size: 524288000
-                      mime_type: text/plain
-                      created_time: 2024-01-15T09:15:00Z
-                      updated_time: 2024-01-15T09:15:00Z
-                      version: "1.0"
-                      checksums:
-                      - checksum: b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9
-                        type: sha-256
-                      access_methods:
-                      - type: https
-                        access_url:
-                          url: https://data.example.org/files/annotations.gff3
-                      description: Gene annotations in GFF3 format
-              schema:
-                $ref: "#/components/schemas/RegisterObjects_201_response"
-          description: "DRS objects were successfully registered as an atomic transaction.\
-            \ Returns the complete DRS objects with server-minted IDs and timestamps.\
-            \ All candidate objects were validated and registered together - if any\
-            \ had failed, none would have been registered."
-        "400":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-          description: The request is malformed.
-        "401":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-          description: The request is unauthorized.
-        "403":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-          description: The requester is not authorized to perform this action.
-        "413":
-          content:
-            application/json:
-              examples:
-                bulk_limit_exceeded:
-                  description: Request contains more objects than server's maximum
-                    bulk delete limit
-                  summary: Bulk delete limit exceeded
-                  value:
-                    msg: Bulk delete request contains 150 objects but server maximum
-                      is 100. Check maxBulkDeleteLength in service-info.
-                    status_code: 413
-                request_size_too_large:
-                  description: The overall request payload exceeds server limits
-                  summary: Request payload too large
-                  value:
-                    msg: Request payload size exceeds server limit of 1MB
-                    status_code: 413
-              schema:
-                $ref: "#/components/schemas/Error"
-          description: The bulk request is too large.
-        "500":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-          description: An unexpected error occurred.
-      security:
-      - {}
-      - BasicAuth: []
-      - BearerAuth: []
-      - PassportAuth: []
-      summary: Register DRS objects
-      tags:
-      - Register Objects
-      x-swagger-router-controller: ga4gh.drs.server
-      x-codegen-request-body-name: body
   /objects/{object_id}/access-methods:
-    put:
+    post:
       description: |-
         **Optional Endpoint**: Not all DRS servers support access method updates.
         Update the access methods for an existing DRS object. Only access methods are modified -  core object metadata (size, checksums, name) remains unchanged. Servers MAY validate  that new access methods point to the same data.
@@ -952,8 +1233,74 @@ paths:
       summary: Update access methods for a DRS object
       tags:
       - Objects
+  /objects/checksum/{checksum}:
+    get:
+      description: |-
+        Returns an array of `DRSObjects` that match a given checksum.
+        The checksum type is not provide, the checksum check is done against all checksum types.
+      operationId: GetObjectsByChecksum
+      parameters:
+      - description: A `checksum` value from the `checksums` list of a `DrsObject`
+        in: path
+        name: checksum
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetBulkObjects_200_response"
+          description: The `DrsObjects` were found successfully
+        "202":
+          description: |
+            The operation is delayed and will continue asynchronously. The client should retry this same request after the delay specified by Retry-After header.
+          headers:
+            Retry-After:
+              description: |
+                Delay in seconds. The client should retry this same request after waiting for this duration. To simplify client response processing, this must be an integral relative time in seconds. This value SHOULD represent the minimum duration the client should wait before attempting the operation again with a reasonable expectation of success. When it is not feasible for the server to determine the actual expected delay, the server may return a brief, fixed value instead.
+              schema:
+                format: int64
+                type: integer
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+          description: The request is malformed.
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+          description: The request is unauthorized.
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+          description: The requester is not authorized to perform this action.
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+          description: The requested `DrsObject` wasn't found.
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+          description: An unexpected error occurred.
+      security:
+      - PassportAuth: []
+      summary: Get DRS objects that are a match for the checksum.
+      tags:
+      - Objects
+      x-swagger-router-controller: ga4gh.drs.server
   /objects/access-methods:
-    put:
+    post:
       description: |-
         **Optional Endpoint**: Not all DRS servers support access method updates.
         Update access methods for multiple DRS objects in a single atomic transaction.  If ANY object fails to update, the ENTIRE request fails and NO objects are updated. Only access methods are modified - core object metadata remains unchanged.
@@ -1029,506 +1376,6 @@ paths:
       summary: Bulk update access methods for multiple DRS objects
       tags:
       - Objects
-  /objects/{object_id}/checksums:
-    put:
-      description: |-
-        **Optional Endpoint**: Not all DRS servers support checksum addition.
-        Add additional checksums for a DRS object. This endpoint does not support altering  existing checksums, only adding additional checksum types that aren't already  present in the DRS object. If a client attempts to update an existing checksum type  the server MAY ignore the update or MAY return an error.
-        **Authentication**: GA4GH Passports can be provided in the request body.
-      operationId: addChecksums
-      parameters:
-      - description: DRS object identifier
-        in: path
-        name: object_id
-        required: true
-        schema:
-          type: string
-      requestBody:
-        $ref: "#/components/requestBodies/ChecksumAdditionBody"
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DrsObject"
-          description: Checksums successfully added. Returns the updated DRS object
-            with new checksums and updated timestamp.
-        "400":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-          description: The request is malformed.
-        "401":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-          description: The request is unauthorized.
-        "403":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-          description: The requester is not authorized to perform this action.
-        "404":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-          description: The requested `DrsObject` wasn't found.
-        "413":
-          content:
-            application/json:
-              examples:
-                bulk_limit_exceeded:
-                  description: Request contains more objects than server's maximum
-                    bulk delete limit
-                  summary: Bulk delete limit exceeded
-                  value:
-                    msg: Bulk delete request contains 150 objects but server maximum
-                      is 100. Check maxBulkDeleteLength in service-info.
-                    status_code: 413
-                request_size_too_large:
-                  description: The overall request payload exceeds server limits
-                  summary: Request payload too large
-                  value:
-                    msg: Request payload size exceeds server limit of 1MB
-                    status_code: 413
-              schema:
-                $ref: "#/components/schemas/Error"
-          description: The bulk request is too large.
-        "500":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-          description: An unexpected error occurred.
-      security:
-      - {}
-      - BasicAuth: []
-      - BearerAuth: []
-      - PassportAuth: []
-      summary: Add additional checksums for a DRS object
-      tags:
-      - Objects
-  /objects/checksum/{checksum}:
-    get:
-      description: |-
-        Returns an array of `DRSObjects` that match a given checksum.
-        The checksum type is not provide, the checksum check is done against all checksum types.
-      operationId: GetObjectsByChecksum
-      parameters:
-      - description: An `access_id` from the `access_methods` list of a `DrsObject`
-        in: path
-        name: access_id
-        required: true
-        schema:
-          type: string
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/GetBulkObjects_200_response"
-          description: The `DrsObjects` were found successfully
-        "202":
-          description: |
-            The operation is delayed and will continue asynchronously. The client should retry this same request after the delay specified by Retry-After header.
-          headers:
-            Retry-After:
-              description: |
-                Delay in seconds. The client should retry this same request after waiting for this duration. To simplify client response processing, this must be an integral relative time in seconds. This value SHOULD represent the minimum duration the client should wait before attempting the operation again with a reasonable expectation of success. When it is not feasible for the server to determine the actual expected delay, the server may return a brief, fixed value instead.
-              schema:
-                format: int64
-                type: integer
-        "400":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-          description: The request is malformed.
-        "401":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-          description: The request is unauthorized.
-        "403":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-          description: The requester is not authorized to perform this action.
-        "404":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-          description: The requested `DrsObject` wasn't found.
-        "500":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-          description: An unexpected error occurred.
-      security:
-      - PassportAuth: []
-      summary: Get DRS objects that are a match for the checksum.
-      tags:
-      - Objects
-      x-swagger-router-controller: ga4gh.drs.server
-  /objects/checksums:
-    put:
-      description: |-
-        **Optional Endpoint**: Not all DRS servers support checksum addition.
-        Add additional checksums for multiple DRS objects in a single atomic transaction.  If ANY object fails to update, the ENTIRE request fails and NO objects are updated. This endpoint does not support altering existing checksums, only adding additional checksum types that aren't already present in the DRS object. If a client attempts to  update an existing checksum type the server MAY ignore the update or MAY return an  error.
-        **Authentication**: GA4GH Passports can be provided in the request body.
-      operationId: bulkAddChecksums
-      requestBody:
-        $ref: "#/components/requestBodies/BulkChecksumAdditionBody"
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/bulkUpdateAccessMethods_200_response"
-          description: Checksums added for all objects. Returns updated DRS objects
-            with  new checksums and updated timestamps.
-        "400":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-          description: The request is malformed.
-        "401":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-          description: The request is unauthorized.
-        "403":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-          description: The requester is not authorized to perform this action.
-        "404":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-          description: The requested `DrsObject` wasn't found.
-        "413":
-          content:
-            application/json:
-              examples:
-                bulk_limit_exceeded:
-                  description: Request contains more objects than server's maximum
-                    bulk delete limit
-                  summary: Bulk delete limit exceeded
-                  value:
-                    msg: Bulk delete request contains 150 objects but server maximum
-                      is 100. Check maxBulkDeleteLength in service-info.
-                    status_code: 413
-                request_size_too_large:
-                  description: The overall request payload exceeds server limits
-                  summary: Request payload too large
-                  value:
-                    msg: Request payload size exceeds server limit of 1MB
-                    status_code: 413
-              schema:
-                $ref: "#/components/schemas/Error"
-          description: The bulk request is too large.
-        "500":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-          description: An unexpected error occurred.
-      security:
-      - {}
-      - BasicAuth: []
-      - BearerAuth: []
-      - PassportAuth: []
-      summary: Add additional checksums for multiple DRS objects
-      tags:
-      - Objects
-  /objects/{object_id}/delete:
-    put:
-      description: |-
-        **Optional Endpoint**: This endpoint is not required for DRS server implementations.  Not all DRS servers support delete functionality.
-        Deletes a DRS object by ID. This operation removes the DRS object metadata and optionally  attempts to delete the underlying storage data based on the `delete_storage_data` parameter  and server capabilities.
-        By default, only DRS object metadata is deleted while preserving underlying storage data. To attempt storage data deletion, clients must explicitly set delete_storage_data to true and the  server must support storage data deletion (advertised via `deleteStorageDataSupported` in service-info). Servers will make a best effort attempt to delete storage data, but success is not guaranteed.
-        This endpoint uses an HTTP PUT rather than DELETE to accommodate GA4GH Passport authentication in the request body, ensuring compatibility across all HTTP clients and proxies.
-        **Important**: HTTP responses (204 No Content) indicate metadata deletion success only,  not storage deletion success (which are not guaranteed to complete synchronously if they occur at all)
-      operationId: DeleteObject
-      parameters:
-      - description: '`DrsObject` identifier'
-        in: path
-        name: object_id
-        required: true
-        schema:
-          type: string
-      requestBody:
-        $ref: "#/components/requestBodies/DeleteBody"
-      responses:
-        "204":
-          description: "All DRS objects were successfully deleted. For bulk operations,\
-            \ this indicates that  the entire atomic transaction completed successfully\
-            \ - all requested objects have been  deleted. Storage data deletion (if\
-            \ requested) was attempted but success is not guaranteed."
-        "400":
-          content:
-            application/json:
-              examples:
-                unsupported_storage_deletion:
-                  description: Client requested storage data deletion but server doesn't
-                    support it
-                  summary: Storage data deletion not supported
-                  value:
-                    msg: Server does not support storage data deletion. Set delete_storage_data
-                      to false or omit the parameter.
-                    status_code: 400
-                invalid_request_format:
-                  description: Request body contains invalid JSON or missing required
-                    fields
-                  summary: Malformed request body
-                  value:
-                    msg: "Invalid request body: bulk_object_ids is required for bulk\
-                      \ delete operations"
-                    status_code: 400
-                empty_object_list:
-                  description: Bulk delete request with empty object ID array
-                  summary: Empty object ID list
-                  value:
-                    msg: bulk_object_ids cannot be empty
-                    status_code: 400
-              schema:
-                $ref: "#/components/schemas/Error"
-          description: "The delete request is malformed or contains unsupported parameters\
-            \ (e.g., delete_storage_data: true when server doesn't support storage\
-            \ data deletion)."
-        "401":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-          description: The request is unauthorized.
-        "403":
-          content:
-            application/json:
-              examples:
-                insufficient_permissions:
-                  description: Client lacks permission to delete the specified object
-                  summary: Insufficient delete permissions
-                  value:
-                    msg: Client lacks delete permission for object drs_object_123456
-                    status_code: 403
-                invalid_passport:
-                  description: Provided GA4GH Passport is invalid or expired
-                  summary: Invalid GA4GH Passport
-                  value:
-                    msg: Invalid or expired GA4GH Passport provided
-                    status_code: 403
-                missing_visa:
-                  description: GA4GH Passport lacks required visa for delete operation
-                  summary: Missing required visa
-                  value:
-                    msg: GA4GH Passport does not contain required visa for delete
-                      operation on this object
-                    status_code: 403
-              schema:
-                $ref: "#/components/schemas/Error"
-          description: The client is not authorized to delete the requested DRS object.
-        "404":
-          content:
-            application/json:
-              examples:
-                object_not_found:
-                  description: The specified DRS object does not exist
-                  summary: DRS object not found
-                  value:
-                    msg: DRS object drs_object_123456 does not exist
-                    status_code: 404
-                delete_not_supported:
-                  description: This server does not support delete operations
-                  summary: Delete operations not supported
-                  value:
-                    msg: Delete operations are not supported by this server
-                    status_code: 404
-                endpoint_not_found:
-                  description: Delete endpoints are not implemented on this server
-                  summary: Delete endpoint not available
-                  value:
-                    msg: The requested endpoint /objects/delete is not available on
-                      this server
-                    status_code: 404
-              schema:
-                $ref: "#/components/schemas/Error"
-          description: "The requested DRS object for deletion wasn't found, or delete\
-            \ endpoints are not supported by this server."
-        "500":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-          description: An unexpected error occurred.
-      security:
-      - {}
-      - BasicAuth: []
-      - BearerAuth: []
-      - PassportAuth: []
-      summary: Delete a DRS object (optional endpoint)
-      tags:
-      - Objects
-      x-swagger-router-controller: ga4gh.drs.server
-      x-codegen-request-body-name: body
-  /objects/delete:
-    put:
-      description: |-
-        **Optional Endpoint**: This endpoint is not required for DRS server implementations.  Not all DRS servers support delete functionality.
-        Delete multiple DRS objects in a single atomic transaction. If ANY object fails to be deleted,  the ENTIRE request fails and NO objects are deleted. This ensures data consistency and prevents  partial deletion scenarios.
-        **RECOMMENDED - Transactional Behavior**:  Deletion operations SHOULD be atomic transactions. If ANY object fails validation or deletion,  the ENTIRE request SHOULD fail and NO objects SHOULD be deleted. Servers SHOULD implement this as an  all-or-nothing operation to ensure data consistency, but MAY implement partial deletion with  appropriate error reporting if transactional behavior is not feasible.
-        **Authentication**: GA4GH Passports can be provided in the request body for authorization.
-        **Storage Data Deletion**: The `delete_storage_data` parameter controls whether the server will attempt to delete underlying storage files along with DRS metadata. This defaults to false for safety. Servers will make a best effort attempt to delete storage data, but success is not guaranteed.
-        **Server Responsibilities**: - SHOULD treat deletion as an atomic transaction (all succeed or all fail) - SHOULD validate ALL object IDs exist and are accessible before deleting ANY - SHOULD roll back any partial changes if any object fails deletion - SHOULD return 400 if any object ID is invalid or inaccessible when using transactional behavior
-        **Client Responsibilities**: - Provide valid object IDs for all objects to be deleted - Handle potential failure of entire batch if any single object cannot be deleted - Check service-info for `maxBulkDeleteLength` limits before making requests
-      operationId: bulkDeleteObjects
-      requestBody:
-        $ref: "#/components/requestBodies/BulkDeleteBody"
-      responses:
-        "204":
-          description: "All DRS objects were successfully deleted. For bulk operations,\
-            \ this indicates that  the entire atomic transaction completed successfully\
-            \ - all requested objects have been  deleted. Storage data deletion (if\
-            \ requested) was attempted but success is not guaranteed."
-        "400":
-          content:
-            application/json:
-              examples:
-                unsupported_storage_deletion:
-                  description: Client requested storage data deletion but server doesn't
-                    support it
-                  summary: Storage data deletion not supported
-                  value:
-                    msg: Server does not support storage data deletion. Set delete_storage_data
-                      to false or omit the parameter.
-                    status_code: 400
-                invalid_request_format:
-                  description: Request body contains invalid JSON or missing required
-                    fields
-                  summary: Malformed request body
-                  value:
-                    msg: "Invalid request body: bulk_object_ids is required for bulk\
-                      \ delete operations"
-                    status_code: 400
-                empty_object_list:
-                  description: Bulk delete request with empty object ID array
-                  summary: Empty object ID list
-                  value:
-                    msg: bulk_object_ids cannot be empty
-                    status_code: 400
-              schema:
-                $ref: "#/components/schemas/Error"
-          description: "The delete request is malformed or contains unsupported parameters\
-            \ (e.g., delete_storage_data: true when server doesn't support storage\
-            \ data deletion)."
-        "401":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-          description: The request is unauthorized.
-        "403":
-          content:
-            application/json:
-              examples:
-                insufficient_permissions:
-                  description: Client lacks permission to delete the specified object
-                  summary: Insufficient delete permissions
-                  value:
-                    msg: Client lacks delete permission for object drs_object_123456
-                    status_code: 403
-                invalid_passport:
-                  description: Provided GA4GH Passport is invalid or expired
-                  summary: Invalid GA4GH Passport
-                  value:
-                    msg: Invalid or expired GA4GH Passport provided
-                    status_code: 403
-                missing_visa:
-                  description: GA4GH Passport lacks required visa for delete operation
-                  summary: Missing required visa
-                  value:
-                    msg: GA4GH Passport does not contain required visa for delete
-                      operation on this object
-                    status_code: 403
-              schema:
-                $ref: "#/components/schemas/Error"
-          description: The client is not authorized to delete the requested DRS object.
-        "404":
-          content:
-            application/json:
-              examples:
-                object_not_found:
-                  description: The specified DRS object does not exist
-                  summary: DRS object not found
-                  value:
-                    msg: DRS object drs_object_123456 does not exist
-                    status_code: 404
-                delete_not_supported:
-                  description: This server does not support delete operations
-                  summary: Delete operations not supported
-                  value:
-                    msg: Delete operations are not supported by this server
-                    status_code: 404
-                endpoint_not_found:
-                  description: Delete endpoints are not implemented on this server
-                  summary: Delete endpoint not available
-                  value:
-                    msg: The requested endpoint /objects/delete is not available on
-                      this server
-                    status_code: 404
-              schema:
-                $ref: "#/components/schemas/Error"
-          description: "The requested DRS object for deletion wasn't found, or delete\
-            \ endpoints are not supported by this server."
-        "413":
-          content:
-            application/json:
-              examples:
-                bulk_limit_exceeded:
-                  description: Request contains more objects than server's maximum
-                    bulk delete limit
-                  summary: Bulk delete limit exceeded
-                  value:
-                    msg: Bulk delete request contains 150 objects but server maximum
-                      is 100. Check maxBulkDeleteLength in service-info.
-                    status_code: 413
-                request_size_too_large:
-                  description: The overall request payload exceeds server limits
-                  summary: Request payload too large
-                  value:
-                    msg: Request payload size exceeds server limit of 1MB
-                    status_code: 413
-              schema:
-                $ref: "#/components/schemas/Error"
-          description: The bulk request is too large.
-        "500":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-          description: An unexpected error occurred.
-      security:
-      - {}
-      - BasicAuth: []
-      - BearerAuth: []
-      - PassportAuth: []
-      summary: Delete multiple DRS objects
-      tags:
-      - Objects
-      x-codegen-request-body-name: body
   /upload-request:
     post:
       description: "**Optional Endpoint**: This endpoint is not required for DRS server\
@@ -1538,32 +1385,32 @@ paths:
         \ obtain the necessary information to upload files before they are registered\
         \ as DRS objects.\n**Discovery**: Before using this endpoint, clients should\
         \ check the `/service-info` endpoint  to determine if upload operations are\
-        \ supported. Look for `drs.uploadRequestSupported: true` and  `drs.supportedUploadMethodTypes`\
+        \ supported. Look for `drs.uploadRequestSupported: true` and  `drs.supportedUploadMethods`\
         \ to understand which upload methods are available. Also check  `drs.maxUploadSize`\
         \ and `drs.maxUploadRequestLength` for server limits.\n**Usage Flow:**\n1.\
         \ **Discovery**: Client checks `/service-info` endpoint to confirm upload\
         \ support (`drs.uploadRequestSupported: true`) and available methods (`drs.supportedUploadMethods`)\n\
         2. Client sends an upload request with file metadata (name, size, checksums,\
-        \ MIME type) and preferred upload method\n3. Server responds with available\
-        \ upload methods (S3, HTTPS, Google Cloud Storage, etc.) and temporary credentials\n\
-        4. Client selects one or more upload methods from the response and uses the\
-        \ corresponding credentials to upload the file to the storage service\n5.\
-        \ Once uploaded, the client registers the files as DRS objects including access\
-        \ methods that correspond to the upload methods used with a POST request to\
-        \ `/objects/register`, the server will return fully formed DRS objects with\
-        \ server minted unique IDs.\n6. The registered DRS object is accessible through\
-        \ DRS API read endpoints\n\n**Authentication:**\nThe endpoint supports multiple\
-        \ authentication methods including GA4GH Passport tokens sent in the request\
-        \ body. Passport tokens enable fine-grained authorization based on data access\
-        \ policies.\n**Upload Methods**: Response may include multiple options (s3,\
-        \ https, gs, ftp/sftp) for flexibility. Note that servers may return a subset\
-        \ of their advertised `supportedUploadMethodTypes` based on file-specific\
-        \ factors such as file type, size, or server policies.\n**File Integrity**:\
-        \ All requests must include at least one checksum per file (SHA-256, MD5,\
-        \ or other IANA-registered algorithms).\n**Server Validation**: Servers MAY\
-        \ validate checksums/sizes but are not required to. Check service-info for\
-        \ validation behavior. Servers do not validate MIME types against actual file\
-        \ content - clients are responsible for providing accurate MIME type information."
+        \ MIME type)\n3. Server responds with available upload methods (S3, HTTPS,\
+        \ Google Cloud Storage, etc.) and temporary credentials\n4. Client selects\
+        \ one or more upload methods from the response and uses the corresponding\
+        \ credentials to upload the file to the storage service\n5. Once uploaded,\
+        \ the client registers the files as DRS objects including access methods that\
+        \ correspond to the upload methods used with a POST request to `/objects/register`,\
+        \ the server will return fully formed DRS objects with server minted unique\
+        \ IDs.\n6. The registered DRS object becomes accessible through standard DRS\
+        \ API endpoints\n\n**Authentication:**\nThe endpoint supports multiple authentication\
+        \ methods including GA4GH Passport tokens sent in the request body. Passport\
+        \ tokens enable fine-grained authorization based on data access policies.\n\
+        **Upload Methods**: Response may include multiple options (s3, https, gs,\
+        \ ftp/sftp) for flexibility. Note that servers may return a subset of their\
+        \ advertised `supportedUploadMethods` based on file-specific factors such\
+        \ as file type, size, or server policies.\n**File Integrity**: All requests\
+        \ must include at least one checksum per file (SHA-256, MD5, or other IANA-registered\
+        \ algorithms).\n**Server Validation**: Servers MAY validate checksums/sizes\
+        \ but are not required to. Check service-info for validation behavior. Servers\
+        \ do not validate MIME types against actual file content - clients are responsible\
+        \ for providing accurate MIME type information."
       operationId: PostUploadRequest
       requestBody:
         $ref: "#/components/requestBodies/UploadRequestBody"
@@ -1723,9 +1570,9 @@ components:
       schema:
         type: string
     Checksum:
-      description: An `access_id` from the `access_methods` list of a `DrsObject`
+      description: A `checksum` value from the `checksums` list of a `DrsObject`
       in: path
-      name: access_id
+      name: checksum
       required: true
       schema:
         type: string
@@ -1751,118 +1598,6 @@ components:
                 - eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJnYTRnaF9wYXNzcG9ydF92MSI6W119.additional_passport_signature
           schema:
             $ref: "#/components/schemas/PostObject_request"
-      required: true
-    BulkObjectBody:
-      content:
-        application/json:
-          examples:
-            bulk_retrieve:
-              description: Retrieve metadata for multiple existing DRS objects using
-                their IDs
-              summary: Bulk retrieve objects
-              value:
-                passports:
-                - eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJnYTRnaF9wYXNzcG9ydF92MSI6W119.JJ5rN0ktP0qwyZmIPpxmF_p7JsxAZH6L6brUxtad3CM
-                bulk_object_ids:
-                - drs_object_123456
-                - drs_object_789012
-                - drs_object_345678
-            bulk_retrieve_no_auth:
-              description: Retrieve metadata for public DRS objects
-              summary: Bulk retrieve without authentication
-              value:
-                bulk_object_ids:
-                - drs_object_public_123
-                - drs_object_public_456
-          schema:
-            $ref: "#/components/schemas/GetBulkObjects_request"
-      required: true
-    Passports:
-      content:
-        application/json:
-          schema:
-            $ref: "#/components/schemas/PostAccessURL_request"
-      required: true
-    RegisterObjectsBody:
-      content:
-        application/json:
-          examples:
-            single_object_registration:
-              description: Register one DRS object after upload
-              summary: Register a single object
-              value:
-                candidates:
-                - name: sample_data.vcf
-                  size: 1048576
-                  mime_type: text/plain
-                  checksums:
-                  - checksum: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
-                    type: sha-256
-                  description: Variant call format file for sample analysis
-                  access_methods:
-                  - type: s3
-                    access_url:
-                      url: s3://my-bucket/uploads/sample_data.vcf
-                passports:
-                - eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
-            bulk_object_registration:
-              description: Register multiple DRS objects in a single request
-              summary: Register multiple objects
-              value:
-                candidates:
-                - name: genome_assembly.fasta
-                  size: 3221225472
-                  mime_type: text/plain
-                  checksums:
-                  - checksum: a665a45920422f9d417e4867efdc4fb8a04a1f3fff1fa07e998e86f7f7a27ae3
-                    type: sha-256
-                  description: Human genome reference assembly
-                  access_methods:
-                  - type: s3
-                    access_url:
-                      url: s3://genomics-bucket/assemblies/hg38.fasta
-                - name: annotations.gff3
-                  size: 524288000
-                  mime_type: text/plain
-                  checksums:
-                  - checksum: b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9
-                    type: sha-256
-                  description: Gene annotations in GFF3 format
-                  access_methods:
-                  - type: https
-                    access_url:
-                      url: https://data.example.org/files/annotations.gff3
-          schema:
-            $ref: "#/components/schemas/RegisterObjects_request"
-      description: Request body for registering DRS objects after upload
-      required: true
-    AccessMethodUpdateBody:
-      content:
-        application/json:
-          schema:
-            $ref: "#/components/schemas/AccessMethodUpdateRequest"
-      description: Request body for updating access methods of a DRS object
-      required: true
-    BulkAccessMethodUpdateBody:
-      content:
-        application/json:
-          schema:
-            $ref: "#/components/schemas/BulkAccessMethodUpdateRequest"
-      description: Request body for bulk updating access methods of multiple DRS objects
-      required: true
-    ChecksumAdditionBody:
-      content:
-        application/json:
-          schema:
-            $ref: "#/components/schemas/ChecksumAdditionRequest"
-      description: Request body for adding checksums to a DRS object
-      required: true
-    BulkChecksumAdditionBody:
-      content:
-        application/json:
-          schema:
-            $ref: "#/components/schemas/BulkChecksumAdditionRequest"
-      description: Request body for bulk adding checksums to multiple DRS objects
       required: true
     DeleteBody:
       content:
@@ -1992,6 +1727,104 @@ components:
                 - drs_object_789012
           schema:
             $ref: "#/components/schemas/BulkDeleteRequest"
+      required: true
+    BulkObjectBody:
+      content:
+        application/json:
+          examples:
+            bulk_retrieve:
+              description: Retrieve metadata for multiple existing DRS objects using
+                their IDs
+              summary: Bulk retrieve objects
+              value:
+                passports:
+                - eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJnYTRnaF9wYXNzcG9ydF92MSI6W119.JJ5rN0ktP0qwyZmIPpxmF_p7JsxAZH6L6brUxtad3CM
+                bulk_object_ids:
+                - drs_object_123456
+                - drs_object_789012
+                - drs_object_345678
+            bulk_retrieve_no_auth:
+              description: Retrieve metadata for public DRS objects
+              summary: Bulk retrieve without authentication
+              value:
+                bulk_object_ids:
+                - drs_object_public_123
+                - drs_object_public_456
+          schema:
+            $ref: "#/components/schemas/GetBulkObjects_request"
+      required: true
+    RegisterObjectsBody:
+      content:
+        application/json:
+          examples:
+            single_object_registration:
+              description: Register one DRS object after upload
+              summary: Register a single object
+              value:
+                candidates:
+                - name: sample_data.vcf
+                  size: 1048576
+                  mime_type: text/plain
+                  checksums:
+                  - checksum: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+                    type: sha-256
+                  description: Variant call format file for sample analysis
+                  access_methods:
+                  - type: s3
+                    access_url:
+                      url: s3://my-bucket/uploads/sample_data.vcf
+                passports:
+                - eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+            bulk_object_registration:
+              description: Register multiple DRS objects in a single request
+              summary: Register multiple objects
+              value:
+                candidates:
+                - name: genome_assembly.fasta
+                  size: 3221225472
+                  mime_type: text/plain
+                  checksums:
+                  - checksum: a665a45920422f9d417e4867efdc4fb8a04a1f3fff1fa07e998e86f7f7a27ae3
+                    type: sha-256
+                  description: Human genome reference assembly
+                  access_methods:
+                  - type: s3
+                    access_url:
+                      url: s3://genomics-bucket/assemblies/hg38.fasta
+                - name: annotations.gff3
+                  size: 524288000
+                  mime_type: text/plain
+                  checksums:
+                  - checksum: b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9
+                    type: sha-256
+                  description: Gene annotations in GFF3 format
+                  access_methods:
+                  - type: https
+                    access_url:
+                      url: https://data.example.org/files/annotations.gff3
+          schema:
+            $ref: "#/components/schemas/RegisterObjects_request"
+      description: Request body for registering DRS objects after upload
+      required: true
+    Passports:
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/PostAccessURL_request"
+      required: true
+    AccessMethodUpdateBody:
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/AccessMethodUpdateRequest"
+      description: Request body for updating access methods of a DRS object
+      required: true
+    BulkAccessMethodUpdateBody:
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/BulkAccessMethodUpdateRequest"
+      description: Request body for bulk updating access methods of multiple DRS objects
       required: true
     UploadRequestBody:
       content:
@@ -2129,147 +1962,6 @@ components:
     AuthorizationsNotSupported:
       description: '`Authorizations` are not supported for this object. Default to
         `None`.'
-    "200OkDrsObjects":
-      content:
-        application/json:
-          schema:
-            $ref: "#/components/schemas/GetBulkObjects_200_response"
-      description: The `DrsObjects` were found successfully
-    "413RequestTooLarge":
-      content:
-        application/json:
-          examples:
-            bulk_limit_exceeded:
-              description: Request contains more objects than server's maximum bulk
-                delete limit
-              summary: Bulk delete limit exceeded
-              value:
-                msg: Bulk delete request contains 150 objects but server maximum is
-                  100. Check maxBulkDeleteLength in service-info.
-                status_code: 413
-            request_size_too_large:
-              description: The overall request payload exceeds server limits
-              summary: Request payload too large
-              value:
-                msg: Request payload size exceeds server limit of 1MB
-                status_code: 413
-          schema:
-            $ref: "#/components/schemas/Error"
-      description: The bulk request is too large.
-    "200OkBulkAuthorizations":
-      content:
-        application/json:
-          schema:
-            $ref: "#/components/schemas/OptionsBulkObject_200_response"
-      description: '`Authorizations` were found successfully'
-    "200OkAccess":
-      content:
-        application/json:
-          schema:
-            $ref: "#/components/schemas/AccessURL"
-      description: The `AccessURL` was found successfully
-    "200OkAccesses":
-      content:
-        application/json:
-          schema:
-            $ref: "#/components/schemas/GetBulkAccessURL_200_response"
-      description: The `AccessURL` was found successfully
-    "201ObjectsCreated":
-      content:
-        application/json:
-          examples:
-            single_object_created:
-              description: Response after registering one DRS object
-              summary: Single object registered
-              value:
-                objects:
-                - id: drs_obj_a1b2c3d4e5f6
-                  self_uri: drs://drs.example.org/drs_obj_a1b2c3d4e5f6
-                  name: sample_data.vcf
-                  size: 1048576
-                  mime_type: text/plain
-                  created_time: 2024-01-15T10:30:00Z
-                  updated_time: 2024-01-15T10:30:00Z
-                  version: "1.0"
-                  checksums:
-                  - checksum: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
-                    type: sha-256
-                  access_methods:
-                  - type: s3
-                    access_url:
-                      url: s3://my-bucket/uploads/sample_data.vcf
-                  description: Variant call format file for sample analysis
-            multiple_objects_created:
-              description: Response after registering multiple DRS objects
-              summary: Multiple objects registered
-              value:
-                objects:
-                - id: drs_obj_a1b2c3d4e5f6
-                  self_uri: drs://drs.example.org/drs_obj_a1b2c3d4e5f6
-                  name: genome_assembly.fasta
-                  size: 3221225472
-                  mime_type: text/plain
-                  created_time: 2024-01-15T09:00:00Z
-                  updated_time: 2024-01-15T09:00:00Z
-                  version: "1.0"
-                  checksums:
-                  - checksum: a665a45920422f9d417e4867efdc4fb8a04a1f3fff1fa07e998e86f7f7a27ae3
-                    type: sha-256
-                  access_methods:
-                  - type: s3
-                    access_url:
-                      url: s3://genomics-bucket/assemblies/hg38.fasta
-                  description: Human genome reference assembly
-                - id: drs_obj_f6e5d4c3b2a1
-                  self_uri: drs://drs.example.org/drs_obj_f6e5d4c3b2a1
-                  name: annotations.gff3
-                  size: 524288000
-                  mime_type: text/plain
-                  created_time: 2024-01-15T09:15:00Z
-                  updated_time: 2024-01-15T09:15:00Z
-                  version: "1.0"
-                  checksums:
-                  - checksum: b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9
-                    type: sha-256
-                  access_methods:
-                  - type: https
-                    access_url:
-                      url: https://data.example.org/files/annotations.gff3
-                  description: Gene annotations in GFF3 format
-          schema:
-            $ref: "#/components/schemas/RegisterObjects_201_response"
-      description: "DRS objects were successfully registered as an atomic transaction.\
-        \ Returns the complete DRS objects with server-minted IDs and timestamps.\
-        \ All candidate objects were validated and registered together - if any had\
-        \ failed, none would have been registered."
-    "200AccessMethodUpdate":
-      content:
-        application/json:
-          schema:
-            $ref: "#/components/schemas/DrsObject"
-      description: Access methods successfully updated. Returns the updated DRS object
-        with new access methods and updated timestamp.
-    "200BulkAccessMethodUpdate":
-      content:
-        application/json:
-          schema:
-            $ref: "#/components/schemas/bulkUpdateAccessMethods_200_response"
-      description: Access methods successfully updated for all objects. Returns updated
-        DRS objects with  new access methods and updated timestamps.
-    "200ChecksumAddition":
-      content:
-        application/json:
-          schema:
-            $ref: "#/components/schemas/DrsObject"
-      description: Checksums successfully added. Returns the updated DRS object with
-        new checksums and updated timestamp.
-    "200BulkChecksumAddition":
-      content:
-        application/json:
-          schema:
-            $ref: "#/components/schemas/bulkUpdateAccessMethods_200_response"
-      description: Checksums added for all objects. Returns updated DRS objects with  new
-        checksums and updated timestamps.
     "204DeleteSuccess":
       description: "All DRS objects were successfully deleted. For bulk operations,\
         \ this indicates that  the entire atomic transaction completed successfully\
@@ -2359,6 +2051,133 @@ components:
             $ref: "#/components/schemas/Error"
       description: "The requested DRS object for deletion wasn't found, or delete\
         \ endpoints are not supported by this server."
+    "413RequestTooLarge":
+      content:
+        application/json:
+          examples:
+            bulk_limit_exceeded:
+              description: Request contains more objects than server's maximum bulk
+                delete limit
+              summary: Bulk delete limit exceeded
+              value:
+                msg: Bulk delete request contains 150 objects but server maximum is
+                  100. Check maxBulkDeleteLength in service-info.
+                status_code: 413
+            request_size_too_large:
+              description: The overall request payload exceeds server limits
+              summary: Request payload too large
+              value:
+                msg: Request payload size exceeds server limit of 1MB
+                status_code: 413
+          schema:
+            $ref: "#/components/schemas/Error"
+      description: The bulk request is too large.
+    "200OkDrsObjects":
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/GetBulkObjects_200_response"
+      description: The `DrsObjects` were found successfully
+    "200OkBulkAuthorizations":
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/OptionsBulkObject_200_response"
+      description: '`Authorizations` were found successfully'
+    "201ObjectsCreated":
+      content:
+        application/json:
+          examples:
+            single_object_created:
+              description: Response after registering one DRS object
+              summary: Single object registered
+              value:
+                objects:
+                - id: drs_obj_a1b2c3d4e5f6
+                  self_uri: drs://drs.example.org/drs_obj_a1b2c3d4e5f6
+                  name: sample_data.vcf
+                  size: 1048576
+                  mime_type: text/plain
+                  created_time: 2024-01-15T10:30:00Z
+                  updated_time: 2024-01-15T10:30:00Z
+                  version: "1.0"
+                  checksums:
+                  - checksum: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+                    type: sha-256
+                  access_methods:
+                  - type: s3
+                    access_url:
+                      url: s3://my-bucket/uploads/sample_data.vcf
+                  description: Variant call format file for sample analysis
+            multiple_objects_created:
+              description: Response after registering multiple DRS objects
+              summary: Multiple objects registered
+              value:
+                objects:
+                - id: drs_obj_a1b2c3d4e5f6
+                  self_uri: drs://drs.example.org/drs_obj_a1b2c3d4e5f6
+                  name: genome_assembly.fasta
+                  size: 3221225472
+                  mime_type: text/plain
+                  created_time: 2024-01-15T09:00:00Z
+                  updated_time: 2024-01-15T09:00:00Z
+                  version: "1.0"
+                  checksums:
+                  - checksum: a665a45920422f9d417e4867efdc4fb8a04a1f3fff1fa07e998e86f7f7a27ae3
+                    type: sha-256
+                  access_methods:
+                  - type: s3
+                    access_url:
+                      url: s3://genomics-bucket/assemblies/hg38.fasta
+                  description: Human genome reference assembly
+                - id: drs_obj_f6e5d4c3b2a1
+                  self_uri: drs://drs.example.org/drs_obj_f6e5d4c3b2a1
+                  name: annotations.gff3
+                  size: 524288000
+                  mime_type: text/plain
+                  created_time: 2024-01-15T09:15:00Z
+                  updated_time: 2024-01-15T09:15:00Z
+                  version: "1.0"
+                  checksums:
+                  - checksum: b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9
+                    type: sha-256
+                  access_methods:
+                  - type: https
+                    access_url:
+                      url: https://data.example.org/files/annotations.gff3
+                  description: Gene annotations in GFF3 format
+          schema:
+            $ref: "#/components/schemas/RegisterObjects_201_response"
+      description: "DRS objects were successfully registered as an atomic transaction.\
+        \ Returns the complete DRS objects with server-minted IDs and timestamps.\
+        \ All candidate objects were validated and registered together - if any had\
+        \ failed, none would have been registered."
+    "200OkAccess":
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/AccessURL"
+      description: The `AccessURL` was found successfully
+    "200OkAccesses":
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/GetBulkAccessURL_200_response"
+      description: The `AccessURL` was found successfully
+    "200AccessMethodUpdate":
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/DrsObject"
+      description: Access methods successfully updated. Returns the updated DRS object
+        with new access methods and updated timestamp.
+    "200BulkAccessMethodUpdate":
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/bulkUpdateAccessMethods_200_response"
+      description: Access methods successfully updated for all objects. Returns updated
+        DRS objects with  new access methods and updated timestamps.
     "200UploadRequest":
       content:
         application/json:
@@ -2576,7 +2395,7 @@ components:
       description: An object that can optionally include information about the error.
       example:
         msg: msg
-        status_code: 4
+        status_code: 2
       properties:
         msg:
           description: A detailed error message.
@@ -2605,8 +2424,7 @@ components:
         access_methods:
         - cloud: "aws, gcp, or azure"
           access_url:
-            headers:
-            - "Authorization: Basic Z2E0Z2g6ZHJz"
+            headers: "Authorization: Basic Z2E0Z2g6ZHJz"
             url: url
           available: true
           authorizations:
@@ -2625,8 +2443,7 @@ components:
           region: us-east-1
         - cloud: "aws, gcp, or azure"
           access_url:
-            headers:
-            - "Authorization: Basic Z2E0Z2g6ZHJz"
+            headers: "Authorization: Basic Z2E0Z2g6ZHJz"
             url: url
           available: true
           authorizations:
@@ -2649,15 +2466,13 @@ components:
           - null
           name: name
           id: id
-          drs_uri:
-          - drs://drs.example.org/314159
+          drs_uri: drs://drs.example.org/314159
         - contents:
           - null
           - null
           name: name
           id: id
-          drs_uri:
-          - drs://drs.example.org/314159
+          drs_uri: drs://drs.example.org/314159
         name: name
         id: id
       properties:
@@ -2824,10 +2639,22 @@ components:
       items:
         $ref: "#/components/schemas/unresolved_inner"
       type: array
+    BulkObjectIdNoPassport:
+      description: The object that contains the DRS object IDs array
+      example:
+        bulk_object_ids:
+        - bulk_object_ids
+        - bulk_object_ids
+      properties:
+        bulk_object_ids:
+          description: An array of ObjectIDs.
+          items:
+            type: string
+          type: array
+      type: object
     AccessURL:
       example:
-        headers:
-        - "Authorization: Basic Z2E0Z2g6ZHJz"
+        headers: "Authorization: Basic Z2E0Z2g6ZHJz"
         url: url
       properties:
         url:
@@ -2838,8 +2665,7 @@ components:
           description: An optional list of headers to include in the HTTP request
             to `url`. These headers can be used to provide auth tokens required to
             fetch the object bytes.
-          example:
-          - "Authorization: Basic Z2E0Z2g6ZHJz"
+          example: "Authorization: Basic Z2E0Z2g6ZHJz"
           items:
             type: string
           type: array
@@ -2914,16 +2740,14 @@ components:
           description: description
           upload_methods:
           - access_url:
-              headers:
-              - "Authorization: Basic Z2E0Z2g6ZHJz"
+              headers: "Authorization: Basic Z2E0Z2g6ZHJz"
               url: url
             upload_details:
               key: ""
             type: s3
             region: us-east-1
           - access_url:
-              headers:
-              - "Authorization: Basic Z2E0Z2g6ZHJz"
+              headers: "Authorization: Basic Z2E0Z2g6ZHJz"
               url: url
             upload_details:
               key: ""
@@ -2943,16 +2767,14 @@ components:
           description: description
           upload_methods:
           - access_url:
-              headers:
-              - "Authorization: Basic Z2E0Z2g6ZHJz"
+              headers: "Authorization: Basic Z2E0Z2g6ZHJz"
               url: url
             upload_details:
               key: ""
             type: s3
             region: us-east-1
           - access_url:
-              headers:
-              - "Authorization: Basic Z2E0Z2g6ZHJz"
+              headers: "Authorization: Basic Z2E0Z2g6ZHJz"
               url: url
             upload_details:
               key: ""
@@ -2966,6 +2788,71 @@ components:
           type: array
       required:
       - responses
+      type: object
+    DeleteRequest:
+      description: Request body for single object delete operations
+      example:
+        delete_storage_data: false
+        passports:
+        - eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJnYTRnaF9wYXNzcG9ydF92MSI6W119.JJ5rN0ktP0qwyZmIPpxmF_p7JsxAZH6L6brUxtad3CM
+        - eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJnYTRnaF9wYXNzcG9ydF92MSI6W119.JJ5rN0ktP0qwyZmIPpxmF_p7JsxAZH6L6brUxtad3CM
+      properties:
+        passports:
+          description: the encoded JWT GA4GH Passport that contains embedded Visas.  The
+            overall JWT is signed as are the individual Passport Visas.
+          items:
+            example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJnYTRnaF9wYXNzcG9ydF92MSI6W119.JJ5rN0ktP0qwyZmIPpxmF_p7JsxAZH6L6brUxtad3CM
+            type: string
+          type: array
+        delete_storage_data:
+          default: false
+          description: "If true, delete both DRS object metadata and underlying storage\
+            \ data (follows server's deleteStorageDataSupported capability). If false\
+            \ (default), only delete DRS object metadata while preserving underlying\
+            \ storage data. Clients must explicitly set this to true to enable storage\
+            \ data deletion, ensuring intentional choice for this potentially destructive\
+            \ operation."
+          type: boolean
+      type: object
+    BulkDeleteRequest:
+      description: Request body for bulk delete operations
+      example:
+        delete_storage_data: false
+        bulk_object_ids:
+        - drs_object_123456
+        - drs_object_789012
+        - drs_object_345678
+        passports:
+        - eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJnYTRnaF9wYXNzcG9ydF92MSI6W119.JJ5rN0ktP0qwyZmIPpxmF_p7JsxAZH6L6brUxtad3CM
+        - eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJnYTRnaF9wYXNzcG9ydF92MSI6W119.JJ5rN0ktP0qwyZmIPpxmF_p7JsxAZH6L6brUxtad3CM
+      properties:
+        bulk_object_ids:
+          description: Array of DRS object IDs to delete
+          example:
+          - drs_object_123456
+          - drs_object_789012
+          - drs_object_345678
+          items:
+            type: string
+          type: array
+        passports:
+          description: the encoded JWT GA4GH Passport that contains embedded Visas.  The
+            overall JWT is signed as are the individual Passport Visas.
+          items:
+            example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJnYTRnaF9wYXNzcG9ydF92MSI6W119.JJ5rN0ktP0qwyZmIPpxmF_p7JsxAZH6L6brUxtad3CM
+            type: string
+          type: array
+        delete_storage_data:
+          default: false
+          description: "If true, delete both DRS object metadata and underlying storage\
+            \ data (follows server's deleteStorageDataSupported capability). If false\
+            \ (default), only delete DRS object metadata while preserving underlying\
+            \ storage data. Clients must explicitly set this to true to enable storage\
+            \ data deletion, ensuring intentional choice for this potentially destructive\
+            \ operation."
+          type: boolean
+      required:
+      - bulk_object_ids
       type: object
     DrsObjectCandidate:
       properties:
@@ -3041,8 +2928,7 @@ components:
         access_methods:
         - cloud: "aws, gcp, or azure"
           access_url:
-            headers:
-            - "Authorization: Basic Z2E0Z2g6ZHJz"
+            headers: "Authorization: Basic Z2E0Z2g6ZHJz"
             url: url
           available: true
           authorizations:
@@ -3061,8 +2947,7 @@ components:
           region: us-east-1
         - cloud: "aws, gcp, or azure"
           access_url:
-            headers:
-            - "Authorization: Basic Z2E0Z2g6ZHJz"
+            headers: "Authorization: Basic Z2E0Z2g6ZHJz"
             url: url
           available: true
           authorizations:
@@ -3106,8 +2991,7 @@ components:
         - access_methods:
           - cloud: "aws, gcp, or azure"
             access_url:
-              headers:
-              - "Authorization: Basic Z2E0Z2g6ZHJz"
+              headers: "Authorization: Basic Z2E0Z2g6ZHJz"
               url: url
             available: true
             authorizations:
@@ -3126,8 +3010,7 @@ components:
             region: us-east-1
           - cloud: "aws, gcp, or azure"
             access_url:
-              headers:
-              - "Authorization: Basic Z2E0Z2g6ZHJz"
+              headers: "Authorization: Basic Z2E0Z2g6ZHJz"
               url: url
             available: true
             authorizations:
@@ -3148,8 +3031,7 @@ components:
         - access_methods:
           - cloud: "aws, gcp, or azure"
             access_url:
-              headers:
-              - "Authorization: Basic Z2E0Z2g6ZHJz"
+              headers: "Authorization: Basic Z2E0Z2g6ZHJz"
               url: url
             available: true
             authorizations:
@@ -3168,8 +3050,7 @@ components:
             region: us-east-1
           - cloud: "aws, gcp, or azure"
             access_url:
-              headers:
-              - "Authorization: Basic Z2E0Z2g6ZHJz"
+              headers: "Authorization: Basic Z2E0Z2g6ZHJz"
               url: url
             available: true
             authorizations:
@@ -3202,129 +3083,6 @@ components:
       required:
       - updates
       type: object
-    ChecksumAdditionRequest:
-      example:
-        checksums:
-        - checksum: checksum
-          type: sha-256
-        - checksum: checksum
-          type: sha-256
-        passports:
-        - passports
-        - passports
-      properties:
-        checksums:
-          description: New checksums for the DRS object
-          items:
-            $ref: "#/components/schemas/Checksum"
-          minItems: 1
-          type: array
-        passports:
-          description: Optional GA4GH Passport JWTs for authorization
-          items:
-            type: string
-          type: array
-      required:
-      - checksums
-      type: object
-    BulkChecksumAdditionRequest:
-      example:
-        passports:
-        - passports
-        - passports
-        updates:
-        - checksums:
-          - checksum: checksum
-            type: sha-256
-          - checksum: checksum
-            type: sha-256
-          object_id: object_id
-        - checksums:
-          - checksum: checksum
-            type: sha-256
-          - checksum: checksum
-            type: sha-256
-          object_id: object_id
-      properties:
-        updates:
-          description: Array of checksum additions
-          items:
-            $ref: "#/components/schemas/BulkChecksumAdditionRequest_updates_inner"
-          minItems: 1
-          type: array
-        passports:
-          description: Optional GA4GH Passport JWTs for authorization
-          items:
-            type: string
-          type: array
-      required:
-      - additions
-      type: object
-    DeleteRequest:
-      description: Request body for single object delete operations
-      example:
-        delete_storage_data: false
-        passports:
-        - eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJnYTRnaF9wYXNzcG9ydF92MSI6W119.JJ5rN0ktP0qwyZmIPpxmF_p7JsxAZH6L6brUxtad3CM
-        - eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJnYTRnaF9wYXNzcG9ydF92MSI6W119.JJ5rN0ktP0qwyZmIPpxmF_p7JsxAZH6L6brUxtad3CM
-      properties:
-        passports:
-          description: the encoded JWT GA4GH Passport that contains embedded Visas.  The
-            overall JWT is signed as are the individual Passport Visas.
-          items:
-            example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJnYTRnaF9wYXNzcG9ydF92MSI6W119.JJ5rN0ktP0qwyZmIPpxmF_p7JsxAZH6L6brUxtad3CM
-            type: string
-          type: array
-        delete_storage_data:
-          default: false
-          description: "If true, delete both DRS object metadata and underlying storage\
-            \ data (follows server's deleteStorageDataSupported capability). If false\
-            \ (default), only delete DRS object metadata while preserving underlying\
-            \ storage data. Clients must explicitly set this to true to enable storage\
-            \ data deletion, ensuring intentional choice for this potentially destructive\
-            \ operation."
-          type: boolean
-      type: object
-    BulkDeleteRequest:
-      description: Request body for bulk delete operations
-      example:
-        delete_storage_data: false
-        bulk_object_ids:
-        - drs_object_123456
-        - drs_object_789012
-        - drs_object_345678
-        passports:
-        - eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJnYTRnaF9wYXNzcG9ydF92MSI6W119.JJ5rN0ktP0qwyZmIPpxmF_p7JsxAZH6L6brUxtad3CM
-        - eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJnYTRnaF9wYXNzcG9ydF92MSI6W119.JJ5rN0ktP0qwyZmIPpxmF_p7JsxAZH6L6brUxtad3CM
-      properties:
-        bulk_object_ids:
-          description: Array of DRS object IDs to delete
-          example:
-          - drs_object_123456
-          - drs_object_789012
-          - drs_object_345678
-          items:
-            type: string
-          type: array
-        passports:
-          description: the encoded JWT GA4GH Passport that contains embedded Visas.  The
-            overall JWT is signed as are the individual Passport Visas.
-          items:
-            example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJnYTRnaF9wYXNzcG9ydF92MSI6W119.JJ5rN0ktP0qwyZmIPpxmF_p7JsxAZH6L6brUxtad3CM
-            type: string
-          type: array
-        delete_storage_data:
-          default: false
-          description: "If true, delete both DRS object metadata and underlying storage\
-            \ data (follows server's deleteStorageDataSupported capability). If false\
-            \ (default), only delete DRS object metadata while preserving underlying\
-            \ storage data. Clients must explicitly set this to true to enable storage\
-            \ data deletion, ensuring intentional choice for this potentially destructive\
-            \ operation."
-          type: boolean
-      required:
-      - bulk_object_ids
-      type: object
     UploadRequest:
       example:
         requests:
@@ -3333,9 +3091,6 @@ components:
             type: sha-256
           - checksum: checksum
             type: sha-256
-          upload_method_types:
-          - upload_method_types
-          - upload_method_types
           aliases:
           - aliases
           - aliases
@@ -3348,9 +3103,6 @@ components:
             type: sha-256
           - checksum: checksum
             type: sha-256
-          upload_method_types:
-          - upload_method_types
-          - upload_method_types
           aliases:
           - aliases
           - aliases
@@ -3399,8 +3151,7 @@ components:
       example:
         cloud: "aws, gcp, or azure"
         access_url:
-          headers:
-          - "Authorization: Basic Z2E0Z2g6ZHJz"
+          headers: "Authorization: Basic Z2E0Z2g6ZHJz"
           url: url
         available: true
         authorizations:
@@ -3468,8 +3219,7 @@ components:
         - null
         name: name
         id: id
-        drs_uri:
-        - drs://drs.example.org/314159
+        drs_uri: drs://drs.example.org/314159
       properties:
         name:
           description: "A name declared by the bundle author that must be used when\
@@ -3487,8 +3237,7 @@ components:
         drs_uri:
           description: A list of full DRS identifier URI paths that may be used to
             obtain the object. These URIs may be external to this DRS instance.
-          example:
-          - drs://drs.example.org/314159
+          example: drs://drs.example.org/314159
           items:
             type: string
           type: array
@@ -3518,16 +3267,14 @@ components:
         description: description
         upload_methods:
         - access_url:
-            headers:
-            - "Authorization: Basic Z2E0Z2g6ZHJz"
+            headers: "Authorization: Basic Z2E0Z2g6ZHJz"
             url: url
           upload_details:
             key: ""
           type: s3
           region: us-east-1
         - access_url:
-            headers:
-            - "Authorization: Basic Z2E0Z2g6ZHJz"
+            headers: "Authorization: Basic Z2E0Z2g6ZHJz"
             url: url
           upload_details:
             key: ""
@@ -3576,9 +3323,6 @@ components:
           type: sha-256
         - checksum: checksum
           type: sha-256
-        upload_method_types:
-        - upload_method_types
-        - upload_method_types
         aliases:
         - aliases
         - aliases
@@ -3611,17 +3355,6 @@ components:
           items:
             type: string
           type: array
-        upload_method_types:
-          description: "Optional array of requested upload method types which should\
-            \ match those published by  the server in the `supportedUploadMethodsTypes`\
-            \ field in  the `/service-info` response.  Servers SHALL try to honour\
-            \ requests, but the server may not be able to offer the  requested upload\
-            \ type for specific file types/sizes etc. The server MAY return a  400\
-            \ error if it cannot honour the request, or MAY return an alternative\
-            \  supported upload method."
-          items:
-            type: string
-          type: array
       required:
       - checksums
       - mime_type
@@ -3631,8 +3364,7 @@ components:
     UploadMethod:
       example:
         access_url:
-          headers:
-          - "Authorization: Basic Z2E0Z2g6ZHJz"
+          headers: "Authorization: Basic Z2E0Z2g6ZHJz"
           url: url
         upload_details:
           key: ""
@@ -3663,9 +3395,9 @@ components:
           type: string
         upload_details:
           additionalProperties: true
-          description: A dictionary of storage provider specific configuration details
-            that vary by upload method type. The contents and structure depend on
-            the specific upload method being used.
+          description: A dictionary of upload-specific configuration details that
+            vary by upload method type. The contents and structure depend on the specific
+            upload method being used.
           type: object
       required:
       - access_url
@@ -3678,28 +3410,25 @@ components:
       example:
         documentationUrl: https://docs.myservice.example.com
         drs:
+          supportedUploadMethods:
+          - s3
+          - s3
           deleteStorageDataSupported: false
           uploadRequestSupported: false
           objectCount: 1
-          validateFileSizes: false
           objectRegistrationSupported: false
           maxUploadRequestLength: 2
           maxUploadSize: 5
           maxBulkDeleteLength: 9
-          fetchByChecksumSupported: false
           maxBulkAccessMethodUpdateLength: 3
           totalObjectSize: 5
+          validateUploadChecksums: false
+          validateAccessMethodUpdates: false
           maxBulkRequestLength: 6
-          supportedUploadMethodTypes:
-          - s3
-          - s3
-          validateChecksums: false
           deleteSupported: false
-          validateAccessMethods: false
           relatedFileStorageSupported: false
           maxRegisterRequestLength: 7
-          checksumAdditionSupported: false
-          maxBulkChecksumAdditionLength: 2
+          validateUploadFileSizes: false
           accessMethodUpdateSupported: false
         description: This service provides...
         type:
@@ -3784,8 +3513,7 @@ components:
           access_methods:
           - cloud: "aws, gcp, or azure"
             access_url:
-              headers:
-              - "Authorization: Basic Z2E0Z2g6ZHJz"
+              headers: "Authorization: Basic Z2E0Z2g6ZHJz"
               url: url
             available: true
             authorizations:
@@ -3804,8 +3532,7 @@ components:
             region: us-east-1
           - cloud: "aws, gcp, or azure"
             access_url:
-              headers:
-              - "Authorization: Basic Z2E0Z2g6ZHJz"
+              headers: "Authorization: Basic Z2E0Z2g6ZHJz"
               url: url
             available: true
             authorizations:
@@ -3828,15 +3555,13 @@ components:
             - null
             name: name
             id: id
-            drs_uri:
-            - drs://drs.example.org/314159
+            drs_uri: drs://drs.example.org/314159
           - contents:
             - null
             - null
             name: name
             id: id
-            drs_uri:
-            - drs://drs.example.org/314159
+            drs_uri: drs://drs.example.org/314159
           name: name
           id: id
         - checksums:
@@ -3857,8 +3582,7 @@ components:
           access_methods:
           - cloud: "aws, gcp, or azure"
             access_url:
-              headers:
-              - "Authorization: Basic Z2E0Z2g6ZHJz"
+              headers: "Authorization: Basic Z2E0Z2g6ZHJz"
               url: url
             available: true
             authorizations:
@@ -3877,8 +3601,7 @@ components:
             region: us-east-1
           - cloud: "aws, gcp, or azure"
             access_url:
-              headers:
-              - "Authorization: Basic Z2E0Z2g6ZHJz"
+              headers: "Authorization: Basic Z2E0Z2g6ZHJz"
               url: url
             available: true
             authorizations:
@@ -3901,15 +3624,13 @@ components:
             - null
             name: name
             id: id
-            drs_uri:
-            - drs://drs.example.org/314159
+            drs_uri: drs://drs.example.org/314159
           - contents:
             - null
             - null
             name: name
             id: id
-            drs_uri:
-            - drs://drs.example.org/314159
+            drs_uri: drs://drs.example.org/314159
           name: name
           id: id
       properties:
@@ -3974,6 +3695,174 @@ components:
             $ref: "#/components/schemas/Authorizations"
           type: array
       type: object
+    RegisterObjects_request:
+      properties:
+        candidates:
+          description: Array of DRS object candidates to register (server will mint
+            IDs and timestamps)
+          items:
+            $ref: "#/components/schemas/DrsObjectCandidate"
+          minItems: 1
+          type: array
+        passports:
+          description: Optional array of GA4GH Passport JWTs for authorization
+          items:
+            type: string
+          type: array
+      required:
+      - candidates
+      type: object
+    RegisterObjects_201_response:
+      example:
+        objects:
+        - checksums:
+          - checksum: checksum
+            type: sha-256
+          - checksum: checksum
+            type: sha-256
+          created_time: 2000-01-23T04:56:07.000+00:00
+          updated_time: 2000-01-23T04:56:07.000+00:00
+          aliases:
+          - aliases
+          - aliases
+          description: description
+          self_uri: drs://drs.example.org/314159
+          version: version
+          size: 0
+          mime_type: application/json
+          access_methods:
+          - cloud: "aws, gcp, or azure"
+            access_url:
+              headers: "Authorization: Basic Z2E0Z2g6ZHJz"
+              url: url
+            available: true
+            authorizations:
+              passport_auth_issuers:
+              - passport_auth_issuers
+              - passport_auth_issuers
+              bearer_auth_issuers:
+              - bearer_auth_issuers
+              - bearer_auth_issuers
+              supported_types:
+              - None
+              - None
+              drs_object_id: drs_object_id
+            access_id: access_id
+            type: s3
+            region: us-east-1
+          - cloud: "aws, gcp, or azure"
+            access_url:
+              headers: "Authorization: Basic Z2E0Z2g6ZHJz"
+              url: url
+            available: true
+            authorizations:
+              passport_auth_issuers:
+              - passport_auth_issuers
+              - passport_auth_issuers
+              bearer_auth_issuers:
+              - bearer_auth_issuers
+              - bearer_auth_issuers
+              supported_types:
+              - None
+              - None
+              drs_object_id: drs_object_id
+            access_id: access_id
+            type: s3
+            region: us-east-1
+          contents:
+          - contents:
+            - null
+            - null
+            name: name
+            id: id
+            drs_uri: drs://drs.example.org/314159
+          - contents:
+            - null
+            - null
+            name: name
+            id: id
+            drs_uri: drs://drs.example.org/314159
+          name: name
+          id: id
+        - checksums:
+          - checksum: checksum
+            type: sha-256
+          - checksum: checksum
+            type: sha-256
+          created_time: 2000-01-23T04:56:07.000+00:00
+          updated_time: 2000-01-23T04:56:07.000+00:00
+          aliases:
+          - aliases
+          - aliases
+          description: description
+          self_uri: drs://drs.example.org/314159
+          version: version
+          size: 0
+          mime_type: application/json
+          access_methods:
+          - cloud: "aws, gcp, or azure"
+            access_url:
+              headers: "Authorization: Basic Z2E0Z2g6ZHJz"
+              url: url
+            available: true
+            authorizations:
+              passport_auth_issuers:
+              - passport_auth_issuers
+              - passport_auth_issuers
+              bearer_auth_issuers:
+              - bearer_auth_issuers
+              - bearer_auth_issuers
+              supported_types:
+              - None
+              - None
+              drs_object_id: drs_object_id
+            access_id: access_id
+            type: s3
+            region: us-east-1
+          - cloud: "aws, gcp, or azure"
+            access_url:
+              headers: "Authorization: Basic Z2E0Z2g6ZHJz"
+              url: url
+            available: true
+            authorizations:
+              passport_auth_issuers:
+              - passport_auth_issuers
+              - passport_auth_issuers
+              bearer_auth_issuers:
+              - bearer_auth_issuers
+              - bearer_auth_issuers
+              supported_types:
+              - None
+              - None
+              drs_object_id: drs_object_id
+            access_id: access_id
+            type: s3
+            region: us-east-1
+          contents:
+          - contents:
+            - null
+            - null
+            name: name
+            id: id
+            drs_uri: drs://drs.example.org/314159
+          - contents:
+            - null
+            - null
+            name: name
+            id: id
+            drs_uri: drs://drs.example.org/314159
+          name: name
+          id: id
+      properties:
+        objects:
+          description: Array of registered DRS objects in the same order as the candidates
+            in the request
+          items:
+            $ref: "#/components/schemas/DrsObject"
+          type: array
+      required:
+      - objects
+      type: object
     PostAccessURL_request:
       properties:
         passports:
@@ -4021,182 +3910,6 @@ components:
             $ref: "#/components/schemas/BulkAccessURL"
           type: array
       type: object
-    RegisterObjects_request:
-      properties:
-        candidates:
-          description: Array of DRS object candidates to register (server will mint
-            IDs and timestamps)
-          items:
-            $ref: "#/components/schemas/DrsObjectCandidate"
-          minItems: 1
-          type: array
-        passports:
-          description: Optional array of GA4GH Passport JWTs for authorization
-          items:
-            type: string
-          type: array
-      required:
-      - candidates
-      type: object
-    RegisterObjects_201_response:
-      example:
-        objects:
-        - checksums:
-          - checksum: checksum
-            type: sha-256
-          - checksum: checksum
-            type: sha-256
-          created_time: 2000-01-23T04:56:07.000+00:00
-          updated_time: 2000-01-23T04:56:07.000+00:00
-          aliases:
-          - aliases
-          - aliases
-          description: description
-          self_uri: drs://drs.example.org/314159
-          version: version
-          size: 0
-          mime_type: application/json
-          access_methods:
-          - cloud: "aws, gcp, or azure"
-            access_url:
-              headers:
-              - "Authorization: Basic Z2E0Z2g6ZHJz"
-              url: url
-            available: true
-            authorizations:
-              passport_auth_issuers:
-              - passport_auth_issuers
-              - passport_auth_issuers
-              bearer_auth_issuers:
-              - bearer_auth_issuers
-              - bearer_auth_issuers
-              supported_types:
-              - None
-              - None
-              drs_object_id: drs_object_id
-            access_id: access_id
-            type: s3
-            region: us-east-1
-          - cloud: "aws, gcp, or azure"
-            access_url:
-              headers:
-              - "Authorization: Basic Z2E0Z2g6ZHJz"
-              url: url
-            available: true
-            authorizations:
-              passport_auth_issuers:
-              - passport_auth_issuers
-              - passport_auth_issuers
-              bearer_auth_issuers:
-              - bearer_auth_issuers
-              - bearer_auth_issuers
-              supported_types:
-              - None
-              - None
-              drs_object_id: drs_object_id
-            access_id: access_id
-            type: s3
-            region: us-east-1
-          contents:
-          - contents:
-            - null
-            - null
-            name: name
-            id: id
-            drs_uri:
-            - drs://drs.example.org/314159
-          - contents:
-            - null
-            - null
-            name: name
-            id: id
-            drs_uri:
-            - drs://drs.example.org/314159
-          name: name
-          id: id
-        - checksums:
-          - checksum: checksum
-            type: sha-256
-          - checksum: checksum
-            type: sha-256
-          created_time: 2000-01-23T04:56:07.000+00:00
-          updated_time: 2000-01-23T04:56:07.000+00:00
-          aliases:
-          - aliases
-          - aliases
-          description: description
-          self_uri: drs://drs.example.org/314159
-          version: version
-          size: 0
-          mime_type: application/json
-          access_methods:
-          - cloud: "aws, gcp, or azure"
-            access_url:
-              headers:
-              - "Authorization: Basic Z2E0Z2g6ZHJz"
-              url: url
-            available: true
-            authorizations:
-              passport_auth_issuers:
-              - passport_auth_issuers
-              - passport_auth_issuers
-              bearer_auth_issuers:
-              - bearer_auth_issuers
-              - bearer_auth_issuers
-              supported_types:
-              - None
-              - None
-              drs_object_id: drs_object_id
-            access_id: access_id
-            type: s3
-            region: us-east-1
-          - cloud: "aws, gcp, or azure"
-            access_url:
-              headers:
-              - "Authorization: Basic Z2E0Z2g6ZHJz"
-              url: url
-            available: true
-            authorizations:
-              passport_auth_issuers:
-              - passport_auth_issuers
-              - passport_auth_issuers
-              bearer_auth_issuers:
-              - bearer_auth_issuers
-              - bearer_auth_issuers
-              supported_types:
-              - None
-              - None
-              drs_object_id: drs_object_id
-            access_id: access_id
-            type: s3
-            region: us-east-1
-          contents:
-          - contents:
-            - null
-            - null
-            name: name
-            id: id
-            drs_uri:
-            - drs://drs.example.org/314159
-          - contents:
-            - null
-            - null
-            name: name
-            id: id
-            drs_uri:
-            - drs://drs.example.org/314159
-          name: name
-          id: id
-      properties:
-        objects:
-          description: Array of registered DRS objects in the same order as the candidates
-            in the request
-          items:
-            $ref: "#/components/schemas/DrsObject"
-          type: array
-      required:
-      - objects
-      type: object
     bulkUpdateAccessMethods_200_response:
       example:
         objects:
@@ -4218,8 +3931,7 @@ components:
           access_methods:
           - cloud: "aws, gcp, or azure"
             access_url:
-              headers:
-              - "Authorization: Basic Z2E0Z2g6ZHJz"
+              headers: "Authorization: Basic Z2E0Z2g6ZHJz"
               url: url
             available: true
             authorizations:
@@ -4238,8 +3950,7 @@ components:
             region: us-east-1
           - cloud: "aws, gcp, or azure"
             access_url:
-              headers:
-              - "Authorization: Basic Z2E0Z2g6ZHJz"
+              headers: "Authorization: Basic Z2E0Z2g6ZHJz"
               url: url
             available: true
             authorizations:
@@ -4262,15 +3973,13 @@ components:
             - null
             name: name
             id: id
-            drs_uri:
-            - drs://drs.example.org/314159
+            drs_uri: drs://drs.example.org/314159
           - contents:
             - null
             - null
             name: name
             id: id
-            drs_uri:
-            - drs://drs.example.org/314159
+            drs_uri: drs://drs.example.org/314159
           name: name
           id: id
         - checksums:
@@ -4291,8 +4000,7 @@ components:
           access_methods:
           - cloud: "aws, gcp, or azure"
             access_url:
-              headers:
-              - "Authorization: Basic Z2E0Z2g6ZHJz"
+              headers: "Authorization: Basic Z2E0Z2g6ZHJz"
               url: url
             available: true
             authorizations:
@@ -4311,8 +4019,7 @@ components:
             region: us-east-1
           - cloud: "aws, gcp, or azure"
             access_url:
-              headers:
-              - "Authorization: Basic Z2E0Z2g6ZHJz"
+              headers: "Authorization: Basic Z2E0Z2g6ZHJz"
               url: url
             available: true
             authorizations:
@@ -4335,15 +4042,13 @@ components:
             - null
             name: name
             id: id
-            drs_uri:
-            - drs://drs.example.org/314159
+            drs_uri: drs://drs.example.org/314159
           - contents:
             - null
             - null
             name: name
             id: id
-            drs_uri:
-            - drs://drs.example.org/314159
+            drs_uri: drs://drs.example.org/314159
           name: name
           id: id
       properties:
@@ -4388,28 +4093,25 @@ components:
       type: object
     DrsService_drs:
       example:
+        supportedUploadMethods:
+        - s3
+        - s3
         deleteStorageDataSupported: false
         uploadRequestSupported: false
         objectCount: 1
-        validateFileSizes: false
         objectRegistrationSupported: false
         maxUploadRequestLength: 2
         maxUploadSize: 5
         maxBulkDeleteLength: 9
-        fetchByChecksumSupported: false
         maxBulkAccessMethodUpdateLength: 3
         totalObjectSize: 5
+        validateUploadChecksums: false
+        validateAccessMethodUpdates: false
         maxBulkRequestLength: 6
-        supportedUploadMethodTypes:
-        - s3
-        - s3
-        validateChecksums: false
         deleteSupported: false
-        validateAccessMethods: false
         relatedFileStorageSupported: false
         maxRegisterRequestLength: 7
-        checksumAdditionSupported: false
-        maxBulkChecksumAdditionLength: 2
+        validateUploadFileSizes: false
         accessMethodUpdateSupported: false
       properties:
         maxBulkRequestLength:
@@ -4439,7 +4141,7 @@ components:
             \ register uploaded files or existing data as DRS objects. If false or\
             \ missing, the server does not support object registration."
           type: boolean
-        supportedUploadMethodTypes:
+        supportedUploadMethods:
           description: |-
             List of upload methods supported by this DRS server. Only present when uploadRequestSupported is true. Clients can use this information to determine which upload methods are available before making upload requests.
             - **s3**: Direct S3 upload with temporary AWS credentials - **gs**: Google Cloud Storage upload with access tokens   - **https**: Presigned POST URL for HTTP uploads - **ftp**: File Transfer Protocol uploads - **sftp**: Secure File Transfer Protocol uploads - **gsiftp**: GridFTP secure file transfer - **globus**: Globus transfer service for high-performance data movement
@@ -4468,34 +4170,23 @@ components:
             \ a single registration request. Only present when objectRegistrationSupported\
             \ is true. If not specified, defaults to the same value as maxBulkRequestLength."
           type: integer
-        validateChecksums:
+        validateUploadChecksums:
           default: false
-          description: "Indicates whether this DRS server validates file checksums\
-            \ against the provided metadata. If true, the server will verify that\
-            \ uploaded and registered files match their declared checksums and may\
-            \ reject objects with mismatches. If false or missing, the server does\
-            \ not perform checksum validation and relies on client-provided metadata.\
-            \ Only present when at least one of uploadRequestSupported or objectRegistrationSupported\
-            \ or checksumAdditionSupported are true."
+          description: "Indicates whether this DRS server validates uploaded file\
+            \ checksums against the provided metadata. If true, the server will verify\
+            \ that uploaded files match their declared checksums and may reject uploads\
+            \ with mismatches. If false or missing, the server does not perform checksum\
+            \ validation and relies on client-provided metadata. Only present when\
+            \ uploadRequestSupported or objectRegistrationSupported is true."
           type: boolean
-        validateFileSizes:
+        validateUploadFileSizes:
           default: false
-          description: "Indicates whether this DRS server validates file sizes against\
-            \ the provided metadata. If true, the server will verify that uploaded\
-            \ files match their declared sizes and may reject uploads with mismatches.\
-            \ If false or missing, the server does not perform file size validation\
-            \ and relies on client-provided metadata. Only present when uploadRequestSupported\
-            \ or objectRegistrationSupported is true."
-          type: boolean
-        validateAccessMethods:
-          default: false
-          description: "Indicates whether this DRS server validates access methods\
-            \ by following the URLs to check that they resolve to the expected objects\
-            \  (e.g. by checking that the file sizes and checksums match) If true,\
-            \ the server will attempt to verify checksums/content before accepting\
-            \ access methods. If false or missing, the server trusts client-provided\
-            \ access methods without validation. Only present when at least one of\
-            \ objectRegistrationSupported or accessMethodUpdateSupported are true."
+          description: "Indicates whether this DRS server validates uploaded file\
+            \ sizes against the provided metadata. If true, the server will verify\
+            \ that uploaded files match their declared sizes and may reject uploads\
+            \ with mismatches. If false or missing, the server does not perform file\
+            \ size validation and relies on client-provided metadata. Only present\
+            \ when uploadRequestSupported or objectRegistrationSupported is true."
           type: boolean
         relatedFileStorageSupported:
           default: false
@@ -4512,7 +4203,7 @@ components:
           default: false
           description: "Indicates whether this DRS server supports delete operations\
             \ via the delete endpoints. If true, clients can delete DRS objects using\
-            \ PUT requests to `/objects/{object_id}/delete` and `/objects/delete`.\
+            \ POST requests to `/objects/{object_id}/delete` and `/objects/delete`.\
             \ If false or missing, the server does not support delete operations and\
             \ will return 404 for delete endpoint requests. Like upload functionality,\
             \ delete support is entirely optional and servers remain DRS compliant\
@@ -4550,24 +4241,13 @@ components:
             \ bulk access method update request. Only present when accessMethodUpdateSupported\
             \ is true. If not specified, defaults to maxBulkRequestLength."
           type: integer
-        checksumAdditionSupported:
+        validateAccessMethodUpdates:
           default: false
-          description: "Indicates whether this DRS server supports adding new checksums\
-            \ for for existing objects. If true, clients can update access methods\
-            \ using `/objects/{object_id}/checksums` and `/objects/checksums` endpoints.\
-            \ If false or missing, the server does not support checksum addition."
-          type: boolean
-        maxBulkChecksumAdditionLength:
-          description: "Maximum number of objects that can be updated in a single\
-            \ bulk checksum addition request. Only present when checksumAdditionSupported\
-            \ is true. If not specified, defaults to maxBulkRequestLength."
-          type: integer
-        fetchByChecksumSupported:
-          default: false
-          description: "Indicates whether this DRS server supports fetching objects\
-            \ by checksum. If true, clients can fetch DRS objects using `/objects/checksum/{checksum}`,\
-            \ noting that it is possible for  multiple objects to have the same checksum.\
-            \ If false or missing, the server does not support fetching by cejcsum."
+          description: "Indicates whether this DRS server validates new access methods\
+            \ by verifying they point to the same data. If true, the server will attempt\
+            \ to verify checksums/content before updating access methods. If false\
+            \ or missing, the server trusts client-provided access methods without\
+            \ validation. Only present when accessMethodUpdateSupported is true."
           type: boolean
       required:
       - maxBulkRequestLength
@@ -4607,8 +4287,7 @@ components:
         access_methods:
         - cloud: "aws, gcp, or azure"
           access_url:
-            headers:
-            - "Authorization: Basic Z2E0Z2g6ZHJz"
+            headers: "Authorization: Basic Z2E0Z2g6ZHJz"
             url: url
           available: true
           authorizations:
@@ -4627,8 +4306,7 @@ components:
           region: us-east-1
         - cloud: "aws, gcp, or azure"
           access_url:
-            headers:
-            - "Authorization: Basic Z2E0Z2g6ZHJz"
+            headers: "Authorization: Basic Z2E0Z2g6ZHJz"
             url: url
           available: true
           authorizations:
@@ -4660,28 +4338,6 @@ components:
       - access_methods
       - object_id
       type: object
-    BulkChecksumAdditionRequest_updates_inner:
-      example:
-        checksums:
-        - checksum: checksum
-          type: sha-256
-        - checksum: checksum
-          type: sha-256
-        object_id: object_id
-      properties:
-        object_id:
-          description: DRS object ID to add checksum for
-          type: string
-        checksums:
-          description: New checksums for this object
-          items:
-            $ref: "#/components/schemas/Checksum"
-          minItems: 1
-          type: array
-      required:
-      - checksums
-      - object_id
-      type: object
     AccessMethod_access_url:
       allOf:
       - $ref: "#/components/schemas/AccessURL"
@@ -4689,8 +4345,7 @@ components:
           Note that at least one of `access_url` and `access_id` must be provided.
         type: object
       example:
-        headers:
-        - "Authorization: Basic Z2E0Z2g6ZHJz"
+        headers: "Authorization: Basic Z2E0Z2g6ZHJz"
         url: url
     AccessMethod_authorizations:
       allOf:
@@ -4714,14 +4369,10 @@ components:
       - $ref: "#/components/schemas/AccessURL"
       - description: "An `AccessURL` that specifies where the file will be accessible\
           \ after upload. This URL will be used as the access_url in the eventual\
-          \ DRS object, ensuring consistency between upload and retrieval operations.\
-          \ Note that this `upload_details` may contain additional URLs, such as pre-signed\
-          \ POST URLs to support uploading files, these may not be the same as the\
-          \ `access_url`."
+          \ DRS object, ensuring consistency between upload and retrieval operations."
         type: object
       example:
-        headers:
-        - "Authorization: Basic Z2E0Z2g6ZHJz"
+        headers: "Authorization: Basic Z2E0Z2g6ZHJz"
         url: url
   securitySchemes:
     BasicAuth:
@@ -4758,7 +4409,7 @@ x-tagGroups:
   - AccessMethodModel
   - AccessURLModel
   - ChecksumModel
-  - ContentsObjectModels
+  - ContentsObjectModel
   - DrsObjectModel
   - DrsObjectCandidateModel
   - ErrorModel
@@ -4782,4 +4433,3 @@ x-tagGroups:
   - Upload Requests and Object Registration
   - Object Deletion
   - Access Method Update
-  - Checksum Addition

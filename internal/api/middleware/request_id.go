@@ -3,6 +3,7 @@ package middleware
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -51,10 +52,8 @@ func (m *RequestIDMiddleware) Middleware(next http.Handler) http.Handler {
 		next.ServeHTTP(rec, r)
 
 		m.logger.Debug(
-			"request end",
+			fmt.Sprintf("[%d] %s %s", rec.status, r.Method, r.URL.Path),
 			"request_id", requestID,
-			"method", r.Method,
-			"path", r.URL.Path,
 			"status", rec.status,
 			"duration_ms", time.Since(start).Milliseconds(),
 		)

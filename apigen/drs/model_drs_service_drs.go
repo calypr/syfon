@@ -32,7 +32,7 @@ type DrsServiceDrs struct {
 	ObjectRegistrationSupported bool `json:"objectRegistrationSupported,omitempty"`
 
 	// List of upload methods supported by this DRS server. Only present when uploadRequestSupported is true. Clients can use this information to determine which upload methods are available before making upload requests. - **s3**: Direct S3 upload with temporary AWS credentials - **gs**: Google Cloud Storage upload with access tokens   - **https**: Presigned POST URL for HTTP uploads - **ftp**: File Transfer Protocol uploads - **sftp**: Secure File Transfer Protocol uploads - **gsiftp**: GridFTP secure file transfer - **globus**: Globus transfer service for high-performance data movement
-	SupportedUploadMethodTypes []string `json:"supportedUploadMethodTypes,omitempty"`
+	SupportedUploadMethods []string `json:"supportedUploadMethods,omitempty"`
 
 	// Maximum file size in bytes that can be uploaded via the upload endpoints. Only present when uploadRequestSupported is true. If not specified, there is no explicit size limit.
 	MaxUploadSize int64 `json:"maxUploadSize,omitempty"`
@@ -43,19 +43,16 @@ type DrsServiceDrs struct {
 	// Maximum number of candidate objects that can be included in a single registration request. Only present when objectRegistrationSupported is true. If not specified, defaults to the same value as maxBulkRequestLength.
 	MaxRegisterRequestLength int32 `json:"maxRegisterRequestLength,omitempty"`
 
-	// Indicates whether this DRS server validates file checksums against the provided metadata. If true, the server will verify that uploaded and registered files match their declared checksums and may reject objects with mismatches. If false or missing, the server does not perform checksum validation and relies on client-provided metadata. Only present when at least one of uploadRequestSupported or objectRegistrationSupported or checksumAdditionSupported are true.
-	ValidateChecksums bool `json:"validateChecksums,omitempty"`
+	// Indicates whether this DRS server validates uploaded file checksums against the provided metadata. If true, the server will verify that uploaded files match their declared checksums and may reject uploads with mismatches. If false or missing, the server does not perform checksum validation and relies on client-provided metadata. Only present when uploadRequestSupported or objectRegistrationSupported is true.
+	ValidateUploadChecksums bool `json:"validateUploadChecksums,omitempty"`
 
-	// Indicates whether this DRS server validates file sizes against the provided metadata. If true, the server will verify that uploaded files match their declared sizes and may reject uploads with mismatches. If false or missing, the server does not perform file size validation and relies on client-provided metadata. Only present when uploadRequestSupported or objectRegistrationSupported is true.
-	ValidateFileSizes bool `json:"validateFileSizes,omitempty"`
-
-	// Indicates whether this DRS server validates access methods by following the URLs to check that they resolve to the expected objects  (e.g. by checking that the file sizes and checksums match) If true, the server will attempt to verify checksums/content before accepting access methods. If false or missing, the server trusts client-provided access methods without validation. Only present when at least one of objectRegistrationSupported or accessMethodUpdateSupported are true.
-	ValidateAccessMethods bool `json:"validateAccessMethods,omitempty"`
+	// Indicates whether this DRS server validates uploaded file sizes against the provided metadata. If true, the server will verify that uploaded files match their declared sizes and may reject uploads with mismatches. If false or missing, the server does not perform file size validation and relies on client-provided metadata. Only present when uploadRequestSupported or objectRegistrationSupported is true.
+	ValidateUploadFileSizes bool `json:"validateUploadFileSizes,omitempty"`
 
 	// Indicates whether this DRS server supports storing files from the same upload request under a common prefix or folder structure. If true, the server will organize related files together in storage, enabling bioinformatics workflows that expect co-located files (e.g., CRAM + CRAI, VCF + TBI). If false or missing, the server may distribute files across different storage locations or prefixes. Only present when uploadRequestSupported is true. This feature is particularly valuable for genomics tools like samtools that expect index files to be co-located with data files.
 	RelatedFileStorageSupported bool `json:"relatedFileStorageSupported,omitempty"`
 
-	// Indicates whether this DRS server supports delete operations via the delete endpoints. If true, clients can delete DRS objects using PUT requests to `/objects/{object_id}/delete` and `/objects/delete`. If false or missing, the server does not support delete operations and will return 404 for delete endpoint requests. Like upload functionality, delete support is entirely optional and servers remain DRS compliant without it.
+	// Indicates whether this DRS server supports delete operations via the delete endpoints. If true, clients can delete DRS objects using POST requests to `/objects/{object_id}/delete` and `/objects/delete`. If false or missing, the server does not support delete operations and will return 404 for delete endpoint requests. Like upload functionality, delete support is entirely optional and servers remain DRS compliant without it.
 	DeleteSupported bool `json:"deleteSupported,omitempty"`
 
 	// Maximum number of objects that can be deleted in a single bulk delete request via `/objects/delete`. Only present when deleteSupported is true. If not specified when delete is supported, defaults to the same value as maxBulkRequestLength. Servers may enforce lower limits for delete operations compared to other bulk operations for safety reasons.
@@ -70,14 +67,8 @@ type DrsServiceDrs struct {
 	// Maximum number of objects that can be updated in a single bulk access method update request. Only present when accessMethodUpdateSupported is true. If not specified, defaults to maxBulkRequestLength.
 	MaxBulkAccessMethodUpdateLength int32 `json:"maxBulkAccessMethodUpdateLength,omitempty"`
 
-	// Indicates whether this DRS server supports adding new checksums for for existing objects. If true, clients can update access methods using `/objects/{object_id}/checksums` and `/objects/checksums` endpoints. If false or missing, the server does not support checksum addition.
-	ChecksumAdditionSupported bool `json:"checksumAdditionSupported,omitempty"`
-
-	// Maximum number of objects that can be updated in a single bulk checksum addition request. Only present when checksumAdditionSupported is true. If not specified, defaults to maxBulkRequestLength.
-	MaxBulkChecksumAdditionLength int32 `json:"maxBulkChecksumAdditionLength,omitempty"`
-
-	// Indicates whether this DRS server supports fetching objects by checksum. If true, clients can fetch DRS objects using `/objects/checksum/{checksum}`, noting that it is possible for  multiple objects to have the same checksum. If false or missing, the server does not support fetching by cejcsum.
-	FetchByChecksumSupported bool `json:"fetchByChecksumSupported,omitempty"`
+	// Indicates whether this DRS server validates new access methods by verifying they point to the same data. If true, the server will attempt to verify checksums/content before updating access methods. If false or missing, the server trusts client-provided access methods without validation. Only present when accessMethodUpdateSupported is true.
+	ValidateAccessMethodUpdates bool `json:"validateAccessMethodUpdates,omitempty"`
 }
 
 // AssertDrsServiceDrsRequired checks if the required fields are not zero-ed

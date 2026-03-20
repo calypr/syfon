@@ -10,7 +10,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/calypr/drs-server/apigen/bucketapi"
 	"github.com/calypr/drs-server/apigen/drs"
+	"github.com/calypr/drs-server/apigen/internalapi"
 	"github.com/calypr/drs-server/db/core"
 	"github.com/calypr/drs-server/testutils"
 	"github.com/gorilla/mux"
@@ -47,13 +49,13 @@ func TestHandleFenceDownload(t *testing.T) {
 		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusOK)
 	}
 
-	var resp fenceSignedURL
+	var resp internalapi.FenceSignedURL
 	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
 		t.Fatal(err)
 	}
 
-	if !strings.Contains(resp.URL, "signed=true") {
-		t.Errorf("expected signed url, got %v", resp.URL)
+	if !strings.Contains(resp.GetUrl(), "signed=true") {
+		t.Errorf("expected signed url, got %v", resp.GetUrl())
 	}
 }
 
@@ -63,9 +65,8 @@ func TestHandleFenceUploadBlank(t *testing.T) {
 	}
 	mockUM := &testutils.MockUrlManager{}
 
-	reqBody := fenceUploadBlankRequest{
-		GUID: "new-guid",
-	}
+	guid := "new-guid"
+	reqBody := internalapi.FenceUploadBlankRequest{Guid: &guid}
 	body, _ := json.Marshal(reqBody)
 	req, err := http.NewRequest("POST", "/data/upload", bytes.NewBuffer(body))
 	if err != nil {
@@ -79,16 +80,16 @@ func TestHandleFenceUploadBlank(t *testing.T) {
 		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusCreated)
 	}
 
-	var resp fenceUploadBlankResponse
+	var resp internalapi.FenceUploadBlankResponse
 	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
 		t.Fatal(err)
 	}
 
-	if resp.GUID != "new-guid" {
-		t.Errorf("expected guid new-guid, got %v", resp.GUID)
+	if resp.GetGuid() != "new-guid" {
+		t.Errorf("expected guid new-guid, got %v", resp.GetGuid())
 	}
-	if !strings.Contains(resp.URL, "upload=true") {
-		t.Errorf("expected upload url, got %v", resp.URL)
+	if !strings.Contains(resp.GetUrl(), "upload=true") {
+		t.Errorf("expected upload url, got %v", resp.GetUrl())
 	}
 }
 
@@ -96,10 +97,9 @@ func TestHandleFenceMultipartInit(t *testing.T) {
 	mockDB := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}
 	mockUM := &testutils.MockUrlManager{}
 
-	reqBody := fenceMultipartInitRequest{
-		GUID:     "multipart-guid",
-		FileName: "test.bam",
-	}
+	multiGUID := "multipart-guid"
+	fileName := "test.bam"
+	reqBody := internalapi.FenceMultipartInitRequest{Guid: &multiGUID, FileName: &fileName}
 	body, _ := json.Marshal(reqBody)
 	req, err := http.NewRequest("POST", "/multipart/init", bytes.NewBuffer(body))
 	if err != nil {
@@ -113,13 +113,13 @@ func TestHandleFenceMultipartInit(t *testing.T) {
 		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusCreated)
 	}
 
-	var resp fenceMultipartInitResponse
+	var resp internalapi.FenceMultipartInitResponse
 	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
 		t.Fatal(err)
 	}
 
-	if resp.UploadID != "mock-upload-id" {
-		t.Errorf("expected mock-upload-id, got %v", resp.UploadID)
+	if resp.GetUploadId() != "mock-upload-id" {
+		t.Errorf("expected mock-upload-id, got %v", resp.GetUploadId())
 	}
 }
 
@@ -127,9 +127,9 @@ func TestHandleFenceMultipartUpload(t *testing.T) {
 	mockDB := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}
 	mockUM := &testutils.MockUrlManager{}
 
-	reqBody := fenceMultipartUploadRequest{
+	reqBody := internalapi.FenceMultipartUploadRequest{
 		Key:        "hash-key",
-		UploadID:   "mock-upload-id",
+		UploadId:   "mock-upload-id",
 		PartNumber: 1,
 	}
 	body, _ := json.Marshal(reqBody)
@@ -145,11 +145,11 @@ func TestHandleFenceMultipartUpload(t *testing.T) {
 		t.Fatalf("handler returned wrong status code: got %v want %v", status, http.StatusOK)
 	}
 
-	var resp fenceMultipartUploadResponse
+	var resp internalapi.FenceMultipartUploadResponse
 	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
 		t.Fatal(err)
 	}
-	if resp.PresignedURL == "" {
+	if resp.GetPresignedUrl() == "" {
 		t.Fatal("expected presigned_url to be set")
 	}
 }
@@ -158,10 +158,10 @@ func TestHandleFenceMultipartComplete(t *testing.T) {
 	mockDB := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}
 	mockUM := &testutils.MockUrlManager{}
 
-	reqBody := fenceMultipartCompleteRequest{
+	reqBody := internalapi.FenceMultipartCompleteRequest{
 		Key:      "hash-key",
-		UploadID: "mock-upload-id",
-		Parts: []fenceMultipartPart{
+		UploadId: "mock-upload-id",
+		Parts: []internalapi.FenceMultipartPart{
 			{PartNumber: 1, ETag: "etag1"},
 		},
 	}
@@ -301,12 +301,17 @@ func TestHandleFenceBuckets_Gen3Auth(t *testing.T) {
 
 func TestHandleFencePutDeleteBucket_Gen3Auth(t *testing.T) {
 	mockDB := &testutils.MockDatabase{Credentials: map[string]core.S3Credential{}}
+	path := "s3://b2/cbds/proj1"
 
-	putBody, _ := json.Marshal(fencePutBucketRequest{
-		Bucket:    "b2",
-		Region:    "us-east-1",
-		AccessKey: "ak",
-		SecretKey: "sk",
+	putBody, _ := json.Marshal(bucketapi.PutBucketRequest{
+		Bucket:       "b2",
+		Region:       "us-east-1",
+		AccessKey:    "ak",
+		SecretKey:    "sk",
+		Endpoint:     "https://s3.amazonaws.com",
+		Organization: "cbds",
+		ProjectId:    "proj1",
+		Path:         &path,
 	})
 
 	putReq401, _ := http.NewRequest("PUT", "/data/buckets", bytes.NewBuffer(putBody))
@@ -359,6 +364,56 @@ func TestHandleFencePutDeleteBucket_Gen3Auth(t *testing.T) {
 	if delRR204.Code != http.StatusNoContent {
 		t.Fatalf("expected DELETE 204, got %d body=%s", delRR204.Code, delRR204.Body.String())
 	}
+}
+
+func TestHandleFencePutBucket_RejectsInvalidGeneratedPayloads(t *testing.T) {
+	mockDB := &testutils.MockDatabase{Credentials: map[string]core.S3Credential{}}
+
+	t.Run("missing required project_id", func(t *testing.T) {
+		req, _ := http.NewRequest("PUT", "/data/buckets", bytes.NewBufferString(`{
+			"bucket":"b2",
+			"region":"us-east-1",
+			"access_key":"ak",
+			"secret_key":"sk",
+			"endpoint":"https://s3.amazonaws.com",
+			"organization":"cbds"
+		}`))
+		ctx := context.WithValue(req.Context(), core.AuthModeKey, "gen3")
+		ctx = context.WithValue(ctx, core.AuthHeaderPresentKey, true)
+		ctx = context.WithValue(ctx, core.UserPrivilegesKey, map[string]map[string]bool{
+			bucketAdminResource: {"create": true},
+		})
+		req = req.WithContext(ctx)
+		rr := httptest.NewRecorder()
+		handleFencePutBucket(rr, req, mockDB)
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d body=%s", rr.Code, rr.Body.String())
+		}
+	})
+
+	t.Run("unknown field", func(t *testing.T) {
+		req, _ := http.NewRequest("PUT", "/data/buckets", bytes.NewBufferString(`{
+			"bucket":"b2",
+			"region":"us-east-1",
+			"access_key":"ak",
+			"secret_key":"sk",
+			"endpoint":"https://s3.amazonaws.com",
+			"organization":"cbds",
+			"project_id":"proj1",
+			"unexpected":"boom"
+		}`))
+		ctx := context.WithValue(req.Context(), core.AuthModeKey, "gen3")
+		ctx = context.WithValue(ctx, core.AuthHeaderPresentKey, true)
+		ctx = context.WithValue(ctx, core.UserPrivilegesKey, map[string]map[string]bool{
+			bucketAdminResource: {"create": true},
+		})
+		req = req.WithContext(ctx)
+		rr := httptest.NewRecorder()
+		handleFencePutBucket(rr, req, mockDB)
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d body=%s", rr.Code, rr.Body.String())
+		}
+	})
 }
 
 func TestWriteDBErrorBranches(t *testing.T) {

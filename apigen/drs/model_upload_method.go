@@ -24,7 +24,7 @@ type UploadMethod struct {
 	// Cloud region for the upload location. Optional for non-cloud storage types.
 	Region string `json:"region,omitempty"`
 
-	// A dictionary of storage provider specific configuration details that vary by upload method type. The contents and structure depend on the specific upload method being used.
+	// A dictionary of upload-specific configuration details that vary by upload method type. The contents and structure depend on the specific upload method being used.
 	UploadDetails map[string]interface{} `json:"upload_details,omitempty"`
 }
 

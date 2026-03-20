@@ -9,15 +9,10 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/calypr/drs-server/apigen/metricsapi"
 	"github.com/calypr/drs-server/db/core"
 	"github.com/gorilla/mux"
 )
-
-type listResponse struct {
-	Data   []core.FileUsage `json:"data"`
-	Limit  int              `json:"limit"`
-	Offset int              `json:"offset"`
-}
 
 func RegisterMetricsRoutes(router *mux.Router, database core.DatabaseInterface) {
 	router.HandleFunc("/internal/metrics/files", handleListFileUsage(database)).Methods(http.MethodGet)
@@ -50,8 +45,16 @@ func handleListFileUsage(database core.DatabaseInterface) http.HandlerFunc {
 			writeHTTPError(w, r, http.StatusInternalServerError, "failed to list file usage", err)
 			return
 		}
+		out := metricsapi.NewMetricsListResponse()
+		items := make([]metricsapi.FileUsage, 0, len(data))
+		for _, v := range data {
+			items = append(items, toMetricsFileUsage(v))
+		}
+		out.SetData(items)
+		out.SetLimit(int32(limit))
+		out.SetOffset(int32(offset))
 		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(listResponse{Data: data, Limit: limit, Offset: offset}); err != nil {
+		if err := json.NewEncoder(w).Encode(out); err != nil {
 			slog.Error("metrics encode response failed", "request_id", core.GetRequestID(r.Context()), "path", r.URL.Path, "err", err)
 		}
 	}
@@ -78,7 +81,7 @@ func handleGetFileUsage(database core.DatabaseInterface) http.HandlerFunc {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(usage); err != nil {
+		if err := json.NewEncoder(w).Encode(toMetricsFileUsage(*usage)); err != nil {
 			slog.Error("metrics encode response failed", "request_id", core.GetRequestID(r.Context()), "path", r.URL.Path, "err", err)
 		}
 	}
@@ -100,11 +103,35 @@ func handleGetSummary(database core.DatabaseInterface) http.HandlerFunc {
 			writeHTTPError(w, r, http.StatusInternalServerError, "failed to get file usage summary", err)
 			return
 		}
+		out := metricsapi.NewFileUsageSummary()
+		out.SetTotalFiles(summary.TotalFiles)
+		out.SetTotalUploads(summary.TotalUploads)
+		out.SetTotalDownloads(summary.TotalDownloads)
+		out.SetInactiveFileCount(summary.InactiveFileCount)
 		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(summary); err != nil {
+		if err := json.NewEncoder(w).Encode(out); err != nil {
 			slog.Error("metrics encode response failed", "request_id", core.GetRequestID(r.Context()), "path", r.URL.Path, "err", err)
 		}
 	}
+}
+
+func toMetricsFileUsage(v core.FileUsage) metricsapi.FileUsage {
+	out := metricsapi.NewFileUsage()
+	out.SetObjectId(v.ObjectID)
+	out.SetName(v.Name)
+	out.SetSize(v.Size)
+	out.SetUploadCount(v.UploadCount)
+	out.SetDownloadCount(v.DownloadCount)
+	if v.LastUploadTime != nil {
+		out.SetLastUploadTime(*v.LastUploadTime)
+	}
+	if v.LastDownloadTime != nil {
+		out.SetLastDownloadTime(*v.LastDownloadTime)
+	}
+	if v.LastAccessTime != nil {
+		out.SetLastAccessTime(*v.LastAccessTime)
+	}
+	return *out
 }
 
 func parseInactiveSince(r *http.Request) (*time.Time, error) {

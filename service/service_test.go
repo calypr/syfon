@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"testing"
 
@@ -55,6 +56,14 @@ func TestGetAccessURL(t *testing.T) {
 	expectedURL := "s3://bucket/key?signed=true"
 	if accessURL.Url != expectedURL {
 		t.Errorf("expected URL %s, got %s", expectedURL, accessURL.Url)
+	}
+
+	usage, ok := mockDB.Usage["test-obj-id"]
+	if !ok {
+		t.Fatalf("expected usage metric for object to be recorded")
+	}
+	if usage.DownloadCount != 1 {
+		t.Fatalf("expected download count 1, got %d", usage.DownloadCount)
 	}
 }
 
@@ -183,11 +192,9 @@ func TestAddChecksums_SuccessAddsOnlyNewTypes(t *testing.T) {
 		"/data_file": {"update": true},
 	})
 
-	resp, err := service.AddChecksums(ctx, "obj-1", drs.ChecksumAdditionRequest{
-		Checksums: []drs.Checksum{
-			{Type: "sha-256", Checksum: "should-be-ignored"},
-			{Type: "md5", Checksum: "md5sum"},
-		},
+	resp, err := service.AddChecksums(ctx, "obj-1", []drs.Checksum{
+		{Type: "sha-256", Checksum: "should-be-ignored"},
+		{Type: "md5", Checksum: "md5sum"},
 	})
 	if err != nil {
 		t.Fatalf("AddChecksums failed: %v", err)
@@ -232,17 +239,9 @@ func TestBulkAddChecksums_Success(t *testing.T) {
 		"/data_file": {"update": true},
 	})
 
-	resp, err := service.BulkAddChecksums(ctx, drs.BulkChecksumAdditionRequest{
-		Updates: []drs.BulkChecksumAdditionRequestUpdatesInner{
-			{
-				ObjectId:  "obj-1",
-				Checksums: []drs.Checksum{{Type: "md5", Checksum: "m1"}},
-			},
-			{
-				ObjectId:  "obj-2",
-				Checksums: []drs.Checksum{{Type: "crc32c", Checksum: "c2"}},
-			},
-		},
+	resp, err := service.BulkAddChecksums(ctx, map[string][]drs.Checksum{
+		"obj-1": {{Type: "md5", Checksum: "m1"}},
+		"obj-2": {{Type: "crc32c", Checksum: "c2"}},
 	})
 	if err != nil {
 		t.Fatalf("BulkAddChecksums failed: %v", err)
@@ -273,13 +272,8 @@ func TestBulkAddChecksums_Forbidden(t *testing.T) {
 		"/data_file": {"read": true},
 	})
 
-	resp, err := service.BulkAddChecksums(ctx, drs.BulkChecksumAdditionRequest{
-		Updates: []drs.BulkChecksumAdditionRequestUpdatesInner{
-			{
-				ObjectId:  "obj-1",
-				Checksums: []drs.Checksum{{Type: "md5", Checksum: "m1"}},
-			},
-		},
+	resp, err := service.BulkAddChecksums(ctx, map[string][]drs.Checksum{
+		"obj-1": {{Type: "md5", Checksum: "m1"}},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -600,7 +594,7 @@ func TestOptionsObjectAndBulkObject(t *testing.T) {
 		t.Fatalf("expected 200, got %d", resp.Code)
 	}
 
-	bulkResp, err := service.OptionsBulkObject(context.Background())
+	bulkResp, err := service.OptionsBulkObject(context.Background(), drs.BulkObjectIdNoPassport{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -930,14 +924,11 @@ func TestBulkUpdateAccessMethods_TooLarge(t *testing.T) {
 
 func TestBulkAddChecksums_TooLarge(t *testing.T) {
 	service := NewObjectsAPIService(&testutils.MockDatabase{}, &testutils.MockUrlManager{})
-	updates := make([]drs.BulkChecksumAdditionRequestUpdatesInner, defaultMaxBulkChecksumAdditionLength+1)
-	for i := range updates {
-		updates[i] = drs.BulkChecksumAdditionRequestUpdatesInner{
-			ObjectId:  "obj",
-			Checksums: []drs.Checksum{{Type: "md5", Checksum: "m"}},
-		}
+	updates := make(map[string][]drs.Checksum, defaultMaxBulkChecksumAdditionLength+1)
+	for i := 0; i < defaultMaxBulkChecksumAdditionLength+1; i++ {
+		updates[fmt.Sprintf("obj-%d", i)] = []drs.Checksum{{Type: "md5", Checksum: "m"}}
 	}
-	resp, err := service.BulkAddChecksums(context.Background(), drs.BulkChecksumAdditionRequest{Updates: updates})
+	resp, err := service.BulkAddChecksums(context.Background(), updates)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

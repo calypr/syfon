@@ -103,14 +103,13 @@ var Cmd = &cobra.Command{
 
 		// Init Controller
 		objectsController := drs.NewObjectsAPIController(service)
-		registerObjectsController := drs.NewRegisterObjectsAPIController(service)
 		serviceInfoController := drs.NewServiceInfoAPIController(service)
 		uploadRequestController := drs.NewUploadRequestAPIController(service)
 
 		// Init Router (register generated routes by specificity to avoid path shadowing:
 		// e.g. /objects/register must match before /objects/{object_id}).
 		router := mux.NewRouter().StrictSlash(true)
-		registerAPIRoutes(router, objectsController, registerObjectsController, serviceInfoController, uploadRequestController)
+		registerAPIRoutes(router, objectsController, serviceInfoController, uploadRequestController)
 
 		// Init AuthZ Middleware
 		// We use a standard slog.Logger for data-client compatibility

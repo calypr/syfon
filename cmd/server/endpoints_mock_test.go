@@ -80,9 +80,8 @@ func TestAllRegisteredEndpoints_WithMocks(t *testing.T) {
 		{Method: http.MethodPost, Template: "/ga4gh/drs/v1/objects/register"},
 		{Method: http.MethodPost, Template: "/ga4gh/drs/v1/objects"},
 		{Method: http.MethodPost, Template: "/ga4gh/drs/v1/objects/access"},
-		{Method: http.MethodPut, Template: "/ga4gh/drs/v1/objects/access-methods"},
-		{Method: http.MethodPut, Template: "/ga4gh/drs/v1/objects/checksums"},
-		{Method: http.MethodPut, Template: "/ga4gh/drs/v1/objects/delete"},
+		{Method: http.MethodPost, Template: "/ga4gh/drs/v1/objects/access-methods"},
+		{Method: http.MethodPost, Template: "/ga4gh/drs/v1/objects/delete"},
 		{Method: http.MethodPost, Template: "/info/lfs/objects/batch"},
 		{Method: http.MethodPost, Template: "/index/index/bulk/sha256/validity"},
 		{Method: http.MethodPost, Template: "/internal/v1/sha256/validity"},
@@ -136,12 +135,11 @@ func buildMockServerRouter() *mux.Router {
 	svc := service.NewObjectsAPIService(database, uM)
 
 	objectsController := drs.NewObjectsAPIController(svc)
-	registerObjectsController := drs.NewRegisterObjectsAPIController(svc)
 	serviceInfoController := drs.NewServiceInfoAPIController(svc)
 	uploadRequestController := drs.NewUploadRequestAPIController(svc)
 
 	router := mux.NewRouter().StrictSlash(true)
-	registerAPIRoutes(router, objectsController, registerObjectsController, serviceInfoController, uploadRequestController)
+	registerAPIRoutes(router, objectsController, serviceInfoController, uploadRequestController)
 
 	// Local mode for deterministic no-network auth behavior in tests.
 	logger := slog.New(slog.NewTextHandler(bytes.NewBuffer(nil), nil))
@@ -220,8 +218,6 @@ func requestBodyFor(method, template string) ([]byte, string) {
 		return []byte(`{"bulk_object_access_ids":[{"bulk_object_id":"sha-1","bulk_access_ids":["s3"]}]}`), "application/json"
 	case "/ga4gh/drs/v1/objects/access-methods":
 		return []byte(`{"updates":[{"object_id":"sha-1","access_methods":[{"type":"s3","access_id":"s3","access_url":{"url":"s3://test-bucket-1/sha-1"}}]}]}`), "application/json"
-	case "/ga4gh/drs/v1/objects/checksums":
-		return []byte(`{"updates":[{"object_id":"sha-1","checksums":[{"type":"md5","checksum":"md5sum"}]}]}`), "application/json"
 	case "/ga4gh/drs/v1/objects/{object_id}/checksums":
 		return []byte(`{"checksums":[{"type":"md5","checksum":"md5sum"}]}`), "application/json"
 	case "/ga4gh/drs/v1/objects/delete":

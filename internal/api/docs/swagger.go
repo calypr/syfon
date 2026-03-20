@@ -40,6 +40,8 @@ func RegisterSwaggerRoutes(router *mux.Router) {
 	router.HandleFunc("/swagger/", handleSwaggerUI).Methods(http.MethodGet)
 	router.HandleFunc("/openapi.yaml", handleOpenAPISpec).Methods(http.MethodGet)
 	router.HandleFunc("/openapi-lfs.yaml", handleLFSOpenAPISpec).Methods(http.MethodGet)
+	router.HandleFunc("/openapi-bucket.yaml", handleBucketOpenAPISpec).Methods(http.MethodGet)
+	router.HandleFunc("/openapi-internal.yaml", handleInternalOpenAPISpec).Methods(http.MethodGet)
 }
 
 func handleSwaggerUI(w http.ResponseWriter, _ *http.Request) {
@@ -61,6 +63,26 @@ func handleLFSOpenAPISpec(w http.ResponseWriter, r *http.Request) {
 	specPath, ok := findLFSOpenAPISpecPath()
 	if !ok {
 		http.Error(w, "LFS OpenAPI spec file not found", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/yaml")
+	http.ServeFile(w, r, specPath)
+}
+
+func handleBucketOpenAPISpec(w http.ResponseWriter, r *http.Request) {
+	specPath, ok := findBucketOpenAPISpecPath()
+	if !ok {
+		http.Error(w, "Bucket OpenAPI spec file not found", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/yaml")
+	http.ServeFile(w, r, specPath)
+}
+
+func handleInternalOpenAPISpec(w http.ResponseWriter, r *http.Request) {
+	specPath, ok := findNamedOpenAPISpecPath("internal.openapi.yaml")
+	if !ok {
+		http.Error(w, "Internal OpenAPI spec file not found", http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/yaml")
@@ -124,6 +146,44 @@ func findCompatOpenAPISpecPath() (string, bool) {
 	return "", false
 }
 
+func findBucketOpenAPISpecPath() (string, bool) {
+	candidates := []string{
+		"apigen/api/bucket.openapi.yaml",
+		filepath.Join(filepath.Dir(os.Args[0]), "apigen", "api", "bucket.openapi.yaml"),
+	}
+
+	if _, thisFile, _, ok := runtime.Caller(0); ok {
+		repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", "..", ".."))
+		candidates = append(candidates, filepath.Join(repoRoot, "apigen", "api", "bucket.openapi.yaml"))
+	}
+
+	for _, path := range candidates {
+		if _, err := os.Stat(path); err == nil {
+			return path, true
+		}
+	}
+	return "", false
+}
+
+func findNamedOpenAPISpecPath(fileName string) (string, bool) {
+	candidates := []string{
+		filepath.Join("apigen", "api", fileName),
+		filepath.Join(filepath.Dir(os.Args[0]), "apigen", "api", fileName),
+	}
+
+	if _, thisFile, _, ok := runtime.Caller(0); ok {
+		repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", "..", ".."))
+		candidates = append(candidates, filepath.Join(repoRoot, "apigen", "api", fileName))
+	}
+
+	for _, path := range candidates {
+		if _, err := os.Stat(path); err == nil {
+			return path, true
+		}
+	}
+	return "", false
+}
+
 func buildMergedOpenAPISpec() ([]byte, error) {
 	drsPath, ok := findOpenAPISpecPath()
 	if !ok {
@@ -145,6 +205,23 @@ func buildMergedOpenAPISpec() ([]byte, error) {
 	merged := drsSpec
 	mergeSpecSection(merged, lfsSpec, "paths")
 	mergeSpecSection(merged, lfsSpec, "components")
+	if bucketPath, ok := findBucketOpenAPISpecPath(); ok {
+		if bucketSpec, err := loadSpecYAML(bucketPath); err == nil {
+			mergeSpecSection(merged, bucketSpec, "paths")
+			mergeSpecSection(merged, bucketSpec, "components")
+		}
+	}
+	for _, extra := range []string{
+		"metrics.openapi.yaml",
+		"internal.openapi.yaml",
+	} {
+		if p, ok := findNamedOpenAPISpecPath(extra); ok {
+			if s, err := loadSpecYAML(p); err == nil {
+				mergeSpecSection(merged, s, "paths")
+				mergeSpecSection(merged, s, "components")
+			}
+		}
+	}
 	// Compatibility spec is optional; merge it if present.
 	if compatPath, ok := findCompatOpenAPISpecPath(); ok {
 		if compatSpec, err := loadSpecYAML(compatPath); err == nil {

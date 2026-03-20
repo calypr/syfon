@@ -38,3 +38,12 @@ CREATE TABLE IF NOT EXISTS s3_credential (
   endpoint TEXT
 );
 
+CREATE TABLE IF NOT EXISTS bucket_scope (
+  organization TEXT NOT NULL,
+  project_id TEXT NOT NULL,
+  bucket TEXT NOT NULL,
+  path_prefix TEXT,
+  PRIMARY KEY (organization, project_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_bucket_scope_bucket ON bucket_scope(bucket);

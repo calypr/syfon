@@ -84,17 +84,11 @@ func deleteCredential(w http.ResponseWriter, r *http.Request, database core.Data
 	w.WriteHeader(http.StatusNoContent)
 }
 
-type SignURLRequest struct {
-	URL    string `json:"url"`    // s3://bucket/key
-	Method string `json:"method"` // GET or PUT
-}
-
-type SignURLResponse struct {
-	SignedURL string `json:"signed_url"`
-}
-
 func signURLHandler(w http.ResponseWriter, r *http.Request, uM urlmanager.UrlManager) {
-	var req SignURLRequest
+	var req struct {
+		URL    string `json:"url"`    // s3://bucket/key
+		Method string `json:"method"` // GET or PUT
+	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
@@ -115,5 +109,5 @@ func signURLHandler(w http.ResponseWriter, r *http.Request, uM urlmanager.UrlMan
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(SignURLResponse{SignedURL: signedURL})
+	_ = json.NewEncoder(w).Encode(map[string]string{"signed_url": signedURL})
 }

@@ -77,6 +77,14 @@ func (db *SqliteDB) initSchema() error {
 			secret_key TEXT,
 			endpoint TEXT
 		)`,
+		`CREATE TABLE IF NOT EXISTS bucket_scope (
+			organization TEXT NOT NULL,
+			project_id TEXT NOT NULL,
+			bucket TEXT NOT NULL,
+			path_prefix TEXT,
+			PRIMARY KEY (organization, project_id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_bucket_scope_bucket ON bucket_scope(bucket)`,
 		`CREATE TABLE IF NOT EXISTS lfs_pending_metadata (
 			oid TEXT PRIMARY KEY,
 			candidate_json TEXT NOT NULL,
@@ -811,6 +819,7 @@ func (db *SqliteDB) SaveS3Credential(ctx context.Context, cred *core.S3Credentia
 }
 
 func (db *SqliteDB) DeleteS3Credential(ctx context.Context, bucket string) error {
+	_, _ = db.db.ExecContext(ctx, "DELETE FROM bucket_scope WHERE bucket = ?", bucket)
 	res, err := db.db.ExecContext(ctx, "DELETE FROM s3_credential WHERE bucket = ?", bucket)
 	if err != nil {
 		return err
@@ -841,6 +850,78 @@ func (db *SqliteDB) ListS3Credentials(ctx context.Context) ([]core.S3Credential,
 		creds = append(creds, c)
 	}
 	return creds, nil
+}
+
+func (db *SqliteDB) CreateBucketScope(ctx context.Context, scope *core.BucketScope) error {
+	if scope == nil {
+		return fmt.Errorf("scope is required")
+	}
+	org := strings.TrimSpace(scope.Organization)
+	project := strings.TrimSpace(scope.ProjectID)
+	bucket := strings.TrimSpace(scope.Bucket)
+	prefix := strings.Trim(strings.TrimSpace(scope.PathPrefix), "/")
+	if org == "" || project == "" || bucket == "" {
+		return fmt.Errorf("organization, project_id and bucket are required")
+	}
+
+	existing, err := db.GetBucketScope(ctx, org, project)
+	if err != nil && !errors.Is(err, core.ErrNotFound) {
+		return err
+	}
+	if err == nil && existing != nil {
+		if strings.EqualFold(strings.TrimSpace(existing.Bucket), bucket) && strings.Trim(strings.TrimSpace(existing.PathPrefix), "/") == prefix {
+			return nil
+		}
+		return fmt.Errorf("%w: scope already assigned to bucket=%s prefix=%s", core.ErrConflict, existing.Bucket, existing.PathPrefix)
+	}
+
+	_, err = db.db.ExecContext(ctx, `
+		INSERT INTO bucket_scope (organization, project_id, bucket, path_prefix)
+		VALUES (?, ?, ?, ?)
+	`, org, project, bucket, prefix)
+	if err != nil {
+		return fmt.Errorf("failed to create bucket scope: %w", err)
+	}
+	return nil
+}
+
+func (db *SqliteDB) GetBucketScope(ctx context.Context, organization, projectID string) (*core.BucketScope, error) {
+	var s core.BucketScope
+	err := db.db.QueryRowContext(ctx, `
+		SELECT organization, project_id, bucket, COALESCE(path_prefix, '')
+		FROM bucket_scope
+		WHERE organization = ? AND project_id = ?
+	`, strings.TrimSpace(organization), strings.TrimSpace(projectID)).Scan(
+		&s.Organization, &s.ProjectID, &s.Bucket, &s.PathPrefix,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("%w: bucket scope not found", core.ErrNotFound)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get bucket scope: %w", err)
+	}
+	return &s, nil
+}
+
+func (db *SqliteDB) ListBucketScopes(ctx context.Context) ([]core.BucketScope, error) {
+	rows, err := db.db.QueryContext(ctx, `
+		SELECT organization, project_id, bucket, COALESCE(path_prefix, '')
+		FROM bucket_scope
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []core.BucketScope
+	for rows.Next() {
+		var s core.BucketScope
+		if err := rows.Scan(&s.Organization, &s.ProjectID, &s.Bucket, &s.PathPrefix); err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, nil
 }
 
 func (db *SqliteDB) SavePendingLFSMeta(ctx context.Context, entries []core.PendingLFSMeta) error {

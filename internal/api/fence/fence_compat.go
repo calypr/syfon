@@ -7,81 +7,19 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/calypr/drs-server/apigen/bucketapi"
 	"github.com/calypr/drs-server/apigen/drs"
+	"github.com/calypr/drs-server/apigen/internalapi"
 	"github.com/calypr/drs-server/db/core"
 	"github.com/calypr/drs-server/urlmanager"
 	"github.com/gorilla/mux"
 )
-
-type fenceSignedURL struct {
-	URL string `json:"url"`
-}
-
-type fenceUploadBlankRequest struct {
-	GUID  string   `json:"guid"`
-	Authz []string `json:"authz"`
-}
-
-type fenceUploadBlankResponse struct {
-	GUID string `json:"guid"`
-	URL  string `json:"url"`
-}
-
-type fenceMultipartInitRequest struct {
-	GUID     string `json:"guid"`
-	FileName string `json:"file_name"`
-	Bucket   string `json:"bucket"`
-}
-
-type fenceMultipartInitResponse struct {
-	GUID     string `json:"guid"`
-	UploadID string `json:"uploadId"`
-}
-
-type fenceMultipartUploadRequest struct {
-	Key        string `json:"key"`
-	Bucket     string `json:"bucket,omitempty"`
-	UploadID   string `json:"uploadId"`
-	PartNumber int32  `json:"partNumber"`
-}
-
-type fenceMultipartUploadResponse struct {
-	PresignedURL string `json:"presigned_url"`
-}
-
-type fenceMultipartPart struct {
-	PartNumber int32  `json:"PartNumber"`
-	ETag       string `json:"ETag"`
-}
-
-type fenceMultipartCompleteRequest struct {
-	Key      string               `json:"key"`
-	Bucket   string               `json:"bucket,omitempty"`
-	UploadID string               `json:"uploadId"`
-	Parts    []fenceMultipartPart `json:"parts"`
-}
-
-type fenceBucketMetadata struct {
-	EndpointURL string   `json:"endpoint_url"`
-	Region      string   `json:"region"`
-	Programs    []string `json:"programs,omitempty"`
-}
-
-type fenceBucketsResponse struct {
-	S3Buckets map[string]fenceBucketMetadata `json:"S3_BUCKETS"`
-}
-
-type fencePutBucketRequest struct {
-	Bucket    string `json:"bucket"`
-	Region    string `json:"region"`
-	AccessKey string `json:"access_key"`
-	SecretKey string `json:"secret_key"`
-	Endpoint  string `json:"endpoint"`
-}
 
 type multipartSession struct {
 	Bucket string
@@ -114,11 +52,34 @@ func writeDBError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, core.ErrUnauthorized):
 		writeAuthError(w, r)
+	case errors.Is(err, core.ErrConflict):
+		writeHTTPError(w, r, http.StatusConflict, err.Error(), err)
 	case errors.Is(err, core.ErrNotFound):
 		writeHTTPError(w, r, http.StatusNotFound, "File not found", err)
 	default:
 		writeHTTPError(w, r, http.StatusInternalServerError, err.Error(), err)
 	}
+}
+
+func normalizeScopePath(rawPath, bucket string) (string, error) {
+	p := strings.TrimSpace(rawPath)
+	if p == "" {
+		return "", nil
+	}
+	if !strings.HasPrefix(strings.ToLower(p), "s3://") {
+		return "", fmt.Errorf("path must use s3://<bucket>/<prefix> format")
+	}
+	u, err := url.Parse(p)
+	if err != nil {
+		return "", fmt.Errorf("invalid s3 path: %w", err)
+	}
+	if !strings.EqualFold(u.Scheme, "s3") || strings.TrimSpace(u.Host) == "" {
+		return "", fmt.Errorf("invalid s3 path")
+	}
+	if !strings.EqualFold(strings.TrimSpace(u.Host), strings.TrimSpace(bucket)) {
+		return "", fmt.Errorf("s3 path bucket does not match bucket")
+	}
+	return strings.Trim(strings.TrimSpace(u.Path), "/"), nil
 }
 
 func hasAnyMethodAccess(ctx *http.Request, resources []string, methods ...string) bool {
@@ -264,19 +225,19 @@ func handleFenceDownload(w http.ResponseWriter, r *http.Request, database core.D
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(fenceSignedURL{URL: signedURL}); err != nil {
+	if err := json.NewEncoder(w).Encode(internalapi.FenceSignedURL{Url: &signedURL}); err != nil {
 		slog.Error("fence encode response failed", "request_id", core.GetRequestID(r.Context()), "method", r.Method, "path", r.URL.Path, "err", err)
 	}
 }
 
 func handleFenceUploadBlank(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface, uM urlmanager.UrlManager) {
-	var req fenceUploadBlankRequest
+	var req internalapi.FenceUploadBlankRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeHTTPError(w, r, http.StatusBadRequest, "Invalid request", nil)
 		return
 	}
 
-	guid := req.GUID
+	guid := req.GetGuid()
 	if guid == "" {
 		writeHTTPError(w, r, http.StatusBadRequest, "guid is required", nil)
 		return
@@ -342,10 +303,7 @@ func handleFenceUploadBlank(w http.ResponseWriter, r *http.Request, database cor
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	if err := json.NewEncoder(w).Encode(fenceUploadBlankResponse{
-		GUID: guid,
-		URL:  signedURL,
-	}); err != nil {
+	if err := json.NewEncoder(w).Encode(internalapi.FenceUploadBlankResponse{Guid: &guid, Url: &signedURL}); err != nil {
 		slog.Error("fence encode response failed", "request_id", core.GetRequestID(r.Context()), "method", r.Method, "path", r.URL.Path, "err", err)
 	}
 }
@@ -404,34 +362,34 @@ func handleFenceUploadURL(w http.ResponseWriter, r *http.Request, database core.
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(fenceSignedURL{URL: signedURL}); err != nil {
+	if err := json.NewEncoder(w).Encode(internalapi.FenceSignedURL{Url: &signedURL}); err != nil {
 		slog.Error("fence encode response failed", "request_id", core.GetRequestID(r.Context()), "method", r.Method, "path", r.URL.Path, "err", err)
 	}
 }
 
 func handleFenceMultipartInit(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface, uM urlmanager.UrlManager) {
-	var req fenceMultipartInitRequest
+	var req internalapi.FenceMultipartInitRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeHTTPError(w, r, http.StatusBadRequest, "Invalid request", nil)
 		return
 	}
 
-	guid := req.GUID
+	guid := req.GetGuid()
 	if guid == "" {
-		if req.FileName == "" {
+		if req.GetFileName() == "" {
 			writeHTTPError(w, r, http.StatusBadRequest, "guid or file_name is required", nil)
 			return
 		}
-		guid = req.FileName
+		guid = req.GetFileName()
 	}
 
-	bucket, err := resolveBucket(r, database, req.Bucket)
+	bucket, err := resolveBucket(r, database, req.GetBucket())
 	if bucket == "" {
 		writeHTTPError(w, r, http.StatusInternalServerError, "No bucket configured for upload", nil)
 		return
 	}
 
-	fileName := req.FileName
+	fileName := req.GetFileName()
 	if fileName == "" {
 		fileName = guid
 	}
@@ -479,16 +437,13 @@ func handleFenceMultipartInit(w http.ResponseWriter, r *http.Request, database c
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	if err := json.NewEncoder(w).Encode(fenceMultipartInitResponse{
-		GUID:     guid,
-		UploadID: uploadID,
-	}); err != nil {
+	if err := json.NewEncoder(w).Encode(internalapi.FenceMultipartInitResponse{Guid: &guid, UploadId: &uploadID}); err != nil {
 		slog.Error("fence encode response failed", "request_id", core.GetRequestID(r.Context()), "method", r.Method, "path", r.URL.Path, "err", err)
 	}
 }
 
 func handleFenceMultipartUpload(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface, uM urlmanager.UrlManager) {
-	var req fenceMultipartUploadRequest
+	var req internalapi.FenceMultipartUploadRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
 		writeHTTPError(w, r, http.StatusBadRequest, "Invalid request", nil)
 		return
@@ -497,10 +452,10 @@ func handleFenceMultipartUpload(w http.ResponseWriter, r *http.Request, database
 	if req.Key == "" {
 		req.Key = q.Get("key")
 	}
-	if req.UploadID == "" {
-		req.UploadID = q.Get("uploadId")
-		if req.UploadID == "" {
-			req.UploadID = q.Get("upload_id")
+	if req.UploadId == "" {
+		req.UploadId = q.Get("uploadId")
+		if req.UploadId == "" {
+			req.UploadId = q.Get("upload_id")
 		}
 	}
 	if req.PartNumber <= 0 {
@@ -510,23 +465,26 @@ func handleFenceMultipartUpload(w http.ResponseWriter, r *http.Request, database
 			}
 		}
 	}
-	if req.Bucket == "" {
-		req.Bucket = q.Get("bucket")
+	if req.GetBucket() == "" {
+		if b := q.Get("bucket"); b != "" {
+			req.Bucket = &b
+		}
 	}
-	if req.UploadID != "" && (req.Key == "" || req.Bucket == "") {
-		if raw, ok := multipartUploadSessions.Load(req.UploadID); ok {
+	if req.UploadId != "" && (req.Key == "" || req.GetBucket() == "") {
+		if raw, ok := multipartUploadSessions.Load(req.UploadId); ok {
 			if session, ok := raw.(multipartSession); ok {
 				if req.Key == "" {
 					req.Key = session.Key
 				}
-				if req.Bucket == "" {
-					req.Bucket = session.Bucket
+				if req.GetBucket() == "" {
+					b := session.Bucket
+					req.Bucket = &b
 				}
 			}
 		}
 	}
 
-	if req.Key == "" || req.UploadID == "" || req.PartNumber <= 0 {
+	if req.Key == "" || req.UploadId == "" || req.PartNumber <= 0 {
 		writeHTTPError(w, r, http.StatusBadRequest, "key, uploadId, and positive partNumber are required", nil)
 		return
 	}
@@ -544,26 +502,26 @@ func handleFenceMultipartUpload(w http.ResponseWriter, r *http.Request, database
 		return
 	}
 
-	bucket, err := resolveBucket(r, database, req.Bucket)
+	bucket, err := resolveBucket(r, database, req.GetBucket())
 	if err != nil || bucket == "" {
 		writeHTTPError(w, r, http.StatusInternalServerError, "No bucket configured", nil)
 		return
 	}
 
-	signedURL, err := uM.SignMultipartPart(r.Context(), bucket, req.Key, req.UploadID, req.PartNumber)
+	signedURL, err := uM.SignMultipartPart(r.Context(), bucket, req.Key, req.UploadId, req.PartNumber)
 	if err != nil {
 		writeHTTPError(w, r, http.StatusInternalServerError, err.Error(), err)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(fenceMultipartUploadResponse{PresignedURL: signedURL}); err != nil {
+	if err := json.NewEncoder(w).Encode(internalapi.FenceMultipartUploadResponse{PresignedUrl: &signedURL}); err != nil {
 		slog.Error("fence encode response failed", "request_id", core.GetRequestID(r.Context()), "method", r.Method, "path", r.URL.Path, "err", err)
 	}
 }
 
 func handleFenceMultipartComplete(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface, uM urlmanager.UrlManager) {
-	var req fenceMultipartCompleteRequest
+	var req internalapi.FenceMultipartCompleteRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
 		writeHTTPError(w, r, http.StatusBadRequest, "Invalid request", nil)
 		return
@@ -572,29 +530,32 @@ func handleFenceMultipartComplete(w http.ResponseWriter, r *http.Request, databa
 	if req.Key == "" {
 		req.Key = q.Get("key")
 	}
-	if req.UploadID == "" {
-		req.UploadID = q.Get("uploadId")
-		if req.UploadID == "" {
-			req.UploadID = q.Get("upload_id")
+	if req.UploadId == "" {
+		req.UploadId = q.Get("uploadId")
+		if req.UploadId == "" {
+			req.UploadId = q.Get("upload_id")
 		}
 	}
-	if req.Bucket == "" {
-		req.Bucket = q.Get("bucket")
+	if req.GetBucket() == "" {
+		if b := q.Get("bucket"); b != "" {
+			req.Bucket = &b
+		}
 	}
-	if req.UploadID != "" && (req.Key == "" || req.Bucket == "") {
-		if raw, ok := multipartUploadSessions.Load(req.UploadID); ok {
+	if req.UploadId != "" && (req.Key == "" || req.GetBucket() == "") {
+		if raw, ok := multipartUploadSessions.Load(req.UploadId); ok {
 			if session, ok := raw.(multipartSession); ok {
 				if req.Key == "" {
 					req.Key = session.Key
 				}
-				if req.Bucket == "" {
-					req.Bucket = session.Bucket
+				if req.GetBucket() == "" {
+					b := session.Bucket
+					req.Bucket = &b
 				}
 			}
 		}
 	}
 
-	if req.Key == "" || req.UploadID == "" {
+	if req.Key == "" || req.UploadId == "" {
 		writeHTTPError(w, r, http.StatusBadRequest, "key and uploadId are required", nil)
 		return
 	}
@@ -612,7 +573,7 @@ func handleFenceMultipartComplete(w http.ResponseWriter, r *http.Request, databa
 		return
 	}
 
-	bucket, err := resolveBucket(r, database, req.Bucket)
+	bucket, err := resolveBucket(r, database, req.GetBucket())
 	if err != nil || bucket == "" {
 		writeHTTPError(w, r, http.StatusInternalServerError, "No bucket configured", nil)
 		return
@@ -626,12 +587,12 @@ func handleFenceMultipartComplete(w http.ResponseWriter, r *http.Request, databa
 		})
 	}
 
-	err = uM.CompleteMultipartUpload(r.Context(), bucket, req.Key, req.UploadID, parts)
+	err = uM.CompleteMultipartUpload(r.Context(), bucket, req.Key, req.UploadId, parts)
 	if err != nil {
 		writeHTTPError(w, r, http.StatusInternalServerError, err.Error(), err)
 		return
 	}
-	multipartUploadSessions.Delete(req.UploadID)
+	multipartUploadSessions.Delete(req.UploadId)
 	if recErr := database.RecordFileUpload(r.Context(), req.Key); recErr != nil {
 		slog.Debug("failed to record file upload metric", "request_id", core.GetRequestID(r.Context()), "key", req.Key, "err", recErr)
 	}
@@ -650,13 +611,24 @@ func handleFenceBuckets(w http.ResponseWriter, r *http.Request, database core.Da
 		return
 	}
 
-	resp := fenceBucketsResponse{
-		S3Buckets: make(map[string]fenceBucketMetadata, len(creds)),
+	resp := bucketapi.BucketsResponse{
+		S3BUCKETS: make(map[string]bucketapi.BucketMetadata, len(creds)),
+	}
+	scopes, _ := database.ListBucketScopes(r.Context())
+	programsByBucket := map[string][]string{}
+	for _, s := range scopes {
+		res := core.ResourcePathForScope(s.Organization, s.ProjectID)
+		if res == "" {
+			continue
+		}
+		programsByBucket[s.Bucket] = append(programsByBucket[s.Bucket], res)
 	}
 	for _, c := range creds {
-		resp.S3Buckets[c.Bucket] = fenceBucketMetadata{
-			Region: c.Region,
-		}
+		bm := bucketapi.BucketMetadata{}
+		bm.SetEndpointUrl(c.Endpoint)
+		bm.SetRegion(c.Region)
+		bm.SetPrograms(programsByBucket[c.Bucket])
+		resp.S3BUCKETS[c.Bucket] = bm
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -670,13 +642,38 @@ func handleFencePutBucket(w http.ResponseWriter, r *http.Request, database core.
 		writeAuthError(w, r)
 		return
 	}
-	var req fencePutBucketRequest
+	var req bucketapi.PutBucketRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeHTTPError(w, r, http.StatusBadRequest, "Invalid request", nil)
 		return
 	}
 	if req.Bucket == "" || req.AccessKey == "" || req.SecretKey == "" {
 		writeHTTPError(w, r, http.StatusBadRequest, "bucket, access_key and secret_key are required", nil)
+		return
+	}
+	if strings.TrimSpace(req.Region) == "" || strings.TrimSpace(req.Endpoint) == "" {
+		writeHTTPError(w, r, http.StatusBadRequest, "region and endpoint are required", nil)
+		return
+	}
+	if strings.TrimSpace(req.Organization) == "" || strings.TrimSpace(req.ProjectId) == "" {
+		writeHTTPError(w, r, http.StatusBadRequest, "organization and project_id are required", nil)
+		return
+	}
+	prefix, err := normalizeScopePath(req.GetPath(), req.Bucket)
+	if err != nil {
+		writeHTTPError(w, r, http.StatusBadRequest, err.Error(), err)
+		return
+	}
+	if prefix == "" {
+		prefix = strings.Trim(strings.TrimSpace(req.Organization)+"/"+strings.TrimSpace(req.ProjectId), "/")
+	}
+	if err := database.CreateBucketScope(r.Context(), &core.BucketScope{
+		Organization: strings.TrimSpace(req.Organization),
+		ProjectID:    strings.TrimSpace(req.ProjectId),
+		Bucket:       strings.TrimSpace(req.Bucket),
+		PathPrefix:   prefix,
+	}); err != nil {
+		writeDBError(w, r, err)
 		return
 	}
 	cred := &core.S3Credential{

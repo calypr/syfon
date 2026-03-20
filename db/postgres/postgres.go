@@ -30,6 +30,9 @@ func NewPostgresDB(dsn string) (*PostgresDB, error) {
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 	pg := &PostgresDB{db: db}
+	if err := pg.ensureBucketScopeSchema(); err != nil {
+		return nil, err
+	}
 	if err := pg.ensureLFSPendingSchema(); err != nil {
 		return nil, err
 	}
@@ -37,6 +40,25 @@ func NewPostgresDB(dsn string) (*PostgresDB, error) {
 		return nil, err
 	}
 	return pg, nil
+}
+
+func (db *PostgresDB) ensureBucketScopeSchema() error {
+	queries := []string{
+		`CREATE TABLE IF NOT EXISTS bucket_scope (
+			organization TEXT NOT NULL,
+			project_id TEXT NOT NULL,
+			bucket TEXT NOT NULL,
+			path_prefix TEXT NULL,
+			PRIMARY KEY (organization, project_id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_bucket_scope_bucket ON bucket_scope(bucket)`,
+	}
+	for _, q := range queries {
+		if _, err := db.db.Exec(q); err != nil {
+			return fmt.Errorf("failed to initialize bucket scope schema: %w", err)
+		}
+	}
+	return nil
 }
 
 func (db *PostgresDB) ensureLFSPendingSchema() error {
@@ -736,6 +758,7 @@ func (db *PostgresDB) SaveS3Credential(ctx context.Context, cred *core.S3Credent
 }
 
 func (db *PostgresDB) DeleteS3Credential(ctx context.Context, bucket string) error {
+	_, _ = db.db.ExecContext(ctx, "DELETE FROM bucket_scope WHERE bucket = $1", bucket)
 	res, err := db.db.ExecContext(ctx, "DELETE FROM s3_credential WHERE bucket = $1", bucket)
 	if err != nil {
 		return err
@@ -766,6 +789,78 @@ func (db *PostgresDB) ListS3Credentials(ctx context.Context) ([]core.S3Credentia
 		creds = append(creds, c)
 	}
 	return creds, nil
+}
+
+func (db *PostgresDB) CreateBucketScope(ctx context.Context, scope *core.BucketScope) error {
+	if scope == nil {
+		return fmt.Errorf("scope is required")
+	}
+	org := strings.TrimSpace(scope.Organization)
+	project := strings.TrimSpace(scope.ProjectID)
+	bucket := strings.TrimSpace(scope.Bucket)
+	prefix := strings.Trim(strings.TrimSpace(scope.PathPrefix), "/")
+	if org == "" || project == "" || bucket == "" {
+		return fmt.Errorf("organization, project_id and bucket are required")
+	}
+
+	existing, err := db.GetBucketScope(ctx, org, project)
+	if err != nil && !errors.Is(err, core.ErrNotFound) {
+		return err
+	}
+	if err == nil && existing != nil {
+		if strings.EqualFold(strings.TrimSpace(existing.Bucket), bucket) && strings.Trim(strings.TrimSpace(existing.PathPrefix), "/") == prefix {
+			return nil
+		}
+		return fmt.Errorf("%w: scope already assigned to bucket=%s prefix=%s", core.ErrConflict, existing.Bucket, existing.PathPrefix)
+	}
+
+	_, err = db.db.ExecContext(ctx, `
+		INSERT INTO bucket_scope (organization, project_id, bucket, path_prefix)
+		VALUES ($1, $2, $3, $4)
+	`, org, project, bucket, prefix)
+	if err != nil {
+		return fmt.Errorf("failed to create bucket scope: %w", err)
+	}
+	return nil
+}
+
+func (db *PostgresDB) GetBucketScope(ctx context.Context, organization, projectID string) (*core.BucketScope, error) {
+	var s core.BucketScope
+	err := db.db.QueryRowContext(ctx, `
+		SELECT organization, project_id, bucket, COALESCE(path_prefix, '')
+		FROM bucket_scope
+		WHERE organization = $1 AND project_id = $2
+	`, strings.TrimSpace(organization), strings.TrimSpace(projectID)).Scan(
+		&s.Organization, &s.ProjectID, &s.Bucket, &s.PathPrefix,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("%w: bucket scope not found", core.ErrNotFound)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get bucket scope: %w", err)
+	}
+	return &s, nil
+}
+
+func (db *PostgresDB) ListBucketScopes(ctx context.Context) ([]core.BucketScope, error) {
+	rows, err := db.db.QueryContext(ctx, `
+		SELECT organization, project_id, bucket, COALESCE(path_prefix, '')
+		FROM bucket_scope
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []core.BucketScope
+	for rows.Next() {
+		var s core.BucketScope
+		if err := rows.Scan(&s.Organization, &s.ProjectID, &s.Bucket, &s.PathPrefix); err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, nil
 }
 
 func (db *PostgresDB) SavePendingLFSMeta(ctx context.Context, entries []core.PendingLFSMeta) error {

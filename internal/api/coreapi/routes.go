@@ -9,14 +9,10 @@ import (
 	corelogic "github.com/calypr/drs-server/internal/coreapi"
 
 	"github.com/calypr/drs-server/apigen/drs"
+	"github.com/calypr/drs-server/apigen/internalapi"
 	"github.com/calypr/drs-server/db/core"
 	"github.com/gorilla/mux"
 )
-
-type shaValidityRequest struct {
-	SHA256 []string `json:"sha256"`
-	Hashes []string `json:"hashes"`
-}
 
 func RegisterCoreRoutes(router *mux.Router, database core.DatabaseInterface) {
 	handler := drs.Logger(handleSHA256Validity(database), "CoreSHA256Validity")
@@ -26,12 +22,12 @@ func RegisterCoreRoutes(router *mux.Router, database core.DatabaseInterface) {
 
 func handleSHA256Validity(database core.DatabaseInterface) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var req shaValidityRequest
+		var req internalapi.BulkSHA256ValidityRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "Invalid request body", http.StatusBadRequest)
 			return
 		}
-		input := req.SHA256
+		input := req.Sha256
 		if len(input) == 0 {
 			input = req.Hashes
 		}

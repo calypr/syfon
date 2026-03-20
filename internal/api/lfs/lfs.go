@@ -49,15 +49,6 @@ func RegisterLFSRoutes(router *mux.Router, database core.DatabaseInterface, uM u
 	router.HandleFunc("/info/lfs/verify", handleVerify(database)).Methods(http.MethodPost)
 }
 
-type metadataSubmitRequest struct {
-	Candidates []drs.DrsObjectCandidate `json:"candidates"`
-	TTLSeconds *int64                   `json:"ttl_seconds,omitempty"`
-}
-
-type metadataSubmitResponse struct {
-	Staged int `json:"staged"`
-}
-
 var (
 	limitMu            sync.Mutex
 	requestWindowMap   = map[string]windowCounter{}
@@ -238,7 +229,7 @@ func handleVerify(database core.DatabaseInterface) http.HandlerFunc {
 
 func handleMetadata(database core.DatabaseInterface) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var req metadataSubmitRequest
+		var req lfsapi.MetadataSubmitRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeHTTPError(w, r, http.StatusBadRequest, "invalid request body", err)
 			return
@@ -249,8 +240,8 @@ func handleMetadata(database core.DatabaseInterface) http.HandlerFunc {
 		}
 
 		ttl := int64(20 * 60) // 20 minutes default.
-		if req.TTLSeconds != nil {
-			ttl = *req.TTLSeconds
+		if req.TtlSeconds != nil {
+			ttl = *req.TtlSeconds
 		}
 		if ttl < 30 {
 			ttl = 30
@@ -262,12 +253,13 @@ func handleMetadata(database core.DatabaseInterface) http.HandlerFunc {
 		now := time.Now().UTC()
 		entries := make([]core.PendingLFSMeta, 0, len(req.Candidates))
 		for i, c := range req.Candidates {
-			oid, ok := canonicalSHA256(c.Checksums)
+			drsCandidate := lfsCandidateToDRS(c)
+			oid, ok := canonicalSHA256(drsCandidate.Checksums)
 			if !ok || normalizeOID(oid) == "" {
 				writeHTTPError(w, r, http.StatusBadRequest, "candidate["+strconv.Itoa(i)+"] must include valid sha256 checksum", nil)
 				return
 			}
-			targetResources := uniqueAuthz(c.AccessMethods)
+			targetResources := uniqueAuthz(drsCandidate.AccessMethods)
 			if len(targetResources) == 0 {
 				targetResources = []string{"/data_file"}
 				if !hasMethodAccess(r, "file_upload", targetResources) && !hasMethodAccess(r, "create", targetResources) {
@@ -280,7 +272,7 @@ func handleMetadata(database core.DatabaseInterface) http.HandlerFunc {
 			}
 			entries = append(entries, core.PendingLFSMeta{
 				OID:       oid,
-				Candidate: c,
+				Candidate: drsCandidate,
 				CreatedAt: now,
 				ExpiresAt: now.Add(time.Duration(ttl) * time.Second),
 			})
@@ -291,7 +283,7 @@ func handleMetadata(database core.DatabaseInterface) http.HandlerFunc {
 			return
 		}
 		w.Header().Set("Content-Type", "application/vnd.git-lfs+json")
-		_ = json.NewEncoder(w).Encode(metadataSubmitResponse{Staged: len(entries)})
+		_ = json.NewEncoder(w).Encode(lfsapi.MetadataSubmitResponse{Staged: int32(len(entries))})
 	}
 }
 
@@ -625,6 +617,46 @@ func normalizeOID(raw string) string {
 	return oid
 }
 
+func lfsCandidateToDRS(in lfsapi.DrsObjectCandidate) drs.DrsObjectCandidate {
+	out := drs.DrsObjectCandidate{
+		Name:        in.GetName(),
+		Size:        in.GetSize(),
+		MimeType:    in.GetMimeType(),
+		Description: in.GetDescription(),
+		Aliases:     append([]string(nil), in.GetAliases()...),
+	}
+	if checks := in.GetChecksums(); len(checks) > 0 {
+		out.Checksums = make([]drs.Checksum, 0, len(checks))
+		for _, c := range checks {
+			out.Checksums = append(out.Checksums, drs.Checksum{
+				Type:     c.GetType(),
+				Checksum: c.GetChecksum(),
+			})
+		}
+	}
+	if methods := in.GetAccessMethods(); len(methods) > 0 {
+		out.AccessMethods = make([]drs.AccessMethod, 0, len(methods))
+		for _, am := range methods {
+			drsMethod := drs.AccessMethod{
+				Type:     am.GetType(),
+				Region:   am.GetRegion(),
+				AccessId: am.GetAccessId(),
+			}
+			if am.AccessUrl != nil {
+				drsMethod.AccessUrl = drs.AccessMethodAccessUrl{
+					Url: am.AccessUrl.GetUrl(),
+				}
+			}
+			authz := am.GetAuthorizations()
+			drsMethod.Authorizations = drs.AccessMethodAuthorizations{
+				BearerAuthIssuers: append([]string(nil), authz.GetBearerAuthIssuers()...),
+			}
+			out.AccessMethods = append(out.AccessMethods, drsMethod)
+		}
+	}
+	return out
+}
+
 func unauthorizedStatus(r *http.Request) int {
 	if core.IsGen3Mode(r.Context()) && !core.HasAuthHeader(r.Context()) {
 		return http.StatusUnauthorized
@@ -699,12 +731,6 @@ func writeDBError(w http.ResponseWriter, r *http.Request, err error) {
 	writeHTTPError(w, r, http.StatusInternalServerError, err.Error(), err)
 }
 
-type lfsErrorResponse struct {
-	Message          string `json:"message"`
-	RequestID        string `json:"request_id,omitempty"`
-	DocumentationURL string `json:"documentation_url,omitempty"`
-}
-
 func writeLFSError(w http.ResponseWriter, r *http.Request, status int, message string, challenge bool) {
 	requestID := core.GetRequestID(r.Context())
 	if challenge {
@@ -712,11 +738,13 @@ func writeLFSError(w http.ResponseWriter, r *http.Request, status int, message s
 	}
 	w.Header().Set("Content-Type", "application/vnd.git-lfs+json")
 	w.WriteHeader(status)
-	payload := lfsErrorResponse{
-		Message:          message,
-		RequestID:        requestID,
-		DocumentationURL: "https://github.com/git-lfs/git-lfs/blob/main/docs/api",
+	payload := lfsapi.LFSErrorResponse{
+		Message: message,
 	}
+	if requestID != "" {
+		payload.SetRequestId(requestID)
+	}
+	payload.SetDocumentationUrl("https://github.com/git-lfs/git-lfs/blob/main/docs/api")
 	if err := json.NewEncoder(w).Encode(payload); err != nil {
 		slog.Error("lfs encode error response failed", "request_id", requestID, "method", r.Method, "path", r.URL.Path, "status", status, "err", err)
 	}

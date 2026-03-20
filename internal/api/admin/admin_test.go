@@ -58,11 +58,11 @@ func TestAdminSignURL(t *testing.T) {
 	router := mux.NewRouter()
 	RegisterAdminRoutes(router, mockDB, mockUM)
 
-	reqBody := SignURLRequest{
-		URL:    "s3://bucket/key",
-		Method: "GET",
+	reqPayload := map[string]string{
+		"url":    "s3://bucket/key",
+		"method": "GET",
 	}
-	body, _ := json.Marshal(reqBody)
+	body, _ := json.Marshal(reqPayload)
 	req, _ := http.NewRequest(http.MethodPost, "/admin/sign_url", bytes.NewBuffer(body))
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
@@ -71,7 +71,9 @@ func TestAdminSignURL(t *testing.T) {
 		t.Errorf("expected 200, got %d", rr.Code)
 	}
 
-	var resp SignURLResponse
+	var resp struct {
+		SignedURL string `json:"signed_url"`
+	}
 	json.NewDecoder(rr.Body).Decode(&resp)
 	if resp.SignedURL == "" {
 		t.Error("expected signed_url in response")

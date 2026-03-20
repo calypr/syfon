@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/calypr/drs-server/apigen/drs"
+	"github.com/calypr/drs-server/apigen/metricsapi"
 	"github.com/calypr/drs-server/db/core"
 	"github.com/calypr/drs-server/testutils"
 	"github.com/gorilla/mux"
@@ -68,12 +69,12 @@ func TestMetricsRoutes_ListAndSummary(t *testing.T) {
 		if rr.Code != http.StatusOK {
 			t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
 		}
-		var resp core.FileUsageSummary
+		var resp metricsapi.FileUsageSummary
 		if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
 			t.Fatalf("decode: %v", err)
 		}
-		if resp.TotalFiles != 2 {
-			t.Fatalf("expected total files 2, got %d", resp.TotalFiles)
+		if resp.GetTotalFiles() != 2 {
+			t.Fatalf("expected total files 2, got %d", resp.GetTotalFiles())
 		}
 	})
 }

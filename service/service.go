@@ -231,7 +231,7 @@ func (s *ObjectsAPIService) GetBulkObjects(ctx context.Context, req drs.GetBulkO
 	return drs.ImplResponse{Code: http.StatusOK, Body: out}, nil
 }
 
-func (s *ObjectsAPIService) OptionsBulkObject(ctx context.Context) (drs.ImplResponse, error) {
+func (s *ObjectsAPIService) OptionsBulkObject(ctx context.Context, _ drs.BulkObjectIdNoPassport) (drs.ImplResponse, error) {
 	// In issue-416 spec branch, OPTIONS /objects no longer includes bulk object ids in request payload.
 	// Return 204 when object-level authorization introspection is not available via this shape.
 	return drs.ImplResponse{Code: http.StatusNoContent, Body: nil}, nil
@@ -356,15 +356,15 @@ func (s *ObjectsAPIService) GetObjectsByChecksums(ctx context.Context, checksums
 	return drs.ImplResponse{Code: http.StatusOK, Body: out}, nil
 }
 
-func (s *ObjectsAPIService) AddChecksums(ctx context.Context, objectID string, req drs.ChecksumAdditionRequest) (drs.ImplResponse, error) {
-	if len(req.Checksums) == 0 {
+func (s *ObjectsAPIService) AddChecksums(ctx context.Context, objectID string, checksums []drs.Checksum) (drs.ImplResponse, error) {
+	if len(checksums) == 0 {
 		return drs.ImplResponse{
 			Code: http.StatusBadRequest,
 			Body: drs.Error{Msg: "checksums cannot be empty", StatusCode: http.StatusBadRequest},
 		}, nil
 	}
-	if len(req.Checksums) > defaultMaxChecksumAdditionsPerObject {
-		return tooLargeResponse(fmt.Sprintf("checksum update contains %d checksums but server maximum is %d", len(req.Checksums), defaultMaxChecksumAdditionsPerObject)), nil
+	if len(checksums) > defaultMaxChecksumAdditionsPerObject {
+		return tooLargeResponse(fmt.Sprintf("checksum update contains %d checksums but server maximum is %d", len(checksums), defaultMaxChecksumAdditionsPerObject)), nil
 	}
 
 	obj, err := s.db.GetObject(ctx, objectID)
@@ -380,7 +380,7 @@ func (s *ObjectsAPIService) AddChecksums(ctx context.Context, objectID string, r
 		return forbiddenResponse(ctx, "forbidden: missing update permission"), nil
 	}
 
-	merged := mergeAdditionalChecksums(obj.Checksums, req.Checksums)
+	merged := mergeAdditionalChecksums(obj.Checksums, checksums)
 	updated := *obj
 	updated.Checksums = merged
 	updated.UpdatedTime = time.Now()
@@ -395,32 +395,30 @@ func (s *ObjectsAPIService) AddChecksums(ctx context.Context, objectID string, r
 	return drs.ImplResponse{Code: http.StatusOK, Body: refreshed.DrsObject}, nil
 }
 
-func (s *ObjectsAPIService) BulkAddChecksums(ctx context.Context, req drs.BulkChecksumAdditionRequest) (drs.ImplResponse, error) {
-	if len(req.Updates) == 0 {
+func (s *ObjectsAPIService) BulkAddChecksums(ctx context.Context, updatesByID map[string][]drs.Checksum) (drs.ImplResponse, error) {
+	if len(updatesByID) == 0 {
 		return drs.ImplResponse{
 			Code: http.StatusBadRequest,
 			Body: drs.Error{Msg: "updates cannot be empty", StatusCode: http.StatusBadRequest},
 		}, nil
 	}
-	if len(req.Updates) > defaultMaxBulkChecksumAdditionLength {
-		return tooLargeResponse(fmt.Sprintf("bulk checksum request contains %d updates but server maximum is %d", len(req.Updates), defaultMaxBulkChecksumAdditionLength)), nil
+	if len(updatesByID) > defaultMaxBulkChecksumAdditionLength {
+		return tooLargeResponse(fmt.Sprintf("bulk checksum request contains %d updates but server maximum is %d", len(updatesByID), defaultMaxBulkChecksumAdditionLength)), nil
 	}
 
-	updatesByID := make(map[string][]drs.Checksum, len(req.Updates))
-	for _, update := range req.Updates {
-		if strings.TrimSpace(update.ObjectId) == "" {
+	for objectID, checksums := range updatesByID {
+		if strings.TrimSpace(objectID) == "" {
 			return drs.ImplResponse{
 				Code: http.StatusBadRequest,
 				Body: drs.Error{Msg: "object_id cannot be empty", StatusCode: http.StatusBadRequest},
 			}, nil
 		}
-		if len(update.Checksums) == 0 {
+		if len(checksums) == 0 {
 			return drs.ImplResponse{
 				Code: http.StatusBadRequest,
 				Body: drs.Error{Msg: "checksums cannot be empty", StatusCode: http.StatusBadRequest},
 			}, nil
 		}
-		updatesByID[update.ObjectId] = append(updatesByID[update.ObjectId], update.Checksums...)
 	}
 
 	// Validate all objects/permissions first to preserve all-or-nothing behavior.
@@ -493,6 +491,9 @@ func (s *ObjectsAPIService) GetAccessURL(ctx context.Context, objectID string, a
 	signedURL, err := s.urlManager.SignURL(ctx, accessID, selectedAccessMethod.AccessUrl.Url, urlmanager.SignOptions{})
 	if err != nil {
 		return drs.ImplResponse{Code: http.StatusInternalServerError, Body: drs.Error{Msg: err.Error(), StatusCode: http.StatusInternalServerError}}, err
+	}
+	if recErr := s.db.RecordFileDownload(ctx, objectID); recErr != nil {
+		slog.Debug("failed to record file download metric", "request_id", core.GetRequestID(ctx), "object_id", objectID, "err", recErr)
 	}
 
 	return drs.ImplResponse{

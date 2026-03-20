@@ -4,8 +4,6 @@ api/openapi.yaml
 drs/api.go
 drs/api_objects.go
 drs/api_objects_service.go
-drs/api_register_objects.go
-drs/api_register_objects_service.go
 drs/api_service_info.go
 drs/api_service_info_service.go
 drs/api_upload_request.go
@@ -23,14 +21,12 @@ drs/model_authorizations.go
 drs/model_bulk_access_method_update_request.go
 drs/model_bulk_access_method_update_request_updates_inner.go
 drs/model_bulk_access_url.go
-drs/model_bulk_checksum_addition_request.go
-drs/model_bulk_checksum_addition_request_updates_inner.go
 drs/model_bulk_delete_request.go
 drs/model_bulk_object_access_id.go
 drs/model_bulk_object_access_id_bulk_object_access_ids_inner.go
+drs/model_bulk_object_id_no_passport.go
 drs/model_bulk_update_access_methods_200_response.go
 drs/model_checksum.go
-drs/model_checksum_addition_request.go
 drs/model_contents_object.go
 drs/model_delete_request.go
 drs/model_drs_object.go

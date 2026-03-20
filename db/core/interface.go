@@ -31,6 +31,9 @@ type DatabaseInterface interface {
 	SaveS3Credential(ctx context.Context, cred *S3Credential) error
 	DeleteS3Credential(ctx context.Context, bucket string) error
 	ListS3Credentials(ctx context.Context) ([]S3Credential, error)
+	CreateBucketScope(ctx context.Context, scope *BucketScope) error
+	GetBucketScope(ctx context.Context, organization, projectID string) (*BucketScope, error)
+	ListBucketScopes(ctx context.Context) ([]BucketScope, error)
 
 	// LFS pending metadata lifecycle.
 	SavePendingLFSMeta(ctx context.Context, entries []PendingLFSMeta) error

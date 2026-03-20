@@ -137,9 +137,9 @@ s3_credentials:
 	// 2. Test URL Signing (Upload)
 	key := fmt.Sprintf("test-upload-%d", time.Now().Unix())
 	targetURL := fmt.Sprintf("s3://%s/%s", bucketName, key)
-	signReq := admin.SignURLRequest{
-		URL:    targetURL,
-		Method: "PUT",
+	signReq := map[string]string{
+		"url":    targetURL,
+		"method": "PUT",
 	}
 	bodyBytes, _ := json.Marshal(signReq)
 	resp, err = client.Post(server.URL+"/admin/sign_url", "application/json", bytes.NewReader(bodyBytes))
@@ -150,7 +150,9 @@ s3_credentials:
 		b, _ := io.ReadAll(resp.Body)
 		t.Fatalf("Sign Upload URL failed: %s, Body: %s", resp.Status, string(b))
 	}
-	var signResp admin.SignURLResponse
+	var signResp struct {
+		SignedURL string `json:"signed_url"`
+	}
 	json.NewDecoder(resp.Body).Decode(&signResp)
 	t.Logf("Upload URL: %s", signResp.SignedURL)
 
@@ -172,7 +174,7 @@ s3_credentials:
 	}
 
 	// 4. Test URL Signing (Download)
-	signReq.Method = "GET"
+	signReq["method"] = "GET"
 	bodyBytes, _ = json.Marshal(signReq)
 	resp, err = client.Post(server.URL+"/admin/sign_url", "application/json", bytes.NewReader(bodyBytes))
 	if err != nil {

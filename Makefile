@@ -6,6 +6,12 @@ MKDOCS_IMAGE ?= squidfunk/mkdocs-material:latest
 GEN_OUT ?= .tmp/apigen.gen
 LFS_OPENAPI ?= apigen/api/lfs.openapi.yaml
 LFS_GEN_OUT ?= .tmp/apigen-lfs.gen
+BUCKET_OPENAPI ?= apigen/api/bucket.openapi.yaml
+BUCKET_GEN_OUT ?= .tmp/apigen-bucket.gen
+METRICS_OPENAPI ?= apigen/api/metrics.openapi.yaml
+METRICS_GEN_OUT ?= .tmp/apigen-metrics.gen
+INTERNAL_OPENAPI ?= apigen/api/internal.openapi.yaml
+INTERNAL_GEN_OUT ?= .tmp/apigen-internal.gen
 SCHEMAS_SUBMODULE ?= ga4gh/data-repository-service-schemas
 AUTO_INIT_SUBMODULE ?= 0
 GOCACHE ?= $(PWD)/.gocache
@@ -79,6 +85,33 @@ gen:
 	    exit 1; \
 	  fi; \
 	fi
+	@if [[ -f "$(BUCKET_OPENAPI)" ]]; then \
+	  $(MAKE) gen-bucket; \
+	else \
+	  if [[ -d apigen/bucketapi ]] && ls apigen/bucketapi/*.go >/dev/null 2>&1; then \
+	    echo "WARNING: $(BUCKET_OPENAPI) not found; preserving existing apigen/bucketapi."; \
+	  else \
+	    echo "WARNING: $(BUCKET_OPENAPI) is missing; bucket models will not be generated."; \
+	  fi; \
+	fi
+	@if [[ -f "$(METRICS_OPENAPI)" ]]; then \
+	  $(MAKE) gen-metrics; \
+	else \
+	  if [[ -d apigen/metricsapi ]] && ls apigen/metricsapi/*.go >/dev/null 2>&1; then \
+	    echo "WARNING: $(METRICS_OPENAPI) not found; preserving existing apigen/metricsapi."; \
+	  else \
+	    echo "WARNING: $(METRICS_OPENAPI) is missing; metrics models will not be generated."; \
+	  fi; \
+	fi
+	@if [[ -f "$(INTERNAL_OPENAPI)" ]]; then \
+	  $(MAKE) gen-internal; \
+	else \
+	  if [[ -d apigen/internalapi ]] && ls apigen/internalapi/*.go >/dev/null 2>&1; then \
+	    echo "WARNING: $(INTERNAL_OPENAPI) not found; preserving existing apigen/internalapi."; \
+	  else \
+	    echo "WARNING: $(INTERNAL_OPENAPI) is missing; internal models will not be generated."; \
+	  fi; \
+	fi
 
 .PHONY: gen-lfs
 gen-lfs:
@@ -112,6 +145,105 @@ gen-lfs:
 	mkdir -p apigen/lfsapi; \
 	find "$(LFS_GEN_OUT)" -maxdepth 1 -type f -name '*.go' -exec mv {} apigen/lfsapi/ \; ; \
 	echo "Generated LFS OpenAPI models into ./apigen/lfsapi"
+
+.PHONY: gen-bucket
+gen-bucket:
+	@set -euo pipefail; \
+	if [[ ! -f "$(BUCKET_OPENAPI)" ]]; then \
+	  echo "ERROR: Bucket OpenAPI spec '$(BUCKET_OPENAPI)' not found."; \
+	  exit 1; \
+	fi; \
+	if ! command -v docker >/dev/null 2>&1; then \
+	  echo "ERROR: docker is required for 'make gen-bucket'."; \
+	  exit 1; \
+	fi; \
+	rm -rf "$(BUCKET_GEN_OUT)"; \
+	docker run --rm --pull=missing \
+	  --user "$$(id -u):$$(id -g)" \
+	  -v "$(PWD):/local" \
+	  $(OAG_IMAGE) generate \
+	  -g go \
+	  --skip-validate-spec \
+	  --git-repo-id drs-server \
+	  --git-user-id calypr \
+	  -i /local/$(BUCKET_OPENAPI) \
+	  -o /local/$(BUCKET_GEN_OUT) \
+	  --global-property models,modelDocs=false,modelTests=false,supportingFiles=utils.go \
+	  --additional-properties packageName=bucketapi,enumClassPrefix=true; \
+	if [[ ! -d "$(BUCKET_GEN_OUT)" ]]; then \
+	  echo "ERROR: generation did not produce expected dir: $(BUCKET_GEN_OUT)"; \
+	  exit 1; \
+	fi; \
+	rm -rf apigen/bucketapi; \
+	mkdir -p apigen/bucketapi; \
+	find "$(BUCKET_GEN_OUT)" -maxdepth 1 -type f -name '*.go' -exec mv {} apigen/bucketapi/ \; ; \
+	echo "Generated Bucket OpenAPI models into ./apigen/bucketapi"
+
+.PHONY: gen-metrics
+gen-metrics:
+	@set -euo pipefail; \
+	if [[ ! -f "$(METRICS_OPENAPI)" ]]; then \
+	  echo "ERROR: Metrics OpenAPI spec '$(METRICS_OPENAPI)' not found."; \
+	  exit 1; \
+	fi; \
+	if ! command -v docker >/dev/null 2>&1; then \
+	  echo "ERROR: docker is required for 'make gen-metrics'."; \
+	  exit 1; \
+	fi; \
+	rm -rf "$(METRICS_GEN_OUT)"; \
+	docker run --rm --pull=missing \
+	  --user "$$(id -u):$$(id -g)" \
+	  -v "$(PWD):/local" \
+	  $(OAG_IMAGE) generate \
+	  -g go \
+	  --skip-validate-spec \
+	  --git-repo-id drs-server \
+	  --git-user-id calypr \
+	  -i /local/$(METRICS_OPENAPI) \
+	  -o /local/$(METRICS_GEN_OUT) \
+	  --global-property models,modelDocs=false,modelTests=false,supportingFiles=utils.go \
+	  --additional-properties packageName=metricsapi,enumClassPrefix=true; \
+	if [[ ! -d "$(METRICS_GEN_OUT)" ]]; then \
+	  echo "ERROR: generation did not produce expected dir: $(METRICS_GEN_OUT)"; \
+	  exit 1; \
+	fi; \
+	rm -rf apigen/metricsapi; \
+	mkdir -p apigen/metricsapi; \
+	find "$(METRICS_GEN_OUT)" -maxdepth 1 -type f -name '*.go' -exec mv {} apigen/metricsapi/ \; ; \
+	echo "Generated Metrics OpenAPI models into ./apigen/metricsapi"
+
+.PHONY: gen-internal
+gen-internal:
+	@set -euo pipefail; \
+	if [[ ! -f "$(INTERNAL_OPENAPI)" ]]; then \
+	  echo "ERROR: Internal OpenAPI spec '$(INTERNAL_OPENAPI)' not found."; \
+	  exit 1; \
+	fi; \
+	if ! command -v docker >/dev/null 2>&1; then \
+	  echo "ERROR: docker is required for 'make gen-internal'."; \
+	  exit 1; \
+	fi; \
+	rm -rf "$(INTERNAL_GEN_OUT)"; \
+	docker run --rm --pull=missing \
+	  --user "$$(id -u):$$(id -g)" \
+	  -v "$(PWD):/local" \
+	  $(OAG_IMAGE) generate \
+	  -g go \
+	  --skip-validate-spec \
+	  --git-repo-id drs-server \
+	  --git-user-id calypr \
+	  -i /local/$(INTERNAL_OPENAPI) \
+	  -o /local/$(INTERNAL_GEN_OUT) \
+	  --global-property models,modelDocs=false,modelTests=false,supportingFiles=utils.go \
+	  --additional-properties packageName=internalapi,enumClassPrefix=true; \
+	if [[ ! -d "$(INTERNAL_GEN_OUT)" ]]; then \
+	  echo "ERROR: generation did not produce expected dir: $(INTERNAL_GEN_OUT)"; \
+	  exit 1; \
+	fi; \
+	rm -rf apigen/internalapi; \
+	mkdir -p apigen/internalapi; \
+	find "$(INTERNAL_GEN_OUT)" -maxdepth 1 -type f -name '*.go' -exec mv {} apigen/internalapi/ \; ; \
+	echo "Generated Internal OpenAPI models into ./apigen/internalapi"
 
 .PHONY: test
 test:

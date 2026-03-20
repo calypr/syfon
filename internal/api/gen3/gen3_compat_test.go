@@ -10,13 +10,18 @@ import (
 	"sort"
 	"testing"
 
-	datahash "github.com/calypr/data-client/hash"
-	dataindexd "github.com/calypr/data-client/indexd"
 	"github.com/calypr/drs-server/apigen/drs"
+	"github.com/calypr/drs-server/apigen/internalapi"
 	"github.com/calypr/drs-server/db/core"
 	"github.com/calypr/drs-server/testutils"
 	"github.com/gorilla/mux"
 )
+
+func strPtr(s string) *string { return &s }
+
+func int64Ptr(v int64) *int64 { return &v }
+
+func mapPtr(m map[string]string) *map[string]string { return &m }
 
 func newGen3Router(t *testing.T) (*mux.Router, *testutils.MockDatabase) {
 	t.Helper()
@@ -29,15 +34,13 @@ func newGen3Router(t *testing.T) (*mux.Router, *testutils.MockDatabase) {
 func TestIndexdCreateGetAndUpdate(t *testing.T) {
 	router, _ := newGen3Router(t)
 
-	create := IndexdRecord{
-		IndexdRecord: dataindexd.IndexdRecord{
-			Did:      "sha-a",
-			Size:     10,
-			Hashes:   datahash.HashInfo{SHA256: "sha-a"},
-			URLs:     []string{"s3://bucket/a"},
-			Authz:    []string{"/programs/p/projects/q"},
-			FileName: "a.bin",
-		},
+	create := internalapi.IndexdRecord{
+		Did:      strPtr("sha-a"),
+		Size:     int64Ptr(10),
+		Hashes:   mapPtr(map[string]string{"sha256": "sha-a"}),
+		Urls:     []string{"s3://bucket/a"},
+		Authz:    []string{"/programs/p/projects/q"},
+		FileName: strPtr("a.bin"),
 	}
 	body, _ := json.Marshal(create)
 	req := httptest.NewRequest(http.MethodPost, "/index/index", bytes.NewReader(body))
@@ -53,23 +56,21 @@ func TestIndexdCreateGetAndUpdate(t *testing.T) {
 	if getRR.Code != http.StatusOK {
 		t.Fatalf("get status=%d body=%s", getRR.Code, getRR.Body.String())
 	}
-	var got IndexdRecordResponse
+	var got internalapi.IndexdRecordResponse
 	if err := json.NewDecoder(getRR.Body).Decode(&got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Did != "sha-a" || got.Hashes.SHA256 != "sha-a" {
+	if got.GetDid() != "sha-a" || got.GetHashes()["sha256"] != "sha-a" {
 		t.Fatalf("unexpected get record: %+v", got)
 	}
 
-	update := IndexdRecord{
-		IndexdRecord: dataindexd.IndexdRecord{
-			Did:      "sha-a",
-			Size:     42,
-			Hashes:   datahash.HashInfo{SHA256: "sha-a", MD5: "deadbeef"},
-			URLs:     []string{"s3://bucket/a-new"},
-			Authz:    []string{"/programs/new/projects/new"},
-			FileName: "a-new.bin",
-		},
+	update := internalapi.IndexdRecord{
+		Did:      strPtr("sha-a"),
+		Size:     int64Ptr(42),
+		Hashes:   mapPtr(map[string]string{"sha256": "sha-a", "md5": "deadbeef"}),
+		Urls:     []string{"s3://bucket/a-new"},
+		Authz:    []string{"/programs/new/projects/new"},
+		FileName: strPtr("a-new.bin"),
 	}
 	updateBody, _ := json.Marshal(update)
 	updateReq := httptest.NewRequest(http.MethodPut, "/index/index/sha-a", bytes.NewReader(updateBody))
@@ -85,21 +86,21 @@ func TestIndexdCreateGetAndUpdate(t *testing.T) {
 	if getRR2.Code != http.StatusOK {
 		t.Fatalf("get after update status=%d body=%s", getRR2.Code, getRR2.Body.String())
 	}
-	var got2 IndexdRecordResponse
+	var got2 internalapi.IndexdRecordResponse
 	if err := json.NewDecoder(getRR2.Body).Decode(&got2); err != nil {
 		t.Fatal(err)
 	}
-	if got2.Size != 42 || got2.FileName != "a-new.bin" {
+	if got2.GetSize() != 42 || got2.GetFileName() != "a-new.bin" {
 		t.Fatalf("unexpected updated fields: %+v", got2)
 	}
-	if len(got2.URLs) != 1 || got2.URLs[0] != "s3://bucket/a-new" {
-		t.Fatalf("unexpected urls after update: %+v", got2.URLs)
+	if len(got2.GetUrls()) != 1 || got2.GetUrls()[0] != "s3://bucket/a-new" {
+		t.Fatalf("unexpected urls after update: %+v", got2.GetUrls())
 	}
-	if len(got2.Authz) != 1 || got2.Authz[0] != "/programs/new/projects/new" {
-		t.Fatalf("unexpected authz after update: %+v", got2.Authz)
+	if len(got2.GetAuthz()) != 1 || got2.GetAuthz()[0] != "/programs/new/projects/new" {
+		t.Fatalf("unexpected authz after update: %+v", got2.GetAuthz())
 	}
-	if got2.Hashes.MD5 != "deadbeef" {
-		t.Fatalf("expected md5 checksum after update, got: %+v", got2.Hashes)
+	if got2.GetHashes()["md5"] != "deadbeef" {
+		t.Fatalf("expected md5 checksum after update, got: %+v", got2.GetHashes())
 	}
 }
 
@@ -107,15 +108,13 @@ func TestIndexdBulkHashesAndDocuments(t *testing.T) {
 	router, _ := newGen3Router(t)
 
 	for _, id := range []string{"sha-b", "sha-c"} {
-		rec := IndexdRecord{
-			IndexdRecord: dataindexd.IndexdRecord{
-				Did:      id,
-				Size:     5,
-				Hashes:   datahash.HashInfo{SHA256: id},
-				URLs:     []string{"s3://bucket/" + id},
-				Authz:    []string{"/programs/p/projects/q"},
-				FileName: id + ".bin",
-			},
+		rec := internalapi.IndexdRecord{
+			Did:      strPtr(id),
+			Size:     int64Ptr(5),
+			Hashes:   mapPtr(map[string]string{"sha256": id}),
+			Urls:     []string{"s3://bucket/" + id},
+			Authz:    []string{"/programs/p/projects/q"},
+			FileName: strPtr(id + ".bin"),
 		}
 		body, _ := json.Marshal(rec)
 		req := httptest.NewRequest(http.MethodPost, "/index/index", bytes.NewReader(body))
@@ -135,14 +134,14 @@ func TestIndexdBulkHashesAndDocuments(t *testing.T) {
 	if hashRR.Code != http.StatusOK {
 		t.Fatalf("bulk hashes status=%d body=%s", hashRR.Code, hashRR.Body.String())
 	}
-	var hashesResp ListRecordsResponse
+	var hashesResp internalapi.ListRecordsResponse
 	if err := json.NewDecoder(hashRR.Body).Decode(&hashesResp); err != nil {
 		t.Fatal(err)
 	}
 	if len(hashesResp.Records) != 2 {
 		t.Fatalf("expected 2 records from bulk hashes, got %d", len(hashesResp.Records))
 	}
-	dids := []string{hashesResp.Records[0].Did, hashesResp.Records[1].Did}
+	dids := []string{hashesResp.Records[0].GetDid(), hashesResp.Records[1].GetDid()}
 	sort.Strings(dids)
 	if dids[0] != "sha-b" || dids[1] != "sha-c" {
 		t.Fatalf("unexpected dids from bulk hashes: %+v", dids)
@@ -155,11 +154,11 @@ func TestIndexdBulkHashesAndDocuments(t *testing.T) {
 	if docRR.Code != http.StatusOK {
 		t.Fatalf("bulk documents status=%d body=%s", docRR.Code, docRR.Body.String())
 	}
-	var docs []IndexdRecordResponse
+	var docs []internalapi.IndexdRecordResponse
 	if err := json.NewDecoder(docRR.Body).Decode(&docs); err != nil {
 		t.Fatal(err)
 	}
-	if len(docs) != 1 || docs[0].Did != "sha-c" {
+	if len(docs) != 1 || docs[0].GetDid() != "sha-c" {
 		t.Fatalf("unexpected bulk documents response: %+v", docs)
 	}
 }
@@ -278,16 +277,12 @@ func TestIndexdGetUnauthorizedStatusCodes(t *testing.T) {
 
 func TestIndexdBulkCreateGen3Unauthorized(t *testing.T) {
 	router, _ := newGen3Router(t)
-	body, _ := json.Marshal(IndexdBulkCreateRequest{
-		Records: []IndexdRecord{
-			{
-				IndexdRecord: dataindexd.IndexdRecord{
-					Did:      "sha-z",
-					Hashes:   datahash.HashInfo{SHA256: "sha-z"},
-					Authz:    []string{"/programs/p/projects/q"},
-					FileName: "z.bin",
-				},
-			},
+	did := "sha-z"
+	fileName := "z.bin"
+	hashes := map[string]string{"sha256": "sha-z"}
+	body, _ := json.Marshal(internalapi.BulkCreateRequest{
+		Records: []internalapi.IndexdRecord{
+			{Did: &did, Hashes: &hashes, Authz: []string{"/programs/p/projects/q"}, FileName: &fileName},
 		},
 	})
 	req := httptest.NewRequest(http.MethodPost, "/index/index/bulk", bytes.NewReader(body))
@@ -300,6 +295,28 @@ func TestIndexdBulkCreateGen3Unauthorized(t *testing.T) {
 	if rr.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401 for unauthorized bulk create, got %d body=%s", rr.Code, rr.Body.String())
 	}
+}
+
+func TestIndexdBulkCreate_RejectsInvalidGeneratedPayloads(t *testing.T) {
+	router, _ := newGen3Router(t)
+
+	t.Run("missing required records", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/index/index/bulk", bytes.NewBufferString(`{}`))
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d body=%s", rr.Code, rr.Body.String())
+		}
+	})
+
+	t.Run("unknown field", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/index/index/bulk", bytes.NewBufferString(`{"records":[],"unexpected":1}`))
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d body=%s", rr.Code, rr.Body.String())
+		}
+	})
 }
 
 func TestIndexdListAndDeleteByOrganizationProject(t *testing.T) {
@@ -331,14 +348,14 @@ func TestIndexdListAndDeleteByOrganizationProject(t *testing.T) {
 	if getRR.Code != http.StatusOK {
 		t.Fatalf("list status=%d body=%s", getRR.Code, getRR.Body.String())
 	}
-	var listResp ListRecordsResponse
+	var listResp internalapi.ListRecordsResponse
 	if err := json.NewDecoder(getRR.Body).Decode(&listResp); err != nil {
 		t.Fatal(err)
 	}
-	if len(listResp.Records) != 1 || listResp.Records[0].Did != "sha-1" {
+	if len(listResp.Records) != 1 || listResp.Records[0].GetDid() != "sha-1" {
 		t.Fatalf("unexpected list response: %+v", listResp.Records)
 	}
-	if listResp.Records[0].Organization != "cbds" || listResp.Records[0].Project != "p1" {
+	if listResp.Records[0].GetOrganization() != "cbds" || listResp.Records[0].GetProject() != "p1" {
 		t.Fatalf("expected organization/project projection, got %+v", listResp.Records[0])
 	}
 
@@ -434,23 +451,23 @@ func TestWriteDBErrorBranches(t *testing.T) {
 }
 
 func TestCanonicalIDAndIndexdToDrsHelpers(t *testing.T) {
-	if got := canonicalIDFromIndexd(IndexdRecord{IndexdRecord: dataindexd.IndexdRecord{Did: "did"}}); got != "did" {
+	if got := canonicalIDFromIndexd(internalapi.IndexdRecord{Did: strPtr("did")}); got != "did" {
 		t.Fatalf("expected did, got %q", got)
 	}
-	if got := canonicalIDFromIndexd(IndexdRecord{IndexdRecord: dataindexd.IndexdRecord{Hashes: datahash.HashInfo{SHA256: "abc"}}}); got != "abc" {
+	if got := canonicalIDFromIndexd(internalapi.IndexdRecord{Hashes: mapPtr(map[string]string{"sha256": "abc"})}); got != "abc" {
 		t.Fatalf("expected sha256 fallback, got %q", got)
 	}
-	if got := canonicalIDFromIndexd(IndexdRecord{}); got != "" {
+	if got := canonicalIDFromIndexd(internalapi.IndexdRecord{}); got != "" {
 		t.Fatalf("expected empty id, got %q", got)
 	}
 
-	if _, err := indexdToDrs(IndexdRecord{}); err == nil {
+	if _, err := indexdToDrs(internalapi.IndexdRecord{}); err == nil {
 		t.Fatal("expected validation error for missing did/hash")
 	}
-	obj, err := indexdToDrs(IndexdRecord{
-		IndexdRecord: dataindexd.IndexdRecord{Hashes: datahash.HashInfo{SHA256: "x"}},
-		Organization: "cbds",
-		Project:      "p1",
+	obj, err := indexdToDrs(internalapi.IndexdRecord{
+		Hashes:       mapPtr(map[string]string{"sha256": "x"}),
+		Organization: strPtr("cbds"),
+		Project:      strPtr("p1"),
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -461,13 +478,11 @@ func TestCanonicalIDAndIndexdToDrsHelpers(t *testing.T) {
 }
 
 func TestIndexdToDrsWithScopeFromEmbeddedRecord(t *testing.T) {
-	obj, err := indexdToDrs(IndexdRecord{
-		IndexdRecord: dataindexd.IndexdRecord{
-			Hashes: datahash.HashInfo{SHA256: "x2"},
-			URLs:   []string{"s3://bucket/x2"},
-		},
-		Organization: "cbds",
-		Project:      "p1",
+	obj, err := indexdToDrs(internalapi.IndexdRecord{
+		Hashes:       mapPtr(map[string]string{"sha256": "x2"}),
+		Urls:         []string{"s3://bucket/x2"},
+		Organization: strPtr("cbds"),
+		Project:      strPtr("p1"),
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

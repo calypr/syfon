@@ -33,9 +33,6 @@ type UploadRequestObject struct {
 
 	// Optional array of alternative names for the file
 	Aliases []string `json:"aliases,omitempty"`
-
-	// Optional array of requested upload method types which should match those published by  the server in the `supportedUploadMethodsTypes` field in  the `/service-info` response.  Servers SHALL try to honour requests, but the server may not be able to offer the  requested upload type for specific file types/sizes etc. The server MAY return a  400 error if it cannot honour the request, or MAY return an alternative  supported upload method.
-	UploadMethodTypes []string `json:"upload_method_types,omitempty"`
 }
 
 // AssertUploadRequestObjectRequired checks if the required fields are not zero-ed
