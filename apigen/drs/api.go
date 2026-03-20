@@ -25,17 +25,24 @@ type ObjectsAPIRouter interface {
 	GetObject(http.ResponseWriter, *http.Request)
 	PostObject(http.ResponseWriter, *http.Request)
 	OptionsObject(http.ResponseWriter, *http.Request)
-	DeleteObject(http.ResponseWriter, *http.Request)
-	BulkDeleteObjects(http.ResponseWriter, *http.Request)
 	GetBulkObjects(http.ResponseWriter, *http.Request)
 	OptionsBulkObject(http.ResponseWriter, *http.Request)
-	RegisterObjects(http.ResponseWriter, *http.Request)
 	GetAccessURL(http.ResponseWriter, *http.Request)
 	PostAccessURL(http.ResponseWriter, *http.Request)
 	GetBulkAccessURL(http.ResponseWriter, *http.Request)
 	UpdateObjectAccessMethods(http.ResponseWriter, *http.Request)
-	GetObjectsByChecksum(http.ResponseWriter, *http.Request)
 	BulkUpdateAccessMethods(http.ResponseWriter, *http.Request)
+	AddChecksums(http.ResponseWriter, *http.Request)
+	GetObjectsByChecksum(http.ResponseWriter, *http.Request)
+	BulkAddChecksums(http.ResponseWriter, *http.Request)
+	DeleteObject(http.ResponseWriter, *http.Request)
+	BulkDeleteObjects(http.ResponseWriter, *http.Request)
+}
+// RegisterObjectsAPIRouter defines the required methods for binding the api requests to a responses for the RegisterObjectsAPI
+// The RegisterObjectsAPIRouter implementation should parse necessary information from the http request,
+// pass the data to a RegisterObjectsAPIServicer to perform the required actions, then write the service results to the http response.
+type RegisterObjectsAPIRouter interface { 
+	RegisterObjects(http.ResponseWriter, *http.Request)
 }
 // ServiceInfoAPIRouter defines the required methods for binding the api requests to a responses for the ServiceInfoAPI
 // The ServiceInfoAPIRouter implementation should parse necessary information from the http request,
@@ -59,17 +66,27 @@ type ObjectsAPIServicer interface {
 	GetObject(context.Context, string, bool) (ImplResponse, error)
 	PostObject(context.Context, string, PostObjectRequest) (ImplResponse, error)
 	OptionsObject(context.Context, string) (ImplResponse, error)
-	DeleteObject(context.Context, string, DeleteRequest) (ImplResponse, error)
-	BulkDeleteObjects(context.Context, BulkDeleteRequest) (ImplResponse, error)
 	GetBulkObjects(context.Context, GetBulkObjectsRequest, bool) (ImplResponse, error)
-	OptionsBulkObject(context.Context, BulkObjectIdNoPassport) (ImplResponse, error)
-	RegisterObjects(context.Context, RegisterObjectsRequest) (ImplResponse, error)
+	OptionsBulkObject(context.Context) (ImplResponse, error)
 	GetAccessURL(context.Context, string, string) (ImplResponse, error)
 	PostAccessURL(context.Context, string, string, PostAccessUrlRequest) (ImplResponse, error)
 	GetBulkAccessURL(context.Context, BulkObjectAccessId) (ImplResponse, error)
 	UpdateObjectAccessMethods(context.Context, string, AccessMethodUpdateRequest) (ImplResponse, error)
-	GetObjectsByChecksum(context.Context, string) (ImplResponse, error)
 	BulkUpdateAccessMethods(context.Context, BulkAccessMethodUpdateRequest) (ImplResponse, error)
+	AddChecksums(context.Context, string, ChecksumAdditionRequest) (ImplResponse, error)
+	GetObjectsByChecksum(context.Context, string) (ImplResponse, error)
+	BulkAddChecksums(context.Context, BulkChecksumAdditionRequest) (ImplResponse, error)
+	DeleteObject(context.Context, string, DeleteRequest) (ImplResponse, error)
+	BulkDeleteObjects(context.Context, BulkDeleteRequest) (ImplResponse, error)
+}
+
+
+// RegisterObjectsAPIServicer defines the api actions for the RegisterObjectsAPI service
+// This interface intended to stay up to date with the openapi yaml used to generate it,
+// while the service implementation can be ignored with the .openapi-generator-ignore file
+// and updated with the logic required for the API.
+type RegisterObjectsAPIServicer interface { 
+	RegisterObjects(context.Context, RegisterObjectsRequest) (ImplResponse, error)
 }
 
 

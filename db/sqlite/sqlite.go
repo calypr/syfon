@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -76,6 +77,25 @@ func (db *SqliteDB) initSchema() error {
 			secret_key TEXT,
 			endpoint TEXT
 		)`,
+		`CREATE TABLE IF NOT EXISTS lfs_pending_metadata (
+			oid TEXT PRIMARY KEY,
+			candidate_json TEXT NOT NULL,
+			created_time TIMESTAMP NOT NULL,
+			expires_time TIMESTAMP NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_lfs_pending_metadata_expires ON lfs_pending_metadata(expires_time)`,
+		`CREATE INDEX IF NOT EXISTS idx_lfs_pending_metadata_created ON lfs_pending_metadata(created_time)`,
+		`CREATE TABLE IF NOT EXISTS object_usage (
+			object_id TEXT PRIMARY KEY,
+			upload_count INTEGER NOT NULL DEFAULT 0,
+			download_count INTEGER NOT NULL DEFAULT 0,
+			last_upload_time TIMESTAMP NULL,
+			last_download_time TIMESTAMP NULL,
+			updated_time TIMESTAMP NOT NULL,
+			FOREIGN KEY(object_id) REFERENCES drs_object(id) ON DELETE CASCADE
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_object_usage_last_download_time ON object_usage(last_download_time)`,
+		`CREATE INDEX IF NOT EXISTS idx_object_usage_last_upload_time ON object_usage(last_upload_time)`,
 	}
 
 	for _, q := range queries {
@@ -821,4 +841,254 @@ func (db *SqliteDB) ListS3Credentials(ctx context.Context) ([]core.S3Credential,
 		creds = append(creds, c)
 	}
 	return creds, nil
+}
+
+func (db *SqliteDB) SavePendingLFSMeta(ctx context.Context, entries []core.PendingLFSMeta) error {
+	if len(entries) == 0 {
+		return nil
+	}
+	tx, err := db.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM lfs_pending_metadata WHERE expires_time <= ?`, time.Now().UTC()); err != nil {
+		return fmt.Errorf("failed to prune expired pending metadata: %w", err)
+	}
+
+	for _, e := range entries {
+		raw, err := json.Marshal(e.Candidate)
+		if err != nil {
+			return fmt.Errorf("failed to marshal pending candidate for oid %s: %w", e.OID, err)
+		}
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO lfs_pending_metadata (oid, candidate_json, created_time, expires_time)
+			VALUES (?, ?, ?, ?)
+			ON CONFLICT (oid) DO UPDATE SET
+				candidate_json = excluded.candidate_json,
+				created_time = excluded.created_time,
+				expires_time = excluded.expires_time
+		`, e.OID, string(raw), e.CreatedAt.UTC(), e.ExpiresAt.UTC()); err != nil {
+			return fmt.Errorf("failed to save pending metadata for oid %s: %w", e.OID, err)
+		}
+	}
+	return tx.Commit()
+}
+
+func (db *SqliteDB) PopPendingLFSMeta(ctx context.Context, oid string) (*core.PendingLFSMeta, error) {
+	tx, err := db.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM lfs_pending_metadata WHERE expires_time <= ?`, time.Now().UTC()); err != nil {
+		return nil, fmt.Errorf("failed to prune expired pending metadata: %w", err)
+	}
+
+	var (
+		raw       string
+		createdAt time.Time
+		expiresAt time.Time
+	)
+	if err := tx.QueryRowContext(ctx, `
+		SELECT candidate_json, created_time, expires_time
+		FROM lfs_pending_metadata
+		WHERE oid = ? AND expires_time > ?
+	`, oid, time.Now().UTC()).Scan(&raw, &createdAt, &expiresAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("%w: pending metadata not found", core.ErrNotFound)
+		}
+		return nil, fmt.Errorf("failed to load pending metadata for oid %s: %w", oid, err)
+	}
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM lfs_pending_metadata WHERE oid = ?`, oid); err != nil {
+		return nil, fmt.Errorf("failed to consume pending metadata for oid %s: %w", oid, err)
+	}
+
+	var c drs.DrsObjectCandidate
+	if err := json.Unmarshal([]byte(raw), &c); err != nil {
+		return nil, fmt.Errorf("failed to parse pending metadata candidate for oid %s: %w", oid, err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return &core.PendingLFSMeta{
+		OID:       oid,
+		Candidate: c,
+		CreatedAt: createdAt,
+		ExpiresAt: expiresAt,
+	}, nil
+}
+
+func (db *SqliteDB) RecordFileUpload(ctx context.Context, objectID string) error {
+	now := time.Now().UTC()
+	_, err := db.db.ExecContext(ctx, `
+		INSERT INTO object_usage (object_id, upload_count, download_count, last_upload_time, last_download_time, updated_time)
+		VALUES (?, 1, 0, ?, NULL, ?)
+		ON CONFLICT(object_id) DO UPDATE SET
+			upload_count = object_usage.upload_count + 1,
+			last_upload_time = excluded.last_upload_time,
+			updated_time = excluded.updated_time
+	`, objectID, now, now)
+	return err
+}
+
+func (db *SqliteDB) RecordFileDownload(ctx context.Context, objectID string) error {
+	now := time.Now().UTC()
+	_, err := db.db.ExecContext(ctx, `
+		INSERT INTO object_usage (object_id, upload_count, download_count, last_upload_time, last_download_time, updated_time)
+		VALUES (?, 0, 1, NULL, ?, ?)
+		ON CONFLICT(object_id) DO UPDATE SET
+			download_count = object_usage.download_count + 1,
+			last_download_time = excluded.last_download_time,
+			updated_time = excluded.updated_time
+	`, objectID, now, now)
+	return err
+}
+
+func (db *SqliteDB) GetFileUsage(ctx context.Context, objectID string) (*core.FileUsage, error) {
+	var usage core.FileUsage
+	var lastUpload sql.NullTime
+	var lastDownload sql.NullTime
+	err := db.db.QueryRowContext(ctx, `
+		SELECT o.id, o.name, o.size,
+			COALESCE(u.upload_count, 0),
+			COALESCE(u.download_count, 0),
+			u.last_upload_time,
+			u.last_download_time
+		FROM drs_object o
+		LEFT JOIN object_usage u ON u.object_id = o.id
+		WHERE o.id = ?
+	`, objectID).Scan(
+		&usage.ObjectID,
+		&usage.Name,
+		&usage.Size,
+		&usage.UploadCount,
+		&usage.DownloadCount,
+		&lastUpload,
+		&lastDownload,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("%w: file usage not found", core.ErrNotFound)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if lastUpload.Valid {
+		t := lastUpload.Time
+		usage.LastUploadTime = &t
+	}
+	if lastDownload.Valid {
+		t := lastDownload.Time
+		usage.LastDownloadTime = &t
+	}
+	usage.LastAccessTime = latestTime(usage.LastUploadTime, usage.LastDownloadTime)
+	return &usage, nil
+}
+
+func (db *SqliteDB) ListFileUsage(ctx context.Context, limit, offset int, inactiveSince *time.Time) ([]core.FileUsage, error) {
+	if limit <= 0 {
+		limit = 200
+	}
+	if limit > 1000 {
+		limit = 1000
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	query := `
+		SELECT o.id, o.name, o.size,
+			COALESCE(u.upload_count, 0),
+			COALESCE(u.download_count, 0),
+			u.last_upload_time,
+			u.last_download_time
+		FROM drs_object o
+		LEFT JOIN object_usage u ON u.object_id = o.id
+	`
+	args := []any{}
+	if inactiveSince != nil {
+		query += ` WHERE u.last_download_time IS NULL OR u.last_download_time < ?`
+		args = append(args, inactiveSince.UTC())
+	}
+	query += ` ORDER BY COALESCE(u.last_download_time, '1970-01-01T00:00:00Z') ASC, o.id ASC LIMIT ? OFFSET ?`
+	args = append(args, limit, offset)
+
+	rows, err := db.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]core.FileUsage, 0, limit)
+	for rows.Next() {
+		var usage core.FileUsage
+		var lastUpload sql.NullTime
+		var lastDownload sql.NullTime
+		if err := rows.Scan(
+			&usage.ObjectID,
+			&usage.Name,
+			&usage.Size,
+			&usage.UploadCount,
+			&usage.DownloadCount,
+			&lastUpload,
+			&lastDownload,
+		); err != nil {
+			return nil, err
+		}
+		if lastUpload.Valid {
+			t := lastUpload.Time
+			usage.LastUploadTime = &t
+		}
+		if lastDownload.Valid {
+			t := lastDownload.Time
+			usage.LastDownloadTime = &t
+		}
+		usage.LastAccessTime = latestTime(usage.LastUploadTime, usage.LastDownloadTime)
+		out = append(out, usage)
+	}
+	return out, nil
+}
+
+func (db *SqliteDB) GetFileUsageSummary(ctx context.Context, inactiveSince *time.Time) (core.FileUsageSummary, error) {
+	summary := core.FileUsageSummary{}
+	query := `
+		SELECT
+			COUNT(o.id) AS total_files,
+			COALESCE(SUM(COALESCE(u.upload_count, 0)), 0) AS total_uploads,
+			COALESCE(SUM(COALESCE(u.download_count, 0)), 0) AS total_downloads,
+			COALESCE(SUM(CASE WHEN u.last_download_time IS NULL OR u.last_download_time < ? THEN 1 ELSE 0 END), 0) AS inactive_files
+		FROM drs_object o
+		LEFT JOIN object_usage u ON u.object_id = o.id
+	`
+	inactiveCutoff := time.Now().UTC().AddDate(0, 0, -730)
+	if inactiveSince != nil {
+		inactiveCutoff = inactiveSince.UTC()
+	}
+	if err := db.db.QueryRowContext(ctx, query, inactiveCutoff).Scan(
+		&summary.TotalFiles,
+		&summary.TotalUploads,
+		&summary.TotalDownloads,
+		&summary.InactiveFileCount,
+	); err != nil {
+		return core.FileUsageSummary{}, err
+	}
+	return summary, nil
+}
+
+func latestTime(ts ...*time.Time) *time.Time {
+	var latest *time.Time
+	for _, t := range ts {
+		if t == nil {
+			continue
+		}
+		if latest == nil || t.After(*latest) {
+			copyT := *t
+			latest = &copyT
+		}
+	}
+	return latest
 }

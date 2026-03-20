@@ -1,22 +1,20 @@
 package gen3
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
-	datadrs "github.com/calypr/data-client/drs"
 	datahash "github.com/calypr/data-client/hash"
 	dataindexd "github.com/calypr/data-client/indexd"
 	"github.com/calypr/drs-server/apigen/drs"
 	"github.com/calypr/drs-server/db/core"
+	corelogic "github.com/calypr/drs-server/internal/coreapi"
 	"github.com/gorilla/mux"
 )
 
@@ -308,45 +306,14 @@ func handleIndexdBulkSHA256Validity(database core.DatabaseInterface) http.Handle
 			return
 		}
 
-		targets := make([]string, 0, len(input))
-		seen := make(map[string]struct{}, len(input))
-		for _, raw := range input {
-			sha := normalizeSHA(raw)
-			if sha == "" {
-				continue
-			}
-			if _, ok := seen[sha]; ok {
-				continue
-			}
-			seen[sha] = struct{}{}
-			targets = append(targets, sha)
-		}
-		if len(targets) == 0 {
-			writeHTTPError(w, r, http.StatusBadRequest, "No valid sha256 values provided", nil)
-			return
-		}
-
-		bucketSet, err := getRegisteredBucketSet(r.Context(), database)
+		resp, err := corelogic.ComputeSHA256Validity(r.Context(), database, input)
 		if err != nil {
-			writeHTTPError(w, r, http.StatusInternalServerError, fmt.Sprintf("failed to load registered buckets: %v", err), err)
-			return
-		}
-
-		objsMap, err := database.GetObjectsByChecksums(r.Context(), targets)
-		if err != nil {
-			writeDBError(w, r, err)
-			return
-		}
-
-		resp := make(map[string]bool, len(targets))
-		for _, sha := range targets {
-			resp[sha] = false
-			for _, obj := range objsMap[sha] {
-				if hasValidRegisteredS3Target(obj, bucketSet) {
-					resp[sha] = true
-					break
-				}
+			if errors.Is(err, corelogic.ErrNoValidSHA256) {
+				writeHTTPError(w, r, http.StatusBadRequest, "No valid sha256 values provided", nil)
+				return
 			}
+			writeHTTPError(w, r, http.StatusInternalServerError, fmt.Sprintf("failed to compute sha256 validity: %v", err), err)
+			return
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -354,59 +321,6 @@ func handleIndexdBulkSHA256Validity(database core.DatabaseInterface) http.Handle
 			slog.Error("gen3 encode response failed", "request_id", core.GetRequestID(r.Context()), "method", r.Method, "path", r.URL.Path, "err", err)
 		}
 	}
-}
-
-func getRegisteredBucketSet(ctx context.Context, database core.DatabaseInterface) (map[string]struct{}, error) {
-	creds, err := database.ListS3Credentials(ctx)
-	if err != nil {
-		return nil, err
-	}
-	registered := make(map[string]struct{}, len(creds))
-	for _, c := range creds {
-		bucket := strings.TrimSpace(c.Bucket)
-		if bucket == "" {
-			continue
-		}
-		registered[bucket] = struct{}{}
-	}
-	return registered, nil
-}
-
-func hasValidRegisteredS3Target(obj core.InternalObject, registeredBuckets map[string]struct{}) bool {
-	for _, method := range obj.AccessMethods {
-		if !strings.EqualFold(method.Type, "s3") {
-			continue
-		}
-		bucket, key, ok := parseS3URL(method.AccessUrl.Url)
-		if !ok || key == "" {
-			continue
-		}
-		if _, found := registeredBuckets[bucket]; !found {
-			continue
-		}
-		return true
-	}
-	return false
-}
-
-func parseS3URL(raw string) (bucket string, key string, ok bool) {
-	u, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil {
-		return "", "", false
-	}
-	if !strings.EqualFold(u.Scheme, "s3") {
-		return "", "", false
-	}
-	bucket = strings.TrimSpace(u.Host)
-	key = strings.TrimSpace(strings.TrimPrefix(u.Path, "/"))
-	if bucket == "" || key == "" {
-		return "", "", false
-	}
-	return bucket, key, true
-}
-
-func normalizeSHA(raw string) string {
-	return strings.TrimSpace(datadrs.NormalizeOid(strings.TrimSpace(raw)))
 }
 
 // Helper to convert internal DrsObject to Gen3 IndexdRecord

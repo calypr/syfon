@@ -306,15 +306,17 @@ func TestIndexdListAndDeleteByOrganizationProject(t *testing.T) {
 	router, db := newGen3Router(t)
 	db.Objects = map[string]*drs.DrsObject{
 		"sha-1": {
-			Id:             "sha-1",
-			Authorizations: []string{"/programs/cbds/projects/p1"},
-			Checksums:      []drs.Checksum{{Type: "sha256", Checksum: "sha-1"}},
+			Id:        "sha-1",
+			Checksums: []drs.Checksum{{Type: "sha256", Checksum: "sha-1"}},
 		},
 		"sha-2": {
-			Id:             "sha-2",
-			Authorizations: []string{"/programs/cbds/projects/p2"},
-			Checksums:      []drs.Checksum{{Type: "sha256", Checksum: "sha-2"}},
+			Id:        "sha-2",
+			Checksums: []drs.Checksum{{Type: "sha256", Checksum: "sha-2"}},
 		},
+	}
+	db.ObjectAuthz = map[string][]string{
+		"sha-1": {"/programs/cbds/projects/p1"},
+		"sha-2": {"/programs/cbds/projects/p2"},
 	}
 
 	getReq := httptest.NewRequest(http.MethodGet, "/index/index?organization=cbds&project=p1", nil)

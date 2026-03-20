@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/calypr/drs-server/apigen/drs"
 	"github.com/calypr/drs-server/db/core"
@@ -12,10 +13,13 @@ import (
 
 // MockDatabase implements core.DatabaseInterface for testing
 type MockDatabase struct {
-	Objects      map[string]*drs.DrsObject
-	ObjectAuthz  map[string][]string
-	Credentials  map[string]core.S3Credential
-	GetObjectErr error
+	Objects        map[string]*drs.DrsObject
+	ObjectAuthz    map[string][]string
+	Credentials    map[string]core.S3Credential
+	PendingMeta    map[string]core.PendingLFSMeta
+	Usage          map[string]core.FileUsage
+	NoDefaultCreds bool
+	GetObjectErr   error
 }
 
 func (m *MockDatabase) GetServiceInfo(ctx context.Context) (*drs.Service, error) {
@@ -30,8 +34,6 @@ func (m *MockDatabase) GetObject(ctx context.Context, id string) (*core.Internal
 		wrapped := core.InternalObject{DrsObject: *obj}
 		if authz, ok := m.ObjectAuthz[id]; ok {
 			wrapped.Authorizations = append([]string(nil), authz...)
-		} else {
-			wrapped.Authorizations = append([]string(nil), obj.Authorizations...)
 		}
 		return &wrapped, nil
 	}
@@ -96,8 +98,8 @@ func (m *MockDatabase) GetObjectsByChecksums(ctx context.Context, checksums []st
 
 func (m *MockDatabase) ListObjectIDsByResourcePrefix(ctx context.Context, resourcePrefix string) ([]string, error) {
 	ids := make([]string, 0)
-	for id, obj := range m.Objects {
-		authz := obj.Authorizations
+	for id := range m.Objects {
+		authz := []string{}
 		if m.ObjectAuthz != nil {
 			if v, ok := m.ObjectAuthz[id]; ok {
 				authz = v
@@ -206,9 +208,130 @@ func (m *MockDatabase) ListS3Credentials(ctx context.Context) ([]core.S3Credenti
 		}
 		return out, nil
 	}
+	if m.NoDefaultCreds {
+		return []core.S3Credential{}, nil
+	}
 	return []core.S3Credential{
 		{Bucket: "test-bucket-1", Region: "us-east-1"},
 	}, nil
+}
+
+func (m *MockDatabase) SavePendingLFSMeta(ctx context.Context, entries []core.PendingLFSMeta) error {
+	if m.PendingMeta == nil {
+		m.PendingMeta = make(map[string]core.PendingLFSMeta)
+	}
+	for _, e := range entries {
+		m.PendingMeta[e.OID] = e
+	}
+	return nil
+}
+
+func (m *MockDatabase) PopPendingLFSMeta(ctx context.Context, oid string) (*core.PendingLFSMeta, error) {
+	if m.PendingMeta == nil {
+		return nil, fmt.Errorf("%w: pending metadata not found", core.ErrNotFound)
+	}
+	e, ok := m.PendingMeta[oid]
+	if !ok {
+		return nil, fmt.Errorf("%w: pending metadata not found", core.ErrNotFound)
+	}
+	delete(m.PendingMeta, oid)
+	return &e, nil
+}
+
+func (m *MockDatabase) RecordFileUpload(ctx context.Context, objectID string) error {
+	if m.Usage == nil {
+		m.Usage = make(map[string]core.FileUsage)
+	}
+	u := m.Usage[objectID]
+	u.ObjectID = objectID
+	u.UploadCount++
+	now := time.Now().UTC()
+	u.LastUploadTime = &now
+	if obj, ok := m.Objects[objectID]; ok {
+		u.Name = obj.Name
+		u.Size = obj.Size
+	}
+	if u.LastAccessTime == nil || now.After(*u.LastAccessTime) {
+		t := now
+		u.LastAccessTime = &t
+	}
+	m.Usage[objectID] = u
+	return nil
+}
+
+func (m *MockDatabase) RecordFileDownload(ctx context.Context, objectID string) error {
+	if m.Usage == nil {
+		m.Usage = make(map[string]core.FileUsage)
+	}
+	u := m.Usage[objectID]
+	u.ObjectID = objectID
+	u.DownloadCount++
+	now := time.Now().UTC()
+	u.LastDownloadTime = &now
+	if obj, ok := m.Objects[objectID]; ok {
+		u.Name = obj.Name
+		u.Size = obj.Size
+	}
+	if u.LastAccessTime == nil || now.After(*u.LastAccessTime) {
+		t := now
+		u.LastAccessTime = &t
+	}
+	m.Usage[objectID] = u
+	return nil
+}
+
+func (m *MockDatabase) GetFileUsage(ctx context.Context, objectID string) (*core.FileUsage, error) {
+	if m.Usage == nil {
+		return nil, fmt.Errorf("%w: file usage not found", core.ErrNotFound)
+	}
+	u, ok := m.Usage[objectID]
+	if !ok {
+		return nil, fmt.Errorf("%w: file usage not found", core.ErrNotFound)
+	}
+	copyUsage := u
+	return &copyUsage, nil
+}
+
+func (m *MockDatabase) ListFileUsage(ctx context.Context, limit, offset int, inactiveSince *time.Time) ([]core.FileUsage, error) {
+	out := make([]core.FileUsage, 0)
+	if m.Usage == nil {
+		return out, nil
+	}
+	for _, u := range m.Usage {
+		if inactiveSince != nil {
+			if u.LastDownloadTime != nil && !u.LastDownloadTime.Before(*inactiveSince) {
+				continue
+			}
+		}
+		out = append(out, u)
+	}
+	if offset >= len(out) {
+		return []core.FileUsage{}, nil
+	}
+	if limit <= 0 {
+		return out[offset:], nil
+	}
+	end := offset + limit
+	if end > len(out) {
+		end = len(out)
+	}
+	return out[offset:end], nil
+}
+
+func (m *MockDatabase) GetFileUsageSummary(ctx context.Context, inactiveSince *time.Time) (core.FileUsageSummary, error) {
+	var s core.FileUsageSummary
+	s.TotalFiles = int64(len(m.Objects))
+	for _, u := range m.Usage {
+		s.TotalUploads += u.UploadCount
+		s.TotalDownloads += u.DownloadCount
+		if inactiveSince == nil {
+			continue
+		}
+		if u.LastDownloadTime == nil || u.LastDownloadTime.Before(*inactiveSince) {
+			s.InactiveFileCount++
+		}
+	}
+	return s, nil
 }
 
 // MockUrlManager implements urlmanager.UrlManager for testing

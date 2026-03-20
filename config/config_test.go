@@ -30,6 +30,15 @@ func TestLoadConfig_MinimalValid(t *testing.T) {
 	if cfg.Database.Sqlite == nil {
 		t.Fatal("expected sqlite config")
 	}
+	if cfg.LFS.MaxBatchObjects != DefaultLFSMaxBatchObjects {
+		t.Fatalf("expected default lfs.max_batch_objects=%d, got %d", DefaultLFSMaxBatchObjects, cfg.LFS.MaxBatchObjects)
+	}
+	if cfg.LFS.MaxBatchBodyBytes != DefaultLFSMaxBatchBodyBytes {
+		t.Fatalf("expected default lfs.max_batch_body_bytes=%d, got %d", DefaultLFSMaxBatchBodyBytes, cfg.LFS.MaxBatchBodyBytes)
+	}
+	if cfg.LFS.RequestLimitPerMinute != DefaultLFSRequestLimitPerMinute {
+		t.Fatalf("expected default lfs.request_limit_per_minute=%d, got %d", DefaultLFSRequestLimitPerMinute, cfg.LFS.RequestLimitPerMinute)
+	}
 }
 
 func TestLoadConfig_EnvOverrides(t *testing.T) {
@@ -158,5 +167,39 @@ func TestLoadConfig_InvalidDBPortEnv(t *testing.T) {
 
 	if _, err := LoadConfig(""); err == nil {
 		t.Fatal("expected invalid DRS_DB_PORT to return error")
+	}
+}
+
+func TestLoadConfig_LFSEnvOverrides(t *testing.T) {
+	os.Setenv("DRS_DB_SQLITE_FILE", "drs.db")
+	os.Setenv("DRS_AUTH_MODE", "local")
+	os.Setenv("DRS_LFS_MAX_BATCH_OBJECTS", "200")
+	os.Setenv("DRS_LFS_MAX_BATCH_BODY_BYTES", "123456")
+	os.Setenv("DRS_LFS_REQUEST_LIMIT_PER_MINUTE", "33")
+	os.Setenv("DRS_LFS_BANDWIDTH_LIMIT_BYTES_PER_MINUTE", "999")
+	defer func() {
+		os.Unsetenv("DRS_DB_SQLITE_FILE")
+		os.Unsetenv("DRS_AUTH_MODE")
+		os.Unsetenv("DRS_LFS_MAX_BATCH_OBJECTS")
+		os.Unsetenv("DRS_LFS_MAX_BATCH_BODY_BYTES")
+		os.Unsetenv("DRS_LFS_REQUEST_LIMIT_PER_MINUTE")
+		os.Unsetenv("DRS_LFS_BANDWIDTH_LIMIT_BYTES_PER_MINUTE")
+	}()
+
+	cfg, err := LoadConfig("")
+	if err != nil {
+		t.Fatalf("LoadConfig failed: %v", err)
+	}
+	if cfg.LFS.MaxBatchObjects != 200 {
+		t.Fatalf("expected 200, got %d", cfg.LFS.MaxBatchObjects)
+	}
+	if cfg.LFS.MaxBatchBodyBytes != 123456 {
+		t.Fatalf("expected 123456, got %d", cfg.LFS.MaxBatchBodyBytes)
+	}
+	if cfg.LFS.RequestLimitPerMinute != 33 {
+		t.Fatalf("expected 33, got %d", cfg.LFS.RequestLimitPerMinute)
+	}
+	if cfg.LFS.BandwidthLimitBytesPerMinute != 999 {
+		t.Fatalf("expected 999, got %d", cfg.LFS.BandwidthLimitBytesPerMinute)
 	}
 }

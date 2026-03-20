@@ -183,8 +183,7 @@ func TestHandleFenceDownload_Gen3Auth(t *testing.T) {
 	mockDB := &testutils.MockDatabase{
 		Objects: map[string]*drs.DrsObject{
 			"secure-id": {
-				Id:             "secure-id",
-				Authorizations: []string{"/programs/p/projects/q"},
+				Id: "secure-id",
 				AccessMethods: []drs.AccessMethod{
 					{
 						Type: "s3",
@@ -194,6 +193,9 @@ func TestHandleFenceDownload_Gen3Auth(t *testing.T) {
 					},
 				},
 			},
+		},
+		ObjectAuthz: map[string][]string{
+			"secure-id": {"/programs/p/projects/q"},
 		},
 	}
 	mockUM := &testutils.MockUrlManager{}

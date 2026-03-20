@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"time"
 
 	"github.com/calypr/drs-server/apigen/drs"
 )
@@ -30,4 +31,15 @@ type DatabaseInterface interface {
 	SaveS3Credential(ctx context.Context, cred *S3Credential) error
 	DeleteS3Credential(ctx context.Context, bucket string) error
 	ListS3Credentials(ctx context.Context) ([]S3Credential, error)
+
+	// LFS pending metadata lifecycle.
+	SavePendingLFSMeta(ctx context.Context, entries []PendingLFSMeta) error
+	PopPendingLFSMeta(ctx context.Context, oid string) (*PendingLFSMeta, error)
+
+	// File usage metrics lifecycle.
+	RecordFileUpload(ctx context.Context, objectID string) error
+	RecordFileDownload(ctx context.Context, objectID string) error
+	GetFileUsage(ctx context.Context, objectID string) (*FileUsage, error)
+	ListFileUsage(ctx context.Context, limit, offset int, inactiveSince *time.Time) ([]FileUsage, error)
+	GetFileUsageSummary(ctx context.Context, inactiveSince *time.Time) (FileUsageSummary, error)
 }

@@ -16,6 +16,7 @@ type Config struct {
 	Database      DatabaseConfig `json:"database" yaml:"database"`
 	S3Credentials []S3Config     `json:"s3_credentials" yaml:"s3_credentials"`
 	Auth          AuthConfig     `json:"auth" yaml:"auth"`
+	LFS           LFSConfig      `json:"lfs" yaml:"lfs"`
 }
 
 type DatabaseConfig struct {
@@ -59,12 +60,32 @@ type BasicAuthConfig struct {
 	Password string `json:"password" yaml:"password"`
 }
 
+type LFSConfig struct {
+	MaxBatchObjects              int   `json:"max_batch_objects" yaml:"max_batch_objects"`
+	MaxBatchBodyBytes            int64 `json:"max_batch_body_bytes" yaml:"max_batch_body_bytes"`
+	RequestLimitPerMinute        int   `json:"request_limit_per_minute" yaml:"request_limit_per_minute"`
+	BandwidthLimitBytesPerMinute int64 `json:"bandwidth_limit_bytes_per_minute" yaml:"bandwidth_limit_bytes_per_minute"`
+}
+
+const (
+	DefaultLFSMaxBatchObjects                    = 1000
+	DefaultLFSMaxBatchBodyBytes            int64 = 10 * 1024 * 1024 // 10 MiB
+	DefaultLFSRequestLimitPerMinute              = 1200             // 20 req/sec average per client
+	DefaultLFSBandwidthLimitBytesPerMinute int64 = 0                // disabled by default
+)
+
 func LoadConfig(configFile string) (*Config, error) {
 	// 1. Default Config
 	cfg := &Config{
 		Port:     8080,
 		Database: DatabaseConfig{},
 		Auth:     AuthConfig{},
+		LFS: LFSConfig{
+			MaxBatchObjects:              DefaultLFSMaxBatchObjects,
+			MaxBatchBodyBytes:            DefaultLFSMaxBatchBodyBytes,
+			RequestLimitPerMinute:        DefaultLFSRequestLimitPerMinute,
+			BandwidthLimitBytesPerMinute: DefaultLFSBandwidthLimitBytesPerMinute,
+		},
 	}
 
 	// 2. Load from file if provided
@@ -105,6 +126,34 @@ func LoadConfig(configFile string) (*Config, error) {
 	}
 	if pass := os.Getenv("DRS_BASIC_AUTH_PASSWORD"); pass != "" {
 		cfg.Auth.Basic.Password = pass
+	}
+	if v := os.Getenv("DRS_LFS_MAX_BATCH_OBJECTS"); v != "" {
+		i, err := strconv.Atoi(v)
+		if err != nil {
+			return nil, fmt.Errorf("invalid DRS_LFS_MAX_BATCH_OBJECTS: %s", v)
+		}
+		cfg.LFS.MaxBatchObjects = i
+	}
+	if v := os.Getenv("DRS_LFS_MAX_BATCH_BODY_BYTES"); v != "" {
+		i, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("invalid DRS_LFS_MAX_BATCH_BODY_BYTES: %s", v)
+		}
+		cfg.LFS.MaxBatchBodyBytes = i
+	}
+	if v := os.Getenv("DRS_LFS_REQUEST_LIMIT_PER_MINUTE"); v != "" {
+		i, err := strconv.Atoi(v)
+		if err != nil {
+			return nil, fmt.Errorf("invalid DRS_LFS_REQUEST_LIMIT_PER_MINUTE: %s", v)
+		}
+		cfg.LFS.RequestLimitPerMinute = i
+	}
+	if v := os.Getenv("DRS_LFS_BANDWIDTH_LIMIT_BYTES_PER_MINUTE"); v != "" {
+		i, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("invalid DRS_LFS_BANDWIDTH_LIMIT_BYTES_PER_MINUTE: %s", v)
+		}
+		cfg.LFS.BandwidthLimitBytesPerMinute = i
 	}
 
 	// DB Env Vars overrides
@@ -202,6 +251,18 @@ func LoadConfig(configFile string) (*Config, error) {
 	}
 	if (cfg.Auth.Basic.Username == "") != (cfg.Auth.Basic.Password == "") {
 		return nil, fmt.Errorf("both auth.basic.username and auth.basic.password must be set together")
+	}
+	if cfg.LFS.MaxBatchObjects < 0 {
+		return nil, fmt.Errorf("lfs.max_batch_objects must be >= 0")
+	}
+	if cfg.LFS.MaxBatchBodyBytes < 0 {
+		return nil, fmt.Errorf("lfs.max_batch_body_bytes must be >= 0")
+	}
+	if cfg.LFS.RequestLimitPerMinute < 0 {
+		return nil, fmt.Errorf("lfs.request_limit_per_minute must be >= 0")
+	}
+	if cfg.LFS.BandwidthLimitBytesPerMinute < 0 {
+		return nil, fmt.Errorf("lfs.bandwidth_limit_bytes_per_minute must be >= 0")
 	}
 
 	return cfg, nil

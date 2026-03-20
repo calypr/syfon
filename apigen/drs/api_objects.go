@@ -72,18 +72,6 @@ func (c *ObjectsAPIController) Routes() Routes {
 			"/ga4gh/drs/v1/objects/{object_id}",
 			c.OptionsObject,
 		},
-		"DeleteObject": Route{
-			"DeleteObject",
-			strings.ToUpper("Post"),
-			"/ga4gh/drs/v1/objects/{object_id}/delete",
-			c.DeleteObject,
-		},
-		"BulkDeleteObjects": Route{
-			"BulkDeleteObjects",
-			strings.ToUpper("Post"),
-			"/ga4gh/drs/v1/objects/delete",
-			c.BulkDeleteObjects,
-		},
 		"GetBulkObjects": Route{
 			"GetBulkObjects",
 			strings.ToUpper("Post"),
@@ -95,12 +83,6 @@ func (c *ObjectsAPIController) Routes() Routes {
 			strings.ToUpper("Options"),
 			"/ga4gh/drs/v1/objects",
 			c.OptionsBulkObject,
-		},
-		"RegisterObjects": Route{
-			"RegisterObjects",
-			strings.ToUpper("Post"),
-			"/ga4gh/drs/v1/objects/register",
-			c.RegisterObjects,
 		},
 		"GetAccessURL": Route{
 			"GetAccessURL",
@@ -122,9 +104,21 @@ func (c *ObjectsAPIController) Routes() Routes {
 		},
 		"UpdateObjectAccessMethods": Route{
 			"UpdateObjectAccessMethods",
-			strings.ToUpper("Post"),
+			strings.ToUpper("Put"),
 			"/ga4gh/drs/v1/objects/{object_id}/access-methods",
 			c.UpdateObjectAccessMethods,
+		},
+		"BulkUpdateAccessMethods": Route{
+			"BulkUpdateAccessMethods",
+			strings.ToUpper("Put"),
+			"/ga4gh/drs/v1/objects/access-methods",
+			c.BulkUpdateAccessMethods,
+		},
+		"AddChecksums": Route{
+			"AddChecksums",
+			strings.ToUpper("Put"),
+			"/ga4gh/drs/v1/objects/{object_id}/checksums",
+			c.AddChecksums,
 		},
 		"GetObjectsByChecksum": Route{
 			"GetObjectsByChecksum",
@@ -132,11 +126,23 @@ func (c *ObjectsAPIController) Routes() Routes {
 			"/ga4gh/drs/v1/objects/checksum/{checksum}",
 			c.GetObjectsByChecksum,
 		},
-		"BulkUpdateAccessMethods": Route{
-			"BulkUpdateAccessMethods",
-			strings.ToUpper("Post"),
-			"/ga4gh/drs/v1/objects/access-methods",
-			c.BulkUpdateAccessMethods,
+		"BulkAddChecksums": Route{
+			"BulkAddChecksums",
+			strings.ToUpper("Put"),
+			"/ga4gh/drs/v1/objects/checksums",
+			c.BulkAddChecksums,
+		},
+		"DeleteObject": Route{
+			"DeleteObject",
+			strings.ToUpper("Put"),
+			"/ga4gh/drs/v1/objects/{object_id}/delete",
+			c.DeleteObject,
+		},
+		"BulkDeleteObjects": Route{
+			"BulkDeleteObjects",
+			strings.ToUpper("Put"),
+			"/ga4gh/drs/v1/objects/delete",
+			c.BulkDeleteObjects,
 		},
 	}
 }
@@ -163,18 +169,6 @@ func (c *ObjectsAPIController) OrderedRoutes() []Route {
 			c.OptionsObject,
 		},
 		Route{
-			"DeleteObject",
-			strings.ToUpper("Post"),
-			"/ga4gh/drs/v1/objects/{object_id}/delete",
-			c.DeleteObject,
-		},
-		Route{
-			"BulkDeleteObjects",
-			strings.ToUpper("Post"),
-			"/ga4gh/drs/v1/objects/delete",
-			c.BulkDeleteObjects,
-		},
-		Route{
 			"GetBulkObjects",
 			strings.ToUpper("Post"),
 			"/ga4gh/drs/v1/objects",
@@ -185,12 +179,6 @@ func (c *ObjectsAPIController) OrderedRoutes() []Route {
 			strings.ToUpper("Options"),
 			"/ga4gh/drs/v1/objects",
 			c.OptionsBulkObject,
-		},
-		Route{
-			"RegisterObjects",
-			strings.ToUpper("Post"),
-			"/ga4gh/drs/v1/objects/register",
-			c.RegisterObjects,
 		},
 		Route{
 			"GetAccessURL",
@@ -212,9 +200,21 @@ func (c *ObjectsAPIController) OrderedRoutes() []Route {
 		},
 		Route{
 			"UpdateObjectAccessMethods",
-			strings.ToUpper("Post"),
+			strings.ToUpper("Put"),
 			"/ga4gh/drs/v1/objects/{object_id}/access-methods",
 			c.UpdateObjectAccessMethods,
+		},
+		Route{
+			"BulkUpdateAccessMethods",
+			strings.ToUpper("Put"),
+			"/ga4gh/drs/v1/objects/access-methods",
+			c.BulkUpdateAccessMethods,
+		},
+		Route{
+			"AddChecksums",
+			strings.ToUpper("Put"),
+			"/ga4gh/drs/v1/objects/{object_id}/checksums",
+			c.AddChecksums,
 		},
 		Route{
 			"GetObjectsByChecksum",
@@ -223,10 +223,22 @@ func (c *ObjectsAPIController) OrderedRoutes() []Route {
 			c.GetObjectsByChecksum,
 		},
 		Route{
-			"BulkUpdateAccessMethods",
-			strings.ToUpper("Post"),
-			"/ga4gh/drs/v1/objects/access-methods",
-			c.BulkUpdateAccessMethods,
+			"BulkAddChecksums",
+			strings.ToUpper("Put"),
+			"/ga4gh/drs/v1/objects/checksums",
+			c.BulkAddChecksums,
+		},
+		Route{
+			"DeleteObject",
+			strings.ToUpper("Put"),
+			"/ga4gh/drs/v1/objects/{object_id}/delete",
+			c.DeleteObject,
+		},
+		Route{
+			"BulkDeleteObjects",
+			strings.ToUpper("Put"),
+			"/ga4gh/drs/v1/objects/delete",
+			c.BulkDeleteObjects,
 		},
 	}
 }
@@ -321,66 +333,6 @@ func (c *ObjectsAPIController) OptionsObject(w http.ResponseWriter, r *http.Requ
 	_ = EncodeJSONResponse(result.Body, &result.Code, w)
 }
 
-// DeleteObject - Delete a DRS object (optional endpoint)
-func (c *ObjectsAPIController) DeleteObject(w http.ResponseWriter, r *http.Request) {
-	params := mux.Vars(r)
-	objectIdParam := params["object_id"]
-	if objectIdParam == "" {
-		c.errorHandler(w, r, &RequiredError{"object_id"}, nil)
-		return
-	}
-	var bodyParam DeleteRequest
-	d := json.NewDecoder(r.Body)
-	d.DisallowUnknownFields()
-	if err := d.Decode(&bodyParam); err != nil && !errors.Is(err, io.EOF) {
-		c.errorHandler(w, r, &ParsingError{Err: err}, nil)
-		return
-	}
-	if err := AssertDeleteRequestRequired(bodyParam); err != nil {
-		c.errorHandler(w, r, err, nil)
-		return
-	}
-	if err := AssertDeleteRequestConstraints(bodyParam); err != nil {
-		c.errorHandler(w, r, err, nil)
-		return
-	}
-	result, err := c.service.DeleteObject(r.Context(), objectIdParam, bodyParam)
-	// If an error occurred, encode the error with the status code
-	if err != nil {
-		c.errorHandler(w, r, err, &result)
-		return
-	}
-	// If no error, encode the body and the result code
-	_ = EncodeJSONResponse(result.Body, &result.Code, w)
-}
-
-// BulkDeleteObjects - Delete multiple DRS objects
-func (c *ObjectsAPIController) BulkDeleteObjects(w http.ResponseWriter, r *http.Request) {
-	var bodyParam BulkDeleteRequest
-	d := json.NewDecoder(r.Body)
-	d.DisallowUnknownFields()
-	if err := d.Decode(&bodyParam); err != nil {
-		c.errorHandler(w, r, &ParsingError{Err: err}, nil)
-		return
-	}
-	if err := AssertBulkDeleteRequestRequired(bodyParam); err != nil {
-		c.errorHandler(w, r, err, nil)
-		return
-	}
-	if err := AssertBulkDeleteRequestConstraints(bodyParam); err != nil {
-		c.errorHandler(w, r, err, nil)
-		return
-	}
-	result, err := c.service.BulkDeleteObjects(r.Context(), bodyParam)
-	// If an error occurred, encode the error with the status code
-	if err != nil {
-		c.errorHandler(w, r, err, &result)
-		return
-	}
-	// If no error, encode the body and the result code
-	_ = EncodeJSONResponse(result.Body, &result.Code, w)
-}
-
 // GetBulkObjects - Get info about multiple DrsObjects with an optional Passport(s).
 func (c *ObjectsAPIController) GetBulkObjects(w http.ResponseWriter, r *http.Request) {
 	query, err := parseQuery(r.URL.RawQuery)
@@ -429,49 +381,7 @@ func (c *ObjectsAPIController) GetBulkObjects(w http.ResponseWriter, r *http.Req
 
 // OptionsBulkObject - Get Authorization info about multiple DrsObjects.
 func (c *ObjectsAPIController) OptionsBulkObject(w http.ResponseWriter, r *http.Request) {
-	var bulkObjectIdNoPassportParam BulkObjectIdNoPassport
-	d := json.NewDecoder(r.Body)
-	d.DisallowUnknownFields()
-	if err := d.Decode(&bulkObjectIdNoPassportParam); err != nil {
-		c.errorHandler(w, r, &ParsingError{Err: err}, nil)
-		return
-	}
-	if err := AssertBulkObjectIdNoPassportRequired(bulkObjectIdNoPassportParam); err != nil {
-		c.errorHandler(w, r, err, nil)
-		return
-	}
-	if err := AssertBulkObjectIdNoPassportConstraints(bulkObjectIdNoPassportParam); err != nil {
-		c.errorHandler(w, r, err, nil)
-		return
-	}
-	result, err := c.service.OptionsBulkObject(r.Context(), bulkObjectIdNoPassportParam)
-	// If an error occurred, encode the error with the status code
-	if err != nil {
-		c.errorHandler(w, r, err, &result)
-		return
-	}
-	// If no error, encode the body and the result code
-	_ = EncodeJSONResponse(result.Body, &result.Code, w)
-}
-
-// RegisterObjects - Register DRS objects
-func (c *ObjectsAPIController) RegisterObjects(w http.ResponseWriter, r *http.Request) {
-	var bodyParam RegisterObjectsRequest
-	d := json.NewDecoder(r.Body)
-	d.DisallowUnknownFields()
-	if err := d.Decode(&bodyParam); err != nil {
-		c.errorHandler(w, r, &ParsingError{Err: err}, nil)
-		return
-	}
-	if err := AssertRegisterObjectsRequestRequired(bodyParam); err != nil {
-		c.errorHandler(w, r, err, nil)
-		return
-	}
-	if err := AssertRegisterObjectsRequestConstraints(bodyParam); err != nil {
-		c.errorHandler(w, r, err, nil)
-		return
-	}
-	result, err := c.service.RegisterObjects(r.Context(), bodyParam)
+	result, err := c.service.OptionsBulkObject(r.Context())
 	// If an error occurred, encode the error with the status code
 	if err != nil {
 		c.errorHandler(w, r, err, &result)
@@ -602,24 +512,6 @@ func (c *ObjectsAPIController) UpdateObjectAccessMethods(w http.ResponseWriter, 
 	_ = EncodeJSONResponse(result.Body, &result.Code, w)
 }
 
-// GetObjectsByChecksum - Get DRS objects that are a match for the checksum.
-func (c *ObjectsAPIController) GetObjectsByChecksum(w http.ResponseWriter, r *http.Request) {
-	params := mux.Vars(r)
-	checksumParam := params["checksum"]
-	if checksumParam == "" {
-		c.errorHandler(w, r, &RequiredError{"checksum"}, nil)
-		return
-	}
-	result, err := c.service.GetObjectsByChecksum(r.Context(), checksumParam)
-	// If an error occurred, encode the error with the status code
-	if err != nil {
-		c.errorHandler(w, r, err, &result)
-		return
-	}
-	// If no error, encode the body and the result code
-	_ = EncodeJSONResponse(result.Body, &result.Code, w)
-}
-
 // BulkUpdateAccessMethods - Bulk update access methods for multiple DRS objects
 func (c *ObjectsAPIController) BulkUpdateAccessMethods(w http.ResponseWriter, r *http.Request) {
 	var bulkAccessMethodUpdateRequestParam BulkAccessMethodUpdateRequest
@@ -638,6 +530,144 @@ func (c *ObjectsAPIController) BulkUpdateAccessMethods(w http.ResponseWriter, r 
 		return
 	}
 	result, err := c.service.BulkUpdateAccessMethods(r.Context(), bulkAccessMethodUpdateRequestParam)
+	// If an error occurred, encode the error with the status code
+	if err != nil {
+		c.errorHandler(w, r, err, &result)
+		return
+	}
+	// If no error, encode the body and the result code
+	_ = EncodeJSONResponse(result.Body, &result.Code, w)
+}
+
+// AddChecksums - Add additional checksums for a DRS object
+func (c *ObjectsAPIController) AddChecksums(w http.ResponseWriter, r *http.Request) {
+	params := mux.Vars(r)
+	objectIdParam := params["object_id"]
+	if objectIdParam == "" {
+		c.errorHandler(w, r, &RequiredError{"object_id"}, nil)
+		return
+	}
+	var checksumAdditionRequestParam ChecksumAdditionRequest
+	d := json.NewDecoder(r.Body)
+	d.DisallowUnknownFields()
+	if err := d.Decode(&checksumAdditionRequestParam); err != nil {
+		c.errorHandler(w, r, &ParsingError{Err: err}, nil)
+		return
+	}
+	if err := AssertChecksumAdditionRequestRequired(checksumAdditionRequestParam); err != nil {
+		c.errorHandler(w, r, err, nil)
+		return
+	}
+	if err := AssertChecksumAdditionRequestConstraints(checksumAdditionRequestParam); err != nil {
+		c.errorHandler(w, r, err, nil)
+		return
+	}
+	result, err := c.service.AddChecksums(r.Context(), objectIdParam, checksumAdditionRequestParam)
+	// If an error occurred, encode the error with the status code
+	if err != nil {
+		c.errorHandler(w, r, err, &result)
+		return
+	}
+	// If no error, encode the body and the result code
+	_ = EncodeJSONResponse(result.Body, &result.Code, w)
+}
+
+// GetObjectsByChecksum - Get DRS objects that are a match for the checksum.
+func (c *ObjectsAPIController) GetObjectsByChecksum(w http.ResponseWriter, r *http.Request) {
+	params := mux.Vars(r)
+	accessIdParam := params["access_id"]
+	if accessIdParam == "" {
+		c.errorHandler(w, r, &RequiredError{"access_id"}, nil)
+		return
+	}
+	result, err := c.service.GetObjectsByChecksum(r.Context(), accessIdParam)
+	// If an error occurred, encode the error with the status code
+	if err != nil {
+		c.errorHandler(w, r, err, &result)
+		return
+	}
+	// If no error, encode the body and the result code
+	_ = EncodeJSONResponse(result.Body, &result.Code, w)
+}
+
+// BulkAddChecksums - Add additional checksums for multiple DRS objects
+func (c *ObjectsAPIController) BulkAddChecksums(w http.ResponseWriter, r *http.Request) {
+	var bulkChecksumAdditionRequestParam BulkChecksumAdditionRequest
+	d := json.NewDecoder(r.Body)
+	d.DisallowUnknownFields()
+	if err := d.Decode(&bulkChecksumAdditionRequestParam); err != nil {
+		c.errorHandler(w, r, &ParsingError{Err: err}, nil)
+		return
+	}
+	if err := AssertBulkChecksumAdditionRequestRequired(bulkChecksumAdditionRequestParam); err != nil {
+		c.errorHandler(w, r, err, nil)
+		return
+	}
+	if err := AssertBulkChecksumAdditionRequestConstraints(bulkChecksumAdditionRequestParam); err != nil {
+		c.errorHandler(w, r, err, nil)
+		return
+	}
+	result, err := c.service.BulkAddChecksums(r.Context(), bulkChecksumAdditionRequestParam)
+	// If an error occurred, encode the error with the status code
+	if err != nil {
+		c.errorHandler(w, r, err, &result)
+		return
+	}
+	// If no error, encode the body and the result code
+	_ = EncodeJSONResponse(result.Body, &result.Code, w)
+}
+
+// DeleteObject - Delete a DRS object (optional endpoint)
+func (c *ObjectsAPIController) DeleteObject(w http.ResponseWriter, r *http.Request) {
+	params := mux.Vars(r)
+	objectIdParam := params["object_id"]
+	if objectIdParam == "" {
+		c.errorHandler(w, r, &RequiredError{"object_id"}, nil)
+		return
+	}
+	var bodyParam DeleteRequest
+	d := json.NewDecoder(r.Body)
+	d.DisallowUnknownFields()
+	if err := d.Decode(&bodyParam); err != nil && !errors.Is(err, io.EOF) {
+		c.errorHandler(w, r, &ParsingError{Err: err}, nil)
+		return
+	}
+	if err := AssertDeleteRequestRequired(bodyParam); err != nil {
+		c.errorHandler(w, r, err, nil)
+		return
+	}
+	if err := AssertDeleteRequestConstraints(bodyParam); err != nil {
+		c.errorHandler(w, r, err, nil)
+		return
+	}
+	result, err := c.service.DeleteObject(r.Context(), objectIdParam, bodyParam)
+	// If an error occurred, encode the error with the status code
+	if err != nil {
+		c.errorHandler(w, r, err, &result)
+		return
+	}
+	// If no error, encode the body and the result code
+	_ = EncodeJSONResponse(result.Body, &result.Code, w)
+}
+
+// BulkDeleteObjects - Delete multiple DRS objects
+func (c *ObjectsAPIController) BulkDeleteObjects(w http.ResponseWriter, r *http.Request) {
+	var bodyParam BulkDeleteRequest
+	d := json.NewDecoder(r.Body)
+	d.DisallowUnknownFields()
+	if err := d.Decode(&bodyParam); err != nil {
+		c.errorHandler(w, r, &ParsingError{Err: err}, nil)
+		return
+	}
+	if err := AssertBulkDeleteRequestRequired(bodyParam); err != nil {
+		c.errorHandler(w, r, err, nil)
+		return
+	}
+	if err := AssertBulkDeleteRequestConstraints(bodyParam); err != nil {
+		c.errorHandler(w, r, err, nil)
+		return
+	}
+	result, err := c.service.BulkDeleteObjects(r.Context(), bodyParam)
 	// If an error occurred, encode the error with the status code
 	if err != nil {
 		c.errorHandler(w, r, err, &result)

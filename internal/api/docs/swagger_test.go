@@ -39,4 +39,7 @@ func TestOpenAPIRoute(t *testing.T) {
 	if !strings.Contains(rr.Body.String(), "openapi: 3.0.3") {
 		t.Fatalf("expected openapi spec body, got: %s", rr.Body.String())
 	}
+	if !strings.Contains(rr.Body.String(), "/info/lfs/objects/batch") {
+		t.Fatalf("expected merged LFS route in openapi body")
+	}
 }

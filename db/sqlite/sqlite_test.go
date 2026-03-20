@@ -268,3 +268,132 @@ func TestSqliteDB_GetServiceInfo(t *testing.T) {
 		t.Fatalf("expected non-empty service info, got %+v", info)
 	}
 }
+
+func TestSqliteDB_PendingLFSMetaLifecycle(t *testing.T) {
+	ctx := context.Background()
+	db, err := NewSqliteDB(":memory:")
+	if err != nil {
+		t.Fatalf("failed to create db: %v", err)
+	}
+	now := time.Now().UTC()
+	candidate := drs.DrsObjectCandidate{
+		Name: "candidate",
+		Size: 123,
+		Checksums: []drs.Checksum{
+			{Type: "sha256", Checksum: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+		},
+	}
+
+	if err := db.SavePendingLFSMeta(ctx, []core.PendingLFSMeta{
+		{
+			OID:       "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			Candidate: candidate,
+			CreatedAt: now,
+			ExpiresAt: now.Add(5 * time.Minute),
+		},
+	}); err != nil {
+		t.Fatalf("SavePendingLFSMeta failed: %v", err)
+	}
+
+	entry, err := db.PopPendingLFSMeta(ctx, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	if err != nil {
+		t.Fatalf("PopPendingLFSMeta failed: %v", err)
+	}
+	if entry.Candidate.Name != "candidate" {
+		t.Fatalf("unexpected candidate payload: %+v", entry.Candidate)
+	}
+
+	if _, err := db.PopPendingLFSMeta(ctx, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"); err == nil {
+		t.Fatalf("expected not found after pop")
+	}
+}
+
+func TestSqliteDB_PendingLFSMetaPrunesExpired(t *testing.T) {
+	ctx := context.Background()
+	db, err := NewSqliteDB(":memory:")
+	if err != nil {
+		t.Fatalf("failed to create db: %v", err)
+	}
+	now := time.Now().UTC()
+	oid := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	candidate := drs.DrsObjectCandidate{
+		Name: "expired",
+		Checksums: []drs.Checksum{
+			{Type: "sha256", Checksum: oid},
+		},
+	}
+
+	if err := db.SavePendingLFSMeta(ctx, []core.PendingLFSMeta{
+		{
+			OID:       oid,
+			Candidate: candidate,
+			CreatedAt: now.Add(-2 * time.Hour),
+			ExpiresAt: now.Add(-1 * time.Hour),
+		},
+	}); err != nil {
+		t.Fatalf("SavePendingLFSMeta failed: %v", err)
+	}
+
+	if _, err := db.PopPendingLFSMeta(ctx, oid); err == nil {
+		t.Fatalf("expected not found for expired metadata")
+	}
+}
+
+func TestSqliteDB_FileUsageMetrics(t *testing.T) {
+	ctx := context.Background()
+	db, err := NewSqliteDB(":memory:")
+	if err != nil {
+		t.Fatalf("failed to create db: %v", err)
+	}
+	now := time.Now().UTC()
+	oid := "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+	if err := db.CreateObject(ctx, &core.InternalObject{
+		DrsObject: drs.DrsObject{
+			Id:          oid,
+			Name:        "metrics-object",
+			Size:        42,
+			CreatedTime: now,
+			UpdatedTime: now,
+			Version:     "1",
+		},
+	}); err != nil {
+		t.Fatalf("CreateObject failed: %v", err)
+	}
+
+	if err := db.RecordFileUpload(ctx, oid); err != nil {
+		t.Fatalf("RecordFileUpload failed: %v", err)
+	}
+	if err := db.RecordFileDownload(ctx, oid); err != nil {
+		t.Fatalf("RecordFileDownload failed: %v", err)
+	}
+	if err := db.RecordFileDownload(ctx, oid); err != nil {
+		t.Fatalf("RecordFileDownload failed: %v", err)
+	}
+
+	usage, err := db.GetFileUsage(ctx, oid)
+	if err != nil {
+		t.Fatalf("GetFileUsage failed: %v", err)
+	}
+	if usage.UploadCount != 1 || usage.DownloadCount != 2 {
+		t.Fatalf("unexpected usage counters: %+v", usage)
+	}
+	if usage.LastAccessTime == nil {
+		t.Fatalf("expected last access time to be set")
+	}
+
+	rows, err := db.ListFileUsage(ctx, 10, 0, nil)
+	if err != nil {
+		t.Fatalf("ListFileUsage failed: %v", err)
+	}
+	if len(rows) == 0 {
+		t.Fatalf("expected at least one usage row")
+	}
+
+	summary, err := db.GetFileUsageSummary(ctx, nil)
+	if err != nil {
+		t.Fatalf("GetFileUsageSummary failed: %v", err)
+	}
+	if summary.TotalFiles == 0 || summary.TotalUploads == 0 || summary.TotalDownloads == 0 {
+		t.Fatalf("unexpected summary: %+v", summary)
+	}
+}

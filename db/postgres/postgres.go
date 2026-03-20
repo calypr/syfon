@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -28,7 +29,54 @@ func NewPostgresDB(dsn string) (*PostgresDB, error) {
 	if err := db.Ping(); err != nil {
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
-	return &PostgresDB{db: db}, nil
+	pg := &PostgresDB{db: db}
+	if err := pg.ensureLFSPendingSchema(); err != nil {
+		return nil, err
+	}
+	if err := pg.ensureObjectUsageSchema(); err != nil {
+		return nil, err
+	}
+	return pg, nil
+}
+
+func (db *PostgresDB) ensureLFSPendingSchema() error {
+	queries := []string{
+		`CREATE TABLE IF NOT EXISTS lfs_pending_metadata (
+			oid TEXT PRIMARY KEY,
+			candidate_json JSONB NOT NULL,
+			created_time TIMESTAMPTZ NOT NULL,
+			expires_time TIMESTAMPTZ NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_lfs_pending_metadata_expires ON lfs_pending_metadata(expires_time)`,
+		`CREATE INDEX IF NOT EXISTS idx_lfs_pending_metadata_created ON lfs_pending_metadata(created_time)`,
+	}
+	for _, q := range queries {
+		if _, err := db.db.Exec(q); err != nil {
+			return fmt.Errorf("failed to initialize lfs pending metadata schema: %w", err)
+		}
+	}
+	return nil
+}
+
+func (db *PostgresDB) ensureObjectUsageSchema() error {
+	queries := []string{
+		`CREATE TABLE IF NOT EXISTS object_usage (
+			object_id TEXT PRIMARY KEY REFERENCES drs_object(id) ON DELETE CASCADE,
+			upload_count BIGINT NOT NULL DEFAULT 0,
+			download_count BIGINT NOT NULL DEFAULT 0,
+			last_upload_time TIMESTAMPTZ NULL,
+			last_download_time TIMESTAMPTZ NULL,
+			updated_time TIMESTAMPTZ NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_object_usage_last_download_time ON object_usage(last_download_time)`,
+		`CREATE INDEX IF NOT EXISTS idx_object_usage_last_upload_time ON object_usage(last_upload_time)`,
+	}
+	for _, q := range queries {
+		if _, err := db.db.Exec(q); err != nil {
+			return fmt.Errorf("failed to initialize object usage schema: %w", err)
+		}
+	}
+	return nil
 }
 
 func (db *PostgresDB) GetServiceInfo(ctx context.Context) (*drs.Service, error) {
@@ -718,4 +766,256 @@ func (db *PostgresDB) ListS3Credentials(ctx context.Context) ([]core.S3Credentia
 		creds = append(creds, c)
 	}
 	return creds, nil
+}
+
+func (db *PostgresDB) SavePendingLFSMeta(ctx context.Context, entries []core.PendingLFSMeta) error {
+	if len(entries) == 0 {
+		return nil
+	}
+	tx, err := db.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM lfs_pending_metadata WHERE expires_time <= NOW()`); err != nil {
+		return fmt.Errorf("failed to prune expired pending metadata: %w", err)
+	}
+
+	for _, e := range entries {
+		raw, err := json.Marshal(e.Candidate)
+		if err != nil {
+			return fmt.Errorf("failed to marshal pending candidate for oid %s: %w", e.OID, err)
+		}
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO lfs_pending_metadata (oid, candidate_json, created_time, expires_time)
+			VALUES ($1, $2::jsonb, $3, $4)
+			ON CONFLICT (oid) DO UPDATE SET
+				candidate_json = EXCLUDED.candidate_json,
+				created_time = EXCLUDED.created_time,
+				expires_time = EXCLUDED.expires_time
+		`, e.OID, string(raw), e.CreatedAt.UTC(), e.ExpiresAt.UTC()); err != nil {
+			return fmt.Errorf("failed to save pending metadata for oid %s: %w", e.OID, err)
+		}
+	}
+	return tx.Commit()
+}
+
+func (db *PostgresDB) PopPendingLFSMeta(ctx context.Context, oid string) (*core.PendingLFSMeta, error) {
+	tx, err := db.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM lfs_pending_metadata WHERE expires_time <= NOW()`); err != nil {
+		return nil, fmt.Errorf("failed to prune expired pending metadata: %w", err)
+	}
+
+	var (
+		raw       string
+		createdAt time.Time
+		expiresAt time.Time
+	)
+	if err := tx.QueryRowContext(ctx, `
+		SELECT candidate_json::text, created_time, expires_time
+		FROM lfs_pending_metadata
+		WHERE oid = $1 AND expires_time > NOW()
+		FOR UPDATE
+	`, oid).Scan(&raw, &createdAt, &expiresAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("%w: pending metadata not found", core.ErrNotFound)
+		}
+		return nil, fmt.Errorf("failed to load pending metadata for oid %s: %w", oid, err)
+	}
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM lfs_pending_metadata WHERE oid = $1`, oid); err != nil {
+		return nil, fmt.Errorf("failed to consume pending metadata for oid %s: %w", oid, err)
+	}
+
+	var c drs.DrsObjectCandidate
+	if err := json.Unmarshal([]byte(raw), &c); err != nil {
+		return nil, fmt.Errorf("failed to parse pending metadata candidate for oid %s: %w", oid, err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return &core.PendingLFSMeta{
+		OID:       oid,
+		Candidate: c,
+		CreatedAt: createdAt,
+		ExpiresAt: expiresAt,
+	}, nil
+}
+
+func (db *PostgresDB) RecordFileUpload(ctx context.Context, objectID string) error {
+	now := time.Now().UTC()
+	_, err := db.db.ExecContext(ctx, `
+		INSERT INTO object_usage (object_id, upload_count, download_count, last_upload_time, last_download_time, updated_time)
+		VALUES ($1, 1, 0, $2, NULL, $2)
+		ON CONFLICT (object_id) DO UPDATE SET
+			upload_count = object_usage.upload_count + 1,
+			last_upload_time = EXCLUDED.last_upload_time,
+			updated_time = EXCLUDED.updated_time
+	`, objectID, now)
+	return err
+}
+
+func (db *PostgresDB) RecordFileDownload(ctx context.Context, objectID string) error {
+	now := time.Now().UTC()
+	_, err := db.db.ExecContext(ctx, `
+		INSERT INTO object_usage (object_id, upload_count, download_count, last_upload_time, last_download_time, updated_time)
+		VALUES ($1, 0, 1, NULL, $2, $2)
+		ON CONFLICT (object_id) DO UPDATE SET
+			download_count = object_usage.download_count + 1,
+			last_download_time = EXCLUDED.last_download_time,
+			updated_time = EXCLUDED.updated_time
+	`, objectID, now)
+	return err
+}
+
+func (db *PostgresDB) GetFileUsage(ctx context.Context, objectID string) (*core.FileUsage, error) {
+	var usage core.FileUsage
+	var lastUpload sql.NullTime
+	var lastDownload sql.NullTime
+	err := db.db.QueryRowContext(ctx, `
+		SELECT o.id, o.name, o.size,
+			COALESCE(u.upload_count, 0),
+			COALESCE(u.download_count, 0),
+			u.last_upload_time,
+			u.last_download_time
+		FROM drs_object o
+		LEFT JOIN object_usage u ON u.object_id = o.id
+		WHERE o.id = $1
+	`, objectID).Scan(
+		&usage.ObjectID,
+		&usage.Name,
+		&usage.Size,
+		&usage.UploadCount,
+		&usage.DownloadCount,
+		&lastUpload,
+		&lastDownload,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("%w: file usage not found", core.ErrNotFound)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if lastUpload.Valid {
+		t := lastUpload.Time
+		usage.LastUploadTime = &t
+	}
+	if lastDownload.Valid {
+		t := lastDownload.Time
+		usage.LastDownloadTime = &t
+	}
+	usage.LastAccessTime = latestUsageTime(usage.LastUploadTime, usage.LastDownloadTime)
+	return &usage, nil
+}
+
+func (db *PostgresDB) ListFileUsage(ctx context.Context, limit, offset int, inactiveSince *time.Time) ([]core.FileUsage, error) {
+	if limit <= 0 {
+		limit = 200
+	}
+	if limit > 1000 {
+		limit = 1000
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	query := `
+		SELECT o.id, o.name, o.size,
+			COALESCE(u.upload_count, 0),
+			COALESCE(u.download_count, 0),
+			u.last_upload_time,
+			u.last_download_time
+		FROM drs_object o
+		LEFT JOIN object_usage u ON u.object_id = o.id
+	`
+	args := []any{}
+	argPos := 1
+	if inactiveSince != nil {
+		query += fmt.Sprintf(" WHERE u.last_download_time IS NULL OR u.last_download_time < $%d", argPos)
+		args = append(args, inactiveSince.UTC())
+		argPos++
+	}
+	query += fmt.Sprintf(" ORDER BY COALESCE(u.last_download_time, TIMESTAMPTZ '1970-01-01T00:00:00Z') ASC, o.id ASC LIMIT $%d OFFSET $%d", argPos, argPos+1)
+	args = append(args, limit, offset)
+
+	rows, err := db.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]core.FileUsage, 0, limit)
+	for rows.Next() {
+		var usage core.FileUsage
+		var lastUpload sql.NullTime
+		var lastDownload sql.NullTime
+		if err := rows.Scan(
+			&usage.ObjectID,
+			&usage.Name,
+			&usage.Size,
+			&usage.UploadCount,
+			&usage.DownloadCount,
+			&lastUpload,
+			&lastDownload,
+		); err != nil {
+			return nil, err
+		}
+		if lastUpload.Valid {
+			t := lastUpload.Time
+			usage.LastUploadTime = &t
+		}
+		if lastDownload.Valid {
+			t := lastDownload.Time
+			usage.LastDownloadTime = &t
+		}
+		usage.LastAccessTime = latestUsageTime(usage.LastUploadTime, usage.LastDownloadTime)
+		out = append(out, usage)
+	}
+	return out, nil
+}
+
+func (db *PostgresDB) GetFileUsageSummary(ctx context.Context, inactiveSince *time.Time) (core.FileUsageSummary, error) {
+	cutoff := time.Now().UTC().AddDate(0, 0, -730)
+	if inactiveSince != nil {
+		cutoff = inactiveSince.UTC()
+	}
+	var summary core.FileUsageSummary
+	if err := db.db.QueryRowContext(ctx, `
+		SELECT
+			COUNT(o.id) AS total_files,
+			COALESCE(SUM(COALESCE(u.upload_count, 0)), 0) AS total_uploads,
+			COALESCE(SUM(COALESCE(u.download_count, 0)), 0) AS total_downloads,
+			COALESCE(SUM(CASE WHEN u.last_download_time IS NULL OR u.last_download_time < $1 THEN 1 ELSE 0 END), 0) AS inactive_files
+		FROM drs_object o
+		LEFT JOIN object_usage u ON u.object_id = o.id
+	`, cutoff).Scan(
+		&summary.TotalFiles,
+		&summary.TotalUploads,
+		&summary.TotalDownloads,
+		&summary.InactiveFileCount,
+	); err != nil {
+		return core.FileUsageSummary{}, err
+	}
+	return summary, nil
+}
+
+func latestUsageTime(ts ...*time.Time) *time.Time {
+	var latest *time.Time
+	for _, t := range ts {
+		if t == nil {
+			continue
+		}
+		if latest == nil || t.After(*latest) {
+			copyT := *t
+			latest = &copyT
+		}
+	}
+	return latest
 }

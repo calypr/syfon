@@ -136,9 +136,11 @@ func TestBulkUpdateAccessMethods(t *testing.T) {
 	mockDB := &testutils.MockDatabase{
 		Objects: map[string]*drs.DrsObject{
 			"obj-1": {
-				Id:             "obj-1",
-				Authorizations: []string{"/data_file"},
+				Id: "obj-1",
 			},
+		},
+		ObjectAuthz: map[string][]string{
+			"obj-1": {"/data_file"},
 		},
 	}
 	service := NewObjectsAPIService(mockDB, &testutils.MockUrlManager{})
@@ -159,6 +161,131 @@ func TestBulkUpdateAccessMethods(t *testing.T) {
 	}
 	if resp.Code != 200 {
 		t.Errorf("expected 200, got %d", resp.Code)
+	}
+}
+
+func TestAddChecksums_SuccessAddsOnlyNewTypes(t *testing.T) {
+	mockDB := &testutils.MockDatabase{
+		Objects: map[string]*drs.DrsObject{
+			"obj-1": {
+				Id: "obj-1",
+				Checksums: []drs.Checksum{
+					{Type: "sha256", Checksum: "abc123"},
+				},
+			},
+		},
+	}
+	service := NewObjectsAPIService(mockDB, &testutils.MockUrlManager{})
+
+	ctx := context.WithValue(context.Background(), core.AuthModeKey, "gen3")
+	ctx = context.WithValue(ctx, core.AuthHeaderPresentKey, true)
+	ctx = context.WithValue(ctx, core.UserPrivilegesKey, map[string]map[string]bool{
+		"/data_file": {"update": true},
+	})
+
+	resp, err := service.AddChecksums(ctx, "obj-1", drs.ChecksumAdditionRequest{
+		Checksums: []drs.Checksum{
+			{Type: "sha-256", Checksum: "should-be-ignored"},
+			{Type: "md5", Checksum: "md5sum"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("AddChecksums failed: %v", err)
+	}
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.Code)
+	}
+	obj, ok := resp.Body.(drs.DrsObject)
+	if !ok {
+		t.Fatalf("expected DrsObject response, got %T", resp.Body)
+	}
+
+	hasSHA256 := false
+	hasMD5 := false
+	for _, cs := range obj.Checksums {
+		switch cs.Type {
+		case "sha256":
+			hasSHA256 = true
+		case "md5":
+			if cs.Checksum == "md5sum" {
+				hasMD5 = true
+			}
+		}
+	}
+	if !hasSHA256 || !hasMD5 {
+		t.Fatalf("expected sha256+md5 checksums, got %+v", obj.Checksums)
+	}
+}
+
+func TestBulkAddChecksums_Success(t *testing.T) {
+	mockDB := &testutils.MockDatabase{
+		Objects: map[string]*drs.DrsObject{
+			"obj-1": {Id: "obj-1", Checksums: []drs.Checksum{{Type: "sha256", Checksum: "a1"}}},
+			"obj-2": {Id: "obj-2", Checksums: []drs.Checksum{{Type: "sha256", Checksum: "b2"}}},
+		},
+	}
+	service := NewObjectsAPIService(mockDB, &testutils.MockUrlManager{})
+
+	ctx := context.WithValue(context.Background(), core.AuthModeKey, "gen3")
+	ctx = context.WithValue(ctx, core.AuthHeaderPresentKey, true)
+	ctx = context.WithValue(ctx, core.UserPrivilegesKey, map[string]map[string]bool{
+		"/data_file": {"update": true},
+	})
+
+	resp, err := service.BulkAddChecksums(ctx, drs.BulkChecksumAdditionRequest{
+		Updates: []drs.BulkChecksumAdditionRequestUpdatesInner{
+			{
+				ObjectId:  "obj-1",
+				Checksums: []drs.Checksum{{Type: "md5", Checksum: "m1"}},
+			},
+			{
+				ObjectId:  "obj-2",
+				Checksums: []drs.Checksum{{Type: "crc32c", Checksum: "c2"}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("BulkAddChecksums failed: %v", err)
+	}
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.Code)
+	}
+	out, ok := resp.Body.(drs.BulkUpdateAccessMethods200Response)
+	if !ok {
+		t.Fatalf("expected BulkUpdateAccessMethods200Response, got %T", resp.Body)
+	}
+	if len(out.Objects) != 2 {
+		t.Fatalf("expected 2 updated objects, got %d", len(out.Objects))
+	}
+}
+
+func TestBulkAddChecksums_Forbidden(t *testing.T) {
+	mockDB := &testutils.MockDatabase{
+		Objects: map[string]*drs.DrsObject{
+			"obj-1": {Id: "obj-1", Checksums: []drs.Checksum{{Type: "sha256", Checksum: "a1"}}},
+		},
+	}
+	service := NewObjectsAPIService(mockDB, &testutils.MockUrlManager{})
+
+	ctx := context.WithValue(context.Background(), core.AuthModeKey, "gen3")
+	ctx = context.WithValue(ctx, core.AuthHeaderPresentKey, true)
+	ctx = context.WithValue(ctx, core.UserPrivilegesKey, map[string]map[string]bool{
+		"/data_file": {"read": true},
+	})
+
+	resp, err := service.BulkAddChecksums(ctx, drs.BulkChecksumAdditionRequest{
+		Updates: []drs.BulkChecksumAdditionRequestUpdatesInner{
+			{
+				ObjectId:  "obj-1",
+				Checksums: []drs.Checksum{{Type: "md5", Checksum: "m1"}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d", resp.Code)
 	}
 }
 
@@ -199,17 +326,15 @@ func TestRegisterObjects_ForbiddenWithoutCreatePermission(t *testing.T) {
 	}
 }
 
-func TestRegisterObjects_UsesOrganizationProjectScope(t *testing.T) {
+func TestRegisterObjects_UsesAccessMethodAuthzScope(t *testing.T) {
 	mockDB := &testutils.MockDatabase{}
 	service := NewObjectsAPIService(mockDB, &testutils.MockUrlManager{})
 
 	req := drs.RegisterObjectsRequest{
 		Candidates: []drs.DrsObjectCandidate{
 			{
-				Name:         "obj",
-				Size:         1,
-				Organization: "cbdsTest",
-				Project:      "git_drs_e2e_test",
+				Name: "obj",
+				Size: 1,
 				Checksums: []drs.Checksum{
 					{Type: "sha256", Checksum: "a1b2"},
 				},
@@ -217,6 +342,9 @@ func TestRegisterObjects_UsesOrganizationProjectScope(t *testing.T) {
 					{
 						Type:      "s3",
 						AccessUrl: drs.AccessMethodAccessUrl{Url: "s3://b/a1b2"},
+						Authorizations: drs.AccessMethodAuthorizations{
+							BearerAuthIssuers: []string{"/programs/cbdsTest/projects/git_drs_e2e_test"},
+						},
 					},
 				},
 			},
@@ -234,37 +362,6 @@ func TestRegisterObjects_UsesOrganizationProjectScope(t *testing.T) {
 	}
 	if resp.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d", resp.Code)
-	}
-}
-
-func TestRegisterObjects_ProjectRequiresOrganization(t *testing.T) {
-	mockDB := &testutils.MockDatabase{}
-	service := NewObjectsAPIService(mockDB, &testutils.MockUrlManager{})
-
-	req := drs.RegisterObjectsRequest{
-		Candidates: []drs.DrsObjectCandidate{
-			{
-				Name:    "obj",
-				Size:    1,
-				Project: "git_drs_e2e_test",
-				Checksums: []drs.Checksum{
-					{Type: "sha256", Checksum: "b1c2"},
-				},
-				AccessMethods: []drs.AccessMethod{
-					{
-						Type:      "s3",
-						AccessUrl: drs.AccessMethodAccessUrl{Url: "s3://b/b1c2"},
-					},
-				},
-			},
-		},
-	}
-	resp, err := service.RegisterObjects(context.Background(), req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if resp.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d", resp.Code)
 	}
 }
 
@@ -302,13 +399,15 @@ func TestGetBulkObjects_TracksMissingAndDenied(t *testing.T) {
 	mockDB := &testutils.MockDatabase{
 		Objects: map[string]*drs.DrsObject{
 			"obj-ok": {
-				Id:             "obj-ok",
-				Authorizations: []string{"/programs/a/projects/b"},
+				Id: "obj-ok",
 			},
 			"obj-denied": {
-				Id:             "obj-denied",
-				Authorizations: []string{"/programs/a/projects/c"},
+				Id: "obj-denied",
 			},
+		},
+		ObjectAuthz: map[string][]string{
+			"obj-ok":     {"/programs/a/projects/b"},
+			"obj-denied": {"/programs/a/projects/c"},
 		},
 	}
 	service := NewObjectsAPIService(mockDB, &testutils.MockUrlManager{})
@@ -348,15 +447,17 @@ func TestGetBulkAccessURL_UnresolvedCodes(t *testing.T) {
 				AccessMethods: []drs.AccessMethod{
 					{AccessId: "s3", Type: "s3", AccessUrl: drs.AccessMethodAccessUrl{Url: "s3://bucket/ok"}},
 				},
-				Authorizations: []string{"/programs/a/projects/b"},
 			},
 			"denied": {
 				Id: "denied",
 				AccessMethods: []drs.AccessMethod{
 					{AccessId: "s3", Type: "s3", AccessUrl: drs.AccessMethodAccessUrl{Url: "s3://bucket/denied"}},
 				},
-				Authorizations: []string{"/programs/a/projects/c"},
 			},
+		},
+		ObjectAuthz: map[string][]string{
+			"ok":     {"/programs/a/projects/b"},
+			"denied": {"/programs/a/projects/c"},
 		},
 	}
 	service := NewObjectsAPIService(mockDB, &testutils.MockUrlManager{})
@@ -396,9 +497,11 @@ func TestBulkUpdateAccessMethods_ForbiddenInGen3NoAuthHeader(t *testing.T) {
 	mockDB := &testutils.MockDatabase{
 		Objects: map[string]*drs.DrsObject{
 			"obj-1": {
-				Id:             "obj-1",
-				Authorizations: []string{"/programs/a/projects/b"},
+				Id: "obj-1",
 			},
+		},
+		ObjectAuthz: map[string][]string{
+			"obj-1": {"/programs/a/projects/b"},
 		},
 	}
 	service := NewObjectsAPIService(mockDB, &testutils.MockUrlManager{})
@@ -425,9 +528,11 @@ func TestDeleteObject_SuccessAndForbidden(t *testing.T) {
 	mockDB := &testutils.MockDatabase{
 		Objects: map[string]*drs.DrsObject{
 			"obj-del": {
-				Id:             "obj-del",
-				Authorizations: []string{"/programs/a/projects/b"},
+				Id: "obj-del",
 			},
+		},
+		ObjectAuthz: map[string][]string{
+			"obj-del": {"/programs/a/projects/b"},
 		},
 	}
 	service := NewObjectsAPIService(mockDB, &testutils.MockUrlManager{})
@@ -474,13 +579,15 @@ func TestOptionsObjectAndBulkObject(t *testing.T) {
 	mockDB := &testutils.MockDatabase{
 		Objects: map[string]*drs.DrsObject{
 			"obj-1": {
-				Id:             "obj-1",
-				Authorizations: []string{"/programs/a/projects/b"},
+				Id: "obj-1",
 			},
 			"obj-2": {
-				Id:             "obj-2",
-				Authorizations: []string{"/programs/a/projects/c"},
+				Id: "obj-2",
 			},
+		},
+		ObjectAuthz: map[string][]string{
+			"obj-1": {"/programs/a/projects/b"},
+			"obj-2": {"/programs/a/projects/c"},
 		},
 	}
 	service := NewObjectsAPIService(mockDB, &testutils.MockUrlManager{})
@@ -493,26 +600,12 @@ func TestOptionsObjectAndBulkObject(t *testing.T) {
 		t.Fatalf("expected 200, got %d", resp.Code)
 	}
 
-	ctx := context.WithValue(context.Background(), core.AuthModeKey, "gen3")
-	ctx = context.WithValue(ctx, core.AuthHeaderPresentKey, true)
-	ctx = context.WithValue(ctx, core.UserPrivilegesKey, map[string]map[string]bool{
-		"/programs/a/projects/b": {"read": true},
-	})
-	bulkResp, err := service.OptionsBulkObject(ctx, drs.BulkObjectIdNoPassport{
-		BulkObjectIds: []string{"obj-1", "obj-2", "missing"},
-	})
+	bulkResp, err := service.OptionsBulkObject(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if bulkResp.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", bulkResp.Code)
-	}
-	out, ok := bulkResp.Body.(drs.OptionsBulkObject200Response)
-	if !ok {
-		t.Fatalf("expected OptionsBulkObject200Response, got %T", bulkResp.Body)
-	}
-	if out.Summary.Requested != 3 || out.Summary.Resolved != 1 || out.Summary.Unresolved != 1 {
-		t.Fatalf("unexpected summary: %+v", out.Summary)
+	if bulkResp.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d", bulkResp.Code)
 	}
 }
 
@@ -569,9 +662,11 @@ func TestUpdateObjectAccessMethods_Success(t *testing.T) {
 	mockDB := &testutils.MockDatabase{
 		Objects: map[string]*drs.DrsObject{
 			"obj-upd": {
-				Id:             "obj-upd",
-				Authorizations: []string{"/programs/a/projects/b"},
+				Id: "obj-upd",
 			},
+		},
+		ObjectAuthz: map[string][]string{
+			"obj-upd": {"/programs/a/projects/b"},
 		},
 	}
 	service := NewObjectsAPIService(mockDB, &testutils.MockUrlManager{})
@@ -730,8 +825,12 @@ func TestPostUploadRequest_Gen3Unauthorized(t *testing.T) {
 func TestBulkDeleteObjects_Success(t *testing.T) {
 	mockDB := &testutils.MockDatabase{
 		Objects: map[string]*drs.DrsObject{
-			"obj-a": {Id: "obj-a", Authorizations: []string{"/programs/a/projects/b"}},
-			"obj-b": {Id: "obj-b", Authorizations: []string{"/programs/a/projects/b"}},
+			"obj-a": {Id: "obj-a"},
+			"obj-b": {Id: "obj-b"},
+		},
+		ObjectAuthz: map[string][]string{
+			"obj-a": {"/programs/a/projects/b"},
+			"obj-b": {"/programs/a/projects/b"},
 		},
 	}
 	service := NewObjectsAPIService(mockDB, &testutils.MockUrlManager{})
@@ -760,5 +859,89 @@ func TestGetServiceInfo(t *testing.T) {
 	}
 	if resp.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.Code)
+	}
+}
+
+func TestGetBulkObjects_TooLarge(t *testing.T) {
+	service := NewObjectsAPIService(&testutils.MockDatabase{}, &testutils.MockUrlManager{})
+	ids := make([]string, defaultMaxBulkRequestLength+1)
+	for i := range ids {
+		ids[i] = "obj"
+	}
+	resp, err := service.GetBulkObjects(context.Background(), drs.GetBulkObjectsRequest{BulkObjectIds: ids}, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected 413, got %d", resp.Code)
+	}
+}
+
+func TestRegisterObjects_TooLarge(t *testing.T) {
+	service := NewObjectsAPIService(&testutils.MockDatabase{}, &testutils.MockUrlManager{})
+	candidates := make([]drs.DrsObjectCandidate, defaultMaxRegisterRequestLength+1)
+	for i := range candidates {
+		candidates[i] = drs.DrsObjectCandidate{
+			Name: "obj",
+			Size: 1,
+			Checksums: []drs.Checksum{
+				{Type: "sha256", Checksum: "deadbeef"},
+			},
+		}
+	}
+	resp, err := service.RegisterObjects(context.Background(), drs.RegisterObjectsRequest{Candidates: candidates})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected 413, got %d", resp.Code)
+	}
+}
+
+func TestBulkDeleteObjects_TooLarge(t *testing.T) {
+	service := NewObjectsAPIService(&testutils.MockDatabase{}, &testutils.MockUrlManager{})
+	ids := make([]string, defaultMaxBulkDeleteLength+1)
+	for i := range ids {
+		ids[i] = "obj"
+	}
+	resp, err := service.BulkDeleteObjects(context.Background(), drs.BulkDeleteRequest{BulkObjectIds: ids})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected 413, got %d", resp.Code)
+	}
+}
+
+func TestBulkUpdateAccessMethods_TooLarge(t *testing.T) {
+	service := NewObjectsAPIService(&testutils.MockDatabase{}, &testutils.MockUrlManager{})
+	updates := make([]drs.BulkAccessMethodUpdateRequestUpdatesInner, defaultMaxBulkAccessMethodUpdateLength+1)
+	for i := range updates {
+		updates[i] = drs.BulkAccessMethodUpdateRequestUpdatesInner{ObjectId: "obj"}
+	}
+	resp, err := service.BulkUpdateAccessMethods(context.Background(), drs.BulkAccessMethodUpdateRequest{Updates: updates})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected 413, got %d", resp.Code)
+	}
+}
+
+func TestBulkAddChecksums_TooLarge(t *testing.T) {
+	service := NewObjectsAPIService(&testutils.MockDatabase{}, &testutils.MockUrlManager{})
+	updates := make([]drs.BulkChecksumAdditionRequestUpdatesInner, defaultMaxBulkChecksumAdditionLength+1)
+	for i := range updates {
+		updates[i] = drs.BulkChecksumAdditionRequestUpdatesInner{
+			ObjectId:  "obj",
+			Checksums: []drs.Checksum{{Type: "md5", Checksum: "m"}},
+		}
+	}
+	resp, err := service.BulkAddChecksums(context.Background(), drs.BulkChecksumAdditionRequest{Updates: updates})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected 413, got %d", resp.Code)
 	}
 }

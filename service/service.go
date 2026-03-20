@@ -22,6 +22,15 @@ type ObjectsAPIService struct {
 	urlManager urlmanager.UrlManager
 }
 
+const (
+	defaultMaxBulkRequestLength            = 200
+	defaultMaxBulkDeleteLength             = 100
+	defaultMaxRegisterRequestLength        = 200
+	defaultMaxBulkAccessMethodUpdateLength = 200
+	defaultMaxBulkChecksumAdditionLength   = 200
+	defaultMaxChecksumAdditionsPerObject   = 200
+)
+
 // NewObjectsAPIService creates a new ObjectsAPIService.
 func NewObjectsAPIService(db core.DatabaseInterface, urlManager urlmanager.UrlManager) *ObjectsAPIService {
 	return &ObjectsAPIService{db: db, urlManager: urlManager}
@@ -62,7 +71,17 @@ func forbiddenResponse(ctx context.Context, msg string) drs.ImplResponse {
 	}
 }
 
+func tooLargeResponse(msg string) drs.ImplResponse {
+	return drs.ImplResponse{
+		Code: http.StatusRequestEntityTooLarge,
+		Body: drs.Error{Msg: msg, StatusCode: http.StatusRequestEntityTooLarge},
+	}
+}
+
 func (s *ObjectsAPIService) GetObject(ctx context.Context, id string, expand bool) (drs.ImplResponse, error) {
+	if strings.TrimSpace(id) == "" {
+		return drs.ImplResponse{Code: http.StatusBadRequest, Body: drs.Error{Msg: "object_id cannot be empty", StatusCode: http.StatusBadRequest}}, nil
+	}
 	obj, err := s.db.GetObject(ctx, id)
 	if err != nil {
 		resp := errorResponseForDBError(ctx, "GetObject", err)
@@ -72,16 +91,26 @@ func (s *ObjectsAPIService) GetObject(ctx context.Context, id string, expand boo
 }
 
 func (s *ObjectsAPIService) PostObject(ctx context.Context, id string, req drs.PostObjectRequest) (drs.ImplResponse, error) {
+	if strings.TrimSpace(id) == "" {
+		return drs.ImplResponse{Code: http.StatusBadRequest, Body: drs.Error{Msg: "object_id cannot be empty", StatusCode: http.StatusBadRequest}}, nil
+	}
 	return s.GetObject(ctx, id, false)
 }
 
 func (s *ObjectsAPIService) OptionsObject(ctx context.Context, id string) (drs.ImplResponse, error) {
+	if strings.TrimSpace(id) == "" {
+		return drs.ImplResponse{Code: http.StatusBadRequest, Body: drs.Error{Msg: "object_id cannot be empty", StatusCode: http.StatusBadRequest}}, nil
+	}
 	obj, err := s.db.GetObject(ctx, id)
 	if err != nil {
 		resp := errorResponseForDBError(ctx, "OptionsObject", err)
 		return resp, err
 	}
-	return drs.ImplResponse{Code: http.StatusOK, Body: authorizationsForObject(obj)}, nil
+	authz := authorizationsForObject(obj)
+	if len(authz.BearerAuthIssuers) == 0 {
+		return drs.ImplResponse{Code: http.StatusNoContent, Body: nil}, nil
+	}
+	return drs.ImplResponse{Code: http.StatusOK, Body: authz}, nil
 }
 
 func (s *ObjectsAPIService) DeleteObject(ctx context.Context, id string, req drs.DeleteRequest) (drs.ImplResponse, error) {
@@ -110,11 +139,25 @@ func (s *ObjectsAPIService) BulkDeleteObjects(ctx context.Context, req drs.BulkD
 	if len(req.BulkObjectIds) == 0 {
 		return drs.ImplResponse{Code: http.StatusBadRequest, Body: drs.Error{Msg: "bulk_object_ids cannot be empty", StatusCode: http.StatusBadRequest}}, nil
 	}
+	if len(req.BulkObjectIds) > defaultMaxBulkDeleteLength {
+		return tooLargeResponse(fmt.Sprintf("bulk delete request contains %d objects but server maximum is %d", len(req.BulkObjectIds), defaultMaxBulkDeleteLength)), nil
+	}
+
+	fetched, err := s.db.GetBulkObjects(ctx, req.BulkObjectIds)
+	if err != nil {
+		resp := errorResponseForDBError(ctx, "BulkDeleteObjects.GetBulkObjects", err)
+		return resp, err
+	}
+	byID := make(map[string]core.InternalObject, len(fetched))
+	for _, obj := range fetched {
+		byID[obj.Id] = obj
+	}
+
 	for _, id := range req.BulkObjectIds {
-		obj, err := s.db.GetObject(ctx, id)
-		if err != nil {
-			resp := errorResponseForDBError(ctx, "BulkDeleteObjects.GetObject", err)
-			return resp, err
+		obj, ok := byID[id]
+		if !ok {
+			resp := errorResponseForDBError(ctx, "BulkDeleteObjects.GetBulkObjects", core.ErrNotFound)
+			return resp, core.ErrNotFound
 		}
 		targetResources := obj.Authorizations
 		if len(targetResources) == 0 {
@@ -131,18 +174,30 @@ func (s *ObjectsAPIService) BulkDeleteObjects(ctx context.Context, req drs.BulkD
 }
 
 func (s *ObjectsAPIService) GetBulkObjects(ctx context.Context, req drs.GetBulkObjectsRequest, expand bool) (drs.ImplResponse, error) {
+	if len(req.BulkObjectIds) == 0 {
+		return drs.ImplResponse{Code: http.StatusBadRequest, Body: drs.Error{Msg: "bulk_object_ids cannot be empty", StatusCode: http.StatusBadRequest}}, nil
+	}
+	if len(req.BulkObjectIds) > defaultMaxBulkRequestLength {
+		return tooLargeResponse(fmt.Sprintf("bulk object request contains %d object IDs but server maximum is %d", len(req.BulkObjectIds), defaultMaxBulkRequestLength)), nil
+	}
+
+	fetched, err := s.db.GetBulkObjects(ctx, req.BulkObjectIds)
+	if err != nil {
+		resp := errorResponseForDBError(ctx, "GetBulkObjects.GetBulkObjects", err)
+		return resp, err
+	}
+	byID := make(map[string]core.InternalObject, len(fetched))
+	for _, obj := range fetched {
+		byID[obj.Id] = obj
+	}
+
 	resolved := make([]drs.DrsObject, 0, len(req.BulkObjectIds))
 	missing := make([]string, 0)
 	denied := make([]string, 0)
 	for _, id := range req.BulkObjectIds {
-		obj, err := s.db.GetObject(ctx, id)
-		if err != nil {
-			if errors.Is(err, core.ErrUnauthorized) {
-				slog.Warn("bulk get denied", "request_id", core.GetRequestID(ctx), "id", id, "err", err)
-				denied = append(denied, id)
-				continue
-			}
-			slog.Info("bulk get unresolved", "request_id", core.GetRequestID(ctx), "id", id, "err", err)
+		obj, ok := byID[id]
+		if !ok {
+			slog.Info("bulk get unresolved", "request_id", core.GetRequestID(ctx), "id", id, "err", core.ErrNotFound)
 			missing = append(missing, id)
 			continue
 		}
@@ -176,55 +231,23 @@ func (s *ObjectsAPIService) GetBulkObjects(ctx context.Context, req drs.GetBulkO
 	return drs.ImplResponse{Code: http.StatusOK, Body: out}, nil
 }
 
-func (s *ObjectsAPIService) OptionsBulkObject(ctx context.Context, req drs.BulkObjectIdNoPassport) (drs.ImplResponse, error) {
-	resolved := make([]drs.Authorizations, 0, len(req.BulkObjectIds))
-	missing := make([]string, 0)
-	denied := make([]string, 0)
-	for _, id := range req.BulkObjectIds {
-		obj, err := s.db.GetObject(ctx, id)
-		if err != nil {
-			if errors.Is(err, core.ErrUnauthorized) {
-				slog.Warn("options bulk denied", "request_id", core.GetRequestID(ctx), "id", id, "err", err)
-				denied = append(denied, id)
-				continue
-			}
-			slog.Info("options bulk unresolved", "request_id", core.GetRequestID(ctx), "id", id, "err", err)
-			missing = append(missing, id)
-			continue
-		}
-		if len(obj.Authorizations) > 0 && !core.HasMethodAccess(ctx, "read", obj.Authorizations) {
-			slog.Warn("options bulk denied by access check", "request_id", core.GetRequestID(ctx), "id", id)
-			denied = append(denied, id)
-			continue
-		}
-		auth := authorizationsForObject(obj)
-		auth.DrsObjectId = id
-		resolved = append(resolved, auth)
-	}
-	out := drs.OptionsBulkObject200Response{
-		Summary: drs.Summary{
-			Requested:  int32(len(req.BulkObjectIds)),
-			Resolved:   int32(len(resolved)),
-			Unresolved: int32(len(missing)),
-		},
-		ResolvedDrsObject: resolved,
-	}
-	if len(denied) > 0 {
-		out.UnresolvedDrsObjects = append(out.UnresolvedDrsObjects, drs.UnresolvedInner{
-			ErrorCode: int32(unauthorizedStatus(ctx)),
-			ObjectIds: uniqueStrings(denied),
-		})
-	}
-	if len(missing) > 0 {
-		out.UnresolvedDrsObjects = append(out.UnresolvedDrsObjects, drs.UnresolvedInner{
-			ErrorCode: 404,
-			ObjectIds: uniqueStrings(missing),
-		})
-	}
-	return drs.ImplResponse{Code: http.StatusOK, Body: out}, nil
+func (s *ObjectsAPIService) OptionsBulkObject(ctx context.Context) (drs.ImplResponse, error) {
+	// In issue-416 spec branch, OPTIONS /objects no longer includes bulk object ids in request payload.
+	// Return 204 when object-level authorization introspection is not available via this shape.
+	return drs.ImplResponse{Code: http.StatusNoContent, Body: nil}, nil
 }
 
 func (s *ObjectsAPIService) RegisterObjects(ctx context.Context, req drs.RegisterObjectsRequest) (drs.ImplResponse, error) {
+	if len(req.Candidates) == 0 {
+		return drs.ImplResponse{
+			Code: http.StatusBadRequest,
+			Body: drs.Error{Msg: "candidates cannot be empty", StatusCode: http.StatusBadRequest},
+		}, nil
+	}
+	if len(req.Candidates) > defaultMaxRegisterRequestLength {
+		return tooLargeResponse(fmt.Sprintf("register request contains %d candidates but server maximum is %d", len(req.Candidates), defaultMaxRegisterRequestLength)), nil
+	}
+
 	var objects []core.InternalObject
 	now := time.Now()
 	registered := make([]drs.DrsObject, 0, len(req.Candidates))
@@ -290,22 +313,6 @@ func (s *ObjectsAPIService) RegisterObjects(ctx context.Context, req drs.Registe
 				authz = append(authz, issuer)
 			}
 		}
-		if len(authz) == 0 && (c.Organization != "" || c.Project != "") {
-			if strings.TrimSpace(c.Project) != "" && strings.TrimSpace(c.Organization) == "" {
-				return drs.ImplResponse{
-					Code: http.StatusBadRequest,
-					Body: drs.Error{
-						Msg:        "candidate[" + strconv.Itoa(i) + "] project requires organization",
-						StatusCode: http.StatusBadRequest,
-					},
-				}, nil
-			}
-			path := core.ResourcePathForScope(c.Organization, c.Project)
-			if path != "" {
-				authz = append(authz, path)
-			}
-		}
-		obj.Authorizations = authz
 		for i := range accessMethods {
 			accessMethods[i].Authorizations = drs.AccessMethodAuthorizations{
 				BearerAuthIssuers: authz,
@@ -349,7 +356,114 @@ func (s *ObjectsAPIService) GetObjectsByChecksums(ctx context.Context, checksums
 	return drs.ImplResponse{Code: http.StatusOK, Body: out}, nil
 }
 
+func (s *ObjectsAPIService) AddChecksums(ctx context.Context, objectID string, req drs.ChecksumAdditionRequest) (drs.ImplResponse, error) {
+	if len(req.Checksums) == 0 {
+		return drs.ImplResponse{
+			Code: http.StatusBadRequest,
+			Body: drs.Error{Msg: "checksums cannot be empty", StatusCode: http.StatusBadRequest},
+		}, nil
+	}
+	if len(req.Checksums) > defaultMaxChecksumAdditionsPerObject {
+		return tooLargeResponse(fmt.Sprintf("checksum update contains %d checksums but server maximum is %d", len(req.Checksums), defaultMaxChecksumAdditionsPerObject)), nil
+	}
+
+	obj, err := s.db.GetObject(ctx, objectID)
+	if err != nil {
+		resp := errorResponseForDBError(ctx, "AddChecksums.GetObject", err)
+		return resp, err
+	}
+	targetResources := obj.Authorizations
+	if len(targetResources) == 0 {
+		targetResources = []string{"/data_file"}
+	}
+	if !core.HasMethodAccess(ctx, "update", targetResources) {
+		return forbiddenResponse(ctx, "forbidden: missing update permission"), nil
+	}
+
+	merged := mergeAdditionalChecksums(obj.Checksums, req.Checksums)
+	updated := *obj
+	updated.Checksums = merged
+	updated.UpdatedTime = time.Now()
+	if err := s.db.RegisterObjects(ctx, []core.InternalObject{updated}); err != nil {
+		return drs.ImplResponse{Code: http.StatusInternalServerError, Body: drs.Error{Msg: err.Error(), StatusCode: http.StatusInternalServerError}}, err
+	}
+	refreshed, err := s.db.GetObject(ctx, objectID)
+	if err != nil {
+		resp := errorResponseForDBError(ctx, "AddChecksums.GetObjectPostUpdate", err)
+		return resp, err
+	}
+	return drs.ImplResponse{Code: http.StatusOK, Body: refreshed.DrsObject}, nil
+}
+
+func (s *ObjectsAPIService) BulkAddChecksums(ctx context.Context, req drs.BulkChecksumAdditionRequest) (drs.ImplResponse, error) {
+	if len(req.Updates) == 0 {
+		return drs.ImplResponse{
+			Code: http.StatusBadRequest,
+			Body: drs.Error{Msg: "updates cannot be empty", StatusCode: http.StatusBadRequest},
+		}, nil
+	}
+	if len(req.Updates) > defaultMaxBulkChecksumAdditionLength {
+		return tooLargeResponse(fmt.Sprintf("bulk checksum request contains %d updates but server maximum is %d", len(req.Updates), defaultMaxBulkChecksumAdditionLength)), nil
+	}
+
+	updatesByID := make(map[string][]drs.Checksum, len(req.Updates))
+	for _, update := range req.Updates {
+		if strings.TrimSpace(update.ObjectId) == "" {
+			return drs.ImplResponse{
+				Code: http.StatusBadRequest,
+				Body: drs.Error{Msg: "object_id cannot be empty", StatusCode: http.StatusBadRequest},
+			}, nil
+		}
+		if len(update.Checksums) == 0 {
+			return drs.ImplResponse{
+				Code: http.StatusBadRequest,
+				Body: drs.Error{Msg: "checksums cannot be empty", StatusCode: http.StatusBadRequest},
+			}, nil
+		}
+		updatesByID[update.ObjectId] = append(updatesByID[update.ObjectId], update.Checksums...)
+	}
+
+	// Validate all objects/permissions first to preserve all-or-nothing behavior.
+	toWrite := make([]core.InternalObject, 0, len(updatesByID))
+	for objectID, checksums := range updatesByID {
+		obj, err := s.db.GetObject(ctx, objectID)
+		if err != nil {
+			resp := errorResponseForDBError(ctx, "BulkAddChecksums.GetObject", err)
+			return resp, err
+		}
+		targetResources := obj.Authorizations
+		if len(targetResources) == 0 {
+			targetResources = []string{"/data_file"}
+		}
+		if !core.HasMethodAccess(ctx, "update", targetResources) {
+			return forbiddenResponse(ctx, "forbidden: missing update permission"), nil
+		}
+		updated := *obj
+		updated.Checksums = mergeAdditionalChecksums(obj.Checksums, checksums)
+		updated.UpdatedTime = time.Now()
+		toWrite = append(toWrite, updated)
+	}
+
+	if err := s.db.RegisterObjects(ctx, toWrite); err != nil {
+		return drs.ImplResponse{Code: http.StatusInternalServerError, Body: drs.Error{Msg: err.Error(), StatusCode: http.StatusInternalServerError}}, err
+	}
+
+	updatedObjects := make([]drs.DrsObject, 0, len(updatesByID))
+	for objectID := range updatesByID {
+		obj, err := s.db.GetObject(ctx, objectID)
+		if err != nil {
+			resp := errorResponseForDBError(ctx, "BulkAddChecksums.GetObjectPostUpdate", err)
+			return resp, err
+		}
+		updatedObjects = append(updatedObjects, obj.DrsObject)
+	}
+	return drs.ImplResponse{Code: http.StatusOK, Body: drs.BulkUpdateAccessMethods200Response{Objects: updatedObjects}}, nil
+}
+
 func (s *ObjectsAPIService) GetAccessURL(ctx context.Context, objectID string, accessID string) (drs.ImplResponse, error) {
+	if strings.TrimSpace(objectID) == "" || strings.TrimSpace(accessID) == "" {
+		return drs.ImplResponse{Code: http.StatusBadRequest, Body: drs.Error{Msg: "object_id and access_id are required", StatusCode: http.StatusBadRequest}}, nil
+	}
 	obj, err := s.db.GetObject(ctx, objectID)
 	if err != nil {
 		resp := errorResponseForDBError(ctx, "GetAccessURL.GetObject", err)
@@ -394,6 +508,13 @@ func (s *ObjectsAPIService) PostAccessURL(ctx context.Context, objectID string, 
 }
 
 func (s *ObjectsAPIService) GetBulkAccessURL(ctx context.Context, req drs.BulkObjectAccessId) (drs.ImplResponse, error) {
+	if len(req.BulkObjectAccessIds) == 0 {
+		return drs.ImplResponse{Code: http.StatusBadRequest, Body: drs.Error{Msg: "bulk_object_access_ids cannot be empty", StatusCode: http.StatusBadRequest}}, nil
+	}
+	if len(req.BulkObjectAccessIds) > defaultMaxBulkRequestLength {
+		return tooLargeResponse(fmt.Sprintf("bulk access request contains %d object mappings but server maximum is %d", len(req.BulkObjectAccessIds), defaultMaxBulkRequestLength)), nil
+	}
+
 	var results []drs.BulkAccessUrl
 	unresolvedByCode := map[int32][]string{}
 	requested := 0
@@ -442,6 +563,13 @@ func (s *ObjectsAPIService) GetBulkAccessURL(ctx context.Context, req drs.BulkOb
 }
 
 func (s *ObjectsAPIService) UpdateObjectAccessMethods(ctx context.Context, objectID string, req drs.AccessMethodUpdateRequest) (drs.ImplResponse, error) {
+	if strings.TrimSpace(objectID) == "" {
+		return drs.ImplResponse{Code: http.StatusBadRequest, Body: drs.Error{Msg: "object_id cannot be empty", StatusCode: http.StatusBadRequest}}, nil
+	}
+	if len(req.AccessMethods) == 0 {
+		return drs.ImplResponse{Code: http.StatusBadRequest, Body: drs.Error{Msg: "access_methods cannot be empty", StatusCode: http.StatusBadRequest}}, nil
+	}
+
 	existing, err := s.db.GetObject(ctx, objectID)
 	if err != nil {
 		resp := errorResponseForDBError(ctx, "UpdateObjectAccessMethods.GetObject", err)
@@ -483,6 +611,39 @@ func normalizeChecksum(cs string) string {
 	return cs
 }
 
+func normalizeChecksumType(checksumType string) string {
+	normalized := strings.ToLower(strings.TrimSpace(checksumType))
+	normalized = strings.ReplaceAll(normalized, "-", "")
+	return normalized
+}
+
+func mergeAdditionalChecksums(existing []drs.Checksum, additions []drs.Checksum) []drs.Checksum {
+	out := make([]drs.Checksum, 0, len(existing)+len(additions))
+	seenTypes := make(map[string]struct{}, len(existing)+len(additions))
+
+	for _, cs := range existing {
+		if t := normalizeChecksumType(cs.Type); t != "" {
+			seenTypes[t] = struct{}{}
+		}
+		out = append(out, cs)
+	}
+
+	for _, cs := range additions {
+		t := normalizeChecksumType(cs.Type)
+		v := strings.TrimSpace(normalizeChecksum(cs.Checksum))
+		if t == "" || v == "" {
+			continue
+		}
+		if _, exists := seenTypes[t]; exists {
+			// Do not alter existing checksum types.
+			continue
+		}
+		out = append(out, drs.Checksum{Type: strings.TrimSpace(cs.Type), Checksum: v})
+		seenTypes[t] = struct{}{}
+	}
+	return out
+}
+
 func canonicalSHA256(checksums []drs.Checksum) (string, bool) {
 	for _, cs := range checksums {
 		checksumType := strings.ToLower(strings.TrimSpace(cs.Type))
@@ -497,6 +658,13 @@ func canonicalSHA256(checksums []drs.Checksum) (string, bool) {
 }
 
 func (s *ObjectsAPIService) BulkUpdateAccessMethods(ctx context.Context, req drs.BulkAccessMethodUpdateRequest) (drs.ImplResponse, error) {
+	if len(req.Updates) == 0 {
+		return drs.ImplResponse{Code: http.StatusBadRequest, Body: drs.Error{Msg: "updates cannot be empty", StatusCode: http.StatusBadRequest}}, nil
+	}
+	if len(req.Updates) > defaultMaxBulkAccessMethodUpdateLength {
+		return tooLargeResponse(fmt.Sprintf("bulk access method update contains %d updates but server maximum is %d", len(req.Updates), defaultMaxBulkAccessMethodUpdateLength)), nil
+	}
+
 	updates := make(map[string][]drs.AccessMethod)
 	updated := make([]drs.DrsObject, 0, len(req.Updates))
 	for _, u := range req.Updates {

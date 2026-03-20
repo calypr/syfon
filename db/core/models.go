@@ -60,3 +60,32 @@ type S3Credential struct {
 	SecretKey string `db:"secret_key"`
 	Endpoint  string `db:"endpoint"`
 }
+
+// PendingLFSMeta stores a staged LFS metadata packet keyed by object checksum.
+// It is submitted before transfer and consumed at verify-time.
+type PendingLFSMeta struct {
+	OID       string
+	Candidate drs.DrsObjectCandidate
+	CreatedAt time.Time
+	ExpiresAt time.Time
+}
+
+// FileUsage captures per-object transfer activity that can drive lifecycle policies.
+type FileUsage struct {
+	ObjectID       string
+	Name           string
+	Size           int64
+	UploadCount    int64
+	DownloadCount  int64
+	LastUploadTime *time.Time
+	LastDownloadTime *time.Time
+	LastAccessTime *time.Time
+}
+
+// FileUsageSummary provides aggregate transfer insights.
+type FileUsageSummary struct {
+	TotalFiles         int64
+	TotalUploads       int64
+	TotalDownloads     int64
+	InactiveFileCount  int64
+}

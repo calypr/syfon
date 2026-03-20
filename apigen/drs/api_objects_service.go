@@ -112,61 +112,6 @@ func (s *ObjectsAPIService) OptionsObject(ctx context.Context, objectId string) 
 	return Response(http.StatusNotImplemented, nil), errors.New("OptionsObject method not implemented")
 }
 
-// DeleteObject - Delete a DRS object (optional endpoint)
-func (s *ObjectsAPIService) DeleteObject(ctx context.Context, objectId string, body DeleteRequest) (ImplResponse, error) {
-	// TODO - update DeleteObject with the required logic for this service method.
-	// Add api_objects_service.go to the .openapi-generator-ignore to avoid overwriting this service implementation when updating open api generation.
-
-	// TODO: Uncomment the next line to return response Response(204, {}) or use other options such as http.Ok ...
-	// return Response(204, nil),nil
-
-	// TODO: Uncomment the next line to return response Response(400, Error{}) or use other options such as http.Ok ...
-	// return Response(400, Error{}), nil
-
-	// TODO: Uncomment the next line to return response Response(401, Error{}) or use other options such as http.Ok ...
-	// return Response(401, Error{}), nil
-
-	// TODO: Uncomment the next line to return response Response(403, Error{}) or use other options such as http.Ok ...
-	// return Response(403, Error{}), nil
-
-	// TODO: Uncomment the next line to return response Response(404, Error{}) or use other options such as http.Ok ...
-	// return Response(404, Error{}), nil
-
-	// TODO: Uncomment the next line to return response Response(500, Error{}) or use other options such as http.Ok ...
-	// return Response(500, Error{}), nil
-
-	return Response(http.StatusNotImplemented, nil), errors.New("DeleteObject method not implemented")
-}
-
-// BulkDeleteObjects - Delete multiple DRS objects
-func (s *ObjectsAPIService) BulkDeleteObjects(ctx context.Context, body BulkDeleteRequest) (ImplResponse, error) {
-	// TODO - update BulkDeleteObjects with the required logic for this service method.
-	// Add api_objects_service.go to the .openapi-generator-ignore to avoid overwriting this service implementation when updating open api generation.
-
-	// TODO: Uncomment the next line to return response Response(204, {}) or use other options such as http.Ok ...
-	// return Response(204, nil),nil
-
-	// TODO: Uncomment the next line to return response Response(400, Error{}) or use other options such as http.Ok ...
-	// return Response(400, Error{}), nil
-
-	// TODO: Uncomment the next line to return response Response(401, Error{}) or use other options such as http.Ok ...
-	// return Response(401, Error{}), nil
-
-	// TODO: Uncomment the next line to return response Response(403, Error{}) or use other options such as http.Ok ...
-	// return Response(403, Error{}), nil
-
-	// TODO: Uncomment the next line to return response Response(404, Error{}) or use other options such as http.Ok ...
-	// return Response(404, Error{}), nil
-
-	// TODO: Uncomment the next line to return response Response(413, Error{}) or use other options such as http.Ok ...
-	// return Response(413, Error{}), nil
-
-	// TODO: Uncomment the next line to return response Response(500, Error{}) or use other options such as http.Ok ...
-	// return Response(500, Error{}), nil
-
-	return Response(http.StatusNotImplemented, nil), errors.New("BulkDeleteObjects method not implemented")
-}
-
 // GetBulkObjects - Get info about multiple DrsObjects with an optional Passport(s).
 func (s *ObjectsAPIService) GetBulkObjects(ctx context.Context, getBulkObjectsRequest GetBulkObjectsRequest, expand bool) (ImplResponse, error) {
 	// TODO - update GetBulkObjects with the required logic for this service method.
@@ -200,7 +145,7 @@ func (s *ObjectsAPIService) GetBulkObjects(ctx context.Context, getBulkObjectsRe
 }
 
 // OptionsBulkObject - Get Authorization info about multiple DrsObjects.
-func (s *ObjectsAPIService) OptionsBulkObject(ctx context.Context, bulkObjectIdNoPassport BulkObjectIdNoPassport) (ImplResponse, error) {
+func (s *ObjectsAPIService) OptionsBulkObject(ctx context.Context) (ImplResponse, error) {
 	// TODO - update OptionsBulkObject with the required logic for this service method.
 	// Add api_objects_service.go to the .openapi-generator-ignore to avoid overwriting this service implementation when updating open api generation.
 
@@ -226,32 +171,6 @@ func (s *ObjectsAPIService) OptionsBulkObject(ctx context.Context, bulkObjectIdN
 	// return Response(500, Error{}), nil
 
 	return Response(http.StatusNotImplemented, nil), errors.New("OptionsBulkObject method not implemented")
-}
-
-// RegisterObjects - Register DRS objects
-func (s *ObjectsAPIService) RegisterObjects(ctx context.Context, body RegisterObjectsRequest) (ImplResponse, error) {
-	// TODO - update RegisterObjects with the required logic for this service method.
-	// Add api_objects_service.go to the .openapi-generator-ignore to avoid overwriting this service implementation when updating open api generation.
-
-	// TODO: Uncomment the next line to return response Response(201, RegisterObjects201Response{}) or use other options such as http.Ok ...
-	// return Response(201, RegisterObjects201Response{}), nil
-
-	// TODO: Uncomment the next line to return response Response(400, Error{}) or use other options such as http.Ok ...
-	// return Response(400, Error{}), nil
-
-	// TODO: Uncomment the next line to return response Response(401, Error{}) or use other options such as http.Ok ...
-	// return Response(401, Error{}), nil
-
-	// TODO: Uncomment the next line to return response Response(403, Error{}) or use other options such as http.Ok ...
-	// return Response(403, Error{}), nil
-
-	// TODO: Uncomment the next line to return response Response(413, Error{}) or use other options such as http.Ok ...
-	// return Response(413, Error{}), nil
-
-	// TODO: Uncomment the next line to return response Response(500, Error{}) or use other options such as http.Ok ...
-	// return Response(500, Error{}), nil
-
-	return Response(http.StatusNotImplemented, nil), errors.New("RegisterObjects method not implemented")
 }
 
 // GetAccessURL - Get a URL for fetching bytes
@@ -370,35 +289,6 @@ func (s *ObjectsAPIService) UpdateObjectAccessMethods(ctx context.Context, objec
 	return Response(http.StatusNotImplemented, nil), errors.New("UpdateObjectAccessMethods method not implemented")
 }
 
-// GetObjectsByChecksum - Get DRS objects that are a match for the checksum.
-func (s *ObjectsAPIService) GetObjectsByChecksum(ctx context.Context, checksum string) (ImplResponse, error) {
-	// TODO - update GetObjectsByChecksum with the required logic for this service method.
-	// Add api_objects_service.go to the .openapi-generator-ignore to avoid overwriting this service implementation when updating open api generation.
-
-	// TODO: Uncomment the next line to return response Response(200, GetBulkObjects200Response{}) or use other options such as http.Ok ...
-	// return Response(200, GetBulkObjects200Response{}), nil
-
-	// TODO: Uncomment the next line to return response Response(202, {}) or use other options such as http.Ok ...
-	// return Response(202, nil),nil
-
-	// TODO: Uncomment the next line to return response Response(400, Error{}) or use other options such as http.Ok ...
-	// return Response(400, Error{}), nil
-
-	// TODO: Uncomment the next line to return response Response(401, Error{}) or use other options such as http.Ok ...
-	// return Response(401, Error{}), nil
-
-	// TODO: Uncomment the next line to return response Response(403, Error{}) or use other options such as http.Ok ...
-	// return Response(403, Error{}), nil
-
-	// TODO: Uncomment the next line to return response Response(404, Error{}) or use other options such as http.Ok ...
-	// return Response(404, Error{}), nil
-
-	// TODO: Uncomment the next line to return response Response(500, Error{}) or use other options such as http.Ok ...
-	// return Response(500, Error{}), nil
-
-	return Response(http.StatusNotImplemented, nil), errors.New("GetObjectsByChecksum method not implemented")
-}
-
 // BulkUpdateAccessMethods - Bulk update access methods for multiple DRS objects
 func (s *ObjectsAPIService) BulkUpdateAccessMethods(ctx context.Context, bulkAccessMethodUpdateRequest BulkAccessMethodUpdateRequest) (ImplResponse, error) {
 	// TODO - update BulkUpdateAccessMethods with the required logic for this service method.
@@ -426,4 +316,146 @@ func (s *ObjectsAPIService) BulkUpdateAccessMethods(ctx context.Context, bulkAcc
 	// return Response(500, Error{}), nil
 
 	return Response(http.StatusNotImplemented, nil), errors.New("BulkUpdateAccessMethods method not implemented")
+}
+
+// AddChecksums - Add additional checksums for a DRS object
+func (s *ObjectsAPIService) AddChecksums(ctx context.Context, objectId string, checksumAdditionRequest ChecksumAdditionRequest) (ImplResponse, error) {
+	// TODO - update AddChecksums with the required logic for this service method.
+	// Add api_objects_service.go to the .openapi-generator-ignore to avoid overwriting this service implementation when updating open api generation.
+
+	// TODO: Uncomment the next line to return response Response(200, DrsObject{}) or use other options such as http.Ok ...
+	// return Response(200, DrsObject{}), nil
+
+	// TODO: Uncomment the next line to return response Response(400, Error{}) or use other options such as http.Ok ...
+	// return Response(400, Error{}), nil
+
+	// TODO: Uncomment the next line to return response Response(401, Error{}) or use other options such as http.Ok ...
+	// return Response(401, Error{}), nil
+
+	// TODO: Uncomment the next line to return response Response(403, Error{}) or use other options such as http.Ok ...
+	// return Response(403, Error{}), nil
+
+	// TODO: Uncomment the next line to return response Response(404, Error{}) or use other options such as http.Ok ...
+	// return Response(404, Error{}), nil
+
+	// TODO: Uncomment the next line to return response Response(413, Error{}) or use other options such as http.Ok ...
+	// return Response(413, Error{}), nil
+
+	// TODO: Uncomment the next line to return response Response(500, Error{}) or use other options such as http.Ok ...
+	// return Response(500, Error{}), nil
+
+	return Response(http.StatusNotImplemented, nil), errors.New("AddChecksums method not implemented")
+}
+
+// GetObjectsByChecksum - Get DRS objects that are a match for the checksum.
+func (s *ObjectsAPIService) GetObjectsByChecksum(ctx context.Context, accessId string) (ImplResponse, error) {
+	// TODO - update GetObjectsByChecksum with the required logic for this service method.
+	// Add api_objects_service.go to the .openapi-generator-ignore to avoid overwriting this service implementation when updating open api generation.
+
+	// TODO: Uncomment the next line to return response Response(200, GetBulkObjects200Response{}) or use other options such as http.Ok ...
+	// return Response(200, GetBulkObjects200Response{}), nil
+
+	// TODO: Uncomment the next line to return response Response(202, {}) or use other options such as http.Ok ...
+	// return Response(202, nil),nil
+
+	// TODO: Uncomment the next line to return response Response(400, Error{}) or use other options such as http.Ok ...
+	// return Response(400, Error{}), nil
+
+	// TODO: Uncomment the next line to return response Response(401, Error{}) or use other options such as http.Ok ...
+	// return Response(401, Error{}), nil
+
+	// TODO: Uncomment the next line to return response Response(403, Error{}) or use other options such as http.Ok ...
+	// return Response(403, Error{}), nil
+
+	// TODO: Uncomment the next line to return response Response(404, Error{}) or use other options such as http.Ok ...
+	// return Response(404, Error{}), nil
+
+	// TODO: Uncomment the next line to return response Response(500, Error{}) or use other options such as http.Ok ...
+	// return Response(500, Error{}), nil
+
+	return Response(http.StatusNotImplemented, nil), errors.New("GetObjectsByChecksum method not implemented")
+}
+
+// BulkAddChecksums - Add additional checksums for multiple DRS objects
+func (s *ObjectsAPIService) BulkAddChecksums(ctx context.Context, bulkChecksumAdditionRequest BulkChecksumAdditionRequest) (ImplResponse, error) {
+	// TODO - update BulkAddChecksums with the required logic for this service method.
+	// Add api_objects_service.go to the .openapi-generator-ignore to avoid overwriting this service implementation when updating open api generation.
+
+	// TODO: Uncomment the next line to return response Response(200, BulkUpdateAccessMethods200Response{}) or use other options such as http.Ok ...
+	// return Response(200, BulkUpdateAccessMethods200Response{}), nil
+
+	// TODO: Uncomment the next line to return response Response(400, Error{}) or use other options such as http.Ok ...
+	// return Response(400, Error{}), nil
+
+	// TODO: Uncomment the next line to return response Response(401, Error{}) or use other options such as http.Ok ...
+	// return Response(401, Error{}), nil
+
+	// TODO: Uncomment the next line to return response Response(403, Error{}) or use other options such as http.Ok ...
+	// return Response(403, Error{}), nil
+
+	// TODO: Uncomment the next line to return response Response(404, Error{}) or use other options such as http.Ok ...
+	// return Response(404, Error{}), nil
+
+	// TODO: Uncomment the next line to return response Response(413, Error{}) or use other options such as http.Ok ...
+	// return Response(413, Error{}), nil
+
+	// TODO: Uncomment the next line to return response Response(500, Error{}) or use other options such as http.Ok ...
+	// return Response(500, Error{}), nil
+
+	return Response(http.StatusNotImplemented, nil), errors.New("BulkAddChecksums method not implemented")
+}
+
+// DeleteObject - Delete a DRS object (optional endpoint)
+func (s *ObjectsAPIService) DeleteObject(ctx context.Context, objectId string, body DeleteRequest) (ImplResponse, error) {
+	// TODO - update DeleteObject with the required logic for this service method.
+	// Add api_objects_service.go to the .openapi-generator-ignore to avoid overwriting this service implementation when updating open api generation.
+
+	// TODO: Uncomment the next line to return response Response(204, {}) or use other options such as http.Ok ...
+	// return Response(204, nil),nil
+
+	// TODO: Uncomment the next line to return response Response(400, Error{}) or use other options such as http.Ok ...
+	// return Response(400, Error{}), nil
+
+	// TODO: Uncomment the next line to return response Response(401, Error{}) or use other options such as http.Ok ...
+	// return Response(401, Error{}), nil
+
+	// TODO: Uncomment the next line to return response Response(403, Error{}) or use other options such as http.Ok ...
+	// return Response(403, Error{}), nil
+
+	// TODO: Uncomment the next line to return response Response(404, Error{}) or use other options such as http.Ok ...
+	// return Response(404, Error{}), nil
+
+	// TODO: Uncomment the next line to return response Response(500, Error{}) or use other options such as http.Ok ...
+	// return Response(500, Error{}), nil
+
+	return Response(http.StatusNotImplemented, nil), errors.New("DeleteObject method not implemented")
+}
+
+// BulkDeleteObjects - Delete multiple DRS objects
+func (s *ObjectsAPIService) BulkDeleteObjects(ctx context.Context, body BulkDeleteRequest) (ImplResponse, error) {
+	// TODO - update BulkDeleteObjects with the required logic for this service method.
+	// Add api_objects_service.go to the .openapi-generator-ignore to avoid overwriting this service implementation when updating open api generation.
+
+	// TODO: Uncomment the next line to return response Response(204, {}) or use other options such as http.Ok ...
+	// return Response(204, nil),nil
+
+	// TODO: Uncomment the next line to return response Response(400, Error{}) or use other options such as http.Ok ...
+	// return Response(400, Error{}), nil
+
+	// TODO: Uncomment the next line to return response Response(401, Error{}) or use other options such as http.Ok ...
+	// return Response(401, Error{}), nil
+
+	// TODO: Uncomment the next line to return response Response(403, Error{}) or use other options such as http.Ok ...
+	// return Response(403, Error{}), nil
+
+	// TODO: Uncomment the next line to return response Response(404, Error{}) or use other options such as http.Ok ...
+	// return Response(404, Error{}), nil
+
+	// TODO: Uncomment the next line to return response Response(413, Error{}) or use other options such as http.Ok ...
+	// return Response(413, Error{}), nil
+
+	// TODO: Uncomment the next line to return response Response(500, Error{}) or use other options such as http.Ok ...
+	// return Response(500, Error{}), nil
+
+	return Response(http.StatusNotImplemented, nil), errors.New("BulkDeleteObjects method not implemented")
 }

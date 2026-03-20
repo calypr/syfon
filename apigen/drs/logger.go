@@ -12,36 +12,23 @@
 package drs
 
 import (
-	"log/slog"
 	"net/http"
+	"log"
 	"time"
 )
-
-type statusRecorder struct {
-	http.ResponseWriter
-	status int
-}
-
-func (r *statusRecorder) WriteHeader(status int) {
-	r.status = status
-	r.ResponseWriter.WriteHeader(status)
-}
 
 func Logger(inner http.Handler, name string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 
-		inner.ServeHTTP(rec, r)
+		inner.ServeHTTP(w, r)
 
-		slog.Info(
-			"http request",
-			"method", r.Method,
-			"path", r.RequestURI,
-			"handler", name,
-			"request_id", r.Header.Get("X-Request-Id"),
-			"status", rec.status,
-			"duration_ms", time.Since(start).Milliseconds(),
+		log.Printf(
+			"%s %s %s %s",
+			r.Method,
+			r.RequestURI,
+			name,
+			time.Since(start),
 		)
 	})
 }

@@ -45,7 +45,12 @@ func runTests(m *testing.M) int {
 
 	cmd := exec.Command(binaryPath, "serve")
 	cmd.Dir = rootDir
-	cmd.Env = append(os.Environ(), "DRS_PORT=9005", "DRS_DB_SQLITE_FILE=drs_test.db")
+	cmd.Env = append(
+		os.Environ(),
+		"DRS_PORT=9005",
+		"DRS_DB_SQLITE_FILE=drs_test.db",
+		"DRS_AUTH_MODE=local",
+	)
 
 	// Put the child in its own process group so we can kill the whole tree.
 	cmd.SysProcAttr = &syscall.SysProcAttr{

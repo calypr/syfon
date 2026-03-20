@@ -3,6 +3,7 @@ package middleware
 import (
 	"context"
 	"crypto/subtle"
+	"encoding/base64"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -58,9 +59,12 @@ func (m *AuthzMiddleware) Middleware(next http.Handler) http.Handler {
 			return
 		}
 		ctx = context.WithValue(ctx, core.AuthHeaderPresentKey, true)
-
-		tokenString := strings.TrimPrefix(authHeader, "Bearer ")
-		tokenString = strings.TrimSpace(tokenString)
+		tokenString, err := extractBearerLikeToken(authHeader)
+		if err != nil {
+			m.logger.Debug("failed to parse authorization header", "error", err)
+			next.ServeHTTP(w, r.WithContext(ctx))
+			return
+		}
 
 		// 1. Discover Fence API endpoint from token 'iss' claim
 		apiEndpoint, _, err := m.parseToken(tokenString)
@@ -123,6 +127,37 @@ func (m *AuthzMiddleware) parseToken(tokenString string) (endpoint string, exp f
 	exp, _ = claims["exp"].(float64)
 
 	return endpoint, exp, nil
+}
+
+func extractBearerLikeToken(authHeader string) (string, error) {
+	trimmed := strings.TrimSpace(authHeader)
+	if strings.HasPrefix(strings.ToLower(trimmed), "bearer ") {
+		token := strings.TrimSpace(trimmed[len("Bearer "):])
+		if token == "" {
+			return "", fmt.Errorf("empty bearer token")
+		}
+		return token, nil
+	}
+	if strings.HasPrefix(strings.ToLower(trimmed), "basic ") {
+		payload := strings.TrimSpace(trimmed[len("Basic "):])
+		if payload == "" {
+			return "", fmt.Errorf("empty basic auth payload")
+		}
+		decoded, err := base64.StdEncoding.DecodeString(payload)
+		if err != nil {
+			return "", fmt.Errorf("invalid basic auth payload: %w", err)
+		}
+		parts := strings.SplitN(string(decoded), ":", 2)
+		if len(parts) != 2 {
+			return "", fmt.Errorf("malformed basic auth credentials")
+		}
+		token := strings.TrimSpace(parts[1])
+		if token == "" {
+			return "", fmt.Errorf("empty basic auth password token")
+		}
+		return token, nil
+	}
+	return "", fmt.Errorf("unsupported authorization scheme")
 }
 
 func (m *AuthzMiddleware) extractPrivileges(privs map[string]any) ([]string, map[string]map[string]bool) {

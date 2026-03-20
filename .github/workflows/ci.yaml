@@ -29,6 +29,12 @@ jobs:
       - name: Run unit tests
         run: make test-unit
 
+      - name: Run server endpoint router tests
+        run: |
+          go test ./cmd/server \
+            -run 'Test(AllRegisteredEndpoints_WithMocks|RegisterAPIRoutes_StaticBeforeParamAcrossControllers|RegisterControllerRoutes_StaticBeforeParam)' \
+            -v
+
       - name: Run coverage
         run: make coverage
 

@@ -1,10 +1,18 @@
 package server
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"log"
 	"log/slog"
 	"net/http"
+	"os"
+	"os/signal"
+	"sort"
+	"strings"
+	"syscall"
+	"time"
 
 	"github.com/calypr/drs-server/apigen/drs"
 	"github.com/calypr/drs-server/config"
@@ -12,12 +20,16 @@ import (
 	"github.com/calypr/drs-server/db/postgres"
 	"github.com/calypr/drs-server/db/sqlite"
 	"github.com/calypr/drs-server/internal/api/admin"
+	coreapi "github.com/calypr/drs-server/internal/api/coreapi"
 	"github.com/calypr/drs-server/internal/api/docs"
 	"github.com/calypr/drs-server/internal/api/fence"
 	"github.com/calypr/drs-server/internal/api/gen3"
+	"github.com/calypr/drs-server/internal/api/lfs"
+	"github.com/calypr/drs-server/internal/api/metrics"
 	"github.com/calypr/drs-server/internal/api/middleware"
 	"github.com/calypr/drs-server/service"
 	"github.com/calypr/drs-server/urlmanager"
+	"github.com/gorilla/mux"
 	"github.com/spf13/cobra"
 )
 
@@ -91,11 +103,14 @@ var Cmd = &cobra.Command{
 
 		// Init Controller
 		objectsController := drs.NewObjectsAPIController(service)
+		registerObjectsController := drs.NewRegisterObjectsAPIController(service)
 		serviceInfoController := drs.NewServiceInfoAPIController(service)
 		uploadRequestController := drs.NewUploadRequestAPIController(service)
 
-		// Init Router
-		router := drs.NewRouter(objectsController, serviceInfoController, uploadRequestController)
+		// Init Router (register generated routes by specificity to avoid path shadowing:
+		// e.g. /objects/register must match before /objects/{object_id}).
+		router := mux.NewRouter().StrictSlash(true)
+		registerAPIRoutes(router, objectsController, registerObjectsController, serviceInfoController, uploadRequestController)
 
 		// Init AuthZ Middleware
 		// We use a standard slog.Logger for data-client compatibility
@@ -121,19 +136,108 @@ var Cmd = &cobra.Command{
 		// Register Admin Routes
 		admin.RegisterAdminRoutes(router, database, uM)
 		docs.RegisterSwaggerRoutes(router)
+		coreapi.RegisterCoreRoutes(router, database)
+		metrics.RegisterMetricsRoutes(router, database)
 
 		// Register Gen3 Compatibility Routes (for git-drs)
 		gen3.RegisterGen3Routes(router, database)
 
-		// Register Fence Compatibility Routes (for data download/upload)
+		// Register Fence compatibility routes (multipart/upload/download compatibility).
 		fence.RegisterFenceRoutes(router, database, uM)
+		fmt.Println("Fence compatibility routes enabled")
+
+		// Register Git LFS API routes
+		lfs.RegisterLFSRoutes(router, database, uM, lfs.Options{
+			MaxBatchObjects:              cfg.LFS.MaxBatchObjects,
+			MaxBatchBodyBytes:            cfg.LFS.MaxBatchBodyBytes,
+			RequestLimitPerMinute:        cfg.LFS.RequestLimitPerMinute,
+			BandwidthLimitBytesPerMinute: cfg.LFS.BandwidthLimitBytesPerMinute,
+		})
 
 		addr := fmt.Sprintf(":%d", cfg.Port)
 		fmt.Printf("Server starting on %s\n", addr)
-		log.Fatal(http.ListenAndServe(addr, router))
+		server := &http.Server{
+			Addr:              addr,
+			Handler:           router,
+			ReadHeaderTimeout: 10 * time.Second,
+			ReadTimeout:       30 * time.Second,
+			WriteTimeout:      120 * time.Second,
+			IdleTimeout:       120 * time.Second,
+		}
+
+		errCh := make(chan error, 1)
+		go func() {
+			if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				errCh <- err
+			}
+		}()
+
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+		defer signal.Stop(sigCh)
+
+		select {
+		case err := <-errCh:
+			log.Fatalf("server listen failed: %v", err)
+		case sig := <-sigCh:
+			slog.Info("shutdown signal received", "signal", sig.String())
+		case <-cmd.Context().Done():
+			slog.Info("shutdown requested by context cancellation")
+		}
+
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			log.Fatalf("server shutdown failed: %v", err)
+		}
+		slog.Info("server shutdown complete")
 	},
 }
 
 func init() {
 	Cmd.Flags().StringVar(&configFile, "config", "", "Path to configuration file (json/yaml)")
+}
+
+func registerControllerRoutes(router *mux.Router, api drs.Router) {
+	registerSortedRoutes(router, append([]drs.Route(nil), api.OrderedRoutes()...))
+}
+
+func registerAPIRoutes(router *mux.Router, apis ...drs.Router) {
+	routes := make([]drs.Route, 0)
+	for _, api := range apis {
+		routes = append(routes, api.OrderedRoutes()...)
+	}
+	registerSortedRoutes(router, routes)
+}
+
+func registerSortedRoutes(router *mux.Router, routes []drs.Route) {
+	sort.SliceStable(routes, func(i, j int) bool {
+		a := routes[i]
+		b := routes[j]
+		aParams := strings.Count(a.Pattern, "{")
+		bParams := strings.Count(b.Pattern, "{")
+		if aParams != bParams {
+			return aParams < bParams
+		}
+		aSegs := segmentCount(a.Pattern)
+		bSegs := segmentCount(b.Pattern)
+		if aSegs != bSegs {
+			return aSegs > bSegs
+		}
+		return len(a.Pattern) > len(b.Pattern)
+	})
+
+	for _, route := range routes {
+		var handler http.Handler = route.HandlerFunc
+		handler = drs.Logger(handler, route.Name)
+		router.Methods(route.Method).Path(route.Pattern).Name(route.Name).Handler(handler)
+	}
+}
+
+func segmentCount(pattern string) int {
+	trimmed := strings.Trim(pattern, "/")
+	if trimmed == "" {
+		return 0
+	}
+	return strings.Count(trimmed, "/") + 1
 }

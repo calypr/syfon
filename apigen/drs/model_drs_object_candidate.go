@@ -11,8 +11,10 @@
 
 package drs
 
+
+
+
 type DrsObjectCandidate struct {
-	Id string `json:"id,omitempty"`
 
 	// A string that can be used to name a `DrsObject`. This string is made up of uppercase and lowercase letters, decimal digits, hyphen, period, and underscore [A-Za-z0-9.-_]. See http://pubs.opengroup.org/onlinepubs/9699919799/basedefs/V1_chap03.html#tag_03_282[portable filenames].
 	Name string `json:"name,omitempty"`
@@ -40,18 +42,12 @@ type DrsObjectCandidate struct {
 
 	// A list of strings that can be used to find other metadata about this `DrsObject` from external metadata sources. These aliases can be used to represent secondary accession numbers or external GUIDs.
 	Aliases []string `json:"aliases,omitempty"`
-
-	// Logical organization/program identifier used to derive authorization scope.
-	Organization string `json:"organization,omitempty"`
-
-	// Logical project identifier used with organization to derive authorization scope.
-	Project string `json:"project,omitempty"`
 }
 
 // AssertDrsObjectCandidateRequired checks if the required fields are not zero-ed
 func AssertDrsObjectCandidateRequired(obj DrsObjectCandidate) error {
 	elements := map[string]interface{}{
-		"size":      obj.Size,
+		"size": obj.Size,
 		"checksums": obj.Checksums,
 	}
 	for name, el := range elements {

@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"encoding/base64"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -136,4 +137,34 @@ func TestExtractPrivileges(t *testing.T) {
 	if len(out["/programs/a"]) != 0 {
 		t.Fatalf("expected empty method map for malformed privilege list")
 	}
+}
+
+func TestExtractBearerLikeToken(t *testing.T) {
+	t.Run("bearer token", func(t *testing.T) {
+		token, err := extractBearerLikeToken("Bearer abc.def.ghi")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if token != "abc.def.ghi" {
+			t.Fatalf("unexpected token: %q", token)
+		}
+	})
+
+	t.Run("basic token in password", func(t *testing.T) {
+		encoded := base64.StdEncoding.EncodeToString([]byte("oauth2:abc.def.ghi"))
+		token, err := extractBearerLikeToken(fmt.Sprintf("Basic %s", encoded))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if token != "abc.def.ghi" {
+			t.Fatalf("unexpected token: %q", token)
+		}
+	})
+
+	t.Run("unsupported scheme", func(t *testing.T) {
+		_, err := extractBearerLikeToken("Digest abc")
+		if err == nil {
+			t.Fatalf("expected error for unsupported scheme")
+		}
+	})
 }
