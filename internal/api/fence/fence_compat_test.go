@@ -260,6 +260,14 @@ func TestHandleFenceBuckets_Gen3Auth(t *testing.T) {
 		Credentials: map[string]core.S3Credential{
 			"b1": {Bucket: "b1", Region: "us-east-1"},
 		},
+		BucketScopes: map[string]core.BucketScope{
+			"cbds|proj1": {
+				Organization: "cbds",
+				ProjectID:    "proj1",
+				Bucket:       "b1",
+				PathPrefix:   "cbds/proj1",
+			},
+		},
 	}
 
 	req401, _ := http.NewRequest("GET", "/data/buckets", nil)
@@ -297,6 +305,26 @@ func TestHandleFenceBuckets_Gen3Auth(t *testing.T) {
 	if rr200.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rr200.Code, rr200.Body.String())
 	}
+
+	reqScoped, _ := http.NewRequest("GET", "/data/buckets", nil)
+	ctxScoped := context.WithValue(reqScoped.Context(), core.AuthModeKey, "gen3")
+	ctxScoped = context.WithValue(ctxScoped, core.AuthHeaderPresentKey, true)
+	ctxScoped = context.WithValue(ctxScoped, core.UserPrivilegesKey, map[string]map[string]bool{
+		"/programs/cbds/projects/proj1": {"read": true},
+	})
+	reqScoped = reqScoped.WithContext(ctxScoped)
+	rrScoped := httptest.NewRecorder()
+	handleFenceBuckets(rrScoped, reqScoped, mockDB)
+	if rrScoped.Code != http.StatusOK {
+		t.Fatalf("expected scoped GET 200, got %d body=%s", rrScoped.Code, rrScoped.Body.String())
+	}
+	var resp bucketapi.BucketsResponse
+	if err := json.Unmarshal(rrScoped.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if _, ok := resp.S3BUCKETS["b1"]; !ok {
+		t.Fatalf("expected scoped response to include b1")
+	}
 }
 
 func TestHandleFencePutDeleteBucket_Gen3Auth(t *testing.T) {
@@ -328,7 +356,7 @@ func TestHandleFencePutDeleteBucket_Gen3Auth(t *testing.T) {
 	ctxPut201 := context.WithValue(putReq201.Context(), core.AuthModeKey, "gen3")
 	ctxPut201 = context.WithValue(ctxPut201, core.AuthHeaderPresentKey, true)
 	ctxPut201 = context.WithValue(ctxPut201, core.UserPrivilegesKey, map[string]map[string]bool{
-		bucketAdminResource: {"create": true},
+		"/programs/cbds/projects/proj1": {"create": true},
 	})
 	putReq201 = putReq201.WithContext(ctxPut201)
 	putRR201 := httptest.NewRecorder()
@@ -356,7 +384,7 @@ func TestHandleFencePutDeleteBucket_Gen3Auth(t *testing.T) {
 	ctxDel204 := context.WithValue(delReq204.Context(), core.AuthModeKey, "gen3")
 	ctxDel204 = context.WithValue(ctxDel204, core.AuthHeaderPresentKey, true)
 	ctxDel204 = context.WithValue(ctxDel204, core.UserPrivilegesKey, map[string]map[string]bool{
-		bucketAdminResource: {"delete": true},
+		"/programs/cbds/projects/proj1": {"update": true},
 	})
 	delReq204 = delReq204.WithContext(ctxDel204)
 	delRR204 := httptest.NewRecorder()

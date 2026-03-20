@@ -97,6 +97,22 @@ func hasAnyMethodAccess(ctx *http.Request, resources []string, methods ...string
 	return false
 }
 
+func hasGlobalBucketAdminAccess(r *http.Request, methods ...string) bool {
+	return hasAnyMethodAccess(r, []string{bucketAdminResource}, methods...)
+}
+
+func scopeResource(org, project string) string {
+	return strings.TrimSpace(core.ResourcePathForScope(org, project))
+}
+
+func hasScopedBucketAccess(r *http.Request, scope core.BucketScope, methods ...string) bool {
+	res := scopeResource(scope.Organization, scope.ProjectID)
+	if res == "" {
+		return false
+	}
+	return hasAnyMethodAccess(r, []string{res}, methods...)
+}
+
 func RegisterFenceRoutes(router *mux.Router, database core.DatabaseInterface, uM urlmanager.UrlManager) {
 	for _, p := range []string{"/data", "/user/data"} {
 		registerFenceDataRoutes(router, p, database, uM)
@@ -601,22 +617,39 @@ func handleFenceMultipartComplete(w http.ResponseWriter, r *http.Request, databa
 }
 
 func handleFenceBuckets(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface) {
-	if !hasAnyMethodAccess(r, []string{bucketAdminResource}, "read") {
-		writeAuthError(w, r)
-		return
-	}
 	creds, err := database.ListS3Credentials(r.Context())
 	if err != nil {
 		writeHTTPError(w, r, http.StatusInternalServerError, err.Error(), err)
 		return
 	}
+	scopes, _ := database.ListBucketScopes(r.Context())
+
+	allowedBuckets := map[string]bool{}
+	allowAll := !core.IsGen3Mode(r.Context()) || hasGlobalBucketAdminAccess(r, "read")
+	if !allowAll {
+		if !core.HasAuthHeader(r.Context()) {
+			writeAuthError(w, r)
+			return
+		}
+		for _, s := range scopes {
+			if hasScopedBucketAccess(r, s, "read", "create", "update", "delete", "file_upload") {
+				allowedBuckets[s.Bucket] = true
+			}
+		}
+		if len(allowedBuckets) == 0 {
+			writeAuthError(w, r)
+			return
+		}
+	}
 
 	resp := bucketapi.BucketsResponse{
 		S3BUCKETS: make(map[string]bucketapi.BucketMetadata, len(creds)),
 	}
-	scopes, _ := database.ListBucketScopes(r.Context())
 	programsByBucket := map[string][]string{}
 	for _, s := range scopes {
+		if !allowAll && !allowedBuckets[s.Bucket] {
+			continue
+		}
 		res := core.ResourcePathForScope(s.Organization, s.ProjectID)
 		if res == "" {
 			continue
@@ -624,6 +657,9 @@ func handleFenceBuckets(w http.ResponseWriter, r *http.Request, database core.Da
 		programsByBucket[s.Bucket] = append(programsByBucket[s.Bucket], res)
 	}
 	for _, c := range creds {
+		if !allowAll && !allowedBuckets[c.Bucket] {
+			continue
+		}
 		bm := bucketapi.BucketMetadata{}
 		bm.SetEndpointUrl(c.Endpoint)
 		bm.SetRegion(c.Region)
@@ -638,10 +674,6 @@ func handleFenceBuckets(w http.ResponseWriter, r *http.Request, database core.Da
 }
 
 func handleFencePutBucket(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface) {
-	if !hasAnyMethodAccess(r, []string{bucketAdminResource}, "create", "update") {
-		writeAuthError(w, r)
-		return
-	}
 	var req bucketapi.PutBucketRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeHTTPError(w, r, http.StatusBadRequest, "Invalid request", nil)
@@ -658,6 +690,19 @@ func handleFencePutBucket(w http.ResponseWriter, r *http.Request, database core.
 	if strings.TrimSpace(req.Organization) == "" || strings.TrimSpace(req.ProjectId) == "" {
 		writeHTTPError(w, r, http.StatusBadRequest, "organization and project_id are required", nil)
 		return
+	}
+	if core.IsGen3Mode(r.Context()) {
+		if !core.HasAuthHeader(r.Context()) {
+			writeAuthError(w, r)
+			return
+		}
+		if !hasGlobalBucketAdminAccess(r, "create", "update") {
+			res := scopeResource(req.Organization, req.ProjectId)
+			if res == "" || !hasAnyMethodAccess(r, []string{res}, "create", "update") {
+				writeAuthError(w, r)
+				return
+			}
+		}
 	}
 	prefix, err := normalizeScopePath(req.GetPath(), req.Bucket)
 	if err != nil {
@@ -691,14 +736,39 @@ func handleFencePutBucket(w http.ResponseWriter, r *http.Request, database core.
 }
 
 func handleFenceDeleteBucket(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface) {
-	if !hasAnyMethodAccess(r, []string{bucketAdminResource}, "delete") {
-		writeAuthError(w, r)
-		return
-	}
 	bucket := mux.Vars(r)["bucket"]
 	if bucket == "" {
 		writeHTTPError(w, r, http.StatusBadRequest, "bucket is required", nil)
 		return
+	}
+	if core.IsGen3Mode(r.Context()) {
+		if !core.HasAuthHeader(r.Context()) {
+			writeAuthError(w, r)
+			return
+		}
+		if !hasGlobalBucketAdminAccess(r, "delete") {
+			scopes, err := database.ListBucketScopes(r.Context())
+			if err != nil {
+				writeHTTPError(w, r, http.StatusInternalServerError, err.Error(), err)
+				return
+			}
+			matching := 0
+			for _, s := range scopes {
+				if s.Bucket != bucket {
+					continue
+				}
+				matching++
+				if !hasScopedBucketAccess(r, s, "delete", "update") {
+					writeAuthError(w, r)
+					return
+				}
+			}
+			// If no scope ties this bucket to a project, require global bucket-admin delete.
+			if matching == 0 {
+				writeAuthError(w, r)
+				return
+			}
+		}
 	}
 	if err := database.DeleteS3Credential(r.Context(), bucket); err != nil {
 		writeHTTPError(w, r, http.StatusInternalServerError, err.Error(), err)
