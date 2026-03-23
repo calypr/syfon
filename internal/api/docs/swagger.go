@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 
+	openapispec "github.com/calypr/drs-server/apigen/api"
 	"github.com/gorilla/mux"
 	"gopkg.in/yaml.v3"
 )
@@ -61,33 +62,33 @@ func handleOpenAPISpec(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleLFSOpenAPISpec(w http.ResponseWriter, r *http.Request) {
-	specPath, ok := findLFSOpenAPISpecPath()
-	if !ok {
-		http.Error(w, "LFS OpenAPI spec file not found", http.StatusInternalServerError)
+	specBytes, err := loadSpecBytesByName("lfs.openapi.yaml")
+	if err != nil {
+		http.Error(w, "LFS OpenAPI spec file not found: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/yaml")
-	http.ServeFile(w, r, specPath)
+	_, _ = w.Write(specBytes)
 }
 
 func handleBucketOpenAPISpec(w http.ResponseWriter, r *http.Request) {
-	specPath, ok := findBucketOpenAPISpecPath()
-	if !ok {
-		http.Error(w, "Bucket OpenAPI spec file not found", http.StatusInternalServerError)
+	specBytes, err := loadSpecBytesByName("bucket.openapi.yaml")
+	if err != nil {
+		http.Error(w, "Bucket OpenAPI spec file not found: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/yaml")
-	http.ServeFile(w, r, specPath)
+	_, _ = w.Write(specBytes)
 }
 
 func handleInternalOpenAPISpec(w http.ResponseWriter, r *http.Request) {
-	specPath, ok := findNamedOpenAPISpecPath("internal.openapi.yaml")
-	if !ok {
-		http.Error(w, "Internal OpenAPI spec file not found", http.StatusInternalServerError)
+	specBytes, err := loadSpecBytesByName("internal.openapi.yaml")
+	if err != nil {
+		http.Error(w, "Internal OpenAPI spec file not found: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/yaml")
-	http.ServeFile(w, r, specPath)
+	_, _ = w.Write(specBytes)
 }
 
 func findOpenAPISpecPath() (string, bool) {
@@ -186,49 +187,34 @@ func findNamedOpenAPISpecPath(fileName string) (string, bool) {
 }
 
 func buildMergedOpenAPISpec() ([]byte, error) {
-	drsPath, ok := findOpenAPISpecPath()
-	if !ok {
-		return nil, fmt.Errorf("DRS spec missing")
-	}
-	lfsPath, ok := findLFSOpenAPISpecPath()
-	if !ok {
-		return nil, fmt.Errorf("LFS spec missing")
-	}
-
-	drsSpec, err := loadSpecYAML(drsPath)
+	drsSpec, err := loadSpecYAMLByName("openapi.yaml")
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("DRS spec missing: %w", err)
 	}
-	lfsSpec, err := loadSpecYAML(lfsPath)
+	lfsSpec, err := loadSpecYAMLByName("lfs.openapi.yaml")
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("LFS spec missing: %w", err)
 	}
 	merged := drsSpec
 	mergeSpecSection(merged, lfsSpec, "paths")
 	mergeSpecSection(merged, lfsSpec, "components")
-	if bucketPath, ok := findBucketOpenAPISpecPath(); ok {
-		if bucketSpec, err := loadSpecYAML(bucketPath); err == nil {
-			mergeSpecSection(merged, bucketSpec, "paths")
-			mergeSpecSection(merged, bucketSpec, "components")
-		}
+	if bucketSpec, err := loadSpecYAMLByName("bucket.openapi.yaml"); err == nil {
+		mergeSpecSection(merged, bucketSpec, "paths")
+		mergeSpecSection(merged, bucketSpec, "components")
 	}
 	for _, extra := range []string{
 		"metrics.openapi.yaml",
 		"internal.openapi.yaml",
 	} {
-		if p, ok := findNamedOpenAPISpecPath(extra); ok {
-			if s, err := loadSpecYAML(p); err == nil {
-				mergeSpecSection(merged, s, "paths")
-				mergeSpecSection(merged, s, "components")
-			}
+		if s, err := loadSpecYAMLByName(extra); err == nil {
+			mergeSpecSection(merged, s, "paths")
+			mergeSpecSection(merged, s, "components")
 		}
 	}
 	// Compatibility spec is optional; merge it if present.
-	if compatPath, ok := findCompatOpenAPISpecPath(); ok {
-		if compatSpec, err := loadSpecYAML(compatPath); err == nil {
-			mergeSpecSection(merged, compatSpec, "paths")
-			mergeSpecSection(merged, compatSpec, "components")
-		}
+	if compatSpec, err := loadSpecYAMLByName("compat.openapi.yaml"); err == nil {
+		mergeSpecSection(merged, compatSpec, "paths")
+		mergeSpecSection(merged, compatSpec, "components")
 	}
 
 	out, err := yaml.Marshal(merged)
@@ -248,6 +234,32 @@ func loadSpecYAML(path string) (map[string]interface{}, error) {
 		return nil, err
 	}
 	return doc, nil
+}
+
+func loadSpecYAMLByName(fileName string) (map[string]interface{}, error) {
+	raw, err := loadSpecBytesByName(fileName)
+	if err != nil {
+		return nil, err
+	}
+	var doc map[string]interface{}
+	if err := yaml.Unmarshal(raw, &doc); err != nil {
+		return nil, err
+	}
+	return doc, nil
+}
+
+func loadSpecBytesByName(fileName string) ([]byte, error) {
+	// Prefer embedded specs so runtime path/layout does not matter in deployments.
+	raw, err := openapispec.ReadSpec(fileName)
+	if err == nil {
+		return raw, nil
+	}
+	// Fallback for local dev scenarios where embeddings might be stale.
+	path, ok := findNamedOpenAPISpecPath(fileName)
+	if !ok {
+		return nil, err
+	}
+	return os.ReadFile(path)
 }
 
 func mergeSpecSection(dst map[string]interface{}, src map[string]interface{}, section string) {

@@ -138,8 +138,8 @@ go run . serve --config config.local.yaml
 
 Useful endpoints:
 - `GET /healthz`
-- `GET /swagger` (Swagger UI)
-- `GET /openapi.yaml` (OpenAPI spec)
+- `GET /index/swagger` (Swagger UI)
+- `GET /index/openapi.yaml` (OpenAPI spec)
 - `GET /service-info`
 - `GET /index/{id}` (gen3 compatibility)
 - `POST /index/bulk/sha256/validity` (bulk sha validity map for git-lfs style flows)

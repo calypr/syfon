@@ -440,3 +440,42 @@ func TestSqliteDB_FileUsageMetrics(t *testing.T) {
 		t.Fatalf("unexpected summary: %+v", summary)
 	}
 }
+
+func TestSqliteDB_FileUsageMetrics_MissingObjectQueuedAndFlushedOnCreate(t *testing.T) {
+	ctx := context.Background()
+	db, err := NewSqliteDB(":memory:")
+	if err != nil {
+		t.Fatalf("failed to create db: %v", err)
+	}
+	oid := "missing-object"
+	if err := db.RecordFileUpload(ctx, oid); err != nil {
+		t.Fatalf("RecordFileUpload should queue for missing object, got: %v", err)
+	}
+	if err := db.RecordFileDownload(ctx, oid); err != nil {
+		t.Fatalf("RecordFileDownload should queue for missing object, got: %v", err)
+	}
+	if _, err := db.GetFileUsage(ctx, oid); err == nil {
+		t.Fatalf("expected not found for missing object usage")
+	}
+
+	now := time.Now().UTC()
+	if err := db.CreateObject(ctx, &core.InternalObject{
+		DrsObject: drs.DrsObject{
+			Id:          oid,
+			Name:        "later-created",
+			Size:        11,
+			CreatedTime: now,
+			UpdatedTime: now,
+			Version:     "1",
+		},
+	}); err != nil {
+		t.Fatalf("CreateObject failed: %v", err)
+	}
+	usage, err := db.GetFileUsage(ctx, oid)
+	if err != nil {
+		t.Fatalf("GetFileUsage failed after create: %v", err)
+	}
+	if usage.UploadCount != 1 || usage.DownloadCount != 1 {
+		t.Fatalf("expected queued usage to flush on create, got: %+v", usage)
+	}
+}
