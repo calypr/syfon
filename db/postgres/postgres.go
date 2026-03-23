@@ -39,6 +39,9 @@ func NewPostgresDB(dsn string) (*PostgresDB, error) {
 	if err := pg.ensureObjectUsageSchema(); err != nil {
 		return nil, err
 	}
+	if err := pg.ensurePendingObjectUsageSchema(); err != nil {
+		return nil, err
+	}
 	return pg, nil
 }
 
@@ -96,6 +99,25 @@ func (db *PostgresDB) ensureObjectUsageSchema() error {
 	for _, q := range queries {
 		if _, err := db.db.Exec(q); err != nil {
 			return fmt.Errorf("failed to initialize object usage schema: %w", err)
+		}
+	}
+	return nil
+}
+
+func (db *PostgresDB) ensurePendingObjectUsageSchema() error {
+	queries := []string{
+		`CREATE TABLE IF NOT EXISTS object_usage_event (
+			id BIGSERIAL PRIMARY KEY,
+			object_id TEXT NOT NULL,
+			event_type TEXT NOT NULL CHECK (event_type IN ('upload','download')),
+			event_time TIMESTAMPTZ NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_object_usage_event_object_id ON object_usage_event(object_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_object_usage_event_event_time ON object_usage_event(event_time)`,
+	}
+	for _, q := range queries {
+		if _, err := db.db.Exec(q); err != nil {
+			return fmt.Errorf("failed to initialize object usage event schema: %w", err)
 		}
 	}
 	return nil
@@ -299,6 +321,10 @@ func (db *PostgresDB) CreateObject(ctx context.Context, obj *core.InternalObject
 		}
 	}
 
+	if err := db.flushObjectUsageEventsForIDsTx(ctx, tx, []string{obj.Id}); err != nil {
+		return fmt.Errorf("failed to apply object usage events: %w", err)
+	}
+
 	return tx.Commit()
 }
 
@@ -435,7 +461,55 @@ func (db *PostgresDB) RegisterObjects(ctx context.Context, objects []core.Intern
 		}
 	}
 
+	if err := db.flushObjectUsageEventsForIDsTx(ctx, tx, ids); err != nil {
+		return fmt.Errorf("failed to apply object usage events: %w", err)
+	}
+
 	return tx.Commit()
+}
+
+func (db *PostgresDB) flushObjectUsageEventsForIDsTx(ctx context.Context, tx *sql.Tx, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	now := time.Now().UTC()
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO object_usage (object_id, upload_count, download_count, last_upload_time, last_download_time, updated_time)
+		SELECT e.object_id,
+			COALESCE(SUM(CASE WHEN e.event_type = 'upload' THEN 1 ELSE 0 END), 0) AS upload_count,
+			COALESCE(SUM(CASE WHEN e.event_type = 'download' THEN 1 ELSE 0 END), 0) AS download_count,
+			MAX(CASE WHEN e.event_type = 'upload' THEN e.event_time END) AS last_upload_time,
+			MAX(CASE WHEN e.event_type = 'download' THEN e.event_time END) AS last_download_time,
+			$2
+		FROM object_usage_event e
+		JOIN drs_object o ON o.id = e.object_id
+		WHERE e.object_id = ANY($1)
+		GROUP BY e.object_id
+		ON CONFLICT (object_id) DO UPDATE SET
+			upload_count = object_usage.upload_count + EXCLUDED.upload_count,
+			download_count = object_usage.download_count + EXCLUDED.download_count,
+			last_upload_time = CASE
+				WHEN EXCLUDED.last_upload_time IS NULL THEN object_usage.last_upload_time
+				WHEN object_usage.last_upload_time IS NULL THEN EXCLUDED.last_upload_time
+				WHEN EXCLUDED.last_upload_time > object_usage.last_upload_time THEN EXCLUDED.last_upload_time
+				ELSE object_usage.last_upload_time
+			END,
+			last_download_time = CASE
+				WHEN EXCLUDED.last_download_time IS NULL THEN object_usage.last_download_time
+				WHEN object_usage.last_download_time IS NULL THEN EXCLUDED.last_download_time
+				WHEN EXCLUDED.last_download_time > object_usage.last_download_time THEN EXCLUDED.last_download_time
+				ELSE object_usage.last_download_time
+			END,
+			updated_time = EXCLUDED.updated_time
+	`, pq.Array(ids), now); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, `
+		DELETE FROM object_usage_event e
+		USING drs_object o
+		WHERE e.object_id = o.id AND e.object_id = ANY($1)
+	`, pq.Array(ids))
+	return err
 }
 
 func (db *PostgresDB) GetBulkObjects(ctx context.Context, ids []string) ([]core.InternalObject, error) {
@@ -528,6 +602,9 @@ func (db *PostgresDB) ListObjectIDsByResourcePrefix(ctx context.Context, resourc
 			return nil, err
 		}
 		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	return ids, nil
 }
@@ -1000,12 +1077,8 @@ func (db *PostgresDB) PopPendingLFSMeta(ctx context.Context, oid string) (*core.
 func (db *PostgresDB) RecordFileUpload(ctx context.Context, objectID string) error {
 	now := time.Now().UTC()
 	_, err := db.db.ExecContext(ctx, `
-		INSERT INTO object_usage (object_id, upload_count, download_count, last_upload_time, last_download_time, updated_time)
-		VALUES ($1, 1, 0, $2, NULL, $2)
-		ON CONFLICT (object_id) DO UPDATE SET
-			upload_count = object_usage.upload_count + 1,
-			last_upload_time = EXCLUDED.last_upload_time,
-			updated_time = EXCLUDED.updated_time
+		INSERT INTO object_usage_event (object_id, event_type, event_time)
+		VALUES ($1, 'upload', $2)
 	`, objectID, now)
 	return err
 }
@@ -1013,17 +1086,16 @@ func (db *PostgresDB) RecordFileUpload(ctx context.Context, objectID string) err
 func (db *PostgresDB) RecordFileDownload(ctx context.Context, objectID string) error {
 	now := time.Now().UTC()
 	_, err := db.db.ExecContext(ctx, `
-		INSERT INTO object_usage (object_id, upload_count, download_count, last_upload_time, last_download_time, updated_time)
-		VALUES ($1, 0, 1, NULL, $2, $2)
-		ON CONFLICT (object_id) DO UPDATE SET
-			download_count = object_usage.download_count + 1,
-			last_download_time = EXCLUDED.last_download_time,
-			updated_time = EXCLUDED.updated_time
+		INSERT INTO object_usage_event (object_id, event_type, event_time)
+		VALUES ($1, 'download', $2)
 	`, objectID, now)
 	return err
 }
 
 func (db *PostgresDB) GetFileUsage(ctx context.Context, objectID string) (*core.FileUsage, error) {
+	if err := db.flushObjectUsageEvents(ctx); err != nil {
+		return nil, err
+	}
 	var usage core.FileUsage
 	var lastUpload sql.NullTime
 	var lastDownload sql.NullTime
@@ -1064,6 +1136,9 @@ func (db *PostgresDB) GetFileUsage(ctx context.Context, objectID string) (*core.
 }
 
 func (db *PostgresDB) ListFileUsage(ctx context.Context, limit, offset int, inactiveSince *time.Time) ([]core.FileUsage, error) {
+	if err := db.flushObjectUsageEvents(ctx); err != nil {
+		return nil, err
+	}
 	if limit <= 0 {
 		limit = 200
 	}
@@ -1130,6 +1205,9 @@ func (db *PostgresDB) ListFileUsage(ctx context.Context, limit, offset int, inac
 }
 
 func (db *PostgresDB) GetFileUsageSummary(ctx context.Context, inactiveSince *time.Time) (core.FileUsageSummary, error) {
+	if err := db.flushObjectUsageEvents(ctx); err != nil {
+		return core.FileUsageSummary{}, err
+	}
 	cutoff := time.Now().UTC().AddDate(0, 0, -730)
 	if inactiveSince != nil {
 		cutoff = inactiveSince.UTC()
@@ -1152,6 +1230,43 @@ func (db *PostgresDB) GetFileUsageSummary(ctx context.Context, inactiveSince *ti
 		return core.FileUsageSummary{}, err
 	}
 	return summary, nil
+}
+
+func (db *PostgresDB) flushObjectUsageEvents(ctx context.Context) error {
+	tx, err := db.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	ids, err := db.existingObjectIDsWithEvents(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if err := db.flushObjectUsageEventsForIDsTx(ctx, tx, ids); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (db *PostgresDB) existingObjectIDsWithEvents(ctx context.Context, tx *sql.Tx) ([]string, error) {
+	rows, err := tx.QueryContext(ctx, `
+		SELECT DISTINCT e.object_id
+		FROM object_usage_event e
+		JOIN drs_object o ON o.id = e.object_id
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	ids := make([]string, 0)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, nil
 }
 
 func latestUsageTime(ts ...*time.Time) *time.Time {

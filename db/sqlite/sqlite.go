@@ -104,6 +104,14 @@ func (db *SqliteDB) initSchema() error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_object_usage_last_download_time ON object_usage(last_download_time)`,
 		`CREATE INDEX IF NOT EXISTS idx_object_usage_last_upload_time ON object_usage(last_upload_time)`,
+		`CREATE TABLE IF NOT EXISTS object_usage_event (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			object_id TEXT NOT NULL,
+			event_type TEXT NOT NULL CHECK(event_type IN ('upload','download')),
+			event_time TIMESTAMP NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_object_usage_event_object_id ON object_usage_event(object_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_object_usage_event_event_time ON object_usage_event(event_time)`,
 	}
 
 	for _, q := range queries {
@@ -299,6 +307,10 @@ func (db *SqliteDB) CreateObject(ctx context.Context, obj *core.InternalObject) 
 		}
 	}
 
+	if err := db.flushObjectUsageEventsForIDsTx(ctx, tx, []string{obj.Id}); err != nil {
+		return fmt.Errorf("failed to apply object usage events: %w", err)
+	}
+
 	return tx.Commit()
 }
 
@@ -416,7 +428,59 @@ func (db *SqliteDB) RegisterObjects(ctx context.Context, objects []core.Internal
 		}
 	}
 
+	if err := db.flushObjectUsageEventsForIDsTx(ctx, tx, ids); err != nil {
+		return fmt.Errorf("failed to apply object usage events: %w", err)
+	}
+
 	return tx.Commit()
+}
+
+func (db *SqliteDB) flushObjectUsageEventsForIDsTx(ctx context.Context, tx *sql.Tx, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	now := time.Now().UTC()
+	placeholders := make([]string, len(ids))
+	args := make([]interface{}, 0, len(ids)+1)
+	args = append(args, now)
+	for i, id := range ids {
+		placeholders[i] = "?"
+		args = append(args, id)
+	}
+	inClause := strings.Join(placeholders, ",")
+	query := fmt.Sprintf(`
+		INSERT INTO object_usage (object_id, upload_count, download_count, last_upload_time, last_download_time, updated_time)
+		SELECT e.object_id,
+			COALESCE(SUM(CASE WHEN e.event_type = 'upload' THEN 1 ELSE 0 END), 0) AS upload_count,
+			COALESCE(SUM(CASE WHEN e.event_type = 'download' THEN 1 ELSE 0 END), 0) AS download_count,
+			MAX(CASE WHEN e.event_type = 'upload' THEN e.event_time END) AS last_upload_time,
+			MAX(CASE WHEN e.event_type = 'download' THEN e.event_time END) AS last_download_time,
+			?
+		FROM object_usage_event e
+		JOIN drs_object o ON o.id = e.object_id
+		WHERE e.object_id IN (%s)
+		GROUP BY e.object_id
+		ON CONFLICT(object_id) DO UPDATE SET
+			upload_count = object_usage.upload_count + excluded.upload_count,
+			download_count = object_usage.download_count + excluded.download_count,
+			last_upload_time = CASE
+				WHEN excluded.last_upload_time IS NULL THEN object_usage.last_upload_time
+				WHEN object_usage.last_upload_time IS NULL THEN excluded.last_upload_time
+				WHEN excluded.last_upload_time > object_usage.last_upload_time THEN excluded.last_upload_time
+				ELSE object_usage.last_upload_time
+			END,
+			last_download_time = CASE
+				WHEN excluded.last_download_time IS NULL THEN object_usage.last_download_time
+				WHEN object_usage.last_download_time IS NULL THEN excluded.last_download_time
+				WHEN excluded.last_download_time > object_usage.last_download_time THEN excluded.last_download_time
+				ELSE object_usage.last_download_time
+			END,
+			updated_time = excluded.updated_time
+	`, inClause)
+	if _, err := tx.ExecContext(ctx, query, args...); err != nil {
+		return err
+	}
+	return execSQLiteDeleteByIDs(tx, "object_usage_event", ids)
 }
 
 func (db *SqliteDB) GetBulkObjects(ctx context.Context, ids []string) ([]core.InternalObject, error) {
@@ -1060,30 +1124,25 @@ func (db *SqliteDB) PopPendingLFSMeta(ctx context.Context, oid string) (*core.Pe
 func (db *SqliteDB) RecordFileUpload(ctx context.Context, objectID string) error {
 	now := time.Now().UTC()
 	_, err := db.db.ExecContext(ctx, `
-		INSERT INTO object_usage (object_id, upload_count, download_count, last_upload_time, last_download_time, updated_time)
-		VALUES (?, 1, 0, ?, NULL, ?)
-		ON CONFLICT(object_id) DO UPDATE SET
-			upload_count = object_usage.upload_count + 1,
-			last_upload_time = excluded.last_upload_time,
-			updated_time = excluded.updated_time
-	`, objectID, now, now)
+		INSERT INTO object_usage_event (object_id, event_type, event_time)
+		VALUES (?, 'upload', ?)
+	`, objectID, now)
 	return err
 }
 
 func (db *SqliteDB) RecordFileDownload(ctx context.Context, objectID string) error {
 	now := time.Now().UTC()
 	_, err := db.db.ExecContext(ctx, `
-		INSERT INTO object_usage (object_id, upload_count, download_count, last_upload_time, last_download_time, updated_time)
-		VALUES (?, 0, 1, NULL, ?, ?)
-		ON CONFLICT(object_id) DO UPDATE SET
-			download_count = object_usage.download_count + 1,
-			last_download_time = excluded.last_download_time,
-			updated_time = excluded.updated_time
-	`, objectID, now, now)
+		INSERT INTO object_usage_event (object_id, event_type, event_time)
+		VALUES (?, 'download', ?)
+	`, objectID, now)
 	return err
 }
 
 func (db *SqliteDB) GetFileUsage(ctx context.Context, objectID string) (*core.FileUsage, error) {
+	if err := db.flushObjectUsageEvents(ctx); err != nil {
+		return nil, err
+	}
 	var usage core.FileUsage
 	var lastUpload sql.NullTime
 	var lastDownload sql.NullTime
@@ -1124,6 +1183,9 @@ func (db *SqliteDB) GetFileUsage(ctx context.Context, objectID string) (*core.Fi
 }
 
 func (db *SqliteDB) ListFileUsage(ctx context.Context, limit, offset int, inactiveSince *time.Time) ([]core.FileUsage, error) {
+	if err := db.flushObjectUsageEvents(ctx); err != nil {
+		return nil, err
+	}
 	if limit <= 0 {
 		limit = 200
 	}
@@ -1188,6 +1250,9 @@ func (db *SqliteDB) ListFileUsage(ctx context.Context, limit, offset int, inacti
 }
 
 func (db *SqliteDB) GetFileUsageSummary(ctx context.Context, inactiveSince *time.Time) (core.FileUsageSummary, error) {
+	if err := db.flushObjectUsageEvents(ctx); err != nil {
+		return core.FileUsageSummary{}, err
+	}
 	summary := core.FileUsageSummary{}
 	query := `
 		SELECT
@@ -1211,6 +1276,42 @@ func (db *SqliteDB) GetFileUsageSummary(ctx context.Context, inactiveSince *time
 		return core.FileUsageSummary{}, err
 	}
 	return summary, nil
+}
+
+func (db *SqliteDB) flushObjectUsageEvents(ctx context.Context) error {
+	tx, err := db.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	rows, err := tx.QueryContext(ctx, `
+		SELECT DISTINCT e.object_id
+		FROM object_usage_event e
+		JOIN drs_object o ON o.id = e.object_id
+	`)
+	if err != nil {
+		return err
+	}
+	ids := make([]string, 0)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+
+	if err := db.flushObjectUsageEventsForIDsTx(ctx, tx, ids); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func latestTime(ts ...*time.Time) *time.Time {

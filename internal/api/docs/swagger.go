@@ -25,7 +25,7 @@ const swaggerUIHTML = `<!doctype html>
   <script>
     window.onload = function() {
       window.ui = SwaggerUIBundle({
-        url: "/openapi.yaml",
+        url: "/index/openapi.yaml",
         dom_id: "#swagger-ui"
       });
     };
@@ -36,14 +36,13 @@ const swaggerUIHTML = `<!doctype html>
 
 // RegisterSwaggerRoutes adds Swagger/OpenAPI docs endpoints.
 func RegisterSwaggerRoutes(router *mux.Router) {
-	router.HandleFunc("/swagger", handleSwaggerUI).Methods(http.MethodGet)
-	router.HandleFunc("/swagger/", handleSwaggerUI).Methods(http.MethodGet)
-	router.HandleFunc("/openapi.yaml", handleOpenAPISpec).Methods(http.MethodGet)
-	// Indexd-compat mount for environments that only proxy /index/* to drs-server.
+	router.HandleFunc("/index/swagger", handleSwaggerUI).Methods(http.MethodGet)
+	router.HandleFunc("/index/swagger/", handleSwaggerUI).Methods(http.MethodGet)
+	// OpenAPI is intentionally exposed only under /index for proxy compatibility.
 	router.HandleFunc("/index/openapi.yaml", handleOpenAPISpec).Methods(http.MethodGet)
-	router.HandleFunc("/openapi-lfs.yaml", handleLFSOpenAPISpec).Methods(http.MethodGet)
-	router.HandleFunc("/openapi-bucket.yaml", handleBucketOpenAPISpec).Methods(http.MethodGet)
-	router.HandleFunc("/openapi-internal.yaml", handleInternalOpenAPISpec).Methods(http.MethodGet)
+	router.HandleFunc("/index/openapi-lfs.yaml", handleLFSOpenAPISpec).Methods(http.MethodGet)
+	router.HandleFunc("/index/openapi-bucket.yaml", handleBucketOpenAPISpec).Methods(http.MethodGet)
+	router.HandleFunc("/index/openapi-internal.yaml", handleInternalOpenAPISpec).Methods(http.MethodGet)
 }
 
 func handleSwaggerUI(w http.ResponseWriter, _ *http.Request) {

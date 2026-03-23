@@ -9,11 +9,24 @@ import (
 	"github.com/gorilla/mux"
 )
 
-func TestSwaggerUIRoute(t *testing.T) {
+func TestSwaggerUIRouteRootNotServed(t *testing.T) {
 	router := mux.NewRouter()
 	RegisterSwaggerRoutes(router)
 
 	req := httptest.NewRequest(http.MethodGet, "/swagger", nil)
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestSwaggerUIRouteViaIndexPrefix(t *testing.T) {
+	router := mux.NewRouter()
+	RegisterSwaggerRoutes(router)
+
+	req := httptest.NewRequest(http.MethodGet, "/index/swagger", nil)
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 
@@ -25,7 +38,7 @@ func TestSwaggerUIRoute(t *testing.T) {
 	}
 }
 
-func TestOpenAPIRoute(t *testing.T) {
+func TestOpenAPIRouteRootNotServed(t *testing.T) {
 	router := mux.NewRouter()
 	RegisterSwaggerRoutes(router)
 
@@ -33,14 +46,8 @@ func TestOpenAPIRoute(t *testing.T) {
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
-	}
-	if !strings.Contains(rr.Body.String(), "openapi: 3.0.3") {
-		t.Fatalf("expected openapi spec body, got: %s", rr.Body.String())
-	}
-	if !strings.Contains(rr.Body.String(), "/info/lfs/objects/batch") {
-		t.Fatalf("expected merged LFS route in openapi body")
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d body=%s", rr.Code, rr.Body.String())
 	}
 }
 
@@ -57,5 +64,38 @@ func TestOpenAPIRouteViaIndexPrefix(t *testing.T) {
 	}
 	if !strings.Contains(rr.Body.String(), "openapi: 3.0.3") {
 		t.Fatalf("expected openapi spec body, got: %s", rr.Body.String())
+	}
+}
+
+func TestAuxOpenAPIRoutesIndexOnly(t *testing.T) {
+	router := mux.NewRouter()
+	RegisterSwaggerRoutes(router)
+
+	rootPaths := []string{
+		"/openapi-lfs.yaml",
+		"/openapi-bucket.yaml",
+		"/openapi-internal.yaml",
+	}
+	for _, p := range rootPaths {
+		req := httptest.NewRequest(http.MethodGet, p, nil)
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+		if rr.Code != http.StatusNotFound {
+			t.Fatalf("expected 404 for %s, got %d body=%s", p, rr.Code, rr.Body.String())
+		}
+	}
+
+	indexPaths := []string{
+		"/index/openapi-lfs.yaml",
+		"/index/openapi-bucket.yaml",
+		"/index/openapi-internal.yaml",
+	}
+	for _, p := range indexPaths {
+		req := httptest.NewRequest(http.MethodGet, p, nil)
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200 for %s, got %d body=%s", p, rr.Code, rr.Body.String())
+		}
 	}
 }
