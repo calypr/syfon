@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/calypr/drs-server/db/core"
 )
@@ -216,5 +217,94 @@ func TestGen3MockAuthRequireHeader(t *testing.T) {
 	handler.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+}
+
+func TestAuthzCacheSetGetPositive(t *testing.T) {
+	c := newAuthzCache(authCacheConfig{
+		Enabled:     true,
+		TTL:         2 * time.Second,
+		NegativeTTL: 1 * time.Second,
+		MaxEntries:  10,
+	})
+	resources := []string{"/data_file"}
+	privs := map[string]map[string]bool{
+		"/data_file": {"read": true, "create": true},
+	}
+
+	c.set("k1", resources, privs, false)
+	gotRes, gotPrivs, negative, ok := c.get("k1")
+	if !ok {
+		t.Fatalf("expected cache hit")
+	}
+	if negative {
+		t.Fatalf("expected positive entry")
+	}
+	if len(gotRes) != 1 || gotRes[0] != "/data_file" {
+		t.Fatalf("unexpected resources: %+v", gotRes)
+	}
+	if !gotPrivs["/data_file"]["read"] || !gotPrivs["/data_file"]["create"] {
+		t.Fatalf("unexpected privileges: %+v", gotPrivs)
+	}
+}
+
+func TestAuthzCacheSetGetNegative(t *testing.T) {
+	c := newAuthzCache(authCacheConfig{
+		Enabled:     true,
+		TTL:         2 * time.Second,
+		NegativeTTL: 2 * time.Second,
+		MaxEntries:  10,
+	})
+	c.set("k2", nil, nil, true)
+	_, _, negative, ok := c.get("k2")
+	if !ok {
+		t.Fatalf("expected cache hit")
+	}
+	if !negative {
+		t.Fatalf("expected negative entry")
+	}
+}
+
+func TestAuthzCacheExpires(t *testing.T) {
+	c := newAuthzCache(authCacheConfig{
+		Enabled:     true,
+		TTL:         20 * time.Millisecond,
+		NegativeTTL: 20 * time.Millisecond,
+		MaxEntries:  10,
+	})
+	c.set("k3", []string{"/x"}, map[string]map[string]bool{"/x": {"read": true}}, false)
+	time.Sleep(35 * time.Millisecond)
+	_, _, _, ok := c.get("k3")
+	if ok {
+		t.Fatalf("expected cache miss after expiry")
+	}
+}
+
+func TestAuthzCacheDeepCopy(t *testing.T) {
+	c := newAuthzCache(authCacheConfig{
+		Enabled:     true,
+		TTL:         2 * time.Second,
+		NegativeTTL: 1 * time.Second,
+		MaxEntries:  10,
+	})
+	resources := []string{"/a"}
+	privs := map[string]map[string]bool{
+		"/a": {"read": true},
+	}
+	c.set("k4", resources, privs, false)
+
+	// Mutate originals after set; cache should keep prior values.
+	resources[0] = "/mutated"
+	privs["/a"]["read"] = false
+
+	gotRes, gotPrivs, _, ok := c.get("k4")
+	if !ok {
+		t.Fatalf("expected cache hit")
+	}
+	if gotRes[0] != "/a" {
+		t.Fatalf("expected cached resource '/a', got %q", gotRes[0])
+	}
+	if !gotPrivs["/a"]["read"] {
+		t.Fatalf("expected cached read=true, got %+v", gotPrivs)
 	}
 }

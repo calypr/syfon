@@ -2,14 +2,19 @@ package middleware
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/calypr/data-client/conf"
 	"github.com/calypr/data-client/fence"
@@ -17,6 +22,7 @@ import (
 	"github.com/calypr/data-client/request"
 	"github.com/calypr/drs-server/db/core"
 	"github.com/golang-jwt/jwt/v5"
+	"golang.org/x/sync/singleflight"
 )
 
 type AuthzMiddleware struct {
@@ -25,6 +31,8 @@ type AuthzMiddleware struct {
 	basicUser string
 	basicPass string
 	mock      mockAuthConfig
+	cache     *authzCache
+	sf        singleflight.Group
 }
 
 type mockAuthConfig struct {
@@ -34,13 +42,41 @@ type mockAuthConfig struct {
 	Methods           []string
 }
 
+type authCacheConfig struct {
+	Enabled      bool
+	TTL          time.Duration
+	NegativeTTL  time.Duration
+	MaxEntries   int
+	CleanupEvery time.Duration
+}
+
+type authzCache struct {
+	cfg authCacheConfig
+
+	mu      sync.RWMutex
+	entries map[string]authzCacheEntry
+}
+
+type authzCacheEntry struct {
+	resources  []string
+	privileges map[string]map[string]bool
+	negative   bool
+	expiresAt  time.Time
+}
+
 func NewAuthzMiddleware(logger *slog.Logger, mode, basicUser, basicPass string) *AuthzMiddleware {
+	cfg := loadAuthCacheConfigFromEnv()
+	var cache *authzCache
+	if cfg.Enabled {
+		cache = newAuthzCache(cfg)
+	}
 	return &AuthzMiddleware{
 		logger:    logger,
 		mode:      strings.ToLower(strings.TrimSpace(mode)),
 		basicUser: basicUser,
 		basicPass: basicPass,
 		mock:      loadMockAuthConfigFromEnv(),
+		cache:     cache,
 	}
 }
 
@@ -100,42 +136,223 @@ func (m *AuthzMiddleware) Middleware(next http.Handler) http.Handler {
 			return
 		}
 
-		// 1. Discover Fence API endpoint from token 'iss' claim
-		apiEndpoint, _, err := m.parseToken(tokenString)
-		if err != nil {
-			m.logger.Debug("failed to parse token", "error", err)
+		cacheKey := tokenCacheKey(tokenString)
+		if m.cache != nil {
+			if resources, privileges, negative, ok := m.cache.get(cacheKey); ok {
+				if negative {
+					next.ServeHTTP(w, r.WithContext(ctx))
+					return
+				}
+				ctx = context.WithValue(ctx, core.UserAuthzKey, resources)
+				ctx = context.WithValue(ctx, core.UserPrivilegesKey, privileges)
+				next.ServeHTTP(w, r.WithContext(ctx))
+				return
+			}
+		}
+
+		type authFetchResult struct {
+			resources  []string
+			privileges map[string]map[string]bool
+			negative   bool
+		}
+
+		v, _, _ := m.sf.Do(cacheKey, func() (interface{}, error) {
+			// 1. Discover Fence API endpoint from token 'iss' claim
+			apiEndpoint, _, err := m.parseToken(tokenString)
+			if err != nil {
+				m.logger.Debug("failed to parse token", "error", err)
+				return authFetchResult{negative: true}, nil
+			}
+
+			// 2. Initialize data-client FenceClient
+			cred := &conf.Credential{
+				AccessToken: tokenString,
+				APIEndpoint: apiEndpoint,
+			}
+
+			// We use a no-op gen3 logger for the request client to avoid unnecessary side effects in middleware
+			gen3Logger := logs.NewGen3Logger(m.logger, "", "drs-server")
+			reqClient := request.NewRequestInterface(gen3Logger, cred, nil)
+			fenceClient := fence.NewFenceClient(reqClient, cred, m.logger)
+
+			// 3. Fetch user info (privileges)
+			privs, err := fenceClient.CheckPrivileges(r.Context())
+			if err != nil {
+				m.logger.Debug("failed to check privileges with fence", "error", err)
+				return authFetchResult{negative: true}, nil
+			}
+
+			// 4. Map privileges to authorized resources + methods
+			authorizedResources, privileges := m.extractPrivileges(privs)
+			return authFetchResult{
+				resources:  authorizedResources,
+				privileges: privileges,
+				negative:   false,
+			}, nil
+		})
+		res, _ := v.(authFetchResult)
+
+		if m.cache != nil {
+			m.cache.set(cacheKey, res.resources, res.privileges, res.negative)
+		}
+
+		if res.negative {
 			next.ServeHTTP(w, r.WithContext(ctx))
 			return
 		}
 
-		// 2. Initialize data-client FenceClient
-		cred := &conf.Credential{
-			AccessToken: tokenString,
-			APIEndpoint: apiEndpoint,
-		}
-
-		// We use a no-op gen3 logger for the request client to avoid unnecessary side effects in middleware
-		gen3Logger := logs.NewGen3Logger(m.logger, "", "drs-server")
-		reqClient := request.NewRequestInterface(gen3Logger, cred, nil)
-		fenceClient := fence.NewFenceClient(reqClient, cred, m.logger)
-
-		// 3. Fetch user info (privileges)
-		// NOTE: We are NOT caching here to ensure we always have the latest permissions from Fence.
-		// If performance becomes an issue, consider adding a short-lived cache (e.g., 30s-1m).
-		privs, err := fenceClient.CheckPrivileges(r.Context())
-		if err != nil {
-			m.logger.Debug("failed to check privileges with fence", "error", err)
-			next.ServeHTTP(w, r.WithContext(ctx))
-			return
-		}
-
-		// 4. Map privileges to authorized resources + methods
-		authorizedResources, privileges := m.extractPrivileges(privs)
-		ctx = context.WithValue(ctx, core.UserAuthzKey, authorizedResources)
-		ctx = context.WithValue(ctx, core.UserPrivilegesKey, privileges)
+		ctx = context.WithValue(ctx, core.UserAuthzKey, res.resources)
+		ctx = context.WithValue(ctx, core.UserPrivilegesKey, res.privileges)
 
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+func newAuthzCache(cfg authCacheConfig) *authzCache {
+	return &authzCache{
+		cfg:     cfg,
+		entries: make(map[string]authzCacheEntry, cfg.MaxEntries),
+	}
+}
+
+func (c *authzCache) get(key string) ([]string, map[string]map[string]bool, bool, bool) {
+	now := time.Now()
+	c.mu.RLock()
+	entry, ok := c.entries[key]
+	c.mu.RUnlock()
+	if !ok {
+		return nil, nil, false, false
+	}
+	if now.After(entry.expiresAt) {
+		c.mu.Lock()
+		// Re-check under write lock to avoid deleting refreshed entries.
+		if curr, ok := c.entries[key]; ok && now.After(curr.expiresAt) {
+			delete(c.entries, key)
+		}
+		c.mu.Unlock()
+		return nil, nil, false, false
+	}
+	return cloneStrings(entry.resources), clonePrivMap(entry.privileges), entry.negative, true
+}
+
+func (c *authzCache) set(key string, resources []string, privileges map[string]map[string]bool, negative bool) {
+	ttl := c.cfg.TTL
+	if negative {
+		ttl = c.cfg.NegativeTTL
+	}
+	if ttl <= 0 {
+		return
+	}
+	entry := authzCacheEntry{
+		resources:  cloneStrings(resources),
+		privileges: clonePrivMap(privileges),
+		negative:   negative,
+		expiresAt:  time.Now().Add(ttl),
+	}
+
+	c.mu.Lock()
+	c.entries[key] = entry
+	if len(c.entries) > c.cfg.MaxEntries {
+		c.evictExpiredOrOldestLocked()
+	}
+	c.mu.Unlock()
+}
+
+func (c *authzCache) evictExpiredOrOldestLocked() {
+	now := time.Now()
+	for k, v := range c.entries {
+		if now.After(v.expiresAt) {
+			delete(c.entries, k)
+		}
+	}
+	if len(c.entries) <= c.cfg.MaxEntries {
+		return
+	}
+
+	type kv struct {
+		key string
+		exp time.Time
+	}
+	all := make([]kv, 0, len(c.entries))
+	for k, v := range c.entries {
+		all = append(all, kv{key: k, exp: v.expiresAt})
+	}
+	sort.Slice(all, func(i, j int) bool {
+		return all[i].exp.Before(all[j].exp)
+	})
+
+	toDrop := len(c.entries) - c.cfg.MaxEntries
+	for i := 0; i < toDrop && i < len(all); i++ {
+		delete(c.entries, all[i].key)
+	}
+}
+
+func loadAuthCacheConfigFromEnv() authCacheConfig {
+	cfg := authCacheConfig{
+		Enabled:      parseBoolEnv("DRS_AUTH_CACHE_ENABLED", true),
+		TTL:          parseDurationSecondsEnv("DRS_AUTH_CACHE_TTL_SECONDS", 45),
+		NegativeTTL:  parseDurationSecondsEnv("DRS_AUTH_CACHE_NEGATIVE_TTL_SECONDS", 8),
+		MaxEntries:   parseIntEnv("DRS_AUTH_CACHE_MAX_ENTRIES", 20000),
+		CleanupEvery: parseDurationSecondsEnv("DRS_AUTH_CACHE_CLEANUP_SECONDS", 60),
+	}
+	if cfg.MaxEntries < 1 {
+		cfg.MaxEntries = 1
+	}
+	return cfg
+}
+
+func parseDurationSecondsEnv(name string, defSeconds int) time.Duration {
+	v := parseIntEnv(name, defSeconds)
+	if v < 0 {
+		v = defSeconds
+	}
+	return time.Duration(v) * time.Second
+}
+
+func parseIntEnv(name string, def int) int {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return def
+	}
+	var v int
+	_, err := fmt.Sscanf(raw, "%d", &v)
+	if err != nil {
+		return def
+	}
+	return v
+}
+
+func tokenCacheKey(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
+}
+
+func cloneStrings(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]string, len(in))
+	copy(out, in)
+	return out
+}
+
+func clonePrivMap(in map[string]map[string]bool) map[string]map[string]bool {
+	if len(in) == 0 {
+		return map[string]map[string]bool{}
+	}
+	out := make(map[string]map[string]bool, len(in))
+	for k, methods := range in {
+		if methods == nil {
+			out[k] = map[string]bool{}
+			continue
+		}
+		mm := make(map[string]bool, len(methods))
+		for mk, mv := range methods {
+			mm[mk] = mv
+		}
+		out[k] = mm
+	}
+	return out
 }
 
 func loadMockAuthConfigFromEnv() mockAuthConfig {
