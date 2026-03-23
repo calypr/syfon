@@ -370,19 +370,18 @@ func prepareUploadActions(r *http.Request, database core.DatabaseInterface, uM u
 }
 
 func resolveObjectForOID(ctx context.Context, database core.DatabaseInterface, oid string) (*core.InternalObject, error) {
-	if obj, err := database.GetObject(ctx, oid); err == nil {
-		return obj, nil
-	} else if !isNotFound(err) {
-		return nil, err
-	}
-
-	// Some flows register by DRS DID while OID is only checksum.
-	// Fall back to checksum lookup to keep upload/download key resolution consistent.
+	// Checksum-first resolution: OID is the operational identity in git-lfs/git-drs flows.
 	byChecksum, err := database.GetObjectsByChecksum(ctx, oid)
 	if err != nil {
 		return nil, err
 	}
 	if len(byChecksum) == 0 {
+		// Legacy fallback: object IDs may still be UUID/DID values in some records/flows.
+		if obj, getErr := database.GetObject(ctx, oid); getErr == nil {
+			return obj, nil
+		} else if !isNotFound(getErr) {
+			return nil, getErr
+		}
 		return nil, fmt.Errorf("%w: object not found", core.ErrNotFound)
 	}
 	obj := byChecksum[0]

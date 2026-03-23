@@ -141,8 +141,8 @@ Useful endpoints:
 - `GET /swagger` (Swagger UI)
 - `GET /openapi.yaml` (OpenAPI spec)
 - `GET /service-info`
-- `GET /index/index/{id}` (gen3 compatibility)
-- `POST /index/index/bulk/sha256/validity` (bulk sha validity map for git-lfs style flows)
+- `GET /index/{id}` (gen3 compatibility)
+- `POST /index/bulk/sha256/validity` (bulk sha validity map for git-lfs style flows)
 - `GET /data/download/{id}` (fence compatibility)
 
 ## Running Integration Tests

@@ -43,14 +43,14 @@ func TestIndexdCreateGetAndUpdate(t *testing.T) {
 		FileName: strPtr("a.bin"),
 	}
 	body, _ := json.Marshal(create)
-	req := httptest.NewRequest(http.MethodPost, "/index/index", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/index", bytes.NewReader(body))
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("create status=%d body=%s", rr.Code, rr.Body.String())
 	}
 
-	getReq := httptest.NewRequest(http.MethodGet, "/index/index/sha-a", nil)
+	getReq := httptest.NewRequest(http.MethodGet, "/index/sha-a", nil)
 	getRR := httptest.NewRecorder()
 	router.ServeHTTP(getRR, getReq)
 	if getRR.Code != http.StatusOK {
@@ -73,14 +73,14 @@ func TestIndexdCreateGetAndUpdate(t *testing.T) {
 		FileName: strPtr("a-new.bin"),
 	}
 	updateBody, _ := json.Marshal(update)
-	updateReq := httptest.NewRequest(http.MethodPut, "/index/index/sha-a", bytes.NewReader(updateBody))
+	updateReq := httptest.NewRequest(http.MethodPut, "/index/sha-a", bytes.NewReader(updateBody))
 	updateRR := httptest.NewRecorder()
 	router.ServeHTTP(updateRR, updateReq)
 	if updateRR.Code != http.StatusOK {
 		t.Fatalf("update status=%d body=%s", updateRR.Code, updateRR.Body.String())
 	}
 
-	getReq2 := httptest.NewRequest(http.MethodGet, "/index/index/sha-a", nil)
+	getReq2 := httptest.NewRequest(http.MethodGet, "/index/sha-a", nil)
 	getRR2 := httptest.NewRecorder()
 	router.ServeHTTP(getRR2, getReq2)
 	if getRR2.Code != http.StatusOK {
@@ -117,7 +117,7 @@ func TestIndexdBulkHashesAndDocuments(t *testing.T) {
 			FileName: strPtr(id + ".bin"),
 		}
 		body, _ := json.Marshal(rec)
-		req := httptest.NewRequest(http.MethodPost, "/index/index", bytes.NewReader(body))
+		req := httptest.NewRequest(http.MethodPost, "/index", bytes.NewReader(body))
 		rr := httptest.NewRecorder()
 		router.ServeHTTP(rr, req)
 		if rr.Code != http.StatusCreated {
@@ -128,7 +128,7 @@ func TestIndexdBulkHashesAndDocuments(t *testing.T) {
 	hashReqBody, _ := json.Marshal(map[string][]string{
 		"hashes": []string{"sha256:sha-b", "sha-c"},
 	})
-	hashReq := httptest.NewRequest(http.MethodPost, "/index/index/bulk/hashes", bytes.NewReader(hashReqBody))
+	hashReq := httptest.NewRequest(http.MethodPost, "/index/bulk/hashes", bytes.NewReader(hashReqBody))
 	hashRR := httptest.NewRecorder()
 	router.ServeHTTP(hashRR, hashReq)
 	if hashRR.Code != http.StatusOK {
@@ -148,7 +148,7 @@ func TestIndexdBulkHashesAndDocuments(t *testing.T) {
 	}
 
 	docReqBody, _ := json.Marshal(map[string][]string{"ids": []string{"sha-c"}})
-	docReq := httptest.NewRequest(http.MethodPost, "/bulk/documents", bytes.NewReader(docReqBody))
+	docReq := httptest.NewRequest(http.MethodPost, "/index/bulk/documents", bytes.NewReader(docReqBody))
 	docRR := httptest.NewRecorder()
 	router.ServeHTTP(docRR, docReq)
 	if docRR.Code != http.StatusOK {
@@ -192,7 +192,7 @@ func TestIndexdBulkSHA256Validity(t *testing.T) {
 	reqBody, _ := json.Marshal(map[string][]string{
 		"sha256": []string{"sha-valid", "sha-bad-bucket", "sha-bad-url", "sha-missing"},
 	})
-	req := httptest.NewRequest(http.MethodPost, "/index/index/bulk/sha256/validity", bytes.NewReader(reqBody))
+	req := httptest.NewRequest(http.MethodPost, "/index/bulk/sha256/validity", bytes.NewReader(reqBody))
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
@@ -234,7 +234,7 @@ func TestIndexdBulkSHA256Validity_AcceptsHashesAlias(t *testing.T) {
 	reqBody, _ := json.Marshal(map[string][]string{
 		"hashes": []string{"sha256:sha-prefixed"},
 	})
-	req := httptest.NewRequest(http.MethodPost, "/index/index/bulk/sha256/validity", bytes.NewReader(reqBody))
+	req := httptest.NewRequest(http.MethodPost, "/index/bulk/sha256/validity", bytes.NewReader(reqBody))
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
@@ -254,7 +254,7 @@ func TestIndexdGetUnauthorizedStatusCodes(t *testing.T) {
 	router := mux.NewRouter()
 	RegisterGen3Routes(router, db)
 
-	req401 := httptest.NewRequest(http.MethodGet, "/index/index/sha-denied", nil)
+	req401 := httptest.NewRequest(http.MethodGet, "/index/sha-denied", nil)
 	ctx401 := context.WithValue(req401.Context(), core.AuthModeKey, "gen3")
 	ctx401 = context.WithValue(ctx401, core.AuthHeaderPresentKey, false)
 	req401 = req401.WithContext(ctx401)
@@ -264,7 +264,7 @@ func TestIndexdGetUnauthorizedStatusCodes(t *testing.T) {
 		t.Fatalf("expected 401 when auth header missing, got %d body=%s", rr401.Code, rr401.Body.String())
 	}
 
-	req403 := httptest.NewRequest(http.MethodGet, "/index/index/sha-denied", nil)
+	req403 := httptest.NewRequest(http.MethodGet, "/index/sha-denied", nil)
 	ctx403 := context.WithValue(req403.Context(), core.AuthModeKey, "gen3")
 	ctx403 = context.WithValue(ctx403, core.AuthHeaderPresentKey, true)
 	req403 = req403.WithContext(ctx403)
@@ -285,7 +285,7 @@ func TestIndexdBulkCreateGen3Unauthorized(t *testing.T) {
 			{Did: &did, Hashes: &hashes, Authz: []string{"/programs/p/projects/q"}, FileName: &fileName},
 		},
 	})
-	req := httptest.NewRequest(http.MethodPost, "/index/index/bulk", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/index/bulk", bytes.NewReader(body))
 	ctx := context.WithValue(req.Context(), core.AuthModeKey, "gen3")
 	ctx = context.WithValue(ctx, core.AuthHeaderPresentKey, false)
 	req = req.WithContext(ctx)
@@ -301,7 +301,7 @@ func TestIndexdBulkCreate_RejectsInvalidGeneratedPayloads(t *testing.T) {
 	router, _ := newGen3Router(t)
 
 	t.Run("missing required records", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPost, "/index/index/bulk", bytes.NewBufferString(`{}`))
+		req := httptest.NewRequest(http.MethodPost, "/index/bulk", bytes.NewBufferString(`{}`))
 		rr := httptest.NewRecorder()
 		router.ServeHTTP(rr, req)
 		if rr.Code != http.StatusBadRequest {
@@ -310,7 +310,7 @@ func TestIndexdBulkCreate_RejectsInvalidGeneratedPayloads(t *testing.T) {
 	})
 
 	t.Run("unknown field", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPost, "/index/index/bulk", bytes.NewBufferString(`{"records":[],"unexpected":1}`))
+		req := httptest.NewRequest(http.MethodPost, "/index/bulk", bytes.NewBufferString(`{"records":[],"unexpected":1}`))
 		rr := httptest.NewRecorder()
 		router.ServeHTTP(rr, req)
 		if rr.Code != http.StatusBadRequest {
@@ -336,7 +336,7 @@ func TestIndexdListAndDeleteByOrganizationProject(t *testing.T) {
 		"sha-2": {"/programs/cbds/projects/p2"},
 	}
 
-	getReq := httptest.NewRequest(http.MethodGet, "/index/index?organization=cbds&project=p1", nil)
+	getReq := httptest.NewRequest(http.MethodGet, "/index?organization=cbds&project=p1", nil)
 	getCtx := context.WithValue(getReq.Context(), core.AuthModeKey, "gen3")
 	getCtx = context.WithValue(getCtx, core.AuthHeaderPresentKey, true)
 	getCtx = context.WithValue(getCtx, core.UserPrivilegesKey, map[string]map[string]bool{
@@ -359,7 +359,7 @@ func TestIndexdListAndDeleteByOrganizationProject(t *testing.T) {
 		t.Fatalf("expected organization/project projection, got %+v", listResp.Records[0])
 	}
 
-	delReq := httptest.NewRequest(http.MethodDelete, "/index/index?organization=cbds&project=p1", nil)
+	delReq := httptest.NewRequest(http.MethodDelete, "/index?organization=cbds&project=p1", nil)
 	delCtx := context.WithValue(delReq.Context(), core.AuthModeKey, "gen3")
 	delCtx = context.WithValue(delCtx, core.AuthHeaderPresentKey, true)
 	delCtx = context.WithValue(delCtx, core.UserPrivilegesKey, map[string]map[string]bool{
@@ -385,7 +385,7 @@ func TestIndexdDeleteByID(t *testing.T) {
 		"sha-del": {Id: "sha-del"},
 	}
 
-	delReq := httptest.NewRequest(http.MethodDelete, "/index/index/sha-del", nil)
+	delReq := httptest.NewRequest(http.MethodDelete, "/index/sha-del", nil)
 	delReq = mux.SetURLVars(delReq, map[string]string{"id": "sha-del"})
 	delRR := httptest.NewRecorder()
 	router.ServeHTTP(delRR, delReq)
@@ -395,19 +395,19 @@ func TestIndexdDeleteByID(t *testing.T) {
 }
 
 func TestParseScopeQuery(t *testing.T) {
-	req1 := httptest.NewRequest(http.MethodGet, "/index/index?authz=/programs/a/projects/b", nil)
+	req1 := httptest.NewRequest(http.MethodGet, "/index?authz=/programs/a/projects/b", nil)
 	scope, ok, err := parseScopeQuery(req1)
 	if err != nil || !ok || scope != "/programs/a/projects/b" {
 		t.Fatalf("unexpected authz parse result: scope=%q ok=%v err=%v", scope, ok, err)
 	}
 
-	req2 := httptest.NewRequest(http.MethodGet, "/index/index?organization=a&project=b", nil)
+	req2 := httptest.NewRequest(http.MethodGet, "/index?organization=a&project=b", nil)
 	scope, ok, err = parseScopeQuery(req2)
 	if err != nil || !ok || scope != "/programs/a/projects/b" {
 		t.Fatalf("unexpected org/project parse result: scope=%q ok=%v err=%v", scope, ok, err)
 	}
 
-	req3 := httptest.NewRequest(http.MethodGet, "/index/index?project=b", nil)
+	req3 := httptest.NewRequest(http.MethodGet, "/index?project=b", nil)
 	_, _, err = parseScopeQuery(req3)
 	if err == nil {
 		t.Fatal("expected error when project provided without organization")
@@ -416,7 +416,7 @@ func TestParseScopeQuery(t *testing.T) {
 
 func TestIndexdListNotImplementedWithoutQuery(t *testing.T) {
 	router, _ := newGen3Router(t)
-	req := httptest.NewRequest(http.MethodGet, "/index/index", nil)
+	req := httptest.NewRequest(http.MethodGet, "/index", nil)
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 	if rr.Code != http.StatusNotImplemented {
@@ -495,14 +495,14 @@ func TestIndexdToDrsWithScopeFromEmbeddedRecord(t *testing.T) {
 func TestIndexdBulkCreateAndDocsValidationErrors(t *testing.T) {
 	router, _ := newGen3Router(t)
 
-	badBulk := httptest.NewRequest(http.MethodPost, "/index/index/bulk", bytes.NewBufferString(`{}`))
+	badBulk := httptest.NewRequest(http.MethodPost, "/index/bulk", bytes.NewBufferString(`{}`))
 	badBulkRR := httptest.NewRecorder()
 	router.ServeHTTP(badBulkRR, badBulk)
 	if badBulkRR.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for empty bulk create, got %d", badBulkRR.Code)
 	}
 
-	badDocs := httptest.NewRequest(http.MethodPost, "/bulk/documents", bytes.NewBufferString(`{`))
+	badDocs := httptest.NewRequest(http.MethodPost, "/index/bulk/documents", bytes.NewBufferString(`{`))
 	badDocsRR := httptest.NewRecorder()
 	router.ServeHTTP(badDocsRR, badDocs)
 	if badDocsRR.Code != http.StatusBadRequest {
@@ -518,7 +518,7 @@ func TestIndexdListByHashPath(t *testing.T) {
 			Checksums: []drs.Checksum{{Type: "sha256", Checksum: "sha-h"}},
 		},
 	}
-	req := httptest.NewRequest(http.MethodGet, "/index/index?hash=sha256:sha-h", nil)
+	req := httptest.NewRequest(http.MethodGet, "/index?hash=sha256:sha-h", nil)
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {

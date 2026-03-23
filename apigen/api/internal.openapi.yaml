@@ -11,7 +11,7 @@ tags:
   - name: index
   - name: fence-compat
 paths:
-  /index/index:
+  /index:
     get:
       tags: [index]
       operationId: indexList
@@ -87,7 +87,7 @@ paths:
         '403': { description: Forbidden }
         '500': { description: Internal server error }
 
-  /index/index/{id}:
+  /index/{id}:
     get:
       tags: [index]
       operationId: indexGet
@@ -139,7 +139,7 @@ paths:
         '404': { description: Not found }
         '500': { description: Internal server error }
 
-  /index/index/bulk:
+  /index/bulk:
     post:
       tags: [index]
       operationId: indexBulkCreate
@@ -159,7 +159,7 @@ paths:
         '403': { description: Forbidden }
         '500': { description: Internal server error }
 
-  /index/index/bulk/hashes:
+  /index/bulk/hashes:
     post:
       tags: [index]
       operationId: indexBulkHashes
@@ -177,7 +177,7 @@ paths:
         '400': { description: Validation error }
         '500': { description: Internal server error }
 
-  /index/index/bulk/sha256/validity:
+  /index/bulk/sha256/validity:
     post:
       tags: [index]
       operationId: indexBulkSHA256Validity
@@ -198,7 +198,7 @@ paths:
         '400': { description: Validation error }
         '500': { description: Internal server error }
 
-  /bulk/documents:
+  /index/bulk/documents:
     post:
       tags: [index]
       operationId: indexBulkDocuments

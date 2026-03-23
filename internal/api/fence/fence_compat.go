@@ -19,6 +19,7 @@ import (
 	"github.com/calypr/drs-server/apigen/internalapi"
 	"github.com/calypr/drs-server/db/core"
 	"github.com/calypr/drs-server/urlmanager"
+	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 )
 
@@ -196,7 +197,7 @@ func resolveObjectS3Key(database core.DatabaseInterface, ctx *http.Request, obje
 	if strings.TrimSpace(objectID) == "" || strings.TrimSpace(bucket) == "" {
 		return "", false
 	}
-	obj, err := database.GetObject(ctx.Context(), objectID)
+	obj, err := resolveObjectByIDOrChecksum(database, ctx.Context(), objectID)
 	if err != nil {
 		return "", false
 	}
@@ -221,7 +222,52 @@ func resolveObjectS3Key(database core.DatabaseInterface, ctx *http.Request, obje
 	return "", false
 }
 
+func looksLikeSHA256(v string) bool {
+	s := strings.TrimSpace(strings.ToLower(v))
+	if len(s) != 64 {
+		return false
+	}
+	for i := range len(s) {
+		c := s[i]
+		if (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func checksumHintFromInputs(guid, fileName string) string {
+	g := strings.TrimSpace(guid)
+	if looksLikeSHA256(g) {
+		return g
+	}
+	f := strings.TrimSpace(fileName)
+	if looksLikeSHA256(f) {
+		return f
+	}
+	parts := strings.Split(strings.Trim(f, "/"), "/")
+	if len(parts) > 0 {
+		last := strings.TrimSpace(parts[len(parts)-1])
+		if looksLikeSHA256(last) {
+			return last
+		}
+	}
+	return ""
+}
+
 func resolveObjectByIDOrChecksum(database core.DatabaseInterface, ctx context.Context, objectID string) (*core.InternalObject, error) {
+	// Checksum-first resolution: fence-compatible routes are commonly called with OID.
+	byChecksum, err := database.GetObjectsByChecksum(ctx, objectID)
+	if err != nil {
+		return nil, err
+	}
+	if len(byChecksum) > 0 {
+		objCopy := byChecksum[0]
+		return &objCopy, nil
+	}
+
+	// Legacy fallback for UUID/DID based lookups.
 	obj, err := database.GetObject(ctx, objectID)
 	if err == nil {
 		return obj, nil
@@ -229,15 +275,7 @@ func resolveObjectByIDOrChecksum(database core.DatabaseInterface, ctx context.Co
 	if !errors.Is(err, core.ErrNotFound) {
 		return nil, err
 	}
-	byChecksum, err := database.GetObjectsByChecksum(ctx, objectID)
-	if err != nil {
-		return nil, err
-	}
-	if len(byChecksum) == 0 {
-		return nil, core.ErrNotFound
-	}
-	objCopy := byChecksum[0]
-	return &objCopy, nil
+	return nil, core.ErrNotFound
 }
 
 func handleFenceDownload(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface, uM urlmanager.UrlManager) {
@@ -443,13 +481,11 @@ func handleFenceMultipartInit(w http.ResponseWriter, r *http.Request, database c
 		return
 	}
 
-	guid := req.GetGuid()
-	if guid == "" {
-		if req.GetFileName() == "" {
-			writeHTTPError(w, r, http.StatusBadRequest, "guid or file_name is required", nil)
-			return
-		}
-		guid = req.GetFileName()
+	requestGUID := strings.TrimSpace(req.GetGuid())
+	fileName := strings.TrimSpace(req.GetFileName())
+	if requestGUID == "" && fileName == "" {
+		writeHTTPError(w, r, http.StatusBadRequest, "guid or file_name is required", nil)
+		return
 	}
 
 	bucket, err := resolveBucket(r, database, req.GetBucket())
@@ -458,9 +494,38 @@ func handleFenceMultipartInit(w http.ResponseWriter, r *http.Request, database c
 		return
 	}
 
-	fileName := req.GetFileName()
+	checksumHint := checksumHintFromInputs(requestGUID, fileName)
+
+	var existingObj *core.InternalObject
+	if requestGUID != "" {
+		obj, err := resolveObjectByIDOrChecksum(database, r.Context(), requestGUID)
+		if err != nil && !errors.Is(err, core.ErrNotFound) {
+			writeDBError(w, r, err)
+			return
+		}
+		existingObj = obj
+	}
+	if existingObj == nil && checksumHint != "" {
+		obj, err := resolveObjectByIDOrChecksum(database, r.Context(), checksumHint)
+		if err != nil && !errors.Is(err, core.ErrNotFound) {
+			writeDBError(w, r, err)
+			return
+		}
+		existingObj = obj
+	}
+
+	guid := requestGUID
+	if existingObj != nil && strings.TrimSpace(existingObj.Id) != "" {
+		guid = strings.TrimSpace(existingObj.Id)
+	} else if guid == "" || looksLikeSHA256(guid) {
+		// Canonical mode: checksum drives key lookups; DRS ID remains UUID.
+		guid = uuid.NewString()
+	}
+
 	if fileName == "" {
-		if resolvedKey, ok := resolveObjectS3Key(database, r, guid, bucket); ok {
+		if checksumHint != "" {
+			fileName = checksumHint
+		} else if resolvedKey, ok := resolveObjectS3Key(database, r, guid, bucket); ok {
 			fileName = resolvedKey
 		} else {
 			fileName = guid
@@ -468,13 +533,13 @@ func handleFenceMultipartInit(w http.ResponseWriter, r *http.Request, database c
 	}
 
 	targetResources := []string{"/data_file"}
-	if guid != "" {
-		if obj, err := database.GetObject(r.Context(), guid); err == nil && len(obj.Authorizations) > 0 {
-			targetResources = obj.Authorizations
-		} else if err != nil && !errors.Is(err, core.ErrNotFound) {
-			writeDBError(w, r, err)
-			return
-		}
+	if existingObj != nil && len(existingObj.Authorizations) > 0 {
+		targetResources = existingObj.Authorizations
+	} else if obj, err := database.GetObject(r.Context(), guid); err == nil && len(obj.Authorizations) > 0 {
+		targetResources = obj.Authorizations
+	} else if err != nil && !errors.Is(err, core.ErrNotFound) {
+		writeDBError(w, r, err)
+		return
 	}
 	if !hasAnyMethodAccess(r, targetResources, "file_upload", "create", "update") {
 		writeAuthError(w, r)
@@ -489,8 +554,10 @@ func handleFenceMultipartInit(w http.ResponseWriter, r *http.Request, database c
 	multipartUploadSessions.Store(uploadID, multipartSession{Bucket: bucket, Key: fileName})
 
 	// Create blank record if not exists
-	_, err = database.GetObject(r.Context(), guid)
-	if err != nil {
+	if existingObj == nil {
+		_, err = database.GetObject(r.Context(), guid)
+	}
+	if existingObj == nil && err != nil {
 		now := time.Now()
 		obj := &drs.DrsObject{
 			Id:          guid,
@@ -498,6 +565,9 @@ func handleFenceMultipartInit(w http.ResponseWriter, r *http.Request, database c
 			UpdatedTime: now,
 			Version:     "1",
 			Name:        fileName,
+		}
+		if checksumHint != "" {
+			obj.Checksums = []drs.Checksum{{Type: "sha256", Checksum: checksumHint}}
 		}
 		if err := database.CreateObject(r.Context(), &core.InternalObject{
 			DrsObject:      *obj,

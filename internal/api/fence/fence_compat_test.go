@@ -15,6 +15,7 @@ import (
 	"github.com/calypr/drs-server/apigen/internalapi"
 	"github.com/calypr/drs-server/db/core"
 	"github.com/calypr/drs-server/testutils"
+	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 )
 
@@ -167,6 +168,87 @@ func TestHandleFenceMultipartInit(t *testing.T) {
 
 	if resp.GetUploadId() != "mock-upload-id" {
 		t.Errorf("expected mock-upload-id, got %v", resp.GetUploadId())
+	}
+}
+
+func TestHandleFenceMultipartInit_MintsUUIDForChecksumInput(t *testing.T) {
+	mockDB := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}
+	mockUM := &testutils.MockUrlManager{}
+
+	checksum := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	reqBody := internalapi.FenceMultipartInitRequest{FileName: &checksum}
+	body, _ := json.Marshal(reqBody)
+	req, err := http.NewRequest("POST", "/multipart/init", bytes.NewBuffer(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rr := httptest.NewRecorder()
+	handleFenceMultipartInit(rr, req, mockDB, mockUM)
+
+	if status := rr.Code; status != http.StatusCreated {
+		t.Fatalf("handler returned wrong status code: got %v want %v body=%s", status, http.StatusCreated, rr.Body.String())
+	}
+
+	var resp internalapi.FenceMultipartInitResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := uuid.Parse(resp.GetGuid()); err != nil {
+		t.Fatalf("expected minted UUID guid, got %q", resp.GetGuid())
+	}
+	obj, ok := mockDB.Objects[resp.GetGuid()]
+	if !ok {
+		t.Fatalf("expected created object for guid %s", resp.GetGuid())
+	}
+	if len(obj.Checksums) == 0 || obj.Checksums[0].Checksum != checksum {
+		t.Fatalf("expected checksum %s to be persisted, got %+v", checksum, obj.Checksums)
+	}
+}
+
+func TestHandleFenceMultipartInit_ResolvesExistingByChecksumGUID(t *testing.T) {
+	checksum := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	existingID := "ee53f5ce-8069-4f99-bd59-0517e6a2f1ea"
+	mockDB := &testutils.MockDatabase{
+		Objects: map[string]*drs.DrsObject{
+			existingID: {
+				Id: existingID,
+				Checksums: []drs.Checksum{
+					{Type: "sha256", Checksum: checksum},
+				},
+				AccessMethods: []drs.AccessMethod{
+					{
+						Type: "s3",
+						AccessUrl: drs.AccessMethodAccessUrl{
+							Url: "s3://test-bucket-1/cbds/end_to_end_test/" + checksum,
+						},
+					},
+				},
+			},
+		},
+	}
+	mockUM := &testutils.MockUrlManager{}
+
+	reqBody := internalapi.FenceMultipartInitRequest{Guid: &checksum}
+	body, _ := json.Marshal(reqBody)
+	req, err := http.NewRequest("POST", "/multipart/init", bytes.NewBuffer(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rr := httptest.NewRecorder()
+	handleFenceMultipartInit(rr, req, mockDB, mockUM)
+
+	if status := rr.Code; status != http.StatusCreated {
+		t.Fatalf("handler returned wrong status code: got %v want %v body=%s", status, http.StatusCreated, rr.Body.String())
+	}
+
+	var resp internalapi.FenceMultipartInitResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.GetGuid() != existingID {
+		t.Fatalf("expected resolved existing UUID guid %s, got %s", existingID, resp.GetGuid())
 	}
 }
 

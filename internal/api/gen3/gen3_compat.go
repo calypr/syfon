@@ -45,7 +45,7 @@ func writeDBError(w http.ResponseWriter, r *http.Request, err error) {
 // RegisterGen3Routes registers the Indexd-compatible routes on the router.
 func RegisterGen3Routes(router *mux.Router, database core.DatabaseInterface) {
 	// Indexd Endpoints
-	router.Handle("/index/index", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	router.Handle("/index", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
 			handleIndexdList(w, r, database)
@@ -58,12 +58,12 @@ func RegisterGen3Routes(router *mux.Router, database core.DatabaseInterface) {
 		}
 	}), "IndexdIndex")).Methods(http.MethodGet, http.MethodPost, http.MethodDelete)
 
-	router.Handle("/index/index/bulk/hashes", drs.Logger(handleIndexdBulkHashes(database), "IndexdBulkHashes")).Methods(http.MethodPost)
-	router.Handle("/index/index/bulk/sha256/validity", drs.Logger(handleIndexdBulkSHA256Validity(database), "IndexdBulkSHA256Validity")).Methods(http.MethodPost)
-	router.Handle("/index/index/bulk", drs.Logger(handleIndexdBulkCreate(database), "IndexdBulkCreate")).Methods(http.MethodPost)
-	router.Handle("/bulk/documents", drs.Logger(handleIndexdBulkDocuments(database), "IndexdBulkDocuments")).Methods(http.MethodPost)
+	router.Handle("/index/bulk/hashes", drs.Logger(handleIndexdBulkHashes(database), "IndexdBulkHashes")).Methods(http.MethodPost)
+	router.Handle("/index/bulk/sha256/validity", drs.Logger(handleIndexdBulkSHA256Validity(database), "IndexdBulkSHA256Validity")).Methods(http.MethodPost)
+	router.Handle("/index/bulk", drs.Logger(handleIndexdBulkCreate(database), "IndexdBulkCreate")).Methods(http.MethodPost)
+	router.Handle("/index/bulk/documents", drs.Logger(handleIndexdBulkDocuments(database), "IndexdBulkDocuments")).Methods(http.MethodPost)
 
-	router.Handle("/index/index/{id}", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	router.Handle("/index/{id}", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
 			handleIndexdGet(w, r, database)

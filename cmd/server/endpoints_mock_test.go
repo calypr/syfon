@@ -83,7 +83,7 @@ func TestAllRegisteredEndpoints_WithMocks(t *testing.T) {
 		{Method: http.MethodPost, Template: "/ga4gh/drs/v1/objects/access-methods"},
 		{Method: http.MethodPost, Template: "/ga4gh/drs/v1/objects/delete"},
 		{Method: http.MethodPost, Template: "/info/lfs/objects/batch"},
-		{Method: http.MethodPost, Template: "/index/index/bulk/sha256/validity"},
+		{Method: http.MethodPost, Template: "/index/bulk/sha256/validity"},
 		{Method: http.MethodPost, Template: "/internal/v1/sha256/validity"},
 		{Method: http.MethodGet, Template: "/internal/v1/metrics/summary"},
 		{Method: http.MethodGet, Template: "/internal/v1/metrics/files"},
@@ -232,13 +232,13 @@ func requestBodyFor(method, template string) ([]byte, string) {
 		}
 	case "/admin/sign_url":
 		return []byte(`{"url":"s3://test-bucket-1/sha-1","method":"GET"}`), "application/json"
-	case "/internal/sha256/validity", "/internal/v1/sha256/validity", "/index/index/bulk/sha256/validity":
+	case "/internal/sha256/validity", "/internal/v1/sha256/validity", "/index/bulk/sha256/validity":
 		return []byte(`{"sha256":["sha-1"]}`), "application/json"
-	case "/index/index/bulk/hashes":
+	case "/index/bulk/hashes":
 		return []byte(`{"hashes":["sha-1"]}`), "application/json"
-	case "/index/index/bulk":
+	case "/index/bulk":
 		return []byte(`{"records":[{"did":"sha-1","hashes":{"sha256":"sha-1"},"size":1,"urls":["s3://test-bucket-1/sha-1"],"authz":["/data_file"]}]}`), "application/json"
-	case "/bulk/documents":
+	case "/index/bulk/documents":
 		return []byte(`["sha-1"]`), "application/json"
 	case "/data/upload", "/user/data/upload", "/data/upload/{file_id}", "/user/data/upload/{file_id}":
 		if template == "/data/upload" || template == "/user/data/upload" {
