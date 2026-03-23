@@ -584,12 +584,8 @@ func handleIndexdList(w http.ResponseWriter, r *http.Request, database core.Data
 			records = append(records, drsToIndexd(&o))
 		}
 
-		response := internalapi.ListRecordsResponse{
-			Records: records,
-		}
-
 		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(response); err != nil {
+		if err := json.NewEncoder(w).Encode(map[string]any{"records": records}); err != nil {
 			slog.Error("gen3 encode response failed", "request_id", core.GetRequestID(r.Context()), "method", r.Method, "path", r.URL.Path, "err", err)
 		}
 		return
@@ -625,7 +621,7 @@ func handleIndexdList(w http.ResponseWriter, r *http.Request, database core.Data
 			records = append(records, drsToIndexd(obj))
 		}
 		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(internalapi.ListRecordsResponse{Records: records}); err != nil {
+		if err := json.NewEncoder(w).Encode(map[string]any{"records": records}); err != nil {
 			slog.Error("gen3 encode response failed", "request_id", core.GetRequestID(r.Context()), "method", r.Method, "path", r.URL.Path, "err", err)
 		}
 		return
@@ -637,8 +633,9 @@ func handleIndexdList(w http.ResponseWriter, r *http.Request, database core.Data
 }
 
 func normalizeHashQueryValue(raw string) string {
-	if parts := strings.SplitN(strings.TrimSpace(raw), ":", 2); len(parts) == 2 {
-		return strings.TrimSpace(parts[1])
+	clean := strings.Trim(strings.TrimSpace(raw), `"'`)
+	if parts := strings.SplitN(clean, ":", 2); len(parts) == 2 {
+		return strings.Trim(strings.TrimSpace(parts[1]), `"'`)
 	}
-	return strings.TrimSpace(raw)
+	return clean
 }

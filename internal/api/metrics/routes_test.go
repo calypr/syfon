@@ -48,7 +48,7 @@ func TestMetricsRoutes_ListAndSummary(t *testing.T) {
 	RegisterMetricsRoutes(router, db)
 
 	t.Run("list", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/internal/v1/metrics/files?limit=10&offset=0&inactive_days=365", nil)
+		req := httptest.NewRequest(http.MethodGet, "/index/internal/v1/metrics/files?limit=10&offset=0&inactive_days=365", nil)
 		rr := httptest.NewRecorder()
 		router.ServeHTTP(rr, req)
 		if rr.Code != http.StatusOK {
@@ -64,7 +64,7 @@ func TestMetricsRoutes_ListAndSummary(t *testing.T) {
 	})
 
 	t.Run("summary", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/internal/v1/metrics/summary?inactive_days=365", nil)
+		req := httptest.NewRequest(http.MethodGet, "/index/internal/v1/metrics/summary?inactive_days=365", nil)
 		rr := httptest.NewRecorder()
 		router.ServeHTTP(rr, req)
 		if rr.Code != http.StatusOK {
@@ -84,14 +84,14 @@ func TestMetricsRoutes_GetNotFoundAndValidation(t *testing.T) {
 	router := mux.NewRouter()
 	RegisterMetricsRoutes(router, &testutils.MockDatabase{})
 
-	req := httptest.NewRequest(http.MethodGet, "/internal/v1/metrics/files/missing", nil)
+	req := httptest.NewRequest(http.MethodGet, "/index/internal/v1/metrics/files/missing", nil)
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d body=%s", rr.Code, rr.Body.String())
 	}
 
-	req2 := httptest.NewRequest(http.MethodGet, "/internal/v1/metrics/files?limit=0", nil)
+	req2 := httptest.NewRequest(http.MethodGet, "/index/internal/v1/metrics/files?limit=0", nil)
 	rr2 := httptest.NewRecorder()
 	router.ServeHTTP(rr2, req2)
 	if rr2.Code != http.StatusBadRequest {
@@ -126,7 +126,7 @@ func TestMetricsSummaryAuthzAndScope(t *testing.T) {
 	RegisterMetricsRoutes(router, db)
 
 	t.Run("scope reader can access scoped summary", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/internal/v1/metrics/summary?organization=cbds&project=end_to_end_test", nil)
+		req := httptest.NewRequest(http.MethodGet, "/index/internal/v1/metrics/summary?organization=cbds&project=end_to_end_test", nil)
 		ctx := context.WithValue(req.Context(), core.AuthModeKey, "gen3")
 		ctx = context.WithValue(ctx, core.AuthHeaderPresentKey, true)
 		ctx = context.WithValue(ctx, core.UserPrivilegesKey, map[string]map[string]bool{
@@ -148,7 +148,7 @@ func TestMetricsSummaryAuthzAndScope(t *testing.T) {
 	})
 
 	t.Run("missing auth header returns 401", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/internal/v1/metrics/summary?organization=cbds&project=end_to_end_test", nil)
+		req := httptest.NewRequest(http.MethodGet, "/index/internal/v1/metrics/summary?organization=cbds&project=end_to_end_test", nil)
 		ctx := context.WithValue(req.Context(), core.AuthModeKey, "gen3")
 		ctx = context.WithValue(ctx, core.AuthHeaderPresentKey, false)
 		req = req.WithContext(ctx)
@@ -160,7 +160,7 @@ func TestMetricsSummaryAuthzAndScope(t *testing.T) {
 	})
 
 	t.Run("indexd_admin style reader can access global summary via /programs read", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/internal/v1/metrics/summary", nil)
+		req := httptest.NewRequest(http.MethodGet, "/index/internal/v1/metrics/summary", nil)
 		ctx := context.WithValue(req.Context(), core.AuthModeKey, "gen3")
 		ctx = context.WithValue(ctx, core.AuthHeaderPresentKey, true)
 		ctx = context.WithValue(ctx, core.UserPrivilegesKey, map[string]map[string]bool{
@@ -206,7 +206,7 @@ func TestMetricsFilesAuthzAndScope(t *testing.T) {
 	RegisterMetricsRoutes(router, db)
 
 	t.Run("scoped list returns only scoped objects", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/internal/v1/metrics/files?organization=cbds&project=end_to_end_test&limit=10&offset=0", nil)
+		req := httptest.NewRequest(http.MethodGet, "/index/internal/v1/metrics/files?organization=cbds&project=end_to_end_test&limit=10&offset=0", nil)
 		ctx := context.WithValue(req.Context(), core.AuthModeKey, "gen3")
 		ctx = context.WithValue(ctx, core.AuthHeaderPresentKey, true)
 		ctx = context.WithValue(ctx, core.UserPrivilegesKey, map[string]map[string]bool{
@@ -239,7 +239,7 @@ func TestMetricsFilesAuthzAndScope(t *testing.T) {
 	})
 
 	t.Run("scoped object lookup outside scope returns 404", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/internal/v1/metrics/files/other-1?organization=cbds&project=end_to_end_test", nil)
+		req := httptest.NewRequest(http.MethodGet, "/index/internal/v1/metrics/files/other-1?organization=cbds&project=end_to_end_test", nil)
 		ctx := context.WithValue(req.Context(), core.AuthModeKey, "gen3")
 		ctx = context.WithValue(ctx, core.AuthHeaderPresentKey, true)
 		ctx = context.WithValue(ctx, core.UserPrivilegesKey, map[string]map[string]bool{
@@ -254,7 +254,7 @@ func TestMetricsFilesAuthzAndScope(t *testing.T) {
 	})
 
 	t.Run("global object lookup allowed via /programs read", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/internal/v1/metrics/files/other-1", nil)
+		req := httptest.NewRequest(http.MethodGet, "/index/internal/v1/metrics/files/other-1", nil)
 		ctx := context.WithValue(req.Context(), core.AuthModeKey, "gen3")
 		ctx = context.WithValue(ctx, core.AuthHeaderPresentKey, true)
 		ctx = context.WithValue(ctx, core.UserPrivilegesKey, map[string]map[string]bool{

@@ -145,9 +145,9 @@ Propose the following additions/clarifications to DRS:
 | Bulk access-method updates | `POST /ga4gh/drs/v1/objects/access-methods` | Legacy update flows in compat paths | Use official DRS for new code | Remove compat update paths after parity tests |
 | Bulk checksum addition | `POST /ga4gh/drs/v1/objects/checksums` | N/A | Implement official endpoint fully | Endpoint returns non-`501` and passes integration tests |
 | Bulk SHA validity (`sha -> bool`) | No direct equivalent today | `POST /index/bulk/sha256/validity` | Keep internal | Propose/land DRS bulk validity contract; migrate callers |
-| Multipart upload init | No direct lifecycle equivalent today | `POST /user/data/multipart/init` | Keep internal | Official DRS multipart session model exists and is adopted |
-| Multipart upload part URL / part commit | No direct lifecycle equivalent today | `POST /user/data/multipart/upload` | Keep internal | Official DRS multipart part lifecycle exists and is adopted |
-| Multipart upload complete | No direct lifecycle equivalent today | `POST /user/data/multipart/complete` | Keep internal | Official DRS multipart completion semantics adopted + e2e parity |
+| Multipart upload init | No direct lifecycle equivalent today | `POST /data/multipart/init` | Keep internal | Official DRS multipart session model exists and is adopted |
+| Multipart upload part URL / part commit | No direct lifecycle equivalent today | `POST /data/multipart/upload` | Keep internal | Official DRS multipart part lifecycle exists and is adopted |
+| Multipart upload complete | No direct lifecycle equivalent today | `POST /data/multipart/complete` | Keep internal | Official DRS multipart completion semantics adopted + e2e parity |
 | Multipart/resumable download control | Partial via access methods only | Internal range/resume behavior (service + client logic) | Keep internal behavior | Official DRS resumable download semantics available + parity tests |
 | Registration preflight (validate without commit) | No consistent dedicated endpoint today | Internal validation path(s) in registration workflow | Keep internal | Dedicated DRS preflight endpoint standardized and implemented |
 | Rich registration envelope around `DrsObject` | Base `DrsObject` + candidates only | Internal model wrappers/fields | Keep internal wrapper | Standard extension envelope guidance adopted and implemented |

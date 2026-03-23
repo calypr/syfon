@@ -222,7 +222,7 @@ s3_credentials:
 				"bucket":    bucketName,
 			}
 			mpBody, _ := json.Marshal(fenceMultipartReq)
-			resp, err = client.Post(server.URL+"/multipart/init", "application/json", bytes.NewReader(mpBody))
+			resp, err = client.Post(server.URL+"/data/multipart/init", "application/json", bytes.NewReader(mpBody))
 			if err != nil {
 				t.Fatalf("Fence multipart init failed: %v", err)
 			}

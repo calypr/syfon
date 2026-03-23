@@ -84,9 +84,9 @@ func TestAllRegisteredEndpoints_WithMocks(t *testing.T) {
 		{Method: http.MethodPost, Template: "/ga4gh/drs/v1/objects/delete"},
 		{Method: http.MethodPost, Template: "/info/lfs/objects/batch"},
 		{Method: http.MethodPost, Template: "/index/bulk/sha256/validity"},
-		{Method: http.MethodPost, Template: "/internal/v1/sha256/validity"},
-		{Method: http.MethodGet, Template: "/internal/v1/metrics/summary"},
-		{Method: http.MethodGet, Template: "/internal/v1/metrics/files"},
+		{Method: http.MethodPost, Template: "/index/internal/v1/sha256/validity"},
+		{Method: http.MethodGet, Template: "/index/internal/v1/metrics/summary"},
+		{Method: http.MethodGet, Template: "/index/internal/v1/metrics/files"},
 	}
 	for _, req := range required {
 		if _, ok := seen[req.Method+" "+req.Template]; !ok {
@@ -232,7 +232,7 @@ func requestBodyFor(method, template string) ([]byte, string) {
 		}
 	case "/admin/sign_url":
 		return []byte(`{"url":"s3://test-bucket-1/sha-1","method":"GET"}`), "application/json"
-	case "/internal/sha256/validity", "/internal/v1/sha256/validity", "/index/bulk/sha256/validity":
+	case "/index/internal/v1/sha256/validity", "/index/bulk/sha256/validity":
 		return []byte(`{"sha256":["sha-1"]}`), "application/json"
 	case "/index/bulk/hashes":
 		return []byte(`{"hashes":["sha-1"]}`), "application/json"
@@ -240,18 +240,18 @@ func requestBodyFor(method, template string) ([]byte, string) {
 		return []byte(`{"records":[{"did":"sha-1","hashes":{"sha256":"sha-1"},"size":1,"urls":["s3://test-bucket-1/sha-1"],"authz":["/data_file"]}]}`), "application/json"
 	case "/index/bulk/documents":
 		return []byte(`["sha-1"]`), "application/json"
-	case "/data/upload", "/user/data/upload", "/data/upload/{file_id}", "/user/data/upload/{file_id}":
-		if template == "/data/upload" || template == "/user/data/upload" {
+	case "/data/upload", "/data/upload/{file_id}":
+		if template == "/data/upload" {
 			return []byte(`{"guid":"sha-1","authz":["/data_file"]}`), "application/json"
 		}
 		return []byte(`{}`), "application/json"
-	case "/multipart/init", "/data/multipart/init", "/user/data/multipart/init":
+	case "/data/multipart/init":
 		return []byte(`{"guid":"sha-1","file_name":"sha-1","bucket":"test-bucket-1"}`), "application/json"
-	case "/multipart/upload", "/data/multipart/upload", "/user/data/multipart/upload":
+	case "/data/multipart/upload":
 		return []byte(`{"key":"sha-1","bucket":"test-bucket-1","uploadId":"mock-upload-id","partNumber":1}`), "application/json"
-	case "/multipart/complete", "/data/multipart/complete", "/user/data/multipart/complete":
+	case "/data/multipart/complete":
 		return []byte(`{"key":"sha-1","bucket":"test-bucket-1","uploadId":"mock-upload-id","parts":[{"PartNumber":1,"ETag":"etag-1"}]}`), "application/json"
-	case "/data/buckets", "/user/data/buckets":
+	case "/data/buckets":
 		if method == http.MethodPut {
 			return []byte(`{"bucket":"test-bucket-3","region":"us-east-1","access_key":"k","secret_key":"s","endpoint":""}`), "application/json"
 		}

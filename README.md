@@ -143,7 +143,7 @@ Useful endpoints:
 - `GET /service-info`
 - `GET /index/{id}` (gen3 compatibility)
 - `POST /index/bulk/sha256/validity` (bulk sha validity map for git-lfs style flows)
-- `GET /data/download/{id}` (fence compatibility)
+- `GET /download/{id}` (fence compatibility)
 
 ## Running Integration Tests
 

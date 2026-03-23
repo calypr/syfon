@@ -16,8 +16,7 @@ import (
 
 func RegisterCoreRoutes(router *mux.Router, database core.DatabaseInterface) {
 	handler := drs.Logger(handleSHA256Validity(database), "CoreSHA256Validity")
-	router.Handle("/internal/sha256/validity", handler).Methods(http.MethodPost)
-	router.Handle("/internal/v1/sha256/validity", handler).Methods(http.MethodPost)
+	router.Handle("/index/internal/v1/sha256/validity", handler).Methods(http.MethodPost)
 }
 
 func handleSHA256Validity(database core.DatabaseInterface) http.HandlerFunc {

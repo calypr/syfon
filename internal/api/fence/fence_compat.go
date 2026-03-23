@@ -116,39 +116,32 @@ func hasScopedBucketAccess(r *http.Request, scope core.BucketScope, methods ...s
 }
 
 func RegisterFenceRoutes(router *mux.Router, database core.DatabaseInterface, uM urlmanager.UrlManager) {
-	for _, p := range []string{"/data", "/user/data"} {
-		registerFenceDataRoutes(router, p, database, uM)
-	}
-	// Legacy multipart paths retained for backwards compatibility.
-	registerFenceMultipartRoutes(router, "", database, uM)
-}
-
-func registerFenceDataRoutes(router *mux.Router, base string, database core.DatabaseInterface, uM urlmanager.UrlManager) {
-	router.Handle(base+"/download/{file_id}", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// Canonical upload/download routes.
+	router.Handle("/data/download/{file_id}", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handleFenceDownload(w, r, database, uM)
 	}), "FenceDownload")).Methods(http.MethodGet)
 
-	router.Handle(base+"/upload", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	router.Handle("/data/upload", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handleFenceUploadBlank(w, r, database, uM)
 	}), "FenceUploadBlank")).Methods(http.MethodPost)
 
-	router.Handle(base+"/upload/{file_id}", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	router.Handle("/data/upload/{file_id}", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handleFenceUploadURL(w, r, database, uM)
 	}), "FenceUploadURL")).Methods(http.MethodGet)
 
-	router.Handle(base+"/multipart/init", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	router.Handle("/data/multipart/init", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handleFenceMultipartInit(w, r, database, uM)
 	}), "FenceMultipartInit")).Methods(http.MethodPost)
 
-	router.Handle(base+"/multipart/upload", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	router.Handle("/data/multipart/upload", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handleFenceMultipartUpload(w, r, database, uM)
 	}), "FenceMultipartUpload")).Methods(http.MethodPost)
 
-	router.Handle(base+"/multipart/complete", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	router.Handle("/data/multipart/complete", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handleFenceMultipartComplete(w, r, database, uM)
 	}), "FenceMultipartComplete")).Methods(http.MethodPost)
 
-	router.Handle(base+"/buckets", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	router.Handle("/data/buckets", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
 			handleFenceBuckets(w, r, database)
@@ -159,27 +152,13 @@ func registerFenceDataRoutes(router *mux.Router, base string, database core.Data
 		}
 	}), "FenceBuckets")).Methods(http.MethodGet, http.MethodPut)
 
-	router.Handle(base+"/buckets/{bucket}", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	router.Handle("/data/buckets/{bucket}", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodDelete {
 			handleFenceDeleteBucket(w, r, database)
 			return
 		}
 		writeHTTPError(w, r, http.StatusMethodNotAllowed, "Method not allowed", nil)
 	}), "FenceBucketDetail")).Methods(http.MethodDelete)
-}
-
-func registerFenceMultipartRoutes(router *mux.Router, base string, database core.DatabaseInterface, uM urlmanager.UrlManager) {
-	router.Handle(base+"/multipart/init", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		handleFenceMultipartInit(w, r, database, uM)
-	}), "FenceMultipartInitLegacy")).Methods(http.MethodPost)
-
-	router.Handle(base+"/multipart/upload", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		handleFenceMultipartUpload(w, r, database, uM)
-	}), "FenceMultipartUploadLegacy")).Methods(http.MethodPost)
-
-	router.Handle(base+"/multipart/complete", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		handleFenceMultipartComplete(w, r, database, uM)
-	}), "FenceMultipartCompleteLegacy")).Methods(http.MethodPost)
 }
 
 func resolveBucket(ctx *http.Request, database core.DatabaseInterface, requested string) (string, error) {

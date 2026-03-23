@@ -18,12 +18,13 @@ import (
 )
 
 func RegisterMetricsRoutes(router *mux.Router, database core.DatabaseInterface) {
-	router.HandleFunc("/internal/metrics/files", handleListFileUsage(database)).Methods(http.MethodGet)
-	router.HandleFunc("/internal/v1/metrics/files", handleListFileUsage(database)).Methods(http.MethodGet)
-	router.HandleFunc("/internal/metrics/files/{object_id}", handleGetFileUsage(database)).Methods(http.MethodGet)
-	router.HandleFunc("/internal/v1/metrics/files/{object_id}", handleGetFileUsage(database)).Methods(http.MethodGet)
-	router.HandleFunc("/internal/metrics/summary", handleGetSummary(database)).Methods(http.MethodGet)
-	router.HandleFunc("/internal/v1/metrics/summary", handleGetSummary(database)).Methods(http.MethodGet)
+	listHandler := handleListFileUsage(database)
+	getHandler := handleGetFileUsage(database)
+	summaryHandler := handleGetSummary(database)
+
+	router.HandleFunc("/index/internal/v1/metrics/files", listHandler).Methods(http.MethodGet)
+	router.HandleFunc("/index/internal/v1/metrics/files/{object_id}", getHandler).Methods(http.MethodGet)
+	router.HandleFunc("/index/internal/v1/metrics/summary", summaryHandler).Methods(http.MethodGet)
 }
 
 func handleListFileUsage(database core.DatabaseInterface) http.HandlerFunc {

@@ -13,73 +13,6 @@ paths:
     get:
       tags: [bucket]
       summary: List configured bucket credentials and org/project assignments
-      operationId: listBucketsCompat
-      responses:
-        '200':
-          description: Bucket map
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BucketsResponse'
-        '401':
-          description: Authentication required
-        '403':
-          description: Forbidden
-        '500':
-          description: Internal server error
-    put:
-      tags: [bucket]
-      summary: Upsert bucket credential and claim org/project scope
-      operationId: putBucketCompat
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/PutBucketRequest'
-      responses:
-        '201':
-          description: Bucket credential and scope created/updated
-        '400':
-          description: Validation error
-        '401':
-          description: Authentication required
-        '403':
-          description: Forbidden
-        '409':
-          description: Scope already assigned to a different bucket/path
-        '500':
-          description: Internal server error
-
-  /data/buckets/{bucket}:
-    delete:
-      tags: [bucket]
-      summary: Delete bucket credential
-      operationId: deleteBucketCompat
-      parameters:
-        - name: bucket
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        '204':
-          description: Deleted
-        '400':
-          description: Validation error
-        '401':
-          description: Authentication required
-        '403':
-          description: Forbidden
-        '404':
-          description: Not found
-        '500':
-          description: Internal server error
-
-  /user/data/buckets:
-    get:
-      tags: [bucket]
-      summary: List configured bucket credentials and org/project assignments
       operationId: listBuckets
       responses:
         '200':
@@ -118,7 +51,7 @@ paths:
         '500':
           description: Internal server error
 
-  /user/data/buckets/{bucket}:
+  /data/buckets/{bucket}:
     delete:
       tags: [bucket]
       summary: Delete bucket credential

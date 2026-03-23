@@ -149,7 +149,7 @@ func TestHandleFenceMultipartInit(t *testing.T) {
 	fileName := "test.bam"
 	reqBody := internalapi.FenceMultipartInitRequest{Guid: &multiGUID, FileName: &fileName}
 	body, _ := json.Marshal(reqBody)
-	req, err := http.NewRequest("POST", "/multipart/init", bytes.NewBuffer(body))
+	req, err := http.NewRequest("POST", "/data/multipart/init", bytes.NewBuffer(body))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +178,7 @@ func TestHandleFenceMultipartInit_MintsUUIDForChecksumInput(t *testing.T) {
 	checksum := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	reqBody := internalapi.FenceMultipartInitRequest{FileName: &checksum}
 	body, _ := json.Marshal(reqBody)
-	req, err := http.NewRequest("POST", "/multipart/init", bytes.NewBuffer(body))
+	req, err := http.NewRequest("POST", "/data/multipart/init", bytes.NewBuffer(body))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,7 +231,7 @@ func TestHandleFenceMultipartInit_ResolvesExistingByChecksumGUID(t *testing.T) {
 
 	reqBody := internalapi.FenceMultipartInitRequest{Guid: &checksum}
 	body, _ := json.Marshal(reqBody)
-	req, err := http.NewRequest("POST", "/multipart/init", bytes.NewBuffer(body))
+	req, err := http.NewRequest("POST", "/data/multipart/init", bytes.NewBuffer(body))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -262,7 +262,7 @@ func TestHandleFenceMultipartUpload(t *testing.T) {
 		PartNumber: 1,
 	}
 	body, _ := json.Marshal(reqBody)
-	req, err := http.NewRequest("POST", "/user/data/multipart/upload", bytes.NewBuffer(body))
+	req, err := http.NewRequest("POST", "/data/multipart/upload", bytes.NewBuffer(body))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -295,7 +295,7 @@ func TestHandleFenceMultipartComplete(t *testing.T) {
 		},
 	}
 	body, _ := json.Marshal(reqBody)
-	req, err := http.NewRequest("POST", "/user/data/multipart/complete", bytes.NewBuffer(body))
+	req, err := http.NewRequest("POST", "/data/multipart/complete", bytes.NewBuffer(body))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -630,14 +630,14 @@ func TestHandleFenceMultipartValidationErrors(t *testing.T) {
 	db := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}
 	um := &testutils.MockUrlManager{}
 
-	reqUpload := httptest.NewRequest(http.MethodPost, "/user/data/multipart/upload", strings.NewReader(`{}`))
+	reqUpload := httptest.NewRequest(http.MethodPost, "/data/multipart/upload", strings.NewReader(`{}`))
 	rrUpload := httptest.NewRecorder()
 	handleFenceMultipartUpload(rrUpload, reqUpload, db, um)
 	if rrUpload.Code != http.StatusBadRequest {
 		t.Fatalf("expected upload 400, got %d body=%s", rrUpload.Code, rrUpload.Body.String())
 	}
 
-	reqComplete := httptest.NewRequest(http.MethodPost, "/user/data/multipart/complete", strings.NewReader(`{}`))
+	reqComplete := httptest.NewRequest(http.MethodPost, "/data/multipart/complete", strings.NewReader(`{}`))
 	rrComplete := httptest.NewRecorder()
 	handleFenceMultipartComplete(rrComplete, reqComplete, db, um)
 	if rrComplete.Code != http.StatusBadRequest {

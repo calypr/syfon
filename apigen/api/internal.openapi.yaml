@@ -239,50 +239,10 @@ paths:
         '404': { description: Not found }
         '500': { description: Internal server error }
 
-  /user/data/download/{file_id}:
-    get:
-      tags: [fence-compat]
-      operationId: fenceDownloadUserData
-      parameters:
-        - in: path
-          name: file_id
-          required: true
-          schema: { type: string }
-      responses:
-        '200':
-          description: Signed download URL
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/FenceSignedURL' }
-        '401': { description: Authentication required }
-        '403': { description: Forbidden }
-        '404': { description: Not found }
-        '500': { description: Internal server error }
-
   /data/upload:
     post:
       tags: [fence-compat]
-      operationId: fenceUploadBlankData
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/FenceUploadBlankRequest' }
-      responses:
-        '200':
-          description: Upload URL issued
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/FenceUploadBlankResponse' }
-        '400': { description: Validation error }
-        '401': { description: Authentication required }
-        '403': { description: Forbidden }
-        '500': { description: Internal server error }
-
-  /user/data/upload:
-    post:
-      tags: [fence-compat]
-      operationId: fenceUploadBlankUserData
+      operationId: fenceUploadBlank
       requestBody:
         required: false
         content:
@@ -302,27 +262,7 @@ paths:
   /data/upload/{file_id}:
     get:
       tags: [fence-compat]
-      operationId: fenceUploadURLData
-      parameters:
-        - in: path
-          name: file_id
-          required: true
-          schema: { type: string }
-      responses:
-        '200':
-          description: Signed upload URL
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/FenceSignedURL' }
-        '400': { description: Validation error }
-        '401': { description: Authentication required }
-        '403': { description: Forbidden }
-        '500': { description: Internal server error }
-
-  /user/data/upload/{file_id}:
-    get:
-      tags: [fence-compat]
-      operationId: fenceUploadURLUserData
+      operationId: fenceUploadURL
       parameters:
         - in: path
           name: file_id
@@ -342,27 +282,7 @@ paths:
   /data/multipart/init:
     post:
       tags: [fence-compat]
-      operationId: fenceMultipartInitData
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/FenceMultipartInitRequest' }
-      responses:
-        '200':
-          description: Multipart upload initialized
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/FenceMultipartInitResponse' }
-        '400': { description: Validation error }
-        '401': { description: Authentication required }
-        '403': { description: Forbidden }
-        '500': { description: Internal server error }
-
-  /user/data/multipart/init:
-    post:
-      tags: [fence-compat]
-      operationId: fenceMultipartInitUserData
+      operationId: fenceMultipartInit
       requestBody:
         required: true
         content:
@@ -382,27 +302,7 @@ paths:
   /data/multipart/upload:
     post:
       tags: [fence-compat]
-      operationId: fenceMultipartUploadData
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/FenceMultipartUploadRequest' }
-      responses:
-        '200':
-          description: Part presigned URL
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/FenceMultipartUploadResponse' }
-        '400': { description: Validation error }
-        '401': { description: Authentication required }
-        '403': { description: Forbidden }
-        '500': { description: Internal server error }
-
-  /user/data/multipart/upload:
-    post:
-      tags: [fence-compat]
-      operationId: fenceMultipartUploadUserData
+      operationId: fenceMultipartUpload
       requestBody:
         required: true
         content:
@@ -422,79 +322,7 @@ paths:
   /data/multipart/complete:
     post:
       tags: [fence-compat]
-      operationId: fenceMultipartCompleteData
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/FenceMultipartCompleteRequest' }
-      responses:
-        '200': { description: Upload completed }
-        '400': { description: Validation error }
-        '401': { description: Authentication required }
-        '403': { description: Forbidden }
-        '500': { description: Internal server error }
-
-  /user/data/multipart/complete:
-    post:
-      tags: [fence-compat]
-      operationId: fenceMultipartCompleteUserData
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/FenceMultipartCompleteRequest' }
-      responses:
-        '200': { description: Upload completed }
-        '400': { description: Validation error }
-        '401': { description: Authentication required }
-        '403': { description: Forbidden }
-        '500': { description: Internal server error }
-
-  /multipart/init:
-    post:
-      tags: [fence-compat]
-      operationId: fenceMultipartInitLegacy
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/FenceMultipartInitRequest' }
-      responses:
-        '200':
-          description: Multipart upload initialized
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/FenceMultipartInitResponse' }
-        '400': { description: Validation error }
-        '401': { description: Authentication required }
-        '403': { description: Forbidden }
-        '500': { description: Internal server error }
-
-  /multipart/upload:
-    post:
-      tags: [fence-compat]
-      operationId: fenceMultipartUploadLegacy
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/FenceMultipartUploadRequest' }
-      responses:
-        '200':
-          description: Part presigned URL
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/FenceMultipartUploadResponse' }
-        '400': { description: Validation error }
-        '401': { description: Authentication required }
-        '403': { description: Forbidden }
-        '500': { description: Internal server error }
-
-  /multipart/complete:
-    post:
-      tags: [fence-compat]
-      operationId: fenceMultipartCompleteLegacy
+      operationId: fenceMultipartComplete
       requestBody:
         required: true
         content:
