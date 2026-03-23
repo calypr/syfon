@@ -39,6 +39,8 @@ func RegisterSwaggerRoutes(router *mux.Router) {
 	router.HandleFunc("/swagger", handleSwaggerUI).Methods(http.MethodGet)
 	router.HandleFunc("/swagger/", handleSwaggerUI).Methods(http.MethodGet)
 	router.HandleFunc("/openapi.yaml", handleOpenAPISpec).Methods(http.MethodGet)
+	// Indexd-compat mount for environments that only proxy /index/* to drs-server.
+	router.HandleFunc("/index/openapi.yaml", handleOpenAPISpec).Methods(http.MethodGet)
 	router.HandleFunc("/openapi-lfs.yaml", handleLFSOpenAPISpec).Methods(http.MethodGet)
 	router.HandleFunc("/openapi-bucket.yaml", handleBucketOpenAPISpec).Methods(http.MethodGet)
 	router.HandleFunc("/openapi-internal.yaml", handleInternalOpenAPISpec).Methods(http.MethodGet)

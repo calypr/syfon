@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/calypr/drs-server/apigen/metricsapi"
@@ -25,10 +28,6 @@ func RegisterMetricsRoutes(router *mux.Router, database core.DatabaseInterface) 
 
 func handleListFileUsage(database core.DatabaseInterface) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if !hasMetricsReadAccess(r.Context()) {
-			writeAuthError(w, r)
-			return
-		}
 		limit := parseIntQuery(r, "limit", 200)
 		offset := parseIntQuery(r, "offset", 0)
 		if limit < 1 || limit > 1000 || offset < 0 {
@@ -40,7 +39,22 @@ func handleListFileUsage(database core.DatabaseInterface) http.HandlerFunc {
 			writeHTTPError(w, r, http.StatusBadRequest, err.Error(), nil)
 			return
 		}
-		data, err := database.ListFileUsage(r.Context(), limit, offset, inactiveSince)
+		access, err := resolveMetricsAccess(r)
+		if err != nil {
+			writeHTTPError(w, r, http.StatusBadRequest, err.Error(), err)
+			return
+		}
+		if !access.authorized(r.Context()) {
+			writeAuthError(w, r)
+			return
+		}
+
+		var data []core.FileUsage
+		if access.isScoped() {
+			data, _, err = listScopedFileUsage(r.Context(), database, access.scopePrefix, limit, offset, inactiveSince)
+		} else {
+			data, err = database.ListFileUsage(r.Context(), limit, offset, inactiveSince)
+		}
 		if err != nil {
 			writeHTTPError(w, r, http.StatusInternalServerError, "failed to list file usage", err)
 			return
@@ -62,15 +76,33 @@ func handleListFileUsage(database core.DatabaseInterface) http.HandlerFunc {
 
 func handleGetFileUsage(database core.DatabaseInterface) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if !hasMetricsReadAccess(r.Context()) {
-			writeAuthError(w, r)
-			return
-		}
 		objectID := mux.Vars(r)["object_id"]
 		if objectID == "" {
 			writeHTTPError(w, r, http.StatusBadRequest, "object_id is required", nil)
 			return
 		}
+
+		access, err := resolveMetricsAccess(r)
+		if err != nil {
+			writeHTTPError(w, r, http.StatusBadRequest, err.Error(), err)
+			return
+		}
+		if !access.authorized(r.Context()) {
+			writeAuthError(w, r)
+			return
+		}
+		if access.isScoped() {
+			inside, err := objectInScope(r.Context(), database, objectID, access.scopePrefix)
+			if err != nil {
+				writeHTTPError(w, r, http.StatusInternalServerError, "failed to evaluate object scope", err)
+				return
+			}
+			if !inside {
+				writeHTTPError(w, r, http.StatusNotFound, "file usage not found", core.ErrNotFound)
+				return
+			}
+		}
+
 		usage, err := database.GetFileUsage(r.Context(), objectID)
 		if err != nil {
 			if errors.Is(err, core.ErrNotFound) {
@@ -89,16 +121,27 @@ func handleGetFileUsage(database core.DatabaseInterface) http.HandlerFunc {
 
 func handleGetSummary(database core.DatabaseInterface) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if !hasMetricsReadAccess(r.Context()) {
-			writeAuthError(w, r)
-			return
-		}
 		inactiveSince, err := parseInactiveSince(r)
 		if err != nil {
 			writeHTTPError(w, r, http.StatusBadRequest, err.Error(), nil)
 			return
 		}
-		summary, err := database.GetFileUsageSummary(r.Context(), inactiveSince)
+		access, err := resolveMetricsAccess(r)
+		if err != nil {
+			writeHTTPError(w, r, http.StatusBadRequest, err.Error(), err)
+			return
+		}
+		if !access.authorized(r.Context()) {
+			writeAuthError(w, r)
+			return
+		}
+
+		var summary core.FileUsageSummary
+		if access.isScoped() {
+			_, summary, err = listScopedFileUsage(r.Context(), database, access.scopePrefix, 0, 0, inactiveSince)
+		} else {
+			summary, err = database.GetFileUsageSummary(r.Context(), inactiveSince)
+		}
 		if err != nil {
 			writeHTTPError(w, r, http.StatusInternalServerError, "failed to get file usage summary", err)
 			return
@@ -159,9 +202,141 @@ func parseIntQuery(r *http.Request, key string, defaultValue int) int {
 	return v
 }
 
-func hasMetricsReadAccess(ctx context.Context) bool {
-	// In local mode this always returns true.
-	return core.HasMethodAccess(ctx, "read", []string{"/data_file"})
+type metricsAccess struct {
+	scopePrefix string
+}
+
+func (a metricsAccess) isScoped() bool {
+	return strings.TrimSpace(a.scopePrefix) != ""
+}
+
+func (a metricsAccess) authorized(ctx context.Context) bool {
+	if a.isScoped() {
+		return hasMetricsReadAccess(ctx, a.scopePrefix)
+	}
+	return hasGlobalMetricsReadAccess(ctx)
+}
+
+func resolveMetricsAccess(r *http.Request) (metricsAccess, error) {
+	scopePrefix, _, err := parseScopeQuery(r)
+	if err != nil {
+		return metricsAccess{}, err
+	}
+	return metricsAccess{scopePrefix: scopePrefix}, nil
+}
+
+func hasMetricsReadAccess(ctx context.Context, resource string) bool {
+	if strings.TrimSpace(resource) == "" {
+		return hasGlobalMetricsReadAccess(ctx)
+	}
+	return core.HasMethodAccess(ctx, "read", []string{resource})
+}
+
+func hasGlobalMetricsReadAccess(ctx context.Context) bool {
+	// In local mode HasMethodAccess always returns true.
+	// In Gen3 mode, this allows existing "/data_file" readers and indexd admins
+	// that have read access at program scope.
+	return core.HasMethodAccess(ctx, "read", []string{"/data_file"}) ||
+		core.HasMethodAccess(ctx, "read", []string{"/programs"})
+}
+
+func parseScopeQuery(r *http.Request) (string, bool, error) {
+	authz := strings.TrimSpace(r.URL.Query().Get("authz"))
+	if authz != "" {
+		return authz, true, nil
+	}
+	org := strings.TrimSpace(r.URL.Query().Get("organization"))
+	if org == "" {
+		org = strings.TrimSpace(r.URL.Query().Get("program"))
+	}
+	project := strings.TrimSpace(r.URL.Query().Get("project"))
+	if project != "" && org == "" {
+		return "", false, fmt.Errorf("organization is required when project is set")
+	}
+	path := core.ResourcePathForScope(org, project)
+	if path != "" {
+		return path, true, nil
+	}
+	return "", false, nil
+}
+
+func collectScopedUsage(ctx context.Context, database core.DatabaseInterface, scopePrefix string, inactiveSince *time.Time) ([]core.FileUsage, core.FileUsageSummary, error) {
+	ids, err := database.ListObjectIDsByResourcePrefix(ctx, scopePrefix)
+	if err != nil {
+		return nil, core.FileUsageSummary{}, err
+	}
+	sort.Strings(ids)
+
+	summary := core.FileUsageSummary{TotalFiles: int64(len(ids))}
+	usages := make([]core.FileUsage, 0, len(ids))
+	for _, id := range ids {
+		usage, err := database.GetFileUsage(ctx, id)
+		if err != nil {
+			if errors.Is(err, core.ErrNotFound) {
+				if inactiveSince != nil {
+					summary.InactiveFileCount++
+				}
+				obj, objErr := database.GetObject(ctx, id)
+				if objErr != nil {
+					if errors.Is(objErr, core.ErrNotFound) {
+						continue
+					}
+					return nil, core.FileUsageSummary{}, objErr
+				}
+				usages = append(usages, core.FileUsage{
+					ObjectID: id,
+					Name:     obj.Name,
+					Size:     obj.Size,
+				})
+				continue
+			}
+			return nil, core.FileUsageSummary{}, err
+		}
+		summary.TotalUploads += usage.UploadCount
+		summary.TotalDownloads += usage.DownloadCount
+		if inactiveSince != nil && (usage.LastDownloadTime == nil || usage.LastDownloadTime.Before(*inactiveSince)) {
+			summary.InactiveFileCount++
+		}
+		if inactiveSince != nil && usage.LastDownloadTime != nil && !usage.LastDownloadTime.Before(*inactiveSince) {
+			continue
+		}
+		usages = append(usages, *usage)
+	}
+	return usages, summary, nil
+}
+
+func listScopedFileUsage(ctx context.Context, database core.DatabaseInterface, scopePrefix string, limit, offset int, inactiveSince *time.Time) ([]core.FileUsage, core.FileUsageSummary, error) {
+	usages, summary, err := collectScopedUsage(ctx, database, scopePrefix, inactiveSince)
+	if err != nil {
+		return nil, core.FileUsageSummary{}, err
+	}
+	if limit <= 0 {
+		return usages, summary, nil
+	}
+	if offset >= len(usages) {
+		return []core.FileUsage{}, summary, nil
+	}
+	end := offset + limit
+	if end > len(usages) {
+		end = len(usages)
+	}
+	return usages[offset:end], summary, nil
+}
+
+func objectInScope(ctx context.Context, database core.DatabaseInterface, objectID, scopePrefix string) (bool, error) {
+	obj, err := database.GetObject(ctx, objectID)
+	if err != nil {
+		if errors.Is(err, core.ErrNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	for _, authz := range obj.Authorizations {
+		if authz == scopePrefix || strings.HasPrefix(authz, scopePrefix+"/") {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func writeAuthError(w http.ResponseWriter, r *http.Request) {

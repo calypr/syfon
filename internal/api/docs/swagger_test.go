@@ -43,3 +43,19 @@ func TestOpenAPIRoute(t *testing.T) {
 		t.Fatalf("expected merged LFS route in openapi body")
 	}
 }
+
+func TestOpenAPIRouteViaIndexPrefix(t *testing.T) {
+	router := mux.NewRouter()
+	RegisterSwaggerRoutes(router)
+
+	req := httptest.NewRequest(http.MethodGet, "/index/openapi.yaml", nil)
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "openapi: 3.0.3") {
+		t.Fatalf("expected openapi spec body, got: %s", rr.Body.String())
+	}
+}
