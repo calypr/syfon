@@ -235,6 +235,13 @@ func checksumHintFromInputs(guid, fileName string) string {
 	return ""
 }
 
+func targetResourcesFromObject(obj *core.InternalObject) []string {
+	if obj == nil || len(obj.Authorizations) == 0 {
+		return nil
+	}
+	return append([]string(nil), obj.Authorizations...)
+}
+
 func resolveObjectByIDOrChecksum(database core.DatabaseInterface, ctx context.Context, objectID string) (*core.InternalObject, error) {
 	// Checksum-first resolution: fence-compatible routes are commonly called with OID.
 	byChecksum, err := database.GetObjectsByChecksum(ctx, objectID)
@@ -319,16 +326,16 @@ func handleFenceUploadBlank(w http.ResponseWriter, r *http.Request, database cor
 		return
 	}
 
-	guid := req.GetGuid()
+	guid := strings.TrimSpace(req.GetGuid())
 	if guid == "" {
 		writeHTTPError(w, r, http.StatusBadRequest, "guid is required", nil)
 		return
 	}
 
-	// Check if exists
 	targetResources := req.Authz
-	existing, err := database.GetObject(r.Context(), guid)
+	existing, err := resolveObjectByIDOrChecksum(database, r.Context(), guid)
 	if err == nil {
+		guid = strings.TrimSpace(existing.Id)
 		if len(existing.Authorizations) > 0 {
 			targetResources = existing.Authorizations
 		}
@@ -344,6 +351,13 @@ func handleFenceUploadBlank(w http.ResponseWriter, r *http.Request, database cor
 		if !hasAnyMethodAccess(r, targetResources, "file_upload", "create", "update") {
 			writeAuthError(w, r)
 			return
+		}
+		if _, parseErr := uuid.Parse(guid); parseErr != nil {
+			if looksLikeSHA256(guid) {
+				guid = core.MintObjectIDFromChecksum(guid, req.Authz)
+			} else {
+				guid = uuid.NewString()
+			}
 		}
 		now := time.Now()
 		obj := &drs.DrsObject{
@@ -496,9 +510,16 @@ func handleFenceMultipartInit(w http.ResponseWriter, r *http.Request, database c
 	guid := requestGUID
 	if existingObj != nil && strings.TrimSpace(existingObj.Id) != "" {
 		guid = strings.TrimSpace(existingObj.Id)
-	} else if guid == "" || looksLikeSHA256(guid) {
-		// Canonical mode: checksum drives key lookups; DRS ID remains UUID.
+	} else if guid == "" {
 		guid = uuid.NewString()
+	} else if _, parseErr := uuid.Parse(guid); parseErr != nil {
+		if checksumHint != "" && looksLikeSHA256(checksumHint) {
+			guid = core.MintObjectIDFromChecksum(checksumHint, targetResourcesFromObject(existingObj))
+		} else if looksLikeSHA256(guid) {
+			guid = core.MintObjectIDFromChecksum(guid, targetResourcesFromObject(existingObj))
+		} else {
+			guid = uuid.NewString()
+		}
 	}
 
 	if fileName == "" {

@@ -263,10 +263,9 @@ func (s *ObjectsAPIService) RegisterObjects(ctx context.Context, req drs.Registe
 				},
 			}, nil
 		}
-		id := primaryChecksum
+		authz := make([]string, 0)
 
 		obj := drs.DrsObject{
-			Id:          id,
 			Name:        c.Name,
 			Size:        c.Size,
 			CreatedTime: now,
@@ -274,13 +273,11 @@ func (s *ObjectsAPIService) RegisterObjects(ctx context.Context, req drs.Registe
 			Version:     "1",
 			Description: c.Description,
 			Aliases:     c.Aliases,
-			SelfUri:     "drs://" + id,
 		}
 		obj.Checksums = []drs.Checksum{{Type: "sha256", Checksum: primaryChecksum}}
 
 		seenAccess := make(map[string]struct{})
 		seenAuthz := make(map[string]struct{})
-		authz := make([]string, 0)
 		accessMethods := make([]drs.AccessMethod, 0, len(c.AccessMethods))
 		for _, am := range c.AccessMethods {
 			if am.AccessUrl.Url == "" {
@@ -319,6 +316,10 @@ func (s *ObjectsAPIService) RegisterObjects(ctx context.Context, req drs.Registe
 			}
 		}
 		obj.AccessMethods = accessMethods
+		id := core.MintObjectIDFromChecksum(primaryChecksum, authz)
+		obj.Id = id
+		obj.SelfUri = "drs://" + id
+
 		targetResources := authz
 		// Indexd-compatible fallback for file upload flows when no explicit authz is provided.
 		if len(targetResources) == 0 {

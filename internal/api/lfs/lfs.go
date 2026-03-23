@@ -658,8 +658,9 @@ func candidateToInternalObject(c drs.DrsObjectCandidate, now time.Time) (core.In
 	if !ok {
 		return core.InternalObject{}, fmt.Errorf("candidate must include sha256 checksum")
 	}
+	authz := uniqueAuthz(c.AccessMethods)
 	obj := drs.DrsObject{
-		Id:          oid,
+		Id:          core.MintObjectIDFromChecksum(oid, authz),
 		Name:        c.Name,
 		Size:        c.Size,
 		CreatedTime: now,
@@ -668,13 +669,13 @@ func candidateToInternalObject(c drs.DrsObjectCandidate, now time.Time) (core.In
 		MimeType:    c.MimeType,
 		Description: c.Description,
 		Aliases:     append([]string(nil), c.Aliases...),
-		SelfUri:     "drs://" + oid,
+		SelfUri:     "",
 		Checksums:   []drs.Checksum{{Type: "sha256", Checksum: oid}},
 	}
+	obj.SelfUri = "drs://" + obj.Id
 	if strings.TrimSpace(obj.Name) == "" {
 		obj.Name = oid
 	}
-	authz := uniqueAuthz(c.AccessMethods)
 	seenAccess := make(map[string]struct{})
 	for _, am := range c.AccessMethods {
 		url := strings.TrimSpace(am.AccessUrl.Url)

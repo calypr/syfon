@@ -14,6 +14,7 @@ import (
 	"github.com/calypr/drs-server/apigen/internalapi"
 	"github.com/calypr/drs-server/db/core"
 	corelogic "github.com/calypr/drs-server/internal/coreapi"
+	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 )
 
@@ -79,11 +80,20 @@ func RegisterGen3Routes(router *mux.Router, database core.DatabaseInterface) {
 
 func canonicalIDFromIndexd(req internalapi.IndexdRecord) string {
 	if did := strings.TrimSpace(req.GetDid()); did != "" {
-		return did
+		if _, err := uuid.Parse(did); err == nil {
+			return did
+		}
 	}
 	hashes := req.GetHashes()
 	if v, ok := hashes["sha256"]; ok && strings.TrimSpace(v) != "" {
-		return v
+		authz := append([]string(nil), req.GetAuthz()...)
+		if len(authz) == 0 && req.HasOrganization() {
+			path := core.ResourcePathForScope(req.GetOrganization(), req.GetProject())
+			if path != "" {
+				authz = append(authz, path)
+			}
+		}
+		return core.MintObjectIDFromChecksum(v, authz)
 	}
 	return ""
 }
@@ -91,7 +101,7 @@ func canonicalIDFromIndexd(req internalapi.IndexdRecord) string {
 func indexdToDrs(req internalapi.IndexdRecord) (*core.InternalObject, error) {
 	id := canonicalIDFromIndexd(req)
 	if id == "" {
-		return nil, fmt.Errorf("did or sha256 hash is required")
+		return nil, fmt.Errorf("sha256 hash is required unless did is a UUID")
 	}
 	now := time.Now()
 	obj := &drs.DrsObject{

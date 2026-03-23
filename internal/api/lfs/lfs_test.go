@@ -156,8 +156,12 @@ func TestLFSMetadataThenVerifyRegistersObject(t *testing.T) {
 	if verifyRR.Code != http.StatusOK {
 		t.Fatalf("expected 200 from verify, got %d body=%s", verifyRR.Code, verifyRR.Body.String())
 	}
-	if _, ok := db.Objects[oid]; !ok {
-		t.Fatalf("expected object %s to be registered on verify", oid)
+	matches, err := db.GetObjectsByChecksum(context.Background(), oid)
+	if err != nil {
+		t.Fatalf("expected checksum lookup to succeed, got error: %v", err)
+	}
+	if len(matches) == 0 {
+		t.Fatalf("expected object with checksum %s to be registered on verify", oid)
 	}
 }
 

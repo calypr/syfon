@@ -10,6 +10,7 @@ import (
 	"github.com/calypr/drs-server/apigen/drs"
 	"github.com/calypr/drs-server/db/core"
 	"github.com/calypr/drs-server/testutils"
+	"github.com/google/uuid"
 )
 
 func TestGetAccessURL(t *testing.T) {
@@ -122,6 +123,16 @@ func TestRegisterObjects(t *testing.T) {
 	}
 	if _, ok := resp.Body.(drs.RegisterObjects201Response); !ok {
 		t.Fatalf("expected RegisterObjects201Response, got %T", resp.Body)
+	}
+	out := resp.Body.(drs.RegisterObjects201Response)
+	if len(out.Objects) != 1 {
+		t.Fatalf("expected 1 registered object, got %d", len(out.Objects))
+	}
+	if _, err := uuid.Parse(out.Objects[0].Id); err != nil {
+		t.Fatalf("expected UUID object id, got %q", out.Objects[0].Id)
+	}
+	if len(out.Objects[0].Checksums) == 0 || out.Objects[0].Checksums[0].Checksum != "abc123" {
+		t.Fatalf("expected sha256 checksum to be preserved, got %+v", out.Objects[0].Checksums)
 	}
 }
 func TestGetObject(t *testing.T) {

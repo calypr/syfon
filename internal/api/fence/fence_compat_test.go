@@ -133,8 +133,8 @@ func TestHandleFenceUploadBlank(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if resp.GetGuid() != "new-guid" {
-		t.Errorf("expected guid new-guid, got %v", resp.GetGuid())
+	if _, err := uuid.Parse(resp.GetGuid()); err != nil {
+		t.Fatalf("expected minted UUID guid, got %q", resp.GetGuid())
 	}
 	if !strings.Contains(resp.GetUrl(), "upload=true") {
 		t.Errorf("expected upload url, got %v", resp.GetUrl())
@@ -164,6 +164,9 @@ func TestHandleFenceMultipartInit(t *testing.T) {
 	var resp internalapi.FenceMultipartInitResponse
 	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := uuid.Parse(resp.GetGuid()); err != nil {
+		t.Fatalf("expected UUID guid, got %q", resp.GetGuid())
 	}
 
 	if resp.GetUploadId() != "mock-upload-id" {
