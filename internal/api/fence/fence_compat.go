@@ -304,8 +304,8 @@ func handleFenceDownload(w http.ResponseWriter, r *http.Request, database core.D
 		writeHTTPError(w, r, http.StatusInternalServerError, err.Error(), err)
 		return
 	}
-	if recErr := database.RecordFileDownload(r.Context(), fileID); recErr != nil {
-		slog.Debug("failed to record file download metric", "request_id", core.GetRequestID(r.Context()), "file_id", fileID, "err", recErr)
+	if recErr := database.RecordFileDownload(r.Context(), obj.Id); recErr != nil {
+		slog.Debug("failed to record file download metric", "request_id", core.GetRequestID(r.Context()), "file_id", obj.Id, "err", recErr)
 	}
 
 	if r.URL.Query().Get("redirect") == "true" {

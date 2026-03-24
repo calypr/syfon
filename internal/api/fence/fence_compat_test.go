@@ -107,6 +107,53 @@ func TestHandleFenceDownload_ResolvesByChecksum(t *testing.T) {
 	}
 }
 
+func TestHandleFenceDownload_ResolvesByUUID(t *testing.T) {
+	const (
+		did = "2eb7a53c-1309-4be6-b6aa-8ed9249e23a9"
+		oid = "sha256-def"
+	)
+	mockDB := &testutils.MockDatabase{
+		Objects: map[string]*drs.DrsObject{
+			did: {
+				Id: did,
+				Checksums: []drs.Checksum{
+					{Type: "sha256", Checksum: oid},
+				},
+				AccessMethods: []drs.AccessMethod{
+					{
+						Type: "s3",
+						AccessUrl: drs.AccessMethodAccessUrl{
+							Url: "s3://bucket/cbds/end_to_end_test/" + did,
+						},
+					},
+				},
+			},
+		},
+	}
+	mockUM := &testutils.MockUrlManager{}
+
+	req, err := http.NewRequest("GET", "/data/download/"+did, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req = mux.SetURLVars(req, map[string]string{"file_id": did})
+
+	rr := httptest.NewRecorder()
+	handleFenceDownload(rr, req, mockDB, mockUM)
+
+	if status := rr.Code; status != http.StatusOK {
+		t.Errorf("handler returned wrong status code: got %v want %v body=%s", status, http.StatusOK, rr.Body.String())
+	}
+
+	var resp internalapi.FenceSignedURL
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(resp.GetUrl(), "/"+did) {
+		t.Fatalf("expected signed url to include UUID-backed key, got %s", resp.GetUrl())
+	}
+}
+
 func TestHandleFenceUploadBlank(t *testing.T) {
 	mockDB := &testutils.MockDatabase{
 		Objects: map[string]*drs.DrsObject{},
