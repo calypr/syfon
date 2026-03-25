@@ -13,16 +13,24 @@ type MultipartPart struct {
 	ETag       string
 }
 
-// UrlManager is responsible for signing URLs for resource access.
-type UrlManager interface {
+// SignedURLManager signs download/upload URLs for a storage backend.
+type SignedURLManager interface {
 	// SignURL signs a URL for the given resource (Download).
 	SignURL(ctx context.Context, accessId string, url string, opts SignOptions) (string, error)
 
 	// SignUploadURL signs a URL for uploading a resource.
 	SignUploadURL(ctx context.Context, accessId string, url string, opts SignOptions) (string, error)
+}
 
-	// Multipart Support
+// MultipartManager handles multipart lifecycle for a storage backend.
+type MultipartManager interface {
 	InitMultipartUpload(ctx context.Context, bucket string, key string) (string, error)
 	SignMultipartPart(ctx context.Context, bucket string, key string, uploadId string, partNumber int32) (string, error)
 	CompleteMultipartUpload(ctx context.Context, bucket string, key string, uploadId string, parts []MultipartPart) error
+}
+
+// UrlManager composes signed URL operations and multipart operations.
+type UrlManager interface {
+	SignedURLManager
+	MultipartManager
 }

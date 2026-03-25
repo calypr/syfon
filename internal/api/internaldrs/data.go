@@ -142,6 +142,45 @@ func resolveBucket(ctx *http.Request, database core.DatabaseInterface, requested
 	return creds[0].Bucket, nil
 }
 
+func providerForCredential(cred *core.S3Credential) string {
+	if cred == nil || strings.TrimSpace(cred.Provider) == "" {
+		return "s3"
+	}
+	p := strings.ToLower(strings.TrimSpace(cred.Provider))
+	switch p {
+	case "s3", "gcs", "azure", "file":
+		return p
+	case "gs":
+		return "gcs"
+	default:
+		return p
+	}
+}
+
+func objectURLForCredential(cred *core.S3Credential, key string) (string, error) {
+	if cred == nil {
+		return "", fmt.Errorf("credential is required")
+	}
+	cleanKey := strings.TrimPrefix(strings.TrimSpace(key), "/")
+	switch providerForCredential(cred) {
+	case "s3":
+		return fmt.Sprintf("s3://%s/%s", cred.Bucket, cleanKey), nil
+	case "gcs":
+		return fmt.Sprintf("gs://%s/%s", cred.Bucket, cleanKey), nil
+	case "azure":
+		return fmt.Sprintf("azblob://%s/%s", cred.Bucket, cleanKey), nil
+	case "file":
+		root := strings.TrimSpace(cred.Endpoint)
+		if root != "" {
+			root = strings.TrimSuffix(root, "/")
+			return fmt.Sprintf("%s/%s", root, cleanKey), nil
+		}
+		return fmt.Sprintf("file:///%s/%s", strings.TrimPrefix(cred.Bucket, "/"), cleanKey), nil
+	default:
+		return "", fmt.Errorf("unsupported provider: %s", providerForCredential(cred))
+	}
+}
+
 func resolveObjectS3Key(database core.DatabaseInterface, ctx *http.Request, objectID string, bucket string) (string, bool) {
 	if strings.TrimSpace(objectID) == "" || strings.TrimSpace(bucket) == "" {
 		return "", false
@@ -269,7 +308,11 @@ func handleInternalDownload(w http.ResponseWriter, r *http.Request, database cor
 		}
 	}
 
-	signedURL, err := uM.SignURL(r.Context(), "", s3URL, opts)
+	bucketID := ""
+	if parsed, parseErr := url.Parse(s3URL); parseErr == nil {
+		bucketID = parsed.Host
+	}
+	signedURL, err := uM.SignURL(r.Context(), bucketID, s3URL, opts)
 	if err != nil {
 		writeHTTPError(w, r, http.StatusInternalServerError, err.Error(), err)
 		return
@@ -358,10 +401,14 @@ func handleInternalUploadBlank(w http.ResponseWriter, r *http.Request, database 
 		writeHTTPError(w, r, http.StatusInternalServerError, "No buckets configured for upload", nil)
 		return
 	}
-	bucket := creds[0].Bucket
-	s3URL := fmt.Sprintf("s3://%s/%s", bucket, guid)
+	cred := creds[0]
+	objectURL, err := objectURLForCredential(&cred, guid)
+	if err != nil {
+		writeHTTPError(w, r, http.StatusBadRequest, err.Error(), err)
+		return
+	}
 
-	signedURL, err := uM.SignUploadURL(r.Context(), "", s3URL, urlmanager.SignOptions{})
+	signedURL, err := uM.SignUploadURL(r.Context(), cred.Bucket, objectURL, urlmanager.SignOptions{})
 	if err != nil {
 		writeHTTPError(w, r, http.StatusInternalServerError, err.Error(), err)
 		return
@@ -416,7 +463,16 @@ func handleInternalUploadURL(w http.ResponseWriter, r *http.Request, database co
 		return
 	}
 
-	s3URL := fmt.Sprintf("s3://%s/%s", bucket, fileName)
+	cred, err := database.GetS3Credential(r.Context(), bucket)
+	if err != nil {
+		writeHTTPError(w, r, http.StatusBadRequest, "bucket credential not found", err)
+		return
+	}
+	objectURL, err := objectURLForCredential(cred, fileName)
+	if err != nil {
+		writeHTTPError(w, r, http.StatusBadRequest, err.Error(), err)
+		return
+	}
 
 	opts := urlmanager.SignOptions{}
 	if expStr := r.URL.Query().Get("expires_in"); expStr != "" {
@@ -425,7 +481,7 @@ func handleInternalUploadURL(w http.ResponseWriter, r *http.Request, database co
 		}
 	}
 
-	signedURL, err := uM.SignUploadURL(r.Context(), "", s3URL, opts)
+	signedURL, err := uM.SignUploadURL(r.Context(), cred.Bucket, objectURL, opts)
 	if err != nil {
 		writeHTTPError(w, r, http.StatusInternalServerError, err.Error(), err)
 		return
@@ -739,9 +795,10 @@ func handleInternalBuckets(w http.ResponseWriter, r *http.Request, database core
 		}
 	}
 
-	resp := bucketapi.BucketsResponse{
-		S3BUCKETS: make(map[string]bucketapi.BucketMetadata, len(creds)),
+	resp := map[string]any{
+		"S3_BUCKETS": map[string]map[string]any{},
 	}
+	outBuckets := resp["S3_BUCKETS"].(map[string]map[string]any)
 	programsByBucket := map[string][]string{}
 	for _, s := range scopes {
 		if !allowAll && !allowedBuckets[s.Bucket] {
@@ -757,11 +814,12 @@ func handleInternalBuckets(w http.ResponseWriter, r *http.Request, database core
 		if !allowAll && !allowedBuckets[c.Bucket] {
 			continue
 		}
-		bm := bucketapi.BucketMetadata{}
-		bm.SetEndpointUrl(c.Endpoint)
-		bm.SetRegion(c.Region)
-		bm.SetPrograms(programsByBucket[c.Bucket])
-		resp.S3BUCKETS[c.Bucket] = bm
+		outBuckets[c.Bucket] = map[string]any{
+			"endpoint_url": c.Endpoint,
+			"provider":     providerForCredential(&c),
+			"region":       c.Region,
+			"programs":     programsByBucket[c.Bucket],
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -771,18 +829,52 @@ func handleInternalBuckets(w http.ResponseWriter, r *http.Request, database core
 }
 
 func handleInternalPutBucket(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface) {
-	var req bucketapi.PutBucketRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
 		writeHTTPError(w, r, http.StatusBadRequest, "Invalid request", nil)
 		return
 	}
-	if req.Bucket == "" || req.AccessKey == "" || req.SecretKey == "" {
-		writeHTTPError(w, r, http.StatusBadRequest, "bucket, access_key and secret_key are required", nil)
+	var req bucketapi.PutBucketRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeHTTPError(w, r, http.StatusBadRequest, "Invalid request", nil)
 		return
 	}
-	if strings.TrimSpace(req.Region) == "" || strings.TrimSpace(req.Endpoint) == "" {
-		writeHTTPError(w, r, http.StatusBadRequest, "region and endpoint are required", nil)
+	provider := "s3"
+	var raw map[string]any
+	if err := json.Unmarshal(body, &raw); err == nil {
+		if v, ok := raw["provider"].(string); ok && strings.TrimSpace(v) != "" {
+			provider = strings.ToLower(strings.TrimSpace(v))
+		}
+	}
+	switch provider {
+	case "", "s3":
+		provider = "s3"
+	case "gs", "gcs":
+		provider = "gcs"
+	case "azure", "file":
+		// keep as-is
+	default:
+		writeHTTPError(w, r, http.StatusBadRequest, "provider must be one of: s3, gcs, azure, file", nil)
 		return
+	}
+	if req.Bucket == "" {
+		writeHTTPError(w, r, http.StatusBadRequest, "bucket is required", nil)
+		return
+	}
+	region := strings.TrimSpace(req.Region)
+	if provider == "s3" {
+		if req.AccessKey == "" || req.SecretKey == "" {
+			writeHTTPError(w, r, http.StatusBadRequest, "access_key and secret_key are required for provider=s3", nil)
+			return
+		}
+		if region == "" || strings.TrimSpace(req.Endpoint) == "" {
+			writeHTTPError(w, r, http.StatusBadRequest, "region and endpoint are required for provider=s3", nil)
+			return
+		}
+		if strings.Contains(region, "://") || strings.Contains(region, "/") || strings.Contains(region, " ") {
+			writeHTTPError(w, r, http.StatusBadRequest, "region must be a plain region name (for example: us-east-1)", nil)
+			return
+		}
 	}
 	if strings.TrimSpace(req.Organization) == "" || strings.TrimSpace(req.ProjectId) == "" {
 		writeHTTPError(w, r, http.StatusBadRequest, "organization and project_id are required", nil)
@@ -820,7 +912,8 @@ func handleInternalPutBucket(w http.ResponseWriter, r *http.Request, database co
 	}
 	cred := &core.S3Credential{
 		Bucket:    req.Bucket,
-		Region:    req.Region,
+		Provider:  provider,
+		Region:    region,
 		AccessKey: req.AccessKey,
 		SecretKey: req.SecretKey,
 		Endpoint:  req.Endpoint,

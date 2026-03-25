@@ -92,6 +92,9 @@ components:
       properties:
         bucket:
           type: string
+        provider:
+          type: string
+          description: Storage backend provider (s3|gcs|azure|file). Defaults to s3.
         region:
           type: string
         access_key:
@@ -111,6 +114,8 @@ components:
       type: object
       properties:
         endpoint_url:
+          type: string
+        provider:
           type: string
         region:
           type: string

@@ -3,6 +3,7 @@ package admin
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/calypr/drs-server/db/core"
 	"github.com/calypr/drs-server/urlmanager"
@@ -54,6 +55,8 @@ func putCredential(w http.ResponseWriter, r *http.Request, database core.Databas
 	var req struct {
 		Bucket          string `json:"bucket"`
 		BucketLegacy    string `json:"Bucket"`
+		Provider        string `json:"provider"`
+		ProviderLegacy  string `json:"Provider"`
 		Region          string `json:"region"`
 		RegionLegacy    string `json:"Region"`
 		AccessKey       string `json:"access_key"`
@@ -69,6 +72,7 @@ func putCredential(w http.ResponseWriter, r *http.Request, database core.Databas
 	}
 	cred := core.S3Credential{
 		Bucket:    firstNonEmpty(req.Bucket, req.BucketLegacy),
+		Provider:  strings.ToLower(firstNonEmpty(req.Provider, req.ProviderLegacy, "s3")),
 		Region:    firstNonEmpty(req.Region, req.RegionLegacy),
 		AccessKey: firstNonEmpty(req.AccessKey, req.AccessKeyLegacy),
 		SecretKey: firstNonEmpty(req.SecretKey, req.SecretKeyLegacy),

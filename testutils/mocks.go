@@ -186,6 +186,7 @@ func (m *MockDatabase) GetS3Credential(ctx context.Context, bucket string) (*cor
 	}
 	return &core.S3Credential{
 		Bucket:    bucket,
+		Provider:  "s3",
 		Region:    "us-east-1",
 		AccessKey: "test-key",
 		SecretKey: "test-secret",
@@ -219,7 +220,7 @@ func (m *MockDatabase) ListS3Credentials(ctx context.Context) ([]core.S3Credenti
 		return []core.S3Credential{}, nil
 	}
 	return []core.S3Credential{
-		{Bucket: "test-bucket-1", Region: "us-east-1"},
+		{Bucket: "test-bucket-1", Provider: "s3", Region: "us-east-1"},
 	}, nil
 }
 

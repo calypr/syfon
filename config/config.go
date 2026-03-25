@@ -39,6 +39,7 @@ type PostgresConfig struct {
 
 type S3Config struct {
 	Bucket    string `json:"bucket" yaml:"bucket"`
+	Provider  string `json:"provider,omitempty" yaml:"provider,omitempty"`
 	Region    string `json:"region" yaml:"region"`
 	AccessKey string `json:"access_key" yaml:"access_key"`
 	SecretKey string `json:"secret_key" yaml:"secret_key"`
@@ -226,17 +227,29 @@ func LoadConfig(configFile string) (*Config, error) {
 
 	// Validate S3 Credentials
 	for i, cred := range cfg.S3Credentials {
+		provider := strings.ToLower(strings.TrimSpace(cred.Provider))
+		if provider == "" {
+			provider = "s3"
+		}
+		cfg.S3Credentials[i].Provider = provider
 		if cred.Bucket == "" {
 			return nil, fmt.Errorf("s3_credentials[%d]: bucket is required", i)
 		}
-		if cred.Region == "" {
-			return nil, fmt.Errorf("s3_credentials[%d]: region is required", i)
-		}
-		if cred.AccessKey == "" {
-			return nil, fmt.Errorf("s3_credentials[%d]: access_key is required", i)
-		}
-		if cred.SecretKey == "" {
-			return nil, fmt.Errorf("s3_credentials[%d]: secret_key is required", i)
+		switch provider {
+		case "s3":
+			if cred.Region == "" {
+				return nil, fmt.Errorf("s3_credentials[%d]: region is required for provider=s3", i)
+			}
+			if cred.AccessKey == "" {
+				return nil, fmt.Errorf("s3_credentials[%d]: access_key is required for provider=s3", i)
+			}
+			if cred.SecretKey == "" {
+				return nil, fmt.Errorf("s3_credentials[%d]: secret_key is required for provider=s3", i)
+			}
+		case "gcs", "azure", "file":
+			// Non-S3 backends can rely on ambient credentials/config.
+		default:
+			return nil, fmt.Errorf("s3_credentials[%d]: unsupported provider %q", i, provider)
 		}
 	}
 	cfg.Auth.Mode = strings.ToLower(strings.TrimSpace(cfg.Auth.Mode))

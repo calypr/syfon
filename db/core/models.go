@@ -55,6 +55,7 @@ type DrsObjectChecksum struct {
 // S3Credential represents the 's3_credential' table
 type S3Credential struct {
 	Bucket    string `db:"bucket"`
+	Provider  string `db:"provider"`
 	Region    string `db:"region"`
 	AccessKey string `db:"access_key"`
 	SecretKey string `db:"secret_key"`

@@ -33,6 +33,9 @@ func NewPostgresDB(dsn string) (*PostgresDB, error) {
 	if err := pg.ensureBucketScopeSchema(); err != nil {
 		return nil, err
 	}
+	if err := pg.ensureS3CredentialSchema(); err != nil {
+		return nil, err
+	}
 	if err := pg.ensureLFSPendingSchema(); err != nil {
 		return nil, err
 	}
@@ -43,6 +46,17 @@ func NewPostgresDB(dsn string) (*PostgresDB, error) {
 		return nil, err
 	}
 	return pg, nil
+}
+
+func (db *PostgresDB) ensureS3CredentialSchema() error {
+	_, err := db.db.Exec(`
+		ALTER TABLE s3_credential
+		ADD COLUMN IF NOT EXISTS provider TEXT NOT NULL DEFAULT 's3'
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to initialize s3_credential provider schema: %w", err)
+	}
+	return nil
 }
 
 func (db *PostgresDB) ensureBucketScopeSchema() error {
@@ -823,9 +837,9 @@ func (db *PostgresDB) BulkUpdateAccessMethods(ctx context.Context, updates map[s
 func (db *PostgresDB) GetS3Credential(ctx context.Context, bucket string) (*core.S3Credential, error) {
 	var c core.S3Credential
 	err := db.db.QueryRowContext(ctx, `
-		SELECT bucket, region, access_key, secret_key, endpoint
+		SELECT bucket, provider, region, access_key, secret_key, endpoint
 		FROM s3_credential WHERE bucket = $1`, bucket).Scan(
-		&c.Bucket, &c.Region, &c.AccessKey, &c.SecretKey, &c.Endpoint,
+		&c.Bucket, &c.Provider, &c.Region, &c.AccessKey, &c.SecretKey, &c.Endpoint,
 	)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("credential not found")
@@ -838,14 +852,15 @@ func (db *PostgresDB) GetS3Credential(ctx context.Context, bucket string) (*core
 
 func (db *PostgresDB) SaveS3Credential(ctx context.Context, cred *core.S3Credential) error {
 	_, err := db.db.ExecContext(ctx, `
-		INSERT INTO s3_credential (bucket, region, access_key, secret_key, endpoint)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO s3_credential (bucket, provider, region, access_key, secret_key, endpoint)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		ON CONFLICT (bucket) DO UPDATE SET
+			provider = EXCLUDED.provider,
 			region = EXCLUDED.region,
 			access_key = EXCLUDED.access_key,
 			secret_key = EXCLUDED.secret_key,
 			endpoint = EXCLUDED.endpoint`,
-		cred.Bucket, cred.Region, cred.AccessKey, cred.SecretKey, cred.Endpoint,
+		cred.Bucket, strings.ToLower(strings.TrimSpace(defaultProvider(cred.Provider))), cred.Region, cred.AccessKey, cred.SecretKey, cred.Endpoint,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to save credential: %w", err)
@@ -870,7 +885,7 @@ func (db *PostgresDB) DeleteS3Credential(ctx context.Context, bucket string) err
 }
 
 func (db *PostgresDB) ListS3Credentials(ctx context.Context) ([]core.S3Credential, error) {
-	rows, err := db.db.QueryContext(ctx, "SELECT bucket, region, access_key, secret_key, endpoint FROM s3_credential")
+	rows, err := db.db.QueryContext(ctx, "SELECT bucket, provider, region, access_key, secret_key, endpoint FROM s3_credential")
 	if err != nil {
 		return nil, err
 	}
@@ -879,12 +894,19 @@ func (db *PostgresDB) ListS3Credentials(ctx context.Context) ([]core.S3Credentia
 	var creds []core.S3Credential
 	for rows.Next() {
 		var c core.S3Credential
-		if err := rows.Scan(&c.Bucket, &c.Region, &c.AccessKey, &c.SecretKey, &c.Endpoint); err != nil {
+		if err := rows.Scan(&c.Bucket, &c.Provider, &c.Region, &c.AccessKey, &c.SecretKey, &c.Endpoint); err != nil {
 			return nil, err
 		}
 		creds = append(creds, c)
 	}
 	return creds, nil
+}
+
+func defaultProvider(provider string) string {
+	if strings.TrimSpace(provider) == "" {
+		return "s3"
+	}
+	return provider
 }
 
 func (db *PostgresDB) CreateBucketScope(ctx context.Context, scope *core.BucketScope) error {

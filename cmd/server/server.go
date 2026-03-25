@@ -83,6 +83,7 @@ var Cmd = &cobra.Command{
 			for _, c := range cfg.S3Credentials {
 				cred := &core.S3Credential{
 					Bucket:    c.Bucket,
+					Provider:  c.Provider,
 					Region:    c.Region,
 					AccessKey: c.AccessKey,
 					SecretKey: c.SecretKey,
@@ -94,8 +95,8 @@ var Cmd = &cobra.Command{
 			}
 		}
 
-		// Init UrlManager using generic BlobUrlManager for go-cloud support
-		uM := urlmanager.NewBlobUrlManager()
+		// Init URL manager routed by credential provider metadata.
+		uM := urlmanager.NewRoutedUrlManager(database)
 
 		// Init Service
 		service := service.NewObjectsAPIService(database, uM)

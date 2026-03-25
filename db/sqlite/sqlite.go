@@ -72,6 +72,7 @@ func (db *SqliteDB) initSchema() error {
 		)`,
 		`CREATE TABLE IF NOT EXISTS s3_credential (
 			bucket TEXT PRIMARY KEY,
+			provider TEXT NOT NULL DEFAULT 's3',
 			region TEXT,
 			access_key TEXT,
 			secret_key TEXT,
@@ -116,6 +117,11 @@ func (db *SqliteDB) initSchema() error {
 
 	for _, q := range queries {
 		if _, err := db.db.Exec(q); err != nil {
+			return err
+		}
+	}
+	if _, err := db.db.Exec(`ALTER TABLE s3_credential ADD COLUMN provider TEXT NOT NULL DEFAULT 's3'`); err != nil {
+		if !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
 			return err
 		}
 	}
@@ -870,9 +876,9 @@ func (db *SqliteDB) BulkUpdateAccessMethods(ctx context.Context, updates map[str
 func (db *SqliteDB) GetS3Credential(ctx context.Context, bucket string) (*core.S3Credential, error) {
 	var c core.S3Credential
 	err := db.db.QueryRowContext(ctx, `
-		SELECT bucket, region, access_key, secret_key, endpoint
+		SELECT bucket, provider, region, access_key, secret_key, endpoint
 		FROM s3_credential WHERE bucket = ?`, bucket).Scan(
-		&c.Bucket, &c.Region, &c.AccessKey, &c.SecretKey, &c.Endpoint,
+		&c.Bucket, &c.Provider, &c.Region, &c.AccessKey, &c.SecretKey, &c.Endpoint,
 	)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("credential not found")
@@ -886,14 +892,15 @@ func (db *SqliteDB) GetS3Credential(ctx context.Context, bucket string) (*core.S
 func (db *SqliteDB) SaveS3Credential(ctx context.Context, cred *core.S3Credential) error {
 	// SQLite UPSERT syntax: INSERT INTO ... ON CONFLICT (...) DO UPDATE SET ...
 	_, err := db.db.ExecContext(ctx, `
-		INSERT INTO s3_credential (bucket, region, access_key, secret_key, endpoint)
-		VALUES (?, ?, ?, ?, ?)
+		INSERT INTO s3_credential (bucket, provider, region, access_key, secret_key, endpoint)
+		VALUES (?, ?, ?, ?, ?, ?)
 		ON CONFLICT (bucket) DO UPDATE SET
+			provider = excluded.provider,
 			region = excluded.region,
 			access_key = excluded.access_key,
 			secret_key = excluded.secret_key,
 			endpoint = excluded.endpoint`,
-		cred.Bucket, cred.Region, cred.AccessKey, cred.SecretKey, cred.Endpoint,
+		cred.Bucket, strings.ToLower(strings.TrimSpace(defaultProvider(cred.Provider))), cred.Region, cred.AccessKey, cred.SecretKey, cred.Endpoint,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to save credential: %w", err)
@@ -918,7 +925,7 @@ func (db *SqliteDB) DeleteS3Credential(ctx context.Context, bucket string) error
 }
 
 func (db *SqliteDB) ListS3Credentials(ctx context.Context) ([]core.S3Credential, error) {
-	rows, err := db.db.QueryContext(ctx, "SELECT bucket, region, access_key, secret_key, endpoint FROM s3_credential")
+	rows, err := db.db.QueryContext(ctx, "SELECT bucket, provider, region, access_key, secret_key, endpoint FROM s3_credential")
 	if err != nil {
 		return nil, err
 	}
@@ -927,12 +934,19 @@ func (db *SqliteDB) ListS3Credentials(ctx context.Context) ([]core.S3Credential,
 	var creds []core.S3Credential
 	for rows.Next() {
 		var c core.S3Credential
-		if err := rows.Scan(&c.Bucket, &c.Region, &c.AccessKey, &c.SecretKey, &c.Endpoint); err != nil {
+		if err := rows.Scan(&c.Bucket, &c.Provider, &c.Region, &c.AccessKey, &c.SecretKey, &c.Endpoint); err != nil {
 			return nil, err
 		}
 		creds = append(creds, c)
 	}
 	return creds, nil
+}
+
+func defaultProvider(provider string) string {
+	if strings.TrimSpace(provider) == "" {
+		return "s3"
+	}
+	return provider
 }
 
 func (db *SqliteDB) CreateBucketScope(ctx context.Context, scope *core.BucketScope) error {
