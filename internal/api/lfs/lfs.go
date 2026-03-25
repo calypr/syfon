@@ -178,7 +178,7 @@ func handleVerify(database core.DatabaseInterface) http.HandlerFunc {
 			writeLFSError(w, r, http.StatusBadRequest, "invalid oid", false)
 			return
 		}
-		obj, err := database.GetObject(r.Context(), oid)
+		obj, err := resolveObjectForOID(r.Context(), database, oid)
 		if err == nil {
 			if len(obj.Authorizations) > 0 && !hasMethodAccess(r, "read", obj.Authorizations) {
 				writeLFSError(w, r, unauthorizedStatus(r), "Unauthorized", unauthorizedStatus(r) == http.StatusUnauthorized)
@@ -297,7 +297,7 @@ func handleMetadata(database core.DatabaseInterface) http.HandlerFunc {
 }
 
 func prepareDownloadActions(r *http.Request, database core.DatabaseInterface, uM urlmanager.UrlManager, oid string) (*lfsapi.BatchActions, *lfsapi.ObjectError) {
-	obj, err := database.GetObject(r.Context(), oid)
+	obj, err := resolveObjectForOID(r.Context(), database, oid)
 	if err != nil {
 		return nil, dbErrToBatchError(err, r)
 	}

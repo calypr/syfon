@@ -85,9 +85,6 @@ The `drs-server` provides a robust implementation of the [GA4GH DRS API](https:/
 - **GA4GH DRS Compliance**: Implements the standard DRS API for describing and accessing data objects.
 - **Database Flexibility**: Supports both **SQLite** and **PostgreSQL** backends with a modular driver architecture.
 - **S3 Integration**: Native support for Amazon S3 (and compatible storage like MinIO) with signed URL generation for downloads and multipart uploads.
-- **Gen3 Compatibility Layers**:
-    - **Fence Compatibility**: Supports Fence-style `/data/download` and multipart upload endpoints.
-    - **Indexd Compatibility**: Provides Indexd-style metadata management for integration with `git-drs`.
 
 ## Configuration
 

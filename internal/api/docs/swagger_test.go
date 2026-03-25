@@ -26,7 +26,7 @@ func TestSwaggerUIRouteViaIndexPrefix(t *testing.T) {
 	router := mux.NewRouter()
 	RegisterSwaggerRoutes(router)
 
-	req := httptest.NewRequest(http.MethodGet, "/index/swagger", nil)
+	req := httptest.NewRequest(http.MethodGet, "/internal/swagger", nil)
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 
@@ -55,7 +55,7 @@ func TestOpenAPIRouteViaIndexPrefix(t *testing.T) {
 	router := mux.NewRouter()
 	RegisterSwaggerRoutes(router)
 
-	req := httptest.NewRequest(http.MethodGet, "/index/openapi.yaml", nil)
+	req := httptest.NewRequest(http.MethodGet, "/internal/openapi.yaml", nil)
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 
@@ -86,9 +86,9 @@ func TestAuxOpenAPIRoutesIndexOnly(t *testing.T) {
 	}
 
 	indexPaths := []string{
-		"/index/openapi-lfs.yaml",
-		"/index/openapi-bucket.yaml",
-		"/index/openapi-internal.yaml",
+		"/internal/openapi-lfs.yaml",
+		"/internal/openapi-bucket.yaml",
+		"/internal/openapi-internal.yaml",
 	}
 	for _, p := range indexPaths {
 		req := httptest.NewRequest(http.MethodGet, p, nil)

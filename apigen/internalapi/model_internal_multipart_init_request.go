@@ -14,35 +14,35 @@ import (
 	"encoding/json"
 )
 
-// checks if the FenceMultipartInitRequest type satisfies the MappedNullable interface at compile time
-var _ MappedNullable = &FenceMultipartInitRequest{}
+// checks if the InternalMultipartInitRequest type satisfies the MappedNullable interface at compile time
+var _ MappedNullable = &InternalMultipartInitRequest{}
 
-// FenceMultipartInitRequest struct for FenceMultipartInitRequest
-type FenceMultipartInitRequest struct {
+// InternalMultipartInitRequest struct for InternalMultipartInitRequest
+type InternalMultipartInitRequest struct {
 	Guid *string `json:"guid,omitempty"`
 	FileName *string `json:"file_name,omitempty"`
 	Bucket *string `json:"bucket,omitempty"`
 }
 
-// NewFenceMultipartInitRequest instantiates a new FenceMultipartInitRequest object
+// NewInternalMultipartInitRequest instantiates a new InternalMultipartInitRequest object
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewFenceMultipartInitRequest() *FenceMultipartInitRequest {
-	this := FenceMultipartInitRequest{}
+func NewInternalMultipartInitRequest() *InternalMultipartInitRequest {
+	this := InternalMultipartInitRequest{}
 	return &this
 }
 
-// NewFenceMultipartInitRequestWithDefaults instantiates a new FenceMultipartInitRequest object
+// NewInternalMultipartInitRequestWithDefaults instantiates a new InternalMultipartInitRequest object
 // This constructor will only assign default values to properties that have it defined,
 // but it doesn't guarantee that properties required by API are set
-func NewFenceMultipartInitRequestWithDefaults() *FenceMultipartInitRequest {
-	this := FenceMultipartInitRequest{}
+func NewInternalMultipartInitRequestWithDefaults() *InternalMultipartInitRequest {
+	this := InternalMultipartInitRequest{}
 	return &this
 }
 
 // GetGuid returns the Guid field value if set, zero value otherwise.
-func (o *FenceMultipartInitRequest) GetGuid() string {
+func (o *InternalMultipartInitRequest) GetGuid() string {
 	if o == nil || IsNil(o.Guid) {
 		var ret string
 		return ret
@@ -52,7 +52,7 @@ func (o *FenceMultipartInitRequest) GetGuid() string {
 
 // GetGuidOk returns a tuple with the Guid field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *FenceMultipartInitRequest) GetGuidOk() (*string, bool) {
+func (o *InternalMultipartInitRequest) GetGuidOk() (*string, bool) {
 	if o == nil || IsNil(o.Guid) {
 		return nil, false
 	}
@@ -60,7 +60,7 @@ func (o *FenceMultipartInitRequest) GetGuidOk() (*string, bool) {
 }
 
 // HasGuid returns a boolean if a field has been set.
-func (o *FenceMultipartInitRequest) HasGuid() bool {
+func (o *InternalMultipartInitRequest) HasGuid() bool {
 	if o != nil && !IsNil(o.Guid) {
 		return true
 	}
@@ -69,12 +69,12 @@ func (o *FenceMultipartInitRequest) HasGuid() bool {
 }
 
 // SetGuid gets a reference to the given string and assigns it to the Guid field.
-func (o *FenceMultipartInitRequest) SetGuid(v string) {
+func (o *InternalMultipartInitRequest) SetGuid(v string) {
 	o.Guid = &v
 }
 
 // GetFileName returns the FileName field value if set, zero value otherwise.
-func (o *FenceMultipartInitRequest) GetFileName() string {
+func (o *InternalMultipartInitRequest) GetFileName() string {
 	if o == nil || IsNil(o.FileName) {
 		var ret string
 		return ret
@@ -84,7 +84,7 @@ func (o *FenceMultipartInitRequest) GetFileName() string {
 
 // GetFileNameOk returns a tuple with the FileName field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *FenceMultipartInitRequest) GetFileNameOk() (*string, bool) {
+func (o *InternalMultipartInitRequest) GetFileNameOk() (*string, bool) {
 	if o == nil || IsNil(o.FileName) {
 		return nil, false
 	}
@@ -92,7 +92,7 @@ func (o *FenceMultipartInitRequest) GetFileNameOk() (*string, bool) {
 }
 
 // HasFileName returns a boolean if a field has been set.
-func (o *FenceMultipartInitRequest) HasFileName() bool {
+func (o *InternalMultipartInitRequest) HasFileName() bool {
 	if o != nil && !IsNil(o.FileName) {
 		return true
 	}
@@ -101,12 +101,12 @@ func (o *FenceMultipartInitRequest) HasFileName() bool {
 }
 
 // SetFileName gets a reference to the given string and assigns it to the FileName field.
-func (o *FenceMultipartInitRequest) SetFileName(v string) {
+func (o *InternalMultipartInitRequest) SetFileName(v string) {
 	o.FileName = &v
 }
 
 // GetBucket returns the Bucket field value if set, zero value otherwise.
-func (o *FenceMultipartInitRequest) GetBucket() string {
+func (o *InternalMultipartInitRequest) GetBucket() string {
 	if o == nil || IsNil(o.Bucket) {
 		var ret string
 		return ret
@@ -116,7 +116,7 @@ func (o *FenceMultipartInitRequest) GetBucket() string {
 
 // GetBucketOk returns a tuple with the Bucket field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *FenceMultipartInitRequest) GetBucketOk() (*string, bool) {
+func (o *InternalMultipartInitRequest) GetBucketOk() (*string, bool) {
 	if o == nil || IsNil(o.Bucket) {
 		return nil, false
 	}
@@ -124,7 +124,7 @@ func (o *FenceMultipartInitRequest) GetBucketOk() (*string, bool) {
 }
 
 // HasBucket returns a boolean if a field has been set.
-func (o *FenceMultipartInitRequest) HasBucket() bool {
+func (o *InternalMultipartInitRequest) HasBucket() bool {
 	if o != nil && !IsNil(o.Bucket) {
 		return true
 	}
@@ -133,11 +133,11 @@ func (o *FenceMultipartInitRequest) HasBucket() bool {
 }
 
 // SetBucket gets a reference to the given string and assigns it to the Bucket field.
-func (o *FenceMultipartInitRequest) SetBucket(v string) {
+func (o *InternalMultipartInitRequest) SetBucket(v string) {
 	o.Bucket = &v
 }
 
-func (o FenceMultipartInitRequest) MarshalJSON() ([]byte, error) {
+func (o InternalMultipartInitRequest) MarshalJSON() ([]byte, error) {
 	toSerialize,err := o.ToMap()
 	if err != nil {
 		return []byte{}, err
@@ -145,7 +145,7 @@ func (o FenceMultipartInitRequest) MarshalJSON() ([]byte, error) {
 	return json.Marshal(toSerialize)
 }
 
-func (o FenceMultipartInitRequest) ToMap() (map[string]interface{}, error) {
+func (o InternalMultipartInitRequest) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	if !IsNil(o.Guid) {
 		toSerialize["guid"] = o.Guid
@@ -159,38 +159,38 @@ func (o FenceMultipartInitRequest) ToMap() (map[string]interface{}, error) {
 	return toSerialize, nil
 }
 
-type NullableFenceMultipartInitRequest struct {
-	value *FenceMultipartInitRequest
+type NullableInternalMultipartInitRequest struct {
+	value *InternalMultipartInitRequest
 	isSet bool
 }
 
-func (v NullableFenceMultipartInitRequest) Get() *FenceMultipartInitRequest {
+func (v NullableInternalMultipartInitRequest) Get() *InternalMultipartInitRequest {
 	return v.value
 }
 
-func (v *NullableFenceMultipartInitRequest) Set(val *FenceMultipartInitRequest) {
+func (v *NullableInternalMultipartInitRequest) Set(val *InternalMultipartInitRequest) {
 	v.value = val
 	v.isSet = true
 }
 
-func (v NullableFenceMultipartInitRequest) IsSet() bool {
+func (v NullableInternalMultipartInitRequest) IsSet() bool {
 	return v.isSet
 }
 
-func (v *NullableFenceMultipartInitRequest) Unset() {
+func (v *NullableInternalMultipartInitRequest) Unset() {
 	v.value = nil
 	v.isSet = false
 }
 
-func NewNullableFenceMultipartInitRequest(val *FenceMultipartInitRequest) *NullableFenceMultipartInitRequest {
-	return &NullableFenceMultipartInitRequest{value: val, isSet: true}
+func NewNullableInternalMultipartInitRequest(val *InternalMultipartInitRequest) *NullableInternalMultipartInitRequest {
+	return &NullableInternalMultipartInitRequest{value: val, isSet: true}
 }
 
-func (v NullableFenceMultipartInitRequest) MarshalJSON() ([]byte, error) {
+func (v NullableInternalMultipartInitRequest) MarshalJSON() ([]byte, error) {
 	return json.Marshal(v.value)
 }
 
-func (v *NullableFenceMultipartInitRequest) UnmarshalJSON(src []byte) error {
+func (v *NullableInternalMultipartInitRequest) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }

@@ -21,7 +21,7 @@ var _ MappedNullable = &BulkCreateRequest{}
 
 // BulkCreateRequest struct for BulkCreateRequest
 type BulkCreateRequest struct {
-	Records []IndexdRecord `json:"records"`
+	Records []InternalRecord `json:"records"`
 }
 
 type _BulkCreateRequest BulkCreateRequest
@@ -30,7 +30,7 @@ type _BulkCreateRequest BulkCreateRequest
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewBulkCreateRequest(records []IndexdRecord) *BulkCreateRequest {
+func NewBulkCreateRequest(records []InternalRecord) *BulkCreateRequest {
 	this := BulkCreateRequest{}
 	this.Records = records
 	return &this
@@ -45,9 +45,9 @@ func NewBulkCreateRequestWithDefaults() *BulkCreateRequest {
 }
 
 // GetRecords returns the Records field value
-func (o *BulkCreateRequest) GetRecords() []IndexdRecord {
+func (o *BulkCreateRequest) GetRecords() []InternalRecord {
 	if o == nil {
-		var ret []IndexdRecord
+		var ret []InternalRecord
 		return ret
 	}
 
@@ -56,7 +56,7 @@ func (o *BulkCreateRequest) GetRecords() []IndexdRecord {
 
 // GetRecordsOk returns a tuple with the Records field value
 // and a boolean to check if the value has been set.
-func (o *BulkCreateRequest) GetRecordsOk() ([]IndexdRecord, bool) {
+func (o *BulkCreateRequest) GetRecordsOk() ([]InternalRecord, bool) {
 	if o == nil {
 		return nil, false
 	}
@@ -64,7 +64,7 @@ func (o *BulkCreateRequest) GetRecordsOk() ([]IndexdRecord, bool) {
 }
 
 // SetRecords sets field value
-func (o *BulkCreateRequest) SetRecords(v []IndexdRecord) {
+func (o *BulkCreateRequest) SetRecords(v []InternalRecord) {
 	o.Records = v
 }
 

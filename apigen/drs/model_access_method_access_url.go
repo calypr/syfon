@@ -14,12 +14,13 @@ package drs
 
 
 
+// AccessMethodAccessUrl - An `AccessURL` that can be used to fetch the actual object bytes. Note that at least one of `access_url` and `access_id` must be provided.
 type AccessMethodAccessUrl struct {
 
 	// A fully resolvable URL that can be used to fetch the actual object bytes.
 	Url string `json:"url"`
 
-	// An optional list of headers to include in the HTTP request to `url`. These headers can be used to provide auth tokens required to fetch the object bytes.
+	// GA4GH-compatible list of HTTP headers.
 	Headers []string `json:"headers,omitempty"`
 }
 

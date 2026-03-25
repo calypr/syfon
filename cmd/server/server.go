@@ -22,8 +22,7 @@ import (
 	"github.com/calypr/drs-server/internal/api/admin"
 	coreapi "github.com/calypr/drs-server/internal/api/coreapi"
 	"github.com/calypr/drs-server/internal/api/docs"
-	"github.com/calypr/drs-server/internal/api/fence"
-	"github.com/calypr/drs-server/internal/api/gen3"
+	"github.com/calypr/drs-server/internal/api/internaldrs"
 	"github.com/calypr/drs-server/internal/api/lfs"
 	"github.com/calypr/drs-server/internal/api/metrics"
 	"github.com/calypr/drs-server/internal/api/middleware"
@@ -95,8 +94,8 @@ var Cmd = &cobra.Command{
 			}
 		}
 
-		// Init UrlManager
-		uM := urlmanager.NewS3UrlManager(database)
+		// Init UrlManager using generic BlobUrlManager for go-cloud support
+		uM := urlmanager.NewBlobUrlManager()
 
 		// Init Service
 		service := service.NewObjectsAPIService(database, uM)
@@ -138,12 +137,10 @@ var Cmd = &cobra.Command{
 		coreapi.RegisterCoreRoutes(router, database)
 		metrics.RegisterMetricsRoutes(router, database)
 
-		// Register Gen3 Compatibility Routes (for git-drs)
-		gen3.RegisterGen3Routes(router, database)
+		internaldrs.RegisterInternalIndexRoutes(router, database)
 
-		// Register Fence compatibility routes (multipart/upload/download compatibility).
-		fence.RegisterFenceRoutes(router, database, uM)
-		fmt.Println("Fence compatibility routes enabled")
+		internaldrs.RegisterInternalDataRoutes(router, database, uM)
+		fmt.Println("Internal DRS compatibility routes enabled")
 
 		// Register Git LFS API routes
 		lfs.RegisterLFSRoutes(router, database, uM, lfs.Options{

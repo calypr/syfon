@@ -2,6 +2,8 @@ SHELL := /bin/bash
 .DEFAULT_GOAL := build
 OPENAPI ?= ga4gh/data-repository-service-schemas/openapi/data_repository_service.openapi.yaml
 OAG_IMAGE ?= openapitools/openapi-generator-cli:latest
+REDOCLY_IMAGE ?= redocly/cli:latest
+YQ_IMAGE ?= mikefarah/yq:latest
 MKDOCS_IMAGE ?= squidfunk/mkdocs-material:latest
 GEN_OUT ?= .tmp/apigen.gen
 LFS_OPENAPI ?= apigen/api/lfs.openapi.yaml
@@ -30,11 +32,7 @@ gen:
 	mkdir -p .tmp; \
 	spec="$(OPENAPI)"; \
 	if [[ ! -f "$$spec" ]]; then \
-	  fallback="apigen/api/openapi.yaml"; \
-	  if [[ -f "$$fallback" ]]; then \
-	    echo "OpenAPI spec '$$spec' not found. Using local fallback '$$fallback'."; \
-	    spec="$$fallback"; \
-	  elif [[ "$(AUTO_INIT_SUBMODULE)" == "1" ]]; then \
+	  if [[ "$(AUTO_INIT_SUBMODULE)" == "1" ]]; then \
 	    echo "OpenAPI spec '$$spec' not found. Initializing submodule..."; \
 	    git submodule update --init --recursive --depth 1 "$(SCHEMAS_SUBMODULE)" || true; \
 	  fi; \
@@ -49,6 +47,16 @@ gen:
 	  echo "ERROR: docker is required for 'make gen'."; \
 	  exit 1; \
 	fi; \
+	echo "Bundling canonical OpenAPI spec with Redocly..."; \
+	docker run --rm \
+	  --user "$$(id -u):$$(id -g)" \
+	  -v "$(PWD):/local" \
+	  $(REDOCLY_IMAGE) bundle /local/$$spec --output /local/.tmp/drs.base.yaml --ext yaml; \
+	echo "Merging internal Extensions with yq..."; \
+	docker run --rm \
+	  --user "$$(id -u):$$(id -g)" \
+	  -v "$(PWD):/local" \
+	  $(YQ_IMAGE) eval-all 'select(fileIndex == 0) * select(fileIndex == 1)' /local/.tmp/drs.base.yaml /local/apigen/specs/drs-extensions-overlay.yaml > apigen/api/openapi.yaml; \
 	rm -rf "$(GEN_OUT)"; \
 	docker run --rm --pull=missing \
 	  --user "$$(id -u):$$(id -g)" \
@@ -58,7 +66,7 @@ gen:
 	  --skip-validate-spec \
 	  --git-repo-id drs-server \
 	  --git-user-id calypr \
-	  -i /local/$$spec \
+	  -i /local/apigen/api/openapi.yaml \
 	  -o /local/$(GEN_OUT) \
 	  --additional-properties outputAsLibrary=true,sourceFolder=drs,packageName=drs; \
 	if [[ ! -f "$(GEN_OUT)/drs/api.go" ]]; then \
@@ -72,8 +80,7 @@ gen:
 	cp -f "$(GEN_OUT)/.openapi-generator-ignore" apigen/.openapi-generator-ignore; \
 	rm -rf apigen/.openapi-generator; \
 	cp -R "$(GEN_OUT)/.openapi-generator" apigen/.openapi-generator; \
-	cp -f "$(GEN_OUT)/api/openapi.yaml" apigen/api/openapi.yaml; \
-	echo "Generated OpenAPI server stubs into ./apigen/drs and ./apigen/api/openapi.yaml"; \
+	echo "Generated OpenAPI server stubs into ./apigen/drs and bundled spec into ./apigen/api/openapi.yaml"; \
 	if [[ -f "$(LFS_OPENAPI)" ]]; then \
 	  $(MAKE) gen-lfs; \
 	else \
@@ -124,6 +131,8 @@ gen-lfs:
 	  echo "ERROR: docker is required for 'make gen-lfs'."; \
 	  exit 1; \
 	fi; \
+	echo "Validating/Bundling LFS spec with Redocly..."; \
+	docker run --rm -v "$(PWD):/spec" $(REDOCLY_IMAGE) bundle /spec/$(LFS_OPENAPI) --output /spec/apigen/api/lfs.openapi.yaml --ext yaml; \
 	rm -rf "$(LFS_GEN_OUT)"; \
 	docker run --rm --pull=missing \
 	  --user "$$(id -u):$$(id -g)" \
@@ -133,7 +142,7 @@ gen-lfs:
 	  --skip-validate-spec \
 	  --git-repo-id drs-server \
 	  --git-user-id calypr \
-	  -i /local/$(LFS_OPENAPI) \
+	  -i /local/apigen/api/lfs.openapi.yaml \
 	  -o /local/$(LFS_GEN_OUT) \
 	  --global-property models,modelDocs=false,modelTests=false,supportingFiles=utils.go \
 	  --additional-properties packageName=lfsapi,enumClassPrefix=true; \
@@ -157,6 +166,8 @@ gen-bucket:
 	  echo "ERROR: docker is required for 'make gen-bucket'."; \
 	  exit 1; \
 	fi; \
+	echo "Validating/Bundling Bucket spec with Redocly..."; \
+	docker run --rm -v "$(PWD):/spec" $(REDOCLY_IMAGE) bundle /spec/$(BUCKET_OPENAPI) --output /spec/apigen/api/bucket.openapi.yaml --ext yaml; \
 	rm -rf "$(BUCKET_GEN_OUT)"; \
 	docker run --rm --pull=missing \
 	  --user "$$(id -u):$$(id -g)" \
@@ -166,7 +177,7 @@ gen-bucket:
 	  --skip-validate-spec \
 	  --git-repo-id drs-server \
 	  --git-user-id calypr \
-	  -i /local/$(BUCKET_OPENAPI) \
+	  -i /local/apigen/api/bucket.openapi.yaml \
 	  -o /local/$(BUCKET_GEN_OUT) \
 	  --global-property models,modelDocs=false,modelTests=false,supportingFiles=utils.go \
 	  --additional-properties packageName=bucketapi,enumClassPrefix=true; \
@@ -190,6 +201,8 @@ gen-metrics:
 	  echo "ERROR: docker is required for 'make gen-metrics'."; \
 	  exit 1; \
 	fi; \
+	echo "Validating/Bundling Metrics spec with Redocly..."; \
+	docker run --rm -v "$(PWD):/spec" $(REDOCLY_IMAGE) bundle /spec/$(METRICS_OPENAPI) --output /spec/apigen/api/metrics.openapi.yaml --ext yaml; \
 	rm -rf "$(METRICS_GEN_OUT)"; \
 	docker run --rm --pull=missing \
 	  --user "$$(id -u):$$(id -g)" \
@@ -199,7 +212,7 @@ gen-metrics:
 	  --skip-validate-spec \
 	  --git-repo-id drs-server \
 	  --git-user-id calypr \
-	  -i /local/$(METRICS_OPENAPI) \
+	  -i /local/apigen/api/metrics.openapi.yaml \
 	  -o /local/$(METRICS_GEN_OUT) \
 	  --global-property models,modelDocs=false,modelTests=false,supportingFiles=utils.go \
 	  --additional-properties packageName=metricsapi,enumClassPrefix=true; \
@@ -223,6 +236,8 @@ gen-internal:
 	  echo "ERROR: docker is required for 'make gen-internal'."; \
 	  exit 1; \
 	fi; \
+	echo "Validating/Bundling Internal spec with Redocly..."; \
+	docker run --rm -v "$(PWD):/spec" $(REDOCLY_IMAGE) bundle /spec/$(INTERNAL_OPENAPI) --output /spec/apigen/api/internal.openapi.yaml --ext yaml; \
 	rm -rf "$(INTERNAL_GEN_OUT)"; \
 	docker run --rm --pull=missing \
 	  --user "$$(id -u):$$(id -g)" \
@@ -232,7 +247,7 @@ gen-internal:
 	  --skip-validate-spec \
 	  --git-repo-id drs-server \
 	  --git-user-id calypr \
-	  -i /local/$(INTERNAL_OPENAPI) \
+	  -i /local/apigen/api/internal.openapi.yaml \
 	  -o /local/$(INTERNAL_GEN_OUT) \
 	  --global-property models,modelDocs=false,modelTests=false,supportingFiles=utils.go \
 	  --additional-properties packageName=internalapi,enumClassPrefix=true; \

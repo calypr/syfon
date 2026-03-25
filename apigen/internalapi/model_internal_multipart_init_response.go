@@ -14,34 +14,34 @@ import (
 	"encoding/json"
 )
 
-// checks if the FenceMultipartInitResponse type satisfies the MappedNullable interface at compile time
-var _ MappedNullable = &FenceMultipartInitResponse{}
+// checks if the InternalMultipartInitResponse type satisfies the MappedNullable interface at compile time
+var _ MappedNullable = &InternalMultipartInitResponse{}
 
-// FenceMultipartInitResponse struct for FenceMultipartInitResponse
-type FenceMultipartInitResponse struct {
+// InternalMultipartInitResponse struct for InternalMultipartInitResponse
+type InternalMultipartInitResponse struct {
 	Guid *string `json:"guid,omitempty"`
 	UploadId *string `json:"uploadId,omitempty"`
 }
 
-// NewFenceMultipartInitResponse instantiates a new FenceMultipartInitResponse object
+// NewInternalMultipartInitResponse instantiates a new InternalMultipartInitResponse object
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewFenceMultipartInitResponse() *FenceMultipartInitResponse {
-	this := FenceMultipartInitResponse{}
+func NewInternalMultipartInitResponse() *InternalMultipartInitResponse {
+	this := InternalMultipartInitResponse{}
 	return &this
 }
 
-// NewFenceMultipartInitResponseWithDefaults instantiates a new FenceMultipartInitResponse object
+// NewInternalMultipartInitResponseWithDefaults instantiates a new InternalMultipartInitResponse object
 // This constructor will only assign default values to properties that have it defined,
 // but it doesn't guarantee that properties required by API are set
-func NewFenceMultipartInitResponseWithDefaults() *FenceMultipartInitResponse {
-	this := FenceMultipartInitResponse{}
+func NewInternalMultipartInitResponseWithDefaults() *InternalMultipartInitResponse {
+	this := InternalMultipartInitResponse{}
 	return &this
 }
 
 // GetGuid returns the Guid field value if set, zero value otherwise.
-func (o *FenceMultipartInitResponse) GetGuid() string {
+func (o *InternalMultipartInitResponse) GetGuid() string {
 	if o == nil || IsNil(o.Guid) {
 		var ret string
 		return ret
@@ -51,7 +51,7 @@ func (o *FenceMultipartInitResponse) GetGuid() string {
 
 // GetGuidOk returns a tuple with the Guid field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *FenceMultipartInitResponse) GetGuidOk() (*string, bool) {
+func (o *InternalMultipartInitResponse) GetGuidOk() (*string, bool) {
 	if o == nil || IsNil(o.Guid) {
 		return nil, false
 	}
@@ -59,7 +59,7 @@ func (o *FenceMultipartInitResponse) GetGuidOk() (*string, bool) {
 }
 
 // HasGuid returns a boolean if a field has been set.
-func (o *FenceMultipartInitResponse) HasGuid() bool {
+func (o *InternalMultipartInitResponse) HasGuid() bool {
 	if o != nil && !IsNil(o.Guid) {
 		return true
 	}
@@ -68,12 +68,12 @@ func (o *FenceMultipartInitResponse) HasGuid() bool {
 }
 
 // SetGuid gets a reference to the given string and assigns it to the Guid field.
-func (o *FenceMultipartInitResponse) SetGuid(v string) {
+func (o *InternalMultipartInitResponse) SetGuid(v string) {
 	o.Guid = &v
 }
 
 // GetUploadId returns the UploadId field value if set, zero value otherwise.
-func (o *FenceMultipartInitResponse) GetUploadId() string {
+func (o *InternalMultipartInitResponse) GetUploadId() string {
 	if o == nil || IsNil(o.UploadId) {
 		var ret string
 		return ret
@@ -83,7 +83,7 @@ func (o *FenceMultipartInitResponse) GetUploadId() string {
 
 // GetUploadIdOk returns a tuple with the UploadId field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *FenceMultipartInitResponse) GetUploadIdOk() (*string, bool) {
+func (o *InternalMultipartInitResponse) GetUploadIdOk() (*string, bool) {
 	if o == nil || IsNil(o.UploadId) {
 		return nil, false
 	}
@@ -91,7 +91,7 @@ func (o *FenceMultipartInitResponse) GetUploadIdOk() (*string, bool) {
 }
 
 // HasUploadId returns a boolean if a field has been set.
-func (o *FenceMultipartInitResponse) HasUploadId() bool {
+func (o *InternalMultipartInitResponse) HasUploadId() bool {
 	if o != nil && !IsNil(o.UploadId) {
 		return true
 	}
@@ -100,11 +100,11 @@ func (o *FenceMultipartInitResponse) HasUploadId() bool {
 }
 
 // SetUploadId gets a reference to the given string and assigns it to the UploadId field.
-func (o *FenceMultipartInitResponse) SetUploadId(v string) {
+func (o *InternalMultipartInitResponse) SetUploadId(v string) {
 	o.UploadId = &v
 }
 
-func (o FenceMultipartInitResponse) MarshalJSON() ([]byte, error) {
+func (o InternalMultipartInitResponse) MarshalJSON() ([]byte, error) {
 	toSerialize,err := o.ToMap()
 	if err != nil {
 		return []byte{}, err
@@ -112,7 +112,7 @@ func (o FenceMultipartInitResponse) MarshalJSON() ([]byte, error) {
 	return json.Marshal(toSerialize)
 }
 
-func (o FenceMultipartInitResponse) ToMap() (map[string]interface{}, error) {
+func (o InternalMultipartInitResponse) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	if !IsNil(o.Guid) {
 		toSerialize["guid"] = o.Guid
@@ -123,38 +123,38 @@ func (o FenceMultipartInitResponse) ToMap() (map[string]interface{}, error) {
 	return toSerialize, nil
 }
 
-type NullableFenceMultipartInitResponse struct {
-	value *FenceMultipartInitResponse
+type NullableInternalMultipartInitResponse struct {
+	value *InternalMultipartInitResponse
 	isSet bool
 }
 
-func (v NullableFenceMultipartInitResponse) Get() *FenceMultipartInitResponse {
+func (v NullableInternalMultipartInitResponse) Get() *InternalMultipartInitResponse {
 	return v.value
 }
 
-func (v *NullableFenceMultipartInitResponse) Set(val *FenceMultipartInitResponse) {
+func (v *NullableInternalMultipartInitResponse) Set(val *InternalMultipartInitResponse) {
 	v.value = val
 	v.isSet = true
 }
 
-func (v NullableFenceMultipartInitResponse) IsSet() bool {
+func (v NullableInternalMultipartInitResponse) IsSet() bool {
 	return v.isSet
 }
 
-func (v *NullableFenceMultipartInitResponse) Unset() {
+func (v *NullableInternalMultipartInitResponse) Unset() {
 	v.value = nil
 	v.isSet = false
 }
 
-func NewNullableFenceMultipartInitResponse(val *FenceMultipartInitResponse) *NullableFenceMultipartInitResponse {
-	return &NullableFenceMultipartInitResponse{value: val, isSet: true}
+func NewNullableInternalMultipartInitResponse(val *InternalMultipartInitResponse) *NullableInternalMultipartInitResponse {
+	return &NullableInternalMultipartInitResponse{value: val, isSet: true}
 }
 
-func (v NullableFenceMultipartInitResponse) MarshalJSON() ([]byte, error) {
+func (v NullableInternalMultipartInitResponse) MarshalJSON() ([]byte, error) {
 	return json.Marshal(v.value)
 }
 
-func (v *NullableFenceMultipartInitResponse) UnmarshalJSON(src []byte) error {
+func (v *NullableInternalMultipartInitResponse) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }

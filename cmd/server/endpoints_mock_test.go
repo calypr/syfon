@@ -14,8 +14,7 @@ import (
 	"github.com/calypr/drs-server/internal/api/admin"
 	coreapi "github.com/calypr/drs-server/internal/api/coreapi"
 	"github.com/calypr/drs-server/internal/api/docs"
-	"github.com/calypr/drs-server/internal/api/fence"
-	"github.com/calypr/drs-server/internal/api/gen3"
+	"github.com/calypr/drs-server/internal/api/internaldrs"
 	"github.com/calypr/drs-server/internal/api/lfs"
 	"github.com/calypr/drs-server/internal/api/metrics"
 	"github.com/calypr/drs-server/internal/api/middleware"
@@ -83,10 +82,10 @@ func TestAllRegisteredEndpoints_WithMocks(t *testing.T) {
 		{Method: http.MethodPost, Template: "/ga4gh/drs/v1/objects/access-methods"},
 		{Method: http.MethodPost, Template: "/ga4gh/drs/v1/objects/delete"},
 		{Method: http.MethodPost, Template: "/info/lfs/objects/batch"},
-		{Method: http.MethodPost, Template: "/index/bulk/sha256/validity"},
-		{Method: http.MethodPost, Template: "/index/internal/v1/sha256/validity"},
-		{Method: http.MethodGet, Template: "/index/internal/v1/metrics/summary"},
-		{Method: http.MethodGet, Template: "/index/internal/v1/metrics/files"},
+		{Method: http.MethodPost, Template: "/internal/index/bulk/sha256/validity"},
+		{Method: http.MethodPost, Template: "/internal/index/bulk/sha256/validity"},
+		{Method: http.MethodGet, Template: "/internal/metrics/v1/summary"},
+		{Method: http.MethodGet, Template: "/internal/metrics/v1/files"},
 	}
 	for _, req := range required {
 		if _, ok := seen[req.Method+" "+req.Template]; !ok {
@@ -157,8 +156,8 @@ func buildMockServerRouter() *mux.Router {
 	docs.RegisterSwaggerRoutes(router)
 	coreapi.RegisterCoreRoutes(router, database)
 	metrics.RegisterMetricsRoutes(router, database)
-	gen3.RegisterGen3Routes(router, database)
-	fence.RegisterFenceRoutes(router, database, uM)
+	internaldrs.RegisterInternalIndexRoutes(router, database)
+	internaldrs.RegisterInternalDataRoutes(router, database, uM)
 	lfs.RegisterLFSRoutes(router, database, uM)
 	return router
 }
@@ -232,26 +231,26 @@ func requestBodyFor(method, template string) ([]byte, string) {
 		}
 	case "/admin/sign_url":
 		return []byte(`{"url":"s3://test-bucket-1/sha-1","method":"GET"}`), "application/json"
-	case "/index/internal/v1/sha256/validity", "/index/bulk/sha256/validity":
+	case "/internal/metrics/v1/sha256/validity", "/internal/internal/index/bulk/sha256/validity":
 		return []byte(`{"sha256":["sha-1"]}`), "application/json"
-	case "/index/bulk/hashes":
+	case "/internal/internal/index/bulk/hashes":
 		return []byte(`{"hashes":["sha-1"]}`), "application/json"
-	case "/index/bulk":
+	case "/internal/internal/index/bulk":
 		return []byte(`{"records":[{"did":"sha-1","hashes":{"sha256":"sha-1"},"size":1,"urls":["s3://test-bucket-1/sha-1"],"authz":["/data_file"]}]}`), "application/json"
-	case "/index/bulk/documents":
+	case "/internal/internal/index/bulk/documents":
 		return []byte(`["sha-1"]`), "application/json"
-	case "/data/upload", "/data/upload/{file_id}":
-		if template == "/data/upload" {
+	case "/internal/data/upload", "/internal/data/upload/{file_id}":
+		if template == "/internal/data/upload" {
 			return []byte(`{"guid":"sha-1","authz":["/data_file"]}`), "application/json"
 		}
 		return []byte(`{}`), "application/json"
-	case "/data/multipart/init":
+	case "/internal/data/multipart/init":
 		return []byte(`{"guid":"sha-1","file_name":"sha-1","bucket":"test-bucket-1"}`), "application/json"
-	case "/data/multipart/upload":
+	case "/internal/data/multipart/upload":
 		return []byte(`{"key":"sha-1","bucket":"test-bucket-1","uploadId":"mock-upload-id","partNumber":1}`), "application/json"
-	case "/data/multipart/complete":
+	case "/internal/data/multipart/complete":
 		return []byte(`{"key":"sha-1","bucket":"test-bucket-1","uploadId":"mock-upload-id","parts":[{"PartNumber":1,"ETag":"etag-1"}]}`), "application/json"
-	case "/data/buckets":
+	case "/internal/data/buckets":
 		if method == http.MethodPut {
 			return []byte(`{"bucket":"test-bucket-3","region":"us-east-1","access_key":"k","secret_key":"s","endpoint":""}`), "application/json"
 		}

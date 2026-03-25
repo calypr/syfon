@@ -14,33 +14,33 @@ import (
 	"encoding/json"
 )
 
-// checks if the FenceSignedURL type satisfies the MappedNullable interface at compile time
-var _ MappedNullable = &FenceSignedURL{}
+// checks if the InternalSignedURL type satisfies the MappedNullable interface at compile time
+var _ MappedNullable = &InternalSignedURL{}
 
-// FenceSignedURL struct for FenceSignedURL
-type FenceSignedURL struct {
+// InternalSignedURL struct for InternalSignedURL
+type InternalSignedURL struct {
 	Url *string `json:"url,omitempty"`
 }
 
-// NewFenceSignedURL instantiates a new FenceSignedURL object
+// NewInternalSignedURL instantiates a new InternalSignedURL object
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewFenceSignedURL() *FenceSignedURL {
-	this := FenceSignedURL{}
+func NewInternalSignedURL() *InternalSignedURL {
+	this := InternalSignedURL{}
 	return &this
 }
 
-// NewFenceSignedURLWithDefaults instantiates a new FenceSignedURL object
+// NewInternalSignedURLWithDefaults instantiates a new InternalSignedURL object
 // This constructor will only assign default values to properties that have it defined,
 // but it doesn't guarantee that properties required by API are set
-func NewFenceSignedURLWithDefaults() *FenceSignedURL {
-	this := FenceSignedURL{}
+func NewInternalSignedURLWithDefaults() *InternalSignedURL {
+	this := InternalSignedURL{}
 	return &this
 }
 
 // GetUrl returns the Url field value if set, zero value otherwise.
-func (o *FenceSignedURL) GetUrl() string {
+func (o *InternalSignedURL) GetUrl() string {
 	if o == nil || IsNil(o.Url) {
 		var ret string
 		return ret
@@ -50,7 +50,7 @@ func (o *FenceSignedURL) GetUrl() string {
 
 // GetUrlOk returns a tuple with the Url field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *FenceSignedURL) GetUrlOk() (*string, bool) {
+func (o *InternalSignedURL) GetUrlOk() (*string, bool) {
 	if o == nil || IsNil(o.Url) {
 		return nil, false
 	}
@@ -58,7 +58,7 @@ func (o *FenceSignedURL) GetUrlOk() (*string, bool) {
 }
 
 // HasUrl returns a boolean if a field has been set.
-func (o *FenceSignedURL) HasUrl() bool {
+func (o *InternalSignedURL) HasUrl() bool {
 	if o != nil && !IsNil(o.Url) {
 		return true
 	}
@@ -67,11 +67,11 @@ func (o *FenceSignedURL) HasUrl() bool {
 }
 
 // SetUrl gets a reference to the given string and assigns it to the Url field.
-func (o *FenceSignedURL) SetUrl(v string) {
+func (o *InternalSignedURL) SetUrl(v string) {
 	o.Url = &v
 }
 
-func (o FenceSignedURL) MarshalJSON() ([]byte, error) {
+func (o InternalSignedURL) MarshalJSON() ([]byte, error) {
 	toSerialize,err := o.ToMap()
 	if err != nil {
 		return []byte{}, err
@@ -79,7 +79,7 @@ func (o FenceSignedURL) MarshalJSON() ([]byte, error) {
 	return json.Marshal(toSerialize)
 }
 
-func (o FenceSignedURL) ToMap() (map[string]interface{}, error) {
+func (o InternalSignedURL) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	if !IsNil(o.Url) {
 		toSerialize["url"] = o.Url
@@ -87,38 +87,38 @@ func (o FenceSignedURL) ToMap() (map[string]interface{}, error) {
 	return toSerialize, nil
 }
 
-type NullableFenceSignedURL struct {
-	value *FenceSignedURL
+type NullableInternalSignedURL struct {
+	value *InternalSignedURL
 	isSet bool
 }
 
-func (v NullableFenceSignedURL) Get() *FenceSignedURL {
+func (v NullableInternalSignedURL) Get() *InternalSignedURL {
 	return v.value
 }
 
-func (v *NullableFenceSignedURL) Set(val *FenceSignedURL) {
+func (v *NullableInternalSignedURL) Set(val *InternalSignedURL) {
 	v.value = val
 	v.isSet = true
 }
 
-func (v NullableFenceSignedURL) IsSet() bool {
+func (v NullableInternalSignedURL) IsSet() bool {
 	return v.isSet
 }
 
-func (v *NullableFenceSignedURL) Unset() {
+func (v *NullableInternalSignedURL) Unset() {
 	v.value = nil
 	v.isSet = false
 }
 
-func NewNullableFenceSignedURL(val *FenceSignedURL) *NullableFenceSignedURL {
-	return &NullableFenceSignedURL{value: val, isSet: true}
+func NewNullableInternalSignedURL(val *InternalSignedURL) *NullableInternalSignedURL {
+	return &NullableInternalSignedURL{value: val, isSet: true}
 }
 
-func (v NullableFenceSignedURL) MarshalJSON() ([]byte, error) {
+func (v NullableInternalSignedURL) MarshalJSON() ([]byte, error) {
 	return json.Marshal(v.value)
 }
 
-func (v *NullableFenceSignedURL) UnmarshalJSON(src []byte) error {
+func (v *NullableInternalSignedURL) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }

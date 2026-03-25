@@ -16,41 +16,41 @@ import (
 	"fmt"
 )
 
-// checks if the FenceMultipartUploadRequest type satisfies the MappedNullable interface at compile time
-var _ MappedNullable = &FenceMultipartUploadRequest{}
+// checks if the InternalMultipartCompleteRequest type satisfies the MappedNullable interface at compile time
+var _ MappedNullable = &InternalMultipartCompleteRequest{}
 
-// FenceMultipartUploadRequest struct for FenceMultipartUploadRequest
-type FenceMultipartUploadRequest struct {
+// InternalMultipartCompleteRequest struct for InternalMultipartCompleteRequest
+type InternalMultipartCompleteRequest struct {
 	Key string `json:"key"`
 	Bucket *string `json:"bucket,omitempty"`
 	UploadId string `json:"uploadId"`
-	PartNumber int32 `json:"partNumber"`
+	Parts []InternalMultipartPart `json:"parts"`
 }
 
-type _FenceMultipartUploadRequest FenceMultipartUploadRequest
+type _InternalMultipartCompleteRequest InternalMultipartCompleteRequest
 
-// NewFenceMultipartUploadRequest instantiates a new FenceMultipartUploadRequest object
+// NewInternalMultipartCompleteRequest instantiates a new InternalMultipartCompleteRequest object
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewFenceMultipartUploadRequest(key string, uploadId string, partNumber int32) *FenceMultipartUploadRequest {
-	this := FenceMultipartUploadRequest{}
+func NewInternalMultipartCompleteRequest(key string, uploadId string, parts []InternalMultipartPart) *InternalMultipartCompleteRequest {
+	this := InternalMultipartCompleteRequest{}
 	this.Key = key
 	this.UploadId = uploadId
-	this.PartNumber = partNumber
+	this.Parts = parts
 	return &this
 }
 
-// NewFenceMultipartUploadRequestWithDefaults instantiates a new FenceMultipartUploadRequest object
+// NewInternalMultipartCompleteRequestWithDefaults instantiates a new InternalMultipartCompleteRequest object
 // This constructor will only assign default values to properties that have it defined,
 // but it doesn't guarantee that properties required by API are set
-func NewFenceMultipartUploadRequestWithDefaults() *FenceMultipartUploadRequest {
-	this := FenceMultipartUploadRequest{}
+func NewInternalMultipartCompleteRequestWithDefaults() *InternalMultipartCompleteRequest {
+	this := InternalMultipartCompleteRequest{}
 	return &this
 }
 
 // GetKey returns the Key field value
-func (o *FenceMultipartUploadRequest) GetKey() string {
+func (o *InternalMultipartCompleteRequest) GetKey() string {
 	if o == nil {
 		var ret string
 		return ret
@@ -61,7 +61,7 @@ func (o *FenceMultipartUploadRequest) GetKey() string {
 
 // GetKeyOk returns a tuple with the Key field value
 // and a boolean to check if the value has been set.
-func (o *FenceMultipartUploadRequest) GetKeyOk() (*string, bool) {
+func (o *InternalMultipartCompleteRequest) GetKeyOk() (*string, bool) {
 	if o == nil {
 		return nil, false
 	}
@@ -69,12 +69,12 @@ func (o *FenceMultipartUploadRequest) GetKeyOk() (*string, bool) {
 }
 
 // SetKey sets field value
-func (o *FenceMultipartUploadRequest) SetKey(v string) {
+func (o *InternalMultipartCompleteRequest) SetKey(v string) {
 	o.Key = v
 }
 
 // GetBucket returns the Bucket field value if set, zero value otherwise.
-func (o *FenceMultipartUploadRequest) GetBucket() string {
+func (o *InternalMultipartCompleteRequest) GetBucket() string {
 	if o == nil || IsNil(o.Bucket) {
 		var ret string
 		return ret
@@ -84,7 +84,7 @@ func (o *FenceMultipartUploadRequest) GetBucket() string {
 
 // GetBucketOk returns a tuple with the Bucket field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *FenceMultipartUploadRequest) GetBucketOk() (*string, bool) {
+func (o *InternalMultipartCompleteRequest) GetBucketOk() (*string, bool) {
 	if o == nil || IsNil(o.Bucket) {
 		return nil, false
 	}
@@ -92,7 +92,7 @@ func (o *FenceMultipartUploadRequest) GetBucketOk() (*string, bool) {
 }
 
 // HasBucket returns a boolean if a field has been set.
-func (o *FenceMultipartUploadRequest) HasBucket() bool {
+func (o *InternalMultipartCompleteRequest) HasBucket() bool {
 	if o != nil && !IsNil(o.Bucket) {
 		return true
 	}
@@ -101,12 +101,12 @@ func (o *FenceMultipartUploadRequest) HasBucket() bool {
 }
 
 // SetBucket gets a reference to the given string and assigns it to the Bucket field.
-func (o *FenceMultipartUploadRequest) SetBucket(v string) {
+func (o *InternalMultipartCompleteRequest) SetBucket(v string) {
 	o.Bucket = &v
 }
 
 // GetUploadId returns the UploadId field value
-func (o *FenceMultipartUploadRequest) GetUploadId() string {
+func (o *InternalMultipartCompleteRequest) GetUploadId() string {
 	if o == nil {
 		var ret string
 		return ret
@@ -117,7 +117,7 @@ func (o *FenceMultipartUploadRequest) GetUploadId() string {
 
 // GetUploadIdOk returns a tuple with the UploadId field value
 // and a boolean to check if the value has been set.
-func (o *FenceMultipartUploadRequest) GetUploadIdOk() (*string, bool) {
+func (o *InternalMultipartCompleteRequest) GetUploadIdOk() (*string, bool) {
 	if o == nil {
 		return nil, false
 	}
@@ -125,35 +125,35 @@ func (o *FenceMultipartUploadRequest) GetUploadIdOk() (*string, bool) {
 }
 
 // SetUploadId sets field value
-func (o *FenceMultipartUploadRequest) SetUploadId(v string) {
+func (o *InternalMultipartCompleteRequest) SetUploadId(v string) {
 	o.UploadId = v
 }
 
-// GetPartNumber returns the PartNumber field value
-func (o *FenceMultipartUploadRequest) GetPartNumber() int32 {
+// GetParts returns the Parts field value
+func (o *InternalMultipartCompleteRequest) GetParts() []InternalMultipartPart {
 	if o == nil {
-		var ret int32
+		var ret []InternalMultipartPart
 		return ret
 	}
 
-	return o.PartNumber
+	return o.Parts
 }
 
-// GetPartNumberOk returns a tuple with the PartNumber field value
+// GetPartsOk returns a tuple with the Parts field value
 // and a boolean to check if the value has been set.
-func (o *FenceMultipartUploadRequest) GetPartNumberOk() (*int32, bool) {
+func (o *InternalMultipartCompleteRequest) GetPartsOk() ([]InternalMultipartPart, bool) {
 	if o == nil {
 		return nil, false
 	}
-	return &o.PartNumber, true
+	return o.Parts, true
 }
 
-// SetPartNumber sets field value
-func (o *FenceMultipartUploadRequest) SetPartNumber(v int32) {
-	o.PartNumber = v
+// SetParts sets field value
+func (o *InternalMultipartCompleteRequest) SetParts(v []InternalMultipartPart) {
+	o.Parts = v
 }
 
-func (o FenceMultipartUploadRequest) MarshalJSON() ([]byte, error) {
+func (o InternalMultipartCompleteRequest) MarshalJSON() ([]byte, error) {
 	toSerialize,err := o.ToMap()
 	if err != nil {
 		return []byte{}, err
@@ -161,25 +161,25 @@ func (o FenceMultipartUploadRequest) MarshalJSON() ([]byte, error) {
 	return json.Marshal(toSerialize)
 }
 
-func (o FenceMultipartUploadRequest) ToMap() (map[string]interface{}, error) {
+func (o InternalMultipartCompleteRequest) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	toSerialize["key"] = o.Key
 	if !IsNil(o.Bucket) {
 		toSerialize["bucket"] = o.Bucket
 	}
 	toSerialize["uploadId"] = o.UploadId
-	toSerialize["partNumber"] = o.PartNumber
+	toSerialize["parts"] = o.Parts
 	return toSerialize, nil
 }
 
-func (o *FenceMultipartUploadRequest) UnmarshalJSON(data []byte) (err error) {
+func (o *InternalMultipartCompleteRequest) UnmarshalJSON(data []byte) (err error) {
 	// This validates that all required properties are included in the JSON object
 	// by unmarshalling the object into a generic map with string keys and checking
 	// that every required field exists as a key in the generic map.
 	requiredProperties := []string{
 		"key",
 		"uploadId",
-		"partNumber",
+		"parts",
 	}
 
 	allProperties := make(map[string]interface{})
@@ -196,53 +196,53 @@ func (o *FenceMultipartUploadRequest) UnmarshalJSON(data []byte) (err error) {
 		}
 	}
 
-	varFenceMultipartUploadRequest := _FenceMultipartUploadRequest{}
+	varInternalMultipartCompleteRequest := _InternalMultipartCompleteRequest{}
 
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
-	err = decoder.Decode(&varFenceMultipartUploadRequest)
+	err = decoder.Decode(&varInternalMultipartCompleteRequest)
 
 	if err != nil {
 		return err
 	}
 
-	*o = FenceMultipartUploadRequest(varFenceMultipartUploadRequest)
+	*o = InternalMultipartCompleteRequest(varInternalMultipartCompleteRequest)
 
 	return err
 }
 
-type NullableFenceMultipartUploadRequest struct {
-	value *FenceMultipartUploadRequest
+type NullableInternalMultipartCompleteRequest struct {
+	value *InternalMultipartCompleteRequest
 	isSet bool
 }
 
-func (v NullableFenceMultipartUploadRequest) Get() *FenceMultipartUploadRequest {
+func (v NullableInternalMultipartCompleteRequest) Get() *InternalMultipartCompleteRequest {
 	return v.value
 }
 
-func (v *NullableFenceMultipartUploadRequest) Set(val *FenceMultipartUploadRequest) {
+func (v *NullableInternalMultipartCompleteRequest) Set(val *InternalMultipartCompleteRequest) {
 	v.value = val
 	v.isSet = true
 }
 
-func (v NullableFenceMultipartUploadRequest) IsSet() bool {
+func (v NullableInternalMultipartCompleteRequest) IsSet() bool {
 	return v.isSet
 }
 
-func (v *NullableFenceMultipartUploadRequest) Unset() {
+func (v *NullableInternalMultipartCompleteRequest) Unset() {
 	v.value = nil
 	v.isSet = false
 }
 
-func NewNullableFenceMultipartUploadRequest(val *FenceMultipartUploadRequest) *NullableFenceMultipartUploadRequest {
-	return &NullableFenceMultipartUploadRequest{value: val, isSet: true}
+func NewNullableInternalMultipartCompleteRequest(val *InternalMultipartCompleteRequest) *NullableInternalMultipartCompleteRequest {
+	return &NullableInternalMultipartCompleteRequest{value: val, isSet: true}
 }
 
-func (v NullableFenceMultipartUploadRequest) MarshalJSON() ([]byte, error) {
+func (v NullableInternalMultipartCompleteRequest) MarshalJSON() ([]byte, error) {
 	return json.Marshal(v.value)
 }
 
-func (v *NullableFenceMultipartUploadRequest) UnmarshalJSON(src []byte) error {
+func (v *NullableInternalMultipartCompleteRequest) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }

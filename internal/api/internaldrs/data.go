@@ -1,4 +1,4 @@
-package fence
+package internaldrs
 
 import (
 	"context"
@@ -30,38 +30,8 @@ type multipartSession struct {
 
 var multipartUploadSessions sync.Map // uploadID -> multipartSession
 
-const bucketAdminResource = "/services/fence/buckets"
+const bucketAdminResource = "/services/internal/buckets"
 
-func writeHTTPError(w http.ResponseWriter, r *http.Request, status int, msg string, err error) {
-	requestID := core.GetRequestID(r.Context())
-	if err != nil {
-		slog.Error("fence request failed", "request_id", requestID, "method", r.Method, "path", r.URL.Path, "status", status, "msg", msg, "err", err)
-	} else {
-		slog.Warn("fence request rejected", "request_id", requestID, "method", r.Method, "path", r.URL.Path, "status", status, "msg", msg)
-	}
-	http.Error(w, msg, status)
-}
-
-func writeAuthError(w http.ResponseWriter, r *http.Request) {
-	code := http.StatusForbidden
-	if core.IsGen3Mode(r.Context()) && !core.HasAuthHeader(r.Context()) {
-		code = http.StatusUnauthorized
-	}
-	writeHTTPError(w, r, code, "Unauthorized", nil)
-}
-
-func writeDBError(w http.ResponseWriter, r *http.Request, err error) {
-	switch {
-	case errors.Is(err, core.ErrUnauthorized):
-		writeAuthError(w, r)
-	case errors.Is(err, core.ErrConflict):
-		writeHTTPError(w, r, http.StatusConflict, err.Error(), err)
-	case errors.Is(err, core.ErrNotFound):
-		writeHTTPError(w, r, http.StatusNotFound, "File not found", err)
-	default:
-		writeHTTPError(w, r, http.StatusInternalServerError, err.Error(), err)
-	}
-}
 
 func normalizeScopePath(rawPath, bucket string) (string, error) {
 	p := strings.TrimSpace(rawPath)
@@ -115,50 +85,50 @@ func hasScopedBucketAccess(r *http.Request, scope core.BucketScope, methods ...s
 	return hasAnyMethodAccess(r, []string{res}, methods...)
 }
 
-func RegisterFenceRoutes(router *mux.Router, database core.DatabaseInterface, uM urlmanager.UrlManager) {
+func RegisterInternalDataRoutes(router *mux.Router, database core.DatabaseInterface, uM urlmanager.UrlManager) {
 	// Canonical upload/download routes.
-	router.Handle("/data/download/{file_id}", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		handleFenceDownload(w, r, database, uM)
-	}), "FenceDownload")).Methods(http.MethodGet)
+	router.Handle("/internal/data/download/{file_id}", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handleInternalDownload(w, r, database, uM)
+	}), "InternalDownload")).Methods(http.MethodGet)
 
-	router.Handle("/data/upload", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		handleFenceUploadBlank(w, r, database, uM)
-	}), "FenceUploadBlank")).Methods(http.MethodPost)
+	router.Handle("/internal/data/upload", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handleInternalUploadBlank(w, r, database, uM)
+	}), "InternalUploadBlank")).Methods(http.MethodPost)
 
-	router.Handle("/data/upload/{file_id}", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		handleFenceUploadURL(w, r, database, uM)
-	}), "FenceUploadURL")).Methods(http.MethodGet)
+	router.Handle("/internal/data/upload/{file_id}", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handleInternalUploadURL(w, r, database, uM)
+	}), "InternalUploadURL")).Methods(http.MethodGet)
 
-	router.Handle("/data/multipart/init", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		handleFenceMultipartInit(w, r, database, uM)
-	}), "FenceMultipartInit")).Methods(http.MethodPost)
+	router.Handle("/internal/data/multipart/init", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handleInternalMultipartInit(w, r, database, uM)
+	}), "InternalMultipartInit")).Methods(http.MethodPost)
 
-	router.Handle("/data/multipart/upload", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		handleFenceMultipartUpload(w, r, database, uM)
-	}), "FenceMultipartUpload")).Methods(http.MethodPost)
+	router.Handle("/internal/data/multipart/upload", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handleInternalMultipartUpload(w, r, database, uM)
+	}), "InternalMultipartUpload")).Methods(http.MethodPost)
 
-	router.Handle("/data/multipart/complete", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		handleFenceMultipartComplete(w, r, database, uM)
-	}), "FenceMultipartComplete")).Methods(http.MethodPost)
+	router.Handle("/internal/data/multipart/complete", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handleInternalMultipartComplete(w, r, database, uM)
+	}), "InternalMultipartComplete")).Methods(http.MethodPost)
 
-	router.Handle("/data/buckets", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	router.Handle("/internal/data/buckets", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
-			handleFenceBuckets(w, r, database)
+			handleInternalBuckets(w, r, database)
 		case http.MethodPut:
-			handleFencePutBucket(w, r, database)
+			handleInternalPutBucket(w, r, database)
 		default:
 			writeHTTPError(w, r, http.StatusMethodNotAllowed, "Method not allowed", nil)
 		}
-	}), "FenceBuckets")).Methods(http.MethodGet, http.MethodPut)
+	}), "InternalBuckets")).Methods(http.MethodGet, http.MethodPut)
 
-	router.Handle("/data/buckets/{bucket}", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	router.Handle("/internal/data/buckets/{bucket}", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodDelete {
-			handleFenceDeleteBucket(w, r, database)
+			handleInternalDeleteBucket(w, r, database)
 			return
 		}
 		writeHTTPError(w, r, http.StatusMethodNotAllowed, "Method not allowed", nil)
-	}), "FenceBucketDetail")).Methods(http.MethodDelete)
+	}), "InternalBucketDetail")).Methods(http.MethodDelete)
 }
 
 func resolveBucket(ctx *http.Request, database core.DatabaseInterface, requested string) (string, error) {
@@ -243,7 +213,7 @@ func targetResourcesFromObject(obj *core.InternalObject) []string {
 }
 
 func resolveObjectByIDOrChecksum(database core.DatabaseInterface, ctx context.Context, objectID string) (*core.InternalObject, error) {
-	// Checksum-first resolution: fence-compatible routes are commonly called with OID.
+	// Checksum-first resolution: internal-compatible routes are commonly called with OID.
 	byChecksum, err := database.GetObjectsByChecksum(ctx, objectID)
 	if err != nil {
 		return nil, err
@@ -264,7 +234,7 @@ func resolveObjectByIDOrChecksum(database core.DatabaseInterface, ctx context.Co
 	return nil, core.ErrNotFound
 }
 
-func handleFenceDownload(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface, uM urlmanager.UrlManager) {
+func handleInternalDownload(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface, uM urlmanager.UrlManager) {
 	vars := mux.Vars(r)
 	fileID := vars["file_id"]
 
@@ -314,13 +284,13 @@ func handleFenceDownload(w http.ResponseWriter, r *http.Request, database core.D
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(internalapi.FenceSignedURL{Url: &signedURL}); err != nil {
-		slog.Error("fence encode response failed", "request_id", core.GetRequestID(r.Context()), "method", r.Method, "path", r.URL.Path, "err", err)
+	if err := json.NewEncoder(w).Encode(internalapi.InternalSignedURL{Url: &signedURL}); err != nil {
+		slog.Error("internal encode response failed", "request_id", core.GetRequestID(r.Context()), "method", r.Method, "path", r.URL.Path, "err", err)
 	}
 }
 
-func handleFenceUploadBlank(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface, uM urlmanager.UrlManager) {
-	var req internalapi.FenceUploadBlankRequest
+func handleInternalUploadBlank(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface, uM urlmanager.UrlManager) {
+	var req internalapi.InternalUploadBlankRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeHTTPError(w, r, http.StatusBadRequest, "Invalid request", nil)
 		return
@@ -399,12 +369,12 @@ func handleFenceUploadBlank(w http.ResponseWriter, r *http.Request, database cor
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	if err := json.NewEncoder(w).Encode(internalapi.FenceUploadBlankResponse{Guid: &guid, Url: &signedURL}); err != nil {
-		slog.Error("fence encode response failed", "request_id", core.GetRequestID(r.Context()), "method", r.Method, "path", r.URL.Path, "err", err)
+	if err := json.NewEncoder(w).Encode(internalapi.InternalUploadBlankResponse{Guid: &guid, Url: &signedURL}); err != nil {
+		slog.Error("internal encode response failed", "request_id", core.GetRequestID(r.Context()), "method", r.Method, "path", r.URL.Path, "err", err)
 	}
 }
 
-func handleFenceUploadURL(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface, uM urlmanager.UrlManager) {
+func handleInternalUploadURL(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface, uM urlmanager.UrlManager) {
 	vars := mux.Vars(r)
 	fileID := vars["file_id"]
 	targetResources := []string{"/data_file"}
@@ -462,13 +432,13 @@ func handleFenceUploadURL(w http.ResponseWriter, r *http.Request, database core.
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(internalapi.FenceSignedURL{Url: &signedURL}); err != nil {
-		slog.Error("fence encode response failed", "request_id", core.GetRequestID(r.Context()), "method", r.Method, "path", r.URL.Path, "err", err)
+	if err := json.NewEncoder(w).Encode(internalapi.InternalSignedURL{Url: &signedURL}); err != nil {
+		slog.Error("internal encode response failed", "request_id", core.GetRequestID(r.Context()), "method", r.Method, "path", r.URL.Path, "err", err)
 	}
 }
 
-func handleFenceMultipartInit(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface, uM urlmanager.UrlManager) {
-	var req internalapi.FenceMultipartInitRequest
+func handleInternalMultipartInit(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface, uM urlmanager.UrlManager) {
+	var req internalapi.InternalMultipartInitRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeHTTPError(w, r, http.StatusBadRequest, "Invalid request", nil)
 		return
@@ -580,13 +550,13 @@ func handleFenceMultipartInit(w http.ResponseWriter, r *http.Request, database c
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	if err := json.NewEncoder(w).Encode(internalapi.FenceMultipartInitResponse{Guid: &guid, UploadId: &uploadID}); err != nil {
-		slog.Error("fence encode response failed", "request_id", core.GetRequestID(r.Context()), "method", r.Method, "path", r.URL.Path, "err", err)
+	if err := json.NewEncoder(w).Encode(internalapi.InternalMultipartInitResponse{Guid: &guid, UploadId: &uploadID}); err != nil {
+		slog.Error("internal encode response failed", "request_id", core.GetRequestID(r.Context()), "method", r.Method, "path", r.URL.Path, "err", err)
 	}
 }
 
-func handleFenceMultipartUpload(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface, uM urlmanager.UrlManager) {
-	var req internalapi.FenceMultipartUploadRequest
+func handleInternalMultipartUpload(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface, uM urlmanager.UrlManager) {
+	var req internalapi.InternalMultipartUploadRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
 		writeHTTPError(w, r, http.StatusBadRequest, "Invalid request", nil)
 		return
@@ -658,13 +628,13 @@ func handleFenceMultipartUpload(w http.ResponseWriter, r *http.Request, database
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(internalapi.FenceMultipartUploadResponse{PresignedUrl: &signedURL}); err != nil {
-		slog.Error("fence encode response failed", "request_id", core.GetRequestID(r.Context()), "method", r.Method, "path", r.URL.Path, "err", err)
+	if err := json.NewEncoder(w).Encode(internalapi.InternalMultipartUploadResponse{PresignedUrl: &signedURL}); err != nil {
+		slog.Error("internal encode response failed", "request_id", core.GetRequestID(r.Context()), "method", r.Method, "path", r.URL.Path, "err", err)
 	}
 }
 
-func handleFenceMultipartComplete(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface, uM urlmanager.UrlManager) {
-	var req internalapi.FenceMultipartCompleteRequest
+func handleInternalMultipartComplete(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface, uM urlmanager.UrlManager) {
+	var req internalapi.InternalMultipartCompleteRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
 		writeHTTPError(w, r, http.StatusBadRequest, "Invalid request", nil)
 		return
@@ -743,7 +713,7 @@ func handleFenceMultipartComplete(w http.ResponseWriter, r *http.Request, databa
 	w.WriteHeader(http.StatusOK)
 }
 
-func handleFenceBuckets(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface) {
+func handleInternalBuckets(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface) {
 	creds, err := database.ListS3Credentials(r.Context())
 	if err != nil {
 		writeHTTPError(w, r, http.StatusInternalServerError, err.Error(), err)
@@ -796,11 +766,11 @@ func handleFenceBuckets(w http.ResponseWriter, r *http.Request, database core.Da
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		slog.Error("fence encode response failed", "request_id", core.GetRequestID(r.Context()), "method", r.Method, "path", r.URL.Path, "err", err)
+		slog.Error("internal encode response failed", "request_id", core.GetRequestID(r.Context()), "method", r.Method, "path", r.URL.Path, "err", err)
 	}
 }
 
-func handleFencePutBucket(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface) {
+func handleInternalPutBucket(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface) {
 	var req bucketapi.PutBucketRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeHTTPError(w, r, http.StatusBadRequest, "Invalid request", nil)
@@ -862,7 +832,7 @@ func handleFencePutBucket(w http.ResponseWriter, r *http.Request, database core.
 	w.WriteHeader(http.StatusCreated)
 }
 
-func handleFenceDeleteBucket(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface) {
+func handleInternalDeleteBucket(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface) {
 	bucket := mux.Vars(r)["bucket"]
 	if bucket == "" {
 		writeHTTPError(w, r, http.StatusBadRequest, "bucket is required", nil)

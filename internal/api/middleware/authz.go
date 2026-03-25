@@ -173,12 +173,12 @@ func (m *AuthzMiddleware) Middleware(next http.Handler) http.Handler {
 			// We use a no-op gen3 logger for the request client to avoid unnecessary side effects in middleware
 			gen3Logger := logs.NewGen3Logger(m.logger, "", "drs-server")
 			reqClient := request.NewRequestInterface(gen3Logger, cred, nil)
-			fenceClient := fence.NewFenceClient(reqClient, cred, m.logger)
+			authClient := fence.NewFenceClient(reqClient, cred, m.logger)
 
 			// 3. Fetch user info (privileges)
-			privs, err := fenceClient.CheckPrivileges(r.Context())
+			privs, err := authClient.CheckPrivileges(r.Context())
 			if err != nil {
-				m.logger.Debug("failed to check privileges with fence", "error", err)
+				m.logger.Debug("failed to check privileges with internal auth", "error", err)
 				return authFetchResult{negative: true}, nil
 			}
 

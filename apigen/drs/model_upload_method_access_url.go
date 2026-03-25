@@ -14,12 +14,13 @@ package drs
 
 
 
+// UploadMethodAccessUrl - An `AccessURL` that specifies where the file will be accessible after upload. This URL will be used as the access_url in the eventual DRS object, ensuring consistency between upload and retrieval operations.
 type UploadMethodAccessUrl struct {
 
-	// A fully resolvable URL that can be used to fetch the actual object bytes.
+	// Inlined Upload URL context.
 	Url string `json:"url"`
 
-	// An optional list of headers to include in the HTTP request to `url`. These headers can be used to provide auth tokens required to fetch the object bytes.
+	// Inlined Upload Headers.
 	Headers []string `json:"headers,omitempty"`
 }
 

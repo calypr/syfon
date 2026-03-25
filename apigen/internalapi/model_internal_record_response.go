@@ -14,11 +14,11 @@ import (
 	"encoding/json"
 )
 
-// checks if the IndexdRecordResponse type satisfies the MappedNullable interface at compile time
-var _ MappedNullable = &IndexdRecordResponse{}
+// checks if the InternalRecordResponse type satisfies the MappedNullable interface at compile time
+var _ MappedNullable = &InternalRecordResponse{}
 
-// IndexdRecordResponse struct for IndexdRecordResponse
-type IndexdRecordResponse struct {
+// InternalRecordResponse struct for InternalRecordResponse
+type InternalRecordResponse struct {
 	Did *string `json:"did,omitempty"`
 	// Hash map, e.g. {\"sha256\":\"...\"}
 	Hashes *map[string]string `json:"hashes,omitempty"`
@@ -35,25 +35,25 @@ type IndexdRecordResponse struct {
 	Uploader *string `json:"uploader,omitempty"`
 }
 
-// NewIndexdRecordResponse instantiates a new IndexdRecordResponse object
+// NewInternalRecordResponse instantiates a new InternalRecordResponse object
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewIndexdRecordResponse() *IndexdRecordResponse {
-	this := IndexdRecordResponse{}
+func NewInternalRecordResponse() *InternalRecordResponse {
+	this := InternalRecordResponse{}
 	return &this
 }
 
-// NewIndexdRecordResponseWithDefaults instantiates a new IndexdRecordResponse object
+// NewInternalRecordResponseWithDefaults instantiates a new InternalRecordResponse object
 // This constructor will only assign default values to properties that have it defined,
 // but it doesn't guarantee that properties required by API are set
-func NewIndexdRecordResponseWithDefaults() *IndexdRecordResponse {
-	this := IndexdRecordResponse{}
+func NewInternalRecordResponseWithDefaults() *InternalRecordResponse {
+	this := InternalRecordResponse{}
 	return &this
 }
 
 // GetDid returns the Did field value if set, zero value otherwise.
-func (o *IndexdRecordResponse) GetDid() string {
+func (o *InternalRecordResponse) GetDid() string {
 	if o == nil || IsNil(o.Did) {
 		var ret string
 		return ret
@@ -63,7 +63,7 @@ func (o *IndexdRecordResponse) GetDid() string {
 
 // GetDidOk returns a tuple with the Did field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *IndexdRecordResponse) GetDidOk() (*string, bool) {
+func (o *InternalRecordResponse) GetDidOk() (*string, bool) {
 	if o == nil || IsNil(o.Did) {
 		return nil, false
 	}
@@ -71,7 +71,7 @@ func (o *IndexdRecordResponse) GetDidOk() (*string, bool) {
 }
 
 // HasDid returns a boolean if a field has been set.
-func (o *IndexdRecordResponse) HasDid() bool {
+func (o *InternalRecordResponse) HasDid() bool {
 	if o != nil && !IsNil(o.Did) {
 		return true
 	}
@@ -80,12 +80,12 @@ func (o *IndexdRecordResponse) HasDid() bool {
 }
 
 // SetDid gets a reference to the given string and assigns it to the Did field.
-func (o *IndexdRecordResponse) SetDid(v string) {
+func (o *InternalRecordResponse) SetDid(v string) {
 	o.Did = &v
 }
 
 // GetHashes returns the Hashes field value if set, zero value otherwise.
-func (o *IndexdRecordResponse) GetHashes() map[string]string {
+func (o *InternalRecordResponse) GetHashes() map[string]string {
 	if o == nil || IsNil(o.Hashes) {
 		var ret map[string]string
 		return ret
@@ -95,7 +95,7 @@ func (o *IndexdRecordResponse) GetHashes() map[string]string {
 
 // GetHashesOk returns a tuple with the Hashes field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *IndexdRecordResponse) GetHashesOk() (*map[string]string, bool) {
+func (o *InternalRecordResponse) GetHashesOk() (*map[string]string, bool) {
 	if o == nil || IsNil(o.Hashes) {
 		return nil, false
 	}
@@ -103,7 +103,7 @@ func (o *IndexdRecordResponse) GetHashesOk() (*map[string]string, bool) {
 }
 
 // HasHashes returns a boolean if a field has been set.
-func (o *IndexdRecordResponse) HasHashes() bool {
+func (o *InternalRecordResponse) HasHashes() bool {
 	if o != nil && !IsNil(o.Hashes) {
 		return true
 	}
@@ -112,12 +112,12 @@ func (o *IndexdRecordResponse) HasHashes() bool {
 }
 
 // SetHashes gets a reference to the given map[string]string and assigns it to the Hashes field.
-func (o *IndexdRecordResponse) SetHashes(v map[string]string) {
+func (o *InternalRecordResponse) SetHashes(v map[string]string) {
 	o.Hashes = &v
 }
 
 // GetSize returns the Size field value if set, zero value otherwise.
-func (o *IndexdRecordResponse) GetSize() int64 {
+func (o *InternalRecordResponse) GetSize() int64 {
 	if o == nil || IsNil(o.Size) {
 		var ret int64
 		return ret
@@ -127,7 +127,7 @@ func (o *IndexdRecordResponse) GetSize() int64 {
 
 // GetSizeOk returns a tuple with the Size field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *IndexdRecordResponse) GetSizeOk() (*int64, bool) {
+func (o *InternalRecordResponse) GetSizeOk() (*int64, bool) {
 	if o == nil || IsNil(o.Size) {
 		return nil, false
 	}
@@ -135,7 +135,7 @@ func (o *IndexdRecordResponse) GetSizeOk() (*int64, bool) {
 }
 
 // HasSize returns a boolean if a field has been set.
-func (o *IndexdRecordResponse) HasSize() bool {
+func (o *InternalRecordResponse) HasSize() bool {
 	if o != nil && !IsNil(o.Size) {
 		return true
 	}
@@ -144,12 +144,12 @@ func (o *IndexdRecordResponse) HasSize() bool {
 }
 
 // SetSize gets a reference to the given int64 and assigns it to the Size field.
-func (o *IndexdRecordResponse) SetSize(v int64) {
+func (o *InternalRecordResponse) SetSize(v int64) {
 	o.Size = &v
 }
 
 // GetUrls returns the Urls field value if set, zero value otherwise.
-func (o *IndexdRecordResponse) GetUrls() []string {
+func (o *InternalRecordResponse) GetUrls() []string {
 	if o == nil || IsNil(o.Urls) {
 		var ret []string
 		return ret
@@ -159,7 +159,7 @@ func (o *IndexdRecordResponse) GetUrls() []string {
 
 // GetUrlsOk returns a tuple with the Urls field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *IndexdRecordResponse) GetUrlsOk() ([]string, bool) {
+func (o *InternalRecordResponse) GetUrlsOk() ([]string, bool) {
 	if o == nil || IsNil(o.Urls) {
 		return nil, false
 	}
@@ -167,7 +167,7 @@ func (o *IndexdRecordResponse) GetUrlsOk() ([]string, bool) {
 }
 
 // HasUrls returns a boolean if a field has been set.
-func (o *IndexdRecordResponse) HasUrls() bool {
+func (o *InternalRecordResponse) HasUrls() bool {
 	if o != nil && !IsNil(o.Urls) {
 		return true
 	}
@@ -176,12 +176,12 @@ func (o *IndexdRecordResponse) HasUrls() bool {
 }
 
 // SetUrls gets a reference to the given []string and assigns it to the Urls field.
-func (o *IndexdRecordResponse) SetUrls(v []string) {
+func (o *InternalRecordResponse) SetUrls(v []string) {
 	o.Urls = v
 }
 
 // GetAuthz returns the Authz field value if set, zero value otherwise.
-func (o *IndexdRecordResponse) GetAuthz() []string {
+func (o *InternalRecordResponse) GetAuthz() []string {
 	if o == nil || IsNil(o.Authz) {
 		var ret []string
 		return ret
@@ -191,7 +191,7 @@ func (o *IndexdRecordResponse) GetAuthz() []string {
 
 // GetAuthzOk returns a tuple with the Authz field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *IndexdRecordResponse) GetAuthzOk() ([]string, bool) {
+func (o *InternalRecordResponse) GetAuthzOk() ([]string, bool) {
 	if o == nil || IsNil(o.Authz) {
 		return nil, false
 	}
@@ -199,7 +199,7 @@ func (o *IndexdRecordResponse) GetAuthzOk() ([]string, bool) {
 }
 
 // HasAuthz returns a boolean if a field has been set.
-func (o *IndexdRecordResponse) HasAuthz() bool {
+func (o *InternalRecordResponse) HasAuthz() bool {
 	if o != nil && !IsNil(o.Authz) {
 		return true
 	}
@@ -208,12 +208,12 @@ func (o *IndexdRecordResponse) HasAuthz() bool {
 }
 
 // SetAuthz gets a reference to the given []string and assigns it to the Authz field.
-func (o *IndexdRecordResponse) SetAuthz(v []string) {
+func (o *InternalRecordResponse) SetAuthz(v []string) {
 	o.Authz = v
 }
 
 // GetFileName returns the FileName field value if set, zero value otherwise.
-func (o *IndexdRecordResponse) GetFileName() string {
+func (o *InternalRecordResponse) GetFileName() string {
 	if o == nil || IsNil(o.FileName) {
 		var ret string
 		return ret
@@ -223,7 +223,7 @@ func (o *IndexdRecordResponse) GetFileName() string {
 
 // GetFileNameOk returns a tuple with the FileName field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *IndexdRecordResponse) GetFileNameOk() (*string, bool) {
+func (o *InternalRecordResponse) GetFileNameOk() (*string, bool) {
 	if o == nil || IsNil(o.FileName) {
 		return nil, false
 	}
@@ -231,7 +231,7 @@ func (o *IndexdRecordResponse) GetFileNameOk() (*string, bool) {
 }
 
 // HasFileName returns a boolean if a field has been set.
-func (o *IndexdRecordResponse) HasFileName() bool {
+func (o *InternalRecordResponse) HasFileName() bool {
 	if o != nil && !IsNil(o.FileName) {
 		return true
 	}
@@ -240,12 +240,12 @@ func (o *IndexdRecordResponse) HasFileName() bool {
 }
 
 // SetFileName gets a reference to the given string and assigns it to the FileName field.
-func (o *IndexdRecordResponse) SetFileName(v string) {
+func (o *InternalRecordResponse) SetFileName(v string) {
 	o.FileName = &v
 }
 
 // GetOrganization returns the Organization field value if set, zero value otherwise.
-func (o *IndexdRecordResponse) GetOrganization() string {
+func (o *InternalRecordResponse) GetOrganization() string {
 	if o == nil || IsNil(o.Organization) {
 		var ret string
 		return ret
@@ -255,7 +255,7 @@ func (o *IndexdRecordResponse) GetOrganization() string {
 
 // GetOrganizationOk returns a tuple with the Organization field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *IndexdRecordResponse) GetOrganizationOk() (*string, bool) {
+func (o *InternalRecordResponse) GetOrganizationOk() (*string, bool) {
 	if o == nil || IsNil(o.Organization) {
 		return nil, false
 	}
@@ -263,7 +263,7 @@ func (o *IndexdRecordResponse) GetOrganizationOk() (*string, bool) {
 }
 
 // HasOrganization returns a boolean if a field has been set.
-func (o *IndexdRecordResponse) HasOrganization() bool {
+func (o *InternalRecordResponse) HasOrganization() bool {
 	if o != nil && !IsNil(o.Organization) {
 		return true
 	}
@@ -272,12 +272,12 @@ func (o *IndexdRecordResponse) HasOrganization() bool {
 }
 
 // SetOrganization gets a reference to the given string and assigns it to the Organization field.
-func (o *IndexdRecordResponse) SetOrganization(v string) {
+func (o *InternalRecordResponse) SetOrganization(v string) {
 	o.Organization = &v
 }
 
 // GetProject returns the Project field value if set, zero value otherwise.
-func (o *IndexdRecordResponse) GetProject() string {
+func (o *InternalRecordResponse) GetProject() string {
 	if o == nil || IsNil(o.Project) {
 		var ret string
 		return ret
@@ -287,7 +287,7 @@ func (o *IndexdRecordResponse) GetProject() string {
 
 // GetProjectOk returns a tuple with the Project field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *IndexdRecordResponse) GetProjectOk() (*string, bool) {
+func (o *InternalRecordResponse) GetProjectOk() (*string, bool) {
 	if o == nil || IsNil(o.Project) {
 		return nil, false
 	}
@@ -295,7 +295,7 @@ func (o *IndexdRecordResponse) GetProjectOk() (*string, bool) {
 }
 
 // HasProject returns a boolean if a field has been set.
-func (o *IndexdRecordResponse) HasProject() bool {
+func (o *InternalRecordResponse) HasProject() bool {
 	if o != nil && !IsNil(o.Project) {
 		return true
 	}
@@ -304,12 +304,12 @@ func (o *IndexdRecordResponse) HasProject() bool {
 }
 
 // SetProject gets a reference to the given string and assigns it to the Project field.
-func (o *IndexdRecordResponse) SetProject(v string) {
+func (o *InternalRecordResponse) SetProject(v string) {
 	o.Project = &v
 }
 
 // GetBaseid returns the Baseid field value if set, zero value otherwise.
-func (o *IndexdRecordResponse) GetBaseid() string {
+func (o *InternalRecordResponse) GetBaseid() string {
 	if o == nil || IsNil(o.Baseid) {
 		var ret string
 		return ret
@@ -319,7 +319,7 @@ func (o *IndexdRecordResponse) GetBaseid() string {
 
 // GetBaseidOk returns a tuple with the Baseid field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *IndexdRecordResponse) GetBaseidOk() (*string, bool) {
+func (o *InternalRecordResponse) GetBaseidOk() (*string, bool) {
 	if o == nil || IsNil(o.Baseid) {
 		return nil, false
 	}
@@ -327,7 +327,7 @@ func (o *IndexdRecordResponse) GetBaseidOk() (*string, bool) {
 }
 
 // HasBaseid returns a boolean if a field has been set.
-func (o *IndexdRecordResponse) HasBaseid() bool {
+func (o *InternalRecordResponse) HasBaseid() bool {
 	if o != nil && !IsNil(o.Baseid) {
 		return true
 	}
@@ -336,12 +336,12 @@ func (o *IndexdRecordResponse) HasBaseid() bool {
 }
 
 // SetBaseid gets a reference to the given string and assigns it to the Baseid field.
-func (o *IndexdRecordResponse) SetBaseid(v string) {
+func (o *InternalRecordResponse) SetBaseid(v string) {
 	o.Baseid = &v
 }
 
 // GetRev returns the Rev field value if set, zero value otherwise.
-func (o *IndexdRecordResponse) GetRev() string {
+func (o *InternalRecordResponse) GetRev() string {
 	if o == nil || IsNil(o.Rev) {
 		var ret string
 		return ret
@@ -351,7 +351,7 @@ func (o *IndexdRecordResponse) GetRev() string {
 
 // GetRevOk returns a tuple with the Rev field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *IndexdRecordResponse) GetRevOk() (*string, bool) {
+func (o *InternalRecordResponse) GetRevOk() (*string, bool) {
 	if o == nil || IsNil(o.Rev) {
 		return nil, false
 	}
@@ -359,7 +359,7 @@ func (o *IndexdRecordResponse) GetRevOk() (*string, bool) {
 }
 
 // HasRev returns a boolean if a field has been set.
-func (o *IndexdRecordResponse) HasRev() bool {
+func (o *InternalRecordResponse) HasRev() bool {
 	if o != nil && !IsNil(o.Rev) {
 		return true
 	}
@@ -368,12 +368,12 @@ func (o *IndexdRecordResponse) HasRev() bool {
 }
 
 // SetRev gets a reference to the given string and assigns it to the Rev field.
-func (o *IndexdRecordResponse) SetRev(v string) {
+func (o *InternalRecordResponse) SetRev(v string) {
 	o.Rev = &v
 }
 
 // GetCreatedDate returns the CreatedDate field value if set, zero value otherwise.
-func (o *IndexdRecordResponse) GetCreatedDate() string {
+func (o *InternalRecordResponse) GetCreatedDate() string {
 	if o == nil || IsNil(o.CreatedDate) {
 		var ret string
 		return ret
@@ -383,7 +383,7 @@ func (o *IndexdRecordResponse) GetCreatedDate() string {
 
 // GetCreatedDateOk returns a tuple with the CreatedDate field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *IndexdRecordResponse) GetCreatedDateOk() (*string, bool) {
+func (o *InternalRecordResponse) GetCreatedDateOk() (*string, bool) {
 	if o == nil || IsNil(o.CreatedDate) {
 		return nil, false
 	}
@@ -391,7 +391,7 @@ func (o *IndexdRecordResponse) GetCreatedDateOk() (*string, bool) {
 }
 
 // HasCreatedDate returns a boolean if a field has been set.
-func (o *IndexdRecordResponse) HasCreatedDate() bool {
+func (o *InternalRecordResponse) HasCreatedDate() bool {
 	if o != nil && !IsNil(o.CreatedDate) {
 		return true
 	}
@@ -400,12 +400,12 @@ func (o *IndexdRecordResponse) HasCreatedDate() bool {
 }
 
 // SetCreatedDate gets a reference to the given string and assigns it to the CreatedDate field.
-func (o *IndexdRecordResponse) SetCreatedDate(v string) {
+func (o *InternalRecordResponse) SetCreatedDate(v string) {
 	o.CreatedDate = &v
 }
 
 // GetUpdatedDate returns the UpdatedDate field value if set, zero value otherwise.
-func (o *IndexdRecordResponse) GetUpdatedDate() string {
+func (o *InternalRecordResponse) GetUpdatedDate() string {
 	if o == nil || IsNil(o.UpdatedDate) {
 		var ret string
 		return ret
@@ -415,7 +415,7 @@ func (o *IndexdRecordResponse) GetUpdatedDate() string {
 
 // GetUpdatedDateOk returns a tuple with the UpdatedDate field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *IndexdRecordResponse) GetUpdatedDateOk() (*string, bool) {
+func (o *InternalRecordResponse) GetUpdatedDateOk() (*string, bool) {
 	if o == nil || IsNil(o.UpdatedDate) {
 		return nil, false
 	}
@@ -423,7 +423,7 @@ func (o *IndexdRecordResponse) GetUpdatedDateOk() (*string, bool) {
 }
 
 // HasUpdatedDate returns a boolean if a field has been set.
-func (o *IndexdRecordResponse) HasUpdatedDate() bool {
+func (o *InternalRecordResponse) HasUpdatedDate() bool {
 	if o != nil && !IsNil(o.UpdatedDate) {
 		return true
 	}
@@ -432,12 +432,12 @@ func (o *IndexdRecordResponse) HasUpdatedDate() bool {
 }
 
 // SetUpdatedDate gets a reference to the given string and assigns it to the UpdatedDate field.
-func (o *IndexdRecordResponse) SetUpdatedDate(v string) {
+func (o *InternalRecordResponse) SetUpdatedDate(v string) {
 	o.UpdatedDate = &v
 }
 
 // GetUploader returns the Uploader field value if set, zero value otherwise.
-func (o *IndexdRecordResponse) GetUploader() string {
+func (o *InternalRecordResponse) GetUploader() string {
 	if o == nil || IsNil(o.Uploader) {
 		var ret string
 		return ret
@@ -447,7 +447,7 @@ func (o *IndexdRecordResponse) GetUploader() string {
 
 // GetUploaderOk returns a tuple with the Uploader field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *IndexdRecordResponse) GetUploaderOk() (*string, bool) {
+func (o *InternalRecordResponse) GetUploaderOk() (*string, bool) {
 	if o == nil || IsNil(o.Uploader) {
 		return nil, false
 	}
@@ -455,7 +455,7 @@ func (o *IndexdRecordResponse) GetUploaderOk() (*string, bool) {
 }
 
 // HasUploader returns a boolean if a field has been set.
-func (o *IndexdRecordResponse) HasUploader() bool {
+func (o *InternalRecordResponse) HasUploader() bool {
 	if o != nil && !IsNil(o.Uploader) {
 		return true
 	}
@@ -464,11 +464,11 @@ func (o *IndexdRecordResponse) HasUploader() bool {
 }
 
 // SetUploader gets a reference to the given string and assigns it to the Uploader field.
-func (o *IndexdRecordResponse) SetUploader(v string) {
+func (o *InternalRecordResponse) SetUploader(v string) {
 	o.Uploader = &v
 }
 
-func (o IndexdRecordResponse) MarshalJSON() ([]byte, error) {
+func (o InternalRecordResponse) MarshalJSON() ([]byte, error) {
 	toSerialize,err := o.ToMap()
 	if err != nil {
 		return []byte{}, err
@@ -476,7 +476,7 @@ func (o IndexdRecordResponse) MarshalJSON() ([]byte, error) {
 	return json.Marshal(toSerialize)
 }
 
-func (o IndexdRecordResponse) ToMap() (map[string]interface{}, error) {
+func (o InternalRecordResponse) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	if !IsNil(o.Did) {
 		toSerialize["did"] = o.Did
@@ -520,38 +520,38 @@ func (o IndexdRecordResponse) ToMap() (map[string]interface{}, error) {
 	return toSerialize, nil
 }
 
-type NullableIndexdRecordResponse struct {
-	value *IndexdRecordResponse
+type NullableInternalRecordResponse struct {
+	value *InternalRecordResponse
 	isSet bool
 }
 
-func (v NullableIndexdRecordResponse) Get() *IndexdRecordResponse {
+func (v NullableInternalRecordResponse) Get() *InternalRecordResponse {
 	return v.value
 }
 
-func (v *NullableIndexdRecordResponse) Set(val *IndexdRecordResponse) {
+func (v *NullableInternalRecordResponse) Set(val *InternalRecordResponse) {
 	v.value = val
 	v.isSet = true
 }
 
-func (v NullableIndexdRecordResponse) IsSet() bool {
+func (v NullableInternalRecordResponse) IsSet() bool {
 	return v.isSet
 }
 
-func (v *NullableIndexdRecordResponse) Unset() {
+func (v *NullableInternalRecordResponse) Unset() {
 	v.value = nil
 	v.isSet = false
 }
 
-func NewNullableIndexdRecordResponse(val *IndexdRecordResponse) *NullableIndexdRecordResponse {
-	return &NullableIndexdRecordResponse{value: val, isSet: true}
+func NewNullableInternalRecordResponse(val *InternalRecordResponse) *NullableInternalRecordResponse {
+	return &NullableInternalRecordResponse{value: val, isSet: true}
 }
 
-func (v NullableIndexdRecordResponse) MarshalJSON() ([]byte, error) {
+func (v NullableInternalRecordResponse) MarshalJSON() ([]byte, error) {
 	return json.Marshal(v.value)
 }
 
-func (v *NullableIndexdRecordResponse) UnmarshalJSON(src []byte) error {
+func (v *NullableInternalRecordResponse) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }

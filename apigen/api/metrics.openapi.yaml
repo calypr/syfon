@@ -8,20 +8,30 @@ servers:
 tags:
   - name: metrics
 paths:
-  /index/internal/v1/metrics/files:
+  /internal/metrics/v1/files:
     get:
-      tags: [metrics]
+      tags:
+        - metrics
       operationId: listMetricsFiles
       parameters:
         - in: query
           name: limit
-          schema: { type: integer, minimum: 1, maximum: 1000, default: 200 }
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 200
         - in: query
           name: offset
-          schema: { type: integer, minimum: 0, default: 0 }
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
         - in: query
           name: inactive_days
-          schema: { type: integer, minimum: 0 }
+          schema:
+            type: integer
+            minimum: 0
       responses:
         '200':
           description: Paginated file usage metrics
@@ -29,20 +39,25 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/MetricsListResponse'
-        '400': { description: Invalid query params }
-        '401': { description: Authentication required }
-        '403': { description: Forbidden }
-        '500': { description: Internal server error }
-
-  /index/internal/v1/metrics/files/{object_id}:
+        '400':
+          description: Invalid query params
+        '401':
+          description: Authentication required
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
+  /internal/metrics/v1/files/{object_id}:
     get:
-      tags: [metrics]
+      tags:
+        - metrics
       operationId: getMetricsFile
       parameters:
         - in: path
           name: object_id
           required: true
-          schema: { type: string }
+          schema:
+            type: string
       responses:
         '200':
           description: File usage metric
@@ -50,20 +65,27 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FileUsage'
-        '400': { description: Invalid object id }
-        '401': { description: Authentication required }
-        '403': { description: Forbidden }
-        '404': { description: Not found }
-        '500': { description: Internal server error }
-
-  /index/internal/v1/metrics/summary:
+        '400':
+          description: Invalid object id
+        '401':
+          description: Authentication required
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found
+        '500':
+          description: Internal server error
+  /internal/metrics/v1/summary:
     get:
-      tags: [metrics]
+      tags:
+        - metrics
       operationId: getMetricsSummary
       parameters:
         - in: query
           name: inactive_days
-          schema: { type: integer, minimum: 0 }
+          schema:
+            type: integer
+            minimum: 0
       responses:
         '200':
           description: Aggregate summary metrics
@@ -71,33 +93,59 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FileUsageSummary'
-        '400': { description: Invalid query params }
-        '401': { description: Authentication required }
-        '403': { description: Forbidden }
-        '500': { description: Internal server error }
-
+        '400':
+          description: Invalid query params
+        '401':
+          description: Authentication required
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
 components:
   schemas:
     FileUsage:
       type: object
       properties:
-        object_id: { type: string }
-        name: { type: string }
-        size: { type: integer, format: int64 }
-        upload_count: { type: integer, format: int64 }
-        download_count: { type: integer, format: int64 }
-        last_upload_time: { type: string, format: date-time, nullable: true }
-        last_download_time: { type: string, format: date-time, nullable: true }
-        last_access_time: { type: string, format: date-time, nullable: true }
-
+        object_id:
+          type: string
+        name:
+          type: string
+        size:
+          type: integer
+          format: int64
+        upload_count:
+          type: integer
+          format: int64
+        download_count:
+          type: integer
+          format: int64
+        last_upload_time:
+          type: string
+          format: date-time
+          nullable: true
+        last_download_time:
+          type: string
+          format: date-time
+          nullable: true
+        last_access_time:
+          type: string
+          format: date-time
+          nullable: true
     FileUsageSummary:
       type: object
       properties:
-        total_files: { type: integer, format: int64 }
-        total_uploads: { type: integer, format: int64 }
-        total_downloads: { type: integer, format: int64 }
-        inactive_file_count: { type: integer, format: int64 }
-
+        total_files:
+          type: integer
+          format: int64
+        total_uploads:
+          type: integer
+          format: int64
+        total_downloads:
+          type: integer
+          format: int64
+        inactive_file_count:
+          type: integer
+          format: int64
     MetricsListResponse:
       type: object
       properties:
@@ -105,5 +153,7 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/FileUsage'
-        limit: { type: integer }
-        offset: { type: integer }
+        limit:
+          type: integer
+        offset:
+          type: integer

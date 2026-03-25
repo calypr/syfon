@@ -18,7 +18,7 @@ import (
 	"github.com/calypr/drs-server/db"
 	"github.com/calypr/drs-server/db/core"
 	"github.com/calypr/drs-server/internal/api/admin"
-	"github.com/calypr/drs-server/internal/api/fence"
+	"github.com/calypr/drs-server/internal/api/internaldrs"
 	"github.com/calypr/drs-server/service"
 	"github.com/calypr/drs-server/urlmanager"
 )
@@ -104,8 +104,9 @@ s3_credentials:
 
 	// Register Admin Routes
 	admin.RegisterAdminRoutes(router, database, uM)
-	// Register Fence Routes
-	fence.RegisterFenceRoutes(router, database, uM)
+	// Register Internal Routes
+	internaldrs.RegisterInternalIndexRoutes(router, database)
+	internaldrs.RegisterInternalDataRoutes(router, database, uM)
 
 	server := httptest.NewServer(router)
 	defer server.Close()
@@ -197,39 +198,39 @@ s3_credentials:
 			t.Logf("Downloaded content mismatch (expected with fake creds/bucket).")
 		} else {
 			t.Log("Download successful and verified")
-			// 6. Test Fence Compatibility Upload (Blank)
-			fenceUploadReq := map[string]interface{}{}
-			fenceBody, _ := json.Marshal(fenceUploadReq)
-			resp, err = client.Post(server.URL+"/data/upload", "application/json", bytes.NewReader(fenceBody))
+			// 6. Test Internal Compatibility Upload (Blank)
+			internalUploadReq := map[string]interface{}{}
+			internalBody, _ := json.Marshal(internalUploadReq)
+			resp, err = client.Post(server.URL+"/internal/data/upload", "application/json", bytes.NewReader(internalBody))
 			if err != nil {
-				t.Fatalf("Fence upload blank failed: %v", err)
+				t.Fatalf("Internal upload blank failed: %v", err)
 			}
 			if resp.StatusCode != http.StatusCreated {
-				t.Errorf("Fence upload blank status: %s", resp.Status)
+				t.Errorf("Internal upload blank status: %s", resp.Status)
 			}
-			var fenceResp map[string]string
-			json.NewDecoder(resp.Body).Decode(&fenceResp)
-			guid := fenceResp["guid"]
-			t.Logf("Fence GUID: %s", guid)
-			if guid == "" || fenceResp["url"] == "" {
-				t.Error("Expected guid and url in fence response")
+			var internalResp map[string]string
+			json.NewDecoder(resp.Body).Decode(&internalResp)
+			guid := internalResp["guid"]
+			t.Logf("Internal GUID: %s", guid)
+			if guid == "" || internalResp["url"] == "" {
+				t.Error("Expected guid and url in internal response")
 			}
 
-			// 7. Test Fence Multipart Init
-			fenceMultipartReq := map[string]interface{}{
+			// 7. Test Internal Multipart Init
+			internalMultipartReq := map[string]interface{}{
 				"guid":      guid,
 				"file_name": "test-multipart",
 				"bucket":    bucketName,
 			}
-			mpBody, _ := json.Marshal(fenceMultipartReq)
-			resp, err = client.Post(server.URL+"/data/multipart/init", "application/json", bytes.NewReader(mpBody))
+			mpBody, _ := json.Marshal(internalMultipartReq)
+			resp, err = client.Post(server.URL+"/internal/data/multipart/init", "application/json", bytes.NewReader(mpBody))
 			if err != nil {
-				t.Fatalf("Fence multipart init failed: %v", err)
+				t.Fatalf("Internal multipart init failed: %v", err)
 			}
 			if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 				// Implementation returns 201 Created
 				if resp.StatusCode != http.StatusCreated {
-					t.Errorf("Fence multipart init status: %s", resp.Status)
+					t.Errorf("Internal multipart init status: %s", resp.Status)
 				}
 			}
 			var mpResp map[string]string
@@ -246,20 +247,20 @@ s3_credentials:
 				// Let's check error response if status was not OK.
 			}
 
-			// 8. Test Fence Download
-			resp, err = client.Get(server.URL + "/data/download/" + guid)
+			// 8. Test Internal Download
+			resp, err = client.Get(server.URL + "/internal/data/download/" + guid)
 			if err != nil {
-				t.Fatalf("Fence download req failed: %v", err)
+				t.Fatalf("Internal download req failed: %v", err)
 			}
 			if resp.StatusCode != http.StatusOK {
 				// It might fail 404 if we didn't actually create an S3 access method for it.
-				// Fence upload blank creates a record but maybe not the specific access method structure needed for download lookup?
-				// handleFenceUploadBlank creates a record.
-				// handleFenceDownload looks for options.
-				// Inspect handleFenceDownload: finds object, looks for access method type=s3.
-				// handleFenceUploadBlank doesn't add access methods! It just returns a URL.
-				// Indexd usually handles that separately or Fence adds it.
-				// My implementation of handleFenceUploadBlank calls database.CreateObject(obj).
+				// Internal upload blank creates a record but maybe not the specific access method structure needed for download lookup?
+				// handleInternalUploadBlank creates a record.
+				// handleInternalDownload looks for options.
+				// Inspect handleInternalDownload: finds object, looks for access method type=s3.
+				// handleInternalUploadBlank doesn't add access methods! It just returns a URL.
+				// Internal usually handles that separately or Internal adds it.
+				// My implementation of handleInternalUploadBlank calls database.CreateObject(obj).
 				// obj has no access methods.
 				// So download will 404. Expected.
 				if resp.StatusCode != http.StatusNotFound {

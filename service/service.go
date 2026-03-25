@@ -321,7 +321,7 @@ func (s *ObjectsAPIService) RegisterObjects(ctx context.Context, req drs.Registe
 		obj.SelfUri = "drs://" + id
 
 		targetResources := authz
-		// Indexd-compatible fallback for file upload flows when no explicit authz is provided.
+		// Internal-compatible fallback for file upload flows when no explicit authz is provided.
 		if len(targetResources) == 0 {
 			targetResources = []string{"/data_file"}
 			if !core.HasMethodAccess(ctx, "file_upload", targetResources) && !core.HasMethodAccess(ctx, "create", targetResources) {

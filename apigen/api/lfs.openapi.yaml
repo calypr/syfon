@@ -13,7 +13,8 @@ tags:
 paths:
   /info/lfs/objects/batch:
     post:
-      tags: [lfs]
+      tags:
+        - lfs
       summary: Git LFS Batch API
       description: |
         Requests upload/download actions for one or more LFS objects.
@@ -83,18 +84,6 @@ paths:
             application/vnd.git-lfs+json:
               schema:
                 $ref: '#/components/schemas/LFSErrorResponse'
-        '507':
-          description: Insufficient storage
-          content:
-            application/vnd.git-lfs+json:
-              schema:
-                $ref: '#/components/schemas/LFSErrorResponse'
-        '509':
-          description: Bandwidth limit exceeded
-          content:
-            application/vnd.git-lfs+json:
-              schema:
-                $ref: '#/components/schemas/LFSErrorResponse'
         '502':
           description: Bad gateway
           content:
@@ -113,10 +102,22 @@ paths:
             application/vnd.git-lfs+json:
               schema:
                 $ref: '#/components/schemas/LFSErrorResponse'
-
+        '507':
+          description: Insufficient storage
+          content:
+            application/vnd.git-lfs+json:
+              schema:
+                $ref: '#/components/schemas/LFSErrorResponse'
+        '509':
+          description: Bandwidth limit exceeded
+          content:
+            application/vnd.git-lfs+json:
+              schema:
+                $ref: '#/components/schemas/LFSErrorResponse'
   /info/lfs/verify:
     post:
-      tags: [lfs]
+      tags:
+        - lfs
       summary: Git LFS Verify API
       description: |
         Verifies uploaded object state. In drs-server this may consume staged metadata
@@ -164,10 +165,10 @@ paths:
             application/vnd.git-lfs+json:
               schema:
                 $ref: '#/components/schemas/LFSErrorResponse'
-
   /info/lfs/objects/metadata:
     post:
-      tags: [lfs]
+      tags:
+        - lfs
       summary: Stage metadata for deferred object registration (drs-server extension)
       operationId: lfsStageMetadata
       requestBody:
@@ -216,10 +217,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/LFSErrorResponse'
-
   /info/lfs/objects/{oid}:
     put:
-      tags: [lfs]
+      tags:
+        - lfs
       summary: Upload object bytes via drs-server upload proxy (drs-server extension)
       operationId: lfsUploadProxy
       parameters:
@@ -263,19 +264,18 @@ paths:
             text/plain:
               schema:
                 type: string
-        '507':
-          description: Insufficient storage for upload
-          content:
-            text/plain:
-              schema:
-                type: string
         '502':
           description: Upstream storage error
           content:
             text/plain:
               schema:
                 type: string
-
+        '507':
+          description: Insufficient storage for upload
+          content:
+            text/plain:
+              schema:
+                type: string
 components:
   headers:
     LFSAuthenticate:
@@ -285,7 +285,6 @@ components:
       schema:
         type: string
       example: Basic realm="Git LFS"
-
   schemas:
     BatchRequest:
       type: object
@@ -295,7 +294,9 @@ components:
       properties:
         operation:
           type: string
-          enum: [upload, download]
+          enum:
+            - upload
+            - download
         transfers:
           type: array
           items:
@@ -310,14 +311,12 @@ components:
         hash_algo:
           type: string
           default: sha256
-
     RefSpec:
       type: object
       properties:
         name:
           type: string
           description: Fully-qualified server refspec
-
     BatchRequestObject:
       type: object
       required:
@@ -330,7 +329,6 @@ components:
           type: integer
           format: int64
           minimum: 0
-
     BatchResponse:
       type: object
       required:
@@ -345,7 +343,6 @@ components:
         hash_algo:
           type: string
           default: sha256
-
     BatchResponseObject:
       type: object
       required:
@@ -364,7 +361,6 @@ components:
           $ref: '#/components/schemas/BatchActions'
         error:
           $ref: '#/components/schemas/ObjectError'
-
     BatchActions:
       type: object
       properties:
@@ -374,7 +370,6 @@ components:
           $ref: '#/components/schemas/Action'
         verify:
           $ref: '#/components/schemas/Action'
-
     Action:
       type: object
       required:
@@ -396,7 +391,6 @@ components:
           type: string
           format: date-time
           description: RFC3339 timestamp
-
     ObjectError:
       type: object
       required:
@@ -409,7 +403,6 @@ components:
           description: Object-level error code (commonly HTTP-like status code)
         message:
           type: string
-
     VerifyRequest:
       type: object
       required:
@@ -422,7 +415,6 @@ components:
           type: integer
           format: int64
           minimum: 0
-
     LFSErrorResponse:
       type: object
       required:
@@ -435,7 +427,6 @@ components:
         documentation_url:
           type: string
           format: uri
-
     MetadataSubmitRequest:
       type: object
       required:
@@ -450,7 +441,6 @@ components:
           type: integer
           format: int64
           minimum: 1
-
     MetadataSubmitResponse:
       type: object
       required:
@@ -460,7 +450,6 @@ components:
           type: integer
           format: int32
           minimum: 0
-
     DrsObjectCandidate:
       type: object
       properties:
@@ -488,7 +477,6 @@ components:
           type: string
         description:
           type: string
-
     Checksum:
       type: object
       required:
@@ -499,7 +487,6 @@ components:
           type: string
         checksum:
           type: string
-
     AccessMethod:
       type: object
       properties:
@@ -513,13 +500,11 @@ components:
           type: string
         authorizations:
           $ref: '#/components/schemas/AccessMethodAuthorizations'
-
     AccessMethodAccessUrl:
       type: object
       properties:
         url:
           type: string
-
     AccessMethodAuthorizations:
       type: object
       properties:

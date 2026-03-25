@@ -9,9 +9,10 @@ servers:
 tags:
   - name: bucket
 paths:
-  /data/buckets:
+  /internal/data/buckets:
     get:
-      tags: [bucket]
+      tags:
+        - bucket
       summary: List configured bucket credentials and org/project assignments
       operationId: listBuckets
       responses:
@@ -28,7 +29,8 @@ paths:
         '500':
           description: Internal server error
     put:
-      tags: [bucket]
+      tags:
+        - bucket
       summary: Upsert bucket credential and claim org/project scope
       operationId: putBucket
       requestBody:
@@ -50,10 +52,10 @@ paths:
           description: Scope already assigned to a different bucket/path
         '500':
           description: Internal server error
-
-  /data/buckets/{bucket}:
+  /internal/data/buckets/{bucket}:
     delete:
-      tags: [bucket]
+      tags:
+        - bucket
       summary: Delete bucket credential
       operationId: deleteBucket
       parameters:
@@ -75,7 +77,6 @@ paths:
           description: Not found
         '500':
           description: Internal server error
-
 components:
   schemas:
     PutBucketRequest:
@@ -106,7 +107,6 @@ components:
         path:
           type: string
           description: Optional s3://bucket/prefix path override
-
     BucketMetadata:
       type: object
       properties:
@@ -118,7 +118,6 @@ components:
           type: array
           items:
             type: string
-
     BucketsResponse:
       type: object
       required:

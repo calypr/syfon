@@ -16,38 +16,38 @@ import (
 	"fmt"
 )
 
-// checks if the FenceMultipartPart type satisfies the MappedNullable interface at compile time
-var _ MappedNullable = &FenceMultipartPart{}
+// checks if the InternalMultipartPart type satisfies the MappedNullable interface at compile time
+var _ MappedNullable = &InternalMultipartPart{}
 
-// FenceMultipartPart struct for FenceMultipartPart
-type FenceMultipartPart struct {
+// InternalMultipartPart struct for InternalMultipartPart
+type InternalMultipartPart struct {
 	PartNumber int32 `json:"PartNumber"`
 	ETag string `json:"ETag"`
 }
 
-type _FenceMultipartPart FenceMultipartPart
+type _InternalMultipartPart InternalMultipartPart
 
-// NewFenceMultipartPart instantiates a new FenceMultipartPart object
+// NewInternalMultipartPart instantiates a new InternalMultipartPart object
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewFenceMultipartPart(partNumber int32, eTag string) *FenceMultipartPart {
-	this := FenceMultipartPart{}
+func NewInternalMultipartPart(partNumber int32, eTag string) *InternalMultipartPart {
+	this := InternalMultipartPart{}
 	this.PartNumber = partNumber
 	this.ETag = eTag
 	return &this
 }
 
-// NewFenceMultipartPartWithDefaults instantiates a new FenceMultipartPart object
+// NewInternalMultipartPartWithDefaults instantiates a new InternalMultipartPart object
 // This constructor will only assign default values to properties that have it defined,
 // but it doesn't guarantee that properties required by API are set
-func NewFenceMultipartPartWithDefaults() *FenceMultipartPart {
-	this := FenceMultipartPart{}
+func NewInternalMultipartPartWithDefaults() *InternalMultipartPart {
+	this := InternalMultipartPart{}
 	return &this
 }
 
 // GetPartNumber returns the PartNumber field value
-func (o *FenceMultipartPart) GetPartNumber() int32 {
+func (o *InternalMultipartPart) GetPartNumber() int32 {
 	if o == nil {
 		var ret int32
 		return ret
@@ -58,7 +58,7 @@ func (o *FenceMultipartPart) GetPartNumber() int32 {
 
 // GetPartNumberOk returns a tuple with the PartNumber field value
 // and a boolean to check if the value has been set.
-func (o *FenceMultipartPart) GetPartNumberOk() (*int32, bool) {
+func (o *InternalMultipartPart) GetPartNumberOk() (*int32, bool) {
 	if o == nil {
 		return nil, false
 	}
@@ -66,12 +66,12 @@ func (o *FenceMultipartPart) GetPartNumberOk() (*int32, bool) {
 }
 
 // SetPartNumber sets field value
-func (o *FenceMultipartPart) SetPartNumber(v int32) {
+func (o *InternalMultipartPart) SetPartNumber(v int32) {
 	o.PartNumber = v
 }
 
 // GetETag returns the ETag field value
-func (o *FenceMultipartPart) GetETag() string {
+func (o *InternalMultipartPart) GetETag() string {
 	if o == nil {
 		var ret string
 		return ret
@@ -82,7 +82,7 @@ func (o *FenceMultipartPart) GetETag() string {
 
 // GetETagOk returns a tuple with the ETag field value
 // and a boolean to check if the value has been set.
-func (o *FenceMultipartPart) GetETagOk() (*string, bool) {
+func (o *InternalMultipartPart) GetETagOk() (*string, bool) {
 	if o == nil {
 		return nil, false
 	}
@@ -90,11 +90,11 @@ func (o *FenceMultipartPart) GetETagOk() (*string, bool) {
 }
 
 // SetETag sets field value
-func (o *FenceMultipartPart) SetETag(v string) {
+func (o *InternalMultipartPart) SetETag(v string) {
 	o.ETag = v
 }
 
-func (o FenceMultipartPart) MarshalJSON() ([]byte, error) {
+func (o InternalMultipartPart) MarshalJSON() ([]byte, error) {
 	toSerialize,err := o.ToMap()
 	if err != nil {
 		return []byte{}, err
@@ -102,14 +102,14 @@ func (o FenceMultipartPart) MarshalJSON() ([]byte, error) {
 	return json.Marshal(toSerialize)
 }
 
-func (o FenceMultipartPart) ToMap() (map[string]interface{}, error) {
+func (o InternalMultipartPart) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	toSerialize["PartNumber"] = o.PartNumber
 	toSerialize["ETag"] = o.ETag
 	return toSerialize, nil
 }
 
-func (o *FenceMultipartPart) UnmarshalJSON(data []byte) (err error) {
+func (o *InternalMultipartPart) UnmarshalJSON(data []byte) (err error) {
 	// This validates that all required properties are included in the JSON object
 	// by unmarshalling the object into a generic map with string keys and checking
 	// that every required field exists as a key in the generic map.
@@ -132,53 +132,53 @@ func (o *FenceMultipartPart) UnmarshalJSON(data []byte) (err error) {
 		}
 	}
 
-	varFenceMultipartPart := _FenceMultipartPart{}
+	varInternalMultipartPart := _InternalMultipartPart{}
 
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
-	err = decoder.Decode(&varFenceMultipartPart)
+	err = decoder.Decode(&varInternalMultipartPart)
 
 	if err != nil {
 		return err
 	}
 
-	*o = FenceMultipartPart(varFenceMultipartPart)
+	*o = InternalMultipartPart(varInternalMultipartPart)
 
 	return err
 }
 
-type NullableFenceMultipartPart struct {
-	value *FenceMultipartPart
+type NullableInternalMultipartPart struct {
+	value *InternalMultipartPart
 	isSet bool
 }
 
-func (v NullableFenceMultipartPart) Get() *FenceMultipartPart {
+func (v NullableInternalMultipartPart) Get() *InternalMultipartPart {
 	return v.value
 }
 
-func (v *NullableFenceMultipartPart) Set(val *FenceMultipartPart) {
+func (v *NullableInternalMultipartPart) Set(val *InternalMultipartPart) {
 	v.value = val
 	v.isSet = true
 }
 
-func (v NullableFenceMultipartPart) IsSet() bool {
+func (v NullableInternalMultipartPart) IsSet() bool {
 	return v.isSet
 }
 
-func (v *NullableFenceMultipartPart) Unset() {
+func (v *NullableInternalMultipartPart) Unset() {
 	v.value = nil
 	v.isSet = false
 }
 
-func NewNullableFenceMultipartPart(val *FenceMultipartPart) *NullableFenceMultipartPart {
-	return &NullableFenceMultipartPart{value: val, isSet: true}
+func NewNullableInternalMultipartPart(val *InternalMultipartPart) *NullableInternalMultipartPart {
+	return &NullableInternalMultipartPart{value: val, isSet: true}
 }
 
-func (v NullableFenceMultipartPart) MarshalJSON() ([]byte, error) {
+func (v NullableInternalMultipartPart) MarshalJSON() ([]byte, error) {
 	return json.Marshal(v.value)
 }
 
-func (v *NullableFenceMultipartPart) UnmarshalJSON(src []byte) error {
+func (v *NullableInternalMultipartPart) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }

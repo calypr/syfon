@@ -14,34 +14,34 @@ import (
 	"encoding/json"
 )
 
-// checks if the FenceUploadBlankResponse type satisfies the MappedNullable interface at compile time
-var _ MappedNullable = &FenceUploadBlankResponse{}
+// checks if the InternalUploadBlankResponse type satisfies the MappedNullable interface at compile time
+var _ MappedNullable = &InternalUploadBlankResponse{}
 
-// FenceUploadBlankResponse struct for FenceUploadBlankResponse
-type FenceUploadBlankResponse struct {
+// InternalUploadBlankResponse struct for InternalUploadBlankResponse
+type InternalUploadBlankResponse struct {
 	Guid *string `json:"guid,omitempty"`
 	Url *string `json:"url,omitempty"`
 }
 
-// NewFenceUploadBlankResponse instantiates a new FenceUploadBlankResponse object
+// NewInternalUploadBlankResponse instantiates a new InternalUploadBlankResponse object
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewFenceUploadBlankResponse() *FenceUploadBlankResponse {
-	this := FenceUploadBlankResponse{}
+func NewInternalUploadBlankResponse() *InternalUploadBlankResponse {
+	this := InternalUploadBlankResponse{}
 	return &this
 }
 
-// NewFenceUploadBlankResponseWithDefaults instantiates a new FenceUploadBlankResponse object
+// NewInternalUploadBlankResponseWithDefaults instantiates a new InternalUploadBlankResponse object
 // This constructor will only assign default values to properties that have it defined,
 // but it doesn't guarantee that properties required by API are set
-func NewFenceUploadBlankResponseWithDefaults() *FenceUploadBlankResponse {
-	this := FenceUploadBlankResponse{}
+func NewInternalUploadBlankResponseWithDefaults() *InternalUploadBlankResponse {
+	this := InternalUploadBlankResponse{}
 	return &this
 }
 
 // GetGuid returns the Guid field value if set, zero value otherwise.
-func (o *FenceUploadBlankResponse) GetGuid() string {
+func (o *InternalUploadBlankResponse) GetGuid() string {
 	if o == nil || IsNil(o.Guid) {
 		var ret string
 		return ret
@@ -51,7 +51,7 @@ func (o *FenceUploadBlankResponse) GetGuid() string {
 
 // GetGuidOk returns a tuple with the Guid field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *FenceUploadBlankResponse) GetGuidOk() (*string, bool) {
+func (o *InternalUploadBlankResponse) GetGuidOk() (*string, bool) {
 	if o == nil || IsNil(o.Guid) {
 		return nil, false
 	}
@@ -59,7 +59,7 @@ func (o *FenceUploadBlankResponse) GetGuidOk() (*string, bool) {
 }
 
 // HasGuid returns a boolean if a field has been set.
-func (o *FenceUploadBlankResponse) HasGuid() bool {
+func (o *InternalUploadBlankResponse) HasGuid() bool {
 	if o != nil && !IsNil(o.Guid) {
 		return true
 	}
@@ -68,12 +68,12 @@ func (o *FenceUploadBlankResponse) HasGuid() bool {
 }
 
 // SetGuid gets a reference to the given string and assigns it to the Guid field.
-func (o *FenceUploadBlankResponse) SetGuid(v string) {
+func (o *InternalUploadBlankResponse) SetGuid(v string) {
 	o.Guid = &v
 }
 
 // GetUrl returns the Url field value if set, zero value otherwise.
-func (o *FenceUploadBlankResponse) GetUrl() string {
+func (o *InternalUploadBlankResponse) GetUrl() string {
 	if o == nil || IsNil(o.Url) {
 		var ret string
 		return ret
@@ -83,7 +83,7 @@ func (o *FenceUploadBlankResponse) GetUrl() string {
 
 // GetUrlOk returns a tuple with the Url field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *FenceUploadBlankResponse) GetUrlOk() (*string, bool) {
+func (o *InternalUploadBlankResponse) GetUrlOk() (*string, bool) {
 	if o == nil || IsNil(o.Url) {
 		return nil, false
 	}
@@ -91,7 +91,7 @@ func (o *FenceUploadBlankResponse) GetUrlOk() (*string, bool) {
 }
 
 // HasUrl returns a boolean if a field has been set.
-func (o *FenceUploadBlankResponse) HasUrl() bool {
+func (o *InternalUploadBlankResponse) HasUrl() bool {
 	if o != nil && !IsNil(o.Url) {
 		return true
 	}
@@ -100,11 +100,11 @@ func (o *FenceUploadBlankResponse) HasUrl() bool {
 }
 
 // SetUrl gets a reference to the given string and assigns it to the Url field.
-func (o *FenceUploadBlankResponse) SetUrl(v string) {
+func (o *InternalUploadBlankResponse) SetUrl(v string) {
 	o.Url = &v
 }
 
-func (o FenceUploadBlankResponse) MarshalJSON() ([]byte, error) {
+func (o InternalUploadBlankResponse) MarshalJSON() ([]byte, error) {
 	toSerialize,err := o.ToMap()
 	if err != nil {
 		return []byte{}, err
@@ -112,7 +112,7 @@ func (o FenceUploadBlankResponse) MarshalJSON() ([]byte, error) {
 	return json.Marshal(toSerialize)
 }
 
-func (o FenceUploadBlankResponse) ToMap() (map[string]interface{}, error) {
+func (o InternalUploadBlankResponse) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	if !IsNil(o.Guid) {
 		toSerialize["guid"] = o.Guid
@@ -123,38 +123,38 @@ func (o FenceUploadBlankResponse) ToMap() (map[string]interface{}, error) {
 	return toSerialize, nil
 }
 
-type NullableFenceUploadBlankResponse struct {
-	value *FenceUploadBlankResponse
+type NullableInternalUploadBlankResponse struct {
+	value *InternalUploadBlankResponse
 	isSet bool
 }
 
-func (v NullableFenceUploadBlankResponse) Get() *FenceUploadBlankResponse {
+func (v NullableInternalUploadBlankResponse) Get() *InternalUploadBlankResponse {
 	return v.value
 }
 
-func (v *NullableFenceUploadBlankResponse) Set(val *FenceUploadBlankResponse) {
+func (v *NullableInternalUploadBlankResponse) Set(val *InternalUploadBlankResponse) {
 	v.value = val
 	v.isSet = true
 }
 
-func (v NullableFenceUploadBlankResponse) IsSet() bool {
+func (v NullableInternalUploadBlankResponse) IsSet() bool {
 	return v.isSet
 }
 
-func (v *NullableFenceUploadBlankResponse) Unset() {
+func (v *NullableInternalUploadBlankResponse) Unset() {
 	v.value = nil
 	v.isSet = false
 }
 
-func NewNullableFenceUploadBlankResponse(val *FenceUploadBlankResponse) *NullableFenceUploadBlankResponse {
-	return &NullableFenceUploadBlankResponse{value: val, isSet: true}
+func NewNullableInternalUploadBlankResponse(val *InternalUploadBlankResponse) *NullableInternalUploadBlankResponse {
+	return &NullableInternalUploadBlankResponse{value: val, isSet: true}
 }
 
-func (v NullableFenceUploadBlankResponse) MarshalJSON() ([]byte, error) {
+func (v NullableInternalUploadBlankResponse) MarshalJSON() ([]byte, error) {
 	return json.Marshal(v.value)
 }
 
-func (v *NullableFenceUploadBlankResponse) UnmarshalJSON(src []byte) error {
+func (v *NullableInternalUploadBlankResponse) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }

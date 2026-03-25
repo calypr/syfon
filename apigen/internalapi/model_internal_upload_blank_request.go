@@ -14,34 +14,34 @@ import (
 	"encoding/json"
 )
 
-// checks if the FenceUploadBlankRequest type satisfies the MappedNullable interface at compile time
-var _ MappedNullable = &FenceUploadBlankRequest{}
+// checks if the InternalUploadBlankRequest type satisfies the MappedNullable interface at compile time
+var _ MappedNullable = &InternalUploadBlankRequest{}
 
-// FenceUploadBlankRequest struct for FenceUploadBlankRequest
-type FenceUploadBlankRequest struct {
+// InternalUploadBlankRequest struct for InternalUploadBlankRequest
+type InternalUploadBlankRequest struct {
 	Guid *string `json:"guid,omitempty"`
 	Authz []string `json:"authz,omitempty"`
 }
 
-// NewFenceUploadBlankRequest instantiates a new FenceUploadBlankRequest object
+// NewInternalUploadBlankRequest instantiates a new InternalUploadBlankRequest object
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewFenceUploadBlankRequest() *FenceUploadBlankRequest {
-	this := FenceUploadBlankRequest{}
+func NewInternalUploadBlankRequest() *InternalUploadBlankRequest {
+	this := InternalUploadBlankRequest{}
 	return &this
 }
 
-// NewFenceUploadBlankRequestWithDefaults instantiates a new FenceUploadBlankRequest object
+// NewInternalUploadBlankRequestWithDefaults instantiates a new InternalUploadBlankRequest object
 // This constructor will only assign default values to properties that have it defined,
 // but it doesn't guarantee that properties required by API are set
-func NewFenceUploadBlankRequestWithDefaults() *FenceUploadBlankRequest {
-	this := FenceUploadBlankRequest{}
+func NewInternalUploadBlankRequestWithDefaults() *InternalUploadBlankRequest {
+	this := InternalUploadBlankRequest{}
 	return &this
 }
 
 // GetGuid returns the Guid field value if set, zero value otherwise.
-func (o *FenceUploadBlankRequest) GetGuid() string {
+func (o *InternalUploadBlankRequest) GetGuid() string {
 	if o == nil || IsNil(o.Guid) {
 		var ret string
 		return ret
@@ -51,7 +51,7 @@ func (o *FenceUploadBlankRequest) GetGuid() string {
 
 // GetGuidOk returns a tuple with the Guid field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *FenceUploadBlankRequest) GetGuidOk() (*string, bool) {
+func (o *InternalUploadBlankRequest) GetGuidOk() (*string, bool) {
 	if o == nil || IsNil(o.Guid) {
 		return nil, false
 	}
@@ -59,7 +59,7 @@ func (o *FenceUploadBlankRequest) GetGuidOk() (*string, bool) {
 }
 
 // HasGuid returns a boolean if a field has been set.
-func (o *FenceUploadBlankRequest) HasGuid() bool {
+func (o *InternalUploadBlankRequest) HasGuid() bool {
 	if o != nil && !IsNil(o.Guid) {
 		return true
 	}
@@ -68,12 +68,12 @@ func (o *FenceUploadBlankRequest) HasGuid() bool {
 }
 
 // SetGuid gets a reference to the given string and assigns it to the Guid field.
-func (o *FenceUploadBlankRequest) SetGuid(v string) {
+func (o *InternalUploadBlankRequest) SetGuid(v string) {
 	o.Guid = &v
 }
 
 // GetAuthz returns the Authz field value if set, zero value otherwise.
-func (o *FenceUploadBlankRequest) GetAuthz() []string {
+func (o *InternalUploadBlankRequest) GetAuthz() []string {
 	if o == nil || IsNil(o.Authz) {
 		var ret []string
 		return ret
@@ -83,7 +83,7 @@ func (o *FenceUploadBlankRequest) GetAuthz() []string {
 
 // GetAuthzOk returns a tuple with the Authz field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *FenceUploadBlankRequest) GetAuthzOk() ([]string, bool) {
+func (o *InternalUploadBlankRequest) GetAuthzOk() ([]string, bool) {
 	if o == nil || IsNil(o.Authz) {
 		return nil, false
 	}
@@ -91,7 +91,7 @@ func (o *FenceUploadBlankRequest) GetAuthzOk() ([]string, bool) {
 }
 
 // HasAuthz returns a boolean if a field has been set.
-func (o *FenceUploadBlankRequest) HasAuthz() bool {
+func (o *InternalUploadBlankRequest) HasAuthz() bool {
 	if o != nil && !IsNil(o.Authz) {
 		return true
 	}
@@ -100,11 +100,11 @@ func (o *FenceUploadBlankRequest) HasAuthz() bool {
 }
 
 // SetAuthz gets a reference to the given []string and assigns it to the Authz field.
-func (o *FenceUploadBlankRequest) SetAuthz(v []string) {
+func (o *InternalUploadBlankRequest) SetAuthz(v []string) {
 	o.Authz = v
 }
 
-func (o FenceUploadBlankRequest) MarshalJSON() ([]byte, error) {
+func (o InternalUploadBlankRequest) MarshalJSON() ([]byte, error) {
 	toSerialize,err := o.ToMap()
 	if err != nil {
 		return []byte{}, err
@@ -112,7 +112,7 @@ func (o FenceUploadBlankRequest) MarshalJSON() ([]byte, error) {
 	return json.Marshal(toSerialize)
 }
 
-func (o FenceUploadBlankRequest) ToMap() (map[string]interface{}, error) {
+func (o InternalUploadBlankRequest) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	if !IsNil(o.Guid) {
 		toSerialize["guid"] = o.Guid
@@ -123,38 +123,38 @@ func (o FenceUploadBlankRequest) ToMap() (map[string]interface{}, error) {
 	return toSerialize, nil
 }
 
-type NullableFenceUploadBlankRequest struct {
-	value *FenceUploadBlankRequest
+type NullableInternalUploadBlankRequest struct {
+	value *InternalUploadBlankRequest
 	isSet bool
 }
 
-func (v NullableFenceUploadBlankRequest) Get() *FenceUploadBlankRequest {
+func (v NullableInternalUploadBlankRequest) Get() *InternalUploadBlankRequest {
 	return v.value
 }
 
-func (v *NullableFenceUploadBlankRequest) Set(val *FenceUploadBlankRequest) {
+func (v *NullableInternalUploadBlankRequest) Set(val *InternalUploadBlankRequest) {
 	v.value = val
 	v.isSet = true
 }
 
-func (v NullableFenceUploadBlankRequest) IsSet() bool {
+func (v NullableInternalUploadBlankRequest) IsSet() bool {
 	return v.isSet
 }
 
-func (v *NullableFenceUploadBlankRequest) Unset() {
+func (v *NullableInternalUploadBlankRequest) Unset() {
 	v.value = nil
 	v.isSet = false
 }
 
-func NewNullableFenceUploadBlankRequest(val *FenceUploadBlankRequest) *NullableFenceUploadBlankRequest {
-	return &NullableFenceUploadBlankRequest{value: val, isSet: true}
+func NewNullableInternalUploadBlankRequest(val *InternalUploadBlankRequest) *NullableInternalUploadBlankRequest {
+	return &NullableInternalUploadBlankRequest{value: val, isSet: true}
 }
 
-func (v NullableFenceUploadBlankRequest) MarshalJSON() ([]byte, error) {
+func (v NullableInternalUploadBlankRequest) MarshalJSON() ([]byte, error) {
 	return json.Marshal(v.value)
 }
 
-func (v *NullableFenceUploadBlankRequest) UnmarshalJSON(src []byte) error {
+func (v *NullableInternalUploadBlankRequest) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }

@@ -8,184 +8,240 @@ info:
 servers:
   - url: /
 tags:
-  - name: index
-  - name: fence-compat
+  - name: internal-index
+  - name: internal-data
 paths:
-  /index:
+  /internal/index:
     get:
-      tags: [index]
-      operationId: indexList
+      tags:
+        - internal-index
+      operationId: internalList
       parameters:
         - in: query
           name: hash
-          schema: { type: string }
+          schema:
+            type: string
         - in: query
           name: authz
-          schema: { type: string }
+          schema:
+            type: string
         - in: query
           name: organization
-          schema: { type: string }
+          schema:
+            type: string
         - in: query
           name: program
-          schema: { type: string }
+          schema:
+            type: string
         - in: query
           name: project
-          schema: { type: string }
+          schema:
+            type: string
       responses:
         '200':
           description: List response
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/ListRecordsResponse' }
-        '400': { description: Validation error }
-        '401': { description: Authentication required }
-        '403': { description: Forbidden }
-        '500': { description: Internal server error }
-        '501': { description: Listing mode not implemented without query params }
+              schema:
+                $ref: '#/components/schemas/ListRecordsResponse'
+        '400':
+          description: Validation error
+        '401':
+          description: Authentication required
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
+        '501':
+          description: Listing mode not implemented without query params
     post:
-      tags: [index]
-      operationId: indexCreate
+      tags:
+        - internal-index
+      operationId: internalCreate
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/IndexdRecord' }
+            schema:
+              $ref: '#/components/schemas/InternalRecord'
       responses:
         '201':
           description: Created
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/IndexdRecordResponse' }
-        '400': { description: Validation error }
-        '401': { description: Authentication required }
-        '403': { description: Forbidden }
-        '500': { description: Internal server error }
+              schema:
+                $ref: '#/components/schemas/InternalRecordResponse'
+        '400':
+          description: Validation error
+        '401':
+          description: Authentication required
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
     delete:
-      tags: [index]
-      operationId: indexDeleteByQuery
+      tags:
+        - internal-index
+      operationId: internalDeleteByQuery
       parameters:
         - in: query
           name: authz
-          schema: { type: string }
+          schema:
+            type: string
         - in: query
           name: organization
-          schema: { type: string }
+          schema:
+            type: string
         - in: query
           name: program
-          schema: { type: string }
+          schema:
+            type: string
         - in: query
           name: project
-          schema: { type: string }
+          schema:
+            type: string
       responses:
         '200':
           description: Deleted count
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/DeleteByQueryResponse' }
-        '400': { description: Validation error }
-        '401': { description: Authentication required }
-        '403': { description: Forbidden }
-        '500': { description: Internal server error }
-
-  /index/{id}:
+              schema:
+                $ref: '#/components/schemas/DeleteByQueryResponse'
+        '400':
+          description: Validation error
+        '401':
+          description: Authentication required
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
+  /internal/index/{id}:
     get:
-      tags: [index]
-      operationId: indexGet
+      tags:
+        - internal-index
+      operationId: internalGet
       parameters:
         - in: path
           name: id
           required: true
-          schema: { type: string }
+          schema:
+            type: string
       responses:
         '200':
           description: Record
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/IndexdRecordResponse' }
-        '404': { description: Not found }
-        '500': { description: Internal server error }
+              schema:
+                $ref: '#/components/schemas/InternalRecordResponse'
+        '404':
+          description: Not found
+        '500':
+          description: Internal server error
     put:
-      tags: [index]
-      operationId: indexUpdate
+      tags:
+        - internal-index
+      operationId: internalUpdate
       parameters:
         - in: path
           name: id
           required: true
-          schema: { type: string }
+          schema:
+            type: string
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/IndexdRecord' }
+            schema:
+              $ref: '#/components/schemas/InternalRecord'
       responses:
         '200':
           description: Updated
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/IndexdRecordResponse' }
-        '400': { description: Validation error }
-        '404': { description: Not found }
-        '500': { description: Internal server error }
+              schema:
+                $ref: '#/components/schemas/InternalRecordResponse'
+        '400':
+          description: Validation error
+        '404':
+          description: Not found
+        '500':
+          description: Internal server error
     delete:
-      tags: [index]
-      operationId: indexDelete
+      tags:
+        - internal-index
+      operationId: internalDelete
       parameters:
         - in: path
           name: id
           required: true
-          schema: { type: string }
+          schema:
+            type: string
       responses:
-        '200': { description: Deleted }
-        '404': { description: Not found }
-        '500': { description: Internal server error }
-
-  /index/bulk:
+        '200':
+          description: Deleted
+        '404':
+          description: Not found
+        '500':
+          description: Internal server error
+  /internal/index/bulk:
     post:
-      tags: [index]
-      operationId: indexBulkCreate
+      tags:
+        - internal-index
+      operationId: internalBulkCreate
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/BulkCreateRequest' }
+            schema:
+              $ref: '#/components/schemas/BulkCreateRequest'
       responses:
         '201':
           description: Created records
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/ListRecordsResponse' }
-        '400': { description: Validation error }
-        '401': { description: Authentication required }
-        '403': { description: Forbidden }
-        '500': { description: Internal server error }
-
-  /index/bulk/hashes:
+              schema:
+                $ref: '#/components/schemas/ListRecordsResponse'
+        '400':
+          description: Validation error
+        '401':
+          description: Authentication required
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
+  /internal/index/bulk/hashes:
     post:
-      tags: [index]
-      operationId: indexBulkHashes
+      tags:
+        - internal-index
+      operationId: internalBulkHashes
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/BulkHashesRequest' }
+            schema:
+              $ref: '#/components/schemas/BulkHashesRequest'
       responses:
         '200':
           description: Matched records
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/ListRecordsResponse' }
-        '400': { description: Validation error }
-        '500': { description: Internal server error }
-
-  /index/bulk/sha256/validity:
+              schema:
+                $ref: '#/components/schemas/ListRecordsResponse'
+        '400':
+          description: Validation error
+        '500':
+          description: Internal server error
+  /internal/index/bulk/sha256/validity:
     post:
-      tags: [index]
-      operationId: indexBulkSHA256Validity
+      tags:
+        - internal-index
+      operationId: internalBulkSHA256Validity
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/BulkSHA256ValidityRequest' }
+            schema:
+              $ref: '#/components/schemas/BulkSHA256ValidityRequest'
       responses:
         '200':
           description: sha256 validity map
@@ -195,18 +251,21 @@ paths:
                 type: object
                 additionalProperties:
                   type: boolean
-        '400': { description: Validation error }
-        '500': { description: Internal server error }
-
-  /index/bulk/documents:
+        '400':
+          description: Validation error
+        '500':
+          description: Internal server error
+  /internal/index/bulk/documents:
     post:
-      tags: [index]
-      operationId: indexBulkDocuments
+      tags:
+        - internal-index
+      operationId: internalBulkDocuments
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/BulkDocumentsRequest' }
+            schema:
+              $ref: '#/components/schemas/BulkDocumentsRequest'
       responses:
         '200':
           description: Records
@@ -215,126 +274,163 @@ paths:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/IndexdRecordResponse'
-        '400': { description: Validation error }
-        '500': { description: Internal server error }
-
-  /data/download/{file_id}:
+                  $ref: '#/components/schemas/InternalRecordResponse'
+        '400':
+          description: Validation error
+        '500':
+          description: Internal server error
+  /internal/data/download/{file_id}:
     get:
-      tags: [fence-compat]
-      operationId: fenceDownloadData
+      tags:
+        - internal-data
+      operationId: internalDownloadData
       parameters:
         - in: path
           name: file_id
           required: true
-          schema: { type: string }
+          schema:
+            type: string
       responses:
         '200':
           description: Signed download URL
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/FenceSignedURL' }
-        '401': { description: Authentication required }
-        '403': { description: Forbidden }
-        '404': { description: Not found }
-        '500': { description: Internal server error }
-
-  /data/upload:
+              schema:
+                $ref: '#/components/schemas/InternalSignedURL'
+        '401':
+          description: Authentication required
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found
+        '500':
+          description: Internal server error
+  /internal/data/upload:
     post:
-      tags: [fence-compat]
-      operationId: fenceUploadBlank
+      tags:
+        - internal-data
+      operationId: internalUploadBlank
       requestBody:
         required: false
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/FenceUploadBlankRequest' }
+            schema:
+              $ref: '#/components/schemas/InternalUploadBlankRequest'
       responses:
         '200':
           description: Upload URL issued
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/FenceUploadBlankResponse' }
-        '400': { description: Validation error }
-        '401': { description: Authentication required }
-        '403': { description: Forbidden }
-        '500': { description: Internal server error }
-
-  /data/upload/{file_id}:
+              schema:
+                $ref: '#/components/schemas/InternalUploadBlankResponse'
+        '400':
+          description: Validation error
+        '401':
+          description: Authentication required
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
+  /internal/data/upload/{file_id}:
     get:
-      tags: [fence-compat]
-      operationId: fenceUploadURL
+      tags:
+        - internal-data
+      operationId: internalUploadURL
       parameters:
         - in: path
           name: file_id
           required: true
-          schema: { type: string }
+          schema:
+            type: string
       responses:
         '200':
           description: Signed upload URL
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/FenceSignedURL' }
-        '400': { description: Validation error }
-        '401': { description: Authentication required }
-        '403': { description: Forbidden }
-        '500': { description: Internal server error }
-
-  /data/multipart/init:
+              schema:
+                $ref: '#/components/schemas/InternalSignedURL'
+        '400':
+          description: Validation error
+        '401':
+          description: Authentication required
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
+  /internal/data/multipart/init:
     post:
-      tags: [fence-compat]
-      operationId: fenceMultipartInit
+      tags:
+        - internal-data
+      operationId: internalMultipartInit
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/FenceMultipartInitRequest' }
+            schema:
+              $ref: '#/components/schemas/InternalMultipartInitRequest'
       responses:
         '200':
           description: Multipart upload initialized
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/FenceMultipartInitResponse' }
-        '400': { description: Validation error }
-        '401': { description: Authentication required }
-        '403': { description: Forbidden }
-        '500': { description: Internal server error }
-
-  /data/multipart/upload:
+              schema:
+                $ref: '#/components/schemas/InternalMultipartInitResponse'
+        '400':
+          description: Validation error
+        '401':
+          description: Authentication required
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
+  /internal/data/multipart/upload:
     post:
-      tags: [fence-compat]
-      operationId: fenceMultipartUpload
+      tags:
+        - internal-data
+      operationId: internalMultipartUpload
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/FenceMultipartUploadRequest' }
+            schema:
+              $ref: '#/components/schemas/InternalMultipartUploadRequest'
       responses:
         '200':
           description: Part presigned URL
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/FenceMultipartUploadResponse' }
-        '400': { description: Validation error }
-        '401': { description: Authentication required }
-        '403': { description: Forbidden }
-        '500': { description: Internal server error }
-
-  /data/multipart/complete:
+              schema:
+                $ref: '#/components/schemas/InternalMultipartUploadResponse'
+        '400':
+          description: Validation error
+        '401':
+          description: Authentication required
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
+  /internal/data/multipart/complete:
     post:
-      tags: [fence-compat]
-      operationId: fenceMultipartComplete
+      tags:
+        - internal-data
+      operationId: internalMultipartComplete
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/FenceMultipartCompleteRequest' }
+            schema:
+              $ref: '#/components/schemas/InternalMultipartCompleteRequest'
       responses:
-        '200': { description: Upload completed }
-        '400': { description: Validation error }
-        '401': { description: Authentication required }
-        '403': { description: Forbidden }
-        '500': { description: Internal server error }
-
+        '200':
+          description: Upload completed
+        '400':
+          description: Validation error
+        '401':
+          description: Authentication required
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
 components:
   schemas:
     HashInfo:
@@ -342,146 +438,184 @@ components:
       additionalProperties:
         type: string
       description: Hash map, e.g. {"sha256":"..."}
-
-    IndexdRecord:
+    InternalRecord:
       type: object
       properties:
-        did: { type: string }
-        hashes: { $ref: '#/components/schemas/HashInfo' }
-        size: { type: integer, format: int64 }
+        did:
+          type: string
+        hashes:
+          $ref: '#/components/schemas/HashInfo'
+        size:
+          type: integer
+          format: int64
         urls:
           type: array
-          items: { type: string }
+          items:
+            type: string
         authz:
           type: array
-          items: { type: string }
-        file_name: { type: string }
-        organization: { type: string }
-        project: { type: string }
-
-    IndexdRecordResponse:
+          items:
+            type: string
+        file_name:
+          type: string
+        organization:
+          type: string
+        project:
+          type: string
+    InternalRecordResponse:
       allOf:
-        - $ref: '#/components/schemas/IndexdRecord'
+        - $ref: '#/components/schemas/InternalRecord'
         - type: object
           properties:
-            baseid: { type: string }
-            rev: { type: string }
-            created_date: { type: string }
-            updated_date: { type: string }
-            uploader: { type: string }
-
+            baseid:
+              type: string
+            rev:
+              type: string
+            created_date:
+              type: string
+            updated_date:
+              type: string
+            uploader:
+              type: string
     ListRecordsResponse:
       type: object
       properties:
         records:
           type: array
-          items: { $ref: '#/components/schemas/IndexdRecordResponse' }
-
+          items:
+            $ref: '#/components/schemas/InternalRecordResponse'
     BulkCreateRequest:
       type: object
-      required: [records]
+      required:
+        - records
       properties:
         records:
           type: array
-          items: { $ref: '#/components/schemas/IndexdRecord' }
-
+          items:
+            $ref: '#/components/schemas/InternalRecord'
     BulkHashesRequest:
       type: object
-      required: [hashes]
+      required:
+        - hashes
       properties:
         hashes:
           type: array
-          items: { type: string }
-
+          items:
+            type: string
     BulkSHA256ValidityRequest:
       type: object
       properties:
         sha256:
           type: array
-          items: { type: string }
+          items:
+            type: string
         hashes:
           type: array
-          items: { type: string }
-
+          items:
+            type: string
     BulkDocumentsRequest:
       oneOf:
         - type: array
-          items: { type: string }
+          items:
+            type: string
         - type: object
           properties:
             ids:
               type: array
-              items: { type: string }
+              items:
+                type: string
             dids:
               type: array
-              items: { type: string }
-
+              items:
+                type: string
     DeleteByQueryResponse:
       type: object
       properties:
-        deleted: { type: integer }
-
-    FenceSignedURL:
+        deleted:
+          type: integer
+    InternalSignedURL:
       type: object
       properties:
-        url: { type: string }
-
-    FenceUploadBlankRequest:
+        url:
+          type: string
+    InternalUploadBlankRequest:
       type: object
       properties:
-        guid: { type: string }
+        guid:
+          type: string
         authz:
           type: array
-          items: { type: string }
-
-    FenceUploadBlankResponse:
+          items:
+            type: string
+    InternalUploadBlankResponse:
       type: object
       properties:
-        guid: { type: string }
-        url: { type: string }
-
-    FenceMultipartInitRequest:
+        guid:
+          type: string
+        url:
+          type: string
+    InternalMultipartInitRequest:
       type: object
       properties:
-        guid: { type: string }
-        file_name: { type: string }
-        bucket: { type: string }
-
-    FenceMultipartInitResponse:
+        guid:
+          type: string
+        file_name:
+          type: string
+        bucket:
+          type: string
+    InternalMultipartInitResponse:
       type: object
       properties:
-        guid: { type: string }
-        uploadId: { type: string }
-
-    FenceMultipartUploadRequest:
+        guid:
+          type: string
+        uploadId:
+          type: string
+    InternalMultipartUploadRequest:
       type: object
-      required: [key, uploadId, partNumber]
+      required:
+        - key
+        - uploadId
+        - partNumber
       properties:
-        key: { type: string }
-        bucket: { type: string }
-        uploadId: { type: string }
-        partNumber: { type: integer, format: int32 }
-
-    FenceMultipartUploadResponse:
+        key:
+          type: string
+        bucket:
+          type: string
+        uploadId:
+          type: string
+        partNumber:
+          type: integer
+          format: int32
+    InternalMultipartUploadResponse:
       type: object
       properties:
-        presigned_url: { type: string }
-
-    FenceMultipartPart:
+        presigned_url:
+          type: string
+    InternalMultipartPart:
       type: object
-      required: [PartNumber, ETag]
+      required:
+        - PartNumber
+        - ETag
       properties:
-        PartNumber: { type: integer, format: int32 }
-        ETag: { type: string }
-
-    FenceMultipartCompleteRequest:
+        PartNumber:
+          type: integer
+          format: int32
+        ETag:
+          type: string
+    InternalMultipartCompleteRequest:
       type: object
-      required: [key, uploadId, parts]
+      required:
+        - key
+        - uploadId
+        - parts
       properties:
-        key: { type: string }
-        bucket: { type: string }
-        uploadId: { type: string }
+        key:
+          type: string
+        bucket:
+          type: string
+        uploadId:
+          type: string
         parts:
           type: array
           items:
-            $ref: '#/components/schemas/FenceMultipartPart'
+            $ref: '#/components/schemas/InternalMultipartPart'
