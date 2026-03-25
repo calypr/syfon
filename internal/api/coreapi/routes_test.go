@@ -31,7 +31,7 @@ func TestSHA256ValidityRoute(t *testing.T) {
 	RegisterCoreRoutes(router, db)
 
 	body, _ := json.Marshal(map[string]any{"sha256": []string{"abc", "missing"}})
-	req := httptest.NewRequest(http.MethodPost, "/index/internal/v1/sha256/validity", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/index/v1/sha256/validity", bytes.NewReader(body))
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 
@@ -52,7 +52,7 @@ func TestSHA256ValidityRouteValidation(t *testing.T) {
 	router := mux.NewRouter()
 	RegisterCoreRoutes(router, db)
 
-	req := httptest.NewRequest(http.MethodPost, "/index/internal/v1/sha256/validity", bytes.NewBufferString(`{"sha256":["   "]}`))
+	req := httptest.NewRequest(http.MethodPost, "/index/v1/sha256/validity", bytes.NewBufferString(`{"sha256":["   "]}`))
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 

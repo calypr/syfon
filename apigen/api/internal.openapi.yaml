@@ -11,7 +11,7 @@ tags:
   - name: internal-index
   - name: internal-data
 paths:
-  /internal/index:
+  /index:
     get:
       tags:
         - internal-index
@@ -115,7 +115,7 @@ paths:
           description: Forbidden
         '500':
           description: Internal server error
-  /internal/index/{id}:
+  /index/{id}:
     get:
       tags:
         - internal-index
@@ -183,7 +183,7 @@ paths:
           description: Not found
         '500':
           description: Internal server error
-  /internal/index/bulk:
+  /index/bulk:
     post:
       tags:
         - internal-index
@@ -209,7 +209,7 @@ paths:
           description: Forbidden
         '500':
           description: Internal server error
-  /internal/index/bulk/hashes:
+  /index/bulk/hashes:
     post:
       tags:
         - internal-index
@@ -231,7 +231,7 @@ paths:
           description: Validation error
         '500':
           description: Internal server error
-  /internal/index/bulk/sha256/validity:
+  /index/bulk/sha256/validity:
     post:
       tags:
         - internal-index
@@ -255,7 +255,7 @@ paths:
           description: Validation error
         '500':
           description: Internal server error
-  /internal/index/bulk/documents:
+  /index/bulk/documents:
     post:
       tags:
         - internal-index
@@ -279,7 +279,7 @@ paths:
           description: Validation error
         '500':
           description: Internal server error
-  /internal/data/download/{file_id}:
+  /data/download/{file_id}:
     get:
       tags:
         - internal-data
@@ -305,7 +305,7 @@ paths:
           description: Not found
         '500':
           description: Internal server error
-  /internal/data/upload:
+  /data/upload:
     post:
       tags:
         - internal-data
@@ -331,7 +331,7 @@ paths:
           description: Forbidden
         '500':
           description: Internal server error
-  /internal/data/upload/{file_id}:
+  /data/upload/{file_id}:
     get:
       tags:
         - internal-data
@@ -357,7 +357,7 @@ paths:
           description: Forbidden
         '500':
           description: Internal server error
-  /internal/data/multipart/init:
+  /data/multipart/init:
     post:
       tags:
         - internal-data
@@ -383,7 +383,7 @@ paths:
           description: Forbidden
         '500':
           description: Internal server error
-  /internal/data/multipart/upload:
+  /data/multipart/upload:
     post:
       tags:
         - internal-data
@@ -409,7 +409,7 @@ paths:
           description: Forbidden
         '500':
           description: Internal server error
-  /internal/data/multipart/complete:
+  /data/multipart/complete:
     post:
       tags:
         - internal-data

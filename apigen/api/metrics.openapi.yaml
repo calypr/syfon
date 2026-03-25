@@ -8,7 +8,7 @@ servers:
 tags:
   - name: metrics
 paths:
-  /internal/metrics/v1/files:
+  /index/v1/metrics/files:
     get:
       tags:
         - metrics
@@ -47,7 +47,7 @@ paths:
           description: Forbidden
         '500':
           description: Internal server error
-  /internal/metrics/v1/files/{object_id}:
+  /index/v1/metrics/files/{object_id}:
     get:
       tags:
         - metrics
@@ -75,7 +75,7 @@ paths:
           description: Not found
         '500':
           description: Internal server error
-  /internal/metrics/v1/summary:
+  /index/v1/metrics/summary:
     get:
       tags:
         - metrics

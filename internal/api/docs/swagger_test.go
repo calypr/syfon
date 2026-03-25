@@ -9,7 +9,7 @@ import (
 	"github.com/gorilla/mux"
 )
 
-func TestSwaggerUIRouteRootNotServed(t *testing.T) {
+func TestSwaggerUIRouteRootServed(t *testing.T) {
 	router := mux.NewRouter()
 	RegisterSwaggerRoutes(router)
 
@@ -17,16 +17,16 @@ func TestSwaggerUIRouteRootNotServed(t *testing.T) {
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 
-	if rr.Code != http.StatusNotFound {
-		t.Fatalf("expected 404, got %d body=%s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
 	}
 }
 
-func TestSwaggerUIRouteViaIndexPrefix(t *testing.T) {
+func TestSwaggerUIRouteTrailingSlash(t *testing.T) {
 	router := mux.NewRouter()
 	RegisterSwaggerRoutes(router)
 
-	req := httptest.NewRequest(http.MethodGet, "/internal/swagger", nil)
+	req := httptest.NewRequest(http.MethodGet, "/swagger/", nil)
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 
@@ -38,7 +38,7 @@ func TestSwaggerUIRouteViaIndexPrefix(t *testing.T) {
 	}
 }
 
-func TestOpenAPIRouteRootNotServed(t *testing.T) {
+func TestOpenAPIRouteRootServed(t *testing.T) {
 	router := mux.NewRouter()
 	RegisterSwaggerRoutes(router)
 
@@ -46,16 +46,16 @@ func TestOpenAPIRouteRootNotServed(t *testing.T) {
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 
-	if rr.Code != http.StatusNotFound {
-		t.Fatalf("expected 404, got %d body=%s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
 	}
 }
 
-func TestOpenAPIRouteViaIndexPrefix(t *testing.T) {
+func TestOpenAPIRouteServed(t *testing.T) {
 	router := mux.NewRouter()
 	RegisterSwaggerRoutes(router)
 
-	req := httptest.NewRequest(http.MethodGet, "/internal/openapi.yaml", nil)
+	req := httptest.NewRequest(http.MethodGet, "/openapi.yaml", nil)
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 
@@ -67,30 +67,16 @@ func TestOpenAPIRouteViaIndexPrefix(t *testing.T) {
 	}
 }
 
-func TestAuxOpenAPIRoutesIndexOnly(t *testing.T) {
+func TestAuxOpenAPIRoutesServed(t *testing.T) {
 	router := mux.NewRouter()
 	RegisterSwaggerRoutes(router)
 
-	rootPaths := []string{
+	paths := []string{
 		"/openapi-lfs.yaml",
 		"/openapi-bucket.yaml",
 		"/openapi-internal.yaml",
 	}
-	for _, p := range rootPaths {
-		req := httptest.NewRequest(http.MethodGet, p, nil)
-		rr := httptest.NewRecorder()
-		router.ServeHTTP(rr, req)
-		if rr.Code != http.StatusNotFound {
-			t.Fatalf("expected 404 for %s, got %d body=%s", p, rr.Code, rr.Body.String())
-		}
-	}
-
-	indexPaths := []string{
-		"/internal/openapi-lfs.yaml",
-		"/internal/openapi-bucket.yaml",
-		"/internal/openapi-internal.yaml",
-	}
-	for _, p := range indexPaths {
+	for _, p := range paths {
 		req := httptest.NewRequest(http.MethodGet, p, nil)
 		rr := httptest.NewRecorder()
 		router.ServeHTTP(rr, req)

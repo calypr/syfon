@@ -201,7 +201,7 @@ s3_credentials:
 			// 6. Test Internal Compatibility Upload (Blank)
 			internalUploadReq := map[string]interface{}{}
 			internalBody, _ := json.Marshal(internalUploadReq)
-			resp, err = client.Post(server.URL+"/internal/data/upload", "application/json", bytes.NewReader(internalBody))
+			resp, err = client.Post(server.URL+"/data/upload", "application/json", bytes.NewReader(internalBody))
 			if err != nil {
 				t.Fatalf("Internal upload blank failed: %v", err)
 			}
@@ -223,7 +223,7 @@ s3_credentials:
 				"bucket":    bucketName,
 			}
 			mpBody, _ := json.Marshal(internalMultipartReq)
-			resp, err = client.Post(server.URL+"/internal/data/multipart/init", "application/json", bytes.NewReader(mpBody))
+			resp, err = client.Post(server.URL+"/data/multipart/init", "application/json", bytes.NewReader(mpBody))
 			if err != nil {
 				t.Fatalf("Internal multipart init failed: %v", err)
 			}
@@ -248,7 +248,7 @@ s3_credentials:
 			}
 
 			// 8. Test Internal Download
-			resp, err = client.Get(server.URL + "/internal/data/download/" + guid)
+			resp, err = client.Get(server.URL + "/data/download/" + guid)
 			if err != nil {
 				t.Fatalf("Internal download req failed: %v", err)
 			}

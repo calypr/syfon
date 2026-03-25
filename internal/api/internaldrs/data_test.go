@@ -37,7 +37,7 @@ func TestHandleInternalDownload(t *testing.T) {
 	}
 	mockUM := &testutils.MockUrlManager{}
 
-	req, err := http.NewRequest("GET", "/internal/data/download/test-file-id", nil)
+	req, err := http.NewRequest("GET", "/data/download/test-file-id", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +85,7 @@ func TestHandleInternalDownload_ResolvesByChecksum(t *testing.T) {
 	}
 	mockUM := &testutils.MockUrlManager{}
 
-	req, err := http.NewRequest("GET", "/internal/data/download/"+oid, nil)
+	req, err := http.NewRequest("GET", "/data/download/"+oid, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +132,7 @@ func TestHandleInternalDownload_ResolvesByUUID(t *testing.T) {
 	}
 	mockUM := &testutils.MockUrlManager{}
 
-	req, err := http.NewRequest("GET", "/internal/data/download/"+did, nil)
+	req, err := http.NewRequest("GET", "/data/download/"+did, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +163,7 @@ func TestHandleInternalUploadBlank(t *testing.T) {
 	guid := "new-guid"
 	reqBody := internalapi.InternalUploadBlankRequest{Guid: &guid}
 	body, _ := json.Marshal(reqBody)
-	req, err := http.NewRequest("POST", "/internal/data/upload", bytes.NewBuffer(body))
+	req, err := http.NewRequest("POST", "/data/upload", bytes.NewBuffer(body))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,7 +196,7 @@ func TestHandleInternalMultipartInit(t *testing.T) {
 	fileName := "test.bam"
 	reqBody := internalapi.InternalMultipartInitRequest{Guid: &multiGUID, FileName: &fileName}
 	body, _ := json.Marshal(reqBody)
-	req, err := http.NewRequest("POST", "/internal/data/multipart/init", bytes.NewBuffer(body))
+	req, err := http.NewRequest("POST", "/data/multipart/init", bytes.NewBuffer(body))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,7 +228,7 @@ func TestHandleInternalMultipartInit_MintsUUIDForChecksumInput(t *testing.T) {
 	checksum := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	reqBody := internalapi.InternalMultipartInitRequest{FileName: &checksum}
 	body, _ := json.Marshal(reqBody)
-	req, err := http.NewRequest("POST", "/internal/data/multipart/init", bytes.NewBuffer(body))
+	req, err := http.NewRequest("POST", "/data/multipart/init", bytes.NewBuffer(body))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -281,7 +281,7 @@ func TestHandleInternalMultipartInit_ResolvesExistingByChecksumGUID(t *testing.T
 
 	reqBody := internalapi.InternalMultipartInitRequest{Guid: &checksum}
 	body, _ := json.Marshal(reqBody)
-	req, err := http.NewRequest("POST", "/internal/data/multipart/init", bytes.NewBuffer(body))
+	req, err := http.NewRequest("POST", "/data/multipart/init", bytes.NewBuffer(body))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -312,7 +312,7 @@ func TestHandleInternalMultipartUpload(t *testing.T) {
 		PartNumber: 1,
 	}
 	body, _ := json.Marshal(reqBody)
-	req, err := http.NewRequest("POST", "/internal/data/multipart/upload", bytes.NewBuffer(body))
+	req, err := http.NewRequest("POST", "/data/multipart/upload", bytes.NewBuffer(body))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -345,7 +345,7 @@ func TestHandleInternalMultipartComplete(t *testing.T) {
 		},
 	}
 	body, _ := json.Marshal(reqBody)
-	req, err := http.NewRequest("POST", "/internal/data/multipart/complete", bytes.NewBuffer(body))
+	req, err := http.NewRequest("POST", "/data/multipart/complete", bytes.NewBuffer(body))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -379,7 +379,7 @@ func TestHandleInternalDownload_Gen3Auth(t *testing.T) {
 	}
 	mockUM := &testutils.MockUrlManager{}
 
-	req401, _ := http.NewRequest("GET", "/internal/data/download/secure-id", nil)
+	req401, _ := http.NewRequest("GET", "/data/download/secure-id", nil)
 	req401 = mux.SetURLVars(req401, map[string]string{"file_id": "secure-id"})
 	ctx401 := context.WithValue(req401.Context(), core.AuthModeKey, "gen3")
 	ctx401 = context.WithValue(ctx401, core.AuthHeaderPresentKey, false)
@@ -390,7 +390,7 @@ func TestHandleInternalDownload_Gen3Auth(t *testing.T) {
 		t.Fatalf("expected 401, got %d body=%s", rr401.Code, rr401.Body.String())
 	}
 
-	req403, _ := http.NewRequest("GET", "/internal/data/download/secure-id", nil)
+	req403, _ := http.NewRequest("GET", "/data/download/secure-id", nil)
 	req403 = mux.SetURLVars(req403, map[string]string{"file_id": "secure-id"})
 	ctx403 := context.WithValue(req403.Context(), core.AuthModeKey, "gen3")
 	ctx403 = context.WithValue(ctx403, core.AuthHeaderPresentKey, true)
@@ -404,7 +404,7 @@ func TestHandleInternalDownload_Gen3Auth(t *testing.T) {
 		t.Fatalf("expected 403, got %d body=%s", rr403.Code, rr403.Body.String())
 	}
 
-	req200, _ := http.NewRequest("GET", "/internal/data/download/secure-id", nil)
+	req200, _ := http.NewRequest("GET", "/data/download/secure-id", nil)
 	req200 = mux.SetURLVars(req200, map[string]string{"file_id": "secure-id"})
 	ctx200 := context.WithValue(req200.Context(), core.AuthModeKey, "gen3")
 	ctx200 = context.WithValue(ctx200, core.AuthHeaderPresentKey, true)
@@ -422,7 +422,7 @@ func TestHandleInternalDownload_Gen3Auth(t *testing.T) {
 func TestHandleInternalUploadURL_Gen3Unauthorized(t *testing.T) {
 	mockDB := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}
 	mockUM := &testutils.MockUrlManager{}
-	req, _ := http.NewRequest("GET", "/internal/data/upload/some-id?bucket=test-bucket", nil)
+	req, _ := http.NewRequest("GET", "/data/upload/some-id?bucket=test-bucket", nil)
 	req = mux.SetURLVars(req, map[string]string{"file_id": "some-id"})
 	ctx := context.WithValue(req.Context(), core.AuthModeKey, "gen3")
 	ctx = context.WithValue(ctx, core.AuthHeaderPresentKey, false)
@@ -449,7 +449,7 @@ func TestHandleInternalBuckets_Gen3Auth(t *testing.T) {
 		},
 	}
 
-	req401, _ := http.NewRequest("GET", "/internal/data/buckets", nil)
+	req401, _ := http.NewRequest("GET", "/data/buckets", nil)
 	ctx401 := context.WithValue(req401.Context(), core.AuthModeKey, "gen3")
 	ctx401 = context.WithValue(ctx401, core.AuthHeaderPresentKey, false)
 	req401 = req401.WithContext(ctx401)
@@ -459,7 +459,7 @@ func TestHandleInternalBuckets_Gen3Auth(t *testing.T) {
 		t.Fatalf("expected 401, got %d body=%s", rr401.Code, rr401.Body.String())
 	}
 
-	req403, _ := http.NewRequest("GET", "/internal/data/buckets", nil)
+	req403, _ := http.NewRequest("GET", "/data/buckets", nil)
 	ctx403 := context.WithValue(req403.Context(), core.AuthModeKey, "gen3")
 	ctx403 = context.WithValue(ctx403, core.AuthHeaderPresentKey, true)
 	ctx403 = context.WithValue(ctx403, core.UserPrivilegesKey, map[string]map[string]bool{
@@ -472,7 +472,7 @@ func TestHandleInternalBuckets_Gen3Auth(t *testing.T) {
 		t.Fatalf("expected 403, got %d body=%s", rr403.Code, rr403.Body.String())
 	}
 
-	req200, _ := http.NewRequest("GET", "/internal/data/buckets", nil)
+	req200, _ := http.NewRequest("GET", "/data/buckets", nil)
 	ctx200 := context.WithValue(req200.Context(), core.AuthModeKey, "gen3")
 	ctx200 = context.WithValue(ctx200, core.AuthHeaderPresentKey, true)
 	ctx200 = context.WithValue(ctx200, core.UserPrivilegesKey, map[string]map[string]bool{
@@ -485,7 +485,7 @@ func TestHandleInternalBuckets_Gen3Auth(t *testing.T) {
 		t.Fatalf("expected 200, got %d body=%s", rr200.Code, rr200.Body.String())
 	}
 
-	reqScoped, _ := http.NewRequest("GET", "/internal/data/buckets", nil)
+	reqScoped, _ := http.NewRequest("GET", "/data/buckets", nil)
 	ctxScoped := context.WithValue(reqScoped.Context(), core.AuthModeKey, "gen3")
 	ctxScoped = context.WithValue(ctxScoped, core.AuthHeaderPresentKey, true)
 	ctxScoped = context.WithValue(ctxScoped, core.UserPrivilegesKey, map[string]map[string]bool{
@@ -521,7 +521,7 @@ func TestHandleInternalPutDeleteBucket_Gen3Auth(t *testing.T) {
 		Path:         &path,
 	})
 
-	putReq401, _ := http.NewRequest("PUT", "/internal/data/buckets", bytes.NewBuffer(putBody))
+	putReq401, _ := http.NewRequest("PUT", "/data/buckets", bytes.NewBuffer(putBody))
 	ctxPut401 := context.WithValue(putReq401.Context(), core.AuthModeKey, "gen3")
 	ctxPut401 = context.WithValue(ctxPut401, core.AuthHeaderPresentKey, false)
 	putReq401 = putReq401.WithContext(ctxPut401)
@@ -531,7 +531,7 @@ func TestHandleInternalPutDeleteBucket_Gen3Auth(t *testing.T) {
 		t.Fatalf("expected PUT 401, got %d body=%s", putRR401.Code, putRR401.Body.String())
 	}
 
-	putReq201, _ := http.NewRequest("PUT", "/internal/data/buckets", bytes.NewBuffer(putBody))
+	putReq201, _ := http.NewRequest("PUT", "/data/buckets", bytes.NewBuffer(putBody))
 	ctxPut201 := context.WithValue(putReq201.Context(), core.AuthModeKey, "gen3")
 	ctxPut201 = context.WithValue(ctxPut201, core.AuthHeaderPresentKey, true)
 	ctxPut201 = context.WithValue(ctxPut201, core.UserPrivilegesKey, map[string]map[string]bool{
@@ -544,7 +544,7 @@ func TestHandleInternalPutDeleteBucket_Gen3Auth(t *testing.T) {
 		t.Fatalf("expected PUT 201, got %d body=%s", putRR201.Code, putRR201.Body.String())
 	}
 
-	delReq403, _ := http.NewRequest("DELETE", "/internal/data/buckets/b2", nil)
+	delReq403, _ := http.NewRequest("DELETE", "/data/buckets/b2", nil)
 	delReq403 = mux.SetURLVars(delReq403, map[string]string{"bucket": "b2"})
 	ctxDel403 := context.WithValue(delReq403.Context(), core.AuthModeKey, "gen3")
 	ctxDel403 = context.WithValue(ctxDel403, core.AuthHeaderPresentKey, true)
@@ -558,7 +558,7 @@ func TestHandleInternalPutDeleteBucket_Gen3Auth(t *testing.T) {
 		t.Fatalf("expected DELETE 403, got %d body=%s", delRR403.Code, delRR403.Body.String())
 	}
 
-	delReq204, _ := http.NewRequest("DELETE", "/internal/data/buckets/b2", nil)
+	delReq204, _ := http.NewRequest("DELETE", "/data/buckets/b2", nil)
 	delReq204 = mux.SetURLVars(delReq204, map[string]string{"bucket": "b2"})
 	ctxDel204 := context.WithValue(delReq204.Context(), core.AuthModeKey, "gen3")
 	ctxDel204 = context.WithValue(ctxDel204, core.AuthHeaderPresentKey, true)
@@ -577,7 +577,7 @@ func TestHandleInternalPutBucket_RejectsInvalidGeneratedPayloads(t *testing.T) {
 	mockDB := &testutils.MockDatabase{Credentials: map[string]core.S3Credential{}}
 
 	t.Run("missing required project_id", func(t *testing.T) {
-		req, _ := http.NewRequest("PUT", "/internal/data/buckets", bytes.NewBufferString(`{
+		req, _ := http.NewRequest("PUT", "/data/buckets", bytes.NewBufferString(`{
 			"bucket":"b2",
 			"region":"us-east-1",
 			"access_key":"ak",
@@ -599,7 +599,7 @@ func TestHandleInternalPutBucket_RejectsInvalidGeneratedPayloads(t *testing.T) {
 	})
 
 	t.Run("unknown field", func(t *testing.T) {
-		req, _ := http.NewRequest("PUT", "/internal/data/buckets", bytes.NewBufferString(`{
+		req, _ := http.NewRequest("PUT", "/data/buckets", bytes.NewBufferString(`{
 			"bucket":"b2",
 			"region":"us-east-1",
 			"access_key":"ak",
@@ -652,7 +652,7 @@ func TestHandleInternalUploadURL_Branches(t *testing.T) {
 
 	t.Run("no bucket configured", func(t *testing.T) {
 		db := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}
-		req := httptest.NewRequest(http.MethodGet, "/internal/data/upload/abc", nil)
+		req := httptest.NewRequest(http.MethodGet, "/data/upload/abc", nil)
 		req = mux.SetURLVars(req, map[string]string{"file_id": "abc"})
 		rr := httptest.NewRecorder()
 		handleInternalUploadURL(rr, req, db, mockUM)
@@ -663,7 +663,7 @@ func TestHandleInternalUploadURL_Branches(t *testing.T) {
 
 	t.Run("query bucket and filename signs upload url", func(t *testing.T) {
 		db := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}
-		req := httptest.NewRequest(http.MethodGet, "/internal/data/upload/abc?bucket=b1&file_name=file.bin&expires_in=60", nil)
+		req := httptest.NewRequest(http.MethodGet, "/data/upload/abc?bucket=b1&file_name=file.bin&expires_in=60", nil)
 		req = mux.SetURLVars(req, map[string]string{"file_id": "abc"})
 		rr := httptest.NewRecorder()
 		handleInternalUploadURL(rr, req, db, mockUM)
@@ -680,14 +680,14 @@ func TestHandleInternalMultipartValidationErrors(t *testing.T) {
 	db := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}
 	um := &testutils.MockUrlManager{}
 
-	reqUpload := httptest.NewRequest(http.MethodPost, "/internal/data/multipart/upload", strings.NewReader(`{}`))
+	reqUpload := httptest.NewRequest(http.MethodPost, "/data/multipart/upload", strings.NewReader(`{}`))
 	rrUpload := httptest.NewRecorder()
 	handleInternalMultipartUpload(rrUpload, reqUpload, db, um)
 	if rrUpload.Code != http.StatusBadRequest {
 		t.Fatalf("expected upload 400, got %d body=%s", rrUpload.Code, rrUpload.Body.String())
 	}
 
-	reqComplete := httptest.NewRequest(http.MethodPost, "/internal/data/multipart/complete", strings.NewReader(`{}`))
+	reqComplete := httptest.NewRequest(http.MethodPost, "/data/multipart/complete", strings.NewReader(`{}`))
 	rrComplete := httptest.NewRecorder()
 	handleInternalMultipartComplete(rrComplete, reqComplete, db, um)
 	if rrComplete.Code != http.StatusBadRequest {
@@ -701,7 +701,7 @@ func TestRegisterInternalRoutes_Smoke(t *testing.T) {
 	router := mux.NewRouter()
 	RegisterInternalDataRoutes(router, db, um)
 
-	req := httptest.NewRequest(http.MethodGet, "/internal/data/upload/abc?bucket=b1", nil)
+	req := httptest.NewRequest(http.MethodGet, "/data/upload/abc?bucket=b1", nil)
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 	// No creds configured for b1 in mock -> falls back to signing anyway with mock url manager.

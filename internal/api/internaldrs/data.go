@@ -32,7 +32,6 @@ var multipartUploadSessions sync.Map // uploadID -> multipartSession
 
 const bucketAdminResource = "/services/internal/buckets"
 
-
 func normalizeScopePath(rawPath, bucket string) (string, error) {
 	p := strings.TrimSpace(rawPath)
 	if p == "" {
@@ -86,32 +85,33 @@ func hasScopedBucketAccess(r *http.Request, scope core.BucketScope, methods ...s
 }
 
 func RegisterInternalDataRoutes(router *mux.Router, database core.DatabaseInterface, uM urlmanager.UrlManager) {
-	// Canonical upload/download routes.
-	router.Handle("/internal/data/download/{file_id}", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// Data routes exposed under /data to match gateway contract.
+	router.Handle("/data/download/{file_id}", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handleInternalDownload(w, r, database, uM)
 	}), "InternalDownload")).Methods(http.MethodGet)
 
-	router.Handle("/internal/data/upload", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	router.Handle("/data/upload", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handleInternalUploadBlank(w, r, database, uM)
 	}), "InternalUploadBlank")).Methods(http.MethodPost)
 
-	router.Handle("/internal/data/upload/{file_id}", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	router.Handle("/data/upload/{file_id}", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handleInternalUploadURL(w, r, database, uM)
 	}), "InternalUploadURL")).Methods(http.MethodGet)
 
-	router.Handle("/internal/data/multipart/init", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	router.Handle("/data/multipart/init", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handleInternalMultipartInit(w, r, database, uM)
 	}), "InternalMultipartInit")).Methods(http.MethodPost)
 
-	router.Handle("/internal/data/multipart/upload", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	router.Handle("/data/multipart/upload", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handleInternalMultipartUpload(w, r, database, uM)
 	}), "InternalMultipartUpload")).Methods(http.MethodPost)
 
-	router.Handle("/internal/data/multipart/complete", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	router.Handle("/data/multipart/complete", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handleInternalMultipartComplete(w, r, database, uM)
 	}), "InternalMultipartComplete")).Methods(http.MethodPost)
 
-	router.Handle("/internal/data/buckets", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// Bucket endpoints.
+	router.Handle("/data/buckets", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
 			handleInternalBuckets(w, r, database)
@@ -122,7 +122,7 @@ func RegisterInternalDataRoutes(router *mux.Router, database core.DatabaseInterf
 		}
 	}), "InternalBuckets")).Methods(http.MethodGet, http.MethodPut)
 
-	router.Handle("/internal/data/buckets/{bucket}", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	router.Handle("/data/buckets/{bucket}", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodDelete {
 			handleInternalDeleteBucket(w, r, database)
 			return

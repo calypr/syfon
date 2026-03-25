@@ -22,7 +22,7 @@ import (
 // RegisterInternalIndexRoutes registers the Internal-compatible routes on the router.
 func RegisterInternalIndexRoutes(router *mux.Router, database core.DatabaseInterface) {
 	// Internal Endpoints
-	router.Handle("/internal/index", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	router.Handle("/index", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
 			handleInternalList(w, r, database)
@@ -35,12 +35,12 @@ func RegisterInternalIndexRoutes(router *mux.Router, database core.DatabaseInter
 		}
 	}), "InternalIndex")).Methods(http.MethodGet, http.MethodPost, http.MethodDelete)
 
-	router.Handle("/internal/index/bulk/hashes", drs.Logger(handleInternalBulkHashes(database), "InternalBulkHashes")).Methods(http.MethodPost)
-	router.Handle("/internal/index/bulk/sha256/validity", drs.Logger(handleInternalBulkSHA256Validity(database), "InternalBulkSHA256Validity")).Methods(http.MethodPost)
-	router.Handle("/internal/index/bulk", drs.Logger(handleInternalBulkCreate(database), "InternalBulkCreate")).Methods(http.MethodPost)
-	router.Handle("/internal/index/bulk/documents", drs.Logger(handleInternalBulkDocuments(database), "InternalBulkDocuments")).Methods(http.MethodPost)
+	router.Handle("/index/bulk/hashes", drs.Logger(handleInternalBulkHashes(database), "InternalBulkHashes")).Methods(http.MethodPost)
+	router.Handle("/index/bulk/sha256/validity", drs.Logger(handleInternalBulkSHA256Validity(database), "InternalBulkSHA256Validity")).Methods(http.MethodPost)
+	router.Handle("/index/bulk", drs.Logger(handleInternalBulkCreate(database), "InternalBulkCreate")).Methods(http.MethodPost)
+	router.Handle("/index/bulk/documents", drs.Logger(handleInternalBulkDocuments(database), "InternalBulkDocuments")).Methods(http.MethodPost)
 
-	router.Handle("/internal/index/{id}", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	router.Handle("/index/{id}", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
 			handleInternalGet(w, r, database)
