@@ -159,7 +159,7 @@ func TestMetricsSummaryAuthzAndScope(t *testing.T) {
 		}
 	})
 
-	t.Run("indexd_admin style reader can access global summary via /programs read", func(t *testing.T) {
+	t.Run("program reader can access global summary via /programs read", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/index/v1/metrics/summary", nil)
 		ctx := context.WithValue(req.Context(), core.AuthModeKey, "gen3")
 		ctx = context.WithValue(ctx, core.AuthHeaderPresentKey, true)

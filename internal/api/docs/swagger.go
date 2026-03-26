@@ -8,6 +8,7 @@ import (
 	"runtime"
 
 	openapispec "github.com/calypr/drs-server/apigen/api"
+	"github.com/calypr/drs-server/config"
 	"github.com/gorilla/mux"
 	"gopkg.in/yaml.v3"
 )
@@ -26,7 +27,7 @@ const swaggerUIHTML = `<!doctype html>
   <script>
     window.onload = function() {
       window.ui = SwaggerUIBundle({
-        url: "/openapi.yaml",
+        url: "` + config.RouteOpenAPISpec + `",
         dom_id: "#swagger-ui"
       });
     };
@@ -37,13 +38,13 @@ const swaggerUIHTML = `<!doctype html>
 
 // RegisterSwaggerRoutes adds Swagger/OpenAPI docs endpoints.
 func RegisterSwaggerRoutes(router *mux.Router) {
-	router.HandleFunc("/swagger", handleSwaggerUI).Methods(http.MethodGet)
-	router.HandleFunc("/swagger/", handleSwaggerUI).Methods(http.MethodGet)
+	router.HandleFunc(config.RouteSwaggerUI, handleSwaggerUI).Methods(http.MethodGet)
+	router.HandleFunc(config.RouteSwaggerUIAlt, handleSwaggerUI).Methods(http.MethodGet)
 	// OpenAPI is intentionally exposed only under /index for proxy compatibility.
-	router.HandleFunc("/openapi.yaml", handleOpenAPISpec).Methods(http.MethodGet)
-	router.HandleFunc("/openapi-lfs.yaml", handleLFSOpenAPISpec).Methods(http.MethodGet)
-	router.HandleFunc("/openapi-bucket.yaml", handleBucketOpenAPISpec).Methods(http.MethodGet)
-	router.HandleFunc("/openapi-internal.yaml", handleInternalOpenAPISpec).Methods(http.MethodGet)
+	router.HandleFunc(config.RouteOpenAPISpec, handleOpenAPISpec).Methods(http.MethodGet)
+	router.HandleFunc(config.RouteLFSSpec, handleLFSOpenAPISpec).Methods(http.MethodGet)
+	router.HandleFunc(config.RouteBucketSpec, handleBucketOpenAPISpec).Methods(http.MethodGet)
+	router.HandleFunc(config.RouteInternalSpec, handleInternalOpenAPISpec).Methods(http.MethodGet)
 }
 
 func handleSwaggerUI(w http.ResponseWriter, _ *http.Request) {

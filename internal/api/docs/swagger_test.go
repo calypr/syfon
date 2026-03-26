@@ -13,7 +13,7 @@ func TestSwaggerUIRouteRootServed(t *testing.T) {
 	router := mux.NewRouter()
 	RegisterSwaggerRoutes(router)
 
-	req := httptest.NewRequest(http.MethodGet, "/swagger", nil)
+	req := httptest.NewRequest(http.MethodGet, "/index/swagger", nil)
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 
@@ -26,7 +26,7 @@ func TestSwaggerUIRouteTrailingSlash(t *testing.T) {
 	router := mux.NewRouter()
 	RegisterSwaggerRoutes(router)
 
-	req := httptest.NewRequest(http.MethodGet, "/swagger/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/index/swagger/", nil)
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 
@@ -42,7 +42,7 @@ func TestOpenAPIRouteRootServed(t *testing.T) {
 	router := mux.NewRouter()
 	RegisterSwaggerRoutes(router)
 
-	req := httptest.NewRequest(http.MethodGet, "/openapi.yaml", nil)
+	req := httptest.NewRequest(http.MethodGet, "/index/openapi.yaml", nil)
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 
@@ -55,7 +55,7 @@ func TestOpenAPIRouteServed(t *testing.T) {
 	router := mux.NewRouter()
 	RegisterSwaggerRoutes(router)
 
-	req := httptest.NewRequest(http.MethodGet, "/openapi.yaml", nil)
+	req := httptest.NewRequest(http.MethodGet, "/index/openapi.yaml", nil)
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 
@@ -72,9 +72,9 @@ func TestAuxOpenAPIRoutesServed(t *testing.T) {
 	RegisterSwaggerRoutes(router)
 
 	paths := []string{
-		"/openapi-lfs.yaml",
-		"/openapi-bucket.yaml",
-		"/openapi-internal.yaml",
+		"/index/openapi-lfs.yaml",
+		"/index/openapi-bucket.yaml",
+		"/index/openapi-internal.yaml",
 	}
 	for _, p := range paths {
 		req := httptest.NewRequest(http.MethodGet, p, nil)

@@ -10,13 +10,14 @@ import (
 
 	"github.com/calypr/drs-server/apigen/drs"
 	"github.com/calypr/drs-server/apigen/internalapi"
+	"github.com/calypr/drs-server/config"
 	"github.com/calypr/drs-server/db/core"
 	"github.com/gorilla/mux"
 )
 
 func RegisterCoreRoutes(router *mux.Router, database core.DatabaseInterface) {
 	handler := drs.Logger(handleSHA256Validity(database), "CoreSHA256Validity")
-	router.Handle("/index/v1/sha256/validity", handler).Methods(http.MethodPost)
+	router.Handle(config.RouteCoreSHA256, handler).Methods(http.MethodPost)
 }
 
 func handleSHA256Validity(database core.DatabaseInterface) http.HandlerFunc {

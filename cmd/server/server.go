@@ -19,7 +19,6 @@ import (
 	"github.com/calypr/drs-server/db/core"
 	"github.com/calypr/drs-server/db/postgres"
 	"github.com/calypr/drs-server/db/sqlite"
-	"github.com/calypr/drs-server/internal/api/admin"
 	coreapi "github.com/calypr/drs-server/internal/api/coreapi"
 	"github.com/calypr/drs-server/internal/api/docs"
 	"github.com/calypr/drs-server/internal/api/internaldrs"
@@ -95,8 +94,8 @@ var Cmd = &cobra.Command{
 			}
 		}
 
-		// Init URL manager routed by credential provider metadata.
-		uM := urlmanager.NewRoutedUrlManager(database)
+		// Init unified URL manager.
+		uM := urlmanager.NewManager(database, cfg.Signing)
 
 		// Init Service
 		service := service.NewObjectsAPIService(database, uM)
@@ -127,13 +126,11 @@ var Cmd = &cobra.Command{
 		router.Use(requestIDMiddleware.Middleware)
 		router.Use(authzMiddleware.Middleware)
 
-		router.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		router.HandleFunc(config.RouteHealthz, func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte("OK"))
 		})
 
-		// Register Admin Routes
-		admin.RegisterAdminRoutes(router, database, uM)
 		docs.RegisterSwaggerRoutes(router)
 		coreapi.RegisterCoreRoutes(router, database)
 		metrics.RegisterMetricsRoutes(router, database)

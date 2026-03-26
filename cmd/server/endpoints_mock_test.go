@@ -11,7 +11,6 @@ import (
 
 	"github.com/calypr/drs-server/apigen/drs"
 	"github.com/calypr/drs-server/db/core"
-	"github.com/calypr/drs-server/internal/api/admin"
 	coreapi "github.com/calypr/drs-server/internal/api/coreapi"
 	"github.com/calypr/drs-server/internal/api/docs"
 	"github.com/calypr/drs-server/internal/api/internaldrs"
@@ -94,6 +93,25 @@ func TestAllRegisteredEndpoints_WithMocks(t *testing.T) {
 	}
 }
 
+func TestAdminRoutesNotRegistered(t *testing.T) {
+	router := buildMockServerRouter()
+
+	reqSign := httptest.NewRequest(http.MethodPost, "/admin/sign_url", bytes.NewBufferString(`{"url":"s3://b/k","method":"GET"}`))
+	reqSign.Header.Set("Content-Type", "application/json")
+	rrSign := httptest.NewRecorder()
+	router.ServeHTTP(rrSign, reqSign)
+	if rrSign.Code != http.StatusNotFound {
+		t.Fatalf("expected /admin/sign_url to be absent (404), got %d", rrSign.Code)
+	}
+
+	reqCreds := httptest.NewRequest(http.MethodGet, "/admin/credentials", nil)
+	rrCreds := httptest.NewRecorder()
+	router.ServeHTTP(rrCreds, reqCreds)
+	if rrCreds.Code != http.StatusNotFound {
+		t.Fatalf("expected /admin/credentials to be absent (404), got %d", rrCreds.Code)
+	}
+}
+
 func buildMockServerRouter() *mux.Router {
 	database := &testutils.MockDatabase{
 		Objects: map[string]*drs.DrsObject{
@@ -152,7 +170,6 @@ func buildMockServerRouter() *mux.Router {
 		_, _ = w.Write([]byte("OK"))
 	})
 
-	admin.RegisterAdminRoutes(router, database, uM)
 	docs.RegisterSwaggerRoutes(router)
 	coreapi.RegisterCoreRoutes(router, database)
 	metrics.RegisterMetricsRoutes(router, database)
@@ -225,12 +242,6 @@ func requestBodyFor(method, template string) ([]byte, string) {
 		return []byte(`{"delete_storage_data":false}`), "application/json"
 	case "/ga4gh/drs/v1/upload-request":
 		return []byte(`{"requests":[{"size":1,"checksums":[{"type":"sha256","checksum":"sha-1"}],"name":"obj.bin"}]}`), "application/json"
-	case "/admin/credentials":
-		if method == http.MethodPut {
-			return []byte(`{"bucket":"test-bucket-2","region":"us-east-1","access_key":"k","secret_key":"s"}`), "application/json"
-		}
-	case "/admin/sign_url":
-		return []byte(`{"url":"s3://test-bucket-1/sha-1","method":"GET"}`), "application/json"
 	case "/index/v1/sha256/validity", "/index/bulk/sha256/validity":
 		return []byte(`{"sha256":["sha-1"]}`), "application/json"
 	case "/index/bulk/hashes":
@@ -254,6 +265,8 @@ func requestBodyFor(method, template string) ([]byte, string) {
 		if method == http.MethodPut {
 			return []byte(`{"bucket":"test-bucket-3","region":"us-east-1","access_key":"k","secret_key":"s","endpoint":""}`), "application/json"
 		}
+	case "/data/buckets/{bucket}/scopes":
+		return []byte(`{"organization":"cbds","project_id":"proj2"}`), "application/json"
 	case "/info/lfs/objects/batch":
 		return []byte(`{"operation":"download","objects":[{"oid":"sha-1","size":1}]}`), "application/json"
 	case "/info/lfs/objects/metadata":

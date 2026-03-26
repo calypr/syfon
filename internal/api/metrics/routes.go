@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/calypr/drs-server/apigen/metricsapi"
+	"github.com/calypr/drs-server/config"
 	"github.com/calypr/drs-server/db/core"
 	"github.com/gorilla/mux"
 )
@@ -22,9 +23,9 @@ func RegisterMetricsRoutes(router *mux.Router, database core.DatabaseInterface) 
 	getHandler := handleGetFileUsage(database)
 	summaryHandler := handleGetSummary(database)
 
-	router.HandleFunc("/index/v1/metrics/files", listHandler).Methods(http.MethodGet)
-	router.HandleFunc("/index/v1/metrics/files/{object_id}", getHandler).Methods(http.MethodGet)
-	router.HandleFunc("/index/v1/metrics/summary", summaryHandler).Methods(http.MethodGet)
+	router.HandleFunc(config.RouteMetricsFiles, listHandler).Methods(http.MethodGet)
+	router.HandleFunc(config.RouteMetricsFileDetail, getHandler).Methods(http.MethodGet)
+	router.HandleFunc(config.RouteMetricsSummary, summaryHandler).Methods(http.MethodGet)
 }
 
 func handleListFileUsage(database core.DatabaseInterface) http.HandlerFunc {
@@ -235,7 +236,7 @@ func hasMetricsReadAccess(ctx context.Context, resource string) bool {
 
 func hasGlobalMetricsReadAccess(ctx context.Context) bool {
 	// In local mode HasMethodAccess always returns true.
-	// In Gen3 mode, this allows existing "/data_file" readers and indexd admins
+	// In Gen3 mode, this allows existing "/data_file" readers and privileged
 	// that have read access at program scope.
 	return core.HasMethodAccess(ctx, "read", []string{"/data_file"}) ||
 		core.HasMethodAccess(ctx, "read", []string{"/programs"})

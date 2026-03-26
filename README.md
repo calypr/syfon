@@ -37,8 +37,8 @@ database:
 s3_credentials:
   - bucket: "local-bucket"
     region: "us-east-1"
-    access_key: "minioadmin"
-    secret_key: "minioadmin"
+    access_key: "minio-user"
+    secret_key: "minio-pass"
     endpoint: "http://localhost:9000"
 ```
 
@@ -155,7 +155,7 @@ go test ./cmd/server -v -count=1 -testConfig=config.yaml
 The project follows a modular structure to ensure maintainability:
 - `db/core`: Core interfaces and models.
 - `db/sqlite`, `db/postgres`: Database implementation drivers.
-- `internal/api`: Subpackages for different API contexts (Admin, Fence, Gen3).
+- `internal/api`: Subpackages for different API contexts (Core, internal compatibility, LFS, metrics, docs, middleware).
 - `service`: High-level business logic implementing the DRS service.
 - `urlmanager`: Logic for interacting with cloud storage providers.
 
@@ -168,5 +168,5 @@ The project uses a Makefile for common tasks:
 - `make test`: Runs all unit and integration tests.
 - `make test-unit`: Runs unit tests only (excludes integration packages).
 - `make coverage`: Runs coverage for core production packages (db/service/middleware/url signing) and writes `coverage/coverage.out`, `coverage/coverage.txt`, and `coverage/coverage.html`.
-- `make coverage-full`: Runs broader compatibility-layer coverage (includes gen3/fence/admin packages).
+- `make coverage-full`: Runs broader compatibility-layer coverage (includes internal compatibility and LFS packages).
 - `make serve`: Starts the DRS server.

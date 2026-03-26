@@ -117,8 +117,8 @@ func TestExtractPrivileges(t *testing.T) {
 			map[string]any{"service": "drs", "method": "read"},
 			map[string]any{"service": "indexd", "method": "create"},
 			map[string]any{"service": "*", "method": "delete"},
-			map[string]any{"service": "fence", "method": "admin"}, // ignored service
-			map[string]any{"service": "drs"},                      // missing method
+			map[string]any{"service": "fence", "method": "superuser"}, // ignored service
+			map[string]any{"service": "drs"},                          // missing method
 			"bad-entry",
 		},
 		"/programs/a": "not-a-list",
@@ -132,8 +132,8 @@ func TestExtractPrivileges(t *testing.T) {
 	if !methods["read"] || !methods["create"] || !methods["delete"] {
 		t.Fatalf("expected read/create/delete methods from accepted services, got %v", methods)
 	}
-	if methods["admin"] {
-		t.Fatalf("did not expect admin method from unsupported service")
+	if methods["superuser"] {
+		t.Fatalf("did not expect superuser method from unsupported service")
 	}
 	if len(out["/programs/a"]) != 0 {
 		t.Fatalf("expected empty method map for malformed privilege list")

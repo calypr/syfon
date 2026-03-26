@@ -12,9 +12,9 @@ import (
 
 	"github.com/calypr/drs-server/apigen/drs"
 	"github.com/calypr/drs-server/apigen/internalapi"
+	"github.com/calypr/drs-server/config"
 	"github.com/calypr/drs-server/db/core"
 	corelogic "github.com/calypr/drs-server/internal/coreapi"
-	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 )
 
@@ -22,7 +22,7 @@ import (
 // RegisterInternalIndexRoutes registers the Internal-compatible routes on the router.
 func RegisterInternalIndexRoutes(router *mux.Router, database core.DatabaseInterface) {
 	// Internal Endpoints
-	router.Handle("/index", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	router.Handle(config.RouteInternalIndex, drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
 			handleInternalList(w, r, database)
@@ -35,12 +35,12 @@ func RegisterInternalIndexRoutes(router *mux.Router, database core.DatabaseInter
 		}
 	}), "InternalIndex")).Methods(http.MethodGet, http.MethodPost, http.MethodDelete)
 
-	router.Handle("/index/bulk/hashes", drs.Logger(handleInternalBulkHashes(database), "InternalBulkHashes")).Methods(http.MethodPost)
-	router.Handle("/index/bulk/sha256/validity", drs.Logger(handleInternalBulkSHA256Validity(database), "InternalBulkSHA256Validity")).Methods(http.MethodPost)
-	router.Handle("/index/bulk", drs.Logger(handleInternalBulkCreate(database), "InternalBulkCreate")).Methods(http.MethodPost)
-	router.Handle("/index/bulk/documents", drs.Logger(handleInternalBulkDocuments(database), "InternalBulkDocuments")).Methods(http.MethodPost)
+	router.Handle(config.RouteInternalBulkHashes, drs.Logger(handleInternalBulkHashes(database), "InternalBulkHashes")).Methods(http.MethodPost)
+	router.Handle(config.RouteInternalBulkSHA256, drs.Logger(handleInternalBulkSHA256Validity(database), "InternalBulkSHA256Validity")).Methods(http.MethodPost)
+	router.Handle(config.RouteInternalBulkCreate, drs.Logger(handleInternalBulkCreate(database), "InternalBulkCreate")).Methods(http.MethodPost)
+	router.Handle(config.RouteInternalBulkDocs, drs.Logger(handleInternalBulkDocuments(database), "InternalBulkDocuments")).Methods(http.MethodPost)
 
-	router.Handle("/index/{id}", drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	router.Handle(config.RouteInternalIndexDetail, drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
 			handleInternalGet(w, r, database)
@@ -54,67 +54,6 @@ func RegisterInternalIndexRoutes(router *mux.Router, database core.DatabaseInter
 	}), "InternalDetail")).Methods(http.MethodGet, http.MethodPut, http.MethodDelete)
 }
 
-func canonicalIDFromInternal(req internalapi.InternalRecord) string {
-	if did := strings.TrimSpace(req.GetDid()); did != "" {
-		if _, err := uuid.Parse(did); err == nil {
-			return did
-		}
-	}
-	hashes := req.GetHashes()
-	if v, ok := hashes["sha256"]; ok && strings.TrimSpace(v) != "" {
-		authz := append([]string(nil), req.GetAuthz()...)
-		if len(authz) == 0 && req.HasOrganization() {
-			path := core.ResourcePathForScope(req.GetOrganization(), req.GetProject())
-			if path != "" {
-				authz = append(authz, path)
-			}
-		}
-		return core.MintObjectIDFromChecksum(v, authz)
-	}
-	return ""
-}
-
-func internalToDrs(req internalapi.InternalRecord) (*core.InternalObject, error) {
-	id := canonicalIDFromInternal(req)
-	if id == "" {
-		return nil, fmt.Errorf("sha256 hash is required unless did is a UUID")
-	}
-	now := time.Now()
-	obj := &drs.DrsObject{
-		Id:          id,
-		SelfUri:     "drs://" + id,
-		Size:        req.GetSize(),
-		CreatedTime: now,
-		UpdatedTime: now,
-		Name:        req.GetFileName(),
-	}
-	for t, v := range req.GetHashes() {
-		obj.Checksums = append(obj.Checksums, drs.Checksum{Type: t, Checksum: v})
-	}
-	if len(obj.Checksums) == 0 {
-		obj.Checksums = append(obj.Checksums, drs.Checksum{Type: "sha256", Checksum: id})
-	}
-	for _, u := range req.GetUrls() {
-		obj.AccessMethods = append(obj.AccessMethods, drs.AccessMethod{
-			Type:      "s3",
-			AccessUrl: drs.AccessMethodAccessUrl{Url: u},
-			Region:    "us-east-1",
-		})
-	}
-	authz := append([]string(nil), req.GetAuthz()...)
-	if len(authz) == 0 && req.HasOrganization() {
-		path := core.ResourcePathForScope(req.GetOrganization(), req.GetProject())
-		if path != "" {
-			authz = append(authz, path)
-		}
-	}
-	for i := range obj.AccessMethods {
-		obj.AccessMethods[i].Authorizations = drs.AccessMethodAuthorizations{
-			BearerAuthIssuers: authz,
-		}
-	}
-	return &core.InternalObject{DrsObject: *obj, Authorizations: authz}, nil
-}
 
 func handleInternalBulkCreate(database core.DatabaseInterface) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -280,61 +219,6 @@ func handleInternalBulkSHA256Validity(database core.DatabaseInterface) http.Hand
 	}
 }
 
-// Helper to convert internal DrsObject to Gen3 InternalRecord
-func drsToInternal(obj *core.InternalObject) internalapi.InternalRecordResponse {
-	hashes := make(map[string]string, len(obj.Checksums))
-	for _, c := range obj.Checksums {
-		hashes[c.Type] = c.Checksum
-	}
-	if len(hashes) == 0 && obj.Id != "" {
-		hashes["sha256"] = obj.Id
-	}
-
-	var urls []string
-	authz := append([]string(nil), obj.Authorizations...)
-	if len(obj.AccessMethods) > 0 {
-		for _, am := range obj.AccessMethods {
-			if am.AccessUrl.Url != "" {
-				urls = append(urls, am.AccessUrl.Url)
-			}
-		}
-	}
-	scope := core.ParseResourcePath(firstAuthz(authz))
-	resp := internalapi.InternalRecordResponse{
-		Authz: authz,
-		Urls:  urls,
-	}
-	if obj.Id != "" {
-		resp.SetDid(obj.Id)
-	}
-	resp.SetSize(obj.Size)
-	if len(hashes) > 0 {
-		resp.SetHashes(hashes)
-	}
-	if obj.Name != "" {
-		resp.SetFileName(obj.Name)
-	}
-	if scope.Organization != "" {
-		resp.SetOrganization(scope.Organization)
-	}
-	if scope.Project != "" {
-		resp.SetProject(scope.Project)
-	}
-	if !obj.CreatedTime.IsZero() {
-		resp.SetCreatedDate(obj.CreatedTime.Format(time.RFC3339))
-	}
-	if !obj.UpdatedTime.IsZero() {
-		resp.SetUpdatedDate(obj.UpdatedTime.Format(time.RFC3339))
-	}
-	return resp
-}
-
-func firstAuthz(authz []string) string {
-	if len(authz) == 0 {
-		return ""
-	}
-	return authz[0]
-}
 
 // handleInternalGet retrieves a record by DID.
 func handleInternalGet(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface) {
@@ -611,10 +495,3 @@ func handleInternalList(w http.ResponseWriter, r *http.Request, database core.Da
 	writeHTTPError(w, r, http.StatusNotImplemented, "Listing not fully implemented without query params", nil)
 }
 
-func normalizeHashQueryValue(raw string) string {
-	clean := strings.Trim(strings.TrimSpace(raw), `"'`)
-	if parts := strings.SplitN(clean, ":", 2); len(parts) == 2 {
-		return strings.Trim(strings.TrimSpace(parts[1]), `"'`)
-	}
-	return clean
-}

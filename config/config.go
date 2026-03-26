@@ -11,12 +11,68 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+const (
+	S3Prefix        = "s3://"
+	GCSPrefix       = "gs://"
+	AzurePrefix     = "azblob://"
+	FilePrefix      = "file:///"
+	DRSPrefix       = "drs://"
+	DefaultS3Region = "us-east-1"
+
+	DefaultSigningExpirySeconds = 900 // 15 minutes
+
+	// --- Route Constants ---
+	RouteHealthz = "/healthz"
+
+	// LFS
+	RouteLFSBatch    = "/info/lfs/objects/batch"
+	RouteLFSMetadata = "/info/lfs/objects/metadata"
+	RouteLFSObject   = "/info/lfs/objects/{oid}"
+	RouteLFSVerify   = "/info/lfs/verify"
+
+	// Metrics
+	RouteMetricsFiles      = "/index/v1/metrics/files"
+	RouteMetricsFileDetail = "/index/v1/metrics/files/{object_id}"
+	RouteMetricsSummary    = "/index/v1/metrics/summary"
+
+	// Docs
+	RouteSwaggerUI    = "/index/swagger"
+	RouteSwaggerUIAlt = "/index/swagger/"
+	RouteOpenAPISpec  = "/index/openapi.yaml"
+	RouteLFSSpec      = "/index/openapi-lfs.yaml"
+	RouteBucketSpec   = "/index/openapi-bucket.yaml"
+	RouteInternalSpec = "/index/openapi-internal.yaml"
+
+	// Internal DRS Data
+	RouteInternalDownload          = "/data/download/{file_id}"
+	RouteInternalUpload            = "/data/upload"
+	RouteInternalUploadURL         = "/data/upload/{file_id}"
+	RouteInternalMultipartInit     = "/data/multipart/init"
+	RouteInternalMultipartUpload   = "/data/multipart/upload"
+	RouteInternalMultipartComplete = "/data/multipart/complete"
+	RouteInternalBuckets           = "/data/buckets"
+	RouteInternalBucketDetail      = "/data/buckets/{bucket}"
+	RouteInternalBucketScopes      = "/data/buckets/{bucket}/scopes"
+
+	// Internal DRS Index
+	RouteInternalIndex       = "/index"
+	RouteInternalIndexDetail = "/index/{id}"
+	RouteInternalBulkHashes  = "/index/bulk/hashes"
+	RouteInternalBulkSHA256  = "/index/bulk/sha256/validity"
+	RouteInternalBulkCreate  = "/index/bulk"
+	RouteInternalBulkDocs    = "/index/bulk/documents"
+
+	// Core API
+	RouteCoreSHA256 = "/index/v1/sha256/validity"
+)
+
 type Config struct {
 	Port          int            `json:"port" yaml:"port"`
 	Database      DatabaseConfig `json:"database" yaml:"database"`
 	S3Credentials []S3Config     `json:"s3_credentials" yaml:"s3_credentials"`
 	Auth          AuthConfig     `json:"auth" yaml:"auth"`
 	LFS           LFSConfig      `json:"lfs" yaml:"lfs"`
+	Signing       SigningConfig  `json:"signing" yaml:"signing"`
 }
 
 type DatabaseConfig struct {
@@ -61,6 +117,10 @@ type BasicAuthConfig struct {
 	Password string `json:"password" yaml:"password"`
 }
 
+type SigningConfig struct {
+	DefaultExpirySeconds int `json:"default_expiry_seconds" yaml:"default_expiry_seconds"`
+}
+
 type LFSConfig struct {
 	MaxBatchObjects              int   `json:"max_batch_objects" yaml:"max_batch_objects"`
 	MaxBatchBodyBytes            int64 `json:"max_batch_body_bytes" yaml:"max_batch_body_bytes"`
@@ -86,6 +146,9 @@ func LoadConfig(configFile string) (*Config, error) {
 			MaxBatchBodyBytes:            DefaultLFSMaxBatchBodyBytes,
 			RequestLimitPerMinute:        DefaultLFSRequestLimitPerMinute,
 			BandwidthLimitBytesPerMinute: DefaultLFSBandwidthLimitBytesPerMinute,
+		},
+		Signing: SigningConfig{
+			DefaultExpirySeconds: DefaultSigningExpirySeconds,
 		},
 	}
 
@@ -155,6 +218,13 @@ func LoadConfig(configFile string) (*Config, error) {
 			return nil, fmt.Errorf("invalid DRS_LFS_BANDWIDTH_LIMIT_BYTES_PER_MINUTE: %s", v)
 		}
 		cfg.LFS.BandwidthLimitBytesPerMinute = i
+	}
+	if v := os.Getenv("DRS_SIGNING_DEFAULT_EXPIRY_SECONDS"); v != "" {
+		i, err := strconv.Atoi(v)
+		if err != nil {
+			return nil, fmt.Errorf("invalid DRS_SIGNING_DEFAULT_EXPIRY_SECONDS: %s", v)
+		}
+		cfg.Signing.DefaultExpirySeconds = i
 	}
 
 	// DB Env Vars overrides

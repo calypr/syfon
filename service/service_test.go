@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/calypr/drs-server/apigen/drs"
@@ -824,6 +825,116 @@ func TestPostUploadRequest_Gen3Unauthorized(t *testing.T) {
 	}
 	if resp.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d", resp.Code)
+	}
+}
+
+func TestPostUploadRequest_UsesScopedBucketWhenAuthorized(t *testing.T) {
+	mockDB := &testutils.MockDatabase{
+		Credentials: map[string]core.S3Credential{
+			"bucket-a": {Bucket: "bucket-a", Region: "us-east-1"},
+			"bucket-b": {Bucket: "bucket-b", Region: "us-west-2"},
+		},
+		BucketScopes: map[string]core.BucketScope{
+			"cbds|proj2": {
+				Organization: "cbds",
+				ProjectID:    "proj2",
+				Bucket:       "bucket-b",
+				PathPrefix:   "cbds/proj2",
+			},
+		},
+	}
+	service := NewObjectsAPIService(mockDB, &testutils.MockUrlManager{})
+
+	req := drs.UploadRequest{
+		Requests: []drs.UploadRequestObject{
+			{
+				Name:      "sample.bin",
+				Size:      10,
+				MimeType:  "application/octet-stream",
+				Checksums: []drs.Checksum{{Type: "sha256", Checksum: "deadbeef"}},
+			},
+		},
+	}
+	ctx := context.WithValue(context.Background(), core.AuthModeKey, "gen3")
+	ctx = context.WithValue(ctx, core.AuthHeaderPresentKey, true)
+	ctx = context.WithValue(ctx, core.UserPrivilegesKey, map[string]map[string]bool{
+		"/data_file":                    {"file_upload": true},
+		"/programs/cbds/projects/proj2": {"create": true},
+	})
+
+	resp, err := service.PostUploadRequest(ctx, req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.Code)
+	}
+	body, ok := resp.Body.(drs.UploadResponse)
+	if !ok {
+		t.Fatalf("expected UploadResponse body, got %T", resp.Body)
+	}
+	if len(body.Responses) != 1 || len(body.Responses[0].UploadMethods) != 1 {
+		t.Fatalf("unexpected upload response shape: %+v", body)
+	}
+	method := body.Responses[0].UploadMethods[0]
+	if method.Region != "us-west-2" {
+		t.Fatalf("expected scoped bucket region us-west-2, got %s", method.Region)
+	}
+	if !strings.Contains(method.AccessUrl.Url, "bucket-b") {
+		t.Fatalf("expected signed URL for bucket-b, got %s", method.AccessUrl.Url)
+	}
+}
+
+func TestPostUploadRequest_FallsBackWhenNoScopedAccess(t *testing.T) {
+	mockDB := &testutils.MockDatabase{
+		Credentials: map[string]core.S3Credential{
+			"bucket-a": {Bucket: "bucket-a", Region: "us-east-1"},
+			"bucket-b": {Bucket: "bucket-b", Region: "us-west-2"},
+		},
+		BucketScopes: map[string]core.BucketScope{
+			"cbds|proj2": {
+				Organization: "cbds",
+				ProjectID:    "proj2",
+				Bucket:       "bucket-b",
+				PathPrefix:   "cbds/proj2",
+			},
+		},
+	}
+	service := NewObjectsAPIService(mockDB, &testutils.MockUrlManager{})
+
+	req := drs.UploadRequest{
+		Requests: []drs.UploadRequestObject{
+			{
+				Name:      "sample.bin",
+				Size:      10,
+				MimeType:  "application/octet-stream",
+				Checksums: []drs.Checksum{{Type: "sha256", Checksum: "deadbeef"}},
+			},
+		},
+	}
+	ctx := context.WithValue(context.Background(), core.AuthModeKey, "gen3")
+	ctx = context.WithValue(ctx, core.AuthHeaderPresentKey, true)
+	ctx = context.WithValue(ctx, core.UserPrivilegesKey, map[string]map[string]bool{
+		"/data_file": {"file_upload": true},
+	})
+
+	resp, err := service.PostUploadRequest(ctx, req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.Code)
+	}
+	body, ok := resp.Body.(drs.UploadResponse)
+	if !ok {
+		t.Fatalf("expected UploadResponse body, got %T", resp.Body)
+	}
+	method := body.Responses[0].UploadMethods[0]
+	if method.Region != "us-east-1" {
+		t.Fatalf("expected fallback bucket region us-east-1, got %s", method.Region)
+	}
+	if !strings.Contains(method.AccessUrl.Url, "bucket-a") {
+		t.Fatalf("expected fallback signed URL for bucket-a, got %s", method.AccessUrl.Url)
 	}
 }
 

@@ -19,7 +19,7 @@ type openAPIDoc struct {
 func TestOpenAPISpecRoutesRegistered(t *testing.T) {
 	router := buildMockServerRouter()
 
-	req := httptest.NewRequest(http.MethodGet, "/openapi.yaml", nil)
+	req := httptest.NewRequest(http.MethodGet, "/index/openapi.yaml", nil)
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {

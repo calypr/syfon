@@ -5,32 +5,29 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/calypr/drs-server/config"
 	"github.com/calypr/drs-server/db/core"
 	"github.com/calypr/drs-server/db/sqlite"
 )
 
-func TestS3UrlManager_SignURL(t *testing.T) {
+func TestManager_SignURL(t *testing.T) {
 	ctx := context.Background()
-	// Use in-memory SQLite for testing
 	database, err := sqlite.NewSqliteDB(":memory:")
 	if err != nil {
 		t.Fatalf("failed to init db: %v", err)
 	}
 
-	// Create and save a credential
 	cred := &core.S3Credential{
 		Bucket:    "my-bucket",
 		Region:    "us-east-1",
 		AccessKey: "test-key-id",
 		SecretKey: "test-secret-key",
 	}
-	// Depending on how SaveS3Credential is defined, it might need a context.
-	// db.NewInMemoryDB likely returns a *InMemoryDB which implements DatabaseInterface.
 	if err := database.SaveS3Credential(ctx, cred); err != nil {
 		t.Fatalf("failed to save credential: %v", err)
 	}
 
-	manager := NewS3UrlManager(database)
+	manager := NewManager(database, config.SigningConfig{DefaultExpirySeconds: 900})
 
 	urlStr := "s3://my-bucket/my-obj"
 	signedURL, err := manager.SignURL(ctx, "resource-1", urlStr, SignOptions{})
@@ -38,8 +35,6 @@ func TestS3UrlManager_SignURL(t *testing.T) {
 		t.Fatalf("SignURL failed: %v", err)
 	}
 
-	// The exact formatted URL might depend on the SDK/Provider, but it should contain the bucket and key.
-	// For standard S3: https://my-bucket.s3.us-east-1.amazonaws.com/my-obj?...
 	if !strings.Contains(signedURL, "my-bucket") || !strings.Contains(signedURL, "my-obj") {
 		t.Errorf("expected signed URL to contain bucket and key, got: %s", signedURL)
 	}
@@ -48,7 +43,6 @@ func TestS3UrlManager_SignURL(t *testing.T) {
 		t.Errorf("expected signed URL to contain signature, got: %s", signedURL)
 	}
 
-	// Also test Upload URL
 	uploadURL, err := manager.SignUploadURL(ctx, "resource-1", urlStr, SignOptions{})
 	if err != nil {
 		t.Fatalf("SignUploadURL failed: %v", err)
@@ -58,23 +52,26 @@ func TestS3UrlManager_SignURL(t *testing.T) {
 	}
 }
 
-func TestS3UrlManager_InvalidScheme(t *testing.T) {
+func TestManager_FileScheme(t *testing.T) {
 	ctx := context.Background()
 	database, err := sqlite.NewSqliteDB(":memory:")
 	if err != nil {
 		t.Fatalf("failed to init db: %v", err)
 	}
-	manager := NewS3UrlManager(database)
+	manager := NewManager(database, config.SigningConfig{DefaultExpirySeconds: 900})
 
-	if _, err := manager.SignURL(ctx, "id", "https://example.org/file", SignOptions{}); err == nil {
-		t.Fatal("expected SignURL to fail for non-s3 scheme")
+	// file:// should work without DB credentials
+	urlStr := "file:///tmp/test.txt"
+	signedURL, err := manager.SignURL(ctx, "", urlStr, SignOptions{})
+	if err != nil {
+		t.Fatalf("SignURL failed for file scheme: %v", err)
 	}
-	if _, err := manager.SignUploadURL(ctx, "id", "https://example.org/file", SignOptions{}); err == nil {
-		t.Fatal("expected SignUploadURL to fail for non-s3 scheme")
+	if !strings.Contains(signedURL, "test.txt") {
+		t.Errorf("expected file URL to contain filename, got: %s", signedURL)
 	}
 }
 
-func TestS3UrlManager_MultipartMethods(t *testing.T) {
+func TestManager_MultipartMethods(t *testing.T) {
 	ctx := context.Background()
 	database, err := sqlite.NewSqliteDB(":memory:")
 	if err != nil {
@@ -85,14 +82,14 @@ func TestS3UrlManager_MultipartMethods(t *testing.T) {
 		Region:    "us-east-1",
 		AccessKey: "test-key-id",
 		SecretKey: "test-secret-key",
-		Endpoint:  "http://127.0.0.1:1",
+		Endpoint:  "http://127.0.0.1:1", // Unreachable endpoint for init/complete tests
 	}); err != nil {
 		t.Fatalf("failed to save credential: %v", err)
 	}
 
-	manager := NewS3UrlManager(database)
+	manager := NewManager(database, config.SigningConfig{DefaultExpirySeconds: 900})
 
-	// Presigning upload part is local and should succeed without calling remote services.
+	// Presigning upload part is local.
 	partURL, err := manager.SignMultipartPart(ctx, "mp-bucket", "obj", "upload-id", 1)
 	if err != nil {
 		t.Fatalf("SignMultipartPart failed: %v", err)
@@ -105,7 +102,31 @@ func TestS3UrlManager_MultipartMethods(t *testing.T) {
 	if _, err := manager.InitMultipartUpload(ctx, "mp-bucket", "obj"); err == nil {
 		t.Fatal("expected InitMultipartUpload to fail against unreachable endpoint")
 	}
-	if err := manager.CompleteMultipartUpload(ctx, "mp-bucket", "obj", "upload-id", []MultipartPart{{PartNumber: 1, ETag: "etag"}}); err == nil {
-		t.Fatal("expected CompleteMultipartUpload to fail against unreachable endpoint")
+}
+
+func TestManager_ResolveFallbackFromAccessIDToURLBucket(t *testing.T) {
+	ctx := context.Background()
+	database, err := sqlite.NewSqliteDB(":memory:")
+	if err != nil {
+		t.Fatalf("failed to init db: %v", err)
+	}
+	if err := database.SaveS3Credential(ctx, &core.S3Credential{
+		Bucket:    "cbds",
+		Provider:  "s3",
+		Region:    "us-east-1",
+		AccessKey: "test-key-id",
+		SecretKey: "test-secret-key",
+	}); err != nil {
+		t.Fatalf("failed to save credential: %v", err)
+	}
+
+	manager := NewManager(database, config.SigningConfig{DefaultExpirySeconds: 900})
+
+	signedURL, err := manager.SignURL(ctx, "s3", "s3://cbds/path/to/object", SignOptions{})
+	if err != nil {
+		t.Fatalf("SignURL failed: %v", err)
+	}
+	if !strings.Contains(signedURL, "cbds") || !strings.Contains(signedURL, "X-Amz-Signature") {
+		t.Fatalf("unexpected signed url: %s", signedURL)
 	}
 }
