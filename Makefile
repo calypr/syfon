@@ -276,6 +276,11 @@ coverage:
 	chmod +x ./scripts/run_coverage.sh
 	./scripts/run_coverage.sh
 
+.PHONY: coverage-meaningful
+coverage-meaningful:
+	chmod +x ./scripts/run_coverage.sh
+	COVERAGE_SCOPE=meaningful ./scripts/run_coverage.sh
+
 .PHONY: coverage-full
 coverage-full:
 	chmod +x ./scripts/run_coverage.sh

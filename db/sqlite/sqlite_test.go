@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -477,5 +478,107 @@ func TestSqliteDB_FileUsageMetrics_MissingObjectQueuedAndFlushedOnCreate(t *test
 	}
 	if usage.UploadCount != 1 || usage.DownloadCount != 1 {
 		t.Fatalf("expected queued usage to flush on create, got: %+v", usage)
+	}
+}
+
+func TestSqliteDB_BucketScopeLifecycle(t *testing.T) {
+	ctx := context.Background()
+	db, err := NewSqliteDB(":memory:")
+	if err != nil {
+		t.Fatalf("failed to create db: %v", err)
+	}
+
+	if err := db.CreateBucketScope(ctx, nil); err == nil {
+		t.Fatalf("expected validation error for nil scope")
+	}
+
+	scope := &core.BucketScope{
+		Organization: "calypr",
+		ProjectID:    "proj-a",
+		Bucket:       "bucket-a",
+		PathPrefix:   "/data/a/",
+	}
+	if err := db.CreateBucketScope(ctx, scope); err != nil {
+		t.Fatalf("CreateBucketScope failed: %v", err)
+	}
+
+	got, err := db.GetBucketScope(ctx, "calypr", "proj-a")
+	if err != nil {
+		t.Fatalf("GetBucketScope failed: %v", err)
+	}
+	if got.Bucket != "bucket-a" || got.PathPrefix != "data/a" {
+		t.Fatalf("unexpected scope: %+v", got)
+	}
+
+	if err := db.CreateBucketScope(ctx, &core.BucketScope{
+		Organization: "calypr",
+		ProjectID:    "proj-a",
+		Bucket:       "bucket-a",
+		PathPrefix:   "data/a",
+	}); err != nil {
+		t.Fatalf("idempotent create should succeed, got: %v", err)
+	}
+
+	if err := db.CreateBucketScope(ctx, &core.BucketScope{
+		Organization: "calypr",
+		ProjectID:    "proj-a",
+		Bucket:       "bucket-b",
+		PathPrefix:   "data/b",
+	}); !errors.Is(err, core.ErrConflict) {
+		t.Fatalf("expected ErrConflict for remap, got: %v", err)
+	}
+
+	all, err := db.ListBucketScopes(ctx)
+	if err != nil {
+		t.Fatalf("ListBucketScopes failed: %v", err)
+	}
+	if len(all) != 1 {
+		t.Fatalf("expected 1 scope, got %d", len(all))
+	}
+
+	_, err = db.GetBucketScope(ctx, "calypr", "missing")
+	if !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for missing scope, got: %v", err)
+	}
+}
+
+func TestSqliteDB_GetPendingLFSMeta(t *testing.T) {
+	ctx := context.Background()
+	db, err := NewSqliteDB(":memory:")
+	if err != nil {
+		t.Fatalf("failed to create db: %v", err)
+	}
+
+	now := time.Now().UTC()
+	oid := "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+	candidate := drs.DrsObjectCandidate{
+		Name: "candidate-get",
+		Checksums: []drs.Checksum{
+			{Type: "sha256", Checksum: oid},
+		},
+	}
+
+	if err := db.SavePendingLFSMeta(ctx, []core.PendingLFSMeta{
+		{
+			OID:       oid,
+			Candidate: candidate,
+			CreatedAt: now,
+			ExpiresAt: now.Add(10 * time.Minute),
+		},
+	}); err != nil {
+		t.Fatalf("SavePendingLFSMeta failed: %v", err)
+	}
+
+	got, err := db.GetPendingLFSMeta(ctx, oid)
+	if err != nil {
+		t.Fatalf("GetPendingLFSMeta failed: %v", err)
+	}
+	if got.Candidate.Name != "candidate-get" {
+		t.Fatalf("unexpected pending metadata: %+v", got)
+	}
+
+	_, err = db.GetPendingLFSMeta(ctx, "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
+	if !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for missing pending metadata, got: %v", err)
 	}
 }

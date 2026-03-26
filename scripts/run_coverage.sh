@@ -5,15 +5,25 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT_DIR="${ROOT_DIR}/coverage"
 OUT_FILE="${OUT_DIR}/coverage.out"
 HTML_FILE="${OUT_DIR}/coverage.html"
-SCOPE="${COVERAGE_SCOPE:-core}"
+SCOPE="${COVERAGE_SCOPE:-meaningful}"
 
 mkdir -p "${OUT_DIR}"
 
-if [[ "${SCOPE}" == "full" ]]; then
-  PKGS="$(cd "${ROOT_DIR}" && go list ./... | grep -Ev '^github.com/calypr/drs-server$|/apigen/|/cmd$|/cmd/|/tests/endpoints$|/db$|/db/postgres$|/testutils$')"
-else
-  PKGS="github.com/calypr/drs-server/db/core github.com/calypr/drs-server/db/sqlite github.com/calypr/drs-server/internal/api/middleware github.com/calypr/drs-server/service github.com/calypr/drs-server/urlmanager"
-fi
+case "${SCOPE}" in
+  full)
+    PKGS="$(cd "${ROOT_DIR}" && go list ./...)"
+    ;;
+  meaningful)
+    PKGS="$(cd "${ROOT_DIR}" && go list ./... | grep -Ev '^github.com/calypr/drs-server$|/apigen/|/tests/endpoints$|/testutils$|/cmd$|/cmd/openapi-remove-examples$|/db$')"
+    ;;
+  core)
+    PKGS="github.com/calypr/drs-server/db/core github.com/calypr/drs-server/db/sqlite github.com/calypr/drs-server/internal/api/middleware github.com/calypr/drs-server/service github.com/calypr/drs-server/urlmanager"
+    ;;
+  *)
+    echo "unknown COVERAGE_SCOPE='${SCOPE}'. valid: full, meaningful, core"
+    exit 1
+    ;;
+esac
 
 if [[ -z "${PKGS}" ]]; then
   echo "no packages selected for coverage run"
