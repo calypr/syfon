@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -48,7 +49,17 @@ func (s *ObjectsAPIService) PostUploadRequest(ctx context.Context, uploadRequest
 		}, nil
 	}
 
-	selected := creds[0]
+	// Pick fallback credential deterministically to avoid map-order instability.
+	selected := core.S3Credential{}
+	keys := make([]string, 0, len(credByBucket))
+	for b := range credByBucket {
+		keys = append(keys, b)
+	}
+	sort.Strings(keys)
+	if len(keys) > 0 {
+		selected = credByBucket[keys[0]]
+	}
+
 	if scopes, scopeErr := s.db.ListBucketScopes(ctx); scopeErr == nil {
 		for _, scope := range scopes {
 			resource := core.ResourcePathForScope(scope.Organization, scope.ProjectID)
