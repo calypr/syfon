@@ -11,7 +11,7 @@ Ensure all files referenced in `mkdocs.yml` under `nav` exist under `docs/`.
 - Ensure you have rebuilt the docs after making changes:
 
       ```bash
-      make mkdocs
+      make docs
       ```
 
 ### Server does not start

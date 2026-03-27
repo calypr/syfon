@@ -10,6 +10,11 @@ markdown_extensions:
           format: !!python/name:pymdownx.superfences.fence_code_format
 nav:
   - Home: index.md
+  - Quickstart: quickstart.md
+  - Build: build.md
   - Configuration: configuration.md
   - Deployment: deployment.md
   - Troubleshooting: troubleshooting.md
+  - Development: development.md
+  - Architecture: architecture.md
+  - ADR: adr-internal-vs-ga4gh-drs.md

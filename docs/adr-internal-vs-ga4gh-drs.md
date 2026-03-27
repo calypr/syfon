@@ -1,4 +1,4 @@
-# ADR: Internal DRS Delta (Non-LFS Path)
+# ADR: Internal DRS Delta
 
 ## Status
 Proposed (for internal review and standards pitch)
@@ -23,6 +23,7 @@ Git LFS is intentionally out of scope for this ADR. LFS remains an optional comp
 
 ## Problem Statement
 Our primary workflow requires:
+
 - Multipart upload and download for very large objects.
 - Resumable transfer semantics (upload and download).
 - Bulk record validity checks by SHA256.
@@ -35,6 +36,7 @@ Current DRS spec has improved bulk and registration capabilities, but does not y
 
 ## What Official DRS Already Covers (and we should use directly)
 These are not "gaps" and should stay on official endpoints:
+
 - Bulk object registration (`/objects/register`).
 - Bulk object retrieval (`/objects`).
 - Bulk delete (`/objects/delete`).
@@ -51,6 +53,7 @@ Implementation note:
 
 ### 1) Multipart Upload Session Lifecycle
 Needed behavior:
+
 - Explicit `init -> part upload -> complete/abort` state machine.
 - Idempotent part commits.
 - Resume from partial state after interruption.
@@ -61,6 +64,7 @@ Why this is a gap:
 
 ### 2) Multipart/Resumable Download Semantics
 Needed behavior:
+
 - Reliable range-based download strategy for large objects.
 - Resume token/state for interrupted downloads.
 - Optional server-side advisory for chunk sizing/concurrency.
@@ -70,6 +74,7 @@ Why this is a gap:
 
 ### 3) Bulk SHA256 Validity Endpoint
 Needed behavior:
+
 - Input: list of SHA256 values.
 - Output: map of `sha256 -> valid:boolean`.
 - Valid means: object record exists, references a registered bucket, and has valid S3 path syntax (object byte existence check is intentionally out of scope).
@@ -79,14 +84,17 @@ Why this is a gap:
 
 ### 4) Registration Preflight/Validation Contract
 Needed behavior:
+
 - Validate candidate metadata/authz/storage target before durable registration.
 - Return deterministic, per-candidate validation errors.
 
 Why this is a gap:
+
 - DRS registration exists, but explicit preflight contract for policy+storage validation without commit is not consistently standardized.
 
 ### 5) Rich Registration Envelope Around Base DRS Object
 Needed behavior:
+
 - Preserve `DrsObject` schema, but allow additional operational metadata needed for policy and workflow integrity.
 - Keep this extension explicit and versioned.
 
@@ -97,6 +105,7 @@ Why this is a gap:
 
 ## Conformance Risk If We Remove Internal Delta Too Early
 If we hard-conform to official DRS today without these internal capabilities:
+
 - Large-file durability regresses (multipart/resume behavior weakens).
 - Throughput regresses in high-volume push/pull workflows.
 - Validation fidelity regresses (more client-side guesswork).
@@ -107,11 +116,13 @@ These are functional regressions, not cosmetic differences.
 ---
 
 ## Target Architecture
+
 - Official DRS endpoints are canonical wherever they provide required behavior.
 - Internal endpoints exist only for features not yet standardized in DRS.
 - Internal capabilities are designed as candidate DRS extensions, not permanent private forks.
 
 Goal:
+
 - Minimize internal superset over time,
 - Without losing transfer durability, resumability, or validation guarantees.
 
@@ -119,6 +130,7 @@ Goal:
 
 ## Proposal to Upstream / Spec Evolution
 Propose the following additions/clarifications to DRS:
+
 1. Standard multipart upload session model (init/part/complete/abort/resume).
 2. Standard resumable download guidance/contract (range and resume semantics).
 3. Standard bulk SHA validity endpoint contract.
@@ -128,6 +140,7 @@ Propose the following additions/clarifications to DRS:
 ---
 
 ## Migration Guidance
+
 1. Keep using official DRS bulk endpoints in all new code where supported.
 2. Keep internal transfer/validity endpoints as temporary scaffolding.
 3. Maintain a parity matrix: `internal feature -> official DRS equivalent`.
@@ -153,6 +166,7 @@ Propose the following additions/clarifications to DRS:
 | Rich registration envelope around `DrsObject` | Base `DrsObject` + candidates only | Internal model wrappers/fields | Keep internal wrapper | Standard extension envelope guidance adopted and implemented |
 
 Notes:
+
 - “Official DRS Endpoint(s)” are listed as implemented in our generated spec branch and server surface.
 - Internal endpoints above are part of current deployed behavior and should be treated as temporary where a standards-equivalent path exists.
 
