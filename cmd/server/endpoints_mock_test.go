@@ -255,6 +255,8 @@ func requestBodyFor(method, template string) ([]byte, string) {
 			return []byte(`{"guid":"sha-1","authz":["/data_file"]}`), "application/json"
 		}
 		return []byte(`{}`), "application/json"
+	case "/data/upload/bulk":
+		return []byte(`{"requests":[{"file_id":"sha-1","bucket":"test-bucket-1","file_name":"sha-1"}]}`), "application/json"
 	case "/data/multipart/init":
 		return []byte(`{"guid":"sha-1","file_name":"sha-1","bucket":"test-bucket-1"}`), "application/json"
 	case "/data/multipart/upload":

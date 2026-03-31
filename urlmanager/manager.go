@@ -28,18 +28,22 @@ import (
 
 // cacheItem holds the blob.Bucket and any provider-specific clients (e.g. s3.Client).
 type cacheItem struct {
-	Bucket   *blob.Bucket
-	S3Client *s3.Client
+	Bucket        *blob.Bucket
+	S3Client      *s3.Client
+	S3Presigner   *s3.PresignClient
+	Provider      string
+	BucketName    string
+	SignerMissing bool
 }
 
 // Manager is the unified implementation of UrlManager.
-// It handles multicloud signing and multipart uploads by resolving 
+// It handles multicloud signing and multipart uploads by resolving
 // provider metadata from the database.
 type Manager struct {
 	database        core.DatabaseInterface
 	signing         config.SigningConfig
 	defaultProvider string
-	cache           sync.Map // keyed by bucket name
+	cache           sync.Map // keyed by provider+bucket
 }
 
 func NewManager(database core.DatabaseInterface, signing config.SigningConfig) *Manager {
@@ -66,32 +70,31 @@ func (m *Manager) SignURL(ctx context.Context, accessId string, urlStr string, o
 		expiry = time.Duration(opts.ExpiresIn) * time.Second
 	}
 
-	if p == provider.S3 && item.S3Client != nil {
-		presignClient := s3.NewPresignClient(item.S3Client)
-		req, err := presignClient.PresignGetObject(ctx, &s3.GetObjectInput{
-			Bucket: aws.String(bucketName),
-			Key:    aws.String(key),
-		}, func(o *s3.PresignOptions) {
-			o.Expires = expiry
-		})
-		if err != nil {
-			return "", fmt.Errorf("failed to sign s3 url: %w", err)
-		}
-		return req.URL, nil
-	}
-
 	signed, err := item.Bucket.SignedURL(ctx, key, &blob.SignedURLOptions{
 		Expiry: expiry,
 		Method: http.MethodGet,
 	})
-	if err != nil {
-		// If signing is not supported by the driver (e.g. fileblob), fallback to the original URL.
-		if strings.Contains(strings.ToLower(err.Error()), "unimplemented") || strings.Contains(strings.ToLower(err.Error()), "not supported") {
-			return urlStr, nil
-		}
-		return "", err
+	if err == nil {
+		return signed, nil
 	}
-	return signed, nil
+
+	// If driver signing is unsupported (or unavailable), fallback to provider-specific presigning.
+	if isSigningNotSupported(err) {
+		if p == provider.S3 && item.S3Presigner != nil {
+			req, pErr := item.S3Presigner.PresignGetObject(ctx, &s3.GetObjectInput{
+				Bucket: aws.String(bucketName),
+				Key:    aws.String(key),
+			}, func(o *s3.PresignOptions) {
+				o.Expires = expiry
+			})
+			if pErr != nil {
+				return "", fmt.Errorf("failed to sign s3 url: %w", pErr)
+			}
+			return req.URL, nil
+		}
+		return urlStr, nil
+	}
+	return "", err
 }
 
 func (m *Manager) SignUploadURL(ctx context.Context, accessId string, urlStr string, opts SignOptions) (string, error) {
@@ -110,32 +113,31 @@ func (m *Manager) SignUploadURL(ctx context.Context, accessId string, urlStr str
 		expiry = time.Duration(opts.ExpiresIn) * time.Second
 	}
 
-	if p == provider.S3 && item.S3Client != nil {
-		presignClient := s3.NewPresignClient(item.S3Client)
-		req, err := presignClient.PresignPutObject(ctx, &s3.PutObjectInput{
-			Bucket: aws.String(bucketName),
-			Key:    aws.String(key),
-		}, func(o *s3.PresignOptions) {
-			o.Expires = expiry
-		})
-		if err != nil {
-			return "", fmt.Errorf("failed to sign s3 upload url: %w", err)
-		}
-		return req.URL, nil
-	}
-
 	signed, err := item.Bucket.SignedURL(ctx, key, &blob.SignedURLOptions{
 		Expiry: expiry,
 		Method: http.MethodPut,
 	})
-	if err != nil {
-		// If signing is not supported by the driver (e.g. fileblob), fallback to the original URL.
-		if strings.Contains(strings.ToLower(err.Error()), "unimplemented") || strings.Contains(strings.ToLower(err.Error()), "not supported") {
-			return urlStr, nil
-		}
-		return "", err
+	if err == nil {
+		return signed, nil
 	}
-	return signed, nil
+
+	// If driver signing is unsupported (or unavailable), fallback to provider-specific presigning.
+	if isSigningNotSupported(err) {
+		if p == provider.S3 && item.S3Presigner != nil {
+			req, pErr := item.S3Presigner.PresignPutObject(ctx, &s3.PutObjectInput{
+				Bucket: aws.String(bucketName),
+				Key:    aws.String(key),
+			}, func(o *s3.PresignOptions) {
+				o.Expires = expiry
+			})
+			if pErr != nil {
+				return "", fmt.Errorf("failed to sign s3 upload url: %w", pErr)
+			}
+			return req.URL, nil
+		}
+		return urlStr, nil
+	}
+	return "", err
 }
 
 func (m *Manager) InitMultipartUpload(ctx context.Context, bucketName string, key string) (string, error) {
@@ -177,8 +179,10 @@ func (m *Manager) SignMultipartPart(ctx context.Context, bucketName string, key 
 		return "", err
 	}
 
-	presignClient := s3.NewPresignClient(item.S3Client)
-	req, err := presignClient.PresignUploadPart(ctx, &s3.UploadPartInput{
+	if item.S3Presigner == nil {
+		return "", fmt.Errorf("missing s3 presign client for bucket %s", bucketName)
+	}
+	req, err := item.S3Presigner.PresignUploadPart(ctx, &s3.UploadPartInput{
 		Bucket:     aws.String(bucketName),
 		Key:        aws.String(key),
 		UploadId:   aws.String(uploadId),
@@ -275,7 +279,8 @@ func (m *Manager) resolveProviderForBucket(ctx context.Context, bucket string) (
 }
 
 func (m *Manager) getBucket(ctx context.Context, bucketName string, p string) (*cacheItem, error) {
-	if val, ok := m.cache.Load(bucketName); ok {
+	cacheKey := providerBucketCacheKey(p, bucketName)
+	if val, ok := m.cache.Load(cacheKey); ok {
 		return val.(*cacheItem), nil
 	}
 
@@ -314,8 +319,20 @@ func (m *Manager) getBucket(ctx context.Context, bucketName string, p string) (*
 		return nil, err
 	}
 
-	m.cache.Store(bucketName, item)
+	m.cache.Store(cacheKey, item)
 	return item, nil
+}
+
+func providerBucketCacheKey(p string, bucketName string) string {
+	return strings.TrimSpace(provider.Normalize(p, "")) + "|" + strings.TrimSpace(bucketName)
+}
+
+func isSigningNotSupported(err error) bool {
+	if err == nil {
+		return false
+	}
+	lower := strings.ToLower(err.Error())
+	return strings.Contains(lower, "unimplemented") || strings.Contains(lower, "not supported")
 }
 
 func (m *Manager) openS3Bucket(ctx context.Context, bucketName string) (*cacheItem, error) {
@@ -356,7 +373,10 @@ func (m *Manager) openS3Bucket(ctx context.Context, bucketName string) (*cacheIt
 	}
 
 	return &cacheItem{
-		Bucket:   bucket,
-		S3Client: client,
+		Bucket:      bucket,
+		S3Client:    client,
+		S3Presigner: s3.NewPresignClient(client),
+		Provider:    provider.S3,
+		BucketName:  bucketName,
 	}, nil
 }

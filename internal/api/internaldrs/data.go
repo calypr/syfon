@@ -62,6 +62,10 @@ func RegisterInternalDataRoutes(router *mux.Router, database core.DatabaseInterf
 		handleInternalUploadURL(w, r, database, uM)
 	}), "InternalUploadURL")).Methods(http.MethodGet)
 
+	router.Handle(config.RouteInternalUploadBulk, drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handleInternalUploadBulk(w, r, database, uM)
+	}), "InternalUploadBulk")).Methods(http.MethodPost)
+
 	router.Handle(config.RouteInternalMultipartInit, drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handleInternalMultipartInit(w, r, database, uM)
 	}), "InternalMultipartInit")).Methods(http.MethodPost)

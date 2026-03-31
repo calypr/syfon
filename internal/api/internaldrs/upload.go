@@ -26,6 +26,30 @@ type multipartSession struct {
 
 var multipartUploadSessions sync.Map // uploadID -> multipartSession
 
+type internalUploadBulkRequest struct {
+	Requests []internalUploadBulkItem `json:"requests"`
+}
+
+type internalUploadBulkItem struct {
+	FileID    string `json:"file_id"`
+	Bucket    string `json:"bucket,omitempty"`
+	FileName  string `json:"file_name,omitempty"`
+	ExpiresIn *int   `json:"expires_in,omitempty"`
+}
+
+type internalUploadBulkResponse struct {
+	Results []internalUploadBulkResult `json:"results"`
+}
+
+type internalUploadBulkResult struct {
+	FileID   string  `json:"file_id"`
+	Bucket   string  `json:"bucket,omitempty"`
+	FileName string  `json:"file_name,omitempty"`
+	Url      *string `json:"url,omitempty"`
+	Status   int     `json:"status"`
+	Error    string  `json:"error,omitempty"`
+}
+
 func handleInternalUploadBlank(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface, uM urlmanager.UrlManager) {
 	var req internalapi.InternalUploadBlankRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -183,6 +207,125 @@ func handleInternalUploadURL(w http.ResponseWriter, r *http.Request, database co
 	if err := json.NewEncoder(w).Encode(internalapi.InternalSignedURL{Url: &signedURL}); err != nil {
 		slog.Error("internal encode response failed", "request_id", core.GetRequestID(r.Context()), "method", r.Method, "path", r.URL.Path, "err", err)
 	}
+}
+
+func handleInternalUploadBulk(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface, uM urlmanager.UrlManager) {
+	var req internalUploadBulkRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeHTTPError(w, r, http.StatusBadRequest, "Invalid request", nil)
+		return
+	}
+	if len(req.Requests) == 0 {
+		writeHTTPError(w, r, http.StatusBadRequest, "requests cannot be empty", nil)
+		return
+	}
+
+	resp := internalUploadBulkResponse{
+		Results: make([]internalUploadBulkResult, 0, len(req.Requests)),
+	}
+	aggregateStatus := http.StatusOK
+
+	for _, item := range req.Requests {
+		result := signInternalUploadBulkItem(r, database, uM, item)
+		if result.Status != http.StatusOK {
+			aggregateStatus = http.StatusMultiStatus
+		}
+		resp.Results = append(resp.Results, result)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(aggregateStatus)
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		slog.Error("internal encode response failed", "request_id", core.GetRequestID(r.Context()), "method", r.Method, "path", r.URL.Path, "err", err)
+	}
+}
+
+func signInternalUploadBulkItem(r *http.Request, database core.DatabaseInterface, uM urlmanager.UrlManager, item internalUploadBulkItem) internalUploadBulkResult {
+	result := internalUploadBulkResult{
+		FileID: strings.TrimSpace(item.FileID),
+		Status: http.StatusOK,
+	}
+	if result.FileID == "" {
+		result.Status = http.StatusBadRequest
+		result.Error = "file_id is required"
+		return result
+	}
+
+	targetResources := []string{"/data_file"}
+	if obj, err := database.GetObject(r.Context(), result.FileID); err == nil {
+		if len(obj.Authorizations) > 0 {
+			targetResources = obj.Authorizations
+		}
+	} else if errors.Is(err, core.ErrUnauthorized) {
+		result.Status = authStatusCodeForRequest(r)
+		result.Error = "Unauthorized"
+		return result
+	}
+
+	if !hasAnyMethodAccess(r, targetResources, "file_upload", "create", "update") {
+		result.Status = authStatusCodeForRequest(r)
+		result.Error = "Unauthorized"
+		return result
+	}
+
+	bucket := strings.TrimSpace(item.Bucket)
+	if bucket == "" {
+		creds, _ := database.ListS3Credentials(r.Context())
+		if len(creds) > 0 {
+			bucket = strings.TrimSpace(creds[0].Bucket)
+		}
+	}
+	result.Bucket = bucket
+
+	fileName := strings.TrimSpace(item.FileName)
+	if fileName == "" {
+		if resolvedKey, ok := resolveObjectS3Key(database, r, result.FileID, bucket); ok {
+			fileName = resolvedKey
+		} else {
+			fileName = result.FileID
+		}
+	}
+	result.FileName = fileName
+
+	if bucket == "" {
+		result.Status = http.StatusBadRequest
+		result.Error = "No bucket specified or configured"
+		return result
+	}
+
+	cred, err := database.GetS3Credential(r.Context(), bucket)
+	if err != nil {
+		result.Status = http.StatusBadRequest
+		result.Error = "bucket credential not found"
+		return result
+	}
+	objectURL, err := objectURLForCredential(cred, fileName)
+	if err != nil {
+		result.Status = http.StatusBadRequest
+		result.Error = err.Error()
+		return result
+	}
+
+	opts := urlmanager.SignOptions{}
+	if item.ExpiresIn != nil {
+		opts.ExpiresIn = *item.ExpiresIn
+	}
+	signedURL, err := uM.SignUploadURL(r.Context(), cred.Bucket, objectURL, opts)
+	if err != nil {
+		result.Status = http.StatusInternalServerError
+		result.Error = err.Error()
+		return result
+	}
+
+	result.Url = &signedURL
+	return result
+}
+
+func authStatusCodeForRequest(r *http.Request) int {
+	if core.IsGen3Mode(r.Context()) && !core.HasAuthHeader(r.Context()) {
+		return http.StatusUnauthorized
+	}
+	return http.StatusForbidden
 }
 
 func handleInternalMultipartInit(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface, uM urlmanager.UrlManager) {

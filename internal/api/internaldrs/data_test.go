@@ -721,6 +721,106 @@ func TestHandleInternalUploadURL_Branches(t *testing.T) {
 	})
 }
 
+func TestHandleInternalUploadBulk_MixedResults(t *testing.T) {
+	mockUM := &testutils.MockUrlManager{}
+	db := &testutils.MockDatabase{
+		Objects: map[string]*drs.DrsObject{
+			"obj-1": {
+				Id: "obj-1",
+				AccessMethods: []drs.AccessMethod{
+					{
+						Type: "s3",
+						AccessUrl: drs.AccessMethodAccessUrl{
+							Url: "s3://b1/prefix/from-existing.bin",
+						},
+					},
+				},
+			},
+		},
+		Credentials: map[string]core.S3Credential{
+			"b1": {Bucket: "b1", Provider: "s3", Region: "us-east-1"},
+		},
+	}
+
+	reqBody := internalUploadBulkRequest{
+		Requests: []internalUploadBulkItem{
+			{FileID: "obj-1", Bucket: "b1"},
+			{FileID: ""},
+		},
+	}
+	body, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest(http.MethodPost, "/data/upload/bulk", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+
+	handleInternalUploadBulk(rr, req, db, mockUM)
+
+	if rr.Code != http.StatusMultiStatus {
+		t.Fatalf("expected 207 for mixed batch results, got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var resp internalUploadBulkResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if len(resp.Results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(resp.Results))
+	}
+	if resp.Results[0].Status != http.StatusOK || resp.Results[0].Url == nil {
+		t.Fatalf("expected first result to be signed, got %+v", resp.Results[0])
+	}
+	if !strings.Contains(*resp.Results[0].Url, "upload=true") {
+		t.Fatalf("expected signed upload URL in first result, got %+v", resp.Results[0])
+	}
+	if resp.Results[0].FileName != "prefix/from-existing.bin" {
+		t.Fatalf("expected resolved key from existing object, got %q", resp.Results[0].FileName)
+	}
+	if resp.Results[1].Status != http.StatusBadRequest {
+		t.Fatalf("expected second result 400, got %+v", resp.Results[1])
+	}
+}
+
+func TestHandleInternalUploadBulk_Gen3UnauthorizedPerItem(t *testing.T) {
+	mockUM := &testutils.MockUrlManager{}
+	db := &testutils.MockDatabase{
+		Objects: map[string]*drs.DrsObject{
+			"secure-id": {
+				Id: "secure-id",
+			},
+		},
+		ObjectAuthz: map[string][]string{
+			"secure-id": {"/programs/p/projects/q"},
+		},
+	}
+
+	reqBody := internalUploadBulkRequest{
+		Requests: []internalUploadBulkItem{
+			{FileID: "secure-id", Bucket: "b1"},
+		},
+	}
+	body, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest(http.MethodPost, "/data/upload/bulk", bytes.NewReader(body))
+	ctx := context.WithValue(req.Context(), core.AuthModeKey, "gen3")
+	ctx = context.WithValue(ctx, core.AuthHeaderPresentKey, false)
+	req = req.WithContext(ctx)
+	rr := httptest.NewRecorder()
+
+	handleInternalUploadBulk(rr, req, db, mockUM)
+
+	if rr.Code != http.StatusMultiStatus {
+		t.Fatalf("expected 207, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp internalUploadBulkResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if len(resp.Results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(resp.Results))
+	}
+	if resp.Results[0].Status != http.StatusUnauthorized {
+		t.Fatalf("expected per-item status 401, got %+v", resp.Results[0])
+	}
+}
+
 func TestHandleInternalMultipartValidationErrors(t *testing.T) {
 	db := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}
 	um := &testutils.MockUrlManager{}

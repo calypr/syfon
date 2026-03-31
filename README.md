@@ -31,6 +31,10 @@ Create `config.local.yaml`:
 port: 8080
 auth:
   mode: local
+  # optional basic auth for local mode
+  # basic:
+  #   username: "drs-user"
+  #   password: "drs-pass"
 database:
   sqlite:
     file: "drs_local.db"
@@ -58,6 +62,7 @@ curl -s http://localhost:8080/healthz
 Notes:
 - `auth.mode` is required and must be `local` or `gen3`.
 - Local development should run `auth.mode: local` with SQLite only.
+- In `local` mode, set `auth.basic.username/password` (or env `DRS_BASIC_AUTH_USER` / `DRS_BASIC_AUTH_PASSWORD`) to enforce HTTP basic auth.
 - `gen3` mode is for deployed environments and requires PostgreSQL.
 
 ### Local Gen3 Mock Auth (no redeploy loop)
@@ -119,6 +124,8 @@ s3_credentials:
 ```
 
 In `gen3` mode, PostgreSQL is required unless `DRS_AUTH_MOCK_ENABLED=true` is set for local mock-auth testing.
+
+Detailed configuration reference (including env overrides): [docs/configuration.md](docs/configuration.md)
 
 ## Gen3/PostgreSQL Schema Initialization
 

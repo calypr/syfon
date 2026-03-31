@@ -47,6 +47,7 @@ const (
 	RouteInternalDownload          = "/data/download/{file_id}"
 	RouteInternalUpload            = "/data/upload"
 	RouteInternalUploadURL         = "/data/upload/{file_id}"
+	RouteInternalUploadBulk        = "/data/upload/bulk"
 	RouteInternalMultipartInit     = "/data/multipart/init"
 	RouteInternalMultipartUpload   = "/data/multipart/upload"
 	RouteInternalMultipartComplete = "/data/multipart/complete"
