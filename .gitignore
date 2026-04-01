@@ -8,6 +8,8 @@
 *.out
 *.a
 *.o
+*.env
+config_sample.yaml
 
 # Go workspace caches
 *.cover
@@ -36,3 +38,4 @@ syfon
 # Local runtime/test databases
 /drs.db
 /drs_test.db
+
