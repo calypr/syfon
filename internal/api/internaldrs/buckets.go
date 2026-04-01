@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/calypr/drs-server/config"
-	"github.com/calypr/drs-server/db/core"
+	"github.com/calypr/syfon/config"
+	"github.com/calypr/syfon/db/core"
 	"github.com/gorilla/mux"
 )
 

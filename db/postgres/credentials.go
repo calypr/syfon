@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/calypr/drs-server/db/core"
+	"github.com/calypr/syfon/db/core"
 )
 
 func (db *PostgresDB) GetS3Credential(ctx context.Context, bucket string) (*core.S3Credential, error) {
@@ -18,16 +18,38 @@ func (db *PostgresDB) GetS3Credential(ctx context.Context, bucket string) (*core
 		&c.Bucket, &c.Provider, &c.Region, &c.AccessKey, &c.SecretKey, &c.Endpoint,
 	)
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("credential not found")
+		notFoundErr := fmt.Errorf("credential not found")
+		core.AuditS3CredentialAccess(ctx, "read", bucket, notFoundErr)
+		return nil, notFoundErr
 	}
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch credential: %w", err)
+		wrapped := fmt.Errorf("failed to fetch credential: %w", err)
+		core.AuditS3CredentialAccess(ctx, "read", bucket, wrapped)
+		return nil, wrapped
 	}
-	return &c, nil
+	parsed, err := core.ParseS3CredentialFromStorage(&c)
+	if err != nil {
+		wrapped := fmt.Errorf("failed to decrypt credential: %w", err)
+		core.AuditS3CredentialAccess(ctx, "read", bucket, wrapped)
+		return nil, wrapped
+	}
+	core.AuditS3CredentialAccess(ctx, "read", bucket, nil)
+	return parsed, nil
 }
 
 func (db *PostgresDB) SaveS3Credential(ctx context.Context, cred *core.S3Credential) error {
-	_, err := db.db.ExecContext(ctx, `
+	bucket := ""
+	if cred != nil {
+		bucket = cred.Bucket
+	}
+	stored, err := core.PrepareS3CredentialForStorage(cred)
+	if err != nil {
+		wrapped := fmt.Errorf("failed to prepare credential for storage: %w", err)
+		core.AuditS3CredentialAccess(ctx, "write", bucket, wrapped)
+		return wrapped
+	}
+
+	_, err = db.db.ExecContext(ctx, `
 		INSERT INTO s3_credential (bucket, provider, region, access_key, secret_key, endpoint)
 		VALUES ($1, $2, $3, $4, $5, $6)
 		ON CONFLICT (bucket) DO UPDATE SET
@@ -36,11 +58,14 @@ func (db *PostgresDB) SaveS3Credential(ctx context.Context, cred *core.S3Credent
 			access_key = EXCLUDED.access_key,
 			secret_key = EXCLUDED.secret_key,
 			endpoint = EXCLUDED.endpoint`,
-		cred.Bucket, strings.ToLower(strings.TrimSpace(defaultProvider(cred.Provider))), cred.Region, cred.AccessKey, cred.SecretKey, cred.Endpoint,
+		stored.Bucket, strings.ToLower(strings.TrimSpace(defaultProvider(stored.Provider))), stored.Region, stored.AccessKey, stored.SecretKey, stored.Endpoint,
 	)
 	if err != nil {
-		return fmt.Errorf("failed to save credential: %w", err)
+		wrapped := fmt.Errorf("failed to save credential: %w", err)
+		core.AuditS3CredentialAccess(ctx, "write", stored.Bucket, wrapped)
+		return wrapped
 	}
+	core.AuditS3CredentialAccess(ctx, "write", stored.Bucket, nil)
 	return nil
 }
 
@@ -50,15 +75,20 @@ func (db *PostgresDB) DeleteS3Credential(ctx context.Context, bucket string) err
 
 	result, err := db.db.ExecContext(ctx, "DELETE FROM s3_credential WHERE bucket = $1", bucket)
 	if err != nil {
+		core.AuditS3CredentialAccess(ctx, "delete", bucket, err)
 		return err
 	}
 	rows, err := result.RowsAffected()
 	if err != nil {
+		core.AuditS3CredentialAccess(ctx, "delete", bucket, err)
 		return err
 	}
 	if rows == 0 {
-		return fmt.Errorf("credential not found")
+		notFoundErr := fmt.Errorf("credential not found")
+		core.AuditS3CredentialAccess(ctx, "delete", bucket, notFoundErr)
+		return notFoundErr
 	}
+	core.AuditS3CredentialAccess(ctx, "delete", bucket, nil)
 	return nil
 }
 
@@ -73,10 +103,18 @@ func (db *PostgresDB) ListS3Credentials(ctx context.Context) ([]core.S3Credentia
 	for rows.Next() {
 		var c core.S3Credential
 		if err := rows.Scan(&c.Bucket, &c.Provider, &c.Region, &c.AccessKey, &c.SecretKey, &c.Endpoint); err != nil {
+			core.AuditS3CredentialAccess(ctx, "list", "", err)
 			return nil, err
 		}
-		creds = append(creds, c)
+		parsed, err := core.ParseS3CredentialFromStorage(&c)
+		if err != nil {
+			wrapped := fmt.Errorf("failed to decrypt credential for bucket %s: %w", c.Bucket, err)
+			core.AuditS3CredentialAccess(ctx, "list", c.Bucket, wrapped)
+			return nil, wrapped
+		}
+		creds = append(creds, *parsed)
 	}
+	core.AuditS3CredentialAccess(ctx, "list", "", nil)
 	return creds, nil
 }
 

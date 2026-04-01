@@ -1,8 +1,8 @@
 package service
 
 import (
-	"github.com/calypr/drs-server/db/core"
-	"github.com/calypr/drs-server/urlmanager"
+	"github.com/calypr/syfon/db/core"
+	"github.com/calypr/syfon/urlmanager"
 )
 
 // ObjectsAPIService implements the Objects API service.

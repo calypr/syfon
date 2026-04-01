@@ -4,7 +4,7 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/calypr/drs-server/apigen/drs"
+	"github.com/calypr/syfon/apigen/drs"
 )
 
 func (s *ObjectsAPIService) GetServiceInfo(ctx context.Context) (drs.ImplResponse, error) {

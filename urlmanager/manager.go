@@ -15,9 +15,9 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 
-	"github.com/calypr/drs-server/config"
-	"github.com/calypr/drs-server/db/core"
-	"github.com/calypr/drs-server/internal/provider"
+	"github.com/calypr/syfon/config"
+	"github.com/calypr/syfon/db/core"
+	"github.com/calypr/syfon/internal/provider"
 
 	"gocloud.dev/blob"
 	_ "gocloud.dev/blob/azureblob"

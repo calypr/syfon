@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"runtime"
 
-	openapispec "github.com/calypr/drs-server/apigen/api"
-	"github.com/calypr/drs-server/config"
+	openapispec "github.com/calypr/syfon/apigen/api"
+	"github.com/calypr/syfon/config"
 	"github.com/gorilla/mux"
 	"gopkg.in/yaml.v3"
 )

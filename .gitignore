@@ -31,7 +31,7 @@ coverage.*
 
 site/
 
-drs-server
+syfon
 
 # Local runtime/test databases
 /drs.db

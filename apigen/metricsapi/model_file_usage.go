@@ -20,14 +20,14 @@ var _ MappedNullable = &FileUsage{}
 
 // FileUsage struct for FileUsage
 type FileUsage struct {
-	ObjectId *string `json:"object_id,omitempty"`
-	Name *string `json:"name,omitempty"`
-	Size *int64 `json:"size,omitempty"`
-	UploadCount *int64 `json:"upload_count,omitempty"`
-	DownloadCount *int64 `json:"download_count,omitempty"`
-	LastUploadTime NullableTime `json:"last_upload_time,omitempty"`
+	ObjectId         *string      `json:"object_id,omitempty"`
+	Name             *string      `json:"name,omitempty"`
+	Size             *int64       `json:"size,omitempty"`
+	UploadCount      *int64       `json:"upload_count,omitempty"`
+	DownloadCount    *int64       `json:"download_count,omitempty"`
+	LastUploadTime   NullableTime `json:"last_upload_time,omitempty"`
 	LastDownloadTime NullableTime `json:"last_download_time,omitempty"`
-	LastAccessTime NullableTime `json:"last_access_time,omitempty"`
+	LastAccessTime   NullableTime `json:"last_access_time,omitempty"`
 }
 
 // NewFileUsage instantiates a new FileUsage object
@@ -239,6 +239,7 @@ func (o *FileUsage) HasLastUploadTime() bool {
 func (o *FileUsage) SetLastUploadTime(v time.Time) {
 	o.LastUploadTime.Set(&v)
 }
+
 // SetLastUploadTimeNil sets the value for LastUploadTime to be an explicit nil
 func (o *FileUsage) SetLastUploadTimeNil() {
 	o.LastUploadTime.Set(nil)
@@ -281,6 +282,7 @@ func (o *FileUsage) HasLastDownloadTime() bool {
 func (o *FileUsage) SetLastDownloadTime(v time.Time) {
 	o.LastDownloadTime.Set(&v)
 }
+
 // SetLastDownloadTimeNil sets the value for LastDownloadTime to be an explicit nil
 func (o *FileUsage) SetLastDownloadTimeNil() {
 	o.LastDownloadTime.Set(nil)
@@ -323,6 +325,7 @@ func (o *FileUsage) HasLastAccessTime() bool {
 func (o *FileUsage) SetLastAccessTime(v time.Time) {
 	o.LastAccessTime.Set(&v)
 }
+
 // SetLastAccessTimeNil sets the value for LastAccessTime to be an explicit nil
 func (o *FileUsage) SetLastAccessTimeNil() {
 	o.LastAccessTime.Set(nil)
@@ -334,7 +337,7 @@ func (o *FileUsage) UnsetLastAccessTime() {
 }
 
 func (o FileUsage) MarshalJSON() ([]byte, error) {
-	toSerialize,err := o.ToMap()
+	toSerialize, err := o.ToMap()
 	if err != nil {
 		return []byte{}, err
 	}
@@ -405,5 +408,3 @@ func (v *NullableFileUsage) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }
-
-

@@ -10,14 +10,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/calypr/drs-server/apigen/drs"
-	"github.com/calypr/drs-server/apigen/internalapi"
-	"github.com/calypr/drs-server/config"
-	"github.com/calypr/drs-server/db/core"
-	corelogic "github.com/calypr/drs-server/internal/coreapi"
+	"github.com/calypr/syfon/apigen/drs"
+	"github.com/calypr/syfon/apigen/internalapi"
+	"github.com/calypr/syfon/config"
+	"github.com/calypr/syfon/db/core"
+	corelogic "github.com/calypr/syfon/internal/coreapi"
 	"github.com/gorilla/mux"
 )
-
 
 // RegisterInternalIndexRoutes registers the Internal-compatible routes on the router.
 func RegisterInternalIndexRoutes(router *mux.Router, database core.DatabaseInterface) {
@@ -53,7 +52,6 @@ func RegisterInternalIndexRoutes(router *mux.Router, database core.DatabaseInter
 		}
 	}), "InternalDetail")).Methods(http.MethodGet, http.MethodPut, http.MethodDelete)
 }
-
 
 func handleInternalBulkCreate(database core.DatabaseInterface) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -219,7 +217,6 @@ func handleInternalBulkSHA256Validity(database core.DatabaseInterface) http.Hand
 	}
 }
 
-
 // handleInternalGet retrieves a record by DID.
 func handleInternalGet(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface) {
 	vars := mux.Vars(r)
@@ -353,7 +350,6 @@ func handleInternalDelete(w http.ResponseWriter, r *http.Request, database core.
 
 	w.WriteHeader(http.StatusOK)
 }
-
 
 func parseScopeQuery(r *http.Request) (string, bool, error) {
 	authz := strings.TrimSpace(r.URL.Query().Get("authz"))
@@ -494,4 +490,3 @@ func handleInternalList(w http.ResponseWriter, r *http.Request, database core.Da
 	// Not strictly required for the test case described (which uses GetObjectByHash), but good to return empty list or not implemented.
 	writeHTTPError(w, r, http.StatusNotImplemented, "Listing not fully implemented without query params", nil)
 }
-

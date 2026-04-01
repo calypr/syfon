@@ -4,8 +4,8 @@ package db
 // The actual implementations are in subpackages.
 
 import (
-	"github.com/calypr/drs-server/db/core"
-	"github.com/calypr/drs-server/db/sqlite"
+	"github.com/calypr/syfon/db/core"
+	"github.com/calypr/syfon/db/sqlite"
 )
 
 // NewInMemoryDB returns a new database interface backed by an in-memory SQLite database.

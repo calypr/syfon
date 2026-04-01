@@ -11,9 +11,6 @@
 
 package drs
 
-
-
-
 type DrsServiceDrs struct {
 
 	// The max length the bulk request endpoints can handle (>= 1) before generating a 413 error e.g. how long can the arrays bulk_object_ids and bulk_object_access_ids be for this server.

@@ -34,7 +34,7 @@ gen:
 	if [[ ! -f "$$spec" ]]; then \
 	  if [[ "$(AUTO_INIT_SUBMODULE)" == "1" ]]; then \
 	    echo "OpenAPI spec '$$spec' not found. Initializing submodule..."; \
-	    git submodule update --init --recursive --depth 1 "$(SCHEMAS_SUBMODULE)" || true; \
+	    git submodule update --init --recursive --depth 1 "$(SCHEMAS_SUBMODULE)" \
 	  fi; \
 	fi; \
 	if [[ ! -f "$$spec" ]]; then \
@@ -64,7 +64,7 @@ gen:
 	  $(OAG_IMAGE) generate \
 	  -g go-server \
 	  --skip-validate-spec \
-	  --git-repo-id drs-server \
+	  --git-repo-id syfon \
 	  --git-user-id calypr \
 	  -i /local/apigen/api/openapi.yaml \
 	  -o /local/$(GEN_OUT) \
@@ -140,7 +140,7 @@ gen-lfs:
 	  $(OAG_IMAGE) generate \
 	  -g go \
 	  --skip-validate-spec \
-	  --git-repo-id drs-server \
+	  --git-repo-id syfon \
 	  --git-user-id calypr \
 	  -i /local/apigen/api/lfs.openapi.yaml \
 	  -o /local/$(LFS_GEN_OUT) \
@@ -175,7 +175,7 @@ gen-bucket:
 	  $(OAG_IMAGE) generate \
 	  -g go \
 	  --skip-validate-spec \
-	  --git-repo-id drs-server \
+	  --git-repo-id syfon \
 	  --git-user-id calypr \
 	  -i /local/apigen/api/bucket.openapi.yaml \
 	  -o /local/$(BUCKET_GEN_OUT) \
@@ -210,7 +210,7 @@ gen-metrics:
 	  $(OAG_IMAGE) generate \
 	  -g go \
 	  --skip-validate-spec \
-	  --git-repo-id drs-server \
+	  --git-repo-id syfon \
 	  --git-user-id calypr \
 	  -i /local/apigen/api/metrics.openapi.yaml \
 	  -o /local/$(METRICS_GEN_OUT) \
@@ -245,7 +245,7 @@ gen-internal:
 	  $(OAG_IMAGE) generate \
 	  -g go \
 	  --skip-validate-spec \
-	  --git-repo-id drs-server \
+	  --git-repo-id syfon \
 	  --git-user-id calypr \
 	  -i /local/apigen/api/internal.openapi.yaml \
 	  -o /local/$(INTERNAL_GEN_OUT) \

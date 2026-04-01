@@ -13,10 +13,8 @@ func TestLoadConfig_NoDatabaseError(t *testing.T) {
 }
 
 func TestLoadConfig_MinimalValid(t *testing.T) {
-	os.Setenv("DRS_DB_SQLITE_FILE", "drs.db")
-	os.Setenv("DRS_AUTH_MODE", "local")
-	defer os.Unsetenv("DRS_DB_SQLITE_FILE")
-	defer os.Unsetenv("DRS_AUTH_MODE")
+	t.Setenv("DRS_DB_SQLITE_FILE", "drs.db")
+	t.Setenv("DRS_AUTH_MODE", "local")
 
 	cfg, err := LoadConfig("")
 	if err != nil {
@@ -42,14 +40,9 @@ func TestLoadConfig_MinimalValid(t *testing.T) {
 }
 
 func TestLoadConfig_EnvOverrides(t *testing.T) {
-	os.Setenv("DRS_PORT", "9090")
-	os.Setenv("DRS_DB_SQLITE_FILE", "test_env.db")
-	os.Setenv("DRS_AUTH_MODE", "local")
-	defer func() {
-		os.Unsetenv("DRS_PORT")
-		os.Unsetenv("DRS_DB_SQLITE_FILE")
-		os.Unsetenv("DRS_AUTH_MODE")
-	}()
+	t.Setenv("DRS_PORT", "9090")
+	t.Setenv("DRS_DB_SQLITE_FILE", "test_env.db")
+	t.Setenv("DRS_AUTH_MODE", "local")
 
 	cfg, err := LoadConfig("")
 	if err != nil {
@@ -66,14 +59,9 @@ func TestLoadConfig_EnvOverrides(t *testing.T) {
 }
 
 func TestLoadConfig_PostgresEnv(t *testing.T) {
-	os.Setenv("DRS_DB_HOST", "myhost")
-	os.Setenv("DRS_DB_DATABASE", "mydb")
-	os.Setenv("DRS_AUTH_MODE", "gen3")
-	defer func() {
-		os.Unsetenv("DRS_DB_HOST")
-		os.Unsetenv("DRS_DB_DATABASE")
-		os.Unsetenv("DRS_AUTH_MODE")
-	}()
+	t.Setenv("DRS_DB_HOST", "myhost")
+	t.Setenv("DRS_DB_DATABASE", "mydb")
+	t.Setenv("DRS_AUTH_MODE", "gen3")
 
 	cfg, err := LoadConfig("")
 	if err != nil {
@@ -119,8 +107,7 @@ database:
 }
 
 func TestLoadConfig_AuthModeRequired(t *testing.T) {
-	os.Setenv("DRS_DB_SQLITE_FILE", "drs.db")
-	defer os.Unsetenv("DRS_DB_SQLITE_FILE")
+	t.Setenv("DRS_DB_SQLITE_FILE", "drs.db")
 
 	if _, err := LoadConfig(""); err == nil {
 		t.Fatal("expected error when auth.mode is not provided")
@@ -128,12 +115,8 @@ func TestLoadConfig_AuthModeRequired(t *testing.T) {
 }
 
 func TestLoadConfig_InvalidAuthMode(t *testing.T) {
-	os.Setenv("DRS_DB_SQLITE_FILE", "drs.db")
-	os.Setenv("DRS_AUTH_MODE", "weird")
-	defer func() {
-		os.Unsetenv("DRS_DB_SQLITE_FILE")
-		os.Unsetenv("DRS_AUTH_MODE")
-	}()
+	t.Setenv("DRS_DB_SQLITE_FILE", "drs.db")
+	t.Setenv("DRS_AUTH_MODE", "weird")
 
 	if _, err := LoadConfig(""); err == nil {
 		t.Fatal("expected error for invalid auth mode")
@@ -141,12 +124,8 @@ func TestLoadConfig_InvalidAuthMode(t *testing.T) {
 }
 
 func TestLoadConfig_Gen3RequiresPostgres(t *testing.T) {
-	os.Setenv("DRS_DB_SQLITE_FILE", "drs.db")
-	os.Setenv("DRS_AUTH_MODE", "gen3")
-	defer func() {
-		os.Unsetenv("DRS_DB_SQLITE_FILE")
-		os.Unsetenv("DRS_AUTH_MODE")
-	}()
+	t.Setenv("DRS_DB_SQLITE_FILE", "drs.db")
+	t.Setenv("DRS_AUTH_MODE", "gen3")
 
 	if _, err := LoadConfig(""); err == nil {
 		t.Fatal("expected error when auth.mode=gen3 and postgres is not configured")
@@ -154,16 +133,10 @@ func TestLoadConfig_Gen3RequiresPostgres(t *testing.T) {
 }
 
 func TestLoadConfig_InvalidDBPortEnv(t *testing.T) {
-	os.Setenv("DRS_DB_HOST", "localhost")
-	os.Setenv("DRS_DB_DATABASE", "drs")
-	os.Setenv("DRS_DB_PORT", "not-a-number")
-	os.Setenv("DRS_AUTH_MODE", "gen3")
-	defer func() {
-		os.Unsetenv("DRS_DB_HOST")
-		os.Unsetenv("DRS_DB_DATABASE")
-		os.Unsetenv("DRS_DB_PORT")
-		os.Unsetenv("DRS_AUTH_MODE")
-	}()
+	t.Setenv("DRS_DB_HOST", "localhost")
+	t.Setenv("DRS_DB_DATABASE", "drs")
+	t.Setenv("DRS_DB_PORT", "not-a-number")
+	t.Setenv("DRS_AUTH_MODE", "gen3")
 
 	if _, err := LoadConfig(""); err == nil {
 		t.Fatal("expected invalid DRS_DB_PORT to return error")
@@ -171,20 +144,12 @@ func TestLoadConfig_InvalidDBPortEnv(t *testing.T) {
 }
 
 func TestLoadConfig_LFSEnvOverrides(t *testing.T) {
-	os.Setenv("DRS_DB_SQLITE_FILE", "drs.db")
-	os.Setenv("DRS_AUTH_MODE", "local")
-	os.Setenv("DRS_LFS_MAX_BATCH_OBJECTS", "200")
-	os.Setenv("DRS_LFS_MAX_BATCH_BODY_BYTES", "123456")
-	os.Setenv("DRS_LFS_REQUEST_LIMIT_PER_MINUTE", "33")
-	os.Setenv("DRS_LFS_BANDWIDTH_LIMIT_BYTES_PER_MINUTE", "999")
-	defer func() {
-		os.Unsetenv("DRS_DB_SQLITE_FILE")
-		os.Unsetenv("DRS_AUTH_MODE")
-		os.Unsetenv("DRS_LFS_MAX_BATCH_OBJECTS")
-		os.Unsetenv("DRS_LFS_MAX_BATCH_BODY_BYTES")
-		os.Unsetenv("DRS_LFS_REQUEST_LIMIT_PER_MINUTE")
-		os.Unsetenv("DRS_LFS_BANDWIDTH_LIMIT_BYTES_PER_MINUTE")
-	}()
+	t.Setenv("DRS_DB_SQLITE_FILE", "drs.db")
+	t.Setenv("DRS_AUTH_MODE", "local")
+	t.Setenv("DRS_LFS_MAX_BATCH_OBJECTS", "200")
+	t.Setenv("DRS_LFS_MAX_BATCH_BODY_BYTES", "123456")
+	t.Setenv("DRS_LFS_REQUEST_LIMIT_PER_MINUTE", "33")
+	t.Setenv("DRS_LFS_BANDWIDTH_LIMIT_BYTES_PER_MINUTE", "999")
 
 	cfg, err := LoadConfig("")
 	if err != nil {

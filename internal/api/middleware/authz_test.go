@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/calypr/drs-server/db/core"
+	"github.com/calypr/syfon/db/core"
 )
 
 func TestLocalModeBasicAuthEnforced(t *testing.T) {

@@ -14,10 +14,10 @@ case "${SCOPE}" in
     PKGS="$(cd "${ROOT_DIR}" && go list ./...)"
     ;;
   meaningful)
-    PKGS="$(cd "${ROOT_DIR}" && go list ./... | grep -Ev '^github.com/calypr/drs-server$|/apigen/|/tests/endpoints$|/testutils$|/cmd$|/cmd/openapi-remove-examples$|/db$')"
+    PKGS="$(cd "${ROOT_DIR}" && go list ./... | grep -Ev '^github.com/calypr/syfon$|/apigen/|/tests/endpoints$|/testutils$|/cmd$|/cmd/openapi-remove-examples$|/db$')"
     ;;
   core)
-    PKGS="github.com/calypr/drs-server/db/core github.com/calypr/drs-server/db/sqlite github.com/calypr/drs-server/internal/api/middleware github.com/calypr/drs-server/service github.com/calypr/drs-server/urlmanager"
+    PKGS="github.com/calypr/syfon/db/core github.com/calypr/syfon/db/sqlite github.com/calypr/syfon/internal/api/middleware github.com/calypr/syfon/service github.com/calypr/syfon/urlmanager"
     ;;
   *)
     echo "unknown COVERAGE_SCOPE='${SCOPE}'. valid: full, meaningful, core"

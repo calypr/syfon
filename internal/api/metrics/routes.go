@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/calypr/drs-server/apigen/metricsapi"
-	"github.com/calypr/drs-server/config"
-	"github.com/calypr/drs-server/db/core"
+	"github.com/calypr/syfon/apigen/metricsapi"
+	"github.com/calypr/syfon/config"
+	"github.com/calypr/syfon/db/core"
 	"github.com/gorilla/mux"
 )
 

@@ -11,9 +11,6 @@
 
 package drs
 
-
-
-
 // Summary - A summary of what was resolved.
 type Summary struct {
 

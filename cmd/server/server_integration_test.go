@@ -13,13 +13,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/calypr/drs-server/apigen/drs"
-	"github.com/calypr/drs-server/config"
-	"github.com/calypr/drs-server/db"
-	"github.com/calypr/drs-server/db/core"
-	"github.com/calypr/drs-server/internal/api/internaldrs"
-	"github.com/calypr/drs-server/service"
-	"github.com/calypr/drs-server/urlmanager"
+	"github.com/calypr/syfon/apigen/drs"
+	"github.com/calypr/syfon/config"
+	"github.com/calypr/syfon/db"
+	"github.com/calypr/syfon/db/core"
+	"github.com/calypr/syfon/internal/api/internaldrs"
+	"github.com/calypr/syfon/service"
+	"github.com/calypr/syfon/urlmanager"
 )
 
 var (
@@ -32,6 +32,7 @@ func TestMain(m *testing.M) {
 }
 
 func TestS3Integration(t *testing.T) {
+	t.Setenv(core.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
 	configPath := *testConfigPath
 	if configPath == "" {
 		// Create a temporary config for testing if none provided

@@ -1,4 +1,4 @@
-name: DRS Server CI
+name: Syfon CI
 
 on:
   push:
@@ -58,4 +58,4 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Build container image
-        run: docker build -t drs-server:ci .
+        run: docker build -t syfon:ci .

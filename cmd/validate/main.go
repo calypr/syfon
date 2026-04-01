@@ -2,13 +2,13 @@ package validate
 
 import (
 	"flag"
+	"log/slog"
 	"net/http"
 	"os"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/spf13/cobra"
-	"go.uber.org/zap"
 )
 
 // defaultSpecPath is the fallback location of the OpenAPI specification
@@ -22,7 +22,7 @@ const defaultSpecPath = "apigen/api/openapi.yaml"
 //
 //	1\) Parses CLI flags for listen address and debug logging.
 //	2\) Determines the OpenAPI spec path from environment or default.
-//	3\) Builds a zap logger, honoring the debug flag.
+//	3\) Builds a structured logger, honoring the debug flag.
 //	4\) Constructs an OpenAPI validator middleware from the spec file.
 //	5\) Creates a Gin router and attaches middleware and routes.
 //	6\) Starts an HTTP server with sensible timeouts.
@@ -48,23 +48,12 @@ var Cmd = &cobra.Command{
 			specPath = defaultSpecPath
 		}
 
-		// Create a production\-oriented zap logger configuration.
-		// This sets up JSON logging with reasonable defaults.
-		cfg := zap.NewProductionConfig()
-
-		// If debug logging is requested via the flag, lower the log
-		// level to Debug so more verbose messages are emitted.
+		level := slog.LevelInfo
 		if *debug {
-			cfg.Level = zap.NewAtomicLevelAt(zap.DebugLevel)
+			level = slog.LevelDebug
 		}
-
-		// Build the actual logger from the configuration.
-		// The error is intentionally ignored here for brevity, but in a
-		// production system you may want to handle it explicitly.
-		log, _ := cfg.Build()
-
-		// Ensure any buffered log entries are flushed before the process exits.
-		defer func() { _ = log.Sync() }()
+		logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: level}))
+		slog.SetDefault(logger)
 
 		// Build the OpenAPI validator middleware using the resolved spec path.
 		// The second argument (true) can be used to enable strict mode or
@@ -73,7 +62,8 @@ var Cmd = &cobra.Command{
 		// so the process is terminated with a fatal log.
 		validator, err := newSpecValidator(specPath, true)
 		if err != nil {
-			log.Fatal("openapi validator", zap.Error(err))
+			logger.Error("openapi validator setup failed", "err", err)
+			os.Exit(1)
 		}
 
 		// Create a new Gin engine instance. Gin provides routing, middleware,
@@ -109,11 +99,13 @@ var Cmd = &cobra.Command{
 		}
 
 		// Log that the server is starting and on which address it will listen.
-		log.Info("listening", zap.String("addr", *addr))
+		logger.Info("listening", "addr", *addr)
 
 		// Start the HTTP server. ListenAndServe blocks until the server stops
 		// or an unrecoverable error occurs. The returned error is ignored here,
 		// but in a more robust setup you might log or handle it.
-		_ = srv.ListenAndServe()
+		if err := srv.ListenAndServe(); err != nil {
+			logger.Error("validator server exited", "err", err)
+		}
 	},
 }

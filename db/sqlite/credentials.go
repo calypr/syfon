@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/calypr/drs-server/db/core"
+	"github.com/calypr/syfon/db/core"
 )
 
 func (db *SqliteDB) GetS3Credential(ctx context.Context, bucket string) (*core.S3Credential, error) {
@@ -18,17 +18,39 @@ func (db *SqliteDB) GetS3Credential(ctx context.Context, bucket string) (*core.S
 		&c.Bucket, &c.Provider, &c.Region, &c.AccessKey, &c.SecretKey, &c.Endpoint,
 	)
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("credential not found")
+		notFoundErr := fmt.Errorf("credential not found")
+		core.AuditS3CredentialAccess(ctx, "read", bucket, notFoundErr)
+		return nil, notFoundErr
 	}
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch credential: %w", err)
+		wrapped := fmt.Errorf("failed to fetch credential: %w", err)
+		core.AuditS3CredentialAccess(ctx, "read", bucket, wrapped)
+		return nil, wrapped
 	}
-	return &c, nil
+	parsed, err := core.ParseS3CredentialFromStorage(&c)
+	if err != nil {
+		wrapped := fmt.Errorf("failed to decrypt credential: %w", err)
+		core.AuditS3CredentialAccess(ctx, "read", bucket, wrapped)
+		return nil, wrapped
+	}
+	core.AuditS3CredentialAccess(ctx, "read", bucket, nil)
+	return parsed, nil
 }
 
 func (db *SqliteDB) SaveS3Credential(ctx context.Context, cred *core.S3Credential) error {
+	bucket := ""
+	if cred != nil {
+		bucket = cred.Bucket
+	}
+	stored, err := core.PrepareS3CredentialForStorage(cred)
+	if err != nil {
+		wrapped := fmt.Errorf("failed to prepare credential for storage: %w", err)
+		core.AuditS3CredentialAccess(ctx, "write", bucket, wrapped)
+		return wrapped
+	}
+
 	// SQLite UPSERT syntax: INSERT INTO ... ON CONFLICT (...) DO UPDATE SET ...
-	_, err := db.db.ExecContext(ctx, `
+	_, err = db.db.ExecContext(ctx, `
 		INSERT INTO s3_credential (bucket, provider, region, access_key, secret_key, endpoint)
 		VALUES (?, ?, ?, ?, ?, ?)
 		ON CONFLICT (bucket) DO UPDATE SET
@@ -37,11 +59,14 @@ func (db *SqliteDB) SaveS3Credential(ctx context.Context, cred *core.S3Credentia
 			access_key = excluded.access_key,
 			secret_key = excluded.secret_key,
 			endpoint = excluded.endpoint`,
-		cred.Bucket, strings.ToLower(strings.TrimSpace(defaultProvider(cred.Provider))), cred.Region, cred.AccessKey, cred.SecretKey, cred.Endpoint,
+		stored.Bucket, strings.ToLower(strings.TrimSpace(defaultProvider(stored.Provider))), stored.Region, stored.AccessKey, stored.SecretKey, stored.Endpoint,
 	)
 	if err != nil {
-		return fmt.Errorf("failed to save credential: %w", err)
+		wrapped := fmt.Errorf("failed to save credential: %w", err)
+		core.AuditS3CredentialAccess(ctx, "write", stored.Bucket, wrapped)
+		return wrapped
 	}
+	core.AuditS3CredentialAccess(ctx, "write", stored.Bucket, nil)
 	return nil
 }
 
@@ -49,15 +74,20 @@ func (db *SqliteDB) DeleteS3Credential(ctx context.Context, bucket string) error
 	_, _ = db.db.ExecContext(ctx, "DELETE FROM bucket_scope WHERE bucket = ?", bucket)
 	res, err := db.db.ExecContext(ctx, "DELETE FROM s3_credential WHERE bucket = ?", bucket)
 	if err != nil {
+		core.AuditS3CredentialAccess(ctx, "delete", bucket, err)
 		return err
 	}
 	rows, err := res.RowsAffected()
 	if err != nil {
+		core.AuditS3CredentialAccess(ctx, "delete", bucket, err)
 		return err
 	}
 	if rows == 0 {
-		return fmt.Errorf("credential not found")
+		notFoundErr := fmt.Errorf("credential not found")
+		core.AuditS3CredentialAccess(ctx, "delete", bucket, notFoundErr)
+		return notFoundErr
 	}
+	core.AuditS3CredentialAccess(ctx, "delete", bucket, nil)
 	return nil
 }
 
@@ -72,10 +102,18 @@ func (db *SqliteDB) ListS3Credentials(ctx context.Context) ([]core.S3Credential,
 	for rows.Next() {
 		var c core.S3Credential
 		if err := rows.Scan(&c.Bucket, &c.Provider, &c.Region, &c.AccessKey, &c.SecretKey, &c.Endpoint); err != nil {
+			core.AuditS3CredentialAccess(ctx, "list", "", err)
 			return nil, err
 		}
-		creds = append(creds, c)
+		parsed, err := core.ParseS3CredentialFromStorage(&c)
+		if err != nil {
+			wrapped := fmt.Errorf("failed to decrypt credential for bucket %s: %w", c.Bucket, err)
+			core.AuditS3CredentialAccess(ctx, "list", c.Bucket, wrapped)
+			return nil, wrapped
+		}
+		creds = append(creds, *parsed)
 	}
+	core.AuditS3CredentialAccess(ctx, "list", "", nil)
 	return creds, nil
 }
 

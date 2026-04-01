@@ -11,9 +11,6 @@
 
 package drs
 
-
-
-
 // ServiceOrganization - Organization providing the service
 type ServiceOrganization struct {
 
@@ -28,7 +25,7 @@ type ServiceOrganization struct {
 func AssertServiceOrganizationRequired(obj ServiceOrganization) error {
 	elements := map[string]interface{}{
 		"name": obj.Name,
-		"url": obj.Url,
+		"url":  obj.Url,
 	}
 	for name, el := range elements {
 		if isZero := IsZeroValue(el); isZero {

@@ -9,15 +9,15 @@ RUN go mod download
 COPY . .
 ARG TARGETOS=linux
 ARG TARGETARCH
-RUN CGO_ENABLED=1 GOOS=${TARGETOS} GOARCH=${TARGETARCH:-$(go env GOARCH)} go build -o /out/drs-server .
+RUN CGO_ENABLED=1 GOOS=${TARGETOS} GOARCH=${TARGETARCH:-$(go env GOARCH)} go build -o /out/syfon .
 
 FROM alpine:3.21
 
 RUN apk add --no-cache ca-certificates tzdata && adduser -D -h /app drs
 WORKDIR /app
 
-COPY --from=builder /out/drs-server /usr/local/bin/drs-server
+COPY --from=builder /out/syfon /usr/local/bin/syfon
 
 EXPOSE 8080
 USER drs
-ENTRYPOINT ["drs-server"]
+ENTRYPOINT ["syfon"]

@@ -62,4 +62,3 @@ func TestMintObjectIDFromChecksum_NoScopeFallbackDeterministic(t *testing.T) {
 		t.Fatalf("expected deterministic no-scope fallback IDs to match: %s vs %s", id1, id2)
 	}
 }
-

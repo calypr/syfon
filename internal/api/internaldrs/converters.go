@@ -6,11 +6,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/calypr/drs-server/apigen/drs"
-	"github.com/calypr/drs-server/apigen/internalapi"
-	"github.com/calypr/drs-server/config"
-	"github.com/calypr/drs-server/db/core"
-	"github.com/calypr/drs-server/internal/provider"
+	"github.com/calypr/syfon/apigen/drs"
+	"github.com/calypr/syfon/apigen/internalapi"
+	"github.com/calypr/syfon/config"
+	"github.com/calypr/syfon/db/core"
+	"github.com/calypr/syfon/internal/provider"
 	"github.com/google/uuid"
 )
 

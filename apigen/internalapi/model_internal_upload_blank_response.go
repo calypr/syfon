@@ -1,7 +1,7 @@
 /*
 Internal Compatibility API (DRS Server)
 
-Consolidated internal API delta for drs-server. This spec captures non-GA4GH DRS internal/compatibility routes. 
+Consolidated internal API delta for drs-server. This spec captures non-GA4GH DRS internal/compatibility routes.
 
 API version: 1.0.0
 */
@@ -20,7 +20,7 @@ var _ MappedNullable = &InternalUploadBlankResponse{}
 // InternalUploadBlankResponse struct for InternalUploadBlankResponse
 type InternalUploadBlankResponse struct {
 	Guid *string `json:"guid,omitempty"`
-	Url *string `json:"url,omitempty"`
+	Url  *string `json:"url,omitempty"`
 }
 
 // NewInternalUploadBlankResponse instantiates a new InternalUploadBlankResponse object
@@ -105,7 +105,7 @@ func (o *InternalUploadBlankResponse) SetUrl(v string) {
 }
 
 func (o InternalUploadBlankResponse) MarshalJSON() ([]byte, error) {
-	toSerialize,err := o.ToMap()
+	toSerialize, err := o.ToMap()
 	if err != nil {
 		return []byte{}, err
 	}
@@ -158,5 +158,3 @@ func (v *NullableInternalUploadBlankResponse) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }
-
-

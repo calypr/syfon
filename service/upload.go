@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/calypr/drs-server/apigen/drs"
-	"github.com/calypr/drs-server/db/core"
-	"github.com/calypr/drs-server/urlmanager"
+	"github.com/calypr/syfon/apigen/drs"
+	"github.com/calypr/syfon/db/core"
+	"github.com/calypr/syfon/urlmanager"
 )
 
 func (s *ObjectsAPIService) PostUploadRequest(ctx context.Context, uploadRequest drs.UploadRequest) (drs.ImplResponse, error) {

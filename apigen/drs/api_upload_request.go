@@ -19,7 +19,7 @@ import (
 
 // UploadRequestAPIController binds http requests to an api service and writes the service results to the http response
 type UploadRequestAPIController struct {
-	service UploadRequestAPIServicer
+	service      UploadRequestAPIServicer
 	errorHandler ErrorHandler
 }
 
@@ -62,7 +62,7 @@ func (c *UploadRequestAPIController) Routes() Routes {
 // OrderedRoutes returns all the api routes in a deterministic order for the UploadRequestAPIController
 func (c *UploadRequestAPIController) OrderedRoutes() []Route {
 	return []Route{
-		Route{
+		{
 			"PostUploadRequest",
 			strings.ToUpper("Post"),
 			"/ga4gh/drs/v1/upload-request",
@@ -70,8 +70,6 @@ func (c *UploadRequestAPIController) OrderedRoutes() []Route {
 		},
 	}
 }
-
-
 
 // PostUploadRequest - Request upload methods for files
 func (c *UploadRequestAPIController) PostUploadRequest(w http.ResponseWriter, r *http.Request) {

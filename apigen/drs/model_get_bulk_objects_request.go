@@ -11,9 +11,6 @@
 
 package drs
 
-
-
-
 type GetBulkObjectsRequest struct {
 
 	// the encoded JWT GA4GH Passport that contains embedded Visas.  The overall JWT is signed as are the individual Passport Visas.

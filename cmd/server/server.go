@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"log/slog"
 	"net/http"
 	"os"
@@ -14,19 +13,19 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/calypr/drs-server/apigen/drs"
-	"github.com/calypr/drs-server/config"
-	"github.com/calypr/drs-server/db/core"
-	"github.com/calypr/drs-server/db/postgres"
-	"github.com/calypr/drs-server/db/sqlite"
-	coreapi "github.com/calypr/drs-server/internal/api/coreapi"
-	"github.com/calypr/drs-server/internal/api/docs"
-	"github.com/calypr/drs-server/internal/api/internaldrs"
-	"github.com/calypr/drs-server/internal/api/lfs"
-	"github.com/calypr/drs-server/internal/api/metrics"
-	"github.com/calypr/drs-server/internal/api/middleware"
-	"github.com/calypr/drs-server/service"
-	"github.com/calypr/drs-server/urlmanager"
+	"github.com/calypr/syfon/apigen/drs"
+	"github.com/calypr/syfon/config"
+	"github.com/calypr/syfon/db/core"
+	"github.com/calypr/syfon/db/postgres"
+	"github.com/calypr/syfon/db/sqlite"
+	coreapi "github.com/calypr/syfon/internal/api/coreapi"
+	"github.com/calypr/syfon/internal/api/docs"
+	"github.com/calypr/syfon/internal/api/internaldrs"
+	"github.com/calypr/syfon/internal/api/lfs"
+	"github.com/calypr/syfon/internal/api/metrics"
+	"github.com/calypr/syfon/internal/api/middleware"
+	"github.com/calypr/syfon/service"
+	"github.com/calypr/syfon/urlmanager"
 	"github.com/gorilla/mux"
 	"github.com/spf13/cobra"
 )
@@ -37,13 +36,20 @@ var Cmd = &cobra.Command{
 	Use:   "serve",
 	Short: "Starts the DRS Object API server",
 	Run: func(cmd *cobra.Command, args []string) {
+		logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+		slog.SetDefault(logger)
+		fatal := func(msg string, args ...any) {
+			logger.Error(msg, args...)
+			os.Exit(1)
+		}
+
 		// Load Config
 		cfg, err := config.LoadConfig(configFile)
 		if err != nil {
-			log.Fatalf("Failed to load config: %v", err)
+			fatal("failed to load config", "err", err)
 		}
 		if cfg.Auth.Mode == config.AuthModeGen3 && cfg.Database.Postgres == nil && !isMockAuthEnabled() {
-			log.Fatal("auth.mode=gen3 requires postgres database")
+			fatal("auth.mode=gen3 requires postgres database")
 		}
 
 		// Init DB
@@ -55,7 +61,7 @@ var Cmd = &cobra.Command{
 			if dbPath == "" {
 				dbPath = "drs.db"
 			}
-			fmt.Printf("Initializing SqliteDB (File: %s)\n", dbPath)
+			logger.Info("initializing sqlite database", "file", dbPath)
 			database, errDb = sqlite.NewSqliteDB(dbPath)
 		} else if cfg.Database.Postgres != nil {
 			dsn := fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=%s",
@@ -66,19 +72,28 @@ var Cmd = &cobra.Command{
 				cfg.Database.Postgres.Database,
 				cfg.Database.Postgres.SSLMode,
 			)
-			fmt.Printf("Initializing PostgresDB (Host: %s, DB: %s)\n", cfg.Database.Postgres.Host, cfg.Database.Postgres.Database)
+			logger.Info("initializing postgres database", "host", cfg.Database.Postgres.Host, "database", cfg.Database.Postgres.Database)
 			database, errDb = postgres.NewPostgresDB(dsn)
 		} else {
-			log.Fatal("No database configuration provided")
+			fatal("no database configuration provided")
 		}
 
 		if errDb != nil {
-			log.Fatalf("Failed to initialize database: %v", errDb)
+			fatal("failed to initialize database", "err", errDb)
 		}
 
 		// Load S3 Credentials from Config if present
 		if len(cfg.S3Credentials) > 0 {
-			fmt.Printf("Loading %d S3 credentials from config\n", len(cfg.S3Credentials))
+			encryptionEnabled, encErr := core.CredentialEncryptionEnabled()
+			if encErr != nil {
+				fatal("invalid credential encryption configuration", "env", core.CredentialMasterKeyEnv, "err", encErr)
+			}
+			if !encryptionEnabled {
+				fatal("s3 credential encryption key is required", "env", core.CredentialMasterKeyEnv)
+			}
+
+			logger.Info("loading configured s3 credentials", "count", len(cfg.S3Credentials))
+			// S3 credentials are encrypted before persistence and audited on read/write/delete/list.
 			for _, c := range cfg.S3Credentials {
 				cred := &core.S3Credential{
 					Bucket:    c.Bucket,
@@ -89,7 +104,7 @@ var Cmd = &cobra.Command{
 					Endpoint:  c.Endpoint,
 				}
 				if err := database.SaveS3Credential(cmd.Context(), cred); err != nil {
-					log.Printf("Failed to save credential for bucket %s: %v", c.Bucket, err)
+					logger.Error("failed to save s3 credential", "bucket", c.Bucket, "err", err)
 				}
 			}
 		}
@@ -112,8 +127,7 @@ var Cmd = &cobra.Command{
 
 		// Init AuthZ Middleware
 		// We use a standard slog.Logger for data-client compatibility
-		slogLogger := slog.New(slog.NewTextHandler(log.Writer(), &slog.HandlerOptions{Level: slog.LevelDebug}))
-		slog.SetDefault(slogLogger)
+		slogLogger := logger
 		authzMiddleware := middleware.NewAuthzMiddleware(
 			slogLogger,
 			cfg.Auth.Mode,
@@ -138,7 +152,7 @@ var Cmd = &cobra.Command{
 		internaldrs.RegisterInternalIndexRoutes(router, database)
 
 		internaldrs.RegisterInternalDataRoutes(router, database, uM)
-		fmt.Println("Internal DRS compatibility routes enabled")
+		logger.Info("internal drs compatibility routes enabled")
 
 		// Register Git LFS API routes
 		lfs.RegisterLFSRoutes(router, database, uM, lfs.Options{
@@ -149,7 +163,7 @@ var Cmd = &cobra.Command{
 		})
 
 		addr := fmt.Sprintf(":%d", cfg.Port)
-		fmt.Printf("Server starting on %s\n", addr)
+		logger.Info("server starting", "addr", addr)
 		server := &http.Server{
 			Addr:              addr,
 			Handler:           router,
@@ -172,19 +186,19 @@ var Cmd = &cobra.Command{
 
 		select {
 		case err := <-errCh:
-			log.Fatalf("server listen failed: %v", err)
+			fatal("server listen failed", "err", err)
 		case sig := <-sigCh:
-			slog.Info("shutdown signal received", "signal", sig.String())
+			logger.Info("shutdown signal received", "signal", sig.String())
 		case <-cmd.Context().Done():
-			slog.Info("shutdown requested by context cancellation")
+			logger.Info("shutdown requested by context cancellation")
 		}
 
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		if err := server.Shutdown(shutdownCtx); err != nil {
-			log.Fatalf("server shutdown failed: %v", err)
+			fatal("server shutdown failed", "err", err)
 		}
-		slog.Info("server shutdown complete")
+		logger.Info("server shutdown complete")
 	},
 }
 

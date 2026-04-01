@@ -8,10 +8,10 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/calypr/drs-server/apigen/drs"
-	"github.com/calypr/drs-server/config"
-	"github.com/calypr/drs-server/db/core"
-	"github.com/calypr/drs-server/urlmanager"
+	"github.com/calypr/syfon/apigen/drs"
+	"github.com/calypr/syfon/config"
+	"github.com/calypr/syfon/db/core"
+	"github.com/calypr/syfon/urlmanager"
 	"github.com/gorilla/mux"
 )
 

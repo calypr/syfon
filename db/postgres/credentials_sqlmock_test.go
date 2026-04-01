@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/calypr/drs-server/db/core"
+	"github.com/calypr/syfon/db/core"
 )
 
 func newMockPostgresDB(t *testing.T) (*PostgresDB, sqlmock.Sqlmock, *sql.DB) {
@@ -44,6 +44,37 @@ func TestGetS3Credential(t *testing.T) {
 	}
 }
 
+func TestGetS3Credential_DecryptsEncryptedSecrets(t *testing.T) {
+	t.Setenv(core.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
+	encAK, err := core.EncryptCredentialField("ak")
+	if err != nil {
+		t.Fatalf("encrypt access key: %v", err)
+	}
+	encSK, err := core.EncryptCredentialField("sk")
+	if err != nil {
+		t.Fatalf("encrypt secret key: %v", err)
+	}
+
+	pg, mock, rawDB := newMockPostgresDB(t)
+	defer rawDB.Close()
+
+	rows := sqlmock.NewRows([]string{"bucket", "provider", "region", "access_key", "secret_key", "endpoint"}).
+		AddRow("b1", "s3", "us-east-1", encAK, encSK, "https://s3.example")
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT bucket, provider, region, access_key, secret_key, endpoint
+		FROM s3_credential WHERE bucket = $1`)).
+		WithArgs("b1").
+		WillReturnRows(rows)
+
+	got, err := pg.GetS3Credential(context.Background(), "b1")
+	if err != nil {
+		t.Fatalf("GetS3Credential returned error: %v", err)
+	}
+	if got.AccessKey != "ak" || got.SecretKey != "sk" {
+		t.Fatalf("expected decrypted keys, got %+v", got)
+	}
+}
+
 func TestGetS3CredentialNotFound(t *testing.T) {
 	pg, mock, rawDB := newMockPostgresDB(t)
 	defer rawDB.Close()
@@ -61,6 +92,7 @@ func TestGetS3CredentialNotFound(t *testing.T) {
 }
 
 func TestSaveS3Credential(t *testing.T) {
+	t.Setenv(core.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
 	pg, mock, rawDB := newMockPostgresDB(t)
 	defer rawDB.Close()
 
@@ -73,7 +105,7 @@ func TestSaveS3Credential(t *testing.T) {
 			access_key = EXCLUDED.access_key,
 			secret_key = EXCLUDED.secret_key,
 			endpoint = EXCLUDED.endpoint`)).
-		WithArgs("b1", "s3", "us-east-1", "ak", "sk", "https://s3.example").
+		WithArgs("b1", "s3", "us-east-1", sqlmock.AnyArg(), sqlmock.AnyArg(), "https://s3.example").
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	err := pg.SaveS3Credential(context.Background(), &core.S3Credential{

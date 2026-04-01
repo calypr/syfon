@@ -1,4 +1,4 @@
-site_name: drs-server
+site_name: sifon
 theme:
   name: readthedocs
   custom_dir: overrides

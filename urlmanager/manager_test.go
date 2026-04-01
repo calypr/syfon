@@ -5,12 +5,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/calypr/drs-server/config"
-	"github.com/calypr/drs-server/db/core"
-	"github.com/calypr/drs-server/db/sqlite"
+	"github.com/calypr/syfon/config"
+	"github.com/calypr/syfon/db/core"
+	"github.com/calypr/syfon/db/sqlite"
 )
 
 func TestManager_SignURL(t *testing.T) {
+	t.Setenv(core.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
 	ctx := context.Background()
 	database, err := sqlite.NewSqliteDB(":memory:")
 	if err != nil {
@@ -72,6 +73,7 @@ func TestManager_FileScheme(t *testing.T) {
 }
 
 func TestManager_MultipartMethods(t *testing.T) {
+	t.Setenv(core.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
 	ctx := context.Background()
 	database, err := sqlite.NewSqliteDB(":memory:")
 	if err != nil {
@@ -105,6 +107,7 @@ func TestManager_MultipartMethods(t *testing.T) {
 }
 
 func TestManager_ResolveFallbackFromAccessIDToURLBucket(t *testing.T) {
+	t.Setenv(core.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
 	ctx := context.Background()
 	database, err := sqlite.NewSqliteDB(":memory:")
 	if err != nil {

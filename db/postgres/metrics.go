@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/calypr/drs-server/db/core"
+	"github.com/calypr/syfon/db/core"
 	"github.com/lib/pq"
 )
 

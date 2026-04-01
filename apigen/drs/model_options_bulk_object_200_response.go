@@ -11,11 +11,7 @@
 
 package drs
 
-
-
-
 type OptionsBulkObject200Response struct {
-
 	Summary Summary `json:"summary,omitempty"`
 
 	// Error codes for each unresolved drs objects.

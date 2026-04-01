@@ -1,10 +1,10 @@
 # Configuration
 
-This document describes the `drs-server` configuration model used by `serve --config <file>`.
+This document describes the `syfon` configuration model used by `serve --config <file>`.
 
 ## Configuration file
 
-`drs-server` accepts YAML or JSON config. Core sections:
+`syfon` accepts YAML or JSON config. Core sections:
 
 - `port`
 - `auth`
@@ -140,7 +140,7 @@ Environment variables override config file values.
 Run server:
 
 ```bash
-drs-server serve --config config_sample.yaml
+syfon serve --config config_sample.yaml
 ```
 
 Health check:

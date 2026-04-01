@@ -1,7 +1,7 @@
 /*
 Internal Compatibility API (DRS Server)
 
-Consolidated internal API delta for drs-server. This spec captures non-GA4GH DRS internal/compatibility routes. 
+Consolidated internal API delta for drs-server. This spec captures non-GA4GH DRS internal/compatibility routes.
 
 API version: 1.0.0
 */
@@ -21,18 +21,18 @@ var _ MappedNullable = &InternalRecordResponse{}
 type InternalRecordResponse struct {
 	Did *string `json:"did,omitempty"`
 	// Hash map, e.g. {\"sha256\":\"...\"}
-	Hashes *map[string]string `json:"hashes,omitempty"`
-	Size *int64 `json:"size,omitempty"`
-	Urls []string `json:"urls,omitempty"`
-	Authz []string `json:"authz,omitempty"`
-	FileName *string `json:"file_name,omitempty"`
-	Organization *string `json:"organization,omitempty"`
-	Project *string `json:"project,omitempty"`
-	Baseid *string `json:"baseid,omitempty"`
-	Rev *string `json:"rev,omitempty"`
-	CreatedDate *string `json:"created_date,omitempty"`
-	UpdatedDate *string `json:"updated_date,omitempty"`
-	Uploader *string `json:"uploader,omitempty"`
+	Hashes       *map[string]string `json:"hashes,omitempty"`
+	Size         *int64             `json:"size,omitempty"`
+	Urls         []string           `json:"urls,omitempty"`
+	Authz        []string           `json:"authz,omitempty"`
+	FileName     *string            `json:"file_name,omitempty"`
+	Organization *string            `json:"organization,omitempty"`
+	Project      *string            `json:"project,omitempty"`
+	Baseid       *string            `json:"baseid,omitempty"`
+	Rev          *string            `json:"rev,omitempty"`
+	CreatedDate  *string            `json:"created_date,omitempty"`
+	UpdatedDate  *string            `json:"updated_date,omitempty"`
+	Uploader     *string            `json:"uploader,omitempty"`
 }
 
 // NewInternalRecordResponse instantiates a new InternalRecordResponse object
@@ -469,7 +469,7 @@ func (o *InternalRecordResponse) SetUploader(v string) {
 }
 
 func (o InternalRecordResponse) MarshalJSON() ([]byte, error) {
-	toSerialize,err := o.ToMap()
+	toSerialize, err := o.ToMap()
 	if err != nil {
 		return []byte{}, err
 	}
@@ -555,5 +555,3 @@ func (v *NullableInternalRecordResponse) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }
-
-

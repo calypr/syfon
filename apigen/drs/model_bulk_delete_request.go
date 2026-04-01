@@ -11,9 +11,6 @@
 
 package drs
 
-
-
-
 // BulkDeleteRequest - Request body for bulk delete operations
 type BulkDeleteRequest struct {
 

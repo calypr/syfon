@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/calypr/drs-server/apigen/drs"
+	"github.com/calypr/syfon/apigen/drs"
 )
 
 // DatabaseInterface defines the methods required for a database backend

@@ -3,7 +3,7 @@ package core
 import (
 	"time"
 
-	"github.com/calypr/drs-server/apigen/drs"
+	"github.com/calypr/syfon/apigen/drs"
 )
 
 // DrsObjectRecord represents the internal database record for a DRS Object

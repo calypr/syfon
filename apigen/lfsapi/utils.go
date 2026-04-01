@@ -1,7 +1,7 @@
 /*
 Git LFS API (DRS Server)
 
-OpenAPI model spec for Git LFS-compatible endpoints implemented by drs-server. This includes standard Batch and Verify payload models plus drs-server extensions used for upload proxy and metadata staging. 
+OpenAPI model spec for Git LFS-compatible endpoints implemented by drs-server. This includes standard Batch and Verify payload models plus drs-server extensions used for upload proxy and metadata staging.
 
 API version: 1.1.0
 */

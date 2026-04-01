@@ -1,12 +1,12 @@
-# Contributing to `drs-server`
+# Contributing to `syfon`
 
-Thank you for your interest in contributing to `drs-server`, a lightweight reference implementation of a GA4GH Data Repository Service (DRS) server in Go.
+Thank you for your interest in contributing to `syfon`, a lightweight reference implementation of a GA4GH Data Repository Service (DRS) server in Go.
 
 This document outlines how to set up your environment, make changes, and submit them.
 
 ## Project overview
 
-`drs-server`:
+`syfon`:
 
 * Implements a GA4GH DRS\-compatible HTTP API in Go.
 * Uses the official GA4GH DRS OpenAPI spec via a Git submodule at `ga4gh/data-repository-service-schemas`.
@@ -20,8 +20,8 @@ This document outlines how to set up your environment, make changes, and submit 
 2. Clone your fork:
 
    ```bash
-   git clone git@github.com:<you>/drs-server.git
-   cd drs-server
+   git clone git@github.com:<you>/syfon.git
+   cd syfon
    ```
 
 3. Initialize submodules:
@@ -85,6 +85,27 @@ go test ./...
 * Do not manually edit files under `apigen`.
 * Regenerate using `make gen` when the OpenAPI spec changes.
 * Commit the regenerated files along with the spec or handler changes.
+
+#### Generated code policy (`apigen/`)
+
+This repository keeps generated sources in version control.
+
+* Generated files in `apigen/` **must be committed** with the PR that changes generation inputs.
+* Regenerate `apigen/` when any of the following change:
+  * OpenAPI documents under `apigen/api/`
+  * Generator config/templates used by `make gen`
+  * GA4GH schema submodule updates that affect generated output
+* PRs that change generation inputs should include:
+  * the input change
+  * regenerated `apigen/` output
+  * a short note in the PR description that codegen was run
+* Generated files should include a `// GENERATED` header (or equivalent generator banner) so they are clearly machine-generated.
+
+Regeneration command:
+
+```bash
+make gen
+```
 
 ## Testing
 

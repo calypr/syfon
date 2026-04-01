@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/calypr/drs-server/apigen/drs"
-	"github.com/calypr/drs-server/db/core"
+	"github.com/calypr/syfon/apigen/drs"
+	"github.com/calypr/syfon/db/core"
 )
 
 func errorResponseForDBError(ctx context.Context, op string, err error) drs.ImplResponse {

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/calypr/drs-server/db/core"
+	"github.com/calypr/syfon/db/core"
 )
 
 type RequestIDMiddleware struct {

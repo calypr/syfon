@@ -11,12 +11,9 @@
 
 package drs
 
-
 import (
 	"time"
 )
-
-
 
 type GetServiceInfo200Response struct {
 
@@ -60,11 +57,11 @@ type GetServiceInfo200Response struct {
 // AssertGetServiceInfo200ResponseRequired checks if the required fields are not zero-ed
 func AssertGetServiceInfo200ResponseRequired(obj GetServiceInfo200Response) error {
 	elements := map[string]interface{}{
-		"id": obj.Id,
-		"name": obj.Name,
-		"type": obj.Type,
-		"organization": obj.Organization,
-		"version": obj.Version,
+		"id":                   obj.Id,
+		"name":                 obj.Name,
+		"type":                 obj.Type,
+		"organization":         obj.Organization,
+		"version":              obj.Version,
 		"maxBulkRequestLength": obj.MaxBulkRequestLength,
 	}
 	for name, el := range elements {

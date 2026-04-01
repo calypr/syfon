@@ -7,9 +7,9 @@ import (
 	"net/url"
 	"strconv"
 
-	"github.com/calypr/drs-server/apigen/internalapi"
-	"github.com/calypr/drs-server/db/core"
-	"github.com/calypr/drs-server/urlmanager"
+	"github.com/calypr/syfon/apigen/internalapi"
+	"github.com/calypr/syfon/db/core"
+	"github.com/calypr/syfon/urlmanager"
 	"github.com/gorilla/mux"
 )
 

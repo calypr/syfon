@@ -11,9 +11,6 @@
 
 package drs
 
-
-
-
 // BulkObjectIdNoPassport - The object that contains the DRS object IDs array
 type BulkObjectIdNoPassport struct {
 

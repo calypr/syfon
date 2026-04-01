@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/calypr/drs-server/apigen/drs"
-	"github.com/calypr/drs-server/db/core"
+	"github.com/calypr/syfon/apigen/drs"
+	"github.com/calypr/syfon/db/core"
 )
 
 func (db *SqliteDB) SavePendingLFSMeta(ctx context.Context, entries []core.PendingLFSMeta) error {

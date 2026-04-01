@@ -1,4 +1,4 @@
-# drs-server
+# syfon
 
 A lightweight reference implementation of a GA4GH Data Repository Service (DRS) server in Go.
 

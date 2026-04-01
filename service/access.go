@@ -7,9 +7,9 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/calypr/drs-server/apigen/drs"
-	"github.com/calypr/drs-server/db/core"
-	"github.com/calypr/drs-server/urlmanager"
+	"github.com/calypr/syfon/apigen/drs"
+	"github.com/calypr/syfon/db/core"
+	"github.com/calypr/syfon/urlmanager"
 )
 
 func (s *ObjectsAPIService) GetAccessURL(ctx context.Context, objectID string, accessID string) (drs.ImplResponse, error) {

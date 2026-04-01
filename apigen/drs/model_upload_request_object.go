@@ -11,9 +11,6 @@
 
 package drs
 
-
-
-
 type UploadRequestObject struct {
 
 	// The name of the file to upload
@@ -38,8 +35,8 @@ type UploadRequestObject struct {
 // AssertUploadRequestObjectRequired checks if the required fields are not zero-ed
 func AssertUploadRequestObjectRequired(obj UploadRequestObject) error {
 	elements := map[string]interface{}{
-		"name": obj.Name,
-		"size": obj.Size,
+		"name":      obj.Name,
+		"size":      obj.Size,
 		"mime_type": obj.MimeType,
 		"checksums": obj.Checksums,
 	}

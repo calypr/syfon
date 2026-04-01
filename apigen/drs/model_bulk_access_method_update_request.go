@@ -11,9 +11,6 @@
 
 package drs
 
-
-
-
 type BulkAccessMethodUpdateRequest struct {
 
 	// Array of access method updates to perform

@@ -11,12 +11,9 @@
 
 package drs
 
-
 import (
 	"time"
 )
-
-
 
 // Service - GA4GH service
 type Service struct {
@@ -56,11 +53,11 @@ type Service struct {
 // AssertServiceRequired checks if the required fields are not zero-ed
 func AssertServiceRequired(obj Service) error {
 	elements := map[string]interface{}{
-		"id": obj.Id,
-		"name": obj.Name,
-		"type": obj.Type,
+		"id":           obj.Id,
+		"name":         obj.Name,
+		"type":         obj.Type,
 		"organization": obj.Organization,
-		"version": obj.Version,
+		"version":      obj.Version,
 	}
 	for name, el := range elements {
 		if isZero := IsZeroValue(el); isZero {

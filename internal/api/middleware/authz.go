@@ -20,7 +20,7 @@ import (
 	"github.com/calypr/data-client/fence"
 	"github.com/calypr/data-client/logs"
 	"github.com/calypr/data-client/request"
-	"github.com/calypr/drs-server/db/core"
+	"github.com/calypr/syfon/db/core"
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/sync/singleflight"
 )
@@ -91,7 +91,7 @@ func (m *AuthzMiddleware) Middleware(next http.Handler) http.Handler {
 				if !ok ||
 					subtle.ConstantTimeCompare([]byte(user), []byte(m.basicUser)) != 1 ||
 					subtle.ConstantTimeCompare([]byte(pass), []byte(m.basicPass)) != 1 {
-					w.Header().Set("WWW-Authenticate", `Basic realm="drs-server"`)
+					w.Header().Set("WWW-Authenticate", `Basic realm="syfon"`)
 					http.Error(w, "Unauthorized", http.StatusUnauthorized)
 					return
 				}
@@ -171,7 +171,7 @@ func (m *AuthzMiddleware) Middleware(next http.Handler) http.Handler {
 			}
 
 			// We use a no-op gen3 logger for the request client to avoid unnecessary side effects in middleware
-			gen3Logger := logs.NewGen3Logger(m.logger, "", "drs-server")
+			gen3Logger := logs.NewGen3Logger(m.logger, "", "syfon")
 			reqClient := request.NewRequestInterface(gen3Logger, cred, nil)
 			authClient := fence.NewFenceClient(reqClient, cred, m.logger)
 

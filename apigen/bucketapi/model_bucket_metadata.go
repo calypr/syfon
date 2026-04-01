@@ -1,7 +1,7 @@
 /*
 Bucket Credential API (DRS Server)
 
-Bucket credential and scope management API used by drs-server compatible clients. 
+Bucket credential and scope management API used by drs-server compatible clients.
 
 API version: 1.0.0
 */
@@ -19,9 +19,9 @@ var _ MappedNullable = &BucketMetadata{}
 
 // BucketMetadata struct for BucketMetadata
 type BucketMetadata struct {
-	EndpointUrl *string `json:"endpoint_url,omitempty"`
-	Region *string `json:"region,omitempty"`
-	Programs []string `json:"programs,omitempty"`
+	EndpointUrl *string  `json:"endpoint_url,omitempty"`
+	Region      *string  `json:"region,omitempty"`
+	Programs    []string `json:"programs,omitempty"`
 }
 
 // NewBucketMetadata instantiates a new BucketMetadata object
@@ -138,7 +138,7 @@ func (o *BucketMetadata) SetPrograms(v []string) {
 }
 
 func (o BucketMetadata) MarshalJSON() ([]byte, error) {
-	toSerialize,err := o.ToMap()
+	toSerialize, err := o.ToMap()
 	if err != nil {
 		return []byte{}, err
 	}
@@ -194,5 +194,3 @@ func (v *NullableBucketMetadata) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }
-
-

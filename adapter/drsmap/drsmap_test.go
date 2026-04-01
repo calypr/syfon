@@ -3,8 +3,8 @@ package drsmap
 import (
 	"testing"
 
-	"github.com/calypr/drs-server/apigen/drs"
-	"github.com/calypr/drs-server/db/core"
+	"github.com/calypr/syfon/apigen/drs"
+	"github.com/calypr/syfon/db/core"
 )
 
 func TestToExternalSliceAndMapAndWrap(t *testing.T) {

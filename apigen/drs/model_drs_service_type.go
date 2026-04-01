@@ -11,11 +11,7 @@
 
 package drs
 
-
-
-
 type DrsServiceType struct {
-
 	Artifact string `json:"artifact"`
 }
 

@@ -9,10 +9,10 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/calypr/drs-server/apigen/drs"
-	"github.com/calypr/drs-server/apigen/lfsapi"
-	"github.com/calypr/drs-server/db/core"
-	"github.com/calypr/drs-server/urlmanager"
+	"github.com/calypr/syfon/apigen/drs"
+	"github.com/calypr/syfon/apigen/lfsapi"
+	"github.com/calypr/syfon/db/core"
+	"github.com/calypr/syfon/urlmanager"
 )
 
 func prepareDownloadActions(r *http.Request, database core.DatabaseInterface, uM urlmanager.UrlManager, oid string) (*lfsapi.BatchActions, *lfsapi.ObjectError) {

@@ -1,4 +1,4 @@
-module github.com/calypr/drs-server
+module github.com/calypr/syfon
 
 go 1.26.1
 

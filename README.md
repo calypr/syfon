@@ -1,4 +1,4 @@
-# drs-server
+# syfon
 
 A lightweight, production-grade implementation of a GA4GH Data Repository Service (DRS) server in Go.
 
@@ -14,7 +14,7 @@ A lightweight, production-grade implementation of a GA4GH Data Repository Servic
 
 ```bash
 git clone <your-repo-url>
-cd drs-server
+cd syfon
 ```
 
 ### 2. Run tests
@@ -84,7 +84,7 @@ Optional:
 
 ## Purpose
 
-The `drs-server` provides a robust implementation of the [GA4GH DRS API](https://ga4gh.github.io/data-repository-service-schemas/). It is designed to manage metadata for data objects and provide secure access via signed URLs.
+The `syfon` provides a robust implementation of the [GA4GH DRS API](https://ga4gh.github.io/data-repository-service-schemas/). It is designed to manage metadata for data objects and provide secure access via signed URLs.
 
 ### Key Features
 - **GA4GH DRS Compliance**: Implements the standard DRS API for describing and accessing data objects.
@@ -129,7 +129,7 @@ Detailed configuration reference (including env overrides): [docs/configuration.
 
 ## Gen3/PostgreSQL Schema Initialization
 
-For deployment environments using PostgreSQL, schema initialization is managed by the Helm chart (`helm/drs-server/templates/postgres-schema-configmap.yaml` + init Job).
+For deployment environments using PostgreSQL, schema initialization is managed by the Helm chart (`helm/syfon/templates/postgres-schema-configmap.yaml` + init Job).
 This repository intentionally does not ship a separate Postgres init SQL script.
 
 ## Local Development Workflow

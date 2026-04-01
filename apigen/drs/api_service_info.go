@@ -18,7 +18,7 @@ import (
 
 // ServiceInfoAPIController binds http requests to an api service and writes the service results to the http response
 type ServiceInfoAPIController struct {
-	service ServiceInfoAPIServicer
+	service      ServiceInfoAPIServicer
 	errorHandler ErrorHandler
 }
 
@@ -61,7 +61,7 @@ func (c *ServiceInfoAPIController) Routes() Routes {
 // OrderedRoutes returns all the api routes in a deterministic order for the ServiceInfoAPIController
 func (c *ServiceInfoAPIController) OrderedRoutes() []Route {
 	return []Route{
-		Route{
+		{
 			"GetServiceInfo",
 			strings.ToUpper("Get"),
 			"/ga4gh/drs/v1/service-info",
@@ -69,8 +69,6 @@ func (c *ServiceInfoAPIController) OrderedRoutes() []Route {
 		},
 	}
 }
-
-
 
 // GetServiceInfo - Retrieve information about this service
 func (c *ServiceInfoAPIController) GetServiceInfo(w http.ResponseWriter, r *http.Request) {

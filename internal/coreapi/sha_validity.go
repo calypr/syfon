@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	datadrs "github.com/calypr/data-client/drs"
-	"github.com/calypr/drs-server/db/core"
+	"github.com/calypr/syfon/db/core"
 )
 
 var ErrNoValidSHA256 = errors.New("no valid sha256 values provided")

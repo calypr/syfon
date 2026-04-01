@@ -5,7 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/calypr/drs-server/apigen/drs"
+	"github.com/calypr/syfon/apigen/drs"
 	"github.com/gorilla/mux"
 )
 

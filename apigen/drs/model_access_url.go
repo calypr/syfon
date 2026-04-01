@@ -11,9 +11,6 @@
 
 package drs
 
-
-
-
 type AccessUrl struct {
 
 	// A fully resolvable URL that can be used to fetch the actual object bytes.

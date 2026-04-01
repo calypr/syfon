@@ -11,9 +11,6 @@
 
 package drs
 
-
-
-
 // AccessMethodAccessUrl - An `AccessURL` that can be used to fetch the actual object bytes. Note that at least one of `access_url` and `access_id` must be provided.
 type AccessMethodAccessUrl struct {
 

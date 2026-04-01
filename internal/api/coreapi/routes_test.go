@@ -7,9 +7,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/calypr/drs-server/apigen/drs"
-	"github.com/calypr/drs-server/db/core"
-	"github.com/calypr/drs-server/testutils"
+	"github.com/calypr/syfon/apigen/drs"
+	"github.com/calypr/syfon/db/core"
+	"github.com/calypr/syfon/testutils"
 	"github.com/gorilla/mux"
 )
 

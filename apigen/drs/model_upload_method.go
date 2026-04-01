@@ -11,9 +11,6 @@
 
 package drs
 
-
-
-
 type UploadMethod struct {
 
 	// Type of upload method. Implementations MAY support any subset of these types. The 'https' type can be used to return a presigned POST URL and is expected to be the most common implementation for typical file uploads. This method provides a simple HTTP POST interface that works with standard web clients. The 's3' type is primarily intended to support uploads of large files that want to take advantage of multipart uploads and automatic retries implemented in AWS libraries. This method provides direct access to S3-specific upload capabilities. Other common implementations include 'gs' for Google Cloud Storage and 'sftp' for secure FTP uploads.
@@ -31,7 +28,7 @@ type UploadMethod struct {
 // AssertUploadMethodRequired checks if the required fields are not zero-ed
 func AssertUploadMethodRequired(obj UploadMethod) error {
 	elements := map[string]interface{}{
-		"type": obj.Type,
+		"type":       obj.Type,
 		"access_url": obj.AccessUrl,
 	}
 	for name, el := range elements {

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/calypr/drs-server/db/core"
+	"github.com/calypr/syfon/db/core"
 )
 
 func defaultProvider(provider string) string {

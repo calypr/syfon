@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/calypr/drs-server/apigen/drs"
-	"github.com/calypr/drs-server/db/core"
+	"github.com/calypr/syfon/apigen/drs"
+	"github.com/calypr/syfon/db/core"
 )
 
 func TestSqliteDB_CRUD(t *testing.T) {
@@ -119,6 +119,7 @@ func TestSqliteDB_GetObjectsByChecksum_WhenIDDiffers(t *testing.T) {
 }
 
 func TestSqliteDB_S3Credentials(t *testing.T) {
+	t.Setenv(core.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
 	ctx := context.Background()
 	db, err := NewSqliteDB(":memory:")
 	if err != nil {
@@ -155,6 +156,42 @@ func TestSqliteDB_S3Credentials(t *testing.T) {
 
 	if err := db.DeleteS3Credential(ctx, "test-bucket"); err != nil {
 		t.Fatalf("DeleteS3Credential failed: %v", err)
+	}
+}
+
+func TestSqliteDB_S3Credentials_EncryptedAtRest(t *testing.T) {
+	t.Setenv(core.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
+	ctx := context.Background()
+	db, err := NewSqliteDB(":memory:")
+	if err != nil {
+		t.Fatalf("failed to create db: %v", err)
+	}
+
+	cred := &core.S3Credential{
+		Bucket:    "enc-bucket",
+		Region:    "us-east-1",
+		AccessKey: "plain-ak",
+		SecretKey: "plain-sk",
+		Endpoint:  "http://localhost:9000",
+	}
+	if err := db.SaveS3Credential(ctx, cred); err != nil {
+		t.Fatalf("SaveS3Credential failed: %v", err)
+	}
+
+	var storedAK, storedSK string
+	if err := db.db.QueryRowContext(ctx, "SELECT access_key, secret_key FROM s3_credential WHERE bucket = ?", "enc-bucket").Scan(&storedAK, &storedSK); err != nil {
+		t.Fatalf("raw select failed: %v", err)
+	}
+	if storedAK == "plain-ak" || storedSK == "plain-sk" {
+		t.Fatalf("expected encrypted values at rest, got access=%q secret=%q", storedAK, storedSK)
+	}
+
+	got, err := db.GetS3Credential(ctx, "enc-bucket")
+	if err != nil {
+		t.Fatalf("GetS3Credential failed: %v", err)
+	}
+	if got.AccessKey != "plain-ak" || got.SecretKey != "plain-sk" {
+		t.Fatalf("expected decrypted values, got %+v", got)
 	}
 }
 
