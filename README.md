@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/images/syfon-logo.png" alt="syfon logo" width="520" />
+</p>
+
 # syfon
 
 A lightweight, production-grade implementation of a GA4GH Data Repository Service (DRS) server in Go.
