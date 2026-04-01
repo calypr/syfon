@@ -4,9 +4,13 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -54,6 +58,21 @@ func TestSyfonExternalServerE2E(t *testing.T) {
 	outPath := filepath.Join(t.TempDir(), "external-e2e-downloaded.txt")
 	out, err = executeRootCommand(t, "--server", serverURL, "download", "--did", uploadedID, "--out", outPath)
 	if err != nil {
+		if bucket, ok := missingCredentialBucket(out); ok {
+			bootstrapped, bootstrapErr := bootstrapExternalBucketCredential(serverURL, bucket)
+			if bootstrapErr != nil {
+				t.Skipf("external server missing credential for bucket %q and bootstrap failed: %v", bucket, bootstrapErr)
+			}
+			if !bootstrapped {
+				t.Skipf(
+					"external server missing credential for bucket %q. Set env vars (for example TEST_BUCKET_PROVIDER/ACCESS_KEY/SECRET_KEY/ENDPOINT/REGION) so test can bootstrap /data/buckets",
+					bucket,
+				)
+			}
+			out, err = executeRootCommand(t, "--server", serverURL, "download", "--did", uploadedID, "--out", outPath)
+		}
+	}
+	if err != nil {
 		t.Fatalf("download failed: %v output=%s", err, out)
 	}
 	got, err := os.ReadFile(outPath)
@@ -87,4 +106,96 @@ func parseUploadedObjectID(out string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("missing uploaded line")
+}
+
+var missingCredentialRe = regexp.MustCompile(`failed to get credentials for bucket ([^: ]+): credential not found`)
+
+func missingCredentialBucket(output string) (string, bool) {
+	m := missingCredentialRe.FindStringSubmatch(output)
+	if len(m) == 2 && strings.TrimSpace(m[1]) != "" {
+		return strings.TrimSpace(m[1]), true
+	}
+	return "", false
+}
+
+func bootstrapExternalBucketCredential(serverURL, bucket string) (bool, error) {
+	bucket = strings.TrimSpace(bucket)
+	if bucket == "" {
+		return false, fmt.Errorf("bucket name is empty")
+	}
+
+	provider := firstNonEmptyEnv("TEST_BUCKET_PROVIDER", "SYFON_E2E_BUCKET_PROVIDER", "BUCKET_PROVIDER", "SYFON_BUCKET_PROVIDER")
+	if provider == "" {
+		provider = "s3"
+	}
+	region := firstNonEmptyEnv("TEST_BUCKET_REGION", "SYFON_E2E_BUCKET_REGION", "BUCKET_REGION", "AWS_REGION", "AWS_DEFAULT_REGION")
+	if region == "" {
+		region = "us-east-1"
+	}
+	endpoint := firstNonEmptyEnv("TEST_BUCKET_ENDPOINT", "SYFON_E2E_BUCKET_ENDPOINT", "BUCKET_ENDPOINT", "AWS_ENDPOINT_URL_S3", "S3_ENDPOINT")
+	organization := firstNonEmptyEnv("TEST_ORGANIZATION", "SYFON_E2E_ORGANIZATION", "ORGANIZATION")
+	projectID := firstNonEmptyEnv("TEST_PROJECT_ID", "SYFON_E2E_PROJECT_ID", "PROJECT_ID")
+	if organization == "" {
+		organization = "syfon"
+	}
+	if projectID == "" {
+		projectID = "e2e"
+	}
+	accessKey := firstNonEmptyEnv("TEST_BUCKET_ACCESS_KEY", "SYFON_E2E_BUCKET_ACCESS_KEY", "BUCKET_ACCESS_KEY", "AWS_ACCESS_KEY_ID")
+	secretKey := firstNonEmptyEnv("TEST_BUCKET_SECRET_KEY", "SYFON_E2E_BUCKET_SECRET_KEY", "BUCKET_SECRET_KEY", "AWS_SECRET_ACCESS_KEY")
+
+	payload := map[string]string{
+		"bucket":   bucket,
+		"provider": provider,
+		"region":   region,
+	}
+	if endpoint != "" {
+		payload["endpoint"] = endpoint
+	}
+	if organization != "" {
+		payload["organization"] = organization
+	}
+	if projectID != "" {
+		payload["project_id"] = projectID
+	}
+
+	if !strings.EqualFold(provider, "file") {
+		if accessKey == "" || secretKey == "" {
+			return false, nil
+		}
+		payload["access_key"] = accessKey
+		payload["secret_key"] = secretKey
+	}
+
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return false, fmt.Errorf("marshal bucket payload: %w", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPut, strings.TrimRight(serverURL, "/")+"/data/buckets", bytes.NewReader(data))
+	if err != nil {
+		return false, fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := newHTTPClient().Do(req)
+	if err != nil {
+		return false, fmt.Errorf("put /data/buckets: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		return false, fmt.Errorf("put /data/buckets status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	return true, nil
+}
+
+func firstNonEmptyEnv(keys ...string) string {
+	for _, key := range keys {
+		if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+			return v
+		}
+	}
+	return ""
 }

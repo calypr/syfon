@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/calypr/syfon/apigen/internalapi"
 	"github.com/spf13/cobra"
 )
 
@@ -35,27 +34,34 @@ var uploadCmd = &cobra.Command{
 			did = filepath.Base(uploadFile)
 		}
 
-		var signed internalapi.InternalUploadBlankResponse
+		var signed struct {
+			Guid   string `json:"guid"`
+			Url    string `json:"url"`
+			Bucket string `json:"bucket"`
+		}
 		if err := doJSON(http.MethodPost, "/data/upload", map[string]string{"guid": did}, &signed); err != nil {
 			return err
 		}
-		serverGUID := strings.TrimSpace(signed.GetGuid())
+		serverGUID := strings.TrimSpace(signed.Guid)
 		if requestedDID != "" && serverGUID != "" && serverGUID != requestedDID {
 			return fmt.Errorf("server returned guid %q but --did %q was requested", serverGUID, requestedDID)
 		}
 		if serverGUID != "" {
 			did = serverGUID
 		}
-		if strings.TrimSpace(signed.GetUrl()) == "" {
+		if strings.TrimSpace(signed.Url) == "" {
 			return fmt.Errorf("server returned empty upload URL")
 		}
-		if err := uploadBytesToSignedURL(signed.GetUrl(), data); err != nil {
+		if err := uploadBytesToSignedURL(signed.Url, data); err != nil {
 			return err
 		}
 
 		sha := sha256.Sum256(data)
 		sum := hex.EncodeToString(sha[:])
-		objectURL := canonicalObjectURLFromSignedURL(signed.GetUrl(), did)
+		objectURL, err := canonicalObjectURLFromSignedURL(signed.Url, strings.TrimSpace(signed.Bucket), did)
+		if err != nil {
+			return err
+		}
 		if err := ensureRecordWithURL(did, objectURL, filepath.Base(uploadFile), int64(len(data)), sum); err != nil {
 			return err
 		}

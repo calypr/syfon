@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/calypr/syfon/apigen/bucketapi"
 	"github.com/calypr/syfon/apigen/internalapi"
 )
 
@@ -164,72 +163,36 @@ func postInternalRecord(rec *internalapi.InternalRecord) error {
 	return doJSON(http.MethodPost, "/index", rec, nil)
 }
 
-func canonicalObjectURLFromSignedURL(signedURL, fallbackDID string) string {
+func canonicalObjectURLFromSignedURL(signedURL, bucketHint, fallbackDID string) (string, error) {
 	parsed, err := url.Parse(strings.TrimSpace(signedURL))
 	if err != nil {
-		return strings.Split(strings.TrimSpace(signedURL), "?")[0]
+		return "", fmt.Errorf("parse signed url: %w", err)
 	}
 	parsed.RawQuery = ""
 	parsed.Fragment = ""
 
 	switch strings.ToLower(parsed.Scheme) {
 	case "file":
-		return parsed.String()
+		return parsed.String(), nil
 	case "http", "https":
-		var buckets bucketapi.BucketsResponse
-		if err := doJSON(http.MethodGet, "/data/buckets", nil, &buckets); err == nil {
-			host := strings.TrimSpace(parsed.Host)
-			path := strings.Trim(strings.TrimSpace(parsed.Path), "/")
-			for bucket, entry := range buckets.GetS3BUCKETS() {
-				endpointHost := endpointHostOnly(entry.GetEndpointUrl())
-				if endpointHost == "" || !strings.EqualFold(endpointHost, host) {
-					continue
-				}
-				key := path
-				if strings.HasPrefix(key, bucket+"/") {
-					key = strings.TrimPrefix(key, bucket+"/")
-				}
-				if strings.TrimSpace(key) == "" {
-					key = strings.TrimSpace(fallbackDID)
-				}
-				if key != "" {
-					return "s3://" + bucket + "/" + key
-				}
-				return "s3://" + bucket
-			}
+		bucketHint = strings.TrimSpace(bucketHint)
+		if bucketHint == "" {
+			return "", fmt.Errorf("server returned upload URL without bucket; cannot canonicalize object URL safely")
 		}
-		if parsed.Host != "" {
-			key := strings.Trim(strings.TrimSpace(parsed.Path), "/")
-			if key == "" {
-				key = strings.TrimSpace(fallbackDID)
-			}
-			if key != "" {
-				return "s3://" + parsed.Host + "/" + key
-			}
-			return "s3://" + parsed.Host
+		key := strings.Trim(strings.TrimSpace(parsed.Path), "/")
+		if strings.HasPrefix(key, bucketHint+"/") {
+			key = strings.TrimPrefix(key, bucketHint+"/")
 		}
-		return parsed.String()
+		if key == "" {
+			key = strings.TrimSpace(fallbackDID)
+		}
+		if key == "" {
+			return "", fmt.Errorf("unable to derive object key from upload URL")
+		}
+		return "s3://" + bucketHint + "/" + key, nil
 	default:
-		return parsed.String()
+		return parsed.String(), nil
 	}
-}
-
-func endpointHostOnly(raw string) string {
-	clean := strings.TrimSpace(raw)
-	if clean == "" {
-		return ""
-	}
-	u, err := url.Parse(clean)
-	if err != nil || u.Host == "" {
-		if !strings.Contains(clean, "://") {
-			u2, err2 := url.Parse("https://" + clean)
-			if err2 == nil {
-				return strings.TrimSpace(u2.Host)
-			}
-		}
-		return ""
-	}
-	return strings.TrimSpace(u.Host)
 }
 
 func ensureRecordWithURL(did, objectURL, fileName string, size int64, sha256sum string) error {

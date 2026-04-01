@@ -132,7 +132,11 @@ func handleInternalUploadBlank(w http.ResponseWriter, r *http.Request, database 
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	if err := json.NewEncoder(w).Encode(internalapi.InternalUploadBlankResponse{Guid: &guid, Url: &signedURL}); err != nil {
+	if err := json.NewEncoder(w).Encode(map[string]string{
+		"guid":   guid,
+		"url":    signedURL,
+		"bucket": cred.Bucket,
+	}); err != nil {
 		slog.Error("internal encode response failed", "request_id", core.GetRequestID(r.Context()), "method", r.Method, "path", r.URL.Path, "err", err)
 	}
 }

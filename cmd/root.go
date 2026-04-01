@@ -36,6 +36,7 @@ func init() {
 	RootCmd.AddCommand(server.Cmd)
 	RootCmd.AddCommand(versionCmd)
 	RootCmd.AddCommand(pingCmd)
+	RootCmd.AddCommand(bucketCmd)
 	RootCmd.AddCommand(addURLCmd)
 	RootCmd.AddCommand(uploadCmd)
 	RootCmd.AddCommand(downloadCmd)
