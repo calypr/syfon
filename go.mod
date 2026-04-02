@@ -2,6 +2,8 @@ module github.com/calypr/syfon
 
 go 1.26.1
 
+replace github.com/calypr/syfon/apigen => ./apigen
+
 require (
 	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/aws/aws-sdk-go-v2 v1.41.5

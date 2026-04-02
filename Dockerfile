@@ -4,6 +4,7 @@ RUN apk add --no-cache build-base git
 WORKDIR /src
 
 COPY go.mod go.sum ./
+COPY apigen/go.mod apigen/go.sum ./apigen/
 RUN go mod download
 
 COPY . .
