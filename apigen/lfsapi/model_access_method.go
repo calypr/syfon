@@ -1,7 +1,7 @@
 /*
 Git LFS API (DRS Server)
 
-OpenAPI model spec for Git LFS-compatible endpoints implemented by drs-server. This includes standard Batch and Verify payload models plus drs-server extensions used for upload proxy and metadata staging.
+OpenAPI model spec for Git LFS-compatible endpoints implemented by drs-server. This includes standard Batch and Verify payload models plus drs-server extensions used for upload proxy and metadata staging. 
 
 API version: 1.1.0
 */
@@ -19,10 +19,10 @@ var _ MappedNullable = &AccessMethod{}
 
 // AccessMethod struct for AccessMethod
 type AccessMethod struct {
-	Type           *string                     `json:"type,omitempty"`
-	AccessId       *string                     `json:"access_id,omitempty"`
-	AccessUrl      *AccessMethodAccessUrl      `json:"access_url,omitempty"`
-	Region         *string                     `json:"region,omitempty"`
+	Type *string `json:"type,omitempty"`
+	AccessId *string `json:"access_id,omitempty"`
+	AccessUrl *AccessMethodAccessUrl `json:"access_url,omitempty"`
+	Region *string `json:"region,omitempty"`
 	Authorizations *AccessMethodAuthorizations `json:"authorizations,omitempty"`
 }
 
@@ -204,7 +204,7 @@ func (o *AccessMethod) SetAuthorizations(v AccessMethodAuthorizations) {
 }
 
 func (o AccessMethod) MarshalJSON() ([]byte, error) {
-	toSerialize, err := o.ToMap()
+	toSerialize,err := o.ToMap()
 	if err != nil {
 		return []byte{}, err
 	}
@@ -266,3 +266,5 @@ func (v *NullableAccessMethod) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }
+
+

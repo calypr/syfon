@@ -7,28 +7,11 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/calypr/syfon/apigen/bucketapi"
 	"github.com/calypr/syfon/config"
 	"github.com/calypr/syfon/db/core"
 	"github.com/gorilla/mux"
 )
-
-type putBucketRequest struct {
-	Bucket       string  `json:"bucket"`
-	Provider     string  `json:"provider,omitempty"`
-	Region       string  `json:"region"`
-	AccessKey    string  `json:"access_key"`
-	SecretKey    string  `json:"secret_key"`
-	Endpoint     string  `json:"endpoint"`
-	Organization string  `json:"organization"`
-	ProjectID    string  `json:"project_id"`
-	Path         *string `json:"path,omitempty"`
-}
-
-type addBucketScopeRequest struct {
-	Organization string  `json:"organization"`
-	ProjectID    string  `json:"project_id"`
-	Path         *string `json:"path,omitempty"`
-}
 
 func handleInternalBuckets(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface) {
 	creds, err := database.ListS3Credentials(r.Context())
@@ -56,10 +39,9 @@ func handleInternalBuckets(w http.ResponseWriter, r *http.Request, database core
 		}
 	}
 
-	resp := map[string]any{
-		"S3_BUCKETS": map[string]map[string]any{},
-	}
-	outBuckets := resp["S3_BUCKETS"].(map[string]map[string]any)
+	resp := bucketapi.BucketsResponse{}
+	resp.SetS3BUCKETS(map[string]bucketapi.BucketMetadata{})
+	outBuckets := resp.GetS3BUCKETS()
 	programsByBucket := map[string][]string{}
 	for _, s := range scopes {
 		if !allowAll && !allowedBuckets[s.Bucket] {
@@ -75,12 +57,12 @@ func handleInternalBuckets(w http.ResponseWriter, r *http.Request, database core
 		if !allowAll && !allowedBuckets[c.Bucket] {
 			continue
 		}
-		outBuckets[c.Bucket] = map[string]any{
-			"endpoint_url": c.Endpoint,
-			"provider":     c.Provider,
-			"region":       c.Region,
-			"programs":     programsByBucket[c.Bucket],
-		}
+		meta := bucketapi.BucketMetadata{}
+		meta.SetEndpointUrl(c.Endpoint)
+		meta.SetProvider(c.Provider)
+		meta.SetRegion(c.Region)
+		meta.SetPrograms(programsByBucket[c.Bucket])
+		outBuckets[c.Bucket] = meta
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -96,13 +78,13 @@ func handleInternalPutBucket(w http.ResponseWriter, r *http.Request, database co
 		return
 	}
 
-	var req putBucketRequest
+	var req bucketapi.PutBucketRequest
 	if err := decodeStrictJSON(body, &req); err != nil {
 		writeHTTPError(w, r, http.StatusBadRequest, "Invalid request body", nil)
 		return
 	}
 
-	provider := strings.ToLower(strings.TrimSpace(req.Provider))
+	provider := strings.ToLower(strings.TrimSpace(req.GetProvider()))
 	switch provider {
 	case "", "s3":
 		provider = "s3"
@@ -117,8 +99,20 @@ func handleInternalPutBucket(w http.ResponseWriter, r *http.Request, database co
 
 	req.Bucket = strings.TrimSpace(req.Bucket)
 	req.Organization = strings.TrimSpace(req.Organization)
-	req.ProjectID = strings.TrimSpace(req.ProjectID)
-	if req.Bucket == "" || req.Organization == "" || req.ProjectID == "" {
+	req.ProjectId = strings.TrimSpace(req.ProjectId)
+	if v := strings.TrimSpace(req.GetRegion()); v != "" {
+		req.SetRegion(v)
+	}
+	if v := strings.TrimSpace(req.GetAccessKey()); v != "" {
+		req.SetAccessKey(v)
+	}
+	if v := strings.TrimSpace(req.GetSecretKey()); v != "" {
+		req.SetSecretKey(v)
+	}
+	if v := strings.TrimSpace(req.GetEndpoint()); v != "" {
+		req.SetEndpoint(v)
+	}
+	if req.Bucket == "" || req.Organization == "" || req.ProjectId == "" {
 		writeHTTPError(w, r, http.StatusBadRequest, "bucket, organization, and project_id are required", nil)
 		return
 	}
@@ -129,7 +123,7 @@ func handleInternalPutBucket(w http.ResponseWriter, r *http.Request, database co
 			return
 		}
 		if !hasGlobalBucketControlAccess(r, "create", "update") {
-			res := scopeResource(req.Organization, req.ProjectID)
+			res := scopeResource(req.Organization, req.ProjectId)
 			if res == "" || !hasAnyMethodAccess(r, []string{res}, "create", "update") {
 				writeAuthError(w, r)
 				return
@@ -143,27 +137,27 @@ func handleInternalPutBucket(w http.ResponseWriter, r *http.Request, database co
 		return
 	}
 	if prefix == "" {
-		prefix = strings.Trim(req.Organization+"/"+req.ProjectID, "/")
+		prefix = strings.Trim(req.Organization+"/"+req.ProjectId, "/")
 	}
 
 	existingCred, credErr := database.GetS3Credential(r.Context(), req.Bucket)
 	hasExistingCred := credErr == nil && existingCred != nil
 	scopeOnly := hasExistingCred &&
-		strings.TrimSpace(req.AccessKey) == "" &&
-		strings.TrimSpace(req.SecretKey) == "" &&
-		strings.TrimSpace(req.Endpoint) == "" &&
-		strings.TrimSpace(req.Region) == "" &&
-		strings.TrimSpace(req.Provider) == ""
+		strings.TrimSpace(req.GetAccessKey()) == "" &&
+		strings.TrimSpace(req.GetSecretKey()) == "" &&
+		strings.TrimSpace(req.GetEndpoint()) == "" &&
+		strings.TrimSpace(req.GetRegion()) == "" &&
+		strings.TrimSpace(req.GetProvider()) == ""
 
 	if !hasExistingCred && provider == "s3" &&
-		(strings.TrimSpace(req.AccessKey) == "" || strings.TrimSpace(req.SecretKey) == "") {
+		(strings.TrimSpace(req.GetAccessKey()) == "" || strings.TrimSpace(req.GetSecretKey()) == "") {
 		writeHTTPError(w, r, http.StatusBadRequest, "access_key and secret_key are required for new s3 credentials", nil)
 		return
 	}
 
 	if err := database.CreateBucketScope(r.Context(), &core.BucketScope{
 		Organization: req.Organization,
-		ProjectID:    req.ProjectID,
+		ProjectID:    req.ProjectId,
 		Bucket:       req.Bucket,
 		PathPrefix:   prefix,
 	}); err != nil {
@@ -176,10 +170,10 @@ func handleInternalPutBucket(w http.ResponseWriter, r *http.Request, database co
 		return
 	}
 
-	region := strings.TrimSpace(req.Region)
-	accessKey := strings.TrimSpace(req.AccessKey)
-	secretKey := strings.TrimSpace(req.SecretKey)
-	endpoint := strings.TrimSpace(req.Endpoint)
+	region := strings.TrimSpace(req.GetRegion())
+	accessKey := strings.TrimSpace(req.GetAccessKey())
+	secretKey := strings.TrimSpace(req.GetSecretKey())
+	endpoint := strings.TrimSpace(req.GetEndpoint())
 	if hasExistingCred {
 		if region == "" {
 			region = existingCred.Region
@@ -275,14 +269,14 @@ func handleInternalCreateBucketScope(w http.ResponseWriter, r *http.Request, dat
 		return
 	}
 
-	var req addBucketScopeRequest
+	var req bucketapi.AddBucketScopeRequest
 	if err := decodeStrictJSON(body, &req); err != nil {
 		writeHTTPError(w, r, http.StatusBadRequest, "Invalid request body", nil)
 		return
 	}
 	req.Organization = strings.TrimSpace(req.Organization)
-	req.ProjectID = strings.TrimSpace(req.ProjectID)
-	if req.Organization == "" || req.ProjectID == "" {
+	req.ProjectId = strings.TrimSpace(req.ProjectId)
+	if req.Organization == "" || req.ProjectId == "" {
 		writeHTTPError(w, r, http.StatusBadRequest, "organization and project_id are required", nil)
 		return
 	}
@@ -293,7 +287,7 @@ func handleInternalCreateBucketScope(w http.ResponseWriter, r *http.Request, dat
 			return
 		}
 		if !hasGlobalBucketControlAccess(r, "create", "update") {
-			res := scopeResource(req.Organization, req.ProjectID)
+			res := scopeResource(req.Organization, req.ProjectId)
 			if res == "" || !hasAnyMethodAccess(r, []string{res}, "create", "update") {
 				writeAuthError(w, r)
 				return
@@ -303,7 +297,7 @@ func handleInternalCreateBucketScope(w http.ResponseWriter, r *http.Request, dat
 
 	path := readOptionalPath(req.Path)
 	if strings.TrimSpace(path) == "" {
-		path = config.S3Prefix + bucket + "/" + strings.Trim(req.Organization+"/"+req.ProjectID, "/")
+		path = config.S3Prefix + bucket + "/" + strings.Trim(req.Organization+"/"+req.ProjectId, "/")
 	}
 	prefix, err := normalizeScopePath(path, bucket)
 	if err != nil {
@@ -312,7 +306,7 @@ func handleInternalCreateBucketScope(w http.ResponseWriter, r *http.Request, dat
 	}
 	if err := database.CreateBucketScope(r.Context(), &core.BucketScope{
 		Organization: req.Organization,
-		ProjectID:    req.ProjectID,
+		ProjectID:    req.ProjectId,
 		Bucket:       bucket,
 		PathPrefix:   prefix,
 	}); err != nil {

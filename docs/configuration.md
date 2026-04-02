@@ -110,6 +110,17 @@ Environment variables override config file values.
 
 - `DRS_SIGNING_DEFAULT_EXPIRY_SECONDS`
 
+### Credential encryption
+
+- `DRS_CREDENTIAL_KEY_MANAGER` (optional: `local` or `aws-kms`)
+- `DRS_CREDENTIAL_KMS_KEY_ID` (when using AWS KMS)
+- `DRS_CREDENTIAL_MASTER_KEY` (optional explicit local KEK override)
+- `DRS_CREDENTIAL_LOCAL_KEY_FILE` (optional local key file path)
+
+By default, Syfon uses `local` key management and auto-creates a server-side local KEK file. If `DRS_DB_SQLITE_FILE` is set, the local KEK defaults to the same directory (`.syfon-credential-kek`).
+
+If `DRS_CREDENTIAL_KMS_KEY_ID` is set (or `DRS_CREDENTIAL_KEY_MANAGER=aws-kms`), Syfon uses AWS KMS to wrap/unwrap per-record DEKs.
+
 ### SQLite/Postgres
 
 - `DRS_DB_SQLITE_FILE`

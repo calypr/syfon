@@ -19,9 +19,9 @@ var _ MappedNullable = &FileUsageSummary{}
 
 // FileUsageSummary struct for FileUsageSummary
 type FileUsageSummary struct {
-	TotalFiles        *int64 `json:"total_files,omitempty"`
-	TotalUploads      *int64 `json:"total_uploads,omitempty"`
-	TotalDownloads    *int64 `json:"total_downloads,omitempty"`
+	TotalFiles *int64 `json:"total_files,omitempty"`
+	TotalUploads *int64 `json:"total_uploads,omitempty"`
+	TotalDownloads *int64 `json:"total_downloads,omitempty"`
 	InactiveFileCount *int64 `json:"inactive_file_count,omitempty"`
 }
 
@@ -171,7 +171,7 @@ func (o *FileUsageSummary) SetInactiveFileCount(v int64) {
 }
 
 func (o FileUsageSummary) MarshalJSON() ([]byte, error) {
-	toSerialize, err := o.ToMap()
+	toSerialize,err := o.ToMap()
 	if err != nil {
 		return []byte{}, err
 	}
@@ -230,3 +230,5 @@ func (v *NullableFileUsageSummary) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }
+
+

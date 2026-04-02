@@ -31,6 +31,7 @@ drs/model_contents_object.go
 drs/model_delete_request.go
 drs/model_drs_object.go
 drs/model_drs_object_candidate.go
+drs/model_drs_page.go
 drs/model_drs_service.go
 drs/model_drs_service_drs.go
 drs/model_drs_service_type.go

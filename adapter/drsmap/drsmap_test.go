@@ -11,6 +11,11 @@ func TestToExternalSliceAndMapAndWrap(t *testing.T) {
 	obj1 := core.InternalObject{DrsObject: drs.DrsObject{Id: "id-1"}, Authorizations: []string{"/a"}}
 	obj2 := core.InternalObject{DrsObject: drs.DrsObject{Id: "id-2"}, Authorizations: []string{"/b"}}
 
+	single := ToExternal(obj1)
+	if single.Id != "id-1" {
+		t.Fatalf("unexpected external object: %#v", single)
+	}
+
 	slice := ToExternalSlice([]core.InternalObject{obj1, obj2})
 	if len(slice) != 2 || slice[0].Id != "id-1" || slice[1].Id != "id-2" {
 		t.Fatalf("unexpected external slice: %#v", slice)

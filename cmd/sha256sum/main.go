@@ -1,30 +1,30 @@
-package cmd
+package sha256sum
 
 import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"net/http"
-	"net/url"
 	"os"
 	"strings"
 
-	"github.com/calypr/syfon/apigen/internalapi"
+	"github.com/calypr/syfon/cmd/cliutil"
 	"github.com/spf13/cobra"
 )
 
 var sha256Did string
 
-var sha256sumCmd = &cobra.Command{
+var Cmd = &cobra.Command{
 	Use:   "sha256sum",
 	Short: "Download object to temp storage, compute sha256, update record, and print hash",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := cmd.Context()
 		if strings.TrimSpace(sha256Did) == "" {
 			return fmt.Errorf("--did is required")
 		}
 
-		var signed internalapi.InternalSignedURL
-		if err := doJSON(http.MethodGet, "/data/download/"+url.PathEscape(sha256Did), nil, &signed); err != nil {
+		c := cliutil.NewSyfonClient(cmd)
+		signed, err := c.GetDownloadURL(ctx, sha256Did)
+		if err != nil {
 			return err
 		}
 
@@ -36,7 +36,7 @@ var sha256sumCmd = &cobra.Command{
 		tmpFile.Close()
 		defer os.Remove(tmpPath)
 
-		if err := downloadSignedURLToPath(signed.GetUrl(), tmpPath); err != nil {
+		if err := cliutil.DownloadSignedURLToPath(ctx, signed.URL, tmpPath); err != nil {
 			return err
 		}
 		data, err := os.ReadFile(tmpPath)
@@ -46,7 +46,7 @@ var sha256sumCmd = &cobra.Command{
 		hash := sha256.Sum256(data)
 		sum := hex.EncodeToString(hash[:])
 
-		rec, err := getInternalRecord(sha256Did)
+		rec, err := cliutil.GetInternalRecord(ctx, c, sha256Did)
 		if err != nil {
 			return err
 		}
@@ -59,7 +59,7 @@ var sha256sumCmd = &cobra.Command{
 		if strings.TrimSpace(rec.GetDid()) == "" {
 			rec.SetDid(sha256Did)
 		}
-		if err := putInternalRecord(sha256Did, rec); err != nil {
+		if err := cliutil.PutInternalRecord(ctx, c, sha256Did, rec); err != nil {
 			return err
 		}
 
@@ -69,5 +69,5 @@ var sha256sumCmd = &cobra.Command{
 }
 
 func init() {
-	sha256sumCmd.Flags().StringVar(&sha256Did, "did", "", "DRS object DID")
+	Cmd.Flags().StringVar(&sha256Did, "did", "", "DRS object DID")
 }

@@ -208,8 +208,9 @@ func TestHandleInternalMultipartInit(t *testing.T) {
 		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusCreated)
 	}
 
+	bodyBytes := rr.Body.Bytes()
 	var resp internalapi.InternalMultipartInitResponse
-	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+	if err := json.Unmarshal(bodyBytes, &resp); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := uuid.Parse(resp.GetGuid()); err != nil {
@@ -218,6 +219,17 @@ func TestHandleInternalMultipartInit(t *testing.T) {
 
 	if resp.GetUploadId() != "mock-upload-id" {
 		t.Errorf("expected mock-upload-id, got %v", resp.GetUploadId())
+	}
+
+	var raw map[string]any
+	if err := json.Unmarshal(bodyBytes, &raw); err != nil {
+		t.Fatalf("failed to decode raw response: %v", err)
+	}
+	if _, ok := raw["uploadId"]; !ok {
+		t.Fatalf("expected canonical uploadId field in response, got %v", raw)
+	}
+	if _, ok := raw["upload_id"]; ok {
+		t.Fatalf("unexpected legacy upload_id field in response, got %v", raw)
 	}
 }
 
@@ -517,12 +529,16 @@ func TestHandleInternalPutDeleteBucket_Gen3Auth(t *testing.T) {
 	mockDB := &testutils.MockDatabase{Credentials: map[string]core.S3Credential{}}
 	path := "s3://b2/cbds/proj1"
 
+	region := "us-east-1"
+	accessKey := "ak"
+	secretKey := "sk"
+	endpoint := "https://s3.amazonaws.com"
 	putBody, _ := json.Marshal(bucketapi.PutBucketRequest{
 		Bucket:       "b2",
-		Region:       "us-east-1",
-		AccessKey:    "ak",
-		SecretKey:    "sk",
-		Endpoint:     "https://s3.amazonaws.com",
+		Region:       &region,
+		AccessKey:    &accessKey,
+		SecretKey:    &secretKey,
+		Endpoint:     &endpoint,
 		Organization: "cbds",
 		ProjectId:    "proj1",
 		Path:         &path,
@@ -742,10 +758,10 @@ func TestHandleInternalUploadBulk_MixedResults(t *testing.T) {
 		},
 	}
 
-	reqBody := internalUploadBulkRequest{
-		Requests: []internalUploadBulkItem{
-			{FileID: "obj-1", Bucket: "b1"},
-			{FileID: ""},
+	reqBody := internalapi.InternalUploadBulkRequest{
+		Requests: []internalapi.InternalUploadBulkItem{
+			{FileId: "obj-1", Bucket: internalapi.PtrString("b1")},
+			{FileId: ""},
 		},
 	}
 	body, _ := json.Marshal(reqBody)
@@ -758,23 +774,23 @@ func TestHandleInternalUploadBulk_MixedResults(t *testing.T) {
 		t.Fatalf("expected 207 for mixed batch results, got %d body=%s", rr.Code, rr.Body.String())
 	}
 
-	var resp internalUploadBulkResponse
+	var resp internalapi.InternalUploadBulkResponse
 	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
 	if len(resp.Results) != 2 {
 		t.Fatalf("expected 2 results, got %d", len(resp.Results))
 	}
-	if resp.Results[0].Status != http.StatusOK || resp.Results[0].Url == nil {
+	if resp.Results[0].GetStatus() != int32(http.StatusOK) || resp.Results[0].Url == nil {
 		t.Fatalf("expected first result to be signed, got %+v", resp.Results[0])
 	}
 	if !strings.Contains(*resp.Results[0].Url, "upload=true") {
 		t.Fatalf("expected signed upload URL in first result, got %+v", resp.Results[0])
 	}
-	if resp.Results[0].FileName != "prefix/from-existing.bin" {
-		t.Fatalf("expected resolved key from existing object, got %q", resp.Results[0].FileName)
+	if resp.Results[0].GetFileName() != "prefix/from-existing.bin" {
+		t.Fatalf("expected resolved key from existing object, got %q", resp.Results[0].GetFileName())
 	}
-	if resp.Results[1].Status != http.StatusBadRequest {
+	if resp.Results[1].GetStatus() != int32(http.StatusBadRequest) {
 		t.Fatalf("expected second result 400, got %+v", resp.Results[1])
 	}
 }
@@ -792,9 +808,9 @@ func TestHandleInternalUploadBulk_Gen3UnauthorizedPerItem(t *testing.T) {
 		},
 	}
 
-	reqBody := internalUploadBulkRequest{
-		Requests: []internalUploadBulkItem{
-			{FileID: "secure-id", Bucket: "b1"},
+	reqBody := internalapi.InternalUploadBulkRequest{
+		Requests: []internalapi.InternalUploadBulkItem{
+			{FileId: "secure-id", Bucket: internalapi.PtrString("b1")},
 		},
 	}
 	body, _ := json.Marshal(reqBody)
@@ -809,14 +825,14 @@ func TestHandleInternalUploadBulk_Gen3UnauthorizedPerItem(t *testing.T) {
 	if rr.Code != http.StatusMultiStatus {
 		t.Fatalf("expected 207, got %d body=%s", rr.Code, rr.Body.String())
 	}
-	var resp internalUploadBulkResponse
+	var resp internalapi.InternalUploadBulkResponse
 	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
 	if len(resp.Results) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(resp.Results))
 	}
-	if resp.Results[0].Status != http.StatusUnauthorized {
+	if resp.Results[0].GetStatus() != int32(http.StatusUnauthorized) {
 		t.Fatalf("expected per-item status 401, got %+v", resp.Results[0])
 	}
 }
@@ -837,6 +853,21 @@ func TestHandleInternalMultipartValidationErrors(t *testing.T) {
 	handleInternalMultipartComplete(rrComplete, reqComplete, db, um)
 	if rrComplete.Code != http.StatusBadRequest {
 		t.Fatalf("expected complete 400, got %d body=%s", rrComplete.Code, rrComplete.Body.String())
+	}
+
+	// Strict contract: only uploadId is accepted as query fallback.
+	reqLegacyUpload := httptest.NewRequest(http.MethodPost, "/data/multipart/upload?key=k&upload_id=u&partNumber=1", nil)
+	rrLegacyUpload := httptest.NewRecorder()
+	handleInternalMultipartUpload(rrLegacyUpload, reqLegacyUpload, db, um)
+	if rrLegacyUpload.Code != http.StatusBadRequest {
+		t.Fatalf("expected legacy upload_id upload request to fail with 400, got %d body=%s", rrLegacyUpload.Code, rrLegacyUpload.Body.String())
+	}
+
+	reqLegacyComplete := httptest.NewRequest(http.MethodPost, "/data/multipart/complete?key=k&upload_id=u", nil)
+	rrLegacyComplete := httptest.NewRecorder()
+	handleInternalMultipartComplete(rrLegacyComplete, reqLegacyComplete, db, um)
+	if rrLegacyComplete.Code != http.StatusBadRequest {
+		t.Fatalf("expected legacy upload_id complete request to fail with 400, got %d body=%s", rrLegacyComplete.Code, rrLegacyComplete.Body.String())
 	}
 }
 

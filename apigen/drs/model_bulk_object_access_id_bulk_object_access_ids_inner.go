@@ -11,6 +11,9 @@
 
 package drs
 
+
+
+
 type BulkObjectAccessIdBulkObjectAccessIdsInner struct {
 
 	// DRS object ID

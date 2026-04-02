@@ -122,6 +122,34 @@ func (m *MockDatabase) ListObjectIDsByResourcePrefix(ctx context.Context, resour
 	return ids, nil
 }
 
+func (m *MockDatabase) CreateObjectAlias(ctx context.Context, aliasID, canonicalObjectID string) error {
+	if m.Objects == nil {
+		return fmt.Errorf("%w: object not found", core.ErrNotFound)
+	}
+	obj, ok := m.Objects[canonicalObjectID]
+	if !ok {
+		return fmt.Errorf("%w: object not found", core.ErrNotFound)
+	}
+	copyObj := *obj
+	copyObj.Id = aliasID
+	m.Objects[aliasID] = &copyObj
+	if m.ObjectAuthz != nil {
+		if authz, ok := m.ObjectAuthz[canonicalObjectID]; ok {
+			m.ObjectAuthz[aliasID] = append([]string(nil), authz...)
+		}
+	}
+	return nil
+}
+
+func (m *MockDatabase) ResolveObjectAlias(ctx context.Context, aliasID string) (string, error) {
+	if m.Objects != nil {
+		if _, ok := m.Objects[aliasID]; ok {
+			return aliasID, nil
+		}
+	}
+	return "", fmt.Errorf("%w: object not found", core.ErrNotFound)
+}
+
 func (m *MockDatabase) RegisterObjects(ctx context.Context, objects []core.InternalObject) error {
 	if m.Objects == nil {
 		m.Objects = make(map[string]*drs.DrsObject)

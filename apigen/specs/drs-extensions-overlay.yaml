@@ -1,5 +1,14 @@
 components:
   schemas:
+    DRSPage:
+      type: object
+      required:
+        - drs_objects
+      properties:
+        drs_objects:
+          type: array
+          items:
+            $ref: '#/components/schemas/DrsObject'
     AccessMethod:
       properties:
         access_url:

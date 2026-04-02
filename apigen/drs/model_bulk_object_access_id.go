@@ -11,8 +11,12 @@
 
 package drs
 
+
+
+
 // BulkObjectAccessId - The object that contains object_id/access_id tuples
 type BulkObjectAccessId struct {
+
 	Passports []string `json:"passports,omitempty"`
 
 	BulkObjectAccessIds []BulkObjectAccessIdBulkObjectAccessIdsInner `json:"bulk_object_access_ids,omitempty"`

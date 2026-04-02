@@ -44,6 +44,9 @@ func NewPostgresDB(dsn string) (*PostgresDB, error) {
 	if err := pg.ensurePendingObjectUsageSchema(); err != nil {
 		return nil, err
 	}
+	if err := pg.ensureObjectAliasSchema(); err != nil {
+		return nil, err
+	}
 	return pg, nil
 }
 
@@ -131,6 +134,22 @@ func (db *PostgresDB) ensurePendingObjectUsageSchema() error {
 	for _, q := range queries {
 		if _, err := db.db.Exec(q); err != nil {
 			return fmt.Errorf("failed to initialize object usage event schema: %w", err)
+		}
+	}
+	return nil
+}
+
+func (db *PostgresDB) ensureObjectAliasSchema() error {
+	queries := []string{
+		`CREATE TABLE IF NOT EXISTS drs_object_alias (
+			alias_id TEXT PRIMARY KEY,
+			object_id TEXT NOT NULL REFERENCES drs_object(id) ON DELETE CASCADE
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_drs_object_alias_object_id ON drs_object_alias(object_id)`,
+	}
+	for _, q := range queries {
+		if _, err := db.db.Exec(q); err != nil {
+			return fmt.Errorf("failed to initialize object alias schema: %w", err)
 		}
 	}
 	return nil

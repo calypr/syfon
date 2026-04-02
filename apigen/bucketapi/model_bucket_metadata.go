@@ -1,7 +1,7 @@
 /*
 Bucket Credential API (DRS Server)
 
-Bucket credential and scope management API used by drs-server compatible clients.
+Bucket credential and scope management API used by drs-server compatible clients. 
 
 API version: 1.0.0
 */
@@ -19,9 +19,10 @@ var _ MappedNullable = &BucketMetadata{}
 
 // BucketMetadata struct for BucketMetadata
 type BucketMetadata struct {
-	EndpointUrl *string  `json:"endpoint_url,omitempty"`
-	Region      *string  `json:"region,omitempty"`
-	Programs    []string `json:"programs,omitempty"`
+	EndpointUrl *string `json:"endpoint_url,omitempty"`
+	Provider *string `json:"provider,omitempty"`
+	Region *string `json:"region,omitempty"`
+	Programs []string `json:"programs,omitempty"`
 }
 
 // NewBucketMetadata instantiates a new BucketMetadata object
@@ -71,6 +72,38 @@ func (o *BucketMetadata) HasEndpointUrl() bool {
 // SetEndpointUrl gets a reference to the given string and assigns it to the EndpointUrl field.
 func (o *BucketMetadata) SetEndpointUrl(v string) {
 	o.EndpointUrl = &v
+}
+
+// GetProvider returns the Provider field value if set, zero value otherwise.
+func (o *BucketMetadata) GetProvider() string {
+	if o == nil || IsNil(o.Provider) {
+		var ret string
+		return ret
+	}
+	return *o.Provider
+}
+
+// GetProviderOk returns a tuple with the Provider field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *BucketMetadata) GetProviderOk() (*string, bool) {
+	if o == nil || IsNil(o.Provider) {
+		return nil, false
+	}
+	return o.Provider, true
+}
+
+// HasProvider returns a boolean if a field has been set.
+func (o *BucketMetadata) HasProvider() bool {
+	if o != nil && !IsNil(o.Provider) {
+		return true
+	}
+
+	return false
+}
+
+// SetProvider gets a reference to the given string and assigns it to the Provider field.
+func (o *BucketMetadata) SetProvider(v string) {
+	o.Provider = &v
 }
 
 // GetRegion returns the Region field value if set, zero value otherwise.
@@ -138,7 +171,7 @@ func (o *BucketMetadata) SetPrograms(v []string) {
 }
 
 func (o BucketMetadata) MarshalJSON() ([]byte, error) {
-	toSerialize, err := o.ToMap()
+	toSerialize,err := o.ToMap()
 	if err != nil {
 		return []byte{}, err
 	}
@@ -149,6 +182,9 @@ func (o BucketMetadata) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	if !IsNil(o.EndpointUrl) {
 		toSerialize["endpoint_url"] = o.EndpointUrl
+	}
+	if !IsNil(o.Provider) {
+		toSerialize["provider"] = o.Provider
 	}
 	if !IsNil(o.Region) {
 		toSerialize["region"] = o.Region
@@ -194,3 +230,5 @@ func (v *NullableBucketMetadata) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }
+
+

@@ -118,6 +118,75 @@ func TestSqliteDB_GetObjectsByChecksum_WhenIDDiffers(t *testing.T) {
 	}
 }
 
+func TestSqliteDB_ObjectAliasLifecycle(t *testing.T) {
+	ctx := context.Background()
+	db, err := NewSqliteDB(":memory:")
+	if err != nil {
+		t.Fatalf("failed to create db: %v", err)
+	}
+
+	canonicalID := "11111111-1111-4111-8111-111111111111"
+	aliasID := "22222222-2222-4222-8222-222222222222"
+	checksum := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	now := time.Now().UTC()
+
+	if err := db.CreateObject(ctx, &core.InternalObject{
+		DrsObject: drs.DrsObject{
+			Id:          canonicalID,
+			CreatedTime: now,
+			UpdatedTime: now,
+			Checksums:   []drs.Checksum{{Type: "sha256", Checksum: checksum}},
+			AccessMethods: []drs.AccessMethod{
+				{Type: "s3", AccessUrl: drs.AccessMethodAccessUrl{Url: "s3://bucket/path/object"}},
+			},
+		},
+		Authorizations: []string{"/programs/a/projects/b"},
+	}); err != nil {
+		t.Fatalf("CreateObject failed: %v", err)
+	}
+
+	if err := db.CreateObjectAlias(ctx, aliasID, canonicalID); err != nil {
+		t.Fatalf("CreateObjectAlias failed: %v", err)
+	}
+
+	resolved, err := db.ResolveObjectAlias(ctx, aliasID)
+	if err != nil {
+		t.Fatalf("ResolveObjectAlias failed: %v", err)
+	}
+	if resolved != canonicalID {
+		t.Fatalf("expected canonical id %s, got %s", canonicalID, resolved)
+	}
+
+	aliased, err := db.GetObject(ctx, aliasID)
+	if err != nil {
+		t.Fatalf("GetObject(alias) failed: %v", err)
+	}
+	if aliased.Id != aliasID {
+		t.Fatalf("expected alias id %s, got %s", aliasID, aliased.Id)
+	}
+	if len(aliased.Checksums) != 1 || aliased.Checksums[0].Checksum != checksum {
+		t.Fatalf("expected checksum to resolve through alias, got %+v", aliased.Checksums)
+	}
+
+	byChecksum, err := db.GetObjectsByChecksum(ctx, checksum)
+	if err != nil {
+		t.Fatalf("GetObjectsByChecksum failed: %v", err)
+	}
+	if len(byChecksum) != 1 || byChecksum[0].Id != canonicalID {
+		t.Fatalf("expected exactly one canonical record for checksum, got %+v", byChecksum)
+	}
+
+	if err := db.DeleteObject(ctx, aliasID); err != nil {
+		t.Fatalf("DeleteObject(alias) failed: %v", err)
+	}
+	if _, err := db.ResolveObjectAlias(ctx, aliasID); err == nil {
+		t.Fatal("expected alias to be deleted")
+	}
+	if _, err := db.GetObject(ctx, canonicalID); err != nil {
+		t.Fatalf("expected canonical object to remain, got error: %v", err)
+	}
+}
+
 func TestSqliteDB_S3Credentials(t *testing.T) {
 	t.Setenv(core.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
 	ctx := context.Background()

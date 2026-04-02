@@ -19,9 +19,9 @@ var _ MappedNullable = &MetricsListResponse{}
 
 // MetricsListResponse struct for MetricsListResponse
 type MetricsListResponse struct {
-	Data   []FileUsage `json:"data,omitempty"`
-	Limit  *int32      `json:"limit,omitempty"`
-	Offset *int32      `json:"offset,omitempty"`
+	Data []FileUsage `json:"data,omitempty"`
+	Limit *int32 `json:"limit,omitempty"`
+	Offset *int32 `json:"offset,omitempty"`
 }
 
 // NewMetricsListResponse instantiates a new MetricsListResponse object
@@ -138,7 +138,7 @@ func (o *MetricsListResponse) SetOffset(v int32) {
 }
 
 func (o MetricsListResponse) MarshalJSON() ([]byte, error) {
-	toSerialize, err := o.ToMap()
+	toSerialize,err := o.ToMap()
 	if err != nil {
 		return []byte{}, err
 	}
@@ -194,3 +194,5 @@ func (v *NullableMetricsListResponse) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }
+
+

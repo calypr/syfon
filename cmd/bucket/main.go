@@ -1,10 +1,11 @@
-package cmd
+package bucket
 
 import (
 	"fmt"
-	"net/http"
 	"strings"
 
+	syclient "github.com/calypr/syfon/client"
+	"github.com/calypr/syfon/cmd/cliutil"
 	"github.com/spf13/cobra"
 )
 
@@ -19,12 +20,12 @@ var (
 	bucketPath         string
 )
 
-var bucketCmd = &cobra.Command{
+var Cmd = &cobra.Command{
 	Use:   "bucket",
 	Short: "Manage Syfon bucket credentials and scopes",
 }
 
-var bucketAddCmd = &cobra.Command{
+var addCmd = &cobra.Command{
 	Use:   "add <bucket>",
 	Short: "Create or update bucket credentials/scope on the server",
 	Args:  cobra.ExactArgs(1),
@@ -44,27 +45,29 @@ var bucketAddCmd = &cobra.Command{
 			return fmt.Errorf("--organization and --project-id are required")
 		}
 
-		payload := map[string]string{
-			"bucket":       bucket,
-			"provider":     provider,
-			"region":       strings.TrimSpace(bucketRegion),
-			"organization": organization,
-			"project_id":   projectID,
+		payload := syclient.PutBucketRequest{
+			Bucket:       bucket,
+			Organization: organization,
+			ProjectId:    projectID,
+		}
+		payload.SetProvider(provider)
+		if v := strings.TrimSpace(bucketRegion); v != "" {
+			payload.SetRegion(v)
 		}
 		if v := strings.TrimSpace(bucketAccessKey); v != "" {
-			payload["access_key"] = v
+			payload.SetAccessKey(v)
 		}
 		if v := strings.TrimSpace(bucketSecretKey); v != "" {
-			payload["secret_key"] = v
+			payload.SetSecretKey(v)
 		}
 		if v := strings.TrimSpace(bucketEndpoint); v != "" {
-			payload["endpoint"] = v
+			payload.SetEndpoint(v)
 		}
 		if v := strings.TrimSpace(bucketPath); v != "" {
-			payload["path"] = v
+			payload.SetPath(v)
 		}
 
-		if err := doJSON(http.MethodPut, "/data/buckets", payload, nil); err != nil {
+		if err := cliutil.NewSyfonClient(cmd).PutBucket(cmd.Context(), payload); err != nil {
 			return err
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "bucket configured: %s (provider=%s org=%s project=%s)\n", bucket, provider, organization, projectID)
@@ -73,15 +76,14 @@ var bucketAddCmd = &cobra.Command{
 }
 
 func init() {
-	bucketAddCmd.Flags().StringVar(&bucketProvider, "provider", "s3", "Bucket provider: s3|gcs|azure|file")
-	bucketAddCmd.Flags().StringVar(&bucketRegion, "region", "us-east-1", "Bucket region")
-	bucketAddCmd.Flags().StringVar(&bucketAccessKey, "access-key", "", "S3 access key (required for new s3 creds)")
-	bucketAddCmd.Flags().StringVar(&bucketSecretKey, "secret-key", "", "S3 secret key (required for new s3 creds)")
-	bucketAddCmd.Flags().StringVar(&bucketEndpoint, "endpoint", "", "Custom endpoint URL")
-	bucketAddCmd.Flags().StringVar(&bucketOrganization, "organization", "syfon", "Scope organization")
-	bucketAddCmd.Flags().StringVar(&bucketProjectID, "project-id", "e2e", "Scope project id")
-	bucketAddCmd.Flags().StringVar(&bucketPath, "path", "", "Optional bucket path prefix for this scope")
+	addCmd.Flags().StringVar(&bucketProvider, "provider", "s3", "Bucket provider: s3|gcs|azure|file")
+	addCmd.Flags().StringVar(&bucketRegion, "region", "us-east-1", "Bucket region")
+	addCmd.Flags().StringVar(&bucketAccessKey, "access-key", "", "S3 access key (required for new s3 creds)")
+	addCmd.Flags().StringVar(&bucketSecretKey, "secret-key", "", "S3 secret key (required for new s3 creds)")
+	addCmd.Flags().StringVar(&bucketEndpoint, "endpoint", "", "Custom endpoint URL")
+	addCmd.Flags().StringVar(&bucketOrganization, "organization", "syfon", "Scope organization")
+	addCmd.Flags().StringVar(&bucketProjectID, "project-id", "e2e", "Scope project id")
+	addCmd.Flags().StringVar(&bucketPath, "path", "", "Optional bucket path prefix for this scope")
 
-	bucketCmd.AddCommand(bucketAddCmd)
+	Cmd.AddCommand(addCmd)
 }
-

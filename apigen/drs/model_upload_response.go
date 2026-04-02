@@ -11,6 +11,9 @@
 
 package drs
 
+
+
+
 type UploadResponse struct {
 
 	// List of upload responses for the requested files

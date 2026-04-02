@@ -11,7 +11,11 @@
 
 package drs
 
+
+
+
 type BulkAccessUrl struct {
+
 	DrsObjectId string `json:"drs_object_id,omitempty"`
 
 	DrsAccessId string `json:"drs_access_id,omitempty"`

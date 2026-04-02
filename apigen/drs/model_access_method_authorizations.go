@@ -11,8 +11,12 @@
 
 package drs
 
+
+
+
 // AccessMethodAuthorizations - When `access_id` is provided, `authorizations` provides information about how to authorize the `/access` method.
 type AccessMethodAuthorizations struct {
+
 	DrsObjectId string `json:"drs_object_id,omitempty"`
 
 	SupportedTypes []string `json:"supported_types,omitempty"`

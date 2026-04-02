@@ -32,10 +32,10 @@ gen:
 	mkdir -p .tmp; \
 	spec="$(OPENAPI)"; \
 	if [[ ! -f "$$spec" ]]; then \
-	  if [[ "$(AUTO_INIT_SUBMODULE)" == "1" ]]; then \
-	    echo "OpenAPI spec '$$spec' not found. Initializing submodule..."; \
-	    git submodule update --init --recursive --depth 1 "$(SCHEMAS_SUBMODULE)" \
-	  fi; \
+		  if [[ "$(AUTO_INIT_SUBMODULE)" == "1" ]]; then \
+		    echo "OpenAPI spec '$$spec' not found. Initializing submodule..."; \
+		    git submodule update --init --recursive --depth 1 "$(SCHEMAS_SUBMODULE)"; \
+		  fi; \
 	fi; \
 	if [[ ! -f "$$spec" ]]; then \
 	  echo "ERROR: OpenAPI spec '$$spec' not found."; \

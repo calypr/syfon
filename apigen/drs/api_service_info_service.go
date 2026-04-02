@@ -13,8 +13,8 @@ package drs
 
 import (
 	"context"
-	"errors"
 	"net/http"
+	"errors"
 )
 
 // ServiceInfoAPIService is a service that implements the logic for the ServiceInfoAPIServicer

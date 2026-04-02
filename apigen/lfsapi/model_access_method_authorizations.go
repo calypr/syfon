@@ -1,7 +1,7 @@
 /*
 Git LFS API (DRS Server)
 
-OpenAPI model spec for Git LFS-compatible endpoints implemented by drs-server. This includes standard Batch and Verify payload models plus drs-server extensions used for upload proxy and metadata staging.
+OpenAPI model spec for Git LFS-compatible endpoints implemented by drs-server. This includes standard Batch and Verify payload models plus drs-server extensions used for upload proxy and metadata staging. 
 
 API version: 1.1.0
 */
@@ -72,7 +72,7 @@ func (o *AccessMethodAuthorizations) SetBearerAuthIssuers(v []string) {
 }
 
 func (o AccessMethodAuthorizations) MarshalJSON() ([]byte, error) {
-	toSerialize, err := o.ToMap()
+	toSerialize,err := o.ToMap()
 	if err != nil {
 		return []byte{}, err
 	}
@@ -122,3 +122,5 @@ func (v *NullableAccessMethodAuthorizations) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }
+
+

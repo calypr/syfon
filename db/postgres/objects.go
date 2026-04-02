@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -13,6 +14,11 @@ import (
 )
 
 func (db *PostgresDB) DeleteObject(ctx context.Context, id string) error {
+	if aliasResult, aliasErr := db.db.ExecContext(ctx, "DELETE FROM drs_object_alias WHERE alias_id = $1", id); aliasErr == nil {
+		if rows, rowsErr := aliasResult.RowsAffected(); rowsErr == nil && rows > 0 {
+			return nil
+		}
+	}
 	result, err := db.db.ExecContext(ctx, "DELETE FROM drs_object WHERE id = $1", id)
 	if err != nil {
 		return err
@@ -27,36 +33,97 @@ func (db *PostgresDB) DeleteObject(ctx context.Context, id string) error {
 	return nil
 }
 
+func (db *PostgresDB) CreateObjectAlias(ctx context.Context, aliasID, canonicalObjectID string) error {
+	aliasID = strings.TrimSpace(aliasID)
+	canonicalObjectID = strings.TrimSpace(canonicalObjectID)
+	if aliasID == "" || canonicalObjectID == "" {
+		return fmt.Errorf("alias_id and canonical object id are required")
+	}
+	if aliasID == canonicalObjectID {
+		return nil
+	}
+	var exists string
+	err := db.db.QueryRowContext(ctx, "SELECT id FROM drs_object WHERE id = $1", canonicalObjectID).Scan(&exists)
+	if err == sql.ErrNoRows {
+		return fmt.Errorf("%w: object not found", core.ErrNotFound)
+	}
+	if err != nil {
+		return err
+	}
+	_, err = db.db.ExecContext(ctx, `
+		INSERT INTO drs_object_alias(alias_id, object_id)
+		VALUES ($1, $2)
+		ON CONFLICT(alias_id) DO UPDATE SET object_id=EXCLUDED.object_id
+	`, aliasID, canonicalObjectID)
+	return err
+}
+
+func (db *PostgresDB) ResolveObjectAlias(ctx context.Context, aliasID string) (string, error) {
+	aliasID = strings.TrimSpace(aliasID)
+	if aliasID == "" {
+		return "", fmt.Errorf("%w: object not found", core.ErrNotFound)
+	}
+	var canonicalID string
+	err := db.db.QueryRowContext(ctx, "SELECT object_id FROM drs_object_alias WHERE alias_id = $1", aliasID).Scan(&canonicalID)
+	if err == sql.ErrNoRows {
+		return "", fmt.Errorf("%w: object not found", core.ErrNotFound)
+	}
+	if err != nil {
+		return "", err
+	}
+	return canonicalID, nil
+}
+
 func (db *PostgresDB) GetObject(ctx context.Context, id string) (*core.InternalObject, error) {
+	requestID := strings.TrimSpace(id)
+	lookupID := requestID
+	resolvedAlias := false
+
+retryLookup:
 	// 1. Fetch main record
 	var r core.DrsObjectRecord
 	err := db.db.QueryRowContext(ctx, `
 		SELECT id, size, created_time, updated_time, name, version, description
-		FROM drs_object WHERE id = $1`, id).Scan(
+		FROM drs_object WHERE id = $1`, lookupID).Scan(
 		&r.ID, &r.Size, &r.CreatedTime, &r.UpdatedTime, &r.Name, &r.Version, &r.Description,
 	)
 	if err == sql.ErrNoRows {
+		if !resolvedAlias {
+			canonicalID, aliasErr := db.ResolveObjectAlias(ctx, requestID)
+			if aliasErr == nil && strings.TrimSpace(canonicalID) != "" {
+				lookupID = strings.TrimSpace(canonicalID)
+				resolvedAlias = true
+				goto retryLookup
+			}
+			if aliasErr != nil && !errors.Is(aliasErr, core.ErrNotFound) {
+				return nil, aliasErr
+			}
+		}
 		return nil, fmt.Errorf("%w: object not found", core.ErrNotFound)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch record: %w", err)
 	}
+	objectID := r.ID
+	if resolvedAlias && requestID != "" {
+		objectID = requestID
+	}
 
 	obj := &core.InternalObject{
 		DrsObject: drs.DrsObject{
-			Id:          r.ID,
+			Id:          objectID,
 			Size:        r.Size,
 			CreatedTime: r.CreatedTime,
 			UpdatedTime: r.UpdatedTime,
 			Version:     r.Version,
 			Description: r.Description,
 			Name:        r.Name,
-			SelfUri:     "drs://" + r.ID,
+			SelfUri:     "drs://" + objectID,
 		},
 	}
 
 	// 2. Fetch URLs (Access Methods)
-	urlRows, err := db.db.QueryContext(ctx, "SELECT url, type FROM drs_object_access_method WHERE object_id = $1", id)
+	urlRows, err := db.db.QueryContext(ctx, "SELECT url, type FROM drs_object_access_method WHERE object_id = $1", lookupID)
 	if err != nil {
 		return nil, err
 	}
@@ -80,7 +147,7 @@ func (db *PostgresDB) GetObject(ctx context.Context, id string) (*core.InternalO
 	}
 
 	// 3. Fetch Checksums
-	hashRows, err := db.db.QueryContext(ctx, "SELECT type, checksum FROM drs_object_checksum WHERE object_id = $1", id)
+	hashRows, err := db.db.QueryContext(ctx, "SELECT type, checksum FROM drs_object_checksum WHERE object_id = $1", lookupID)
 	if err != nil {
 		return nil, err
 	}
@@ -100,7 +167,7 @@ func (db *PostgresDB) GetObject(ctx context.Context, id string) (*core.InternalO
 	}
 
 	// 4. Fetch object-level authz resources.
-	authzRows, err := db.db.QueryContext(ctx, "SELECT resource FROM drs_object_authz WHERE object_id = $1", id)
+	authzRows, err := db.db.QueryContext(ctx, "SELECT resource FROM drs_object_authz WHERE object_id = $1", lookupID)
 	if err != nil {
 		return nil, err
 	}
@@ -137,7 +204,7 @@ func (db *PostgresDB) GetObject(ctx context.Context, id string) (*core.InternalO
 		WHERE o.id = $1 AND (
 			NOT EXISTS (SELECT 1 FROM drs_object_authz a WHERE a.object_id = o.id)
 			OR EXISTS (SELECT 1 FROM drs_object_authz a WHERE a.object_id = o.id AND a.resource = ANY($2))
-		)`, id, pq.Array(userResources)).Scan(&count)
+		)`, lookupID, pq.Array(userResources)).Scan(&count)
 
 	if err != nil {
 		return nil, fmt.Errorf("authorization check failed: %w", err)

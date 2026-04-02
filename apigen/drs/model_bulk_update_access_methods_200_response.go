@@ -11,6 +11,9 @@
 
 package drs
 
+
+
+
 type BulkUpdateAccessMethods200Response struct {
 
 	// Array of updated DRS objects

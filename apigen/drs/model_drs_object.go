@@ -11,9 +11,12 @@
 
 package drs
 
+
 import (
 	"time"
 )
+
+
 
 type DrsObject struct {
 
@@ -60,11 +63,11 @@ type DrsObject struct {
 // AssertDrsObjectRequired checks if the required fields are not zero-ed
 func AssertDrsObjectRequired(obj DrsObject) error {
 	elements := map[string]interface{}{
-		"id":           obj.Id,
-		"self_uri":     obj.SelfUri,
-		"size":         obj.Size,
+		"id": obj.Id,
+		"self_uri": obj.SelfUri,
+		"size": obj.Size,
 		"created_time": obj.CreatedTime,
-		"checksums":    obj.Checksums,
+		"checksums": obj.Checksums,
 	}
 	for name, el := range elements {
 		if isZero := IsZeroValue(el); isZero {

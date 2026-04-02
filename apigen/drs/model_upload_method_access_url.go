@@ -11,6 +11,9 @@
 
 package drs
 
+
+
+
 // UploadMethodAccessUrl - An `AccessURL` that specifies where the file will be accessible after upload. This URL will be used as the access_url in the eventual DRS object, ensuring consistency between upload and retrieval operations.
 type UploadMethodAccessUrl struct {
 

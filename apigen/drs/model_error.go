@@ -11,6 +11,9 @@
 
 package drs
 
+
+
+
 // Error - An object that can optionally include information about the error.
 type Error struct {
 

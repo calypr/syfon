@@ -1,7 +1,7 @@
 /*
 Internal Compatibility API (DRS Server)
 
-Consolidated internal API delta for drs-server. This spec captures non-GA4GH DRS internal/compatibility routes.
+Consolidated internal API delta for drs-server. This spec captures non-GA4GH DRS internal/compatibility routes. 
 
 API version: 1.0.0
 */
@@ -105,7 +105,7 @@ func (o *BulkSHA256ValidityRequest) SetHashes(v []string) {
 }
 
 func (o BulkSHA256ValidityRequest) MarshalJSON() ([]byte, error) {
-	toSerialize, err := o.ToMap()
+	toSerialize,err := o.ToMap()
 	if err != nil {
 		return []byte{}, err
 	}
@@ -158,3 +158,5 @@ func (v *NullableBulkSHA256ValidityRequest) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }
+
+

@@ -11,6 +11,9 @@
 
 package drs
 
+
+
+
 type Checksum struct {
 
 	// The hex-string encoded checksum for the data
@@ -24,7 +27,7 @@ type Checksum struct {
 func AssertChecksumRequired(obj Checksum) error {
 	elements := map[string]interface{}{
 		"checksum": obj.Checksum,
-		"type":     obj.Type,
+		"type": obj.Type,
 	}
 	for name, el := range elements {
 		if isZero := IsZeroValue(el); isZero {

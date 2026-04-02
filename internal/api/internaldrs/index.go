@@ -1,12 +1,15 @@
 package internaldrs
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -83,6 +86,17 @@ func handleInternalBulkCreate(database core.DatabaseInterface) http.HandlerFunc 
 				return
 			}
 
+			aliased, canonicalObj, aliasErr := maybeAliasBySHA256(r.Context(), database, rec, obj)
+			if aliasErr != nil {
+				writeDBError(w, r, aliasErr)
+				return
+			}
+			if aliased {
+				resp := drsToInternal(canonicalObj)
+				resp.SetDid(obj.Id)
+				results = append(results, resp)
+				continue
+			}
 			if err := database.CreateObject(r.Context(), obj); err != nil {
 				writeDBError(w, r, err)
 				return
@@ -247,6 +261,21 @@ func handleInternalCreate(w http.ResponseWriter, r *http.Request, database core.
 		writeHTTPError(w, r, http.StatusBadRequest, err.Error(), err)
 		return
 	}
+	aliased, canonicalObj, aliasErr := maybeAliasBySHA256(r.Context(), database, req, obj)
+	if aliasErr != nil {
+		writeDBError(w, r, aliasErr)
+		return
+	}
+	if aliased {
+		response := drsToInternal(canonicalObj)
+		response.SetDid(obj.Id)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			slog.Error("gen3 encode response failed", "request_id", core.GetRequestID(r.Context()), "method", r.Method, "path", r.URL.Path, "err", err)
+		}
+		return
+	}
 	if err := database.CreateObject(r.Context(), obj); err != nil {
 		writeDBError(w, r, err)
 		return
@@ -258,6 +287,34 @@ func handleInternalCreate(w http.ResponseWriter, r *http.Request, database core.
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		slog.Error("gen3 encode response failed", "request_id", core.GetRequestID(r.Context()), "method", r.Method, "path", r.URL.Path, "err", err)
 	}
+}
+
+func maybeAliasBySHA256(ctx context.Context, database core.DatabaseInterface, req internalapi.InternalRecord, obj *core.InternalObject) (bool, *core.InternalObject, error) {
+	if obj == nil {
+		return false, nil, nil
+	}
+	sha := strings.TrimSpace(req.GetHashes()["sha256"])
+	if sha == "" {
+		return false, nil, nil
+	}
+
+	existing, err := database.GetObjectsByChecksum(ctx, sha)
+	if err != nil {
+		return false, nil, err
+	}
+	if len(existing) == 0 {
+		return false, nil, nil
+	}
+	sort.Slice(existing, func(i, j int) bool { return existing[i].Id < existing[j].Id })
+	canonical := existing[0]
+	if strings.TrimSpace(canonical.Id) == "" || canonical.Id == obj.Id {
+		return false, nil, nil
+	}
+	if err := database.CreateObjectAlias(ctx, obj.Id, canonical.Id); err != nil {
+		return false, nil, err
+	}
+	canonicalCopy := canonical
+	return true, &canonicalCopy, nil
 }
 
 // handleInternalUpdate updates an existing record.
@@ -454,6 +511,12 @@ func handleInternalList(w http.ResponseWriter, r *http.Request, database core.Da
 		writeHTTPError(w, r, http.StatusBadRequest, err.Error(), err)
 		return
 	}
+	limit, page, err := parseListPagination(r)
+	if err != nil {
+		writeHTTPError(w, r, http.StatusBadRequest, err.Error(), err)
+		return
+	}
+	offset := page * limit
 	if hasScope {
 		if core.IsGen3Mode(r.Context()) && !core.HasAuthHeader(r.Context()) {
 			writeAuthError(w, r)
@@ -479,14 +542,79 @@ func handleInternalList(w http.ResponseWriter, r *http.Request, database core.Da
 			}
 			records = append(records, drsToInternal(obj))
 		}
+		records = paginateRecords(records, offset, limit)
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(map[string]any{"records": records}); err != nil {
 			slog.Error("gen3 encode response failed", "request_id", core.GetRequestID(r.Context()), "method", r.Method, "path", r.URL.Path, "err", err)
 		}
 		return
 	}
+	if core.IsGen3Mode(r.Context()) && !core.HasAuthHeader(r.Context()) {
+		writeAuthError(w, r)
+		return
+	}
+	// Unscoped list: use root resource prefix to include all scoped records.
+	ids, err := database.ListObjectIDsByResourcePrefix(r.Context(), "/")
+	if err != nil {
+		writeHTTPError(w, r, http.StatusInternalServerError, fmt.Sprintf("Error listing records: %v", err), err)
+		return
+	}
+	records := make([]internalapi.InternalRecordResponse, 0, len(ids))
+	for _, id := range ids {
+		obj, err := database.GetObject(r.Context(), id)
+		if err != nil {
+			if errors.Is(err, core.ErrUnauthorized) || errors.Is(err, core.ErrNotFound) {
+				continue
+			}
+			writeHTTPError(w, r, http.StatusInternalServerError, fmt.Sprintf("Error fetching object %s: %v", id, err), err)
+			return
+		}
+		if len(obj.Authorizations) > 0 && !core.HasMethodAccess(r.Context(), "read", obj.Authorizations) {
+			continue
+		}
+		records = append(records, drsToInternal(obj))
+	}
+	records = paginateRecords(records, offset, limit)
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]any{"records": records}); err != nil {
+		slog.Error("gen3 encode response failed", "request_id", core.GetRequestID(r.Context()), "method", r.Method, "path", r.URL.Path, "err", err)
+	}
+}
 
-	// If no hash, maybe valid list?
-	// Not strictly required for the test case described (which uses GetObjectByHash), but good to return empty list or not implemented.
-	writeHTTPError(w, r, http.StatusNotImplemented, "Listing not fully implemented without query params", nil)
+func parseListPagination(r *http.Request) (int, int, error) {
+	const (
+		defaultLimit = 50
+		maxLimit     = 1000
+	)
+	limit := defaultLimit
+	page := 0
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		v, err := strconv.Atoi(raw)
+		if err != nil || v <= 0 {
+			return 0, 0, fmt.Errorf("limit must be a positive integer")
+		}
+		if v > maxLimit {
+			v = maxLimit
+		}
+		limit = v
+	}
+	if raw := strings.TrimSpace(r.URL.Query().Get("page")); raw != "" {
+		v, err := strconv.Atoi(raw)
+		if err != nil || v < 0 {
+			return 0, 0, fmt.Errorf("page must be a non-negative integer")
+		}
+		page = v
+	}
+	return limit, page, nil
+}
+
+func paginateRecords(records []internalapi.InternalRecordResponse, offset, limit int) []internalapi.InternalRecordResponse {
+	if offset >= len(records) {
+		return []internalapi.InternalRecordResponse{}
+	}
+	end := offset + limit
+	if end > len(records) {
+		end = len(records)
+	}
+	return records[offset:end]
 }

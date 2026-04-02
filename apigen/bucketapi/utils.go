@@ -1,7 +1,7 @@
 /*
 Bucket Credential API (DRS Server)
 
-Bucket credential and scope management API used by drs-server compatible clients.
+Bucket credential and scope management API used by drs-server compatible clients. 
 
 API version: 1.0.0
 */

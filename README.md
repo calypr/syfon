@@ -172,6 +172,25 @@ The project follows a modular structure to ensure maintainability:
 
 See DB table details and relationships in [db/README.md](db/README.md).
 
+## Go Client SDK (Multi-Module)
+
+This repository now includes a separate Go client module at `./client`:
+
+- Module path: `github.com/calypr/syfon/client`
+- Purpose: reusable HTTP client for Syfon APIs (used by the Syfon CLI and external tools)
+
+Example import:
+
+```go
+import syclient "github.com/calypr/syfon/client"
+```
+
+The root module (`github.com/calypr/syfon`) uses a local `replace` during development:
+
+```go
+replace github.com/calypr/syfon/client => ./client
+```
+
 ## Development
 
 The project uses a Makefile for common tasks:

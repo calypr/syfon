@@ -11,6 +11,9 @@
 
 package drs
 
+
+
+
 // ServiceType - Type of a GA4GH service
 type ServiceType struct {
 
@@ -27,9 +30,9 @@ type ServiceType struct {
 // AssertServiceTypeRequired checks if the required fields are not zero-ed
 func AssertServiceTypeRequired(obj ServiceType) error {
 	elements := map[string]interface{}{
-		"group":    obj.Group,
+		"group": obj.Group,
 		"artifact": obj.Artifact,
-		"version":  obj.Version,
+		"version": obj.Version,
 	}
 	for name, el := range elements {
 		if isZero := IsZeroValue(el); isZero {

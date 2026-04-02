@@ -1,13 +1,11 @@
-package cmd
+package download
 
 import (
 	"fmt"
-	"net/http"
-	"net/url"
 	"path/filepath"
 	"strings"
 
-	"github.com/calypr/syfon/apigen/internalapi"
+	"github.com/calypr/syfon/cmd/cliutil"
 	"github.com/spf13/cobra"
 )
 
@@ -16,10 +14,11 @@ var (
 	downloadOut string
 )
 
-var downloadCmd = &cobra.Command{
+var Cmd = &cobra.Command{
 	Use:   "download",
 	Short: "Download a DRS object by DID",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := cmd.Context()
 		if strings.TrimSpace(downloadDid) == "" {
 			return fmt.Errorf("--did is required")
 		}
@@ -27,14 +26,14 @@ var downloadCmd = &cobra.Command{
 		if out == "" {
 			out = filepath.Base(downloadDid)
 		}
-		var signed internalapi.InternalSignedURL
-		if err := doJSON(http.MethodGet, "/data/download/"+url.PathEscape(downloadDid), nil, &signed); err != nil {
+		signed, err := cliutil.NewSyfonClient(cmd).GetDownloadURL(ctx, downloadDid)
+		if err != nil {
 			return err
 		}
-		if strings.TrimSpace(signed.GetUrl()) == "" {
+		if strings.TrimSpace(signed.URL) == "" {
 			return fmt.Errorf("server returned empty download URL")
 		}
-		if err := downloadSignedURLToPath(signed.GetUrl(), out); err != nil {
+		if err := cliutil.DownloadSignedURLToPath(ctx, signed.URL, out); err != nil {
 			return err
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "downloaded %s -> %s\n", downloadDid, out)
@@ -43,6 +42,6 @@ var downloadCmd = &cobra.Command{
 }
 
 func init() {
-	downloadCmd.Flags().StringVar(&downloadDid, "did", "", "DRS object DID")
-	downloadCmd.Flags().StringVar(&downloadOut, "out", "", "Output file path")
+	Cmd.Flags().StringVar(&downloadDid, "did", "", "DRS object DID")
+	Cmd.Flags().StringVar(&downloadOut, "out", "", "Output file path")
 }

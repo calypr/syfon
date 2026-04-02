@@ -1,7 +1,7 @@
 /*
 Internal Compatibility API (DRS Server)
 
-Consolidated internal API delta for drs-server. This spec captures non-GA4GH DRS internal/compatibility routes.
+Consolidated internal API delta for drs-server. This spec captures non-GA4GH DRS internal/compatibility routes. 
 
 API version: 1.0.0
 */
@@ -72,7 +72,7 @@ func (o *InternalMultipartUploadResponse) SetPresignedUrl(v string) {
 }
 
 func (o InternalMultipartUploadResponse) MarshalJSON() ([]byte, error) {
-	toSerialize, err := o.ToMap()
+	toSerialize,err := o.ToMap()
 	if err != nil {
 		return []byte{}, err
 	}
@@ -122,3 +122,5 @@ func (v *NullableInternalMultipartUploadResponse) UnmarshalJSON(src []byte) erro
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }
+
+

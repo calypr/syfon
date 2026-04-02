@@ -1,7 +1,7 @@
 /*
 Internal Compatibility API (DRS Server)
 
-Consolidated internal API delta for drs-server. This spec captures non-GA4GH DRS internal/compatibility routes.
+Consolidated internal API delta for drs-server. This spec captures non-GA4GH DRS internal/compatibility routes. 
 
 API version: 1.0.0
 */
@@ -19,7 +19,7 @@ import (
 // BulkDocumentsRequest - struct for BulkDocumentsRequest
 type BulkDocumentsRequest struct {
 	BulkDocumentsRequestOneOf *BulkDocumentsRequestOneOf
-	ArrayOfString             *[]string
+	ArrayOfString *[]string
 }
 
 // BulkDocumentsRequestOneOfAsBulkDocumentsRequest is a convenience function that returns BulkDocumentsRequestOneOf wrapped in BulkDocumentsRequest
@@ -35,6 +35,7 @@ func ArrayOfStringAsBulkDocumentsRequest(v *[]string) BulkDocumentsRequest {
 		ArrayOfString: v,
 	}
 }
+
 
 // Unmarshal JSON data into one of the pointers in the struct
 func (dst *BulkDocumentsRequest) UnmarshalJSON(data []byte) error {
@@ -101,7 +102,7 @@ func (src BulkDocumentsRequest) MarshalJSON() ([]byte, error) {
 }
 
 // Get the actual instance
-func (obj *BulkDocumentsRequest) GetActualInstance() interface{} {
+func (obj *BulkDocumentsRequest) GetActualInstance() (interface{}) {
 	if obj == nil {
 		return nil
 	}
@@ -118,7 +119,7 @@ func (obj *BulkDocumentsRequest) GetActualInstance() interface{} {
 }
 
 // Get the actual instance value
-func (obj BulkDocumentsRequest) GetActualInstanceValue() interface{} {
+func (obj BulkDocumentsRequest) GetActualInstanceValue() (interface{}) {
 	if obj.BulkDocumentsRequestOneOf != nil {
 		return *obj.BulkDocumentsRequestOneOf
 	}
@@ -166,3 +167,5 @@ func (v *NullableBulkDocumentsRequest) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }
+
+

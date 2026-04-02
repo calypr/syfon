@@ -11,6 +11,9 @@
 
 package drs
 
+
+
+
 type RegisterObjectsRequest struct {
 
 	// Array of DRS object candidates to register (server will mint IDs and timestamps)

@@ -11,6 +11,9 @@
 
 package drs
 
+
+
+
 // DeleteRequest - Request body for single object delete operations
 type DeleteRequest struct {
 

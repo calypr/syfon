@@ -17,6 +17,9 @@ func TestDeleteObject(t *testing.T) {
 		pg, mock, rawDB := newMockPostgresDB(t)
 		defer rawDB.Close()
 
+		mock.ExpectExec(regexp.QuoteMeta("DELETE FROM drs_object_alias WHERE alias_id = $1")).
+			WithArgs("obj-1").
+			WillReturnResult(sqlmock.NewResult(0, 0))
 		mock.ExpectExec(regexp.QuoteMeta("DELETE FROM drs_object WHERE id = $1")).
 			WithArgs("obj-1").
 			WillReturnResult(sqlmock.NewResult(0, 1))
@@ -33,6 +36,9 @@ func TestDeleteObject(t *testing.T) {
 		pg, mock, rawDB := newMockPostgresDB(t)
 		defer rawDB.Close()
 
+		mock.ExpectExec(regexp.QuoteMeta("DELETE FROM drs_object_alias WHERE alias_id = $1")).
+			WithArgs("missing").
+			WillReturnResult(sqlmock.NewResult(0, 0))
 		mock.ExpectExec(regexp.QuoteMeta("DELETE FROM drs_object WHERE id = $1")).
 			WithArgs("missing").
 			WillReturnResult(sqlmock.NewResult(0, 0))
@@ -51,6 +57,9 @@ func TestGetObject_NotFound(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta(`
 		SELECT id, size, created_time, updated_time, name, version, description
 		FROM drs_object WHERE id = $1`)).
+		WithArgs("missing").
+		WillReturnError(sql.ErrNoRows)
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT object_id FROM drs_object_alias WHERE alias_id = $1")).
 		WithArgs("missing").
 		WillReturnError(sql.ErrNoRows)
 

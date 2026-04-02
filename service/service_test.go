@@ -734,6 +734,16 @@ func TestAuthorizationsForObjectFallback(t *testing.T) {
 	}
 }
 
+func TestUniqueStringsCaseInsensitive(t *testing.T) {
+	got := uniqueStringsCaseInsensitive([]string{" Alpha ", "alpha", "BETA", "beta", "", "  "})
+	if len(got) != 2 {
+		t.Fatalf("expected 2 unique case-insensitive values, got %d (%v)", len(got), got)
+	}
+	if got[0] != " Alpha " || got[1] != "BETA" {
+		t.Fatalf("expected first-seen value preservation, got %v", got)
+	}
+}
+
 func TestPostObjectDelegatesToGetObject(t *testing.T) {
 	mockDB := &testutils.MockDatabase{
 		Objects: map[string]*drs.DrsObject{

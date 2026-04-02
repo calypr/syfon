@@ -31,7 +31,7 @@ const errMsgMaxValueConstraint = "provided parameter is not respecting maximum v
 
 // Response return a ImplResponse struct filled
 func Response(code int, body interface{}) ImplResponse {
-	return ImplResponse{
+	return ImplResponse {
 		Code: code,
 		Body: body,
 	}
@@ -162,7 +162,7 @@ func readFileHeaderToTempFile(fileHeader *multipart.FileHeader) (*os.File, error
 	if err != nil {
 		return nil, err
 	}
-
+	
 	return file, nil
 }
 

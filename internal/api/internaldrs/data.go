@@ -180,5 +180,21 @@ func resolveObjectByIDOrChecksum(database core.DatabaseInterface, ctx context.Co
 	if !errors.Is(err, core.ErrNotFound) {
 		return nil, err
 	}
+	canonicalID, aliasErr := database.ResolveObjectAlias(ctx, objectID)
+	if aliasErr == nil && strings.TrimSpace(canonicalID) != "" {
+		obj, getErr := database.GetObject(ctx, canonicalID)
+		if getErr == nil {
+			objCopy := *obj
+			objCopy.DrsObject.Id = objectID
+			objCopy.DrsObject.SelfUri = "drs://" + objectID
+			return &objCopy, nil
+		}
+		if !errors.Is(getErr, core.ErrNotFound) {
+			return nil, getErr
+		}
+	}
+	if aliasErr != nil && !errors.Is(aliasErr, core.ErrNotFound) {
+		return nil, aliasErr
+	}
 	return nil, core.ErrNotFound
 }

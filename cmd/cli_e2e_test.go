@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/calypr/syfon/apigen/drs"
+	syclient "github.com/calypr/syfon/client"
 	"github.com/calypr/syfon/config"
 	"github.com/calypr/syfon/db"
 	"github.com/calypr/syfon/db/core"
@@ -132,13 +133,13 @@ func TestSyfonUploadDownloadAddURLAndSHA256(t *testing.T) {
 		t.Fatalf("sha256sum output missing expected hash: %s", hashOut)
 	}
 
-	serverBaseURL = server.URL
-	rec, err := getInternalRecord(uploadDID)
+	rec, err := syclient.New(server.URL).GetRecord(context.Background(), uploadDID)
 	if err != nil {
 		t.Fatalf("fetch updated record: %v", err)
 	}
-	if rec.GetHashes()["sha256"] != expectedSum {
-		t.Fatalf("expected sha256 in record: %s got: %s", expectedSum, rec.GetHashes()["sha256"])
+	hashes := rec.GetHashes()
+	if hashes["sha256"] != expectedSum {
+		t.Fatalf("expected sha256 in record: %s got: %s", expectedSum, hashes["sha256"])
 	}
 
 	externalSource := filepath.Join(t.TempDir(), "existing-url-source.txt")

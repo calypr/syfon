@@ -1,7 +1,7 @@
 /*
 Internal Compatibility API (DRS Server)
 
-Consolidated internal API delta for drs-server. This spec captures non-GA4GH DRS internal/compatibility routes.
+Consolidated internal API delta for drs-server. This spec captures non-GA4GH DRS internal/compatibility routes. 
 
 API version: 1.0.0
 */
@@ -19,9 +19,9 @@ var _ MappedNullable = &InternalMultipartInitRequest{}
 
 // InternalMultipartInitRequest struct for InternalMultipartInitRequest
 type InternalMultipartInitRequest struct {
-	Guid     *string `json:"guid,omitempty"`
+	Guid *string `json:"guid,omitempty"`
 	FileName *string `json:"file_name,omitempty"`
-	Bucket   *string `json:"bucket,omitempty"`
+	Bucket *string `json:"bucket,omitempty"`
 }
 
 // NewInternalMultipartInitRequest instantiates a new InternalMultipartInitRequest object
@@ -138,7 +138,7 @@ func (o *InternalMultipartInitRequest) SetBucket(v string) {
 }
 
 func (o InternalMultipartInitRequest) MarshalJSON() ([]byte, error) {
-	toSerialize, err := o.ToMap()
+	toSerialize,err := o.ToMap()
 	if err != nil {
 		return []byte{}, err
 	}
@@ -194,3 +194,5 @@ func (v *NullableInternalMultipartInitRequest) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }
+
+

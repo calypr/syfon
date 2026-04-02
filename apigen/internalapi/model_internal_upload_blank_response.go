@@ -1,7 +1,7 @@
 /*
 Internal Compatibility API (DRS Server)
 
-Consolidated internal API delta for drs-server. This spec captures non-GA4GH DRS internal/compatibility routes.
+Consolidated internal API delta for drs-server. This spec captures non-GA4GH DRS internal/compatibility routes. 
 
 API version: 1.0.0
 */
@@ -20,7 +20,8 @@ var _ MappedNullable = &InternalUploadBlankResponse{}
 // InternalUploadBlankResponse struct for InternalUploadBlankResponse
 type InternalUploadBlankResponse struct {
 	Guid *string `json:"guid,omitempty"`
-	Url  *string `json:"url,omitempty"`
+	Url *string `json:"url,omitempty"`
+	Bucket *string `json:"bucket,omitempty"`
 }
 
 // NewInternalUploadBlankResponse instantiates a new InternalUploadBlankResponse object
@@ -104,8 +105,40 @@ func (o *InternalUploadBlankResponse) SetUrl(v string) {
 	o.Url = &v
 }
 
+// GetBucket returns the Bucket field value if set, zero value otherwise.
+func (o *InternalUploadBlankResponse) GetBucket() string {
+	if o == nil || IsNil(o.Bucket) {
+		var ret string
+		return ret
+	}
+	return *o.Bucket
+}
+
+// GetBucketOk returns a tuple with the Bucket field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *InternalUploadBlankResponse) GetBucketOk() (*string, bool) {
+	if o == nil || IsNil(o.Bucket) {
+		return nil, false
+	}
+	return o.Bucket, true
+}
+
+// HasBucket returns a boolean if a field has been set.
+func (o *InternalUploadBlankResponse) HasBucket() bool {
+	if o != nil && !IsNil(o.Bucket) {
+		return true
+	}
+
+	return false
+}
+
+// SetBucket gets a reference to the given string and assigns it to the Bucket field.
+func (o *InternalUploadBlankResponse) SetBucket(v string) {
+	o.Bucket = &v
+}
+
 func (o InternalUploadBlankResponse) MarshalJSON() ([]byte, error) {
-	toSerialize, err := o.ToMap()
+	toSerialize,err := o.ToMap()
 	if err != nil {
 		return []byte{}, err
 	}
@@ -119,6 +152,9 @@ func (o InternalUploadBlankResponse) ToMap() (map[string]interface{}, error) {
 	}
 	if !IsNil(o.Url) {
 		toSerialize["url"] = o.Url
+	}
+	if !IsNil(o.Bucket) {
+		toSerialize["bucket"] = o.Bucket
 	}
 	return toSerialize, nil
 }
@@ -158,3 +194,5 @@ func (v *NullableInternalUploadBlankResponse) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }
+
+

@@ -1,7 +1,7 @@
 /*
 Git LFS API (DRS Server)
 
-OpenAPI model spec for Git LFS-compatible endpoints implemented by drs-server. This includes standard Batch and Verify payload models plus drs-server extensions used for upload proxy and metadata staging.
+OpenAPI model spec for Git LFS-compatible endpoints implemented by drs-server. This includes standard Batch and Verify payload models plus drs-server extensions used for upload proxy and metadata staging. 
 
 API version: 1.1.0
 */
@@ -11,8 +11,8 @@ API version: 1.1.0
 package lfsapi
 
 import (
-	"bytes"
 	"encoding/json"
+	"bytes"
 	"fmt"
 )
 
@@ -21,8 +21,8 @@ var _ MappedNullable = &LFSErrorResponse{}
 
 // LFSErrorResponse struct for LFSErrorResponse
 type LFSErrorResponse struct {
-	Message          string  `json:"message"`
-	RequestId        *string `json:"request_id,omitempty"`
+	Message string `json:"message"`
+	RequestId *string `json:"request_id,omitempty"`
 	DocumentationUrl *string `json:"documentation_url,omitempty"`
 }
 
@@ -135,7 +135,7 @@ func (o *LFSErrorResponse) SetDocumentationUrl(v string) {
 }
 
 func (o LFSErrorResponse) MarshalJSON() ([]byte, error) {
-	toSerialize, err := o.ToMap()
+	toSerialize,err := o.ToMap()
 	if err != nil {
 		return []byte{}, err
 	}
@@ -167,10 +167,10 @@ func (o *LFSErrorResponse) UnmarshalJSON(data []byte) (err error) {
 	err = json.Unmarshal(data, &allProperties)
 
 	if err != nil {
-		return err
+		return err;
 	}
 
-	for _, requiredProperty := range requiredProperties {
+	for _, requiredProperty := range(requiredProperties) {
 		if _, exists := allProperties[requiredProperty]; !exists {
 			return fmt.Errorf("no value given for required property %v", requiredProperty)
 		}
@@ -226,3 +226,5 @@ func (v *NullableLFSErrorResponse) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }
+
+

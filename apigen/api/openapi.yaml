@@ -1902,6 +1902,15 @@ components:
           items:
             $ref: '#/components/schemas/UploadResponseObject'
           description: List of upload responses for the requested files
+    DRSPage:
+      type: object
+      required:
+        - drs_objects
+      properties:
+        drs_objects:
+          type: array
+          items:
+            $ref: '#/components/schemas/DrsObject'
   responses:
     200ServiceInfo:
       description: Retrieve info about the DRS service

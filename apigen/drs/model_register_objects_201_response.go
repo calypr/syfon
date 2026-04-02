@@ -11,6 +11,9 @@
 
 package drs
 
+
+
+
 type RegisterObjects201Response struct {
 
 	// Array of registered DRS objects in the same order as the candidates in the request

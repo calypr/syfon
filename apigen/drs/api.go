@@ -16,10 +16,12 @@ import (
 	"net/http"
 )
 
+
+
 // ObjectsAPIRouter defines the required methods for binding the api requests to a responses for the ObjectsAPI
 // The ObjectsAPIRouter implementation should parse necessary information from the http request,
 // pass the data to a ObjectsAPIServicer to perform the required actions, then write the service results to the http response.
-type ObjectsAPIRouter interface {
+type ObjectsAPIRouter interface { 
 	GetObject(http.ResponseWriter, *http.Request)
 	PostObject(http.ResponseWriter, *http.Request)
 	OptionsObject(http.ResponseWriter, *http.Request)
@@ -35,26 +37,25 @@ type ObjectsAPIRouter interface {
 	GetObjectsByChecksum(http.ResponseWriter, *http.Request)
 	BulkUpdateAccessMethods(http.ResponseWriter, *http.Request)
 }
-
 // ServiceInfoAPIRouter defines the required methods for binding the api requests to a responses for the ServiceInfoAPI
 // The ServiceInfoAPIRouter implementation should parse necessary information from the http request,
 // pass the data to a ServiceInfoAPIServicer to perform the required actions, then write the service results to the http response.
-type ServiceInfoAPIRouter interface {
+type ServiceInfoAPIRouter interface { 
 	GetServiceInfo(http.ResponseWriter, *http.Request)
 }
-
 // UploadRequestAPIRouter defines the required methods for binding the api requests to a responses for the UploadRequestAPI
 // The UploadRequestAPIRouter implementation should parse necessary information from the http request,
 // pass the data to a UploadRequestAPIServicer to perform the required actions, then write the service results to the http response.
-type UploadRequestAPIRouter interface {
+type UploadRequestAPIRouter interface { 
 	PostUploadRequest(http.ResponseWriter, *http.Request)
 }
+
 
 // ObjectsAPIServicer defines the api actions for the ObjectsAPI service
 // This interface intended to stay up to date with the openapi yaml used to generate it,
 // while the service implementation can be ignored with the .openapi-generator-ignore file
 // and updated with the logic required for the API.
-type ObjectsAPIServicer interface {
+type ObjectsAPIServicer interface { 
 	GetObject(context.Context, string, bool) (ImplResponse, error)
 	PostObject(context.Context, string, PostObjectRequest) (ImplResponse, error)
 	OptionsObject(context.Context, string) (ImplResponse, error)
@@ -71,18 +72,20 @@ type ObjectsAPIServicer interface {
 	BulkUpdateAccessMethods(context.Context, BulkAccessMethodUpdateRequest) (ImplResponse, error)
 }
 
+
 // ServiceInfoAPIServicer defines the api actions for the ServiceInfoAPI service
 // This interface intended to stay up to date with the openapi yaml used to generate it,
 // while the service implementation can be ignored with the .openapi-generator-ignore file
 // and updated with the logic required for the API.
-type ServiceInfoAPIServicer interface {
+type ServiceInfoAPIServicer interface { 
 	GetServiceInfo(context.Context) (ImplResponse, error)
 }
+
 
 // UploadRequestAPIServicer defines the api actions for the UploadRequestAPI service
 // This interface intended to stay up to date with the openapi yaml used to generate it,
 // while the service implementation can be ignored with the .openapi-generator-ignore file
 // and updated with the logic required for the API.
-type UploadRequestAPIServicer interface {
+type UploadRequestAPIServicer interface { 
 	PostUploadRequest(context.Context, UploadRequest) (ImplResponse, error)
 }

@@ -11,6 +11,9 @@
 
 package drs
 
+
+
+
 type BulkAccessMethodUpdateRequestUpdatesInner struct {
 
 	// DRS object ID to update
@@ -23,7 +26,7 @@ type BulkAccessMethodUpdateRequestUpdatesInner struct {
 // AssertBulkAccessMethodUpdateRequestUpdatesInnerRequired checks if the required fields are not zero-ed
 func AssertBulkAccessMethodUpdateRequestUpdatesInnerRequired(obj BulkAccessMethodUpdateRequestUpdatesInner) error {
 	elements := map[string]interface{}{
-		"object_id":      obj.ObjectId,
+		"object_id": obj.ObjectId,
 		"access_methods": obj.AccessMethods,
 	}
 	for name, el := range elements {

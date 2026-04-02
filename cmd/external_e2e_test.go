@@ -13,6 +13,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/calypr/syfon/cmd/cliutil"
 )
 
 // TestSyfonExternalServerE2E runs CLI-only e2e checks against a live Syfon server.
@@ -178,7 +180,7 @@ func bootstrapExternalBucketCredential(serverURL, bucket string) (bool, error) {
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := newHTTPClient().Do(req)
+	resp, err := cliutil.NewHTTPClient().Do(req)
 	if err != nil {
 		return false, fmt.Errorf("put /data/buckets: %w", err)
 	}

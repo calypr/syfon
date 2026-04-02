@@ -11,6 +11,9 @@
 
 package drs
 
+
+
+
 type DrsObjectCandidate struct {
 
 	// A string that can be used to name a `DrsObject`. This string is made up of uppercase and lowercase letters, decimal digits, hyphen, period, and underscore [A-Za-z0-9.-_]. See http://pubs.opengroup.org/onlinepubs/9699919799/basedefs/V1_chap03.html#tag_03_282[portable filenames].
@@ -44,7 +47,7 @@ type DrsObjectCandidate struct {
 // AssertDrsObjectCandidateRequired checks if the required fields are not zero-ed
 func AssertDrsObjectCandidateRequired(obj DrsObjectCandidate) error {
 	elements := map[string]interface{}{
-		"size":      obj.Size,
+		"size": obj.Size,
 		"checksums": obj.Checksums,
 	}
 	for name, el := range elements {

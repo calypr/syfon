@@ -1,7 +1,7 @@
 /*
 Git LFS API (DRS Server)
 
-OpenAPI model spec for Git LFS-compatible endpoints implemented by drs-server. This includes standard Batch and Verify payload models plus drs-server extensions used for upload proxy and metadata staging.
+OpenAPI model spec for Git LFS-compatible endpoints implemented by drs-server. This includes standard Batch and Verify payload models plus drs-server extensions used for upload proxy and metadata staging. 
 
 API version: 1.1.0
 */
@@ -19,14 +19,14 @@ var _ MappedNullable = &DrsObjectCandidate{}
 
 // DrsObjectCandidate struct for DrsObjectCandidate
 type DrsObjectCandidate struct {
-	Id            *string        `json:"id,omitempty"`
-	Name          *string        `json:"name,omitempty"`
-	Size          *int64         `json:"size,omitempty"`
-	Checksums     []Checksum     `json:"checksums,omitempty"`
+	Id *string `json:"id,omitempty"`
+	Name *string `json:"name,omitempty"`
+	Size *int64 `json:"size,omitempty"`
+	Checksums []Checksum `json:"checksums,omitempty"`
 	AccessMethods []AccessMethod `json:"access_methods,omitempty"`
-	Aliases       []string       `json:"aliases,omitempty"`
-	MimeType      *string        `json:"mime_type,omitempty"`
-	Description   *string        `json:"description,omitempty"`
+	Aliases []string `json:"aliases,omitempty"`
+	MimeType *string `json:"mime_type,omitempty"`
+	Description *string `json:"description,omitempty"`
 }
 
 // NewDrsObjectCandidate instantiates a new DrsObjectCandidate object
@@ -303,7 +303,7 @@ func (o *DrsObjectCandidate) SetDescription(v string) {
 }
 
 func (o DrsObjectCandidate) MarshalJSON() ([]byte, error) {
-	toSerialize, err := o.ToMap()
+	toSerialize,err := o.ToMap()
 	if err != nil {
 		return []byte{}, err
 	}
@@ -374,3 +374,5 @@ func (v *NullableDrsObjectCandidate) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }
+
+

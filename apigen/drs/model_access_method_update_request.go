@@ -11,6 +11,9 @@
 
 package drs
 
+
+
+
 type AccessMethodUpdateRequest struct {
 
 	// New access methods for the DRS object

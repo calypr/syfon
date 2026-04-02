@@ -1,7 +1,7 @@
 /*
 Internal Compatibility API (DRS Server)
 
-Consolidated internal API delta for drs-server. This spec captures non-GA4GH DRS internal/compatibility routes.
+Consolidated internal API delta for drs-server. This spec captures non-GA4GH DRS internal/compatibility routes. 
 
 API version: 1.0.0
 */
@@ -11,8 +11,8 @@ API version: 1.0.0
 package internalapi
 
 import (
-	"bytes"
 	"encoding/json"
+	"bytes"
 	"fmt"
 )
 
@@ -21,8 +21,8 @@ var _ MappedNullable = &InternalMultipartPart{}
 
 // InternalMultipartPart struct for InternalMultipartPart
 type InternalMultipartPart struct {
-	PartNumber int32  `json:"PartNumber"`
-	ETag       string `json:"ETag"`
+	PartNumber int32 `json:"PartNumber"`
+	ETag string `json:"ETag"`
 }
 
 type _InternalMultipartPart InternalMultipartPart
@@ -95,7 +95,7 @@ func (o *InternalMultipartPart) SetETag(v string) {
 }
 
 func (o InternalMultipartPart) MarshalJSON() ([]byte, error) {
-	toSerialize, err := o.ToMap()
+	toSerialize,err := o.ToMap()
 	if err != nil {
 		return []byte{}, err
 	}
@@ -123,10 +123,10 @@ func (o *InternalMultipartPart) UnmarshalJSON(data []byte) (err error) {
 	err = json.Unmarshal(data, &allProperties)
 
 	if err != nil {
-		return err
+		return err;
 	}
 
-	for _, requiredProperty := range requiredProperties {
+	for _, requiredProperty := range(requiredProperties) {
 		if _, exists := allProperties[requiredProperty]; !exists {
 			return fmt.Errorf("no value given for required property %v", requiredProperty)
 		}
@@ -182,3 +182,5 @@ func (v *NullableInternalMultipartPart) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }
+
+

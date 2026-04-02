@@ -37,6 +37,19 @@ paths:
           name: project
           schema:
             type: string
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 50
+        - in: query
+          name: page
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
       responses:
         '200':
           description: List response
@@ -52,8 +65,6 @@ paths:
           description: Forbidden
         '500':
           description: Internal server error
-        '501':
-          description: Listing mode not implemented without query params
     post:
       tags:
         - internal-index
@@ -317,12 +328,44 @@ paths:
             schema:
               $ref: '#/components/schemas/InternalUploadBlankRequest'
       responses:
-        '200':
+        '201':
           description: Upload URL issued
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/InternalUploadBlankResponse'
+        '400':
+          description: Validation error
+        '401':
+          description: Authentication required
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
+  /data/upload/bulk:
+    post:
+      tags:
+        - internal-data
+      operationId: internalUploadBulk
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InternalUploadBulkRequest'
+      responses:
+        '200':
+          description: Signed upload URLs for all requested items
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalUploadBulkResponse'
+        '207':
+          description: Partial failures while signing upload URLs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalUploadBulkResponse'
         '400':
           description: Validation error
         '401':
@@ -553,6 +596,57 @@ components:
         guid:
           type: string
         url:
+          type: string
+        bucket:
+          type: string
+    InternalUploadBulkRequest:
+      type: object
+      required:
+        - requests
+      properties:
+        requests:
+          type: array
+          items:
+            $ref: '#/components/schemas/InternalUploadBulkItem'
+    InternalUploadBulkItem:
+      type: object
+      required:
+        - file_id
+      properties:
+        file_id:
+          type: string
+        bucket:
+          type: string
+        file_name:
+          type: string
+        expires_in:
+          type: integer
+          format: int32
+    InternalUploadBulkResponse:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/InternalUploadBulkResult'
+    InternalUploadBulkResult:
+      type: object
+      required:
+        - file_id
+        - status
+      properties:
+        file_id:
+          type: string
+        bucket:
+          type: string
+        file_name:
+          type: string
+        url:
+          type: string
+        status:
+          type: integer
+          format: int32
+        error:
           type: string
     InternalMultipartInitRequest:
       type: object

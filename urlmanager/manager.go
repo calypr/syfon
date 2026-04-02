@@ -43,7 +43,7 @@ type Manager struct {
 	database        core.DatabaseInterface
 	signing         config.SigningConfig
 	defaultProvider string
-	cache           sync.Map // keyed by provider+bucket
+	cache           sync.Map // keyed by bucket/provider and credential namespaces
 }
 
 func NewManager(database core.DatabaseInterface, signing config.SigningConfig) *Manager {
@@ -271,11 +271,35 @@ func (m *Manager) resolve(ctx context.Context, accessId string, urlStr string) (
 }
 
 func (m *Manager) resolveProviderForBucket(ctx context.Context, bucket string) (string, error) {
-	cred, err := m.database.GetS3Credential(ctx, strings.TrimSpace(bucket))
+	cred, err := m.credentialForBucket(ctx, bucket)
 	if err != nil {
 		return "", err
 	}
 	return provider.Normalize(cred.Provider, m.defaultProvider), nil
+}
+
+func (m *Manager) credentialForBucket(ctx context.Context, bucket string) (*core.S3Credential, error) {
+	key := strings.TrimSpace(bucket)
+	if key == "" {
+		return nil, fmt.Errorf("bucket is required")
+	}
+	credKey := "cred|" + key
+	if cached, ok := m.cache.Load(credKey); ok {
+		if c, ok := cached.(core.S3Credential); ok {
+			cp := c
+			return &cp, nil
+		}
+	}
+
+	cred, err := m.database.GetS3Credential(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	if cred == nil {
+		return nil, fmt.Errorf("credential not found")
+	}
+	m.cache.Store(credKey, *cred)
+	return cred, nil
 }
 
 func (m *Manager) getBucket(ctx context.Context, bucketName string, p string) (*cacheItem, error) {
@@ -324,7 +348,7 @@ func (m *Manager) getBucket(ctx context.Context, bucketName string, p string) (*
 }
 
 func providerBucketCacheKey(p string, bucketName string) string {
-	return strings.TrimSpace(provider.Normalize(p, "")) + "|" + strings.TrimSpace(bucketName)
+	return "bucket|" + strings.TrimSpace(provider.Normalize(p, "")) + "|" + strings.TrimSpace(bucketName)
 }
 
 func isSigningNotSupported(err error) bool {
@@ -336,7 +360,7 @@ func isSigningNotSupported(err error) bool {
 }
 
 func (m *Manager) openS3Bucket(ctx context.Context, bucketName string) (*cacheItem, error) {
-	cred, err := m.database.GetS3Credential(ctx, bucketName)
+	cred, err := m.credentialForBucket(ctx, bucketName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get credentials for bucket %s: %w", bucketName, err)
 	}

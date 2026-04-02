@@ -1,7 +1,7 @@
 /*
 Bucket Credential API (DRS Server)
 
-Bucket credential and scope management API used by drs-server compatible clients.
+Bucket credential and scope management API used by drs-server compatible clients. 
 
 API version: 1.0.0
 */
@@ -11,8 +11,8 @@ API version: 1.0.0
 package bucketapi
 
 import (
-	"bytes"
 	"encoding/json"
+	"bytes"
 	"fmt"
 )
 
@@ -21,13 +21,15 @@ var _ MappedNullable = &PutBucketRequest{}
 
 // PutBucketRequest struct for PutBucketRequest
 type PutBucketRequest struct {
-	Bucket       string `json:"bucket"`
-	Region       string `json:"region"`
-	AccessKey    string `json:"access_key"`
-	SecretKey    string `json:"secret_key"`
-	Endpoint     string `json:"endpoint"`
+	Bucket string `json:"bucket"`
+	// Storage backend provider (s3|gcs|azure|file). Defaults to s3.
+	Provider *string `json:"provider,omitempty"`
+	Region *string `json:"region,omitempty"`
+	AccessKey *string `json:"access_key,omitempty"`
+	SecretKey *string `json:"secret_key,omitempty"`
+	Endpoint *string `json:"endpoint,omitempty"`
 	Organization string `json:"organization"`
-	ProjectId    string `json:"project_id"`
+	ProjectId string `json:"project_id"`
 	// Optional s3://bucket/prefix path override
 	Path *string `json:"path,omitempty"`
 }
@@ -38,13 +40,9 @@ type _PutBucketRequest PutBucketRequest
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewPutBucketRequest(bucket string, region string, accessKey string, secretKey string, endpoint string, organization string, projectId string) *PutBucketRequest {
+func NewPutBucketRequest(bucket string, organization string, projectId string) *PutBucketRequest {
 	this := PutBucketRequest{}
 	this.Bucket = bucket
-	this.Region = region
-	this.AccessKey = accessKey
-	this.SecretKey = secretKey
-	this.Endpoint = endpoint
 	this.Organization = organization
 	this.ProjectId = projectId
 	return &this
@@ -82,100 +80,164 @@ func (o *PutBucketRequest) SetBucket(v string) {
 	o.Bucket = v
 }
 
-// GetRegion returns the Region field value
-func (o *PutBucketRequest) GetRegion() string {
-	if o == nil {
+// GetProvider returns the Provider field value if set, zero value otherwise.
+func (o *PutBucketRequest) GetProvider() string {
+	if o == nil || IsNil(o.Provider) {
 		var ret string
 		return ret
 	}
-
-	return o.Region
+	return *o.Provider
 }
 
-// GetRegionOk returns a tuple with the Region field value
+// GetProviderOk returns a tuple with the Provider field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *PutBucketRequest) GetProviderOk() (*string, bool) {
+	if o == nil || IsNil(o.Provider) {
+		return nil, false
+	}
+	return o.Provider, true
+}
+
+// HasProvider returns a boolean if a field has been set.
+func (o *PutBucketRequest) HasProvider() bool {
+	if o != nil && !IsNil(o.Provider) {
+		return true
+	}
+
+	return false
+}
+
+// SetProvider gets a reference to the given string and assigns it to the Provider field.
+func (o *PutBucketRequest) SetProvider(v string) {
+	o.Provider = &v
+}
+
+// GetRegion returns the Region field value if set, zero value otherwise.
+func (o *PutBucketRequest) GetRegion() string {
+	if o == nil || IsNil(o.Region) {
+		var ret string
+		return ret
+	}
+	return *o.Region
+}
+
+// GetRegionOk returns a tuple with the Region field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 func (o *PutBucketRequest) GetRegionOk() (*string, bool) {
-	if o == nil {
+	if o == nil || IsNil(o.Region) {
 		return nil, false
 	}
-	return &o.Region, true
+	return o.Region, true
 }
 
-// SetRegion sets field value
+// HasRegion returns a boolean if a field has been set.
+func (o *PutBucketRequest) HasRegion() bool {
+	if o != nil && !IsNil(o.Region) {
+		return true
+	}
+
+	return false
+}
+
+// SetRegion gets a reference to the given string and assigns it to the Region field.
 func (o *PutBucketRequest) SetRegion(v string) {
-	o.Region = v
+	o.Region = &v
 }
 
-// GetAccessKey returns the AccessKey field value
+// GetAccessKey returns the AccessKey field value if set, zero value otherwise.
 func (o *PutBucketRequest) GetAccessKey() string {
-	if o == nil {
+	if o == nil || IsNil(o.AccessKey) {
 		var ret string
 		return ret
 	}
-
-	return o.AccessKey
+	return *o.AccessKey
 }
 
-// GetAccessKeyOk returns a tuple with the AccessKey field value
+// GetAccessKeyOk returns a tuple with the AccessKey field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 func (o *PutBucketRequest) GetAccessKeyOk() (*string, bool) {
-	if o == nil {
+	if o == nil || IsNil(o.AccessKey) {
 		return nil, false
 	}
-	return &o.AccessKey, true
+	return o.AccessKey, true
 }
 
-// SetAccessKey sets field value
+// HasAccessKey returns a boolean if a field has been set.
+func (o *PutBucketRequest) HasAccessKey() bool {
+	if o != nil && !IsNil(o.AccessKey) {
+		return true
+	}
+
+	return false
+}
+
+// SetAccessKey gets a reference to the given string and assigns it to the AccessKey field.
 func (o *PutBucketRequest) SetAccessKey(v string) {
-	o.AccessKey = v
+	o.AccessKey = &v
 }
 
-// GetSecretKey returns the SecretKey field value
+// GetSecretKey returns the SecretKey field value if set, zero value otherwise.
 func (o *PutBucketRequest) GetSecretKey() string {
-	if o == nil {
+	if o == nil || IsNil(o.SecretKey) {
 		var ret string
 		return ret
 	}
-
-	return o.SecretKey
+	return *o.SecretKey
 }
 
-// GetSecretKeyOk returns a tuple with the SecretKey field value
+// GetSecretKeyOk returns a tuple with the SecretKey field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 func (o *PutBucketRequest) GetSecretKeyOk() (*string, bool) {
-	if o == nil {
+	if o == nil || IsNil(o.SecretKey) {
 		return nil, false
 	}
-	return &o.SecretKey, true
+	return o.SecretKey, true
 }
 
-// SetSecretKey sets field value
+// HasSecretKey returns a boolean if a field has been set.
+func (o *PutBucketRequest) HasSecretKey() bool {
+	if o != nil && !IsNil(o.SecretKey) {
+		return true
+	}
+
+	return false
+}
+
+// SetSecretKey gets a reference to the given string and assigns it to the SecretKey field.
 func (o *PutBucketRequest) SetSecretKey(v string) {
-	o.SecretKey = v
+	o.SecretKey = &v
 }
 
-// GetEndpoint returns the Endpoint field value
+// GetEndpoint returns the Endpoint field value if set, zero value otherwise.
 func (o *PutBucketRequest) GetEndpoint() string {
-	if o == nil {
+	if o == nil || IsNil(o.Endpoint) {
 		var ret string
 		return ret
 	}
-
-	return o.Endpoint
+	return *o.Endpoint
 }
 
-// GetEndpointOk returns a tuple with the Endpoint field value
+// GetEndpointOk returns a tuple with the Endpoint field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 func (o *PutBucketRequest) GetEndpointOk() (*string, bool) {
-	if o == nil {
+	if o == nil || IsNil(o.Endpoint) {
 		return nil, false
 	}
-	return &o.Endpoint, true
+	return o.Endpoint, true
 }
 
-// SetEndpoint sets field value
+// HasEndpoint returns a boolean if a field has been set.
+func (o *PutBucketRequest) HasEndpoint() bool {
+	if o != nil && !IsNil(o.Endpoint) {
+		return true
+	}
+
+	return false
+}
+
+// SetEndpoint gets a reference to the given string and assigns it to the Endpoint field.
 func (o *PutBucketRequest) SetEndpoint(v string) {
-	o.Endpoint = v
+	o.Endpoint = &v
 }
 
 // GetOrganization returns the Organization field value
@@ -259,7 +321,7 @@ func (o *PutBucketRequest) SetPath(v string) {
 }
 
 func (o PutBucketRequest) MarshalJSON() ([]byte, error) {
-	toSerialize, err := o.ToMap()
+	toSerialize,err := o.ToMap()
 	if err != nil {
 		return []byte{}, err
 	}
@@ -269,10 +331,21 @@ func (o PutBucketRequest) MarshalJSON() ([]byte, error) {
 func (o PutBucketRequest) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	toSerialize["bucket"] = o.Bucket
-	toSerialize["region"] = o.Region
-	toSerialize["access_key"] = o.AccessKey
-	toSerialize["secret_key"] = o.SecretKey
-	toSerialize["endpoint"] = o.Endpoint
+	if !IsNil(o.Provider) {
+		toSerialize["provider"] = o.Provider
+	}
+	if !IsNil(o.Region) {
+		toSerialize["region"] = o.Region
+	}
+	if !IsNil(o.AccessKey) {
+		toSerialize["access_key"] = o.AccessKey
+	}
+	if !IsNil(o.SecretKey) {
+		toSerialize["secret_key"] = o.SecretKey
+	}
+	if !IsNil(o.Endpoint) {
+		toSerialize["endpoint"] = o.Endpoint
+	}
 	toSerialize["organization"] = o.Organization
 	toSerialize["project_id"] = o.ProjectId
 	if !IsNil(o.Path) {
@@ -287,10 +360,6 @@ func (o *PutBucketRequest) UnmarshalJSON(data []byte) (err error) {
 	// that every required field exists as a key in the generic map.
 	requiredProperties := []string{
 		"bucket",
-		"region",
-		"access_key",
-		"secret_key",
-		"endpoint",
 		"organization",
 		"project_id",
 	}
@@ -300,10 +369,10 @@ func (o *PutBucketRequest) UnmarshalJSON(data []byte) (err error) {
 	err = json.Unmarshal(data, &allProperties)
 
 	if err != nil {
-		return err
+		return err;
 	}
 
-	for _, requiredProperty := range requiredProperties {
+	for _, requiredProperty := range(requiredProperties) {
 		if _, exists := allProperties[requiredProperty]; !exists {
 			return fmt.Errorf("no value given for required property %v", requiredProperty)
 		}
@@ -359,3 +428,5 @@ func (v *NullablePutBucketRequest) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }
+
+

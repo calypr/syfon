@@ -12,15 +12,15 @@
 package drs
 
 import (
-	"github.com/gorilla/mux"
 	"net/http"
+	"github.com/gorilla/mux"
 )
 
 // A Route defines the parameters for an api endpoint
 type Route struct {
 	Name        string
-	Method      string
-	Pattern     string
+	Method	    string
+	Pattern	    string
 	HandlerFunc http.HandlerFunc
 }
 

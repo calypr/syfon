@@ -39,3 +39,7 @@ syfon
 /drs.db
 /drs_test.db
 
+
+# Local one-off configs and DBs
+/drs_local.db
+/drs_mock.db

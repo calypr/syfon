@@ -16,6 +16,8 @@ type DatabaseInterface interface {
 	GetObjectsByChecksum(ctx context.Context, checksum string) ([]InternalObject, error)
 	GetObjectsByChecksums(ctx context.Context, checksums []string) (map[string][]InternalObject, error)
 	ListObjectIDsByResourcePrefix(ctx context.Context, resourcePrefix string) ([]string, error)
+	CreateObjectAlias(ctx context.Context, aliasID, canonicalObjectID string) error
+	ResolveObjectAlias(ctx context.Context, aliasID string) (string, error)
 
 	// New Bulk Operations
 	GetBulkObjects(ctx context.Context, ids []string) ([]InternalObject, error)
