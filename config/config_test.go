@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"testing"
 )
@@ -168,3 +169,47 @@ func TestLoadConfig_LFSEnvOverrides(t *testing.T) {
 		t.Fatalf("expected 999, got %d", cfg.LFS.BandwidthLimitBytesPerMinute)
 	}
 }
+
+func TestLoadConfig_ValidBucketNames(t *testing.T) {
+	validNames := []string{
+		"abc",
+		"my-bucket",
+		"a1-b2-c3",
+		"bucket123",
+		"test-bucket-2026",
+	}
+
+	for _, bucket := range validNames {
+		t.Run(bucket, func(t *testing.T) {
+			content := fmt.Sprintf(`
+auth:
+  mode: local
+database:
+  sqlite:
+    file: "test.db"
+s3_credentials:
+  - bucket: %q
+    provider: s3
+    region: "us-east-1"
+    access_key: "test-key"
+    secret_key: "test-secret"
+`, bucket)
+
+			tmpfile, err := os.CreateTemp("", "config-valid-bucket-*.yaml")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer os.Remove(tmpfile.Name())
+
+			if _, err := tmpfile.Write([]byte(content)); err != nil {
+				t.Fatal(err)
+			}
+			tmpfile.Close()
+
+			if _, err := LoadConfig(tmpfile.Name()); err != nil {
+				t.Fatalf("expected valid bucket %q to pass validation, got error: %v", bucket, err)
+			}
+		})
+	}
+}
+
