@@ -333,6 +333,11 @@ release-check-version:
 release-check-clean:
 	@set -euo pipefail; \
 	if [[ -n "$$(git status --porcelain)" ]]; then \
+	  if [[ "$(DRY_RUN)" == "1" ]]; then \
+	    echo "WARN: git tree is dirty (dry run continuing)"; \
+	    git status --short; \
+	    exit 0; \
+	  fi; \
 	  echo "ERROR: git tree is dirty. Commit/stash changes before releasing."; \
 	  git status --short; \
 	  exit 1; \
@@ -343,6 +348,10 @@ release-check-apigen-tag: release-check-version
 	@set -euo pipefail; \
 	tag="$(APIGEN_TAG_PREFIX)/$(VERSION)"; \
 	if git rev-parse "$$tag" >/dev/null 2>&1; then \
+	  if [[ "$(DRY_RUN)" == "1" ]]; then \
+	    echo "WARN: tag already exists locally (dry run continuing): $$tag"; \
+	    exit 0; \
+	  fi; \
 	  echo "ERROR: tag already exists locally: $$tag"; \
 	  exit 1; \
 	fi
@@ -352,6 +361,10 @@ release-check-client-tag: release-check-version
 	@set -euo pipefail; \
 	tag="$(CLIENT_TAG_PREFIX)/$(VERSION)"; \
 	if git rev-parse "$$tag" >/dev/null 2>&1; then \
+	  if [[ "$(DRY_RUN)" == "1" ]]; then \
+	    echo "WARN: tag already exists locally (dry run continuing): $$tag"; \
+	    exit 0; \
+	  fi; \
 	  echo "ERROR: tag already exists locally: $$tag"; \
 	  exit 1; \
 	fi
