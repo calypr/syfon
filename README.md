@@ -69,6 +69,12 @@ Notes:
 - In `local` mode, set `auth.basic.username/password` (or env `DRS_BASIC_AUTH_USER` / `DRS_BASIC_AUTH_PASSWORD`) to enforce HTTP basic auth.
 - `gen3` mode is for deployed environments and requires PostgreSQL.
 
+Record scope note:
+- Syfon supports both scoped records (with `authz`, such as `/programs/<org>/projects/<project>`) and unscoped records (empty `authz`).
+- Unscoped `ls` (`GET /index` without `organization/project/authz` filters) returns all records, including unscoped ones.
+- RBAC checks still apply for scoped records in `gen3` mode.
+- Recommended production policy: require project/authz at write time so unscoped records are not created unintentionally.
+
 ### Local Gen3 Mock Auth (no redeploy loop)
 
 For local integration testing of Gen3 authorization behavior without Fence/Arborist and without PostgreSQL, run with mock auth:
