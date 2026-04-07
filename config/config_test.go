@@ -176,8 +176,8 @@ func TestLoadConfig_InvalidBucketNames(t *testing.T) {
 		bucket      string
 		errContains string
 	}{
-		{"ab", "3–63 characters"},
-		{string(make([]byte, 64)), "3–63 characters"},
+		{"ab", "3-63 characters"},
+		{string(make([]byte, 64)), "3-63 characters"},
 		{"MyBucket", "invalid"},
 		{"my_bucket", "invalid"},
 		{"my.bucket", "invalid"},
@@ -315,4 +315,3 @@ s3_credentials:
 		})
 	}
 }
-
