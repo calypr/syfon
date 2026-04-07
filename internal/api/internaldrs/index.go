@@ -76,9 +76,12 @@ func handleInternalBulkCreate(database core.DatabaseInterface) http.HandlerFunc 
 				writeHTTPError(w, r, http.StatusBadRequest, fmt.Sprintf("record[%d]: %v", i, err), err)
 				return
 			}
-			targetResources := obj.Authorizations
-			if len(targetResources) == 0 {
-				targetResources = []string{"/data_file"}
+			hadExplicitAuthz := len(obj.Authorizations) > 0
+			targetResources := objectAuthorizationsOrDefault(obj)
+			if !hadExplicitAuthz {
+				obj.Authorizations = append([]string(nil), targetResources...)
+			}
+			if !hadExplicitAuthz {
 				if !core.HasMethodAccess(r.Context(), "file_upload", targetResources) && !core.HasMethodAccess(r.Context(), "create", targetResources) {
 					writeAuthError(w, r)
 					return
@@ -340,6 +343,9 @@ func handleInternalCreate(w http.ResponseWriter, r *http.Request, database core.
 		writeHTTPError(w, r, http.StatusBadRequest, err.Error(), err)
 		return
 	}
+	if len(obj.Authorizations) == 0 {
+		obj.Authorizations = []string{"/data_file"}
+	}
 	aliased, canonicalObj, aliasErr := maybeAliasBySHA256(r.Context(), database, req, obj)
 	if aliasErr != nil {
 		writeDBError(w, r, aliasErr)
@@ -366,6 +372,13 @@ func handleInternalCreate(w http.ResponseWriter, r *http.Request, database core.
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		slog.Error("gen3 encode response failed", "request_id", core.GetRequestID(r.Context()), "method", r.Method, "path", r.URL.Path, "err", err)
 	}
+}
+
+func objectAuthorizationsOrDefault(obj *core.InternalObject) []string {
+	if obj == nil || len(obj.Authorizations) == 0 {
+		return []string{"/data_file"}
+	}
+	return append([]string(nil), obj.Authorizations...)
 }
 
 func maybeAliasBySHA256(ctx context.Context, database core.DatabaseInterface, req internalapi.InternalRecord, obj *core.InternalObject) (bool, *core.InternalObject, error) {

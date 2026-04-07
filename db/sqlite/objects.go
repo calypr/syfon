@@ -435,6 +435,26 @@ func (db *SqliteDB) GetObjectsByChecksums(ctx context.Context, checksums []strin
 }
 
 func (db *SqliteDB) ListObjectIDsByResourcePrefix(ctx context.Context, resourcePrefix string) ([]string, error) {
+	if resourcePrefix == "/" {
+		rows, err := db.db.QueryContext(ctx, `
+			SELECT DISTINCT object_id
+			FROM drs_object_authz`)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+
+		ids := make([]string, 0)
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				return nil, err
+			}
+			ids = append(ids, id)
+		}
+		return ids, nil
+	}
+
 	rows, err := db.db.QueryContext(ctx, `
 		SELECT DISTINCT object_id
 		FROM drs_object_authz
