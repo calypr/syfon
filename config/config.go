@@ -309,14 +309,14 @@ func LoadConfig(configFile string) (*Config, error) {
 		if cred.Bucket == "" {
 			return nil, fmt.Errorf("s3_credentials[%d]: bucket is required", i)
 		}
-		if len(cred.Bucket) < 3 || len(cred.Bucket) > 63 {
-			return nil, fmt.Errorf("s3_credentials[%d]: bucket name %q must be 3–63 characters", i, cred.Bucket)
-		}
-		if !validBucketName.MatchString(cred.Bucket) {
-			return nil, fmt.Errorf("s3_credentials[%d]: bucket name %q is invalid (lowercase letters, numbers, hyphens only; must start and end with letter or number)", i, cred.Bucket)
-		}
 		switch provider {
 		case "s3":
+			if len(cred.Bucket) < 3 || len(cred.Bucket) > 63 {
+				return nil, fmt.Errorf("s3_credentials[%d]: bucket name %q must be 3–63 characters", i, cred.Bucket)
+			}
+			if !validBucketName.MatchString(cred.Bucket) {
+				return nil, fmt.Errorf("s3_credentials[%d]: bucket name %q is invalid (lowercase letters, numbers, hyphens only; must start and end with letter or number)", i, cred.Bucket)
+			}
 			if cred.Region == "" {
 				return nil, fmt.Errorf("s3_credentials[%d]: region is required for provider=s3", i)
 			}
