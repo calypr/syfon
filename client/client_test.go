@@ -58,21 +58,27 @@ func TestDataUploadBlank(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			t.Fatalf("decode request: %v", err)
 		}
-		if req.GUID != "abc" {
-			t.Fatalf("unexpected guid: %q", req.GUID)
+		if req.GetGuid() != "abc" {
+			t.Fatalf("unexpected guid: %q", req.GetGuid())
 		}
-		data, _ := json.Marshal(SignedURL{GUID: "abc", URL: "https://signed", Bucket: "b1"})
+		out := UploadBlankResponse{}
+		out.SetGuid("abc")
+		out.SetUrl("https://signed")
+		out.SetBucket("b1")
+		data, _ := json.Marshal(out)
 		return &http.Response{
 			StatusCode: http.StatusOK,
 			Body:       io.NopCloser(strings.NewReader(string(data))),
 			Header:     make(http.Header),
 		}, nil
 	})
-	out, err := c.Data().UploadBlank(context.Background(), UploadBlankRequest{GUID: "abc"})
+	req := UploadBlankRequest{}
+	req.SetGuid("abc")
+	out, err := c.Data().UploadBlank(context.Background(), req)
 	if err != nil {
 		t.Fatalf("UploadBlank failed: %v", err)
 	}
-	if out.URL != "https://signed" || out.Bucket != "b1" {
+	if out.GetUrl() != "https://signed" || out.GetBucket() != "b1" {
 		t.Fatalf("unexpected response: %+v", out)
 	}
 }
@@ -116,11 +122,13 @@ func TestDataMultipartInitUsesCanonicalUploadId(t *testing.T) {
 			Header:     make(http.Header),
 		}, nil
 	})
-	out, err := c.Data().MultipartInit(context.Background(), MultipartInitRequest{GUID: "g1"})
+	req := MultipartInitRequest{}
+	req.SetGuid("g1")
+	out, err := c.Data().MultipartInit(context.Background(), req)
 	if err != nil {
 		t.Fatalf("MultipartInit failed: %v", err)
 	}
-	if out.GUID != "g1" || out.UploadID != "u1" {
+	if out.GetGuid() != "g1" || out.GetUploadId() != "u1" {
 		t.Fatalf("unexpected response: %+v", out)
 	}
 }

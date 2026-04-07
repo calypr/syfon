@@ -200,3 +200,9 @@ The project uses a Makefile for common tasks:
 - `make coverage`: Runs coverage for core production packages (db/service/middleware/url signing) and writes `coverage/coverage.out`, `coverage/coverage.txt`, and `coverage/coverage.html`.
 - `make coverage-full`: Runs broader compatibility-layer coverage (includes internal compatibility and LFS packages).
 - `make serve`: Starts the DRS server.
+
+### apigen Scope (Current vs Future)
+
+The `apigen` module is currently used as a shared model/types package, not a full server/client operation generator. In practice, we generate and commit schemas/models from OpenAPI (`components/schemas`), while route handlers and request wiring are implemented manually under `internal/api/internaldrs` and related packages. This means path/operation updates in `apigen/api/*.openapi.yaml` may change contract/docs without producing new generated handler code.
+
+This is intentional for now to keep control of runtime behavior and compatibility logic. We can expand `apigen` later to include operation-level generation (`apis`/server interfaces) once we decide to move more routing and handler contracts to generated code.

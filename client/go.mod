@@ -3,12 +3,11 @@ module github.com/calypr/syfon/client
 go 1.26.1
 
 require (
-	github.com/calypr/syfon v0.0.0
+	github.com/calypr/syfon/apigen v0.1.2
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/hashicorp/go-retryablehttp v0.7.8
-	github.com/hashicorp/go-version v1.9.0
 	github.com/vbauerster/mpb/v8 v8.12.0
 	go.uber.org/mock v0.6.0
 	gocloud.dev v0.45.0
@@ -57,7 +56,6 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.35.13 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sts v1.41.6 // indirect
 	github.com/aws/smithy-go v1.24.2 // indirect
-	github.com/calypr/syfon/apigen v0.0.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/cncf/xds/go v0.0.0-20251110193048-8bfbf64dc13e // indirect
@@ -103,7 +101,3 @@ require (
 	google.golang.org/protobuf v1.36.10 // indirect
 	gopkg.in/validator.v2 v2.0.1 // indirect
 )
-
-replace github.com/calypr/syfon/apigen => ../apigen
-
-replace github.com/calypr/syfon => ..

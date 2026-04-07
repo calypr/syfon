@@ -10,8 +10,8 @@ type DataService struct {
 	c *Client
 }
 
-func (d *DataService) UploadBlank(ctx context.Context, req UploadBlankRequest) (SignedURL, error) {
-	var out SignedURL
+func (d *DataService) UploadBlank(ctx context.Context, req UploadBlankRequest) (UploadBlankResponse, error) {
+	var out UploadBlankResponse
 	err := d.c.doJSON(ctx, "POST", "/data/upload", nil, req, &out)
 	return out, err
 }
@@ -69,7 +69,15 @@ func (d *DataService) MultipartComplete(ctx context.Context, req MultipartComple
 
 // Compatibility wrappers used by current CLI code.
 func (c *Client) RequestUploadURL(ctx context.Context, guid string) (SignedURL, error) {
-	return c.Data().UploadBlank(ctx, UploadBlankRequest{GUID: guid})
+	req := UploadBlankRequest{}
+	req.SetGuid(guid)
+	out, err := c.Data().UploadBlank(ctx, req)
+	if err != nil {
+		return SignedURL{}, err
+	}
+	signed := SignedURL{}
+	signed.SetUrl(out.GetUrl())
+	return signed, nil
 }
 
 func (c *Client) GetDownloadURL(ctx context.Context, did string) (SignedURL, error) {

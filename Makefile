@@ -20,6 +20,7 @@ GOCACHE ?= $(PWD)/.gocache
 REMOTE ?= origin
 VERSION ?=
 DRY_RUN ?= 0
+RUN_TESTS ?= 1
 APIGEN_TAG_PREFIX ?= apigen
 CLIENT_TAG_PREFIX ?= client
 
@@ -343,6 +344,36 @@ release-check-clean:
 	  exit 1; \
 	fi
 
+.PHONY: release-check-clean-apigen
+release-check-clean-apigen:
+	@set -euo pipefail; \
+	dirty="$$(git status --porcelain -- apigen)"; \
+	if [[ -n "$$dirty" ]]; then \
+	  if [[ "$(DRY_RUN)" == "1" ]]; then \
+	    echo "WARN: apigen tree is dirty (dry run continuing)"; \
+	    printf "%s\n" "$$dirty"; \
+	    exit 0; \
+	  fi; \
+	  echo "ERROR: apigen tree is dirty. Commit/stash apigen changes before releasing apigen."; \
+	  printf "%s\n" "$$dirty"; \
+	  exit 1; \
+	fi
+
+.PHONY: release-check-clean-client
+release-check-clean-client:
+	@set -euo pipefail; \
+	dirty="$$(git status --porcelain -- client)"; \
+	if [[ -n "$$dirty" ]]; then \
+	  if [[ "$(DRY_RUN)" == "1" ]]; then \
+	    echo "WARN: client tree is dirty (dry run continuing)"; \
+	    printf "%s\n" "$$dirty"; \
+	    exit 0; \
+	  fi; \
+	  echo "ERROR: client tree is dirty. Commit/stash client changes before releasing client."; \
+	  printf "%s\n" "$$dirty"; \
+	  exit 1; \
+	fi
+
 .PHONY: release-check-apigen-tag
 release-check-apigen-tag: release-check-version
 	@set -euo pipefail; \
@@ -372,17 +403,25 @@ release-check-client-tag: release-check-version
 .PHONY: release-test-apigen
 release-test-apigen:
 	@set -euo pipefail; \
+	if [[ "$(RUN_TESTS)" != "1" ]]; then \
+	  echo "Skipping apigen tests (RUN_TESTS=$(RUN_TESTS))"; \
+	  exit 0; \
+	fi; \
 	cd apigen; \
 	GOCACHE="$(GOCACHE)" go test ./...
 
 .PHONY: release-test-client
 release-test-client:
 	@set -euo pipefail; \
+	if [[ "$(RUN_TESTS)" != "1" ]]; then \
+	  echo "Skipping client tests (RUN_TESTS=$(RUN_TESTS))"; \
+	  exit 0; \
+	fi; \
 	cd client; \
 	GOCACHE="$(GOCACHE)" go test ./...
 
 .PHONY: release-apigen
-release-apigen: release-check-clean release-check-apigen-tag release-test-apigen
+release-apigen: release-check-clean-apigen release-check-apigen-tag release-test-apigen
 	@set -euo pipefail; \
 	tag="$(APIGEN_TAG_PREFIX)/$(VERSION)"; \
 	if [[ "$(DRY_RUN)" == "1" ]]; then \
@@ -395,7 +434,7 @@ release-apigen: release-check-clean release-check-apigen-tag release-test-apigen
 	echo "Released $$tag"
 
 .PHONY: release-client
-release-client: release-check-clean release-check-client-tag release-test-client
+release-client: release-check-clean-client release-check-client-tag release-test-client
 	@set -euo pipefail; \
 	tag="$(CLIENT_TAG_PREFIX)/$(VERSION)"; \
 	if [[ "$(DRY_RUN)" == "1" ]]; then \

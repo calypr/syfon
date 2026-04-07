@@ -210,32 +210,32 @@ func (c *Client) Resolve(ctx context.Context, id string) (*transfer.ResolvedObje
 
 // InitMultipartUpload implements transfer.MultipartURLSigner.
 func (c *Client) InitMultipartUpload(ctx context.Context, guid, filename, bucket string) (*common.MultipartUploadInit, error) {
-	resp, err := c.Data().MultipartInit(ctx, MultipartInitRequest{
-		GUID:     guid,
-		FileName: filename,
-		Bucket:   bucket,
-	})
+	req := MultipartInitRequest{}
+	req.SetGuid(guid)
+	req.SetFileName(filename)
+	req.SetBucket(bucket)
+	resp, err := c.Data().MultipartInit(ctx, req)
 	if err != nil {
 		return nil, err
 	}
 	return &common.MultipartUploadInit{
-		UploadID: resp.UploadID,
-		GUID:     resp.GUID,
+		UploadID: resp.GetUploadId(),
+		GUID:     resp.GetGuid(),
 	}, nil
 }
 
 // GetMultipartUploadURL implements transfer.MultipartURLSigner.
 func (c *Client) GetMultipartUploadURL(ctx context.Context, key, uploadID string, partNum int32, bucket string) (string, error) {
-	resp, err := c.Data().MultipartUpload(ctx, MultipartUploadRequest{
-		Key:        key,
-		UploadID:   uploadID,
-		PartNumber: partNum,
-		Bucket:     bucket,
-	})
+	req := MultipartUploadRequest{}
+	req.SetKey(key)
+	req.SetUploadId(uploadID)
+	req.SetPartNumber(partNum)
+	req.SetBucket(bucket)
+	resp, err := c.Data().MultipartUpload(ctx, req)
 	if err != nil {
 		return "", err
 	}
-	return resp.PresignedURL, nil
+	return resp.GetPresignedUrl(), nil
 }
 
 // CompleteMultipartUpload implements transfer.MultipartURLSigner.
@@ -248,18 +248,20 @@ func (c *Client) CompleteMultipartUpload(ctx context.Context, key, uploadID stri
 		})
 	}
 
-	return c.Data().MultipartComplete(ctx, MultipartCompleteRequest{
-		Key:      key,
-		UploadID: uploadID,
-		Bucket:   bucket,
-		Parts:    apiParts,
-	})
+	req := MultipartCompleteRequest{}
+	req.SetKey(key)
+	req.SetUploadId(uploadID)
+	req.SetBucket(bucket)
+	req.SetParts(apiParts)
+	return c.Data().MultipartComplete(ctx, req)
 }
 
 // GetWriter implements transfer.ObjectWriter.
 func (c *Client) GetWriter(ctx context.Context, guid string) (io.WriteCloser, error) {
 	// For simple single-stream PUT directly to a signed URL.
-	_, err := c.Data().UploadBlank(ctx, UploadBlankRequest{GUID: guid})
+	req := UploadBlankRequest{}
+	req.SetGuid(guid)
+	_, err := c.Data().UploadBlank(ctx, req)
 	if err != nil {
 		return nil, err
 	}

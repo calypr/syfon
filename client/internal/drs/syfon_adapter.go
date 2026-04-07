@@ -3,14 +3,15 @@ package drs
 import (
 	"time"
 
-	apitypes "github.com/calypr/syfon/api/types"
+	drsapi "github.com/calypr/syfon/apigen/drs"
+	internalapi "github.com/calypr/syfon/apigen/internalapi"
 )
 
-func drsObjectToSyfonInternalRecord(obj *DRSObject) (apitypes.InternalRecord, error) {
+func drsObjectToSyfonInternalRecord(obj *DRSObject) (internalapi.InternalRecordResponse, error) {
 	if obj == nil {
-		return apitypes.InternalRecord{}, nil
+		return internalapi.InternalRecordResponse{}, nil
 	}
-	out := apitypes.InternalRecord{}
+	out := internalapi.InternalRecordResponse{}
 	out.SetDid(obj.Id)
 	if obj.Name != "" {
 		out.SetFileName(obj.Name)
@@ -22,7 +23,7 @@ func drsObjectToSyfonInternalRecord(obj *DRSObject) (apitypes.InternalRecord, er
 	return out, nil
 }
 
-func syfonInternalRecordToDRSObject(rec apitypes.InternalRecord) (*DRSObject, error) {
+func syfonInternalRecordToDRSObject(rec internalapi.InternalRecordResponse) (*DRSObject, error) {
 	accessMethods, err := DRSAccessMethodsFromInternalURLs(rec.GetUrls(), rec.GetAuthz())
 	if err != nil {
 		return nil, err
@@ -48,7 +49,7 @@ func syfonInternalRecordToDRSObject(rec apitypes.InternalRecord) (*DRSObject, er
 	return obj, nil
 }
 
-func convertDrsChecksumsToMap(checksums []apitypes.Checksum) map[string]string {
+func convertDrsChecksumsToMap(checksums []drsapi.Checksum) map[string]string {
 	result := make(map[string]string, len(checksums))
 	for _, c := range checksums {
 		result[c.Type] = c.Checksum
@@ -56,10 +57,10 @@ func convertDrsChecksumsToMap(checksums []apitypes.Checksum) map[string]string {
 	return result
 }
 
-func convertMapToDrsChecksums(hashes map[string]string) []apitypes.Checksum {
-	result := make([]apitypes.Checksum, 0, len(hashes))
+func convertMapToDrsChecksums(hashes map[string]string) []drsapi.Checksum {
+	result := make([]drsapi.Checksum, 0, len(hashes))
 	for t, c := range hashes {
-		result = append(result, apitypes.Checksum{
+		result = append(result, drsapi.Checksum{
 			Type:     t,
 			Checksum: c,
 		})

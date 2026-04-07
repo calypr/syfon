@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	apitypes "github.com/calypr/syfon/api/types"
+	internalapi "github.com/calypr/syfon/apigen/internalapi"
 	"github.com/calypr/syfon/client/conf"
 	"github.com/calypr/syfon/client/pkg/common"
 	"github.com/calypr/syfon/client/pkg/hash"
@@ -26,7 +26,7 @@ type Config struct {
 }
 
 type internalListResponse struct {
-	Records []apitypes.InternalRecord `json:"records"`
+	Records []internalapi.InternalRecordResponse `json:"records"`
 }
 
 type DrsClient struct {
@@ -123,7 +123,7 @@ func (c *DrsClient) GetObject(ctx context.Context, id string) (*DRSObject, error
 		return nil, fmt.Errorf("failed to get metadata for %s: %s", id, resp.Status)
 	}
 
-	var rec apitypes.InternalRecord
+	var rec internalapi.InternalRecordResponse
 	if err := json.NewDecoder(resp.Body).Decode(&rec); err != nil {
 		return nil, err
 	}
@@ -284,7 +284,7 @@ func (c *DrsClient) RegisterRecord(ctx context.Context, record *DRSObject) (*DRS
 		return nil, fmt.Errorf("failed to register record: %s", resp.Status)
 	}
 
-	var rec apitypes.InternalRecord
+	var rec internalapi.InternalRecordResponse
 	if err := json.NewDecoder(resp.Body).Decode(&rec); err != nil {
 		return nil, err
 	}
@@ -320,7 +320,7 @@ func (c *DrsClient) UpdateRecord(ctx context.Context, updateInfo *DRSObject, did
 		return nil, fmt.Errorf("failed to update record %s: %s", did, resp.Status)
 	}
 
-	var rec apitypes.InternalRecord
+	var rec internalapi.InternalRecordResponse
 	if err := json.NewDecoder(resp.Body).Decode(&rec); err != nil {
 		return nil, err
 	}
@@ -367,7 +367,7 @@ func (c *DrsClient) DeleteRecordsByChecksums(ctx context.Context, checksums []*h
 		return 0, nil
 	}
 
-	body, _ := json.Marshal(apitypes.BulkHashesRequest{Hashes: hashes})
+	body, _ := json.Marshal(internalapi.BulkHashesRequest{Hashes: hashes})
 	rb := c.New(http.MethodPost, c.endpoint("/index/bulk/delete")).
 		WithBody(bytes.NewReader(body)).
 		WithHeader("Content-Type", "application/json")

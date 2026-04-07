@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	sytypes "github.com/calypr/syfon/api/types"
+	drsapi "github.com/calypr/syfon/apigen/drs"
 )
 
 // ChecksumType represents the digest method used to create the checksum
@@ -49,7 +49,7 @@ var SupportedChecksums = map[string]bool{
 	string(ChecksumTypeTrunc512): true,
 }
 
-type Checksum sytypes.Checksum
+type Checksum drsapi.Checksum
 
 type HashInfo struct {
 	MD5    string `json:"md5,omitempty"`
@@ -144,7 +144,7 @@ func ConvertChecksumsToHashInfo(checksums []Checksum) HashInfo {
 	return ConvertStringMapToHashInfo(checksumMap)
 }
 
-func ConvertDrsChecksumsToMap(checksums []sytypes.Checksum) map[string]string {
+func ConvertDrsChecksumsToMap(checksums []drsapi.Checksum) map[string]string {
 	result := make(map[string]string, len(checksums))
 	for _, c := range checksums {
 		result[c.Type] = c.Checksum
@@ -152,15 +152,15 @@ func ConvertDrsChecksumsToMap(checksums []sytypes.Checksum) map[string]string {
 	return result
 }
 
-func ConvertDrsChecksumsToHashInfo(checksums []sytypes.Checksum) HashInfo {
+func ConvertDrsChecksumsToHashInfo(checksums []drsapi.Checksum) HashInfo {
 	checksumMap := ConvertDrsChecksumsToMap(checksums)
 	return ConvertStringMapToHashInfo(checksumMap)
 }
 
-func ConvertMapToDrsChecksums(hashes map[string]string) []sytypes.Checksum {
-	result := make([]sytypes.Checksum, 0, len(hashes))
+func ConvertMapToDrsChecksums(hashes map[string]string) []drsapi.Checksum {
+	result := make([]drsapi.Checksum, 0, len(hashes))
 	for t, c := range hashes {
-		result = append(result, sytypes.Checksum{
+		result = append(result, drsapi.Checksum{
 			Type:     t,
 			Checksum: c,
 		})
