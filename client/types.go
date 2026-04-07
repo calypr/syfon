@@ -20,6 +20,7 @@ type ListRecordsResponse = apitypes.ListRecordsResponse
 type BulkCreateRequest = apitypes.BulkCreateRequest
 type BulkHashesRequest = apitypes.BulkHashesRequest
 type BulkSHA256ValidityRequest = apitypes.BulkSHA256ValidityRequest
+type DeleteByQueryResponse = apitypes.DeleteByQueryResponse
 type MultipartPart = apitypes.MultipartPart
 type PutBucketRequest = apitypes.PutBucketRequest
 type BucketScopeRequest = apitypes.AddBucketScopeRequest
@@ -41,6 +42,8 @@ type DeleteByQueryOptions struct {
 	Authz        string
 	Organization string
 	ProjectID    string
+	Hash         string
+	HashType     string
 }
 
 type ListRecordsOptions struct {

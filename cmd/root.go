@@ -6,11 +6,8 @@ import (
 
 	"github.com/calypr/syfon/cmd/addurl"
 	"github.com/calypr/syfon/cmd/bucket"
-	"github.com/calypr/syfon/cmd/download"
 	"github.com/calypr/syfon/cmd/ping"
 	"github.com/calypr/syfon/cmd/server"
-	"github.com/calypr/syfon/cmd/sha256sum"
-	"github.com/calypr/syfon/cmd/upload"
 	"github.com/calypr/syfon/cmd/validate"
 	"github.com/calypr/syfon/cmd/version"
 	"github.com/spf13/cobra"
@@ -45,7 +42,4 @@ func init() {
 	RootCmd.AddCommand(ping.Cmd)
 	RootCmd.AddCommand(bucket.Cmd)
 	RootCmd.AddCommand(addurl.Cmd)
-	RootCmd.AddCommand(upload.Cmd)
-	RootCmd.AddCommand(download.Cmd)
-	RootCmd.AddCommand(sha256sum.Cmd)
 }

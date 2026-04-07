@@ -662,6 +662,32 @@ func TestService_HelperAndLookupMethods(t *testing.T) {
 	if bulkResp.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", bulkResp.Code)
 	}
+
+	mismatchResp, err := service.GetObjectsByChecksum(context.Background(), "md5:sha-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if mismatchResp.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for type mismatch, got %d", mismatchResp.Code)
+	}
+
+	typedBulkResp, err := service.GetObjectsByChecksums(context.Background(), []string{"sha256:sha-1", "md5:sha-1"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if typedBulkResp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", typedBulkResp.Code)
+	}
+	typedBody, ok := typedBulkResp.Body.(map[string][]drs.DrsObject)
+	if !ok {
+		t.Fatalf("unexpected typed bulk body type: %T", typedBulkResp.Body)
+	}
+	if len(typedBody["sha256:sha-1"]) != 1 {
+		t.Fatalf("expected one sha256 match, got %+v", typedBody["sha256:sha-1"])
+	}
+	if len(typedBody["md5:sha-1"]) != 0 {
+		t.Fatalf("expected no md5 matches, got %+v", typedBody["md5:sha-1"])
+	}
 }
 
 func TestUpdateObjectAccessMethods_Success(t *testing.T) {

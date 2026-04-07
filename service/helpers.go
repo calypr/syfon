@@ -66,6 +66,17 @@ func normalizeChecksumType(checksumType string) string {
 	return normalized
 }
 
+func parseChecksumQuery(checksum string) (checksumType string, checksumValue string) {
+	clean := strings.Trim(strings.TrimSpace(checksum), `"'`)
+	checksumType = ""
+	checksumValue = normalizeChecksum(clean)
+	if parts := strings.SplitN(clean, ":", 2); len(parts) == 2 {
+		checksumType = normalizeChecksumType(parts[0])
+		checksumValue = strings.Trim(strings.TrimSpace(parts[1]), `"'`)
+	}
+	return checksumType, checksumValue
+}
+
 func mergeAdditionalChecksums(existing []drs.Checksum, additions []drs.Checksum) []drs.Checksum {
 	out := make([]drs.Checksum, 0, len(existing)+len(additions))
 	seenTypes := make(map[string]struct{}, len(existing)+len(additions))

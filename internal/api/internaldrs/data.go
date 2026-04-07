@@ -11,6 +11,7 @@ import (
 	"github.com/calypr/syfon/apigen/drs"
 	"github.com/calypr/syfon/config"
 	"github.com/calypr/syfon/db/core"
+	"github.com/calypr/syfon/internal/provider"
 	"github.com/calypr/syfon/urlmanager"
 	"github.com/gorilla/mux"
 )
@@ -53,6 +54,10 @@ func RegisterInternalDataRoutes(router *mux.Router, database core.DatabaseInterf
 	router.Handle(config.RouteInternalDownload, drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handleInternalDownload(w, r, database, uM)
 	}), "InternalDownload")).Methods(http.MethodGet)
+
+	router.Handle(config.RouteInternalDownloadPart, drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handleInternalDownloadPart(w, r, database, uM)
+	}), "InternalDownloadPart")).Methods(http.MethodGet)
 
 	router.Handle(config.RouteInternalUpload, drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handleInternalUploadBlank(w, r, database, uM)
@@ -132,7 +137,7 @@ func resolveBucket(ctx *http.Request, database core.DatabaseInterface, requested
 	return creds[0].Bucket, nil
 }
 
-func resolveObjectS3Key(database core.DatabaseInterface, ctx *http.Request, objectID string, bucket string) (string, bool) {
+func resolveObjectRemotePath(database core.DatabaseInterface, ctx *http.Request, objectID string, bucket string) (string, bool) {
 	if strings.TrimSpace(objectID) == "" || strings.TrimSpace(bucket) == "" {
 		return "", false
 	}
@@ -147,7 +152,12 @@ func resolveObjectS3Key(database core.DatabaseInterface, ctx *http.Request, obje
 			continue
 		}
 		u, err := url.Parse(raw)
-		if err != nil || !strings.EqualFold(u.Scheme, "s3") {
+		if err != nil {
+			continue
+		}
+		// Match any supported protocol scheme.
+		p := provider.FromScheme(u.Scheme)
+		if p == "" {
 			continue
 		}
 		if !strings.EqualFold(strings.TrimSpace(u.Host), targetBucket) {

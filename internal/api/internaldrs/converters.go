@@ -191,6 +191,45 @@ func normalizeHashQueryValue(raw string) string {
 	return clean
 }
 
+func normalizeHashQueryType(raw string) string {
+	clean := strings.Trim(strings.TrimSpace(raw), `"'`)
+	clean = strings.ToLower(clean)
+	clean = strings.ReplaceAll(clean, "-", "")
+	return clean
+}
+
+// parseHashQuery returns normalized hash type (when provided) and normalized value.
+// Type precedence: explicit query `hash_type` first, then `type:value` prefix in `hash`.
+func parseHashQuery(rawHash string, rawType string) (string, string) {
+	hashType := normalizeHashQueryType(rawType)
+	hashValue := normalizeHashQueryValue(rawHash)
+
+	cleanHash := strings.Trim(strings.TrimSpace(rawHash), `"'`)
+	if hashType == "" {
+		if parts := strings.SplitN(cleanHash, ":", 2); len(parts) == 2 {
+			hashType = normalizeHashQueryType(parts[0])
+		}
+	}
+	return hashType, hashValue
+}
+
+func objectHasChecksumTypeAndValue(obj core.InternalObject, hashType string, hashValue string) bool {
+	targetType := normalizeHashQueryType(hashType)
+	targetValue := normalizeHashQueryValue(hashValue)
+	if targetType == "" || targetValue == "" {
+		return false
+	}
+	for _, cs := range obj.Checksums {
+		if normalizeHashQueryType(cs.Type) != targetType {
+			continue
+		}
+		if normalizeHashQueryValue(cs.Checksum) == targetValue {
+			return true
+		}
+	}
+	return false
+}
+
 func looksLikeSHA256(v string) bool {
 	s := strings.TrimSpace(strings.ToLower(v))
 	if len(s) != 64 {

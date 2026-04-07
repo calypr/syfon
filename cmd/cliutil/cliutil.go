@@ -9,7 +9,6 @@ import (
 	"time"
 
 	syclient "github.com/calypr/syfon/client"
-	"github.com/calypr/syfon/xfer"
 	"github.com/spf13/cobra"
 )
 
@@ -33,13 +32,7 @@ func NewSyfonClient(cmd *cobra.Command) *syclient.Client {
 	return syclient.New(NormalizedServerURL(cmd), syclient.WithHTTPClient(NewHTTPClient()))
 }
 
-func UploadBytesToSignedURL(ctx context.Context, signedURL string, payload []byte) error {
-	return xfer.UploadBytes(ctx, NewHTTPClient(), signedURL, payload)
-}
 
-func DownloadSignedURLToPath(ctx context.Context, signedURL, outPath string) error {
-	return xfer.DownloadToPath(ctx, NewHTTPClient(), signedURL, outPath)
-}
 
 func GetInternalRecord(ctx context.Context, c *syclient.Client, did string) (*syclient.InternalRecord, error) {
 	out, err := c.GetRecord(ctx, did)

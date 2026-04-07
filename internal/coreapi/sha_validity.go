@@ -6,7 +6,6 @@ import (
 	"net/url"
 	"strings"
 
-	datadrs "github.com/calypr/data-client/drs"
 	"github.com/calypr/syfon/db/core"
 )
 
@@ -46,7 +45,7 @@ func NormalizeSHA256(values []string) []string {
 	targets := make([]string, 0, len(values))
 	seen := make(map[string]struct{}, len(values))
 	for _, raw := range values {
-		sha := strings.ToLower(strings.TrimSpace(datadrs.NormalizeOid(strings.TrimSpace(raw))))
+		sha := strings.ToLower(strings.TrimSpace(normalizeOID(strings.TrimSpace(raw))))
 		if sha == "" {
 			continue
 		}
@@ -57,6 +56,13 @@ func NormalizeSHA256(values []string) []string {
 		targets = append(targets, sha)
 	}
 	return targets
+}
+
+func normalizeOID(oid string) string {
+	if strings.HasPrefix(oid, "sha256:") {
+		return strings.TrimPrefix(oid, "sha256:")
+	}
+	return oid
 }
 
 func getRegisteredBucketSet(ctx context.Context, database core.DatabaseInterface) (map[string]struct{}, error) {

@@ -10,6 +10,11 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/calypr/syfon/client/pkg/common"
+	"github.com/calypr/syfon/client/pkg/request"
+	"github.com/calypr/syfon/client/transfer"
+	"github.com/hashicorp/go-retryablehttp"
 )
 
 const (
@@ -24,6 +29,9 @@ type Config struct {
 	UserAgent  string
 	BasicAuth  *BasicAuth
 	Token      string
+
+	// Requestor allows overriding the default HTTP backend.
+	Requestor request.RequestInterface
 }
 
 type BasicAuth struct {
@@ -37,6 +45,7 @@ type Client struct {
 	userAgent  string
 	basicAuth  *BasicAuth
 	token      string
+	requestor  request.RequestInterface
 
 	health  *HealthService
 	data    *DataService
@@ -54,6 +63,12 @@ func WithHTTPClient(h *http.Client) Option {
 		if h != nil {
 			c.HTTPClient = h
 		}
+	}
+}
+
+func WithRequestor(r request.RequestInterface) Option {
+	return func(c *Config) {
+		c.Requestor = r
 	}
 }
 
@@ -132,12 +147,23 @@ func NewClient(cfg *Config) (*Client, error) {
 		ua = defaultUA
 	}
 
+	req := cfg.Requestor
+	if req == nil {
+		// Default requestor if not provided.
+		rClient := retryablehttp.NewClient()
+		rClient.Logger = nil // Disable verbose retry logging by default
+		req = &request.Request{
+			RetryClient: rClient,
+		}
+	}
+
 	client := &Client{
 		baseURL:    strings.TrimRight(u.String(), "/"),
 		httpClient: hc,
 		userAgent:  ua,
 		basicAuth:  cfg.BasicAuth,
 		token:      strings.TrimSpace(cfg.Token),
+		requestor:  req,
 	}
 	client.health = &HealthService{c: client}
 	client.data = &DataService{c: client}
@@ -158,6 +184,107 @@ func (c *Client) DRS() *DRSService         { return c.drs }
 func (c *Client) Buckets() *BucketsService { return c.buckets }
 func (c *Client) Core() *CoreService       { return c.core }
 func (c *Client) Metrics() *MetricsService { return c.metrics }
+
+// --- Managed Transfer Orchestration ---
+
+// Resolve implements transfer.Resolver by fetching object metadata from the DRS API.
+func (c *Client) Resolve(ctx context.Context, id string) (*transfer.ResolvedObject, error) {
+	obj, err := c.DRS().GetObject(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	// Convert DRSObject to transfer.ResolvedObject.
+	// For simplicity, we assume the first access method is the primary one.
+	if len(obj.AccessMethods) == 0 {
+		return nil, fmt.Errorf("no access methods found for object %s", id)
+	}
+	am := obj.AccessMethods[0]
+	return &transfer.ResolvedObject{
+		Id:           obj.Id,
+		Name:         obj.Name,
+		Size:         obj.Size,
+		ProviderURL:  am.AccessUrl.Url,
+		AccessMethod: am.Type,
+	}, nil
+}
+
+// InitMultipartUpload implements transfer.MultipartURLSigner.
+func (c *Client) InitMultipartUpload(ctx context.Context, guid, filename, bucket string) (*common.MultipartUploadInit, error) {
+	resp, err := c.Data().MultipartInit(ctx, MultipartInitRequest{
+		GUID:     guid,
+		FileName: filename,
+		Bucket:   bucket,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &common.MultipartUploadInit{
+		UploadID: resp.UploadID,
+		GUID:     resp.GUID,
+	}, nil
+}
+
+// GetMultipartUploadURL implements transfer.MultipartURLSigner.
+func (c *Client) GetMultipartUploadURL(ctx context.Context, key, uploadID string, partNum int32, bucket string) (string, error) {
+	resp, err := c.Data().MultipartUpload(ctx, MultipartUploadRequest{
+		Key:        key,
+		UploadID:   uploadID,
+		PartNumber: partNum,
+		Bucket:     bucket,
+	})
+	if err != nil {
+		return "", err
+	}
+	return resp.PresignedURL, nil
+}
+
+// CompleteMultipartUpload implements transfer.MultipartURLSigner.
+func (c *Client) CompleteMultipartUpload(ctx context.Context, key, uploadID string, parts []common.MultipartUploadPart, bucket string) error {
+	var apiParts []MultipartPart
+	for _, p := range parts {
+		apiParts = append(apiParts, MultipartPart{
+			PartNumber: p.PartNumber,
+			ETag:       p.ETag,
+		})
+	}
+
+	return c.Data().MultipartComplete(ctx, MultipartCompleteRequest{
+		Key:      key,
+		UploadID: uploadID,
+		Bucket:   bucket,
+		Parts:    apiParts,
+	})
+}
+
+// GetWriter implements transfer.ObjectWriter.
+func (c *Client) GetWriter(ctx context.Context, guid string) (io.WriteCloser, error) {
+	// For simple single-stream PUT directly to a signed URL.
+	_, err := c.Data().UploadBlank(ctx, UploadBlankRequest{GUID: guid})
+	if err != nil {
+		return nil, err
+	}
+
+	// This is a bit tricky as GetWriter expects to return a WriteCloser that doesn't exist yet.
+	// We might need a bridge here, but for now we'll assume orchestrated transfer handles it.
+	return nil, fmt.Errorf("GetWriter not yet fully implemented for Client; use high-level Upload")
+}
+
+// Upload is the high-level orchestrated entry point for data movement.
+func (c *Client) Upload(ctx context.Context, req common.FileUploadRequestObject, showProgress bool, opts ...transfer.UploadOptions) error {
+	// We pass 'c' as the resolver and signer since it implements the necessary interfaces.
+	// We pass 'c.requestor' for the actual HTTP PUT operations to presigned URLs.
+	return transfer.Upload(ctx, c, c, req, showProgress, opts...)
+}
+
+// New implements request.RequestInterface proxy.
+func (c *Client) New(method, url string) *request.RequestBuilder {
+	return c.requestor.New(method, url)
+}
+
+// Do implements request.RequestInterface proxy.
+func (c *Client) Do(ctx context.Context, rb *request.RequestBuilder) (*http.Response, error) {
+	return c.requestor.Do(ctx, rb)
+}
 
 type ResponseError struct {
 	Method  string

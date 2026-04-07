@@ -20,6 +20,9 @@ type SignedURLManager interface {
 
 	// SignUploadURL signs a URL for uploading a resource.
 	SignUploadURL(ctx context.Context, accessId string, url string, opts SignOptions) (string, error)
+
+	// SignDownloadPart signs a URL for downloading a specific byte range.
+	SignDownloadPart(ctx context.Context, accessId string, url string, start int64, end int64, opts SignOptions) (string, error)
 }
 
 // MultipartManager handles multipart lifecycle for a storage backend.

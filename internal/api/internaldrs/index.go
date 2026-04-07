@@ -38,6 +38,7 @@ func RegisterInternalIndexRoutes(router *mux.Router, database core.DatabaseInter
 	}), "InternalIndex")).Methods(http.MethodGet, http.MethodPost, http.MethodDelete)
 
 	router.Handle(config.RouteInternalBulkHashes, drs.Logger(handleInternalBulkHashes(database), "InternalBulkHashes")).Methods(http.MethodPost)
+	router.Handle(config.RouteInternalBulkDeleteHashes, drs.Logger(handleInternalBulkDeleteHashes(database), "InternalBulkDeleteHashes")).Methods(http.MethodPost)
 	router.Handle(config.RouteInternalBulkSHA256, drs.Logger(handleInternalBulkSHA256Validity(database), "InternalBulkSHA256Validity")).Methods(http.MethodPost)
 	router.Handle(config.RouteInternalBulkCreate, drs.Logger(handleInternalBulkCreate(database), "InternalBulkCreate")).Methods(http.MethodPost)
 	router.Handle(config.RouteInternalBulkDocs, drs.Logger(handleInternalBulkDocuments(database), "InternalBulkDocuments")).Methods(http.MethodPost)
@@ -166,10 +167,11 @@ func handleInternalBulkHashes(database core.DatabaseInterface) http.HandlerFunc 
 			return
 		}
 
-		// Normalize hashes
+		// Normalize hashes while preserving optional type selectors.
 		targetHashes := make([]string, len(req.Hashes))
+		targetTypes := make([]string, len(req.Hashes))
 		for i, h := range req.Hashes {
-			targetHashes[i] = normalizeHashQueryValue(h)
+			targetTypes[i], targetHashes[i] = parseHashQuery(h, "")
 		}
 
 		objsMap, err := database.GetObjectsByChecksums(r.Context(), targetHashes)
@@ -181,17 +183,93 @@ func handleInternalBulkHashes(database core.DatabaseInterface) http.HandlerFunc 
 		// Convert back to InternalRecord results
 		// Gen3 Internal usually returns a mapping or a list. Let's return a list of records found.
 		results := make([]internalapi.InternalRecordResponse, 0)
-		for _, objs := range objsMap {
+		seen := make(map[string]struct{})
+		for i := range targetHashes {
+			hash := targetHashes[i]
+			objs := objsMap[hash]
 			for _, o := range objs {
+				if targetTypes[i] != "" && !objectHasChecksumTypeAndValue(o, targetTypes[i], hash) {
+					continue
+				}
 				if len(o.Authorizations) > 0 && !core.HasMethodAccess(r.Context(), "read", o.Authorizations) {
 					continue
 				}
+				if _, exists := seen[o.Id]; exists {
+					continue
+				}
+				seen[o.Id] = struct{}{}
 				results = append(results, drsToInternal(&o))
 			}
 		}
 
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(internalapi.ListRecordsResponse{Records: results}); err != nil {
+			slog.Error("gen3 encode response failed", "request_id", core.GetRequestID(r.Context()), "method", r.Method, "path", r.URL.Path, "err", err)
+		}
+	}
+}
+
+// handleInternalBulkDeleteHashes allows deleting multiple records by their hashes.
+func handleInternalBulkDeleteHashes(database core.DatabaseInterface) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req internalapi.BulkHashesRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeHTTPError(w, r, http.StatusBadRequest, "Invalid request body", nil)
+			return
+		}
+		if len(req.Hashes) == 0 {
+			writeHTTPError(w, r, http.StatusBadRequest, "Hashes cannot be empty", nil)
+			return
+		}
+
+		// Lookup records by their hashes to check permissions
+		targetHashes := make([]string, len(req.Hashes))
+		targetTypes := make([]string, len(req.Hashes))
+		for i, h := range req.Hashes {
+			targetTypes[i], targetHashes[i] = parseHashQuery(h, "")
+		}
+
+		objsMap, err := database.GetObjectsByChecksums(r.Context(), targetHashes)
+		if err != nil {
+			writeDBError(w, r, err)
+			return
+		}
+
+		toDelete := make([]string, 0)
+		seen := make(map[string]struct{})
+		for i := range targetHashes {
+			hash := targetHashes[i]
+			objs := objsMap[hash]
+			for _, o := range objs {
+				if targetTypes[i] != "" && !objectHasChecksumTypeAndValue(o, targetTypes[i], hash) {
+					continue
+				}
+				if _, exists := seen[o.Id]; exists {
+					continue
+				}
+				// Check delete permissions
+				targetResources := o.Authorizations
+				if len(targetResources) == 0 {
+					targetResources = []string{"/data_file"}
+				}
+				if !core.HasMethodAccess(r.Context(), "delete", targetResources) {
+					continue
+				}
+				seen[o.Id] = struct{}{}
+				toDelete = append(toDelete, o.Id)
+			}
+		}
+
+		if len(toDelete) > 0 {
+			if err := database.BulkDeleteObjects(r.Context(), toDelete); err != nil {
+				writeDBError(w, r, err)
+				return
+			}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		count := int32(len(toDelete))
+		if err := json.NewEncoder(w).Encode(internalapi.DeleteByQueryResponse{Deleted: &count}); err != nil {
 			slog.Error("gen3 encode response failed", "request_id", core.GetRequestID(r.Context()), "method", r.Method, "path", r.URL.Path, "err", err)
 		}
 	}
@@ -434,8 +512,12 @@ func handleInternalDeleteByQuery(w http.ResponseWriter, r *http.Request, databas
 		writeHTTPError(w, r, http.StatusBadRequest, err.Error(), err)
 		return
 	}
-	if !hasScope {
-		writeHTTPError(w, r, http.StatusBadRequest, "organization/project or authz query is required", nil)
+
+	hash := r.URL.Query().Get("hash")
+	hashType := r.URL.Query().Get("hash_type")
+
+	if !hasScope && hash == "" {
+		writeHTTPError(w, r, http.StatusBadRequest, "organization/project, authz, or hash query is required", nil)
 		return
 	}
 	if core.IsGen3Mode(r.Context()) && !core.HasAuthHeader(r.Context()) {
@@ -443,11 +525,31 @@ func handleInternalDeleteByQuery(w http.ResponseWriter, r *http.Request, databas
 		return
 	}
 
-	ids, err := database.ListObjectIDsByResourcePrefix(r.Context(), scopePrefix)
-	if err != nil {
-		writeHTTPError(w, r, http.StatusInternalServerError, fmt.Sprintf("failed to list records: %v", err), err)
-		return
+	var ids []string
+	if hasScope {
+		scopeIDs, err := database.ListObjectIDsByResourcePrefix(r.Context(), scopePrefix)
+		if err != nil {
+			writeHTTPError(w, r, http.StatusInternalServerError, fmt.Sprintf("failed to list records by scope: %v", err), err)
+			return
+		}
+		ids = append(ids, scopeIDs...)
 	}
+
+	if hash != "" {
+		hashType, hash = parseHashQuery(hash, hashType)
+		objs, err := database.GetObjectsByChecksum(r.Context(), hash)
+		if err != nil {
+			writeDBError(w, r, err)
+			return
+		}
+		for _, o := range objs {
+			if hashType != "" && !objectHasChecksumTypeAndValue(o, hashType, hash) {
+				continue
+			}
+			ids = append(ids, o.Id)
+		}
+	}
+
 	toDelete := make([]string, 0, len(ids))
 	for _, id := range ids {
 		obj, err := database.GetObject(r.Context(), id)
@@ -475,7 +577,8 @@ func handleInternalDeleteByQuery(w http.ResponseWriter, r *http.Request, databas
 		}
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(map[string]int{"deleted": len(toDelete)}); err != nil {
+	count := int32(len(toDelete))
+	if err := json.NewEncoder(w).Encode(internalapi.DeleteByQueryResponse{Deleted: &count}); err != nil {
 		slog.Error("gen3 encode response failed", "request_id", core.GetRequestID(r.Context()), "method", r.Method, "path", r.URL.Path, "err", err)
 	}
 }
@@ -484,10 +587,10 @@ func handleInternalDeleteByQuery(w http.ResponseWriter, r *http.Request, databas
 func handleInternalList(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface) {
 	// Query params: hash, hash_type
 	hash := r.URL.Query().Get("hash")
-	// hash_type := r.URL.Query().Get("hash_type") // We can assume sha256 or iterate, current db method only takes value (naive)
+	hashType := r.URL.Query().Get("hash_type")
 
 	if hash != "" {
-		hash = normalizeHashQueryValue(hash)
+		hashType, hash = parseHashQuery(hash, hashType)
 
 		objs, err := database.GetObjectsByChecksum(r.Context(), hash)
 		if err != nil {
@@ -497,6 +600,9 @@ func handleInternalList(w http.ResponseWriter, r *http.Request, database core.Da
 
 		var records []internalapi.InternalRecordResponse
 		for _, o := range objs {
+			if hashType != "" && !objectHasChecksumTypeAndValue(o, hashType, hash) {
+				continue
+			}
 			records = append(records, drsToInternal(&o))
 		}
 

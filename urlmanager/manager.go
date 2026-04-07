@@ -9,11 +9,12 @@ import (
 	"sync"
 	"time"
 
+	"cloud.google.com/go/storage"
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
-	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 
 	"github.com/calypr/syfon/config"
 	"github.com/calypr/syfon/db/core"
@@ -28,12 +29,15 @@ import (
 
 // cacheItem holds the blob.Bucket and any provider-specific clients (e.g. s3.Client).
 type cacheItem struct {
-	Bucket        *blob.Bucket
-	S3Client      *s3.Client
-	S3Presigner   *s3.PresignClient
-	Provider      string
-	BucketName    string
-	SignerMissing bool
+	Bucket          *blob.Bucket
+	S3Client        *s3.Client
+	S3Presigner     *s3.PresignClient
+	GCSClient       *storage.Client
+	AzureSharedKey  *azblob.SharedKeyCredential
+	AzureServiceURL string
+	Provider        string
+	BucketName      string
+	SignerMissing   bool
 }
 
 // Manager is the unified implementation of UrlManager.
@@ -80,17 +84,32 @@ func (m *Manager) SignURL(ctx context.Context, accessId string, urlStr string, o
 
 	// If driver signing is unsupported (or unavailable), fallback to provider-specific presigning.
 	if isSigningNotSupported(err) {
-		if p == provider.S3 && item.S3Presigner != nil {
-			req, pErr := item.S3Presigner.PresignGetObject(ctx, &s3.GetObjectInput{
-				Bucket: aws.String(bucketName),
-				Key:    aws.String(key),
-			}, func(o *s3.PresignOptions) {
-				o.Expires = expiry
-			})
-			if pErr != nil {
-				return "", fmt.Errorf("failed to sign s3 url: %w", pErr)
+		switch p {
+		case provider.S3:
+			if item.S3Presigner != nil {
+				req, pErr := item.S3Presigner.PresignGetObject(ctx, &s3.GetObjectInput{
+					Bucket: aws.String(bucketName),
+					Key:    aws.String(key),
+				}, func(o *s3.PresignOptions) {
+					o.Expires = expiry
+				})
+				if pErr == nil {
+					return req.URL, nil
+				}
 			}
-			return req.URL, nil
+		case provider.GCS:
+			if cred, cErr := m.credentialForBucket(ctx, bucketName); cErr == nil {
+				signed, pErr := gcsSignedURL(bucketName, key, http.MethodGet, expiry, "", cred, m.signing)
+				if pErr == nil {
+					return signed, nil
+				}
+			}
+			if item.AzureSharedKey != nil {
+				signed, pErr := azureSignedURL(item.AzureServiceURL, bucketName, key, http.MethodGet, expiry, "", item.AzureSharedKey)
+				if pErr == nil {
+					return signed, nil
+				}
+			}
 		}
 		return urlStr, nil
 	}
@@ -123,21 +142,87 @@ func (m *Manager) SignUploadURL(ctx context.Context, accessId string, urlStr str
 
 	// If driver signing is unsupported (or unavailable), fallback to provider-specific presigning.
 	if isSigningNotSupported(err) {
-		if p == provider.S3 && item.S3Presigner != nil {
-			req, pErr := item.S3Presigner.PresignPutObject(ctx, &s3.PutObjectInput{
-				Bucket: aws.String(bucketName),
-				Key:    aws.String(key),
-			}, func(o *s3.PresignOptions) {
-				o.Expires = expiry
-			})
-			if pErr != nil {
-				return "", fmt.Errorf("failed to sign s3 upload url: %w", pErr)
+		switch p {
+		case provider.S3:
+			if item.S3Presigner != nil {
+				req, pErr := item.S3Presigner.PresignPutObject(ctx, &s3.PutObjectInput{
+					Bucket: aws.String(bucketName),
+					Key:    aws.String(key),
+				}, func(o *s3.PresignOptions) {
+					o.Expires = expiry
+				})
+				if pErr == nil {
+					return req.URL, nil
+				}
 			}
-			return req.URL, nil
+		case provider.GCS:
+			if cred, cErr := m.credentialForBucket(ctx, bucketName); cErr == nil {
+				signed, pErr := gcsSignedURL(bucketName, key, http.MethodPut, expiry, "", cred, m.signing)
+				if pErr == nil {
+					return signed, nil
+				}
+			}
+			if item.AzureSharedKey != nil {
+				signed, pErr := azureSignedURL(item.AzureServiceURL, bucketName, key, http.MethodPut, expiry, "", item.AzureSharedKey)
+				if pErr == nil {
+					return signed, nil
+				}
+			}
 		}
 		return urlStr, nil
 	}
 	return "", err
+}
+
+func (m *Manager) SignDownloadPart(ctx context.Context, accessId string, urlStr string, start int64, end int64, opts SignOptions) (string, error) {
+	bucketName, key, p, err := m.resolve(ctx, accessId, urlStr)
+	if err != nil {
+		return "", err
+	}
+
+	item, err := m.getBucket(ctx, bucketName, p)
+	if err != nil {
+		return "", err
+	}
+
+	expiry := 15 * time.Minute
+	if opts.ExpiresIn > 0 {
+		expiry = time.Duration(opts.ExpiresIn) * time.Second
+	}
+
+	rangeStr := fmt.Sprintf("bytes=%d-%d", start, end)
+
+	switch p {
+	case provider.S3:
+		if item.S3Presigner != nil {
+			req, pErr := item.S3Presigner.PresignGetObject(ctx, &s3.GetObjectInput{
+				Bucket: aws.String(bucketName),
+				Key:    aws.String(key),
+				Range:  aws.String(rangeStr),
+			}, func(o *s3.PresignOptions) {
+				o.Expires = expiry
+			})
+			if pErr == nil {
+				return req.URL, nil
+			}
+		}
+	case provider.GCS:
+		if cred, cErr := m.credentialForBucket(ctx, bucketName); cErr == nil {
+			signed, pErr := gcsSignedURL(bucketName, key, http.MethodGet, expiry, rangeStr, cred, m.signing)
+			if pErr == nil {
+				return signed, nil
+			}
+		}
+	case provider.Azure:
+		if item.AzureSharedKey != nil {
+			signed, pErr := azureSignedURL(item.AzureServiceURL, bucketName, key, http.MethodGet, expiry, rangeStr, item.AzureSharedKey)
+			if pErr == nil {
+				return signed, nil
+			}
+		}
+	}
+
+	return m.SignURL(ctx, accessId, urlStr, opts)
 }
 
 func (m *Manager) InitMultipartUpload(ctx context.Context, bucketName string, key string) (string, error) {
@@ -145,24 +230,11 @@ func (m *Manager) InitMultipartUpload(ctx context.Context, bucketName string, ke
 	if err != nil {
 		return "", err
 	}
-	if p != provider.S3 {
-		return "", fmt.Errorf("multipart uploads only supported for explicit AWS S3 buckets (provider=%s)", p)
-	}
-
-	item, err := m.getBucket(ctx, bucketName, p)
+	backend, err := m.getMultipartBackend(ctx, bucketName, p)
 	if err != nil {
 		return "", err
 	}
-
-	out, err := item.S3Client.CreateMultipartUpload(ctx, &s3.CreateMultipartUploadInput{
-		Bucket: aws.String(bucketName),
-		Key:    aws.String(key),
-	})
-	if err != nil {
-		return "", fmt.Errorf("failed to init multipart upload: %w", err)
-	}
-
-	return *out.UploadId, nil
+	return backend.Init(ctx, bucketName, key)
 }
 
 func (m *Manager) SignMultipartPart(ctx context.Context, bucketName string, key string, uploadId string, partNumber int32) (string, error) {
@@ -170,31 +242,11 @@ func (m *Manager) SignMultipartPart(ctx context.Context, bucketName string, key 
 	if err != nil {
 		return "", err
 	}
-	if p != provider.S3 {
-		return "", fmt.Errorf("multipart uploads only supported for explicit AWS S3 buckets")
-	}
-
-	item, err := m.getBucket(ctx, bucketName, p)
+	backend, err := m.getMultipartBackend(ctx, bucketName, p)
 	if err != nil {
 		return "", err
 	}
-
-	if item.S3Presigner == nil {
-		return "", fmt.Errorf("missing s3 presign client for bucket %s", bucketName)
-	}
-	req, err := item.S3Presigner.PresignUploadPart(ctx, &s3.UploadPartInput{
-		Bucket:     aws.String(bucketName),
-		Key:        aws.String(key),
-		UploadId:   aws.String(uploadId),
-		PartNumber: aws.Int32(partNumber),
-	}, func(o *s3.PresignOptions) {
-		o.Expires = time.Duration(m.signing.DefaultExpirySeconds) * time.Second
-	})
-	if err != nil {
-		return "", fmt.Errorf("failed to sign multipart part: %w", err)
-	}
-
-	return req.URL, nil
+	return backend.SignPart(ctx, bucketName, key, uploadId, partNumber)
 }
 
 func (m *Manager) CompleteMultipartUpload(ctx context.Context, bucketName string, key string, uploadId string, parts []MultipartPart) error {
@@ -202,36 +254,11 @@ func (m *Manager) CompleteMultipartUpload(ctx context.Context, bucketName string
 	if err != nil {
 		return err
 	}
-	if p != provider.S3 {
-		return fmt.Errorf("multipart uploads only supported for explicit AWS S3 buckets")
-	}
-
-	item, err := m.getBucket(ctx, bucketName, p)
+	backend, err := m.getMultipartBackend(ctx, bucketName, p)
 	if err != nil {
 		return err
 	}
-
-	completedParts := make([]types.CompletedPart, len(parts))
-	for i, p := range parts {
-		completedParts[i] = types.CompletedPart{
-			ETag:       aws.String(p.ETag),
-			PartNumber: aws.Int32(p.PartNumber),
-		}
-	}
-
-	_, err = item.S3Client.CompleteMultipartUpload(ctx, &s3.CompleteMultipartUploadInput{
-		Bucket:   aws.String(bucketName),
-		Key:      aws.String(key),
-		UploadId: aws.String(uploadId),
-		MultipartUpload: &types.CompletedMultipartUpload{
-			Parts: completedParts,
-		},
-	})
-	if err != nil {
-		return fmt.Errorf("failed to complete multipart upload: %w", err)
-	}
-
-	return nil
+	return backend.Complete(ctx, bucketName, key, uploadId, parts)
 }
 
 func (m *Manager) resolve(ctx context.Context, accessId string, urlStr string) (bucket string, key string, p string, err error) {
@@ -322,19 +349,9 @@ func (m *Manager) getBucket(ctx context.Context, bucketName string, p string) (*
 			err = bErr
 		}
 	case provider.GCS:
-		bucket, bErr := blob.OpenBucket(ctx, config.GCSPrefix+bucketName)
-		if bErr == nil {
-			item = &cacheItem{Bucket: bucket}
-		} else {
-			err = bErr
-		}
+		item, err = m.openGCSBucket(ctx, bucketName)
 	case provider.Azure:
-		bucket, bErr := blob.OpenBucket(ctx, config.AzurePrefix+bucketName)
-		if bErr == nil {
-			item = &cacheItem{Bucket: bucket}
-		} else {
-			err = bErr
-		}
+		item, err = m.openAzureBucket(ctx, bucketName)
 	default:
 		return nil, fmt.Errorf("unsupported provider: %s", p)
 	}

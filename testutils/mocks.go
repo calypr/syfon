@@ -443,6 +443,10 @@ func (m *MockUrlManager) SignMultipartPart(ctx context.Context, bucket string, k
 	return fmt.Sprintf("s3://%s/%s?uploadId=%s&partNumber=%d", bucket, key, uploadId, partNumber), nil
 }
 
+func (m *MockUrlManager) SignDownloadPart(ctx context.Context, accessId string, url string, start int64, end int64, opts urlmanager.SignOptions) (string, error) {
+	return fmt.Sprintf("%s?signed=true&range=%d-%d", url, start, end), nil
+}
+
 func (m *MockUrlManager) CompleteMultipartUpload(ctx context.Context, bucket string, key string, uploadId string, parts []urlmanager.MultipartPart) error {
 	return nil
 }

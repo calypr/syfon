@@ -65,6 +65,7 @@ paths:
           description: Forbidden
         '500':
           description: Internal server error
+  /index/bulk/sha256/validity:
     post:
       tags:
         - internal-index
@@ -109,6 +110,14 @@ paths:
             type: string
         - in: query
           name: project
+          schema:
+            type: string
+        - in: query
+          name: hash
+          schema:
+            type: string
+        - in: query
+          name: hash_type
           schema:
             type: string
       responses:
@@ -242,6 +251,32 @@ paths:
           description: Validation error
         '500':
           description: Internal server error
+  /index/bulk/delete:
+    post:
+      tags:
+        - internal-index
+      operationId: internalBulkDeleteHashes
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkHashesRequest'
+      responses:
+        '200':
+          description: Deleted count
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteByQueryResponse'
+        '400':
+          description: Validation error
+        '401':
+          description: Authentication required
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
   /index/bulk/sha256/validity:
     post:
       tags:
@@ -342,52 +377,72 @@ paths:
           description: Forbidden
         '500':
           description: Internal server error
-  /data/upload/bulk:
-    post:
-      tags:
-        - internal-data
-      operationId: internalUploadBulk
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/InternalUploadBulkRequest'
-      responses:
-        '200':
-          description: Signed upload URLs for all requested items
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/InternalUploadBulkResponse'
-        '207':
-          description: Partial failures while signing upload URLs
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/InternalUploadBulkResponse'
-        '400':
-          description: Validation error
-        '401':
-          description: Authentication required
-        '403':
-          description: Forbidden
-        '500':
-          description: Internal server error
-  /data/upload/{file_id}:
+  /data/download/{file_id}:
     get:
       tags:
         - internal-data
-      operationId: internalUploadURL
+      operationId: internalDownload
       parameters:
         - in: path
           name: file_id
           required: true
           schema:
             type: string
+        - in: query
+          name: redirect
+          required: false
+          schema:
+            type: boolean
+        - in: query
+          name: expires_in
+          required: false
+          schema:
+            type: integer
       responses:
         '200':
-          description: Signed upload URL
+          description: Signed download URL
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalSignedURL'
+        '302':
+          description: Redirect to signed download URL
+        '400':
+          description: Validation error
+        '401':
+          description: Authentication required
+        '403':
+          description: Forbidden
+        '404':
+          description: File not found
+        '500':
+          description: Internal server error
+  /data/download/{file_id}/part:
+    get:
+      tags:
+        - internal-data
+      operationId: internalDownloadPart
+      parameters:
+        - in: path
+          name: file_id
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: start
+          required: true
+          schema:
+            type: integer
+            format: int64
+        - in: query
+          name: end
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: Signed range/part download URL
           content:
             application/json:
               schema:
@@ -398,8 +453,11 @@ paths:
           description: Authentication required
         '403':
           description: Forbidden
+        '404':
+          description: File not found
         '500':
           description: Internal server error
+  /data/upload/bulk:
   /data/multipart/init:
     post:
       tags:

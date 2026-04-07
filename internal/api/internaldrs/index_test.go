@@ -90,6 +90,106 @@ func TestHandleInternalList_ScopeFilteringByReadPrivilege(t *testing.T) {
 	}
 }
 
+func TestHandleInternalList_HashTypeFiltering(t *testing.T) {
+	now := time.Now().UTC()
+	mockDB := &testutils.MockDatabase{
+		Objects: map[string]*drs.DrsObject{
+			"obj-sha": {
+				Id:          "obj-sha",
+				CreatedTime: now,
+				UpdatedTime: now,
+				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: "samehash"}},
+			},
+			"obj-md5": {
+				Id:          "obj-md5",
+				CreatedTime: now,
+				UpdatedTime: now,
+				Checksums:   []drs.Checksum{{Type: "md5", Checksum: "samehash"}},
+			},
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/?hash=sha256:samehash", nil)
+	rr := httptest.NewRecorder()
+	handleInternalList(rr, req, mockDB)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var payload struct {
+		Records []map[string]any `json:"records"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Records) != 1 {
+		t.Fatalf("expected 1 record, got %d", len(payload.Records))
+	}
+	if got, _ := payload.Records[0]["did"].(string); got != "obj-sha" {
+		t.Fatalf("expected obj-sha, got %q", got)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/?hash=samehash&hash_type=md5", nil)
+	rr = httptest.NewRecorder()
+	handleInternalList(rr, req, mockDB)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	payload = struct {
+		Records []map[string]any `json:"records"`
+	}{}
+	if err := json.NewDecoder(rr.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Records) != 1 {
+		t.Fatalf("expected 1 record, got %d", len(payload.Records))
+	}
+	if got, _ := payload.Records[0]["did"].(string); got != "obj-md5" {
+		t.Fatalf("expected obj-md5, got %q", got)
+	}
+}
+
+func TestHandleInternalBulkHashes_HashTypeFiltering(t *testing.T) {
+	now := time.Now().UTC()
+	mockDB := &testutils.MockDatabase{
+		Objects: map[string]*drs.DrsObject{
+			"obj-sha": {
+				Id:          "obj-sha",
+				CreatedTime: now,
+				UpdatedTime: now,
+				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: "samehash"}},
+			},
+			"obj-md5": {
+				Id:          "obj-md5",
+				CreatedTime: now,
+				UpdatedTime: now,
+				Checksums:   []drs.Checksum{{Type: "md5", Checksum: "samehash"}},
+			},
+		},
+	}
+
+	reqBody := `{"hashes":["sha256:samehash"]}`
+	req := httptest.NewRequest(http.MethodPost, "/bulk/hashes", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	handleInternalBulkHashes(mockDB).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var payload struct {
+		Records []map[string]any `json:"records"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Records) != 1 {
+		t.Fatalf("expected 1 record, got %d", len(payload.Records))
+	}
+	if got, _ := payload.Records[0]["did"].(string); got != "obj-sha" {
+		t.Fatalf("expected obj-sha, got %q", got)
+	}
+}
+
 func TestHandleInternalDeleteByQuery(t *testing.T) {
 	t.Run("requires scope query", func(t *testing.T) {
 		mockDB := &testutils.MockDatabase{}

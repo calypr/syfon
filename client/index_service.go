@@ -57,7 +57,7 @@ func (s *IndexService) List(ctx context.Context, opts ListRecordsOptions) (ListR
 	return out, err
 }
 
-func (s *IndexService) DeleteByQuery(ctx context.Context, opts DeleteByQueryOptions) (map[string]int, error) {
+func (s *IndexService) DeleteByQuery(ctx context.Context, opts DeleteByQueryOptions) (DeleteByQueryResponse, error) {
 	q := url.Values{}
 	if opts.Authz != "" {
 		q.Set("authz", opts.Authz)
@@ -68,7 +68,13 @@ func (s *IndexService) DeleteByQuery(ctx context.Context, opts DeleteByQueryOpti
 	if opts.ProjectID != "" {
 		q.Set("project", opts.ProjectID)
 	}
-	out := map[string]int{}
+	if opts.Hash != "" {
+		q.Set("hash", opts.Hash)
+	}
+	if opts.HashType != "" {
+		q.Set("hash_type", opts.HashType)
+	}
+	var out DeleteByQueryResponse
 	err := s.c.doJSON(ctx, "DELETE", "/index", q, nil, &out)
 	return out, err
 }
@@ -82,6 +88,12 @@ func (s *IndexService) BulkCreate(ctx context.Context, req BulkCreateRequest) (L
 func (s *IndexService) BulkHashes(ctx context.Context, req BulkHashesRequest) (ListRecordsResponse, error) {
 	var out ListRecordsResponse
 	err := s.c.doJSON(ctx, "POST", "/index/bulk/hashes", nil, req, &out)
+	return out, err
+}
+
+func (s *IndexService) BulkDeleteByHashes(ctx context.Context, req BulkHashesRequest) (DeleteByQueryResponse, error) {
+	var out DeleteByQueryResponse
+	err := s.c.doJSON(ctx, "POST", "/index/bulk/delete", nil, req, &out)
 	return out, err
 }
 
