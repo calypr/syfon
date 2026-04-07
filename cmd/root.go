@@ -6,6 +6,7 @@ import (
 
 	"github.com/calypr/syfon/cmd/addurl"
 	"github.com/calypr/syfon/cmd/bucket"
+	migrateCmd "github.com/calypr/syfon/cmd/migrate"
 	"github.com/calypr/syfon/cmd/ping"
 	"github.com/calypr/syfon/cmd/server"
 	"github.com/calypr/syfon/cmd/validate"
@@ -42,4 +43,5 @@ func init() {
 	RootCmd.AddCommand(ping.Cmd)
 	RootCmd.AddCommand(bucket.Cmd)
 	RootCmd.AddCommand(addurl.Cmd)
+	RootCmd.AddCommand(migrateCmd.Cmd)
 }
