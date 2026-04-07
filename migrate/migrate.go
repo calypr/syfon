@@ -1,12 +1,16 @@
 package migrate
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
+	"strings"
+	"time"
 
-	internalapi "github.com/calypr/syfon/apigen/internalapi"
-	syclient "github.com/calypr/syfon/client"
+	"github.com/calypr/syfon/apigen/drs"
 	"github.com/calypr/syfon/db/core"
 )
 
@@ -50,15 +54,37 @@ func (s Stats) String() string {
 	)
 }
 
+// migrateWireRecord is the JSON payload sent to POST /index/migrate/bulk.
+// It must match the migrateBulkRecord struct in
+// internal/api/internaldrs/migrate_bulk.go field-for-field.
+type migrateWireRecord struct {
+	ID            string             `json:"id"`
+	Name          string             `json:"name,omitempty"`
+	Size          int64              `json:"size"`
+	Version       string             `json:"version,omitempty"`
+	Description   string             `json:"description,omitempty"`
+	CreatedTime   time.Time          `json:"created_time"`
+	UpdatedTime   time.Time          `json:"updated_time,omitempty"`
+	Checksums     []drs.Checksum     `json:"checksums"`
+	AccessMethods []drs.AccessMethod `json:"access_methods,omitempty"`
+	Authz         []string           `json:"authz,omitempty"`
+}
+
+type migrateWireRequest struct {
+	Records []migrateWireRecord `json:"records"`
+}
+
 // Run executes the full Indexd → Syfon ETL pipeline:
 //
 //  1. Extract   – paginate records from the Indexd API
 //  2. Transform – apply the DRS field mapping (issue #20)
-//  3. Validate  – checksums, URLs and authz must be present
-//  4. Load      – bulk-register objects into Syfon via RegisterObjects
+//  3. Validate  – checksums and id must be present
+//  4. Load      – POST /index/migrate/bulk, which calls RegisterObjects
+//                 directly to preserve all fields including original ID,
+//                 timestamps, version and description
 //
-// The pipeline is idempotent: Syfon's RegisterObjects upserts records, so
-// re-running the migration is safe.
+// The pipeline is idempotent: RegisterObjects upserts records, so re-running
+// is safe.
 func Run(ctx context.Context, cfg Config) (Stats, error) {
 	batchSize := cfg.BatchSize
 	if batchSize <= 0 {
@@ -66,43 +92,42 @@ func Run(ctx context.Context, cfg Config) (Stats, error) {
 	}
 
 	src := NewIndexdClient(cfg.IndexdURL)
-	var dst *syclient.Client
+	var httpClient *http.Client
 	if !cfg.DryRun {
-		dst = syclient.New(cfg.SyfonURL)
+		httpClient = &http.Client{Timeout: 60 * time.Second}
 	}
 
-	var stats Stats
-	start := ""
-	page := 0
+	var (
+		stats        Stats
+		cursorStart  string // empty = first request; updated each round
+		pageNum      int    // only used in page mode
+		cursorMode   bool   // true once source emits a non-empty cursor
+	)
 
 	for {
+		// Gate: stop starting new fetches once the limit is reached.
 		if cfg.Limit > 0 && stats.Fetched >= cfg.Limit {
 			break
 		}
 
-		fetchN := batchSize
-		if cfg.Limit > 0 {
-			remaining := cfg.Limit - stats.Fetched
-			if remaining < fetchN {
-				fetchN = remaining
-			}
-		}
-
-		records, nextStart, err := src.ListPage(ctx, fetchN, start, page)
+		// Always request a full batchSize.  The limit only controls whether
+		// we start a new fetch, never how many records we consume from one
+		// already-fetched page (to avoid data-loss with cursor-based sources).
+		records, nextStart, err := src.ListPage(ctx, batchSize, cursorStart, pageNum)
 		if err != nil {
-			return stats, fmt.Errorf("fetch page (start=%q page=%d): %w", start, page, err)
+			return stats, fmt.Errorf("fetch page (cursor=%q page=%d): %w", cursorStart, pageNum, err)
 		}
 		if len(records) == 0 {
-			break // exhausted
+			break // source exhausted
 		}
 
-		// Guard against servers that ignore the limit parameter.
-		if len(records) > fetchN {
-			records = records[:fetchN]
+		// Detect pagination mode on the first response that carries a cursor.
+		if nextStart != "" {
+			cursorMode = true
 		}
 
 		stats.Fetched += len(records)
-		slog.Info("migrate: fetched", "count", len(records), "start", start, "page", page)
+		slog.Info("migrate: fetched", "count", len(records), "cursor", cursorStart, "page", pageNum)
 
 		// Apply default authz to records that arrive without one.
 		if len(cfg.DefaultAuthz) > 0 {
@@ -131,38 +156,39 @@ func Run(ctx context.Context, cfg Config) (Stats, error) {
 			valid = append(valid, obj)
 		}
 
-		if !cfg.DryRun && dst != nil && len(valid) > 0 {
-			if err := registerBatch(ctx, dst, valid); err != nil {
+		if !cfg.DryRun && httpClient != nil && len(valid) > 0 {
+			if err := registerBatch(ctx, httpClient, cfg.SyfonURL, valid); err != nil {
 				return stats, fmt.Errorf("load batch: %w", err)
 			}
 			stats.Loaded += len(valid)
 			slog.Info("migrate: loaded", "count", len(valid))
 		} else {
-			stats.Loaded += len(valid) // count as "would load" in dry-run
+			stats.Loaded += len(valid) // dry-run: count as "would load"
 		}
 
-		// Advance cursor.
-		if nextStart != "" {
-			start = nextStart
-			page = 0
+		// Advance to next page.
+		if cursorMode {
+			// Cursor-based source: empty nextStart signals end of stream.
+			// Never fall back to page mode — cursor and page are mutually
+			// exclusive pagination strategies.
+			if nextStart == "" {
+				break
+			}
+			cursorStart = nextStart
+			// pageNum is irrelevant in cursor mode; leave it at 0.
 		} else {
-			page++
-			start = ""
-		}
-
-		if len(records) < fetchN {
-			break // last page
+			// Page-based source: a short page means this was the last one.
+			if len(records) < batchSize {
+				break
+			}
+			pageNum++
 		}
 	}
 
 	return stats, nil
 }
 
-// validate checks that the transformed DRS object meets the acceptance criteria
-// from issue #20:
-//   - checksums preserved
-//   - URLs mapped
-//   - authz preserved
+// validate checks acceptance criteria from issue #20.
 func validate(obj core.InternalObject) error {
 	if obj.Id == "" {
 		return fmt.Errorf("id is empty")
@@ -178,37 +204,49 @@ func validate(obj core.InternalObject) error {
 	return nil
 }
 
-// registerBatch bulk-upserts a slice of InternalObjects into Syfon using the
-// internal bulk-create endpoint (POST /index/bulk).  This preserves DIDs (UUID
-// DIDs are kept as-is; non-UUID DIDs are aliased to a SHA256-derived canonical
-// ID), checksums, URLs and authz.
-func registerBatch(ctx context.Context, c *syclient.Client, objects []core.InternalObject) error {
-	records := make([]internalapi.InternalRecord, 0, len(objects))
+// registerBatch POST /index/migrate/bulk — preserves all DRS fields including
+// the original source ID, timestamps, version, description, checksums, access
+// methods and authz by going through the dedicated migration endpoint, which
+// calls database.RegisterObjects directly.
+func registerBatch(ctx context.Context, client *http.Client, syfonURL string, objects []core.InternalObject) error {
+	recs := make([]migrateWireRecord, 0, len(objects))
 	for _, obj := range objects {
-		rec := internalapi.InternalRecord{}
-		rec.SetDid(obj.Id)
-		rec.SetSize(obj.Size)
-		if obj.Name != "" {
-			rec.SetFileName(obj.Name)
-		}
-		hashes := make(map[string]string, len(obj.Checksums))
-		for _, cs := range obj.Checksums {
-			if cs.Type != "" && cs.Checksum != "" {
-				hashes[cs.Type] = cs.Checksum
-			}
-		}
-		if len(hashes) > 0 {
-			rec.SetHashes(hashes)
-		}
-		for _, am := range obj.AccessMethods {
-			if am.AccessUrl.Url != "" {
-				rec.Urls = append(rec.Urls, am.AccessUrl.Url)
-			}
-		}
-		rec.Authz = append([]string(nil), obj.Authorizations...)
-		records = append(records, rec)
+		recs = append(recs, migrateWireRecord{
+			ID:            obj.Id,
+			Name:          obj.Name,
+			Size:          obj.Size,
+			Version:       obj.Version,
+			Description:   obj.Description,
+			CreatedTime:   obj.CreatedTime,
+			UpdatedTime:   obj.UpdatedTime,
+			Checksums:     append([]drs.Checksum(nil), obj.Checksums...),
+			AccessMethods: append([]drs.AccessMethod(nil), obj.AccessMethods...),
+			Authz:         append([]string(nil), obj.Authorizations...),
+		})
 	}
-	_, err := c.Index().BulkCreate(ctx, syclient.BulkCreateRequest{Records: records})
-	return err
+
+	body, err := json.Marshal(migrateWireRequest{Records: recs})
+	if err != nil {
+		return fmt.Errorf("marshal request: %w", err)
+	}
+
+	endpoint := strings.TrimRight(syfonURL, "/") + "/index/migrate/bulk"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("build request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("POST %s: %w", endpoint, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("POST %s: unexpected status %d", endpoint, resp.StatusCode)
+	}
+	return nil
 }
 

@@ -40,6 +40,7 @@ func RegisterInternalIndexRoutes(router *mux.Router, database core.DatabaseInter
 	router.Handle(config.RouteInternalBulkHashes, drs.Logger(handleInternalBulkHashes(database), "InternalBulkHashes")).Methods(http.MethodPost)
 	router.Handle(config.RouteInternalBulkDeleteHashes, drs.Logger(handleInternalBulkDeleteHashes(database), "InternalBulkDeleteHashes")).Methods(http.MethodPost)
 	router.Handle(config.RouteInternalBulkSHA256, drs.Logger(handleInternalBulkSHA256Validity(database), "InternalBulkSHA256Validity")).Methods(http.MethodPost)
+	router.Handle(config.RouteInternalMigrateBulk, drs.Logger(handleMigrateBulk(database), "InternalMigrateBulk")).Methods(http.MethodPost)
 	router.Handle(config.RouteInternalBulkCreate, drs.Logger(handleInternalBulkCreate(database), "InternalBulkCreate")).Methods(http.MethodPost)
 	router.Handle(config.RouteInternalBulkDocs, drs.Logger(handleInternalBulkDocuments(database), "InternalBulkDocuments")).Methods(http.MethodPost)
 

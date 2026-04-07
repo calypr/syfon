@@ -64,6 +64,7 @@ const (
 	RouteInternalBulkSHA256  = "/index/bulk/sha256/validity"
 	RouteInternalBulkCreate  = "/index/bulk"
 	RouteInternalBulkDocs    = "/index/bulk/documents"
+	RouteInternalMigrateBulk = "/index/migrate/bulk"
 
 	// Core API
 	RouteCoreSHA256 = "/index/v1/sha256/validity"
