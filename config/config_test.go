@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -167,6 +168,106 @@ func TestLoadConfig_LFSEnvOverrides(t *testing.T) {
 	}
 	if cfg.LFS.BandwidthLimitBytesPerMinute != 999 {
 		t.Fatalf("expected 999, got %d", cfg.LFS.BandwidthLimitBytesPerMinute)
+	}
+}
+
+func TestLoadConfig_InvalidBucketNames(t *testing.T) {
+	cases := []struct {
+		bucket      string
+		errContains string
+	}{
+		{"ab", "3–63 characters"},
+		{string(make([]byte, 64)), "3–63 characters"},
+		{"MyBucket", "invalid"},
+		{"my_bucket", "invalid"},
+		{"my.bucket", "invalid"},
+		{"-mybucket", "invalid"},
+		{"mybucket-", "invalid"},
+		{"192.168.1.1", "invalid"},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.bucket, func(t *testing.T) {
+			content := fmt.Sprintf(`
+auth:
+  mode: local
+database:
+  sqlite:
+    file: "test.db"
+s3_credentials:
+  - bucket: %q
+    provider: s3
+    region: "us-east-1"
+    access_key: "test-key"
+    secret_key: "test-secret"
+`, tc.bucket)
+
+			tmpfile, err := os.CreateTemp("", "config-invalid-bucket-*.yaml")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer os.Remove(tmpfile.Name())
+			if _, err := tmpfile.Write([]byte(content)); err != nil {
+				t.Fatal(err)
+			}
+			if err := tmpfile.Close(); err != nil {
+				t.Fatal(err)
+			}
+
+			_, err = LoadConfig(tmpfile.Name())
+			if err == nil {
+				t.Fatalf("expected error for invalid bucket %q, got nil", tc.bucket)
+			}
+			if !strings.Contains(err.Error(), tc.errContains) {
+				t.Errorf("bucket %q: expected error containing %q, got: %v", tc.bucket, tc.errContains, err)
+			}
+		})
+	}
+}
+
+func TestLoadConfig_NonS3ProviderBucketNames(t *testing.T) {
+	// Names that would fail S3 validation but must be accepted for non-S3 providers.
+	cases := []struct {
+		provider string
+		bucket   string
+	}{
+		{"gcs", "my.gcs.bucket"},
+		{"gcs", "GCS-Bucket"},
+		{"file", "/tmp/local-data"},
+		{"file", "LocalStore"},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.provider+"/"+tc.bucket, func(t *testing.T) {
+			content := fmt.Sprintf(`
+auth:
+  mode: local
+database:
+  sqlite:
+    file: "test.db"
+s3_credentials:
+  - bucket: %q
+    provider: %q
+`, tc.bucket, tc.provider)
+
+			tmpfile, err := os.CreateTemp("", "config-non-s3-bucket-*.yaml")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer os.Remove(tmpfile.Name())
+			if _, err := tmpfile.Write([]byte(content)); err != nil {
+				t.Fatal(err)
+			}
+			if err := tmpfile.Close(); err != nil {
+				t.Fatal(err)
+			}
+
+			if _, err := LoadConfig(tmpfile.Name()); err != nil {
+				t.Fatalf("provider=%q bucket=%q: expected no error, got: %v", tc.provider, tc.bucket, err)
+			}
+		})
 	}
 }
 
