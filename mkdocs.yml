@@ -13,4 +13,5 @@ nav:
   - Configuration: configuration.md
   - Encryption: encryption.md
   - Deployment: deployment.md
+  - Operator Guide: operator-guide-migration-indexd.md
   - Troubleshooting: troubleshooting.md
