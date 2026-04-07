@@ -204,7 +204,9 @@ s3_credentials:
 			if _, err := tmpfile.Write([]byte(content)); err != nil {
 				t.Fatal(err)
 			}
-			tmpfile.Close()
+			if err := tmpfile.Close(); err != nil {
+				t.Fatal(err)
+			}
 
 			if _, err := LoadConfig(tmpfile.Name()); err != nil {
 				t.Fatalf("expected valid bucket %q to pass validation, got error: %v", bucket, err)
