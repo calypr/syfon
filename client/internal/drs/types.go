@@ -1,38 +1,38 @@
 package drs
 
 import (
+	apitypes "github.com/calypr/syfon/api/types"
 	"github.com/calypr/syfon/client/pkg/hash"
-	syclient "github.com/calypr/syfon/client"
 )
 
 type ChecksumType = string
-type Checksum = syclient.Checksum
+type Checksum = apitypes.Checksum
 type HashInfo = hash.HashInfo
 
-type AccessURL = syclient.AccessMethodAccessURL
-type Authorizations = syclient.AccessMethodAuthorizations
-type AccessMethod = syclient.AccessMethod
+type AccessURL = apitypes.AccessMethodAccessURL
+type Authorizations = apitypes.AccessMethodAuthorizations
+type AccessMethod = apitypes.AccessMethod
 
-type Contents = syclient.ContentsObject
+type Contents = apitypes.ContentsObject
 
-type DRSPage = syclient.DRSPage
+type DRSPage = apitypes.DRSPage
 
 type DRSObjectResult struct {
 	Object *DRSObject
 	Error  error
 }
 
-type DRSObject = syclient.DRSObject
+type DRSObject = apitypes.DRSObject
 
-type DRSObjectCandidate = syclient.DRSObjectCandidate
-type RegisterObjectsRequest = syclient.RegisterObjectsRequest
+type DRSObjectCandidate = apitypes.DRSObjectCandidate
+type RegisterObjectsRequest = apitypes.RegisterObjectsRequest
 
 // SyncCandidate represents a local file record to be synchronized with DRS.
 // It is the generic version of the git-drs LfsFileInfo.
 type SyncCandidate struct {
-	Name      string
-	Size      int64
-	Oid       string
+	Name string
+	Size int64
+	Oid  string
 	// The local filesystem path to the payload.
 	Path      string
 	IsPointer bool
@@ -43,7 +43,7 @@ type UploadConfig struct {
 	// Threshold in bytes for switching from single-part to multipart upload.
 	MultiPartThreshold int64
 	// Concurrency for small file uploads and multipart part uploads.
-	UploadConcurrency  int
+	UploadConcurrency int
 	// Whether to overwrite existing metadata if checksums match but IDs differ.
-	Upsert             bool
+	Upsert bool
 }

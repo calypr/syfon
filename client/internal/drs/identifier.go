@@ -65,7 +65,7 @@ func parseValidatedHashIdentifier(v string) (*hash.Checksum, bool) {
 			return nil, false
 		}
 		ck := &hash.Checksum{
-			Type:     hash.NormalizeChecksumType(parts[0]),
+			Type:     string(hash.NormalizeChecksumType(parts[0])),
 			Checksum: strings.TrimSpace(parts[1]),
 		}
 		if err := hash.ValidateChecksum(*ck); err != nil {
@@ -76,7 +76,7 @@ func parseValidatedHashIdentifier(v string) (*hash.Checksum, bool) {
 
 	// Backward-compatible shorthand: bare 64-hex means sha256.
 	ck := &hash.Checksum{
-		Type:     hash.ChecksumTypeSHA256,
+		Type:     string(hash.ChecksumTypeSHA256),
 		Checksum: strings.ToLower(strings.TrimSpace(v)),
 	}
 	if err := hash.ValidateChecksum(*ck); err != nil {

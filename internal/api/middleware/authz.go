@@ -4,9 +4,11 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/json"
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -17,7 +19,6 @@ import (
 	"time"
 
 	"github.com/calypr/syfon/client/conf"
-	"github.com/calypr/syfon/client/fence"
 	"github.com/calypr/syfon/client/pkg/logs"
 	"github.com/calypr/syfon/client/pkg/request"
 	"github.com/calypr/syfon/db/core"
@@ -164,7 +165,7 @@ func (m *AuthzMiddleware) Middleware(next http.Handler) http.Handler {
 				return authFetchResult{negative: true}, nil
 			}
 
-			// 2. Initialize data-client FenceClient
+			// 2. Initialize request client for authz lookup.
 			cred := &conf.Credential{
 				AccessToken: tokenString,
 				APIEndpoint: apiEndpoint,
@@ -173,10 +174,9 @@ func (m *AuthzMiddleware) Middleware(next http.Handler) http.Handler {
 			// We use a no-op gen3 logger for the request client to avoid unnecessary side effects in middleware
 			gen3Logger := logs.NewGen3Logger(m.logger, "", "syfon")
 			reqClient := request.NewRequestInterface(gen3Logger, cred, nil)
-			authClient := fence.NewFenceClient(reqClient, cred, m.logger)
 
 			// 3. Fetch user info (privileges)
-			privs, err := authClient.CheckPrivileges(r.Context())
+			privs, err := fetchPrivileges(r.Context(), reqClient, cred)
 			if err != nil {
 				m.logger.Debug("failed to check privileges with internal auth", "error", err)
 				return authFetchResult{negative: true}, nil
@@ -206,6 +206,37 @@ func (m *AuthzMiddleware) Middleware(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+func fetchPrivileges(ctx context.Context, reqClient request.RequestInterface, cred *conf.Credential) (map[string]any, error) {
+	resp, err := reqClient.Do(ctx, &request.RequestBuilder{
+		Url:    strings.TrimRight(cred.APIEndpoint, "/") + "/user",
+		Method: http.MethodGet,
+		Token:  cred.AccessToken,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("request user info: %w", err)
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read user info response: %w", err)
+	}
+
+	var data map[string]any
+	if err := json.Unmarshal(bodyBytes, &data); err != nil {
+		return nil, fmt.Errorf("parse user info response: %w", err)
+	}
+
+	resourceAccess, ok := data["authz"].(map[string]any)
+	if !ok || len(resourceAccess) == 0 {
+		resourceAccess, ok = data["project_access"].(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("no authz/project_access found in user response")
+		}
+	}
+	return resourceAccess, nil
 }
 
 func newAuthzCache(cfg authCacheConfig) *authzCache {

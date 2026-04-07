@@ -5,20 +5,20 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 
-	"github.com/calypr/syfon/client/pkg/common"
+	apitypes "github.com/calypr/syfon/api/types"
 	"github.com/calypr/syfon/client/conf"
-	"github.com/calypr/syfon/client/xfer/download"
+	"github.com/calypr/syfon/client/pkg/common"
 	"github.com/calypr/syfon/client/pkg/hash"
 	"github.com/calypr/syfon/client/pkg/logs"
 	"github.com/calypr/syfon/client/pkg/request"
 	"github.com/calypr/syfon/client/transfer"
-	syclient "github.com/calypr/syfon/client"
 )
 
 type Config struct {
@@ -26,7 +26,7 @@ type Config struct {
 }
 
 type internalListResponse struct {
-	Records []syclient.InternalRecord `json:"records"`
+	Records []apitypes.InternalRecord `json:"records"`
 }
 
 type DrsClient struct {
@@ -123,7 +123,7 @@ func (c *DrsClient) GetObject(ctx context.Context, id string) (*DRSObject, error
 		return nil, fmt.Errorf("failed to get metadata for %s: %s", id, resp.Status)
 	}
 
-	var rec syclient.InternalRecord
+	var rec apitypes.InternalRecord
 	if err := json.NewDecoder(resp.Body).Decode(&rec); err != nil {
 		return nil, err
 	}
@@ -135,7 +135,7 @@ func (c *DrsClient) GetObjectByHash(ctx context.Context, ck *hash.Checksum) ([]D
 		return nil, fmt.Errorf("checksum is required")
 	}
 	norm := hash.Checksum{
-		Type:     hash.NormalizeChecksumType(ck.Type.String()),
+		Type:     string(hash.NormalizeChecksumType(ck.Type)),
 		Checksum: strings.TrimSpace(ck.Checksum),
 	}
 	if err := hash.ValidateChecksum(norm); err != nil {
@@ -183,7 +183,7 @@ func (c *DrsClient) BatchGetObjectsByChecksums(ctx context.Context, checksums []
 			continue
 		}
 		norm := hash.Checksum{
-			Type:     hash.NormalizeChecksumType(ck.Type.String()),
+			Type:     string(hash.NormalizeChecksumType(ck.Type)),
 			Checksum: strings.TrimSpace(ck.Checksum),
 		}
 		key := fmt.Sprintf("%s:%s", norm.Type, norm.Checksum)
@@ -199,7 +199,7 @@ func (c *DrsClient) BatchGetObjectsByChecksums(ctx context.Context, checksums []
 func (c *DrsClient) BatchGetObjectsByHash(ctx context.Context, hashes []string) (map[string][]DRSObject, error) {
 	result := make(map[string][]DRSObject)
 	for _, h := range hashes {
-		objs, err := c.GetObjectByHash(ctx, &hash.Checksum{Type: hash.ChecksumTypeSHA256, Checksum: strings.TrimSpace(h)})
+		objs, err := c.GetObjectByHash(ctx, &hash.Checksum{Type: string(hash.ChecksumTypeSHA256), Checksum: strings.TrimSpace(h)})
 		if err == nil {
 			result[h] = objs
 		}
@@ -284,7 +284,7 @@ func (c *DrsClient) RegisterRecord(ctx context.Context, record *DRSObject) (*DRS
 		return nil, fmt.Errorf("failed to register record: %s", resp.Status)
 	}
 
-	var rec syclient.InternalRecord
+	var rec apitypes.InternalRecord
 	if err := json.NewDecoder(resp.Body).Decode(&rec); err != nil {
 		return nil, err
 	}
@@ -320,7 +320,7 @@ func (c *DrsClient) UpdateRecord(ctx context.Context, updateInfo *DRSObject, did
 		return nil, fmt.Errorf("failed to update record %s: %s", did, resp.Status)
 	}
 
-	var rec syclient.InternalRecord
+	var rec apitypes.InternalRecord
 	if err := json.NewDecoder(resp.Body).Decode(&rec); err != nil {
 		return nil, err
 	}
@@ -346,7 +346,7 @@ func (c *DrsClient) DeleteRecordsByProject(ctx context.Context, projectId string
 
 func (c *DrsClient) DeleteRecordByOID(ctx context.Context, oid string) error {
 	return c.DeleteRecordByChecksum(ctx, &hash.Checksum{
-		Type:     hash.ChecksumTypeSHA256,
+		Type:     string(hash.ChecksumTypeSHA256),
 		Checksum: NormalizeOid(strings.TrimSpace(oid)),
 	})
 }
@@ -358,7 +358,7 @@ func (c *DrsClient) DeleteRecordsByChecksums(ctx context.Context, checksums []*h
 			continue
 		}
 		norm := hash.Checksum{
-			Type:     hash.NormalizeChecksumType(ck.Type.String()),
+			Type:     string(hash.NormalizeChecksumType(ck.Type)),
 			Checksum: strings.TrimSpace(ck.Checksum),
 		}
 		hashes = append(hashes, fmt.Sprintf("%s:%s", norm.Type, norm.Checksum))
@@ -367,7 +367,7 @@ func (c *DrsClient) DeleteRecordsByChecksums(ctx context.Context, checksums []*h
 		return 0, nil
 	}
 
-	body, _ := json.Marshal(syclient.BulkHashesRequest{Hashes: hashes})
+	body, _ := json.Marshal(apitypes.BulkHashesRequest{Hashes: hashes})
 	rb := c.New(http.MethodPost, c.endpoint("/index/bulk/delete")).
 		WithBody(bytes.NewReader(body)).
 		WithHeader("Content-Type", "application/json")
@@ -503,7 +503,7 @@ func (c *DrsClient) UpsertRecord(ctx context.Context, url string, sha256 string,
 		obj.AccessMethods[0].AccessUrl.Url = strings.TrimSpace(url)
 	}
 
-	recs, err := c.GetObjectByHash(ctx, &hash.Checksum{Type: hash.ChecksumTypeSHA256, Checksum: sha256})
+	recs, err := c.GetObjectByHash(ctx, &hash.Checksum{Type: string(hash.ChecksumTypeSHA256), Checksum: sha256})
 	if err == nil && len(recs) > 0 {
 		if match, matchErr := FindMatchingRecord(recs, c.orgName, project); matchErr == nil && match != nil {
 			return c.UpdateRecord(ctx, obj, match.Id)
@@ -736,8 +736,35 @@ func (c *DrsClient) CompleteMultipartUpload(ctx context.Context, key string, upl
 
 // Orchestrators.
 
-func (c *DrsClient) DownloadFile(ctx context.Context, id string, destPath string) error {
-	return download.DownloadFile(ctx, c, c, id, destPath)
+func (c *DrsClient) ResolveDownloadURL(ctx context.Context, guid string, accessID string) (string, error) {
+	return ResolveDownloadURL(ctx, c, guid, accessID)
+}
+
+func (c *DrsClient) Download(ctx context.Context, fdr *common.FileDownloadResponseObject) (*http.Response, error) {
+	if strings.TrimSpace(fdr.PresignedURL) == "" {
+		downloadURL, err := c.ResolveDownloadURL(ctx, fdr.GUID, "")
+		if err != nil {
+			return nil, err
+		}
+		fdr.PresignedURL = downloadURL
+	}
+	return transfer.GenericDownload(ctx, c.RequestInterface, fdr)
+}
+
+func (c *DrsClient) Upload(ctx context.Context, signedURL string, body io.Reader, size int64) error {
+	_, err := transfer.DoUpload(ctx, c.RequestInterface, signedURL, body, size)
+	return err
+}
+
+func (c *DrsClient) UploadPart(ctx context.Context, signedURL string, body io.Reader, size int64) (string, error) {
+	return transfer.DoUpload(ctx, c.RequestInterface, signedURL, body, size)
+}
+
+func (c *DrsClient) DeleteFile(ctx context.Context, guid string) (string, error) {
+	if err := c.DeleteRecord(ctx, guid); err != nil {
+		return "", err
+	}
+	return "deleted", nil
 }
 
 func (c *DrsClient) ListObjects(ctx context.Context) (chan DRSObjectResult, error) {

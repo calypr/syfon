@@ -39,7 +39,7 @@ func TestGetObjectByHash_UsesTypedChecksumQuery(t *testing.T) {
 	req := &fakeRequest{}
 	c := NewLocalDrsClient(req, "http://example.org", nil)
 	_, err := c.GetObjectByHash(context.Background(), &hash.Checksum{
-		Type:     hash.ChecksumTypeSHA512,
+		Type:     string(hash.ChecksumTypeSHA512),
 		Checksum: strings.Repeat("a", 128),
 	})
 	if err != nil {
@@ -58,7 +58,7 @@ func TestGetObjectByHash_InvalidChecksumFails(t *testing.T) {
 	req := &fakeRequest{}
 	c := NewLocalDrsClient(req, "http://example.org", nil)
 	_, err := c.GetObjectByHash(context.Background(), &hash.Checksum{
-		Type:     hash.ChecksumTypeSHA512,
+		Type:     string(hash.ChecksumTypeSHA512),
 		Checksum: "abc",
 	})
 	if err == nil {

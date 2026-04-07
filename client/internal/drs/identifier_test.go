@@ -22,7 +22,7 @@ func TestParseObjectIdentifier_SHA256(t *testing.T) {
 	if id.Kind() != IdentifierChecksum {
 		t.Fatalf("expected checksum kind, got %s", id.Kind())
 	}
-	if id.Hash == nil || id.Hash.Type.String() != "sha256" || id.Hash.Checksum != "40b8b6a2855c3d194df090a2240adf5eb6c49d9b75accfae0d4c69dacb5a2c5d" {
+	if id.Hash == nil || id.Hash.Type != "sha256" || id.Hash.Checksum != "40b8b6a2855c3d194df090a2240adf5eb6c49d9b75accfae0d4c69dacb5a2c5d" {
 		t.Fatalf("unexpected sha parse result: %+v", id)
 	}
 }
@@ -33,7 +33,7 @@ func TestParseObjectIdentifier_SHA512(t *testing.T) {
 	if id.Kind() != IdentifierChecksum {
 		t.Fatalf("expected checksum kind, got %s", id.Kind())
 	}
-	if id.Hash == nil || id.Hash.Type.String() != "sha512" || id.Hash.Checksum == "" {
+	if id.Hash == nil || id.Hash.Type != "sha512" || id.Hash.Checksum == "" {
 		t.Fatalf("unexpected checksum parse result: %+v", id)
 	}
 }

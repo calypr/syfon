@@ -2,6 +2,7 @@ package drs
 
 import (
 	"context"
+	"net/http"
 
 	"github.com/calypr/syfon/client/pkg/common"
 	"github.com/calypr/syfon/client/pkg/hash"
@@ -41,6 +42,8 @@ type MutableMetadataManager interface {
 
 // URLSigner handles generating signed URLs for access.
 type URLSigner interface {
+	ResolveDownloadURL(ctx context.Context, guid string, accessID string) (string, error)
+	Download(ctx context.Context, fdr *common.FileDownloadResponseObject) (*http.Response, error)
 	GetDownloadURL(ctx context.Context, id string, accessID string) (*AccessURL, error)
 	GetDownloadPartURL(ctx context.Context, id string, start, end int64) (*transfer.SignedURL, error)
 	GetUploadURL(ctx context.Context, id string) (*AccessURL, error)

@@ -17,6 +17,11 @@ INTERNAL_GEN_OUT ?= .tmp/apigen-internal.gen
 SCHEMAS_SUBMODULE ?= ga4gh/data-repository-service-schemas
 AUTO_INIT_SUBMODULE ?= 0
 GOCACHE ?= $(PWD)/.gocache
+REMOTE ?= origin
+VERSION ?=
+DRY_RUN ?= 0
+APIGEN_TAG_PREFIX ?= apigen
+CLIENT_TAG_PREFIX ?= client
 
 .PHONY: init-schemas
 init-schemas:
@@ -298,3 +303,106 @@ docs:
 	  -p 8000:8000 \
 	  $(MKDOCS_IMAGE) \
 	  serve -a 0.0.0.0:8000
+
+.PHONY: release-plan
+release-plan:
+	@set -euo pipefail; \
+	if [[ -z "$(VERSION)" ]]; then \
+	  echo "ERROR: VERSION is required (example: make release-apigen VERSION=v0.1.0)"; \
+	  exit 1; \
+	fi; \
+	echo "remote:      $(REMOTE)"; \
+	echo "version:     $(VERSION)"; \
+	echo "apigen tag:  $(APIGEN_TAG_PREFIX)/$(VERSION)"; \
+	echo "client tag:  $(CLIENT_TAG_PREFIX)/$(VERSION)"; \
+	echo "dry run:     $(DRY_RUN)"
+
+.PHONY: release-check-version
+release-check-version:
+	@set -euo pipefail; \
+	if [[ -z "$(VERSION)" ]]; then \
+	  echo "ERROR: VERSION is required (example: VERSION=v0.1.0)"; \
+	  exit 1; \
+	fi; \
+	if [[ ! "$(VERSION)" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-.].+)?$$ ]]; then \
+	  echo "ERROR: VERSION must look like vX.Y.Z (got: $(VERSION))"; \
+	  exit 1; \
+	fi
+
+.PHONY: release-check-clean
+release-check-clean:
+	@set -euo pipefail; \
+	if [[ -n "$$(git status --porcelain)" ]]; then \
+	  if [[ "$(DRY_RUN)" == "1" ]]; then \
+	    echo "WARN: git tree is dirty (dry run continuing)"; \
+	    git status --short; \
+	    exit 0; \
+	  fi; \
+	  echo "ERROR: git tree is dirty. Commit/stash changes before releasing."; \
+	  git status --short; \
+	  exit 1; \
+	fi
+
+.PHONY: release-check-apigen-tag
+release-check-apigen-tag: release-check-version
+	@set -euo pipefail; \
+	tag="$(APIGEN_TAG_PREFIX)/$(VERSION)"; \
+	if git rev-parse "$$tag" >/dev/null 2>&1; then \
+	  if [[ "$(DRY_RUN)" == "1" ]]; then \
+	    echo "WARN: tag already exists locally (dry run continuing): $$tag"; \
+	    exit 0; \
+	  fi; \
+	  echo "ERROR: tag already exists locally: $$tag"; \
+	  exit 1; \
+	fi
+
+.PHONY: release-check-client-tag
+release-check-client-tag: release-check-version
+	@set -euo pipefail; \
+	tag="$(CLIENT_TAG_PREFIX)/$(VERSION)"; \
+	if git rev-parse "$$tag" >/dev/null 2>&1; then \
+	  if [[ "$(DRY_RUN)" == "1" ]]; then \
+	    echo "WARN: tag already exists locally (dry run continuing): $$tag"; \
+	    exit 0; \
+	  fi; \
+	  echo "ERROR: tag already exists locally: $$tag"; \
+	  exit 1; \
+	fi
+
+.PHONY: release-test-apigen
+release-test-apigen:
+	@set -euo pipefail; \
+	cd apigen; \
+	GOCACHE="$(GOCACHE)" go test ./...
+
+.PHONY: release-test-client
+release-test-client:
+	@set -euo pipefail; \
+	cd client; \
+	GOCACHE="$(GOCACHE)" go test ./...
+
+.PHONY: release-apigen
+release-apigen: release-check-clean release-check-apigen-tag release-test-apigen
+	@set -euo pipefail; \
+	tag="$(APIGEN_TAG_PREFIX)/$(VERSION)"; \
+	if [[ "$(DRY_RUN)" == "1" ]]; then \
+	  echo "[DRY RUN] git tag -a $$tag -m \"Release $$tag\""; \
+	  echo "[DRY RUN] git push $(REMOTE) $$tag"; \
+	  exit 0; \
+	fi; \
+	git tag -a "$$tag" -m "Release $$tag"; \
+	git push "$(REMOTE)" "$$tag"; \
+	echo "Released $$tag"
+
+.PHONY: release-client
+release-client: release-check-clean release-check-client-tag release-test-client
+	@set -euo pipefail; \
+	tag="$(CLIENT_TAG_PREFIX)/$(VERSION)"; \
+	if [[ "$(DRY_RUN)" == "1" ]]; then \
+	  echo "[DRY RUN] git tag -a $$tag -m \"Release $$tag\""; \
+	  echo "[DRY RUN] git push $(REMOTE) $$tag"; \
+	  exit 0; \
+	fi; \
+	git tag -a "$$tag" -m "Release $$tag"; \
+	git push "$(REMOTE)" "$$tag"; \
+	echo "Released $$tag"

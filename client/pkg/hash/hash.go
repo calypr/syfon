@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	sytypes "github.com/calypr/syfon/api/types"
 )
 
 // ChecksumType represents the digest method used to create the checksum
@@ -47,10 +49,7 @@ var SupportedChecksums = map[string]bool{
 	string(ChecksumTypeTrunc512): true,
 }
 
-type Checksum struct {
-	Checksum string       `json:"checksum"`
-	Type     ChecksumType `json:"type"`
-}
+type Checksum sytypes.Checksum
 
 type HashInfo struct {
 	MD5    string `json:"md5,omitempty"`
@@ -135,7 +134,7 @@ func ConvertHashInfoToMap(hashes HashInfo) map[string]string {
 func ConvertChecksumsToMap(checksums []Checksum) map[string]string {
 	result := make(map[string]string, len(checksums))
 	for _, c := range checksums {
-		result[string(c.Type)] = c.Checksum
+		result[c.Type] = c.Checksum
 	}
 	return result
 }
@@ -143,6 +142,30 @@ func ConvertChecksumsToMap(checksums []Checksum) map[string]string {
 func ConvertChecksumsToHashInfo(checksums []Checksum) HashInfo {
 	checksumMap := ConvertChecksumsToMap(checksums)
 	return ConvertStringMapToHashInfo(checksumMap)
+}
+
+func ConvertDrsChecksumsToMap(checksums []sytypes.Checksum) map[string]string {
+	result := make(map[string]string, len(checksums))
+	for _, c := range checksums {
+		result[c.Type] = c.Checksum
+	}
+	return result
+}
+
+func ConvertDrsChecksumsToHashInfo(checksums []sytypes.Checksum) HashInfo {
+	checksumMap := ConvertDrsChecksumsToMap(checksums)
+	return ConvertStringMapToHashInfo(checksumMap)
+}
+
+func ConvertMapToDrsChecksums(hashes map[string]string) []sytypes.Checksum {
+	result := make([]sytypes.Checksum, 0, len(hashes))
+	for t, c := range hashes {
+		result = append(result, sytypes.Checksum{
+			Type:     t,
+			Checksum: c,
+		})
+	}
+	return result
 }
 
 func NormalizeChecksumType(raw string) ChecksumType {
@@ -171,7 +194,7 @@ func ValidateChecksum(c Checksum) error {
 	if checksum == "" {
 		return fmt.Errorf("checksum value is required")
 	}
-	ct := NormalizeChecksumType(c.Type.String())
+	ct := NormalizeChecksumType(c.Type)
 	if !ct.IsValid() {
 		return fmt.Errorf("unsupported checksum type %q", c.Type)
 	}
