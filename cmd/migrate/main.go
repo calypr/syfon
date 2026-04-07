@@ -32,16 +32,17 @@ var Cmd = &cobra.Command{
   2. Transforms each record to the GA4GH DRS data model (issue #20):
        did → id, file_name → name, urls → access_methods,
        hashes → checksums, authz → authz
-     Deprecated fields (baseid, rev, metadata, acl, form, uploader) are
-     silently dropped.
+     Deprecated fields (baseid, rev, metadata, urls_metadata, acl, form,
+     uploader) are silently dropped.
   3. Validates checksums, URLs and authz are preserved.
-  4. Loads objects into the target Syfon server via POST /index/bulk.
+  4. Loads objects into the target Syfon server via POST /index/migrate/bulk
+     to preserve IDs and timestamps.
 
 The pipeline is idempotent: re-running is safe.`,
 	Example: `  # Dry-run: show what would be migrated without writing anything
   syfon migrate --indexd-url https://indexd.example.org --dry-run
 
-  # Live run against a local Syfon server
+  # Live run against a local Syfon server using the migration bulk endpoint
   syfon migrate --indexd-url https://indexd.example.org --server http://localhost:8080
 
   # Migrate only the first 1000 records in batches of 200

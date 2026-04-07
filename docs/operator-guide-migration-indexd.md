@@ -17,7 +17,7 @@ This guide explains how to configure, run, and validate the `syfon migrate` work
 1. Extract records from source `IndexdURL` (`GET /index`)
 2. Transform Indexd fields to Syfon DRS model
 3. Validate each transformed object
-4. Load records into Syfon (`POST /index/bulk`)
+4. Load records into Syfon (`POST /index/migrate/bulk`, internal-only route)
 
 It is idempotent. Re-running the same migration does not create duplicate records.
 
