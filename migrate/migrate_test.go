@@ -167,10 +167,9 @@ func TestRun_CursorPagination_StopsOnEmptyCursor(t *testing.T) {
 	}
 }
 
-func TestRun_NoTruncationOnOversizedPage(t *testing.T) {
+func TestRun_HardLimitOnOversizedPage(t *testing.T) {
 	// Source returns 20 records even though we requested 5 (limit=5).
-	// Bug #2 would truncate to 5 and advance the cursor past the other 15.
-	// Correct: process all 20 in dry-run, don't start another fetch.
+	// Hard-limit behavior must cap processed records at 5.
 	records := make([]IndexdRecord, 20)
 	for i := range records {
 		records[i] = IndexdRecord{
@@ -188,16 +187,14 @@ func TestRun_NoTruncationOnOversizedPage(t *testing.T) {
 		IndexdURL: srv.URL,
 		SyfonURL:  "http://127.0.0.1:0",
 		BatchSize: 10,
-		Limit:     5, // gate: don't start a second fetch after we've seen 5+
+		Limit:     5,
 		DryRun:    true,
 	})
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
-	// The first page returns 20 records; all are processed without truncation.
-	// Limit=5 only prevents a SECOND fetch from starting.
-	if stats.Fetched < 10 {
-		t.Errorf("Fetched %d, expected full first batch (no silent truncation)", stats.Fetched)
+	if stats.Fetched != 5 {
+		t.Errorf("Fetched: got %d, want 5 (hard limit)", stats.Fetched)
 	}
 }
 
@@ -253,8 +250,8 @@ func TestRun_SkipsRecordsWithoutChecksums(t *testing.T) {
 }
 
 func TestRun_LimitGatesNewFetches(t *testing.T) {
-	// 20 records, limit=5, batch=10.  First fetch returns 10 records (all processed).
-	// After that stats.Fetched=10 >= limit=5, so no second fetch starts.
+	// 20 records, limit=5, batch=10. Even if source ignores the requested limit,
+	// processed records must still be capped at 5 and no second fetch should start.
 	records := make([]IndexdRecord, 20)
 	for i := range records {
 		records[i] = IndexdRecord{
@@ -292,9 +289,8 @@ func TestRun_LimitGatesNewFetches(t *testing.T) {
 	if calls > 1 {
 		t.Errorf("source called %d times; limit should have prevented more than 1 fetch", calls)
 	}
-	// First page returns 10 records and all are processed (no truncation).
-	if stats.Fetched != 10 {
-		t.Errorf("Fetched: got %d, want 10 (full first batch, limit gates new fetches)", stats.Fetched)
+	if stats.Fetched != 5 {
+		t.Errorf("Fetched: got %d, want 5 (hard limit)", stats.Fetched)
 	}
 }
 

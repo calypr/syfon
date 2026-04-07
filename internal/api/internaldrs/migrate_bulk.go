@@ -89,6 +89,15 @@ func handleMigrateBulk(database core.DatabaseInterface) http.HandlerFunc {
 				},
 				Authorizations: append([]string(nil), rec.Authz...),
 			}
+
+			targetResources := objectAuthorizationsOrDefault(&obj)
+			if len(obj.Authorizations) == 0 {
+				obj.Authorizations = append([]string(nil), targetResources...)
+			}
+			if !core.HasMethodAccess(r.Context(), "create", targetResources) {
+				writeAuthError(w, r)
+				return
+			}
 			objects = append(objects, obj)
 		}
 

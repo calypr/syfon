@@ -70,7 +70,6 @@ func Transform(rec IndexdRecord) (core.InternalObject, error) {
 		obj.AccessMethods = append(obj.AccessMethods, drs.AccessMethod{
 			AccessUrl: drs.AccessMethodAccessUrl{Url: rawURL},
 			Type:      inferAccessMethodType(rawURL),
-			AccessId:  inferAccessMethodType(rawURL),
 		})
 	}
 

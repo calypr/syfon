@@ -109,16 +109,28 @@ func Run(ctx context.Context, cfg Config) (Stats, error) {
 		if cfg.Limit > 0 && stats.Fetched >= cfg.Limit {
 			break
 		}
+		fetchN := batchSize
+		if cfg.Limit > 0 {
+			remaining := cfg.Limit - stats.Fetched
+			if remaining <= 0 {
+				break
+			}
+			if remaining < fetchN {
+				fetchN = remaining
+			}
+		}
 
-		// Always request a full batchSize.  The limit only controls whether
-		// we start a new fetch, never how many records we consume from one
-		// already-fetched page (to avoid data-loss with cursor-based sources).
-		records, nextStart, err := src.ListPage(ctx, batchSize, cursorStart, pageNum)
+		records, nextStart, err := src.ListPage(ctx, fetchN, cursorStart, pageNum)
 		if err != nil {
 			return stats, fmt.Errorf("fetch page (cursor=%q page=%d): %w", cursorStart, pageNum, err)
 		}
 		if len(records) == 0 {
 			break // source exhausted
+		}
+		if cfg.Limit > 0 && len(records) > fetchN {
+			// Some sources may ignore limit. Hard-cap processed records so --limit
+			// remains a strict maximum for canary runs.
+			records = records[:fetchN]
 		}
 
 		// Detect pagination mode on the first response that carries a cursor.
@@ -178,7 +190,7 @@ func Run(ctx context.Context, cfg Config) (Stats, error) {
 			// pageNum is irrelevant in cursor mode; leave it at 0.
 		} else {
 			// Page-based source: a short page means this was the last one.
-			if len(records) < batchSize {
+			if len(records) < fetchN {
 				break
 			}
 			pageNum++

@@ -166,6 +166,9 @@ func TestTransform_MultipleURLs(t *testing.T) {
 		if am.Type != expectTypes[i] {
 			t.Errorf("AccessMethods[%d].Type: got %q, want %q", i, am.Type, expectTypes[i])
 		}
+		if am.AccessId != "" {
+			t.Errorf("AccessMethods[%d].AccessId: got %q, want empty", i, am.AccessId)
+		}
 	}
 }
 
