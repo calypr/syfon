@@ -32,12 +32,7 @@ func (b *gcsMultipartBackend) SignPart(ctx context.Context, bucketName string, k
 	if err != nil {
 		return "", err
 	}
-	partKey := multipartPartObjectKey(key, uploadID, partNumber)
-	expiry := time.Duration(b.m.signing.DefaultExpirySeconds) * time.Second
-	if expiry <= 0 {
-		expiry = 15 * time.Minute
-	}
-	return gcsSignedURL(bucketName, partKey, http.MethodPut, expiry, "", cred, b.m.signing)
+	return gcsSignedUploadPartURL(bucketName, multipartPartObjectKey(key, uploadID, partNumber), cred, b.m.signing)
 }
 
 func (b *gcsMultipartBackend) Complete(ctx context.Context, bucketName string, key string, uploadID string, parts []MultipartPart) error {
@@ -123,6 +118,19 @@ func gcsSignedURL(bucket string, key string, method string, expiry time.Duration
 		opts.Headers = append(opts.Headers, "Range:"+rangeStr)
 	}
 	return storage.SignedURL(bucket, key, opts)
+}
+
+func gcsSignedUploadPartURL(bucket string, partKey string, cred *core.S3Credential, signing config.SigningConfig) (string, error) {
+	googleAccessID := gcsGoogleAccessID(cred)
+	privateKey := gcsPrivateKey(cred)
+	if googleAccessID == "" || privateKey == "" {
+		return "", fmt.Errorf("gcs multipart signing requires service account credentials (access_key=client_email, secret_key=private_key or JSON key)")
+	}
+	expiry := time.Duration(signing.DefaultExpirySeconds) * time.Second
+	if expiry <= 0 {
+		expiry = 15 * time.Minute
+	}
+	return gcsSignedURL(bucket, partKey, http.MethodPut, expiry, "", cred, signing)
 }
 
 func gcsGoogleAccessID(cred *core.S3Credential) string {

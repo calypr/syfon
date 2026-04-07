@@ -46,10 +46,10 @@ func (s *DRSService) RegisterObjects(ctx context.Context, req RegisterObjectsReq
 
 func internalRecordToDRSObject(rec InternalRecord) DRSObject {
 	obj := DRSObject{
-		Id:       rec.GetDid(),
-		SelfUri:  "drs://" + rec.GetDid(),
-		Size:     rec.GetSize(),
-		Name:     rec.GetFileName(),
+		Id:        rec.GetDid(),
+		SelfUri:   "drs://" + rec.GetDid(),
+		Size:      rec.GetSize(),
+		Name:      rec.GetFileName(),
 		Checksums: make([]Checksum, 0, len(rec.GetHashes())),
 	}
 	for typ, checksum := range rec.GetHashes() {

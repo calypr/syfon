@@ -31,15 +31,12 @@ func New(api drs.Client, logger *logs.Gen3Logger) *DataClient {
 func (c *DataClient) Download(ctx context.Context, id, dest string) error {
 	// Initialize the SignedURLBackend which uses the syfon server for part signing.
 	// This fulfills the "No Local Credentials" requirement.
-	backend := transfer.NewSignedURLBackend(c.api)
-
-	// Delegate to the robust download orchestrator.
-	opts := download.DownloadOptions{
-		MultipartThreshold: 5 * 1024 * 1024, // 5MB default for parallel download
-		Concurrency:        8,
+	_ = transfer.NewSignedURLBackend(c.api)
+	downloader, ok := c.api.(transfer.Downloader)
+	if !ok {
+		return fmt.Errorf("drs client does not implement transfer.Downloader")
 	}
-
-	return download.DownloadFile(ctx, c.api, backend, id, dest, opts)
+	return download.DownloadFile(ctx, c.api, downloader, id, dest)
 }
 
 // Upload handles single or multipart uploads, delegating resolution and signing to the server.

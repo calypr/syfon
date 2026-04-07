@@ -15,7 +15,7 @@ func ResolveObject(ctx context.Context, client Client, guid string) (*DRSObject,
 	case IdentifierUUID:
 		return client.GetObject(ctx, id.UUID.String())
 	case IdentifierChecksum:
-		if hash.NormalizeChecksumType(id.Hash.Type.String()) == hash.ChecksumTypeSHA256 {
+		if hash.NormalizeChecksumType(id.Hash.Type) == hash.ChecksumTypeSHA256 {
 			if cached, ok := PrefetchedBySHA(ctx, id.Hash.Checksum); ok {
 				obj := cached
 				return &obj, nil
@@ -30,7 +30,7 @@ func ResolveObject(ctx context.Context, client Client, guid string) (*DRSObject,
 			return obj, nil
 		}
 		if parsedHash, ok := parseValidatedHashIdentifier(guid); ok {
-			if hash.NormalizeChecksumType(parsedHash.Type.String()) == hash.ChecksumTypeSHA256 {
+			if hash.NormalizeChecksumType(parsedHash.Type) == hash.ChecksumTypeSHA256 {
 				if cached, ok := PrefetchedBySHA(ctx, parsedHash.Checksum); ok {
 					obj := cached
 					return &obj, nil

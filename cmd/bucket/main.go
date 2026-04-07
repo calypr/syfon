@@ -2,6 +2,7 @@ package bucket
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	syclient "github.com/calypr/syfon/client"
@@ -75,6 +76,57 @@ var addCmd = &cobra.Command{
 	},
 }
 
+var listCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List configured buckets",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		resp, err := cliutil.NewSyfonClient(cmd).Buckets().List(cmd.Context())
+		if err != nil {
+			return err
+		}
+		buckets := resp.GetS3BUCKETS()
+		if len(buckets) == 0 {
+			fmt.Fprintln(cmd.OutOrStdout(), "no buckets configured")
+			return nil
+		}
+		names := make([]string, 0, len(buckets))
+		for name := range buckets {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			md := buckets[name]
+			fmt.Fprintf(
+				cmd.OutOrStdout(),
+				"%s\tprovider=%s\tregion=%s\tprograms=%s\n",
+				name,
+				strings.TrimSpace(md.GetProvider()),
+				strings.TrimSpace(md.GetRegion()),
+				strings.Join(md.GetPrograms(), ","),
+			)
+		}
+		return nil
+	},
+}
+
+var removeCmd = &cobra.Command{
+	Use:     "remove <bucket>",
+	Aliases: []string{"rm", "delete"},
+	Short:   "Remove bucket credentials and scopes",
+	Args:    cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		bucket := strings.TrimSpace(args[0])
+		if bucket == "" {
+			return fmt.Errorf("bucket is required")
+		}
+		if err := cliutil.NewSyfonClient(cmd).Buckets().Delete(cmd.Context(), bucket); err != nil {
+			return err
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "bucket removed: %s\n", bucket)
+		return nil
+	},
+}
+
 func init() {
 	addCmd.Flags().StringVar(&bucketProvider, "provider", "s3", "Bucket provider: s3|gcs|azure|file")
 	addCmd.Flags().StringVar(&bucketRegion, "region", "us-east-1", "Bucket region")
@@ -86,4 +138,6 @@ func init() {
 	addCmd.Flags().StringVar(&bucketPath, "path", "", "Optional bucket path prefix for this scope")
 
 	Cmd.AddCommand(addCmd)
+	Cmd.AddCommand(listCmd)
+	Cmd.AddCommand(removeCmd)
 }
