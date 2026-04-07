@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/calypr/syfon/cmd/cliutil"
+	syclient "github.com/calypr/syfon/client"
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 )
@@ -44,19 +45,22 @@ var Cmd = &cobra.Command{
 		}
 
 		c := cliutil.NewSyfonClient(cmd)
-		signed, err := c.RequestUploadURL(ctx, did)
+		uploadReq := syclient.UploadBlankRequest{}
+		uploadReq.SetGuid(did)
+		signed, err := c.Data().UploadBlank(ctx, uploadReq)
 		if err != nil {
 			return fmt.Errorf("request upload url: %w", err)
 		}
-		if strings.TrimSpace(signed.URL) == "" {
+		uploadURL := strings.TrimSpace(signed.GetUrl())
+		if uploadURL == "" {
 			return fmt.Errorf("empty upload url for did %s", did)
 		}
 
-		if err := uploadBytesToURL(ctx, signed.URL, srcPath); err != nil {
+		if err := uploadBytesToURL(ctx, uploadURL, srcPath); err != nil {
 			return err
 		}
 
-		objectURL, err := cliutil.CanonicalObjectURLFromSignedURL(signed.URL, strings.TrimSpace(signed.Bucket), did)
+		objectURL, err := cliutil.CanonicalObjectURLFromSignedURL(uploadURL, strings.TrimSpace(signed.GetBucket()), did)
 		if err != nil {
 			return err
 		}

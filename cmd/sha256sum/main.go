@@ -32,14 +32,15 @@ var Cmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("get download url: %w", err)
 		}
-		if strings.TrimSpace(signed.URL) == "" {
-			return fmt.Errorf("empty download url for did %s", did)
-		}
+			downloadURL := strings.TrimSpace(signed.GetUrl())
+			if downloadURL == "" {
+				return fmt.Errorf("empty download url for did %s", did)
+			}
 
-		data, err := readURLBytes(ctx, signed.URL)
-		if err != nil {
-			return err
-		}
+			data, err := readURLBytes(ctx, downloadURL)
+			if err != nil {
+				return err
+			}
 		sumArr := sha256.Sum256(data)
 		sum := hex.EncodeToString(sumArr[:])
 
