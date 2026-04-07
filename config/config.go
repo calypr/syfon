@@ -68,6 +68,8 @@ const (
 	RouteCoreSHA256 = "/index/v1/sha256/validity"
 )
 
+var ValidBucketName = regexp.MustCompile(`^[a-z0-9][a-z0-9\-]{1,61}[a-z0-9]$`)
+
 type Config struct {
 	Port          int            `json:"port" yaml:"port"`
 	Database      DatabaseConfig `json:"database" yaml:"database"`
@@ -297,8 +299,6 @@ func LoadConfig(configFile string) (*Config, error) {
 		return nil, fmt.Errorf("no database specified in config")
 	}
 
-	var validBucketName = regexp.MustCompile(`^[a-z0-9][a-z0-9\-]{1,61}[a-z0-9]$`)
-
 	// Validate S3 Credentials
 	for i, cred := range cfg.S3Credentials {
 		provider := strings.ToLower(strings.TrimSpace(cred.Provider))
@@ -314,7 +314,7 @@ func LoadConfig(configFile string) (*Config, error) {
 			if len(cred.Bucket) < 3 || len(cred.Bucket) > 63 {
 				return nil, fmt.Errorf("s3_credentials[%d]: bucket name %q must be 3–63 characters", i, cred.Bucket)
 			}
-			if !validBucketName.MatchString(cred.Bucket) {
+			if !ValidBucketName.MatchString(cred.Bucket) {
 				return nil, fmt.Errorf("s3_credentials[%d]: bucket name %q is invalid (lowercase letters, numbers, hyphens only; must start and end with letter or number)", i, cred.Bucket)
 			}
 			if cred.Region == "" {
