@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/calypr/syfon/client/drs"
@@ -21,10 +22,11 @@ import (
 )
 
 type fakeBackend struct {
-	logger *logs.Gen3Logger
-	doFunc func(context.Context, *common.FileDownloadResponseObject) (*http.Response, error)
-	data   []byte
-	size   int64
+	logger                 *logs.Gen3Logger
+	doFunc                 func(context.Context, *common.FileDownloadResponseObject) (*http.Response, error)
+	resolveDownloadURLFunc func(context.Context, string, string) (string, error)
+	data                   []byte
+	size                   int64
 }
 
 func (f *fakeBackend) Name() string             { return "Fake" }
@@ -50,6 +52,9 @@ func (f *fakeBackend) fileDetails(guid string) *drs.DRSObject {
 }
 
 func (f *fakeBackend) ResolveDownloadURL(ctx context.Context, guid string, accessID string) (string, error) {
+	if f.resolveDownloadURLFunc != nil {
+		return f.resolveDownloadURLFunc(ctx, guid, accessID)
+	}
 	if guid == "test-fallback" {
 		return "", errors.New("fallback")
 	}
@@ -392,6 +397,151 @@ func TestDownloadToPathMultipart(t *testing.T) {
 	}
 	if !bytes.Equal(payload, got) {
 		t.Fatal("downloaded payload mismatch")
+	}
+}
+
+func TestDownloadToPathMultipartUsesProtocolAccessID(t *testing.T) {
+	payload := bytes.Repeat([]byte("p"), 2*1024*1024)
+	tmpDir := t.TempDir()
+	dst := filepath.Join(tmpDir, "multipart-protocol.bin")
+
+	var resolvedAccessID string
+	fake := &fakeBackend{
+		logger: logs.NewGen3Logger(nil, "", ""),
+		data:   payload,
+		size:   int64(len(payload)),
+		resolveDownloadURLFunc: func(_ context.Context, _ string, accessID string) (string, error) {
+			resolvedAccessID = accessID
+			return "https://download.example.com/object", nil
+		},
+	}
+	dc := &fakeDrsClient{backend: fake}
+
+	err := DownloadToPathWithOptions(
+		context.Background(),
+		dc,
+		fake,
+		fake.Logger().Logger,
+		"guid-protocol",
+		dst,
+		"s3",
+		DownloadOptions{
+			MultipartThreshold: 1 * 1024 * 1024,
+			ChunkSize:          256 * 1024,
+			Concurrency:        4,
+		},
+	)
+	if err != nil {
+		t.Fatalf("multipart download failed: %v", err)
+	}
+	if resolvedAccessID != "s3" {
+		t.Fatalf("expected access ID %q, got %q", "s3", resolvedAccessID)
+	}
+}
+
+func TestDownloadToPathMultipartErrorPropagation(t *testing.T) {
+	payload := bytes.Repeat([]byte("e"), 2*1024*1024)
+	tmpDir := t.TempDir()
+	dst := filepath.Join(tmpDir, "multipart-error.bin")
+
+	fake := &fakeBackend{
+		logger: logs.NewGen3Logger(nil, "", ""),
+		data:   payload,
+		size:   int64(len(payload)),
+		doFunc: func(_ context.Context, fdr *common.FileDownloadResponseObject) (*http.Response, error) {
+			if fdr.RangeStart != nil && fdr.RangeEnd != nil && *fdr.RangeStart == 256*1024 {
+				return nil, errors.New("boom")
+			}
+			if fdr.RangeStart != nil && fdr.RangeEnd != nil {
+				start, end := *fdr.RangeStart, *fdr.RangeEnd
+				return newDownloadResponse(fdr.PresignedURL, payload[start:end+1], http.StatusPartialContent), nil
+			}
+			return newDownloadResponse(fdr.PresignedURL, payload, http.StatusOK), nil
+		},
+	}
+	dc := &fakeDrsClient{backend: fake}
+
+	err := DownloadToPathWithOptions(
+		context.Background(),
+		dc,
+		fake,
+		fake.Logger().Logger,
+		"guid-multipart-error",
+		dst,
+		"",
+		DownloadOptions{
+			MultipartThreshold: 1 * 1024 * 1024,
+			ChunkSize:          256 * 1024,
+			Concurrency:        4,
+		},
+	)
+	if err == nil {
+		t.Fatal("expected multipart download error")
+	}
+	if !strings.Contains(err.Error(), "range download") {
+		t.Fatalf("expected range error context, got: %v", err)
+	}
+}
+
+func TestDownloadToPathMultipartProgressAccounting(t *testing.T) {
+	payload := bytes.Repeat([]byte("q"), 2*1024*1024)
+	tmpDir := t.TempDir()
+	dst := filepath.Join(tmpDir, "multipart-progress.bin")
+
+	var (
+		mu     sync.Mutex
+		events []common.ProgressEvent
+	)
+	progress := func(event common.ProgressEvent) error {
+		mu.Lock()
+		defer mu.Unlock()
+		events = append(events, event)
+		return nil
+	}
+
+	fake := &fakeBackend{
+		logger: logs.NewGen3Logger(nil, "", ""),
+		data:   payload,
+		size:   int64(len(payload)),
+	}
+	dc := &fakeDrsClient{backend: fake}
+	ctx := common.WithProgress(context.Background(), progress)
+
+	err := DownloadToPathWithOptions(
+		ctx,
+		dc,
+		fake,
+		fake.Logger().Logger,
+		"guid-progress",
+		dst,
+		"",
+		DownloadOptions{
+			MultipartThreshold: 1 * 1024 * 1024,
+			ChunkSize:          256 * 1024,
+			Concurrency:        4,
+		},
+	)
+	if err != nil {
+		t.Fatalf("multipart download failed: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(events) == 0 {
+		t.Fatal("expected progress events")
+	}
+
+	var sum int64
+	for _, event := range events {
+		sum += event.BytesSinceLast
+	}
+	if sum != int64(len(payload)) {
+		t.Fatalf("expected progress sum %d, got %d", len(payload), sum)
+	}
+
+	last := events[len(events)-1]
+	if last.BytesSoFar != int64(len(payload)) {
+		t.Fatalf("expected final bytesSoFar %d, got %d", len(payload), last.BytesSoFar)
 	}
 }
 

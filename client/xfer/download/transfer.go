@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"github.com/calypr/syfon/client/drs"
@@ -330,12 +331,7 @@ func downloadToPathMultipart(
 	totalSize int64,
 	opts DownloadOptions,
 ) error {
-	protocolText := ""
-	if protocol != "" {
-		protocolText = "?protocol=" + protocol
-	}
-
-	signedURL, err := bk.ResolveDownloadURL(ctx, guid, protocolText)
+	signedURL, err := bk.ResolveDownloadURL(ctx, guid, protocol)
 	if err != nil {
 		return fmt.Errorf("failed to resolve download URL for %s: %w", guid, err)
 	}
@@ -384,6 +380,11 @@ func downloadToPathMultipart(
 		hash = guid
 	}
 	var soFar atomic.Int64
+	bufPool := sync.Pool{
+		New: func() any {
+			return make([]byte, 256*1024)
+		},
+	}
 
 	totalParts := int((totalSize + opts.ChunkSize - 1) / opts.ChunkSize)
 	g, gctx := errgroup.WithContext(ctx)
@@ -416,21 +417,24 @@ func downloadToPathMultipart(
 				return fmt.Errorf("range download %d-%d returned status %d", ps, pe, partResp.StatusCode)
 			}
 
-			buf, err := io.ReadAll(partResp.Body)
+			partSize := pe - ps + 1
+			w := io.NewOffsetWriter(file, ps)
+			buf := bufPool.Get().([]byte)
+			written, err := io.CopyBuffer(w, io.LimitReader(partResp.Body, partSize), buf)
+			bufPool.Put(buf)
 			if err != nil {
-				return fmt.Errorf("range read %d-%d failed: %w", ps, pe, err)
+				return fmt.Errorf("range copy %d-%d failed after %d/%d bytes: %w", ps, pe, written, partSize, err)
 			}
-
-			if _, err := file.WriteAt(buf, ps); err != nil {
-				return fmt.Errorf("range write %d-%d failed: %w", ps, pe, err)
+			if written != partSize {
+				return fmt.Errorf("range copy %d-%d was short: got %d/%d bytes", ps, pe, written, partSize)
 			}
 
 			if progress != nil {
-				current := soFar.Add(int64(len(buf)))
+				current := soFar.Add(written)
 				_ = progress(common.ProgressEvent{
 					Event:          "progress",
 					Oid:            hash,
-					BytesSinceLast: int64(len(buf)),
+					BytesSinceLast: written,
 					BytesSoFar:     current,
 				})
 			}
