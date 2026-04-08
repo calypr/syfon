@@ -33,6 +33,7 @@ func runWithArgs(args []string, stdout, stderr io.Writer) error {
 
 	var (
 		indexdURL string
+		profile   string
 		syfonURL  string
 		batchSize int
 		limit     int
@@ -52,6 +53,7 @@ func runWithArgs(args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("syfon-migrate", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.StringVar(&indexdURL, "indexd-url", "", "Source Indexd server base URL (required)")
+	fs.StringVar(&profile, "profile", "", "Gen3 profile for authenticated Indexd reads")
 	fs.StringVar(&syfonURL, "server", defaultServerURL, "Target Syfon server base URL")
 	fs.IntVar(&batchSize, "batch-size", 100, "Number of records to fetch/write per batch")
 	fs.IntVar(&limit, "limit", 0, "Maximum number of records to migrate (0 = all)")
@@ -75,6 +77,10 @@ func runWithArgs(args []string, stdout, stderr io.Writer) error {
 	if syfonURL == "" {
 		return fmt.Errorf("--server cannot be empty")
 	}
+	profile = strings.TrimSpace(profile)
+	if profile == "" {
+		return fmt.Errorf("--profile is required")
+	}
 
 	defaultAuthz := splitCSV(authzCSV)
 	cfg := migrate.Config{
@@ -86,12 +92,17 @@ func runWithArgs(args []string, stdout, stderr io.Writer) error {
 		DefaultAuthz: defaultAuthz,
 	}
 
+	src, err := NewIndexdClient(indexdURL, strings.TrimSpace(profile))
+	if err != nil {
+		return fmt.Errorf("init indexd client: %w", err)
+	}
+
 	if dryRun {
 		fmt.Fprintln(stdout, "dry-run: no records will be written to Syfon")
 	}
 	fmt.Fprintf(stdout, "migration starting: indexd=%s syfon=%s batch=%d limit=%d\n", indexdURL, syfonURL, batchSize, limit)
 
-	stats, err := migrationRunner(context.Background(), cfg)
+	stats, err := migrationRunner(context.Background(), src, cfg)
 	if err != nil {
 		return fmt.Errorf("migration failed: %w", err)
 	}

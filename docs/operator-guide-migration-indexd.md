@@ -50,6 +50,7 @@ Notes:
 
 Useful flags:
 
+- `--indexd-profile` (optional Gen3 profile from `~/.gen3/gen3_client_config.ini` for authenticated source reads)
 - `--batch-size` (default `100`)
 - `--limit` (`0` means all records)
 - `--dry-run` (no writes)
@@ -81,6 +82,16 @@ Run a small subset first:
   --indexd-url "$INDEXD_URL" \
   --server "$SYFON_SERVER_URL" \
   --batch-size 100 \
+  --limit 1000
+```
+
+If the source Indexd requires Gen3 credentials, run with a configured profile:
+
+```bash
+./bin/syfon-migrate \
+  --indexd-url "$INDEXD_URL" \
+  --indexd-profile default \
+  --server "$SYFON_SERVER_URL" \
   --limit 1000
 ```
 

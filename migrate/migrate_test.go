@@ -3,11 +3,59 @@ package migrate
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
+
+// testIndexdClient is a plain-HTTP SourceLister used exclusively in tests.
+type testIndexdClient struct {
+	baseURL string
+	client  *http.Client
+}
+
+func newTestIndexdClient(baseURL string) *testIndexdClient {
+	return &testIndexdClient{
+		baseURL: strings.TrimRight(baseURL, "/"),
+		client:  &http.Client{Timeout: 10 * time.Second},
+	}
+}
+
+func (c *testIndexdClient) ListPage(ctx context.Context, limit int, start string, page int) ([]IndexdRecord, string, error) {
+	q := url.Values{}
+	if limit > 0 {
+		q.Set("limit", fmt.Sprintf("%d", limit))
+	}
+	if start != "" {
+		q.Set("start", start)
+	} else if page > 0 {
+		q.Set("page", fmt.Sprintf("%d", page))
+	}
+	endpoint := c.baseURL + "/index?" + q.Encode()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, "", err
+	}
+	req.Header.Set("Accept", "application/json")
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, "", fmt.Errorf("status %d", resp.StatusCode)
+	}
+	var pg IndexdPage
+	if err := json.NewDecoder(resp.Body).Decode(&pg); err != nil {
+		return nil, "", err
+	}
+	return pg.Records, pg.Start, nil
+}
 
 // mockIndexdServer serves pages of IndexdRecords, optionally emitting a
 // cursor (nextStart) to simulate cursor-based Indexd pagination.
@@ -90,7 +138,7 @@ func TestRun_BasicMigration(t *testing.T) {
 	syfonSrv := mockSyfonServer(t, &loaded)
 	defer syfonSrv.Close()
 
-	stats, err := Run(context.Background(), Config{
+	stats, err := Run(context.Background(), newTestIndexdClient(indexdSrv.URL), Config{
 		IndexdURL: indexdSrv.URL,
 		SyfonURL:  syfonSrv.URL,
 		BatchSize: 10,
@@ -149,7 +197,7 @@ func TestRun_CursorPagination_StopsOnEmptyCursor(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	stats, err := Run(context.Background(), Config{
+	stats, err := Run(context.Background(), newTestIndexdClient(srv.URL), Config{
 		IndexdURL: srv.URL,
 		SyfonURL:  "http://127.0.0.1:0",
 		BatchSize: 10,
@@ -183,7 +231,7 @@ func TestRun_HardLimitOnOversizedPage(t *testing.T) {
 	srv := mockIndexdServer(t, records, false) // page mode, returns all 20 at once
 	defer srv.Close()
 
-	stats, err := Run(context.Background(), Config{
+	stats, err := Run(context.Background(), newTestIndexdClient(srv.URL), Config{
 		IndexdURL: srv.URL,
 		SyfonURL:  "http://127.0.0.1:0",
 		BatchSize: 10,
@@ -206,7 +254,7 @@ func TestRun_DryRun(t *testing.T) {
 	indexdSrv := mockIndexdServer(t, records, false)
 	defer indexdSrv.Close()
 
-	stats, err := Run(context.Background(), Config{
+	stats, err := Run(context.Background(), newTestIndexdClient(indexdSrv.URL), Config{
 		IndexdURL: indexdSrv.URL,
 		SyfonURL:  "http://127.0.0.1:0",
 		BatchSize: 10,
@@ -232,7 +280,7 @@ func TestRun_SkipsRecordsWithoutChecksums(t *testing.T) {
 	indexdSrv := mockIndexdServer(t, records, false)
 	defer indexdSrv.Close()
 
-	stats, err := Run(context.Background(), Config{
+	stats, err := Run(context.Background(), newTestIndexdClient(indexdSrv.URL), Config{
 		IndexdURL: indexdSrv.URL,
 		SyfonURL:  "http://127.0.0.1:0",
 		BatchSize: 10,
@@ -275,7 +323,7 @@ func TestRun_LimitGatesNewFetches(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	stats, err := Run(context.Background(), Config{
+	stats, err := Run(context.Background(), newTestIndexdClient(srv.URL), Config{
 		IndexdURL: srv.URL,
 		SyfonURL:  "http://127.0.0.1:0",
 		BatchSize: 10,
@@ -306,7 +354,7 @@ func TestRun_DefaultAuthzApplied(t *testing.T) {
 	syfonSrv := mockSyfonServer(t, &loaded)
 	defer syfonSrv.Close()
 
-	stats, err := Run(context.Background(), Config{
+	stats, err := Run(context.Background(), newTestIndexdClient(indexdSrv.URL), Config{
 		IndexdURL:    indexdSrv.URL,
 		SyfonURL:     syfonSrv.URL,
 		BatchSize:    10,
@@ -345,7 +393,7 @@ func TestRun_IdentityPreservedOnWire(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, err := Run(context.Background(), Config{
+	_, err := Run(context.Background(), newTestIndexdClient(srv.URL), Config{
 		IndexdURL: srv.URL,
 		SyfonURL:  srv.URL, // same server handles both roles in this test
 		BatchSize: 10,

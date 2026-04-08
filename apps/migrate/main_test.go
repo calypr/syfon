@@ -37,7 +37,7 @@ func TestRunWithArgs_DryRunSmoke(t *testing.T) {
 	t.Cleanup(func() { migrationRunner = origRunner })
 
 	called := false
-	migrationRunner = func(_ context.Context, cfg migrate.Config) (migrate.Stats, error) {
+	migrationRunner = func(_ context.Context, _ migrate.SourceLister, cfg migrate.Config) (migrate.Stats, error) {
 		called = true
 		if cfg.IndexdURL != "https://indexd.example.org" {
 			t.Fatalf("unexpected IndexdURL: %q", cfg.IndexdURL)
@@ -85,7 +85,7 @@ func TestRunWithArgs_PropagatesRunnerError(t *testing.T) {
 	origRunner := migrationRunner
 	t.Cleanup(func() { migrationRunner = origRunner })
 
-	migrationRunner = func(_ context.Context, _ migrate.Config) (migrate.Stats, error) {
+	migrationRunner = func(_ context.Context, _ migrate.SourceLister, _ migrate.Config) (migrate.Stats, error) {
 		return migrate.Stats{}, errors.New("boom")
 	}
 

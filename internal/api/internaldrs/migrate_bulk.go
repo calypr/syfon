@@ -2,6 +2,7 @@ package internaldrs
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -118,7 +119,9 @@ func handleMigrateBulk(database core.DatabaseInterface) http.HandlerFunc {
 				"request_id", core.GetRequestID(r.Context()),
 				"err", err,
 			)
+		} else {
+			slog.InfoContext(r.Context(), fmt.Sprintf("migrate bulk: OK len(objects) %d", len(objects)))
 		}
+
 	}
 }
-

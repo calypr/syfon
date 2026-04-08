@@ -317,7 +317,7 @@ coverage-full:
 
 .PHONY: serve
 serve:
-	go run ./cmd/server $(ARGS)
+	go run . serve $(ARGS)
 
 .PHONY: docs
 docs:

@@ -40,17 +40,18 @@ type Config struct {
 
 // Stats summarises the outcome of a migration run.
 type Stats struct {
-	Fetched     int
-	Transformed int
-	Loaded      int
-	Skipped     int
-	Errors      int
+	Fetched          int
+	Transformed      int
+	Loaded           int
+	Skipped          int
+	Errors           int
+	CountOfUniqueIDs int
 }
 
 func (s Stats) String() string {
 	return fmt.Sprintf(
-		"fetched=%d transformed=%d loaded=%d skipped=%d errors=%d",
-		s.Fetched, s.Transformed, s.Loaded, s.Skipped, s.Errors,
+		"fetched=%d transformed=%d loaded=%d skipped=%d errors=%d count_of_unique_ids=%d",
+		s.Fetched, s.Transformed, s.Loaded, s.Skipped, s.Errors, s.CountOfUniqueIDs,
 	)
 }
 
@@ -80,28 +81,30 @@ type migrateWireRequest struct {
 //  2. Transform – apply the DRS field mapping (issue #20)
 //  3. Validate  – checksums and id must be present
 //  4. Load      – POST /index/migrate/bulk, which calls RegisterObjects
-//                 directly to preserve all fields including original ID,
-//                 timestamps, version and description
+//     directly to preserve all fields including original ID,
+//     timestamps, version and description
 //
 // The pipeline is idempotent: RegisterObjects upserts records, so re-running
 // is safe.
-func Run(ctx context.Context, cfg Config) (Stats, error) {
+// Run executes the full Indexd → Syfon ETL pipeline.
+// src is the authenticated source reader; construct it in the caller (e.g. apps/migrate).
+func Run(ctx context.Context, src SourceLister, cfg Config) (Stats, error) {
 	batchSize := cfg.BatchSize
 	if batchSize <= 0 {
 		batchSize = 100
 	}
 
-	src := NewIndexdClient(cfg.IndexdURL)
 	var httpClient *http.Client
 	if !cfg.DryRun {
 		httpClient = &http.Client{Timeout: 60 * time.Second}
 	}
 
 	var (
-		stats        Stats
-		cursorStart  string // empty = first request; updated each round
-		pageNum      int    // only used in page mode
-		cursorMode   bool   // true once source emits a non-empty cursor
+		stats       Stats
+		cursorStart string // empty = first request; updated each round
+		pageNum     int    // only used in page mode
+		cursorMode  bool   // true once source emits a non-empty cursor
+		uniqueIDs   = make(map[string]struct{})
 	)
 
 	for {
@@ -139,6 +142,13 @@ func Run(ctx context.Context, cfg Config) (Stats, error) {
 		}
 
 		stats.Fetched += len(records)
+		for _, rec := range records {
+			if rec.DID == "" {
+				continue
+			}
+			uniqueIDs[rec.DID] = struct{}{}
+		}
+		stats.CountOfUniqueIDs = len(uniqueIDs)
 		slog.Info("migrate: fetched", "count", len(records), "cursor", cursorStart, "page", pageNum)
 
 		// Apply default authz to records that arrive without one.
@@ -261,4 +271,3 @@ func registerBatch(ctx context.Context, client *http.Client, syfonURL string, ob
 	}
 	return nil
 }
-
