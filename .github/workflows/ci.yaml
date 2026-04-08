@@ -99,9 +99,9 @@ jobs:
 
       - name: Export digest
         run: |
+          set -euo pipefail
           mkdir -p /tmp/digests
-          digest="${{ steps.build.outputs.digest }}"
-          touch "/tmp/digests/${digest// sectors:/:}"
+          printf '%s\n' "${{ steps.build.outputs.digest }}" > "/tmp/digests/${{ matrix.arch }}.txt"
           
       - name: Upload digest
         uses: actions/upload-artifact@v4
@@ -146,5 +146,7 @@ jobs:
 
       - name: Create manifest list and push
         run: |
+          set -euo pipefail
+          mapfile -t digests < <(cat /tmp/digests/*.txt)
           docker buildx imagetools create $(echo $DOCKER_METADATA_OUTPUT_TAGS | xargs -n 1 echo -t) \
-            $(printf 'quay.io/ohsu-comp-bio/syfon@sha256:%s ' *)
+            $(printf 'quay.io/ohsu-comp-bio/syfon@%s ' "${digests[@]}")
