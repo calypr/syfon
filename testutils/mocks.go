@@ -106,6 +106,10 @@ func (m *MockDatabase) GetObjectsByChecksums(ctx context.Context, checksums []st
 func (m *MockDatabase) ListObjectIDsByResourcePrefix(ctx context.Context, resourcePrefix string) ([]string, error) {
 	ids := make([]string, 0)
 	for id := range m.Objects {
+		if resourcePrefix == "/" {
+			ids = append(ids, id)
+			continue
+		}
 		authz := []string{}
 		if m.ObjectAuthz != nil {
 			if v, ok := m.ObjectAuthz[id]; ok {

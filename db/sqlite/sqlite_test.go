@@ -362,6 +362,46 @@ func TestSqliteDB_GetObjectsByChecksumsAndListByPrefix(t *testing.T) {
 	}
 }
 
+func TestSqliteDB_ListObjectIDsByResourcePrefixRootIncludesUnscoped(t *testing.T) {
+	ctx := context.Background()
+	db, _ := NewSqliteDB(":memory:")
+	now := time.Now()
+
+	if err := db.RegisterObjects(ctx, []core.InternalObject{
+		{
+			DrsObject: drs.DrsObject{
+				Id:          "scoped",
+				CreatedTime: now,
+				UpdatedTime: now,
+				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: "scoped"}},
+			},
+			Authorizations: []string{"/programs/a/projects/b"},
+		},
+		{
+			DrsObject: drs.DrsObject{
+				Id:          "unscoped",
+				CreatedTime: now,
+				UpdatedTime: now,
+				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: "unscoped"}},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("RegisterObjects failed: %v", err)
+	}
+
+	ids, err := db.ListObjectIDsByResourcePrefix(ctx, "/")
+	if err != nil {
+		t.Fatalf("ListObjectIDsByResourcePrefix root failed: %v", err)
+	}
+	seen := map[string]bool{}
+	for _, id := range ids {
+		seen[id] = true
+	}
+	if !seen["scoped"] || !seen["unscoped"] {
+		t.Fatalf("expected scoped and unscoped ids, got %+v", ids)
+	}
+}
+
 func TestSqliteDB_BulkUpdateAccessMethods(t *testing.T) {
 	ctx := context.Background()
 	db, _ := NewSqliteDB(":memory:")

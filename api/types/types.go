@@ -17,7 +17,7 @@ type DRSObjectCandidate = drsapi.DrsObjectCandidate
 type RegisterObjectsRequest = drsapi.RegisterObjectsRequest
 type RegisterObjectsResponse = drsapi.RegisterObjects201Response
 
-type InternalRecord = internalapi.InternalRecordResponse
+type InternalRecord = internalapi.InternalRecord
 type InternalRecordResponse = internalapi.InternalRecordResponse
 type ListRecordsResponse = internalapi.ListRecordsResponse
 type BulkCreateRequest = internalapi.BulkCreateRequest

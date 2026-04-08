@@ -23,10 +23,13 @@ import (
 	"github.com/calypr/syfon/service"
 	"github.com/calypr/syfon/urlmanager"
 	"github.com/google/uuid"
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 func executeRootCommand(t *testing.T, args ...string) (string, error) {
 	t.Helper()
+	resetCommandFlags(RootCmd)
 	var out bytes.Buffer
 	var errOut bytes.Buffer
 	RootCmd.SetOut(&out)
@@ -34,6 +37,21 @@ func executeRootCommand(t *testing.T, args ...string) (string, error) {
 	RootCmd.SetArgs(args)
 	err := RootCmd.Execute()
 	return strings.TrimSpace(out.String() + errOut.String()), err
+}
+
+func resetCommandFlags(cmd *cobra.Command) {
+	resetFlagSet(cmd.PersistentFlags())
+	resetFlagSet(cmd.Flags())
+	for _, child := range cmd.Commands() {
+		resetCommandFlags(child)
+	}
+}
+
+func resetFlagSet(fs *pflag.FlagSet) {
+	fs.VisitAll(func(f *pflag.Flag) {
+		_ = f.Value.Set(f.DefValue)
+		f.Changed = false
+	})
 }
 
 func newSyfonTestServer(t *testing.T) *httptest.Server {

@@ -485,9 +485,7 @@ func (db *PostgresDB) GetObjectsByChecksums(ctx context.Context, checksums []str
 
 func (db *PostgresDB) ListObjectIDsByResourcePrefix(ctx context.Context, resourcePrefix string) ([]string, error) {
 	if resourcePrefix == "/" {
-		rows, err := db.db.QueryContext(ctx, `
-			SELECT DISTINCT object_id
-			FROM drs_object_authz`)
+		rows, err := db.db.QueryContext(ctx, `SELECT id FROM drs_object`)
 		if err != nil {
 			return nil, err
 		}

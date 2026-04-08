@@ -11,8 +11,8 @@ require (
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.7
 	github.com/aws/aws-sdk-go-v2/service/kms v1.50.4
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.95.1
-	github.com/calypr/syfon/apigen v0.1.2
-	github.com/calypr/syfon/client v0.1.2
+	github.com/calypr/syfon/apigen v0.1.3
+	github.com/calypr/syfon/client v0.1.4
 	github.com/getkin/kin-openapi v0.133.0
 	github.com/gin-gonic/gin v1.11.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
@@ -21,6 +21,7 @@ require (
 	github.com/lib/pq v1.11.1
 	github.com/mattn/go-sqlite3 v1.14.33
 	github.com/spf13/cobra v1.10.2
+	github.com/spf13/pflag v1.0.10
 	gocloud.dev v0.45.0
 	golang.org/x/sync v0.19.0
 	google.golang.org/api v0.256.0
@@ -105,7 +106,6 @@ require (
 	github.com/planetscale/vtprotobuf v0.6.1-0.20240319094008-0393e58bdf10 // indirect
 	github.com/quic-go/qpack v0.5.1 // indirect
 	github.com/quic-go/quic-go v0.54.0 // indirect
-	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/spiffe/go-spiffe/v2 v2.6.0 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/ugorji/go/codec v1.3.0 // indirect

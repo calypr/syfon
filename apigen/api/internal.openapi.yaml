@@ -632,7 +632,7 @@ components:
         records:
           type: array
           items:
-            $ref: '#/components/schemas/InternalRecordResponse'
+            $ref: '#/components/schemas/InternalRecord'
     BulkCreateRequest:
       type: object
       required:

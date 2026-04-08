@@ -52,7 +52,7 @@ const (
 
 	// FenceDataDownloadEndpoint is the endpoint postfix for download presigned-url
 	FenceDataDownloadEndpoint = "/data/download"
-	
+
 	// FenceDataDownloadPartEndpoint is the endpoint postfix for download part presigned-url
 	FenceDataDownloadPartEndpoint = "/data/download/%s/part"
 
@@ -93,6 +93,6 @@ const (
 )
 
 var (
-	// MinChunkSize is configurable via git config and initialized in init()
+	// MinChunkSize is the lower bound for multipart chunk sizing.
 	MinChunkSize = 10 * MB
 )

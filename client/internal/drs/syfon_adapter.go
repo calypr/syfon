@@ -7,11 +7,11 @@ import (
 	internalapi "github.com/calypr/syfon/apigen/internalapi"
 )
 
-func drsObjectToSyfonInternalRecord(obj *DRSObject) (internalapi.InternalRecordResponse, error) {
+func drsObjectToSyfonInternalRecord(obj *DRSObject) (internalapi.InternalRecord, error) {
 	if obj == nil {
-		return internalapi.InternalRecordResponse{}, nil
+		return internalapi.InternalRecord{}, nil
 	}
-	out := internalapi.InternalRecordResponse{}
+	out := internalapi.InternalRecord{}
 	out.SetDid(obj.Id)
 	if obj.Name != "" {
 		out.SetFileName(obj.Name)
@@ -21,6 +21,20 @@ func drsObjectToSyfonInternalRecord(obj *DRSObject) (internalapi.InternalRecordR
 	out.SetAuthz(InternalAuthzFromDrsAccessMethods(obj.AccessMethods))
 	out.SetHashes(convertDrsChecksumsToMap(obj.Checksums))
 	return out, nil
+}
+
+func syfonInternalRecordToDRSObjectFromRecord(rec internalapi.InternalRecord) (*DRSObject, error) {
+	resp := internalapi.InternalRecordResponse{
+		Did:          rec.Did,
+		Hashes:       rec.Hashes,
+		Size:         rec.Size,
+		Urls:         rec.Urls,
+		Authz:        rec.Authz,
+		FileName:     rec.FileName,
+		Organization: rec.Organization,
+		Project:      rec.Project,
+	}
+	return syfonInternalRecordToDRSObject(resp)
 }
 
 func syfonInternalRecordToDRSObject(rec internalapi.InternalRecordResponse) (*DRSObject, error) {
