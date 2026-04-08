@@ -8,7 +8,6 @@ import (
 	"github.com/calypr/syfon/cmd/bucket"
 	"github.com/calypr/syfon/cmd/download"
 	listcmd "github.com/calypr/syfon/cmd/list"
-	migrateCmd "github.com/calypr/syfon/cmd/migrate"
 	"github.com/calypr/syfon/cmd/ping"
 	"github.com/calypr/syfon/cmd/rm"
 	"github.com/calypr/syfon/cmd/server"
@@ -53,5 +52,4 @@ func init() {
 	RootCmd.AddCommand(sha256sum.Cmd)
 	RootCmd.AddCommand(listcmd.Cmd)
 	RootCmd.AddCommand(rm.Cmd)
-	RootCmd.AddCommand(migrateCmd.Cmd)
 }

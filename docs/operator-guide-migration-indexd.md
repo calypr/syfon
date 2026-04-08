@@ -1,6 +1,6 @@
 # Operator Guide: Indexd to Syfon Migration
 
-This guide explains how to configure, run, and validate the `syfon migrate` workflow introduced for issue #20.
+This guide explains how to configure, run, and validate the standalone `syfon-migrate` workflow introduced for issue #20.
 
 ## What this guide covers
 
@@ -12,7 +12,7 @@ This guide explains how to configure, run, and validate the `syfon migrate` work
 
 ## Migration behavior (quick reference)
 
-`syfon migrate` runs an API-driven ETL pipeline:
+`syfon-migrate` runs an API-driven ETL pipeline:
 
 1. Extract records from source `IndexdURL` (`GET /index`)
 2. Transform Indexd fields to Syfon DRS model
@@ -25,7 +25,7 @@ It is idempotent. Re-running the same migration does not create duplicate record
 
 - A running source Indexd-compatible API reachable at `<INDEXD_URL>`
 - A running target Syfon server reachable at `<SYFON_URL>`
-- Built `syfon` CLI binary (or `go run .` in this repo)
+- Built `syfon-migrate` binary
 - Credentials/network access to read source and write target
 
 Optional but recommended:
@@ -60,7 +60,7 @@ Useful flags:
 ### Step A: Dry run (required first)
 
 ```bash
-./syfon migrate \
+./bin/syfon-migrate \
   --indexd-url "$INDEXD_URL" \
   --server "$SYFON_SERVER_URL" \
   --dry-run
@@ -77,7 +77,7 @@ In dry-run mode, `loaded` means "would load".
 Run a small subset first:
 
 ```bash
-./syfon migrate \
+./bin/syfon-migrate \
   --indexd-url "$INDEXD_URL" \
   --server "$SYFON_SERVER_URL" \
   --batch-size 100 \
@@ -87,7 +87,7 @@ Run a small subset first:
 ### Step C: Full run
 
 ```bash
-./syfon migrate \
+./bin/syfon-migrate \
   --indexd-url "$INDEXD_URL" \
   --server "$SYFON_SERVER_URL" \
   --batch-size 500
@@ -96,7 +96,7 @@ Run a small subset first:
 If you need a default authz for legacy records missing authz:
 
 ```bash
-./syfon migrate \
+./bin/syfon-migrate \
   --indexd-url "$INDEXD_URL" \
   --server "$SYFON_SERVER_URL" \
   --default-authz /programs/open
@@ -149,7 +149,7 @@ Compare dry-run and live run totals from command output:
 Re-running the same command is safe and expected for retry/recovery.
 
 ```bash
-./syfon migrate --indexd-url "$INDEXD_URL" --server "$SYFON_SERVER_URL"
+./bin/syfon-migrate --indexd-url "$INDEXD_URL" --server "$SYFON_SERVER_URL"
 ```
 
 ## Rollback options

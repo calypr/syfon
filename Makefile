@@ -17,6 +17,9 @@ INTERNAL_GEN_OUT ?= .tmp/apigen-internal.gen
 SCHEMAS_SUBMODULE ?= ga4gh/data-repository-service-schemas
 AUTO_INIT_SUBMODULE ?= 0
 GOCACHE ?= $(PWD)/.gocache
+MIGRATE_APP_DIR ?= apps/migrate
+MIGRATE_BIN ?= bin/syfon-migrate
+MIGRATE_ARGS ?=
 REMOTE ?= origin
 VERSION ?=
 DRY_RUN ?= 0
@@ -31,6 +34,20 @@ init-schemas:
 .PHONY: build
 build:
 	GOCACHE="$(GOCACHE)" go build ./...
+
+.PHONY: build-migrate
+build-migrate:
+	@set -euo pipefail; \
+	mkdir -p "$$(dirname "$(MIGRATE_BIN)")"; \
+	cd "$(MIGRATE_APP_DIR)"; \
+	GOCACHE="$(GOCACHE)" go mod tidy; \
+	GOCACHE="$(GOCACHE)" go build -o "../../$(MIGRATE_BIN)" .; \
+	echo "Built $(MIGRATE_BIN)"
+
+.PHONY: run-migrate
+run-migrate: build-migrate
+	@set -euo pipefail; \
+	"./$(MIGRATE_BIN)" $(MIGRATE_ARGS)
 
 .PHONY: gen
 gen:
@@ -269,6 +286,12 @@ gen-internal:
 .PHONY: test
 test:
 	GOCACHE="$(GOCACHE)" go clean -testcache
+	GOCACHE="$(GOCACHE)" go test -v ./...
+
+.PHONY: test-migrate
+test-migrate:
+	@set -euo pipefail; \
+	cd "$(MIGRATE_APP_DIR)"; \
 	GOCACHE="$(GOCACHE)" go test -v ./...
 
 .PHONY: test-unit
