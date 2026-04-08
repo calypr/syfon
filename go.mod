@@ -2,6 +2,8 @@ module github.com/calypr/syfon
 
 go 1.26.1
 
+replace github.com/calypr/syfon/apigen => ./apigen
+
 require (
 	cloud.google.com/go/storage v1.57.2
 	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.6.3

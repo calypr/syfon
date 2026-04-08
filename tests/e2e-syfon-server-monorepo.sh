@@ -28,7 +28,46 @@ TEST_ORGANIZATION="${TEST_ORGANIZATION:-syfon}"
 TEST_PROJECT_ID="${TEST_PROJECT_ID:-e2e}"
 
 log() { printf '[syfon-e2e-monorepo] %s\n' "$*"; }
+log_warn() { printf '[syfon-e2e-monorepo][warn] %s\n' "$*" >&2; }
 fail() { printf '[syfon-e2e-monorepo] ERROR: %s\n' "$*" >&2; exit 1; }
+phase() { log "PHASE: $1"; }
+
+CURRENT_PHASE="init"
+TEST_OUTCOME="FAIL"
+FAIL_LINE=""
+FAIL_CMD=""
+SYFON_BIN=""
+MONO_ROOT=""
+VERIFY_ROOT=""
+REQ_ITEMS_FILE=""
+RESP_FILE=""
+INDEX_ITEMS_FILE=""
+
+on_error() {
+  local line="${BASH_LINENO[0]:-}"
+  local cmd="${BASH_COMMAND:-unknown}"
+  FAIL_LINE="${FAIL_LINE:-$line}"
+  FAIL_CMD="${FAIL_CMD:-$cmd}"
+}
+
+cleanup() {
+  local exit_code=$?
+  rm -f "${SYFON_BIN:-}" /tmp/syfon-monorepo-bucket-create.out /tmp/syfon-monorepo-upload.out \
+    "${REQ_ITEMS_FILE:-}" "${RESP_FILE:-}" "${INDEX_ITEMS_FILE:-}" /tmp/syfon-monorepo-index.out
+  rm -rf "${MONO_ROOT:-}" "${VERIFY_ROOT:-}"
+  if [[ "$exit_code" -eq 0 && "$TEST_OUTCOME" == "PASS" ]]; then
+    log "RESULT: PASS"
+  else
+    log_warn "RESULT: FAIL (phase=${CURRENT_PHASE}, line=${FAIL_LINE:-unknown}, exit_code=$exit_code)"
+    if [[ -n "${FAIL_CMD:-}" ]]; then
+      log_warn "Failed command: ${FAIL_CMD}"
+    fi
+  fi
+  exit "$exit_code"
+}
+
+trap on_error ERR
+trap cleanup EXIT
 
 new_uuid() {
   if command -v uuidgen >/dev/null 2>&1; then
@@ -133,14 +172,19 @@ should_verify() {
 }
 
 main() {
+  CURRENT_PHASE="validation"
   log "using server: ${TEST_DRS_URL%/}"
   health_check
+  CURRENT_PHASE="auth-setup"
   ensure_bucket_config
 
   local syfon_bin mono_root verify_root
   syfon_bin="$(build_syfon)"
   mono_root="$(mktemp -d /tmp/syfon-e2e-monorepo-src.XXXXXX)"
   verify_root="$(mktemp -d /tmp/syfon-e2e-monorepo-dst.XXXXXX)"
+  SYFON_BIN="$syfon_bin"
+  MONO_ROOT="$mono_root"
+  VERIFY_ROOT="$verify_root"
 
   local IFS=',' top_levels_arr=()
   read -r -a top_levels_arr <<<"$MONO_TOP_LEVELS"
@@ -189,8 +233,11 @@ main() {
   req_items_file="$(mktemp /tmp/syfon-monorepo-req-items.XXXXXX)"
   resp_file="$(mktemp /tmp/syfon-monorepo-sign-resp.XXXXXX)"
   index_items_file="$(mktemp /tmp/syfon-monorepo-index-items.XXXXXX)"
-  trap 'rm -f "${syfon_bin:-}" /tmp/syfon-monorepo-bucket-create.out /tmp/syfon-monorepo-upload.out "${req_items_file:-}" "${resp_file:-}" "${index_items_file:-}"; rm -rf "${mono_root:-}" "${verify_root:-}"' EXIT
+  REQ_ITEMS_FILE="$req_items_file"
+  RESP_FILE="$resp_file"
+  INDEX_ITEMS_FILE="$index_items_file"
 
+  CURRENT_PHASE="bulk-upload-register"
   while [[ "$start" -lt "$total" ]]; do
     end=$((start + batch_size))
     if [[ "$end" -gt "$total" ]]; then
@@ -273,6 +320,7 @@ main() {
   done
 
   local dst sum_out verify_idx
+  CURRENT_PHASE="download-verify"
   for ((i=0; i<total; i++)); do
     verify_idx=$((i + 1))
     if ! should_verify "$verify_idx" "$total"; then
@@ -290,6 +338,7 @@ main() {
   done
 
   log "PASS objects=$count verified_mode=$MONO_VERIFY_ALL top_levels=${MONO_TOP_LEVELS}"
+  TEST_OUTCOME="PASS"
 }
 
 main "$@"

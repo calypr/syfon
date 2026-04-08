@@ -68,7 +68,7 @@ func handleInternalBulkCreate(database core.DatabaseInterface) http.HandlerFunc 
 			writeHTTPError(w, r, http.StatusBadRequest, "records cannot be empty", nil)
 			return
 		}
-		results := make([]internalapi.InternalRecordResponse, 0, len(req.Records))
+		results := make([]internalapi.InternalRecord, 0, len(req.Records))
 		for i, rec := range req.Records {
 			obj, err := internalToDrs(rec)
 			if err != nil {
@@ -93,7 +93,7 @@ func handleInternalBulkCreate(database core.DatabaseInterface) http.HandlerFunc 
 				return
 			}
 			if aliased {
-				resp := drsToInternal(canonicalObj)
+				resp := drsToInternalRecord(canonicalObj)
 				resp.SetDid(obj.Id)
 				results = append(results, resp)
 				continue
@@ -102,7 +102,7 @@ func handleInternalBulkCreate(database core.DatabaseInterface) http.HandlerFunc 
 				writeDBError(w, r, err)
 				return
 			}
-			results = append(results, drsToInternal(obj))
+			results = append(results, drsToInternalRecord(obj))
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
@@ -182,7 +182,7 @@ func handleInternalBulkHashes(database core.DatabaseInterface) http.HandlerFunc 
 
 		// Convert back to InternalRecord results
 		// Gen3 Internal usually returns a mapping or a list. Let's return a list of records found.
-		results := make([]internalapi.InternalRecordResponse, 0)
+		results := make([]internalapi.InternalRecord, 0)
 		seen := make(map[string]struct{})
 		for i := range targetHashes {
 			hash := targetHashes[i]
@@ -198,7 +198,7 @@ func handleInternalBulkHashes(database core.DatabaseInterface) http.HandlerFunc 
 					continue
 				}
 				seen[o.Id] = struct{}{}
-				results = append(results, drsToInternal(&o))
+				results = append(results, drsToInternalRecord(&o))
 			}
 		}
 
@@ -598,12 +598,12 @@ func handleInternalList(w http.ResponseWriter, r *http.Request, database core.Da
 			return
 		}
 
-		var records []internalapi.InternalRecordResponse
+		var records []internalapi.InternalRecord
 		for _, o := range objs {
 			if hashType != "" && !objectHasChecksumTypeAndValue(o, hashType, hash) {
 				continue
 			}
-			records = append(records, drsToInternal(&o))
+			records = append(records, drsToInternalRecord(&o))
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -633,7 +633,7 @@ func handleInternalList(w http.ResponseWriter, r *http.Request, database core.Da
 			writeHTTPError(w, r, http.StatusInternalServerError, fmt.Sprintf("Error listing records: %v", err), err)
 			return
 		}
-		records := make([]internalapi.InternalRecordResponse, 0, len(ids))
+		records := make([]internalapi.InternalRecord, 0, len(ids))
 		for _, id := range ids {
 			obj, err := database.GetObject(r.Context(), id)
 			if err != nil {
@@ -646,7 +646,7 @@ func handleInternalList(w http.ResponseWriter, r *http.Request, database core.Da
 			if len(obj.Authorizations) > 0 && !core.HasMethodAccess(r.Context(), "read", obj.Authorizations) {
 				continue
 			}
-			records = append(records, drsToInternal(obj))
+			records = append(records, drsToInternalRecord(obj))
 		}
 		records = paginateRecords(records, offset, limit)
 		w.Header().Set("Content-Type", "application/json")
@@ -665,7 +665,7 @@ func handleInternalList(w http.ResponseWriter, r *http.Request, database core.Da
 		writeHTTPError(w, r, http.StatusInternalServerError, fmt.Sprintf("Error listing records: %v", err), err)
 		return
 	}
-	records := make([]internalapi.InternalRecordResponse, 0, len(ids))
+	records := make([]internalapi.InternalRecord, 0, len(ids))
 	for _, id := range ids {
 		obj, err := database.GetObject(r.Context(), id)
 		if err != nil {
@@ -678,7 +678,7 @@ func handleInternalList(w http.ResponseWriter, r *http.Request, database core.Da
 		if len(obj.Authorizations) > 0 && !core.HasMethodAccess(r.Context(), "read", obj.Authorizations) {
 			continue
 		}
-		records = append(records, drsToInternal(obj))
+		records = append(records, drsToInternalRecord(obj))
 	}
 	records = paginateRecords(records, offset, limit)
 	w.Header().Set("Content-Type", "application/json")
@@ -714,9 +714,9 @@ func parseListPagination(r *http.Request) (int, int, error) {
 	return limit, page, nil
 }
 
-func paginateRecords(records []internalapi.InternalRecordResponse, offset, limit int) []internalapi.InternalRecordResponse {
+func paginateRecords(records []internalapi.InternalRecord, offset, limit int) []internalapi.InternalRecord {
 	if offset >= len(records) {
-		return []internalapi.InternalRecordResponse{}
+		return []internalapi.InternalRecord{}
 	}
 	end := offset + limit
 	if end > len(records) {

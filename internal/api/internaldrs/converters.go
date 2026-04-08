@@ -78,7 +78,7 @@ func internalToDrs(req internalapi.InternalRecord) (*core.InternalObject, error)
 	return &core.InternalObject{DrsObject: *obj, Authorizations: authz}, nil
 }
 
-func drsToInternal(obj *core.InternalObject) internalapi.InternalRecordResponse {
+func drsToInternalRecord(obj *core.InternalObject) internalapi.InternalRecord {
 	hashes := make(map[string]string, len(obj.Checksums))
 	for _, c := range obj.Checksums {
 		hashes[c.Type] = c.Checksum
@@ -97,7 +97,7 @@ func drsToInternal(obj *core.InternalObject) internalapi.InternalRecordResponse 
 		}
 	}
 	scope := core.ParseResourcePath(firstAuthz(authz))
-	resp := internalapi.InternalRecordResponse{
+	resp := internalapi.InternalRecord{
 		Authz: authz,
 		Urls:  urls,
 	}
@@ -116,6 +116,21 @@ func drsToInternal(obj *core.InternalObject) internalapi.InternalRecordResponse 
 	}
 	if scope.Project != "" {
 		resp.SetProject(scope.Project)
+	}
+	return resp
+}
+
+func drsToInternal(obj *core.InternalObject) internalapi.InternalRecordResponse {
+	base := drsToInternalRecord(obj)
+	resp := internalapi.InternalRecordResponse{
+		Did:          base.Did,
+		Hashes:       base.Hashes,
+		Size:         base.Size,
+		Urls:         base.Urls,
+		Authz:        base.Authz,
+		FileName:     base.FileName,
+		Organization: base.Organization,
+		Project:      base.Project,
 	}
 	if !obj.CreatedTime.IsZero() {
 		resp.SetCreatedDate(obj.CreatedTime.Format(time.RFC3339))

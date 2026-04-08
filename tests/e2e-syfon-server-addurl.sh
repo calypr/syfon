@@ -23,7 +23,42 @@ TEST_ORGANIZATION="${TEST_ORGANIZATION:-syfon}"
 TEST_PROJECT_ID="${TEST_PROJECT_ID:-e2e}"
 
 log() { printf '[syfon-e2e-addurl] %s\n' "$*"; }
+log_warn() { printf '[syfon-e2e-addurl][warn] %s\n' "$*" >&2; }
 fail() { printf '[syfon-e2e-addurl] ERROR: %s\n' "$*" >&2; exit 1; }
+phase() { log "PHASE: $1"; }
+
+CURRENT_PHASE="init"
+TEST_OUTCOME="FAIL"
+FAIL_LINE=""
+FAIL_CMD=""
+SYFON_BIN=""
+SRC_FILE=""
+DST_FILE=""
+
+on_error() {
+  local line="${BASH_LINENO[0]:-}"
+  local cmd="${BASH_COMMAND:-unknown}"
+  FAIL_LINE="${FAIL_LINE:-$line}"
+  FAIL_CMD="${FAIL_CMD:-$cmd}"
+}
+
+cleanup() {
+  local exit_code=$?
+  rm -f "${SYFON_BIN:-}" "${SRC_FILE:-}" "${DST_FILE:-}" \
+    /tmp/syfon-addurl-bucket-create.out /tmp/syfon-addurl-sign.out /tmp/syfon-addurl-upload.out
+  if [[ "$exit_code" -eq 0 && "$TEST_OUTCOME" == "PASS" ]]; then
+    log "RESULT: PASS"
+  else
+    log_warn "RESULT: FAIL (phase=${CURRENT_PHASE}, line=${FAIL_LINE:-unknown}, exit_code=$exit_code)"
+    if [[ -n "${FAIL_CMD:-}" ]]; then
+      log_warn "Failed command: ${FAIL_CMD}"
+    fi
+  fi
+  exit "$exit_code"
+}
+
+trap on_error ERR
+trap cleanup EXIT
 
 new_uuid() {
   if command -v uuidgen >/dev/null 2>&1; then
@@ -118,25 +153,32 @@ build_syfon() {
 }
 
 main() {
+  CURRENT_PHASE="validation"
   log "using server: ${TEST_DRS_URL%/}"
   health_check
+  CURRENT_PHASE="auth-setup"
   ensure_bucket_config
 
   local syfon_bin src dst did src_size expected_sum sum_out key req_payload sign_status signed_url sign_name sign_bucket object_url
+  CURRENT_PHASE="build-cli"
   syfon_bin="$(build_syfon)"
+  SYFON_BIN="$syfon_bin"
   src="$(mktemp /tmp/syfon-e2e-addurl-src.XXXXXX)"
   dst="$(mktemp /tmp/syfon-e2e-addurl-dst.XXXXXX)"
+  SRC_FILE="$src"
+  DST_FILE="$dst"
   did="$(new_uuid)"
   key="syfon-e2e/addurl/${did}.txt"
-  trap 'rm -f "${syfon_bin:-}" "${src:-}" "${dst:-}" /tmp/syfon-addurl-bucket-create.out /tmp/syfon-addurl-sign.out /tmp/syfon-addurl-upload.out' EXIT
 
   printf 'syfon add-url e2e payload %s\n' "$did" >"$src"
   src_size="$(wc -c <"$src" | tr -d ' ')"
   expected_sum="$(sha256sum "$src" | awk '{print $1}')"
 
+  CURRENT_PHASE="ping"
   log "ping"
   "$syfon_bin" --server "${TEST_DRS_URL%/}" ping
 
+  CURRENT_PHASE="seed-upload"
   log "pre-upload to bucket via bulk signed URL"
   req_payload="$(jq -nc --arg did "$did" --arg bucket "$TEST_BUCKET_NAME" --arg key "$key" '{requests:[{file_id:$did,bucket:$bucket,file_name:$key}]}')"
   sign_status="$(curl -sS -o /tmp/syfon-addurl-sign.out -w '%{http_code}' \
@@ -158,6 +200,7 @@ main() {
     object_url="s3://${sign_bucket}/${sign_name}"
   fi
 
+  CURRENT_PHASE="add-url"
   log "add-url"
   "$syfon_bin" --server "${TEST_DRS_URL%/}" add-url \
     --did "$did" \
@@ -166,10 +209,12 @@ main() {
     --size "$src_size" \
     --sha256 "$expected_sum"
 
+  CURRENT_PHASE="download"
   log "download"
   "$syfon_bin" --server "${TEST_DRS_URL%/}" download --did "$did" --out "$dst"
   cmp "$src" "$dst" || fail "downloaded file differs from source file"
 
+  CURRENT_PHASE="hash-verify"
   log "sha256sum"
   sum_out="$("$syfon_bin" --server "${TEST_DRS_URL%/}" sha256sum --did "$did")"
   printf '%s\n' "$sum_out"
@@ -178,6 +223,7 @@ main() {
   fi
 
   log "PASS did=$did sha256=$expected_sum"
+  TEST_OUTCOME="PASS"
 }
 
 main "$@"

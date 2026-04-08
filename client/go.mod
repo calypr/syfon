@@ -2,6 +2,8 @@ module github.com/calypr/syfon/client
 
 go 1.26.1
 
+replace github.com/calypr/syfon/apigen => ../apigen
+
 require (
 	github.com/calypr/syfon/apigen v0.1.2
 	github.com/golang-jwt/jwt/v5 v5.3.1

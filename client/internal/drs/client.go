@@ -197,12 +197,56 @@ func (c *DrsClient) BatchGetObjectsByChecksums(ctx context.Context, checksums []
 }
 
 func (c *DrsClient) BatchGetObjectsByHash(ctx context.Context, hashes []string) (map[string][]DRSObject, error) {
-	result := make(map[string][]DRSObject)
+	result := make(map[string][]DRSObject, len(hashes))
+	if len(hashes) == 0 {
+		return result, nil
+	}
+
+	typed := make([]string, 0, len(hashes))
+	normalized := make([]string, 0, len(hashes))
 	for _, h := range hashes {
-		objs, err := c.GetObjectByHash(ctx, &hash.Checksum{Type: string(hash.ChecksumTypeSHA256), Checksum: strings.TrimSpace(h)})
-		if err == nil {
-			result[h] = objs
+		norm := NormalizeOid(strings.TrimSpace(h))
+		if norm == "" {
+			continue
 		}
+		normalized = append(normalized, norm)
+		typed = append(typed, fmt.Sprintf("%s:%s", hash.ChecksumTypeSHA256, norm))
+		result[norm] = []DRSObject{}
+	}
+	if len(typed) == 0 {
+		return result, nil
+	}
+
+	body, _ := json.Marshal(internalapi.BulkHashesRequest{Hashes: typed})
+	rb := c.New(http.MethodPost, c.endpoint("/index/bulk/hashes")).
+		WithBody(bytes.NewReader(body)).
+		WithHeader("Content-Type", "application/json")
+	resp, err := c.Do(ctx, rb)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to bulk get metadata by hash: %s", resp.Status)
+	}
+
+	var list internalapi.ListRecordsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
+		return nil, err
+	}
+	for _, rec := range list.Records {
+		obj, convErr := syfonInternalRecordToDRSObjectFromRecord(rec)
+		if convErr != nil {
+			return nil, convErr
+		}
+		sha := NormalizeOid(hash.ConvertDrsChecksumsToHashInfo(obj.Checksums).SHA256)
+		if sha == "" {
+			continue
+		}
+		if _, ok := result[sha]; !ok {
+			result[sha] = []DRSObject{}
+		}
+		result[sha] = append(result[sha], *obj)
 	}
 	return result, nil
 }
@@ -292,13 +336,43 @@ func (c *DrsClient) RegisterRecord(ctx context.Context, record *DRSObject) (*DRS
 }
 
 func (c *DrsClient) RegisterRecords(ctx context.Context, records []*DRSObject) ([]*DRSObject, error) {
-	results := make([]*DRSObject, 0, len(records))
-	for _, r := range records {
-		out, err := c.RegisterRecord(ctx, r)
+	if len(records) == 0 {
+		return []*DRSObject{}, nil
+	}
+
+	internalRecords := make([]internalapi.InternalRecord, 0, len(records))
+	for i, r := range records {
+		internalRecord, err := drsObjectToSyfonInternalRecord(r)
 		if err != nil {
-			return results, err
+			return nil, fmt.Errorf("record[%d] conversion failed: %w", i, err)
 		}
-		results = append(results, out)
+		internalRecords = append(internalRecords, internalRecord)
+	}
+
+	body, _ := json.Marshal(internalapi.BulkCreateRequest{Records: internalRecords})
+	rb := c.New(http.MethodPost, c.endpoint("/index/bulk")).
+		WithBody(bytes.NewReader(body)).
+		WithHeader("Content-Type", "application/json")
+	resp, err := c.Do(ctx, rb)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to register records: %s", resp.Status)
+	}
+
+	var out internalapi.ListRecordsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	results := make([]*DRSObject, 0, len(out.Records))
+	for _, rec := range out.Records {
+		obj, convErr := syfonInternalRecordToDRSObjectFromRecord(rec)
+		if convErr != nil {
+			return nil, convErr
+		}
+		results = append(results, obj)
 	}
 	return results, nil
 }
