@@ -9,8 +9,15 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-and-push:
-    runs-on: ubuntu-latest
+  build:
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     steps:
       - name: Check out code
         uses: actions/checkout@v4
@@ -22,35 +29,67 @@ jobs:
           username: ${{ secrets.QUAY_USERNAME }}
           password: ${{ secrets.QUAY_ROBOT_TOKEN }}
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Compute image tags
+      - name: Compute tags
         id: meta
         run: |
           set -euo pipefail
           BRANCH=$(echo "${GITHUB_REF#refs/*/}" | tr '/[:upper:]' '_[:lower:]')
           SHORT_SHA="${GITHUB_SHA::12}"
           REPO=quay.io/ohsu-comp-bio/syfon
-          TAGS="$REPO:$BRANCH"$'\n'"$REPO:$BRANCH-$SHORT_SHA"$'\n'"$REPO:sha-$SHORT_SHA"
-          if [[ "$BRANCH" == "main" ]]; then
-            TAGS="$TAGS"$'\n'"$REPO:latest"
-          fi
           {
-            echo "tags<<EOF"
-            echo "$TAGS"
-            echo "EOF"
+            echo "branch=$BRANCH"
+            echo "short_sha=$SHORT_SHA"
+            echo "repo=$REPO"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Build and push multi-platform image
+      - name: Build and push architecture image
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
-          platforms: linux/amd64,linux/arm64
-          tags: ${{ steps.meta.outputs.tags }}
+          platforms: linux/${{ matrix.arch }}
+          tags: |
+            ${{ steps.meta.outputs.repo }}:${{ steps.meta.outputs.branch }}-${{ matrix.arch }}
+            ${{ steps.meta.outputs.repo }}:${{ steps.meta.outputs.branch }}-${{ steps.meta.outputs.short_sha }}-${{ matrix.arch }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  create-manifest:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Login to Quay.io
+        uses: docker/login-action@v3
+        with:
+          registry: quay.io
+          username: ${{ secrets.QUAY_USERNAME }}
+          password: ${{ secrets.QUAY_ROBOT_TOKEN }}
+
+      - name: Create and push manifests
+        run: |
+          set -euo pipefail
+          BRANCH=$(echo "${GITHUB_REF#refs/*/}" | tr '/[:upper:]' '_[:lower:]')
+          SHORT_SHA="${GITHUB_SHA::12}"
+          REPO=quay.io/ohsu-comp-bio/syfon
+
+          # Mutable branch tag points at this commit's immutable arch images.
+          docker manifest create "$REPO:$BRANCH" \
+            "$REPO:$BRANCH-$SHORT_SHA-amd64" \
+            "$REPO:$BRANCH-$SHORT_SHA-arm64"
+          docker manifest push "$REPO:$BRANCH"
+
+          # Immutable multi-arch tag for exact commit.
+          docker manifest create "$REPO:$BRANCH-$SHORT_SHA" \
+            "$REPO:$BRANCH-$SHORT_SHA-amd64" \
+            "$REPO:$BRANCH-$SHORT_SHA-arm64"
+          docker manifest push "$REPO:$BRANCH-$SHORT_SHA"
+
+          if [[ "$BRANCH" == "main" ]]; then
+            docker manifest create "$REPO:latest" \
+              "$REPO:main-$SHORT_SHA-amd64" \
+              "$REPO:main-$SHORT_SHA-arm64"
+            docker manifest push "$REPO:latest"
+          fi
