@@ -253,7 +253,7 @@ func registerBatch(ctx context.Context, client *http.Client, syfonURL string, ob
 		return fmt.Errorf("marshal request: %w", err)
 	}
 
-	endpoint := strings.TrimRight(syfonURL, "/") + "/index/bulk/documents"
+	endpoint := strings.TrimRight(syfonURL, "/") + "/index/migrate/bulk"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("build request: %w", err)
