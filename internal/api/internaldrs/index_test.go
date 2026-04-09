@@ -12,6 +12,7 @@ import (
 	"github.com/calypr/syfon/apigen/drs"
 	"github.com/calypr/syfon/db/core"
 	"github.com/calypr/syfon/testutils"
+	"github.com/gorilla/mux"
 )
 
 func TestParseScopeQuery(t *testing.T) {
@@ -251,6 +252,47 @@ func TestHandleInternalDeleteByQuery(t *testing.T) {
 		}
 		if !strings.Contains(rr.Body.String(), `"deleted":2`) {
 			t.Fatalf("expected deleted count in response, got %s", rr.Body.String())
+		}
+	})
+}
+
+func TestRegisterInternalIndexRoutes_LegacyAliases(t *testing.T) {
+	now := time.Now().UTC()
+	mockDB := &testutils.MockDatabase{
+		Objects: map[string]*drs.DrsObject{
+			"obj-1": {Id: "obj-1", CreatedTime: now, UpdatedTime: now, Checksums: []drs.Checksum{{Type: "sha256", Checksum: "h1"}}},
+		},
+	}
+
+	router := mux.NewRouter()
+	RegisterInternalIndexRoutes(router, mockDB)
+
+	t.Run("collection alias /index/index", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/index/index", nil)
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+		}
+	})
+
+	t.Run("detail alias /index/index/{id}", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/index/index/obj-1", nil)
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+		}
+	})
+
+	t.Run("bulk alias /index/index/bulk/hashes", func(t *testing.T) {
+		reqBody := `{"hashes":["sha256:h1"]}`
+		req := httptest.NewRequest(http.MethodPost, "/index/index/bulk/hashes", strings.NewReader(reqBody))
+		req.Header.Set("Content-Type", "application/json")
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
 		}
 	})
 }

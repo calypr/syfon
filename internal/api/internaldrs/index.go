@@ -24,7 +24,7 @@ import (
 // RegisterInternalIndexRoutes registers the Internal-compatible routes on the router.
 func RegisterInternalIndexRoutes(router *mux.Router, database core.DatabaseInterface) {
 	// Internal Endpoints
-	router.Handle(config.RouteInternalIndex, drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	indexCollectionHandler := drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
 			handleInternalList(w, r, database)
@@ -35,15 +35,16 @@ func RegisterInternalIndexRoutes(router *mux.Router, database core.DatabaseInter
 		default:
 			writeHTTPError(w, r, http.StatusMethodNotAllowed, "Method not allowed", nil)
 		}
-	}), "InternalIndex")).Methods(http.MethodGet, http.MethodPost, http.MethodDelete)
+	}), "InternalIndex")
+	registerInternalIndexRouteWithAlias(router, config.RouteInternalIndex, indexCollectionHandler, http.MethodGet, http.MethodPost, http.MethodDelete)
 
-	router.Handle(config.RouteInternalBulkHashes, drs.Logger(handleInternalBulkHashes(database), "InternalBulkHashes")).Methods(http.MethodPost)
-	router.Handle(config.RouteInternalBulkDeleteHashes, drs.Logger(handleInternalBulkDeleteHashes(database), "InternalBulkDeleteHashes")).Methods(http.MethodPost)
-	router.Handle(config.RouteInternalBulkSHA256, drs.Logger(handleInternalBulkSHA256Validity(database), "InternalBulkSHA256Validity")).Methods(http.MethodPost)
-	router.Handle(config.RouteInternalBulkCreate, drs.Logger(handleInternalBulkCreate(database), "InternalBulkCreate")).Methods(http.MethodPost)
-	router.Handle(config.RouteInternalBulkDocs, drs.Logger(handleInternalBulkDocuments(database), "InternalBulkDocuments")).Methods(http.MethodPost)
+	registerInternalIndexRouteWithAlias(router, config.RouteInternalBulkHashes, drs.Logger(handleInternalBulkHashes(database), "InternalBulkHashes"), http.MethodPost)
+	registerInternalIndexRouteWithAlias(router, config.RouteInternalBulkDeleteHashes, drs.Logger(handleInternalBulkDeleteHashes(database), "InternalBulkDeleteHashes"), http.MethodPost)
+	registerInternalIndexRouteWithAlias(router, config.RouteInternalBulkSHA256, drs.Logger(handleInternalBulkSHA256Validity(database), "InternalBulkSHA256Validity"), http.MethodPost)
+	registerInternalIndexRouteWithAlias(router, config.RouteInternalBulkCreate, drs.Logger(handleInternalBulkCreate(database), "InternalBulkCreate"), http.MethodPost)
+	registerInternalIndexRouteWithAlias(router, config.RouteInternalBulkDocs, drs.Logger(handleInternalBulkDocuments(database), "InternalBulkDocuments"), http.MethodPost)
 
-	router.Handle(config.RouteInternalIndexDetail, drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	indexDetailHandler := drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
 			handleInternalGet(w, r, database)
@@ -54,7 +55,26 @@ func RegisterInternalIndexRoutes(router *mux.Router, database core.DatabaseInter
 		default:
 			writeHTTPError(w, r, http.StatusMethodNotAllowed, "Method not allowed", nil)
 		}
-	}), "InternalDetail")).Methods(http.MethodGet, http.MethodPut, http.MethodDelete)
+	}), "InternalDetail")
+	registerInternalIndexRouteWithAlias(router, config.RouteInternalIndexDetail, indexDetailHandler, http.MethodGet, http.MethodPut, http.MethodDelete)
+}
+
+func registerInternalIndexRouteWithAlias(router *mux.Router, path string, handler http.Handler, methods ...string) {
+	router.Handle(path, handler).Methods(methods...)
+	if alias := legacyIndexAliasPath(path); alias != "" {
+		router.Handle(alias, handler).Methods(methods...)
+	}
+}
+
+func legacyIndexAliasPath(path string) string {
+	switch {
+	case path == "/index":
+		return "/index/index"
+	case strings.HasPrefix(path, "/index/"):
+		return "/index/index/" + strings.TrimPrefix(path, "/index/")
+	default:
+		return ""
+	}
 }
 
 func handleInternalBulkCreate(database core.DatabaseInterface) http.HandlerFunc {

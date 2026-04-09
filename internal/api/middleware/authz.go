@@ -210,7 +210,7 @@ func (m *AuthzMiddleware) Middleware(next http.Handler) http.Handler {
 
 func fetchPrivileges(ctx context.Context, reqClient request.RequestInterface, cred *conf.Credential) (map[string]any, error) {
 	resp, err := reqClient.Do(ctx, &request.RequestBuilder{
-		Url:    strings.TrimRight(cred.APIEndpoint, "/") + "/user",
+		Url:    strings.TrimRight(cred.APIEndpoint, "/") + "/user/user",
 		Method: http.MethodGet,
 		Token:  cred.AccessToken,
 	})
