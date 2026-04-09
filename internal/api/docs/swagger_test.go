@@ -65,6 +65,9 @@ func TestOpenAPIRouteServed(t *testing.T) {
 	if !strings.Contains(rr.Body.String(), "openapi: 3.0.3") {
 		t.Fatalf("expected openapi spec body, got: %s", rr.Body.String())
 	}
+	if !strings.Contains(rr.Body.String(), "/index/migrate/bulk:") {
+		t.Fatalf("expected merged spec to include /index/migrate/bulk path, got: %s", rr.Body.String())
+	}
 }
 
 func TestAuxOpenAPIRoutesServed(t *testing.T) {

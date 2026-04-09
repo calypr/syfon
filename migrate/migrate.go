@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -252,7 +253,7 @@ func registerBatch(ctx context.Context, client *http.Client, syfonURL string, ob
 		return fmt.Errorf("marshal request: %w", err)
 	}
 
-	endpoint := strings.TrimRight(syfonURL, "/") + "/index/migrate/bulk"
+	endpoint := strings.TrimRight(syfonURL, "/") + "/index/bulk/documents"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("build request: %w", err)
@@ -262,12 +263,17 @@ func registerBatch(ctx context.Context, client *http.Client, syfonURL string, ob
 
 	resp, err := client.Do(req)
 	if err != nil {
+		if resp != nil && resp.Body != nil {
+			respBody, _ := io.ReadAll(resp.Body)
+			return fmt.Errorf("POST ? %s: %w %s", endpoint, err, respBody)
+		}
 		return fmt.Errorf("POST %s: %w", endpoint, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("POST %s: unexpected status %d", endpoint, resp.StatusCode)
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("POST %s: unexpected status %d %s", endpoint, resp.StatusCode, respBody)
 	}
 	return nil
 }

@@ -250,17 +250,14 @@ func loadSpecYAMLByName(fileName string) (map[string]interface{}, error) {
 }
 
 func loadSpecBytesByName(fileName string) ([]byte, error) {
-	// Prefer embedded specs so runtime path/layout does not matter in deployments.
-	raw, err := openapispec.ReadSpec(fileName)
-	if err == nil {
-		return raw, nil
+	// Prefer local specs when available so in-repo edits are reflected immediately.
+	if path, ok := findNamedOpenAPISpecPath(fileName); ok {
+		if raw, err := os.ReadFile(path); err == nil {
+			return raw, nil
+		}
 	}
-	// Fallback for local dev scenarios where embeddings might be stale.
-	path, ok := findNamedOpenAPISpecPath(fileName)
-	if !ok {
-		return nil, err
-	}
-	return os.ReadFile(path)
+	// Fall back to embedded specs for deployed binaries that don't ship source files.
+	return openapispec.ReadSpec(fileName)
 }
 
 func mergeSpecSection(dst map[string]interface{}, src map[string]interface{}, section string) {

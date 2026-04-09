@@ -324,6 +324,37 @@ paths:
           description: Validation error
         '500':
           description: Internal server error
+  /index/migrate/bulk:
+    post:
+      tags:
+        - internal-index
+      operationId: internalMigrateBulk
+      description: |
+        Upsert a batch of fully-specified DRS objects from external sources (e.g., Indexd).
+        Unlike /index/bulk, this endpoint preserves all fields including original IDs,
+        timestamps, version, description, and authorizations through database.RegisterObjects.
+        This is the only Syfon endpoint intended for Indexd migration use.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MigrateBulkRequest'
+      responses:
+        '200':
+          description: Successfully upserted records
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MigrateBulkResponse'
+        '400':
+          description: Validation error
+        '401':
+          description: Authentication required
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
   /data/upload:
     post:
       tags:
@@ -819,3 +850,91 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/InternalMultipartPart'
+    MigrateBulkRecord:
+      type: object
+      required:
+        - id
+        - checksums
+      properties:
+        id:
+          type: string
+          description: Original source object ID (preserved as-is during migration)
+        name:
+          type: string
+          description: File name
+        size:
+          type: integer
+          format: int64
+          description: File size in bytes
+        version:
+          type: string
+          description: Source version identifier
+        description:
+          type: string
+          description: Object description
+        created_time:
+          type: string
+          format: date-time
+          description: Creation timestamp from source
+        updated_time:
+          type: string
+          format: date-time
+          description: Last update timestamp from source
+        checksums:
+          type: array
+          items:
+            $ref: '#/components/schemas/Checksum'
+          description: Content checksums (e.g., sha256, md5)
+        access_methods:
+          type: array
+          items:
+            $ref: '#/components/schemas/AccessMethod'
+          description: Access methods for retrieving the object
+        authz:
+          type: array
+          items:
+            type: string
+          description: Authorization resource paths
+    Checksum:
+      type: object
+      required:
+        - type
+        - checksum
+      properties:
+        type:
+          type: string
+          description: Hash algorithm (e.g., sha256, md5)
+        checksum:
+          type: string
+          description: Hash value
+    AccessMethod:
+      type: object
+      properties:
+        type:
+          type: string
+          description: Access method type (e.g., s3, gs, https)
+        access_url:
+          type: object
+          properties:
+            url:
+              type: string
+              description: Access URL
+        region:
+          type: string
+          description: Region for cloud storage (e.g., us-east-1)
+    MigrateBulkRequest:
+      type: object
+      required:
+        - records
+      properties:
+        records:
+          type: array
+          items:
+            $ref: '#/components/schemas/MigrateBulkRecord'
+          description: Records to migrate/upsert
+    MigrateBulkResponse:
+      type: object
+      properties:
+        count:
+          type: integer
+          description: Number of records successfully upserted
