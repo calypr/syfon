@@ -68,7 +68,7 @@ const (
 	RouteCoreSHA256 = "/index/v1/sha256/validity"
 )
 
-var ValidBucketName = regexp.MustCompile(`^[a-z0-9][a-z0-9\-]{1,61}[a-z0-9]$`)
+var validBucketNameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9\-]{1,61}[a-z0-9]$`)
 
 type Config struct {
 	Port          int            `json:"port" yaml:"port"`
