@@ -167,6 +167,14 @@ You can run integration tests using your own config file:
 go test ./cmd/server -v -count=1 -testConfig=config.yaml
 ```
 
+Docker-backed MinIO upload and download coverage is available behind an opt-in flag:
+
+```bash
+SYFON_E2E_DOCKER=1 go test ./cmd -run TestSyfonDockerMinIOE2E -v -count=1
+```
+
+This test starts MinIO in Docker, starts a real syfon server configured against it, then verifies `ping`, `upload`, `download`, and `sha256sum`. It skips automatically when the opt-in flag is not set, and it also skips when Docker is unavailable.
+
 ## Architecture
 
 The project follows a modular structure to ensure maintainability:
