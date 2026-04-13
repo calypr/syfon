@@ -8,10 +8,11 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
-	"github.com/calypr/syfon/cmd/cliutil"
 	syclient "github.com/calypr/syfon/client"
+	"github.com/calypr/syfon/cmd/cliutil"
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 )
@@ -102,10 +103,16 @@ func uploadBytesToURL(ctx context.Context, rawURL, srcPath string) error {
 			return fmt.Errorf("open source file: %w", err)
 		}
 		defer f.Close()
+		fi, err := f.Stat()
+		if err != nil {
+			return fmt.Errorf("stat source file: %w", err)
+		}
 		req, err := http.NewRequestWithContext(ctx, http.MethodPut, rawURL, f)
 		if err != nil {
 			return fmt.Errorf("build upload request: %w", err)
 		}
+		req.ContentLength = fi.Size()
+		req.Header.Set("Content-Length", strconv.FormatInt(fi.Size(), 10))
 		resp, err := cliutil.NewHTTPClient().Do(req)
 		if err != nil {
 			return fmt.Errorf("upload request failed: %w", err)
