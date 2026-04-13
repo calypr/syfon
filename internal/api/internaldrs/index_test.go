@@ -191,6 +191,94 @@ func TestHandleInternalBulkHashes_HashTypeFiltering(t *testing.T) {
 	}
 }
 
+func TestHandleInternalCreate_GeneratesMissingDidAndPersistsAuthz(t *testing.T) {
+	mockDB := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}
+	reqBody := `{"size": 42,"authz":["/programs/test/projects/p1"]}`
+	req := httptest.NewRequest(http.MethodPost, "/index", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	handleInternalCreate(rr, req, mockDB)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var resp struct {
+		Did   string            `json:"did"`
+		Authz []string          `json:"authz"`
+		Hashes map[string]string `json:"hashes"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Did == "" {
+		t.Fatal("expected generated did")
+	}
+	if len(resp.Authz) != 1 || resp.Authz[0] != "/programs/test/projects/p1" {
+		t.Fatalf("expected explicit authz to persist, got %v", resp.Authz)
+	}
+	if len(resp.Hashes) != 0 {
+		t.Fatalf("expected no synthesized hashes, got %v", resp.Hashes)
+	}
+	if got := mockDB.ObjectAuthz[resp.Did]; len(got) != 1 || got[0] != "/programs/test/projects/p1" {
+		t.Fatalf("expected persisted authz, got %v", got)
+	}
+}
+
+func TestHandleInternalCreate_MissingAuthzFails(t *testing.T) {
+	mockDB := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}
+	reqBody := `{"size": 42}`
+	req := httptest.NewRequest(http.MethodPost, "/index", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	handleInternalCreate(rr, req, mockDB)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "authorizations are required") {
+		t.Fatalf("expected authz validation error, got %s", rr.Body.String())
+	}
+}
+
+func TestHandleInternalBulkCreate_PersistsExplicitAuthz(t *testing.T) {
+	mockDB := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}
+	reqBody := `{"records":[{"size":7,"authz":["/programs/test/projects/p1"]}]}`
+	req := httptest.NewRequest(http.MethodPost, "/bulk/create", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	handleInternalBulkCreate(mockDB).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var resp struct {
+		Records []struct {
+			Did   string   `json:"did"`
+			Authz []string `json:"authz"`
+		} `json:"records"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp.Records) != 1 {
+		t.Fatalf("expected 1 record, got %d", len(resp.Records))
+	}
+	if resp.Records[0].Did == "" {
+		t.Fatal("expected generated did for bulk create")
+	}
+	if len(resp.Records[0].Authz) != 1 || resp.Records[0].Authz[0] != "/programs/test/projects/p1" {
+		t.Fatalf("expected explicit authz in bulk create response, got %v", resp.Records[0].Authz)
+	}
+	if got := mockDB.ObjectAuthz[resp.Records[0].Did]; len(got) != 1 || got[0] != "/programs/test/projects/p1" {
+		t.Fatalf("expected persisted authz, got %v", got)
+	}
+}
+
 func TestHandleInternalDeleteByQuery(t *testing.T) {
 	t.Run("requires scope query", func(t *testing.T) {
 		mockDB := &testutils.MockDatabase{}

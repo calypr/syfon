@@ -17,18 +17,13 @@ import (
 // --- Domain Mapping Tools ---
 
 func canonicalIDFromInternal(req *internalapi.InternalRecord) string {
-	if did := strings.TrimSpace(req.GetDid()); did != "" {
-		if _, err := uuid.Parse(did); err == nil {
-			return did
-		}
-	}
-	return ""
+	return strings.TrimSpace(req.GetDid())
 }
 
 func internalToDrs(req *internalapi.InternalRecord) (*core.InternalObject, error) {
 	id := canonicalIDFromInternal(req)
 	if id == "" {
-		return nil, fmt.Errorf("valid UUID is required in 'did' field")
+		id = uuid.NewString()
 	}
 	now := time.Now()
 	obj := &drs.DrsObject{
@@ -55,9 +50,6 @@ func internalToDrs(req *internalapi.InternalRecord) (*core.InternalObject, error
 	for t, v := range req.GetHashes() {
 		obj.Checksums = append(obj.Checksums, drs.Checksum{Type: t, Checksum: v})
 	}
-	if len(obj.Checksums) == 0 {
-		obj.Checksums = append(obj.Checksums, drs.Checksum{Type: "sha256", Checksum: id})
-	}
 	for _, u := range req.GetUrls() {
 		obj.AccessMethods = append(obj.AccessMethods, drs.AccessMethod{
 			Type:      "s3",
@@ -72,6 +64,9 @@ func internalToDrs(req *internalapi.InternalRecord) (*core.InternalObject, error
 			authz = append(authz, path)
 		}
 	}
+	if len(authz) == 0 {
+		return nil, fmt.Errorf("authorizations are required")
+	}
 	for i := range obj.AccessMethods {
 		obj.AccessMethods[i].Authorizations = drs.AccessMethodAuthorizations{
 			BearerAuthIssuers: authz,
@@ -84,9 +79,6 @@ func drsToInternalRecord(obj *core.InternalObject) *internalapi.InternalRecord {
 	hashes := make(map[string]string, len(obj.Checksums))
 	for _, c := range obj.Checksums {
 		hashes[c.Type] = c.Checksum
-	}
-	if len(hashes) == 0 && obj.Id != "" {
-		hashes["sha256"] = obj.Id
 	}
 
 	var urls []string
@@ -126,9 +118,6 @@ func drsToInternal(obj *core.InternalObject) *internalapi.InternalRecordResponse
 	hashes := make(map[string]string, len(obj.Checksums))
 	for _, c := range obj.Checksums {
 		hashes[c.Type] = c.Checksum
-	}
-	if len(hashes) == 0 && obj.Id != "" {
-		hashes["sha256"] = obj.Id
 	}
 
 	var urls []string

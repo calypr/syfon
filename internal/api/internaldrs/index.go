@@ -97,13 +97,7 @@ func handleInternalBulkCreate(database core.DatabaseInterface) http.HandlerFunc 
 				return
 			}
 			targetResources := obj.Authorizations
-			if len(targetResources) == 0 {
-				targetResources = []string{"/data_file"}
-				if !core.HasMethodAccess(r.Context(), "file_upload", targetResources) && !core.HasMethodAccess(r.Context(), "create", targetResources) {
-					writeAuthError(w, r)
-					return
-				}
-			} else if !core.HasMethodAccess(r.Context(), "create", targetResources) {
+			if !core.HasMethodAccess(r.Context(), "create", targetResources) {
 				writeAuthError(w, r)
 				return
 			}
@@ -270,9 +264,6 @@ func handleInternalBulkDeleteHashes(database core.DatabaseInterface) http.Handle
 				}
 				// Check delete permissions
 				targetResources := o.Authorizations
-				if len(targetResources) == 0 {
-					targetResources = []string{"/data_file"}
-				}
 				if !core.HasMethodAccess(r.Context(), "delete", targetResources) {
 					continue
 				}
@@ -582,9 +573,6 @@ func handleInternalDeleteByQuery(w http.ResponseWriter, r *http.Request, databas
 			return
 		}
 		targetResources := obj.Authorizations
-		if len(targetResources) == 0 {
-			targetResources = []string{"/data_file"}
-		}
 		if !core.HasMethodAccess(r.Context(), "delete", targetResources) {
 			writeAuthError(w, r)
 			return
