@@ -11,7 +11,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/calypr/syfon/cmd/cliutil"
+	syclient "github.com/calypr/syfon/client"
 	"github.com/spf13/cobra"
 )
 
@@ -26,25 +26,32 @@ var Cmd = &cobra.Command{
 			return fmt.Errorf("--did is required")
 		}
 
-		c := cliutil.NewSyfonClient(cmd)
+		serverURL, err := cmd.Flags().GetString("server")
+		if err != nil {
+			return fmt.Errorf("get server flag: %w", err)
+		}
+		c, err := syclient.New(serverURL)
+		if err != nil {
+			return err
+		}
 		did := strings.TrimSpace(shaDID)
-		signed, err := c.GetDownloadURL(ctx, did)
+		signed, err := c.Data().DownloadURL(ctx, did, 0, false)
 		if err != nil {
 			return fmt.Errorf("get download url: %w", err)
 		}
-			downloadURL := strings.TrimSpace(signed.GetUrl())
-			if downloadURL == "" {
-				return fmt.Errorf("empty download url for did %s", did)
-			}
+		downloadURL := strings.TrimSpace((&signed).GetUrl())
+		if downloadURL == "" {
+			return fmt.Errorf("empty download url for did %s", did)
+		}
 
-			data, err := readURLBytes(ctx, downloadURL)
-			if err != nil {
-				return err
-			}
+		data, err := readURLBytes(ctx, downloadURL, c)
+		if err != nil {
+			return err
+		}
 		sumArr := sha256.Sum256(data)
 		sum := hex.EncodeToString(sumArr[:])
 
-		if err := cliutil.EnsureRecordWithURL(ctx, c, did, "", "", 0, sum); err != nil {
+		if err := c.Index().Upsert(ctx, did, "", "", 0, sum, nil); err != nil {
 			return fmt.Errorf("persist sha256: %w", err)
 		}
 
@@ -53,7 +60,7 @@ var Cmd = &cobra.Command{
 	},
 }
 
-func readURLBytes(ctx context.Context, rawURL string) ([]byte, error) {
+func readURLBytes(ctx context.Context, rawURL string, c *syclient.Client) ([]byte, error) {
 	parsed, err := url.Parse(strings.TrimSpace(rawURL))
 	if err != nil {
 		return nil, fmt.Errorf("parse download url: %w", err)
@@ -66,11 +73,8 @@ func readURLBytes(ctx context.Context, rawURL string) ([]byte, error) {
 		}
 		return data, nil
 	case "http", "https":
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
-		if err != nil {
-			return nil, fmt.Errorf("build download request: %w", err)
-		}
-		resp, err := cliutil.NewHTTPClient().Do(req)
+		rb := c.Requestor().New(http.MethodGet, rawURL)
+		resp, err := c.Requestor().Do(ctx, rb)
 		if err != nil {
 			return nil, fmt.Errorf("download request failed: %w", err)
 		}

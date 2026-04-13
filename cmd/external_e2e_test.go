@@ -13,8 +13,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
-
-	"github.com/calypr/syfon/cmd/cliutil"
+	"time"
 )
 
 // TestSyfonExternalServerE2E runs CLI-only e2e checks against a live Syfon server.
@@ -47,7 +46,7 @@ func TestSyfonExternalServerE2E(t *testing.T) {
 	if err := os.WriteFile(srcPath, srcData, 0o644); err != nil {
 		t.Fatalf("write source file: %v", err)
 	}
-	out, err = executeRootCommand(t, "--server", serverURL, "upload", "--file", srcPath)
+	out, err = executeRootCommand(t, "--server", serverURL, "upload", "--file", srcPath, "--authz", "/programs/syfon/projects/e2e")
 	if err != nil {
 		t.Fatalf("upload failed: %v output=%s", err, out)
 	}
@@ -100,14 +99,21 @@ func TestSyfonExternalServerE2E(t *testing.T) {
 func parseUploadedObjectID(out string) (string, error) {
 	for _, line := range strings.Split(out, "\n") {
 		line = strings.TrimSpace(line)
+		// Check for both "uploaded: <ID>" and "uploaded <ID>" formats
+		if strings.HasPrefix(line, "uploaded:") {
+			parts := strings.SplitN(line, ":", 2)
+			if len(parts) == 2 {
+				return strings.TrimSpace(parts[1]), nil
+			}
+		}
 		if strings.HasPrefix(line, "uploaded ") {
 			parts := strings.Split(line, " ")
 			if len(parts) > 0 {
-				return parts[len(parts)-1], nil
+				return strings.TrimSpace(parts[len(parts)-1]), nil
 			}
 		}
 	}
-	return "", fmt.Errorf("missing uploaded line")
+	return "", fmt.Errorf("missing uploaded line in output: %q", out)
 }
 
 var missingCredentialRe = regexp.MustCompile(`failed to get credentials for bucket ([^: ]+): credential not found`)
@@ -180,7 +186,8 @@ func bootstrapExternalBucketCredential(serverURL, bucket string) (bool, error) {
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := cliutil.NewHTTPClient().Do(req)
+	client := &http.Client{Timeout: 60 * time.Second}
+	resp, err := client.Do(req)
 	if err != nil {
 		return false, fmt.Errorf("put /data/buckets: %w", err)
 	}

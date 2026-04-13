@@ -16,10 +16,12 @@ import (
 	"sync/atomic"
 	"testing"
 
+	internalapi "github.com/calypr/syfon/apigen/internalapi"
 	"github.com/calypr/syfon/client/conf"
 	"github.com/calypr/syfon/client/pkg/common"
 	"github.com/calypr/syfon/client/pkg/logs"
 	"github.com/calypr/syfon/client/pkg/request"
+	"github.com/calypr/syfon/client/xfer"
 )
 
 type fakeGen3Upload struct {
@@ -29,7 +31,7 @@ type fakeGen3Upload struct {
 }
 
 func (f *fakeGen3Upload) Name() string             { return "fake" }
-func (f *fakeGen3Upload) Logger() *logs.Gen3Logger { return f.logger }
+func (f *fakeGen3Upload) Logger() xfer.TransferLogger { return f.logger }
 
 func (f *fakeGen3Upload) Do(ctx context.Context, req *request.RequestBuilder) (*http.Response, error) {
 	return f.doFunc(ctx, req)
@@ -41,14 +43,10 @@ func (f *fakeGen3Upload) New(method, url string) *request.RequestBuilder {
 func (f *fakeGen3Upload) ResolveUploadURL(ctx context.Context, guid string, filename string, metadata common.FileMetadata, bucket string) (string, error) {
 	return "", fmt.Errorf("not implemented")
 }
-func (f *fakeGen3Upload) ResolveUploadURLs(ctx context.Context, requests []common.UploadURLResolveRequest) ([]common.UploadURLResolveResponse, error) {
-	return nil, fmt.Errorf("not implemented")
-}
-
-func (f *fakeGen3Upload) InitMultipartUpload(ctx context.Context, guid string, filename string, bucket string) (*common.MultipartUploadInit, error) {
+func (f *fakeGen3Upload) InitMultipartUpload(ctx context.Context, guid string, filename string, bucket string) (string, string, error) {
 	resp, err := f.Do(ctx, &request.RequestBuilder{Url: common.FenceDataMultipartInitEndpoint})
 	if err != nil {
-		return nil, err
+		return "", "", err
 	}
 	defer resp.Body.Close()
 	var msg struct {
@@ -56,9 +54,9 @@ func (f *fakeGen3Upload) InitMultipartUpload(ctx context.Context, guid string, f
 		GUID     string `json:"guid"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&msg); err != nil {
-		return nil, err
+		return "", "", err
 	}
-	return &common.MultipartUploadInit{GUID: msg.GUID, UploadID: msg.UploadID}, nil
+	return msg.UploadID, msg.GUID, nil
 }
 func (f *fakeGen3Upload) GetMultipartUploadURL(ctx context.Context, key string, uploadID string, partNumber int32, bucket string) (string, error) {
 	resp, err := f.Do(ctx, &request.RequestBuilder{Url: common.FenceDataMultipartUploadEndpoint})
@@ -74,7 +72,7 @@ func (f *fakeGen3Upload) GetMultipartUploadURL(ctx context.Context, key string, 
 	}
 	return msg.PresignedURL, nil
 }
-func (f *fakeGen3Upload) CompleteMultipartUpload(ctx context.Context, key string, uploadID string, parts []common.MultipartUploadPart, bucket string) error {
+func (f *fakeGen3Upload) CompleteMultipartUpload(ctx context.Context, key string, uploadID string, parts []internalapi.InternalMultipartPart, bucket string) error {
 	_, err := f.Do(ctx, &request.RequestBuilder{Url: common.FenceDataMultipartCompleteEndpoint})
 	return err
 }
@@ -148,17 +146,10 @@ func TestMultipartUploadProgressIntegration(t *testing.T) {
 		},
 	}
 
-	requestObject := common.FileUploadRequestObject{
-		SourcePath: file.Name(),
-		ObjectKey:  "multipart.bin",
-		GUID:       "guid-123",
-		Bucket:     "bucket",
-	}
-
 	ctx = common.WithProgress(ctx, progress)
 	ctx = common.WithOid(ctx, "guid-123")
 
-	if err := MultipartUpload(ctx, fake, requestObject, file, false); err != nil {
+	if err := MultipartUpload(ctx, fake, file.Name(), "multipart.bin", "guid-123", "bucket", common.FileMetadata{}, file, false); err != nil {
 		t.Fatalf("multipart upload failed: %v", err)
 	}
 
@@ -259,13 +250,7 @@ func TestMultipartUploadResumesWithoutReinit(t *testing.T) {
 		},
 	}
 
-	req := common.FileUploadRequestObject{
-		SourcePath: path,
-		ObjectKey:  "resume.bin",
-		GUID:       "guid-resume-1",
-		Bucket:     "bucket",
-	}
-	checkpointPath, err := multipartCheckpointPath(req)
+	checkpointPath, err := multipartCheckpointPath(path, "resume.bin", "guid-resume-1", "bucket")
 	if err != nil {
 		t.Fatalf("checkpoint path: %v", err)
 	}
@@ -275,7 +260,7 @@ func TestMultipartUploadResumesWithoutReinit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open file1: %v", err)
 	}
-	err = MultipartUpload(ctx, fake, req, file1, false)
+	err = MultipartUpload(ctx, fake, path, "resume.bin", "guid-resume-1", "bucket", common.FileMetadata{}, file1, false)
 	_ = file1.Close()
 	if err == nil {
 		t.Fatal("expected first multipart upload to fail")
@@ -292,7 +277,7 @@ func TestMultipartUploadResumesWithoutReinit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open file2: %v", err)
 	}
-	err = MultipartUpload(ctx, fake, req, file2, false)
+	err = MultipartUpload(ctx, fake, path, "resume.bin", "guid-resume-1", "bucket", common.FileMetadata{}, file2, false)
 	_ = file2.Close()
 	if err != nil {
 		t.Fatalf("resume multipart upload failed: %v", err)

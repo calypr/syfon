@@ -589,9 +589,13 @@ components:
       description: Hash map, e.g. {"sha256":"..."}
     InternalRecord:
       type: object
+      required:
+        - did
+        - authz
       properties:
         did:
           type: string
+          minLength: 1
         hashes:
           $ref: '#/components/schemas/HashInfo'
         size:
@@ -605,6 +609,7 @@ components:
           type: array
           items:
             type: string
+          minItems: 1
         file_name:
           type: string
         organization:

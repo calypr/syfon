@@ -18,32 +18,41 @@ func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
 func newTestClient(t *testing.T, fn roundTripFunc) *Client {
 	t.Helper()
 	httpClient := &http.Client{Transport: fn}
-	return New("http://example.test", WithHTTPClient(httpClient))
+	c, err := New("http://example.test", WithHTTPClient(httpClient))
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+	return c
 }
 
 func TestClientBasicAuthAndUserAgent(t *testing.T) {
 	t.Parallel()
-	c := New("http://example.test",
+	httpClient := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path != "/healthz" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		user, pass, ok := r.BasicAuth()
+		if !ok || user != "u" || pass != "p" {
+			t.Fatalf("missing/invalid basic auth user=%q pass=%q ok=%v", user, pass, ok)
+		}
+		if got := r.Header.Get("User-Agent"); got != "syfon-test-client" {
+			t.Fatalf("unexpected user agent: %q", got)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader("")),
+			Header:     make(http.Header),
+		}, nil
+	})}
+
+	c, err := New("http://example.test",
 		WithBasicAuth("u", "p"),
 		WithUserAgent("syfon-test-client"),
-		WithHTTPClient(&http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
-			if r.URL.Path != "/healthz" {
-				t.Fatalf("unexpected path: %s", r.URL.Path)
-			}
-			user, pass, ok := r.BasicAuth()
-			if !ok || user != "u" || pass != "p" {
-				t.Fatalf("missing/invalid basic auth user=%q pass=%q ok=%v", user, pass, ok)
-			}
-			if got := r.Header.Get("User-Agent"); got != "syfon-test-client" {
-				t.Fatalf("unexpected user agent: %q", got)
-			}
-			return &http.Response{
-				StatusCode: http.StatusOK,
-				Body:       io.NopCloser(strings.NewReader("")),
-				Header:     make(http.Header),
-			}, nil
-		})}))
-	if err := c.Ping(context.Background()); err != nil {
+		WithHTTPClient(httpClient))
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+	if err := c.Health().Ping(context.Background()); err != nil {
 		t.Fatalf("ping failed: %v", err)
 	}
 }
@@ -73,8 +82,8 @@ func TestDataUploadBlank(t *testing.T) {
 		}, nil
 	})
 	req := UploadBlankRequest{}
-	(&req).SetGuid("abc")
-	out, err := c.Data().UploadBlank(context.Background(), req)
+	req.SetGuid("abc")
+	out, err := c.data.UploadBlank(context.Background(), req)
 	if err != nil {
 		t.Fatalf("UploadBlank failed: %v", err)
 	}
@@ -101,7 +110,7 @@ func TestIndexListByHash(t *testing.T) {
 			Header:     make(http.Header),
 		}, nil
 	})
-	out, err := c.Index().List(context.Background(), ListRecordsOptions{Hash: "sha256:deadbeef"})
+	out, err := c.index.List(context.Background(), ListRecordsOptions{Hash: "sha256:deadbeef"})
 	if err != nil {
 		t.Fatalf("Index.List failed: %v", err)
 	}
@@ -123,8 +132,8 @@ func TestDataMultipartInitUsesCanonicalUploadId(t *testing.T) {
 		}, nil
 	})
 	req := MultipartInitRequest{}
-	(&req).SetGuid("g1")
-	out, err := c.Data().MultipartInit(context.Background(), req)
+	req.SetGuid("g1")
+	out, err := c.data.MultipartInit(context.Background(), req)
 	if err != nil {
 		t.Fatalf("MultipartInit failed: %v", err)
 	}

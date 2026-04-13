@@ -53,7 +53,6 @@ func (m *MockRequestInterface) Do(ctx context.Context, req *request.RequestBuild
 
 // Do indicates an expected call of Do.
 func (mr *MockRequestInterfaceMockRecorder) Do(ctx, req any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Do", reflect.TypeOf((*MockRequestInterface)(nil).Do), ctx, req)
 }
 

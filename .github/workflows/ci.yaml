@@ -53,6 +53,25 @@ jobs:
 
       - name: Run go vet
         run: go vet ./...
+
+  integration-test:
+    name: Docker Integration Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run Docker-backed MinIO E2E tests
+        env:
+          SYFON_E2E_DOCKER: 1
+        run: |
+          go test -v -run TestSyfonDocker ./cmd/...
   build-and-push:
     name: Build syfon
     runs-on: ${{ matrix.arch == 'amd64' && 'ubuntu-latest' || 'ubuntu-24.04-arm' }}

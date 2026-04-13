@@ -7,35 +7,22 @@ import (
 	"os"
 
 	"github.com/calypr/syfon/client/pkg/common"
-	"github.com/calypr/syfon/client/pkg/logs"
-	"github.com/calypr/syfon/client/transfer"
+	"github.com/calypr/syfon/client/xfer"
 )
 
-func UploadSingle(ctx context.Context, bk transfer.Uploader, logger *logs.Gen3Logger, req common.FileUploadRequestObject, showProgress bool) error {
-	logger.DebugContext(ctx, "File upload request",
-		"source_path", req.SourcePath,
-		"object_key", req.ObjectKey,
-		"guid", req.GUID,
-		"bucket", req.Bucket,
-	)
+func UploadSingle(ctx context.Context, bk xfer.Uploader, logger xfer.TransferLogger, sourcePath, objectKey, guid, bucket string, metadata common.FileMetadata, showProgress bool) error {
+	req := uploadRequest{
+		sourcePath: sourcePath,
+		objectKey:  objectKey,
+		guid:       guid,
+		bucket:     bucket,
+		metadata:   metadata,
+	}
 
-	// Helper to handle * in path if it was passed, though optimally caller handles this.
-	// We will trust the SourcePath in the request object mostly, but for safety we can check existence.
-	// But commonly parsing happens before creating the object usually.
-	// Let's assume req.SourcePath is a single valid file path for now as per design.
-
-	file, err := os.Open(req.SourcePath)
+	file, err := os.Open(req.sourcePath)
 	if err != nil {
-		if showProgress {
-			sb := logger.Scoreboard()
-			if sb != nil {
-				sb.IncrementSB(len(sb.Counts))
-				sb.PrintSB()
-			}
-		}
-		logger.Failed(req.SourcePath, req.ObjectKey, common.FileMetadata{}, "", 0, false)
-		logger.ErrorContext(ctx, "File open error", "file", req.SourcePath, "error", err)
-		return fmt.Errorf("[ERROR] when opening file path %s, an error occurred: %s\n", req.SourcePath, err.Error())
+		logger.Failed(req.sourcePath, req.objectKey, common.FileMetadata{}, "", 0, false)
+		return fmt.Errorf("error opening file %s: %w", req.sourcePath, err)
 	}
 	defer file.Close()
 
@@ -43,56 +30,23 @@ func UploadSingle(ctx context.Context, bk transfer.Uploader, logger *logs.Gen3Lo
 	if err != nil {
 		return fmt.Errorf("failed to stat file: %w", err)
 	}
-	fileSize := fi.Size()
 
-	furObject, err := generateUploadRequest(ctx, bk, req, file, nil)
+	fur, err := generateUploadRequest(ctx, bk, req, file, nil)
 	if err != nil {
-		if showProgress {
-			sb := logger.Scoreboard()
-			if sb != nil {
-				sb.IncrementSB(len(sb.Counts))
-				sb.PrintSB()
-			}
-		}
-		logger.Failed(req.SourcePath, req.ObjectKey, common.FileMetadata{}, req.GUID, 0, false)
-		logger.ErrorContext(ctx, "Error occurred during request generation", "file", req.SourcePath, "error", err)
-		return fmt.Errorf("[ERROR] Error occurred during request generation for file %s: %s\n", req.SourcePath, err.Error())
-	}
-
-	progressCallback := common.GetProgress(ctx)
-	oid := common.GetOid(ctx)
-	if oid == "" {
-		oid = resolveUploadOID(furObject)
-	}
-
-	var reader io.Reader = file
-	var progressTracker *progressReader
-	if progressCallback != nil {
-		progressTracker = newProgressReader(file, progressCallback, oid, fileSize)
-		reader = progressTracker
-	}
-
-	err = bk.Upload(ctx, furObject.PresignedURL, reader, fileSize)
-	if progressTracker != nil {
-		if finalizeErr := progressTracker.Finalize(); finalizeErr != nil && err == nil {
-			err = finalizeErr
-		}
-	}
-
-	if err != nil {
-		logger.ErrorContext(ctx, "Upload failed", "error", err)
+		logger.Failed(req.sourcePath, req.objectKey, common.FileMetadata{}, guid, 0, false)
 		return err
 	}
 
-	logger.DebugContext(ctx, "Successfully uploaded", "file", req.ObjectKey)
-	logger.Succeeded(req.SourcePath, req.GUID)
-
-	if showProgress {
-		sb := logger.Scoreboard()
-		if sb != nil {
-			sb.IncrementSB(0)
-			sb.PrintSB()
-		}
+	reader := io.Reader(file)
+	if progress := common.GetProgress(ctx); progress != nil {
+		reader = newProgressReader(file, progress, resolveUploadOID(fur.objectKey, fur.guid), fi.Size())
 	}
+
+	err = bk.Upload(ctx, fur.presignedURL, reader, fi.Size())
+	if err != nil {
+		return err
+	}
+
+	logger.Succeeded(req.sourcePath, guid)
 	return nil
 }

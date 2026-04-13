@@ -16,7 +16,7 @@ import (
 
 	"github.com/calypr/syfon/client/drs"
 	"github.com/calypr/syfon/client/pkg/common"
-	"github.com/calypr/syfon/client/transfer"
+	"github.com/calypr/syfon/client/xfer"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -38,7 +38,7 @@ func defaultDownloadOptions() DownloadOptions {
 func DownloadSingleWithProgress(
 	ctx context.Context,
 	dc drs.Client,
-	bk transfer.Downloader,
+	bk xfer.Downloader,
 	guid string,
 	downloadPath string,
 	protocol string,
@@ -59,38 +59,30 @@ func DownloadSingleWithProgress(
 		return err
 	}
 
-	fdr := common.FileDownloadResponseObject{
-		DownloadPath: downloadPath,
-		Filename:     info.Name,
-		GUID:         guid,
-	}
+	fdr := downloadRequest{downloadPath: downloadPath, filename: info.Name, guid: guid}
 
-	protocolText := ""
-	if protocol != "" {
-		protocolText = "?protocol=" + protocol
-	}
-	if err := GetDownloadResponse(ctx, bk, &fdr, protocolText); err != nil {
+	if err := GetDownloadResponse(ctx, bk, &fdr, protocol); err != nil {
 		return err
 	}
 
-	fullPath := filepath.Join(fdr.DownloadPath, fdr.Filename)
+	fullPath := filepath.Join(fdr.downloadPath, fdr.filename)
 	if dir := filepath.Dir(fullPath); dir != "." {
 		if err = os.MkdirAll(dir, 0766); err != nil {
-			_ = fdr.Response.Body.Close()
+			_ = fdr.response.Body.Close()
 			return fmt.Errorf("mkdir for %s: %w", fullPath, err)
 		}
 	}
 
 	flags := os.O_CREATE | os.O_WRONLY
-	if fdr.Range > 0 {
+	if fdr.rangeBytes > 0 {
 		flags |= os.O_APPEND
-	} else if fdr.Overwrite {
+	} else if fdr.overwrite {
 		flags |= os.O_TRUNC
 	}
 
 	file, err := os.OpenFile(fullPath, flags, 0666)
 	if err != nil {
-		_ = fdr.Response.Body.Close()
+		_ = fdr.response.Body.Close()
 		return fmt.Errorf("open local file %s: %w", fullPath, err)
 	}
 
@@ -102,8 +94,8 @@ func DownloadSingleWithProgress(
 		writer = tracker
 	}
 
-	_, copyErr := io.Copy(writer, fdr.Response.Body)
-	_ = fdr.Response.Body.Close()
+	_, copyErr := io.Copy(writer, fdr.response.Body)
+	_ = fdr.response.Body.Close()
 	_ = file.Close()
 	if tracker != nil {
 		if finalizeErr := tracker.Finalize(); finalizeErr != nil && copyErr == nil {
@@ -111,7 +103,7 @@ func DownloadSingleWithProgress(
 		}
 	}
 	if copyErr != nil {
-		return fmt.Errorf("download failed for %s: %w", fdr.Filename, copyErr)
+		return fmt.Errorf("download failed for %s: %w", fdr.filename, copyErr)
 	}
 	return nil
 }
@@ -120,7 +112,7 @@ func DownloadSingleWithProgress(
 func DownloadToPath(
 	ctx context.Context,
 	dc drs.Client,
-	bk transfer.Downloader,
+	bk xfer.Downloader,
 	logger *slog.Logger,
 	guid string,
 	dstPath string,
@@ -133,7 +125,7 @@ func DownloadToPath(
 func DownloadToPathWithOptions(
 	ctx context.Context,
 	dc drs.Client,
-	bk transfer.Downloader,
+	bk xfer.Downloader,
 	logger *slog.Logger,
 	guid string,
 	dstPath string,
@@ -180,7 +172,7 @@ func DownloadToPathWithOptions(
 
 func downloadToPathSingle(
 	ctx context.Context,
-	bk transfer.Downloader,
+	bk xfer.Downloader,
 	logger *slog.Logger,
 	guid string,
 	dstPath string,
@@ -198,19 +190,12 @@ func downloadToPathSingle(
 		}
 	}
 
-	fdr := common.FileDownloadResponseObject{
-		GUID: guid,
-	}
+	fdr := downloadRequest{guid: guid}
 	if existingSize > 0 {
-		fdr.Range = existingSize
+		fdr.rangeBytes = existingSize
 	}
 
-	protocolText := ""
-	if protocol != "" {
-		protocolText = "?protocol=" + protocol
-	}
-
-	if err := GetDownloadResponse(ctx, bk, &fdr, protocolText); err != nil {
+	if err := GetDownloadResponse(ctx, bk, &fdr, protocol); err != nil {
 		// Mimic failed context logging from original
 		// We'd need to reconstruct the "logger.FailedContext" logic if using raw slog
 		// For now, simple error logging or rely on caller to log context?
@@ -219,9 +204,9 @@ func downloadToPathSingle(
 		logger.Error("Download failed", "error", err, "path", dstPath, "guid", guid)
 		return err
 	}
-	defer fdr.Response.Body.Close()
+	defer fdr.response.Body.Close()
 
-	if existingSize > 0 && fdr.Response.StatusCode == http.StatusOK {
+	if existingSize > 0 && fdr.response.StatusCode == http.StatusOK {
 		// Server ignored range; restart from zero.
 		existingSize = 0
 	}
@@ -248,7 +233,7 @@ func downloadToPathSingle(
 
 	var writer io.Writer = file
 	if progress != nil {
-		total := fdr.Response.ContentLength + existingSize
+		total := fdr.response.ContentLength + existingSize
 		tracker := newProgressWriter(file, progress, hash, total)
 		if existingSize > 0 {
 			tracker.bytesSoFar = existingSize
@@ -257,7 +242,7 @@ func downloadToPathSingle(
 		defer tracker.Finalize()
 	}
 
-	reader := io.Reader(fdr.Response.Body)
+	reader := io.Reader(fdr.response.Body)
 	if failAfter := parseInjectedDownloadFailureBytes(); failAfter > 0 {
 		reader = &failAfterReader{
 			r:         reader,
@@ -323,7 +308,7 @@ func (f *failAfterReader) Read(p []byte) (int, error) {
 
 func downloadToPathMultipart(
 	ctx context.Context,
-	bk transfer.Downloader,
+	bk xfer.Downloader,
 	logger *slog.Logger,
 	guid string,
 	dstPath string,
@@ -342,14 +327,7 @@ func downloadToPathMultipart(
 	if rangeEnd >= totalSize {
 		rangeEnd = totalSize - 1
 	}
-	preflight := &common.FileDownloadResponseObject{
-		GUID:         guid,
-		PresignedURL: signedURL,
-		RangeStart:   &rangeStart,
-		RangeEnd:     &rangeEnd,
-	}
-
-	resp, err := bk.Download(ctx, preflight)
+	resp, err := bk.Download(ctx, signedURL, &rangeStart, &rangeEnd)
 	if err != nil {
 		return fmt.Errorf("multipart preflight request failed: %w", err)
 	}
@@ -400,14 +378,7 @@ func downloadToPathMultipart(
 		pe := partEnd
 
 		g.Go(func() error {
-			fdr := &common.FileDownloadResponseObject{
-				GUID:         guid,
-				PresignedURL: signedURL,
-				RangeStart:   &ps,
-				RangeEnd:     &pe,
-			}
-
-			partResp, err := bk.Download(gctx, fdr)
+			partResp, err := bk.Download(gctx, signedURL, &ps, &pe)
 			if err != nil {
 				return fmt.Errorf("range download %d-%d failed: %w", ps, pe, err)
 			}

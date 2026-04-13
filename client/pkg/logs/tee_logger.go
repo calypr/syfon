@@ -124,6 +124,11 @@ func (t *Gen3Logger) Writer() io.Writer {
 	return os.Stderr
 }
 
+// Slog exposes the underlying slog.Logger for code that needs direct slog access.
+func (t *Gen3Logger) Slog() *slog.Logger {
+	return t.Logger
+}
+
 // Scoreboard returns the embedded Scoreboard.
 func (t *Gen3Logger) Scoreboard() *Scoreboard {
 	return t.scoreboard

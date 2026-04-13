@@ -12,9 +12,8 @@ import (
 	drs "github.com/calypr/syfon/client/drs"
 	common "github.com/calypr/syfon/client/pkg/common"
 	hash "github.com/calypr/syfon/client/pkg/hash"
-	logs "github.com/calypr/syfon/client/pkg/logs"
 	request "github.com/calypr/syfon/client/pkg/request"
-	transfer "github.com/calypr/syfon/client/transfer"
+	xfer "github.com/calypr/syfon/client/xfer"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -104,10 +103,10 @@ func (mr *MockDrsClientMockRecorder) GetDownloadURL(ctx, id, accessType any) *go
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetDownloadURL", reflect.TypeOf((*MockDrsClient)(nil).GetDownloadURL), ctx, id, accessType)
 }
 
-func (m *MockDrsClient) GetDownloadPartURL(ctx context.Context, id string, start, end int64) (*transfer.SignedURL, error) {
+func (m *MockDrsClient) GetDownloadPartURL(ctx context.Context, id string, start, end int64) (*xfer.SignedURL, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "GetDownloadPartURL", ctx, id, start, end)
-	ret0, _ := ret[0].(*transfer.SignedURL)
+	ret0, _ := ret[0].(*xfer.SignedURL)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -260,10 +259,10 @@ func (mr *MockDrsClientMockRecorder) New(method, url any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "New", reflect.TypeOf((*MockDrsClient)(nil).New), method, url)
 }
 
-func (m *MockDrsClient) Resolve(ctx context.Context, id string) (*transfer.ResolvedObject, error) {
+func (m *MockDrsClient) Resolve(ctx context.Context, id string) (*xfer.ResolvedObject, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "Resolve", ctx, id)
-	ret0, _ := ret[0].(*transfer.ResolvedObject)
+	ret0, _ := ret[0].(*xfer.ResolvedObject)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -286,10 +285,10 @@ func (mr *MockDrsClientMockRecorder) GetUploadURL(ctx, id any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetUploadURL", reflect.TypeOf((*MockDrsClient)(nil).GetUploadURL), ctx, id)
 }
 
-func (m *MockDrsClient) Stat(ctx context.Context, guid string) (*transfer.ObjectMetadata, error) {
+func (m *MockDrsClient) Stat(ctx context.Context, guid string) (*xfer.ObjectMetadata, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "Stat", ctx, guid)
-	ret0, _ := ret[0].(*transfer.ObjectMetadata)
+	ret0, _ := ret[0].(*xfer.ObjectMetadata)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -420,16 +419,13 @@ func (m *MockDrsClient) BuildDrsObj(fileName string, checksum string, size int64
 }
 func (m *MockDrsClient) DownloadFile(ctx context.Context, oid, destPath string) error { return nil }
 func (m *MockDrsClient) Name() string                                                 { return "mock-drs-client" }
-func (m *MockDrsClient) Logger() *logs.Gen3Logger                                     { return nil }
+func (m *MockDrsClient) Logger() xfer.TransferLogger                                   { return nil }
 func (m *MockDrsClient) ResolveUploadURL(ctx context.Context, guid string, filename string, metadata common.FileMetadata, bucket string) (string, error) {
 	return "", nil
-}
-func (m *MockDrsClient) ResolveUploadURLs(ctx context.Context, requests []common.UploadURLResolveRequest) ([]common.UploadURLResolveResponse, error) {
-	return nil, nil
 }
 func (m *MockDrsClient) ResolveDownloadURL(ctx context.Context, guid string, accessID string) (string, error) {
 	return "", nil
 }
-func (m *MockDrsClient) Download(ctx context.Context, fdr *common.FileDownloadResponseObject) (*http.Response, error) {
+func (m *MockDrsClient) Download(ctx context.Context, url string, rangeStart, rangeEnd *int64) (*http.Response, error) {
 	return nil, nil
 }

@@ -11,12 +11,13 @@ type UploadConfig struct {
 	ShowProgress      bool
 }
 
-// FileInfo is a helper struct for including subdirname as filename
-type FileInfo struct {
-	FilePath     string
-	Filename     string
-	FileMetadata common.FileMetadata
-	ObjectId     string
+type uploadRequest struct {
+	sourcePath   string
+	objectKey    string
+	metadata     common.FileMetadata
+	guid         string
+	presignedURL string
+	bucket       string
 }
 
 // RenamedOrSkippedFileInfo is a helper struct for recording renamed or skipped files

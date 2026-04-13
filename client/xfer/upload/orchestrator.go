@@ -3,14 +3,13 @@ package upload
 import (
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/calypr/syfon/client/drs"
 	"github.com/calypr/syfon/client/pkg/common"
-	"github.com/calypr/syfon/client/transfer"
+	"github.com/calypr/syfon/client/xfer"
 )
 
 // RegisterFile orchestrates the full registration and upload flow:
@@ -74,7 +73,7 @@ func RegisterFile(ctx context.Context, bk UploadBackend, dc drs.Client, drsObjec
 			return nil, fmt.Errorf("upload failed: %w", err)
 		}
 	} else {
-		if err := multipartUpload(ctx, bk, drsObject.Id, uploadFilename, bucketName, file, stat.Size()); err != nil {
+		if err := MultipartUpload(ctx, bk, filePath, uploadFilename, drsObject.Id, bucketName, common.FileMetadata{}, file, false); err != nil {
 			return nil, fmt.Errorf("multipart upload failed: %w", err)
 		}
 	}
@@ -82,41 +81,4 @@ func RegisterFile(ctx context.Context, bk UploadBackend, dc drs.Client, drsObjec
 	return drsObject, nil
 }
 
-func multipartUpload(ctx context.Context, bk UploadBackend, guid, filename, bucket string, file *os.File, size int64) error {
-	initResp, err := bk.InitMultipartUpload(ctx, guid, filename, bucket)
-	if err != nil {
-		return err
-	}
-
-	chunkSize := OptimalChunkSize(size)
-	numChunks := int((size + chunkSize - 1) / chunkSize)
-	parts := make([]common.MultipartUploadPart, numChunks)
-
-	for partNum := 1; partNum <= numChunks; partNum++ {
-		offset := int64(partNum-1) * chunkSize
-		partSize := chunkSize
-		if offset+partSize > size {
-			partSize = size - offset
-		}
-
-		partURL, err := bk.GetMultipartUploadURL(ctx, "", initResp.UploadID, int32(partNum), bucket)
-		if err != nil {
-			return err
-		}
-
-		section := io.NewSectionReader(file, offset, partSize)
-		etag, err := bk.UploadPart(ctx, partURL, section, partSize)
-		if err != nil {
-			return err
-		}
-
-		parts[partNum-1] = common.MultipartUploadPart{
-			PartNumber: int32(partNum),
-			ETag:       etag,
-		}
-	}
-
-	return bk.CompleteMultipartUpload(ctx, "", initResp.UploadID, parts, bucket)
-}
-
-type UploadBackend = transfer.Uploader
+type UploadBackend = xfer.Uploader

@@ -1,4 +1,4 @@
-package transfer
+package xfer
 
 import (
 	"context"
@@ -11,20 +11,6 @@ import (
 	"github.com/calypr/syfon/client/pkg/common"
 	"github.com/calypr/syfon/client/pkg/request"
 )
-
-// ResolveRange parses range information from FileDownloadResponseObject.
-func ResolveRange(fdr *common.FileDownloadResponseObject) (start int64, end *int64, ok bool) {
-	if fdr == nil {
-		return 0, nil, false
-	}
-	if fdr.RangeStart != nil {
-		return *fdr.RangeStart, fdr.RangeEnd, true
-	}
-	if fdr.Range > 0 {
-		return fdr.Range, nil, true
-	}
-	return 0, nil, false
-}
 
 // DoUpload performs a presigned PUT request and returns ETag when available.
 func DoUpload(ctx context.Context, req request.RequestInterface, url string, body io.Reader, size int64) (string, error) {
@@ -48,15 +34,14 @@ func DoUpload(ctx context.Context, req request.RequestInterface, url string, bod
 }
 
 // GenericDownload performs GET (optionally ranged) against a signed URL.
-func GenericDownload(ctx context.Context, req request.RequestInterface, fdr *common.FileDownloadResponseObject) (*http.Response, error) {
-	skipAuth := common.IsCloudPresignedURL(fdr.PresignedURL)
+func GenericDownload(ctx context.Context, req request.RequestInterface, signedURL string, rangeStart, rangeEnd *int64) (*http.Response, error) {
+	skipAuth := common.IsCloudPresignedURL(signedURL)
 
-	rb := req.New(http.MethodGet, fdr.PresignedURL)
-	start, end, hasRange := ResolveRange(fdr)
-	if hasRange {
-		rangeHeader := "bytes=" + strconv.FormatInt(start, 10) + "-"
-		if end != nil {
-			rangeHeader += strconv.FormatInt(*end, 10)
+	rb := req.New(http.MethodGet, signedURL)
+	if rangeStart != nil {
+		rangeHeader := "bytes=" + strconv.FormatInt(*rangeStart, 10) + "-"
+		if rangeEnd != nil {
+			rangeHeader += strconv.FormatInt(*rangeEnd, 10)
 		}
 		rb.WithHeader("Range", rangeHeader)
 	}

@@ -120,7 +120,7 @@ func TestSyfonUploadDownloadAddURLAndSHA256(t *testing.T) {
 	}
 
 	uploadDID := uuid.NewString()
-	out, err := executeRootCommand(t, "--server", server.URL, "upload", "--file", srcPath, "--did", uploadDID)
+	out, err := executeRootCommand(t, "--server", server.URL, "upload", "--file", srcPath, "--did", uploadDID, "--authz", "/programs/syfon/projects/e2e")
 	if err != nil {
 		t.Fatalf("upload command failed: %v output=%s", err, out)
 	}
@@ -151,7 +151,11 @@ func TestSyfonUploadDownloadAddURLAndSHA256(t *testing.T) {
 		t.Fatalf("sha256sum output missing expected hash: %s", hashOut)
 	}
 
-	rec, err := syclient.New(server.URL).GetRecord(context.Background(), uploadDID)
+	c, err := syclient.New(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, err := c.Index().Get(context.Background(), uploadDID)
 	if err != nil {
 		t.Fatalf("fetch updated record: %v", err)
 	}
@@ -173,6 +177,7 @@ func TestSyfonUploadDownloadAddURLAndSHA256(t *testing.T) {
 		"add-url",
 		"--did", addURLDID,
 		"--url", fileURL,
+		"--authz", "/programs/syfon/projects/e2e",
 		"--name", "existing-url-source.txt",
 		"--size", "21",
 	)

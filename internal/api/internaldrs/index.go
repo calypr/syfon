@@ -97,13 +97,7 @@ func handleInternalBulkCreate(database core.DatabaseInterface) http.HandlerFunc 
 				return
 			}
 			targetResources := obj.Authorizations
-			if len(targetResources) == 0 {
-				targetResources = []string{"/data_file"}
-				if !core.HasMethodAccess(r.Context(), "file_upload", targetResources) && !core.HasMethodAccess(r.Context(), "create", targetResources) {
-					writeAuthError(w, r)
-					return
-				}
-			} else if !core.HasMethodAccess(r.Context(), "create", targetResources) {
+			if !core.HasMethodAccess(r.Context(), "create", targetResources) {
 				writeAuthError(w, r)
 				return
 			}
@@ -270,9 +264,6 @@ func handleInternalBulkDeleteHashes(database core.DatabaseInterface) http.Handle
 				}
 				// Check delete permissions
 				targetResources := o.Authorizations
-				if len(targetResources) == 0 {
-					targetResources = []string{"/data_file"}
-				}
 				if !core.HasMethodAccess(r.Context(), "delete", targetResources) {
 					continue
 				}
@@ -421,7 +412,12 @@ func handleInternalUpdate(w http.ResponseWriter, r *http.Request, database core.
 	vars := mux.Vars(r)
 	id := vars["id"]
 
-	var req internalapi.InternalRecord
+	// Decode into InternalRecordResponse because the client serializes that type,
+	// which contains extra read-only fields (baseid, rev, created_date, etc.) that
+	// are absent from InternalRecord. InternalRecord's UnmarshalJSON uses
+	// DisallowUnknownFields and would reject those extra fields with a 400.
+	// Both types share the same writable fields so we can read them from the response type.
+	var req internalapi.InternalRecordResponse
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeHTTPError(w, r, http.StatusBadRequest, "Invalid request body", nil)
 		return
@@ -460,9 +456,7 @@ func handleInternalUpdate(w http.ResponseWriter, r *http.Request, database core.
 		}
 	}
 
-	if req.HasAuthz() {
-		updated.Authorizations = append([]string(nil), req.GetAuthz()...)
-	}
+	updated.Authorizations = append([]string(nil), req.GetAuthz()...)
 	if req.HasHashes() && len(req.GetHashes()) > 0 {
 		updated.Checksums = nil
 		for t, v := range req.GetHashes() {
@@ -582,9 +576,6 @@ func handleInternalDeleteByQuery(w http.ResponseWriter, r *http.Request, databas
 			return
 		}
 		targetResources := obj.Authorizations
-		if len(targetResources) == 0 {
-			targetResources = []string{"/data_file"}
-		}
 		if !core.HasMethodAccess(r.Context(), "delete", targetResources) {
 			writeAuthError(w, r)
 			return

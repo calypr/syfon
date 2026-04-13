@@ -56,6 +56,18 @@ func (s *requestSpy) Do(ctx context.Context, req *request.RequestBuilder) (*http
 	}, nil
 }
 
+func (s *requestSpy) DoJSON(ctx context.Context, rb *request.RequestBuilder, out any) error {
+	resp, err := s.Do(ctx, rb)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if out != nil {
+		return json.NewDecoder(resp.Body).Decode(out)
+	}
+	return nil
+}
+
 func TestBatchGetObjectsByHash_UsesBulkHashesEndpoint(t *testing.T) {
 	spy := &requestSpy{}
 	spy.doFunc = func(method, url string, body []byte) (*http.Response, error) {

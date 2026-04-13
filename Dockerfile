@@ -5,6 +5,7 @@ WORKDIR /src
 
 COPY go.mod go.sum ./
 COPY apigen/go.mod apigen/go.sum ./apigen/
+COPY client/go.mod client/go.sum ./client/
 RUN go mod download
 
 COPY . .

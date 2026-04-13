@@ -6,28 +6,35 @@ import (
 )
 
 type BucketsService struct {
-	c *Client
+	base *baseService
 }
 
 func (s *BucketsService) List(ctx context.Context) (BucketsResponse, error) {
 	var out BucketsResponse
-	err := s.c.doJSON(ctx, "GET", "/data/buckets", nil, nil, &out)
+	rb := s.base.requestor.New("GET", "/data/buckets")
+	err := s.base.requestor.DoJSON(ctx, rb, &out)
 	return out, err
 }
 
 func (s *BucketsService) Put(ctx context.Context, req PutBucketRequest) error {
-	return s.c.doJSON(ctx, "PUT", "/data/buckets", nil, req, nil)
+	rb, err := s.base.requestor.New("PUT", "/data/buckets").WithJSONBody(req)
+	if err != nil {
+		return err
+	}
+	return s.base.requestor.DoJSON(ctx, rb, nil)
 }
 
 func (s *BucketsService) Delete(ctx context.Context, bucket string) error {
-	return s.c.doJSON(ctx, "DELETE", "/data/buckets/"+url.PathEscape(bucket), nil, nil, nil)
+	rb := s.base.requestor.New("DELETE", "/data/buckets/"+url.PathEscape(bucket))
+	return s.base.requestor.DoJSON(ctx, rb, nil)
 }
 
 func (s *BucketsService) AddScope(ctx context.Context, bucket string, req BucketScopeRequest) error {
-	return s.c.doJSON(ctx, "POST", "/data/buckets/"+url.PathEscape(bucket)+"/scopes", nil, req, nil)
+	rb, err := s.base.requestor.New("POST", "/data/buckets/"+url.PathEscape(bucket)+"/scopes").WithJSONBody(req)
+	if err != nil {
+		return err
+	}
+	return s.base.requestor.DoJSON(ctx, rb, nil)
 }
 
-// Compatibility wrapper used by current CLI code.
-func (c *Client) PutBucket(ctx context.Context, req PutBucketRequest) error {
-	return c.Buckets().Put(ctx, req)
-}
+// --- BucketsService ---

@@ -11,25 +11,16 @@ import (
 	"github.com/calypr/syfon/config"
 	"github.com/calypr/syfon/db/core"
 	"github.com/calypr/syfon/internal/provider"
-	"github.com/google/uuid"
 )
 
 // --- Domain Mapping Tools ---
 
 func canonicalIDFromInternal(req *internalapi.InternalRecord) string {
-	if did := strings.TrimSpace(req.GetDid()); did != "" {
-		if _, err := uuid.Parse(did); err == nil {
-			return did
-		}
-	}
-	return ""
+	return strings.TrimSpace(req.GetDid())
 }
 
 func internalToDrs(req *internalapi.InternalRecord) (*core.InternalObject, error) {
 	id := canonicalIDFromInternal(req)
-	if id == "" {
-		return nil, fmt.Errorf("valid UUID is required in 'did' field")
-	}
 	now := time.Now()
 	obj := &drs.DrsObject{
 		Id:          id,
@@ -55,9 +46,6 @@ func internalToDrs(req *internalapi.InternalRecord) (*core.InternalObject, error
 	for t, v := range req.GetHashes() {
 		obj.Checksums = append(obj.Checksums, drs.Checksum{Type: t, Checksum: v})
 	}
-	if len(obj.Checksums) == 0 {
-		obj.Checksums = append(obj.Checksums, drs.Checksum{Type: "sha256", Checksum: id})
-	}
 	for _, u := range req.GetUrls() {
 		obj.AccessMethods = append(obj.AccessMethods, drs.AccessMethod{
 			Type:      "s3",
@@ -66,12 +54,6 @@ func internalToDrs(req *internalapi.InternalRecord) (*core.InternalObject, error
 		})
 	}
 	authz := append([]string(nil), req.GetAuthz()...)
-	if len(authz) == 0 && req.HasOrganization() {
-		path := core.ResourcePathForScope(req.GetOrganization(), req.GetProject())
-		if path != "" {
-			authz = append(authz, path)
-		}
-	}
 	for i := range obj.AccessMethods {
 		obj.AccessMethods[i].Authorizations = drs.AccessMethodAuthorizations{
 			BearerAuthIssuers: authz,
@@ -85,9 +67,6 @@ func drsToInternalRecord(obj *core.InternalObject) *internalapi.InternalRecord {
 	for _, c := range obj.Checksums {
 		hashes[c.Type] = c.Checksum
 	}
-	if len(hashes) == 0 && obj.Id != "" {
-		hashes["sha256"] = obj.Id
-	}
 
 	var urls []string
 	authz := append([]string(nil), obj.Authorizations...)
@@ -99,13 +78,8 @@ func drsToInternalRecord(obj *core.InternalObject) *internalapi.InternalRecord {
 		}
 	}
 	scope := core.ParseResourcePath(firstAuthz(authz))
-	resp := internalapi.NewInternalRecord()
-	resp.SetAuthz(authz)
+	resp := internalapi.NewInternalRecord(obj.Id, authz)
 	resp.SetUrls(urls)
-
-	if obj.Id != "" {
-		resp.SetDid(obj.Id)
-	}
 	resp.SetSize(obj.Size)
 	if len(hashes) > 0 {
 		resp.SetHashes(hashes)
@@ -127,9 +101,6 @@ func drsToInternal(obj *core.InternalObject) *internalapi.InternalRecordResponse
 	for _, c := range obj.Checksums {
 		hashes[c.Type] = c.Checksum
 	}
-	if len(hashes) == 0 && obj.Id != "" {
-		hashes["sha256"] = obj.Id
-	}
 
 	var urls []string
 	authz := append([]string(nil), obj.Authorizations...)
@@ -142,15 +113,13 @@ func drsToInternal(obj *core.InternalObject) *internalapi.InternalRecordResponse
 	}
 	scope := core.ParseResourcePath(firstAuthz(authz))
 
-	resp := internalapi.NewInternalRecordResponse()
-	resp.SetDid(obj.Id)
+	resp := internalapi.NewInternalRecordResponse(obj.Id, authz)
 	resp.SetSize(obj.Size)
 	resp.SetFileName(obj.Name)
 	resp.SetVersion(obj.Version)
 	resp.SetDescription(obj.Description)
 	resp.SetHashes(hashes)
 	resp.SetUrls(urls)
-	resp.SetAuthz(authz)
 
 	if scope.Organization != "" {
 		resp.SetOrganization(scope.Organization)
