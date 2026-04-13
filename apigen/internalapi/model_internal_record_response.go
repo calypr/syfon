@@ -28,6 +28,10 @@ type InternalRecordResponse struct {
 	FileName *string `json:"file_name,omitempty"`
 	Organization *string `json:"organization,omitempty"`
 	Project *string `json:"project,omitempty"`
+	Version *string `json:"version,omitempty"`
+	Description *string `json:"description,omitempty"`
+	CreatedTime *string `json:"created_time,omitempty"`
+	UpdatedTime *string `json:"updated_time,omitempty"`
 	Baseid *string `json:"baseid,omitempty"`
 	Rev *string `json:"rev,omitempty"`
 	CreatedDate *string `json:"created_date,omitempty"`
@@ -308,6 +312,134 @@ func (o *InternalRecordResponse) SetProject(v string) {
 	o.Project = &v
 }
 
+// GetVersion returns the Version field value if set, zero value otherwise.
+func (o *InternalRecordResponse) GetVersion() string {
+	if o == nil || IsNil(o.Version) {
+		var ret string
+		return ret
+	}
+	return *o.Version
+}
+
+// GetVersionOk returns a tuple with the Version field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *InternalRecordResponse) GetVersionOk() (*string, bool) {
+	if o == nil || IsNil(o.Version) {
+		return nil, false
+	}
+	return o.Version, true
+}
+
+// HasVersion returns a boolean if a field has been set.
+func (o *InternalRecordResponse) HasVersion() bool {
+	if o != nil && !IsNil(o.Version) {
+		return true
+	}
+
+	return false
+}
+
+// SetVersion gets a reference to the given string and assigns it to the Version field.
+func (o *InternalRecordResponse) SetVersion(v string) {
+	o.Version = &v
+}
+
+// GetDescription returns the Description field value if set, zero value otherwise.
+func (o *InternalRecordResponse) GetDescription() string {
+	if o == nil || IsNil(o.Description) {
+		var ret string
+		return ret
+	}
+	return *o.Description
+}
+
+// GetDescriptionOk returns a tuple with the Description field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *InternalRecordResponse) GetDescriptionOk() (*string, bool) {
+	if o == nil || IsNil(o.Description) {
+		return nil, false
+	}
+	return o.Description, true
+}
+
+// HasDescription returns a boolean if a field has been set.
+func (o *InternalRecordResponse) HasDescription() bool {
+	if o != nil && !IsNil(o.Description) {
+		return true
+	}
+
+	return false
+}
+
+// SetDescription gets a reference to the given string and assigns it to the Description field.
+func (o *InternalRecordResponse) SetDescription(v string) {
+	o.Description = &v
+}
+
+// GetCreatedTime returns the CreatedTime field value if set, zero value otherwise.
+func (o *InternalRecordResponse) GetCreatedTime() string {
+	if o == nil || IsNil(o.CreatedTime) {
+		var ret string
+		return ret
+	}
+	return *o.CreatedTime
+}
+
+// GetCreatedTimeOk returns a tuple with the CreatedTime field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *InternalRecordResponse) GetCreatedTimeOk() (*string, bool) {
+	if o == nil || IsNil(o.CreatedTime) {
+		return nil, false
+	}
+	return o.CreatedTime, true
+}
+
+// HasCreatedTime returns a boolean if a field has been set.
+func (o *InternalRecordResponse) HasCreatedTime() bool {
+	if o != nil && !IsNil(o.CreatedTime) {
+		return true
+	}
+
+	return false
+}
+
+// SetCreatedTime gets a reference to the given string and assigns it to the CreatedTime field.
+func (o *InternalRecordResponse) SetCreatedTime(v string) {
+	o.CreatedTime = &v
+}
+
+// GetUpdatedTime returns the UpdatedTime field value if set, zero value otherwise.
+func (o *InternalRecordResponse) GetUpdatedTime() string {
+	if o == nil || IsNil(o.UpdatedTime) {
+		var ret string
+		return ret
+	}
+	return *o.UpdatedTime
+}
+
+// GetUpdatedTimeOk returns a tuple with the UpdatedTime field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *InternalRecordResponse) GetUpdatedTimeOk() (*string, bool) {
+	if o == nil || IsNil(o.UpdatedTime) {
+		return nil, false
+	}
+	return o.UpdatedTime, true
+}
+
+// HasUpdatedTime returns a boolean if a field has been set.
+func (o *InternalRecordResponse) HasUpdatedTime() bool {
+	if o != nil && !IsNil(o.UpdatedTime) {
+		return true
+	}
+
+	return false
+}
+
+// SetUpdatedTime gets a reference to the given string and assigns it to the UpdatedTime field.
+func (o *InternalRecordResponse) SetUpdatedTime(v string) {
+	o.UpdatedTime = &v
+}
+
 // GetBaseid returns the Baseid field value if set, zero value otherwise.
 func (o *InternalRecordResponse) GetBaseid() string {
 	if o == nil || IsNil(o.Baseid) {
@@ -501,6 +633,18 @@ func (o InternalRecordResponse) ToMap() (map[string]interface{}, error) {
 	}
 	if !IsNil(o.Project) {
 		toSerialize["project"] = o.Project
+	}
+	if !IsNil(o.Version) {
+		toSerialize["version"] = o.Version
+	}
+	if !IsNil(o.Description) {
+		toSerialize["description"] = o.Description
+	}
+	if !IsNil(o.CreatedTime) {
+		toSerialize["created_time"] = o.CreatedTime
+	}
+	if !IsNil(o.UpdatedTime) {
+		toSerialize["updated_time"] = o.UpdatedTime
 	}
 	if !IsNil(o.Baseid) {
 		toSerialize["baseid"] = o.Baseid

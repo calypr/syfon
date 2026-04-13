@@ -20,6 +20,18 @@ func drsObjectToSyfonInternalRecord(obj *DRSObject) (internalapi.InternalRecord,
 	out.SetUrls(InternalURLFromDrsAccessURLs(obj.AccessMethods))
 	out.SetAuthz(InternalAuthzFromDrsAccessMethods(obj.AccessMethods))
 	out.SetHashes(convertDrsChecksumsToMap(obj.Checksums))
+	if obj.Version != "" {
+		out.SetVersion(obj.Version)
+	}
+	if obj.Description != "" {
+		out.SetDescription(obj.Description)
+	}
+	if !obj.CreatedTime.IsZero() {
+		out.SetCreatedTime(obj.CreatedTime.Format(time.RFC3339))
+	}
+	if !obj.UpdatedTime.IsZero() {
+		out.SetUpdatedTime(obj.UpdatedTime.Format(time.RFC3339))
+	}
 	return out, nil
 }
 
@@ -54,10 +66,20 @@ func syfonInternalRecordToDRSObject(rec internalapi.InternalRecordResponse) (*DR
 	if rec.GetFileName() != "" {
 		obj.Name = rec.GetFileName()
 	}
-	if t, ok := parseRFC3339(rec.GetCreatedDate()); ok {
+	if rec.GetVersion() != "" {
+		obj.Version = rec.GetVersion()
+	}
+	if rec.GetDescription() != "" {
+		obj.Description = rec.GetDescription()
+	}
+	if t, ok := parseRFC3339(rec.GetCreatedTime()); ok {
+		obj.CreatedTime = t
+	} else if t, ok := parseRFC3339(rec.GetCreatedDate()); ok {
 		obj.CreatedTime = t
 	}
-	if t, ok := parseRFC3339(rec.GetUpdatedDate()); ok {
+	if t, ok := parseRFC3339(rec.GetUpdatedTime()); ok {
+		obj.UpdatedTime = t
+	} else if t, ok := parseRFC3339(rec.GetUpdatedDate()); ok {
 		obj.UpdatedTime = t
 	}
 	return obj, nil

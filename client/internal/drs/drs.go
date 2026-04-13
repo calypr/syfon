@@ -53,10 +53,24 @@ func ProjectToResource(org, project string) (string, error) {
 
 // From git-drs/drsmap/drs_map.go
 
-func DrsUUID(projectId string, hash string) string {
-	// create UUID based on project ID and hash
-	hashStr := fmt.Sprintf("%s:%s", projectId, hash)
-	return uuid.NewSHA1(NAMESPACE, []byte(hashStr)).String()
+// DrsUUID generates a deterministic version 5 UUID for a DRS object
+// based on its scope (organization and project) and content hash.
+func DrsUUID(org, project, hash string) string {
+	// 1. Normalize hash - strip sha256: prefix if present
+	hash = NormalizeOid(hash)
+
+	// 2. Resolve canonical resource path for the project.
+	// This ensures that same project names in different organizations produce different IDs.
+	resource, err := ProjectToResource(org, project)
+	if err != nil {
+		// Fallback to simple concatenation if project info is corrupt
+		resource = org + ":" + project
+	}
+
+	// 3. Create UUID based on resource path and hash
+	// We use the canonical "resource:hash" string as the name for the V5 UUID.
+	seed := fmt.Sprintf("%s:%s", resource, hash)
+	return uuid.NewSHA1(NAMESPACE, []byte(seed)).String()
 }
 
 func FindMatchingRecord(records []DRSObject, organization, projectId string) (*DRSObject, error) {
@@ -91,8 +105,8 @@ func FindMatchingRecord(records []DRSObject, organization, projectId string) (*D
 }
 
 // DRS UUID generation using SHA1 (compatible with git-drs)
-func GenerateDrsID(projectId, hash string) string {
-	return DrsUUID(projectId, hash)
+func GenerateDrsID(org, project, hash string) string {
+	return DrsUUID(org, project, hash)
 }
 
 func BuildDrsObj(fileName string, checksum string, size int64, drsId string, bucketName string, org string, projectId string) (*DRSObject, error) {
