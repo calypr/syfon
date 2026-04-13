@@ -211,48 +211,49 @@ func (c *Client) Resolve(ctx context.Context, id string) (*transfer.ResolvedObje
 // InitMultipartUpload implements transfer.MultipartURLSigner.
 func (c *Client) InitMultipartUpload(ctx context.Context, guid, filename, bucket string) (*common.MultipartUploadInit, error) {
 	req := MultipartInitRequest{}
-	req.SetGuid(guid)
-	req.SetFileName(filename)
-	req.SetBucket(bucket)
+	(&req).SetGuid(guid)
+	(&req).SetFileName(filename)
+	(&req).SetBucket(bucket)
 	resp, err := c.Data().MultipartInit(ctx, req)
 	if err != nil {
 		return nil, err
 	}
 	return &common.MultipartUploadInit{
-		UploadID: resp.GetUploadId(),
-		GUID:     resp.GetGuid(),
+		UploadID: (&resp).GetUploadId(),
+		GUID:     (&resp).GetGuid(),
 	}, nil
 }
 
 // GetMultipartUploadURL implements transfer.MultipartURLSigner.
 func (c *Client) GetMultipartUploadURL(ctx context.Context, key, uploadID string, partNum int32, bucket string) (string, error) {
 	req := MultipartUploadRequest{}
-	req.SetKey(key)
-	req.SetUploadId(uploadID)
-	req.SetPartNumber(partNum)
-	req.SetBucket(bucket)
+	(&req).SetKey(key)
+	(&req).SetUploadId(uploadID)
+	(&req).SetPartNumber(partNum)
+	(&req).SetBucket(bucket)
 	resp, err := c.Data().MultipartUpload(ctx, req)
 	if err != nil {
 		return "", err
 	}
-	return resp.GetPresignedUrl(), nil
+	return (&resp).GetPresignedUrl(), nil
 }
 
 // CompleteMultipartUpload implements transfer.MultipartURLSigner.
 func (c *Client) CompleteMultipartUpload(ctx context.Context, key, uploadID string, parts []common.MultipartUploadPart, bucket string) error {
 	var apiParts []MultipartPart
 	for _, p := range parts {
-		apiParts = append(apiParts, MultipartPart{
+		item := MultipartPart{
 			PartNumber: p.PartNumber,
 			ETag:       p.ETag,
-		})
+		}
+		apiParts = append(apiParts, item)
 	}
 
 	req := MultipartCompleteRequest{}
-	req.SetKey(key)
-	req.SetUploadId(uploadID)
-	req.SetBucket(bucket)
-	req.SetParts(apiParts)
+	(&req).SetKey(key)
+	(&req).SetUploadId(uploadID)
+	(&req).SetBucket(bucket)
+	(&req).SetParts(apiParts)
 	return c.Data().MultipartComplete(ctx, req)
 }
 
@@ -260,7 +261,7 @@ func (c *Client) CompleteMultipartUpload(ctx context.Context, key, uploadID stri
 func (c *Client) GetWriter(ctx context.Context, guid string) (io.WriteCloser, error) {
 	// For simple single-stream PUT directly to a signed URL.
 	req := UploadBlankRequest{}
-	req.SetGuid(guid)
+	(&req).SetGuid(guid)
 	_, err := c.Data().UploadBlank(ctx, req)
 	if err != nil {
 		return nil, err

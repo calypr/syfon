@@ -58,13 +58,13 @@ func TestDataUploadBlank(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			t.Fatalf("decode request: %v", err)
 		}
-		if req.GetGuid() != "abc" {
-			t.Fatalf("unexpected guid: %q", req.GetGuid())
+		if (&req).GetGuid() != "abc" {
+			t.Fatalf("unexpected guid: %q", (&req).GetGuid())
 		}
 		out := UploadBlankResponse{}
-		out.SetGuid("abc")
-		out.SetUrl("https://signed")
-		out.SetBucket("b1")
+		(&out).SetGuid("abc")
+		(&out).SetUrl("https://signed")
+		(&out).SetBucket("b1")
 		data, _ := json.Marshal(out)
 		return &http.Response{
 			StatusCode: http.StatusOK,
@@ -73,12 +73,12 @@ func TestDataUploadBlank(t *testing.T) {
 		}, nil
 	})
 	req := UploadBlankRequest{}
-	req.SetGuid("abc")
+	(&req).SetGuid("abc")
 	out, err := c.Data().UploadBlank(context.Background(), req)
 	if err != nil {
 		t.Fatalf("UploadBlank failed: %v", err)
 	}
-	if out.GetUrl() != "https://signed" || out.GetBucket() != "b1" {
+	if (&out).GetUrl() != "https://signed" || (&out).GetBucket() != "b1" {
 		t.Fatalf("unexpected response: %+v", out)
 	}
 }
@@ -86,7 +86,7 @@ func TestDataUploadBlank(t *testing.T) {
 func TestIndexListByHash(t *testing.T) {
 	t.Parallel()
 	rec := InternalRecord{}
-	rec.SetDid("id-1")
+	(&rec).SetDid("id-1")
 	c := newTestClient(t, func(r *http.Request) (*http.Response, error) {
 		if r.Method != http.MethodGet || r.URL.Path != "/index" {
 			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
@@ -105,7 +105,7 @@ func TestIndexListByHash(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Index.List failed: %v", err)
 	}
-	if len(out.Records) != 1 || out.Records[0].GetDid() != "id-1" {
+	if len(out.Records) != 1 || (&out.Records[0]).GetDid() != "id-1" {
 		t.Fatalf("unexpected response: %+v", out)
 	}
 }
@@ -123,12 +123,12 @@ func TestDataMultipartInitUsesCanonicalUploadId(t *testing.T) {
 		}, nil
 	})
 	req := MultipartInitRequest{}
-	req.SetGuid("g1")
+	(&req).SetGuid("g1")
 	out, err := c.Data().MultipartInit(context.Background(), req)
 	if err != nil {
 		t.Fatalf("MultipartInit failed: %v", err)
 	}
-	if out.GetGuid() != "g1" || out.GetUploadId() != "u1" {
+	if (&out).GetGuid() != "g1" || (&out).GetUploadId() != "u1" {
 		t.Fatalf("unexpected response: %+v", out)
 	}
 }

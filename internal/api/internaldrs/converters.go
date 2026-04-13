@@ -123,12 +123,41 @@ func drsToInternalRecord(obj *core.InternalObject) *internalapi.InternalRecord {
 }
 
 func drsToInternal(obj *core.InternalObject) *internalapi.InternalRecordResponse {
+	hashes := make(map[string]string, len(obj.Checksums))
+	for _, c := range obj.Checksums {
+		hashes[c.Type] = c.Checksum
+	}
+	if len(hashes) == 0 && obj.Id != "" {
+		hashes["sha256"] = obj.Id
+	}
+
+	var urls []string
+	authz := append([]string(nil), obj.Authorizations...)
+	if len(obj.AccessMethods) > 0 {
+		for _, am := range obj.AccessMethods {
+			if am.AccessUrl.Url != "" {
+				urls = append(urls, am.AccessUrl.Url)
+			}
+		}
+	}
+	scope := core.ParseResourcePath(firstAuthz(authz))
+
 	resp := internalapi.NewInternalRecordResponse()
 	resp.SetDid(obj.Id)
 	resp.SetSize(obj.Size)
 	resp.SetFileName(obj.Name)
 	resp.SetVersion(obj.Version)
 	resp.SetDescription(obj.Description)
+	resp.SetHashes(hashes)
+	resp.SetUrls(urls)
+	resp.SetAuthz(authz)
+
+	if scope.Organization != "" {
+		resp.SetOrganization(scope.Organization)
+	}
+	if scope.Project != "" {
+		resp.SetProject(scope.Project)
+	}
 
 	resp.SetCreatedTime(obj.CreatedTime.Format(time.RFC3339))
 	resp.SetUpdatedTime(obj.UpdatedTime.Format(time.RFC3339))
