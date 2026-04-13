@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"fmt"
 	"net/url"
 	"strconv"
 	"strings"
@@ -153,11 +154,17 @@ func (s *IndexService) SHA256Validity(ctx context.Context, values []string) (map
 	return out, err
 }
 
-func (s *IndexService) Upsert(ctx context.Context, did, objectURL, fileName string, size int64, sha256sum string) error {
+func (s *IndexService) Upsert(ctx context.Context, did, objectURL, fileName string, size int64, sha256sum string, authz []string) error {
 	existing, err := s.Get(ctx, did)
 	if err == nil {
 		if strings.TrimSpace((&existing).GetDid()) == "" {
 			(&existing).SetDid(did)
+		}
+		if len((&existing).GetAuthz()) == 0 {
+			if len(authz) == 0 {
+				return fmt.Errorf("authz is required to upsert record %s", did)
+			}
+			(&existing).SetAuthz(append([]string(nil), authz...))
 		}
 		if fileName != "" {
 			(&existing).SetFileName(fileName)
@@ -190,6 +197,10 @@ func (s *IndexService) Upsert(ctx context.Context, did, objectURL, fileName stri
 
 	payload := InternalRecord{}
 	(&payload).SetDid(did)
+	if len(authz) == 0 {
+		return fmt.Errorf("authz is required to create record %s", did)
+	}
+	(&payload).SetAuthz(append([]string(nil), authz...))
 	if size > 0 {
 		(&payload).SetSize(size)
 	}

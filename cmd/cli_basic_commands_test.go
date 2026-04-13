@@ -21,6 +21,7 @@ func TestSyfonListAndRemoveCommands(t *testing.T) {
 	did := "11111111-1111-1111-1111-111111111111"
 	rec := syclient.InternalRecord{}
 	rec.SetDid(did)
+	rec.SetAuthz([]string{"/programs/syfon/projects/e2e"})
 	rec.SetFileName("README.md")
 	rec.SetSize(123)
 	rec.SetUrls([]string{"s3://syfon-bucket/path/README.md"})
@@ -72,7 +73,7 @@ func TestSyfonDownloadDefaultsToRecordFilename(t *testing.T) {
 	}
 	did := "22222222-2222-2222-2222-222222222222"
 	// Store record with explicit filename and file:// URL so download can resolve locally.
-	if err := c.Index().Upsert(context.Background(), did, "file://"+srcPath, "README.md", int64(len(srcData)), ""); err != nil {
+	if err := c.Index().Upsert(context.Background(), did, "file://"+srcPath, "README.md", int64(len(srcData)), "", []string{"/programs/syfon/projects/e2e"}); err != nil {
 		t.Fatalf("seed record with file url: %v", err)
 	}
 

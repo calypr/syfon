@@ -51,7 +51,7 @@ var Cmd = &cobra.Command{
 		sumArr := sha256.Sum256(data)
 		sum := hex.EncodeToString(sumArr[:])
 
-		if err := c.Index().Upsert(ctx, did, "", "", 0, sum); err != nil {
+		if err := c.Index().Upsert(ctx, did, "", "", 0, sum, nil); err != nil {
 			return fmt.Errorf("persist sha256: %w", err)
 		}
 

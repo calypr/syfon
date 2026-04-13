@@ -12,6 +12,8 @@ package internalapi
 
 import (
 	"encoding/json"
+	"bytes"
+	"fmt"
 )
 
 // checks if the InternalRecordResponse type satisfies the MappedNullable interface at compile time
@@ -19,12 +21,12 @@ var _ MappedNullable = &InternalRecordResponse{}
 
 // InternalRecordResponse struct for InternalRecordResponse
 type InternalRecordResponse struct {
-	Did *string `json:"did,omitempty"`
+	Did string `json:"did"`
 	// Hash map, e.g. {\"sha256\":\"...\"}
 	Hashes *map[string]string `json:"hashes,omitempty"`
 	Size *int64 `json:"size,omitempty"`
 	Urls []string `json:"urls,omitempty"`
-	Authz []string `json:"authz,omitempty"`
+	Authz []string `json:"authz"`
 	FileName *string `json:"file_name,omitempty"`
 	Organization *string `json:"organization,omitempty"`
 	Project *string `json:"project,omitempty"`
@@ -39,12 +41,16 @@ type InternalRecordResponse struct {
 	Uploader *string `json:"uploader,omitempty"`
 }
 
+type _InternalRecordResponse InternalRecordResponse
+
 // NewInternalRecordResponse instantiates a new InternalRecordResponse object
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewInternalRecordResponse() *InternalRecordResponse {
+func NewInternalRecordResponse(did string, authz []string) *InternalRecordResponse {
 	this := InternalRecordResponse{}
+	this.Did = did
+	this.Authz = authz
 	return &this
 }
 
@@ -56,36 +62,28 @@ func NewInternalRecordResponseWithDefaults() *InternalRecordResponse {
 	return &this
 }
 
-// GetDid returns the Did field value if set, zero value otherwise.
+// GetDid returns the Did field value
 func (o *InternalRecordResponse) GetDid() string {
-	if o == nil || IsNil(o.Did) {
+	if o == nil {
 		var ret string
 		return ret
 	}
-	return *o.Did
+
+	return o.Did
 }
 
-// GetDidOk returns a tuple with the Did field value if set, nil otherwise
+// GetDidOk returns a tuple with the Did field value
 // and a boolean to check if the value has been set.
 func (o *InternalRecordResponse) GetDidOk() (*string, bool) {
-	if o == nil || IsNil(o.Did) {
+	if o == nil {
 		return nil, false
 	}
-	return o.Did, true
+	return &o.Did, true
 }
 
-// HasDid returns a boolean if a field has been set.
-func (o *InternalRecordResponse) HasDid() bool {
-	if o != nil && !IsNil(o.Did) {
-		return true
-	}
-
-	return false
-}
-
-// SetDid gets a reference to the given string and assigns it to the Did field.
+// SetDid sets field value
 func (o *InternalRecordResponse) SetDid(v string) {
-	o.Did = &v
+	o.Did = v
 }
 
 // GetHashes returns the Hashes field value if set, zero value otherwise.
@@ -184,34 +182,26 @@ func (o *InternalRecordResponse) SetUrls(v []string) {
 	o.Urls = v
 }
 
-// GetAuthz returns the Authz field value if set, zero value otherwise.
+// GetAuthz returns the Authz field value
 func (o *InternalRecordResponse) GetAuthz() []string {
-	if o == nil || IsNil(o.Authz) {
+	if o == nil {
 		var ret []string
 		return ret
 	}
+
 	return o.Authz
 }
 
-// GetAuthzOk returns a tuple with the Authz field value if set, nil otherwise
+// GetAuthzOk returns a tuple with the Authz field value
 // and a boolean to check if the value has been set.
 func (o *InternalRecordResponse) GetAuthzOk() ([]string, bool) {
-	if o == nil || IsNil(o.Authz) {
+	if o == nil {
 		return nil, false
 	}
 	return o.Authz, true
 }
 
-// HasAuthz returns a boolean if a field has been set.
-func (o *InternalRecordResponse) HasAuthz() bool {
-	if o != nil && !IsNil(o.Authz) {
-		return true
-	}
-
-	return false
-}
-
-// SetAuthz gets a reference to the given []string and assigns it to the Authz field.
+// SetAuthz sets field value
 func (o *InternalRecordResponse) SetAuthz(v []string) {
 	o.Authz = v
 }
@@ -610,9 +600,7 @@ func (o InternalRecordResponse) MarshalJSON() ([]byte, error) {
 
 func (o InternalRecordResponse) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
-	if !IsNil(o.Did) {
-		toSerialize["did"] = o.Did
-	}
+	toSerialize["did"] = o.Did
 	if !IsNil(o.Hashes) {
 		toSerialize["hashes"] = o.Hashes
 	}
@@ -622,9 +610,7 @@ func (o InternalRecordResponse) ToMap() (map[string]interface{}, error) {
 	if !IsNil(o.Urls) {
 		toSerialize["urls"] = o.Urls
 	}
-	if !IsNil(o.Authz) {
-		toSerialize["authz"] = o.Authz
-	}
+	toSerialize["authz"] = o.Authz
 	if !IsNil(o.FileName) {
 		toSerialize["file_name"] = o.FileName
 	}
@@ -662,6 +648,44 @@ func (o InternalRecordResponse) ToMap() (map[string]interface{}, error) {
 		toSerialize["uploader"] = o.Uploader
 	}
 	return toSerialize, nil
+}
+
+func (o *InternalRecordResponse) UnmarshalJSON(data []byte) (err error) {
+	// This validates that all required properties are included in the JSON object
+	// by unmarshalling the object into a generic map with string keys and checking
+	// that every required field exists as a key in the generic map.
+	requiredProperties := []string{
+		"did",
+		"authz",
+	}
+
+	allProperties := make(map[string]interface{})
+
+	err = json.Unmarshal(data, &allProperties)
+
+	if err != nil {
+		return err;
+	}
+
+	for _, requiredProperty := range(requiredProperties) {
+		if _, exists := allProperties[requiredProperty]; !exists {
+			return fmt.Errorf("no value given for required property %v", requiredProperty)
+		}
+	}
+
+	varInternalRecordResponse := _InternalRecordResponse{}
+
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	err = decoder.Decode(&varInternalRecordResponse)
+
+	if err != nil {
+		return err
+	}
+
+	*o = InternalRecordResponse(varInternalRecordResponse)
+
+	return err
 }
 
 type NullableInternalRecordResponse struct {

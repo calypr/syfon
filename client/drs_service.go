@@ -53,7 +53,7 @@ func (s *DRSService) ListObjects(ctx context.Context, limit, page int) (DRSPage,
 		DrsObjects: make([]DRSObject, 0, len(listResp.GetRecords())),
 	}
 	for _, rec := range listResp.GetRecords() {
-		out.DrsObjects = append(out.DrsObjects, internalRecordToDRSObject(rec))
+		out.DrsObjects = append(out.DrsObjects, internalRecordToDRSObject(&rec))
 	}
 	return out, nil
 }
@@ -75,7 +75,16 @@ func (s *DRSService) RegisterObjects(ctx context.Context, req RegisterObjectsReq
 	return out, doneErr
 }
 
-func internalRecordToDRSObject(rec InternalRecord) DRSObject {
+type internalRecordView interface {
+	GetDid() string
+	GetSize() int64
+	GetFileName() string
+	GetHashes() map[string]string
+	GetUrls() []string
+	GetAuthz() []string
+}
+
+func internalRecordToDRSObject(rec internalRecordView) DRSObject {
 	obj := DRSObject{
 		Id:        rec.GetDid(),
 		SelfUri:   "drs://" + rec.GetDid(),

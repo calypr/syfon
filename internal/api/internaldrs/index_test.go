@@ -191,9 +191,9 @@ func TestHandleInternalBulkHashes_HashTypeFiltering(t *testing.T) {
 	}
 }
 
-func TestHandleInternalCreate_GeneratesMissingDidAndPersistsAuthz(t *testing.T) {
+func TestHandleInternalCreate_PersistsExplicitDidAndAuthz(t *testing.T) {
 	mockDB := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}
-	reqBody := `{"size": 42,"authz":["/programs/test/projects/p1"]}`
+	reqBody := `{"did":"obj-1","size":42,"authz":["/programs/test/projects/p1"]}`
 	req := httptest.NewRequest(http.MethodPost, "/index", strings.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
@@ -212,8 +212,8 @@ func TestHandleInternalCreate_GeneratesMissingDidAndPersistsAuthz(t *testing.T) 
 	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if resp.Did == "" {
-		t.Fatal("expected generated did")
+	if resp.Did != "obj-1" {
+		t.Fatalf("expected did obj-1, got %q", resp.Did)
 	}
 	if len(resp.Authz) != 1 || resp.Authz[0] != "/programs/test/projects/p1" {
 		t.Fatalf("expected explicit authz to persist, got %v", resp.Authz)
@@ -226,26 +226,45 @@ func TestHandleInternalCreate_GeneratesMissingDidAndPersistsAuthz(t *testing.T) 
 	}
 }
 
-func TestHandleInternalCreate_MissingAuthzFails(t *testing.T) {
-	mockDB := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}
-	reqBody := `{"size": 42}`
-	req := httptest.NewRequest(http.MethodPost, "/index", strings.NewReader(reqBody))
-	req.Header.Set("Content-Type", "application/json")
-	rr := httptest.NewRecorder()
+func TestHandleInternalCreate_RequiredFieldsFailAtDecode(t *testing.T) {
+	t.Run("missing did", func(t *testing.T) {
+		mockDB := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}
+		reqBody := `{"size":42,"authz":["/programs/test/projects/p1"]}`
+		req := httptest.NewRequest(http.MethodPost, "/index", strings.NewReader(reqBody))
+		req.Header.Set("Content-Type", "application/json")
+		rr := httptest.NewRecorder()
 
-	handleInternalCreate(rr, req, mockDB)
+		handleInternalCreate(rr, req, mockDB)
 
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d body=%s", rr.Code, rr.Body.String())
-	}
-	if !strings.Contains(rr.Body.String(), "authorizations are required") {
-		t.Fatalf("expected authz validation error, got %s", rr.Body.String())
-	}
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d body=%s", rr.Code, rr.Body.String())
+		}
+		if !strings.Contains(rr.Body.String(), "Invalid request body") {
+			t.Fatalf("expected decode validation error, got %s", rr.Body.String())
+		}
+	})
+
+	t.Run("missing authz", func(t *testing.T) {
+		mockDB := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}
+		reqBody := `{"did":"obj-1","size":42}`
+		req := httptest.NewRequest(http.MethodPost, "/index", strings.NewReader(reqBody))
+		req.Header.Set("Content-Type", "application/json")
+		rr := httptest.NewRecorder()
+
+		handleInternalCreate(rr, req, mockDB)
+
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d body=%s", rr.Code, rr.Body.String())
+		}
+		if !strings.Contains(rr.Body.String(), "Invalid request body") {
+			t.Fatalf("expected decode validation error, got %s", rr.Body.String())
+		}
+	})
 }
 
 func TestHandleInternalBulkCreate_PersistsExplicitAuthz(t *testing.T) {
 	mockDB := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}
-	reqBody := `{"records":[{"size":7,"authz":["/programs/test/projects/p1"]}]}`
+	reqBody := `{"records":[{"did":"obj-bulk-1","size":7,"authz":["/programs/test/projects/p1"]}]}`
 	req := httptest.NewRequest(http.MethodPost, "/bulk/create", strings.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
@@ -268,8 +287,8 @@ func TestHandleInternalBulkCreate_PersistsExplicitAuthz(t *testing.T) {
 	if len(resp.Records) != 1 {
 		t.Fatalf("expected 1 record, got %d", len(resp.Records))
 	}
-	if resp.Records[0].Did == "" {
-		t.Fatal("expected generated did for bulk create")
+	if resp.Records[0].Did != "obj-bulk-1" {
+		t.Fatalf("expected did obj-bulk-1, got %q", resp.Records[0].Did)
 	}
 	if len(resp.Records[0].Authz) != 1 || resp.Records[0].Authz[0] != "/programs/test/projects/p1" {
 		t.Fatalf("expected explicit authz in bulk create response, got %v", resp.Records[0].Authz)

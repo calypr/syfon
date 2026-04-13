@@ -11,7 +11,6 @@ import (
 	"github.com/calypr/syfon/config"
 	"github.com/calypr/syfon/db/core"
 	"github.com/calypr/syfon/internal/provider"
-	"github.com/google/uuid"
 )
 
 // --- Domain Mapping Tools ---
@@ -22,9 +21,6 @@ func canonicalIDFromInternal(req *internalapi.InternalRecord) string {
 
 func internalToDrs(req *internalapi.InternalRecord) (*core.InternalObject, error) {
 	id := canonicalIDFromInternal(req)
-	if id == "" {
-		id = uuid.NewString()
-	}
 	now := time.Now()
 	obj := &drs.DrsObject{
 		Id:          id,
@@ -58,15 +54,6 @@ func internalToDrs(req *internalapi.InternalRecord) (*core.InternalObject, error
 		})
 	}
 	authz := append([]string(nil), req.GetAuthz()...)
-	if len(authz) == 0 && req.HasOrganization() {
-		path := core.ResourcePathForScope(req.GetOrganization(), req.GetProject())
-		if path != "" {
-			authz = append(authz, path)
-		}
-	}
-	if len(authz) == 0 {
-		return nil, fmt.Errorf("authorizations are required")
-	}
 	for i := range obj.AccessMethods {
 		obj.AccessMethods[i].Authorizations = drs.AccessMethodAuthorizations{
 			BearerAuthIssuers: authz,
@@ -91,13 +78,8 @@ func drsToInternalRecord(obj *core.InternalObject) *internalapi.InternalRecord {
 		}
 	}
 	scope := core.ParseResourcePath(firstAuthz(authz))
-	resp := internalapi.NewInternalRecord()
-	resp.SetAuthz(authz)
+	resp := internalapi.NewInternalRecord(obj.Id, authz)
 	resp.SetUrls(urls)
-
-	if obj.Id != "" {
-		resp.SetDid(obj.Id)
-	}
 	resp.SetSize(obj.Size)
 	if len(hashes) > 0 {
 		resp.SetHashes(hashes)
@@ -131,15 +113,13 @@ func drsToInternal(obj *core.InternalObject) *internalapi.InternalRecordResponse
 	}
 	scope := core.ParseResourcePath(firstAuthz(authz))
 
-	resp := internalapi.NewInternalRecordResponse()
-	resp.SetDid(obj.Id)
+	resp := internalapi.NewInternalRecordResponse(obj.Id, authz)
 	resp.SetSize(obj.Size)
 	resp.SetFileName(obj.Name)
 	resp.SetVersion(obj.Version)
 	resp.SetDescription(obj.Description)
 	resp.SetHashes(hashes)
 	resp.SetUrls(urls)
-	resp.SetAuthz(authz)
 
 	if scope.Organization != "" {
 		resp.SetOrganization(scope.Organization)

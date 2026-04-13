@@ -18,6 +18,7 @@ import (
 var (
 	uploadFile string
 	uploadDID  string
+	uploadAuthz string
 )
 
 var Cmd = &cobra.Command{
@@ -42,6 +43,10 @@ var Cmd = &cobra.Command{
 		if did == "" {
 			did = uuid.NewString()
 		}
+		authz := strings.TrimSpace(uploadAuthz)
+		if authz == "" {
+			return fmt.Errorf("--authz is required")
+		}
 
 		serverURL, err := cmd.Flags().GetString("server")
 		if err != nil {
@@ -53,6 +58,7 @@ var Cmd = &cobra.Command{
 		}
 		uploadReq := syclient.UploadBlankRequest{}
 		(&uploadReq).SetGuid(did)
+		(&uploadReq).SetAuthz([]string{authz})
 		signed, err := c.Data().UploadBlank(ctx, uploadReq)
 		if err != nil {
 			return fmt.Errorf("request upload url: %w", err)
@@ -71,7 +77,15 @@ var Cmd = &cobra.Command{
 			return err
 		}
 
-		if err := c.Index().Upsert(ctx, did, objectURL, filepath.Base(srcPath), info.Size(), ""); err != nil {
+		record, err := c.Index().Get(ctx, did)
+		if err != nil {
+			return fmt.Errorf("resolve record authz: %w", err)
+		}
+		recordAuthz := record.GetAuthz()
+		if len(recordAuthz) == 0 {
+			return fmt.Errorf("record %s has no authz", did)
+		}
+		if err := c.Index().Upsert(ctx, did, objectURL, filepath.Base(srcPath), info.Size(), "", recordAuthz); err != nil {
 			return fmt.Errorf("record update failed: %w", err)
 		}
 
@@ -138,4 +152,5 @@ func uploadBytesToURL(ctx context.Context, rawURL, srcPath string, c *syclient.C
 func init() {
 	Cmd.Flags().StringVar(&uploadFile, "file", "", "Path to source file")
 	Cmd.Flags().StringVar(&uploadDID, "did", "", "Optional object DID (generated when omitted)")
+	Cmd.Flags().StringVar(&uploadAuthz, "authz", "", "Required authz scope for the record")
 }
