@@ -7,8 +7,7 @@ import (
 	"time"
 
 	"github.com/calypr/syfon/client/pkg/common"
-	"github.com/calypr/syfon/client/pkg/logs"
-	"github.com/calypr/syfon/client/transfer"
+	"github.com/calypr/syfon/client/xfer"
 )
 
 // GetWaitTime calculates exponential backoff with cap
@@ -22,7 +21,7 @@ func GetWaitTime(retryCount int) time.Duration {
 }
 
 // RetryFailedUploads re-uploads previously failed files with exponential backoff
-func RetryFailedUploads(ctx context.Context, bk transfer.Uploader, logger *logs.Gen3Logger, failedMap map[string]common.RetryObject) {
+func RetryFailedUploads(ctx context.Context, bk xfer.Uploader, logger xfer.TransferLogger, failedMap map[string]common.RetryObject) {
 	if len(failedMap) == 0 {
 		logger.Println("No failed files to retry.")
 		return
@@ -73,16 +72,9 @@ func RetryFailedUploads(ctx context.Context, bk transfer.Uploader, logger *logs.
 
 		if ro.Multipart {
 			// Retry multipart
-			req := common.FileUploadRequestObject{
-				SourcePath:   ro.SourcePath,
-				ObjectKey:    ro.ObjectKey,
-				GUID:         ro.GUID,
-				FileMetadata: ro.FileMetadata,
-				Bucket:       ro.Bucket,
-			}
-			err = MultipartUpload(ctx, bk, req, file, true)
+			err = MultipartUpload(ctx, bk, ro.SourcePath, ro.ObjectKey, ro.GUID, ro.Bucket, ro.FileMetadata, file, true)
 			if err == nil {
-				logger.Succeeded(ro.SourcePath, req.GUID)
+				logger.Succeeded(ro.SourcePath, ro.GUID)
 				if sb != nil {
 					sb.IncrementSB(ro.RetryCount - 1)
 				}
@@ -90,19 +82,18 @@ func RetryFailedUploads(ctx context.Context, bk transfer.Uploader, logger *logs.
 			}
 		} else {
 			// Retry single-part
-			respObj, err := GeneratePresignedUploadURL(ctx, bk, ro.ObjectKey, ro.FileMetadata, ro.Bucket)
+			respURL, err := GeneratePresignedUploadURL(ctx, bk, ro.ObjectKey, ro.FileMetadata, ro.Bucket)
 			if err != nil {
 				handleRetryFailure(ctx, bk, logger, ro, retryChan, err)
 				continue
 			}
 
-			file, err := os.Open(ro.SourcePath)
+			stat, err := file.Stat()
+			file.Close()
 			if err != nil {
 				handleRetryFailure(ctx, bk, logger, ro, retryChan, err)
 				continue
 			}
-			stat, _ := file.Stat()
-			file.Close()
 
 			if stat.Size() > common.FileSizeLimit {
 				ro.Multipart = true
@@ -110,23 +101,15 @@ func RetryFailedUploads(ctx context.Context, bk transfer.Uploader, logger *logs.
 				continue
 			}
 
-			fur := common.FileUploadRequestObject{
-				SourcePath:   ro.SourcePath,
-				ObjectKey:    ro.ObjectKey,
-				FileMetadata: ro.FileMetadata,
-				GUID:         respObj.GUID,
-				PresignedURL: respObj.URL,
-			}
-
-			fur, err = generateUploadRequest(ctx, bk, fur, nil, nil)
+			file, err = os.Open(ro.SourcePath)
 			if err != nil {
 				handleRetryFailure(ctx, bk, logger, ro, retryChan, err)
 				continue
 			}
-
-			err = UploadSingle(ctx, bk, logger, fur, true)
+			err = bk.Upload(ctx, respURL, file, stat.Size())
+			_ = file.Close()
 			if err == nil {
-				logger.Succeeded(ro.SourcePath, fur.GUID)
+				logger.Succeeded(ro.SourcePath, ro.GUID)
 				if sb != nil {
 					sb.IncrementSB(ro.RetryCount - 1)
 				}
@@ -140,7 +123,7 @@ func RetryFailedUploads(ctx context.Context, bk transfer.Uploader, logger *logs.
 }
 
 // handleRetryFailure logs failure and requeues if retries remain
-func handleRetryFailure(ctx context.Context, bk transfer.Uploader, logger *logs.Gen3Logger, ro common.RetryObject, retryChan chan common.RetryObject, err error) {
+func handleRetryFailure(ctx context.Context, bk xfer.Uploader, logger xfer.TransferLogger, ro common.RetryObject, retryChan chan common.RetryObject, err error) {
 	logger.Failed(ro.SourcePath, ro.ObjectKey, ro.FileMetadata, ro.GUID, ro.RetryCount, ro.Multipart)
 	if err != nil {
 		logger.Println("Retry error:", err)

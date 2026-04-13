@@ -3,12 +3,12 @@ package client
 import "context"
 
 type HealthService struct {
-	c *Client
+	base *baseService
 }
 
 func (h *HealthService) Ping(ctx context.Context) error {
-	return h.c.doJSON(ctx, "GET", "/healthz", nil, nil, nil)
+	rb := h.base.requestor.New("GET", "/healthz")
+	return h.base.requestor.DoJSON(ctx, rb, nil)
 }
 
-// Compatibility wrapper.
-func (c *Client) Ping(ctx context.Context) error { return c.Health().Ping(ctx) }
+// --- HealthService ---

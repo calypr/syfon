@@ -8,26 +8,25 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/calypr/syfon/client/pkg/common"
-	"github.com/calypr/syfon/client/transfer"
+	"github.com/calypr/syfon/client/xfer"
 )
 
 // GetDownloadResponse gets presigned URL and prepares HTTP response
-func GetDownloadResponse(ctx context.Context, bk transfer.Downloader, fdr *common.FileDownloadResponseObject, protocolText string) error {
-	url, err := bk.ResolveDownloadURL(ctx, fdr.GUID, protocolText)
+func GetDownloadResponse(ctx context.Context, bk xfer.Downloader, fdr *downloadRequest, protocolText string) error {
+	url, err := bk.ResolveDownloadURL(ctx, fdr.guid, protocolText)
 	if err != nil {
-		return fmt.Errorf("failed to resolve download URL for %s: %w", fdr.GUID, err)
+		return fmt.Errorf("failed to resolve download URL for %s: %w", fdr.guid, err)
 	}
-	fdr.PresignedURL = url
+	fdr.presignedURL = url
 
 	return makeDownloadRequest(ctx, bk, fdr)
 }
 
-func makeDownloadRequest(ctx context.Context, bk transfer.Downloader, fdr *common.FileDownloadResponseObject) error {
-	resp, err := bk.Download(ctx, fdr)
+func makeDownloadRequest(ctx context.Context, bk xfer.Downloader, fdr *downloadRequest) error {
+	resp, err := bk.Download(ctx, fdr.presignedURL, fdr.rangeStart, fdr.rangeEnd)
 
 	if err != nil {
-		return errors.New("Request failed: " + strings.ReplaceAll(err.Error(), fdr.PresignedURL, "<SENSITIVE_URL>"))
+		return errors.New("Request failed: " + strings.ReplaceAll(err.Error(), fdr.presignedURL, "<SENSITIVE_URL>"))
 	}
 
 	// Check for non-success status codes
@@ -43,6 +42,6 @@ func makeDownloadRequest(ctx context.Context, bk transfer.Downloader, fdr *commo
 		return fmt.Errorf("non-OK response: %d, body: %s", resp.StatusCode, bodyString)
 	}
 
-	fdr.Response = resp
+	fdr.response = resp
 	return nil
 }

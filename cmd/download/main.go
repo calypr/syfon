@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/calypr/syfon/cmd/cliutil"
+	syclient "github.com/calypr/syfon/client"
 	"github.com/spf13/cobra"
 )
 
@@ -28,10 +28,17 @@ var Cmd = &cobra.Command{
 		if did == "" {
 			return fmt.Errorf("--did is required")
 		}
-		c := cliutil.NewSyfonClient(cmd)
+		serverURL, err := cmd.Flags().GetString("server")
+		if err != nil {
+			return fmt.Errorf("get server flag: %w", err)
+		}
+		c, err := syclient.New(serverURL)
+		if err != nil {
+			return err
+		}
 		outPath := strings.TrimSpace(downloadOut)
 		if outPath == "" {
-			rec, err := c.GetRecord(ctx, did)
+			rec, err := c.Index().Get(ctx, did)
 			if err != nil {
 				return fmt.Errorf("resolve output filename from record: %w", err)
 			}
@@ -45,23 +52,23 @@ var Cmd = &cobra.Command{
 			return fmt.Errorf("create output directory: %w", err)
 		}
 
-		signed, err := c.GetDownloadURL(ctx, did)
+		signed, err := c.Data().DownloadURL(ctx, did, 0, false)
 		if err != nil {
 			return fmt.Errorf("get download url: %w", err)
 		}
-			downloadURL := strings.TrimSpace(signed.GetUrl())
-			if downloadURL == "" {
-				return fmt.Errorf("empty download url for did %s", did)
-			}
-			if err := downloadURLToPath(ctx, downloadURL, outPath); err != nil {
-				return err
-			}
+		downloadURL := strings.TrimSpace((&signed).GetUrl())
+		if downloadURL == "" {
+			return fmt.Errorf("empty download url for did %s", did)
+		}
+		if err := downloadURLToPath(ctx, downloadURL, outPath, c); err != nil {
+			return err
+		}
 		fmt.Fprintf(cmd.OutOrStdout(), "downloaded %s -> %s\n", did, outPath)
 		return nil
 	},
 }
 
-func downloadURLToPath(ctx context.Context, rawURL, outPath string) error {
+func downloadURLToPath(ctx context.Context, rawURL, outPath string, c *syclient.Client) error {
 	parsed, err := url.Parse(strings.TrimSpace(rawURL))
 	if err != nil {
 		return fmt.Errorf("parse download url: %w", err)
@@ -77,11 +84,8 @@ func downloadURLToPath(ctx context.Context, rawURL, outPath string) error {
 		}
 		return nil
 	case "http", "https":
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
-		if err != nil {
-			return fmt.Errorf("build download request: %w", err)
-		}
-		resp, err := cliutil.NewHTTPClient().Do(req)
+		rb := c.Requestor().New(http.MethodGet, rawURL)
+		resp, err := c.Requestor().Do(ctx, rb)
 		if err != nil {
 			return fmt.Errorf("download request failed: %w", err)
 		}

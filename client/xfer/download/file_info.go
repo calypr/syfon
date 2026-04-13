@@ -4,13 +4,13 @@ import (
 	"context"
 
 	"github.com/calypr/syfon/client/drs"
-	"github.com/calypr/syfon/client/pkg/logs"
+	"github.com/calypr/syfon/client/xfer"
 )
 
 func GetFileInfo(
 	ctx context.Context,
 	dc drs.Client,
-	logger *logs.Gen3Logger,
+	logger xfer.TransferLogger,
 	guid, protocol, downloadPath, filenameFormat string,
 	rename bool,
 	renamedFiles *[]RenamedOrSkippedFileInfo,

@@ -25,11 +25,11 @@ func newProgressReader(reader io.Reader, onProgress common.ProgressCallback, has
 	}
 }
 
-func resolveUploadOID(req common.FileUploadRequestObject) string {
-	if req.ObjectKey != "" {
-		return req.ObjectKey
+func resolveUploadOID(objectKey, guid string) string {
+	if objectKey != "" {
+		return objectKey
 	}
-	return req.GUID
+	return guid
 }
 
 func (pr *progressReader) Read(p []byte) (int, error) {

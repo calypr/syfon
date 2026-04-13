@@ -1,19 +1,44 @@
-package transfer
+package xfer
 
 import (
 	"context"
 	"io"
 	"net/http"
+	"log/slog"
 
+	internalapi "github.com/calypr/syfon/apigen/internalapi"
 	"github.com/calypr/syfon/client/pkg/common"
 	"github.com/calypr/syfon/client/pkg/hash"
 	"github.com/calypr/syfon/client/pkg/logs"
 )
 
-// Service provides high-level identity and naming.
+// TransferLogger is the minimal logging surface used by the transfer engines.
+type TransferLogger interface {
+	Slog() *slog.Logger
+	Info(msg string, args ...any)
+	InfoContext(ctx context.Context, msg string, args ...any)
+	Error(msg string, args ...any)
+	ErrorContext(ctx context.Context, msg string, args ...any)
+	Warn(msg string, args ...any)
+	WarnContext(ctx context.Context, msg string, args ...any)
+	Debug(msg string, args ...any)
+	DebugContext(ctx context.Context, msg string, args ...any)
+	Printf(format string, v ...any)
+	Println(v ...any)
+	Failed(filePath, filename string, metadata common.FileMetadata, guid string, retryCount int, multipart bool)
+	FailedContext(ctx context.Context, filePath, filename string, metadata common.FileMetadata, guid string, retryCount int, multipart bool)
+	Succeeded(filePath, guid string)
+	SucceededContext(ctx context.Context, filePath, guid string)
+	GetSucceededLogMap() map[string]string
+	GetFailedLogMap() map[string]common.RetryObject
+	DeleteFromFailedLog(path string)
+	Scoreboard() *logs.Scoreboard
+}
+
+// Service provides high-level identity and logging access.
 type Service interface {
 	Name() string
-	Logger() *logs.Gen3Logger
+	Logger() TransferLogger
 }
 
 // ObjectMetadata carries provider-agnostic information about a storage target.
@@ -22,7 +47,7 @@ type ObjectMetadata struct {
 	Checksums    []hash.HashInfo
 	MD5          string
 	AcceptRanges bool
-	Provider     string // e.g. aws, gcp, azure, fs, http
+	Provider     string
 }
 
 // ObjectReader provides metadata and single-stream read access.
@@ -62,30 +87,19 @@ type SignedURL struct {
 }
 
 // PartSigner is a generic interface for components that can sign byte ranges.
-// This decouples the transfer package from the higher-level DRS client.
 type PartSigner interface {
 	GetDownloadPartURL(ctx context.Context, id string, start, end int64) (*SignedURL, error)
-	Logger() *logs.Gen3Logger
+	Logger() TransferLogger
 }
 
-// Downloader is the signed URL resolution and byte download surface.
-type Downloader interface {
-	Service
-	ResolveDownloadURL(ctx context.Context, guid string, accessID string) (string, error)
-	Download(ctx context.Context, fdr *common.FileDownloadResponseObject) (*http.Response, error)
+// Provider resolves the bucket/key for a GUID.
+type Provider interface {
+	GetStorageLocation(ctx context.Context, guid string) (bucket, key string, err error)
 }
 
-// Uploader is the signed URL and multipart upload surface.
-type Uploader interface {
-	Service
-	ResolveUploadURL(ctx context.Context, guid string, filename string, metadata common.FileMetadata, bucket string) (string, error)
-	ResolveUploadURLs(ctx context.Context, requests []common.UploadURLResolveRequest) ([]common.UploadURLResolveResponse, error)
-	InitMultipartUpload(ctx context.Context, guid string, filename string, bucket string) (*common.MultipartUploadInit, error)
-	GetMultipartUploadURL(ctx context.Context, key string, uploadID string, partNumber int32, bucket string) (string, error)
-	CompleteMultipartUpload(ctx context.Context, key string, uploadID string, parts []common.MultipartUploadPart, bucket string) error
-	Upload(ctx context.Context, url string, body io.Reader, size int64) error
-	UploadPart(ctx context.Context, url string, body io.Reader, size int64) (string, error)
-	DeleteFile(ctx context.Context, guid string) (string, error)
+// Resolver handles logical-to-physical mapping.
+type Resolver interface {
+	Resolve(ctx context.Context, id string) (*ResolvedObject, error)
 }
 
 // Backend embeds capabilities. Adapters can satisfy all or some of these.
@@ -95,4 +109,23 @@ type Backend interface {
 	ObjectWriter
 	MultipartWriter
 	ObjectDeleter
+}
+
+// Downloader is the signed URL resolution and byte download surface.
+type Downloader interface {
+	Service
+	ResolveDownloadURL(ctx context.Context, guid string, accessID string) (string, error)
+	Download(ctx context.Context, url string, rangeStart, rangeEnd *int64) (*http.Response, error)
+}
+
+// Uploader is the signed URL and multipart upload surface.
+type Uploader interface {
+	Service
+	ResolveUploadURL(ctx context.Context, guid string, filename string, metadata common.FileMetadata, bucket string) (string, error)
+	InitMultipartUpload(ctx context.Context, guid string, filename string, bucket string) (uploadID string, key string, err error)
+	GetMultipartUploadURL(ctx context.Context, key string, uploadID string, partNumber int32, bucket string) (string, error)
+	CompleteMultipartUpload(ctx context.Context, key string, uploadID string, parts []internalapi.InternalMultipartPart, bucket string) error
+	Upload(ctx context.Context, url string, body io.Reader, size int64) error
+	UploadPart(ctx context.Context, url string, body io.Reader, size int64) (string, error)
+	DeleteFile(ctx context.Context, guid string) (string, error)
 }

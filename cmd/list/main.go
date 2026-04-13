@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	syclient "github.com/calypr/syfon/client"
-	"github.com/calypr/syfon/cmd/cliutil"
 	"github.com/spf13/cobra"
 )
 
@@ -22,7 +21,14 @@ var Cmd = &cobra.Command{
 	Aliases: []string{"list"},
 	Short:   "List indexed files",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		c := cliutil.NewSyfonClient(cmd)
+		serverURL, err := cmd.Flags().GetString("server")
+		if err != nil {
+			return fmt.Errorf("get server flag: %w", err)
+		}
+		c, err := syclient.New(serverURL)
+		if err != nil {
+			return err
+		}
 		resp, err := c.Index().List(cmd.Context(), syclient.ListRecordsOptions{
 			Limit:        listLimit,
 			Page:         listPage,

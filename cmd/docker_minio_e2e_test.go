@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -61,78 +62,96 @@ func TestSyfonDockerMinIOE2E(t *testing.T) {
 	}
 
 	ctx := context.Background()
+	t.Logf("STEP 1: Starting MinIO Docker container...")
 	minioEnv, err := startMinIOContainer(ctx)
 	if err != nil {
 		if isDockerUnavailable(err) {
+			t.Logf("Docker unavailable for %s: %v", dockerE2EEnvVar, err)
 			t.Skipf("Docker is unavailable for %s: %v", dockerE2EEnvVar, err)
 		}
-		t.Fatalf("start MinIO container: %v", err)
+		t.Fatalf("FAILED to start MinIO container: %v", err)
 	}
+	t.Logf("MinIO started at %s (Bucket: %s)", minioEnv.endpoint, minioEnv.bucket)
 	t.Cleanup(func() {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		if err := minioEnv.container.Terminate(cleanupCtx); err != nil {
-			t.Logf("terminate MinIO container: %v", err)
+			t.Logf("Warning: failed to terminate MinIO container: %v", err)
 		}
 	})
 
+	t.Logf("STEP 2: Starting Syfon server process...")
 	server := startSyfonServerProcess(t, minioEnv)
+	t.Logf("Syfon server listening at %s", server.url)
 	t.Cleanup(func() {
 		stopSyfonServerProcess(t, server)
 	})
 
+	t.Logf("STEP 3: Pinging Syfon server...")
 	pingOut, err := executeRootCommand(t, "--server", server.url, "ping")
+	t.Logf("Ping Output:\n%s", pingOut)
 	if err != nil {
-		t.Fatalf("ping failed: %v output=%s", err, pingOut)
+		t.Fatalf("Ping failed: %v", err)
 	}
 	if !strings.Contains(pingOut, "Syfon is reachable") {
-		t.Fatalf("unexpected ping output: %s", pingOut)
+		t.Fatalf("Unexpected ping output: (missing 'Syfon is reachable')")
 	}
 
+	t.Logf("STEP 4: Uploading test file...")
 	srcPath := filepath.Join(t.TempDir(), "docker-minio-source.txt")
 	srcData := []byte("syfon docker minio e2e payload")
 	if err := os.WriteFile(srcPath, srcData, 0o644); err != nil {
-		t.Fatalf("write source file: %v", err)
+		t.Fatalf("Failed to write source file: %v", err)
 	}
 
 	uploadOut, err := executeRootCommand(t, "--server", server.url, "upload", "--file", srcPath)
+	t.Logf("Upload Output:\n%s", uploadOut)
 	if err != nil {
-		t.Fatalf("upload failed: %v output=%s", err, uploadOut)
+		t.Fatalf("Upload failed: %v", err)
 	}
 	uploadedID, err := parseUploadedObjectID(uploadOut)
 	if err != nil {
-		t.Fatalf("parse upload output: %v output=%s", err, uploadOut)
+		t.Fatalf("Failed to parse DID from upload output: %v", err)
 	}
+	t.Logf("Object registered with DID: %s", uploadedID)
 
+	t.Logf("STEP 5: Verifying object existence in MinIO directly...")
 	if _, err := minioEnv.s3Client.HeadObject(ctx, &s3.HeadObjectInput{
 		Bucket: aws.String(minioEnv.bucket),
 		Key:    aws.String(uploadedID),
 	}); err != nil {
-		t.Fatalf("uploaded object missing from MinIO bucket: %v", err)
+		t.Fatalf("Data check failed: Object is missing from MinIO bucket: %v", err)
 	}
+	t.Logf("Object verified in S3 bucket.")
 
+	t.Logf("STEP 6: Downloading object...")
 	downloadPath := filepath.Join(t.TempDir(), "docker-minio-downloaded.txt")
 	downloadOut, err := executeRootCommand(t, "--server", server.url, "download", "--did", uploadedID, "--out", downloadPath)
+	t.Logf("Download Output:\n%s", downloadOut)
 	if err != nil {
-		t.Fatalf("download failed: %v output=%s", err, downloadOut)
+		t.Fatalf("Download failed: %v", err)
 	}
 	got, err := os.ReadFile(downloadPath)
 	if err != nil {
-		t.Fatalf("read downloaded file: %v", err)
+		t.Fatalf("Failed to read downloaded file: %v", err)
 	}
 	if !bytes.Equal(got, srcData) {
-		t.Fatalf("downloaded bytes mismatch")
+		t.Fatalf("Integrity Check Failed: downloaded bytes mismatch")
 	}
+	t.Logf("Download verified (bytes match source).")
 
+	t.Logf("STEP 7: Verifying hash computation...")
 	sumOut, err := executeRootCommand(t, "--server", server.url, "sha256sum", "--did", uploadedID)
+	t.Logf("Sha256sum Output:\n%s", sumOut)
 	if err != nil {
-		t.Fatalf("sha256sum failed: %v output=%s", err, sumOut)
+		t.Fatalf("sha256sum command failed: %v", err)
 	}
 	expectedHash := sha256.Sum256(srcData)
 	expectedSum := hex.EncodeToString(expectedHash[:])
 	if !strings.Contains(sumOut, expectedSum) {
-		t.Fatalf("expected sha256 %s in output, got %s", expectedSum, sumOut)
+		t.Fatalf("Hash mismatch: expected %s, got output: %s", expectedSum, sumOut)
 	}
+	t.Logf("Hash verified.")
 }
 
 func startMinIOContainer(ctx context.Context) (*minioContainer, error) {
@@ -248,12 +267,10 @@ func startSyfonServerProcess(t *testing.T, minioEnv *minioContainer) *syfonServe
 
 	stdoutBuf := &bytes.Buffer{}
 	stderrBuf := &bytes.Buffer{}
-	go func() {
-		_, _ = io.Copy(stdoutBuf, stdoutPipe)
-	}()
-	go func() {
-		_, _ = io.Copy(stderrBuf, stderrPipe)
-	}()
+
+	// Multi-writer to keep buffers for error reporting and stream to T.Log for live feedback.
+	go streamToTestLog(t, "[SERVER STDOUT]", stdoutPipe, stdoutBuf)
+	go streamToTestLog(t, "[SERVER STDERR]", stderrPipe, stderrBuf)
 
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start syfon server: %v", err)
@@ -434,6 +451,17 @@ func logServerProcessOutput(t *testing.T, serverURL string, stdoutBuf, stderrBuf
 	}
 }
 
+func streamToTestLog(t *testing.T, prefix string, r io.Reader, buf *bytes.Buffer) {
+	scanner := bufio.NewScanner(r)
+	for scanner.Scan() {
+		line := scanner.Text()
+		t.Logf("%s %s", prefix, line)
+		if buf != nil {
+			buf.WriteString(line + "\n")
+		}
+	}
+}
+
 func isDockerUnavailable(err error) bool {
 	if err == nil {
 		return false
@@ -447,4 +475,78 @@ func isDockerUnavailable(err error) bool {
 		strings.Contains(lower, "failed to create docker provider") ||
 		strings.Contains(lower, "context deadline exceeded") ||
 		strings.Contains(lower, "failed to create container")
+}
+func TestSyfonDockerMultipartUpload(t *testing.T) {
+	if strings.TrimSpace(os.Getenv(dockerE2EEnvVar)) != "1" {
+		t.Skipf("set %s=1 to run the Docker-backed MinIO integration test", dockerE2EEnvVar)
+	}
+
+	ctx := context.Background()
+	t.Logf("STEP 1: Starting MinIO Docker container for Multipart test...")
+	minioEnv, err := startMinIOContainer(ctx)
+	if err != nil {
+		if isDockerUnavailable(err) {
+			t.Logf("Docker unavailable for %s: %v", dockerE2EEnvVar, err)
+			t.Skipf("Docker is unavailable for %s: %v", dockerE2EEnvVar, err)
+		}
+		t.Fatalf("FAILED to start MinIO container: %v", err)
+	}
+	t.Cleanup(func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		_ = minioEnv.container.Terminate(cleanupCtx)
+	})
+
+	t.Logf("STEP 2: Starting Syfon server process...")
+	server := startSyfonServerProcess(t, minioEnv)
+	t.Cleanup(func() { stopSyfonServerProcess(t, server) })
+
+	t.Logf("STEP 3: Generating 7MB junk file for multipart check...")
+	srcPath := filepath.Join(t.TempDir(), "large-multipart-source.txt")
+	const sizeMB = 7
+	srcData := make([]byte, sizeMB*1024*1024)
+	for i := range srcData {
+		srcData[i] = byte(i % 256)
+	}
+	if err := os.WriteFile(srcPath, srcData, 0o644); err != nil {
+		t.Fatalf("Failed to write large source file: %v", err)
+	}
+
+	t.Logf("STEP 4: Executing Multipart Upload (7MB)...")
+	uploadOut, err := executeRootCommand(t, "--server", server.url, "upload", "--file", srcPath)
+	t.Logf("Multipart Upload Output:\n%s", uploadOut)
+	if err != nil {
+		t.Fatalf("Multipart upload command failed: %v", err)
+	}
+	uploadedID, _ := parseUploadedObjectID(uploadOut)
+	t.Logf("Multipart upload successful. DID: %s", uploadedID)
+
+	t.Logf("STEP 5: Executing Multipart Download and verifying bytes...")
+	downloadPath := filepath.Join(t.TempDir(), "large-multipart-downloaded.txt")
+	downloadOut, err := executeRootCommand(t, "--server", server.url, "download", "--did", uploadedID, "--out", downloadPath)
+	t.Logf("Multipart Download Output:\n%s", downloadOut)
+	if err != nil {
+		t.Fatalf("Multipart download failed: %v", err)
+	}
+	got, err := os.ReadFile(downloadPath)
+	if err != nil {
+		t.Fatalf("Failed to read downloaded file: %v", err)
+	}
+	if !bytes.Equal(got, srcData) {
+		t.Fatalf("Integrity Check Failed: multipart downloaded bytes mismatch: expected %d bytes, got %d", len(srcData), len(got))
+	}
+	t.Logf("Multipart integrity verified.")
+
+	t.Logf("STEP 6: Verifying hash for multipart object...")
+	sumOut, err := executeRootCommand(t, "--server", server.url, "sha256sum", "--did", uploadedID)
+	t.Logf("Multipart Sha256sum Output:\n%s", sumOut)
+	if err != nil {
+		t.Fatalf("sha256sum failed: %v", err)
+	}
+	expectedHash := sha256.Sum256(srcData)
+	expectedSum := hex.EncodeToString(expectedHash[:])
+	if !strings.Contains(sumOut, expectedSum) {
+		t.Fatalf("Hash mismatch in multipart verify: expected %s, got output: %s", expectedSum, sumOut)
+	}
+	t.Logf("Multipart verify complete.")
 }

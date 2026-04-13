@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	syclient "github.com/calypr/syfon/client"
-	"github.com/calypr/syfon/cmd/cliutil"
 	"github.com/spf13/cobra"
 )
 
@@ -68,7 +67,15 @@ var addCmd = &cobra.Command{
 			payload.SetPath(v)
 		}
 
-		if err := cliutil.NewSyfonClient(cmd).PutBucket(cmd.Context(), payload); err != nil {
+		serverURL, err := cmd.Flags().GetString("server")
+		if err != nil {
+			return fmt.Errorf("get server flag: %w", err)
+		}
+		c, err := syclient.New(serverURL)
+		if err != nil {
+			return err
+		}
+		if err := c.Buckets().Put(cmd.Context(), payload); err != nil {
 			return err
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "bucket configured: %s (provider=%s org=%s project=%s)\n", bucket, provider, organization, projectID)
@@ -80,7 +87,15 @@ var listCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List configured buckets",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		resp, err := cliutil.NewSyfonClient(cmd).Buckets().List(cmd.Context())
+		serverURL, err := cmd.Flags().GetString("server")
+		if err != nil {
+			return fmt.Errorf("get server flag: %w", err)
+		}
+		c, err := syclient.New(serverURL)
+		if err != nil {
+			return err
+		}
+		resp, err := c.Buckets().List(cmd.Context())
 		if err != nil {
 			return err
 		}
@@ -119,7 +134,15 @@ var removeCmd = &cobra.Command{
 		if bucket == "" {
 			return fmt.Errorf("bucket is required")
 		}
-		if err := cliutil.NewSyfonClient(cmd).Buckets().Delete(cmd.Context(), bucket); err != nil {
+		serverURL, err := cmd.Flags().GetString("server")
+		if err != nil {
+			return fmt.Errorf("get server flag: %w", err)
+		}
+		c, err := syclient.New(serverURL)
+		if err != nil {
+			return err
+		}
+		if err := c.Buckets().Delete(cmd.Context(), bucket); err != nil {
 			return err
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "bucket removed: %s\n", bucket)

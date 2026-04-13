@@ -13,24 +13,25 @@ import (
 	"sync"
 	"testing"
 
+	internalapi "github.com/calypr/syfon/apigen/internalapi"
 	"github.com/calypr/syfon/client/drs"
 	"github.com/calypr/syfon/client/pkg/common"
 	"github.com/calypr/syfon/client/pkg/hash"
 	"github.com/calypr/syfon/client/pkg/logs"
 	"github.com/calypr/syfon/client/pkg/request"
-	"github.com/calypr/syfon/client/transfer"
+	"github.com/calypr/syfon/client/xfer"
 )
 
 type fakeBackend struct {
 	logger                 *logs.Gen3Logger
-	doFunc                 func(context.Context, *common.FileDownloadResponseObject) (*http.Response, error)
+	doFunc                 func(context.Context, string, *int64, *int64) (*http.Response, error)
 	resolveDownloadURLFunc func(context.Context, string, string) (string, error)
 	data                   []byte
 	size                   int64
 }
 
 func (f *fakeBackend) Name() string             { return "Fake" }
-func (f *fakeBackend) Logger() *logs.Gen3Logger { return f.logger }
+func (f *fakeBackend) Logger() xfer.TransferLogger { return f.logger }
 
 func (f *fakeBackend) fileDetails(guid string) *drs.DRSObject {
 	size := f.size
@@ -65,15 +66,15 @@ func (f *fakeBackend) ResolveUploadURL(ctx context.Context, guid string, filenam
 	return "", errors.New("not implemented")
 }
 
-func (f *fakeBackend) InitMultipartUpload(ctx context.Context, guid string, filename string, bucket string) (*common.MultipartUploadInit, error) {
-	return nil, errors.New("not implemented")
+func (f *fakeBackend) InitMultipartUpload(ctx context.Context, guid string, filename string, bucket string) (string, string, error) {
+	return "", "", errors.New("not implemented")
 }
 
 func (f *fakeBackend) GetMultipartUploadURL(ctx context.Context, key string, uploadID string, partNumber int32, bucket string) (string, error) {
 	return "", errors.New("not implemented")
 }
 
-func (f *fakeBackend) CompleteMultipartUpload(ctx context.Context, key string, uploadID string, parts []common.MultipartUploadPart, bucket string) error {
+func (f *fakeBackend) CompleteMultipartUpload(ctx context.Context, key string, uploadID string, parts []internalapi.InternalMultipartPart, bucket string) error {
 	return errors.New("not implemented")
 }
 
@@ -89,28 +90,28 @@ func (f *fakeBackend) DeleteFile(ctx context.Context, guid string) (string, erro
 	return "", errors.New("not implemented")
 }
 
-func (f *fakeBackend) Download(ctx context.Context, fdr *common.FileDownloadResponseObject) (*http.Response, error) {
+func (f *fakeBackend) Download(ctx context.Context, url string, rangeStart, rangeEnd *int64) (*http.Response, error) {
 	if f.doFunc != nil {
-		return f.doFunc(ctx, fdr)
+		return f.doFunc(ctx, url, rangeStart, rangeEnd)
 	}
-	if fdr.Range > 0 {
-		start := fdr.Range
+	if rangeStart != nil {
+		start := *rangeStart
 		if start < 0 || start > int64(len(f.data)) {
 			return nil, errors.New("invalid resume range")
 		}
 		if start == int64(len(f.data)) {
-			return newDownloadResponse(fdr.PresignedURL, []byte{}, http.StatusPartialContent), nil
+			return newDownloadResponse(url, []byte{}, http.StatusPartialContent), nil
 		}
-		return newDownloadResponse(fdr.PresignedURL, f.data[start:], http.StatusPartialContent), nil
+		return newDownloadResponse(url, f.data[start:], http.StatusPartialContent), nil
 	}
-	if fdr.RangeStart != nil && fdr.RangeEnd != nil {
-		start, end := *fdr.RangeStart, *fdr.RangeEnd
+	if rangeStart != nil && rangeEnd != nil {
+		start, end := *rangeStart, *rangeEnd
 		if start < 0 || end >= int64(len(f.data)) || start > end {
 			return nil, errors.New("invalid range")
 		}
-		return newDownloadResponse(fdr.PresignedURL, f.data[start:end+1], http.StatusPartialContent), nil
+		return newDownloadResponse(url, f.data[start:end+1], http.StatusPartialContent), nil
 	}
-	return newDownloadResponse(fdr.PresignedURL, f.data, http.StatusOK), nil
+	return newDownloadResponse(url, f.data, http.StatusOK), nil
 }
 
 type fakeDrsClient struct {
@@ -178,7 +179,7 @@ func (f *fakeDrsClient) GetDownloadURL(ctx context.Context, id string, accessTyp
 	return nil, errors.New("not implemented")
 }
 
-func (f *fakeDrsClient) GetDownloadPartURL(ctx context.Context, id string, start, end int64) (*transfer.SignedURL, error) {
+func (f *fakeDrsClient) GetDownloadPartURL(ctx context.Context, id string, start, end int64) (*xfer.SignedURL, error) {
 	return nil, errors.New("not implemented")
 }
 
@@ -190,23 +191,19 @@ func (f *fakeDrsClient) ResolveDownloadURL(ctx context.Context, guid string, acc
 	return f.backend.ResolveDownloadURL(ctx, guid, accessID)
 }
 
-func (f *fakeDrsClient) Download(ctx context.Context, fdr *common.FileDownloadResponseObject) (*http.Response, error) {
-	return f.backend.Download(ctx, fdr)
+func (f *fakeDrsClient) Download(ctx context.Context, url string, rangeStart, rangeEnd *int64) (*http.Response, error) {
+	return f.backend.Download(ctx, url, rangeStart, rangeEnd)
 }
 
 func (f *fakeDrsClient) ResolveUploadURL(ctx context.Context, guid, filename string, metadata common.FileMetadata, bucket string) (string, error) {
 	return "", errors.New("not implemented")
 }
 
-func (f *fakeDrsClient) ResolveUploadURLs(ctx context.Context, requests []common.UploadURLResolveRequest) ([]common.UploadURLResolveResponse, error) {
+func (f *fakeDrsClient) Resolve(ctx context.Context, id string) (*xfer.ResolvedObject, error) {
 	return nil, errors.New("not implemented")
 }
 
-func (f *fakeDrsClient) Resolve(ctx context.Context, id string) (*transfer.ResolvedObject, error) {
-	return nil, errors.New("not implemented")
-}
-
-func (f *fakeDrsClient) Stat(ctx context.Context, guid string) (*transfer.ObjectMetadata, error) {
+func (f *fakeDrsClient) Stat(ctx context.Context, guid string) (*xfer.ObjectMetadata, error) {
 	return nil, errors.New("not implemented")
 }
 
@@ -258,7 +255,7 @@ func (f *fakeDrsClient) Name() string {
 	return f.backend.Name()
 }
 
-func (f *fakeDrsClient) Logger() *logs.Gen3Logger {
+func (f *fakeDrsClient) Logger() xfer.TransferLogger {
 	return f.backend.Logger()
 }
 
@@ -377,7 +374,7 @@ func TestDownloadToPathMultipart(t *testing.T) {
 		context.Background(),
 		dc,
 		fake,
-		fake.Logger().Logger,
+		fake.Logger().Slog(),
 		"guid-789",
 		dst,
 		"",
@@ -421,7 +418,7 @@ func TestDownloadToPathMultipartUsesProtocolAccessID(t *testing.T) {
 		context.Background(),
 		dc,
 		fake,
-		fake.Logger().Logger,
+		fake.Logger().Slog(),
 		"guid-protocol",
 		dst,
 		"s3",
@@ -448,15 +445,15 @@ func TestDownloadToPathMultipartErrorPropagation(t *testing.T) {
 		logger: logs.NewGen3Logger(nil, "", ""),
 		data:   payload,
 		size:   int64(len(payload)),
-		doFunc: func(_ context.Context, fdr *common.FileDownloadResponseObject) (*http.Response, error) {
-			if fdr.RangeStart != nil && fdr.RangeEnd != nil && *fdr.RangeStart == 256*1024 {
+		doFunc: func(_ context.Context, url string, rangeStart, rangeEnd *int64) (*http.Response, error) {
+			if rangeStart != nil && rangeEnd != nil && *rangeStart == 256*1024 {
 				return nil, errors.New("boom")
 			}
-			if fdr.RangeStart != nil && fdr.RangeEnd != nil {
-				start, end := *fdr.RangeStart, *fdr.RangeEnd
-				return newDownloadResponse(fdr.PresignedURL, payload[start:end+1], http.StatusPartialContent), nil
+			if rangeStart != nil && rangeEnd != nil {
+				start, end := *rangeStart, *rangeEnd
+				return newDownloadResponse(url, payload[start:end+1], http.StatusPartialContent), nil
 			}
-			return newDownloadResponse(fdr.PresignedURL, payload, http.StatusOK), nil
+			return newDownloadResponse(url, payload, http.StatusOK), nil
 		},
 	}
 	dc := &fakeDrsClient{backend: fake}
@@ -465,7 +462,7 @@ func TestDownloadToPathMultipartErrorPropagation(t *testing.T) {
 		context.Background(),
 		dc,
 		fake,
-		fake.Logger().Logger,
+		fake.Logger().Slog(),
 		"guid-multipart-error",
 		dst,
 		"",
@@ -511,7 +508,7 @@ func TestDownloadToPathMultipartProgressAccounting(t *testing.T) {
 		ctx,
 		dc,
 		fake,
-		fake.Logger().Logger,
+		fake.Logger().Slog(),
 		"guid-progress",
 		dst,
 		"",
@@ -559,12 +556,16 @@ func TestDownloadToPathSingleResumeFromPartial(t *testing.T) {
 		logger: logs.NewGen3Logger(nil, "", ""),
 		data:   payload,
 		size:   int64(len(payload)),
-		doFunc: func(_ context.Context, fdr *common.FileDownloadResponseObject) (*http.Response, error) {
-			gotRange = fdr.Range
-			if fdr.Range <= 0 {
+		doFunc: func(_ context.Context, url string, rangeStart, rangeEnd *int64) (*http.Response, error) {
+			if rangeStart == nil {
+				gotRange = 0
+			} else {
+				gotRange = *rangeStart
+			}
+			if gotRange <= 0 {
 				return nil, errors.New("expected resume range")
 			}
-			return newDownloadResponse(fdr.PresignedURL, payload[fdr.Range:], http.StatusPartialContent), nil
+			return newDownloadResponse(url, payload[gotRange:], http.StatusPartialContent), nil
 		},
 	}
 	dc := &fakeDrsClient{backend: fake}
@@ -573,7 +574,7 @@ func TestDownloadToPathSingleResumeFromPartial(t *testing.T) {
 		context.Background(),
 		dc,
 		fake,
-		fake.Logger().Logger,
+		fake.Logger().Slog(),
 		"guid-resume",
 		dst,
 		"",
@@ -611,12 +612,12 @@ func TestDownloadToPathSingleRangeIgnoredRestarts(t *testing.T) {
 		logger: logs.NewGen3Logger(nil, "", ""),
 		data:   payload,
 		size:   int64(len(payload)),
-		doFunc: func(_ context.Context, fdr *common.FileDownloadResponseObject) (*http.Response, error) {
+		doFunc: func(_ context.Context, url string, rangeStart, rangeEnd *int64) (*http.Response, error) {
 			// Simulate server ignoring Range and returning full body with 200.
-			if fdr.Range <= 0 {
+			if rangeStart == nil || *rangeStart <= 0 {
 				return nil, errors.New("expected range request")
 			}
-			return newDownloadResponse(fdr.PresignedURL, payload, http.StatusOK), nil
+			return newDownloadResponse(url, payload, http.StatusOK), nil
 		},
 	}
 	dc := &fakeDrsClient{backend: fake}
@@ -625,7 +626,7 @@ func TestDownloadToPathSingleRangeIgnoredRestarts(t *testing.T) {
 		context.Background(),
 		dc,
 		fake,
-		fake.Logger().Logger,
+		fake.Logger().Slog(),
 		"guid-range-ignored",
 		dst,
 		"",
@@ -657,7 +658,7 @@ func TestDownloadToPathAlreadyCompleteSkipsDownload(t *testing.T) {
 		logger: logs.NewGen3Logger(nil, "", ""),
 		data:   payload,
 		size:   int64(len(payload)),
-		doFunc: func(_ context.Context, _ *common.FileDownloadResponseObject) (*http.Response, error) {
+		doFunc: func(_ context.Context, _ string, _ *int64, _ *int64) (*http.Response, error) {
 			calls++
 			return newDownloadResponse("https://download.example.com/object", payload, http.StatusOK), nil
 		},
@@ -668,7 +669,7 @@ func TestDownloadToPathAlreadyCompleteSkipsDownload(t *testing.T) {
 		context.Background(),
 		dc,
 		fake,
-		fake.Logger().Logger,
+		fake.Logger().Slog(),
 		"guid-complete",
 		dst,
 		"",

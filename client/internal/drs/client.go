@@ -18,7 +18,7 @@ import (
 	"github.com/calypr/syfon/client/pkg/hash"
 	"github.com/calypr/syfon/client/pkg/logs"
 	"github.com/calypr/syfon/client/pkg/request"
-	"github.com/calypr/syfon/client/transfer"
+	"github.com/calypr/syfon/client/xfer"
 )
 
 type Config struct {
@@ -31,12 +31,12 @@ type internalListResponse struct {
 
 type DrsClient struct {
 	request.RequestInterface
-	transfer.Backend // Embedded for automatic delegation Across S3, GCS, and Azure.
-	bucketName       string
-	orgName          string
-	projectId        string
-	baseURL          string
-	config           Config
+	xfer.Backend // Embedded for automatic delegation Across S3, GCS, and Azure.
+	bucketName   string
+	orgName      string
+	projectId    string
+	baseURL      string
+	config       Config
 }
 
 // NewDrsClient is the Gen3 resolution layer initialization.
@@ -51,7 +51,7 @@ func NewDrsClient(req request.RequestInterface, cred *conf.Credential, logger *l
 	if cred != nil {
 		c.baseURL = strings.TrimRight(strings.TrimSpace(cred.APIEndpoint), "/")
 	}
-	c.Backend = transfer.New(logger, c)
+	c.Backend = xfer.New(logger, c)
 	return c
 }
 
@@ -64,7 +64,7 @@ func NewLocalDrsClient(req request.RequestInterface, baseURL string, logger *log
 			MultiPartThreshold: common.FileSizeLimit,
 		},
 	}
-	c.Backend = transfer.New(logger, c)
+	c.Backend = xfer.New(logger, c)
 	return c
 }
 
@@ -85,13 +85,13 @@ func (c *DrsClient) endpoint(path string) string {
 func (c *DrsClient) Name() string { return "DRSClient" }
 
 // Resolve translates a GUID into a physical transfer specification.
-func (c *DrsClient) Resolve(ctx context.Context, id string) (*transfer.ResolvedObject, error) {
+func (c *DrsClient) Resolve(ctx context.Context, id string) (*xfer.ResolvedObject, error) {
 	drsObject, err := ResolveObject(ctx, c, id)
 	if err != nil {
 		return nil, err
 	}
 
-	resolved := &transfer.ResolvedObject{
+	resolved := &xfer.ResolvedObject{
 		Id:           drsObject.Id,
 		Name:         drsObject.Name,
 		Size:         drsObject.Size,
@@ -269,7 +269,7 @@ func (c *DrsClient) GetDownloadURL(ctx context.Context, id string, accessID stri
 	return &out, nil
 }
 
-func (c *DrsClient) GetDownloadPartURL(ctx context.Context, id string, start, end int64) (*transfer.SignedURL, error) {
+func (c *DrsClient) GetDownloadPartURL(ctx context.Context, id string, start, end int64) (*xfer.SignedURL, error) {
 	q := url.Values{}
 	q.Set("start", fmt.Sprintf("%d", start))
 	q.Set("end", fmt.Sprintf("%d", end))
@@ -299,7 +299,7 @@ func (c *DrsClient) GetDownloadPartURL(ctx context.Context, id string, start, en
 		}
 	}
 
-	return &transfer.SignedURL{
+	return &xfer.SignedURL{
 		URL:     out.Url,
 		Headers: headers,
 	}, nil
@@ -625,133 +625,37 @@ func (c *DrsClient) ResolveUploadURL(ctx context.Context, guid, filename string,
 	return out.URL, nil
 }
 
-func (c *DrsClient) ResolveUploadURLs(ctx context.Context, requests []common.UploadURLResolveRequest) ([]common.UploadURLResolveResponse, error) {
-	type uploadBulkItem struct {
-		FileID   string `json:"file_id"`
-		Bucket   string `json:"bucket,omitempty"`
-		FileName string `json:"file_name,omitempty"`
-	}
-	type uploadBulkRequest struct {
-		Requests []uploadBulkItem `json:"requests"`
-	}
-	type uploadBulkResult struct {
-		FileID   string `json:"file_id,omitempty"`
-		Bucket   string `json:"bucket,omitempty"`
-		FileName string `json:"file_name,omitempty"`
-		URL      string `json:"url,omitempty"`
-		Status   int32  `json:"status,omitempty"`
-		Error    string `json:"error,omitempty"`
-	}
-	type uploadBulkResponse struct {
-		Results []uploadBulkResult `json:"results"`
-	}
-
-	if len(requests) == 0 {
-		return []common.UploadURLResolveResponse{}, nil
-	}
-
-	items := make([]uploadBulkItem, 0, len(requests))
-	for _, req := range requests {
-		fileID := strings.TrimSpace(req.GUID)
-		if fileID == "" {
-			fileID = strings.TrimSpace(req.Filename)
-		}
-		items = append(items, uploadBulkItem{
-			FileID:   fileID,
-			Bucket:   req.Bucket,
-			FileName: req.Filename,
-		})
-	}
-
-	body, err := json.Marshal(uploadBulkRequest{Requests: items})
-	if err != nil {
-		return nil, err
-	}
-
-	rb := c.New(http.MethodPost, c.endpoint("/data/upload/bulk")).
-		WithBody(bytes.NewReader(body)).
-		WithHeader("Content-Type", "application/json")
-
-	resp, err := c.Do(ctx, rb)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to resolve upload URLs: %s", resp.Status)
-	}
-
-	var out uploadBulkResponse
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return nil, err
-	}
-
-	results := make([]common.UploadURLResolveResponse, len(requests))
-	for i := range requests {
-		results[i] = common.UploadURLResolveResponse{
-			GUID:     requests[i].GUID,
-			Filename: requests[i].Filename,
-			Bucket:   requests[i].Bucket,
-			Status:   http.StatusBadGateway,
-			Error:    "missing result for request",
-		}
-	}
-	for i := range out.Results {
-		if i >= len(results) {
-			break
-		}
-		r := out.Results[i]
-		results[i].URL = r.URL
-		results[i].Status = int(r.Status)
-		results[i].Error = r.Error
-		if strings.TrimSpace(results[i].GUID) == "" {
-			results[i].GUID = r.FileID
-		}
-		if strings.TrimSpace(results[i].Filename) == "" {
-			results[i].Filename = r.FileName
-		}
-		if strings.TrimSpace(results[i].Bucket) == "" {
-			results[i].Bucket = r.Bucket
-		}
-		if results[i].Status == 0 {
-			results[i].Status = http.StatusOK
-		}
-	}
-
-	return results, nil
-}
-
-func (c *DrsClient) InitMultipartUpload(ctx context.Context, guid string, filename string, bucket string) (*common.MultipartUploadInit, error) {
+func (c *DrsClient) InitMultipartUpload(ctx context.Context, guid string, filename string, bucket string) (string, string, error) {
 	body, err := json.Marshal(map[string]string{
 		"guid":      guid,
 		"file_name": filename,
 		"bucket":    bucket,
 	})
 	if err != nil {
-		return nil, err
+		return "", "", err
 	}
 	rb := c.New(http.MethodPost, c.endpoint("/data/multipart/init")).
 		WithBody(bytes.NewReader(body)).
 		WithHeader("Content-Type", "application/json")
 	resp, err := c.Do(ctx, rb)
 	if err != nil {
-		return nil, err
+		return "", "", err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		return nil, fmt.Errorf("failed to init multipart upload: %s", resp.Status)
+		return "", "", fmt.Errorf("failed to init multipart upload: %s", resp.Status)
 	}
 	var out struct {
 		GUID     string `json:"guid"`
 		UploadID string `json:"uploadId"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return nil, err
+		return "", "", err
 	}
 	if strings.TrimSpace(out.UploadID) == "" {
-		return nil, fmt.Errorf("multipart init missing uploadId")
+		return "", "", fmt.Errorf("multipart init missing uploadId")
 	}
-	return &common.MultipartUploadInit{GUID: out.GUID, UploadID: out.UploadID}, nil
+	return out.UploadID, out.GUID, nil
 }
 
 func (c *DrsClient) GetMultipartUploadURL(ctx context.Context, key string, uploadID string, partNumber int32, bucket string) (string, error) {
@@ -787,7 +691,7 @@ func (c *DrsClient) GetMultipartUploadURL(ctx context.Context, key string, uploa
 	return out.PresignedURL, nil
 }
 
-func (c *DrsClient) CompleteMultipartUpload(ctx context.Context, key string, uploadID string, parts []common.MultipartUploadPart, bucket string) error {
+func (c *DrsClient) CompleteMultipartUpload(ctx context.Context, key string, uploadID string, parts []internalapi.InternalMultipartPart, bucket string) error {
 	body, err := json.Marshal(map[string]any{
 		"key":      key,
 		"bucket":   bucket,
@@ -817,24 +721,17 @@ func (c *DrsClient) ResolveDownloadURL(ctx context.Context, guid string, accessI
 	return ResolveDownloadURL(ctx, c, guid, accessID)
 }
 
-func (c *DrsClient) Download(ctx context.Context, fdr *common.FileDownloadResponseObject) (*http.Response, error) {
-	if strings.TrimSpace(fdr.PresignedURL) == "" {
-		downloadURL, err := c.ResolveDownloadURL(ctx, fdr.GUID, "")
-		if err != nil {
-			return nil, err
-		}
-		fdr.PresignedURL = downloadURL
-	}
-	return transfer.GenericDownload(ctx, c.RequestInterface, fdr)
+func (c *DrsClient) Download(ctx context.Context, signedURL string, rangeStart, rangeEnd *int64) (*http.Response, error) {
+	return xfer.GenericDownload(ctx, c.RequestInterface, signedURL, rangeStart, rangeEnd)
 }
 
 func (c *DrsClient) Upload(ctx context.Context, signedURL string, body io.Reader, size int64) error {
-	_, err := transfer.DoUpload(ctx, c.RequestInterface, signedURL, body, size)
+	_, err := xfer.DoUpload(ctx, c.RequestInterface, signedURL, body, size)
 	return err
 }
 
 func (c *DrsClient) UploadPart(ctx context.Context, signedURL string, body io.Reader, size int64) (string, error) {
-	return transfer.DoUpload(ctx, c.RequestInterface, signedURL, body, size)
+	return xfer.DoUpload(ctx, c.RequestInterface, signedURL, body, size)
 }
 
 func (c *DrsClient) DeleteFile(ctx context.Context, guid string) (string, error) {

@@ -9,17 +9,21 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/calypr/syfon/client/pkg/common"
 	"github.com/calypr/syfon/client/conf"
+	"github.com/calypr/syfon/client/pkg/common"
 )
 
+type accessTokenResponse struct {
+	AccessToken string `json:"access_token"`
+}
+
 func (t *AuthTransport) NewAccessToken(ctx context.Context) error {
-	if t.Cred.APIKey == "" {
+	if t.Cred == nil || t.Cred.APIKey == "" {
 		return errors.New("APIKey is required to refresh access token")
 	}
 
 	refreshClient := &http.Client{Transport: t.Base}
-
+	// ... (rest of NewAccessToken implementation)
 	payload := map[string]string{"api_key": t.Cred.APIKey}
 	reader, err := common.ToJSONReader(payload)
 	if err != nil {
@@ -43,7 +47,7 @@ func (t *AuthTransport) NewAccessToken(ctx context.Context) error {
 		return errors.New("failed to refresh token, status: " + strconv.Itoa(resp.StatusCode))
 	}
 
-	var result common.AccessTokenStruct
+	var result accessTokenResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return err
 	}
@@ -71,18 +75,24 @@ func (t *AuthTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		return t.Base.RoundTrip(req)
 	}
 
-	t.mu.RLock()
-	token := t.Cred.AccessToken
-	t.mu.RUnlock()
+	var token string
+	if t.Cred != nil {
+		t.mu.RLock()
+		token = t.Cred.AccessToken
+		t.mu.RUnlock()
+	}
 
 	// Just add the header and pass it down
-	if token != "" {
+	if token != "" && req.Header.Get("Authorization") == "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	return t.Base.RoundTrip(req)
 }
 
 func (t *AuthTransport) refreshOnce(ctx context.Context) error {
+	if t.Cred == nil {
+		return nil
+	}
 	t.refreshMu.Lock()
 	defer t.refreshMu.Unlock()
 

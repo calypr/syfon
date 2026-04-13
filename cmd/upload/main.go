@@ -8,11 +8,9 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	syclient "github.com/calypr/syfon/client"
-	"github.com/calypr/syfon/cmd/cliutil"
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 )
@@ -45,28 +43,35 @@ var Cmd = &cobra.Command{
 			did = uuid.NewString()
 		}
 
-		c := cliutil.NewSyfonClient(cmd)
+		serverURL, err := cmd.Flags().GetString("server")
+		if err != nil {
+			return fmt.Errorf("get server flag: %w", err)
+		}
+		c, err := syclient.New(serverURL)
+		if err != nil {
+			return err
+		}
 		uploadReq := syclient.UploadBlankRequest{}
-		uploadReq.SetGuid(did)
+		(&uploadReq).SetGuid(did)
 		signed, err := c.Data().UploadBlank(ctx, uploadReq)
 		if err != nil {
 			return fmt.Errorf("request upload url: %w", err)
 		}
-		uploadURL := strings.TrimSpace(signed.GetUrl())
+		uploadURL := strings.TrimSpace((&signed).GetUrl())
 		if uploadURL == "" {
 			return fmt.Errorf("empty upload url for did %s", did)
 		}
 
-		if err := uploadBytesToURL(ctx, uploadURL, srcPath); err != nil {
+		if err := uploadBytesToURL(ctx, uploadURL, srcPath, c); err != nil {
 			return err
 		}
 
-		objectURL, err := cliutil.CanonicalObjectURLFromSignedURL(uploadURL, strings.TrimSpace(signed.GetBucket()), did)
+		objectURL, err := c.Data().CanonicalObjectURL(uploadURL, strings.TrimSpace((&signed).GetBucket()), did)
 		if err != nil {
 			return err
 		}
 
-		if err := cliutil.EnsureRecordWithURL(ctx, c, did, objectURL, filepath.Base(srcPath), info.Size(), ""); err != nil {
+		if err := c.Index().Upsert(ctx, did, objectURL, filepath.Base(srcPath), info.Size(), ""); err != nil {
 			return fmt.Errorf("record update failed: %w", err)
 		}
 
@@ -75,7 +80,7 @@ var Cmd = &cobra.Command{
 	},
 }
 
-func uploadBytesToURL(ctx context.Context, rawURL, srcPath string) error {
+func uploadBytesToURL(ctx context.Context, rawURL, srcPath string, c *syclient.Client) error {
 	parsed, err := url.Parse(strings.TrimSpace(rawURL))
 	if err != nil {
 		return fmt.Errorf("parse upload url: %w", err)
@@ -107,19 +112,21 @@ func uploadBytesToURL(ctx context.Context, rawURL, srcPath string) error {
 		if err != nil {
 			return fmt.Errorf("stat source file: %w", err)
 		}
-		req, err := http.NewRequestWithContext(ctx, http.MethodPut, rawURL, f)
-		if err != nil {
-			return fmt.Errorf("build upload request: %w", err)
-		}
-		req.ContentLength = fi.Size()
-		req.Header.Set("Content-Length", strconv.FormatInt(fi.Size(), 10))
-		resp, err := cliutil.NewHTTPClient().Do(req)
+
+		rb := c.Requestor().New(http.MethodPut, rawURL)
+		rb.WithBody(f)
+		rb.WithPartSize(fi.Size())
+
+		resp, err := c.Requestor().Do(ctx, rb)
 		if err != nil {
 			return fmt.Errorf("upload request failed: %w", err)
 		}
 		defer resp.Body.Close()
 		if resp.StatusCode >= 400 {
-			body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+			body, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
+			if err != nil {
+				return fmt.Errorf("upload failed status=%d: %w", resp.StatusCode, err)
+			}
 			return fmt.Errorf("upload failed status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(body)))
 		}
 		return nil

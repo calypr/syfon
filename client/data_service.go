@@ -2,17 +2,31 @@ package client
 
 import (
 	"context"
+	"fmt"
+	"io"
+	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
+
+	internalapi "github.com/calypr/syfon/apigen/internalapi"
+	"github.com/calypr/syfon/client/pkg/logs"
+	"github.com/calypr/syfon/client/pkg/request"
+	"github.com/calypr/syfon/client/xfer"
 )
 
 type DataService struct {
-	c *Client
+	base *baseService
+	drs  *DRSService
 }
 
 func (d *DataService) UploadBlank(ctx context.Context, req UploadBlankRequest) (UploadBlankResponse, error) {
 	var out UploadBlankResponse
-	err := d.c.doJSON(ctx, "POST", "/data/upload", nil, req, &out)
+	rb, err := d.base.requestor.New("POST", "/data/upload").WithJSONBody(req)
+	if err != nil {
+		return out, err
+	}
+	err = d.base.requestor.DoJSON(ctx, rb, &out)
 	return out, err
 }
 
@@ -28,13 +42,18 @@ func (d *DataService) UploadURL(ctx context.Context, req UploadURLRequest) (Sign
 		q.Set("expires_in", strconv.Itoa(req.ExpiresIn))
 	}
 	var out SignedURL
-	err := d.c.doJSON(ctx, "GET", "/data/upload/"+url.PathEscape(req.FileID), q, nil, &out)
+	rb := d.base.requestor.New("GET", "/data/upload/"+url.PathEscape(req.FileID)).WithQueryValues(q)
+	err := d.base.requestor.DoJSON(ctx, rb, &out)
 	return out, err
 }
 
 func (d *DataService) UploadBulk(ctx context.Context, req UploadBulkRequest) (UploadBulkResponse, error) {
 	var out UploadBulkResponse
-	err := d.c.doJSON(ctx, "POST", "/data/upload/bulk", nil, req, &out)
+	rb, err := d.base.requestor.New("POST", "/data/upload/bulk").WithJSONBody(req)
+	if err != nil {
+		return out, err
+	}
+	err = d.base.requestor.DoJSON(ctx, rb, &out)
 	return out, err
 }
 
@@ -47,39 +66,147 @@ func (d *DataService) DownloadURL(ctx context.Context, did string, expiresIn int
 		q.Set("redirect", "true")
 	}
 	var out SignedURL
-	err := d.c.doJSON(ctx, "GET", "/data/download/"+url.PathEscape(did), q, nil, &out)
+	rb := d.base.requestor.New("GET", "/data/download/"+url.PathEscape(did)).WithQueryValues(q)
+	err := d.base.requestor.DoJSON(ctx, rb, &out)
 	return out, err
 }
 
 func (d *DataService) MultipartInit(ctx context.Context, req MultipartInitRequest) (MultipartInitResponse, error) {
 	var out MultipartInitResponse
-	err := d.c.doJSON(ctx, "POST", "/data/multipart/init", nil, req, &out)
+	rb, err := d.base.requestor.New("POST", "/data/multipart/init").WithJSONBody(req)
+	if err != nil {
+		return out, err
+	}
+	err = d.base.requestor.DoJSON(ctx, rb, &out)
 	return out, err
 }
 
 func (d *DataService) MultipartUpload(ctx context.Context, req MultipartUploadRequest) (MultipartUploadResponse, error) {
 	var out MultipartUploadResponse
-	err := d.c.doJSON(ctx, "POST", "/data/multipart/upload", nil, req, &out)
+	rb, err := d.base.requestor.New("POST", "/data/multipart/upload").WithJSONBody(req)
+	if err != nil {
+		return out, err
+	}
+	err = d.base.requestor.DoJSON(ctx, rb, &out)
 	return out, err
 }
 
 func (d *DataService) MultipartComplete(ctx context.Context, req MultipartCompleteRequest) error {
-	return d.c.doJSON(ctx, "POST", "/data/multipart/complete", nil, req, nil)
-}
-
-// Compatibility wrappers used by current CLI code.
-func (c *Client) RequestUploadURL(ctx context.Context, guid string) (SignedURL, error) {
-	req := UploadBlankRequest{}
-	(&req).SetGuid(guid)
-	out, err := c.Data().UploadBlank(ctx, req)
+	rb, err := d.base.requestor.New("POST", "/data/multipart/complete").WithJSONBody(req)
 	if err != nil {
-		return SignedURL{}, err
+		return err
 	}
-	signed := SignedURL{}
-	(&signed).SetUrl((&out).GetUrl())
-	return signed, nil
+	return d.base.requestor.DoJSON(ctx, rb, nil)
 }
 
-func (c *Client) GetDownloadURL(ctx context.Context, did string) (SignedURL, error) {
-	return c.Data().DownloadURL(ctx, did, 0, false)
+// --- transfer.ObjectWriter interface support ---
+
+func (d *DataService) GetWriter(ctx context.Context, guid string) (io.WriteCloser, error) {
+	req := UploadBlankRequest{}
+	req.SetGuid(guid)
+	_, err := d.UploadBlank(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	return nil, fmt.Errorf("GetWriter not yet fully implemented for DataService")
+}
+
+// --- transfer.Downloader interface support ---
+
+func (d *DataService) ResolveDownloadURL(ctx context.Context, guid string, accessID string) (string, error) {
+	resp, err := d.DownloadURL(ctx, guid, 0, false)
+	if err != nil {
+		return "", err
+	}
+	return resp.GetUrl(), nil
+}
+
+func (d *DataService) Download(ctx context.Context, signedURL string, rangeStart, rangeEnd *int64) (*http.Response, error) {
+	return xfer.GenericDownload(ctx, d.base.requestor, signedURL, rangeStart, rangeEnd)
+}
+
+// --- transfer.Service interface support ---
+
+func (d *DataService) Name() string { return "syfon-data-service" }
+
+func (d *DataService) Logger() xfer.TransferLogger {
+	if r, ok := d.base.requestor.(*request.Request); ok {
+		return r.Logs
+	}
+	return logs.NewGen3Logger(nil, "", "")
+}
+
+// --- transfer.MultipartURLSigner interface support ---
+
+func (d *DataService) InitMultipartUpload(ctx context.Context, guid, filename, bucket string) (string, string, error) {
+	req := MultipartInitRequest{}
+	req.SetGuid(guid)
+	req.SetFileName(filename)
+	req.SetBucket(bucket)
+	resp, err := d.MultipartInit(ctx, req)
+	if err != nil {
+		return "", "", err
+	}
+	return resp.GetUploadId(), resp.GetGuid(), nil
+}
+
+func (d *DataService) GetMultipartUploadURL(ctx context.Context, key, uploadID string, partNum int32, bucket string) (string, error) {
+	req := MultipartUploadRequest{}
+	req.SetKey(key)
+	req.SetUploadId(uploadID)
+	req.SetPartNumber(partNum)
+	req.SetBucket(bucket)
+	resp, err := d.MultipartUpload(ctx, req)
+	if err != nil {
+		return "", err
+	}
+	return resp.GetPresignedUrl(), nil
+}
+
+func (d *DataService) CompleteMultipartUpload(ctx context.Context, key, uploadID string, parts []internalapi.InternalMultipartPart, bucket string) error {
+	var apiParts []MultipartPart
+	for _, p := range parts {
+		apiParts = append(apiParts, MultipartPart{
+			PartNumber: p.PartNumber,
+			ETag:       p.ETag,
+		})
+	}
+	req := MultipartCompleteRequest{}
+	req.SetKey(key)
+	req.SetUploadId(uploadID)
+	req.SetBucket(bucket)
+	req.SetParts(apiParts)
+	return d.MultipartComplete(ctx, req)
+}
+
+func (d *DataService) CanonicalObjectURL(signedURL, bucketHint, fallbackDID string) (string, error) {
+	parsed, err := url.Parse(strings.TrimSpace(signedURL))
+	if err != nil {
+		return "", fmt.Errorf("parse signed url: %w", err)
+	}
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+
+	switch strings.ToLower(parsed.Scheme) {
+	case "file":
+		return parsed.String(), nil
+	case "http", "https":
+		bucketHint = strings.TrimSpace(bucketHint)
+		if bucketHint == "" {
+			return "", fmt.Errorf("server returned upload URL without bucket; cannot canonicalize object URL safely")
+		}
+		key := strings.Trim(strings.TrimSpace(parsed.Path), "/")
+		if strings.HasPrefix(key, bucketHint+"/") {
+			key = strings.TrimPrefix(key, bucketHint+"/")
+		}
+		if key == "" {
+			key = strings.TrimSpace(fallbackDID)
+		}
+		if key == "" {
+			return "", fmt.Errorf("unable to derive object key from upload URL")
+		}
+		return "s3://" + bucketHint + "/" + key, nil
+	default:
+		return parsed.String(), nil
+	}
 }

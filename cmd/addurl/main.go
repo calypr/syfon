@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/calypr/syfon/cmd/cliutil"
+	syclient "github.com/calypr/syfon/client"
 	"github.com/spf13/cobra"
 )
 
@@ -28,8 +28,15 @@ var Cmd = &cobra.Command{
 		if strings.TrimSpace(addURL) == "" {
 			return fmt.Errorf("--url is required")
 		}
-		c := cliutil.NewSyfonClient(cmd)
-		if err := cliutil.EnsureRecordWithURL(ctx, c, addURLDid, addURL, addURLName, addURLSize, addURLSHA256); err != nil {
+		serverURL, err := cmd.Flags().GetString("server")
+		if err != nil {
+			return fmt.Errorf("get server flag: %w", err)
+		}
+		c, err := syclient.New(serverURL)
+		if err != nil {
+			return err
+		}
+		if err := c.Index().Upsert(ctx, addURLDid, addURL, addURLName, addURLSize, addURLSHA256); err != nil {
 			return err
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "record updated: %s\n", addURLDid)

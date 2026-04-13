@@ -9,17 +9,16 @@ import (
 
 	"github.com/calypr/syfon/client/drs"
 	"github.com/calypr/syfon/client/pkg/common"
-	"github.com/calypr/syfon/client/transfer"
+	"github.com/calypr/syfon/client/xfer"
 	"github.com/vbauerster/mpb/v8"
 	"github.com/vbauerster/mpb/v8/decor"
 )
 
-// DownloadMultiple is the public entry point called from g3cmd
 func DownloadMultiple(
 	ctx context.Context,
 	dc drs.Client,
-	bk transfer.Downloader,
-	objects []common.ManifestObject,
+	bk xfer.Downloader,
+	guids []string,
 	downloadPath string,
 	filenameFormat string,
 	rename bool,
@@ -29,12 +28,9 @@ func DownloadMultiple(
 	skipCompleted bool,
 ) error {
 	logger := bk.Logger()
-
-	// === Input validation ===
 	if numParallel < 1 {
 		return fmt.Errorf("numparallel must be a positive integer")
 	}
-
 	var err error
 	downloadPath, err = common.ParseRootPath(downloadPath)
 	if err != nil {
@@ -43,53 +39,26 @@ func DownloadMultiple(
 	if !strings.HasSuffix(downloadPath, "/") {
 		downloadPath += "/"
 	}
-
-	filenameFormat = strings.ToLower(strings.TrimSpace(filenameFormat))
-	if filenameFormat != "original" && filenameFormat != "guid" && filenameFormat != "combined" {
-		return fmt.Errorf("filename-format must be one of: original, guid, combined")
+	if err := handleWarningsAndConfirmation(ctx, logger.Slog(), downloadPath, filenameFormat, rename, noPrompt); err != nil {
+		return err
 	}
-	if (filenameFormat == "guid" || filenameFormat == "combined") && rename {
-		logger.WarnContext(ctx, "NOTICE: rename flag is ignored in guid/combined mode")
-		rename = false
-	}
-
-	// === Warnings and user confirmation ===
-	if err := handleWarningsAndConfirmation(ctx, logger.Logger, downloadPath, filenameFormat, rename, noPrompt); err != nil {
-		return err // aborted by user
-	}
-
-	// === Create download directory ===
 	if err := os.MkdirAll(downloadPath, 0766); err != nil {
 		return fmt.Errorf("cannot create directory %s: %w", downloadPath, err)
 	}
-
-	// === Prepare files (metadata + local validation) ===
-	toDownload, skipped, renamed, err := prepareFiles(ctx, dc, bk, objects, downloadPath, filenameFormat, rename, skipCompleted, protocol)
+	toDownload, skipped, renamed, err := prepareFiles(ctx, dc, bk, guids, downloadPath, filenameFormat, rename, skipCompleted, protocol)
 	if err != nil {
 		return err
 	}
-
-	logger.InfoContext(ctx, "Summary",
-		"Total objects", len(objects),
-		"To download", len(toDownload),
-		"Skipped", len(skipped))
-
-	// === Download phase ===
 	downloaded, downloadErr := downloadFiles(ctx, bk, toDownload, numParallel, protocol)
-
-	// === Final summary ===
 	logger.InfoContext(ctx, fmt.Sprintf("%d files downloaded successfully.", downloaded))
-	printRenamed(ctx, logger.Logger, renamed)
-	printSkipped(ctx, logger.Logger, skipped)
-
+	printRenamed(ctx, logger.Slog(), renamed)
+	printSkipped(ctx, logger.Slog(), skipped)
 	if downloadErr != nil {
 		logger.WarnContext(ctx, "Some downloads failed. See errors above.")
 	}
-
-	return nil // we log failures but don't fail the whole command unless critical
+	return nil
 }
 
-// handleWarningsAndConfirmation prints warnings and asks for confirmation if needed
 func handleWarningsAndConfirmation(ctx context.Context, logger *slog.Logger, downloadPath, filenameFormat string, rename, noPrompt bool) error {
 	if filenameFormat == "guid" || filenameFormat == "combined" {
 		logger.WarnContext(ctx, fmt.Sprintf("WARNING: in %q mode, duplicate files in %q will be overwritten", filenameFormat, downloadPath))
@@ -98,7 +67,6 @@ func handleWarningsAndConfirmation(ctx context.Context, logger *slog.Logger, dow
 	} else {
 		logger.InfoContext(ctx, fmt.Sprintf("NOTICE: rename=true in original mode – duplicates in %q will be renamed with a counter", downloadPath))
 	}
-
 	if noPrompt {
 		return nil
 	}
@@ -108,64 +76,42 @@ func handleWarningsAndConfirmation(ctx context.Context, logger *slog.Logger, dow
 	return nil
 }
 
-// prepareFiles gathers metadata, checks local files, collects skips/renames
 func prepareFiles(
 	ctx context.Context,
 	dc drs.Client,
-	bk transfer.Downloader,
-	objects []common.ManifestObject,
+	bk xfer.Downloader,
+	guids []string,
 	downloadPath, filenameFormat string,
 	rename, skipCompleted bool,
 	protocol string,
-) ([]common.FileDownloadResponseObject, []RenamedOrSkippedFileInfo, []RenamedOrSkippedFileInfo, error) {
+) ([]downloadRequest, []RenamedOrSkippedFileInfo, []RenamedOrSkippedFileInfo, error) {
 	logger := bk.Logger()
 	renamed := make([]RenamedOrSkippedFileInfo, 0)
 	skipped := make([]RenamedOrSkippedFileInfo, 0)
-	toDownload := make([]common.FileDownloadResponseObject, 0, len(objects))
-
+	toDownload := make([]downloadRequest, 0, len(guids))
 	p := mpb.New(mpb.WithOutput(os.Stdout))
-	bar := p.AddBar(int64(len(objects)),
-		mpb.PrependDecorators(decor.Name("Preparing "), decor.CountersNoUnit("%d / %d")),
-		mpb.AppendDecorators(decor.Percentage()),
-	)
+	bar := p.AddBar(int64(len(guids)), mpb.PrependDecorators(decor.Name("Preparing "), decor.CountersNoUnit("%d / %d")), mpb.AppendDecorators(decor.Percentage()))
 
-	for _, obj := range objects {
-		if obj.GUID == "" {
-			logger.WarnContext(ctx, "Empty GUID, skipping entry")
+	for _, guid := range guids {
+		if guid == "" {
 			bar.Increment()
 			continue
 		}
-
-		info := &IndexdResponse{Name: obj.Title, Size: obj.Size}
-		var err error
-		if info.Name == "" || info.Size == 0 {
-			// Very strict object id checking
-			info, err = GetFileInfo(ctx, dc, logger, obj.GUID, protocol, downloadPath, filenameFormat, rename, &renamed)
-			if err != nil {
-				return nil, nil, nil, err
-			}
+		info, err := GetFileInfo(ctx, dc, logger, guid, protocol, downloadPath, filenameFormat, rename, &renamed)
+		if err != nil {
+			return nil, nil, nil, err
 		}
-
-		fdr := common.FileDownloadResponseObject{
-			DownloadPath: downloadPath,
-			Filename:     info.Name,
-			GUID:         obj.GUID,
-		}
-
+		fdr := downloadRequest{downloadPath: downloadPath, filename: info.Name, guid: guid}
 		if !rename {
-			validateLocalFileStat(logger.Logger, &fdr, int64(info.Size), skipCompleted)
+			validateLocalFileStat(logger.Slog(), &fdr, int64(info.Size), skipCompleted)
 		}
-
-		if fdr.Skip {
-			logger.InfoContext(ctx, fmt.Sprintf("Skipping %q (GUID: %s) – complete local copy exists", fdr.Filename, fdr.GUID))
-			skipped = append(skipped, RenamedOrSkippedFileInfo{GUID: fdr.GUID, OldFilename: fdr.Filename})
+		if fdr.skip {
+			skipped = append(skipped, RenamedOrSkippedFileInfo{GUID: fdr.guid, OldFilename: fdr.filename})
 		} else {
 			toDownload = append(toDownload, fdr)
 		}
-
 		bar.Increment()
 	}
 	p.Wait()
-	logger.InfoContext(ctx, "Preparation complete")
 	return toDownload, skipped, renamed, nil
 }
