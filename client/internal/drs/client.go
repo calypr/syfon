@@ -500,7 +500,8 @@ func (c *DrsClient) RegisterFile(ctx context.Context, oid, path string) (*DRSObj
 	if strings.TrimSpace(c.bucketName) == "" {
 		return nil, fmt.Errorf("bucket name is required")
 	}
-	did := DrsUUID(c.projectId, oid)
+	org, project := c.resolveScope(c.projectId)
+	did := DrsUUID(org, project, oid)
 	obj, err := BuildDrsObjWithPrefix(filepath.Base(path), oid, stat.Size(), did, c.bucketName, c.orgName, c.projectId, "")
 	if err != nil {
 		return nil, err
@@ -529,7 +530,8 @@ func (c *DrsClient) AddURL(ctx context.Context, blobURL, sha256 string, opts ...
 		name = sha256
 	}
 
-	did := DrsUUID(c.projectId, sha256)
+	org, project := c.resolveScope(c.projectId)
+	did := DrsUUID(org, project, sha256)
 	obj := &DRSObject{
 		Id:   did,
 		Name: name,
@@ -568,7 +570,8 @@ func (c *DrsClient) UpsertRecord(ctx context.Context, url string, sha256 string,
 	if strings.TrimSpace(c.bucketName) == "" {
 		return nil, fmt.Errorf("bucket name is required")
 	}
-	did := DrsUUID(project, sha256)
+	org, project := c.resolveScope(projectId)
+	did := DrsUUID(org, project, sha256)
 	obj, err := BuildDrsObjWithPrefix(filepath.Base(strings.TrimSpace(url)), sha256, fileSize, did, c.bucketName, c.orgName, project, "")
 	if err != nil {
 		return nil, err

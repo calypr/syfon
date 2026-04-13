@@ -28,6 +28,10 @@ type InternalRecord struct {
 	FileName *string `json:"file_name,omitempty"`
 	Organization *string `json:"organization,omitempty"`
 	Project *string `json:"project,omitempty"`
+	Version *string `json:"version,omitempty"`
+	Description *string `json:"description,omitempty"`
+	CreatedTime *string `json:"created_time,omitempty"`
+	UpdatedTime *string `json:"updated_time,omitempty"`
 }
 
 // NewInternalRecord instantiates a new InternalRecord object
@@ -303,6 +307,134 @@ func (o *InternalRecord) SetProject(v string) {
 	o.Project = &v
 }
 
+// GetVersion returns the Version field value if set, zero value otherwise.
+func (o *InternalRecord) GetVersion() string {
+	if o == nil || IsNil(o.Version) {
+		var ret string
+		return ret
+	}
+	return *o.Version
+}
+
+// GetVersionOk returns a tuple with the Version field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *InternalRecord) GetVersionOk() (*string, bool) {
+	if o == nil || IsNil(o.Version) {
+		return nil, false
+	}
+	return o.Version, true
+}
+
+// HasVersion returns a boolean if a field has been set.
+func (o *InternalRecord) HasVersion() bool {
+	if o != nil && !IsNil(o.Version) {
+		return true
+	}
+
+	return false
+}
+
+// SetVersion gets a reference to the given string and assigns it to the Version field.
+func (o *InternalRecord) SetVersion(v string) {
+	o.Version = &v
+}
+
+// GetDescription returns the Description field value if set, zero value otherwise.
+func (o *InternalRecord) GetDescription() string {
+	if o == nil || IsNil(o.Description) {
+		var ret string
+		return ret
+	}
+	return *o.Description
+}
+
+// GetDescriptionOk returns a tuple with the Description field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *InternalRecord) GetDescriptionOk() (*string, bool) {
+	if o == nil || IsNil(o.Description) {
+		return nil, false
+	}
+	return o.Description, true
+}
+
+// HasDescription returns a boolean if a field has been set.
+func (o *InternalRecord) HasDescription() bool {
+	if o != nil && !IsNil(o.Description) {
+		return true
+	}
+
+	return false
+}
+
+// SetDescription gets a reference to the given string and assigns it to the Description field.
+func (o *InternalRecord) SetDescription(v string) {
+	o.Description = &v
+}
+
+// GetCreatedTime returns the CreatedTime field value if set, zero value otherwise.
+func (o *InternalRecord) GetCreatedTime() string {
+	if o == nil || IsNil(o.CreatedTime) {
+		var ret string
+		return ret
+	}
+	return *o.CreatedTime
+}
+
+// GetCreatedTimeOk returns a tuple with the CreatedTime field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *InternalRecord) GetCreatedTimeOk() (*string, bool) {
+	if o == nil || IsNil(o.CreatedTime) {
+		return nil, false
+	}
+	return o.CreatedTime, true
+}
+
+// HasCreatedTime returns a boolean if a field has been set.
+func (o *InternalRecord) HasCreatedTime() bool {
+	if o != nil && !IsNil(o.CreatedTime) {
+		return true
+	}
+
+	return false
+}
+
+// SetCreatedTime gets a reference to the given string and assigns it to the CreatedTime field.
+func (o *InternalRecord) SetCreatedTime(v string) {
+	o.CreatedTime = &v
+}
+
+// GetUpdatedTime returns the UpdatedTime field value if set, zero value otherwise.
+func (o *InternalRecord) GetUpdatedTime() string {
+	if o == nil || IsNil(o.UpdatedTime) {
+		var ret string
+		return ret
+	}
+	return *o.UpdatedTime
+}
+
+// GetUpdatedTimeOk returns a tuple with the UpdatedTime field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *InternalRecord) GetUpdatedTimeOk() (*string, bool) {
+	if o == nil || IsNil(o.UpdatedTime) {
+		return nil, false
+	}
+	return o.UpdatedTime, true
+}
+
+// HasUpdatedTime returns a boolean if a field has been set.
+func (o *InternalRecord) HasUpdatedTime() bool {
+	if o != nil && !IsNil(o.UpdatedTime) {
+		return true
+	}
+
+	return false
+}
+
+// SetUpdatedTime gets a reference to the given string and assigns it to the UpdatedTime field.
+func (o *InternalRecord) SetUpdatedTime(v string) {
+	o.UpdatedTime = &v
+}
+
 func (o InternalRecord) MarshalJSON() ([]byte, error) {
 	toSerialize,err := o.ToMap()
 	if err != nil {
@@ -336,6 +468,18 @@ func (o InternalRecord) ToMap() (map[string]interface{}, error) {
 	}
 	if !IsNil(o.Project) {
 		toSerialize["project"] = o.Project
+	}
+	if !IsNil(o.Version) {
+		toSerialize["version"] = o.Version
+	}
+	if !IsNil(o.Description) {
+		toSerialize["description"] = o.Description
+	}
+	if !IsNil(o.CreatedTime) {
+		toSerialize["created_time"] = o.CreatedTime
+	}
+	if !IsNil(o.UpdatedTime) {
+		toSerialize["updated_time"] = o.UpdatedTime
 	}
 	return toSerialize, nil
 }

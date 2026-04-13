@@ -102,12 +102,8 @@ github.com/bytedance/sonic v1.14.0 h1:/OfKt8HFw0kh2rj8N0F6C/qPGRESq0BbaNZgcNXXzQ
 github.com/bytedance/sonic v1.14.0/go.mod h1:WoEbx8WTcFJfzCe0hbmyTGrfjt8PzNEBdxlNUO24NhA=
 github.com/bytedance/sonic/loader v0.3.0 h1:dskwH8edlzNMctoruo8FPTJDF3vLtDT0sXZwvZJyqeA=
 github.com/bytedance/sonic/loader v0.3.0/go.mod h1:N8A3vUdtUebEY2/VQC0MyhYeKUFosQU6FxH2JmUe6VI=
-github.com/calypr/syfon/apigen v0.1.3 h1:+vih5rHVjrkIoiWaMJa3OnFUrrTIKcMH940XyQKnWRc=
-github.com/calypr/syfon/apigen v0.1.3/go.mod h1:2oqNkseovHqbU8kYu4nU+w5VrwhzAj6KfPL7YTBQEGk=
-github.com/calypr/syfon/client v0.1.4 h1:TQbxJnrws/3UHfum2az1yeUS3SEkNn1c0TsXYAJ7Ru8=
-github.com/calypr/syfon/client v0.1.4/go.mod h1:WkZookhX2k5sTXCLDlURfswh2OiOmMFOUfS1ZMVC45U=
-github.com/cenkalti/backoff/v4 v4.3.0 h1:MyRJ/UdXutAwSAT+s3wNd7MfTIcy71VQueUuFK343L8=
-github.com/cenkalti/backoff/v4 v4.3.0/go.mod h1:Y3VNntkOUPxTVeUxJ/G5vcM//AlwfmyYozVcomhLiZE=
+github.com/calypr/syfon/apigen v0.1.4 h1:HIyYxScWyESFMBpGfFfGLnHJbbRlOnTQVz3ZKmIclN0=
+github.com/calypr/syfon/apigen v0.1.4/go.mod h1:2oqNkseovHqbU8kYu4nU+w5VrwhzAj6KfPL7YTBQEGk=
 github.com/cespare/xxhash/v2 v2.3.0 h1:UL815xU9SqsFlibzuggzjXhog7bL6oX9BbNZnL2UFvs=
 github.com/cespare/xxhash/v2 v2.3.0/go.mod h1:VGX0DQ3Q6kWi7AoAeZDth3/j3BFtOZR5XLFGgcrjCOs=
 github.com/cloudwego/base64x v0.1.6 h1:t11wG9AECkCDk5fMSoxmufanudBtJ+/HemLstXDLI2M=

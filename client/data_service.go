@@ -70,13 +70,13 @@ func (d *DataService) MultipartComplete(ctx context.Context, req MultipartComple
 // Compatibility wrappers used by current CLI code.
 func (c *Client) RequestUploadURL(ctx context.Context, guid string) (SignedURL, error) {
 	req := UploadBlankRequest{}
-	req.SetGuid(guid)
+	(&req).SetGuid(guid)
 	out, err := c.Data().UploadBlank(ctx, req)
 	if err != nil {
 		return SignedURL{}, err
 	}
 	signed := SignedURL{}
-	signed.SetUrl(out.GetUrl())
+	(&signed).SetUrl((&out).GetUrl())
 	return signed, nil
 }
 

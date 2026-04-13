@@ -16,30 +16,19 @@ import (
 
 // --- Domain Mapping Tools ---
 
-func canonicalIDFromInternal(req internalapi.InternalRecord) string {
+func canonicalIDFromInternal(req *internalapi.InternalRecord) string {
 	if did := strings.TrimSpace(req.GetDid()); did != "" {
 		if _, err := uuid.Parse(did); err == nil {
 			return did
 		}
 	}
-	hashes := req.GetHashes()
-	if v, ok := hashes["sha256"]; ok && strings.TrimSpace(v) != "" {
-		authz := append([]string(nil), req.GetAuthz()...)
-		if len(authz) == 0 && req.HasOrganization() {
-			path := core.ResourcePathForScope(req.GetOrganization(), req.GetProject())
-			if path != "" {
-				authz = append(authz, path)
-			}
-		}
-		return core.MintObjectIDFromChecksum(v, authz)
-	}
 	return ""
 }
 
-func internalToDrs(req internalapi.InternalRecord) (*core.InternalObject, error) {
+func internalToDrs(req *internalapi.InternalRecord) (*core.InternalObject, error) {
 	id := canonicalIDFromInternal(req)
 	if id == "" {
-		return nil, fmt.Errorf("sha256 hash is required unless did is a UUID")
+		return nil, fmt.Errorf("valid UUID is required in 'did' field")
 	}
 	now := time.Now()
 	obj := &drs.DrsObject{
@@ -49,6 +38,19 @@ func internalToDrs(req internalapi.InternalRecord) (*core.InternalObject, error)
 		CreatedTime: now,
 		UpdatedTime: now,
 		Name:        req.GetFileName(),
+		Version:     req.GetVersion(),
+		Description: req.GetDescription(),
+	}
+
+	if ct := req.GetCreatedTime(); ct != "" {
+		if t, err := time.Parse(time.RFC3339, ct); err == nil {
+			obj.CreatedTime = t
+		}
+	}
+	if ut := req.GetUpdatedTime(); ut != "" {
+		if t, err := time.Parse(time.RFC3339, ut); err == nil {
+			obj.UpdatedTime = t
+		}
 	}
 	for t, v := range req.GetHashes() {
 		obj.Checksums = append(obj.Checksums, drs.Checksum{Type: t, Checksum: v})
@@ -78,7 +80,7 @@ func internalToDrs(req internalapi.InternalRecord) (*core.InternalObject, error)
 	return &core.InternalObject{DrsObject: *obj, Authorizations: authz}, nil
 }
 
-func drsToInternalRecord(obj *core.InternalObject) internalapi.InternalRecord {
+func drsToInternalRecord(obj *core.InternalObject) *internalapi.InternalRecord {
 	hashes := make(map[string]string, len(obj.Checksums))
 	for _, c := range obj.Checksums {
 		hashes[c.Type] = c.Checksum
@@ -97,10 +99,10 @@ func drsToInternalRecord(obj *core.InternalObject) internalapi.InternalRecord {
 		}
 	}
 	scope := core.ParseResourcePath(firstAuthz(authz))
-	resp := internalapi.InternalRecord{
-		Authz: authz,
-		Urls:  urls,
-	}
+	resp := internalapi.NewInternalRecord()
+	resp.SetAuthz(authz)
+	resp.SetUrls(urls)
+
 	if obj.Id != "" {
 		resp.SetDid(obj.Id)
 	}
@@ -120,24 +122,49 @@ func drsToInternalRecord(obj *core.InternalObject) internalapi.InternalRecord {
 	return resp
 }
 
-func drsToInternal(obj *core.InternalObject) internalapi.InternalRecordResponse {
-	base := drsToInternalRecord(obj)
-	resp := internalapi.InternalRecordResponse{
-		Did:          base.Did,
-		Hashes:       base.Hashes,
-		Size:         base.Size,
-		Urls:         base.Urls,
-		Authz:        base.Authz,
-		FileName:     base.FileName,
-		Organization: base.Organization,
-		Project:      base.Project,
+func drsToInternal(obj *core.InternalObject) *internalapi.InternalRecordResponse {
+	hashes := make(map[string]string, len(obj.Checksums))
+	for _, c := range obj.Checksums {
+		hashes[c.Type] = c.Checksum
 	}
-	if !obj.CreatedTime.IsZero() {
-		resp.SetCreatedDate(obj.CreatedTime.Format(time.RFC3339))
+	if len(hashes) == 0 && obj.Id != "" {
+		hashes["sha256"] = obj.Id
 	}
-	if !obj.UpdatedTime.IsZero() {
-		resp.SetUpdatedDate(obj.UpdatedTime.Format(time.RFC3339))
+
+	var urls []string
+	authz := append([]string(nil), obj.Authorizations...)
+	if len(obj.AccessMethods) > 0 {
+		for _, am := range obj.AccessMethods {
+			if am.AccessUrl.Url != "" {
+				urls = append(urls, am.AccessUrl.Url)
+			}
+		}
 	}
+	scope := core.ParseResourcePath(firstAuthz(authz))
+
+	resp := internalapi.NewInternalRecordResponse()
+	resp.SetDid(obj.Id)
+	resp.SetSize(obj.Size)
+	resp.SetFileName(obj.Name)
+	resp.SetVersion(obj.Version)
+	resp.SetDescription(obj.Description)
+	resp.SetHashes(hashes)
+	resp.SetUrls(urls)
+	resp.SetAuthz(authz)
+
+	if scope.Organization != "" {
+		resp.SetOrganization(scope.Organization)
+	}
+	if scope.Project != "" {
+		resp.SetProject(scope.Project)
+	}
+
+	resp.SetCreatedTime(obj.CreatedTime.Format(time.RFC3339))
+	resp.SetUpdatedTime(obj.UpdatedTime.Format(time.RFC3339))
+
+	resp.SetCreatedDate(obj.CreatedTime.Format(time.RFC3339))
+	resp.SetUpdatedDate(obj.UpdatedTime.Format(time.RFC3339))
+
 	return resp
 }
 

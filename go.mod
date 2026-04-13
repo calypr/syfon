@@ -2,6 +2,8 @@ module github.com/calypr/syfon
 
 go 1.26.1
 
+replace github.com/calypr/syfon/client v0.1.4 => ./client
+
 require (
 	cloud.google.com/go/storage v1.57.2
 	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.6.3
@@ -11,7 +13,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.7
 	github.com/aws/aws-sdk-go-v2/service/kms v1.50.4
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.95.1
-	github.com/calypr/syfon/apigen v0.1.3
+	github.com/calypr/syfon/apigen v0.1.4
 	github.com/calypr/syfon/client v0.1.4
 	github.com/getkin/kin-openapi v0.133.0
 	github.com/gin-gonic/gin v1.11.0

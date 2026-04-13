@@ -89,7 +89,8 @@ func handleInternalBulkCreate(database core.DatabaseInterface) http.HandlerFunc 
 			return
 		}
 		results := make([]internalapi.InternalRecord, 0, len(req.Records))
-		for i, rec := range req.Records {
+		for i := range req.Records {
+			rec := &req.Records[i]
 			obj, err := internalToDrs(rec)
 			if err != nil {
 				writeHTTPError(w, r, http.StatusBadRequest, fmt.Sprintf("record[%d]: %v", i, err), err)
@@ -115,14 +116,14 @@ func handleInternalBulkCreate(database core.DatabaseInterface) http.HandlerFunc 
 			if aliased {
 				resp := drsToInternalRecord(canonicalObj)
 				resp.SetDid(obj.Id)
-				results = append(results, resp)
+				results = append(results, *resp)
 				continue
 			}
 			if err := database.CreateObject(r.Context(), obj); err != nil {
 				writeDBError(w, r, err)
 				return
 			}
-			results = append(results, drsToInternalRecord(obj))
+			results = append(results, *drsToInternalRecord(obj))
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
@@ -169,7 +170,7 @@ func handleInternalBulkDocuments(database core.DatabaseInterface) http.HandlerFu
 			if len(objs[i].Authorizations) > 0 && !core.HasMethodAccess(r.Context(), "read", objs[i].Authorizations) {
 				continue
 			}
-			out = append(out, drsToInternal(&objs[i]))
+			out = append(out, *drsToInternal(&objs[i]))
 		}
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(out); err != nil {
@@ -218,7 +219,7 @@ func handleInternalBulkHashes(database core.DatabaseInterface) http.HandlerFunc 
 					continue
 				}
 				seen[o.Id] = struct{}{}
-				results = append(results, drsToInternalRecord(&o))
+				results = append(results, *drsToInternalRecord(&o))
 			}
 		}
 
@@ -354,12 +355,12 @@ func handleInternalCreate(w http.ResponseWriter, r *http.Request, database core.
 		writeHTTPError(w, r, http.StatusBadRequest, "Invalid request body", nil)
 		return
 	}
-	obj, err := internalToDrs(req)
+	obj, err := internalToDrs(&req)
 	if err != nil {
 		writeHTTPError(w, r, http.StatusBadRequest, err.Error(), err)
 		return
 	}
-	aliased, canonicalObj, aliasErr := maybeAliasBySHA256(r.Context(), database, req, obj)
+	aliased, canonicalObj, aliasErr := maybeAliasBySHA256(r.Context(), database, &req, obj)
 	if aliasErr != nil {
 		writeDBError(w, r, aliasErr)
 		return
@@ -387,7 +388,7 @@ func handleInternalCreate(w http.ResponseWriter, r *http.Request, database core.
 	}
 }
 
-func maybeAliasBySHA256(ctx context.Context, database core.DatabaseInterface, req internalapi.InternalRecord, obj *core.InternalObject) (bool, *core.InternalObject, error) {
+func maybeAliasBySHA256(ctx context.Context, database core.DatabaseInterface, req *internalapi.InternalRecord, obj *core.InternalObject) (bool, *core.InternalObject, error) {
 	if obj == nil {
 		return false, nil, nil
 	}
@@ -623,7 +624,7 @@ func handleInternalList(w http.ResponseWriter, r *http.Request, database core.Da
 			if hashType != "" && !objectHasChecksumTypeAndValue(o, hashType, hash) {
 				continue
 			}
-			records = append(records, drsToInternalRecord(&o))
+			records = append(records, *drsToInternalRecord(&o))
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -666,7 +667,7 @@ func handleInternalList(w http.ResponseWriter, r *http.Request, database core.Da
 			if len(obj.Authorizations) > 0 && !core.HasMethodAccess(r.Context(), "read", obj.Authorizations) {
 				continue
 			}
-			records = append(records, drsToInternalRecord(obj))
+			records = append(records, *drsToInternalRecord(obj))
 		}
 		records = paginateRecords(records, offset, limit)
 		w.Header().Set("Content-Type", "application/json")
@@ -698,7 +699,7 @@ func handleInternalList(w http.ResponseWriter, r *http.Request, database core.Da
 		if len(obj.Authorizations) > 0 && !core.HasMethodAccess(r.Context(), "read", obj.Authorizations) {
 			continue
 		}
-		records = append(records, drsToInternalRecord(obj))
+		records = append(records, *drsToInternalRecord(obj))
 	}
 	records = paginateRecords(records, offset, limit)
 	w.Header().Set("Content-Type", "application/json")

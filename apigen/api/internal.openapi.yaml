@@ -611,6 +611,14 @@ components:
           type: string
         project:
           type: string
+        version:
+          type: string
+        description:
+          type: string
+        created_time:
+          type: string
+        updated_time:
+          type: string
     InternalRecordResponse:
       allOf:
         - $ref: '#/components/schemas/InternalRecord'
