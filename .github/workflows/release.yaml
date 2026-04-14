@@ -28,17 +28,17 @@ jobs:
     secrets: inherit
 
   build:
-    name: Build (${{ matrix.goos }}/${{ matrix.goarch }})
+    name: Build (${{ matrix.os }}/${{ matrix.arch }})
     needs: [test]
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { runner: ubuntu-latest,     goos: linux,  goarch: amd64 }
-          - { runner: ubuntu-24.04-arm,  goos: linux,  goarch: arm64 }
-          - { runner: macos-26-intel,    goos: darwin, goarch: amd64 }
-          - { runner: macos-latest,      goos: darwin, goarch: arm64 }
+          - { os: linux, arch: amd64, runner: ubuntu-latest }
+          - { os: linux, arch: arm64, runner: ubuntu-24.04-arm }
+          - { os: darwin, arch: amd64, runner: macos-latest }
+          - { os: darwin, arch: arm64, runner: macos-latest }
 
     steps:
       - name: Checkout
@@ -54,19 +54,19 @@ jobs:
 
       - name: Build
         env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
+          GOOS: ${{ matrix.os == 'linux' && 'linux' || 'darwin' }}
+          GOARCH: ${{ matrix.arch }}
           GIT_BRANCH: ${{ github.ref_name }}
           GIT_UPSTREAM: ${{ github.server_url }}/${{ github.repository }}
         run: |
           CGO_ENABLED=1 make build
-          mv syfon syfon-${{ matrix.goos }}-${{ matrix.goarch }}
+          mv syfon syfon-${{ matrix.os }}-${{ matrix.arch }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: syfon-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: syfon-${{ matrix.goos }}-${{ matrix.goarch }}
+          name: syfon-${{ matrix.os }}-${{ matrix.arch }}
+          path: syfon-${{ matrix.os }}-${{ matrix.arch }}
           if-no-files-found: error
           retention-days: 1
 

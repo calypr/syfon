@@ -11,7 +11,7 @@ on:
   push:
     branches:
       - main
-      - develop
+      - development
   workflow_dispatch:
   workflow_call:
 
