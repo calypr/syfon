@@ -174,6 +174,7 @@ install() {
 	echo "Installing Syfon to $DEST..."
 	mkdir -p $DEST
 	mv syfon $DEST
+	chmod +x $DEST/syfon
 
 	# Clean up
 	rm $TAR_NAME $CHECKSUM_FILE
