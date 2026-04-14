@@ -43,7 +43,7 @@ func init() {
 
 	RootCmd.AddCommand(validate.Cmd)
 	RootCmd.AddCommand(server.Cmd)
-	RootCmd.AddCommand(version.New(Version))
+	RootCmd.AddCommand(version.Cmd)
 	RootCmd.AddCommand(ping.Cmd)
 	RootCmd.AddCommand(bucket.Cmd)
 	RootCmd.AddCommand(addurl.Cmd)
