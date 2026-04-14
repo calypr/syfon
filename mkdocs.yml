@@ -14,3 +14,4 @@ nav:
   - Encryption: encryption.md
   - Deployment: deployment.md
   - Troubleshooting: troubleshooting.md
+  - ADR: middleware-validation-authz-plugins.md
