@@ -49,3 +49,4 @@ nav:
   - Architecture Decisions:
     - Internal vs GA4GH DRS API: adr-internal-vs-ga4gh-drs.md
     - One-Time Bootstrap Claim: adr-one-time-program-bootstrap-claim.md
+    - ADR: middleware-validation-authz-plugins.md
