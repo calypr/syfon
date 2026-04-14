@@ -54,7 +54,7 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
         run: |
-          CGO_ENABLED=1 make build-release
+          CGO_ENABLED=1 make build
           mv syfon syfon-${{ matrix.goos }}-${{ matrix.goarch }}
 
       - name: Upload artifact
