@@ -47,6 +47,10 @@ build:
 install:
 	@GOCACHE="$(GOCACHE)" go install -ldflags "$(LDFLAGS)" ./...
 
+.PHONY: build-release
+build-release:
+	CGO_ENABLED=1 GOCACHE="$(GOCACHE)" go build -ldflags "$(LDFLAGS)" -o syfon .
+
 # Build binaries for all OS/Architectures
 .PHONY: snapshot
 snapshot: release-dep
