@@ -1,4 +1,4 @@
-<p align="center">
+<div align="center">
   <img src="docs/images/syfon-logo.png" alt="syfon logo" width="520" />
   <br><br>
   <a href="https://pkg.go.dev/github.com/calypr/syfon"><img src="https://pkg.go.dev/badge/github.com/calypr/syfon.svg" alt="Go Reference"></a>
@@ -8,9 +8,9 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
   <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs Welcome"></a>
   <a href="https://github.com/calypr/syfon/releases"><img src="https://img.shields.io/github/v/release/calypr/syfon" alt="Latest Release"></a>
-</p>
-
-A lightweight, production-grade implementation of a GA4GH Data Repository Service (DRS) server in Go.
+  
+  <p align="center">A lightweight, production-grade implementation of a GA4GH Data Repository Service (DRS) server in Go.</p>
+</div>
 
 # Quickstart
 
