@@ -96,7 +96,7 @@ func TestSyfonExternalServerE2E(t *testing.T) {
 	}
 }
 
-var uploadedIDRe = regexp.MustCompile(`(?:successfully\s+)?uploaded[:\s]+([a-f0-9-]{36})`)
+var uploadedIDRe = regexp.MustCompile(`(?:successfully\s+)?uploaded[:\s]+([a-f0-9-]{36,64})`)
 
 func parseUploadedObjectID(out string) (string, error) {
 	for _, line := range strings.Split(out, "\n") {

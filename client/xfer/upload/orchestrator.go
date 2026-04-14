@@ -36,7 +36,15 @@ func RegisterFile(ctx context.Context, bk UploadBackend, dc drs.Client, drsObjec
 	// (Skipping for now to prioritize core functionality, but can be added back)
 
 	// 4. Determine upload filename/key
+	// Content-Addressable Storage (CAS): We prioritize the SHA256 hash as the storage key.
 	uploadFilename := filepath.Base(filePath)
+	for _, c := range drsObject.Checksums {
+		if strings.ToLower(c.Type) == "sha256" {
+			uploadFilename = c.Checksum
+			break
+		}
+	}
+
 	if len(drsObject.AccessMethods) > 0 {
 		for _, am := range drsObject.AccessMethods {
 			if am.Type == "s3" || am.Type == "gs" {

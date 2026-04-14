@@ -120,10 +120,18 @@ var Cmd = &cobra.Command{
 		serviceInfoController := drs.NewServiceInfoAPIController(service)
 		uploadRequestController := drs.NewUploadRequestAPIController(service)
 
-		// Init Router (register generated routes by specificity to avoid path shadowing:
-		// e.g. /objects/register must match before /objects/{object_id}).
+		// Init Router
 		router := mux.NewRouter().StrictSlash(true)
-		registerAPIRoutes(router, objectsController, serviceInfoController, uploadRequestController)
+
+		// 1. Health check endpoint remains public and bypasses all middleware
+		router.HandleFunc(config.RouteHealthz, func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("OK"))
+		}).Methods(http.MethodGet)
+
+		// 2. All other routes are registered on a subrouter that uses authentication and tracing middleware
+		api := router.PathPrefix("/").Subrouter()
+		registerAPIRoutes(api, objectsController, serviceInfoController, uploadRequestController)
 
 		// Init AuthZ Middleware
 		// We use a standard slog.Logger for data-client compatibility
@@ -136,26 +144,21 @@ var Cmd = &cobra.Command{
 		)
 		requestIDMiddleware := middleware.NewRequestIDMiddleware(slogLogger)
 
-		// Apply Middlewares
-		router.Use(requestIDMiddleware.Middleware)
-		router.Use(authzMiddleware.Middleware)
+		// Apply Middlewares to the protected API subrouter
+		api.Use(requestIDMiddleware.Middleware)
+		api.Use(authzMiddleware.Middleware)
 
-		router.HandleFunc(config.RouteHealthz, func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("OK"))
-		})
+		docs.RegisterSwaggerRoutes(api)
+		coreapi.RegisterCoreRoutes(api, database)
+		metrics.RegisterMetricsRoutes(api, database)
 
-		docs.RegisterSwaggerRoutes(router)
-		coreapi.RegisterCoreRoutes(router, database)
-		metrics.RegisterMetricsRoutes(router, database)
+		internaldrs.RegisterInternalIndexRoutes(api, database)
 
-		internaldrs.RegisterInternalIndexRoutes(router, database)
-
-		internaldrs.RegisterInternalDataRoutes(router, database, uM)
+		internaldrs.RegisterInternalDataRoutes(api, database, uM)
 		logger.Info("internal drs compatibility routes enabled")
 
 		// Register Git LFS API routes
-		lfs.RegisterLFSRoutes(router, database, uM, lfs.Options{
+		lfs.RegisterLFSRoutes(api, database, uM, lfs.Options{
 			MaxBatchObjects:              cfg.LFS.MaxBatchObjects,
 			MaxBatchBodyBytes:            cfg.LFS.MaxBatchBodyBytes,
 			RequestLimitPerMinute:        cfg.LFS.RequestLimitPerMinute,

@@ -1,6 +1,8 @@
 package upload
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,7 +11,6 @@ import (
 	syclient "github.com/calypr/syfon/client"
 	"github.com/calypr/syfon/client/drs"
 	"github.com/calypr/syfon/client/xfer/upload"
-	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 )
 
@@ -37,10 +38,6 @@ var Cmd = &cobra.Command{
 			return fmt.Errorf("--file must be a regular file")
 		}
 
-		did := strings.TrimSpace(uploadDID)
-		if did == "" {
-			did = uuid.NewString()
-		}
 		authz := strings.TrimSpace(uploadAuthz)
 		if authz == "" {
 			return fmt.Errorf("--authz is required")
@@ -55,16 +52,32 @@ var Cmd = &cobra.Command{
 			return err
 		}
 
-		// Create a DRS client from the SDK to pass to the orchestrator
-		dc := drs.NewDrsClient(c.Requestor(), nil, c.Logger())
+		// Calculate SHA256 hash of the file to use as the content-addressable ID
+		fileBytes, err := os.ReadFile(srcPath)
+		if err != nil {
+			return fmt.Errorf("read file for hashing: %w", err)
+		}
+		hash := sha256.Sum256(fileBytes)
+		checksum := hex.EncodeToString(hash[:])
 
-		// Set bucket/project if available (for future-proofing, currently uses defaults)
-		// For now, we'll use the provided authz to infer scope if needed.
+		did := strings.TrimSpace(uploadDID)
+		if did == "" {
+			did = checksum
+		}
+
+		// Create a DRS client from the SDK
+		dc := drs.NewDrsClient(c.Requestor(), nil, c.Logger())
 
 		drsObj := &drs.DRSObject{
 			Id:   did,
 			Name: filepath.Base(srcPath),
 			Size: info.Size(),
+			Checksums: []drs.Checksum{
+				{
+					Type:     "sha256",
+					Checksum: checksum,
+				},
+			},
 			AccessMethods: []drs.AccessMethod{
 				{
 					Type: "s3", // Default type
@@ -76,8 +89,8 @@ var Cmd = &cobra.Command{
 		}
 
 		// Register and upload using the SDK's orchestrator
-		// This will automatically handle multipart (if > 4.5GB) and progress display.
 		fmt.Fprintf(cmd.OutOrStdout(), "Uploading %s (%s)...\n", srcPath, upload.FormatSize(info.Size()))
+		fmt.Fprintf(cmd.OutOrStdout(), "DID: %s\n", did)
 
 		_, err = upload.RegisterFile(ctx, c.Data(), dc, drsObj, srcPath, "")
 		if err != nil {
