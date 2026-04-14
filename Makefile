@@ -40,8 +40,8 @@ LDFLAGS     := -X github.com/calypr/syfon/version.Version=$(GIT_VERSION) \
                -X github.com/calypr/syfon/version.GitUpstream=$(GIT_UPSTREAM)
 
 .PHONY: build
-build:
-	@GOCACHE="$(GOCACHE)" go build -ldflags "$(LDFLAGS)" -o syfon ./...
+build: build
+	CGO_ENABLED=1 GOCACHE="$(GOCACHE)" go build -ldflags "$(LDFLAGS)" -o syfon .
 
 .PHONY: install
 install:
