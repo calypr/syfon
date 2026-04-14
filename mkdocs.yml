@@ -1,4 +1,5 @@
 site_name: Syfon
+site_url: https://calypr.org/syfon/
 site_description: A lightweight, production-grade GA4GH DRS server in Go.
 theme:
   name: material
