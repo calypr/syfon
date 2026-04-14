@@ -55,6 +55,8 @@ jobs:
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
+          GIT_BRANCH: ${{ github.ref_name }}
+          GIT_UPSTREAM: ${{ github.server_url }}/${{ github.repository }}
         run: |
           CGO_ENABLED=1 make build
           mv syfon syfon-${{ matrix.goos }}-${{ matrix.goarch }}
@@ -135,3 +137,17 @@ jobs:
             $flags \
             dist/*.tar.gz \
             dist/syfon-${{ github.ref_name }}-checksums.txt
+
+      - name: Tag submodules
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          version="${{ github.ref_name }}"
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          for prefix in apigen client; do
+            subtag="${prefix}/${version}"
+            git tag "$subtag"
+            git push origin "$subtag"
+          done
