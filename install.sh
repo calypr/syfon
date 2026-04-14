@@ -182,7 +182,6 @@ install() {
 	echo "Installation successful: $DEST/syfon"
 	echo
 	$DEST/syfon version
-	echo
 	echo "Run '$DEST/syfon --help' for more info"
 }
 
