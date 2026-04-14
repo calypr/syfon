@@ -8,6 +8,7 @@ on:
     paths:
       - 'docs/**'
       - 'mkdocs.yml'
+      - 'install.sh'
   workflow_dispatch:
 
 permissions:
@@ -39,6 +40,9 @@ jobs:
 
       - name: Build site
         run: mkdocs build --site-dir site
+
+      - name: Copy install script
+        run: cp install.sh ./site/install.sh
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
