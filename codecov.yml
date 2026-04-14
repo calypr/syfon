@@ -1,6 +1,13 @@
 codecov:
   require_ci_to_pass: true
 
+comment:
+  layout: "reach,diff,flags,tree"
+  behavior: default
+  require_changes: false
+  require_base: false
+  require_head: true
+
 coverage:
   precision: 2
   round: down
@@ -26,4 +33,3 @@ flags:
     carryforward: true
   client:
     carryforward: true
-
