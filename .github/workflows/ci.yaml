@@ -1,6 +1,7 @@
 name: Syfon CI
 
 permissions:
+  actions: write
   contents: read
   id-token: write
 
@@ -52,14 +53,21 @@ jobs:
           mkdir -p coverage
           go test -count=1 -covermode=atomic -coverprofile=coverage/coverage.out ./...
 
-      - name: Upload coverage to Codecov
+      - name: Upload root coverage to Codecov
         uses: codecov/codecov-action@v5
         with:
           use_oidc: true
-          files: coverage/coverage.out,client/coverage/coverage.out
-          flags: root,client
+          files: coverage/coverage.out
+          flags: root
           fail_ci_if_error: true
 
+      - name: Upload client coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          use_oidc: true
+          files: client/coverage/coverage.out
+          flags: client
+          fail_ci_if_error: true
       - name: Upload coverage artifacts
         uses: actions/upload-artifact@v4
         with:
