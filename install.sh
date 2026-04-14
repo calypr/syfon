@@ -5,10 +5,10 @@ set -euo pipefail
 # set -x
 
 show_help() {
-	echo "Syphon Installation Script"
+	echo "Syfon Installation Script"
 	echo
 	echo "Usage:"
-	echo "  $0 [version] [install_path]  # Install Syphon (default: latest version to \$HOME/.local/bin)"
+	echo "  $0 [version] [install_path]  # Install Syfon (default: latest version to \$HOME/.local/bin)"
 	echo "  $0 --list                    # List available versions"
 	echo "  $0 --help                    # Show this help"
 	echo "  $0 --version <version>       # Specify version to install"
@@ -16,7 +16,7 @@ show_help() {
 }
 
 list_tags() {
-	RELEASES_URL="https://api.github.com/repos/calypr/syphon/releases"
+	RELEASES_URL="https://api.github.com/repos/calypr/syfon/releases"
 
 	# Get all releases and extract tag names
 	RELEASES_JSON=$(curl -s "$RELEASES_URL")
@@ -83,11 +83,11 @@ done
 get_release_url() {
 	if [ -z "$VERSION" ]; then
 		echo "No version specified. Fetching the latest release..."
-		RELEASE_URL="https://api.github.com/repos/calypr/syphon/releases/latest"
+		RELEASE_URL="https://api.github.com/repos/calypr/syfon/releases/latest"
 		VERSION=$(curl -s $RELEASE_URL | grep '"tag_name":' | cut -d '"' -f 4)
 	else
 		echo "Fetching release for version $VERSION..."
-		RELEASE_URL="https://api.github.com/repos/calypr/syphon/releases/tags/$VERSION"
+		RELEASE_URL="https://api.github.com/repos/calypr/syfon/releases/tags/$VERSION"
 	fi
 }
 
@@ -127,10 +127,10 @@ get_assets() {
 }
 
 download() {
-	TAR_FILE="syphon-${OS}-${ARCH}"
+	TAR_FILE="syfon-${OS}-${ARCH}"
 
 	# Download the tar.gz file and checksums.txt for the detected OS and Arch
-	echo "Downloading Syphon $VERSION for $OS $ARCH..."
+	echo "Downloading Syfon $VERSION for $OS $ARCH..."
 	for asset in $ASSETS; do
 		asset_name=$(basename "$asset")
 
@@ -167,22 +167,22 @@ install() {
 	echo "Extracting the package..."
 	tar -xzf $TAR_NAME
 
-	# Determine where to install the Syphon binary
+	# Determine where to install the Syfon binary
 	if [ -z "$DEST" ]; then
 		DEST=$HOME/.local/bin
 	fi
-	echo "Installing Syphon to $DEST..."
+	echo "Installing Syfon to $DEST..."
 	mkdir -p $DEST
-	mv syphon $DEST
+	mv syfon $DEST
 
 	# Clean up
 	rm $TAR_NAME $CHECKSUM_FILE
 
-	echo "Installation successful: $DEST/syphon"
+	echo "Installation successful: $DEST/syfon"
 	echo
-	$DEST/syphon version
+	$DEST/syfon version
 	echo
-	echo "Run '$DEST/syphon --help' for more info"
+	echo "Run '$DEST/syfon --help' for more info"
 }
 
 main() {
