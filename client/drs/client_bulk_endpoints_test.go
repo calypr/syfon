@@ -95,7 +95,7 @@ func TestBatchGetObjectsByHash_UsesBulkHashesEndpoint(t *testing.T) {
 		size := int64(12)
 		resp := internalapi.ListRecordsResponse{
 			Records: []internalapi.InternalRecord{{
-				Did:      &did,
+				Did:      did,
 				FileName: &fileName,
 				Hashes:   &hashes,
 				Size:     &size,
@@ -158,7 +158,7 @@ func TestRegisterRecords_UsesBulkCreateEndpoint(t *testing.T) {
 		size := int64(21)
 		resp := internalapi.ListRecordsResponse{
 			Records: []internalapi.InternalRecord{{
-				Did:      &did,
+				Did:      did,
 				FileName: &fileName,
 				Hashes:   &hashes,
 				Size:     &size,

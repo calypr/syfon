@@ -4,6 +4,17 @@
 
 # syfon
 
+[![Go Reference](https://pkg.go.dev/badge/github.com/calypr/syfon.svg)](https://pkg.go.dev/github.com/calypr/syfon)
+[![Go Report Card](https://goreportcard.com/badge/github.com/calypr/syfon)](https://goreportcard.com/report/github.com/calypr/syfon)
+[![Go Version](https://img.shields.io/badge/go-1.26.1-00ADD8?logo=go)](https://go.dev/doc/devel/release)
+[![CI](https://github.com/calypr/syfon/actions/workflows/ci.yaml/badge.svg)](https://github.com/calypr/syfon/actions/workflows/ci.yaml)
+[![Coverage](https://codecov.io/gh/calypr/syfon/branch/main/graph/badge.svg)](https://codecov.io/gh/calypr/syfon)
+[![dependabot](https://img.shields.io/badge/dependabot-enabled-025E8C?logo=dependabot)](https://github.com/calypr/syfon/security/dependabot)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Latest Release](https://img.shields.io/github/v/release/calypr/syfon)](https://github.com/calypr/syfon/releases)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+[![GitHub Stars](https://img.shields.io/github/stars/calypr/syfon?style=social)](https://github.com/calypr/syfon/stargazers)
+
 A lightweight, production-grade implementation of a GA4GH Data Repository Service (DRS) server in Go.
 
 ## Quickstart
@@ -268,3 +279,8 @@ The project uses a Makefile for common tasks:
 The `apigen` module is currently used as a shared model/types package, not a full server/client operation generator. In practice, we generate and commit schemas/models from OpenAPI (`components/schemas`), while route handlers and request wiring are implemented manually under `internal/api/internaldrs` and related packages. This means path/operation updates in `apigen/api/*.openapi.yaml` may change contract/docs without producing new generated handler code.
 
 This is intentional for now to keep control of runtime behavior and compatibility logic. We can expand `apigen` later to include operation-level generation (`apis`/server interfaces) once we decide to move more routing and handler contracts to generated code.
+
+## License
+
+This project is licensed under the MIT License. See [LICENSE](LICENSE).
+
