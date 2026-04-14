@@ -26,7 +26,7 @@ func TestNewRequestInterface(t *testing.T) {
 	// Create a mock config manager
 	mockConf := &mockConfigManager{}
 
-	reqInterface := NewRequestInterface(logs.NewGen3Logger(logger, "", ""), cred, mockConf)
+	reqInterface := NewRequestInterface(logs.NewGen3Logger(logger, "", ""), cred, mockConf, "https://example.com", "test-ua", nil)
 
 	if reqInterface == nil {
 		t.Fatal("Expected non-nil request interface")
@@ -37,65 +37,44 @@ func TestNewRequestInterface(t *testing.T) {
 		t.Fatal("Expected request interface to be of type *Request")
 	}
 
-	if req.RetryClient == nil {
-		t.Error("Expected non-nil retry client")
+	if req.BaseURL != "https://example.com" {
+		t.Errorf("Expected BaseURL 'https://example.com', got '%s'", req.BaseURL)
 	}
 
-	if req.Logs == nil {
-		t.Error("Expected non-nil logger")
+	if req.UserAgent != "test-ua" {
+		t.Errorf("Expected UserAgent 'test-ua', got '%s'", req.UserAgent)
 	}
 }
 
 func TestRequestBuilder_New(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	cred := &conf.Credential{
-		KeyID:       "test-key",
-		APIKey:      "test-secret",
-		APIEndpoint: "https://example.com",
-	}
 	mockConf := &mockConfigManager{}
 
-	reqInterface := NewRequestInterface(logs.NewGen3Logger(logger, "", ""), cred, mockConf)
+	reqInterface := NewRequestInterface(logs.NewGen3Logger(logger, "", ""), nil, mockConf, "https://example.com", "test-ua", nil)
 	req := reqInterface.(*Request)
 
-	builder := req.New("GET", "https://example.com/api/test")
-
-	if builder == nil {
-		t.Fatal("Expected non-nil request builder")
-	}
-
-	if builder.Method != "GET" {
-		t.Errorf("Expected method 'GET', got '%s'", builder.Method)
-	}
-
+	// Test relative path
+	builder := req.New("GET", "/api/test")
 	if builder.Url != "https://example.com/api/test" {
 		t.Errorf("Expected URL 'https://example.com/api/test', got '%s'", builder.Url)
+	}
+
+	// Test absolute URL
+	builder = req.New("GET", "https://other.com/api/test")
+	if builder.Url != "https://other.com/api/test" {
+		t.Errorf("Expected URL 'https://other.com/api/test', got '%s'", builder.Url)
 	}
 }
 
 func TestRequestBuilder_WithHeaders(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	cred := &conf.Credential{
-		KeyID:       "test-key",
-		APIKey:      "test-secret",
-		APIEndpoint: "https://example.com",
-	}
 	mockConf := &mockConfigManager{}
 
-	reqInterface := NewRequestInterface(logs.NewGen3Logger(logger, "", ""), cred, mockConf)
+	reqInterface := NewRequestInterface(logs.NewGen3Logger(logger, "", ""), nil, mockConf, "https://example.com", "test-ua", nil)
 	req := reqInterface.(*Request)
 
-	builder := req.New("GET", "https://example.com/api/test")
-	builder = builder.WithHeader("Content-Type", "application/json")
+	builder := req.New("GET", "/api/test")
 	builder = builder.WithHeader("X-Custom-Header", "test-value")
-
-	if len(builder.Headers) != 2 {
-		t.Errorf("Expected 2 headers, got %d", len(builder.Headers))
-	}
-
-	if builder.Headers["Content-Type"] != "application/json" {
-		t.Error("Expected Content-Type header to be set")
-	}
 
 	if builder.Headers["X-Custom-Header"] != "test-value" {
 		t.Error("Expected X-Custom-Header to be set")
@@ -104,18 +83,13 @@ func TestRequestBuilder_WithHeaders(t *testing.T) {
 
 func TestRequestBuilder_WithToken(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	cred := &conf.Credential{
-		KeyID:       "test-key",
-		APIKey:      "test-secret",
-		APIEndpoint: "https://example.com",
-	}
 	mockConf := &mockConfigManager{}
 
-	reqInterface := NewRequestInterface(logs.NewGen3Logger(logger, "", ""), cred, mockConf)
+	reqInterface := NewRequestInterface(logs.NewGen3Logger(logger, "", ""), nil, mockConf, "https://example.com", "test-ua", nil)
 	req := reqInterface.(*Request)
 
 	token := "test-bearer-token-12345"
-	builder := req.New("GET", "https://example.com/api/test")
+	builder := req.New("GET", "/api/test")
 	builder = builder.WithToken(token)
 
 	if builder.Token != token {
@@ -125,18 +99,13 @@ func TestRequestBuilder_WithToken(t *testing.T) {
 
 func TestRequestBuilder_WithBody(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	cred := &conf.Credential{
-		KeyID:       "test-key",
-		APIKey:      "test-secret",
-		APIEndpoint: "https://example.com",
-	}
 	mockConf := &mockConfigManager{}
 
-	reqInterface := NewRequestInterface(logs.NewGen3Logger(logger, "", ""), cred, mockConf)
+	reqInterface := NewRequestInterface(logs.NewGen3Logger(logger, "", ""), nil, mockConf, "https://example.com", "test-ua", nil)
 	req := reqInterface.(*Request)
 
 	body := strings.NewReader("test body content")
-	builder := req.New("POST", "https://example.com/api/test")
+	builder := req.New("POST", "/api/test")
 	builder = builder.WithBody(body)
 
 	if builder.Body == nil {
@@ -151,6 +120,12 @@ func TestRequest_Do_Success(t *testing.T) {
 		if r.Method != "GET" {
 			t.Errorf("Expected GET method, got %s", r.Method)
 		}
+		if r.Header.Get("User-Agent") != "test-ua" {
+			t.Errorf("Expected User-Agent 'test-ua', got '%s'", r.Header.Get("User-Agent"))
+		}
+		if r.Header.Get("Authorization") != "Bearer test-token" {
+			t.Errorf("Expected Authorization 'Bearer test-token', got '%s'", r.Header.Get("Authorization"))
+		}
 
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"status": "success"}`))
@@ -158,17 +133,12 @@ func TestRequest_Do_Success(t *testing.T) {
 	defer server.Close()
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	cred := &conf.Credential{
-		KeyID:       "test-key",
-		APIKey:      "test-secret",
-		APIEndpoint: server.URL,
-	}
 	mockConf := &mockConfigManager{}
 
-	reqInterface := NewRequestInterface(logs.NewGen3Logger(logger, "", ""), cred, mockConf)
+	reqInterface := NewRequestInterface(logs.NewGen3Logger(logger, "", ""), nil, mockConf, server.URL, "test-ua", nil)
 	req := reqInterface.(*Request)
 
-	builder := req.New("GET", server.URL+"/api/test")
+	builder := req.New("GET", "/api/test")
 	builder = builder.WithToken("test-token")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -208,17 +178,12 @@ func TestRequest_Do_WithCustomHeaders(t *testing.T) {
 	defer server.Close()
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	cred := &conf.Credential{
-		KeyID:       "test-key",
-		APIKey:      "test-secret",
-		APIEndpoint: server.URL,
-	}
 	mockConf := &mockConfigManager{}
 
-	reqInterface := NewRequestInterface(logs.NewGen3Logger(logger, "", ""), cred, mockConf)
+	reqInterface := NewRequestInterface(logs.NewGen3Logger(logger, "", ""), nil, mockConf, server.URL, "test-ua", nil)
 	req := reqInterface.(*Request)
 
-	builder := req.New("GET", server.URL+"/api/test")
+	builder := req.New("GET", "/api/test")
 	builder = builder.WithHeader("X-Custom-Header", "test-value")
 
 	ctx := context.Background()

@@ -8,21 +8,24 @@ import (
 	"testing"
 
 	syclient "github.com/calypr/syfon/client"
-	"github.com/calypr/syfon/cmd/cliutil"
 )
 
 func TestSyfonListAndRemoveCommands(t *testing.T) {
 	server := newSyfonTestServer(t)
 	defer server.Close()
 
-	c := syclient.New(server.URL)
+	c, err := syclient.New(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
 	did := "11111111-1111-1111-1111-111111111111"
 	rec := syclient.InternalRecord{}
 	rec.SetDid(did)
+	rec.SetAuthz([]string{"/programs/syfon/projects/e2e"})
 	rec.SetFileName("README.md")
 	rec.SetSize(123)
 	rec.SetUrls([]string{"s3://syfon-bucket/path/README.md"})
-	if err := c.PostRecord(context.Background(), rec); err != nil {
+	if _, err := c.Index().Create(context.Background(), rec); err != nil {
 		t.Fatalf("seed record: %v", err)
 	}
 
@@ -64,10 +67,13 @@ func TestSyfonDownloadDefaultsToRecordFilename(t *testing.T) {
 		t.Fatalf("write source: %v", err)
 	}
 
-	c := syclient.New(server.URL)
+	c, err := syclient.New(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
 	did := "22222222-2222-2222-2222-222222222222"
 	// Store record with explicit filename and file:// URL so download can resolve locally.
-	if err := cliutil.EnsureRecordWithURL(context.Background(), c, did, "file://"+srcPath, "README.md", int64(len(srcData)), ""); err != nil {
+	if err := c.Index().Upsert(context.Background(), did, "file://"+srcPath, "README.md", int64(len(srcData)), "", []string{"/programs/syfon/projects/e2e"}); err != nil {
 		t.Fatalf("seed record with file url: %v", err)
 	}
 
@@ -93,7 +99,10 @@ func TestSyfonBucketListAndRemoveCommands(t *testing.T) {
 	server := newSyfonTestServer(t)
 	defer server.Close()
 
-	c := syclient.New(server.URL)
+	c, err := syclient.New(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := c.Buckets().Put(context.Background(), syclient.PutBucketRequest{
 		Bucket:       "test-bucket-cli",
 		Provider:     stringPtr("s3"),

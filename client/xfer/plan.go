@@ -1,19 +1,19 @@
-package transfer
+package xfer
 
 import (
 	"context"
+
 	"github.com/calypr/syfon/client/pkg/hash"
 )
 
-// ResolvedObject is the outcome of the Resolution layer (e.g. DRS).
-// It contains everything the transfer engine needs to start planning.
+// ResolvedObject is the outcome of the resolution layer.
 type ResolvedObject struct {
 	Id           string
 	Name         string
 	Size         int64
 	Checksums    hash.HashInfo
-	ProviderURL  string // The cloud-native URL or signed URL
-	AccessMethod string // s3, gs, azblob, https, etc.
+	ProviderURL  string
+	AccessMethod string
 }
 
 // TransferStrategy defines how the engine intends to move the data.
@@ -26,11 +26,10 @@ const (
 )
 
 // TransferPlan is the blueprint for a specific data movement.
-// It tracks chunks, retries, and resumability state.
 type TransferPlan struct {
-	Strategy TransferStrategy
-	TotalSize int64
-	Chunks    []Chunk
+	Strategy       TransferStrategy
+	TotalSize      int64
+	Chunks         []Chunk
 	CheckpointPath string
 }
 
@@ -49,8 +48,7 @@ const (
 	ChunkFailed    ChunkStatus = "failed"
 )
 
-// Planner is the interface for components that analyze a ResolvedObject 
-// to decide on the best strategy.
+// Planner defines how to analyze a resolved object into a transfer plan.
 type Planner interface {
 	PlanDownload(ctx context.Context, obj ResolvedObject) (*TransferPlan, error)
 	PlanUpload(ctx context.Context, obj ResolvedObject) (*TransferPlan, error)

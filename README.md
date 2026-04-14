@@ -159,6 +159,54 @@ Useful endpoints:
 - `POST /index/bulk/sha256/validity` (bulk sha validity map for git-lfs style flows)
 - `GET /download/{id}` (fence compatibility)
 
+
+## Minio Starter Kit
+
+Start up a docker container with MinIO for testing:
+```
+docker run -p 9000:9000 -p 9001:9001 \
+  -e "MINIO_ROOT_USER=admin" \
+  -e "MINIO_ROOT_PASSWORD=password123" \
+  -v ./data:/data \
+  minio/minio server /data --console-address ":9001"
+```
+
+Create a config file called `local.yaml`
+```
+port: 8080
+
+auth:
+    mode: local
+
+database:
+  sqlite:
+    file: "drs.db"
+database:
+  sqlite:
+    file: "drs.db"
+s3_credentials:
+  - bucket: "test-bucket"
+    region: "us-east-1"
+    access_key: "admin"
+    secret_key: "password123"
+    endpoint: "http://localhost:9000"
+```
+
+Start the syfon server
+```
+syfon server --config local.yaml
+```
+
+Upload a file
+```
+syfon upload --file README.md
+```
+
+List records
+```
+syfon ls
+```
+
 ## Running Integration Tests
 
 You can run integration tests using your own config file:
@@ -166,6 +214,14 @@ You can run integration tests using your own config file:
 ```bash
 go test ./cmd/server -v -count=1 -testConfig=config.yaml
 ```
+
+Docker-backed MinIO upload and download coverage is available behind an opt-in flag:
+
+```bash
+SYFON_E2E_DOCKER=1 go test ./cmd -run TestSyfonDockerMinIOE2E -v -count=1
+```
+
+This test starts MinIO in Docker, starts a real syfon server configured against it, then verifies `ping`, `upload`, `download`, and `sha256sum`. It skips automatically when the opt-in flag is not set, and it also skips when Docker is unavailable.
 
 ## Architecture
 

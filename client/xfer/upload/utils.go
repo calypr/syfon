@@ -9,24 +9,23 @@ import (
 	"strings"
 
 	"github.com/calypr/syfon/client/pkg/common"
-	"github.com/calypr/syfon/client/pkg/logs"
-	"github.com/calypr/syfon/client/transfer"
+	"github.com/calypr/syfon/client/xfer"
 )
 
-func SeparateSingleAndMultipartUploads(bk transfer.Uploader, objects []common.FileUploadRequestObject) ([]common.FileUploadRequestObject, []common.FileUploadRequestObject) {
+func SeparateSingleAndMultipartUploads(bk interface{ Logger() xfer.TransferLogger }, objects []uploadRequest) ([]uploadRequest, []uploadRequest) {
 	fileSizeLimit := common.FileSizeLimit
 	logger := bk.Logger()
 
-	var singlepartObjects []common.FileUploadRequestObject
-	var multipartObjects []common.FileUploadRequestObject
+	var singlepartObjects []uploadRequest
+	var multipartObjects []uploadRequest
 
 	for _, object := range objects {
-		fi, err := os.Stat(object.SourcePath)
+		fi, err := os.Stat(object.sourcePath)
 		if err != nil {
 			if os.IsNotExist(err) {
-				logger.Error("The file you specified does not exist locally", "path", object.SourcePath)
+				logger.Error("The file you specified does not exist locally", "path", object.sourcePath)
 			} else {
-				logger.Error("File stat error", "path", object.SourcePath, "error", err)
+				logger.Error("File stat error", "path", object.sourcePath, "error", err)
 			}
 			continue
 		}
@@ -47,11 +46,11 @@ func SeparateSingleAndMultipartUploads(bk transfer.Uploader, objects []common.Fi
 }
 
 // ProcessFilename returns an FileInfo object which has the information about the path and name to be used for upload of a file
-func ProcessFilename(logger *logs.Gen3Logger, uploadPath string, filePath string, objectId string, includeSubDirName bool, includeMetadata bool) (common.FileUploadRequestObject, error) {
+func ProcessFilename(logger xfer.TransferLogger, uploadPath string, filePath string, objectId string, includeSubDirName bool, includeMetadata bool) (string, string, common.FileMetadata, error) {
 	var err error
 	filePath, err = common.GetAbsolutePath(filePath)
 	if err != nil {
-		return common.FileUploadRequestObject{}, err
+		return "", "", common.FileMetadata{}, err
 	}
 
 	filename := filepath.Base(filePath) // Default to base filename
@@ -60,7 +59,7 @@ func ProcessFilename(logger *logs.Gen3Logger, uploadPath string, filePath string
 	if includeSubDirName {
 		absUploadPath, err := common.GetAbsolutePath(uploadPath)
 		if err != nil {
-			return common.FileUploadRequestObject{}, err
+			return "", "", common.FileMetadata{}, err
 		}
 
 		// Ensure absUploadPath is a directory path for relative calculation
@@ -68,13 +67,13 @@ func ProcessFilename(logger *logs.Gen3Logger, uploadPath string, filePath string
 		uploadDir := strings.TrimSuffix(absUploadPath, common.PathSeparator+"*")
 		fileInfo, err := os.Stat(uploadDir)
 		if err != nil {
-			return common.FileUploadRequestObject{}, err
+			return "", "", common.FileMetadata{}, err
 		}
 		if fileInfo.IsDir() {
 			// Calculate the path of the file relative to the upload directory
 			relPath, err := filepath.Rel(uploadDir, filePath)
 			if err != nil {
-				return common.FileUploadRequestObject{}, err
+				return "", "", common.FileMetadata{}, err
 			}
 			filename = relPath
 		}
@@ -87,18 +86,18 @@ func ProcessFilename(logger *logs.Gen3Logger, uploadPath string, filePath string
 		if _, err := os.Stat(metadataFilePath); err == nil {
 			metadataFileBytes, err = os.ReadFile(metadataFilePath)
 			if err != nil {
-				return common.FileUploadRequestObject{}, errors.New("Error reading metadata file " + metadataFilePath + ": " + err.Error())
+				return "", "", common.FileMetadata{}, errors.New("Error reading metadata file " + metadataFilePath + ": " + err.Error())
 			}
 			err := json.Unmarshal(metadataFileBytes, &metadata)
 			if err != nil {
-				return common.FileUploadRequestObject{}, errors.New("Error parsing metadata file " + metadataFilePath + ": " + err.Error())
+				return "", "", common.FileMetadata{}, errors.New("Error parsing metadata file " + metadataFilePath + ": " + err.Error())
 			}
 		} else {
 			// No metadata file was found for this file -- proceed, but warn the user.
 			logger.Printf("WARNING: File metadata is enabled, but could not find the metadata file %v for file %v. Execute `data-client upload --help` for more info on file metadata.\n", metadataFilePath, filePath)
 		}
 	}
-	return common.FileUploadRequestObject{SourcePath: filePath, ObjectKey: filename, FileMetadata: metadata, GUID: objectId}, nil
+	return filePath, filename, metadata, nil
 }
 
 // FormatSize helps to parse a int64 size into string

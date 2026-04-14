@@ -6,7 +6,7 @@ import (
 
 	"github.com/calypr/syfon/client/pkg/common"
 	"github.com/calypr/syfon/client/pkg/hash"
-	"github.com/calypr/syfon/client/transfer"
+	"github.com/calypr/syfon/client/xfer"
 )
 
 // MetadataManager defines the read-only resolution operations.
@@ -37,22 +37,21 @@ type MutableMetadataManager interface {
 
 	// URL Management
 	ResolveUploadURL(ctx context.Context, guid, filename string, metadata common.FileMetadata, bucket string) (string, error)
-	ResolveUploadURLs(ctx context.Context, requests []common.UploadURLResolveRequest) ([]common.UploadURLResolveResponse, error)
 }
 
 // URLSigner handles generating signed URLs for access.
 type URLSigner interface {
 	ResolveDownloadURL(ctx context.Context, guid string, accessID string) (string, error)
-	Download(ctx context.Context, fdr *common.FileDownloadResponseObject) (*http.Response, error)
+	Download(ctx context.Context, url string, rangeStart, rangeEnd *int64) (*http.Response, error)
 	GetDownloadURL(ctx context.Context, id string, accessID string) (*AccessURL, error)
-	GetDownloadPartURL(ctx context.Context, id string, start, end int64) (*transfer.SignedURL, error)
+	GetDownloadPartURL(ctx context.Context, id string, start, end int64) (*xfer.SignedURL, error)
 	GetUploadURL(ctx context.Context, id string) (*AccessURL, error)
 }
 
 // Resolver handles logical-to-physical mapping.
 type Resolver interface {
 	// Resolve translates a GUID into a physical transfer specification Across S3, GCS, and Azure.
-	Resolve(ctx context.Context, id string) (*transfer.ResolvedObject, error)
+	Resolve(ctx context.Context, id string) (*xfer.ResolvedObject, error)
 }
 
 // Client facilitates high-level Data Repository Service operations.
@@ -63,8 +62,8 @@ type Client interface {
 	MutableMetadataManager
 	URLSigner
 	Resolver
-	transfer.Backend
-	transfer.Provider
+	xfer.Backend
+	xfer.Provider
 
 	// Fluent context helpers.
 	WithProject(projectId string) Client
@@ -75,7 +74,6 @@ type Client interface {
 	GetBucketName() string
 	GetOrganization() string
 }
-
 
 // AddURLOption defines functional options for AddURL.
 type AddURLOption func(o *DRSObject)

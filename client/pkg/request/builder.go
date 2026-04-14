@@ -2,29 +2,22 @@ package request
 
 import (
 	"io"
+	"net/url"
+	"strings"
+	"time"
 
 	"github.com/calypr/syfon/client/pkg/common"
 )
 
-// New addition to your request package
 type RequestBuilder struct {
-	//Req     *Request // the underlying retry client holder
 	Method   string
 	Url      string
-	Body     io.Reader // store as []byte for easy reuse
+	Body     io.Reader
 	Headers  map[string]string
 	Token    string
 	PartSize int64
 	SkipAuth bool
-}
-
-func (r *Request) New(method, url string) *RequestBuilder {
-	return &RequestBuilder{
-		//Req:     r,
-		Method:  method,
-		Url:     url,
-		Headers: make(map[string]string),
-	}
+	Timeout  time.Duration
 }
 
 func (ar *RequestBuilder) WithToken(token string) *RequestBuilder {
@@ -41,7 +34,6 @@ func (ar *RequestBuilder) WithJSONBody(v any) (*RequestBuilder, error) {
 	ar.Body = reader
 	ar.Headers[common.HeaderContentType] = common.MIMEApplicationJSON
 	return ar, nil
-
 }
 
 func (ar *RequestBuilder) WithBody(body io.Reader) *RequestBuilder {
@@ -54,6 +46,27 @@ func (ar *RequestBuilder) WithHeader(key, value string) *RequestBuilder {
 	return ar
 }
 
+func (ar *RequestBuilder) WithQuery(key, value string) *RequestBuilder {
+	if strings.Contains(ar.Url, "?") {
+		ar.Url += "&" + url.QueryEscape(key) + "=" + url.QueryEscape(value)
+	} else {
+		ar.Url += "?" + url.QueryEscape(key) + "=" + url.QueryEscape(value)
+	}
+	return ar
+}
+
+func (ar *RequestBuilder) WithQueryValues(v url.Values) *RequestBuilder {
+	if len(v) == 0 {
+		return ar
+	}
+	if strings.Contains(ar.Url, "?") {
+		ar.Url += "&" + v.Encode()
+	} else {
+		ar.Url += "?" + v.Encode()
+	}
+	return ar
+}
+
 func (ar *RequestBuilder) WithSkipAuth(skip bool) *RequestBuilder {
 	ar.SkipAuth = skip
 	return ar
@@ -61,5 +74,10 @@ func (ar *RequestBuilder) WithSkipAuth(skip bool) *RequestBuilder {
 
 func (ar *RequestBuilder) WithPartSize(size int64) *RequestBuilder {
 	ar.PartSize = size
+	return ar
+}
+ 
+func (ar *RequestBuilder) WithTimeout(d time.Duration) *RequestBuilder {
+	ar.Timeout = d
 	return ar
 }

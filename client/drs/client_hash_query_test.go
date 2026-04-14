@@ -2,6 +2,7 @@ package drs
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
@@ -33,6 +34,18 @@ func (f *fakeRequest) Do(ctx context.Context, req *request.RequestBuilder) (*htt
 		Status:     "200 OK",
 		Body:       io.NopCloser(strings.NewReader(`{"records":[]}`)),
 	}, nil
+}
+
+func (f *fakeRequest) DoJSON(ctx context.Context, rb *request.RequestBuilder, out any) error {
+	resp, err := f.Do(ctx, rb)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if out != nil {
+		return json.NewDecoder(resp.Body).Decode(out)
+	}
+	return nil
 }
 
 func TestGetObjectByHash_UsesTypedChecksumQuery(t *testing.T) {

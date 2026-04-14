@@ -1,10 +1,10 @@
 package download
 
 import (
+	"io"
 	"log/slog"
+	"net/http"
 	"os"
-
-	"github.com/calypr/syfon/client/pkg/common"
 )
 
 type IndexdResponse struct {
@@ -17,13 +17,27 @@ type RenamedOrSkippedFileInfo struct {
 	NewFilename string
 }
 
+type downloadRequest struct {
+	downloadPath string
+	filename     string
+	guid         string
+	presignedURL string
+	rangeBytes   int64
+	rangeStart   *int64
+	rangeEnd     *int64
+	overwrite    bool
+	skip         bool
+	response     *http.Response
+	writer       io.Writer
+}
+
 func validateLocalFileStat(
 	logger *slog.Logger,
-	fdr *common.FileDownloadResponseObject,
+	fdr *downloadRequest,
 	filesize int64,
 	skipCompleted bool,
 ) {
-	fullPath := fdr.DownloadPath + fdr.Filename
+	fullPath := fdr.downloadPath + fdr.filename
 
 	fi, err := os.Stat(fullPath)
 	if err != nil {
@@ -40,21 +54,21 @@ func validateLocalFileStat(
 
 	// User doesn't want to skip completed files → force full overwrite
 	if !skipCompleted {
-		fdr.Overwrite = true
+		fdr.overwrite = true
 		return
 	}
 
 	// Exact match → skip entirely
 	if localSize == filesize {
-		fdr.Skip = true
+		fdr.skip = true
 		return
 	}
 
 	// Local file larger than expected → overwrite fully (corrupted or different file)
 	if localSize > filesize {
-		fdr.Overwrite = true
+		fdr.overwrite = true
 		return
 	}
 
-	fdr.Range = localSize
+	fdr.rangeBytes = localSize
 }

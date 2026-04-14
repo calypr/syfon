@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/calypr/syfon/cmd/cliutil"
+	syclient "github.com/calypr/syfon/client"
 	"github.com/spf13/cobra"
 )
 
@@ -19,7 +19,14 @@ var Cmd = &cobra.Command{
 		if did == "" {
 			return fmt.Errorf("--did is required")
 		}
-		c := cliutil.NewSyfonClient(cmd)
+		serverURL, err := cmd.Flags().GetString("server")
+		if err != nil {
+			return fmt.Errorf("get server flag: %w", err)
+		}
+		c, err := syclient.New(serverURL)
+		if err != nil {
+			return err
+		}
 		if err := c.Index().Delete(cmd.Context(), did); err != nil {
 			return err
 		}

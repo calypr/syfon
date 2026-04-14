@@ -8,76 +8,61 @@ import (
 	"sync"
 
 	"github.com/calypr/syfon/client/pkg/common"
-	"github.com/calypr/syfon/client/pkg/logs"
-	"github.com/calypr/syfon/client/transfer"
+	"github.com/calypr/syfon/client/xfer"
 	"github.com/vbauerster/mpb/v8"
 	"github.com/vbauerster/mpb/v8/decor"
 )
 
-func InitBatchUploadChannels(numParallel int, inputSliceLen int) (int, chan *http.Response, chan error, []common.FileUploadRequestObject) {
-	workers := numParallel
-	if workers < 1 || workers > inputSliceLen {
-		workers = inputSliceLen
-	}
-	if workers < 1 {
-		workers = 1
-	}
-
-	respCh := make(chan *http.Response, inputSliceLen)
-	errCh := make(chan error, inputSliceLen)
-	batchSlice := make([]common.FileUploadRequestObject, 0, workers)
-
-	return workers, respCh, errCh, batchSlice
-}
-
 func BatchUpload(
 	ctx context.Context,
-	bk transfer.Uploader,
-	logger *logs.Gen3Logger,
-	furObjects []common.FileUploadRequestObject,
+	bk xfer.Uploader,
+	logger xfer.TransferLogger,
+	uploadPath string,
+	filePaths []string,
 	workers int,
-	respCh chan *http.Response,
-	errCh chan error,
 	bucketName string,
+	includeSubDirName bool,
+	hasMetadata bool,
 ) {
-	if len(furObjects) == 0 {
+	if len(filePaths) == 0 {
 		return
 	}
 
-	// Ensure bucket is set
-	for i := range furObjects {
-		if furObjects[i].Bucket == "" {
-			furObjects[i].Bucket = bucketName
+	jobs := make([]uploadRequest, 0, len(filePaths))
+	for _, filePath := range filePaths {
+		src, key, metadata, err := ProcessFilename(logger, uploadPath, filePath, "", includeSubDirName, hasMetadata)
+		if err != nil {
+			logger.Failed(filePath, filePath, common.FileMetadata{}, "", 0, false)
+			continue
 		}
+		jobs = append(jobs, uploadRequest{
+			sourcePath: src,
+			objectKey:  key,
+			metadata:   metadata,
+			bucket:     bucketName,
+		})
+	}
+	if len(jobs) == 0 {
+		return
 	}
 
 	progress := mpb.New(mpb.WithOutput(os.Stdout))
-
-	workCh := make(chan common.FileUploadRequestObject, len(furObjects))
-
+	workCh := make(chan uploadRequest, len(jobs))
+	errCh := make(chan error, len(jobs))
+	respCh := make(chan *http.Response, len(jobs))
 	var wg sync.WaitGroup
+
 	for i := 0; i < workers; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for fur := range workCh {
-				// --- Ensure presigned URL ---
-				if fur.PresignedURL == "" {
-					resp, err := GeneratePresignedUploadURL(ctx, bk, fur.ObjectKey, fur.FileMetadata, fur.Bucket)
-					if err != nil {
-						logger.Failed(fur.SourcePath, fur.ObjectKey, fur.FileMetadata, "", 0, false)
-						errCh <- err
-						continue
-					}
-					fur.PresignedURL = resp.URL
-					fur.GUID = resp.GUID
-					logger.Failed(fur.SourcePath, fur.ObjectKey, fur.FileMetadata, resp.GUID, 0, false) // update log
+			for job := range workCh {
+				if job.bucket == "" {
+					job.bucket = bucketName
 				}
-
-				// --- Open file ---
-				file, err := os.Open(fur.SourcePath)
+				file, err := os.Open(job.sourcePath)
 				if err != nil {
-					logger.Failed(fur.SourcePath, fur.ObjectKey, fur.FileMetadata, fur.GUID, 0, false)
+					logger.Failed(job.sourcePath, job.objectKey, job.metadata, job.guid, 0, false)
 					errCh <- fmt.Errorf("file open error: %w", err)
 					continue
 				}
@@ -85,22 +70,14 @@ func BatchUpload(
 				fi, err := file.Stat()
 				if err != nil {
 					file.Close()
-					logger.Failed(fur.SourcePath, fur.ObjectKey, fur.FileMetadata, fur.GUID, 0, false)
+					logger.Failed(job.sourcePath, job.objectKey, job.metadata, job.guid, 0, false)
 					errCh <- fmt.Errorf("file stat error: %w", err)
 					continue
 				}
 
-				if fi.Size() > common.FileSizeLimit {
-					file.Close()
-					logger.Failed(fur.SourcePath, fur.ObjectKey, fur.FileMetadata, fur.GUID, 0, false)
-					errCh <- fmt.Errorf("file size exceeds limit: %s", fur.ObjectKey)
-					continue
-				}
-
-				// --- Progress bar ---
 				bar := progress.AddBar(fi.Size(),
 					mpb.PrependDecorators(
-						decor.Name(fur.ObjectKey+" "),
+						decor.Name(job.objectKey+" "),
 						decor.CountersKibiByte("% .1f / % .1f"),
 					),
 					mpb.AppendDecorators(
@@ -110,33 +87,39 @@ func BatchUpload(
 				)
 
 				proxyReader := bar.ProxyReader(file)
-
-				// --- Upload ---
-				err = bk.Upload(ctx, fur.PresignedURL, proxyReader, fi.Size())
-
-				// Cleanup
-				file.Close()
-				bar.Abort(false)
-
+				url, err := bk.ResolveUploadURL(ctx, job.guid, job.objectKey, job.metadata, job.bucket)
 				if err != nil {
-					logger.Failed(fur.SourcePath, fur.ObjectKey, fur.FileMetadata, fur.GUID, 0, false)
+					file.Close()
+					bar.Abort(false)
+					logger.Failed(job.sourcePath, job.objectKey, job.metadata, job.guid, 0, false)
 					errCh <- err
 					continue
 				}
-
-				// Success
-				logger.DeleteFromFailedLog(fur.SourcePath)
-				logger.Succeeded(fur.SourcePath, fur.GUID)
-				logger.Scoreboard().IncrementSB(0)
+				err = bk.Upload(ctx, url, proxyReader, fi.Size())
+				file.Close()
+				bar.Abort(false)
+				if err != nil {
+					logger.Failed(job.sourcePath, job.objectKey, job.metadata, job.guid, 0, false)
+					errCh <- err
+					continue
+				}
+				logger.DeleteFromFailedLog(job.sourcePath)
+				logger.Succeeded(job.sourcePath, job.guid)
+				if sb := logger.Scoreboard(); sb != nil {
+					sb.IncrementSB(0)
+				}
+				respCh <- nil
 			}
 		}()
 	}
 
-	for _, obj := range furObjects {
-		workCh <- obj
+	for _, job := range jobs {
+		workCh <- job
 	}
 	close(workCh)
 
 	wg.Wait()
 	progress.Wait()
+	_ = errCh
+	_ = respCh
 }

@@ -1,4 +1,4 @@
-package transfer
+package xfer
 
 import (
 	"context"
@@ -6,7 +6,6 @@ import (
 	"io"
 
 	"github.com/calypr/syfon/client/pkg/hash"
-	"github.com/calypr/syfon/client/pkg/logs"
 	"gocloud.dev/blob"
 	_ "gocloud.dev/blob/azureblob"
 	_ "gocloud.dev/blob/fileblob"
@@ -14,19 +13,14 @@ import (
 	_ "gocloud.dev/blob/s3blob"
 )
 
-// Provider is the minimal interface a capability needs to resolve its bucket/key.
-type Provider interface {
-	GetStorageLocation(ctx context.Context, guid string) (bucket, key string, err error)
-}
-
 // client is the Go Cloud adapter implementation of Backend.
 type client struct {
-	logger   *logs.Gen3Logger
+	logger   TransferLogger
 	provider Provider
 }
 
 // New returns a unified transfer adapter sitting on top of the go-cloud blob package.
-func New(logger *logs.Gen3Logger, provider Provider) Backend {
+func New(logger TransferLogger, provider Provider) Backend {
 	return &client{
 		logger:   logger,
 		provider: provider,
@@ -34,7 +28,7 @@ func New(logger *logs.Gen3Logger, provider Provider) Backend {
 }
 
 func (c *client) Name() string             { return "GoCloudBackend" }
-func (c *client) Logger() *logs.Gen3Logger { return c.logger }
+func (c *client) Logger() TransferLogger    { return c.logger }
 
 func (c *client) Stat(ctx context.Context, guid string) (*ObjectMetadata, error) {
 	bucket, key, err := c.provider.GetStorageLocation(ctx, guid)

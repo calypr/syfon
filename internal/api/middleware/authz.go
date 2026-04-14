@@ -4,9 +4,9 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
-	"encoding/json"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -173,7 +173,7 @@ func (m *AuthzMiddleware) Middleware(next http.Handler) http.Handler {
 
 			// We use a no-op gen3 logger for the request client to avoid unnecessary side effects in middleware
 			gen3Logger := logs.NewGen3Logger(m.logger, "", "syfon")
-			reqClient := request.NewRequestInterface(gen3Logger, cred, nil)
+			reqClient := request.NewRequestInterface(gen3Logger, cred, nil, apiEndpoint, "syfon-server", nil)
 
 			// 3. Fetch user info (privileges)
 			privs, err := fetchPrivileges(r.Context(), reqClient, cred)

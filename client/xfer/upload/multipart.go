@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
@@ -16,8 +15,9 @@ import (
 	"sync"
 	"sync/atomic"
 
+	internalapi "github.com/calypr/syfon/apigen/internalapi"
 	"github.com/calypr/syfon/client/pkg/common"
-	"github.com/calypr/syfon/client/transfer"
+	"github.com/calypr/syfon/client/xfer"
 	"github.com/vbauerster/mpb/v8"
 	"github.com/vbauerster/mpb/v8/decor"
 )
@@ -36,8 +36,15 @@ type multipartResumeState struct {
 	Completed       map[int]string `json:"completed"`
 }
 
-func MultipartUpload(ctx context.Context, bk transfer.Uploader, req common.FileUploadRequestObject, file *os.File, showProgress bool) error {
-	bk.Logger().DebugContext(ctx, "File Multipart Upload Request", "request", req)
+func MultipartUpload(ctx context.Context, bk xfer.Uploader, sourcePath, objectKey, guid, bucket string, metadata common.FileMetadata, file *os.File, showProgress bool) error {
+	req := uploadRequest{
+		sourcePath: sourcePath,
+		objectKey:  objectKey,
+		guid:       guid,
+		bucket:     bucket,
+		metadata:   metadata,
+	}
+	bk.Logger().DebugContext(ctx, "File Multipart Upload Request", "source_path", req.sourcePath, "object_key", req.objectKey, "guid", req.guid, "bucket", req.bucket)
 	failUploadOnce := strings.TrimSpace(os.Getenv("DATA_CLIENT_TEST_FAIL_UPLOAD_PART_ONCE")) == "1"
 	var injectedUploadFailure atomic.Bool
 
@@ -48,7 +55,7 @@ func MultipartUpload(ctx context.Context, bk transfer.Uploader, req common.FileU
 
 	fileSize := stat.Size()
 	if fileSize == 0 {
-		return fmt.Errorf("file is empty: %s", req.ObjectKey)
+		return fmt.Errorf("file is empty: %s", req.objectKey)
 	}
 
 	var p *mpb.Progress
@@ -57,7 +64,7 @@ func MultipartUpload(ctx context.Context, bk transfer.Uploader, req common.FileU
 		p = mpb.New(mpb.WithOutput(os.Stdout))
 		bar = p.AddBar(fileSize,
 			mpb.PrependDecorators(
-				decor.Name(req.ObjectKey+" "),
+				decor.Name(req.objectKey+" "),
 				decor.CountersKibiByte("%.1f / %.1f"),
 			),
 			mpb.AppendDecorators(
@@ -68,27 +75,27 @@ func MultipartUpload(ctx context.Context, bk transfer.Uploader, req common.FileU
 	}
 
 	chunkSize := OptimalChunkSize(fileSize)
-	checkpointPath, err := multipartCheckpointPath(req)
+	checkpointPath, err := multipartCheckpointPath(req.sourcePath, req.objectKey, req.guid, req.bucket)
 	if err != nil {
 		return err
 	}
 	state, loaded := loadMultipartState(checkpointPath)
 	if !loaded || !state.matches(req, stat, chunkSize) {
-		uploadID, finalGUID, initErr := initMultipartUpload(ctx, bk, req, req.Bucket)
+		uploadID, finalGUID, initErr := initMultipartUpload(ctx, bk, req.guid, req.objectKey, req.bucket)
 		if initErr != nil {
 			return fmt.Errorf("failed to initiate multipart upload: %w", initErr)
 		}
 		state = &multipartResumeState{
-			SourcePath:      req.SourcePath,
-			ObjectKey:       req.ObjectKey,
-			GUID:            req.GUID,
-			Bucket:          req.Bucket,
+			SourcePath:      req.sourcePath,
+			ObjectKey:       req.objectKey,
+			GUID:            req.guid,
+			Bucket:          req.bucket,
 			FileSize:        fileSize,
 			FileModUnixNano: stat.ModTime().UnixNano(),
 			ChunkSize:       chunkSize,
 			UploadID:        uploadID,
 			FinalGUID:       finalGUID,
-			Key:             req.ObjectKey,
+			Key:             req.objectKey,
 			Completed:       map[int]string{},
 		}
 		if saveErr := saveMultipartState(checkpointPath, state); saveErr != nil {
@@ -128,7 +135,7 @@ func MultipartUpload(ctx context.Context, bk transfer.Uploader, req common.FileU
 	progressCallback := common.GetProgress(ctx)
 	oid := common.GetOid(ctx)
 	if oid == "" {
-		oid = resolveUploadOID(req)
+		oid = resolveUploadOID(req.objectKey, req.guid)
 	}
 
 	// 3. Worker logic
@@ -153,7 +160,7 @@ func MultipartUpload(ctx context.Context, bk transfer.Uploader, req common.FileU
 			// It allows each worker to read its own segment without a shared buffer.
 			section := io.NewSectionReader(file, offset, size)
 
-			url, err := generateMultipartPresignedURL(ctx, bk, key, uploadID, partNum, req.Bucket)
+			url, err := generateMultipartPresignedURL(ctx, bk, key, uploadID, partNum, req.bucket)
 			if err != nil {
 				mu.Lock()
 				uploadErrors = append(uploadErrors, fmt.Errorf("URL generation failed part %d: %w", partNum, err))
@@ -162,7 +169,7 @@ func MultipartUpload(ctx context.Context, bk transfer.Uploader, req common.FileU
 			}
 
 			// Perform the upload using the section directly
-			etag, err := uploadPart(ctx, url, section, size)
+			etag, err := bk.UploadPart(ctx, url, section, size)
 			if err != nil {
 				mu.Lock()
 				uploadErrors = append(uploadErrors, fmt.Errorf("upload failed part %d: %w", partNum, err))
@@ -209,9 +216,9 @@ func MultipartUpload(ctx context.Context, bk transfer.Uploader, req common.FileU
 	}
 
 	// 5. Finalize the upload
-	parts := make([]common.MultipartUploadPart, 0, len(state.Completed))
+	parts := make([]internalapi.InternalMultipartPart, 0, len(state.Completed))
 	for partNum, etag := range state.Completed {
-		parts = append(parts, common.MultipartUploadPart{
+		parts = append(parts, internalapi.InternalMultipartPart{
 			PartNumber: int32(partNum),
 			ETag:       etag,
 		})
@@ -220,17 +227,17 @@ func MultipartUpload(ctx context.Context, bk transfer.Uploader, req common.FileU
 		return parts[i].PartNumber < parts[j].PartNumber
 	})
 
-	if err := CompleteMultipartUpload(ctx, bk, key, uploadID, parts, req.Bucket); err != nil {
+	if err := CompleteMultipartUpload(ctx, bk, key, uploadID, parts, req.bucket); err != nil {
 		return fmt.Errorf("failed to complete multipart upload: %w", err)
 	}
 
-	bk.Logger().DebugContext(ctx, "Successfully uploaded", "file", req.ObjectKey, "key", key)
+	bk.Logger().DebugContext(ctx, "Successfully uploaded", "file", req.objectKey, "key", key)
 	_ = os.Remove(checkpointPath)
 	return nil
 }
 
-func initMultipartUpload(ctx context.Context, bk transfer.Uploader, furObject common.FileUploadRequestObject, bucketName string) (string, string, error) {
-	msg, err := bk.InitMultipartUpload(ctx, furObject.GUID, furObject.ObjectKey, bucketName)
+func initMultipartUpload(ctx context.Context, bk xfer.Uploader, guid, objectKey, bucketName string) (string, string, error) {
+	uploadID, key, err := bk.InitMultipartUpload(ctx, guid, objectKey, bucketName)
 
 	if err != nil {
 		if strings.Contains(err.Error(), "404") {
@@ -239,13 +246,13 @@ func initMultipartUpload(ctx context.Context, bk transfer.Uploader, furObject co
 		return "", "", errors.New("Error has occurred during multipart upload initialization, detailed error message: " + err.Error())
 	}
 
-	if msg.UploadID == "" || msg.GUID == "" {
+	if uploadID == "" || key == "" {
 		return "", "", errors.New("unknown error has occurred during multipart upload initialization. Please check logs from Gen3 services")
 	}
-	return msg.UploadID, msg.GUID, nil
+	return uploadID, key, nil
 }
 
-func generateMultipartPresignedURL(ctx context.Context, bk transfer.Uploader, key string, uploadID string, partNumber int, bucketName string) (string, error) {
+func generateMultipartPresignedURL(ctx context.Context, bk xfer.Uploader, key string, uploadID string, partNumber int, bucketName string) (string, error) {
 	url, err := bk.GetMultipartUploadURL(ctx, key, uploadID, int32(partNumber), bucketName)
 	if err != nil {
 		return "", errors.New("Error has occurred during multipart upload presigned url generation, detailed error message: " + err.Error())
@@ -257,7 +264,7 @@ func generateMultipartPresignedURL(ctx context.Context, bk transfer.Uploader, ke
 	return url, nil
 }
 
-func CompleteMultipartUpload(ctx context.Context, bk transfer.Uploader, key string, uploadID string, parts []common.MultipartUploadPart, bucketName string) error {
+func CompleteMultipartUpload(ctx context.Context, bk xfer.Uploader, key string, uploadID string, parts []internalapi.InternalMultipartPart, bucketName string) error {
 	err := bk.CompleteMultipartUpload(ctx, key, uploadID, parts, bucketName)
 	if err != nil {
 		return errors.New("Error has occurred during completing multipart upload, detailed error message: " + err.Error())
@@ -265,41 +272,15 @@ func CompleteMultipartUpload(ctx context.Context, bk transfer.Uploader, key stri
 	return nil
 }
 
-// uploadPart now returns the ETag and error directly.
-// It accepts a Context to allow for cancellation (e.g., if another part fails).
-func uploadPart(ctx context.Context, url string, data io.Reader, partSize int64) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, data)
-	if err != nil {
-		return "", err
-	}
-	if partSize > 0 {
-		req.ContentLength = partSize
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= http.StatusBadRequest {
-		body, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("upload part failed: status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(body)))
-	}
-	etag := strings.Trim(resp.Header.Get("ETag"), `"`)
-	if etag == "" {
-		return "", errors.New("no ETag returned")
-	}
 
-	return etag, nil
-}
-
-func (s *multipartResumeState) matches(req common.FileUploadRequestObject, info os.FileInfo, chunkSize int64) bool {
+func (s *multipartResumeState) matches(req uploadRequest, info os.FileInfo, chunkSize int64) bool {
 	if s == nil {
 		return false
 	}
-	return s.SourcePath == req.SourcePath &&
-		s.ObjectKey == req.ObjectKey &&
-		s.GUID == req.GUID &&
-		s.Bucket == req.Bucket &&
+	return s.SourcePath == req.sourcePath &&
+		s.ObjectKey == req.objectKey &&
+		s.GUID == req.guid &&
+		s.Bucket == req.bucket &&
 		s.FileSize == info.Size() &&
 		s.FileModUnixNano == info.ModTime().UnixNano() &&
 		s.ChunkSize == chunkSize &&
@@ -307,7 +288,7 @@ func (s *multipartResumeState) matches(req common.FileUploadRequestObject, info 
 		s.Key != ""
 }
 
-func multipartCheckpointPath(req common.FileUploadRequestObject) (string, error) {
+func multipartCheckpointPath(sourcePath, objectKey, guid, bucket string) (string, error) {
 	cacheDir := strings.TrimSpace(os.Getenv("DATA_CLIENT_CACHE_DIR"))
 	if cacheDir == "" {
 		var err error
@@ -320,7 +301,7 @@ func multipartCheckpointPath(req common.FileUploadRequestObject) (string, error)
 	if err := os.MkdirAll(base, 0o755); err != nil {
 		return "", err
 	}
-	sum := sha256.Sum256([]byte(req.SourcePath + "|" + req.ObjectKey + "|" + req.GUID + "|" + req.Bucket))
+	sum := sha256.Sum256([]byte(sourcePath + "|" + objectKey + "|" + guid + "|" + bucket))
 	name := hex.EncodeToString(sum[:]) + ".json"
 	return filepath.Join(base, name), nil
 }

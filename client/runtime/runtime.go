@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/calypr/syfon/client/xfer"
 	"github.com/calypr/syfon/client/xfer/download"
 	// "github.com/calypr/syfon/client/xfer/upload"
 	"github.com/calypr/syfon/client/drs"
 	"github.com/calypr/syfon/client/pkg/logs"
-	"github.com/calypr/syfon/client/transfer"
 )
 
 // DataClient is the high-level simplified interface for data operations.
@@ -31,10 +31,10 @@ func New(api drs.Client, logger *logs.Gen3Logger) *DataClient {
 func (c *DataClient) Download(ctx context.Context, id, dest string) error {
 	// Initialize the SignedURLBackend which uses the syfon server for part signing.
 	// This fulfills the "No Local Credentials" requirement.
-	_ = transfer.NewSignedURLBackend(c.api)
-	downloader, ok := c.api.(transfer.Downloader)
+	_ = xfer.NewSignedURLBackend(c.api)
+	downloader, ok := c.api.(xfer.Downloader)
 	if !ok {
-		return fmt.Errorf("drs client does not implement transfer.Downloader")
+		return fmt.Errorf("drs client does not implement xfer.Downloader")
 	}
 	return download.DownloadFile(ctx, c.api, downloader, id, dest)
 }

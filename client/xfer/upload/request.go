@@ -3,34 +3,26 @@ package upload
 import (
 	"context"
 	"fmt"
-	// Added for io.Reader
 	"os"
 
 	"github.com/calypr/syfon/client/pkg/common"
-	"github.com/calypr/syfon/client/transfer"
+	"github.com/calypr/syfon/client/xfer"
 	"github.com/vbauerster/mpb/v8"
 	"github.com/vbauerster/mpb/v8/decor"
 )
 
-// GeneratePresignedURL handles both Shepherd and Fence fallback
-func GeneratePresignedUploadURL(ctx context.Context, bk transfer.Uploader, filename string, metadata common.FileMetadata, bucket string) (*common.PresignedURLResponse, error) {
-	url, err := bk.ResolveUploadURL(ctx, "", filename, metadata, bucket)
-	if err != nil {
-		return nil, err
-	}
-	var res common.PresignedURLResponse
-	res = common.PresignedURLResponse{URL: url, GUID: ""}
-	return &res, nil
+// GeneratePresignedUploadURL resolves a signed upload URL using plain inputs.
+func GeneratePresignedUploadURL(ctx context.Context, bk xfer.Uploader, filename string, metadata common.FileMetadata, bucket string) (string, error) {
+	return bk.ResolveUploadURL(ctx, "", filename, metadata, bucket)
 }
 
-// GenerateUploadRequest helps preparing the HTTP request for upload and the progress bar for single part upload
-func generateUploadRequest(ctx context.Context, bk transfer.Uploader, req common.FileUploadRequestObject, file *os.File, p *mpb.Progress) (common.FileUploadRequestObject, error) {
-	if req.PresignedURL == "" {
-		url, err := bk.ResolveUploadURL(ctx, req.GUID, req.ObjectKey, req.FileMetadata, req.Bucket)
+func generateUploadRequest(ctx context.Context, bk xfer.Uploader, req uploadRequest, file *os.File, p *mpb.Progress) (uploadRequest, error) {
+	if req.presignedURL == "" {
+		url, err := bk.ResolveUploadURL(ctx, req.guid, req.objectKey, req.metadata, req.bucket)
 		if err != nil {
-			return req, fmt.Errorf("Upload error: %w", err)
+			return req, fmt.Errorf("upload error: %w", err)
 		}
-		req.PresignedURL = url
+		req.presignedURL = url
 	}
 
 	fi, err := file.Stat()
@@ -45,7 +37,7 @@ func generateUploadRequest(ctx context.Context, bk transfer.Uploader, req common
 	if p != nil {
 		p.AddBar(fi.Size(),
 			mpb.PrependDecorators(
-				decor.Name(req.ObjectKey, decor.WC{W: len(req.ObjectKey) + 1, C: decor.DindentRight}),
+				decor.Name(req.objectKey, decor.WC{W: len(req.objectKey) + 1, C: decor.DindentRight}),
 				decor.CountersKibiByte("% .2f / % .2f"),
 			),
 			mpb.AppendDecorators(
