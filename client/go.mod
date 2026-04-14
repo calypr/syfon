@@ -99,3 +99,5 @@ require (
 	google.golang.org/protobuf v1.36.10 // indirect
 	gopkg.in/validator.v2 v2.0.1 // indirect
 )
+
+replace github.com/calypr/syfon/apigen => ../apigen

@@ -1,0 +1,129 @@
+# Publishes releases to GitHub when a new semver tag is pushed.
+# Ref: https://semver.org
+#
+# Strategy: build natively on each target runner, then combine artifacts into
+# a GitHub Release. This avoids CGO cross-compilation entirely and does not
+# require a GoReleaser Pro subscription.
+
+name: Release
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # test:
+  #   name: CI
+  #   uses: ./.github/workflows/ci.yaml
+  #   secrets: inherit
+
+  build:
+    name: Build (${{ matrix.goos }}/${{ matrix.goarch }})
+    # needs: [test]
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-latest,     goos: linux,  goarch: amd64 }
+          - { runner: ubuntu-24.04-arm,  goos: linux,  goarch: arm64 }
+          - { runner: macos-26-intel,    goos: darwin, goarch: amd64 }
+          - { runner: macos-latest,      goos: darwin, goarch: arm64 }
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          CGO_ENABLED=1 make build
+          mv syfon syfon-${{ matrix.goos }}-${{ matrix.goarch }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: syfon-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: syfon-${{ matrix.goos }}-${{ matrix.goarch }}
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    name: Release
+    needs: [build]
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: syfon-*
+          merge-multiple: true
+
+      - name: Package archives and checksums
+        run: |
+          set -euo pipefail
+          cd dist
+          for binary in syfon-linux-* syfon-darwin-*; do
+            [[ -f "$binary" ]] || continue
+            archive="${binary}-${{ github.ref_name }}.tar.gz"
+            # Rename to plain "syfon" inside the archive so the install script
+            # can extract and mv syfon $DEST without any platform-specific logic.
+            cp "$binary" syfon
+            tar -czf "$archive" syfon
+            rm syfon
+          done
+          sha256sum *.tar.gz > syfon-${{ github.ref_name }}-checksums.txt
+          ls -lh
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          # Emit commits between the previous tag and this one as the release notes.
+          prev=$(git tag --sort=-version:refname | grep -E '^v[0-9]' | sed -n '2p')
+          if [[ -n "$prev" ]]; then
+            notes=$(git log "${prev}".."${{ github.ref_name }}" --pretty=format:'- %s (%h)' --no-merges)
+          else
+            notes=$(git log "${{ github.ref_name }}" --pretty=format:'- %s (%h)' --no-merges)
+          fi
+          # Write to a file to safely handle multi-line content
+          echo "$notes" > release-notes.md
+
+      - name: Create GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release create "${{ github.ref_name }}" \
+            --title "${{ github.ref_name }}" \
+            --notes-file release-notes.md \
+            dist/*.tar.gz \
+            dist/syfon-${{ github.ref_name }}-checksums.txt
