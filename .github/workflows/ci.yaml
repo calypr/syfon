@@ -59,6 +59,7 @@ jobs:
           use_oidc: true
           files: coverage/coverage.out
           flags: root
+          disable_search: true
           fail_ci_if_error: true
 
       - name: Upload client coverage to Codecov
@@ -67,6 +68,7 @@ jobs:
           use_oidc: true
           files: client/coverage/coverage.out
           flags: client
+          disable_search: true
           fail_ci_if_error: true
       - name: Upload coverage artifacts
         uses: actions/upload-artifact@v4
