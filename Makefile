@@ -28,9 +28,41 @@ CLIENT_TAG_PREFIX ?= client
 init-schemas:
 	@git submodule update --init --recursive --depth 1 "$(SCHEMAS_SUBMODULE)"
 
+GIT_VERSION ?= $(shell git describe --tags --always --match 'v[0-9]*' --dirty='-dirty' 2>/dev/null || echo dev)
+GIT_COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+GIT_BRANCH  ?= $(shell git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)
+BUILD_DATE  ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+GIT_UPSTREAM ?= $(shell git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null || echo unknown)
+LDFLAGS     := -X github.com/calypr/syfon/version.Version=$(GIT_VERSION) \
+               -X github.com/calypr/syfon/version.GitCommit=$(GIT_COMMIT) \
+               -X github.com/calypr/syfon/version.GitBranch=$(GIT_BRANCH) \
+               -X github.com/calypr/syfon/version.BuildDate=$(BUILD_DATE) \
+               -X github.com/calypr/syfon/version.GitUpstream=$(GIT_UPSTREAM)
+
 .PHONY: build
 build:
-	GOCACHE="$(GOCACHE)" go build ./...
+	@GOCACHE="$(GOCACHE)" go build -ldflags "$(LDFLAGS)" ./...
+
+.PHONY: install
+install:
+	@GOCACHE="$(GOCACHE)" go install -ldflags "$(LDFLAGS)" ./...
+
+# Build binaries for all OS/Architectures
+.PHONY: snapshot
+snapshot: release-dep
+	@goreleaser \
+		--clean \
+		--snapshot
+
+# Create a release on Github using GoReleaser
+.PHONY: release
+release: release-dep
+	@goreleaser --clean
+
+# Install dependencies for release
+.PHONY: release-dep
+release-dep:
+	@go install github.com/goreleaser/goreleaser/v2@latest
 
 .PHONY: gen
 gen:

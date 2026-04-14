@@ -1,0 +1,45 @@
+version: 2
+
+builds:
+  - binary: syfon
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    env:
+      - CGO_ENABLED=1
+    ldflags: >
+      -X github.com/calypr/syfon/version.BuildDate={{.Date}}
+      -X github.com/calypr/syfon/version.GitCommit={{.ShortCommit}}
+      -X github.com/calypr/syfon/version.GitBranch={{.Branch}}
+      -X github.com/calypr/syfon/version.GitUpstream={{.GitURL}}
+      -X github.com/calypr/syfon/version.Version={{.Version}}
+
+dist: build/release
+
+release:
+  draft: false
+  prerelease: auto
+
+checksum:
+  name_template: "syfon-{{.Tag}}-checksums.txt"
+
+archives:
+  - formats:
+      - tar.gz
+    name_template: "{{.ProjectName}}-{{.Os}}-{{.Arch}}-{{.Tag}}"
+    files:
+      - LICENSE*
+      - README*
+      - CHANGELOG*
+
+# Add changelog generation
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^ci:'

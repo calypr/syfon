@@ -8,6 +8,7 @@ on:
       - main
       - develop
   workflow_dispatch:
+  workflow_call:
 
 concurrency:
   group: syfon-${{ github.event.pull_request.head.ref || github.ref }}
