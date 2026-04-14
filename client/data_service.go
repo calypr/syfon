@@ -225,13 +225,28 @@ func (d *DataService) CanonicalObjectURL(signedURL, bucketHint, fallbackDID stri
 		return parsed.String(), nil
 	case "http", "https":
 		bucketHint = strings.TrimSpace(bucketHint)
-		if bucketHint == "" {
-			return "", fmt.Errorf("server returned upload URL without bucket; cannot canonicalize object URL safely")
-		}
 		key := strings.Trim(strings.TrimSpace(parsed.Path), "/")
+
+		// If bucketHint is empty, try to infer it from the first segment of the path (Path-Style)
+		if bucketHint == "" {
+			parts := strings.Split(key, "/")
+			if len(parts) > 1 {
+				bucketHint = parts[0]
+				key = strings.Join(parts[1:], "/")
+			}
+		}
+
+		if bucketHint == "" {
+			return "", fmt.Errorf("unable to determine bucket context from URL: %s", signedURL)
+		}
+
+		// If the path starts with /bucket/, strip it to get the key.
 		if strings.HasPrefix(key, bucketHint+"/") {
 			key = strings.TrimPrefix(key, bucketHint+"/")
 		}
+
+		// Use s3:// as the standard internal representation for all HTTP-signed cloud storage (MinIO/S3/GCS)
+		// unless we have specific knowledge to do otherwise.
 		if key == "" {
 			key = strings.TrimSpace(fallbackDID)
 		}
@@ -240,6 +255,9 @@ func (d *DataService) CanonicalObjectURL(signedURL, bucketHint, fallbackDID stri
 		}
 		return "s3://" + bucketHint + "/" + key, nil
 	default:
-		return parsed.String(), nil
+		if parsed.Scheme != "" && parsed.Host != "" {
+			return parsed.String(), nil
+		}
+		return "s3://" + bucketHint + "/" + fallbackDID, nil
 	}
 }

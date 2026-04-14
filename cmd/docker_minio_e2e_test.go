@@ -518,7 +518,10 @@ func TestSyfonDockerMultipartUpload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Multipart upload command failed: %v", err)
 	}
-	uploadedID, _ := parseUploadedObjectID(uploadOut)
+	uploadedID, err := parseUploadedObjectID(uploadOut)
+	if err != nil {
+		t.Fatalf("Failed to parse uploaded ObjectID: %v", err)
+	}
 	t.Logf("Multipart upload successful. DID: %s", uploadedID)
 
 	t.Logf("STEP 5: Executing Multipart Download and verifying bytes...")

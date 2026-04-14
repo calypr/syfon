@@ -76,56 +76,62 @@ func RegisterFile(ctx context.Context, bk UploadBackend, dc drs.Client, drsObjec
 
 		// 6. Finalize registration for single-part (Multipart handles its own completion)
 		canonical, err := bk.CanonicalObjectURL(uploadURL, bucketName, drsObject.Id)
-		if err == nil && canonical != "" {
-			// Fetch the latest record to preserve existing metadata (like Authz)
-			current, getErr := dc.GetObject(ctx, drsObject.Id)
-			if getErr != nil {
-				current = drsObject
+		if err != nil || canonical == "" {
+			if err == nil {
+				err = fmt.Errorf("empty canonical URL returned")
 			}
+			return nil, fmt.Errorf("failed to derive canonical object URL: %w", err)
+		}
 
-			u, parseErr := url.Parse(canonical)
-			if parseErr != nil || u.Scheme == "" {
-				// Fallback to "s3" only if absolutely necessary, but better to fail or log
-				return nil, fmt.Errorf("failed to determine provider type from canonical URL: %s", canonical)
+		// Fetch the latest record to preserve existing metadata (like Authz)
+		current, getErr := dc.GetObject(ctx, drsObject.Id)
+		if getErr != nil {
+			current = drsObject
+		}
+
+		u, parseErr := url.Parse(canonical)
+		if parseErr != nil || u.Scheme == "" {
+			return nil, fmt.Errorf("failed to determine provider type from canonical URL: %s", canonical)
+		}
+		pType := u.Scheme
+
+		// Capture authorizations from existing access methods
+		var authz []string
+		for _, m := range current.AccessMethods {
+			if len(m.Authorizations.BearerAuthIssuers) > 0 {
+				authz = m.Authorizations.BearerAuthIssuers
+				break
 			}
-			pType := u.Scheme
+		}
 
-			// Capture authorizations from existing access methods
-			var authz []string
-			for _, m := range current.AccessMethods {
-				if len(m.Authorizations.BearerAuthIssuers) > 0 {
-					authz = m.Authorizations.BearerAuthIssuers
-					break
+		am := drs.AccessMethod{
+			Type:      pType,
+			AccessUrl: drs.AccessURL{Url: canonical},
+			Authorizations: drs.Authorizations{
+				BearerAuthIssuers: authz,
+			},
+		}
+
+		// Deep merge or update access methods
+		found := false
+		for i, existing := range current.AccessMethods {
+			// Match by URL or by the specific pType we just uploaded to
+			if existing.AccessUrl.Url == canonical || (existing.Type == pType && existing.AccessUrl.Url == "") {
+				// Update while keeping existing authorizations if our new am is empty
+				if len(am.Authorizations.BearerAuthIssuers) == 0 && len(existing.Authorizations.BearerAuthIssuers) > 0 {
+					am.Authorizations = existing.Authorizations
 				}
+				current.AccessMethods[i] = am
+				found = true
+				break
 			}
+		}
+		if !found {
+			current.AccessMethods = append(current.AccessMethods, am)
+		}
 
-			am := drs.AccessMethod{
-				Type:      pType,
-				AccessUrl: drs.AccessURL{Url: canonical},
-				Authorizations: drs.Authorizations{
-					BearerAuthIssuers: authz,
-				},
-			}
-
-			// Deep merge or update access methods
-			found := false
-			for i, existing := range current.AccessMethods {
-				// Match by URL or by the specific pType we just uploaded to
-				if existing.AccessUrl.Url == canonical || (existing.Type == pType && existing.AccessUrl.Url == "") {
-					// Update while keeping existing authorizations if our new am is empty
-					if len(am.Authorizations.BearerAuthIssuers) == 0 && len(existing.Authorizations.BearerAuthIssuers) > 0 {
-						am.Authorizations = existing.Authorizations
-					}
-					current.AccessMethods[i] = am
-					found = true
-					break
-				}
-			}
-			if !found {
-				current.AccessMethods = append(current.AccessMethods, am)
-			}
-
-			_, _ = dc.UpdateRecord(ctx, current, drsObject.Id)
+		if _, updateErr := dc.UpdateRecord(ctx, current, drsObject.Id); updateErr != nil {
+			return nil, fmt.Errorf("failed to finalize registration with server: %w", updateErr)
 		}
 	} else {
 		if err := MultipartUpload(ctx, bk, filePath, uploadFilename, drsObject.Id, bucketName, common.FileMetadata{}, file, false); err != nil {

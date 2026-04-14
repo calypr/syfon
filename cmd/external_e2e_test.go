@@ -96,24 +96,16 @@ func TestSyfonExternalServerE2E(t *testing.T) {
 	}
 }
 
+var uploadedIDRe = regexp.MustCompile(`(?:successfully\s+)?uploaded[:\s]+([a-f0-9-]{36})`)
+
 func parseUploadedObjectID(out string) (string, error) {
 	for _, line := range strings.Split(out, "\n") {
 		line = strings.TrimSpace(line)
-		// Check for both "uploaded: <ID>" and "uploaded <ID>" formats
-		if strings.HasPrefix(line, "uploaded:") {
-			parts := strings.SplitN(line, ":", 2)
-			if len(parts) == 2 {
-				return strings.TrimSpace(parts[1]), nil
-			}
-		}
-		if strings.HasPrefix(line, "uploaded ") {
-			parts := strings.Split(line, " ")
-			if len(parts) > 0 {
-				return strings.TrimSpace(parts[len(parts)-1]), nil
-			}
+		if m := uploadedIDRe.FindStringSubmatch(line); len(m) == 2 {
+			return m[1], nil
 		}
 	}
-	return "", fmt.Errorf("missing uploaded line in output: %q", out)
+	return "", fmt.Errorf("missing uploaded line in output (regex match failed): %q", out)
 }
 
 var missingCredentialRe = regexp.MustCompile(`failed to get credentials for bucket ([^: ]+): credential not found`)

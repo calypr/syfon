@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	"github.com/calypr/syfon/apigen/internalapi"
 	"github.com/calypr/syfon/config"
 	"github.com/calypr/syfon/db/core"
+	"github.com/calypr/syfon/internal/provider"
 	corelogic "github.com/calypr/syfon/internal/coreapi"
 	"github.com/gorilla/mux"
 )
@@ -447,12 +449,24 @@ func handleInternalUpdate(w http.ResponseWriter, r *http.Request, database core.
 
 	if req.HasUrls() {
 		updated.AccessMethods = nil
-		for _, u := range req.GetUrls() {
-			updated.AccessMethods = append(updated.AccessMethods, drs.AccessMethod{
-				Type:      "s3",
-				AccessUrl: drs.AccessMethodAccessUrl{Url: u},
+		for _, uString := range req.GetUrls() {
+			parsed, pErr := url.Parse(uString)
+			pType := "s3" // default
+			if pErr == nil && parsed.Scheme != "" {
+				pType = provider.FromScheme(parsed.Scheme)
+				if pType == "" {
+					pType = parsed.Scheme
+				}
+			}
+			am := drs.AccessMethod{
+				Type:      pType,
+				AccessUrl: drs.AccessMethodAccessUrl{Url: uString},
 				Region:    "us-east-1",
-			})
+				Authorizations: drs.AccessMethodAuthorizations{
+					BearerAuthIssuers: updated.Authorizations,
+				},
+			}
+			updated.AccessMethods = append(updated.AccessMethods, am)
 		}
 	}
 
