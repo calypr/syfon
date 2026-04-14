@@ -1,5 +1,9 @@
 name: Syfon CI
 
+permissions:
+  contents: read
+  id-token: write
+
 on:
   pull_request:
     types: [opened, synchronize, reopened]
@@ -42,6 +46,20 @@ jobs:
       - name: Run coverage
         run: make coverage
 
+      - name: Run client coverage
+        working-directory: client
+        run: |
+          mkdir -p coverage
+          go test -count=1 -covermode=atomic -coverprofile=coverage/coverage.out ./...
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          use_oidc: true
+          files: coverage/coverage.out,client/coverage/coverage.out
+          flags: root,client
+          fail_ci_if_error: true
+
       - name: Upload coverage artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -50,6 +68,7 @@ jobs:
             coverage/coverage.out
             coverage/coverage.txt
             coverage/coverage.html
+            client/coverage/coverage.out
 
       - name: Run go vet
         run: go vet ./...
