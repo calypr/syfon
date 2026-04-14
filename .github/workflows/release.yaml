@@ -9,7 +9,8 @@ name: Release
 on:
   push:
     tags:
-      - 'v*.*.*'
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -146,8 +147,20 @@ jobs:
           version="${{ github.ref_name }}"
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Find the previous root tag to diff against
+          prev=$(git tag --sort=-version:refname | grep -E '^v[0-9]' | sed -n '2p')
+
           for prefix in apigen client; do
             subtag="${prefix}/${version}"
+
+            # Only tag if the submodule directory has changed since the previous release
+            if [[ -n "$prev" ]] && git diff --quiet "${prev}" HEAD -- "${prefix}/"; then
+              echo "No changes in ${prefix}/ since ${prev}, skipping ${subtag}"
+              continue
+            fi
+
             git tag "$subtag"
             git push origin "$subtag"
+            echo "Tagged ${subtag}"
           done
