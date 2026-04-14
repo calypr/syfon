@@ -53,25 +53,61 @@ jobs:
           mkdir -p coverage
           go test -count=1 -covermode=atomic -coverprofile=coverage/coverage.out ./...
 
-      - name: Upload root coverage to Codecov
+      - name: Upload root coverage to Codecov (OIDC)
+        id: codecov_root_oidc
+        continue-on-error: true
         uses: codecov/codecov-action@v5
+        env:
+          CODECOV_SLUG: calypr/syfon
         with:
           use_oidc: true
           files: coverage/coverage.out
           flags: root
           disable_search: true
-          slug: calypr/syfon
+          verbose: true
           fail_ci_if_error: true
 
-      - name: Upload client coverage to Codecov
+      - name: Upload root coverage to Codecov (token fallback)
+        if: steps.codecov_root_oidc.outcome == 'failure'
+        continue-on-error: true
         uses: codecov/codecov-action@v5
+        env:
+          CODECOV_SLUG: calypr/syfon
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage/coverage.out
+          flags: root
+          disable_search: true
+          verbose: true
+          fail_ci_if_error: false
+
+      - name: Upload client coverage to Codecov (OIDC)
+        id: codecov_client_oidc
+        continue-on-error: true
+        uses: codecov/codecov-action@v5
+        env:
+          CODECOV_SLUG: calypr/syfon
         with:
           use_oidc: true
           files: client/coverage/coverage.out
           flags: client
           disable_search: true
-          slug: calypr/syfon
+          verbose: true
           fail_ci_if_error: true
+
+      - name: Upload client coverage to Codecov (token fallback)
+        if: steps.codecov_client_oidc.outcome == 'failure'
+        continue-on-error: true
+        uses: codecov/codecov-action@v5
+        env:
+          CODECOV_SLUG: calypr/syfon
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: client/coverage/coverage.out
+          flags: client
+          disable_search: true
+          verbose: true
+          fail_ci_if_error: false
       - name: Upload coverage artifacts
         uses: actions/upload-artifact@v4
         with:
