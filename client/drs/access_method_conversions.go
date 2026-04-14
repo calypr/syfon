@@ -6,6 +6,18 @@ import (
 )
 
 func DRSAccessMethodsFromInternalURLs(urls []string, authz []string) ([]AccessMethod, error) {
+	if len(urls) == 0 && len(authz) > 0 {
+		// Create a placeholder access method to preserve authorizations
+		return []AccessMethod{
+			{
+				Type: "s3", // Default type for the placeholder
+				Authorizations: Authorizations{
+					BearerAuthIssuers: []string{authz[0]},
+				},
+			},
+		}, nil
+	}
+
 	accessMethods := make([]AccessMethod, 0, len(urls))
 	for _, urlString := range urls {
 		method := AccessMethod{

@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
@@ -170,7 +169,7 @@ func MultipartUpload(ctx context.Context, bk xfer.Uploader, sourcePath, objectKe
 			}
 
 			// Perform the upload using the section directly
-			etag, err := uploadPart(ctx, url, section, size)
+			etag, err := bk.UploadPart(ctx, url, section, size)
 			if err != nil {
 				mu.Lock()
 				uploadErrors = append(uploadErrors, fmt.Errorf("upload failed part %d: %w", partNum, err))
@@ -273,32 +272,6 @@ func CompleteMultipartUpload(ctx context.Context, bk xfer.Uploader, key string, 
 	return nil
 }
 
-// uploadPart now returns the ETag and error directly.
-// It accepts a Context to allow for cancellation (e.g., if another part fails).
-func uploadPart(ctx context.Context, url string, data io.Reader, partSize int64) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, data)
-	if err != nil {
-		return "", err
-	}
-	if partSize > 0 {
-		req.ContentLength = partSize
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= http.StatusBadRequest {
-		body, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("upload part failed: status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(body)))
-	}
-	etag := strings.Trim(resp.Header.Get("ETag"), `"`)
-	if etag == "" {
-		return "", errors.New("no ETag returned")
-	}
-
-	return etag, nil
-}
 
 func (s *multipartResumeState) matches(req uploadRequest, info os.FileInfo, chunkSize int64) bool {
 	if s == nil {

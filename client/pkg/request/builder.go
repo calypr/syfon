@@ -4,6 +4,7 @@ import (
 	"io"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/calypr/syfon/client/pkg/common"
 )
@@ -16,6 +17,7 @@ type RequestBuilder struct {
 	Token    string
 	PartSize int64
 	SkipAuth bool
+	Timeout  time.Duration
 }
 
 func (ar *RequestBuilder) WithToken(token string) *RequestBuilder {
@@ -72,5 +74,10 @@ func (ar *RequestBuilder) WithSkipAuth(skip bool) *RequestBuilder {
 
 func (ar *RequestBuilder) WithPartSize(size int64) *RequestBuilder {
 	ar.PartSize = size
+	return ar
+}
+ 
+func (ar *RequestBuilder) WithTimeout(d time.Duration) *RequestBuilder {
+	ar.Timeout = d
 	return ar
 }

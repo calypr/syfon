@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 
 	"github.com/calypr/syfon/client/conf"
 	"github.com/calypr/syfon/client/pkg/logs"
@@ -14,7 +13,6 @@ import (
 
 const (
 	defaultAddress = "http://127.0.0.1:8080"
-	defaultTimeout = 60 * time.Second
 	defaultUA      = "syfon-client/0"
 )
 
@@ -96,8 +94,10 @@ func WithBearerToken(token string) Option {
 
 func DefaultConfig() *Config {
 	return &Config{
-		Address:    defaultAddress,
-		HTTPClient: &http.Client{Timeout: defaultTimeout},
+		Address: defaultAddress,
+		// We set absolute Timeout to 0 to allow per-request context timeouts
+		// to control the deadline (essential for large uploads).
+		HTTPClient: &http.Client{Timeout: 0},
 		UserAgent:  defaultUA,
 	}
 }

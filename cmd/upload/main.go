@@ -1,23 +1,21 @@
 package upload
 
 import (
-	"context"
 	"fmt"
-	"io"
-	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 
 	syclient "github.com/calypr/syfon/client"
+	"github.com/calypr/syfon/client/drs"
+	"github.com/calypr/syfon/client/xfer/upload"
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 )
 
 var (
-	uploadFile string
-	uploadDID  string
+	uploadFile  string
+	uploadDID   string
 	uploadAuthz string
 )
 
@@ -56,97 +54,39 @@ var Cmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		uploadReq := syclient.UploadBlankRequest{}
-		(&uploadReq).SetGuid(did)
-		(&uploadReq).SetAuthz([]string{authz})
-		signed, err := c.Data().UploadBlank(ctx, uploadReq)
+
+		// Create a DRS client from the SDK to pass to the orchestrator
+		dc := drs.NewDrsClient(c.Requestor(), nil, c.Logger())
+
+		// Set bucket/project if available (for future-proofing, currently uses defaults)
+		// For now, we'll use the provided authz to infer scope if needed.
+
+		drsObj := &drs.DRSObject{
+			Id:   did,
+			Name: filepath.Base(srcPath),
+			Size: info.Size(),
+			AccessMethods: []drs.AccessMethod{
+				{
+					Type: "s3", // Default type
+					Authorizations: drs.Authorizations{
+						BearerAuthIssuers: []string{authz},
+					},
+				},
+			},
+		}
+
+		// Register and upload using the SDK's orchestrator
+		// This will automatically handle multipart (if > 4.5GB) and progress display.
+		fmt.Fprintf(cmd.OutOrStdout(), "Uploading %s (%s)...\n", srcPath, upload.FormatSize(info.Size()))
+
+		_, err = upload.RegisterFile(ctx, c.Data(), dc, drsObj, srcPath, "")
 		if err != nil {
-			return fmt.Errorf("request upload url: %w", err)
-		}
-		uploadURL := strings.TrimSpace((&signed).GetUrl())
-		if uploadURL == "" {
-			return fmt.Errorf("empty upload url for did %s", did)
+			return fmt.Errorf("upload failed: %w", err)
 		}
 
-		if err := uploadBytesToURL(ctx, uploadURL, srcPath, c); err != nil {
-			return err
-		}
-
-		objectURL, err := c.Data().CanonicalObjectURL(uploadURL, strings.TrimSpace((&signed).GetBucket()), did)
-		if err != nil {
-			return err
-		}
-
-		record, err := c.Index().Get(ctx, did)
-		if err != nil {
-			return fmt.Errorf("resolve record authz: %w", err)
-		}
-		recordAuthz := record.GetAuthz()
-		if len(recordAuthz) == 0 {
-			return fmt.Errorf("record %s has no authz", did)
-		}
-		if err := c.Index().Upsert(ctx, did, objectURL, filepath.Base(srcPath), info.Size(), "", recordAuthz); err != nil {
-			return fmt.Errorf("record update failed: %w", err)
-		}
-
-		fmt.Fprintf(cmd.OutOrStdout(), "uploaded %s\n", did)
+		fmt.Fprintf(cmd.OutOrStdout(), "\nsuccessfully uploaded %s\n", did)
 		return nil
 	},
-}
-
-func uploadBytesToURL(ctx context.Context, rawURL, srcPath string, c *syclient.Client) error {
-	parsed, err := url.Parse(strings.TrimSpace(rawURL))
-	if err != nil {
-		return fmt.Errorf("parse upload url: %w", err)
-	}
-	switch strings.ToLower(parsed.Scheme) {
-	case "file":
-		content, err := os.ReadFile(srcPath)
-		if err != nil {
-			return fmt.Errorf("read source file: %w", err)
-		}
-		dstPath := parsed.Path
-		if dstPath == "" {
-			return fmt.Errorf("invalid file upload url: %s", rawURL)
-		}
-		if err := os.MkdirAll(filepath.Dir(dstPath), 0o755); err != nil {
-			return fmt.Errorf("create upload target dir: %w", err)
-		}
-		if err := os.WriteFile(dstPath, content, 0o644); err != nil {
-			return fmt.Errorf("write uploaded file: %w", err)
-		}
-		return nil
-	case "http", "https":
-		f, err := os.Open(srcPath)
-		if err != nil {
-			return fmt.Errorf("open source file: %w", err)
-		}
-		defer f.Close()
-		fi, err := f.Stat()
-		if err != nil {
-			return fmt.Errorf("stat source file: %w", err)
-		}
-
-		rb := c.Requestor().New(http.MethodPut, rawURL)
-		rb.WithBody(f)
-		rb.WithPartSize(fi.Size())
-
-		resp, err := c.Requestor().Do(ctx, rb)
-		if err != nil {
-			return fmt.Errorf("upload request failed: %w", err)
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode >= 400 {
-			body, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
-			if err != nil {
-				return fmt.Errorf("upload failed status=%d: %w", resp.StatusCode, err)
-			}
-			return fmt.Errorf("upload failed status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(body)))
-		}
-		return nil
-	default:
-		return fmt.Errorf("unsupported upload url scheme %q", parsed.Scheme)
-	}
 }
 
 func init() {

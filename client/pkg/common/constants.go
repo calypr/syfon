@@ -68,8 +68,10 @@ const (
 	// PathSeparator is os dependent path separator char
 	PathSeparator = string(os.PathSeparator)
 
-	// DefaultTimeout is used to set timeout value for http client
-	DefaultTimeout = 120 * time.Second
+	// DefaultTimeout is used for standard metadata/API requests
+	DefaultTimeout = 60 * time.Second
+	// DataTimeout is used specifically for large data transfers (uploads/downloads)
+	DataTimeout = 5 * time.Minute
 
 	HeaderContentType   = "Content-Type"
 	MIMEApplicationJSON = "application/json"

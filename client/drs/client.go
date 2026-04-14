@@ -346,7 +346,7 @@ func (c *DrsClient) RegisterRecords(ctx context.Context, records []*DRSObject) (
 		if err != nil {
 			return nil, fmt.Errorf("record[%d] conversion failed: %w", i, err)
 		}
-		internalRecords = append(internalRecords, internalRecord)
+		internalRecords = append(internalRecords, *internalRecord)
 	}
 
 	body, _ := json.Marshal(internalapi.BulkCreateRequest{Records: internalRecords})

@@ -128,4 +128,5 @@ type Uploader interface {
 	Upload(ctx context.Context, url string, body io.Reader, size int64) error
 	UploadPart(ctx context.Context, url string, body io.Reader, size int64) (string, error)
 	DeleteFile(ctx context.Context, guid string) (string, error)
+	CanonicalObjectURL(signedURL, bucketHint, fallbackDID string) (string, error)
 }

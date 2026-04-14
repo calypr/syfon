@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -13,21 +16,43 @@ import (
 )
 
 // DoUpload performs a presigned PUT request and returns ETag when available.
-func DoUpload(ctx context.Context, req request.RequestInterface, url string, body io.Reader, size int64) (string, error) {
-	rb := req.New(http.MethodPut, url).WithBody(body).WithSkipAuth(true)
+func DoUpload(ctx context.Context, req request.RequestInterface, urlStr string, body io.Reader, size int64) (string, error) {
+	parsed, err := url.Parse(strings.TrimSpace(urlStr))
+	if err == nil && strings.ToLower(parsed.Scheme) == "file" {
+		dstPath := parsed.Path
+		if dstPath == "" {
+			return "", fmt.Errorf("invalid file upload url: %s", urlStr)
+		}
+		if err := os.MkdirAll(filepath.Dir(dstPath), 0o755); err != nil {
+			return "", fmt.Errorf("create upload target dir: %w", err)
+		}
+		f, err := os.OpenFile(dstPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+		if err != nil {
+			return "", fmt.Errorf("open upload target file: %w", err)
+		}
+		defer f.Close()
+		_, err = io.Copy(f, body)
+		return "", err
+	}
+
+	skipAuth := common.IsCloudPresignedURL(urlStr)
+	rb := req.New(http.MethodPut, urlStr).WithBody(body).WithTimeout(common.DataTimeout)
+	if skipAuth {
+		rb.WithSkipAuth(true)
+	}
 	if size > 0 {
 		rb.PartSize = size
 	}
 
 	resp, err := req.Do(ctx, rb)
 	if err != nil {
-		return "", fmt.Errorf("upload to %s failed: %w", url, err)
+		return "", fmt.Errorf("upload to %s failed: %w", urlStr, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("upload to %s failed with status %d: %s", url, resp.StatusCode, string(bodyBytes))
+		return "", fmt.Errorf("upload to %s failed with status %d: %s", urlStr, resp.StatusCode, string(bodyBytes))
 	}
 
 	return strings.Trim(resp.Header.Get("ETag"), `"`), nil

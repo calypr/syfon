@@ -11,6 +11,7 @@ import (
 
 	internalapi "github.com/calypr/syfon/apigen/internalapi"
 	"github.com/calypr/syfon/client/pkg/logs"
+	"github.com/calypr/syfon/client/pkg/common"
 	"github.com/calypr/syfon/client/pkg/request"
 	"github.com/calypr/syfon/client/xfer"
 )
@@ -123,6 +124,38 @@ func (d *DataService) ResolveDownloadURL(ctx context.Context, guid string, acces
 
 func (d *DataService) Download(ctx context.Context, signedURL string, rangeStart, rangeEnd *int64) (*http.Response, error) {
 	return xfer.GenericDownload(ctx, d.base.requestor, signedURL, rangeStart, rangeEnd)
+}
+
+// --- transfer.Uploader interface support ---
+ 
+func (d *DataService) ResolveUploadURL(ctx context.Context, guid, filename string, metadata common.FileMetadata, bucket string) (string, error) {
+	resp, err := d.UploadURL(ctx, UploadURLRequest{
+		FileID:   guid,
+		FileName: filename,
+		Bucket:   bucket,
+	})
+	if err != nil {
+		return "", err
+	}
+	return resp.GetUrl(), nil
+}
+ 
+func (d *DataService) Upload(ctx context.Context, url string, body io.Reader, size int64) error {
+	ctx, cancel := context.WithTimeout(ctx, common.DataTimeout)
+	defer cancel()
+	_, err := xfer.DoUpload(ctx, d.base.requestor, url, body, size)
+	return err
+}
+ 
+func (d *DataService) UploadPart(ctx context.Context, url string, body io.Reader, size int64) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, common.DataTimeout)
+	defer cancel()
+	return xfer.DoUpload(ctx, d.base.requestor, url, body, size)
+}
+
+func (d *DataService) DeleteFile(ctx context.Context, guid string) (string, error) {
+	// Not implemented in backend yet, but required by interface
+	return "", fmt.Errorf("DeleteFile not yet implemented for DataService")
 }
 
 // --- transfer.Service interface support ---
