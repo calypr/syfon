@@ -1,8 +1,11 @@
 name: Install Script Test
 
 on:
-  push:
-  release:
+  workflow_run:
+    workflows:
+      - Release
+    types:
+      - completed
   workflow_dispatch:
 
 permissions:
@@ -11,6 +14,7 @@ permissions:
 jobs:
   install:
     name: Test on ${{ matrix.os }} (${{ matrix.arch }})
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -33,5 +37,5 @@ jobs:
           ./install.sh
           # GITHUB_PATH is typically updated by the script, explicitly setting here to ensure it's run successfully
           export PATH="$PATH:$HOME/.local/bin"
-          syphon --help
-          syphon version
+          syfon --help
+          syfon version
