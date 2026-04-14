@@ -7,4 +7,4 @@
 
 ## Production
 
-Describe how to deploy `drs-server` to your target environment (e.g. Kubernetes, Docker, VM).
+Describe how to deploy `syfon` to your target environment (e.g. Kubernetes, Docker, VM).

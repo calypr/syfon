@@ -1,4 +1,4 @@
-site_name: drs-server
+site_name: sifon
 theme:
   name: readthedocs
   custom_dir: overrides
@@ -11,5 +11,6 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Configuration: configuration.md
+  - Encryption: encryption.md
   - Deployment: deployment.md
   - Troubleshooting: troubleshooting.md

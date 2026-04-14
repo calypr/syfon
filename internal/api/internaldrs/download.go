@@ -1,0 +1,162 @@
+package internaldrs
+
+import (
+	"encoding/json"
+	"log/slog"
+	"net/http"
+	"net/url"
+	"strconv"
+
+	"github.com/calypr/syfon/apigen/internalapi"
+	"github.com/calypr/syfon/config"
+	"github.com/calypr/syfon/db/core"
+	"github.com/calypr/syfon/internal/provider"
+	"github.com/calypr/syfon/urlmanager"
+	"github.com/gorilla/mux"
+)
+
+func handleInternalDownload(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface, uM urlmanager.UrlManager) {
+	vars := mux.Vars(r)
+	fileID := vars["file_id"]
+
+	obj, err := resolveObjectByIDOrChecksum(database, r.Context(), fileID)
+	if err != nil {
+		writeDBError(w, r, err)
+		return
+	}
+	if !hasAnyMethodAccess(r, obj.Authorizations, "read") {
+		writeAuthError(w, r)
+		return
+	}
+
+	// Find first supported access method (s3, gs, azblob)
+	var objectURL string
+	for _, am := range obj.AccessMethods {
+		if am.AccessUrl.Url == "" {
+			continue
+		}
+		u, err := url.Parse(am.AccessUrl.Url)
+		if err != nil {
+			continue
+		}
+		if provider.FromScheme(u.Scheme) != "" {
+			objectURL = am.AccessUrl.Url
+			break
+		}
+	}
+
+	if objectURL == "" {
+		writeHTTPError(w, r, http.StatusNotFound, "No supported cloud location found for this file", nil)
+		return
+	}
+
+	opts := urlmanager.SignOptions{}
+	if expStr := r.URL.Query().Get("expires_in"); expStr != "" {
+		if exp, err := strconv.Atoi(expStr); err == nil {
+			opts.ExpiresIn = exp
+		}
+	}
+	if opts.ExpiresIn <= 0 {
+		opts.ExpiresIn = config.DefaultSigningExpirySeconds
+	}
+
+	bucketID := ""
+	if parsed, parseErr := url.Parse(objectURL); parseErr == nil {
+		bucketID = parsed.Host
+	}
+
+	signedURL, err := uM.SignURL(r.Context(), bucketID, objectURL, opts)
+	if err != nil {
+		writeHTTPError(w, r, http.StatusInternalServerError, err.Error(), err)
+		return
+	}
+
+	if recErr := database.RecordFileDownload(r.Context(), obj.Id); recErr != nil {
+		slog.Debug("failed to record file download metric", "request_id", core.GetRequestID(r.Context()), "file_id", obj.Id, "err", recErr)
+	}
+
+	if r.URL.Query().Get("redirect") == "true" {
+		http.Redirect(w, r, signedURL, http.StatusFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(internalapi.InternalSignedURL{
+		Url: &signedURL,
+	})
+}
+
+func handleInternalDownloadPart(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface, uM urlmanager.UrlManager) {
+	vars := mux.Vars(r)
+	fileID := vars["file_id"]
+
+	startStr := r.URL.Query().Get("start")
+	endStr := r.URL.Query().Get("end")
+
+	if startStr == "" || endStr == "" {
+		writeHTTPError(w, r, http.StatusBadRequest, "Missing 'start' or 'end' query parameter", nil)
+		return
+	}
+
+	start, err := strconv.ParseInt(startStr, 10, 64)
+	if err != nil || start < 0 {
+		writeHTTPError(w, r, http.StatusBadRequest, "Invalid 'start' parameter", err)
+		return
+	}
+	end, err := strconv.ParseInt(endStr, 10, 64)
+	if err != nil || end < start {
+		writeHTTPError(w, r, http.StatusBadRequest, "Invalid 'end' parameter", err)
+		return
+	}
+
+	obj, err := resolveObjectByIDOrChecksum(database, r.Context(), fileID)
+	if err != nil {
+		writeDBError(w, r, err)
+		return
+	}
+	if !hasAnyMethodAccess(r, obj.Authorizations, "read") {
+		writeAuthError(w, r)
+		return
+	}
+
+	// Find first supported access method (s3, gs, azblob)
+	var objectURL string
+	for _, am := range obj.AccessMethods {
+		if am.AccessUrl.Url == "" {
+			continue
+		}
+		u, err := url.Parse(am.AccessUrl.Url)
+		if err != nil {
+			continue
+		}
+		if provider.FromScheme(u.Scheme) != "" {
+			objectURL = am.AccessUrl.Url
+			break
+		}
+	}
+
+	if objectURL == "" {
+		writeHTTPError(w, r, http.StatusNotFound, "No supported cloud location found for this file", nil)
+		return
+	}
+
+	bucketID := ""
+	if parsed, parseErr := url.Parse(objectURL); parseErr == nil {
+		bucketID = parsed.Host
+	}
+
+	opts := urlmanager.SignOptions{
+		ExpiresIn: config.DefaultSigningExpirySeconds,
+	}
+
+	signedURL, err := uM.SignDownloadPart(r.Context(), bucketID, objectURL, start, end, opts)
+	if err != nil {
+		writeHTTPError(w, r, http.StatusInternalServerError, err.Error(), err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(internalapi.InternalSignedURL{
+		Url: &signedURL,
+	})
+}

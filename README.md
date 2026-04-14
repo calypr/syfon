@@ -1,43 +1,270 @@
-# drs-server
+<p align="center">
+  <img src="docs/images/syfon-logo.png" alt="syfon logo" width="520" />
+</p>
 
-A lightweight reference implementation of a GA4GH Data Repository Service (DRS) server in Go.
+# syfon
 
-## Table of Contents
-- [Overview](#overview)
-- [Quickstart](QUICKSTART.md)
-- [Contributing](CONTRIBUTING.md)
-- [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+A lightweight, production-grade implementation of a GA4GH Data Repository Service (DRS) server in Go.
 
+## Quickstart
 
-## Overview
+### Prerequisites
 
-GA4GH DRS is a standard API for describing and accessing data objects in cloud or on‑premise repositories.  
-This project consumes the official GA4GH `data-repository-service-schemas` as a Git submodule and generates a Go HTTP server from the DRS OpenAPI spec.
+- Go 1.24+
+- SQLite3 CLI (`sqlite3`)
+- Git
 
+### 1. Clone and enter the repo
 
-```mermaid
-graph TD
-  0[ga4gh/data-repository-service-schemas DRS OpenAPI spec submodule] --> B
-  A[Makefile] --> B[make gen]
-  A --> C2[cmd/server]
-  A --> D[make test]
-  A --> E[make docs/]
-
-  B --> G[internal/apigen generated DRS server code]
-  B --> H[cmd/openapi-remove-examples clean OpenAPI helper] --> H2[internal/apigen/api/openapi.yaml]
-
-  H2 --> C2
-  D --> C2
-  G --> C2
+```bash
+git clone <your-repo-url>
+cd syfon
 ```
 
-* Makefile - targets for generation, tests, docs, and running the server.
-  * `make gen` - generates the DRS server code from the OpenAPI spec.
-    * ga4gh/data-repository-service-schemas - GA4GH DRS OpenAPI spec (Git submodule).
-    * internal/apigen - generated DRS server code.
-    * cmd/openapi-remove-examples - helper to clean the bundled OpenAPI.
-  * `make serve` - runs the DRS server.
-    * cmd/server - main HTTP server (uses gin-gonic/gin).
-  * `make test` - launches server, runs integration tests.
-  * `make docs` - serves documentation with MkDocs.
+### 2. Run tests
 
+```bash
+go test ./... -count=1
+```
+
+### 3. Start in local mode (SQLite, no gen3 authz)
+
+Create `config.local.yaml`:
+
+```yaml
+port: 8080
+auth:
+  mode: local
+  # optional basic auth for local mode
+  # basic:
+  #   username: "drs-user"
+  #   password: "drs-pass"
+database:
+  sqlite:
+    file: "drs_local.db"
+s3_credentials:
+  - bucket: "local-bucket"
+    region: "us-east-1"
+    access_key: "minio-user"
+    secret_key: "minio-pass"
+    endpoint: "http://localhost:9000"
+```
+
+Run:
+
+```bash
+./db/scripts/init_sqlite_db.sh drs_local.db
+go run . serve --config config.local.yaml
+```
+
+Smoke test:
+
+```bash
+curl -s http://localhost:8080/healthz
+```
+
+Notes:
+- `auth.mode` is required and must be `local` or `gen3`.
+- Local development should run `auth.mode: local` with SQLite only.
+- In `local` mode, set `auth.basic.username/password` (or env `DRS_BASIC_AUTH_USER` / `DRS_BASIC_AUTH_PASSWORD`) to enforce HTTP basic auth.
+- `gen3` mode is for deployed environments and requires PostgreSQL.
+
+Record scope note:
+- Syfon supports both scoped records (with `authz`, such as `/programs/<org>/projects/<project>`) and unscoped records (empty `authz`).
+- Unscoped `ls` (`GET /index` without `organization/project/authz` filters) returns all records, including unscoped ones.
+- RBAC checks still apply for scoped records in `gen3` mode.
+- Recommended production policy: require project/authz at write time so unscoped records are not created unintentionally.
+
+### Local Gen3 Mock Auth (no redeploy loop)
+
+For local integration testing of Gen3 authorization behavior without Fence/Arborist and without PostgreSQL, run with mock auth:
+
+```bash
+DRS_AUTH_MODE=gen3 \
+DRS_AUTH_MOCK_ENABLED=true \
+DRS_AUTH_MOCK_RESOURCES="/data_file,/programs/cbds/projects/end_to_end_test" \
+DRS_AUTH_MOCK_METHODS="read,file_upload,create,update,delete" \
+go run . serve --config config.local.yaml
+```
+
+Optional:
+- `DRS_AUTH_MOCK_REQUIRE_AUTH_HEADER=true` requires an `Authorization` header before mock privileges are injected.
+- If `DRS_AUTH_MOCK_RESOURCES` is omitted, default is `"/data_file"`.
+- If `DRS_AUTH_MOCK_METHODS` is omitted, default is `"*"` (full method access).
+
+## Purpose
+
+The `syfon` provides a robust implementation of the [GA4GH DRS API](https://ga4gh.github.io/data-repository-service-schemas/). It is designed to manage metadata for data objects and provide secure access via signed URLs.
+
+### Key Features
+- **GA4GH DRS Compliance**: Implements the standard DRS API for describing and accessing data objects.
+- **Database Flexibility**: Supports both **SQLite** and **PostgreSQL** backends with a modular driver architecture.
+- **S3 Integration**: Native support for Amazon S3 (and compatible storage like MinIO) with signed URL generation for downloads and multipart uploads.
+
+## Configuration
+
+The server is configured via a YAML or JSON file. Use the following structure to set up your environment:
+
+```yaml
+port: 8080
+auth:
+  mode: "local" # required: "local" or "gen3"
+  # basic:
+  #   username: "user"
+  #   password: "pass"
+
+database:
+  sqlite:
+    file: "drs.db"
+  # Or use PostgreSQL:
+  # postgres:
+  #   host: "localhost"
+  #   port: 5432
+  #   user: "user"
+  #   password: "password"
+  #   database: "drs"
+  #   sslmode: "disable"
+
+s3_credentials:
+  - bucket: "my-test-bucket"
+    region: "us-east-1"
+    access_key: "AKIAXXXXXXXXXXXXXXXX"
+    secret_key: "SECRETKEY"
+    endpoint: "s3.amazonaws.com" # Optional: set for MinIO or custom backends
+```
+
+In `gen3` mode, PostgreSQL is required unless `DRS_AUTH_MOCK_ENABLED=true` is set for local mock-auth testing.
+
+Detailed configuration reference (including env overrides): [docs/configuration.md](docs/configuration.md)
+
+## Gen3/PostgreSQL Schema Initialization
+
+For deployment environments using PostgreSQL, schema initialization is managed by the Helm chart (`helm/syfon/templates/postgres-schema-configmap.yaml` + init Job).
+This repository intentionally does not ship a separate Postgres init SQL script.
+
+## Local Development Workflow
+
+```bash
+go test ./... -count=1
+./db/scripts/init_sqlite_db.sh drs_local.db
+go run . serve --config config.local.yaml
+```
+
+Useful endpoints:
+- `GET /healthz`
+- `GET /index/swagger` (Swagger UI)
+- `GET /index/openapi.yaml` (OpenAPI spec)
+- `GET /service-info`
+- `GET /index/{id}` (gen3 compatibility)
+- `POST /index/bulk/sha256/validity` (bulk sha validity map for git-lfs style flows)
+- `GET /download/{id}` (fence compatibility)
+
+
+## Minio Starter Kit
+
+Start up a docker container with MinIO for testing:
+```
+docker run -p 9000:9000 -p 9001:9001 \
+  -e "MINIO_ROOT_USER=admin" \
+  -e "MINIO_ROOT_PASSWORD=password123" \
+  -v ./data:/data \
+  minio/minio server /data --console-address ":9001"
+```
+
+Create a config file called `local.yaml`
+```
+port: 8080
+
+auth:
+    mode: local
+
+database:
+  sqlite:
+    file: "drs.db"
+database:
+  sqlite:
+    file: "drs.db"
+s3_credentials:
+  - bucket: "test-bucket"
+    region: "us-east-1"
+    access_key: "admin"
+    secret_key: "password123"
+    endpoint: "http://localhost:9000"
+```
+
+Start the syfon server
+```
+syfon server --config local.yaml
+```
+
+Upload a file
+```
+syfon upload --file README.md
+```
+
+List records
+```
+syfon ls
+```
+
+## Running Integration Tests
+
+You can run integration tests using your own config file:
+
+```bash
+go test ./cmd/server -v -count=1 -testConfig=config.yaml
+```
+
+Docker-backed MinIO upload and download coverage is available behind an opt-in flag:
+
+```bash
+SYFON_E2E_DOCKER=1 go test ./cmd -run TestSyfonDockerMinIOE2E -v -count=1
+```
+
+This test starts MinIO in Docker, starts a real syfon server configured against it, then verifies `ping`, `upload`, `download`, and `sha256sum`. It skips automatically when the opt-in flag is not set, and it also skips when Docker is unavailable.
+
+## Architecture
+
+The project follows a modular structure to ensure maintainability:
+- `db/core`: Core interfaces and models.
+- `db/sqlite`, `db/postgres`: Database implementation drivers.
+- `internal/api`: Subpackages for different API contexts (Core, internal compatibility, LFS, metrics, docs, middleware).
+- `service`: High-level business logic implementing the DRS service.
+- `urlmanager`: Logic for interacting with cloud storage providers.
+
+See DB table details and relationships in [db/README.md](db/README.md).
+
+## Go Client SDK (Multi-Module)
+
+This repository now includes a separate Go client module at `./client`:
+
+- Module path: `github.com/calypr/syfon/client`
+- Purpose: reusable HTTP client for Syfon APIs (used by the Syfon CLI and external tools)
+
+Example import:
+
+```go
+import syclient "github.com/calypr/syfon/client"
+```
+
+The root module (`github.com/calypr/syfon`) uses a local `replace` during development:
+
+```go
+replace github.com/calypr/syfon/client => ./client
+```
+
+## Development
+
+The project uses a Makefile for common tasks:
+- `make gen`: Generates the DRS server code from the official GA4GH OpenAPI spec (Git submodule).
+- `make test`: Runs all unit and integration tests.
+- `make test-unit`: Runs unit tests only (excludes integration packages).
+- `make coverage`: Runs coverage for core production packages (db/service/middleware/url signing) and writes `coverage/coverage.out`, `coverage/coverage.txt`, and `coverage/coverage.html`.
+- `make coverage-full`: Runs broader compatibility-layer coverage (includes internal compatibility and LFS packages).
+- `make serve`: Starts the DRS server.
+
+### apigen Scope (Current vs Future)
+
+The `apigen` module is currently used as a shared model/types package, not a full server/client operation generator. In practice, we generate and commit schemas/models from OpenAPI (`components/schemas`), while route handlers and request wiring are implemented manually under `internal/api/internaldrs` and related packages. This means path/operation updates in `apigen/api/*.openapi.yaml` may change contract/docs without producing new generated handler code.
+
+This is intentional for now to keep control of runtime behavior and compatibility logic. We can expand `apigen` later to include operation-level generation (`apis`/server interfaces) once we decide to move more routing and handler contracts to generated code.

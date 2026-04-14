@@ -1,4 +1,4 @@
-# drs-server
+# syfon
 
 A lightweight reference implementation of a GA4GH Data Repository Service (DRS) server in Go.
 
@@ -9,6 +9,8 @@ See the `README.md` in the repository root for more details.
 - Implements GA4GH DRS endpoints using Go.
 - Uses the official GA4GH DRS OpenAPI spec via a Git submodule at `ga4gh/data-repository-service-schemas`.
 - Generates server stubs into `internal/apigen`.
+- See `configuration.md` for runtime env/config.
+- See `encryption.md` for credential-at-rest encryption behavior.
 
 ## Architecture
 

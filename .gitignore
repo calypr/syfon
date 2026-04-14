@@ -8,11 +8,14 @@
 *.out
 *.a
 *.o
+*.env
+config_sample.yaml
 
 # Go workspace caches
 *.cover
 *.prof
 *.log
+*.gocache
 coverage.*
 
 # Local build directories
@@ -22,10 +25,22 @@ coverage.*
 /tmp/
 /out/
 /.tmp/
+/.gocache/
 
 # Editor and OS cruft
 .DS_Store
 .idea/
 .vscode/
-
+.gomodcache/*
 site/
+
+syfon
+
+# Local runtime/test databases
+/drs.db
+/drs_test.db
+
+
+# Local one-off configs and DBs
+/drs_local.db
+/drs_mock.db
