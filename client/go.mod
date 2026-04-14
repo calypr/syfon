@@ -10,7 +10,7 @@ require (
 	github.com/vbauerster/mpb/v8 v8.12.0
 	go.uber.org/mock v0.6.0
 	gocloud.dev v0.45.0
-	golang.org/x/sync v0.19.0
+	golang.org/x/sync v0.20.0
 	gopkg.in/ini.v1 v1.67.1
 )
 
