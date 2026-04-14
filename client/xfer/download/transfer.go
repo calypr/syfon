@@ -193,6 +193,7 @@ func downloadToPathSingle(
 	fdr := downloadRequest{guid: guid}
 	if existingSize > 0 {
 		fdr.rangeBytes = existingSize
+		fdr.rangeStart = &fdr.rangeBytes
 	}
 
 	if err := GetDownloadResponse(ctx, bk, &fdr, protocol); err != nil {

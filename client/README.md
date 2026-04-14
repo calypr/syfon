@@ -1,5 +1,16 @@
 # syfon client (Go SDK)
 
+[![Go Reference](https://pkg.go.dev/badge/github.com/calypr/syfon/client.svg)](https://pkg.go.dev/github.com/calypr/syfon/client)
+[![Go Report Card](https://goreportcard.com/badge/github.com/calypr/syfon/client)](https://goreportcard.com/report/github.com/calypr/syfon/client)
+[![Go Version](https://img.shields.io/badge/go-1.26.1-00ADD8?logo=go)](https://go.dev/doc/devel/release)
+[![CI](https://github.com/calypr/syfon/actions/workflows/ci.yaml/badge.svg)](https://github.com/calypr/syfon/actions/workflows/ci.yaml)
+[![Coverage](https://codecov.io/gh/calypr/syfon/branch/main/graph/badge.svg)](https://codecov.io/gh/calypr/syfon)
+[![dependabot](https://img.shields.io/badge/dependabot-enabled-025E8C?logo=dependabot)](https://github.com/calypr/syfon/security/dependabot)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](../LICENSE)
+[![Latest Release](https://img.shields.io/github/v/release/calypr/syfon)](https://github.com/calypr/syfon/releases)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](../CONTRIBUTING.md)
+[![GitHub Stars](https://img.shields.io/github/stars/calypr/syfon?style=social)](https://github.com/calypr/syfon/stargazers)
+
 This module provides a reusable Go client for Syfon APIs.
 
 - Module: `github.com/calypr/syfon/client`
