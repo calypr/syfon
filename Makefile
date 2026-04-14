@@ -63,6 +63,10 @@ release: release-dep
 .PHONY: release-dep
 release-dep:
 	@go install github.com/goreleaser/goreleaser/v2@latest
+	@if ! command -v zig >/dev/null 2>&1; then \
+	  echo "ERROR: zig is required for cross-compilation. Install via: brew install zig"; \
+	  exit 1; \
+	fi
 
 .PHONY: gen
 gen:

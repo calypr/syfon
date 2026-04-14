@@ -45,18 +45,14 @@ jobs:
           go-version-file: 'go.mod'
           cache: true
 
-      - name: Install cross toolchain for linux/arm64
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu
+      - name: Install Zig
+        uses: mlugg/setup-zig@v2
 
       - name: Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
           BRANCH: ${{ github.ref_name }}
-          CGO_ENABLED: "1"
-          # CC: aarch64-linux-gnu-gcc
         run: |
           export PATH="$HOME/go/bin:$PATH"
           make release

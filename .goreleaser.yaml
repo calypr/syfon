@@ -10,6 +10,12 @@ builds:
       - arm64
     env:
       - CGO_ENABLED=1
+      - >-
+        CC={{- if eq .Os "linux" -}}
+          {{- if eq .Arch "amd64"}}zig cc -target x86_64-linux-musl
+          {{- else if eq .Arch "arm64"}}zig cc -target aarch64-linux-musl
+          {{- end}}
+        {{- else}}cc{{- end}}
     ldflags: >
       -X github.com/calypr/syfon/version.BuildDate={{.Date}}
       -X github.com/calypr/syfon/version.GitCommit={{.ShortCommit}}
