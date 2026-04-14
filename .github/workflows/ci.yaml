@@ -36,7 +36,7 @@ jobs:
 
       - name: Run server endpoint router tests
         run: |
-          go test ./cmd/server \
+          CGO_ENABLED=1 go test ./cmd/server \
             -run 'Test(AllRegisteredEndpoints_WithMocks|RegisterAPIRoutes_StaticBeforeParamAcrossControllers|RegisterControllerRoutes_StaticBeforeParam)' \
             -v
 

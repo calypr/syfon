@@ -11,6 +11,6 @@ var Cmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print Syfon version",
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Fprintf(cmd.OutOrStdout(), version.String())
+		fmt.Fprintln(cmd.OutOrStdout(), version.String())
 	},
 }

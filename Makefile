@@ -301,13 +301,13 @@ gen-internal:
 .PHONY: test
 test:
 	GOCACHE="$(GOCACHE)" go clean -testcache
-	GOCACHE="$(GOCACHE)" go test -v ./...
+	CGO_ENABLED=1 GOCACHE="$(GOCACHE)" go test -v ./...
 
 .PHONY: test-unit
 test-unit:
 	GOCACHE="$(GOCACHE)" go clean -testcache
 	@PKGS=$$(go list ./... | grep -Ev '/cmd/server$$|/tests/endpoints$$'); \
-	  GOCACHE="$(GOCACHE)" go test -v -count=1 $$PKGS
+	  CGO_ENABLED=1 GOCACHE="$(GOCACHE)" go test -v -count=1 $$PKGS
 
 .PHONY: coverage
 coverage:
@@ -440,7 +440,7 @@ release-test-apigen:
 	  exit 0; \
 	fi; \
 	cd apigen; \
-	GOCACHE="$(GOCACHE)" go test ./...
+	CGO_ENABLED=1 GOCACHE="$(GOCACHE)" go test ./...
 
 .PHONY: release-test-client
 release-test-client:
@@ -450,7 +450,7 @@ release-test-client:
 	  exit 0; \
 	fi; \
 	cd client; \
-	GOCACHE="$(GOCACHE)" go test ./...
+	CGO_ENABLED=1 GOCACHE="$(GOCACHE)" go test ./...
 
 .PHONY: release-apigen
 release-apigen: release-check-clean-apigen release-check-apigen-tag release-test-apigen
