@@ -162,7 +162,6 @@ jobs:
             type=ref,event=pr
             type=sha,format=short
             type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest,enable=${{ github.ref_type == 'tag' && !contains(github.ref_name, '-rc.') }}
 
       - name: Login to Quay.io

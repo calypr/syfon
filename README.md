@@ -1,23 +1,24 @@
 <p align="center">
   <img src="docs/images/syfon-logo.png" alt="syfon logo" width="520" />
+  <br><br>
+  <a href="https://pkg.go.dev/github.com/calypr/syfon"><img src="https://pkg.go.dev/badge/github.com/calypr/syfon.svg" alt="Go Reference"></a>
+  <a href="https://goreportcard.com/report/github.com/calypr/syfon"><img src="https://goreportcard.com/badge/github.com/calypr/syfon" alt="Go Report Card"></a>
+  <a href="https://github.com/calypr/syfon/actions/workflows/ci.yaml"><img src="https://github.com/calypr/syfon/actions/workflows/ci.yaml/badge.svg" alt="CI"></a>
+  <a href="https://codecov.io/gh/calypr/syfon"><img src="https://codecov.io/gh/calypr/syfon/branch/main/graph/badge.svg" alt="Coverage"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+  <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs Welcome"></a>
+  <a href="https://github.com/calypr/syfon/releases"><img src="https://img.shields.io/github/v/release/calypr/syfon" alt="Latest Release"></a>
 </p>
-
-# syfon
-
-[![Go Reference](https://pkg.go.dev/badge/github.com/calypr/syfon.svg)](https://pkg.go.dev/github.com/calypr/syfon)
-[![Go Report Card](https://goreportcard.com/badge/github.com/calypr/syfon)](https://goreportcard.com/report/github.com/calypr/syfon)
-[![Go Version](https://img.shields.io/badge/go-1.26.1-00ADD8?logo=go)](https://go.dev/doc/devel/release)
-[![CI](https://github.com/calypr/syfon/actions/workflows/ci.yaml/badge.svg)](https://github.com/calypr/syfon/actions/workflows/ci.yaml)
-[![Coverage](https://codecov.io/gh/calypr/syfon/branch/main/graph/badge.svg)](https://codecov.io/gh/calypr/syfon)
-[![dependabot](https://img.shields.io/badge/dependabot-enabled-025E8C?logo=dependabot)](https://github.com/calypr/syfon/security/dependabot)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Latest Release](https://img.shields.io/github/v/release/calypr/syfon)](https://github.com/calypr/syfon/releases)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
-[![GitHub Stars](https://img.shields.io/github/stars/calypr/syfon?style=social)](https://github.com/calypr/syfon/stargazers)
 
 A lightweight, production-grade implementation of a GA4GH Data Repository Service (DRS) server in Go.
 
-## Quickstart
+# Quickstart
+
+```bash
+curl -sSL https://calypr.org/syfon/install.sh | bash
+
+syfon server
+```
 
 ### Prerequisites
 
@@ -283,4 +284,3 @@ This is intentional for now to keep control of runtime behavior and compatibilit
 ## License
 
 This project is licensed under the MIT License. See [LICENSE](LICENSE).
-
