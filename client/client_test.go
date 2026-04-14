@@ -94,7 +94,7 @@ func TestDataUploadBlank(t *testing.T) {
 
 func TestIndexListByHash(t *testing.T) {
 	t.Parallel()
-	rec := InternalRecord{}
+	rec := InternalRecordRequest{}
 	(&rec).SetDid("id-1")
 	c := newTestClient(t, func(r *http.Request) (*http.Response, error) {
 		if r.Method != http.MethodGet || r.URL.Path != "/index" {
@@ -103,7 +103,7 @@ func TestIndexListByHash(t *testing.T) {
 		if got := r.URL.Query().Get("hash"); got != "sha256:deadbeef" {
 			t.Fatalf("unexpected hash query: %q", got)
 		}
-		data, _ := json.Marshal(ListRecordsResponse{Records: []InternalRecord{rec}})
+		data, _ := json.Marshal(ListRecordsResponse{Records: []InternalRecordRequest{rec}})
 		return &http.Response{
 			StatusCode: http.StatusOK,
 			Body:       io.NopCloser(strings.NewReader(string(data))),

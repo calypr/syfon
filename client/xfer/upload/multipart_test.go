@@ -85,6 +85,9 @@ func (f *fakeGen3Upload) UploadPart(ctx context.Context, url string, body io.Rea
 func (f *fakeGen3Upload) DeleteFile(ctx context.Context, guid string) (string, error) {
 	return "", nil
 }
+func (f *fakeGen3Upload) CanonicalObjectURL(signedURL, bucketHint, fallbackDID string) (string, error) {
+	return signedURL, nil
+}
 
 func TestMultipartUploadProgressIntegration(t *testing.T) {
 	ctx := context.Background()
