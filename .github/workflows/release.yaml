@@ -19,14 +19,14 @@ permissions:
   contents: read
 
 jobs:
-  # test:
-  #   name: CI
-  #   uses: ./.github/workflows/ci.yaml
-  #   secrets: inherit
+  test:
+    name: CI
+    uses: ./.github/workflows/ci.yaml
+    secrets: inherit
 
   build:
     name: Build (${{ matrix.goos }}/${{ matrix.goarch }})
-    # needs: [test]
+    needs: [test]
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
