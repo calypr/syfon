@@ -98,7 +98,7 @@ jobs:
         env:
           SYFON_E2E_DOCKER: 1
         run: |
-          go test -v -run TestSyfonDocker ./cmd/...
+          go test ./cmd -run TestSyfonDocker -v
   build-and-push:
     name: Build syfon
     runs-on: ${{ matrix.arch == 'amd64' && 'ubuntu-latest' || 'ubuntu-24.04-arm' }}
