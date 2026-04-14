@@ -60,6 +60,7 @@ jobs:
           files: coverage/coverage.out
           flags: root
           disable_search: true
+          slug: calypr/syfon
           fail_ci_if_error: true
 
       - name: Upload client coverage to Codecov
@@ -69,6 +70,7 @@ jobs:
           files: client/coverage/coverage.out
           flags: client
           disable_search: true
+          slug: calypr/syfon
           fail_ci_if_error: true
       - name: Upload coverage artifacts
         uses: actions/upload-artifact@v4
