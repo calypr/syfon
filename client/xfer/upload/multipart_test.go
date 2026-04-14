@@ -77,10 +77,34 @@ func (f *fakeGen3Upload) CompleteMultipartUpload(ctx context.Context, key string
 	return err
 }
 func (f *fakeGen3Upload) Upload(ctx context.Context, url string, body io.Reader, size int64) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, body)
+	if err != nil {
+		return err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("upload failed: %s", resp.Status)
+	}
 	return nil
 }
 func (f *fakeGen3Upload) UploadPart(ctx context.Context, url string, body io.Reader, size int64) (string, error) {
-	return "", nil
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, body)
+	if err != nil {
+		return "", err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return "", fmt.Errorf("upload part failed: %s", resp.Status)
+	}
+	return resp.Header.Get("ETag"), nil
 }
 func (f *fakeGen3Upload) DeleteFile(ctx context.Context, guid string) (string, error) {
 	return "", nil
