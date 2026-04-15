@@ -2,12 +2,6 @@ name: Install Script Test
 
 on:
   push:
-  workflow_run:
-    workflows:
-      - Release
-    types:
-      - completed
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -15,7 +9,6 @@ permissions:
 jobs:
   install:
     name: Test on ${{ matrix.os }} (${{ matrix.arch }})
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
