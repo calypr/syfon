@@ -185,7 +185,7 @@ func TestGCSSignedUploadPartURL_RequiresServiceAccountSigningMaterial(t *testing
 
 func mustGCSServiceAccountJSON(t *testing.T, clientEmail string) string {
 	t.Helper()
-	privateKey, err := rsa.GenerateKey(rand.Reader, 1024)
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatalf("failed to generate RSA key: %v", err)
 	}
