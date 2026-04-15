@@ -1,6 +1,6 @@
 module github.com/calypr/syfon/apigen
 
-go 1.26.1
+go 1.26.2
 
 require (
 	github.com/gofiber/fiber/v3 v3.1.0

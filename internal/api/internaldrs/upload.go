@@ -104,6 +104,9 @@ func (s *InternalServer) InternalUploadBlank(ctx context.Context, request intern
 		return internalapi.InternalUploadBlank400Response{}, nil
 	}
 
+	if s.uM == nil {
+		return nil, fmt.Errorf("URL Manager not initialized")
+	}
 	signedURL, err := s.uM.SignUploadURL(ctx, cred.Bucket, objectURL, urlmanager.SignOptions{})
 	if err != nil {
 		return nil, err
@@ -181,6 +184,9 @@ func (s *InternalServer) InternalUploadURL(ctx context.Context, request internal
 		opts.ExpiresIn = int(*params.ExpiresIn)
 	}
 
+	if s.uM == nil {
+		return nil, fmt.Errorf("URL Manager not initialized")
+	}
 	signedURL, err := s.uM.SignUploadURL(ctx, cred.Bucket, objectURL, opts)
 	if err != nil {
 		return nil, err
@@ -329,6 +335,12 @@ func (s *InternalServer) signInternalUploadBulkItem(ctx context.Context, item in
 	opts := urlmanager.SignOptions{}
 	if item.ExpiresIn != nil {
 		opts.ExpiresIn = int(*item.ExpiresIn)
+	}
+	if s.uM == nil {
+		result.Status = int32(http.StatusInternalServerError)
+		errStr := "URL Manager not initialized"
+		result.Error = &errStr
+		return result
 	}
 	signedURL, err := s.uM.SignUploadURL(ctx, cred.Bucket, objectURL, opts)
 	if err != nil {

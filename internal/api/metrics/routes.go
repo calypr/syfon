@@ -3,6 +3,7 @@ package metrics
 import (
 	"context"
 	"errors"
+	"net/http"
 	"sort"
 	"strings"
 	"time"
@@ -65,15 +66,16 @@ func (s *MetricsServer) ListMetricsFiles(ctx context.Context, request metricsapi
 		return metricsapi.ListMetricsFiles400Response{}, nil
 	}
 
-	access, err := resolveMetricsAccess(ctx)
-	if err != nil {
-		return metricsapi.ListMetricsFiles400Response{}, nil
-	}
-	if !access.authorized(ctx) {
-		if core.IsGen3Mode(ctx) && !core.HasAuthHeader(ctx) {
+	access, statusCode, ok := s.checkAuth(ctx)
+	if !ok {
+		switch statusCode {
+		case http.StatusUnauthorized:
 			return metricsapi.ListMetricsFiles401Response{}, nil
+		case http.StatusForbidden:
+			return metricsapi.ListMetricsFiles403Response{}, nil
+		default:
+			return metricsapi.ListMetricsFiles400Response{}, nil
 		}
-		return metricsapi.ListMetricsFiles403Response{}, nil
 	}
 
 	var data []core.FileUsage
@@ -104,15 +106,16 @@ func (s *MetricsServer) GetMetricsFile(ctx context.Context, request metricsapi.G
 		return metricsapi.GetMetricsFile400Response{}, nil
 	}
 
-	access, err := resolveMetricsAccess(ctx)
-	if err != nil {
-		return metricsapi.GetMetricsFile400Response{}, nil
-	}
-	if !access.authorized(ctx) {
-		if core.IsGen3Mode(ctx) && !core.HasAuthHeader(ctx) {
+	access, statusCode, ok := s.checkAuth(ctx)
+	if !ok {
+		switch statusCode {
+		case http.StatusUnauthorized:
 			return metricsapi.GetMetricsFile401Response{}, nil
+		case http.StatusForbidden:
+			return metricsapi.GetMetricsFile403Response{}, nil
+		default:
+			return metricsapi.GetMetricsFile400Response{}, nil
 		}
-		return metricsapi.GetMetricsFile403Response{}, nil
 	}
 
 	if access.isScoped() {
@@ -142,15 +145,16 @@ func (s *MetricsServer) GetMetricsSummary(ctx context.Context, request metricsap
 		return metricsapi.GetMetricsSummary400Response{}, nil
 	}
 
-	access, err := resolveMetricsAccess(ctx)
-	if err != nil {
-		return metricsapi.GetMetricsSummary400Response{}, nil
-	}
-	if !access.authorized(ctx) {
-		if core.IsGen3Mode(ctx) && !core.HasAuthHeader(ctx) {
+	access, statusCode, ok := s.checkAuth(ctx)
+	if !ok {
+		switch statusCode {
+		case http.StatusUnauthorized:
 			return metricsapi.GetMetricsSummary401Response{}, nil
+		case http.StatusForbidden:
+			return metricsapi.GetMetricsSummary403Response{}, nil
+		default:
+			return metricsapi.GetMetricsSummary400Response{}, nil
 		}
-		return metricsapi.GetMetricsSummary403Response{}, nil
 	}
 
 	var summary core.FileUsageSummary
@@ -169,6 +173,32 @@ func (s *MetricsServer) GetMetricsSummary(ctx context.Context, request metricsap
 		TotalDownloads:    &summary.TotalDownloads,
 		InactiveFileCount: &summary.InactiveFileCount,
 	}, nil
+}
+
+func (s *MetricsServer) checkAuth(ctx context.Context) (metricsAccess, int, bool) {
+	access, err := resolveMetricsAccess(ctx)
+	if err != nil {
+		return metricsAccess{}, http.StatusBadRequest, false
+	}
+
+	if !core.IsGen3Mode(ctx) {
+		return access, 0, true
+	}
+	if !core.HasAuthHeader(ctx) {
+		return access, http.StatusUnauthorized, false
+	}
+
+	// Baseline read access for metrics: global access or scoped access
+	if core.HasMethodAccess(ctx, "read", []string{"/data_file"}) ||
+		core.HasMethodAccess(ctx, "read", []string{"/programs"}) {
+		return access, 0, true
+	}
+
+	if access.isScoped() && core.HasMethodAccess(ctx, "read", []string{access.scopePrefix}) {
+		return access, 0, true
+	}
+
+	return access, http.StatusForbidden, false
 }
 
 func toMetricsFileUsage(v core.FileUsage) metricsapi.FileUsage {
@@ -204,17 +234,6 @@ func (a metricsAccess) isScoped() bool {
 	return strings.TrimSpace(a.scopePrefix) != ""
 }
 
-func (a metricsAccess) authorized(ctx context.Context) bool {
-	if !core.IsGen3Mode(ctx) {
-		return true
-	}
-	if a.scopePrefix == "" {
-		return hasGlobalMetricsReadAccess(ctx)
-	}
-	return core.HasMethodAccess(ctx, "read", []string{a.scopePrefix}) ||
-		core.HasMethodAccess(ctx, "read", []string{"/programs"})
-}
-
 func resolveMetricsAccess(ctx context.Context) (metricsAccess, error) {
 	scopePrefix, _, err := parseScopeQuery(ctx)
 	if err != nil {
@@ -223,17 +242,7 @@ func resolveMetricsAccess(ctx context.Context) (metricsAccess, error) {
 	return metricsAccess{scopePrefix: scopePrefix}, nil
 }
 
-func hasMetricsReadAccess(ctx context.Context, resource string) bool {
-	if strings.TrimSpace(resource) == "" {
-		return hasGlobalMetricsReadAccess(ctx)
-	}
-	return core.HasMethodAccess(ctx, "read", []string{resource})
-}
-
 func hasGlobalMetricsReadAccess(ctx context.Context) bool {
-	// In local mode HasMethodAccess always returns true.
-	// In Gen3 mode, this allows existing "/data_file" readers and privileged
-	// that have read access at program scope.
 	return core.HasMethodAccess(ctx, "read", []string{"/data_file"}) ||
 		core.HasMethodAccess(ctx, "read", []string{"/programs"})
 }

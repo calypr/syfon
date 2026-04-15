@@ -116,7 +116,7 @@ func (c *DrsClient) Resolve(ctx context.Context, id string) (*xfer.ResolvedObjec
 
 	if drsObject.AccessMethods != nil {
 		for _, am := range *drsObject.AccessMethods {
-			if am.AccessUrl.Url != "" {
+			if am.AccessUrl != nil && am.AccessUrl.Url != "" {
 				resolved.ProviderURL = am.AccessUrl.Url
 				resolved.AccessMethod = string(am.Type)
 				break
@@ -339,7 +339,7 @@ func (c *DrsClient) RegisterRecord(ctx context.Context, record *DRSObject) (*DRS
 		return nil, err
 	}
 	body, _ := json.Marshal(internalRecord)
-	rb := c.New(http.MethodPost, c.endpoint("/index")).WithBody(bytes.NewReader(body))
+	rb := c.New(http.MethodPost, c.endpoint("/index")).WithBody(bytes.NewReader(body)).WithHeader(common.HeaderContentType, common.MIMEApplicationJSON)
 	resp, err := c.Do(ctx, rb)
 	if err != nil {
 		return nil, err
@@ -408,7 +408,9 @@ func (c *DrsClient) UpdateRecord(ctx context.Context, updateInfo *DRSObject, did
 		return nil, err
 	}
 	body, _ := json.Marshal(internalRecord)
-	rb := c.New(http.MethodPut, c.endpoint(fmt.Sprintf("/index/%s", url.PathEscape(did)))).WithBody(bytes.NewReader(body))
+	rb := c.New(http.MethodPut, c.endpoint(fmt.Sprintf("/index/%s", url.PathEscape(did)))).
+		WithBody(bytes.NewReader(body)).
+		WithHeader(common.HeaderContentType, common.MIMEApplicationJSON)
 	resp, err := c.Do(ctx, rb)
 	if err != nil {
 		return nil, err

@@ -136,16 +136,35 @@ func TestMetricsSummaryAuthzAndScope(t *testing.T) {
 		},
 	}
 	app := fiber.New()
+	app.Use(func(c fiber.Ctx) error {
+		// Mock auth values from headers for testing
+		if mode := c.Get("X-Test-Auth-Mode"); mode != "" {
+			ctx := context.WithValue(c.Context(), core.AuthModeKey, mode)
+			if c.Get("X-Test-Auth-Header") == "true" {
+				ctx = context.WithValue(ctx, core.AuthHeaderPresentKey, true)
+			} else if c.Get("X-Test-Auth-Header") == "false" {
+				ctx = context.WithValue(ctx, core.AuthHeaderPresentKey, false)
+			}
+			if privsJSON := c.Get("X-Test-Privileges"); privsJSON != "" {
+				var privs map[string]map[string]bool
+				if err := json.Unmarshal([]byte(privsJSON), &privs); err == nil {
+					ctx = context.WithValue(ctx, core.UserPrivilegesKey, privs)
+				}
+			}
+			c.SetContext(ctx)
+		}
+		return c.Next()
+	})
 	RegisterMetricsRoutes(app, db)
 
 	t.Run("scope reader can access scoped summary", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/index/v1/metrics/summary?organization=cbds&project=end_to_end_test", nil)
-		ctx := context.WithValue(req.Context(), core.AuthModeKey, "gen3")
-		ctx = context.WithValue(ctx, core.AuthHeaderPresentKey, true)
-		ctx = context.WithValue(ctx, core.UserPrivilegesKey, map[string]map[string]bool{
+		req.Header.Set("X-Test-Auth-Mode", "gen3")
+		req.Header.Set("X-Test-Auth-Header", "true")
+		privs, _ := json.Marshal(map[string]map[string]bool{
 			"/programs/cbds/projects/end_to_end_test": {"read": true},
 		})
-		req = req.WithContext(ctx)
+		req.Header.Set("X-Test-Privileges", string(privs))
 		httpResp, err := app.Test(req)
 		if err != nil {
 			t.Fatalf("test request failed: %v", err)
@@ -165,9 +184,8 @@ func TestMetricsSummaryAuthzAndScope(t *testing.T) {
 
 	t.Run("missing auth header returns 401", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/index/v1/metrics/summary?organization=cbds&project=end_to_end_test", nil)
-		ctx := context.WithValue(req.Context(), core.AuthModeKey, "gen3")
-		ctx = context.WithValue(ctx, core.AuthHeaderPresentKey, false)
-		req = req.WithContext(ctx)
+		req.Header.Set("X-Test-Auth-Mode", "gen3")
+		req.Header.Set("X-Test-Auth-Header", "false")
 		httpResp, err := app.Test(req)
 		if err != nil {
 			t.Fatalf("test request failed: %v", err)
@@ -180,12 +198,12 @@ func TestMetricsSummaryAuthzAndScope(t *testing.T) {
 
 	t.Run("program reader can access global summary via /programs read", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/index/v1/metrics/summary", nil)
-		ctx := context.WithValue(req.Context(), core.AuthModeKey, "gen3")
-		ctx = context.WithValue(ctx, core.AuthHeaderPresentKey, true)
-		ctx = context.WithValue(ctx, core.UserPrivilegesKey, map[string]map[string]bool{
+		req.Header.Set("X-Test-Auth-Mode", "gen3")
+		req.Header.Set("X-Test-Auth-Header", "true")
+		privs, _ := json.Marshal(map[string]map[string]bool{
 			"/programs": {"read": true},
 		})
-		req = req.WithContext(ctx)
+		req.Header.Set("X-Test-Privileges", string(privs))
 		httpResp, err := app.Test(req)
 		if err != nil {
 			t.Fatalf("test request failed: %v", err)
@@ -225,16 +243,32 @@ func TestMetricsFilesAuthzAndScope(t *testing.T) {
 		},
 	}
 	app := fiber.New()
+	app.Use(func(c fiber.Ctx) error {
+		if mode := c.Get("X-Test-Auth-Mode"); mode != "" {
+			ctx := context.WithValue(c.Context(), core.AuthModeKey, mode)
+			if c.Get("X-Test-Auth-Header") == "true" {
+				ctx = context.WithValue(ctx, core.AuthHeaderPresentKey, true)
+			}
+			if privsJSON := c.Get("X-Test-Privileges"); privsJSON != "" {
+				var privs map[string]map[string]bool
+				if err := json.Unmarshal([]byte(privsJSON), &privs); err == nil {
+					ctx = context.WithValue(ctx, core.UserPrivilegesKey, privs)
+				}
+			}
+			c.SetContext(ctx)
+		}
+		return c.Next()
+	})
 	RegisterMetricsRoutes(app, db)
 
 	t.Run("scoped list returns only scoped objects", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/index/v1/metrics/files?organization=cbds&project=end_to_end_test&limit=10&offset=0", nil)
-		ctx := context.WithValue(req.Context(), core.AuthModeKey, "gen3")
-		ctx = context.WithValue(ctx, core.AuthHeaderPresentKey, true)
-		ctx = context.WithValue(ctx, core.UserPrivilegesKey, map[string]map[string]bool{
+		req.Header.Set("X-Test-Auth-Mode", "gen3")
+		req.Header.Set("X-Test-Auth-Header", "true")
+		privs, _ := json.Marshal(map[string]map[string]bool{
 			"/programs/cbds/projects/end_to_end_test": {"read": true},
 		})
-		req = req.WithContext(ctx)
+		req.Header.Set("X-Test-Privileges", string(privs))
 		httpResp, err := app.Test(req)
 		if err != nil {
 			t.Fatalf("test request failed: %v", err)
@@ -265,12 +299,12 @@ func TestMetricsFilesAuthzAndScope(t *testing.T) {
 
 	t.Run("scoped object lookup outside scope returns 404", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/index/v1/metrics/files/other-1?organization=cbds&project=end_to_end_test", nil)
-		ctx := context.WithValue(req.Context(), core.AuthModeKey, "gen3")
-		ctx = context.WithValue(ctx, core.AuthHeaderPresentKey, true)
-		ctx = context.WithValue(ctx, core.UserPrivilegesKey, map[string]map[string]bool{
+		req.Header.Set("X-Test-Auth-Mode", "gen3")
+		req.Header.Set("X-Test-Auth-Header", "true")
+		privs, _ := json.Marshal(map[string]map[string]bool{
 			"/programs/cbds/projects/end_to_end_test": {"read": true},
 		})
-		req = req.WithContext(ctx)
+		req.Header.Set("X-Test-Privileges", string(privs))
 		httpResp, err := app.Test(req)
 		if err != nil {
 			t.Fatalf("test request failed: %v", err)
@@ -283,12 +317,12 @@ func TestMetricsFilesAuthzAndScope(t *testing.T) {
 
 	t.Run("global object lookup allowed via /programs read", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/index/v1/metrics/files/other-1", nil)
-		ctx := context.WithValue(req.Context(), core.AuthModeKey, "gen3")
-		ctx = context.WithValue(ctx, core.AuthHeaderPresentKey, true)
-		ctx = context.WithValue(ctx, core.UserPrivilegesKey, map[string]map[string]bool{
+		req.Header.Set("X-Test-Auth-Mode", "gen3")
+		req.Header.Set("X-Test-Auth-Header", "true")
+		privs, _ := json.Marshal(map[string]map[string]bool{
 			"/programs": {"read": true},
 		})
-		req = req.WithContext(ctx)
+		req.Header.Set("X-Test-Privileges", string(privs))
 		httpResp, err := app.Test(req)
 		if err != nil {
 			t.Fatalf("test request failed: %v", err)

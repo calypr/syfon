@@ -50,9 +50,9 @@ func TestAuditS3CredentialAccess_LogsSuccessAndError(t *testing.T) {
 }
 
 func TestInternalObjectExternal(t *testing.T) {
-	obj := InternalObject{DrsObject: drs.DrsObject{Id: "obj-1", Name: "n"}}
+	obj := InternalObject{DrsObject: drs.DrsObject{Id: "obj-1", Name: Ptr("n")}}
 	ext := obj.External()
-	if ext.Id != "obj-1" || ext.Name != "n" {
+	if ext.Id != "obj-1" || StringVal(ext.Name) != "n" {
 		t.Fatalf("unexpected external object: %+v", ext)
 	}
 }

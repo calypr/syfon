@@ -97,7 +97,7 @@ func newSyfonTestServer(t *testing.T) *fiberTestServer {
 	docs.RegisterSwaggerRoutes(app)
 	coreapi.RegisterCoreRoutes(api, database)
 	metrics.RegisterMetricsRoutes(api, database)
-	internaldrs.RegisterInternalIndexRoutes(api, database)
+	internaldrs.RegisterInternalIndexRoutes(api, database, uM)
 	internaldrs.RegisterInternalDataRoutes(api, database, uM)
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")

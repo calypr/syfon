@@ -57,6 +57,8 @@ func TestClientBasicAuthAndUserAgent(t *testing.T) {
 	}
 }
 
+func ptr[T any](v T) *T { return &v }
+
 func TestDataUploadBlank(t *testing.T) {
 	t.Parallel()
 	c := newTestClient(t, func(r *http.Request) (*http.Response, error) {
@@ -67,13 +69,14 @@ func TestDataUploadBlank(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			t.Fatalf("decode request: %v", err)
 		}
-		if (&req).GetGuid() != "abc" {
-			t.Fatalf("unexpected guid: %q", (&req).GetGuid())
+		if req.Guid == nil || *req.Guid != "abc" {
+			t.Fatalf("unexpected guid: %v", req.Guid)
 		}
-		out := UploadBlankResponse{}
-		(&out).SetGuid("abc")
-		(&out).SetUrl("https://signed")
-		(&out).SetBucket("b1")
+		out := UploadBlankResponse{
+			Guid:   ptr("abc"),
+			Url:    ptr("https://signed"),
+			Bucket: ptr("b1"),
+		}
 		data, _ := json.Marshal(out)
 		return &http.Response{
 			StatusCode: http.StatusOK,
@@ -81,21 +84,21 @@ func TestDataUploadBlank(t *testing.T) {
 			Header:     make(http.Header),
 		}, nil
 	})
-	req := UploadBlankRequest{}
-	req.SetGuid("abc")
+	req := UploadBlankRequest{Guid: ptr("abc")}
 	out, err := c.data.UploadBlank(context.Background(), req)
 	if err != nil {
 		t.Fatalf("UploadBlank failed: %v", err)
 	}
-	if (&out).GetUrl() != "https://signed" || (&out).GetBucket() != "b1" {
+	if out.Url == nil || *out.Url != "https://signed" || out.Bucket == nil || *out.Bucket != "b1" {
 		t.Fatalf("unexpected response: %+v", out)
 	}
 }
 
 func TestIndexListByHash(t *testing.T) {
 	t.Parallel()
-	rec := InternalRecordRequest{}
-	(&rec).SetDid("id-1")
+	rec := InternalRecordRequest{
+		Did: "id-1",
+	}
 	c := newTestClient(t, func(r *http.Request) (*http.Response, error) {
 		if r.Method != http.MethodGet || r.URL.Path != "/index" {
 			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
@@ -103,7 +106,7 @@ func TestIndexListByHash(t *testing.T) {
 		if got := r.URL.Query().Get("hash"); got != "sha256:deadbeef" {
 			t.Fatalf("unexpected hash query: %q", got)
 		}
-		data, _ := json.Marshal(ListRecordsResponse{Records: []InternalRecordRequest{rec}})
+		data, _ := json.Marshal(ListRecordsResponse{Records: &[]InternalRecordRequest{rec}})
 		return &http.Response{
 			StatusCode: http.StatusOK,
 			Body:       io.NopCloser(strings.NewReader(string(data))),
@@ -114,7 +117,7 @@ func TestIndexListByHash(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Index.List failed: %v", err)
 	}
-	if len(out.Records) != 1 || (&out.Records[0]).GetDid() != "id-1" {
+	if out.Records == nil || len(*out.Records) != 1 || (*out.Records)[0].Did != "id-1" {
 		t.Fatalf("unexpected response: %+v", out)
 	}
 }
@@ -131,13 +134,12 @@ func TestDataMultipartInitUsesCanonicalUploadId(t *testing.T) {
 			Header:     make(http.Header),
 		}, nil
 	})
-	req := MultipartInitRequest{}
-	req.SetGuid("g1")
+	req := MultipartInitRequest{Guid: ptr("g1")}
 	out, err := c.data.MultipartInit(context.Background(), req)
 	if err != nil {
 		t.Fatalf("MultipartInit failed: %v", err)
 	}
-	if (&out).GetGuid() != "g1" || (&out).GetUploadId() != "u1" {
+	if out.Guid == nil || *out.Guid != "g1" || out.UploadId == nil || *out.UploadId != "u1" {
 		t.Fatalf("unexpected response: %+v", out)
 	}
 }

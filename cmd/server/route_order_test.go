@@ -11,11 +11,11 @@ import (
 
 func TestGinStaticRouteOverridesParamRoute(t *testing.T) {
 	app := fiber.New()
-	app.Post(config.RouteInternalIndex+"/:object_id", func(c fiber.Ctx) error {
-		return c.SendStatus(http.StatusTeapot)
-	})
 	app.Post(config.RouteInternalIndex+"/register", func(c fiber.Ctx) error {
 		return c.SendStatus(http.StatusCreated)
+	})
+	app.Post(config.RouteInternalIndex+"/:object_id", func(c fiber.Ctx) error {
+		return c.SendStatus(http.StatusTeapot)
 	})
 
 	req := httptest.NewRequest(http.MethodPost, "/index/register", nil)

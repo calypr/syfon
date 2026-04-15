@@ -253,6 +253,7 @@ func requestBodyFor(method, template string) ([]byte, string) {
 		if method == http.MethodPut {
 			return []byte(`{"bucket":"test-bucket-3","region":"us-east-1","access_key":"k","secret_key":"s","endpoint":""}`), "application/json"
 		}
+		return []byte(`{}`), "application/json"
 	case "/data/buckets/:bucket/scopes":
 		return []byte(`{"organization":"cbds","project_id":"proj2"}`), "application/json"
 	case "/info/lfs/objects/batch":

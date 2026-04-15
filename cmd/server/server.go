@@ -150,7 +150,7 @@ var Cmd = &cobra.Command{
 		})
 
 		// Remaining non-DRS routes are registered directly on fiber.
-		docs.RegisterSwaggerRoutes(app)
+		docs.RegisterSwaggerRoutes(api)
 		coreapi.RegisterCoreRoutes(api, database)
 		metrics.RegisterMetricsRoutes(api, database)
 		internaldrs.RegisterInternalIndexRoutes(api, database, uM)

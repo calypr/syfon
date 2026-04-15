@@ -188,13 +188,14 @@ func drsToInternal(obj *core.InternalObject) *internalapi.InternalRecordResponse
 		resp.Project = &scope.Project
 	}
 	createdTime := obj.CreatedTime.Format(time.RFC3339)
-	updatedTime := obj.UpdatedTime.Format(time.RFC3339)
-	createdDate := obj.CreatedTime.Format(time.RFC3339)
-	updatedDate := obj.UpdatedTime.Format(time.RFC3339)
 	resp.CreatedTime = &createdTime
-	resp.UpdatedTime = &updatedTime
-	resp.CreatedDate = &createdDate
-	resp.UpdatedDate = &updatedDate
+	resp.CreatedDate = &createdTime
+
+	if obj.UpdatedTime != nil {
+		updatedTime := obj.UpdatedTime.Format(time.RFC3339)
+		resp.UpdatedTime = &updatedTime
+		resp.UpdatedDate = &updatedTime
+	}
 	return resp
 }
 

@@ -33,6 +33,8 @@ type fakeBackend struct {
 func (f *fakeBackend) Name() string             { return "Fake" }
 func (f *fakeBackend) Logger() xfer.TransferLogger { return f.logger }
 
+func ptr[T any](v T) *T { return &v }
+
 func (f *fakeBackend) fileDetails(guid string) *drs.DRSObject {
 	size := f.size
 	if size == 0 && len(f.data) > 0 {
@@ -44,10 +46,10 @@ func (f *fakeBackend) fileDetails(guid string) *drs.DRSObject {
 	name := "payload.bin"
 	accessID := "s3"
 	return &drs.DRSObject{
-		Name: name,
+		Name: &name,
 		Size: size,
-		AccessMethods: []drs.AccessMethod{
-			{AccessId: accessID, Type: "s3"},
+		AccessMethods: &[]drs.AccessMethod{
+			{AccessId: &accessID, Type: "s3"},
 		},
 	}
 }

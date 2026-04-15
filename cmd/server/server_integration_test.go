@@ -96,7 +96,7 @@ s3_credentials:
 
 	uM := urlmanager.NewManager(database, cfg.Signing)
 	app := fiber.New()
-	internaldrs.RegisterInternalIndexRoutes(app, database)
+	internaldrs.RegisterInternalIndexRoutes(app, database, uM)
 	internaldrs.RegisterInternalDataRoutes(app, database, uM)
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")

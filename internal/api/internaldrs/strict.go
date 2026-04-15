@@ -62,6 +62,9 @@ func (s *InternalServer) InternalDownload(ctx context.Context, request internala
 	if parsed, parseErr := url.Parse(objectURL); parseErr == nil {
 		bucketID = parsed.Host
 	}
+	if s.uM == nil {
+		return internalapi.InternalDownload500Response{}, errors.New("url manager not configured")
+	}
 	signedURL, err := s.uM.SignURL(ctx, bucketID, objectURL, opts)
 	if err != nil {
 		return internalapi.InternalDownload500Response{}, err
@@ -100,6 +103,9 @@ func (s *InternalServer) InternalDownloadPart(ctx context.Context, request inter
 	opts := urlmanager.SignOptions{ExpiresIn: config.DefaultSigningExpirySeconds}
 	start := request.Params.Start
 	end := request.Params.End
+	if s.uM == nil {
+		return internalapi.InternalDownloadPart500Response{}, errors.New("url manager not configured")
+	}
 	signedURL, err := s.uM.SignDownloadPart(ctx, bucketID, objectURL, start, end, opts)
 	if err != nil {
 		return internalapi.InternalDownloadPart500Response{}, err

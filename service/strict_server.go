@@ -118,16 +118,7 @@ func (s *StrictServer) OptionsBulkObject(ctx context.Context, request drs.Option
 }
 
 func (s *StrictServer) GetBulkObjects(ctx context.Context, request drs.GetBulkObjectsRequestObject) (drs.GetBulkObjectsResponseObject, error) {
-	var in drs.GetBulkObjectsRequestObject
-	if request.Body != nil {
-		converted, err := convertType[drs.GetBulkObjectsRequestObject](*request.Body)
-		if err != nil {
-			e := makeError(err.Error(), http.StatusBadRequest)
-			return drs.GetBulkObjects400JSONResponse{N400BadRequestJSONResponse: drs.N400BadRequestJSONResponse(e)}, nil
-		}
-		in = converted
-	}
-	resp, err := s.svc.GetBulkObjects(ctx, in, request.Params.Expand != nil && *request.Params.Expand)
+	resp, err := s.svc.GetBulkObjects(ctx, request, request.Params.Expand != nil && *request.Params.Expand)
 	switch asCode(resp, err) {
 	case http.StatusOK:
 		body, convErr := convertType[drs.N200OkDrsObjectsJSONResponse](resp.Body)
@@ -309,12 +300,10 @@ func (s *StrictServer) BulkDeleteObjects(ctx context.Context, request drs.BulkDe
 func (s *StrictServer) RegisterObjects(ctx context.Context, request drs.RegisterObjectsRequestObject) (drs.RegisterObjectsResponseObject, error) {
 	var in drs.RegisterObjectsBody
 	if request.Body != nil {
-		converted, err := convertType[drs.RegisterObjectsBody](*request.Body)
-		if err != nil {
-			e := makeError(err.Error(), http.StatusBadRequest)
-			return drs.RegisterObjects400JSONResponse{N400BadRequestJSONResponse: drs.N400BadRequestJSONResponse(e)}, nil
+		in = drs.RegisterObjectsBody{
+			Candidates: request.Body.Candidates,
+			Passports:  request.Body.Passports,
 		}
-		in = converted
 	}
 	resp, err := s.svc.RegisterObjects(ctx, in)
 	switch asCode(resp, err) {
@@ -400,16 +389,7 @@ func (s *StrictServer) OptionsObject(ctx context.Context, request drs.OptionsObj
 }
 
 func (s *StrictServer) PostObject(ctx context.Context, request drs.PostObjectRequestObject) (drs.PostObjectResponseObject, error) {
-	var in drs.PostObjectRequestObject
-	if request.Body != nil {
-		converted, err := convertType[drs.PostObjectRequestObject](*request.Body)
-		if err != nil {
-			e := makeError(err.Error(), http.StatusBadRequest)
-			return drs.PostObject400JSONResponse{N400BadRequestJSONResponse: drs.N400BadRequestJSONResponse(e)}, nil
-		}
-		in = converted
-	}
-	resp, err := s.svc.PostObject(ctx, string(request.ObjectId), in)
+	resp, err := s.svc.PostObject(ctx, string(request.ObjectId), request)
 	switch asCode(resp, err) {
 	case http.StatusOK:
 		body, convErr := convertType[drs.N200OkDrsObjectJSONResponse](resp.Body)
