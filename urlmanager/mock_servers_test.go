@@ -3,18 +3,20 @@ package urlmanager
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
 	"time"
 
-	"cloud.google.com/go/storage"
 	azcontainer "github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/container"
 	testcontainers "github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
-	"google.golang.org/api/option"
 )
 
 const (
@@ -22,7 +24,7 @@ const (
 	fakeGCSImage       = "fsouza/fake-gcs-server:1.53.0"
 	azuriteImage       = "mcr.microsoft.com/azure-storage/azurite:3.35.0"
 	azuriteAccountName = "devstoreaccount1"
-	azuriteAccountKey  = "Eby8vdM02xNOcqFeqCnf2g=="
+	azuriteAccountKey  = "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw=="
 )
 
 func TestMVPMockServers_FakeGCSAndAzurite(t *testing.T) {
@@ -64,50 +66,67 @@ func TestMVPMockServers_FakeGCSAndAzurite(t *testing.T) {
 		if err != nil {
 			t.Fatalf("resolve fake-gcs-server mapped port: %v", err)
 		}
-		endpoint := fmt.Sprintf("http://%s:%s/storage/v1/", host, port.Port())
-
-		client, err := storage.NewClient(ctx,
-			option.WithEndpoint(endpoint),
-			option.WithoutAuthentication(),
-		)
-		if err != nil {
-			t.Fatalf("create gcs client: %v", err)
-		}
-		t.Cleanup(func() {
-			if err := client.Close(); err != nil {
-				t.Logf("warning: failed to close gcs client: %v", err)
-			}
-		})
-
 		const bucketName = "mvp-fake-gcs-bucket"
 		const objectName = "smoke/object.txt"
 		payload := []byte("fake-gcs-server-mvp")
+		endpointBase := fmt.Sprintf("http://%s:%s", host, port.Port())
 
-		if err := client.Bucket(bucketName).Create(ctx, "syfon-mvp", nil); err != nil {
+		bucketBody, err := json.Marshal(map[string]string{"name": bucketName})
+		if err != nil {
+			t.Fatalf("marshal bucket create request: %v", err)
+		}
+		createBucketURL := endpointBase + "/storage/v1/b?project=syfon-mvp"
+		createReq, err := http.NewRequestWithContext(ctx, http.MethodPost, createBucketURL, bytes.NewReader(bucketBody))
+		if err != nil {
+			t.Fatalf("build create bucket request: %v", err)
+		}
+		createReq.Header.Set("Content-Type", "application/json")
+		createResp, err := http.DefaultClient.Do(createReq)
+		if err != nil {
 			t.Fatalf("create bucket: %v", err)
 		}
-
-		writer := client.Bucket(bucketName).Object(objectName).NewWriter(ctx)
-		if _, err := writer.Write(payload); err != nil {
-			t.Fatalf("write object: %v", err)
+		if createResp.StatusCode < 200 || createResp.StatusCode > 299 {
+			_ = createResp.Body.Close()
+			t.Fatalf("unexpected create bucket status: %s", createResp.Status)
 		}
-		if err := writer.Close(); err != nil {
-			t.Fatalf("close writer: %v", err)
-		}
+		_ = createResp.Body.Close()
 
-		reader, err := client.Bucket(bucketName).Object(objectName).NewReader(ctx)
+		uploadURL := fmt.Sprintf("%s/upload/storage/v1/b/%s/o?uploadType=media&name=%s", endpointBase, bucketName, url.QueryEscape(objectName))
+		putReq, err := http.NewRequestWithContext(ctx, http.MethodPost, uploadURL, bytes.NewReader(payload))
 		if err != nil {
-			t.Fatalf("open reader: %v", err)
+			t.Fatalf("build put request: %v", err)
+		}
+		putResp, err := http.DefaultClient.Do(putReq)
+		if err != nil {
+			t.Fatalf("put object: %v", err)
+		}
+		if putResp.StatusCode < 200 || putResp.StatusCode > 299 {
+			_ = putResp.Body.Close()
+			t.Fatalf("unexpected put status: %s", putResp.Status)
+		}
+		_ = putResp.Body.Close()
+
+		getURL := fmt.Sprintf("%s/storage/v1/b/%s/o/%s?alt=media", endpointBase, bucketName, url.PathEscape(objectName))
+		getReq, err := http.NewRequestWithContext(ctx, http.MethodGet, getURL, nil)
+		if err != nil {
+			t.Fatalf("build get request: %v", err)
+		}
+		getResp, err := http.DefaultClient.Do(getReq)
+		if err != nil {
+			t.Fatalf("get object: %v", err)
 		}
 		t.Cleanup(func() {
-			if err := reader.Close(); err != nil {
-				t.Logf("warning: failed to close gcs reader: %v", err)
+			if err := getResp.Body.Close(); err != nil {
+				t.Logf("warning: failed to close fake-gcs response body: %v", err)
 			}
 		})
+		if getResp.StatusCode != http.StatusOK {
+			t.Fatalf("unexpected get status: %s", getResp.Status)
+		}
 
-		buf, err := io.ReadAll(reader)
+		buf, err := io.ReadAll(getResp.Body)
 		if err != nil {
-			t.Fatalf("read object: %v", err)
+			t.Fatalf("read object body: %v", err)
 		}
 		if !bytes.Equal(buf, payload) {
 			t.Fatalf("unexpected fake-gcs payload: got %q want %q", string(buf), string(payload))
@@ -189,7 +208,28 @@ func isDockerUnavailableForMockTests(err error) bool {
 		strings.Contains(lower, "no such host") ||
 		strings.Contains(lower, "cannot connect") ||
 		strings.Contains(lower, "connection refused") ||
-		strings.Contains(lower, "failed to create docker provider") ||
-		strings.Contains(lower, "context deadline exceeded") ||
-		strings.Contains(lower, "failed to create container")
+		strings.Contains(lower, "failed to create docker provider")
 }
+
+func TestIsDockerUnavailableForMockTests(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "nil error", err: nil, want: false},
+		{name: "docker daemon unavailable", err: errors.New("Cannot connect to the Docker daemon at unix:///var/run/docker.sock"), want: true},
+		{name: "provider creation failed", err: errors.New("failed to create Docker provider"), want: true},
+		{name: "container create failure should fail", err: errors.New("failed to create container: image not found"), want: false},
+		{name: "generic timeout should not skip", err: errors.New("context deadline exceeded"), want: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isDockerUnavailableForMockTests(tc.err); got != tc.want {
+				t.Fatalf("isDockerUnavailableForMockTests(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+

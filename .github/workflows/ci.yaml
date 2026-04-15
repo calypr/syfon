@@ -46,6 +46,8 @@ jobs:
             -v
 
       - name: Run coverage
+        env:
+          SYFON_E2E_MOCK_SERVERS: 1
         run: make coverage
 
       - name: Run client coverage
@@ -140,6 +142,12 @@ jobs:
           SYFON_E2E_DOCKER: 1
         run: |
           go test ./cmd -run TestSyfonDocker -v
+
+      - name: Run Docker-backed mock server tests
+        env:
+          SYFON_E2E_MOCK_SERVERS: 1
+        run: |
+          go test ./urlmanager -run TestMVPMockServers_FakeGCSAndAzurite -count=1 -v
   build-and-push:
     name: Build syfon
     runs-on: ${{ matrix.arch == 'amd64' && 'ubuntu-latest' || 'ubuntu-24.04-arm' }}
