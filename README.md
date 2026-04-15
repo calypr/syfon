@@ -22,7 +22,7 @@ curl -sSL https://calypr.org/syfon/install.sh | bash
 
 ## 2. Start Syfon Server
 
-<details><summary><code>config.local.yaml</code></summary>
+<details><summary><code>local.yaml</code></summary>
 
 ```yaml
 port: 8080
@@ -42,7 +42,7 @@ s3_credentials:
 </details>
 
 ```bash
-syfon serve --config config.local.yaml
+syfon serve --config local.yaml
 ```
 
 Smoke test:
@@ -72,7 +72,7 @@ DRS_AUTH_MODE=gen3 \
 DRS_AUTH_MOCK_ENABLED=true \
 DRS_AUTH_MOCK_RESOURCES="/data_file,/programs/cbds/projects/end_to_end_test" \
 DRS_AUTH_MOCK_METHODS="read,file_upload,create,update,delete" \
-go run . serve --config config.local.yaml
+go run . serve --config local.yaml
 ```
 
 Optional:
@@ -135,7 +135,7 @@ This repository intentionally does not ship a separate Postgres init SQL script.
 ```bash
 go test ./... -count=1
 ./db/scripts/init_sqlite_db.sh drs_local.db
-go run . serve --config config.local.yaml
+go run . serve --config local.yaml
 ```
 
 ## Minio Starter Kit
@@ -240,7 +240,7 @@ This is intentional for now to keep control of runtime behavior and compatibilit
 You can run integration tests using your own config file:
 
 ```bash
-go test ./cmd/server -v -count=1 -testConfig=config.yaml
+go test ./cmd/server -v -count=1 -testConfig=example.yaml
 ```
 
 Docker-backed MinIO upload and download coverage is available behind an opt-in flag:
