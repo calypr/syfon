@@ -141,7 +141,8 @@ go run . serve --config config.local.yaml
 ## Minio Starter Kit
 
 Start up a docker container with MinIO for testing:
-```
+
+```bash
 docker run -p 9000:9000 -p 9001:9001 \
   -e "MINIO_ROOT_USER=admin" \
   -e "MINIO_ROOT_PASSWORD=password123" \
@@ -150,7 +151,8 @@ docker run -p 9000:9000 -p 9001:9001 \
 ```
 
 Create a config file called `local.yaml`
-```
+
+```yaml
 port: 8080
 
 auth:
