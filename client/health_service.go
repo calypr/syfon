@@ -1,14 +1,22 @@
 package client
 
-import "context"
+import (
+	"context"
+
+	"github.com/calypr/syfon/client/pkg/common"
+	"github.com/calypr/syfon/client/pkg/request"
+)
 
 type HealthService struct {
-	base *baseService
+	requestor request.Requester
+}
+
+func NewHealthService(r request.Requester) *HealthService {
+	return &HealthService{requestor: r}
 }
 
 func (h *HealthService) Ping(ctx context.Context) error {
-	rb := h.base.requestor.New("GET", "/healthz")
-	return h.base.requestor.DoJSON(ctx, rb, nil)
+	return h.requestor.Do(ctx, "GET", common.HealthzEndpoint, nil, nil)
 }
 
 // --- HealthService ---

@@ -87,8 +87,8 @@ func downloadURLToPath(ctx context.Context, rawURL, outPath string, c *syclient.
 		}
 		return nil
 	case "http", "https":
-		rb := c.Requestor().New(http.MethodGet, rawURL)
-		resp, err := c.Requestor().Do(ctx, rb)
+		var resp *http.Response
+		err := c.Requestor().Do(ctx, http.MethodGet, rawURL, nil, &resp)
 		if err != nil {
 			return fmt.Errorf("download request failed: %w", err)
 		}

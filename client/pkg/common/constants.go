@@ -18,52 +18,35 @@ const (
 	TB int64 = 1024 * GB
 )
 const (
-	// DefaultUseShepherd sets whether gen3client will attempt to use the Shepherd / Object Management API
-	// endpoints if available.
-	// The user can override this default using the `data-client configure` command.
-	DefaultUseShepherd = false
-
-	// DefaultMinShepherdVersion is the minimum version of Shepherd that the gen3client will use.
-	// Before attempting to use Shepherd, the client will check for Shepherd's version, and if the version is
-	// below this number the gen3client will instead warn the user and fall back to fence/indexd.
-	// The user can override this default using the `data-client configure` command.
-	DefaultMinShepherdVersion = "2.0.0"
-
-	// ShepherdEndpoint is the endpoint postfix for SHEPHERD / the Object Management API
-	ShepherdEndpoint = "/mds"
-
-	// ShepherdVersionEndpoint is the endpoint used to check what version of Shepherd a commons has deployed
-	ShepherdVersionEndpoint = "/mds/version"
-
 	// IndexdIndexEndpoint is the endpoint postfix for INDEXD index
 	IndexdIndexEndpoint = "/index"
 
-	// FenceUserEndpoint is the endpoint postfix for FENCE user
-	FenceUserEndpoint = "/user/user"
+	// DataUserEndpoint is the endpoint postfix for FENCE user
+	DataUserEndpoint = "/user/user"
 
-	// FenceDataEndpoint is the canonical endpoint prefix for upload/delete flows
-	FenceDataEndpoint = "/data/upload"
+	// DataEndpoint is the canonical endpoint prefix for upload/delete flows
+	DataEndpoint = "/data/upload"
 
-	// FenceAccessTokenEndpoint is the endpoint postfix for FENCE access token
-	FenceAccessTokenEndpoint = "/user/credentials/api/access_token"
+	// DataAccessTokenEndpoint is the endpoint postfix for FENCE access token
+	DataAccessTokenEndpoint = "/user/credentials/api/access_token"
 
-	// FenceDataUploadEndpoint is the endpoint postfix for upload init/presigned-url
-	FenceDataUploadEndpoint = FenceDataEndpoint
+	// DataUploadEndpoint is the endpoint postfix for upload init/presigned-url
+	DataUploadEndpoint = DataEndpoint
 
-	// FenceDataDownloadEndpoint is the endpoint postfix for download presigned-url
-	FenceDataDownloadEndpoint = "/data/download"
+	// DataDownloadEndpoint is the endpoint postfix for download presigned-url
+	DataDownloadEndpoint = "/data/download"
 
-	// FenceDataDownloadPartEndpoint is the endpoint postfix for download part presigned-url
-	FenceDataDownloadPartEndpoint = "/data/download/%s/part"
+	// DataDownloadPartEndpoint is the endpoint postfix for download part presigned-url
+	DataDownloadPartEndpoint = "/data/download/%s/part"
 
-	// FenceDataMultipartInitEndpoint is the endpoint postfix for multipart init
-	FenceDataMultipartInitEndpoint = "/data/multipart/init"
+	// DataMultipartInitEndpoint is the endpoint postfix for multipart init
+	DataMultipartInitEndpoint = "/data/multipart/init"
 
-	// FenceDataMultipartUploadEndpoint is the endpoint postfix for multipart upload
-	FenceDataMultipartUploadEndpoint = "/data/multipart/upload"
+	// DataMultipartUploadEndpoint is the endpoint postfix for multipart upload
+	DataMultipartUploadEndpoint = "/data/multipart/upload"
 
-	// FenceDataMultipartCompleteEndpoint is the endpoint postfix for multipart complete
-	FenceDataMultipartCompleteEndpoint = "/data/multipart/complete"
+	// DataMultipartCompleteEndpoint is the endpoint postfix for multipart complete
+	DataMultipartCompleteEndpoint = "/data/multipart/complete"
 
 	// PathSeparator is os dependent path separator char
 	PathSeparator = string(os.PathSeparator)
@@ -92,6 +75,49 @@ const (
 	MaxRetries           = 5
 
 	OnProgressThreshold = 1 * MB
+
+	// API Endpoints
+	HealthzEndpoint = "/healthz"
+
+	IndexdIndexBulkEndpoint               = "/index/bulk"
+	IndexdIndexBulkHashesEndpoint         = "/index/bulk/hashes"
+	IndexdIndexBulkDeleteEndpoint         = "/index/bulk/delete"
+	IndexdIndexBulkSHA256ValidityEndpoint = "/index/bulk/sha256/validity"
+	IndexdIndexBulkDocumentsEndpoint      = "/index/bulk/documents"
+	IndexdIndexSHA256ValidityEndpoint     = "/index/v1/sha256/validity"
+	IndexdIndexRecordEndpointTemplate     = "/index/%s"
+
+	DataUploadBulkEndpoint             = "/data/upload/bulk"
+	DataRecordEndpointTemplate         = "/data/upload/%s"
+	DataDownloadRecordEndpointTemplate = "/data/download/%s"
+
+	DataBucketsEndpoint                = "/data/buckets"
+	DataBucketsRecordsEndpointTemplate = "/data/buckets/%s"
+	DataBucketsScopesEndpointTemplate  = "/data/buckets/%s/scopes"
+
+	MetricsSummaryEndpoint      = "/index/v1/metrics/summary"
+	MetricsFilesEndpoint        = "/index/v1/metrics/files"
+	MetricsFileEndpointTemplate = "/index/v1/metrics/files/%s"
+
+	GA4GHDRSObjectAccessEndpointTemplate = "/ga4gh/drs/v1/objects/%s/access/%s"
+
+	// Query Parameters
+	QueryParamHash         = "hash"
+	QueryParamAuthz        = "authz"
+	QueryParamOrganization = "organization"
+	QueryParamProject      = "project"
+	QueryParamLimit        = "limit"
+	QueryParamOffset       = "offset"
+	QueryParamPage         = "page"
+	QueryParamURL          = "url"
+	QueryParamHashType     = "hash_type"
+	QueryParamBucket       = "bucket"
+	QueryParamFileName     = "file_name"
+	QueryParamExpiresIn    = "expires_in"
+	QueryParamRedirect     = "redirect"
+	QueryParamInactiveDays = "inactive_days"
+	QueryParamStart        = "start"
+	QueryParamEnd          = "end"
 )
 
 var (

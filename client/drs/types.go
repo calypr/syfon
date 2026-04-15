@@ -1,31 +1,38 @@
 package drs
 
 import (
-	drsapi "github.com/calypr/syfon/apigen/drs"
+	"github.com/calypr/syfon/api/types"
 	"github.com/calypr/syfon/client/pkg/hash"
 )
 
 type ChecksumType = string
-type Checksum = drsapi.Checksum
+type Checksum = types.Checksum
 type HashInfo = hash.HashInfo
 
-type AccessURL = drsapi.AccessURL
-type Authorizations = drsapi.Authorizations
-type AccessMethod = drsapi.AccessMethod
+type AccessURL = types.AccessMethodAccessURL
+type Authorizations = types.AccessMethodAuthorizations
+type AccessMethod = types.AccessMethod
 
-type Contents = drsapi.ContentsObject
+type Contents = types.ContentsObject
 
-type DRSPage = drsapi.DRSPage
+type DRSPage = types.DRSPage
 
 type DRSObjectResult struct {
 	Object *DRSObject
 	Error  error
 }
 
-type DRSObject = drsapi.DrsObject
+type DRSObject = types.DRSObject
 
-type DRSObjectCandidate = drsapi.DrsObjectCandidate
-type RegisterObjectsRequest = drsapi.RegisterObjectsBody
+type DRSObjectCandidate = types.DRSObjectCandidate
+type RegisterObjectsRequest = types.RegisterObjectsRequest
+
+type InternalRecordRequest = types.InternalRecordRequest
+type InternalRecordResponse = types.InternalRecordResponse
+type ListRecordsResponse = types.ListRecordsResponse
+type BulkHashesRequest = types.BulkHashesRequest
+type BulkCreateRequest = types.BulkCreateRequest
+type MultipartPart = types.MultipartPart
 
 // SyncCandidate represents a local file record to be synchronized with DRS.
 // It is the generic version of the git-drs LfsFileInfo.

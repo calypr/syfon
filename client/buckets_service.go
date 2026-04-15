@@ -2,39 +2,35 @@ package client
 
 import (
 	"context"
+	"fmt"
 	"net/url"
+
+	"github.com/calypr/syfon/client/pkg/common"
+	"github.com/calypr/syfon/client/pkg/request"
 )
 
 type BucketsService struct {
-	base *baseService
+	requestor request.Requester
+}
+
+func NewBucketsService(r request.Requester) *BucketsService {
+	return &BucketsService{requestor: r}
 }
 
 func (s *BucketsService) List(ctx context.Context) (BucketsResponse, error) {
 	var out BucketsResponse
-	rb := s.base.requestor.New("GET", "/data/buckets")
-	err := s.base.requestor.DoJSON(ctx, rb, &out)
+	err := s.requestor.Do(ctx, "GET", common.DataBucketsEndpoint, nil, &out)
 	return out, err
 }
 
 func (s *BucketsService) Put(ctx context.Context, req PutBucketRequest) error {
-	rb, err := s.base.requestor.New("PUT", "/data/buckets").WithJSONBody(req)
-	if err != nil {
-		return err
-	}
-	return s.base.requestor.DoJSON(ctx, rb, nil)
+	return s.requestor.Do(ctx, "PUT", common.DataBucketsEndpoint, req, nil)
 }
 
 func (s *BucketsService) Delete(ctx context.Context, bucket string) error {
-	rb := s.base.requestor.New("DELETE", "/data/buckets/"+url.PathEscape(bucket))
-	return s.base.requestor.DoJSON(ctx, rb, nil)
+	return s.requestor.Do(ctx, "DELETE", fmt.Sprintf(common.DataBucketsRecordsEndpointTemplate, url.PathEscape(bucket)), nil, nil)
 }
 
 func (s *BucketsService) AddScope(ctx context.Context, bucket string, req BucketScopeRequest) error {
-	rb, err := s.base.requestor.New("POST", "/data/buckets/"+url.PathEscape(bucket)+"/scopes").WithJSONBody(req)
-	if err != nil {
-		return err
-	}
-	return s.base.requestor.DoJSON(ctx, rb, nil)
+	return s.requestor.Do(ctx, "POST", fmt.Sprintf(common.DataBucketsScopesEndpointTemplate, url.PathEscape(bucket)), req, nil)
 }
-
-// --- BucketsService ---

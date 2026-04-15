@@ -7,7 +7,7 @@ import (
 	internalapi "github.com/calypr/syfon/apigen/internalapi"
 )
 
-func drsObjectToSyfonInternalRecord(obj *DRSObject) (*internalapi.InternalRecord, error) {
+func drsObjectToSyfonInternalRecord(obj *DRSObject) (*InternalRecordRequest, error) {
 	if obj == nil {
 		return nil, nil
 	}
@@ -15,7 +15,7 @@ func drsObjectToSyfonInternalRecord(obj *DRSObject) (*internalapi.InternalRecord
 	if obj.AccessMethods != nil {
 		ams = *obj.AccessMethods
 	}
-	out := &internalapi.InternalRecord{
+	out := &InternalRecordRequest{
 		Did:   obj.Id,
 		Authz: InternalAuthzFromDrsAccessMethods(ams),
 		Size:  Ptr(obj.Size),
@@ -42,8 +42,8 @@ func drsObjectToSyfonInternalRecord(obj *DRSObject) (*internalapi.InternalRecord
 	return out, nil
 }
 
-func syfonInternalRecordToDRSObjectFromRecord(rec internalapi.InternalRecord) (*DRSObject, error) {
-	resp := internalapi.InternalRecordResponse{
+func syfonInternalRecordToDRSObjectFromRecord(rec InternalRecordRequest) (*DRSObject, error) {
+	resp := InternalRecordResponse{
 		Did:          rec.Did,
 		Hashes:       rec.Hashes,
 		Size:         rec.Size,
@@ -56,7 +56,7 @@ func syfonInternalRecordToDRSObjectFromRecord(rec internalapi.InternalRecord) (*
 	return syfonInternalRecordToDRSObject(resp)
 }
 
-func syfonInternalRecordToDRSObject(rec internalapi.InternalRecordResponse) (*DRSObject, error) {
+func syfonInternalRecordToDRSObject(rec InternalRecordResponse) (*DRSObject, error) {
 	var urls []string
 	if rec.Urls != nil {
 		urls = *rec.Urls

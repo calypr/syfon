@@ -22,9 +22,6 @@ type Config struct {
 	UserAgent  string
 	BasicAuth  *BasicAuth
 	Token      string
-
-	// Requestor allows overriding the default HTTP backend.
-	Requestor request.RequestInterface
 }
 
 type BasicAuth struct {
@@ -33,7 +30,8 @@ type BasicAuth struct {
 }
 
 type Client struct {
-	baseService
+	requestor request.Requester
+	baseURL   string
 
 	health  *HealthService
 	data    *DataService
@@ -43,14 +41,6 @@ type Client struct {
 	metrics *MetricsService
 }
 
-type baseService struct {
-	baseURL   string
-	userAgent string
-	basicAuth *BasicAuth
-	token     string
-	requestor request.RequestInterface
-}
-
 type Option func(*Config)
 
 func WithHTTPClient(h *http.Client) Option {
@@ -58,12 +48,6 @@ func WithHTTPClient(h *http.Client) Option {
 		if h != nil {
 			c.HTTPClient = h
 		}
-	}
-}
-
-func WithRequestor(r request.RequestInterface) Option {
-	return func(c *Config) {
-		c.Requestor = r
 	}
 }
 
@@ -135,27 +119,19 @@ func NewClient(cfg *Config) (*Client, error) {
 		userAgent = defaultUA
 	}
 
-	req := cfg.Requestor
-	if req == nil {
-		// Initialize the hardened requestor
-		cred := &conf.Credential{
-			AccessToken: cfg.Token,
-		}
-		if cfg.BasicAuth != nil {
-			cred.KeyID = cfg.BasicAuth.Username
-			cred.APIKey = cfg.BasicAuth.Password
-		}
-		req = request.NewRequestInterface(nil, cred, nil, bu, userAgent, cfg.HTTPClient)
+	// Initialize the hardened requestor
+	cred := &conf.Credential{
+		AccessToken: cfg.Token,
 	}
+	if cfg.BasicAuth != nil {
+		cred.KeyID = cfg.BasicAuth.Username
+		cred.APIKey = cfg.BasicAuth.Password
+	}
+	req := request.NewRequestor(nil, cred, nil, bu, userAgent, cfg.HTTPClient)
 
 	client := &Client{
-		baseService: baseService{
-			baseURL:   bu,
-			userAgent: userAgent,
-			basicAuth: cfg.BasicAuth,
-			token:     strings.TrimSpace(cfg.Token),
-			requestor: req,
-		},
+		requestor: req,
+		baseURL:   bu,
 	}
 	client.initServices()
 	return client, nil
@@ -180,12 +156,13 @@ func parseBaseURL(addr string) (string, error) {
 }
 
 func (c *Client) initServices() {
-	c.health = &HealthService{base: &c.baseService}
-	c.index = &IndexService{base: &c.baseService}
-	c.drs = &DRSService{base: &c.baseService, index: c.index}
-	c.data = &DataService{base: &c.baseService, drs: c.drs}
-	c.buckets = &BucketsService{base: &c.baseService}
-	c.metrics = &MetricsService{base: &c.baseService}
+	l := c.Logger()
+	c.health = NewHealthService(c.requestor)
+	c.index = NewIndexService(c.requestor)
+	c.drs = NewDRSService(c.requestor, c.index)
+	c.data = NewDataService(c.requestor, l, c.drs)
+	c.buckets = NewBucketsService(c.requestor)
+	c.metrics = NewMetricsService(c.requestor)
 }
 
 func (c *Client) Address() string { return c.baseURL }
@@ -197,10 +174,10 @@ func (c *Client) DRS() *DRSService         { return c.drs }
 func (c *Client) Buckets() *BucketsService { return c.buckets }
 func (c *Client) Metrics() *MetricsService { return c.metrics }
 
-func (c *Client) Requestor() request.RequestInterface { return c.baseService.requestor }
+func (c *Client) Requestor() request.Requester { return c.requestor }
 
 func (c *Client) Logger() *logs.Gen3Logger {
-	if r, ok := c.Requestor().(*request.Request); ok {
+	if r, ok := c.requestor.(*request.Request); ok {
 		return r.Logs
 	}
 	return logs.NewGen3Logger(nil, "", "")

@@ -6,13 +6,17 @@ import (
 	"net/url"
 
 	"github.com/calypr/syfon/apigen/drs"
-	"github.com/calypr/syfon/apigen/internalapi"
+	"github.com/calypr/syfon/client/pkg/request"
 	"github.com/calypr/syfon/client/xfer"
 )
 
 type DRSService struct {
-	base  *baseService
-	index *IndexService
+	requestor request.Requester
+	index     *IndexService
+}
+
+func NewDRSService(r request.Requester, index *IndexService) *DRSService {
+	return &DRSService{requestor: r, index: index}
 }
 
 // Resolve implements xfer.Resolver by fetching object metadata from the DRS API.
@@ -44,8 +48,7 @@ func (s *DRSService) Resolve(ctx context.Context, id string) (*xfer.ResolvedObje
 
 func (s *DRSService) GetObject(ctx context.Context, objectID string) (DRSObject, error) {
 	var out DRSObject
-	rb := s.base.requestor.New("GET", "/ga4gh/drs/v1/objects/"+url.PathEscape(objectID))
-	err := s.base.requestor.DoJSON(ctx, rb, &out)
+	err := s.requestor.Do(ctx, "GET", "/ga4gh/drs/v1/objects/"+url.PathEscape(objectID), nil, &out)
 	return out, err
 }
 
@@ -57,7 +60,7 @@ func (s *DRSService) ListObjects(ctx context.Context, limit, page int) (DRSPage,
 	if err != nil {
 		return DRSPage{}, err
 	}
-	records := make([]internalapi.InternalRecord, 0)
+	records := make([]InternalRecordRequest, 0)
 	if listResp.Records != nil {
 		records = *listResp.Records
 	}
@@ -72,22 +75,17 @@ func (s *DRSService) ListObjects(ctx context.Context, limit, page int) (DRSPage,
 
 func (s *DRSService) GetAccessURL(ctx context.Context, objectID, accessID string) (AccessMethodAccessURL, error) {
 	var out AccessMethodAccessURL
-	rb := s.base.requestor.New("GET", "/ga4gh/drs/v1/objects/"+url.PathEscape(objectID)+"/access/"+url.PathEscape(accessID))
-	err := s.base.requestor.DoJSON(ctx, rb, &out)
+	err := s.requestor.Do(ctx, "GET", "/ga4gh/drs/v1/objects/"+url.PathEscape(objectID)+"/access/"+url.PathEscape(accessID), nil, &out)
 	return out, err
 }
 
 func (s *DRSService) RegisterObjects(ctx context.Context, req RegisterObjectsRequest) (RegisterObjectsResponse, error) {
 	var out RegisterObjectsResponse
-	rb, err := s.base.requestor.New("POST", "/ga4gh/drs/v1/objects/register").WithJSONBody(req)
-	if err != nil {
-		return out, err
-	}
-	doneErr := s.base.requestor.DoJSON(ctx, rb, &out)
-	return out, doneErr
+	err := s.requestor.Do(ctx, "POST", "/ga4gh/drs/v1/objects/register", req, &out)
+	return out, err
 }
 
-func internalRecordToDRSObject(rec *internalapi.InternalRecord) DRSObject {
+func internalRecordToDRSObject(rec *InternalRecordRequest) DRSObject {
 	size := int64(0)
 	if rec.Size != nil {
 		size = *rec.Size

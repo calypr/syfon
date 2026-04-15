@@ -10,94 +10,81 @@ import (
 	"strings"
 
 	internalapi "github.com/calypr/syfon/apigen/internalapi"
-	"github.com/calypr/syfon/client/pkg/logs"
 	"github.com/calypr/syfon/client/pkg/common"
+	"github.com/calypr/syfon/client/pkg/logs"
 	"github.com/calypr/syfon/client/pkg/request"
 	"github.com/calypr/syfon/client/xfer"
 )
 
 type DataService struct {
-	base *baseService
-	drs  *DRSService
+	requestor request.Requester
+	logger    *logs.Gen3Logger
+	drs       *DRSService
+}
+
+func NewDataService(r request.Requester, l *logs.Gen3Logger, drs *DRSService) *DataService {
+	return &DataService{
+		requestor: r,
+		logger:    l,
+		drs:       drs,
+	}
 }
 
 func (d *DataService) UploadBlank(ctx context.Context, req UploadBlankRequest) (UploadBlankResponse, error) {
 	var out UploadBlankResponse
-	rb, err := d.base.requestor.New("POST", "/data/upload").WithJSONBody(req)
-	if err != nil {
-		return out, err
-	}
-	err = d.base.requestor.DoJSON(ctx, rb, &out)
+	err := d.requestor.Do(ctx, http.MethodPost, common.DataUploadEndpoint, req, &out)
 	return out, err
 }
 
 func (d *DataService) UploadURL(ctx context.Context, req UploadURLRequest) (SignedURL, error) {
 	q := url.Values{}
 	if req.Bucket != "" {
-		q.Set("bucket", req.Bucket)
+		q.Set(common.QueryParamBucket, req.Bucket)
 	}
 	if req.FileName != "" {
-		q.Set("file_name", req.FileName)
+		q.Set(common.QueryParamFileName, req.FileName)
 	}
 	if req.ExpiresIn > 0 {
-		q.Set("expires_in", strconv.Itoa(req.ExpiresIn))
+		q.Set(common.QueryParamExpiresIn, strconv.Itoa(req.ExpiresIn))
 	}
 	var out SignedURL
-	rb := d.base.requestor.New("GET", "/data/upload/"+url.PathEscape(req.FileID)).WithQueryValues(q)
-	err := d.base.requestor.DoJSON(ctx, rb, &out)
+	err := d.requestor.Do(ctx, http.MethodGet, fmt.Sprintf(common.DataRecordEndpointTemplate, url.PathEscape(req.FileID)), nil, &out, request.WithQueryValues(q))
 	return out, err
 }
 
 func (d *DataService) UploadBulk(ctx context.Context, req UploadBulkRequest) (UploadBulkResponse, error) {
 	var out UploadBulkResponse
-	rb, err := d.base.requestor.New("POST", "/data/upload/bulk").WithJSONBody(req)
-	if err != nil {
-		return out, err
-	}
-	err = d.base.requestor.DoJSON(ctx, rb, &out)
+	err := d.requestor.Do(ctx, http.MethodPost, common.DataUploadBulkEndpoint, req, &out)
 	return out, err
 }
 
 func (d *DataService) DownloadURL(ctx context.Context, did string, expiresIn int, redirect bool) (SignedURL, error) {
 	q := url.Values{}
 	if expiresIn > 0 {
-		q.Set("expires_in", strconv.Itoa(expiresIn))
+		q.Set(common.QueryParamExpiresIn, strconv.Itoa(expiresIn))
 	}
 	if redirect {
-		q.Set("redirect", "true")
+		q.Set(common.QueryParamRedirect, "true")
 	}
 	var out SignedURL
-	rb := d.base.requestor.New("GET", "/data/download/"+url.PathEscape(did)).WithQueryValues(q)
-	err := d.base.requestor.DoJSON(ctx, rb, &out)
+	err := d.requestor.Do(ctx, http.MethodGet, fmt.Sprintf(common.DataDownloadRecordEndpointTemplate, url.PathEscape(did)), nil, &out, request.WithQueryValues(q))
 	return out, err
 }
 
 func (d *DataService) MultipartInit(ctx context.Context, req MultipartInitRequest) (MultipartInitResponse, error) {
 	var out MultipartInitResponse
-	rb, err := d.base.requestor.New("POST", "/data/multipart/init").WithJSONBody(req)
-	if err != nil {
-		return out, err
-	}
-	err = d.base.requestor.DoJSON(ctx, rb, &out)
+	err := d.requestor.Do(ctx, http.MethodPost, common.DataMultipartInitEndpoint, req, &out)
 	return out, err
 }
 
 func (d *DataService) MultipartUpload(ctx context.Context, req MultipartUploadRequest) (MultipartUploadResponse, error) {
 	var out MultipartUploadResponse
-	rb, err := d.base.requestor.New("POST", "/data/multipart/upload").WithJSONBody(req)
-	if err != nil {
-		return out, err
-	}
-	err = d.base.requestor.DoJSON(ctx, rb, &out)
+	err := d.requestor.Do(ctx, http.MethodPost, common.DataMultipartUploadEndpoint, req, &out)
 	return out, err
 }
 
 func (d *DataService) MultipartComplete(ctx context.Context, req MultipartCompleteRequest) error {
-	rb, err := d.base.requestor.New("POST", "/data/multipart/complete").WithJSONBody(req)
-	if err != nil {
-		return err
-	}
-	return d.base.requestor.DoJSON(ctx, rb, nil)
+	return d.requestor.Do(ctx, http.MethodPost, common.DataMultipartCompleteEndpoint, req, nil)
 }
 
 // --- transfer.ObjectWriter interface support ---
@@ -127,11 +114,11 @@ func (d *DataService) ResolveDownloadURL(ctx context.Context, guid string, acces
 }
 
 func (d *DataService) Download(ctx context.Context, signedURL string, rangeStart, rangeEnd *int64) (*http.Response, error) {
-	return xfer.GenericDownload(ctx, d.base.requestor, signedURL, rangeStart, rangeEnd)
+	return xfer.GenericDownload(ctx, d.requestor, signedURL, rangeStart, rangeEnd)
 }
 
 // --- transfer.Uploader interface support ---
- 
+
 func (d *DataService) ResolveUploadURL(ctx context.Context, guid, filename string, metadata common.FileMetadata, bucket string) (string, error) {
 	resp, err := d.UploadURL(ctx, UploadURLRequest{
 		FileID:   guid,
@@ -146,18 +133,18 @@ func (d *DataService) ResolveUploadURL(ctx context.Context, guid, filename strin
 	}
 	return *resp.Url, nil
 }
- 
+
 func (d *DataService) Upload(ctx context.Context, url string, body io.Reader, size int64) error {
 	ctx, cancel := context.WithTimeout(ctx, common.DataTimeout)
 	defer cancel()
-	_, err := xfer.DoUpload(ctx, d.base.requestor, url, body, size)
+	_, err := xfer.DoUpload(ctx, d.requestor, url, body, size)
 	return err
 }
- 
+
 func (d *DataService) UploadPart(ctx context.Context, url string, body io.Reader, size int64) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, common.DataTimeout)
 	defer cancel()
-	return xfer.DoUpload(ctx, d.base.requestor, url, body, size)
+	return xfer.DoUpload(ctx, d.requestor, url, body, size)
 }
 
 func (d *DataService) DeleteFile(ctx context.Context, guid string) (string, error) {
@@ -170,10 +157,7 @@ func (d *DataService) DeleteFile(ctx context.Context, guid string) (string, erro
 func (d *DataService) Name() string { return "syfon-data-service" }
 
 func (d *DataService) Logger() xfer.TransferLogger {
-	if r, ok := d.base.requestor.(*request.Request); ok {
-		return r.Logs
-	}
-	return logs.NewGen3Logger(nil, "", "")
+	return d.logger
 }
 
 // --- transfer.MultipartURLSigner interface support ---

@@ -44,7 +44,7 @@ func (f *fakeGen3Upload) ResolveUploadURL(ctx context.Context, guid string, file
 	return "", fmt.Errorf("not implemented")
 }
 func (f *fakeGen3Upload) InitMultipartUpload(ctx context.Context, guid string, filename string, bucket string) (string, string, error) {
-	resp, err := f.Do(ctx, &request.RequestBuilder{Url: common.FenceDataMultipartInitEndpoint})
+	resp, err := f.Do(ctx, &request.RequestBuilder{Url: common.DataMultipartInitEndpoint})
 	if err != nil {
 		return "", "", err
 	}
@@ -59,7 +59,7 @@ func (f *fakeGen3Upload) InitMultipartUpload(ctx context.Context, guid string, f
 	return msg.UploadID, msg.GUID, nil
 }
 func (f *fakeGen3Upload) GetMultipartUploadURL(ctx context.Context, key string, uploadID string, partNumber int32, bucket string) (string, error) {
-	resp, err := f.Do(ctx, &request.RequestBuilder{Url: common.FenceDataMultipartUploadEndpoint})
+	resp, err := f.Do(ctx, &request.RequestBuilder{Url: common.DataMultipartUploadEndpoint})
 	if err != nil {
 		return "", err
 	}
@@ -73,7 +73,7 @@ func (f *fakeGen3Upload) GetMultipartUploadURL(ctx context.Context, key string, 
 	return msg.PresignedURL, nil
 }
 func (f *fakeGen3Upload) CompleteMultipartUpload(ctx context.Context, key string, uploadID string, parts []internalapi.InternalMultipartPart, bucket string) error {
-	_, err := f.Do(ctx, &request.RequestBuilder{Url: common.FenceDataMultipartCompleteEndpoint})
+	_, err := f.Do(ctx, &request.RequestBuilder{Url: common.DataMultipartCompleteEndpoint})
 	return err
 }
 func (f *fakeGen3Upload) Upload(ctx context.Context, url string, body io.Reader, size int64) error {
@@ -161,11 +161,11 @@ func TestMultipartUploadProgressIntegration(t *testing.T) {
 		logger: logger,
 		doFunc: func(_ context.Context, req *request.RequestBuilder) (*http.Response, error) {
 			switch {
-			case strings.Contains(req.Url, common.FenceDataMultipartInitEndpoint):
+			case strings.Contains(req.Url, common.DataMultipartInitEndpoint):
 				return newJSONResponse(req.Url, `{"uploadId":"upload-123","guid":"guid-123"}`), nil
-			case strings.Contains(req.Url, common.FenceDataMultipartUploadEndpoint):
+			case strings.Contains(req.Url, common.DataMultipartUploadEndpoint):
 				return newJSONResponse(req.Url, fmt.Sprintf(`{"presigned_url":"%s"}`, server.URL)), nil
-			case strings.Contains(req.Url, common.FenceDataMultipartCompleteEndpoint):
+			case strings.Contains(req.Url, common.DataMultipartCompleteEndpoint):
 				return newJSONResponse(req.Url, `{}`), nil
 			default:
 				return nil, fmt.Errorf("unexpected request url: %s", req.Url)
@@ -263,12 +263,12 @@ func TestMultipartUploadResumesWithoutReinit(t *testing.T) {
 		logger: logger,
 		doFunc: func(_ context.Context, req *request.RequestBuilder) (*http.Response, error) {
 			switch {
-			case strings.Contains(req.Url, common.FenceDataMultipartInitEndpoint):
+			case strings.Contains(req.Url, common.DataMultipartInitEndpoint):
 				initCalls++
 				return newJSONResponse(req.Url, `{"uploadId":"upload-resume-1","guid":"guid-resume-1"}`), nil
-			case strings.Contains(req.Url, common.FenceDataMultipartUploadEndpoint):
+			case strings.Contains(req.Url, common.DataMultipartUploadEndpoint):
 				return newJSONResponse(req.Url, `{"presigned_url":"https://upload.invalid/part"}`), nil
-			case strings.Contains(req.Url, common.FenceDataMultipartCompleteEndpoint):
+			case strings.Contains(req.Url, common.DataMultipartCompleteEndpoint):
 				completeCalls++
 				return newJSONResponse(req.Url, `{}`), nil
 			default:

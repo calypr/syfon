@@ -11,6 +11,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -42,20 +43,62 @@ func (e *ResponseError) Error() string {
 	return fmt.Sprintf("%s %s: status %d body=%s", e.Method, e.URL, e.Status, e.Body)
 }
 
-type RequestInterface interface {
-	New(method, path string) *RequestBuilder
-	Do(ctx context.Context, req *RequestBuilder) (*http.Response, error)
-	DoJSON(ctx context.Context, req *RequestBuilder, out any) error
+type RequestOption func(*RequestBuilder)
+
+func WithQuery(key, value string) RequestOption {
+	return func(rb *RequestBuilder) {
+		rb.WithQuery(key, value)
+	}
 }
 
-func NewRequestInterface(
+func WithQueryValues(v url.Values) RequestOption {
+	return func(rb *RequestBuilder) {
+		rb.WithQueryValues(v)
+	}
+}
+
+func WithHeader(key, value string) RequestOption {
+	return func(rb *RequestBuilder) {
+		rb.WithHeader(key, value)
+	}
+}
+
+func WithTimeout(d time.Duration) RequestOption {
+	return func(rb *RequestBuilder) {
+		rb.WithTimeout(d)
+	}
+}
+
+func WithToken(token string) RequestOption {
+	return func(rb *RequestBuilder) {
+		rb.WithToken(token)
+	}
+}
+
+func WithSkipAuth(skip bool) RequestOption {
+	return func(rb *RequestBuilder) {
+		rb.WithSkipAuth(skip)
+	}
+}
+
+func WithPartSize(size int64) RequestOption {
+	return func(rb *RequestBuilder) {
+		rb.PartSize = size
+	}
+}
+
+type Requester interface {
+	Do(ctx context.Context, method, path string, body, out any, opts ...RequestOption) error
+}
+
+func NewRequestor(
 	logger *logs.Gen3Logger,
 	cred *conf.Credential,
 	conf conf.ManagerInterface,
 	baseURL string,
 	userAgent string,
 	baseHTTPClient *http.Client,
-) RequestInterface {
+) Requester {
 	if logger == nil {
 		logger = logs.NewGen3Logger(nil, "", "")
 	}
@@ -123,22 +166,31 @@ func NewRequestInterface(
 	return r
 }
 
-func (r *Request) New(method, path string) *RequestBuilder {
-	fullURL := path
-	if !strings.HasPrefix(path, "http") {
-		fullURL = r.BaseURL + "/" + strings.TrimLeft(path, "/")
+func (r *Request) Do(ctx context.Context, method, path string, body, out any, opts ...RequestOption) error {
+	rb := r.newBuilder(method, path)
+	if body != nil {
+		if reader, ok := body.(io.Reader); ok {
+			rb.WithBody(reader)
+		} else {
+			if _, err := rb.WithJSONBody(body); err != nil {
+				return err
+			}
+		}
 	}
-	return &RequestBuilder{
-		Method:  method,
-		Url:     fullURL,
-		Headers: make(map[string]string),
-	}
-}
 
-func (r *Request) Do(ctx context.Context, rb *RequestBuilder) (*http.Response, error) {
+	for _, opt := range opts {
+		opt(rb)
+	}
+
+	if rb.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, rb.Timeout)
+		defer cancel()
+	}
+
 	httpReq, err := http.NewRequestWithContext(ctx, rb.Method, rb.Url, rb.Body)
 	if err != nil {
-		return nil, errors.New("failed to create HTTP request: " + err.Error())
+		return errors.New("failed to create HTTP request: " + err.Error())
 	}
 
 	// Apply default headers
@@ -174,40 +226,56 @@ func (r *Request) Do(ctx context.Context, rb *RequestBuilder) (*http.Response, e
 
 	retryReq, err := retryablehttp.FromRequest(httpReq)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	resp, err := r.RetryClient.Do(retryReq)
 	if err != nil {
-		return resp, errors.New("request failed after retries: " + err.Error())
+		if resp != nil {
+			resp.Body.Close()
+		}
+		return errors.New("request failed after retries: " + err.Error())
 	}
 
-	return resp, nil
+	// Polymorphic Response Handling
+	switch v := out.(type) {
+	case **http.Response:
+		// Raw Mode: Caller is responsible for closing the body.
+		*v = resp
+		return nil
+
+	default:
+		// JSON/Void Mode: We close the body.
+		defer resp.Body.Close()
+
+		data, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode >= 400 {
+			return &ResponseError{
+				Method:  method,
+				URL:     resp.Request.URL.String(),
+				Status:  resp.StatusCode,
+				Body:    strings.TrimSpace(string(data)),
+				Headers: resp.Header.Clone(),
+			}
+		}
+
+		if out != nil && len(data) > 0 {
+			if err := json.Unmarshal(data, out); err != nil {
+				return fmt.Errorf("decode response: %w", err)
+			}
+		}
+		return nil
+	}
 }
 
-func (r *Request) DoJSON(ctx context.Context, rb *RequestBuilder, out any) error {
-	resp, err := r.Do(ctx, rb)
-	if err != nil {
-		return err
+func (r *Request) newBuilder(method, path string) *RequestBuilder {
+	fullURL := path
+	if !strings.HasPrefix(path, "http") {
+		fullURL = r.BaseURL + "/" + strings.TrimLeft(path, "/")
 	}
-	defer resp.Body.Close()
-
-	data, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode >= 400 {
-		return &ResponseError{
-			Method:  rb.Method,
-			URL:     rb.Url,
-			Status:  resp.StatusCode,
-			Body:    strings.TrimSpace(string(data)),
-			Headers: resp.Header.Clone(),
-		}
+	return &RequestBuilder{
+		Method:  method,
+		Url:     fullURL,
+		Headers: make(map[string]string),
 	}
-
-	if out != nil && len(data) > 0 {
-		if err := json.Unmarshal(data, out); err != nil {
-			return fmt.Errorf("decode response: %w", err)
-		}
-	}
-
-	return nil
 }

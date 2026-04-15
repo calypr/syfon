@@ -30,40 +30,21 @@ type requestSpy struct {
 	doFunc     func(method, url string, body []byte) (*http.Response, error)
 }
 
-func (s *requestSpy) New(method, url string) *request.RequestBuilder {
+func (s *requestSpy) Do(ctx context.Context, method, path string, in, out any, opts ...request.RequestOption) error {
 	s.lastMethod = method
-	s.lastURL = url
-	return &request.RequestBuilder{
-		Method:  method,
-		Url:     url,
-		Headers: map[string]string{},
-	}
-}
-
-func (s *requestSpy) Do(ctx context.Context, req *request.RequestBuilder) (*http.Response, error) {
-	_ = ctx
-	if req != nil && req.Body != nil {
-		b, _ := io.ReadAll(req.Body)
-		s.lastBody = b
+	s.lastURL = path
+	if in != nil {
+		s.lastBody, _ = json.Marshal(in)
 	}
 	if s.doFunc != nil {
-		return s.doFunc(req.Method, req.Url, s.lastBody)
-	}
-	return &http.Response{
-		StatusCode: http.StatusOK,
-		Status:     "200 OK",
-		Body:       io.NopCloser(strings.NewReader(`{}`)),
-	}, nil
-}
-
-func (s *requestSpy) DoJSON(ctx context.Context, rb *request.RequestBuilder, out any) error {
-	resp, err := s.Do(ctx, rb)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if out != nil {
-		return json.NewDecoder(resp.Body).Decode(out)
+		resp, err := s.doFunc(method, path, s.lastBody)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		if out != nil {
+			return json.NewDecoder(resp.Body).Decode(out)
+		}
 	}
 	return nil
 }
@@ -78,7 +59,7 @@ func TestBatchGetObjectsByHash_UsesBulkHashesEndpoint(t *testing.T) {
 			t.Fatalf("expected /index/bulk/hashes endpoint, got %s", url)
 		}
 
-		var req internalapi.BulkHashesRequest
+		var req BulkHashesRequest
 		if err := json.Unmarshal(body, &req); err != nil {
 			t.Fatalf("failed to decode request body: %v", err)
 		}
@@ -95,8 +76,8 @@ func TestBatchGetObjectsByHash_UsesBulkHashesEndpoint(t *testing.T) {
 		size := int64(12)
 		h := internalapi.HashInfo(hashes)
 		urls := []string{"s3://bucket/path"}
-		resp := internalapi.ListRecordsResponse{
-			Records: &[]internalapi.InternalRecord{{
+		resp := ListRecordsResponse{
+			Records: &[]InternalRecordRequest{{
 				Did:      did,
 				FileName: &fileName,
 				Hashes:   &h,
@@ -146,7 +127,7 @@ func TestRegisterRecords_UsesBulkCreateEndpoint(t *testing.T) {
 			t.Fatalf("expected /index/bulk endpoint, got %s", url)
 		}
 
-		var req internalapi.BulkCreateRequest
+		var req BulkCreateRequest
 		if err := json.Unmarshal(body, &req); err != nil {
 			t.Fatalf("failed to decode request body: %v", err)
 		}
@@ -160,8 +141,8 @@ func TestRegisterRecords_UsesBulkCreateEndpoint(t *testing.T) {
 		size := int64(21)
 		h := internalapi.HashInfo(hashes)
 		urls := []string{"s3://bucket/bulk.bin"}
-		resp := internalapi.ListRecordsResponse{
-			Records: &[]internalapi.InternalRecord{{
+		resp := ListRecordsResponse{
+			Records: &[]InternalRecordRequest{{
 				Did:      did,
 				FileName: &fileName,
 				Hashes:   &h,

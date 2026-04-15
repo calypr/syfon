@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"strings"
 	"testing"
 	"time"
 
@@ -15,7 +14,7 @@ import (
 	"github.com/calypr/syfon/client/pkg/logs"
 )
 
-func TestNewRequestInterface(t *testing.T) {
+func TestNewRequestor(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	cred := &conf.Credential{
 		KeyID:       "test-key",
@@ -26,7 +25,7 @@ func TestNewRequestInterface(t *testing.T) {
 	// Create a mock config manager
 	mockConf := &mockConfigManager{}
 
-	reqInterface := NewRequestInterface(logs.NewGen3Logger(logger, "", ""), cred, mockConf, "https://example.com", "test-ua", nil)
+	reqInterface := NewRequestor(logs.NewGen3Logger(logger, "", ""), cred, mockConf, "https://example.com", "test-ua", nil)
 
 	if reqInterface == nil {
 		t.Fatal("Expected non-nil request interface")
@@ -46,70 +45,23 @@ func TestNewRequestInterface(t *testing.T) {
 	}
 }
 
-func TestRequestBuilder_New(t *testing.T) {
+func TestRequest_NewBuilder(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	mockConf := &mockConfigManager{}
 
-	reqInterface := NewRequestInterface(logs.NewGen3Logger(logger, "", ""), nil, mockConf, "https://example.com", "test-ua", nil)
+	reqInterface := NewRequestor(logs.NewGen3Logger(logger, "", ""), nil, mockConf, "https://example.com", "test-ua", nil)
 	req := reqInterface.(*Request)
 
 	// Test relative path
-	builder := req.New("GET", "/api/test")
+	builder := req.newBuilder("GET", "/api/test")
 	if builder.Url != "https://example.com/api/test" {
 		t.Errorf("Expected URL 'https://example.com/api/test', got '%s'", builder.Url)
 	}
 
 	// Test absolute URL
-	builder = req.New("GET", "https://other.com/api/test")
+	builder = req.newBuilder("GET", "https://other.com/api/test")
 	if builder.Url != "https://other.com/api/test" {
 		t.Errorf("Expected URL 'https://other.com/api/test', got '%s'", builder.Url)
-	}
-}
-
-func TestRequestBuilder_WithHeaders(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	mockConf := &mockConfigManager{}
-
-	reqInterface := NewRequestInterface(logs.NewGen3Logger(logger, "", ""), nil, mockConf, "https://example.com", "test-ua", nil)
-	req := reqInterface.(*Request)
-
-	builder := req.New("GET", "/api/test")
-	builder = builder.WithHeader("X-Custom-Header", "test-value")
-
-	if builder.Headers["X-Custom-Header"] != "test-value" {
-		t.Error("Expected X-Custom-Header to be set")
-	}
-}
-
-func TestRequestBuilder_WithToken(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	mockConf := &mockConfigManager{}
-
-	reqInterface := NewRequestInterface(logs.NewGen3Logger(logger, "", ""), nil, mockConf, "https://example.com", "test-ua", nil)
-	req := reqInterface.(*Request)
-
-	token := "test-bearer-token-12345"
-	builder := req.New("GET", "/api/test")
-	builder = builder.WithToken(token)
-
-	if builder.Token != token {
-		t.Errorf("Expected token '%s', got '%s'", token, builder.Token)
-	}
-}
-
-func TestRequestBuilder_WithBody(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	mockConf := &mockConfigManager{}
-
-	reqInterface := NewRequestInterface(logs.NewGen3Logger(logger, "", ""), nil, mockConf, "https://example.com", "test-ua", nil)
-	req := reqInterface.(*Request)
-
-	body := strings.NewReader("test body content")
-	builder := req.New("POST", "/api/test")
-	builder = builder.WithBody(body)
-
-	if builder.Body == nil {
-		t.Error("Expected non-nil body")
 	}
 }
 
@@ -135,33 +87,22 @@ func TestRequest_Do_Success(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	mockConf := &mockConfigManager{}
 
-	reqInterface := NewRequestInterface(logs.NewGen3Logger(logger, "", ""), nil, mockConf, server.URL, "test-ua", nil)
-	req := reqInterface.(*Request)
-
-	builder := req.New("GET", "/api/test")
-	builder = builder.WithToken("test-token")
+	reqInterface := NewRequestor(logs.NewGen3Logger(logger, "", ""), nil, mockConf, server.URL, "test-ua", nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	resp, err := req.Do(ctx, builder)
+	var out struct {
+		Status string `json:"status"`
+	}
+	err := reqInterface.Do(ctx, "GET", "/api/test", nil, &out, WithToken("test-token"))
 
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
 
-	if resp == nil {
-		t.Fatal("Expected non-nil response")
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("Expected status 200, got %d", resp.StatusCode)
-	}
-
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-	if !strings.Contains(string(body), "success") {
-		t.Error("Expected response body to contain 'success'")
+	if out.Status != "success" {
+		t.Errorf("Expected status 'success', got %s", out.Status)
 	}
 }
 
@@ -180,24 +121,40 @@ func TestRequest_Do_WithCustomHeaders(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	mockConf := &mockConfigManager{}
 
-	reqInterface := NewRequestInterface(logs.NewGen3Logger(logger, "", ""), nil, mockConf, server.URL, "test-ua", nil)
-	req := reqInterface.(*Request)
-
-	builder := req.New("GET", "/api/test")
-	builder = builder.WithHeader("X-Custom-Header", "test-value")
+	reqInterface := NewRequestor(logs.NewGen3Logger(logger, "", ""), nil, mockConf, server.URL, "test-ua", nil)
 
 	ctx := context.Background()
-	resp, err := req.Do(ctx, builder)
+	err := reqInterface.Do(ctx, "GET", "/api/test", nil, nil, WithHeader("X-Custom-Header", "test-value"))
 
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
+}
 
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("Expected status 200, got %d", resp.StatusCode)
+func TestRequest_Do_RawMode(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("raw content"))
+	}))
+	defer server.Close()
+
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	reqInterface := NewRequestor(logs.NewGen3Logger(logger, "", ""), nil, nil, server.URL, "test-ua", nil)
+
+	var resp *http.Response
+	err := reqInterface.Do(context.Background(), "GET", "/raw", nil, &resp)
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
 	}
+	if resp == nil {
+		t.Fatal("Expected non-nil response")
+	}
+	defer resp.Body.Close()
 
-	resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if string(body) != "raw content" {
+		t.Errorf("Expected 'raw content', got '%s'", string(body))
+	}
 }
 
 // Mock config manager for testing

@@ -1,9 +1,7 @@
 package drs
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,10 +9,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
- 
+
 	drsapi "github.com/calypr/syfon/apigen/drs"
 
-	internalapi "github.com/calypr/syfon/apigen/internalapi"
 	"github.com/calypr/syfon/client/conf"
 	"github.com/calypr/syfon/client/pkg/common"
 	"github.com/calypr/syfon/client/pkg/hash"
@@ -28,23 +25,11 @@ type Config struct {
 }
 
 type internalListResponse struct {
-	Records []internalapi.InternalRecordResponse `json:"records"`
-}
-
-func responseBodyError(resp *http.Response, prefix string) error {
-	if resp == nil {
-		return fmt.Errorf("%s: no response", prefix)
-	}
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-	bodyText := strings.TrimSpace(string(body))
-	if bodyText == "" {
-		return fmt.Errorf("%s: %s", prefix, resp.Status)
-	}
-	return fmt.Errorf("%s: %s body=%s", prefix, resp.Status, bodyText)
+	Records []InternalRecordResponse `json:"records"`
 }
 
 type DrsClient struct {
-	request.RequestInterface
+	request.Requester
 	xfer.Backend // Embedded for automatic delegation Across S3, GCS, and Azure.
 	bucketName   string
 	orgName      string
@@ -54,10 +39,10 @@ type DrsClient struct {
 }
 
 // NewDrsClient is the Gen3 resolution layer initialization.
-func NewDrsClient(req request.RequestInterface, cred *conf.Credential, logger *logs.Gen3Logger) Client {
+func NewDrsClient(req request.Requester, cred *conf.Credential, logger *logs.Gen3Logger) Client {
 	c := &DrsClient{
-		RequestInterface: req,
-		baseURL:          "",
+		Requester: req,
+		baseURL:   "",
 		config: Config{
 			MultiPartThreshold: common.FileSizeLimit,
 		},
@@ -70,10 +55,10 @@ func NewDrsClient(req request.RequestInterface, cred *conf.Credential, logger *l
 }
 
 // NewLocalDrsClient is the local resolution layer initialization.
-func NewLocalDrsClient(req request.RequestInterface, baseURL string, logger *logs.Gen3Logger) Client {
+func NewLocalDrsClient(req request.Requester, baseURL string, logger *logs.Gen3Logger) Client {
 	c := &DrsClient{
-		RequestInterface: req,
-		baseURL:          strings.TrimRight(strings.TrimSpace(baseURL), "/"),
+		Requester: req,
+		baseURL:   strings.TrimRight(strings.TrimSpace(baseURL), "/"),
 		config: Config{
 			MultiPartThreshold: common.FileSizeLimit,
 		},
@@ -130,19 +115,9 @@ func (c *DrsClient) Resolve(ctx context.Context, id string) (*xfer.ResolvedObjec
 // Core Resolution Layer Implementation (Indexd / DRS).
 
 func (c *DrsClient) GetObject(ctx context.Context, id string) (*DRSObject, error) {
-	rb := c.New(http.MethodGet, c.endpoint(fmt.Sprintf("/index/%s", url.PathEscape(id))))
-	resp, err := c.Do(ctx, rb)
+	var rec InternalRecordResponse
+	err := c.Do(ctx, http.MethodGet, c.endpoint(fmt.Sprintf(common.IndexdIndexRecordEndpointTemplate, url.PathEscape(id))), nil, &rec)
 	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, responseBodyError(resp, fmt.Sprintf("failed to get metadata for %s", id))
-	}
-
-	var rec internalapi.InternalRecordResponse
-	if err := json.NewDecoder(resp.Body).Decode(&rec); err != nil {
 		return nil, err
 	}
 	return syfonInternalRecordToDRSObject(rec)
@@ -161,21 +136,13 @@ func (c *DrsClient) GetObjectByHash(ctx context.Context, ck *hash.Checksum) ([]D
 	}
 
 	q := url.Values{}
-	q.Set("hash", fmt.Sprintf("%s:%s", norm.Type, norm.Checksum))
-	rb := c.New(http.MethodGet, c.endpoint("/index?"+q.Encode()))
-	resp, err := c.Do(ctx, rb)
+	q.Set(common.QueryParamHash, fmt.Sprintf("%s:%s", norm.Type, norm.Checksum))
+	var list internalListResponse
+	err := c.Do(ctx, http.MethodGet, c.endpoint(common.IndexdIndexEndpoint+"?"+q.Encode()), nil, &list)
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, responseBodyError(resp, fmt.Sprintf("failed to get metadata by checksum %s:%s", norm.Type, norm.Checksum))
-	}
 
-	var list internalListResponse
-	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
-		return nil, err
-	}
 	records := make([]DRSObject, 0, len(list.Records))
 	for _, rec := range list.Records {
 		obj, convErr := syfonInternalRecordToDRSObject(rec)
@@ -221,13 +188,11 @@ func (c *DrsClient) BatchGetObjectsByHash(ctx context.Context, hashes []string) 
 	}
 
 	typed := make([]string, 0, len(hashes))
-	normalized := make([]string, 0, len(hashes))
 	for _, h := range hashes {
 		norm := NormalizeOid(strings.TrimSpace(h))
 		if norm == "" {
 			continue
 		}
-		normalized = append(normalized, norm)
 		typed = append(typed, fmt.Sprintf("%s:%s", hash.ChecksumTypeSHA256, norm))
 		result[norm] = []DRSObject{}
 	}
@@ -235,55 +200,35 @@ func (c *DrsClient) BatchGetObjectsByHash(ctx context.Context, hashes []string) 
 		return result, nil
 	}
 
-	body, _ := json.Marshal(internalapi.BulkHashesRequest{Hashes: typed})
-	rb := c.New(http.MethodPost, c.endpoint("/index/bulk/hashes")).
-		WithBody(bytes.NewReader(body)).
-		WithHeader("Content-Type", "application/json")
-	resp, err := c.Do(ctx, rb)
+	var list ListRecordsResponse
+	err := c.Do(ctx, http.MethodPost, c.endpoint(common.IndexdIndexBulkHashesEndpoint), BulkHashesRequest{Hashes: typed}, &list)
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, responseBodyError(resp, "failed to bulk get metadata by hash")
-	}
 
-	var list internalapi.ListRecordsResponse
-	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
-		return nil, err
-	}
 	if list.Records != nil {
 		for _, rec := range *list.Records {
-		obj, convErr := syfonInternalRecordToDRSObjectFromRecord(rec)
-		if convErr != nil {
-			return nil, convErr
-		}
-		sha := NormalizeOid(hash.ConvertDrsChecksumsToHashInfo(obj.Checksums).SHA256)
-		if sha == "" {
-			continue
-		}
-		if _, ok := result[sha]; !ok {
-			result[sha] = []DRSObject{}
-		}
-		result[sha] = append(result[sha], *obj)
+			obj, convErr := syfonInternalRecordToDRSObjectFromRecord(rec)
+			if convErr != nil {
+				return nil, convErr
+			}
+			sha := NormalizeOid(hash.ConvertDrsChecksumsToHashInfo(obj.Checksums).SHA256)
+			if sha == "" {
+				continue
+			}
+			if _, ok := result[sha]; !ok {
+				result[sha] = []DRSObject{}
+			}
+			result[sha] = append(result[sha], *obj)
 		}
 	}
 	return result, nil
 }
 
 func (c *DrsClient) GetDownloadURL(ctx context.Context, id string, accessID string) (*AccessURL, error) {
-	rb := c.New(http.MethodGet, c.endpoint(fmt.Sprintf("/ga4gh/drs/v1/objects/%s/access/%s", url.PathEscape(id), url.PathEscape(accessID))))
-	resp, err := c.Do(ctx, rb)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, responseBodyError(resp, fmt.Sprintf("failed to get access URL for %s", id))
-	}
-
 	var out AccessURL
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	err := c.Do(ctx, http.MethodGet, c.endpoint(fmt.Sprintf(common.GA4GHDRSObjectAccessEndpointTemplate, url.PathEscape(id), url.PathEscape(accessID))), nil, &out)
+	if err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -291,23 +236,13 @@ func (c *DrsClient) GetDownloadURL(ctx context.Context, id string, accessID stri
 
 func (c *DrsClient) GetDownloadPartURL(ctx context.Context, id string, start, end int64) (*xfer.SignedURL, error) {
 	q := url.Values{}
-	q.Set("start", fmt.Sprintf("%d", start))
-	q.Set("end", fmt.Sprintf("%d", end))
-
-	endpoint := fmt.Sprintf(common.FenceDataDownloadPartEndpoint, url.PathEscape(id))
-	rb := c.New(http.MethodGet, c.endpoint(endpoint+"?"+q.Encode()))
-	resp, err := c.Do(ctx, rb)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, responseBodyError(resp, fmt.Sprintf("failed to get download part URL for %s", id))
-	}
+	q.Set(common.QueryParamStart, fmt.Sprintf("%d", start))
+	q.Set(common.QueryParamEnd, fmt.Sprintf("%d", end))
 
 	var out AccessURL
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	endpoint := fmt.Sprintf(common.DataDownloadPartEndpoint, url.PathEscape(id))
+	err := c.Do(ctx, http.MethodGet, c.endpoint(endpoint+"?"+q.Encode()), nil, &out)
+	if err != nil {
 		return nil, err
 	}
 
@@ -338,20 +273,9 @@ func (c *DrsClient) RegisterRecord(ctx context.Context, record *DRSObject) (*DRS
 	if err != nil {
 		return nil, err
 	}
-	body, _ := json.Marshal(internalRecord)
-	rb := c.New(http.MethodPost, c.endpoint("/index")).WithBody(bytes.NewReader(body)).WithHeader(common.HeaderContentType, common.MIMEApplicationJSON)
-	resp, err := c.Do(ctx, rb)
+	var rec InternalRecordResponse
+	err = c.Do(ctx, http.MethodPost, c.endpoint(common.IndexdIndexEndpoint), internalRecord, &rec)
 	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
-		return nil, responseBodyError(resp, "failed to register record")
-	}
-
-	var rec internalapi.InternalRecordResponse
-	if err := json.NewDecoder(resp.Body).Decode(&rec); err != nil {
 		return nil, err
 	}
 	return syfonInternalRecordToDRSObject(rec)
@@ -362,7 +286,7 @@ func (c *DrsClient) RegisterRecords(ctx context.Context, records []*DRSObject) (
 		return []*DRSObject{}, nil
 	}
 
-	internalRecords := make([]internalapi.InternalRecord, 0, len(records))
+	internalRecords := make([]InternalRecordRequest, 0, len(records))
 	for i, r := range records {
 		internalRecord, err := drsObjectToSyfonInternalRecord(r)
 		if err != nil {
@@ -371,23 +295,12 @@ func (c *DrsClient) RegisterRecords(ctx context.Context, records []*DRSObject) (
 		internalRecords = append(internalRecords, *internalRecord)
 	}
 
-	body, _ := json.Marshal(internalapi.BulkCreateRequest{Records: internalRecords})
-	rb := c.New(http.MethodPost, c.endpoint("/index/bulk")).
-		WithBody(bytes.NewReader(body)).
-		WithHeader("Content-Type", "application/json")
-	resp, err := c.Do(ctx, rb)
+	var out ListRecordsResponse
+	err := c.Do(ctx, http.MethodPost, c.endpoint(common.IndexdIndexBulkEndpoint), BulkCreateRequest{Records: internalRecords}, &out)
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
-		return nil, responseBodyError(resp, "failed to register records")
-	}
 
-	var out internalapi.ListRecordsResponse
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return nil, err
-	}
 	results := make([]*DRSObject, 0)
 	if out.Records != nil {
 		results = make([]*DRSObject, 0, len(*out.Records))
@@ -407,22 +320,9 @@ func (c *DrsClient) UpdateRecord(ctx context.Context, updateInfo *DRSObject, did
 	if err != nil {
 		return nil, err
 	}
-	body, _ := json.Marshal(internalRecord)
-	rb := c.New(http.MethodPut, c.endpoint(fmt.Sprintf("/index/%s", url.PathEscape(did)))).
-		WithBody(bytes.NewReader(body)).
-		WithHeader(common.HeaderContentType, common.MIMEApplicationJSON)
-	resp, err := c.Do(ctx, rb)
+	var rec InternalRecordResponse
+	err = c.Do(ctx, http.MethodPut, c.endpoint(fmt.Sprintf(common.IndexdIndexRecordEndpointTemplate, url.PathEscape(did))), internalRecord, &rec)
 	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, responseBodyError(resp, fmt.Sprintf("failed to update record %s", did))
-	}
-
-	var rec internalapi.InternalRecordResponse
-	if err := json.NewDecoder(resp.Body).Decode(&rec); err != nil {
 		return nil, err
 	}
 	return syfonInternalRecordToDRSObject(rec)
@@ -431,18 +331,9 @@ func (c *DrsClient) UpdateRecord(ctx context.Context, updateInfo *DRSObject, did
 func (c *DrsClient) DeleteRecordsByProject(ctx context.Context, projectId string) error {
 	org, project := c.resolveScope(projectId)
 	q := url.Values{}
-	q.Set("organization", org)
-	q.Set("project", project)
-	rb := c.New(http.MethodDelete, c.endpoint("/index?"+q.Encode()))
-	resp, err := c.Do(ctx, rb)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return responseBodyError(resp, fmt.Sprintf("failed to delete project records for %s", projectId))
-	}
-	return nil
+	q.Set(common.QueryParamOrganization, org)
+	q.Set(common.QueryParamProject, project)
+	return c.Do(ctx, http.MethodDelete, c.endpoint(common.IndexdIndexEndpoint+"?"+q.Encode()), nil, nil)
 }
 
 func (c *DrsClient) DeleteRecordByOID(ctx context.Context, oid string) error {
@@ -468,24 +359,11 @@ func (c *DrsClient) DeleteRecordsByChecksums(ctx context.Context, checksums []*h
 		return 0, nil
 	}
 
-	body, _ := json.Marshal(internalapi.BulkHashesRequest{Hashes: hashes})
-	rb := c.New(http.MethodPost, c.endpoint("/index/bulk/delete")).
-		WithBody(bytes.NewReader(body)).
-		WithHeader("Content-Type", "application/json")
-	resp, err := c.Do(ctx, rb)
-	if err != nil {
-		return 0, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return 0, responseBodyError(resp, "failed to bulk delete records")
-	}
-
 	var out struct {
 		Deleted *int32 `json:"deleted"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	err := c.Do(ctx, http.MethodPost, c.endpoint(common.IndexdIndexBulkDeleteEndpoint), BulkHashesRequest{Hashes: hashes}, &out)
+	if err != nil {
 		return 0, err
 	}
 	if out.Deleted == nil {
@@ -500,13 +378,7 @@ func (c *DrsClient) DeleteRecordByChecksum(ctx context.Context, ck *hash.Checksu
 }
 
 func (c *DrsClient) DeleteRecord(ctx context.Context, did string) error {
-	rb := c.New(http.MethodDelete, c.endpoint(fmt.Sprintf("/index/%s", url.PathEscape(did))))
-	resp, err := c.Do(ctx, rb)
-	if err != nil {
-		return err
-	}
-	resp.Body.Close()
-	return nil
+	return c.Do(ctx, http.MethodDelete, c.endpoint(fmt.Sprintf(common.IndexdIndexRecordEndpointTemplate, url.PathEscape(did))), nil, nil)
 }
 
 func (c *DrsClient) RegisterFile(ctx context.Context, oid, path string) (*DRSObject, error) {
@@ -622,31 +494,17 @@ func (c *DrsClient) UpsertRecord(ctx context.Context, url string, sha256 string,
 func (c *DrsClient) ResolveUploadURL(ctx context.Context, guid, filename string, metadata common.FileMetadata, bucket string) (string, error) {
 	q := url.Values{}
 	if bucket != "" {
-		q.Set("bucket", bucket)
+		q.Set(common.QueryParamBucket, bucket)
 	}
 	if filename != "" {
-		q.Set("file_name", filename)
-	}
-
-	path := fmt.Sprintf("/data/upload/%s", url.PathEscape(guid))
-	if encoded := q.Encode(); encoded != "" {
-		path += "?" + encoded
-	}
-
-	rb := c.New(http.MethodGet, c.endpoint(path))
-	resp, err := c.Do(ctx, rb)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", responseBodyError(resp, fmt.Sprintf("failed to resolve upload URL for %s", guid))
+		q.Set(common.QueryParamFileName, filename)
 	}
 
 	var out struct {
 		URL string `json:"url"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	err := c.Do(ctx, http.MethodGet, c.endpoint(fmt.Sprintf(common.DataRecordEndpointTemplate, url.PathEscape(guid))), nil, &out, request.WithQueryValues(q))
+	if err != nil {
 		return "", err
 	}
 	if strings.TrimSpace(out.URL) == "" {
@@ -656,30 +514,17 @@ func (c *DrsClient) ResolveUploadURL(ctx context.Context, guid, filename string,
 }
 
 func (c *DrsClient) InitMultipartUpload(ctx context.Context, guid string, filename string, bucket string) (string, string, error) {
-	body, err := json.Marshal(map[string]string{
-		"guid":      guid,
-		"file_name": filename,
-		"bucket":    bucket,
-	})
-	if err != nil {
-		return "", "", err
-	}
-	rb := c.New(http.MethodPost, c.endpoint("/data/multipart/init")).
-		WithBody(bytes.NewReader(body)).
-		WithHeader("Content-Type", "application/json")
-	resp, err := c.Do(ctx, rb)
-	if err != nil {
-		return "", "", err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		return "", "", responseBodyError(resp, "failed to init multipart upload")
-	}
 	var out struct {
 		GUID     string `json:"guid"`
 		UploadID string `json:"uploadId"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	reqBody := map[string]string{
+		"guid":      guid,
+		"file_name": filename,
+		"bucket":    bucket,
+	}
+	err := c.Do(ctx, http.MethodPost, c.endpoint(common.DataMultipartInitEndpoint), reqBody, &out)
+	if err != nil {
 		return "", "", err
 	}
 	if strings.TrimSpace(out.UploadID) == "" {
@@ -689,30 +534,17 @@ func (c *DrsClient) InitMultipartUpload(ctx context.Context, guid string, filena
 }
 
 func (c *DrsClient) GetMultipartUploadURL(ctx context.Context, key string, uploadID string, partNumber int32, bucket string) (string, error) {
-	body, err := json.Marshal(map[string]any{
+	var out struct {
+		PresignedURL string `json:"presigned_url"`
+	}
+	reqBody := map[string]any{
 		"key":        key,
 		"bucket":     bucket,
 		"uploadId":   uploadID,
 		"partNumber": partNumber,
-	})
+	}
+	err := c.Do(ctx, http.MethodPost, c.endpoint(common.DataMultipartUploadEndpoint), reqBody, &out)
 	if err != nil {
-		return "", err
-	}
-	rb := c.New(http.MethodPost, c.endpoint("/data/multipart/upload")).
-		WithBody(bytes.NewReader(body)).
-		WithHeader("Content-Type", "application/json")
-	resp, err := c.Do(ctx, rb)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		return "", responseBodyError(resp, "failed to resolve multipart upload URL")
-	}
-	var out struct {
-		PresignedURL string `json:"presigned_url"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return "", err
 	}
 	if strings.TrimSpace(out.PresignedURL) == "" {
@@ -721,28 +553,14 @@ func (c *DrsClient) GetMultipartUploadURL(ctx context.Context, key string, uploa
 	return out.PresignedURL, nil
 }
 
-func (c *DrsClient) CompleteMultipartUpload(ctx context.Context, key string, uploadID string, parts []internalapi.InternalMultipartPart, bucket string) error {
-	body, err := json.Marshal(map[string]any{
+func (c *DrsClient) CompleteMultipartUpload(ctx context.Context, key string, uploadID string, parts []MultipartPart, bucket string) error {
+	reqBody := map[string]any{
 		"key":      key,
 		"bucket":   bucket,
 		"uploadId": uploadID,
 		"parts":    parts,
-	})
-	if err != nil {
-		return err
 	}
-	rb := c.New(http.MethodPost, c.endpoint("/data/multipart/complete")).
-		WithBody(bytes.NewReader(body)).
-		WithHeader("Content-Type", "application/json")
-	resp, err := c.Do(ctx, rb)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusNoContent {
-		return responseBodyError(resp, "failed to complete multipart upload")
-	}
-	return nil
+	return c.Do(ctx, http.MethodPost, c.endpoint(common.DataMultipartCompleteEndpoint), reqBody, nil)
 }
 
 // Orchestrators.
@@ -751,17 +569,26 @@ func (c *DrsClient) ResolveDownloadURL(ctx context.Context, guid string, accessI
 	return ResolveDownloadURL(ctx, c, guid, accessID)
 }
 
+func (c *DrsClient) getListPage(ctx context.Context, q url.Values) (*internalListResponse, error) {
+	var out internalListResponse
+	err := c.Do(ctx, http.MethodGet, c.endpoint(common.IndexdIndexEndpoint), nil, &out, request.WithQueryValues(q))
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 func (c *DrsClient) Download(ctx context.Context, signedURL string, rangeStart, rangeEnd *int64) (*http.Response, error) {
-	return xfer.GenericDownload(ctx, c.RequestInterface, signedURL, rangeStart, rangeEnd)
+	return xfer.GenericDownload(ctx, c.Requester, signedURL, rangeStart, rangeEnd)
 }
 
 func (c *DrsClient) Upload(ctx context.Context, signedURL string, body io.Reader, size int64) error {
-	_, err := xfer.DoUpload(ctx, c.RequestInterface, signedURL, body, size)
+	_, err := xfer.DoUpload(ctx, c.Requester, signedURL, body, size)
 	return err
 }
 
 func (c *DrsClient) UploadPart(ctx context.Context, signedURL string, body io.Reader, size int64) (string, error) {
-	return xfer.DoUpload(ctx, c.RequestInterface, signedURL, body, size)
+	return xfer.DoUpload(ctx, c.Requester, signedURL, body, size)
 }
 
 func (c *DrsClient) DeleteFile(ctx context.Context, guid string) (string, error) {
@@ -773,16 +600,16 @@ func (c *DrsClient) DeleteFile(ctx context.Context, guid string) (string, error)
 
 func (c *DrsClient) ListObjects(ctx context.Context) (chan DRSObjectResult, error) {
 	q := url.Values{}
-	q.Set("limit", "1000")
+	q.Set(common.QueryParamLimit, "1000")
 	return c.listObjects(ctx, q)
 }
 
 func (c *DrsClient) ListObjectsByProject(ctx context.Context, pid string) (chan DRSObjectResult, error) {
 	org, project := c.resolveScope(pid)
 	q := url.Values{}
-	q.Set("organization", org)
-	q.Set("project", project)
-	q.Set("limit", "1000")
+	q.Set(common.QueryParamOrganization, org)
+	q.Set(common.QueryParamProject, project)
+	q.Set(common.QueryParamLimit, "1000")
 	return c.listObjects(ctx, q)
 }
 
@@ -793,9 +620,9 @@ func (c *DrsClient) GetProjectSample(ctx context.Context, pid string, l int) ([]
 		limit = 1
 	}
 	q := url.Values{}
-	q.Set("organization", org)
-	q.Set("project", project)
-	q.Set("limit", fmt.Sprintf("%d", limit))
+	q.Set(common.QueryParamOrganization, org)
+	q.Set(common.QueryParamProject, project)
+	q.Set(common.QueryParamLimit, fmt.Sprintf("%d", limit))
 	resp, err := c.getListPage(ctx, q)
 	if err != nil {
 		return nil, err
@@ -866,27 +693,6 @@ func (c *DrsClient) resolveScope(projectId string) (organization string, project
 	return "default", project
 }
 
-func (c *DrsClient) getListPage(ctx context.Context, q url.Values) (*internalListResponse, error) {
-	path := "/index"
-	if q != nil && len(q) > 0 {
-		path += "?" + q.Encode()
-	}
-	rb := c.New(http.MethodGet, c.endpoint(path))
-	resp, err := c.Do(ctx, rb)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, responseBodyError(resp, "failed to list records")
-	}
-	var out internalListResponse
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
 func (c *DrsClient) listObjects(ctx context.Context, q url.Values) (chan DRSObjectResult, error) {
 	out := make(chan DRSObjectResult, 1)
 	go func() {
@@ -899,7 +705,7 @@ func (c *DrsClient) listObjects(ctx context.Context, q url.Values) (chan DRSObje
 					qCopy.Add(k, v)
 				}
 			}
-			qCopy.Set("page", fmt.Sprintf("%d", page))
+			qCopy.Set(common.QueryParamPage, fmt.Sprintf("%d", page))
 			resp, err := c.getListPage(ctx, qCopy)
 			if err != nil {
 				out <- DRSObjectResult{Error: err}

@@ -3,7 +3,6 @@ package drs
 import (
 	"context"
 	"encoding/json"
-	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -17,33 +16,11 @@ type fakeRequest struct {
 	lastURL    string
 }
 
-func (f *fakeRequest) New(method, url string) *request.RequestBuilder {
+func (f *fakeRequest) Do(ctx context.Context, method, path string, in, out any, opts ...request.RequestOption) error {
 	f.lastMethod = method
-	f.lastURL = url
-	return &request.RequestBuilder{
-		Method:  method,
-		Url:     url,
-		Headers: map[string]string{},
-	}
-}
-
-func (f *fakeRequest) Do(ctx context.Context, req *request.RequestBuilder) (*http.Response, error) {
-	_ = ctx
-	return &http.Response{
-		StatusCode: http.StatusOK,
-		Status:     "200 OK",
-		Body:       io.NopCloser(strings.NewReader(`{"records":[]}`)),
-	}, nil
-}
-
-func (f *fakeRequest) DoJSON(ctx context.Context, rb *request.RequestBuilder, out any) error {
-	resp, err := f.Do(ctx, rb)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
+	f.lastURL = path
 	if out != nil {
-		return json.NewDecoder(resp.Body).Decode(out)
+		return json.NewDecoder(strings.NewReader(`{"records":[]}`)).Decode(out)
 	}
 	return nil
 }

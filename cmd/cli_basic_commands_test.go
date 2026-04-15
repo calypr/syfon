@@ -22,7 +22,7 @@ func TestSyfonListAndRemoveCommands(t *testing.T) {
 	fileName := "README.md"
 	size := int64(123)
 	urls := []string{"s3://syfon-bucket/path/README.md"}
-	rec := syclient.InternalRecord{
+	rec := syclient.InternalRecordRequest{
 		Did:      did,
 		Authz:    []string{"/programs/syfon/projects/e2e"},
 		FileName: &fileName,

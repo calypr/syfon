@@ -16,7 +16,7 @@ import (
 )
 
 // DoUpload performs a presigned PUT request and returns ETag when available.
-func DoUpload(ctx context.Context, req request.RequestInterface, urlStr string, body io.Reader, size int64) (string, error) {
+func DoUpload(ctx context.Context, req request.Requester, urlStr string, body io.Reader, size int64) (string, error) {
 	parsed, err := url.Parse(strings.TrimSpace(urlStr))
 	if err == nil && strings.ToLower(parsed.Scheme) == "file" {
 		dstPath := parsed.Path
@@ -36,15 +36,18 @@ func DoUpload(ctx context.Context, req request.RequestInterface, urlStr string, 
 	}
 
 	skipAuth := common.IsCloudPresignedURL(urlStr)
-	rb := req.New(http.MethodPut, urlStr).WithBody(body).WithTimeout(common.DataTimeout)
+	opts := []request.RequestOption{
+		request.WithTimeout(common.DataTimeout),
+	}
 	if skipAuth {
-		rb.WithSkipAuth(true)
+		opts = append(opts, request.WithSkipAuth(true))
 	}
 	if size > 0 {
-		rb.PartSize = size
+		opts = append(opts, request.WithPartSize(size))
 	}
 
-	resp, err := req.Do(ctx, rb)
+	var resp *http.Response
+	err = req.Do(ctx, http.MethodPut, urlStr, body, &resp, opts...)
 	if err != nil {
 		return "", fmt.Errorf("upload to %s failed: %w", urlStr, err)
 	}
@@ -58,21 +61,23 @@ func DoUpload(ctx context.Context, req request.RequestInterface, urlStr string, 
 }
 
 // GenericDownload performs GET (optionally ranged) against a signed URL.
-func GenericDownload(ctx context.Context, req request.RequestInterface, signedURL string, rangeStart, rangeEnd *int64) (*http.Response, error) {
+func GenericDownload(ctx context.Context, req request.Requester, signedURL string, rangeStart, rangeEnd *int64) (*http.Response, error) {
 	skipAuth := common.IsCloudPresignedURL(signedURL)
 
-	rb := req.New(http.MethodGet, signedURL)
+	opts := []request.RequestOption{}
 	if rangeStart != nil {
 		rangeHeader := "bytes=" + strconv.FormatInt(*rangeStart, 10) + "-"
 		if rangeEnd != nil {
 			rangeHeader += strconv.FormatInt(*rangeEnd, 10)
 		}
-		rb.WithHeader("Range", rangeHeader)
+		opts = append(opts, request.WithHeader("Range", rangeHeader))
 	}
 
 	if skipAuth {
-		rb.WithSkipAuth(true)
+		opts = append(opts, request.WithSkipAuth(true))
 	}
 
-	return req.Do(ctx, rb)
+	var resp *http.Response
+	err := req.Do(ctx, http.MethodGet, signedURL, nil, &resp, opts...)
+	return resp, err
 }

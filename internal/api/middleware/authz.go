@@ -6,9 +6,7 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -186,7 +184,7 @@ func (m *AuthzMiddleware) FiberMiddleware() fiber.Handler {
 
 			// We use a no-op gen3 logger for the request client to avoid unnecessary side effects in middleware
 			gen3Logger := logs.NewGen3Logger(m.logger, "", "syfon")
-			reqClient := request.NewRequestInterface(gen3Logger, cred, nil, apiEndpoint, "syfon-server", nil)
+			reqClient := request.NewRequestor(gen3Logger, cred, nil, apiEndpoint, "syfon-server", nil)
 
 			// 3. Fetch user info (privileges)
 			privs, err := fetchPrivileges(c.Context(), reqClient, cred)
@@ -222,25 +220,11 @@ func (m *AuthzMiddleware) FiberMiddleware() fiber.Handler {
 	}
 }
 
-func fetchPrivileges(ctx context.Context, reqClient request.RequestInterface, cred *conf.Credential) (map[string]any, error) {
-	resp, err := reqClient.Do(ctx, &request.RequestBuilder{
-		Url:    strings.TrimRight(cred.APIEndpoint, "/") + "/user/user",
-		Method: http.MethodGet,
-		Token:  cred.AccessToken,
-	})
+func fetchPrivileges(ctx context.Context, reqClient request.Requester, cred *conf.Credential) (map[string]any, error) {
+	var data map[string]any
+	err := reqClient.Do(ctx, http.MethodGet, "/user/user", nil, &data)
 	if err != nil {
 		return nil, fmt.Errorf("request user info: %w", err)
-	}
-	defer resp.Body.Close()
-
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read user info response: %w", err)
-	}
-
-	var data map[string]any
-	if err := json.Unmarshal(bodyBytes, &data); err != nil {
-		return nil, fmt.Errorf("parse user info response: %w", err)
 	}
 
 	resourceAccess, ok := data["authz"].(map[string]any)

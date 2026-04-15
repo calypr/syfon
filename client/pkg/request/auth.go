@@ -31,7 +31,7 @@ func (t *AuthTransport) NewAccessToken(ctx context.Context) error {
 		return err
 	}
 
-	refreshUrl := t.Cred.APIEndpoint + common.FenceAccessTokenEndpoint
+	refreshUrl := t.Cred.APIEndpoint + common.DataAccessTokenEndpoint
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, refreshUrl, reader)
 	if err != nil {
 		return err
