@@ -790,13 +790,27 @@ func (c *DrsClient) GetStorageLocation(ctx context.Context, guid string) (bucket
 	if len(obj.AccessMethods) == 0 {
 		return "", "", fmt.Errorf("no access methods found")
 	}
-	u := obj.AccessMethods[0].AccessUrl.Url
-	u = strings.TrimPrefix(u, "s3://")
-	parts := strings.SplitN(u, "/", 2)
-	if len(parts) < 2 {
-		return "", "", fmt.Errorf("invalid storage URL: %s", u)
+	raw := strings.TrimSpace(obj.AccessMethods[0].AccessUrl.Url)
+	parsed, parseErr := url.Parse(raw)
+	if parseErr == nil && parsed != nil {
+		switch strings.ToLower(strings.TrimSpace(parsed.Scheme)) {
+		case "s3", "gs", "azblob":
+			bucket := strings.TrimSpace(parsed.Host)
+			key := strings.Trim(strings.TrimSpace(parsed.Path), "/")
+			if bucket == "" || key == "" {
+				return "", "", fmt.Errorf("invalid storage URL: %s", raw)
+			}
+			return bucket, key, nil
+		}
 	}
-	return parts[0], parts[1], nil
+
+	// Backward-compatible fallback for plain or s3-prefixed values.
+	legacy := strings.TrimPrefix(raw, "s3://")
+	parts := strings.SplitN(legacy, "/", 2)
+	if len(parts) < 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
+		return "", "", fmt.Errorf("invalid storage URL: %s", raw)
+	}
+	return strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]), nil
 }
 
 // Fluent context helpers.
