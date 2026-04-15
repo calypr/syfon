@@ -11,22 +11,33 @@ func drsObjectToSyfonInternalRecord(obj *DRSObject) (*internalapi.InternalRecord
 	if obj == nil {
 		return nil, nil
 	}
-	out := internalapi.NewInternalRecord(obj.Id, InternalAuthzFromDrsAccessMethods(obj.AccessMethods))
-	out.SetSize(obj.Size)
-	out.SetUrls(InternalURLFromDrsAccessURLs(obj.AccessMethods))
-	out.SetAuthz(InternalAuthzFromDrsAccessMethods(obj.AccessMethods))
-	out.SetHashes(convertDrsChecksumsToMap(obj.Checksums))
-	if obj.Version != "" {
-		out.SetVersion(obj.Version)
+	var ams []AccessMethod
+	if obj.AccessMethods != nil {
+		ams = *obj.AccessMethods
 	}
-	if obj.Description != "" {
-		out.SetDescription(obj.Description)
+	out := &internalapi.InternalRecord{
+		Did:   obj.Id,
+		Authz: InternalAuthzFromDrsAccessMethods(ams),
+		Size:  Ptr(obj.Size),
+		Urls:  Ptr(InternalURLFromDrsAccessURLs(ams)),
+	}
+	if obj.Name != nil && *obj.Name != "" {
+		out.FileName = obj.Name
+	}
+	hashes := internalapi.HashInfo(convertDrsChecksumsToMap(obj.Checksums))
+	out.Hashes = &hashes
+
+	if obj.Version != nil && *obj.Version != "" {
+		out.Version = obj.Version
+	}
+	if obj.Description != nil && *obj.Description != "" {
+		out.Description = obj.Description
 	}
 	if !obj.CreatedTime.IsZero() {
-		out.SetCreatedTime(obj.CreatedTime.Format(time.RFC3339))
+		out.CreatedTime = Ptr(obj.CreatedTime.Format(time.RFC3339))
 	}
-	if !obj.UpdatedTime.IsZero() {
-		out.SetUpdatedTime(obj.UpdatedTime.Format(time.RFC3339))
+	if obj.UpdatedTime != nil && !obj.UpdatedTime.IsZero() {
+		out.UpdatedTime = Ptr(obj.UpdatedTime.Format(time.RFC3339))
 	}
 	return out, nil
 }
@@ -46,37 +57,57 @@ func syfonInternalRecordToDRSObjectFromRecord(rec internalapi.InternalRecord) (*
 }
 
 func syfonInternalRecordToDRSObject(rec internalapi.InternalRecordResponse) (*DRSObject, error) {
-	accessMethods, err := DRSAccessMethodsFromInternalURLs(rec.GetUrls(), rec.GetAuthz())
+	var urls []string
+	if rec.Urls != nil {
+		urls = *rec.Urls
+	}
+	accessMethods, err := DRSAccessMethodsFromInternalURLs(urls, rec.Authz)
 	if err != nil {
 		return nil, err
 	}
-	checksums := convertMapToDrsChecksums(rec.GetHashes())
-	did := rec.GetDid()
+	var hashes map[string]string
+	if rec.Hashes != nil {
+		hashes = map[string]string(*rec.Hashes)
+	}
+	checksums := convertMapToDrsChecksums(hashes)
+	did := rec.Did
 	obj := &DRSObject{
 		Id:            did,
 		SelfUri:       "drs://" + did,
-		Size:          rec.GetSize(),
-		AccessMethods: accessMethods,
+		AccessMethods: &accessMethods,
 		Checksums:     checksums,
 	}
-	if rec.GetFileName() != "" {
-		obj.Name = rec.GetFileName()
+	if rec.Size != nil {
+		obj.Size = *rec.Size
 	}
-	if rec.GetVersion() != "" {
-		obj.Version = rec.GetVersion()
+	if rec.FileName != nil && *rec.FileName != "" {
+		obj.Name = rec.FileName
 	}
-	if rec.GetDescription() != "" {
-		obj.Description = rec.GetDescription()
+	if rec.Version != nil && *rec.Version != "" {
+		obj.Version = rec.Version
 	}
-	if t, ok := parseRFC3339(rec.GetCreatedTime()); ok {
+	if rec.Description != nil && *rec.Description != "" {
+		obj.Description = rec.Description
+	}
+	
+	createdTimeStr := ""
+	if rec.CreatedTime != nil {
+		createdTimeStr = *rec.CreatedTime
+	} else if rec.CreatedDate != nil {
+		createdTimeStr = *rec.CreatedDate
+	}
+	if t, ok := parseRFC3339(createdTimeStr); ok {
 		obj.CreatedTime = t
-	} else if t, ok := parseRFC3339(rec.GetCreatedDate()); ok {
-		obj.CreatedTime = t
 	}
-	if t, ok := parseRFC3339(rec.GetUpdatedTime()); ok {
-		obj.UpdatedTime = t
-	} else if t, ok := parseRFC3339(rec.GetUpdatedDate()); ok {
-		obj.UpdatedTime = t
+
+	updatedTimeStr := ""
+	if rec.UpdatedTime != nil {
+		updatedTimeStr = *rec.UpdatedTime
+	} else if rec.UpdatedDate != nil {
+		updatedTimeStr = *rec.UpdatedDate
+	}
+	if t, ok := parseRFC3339(updatedTimeStr); ok {
+		obj.UpdatedTime = Ptr(t)
 	}
 	return obj, nil
 }
@@ -109,4 +140,8 @@ func parseRFC3339(v string) (time.Time, bool) {
 		return time.Time{}, false
 	}
 	return t, true
+}
+
+func Ptr[T any](v T) *T {
+	return &v
 }

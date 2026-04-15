@@ -82,18 +82,20 @@ func getRegisteredBucketSet(ctx context.Context, database core.DatabaseInterface
 }
 
 func hasValidRegisteredS3Target(obj core.InternalObject, registeredBuckets map[string]struct{}) bool {
-	for _, method := range obj.AccessMethods {
-		if !strings.EqualFold(method.Type, "s3") {
-			continue
+	if obj.AccessMethods != nil {
+		for _, method := range *obj.AccessMethods {
+			if !strings.EqualFold(string(method.Type), "s3") {
+				continue
+			}
+			bucket, key, ok := parseS3URL(method.AccessUrl.Url)
+			if !ok || key == "" {
+				continue
+			}
+			if _, found := registeredBuckets[bucket]; !found {
+				continue
+			}
+			return true
 		}
-		bucket, key, ok := parseS3URL(method.AccessUrl.Url)
-		if !ok || key == "" {
-			continue
-		}
-		if _, found := registeredBuckets[bucket]; !found {
-			continue
-		}
-		return true
 	}
 	return false
 }

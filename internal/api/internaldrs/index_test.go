@@ -3,6 +3,7 @@ package internaldrs
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,7 +13,7 @@ import (
 	"github.com/calypr/syfon/apigen/drs"
 	"github.com/calypr/syfon/db/core"
 	"github.com/calypr/syfon/testutils"
-	"github.com/gorilla/mux"
+	"github.com/gofiber/fiber/v3"
 )
 
 func TestParseScopeQuery(t *testing.T) {
@@ -54,8 +55,8 @@ func TestHandleInternalList_ScopeFilteringByReadPrivilege(t *testing.T) {
 	now := time.Now().UTC()
 	mockDB := &testutils.MockDatabase{
 		Objects: map[string]*drs.DrsObject{
-			"obj-allow": {Id: "obj-allow", CreatedTime: now, UpdatedTime: now, Checksums: []drs.Checksum{{Type: "sha256", Checksum: "h1"}}},
-			"obj-deny":  {Id: "obj-deny", CreatedTime: now, UpdatedTime: now, Checksums: []drs.Checksum{{Type: "sha256", Checksum: "h2"}}},
+			"obj-allow": {Id: "obj-allow", CreatedTime: now, UpdatedTime: &now, Checksums: []drs.Checksum{{Type: "sha256", Checksum: "h1"}}},
+			"obj-deny":  {Id: "obj-deny", CreatedTime: now, UpdatedTime: &now, Checksums: []drs.Checksum{{Type: "sha256", Checksum: "h2"}}},
 		},
 		ObjectAuthz: map[string][]string{
 			"obj-allow": {"/programs/org/projects/p1"},
@@ -98,13 +99,13 @@ func TestHandleInternalList_HashTypeFiltering(t *testing.T) {
 			"obj-sha": {
 				Id:          "obj-sha",
 				CreatedTime: now,
-				UpdatedTime: now,
+				UpdatedTime: &now,
 				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: "samehash"}},
 			},
 			"obj-md5": {
 				Id:          "obj-md5",
 				CreatedTime: now,
-				UpdatedTime: now,
+				UpdatedTime: &now,
 				Checksums:   []drs.Checksum{{Type: "md5", Checksum: "samehash"}},
 			},
 		},
@@ -156,13 +157,13 @@ func TestHandleInternalBulkHashes_HashTypeFiltering(t *testing.T) {
 			"obj-sha": {
 				Id:          "obj-sha",
 				CreatedTime: now,
-				UpdatedTime: now,
+				UpdatedTime: &now,
 				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: "samehash"}},
 			},
 			"obj-md5": {
 				Id:          "obj-md5",
 				CreatedTime: now,
-				UpdatedTime: now,
+				UpdatedTime: &now,
 				Checksums:   []drs.Checksum{{Type: "md5", Checksum: "samehash"}},
 			},
 		},
@@ -205,8 +206,8 @@ func TestHandleInternalCreate_PersistsExplicitDidAndAuthz(t *testing.T) {
 	}
 
 	var resp struct {
-		Did   string            `json:"did"`
-		Authz []string          `json:"authz"`
+		Did    string            `json:"did"`
+		Authz  []string          `json:"authz"`
 		Hashes map[string]string `json:"hashes"`
 	}
 	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
@@ -329,8 +330,8 @@ func TestHandleInternalDeleteByQuery(t *testing.T) {
 		now := time.Now().UTC()
 		mockDB := &testutils.MockDatabase{
 			Objects: map[string]*drs.DrsObject{
-				"obj-1": {Id: "obj-1", CreatedTime: now, UpdatedTime: now},
-				"obj-2": {Id: "obj-2", CreatedTime: now, UpdatedTime: now},
+				"obj-1": {Id: "obj-1", CreatedTime: now, UpdatedTime: &now},
+				"obj-2": {Id: "obj-2", CreatedTime: now, UpdatedTime: &now},
 			},
 			ObjectAuthz: map[string][]string{
 				"obj-1": {"/programs/org/projects/a"},
@@ -367,39 +368,48 @@ func TestRegisterInternalIndexRoutes_LegacyAliases(t *testing.T) {
 	now := time.Now().UTC()
 	mockDB := &testutils.MockDatabase{
 		Objects: map[string]*drs.DrsObject{
-			"obj-1": {Id: "obj-1", CreatedTime: now, UpdatedTime: now, Checksums: []drs.Checksum{{Type: "sha256", Checksum: "h1"}}},
+			"obj-1": {Id: "obj-1", CreatedTime: now, UpdatedTime: &now, Checksums: []drs.Checksum{{Type: "sha256", Checksum: "h1"}}},
 		},
 	}
 
-	router := mux.NewRouter()
-	RegisterInternalIndexRoutes(router, mockDB)
+	app := fiber.New()
+	RegisterInternalIndexRoutes(app, mockDB, &testutils.MockUrlManager{})
 
-	t.Run("collection alias /index/index", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/index/index", nil)
-		rr := httptest.NewRecorder()
-		router.ServeHTTP(rr, req)
-		if rr.Code != http.StatusOK {
-			t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	t.Run("collection alias /index", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/index", nil)
+		resp, err := app.Test(req)
+		if err != nil {
+			t.Fatalf("test request failed: %v", err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			t.Fatalf("expected 200, got %d body=%s", resp.StatusCode, string(body))
 		}
 	})
 
-	t.Run("detail alias /index/index/{id}", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/index/index/obj-1", nil)
-		rr := httptest.NewRecorder()
-		router.ServeHTTP(rr, req)
-		if rr.Code != http.StatusOK {
-			t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	t.Run("detail alias /index/{id}", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/index/obj-1", nil)
+		resp, err := app.Test(req)
+		if err != nil {
+			t.Fatalf("test request failed: %v", err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			t.Fatalf("expected 200, got %d body=%s", resp.StatusCode, string(body))
 		}
 	})
 
-	t.Run("bulk alias /index/index/bulk/hashes", func(t *testing.T) {
+	t.Run("bulk alias /index/bulk/hashes", func(t *testing.T) {
 		reqBody := `{"hashes":["sha256:h1"]}`
-		req := httptest.NewRequest(http.MethodPost, "/index/index/bulk/hashes", strings.NewReader(reqBody))
+		req := httptest.NewRequest(http.MethodPost, "/index/bulk/hashes", strings.NewReader(reqBody))
 		req.Header.Set("Content-Type", "application/json")
-		rr := httptest.NewRecorder()
-		router.ServeHTTP(rr, req)
-		if rr.Code != http.StatusOK {
-			t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+		resp, err := app.Test(req)
+		if err != nil {
+			t.Fatalf("test request failed: %v", err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			t.Fatalf("expected 200, got %d body=%s", resp.StatusCode, string(body))
 		}
 	})
 }

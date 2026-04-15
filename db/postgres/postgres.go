@@ -157,14 +157,18 @@ func (db *PostgresDB) ensureObjectAliasSchema() error {
 
 func (db *PostgresDB) GetServiceInfo(ctx context.Context) (*drs.Service, error) {
 	// Static info for now, or fetch from DB if stored there
+	description := "Calypr-backed DRS server"
+	createdAt := time.Now()
+	updatedAt := time.Now()
+	environment := "prod"
 	return &drs.Service{
 		Id:          "drs-service-calypr",
 		Name:        "Calypr DRS Server",
 		Type:        drs.ServiceType{Group: "org.ga4gh", Artifact: "drs", Version: "1.2.0"},
-		Description: "Calypr-backed DRS server",
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
-		Environment: "prod",
+		Description: &description,
+		CreatedAt:   &createdAt,
+		UpdatedAt:   &updatedAt,
+		Environment: &environment,
 		Version:     "1.0.0",
 	}, nil
 }

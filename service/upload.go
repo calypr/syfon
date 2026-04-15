@@ -19,18 +19,18 @@ func (s *ObjectsAPIService) PostUploadRequest(ctx context.Context, uploadRequest
 		code := unauthorizedStatus(ctx)
 		return drs.ImplResponse{
 			Code: code,
-			Body: drs.Error{Msg: "forbidden: missing file_upload/create permission on /data_file", StatusCode: int32(code)},
+			Body: drsError("forbidden: missing file_upload/create permission on /data_file", code),
 		}, nil
 	}
 
 	creds, err := s.db.ListS3Credentials(ctx)
 	if err != nil {
-		return drs.ImplResponse{Code: http.StatusInternalServerError, Body: drs.Error{Msg: err.Error(), StatusCode: http.StatusInternalServerError}}, err
+		return drs.ImplResponse{Code: http.StatusInternalServerError, Body: drsError(err.Error(), http.StatusInternalServerError)}, err
 	}
 	if len(creds) == 0 {
 		return drs.ImplResponse{
 			Code: http.StatusInternalServerError,
-			Body: drs.Error{Msg: "no bucket credentials configured for upload", StatusCode: http.StatusInternalServerError},
+			Body: drsError("no bucket credentials configured for upload", http.StatusInternalServerError),
 		}, nil
 	}
 
@@ -45,7 +45,7 @@ func (s *ObjectsAPIService) PostUploadRequest(ctx context.Context, uploadRequest
 	if len(credByBucket) == 0 {
 		return drs.ImplResponse{
 			Code: http.StatusInternalServerError,
-			Body: drs.Error{Msg: "no bucket credentials configured for upload", StatusCode: http.StatusInternalServerError},
+			Body: drsError("no bucket credentials configured for upload", http.StatusInternalServerError),
 		}, nil
 	}
 
@@ -94,7 +94,7 @@ func (s *ObjectsAPIService) PostUploadRequest(ctx context.Context, uploadRequest
 		if signErr != nil {
 			return drs.ImplResponse{
 				Code: http.StatusInternalServerError,
-				Body: drs.Error{Msg: signErr.Error(), StatusCode: http.StatusInternalServerError},
+				Body: drsError(signErr.Error(), http.StatusInternalServerError),
 			}, signErr
 		}
 
@@ -105,15 +105,21 @@ func (s *ObjectsAPIService) PostUploadRequest(ctx context.Context, uploadRequest
 			Checksums:   req.Checksums,
 			Description: req.Description,
 			Aliases:     req.Aliases,
-			UploadMethods: []drs.UploadMethod{
+			UploadMethods: &[]drs.UploadMethod{
 				{
-					Type:      "s3",
-					AccessUrl: drs.UploadMethodAccessUrl{Url: signedURL},
-					Region:    region,
-					UploadDetails: map[string]interface{}{
-						"bucket": bucket,
-						"key":    key,
-					},
+					Type: drs.UploadMethodType("s3"),
+					AccessUrl: struct {
+						Headers *[]string `json:"headers,omitempty"`
+						Url     string    `json:"url"`
+					}{Url: signedURL},
+					Region: &region,
+					UploadDetails: func() *map[string]interface{} {
+						details := map[string]interface{}{
+							"bucket": bucket,
+							"key":    key,
+						}
+						return &details
+					}(),
 				},
 			},
 		}

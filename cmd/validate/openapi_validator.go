@@ -7,23 +7,16 @@ import (
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/getkin/kin-openapi/openapi3filter"
-	"github.com/getkin/kin-openapi/routers/gorillamux"
-	"github.com/gin-gonic/gin"
+	legacyrouter "github.com/getkin/kin-openapi/routers/legacy"
+	"github.com/gofiber/fiber/v3"
+	"github.com/gofiber/fiber/v3/middleware/adaptor"
 )
 
-// Convenience wrapper: default lenientRoutes to true.
-func newDefaultSpecValidator(specPath string) (gin.HandlerFunc, error) {
+func newDefaultSpecValidator(specPath string) (fiber.Handler, error) {
 	return newSpecValidator(specPath, true)
 }
 
-// newSpecValidator builds a Gin middleware that validates incoming requests
-// against an OpenAPI 3.x document.
-//
-// Behavior:
-// - If the request path+method does not exist in the spec => 404 (strict).
-// - If it exists but the request doesn't conform => 400 with detail.
-// - Security validation is not enforced unless you plug in AuthenticationFunc.
-func newSpecValidator(specPath string, lenientRoutes bool) (gin.HandlerFunc, error) {
+func newSpecValidator(specPath string, lenientRoutes bool) (fiber.Handler, error) {
 	loader := openapi3.NewLoader()
 	loader.IsExternalRefsAllowed = true
 
@@ -31,56 +24,50 @@ func newSpecValidator(specPath string, lenientRoutes bool) (gin.HandlerFunc, err
 	if err != nil {
 		return nil, fmt.Errorf("load spec %q: %w", specPath, err)
 	}
-
-	// Validate the spec once at startup. Some specs with extensions may warn/fail;
-	// adjust as needed (e.g., log warning instead of returning error).
 	if err := spec.Validate(context.Background()); err != nil {
 		return nil, fmt.Errorf("spec validation failed: %w", err)
 	}
 
-	// Router maps incoming HTTP requests to OpenAPI operations.
-	r, err := gorillamux.NewRouter(spec)
+	r, err := legacyrouter.NewRouter(spec)
 	if err != nil {
 		return nil, fmt.Errorf("create openapi router: %w", err)
 	}
 
-	return func(c *gin.Context) {
-		route, pathParams, err := r.FindRoute(c.Request)
+	return func(c fiber.Ctx) error {
+		req, err := adaptor.ConvertRequest(c, true)
 		if err != nil {
-			// Lenient mode: if lenientRoutes is true, skip OpenAPI validation
-			// for unknown routes and continue the handler chain.
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
+				"error":  "failed to adapt request",
+				"detail": err.Error(),
+			})
+		}
+
+		route, pathParams, err := r.FindRoute(req)
+		if err != nil {
 			if lenientRoutes {
-				c.Next()
-				return
+				return c.Next()
 			}
-			// Strict mode: route not in spec => 404
-			c.AbortWithStatusJSON(http.StatusNotFound, gin.H{
+			return c.Status(http.StatusNotFound).JSON(fiber.Map{
 				"error":  "route not found in OpenAPI spec",
 				"detail": err.Error(),
 			})
-			return
 		}
 
-		// Validate request against the OpenAPI operation schema
 		in := &openapi3filter.RequestValidationInput{
-			Request:    c.Request,
+			Request:    req,
 			PathParams: pathParams,
 			Route:      route,
 			Options: &openapi3filter.Options{
-				// If you want spec-defined security enforcement, plug in:
-				// AuthenticationFunc: yourAuthFunc,
 				AuthenticationFunc: nil,
 			},
 		}
-
-		if err := openapi3filter.ValidateRequest(c.Request.Context(), in); err != nil {
-			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{
+		if err := openapi3filter.ValidateRequest(req.Context(), in); err != nil {
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{
 				"error":  "request does not conform to OpenAPI spec",
 				"detail": err.Error(),
 			})
-			return
 		}
 
-		c.Next()
+		return c.Next()
 	}, nil
 }

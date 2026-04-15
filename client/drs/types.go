@@ -9,13 +9,13 @@ type ChecksumType = string
 type Checksum = drsapi.Checksum
 type HashInfo = hash.HashInfo
 
-type AccessURL = drsapi.AccessMethodAccessUrl
-type Authorizations = drsapi.AccessMethodAuthorizations
+type AccessURL = drsapi.AccessURL
+type Authorizations = drsapi.Authorizations
 type AccessMethod = drsapi.AccessMethod
 
 type Contents = drsapi.ContentsObject
 
-type DRSPage = drsapi.DrsPage
+type DRSPage = drsapi.DRSPage
 
 type DRSObjectResult struct {
 	Object *DRSObject
@@ -25,7 +25,7 @@ type DRSObjectResult struct {
 type DRSObject = drsapi.DrsObject
 
 type DRSObjectCandidate = drsapi.DrsObjectCandidate
-type RegisterObjectsRequest = drsapi.RegisterObjectsRequest
+type RegisterObjectsRequest = drsapi.RegisterObjectsBody
 
 // SyncCandidate represents a local file record to be synchronized with DRS.
 // It is the generic version of the git-drs LfsFileInfo.

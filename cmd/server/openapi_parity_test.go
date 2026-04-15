@@ -37,7 +37,7 @@ func TestOpenAPISpecRoutesRegistered(t *testing.T) {
 	endpoints := collectEndpoints(t, router)
 	routeSet := make(map[string]struct{}, len(endpoints))
 	for _, ep := range endpoints {
-		routeSet[strings.ToUpper(ep.Method)+" "+ep.Template] = struct{}{}
+		routeSet[strings.ToUpper(ep.Method)+" "+normalizeRoutePattern(ep.Template)] = struct{}{}
 	}
 
 	supportedOps := map[string]struct{}{
@@ -71,4 +71,8 @@ func TestOpenAPISpecRoutesRegistered(t *testing.T) {
 		sort.Strings(missing)
 		t.Fatalf("openapi routes missing from runtime router:\n%s", strings.Join(missing, "\n"))
 	}
+}
+
+func normalizeRoutePattern(path string) string {
+	return pathVarPattern.ReplaceAllString(path, `{$1}`)
 }

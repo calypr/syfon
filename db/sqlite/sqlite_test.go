@@ -21,15 +21,16 @@ func TestSqliteDB_CRUD(t *testing.T) {
 		Id:          "abc",
 		Size:        123,
 		CreatedTime: time.Now(),
-		UpdatedTime: time.Now(),
-		Version:     "1.0",
-		Name:        "testing",
-		AccessMethods: []drs.AccessMethod{
+		UpdatedTime: func() *time.Time { t := time.Now(); return &t }(),
+		Version:     core.Ptr("1.0"),
+		Name:        core.Ptr("testing"),
+		AccessMethods: &[]drs.AccessMethod{
 			{
-				Type: "s3",
-				AccessUrl: drs.AccessMethodAccessUrl{
-					Url: "s3://bucket/key",
-				},
+				Type: drs.AccessMethodTypeS3,
+				AccessUrl: &struct {
+					Headers *[]string `json:"headers,omitempty"`
+					Url     string    `json:"url"`
+				}{Url: "s3://bucket/key"},
 			},
 		},
 		Checksums: []drs.Checksum{
@@ -50,8 +51,8 @@ func TestSqliteDB_CRUD(t *testing.T) {
 	if fetched.Size != obj.Size {
 		t.Errorf("expected size %d, got %d", obj.Size, fetched.Size)
 	}
-	if len(fetched.AccessMethods) != 1 {
-		t.Errorf("expected 1 access method, got %d", len(fetched.AccessMethods))
+	if fetched.AccessMethods == nil || len(*fetched.AccessMethods) != 1 {
+		t.Errorf("expected 1 access method, got %v", fetched.AccessMethods)
 	}
 
 	// Get by Checksum
@@ -87,15 +88,16 @@ func TestSqliteDB_GetObjectsByChecksum_WhenIDDiffers(t *testing.T) {
 		Id:          "did-123",
 		Size:        10,
 		CreatedTime: time.Now(),
-		UpdatedTime: time.Now(),
-		Version:     "1.0",
-		Name:        "oid-object",
-		AccessMethods: []drs.AccessMethod{
+		UpdatedTime: func() *time.Time { t := time.Now(); return &t }(),
+		Version:     core.Ptr("1.0"),
+		Name:        core.Ptr("oid-object"),
+		AccessMethods: &[]drs.AccessMethod{
 			{
-				Type: "s3",
-				AccessUrl: drs.AccessMethodAccessUrl{
-					Url: "s3://bucket/cbds/end_to_end_test/" + checksum,
-				},
+				Type: drs.AccessMethodTypeS3,
+				AccessUrl: &struct {
+					Headers *[]string `json:"headers,omitempty"`
+					Url     string    `json:"url"`
+				}{Url: "s3://bucket/cbds/end_to_end_test/" + checksum},
 			},
 		},
 		Checksums: []drs.Checksum{
@@ -134,10 +136,13 @@ func TestSqliteDB_ObjectAliasLifecycle(t *testing.T) {
 		DrsObject: drs.DrsObject{
 			Id:          canonicalID,
 			CreatedTime: now,
-			UpdatedTime: now,
+			UpdatedTime: &now,
 			Checksums:   []drs.Checksum{{Type: "sha256", Checksum: checksum}},
-			AccessMethods: []drs.AccessMethod{
-				{Type: "s3", AccessUrl: drs.AccessMethodAccessUrl{Url: "s3://bucket/path/object"}},
+			AccessMethods: &[]drs.AccessMethod{
+				{Type: drs.AccessMethodTypeS3, AccessUrl: &struct {
+					Headers *[]string `json:"headers,omitempty"`
+					Url     string    `json:"url"`
+				}{Url: "s3://bucket/path/object"}},
 			},
 		},
 		Authorizations: []string{"/programs/a/projects/b"},
@@ -297,7 +302,10 @@ func TestSqliteDB_UpdateAccessMethods(t *testing.T) {
 	}
 
 	newMethods := []drs.AccessMethod{
-		{Type: "s3", AccessUrl: drs.AccessMethodAccessUrl{Url: "s3://new/path"}},
+		{Type: drs.AccessMethodTypeS3, AccessUrl: &struct {
+			Headers *[]string `json:"headers,omitempty"`
+			Url     string    `json:"url"`
+		}{Url: "s3://new/path"}},
 	}
 
 	if err := db.UpdateObjectAccessMethods(ctx, "update-me", newMethods); err != nil {
@@ -308,7 +316,7 @@ func TestSqliteDB_UpdateAccessMethods(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetObject failed: %v", err)
 	}
-	if len(fetched.AccessMethods) != 1 || fetched.AccessMethods[0].AccessUrl.Url != "s3://new/path" {
+	if fetched.AccessMethods == nil || len(*fetched.AccessMethods) != 1 || (*fetched.AccessMethods)[0].AccessUrl == nil || (*fetched.AccessMethods)[0].AccessUrl.Url != "s3://new/path" {
 		t.Errorf("expected updated access method, got %v", fetched.AccessMethods)
 	}
 }
@@ -323,7 +331,7 @@ func TestSqliteDB_GetObjectsByChecksumsAndListByPrefix(t *testing.T) {
 			DrsObject: drs.DrsObject{
 				Id:          "sha-x",
 				CreatedTime: now,
-				UpdatedTime: now,
+				UpdatedTime: &now,
 				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: "sha-x"}},
 			},
 			Authorizations: []string{"/programs/a/projects/b"},
@@ -332,7 +340,7 @@ func TestSqliteDB_GetObjectsByChecksumsAndListByPrefix(t *testing.T) {
 			DrsObject: drs.DrsObject{
 				Id:          "sha-y",
 				CreatedTime: now,
-				UpdatedTime: now,
+				UpdatedTime: &now,
 				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: "sha-y"}},
 			},
 			Authorizations: []string{"/programs/a/projects/c"},
@@ -372,7 +380,7 @@ func TestSqliteDB_ListObjectIDsByResourcePrefixRootIncludesUnscoped(t *testing.T
 			DrsObject: drs.DrsObject{
 				Id:          "scoped",
 				CreatedTime: now,
-				UpdatedTime: now,
+				UpdatedTime: &now,
 				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: "scoped"}},
 			},
 			Authorizations: []string{"/programs/a/projects/b"},
@@ -381,7 +389,7 @@ func TestSqliteDB_ListObjectIDsByResourcePrefixRootIncludesUnscoped(t *testing.T
 			DrsObject: drs.DrsObject{
 				Id:          "unscoped",
 				CreatedTime: now,
-				UpdatedTime: now,
+				UpdatedTime: &now,
 				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: "unscoped"}},
 			},
 		},
@@ -412,14 +420,14 @@ func TestSqliteDB_BulkUpdateAccessMethods(t *testing.T) {
 			DrsObject: drs.DrsObject{
 				Id:          "obj-a",
 				CreatedTime: now,
-				UpdatedTime: now,
+				UpdatedTime: &now,
 			},
 		},
 		{
 			DrsObject: drs.DrsObject{
 				Id:          "obj-b",
 				CreatedTime: now,
-				UpdatedTime: now,
+				UpdatedTime: &now,
 			},
 		},
 	}); err != nil {
@@ -428,10 +436,16 @@ func TestSqliteDB_BulkUpdateAccessMethods(t *testing.T) {
 
 	err := db.BulkUpdateAccessMethods(ctx, map[string][]drs.AccessMethod{
 		"obj-a": {
-			{Type: "s3", AccessUrl: drs.AccessMethodAccessUrl{Url: "s3://bucket/a"}},
+			{Type: drs.AccessMethodTypeS3, AccessUrl: &struct {
+				Headers *[]string `json:"headers,omitempty"`
+				Url     string    `json:"url"`
+			}{Url: "s3://bucket/a"}},
 		},
 		"obj-b": {
-			{Type: "s3", AccessUrl: drs.AccessMethodAccessUrl{Url: "s3://bucket/b"}},
+			{Type: drs.AccessMethodTypeS3, AccessUrl: &struct {
+				Headers *[]string `json:"headers,omitempty"`
+				Url     string    `json:"url"`
+			}{Url: "s3://bucket/b"}},
 		},
 	})
 	if err != nil {
@@ -439,7 +453,7 @@ func TestSqliteDB_BulkUpdateAccessMethods(t *testing.T) {
 	}
 
 	a, _ := db.GetObject(ctx, "obj-a")
-	if len(a.AccessMethods) != 1 || a.AccessMethods[0].AccessUrl.Url != "s3://bucket/a" {
+	if a.AccessMethods == nil || len(*a.AccessMethods) != 1 || (*a.AccessMethods)[0].AccessUrl.Url != "s3://bucket/a" {
 		t.Fatalf("unexpected access methods for obj-a: %+v", a.AccessMethods)
 	}
 }
@@ -467,7 +481,7 @@ func TestSqliteDB_PendingLFSMetaLifecycle(t *testing.T) {
 	}
 	now := time.Now().UTC()
 	candidate := drs.DrsObjectCandidate{
-		Name: "candidate",
+		Name: core.Ptr("candidate"),
 		Size: 123,
 		Checksums: []drs.Checksum{
 			{Type: "sha256", Checksum: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
@@ -489,7 +503,7 @@ func TestSqliteDB_PendingLFSMetaLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PopPendingLFSMeta failed: %v", err)
 	}
-	if entry.Candidate.Name != "candidate" {
+	if core.StringVal(entry.Candidate.Name) != "candidate" {
 		t.Fatalf("unexpected candidate payload: %+v", entry.Candidate)
 	}
 
@@ -507,7 +521,7 @@ func TestSqliteDB_PendingLFSMetaPrunesExpired(t *testing.T) {
 	now := time.Now().UTC()
 	oid := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	candidate := drs.DrsObjectCandidate{
-		Name: "expired",
+		Name: core.Ptr("expired"),
 		Checksums: []drs.Checksum{
 			{Type: "sha256", Checksum: oid},
 		},
@@ -540,11 +554,11 @@ func TestSqliteDB_FileUsageMetrics(t *testing.T) {
 	if err := db.CreateObject(ctx, &core.InternalObject{
 		DrsObject: drs.DrsObject{
 			Id:          oid,
-			Name:        "metrics-object",
+			Name:        core.Ptr("metrics-object"),
 			Size:        42,
 			CreatedTime: now,
-			UpdatedTime: now,
-			Version:     "1",
+			UpdatedTime: &now,
+			Version:     core.Ptr("1"),
 		},
 	}); err != nil {
 		t.Fatalf("CreateObject failed: %v", err)
@@ -609,11 +623,11 @@ func TestSqliteDB_FileUsageMetrics_MissingObjectQueuedAndFlushedOnCreate(t *test
 	if err := db.CreateObject(ctx, &core.InternalObject{
 		DrsObject: drs.DrsObject{
 			Id:          oid,
-			Name:        "later-created",
+			Name:        core.Ptr("later-created"),
 			Size:        11,
 			CreatedTime: now,
-			UpdatedTime: now,
-			Version:     "1",
+			UpdatedTime: &now,
+			Version:     core.Ptr("1"),
 		},
 	}); err != nil {
 		t.Fatalf("CreateObject failed: %v", err)
@@ -698,7 +712,7 @@ func TestSqliteDB_GetPendingLFSMeta(t *testing.T) {
 	now := time.Now().UTC()
 	oid := "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
 	candidate := drs.DrsObjectCandidate{
-		Name: "candidate-get",
+		Name: core.Ptr("candidate-get"),
 		Checksums: []drs.Checksum{
 			{Type: "sha256", Checksum: oid},
 		},
@@ -719,7 +733,7 @@ func TestSqliteDB_GetPendingLFSMeta(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetPendingLFSMeta failed: %v", err)
 	}
-	if got.Candidate.Name != "candidate-get" {
+	if core.StringVal(got.Candidate.Name) != "candidate-get" {
 		t.Fatalf("unexpected pending metadata: %+v", got)
 	}
 

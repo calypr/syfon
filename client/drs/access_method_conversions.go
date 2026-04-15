@@ -3,6 +3,8 @@ package drs
 import (
 	"fmt"
 	"net/url"
+
+	drsapi "github.com/calypr/syfon/apigen/drs"
 )
 
 func DRSAccessMethodsFromInternalURLs(urls []string, authz []string) ([]AccessMethod, error) {
@@ -11,8 +13,13 @@ func DRSAccessMethodsFromInternalURLs(urls []string, authz []string) ([]AccessMe
 		return []AccessMethod{
 			{
 				Type: "s3", // Default type for the placeholder
-				Authorizations: Authorizations{
-					BearerAuthIssuers: []string{authz[0]},
+				Authorizations: &struct {
+					BearerAuthIssuers   *[]string                                            "json:\"bearer_auth_issuers,omitempty\""
+					DrsObjectId         *string                                              "json:\"drs_object_id,omitempty\""
+					PassportAuthIssuers *[]string                                            "json:\"passport_auth_issuers,omitempty\""
+					SupportedTypes      *[]drsapi.AccessMethodAuthorizationsSupportedTypes "json:\"supported_types,omitempty\""
+				}{
+					BearerAuthIssuers: &[]string{authz[0]},
 				},
 			},
 		}, nil
@@ -21,7 +28,12 @@ func DRSAccessMethodsFromInternalURLs(urls []string, authz []string) ([]AccessMe
 	accessMethods := make([]AccessMethod, 0, len(urls))
 	for _, urlString := range urls {
 		method := AccessMethod{
-			AccessUrl: AccessURL{Url: urlString},
+			AccessUrl: &struct {
+				Headers *[]string "json:\"headers,omitempty\""
+				Url     string    "json:\"url\""
+			}{
+				Url: urlString,
+			},
 		}
 
 		parsed, err := url.Parse(urlString)
@@ -31,11 +43,18 @@ func DRSAccessMethodsFromInternalURLs(urls []string, authz []string) ([]AccessMe
 		if parsed.Scheme == "" {
 			method.Type = "https"
 		} else {
-			method.Type = parsed.Scheme
+			method.Type = drsapi.AccessMethodType(parsed.Scheme)
 		}
 
 		if len(authz) > 0 {
-			method.Authorizations = Authorizations{BearerAuthIssuers: []string{authz[0]}}
+			method.Authorizations = &struct {
+				BearerAuthIssuers   *[]string                                            "json:\"bearer_auth_issuers,omitempty\""
+				DrsObjectId         *string                                              "json:\"drs_object_id,omitempty\""
+				PassportAuthIssuers *[]string                                            "json:\"passport_auth_issuers,omitempty\""
+				SupportedTypes      *[]drsapi.AccessMethodAuthorizationsSupportedTypes "json:\"supported_types,omitempty\""
+			}{
+				BearerAuthIssuers: &[]string{authz[0]},
+			}
 		}
 		accessMethods = append(accessMethods, method)
 	}
@@ -46,8 +65,8 @@ func DRSAccessMethodsFromInternalURLs(urls []string, authz []string) ([]AccessMe
 func InternalAuthzFromDrsAccessMethods(accessMethods []AccessMethod) []string {
 	authz := make([]string, 0, len(accessMethods))
 	for _, drsURL := range accessMethods {
-		if len(drsURL.Authorizations.BearerAuthIssuers) > 0 {
-			authz = append(authz, drsURL.Authorizations.BearerAuthIssuers[0])
+		if drsURL.Authorizations != nil && drsURL.Authorizations.BearerAuthIssuers != nil && len(*drsURL.Authorizations.BearerAuthIssuers) > 0 {
+			authz = append(authz, (*drsURL.Authorizations.BearerAuthIssuers)[0])
 		}
 	}
 	return authz
@@ -56,7 +75,7 @@ func InternalAuthzFromDrsAccessMethods(accessMethods []AccessMethod) []string {
 func InternalURLFromDrsAccessURLs(accessMethods []AccessMethod) []string {
 	urls := make([]string, 0, len(accessMethods))
 	for _, drsURL := range accessMethods {
-		if drsURL.AccessUrl.Url == "" {
+		if drsURL.AccessUrl == nil || drsURL.AccessUrl.Url == "" {
 			continue
 		}
 		urls = append(urls, drsURL.AccessUrl.Url)

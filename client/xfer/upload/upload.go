@@ -109,8 +109,8 @@ func RegisterAndUploadFile(ctx context.Context, dc drs.Client, bk xfer.Uploader,
 	}
 
 	uploadFilename := filepath.Base(filePath)
-	if res != nil && len(res.AccessMethods) > 0 {
-		for _, am := range res.AccessMethods {
+	if res != nil && res.AccessMethods != nil && len(*res.AccessMethods) > 0 {
+		for _, am := range *res.AccessMethods {
 			if am.Type != "s3" && am.Type != "gs" {
 				continue
 			}
@@ -141,11 +141,11 @@ func isFileDownloadable(ctx context.Context, dc drs.Client, did string) (bool, e
 	if err != nil {
 		return false, err
 	}
-	if len(obj.AccessMethods) == 0 {
+	if obj.AccessMethods == nil || len(*obj.AccessMethods) == 0 {
 		return false, nil
 	}
-	accessType := obj.AccessMethods[0].Type
-	res, err := dc.GetDownloadURL(ctx, did, accessType)
+	accessType := (*obj.AccessMethods)[0].Type
+	res, err := dc.GetDownloadURL(ctx, did, string(accessType))
 	if err != nil || res.Url == "" {
 		return false, nil
 	}

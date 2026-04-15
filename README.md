@@ -274,13 +274,33 @@ The project uses a Makefile for common tasks:
 - `make coverage-full`: Runs broader compatibility-layer coverage (includes internal compatibility and LFS packages).
 - `make serve`: Starts the DRS server.
 
-### apigen Scope (Current vs Future)
+### OpenAPI Generation and Fiber Templates
 
-The `apigen` module is currently used as a shared model/types package, not a full server/client operation generator. In practice, we generate and commit schemas/models from OpenAPI (`components/schemas`), while route handlers and request wiring are implemented manually under `internal/api/internaldrs` and related packages. This means path/operation updates in `apigen/api/*.openapi.yaml` may change contract/docs without producing new generated handler code.
+Syfon uses `oapi-codegen` to generate the HTTP boundary, but it does not use the stock generator output directly. The repo keeps a set of user templates that adapt the generated server to Fiber v3.
 
-This is intentional for now to keep control of runtime behavior and compatibility logic. We can expand `apigen` later to include operation-level generation (`apis`/server interfaces) once we decide to move more routing and handler contracts to generated code.
+The pieces are:
+
+- `apigen/api/*.openapi.yaml`: the source OpenAPI specs.
+- `apigen/specs/oapi-*.yaml`: generator configs that select Fiber server generation and wire in local templates.
+- `apigen/templates/fiber/*.tmpl`: Fiber-specific interface and middleware templates.
+- `apigen/templates/strict/*.tmpl`: strict-handler templates that generate request/response wrapper types and strict server glue.
+- `apigen/{drs,internalapi,lfsapi,metricsapi,bucketapi}`: generated packages committed to the repo.
+
+What the templates do:
+
+- `fiber-interface.tmpl` generates server interfaces that take `fiber.Ctx` plus path/query/header params.
+- `fiber-middleware.tmpl` converts Fiber request data into typed params and calls the server interface.
+- `strict-fiber.tmpl` generates strict-handler request objects and the request/response bridge used by `NewStrictHandler(...)`.
+- `strict-fiber-interface.tmpl` generates the strict server interface and response object types.
+
+Practical rule of thumb:
+
+- Edit the OpenAPI spec when the API contract changes.
+- Edit the templates when the Fiber binding behavior needs to change.
+- Do not hand-edit generated code in `apigen/*`; regenerate it with `make gen` instead.
+
+The runtime wiring then lives in `cmd/server` and `internal/api/*`, where the generated handlers are attached to Fiber routers.
 
 ## License
 
 This project is licensed under the MIT License. See [LICENSE](LICENSE).
-

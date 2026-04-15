@@ -2,10 +2,8 @@ package lfs
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"mime"
 	"net/http"
 	"strings"
@@ -14,57 +12,56 @@ import (
 	"github.com/calypr/syfon/apigen/drs"
 	"github.com/calypr/syfon/apigen/lfsapi"
 	"github.com/calypr/syfon/db/core"
+	"github.com/gofiber/fiber/v3"
 )
 
-func validateLFSRequestHeaders(w http.ResponseWriter, r *http.Request, requireAccept bool, requireContentType bool) bool {
+func validateLFSRequestHeaders(c fiber.Ctx, requireAccept bool, requireContentType bool) bool {
 	const mediaType = "application/vnd.git-lfs+json"
 	if requireAccept {
-		accept := strings.ToLower(strings.TrimSpace(r.Header.Get("Accept")))
+		accept := strings.ToLower(strings.TrimSpace(c.Get("Accept")))
 		if accept == "" || (!strings.Contains(accept, mediaType) && !strings.Contains(accept, "*/*")) {
-			writeLFSError(w, r, http.StatusNotAcceptable, "Accept header must include application/vnd.git-lfs+json", false)
+			writeLFSError(c, http.StatusNotAcceptable, "Accept header must include application/vnd.git-lfs+json", false)
 			return false
 		}
 	}
 	if requireContentType {
-		contentType := strings.TrimSpace(r.Header.Get("Content-Type"))
+		contentType := strings.TrimSpace(c.Get("Content-Type"))
 		if contentType == "" {
-			writeLFSError(w, r, http.StatusUnprocessableEntity, "Content-Type must be application/vnd.git-lfs+json", false)
+			writeLFSError(c, http.StatusUnprocessableEntity, "Content-Type must be application/vnd.git-lfs+json", false)
 			return false
 		}
 		parsed, _, err := mime.ParseMediaType(contentType)
 		if err != nil || strings.ToLower(parsed) != mediaType {
-			writeLFSError(w, r, http.StatusUnprocessableEntity, "Content-Type must be application/vnd.git-lfs+json", false)
+			writeLFSError(c, http.StatusUnprocessableEntity, "Content-Type must be application/vnd.git-lfs+json", false)
 			return false
 		}
 	}
 	return true
 }
 
-func writeLFSError(w http.ResponseWriter, r *http.Request, status int, message string, challenge bool) {
-	requestID := core.GetRequestID(r.Context())
+func writeLFSError(c fiber.Ctx, status int, message string, challenge bool) error {
 	if challenge {
-		w.Header().Set("LFS-Authenticate", `Basic realm="Git LFS"`)
+		c.Set("LFS-Authenticate", `Basic realm="Git LFS"`)
 	}
-	w.Header().Set("Content-Type", "application/vnd.git-lfs+json")
-	w.WriteHeader(status)
+	c.Set("Content-Type", "application/vnd.git-lfs+json")
 	payload := lfsapi.LFSErrorResponse{
 		Message: message,
 	}
-	if requestID != "" {
-		payload.SetRequestId(requestID)
+	if reqID := core.GetRequestID(c.Context()); reqID != "" {
+		payload.RequestId = &reqID
 	}
-	payload.SetDocumentationUrl("https://github.com/git-lfs/git-lfs/blob/main/docs/api")
-	if err := json.NewEncoder(w).Encode(payload); err != nil {
-		slog.Error("lfs encode error response failed", "request_id", requestID, "method", r.Method, "path", r.URL.Path, "status", status, "err", err)
-	}
+	docURL := "https://github.com/git-lfs/git-lfs/blob/main/docs/api"
+	payload.DocumentationUrl = &docURL
+
+	return c.Status(status).JSON(payload)
 }
 
-func enforceRequestLimit(w http.ResponseWriter, r *http.Request, opts Options) bool {
+func enforceRequestLimit(c fiber.Ctx, opts Options) bool {
 	if opts.RequestLimitPerMinute <= 0 {
 		return true
 	}
 	nowMinute := time.Now().UTC().Unix() / 60
-	key := requestClientKey(r)
+	key := requestClientKey(c)
 	limitMu.Lock()
 	defer limitMu.Unlock()
 	win := requestWindowMap[key]
@@ -75,18 +72,18 @@ func enforceRequestLimit(w http.ResponseWriter, r *http.Request, opts Options) b
 	win.Count++
 	requestWindowMap[key] = win
 	if win.Count > opts.RequestLimitPerMinute {
-		writeLFSError(w, r, http.StatusTooManyRequests, "rate limit exceeded", false)
+		writeLFSError(c, http.StatusTooManyRequests, "rate limit exceeded", false)
 		return false
 	}
 	return true
 }
 
-func enforceBandwidthLimit(w http.ResponseWriter, r *http.Request, opts Options, bytes int64) bool {
+func enforceBandwidthLimit(c fiber.Ctx, opts Options, bytes int64) bool {
 	if opts.BandwidthLimitBytesPerMinute <= 0 || bytes <= 0 {
 		return true
 	}
 	nowMinute := time.Now().UTC().Unix() / 60
-	key := requestClientKey(r)
+	key := requestClientKey(c)
 	limitMu.Lock()
 	defer limitMu.Unlock()
 	win := bandwidthWindowMap[key]
@@ -95,7 +92,7 @@ func enforceBandwidthLimit(w http.ResponseWriter, r *http.Request, opts Options,
 		win.Bytes = 0
 	}
 	if win.Bytes+bytes > opts.BandwidthLimitBytesPerMinute {
-		writeLFSError(w, r, 509, "bandwidth limit exceeded", false)
+		writeLFSError(c, 509, "bandwidth limit exceeded", false)
 		return false
 	}
 	win.Bytes += bytes
@@ -103,14 +100,14 @@ func enforceBandwidthLimit(w http.ResponseWriter, r *http.Request, opts Options,
 	return true
 }
 
-func requestClientKey(r *http.Request) string {
-	if auth := strings.TrimSpace(r.Header.Get("Authorization")); auth != "" {
+func requestClientKey(c fiber.Ctx) string {
+	if auth := strings.TrimSpace(c.Get("Authorization")); auth != "" {
 		if len(auth) > 64 {
 			auth = auth[:64]
 		}
 		return "auth:" + auth
 	}
-	return "addr:" + strings.TrimSpace(r.RemoteAddr)
+	return "addr:" + c.IP()
 }
 
 func normalizeOID(raw string) string {
@@ -143,19 +140,8 @@ func resolveObjectForOID(ctx context.Context, database core.DatabaseInterface, o
 	return &obj, nil
 }
 
-func requestBaseURL(r *http.Request) string {
-	scheme := "http"
-	if r.TLS != nil {
-		scheme = "https"
-	}
-	if proto := strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")); proto != "" {
-		scheme = strings.ToLower(proto)
-	}
-	host := r.Host
-	if forwardedHost := strings.TrimSpace(r.Header.Get("X-Forwarded-Host")); forwardedHost != "" {
-		host = forwardedHost
-	}
-	return fmt.Sprintf("%s://%s", scheme, host)
+func requestBaseURL(c fiber.Ctx) string {
+	return c.BaseURL()
 }
 
 func canonicalSHA256(checksums []drs.Checksum) (string, bool) {
@@ -171,19 +157,24 @@ func canonicalSHA256(checksums []drs.Checksum) (string, bool) {
 }
 
 func uniqueAuthz(accessMethods []drs.AccessMethod) []string {
+	if len(accessMethods) == 0 {
+		return nil
+	}
 	seen := make(map[string]struct{})
 	out := make([]string, 0)
 	for _, am := range accessMethods {
-		for _, issuer := range am.Authorizations.BearerAuthIssuers {
-			issuer = strings.TrimSpace(issuer)
-			if issuer == "" {
-				continue
+		if am.Authorizations != nil && am.Authorizations.BearerAuthIssuers != nil {
+			for _, issuer := range *am.Authorizations.BearerAuthIssuers {
+				issuer = strings.TrimSpace(issuer)
+				if issuer == "" {
+					continue
+				}
+				if _, ok := seen[issuer]; ok {
+					continue
+				}
+				seen[issuer] = struct{}{}
+				out = append(out, issuer)
 			}
-			if _, ok := seen[issuer]; ok {
-				continue
-			}
-			seen[issuer] = struct{}{}
-			out = append(out, issuer)
 		}
 	}
 	return out
@@ -194,48 +185,70 @@ func candidateToInternalObject(c drs.DrsObjectCandidate, now time.Time) (core.In
 	if !ok {
 		return core.InternalObject{}, fmt.Errorf("candidate must include sha256 checksum")
 	}
-	authz := uniqueAuthz(c.AccessMethods)
+	var ams []drs.AccessMethod
+	if c.AccessMethods != nil {
+		ams = *c.AccessMethods
+	}
+	authz := uniqueAuthz(ams)
 	obj := drs.DrsObject{
 		Id:          core.MintObjectIDFromChecksum(oid, authz),
-		Name:        c.Name,
 		Size:        c.Size,
 		CreatedTime: now,
-		UpdatedTime: now,
-		Version:     "1",
+		UpdatedTime: &now,
+		Version:     core.Ptr("1"),
 		MimeType:    c.MimeType,
 		Description: c.Description,
-		Aliases:     append([]string(nil), c.Aliases...),
+		Aliases:     core.Ptr(append([]string(nil), derefStringSlice(c.Aliases)...)),
 		SelfUri:     "",
 		Checksums:   []drs.Checksum{{Type: "sha256", Checksum: oid}},
 	}
+	if c.Name != nil {
+		obj.Name = c.Name
+	}
 	obj.SelfUri = "drs://" + obj.Id
-	if strings.TrimSpace(obj.Name) == "" {
-		obj.Name = oid
+	if obj.Name == nil || strings.TrimSpace(*obj.Name) == "" {
+		obj.Name = &oid
 	}
 	seenAccess := make(map[string]struct{})
-	for _, am := range c.AccessMethods {
-		url := strings.TrimSpace(am.AccessUrl.Url)
-		if url == "" {
-			continue
+	if c.AccessMethods != nil {
+		for _, am := range *c.AccessMethods {
+			url := ""
+			if am.AccessUrl != nil {
+				url = strings.TrimSpace(am.AccessUrl.Url)
+			}
+			if url == "" {
+				continue
+			}
+			key := string(am.Type) + "|" + url
+			if _, ok := seenAccess[key]; ok {
+				continue
+			}
+			seenAccess[key] = struct{}{}
+			accessID := am.AccessId
+			if accessID == nil || strings.TrimSpace(*accessID) == "" {
+				accessID = core.Ptr(string(am.Type))
+			}
+			if obj.AccessMethods == nil {
+				obj.AccessMethods = &[]drs.AccessMethod{}
+			}
+
+			*obj.AccessMethods = append(*obj.AccessMethods, drs.AccessMethod{
+				Type:     drs.AccessMethodType(am.Type),
+				AccessId: accessID,
+				AccessUrl: &struct {
+					Headers *[]string `json:"headers,omitempty"`
+					Url     string    `json:"url"`
+				}{Url: url},
+				Authorizations: &struct {
+					BearerAuthIssuers   *[]string                                        `json:"bearer_auth_issuers,omitempty"`
+					DrsObjectId         *string                                          `json:"drs_object_id,omitempty"`
+					PassportAuthIssuers *[]string                                        `json:"passport_auth_issuers,omitempty"`
+					SupportedTypes      *[]drs.AccessMethodAuthorizationsSupportedTypes `json:"supported_types,omitempty"`
+				}{
+					BearerAuthIssuers: &authz,
+				},
+			})
 		}
-		key := strings.TrimSpace(am.Type) + "|" + url
-		if _, ok := seenAccess[key]; ok {
-			continue
-		}
-		seenAccess[key] = struct{}{}
-		accessID := am.AccessId
-		if strings.TrimSpace(accessID) == "" {
-			accessID = am.Type
-		}
-		obj.AccessMethods = append(obj.AccessMethods, drs.AccessMethod{
-			Type:      am.Type,
-			AccessId:  accessID,
-			AccessUrl: drs.AccessMethodAccessUrl{Url: url},
-			Region:    am.Region,
-			Authorizations: drs.AccessMethodAuthorizations{
-				BearerAuthIssuers: append([]string(nil), authz...),
-			},
-		})
 	}
 	return core.InternalObject{
 		DrsObject:      obj,
@@ -243,61 +256,90 @@ func candidateToInternalObject(c drs.DrsObjectCandidate, now time.Time) (core.In
 	}, nil
 }
 
-func lfsCandidateToDRS(in lfsapi.DrsObjectCandidate) drs.DrsObjectCandidate {
-	out := drs.DrsObjectCandidate{
-		Name:        in.GetName(),
-		Size:        in.GetSize(),
-		MimeType:    in.GetMimeType(),
-		Description: in.GetDescription(),
-		Aliases:     append([]string(nil), in.GetAliases()...),
+func derefString(s *string) string {
+	if s == nil {
+		return ""
 	}
-	if checks := in.GetChecksums(); len(checks) > 0 {
-		out.Checksums = make([]drs.Checksum, 0, len(checks))
-		for _, c := range checks {
+	return *s
+}
+
+func derefStringSlice(s *[]string) []string {
+	if s == nil {
+		return nil
+	}
+	return *s
+}
+
+func lfsCandidateToDRS(in lfsapi.DrsObjectCandidate) drs.DrsObjectCandidate {
+	var size int64
+	if in.Size != nil {
+		size = *in.Size
+	}
+	out := drs.DrsObjectCandidate{
+		Name:        in.Name,
+		Size:        size,
+		MimeType:    in.MimeType,
+		Description: in.Description,
+		Aliases:     in.Aliases,
+	}
+	if in.Checksums != nil {
+		out.Checksums = make([]drs.Checksum, 0, len(*in.Checksums))
+		for _, c := range *in.Checksums {
 			out.Checksums = append(out.Checksums, drs.Checksum{
-				Type:     c.GetType(),
-				Checksum: c.GetChecksum(),
+				Type:     c.Type,
+				Checksum: c.Checksum,
 			})
 		}
 	}
-	if methods := in.GetAccessMethods(); len(methods) > 0 {
-		out.AccessMethods = make([]drs.AccessMethod, 0, len(methods))
-		for _, am := range methods {
+	if in.AccessMethods != nil {
+		ams := make([]drs.AccessMethod, 0, len(*in.AccessMethods))
+		for _, am := range *in.AccessMethods {
 			drsMethod := drs.AccessMethod{
-				Type:     am.GetType(),
-				Region:   am.GetRegion(),
-				AccessId: am.GetAccessId(),
+				Type:     drs.AccessMethodType(derefString(am.Type)),
+				Region:   am.Region,
+				AccessId: am.AccessId,
 			}
 			if am.AccessUrl != nil {
-				drsMethod.AccessUrl = drs.AccessMethodAccessUrl{
-					Url: am.AccessUrl.GetUrl(),
+				drsMethod.AccessUrl = &struct {
+					Headers *[]string `json:"headers,omitempty"`
+					Url     string    `json:"url"`
+				}{}
+				if am.AccessUrl.Url != nil {
+					drsMethod.AccessUrl.Url = *am.AccessUrl.Url
 				}
 			}
-			authz := am.GetAuthorizations()
-			drsMethod.Authorizations = drs.AccessMethodAuthorizations{
-				BearerAuthIssuers: append([]string(nil), authz.GetBearerAuthIssuers()...),
+			if am.Authorizations != nil {
+				drsMethod.Authorizations = &struct {
+					BearerAuthIssuers   *[]string                                        `json:"bearer_auth_issuers,omitempty"`
+					DrsObjectId         *string                                          `json:"drs_object_id,omitempty"`
+					PassportAuthIssuers *[]string                                        `json:"passport_auth_issuers,omitempty"`
+					SupportedTypes      *[]drs.AccessMethodAuthorizationsSupportedTypes `json:"supported_types,omitempty"`
+				}{
+					BearerAuthIssuers: am.Authorizations.BearerAuthIssuers,
+				}
 			}
-			out.AccessMethods = append(out.AccessMethods, drsMethod)
+			ams = append(ams, drsMethod)
 		}
+		out.AccessMethods = &ams
 	}
 	return out
 }
 
-func unauthorizedStatus(r *http.Request) int {
-	if core.IsGen3Mode(r.Context()) && !core.HasAuthHeader(r.Context()) {
+func unauthorizedStatus(ctx context.Context) int {
+	if core.IsGen3Mode(ctx) && !core.HasAuthHeader(ctx) {
 		return http.StatusUnauthorized
 	}
 	return http.StatusForbidden
 }
 
-func hasMethodAccess(r *http.Request, method string, resources []string) bool {
-	if !core.IsGen3Mode(r.Context()) {
+func hasMethodAccess(ctx context.Context, method string, resources []string) bool {
+	if !core.IsGen3Mode(ctx) {
 		return true
 	}
 	if len(resources) == 0 {
 		return true
 	}
-	return core.HasMethodAccess(r.Context(), method, resources)
+	return core.HasMethodAccess(ctx, method, resources)
 }
 
 func isNotFound(err error) bool {
@@ -318,41 +360,15 @@ func isAlreadyExists(err error) bool {
 	return strings.Contains(msg, "duplicate") || strings.Contains(msg, "already exists") || strings.Contains(msg, "unique constraint")
 }
 
-func dbErrToBatchError(err error, r *http.Request) *lfsapi.ObjectError {
+func dbErrToBatchError(err error, ctx context.Context) *lfsapi.ObjectError {
 	switch {
 	case err == nil:
 		return nil
 	case isNotFound(err):
 		return &lfsapi.ObjectError{Code: int32(http.StatusNotFound), Message: "not found"}
 	case errors.Is(err, core.ErrUnauthorized), strings.Contains(strings.ToLower(err.Error()), "unauthorized"):
-		return &lfsapi.ObjectError{Code: int32(unauthorizedStatus(r)), Message: "unauthorized"}
+		return &lfsapi.ObjectError{Code: int32(unauthorizedStatus(ctx)), Message: "unauthorized"}
 	default:
 		return &lfsapi.ObjectError{Code: int32(http.StatusInternalServerError), Message: err.Error()}
 	}
-}
-
-func writeHTTPError(w http.ResponseWriter, r *http.Request, status int, msg string, err error) {
-	requestID := core.GetRequestID(r.Context())
-	if err != nil {
-		slog.Error("lfs request failed", "request_id", requestID, "method", r.Method, "path", r.URL.Path, "status", status, "msg", msg, "err", err)
-	} else {
-		slog.Warn("lfs request rejected", "request_id", requestID, "method", r.Method, "path", r.URL.Path, "status", status, "msg", msg)
-	}
-	http.Error(w, msg, status)
-}
-
-func writeAuthError(w http.ResponseWriter, r *http.Request) {
-	writeHTTPError(w, r, unauthorizedStatus(r), "Unauthorized", nil)
-}
-
-func writeDBError(w http.ResponseWriter, r *http.Request, err error) {
-	if isNotFound(err) {
-		writeHTTPError(w, r, http.StatusNotFound, "Object not found", err)
-		return
-	}
-	if errors.Is(err, core.ErrUnauthorized) || strings.Contains(strings.ToLower(err.Error()), "unauthorized") {
-		writeAuthError(w, r)
-		return
-	}
-	writeHTTPError(w, r, http.StatusInternalServerError, err.Error(), err)
 }

@@ -115,10 +115,10 @@ retryLookup:
 			Id:          objectID,
 			Size:        r.Size,
 			CreatedTime: r.CreatedTime,
-			UpdatedTime: r.UpdatedTime,
-			Version:     r.Version,
-			Description: r.Description,
-			Name:        r.Name,
+			UpdatedTime: core.Ptr(r.UpdatedTime),
+			Version:     core.Ptr(r.Version),
+			Description: core.Ptr(r.Description),
+			Name:        core.Ptr(r.Name),
 			SelfUri:     "drs://" + objectID,
 		},
 	}
@@ -163,15 +163,18 @@ retryLookup:
 			continue
 		}
 		seenAccess[k] = struct{}{}
-		am := drs.AccessMethod{
-			AccessUrl: drs.AccessMethodAccessUrl{Url: u},
-			Type:      t,
-			AccessId:  t,
-			Authorizations: drs.AccessMethodAuthorizations{
-				BearerAuthIssuers: recordResources,
-			},
+		if obj.AccessMethods == nil {
+			obj.AccessMethods = &[]drs.AccessMethod{}
 		}
-		obj.AccessMethods = append(obj.AccessMethods, am)
+		am := drs.AccessMethod{
+			AccessUrl: &struct {
+				Headers *[]string `json:"headers,omitempty"`
+				Url     string    `json:"url"`
+			}{Url: u},
+			Type:      drs.AccessMethodType(t),
+			AccessId:  &t,
+		}
+		*obj.AccessMethods = append(*obj.AccessMethods, am)
 	}
 
 	// 4. Fetch Checksums
@@ -216,20 +219,22 @@ func (db *SqliteDB) CreateObject(ctx context.Context, obj *core.InternalObject) 
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO drs_object (id, size, created_time, updated_time, name, version, description)
 		VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		obj.Id, obj.Size, obj.CreatedTime, obj.UpdatedTime, obj.Name, obj.Version, obj.Description,
+		obj.Id, obj.Size, obj.CreatedTime, core.TimeVal(obj.UpdatedTime), core.StringVal(obj.Name), core.StringVal(obj.Version), core.StringVal(obj.Description),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to insert drs_object: %w", err)
 	}
 
 	// Insert URLs
-	for _, am := range obj.AccessMethods {
-		if am.AccessUrl.Url == "" {
-			continue
-		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO drs_object_access_method (object_id, url, type) VALUES (?, ?, ?)`, obj.Id, am.AccessUrl.Url, am.Type)
-		if err != nil {
-			return fmt.Errorf("failed to insert url: %w", err)
+	if obj.AccessMethods != nil {
+		for _, am := range *obj.AccessMethods {
+			if am.AccessUrl == nil || am.AccessUrl.Url == "" {
+				continue
+			}
+			_, err = tx.ExecContext(ctx, `INSERT INTO drs_object_access_method (object_id, url, type) VALUES (?, ?, ?)`, obj.Id, am.AccessUrl.Url, am.Type)
+			if err != nil {
+				return fmt.Errorf("failed to insert url: %w", err)
+			}
 		}
 	}
 
@@ -279,19 +284,21 @@ func (db *SqliteDB) RegisterObjects(ctx context.Context, objects []core.Internal
 
 	for _, obj := range objects {
 		ids = append(ids, obj.Id)
-		mainArgs = append(mainArgs, obj.Id, obj.Size, obj.CreatedTime, obj.UpdatedTime, obj.Name, obj.Version, obj.Description)
+		mainArgs = append(mainArgs, obj.Id, obj.Size, obj.CreatedTime, core.TimeVal(obj.UpdatedTime), core.StringVal(obj.Name), core.StringVal(obj.Version), core.StringVal(obj.Description))
 
 		seenAccess := make(map[string]struct{})
-		for _, am := range obj.AccessMethods {
-			if am.AccessUrl.Url == "" {
-				continue
+		if obj.AccessMethods != nil {
+			for _, am := range *obj.AccessMethods {
+				if am.AccessUrl == nil || am.AccessUrl.Url == "" {
+					continue
+				}
+				key := string(am.Type) + "|" + am.AccessUrl.Url
+				if _, ok := seenAccess[key]; ok {
+					continue
+				}
+				seenAccess[key] = struct{}{}
+				accessArgs = append(accessArgs, obj.Id, am.AccessUrl.Url, am.Type)
 			}
-			key := am.Type + "|" + am.AccessUrl.Url
-			if _, ok := seenAccess[key]; ok {
-				continue
-			}
-			seenAccess[key] = struct{}{}
-			accessArgs = append(accessArgs, obj.Id, am.AccessUrl.Url, am.Type)
 		}
 
 		seenChecksum := make(map[string]struct{})
@@ -593,10 +600,10 @@ func (db *SqliteDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []stri
 					Id:          id,
 					Size:        size,
 					CreatedTime: createdTime,
-					UpdatedTime: updatedTime,
-					Name:        name,
-					Version:     version,
-					Description: description,
+					UpdatedTime: core.Ptr(updatedTime),
+					Name:        core.Ptr(name),
+					Version:     core.Ptr(version),
+					Description: core.Ptr(description),
 					SelfUri:     "drs://" + id,
 				},
 			}
@@ -610,10 +617,17 @@ func (db *SqliteDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []stri
 			key := accessType.String + "|" + accessURL.String
 			if _, exists := seenAccess[id][key]; !exists {
 				seenAccess[id][key] = struct{}{}
-				obj.DrsObject.AccessMethods = append(obj.DrsObject.AccessMethods, drs.AccessMethod{
-					AccessUrl: drs.AccessMethodAccessUrl{Url: accessURL.String},
-					Type:      accessType.String,
-					AccessId:  accessType.String,
+				if obj.DrsObject.AccessMethods == nil {
+					obj.DrsObject.AccessMethods = &[]drs.AccessMethod{}
+				}
+				t := accessType.String
+				*obj.DrsObject.AccessMethods = append(*obj.DrsObject.AccessMethods, drs.AccessMethod{
+					AccessUrl: &struct {
+						Headers *[]string `json:"headers,omitempty"`
+						Url     string    `json:"url"`
+					}{Url: accessURL.String},
+					Type:      drs.AccessMethodType(accessType.String),
+					AccessId:  &t,
 				})
 			}
 		}
@@ -648,14 +662,6 @@ func (db *SqliteDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []stri
 		}
 	}
 
-	for _, obj := range objectsByID {
-		for i := range obj.DrsObject.AccessMethods {
-			obj.DrsObject.AccessMethods[i].Authorizations = drs.AccessMethodAuthorizations{
-				BearerAuthIssuers: obj.Authorizations,
-			}
-		}
-	}
-
 	return objectsByID, nil
 }
 
@@ -672,7 +678,7 @@ func (db *SqliteDB) UpdateObjectAccessMethods(ctx context.Context, objectID stri
 	}
 
 	for _, am := range accessMethods {
-		if am.AccessUrl.Url == "" {
+		if am.AccessUrl == nil || am.AccessUrl.Url == "" {
 			continue
 		}
 		_, err = tx.ExecContext(ctx, `INSERT INTO drs_object_access_method (object_id, url, type) VALUES (?, ?, ?)`, objectID, am.AccessUrl.Url, am.Type)
@@ -696,7 +702,7 @@ func (db *SqliteDB) BulkUpdateAccessMethods(ctx context.Context, updates map[str
 			return err
 		}
 		for _, am := range methods {
-			if am.AccessUrl.Url == "" {
+			if am.AccessUrl == nil || am.AccessUrl.Url == "" {
 				continue
 			}
 			_, err = tx.ExecContext(ctx, `INSERT INTO drs_object_access_method (object_id, url, type) VALUES (?, ?, ?)`, objectID, am.AccessUrl.Url, am.Type)

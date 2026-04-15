@@ -57,16 +57,20 @@ func ResolveDownloadURL(ctx context.Context, client Client, guid string, accessI
 	}
 
 	if accessID == "" {
-		for _, am := range obj.AccessMethods {
-			if am.AccessId != "" {
-				accessID = am.AccessId
-				break
+		if obj.AccessMethods != nil {
+			for _, am := range *obj.AccessMethods {
+				if am.AccessId != nil && *am.AccessId != "" {
+					accessID = *am.AccessId
+					break
+				}
 			}
 		}
 		if accessID == "" {
-			for _, am := range obj.AccessMethods {
-				if am.AccessUrl.Url != "" {
-					return am.AccessUrl.Url, nil
+			if obj.AccessMethods != nil {
+				for _, am := range *obj.AccessMethods {
+					if am.AccessUrl.Url != "" {
+						return am.AccessUrl.Url, nil
+					}
 				}
 			}
 			return "", fmt.Errorf("no suitable access method found for object %s", guid)

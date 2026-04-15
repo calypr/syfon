@@ -1,7 +1,6 @@
 package internaldrs
 
 import (
-	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -10,7 +9,7 @@ import (
 	"github.com/calypr/syfon/apigen/bucketapi"
 	"github.com/calypr/syfon/config"
 	"github.com/calypr/syfon/db/core"
-	"github.com/gorilla/mux"
+	"github.com/calypr/syfon/internal/api/routeutil"
 )
 
 func handleInternalBuckets(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface) {
@@ -39,9 +38,10 @@ func handleInternalBuckets(w http.ResponseWriter, r *http.Request, database core
 		}
 	}
 
-	resp := bucketapi.BucketsResponse{}
-	resp.SetS3BUCKETS(map[string]bucketapi.BucketMetadata{})
-	outBuckets := resp.GetS3BUCKETS()
+	resp := bucketapi.BucketsResponse{
+		S3BUCKETS: map[string]bucketapi.BucketMetadata{},
+	}
+	outBuckets := resp.S3BUCKETS
 	programsByBucket := map[string][]string{}
 	for _, s := range scopes {
 		if !allowAll && !allowedBuckets[s.Bucket] {
@@ -57,11 +57,14 @@ func handleInternalBuckets(w http.ResponseWriter, r *http.Request, database core
 		if !allowAll && !allowedBuckets[c.Bucket] {
 			continue
 		}
-		meta := bucketapi.BucketMetadata{}
-		meta.SetEndpointUrl(c.Endpoint)
-		meta.SetProvider(c.Provider)
-		meta.SetRegion(c.Region)
-		meta.SetPrograms(programsByBucket[c.Bucket])
+		meta := bucketapi.BucketMetadata{
+			EndpointUrl: core.Ptr(c.Endpoint),
+			Provider:    core.Ptr(c.Provider),
+			Region:      core.Ptr(c.Region),
+		}
+		if programs := programsByBucket[c.Bucket]; len(programs) > 0 {
+			meta.Programs = &programs
+		}
 		outBuckets[c.Bucket] = meta
 	}
 
@@ -72,19 +75,13 @@ func handleInternalBuckets(w http.ResponseWriter, r *http.Request, database core
 }
 
 func handleInternalPutBucket(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface) {
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		writeHTTPError(w, r, http.StatusBadRequest, "Invalid request", nil)
-		return
-	}
-
 	var req bucketapi.PutBucketRequest
-	if err := decodeStrictJSON(body, &req); err != nil {
+	if err := decodeStrictJSON(r.Body, &req); err != nil {
 		writeHTTPError(w, r, http.StatusBadRequest, "Invalid request body", nil)
 		return
 	}
 
-	provider := strings.ToLower(strings.TrimSpace(req.GetProvider()))
+	provider := strings.ToLower(strings.TrimSpace(core.StringVal(req.Provider)))
 	switch provider {
 	case "", "s3":
 		provider = "s3"
@@ -100,17 +97,17 @@ func handleInternalPutBucket(w http.ResponseWriter, r *http.Request, database co
 	req.Bucket = strings.TrimSpace(req.Bucket)
 	req.Organization = strings.TrimSpace(req.Organization)
 	req.ProjectId = strings.TrimSpace(req.ProjectId)
-	if v := strings.TrimSpace(req.GetRegion()); v != "" {
-		req.SetRegion(v)
+	if v := strings.TrimSpace(core.StringVal(req.Region)); v != "" {
+		req.Region = core.Ptr(v)
 	}
-	if v := strings.TrimSpace(req.GetAccessKey()); v != "" {
-		req.SetAccessKey(v)
+	if v := strings.TrimSpace(core.StringVal(req.AccessKey)); v != "" {
+		req.AccessKey = core.Ptr(v)
 	}
-	if v := strings.TrimSpace(req.GetSecretKey()); v != "" {
-		req.SetSecretKey(v)
+	if v := strings.TrimSpace(core.StringVal(req.SecretKey)); v != "" {
+		req.SecretKey = core.Ptr(v)
 	}
-	if v := strings.TrimSpace(req.GetEndpoint()); v != "" {
-		req.SetEndpoint(v)
+	if v := strings.TrimSpace(core.StringVal(req.Endpoint)); v != "" {
+		req.Endpoint = core.Ptr(v)
 	}
 	if req.Bucket == "" || req.Organization == "" || req.ProjectId == "" {
 		writeHTTPError(w, r, http.StatusBadRequest, "bucket, organization, and project_id are required", nil)
@@ -143,14 +140,14 @@ func handleInternalPutBucket(w http.ResponseWriter, r *http.Request, database co
 	existingCred, credErr := database.GetS3Credential(r.Context(), req.Bucket)
 	hasExistingCred := credErr == nil && existingCred != nil
 	scopeOnly := hasExistingCred &&
-		strings.TrimSpace(req.GetAccessKey()) == "" &&
-		strings.TrimSpace(req.GetSecretKey()) == "" &&
-		strings.TrimSpace(req.GetEndpoint()) == "" &&
-		strings.TrimSpace(req.GetRegion()) == "" &&
-		strings.TrimSpace(req.GetProvider()) == ""
+		strings.TrimSpace(core.StringVal(req.AccessKey)) == "" &&
+		strings.TrimSpace(core.StringVal(req.SecretKey)) == "" &&
+		strings.TrimSpace(core.StringVal(req.Endpoint)) == "" &&
+		strings.TrimSpace(core.StringVal(req.Region)) == "" &&
+		strings.TrimSpace(core.StringVal(req.Provider)) == ""
 
 	if !hasExistingCred && provider == "s3" &&
-		(strings.TrimSpace(req.GetAccessKey()) == "" || strings.TrimSpace(req.GetSecretKey()) == "") {
+		(strings.TrimSpace(core.StringVal(req.AccessKey)) == "" || strings.TrimSpace(core.StringVal(req.SecretKey)) == "") {
 		writeHTTPError(w, r, http.StatusBadRequest, "access_key and secret_key are required for new s3 credentials", nil)
 		return
 	}
@@ -170,10 +167,10 @@ func handleInternalPutBucket(w http.ResponseWriter, r *http.Request, database co
 		return
 	}
 
-	region := strings.TrimSpace(req.GetRegion())
-	accessKey := strings.TrimSpace(req.GetAccessKey())
-	secretKey := strings.TrimSpace(req.GetSecretKey())
-	endpoint := strings.TrimSpace(req.GetEndpoint())
+	region := strings.TrimSpace(core.StringVal(req.Region))
+	accessKey := strings.TrimSpace(core.StringVal(req.AccessKey))
+	secretKey := strings.TrimSpace(core.StringVal(req.SecretKey))
+	endpoint := strings.TrimSpace(core.StringVal(req.Endpoint))
 	if hasExistingCred {
 		if region == "" {
 			region = existingCred.Region
@@ -210,7 +207,7 @@ func handleInternalPutBucket(w http.ResponseWriter, r *http.Request, database co
 }
 
 func handleInternalDeleteBucket(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface) {
-	bucket := mux.Vars(r)["bucket"]
+	bucket := routeutil.PathParam(r, "bucket")
 	if bucket == "" {
 		writeHTTPError(w, r, http.StatusBadRequest, "bucket name is required", nil)
 		return
@@ -253,7 +250,7 @@ func handleInternalDeleteBucket(w http.ResponseWriter, r *http.Request, database
 }
 
 func handleInternalCreateBucketScope(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface) {
-	bucket := strings.TrimSpace(mux.Vars(r)["bucket"])
+	bucket := strings.TrimSpace(routeutil.PathParam(r, "bucket"))
 	if bucket == "" {
 		writeHTTPError(w, r, http.StatusBadRequest, "bucket name is required", nil)
 		return
@@ -263,14 +260,8 @@ func handleInternalCreateBucketScope(w http.ResponseWriter, r *http.Request, dat
 		return
 	}
 
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		writeHTTPError(w, r, http.StatusBadRequest, "Invalid request", nil)
-		return
-	}
-
 	var req bucketapi.AddBucketScopeRequest
-	if err := decodeStrictJSON(body, &req); err != nil {
+	if err := decodeStrictJSON(r.Body, &req); err != nil {
 		writeHTTPError(w, r, http.StatusBadRequest, "Invalid request body", nil)
 		return
 	}
@@ -323,8 +314,8 @@ func readOptionalPath(path *string) string {
 	return strings.TrimSpace(*path)
 }
 
-func decodeStrictJSON(body []byte, dst any) error {
-	dec := json.NewDecoder(bytes.NewReader(body))
+func decodeStrictJSON(body io.Reader, dst any) error {
+	dec := json.NewDecoder(body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(dst); err != nil {
 		return err

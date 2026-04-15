@@ -201,7 +201,7 @@ func (m *MockDatabase) UpdateObjectAccessMethods(ctx context.Context, objectID s
 		obj = &drs.DrsObject{Id: objectID}
 		m.Objects[objectID] = obj
 	}
-	obj.AccessMethods = accessMethods
+	obj.AccessMethods = &accessMethods
 	return nil
 }
 
@@ -342,7 +342,7 @@ func (m *MockDatabase) RecordFileUpload(ctx context.Context, objectID string) er
 	now := time.Now().UTC()
 	u.LastUploadTime = &now
 	if obj, ok := m.Objects[objectID]; ok {
-		u.Name = obj.Name
+		u.Name = core.StringVal(obj.Name)
 		u.Size = obj.Size
 	}
 	if u.LastAccessTime == nil || now.After(*u.LastAccessTime) {
@@ -363,7 +363,7 @@ func (m *MockDatabase) RecordFileDownload(ctx context.Context, objectID string) 
 	now := time.Now().UTC()
 	u.LastDownloadTime = &now
 	if obj, ok := m.Objects[objectID]; ok {
-		u.Name = obj.Name
+		u.Name = core.StringVal(obj.Name)
 		u.Size = obj.Size
 	}
 	if u.LastAccessTime == nil || now.After(*u.LastAccessTime) {

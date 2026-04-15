@@ -39,7 +39,10 @@ var Cmd = &cobra.Command{
 			return err
 		}
 
-		records := resp.GetRecords()
+		var records []syclient.InternalRecordRequest
+		if resp.Records != nil {
+			records = *resp.Records
+		}
 		if len(records) == 0 {
 			fmt.Fprintln(cmd.OutOrStdout(), "no records found")
 			return nil
@@ -47,15 +50,18 @@ var Cmd = &cobra.Command{
 
 		// Keep output simple and script-friendly: DID<TAB>name<TAB>size.
 		sort.Slice(records, func(i, j int) bool {
-			return strings.TrimSpace(records[i].GetDid()) < strings.TrimSpace(records[j].GetDid())
+			return strings.TrimSpace(records[i].Did) < strings.TrimSpace(records[j].Did)
 		})
 		for _, rec := range records {
-			did := strings.TrimSpace(rec.GetDid())
-			name := strings.TrimSpace(rec.GetFileName())
-			if name == "" {
-				name = "-"
+			did := strings.TrimSpace(rec.Did)
+			name := "-"
+			if rec.FileName != nil {
+				name = strings.TrimSpace(*rec.FileName)
 			}
-			size := rec.GetSize()
+			size := int64(0)
+			if rec.Size != nil {
+				size = *rec.Size
+			}
 			fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\t%d\n", did, name, size)
 		}
 		return nil

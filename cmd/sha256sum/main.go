@@ -39,7 +39,10 @@ var Cmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("get download url: %w", err)
 		}
-		downloadURL := strings.TrimSpace((&signed).GetUrl())
+		downloadURL := ""
+		if signed.Url != nil {
+			downloadURL = strings.TrimSpace(*signed.Url)
+		}
 		if downloadURL == "" {
 			return fmt.Errorf("empty download url for did %s", did)
 		}
@@ -54,7 +57,7 @@ var Cmd = &cobra.Command{
 		// Fetch the latest record to preserve authorizations during upsert
 		var authz []string
 		if rec, err := c.Index().Get(ctx, did); err == nil {
-			authz = rec.GetAuthz()
+			authz = rec.Authz
 		}
 
 		if err := c.Index().Upsert(ctx, did, "", "", 0, sum, authz); err != nil {

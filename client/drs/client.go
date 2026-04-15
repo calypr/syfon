@@ -11,6 +11,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+ 
+	drsapi "github.com/calypr/syfon/apigen/drs"
 
 	internalapi "github.com/calypr/syfon/apigen/internalapi"
 	"github.com/calypr/syfon/client/conf"
@@ -27,6 +29,18 @@ type Config struct {
 
 type internalListResponse struct {
 	Records []internalapi.InternalRecordResponse `json:"records"`
+}
+
+func responseBodyError(resp *http.Response, prefix string) error {
+	if resp == nil {
+		return fmt.Errorf("%s: no response", prefix)
+	}
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	bodyText := strings.TrimSpace(string(body))
+	if bodyText == "" {
+		return fmt.Errorf("%s: %s", prefix, resp.Status)
+	}
+	return fmt.Errorf("%s: %s body=%s", prefix, resp.Status, bodyText)
 }
 
 type DrsClient struct {
@@ -93,16 +107,20 @@ func (c *DrsClient) Resolve(ctx context.Context, id string) (*xfer.ResolvedObjec
 
 	resolved := &xfer.ResolvedObject{
 		Id:           drsObject.Id,
-		Name:         drsObject.Name,
 		Size:         drsObject.Size,
 		AccessMethod: "s3",
 	}
+	if drsObject.Name != nil {
+		resolved.Name = *drsObject.Name
+	}
 
-	for _, am := range drsObject.AccessMethods {
-		if am.AccessUrl.Url != "" {
-			resolved.ProviderURL = am.AccessUrl.Url
-			resolved.AccessMethod = am.Type
-			break
+	if drsObject.AccessMethods != nil {
+		for _, am := range *drsObject.AccessMethods {
+			if am.AccessUrl.Url != "" {
+				resolved.ProviderURL = am.AccessUrl.Url
+				resolved.AccessMethod = string(am.Type)
+				break
+			}
 		}
 	}
 
@@ -120,7 +138,7 @@ func (c *DrsClient) GetObject(ctx context.Context, id string) (*DRSObject, error
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to get metadata for %s: %s", id, resp.Status)
+		return nil, responseBodyError(resp, fmt.Sprintf("failed to get metadata for %s", id))
 	}
 
 	var rec internalapi.InternalRecordResponse
@@ -151,7 +169,7 @@ func (c *DrsClient) GetObjectByHash(ctx context.Context, ck *hash.Checksum) ([]D
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to get metadata by checksum %s:%s: %s", norm.Type, norm.Checksum, resp.Status)
+		return nil, responseBodyError(resp, fmt.Sprintf("failed to get metadata by checksum %s:%s", norm.Type, norm.Checksum))
 	}
 
 	var list internalListResponse
@@ -227,14 +245,15 @@ func (c *DrsClient) BatchGetObjectsByHash(ctx context.Context, hashes []string) 
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to bulk get metadata by hash: %s", resp.Status)
+		return nil, responseBodyError(resp, "failed to bulk get metadata by hash")
 	}
 
 	var list internalapi.ListRecordsResponse
 	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
 		return nil, err
 	}
-	for _, rec := range list.Records {
+	if list.Records != nil {
+		for _, rec := range *list.Records {
 		obj, convErr := syfonInternalRecordToDRSObjectFromRecord(rec)
 		if convErr != nil {
 			return nil, convErr
@@ -247,6 +266,7 @@ func (c *DrsClient) BatchGetObjectsByHash(ctx context.Context, hashes []string) 
 			result[sha] = []DRSObject{}
 		}
 		result[sha] = append(result[sha], *obj)
+		}
 	}
 	return result, nil
 }
@@ -259,7 +279,7 @@ func (c *DrsClient) GetDownloadURL(ctx context.Context, id string, accessID stri
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to get access URL for %s: %s", id, resp.Status)
+		return nil, responseBodyError(resp, fmt.Sprintf("failed to get access URL for %s", id))
 	}
 
 	var out AccessURL
@@ -283,7 +303,7 @@ func (c *DrsClient) GetDownloadPartURL(ctx context.Context, id string, start, en
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to get download part URL for %s: %s", id, resp.Status)
+		return nil, responseBodyError(resp, fmt.Sprintf("failed to get download part URL for %s", id))
 	}
 
 	var out AccessURL
@@ -292,10 +312,12 @@ func (c *DrsClient) GetDownloadPartURL(ctx context.Context, id string, start, en
 	}
 
 	headers := make(map[string]string)
-	for _, h := range out.Headers {
-		parts := strings.SplitN(h, ":", 2)
-		if len(parts) == 2 {
-			headers[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
+	if out.Headers != nil {
+		for _, h := range *out.Headers {
+			parts := strings.SplitN(h, ":", 2)
+			if len(parts) == 2 {
+				headers[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
+			}
 		}
 	}
 
@@ -325,7 +347,7 @@ func (c *DrsClient) RegisterRecord(ctx context.Context, record *DRSObject) (*DRS
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to register record: %s", resp.Status)
+		return nil, responseBodyError(resp, "failed to register record")
 	}
 
 	var rec internalapi.InternalRecordResponse
@@ -359,20 +381,23 @@ func (c *DrsClient) RegisterRecords(ctx context.Context, records []*DRSObject) (
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to register records: %s", resp.Status)
+		return nil, responseBodyError(resp, "failed to register records")
 	}
 
 	var out internalapi.ListRecordsResponse
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return nil, err
 	}
-	results := make([]*DRSObject, 0, len(out.Records))
-	for _, rec := range out.Records {
-		obj, convErr := syfonInternalRecordToDRSObjectFromRecord(rec)
-		if convErr != nil {
-			return nil, convErr
+	results := make([]*DRSObject, 0)
+	if out.Records != nil {
+		results = make([]*DRSObject, 0, len(*out.Records))
+		for _, rec := range *out.Records {
+			obj, convErr := syfonInternalRecordToDRSObjectFromRecord(rec)
+			if convErr != nil {
+				return nil, convErr
+			}
+			results = append(results, obj)
 		}
-		results = append(results, obj)
 	}
 	return results, nil
 }
@@ -391,7 +416,7 @@ func (c *DrsClient) UpdateRecord(ctx context.Context, updateInfo *DRSObject, did
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to update record %s: %s", did, resp.Status)
+		return nil, responseBodyError(resp, fmt.Sprintf("failed to update record %s", did))
 	}
 
 	var rec internalapi.InternalRecordResponse
@@ -413,7 +438,7 @@ func (c *DrsClient) DeleteRecordsByProject(ctx context.Context, projectId string
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to delete project records for %s: %s", projectId, resp.Status)
+		return responseBodyError(resp, fmt.Sprintf("failed to delete project records for %s", projectId))
 	}
 	return nil
 }
@@ -452,7 +477,7 @@ func (c *DrsClient) DeleteRecordsByChecksums(ctx context.Context, checksums []*h
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return 0, fmt.Errorf("failed to bulk delete records: %s", resp.Status)
+		return 0, responseBodyError(resp, "failed to bulk delete records")
 	}
 
 	var out struct {
@@ -534,15 +559,18 @@ func (c *DrsClient) AddURL(ctx context.Context, blobURL, sha256 string, opts ...
 	did := DrsUUID(org, project, sha256)
 	obj := &DRSObject{
 		Id:   did,
-		Name: name,
+		Name: &name,
 		Checksums: []Checksum{{
 			Type:     "sha256",
 			Checksum: sha256,
 		}},
 		Size: 0,
-		AccessMethods: []AccessMethod{{
-			Type: parsedURL.Scheme,
-			AccessUrl: AccessURL{
+		AccessMethods: &[]AccessMethod{{
+			Type: drsapi.AccessMethodType(parsedURL.Scheme),
+			AccessUrl: &struct {
+				Headers *[]string "json:\"headers,omitempty\""
+				Url     string    "json:\"url\""
+			}{
 				Url: blobURL,
 			},
 		}},
@@ -576,8 +604,8 @@ func (c *DrsClient) UpsertRecord(ctx context.Context, url string, sha256 string,
 	if err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(url) != "" && len(obj.AccessMethods) > 0 {
-		obj.AccessMethods[0].AccessUrl.Url = strings.TrimSpace(url)
+	if strings.TrimSpace(url) != "" && obj.AccessMethods != nil && len(*obj.AccessMethods) > 0 {
+		(*obj.AccessMethods)[0].AccessUrl.Url = strings.TrimSpace(url)
 	}
 
 	recs, err := c.GetObjectByHash(ctx, &hash.Checksum{Type: string(hash.ChecksumTypeSHA256), Checksum: sha256})
@@ -610,7 +638,7 @@ func (c *DrsClient) ResolveUploadURL(ctx context.Context, guid, filename string,
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("failed to resolve upload URL for %s: %s", guid, resp.Status)
+		return "", responseBodyError(resp, fmt.Sprintf("failed to resolve upload URL for %s", guid))
 	}
 
 	var out struct {
@@ -643,7 +671,7 @@ func (c *DrsClient) InitMultipartUpload(ctx context.Context, guid string, filena
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		return "", "", fmt.Errorf("failed to init multipart upload: %s", resp.Status)
+		return "", "", responseBodyError(resp, "failed to init multipart upload")
 	}
 	var out struct {
 		GUID     string `json:"guid"`
@@ -677,7 +705,7 @@ func (c *DrsClient) GetMultipartUploadURL(ctx context.Context, key string, uploa
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		return "", fmt.Errorf("failed to resolve multipart upload URL: %s", resp.Status)
+		return "", responseBodyError(resp, "failed to resolve multipart upload URL")
 	}
 	var out struct {
 		PresignedURL string `json:"presigned_url"`
@@ -710,7 +738,7 @@ func (c *DrsClient) CompleteMultipartUpload(ctx context.Context, key string, upl
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusNoContent {
-		return fmt.Errorf("failed to complete multipart upload: %s", resp.Status)
+		return responseBodyError(resp, "failed to complete multipart upload")
 	}
 	return nil
 }
@@ -787,10 +815,10 @@ func (c *DrsClient) GetStorageLocation(ctx context.Context, guid string) (bucket
 	if err != nil {
 		return "", "", err
 	}
-	if len(obj.AccessMethods) == 0 {
+	if obj.AccessMethods == nil || len(*obj.AccessMethods) == 0 {
 		return "", "", fmt.Errorf("no access methods found")
 	}
-	u := obj.AccessMethods[0].AccessUrl.Url
+	u := (*obj.AccessMethods)[0].AccessUrl.Url
 	u = strings.TrimPrefix(u, "s3://")
 	parts := strings.SplitN(u, "/", 2)
 	if len(parts) < 2 {
@@ -848,7 +876,7 @@ func (c *DrsClient) getListPage(ctx context.Context, q url.Values) (*internalLis
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to list records: %s", resp.Status)
+		return nil, responseBodyError(resp, "failed to list records")
 	}
 	var out internalListResponse
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {

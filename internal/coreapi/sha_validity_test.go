@@ -25,14 +25,20 @@ func TestComputeSHA256Validity(t *testing.T) {
 		Objects: map[string]*drs.DrsObject{
 			"sha-ok": {
 				Id: "sha-ok",
-				AccessMethods: []drs.AccessMethod{
-					{Type: "s3", AccessUrl: drs.AccessMethodAccessUrl{Url: "s3://bucket-a/key"}},
+				AccessMethods: &[]drs.AccessMethod{
+					{Type: drs.AccessMethodTypeS3, AccessUrl: &struct {
+						Headers *[]string `json:"headers,omitempty"`
+						Url     string    `json:"url"`
+					}{Url: "s3://bucket-a/key"}},
 				},
 			},
 			"sha-bad": {
 				Id: "sha-bad",
-				AccessMethods: []drs.AccessMethod{
-					{Type: "s3", AccessUrl: drs.AccessMethodAccessUrl{Url: "s3://missing-bucket/key"}},
+				AccessMethods: &[]drs.AccessMethod{
+					{Type: drs.AccessMethodTypeS3, AccessUrl: &struct {
+						Headers *[]string `json:"headers,omitempty"`
+						Url     string    `json:"url"`
+					}{Url: "s3://missing-bucket/key"}},
 				},
 			},
 		},

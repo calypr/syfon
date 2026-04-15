@@ -16,49 +16,77 @@ import (
 // --- Domain Mapping Tools ---
 
 func canonicalIDFromInternal(req *internalapi.InternalRecord) string {
-	return strings.TrimSpace(req.GetDid())
+	if req == nil {
+		return ""
+	}
+	return strings.TrimSpace(req.Did)
 }
 
 func internalToDrs(req *internalapi.InternalRecord) (*core.InternalObject, error) {
-	id := canonicalIDFromInternal(req)
 	now := time.Now()
 	obj := &drs.DrsObject{
-		Id:          id,
-		SelfUri:     config.DRSPrefix + id,
-		Size:        req.GetSize(),
+		Id:          canonicalIDFromInternal(req),
+		SelfUri:     config.DRSPrefix + canonicalIDFromInternal(req),
+		Size:        0,
 		CreatedTime: now,
-		UpdatedTime: now,
-		Name:        req.GetFileName(),
-		Version:     req.GetVersion(),
-		Description: req.GetDescription(),
+		UpdatedTime: &now,
 	}
-
-	if ct := req.GetCreatedTime(); ct != "" {
-		if t, err := time.Parse(time.RFC3339, ct); err == nil {
-			obj.CreatedTime = t
+	if req == nil {
+		return &core.InternalObject{DrsObject: *obj}, nil
+	}
+	if canonicalIDFromInternal(req) == "" {
+		return nil, fmt.Errorf("did is required")
+	}
+	if len(req.Authz) == 0 {
+		return nil, fmt.Errorf("authz is required")
+	}
+	if req.Size != nil {
+		obj.Size = *req.Size
+	}
+	if req.FileName != nil && strings.TrimSpace(*req.FileName) != "" {
+		obj.Name = req.FileName
+	}
+	if req.Version != nil && strings.TrimSpace(*req.Version) != "" {
+		obj.Version = req.Version
+	}
+	if req.Description != nil && strings.TrimSpace(*req.Description) != "" {
+		obj.Description = req.Description
+	}
+	if req.CreatedTime != nil {
+		if ct := strings.TrimSpace(*req.CreatedTime); ct != "" {
+			if t, err := time.Parse(time.RFC3339, ct); err == nil {
+				obj.CreatedTime = t
+			}
 		}
 	}
-	if ut := req.GetUpdatedTime(); ut != "" {
-		if t, err := time.Parse(time.RFC3339, ut); err == nil {
-			obj.UpdatedTime = t
+	if req.UpdatedTime != nil {
+		if ut := strings.TrimSpace(*req.UpdatedTime); ut != "" {
+			if t, err := time.Parse(time.RFC3339, ut); err == nil {
+				obj.UpdatedTime = &t
+			}
 		}
 	}
-	for t, v := range req.GetHashes() {
-		obj.Checksums = append(obj.Checksums, drs.Checksum{Type: t, Checksum: v})
-	}
-	for _, u := range req.GetUrls() {
-		obj.AccessMethods = append(obj.AccessMethods, drs.AccessMethod{
-			Type:      "s3",
-			AccessUrl: drs.AccessMethodAccessUrl{Url: u},
-			Region:    config.DefaultS3Region,
-		})
-	}
-	authz := append([]string(nil), req.GetAuthz()...)
-	for i := range obj.AccessMethods {
-		obj.AccessMethods[i].Authorizations = drs.AccessMethodAuthorizations{
-			BearerAuthIssuers: authz,
+	if req.Hashes != nil {
+		for t, v := range *req.Hashes {
+			obj.Checksums = append(obj.Checksums, drs.Checksum{Type: t, Checksum: v})
 		}
 	}
+	var methods []drs.AccessMethod
+	if req.Urls != nil {
+		methods = make([]drs.AccessMethod, 0, len(*req.Urls))
+		for _, u := range *req.Urls {
+			methods = append(methods, drs.AccessMethod{
+				Type:      drs.AccessMethodType("s3"),
+				AccessUrl: &struct {
+					Headers *[]string `json:"headers,omitempty"`
+					Url     string    `json:"url"`
+				}{Url: u},
+				Region: core.Ptr(config.DefaultS3Region),
+			})
+		}
+		obj.AccessMethods = &methods
+	}
+	authz := append([]string(nil), req.Authz...)
 	return &core.InternalObject{DrsObject: *obj, Authorizations: authz}, nil
 }
 
@@ -70,28 +98,48 @@ func drsToInternalRecord(obj *core.InternalObject) *internalapi.InternalRecord {
 
 	var urls []string
 	authz := append([]string(nil), obj.Authorizations...)
-	if len(obj.AccessMethods) > 0 {
-		for _, am := range obj.AccessMethods {
-			if am.AccessUrl.Url != "" {
+	if obj.AccessMethods != nil {
+		for _, am := range *obj.AccessMethods {
+			if am.AccessUrl != nil && am.AccessUrl.Url != "" {
 				urls = append(urls, am.AccessUrl.Url)
 			}
 		}
 	}
 	scope := core.ParseResourcePath(firstAuthz(authz))
-	resp := internalapi.NewInternalRecord(obj.Id, authz)
-	resp.SetUrls(urls)
-	resp.SetSize(obj.Size)
-	if len(hashes) > 0 {
-		resp.SetHashes(hashes)
+	resp := &internalapi.InternalRecord{
+		Authz: authz,
+		Did:   obj.Id,
+		Size:  &obj.Size,
 	}
-	if obj.Name != "" {
-		resp.SetFileName(obj.Name)
+	if !obj.CreatedTime.IsZero() {
+		v := obj.CreatedTime.Format(time.RFC3339)
+		resp.CreatedTime = &v
+	}
+	if obj.UpdatedTime != nil {
+		v := obj.UpdatedTime.Format(time.RFC3339)
+		resp.UpdatedTime = &v
+	}
+	if name := core.StringVal(obj.Name); name != "" {
+		resp.FileName = &name
+	}
+	if len(hashes) > 0 {
+		h := internalapi.HashInfo(hashes)
+		resp.Hashes = &h
 	}
 	if scope.Organization != "" {
-		resp.SetOrganization(scope.Organization)
+		resp.Organization = &scope.Organization
 	}
 	if scope.Project != "" {
-		resp.SetProject(scope.Project)
+		resp.Project = &scope.Project
+	}
+	if len(urls) > 0 {
+		resp.Urls = &urls
+	}
+	if version := core.StringVal(obj.Version); version != "" {
+		resp.Version = &version
+	}
+	if desc := core.StringVal(obj.Description); desc != "" {
+		resp.Description = &desc
 	}
 	return resp
 }
@@ -104,36 +152,49 @@ func drsToInternal(obj *core.InternalObject) *internalapi.InternalRecordResponse
 
 	var urls []string
 	authz := append([]string(nil), obj.Authorizations...)
-	if len(obj.AccessMethods) > 0 {
-		for _, am := range obj.AccessMethods {
-			if am.AccessUrl.Url != "" {
+	if obj.AccessMethods != nil {
+		for _, am := range *obj.AccessMethods {
+			if am.AccessUrl != nil && am.AccessUrl.Url != "" {
 				urls = append(urls, am.AccessUrl.Url)
 			}
 		}
 	}
 	scope := core.ParseResourcePath(firstAuthz(authz))
-
-	resp := internalapi.NewInternalRecordResponse(obj.Id, authz)
-	resp.SetSize(obj.Size)
-	resp.SetFileName(obj.Name)
-	resp.SetVersion(obj.Version)
-	resp.SetDescription(obj.Description)
-	resp.SetHashes(hashes)
-	resp.SetUrls(urls)
-
+	resp := &internalapi.InternalRecordResponse{
+		Authz: authz,
+		Did:   obj.Id,
+		Size:  &obj.Size,
+	}
+	if name := core.StringVal(obj.Name); name != "" {
+		resp.FileName = &name
+	}
+	if version := core.StringVal(obj.Version); version != "" {
+		resp.Version = &version
+	}
+	if desc := core.StringVal(obj.Description); desc != "" {
+		resp.Description = &desc
+	}
+	if len(hashes) > 0 {
+		h := internalapi.HashInfo(hashes)
+		resp.Hashes = &h
+	}
+	if len(urls) > 0 {
+		resp.Urls = &urls
+	}
 	if scope.Organization != "" {
-		resp.SetOrganization(scope.Organization)
+		resp.Organization = &scope.Organization
 	}
 	if scope.Project != "" {
-		resp.SetProject(scope.Project)
+		resp.Project = &scope.Project
 	}
-
-	resp.SetCreatedTime(obj.CreatedTime.Format(time.RFC3339))
-	resp.SetUpdatedTime(obj.UpdatedTime.Format(time.RFC3339))
-
-	resp.SetCreatedDate(obj.CreatedTime.Format(time.RFC3339))
-	resp.SetUpdatedDate(obj.UpdatedTime.Format(time.RFC3339))
-
+	createdTime := obj.CreatedTime.Format(time.RFC3339)
+	updatedTime := obj.UpdatedTime.Format(time.RFC3339)
+	createdDate := obj.CreatedTime.Format(time.RFC3339)
+	updatedDate := obj.UpdatedTime.Format(time.RFC3339)
+	resp.CreatedTime = &createdTime
+	resp.UpdatedTime = &updatedTime
+	resp.CreatedDate = &createdDate
+	resp.UpdatedDate = &updatedDate
 	return resp
 }
 

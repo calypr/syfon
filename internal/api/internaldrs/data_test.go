@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,24 +15,26 @@ import (
 	"github.com/calypr/syfon/apigen/drs"
 	"github.com/calypr/syfon/apigen/internalapi"
 	"github.com/calypr/syfon/db/core"
+	"github.com/calypr/syfon/internal/api/routeutil"
 	"github.com/calypr/syfon/testutils"
+	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
-	"github.com/gorilla/mux"
 )
 
 func TestHandleInternalDownload(t *testing.T) {
 	mockDB := &testutils.MockDatabase{
 		Objects: map[string]*drs.DrsObject{
 			"test-file-id": {
-				Id: "test-file-id",
-				AccessMethods: []drs.AccessMethod{
-					{
-						Type: "s3",
-						AccessUrl: drs.AccessMethodAccessUrl{
-							Url: "s3://bucket/key",
+					Id: "test-file-id",
+					AccessMethods: &[]drs.AccessMethod{
+						{
+							Type:     drs.AccessMethodTypeS3,
+							AccessUrl: &struct {
+								Headers *[]string `json:"headers,omitempty"`
+								Url     string    `json:"url"`
+							}{Url: "s3://bucket/key"},
 						},
 					},
-				},
 			},
 		},
 	}
@@ -41,7 +44,7 @@ func TestHandleInternalDownload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	req = mux.SetURLVars(req, map[string]string{"file_id": "test-file-id"})
+	req = routeutil.WithPathParams(req, map[string]string{"file_id": "test-file-id"})
 
 	rr := httptest.NewRecorder()
 	handleInternalDownload(rr, req, mockDB, mockUM)
@@ -55,8 +58,8 @@ func TestHandleInternalDownload(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if !strings.Contains(resp.GetUrl(), "signed=true") {
-		t.Errorf("expected signed url, got %v", resp.GetUrl())
+	if !strings.Contains(core.StringVal(resp.Url), "signed=true") {
+		t.Errorf("expected signed url, got %v", core.StringVal(resp.Url))
 	}
 }
 
@@ -64,15 +67,16 @@ func TestHandleInternalDownloadPart(t *testing.T) {
 	mockDB := &testutils.MockDatabase{
 		Objects: map[string]*drs.DrsObject{
 			"test-file-id": {
-				Id: "test-file-id",
-				AccessMethods: []drs.AccessMethod{
-					{
-						Type: "s3",
-						AccessUrl: drs.AccessMethodAccessUrl{
-							Url: "s3://bucket/key",
+					Id: "test-file-id",
+					AccessMethods: &[]drs.AccessMethod{
+						{
+							Type:     drs.AccessMethodTypeS3,
+							AccessUrl: &struct {
+								Headers *[]string `json:"headers,omitempty"`
+								Url     string    `json:"url"`
+							}{Url: "s3://bucket/key"},
 						},
 					},
-				},
 			},
 		},
 	}
@@ -80,7 +84,7 @@ func TestHandleInternalDownloadPart(t *testing.T) {
 
 	t.Run("success", func(t *testing.T) {
 		req, _ := http.NewRequest("GET", "/data/download/test-file-id/part?start=0&end=1024", nil)
-		req = mux.SetURLVars(req, map[string]string{"file_id": "test-file-id"})
+		req = routeutil.WithPathParams(req, map[string]string{"file_id": "test-file-id"})
 
 		rr := httptest.NewRecorder()
 		handleInternalDownloadPart(rr, req, mockDB, mockUM)
@@ -91,14 +95,14 @@ func TestHandleInternalDownloadPart(t *testing.T) {
 
 		var resp internalapi.InternalSignedURL
 		json.NewDecoder(rr.Body).Decode(&resp)
-		if !strings.Contains(resp.GetUrl(), "range=0-1024") {
-			t.Errorf("expected signed range url, got %v", resp.GetUrl())
+		if !strings.Contains(core.StringVal(resp.Url), "range=0-1024") {
+			t.Errorf("expected signed range url, got %v", core.StringVal(resp.Url))
 		}
 	})
 
 	t.Run("missing parameters", func(t *testing.T) {
 		req, _ := http.NewRequest("GET", "/data/download/test-file-id/part?start=0", nil)
-		req = mux.SetURLVars(req, map[string]string{"file_id": "test-file-id"})
+		req = routeutil.WithPathParams(req, map[string]string{"file_id": "test-file-id"})
 		rr := httptest.NewRecorder()
 		handleInternalDownloadPart(rr, req, mockDB, mockUM)
 		if rr.Code != http.StatusBadRequest {
@@ -108,7 +112,7 @@ func TestHandleInternalDownloadPart(t *testing.T) {
 
 	t.Run("invalid range", func(t *testing.T) {
 		req, _ := http.NewRequest("GET", "/data/download/test-file-id/part?start=100&end=50", nil)
-		req = mux.SetURLVars(req, map[string]string{"file_id": "test-file-id"})
+		req = routeutil.WithPathParams(req, map[string]string{"file_id": "test-file-id"})
 		rr := httptest.NewRecorder()
 		handleInternalDownloadPart(rr, req, mockDB, mockUM)
 		if rr.Code != http.StatusBadRequest {
@@ -118,7 +122,7 @@ func TestHandleInternalDownloadPart(t *testing.T) {
 
 	t.Run("file not found", func(t *testing.T) {
 		req, _ := http.NewRequest("GET", "/data/download/unknown/part?start=0&end=100", nil)
-		req = mux.SetURLVars(req, map[string]string{"file_id": "unknown"})
+		req = routeutil.WithPathParams(req, map[string]string{"file_id": "unknown"})
 		rr := httptest.NewRecorder()
 		handleInternalDownloadPart(rr, req, mockDB, mockUM)
 		if rr.Code != http.StatusNotFound {
@@ -139,14 +143,15 @@ func TestHandleInternalDownload_ResolvesByChecksum(t *testing.T) {
 				Checksums: []drs.Checksum{
 					{Type: "sha256", Checksum: oid},
 				},
-				AccessMethods: []drs.AccessMethod{
-					{
-						Type: "s3",
-						AccessUrl: drs.AccessMethodAccessUrl{
-							Url: "s3://bucket/cbds/end_to_end_test/" + did + "/" + oid,
+					AccessMethods: &[]drs.AccessMethod{
+						{
+							Type:     drs.AccessMethodTypeS3,
+							AccessUrl: &struct {
+								Headers *[]string `json:"headers,omitempty"`
+								Url     string    `json:"url"`
+							}{Url: "s3://bucket/cbds/end_to_end_test/" + did + "/" + oid},
 						},
 					},
-				},
 			},
 		},
 	}
@@ -156,7 +161,7 @@ func TestHandleInternalDownload_ResolvesByChecksum(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	req = mux.SetURLVars(req, map[string]string{"file_id": oid})
+	req = routeutil.WithPathParams(req, map[string]string{"file_id": oid})
 
 	rr := httptest.NewRecorder()
 	handleInternalDownload(rr, req, mockDB, mockUM)
@@ -169,8 +174,8 @@ func TestHandleInternalDownload_ResolvesByChecksum(t *testing.T) {
 	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(resp.GetUrl(), "/"+did+"/"+oid) {
-		t.Fatalf("expected signed url to include DID-backed key, got %s", resp.GetUrl())
+	if !strings.Contains(core.StringVal(resp.Url), "/"+did+"/"+oid) {
+		t.Fatalf("expected signed url to include DID-backed key, got %s", core.StringVal(resp.Url))
 	}
 }
 
@@ -186,14 +191,15 @@ func TestHandleInternalDownload_ResolvesByUUID(t *testing.T) {
 				Checksums: []drs.Checksum{
 					{Type: "sha256", Checksum: oid},
 				},
-				AccessMethods: []drs.AccessMethod{
-					{
-						Type: "s3",
-						AccessUrl: drs.AccessMethodAccessUrl{
-							Url: "s3://bucket/cbds/end_to_end_test/" + did,
+					AccessMethods: &[]drs.AccessMethod{
+						{
+							Type:     drs.AccessMethodTypeS3,
+							AccessUrl: &struct {
+								Headers *[]string `json:"headers,omitempty"`
+								Url     string    `json:"url"`
+							}{Url: "s3://bucket/cbds/end_to_end_test/" + did},
 						},
 					},
-				},
 			},
 		},
 	}
@@ -203,7 +209,7 @@ func TestHandleInternalDownload_ResolvesByUUID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	req = mux.SetURLVars(req, map[string]string{"file_id": did})
+	req = routeutil.WithPathParams(req, map[string]string{"file_id": did})
 
 	rr := httptest.NewRecorder()
 	handleInternalDownload(rr, req, mockDB, mockUM)
@@ -216,8 +222,8 @@ func TestHandleInternalDownload_ResolvesByUUID(t *testing.T) {
 	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(resp.GetUrl(), "/"+did) {
-		t.Fatalf("expected signed url to include UUID-backed key, got %s", resp.GetUrl())
+	if !strings.Contains(core.StringVal(resp.Url), "/"+did) {
+		t.Fatalf("expected signed url to include UUID-backed key, got %s", core.StringVal(resp.Url))
 	}
 }
 
@@ -225,26 +231,28 @@ func TestHandleInternalDownload_MultiCloud(t *testing.T) {
 	mockDB := &testutils.MockDatabase{
 		Objects: map[string]*drs.DrsObject{
 			"gcs-file": {
-				Id: "gcs-file",
-				AccessMethods: []drs.AccessMethod{
-					{
-						Type: "gs",
-						AccessUrl: drs.AccessMethodAccessUrl{
-							Url: "gs://gcs-bucket/obj",
+					Id: "gcs-file",
+					AccessMethods: &[]drs.AccessMethod{
+						{
+							Type:     drs.AccessMethodTypeGs,
+							AccessUrl: &struct {
+								Headers *[]string `json:"headers,omitempty"`
+								Url     string    `json:"url"`
+							}{Url: "gs://gcs-bucket/obj"},
 						},
 					},
-				},
 			},
 			"azure-file": {
-				Id: "azure-file",
-				AccessMethods: []drs.AccessMethod{
-					{
-						Type: "azblob",
-						AccessUrl: drs.AccessMethodAccessUrl{
-							Url: "azblob://azure-bucket/obj",
+					Id: "azure-file",
+					AccessMethods: &[]drs.AccessMethod{
+						{
+							Type:     drs.AccessMethodType("azblob"),
+							AccessUrl: &struct {
+								Headers *[]string `json:"headers,omitempty"`
+								Url     string    `json:"url"`
+							}{Url: "azblob://azure-bucket/obj"},
 						},
 					},
-				},
 			},
 		},
 	}
@@ -252,7 +260,7 @@ func TestHandleInternalDownload_MultiCloud(t *testing.T) {
 
 	t.Run("gcs", func(t *testing.T) {
 		req, _ := http.NewRequest("GET", "/data/download/gcs-file", nil)
-		req = mux.SetURLVars(req, map[string]string{"file_id": "gcs-file"})
+		req = routeutil.WithPathParams(req, map[string]string{"file_id": "gcs-file"})
 		rr := httptest.NewRecorder()
 		handleInternalDownload(rr, req, mockDB, mockUM)
 		if rr.Code != http.StatusOK {
@@ -262,7 +270,7 @@ func TestHandleInternalDownload_MultiCloud(t *testing.T) {
 
 	t.Run("azure", func(t *testing.T) {
 		req, _ := http.NewRequest("GET", "/data/download/azure-file", nil)
-		req = mux.SetURLVars(req, map[string]string{"file_id": "azure-file"})
+		req = routeutil.WithPathParams(req, map[string]string{"file_id": "azure-file"})
 		rr := httptest.NewRecorder()
 		handleInternalDownload(rr, req, mockDB, mockUM)
 		if rr.Code != http.StatusOK {
@@ -297,11 +305,11 @@ func TestHandleInternalUploadBlank(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := uuid.Parse(resp.GetGuid()); err != nil {
-		t.Fatalf("expected minted UUID guid, got %q", resp.GetGuid())
+	if _, err := uuid.Parse(core.StringVal(resp.Guid)); err != nil {
+		t.Fatalf("expected minted UUID guid, got %q", core.StringVal(resp.Guid))
 	}
-	if !strings.Contains(resp.GetUrl(), "upload=true") {
-		t.Errorf("expected upload url, got %v", resp.GetUrl())
+	if !strings.Contains(core.StringVal(resp.Url), "upload=true") {
+		t.Errorf("expected upload url, got %v", core.StringVal(resp.Url))
 	}
 }
 
@@ -330,12 +338,12 @@ func TestHandleInternalMultipartInit(t *testing.T) {
 	if err := json.Unmarshal(bodyBytes, &resp); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := uuid.Parse(resp.GetGuid()); err != nil {
-		t.Fatalf("expected UUID guid, got %q", resp.GetGuid())
+	if _, err := uuid.Parse(core.StringVal(resp.Guid)); err != nil {
+		t.Fatalf("expected UUID guid, got %q", core.StringVal(resp.Guid))
 	}
 
-	if resp.GetUploadId() != "mock-upload-id" {
-		t.Errorf("expected mock-upload-id, got %v", resp.GetUploadId())
+	if core.StringVal(resp.UploadId) != "mock-upload-id" {
+		t.Errorf("expected mock-upload-id, got %v", core.StringVal(resp.UploadId))
 	}
 
 	var raw map[string]any
@@ -373,12 +381,12 @@ func TestHandleInternalMultipartInit_MintsUUIDForChecksumInput(t *testing.T) {
 	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := uuid.Parse(resp.GetGuid()); err != nil {
-		t.Fatalf("expected minted UUID guid, got %q", resp.GetGuid())
+	if _, err := uuid.Parse(core.StringVal(resp.Guid)); err != nil {
+		t.Fatalf("expected minted UUID guid, got %q", core.StringVal(resp.Guid))
 	}
-	obj, ok := mockDB.Objects[resp.GetGuid()]
+	obj, ok := mockDB.Objects[core.StringVal(resp.Guid)]
 	if !ok {
-		t.Fatalf("expected created object for guid %s", resp.GetGuid())
+		t.Fatalf("expected created object for guid %s", core.StringVal(resp.Guid))
 	}
 	if len(obj.Checksums) == 0 || obj.Checksums[0].Checksum != checksum {
 		t.Fatalf("expected checksum %s to be persisted, got %+v", checksum, obj.Checksums)
@@ -395,14 +403,15 @@ func TestHandleInternalMultipartInit_ResolvesExistingByChecksumGUID(t *testing.T
 				Checksums: []drs.Checksum{
 					{Type: "sha256", Checksum: checksum},
 				},
-				AccessMethods: []drs.AccessMethod{
-					{
-						Type: "s3",
-						AccessUrl: drs.AccessMethodAccessUrl{
-							Url: "s3://test-bucket-1/cbds/end_to_end_test/" + checksum,
+					AccessMethods: &[]drs.AccessMethod{
+						{
+							Type:     drs.AccessMethodTypeS3,
+							AccessUrl: &struct {
+								Headers *[]string `json:"headers,omitempty"`
+								Url     string    `json:"url"`
+							}{Url: "s3://test-bucket-1/cbds/end_to_end_test/" + checksum},
 						},
 					},
-				},
 			},
 		},
 	}
@@ -426,8 +435,8 @@ func TestHandleInternalMultipartInit_ResolvesExistingByChecksumGUID(t *testing.T
 	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
 		t.Fatal(err)
 	}
-	if resp.GetGuid() != existingID {
-		t.Fatalf("expected resolved existing UUID guid %s, got %s", existingID, resp.GetGuid())
+	if core.StringVal(resp.Guid) != existingID {
+		t.Fatalf("expected resolved existing UUID guid %s, got %s", existingID, core.StringVal(resp.Guid))
 	}
 }
 
@@ -457,7 +466,7 @@ func TestHandleInternalMultipartUpload(t *testing.T) {
 	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
 		t.Fatal(err)
 	}
-	if resp.GetPresignedUrl() == "" {
+	if core.StringVal(resp.PresignedUrl) == "" {
 		t.Fatal("expected presigned_url to be set")
 	}
 }
@@ -491,15 +500,16 @@ func TestHandleInternalDownload_Gen3Auth(t *testing.T) {
 	mockDB := &testutils.MockDatabase{
 		Objects: map[string]*drs.DrsObject{
 			"secure-id": {
-				Id: "secure-id",
-				AccessMethods: []drs.AccessMethod{
-					{
-						Type: "s3",
-						AccessUrl: drs.AccessMethodAccessUrl{
-							Url: "s3://bucket/key",
+					Id: "secure-id",
+					AccessMethods: &[]drs.AccessMethod{
+						{
+							Type:     drs.AccessMethodTypeS3,
+							AccessUrl: &struct {
+								Headers *[]string `json:"headers,omitempty"`
+								Url     string    `json:"url"`
+							}{Url: "s3://bucket/key"},
 						},
 					},
-				},
 			},
 		},
 		ObjectAuthz: map[string][]string{
@@ -509,7 +519,7 @@ func TestHandleInternalDownload_Gen3Auth(t *testing.T) {
 	mockUM := &testutils.MockUrlManager{}
 
 	req401, _ := http.NewRequest("GET", "/data/download/secure-id", nil)
-	req401 = mux.SetURLVars(req401, map[string]string{"file_id": "secure-id"})
+	req401 = routeutil.WithPathParams(req401, map[string]string{"file_id": "secure-id"})
 	ctx401 := context.WithValue(req401.Context(), core.AuthModeKey, "gen3")
 	ctx401 = context.WithValue(ctx401, core.AuthHeaderPresentKey, false)
 	req401 = req401.WithContext(ctx401)
@@ -520,7 +530,7 @@ func TestHandleInternalDownload_Gen3Auth(t *testing.T) {
 	}
 
 	req403, _ := http.NewRequest("GET", "/data/download/secure-id", nil)
-	req403 = mux.SetURLVars(req403, map[string]string{"file_id": "secure-id"})
+	req403 = routeutil.WithPathParams(req403, map[string]string{"file_id": "secure-id"})
 	ctx403 := context.WithValue(req403.Context(), core.AuthModeKey, "gen3")
 	ctx403 = context.WithValue(ctx403, core.AuthHeaderPresentKey, true)
 	ctx403 = context.WithValue(ctx403, core.UserPrivilegesKey, map[string]map[string]bool{
@@ -534,7 +544,7 @@ func TestHandleInternalDownload_Gen3Auth(t *testing.T) {
 	}
 
 	req200, _ := http.NewRequest("GET", "/data/download/secure-id", nil)
-	req200 = mux.SetURLVars(req200, map[string]string{"file_id": "secure-id"})
+	req200 = routeutil.WithPathParams(req200, map[string]string{"file_id": "secure-id"})
 	ctx200 := context.WithValue(req200.Context(), core.AuthModeKey, "gen3")
 	ctx200 = context.WithValue(ctx200, core.AuthHeaderPresentKey, true)
 	ctx200 = context.WithValue(ctx200, core.UserPrivilegesKey, map[string]map[string]bool{
@@ -552,7 +562,7 @@ func TestHandleInternalUploadURL_Gen3Unauthorized(t *testing.T) {
 	mockDB := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}
 	mockUM := &testutils.MockUrlManager{}
 	req, _ := http.NewRequest("GET", "/data/upload/some-id?bucket=test-bucket", nil)
-	req = mux.SetURLVars(req, map[string]string{"file_id": "some-id"})
+	req = routeutil.WithPathParams(req, map[string]string{"file_id": "some-id"})
 	ctx := context.WithValue(req.Context(), core.AuthModeKey, "gen3")
 	ctx = context.WithValue(ctx, core.AuthHeaderPresentKey, false)
 	req = req.WithContext(ctx)
@@ -707,7 +717,7 @@ func TestHandleInternalPutDeleteBucket_Gen3Auth(t *testing.T) {
 		"organization":"cbds",
 		"project_id":"proj3"
 	}`))
-	postScopeReq = mux.SetURLVars(postScopeReq, map[string]string{"bucket": "b2"})
+	postScopeReq = routeutil.WithPathParams(postScopeReq, map[string]string{"bucket": "b2"})
 	ctxPostScope := context.WithValue(postScopeReq.Context(), core.AuthModeKey, "gen3")
 	ctxPostScope = context.WithValue(ctxPostScope, core.AuthHeaderPresentKey, true)
 	ctxPostScope = context.WithValue(ctxPostScope, core.UserPrivilegesKey, map[string]map[string]bool{
@@ -721,7 +731,7 @@ func TestHandleInternalPutDeleteBucket_Gen3Auth(t *testing.T) {
 	}
 
 	delReq403, _ := http.NewRequest("DELETE", "/data/buckets/b2", nil)
-	delReq403 = mux.SetURLVars(delReq403, map[string]string{"bucket": "b2"})
+	delReq403 = routeutil.WithPathParams(delReq403, map[string]string{"bucket": "b2"})
 	ctxDel403 := context.WithValue(delReq403.Context(), core.AuthModeKey, "gen3")
 	ctxDel403 = context.WithValue(ctxDel403, core.AuthHeaderPresentKey, true)
 	ctxDel403 = context.WithValue(ctxDel403, core.UserPrivilegesKey, map[string]map[string]bool{
@@ -735,7 +745,7 @@ func TestHandleInternalPutDeleteBucket_Gen3Auth(t *testing.T) {
 	}
 
 	delReq204, _ := http.NewRequest("DELETE", "/data/buckets/b2", nil)
-	delReq204 = mux.SetURLVars(delReq204, map[string]string{"bucket": "b2"})
+	delReq204 = routeutil.WithPathParams(delReq204, map[string]string{"bucket": "b2"})
 	ctxDel204 := context.WithValue(delReq204.Context(), core.AuthModeKey, "gen3")
 	ctxDel204 = context.WithValue(ctxDel204, core.AuthHeaderPresentKey, true)
 	ctxDel204 = context.WithValue(ctxDel204, core.UserPrivilegesKey, map[string]map[string]bool{
@@ -831,7 +841,7 @@ func TestHandleInternalUploadURL_Branches(t *testing.T) {
 	t.Run("no bucket configured", func(t *testing.T) {
 		db := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}
 		req := httptest.NewRequest(http.MethodGet, "/data/upload/abc", nil)
-		req = mux.SetURLVars(req, map[string]string{"file_id": "abc"})
+		req = routeutil.WithPathParams(req, map[string]string{"file_id": "abc"})
 		rr := httptest.NewRecorder()
 		handleInternalUploadURL(rr, req, db, mockUM)
 		if rr.Code != http.StatusOK {
@@ -842,7 +852,7 @@ func TestHandleInternalUploadURL_Branches(t *testing.T) {
 	t.Run("query bucket and filename signs upload url", func(t *testing.T) {
 		db := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}
 		req := httptest.NewRequest(http.MethodGet, "/data/upload/abc?bucket=b1&filename=f1", nil)
-		req = mux.SetURLVars(req, map[string]string{"file_id": "abc"})
+		req = routeutil.WithPathParams(req, map[string]string{"file_id": "abc"})
 		rr := httptest.NewRecorder()
 		handleInternalUploadURL(rr, req, db, mockUM)
 		if rr.Code != http.StatusOK {
@@ -859,15 +869,16 @@ func TestHandleInternalUploadBulk_MixedResults(t *testing.T) {
 	db := &testutils.MockDatabase{
 		Objects: map[string]*drs.DrsObject{
 			"obj-1": {
-				Id: "obj-1",
-				AccessMethods: []drs.AccessMethod{
-					{
-						Type: "s3",
-						AccessUrl: drs.AccessMethodAccessUrl{
-							Url: "s3://b1/prefix/from-existing.bin",
+					Id: "obj-1",
+					AccessMethods: &[]drs.AccessMethod{
+						{
+							Type:     drs.AccessMethodTypeS3,
+							AccessUrl: &struct {
+								Headers *[]string `json:"headers,omitempty"`
+								Url     string    `json:"url"`
+							}{Url: "s3://b1/prefix/from-existing.bin"},
 						},
 					},
-				},
 			},
 		},
 		Credentials: map[string]core.S3Credential{
@@ -895,20 +906,20 @@ func TestHandleInternalUploadBulk_MixedResults(t *testing.T) {
 	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
-	if len(resp.Results) != 2 {
-		t.Fatalf("expected 2 results, got %d", len(resp.Results))
+	if len(*resp.Results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(*resp.Results))
 	}
-	if resp.Results[0].GetStatus() != int32(http.StatusOK) || resp.Results[0].Url == nil {
-		t.Fatalf("expected first result to be signed, got %+v", resp.Results[0])
+	if (*resp.Results)[0].Status != int32(http.StatusOK) || (*resp.Results)[0].Url == nil {
+		t.Fatalf("expected first result to be signed, got %+v", (*resp.Results)[0])
 	}
-	if !strings.Contains(*resp.Results[0].Url, "upload=true") {
-		t.Fatalf("expected signed upload URL in first result, got %+v", resp.Results[0])
+	if !strings.Contains(*(*resp.Results)[0].Url, "upload=true") {
+		t.Fatalf("expected signed upload URL in first result, got %+v", (*resp.Results)[0])
 	}
-	if resp.Results[0].GetFileName() != "prefix/from-existing.bin" {
-		t.Fatalf("expected resolved key from existing object, got %q", resp.Results[0].GetFileName())
+	if core.StringVal((*resp.Results)[0].FileName) != "prefix/from-existing.bin" {
+		t.Fatalf("expected resolved key from existing object, got %q", core.StringVal((*resp.Results)[0].FileName))
 	}
-	if resp.Results[1].GetStatus() != int32(http.StatusBadRequest) {
-		t.Fatalf("expected second result 400, got %+v", resp.Results[1])
+	if (*resp.Results)[1].Status != int32(http.StatusBadRequest) {
+		t.Fatalf("expected second result 400, got %+v", (*resp.Results)[1])
 	}
 }
 
@@ -946,11 +957,11 @@ func TestHandleInternalUploadBulk_Gen3UnauthorizedPerItem(t *testing.T) {
 	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
-	if len(resp.Results) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(resp.Results))
+	if len(*resp.Results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(*resp.Results))
 	}
-	if resp.Results[0].GetStatus() != int32(http.StatusUnauthorized) {
-		t.Fatalf("expected per-item status 401, got %+v", resp.Results[0])
+	if (*resp.Results)[0].Status != int32(http.StatusUnauthorized) {
+		t.Fatalf("expected per-item status 401, got %+v", (*resp.Results)[0])
 	}
 }
 
@@ -991,14 +1002,17 @@ func TestHandleInternalMultipartValidationErrors(t *testing.T) {
 func TestRegisterInternalRoutes_Smoke(t *testing.T) {
 	db := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}
 	um := &testutils.MockUrlManager{}
-	router := mux.NewRouter()
-	RegisterInternalDataRoutes(router, db, um)
+	app := fiber.New()
+	RegisterInternalDataRoutes(app, db, um)
 
 	req := httptest.NewRequest(http.MethodGet, "/data/upload/abc?bucket=b1", nil)
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("test request failed: %v", err)
+	}
 	// No creds configured for b1 in mock -> falls back to signing anyway with mock url manager.
-	if rr.Code != http.StatusOK && rr.Code != http.StatusBadRequest {
-		t.Fatalf("unexpected status from registered internal route: %d body=%s", rr.Code, rr.Body.String())
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusBadRequest {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("unexpected status from registered internal route: %d body=%s", resp.StatusCode, string(body))
 	}
 }

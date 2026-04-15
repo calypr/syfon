@@ -6,6 +6,8 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+
+	"github.com/calypr/syfon/apigen/internalapi"
 )
 
 type IndexService struct {
@@ -157,61 +159,66 @@ func (s *IndexService) SHA256Validity(ctx context.Context, values []string) (map
 func (s *IndexService) Upsert(ctx context.Context, did, objectURL, fileName string, size int64, sha256sum string, authz []string) error {
 	existing, err := s.Get(ctx, did)
 	if err == nil {
-		if strings.TrimSpace((&existing).GetDid()) == "" {
-			(&existing).SetDid(did)
+		if strings.TrimSpace(existing.Did) == "" {
+			existing.Did = did
 		}
-		if len((&existing).GetAuthz()) == 0 {
+		if len(existing.Authz) == 0 {
 			if len(authz) == 0 {
 				return fmt.Errorf("authz is required to upsert record %s", did)
 			}
-			(&existing).SetAuthz(append([]string(nil), authz...))
+			existing.Authz = append([]string(nil), authz...)
 		}
 		if fileName != "" {
-			(&existing).SetFileName(fileName)
+			existing.FileName = &fileName
 		}
 		if size > 0 {
-			(&existing).SetSize(size)
+			existing.Size = &size
 		}
 		if objectURL != "" {
-			urls := append([]string(nil), (&existing).GetUrls()...)
+			var urls []string
+			if existing.Urls != nil {
+				urls = *existing.Urls
+			}
 			seen := map[string]bool{}
 			for _, u := range urls {
 				seen[u] = true
 			}
 			if !seen[objectURL] {
 				urls = append(urls, objectURL)
-				(&existing).SetUrls(urls)
+				existing.Urls = &urls
 			}
 		}
 		if sha256sum != "" {
-			hashes := (&existing).GetHashes()
-			if hashes == nil {
-				hashes = map[string]string{}
+			if existing.Hashes == nil {
+				h := make(internalapi.HashInfo)
+				existing.Hashes = &h
 			}
-			hashes["sha256"] = sha256sum
-			(&existing).SetHashes(hashes)
+			(*existing.Hashes)["sha256"] = sha256sum
 		}
 		_, err := s.Update(ctx, did, existing)
 		return err
 	}
 
-	payload := InternalRecord{}
-	(&payload).SetDid(did)
+	payload := InternalRecord{
+		Did: did,
+	}
 	if len(authz) == 0 {
 		return fmt.Errorf("authz is required to create record %s", did)
 	}
-	(&payload).SetAuthz(append([]string(nil), authz...))
+	payload.Authz = append([]string(nil), authz...)
 	if size > 0 {
-		(&payload).SetSize(size)
+		payload.Size = &size
 	}
 	if objectURL != "" {
-		(&payload).SetUrls([]string{objectURL})
+		u := []string{objectURL}
+		payload.Urls = &u
 	}
 	if fileName != "" {
-		(&payload).SetFileName(fileName)
+		payload.FileName = &fileName
 	}
 	if sha256sum != "" {
-		(&payload).SetHashes(map[string]string{"sha256": sha256sum})
+		h := internalapi.HashInfo{"sha256": sha256sum}
+		payload.Hashes = &h
 	}
 	_, err = s.Create(ctx, payload)
 	return err

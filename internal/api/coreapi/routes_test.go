@@ -3,6 +3,7 @@ package coreapi
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -10,7 +11,7 @@ import (
 	"github.com/calypr/syfon/apigen/drs"
 	"github.com/calypr/syfon/db/core"
 	"github.com/calypr/syfon/testutils"
-	"github.com/gorilla/mux"
+	"github.com/gofiber/fiber/v3"
 )
 
 func TestSHA256ValidityRoute(t *testing.T) {
@@ -18,8 +19,11 @@ func TestSHA256ValidityRoute(t *testing.T) {
 		Objects: map[string]*drs.DrsObject{
 			"abc": {
 				Id: "abc",
-				AccessMethods: []drs.AccessMethod{
-					{Type: "s3", AccessUrl: drs.AccessMethodAccessUrl{Url: "s3://bucket-a/key"}},
+				AccessMethods: &[]drs.AccessMethod{
+					{Type: drs.AccessMethodTypeS3, AccessUrl: &struct {
+						Headers *[]string `json:"headers,omitempty"`
+						Url     string    `json:"url"`
+					}{Url: "s3://bucket-a/key"}},
 				},
 			},
 		},
@@ -27,36 +31,42 @@ func TestSHA256ValidityRoute(t *testing.T) {
 			"bucket-a": {Bucket: "bucket-a", Region: "us-east-1"},
 		},
 	}
-	router := mux.NewRouter()
-	RegisterCoreRoutes(router, db)
+	app := fiber.New()
+	RegisterCoreRoutes(app, db)
 
 	body, _ := json.Marshal(map[string]any{"sha256": []string{"abc", "missing"}})
 	req := httptest.NewRequest(http.MethodPost, "/index/v1/sha256/validity", bytes.NewReader(body))
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("test request failed: %v", err)
 	}
-	var resp map[string]bool
-	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+	respBody, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", resp.StatusCode, string(respBody))
+	}
+	var decoded map[string]bool
+	if err := json.Unmarshal(respBody, &decoded); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
-	if !resp["abc"] || resp["missing"] {
-		t.Fatalf("unexpected response: %#v", resp)
+	if !decoded["abc"] || decoded["missing"] {
+		t.Fatalf("unexpected response: %#v", decoded)
 	}
 }
 
 func TestSHA256ValidityRouteValidation(t *testing.T) {
 	db := &testutils.MockDatabase{}
-	router := mux.NewRouter()
-	RegisterCoreRoutes(router, db)
+	app := fiber.New()
+	RegisterCoreRoutes(app, db)
 
 	req := httptest.NewRequest(http.MethodPost, "/index/v1/sha256/validity", bytes.NewBufferString(`{"sha256":["   "]}`))
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("test request failed: %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
 
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d body=%s", rr.Code, rr.Body.String())
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d body=%s", resp.StatusCode, string(body))
 	}
 }

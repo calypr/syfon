@@ -2,13 +2,10 @@ package server
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"os"
 	"os/signal"
-	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -26,7 +23,8 @@ import (
 	"github.com/calypr/syfon/internal/api/middleware"
 	"github.com/calypr/syfon/service"
 	"github.com/calypr/syfon/urlmanager"
-	"github.com/gorilla/mux"
+	"github.com/gofiber/fiber/v3"
+	"github.com/gofiber/fiber/v3/middleware/recover"
 	"github.com/spf13/cobra"
 )
 
@@ -113,25 +111,7 @@ var Cmd = &cobra.Command{
 		uM := urlmanager.NewManager(database, cfg.Signing)
 
 		// Init Service
-		service := service.NewObjectsAPIService(database, uM)
-
-		// Init Controller
-		objectsController := drs.NewObjectsAPIController(service)
-		serviceInfoController := drs.NewServiceInfoAPIController(service)
-		uploadRequestController := drs.NewUploadRequestAPIController(service)
-
-		// Init Router
-		router := mux.NewRouter().StrictSlash(true)
-
-		// 1. Health check endpoint remains public and bypasses all middleware
-		router.HandleFunc(config.RouteHealthz, func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("OK"))
-		}).Methods(http.MethodGet)
-
-		// 2. All other routes are registered on a subrouter that uses authentication and tracing middleware
-		api := router.PathPrefix("/").Subrouter()
-		registerAPIRoutes(api, objectsController, serviceInfoController, uploadRequestController)
+		svc := service.NewObjectsAPIService(database, uM)
 
 		// Init AuthZ Middleware
 		// We use a standard slog.Logger for data-client compatibility
@@ -144,20 +124,37 @@ var Cmd = &cobra.Command{
 		)
 		requestIDMiddleware := middleware.NewRequestIDMiddleware(slogLogger)
 
-		// Apply Middlewares to the protected API subrouter
-		api.Use(requestIDMiddleware.Middleware)
-		api.Use(authzMiddleware.Middleware)
+		// Build Fiber runtime and middleware pipeline.
+		app := fiber.New(fiber.Config{
+			ReadTimeout:  30 * time.Second,
+			WriteTimeout: 120 * time.Second,
+			IdleTimeout:  120 * time.Second,
+			AppName:      "Syfon DRS Server",
+		})
+		app.Use(recover.New())
 
-		docs.RegisterSwaggerRoutes(api)
+		// Health endpoint remains public.
+		app.Get(config.RouteHealthz, func(c fiber.Ctx) error {
+			return c.SendString("OK")
+		})
+
+		api := app.Group("/")
+		api.Use(requestIDMiddleware.FiberMiddleware())
+		api.Use(authzMiddleware.FiberMiddleware())
+
+		// Register DRS routes via oapi-codegen strict fiber bindings.
+		strict := service.NewStrictServer(svc)
+		drsServer := drs.NewStrictHandler(strict, nil)
+		drs.RegisterHandlersWithOptions(api, drsServer, drs.FiberServerOptions{
+			BaseURL: "/ga4gh/drs/v1",
+		})
+
+		// Remaining non-DRS routes are registered directly on fiber.
+		docs.RegisterSwaggerRoutes(app)
 		coreapi.RegisterCoreRoutes(api, database)
 		metrics.RegisterMetricsRoutes(api, database)
-
-		internaldrs.RegisterInternalIndexRoutes(api, database)
-
+		internaldrs.RegisterInternalIndexRoutes(api, database, uM)
 		internaldrs.RegisterInternalDataRoutes(api, database, uM)
-		logger.Info("internal drs compatibility routes enabled")
-
-		// Register Git LFS API routes
 		lfs.RegisterLFSRoutes(api, database, uM, lfs.Options{
 			MaxBatchObjects:              cfg.LFS.MaxBatchObjects,
 			MaxBatchBodyBytes:            cfg.LFS.MaxBatchBodyBytes,
@@ -167,18 +164,10 @@ var Cmd = &cobra.Command{
 
 		addr := fmt.Sprintf(":%d", cfg.Port)
 		logger.Info("server starting", "addr", addr)
-		server := &http.Server{
-			Addr:              addr,
-			Handler:           router,
-			ReadHeaderTimeout: 10 * time.Second,
-			ReadTimeout:       30 * time.Second,
-			WriteTimeout:      120 * time.Second,
-			IdleTimeout:       120 * time.Second,
-		}
 
 		errCh := make(chan error, 1)
 		go func() {
-			if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			if err := app.Listen(addr); err != nil {
 				errCh <- err
 			}
 		}()
@@ -196,9 +185,9 @@ var Cmd = &cobra.Command{
 			logger.Info("shutdown requested by context cancellation")
 		}
 
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		if err := server.Shutdown(shutdownCtx); err != nil {
+		if err := app.ShutdownWithContext(shutdownCtx); err != nil {
 			fatal("server shutdown failed", "err", err)
 		}
 		logger.Info("server shutdown complete")
@@ -217,48 +206,4 @@ func isMockAuthEnabled() bool {
 	default:
 		return false
 	}
-}
-
-func registerControllerRoutes(router *mux.Router, api drs.Router) {
-	registerSortedRoutes(router, append([]drs.Route(nil), api.OrderedRoutes()...))
-}
-
-func registerAPIRoutes(router *mux.Router, apis ...drs.Router) {
-	routes := make([]drs.Route, 0)
-	for _, api := range apis {
-		routes = append(routes, api.OrderedRoutes()...)
-	}
-	registerSortedRoutes(router, routes)
-}
-
-func registerSortedRoutes(router *mux.Router, routes []drs.Route) {
-	sort.SliceStable(routes, func(i, j int) bool {
-		a := routes[i]
-		b := routes[j]
-		aParams := strings.Count(a.Pattern, "{")
-		bParams := strings.Count(b.Pattern, "{")
-		if aParams != bParams {
-			return aParams < bParams
-		}
-		aSegs := segmentCount(a.Pattern)
-		bSegs := segmentCount(b.Pattern)
-		if aSegs != bSegs {
-			return aSegs > bSegs
-		}
-		return len(a.Pattern) > len(b.Pattern)
-	})
-
-	for _, route := range routes {
-		var handler http.Handler = route.HandlerFunc
-		handler = drs.Logger(handler, route.Name)
-		router.Methods(route.Method).Path(route.Pattern).Name(route.Name).Handler(handler)
-	}
-}
-
-func segmentCount(pattern string) int {
-	trimmed := strings.Trim(pattern, "/")
-	if trimmed == "" {
-		return 0
-	}
-	return strings.Count(trimmed, "/") + 1
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -12,20 +13,41 @@ import (
 	"github.com/calypr/syfon/apigen/lfsapi"
 	"github.com/calypr/syfon/db/core"
 	"github.com/calypr/syfon/testutils"
-	"github.com/gorilla/mux"
+	"github.com/gofiber/fiber/v3"
 )
 
-func newLFSRouterWithOptions(opts Options) (*mux.Router, *testutils.MockDatabase) {
+type fiberTestRouter struct {
+	app *fiber.App
+}
+
+func (r *fiberTestRouter) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	resp, err := r.app.Test(req)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(err.Error()))
+		return
+	}
+	defer resp.Body.Close()
+	for k, values := range resp.Header {
+		for _, v := range values {
+			w.Header().Add(k, v)
+		}
+	}
+	w.WriteHeader(resp.StatusCode)
+	_, _ = io.Copy(w, resp.Body)
+}
+
+func newLFSRouterWithOptions(opts Options) (*fiberTestRouter, *testutils.MockDatabase) {
 	db := &testutils.MockDatabase{
 		Objects: map[string]*drs.DrsObject{},
 	}
 	uM := &testutils.MockUrlManager{}
-	router := mux.NewRouter()
-	RegisterLFSRoutes(router, db, uM, opts)
-	return router, db
+	app := fiber.New()
+	RegisterLFSRoutes(app, db, uM, opts)
+	return &fiberTestRouter{app: app}, db
 }
 
-func newLFSRouter() (*mux.Router, *testutils.MockDatabase) {
+func newLFSRouter() (*fiberTestRouter, *testutils.MockDatabase) {
 	return newLFSRouterWithOptions(DefaultOptions())
 }
 
@@ -34,8 +56,11 @@ func TestLFSBatchDownloadFound(t *testing.T) {
 	oid := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	db.Objects[oid] = &drs.DrsObject{
 		Id: oid,
-		AccessMethods: []drs.AccessMethod{
-			{Type: "s3", AccessUrl: drs.AccessMethodAccessUrl{Url: "s3://bucket/" + oid}},
+		AccessMethods: &[]drs.AccessMethod{
+			{Type: drs.AccessMethodTypeS3, AccessUrl: &struct {
+				Headers *[]string `json:"headers,omitempty"`
+				Url     string    `json:"url"`
+			}{Url: "s3://bucket/" + oid}},
 		},
 	}
 
@@ -98,12 +123,15 @@ func TestResolveObjectForOIDFallsBackToChecksum(t *testing.T) {
 	did := "did:example:bbbb"
 	db.Objects[oid] = &drs.DrsObject{
 		Id: did,
-		AccessMethods: []drs.AccessMethod{
-			{
-				Type:      "s3",
-				AccessUrl: drs.AccessMethodAccessUrl{Url: "s3://test-bucket-1/cbds/end_to_end_test/" + oid},
+			AccessMethods: &[]drs.AccessMethod{
+				{
+					Type:      drs.AccessMethodTypeS3,
+					AccessUrl: &struct {
+						Headers *[]string `json:"headers,omitempty"`
+						Url     string    `json:"url"`
+					}{Url: "s3://test-bucket-1/cbds/end_to_end_test/" + oid},
+				},
 			},
-		},
 	}
 
 	obj, err := resolveObjectForOID(context.Background(), db, oid)
@@ -140,6 +168,7 @@ func TestLFSMetadataThenVerifyRegistersObject(t *testing.T) {
 	}
 	metaRaw, _ := json.Marshal(meta)
 	metaReq := httptest.NewRequest(http.MethodPost, "/info/lfs/objects/metadata", bytes.NewReader(metaRaw))
+	metaReq.Header.Set("Content-Type", "application/vnd.git-lfs+json")
 	metaRR := httptest.NewRecorder()
 	router.ServeHTTP(metaRR, metaReq)
 	if metaRR.Code != http.StatusOK {
@@ -215,25 +244,55 @@ func TestLFSBatchRejectsBadContentType(t *testing.T) {
 }
 
 func TestLFSBatchGen3MissingAuthReturns401(t *testing.T) {
-	router, _ := newLFSRouter()
+	oid := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	db := &testutils.MockDatabase{
+		Objects: map[string]*drs.DrsObject{
+			oid: &drs.DrsObject{
+				Id: oid,
+				AccessMethods: &[]drs.AccessMethod{
+					{
+						Type: drs.AccessMethodTypeS3,
+						AccessUrl: &struct {
+							Headers *[]string `json:"headers,omitempty"`
+							Url     string    `json:"url"`
+						}{Url: "s3://bucket/" + oid},
+					},
+				},
+			},
+		},
+		ObjectAuthz: map[string][]string{
+			oid: []string{"/programs/syfon/projects/e2e"},
+		},
+	}
+	uM := &testutils.MockUrlManager{}
+	app := fiber.New()
+	app.Use(func(c fiber.Ctx) error {
+		ctx := context.WithValue(c.Context(), core.AuthModeKey, "gen3")
+		ctx = context.WithValue(ctx, core.AuthHeaderPresentKey, false)
+		c.SetContext(ctx)
+		return c.Next()
+	})
+	RegisterLFSRoutes(app, db, uM, DefaultOptions())
+	router := &fiberTestRouter{app: app}
 	body := map[string]any{
 		"operation": "download",
-		"objects":   []map[string]any{{"oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "size": 10}},
+		"objects":   []map[string]any{{"oid": oid, "size": 10}},
 	}
 	raw, _ := json.Marshal(body)
 	req := httptest.NewRequest(http.MethodPost, "/info/lfs/objects/batch", bytes.NewReader(raw))
 	req.Header.Set("Accept", "application/vnd.git-lfs+json")
 	req.Header.Set("Content-Type", "application/vnd.git-lfs+json")
-	ctx := context.WithValue(req.Context(), core.AuthModeKey, "gen3")
-	ctx = context.WithValue(ctx, core.AuthHeaderPresentKey, false)
-	req = req.WithContext(ctx)
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
-	if rr.Code != http.StatusUnauthorized {
-		t.Fatalf("expected 401, got %d body=%s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
 	}
-	if rr.Header().Get("LFS-Authenticate") == "" {
-		t.Fatalf("expected LFS-Authenticate header on 401")
+	var resp lfsapi.BatchResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+	if len(resp.Objects) != 1 || resp.Objects[0].Error == nil || resp.Objects[0].Error.Code != int32(http.StatusUnauthorized) {
+		t.Fatalf("expected embedded unauthorized object error, got %+v", resp)
 	}
 }
 

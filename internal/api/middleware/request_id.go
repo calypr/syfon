@@ -5,11 +5,11 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"strings"
 	"time"
 
 	"github.com/calypr/syfon/db/core"
+	"github.com/gofiber/fiber/v3"
 )
 
 type RequestIDMiddleware struct {
@@ -23,41 +23,34 @@ func NewRequestIDMiddleware(logger *slog.Logger) *RequestIDMiddleware {
 	return &RequestIDMiddleware{logger: logger}
 }
 
-type requestIDStatusRecorder struct {
-	http.ResponseWriter
-	status int
-}
-
-func (r *requestIDStatusRecorder) WriteHeader(status int) {
-	r.status = status
-	r.ResponseWriter.WriteHeader(status)
-}
-
-func (m *RequestIDMiddleware) Middleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requestID := strings.TrimSpace(r.Header.Get(core.RequestIDHeader))
+func (m *RequestIDMiddleware) FiberMiddleware() fiber.Handler {
+	return func(c fiber.Ctx) error {
+		requestID := strings.TrimSpace(c.Get(core.RequestIDHeader))
 		if requestID == "" {
 			requestID = newRequestID()
 		}
 
-		ctx := core.WithRequestID(r.Context(), requestID)
-		r = r.WithContext(ctx)
-		r.Header.Set(core.RequestIDHeader, requestID)
-
-		w.Header().Set(core.RequestIDHeader, requestID)
+		// Inject into context for downstream usage
+		ctx := core.WithRequestID(c.Context(), requestID)
+		c.SetContext(ctx)
+		
+		c.Set(core.RequestIDHeader, requestID)
+		
 		start := time.Now()
-		m.logger.Debug("request start", "request_id", requestID, "method", r.Method, "path", r.URL.Path)
+		m.logger.Debug("request start", "request_id", requestID, "method", c.Method(), "path", c.Path())
 
-		rec := &requestIDStatusRecorder{ResponseWriter: w, status: http.StatusOK}
-		next.ServeHTTP(rec, r)
+		err := c.Next()
 
+		status := c.Response().StatusCode()
 		m.logger.Debug(
-			fmt.Sprintf("[%d] %s %s", rec.status, r.Method, r.URL.Path),
+			fmt.Sprintf("[%d] %s %s", status, c.Method(), c.Path()),
 			"request_id", requestID,
-			"status", rec.status,
+			"status", status,
 			"duration_ms", time.Since(start).Milliseconds(),
 		)
-	})
+
+		return err
+	}
 }
 
 func newRequestID() string {

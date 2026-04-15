@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	drsapi "github.com/calypr/syfon/apigen/drs"
 )
 
 type ObjectBuilder struct {
@@ -53,19 +54,26 @@ func (b ObjectBuilder) Build(fileName string, checksum string, size int64, drsID
 	if err != nil {
 		return nil, err
 	}
-	authorizations := Authorizations{
-		BearerAuthIssuers: []string{authzStr},
-	}
 
 	drsObj := DRSObject{
 		Id:   drsID,
-		Name: fileName,
-		AccessMethods: []AccessMethod{{
-			Type: accessType,
-			AccessUrl: AccessURL{
+		Name: &fileName,
+		AccessMethods: &[]AccessMethod{{
+			Type: drsapi.AccessMethodType(accessType),
+			AccessUrl: &struct {
+				Headers *[]string "json:\"headers,omitempty\""
+				Url     string    "json:\"url\""
+			}{
 				Url: fileURL,
 			},
-			Authorizations: authorizations,
+			Authorizations: &struct {
+				BearerAuthIssuers   *[]string                                            "json:\"bearer_auth_issuers,omitempty\""
+				DrsObjectId         *string                                              "json:\"drs_object_id,omitempty\""
+				PassportAuthIssuers *[]string                                            "json:\"passport_auth_issuers,omitempty\""
+				SupportedTypes      *[]drsapi.AccessMethodAuthorizationsSupportedTypes "json:\"supported_types,omitempty\""
+			}{
+				BearerAuthIssuers: &[]string{authzStr},
+			},
 		}},
 		Checksums: []Checksum{{
 			Type:     "sha256",

@@ -51,8 +51,7 @@ func DoUpload(ctx context.Context, req request.RequestInterface, urlStr string, 
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("upload to %s failed with status %d: %s", urlStr, resp.StatusCode, string(bodyBytes))
+		return "", common.ResponseBodyError(resp, fmt.Sprintf("upload to %s failed", urlStr))
 	}
 
 	return strings.Trim(resp.Header.Get("ETag"), `"`), nil

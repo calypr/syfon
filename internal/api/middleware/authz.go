@@ -22,6 +22,7 @@ import (
 	"github.com/calypr/syfon/client/pkg/logs"
 	"github.com/calypr/syfon/client/pkg/request"
 	"github.com/calypr/syfon/db/core"
+	"github.com/gofiber/fiber/v3"
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/sync/singleflight"
 )
@@ -81,29 +82,42 @@ func NewAuthzMiddleware(logger *slog.Logger, mode, basicUser, basicPass string) 
 	}
 }
 
-// Middleware returns a mux middleware that extracts the token and fetches user info.
-func (m *AuthzMiddleware) Middleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx := context.WithValue(r.Context(), core.AuthHeaderPresentKey, false)
+// FiberMiddleware returns a fiber middleware that extracts the token and fetches user info.
+func (m *AuthzMiddleware) FiberMiddleware() fiber.Handler {
+	return func(c fiber.Ctx) error {
+		ctx := context.WithValue(c.Context(), core.AuthHeaderPresentKey, false)
 		ctx = context.WithValue(ctx, core.AuthModeKey, m.mode)
+		
+		authHeader := c.Get(fiber.HeaderAuthorization)
+
 		if m.mode != "gen3" {
 			if m.basicUser != "" || m.basicPass != "" {
-				user, pass, ok := r.BasicAuth()
-				if !ok ||
-					subtle.ConstantTimeCompare([]byte(user), []byte(m.basicUser)) != 1 ||
-					subtle.ConstantTimeCompare([]byte(pass), []byte(m.basicPass)) != 1 {
-					w.Header().Set("WWW-Authenticate", `Basic realm="syfon"`)
-					http.Error(w, "Unauthorized", http.StatusUnauthorized)
-					return
+				if authHeader == "" || !strings.HasPrefix(strings.ToLower(authHeader), "basic ") {
+					c.Set(fiber.HeaderWWWAuthenticate, `Basic realm="syfon"`)
+					return c.SendStatus(fiber.StatusUnauthorized)
+				}
+				
+				payload := authHeader[len("basic "):]
+				decoded, err := base64.StdEncoding.DecodeString(payload)
+				if err != nil {
+					c.Set(fiber.HeaderWWWAuthenticate, `Basic realm="syfon"`)
+					return c.SendStatus(fiber.StatusUnauthorized)
+				}
+				parts := strings.SplitN(string(decoded), ":", 2)
+				if len(parts) != 2 ||
+					subtle.ConstantTimeCompare([]byte(parts[0]), []byte(m.basicUser)) != 1 ||
+					subtle.ConstantTimeCompare([]byte(parts[1]), []byte(m.basicPass)) != 1 {
+					c.Set(fiber.HeaderWWWAuthenticate, `Basic realm="syfon"`)
+					return c.SendStatus(fiber.StatusUnauthorized)
 				}
 			}
-			next.ServeHTTP(w, r.WithContext(ctx))
-			return
+			c.SetContext(ctx)
+			return c.Next()
 		}
 		if m.mock.Enabled {
 			if m.mock.RequireAuthHeader && !core.HasAuthHeader(ctx) {
-				next.ServeHTTP(w, r.WithContext(ctx))
-				return
+				c.SetContext(ctx)
+				return c.Next()
 			}
 			// In mock mode, mark auth header as present so gen3 authorization checks
 			// in service/DB layers evaluate injected privileges.
@@ -121,33 +135,32 @@ func (m *AuthzMiddleware) Middleware(next http.Handler) http.Handler {
 			}
 			ctx = context.WithValue(ctx, core.UserAuthzKey, resources)
 			ctx = context.WithValue(ctx, core.UserPrivilegesKey, privs)
-			next.ServeHTTP(w, r.WithContext(ctx))
-			return
+			c.SetContext(ctx)
+			return c.Next()
 		}
-		authHeader := r.Header.Get("Authorization")
 		if authHeader == "" {
-			next.ServeHTTP(w, r.WithContext(ctx))
-			return
+			c.SetContext(ctx)
+			return c.Next()
 		}
 		ctx = context.WithValue(ctx, core.AuthHeaderPresentKey, true)
 		tokenString, err := extractBearerLikeToken(authHeader)
 		if err != nil {
 			m.logger.Debug("failed to parse authorization header", "error", err)
-			next.ServeHTTP(w, r.WithContext(ctx))
-			return
+			c.SetContext(ctx)
+			return c.Next()
 		}
 
 		cacheKey := tokenCacheKey(tokenString)
 		if m.cache != nil {
 			if resources, privileges, negative, ok := m.cache.get(cacheKey); ok {
 				if negative {
-					next.ServeHTTP(w, r.WithContext(ctx))
-					return
+					c.SetContext(ctx)
+					return c.Next()
 				}
 				ctx = context.WithValue(ctx, core.UserAuthzKey, resources)
 				ctx = context.WithValue(ctx, core.UserPrivilegesKey, privileges)
-				next.ServeHTTP(w, r.WithContext(ctx))
-				return
+				c.SetContext(ctx)
+				return c.Next()
 			}
 		}
 
@@ -176,7 +189,7 @@ func (m *AuthzMiddleware) Middleware(next http.Handler) http.Handler {
 			reqClient := request.NewRequestInterface(gen3Logger, cred, nil, apiEndpoint, "syfon-server", nil)
 
 			// 3. Fetch user info (privileges)
-			privs, err := fetchPrivileges(r.Context(), reqClient, cred)
+			privs, err := fetchPrivileges(c.Context(), reqClient, cred)
 			if err != nil {
 				m.logger.Debug("failed to check privileges with internal auth", "error", err)
 				return authFetchResult{negative: true}, nil
@@ -197,15 +210,16 @@ func (m *AuthzMiddleware) Middleware(next http.Handler) http.Handler {
 		}
 
 		if res.negative {
-			next.ServeHTTP(w, r.WithContext(ctx))
-			return
+			c.SetContext(ctx)
+			return c.Next()
 		}
 
 		ctx = context.WithValue(ctx, core.UserAuthzKey, res.resources)
 		ctx = context.WithValue(ctx, core.UserPrivilegesKey, res.privileges)
 
-		next.ServeHTTP(w, r.WithContext(ctx))
-	})
+		c.SetContext(ctx)
+		return c.Next()
+	}
 }
 
 func fetchPrivileges(ctx context.Context, reqClient request.RequestInterface, cred *conf.Credential) (map[string]any, error) {

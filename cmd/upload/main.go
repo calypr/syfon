@@ -68,9 +68,11 @@ var Cmd = &cobra.Command{
 		// Create a DRS client from the SDK
 		dc := drs.NewDrsClient(c.Requestor(), nil, c.Logger())
 
+		name := filepath.Base(srcPath)
+		issuers := []string{authz}
 		drsObj := &drs.DRSObject{
 			Id:   did,
-			Name: filepath.Base(srcPath),
+			Name: &name,
 			Size: info.Size(),
 			Checksums: []drs.Checksum{
 				{
@@ -78,11 +80,16 @@ var Cmd = &cobra.Command{
 					Checksum: checksum,
 				},
 			},
-			AccessMethods: []drs.AccessMethod{
+			AccessMethods: &[]drs.AccessMethod{
 				{
 					Type: "s3", // Default type
-					Authorizations: drs.Authorizations{
-						BearerAuthIssuers: []string{authz},
+					Authorizations: &struct {
+						BearerAuthIssuers   *[]string                                   `json:"bearer_auth_issuers,omitempty"`
+						DrsObjectId         *string                                     `json:"drs_object_id,omitempty"`
+						PassportAuthIssuers *[]string                                   `json:"passport_auth_issuers,omitempty"`
+						SupportedTypes      *[]syclient.AccessMethodAuthorizationsSupportedTypes `json:"supported_types,omitempty"`
+					}{
+						BearerAuthIssuers: &issuers,
 					},
 				},
 			},

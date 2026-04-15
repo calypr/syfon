@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	drsapi "github.com/calypr/syfon/apigen/drs"
 )
 
 // NAMESPACE is the UUID namespace used for generating DRS UUIDs
@@ -85,19 +86,19 @@ func FindMatchingRecord(records []DRSObject, organization, projectId string) (*D
 	}
 
 	for _, record := range records {
-		for _, access := range record.AccessMethods {
-			if len(access.Authorizations.BearerAuthIssuers) == 0 {
-				continue
-			}
+		if record.AccessMethods != nil {
+			for _, access := range *record.AccessMethods {
+				if access.Authorizations != nil && access.Authorizations.BearerAuthIssuers != nil && len(*access.Authorizations.BearerAuthIssuers) > 0 {
+					// Check BearerAuthIssuers using a map for O(1) lookup (ref: "lists suck")
+					issuersMap := make(map[string]struct{}, len(*access.Authorizations.BearerAuthIssuers))
+					for _, issuer := range *access.Authorizations.BearerAuthIssuers {
+						issuersMap[issuer] = struct{}{}
+					}
 
-			// Check BearerAuthIssuers using a map for O(1) lookup (ref: "lists suck")
-			issuersMap := make(map[string]struct{}, len(access.Authorizations.BearerAuthIssuers))
-			for _, issuer := range access.Authorizations.BearerAuthIssuers {
-				issuersMap[issuer] = struct{}{}
-			}
-
-			if _, ok := issuersMap[expectedAuthz]; ok {
-				return &record, nil
+					if _, ok := issuersMap[expectedAuthz]; ok {
+						return &record, nil
+					}
+				}
 			}
 		}
 	}
@@ -136,22 +137,29 @@ func BuildDrsObjWithPrefix(fileName string, checksum string, size int64, drsId s
 	if err != nil {
 		return nil, err
 	}
-	authorizations := Authorizations{
-		BearerAuthIssuers: []string{authzStr},
-	}
 
 	drsObj := DRSObject{
 		Id:   drsId,
-		Name: fileName,
-		AccessMethods: []AccessMethod{{
+		Name: &fileName,
+		AccessMethods: &[]AccessMethod{{
 			Type: "s3",
-			AccessUrl: AccessURL{
+			AccessUrl: &struct {
+				Headers *[]string "json:\"headers,omitempty\""
+				Url     string    "json:\"url\""
+			}{
 				Url: fileURL,
 			},
-			Authorizations: authorizations,
+			Authorizations: &struct {
+				BearerAuthIssuers   *[]string                                            "json:\"bearer_auth_issuers,omitempty\""
+				DrsObjectId         *string                                              "json:\"drs_object_id,omitempty\""
+				PassportAuthIssuers *[]string                                            "json:\"passport_auth_issuers,omitempty\""
+				SupportedTypes      *[]drsapi.AccessMethodAuthorizationsSupportedTypes "json:\"supported_types,omitempty\""
+			}{
+				BearerAuthIssuers: &[]string{authzStr},
+			},
 		}},
 		Checksums: []Checksum{{
-			Type: "sha256",
+			Type:     "sha256",
 			Checksum: checksum,
 		}},
 		Size:      size,

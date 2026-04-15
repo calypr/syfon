@@ -6,25 +6,30 @@ import (
 	"testing"
 
 	"github.com/calypr/syfon/db/core"
+	"github.com/gofiber/fiber/v3"
 )
 
 func TestRequestIDMiddleware_GeneratesAndPropagates(t *testing.T) {
 	m := NewRequestIDMiddleware(nil)
-	handler := m.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if core.GetRequestID(r.Context()) == "" {
+	app := fiber.New()
+	app.Use(m.FiberMiddleware())
+	app.Get("/", func(c fiber.Ctx) error {
+		if core.GetRequestID(c.Context()) == "" {
 			t.Fatalf("expected request id in context")
 		}
-		w.WriteHeader(http.StatusOK)
-	}))
+		return c.SendStatus(http.StatusOK)
+	})
 
-	req := httptest.NewRequest(http.MethodGet, "/x", nil)
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rr.Code)
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("test request failed: %v", err)
 	}
-	if rr.Header().Get(core.RequestIDHeader) == "" {
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	if resp.Header.Get(core.RequestIDHeader) == "" {
 		t.Fatalf("expected %s response header", core.RequestIDHeader)
 	}
 }
@@ -32,19 +37,23 @@ func TestRequestIDMiddleware_GeneratesAndPropagates(t *testing.T) {
 func TestRequestIDMiddleware_UsesIncomingHeader(t *testing.T) {
 	m := NewRequestIDMiddleware(nil)
 	const incoming = "rid-test-123"
-	handler := m.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if got := core.GetRequestID(r.Context()); got != incoming {
+	app := fiber.New()
+	app.Use(m.FiberMiddleware())
+	app.Get("/", func(c fiber.Ctx) error {
+		if got := core.GetRequestID(c.Context()); got != incoming {
 			t.Fatalf("expected request id %q in context, got %q", incoming, got)
 		}
-		w.WriteHeader(http.StatusOK)
-	}))
+		return c.SendStatus(http.StatusOK)
+	})
 
-	req := httptest.NewRequest(http.MethodGet, "/x", nil)
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set(core.RequestIDHeader, incoming)
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("test request failed: %v", err)
+	}
 
-	if got := rr.Header().Get(core.RequestIDHeader); got != incoming {
+	if got := resp.Header.Get(core.RequestIDHeader); got != incoming {
 		t.Fatalf("expected response header %q, got %q", incoming, got)
 	}
 }

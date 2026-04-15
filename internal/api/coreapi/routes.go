@@ -12,12 +12,13 @@ import (
 	"github.com/calypr/syfon/apigen/internalapi"
 	"github.com/calypr/syfon/config"
 	"github.com/calypr/syfon/db/core"
-	"github.com/gorilla/mux"
+	"github.com/calypr/syfon/internal/api/routeutil"
+	"github.com/gofiber/fiber/v3"
 )
 
-func RegisterCoreRoutes(router *mux.Router, database core.DatabaseInterface) {
+func RegisterCoreRoutes(router fiber.Router, database core.DatabaseInterface) {
 	handler := drs.Logger(handleSHA256Validity(database), "CoreSHA256Validity")
-	router.Handle(config.RouteCoreSHA256, handler).Methods(http.MethodPost)
+	router.Post(routeutil.FiberPath(config.RouteCoreSHA256), routeutil.Handler(handler))
 }
 
 func handleSHA256Validity(database core.DatabaseInterface) http.HandlerFunc {
@@ -28,11 +29,14 @@ func handleSHA256Validity(database core.DatabaseInterface) http.HandlerFunc {
 			return
 		}
 		input := req.Sha256
-		if len(input) == 0 {
+		if input == nil || len(*input) == 0 {
 			input = req.Hashes
 		}
+		if input == nil || len(*input) == 0 {
+			input = &[]string{}
+		}
 
-		resp, err := corelogic.ComputeSHA256Validity(r.Context(), database, input)
+		resp, err := corelogic.ComputeSHA256Validity(r.Context(), database, *input)
 		if err != nil {
 			status := http.StatusInternalServerError
 			msg := err.Error()

@@ -4,10 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 
+	"github.com/calypr/syfon/client/pkg/common"
 	"github.com/calypr/syfon/client/xfer"
 )
 
@@ -32,14 +32,7 @@ func makeDownloadRequest(ctx context.Context, bk xfer.Downloader, fdr *downloadR
 	// Check for non-success status codes
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
 		defer resp.Body.Close() // Ensure the body is closed
-
-		bodyBytes, err := io.ReadAll(resp.Body)
-		bodyString := "<unable to read body>"
-		if err == nil {
-			bodyString = string(bodyBytes)
-		}
-
-		return fmt.Errorf("non-OK response: %d, body: %s", resp.StatusCode, bodyString)
+		return common.ResponseBodyError(resp, "non-OK response")
 	}
 
 	fdr.response = resp

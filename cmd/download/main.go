@@ -42,9 +42,9 @@ var Cmd = &cobra.Command{
 			if err != nil {
 				return fmt.Errorf("resolve output filename from record: %w", err)
 			}
-			name := strings.TrimSpace(rec.GetFileName())
-			if name == "" {
-				name = did
+			name := did
+			if rec.FileName != nil {
+				name = strings.TrimSpace(*rec.FileName)
 			}
 			outPath = name
 		}
@@ -56,7 +56,10 @@ var Cmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("get download url: %w", err)
 		}
-		downloadURL := strings.TrimSpace((&signed).GetUrl())
+		downloadURL := ""
+		if signed.Url != nil {
+			downloadURL = strings.TrimSpace(*signed.Url)
+		}
 		if downloadURL == "" {
 			return fmt.Errorf("empty download url for did %s", did)
 		}

@@ -11,6 +11,7 @@ import (
 	"github.com/calypr/syfon/client/drs"
 	"github.com/calypr/syfon/client/pkg/common"
 	"github.com/calypr/syfon/client/xfer"
+	drsapi "github.com/calypr/syfon/apigen/drs"
 )
 
 // RegisterFile orchestrates the full registration and upload flow:
@@ -45,16 +46,18 @@ func RegisterFile(ctx context.Context, bk UploadBackend, dc drs.Client, drsObjec
 		}
 	}
 
-	if len(drsObject.AccessMethods) > 0 {
-		for _, am := range drsObject.AccessMethods {
+	if drsObject.AccessMethods != nil && len(*drsObject.AccessMethods) > 0 {
+		for _, am := range *drsObject.AccessMethods {
 			if am.Type == "s3" || am.Type == "gs" {
-				if am.AccessUrl.Url == "" {
+				if am.AccessUrl != nil && am.AccessUrl.Url == "" {
 					continue
 				}
-				parts := strings.Split(am.AccessUrl.Url, "/")
-				if candidate := parts[len(parts)-1]; candidate != "" {
-					uploadFilename = candidate
-					break
+				if am.AccessUrl != nil {
+					parts := strings.Split(am.AccessUrl.Url, "/")
+					if candidate := parts[len(parts)-1]; candidate != "" {
+						uploadFilename = candidate
+						break
+					}
 				}
 			}
 		}
@@ -105,37 +108,52 @@ func RegisterFile(ctx context.Context, bk UploadBackend, dc drs.Client, drsObjec
 
 		// Capture authorizations from existing access methods
 		var authz []string
-		for _, m := range current.AccessMethods {
-			if len(m.Authorizations.BearerAuthIssuers) > 0 {
-				authz = m.Authorizations.BearerAuthIssuers
-				break
+		if current.AccessMethods != nil {
+			for _, m := range *current.AccessMethods {
+				if m.Authorizations != nil && m.Authorizations.BearerAuthIssuers != nil && len(*m.Authorizations.BearerAuthIssuers) > 0 {
+					authz = *m.Authorizations.BearerAuthIssuers
+					break
+				}
 			}
 		}
 
 		am := drs.AccessMethod{
-			Type:      pType,
-			AccessUrl: drs.AccessURL{Url: canonical},
-			Authorizations: drs.Authorizations{
-				BearerAuthIssuers: authz,
+			Type: drsapi.AccessMethodType(pType),
+			AccessUrl: &struct {
+				Headers *[]string "json:\"headers,omitempty\""
+				Url     string    "json:\"url\""
+			}{Url: canonical},
+			Authorizations: &struct {
+				BearerAuthIssuers   *[]string                                            "json:\"bearer_auth_issuers,omitempty\""
+				DrsObjectId         *string                                              "json:\"drs_object_id,omitempty\""
+				PassportAuthIssuers *[]string                                            "json:\"passport_auth_issuers,omitempty\""
+				SupportedTypes      *[]drsapi.AccessMethodAuthorizationsSupportedTypes "json:\"supported_types,omitempty\""
+			}{
+				BearerAuthIssuers: &authz,
 			},
 		}
 
 		// Deep merge or update access methods
 		found := false
-		for i, existing := range current.AccessMethods {
-			// Match by URL or by the specific pType we just uploaded to
-			if existing.AccessUrl.Url == canonical || (existing.Type == pType && existing.AccessUrl.Url == "") {
-				// Update while keeping existing authorizations if our new am is empty
-				if len(am.Authorizations.BearerAuthIssuers) == 0 && len(existing.Authorizations.BearerAuthIssuers) > 0 {
-					am.Authorizations = existing.Authorizations
+		if current.AccessMethods != nil {
+			for i, existing := range *current.AccessMethods {
+				// Match by URL or by the specific pType we just uploaded to
+				if (existing.AccessUrl != nil && existing.AccessUrl.Url == canonical) || (string(existing.Type) == pType && (existing.AccessUrl == nil || existing.AccessUrl.Url == "")) {
+					// Update while keeping existing authorizations if our new am is empty
+					if len(authz) == 0 && existing.Authorizations != nil && existing.Authorizations.BearerAuthIssuers != nil && len(*existing.Authorizations.BearerAuthIssuers) > 0 {
+						am.Authorizations = existing.Authorizations
+					}
+					(*current.AccessMethods)[i] = am
+					found = true
+					break
 				}
-				current.AccessMethods[i] = am
-				found = true
-				break
 			}
 		}
 		if !found {
-			current.AccessMethods = append(current.AccessMethods, am)
+			if current.AccessMethods == nil {
+				current.AccessMethods = &[]drs.AccessMethod{}
+			}
+			*current.AccessMethods = append(*current.AccessMethods, am)
 		}
 
 		if _, updateErr := dc.UpdateRecord(ctx, current, drsObject.Id); updateErr != nil {

@@ -127,7 +127,7 @@ func CanDownloadFile(signedURL string) error {
 	if resp.StatusCode == http.StatusPartialContent || resp.StatusCode == http.StatusOK {
 		return nil
 	}
-	return fmt.Errorf("failed to access file, HTTP status: %d", resp.StatusCode)
+	return ResponseBodyError(resp, "failed to access file")
 }
 
 func IsCloudPresignedURL(raw string) bool {

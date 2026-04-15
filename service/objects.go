@@ -15,7 +15,7 @@ import (
 
 func (s *ObjectsAPIService) GetObject(ctx context.Context, id string, expand bool) (drs.ImplResponse, error) {
 	if strings.TrimSpace(id) == "" {
-		return drs.ImplResponse{Code: http.StatusBadRequest, Body: drs.Error{Msg: "object_id cannot be empty", StatusCode: http.StatusBadRequest}}, nil
+		return drs.ImplResponse{Code: http.StatusBadRequest, Body: drsError("object_id cannot be empty", http.StatusBadRequest)}, nil
 	}
 	obj, err := s.db.GetObject(ctx, id)
 	if err != nil {
@@ -25,16 +25,16 @@ func (s *ObjectsAPIService) GetObject(ctx context.Context, id string, expand boo
 	return drs.ImplResponse{Code: http.StatusOK, Body: obj}, nil
 }
 
-func (s *ObjectsAPIService) PostObject(ctx context.Context, id string, req drs.PostObjectRequest) (drs.ImplResponse, error) {
+func (s *ObjectsAPIService) PostObject(ctx context.Context, id string, req drs.PostObjectRequestObject) (drs.ImplResponse, error) {
 	if strings.TrimSpace(id) == "" {
-		return drs.ImplResponse{Code: http.StatusBadRequest, Body: drs.Error{Msg: "object_id cannot be empty", StatusCode: http.StatusBadRequest}}, nil
+		return drs.ImplResponse{Code: http.StatusBadRequest, Body: drsError("object_id cannot be empty", http.StatusBadRequest)}, nil
 	}
 	return s.GetObject(ctx, id, false)
 }
 
 func (s *ObjectsAPIService) OptionsObject(ctx context.Context, id string) (drs.ImplResponse, error) {
 	if strings.TrimSpace(id) == "" {
-		return drs.ImplResponse{Code: http.StatusBadRequest, Body: drs.Error{Msg: "object_id cannot be empty", StatusCode: http.StatusBadRequest}}, nil
+		return drs.ImplResponse{Code: http.StatusBadRequest, Body: drsError("object_id cannot be empty", http.StatusBadRequest)}, nil
 	}
 	obj, err := s.db.GetObject(ctx, id)
 	if err != nil {
@@ -42,7 +42,7 @@ func (s *ObjectsAPIService) OptionsObject(ctx context.Context, id string) (drs.I
 		return resp, err
 	}
 	authz := authorizationsForObject(obj)
-	if len(authz.BearerAuthIssuers) == 0 {
+	if authz.BearerAuthIssuers == nil || len(*authz.BearerAuthIssuers) == 0 {
 		return drs.ImplResponse{Code: http.StatusNoContent, Body: nil}, nil
 	}
 	return drs.ImplResponse{Code: http.StatusOK, Body: authz}, nil
@@ -72,7 +72,7 @@ func (s *ObjectsAPIService) DeleteObject(ctx context.Context, id string, req drs
 
 func (s *ObjectsAPIService) BulkDeleteObjects(ctx context.Context, req drs.BulkDeleteRequest) (drs.ImplResponse, error) {
 	if len(req.BulkObjectIds) == 0 {
-		return drs.ImplResponse{Code: http.StatusBadRequest, Body: drs.Error{Msg: "bulk_object_ids cannot be empty", StatusCode: http.StatusBadRequest}}, nil
+		return drs.ImplResponse{Code: http.StatusBadRequest, Body: drsError("bulk_object_ids cannot be empty", http.StatusBadRequest)}, nil
 	}
 	if len(req.BulkObjectIds) > defaultMaxBulkDeleteLength {
 		return tooLargeResponse(fmt.Sprintf("bulk delete request contains %d objects but server maximum is %d", len(req.BulkObjectIds), defaultMaxBulkDeleteLength)), nil
@@ -103,20 +103,20 @@ func (s *ObjectsAPIService) BulkDeleteObjects(ctx context.Context, req drs.BulkD
 		}
 	}
 	if err := s.db.BulkDeleteObjects(ctx, req.BulkObjectIds); err != nil {
-		return drs.ImplResponse{Code: http.StatusInternalServerError, Body: drs.Error{Msg: err.Error(), StatusCode: http.StatusInternalServerError}}, err
+		return drs.ImplResponse{Code: http.StatusInternalServerError, Body: drsError(err.Error(), http.StatusInternalServerError)}, err
 	}
 	return drs.ImplResponse{Code: http.StatusNoContent, Body: nil}, nil
 }
 
-func (s *ObjectsAPIService) GetBulkObjects(ctx context.Context, req drs.GetBulkObjectsRequest, expand bool) (drs.ImplResponse, error) {
-	if len(req.BulkObjectIds) == 0 {
-		return drs.ImplResponse{Code: http.StatusBadRequest, Body: drs.Error{Msg: "bulk_object_ids cannot be empty", StatusCode: http.StatusBadRequest}}, nil
+func (s *ObjectsAPIService) GetBulkObjects(ctx context.Context, req drs.GetBulkObjectsRequestObject, expand bool) (drs.ImplResponse, error) {
+	if req.Body == nil || len(req.Body.BulkObjectIds) == 0 {
+		return drs.ImplResponse{Code: http.StatusBadRequest, Body: drsError("bulk_object_ids cannot be empty", http.StatusBadRequest)}, nil
 	}
-	if len(req.BulkObjectIds) > defaultMaxBulkRequestLength {
-		return tooLargeResponse(fmt.Sprintf("bulk object request contains %d object IDs but server maximum is %d", len(req.BulkObjectIds), defaultMaxBulkRequestLength)), nil
+	if len(req.Body.BulkObjectIds) > defaultMaxBulkRequestLength {
+		return tooLargeResponse(fmt.Sprintf("bulk object request contains %d object IDs but server maximum is %d", len(req.Body.BulkObjectIds), defaultMaxBulkRequestLength)), nil
 	}
 
-	fetched, err := s.db.GetBulkObjects(ctx, req.BulkObjectIds)
+	fetched, err := s.db.GetBulkObjects(ctx, req.Body.BulkObjectIds)
 	if err != nil {
 		resp := errorResponseForDBError(ctx, "GetBulkObjects.GetBulkObjects", err)
 		return resp, err
@@ -126,10 +126,10 @@ func (s *ObjectsAPIService) GetBulkObjects(ctx context.Context, req drs.GetBulkO
 		byID[obj.Id] = obj
 	}
 
-	resolved := make([]drs.DrsObject, 0, len(req.BulkObjectIds))
+	resolved := make([]drs.DrsObject, 0, len(req.Body.BulkObjectIds))
 	missing := make([]string, 0)
 	denied := make([]string, 0)
-	for _, id := range req.BulkObjectIds {
+	for _, id := range req.Body.BulkObjectIds {
 		obj, ok := byID[id]
 		if !ok {
 			missing = append(missing, id)
@@ -142,23 +142,41 @@ func (s *ObjectsAPIService) GetBulkObjects(ctx context.Context, req drs.GetBulkO
 		resolved = append(resolved, obj.DrsObject)
 	}
 	out := drs.GetBulkObjects200Response{
-		Summary: drs.Summary{
-			Requested:  int32(len(req.BulkObjectIds)),
-			Resolved:   int32(len(resolved)),
-			Unresolved: int32(len(missing)),
+		Summary: &drs.Summary{
+			Requested:  core.Ptr(len(req.Body.BulkObjectIds)),
+			Resolved:   core.Ptr(len(resolved)),
+			Unresolved: core.Ptr(len(missing)),
 		},
-		ResolvedDrsObject: resolved,
+		ResolvedDrsObject: &resolved,
 	}
 	if len(denied) > 0 {
-		out.UnresolvedDrsObjects = append(out.UnresolvedDrsObjects, drs.UnresolvedInner{
-			ErrorCode: int32(unauthorizedStatus(ctx)),
-			ObjectIds: uniqueStrings(denied),
-		})
+		code := unauthorizedStatus(ctx)
+		ids := uniqueStrings(denied)
+		out.UnresolvedDrsObjects = &[]struct {
+			ErrorCode *int      `json:"error_code,omitempty"`
+			ObjectIds *[]string `json:"object_ids,omitempty"`
+		}{
+			{
+				ErrorCode: &code,
+				ObjectIds: &ids,
+			},
+		}
 	}
 	if len(missing) > 0 {
-		out.UnresolvedDrsObjects = append(out.UnresolvedDrsObjects, drs.UnresolvedInner{
-			ErrorCode: 404,
-			ObjectIds: uniqueStrings(missing),
+		code := http.StatusNotFound
+		ids := uniqueStrings(missing)
+		if out.UnresolvedDrsObjects == nil {
+			out.UnresolvedDrsObjects = &[]struct {
+				ErrorCode *int      `json:"error_code,omitempty"`
+				ObjectIds *[]string `json:"object_ids,omitempty"`
+			}{}
+		}
+		*out.UnresolvedDrsObjects = append(*out.UnresolvedDrsObjects, struct {
+			ErrorCode *int      `json:"error_code,omitempty"`
+			ObjectIds *[]string `json:"object_ids,omitempty"`
+		}{
+			ErrorCode: &code,
+			ObjectIds: &ids,
 		})
 	}
 	return drs.ImplResponse{Code: http.StatusOK, Body: out}, nil
@@ -168,11 +186,11 @@ func (s *ObjectsAPIService) OptionsBulkObject(ctx context.Context, _ drs.BulkObj
 	return drs.ImplResponse{Code: http.StatusNoContent, Body: nil}, nil
 }
 
-func (s *ObjectsAPIService) RegisterObjects(ctx context.Context, req drs.RegisterObjectsRequest) (drs.ImplResponse, error) {
+func (s *ObjectsAPIService) RegisterObjects(ctx context.Context, req drs.RegisterObjectsBody) (drs.ImplResponse, error) {
 	if len(req.Candidates) == 0 {
 		return drs.ImplResponse{
 			Code: http.StatusBadRequest,
-			Body: drs.Error{Msg: "candidates cannot be empty", StatusCode: http.StatusBadRequest},
+			Body: drsError("candidates cannot be empty", http.StatusBadRequest),
 		}, nil
 	}
 	if len(req.Candidates) > defaultMaxRegisterRequestLength {
@@ -188,10 +206,7 @@ func (s *ObjectsAPIService) RegisterObjects(ctx context.Context, req drs.Registe
 		if !ok {
 			return drs.ImplResponse{
 				Code: http.StatusBadRequest,
-				Body: drs.Error{
-					Msg:        "candidate[" + strconv.Itoa(i) + "] must include a sha256 checksum",
-					StatusCode: http.StatusBadRequest,
-				},
+				Body: drsError("candidate[" + strconv.Itoa(i) + "] must include a sha256 checksum", http.StatusBadRequest,),
 			}, nil
 		}
 		authz := make([]string, 0)
@@ -200,8 +215,8 @@ func (s *ObjectsAPIService) RegisterObjects(ctx context.Context, req drs.Registe
 			Name:        c.Name,
 			Size:        c.Size,
 			CreatedTime: now,
-			UpdatedTime: now,
-			Version:     "1",
+			UpdatedTime: core.Ptr(now),
+			Version:     core.Ptr("1"),
 			Description: c.Description,
 			Aliases:     c.Aliases,
 		}
@@ -209,44 +224,54 @@ func (s *ObjectsAPIService) RegisterObjects(ctx context.Context, req drs.Registe
 
 		seenAccess := make(map[string]struct{})
 		seenAuthz := make(map[string]struct{})
-		accessMethods := make([]drs.AccessMethod, 0, len(c.AccessMethods))
-		for _, am := range c.AccessMethods {
-			if am.AccessUrl.Url == "" {
-				continue
-			}
-			accessKey := am.Type + "|" + am.AccessUrl.Url
-			if _, exists := seenAccess[accessKey]; exists {
-				continue
-			}
-			seenAccess[accessKey] = struct{}{}
+		var accessMethods []drs.AccessMethod
+		if c.AccessMethods != nil {
+			accessMethods = make([]drs.AccessMethod, 0, len(*c.AccessMethods))
+			for _, am := range *c.AccessMethods {
+				if am.AccessUrl == nil || am.AccessUrl.Url == "" {
+					continue
+				}
+				accessKey := string(am.Type) + "|" + am.AccessUrl.Url
+				if _, exists := seenAccess[accessKey]; exists {
+					continue
+				}
+				seenAccess[accessKey] = struct{}{}
 
-			accessID := am.AccessId
-			if accessID == "" {
-				accessID = am.Type
-			}
-			accessMethods = append(accessMethods, drs.AccessMethod{
-				Type:      am.Type,
-				AccessUrl: am.AccessUrl,
-				AccessId:  accessID,
-				Region:    am.Region,
-			})
-			for _, issuer := range am.Authorizations.BearerAuthIssuers {
-				if issuer == "" {
-					continue
+				accessID := am.AccessId
+				if accessID == nil || *accessID == "" {
+					accessID = core.Ptr(string(am.Type))
 				}
-				if _, ok := seenAuthz[issuer]; ok {
-					continue
+				accessMethods = append(accessMethods, drs.AccessMethod{
+					Type:      am.Type,
+					AccessUrl: am.AccessUrl,
+					AccessId:  accessID,
+					Region:    am.Region,
+				})
+				if am.Authorizations != nil && am.Authorizations.BearerAuthIssuers != nil {
+					for _, issuer := range *am.Authorizations.BearerAuthIssuers {
+						if issuer == "" {
+							continue
+						}
+						if _, ok := seenAuthz[issuer]; ok {
+							continue
+						}
+						seenAuthz[issuer] = struct{}{}
+						authz = append(authz, issuer)
+					}
 				}
-				seenAuthz[issuer] = struct{}{}
-				authz = append(authz, issuer)
 			}
 		}
 		for i := range accessMethods {
-			accessMethods[i].Authorizations = drs.AccessMethodAuthorizations{
-				BearerAuthIssuers: authz,
+			accessMethods[i].Authorizations = &struct {
+				BearerAuthIssuers   *[]string                                        `json:"bearer_auth_issuers,omitempty"`
+				DrsObjectId         *string                                          `json:"drs_object_id,omitempty"`
+				PassportAuthIssuers *[]string                                        `json:"passport_auth_issuers,omitempty"`
+				SupportedTypes      *[]drs.AccessMethodAuthorizationsSupportedTypes `json:"supported_types,omitempty"`
+			}{
+				BearerAuthIssuers: &authz,
 			}
 		}
-		obj.AccessMethods = accessMethods
+		obj.AccessMethods = &accessMethods
 		id := core.MintObjectIDFromChecksum(primaryChecksum, authz)
 		obj.Id = id
 		obj.SelfUri = "drs://" + id
@@ -267,7 +292,7 @@ func (s *ObjectsAPIService) RegisterObjects(ctx context.Context, req drs.Registe
 	}
 
 	if err := s.db.RegisterObjects(ctx, objects); err != nil {
-		return drs.ImplResponse{Code: http.StatusInternalServerError, Body: drs.Error{Msg: err.Error(), StatusCode: http.StatusInternalServerError}}, err
+		return drs.ImplResponse{Code: http.StatusInternalServerError, Body: drsError(err.Error(), http.StatusInternalServerError)}, err
 	}
 
 	return drs.ImplResponse{
@@ -287,7 +312,7 @@ func (s *ObjectsAPIService) GetObjectsByChecksums(ctx context.Context, checksums
 
 	objsMap, err := s.db.GetObjectsByChecksums(ctx, lookupValues)
 	if err != nil {
-		return drs.ImplResponse{Code: http.StatusInternalServerError, Body: drs.Error{Msg: err.Error(), StatusCode: http.StatusInternalServerError}}, err
+		return drs.ImplResponse{Code: http.StatusInternalServerError, Body: drsError(err.Error(), http.StatusInternalServerError)}, err
 	}
 
 	filtered := make(map[string][]core.InternalObject, len(checksums))
@@ -318,7 +343,7 @@ func (s *ObjectsAPIService) AddChecksums(ctx context.Context, objectID string, c
 	if len(checksums) == 0 {
 		return drs.ImplResponse{
 			Code: http.StatusBadRequest,
-			Body: drs.Error{Msg: "checksums cannot be empty", StatusCode: http.StatusBadRequest},
+			Body: drsError("checksums cannot be empty", http.StatusBadRequest),
 		}, nil
 	}
 	if len(checksums) > defaultMaxChecksumAdditionsPerObject {
@@ -341,9 +366,9 @@ func (s *ObjectsAPIService) AddChecksums(ctx context.Context, objectID string, c
 	merged := mergeAdditionalChecksums(obj.Checksums, checksums)
 	updated := *obj
 	updated.Checksums = merged
-	updated.UpdatedTime = time.Now()
+	updated.UpdatedTime = core.Ptr(time.Now())
 	if err := s.db.RegisterObjects(ctx, []core.InternalObject{updated}); err != nil {
-		return drs.ImplResponse{Code: http.StatusInternalServerError, Body: drs.Error{Msg: err.Error(), StatusCode: http.StatusInternalServerError}}, err
+		return drs.ImplResponse{Code: http.StatusInternalServerError, Body: drsError(err.Error(), http.StatusInternalServerError)}, err
 	}
 	refreshed, err := s.db.GetObject(ctx, objectID)
 	if err != nil {
@@ -357,7 +382,7 @@ func (s *ObjectsAPIService) BulkAddChecksums(ctx context.Context, updatesByID ma
 	if len(updatesByID) == 0 {
 		return drs.ImplResponse{
 			Code: http.StatusBadRequest,
-			Body: drs.Error{Msg: "updates cannot be empty", StatusCode: http.StatusBadRequest},
+			Body: drsError("updates cannot be empty", http.StatusBadRequest),
 		}, nil
 	}
 	if len(updatesByID) > defaultMaxBulkChecksumAdditionLength {
@@ -366,10 +391,10 @@ func (s *ObjectsAPIService) BulkAddChecksums(ctx context.Context, updatesByID ma
 
 	for objectID, checksums := range updatesByID {
 		if strings.TrimSpace(objectID) == "" {
-			return drs.ImplResponse{Code: http.StatusBadRequest, Body: drs.Error{Msg: "object_id cannot be empty", StatusCode: http.StatusBadRequest}}, nil
+			return drs.ImplResponse{Code: http.StatusBadRequest, Body: drsError("object_id cannot be empty", http.StatusBadRequest)}, nil
 		}
 		if len(checksums) == 0 {
-			return drs.ImplResponse{Code: http.StatusBadRequest, Body: drs.Error{Msg: "checksums cannot be empty", StatusCode: http.StatusBadRequest}}, nil
+			return drs.ImplResponse{Code: http.StatusBadRequest, Body: drsError("checksums cannot be empty", http.StatusBadRequest)}, nil
 		}
 	}
 
@@ -389,12 +414,12 @@ func (s *ObjectsAPIService) BulkAddChecksums(ctx context.Context, updatesByID ma
 		}
 		updated := *obj
 		updated.Checksums = mergeAdditionalChecksums(obj.Checksums, checksums)
-		updated.UpdatedTime = time.Now()
+		updated.UpdatedTime = core.Ptr(time.Now())
 		toWrite = append(toWrite, updated)
 	}
 
 	if err := s.db.RegisterObjects(ctx, toWrite); err != nil {
-		return drs.ImplResponse{Code: http.StatusInternalServerError, Body: drs.Error{Msg: err.Error(), StatusCode: http.StatusInternalServerError}}, err
+		return drs.ImplResponse{Code: http.StatusInternalServerError, Body: drsError(err.Error(), http.StatusInternalServerError)}, err
 	}
 
 	updatedObjects := make([]drs.DrsObject, 0, len(updatesByID))
@@ -410,10 +435,10 @@ func (s *ObjectsAPIService) BulkAddChecksums(ctx context.Context, updatesByID ma
 
 func (s *ObjectsAPIService) UpdateObjectAccessMethods(ctx context.Context, objectID string, req drs.AccessMethodUpdateRequest) (drs.ImplResponse, error) {
 	if strings.TrimSpace(objectID) == "" {
-		return drs.ImplResponse{Code: http.StatusBadRequest, Body: drs.Error{Msg: "object_id cannot be empty", StatusCode: http.StatusBadRequest}}, nil
+		return drs.ImplResponse{Code: http.StatusBadRequest, Body: drsError("object_id cannot be empty", http.StatusBadRequest)}, nil
 	}
 	if len(req.AccessMethods) == 0 {
-		return drs.ImplResponse{Code: http.StatusBadRequest, Body: drs.Error{Msg: "access_methods cannot be empty", StatusCode: http.StatusBadRequest}}, nil
+		return drs.ImplResponse{Code: http.StatusBadRequest, Body: drsError("access_methods cannot be empty", http.StatusBadRequest)}, nil
 	}
 
 	existing, err := s.db.GetObject(ctx, objectID)
@@ -430,11 +455,11 @@ func (s *ObjectsAPIService) UpdateObjectAccessMethods(ctx context.Context, objec
 	}
 
 	if err := s.db.UpdateObjectAccessMethods(ctx, objectID, req.AccessMethods); err != nil {
-		return drs.ImplResponse{Code: http.StatusInternalServerError, Body: drs.Error{Msg: err.Error(), StatusCode: http.StatusInternalServerError}}, err
+		return drs.ImplResponse{Code: http.StatusInternalServerError, Body: drsError(err.Error(), http.StatusInternalServerError)}, err
 	}
 	updated, err := s.db.GetObject(ctx, objectID)
 	if err != nil {
-		return drs.ImplResponse{Code: http.StatusInternalServerError, Body: drs.Error{Msg: err.Error(), StatusCode: http.StatusInternalServerError}}, err
+		return drs.ImplResponse{Code: http.StatusInternalServerError, Body: drsError(err.Error(), http.StatusInternalServerError)}, err
 	}
 	return drs.ImplResponse{Code: http.StatusOK, Body: drsmap.ToExternal(*updated)}, nil
 }
@@ -443,7 +468,7 @@ func (s *ObjectsAPIService) GetObjectsByChecksum(ctx context.Context, checksum s
 	checksumType, checksumValue := parseChecksumQuery(checksum)
 	objs, err := s.db.GetObjectsByChecksum(ctx, checksumValue)
 	if err != nil {
-		return drs.ImplResponse{Code: http.StatusInternalServerError, Body: drs.Error{Msg: err.Error(), StatusCode: http.StatusInternalServerError}}, err
+		return drs.ImplResponse{Code: http.StatusInternalServerError, Body: drsError(err.Error(), http.StatusInternalServerError)}, err
 	}
 	if checksumType != "" {
 		filtered := make([]core.InternalObject, 0, len(objs))
@@ -458,14 +483,14 @@ func (s *ObjectsAPIService) GetObjectsByChecksum(ctx context.Context, checksum s
 		objs = filtered
 	}
 	if len(objs) == 0 {
-		return drs.ImplResponse{Code: http.StatusNotFound, Body: drs.Error{Msg: "object not found for checksum", StatusCode: http.StatusNotFound}}, nil
+		return drs.ImplResponse{Code: http.StatusNotFound, Body: drsError("object not found for checksum", http.StatusNotFound)}, nil
 	}
 	return drs.ImplResponse{Code: http.StatusOK, Body: drsmap.ToExternal(objs[0])}, nil
 }
 
 func (s *ObjectsAPIService) BulkUpdateAccessMethods(ctx context.Context, req drs.BulkAccessMethodUpdateRequest) (drs.ImplResponse, error) {
 	if len(req.Updates) == 0 {
-		return drs.ImplResponse{Code: http.StatusBadRequest, Body: drs.Error{Msg: "updates cannot be empty", StatusCode: http.StatusBadRequest}}, nil
+		return drs.ImplResponse{Code: http.StatusBadRequest, Body: drsError("updates cannot be empty", http.StatusBadRequest)}, nil
 	}
 	if len(req.Updates) > defaultMaxBulkAccessMethodUpdateLength {
 		return tooLargeResponse(fmt.Sprintf("bulk access method update contains %d updates but server maximum is %d", len(req.Updates), defaultMaxBulkAccessMethodUpdateLength)), nil
@@ -485,14 +510,14 @@ func (s *ObjectsAPIService) BulkUpdateAccessMethods(ctx context.Context, req drs
 		}
 		if !core.HasMethodAccess(ctx, "update", targetResources) {
 			code := unauthorizedStatus(ctx)
-			return drs.ImplResponse{Code: code, Body: drs.Error{Msg: "forbidden: missing update permission", StatusCode: int32(code)}}, nil
+			return drs.ImplResponse{Code: code, Body: drsError("forbidden: missing update permission", code)}, nil
 		}
 	}
 	for _, update := range req.Updates {
 		updates[update.ObjectId] = update.AccessMethods
 	}
 	if err := s.db.BulkUpdateAccessMethods(ctx, updates); err != nil {
-		return drs.ImplResponse{Code: http.StatusInternalServerError, Body: drs.Error{Msg: err.Error(), StatusCode: http.StatusInternalServerError}}, err
+		return drs.ImplResponse{Code: http.StatusInternalServerError, Body: drsError(err.Error(), http.StatusInternalServerError)}, err
 	}
 	for _, u := range req.Updates {
 		obj, err := s.db.GetObject(ctx, u.ObjectId)

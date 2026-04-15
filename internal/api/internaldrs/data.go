@@ -11,9 +11,10 @@ import (
 	"github.com/calypr/syfon/apigen/drs"
 	"github.com/calypr/syfon/config"
 	"github.com/calypr/syfon/db/core"
+	"github.com/calypr/syfon/internal/api/routeutil"
 	"github.com/calypr/syfon/internal/provider"
 	"github.com/calypr/syfon/urlmanager"
-	"github.com/gorilla/mux"
+	"github.com/gofiber/fiber/v3"
 )
 
 const bucketControlResource = "/services/internal/buckets"
@@ -49,67 +50,44 @@ func hasScopedBucketAccess(r *http.Request, scope core.BucketScope, methods ...s
 	return hasAnyMethodAccess(r, []string{res}, methods...)
 }
 
-func RegisterInternalDataRoutes(router *mux.Router, database core.DatabaseInterface, uM urlmanager.UrlManager) {
-	// Data routes exposed under /data to match gateway contract.
-	router.Handle(config.RouteInternalDownload, drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func RegisterInternalDataRoutes(router fiber.Router, database core.DatabaseInterface, uM urlmanager.UrlManager) {
+	router.Get(routeutil.FiberPath(config.RouteInternalDownload), routeutil.Handler(drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handleInternalDownload(w, r, database, uM)
-	}), "InternalDownload")).Methods(http.MethodGet)
-
-	router.Handle(config.RouteInternalDownloadPart, drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	}), "InternalDownload"), "file_id"))
+	router.Get(routeutil.FiberPath(config.RouteInternalDownloadPart), routeutil.Handler(drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handleInternalDownloadPart(w, r, database, uM)
-	}), "InternalDownloadPart")).Methods(http.MethodGet)
-
-	router.Handle(config.RouteInternalUpload, drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	}), "InternalDownloadPart"), "file_id"))
+	router.Post(routeutil.FiberPath(config.RouteInternalUpload), routeutil.Handler(drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handleInternalUploadBlank(w, r, database, uM)
-	}), "InternalUploadBlank")).Methods(http.MethodPost)
-
-	router.Handle(config.RouteInternalUploadURL, drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	}), "InternalUploadBlank")))
+	router.Get(routeutil.FiberPath(config.RouteInternalUploadURL), routeutil.Handler(drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handleInternalUploadURL(w, r, database, uM)
-	}), "InternalUploadURL")).Methods(http.MethodGet)
-
-	router.Handle(config.RouteInternalUploadBulk, drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	}), "InternalUploadURL"), "file_id"))
+	router.Post(routeutil.FiberPath(config.RouteInternalUploadBulk), routeutil.Handler(drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handleInternalUploadBulk(w, r, database, uM)
-	}), "InternalUploadBulk")).Methods(http.MethodPost)
-
-	router.Handle(config.RouteInternalMultipartInit, drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	}), "InternalUploadBulk")))
+	router.Post(routeutil.FiberPath(config.RouteInternalMultipartInit), routeutil.Handler(drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handleInternalMultipartInit(w, r, database, uM)
-	}), "InternalMultipartInit")).Methods(http.MethodPost)
-
-	router.Handle(config.RouteInternalMultipartUpload, drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	}), "InternalMultipartInit")))
+	router.Post(routeutil.FiberPath(config.RouteInternalMultipartUpload), routeutil.Handler(drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handleInternalMultipartUpload(w, r, database, uM)
-	}), "InternalMultipartUpload")).Methods(http.MethodPost)
-
-	router.Handle(config.RouteInternalMultipartComplete, drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	}), "InternalMultipartUpload")))
+	router.Post(routeutil.FiberPath(config.RouteInternalMultipartComplete), routeutil.Handler(drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handleInternalMultipartComplete(w, r, database, uM)
-	}), "InternalMultipartComplete")).Methods(http.MethodPost)
+	}), "InternalMultipartComplete")))
 
-	// Bucket endpoints.
-	router.Handle(config.RouteInternalBuckets, drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodGet:
-			handleInternalBuckets(w, r, database)
-		case http.MethodPut:
-			handleInternalPutBucket(w, r, database)
-		default:
-			writeHTTPError(w, r, http.StatusMethodNotAllowed, "Method not allowed", nil)
-		}
-	}), "InternalBuckets")).Methods(http.MethodGet, http.MethodPut)
-
-	router.Handle(config.RouteInternalBucketDetail, drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodDelete {
-			handleInternalDeleteBucket(w, r, database)
-			return
-		}
-		writeHTTPError(w, r, http.StatusMethodNotAllowed, "Method not allowed", nil)
-	}), "InternalBucketDetail")).Methods(http.MethodDelete)
-
-	router.Handle(config.RouteInternalBucketScopes, drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPost {
-			handleInternalCreateBucketScope(w, r, database)
-			return
-		}
-		writeHTTPError(w, r, http.StatusMethodNotAllowed, "Method not allowed", nil)
-	}), "InternalBucketScopes")).Methods(http.MethodPost)
+	router.Get(routeutil.FiberPath(config.RouteInternalBuckets), routeutil.Handler(drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handleInternalBuckets(w, r, database)
+	}), "InternalBuckets")))
+	router.Put(routeutil.FiberPath(config.RouteInternalBuckets), routeutil.Handler(drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handleInternalPutBucket(w, r, database)
+	}), "InternalBuckets")))
+	router.Delete(routeutil.FiberPath(config.RouteInternalBucketDetail), routeutil.Handler(drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handleInternalDeleteBucket(w, r, database)
+	}), "InternalBucketDetail"), "bucket"))
+	router.Post(routeutil.FiberPath(config.RouteInternalBucketScopes), routeutil.Handler(drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handleInternalCreateBucketScope(w, r, database)
+	}), "InternalBucketScopes"), "bucket"))
 }
 
 func resolveBucket(ctx *http.Request, database core.DatabaseInterface, requested string) (string, error) {
@@ -146,29 +124,39 @@ func resolveObjectRemotePath(database core.DatabaseInterface, ctx *http.Request,
 		return "", false
 	}
 	targetBucket := strings.TrimSpace(bucket)
-	for _, am := range obj.AccessMethods {
-		raw := strings.TrimSpace(am.AccessUrl.Url)
-		if raw == "" {
-			continue
-		}
-		u, err := url.Parse(raw)
-		if err != nil {
-			continue
-		}
-		// Match any supported protocol scheme.
-		p := provider.FromScheme(u.Scheme)
-		if p == "" {
-			continue
-		}
-		if !strings.EqualFold(strings.TrimSpace(u.Host), targetBucket) {
-			continue
-		}
-		key := strings.TrimPrefix(strings.TrimSpace(u.Path), "/")
-		if key != "" {
-			return key, true
+	if obj.AccessMethods != nil {
+		for _, am := range *obj.AccessMethods {
+			if am.AccessUrl == nil {
+				continue
+			}
+			raw := strings.TrimSpace(am.AccessUrl.Url)
+			if raw == "" {
+				continue
+			}
+			u, err := url.Parse(raw)
+			if err != nil {
+				continue
+			}
+			// Match any supported protocol scheme.
+			p := provider.FromScheme(u.Scheme)
+			if p == "" {
+				continue
+			}
+			if !strings.EqualFold(strings.TrimSpace(u.Host), targetBucket) {
+				continue
+			}
+			key := strings.TrimPrefix(strings.TrimSpace(u.Path), "/")
+			if key != "" {
+				return key, true
+			}
 		}
 	}
 	return "", false
+}
+
+func resolveObjectRemotePathWithCtx(database core.DatabaseInterface, ctx context.Context, objectID string, bucket string) (string, bool) {
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "/", nil)
+	return resolveObjectRemotePath(database, req, objectID, bucket)
 }
 
 func resolveObjectByIDOrChecksum(database core.DatabaseInterface, ctx context.Context, objectID string) (*core.InternalObject, error) {

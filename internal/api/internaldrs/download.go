@@ -10,14 +10,13 @@ import (
 	"github.com/calypr/syfon/apigen/internalapi"
 	"github.com/calypr/syfon/config"
 	"github.com/calypr/syfon/db/core"
+	"github.com/calypr/syfon/internal/api/routeutil"
 	"github.com/calypr/syfon/internal/provider"
 	"github.com/calypr/syfon/urlmanager"
-	"github.com/gorilla/mux"
 )
 
 func handleInternalDownload(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface, uM urlmanager.UrlManager) {
-	vars := mux.Vars(r)
-	fileID := vars["file_id"]
+	fileID := routeutil.PathParam(r, "file_id")
 
 	obj, err := resolveObjectByIDOrChecksum(database, r.Context(), fileID)
 	if err != nil {
@@ -31,17 +30,19 @@ func handleInternalDownload(w http.ResponseWriter, r *http.Request, database cor
 
 	// Find first supported access method (s3, gs, azblob)
 	var objectURL string
-	for _, am := range obj.AccessMethods {
-		if am.AccessUrl.Url == "" {
-			continue
-		}
-		u, err := url.Parse(am.AccessUrl.Url)
-		if err != nil {
-			continue
-		}
-		if provider.FromScheme(u.Scheme) != "" {
-			objectURL = am.AccessUrl.Url
-			break
+	if obj.AccessMethods != nil {
+		for _, am := range *obj.AccessMethods {
+			if am.AccessUrl == nil || am.AccessUrl.Url == "" {
+				continue
+			}
+			u, err := url.Parse(am.AccessUrl.Url)
+			if err != nil {
+				continue
+			}
+			if provider.FromScheme(u.Scheme) != "" {
+				objectURL = am.AccessUrl.Url
+				break
+			}
 		}
 	}
 
@@ -87,8 +88,7 @@ func handleInternalDownload(w http.ResponseWriter, r *http.Request, database cor
 }
 
 func handleInternalDownloadPart(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface, uM urlmanager.UrlManager) {
-	vars := mux.Vars(r)
-	fileID := vars["file_id"]
+	fileID := routeutil.PathParam(r, "file_id")
 
 	startStr := r.URL.Query().Get("start")
 	endStr := r.URL.Query().Get("end")
@@ -121,17 +121,19 @@ func handleInternalDownloadPart(w http.ResponseWriter, r *http.Request, database
 
 	// Find first supported access method (s3, gs, azblob)
 	var objectURL string
-	for _, am := range obj.AccessMethods {
-		if am.AccessUrl.Url == "" {
-			continue
-		}
-		u, err := url.Parse(am.AccessUrl.Url)
-		if err != nil {
-			continue
-		}
-		if provider.FromScheme(u.Scheme) != "" {
-			objectURL = am.AccessUrl.Url
-			break
+	if obj.AccessMethods != nil {
+		for _, am := range *obj.AccessMethods {
+			if am.AccessUrl.Url == "" {
+				continue
+			}
+			u, err := url.Parse(am.AccessUrl.Url)
+			if err != nil {
+				continue
+			}
+			if provider.FromScheme(u.Scheme) != "" {
+				objectURL = am.AccessUrl.Url
+				break
+			}
 		}
 	}
 

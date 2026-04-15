@@ -25,7 +25,9 @@ func GetFileInfo(
 	}
 
 	name := ""
-	name = drsObj.Name
+	if drsObj.Name != nil {
+		name = *drsObj.Name
+	}
 	if name == "" {
 		// If name is empty (some DRS servers might not return it?), use GUID
 		name = guid

@@ -332,10 +332,12 @@ func downloadToPathMultipart(
 	if err != nil {
 		return fmt.Errorf("multipart preflight request failed: %w", err)
 	}
-	_ = resp.Body.Close()
 	if resp.StatusCode != 206 {
-		return fmt.Errorf("range requests not supported (status %d)", resp.StatusCode)
+		bodyErr := common.ResponseBodyError(resp, "range requests not supported")
+		_ = resp.Body.Close()
+		return bodyErr
 	}
+	_ = resp.Body.Close()
 
 	if dir := filepath.Dir(dstPath); dir != "." {
 		if err := os.MkdirAll(dir, 0766); err != nil {
@@ -383,11 +385,13 @@ func downloadToPathMultipart(
 			if err != nil {
 				return fmt.Errorf("range download %d-%d failed: %w", ps, pe, err)
 			}
-			defer partResp.Body.Close()
 
 			if partResp.StatusCode != 206 {
-				return fmt.Errorf("range download %d-%d returned status %d", ps, pe, partResp.StatusCode)
+				bodyErr := common.ResponseBodyError(partResp, fmt.Sprintf("range download %d-%d returned", ps, pe))
+				_ = partResp.Body.Close()
+				return bodyErr
 			}
+			defer partResp.Body.Close()
 
 			partSize := pe - ps + 1
 			w := io.NewOffsetWriter(file, ps)

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+
+	"github.com/calypr/syfon/client/pkg/common"
 )
 
 // SignedURLBackend implements RangeReader using server-signed URLs.
@@ -53,9 +55,9 @@ func (b *SignedURLBackend) GetRangeReader(ctx context.Context, guid string, offs
 	}
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
-		body, _ := io.ReadAll(resp.Body)
+		bodyErr := common.ResponseBodyError(resp, "signed url request failed")
 		resp.Body.Close()
-		return nil, fmt.Errorf("signed url request failed (%d): %s", resp.StatusCode, string(body))
+		return nil, bodyErr
 	}
 
 	return resp.Body, nil

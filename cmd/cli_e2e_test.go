@@ -5,8 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"net/http"
-	"net/http/httptest"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,11 +17,13 @@ import (
 	"github.com/calypr/syfon/db"
 	"github.com/calypr/syfon/db/core"
 	"github.com/calypr/syfon/internal/api/coreapi"
+	"github.com/calypr/syfon/internal/api/docs"
 	"github.com/calypr/syfon/internal/api/internaldrs"
 	"github.com/calypr/syfon/internal/api/metrics"
 	"github.com/calypr/syfon/service"
 	"github.com/calypr/syfon/urlmanager"
 	"github.com/google/uuid"
+	"github.com/gofiber/fiber/v3"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
@@ -54,7 +55,20 @@ func resetFlagSet(fs *pflag.FlagSet) {
 	})
 }
 
-func newSyfonTestServer(t *testing.T) *httptest.Server {
+type fiberTestServer struct {
+	URL string
+	app *fiber.App
+	ln  net.Listener
+}
+
+func (s *fiberTestServer) Close() {
+	_ = s.app.Shutdown()
+	if s.ln != nil {
+		_ = s.ln.Close()
+	}
+}
+
+func newSyfonTestServer(t *testing.T) *fiberTestServer {
 	t.Helper()
 	storageDir := t.TempDir()
 	endpoint := "file://" + storageDir
@@ -71,21 +85,34 @@ func newSyfonTestServer(t *testing.T) *httptest.Server {
 	uM := urlmanager.NewManager(database, config.SigningConfig{DefaultExpirySeconds: 900})
 	svc := service.NewObjectsAPIService(database, uM)
 
-	objectsController := drs.NewObjectsAPIController(svc)
-	serviceInfoController := drs.NewServiceInfoAPIController(svc)
-	uploadController := drs.NewUploadRequestAPIController(svc)
-
-	router := drs.NewRouter(objectsController, serviceInfoController, uploadController)
-	router.HandleFunc(config.RouteHealthz, func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("OK"))
+	app := fiber.New()
+	app.Get(config.RouteHealthz, func(c fiber.Ctx) error {
+		return c.SendString("OK")
 	})
-	coreapi.RegisterCoreRoutes(router, database)
-	metrics.RegisterMetricsRoutes(router, database)
-	internaldrs.RegisterInternalIndexRoutes(router, database)
-	internaldrs.RegisterInternalDataRoutes(router, database, uM)
+	api := app.Group("/")
+	strict := service.NewStrictServer(svc)
+	drs.RegisterHandlersWithOptions(api, drs.NewStrictHandler(strict, nil), drs.FiberServerOptions{
+		BaseURL: "/ga4gh/drs/v1",
+	})
+	docs.RegisterSwaggerRoutes(app)
+	coreapi.RegisterCoreRoutes(api, database)
+	metrics.RegisterMetricsRoutes(api, database)
+	internaldrs.RegisterInternalIndexRoutes(api, database)
+	internaldrs.RegisterInternalDataRoutes(api, database, uM)
 
-	return httptest.NewServer(router)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	go func() {
+		_ = app.Listener(ln)
+	}()
+
+	return &fiberTestServer{
+		URL: "http://" + ln.Addr().String(),
+		app: app,
+		ln:  ln,
+	}
 }
 
 func TestSyfonVersionAndPing(t *testing.T) {
@@ -159,9 +186,11 @@ func TestSyfonUploadDownloadAddURLAndSHA256(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fetch updated record: %v", err)
 	}
-	hashes := rec.GetHashes()
-	if hashes["sha256"] != expectedSum {
-		t.Fatalf("expected sha256 in record: %s got: %s", expectedSum, hashes["sha256"])
+	if rec.Hashes == nil {
+		t.Fatalf("expected hashes in record, got nil")
+	}
+	if (*rec.Hashes)["sha256"] != expectedSum {
+		t.Fatalf("expected sha256 in record: %s got: %s", expectedSum, (*rec.Hashes)["sha256"])
 	}
 
 	externalSource := filepath.Join(t.TempDir(), "existing-url-source.txt")

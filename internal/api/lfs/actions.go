@@ -15,26 +15,28 @@ import (
 	"github.com/calypr/syfon/urlmanager"
 )
 
-func prepareDownloadActions(r *http.Request, database core.DatabaseInterface, uM urlmanager.UrlManager, oid string) (*lfsapi.BatchActions, *lfsapi.ObjectError) {
-	obj, err := resolveObjectForOID(r.Context(), database, oid)
+func prepareDownloadActions(ctx context.Context, database core.DatabaseInterface, uM urlmanager.UrlManager, oid string) (*lfsapi.BatchActions, *lfsapi.ObjectError) {
+	obj, err := resolveObjectForOID(ctx, database, oid)
 	if err != nil {
-		return nil, dbErrToBatchError(err, r)
+		return nil, dbErrToBatchError(err, ctx)
 	}
-	if len(obj.Authorizations) > 0 && !hasMethodAccess(r, "read", obj.Authorizations) {
-		return nil, &lfsapi.ObjectError{Code: int32(unauthorizedStatus(r)), Message: "unauthorized"}
+	if len(obj.Authorizations) > 0 && !hasMethodAccess(ctx, "read", obj.Authorizations) {
+		return nil, &lfsapi.ObjectError{Code: int32(unauthorizedStatus(ctx)), Message: "unauthorized"}
 	}
 
 	var src string
-	for _, am := range obj.AccessMethods {
-		if strings.TrimSpace(am.AccessUrl.Url) != "" {
-			src = am.AccessUrl.Url
-			break
+	if obj.AccessMethods != nil {
+		for _, am := range *obj.AccessMethods {
+			if am.AccessUrl != nil && strings.TrimSpace(am.AccessUrl.Url) != "" {
+				src = am.AccessUrl.Url
+				break
+			}
 		}
 	}
 	if src == "" {
 		return nil, &lfsapi.ObjectError{Code: int32(http.StatusNotFound), Message: "no object location available"}
 	}
-	signed, err := uM.SignURL(r.Context(), "", src, urlmanager.SignOptions{})
+	signed, err := uM.SignURL(ctx, "", src, urlmanager.SignOptions{})
 	if err != nil {
 		return nil, &lfsapi.ObjectError{Code: int32(http.StatusInternalServerError), Message: err.Error()}
 	}
@@ -42,31 +44,31 @@ func prepareDownloadActions(r *http.Request, database core.DatabaseInterface, uM
 	if strings.TrimSpace(obj.Id) != "" {
 		usageObjectID = strings.TrimSpace(obj.Id)
 	}
-	if recErr := database.RecordFileDownload(r.Context(), usageObjectID); recErr != nil {
+	if recErr := database.RecordFileDownload(ctx, usageObjectID); recErr != nil {
 		// Just log metric failures, don't break the download flow.
 	}
 	action := lfsapi.Action{Href: signed}
 	return &lfsapi.BatchActions{Download: &action}, nil
 }
 
-func prepareUploadActions(r *http.Request, database core.DatabaseInterface, uM urlmanager.UrlManager, oid string, reqSize int64) (*lfsapi.BatchActions, int64, *lfsapi.ObjectError) {
-	existing, err := resolveObjectForOID(r.Context(), database, oid)
+func prepareUploadActions(ctx context.Context, database core.DatabaseInterface, uM urlmanager.UrlManager, oid string, reqSize int64, baseURL string) (*lfsapi.BatchActions, int64, *lfsapi.ObjectError) {
+	existing, err := resolveObjectForOID(ctx, database, oid)
 	if err == nil {
-		if len(existing.Authorizations) > 0 && !hasMethodAccess(r, "read", existing.Authorizations) {
-			return nil, existing.Size, &lfsapi.ObjectError{Code: int32(unauthorizedStatus(r)), Message: "unauthorized"}
+		if len(existing.Authorizations) > 0 && !hasMethodAccess(ctx, "read", existing.Authorizations) {
+			return nil, existing.Size, &lfsapi.ObjectError{Code: int32(unauthorizedStatus(ctx)), Message: "unauthorized"}
 		}
 		return nil, existing.Size, nil
 	}
 	if !isNotFound(err) {
-		return nil, reqSize, dbErrToBatchError(err, r)
+		return nil, reqSize, dbErrToBatchError(err, ctx)
 	}
 
 	targetResources := []string{"/data_file"}
-	if !hasMethodAccess(r, "file_upload", targetResources) && !hasMethodAccess(r, "create", targetResources) {
-		return nil, reqSize, &lfsapi.ObjectError{Code: int32(unauthorizedStatus(r)), Message: "unauthorized"}
+	if !hasMethodAccess(ctx, "file_upload", targetResources) && !hasMethodAccess(ctx, "create", targetResources) {
+		return nil, reqSize, &lfsapi.ObjectError{Code: int32(unauthorizedStatus(ctx)), Message: "unauthorized"}
 	}
 
-	creds, credErr := database.ListS3Credentials(r.Context())
+	creds, credErr := database.ListS3Credentials(ctx)
 	if credErr != nil || len(creds) == 0 || strings.TrimSpace(creds[0].Bucket) == "" {
 		if credErr == nil {
 			credErr = fmt.Errorf("no bucket configured")
@@ -77,9 +79,8 @@ func prepareUploadActions(r *http.Request, database core.DatabaseInterface, uM u
 	if size < 0 {
 		size = 0
 	}
-	base := requestBaseURL(r)
-	uploadURL := base + "/info/lfs/objects/" + oid
-	verifyURL := base + "/info/lfs/verify"
+	uploadURL := baseURL + "/info/lfs/objects/" + oid
+	verifyURL := baseURL + "/info/lfs/verify"
 	uploadAction := lfsapi.Action{Href: uploadURL}
 	verifyAction := lfsapi.Action{Href: verifyURL}
 	return &lfsapi.BatchActions{
@@ -88,13 +89,13 @@ func prepareUploadActions(r *http.Request, database core.DatabaseInterface, uM u
 	}, size, nil
 }
 
-func proxySinglePut(r *http.Request, uM urlmanager.UrlManager, bucket, key string) error {
+func proxySinglePut(ctx context.Context, uM urlmanager.UrlManager, bucket, key string) error {
 	s3URL := fmt.Sprintf("s3://%s/%s", bucket, key)
-	signedURL, err := uM.SignUploadURL(r.Context(), "", s3URL, urlmanager.SignOptions{})
+	signedURL, err := uM.SignUploadURL(ctx, "", s3URL, urlmanager.SignOptions{})
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(r.Context(), http.MethodPut, signedURL, bytes.NewReader(nil))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, signedURL, bytes.NewReader(nil))
 	if err != nil {
 		return err
 	}
@@ -138,21 +139,26 @@ func s3KeyFromCandidateForBucket(candidate drs.DrsObjectCandidate, bucket string
 	if targetBucket == "" {
 		return "", false
 	}
-	for _, am := range candidate.AccessMethods {
-		raw := strings.TrimSpace(am.AccessUrl.Url)
-		if raw == "" {
-			continue
-		}
-		u, err := url.Parse(raw)
-		if err != nil || !strings.EqualFold(u.Scheme, "s3") {
-			continue
-		}
-		if strings.TrimSpace(u.Host) != targetBucket {
-			continue
-		}
-		key := strings.TrimPrefix(strings.TrimSpace(u.Path), "/")
-		if key != "" {
-			return key, true
+	if candidate.AccessMethods != nil {
+		for _, am := range *candidate.AccessMethods {
+			if am.AccessUrl == nil {
+				continue
+			}
+			raw := strings.TrimSpace(am.AccessUrl.Url)
+			if raw == "" {
+				continue
+			}
+			u, err := url.Parse(raw)
+			if err != nil || !strings.EqualFold(u.Scheme, "s3") {
+				continue
+			}
+			if strings.TrimSpace(u.Host) != targetBucket {
+				continue
+			}
+			key := strings.TrimPrefix(strings.TrimSpace(u.Path), "/")
+			if key != "" {
+				return key, true
+			}
 		}
 	}
 	return "", false
@@ -166,21 +172,26 @@ func s3KeyFromObjectForBucket(obj *core.InternalObject, bucket string) (string, 
 	if targetBucket == "" {
 		return "", false
 	}
-	for _, am := range obj.AccessMethods {
-		raw := strings.TrimSpace(am.AccessUrl.Url)
-		if raw == "" {
-			continue
-		}
-		u, err := url.Parse(raw)
-		if err != nil || !strings.EqualFold(u.Scheme, "s3") {
-			continue
-		}
-		if strings.TrimSpace(u.Host) != targetBucket {
-			continue
-		}
-		key := strings.TrimPrefix(strings.TrimSpace(u.Path), "/")
-		if key != "" {
-			return key, true
+	if obj.AccessMethods != nil {
+		for _, am := range *obj.AccessMethods {
+			if am.AccessUrl == nil {
+				continue
+			}
+			raw := strings.TrimSpace(am.AccessUrl.Url)
+			if raw == "" {
+				continue
+			}
+			u, err := url.Parse(raw)
+			if err != nil || !strings.EqualFold(u.Scheme, "s3") {
+				continue
+			}
+			if strings.TrimSpace(u.Host) != targetBucket {
+				continue
+			}
+			key := strings.TrimPrefix(strings.TrimSpace(u.Path), "/")
+			if key != "" {
+				return key, true
+			}
 		}
 	}
 	return "", false

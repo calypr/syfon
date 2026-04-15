@@ -20,14 +20,18 @@ func errorResponseForDBError(ctx context.Context, op string, err error) drs.Impl
 			code = http.StatusUnauthorized
 		}
 		slog.Warn("service db unauthorized", "op", op, "request_id", requestID, "status", code, "err", err)
-		return drs.ImplResponse{Code: code, Body: drs.Error{Msg: "unauthorized", StatusCode: int32(code)}}
+		return drs.ImplResponse{Code: code, Body: drsError("unauthorized", code)}
 	case errors.Is(err, core.ErrNotFound):
 		slog.Info("service db not found", "op", op, "request_id", requestID, "status", http.StatusNotFound, "err", err)
-		return drs.ImplResponse{Code: http.StatusNotFound, Body: drs.Error{Msg: "not found", StatusCode: http.StatusNotFound}}
+		return drs.ImplResponse{Code: http.StatusNotFound, Body: drsError("not found", http.StatusNotFound)}
 	default:
 		slog.Error("service db failure", "op", op, "request_id", requestID, "status", http.StatusInternalServerError, "err", err)
-		return drs.ImplResponse{Code: http.StatusInternalServerError, Body: drs.Error{Msg: err.Error(), StatusCode: http.StatusInternalServerError}}
+		return drs.ImplResponse{Code: http.StatusInternalServerError, Body: drsError(err.Error(), http.StatusInternalServerError)}
 	}
+}
+
+func drsError(msg string, status int) drs.Error {
+	return drs.Error{Msg: core.Ptr(msg), StatusCode: core.Ptr(status)}
 }
 
 func unauthorizedStatus(ctx context.Context) int {
@@ -42,14 +46,14 @@ func forbiddenResponse(ctx context.Context, msg string) drs.ImplResponse {
 	slog.Warn("service forbidden", "request_id", core.GetRequestID(ctx), "status", code, "reason", msg)
 	return drs.ImplResponse{
 		Code: code,
-		Body: drs.Error{Msg: msg, StatusCode: int32(code)},
+		Body: drsError(msg, code),
 	}
 }
 
 func tooLargeResponse(msg string) drs.ImplResponse {
 	return drs.ImplResponse{
 		Code: http.StatusRequestEntityTooLarge,
-		Body: drs.Error{Msg: msg, StatusCode: http.StatusRequestEntityTooLarge},
+		Body: drsError(msg, http.StatusRequestEntityTooLarge),
 	}
 }
 
@@ -120,14 +124,23 @@ func canonicalSHA256(checksums []drs.Checksum) (string, bool) {
 func authorizationsForObject(obj *core.InternalObject) drs.Authorizations {
 	authz := uniqueStrings(obj.Authorizations)
 	if len(authz) == 0 {
-		for _, am := range obj.AccessMethods {
-			authz = append(authz, am.Authorizations.BearerAuthIssuers...)
+		if obj.AccessMethods != nil {
+			for _, am := range *obj.AccessMethods {
+				if am.Authorizations != nil && am.Authorizations.BearerAuthIssuers != nil {
+					authz = append(authz, (*am.Authorizations.BearerAuthIssuers)...)
+				}
+			}
 		}
 		authz = uniqueStrings(authz)
 	}
+	var issuers *[]string
+	if len(authz) > 0 {
+		issuers = &authz
+	}
+	supported := []drs.AuthorizationsSupportedTypes{drs.AuthorizationsSupportedTypesBearerAuth}
 	return drs.Authorizations{
-		BearerAuthIssuers: authz,
-		SupportedTypes:    []string{"BearerAuth"},
+		BearerAuthIssuers: issuers,
+		SupportedTypes:    &supported,
 	}
 }
 

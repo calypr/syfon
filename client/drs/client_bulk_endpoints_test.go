@@ -82,24 +82,26 @@ func TestBatchGetObjectsByHash_UsesBulkHashesEndpoint(t *testing.T) {
 		if err := json.Unmarshal(body, &req); err != nil {
 			t.Fatalf("failed to decode request body: %v", err)
 		}
-		if got, want := len(req.GetHashes()), 2; got != want {
+		if got, want := len(req.Hashes), 2; got != want {
 			t.Fatalf("unexpected number of hashes in request: got=%d want=%d", got, want)
 		}
-		if !strings.EqualFold(req.GetHashes()[0], "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa") {
-			t.Fatalf("unexpected first hash query: %s", req.GetHashes()[0])
+		if !strings.EqualFold(req.Hashes[0], "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa") {
+			t.Fatalf("unexpected first hash query: %s", req.Hashes[0])
 		}
 
 		did := "did-1"
 		fileName := "file.bin"
 		hashes := map[string]string{"sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
 		size := int64(12)
+		h := internalapi.HashInfo(hashes)
+		urls := []string{"s3://bucket/path"}
 		resp := internalapi.ListRecordsResponse{
-			Records: []internalapi.InternalRecord{{
+			Records: &[]internalapi.InternalRecord{{
 				Did:      did,
 				FileName: &fileName,
-				Hashes:   &hashes,
+				Hashes:   &h,
 				Size:     &size,
-				Urls:     []string{"s3://bucket/path"},
+				Urls:     &urls,
 			}},
 		}
 		respBody, _ := json.Marshal(resp)
@@ -148,7 +150,7 @@ func TestRegisterRecords_UsesBulkCreateEndpoint(t *testing.T) {
 		if err := json.Unmarshal(body, &req); err != nil {
 			t.Fatalf("failed to decode request body: %v", err)
 		}
-		if got, want := len(req.GetRecords()), 1; got != want {
+		if got, want := len(req.Records), 1; got != want {
 			t.Fatalf("unexpected number of records in request: got=%d want=%d", got, want)
 		}
 
@@ -156,13 +158,15 @@ func TestRegisterRecords_UsesBulkCreateEndpoint(t *testing.T) {
 		fileName := "bulk.bin"
 		hashes := map[string]string{"sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}
 		size := int64(21)
+		h := internalapi.HashInfo(hashes)
+		urls := []string{"s3://bucket/bulk.bin"}
 		resp := internalapi.ListRecordsResponse{
-			Records: []internalapi.InternalRecord{{
+			Records: &[]internalapi.InternalRecord{{
 				Did:      did,
 				FileName: &fileName,
-				Hashes:   &hashes,
+				Hashes:   &h,
 				Size:     &size,
-				Urls:     []string{"s3://bucket/bulk.bin"},
+				Urls:     &urls,
 			}},
 		}
 		respBody, _ := json.Marshal(resp)
@@ -174,20 +178,24 @@ func TestRegisterRecords_UsesBulkCreateEndpoint(t *testing.T) {
 	}
 
 	c := NewLocalDrsClient(spy, "http://example.org", nil)
+	fileName := "bulk.bin"
+	accessURL := struct {
+		Headers *[]string `json:"headers,omitempty"`
+		Url     string    `json:"url"`
+	}{Url: "s3://bucket/bulk.bin"}
+	accessMethods := []AccessMethod{{
+		Type:      "s3",
+		AccessUrl: &accessURL,
+	}}
 	in := []*DRSObject{{
-		Id:   "did-bulk-1",
-		Name: "bulk.bin",
-		Size: 21,
+		Id:            "did-bulk-1",
+		Name:          &fileName,
+		Size:          21,
 		Checksums: []Checksum{{
 			Type:     string(hash.ChecksumTypeSHA256),
 			Checksum: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
 		}},
-		AccessMethods: []AccessMethod{{
-			Type: "s3",
-			AccessUrl: AccessURL{
-				Url: "s3://bucket/bulk.bin",
-			},
-		}},
+		AccessMethods: &accessMethods,
 	}}
 
 	out, err := c.RegisterRecords(context.Background(), in)

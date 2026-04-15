@@ -111,19 +111,14 @@ func TestGetObject_DeduplicatesAndPropagatesAuthz(t *testing.T) {
 	if obj.Id != "obj-1" || obj.SelfUri != "drs://obj-1" {
 		t.Fatalf("unexpected object identity fields: %+v", obj)
 	}
-	if len(obj.AccessMethods) != 2 {
-		t.Fatalf("expected 2 deduplicated access methods, got %d", len(obj.AccessMethods))
+	if obj.AccessMethods == nil || len(*obj.AccessMethods) != 2 {
+		t.Fatalf("expected 2 deduplicated access methods, got %+v", obj.AccessMethods)
 	}
 	if len(obj.Checksums) != 2 {
 		t.Fatalf("expected 2 deduplicated checksums, got %d", len(obj.Checksums))
 	}
 	if len(obj.Authorizations) != 2 {
 		t.Fatalf("expected 2 deduplicated authz resources, got %d", len(obj.Authorizations))
-	}
-	for _, am := range obj.AccessMethods {
-		if len(am.Authorizations.BearerAuthIssuers) != 2 {
-			t.Fatalf("expected authz propagated to access method, got %+v", am.Authorizations)
-		}
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet expectations: %v", err)

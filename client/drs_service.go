@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/url"
 
+	"github.com/calypr/syfon/apigen/drs"
+	"github.com/calypr/syfon/apigen/internalapi"
 	"github.com/calypr/syfon/client/xfer"
 )
 
@@ -19,18 +21,24 @@ func (s *DRSService) Resolve(ctx context.Context, id string) (*xfer.ResolvedObje
 	if err != nil {
 		return nil, err
 	}
-	// Convert DRSObject to transfer.ResolvedObject.
-	// For simplicity, we assume the first access method is the primary one.
-	if len(obj.AccessMethods) == 0 {
+	if obj.AccessMethods == nil || len(*obj.AccessMethods) == 0 {
 		return nil, fmt.Errorf("no access methods found for object %s", id)
 	}
-	am := obj.AccessMethods[0]
+	am := (*obj.AccessMethods)[0]
+	name := ""
+	if obj.Name != nil {
+		name = *obj.Name
+	}
+	url := ""
+	if am.AccessUrl != nil {
+		url = am.AccessUrl.Url
+	}
 	return &xfer.ResolvedObject{
 		Id:           obj.Id,
-		Name:         obj.Name,
+		Name:         name,
 		Size:         obj.Size,
-		ProviderURL:  am.AccessUrl.Url,
-		AccessMethod: am.Type,
+		ProviderURL:  url,
+		AccessMethod: string(am.Type),
 	}, nil
 }
 
@@ -49,10 +57,14 @@ func (s *DRSService) ListObjects(ctx context.Context, limit, page int) (DRSPage,
 	if err != nil {
 		return DRSPage{}, err
 	}
-	out := DRSPage{
-		DrsObjects: make([]DRSObject, 0, len(listResp.GetRecords())),
+	records := make([]internalapi.InternalRecord, 0)
+	if listResp.Records != nil {
+		records = *listResp.Records
 	}
-	for _, rec := range listResp.GetRecords() {
+	out := DRSPage{
+		DrsObjects: make([]DRSObject, 0, len(records)),
+	}
+	for _, rec := range records {
 		out.DrsObjects = append(out.DrsObjects, internalRecordToDRSObject(&rec))
 	}
 	return out, nil
@@ -75,47 +87,59 @@ func (s *DRSService) RegisterObjects(ctx context.Context, req RegisterObjectsReq
 	return out, doneErr
 }
 
-type internalRecordView interface {
-	GetDid() string
-	GetSize() int64
-	GetFileName() string
-	GetHashes() map[string]string
-	GetUrls() []string
-	GetAuthz() []string
-}
-
-func internalRecordToDRSObject(rec internalRecordView) DRSObject {
+func internalRecordToDRSObject(rec *internalapi.InternalRecord) DRSObject {
+	size := int64(0)
+	if rec.Size != nil {
+		size = *rec.Size
+	}
 	obj := DRSObject{
-		Id:        rec.GetDid(),
-		SelfUri:   "drs://" + rec.GetDid(),
-		Size:      rec.GetSize(),
-		Name:      rec.GetFileName(),
-		Checksums: make([]Checksum, 0, len(rec.GetHashes())),
+		Id:      rec.Did,
+		SelfUri: "drs://" + rec.Did,
+		Size:    size,
+		Name:    rec.FileName,
 	}
-	for typ, checksum := range rec.GetHashes() {
-		obj.Checksums = append(obj.Checksums, Checksum{
-			Type:     typ,
-			Checksum: checksum,
-		})
+	if rec.Hashes != nil {
+		hInfo := *rec.Hashes
+		obj.Checksums = make([]Checksum, 0, len(hInfo))
+		for typ, checksum := range hInfo {
+			obj.Checksums = append(obj.Checksums, Checksum{
+				Type:     typ,
+				Checksum: checksum,
+			})
+		}
 	}
 
-	urls := rec.GetUrls()
-	authz := rec.GetAuthz()
-	obj.AccessMethods = make([]AccessMethod, 0, len(urls))
+	var urls []string
+	if rec.Urls != nil {
+		urls = *rec.Urls
+	}
+	authz := rec.Authz
+	ams := make([]AccessMethod, 0, len(urls))
 	for _, rawURL := range urls {
 		method := AccessMethod{
-			AccessUrl: AccessMethodAccessURL{Url: rawURL},
-			Type:      "https",
+			AccessUrl: &struct {
+				Headers *[]string `json:"headers,omitempty"`
+				Url     string    `json:"url"`
+			}{Url: rawURL},
+			Type: "https",
 		}
 		if parsed, err := url.Parse(rawURL); err == nil && parsed.Scheme != "" {
-			method.Type = parsed.Scheme
+			method.Type = drs.AccessMethodType(parsed.Scheme)
 		}
 		if len(authz) > 0 {
-			method.Authorizations = AccessMethodAuthorizations{
-				BearerAuthIssuers: append([]string(nil), authz...),
+			method.Authorizations = &struct {
+				BearerAuthIssuers   *[]string                                   `json:"bearer_auth_issuers,omitempty"`
+				DrsObjectId         *string                                     `json:"drs_object_id,omitempty"`
+				PassportAuthIssuers *[]string                                   `json:"passport_auth_issuers,omitempty"`
+				SupportedTypes      *[]drs.AccessMethodAuthorizationsSupportedTypes `json:"supported_types,omitempty"`
+			}{
+				BearerAuthIssuers: &authz,
 			}
 		}
-		obj.AccessMethods = append(obj.AccessMethods, method)
+		ams = append(ams, method)
+	}
+	if len(ams) > 0 {
+		obj.AccessMethods = &ams
 	}
 	return obj
 }

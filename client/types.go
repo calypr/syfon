@@ -8,15 +8,15 @@ import (
 
 // Canonical API model aliases.
 type Checksum = drsapi.Checksum
-type AccessMethodAuthorizations = drsapi.AccessMethodAuthorizations
-type AccessMethodAccessURL = drsapi.AccessMethodAccessUrl
 type AccessMethod = drsapi.AccessMethod
+type AccessMethodAuthorizationsSupportedTypes = drsapi.AccessMethodAuthorizationsSupportedTypes
+type AccessMethodAccessURL = drsapi.AccessURL
 type ContentsObject = drsapi.ContentsObject
 type DRSObject = drsapi.DrsObject
-type DRSPage = drsapi.DrsPage
+type DRSPage = drsapi.DRSPage
 type DRSObjectCandidate = drsapi.DrsObjectCandidate
-type RegisterObjectsRequest = drsapi.RegisterObjectsRequest
-type RegisterObjectsResponse = drsapi.RegisterObjects201Response
+type RegisterObjectsRequest = drsapi.RegisterObjectsJSONBody
+type RegisterObjectsResponse = drsapi.RegisterObjects201JSONResponse
 type InternalRecordRequest = internalapi.InternalRecord
 type InternalRecord = internalapi.InternalRecordResponse
 type ListRecordsResponse = internalapi.ListRecordsResponse

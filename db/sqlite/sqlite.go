@@ -133,14 +133,18 @@ func (db *SqliteDB) initSchema() error {
 }
 
 func (db *SqliteDB) GetServiceInfo(ctx context.Context) (*drs.Service, error) {
+	name := "Calypr-backed DRS server (SQLite)"
+	createdAt := time.Now()
+	updatedAt := time.Now()
+	environment := "prod"
 	return &drs.Service{
 		Id:          "drs-service-calypr",
 		Name:        "Calypr DRS Server",
 		Type:        drs.ServiceType{Group: "org.ga4gh", Artifact: "drs", Version: "1.2.0"},
-		Description: "Calypr-backed DRS server (SQLite)",
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
-		Environment: "prod",
+		Description: &name,
+		CreatedAt:   &createdAt,
+		UpdatedAt:   &updatedAt,
+		Environment: &environment,
 		Version:     "1.0.0",
 	}, nil
 }

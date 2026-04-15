@@ -114,10 +114,10 @@ retryLookup:
 			Id:          objectID,
 			Size:        r.Size,
 			CreatedTime: r.CreatedTime,
-			UpdatedTime: r.UpdatedTime,
-			Version:     r.Version,
-			Description: r.Description,
-			Name:        r.Name,
+			UpdatedTime: core.Ptr(r.UpdatedTime),
+			Version:     core.Ptr(r.Version),
+			Description: core.Ptr(r.Description),
+			Name:        core.Ptr(r.Name),
 			SelfUri:     "drs://" + objectID,
 		},
 	}
@@ -139,10 +139,17 @@ retryLookup:
 			continue
 		}
 		seenAccess[key] = struct{}{}
-		obj.AccessMethods = append(obj.AccessMethods, drs.AccessMethod{
-			AccessUrl: drs.AccessMethodAccessUrl{Url: u},
-			Type:      t,
-			AccessId:  t,
+		if obj.AccessMethods == nil {
+			obj.AccessMethods = &[]drs.AccessMethod{}
+		}
+		amID := t
+		*obj.AccessMethods = append(*obj.AccessMethods, drs.AccessMethod{
+			AccessUrl: &struct {
+				Headers *[]string `json:"headers,omitempty"`
+				Url     string    `json:"url"`
+			}{Url: u},
+			Type:     drs.AccessMethodType(t),
+			AccessId: &amID,
 		})
 	}
 
@@ -184,12 +191,6 @@ retryLookup:
 		seenAuthz[res] = struct{}{}
 		obj.Authorizations = append(obj.Authorizations, res)
 	}
-	for i := range obj.AccessMethods {
-		obj.AccessMethods[i].Authorizations = drs.AccessMethodAuthorizations{
-			BearerAuthIssuers: obj.Authorizations,
-		}
-	}
-
 	// 5. RBAC Check (gen3 mode only)
 	if !core.IsGen3Mode(ctx) {
 		return obj, nil
@@ -227,20 +228,22 @@ func (db *PostgresDB) CreateObject(ctx context.Context, obj *core.InternalObject
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO drs_object (id, size, created_time, updated_time, name, version, description)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-		obj.Id, obj.Size, obj.CreatedTime, obj.UpdatedTime, obj.Name, obj.Version, obj.Description,
+		obj.Id, obj.Size, obj.CreatedTime, core.TimeVal(obj.UpdatedTime), core.StringVal(obj.Name), core.StringVal(obj.Version), core.StringVal(obj.Description),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to insert drs_object: %w", err)
 	}
 
 	// Insert URLs
-	for _, am := range obj.AccessMethods {
-		if am.AccessUrl.Url == "" {
-			continue
-		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO drs_object_access_method (object_id, url, type) VALUES ($1, $2, $3)`, obj.Id, am.AccessUrl.Url, am.Type)
-		if err != nil {
-			return fmt.Errorf("failed to insert url: %w", err)
+	if obj.AccessMethods != nil {
+		for _, am := range *obj.AccessMethods {
+			if am.AccessUrl == nil || am.AccessUrl.Url == "" {
+				continue
+			}
+			_, err = tx.ExecContext(ctx, `INSERT INTO drs_object_access_method (object_id, url, type) VALUES ($1, $2, $3)`, obj.Id, am.AccessUrl.Url, am.Type)
+			if err != nil {
+				return fmt.Errorf("failed to insert url: %w", err)
+			}
 		}
 	}
 
@@ -304,24 +307,26 @@ func (db *PostgresDB) RegisterObjects(ctx context.Context, objects []core.Intern
 		ids = append(ids, obj.Id)
 		sizes = append(sizes, obj.Size)
 		createdTimes = append(createdTimes, obj.CreatedTime)
-		updatedTimes = append(updatedTimes, obj.UpdatedTime)
-		names = append(names, obj.Name)
-		versions = append(versions, obj.Version)
-		descriptions = append(descriptions, obj.Description)
+		updatedTimes = append(updatedTimes, core.TimeVal(obj.UpdatedTime))
+		names = append(names, core.StringVal(obj.Name))
+		versions = append(versions, core.StringVal(obj.Version))
+		descriptions = append(descriptions, core.StringVal(obj.Description))
 
 		seenAccess := make(map[string]struct{})
-		for _, am := range obj.AccessMethods {
-			if am.AccessUrl.Url == "" {
-				continue
+		if obj.AccessMethods != nil {
+			for _, am := range *obj.AccessMethods {
+				if am.AccessUrl == nil || am.AccessUrl.Url == "" {
+					continue
+				}
+				key := string(am.Type) + "|" + am.AccessUrl.Url
+				if _, ok := seenAccess[key]; ok {
+					continue
+				}
+				seenAccess[key] = struct{}{}
+				accessObjectIDs = append(accessObjectIDs, obj.Id)
+				accessURLs = append(accessURLs, am.AccessUrl.Url)
+				accessTypes = append(accessTypes, string(am.Type))
 			}
-			key := am.Type + "|" + am.AccessUrl.Url
-			if _, ok := seenAccess[key]; ok {
-				continue
-			}
-			seenAccess[key] = struct{}{}
-			accessObjectIDs = append(accessObjectIDs, obj.Id)
-			accessURLs = append(accessURLs, am.AccessUrl.Url)
-			accessTypes = append(accessTypes, am.Type)
 		}
 
 		seenChecksum := make(map[string]struct{})
@@ -618,10 +623,10 @@ func (db *PostgresDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []st
 					Id:          id,
 					Size:        size,
 					CreatedTime: createdTime,
-					UpdatedTime: updatedTime,
-					Name:        name,
-					Version:     version,
-					Description: description,
+					UpdatedTime: core.Ptr(updatedTime),
+					Name:        core.Ptr(name),
+					Version:     core.Ptr(version),
+					Description: core.Ptr(description),
 					SelfUri:     "drs://" + id,
 				},
 			}
@@ -635,10 +640,17 @@ func (db *PostgresDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []st
 			key := accessType.String + "|" + accessURL.String
 			if _, exists := seenAccess[id][key]; !exists {
 				seenAccess[id][key] = struct{}{}
-				obj.DrsObject.AccessMethods = append(obj.DrsObject.AccessMethods, drs.AccessMethod{
-					AccessUrl: drs.AccessMethodAccessUrl{Url: accessURL.String},
-					Type:      accessType.String,
-					AccessId:  accessType.String,
+				if obj.DrsObject.AccessMethods == nil {
+					obj.DrsObject.AccessMethods = &[]drs.AccessMethod{}
+				}
+				amID := accessType.String
+				*obj.DrsObject.AccessMethods = append(*obj.DrsObject.AccessMethods, drs.AccessMethod{
+					AccessUrl: &struct {
+						Headers *[]string `json:"headers,omitempty"`
+						Url     string    `json:"url"`
+					}{Url: accessURL.String},
+					Type:     drs.AccessMethodType(accessType.String),
+					AccessId: &amID,
 				})
 			}
 		}
@@ -664,14 +676,6 @@ func (db *PostgresDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []st
 		return nil, err
 	}
 
-	for _, obj := range objectsByID {
-		for i := range obj.DrsObject.AccessMethods {
-			obj.DrsObject.AccessMethods[i].Authorizations = drs.AccessMethodAuthorizations{
-				BearerAuthIssuers: obj.Authorizations,
-			}
-		}
-	}
-
 	return objectsByID, nil
 }
 
@@ -688,7 +692,7 @@ func (db *PostgresDB) UpdateObjectAccessMethods(ctx context.Context, objectID st
 	}
 
 	for _, am := range accessMethods {
-		if am.AccessUrl.Url == "" {
+		if am.AccessUrl == nil || am.AccessUrl.Url == "" {
 			continue
 		}
 		_, err = tx.ExecContext(ctx, `INSERT INTO drs_object_access_method (object_id, url, type) VALUES ($1, $2, $3)`, objectID, am.AccessUrl.Url, am.Type)
@@ -712,7 +716,7 @@ func (db *PostgresDB) BulkUpdateAccessMethods(ctx context.Context, updates map[s
 			return err
 		}
 		for _, am := range methods {
-			if am.AccessUrl.Url == "" {
+			if am.AccessUrl == nil || am.AccessUrl.Url == "" {
 				continue
 			}
 			_, err = tx.ExecContext(ctx, `INSERT INTO drs_object_access_method (object_id, url, type) VALUES ($1, $2, $3)`, objectID, am.AccessUrl.Url, am.Type)

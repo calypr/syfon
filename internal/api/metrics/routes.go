@@ -2,206 +2,198 @@ package metrics
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
-	"log/slog"
-	"net/http"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/calypr/syfon/apigen/metricsapi"
-	"github.com/calypr/syfon/config"
 	"github.com/calypr/syfon/db/core"
-	"github.com/gorilla/mux"
+	"github.com/gofiber/fiber/v3"
 )
 
-func RegisterMetricsRoutes(router *mux.Router, database core.DatabaseInterface) {
-	listHandler := handleListFileUsage(database)
-	getHandler := handleGetFileUsage(database)
-	summaryHandler := handleGetSummary(database)
+type metricsQueryContextKey struct{}
 
-	router.HandleFunc(config.RouteMetricsFiles, listHandler).Methods(http.MethodGet)
-	router.HandleFunc(config.RouteMetricsFileDetail, getHandler).Methods(http.MethodGet)
-	router.HandleFunc(config.RouteMetricsSummary, summaryHandler).Methods(http.MethodGet)
+type metricsQueryParams struct {
+	authz        string
+	organization string
+	program      string
+	project      string
 }
 
-func handleListFileUsage(database core.DatabaseInterface) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		limit := parseIntQuery(r, "limit", 200)
-		offset := parseIntQuery(r, "offset", 0)
-		if limit < 1 || limit > 1000 || offset < 0 {
-			writeHTTPError(w, r, http.StatusBadRequest, "invalid pagination params", nil)
-			return
-		}
-		inactiveSince, err := parseInactiveSince(r)
-		if err != nil {
-			writeHTTPError(w, r, http.StatusBadRequest, err.Error(), nil)
-			return
-		}
-		access, err := resolveMetricsAccess(r)
-		if err != nil {
-			writeHTTPError(w, r, http.StatusBadRequest, err.Error(), err)
-			return
-		}
-		if !access.authorized(r.Context()) {
-			writeAuthError(w, r)
-			return
-		}
-
-		var data []core.FileUsage
-		if access.isScoped() {
-			data, _, err = listScopedFileUsage(r.Context(), database, access.scopePrefix, limit, offset, inactiveSince)
-		} else {
-			data, err = database.ListFileUsage(r.Context(), limit, offset, inactiveSince)
-		}
-		if err != nil {
-			writeHTTPError(w, r, http.StatusInternalServerError, "failed to list file usage", err)
-			return
-		}
-		out := metricsapi.NewMetricsListResponse()
-		items := make([]metricsapi.FileUsage, 0, len(data))
-		for _, v := range data {
-			items = append(items, toMetricsFileUsage(v))
-		}
-		out.SetData(items)
-		out.SetLimit(int32(limit))
-		out.SetOffset(int32(offset))
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(out); err != nil {
-			slog.Error("metrics encode response failed", "request_id", core.GetRequestID(r.Context()), "path", r.URL.Path, "err", err)
-		}
-	}
+type MetricsServer struct {
+	database core.DatabaseInterface
 }
 
-func handleGetFileUsage(database core.DatabaseInterface) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		objectID := mux.Vars(r)["object_id"]
-		if objectID == "" {
-			writeHTTPError(w, r, http.StatusBadRequest, "object_id is required", nil)
-			return
-		}
-
-		access, err := resolveMetricsAccess(r)
-		if err != nil {
-			writeHTTPError(w, r, http.StatusBadRequest, err.Error(), err)
-			return
-		}
-		if !access.authorized(r.Context()) {
-			writeAuthError(w, r)
-			return
-		}
-		if access.isScoped() {
-			inside, err := objectInScope(r.Context(), database, objectID, access.scopePrefix)
-			if err != nil {
-				writeHTTPError(w, r, http.StatusInternalServerError, "failed to evaluate object scope", err)
-				return
-			}
-			if !inside {
-				writeHTTPError(w, r, http.StatusNotFound, "file usage not found", core.ErrNotFound)
-				return
-			}
-		}
-
-		usage, err := database.GetFileUsage(r.Context(), objectID)
-		if err != nil {
-			if errors.Is(err, core.ErrNotFound) {
-				writeHTTPError(w, r, http.StatusNotFound, "file usage not found", err)
-				return
-			}
-			writeHTTPError(w, r, http.StatusInternalServerError, "failed to get file usage", err)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(toMetricsFileUsage(*usage)); err != nil {
-			slog.Error("metrics encode response failed", "request_id", core.GetRequestID(r.Context()), "path", r.URL.Path, "err", err)
-		}
-	}
+func NewMetricsServer(database core.DatabaseInterface) *MetricsServer {
+	return &MetricsServer{database: database}
 }
 
-func handleGetSummary(database core.DatabaseInterface) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		inactiveSince, err := parseInactiveSince(r)
-		if err != nil {
-			writeHTTPError(w, r, http.StatusBadRequest, err.Error(), nil)
-			return
+func RegisterMetricsRoutes(router fiber.Router, database core.DatabaseInterface) {
+	router.Use(func(c fiber.Ctx) error {
+		params := metricsQueryParams{
+			authz:        strings.TrimSpace(c.Query("authz")),
+			organization: strings.TrimSpace(c.Query("organization")),
+			program:      strings.TrimSpace(c.Query("program")),
+			project:      strings.TrimSpace(c.Query("project")),
 		}
-		access, err := resolveMetricsAccess(r)
-		if err != nil {
-			writeHTTPError(w, r, http.StatusBadRequest, err.Error(), err)
-			return
-		}
-		if !access.authorized(r.Context()) {
-			writeAuthError(w, r)
-			return
-		}
+		c.SetContext(context.WithValue(c.Context(), metricsQueryContextKey{}, params))
+		return c.Next()
+	})
 
-		var summary core.FileUsageSummary
-		if access.isScoped() {
-			_, summary, err = listScopedFileUsage(r.Context(), database, access.scopePrefix, 0, 0, inactiveSince)
-		} else {
-			summary, err = database.GetFileUsageSummary(r.Context(), inactiveSince)
+	server := NewMetricsServer(database)
+	strict := metricsapi.NewStrictHandler(server, nil)
+	metricsapi.RegisterHandlers(router, strict)
+}
+
+func (s *MetricsServer) ListMetricsFiles(ctx context.Context, request metricsapi.ListMetricsFilesRequestObject) (metricsapi.ListMetricsFilesResponseObject, error) {
+	limit := 200
+	if request.Params.Limit != nil {
+		limit = *request.Params.Limit
+	}
+	offset := 0
+	if request.Params.Offset != nil {
+		offset = *request.Params.Offset
+	}
+
+	if limit < 1 || limit > 1000 || offset < 0 {
+		return metricsapi.ListMetricsFiles400Response{}, nil
+	}
+
+	inactiveSince, err := parseInactiveSince(request.Params.InactiveDays)
+	if err != nil {
+		return metricsapi.ListMetricsFiles400Response{}, nil
+	}
+
+	access, err := resolveMetricsAccess(ctx)
+	if err != nil {
+		return metricsapi.ListMetricsFiles400Response{}, nil
+	}
+	if !access.authorized(ctx) {
+		if core.IsGen3Mode(ctx) && !core.HasAuthHeader(ctx) {
+			return metricsapi.ListMetricsFiles401Response{}, nil
 		}
+		return metricsapi.ListMetricsFiles403Response{}, nil
+	}
+
+	var data []core.FileUsage
+	if access.isScoped() {
+		data, _, err = listScopedFileUsage(ctx, s.database, access.scopePrefix, limit, offset, inactiveSince)
+	} else {
+		data, err = s.database.ListFileUsage(ctx, limit, offset, inactiveSince)
+	}
+	if err != nil {
+		return metricsapi.ListMetricsFiles500Response{}, nil
+	}
+
+	items := make([]metricsapi.FileUsage, 0, len(data))
+	for _, v := range data {
+		items = append(items, toMetricsFileUsage(v))
+	}
+
+	return metricsapi.ListMetricsFiles200JSONResponse{
+		Data:   &items,
+		Limit:  &limit,
+		Offset: &offset,
+	}, nil
+}
+
+func (s *MetricsServer) GetMetricsFile(ctx context.Context, request metricsapi.GetMetricsFileRequestObject) (metricsapi.GetMetricsFileResponseObject, error) {
+	objectID := request.ObjectId
+	if objectID == "" {
+		return metricsapi.GetMetricsFile400Response{}, nil
+	}
+
+	access, err := resolveMetricsAccess(ctx)
+	if err != nil {
+		return metricsapi.GetMetricsFile400Response{}, nil
+	}
+	if !access.authorized(ctx) {
+		if core.IsGen3Mode(ctx) && !core.HasAuthHeader(ctx) {
+			return metricsapi.GetMetricsFile401Response{}, nil
+		}
+		return metricsapi.GetMetricsFile403Response{}, nil
+	}
+
+	if access.isScoped() {
+		inside, err := objectInScope(ctx, s.database, objectID, access.scopePrefix)
 		if err != nil {
-			writeHTTPError(w, r, http.StatusInternalServerError, "failed to get file usage summary", err)
-			return
+			return metricsapi.GetMetricsFile500Response{}, nil
 		}
-		out := metricsapi.NewFileUsageSummary()
-		out.SetTotalFiles(summary.TotalFiles)
-		out.SetTotalUploads(summary.TotalUploads)
-		out.SetTotalDownloads(summary.TotalDownloads)
-		out.SetInactiveFileCount(summary.InactiveFileCount)
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(out); err != nil {
-			slog.Error("metrics encode response failed", "request_id", core.GetRequestID(r.Context()), "path", r.URL.Path, "err", err)
+		if !inside {
+			return metricsapi.GetMetricsFile404Response{}, nil
 		}
 	}
+
+	usage, err := s.database.GetFileUsage(ctx, objectID)
+	if err != nil {
+		if errors.Is(err, core.ErrNotFound) {
+			return metricsapi.GetMetricsFile404Response{}, nil
+		}
+		return metricsapi.GetMetricsFile500Response{}, nil
+	}
+
+	return metricsapi.GetMetricsFile200JSONResponse(toMetricsFileUsage(*usage)), nil
+}
+
+func (s *MetricsServer) GetMetricsSummary(ctx context.Context, request metricsapi.GetMetricsSummaryRequestObject) (metricsapi.GetMetricsSummaryResponseObject, error) {
+	inactiveSince, err := parseInactiveSince(request.Params.InactiveDays)
+	if err != nil {
+		return metricsapi.GetMetricsSummary400Response{}, nil
+	}
+
+	access, err := resolveMetricsAccess(ctx)
+	if err != nil {
+		return metricsapi.GetMetricsSummary400Response{}, nil
+	}
+	if !access.authorized(ctx) {
+		if core.IsGen3Mode(ctx) && !core.HasAuthHeader(ctx) {
+			return metricsapi.GetMetricsSummary401Response{}, nil
+		}
+		return metricsapi.GetMetricsSummary403Response{}, nil
+	}
+
+	var summary core.FileUsageSummary
+	if access.isScoped() {
+		_, summary, err = listScopedFileUsage(ctx, s.database, access.scopePrefix, 0, 0, inactiveSince)
+	} else {
+		summary, err = s.database.GetFileUsageSummary(ctx, inactiveSince)
+	}
+	if err != nil {
+		return metricsapi.GetMetricsSummary500Response{}, nil
+	}
+
+	return metricsapi.GetMetricsSummary200JSONResponse{
+		TotalFiles:        &summary.TotalFiles,
+		TotalUploads:      &summary.TotalUploads,
+		TotalDownloads:    &summary.TotalDownloads,
+		InactiveFileCount: &summary.InactiveFileCount,
+	}, nil
 }
 
 func toMetricsFileUsage(v core.FileUsage) metricsapi.FileUsage {
-	out := metricsapi.NewFileUsage()
-	out.SetObjectId(v.ObjectID)
-	out.SetName(v.Name)
-	out.SetSize(v.Size)
-	out.SetUploadCount(v.UploadCount)
-	out.SetDownloadCount(v.DownloadCount)
-	if v.LastUploadTime != nil {
-		out.SetLastUploadTime(*v.LastUploadTime)
+	return metricsapi.FileUsage{
+		ObjectId:         &v.ObjectID,
+		Name:             &v.Name,
+		Size:             &v.Size,
+		UploadCount:      &v.UploadCount,
+		DownloadCount:    &v.DownloadCount,
+		LastUploadTime:   v.LastUploadTime,
+		LastDownloadTime: v.LastDownloadTime,
+		LastAccessTime:   v.LastAccessTime,
 	}
-	if v.LastDownloadTime != nil {
-		out.SetLastDownloadTime(*v.LastDownloadTime)
-	}
-	if v.LastAccessTime != nil {
-		out.SetLastAccessTime(*v.LastAccessTime)
-	}
-	return *out
 }
 
-func parseInactiveSince(r *http.Request) (*time.Time, error) {
-	raw := r.URL.Query().Get("inactive_days")
-	if raw == "" {
+func parseInactiveSince(inactiveDays *int) (*time.Time, error) {
+	if inactiveDays == nil {
 		return nil, nil
 	}
-	days, err := strconv.Atoi(raw)
-	if err != nil || days < 0 {
+	days := *inactiveDays
+	if days < 0 {
 		return nil, errors.New("inactive_days must be a non-negative integer")
 	}
 	t := time.Now().UTC().AddDate(0, 0, -days)
 	return &t, nil
-}
-
-func parseIntQuery(r *http.Request, key string, defaultValue int) int {
-	raw := r.URL.Query().Get(key)
-	if raw == "" {
-		return defaultValue
-	}
-	v, err := strconv.Atoi(raw)
-	if err != nil {
-		return -1
-	}
-	return v
 }
 
 type metricsAccess struct {
@@ -213,14 +205,18 @@ func (a metricsAccess) isScoped() bool {
 }
 
 func (a metricsAccess) authorized(ctx context.Context) bool {
-	if a.isScoped() {
-		return hasMetricsReadAccess(ctx, a.scopePrefix)
+	if !core.IsGen3Mode(ctx) {
+		return true
 	}
-	return hasGlobalMetricsReadAccess(ctx)
+	if a.scopePrefix == "" {
+		return hasGlobalMetricsReadAccess(ctx)
+	}
+	return core.HasMethodAccess(ctx, "read", []string{a.scopePrefix}) ||
+		core.HasMethodAccess(ctx, "read", []string{"/programs"})
 }
 
-func resolveMetricsAccess(r *http.Request) (metricsAccess, error) {
-	scopePrefix, _, err := parseScopeQuery(r)
+func resolveMetricsAccess(ctx context.Context) (metricsAccess, error) {
+	scopePrefix, _, err := parseScopeQuery(ctx)
 	if err != nil {
 		return metricsAccess{}, err
 	}
@@ -242,22 +238,23 @@ func hasGlobalMetricsReadAccess(ctx context.Context) bool {
 		core.HasMethodAccess(ctx, "read", []string{"/programs"})
 }
 
-func parseScopeQuery(r *http.Request) (string, bool, error) {
-	authz := strings.TrimSpace(r.URL.Query().Get("authz"))
+func parseScopeQuery(ctx context.Context) (string, bool, error) {
+	params, _ := ctx.Value(metricsQueryContextKey{}).(metricsQueryParams)
+	authz := strings.TrimSpace(params.authz)
 	if authz != "" {
 		return authz, true, nil
 	}
-	org := strings.TrimSpace(r.URL.Query().Get("organization"))
+	org := strings.TrimSpace(params.organization)
 	if org == "" {
-		org = strings.TrimSpace(r.URL.Query().Get("program"))
+		org = strings.TrimSpace(params.program)
 	}
-	project := strings.TrimSpace(r.URL.Query().Get("project"))
+	project := strings.TrimSpace(params.project)
 	if project != "" && org == "" {
-		return "", false, fmt.Errorf("organization is required when project is set")
+		return "", false, errors.New("organization is required when project is set")
 	}
-	path := core.ResourcePathForScope(org, project)
-	if path != "" {
-		return path, true, nil
+	scope := core.ResourcePathForScope(org, project)
+	if scope != "" {
+		return scope, true, nil
 	}
 	return "", false, nil
 }
@@ -287,7 +284,7 @@ func collectScopedUsage(ctx context.Context, database core.DatabaseInterface, sc
 				}
 				usages = append(usages, core.FileUsage{
 					ObjectID: id,
-					Name:     obj.Name,
+					Name:     core.StringVal(obj.Name),
 					Size:     obj.Size,
 				})
 				continue
@@ -339,22 +336,4 @@ func objectInScope(ctx context.Context, database core.DatabaseInterface, objectI
 		}
 	}
 	return false, nil
-}
-
-func writeAuthError(w http.ResponseWriter, r *http.Request) {
-	status := http.StatusForbidden
-	if core.IsGen3Mode(r.Context()) && !core.HasAuthHeader(r.Context()) {
-		status = http.StatusUnauthorized
-	}
-	writeHTTPError(w, r, status, "Unauthorized", nil)
-}
-
-func writeHTTPError(w http.ResponseWriter, r *http.Request, status int, msg string, err error) {
-	requestID := core.GetRequestID(r.Context())
-	if err != nil {
-		slog.Error("metrics request failed", "request_id", requestID, "method", r.Method, "path", r.URL.Path, "status", status, "msg", msg, "err", err)
-	} else {
-		slog.Warn("metrics request rejected", "request_id", requestID, "method", r.Method, "path", r.URL.Path, "status", status, "msg", msg)
-	}
-	http.Error(w, msg, status)
 }

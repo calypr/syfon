@@ -5,8 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
-	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/calypr/syfon/client/conf"
@@ -44,7 +45,12 @@ func (t *AuthTransport) NewAccessToken(ctx context.Context) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return errors.New("failed to refresh token, status: " + strconv.Itoa(resp.StatusCode))
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		bodyText := strings.TrimSpace(string(body))
+		if bodyText == "" {
+			return fmt.Errorf("failed to refresh token: %s", resp.Status)
+		}
+		return fmt.Errorf("failed to refresh token: %s body=%s", resp.Status, bodyText)
 	}
 
 	var result accessTokenResponse

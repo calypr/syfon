@@ -103,8 +103,9 @@ func (d *DataService) MultipartComplete(ctx context.Context, req MultipartComple
 // --- transfer.ObjectWriter interface support ---
 
 func (d *DataService) GetWriter(ctx context.Context, guid string) (io.WriteCloser, error) {
-	req := UploadBlankRequest{}
-	req.SetGuid(guid)
+	req := UploadBlankRequest{
+		Guid: &guid,
+	}
 	_, err := d.UploadBlank(ctx, req)
 	if err != nil {
 		return nil, err
@@ -119,7 +120,10 @@ func (d *DataService) ResolveDownloadURL(ctx context.Context, guid string, acces
 	if err != nil {
 		return "", err
 	}
-	return resp.GetUrl(), nil
+	if resp.Url == nil {
+		return "", fmt.Errorf("response missing URL")
+	}
+	return *resp.Url, nil
 }
 
 func (d *DataService) Download(ctx context.Context, signedURL string, rangeStart, rangeEnd *int64) (*http.Response, error) {
@@ -137,7 +141,10 @@ func (d *DataService) ResolveUploadURL(ctx context.Context, guid, filename strin
 	if err != nil {
 		return "", err
 	}
-	return resp.GetUrl(), nil
+	if resp.Url == nil {
+		return "", fmt.Errorf("response missing URL")
+	}
+	return *resp.Url, nil
 }
  
 func (d *DataService) Upload(ctx context.Context, url string, body io.Reader, size int64) error {
@@ -172,28 +179,41 @@ func (d *DataService) Logger() xfer.TransferLogger {
 // --- transfer.MultipartURLSigner interface support ---
 
 func (d *DataService) InitMultipartUpload(ctx context.Context, guid, filename, bucket string) (string, string, error) {
-	req := MultipartInitRequest{}
-	req.SetGuid(guid)
-	req.SetFileName(filename)
-	req.SetBucket(bucket)
+	req := MultipartInitRequest{
+		Guid:     &guid,
+		FileName: &filename,
+		Bucket:   &bucket,
+	}
 	resp, err := d.MultipartInit(ctx, req)
 	if err != nil {
 		return "", "", err
 	}
-	return resp.GetUploadId(), resp.GetGuid(), nil
+	uploadID := ""
+	if resp.UploadId != nil {
+		uploadID = *resp.UploadId
+	}
+	respGuid := ""
+	if resp.Guid != nil {
+		respGuid = *resp.Guid
+	}
+	return uploadID, respGuid, nil
 }
 
 func (d *DataService) GetMultipartUploadURL(ctx context.Context, key, uploadID string, partNum int32, bucket string) (string, error) {
-	req := MultipartUploadRequest{}
-	req.SetKey(key)
-	req.SetUploadId(uploadID)
-	req.SetPartNumber(partNum)
-	req.SetBucket(bucket)
+	req := MultipartUploadRequest{
+		Key:        key,
+		UploadId:   uploadID,
+		PartNumber: partNum,
+		Bucket:     &bucket,
+	}
 	resp, err := d.MultipartUpload(ctx, req)
 	if err != nil {
 		return "", err
 	}
-	return resp.GetPresignedUrl(), nil
+	if resp.PresignedUrl == nil {
+		return "", fmt.Errorf("response missing presigned URL")
+	}
+	return *resp.PresignedUrl, nil
 }
 
 func (d *DataService) CompleteMultipartUpload(ctx context.Context, key, uploadID string, parts []internalapi.InternalMultipartPart, bucket string) error {
@@ -204,11 +224,12 @@ func (d *DataService) CompleteMultipartUpload(ctx context.Context, key, uploadID
 			ETag:       p.ETag,
 		})
 	}
-	req := MultipartCompleteRequest{}
-	req.SetKey(key)
-	req.SetUploadId(uploadID)
-	req.SetBucket(bucket)
-	req.SetParts(apiParts)
+	req := MultipartCompleteRequest{
+		Key:      key,
+		UploadId: uploadID,
+		Bucket:   &bucket,
+		Parts:    apiParts,
+	}
 	return d.MultipartComplete(ctx, req)
 }
 

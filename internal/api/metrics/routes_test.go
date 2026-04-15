@@ -3,6 +3,7 @@ package metrics
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -12,15 +13,15 @@ import (
 	"github.com/calypr/syfon/apigen/metricsapi"
 	"github.com/calypr/syfon/db/core"
 	"github.com/calypr/syfon/testutils"
-	"github.com/gorilla/mux"
+	"github.com/gofiber/fiber/v3"
 )
 
 func TestMetricsRoutes_ListAndSummary(t *testing.T) {
 	now := time.Now().UTC()
 	db := &testutils.MockDatabase{
 		Objects: map[string]*drs.DrsObject{
-			"sha-1": {Id: "sha-1", Name: "f1", Size: 1},
-			"sha-2": {Id: "sha-2", Name: "f2", Size: 2},
+			"sha-1": {Id: "sha-1", Name: core.Ptr("f1"), Size: 1},
+			"sha-2": {Id: "sha-2", Name: core.Ptr("f2"), Size: 2},
 		},
 		Usage: map[string]core.FileUsage{
 			"sha-1": {
@@ -44,18 +45,21 @@ func TestMetricsRoutes_ListAndSummary(t *testing.T) {
 		},
 	}
 
-	router := mux.NewRouter()
-	RegisterMetricsRoutes(router, db)
+	app := fiber.New()
+	RegisterMetricsRoutes(app, db)
 
 	t.Run("list", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/index/v1/metrics/files?limit=10&offset=0&inactive_days=365", nil)
-		rr := httptest.NewRecorder()
-		router.ServeHTTP(rr, req)
-		if rr.Code != http.StatusOK {
-			t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+		httpResp, err := app.Test(req)
+		if err != nil {
+			t.Fatalf("test request failed: %v", err)
+		}
+		body, _ := io.ReadAll(httpResp.Body)
+		if httpResp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200, got %d body=%s", httpResp.StatusCode, string(body))
 		}
 		var resp map[string]any
-		if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		if err := json.Unmarshal(body, &resp); err != nil {
 			t.Fatalf("decode: %v", err)
 		}
 		if _, ok := resp["data"]; !ok {
@@ -65,45 +69,54 @@ func TestMetricsRoutes_ListAndSummary(t *testing.T) {
 
 	t.Run("summary", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/index/v1/metrics/summary?inactive_days=365", nil)
-		rr := httptest.NewRecorder()
-		router.ServeHTTP(rr, req)
-		if rr.Code != http.StatusOK {
-			t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+		httpResp, err := app.Test(req)
+		if err != nil {
+			t.Fatalf("test request failed: %v", err)
+		}
+		body, _ := io.ReadAll(httpResp.Body)
+		if httpResp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200, got %d body=%s", httpResp.StatusCode, string(body))
 		}
 		var resp metricsapi.FileUsageSummary
-		if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		if err := json.Unmarshal(body, &resp); err != nil {
 			t.Fatalf("decode: %v", err)
 		}
-		if resp.GetTotalFiles() != 2 {
-			t.Fatalf("expected total files 2, got %d", resp.GetTotalFiles())
+		if resp.TotalFiles == nil || *resp.TotalFiles != 2 {
+			t.Fatalf("expected total files 2, got %+v", resp.TotalFiles)
 		}
 	})
 }
 
 func TestMetricsRoutes_GetNotFoundAndValidation(t *testing.T) {
-	router := mux.NewRouter()
-	RegisterMetricsRoutes(router, &testutils.MockDatabase{})
+	app := fiber.New()
+	RegisterMetricsRoutes(app, &testutils.MockDatabase{})
 
 	req := httptest.NewRequest(http.MethodGet, "/index/v1/metrics/files/missing", nil)
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
-	if rr.Code != http.StatusNotFound {
-		t.Fatalf("expected 404, got %d body=%s", rr.Code, rr.Body.String())
+	httpResp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("test request failed: %v", err)
+	}
+	body, _ := io.ReadAll(httpResp.Body)
+	if httpResp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d body=%s", httpResp.StatusCode, string(body))
 	}
 
 	req2 := httptest.NewRequest(http.MethodGet, "/index/v1/metrics/files?limit=0", nil)
-	rr2 := httptest.NewRecorder()
-	router.ServeHTTP(rr2, req2)
-	if rr2.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d body=%s", rr2.Code, rr2.Body.String())
+	httpResp2, err := app.Test(req2)
+	if err != nil {
+		t.Fatalf("test request failed: %v", err)
+	}
+	body2, _ := io.ReadAll(httpResp2.Body)
+	if httpResp2.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d body=%s", httpResp2.StatusCode, string(body2))
 	}
 }
 
 func TestMetricsSummaryAuthzAndScope(t *testing.T) {
 	db := &testutils.MockDatabase{
 		Objects: map[string]*drs.DrsObject{
-			"scoped-1": {Id: "scoped-1", Name: "f1", Size: 1},
-			"other-1":  {Id: "other-1", Name: "f2", Size: 2},
+			"scoped-1": {Id: "scoped-1", Name: core.Ptr("f1"), Size: 1},
+			"other-1":  {Id: "other-1", Name: core.Ptr("f2"), Size: 2},
 		},
 		ObjectAuthz: map[string][]string{
 			"scoped-1": {"/programs/cbds/projects/end_to_end_test"},
@@ -122,8 +135,8 @@ func TestMetricsSummaryAuthzAndScope(t *testing.T) {
 			},
 		},
 	}
-	router := mux.NewRouter()
-	RegisterMetricsRoutes(router, db)
+	app := fiber.New()
+	RegisterMetricsRoutes(app, db)
 
 	t.Run("scope reader can access scoped summary", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/index/v1/metrics/summary?organization=cbds&project=end_to_end_test", nil)
@@ -133,16 +146,19 @@ func TestMetricsSummaryAuthzAndScope(t *testing.T) {
 			"/programs/cbds/projects/end_to_end_test": {"read": true},
 		})
 		req = req.WithContext(ctx)
-		rr := httptest.NewRecorder()
-		router.ServeHTTP(rr, req)
-		if rr.Code != http.StatusOK {
-			t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+		httpResp, err := app.Test(req)
+		if err != nil {
+			t.Fatalf("test request failed: %v", err)
+		}
+		body, _ := io.ReadAll(httpResp.Body)
+		if httpResp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200, got %d body=%s", httpResp.StatusCode, string(body))
 		}
 		var resp metricsapi.FileUsageSummary
-		if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		if err := json.Unmarshal(body, &resp); err != nil {
 			t.Fatalf("decode: %v", err)
 		}
-		if resp.GetTotalFiles() != 1 || resp.GetTotalUploads() != 2 || resp.GetTotalDownloads() != 3 {
+		if resp.TotalFiles == nil || resp.TotalUploads == nil || resp.TotalDownloads == nil || *resp.TotalFiles != 1 || *resp.TotalUploads != 2 || *resp.TotalDownloads != 3 {
 			t.Fatalf("unexpected scoped summary: %+v", resp)
 		}
 	})
@@ -152,10 +168,13 @@ func TestMetricsSummaryAuthzAndScope(t *testing.T) {
 		ctx := context.WithValue(req.Context(), core.AuthModeKey, "gen3")
 		ctx = context.WithValue(ctx, core.AuthHeaderPresentKey, false)
 		req = req.WithContext(ctx)
-		rr := httptest.NewRecorder()
-		router.ServeHTTP(rr, req)
-		if rr.Code != http.StatusUnauthorized {
-			t.Fatalf("expected 401, got %d body=%s", rr.Code, rr.Body.String())
+		httpResp, err := app.Test(req)
+		if err != nil {
+			t.Fatalf("test request failed: %v", err)
+		}
+		body, _ := io.ReadAll(httpResp.Body)
+		if httpResp.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("expected 401, got %d body=%s", httpResp.StatusCode, string(body))
 		}
 	})
 
@@ -167,10 +186,13 @@ func TestMetricsSummaryAuthzAndScope(t *testing.T) {
 			"/programs": {"read": true},
 		})
 		req = req.WithContext(ctx)
-		rr := httptest.NewRecorder()
-		router.ServeHTTP(rr, req)
-		if rr.Code != http.StatusOK {
-			t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+		httpResp, err := app.Test(req)
+		if err != nil {
+			t.Fatalf("test request failed: %v", err)
+		}
+		body, _ := io.ReadAll(httpResp.Body)
+		if httpResp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200, got %d body=%s", httpResp.StatusCode, string(body))
 		}
 	})
 }
@@ -178,8 +200,8 @@ func TestMetricsSummaryAuthzAndScope(t *testing.T) {
 func TestMetricsFilesAuthzAndScope(t *testing.T) {
 	db := &testutils.MockDatabase{
 		Objects: map[string]*drs.DrsObject{
-			"scoped-1": {Id: "scoped-1", Name: "f1", Size: 1},
-			"other-1":  {Id: "other-1", Name: "f2", Size: 2},
+			"scoped-1": {Id: "scoped-1", Name: core.Ptr("f1"), Size: 1},
+			"other-1":  {Id: "other-1", Name: core.Ptr("f2"), Size: 2},
 		},
 		ObjectAuthz: map[string][]string{
 			"scoped-1": {"/programs/cbds/projects/end_to_end_test"},
@@ -202,8 +224,8 @@ func TestMetricsFilesAuthzAndScope(t *testing.T) {
 			},
 		},
 	}
-	router := mux.NewRouter()
-	RegisterMetricsRoutes(router, db)
+	app := fiber.New()
+	RegisterMetricsRoutes(app, db)
 
 	t.Run("scoped list returns only scoped objects", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/index/v1/metrics/files?organization=cbds&project=end_to_end_test&limit=10&offset=0", nil)
@@ -213,13 +235,16 @@ func TestMetricsFilesAuthzAndScope(t *testing.T) {
 			"/programs/cbds/projects/end_to_end_test": {"read": true},
 		})
 		req = req.WithContext(ctx)
-		rr := httptest.NewRecorder()
-		router.ServeHTTP(rr, req)
-		if rr.Code != http.StatusOK {
-			t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+		httpResp, err := app.Test(req)
+		if err != nil {
+			t.Fatalf("test request failed: %v", err)
+		}
+		body, _ := io.ReadAll(httpResp.Body)
+		if httpResp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200, got %d body=%s", httpResp.StatusCode, string(body))
 		}
 		var resp map[string]any
-		if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		if err := json.Unmarshal(body, &resp); err != nil {
 			t.Fatalf("decode: %v", err)
 		}
 		data, ok := resp["data"].([]any)
@@ -246,10 +271,13 @@ func TestMetricsFilesAuthzAndScope(t *testing.T) {
 			"/programs/cbds/projects/end_to_end_test": {"read": true},
 		})
 		req = req.WithContext(ctx)
-		rr := httptest.NewRecorder()
-		router.ServeHTTP(rr, req)
-		if rr.Code != http.StatusNotFound {
-			t.Fatalf("expected 404, got %d body=%s", rr.Code, rr.Body.String())
+		httpResp, err := app.Test(req)
+		if err != nil {
+			t.Fatalf("test request failed: %v", err)
+		}
+		body, _ := io.ReadAll(httpResp.Body)
+		if httpResp.StatusCode != http.StatusNotFound {
+			t.Fatalf("expected 404, got %d body=%s", httpResp.StatusCode, string(body))
 		}
 	})
 
@@ -261,10 +289,13 @@ func TestMetricsFilesAuthzAndScope(t *testing.T) {
 			"/programs": {"read": true},
 		})
 		req = req.WithContext(ctx)
-		rr := httptest.NewRecorder()
-		router.ServeHTTP(rr, req)
-		if rr.Code != http.StatusOK {
-			t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+		httpResp, err := app.Test(req)
+		if err != nil {
+			t.Fatalf("test request failed: %v", err)
+		}
+		body, _ := io.ReadAll(httpResp.Body)
+		if httpResp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200, got %d body=%s", httpResp.StatusCode, string(body))
 		}
 	})
 }

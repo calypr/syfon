@@ -7,19 +7,18 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"testing"
 	"time"
 
-	"github.com/calypr/syfon/apigen/drs"
 	"github.com/calypr/syfon/config"
 	"github.com/calypr/syfon/db"
 	"github.com/calypr/syfon/db/core"
 	"github.com/calypr/syfon/internal/api/internaldrs"
-	"github.com/calypr/syfon/service"
 	"github.com/calypr/syfon/urlmanager"
+	"github.com/gofiber/fiber/v3"
 )
 
 var (
@@ -96,20 +95,26 @@ s3_credentials:
 	}
 
 	uM := urlmanager.NewManager(database, cfg.Signing)
-	svc := service.NewObjectsAPIService(database, uM)
+	app := fiber.New()
+	internaldrs.RegisterInternalIndexRoutes(app, database)
+	internaldrs.RegisterInternalDataRoutes(app, database, uM)
 
-	objectsController := drs.NewObjectsAPIController(svc)
-	serviceInfoController := drs.NewServiceInfoAPIController(svc)
-	router := drs.NewRouter(objectsController, serviceInfoController)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
 
-	// Register Internal Routes
-	internaldrs.RegisterInternalIndexRoutes(router, database)
-	internaldrs.RegisterInternalDataRoutes(router, database, uM)
+	go func() {
+		_ = app.Listener(ln)
+	}()
 
-	server := httptest.NewServer(router)
-	defer server.Close()
+	serverURL := "http://" + ln.Addr().String()
+	defer func() {
+		_ = app.Shutdown()
+	}()
 
-	client := server.Client()
+	client := &http.Client{}
 
 	// 1. Verify credentials preloaded into the DB
 	creds, err := database.ListS3Credentials(context.Background())
@@ -131,7 +136,7 @@ s3_credentials:
 	key := fmt.Sprintf("test-upload-%d", time.Now().Unix())
 	internalUploadReq := map[string]interface{}{"guid": key}
 	internalBody, _ := json.Marshal(internalUploadReq)
-	resp, err := client.Post(server.URL+"/data/upload", "application/json", bytes.NewReader(internalBody))
+	resp, err := client.Post(serverURL+"/data/upload", "application/json", bytes.NewReader(internalBody))
 	if err != nil {
 		t.Fatalf("Internal upload blank failed: %v", err)
 	}
@@ -174,7 +179,7 @@ s3_credentials:
 		"bucket":    bucketName,
 	}
 	mpBody, _ := json.Marshal(internalMultipartReq)
-	resp, err = client.Post(server.URL+"/data/multipart/init", "application/json", bytes.NewReader(mpBody))
+	resp, err = client.Post(serverURL+"/data/multipart/init", "application/json", bytes.NewReader(mpBody))
 	if err != nil {
 		t.Fatalf("Internal multipart init failed: %v", err)
 	}
@@ -186,7 +191,7 @@ s3_credentials:
 	}
 
 	// 5. Internal download for blank object should not resolve yet (no access method registered).
-	resp, err = client.Get(server.URL + "/data/download/" + guid)
+	resp, err = client.Get(serverURL + "/data/download/" + guid)
 	if err != nil {
 		t.Fatalf("Internal download req failed: %v", err)
 	}

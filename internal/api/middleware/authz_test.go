@@ -10,65 +10,80 @@ import (
 	"time"
 
 	"github.com/calypr/syfon/db/core"
+	"github.com/gofiber/fiber/v3"
 )
 
 func TestLocalModeBasicAuthEnforced(t *testing.T) {
 	m := NewAuthzMiddleware(slog.Default(), "local", "user", "pass")
-	handler := m.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
+	app := fiber.New()
+	app.Use(m.FiberMiddleware())
+	app.Get("/", func(c fiber.Ctx) error {
+		return c.SendStatus(http.StatusOK)
+	})
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-	if rr.Code != http.StatusUnauthorized {
-		t.Fatalf("expected 401, got %d", rr.Code)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("test request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", resp.StatusCode)
 	}
 
 	req2 := httptest.NewRequest(http.MethodGet, "/", nil)
 	req2.SetBasicAuth("user", "pass")
-	rr2 := httptest.NewRecorder()
-	handler.ServeHTTP(rr2, req2)
-	if rr2.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rr2.Code)
+	resp2, err := app.Test(req2)
+	if err != nil {
+		t.Fatalf("test request failed: %v", err)
+	}
+	if resp2.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp2.StatusCode)
 	}
 }
 
 func TestGen3ModeSetsContextWithoutAuthHeader(t *testing.T) {
 	m := NewAuthzMiddleware(slog.Default(), "gen3", "", "")
-	handler := m.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !core.IsGen3Mode(r.Context()) {
+	app := fiber.New()
+	app.Use(m.FiberMiddleware())
+	app.Get("/", func(c fiber.Ctx) error {
+		if !core.IsGen3Mode(c.Context()) {
 			t.Fatalf("expected gen3 mode in context")
 		}
-		if core.HasAuthHeader(r.Context()) {
+		if core.HasAuthHeader(c.Context()) {
 			t.Fatalf("did not expect auth header presence")
 		}
-		w.WriteHeader(http.StatusOK)
-	}))
+		return c.SendStatus(http.StatusOK)
+	})
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rr.Code)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("test request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
 }
 
 func TestGen3ModeMalformedBearerStillPassesToNext(t *testing.T) {
 	m := NewAuthzMiddleware(slog.Default(), "gen3", "", "")
-	handler := m.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !core.HasAuthHeader(r.Context()) {
+	app := fiber.New()
+	app.Use(m.FiberMiddleware())
+	app.Get("/", func(c fiber.Ctx) error {
+		if !core.HasAuthHeader(c.Context()) {
 			t.Fatalf("expected auth header presence to be true")
 		}
-		w.WriteHeader(http.StatusOK)
-	}))
+		return c.SendStatus(http.StatusOK)
+	})
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set("Authorization", "Bearer malformed.token")
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rr.Code)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("test request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
 }
 
@@ -176,24 +191,28 @@ func TestGen3MockAuthInjectsPrivileges(t *testing.T) {
 	t.Setenv("DRS_AUTH_MOCK_METHODS", "read,file_upload,create,update,delete")
 
 	m := NewAuthzMiddleware(slog.Default(), "gen3", "", "")
-	handler := m.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !core.IsGen3Mode(r.Context()) {
+	app := fiber.New()
+	app.Use(m.FiberMiddleware())
+	app.Get("/", func(c fiber.Ctx) error {
+		if !core.IsGen3Mode(c.Context()) {
 			t.Fatalf("expected gen3 mode")
 		}
-		if !core.HasMethodAccess(r.Context(), "read", []string{"/data_file"}) {
+		if !core.HasMethodAccess(c.Context(), "read", []string{"/data_file"}) {
 			t.Fatalf("expected read on /data_file")
 		}
-		if !core.HasMethodAccess(r.Context(), "create", []string{"/programs/cbds/projects/end_to_end_test"}) {
+		if !core.HasMethodAccess(c.Context(), "create", []string{"/programs/cbds/projects/end_to_end_test"}) {
 			t.Fatalf("expected create on project resource")
 		}
-		w.WriteHeader(http.StatusOK)
-	}))
+		return c.SendStatus(http.StatusOK)
+	})
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rr.Code)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("test request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
 }
 
@@ -204,19 +223,23 @@ func TestGen3MockAuthRequireHeader(t *testing.T) {
 	t.Setenv("DRS_AUTH_MOCK_METHODS", "read")
 
 	m := NewAuthzMiddleware(slog.Default(), "gen3", "", "")
-	handler := m.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	app := fiber.New()
+	app.Use(m.FiberMiddleware())
+	app.Get("/", func(c fiber.Ctx) error {
 		// Without header, mock privileges should not be injected.
-		if core.HasMethodAccess(r.Context(), "read", []string{"/data_file"}) {
+		if core.HasMethodAccess(c.Context(), "read", []string{"/data_file"}) {
 			t.Fatalf("did not expect read access without auth header")
 		}
-		w.WriteHeader(http.StatusOK)
-	}))
+		return c.SendStatus(http.StatusOK)
+	})
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rr.Code)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("test request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
 }
 
