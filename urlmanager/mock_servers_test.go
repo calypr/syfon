@@ -205,7 +205,6 @@ func isDockerUnavailableForMockTests(err error) bool {
 	}
 	lower := strings.ToLower(err.Error())
 	return strings.Contains(lower, "docker daemon") ||
-		strings.Contains(lower, "no such host") ||
 		strings.Contains(lower, "cannot connect") ||
 		strings.Contains(lower, "connection refused") ||
 		strings.Contains(lower, "failed to create docker provider")
@@ -220,6 +219,7 @@ func TestIsDockerUnavailableForMockTests(t *testing.T) {
 		{name: "nil error", err: nil, want: false},
 		{name: "docker daemon unavailable", err: errors.New("Cannot connect to the Docker daemon at unix:///var/run/docker.sock"), want: true},
 		{name: "provider creation failed", err: errors.New("failed to create Docker provider"), want: true},
+		{name: "registry dns no such host should fail", err: errors.New("Get https://registry-1.docker.io/v2/: dial tcp: lookup registry-1.docker.io: no such host"), want: false},
 		{name: "container create failure should fail", err: errors.New("failed to create container: image not found"), want: false},
 		{name: "generic timeout should not skip", err: errors.New("context deadline exceeded"), want: false},
 	}
