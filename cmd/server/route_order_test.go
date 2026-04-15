@@ -5,7 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/calypr/syfon/config"
+	"github.com/calypr/syfon/internal/config"
 	"github.com/gofiber/fiber/v3"
 )
 

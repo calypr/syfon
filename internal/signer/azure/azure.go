@@ -13,7 +13,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blockblob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/sas"
-	"github.com/calypr/syfon/db/core"
+	"github.com/calypr/syfon/internal/db/core"
 	"github.com/calypr/syfon/internal/signer"
 	"github.com/google/uuid"
 )

@@ -11,7 +11,7 @@ import (
 
 	"github.com/calypr/syfon/apigen/drs"
 	"github.com/calypr/syfon/apigen/lfsapi"
-	"github.com/calypr/syfon/db/core"
+	"github.com/calypr/syfon/internal/db/core"
 	"github.com/gofiber/fiber/v3"
 )
 

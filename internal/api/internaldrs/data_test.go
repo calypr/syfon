@@ -14,9 +14,9 @@ import (
 	"github.com/calypr/syfon/apigen/bucketapi"
 	"github.com/calypr/syfon/apigen/drs"
 	"github.com/calypr/syfon/apigen/internalapi"
-	"github.com/calypr/syfon/db/core"
+	"github.com/calypr/syfon/internal/db/core"
 	"github.com/calypr/syfon/internal/api/routeutil"
-	"github.com/calypr/syfon/testutils"
+	"github.com/calypr/syfon/internal/testutils"
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 )

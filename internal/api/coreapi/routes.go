@@ -10,8 +10,8 @@ import (
 
 	"github.com/calypr/syfon/apigen/drs"
 	"github.com/calypr/syfon/apigen/internalapi"
-	"github.com/calypr/syfon/config"
-	"github.com/calypr/syfon/db/core"
+	"github.com/calypr/syfon/internal/config"
+	"github.com/calypr/syfon/internal/db/core"
 	"github.com/calypr/syfon/internal/api/routeutil"
 	"github.com/gofiber/fiber/v3"
 )

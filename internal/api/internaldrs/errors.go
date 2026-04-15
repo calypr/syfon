@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/calypr/syfon/db/core"
+	"github.com/calypr/syfon/internal/db/core"
 )
 
 func writeHTTPError(w http.ResponseWriter, r *http.Request, status int, msg string, err error) {

@@ -5,8 +5,8 @@ import (
 	"testing"
 
 	"github.com/calypr/syfon/apigen/drs"
-	"github.com/calypr/syfon/db/core"
-	"github.com/calypr/syfon/testutils"
+	"github.com/calypr/syfon/internal/db/core"
+	"github.com/calypr/syfon/internal/testutils"
 )
 
 func TestNormalizeSHA256(t *testing.T) {

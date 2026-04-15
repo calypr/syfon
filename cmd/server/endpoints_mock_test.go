@@ -10,15 +10,15 @@ import (
 	"testing"
 
 	"github.com/calypr/syfon/apigen/drs"
-	"github.com/calypr/syfon/db/core"
+	"github.com/calypr/syfon/internal/db/core"
 	coreapi "github.com/calypr/syfon/internal/api/coreapi"
 	"github.com/calypr/syfon/internal/api/docs"
 	"github.com/calypr/syfon/internal/api/internaldrs"
 	"github.com/calypr/syfon/internal/api/lfs"
 	"github.com/calypr/syfon/internal/api/metrics"
 	"github.com/calypr/syfon/internal/api/middleware"
-	"github.com/calypr/syfon/service"
-	"github.com/calypr/syfon/testutils"
+	"github.com/calypr/syfon/internal/service"
+	"github.com/calypr/syfon/internal/testutils"
 	"github.com/gofiber/fiber/v3"
 )
 

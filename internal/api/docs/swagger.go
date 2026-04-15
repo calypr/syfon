@@ -8,7 +8,7 @@ import (
 	"runtime"
 
 	openapispec "github.com/calypr/syfon/apigen/api"
-	"github.com/calypr/syfon/config"
+	"github.com/calypr/syfon/internal/config"
 	"github.com/calypr/syfon/internal/api/routeutil"
 	"github.com/gofiber/fiber/v3"
 	"gopkg.in/yaml.v3"

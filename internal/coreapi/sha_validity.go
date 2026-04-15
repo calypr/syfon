@@ -6,7 +6,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/calypr/syfon/db/core"
+	"github.com/calypr/syfon/internal/db/core"
 )
 
 var ErrNoValidSHA256 = errors.New("no valid sha256 values provided")

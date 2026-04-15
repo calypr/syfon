@@ -15,11 +15,11 @@ import (
 
 	"github.com/calypr/syfon/apigen/drs"
 	"github.com/calypr/syfon/apigen/internalapi"
-	"github.com/calypr/syfon/db/core"
+	"github.com/calypr/syfon/internal/db/core"
 	"github.com/calypr/syfon/internal/api/routeutil"
 	corelogic "github.com/calypr/syfon/internal/coreapi"
 	"github.com/calypr/syfon/internal/provider"
-	"github.com/calypr/syfon/urlmanager"
+	"github.com/calypr/syfon/internal/urlmanager"
 	"github.com/gofiber/fiber/v3"
 )
 type InternalServer struct {

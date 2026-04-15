@@ -9,11 +9,11 @@ import (
 	"time"
 
 	"github.com/calypr/syfon/apigen/internalapi"
-	"github.com/calypr/syfon/config"
-	"github.com/calypr/syfon/db/core"
+	"github.com/calypr/syfon/internal/config"
+	"github.com/calypr/syfon/internal/db/core"
 	"github.com/calypr/syfon/internal/api/routeutil"
 	"github.com/calypr/syfon/internal/provider"
-	"github.com/calypr/syfon/urlmanager"
+	"github.com/calypr/syfon/internal/urlmanager"
 )
 
 func handleInternalDownload(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface, uM urlmanager.UrlManager) {

@@ -11,8 +11,8 @@ import (
 
 	"github.com/calypr/syfon/apigen/drs"
 	"github.com/calypr/syfon/apigen/lfsapi"
-	"github.com/calypr/syfon/db/core"
-	"github.com/calypr/syfon/urlmanager"
+	"github.com/calypr/syfon/internal/db/core"
+	"github.com/calypr/syfon/internal/urlmanager"
 )
 
 func prepareDownloadActions(ctx context.Context, database core.DatabaseInterface, uM urlmanager.UrlManager, oid string) (*lfsapi.BatchActions, *lfsapi.ObjectError) {

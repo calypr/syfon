@@ -39,11 +39,11 @@ GIT_COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 GIT_BRANCH  ?= $(shell git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)
 BUILD_DATE  ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 GIT_UPSTREAM ?= $(shell git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null || echo unknown)
-LDFLAGS     := -X github.com/calypr/syfon/version.Version=$(GIT_VERSION) \
-               -X github.com/calypr/syfon/version.GitCommit=$(GIT_COMMIT) \
-               -X github.com/calypr/syfon/version.GitBranch=$(GIT_BRANCH) \
-               -X github.com/calypr/syfon/version.BuildDate=$(BUILD_DATE) \
-               -X github.com/calypr/syfon/version.GitUpstream=$(GIT_UPSTREAM)
+LDFLAGS     := -X github.com/calypr/syfon/internal/version.Version=$(GIT_VERSION) \
+               -X github.com/calypr/syfon/internal/version.GitCommit=$(GIT_COMMIT) \
+               -X github.com/calypr/syfon/internal/version.GitBranch=$(GIT_BRANCH) \
+               -X github.com/calypr/syfon/internal/version.BuildDate=$(BUILD_DATE) \
+               -X github.com/calypr/syfon/internal/version.GitUpstream=$(GIT_UPSTREAM)
 
 .PHONY: build
 build: build

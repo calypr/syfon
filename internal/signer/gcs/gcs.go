@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/storage"
-	"github.com/calypr/syfon/db/core"
+	"github.com/calypr/syfon/internal/db/core"
 	"github.com/calypr/syfon/internal/signer"
 	"github.com/google/uuid"
 	"google.golang.org/api/option"

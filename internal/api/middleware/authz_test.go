@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/calypr/syfon/db/core"
+	"github.com/calypr/syfon/internal/db/core"
 	"github.com/gofiber/fiber/v3"
 )
 
