@@ -1,55 +1,33 @@
-<p align="center">
+<div align="center">
   <img src="docs/images/syfon-logo.png" alt="syfon logo" width="520" />
-</p>
+  <br><br>
+  <a href="https://pkg.go.dev/github.com/calypr/syfon"><img src="https://pkg.go.dev/badge/github.com/calypr/syfon.svg" alt="Go Reference"></a>
+  <a href="https://goreportcard.com/report/github.com/calypr/syfon"><img src="https://goreportcard.com/badge/github.com/calypr/syfon" alt="Go Report Card"></a>
+  <a href="https://github.com/calypr/syfon/actions/workflows/ci.yaml"><img src="https://github.com/calypr/syfon/actions/workflows/ci.yaml/badge.svg" alt="CI"></a>
+  <a href="https://codecov.io/gh/calypr/syfon"><img src="https://codecov.io/gh/calypr/syfon/branch/main/graph/badge.svg" alt="Coverage"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+  <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs Welcome"></a>
+  <a href="https://github.com/calypr/syfon/releases"><img src="https://img.shields.io/github/v/release/calypr/syfon" alt="Latest Release"></a>
+  <br><br>
+  <p align="center">A lightweight, production-grade implementation of a GA4GH Data Repository Service (DRS) server in Go.</p>
+</div>
 
-# syfon
+# Quickstart
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/calypr/syfon.svg)](https://pkg.go.dev/github.com/calypr/syfon)
-[![Go Report Card](https://goreportcard.com/badge/github.com/calypr/syfon)](https://goreportcard.com/report/github.com/calypr/syfon)
-[![Go Version](https://img.shields.io/badge/go-1.26.1-00ADD8?logo=go)](https://go.dev/doc/devel/release)
-[![CI](https://github.com/calypr/syfon/actions/workflows/ci.yaml/badge.svg)](https://github.com/calypr/syfon/actions/workflows/ci.yaml)
-[![Coverage](https://codecov.io/gh/calypr/syfon/branch/main/graph/badge.svg)](https://codecov.io/gh/calypr/syfon)
-[![dependabot](https://img.shields.io/badge/dependabot-enabled-025E8C?logo=dependabot)](https://github.com/calypr/syfon/security/dependabot)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Latest Release](https://img.shields.io/github/v/release/calypr/syfon)](https://github.com/calypr/syfon/releases)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
-[![GitHub Stars](https://img.shields.io/github/stars/calypr/syfon?style=social)](https://github.com/calypr/syfon/stargazers)
-
-A lightweight, production-grade implementation of a GA4GH Data Repository Service (DRS) server in Go.
-
-## Quickstart
-
-### Prerequisites
-
-- Go 1.24+
-- SQLite3 CLI (`sqlite3`)
-- Git
-
-### 1. Clone and enter the repo
+## 1. Install Syfon
 
 ```bash
-git clone <your-repo-url>
-cd syfon
+curl -sSL https://calypr.org/syfon/install.sh | bash
 ```
 
-### 2. Run tests
+## 2. Start Syfon Server
 
-```bash
-go test ./... -count=1
-```
-
-### 3. Start in local mode (SQLite, no gen3 authz)
-
-Create `config.local.yaml`:
+<details><summary><code>config.local.yaml</code></summary>
 
 ```yaml
 port: 8080
 auth:
   mode: local
-  # optional basic auth for local mode
-  # basic:
-  #   username: "drs-user"
-  #   password: "drs-pass"
 database:
   sqlite:
     file: "drs_local.db"
@@ -61,11 +39,10 @@ s3_credentials:
     endpoint: "http://localhost:9000"
 ```
 
-Run:
+</details>
 
 ```bash
-./db/scripts/init_sqlite_db.sh drs_local.db
-go run . serve --config config.local.yaml
+syfon serve --config config.local.yaml
 ```
 
 Smoke test:
@@ -161,20 +138,11 @@ go test ./... -count=1
 go run . serve --config config.local.yaml
 ```
 
-Useful endpoints:
-- `GET /healthz`
-- `GET /index/swagger` (Swagger UI)
-- `GET /index/openapi.yaml` (OpenAPI spec)
-- `GET /service-info`
-- `GET /index/{id}` (gen3 compatibility)
-- `POST /index/bulk/sha256/validity` (bulk sha validity map for git-lfs style flows)
-- `GET /download/{id}` (fence compatibility)
-
-
 ## Minio Starter Kit
 
 Start up a docker container with MinIO for testing:
-```
+
+```bash
 docker run -p 9000:9000 -p 9001:9001 \
   -e "MINIO_ROOT_USER=admin" \
   -e "MINIO_ROOT_PASSWORD=password123" \
@@ -183,7 +151,8 @@ docker run -p 9000:9000 -p 9001:9001 \
 ```
 
 Create a config file called `local.yaml`
-```
+
+```yaml
 port: 8080
 
 auth:
@@ -218,23 +187,9 @@ List records
 syfon ls
 ```
 
-## Running Integration Tests
-
-You can run integration tests using your own config file:
-
-```bash
-go test ./cmd/server -v -count=1 -testConfig=config.yaml
-```
-
-Docker-backed MinIO upload and download coverage is available behind an opt-in flag:
-
-```bash
-SYFON_E2E_DOCKER=1 go test ./cmd -run TestSyfonDockerMinIOE2E -v -count=1
-```
-
 This test starts MinIO in Docker, starts a real syfon server configured against it, then verifies `ping`, `upload`, `download`, and `sha256sum`. It skips automatically when the opt-in flag is not set, and it also skips when Docker is unavailable.
 
-## Architecture
+# Architecture
 
 The project follows a modular structure to ensure maintainability:
 - `db/core`: Core interfaces and models.
@@ -264,7 +219,7 @@ The root module (`github.com/calypr/syfon`) uses a local `replace` during develo
 replace github.com/calypr/syfon/client => ./client
 ```
 
-## Development
+# Development
 
 The project uses a Makefile for common tasks:
 - `make gen`: Generates the DRS server code from the official GA4GH OpenAPI spec (Git submodule).
@@ -274,13 +229,26 @@ The project uses a Makefile for common tasks:
 - `make coverage-full`: Runs broader compatibility-layer coverage (includes internal compatibility and LFS packages).
 - `make serve`: Starts the DRS server.
 
-### apigen Scope (Current vs Future)
+## apigen Scope (Current vs Future)
 
 The `apigen` module is currently used as a shared model/types package, not a full server/client operation generator. In practice, we generate and commit schemas/models from OpenAPI (`components/schemas`), while route handlers and request wiring are implemented manually under `internal/api/internaldrs` and related packages. This means path/operation updates in `apigen/api/*.openapi.yaml` may change contract/docs without producing new generated handler code.
 
 This is intentional for now to keep control of runtime behavior and compatibility logic. We can expand `apigen` later to include operation-level generation (`apis`/server interfaces) once we decide to move more routing and handler contracts to generated code.
 
-## License
+## Running Integration Tests
+
+You can run integration tests using your own config file:
+
+```bash
+go test ./cmd/server -v -count=1 -testConfig=config.yaml
+```
+
+Docker-backed MinIO upload and download coverage is available behind an opt-in flag:
+
+```bash
+SYFON_E2E_DOCKER=1 go test ./cmd -run TestSyfonDockerMinIOE2E -v -count=1
+```
+
+# License
 
 This project is licensed under the MIT License. See [LICENSE](LICENSE).
-
