@@ -17,6 +17,8 @@ import (
 	"github.com/calypr/syfon/db"
 	"github.com/calypr/syfon/db/core"
 	"github.com/calypr/syfon/internal/api/internaldrs"
+	"github.com/calypr/syfon/internal/provider"
+	"github.com/calypr/syfon/internal/signer/s3"
 	"github.com/calypr/syfon/urlmanager"
 	"github.com/gofiber/fiber/v3"
 )
@@ -95,6 +97,7 @@ s3_credentials:
 	}
 
 	uM := urlmanager.NewManager(database, cfg.Signing)
+	uM.RegisterSigner(provider.S3, s3.NewS3Signer(database))
 	app := fiber.New()
 	internaldrs.RegisterInternalIndexRoutes(app, database, uM)
 	internaldrs.RegisterInternalDataRoutes(app, database, uM)

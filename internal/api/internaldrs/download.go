@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"time"
 
 	"github.com/calypr/syfon/apigen/internalapi"
 	"github.com/calypr/syfon/config"
@@ -54,11 +55,11 @@ func handleInternalDownload(w http.ResponseWriter, r *http.Request, database cor
 	opts := urlmanager.SignOptions{}
 	if expStr := r.URL.Query().Get("expires_in"); expStr != "" {
 		if exp, err := strconv.Atoi(expStr); err == nil {
-			opts.ExpiresIn = exp
+			opts.ExpiresIn = time.Duration(exp) * time.Second
 		}
 	}
 	if opts.ExpiresIn <= 0 {
-		opts.ExpiresIn = config.DefaultSigningExpirySeconds
+		opts.ExpiresIn = time.Duration(config.DefaultSigningExpirySeconds) * time.Second
 	}
 
 	bucketID := ""
@@ -148,7 +149,7 @@ func handleInternalDownloadPart(w http.ResponseWriter, r *http.Request, database
 	}
 
 	opts := urlmanager.SignOptions{
-		ExpiresIn: config.DefaultSigningExpirySeconds,
+		ExpiresIn: time.Duration(config.DefaultSigningExpirySeconds) * time.Second,
 	}
 
 	signedURL, err := uM.SignDownloadPart(r.Context(), bucketID, objectURL, start, end, opts)

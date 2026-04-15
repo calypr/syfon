@@ -2,14 +2,15 @@ package urlmanager
 
 import (
 	"context"
-	"io"
 	"strings"
 	"testing"
 
 	"github.com/calypr/syfon/config"
 	"github.com/calypr/syfon/db/core"
 	"github.com/calypr/syfon/db/sqlite"
-	"gocloud.dev/blob/memblob"
+	"github.com/calypr/syfon/internal/provider"
+	"github.com/calypr/syfon/internal/signer/file"
+	"github.com/calypr/syfon/internal/signer/s3"
 )
 
 func TestManager_SignURL(t *testing.T) {
@@ -22,6 +23,7 @@ func TestManager_SignURL(t *testing.T) {
 
 	cred := &core.S3Credential{
 		Bucket:    "my-bucket",
+		Provider:  "s3",
 		Region:    "us-east-1",
 		AccessKey: "test-key-id",
 		SecretKey: "test-secret-key",
@@ -31,6 +33,7 @@ func TestManager_SignURL(t *testing.T) {
 	}
 
 	manager := NewManager(database, config.SigningConfig{DefaultExpirySeconds: 900})
+	manager.RegisterSigner(provider.S3, s3.NewS3Signer(database))
 
 	urlStr := "s3://my-bucket/my-obj"
 	signedURL, err := manager.SignURL(ctx, "resource-1", urlStr, SignOptions{})
@@ -62,6 +65,8 @@ func TestManager_FileScheme(t *testing.T) {
 		t.Fatalf("failed to init db: %v", err)
 	}
 	manager := NewManager(database, config.SigningConfig{DefaultExpirySeconds: 900})
+	fSigner, _ := file.NewFileSigner("/")
+	manager.RegisterSigner(provider.File, fSigner)
 
 	// file:// should work without DB credentials
 	urlStr := "file:///tmp/test.txt"
@@ -83,6 +88,7 @@ func TestManager_MultipartMethods(t *testing.T) {
 	}
 	if err := database.SaveS3Credential(ctx, &core.S3Credential{
 		Bucket:    "mp-bucket",
+		Provider:  "s3",
 		Region:    "us-east-1",
 		AccessKey: "test-key-id",
 		SecretKey: "test-secret-key",
@@ -92,6 +98,7 @@ func TestManager_MultipartMethods(t *testing.T) {
 	}
 
 	manager := NewManager(database, config.SigningConfig{DefaultExpirySeconds: 900})
+	manager.RegisterSigner(provider.S3, s3.NewS3Signer(database))
 
 	// Presigning upload part is local.
 	partURL, err := manager.SignMultipartPart(ctx, "mp-bucket", "obj", "upload-id", 1)
@@ -126,6 +133,7 @@ func TestManager_ResolveFallbackFromAccessIDToURLBucket(t *testing.T) {
 	}
 
 	manager := NewManager(database, config.SigningConfig{DefaultExpirySeconds: 900})
+	manager.RegisterSigner(provider.S3, s3.NewS3Signer(database))
 
 	signedURL, err := manager.SignURL(ctx, "s3", "s3://cbds/path/to/object", SignOptions{})
 	if err != nil {
@@ -133,64 +141,5 @@ func TestManager_ResolveFallbackFromAccessIDToURLBucket(t *testing.T) {
 	}
 	if !strings.Contains(signedURL, "cbds") || !strings.Contains(signedURL, "X-Amz-Signature") {
 		t.Fatalf("unexpected signed url: %s", signedURL)
-	}
-}
-
-func TestCompleteMultipartByStitching(t *testing.T) {
-	ctx := context.Background()
-	bucket := memblob.OpenBucket(nil)
-	key := "test/object.bin"
-	uploadID := "upload-123"
-
-	part1 := multipartPartObjectKey(key, uploadID, 1)
-	part2 := multipartPartObjectKey(key, uploadID, 2)
-
-	w1, err := bucket.NewWriter(ctx, part1, nil)
-	if err != nil {
-		t.Fatalf("open part1 writer: %v", err)
-	}
-	if _, err := w1.Write([]byte("hello ")); err != nil {
-		t.Fatalf("write part1: %v", err)
-	}
-	if err := w1.Close(); err != nil {
-		t.Fatalf("close part1: %v", err)
-	}
-
-	w2, err := bucket.NewWriter(ctx, part2, nil)
-	if err != nil {
-		t.Fatalf("open part2 writer: %v", err)
-	}
-	if _, err := w2.Write([]byte("world")); err != nil {
-		t.Fatalf("write part2: %v", err)
-	}
-	if err := w2.Close(); err != nil {
-		t.Fatalf("close part2: %v", err)
-	}
-
-	if err := completeMultipartByStitching(ctx, bucket, key, uploadID, []MultipartPart{
-		{PartNumber: 2, ETag: "e2"},
-		{PartNumber: 1, ETag: "e1"},
-	}); err != nil {
-		t.Fatalf("completeMultipartByStitching failed: %v", err)
-	}
-
-	r, err := bucket.NewReader(ctx, key, nil)
-	if err != nil {
-		t.Fatalf("open stitched object: %v", err)
-	}
-	defer r.Close()
-	b, err := io.ReadAll(r)
-	if err != nil {
-		t.Fatalf("read stitched object: %v", err)
-	}
-	if got := string(b); got != "hello world" {
-		t.Fatalf("unexpected stitched object content: %q", got)
-	}
-
-	if _, err := bucket.NewReader(ctx, part1, nil); err == nil {
-		t.Fatalf("expected part1 to be cleaned up")
-	}
-	if _, err := bucket.NewReader(ctx, part2, nil); err == nil {
-		t.Fatalf("expected part2 to be cleaned up")
 	}
 }

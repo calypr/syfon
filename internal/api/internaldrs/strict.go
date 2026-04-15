@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/calypr/syfon/apigen/internalapi"
 	"github.com/calypr/syfon/config"
@@ -54,9 +55,9 @@ func (s *InternalServer) InternalDownload(ctx context.Context, request internala
 	if !ok {
 		return internalapi.InternalDownload404Response{}, nil
 	}
-	opts := urlmanager.SignOptions{ExpiresIn: config.DefaultSigningExpirySeconds}
+	opts := urlmanager.SignOptions{ExpiresIn: time.Duration(config.DefaultSigningExpirySeconds) * time.Second}
 	if request.Params.ExpiresIn != nil {
-		opts.ExpiresIn = *request.Params.ExpiresIn
+		opts.ExpiresIn = time.Duration(*request.Params.ExpiresIn) * time.Second
 	}
 	bucketID := ""
 	if parsed, parseErr := url.Parse(objectURL); parseErr == nil {
@@ -100,7 +101,7 @@ func (s *InternalServer) InternalDownloadPart(ctx context.Context, request inter
 	if parsed, parseErr := url.Parse(objectURL); parseErr == nil {
 		bucketID = parsed.Host
 	}
-	opts := urlmanager.SignOptions{ExpiresIn: config.DefaultSigningExpirySeconds}
+	opts := urlmanager.SignOptions{ExpiresIn: time.Duration(config.DefaultSigningExpirySeconds) * time.Second}
 	start := request.Params.Start
 	end := request.Params.End
 	if s.uM == nil {

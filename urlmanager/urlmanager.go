@@ -1,17 +1,16 @@
 package urlmanager
 
-import "context"
+import (
+	"context"
 
-// SignOptions contains optional parameters for signing.
-type SignOptions struct {
-	ExpiresIn int // in seconds
-}
+	"github.com/calypr/syfon/internal/signer"
+)
 
-// MultipartPart represents a part in a multipart upload.
-type MultipartPart struct {
-	PartNumber int32
-	ETag       string
-}
+// SignOptions is a type alias for backward compatibility or convenience.
+type SignOptions = signer.SignOptions
+
+// MultipartPart is a type alias for backward compatibility or convenience.
+type MultipartPart = signer.MultipartPart
 
 // SignedURLManager signs download/upload URLs for a storage backend.
 type SignedURLManager interface {

@@ -181,7 +181,7 @@ func (s *InternalServer) InternalUploadURL(ctx context.Context, request internal
 
 	opts := urlmanager.SignOptions{}
 	if params.ExpiresIn != nil {
-		opts.ExpiresIn = int(*params.ExpiresIn)
+		opts.ExpiresIn = time.Duration(*params.ExpiresIn) * time.Second
 	}
 
 	if s.uM == nil {
@@ -334,7 +334,7 @@ func (s *InternalServer) signInternalUploadBulkItem(ctx context.Context, item in
 
 	opts := urlmanager.SignOptions{}
 	if item.ExpiresIn != nil {
-		opts.ExpiresIn = int(*item.ExpiresIn)
+		opts.ExpiresIn = time.Duration(*item.ExpiresIn) * time.Second
 	}
 	if s.uM == nil {
 		result.Status = int32(http.StatusInternalServerError)
@@ -454,7 +454,7 @@ func signInternalUploadBulkItem(r *http.Request, database core.DatabaseInterface
 
 	opts := urlmanager.SignOptions{}
 	if item.ExpiresIn != nil {
-		opts.ExpiresIn = int(*item.ExpiresIn)
+		opts.ExpiresIn = time.Duration(*item.ExpiresIn) * time.Second
 	}
 	signedURL, err := uM.SignUploadURL(r.Context(), cred.Bucket, objectURL, opts)
 	if err != nil {

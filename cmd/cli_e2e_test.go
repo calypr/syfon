@@ -21,6 +21,8 @@ import (
 	"github.com/calypr/syfon/internal/api/internaldrs"
 	"github.com/calypr/syfon/internal/api/metrics"
 	"github.com/calypr/syfon/service"
+	"github.com/calypr/syfon/internal/provider"
+	"github.com/calypr/syfon/internal/signer/file"
 	"github.com/calypr/syfon/urlmanager"
 	"github.com/google/uuid"
 	"github.com/gofiber/fiber/v3"
@@ -83,6 +85,8 @@ func newSyfonTestServer(t *testing.T) *fiberTestServer {
 	}
 
 	uM := urlmanager.NewManager(database, config.SigningConfig{DefaultExpirySeconds: 900})
+	fSigner, _ := file.NewFileSigner("/")
+	uM.RegisterSigner(provider.File, fSigner)
 	svc := service.NewObjectsAPIService(database, uM)
 
 	app := fiber.New()

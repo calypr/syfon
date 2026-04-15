@@ -21,6 +21,11 @@ import (
 	"github.com/calypr/syfon/internal/api/lfs"
 	"github.com/calypr/syfon/internal/api/metrics"
 	"github.com/calypr/syfon/internal/api/middleware"
+	"github.com/calypr/syfon/internal/provider"
+	"github.com/calypr/syfon/internal/signer/azure"
+	"github.com/calypr/syfon/internal/signer/file"
+	"github.com/calypr/syfon/internal/signer/gcs"
+	"github.com/calypr/syfon/internal/signer/s3"
 	"github.com/calypr/syfon/service"
 	"github.com/calypr/syfon/urlmanager"
 	"github.com/gofiber/fiber/v3"
@@ -109,6 +114,15 @@ var Cmd = &cobra.Command{
 
 		// Init unified URL manager.
 		uM := urlmanager.NewManager(database, cfg.Signing)
+		uM.RegisterSigner(provider.S3, s3.NewS3Signer(database))
+		uM.RegisterSigner(provider.GCS, gcs.NewGCSSigner(database))
+		uM.RegisterSigner(provider.Azure, azure.NewAzureSigner(database))
+		fSigner, fErr := file.NewFileSigner("/")
+		if fErr == nil {
+			uM.RegisterSigner(provider.File, fSigner)
+		} else {
+			logger.Warn("failed to initialize file signer", "err", fErr)
+		}
 
 		// Init Service
 		svc := service.NewObjectsAPIService(database, uM)
