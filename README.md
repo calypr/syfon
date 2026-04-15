@@ -192,9 +192,7 @@ auth:
 database:
   sqlite:
     file: "drs.db"
-database:
-  sqlite:
-    file: "drs.db"
+
 s3_credentials:
   - bucket: "test-bucket"
     region: "us-east-1"

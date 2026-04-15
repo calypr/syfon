@@ -30,6 +30,10 @@ var Cmd = &cobra.Command{
 		}
 
 		srcPath := strings.TrimSpace(uploadFile)
+		srcPath, err := filepath.Abs(srcPath)
+		if err != nil {
+			return fmt.Errorf("resolve absolute path: %w", err)
+		}
 		info, err := os.Stat(srcPath)
 		if err != nil {
 			return fmt.Errorf("stat source file: %w", err)
@@ -39,9 +43,9 @@ var Cmd = &cobra.Command{
 		}
 
 		authz := strings.TrimSpace(uploadAuthz)
-		if authz == "" {
-			return fmt.Errorf("--authz is required")
-		}
+		//note: if authz is empty, will assume the server will allow
+		//unauthenticated uploads. This is not recommended for production,
+		//but can be useful for testing.
 
 		serverURL, err := cmd.Flags().GetString("server")
 		if err != nil {
