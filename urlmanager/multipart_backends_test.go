@@ -2,14 +2,21 @@ package urlmanager
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
 	"encoding/base64"
+	"encoding/json"
+	"encoding/pem"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	"github.com/calypr/syfon/config"
 	"github.com/calypr/syfon/db/core"
+	"github.com/calypr/syfon/db/sqlite"
 )
 
 func TestNormalizedMultipartParts_SortsByPartNumber(t *testing.T) {
@@ -46,7 +53,7 @@ func TestAzureBlobURL_EscapesObjectPath(t *testing.T) {
 	}
 }
 
-func TestAzureMultipartBackend_SignPart(t *testing.T) {
+func TestAzureMultipartBackend_InitAndSignPart(t *testing.T) {
 	accountName := "acct"
 	accountKey := base64.StdEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef"))
 	shared, err := azblob.NewSharedKeyCredential(accountName, accountKey)
@@ -64,7 +71,15 @@ func TestAzureMultipartBackend_SignPart(t *testing.T) {
 		},
 	}
 
-	signedURL, err := backend.SignPart(context.Background(), "bucket", "obj/name.bin", "up123", 7)
+	uploadID, err := backend.Init(context.Background(), "bucket", "obj/name.bin")
+	if err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+	if strings.TrimSpace(uploadID) == "" {
+		t.Fatal("expected non-empty upload id")
+	}
+
+	signedURL, err := backend.SignPart(context.Background(), "bucket", "obj/name.bin", uploadID, 7)
 	if err != nil {
 		t.Fatalf("SignPart failed: %v", err)
 	}
@@ -73,6 +88,9 @@ func TestAzureMultipartBackend_SignPart(t *testing.T) {
 		t.Fatalf("failed to parse signed URL: %v", err)
 	}
 	q := parsed.Query()
+	if parsed.EscapedPath() != "/bucket/obj/name.bin" {
+		t.Fatalf("unexpected signed path: %s", parsed.EscapedPath())
+	}
 	if q.Get("comp") != "block" {
 		t.Fatalf("expected comp=block, got %q", q.Get("comp"))
 	}
@@ -81,6 +99,74 @@ func TestAzureMultipartBackend_SignPart(t *testing.T) {
 	}
 	if q.Get("sig") == "" {
 		t.Fatal("expected SAS signature query parameter (sig)")
+	}
+	rawBlockID, err := base64.StdEncoding.DecodeString(q.Get("blockid"))
+	if err != nil {
+		t.Fatalf("failed to decode blockid: %v", err)
+	}
+	if got, want := string(rawBlockID), uploadID+":00000007"; got != want {
+		t.Fatalf("unexpected decoded blockid: got %q want %q", got, want)
+	}
+}
+
+func TestGCSMultipartBackend_InitAndSignPart(t *testing.T) {
+	t.Setenv(core.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
+	ctx := context.Background()
+	database, err := sqlite.NewSqliteDB(":memory:")
+	if err != nil {
+		t.Fatalf("failed to init db: %v", err)
+	}
+
+	serviceAccountJSON := mustGCSServiceAccountJSON(t, "test-signer@example.iam.gserviceaccount.com")
+	if err := database.SaveS3Credential(ctx, &core.S3Credential{
+		Bucket:    "gcs-multipart-bucket",
+		Provider:  "gcs",
+		SecretKey: serviceAccountJSON,
+	}); err != nil {
+		t.Fatalf("failed to save credential: %v", err)
+	}
+
+	backend := &gcsMultipartBackend{
+		m:    NewManager(database, config.SigningConfig{DefaultExpirySeconds: 900}),
+		item: &cacheItem{},
+	}
+
+	uploadID, err := backend.Init(ctx, "gcs-multipart-bucket", "nested/object.bin")
+	if err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+	if strings.TrimSpace(uploadID) == "" {
+		t.Fatal("expected non-empty upload id")
+	}
+
+	partURL, err := backend.SignPart(ctx, "gcs-multipart-bucket", "nested/object.bin", uploadID, 3)
+	if err != nil {
+		t.Fatalf("SignPart failed: %v", err)
+	}
+
+	parsed, err := url.Parse(partURL)
+	if err != nil {
+		t.Fatalf("failed to parse signed URL: %v", err)
+	}
+	q := parsed.Query()
+	if got, want := parsed.EscapedPath(), "/gcs-multipart-bucket/"+multipartPartObjectKey("nested/object.bin", uploadID, 3); got != want {
+		t.Fatalf("unexpected signed path: got %q want %q", got, want)
+	}
+	if got := q.Get("X-Goog-Algorithm"); got != "GOOG4-RSA-SHA256" {
+		t.Fatalf("unexpected signing algorithm: %q", got)
+	}
+	expires, err := strconv.Atoi(q.Get("X-Goog-Expires"))
+	if err != nil {
+		t.Fatalf("invalid X-Goog-Expires value %q: %v", q.Get("X-Goog-Expires"), err)
+	}
+	if expires <= 0 || expires > 900 {
+		t.Fatalf("unexpected expiry seconds: %d", expires)
+	}
+	if got := q.Get("X-Goog-Credential"); !strings.Contains(got, "test-signer@example.iam.gserviceaccount.com/") {
+		t.Fatalf("unexpected credential scope: %q", got)
+	}
+	if q.Get("X-Goog-Signature") == "" {
+		t.Fatal("expected X-Goog-Signature query parameter")
 	}
 }
 
@@ -95,4 +181,23 @@ func TestGCSSignedUploadPartURL_RequiresServiceAccountSigningMaterial(t *testing
 	if !strings.Contains(err.Error(), "gcs multipart signing requires service account credentials") {
 		t.Fatalf("unexpected error: %v", err)
 	}
+}
+
+func mustGCSServiceAccountJSON(t *testing.T, clientEmail string) string {
+	t.Helper()
+	privateKey, err := rsa.GenerateKey(rand.Reader, 1024)
+	if err != nil {
+		t.Fatalf("failed to generate RSA key: %v", err)
+	}
+	payload, err := json.Marshal(gcsServiceAccountKey{
+		ClientEmail: clientEmail,
+		PrivateKey: string(pem.EncodeToMemory(&pem.Block{
+			Type:  "RSA PRIVATE KEY",
+			Bytes: x509.MarshalPKCS1PrivateKey(privateKey),
+		})),
+	})
+	if err != nil {
+		t.Fatalf("failed to marshal service account JSON: %v", err)
+	}
+	return string(payload)
 }
