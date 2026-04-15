@@ -10,8 +10,8 @@ import (
 	"strings"
 
 	internalapi "github.com/calypr/syfon/apigen/internalapi"
-	"github.com/calypr/syfon/client/pkg/logs"
 	"github.com/calypr/syfon/client/pkg/common"
+	"github.com/calypr/syfon/client/pkg/logs"
 	"github.com/calypr/syfon/client/pkg/request"
 	"github.com/calypr/syfon/client/xfer"
 )
@@ -127,7 +127,7 @@ func (d *DataService) Download(ctx context.Context, signedURL string, rangeStart
 }
 
 // --- transfer.Uploader interface support ---
- 
+
 func (d *DataService) ResolveUploadURL(ctx context.Context, guid, filename string, metadata common.FileMetadata, bucket string) (string, error) {
 	resp, err := d.UploadURL(ctx, UploadURLRequest{
 		FileID:   guid,
@@ -139,14 +139,14 @@ func (d *DataService) ResolveUploadURL(ctx context.Context, guid, filename strin
 	}
 	return resp.GetUrl(), nil
 }
- 
+
 func (d *DataService) Upload(ctx context.Context, url string, body io.Reader, size int64) error {
 	ctx, cancel := context.WithTimeout(ctx, common.DataTimeout)
 	defer cancel()
 	_, err := xfer.DoUpload(ctx, d.base.requestor, url, body, size)
 	return err
 }
- 
+
 func (d *DataService) UploadPart(ctx context.Context, url string, body io.Reader, size int64) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, common.DataTimeout)
 	defer cancel()
@@ -217,6 +217,7 @@ func (d *DataService) CanonicalObjectURL(signedURL, bucketHint, fallbackDID stri
 	if err != nil {
 		return "", fmt.Errorf("parse signed url: %w", err)
 	}
+	originalParsed := *parsed
 	parsed.RawQuery = ""
 	parsed.Fragment = ""
 
@@ -224,7 +225,15 @@ func (d *DataService) CanonicalObjectURL(signedURL, bucketHint, fallbackDID stri
 	case "file":
 		return parsed.String(), nil
 	case "http", "https":
+		if b, k, ok := parseGCSJSONUploadURL(&originalParsed); ok {
+			return "s3://" + b + "/" + k, nil
+		}
+		if b, k, ok := parseAzureBlobSignedURL(&originalParsed); ok {
+			return "s3://" + b + "/" + k, nil
+		}
+
 		bucketHint = strings.TrimSpace(bucketHint)
+
 		key := strings.Trim(strings.TrimSpace(parsed.Path), "/")
 
 		// If bucketHint is empty, try to infer it from the first segment of the path (Path-Style)
@@ -260,4 +269,61 @@ func (d *DataService) CanonicalObjectURL(signedURL, bucketHint, fallbackDID stri
 		}
 		return "s3://" + bucketHint + "/" + fallbackDID, nil
 	}
+}
+
+func parseGCSJSONUploadURL(parsed *url.URL) (bucket string, key string, ok bool) {
+	if parsed == nil {
+		return "", "", false
+	}
+	q := parsed.Query()
+	if strings.TrimSpace(q.Get("uploadType")) != "media" {
+		return "", "", false
+	}
+	key = strings.Trim(strings.TrimSpace(q.Get("name")), "/")
+	if key == "" {
+		return "", "", false
+	}
+	parts := strings.Split(strings.Trim(strings.TrimSpace(parsed.Path), "/"), "/")
+	for i := 0; i+1 < len(parts); i++ {
+		if parts[i] == "b" {
+			bucket = strings.TrimSpace(parts[i+1])
+			break
+		}
+	}
+	if bucket == "" {
+		return "", "", false
+	}
+	return bucket, key, true
+}
+
+func parseAzureBlobSignedURL(parsed *url.URL) (bucket string, key string, ok bool) {
+	if parsed == nil {
+		return "", "", false
+	}
+	q := parsed.Query()
+	if strings.TrimSpace(q.Get("sig")) == "" || !strings.EqualFold(strings.TrimSpace(q.Get("sr")), "b") {
+		return "", "", false
+	}
+	parts := strings.Split(strings.Trim(strings.TrimSpace(parsed.Path), "/"), "/")
+	if len(parts) < 2 {
+		return "", "", false
+	}
+	host := strings.ToLower(strings.TrimSpace(parsed.Hostname()))
+	if strings.Contains(host, ".blob.") {
+		bucket = strings.TrimSpace(parts[0])
+		key = strings.Join(parts[1:], "/")
+	} else {
+		// Azurite path shape: /<account>/<container>/<key...>
+		if len(parts) < 3 {
+			return "", "", false
+		}
+		bucket = strings.TrimSpace(parts[1])
+		key = strings.Join(parts[2:], "/")
+	}
+	bucket = strings.Trim(bucket, "/")
+	key = strings.Trim(key, "/")
+	if bucket == "" || key == "" {
+		return "", "", false
+	}
+	return bucket, key, true
 }

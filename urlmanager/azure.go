@@ -11,11 +11,13 @@ import (
 
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blockblob"
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/container"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/sas"
 	"github.com/calypr/syfon/config"
 	"github.com/calypr/syfon/internal/provider"
 	"github.com/google/uuid"
 	"gocloud.dev/blob"
+	"gocloud.dev/blob/azureblob"
 )
 
 type azureMultipartBackend struct {
@@ -79,18 +81,27 @@ func azureSignedURL(serviceURL string, bucketName string, key string, method str
 	}
 
 	qp, err := sas.BlobSignatureValues{
-		Protocol:      sas.ProtocolHTTPS,
+		Protocol:      azureSASProtocol(serviceURL),
 		StartTime:     now.Add(-5 * time.Minute),
 		ExpiryTime:    now.Add(expiry),
 		Permissions:   perm,
 		ContainerName: bucketName,
 		BlobName:      strings.Trim(strings.TrimSpace(key), "/"),
+		Version:       "2021-08-06",
 	}.SignWithSharedKey(sharedKey)
 	if err != nil {
 		return "", err
 	}
 
 	return blobURL + "?" + qp.Encode(), nil
+}
+
+func azureSASProtocol(serviceURL string) sas.Protocol {
+	u, err := url.Parse(strings.TrimSpace(serviceURL))
+	if err == nil && strings.EqualFold(strings.TrimSpace(u.Scheme), "http") {
+		return sas.ProtocolHTTPSandHTTP
+	}
+	return sas.ProtocolHTTPS
 }
 
 func azureBlockID(uploadID string, partNumber int32) string {
@@ -116,17 +127,14 @@ func azureBlobURL(serviceURL string, bucket string, key string) string {
 }
 
 func (m *Manager) openAzureBucket(ctx context.Context, bucketName string) (*cacheItem, error) {
-	bucket, err := blob.OpenBucket(ctx, config.AzurePrefix+bucketName)
-	if err != nil {
-		return nil, err
-	}
-	item := &cacheItem{
-		Bucket:     bucket,
-		Provider:   provider.Azure,
-		BucketName: bucketName,
-	}
+	item := &cacheItem{Provider: provider.Azure, BucketName: bucketName}
 	cred, err := m.credentialForBucket(ctx, bucketName)
 	if err != nil || cred == nil {
+		bucket, openErr := blob.OpenBucket(ctx, config.AzurePrefix+bucketName)
+		if openErr != nil {
+			return nil, openErr
+		}
+		item.Bucket = bucket
 		return item, nil
 	}
 	accountName := strings.TrimSpace(cred.AccessKey)
@@ -134,12 +142,29 @@ func (m *Manager) openAzureBucket(ctx context.Context, bucketName string) (*cach
 		accountName = azureAccountFromEndpoint(cred.Endpoint)
 	}
 	accountKey := strings.TrimSpace(cred.SecretKey)
+	serviceURL := azureServiceURL(accountName, cred.Endpoint)
 	if accountName != "" && accountKey != "" {
 		shared, err := azblob.NewSharedKeyCredential(accountName, accountKey)
 		if err == nil {
 			item.AzureSharedKey = shared
-			item.AzureServiceURL = azureServiceURL(accountName, cred.Endpoint)
+			item.AzureServiceURL = serviceURL
+			containerURL, joinErr := url.JoinPath(serviceURL, bucketName)
+			if joinErr == nil {
+				client, clientErr := container.NewClientWithSharedKeyCredential(containerURL, shared, nil)
+				if clientErr == nil {
+					if opened, openErr := azureblob.OpenBucket(ctx, client, nil); openErr == nil {
+						item.Bucket = opened
+					}
+				}
+			}
 		}
+	}
+	if item.Bucket == nil {
+		bucket, openErr := blob.OpenBucket(ctx, config.AzurePrefix+bucketName)
+		if openErr != nil {
+			return nil, openErr
+		}
+		item.Bucket = bucket
 	}
 	return item, nil
 }

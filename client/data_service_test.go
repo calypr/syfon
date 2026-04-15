@@ -39,6 +39,34 @@ func TestDataServiceCanonicalObjectURL_GCSAndAzure(t *testing.T) {
 			fallback:   "did:4",
 			want:       "azblob://az-container/path/to/object.bin",
 		},
+		{
+			name:       "fake gcs json upload url maps to bucket and object",
+			signedURL:  "http://localhost:4443/upload/storage/v1/b/test-bucket/o?uploadType=media&name=objects%2Fthing.txt",
+			bucketHint: "",
+			fallback:   "did:5",
+			want:       "s3://test-bucket/objects/thing.txt",
+		},
+		{
+			name:       "fake gcs json upload url overrides incorrect bucket hint",
+			signedURL:  "http://localhost:4443/upload/storage/v1/b/test-bucket/o?uploadType=media&name=objects%2Fthing.txt",
+			bucketHint: "upload",
+			fallback:   "did:6",
+			want:       "s3://test-bucket/objects/thing.txt",
+		},
+		{
+			name:       "azure signed url canonicalizes container path",
+			signedURL:  "https://acct.blob.core.windows.net/az-container/path/to/object.bin?sig=abc&sr=b&sv=2021-08-06",
+			bucketHint: "",
+			fallback:   "did:7",
+			want:       "s3://az-container/path/to/object.bin",
+		},
+		{
+			name:       "azurite signed url canonicalizes account and container path",
+			signedURL:  "http://localhost:10000/devstoreaccount1/az-container/path/to/object.bin?sig=abc&sr=b&sv=2021-08-06",
+			bucketHint: "",
+			fallback:   "did:8",
+			want:       "s3://az-container/path/to/object.bin",
+		},
 	}
 
 	for _, tc := range tests {

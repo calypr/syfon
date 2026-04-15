@@ -137,11 +137,11 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Run Docker-backed MinIO E2E tests
+      - name: Run Docker-backed CLI E2E tests (MinIO, fake-gcs-server, Azurite)
         env:
           SYFON_E2E_DOCKER: 1
         run: |
-          go test ./cmd -run TestSyfonDocker -v
+          go test ./cmd -run '^TestSyfonDocker(MinIOE2E|MultipartUpload|FakeGCSE2E|AzuriteE2E)$' -v -count=1
 
       - name: Run Docker-backed mock server tests
         env:

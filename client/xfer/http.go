@@ -35,10 +35,19 @@ func DoUpload(ctx context.Context, req request.RequestInterface, urlStr string, 
 		return "", err
 	}
 
+	method := http.MethodPut
+	if parsed != nil && useGCSJSONMediaUpload(parsed) {
+		method = http.MethodPost
+	}
+
 	skipAuth := common.IsCloudPresignedURL(urlStr)
-	rb := req.New(http.MethodPut, urlStr).WithBody(body).WithTimeout(common.DataTimeout)
+	rb := req.New(method, urlStr).WithBody(body).WithTimeout(common.DataTimeout)
 	if skipAuth {
 		rb.WithSkipAuth(true)
+	}
+	if method == http.MethodPut && parsed != nil && needsAzureBlobTypeHeader(parsed) {
+		// Azure Put Blob requires this header for SAS-based uploads.
+		rb.WithHeader("x-ms-blob-type", "BlockBlob")
 	}
 	if size > 0 {
 		rb.PartSize = size
@@ -76,4 +85,35 @@ func GenericDownload(ctx context.Context, req request.RequestInterface, signedUR
 	}
 
 	return req.Do(ctx, rb)
+}
+
+func needsAzureBlobTypeHeader(parsed *url.URL) bool {
+	if parsed == nil {
+		return false
+	}
+	scheme := strings.ToLower(strings.TrimSpace(parsed.Scheme))
+	if scheme != "http" && scheme != "https" {
+		return false
+	}
+	q := parsed.Query()
+	if strings.TrimSpace(q.Get("comp")) != "" {
+		return false
+	}
+	if !strings.EqualFold(strings.TrimSpace(q.Get("sr")), "b") {
+		return false
+	}
+	return strings.TrimSpace(q.Get("sig")) != "" && strings.TrimSpace(q.Get("sv")) != ""
+}
+
+func useGCSJSONMediaUpload(parsed *url.URL) bool {
+	if parsed == nil {
+		return false
+	}
+	if strings.TrimSpace(parsed.Query().Get("uploadType")) != "media" {
+		return false
+	}
+	if strings.TrimSpace(parsed.Query().Get("name")) == "" {
+		return false
+	}
+	return strings.Contains(parsed.EscapedPath(), "/upload/storage/v1/b/")
 }

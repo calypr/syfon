@@ -74,6 +74,13 @@ func (m *Manager) SignURL(ctx context.Context, accessId string, urlStr string, o
 		expiry = time.Duration(opts.ExpiresIn) * time.Second
 	}
 
+	if p == provider.Azure && item.AzureSharedKey != nil && strings.TrimSpace(item.AzureServiceURL) != "" {
+		signed, pErr := azureSignedURL(item.AzureServiceURL, bucketName, key, http.MethodGet, expiry, "", item.AzureSharedKey)
+		if pErr == nil {
+			return signed, nil
+		}
+	}
+
 	signed, err := item.Bucket.SignedURL(ctx, key, &blob.SignedURLOptions{
 		Expiry: expiry,
 		Method: http.MethodGet,
@@ -130,6 +137,13 @@ func (m *Manager) SignUploadURL(ctx context.Context, accessId string, urlStr str
 	expiry := 15 * time.Minute
 	if opts.ExpiresIn > 0 {
 		expiry = time.Duration(opts.ExpiresIn) * time.Second
+	}
+
+	if p == provider.Azure && item.AzureSharedKey != nil && strings.TrimSpace(item.AzureServiceURL) != "" {
+		signed, pErr := azureSignedURL(item.AzureServiceURL, bucketName, key, http.MethodPut, expiry, "", item.AzureSharedKey)
+		if pErr == nil {
+			return signed, nil
+		}
 	}
 
 	signed, err := item.Bucket.SignedURL(ctx, key, &blob.SignedURLOptions{
