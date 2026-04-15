@@ -11,7 +11,7 @@ on:
   push:
     branches:
       - main
-      - develop
+      - development
   workflow_dispatch:
   workflow_call:
 
@@ -140,6 +140,7 @@ jobs:
           SYFON_E2E_DOCKER: 1
         run: |
           go test ./cmd -run TestSyfonDocker -v
+  
   build-and-push:
     name: Build syfon
     runs-on: ${{ matrix.arch == 'amd64' && 'ubuntu-latest' || 'ubuntu-24.04-arm' }}
@@ -151,7 +152,6 @@ jobs:
       - name: Check out code
         uses: actions/checkout@v4
 
-      # THIS replaces all your bash scripting for tags
       - name: Docker meta
         id: meta
         uses: docker/metadata-action@v5
@@ -161,7 +161,8 @@ jobs:
             type=ref,event=branch
             type=ref,event=pr
             type=sha,format=short
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable=${{ github.ref_type == 'tag' && !contains(github.ref_name, '-rc.') }}
 
       - name: Login to Quay.io
         uses: docker/login-action@v3
@@ -219,7 +220,9 @@ jobs:
             type=ref,event=branch
             type=ref,event=pr
             type=sha,format=short
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ github.ref_type == 'tag' && !contains(github.ref_name, '-rc.') }}
 
       - name: Login to Quay.io
         uses: docker/login-action@v3

@@ -20,7 +20,7 @@ version:      %s
 
 // String formats a string with version details.
 func String() string {
-	return fmt.Sprintf("Syfon — a Modern DRS Server ⚙️\n"+tpl, GitCommit, GitBranch, GitUpstream, BuildDate, Version)
+	return fmt.Sprintf("Syfon — a Modern DRS Server ⚡️\n"+tpl, GitCommit, GitBranch, GitUpstream, BuildDate, Version)
 }
 
 // LogFields logs build and version information to the given logger.
