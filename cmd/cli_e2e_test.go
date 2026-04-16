@@ -13,19 +13,18 @@ import (
 
 	"github.com/calypr/syfon/apigen/drs"
 	syclient "github.com/calypr/syfon/client"
-	"github.com/calypr/syfon/internal/config"
-	"github.com/calypr/syfon/internal/db"
-	"github.com/calypr/syfon/internal/db/core"
-	"github.com/calypr/syfon/internal/api/coreapi"
 	"github.com/calypr/syfon/internal/api/docs"
 	"github.com/calypr/syfon/internal/api/internaldrs"
 	"github.com/calypr/syfon/internal/api/metrics"
-	"github.com/calypr/syfon/internal/service"
+	"github.com/calypr/syfon/internal/config"
+	"github.com/calypr/syfon/internal/db"
+	"github.com/calypr/syfon/internal/db/core"
 	"github.com/calypr/syfon/internal/provider"
+	"github.com/calypr/syfon/internal/service"
 	"github.com/calypr/syfon/internal/signer/file"
 	"github.com/calypr/syfon/internal/urlmanager"
-	"github.com/google/uuid"
 	"github.com/gofiber/fiber/v3"
+	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
@@ -99,7 +98,6 @@ func newSyfonTestServer(t *testing.T) *fiberTestServer {
 		BaseURL: "/ga4gh/drs/v1",
 	})
 	docs.RegisterSwaggerRoutes(app)
-	coreapi.RegisterCoreRoutes(api, database)
 	metrics.RegisterMetricsRoutes(api, database)
 	internaldrs.RegisterInternalIndexRoutes(api, database, uM)
 	internaldrs.RegisterInternalDataRoutes(api, database, uM)

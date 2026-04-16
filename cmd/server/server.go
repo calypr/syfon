@@ -10,23 +10,17 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/calypr/syfon/apigen/drs"
+	"github.com/calypr/syfon/internal/api/middleware"
 	"github.com/calypr/syfon/internal/config"
 	"github.com/calypr/syfon/internal/db/core"
 	"github.com/calypr/syfon/internal/db/postgres"
 	"github.com/calypr/syfon/internal/db/sqlite"
-	coreapi "github.com/calypr/syfon/internal/api/coreapi"
-	"github.com/calypr/syfon/internal/api/docs"
-	"github.com/calypr/syfon/internal/api/internaldrs"
-	"github.com/calypr/syfon/internal/api/lfs"
-	"github.com/calypr/syfon/internal/api/metrics"
-	"github.com/calypr/syfon/internal/api/middleware"
 	"github.com/calypr/syfon/internal/provider"
+	"github.com/calypr/syfon/internal/service"
 	"github.com/calypr/syfon/internal/signer/azure"
 	"github.com/calypr/syfon/internal/signer/file"
 	"github.com/calypr/syfon/internal/signer/gcs"
 	"github.com/calypr/syfon/internal/signer/s3"
-	"github.com/calypr/syfon/internal/service"
 	"github.com/calypr/syfon/internal/urlmanager"
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/recover"
@@ -113,19 +107,33 @@ var Cmd = &cobra.Command{
 		}
 
 		// Init unified URL manager.
-		uM := urlmanager.NewManager(database, cfg.Signing)
-		uM.RegisterSigner(provider.S3, s3.NewS3Signer(database))
-		uM.RegisterSigner(provider.GCS, gcs.NewGCSSigner(database))
-		uM.RegisterSigner(provider.Azure, azure.NewAzureSigner(database))
-		fSigner, fErr := file.NewFileSigner("/")
-		if fErr == nil {
-			uM.RegisterSigner(provider.File, fSigner)
-		} else {
-			logger.Warn("failed to initialize file signer", "err", fErr)
+		needsUrlManager := cfg.Routes.Ga4gh || cfg.Routes.Internal || cfg.Routes.LFS
+		var uM *urlmanager.Manager
+		var svc *service.ObjectsAPIService
+		if needsUrlManager {
+			uM = urlmanager.NewManager(database, cfg.Signing)
+			uM.RegisterSigner(provider.S3, s3.NewS3Signer(database))
+			uM.RegisterSigner(provider.GCS, gcs.NewGCSSigner(database))
+			uM.RegisterSigner(provider.Azure, azure.NewAzureSigner(database))
+			fSigner, fErr := file.NewFileSigner("/")
+			if fErr == nil {
+				uM.RegisterSigner(provider.File, fSigner)
+			} else {
+				logger.Warn("failed to initialize file signer", "err", fErr)
+			}
+		}
+		if cfg.Routes.Ga4gh {
+			svc = service.NewObjectsAPIService(database, uM)
 		}
 
-		// Init Service
-		svc := service.NewObjectsAPIService(database, uM)
+		// Build Fiber runtime and middleware pipeline.
+		app := fiber.New(fiber.Config{
+			ReadTimeout:  30 * time.Second,
+			WriteTimeout: 120 * time.Second,
+			IdleTimeout:  120 * time.Second,
+			AppName:      "Syfon DRS Server",
+		})
+		app.Use(recover.New())
 
 		// Init AuthZ Middleware
 		// We use a standard slog.Logger for data-client compatibility
@@ -138,43 +146,16 @@ var Cmd = &cobra.Command{
 		)
 		requestIDMiddleware := middleware.NewRequestIDMiddleware(slogLogger)
 
-		// Build Fiber runtime and middleware pipeline.
-		app := fiber.New(fiber.Config{
-			ReadTimeout:  30 * time.Second,
-			WriteTimeout: 120 * time.Second,
-			IdleTimeout:  120 * time.Second,
-			AppName:      "Syfon DRS Server",
-		})
-		app.Use(recover.New())
-
-		// Health endpoint remains public.
-		app.Get(config.RouteHealthz, func(c fiber.Ctx) error {
-			return c.SendString("OK")
-		})
-
-		api := app.Group("/")
-		api.Use(requestIDMiddleware.FiberMiddleware())
-		api.Use(authzMiddleware.FiberMiddleware())
-
-		// Register DRS routes via oapi-codegen strict fiber bindings.
-		strict := service.NewStrictServer(svc)
-		drsServer := drs.NewStrictHandler(strict, nil)
-		drs.RegisterHandlersWithOptions(api, drsServer, drs.FiberServerOptions{
-			BaseURL: "/ga4gh/drs/v1",
-		})
-
-		// Remaining non-DRS routes are registered directly on fiber.
-		docs.RegisterSwaggerRoutes(api)
-		coreapi.RegisterCoreRoutes(api, database)
-		metrics.RegisterMetricsRoutes(api, database)
-		internaldrs.RegisterInternalIndexRoutes(api, database, uM)
-		internaldrs.RegisterInternalDataRoutes(api, database, uM)
-		lfs.RegisterLFSRoutes(api, database, uM, lfs.Options{
-			MaxBatchObjects:              cfg.LFS.MaxBatchObjects,
-			MaxBatchBodyBytes:            cfg.LFS.MaxBatchBodyBytes,
-			RequestLimitPerMinute:        cfg.LFS.RequestLimitPerMinute,
-			BandwidthLimitBytesPerMinute: cfg.LFS.BandwidthLimitBytesPerMinute,
-		})
+		rt := &serverRuntime{
+			app:                 app,
+			cfg:                 cfg,
+			database:            database,
+			uM:                  uM,
+			svc:                 svc,
+			authzMiddleware:     authzMiddleware,
+			requestIDMiddleware: requestIDMiddleware,
+		}
+		applyServerOptions(rt, buildServerOptions(cfg)...)
 
 		addr := fmt.Sprintf(":%d", cfg.Port)
 		logger.Info("server starting", "addr", addr)

@@ -57,16 +57,13 @@ const (
 	RouteInternalBucketScopes      = "/data/buckets/{bucket}/scopes"
 
 	// Internal DRS Index
-	RouteInternalIndex       = "/index"
-	RouteInternalIndexDetail = "/index/{id}"
-	RouteInternalBulkHashes  = "/index/bulk/hashes"
+	RouteInternalIndex            = "/index"
+	RouteInternalIndexDetail      = "/index/{id}"
+	RouteInternalBulkHashes       = "/index/bulk/hashes"
 	RouteInternalBulkDeleteHashes = "/index/bulk/delete"
-	RouteInternalBulkSHA256  = "/index/bulk/sha256/validity"
-	RouteInternalBulkCreate  = "/index/bulk"
-	RouteInternalBulkDocs    = "/index/bulk/documents"
-
-	// Core API
-	RouteCoreSHA256 = "/index/v1/sha256/validity"
+	RouteInternalBulkSHA256       = "/index/bulk/sha256/validity"
+	RouteInternalBulkCreate       = "/index/bulk"
+	RouteInternalBulkDocs         = "/index/bulk/documents"
 )
 
 type Config struct {
@@ -76,6 +73,15 @@ type Config struct {
 	Auth          AuthConfig     `json:"auth" yaml:"auth"`
 	LFS           LFSConfig      `json:"lfs" yaml:"lfs"`
 	Signing       SigningConfig  `json:"signing" yaml:"signing"`
+	Routes        RoutesConfig   `json:"routes" yaml:"routes"`
+}
+
+type RoutesConfig struct {
+	Docs     bool `json:"docs" yaml:"docs"`
+	Ga4gh    bool `json:"ga4gh" yaml:"ga4gh"`
+	Metrics  bool `json:"metrics" yaml:"metrics"`
+	Internal bool `json:"internal" yaml:"internal"`
+	LFS      bool `json:"lfs" yaml:"lfs"`
 }
 
 type DatabaseConfig struct {
@@ -228,6 +234,41 @@ func LoadConfig(configFile string) (*Config, error) {
 			return nil, fmt.Errorf("invalid DRS_SIGNING_DEFAULT_EXPIRY_SECONDS: %s", v)
 		}
 		cfg.Signing.DefaultExpirySeconds = i
+	}
+	if v := os.Getenv("DRS_ENABLE_DOCS"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return nil, fmt.Errorf("invalid DRS_ENABLE_DOCS: %s", v)
+		}
+		cfg.Routes.Docs = b
+	}
+	if v := os.Getenv("DRS_ENABLE_GA4GH"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return nil, fmt.Errorf("invalid DRS_ENABLE_GA4GH: %s", v)
+		}
+		cfg.Routes.Ga4gh = b
+	}
+	if v := os.Getenv("DRS_ENABLE_METRICS"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return nil, fmt.Errorf("invalid DRS_ENABLE_METRICS: %s", v)
+		}
+		cfg.Routes.Metrics = b
+	}
+	if v := os.Getenv("DRS_ENABLE_INTERNAL"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return nil, fmt.Errorf("invalid DRS_ENABLE_INTERNAL: %s", v)
+		}
+		cfg.Routes.Internal = b
+	}
+	if v := os.Getenv("DRS_ENABLE_LFS"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return nil, fmt.Errorf("invalid DRS_ENABLE_LFS: %s", v)
+		}
+		cfg.Routes.LFS = b
 	}
 
 	// DB Env Vars overrides

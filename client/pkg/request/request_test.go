@@ -5,8 +5,8 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -66,28 +66,31 @@ func TestRequest_NewBuilder(t *testing.T) {
 }
 
 func TestRequest_Do_Success(t *testing.T) {
-	// Create a test server
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Verify the request
-		if r.Method != "GET" {
-			t.Errorf("Expected GET method, got %s", r.Method)
-		}
-		if r.Header.Get("User-Agent") != "test-ua" {
-			t.Errorf("Expected User-Agent 'test-ua', got '%s'", r.Header.Get("User-Agent"))
-		}
-		if r.Header.Get("Authorization") != "Bearer test-token" {
-			t.Errorf("Expected Authorization 'Bearer test-token', got '%s'", r.Header.Get("Authorization"))
-		}
-
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status": "success"}`))
-	}))
-	defer server.Close()
-
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	mockConf := &mockConfigManager{}
 
-	reqInterface := NewRequestor(logs.NewGen3Logger(logger, "", ""), nil, mockConf, server.URL, "test-ua", nil)
+	client := &http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			if r.Method != "GET" {
+				t.Errorf("Expected GET method, got %s", r.Method)
+			}
+			if r.Header.Get("User-Agent") != "test-ua" {
+				t.Errorf("Expected User-Agent 'test-ua', got '%s'", r.Header.Get("User-Agent"))
+			}
+			if r.Header.Get("Authorization") != "Bearer test-token" {
+				t.Errorf("Expected Authorization 'test-token', got '%s'", r.Header.Get("Authorization"))
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Status:     "200 OK",
+				Body:       io.NopCloser(strings.NewReader(`{"status":"success"}`)),
+				Header:     make(http.Header),
+				Request:    r,
+			}, nil
+		}),
+	}
+
+	reqInterface := NewRequestor(logs.NewGen3Logger(logger, "", ""), nil, mockConf, "https://example.com", "test-ua", client)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -107,21 +110,26 @@ func TestRequest_Do_Success(t *testing.T) {
 }
 
 func TestRequest_Do_WithCustomHeaders(t *testing.T) {
-	// Create a test server that checks for custom headers
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		customHeader := r.Header.Get("X-Custom-Header")
-		if customHeader != "test-value" {
-			t.Errorf("Expected X-Custom-Header 'test-value', got '%s'", customHeader)
-		}
-
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer server.Close()
-
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	mockConf := &mockConfigManager{}
 
-	reqInterface := NewRequestor(logs.NewGen3Logger(logger, "", ""), nil, mockConf, server.URL, "test-ua", nil)
+	client := &http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			customHeader := r.Header.Get("X-Custom-Header")
+			if customHeader != "test-value" {
+				t.Errorf("Expected X-Custom-Header 'test-value', got '%s'", customHeader)
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Status:     "200 OK",
+				Body:       io.NopCloser(strings.NewReader("")),
+				Header:     make(http.Header),
+				Request:    r,
+			}, nil
+		}),
+	}
+
+	reqInterface := NewRequestor(logs.NewGen3Logger(logger, "", ""), nil, mockConf, "https://example.com", "test-ua", client)
 
 	ctx := context.Background()
 	err := reqInterface.Do(ctx, "GET", "/api/test", nil, nil, WithHeader("X-Custom-Header", "test-value"))
@@ -132,14 +140,19 @@ func TestRequest_Do_WithCustomHeaders(t *testing.T) {
 }
 
 func TestRequest_Do_RawMode(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("raw content"))
-	}))
-	defer server.Close()
-
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	reqInterface := NewRequestor(logs.NewGen3Logger(logger, "", ""), nil, nil, server.URL, "test-ua", nil)
+	client := &http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Status:     "200 OK",
+				Body:       io.NopCloser(strings.NewReader("raw content")),
+				Header:     make(http.Header),
+				Request:    r,
+			}, nil
+		}),
+	}
+	reqInterface := NewRequestor(logs.NewGen3Logger(logger, "", ""), nil, nil, "https://example.com", "test-ua", client)
 
 	var resp *http.Response
 	err := reqInterface.Do(context.Background(), "GET", "/raw", nil, &resp)
@@ -182,4 +195,10 @@ func (m *mockConfigManager) IsCredentialValid(cred *conf.Credential) (bool, erro
 
 func (m *mockConfigManager) IsTokenValid(token string) (bool, error) {
 	return true, nil
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
 }

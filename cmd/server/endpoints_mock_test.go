@@ -10,13 +10,9 @@ import (
 	"testing"
 
 	"github.com/calypr/syfon/apigen/drs"
-	"github.com/calypr/syfon/internal/db/core"
-	coreapi "github.com/calypr/syfon/internal/api/coreapi"
-	"github.com/calypr/syfon/internal/api/docs"
-	"github.com/calypr/syfon/internal/api/internaldrs"
-	"github.com/calypr/syfon/internal/api/lfs"
-	"github.com/calypr/syfon/internal/api/metrics"
 	"github.com/calypr/syfon/internal/api/middleware"
+	"github.com/calypr/syfon/internal/config"
+	"github.com/calypr/syfon/internal/db/core"
 	"github.com/calypr/syfon/internal/service"
 	"github.com/calypr/syfon/internal/testutils"
 	"github.com/gofiber/fiber/v3"
@@ -30,7 +26,13 @@ type endpointCase struct {
 var pathVarPattern = regexp.MustCompile(`:([A-Za-z0-9_]+)`)
 
 func TestAllRegisteredEndpoints_WithMocks(t *testing.T) {
-	app := buildMockServerRouter()
+	app := buildMockServerRouterWithRoutes(config.RoutesConfig{
+		Docs:     true,
+		Ga4gh:    true,
+		Metrics:  true,
+		Internal: true,
+		LFS:      true,
+	})
 
 	endpoints := collectEndpoints(t, app)
 	if len(endpoints) == 0 {
@@ -88,7 +90,13 @@ func TestAllRegisteredEndpoints_WithMocks(t *testing.T) {
 }
 
 func TestAdminRoutesNotRegistered(t *testing.T) {
-	app := buildMockServerRouter()
+	app := buildMockServerRouterWithRoutes(config.RoutesConfig{
+		Docs:     true,
+		Ga4gh:    true,
+		Metrics:  true,
+		Internal: true,
+		LFS:      true,
+	})
 
 	reqSign := httptest.NewRequest(http.MethodPost, "/admin/sign_url", bytes.NewBufferString(`{"url":"s3://b/k","method":"GET"}`))
 	reqSign.Header.Set("Content-Type", "application/json")
@@ -111,6 +119,36 @@ func TestAdminRoutesNotRegistered(t *testing.T) {
 }
 
 func buildMockServerRouter() *fiber.App {
+	return buildMockServerRouterWithRoutes(config.RoutesConfig{
+		Docs:     true,
+		Ga4gh:    true,
+		Metrics:  true,
+		Internal: true,
+		LFS:      true,
+	})
+}
+
+func TestHealthOnlyServerExposesNoOptionalRoutes(t *testing.T) {
+	app := buildMockServerRouterWithRoutes(config.RoutesConfig{})
+
+	endpoints := collectEndpoints(t, app)
+	foundHealth := false
+	for _, ep := range endpoints {
+		if ep.Template == "/healthz" {
+			foundHealth = true
+			continue
+		}
+		if ep.Template == "/" {
+			continue
+		}
+		t.Fatalf("expected only healthz route when no modules are enabled, found %s %s", ep.Method, ep.Template)
+	}
+	if !foundHealth {
+		t.Fatal("expected /healthz route when no modules are enabled")
+	}
+}
+
+func buildMockServerRouterWithRoutes(routes config.RoutesConfig) *fiber.App {
 	database := &testutils.MockDatabase{
 		Objects: map[string]*drs.DrsObject{
 			"sha-1": {
@@ -122,13 +160,16 @@ func buildMockServerRouter() *fiber.App {
 				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: "sha-1"}},
 				AccessMethods: &[]drs.AccessMethod{
 					{
-						Type:      drs.AccessMethodTypeS3,
-						AccessId:  core.Ptr("s3"),
-						AccessUrl: &struct{ Headers *[]string `json:"headers,omitempty"`; Url string `json:"url"` }{Url: "s3://test-bucket-1/sha-1"},
+						Type:     drs.AccessMethodTypeS3,
+						AccessId: core.Ptr("s3"),
+						AccessUrl: &struct {
+							Headers *[]string `json:"headers,omitempty"`
+							Url     string    `json:"url"`
+						}{Url: "s3://test-bucket-1/sha-1"},
 						Authorizations: &struct {
-							BearerAuthIssuers   *[]string `json:"bearer_auth_issuers,omitempty"`
-							DrsObjectId         *string   `json:"drs_object_id,omitempty"`
-							PassportAuthIssuers *[]string `json:"passport_auth_issuers,omitempty"`
+							BearerAuthIssuers   *[]string                                       `json:"bearer_auth_issuers,omitempty"`
+							DrsObjectId         *string                                         `json:"drs_object_id,omitempty"`
+							PassportAuthIssuers *[]string                                       `json:"passport_auth_issuers,omitempty"`
 							SupportedTypes      *[]drs.AccessMethodAuthorizationsSupportedTypes `json:"supported_types,omitempty"`
 						}{
 							BearerAuthIssuers: &[]string{"/data_file"},
@@ -150,30 +191,29 @@ func buildMockServerRouter() *fiber.App {
 		},
 	}
 	uM := &testutils.MockUrlManager{}
-	svc := service.NewObjectsAPIService(database, uM)
 	app := fiber.New()
 
 	logger := slog.New(slog.NewTextHandler(bytes.NewBuffer(nil), nil))
 	authzMiddleware := middleware.NewAuthzMiddleware(logger, "local", "", "")
 	requestIDMiddleware := middleware.NewRequestIDMiddleware(logger)
-	app.Use(requestIDMiddleware.FiberMiddleware())
-	app.Use(authzMiddleware.FiberMiddleware())
-
-	app.Get("/healthz", func(c fiber.Ctx) error {
-		return c.SendString("OK")
-	})
-
-	api := app.Group("/")
-	strict := service.NewStrictServer(svc)
-	drs.RegisterHandlersWithOptions(api, drs.NewStrictHandler(strict, nil), drs.FiberServerOptions{
-		BaseURL: "/ga4gh/drs/v1",
-	})
-	docs.RegisterSwaggerRoutes(app)
-	coreapi.RegisterCoreRoutes(api, database)
-	metrics.RegisterMetricsRoutes(api, database)
-	internaldrs.RegisterInternalIndexRoutes(api, database, uM)
-	internaldrs.RegisterInternalDataRoutes(api, database, uM)
-	lfs.RegisterLFSRoutes(api, database, uM)
+	cfg := &config.Config{Routes: routes}
+	hasOptionalRoutes := routes.Ga4gh || routes.Docs || routes.Metrics || routes.Internal || routes.LFS
+	var svc *service.ObjectsAPIService
+	if hasOptionalRoutes {
+		if routes.Ga4gh {
+			svc = service.NewObjectsAPIService(database, uM)
+		}
+	}
+	rt := &serverRuntime{
+		app:                 app,
+		cfg:                 cfg,
+		database:            database,
+		uM:                  uM,
+		svc:                 svc,
+		authzMiddleware:     authzMiddleware,
+		requestIDMiddleware: requestIDMiddleware,
+	}
+	applyServerOptions(rt, buildServerOptions(cfg)...)
 	return app
 }
 
@@ -228,7 +268,7 @@ func requestBodyFor(method, template string) ([]byte, string) {
 		return []byte(`{"delete_storage_data":false}`), "application/json"
 	case "/ga4gh/drs/v1/upload-request":
 		return []byte(`{"requests":[{"size":1,"checksums":[{"type":"sha256","checksum":"sha-1"}],"name":"obj.bin"}]}`), "application/json"
-	case "/index/v1/sha256/validity", "/index/bulk/sha256/validity":
+	case "/index/bulk/sha256/validity":
 		return []byte(`{"sha256":["sha-1"]}`), "application/json"
 	case "/index/bulk/hashes":
 		return []byte(`{"hashes":["sha-1"]}`), "application/json"

@@ -134,7 +134,7 @@ func (s *IndexService) BulkDocuments(ctx context.Context, dids []string) ([]Inte
 func (s *IndexService) SHA256Validity(ctx context.Context, values []string) (map[string]bool, error) {
 	payload := map[string][]string{"sha256": values}
 	out := map[string]bool{}
-	err := s.requestor.Do(ctx, http.MethodPost, common.IndexdIndexSHA256ValidityEndpoint, payload, &out)
+	err := s.requestor.Do(ctx, http.MethodPost, common.IndexdIndexBulkSHA256ValidityEndpoint, payload, &out)
 	return out, err
 }
 

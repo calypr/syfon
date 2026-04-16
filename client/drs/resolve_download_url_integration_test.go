@@ -38,7 +38,7 @@ func TestDrsClientResolveDownloadURL_DirectAccessURL_GCSAndAzure(t *testing.T) {
 
 				record := internalapi.InternalRecordResponse{
 					Did:  tc.objectID,
-					Urls: []string{tc.accessURL},
+					Urls: &[]string{tc.accessURL},
 				}
 				payload, err := json.Marshal(record)
 				if err != nil {

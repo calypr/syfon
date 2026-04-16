@@ -2,6 +2,7 @@ package xfer
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/url"
@@ -19,24 +20,37 @@ type testRequestor struct {
 	err  error
 }
 
-func (t *testRequestor) New(method, path string) *request.RequestBuilder {
-	return &request.RequestBuilder{Method: method, Url: path, Headers: map[string]string{}}
-}
-
-func (t *testRequestor) Do(_ context.Context, rb *request.RequestBuilder) (*http.Response, error) {
+func (t *testRequestor) Do(_ context.Context, method, path string, body, out any, opts ...request.RequestOption) error {
+	rb := &request.RequestBuilder{Method: method, Url: path, Headers: map[string]string{}}
+	if body != nil {
+		if reader, ok := body.(io.Reader); ok {
+			rb.WithBody(reader)
+		}
+	}
+	for _, opt := range opts {
+		opt(rb)
+	}
 	t.last = rb
 	if t.err != nil {
-		return nil, t.err
+		return t.err
 	}
-	if t.resp != nil {
-		return t.resp, nil
+	resp := t.resp
+	if resp == nil {
+		resp = &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("")), Header: make(http.Header)}
 	}
-	return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("")), Header: make(http.Header)}, nil
-}
-
-func (t *testRequestor) DoJSON(ctx context.Context, req *request.RequestBuilder, out any) error {
-	_, err := t.Do(ctx, req)
-	return err
+	if out == nil {
+		return nil
+	}
+	if outResp, ok := out.(*http.Response); ok {
+		*outResp = *resp
+		return nil
+	}
+	if outResp, ok := out.(**http.Response); ok {
+		*outResp = resp
+		return nil
+	}
+	defer resp.Body.Close()
+	return json.NewDecoder(resp.Body).Decode(out)
 }
 
 func TestNeedsAzureBlobTypeHeader(t *testing.T) {

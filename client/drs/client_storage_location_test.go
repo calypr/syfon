@@ -16,31 +16,26 @@ type storageLocationRequestor struct {
 	url string
 }
 
-func (r *storageLocationRequestor) New(method, path string) *request.RequestBuilder {
-	return &request.RequestBuilder{Method: method, Url: path, Headers: map[string]string{}}
-}
-
-func (r *storageLocationRequestor) Do(ctx context.Context, rb *request.RequestBuilder) (*http.Response, error) {
+func (r *storageLocationRequestor) Do(ctx context.Context, method, path string, body, out any, opts ...request.RequestOption) error {
 	_ = ctx
-	_ = rb
-	rec := internalapi.InternalRecordResponse{Did: "did-1", Urls: []string{r.url}}
-	body, _ := json.Marshal(rec)
-	return &http.Response{
+	_ = method
+	_ = path
+	_ = body
+	rb := &request.RequestBuilder{Method: method, Url: path, Headers: map[string]string{}}
+	for _, opt := range opts {
+		opt(rb)
+	}
+	rec := internalapi.InternalRecordResponse{Did: "did-1", Urls: &[]string{r.url}}
+	payload, _ := json.Marshal(rec)
+	resp := &http.Response{
 		StatusCode: http.StatusOK,
 		Status:     "200 OK",
-		Body:       io.NopCloser(strings.NewReader(string(body))),
-	}, nil
-}
-
-func (r *storageLocationRequestor) DoJSON(ctx context.Context, rb *request.RequestBuilder, out any) error {
-	resp, err := r.Do(ctx, rb)
-	if err != nil {
-		return err
+		Body:       io.NopCloser(strings.NewReader(string(payload))),
 	}
-	defer resp.Body.Close()
 	if out == nil {
 		return nil
 	}
+	defer resp.Body.Close()
 	return json.NewDecoder(resp.Body).Decode(out)
 }
 

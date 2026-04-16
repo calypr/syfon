@@ -37,6 +37,9 @@ func TestLoadConfig_MinimalValid(t *testing.T) {
 	if cfg.LFS.RequestLimitPerMinute != DefaultLFSRequestLimitPerMinute {
 		t.Fatalf("expected default lfs.request_limit_per_minute=%d, got %d", DefaultLFSRequestLimitPerMinute, cfg.LFS.RequestLimitPerMinute)
 	}
+	if cfg.Routes != (RoutesConfig{}) {
+		t.Fatalf("expected route modules to default to disabled, got %+v", cfg.Routes)
+	}
 }
 
 func TestLoadConfig_EnvOverrides(t *testing.T) {
@@ -166,5 +169,23 @@ func TestLoadConfig_LFSEnvOverrides(t *testing.T) {
 	}
 	if cfg.LFS.BandwidthLimitBytesPerMinute != 999 {
 		t.Fatalf("expected 999, got %d", cfg.LFS.BandwidthLimitBytesPerMinute)
+	}
+}
+
+func TestLoadConfig_RouteEnvOverrides(t *testing.T) {
+	t.Setenv("DRS_DB_SQLITE_FILE", "drs.db")
+	t.Setenv("DRS_AUTH_MODE", "local")
+	t.Setenv("DRS_ENABLE_GA4GH", "true")
+	t.Setenv("DRS_ENABLE_INTERNAL", "1")
+	t.Setenv("DRS_ENABLE_LFS", "true")
+	t.Setenv("DRS_ENABLE_METRICS", "true")
+	t.Setenv("DRS_ENABLE_DOCS", "true")
+
+	cfg, err := LoadConfig("")
+	if err != nil {
+		t.Fatalf("LoadConfig failed: %v", err)
+	}
+	if !cfg.Routes.Ga4gh || !cfg.Routes.Internal || !cfg.Routes.LFS || !cfg.Routes.Metrics || !cfg.Routes.Docs {
+		t.Fatalf("expected all route flags to be enabled, got %+v", cfg.Routes)
 	}
 }

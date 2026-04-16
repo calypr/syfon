@@ -84,7 +84,6 @@ const (
 	IndexdIndexBulkDeleteEndpoint         = "/index/bulk/delete"
 	IndexdIndexBulkSHA256ValidityEndpoint = "/index/bulk/sha256/validity"
 	IndexdIndexBulkDocumentsEndpoint      = "/index/bulk/documents"
-	IndexdIndexSHA256ValidityEndpoint     = "/index/v1/sha256/validity"
 	IndexdIndexRecordEndpointTemplate     = "/index/%s"
 
 	DataUploadBulkEndpoint             = "/data/upload/bulk"

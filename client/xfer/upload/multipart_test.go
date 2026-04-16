@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -115,17 +114,30 @@ func (f *fakeGen3Upload) CanonicalObjectURL(signedURL, bucketHint, fallbackDID s
 
 func TestMultipartUploadProgressIntegration(t *testing.T) {
 	ctx := context.Background()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPut {
-			w.WriteHeader(http.StatusMethodNotAllowed)
-			return
+	tmp := t.TempDir()
+	t.Setenv("DATA_CLIENT_CACHE_DIR", tmp)
+	origTransport := http.DefaultClient.Transport
+	http.DefaultClient.Transport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.Method != http.MethodPut {
+			return &http.Response{
+				StatusCode: http.StatusMethodNotAllowed,
+				Body:       io.NopCloser(strings.NewReader("method not allowed")),
+				Header:     make(http.Header),
+				Request:    req,
+			}, nil
 		}
-		_, _ = io.Copy(io.Discard, r.Body)
-		_ = r.Body.Close()
-		w.Header().Set("ETag", "etag-123")
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer server.Close()
+		_, _ = io.Copy(io.Discard, req.Body)
+		_ = req.Body.Close()
+		h := make(http.Header)
+		h.Set("ETag", "etag-123")
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader("")),
+			Header:     h,
+			Request:    req,
+		}, nil
+	})
+	defer func() { http.DefaultClient.Transport = origTransport }()
 
 	file, err := os.CreateTemp(t.TempDir(), "multipart-*.bin")
 	if err != nil {
@@ -164,7 +176,7 @@ func TestMultipartUploadProgressIntegration(t *testing.T) {
 			case strings.Contains(req.Url, common.DataMultipartInitEndpoint):
 				return newJSONResponse(req.Url, `{"uploadId":"upload-123","guid":"guid-123"}`), nil
 			case strings.Contains(req.Url, common.DataMultipartUploadEndpoint):
-				return newJSONResponse(req.Url, fmt.Sprintf(`{"presigned_url":"%s"}`, server.URL)), nil
+				return newJSONResponse(req.Url, fmt.Sprintf(`{"presigned_url":"%s"}`, "https://upload.invalid/part")), nil
 			case strings.Contains(req.Url, common.DataMultipartCompleteEndpoint):
 				return newJSONResponse(req.Url, `{}`), nil
 			default:
