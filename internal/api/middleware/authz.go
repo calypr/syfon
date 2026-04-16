@@ -17,8 +17,8 @@ import (
 	"time"
 
 	"github.com/calypr/syfon/client/conf"
-	"github.com/calypr/syfon/client/pkg/logs"
-	"github.com/calypr/syfon/client/pkg/request"
+	"github.com/calypr/syfon/client/logs"
+	"github.com/calypr/syfon/client/request"
 	"github.com/calypr/syfon/internal/db/core"
 	"github.com/gofiber/fiber/v3"
 	"github.com/golang-jwt/jwt/v5"

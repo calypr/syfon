@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/calypr/syfon/apigen/drs"
+	"github.com/calypr/syfon/apigen/server/drs"
 	syclient "github.com/calypr/syfon/client"
 	"github.com/calypr/syfon/internal/api/docs"
 	"github.com/calypr/syfon/internal/api/internaldrs"

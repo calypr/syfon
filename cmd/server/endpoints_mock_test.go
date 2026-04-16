@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/calypr/syfon/apigen/drs"
+	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/api/middleware"
 	"github.com/calypr/syfon/internal/config"
 	"github.com/calypr/syfon/internal/db/core"

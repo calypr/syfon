@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/calypr/syfon/client/pkg/common"
+	"github.com/calypr/syfon/client/common"
 )
 
 type progressReader struct {

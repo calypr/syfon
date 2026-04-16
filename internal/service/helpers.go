@@ -7,11 +7,11 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/calypr/syfon/apigen/drs"
+	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/db/core"
 )
 
-func errorResponseForDBError(ctx context.Context, op string, err error) drs.ImplResponse {
+func errorResponseForDBError(ctx context.Context, op string, err error) ImplResponse {
 	requestID := core.GetRequestID(ctx)
 	switch {
 	case errors.Is(err, core.ErrUnauthorized):
@@ -20,13 +20,13 @@ func errorResponseForDBError(ctx context.Context, op string, err error) drs.Impl
 			code = http.StatusUnauthorized
 		}
 		slog.Warn("service db unauthorized", "op", op, "request_id", requestID, "status", code, "err", err)
-		return drs.ImplResponse{Code: code, Body: drsError("unauthorized", code)}
+		return ImplResponse{Code: code, Body: drsError("unauthorized", code)}
 	case errors.Is(err, core.ErrNotFound):
 		slog.Info("service db not found", "op", op, "request_id", requestID, "status", http.StatusNotFound, "err", err)
-		return drs.ImplResponse{Code: http.StatusNotFound, Body: drsError("not found", http.StatusNotFound)}
+		return ImplResponse{Code: http.StatusNotFound, Body: drsError("not found", http.StatusNotFound)}
 	default:
 		slog.Error("service db failure", "op", op, "request_id", requestID, "status", http.StatusInternalServerError, "err", err)
-		return drs.ImplResponse{Code: http.StatusInternalServerError, Body: drsError(err.Error(), http.StatusInternalServerError)}
+		return ImplResponse{Code: http.StatusInternalServerError, Body: drsError(err.Error(), http.StatusInternalServerError)}
 	}
 }
 
@@ -41,17 +41,17 @@ func unauthorizedStatus(ctx context.Context) int {
 	return http.StatusForbidden
 }
 
-func forbiddenResponse(ctx context.Context, msg string) drs.ImplResponse {
+func forbiddenResponse(ctx context.Context, msg string) ImplResponse {
 	code := unauthorizedStatus(ctx)
 	slog.Warn("service forbidden", "request_id", core.GetRequestID(ctx), "status", code, "reason", msg)
-	return drs.ImplResponse{
+	return ImplResponse{
 		Code: code,
 		Body: drsError(msg, code),
 	}
 }
 
-func tooLargeResponse(msg string) drs.ImplResponse {
-	return drs.ImplResponse{
+func tooLargeResponse(msg string) ImplResponse {
+	return ImplResponse{
 		Code: http.StatusRequestEntityTooLarge,
 		Body: drsError(msg, http.StatusRequestEntityTooLarge),
 	}

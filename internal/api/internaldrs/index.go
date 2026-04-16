@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/calypr/syfon/apigen/drs"
-	"github.com/calypr/syfon/apigen/internalapi"
+	"github.com/calypr/syfon/apigen/server/drs"
+	"github.com/calypr/syfon/apigen/server/internalapi"
 	"github.com/calypr/syfon/internal/api/internaldrs/logic"
 	"github.com/calypr/syfon/internal/api/routeutil"
 	corelogic "github.com/calypr/syfon/internal/coreapi"
@@ -45,18 +45,18 @@ func RegisterInternalIndexRoutes(router fiber.Router, database core.DatabaseInte
 	server := NewInternalServer(database, manager)
 	strict := internalapi.NewStrictHandler(server, nil)
 	internalapi.RegisterHandlers(router, strict)
-	router.Get("/index/index", routeutil.Handler(drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	router.Get("/index/index", routeutil.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handleInternalList(w, r, database)
-	}), "InternalList")))
-	router.Get("/index/index/{id}", routeutil.Handler(drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	})))
+	router.Get("/index/index/{id}", routeutil.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handleInternalGet(w, r, database)
-	}), "InternalGet"), "id"))
-	router.Post("/index/index/bulk/hashes", routeutil.Handler(drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	}), "id"))
+	router.Post("/index/index/bulk/hashes", routeutil.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handleInternalBulkHashes(database).ServeHTTP(w, r)
-	}), "InternalBulkHashes")))
-	router.Post("/index/index/bulk", routeutil.Handler(drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	})))
+	router.Post("/index/index/bulk", routeutil.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handleInternalBulkCreate(database).ServeHTTP(w, r)
-	}), "InternalBulkCreate")))
+	})))
 }
 
 func (s *InternalServer) InternalList(ctx context.Context, request internalapi.InternalListRequestObject) (internalapi.InternalListResponseObject, error) {

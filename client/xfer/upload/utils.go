@@ -8,11 +8,14 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/calypr/syfon/client/pkg/common"
-	"github.com/calypr/syfon/client/xfer"
+	"github.com/calypr/syfon/client/common"
+	"github.com/calypr/syfon/client/transfer"
+	"github.com/calypr/syfon/client/transfer/engine"
 )
 
-func SeparateSingleAndMultipartUploads(bk interface{ Logger() xfer.TransferLogger }, objects []uploadRequest) ([]uploadRequest, []uploadRequest) {
+func SeparateSingleAndMultipartUploads(bk interface {
+	Logger() transfer.TransferLogger
+}, objects []uploadRequest) ([]uploadRequest, []uploadRequest) {
 	fileSizeLimit := common.FileSizeLimit
 	logger := bk.Logger()
 
@@ -46,7 +49,7 @@ func SeparateSingleAndMultipartUploads(bk interface{ Logger() xfer.TransferLogge
 }
 
 // ProcessFilename returns an FileInfo object which has the information about the path and name to be used for upload of a file
-func ProcessFilename(logger xfer.TransferLogger, uploadPath string, filePath string, objectId string, includeSubDirName bool, includeMetadata bool) (string, string, common.FileMetadata, error) {
+func ProcessFilename(logger transfer.TransferLogger, uploadPath string, filePath string, objectId string, includeSubDirName bool, includeMetadata bool) (string, string, common.FileMetadata, error) {
 	var err error
 	filePath, err = common.GetAbsolutePath(filePath)
 	if err != nil {
@@ -128,57 +131,6 @@ func FormatSize(size int64) string {
 }
 
 // OptimalChunkSize returns a recommended chunk size for the given fileSize (in bytes).
-// - <= 100 MB: return fileSize (use single PUT)
-// - >100 MB and <= 1 GB: 10 MB
-// - >1 GB and <= 10 GB: scaled between 25 MB and 128 MB
-// - >10 GB and <= 100 GB: 256 MB
-// - >100 GB: scaled between 512 MB and 1024 MB (1 GB)
-// See:
-// https://cloud.switch.ch/-/documentation/s3/multipart-uploads/#best-practices
 func OptimalChunkSize(fileSize int64) int64 {
-	if fileSize <= 0 {
-		return 1 * common.MB
-	}
-
-	switch {
-	case fileSize <= 100*common.MB:
-		// Single PUT: return whole file size
-		return fileSize
-
-	case fileSize <= 1*common.GB:
-		return 10 * common.MB
-
-	case fileSize <= 10*common.GB:
-		return scaleLinear(fileSize, 1*common.GB, 10*common.GB, 25*common.MB, 128*common.MB)
-
-	case fileSize <= 100*common.GB:
-		return 256 * common.MB
-
-	default:
-		// Scale for very large files; cap scaling at 1 TB for ratio purposes
-		return scaleLinear(fileSize, 100*common.GB, 1000*common.GB, 512*common.MB, 1024*common.MB)
-	}
-}
-
-// scaleLinear scales size in [minSize, maxSize] to chunk in [minChunk, maxChunk] (linear).
-// Result is rounded down to nearest MB and clamped to [minChunk, maxChunk].
-func scaleLinear(size, minSize, maxSize, minChunk, maxChunk int64) int64 {
-	if size <= minSize {
-		return minChunk
-	}
-	if size >= maxSize {
-		return maxChunk
-	}
-	ratio := float64(size-minSize) / float64(maxSize-minSize)
-	chunkF := float64(minChunk) + ratio*(float64(maxChunk-minChunk))
-	// round down to nearest MB
-	mb := int64(common.MB)
-	chunk := int64(chunkF) / mb * mb
-	if chunk < minChunk {
-		return minChunk
-	}
-	if chunk > maxChunk {
-		return maxChunk
-	}
-	return chunk
+	return engine.OptimalChunkSize(fileSize)
 }

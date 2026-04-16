@@ -14,12 +14,19 @@ METRICS_OPENAPI ?= apigen/api/metrics.openapi.yaml
 METRICS_GEN_OUT ?= .tmp/apigen-metrics.gen
 INTERNAL_OPENAPI ?= apigen/api/internal.openapi.yaml
 INTERNAL_GEN_OUT ?= .tmp/apigen-internal.gen
+MODEL_OPENAPI ?= apigen/model/openapi.yaml
+MODEL_CONFIG ?= apigen/specs/oapi-model.yaml
 SCHEMAS_SUBMODULE ?= ga4gh/data-repository-service-schemas
-OAPI_DRS_GIN_CONFIG ?= apigen/specs/oapi-drsgin.yaml
+OAPI_DRS_GIN_CONFIG ?= apigen/specs/oapi-drs.yaml
 OAPI_LFS_CONFIG ?= apigen/specs/oapi-lfs.yaml
 OAPI_BUCKET_CONFIG ?= apigen/specs/oapi-bucket.yaml
 OAPI_METRICS_CONFIG ?= apigen/specs/oapi-metrics.yaml
 OAPI_INTERNAL_CONFIG ?= apigen/specs/oapi-internal.yaml
+CLIENT_OAPI_DRS_CONFIG ?= apigen/specs/client-oapi-drs.yaml
+CLIENT_OAPI_LFS_CONFIG ?= apigen/specs/client-oapi-lfs.yaml
+CLIENT_OAPI_BUCKET_CONFIG ?= apigen/specs/client-oapi-bucket.yaml
+CLIENT_OAPI_METRICS_CONFIG ?= apigen/specs/client-oapi-metrics.yaml
+CLIENT_OAPI_INTERNAL_CONFIG ?= apigen/specs/client-oapi-internal.yaml
 
 AUTO_INIT_SUBMODULE ?= 0
 GOCACHE ?= $(PWD)/.gocache
@@ -46,7 +53,7 @@ LDFLAGS     := -X github.com/calypr/syfon/internal/version.Version=$(GIT_VERSION
                -X github.com/calypr/syfon/internal/version.GitUpstream=$(GIT_UPSTREAM)
 
 .PHONY: build
-build: build
+build: gen
 	CGO_ENABLED=1 GOCACHE="$(GOCACHE)" go build -ldflags "$(LDFLAGS)" -o syfon .
 
 .PHONY: install
@@ -86,66 +93,63 @@ gen:
 	  $(YQ_IMAGE) eval-all 'select(fileIndex == 0) * select(fileIndex == 1)' /local/.tmp/drs.base.yaml /local/apigen/specs/drs-extensions-overlay.yaml > apigen/api/openapi.yaml; \
 	mkdir -p apigen/api apigen; \
 	echo "Bundled canonical DRS OpenAPI spec into ./apigen/api/openapi.yaml"; \
-	if [[ ! -f "$(OAPI_DRS_GIN_CONFIG)" ]]; then \
-	  echo "ERROR: oapi-codegen config '$(OAPI_DRS_GIN_CONFIG)' not found."; \
+	if [[ ! -f "$(MODEL_CONFIG)" ]]; then \
+	  echo "ERROR: oapi-codegen config '$(MODEL_CONFIG)' not found."; \
 	  exit 1; \
 	fi; \
-	echo "Generating gin strict server bindings with oapi-codegen..."; \
-	mkdir -p apigen/drs; \
-	GOTOOLCHAIN=local $(OAPI_CODEGEN) -config "$(OAPI_DRS_GIN_CONFIG)" apigen/api/openapi.yaml > apigen/drs/drs.gen.go; \
-	echo "Generated gin strict server bindings into ./apigen/drs/drs.gen.go"; \
-	$(MAKE) gen-lfs; \
-	$(MAKE) gen-bucket; \
-	$(MAKE) gen-metrics; \
-	$(MAKE) gen-internal
+	$(MAKE) gen-model; \
+	$(MAKE) gen-server; \
+	$(MAKE) gen-client
 
-.PHONY: gen-lfs
-gen-lfs:
+.PHONY: gen-model
+gen-model:
 	@set -euo pipefail; \
-	if [[ ! -f "$(LFS_OPENAPI)" ]]; then \
-	  echo "ERROR: LFS OpenAPI spec '$(LFS_OPENAPI)' not found."; \
-	  exit 1; \
-	fi; \
-	echo "Generating LFS gin strict server with oapi-codegen..."; \
-	mkdir -p apigen/lfsapi; \
-	GOTOOLCHAIN=local $(OAPI_CODEGEN) -config "$(OAPI_LFS_CONFIG)" apigen/api/lfs.openapi.yaml > apigen/lfsapi/lfs.gen.go; \
-	echo "Generated LFS gin strict server into ./apigen/lfsapi/lfs.gen.go"
+	mkdir -p apigen/model; \
+	cp apigen/api/openapi.yaml "$(MODEL_OPENAPI)"; \
+	echo "Generating shared model bindings with oapi-codegen..."; \
+	GOTOOLCHAIN=local $(OAPI_CODEGEN) -config "$(MODEL_CONFIG)" "$(MODEL_OPENAPI)" > apigen/model/model.gen.go; \
+	echo "Generated shared model bindings into ./apigen/model/model.gen.go"
 
-.PHONY: gen-bucket
-gen-bucket:
+.PHONY: gen-server
+gen-server:
 	@set -euo pipefail; \
-	if [[ ! -f "$(BUCKET_OPENAPI)" ]]; then \
-	  echo "ERROR: Bucket OpenAPI spec '$(BUCKET_OPENAPI)' not found."; \
-	  exit 1; \
-	fi; \
-	echo "Generating Bucket gin strict server with oapi-codegen..."; \
-	mkdir -p apigen/bucketapi; \
-	GOTOOLCHAIN=local $(OAPI_CODEGEN) -config "$(OAPI_BUCKET_CONFIG)" apigen/api/bucket.openapi.yaml > apigen/bucketapi/bucket.gen.go; \
-	echo "Generated Bucket gin strict server into ./apigen/bucketapi/bucket.gen.go"
+	mkdir -p apigen/server/drs apigen/server/lfsapi apigen/server/bucketapi apigen/server/metricsapi apigen/server/internalapi; \
+	echo "Generating Fiber v3 strict server bindings with oapi-codegen..."; \
+	GOTOOLCHAIN=local $(OAPI_CODEGEN) -config "$(OAPI_DRS_GIN_CONFIG)" apigen/api/openapi.yaml > apigen/server/drs/drs.gen.go; \
+	echo "Generated Fiber v3 strict server bindings into ./apigen/server/drs/drs.gen.go"; \
+	echo "Generating LFS Fiber v3 strict server with oapi-codegen..."; \
+	GOTOOLCHAIN=local $(OAPI_CODEGEN) -config "$(OAPI_LFS_CONFIG)" apigen/api/lfs.openapi.yaml > apigen/server/lfsapi/lfs.gen.go; \
+	echo "Generated LFS Fiber v3 strict server into ./apigen/server/lfsapi/lfs.gen.go"; \
+	echo "Generating Bucket Fiber v3 strict server with oapi-codegen..."; \
+	GOTOOLCHAIN=local $(OAPI_CODEGEN) -config "$(OAPI_BUCKET_CONFIG)" apigen/api/bucket.openapi.yaml > apigen/server/bucketapi/bucket.gen.go; \
+	echo "Generated Bucket Fiber v3 strict server into ./apigen/server/bucketapi/bucket.gen.go"; \
+	echo "Generating Metrics Fiber v3 strict server with oapi-codegen..."; \
+	GOTOOLCHAIN=local $(OAPI_CODEGEN) -config "$(OAPI_METRICS_CONFIG)" apigen/api/metrics.openapi.yaml > apigen/server/metricsapi/metrics.gen.go; \
+	echo "Generated Metrics Fiber v3 strict server into ./apigen/server/metricsapi/metrics.gen.go"; \
+	echo "Generating Internal Fiber v3 strict server with oapi-codegen..."; \
+	GOTOOLCHAIN=local $(OAPI_CODEGEN) -config "$(OAPI_INTERNAL_CONFIG)" apigen/api/internal.openapi.yaml > apigen/server/internalapi/internal.gen.go; \
+	echo "Generated Internal Fiber v3 strict server into ./apigen/server/internalapi/internal.gen.go"
 
-.PHONY: gen-metrics
-gen-metrics:
+.PHONY: gen-client
+gen-client:
 	@set -euo pipefail; \
-	if [[ ! -f "$(METRICS_OPENAPI)" ]]; then \
-	  echo "ERROR: Metrics OpenAPI spec '$(METRICS_OPENAPI)' not found."; \
+	mkdir -p apigen/client/drs apigen/client/lfsapi apigen/client/bucketapi apigen/client/metricsapi apigen/client/internalapi; \
+	if [[ ! -f "$(CLIENT_OAPI_DRS_CONFIG)" ]]; then \
+	  echo "ERROR: client oapi-codegen config '$(CLIENT_OAPI_DRS_CONFIG)' not found."; \
 	  exit 1; \
 	fi; \
-	echo "Generating Metrics gin strict server with oapi-codegen..."; \
-	mkdir -p apigen/metricsapi; \
-	GOTOOLCHAIN=local $(OAPI_CODEGEN) -config "$(OAPI_METRICS_CONFIG)" apigen/api/metrics.openapi.yaml > apigen/metricsapi/metrics.gen.go; \
-	echo "Generated Metrics gin strict server into ./apigen/metricsapi/metrics.gen.go"
-
-.PHONY: gen-internal
-gen-internal:
-	@set -euo pipefail; \
-	if [[ ! -f "$(INTERNAL_OPENAPI)" ]]; then \
-	  echo "ERROR: Internal OpenAPI spec '$(INTERNAL_OPENAPI)' not found."; \
-	  exit 1; \
-	fi; \
-	echo "Generating Internal gin strict server with oapi-codegen..."; \
-	mkdir -p apigen/internalapi; \
-	GOTOOLCHAIN=local $(OAPI_CODEGEN) -config "$(OAPI_INTERNAL_CONFIG)" apigen/api/internal.openapi.yaml > apigen/internalapi/internal.gen.go; \
-	echo "Generated Internal gin strict server into ./apigen/internalapi/internal.gen.go"
+	echo "Generating separate client bindings with oapi-codegen..."; \
+	GOTOOLCHAIN=local $(OAPI_CODEGEN) -config "$(CLIENT_OAPI_DRS_CONFIG)" apigen/api/openapi.yaml > apigen/client/drs/drs.gen.go; \
+	echo "Generated DRS client bindings into ./apigen/client/drs/drs.gen.go"; \
+	GOTOOLCHAIN=local $(OAPI_CODEGEN) -config "$(CLIENT_OAPI_LFS_CONFIG)" apigen/api/lfs.openapi.yaml > apigen/client/lfsapi/lfs.gen.go; \
+	echo "Generated LFS client bindings into ./apigen/client/lfsapi/lfs.gen.go"; \
+	GOTOOLCHAIN=local $(OAPI_CODEGEN) -config "$(CLIENT_OAPI_BUCKET_CONFIG)" apigen/api/bucket.openapi.yaml > apigen/client/bucketapi/bucket.gen.go; \
+	echo "Generated Bucket client bindings into ./apigen/client/bucketapi/bucket.gen.go"; \
+	GOTOOLCHAIN=local $(OAPI_CODEGEN) -config "$(CLIENT_OAPI_METRICS_CONFIG)" apigen/api/metrics.openapi.yaml > apigen/client/metricsapi/metrics.gen.go; \
+	echo "Generated Metrics client bindings into ./apigen/client/metricsapi/metrics.gen.go"; \
+	GOTOOLCHAIN=local $(OAPI_CODEGEN) -config "$(CLIENT_OAPI_INTERNAL_CONFIG)" apigen/api/internal.openapi.yaml > apigen/client/internalapi/internal.gen.go; \
+	echo "Generated Internal client bindings into ./apigen/client/internalapi/internal.gen.go"; \
+	echo "Generated client bindings into ./apigen/client/*"
 
 .PHONY: test
 test:

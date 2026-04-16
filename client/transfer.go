@@ -8,10 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/calypr/syfon/client/drs"
-	"github.com/calypr/syfon/client/pkg/common"
-	sylogs "github.com/calypr/syfon/client/pkg/logs"
-	syxfer "github.com/calypr/syfon/client/xfer"
+	"github.com/calypr/syfon/client/common"
+	sylogs "github.com/calypr/syfon/client/logs"
+	"github.com/calypr/syfon/client/transfer"
 	sydownload "github.com/calypr/syfon/client/xfer/download"
 	syupload "github.com/calypr/syfon/client/xfer/upload"
 )
@@ -50,38 +49,38 @@ type downloadManifestEntry struct {
 }
 
 // Upload handles local file uploads, manifest-driven uploads, and retrying failed uploads.
-// It keeps transfer orchestration in the client package so callers only pass flags and paths.
-func Upload(ctx context.Context, api drs.Client, sourcePath string, opts UploadOptions) error {
-	uploader, ok := api.(syxfer.Uploader)
-	if !ok {
-		return fmt.Errorf("drs client does not implement xfer.Uploader")
+func Upload(ctx context.Context, bk transfer.Backend, sourcePath string, opts UploadOptions) error {
+	if bk == nil {
+		return fmt.Errorf("backend is required")
 	}
-	logger := api.Logger()
+	logger := bk.Logger()
 	if logger == nil {
 		logger = sylogs.NewGen3Logger(nil, "", "")
 	}
 	if strings.TrimSpace(opts.Bucket) == "" {
-		opts.Bucket = strings.TrimSpace(api.GetBucketName())
+		return fmt.Errorf("bucket is required")
 	}
 	if opts.NumParallel <= 0 {
 		opts.NumParallel = 1
 	}
 
 	if strings.TrimSpace(opts.RetryFailedLogPath) != "" {
-		return retryFailedUploadsFromFile(ctx, uploader, logger, opts.RetryFailedLogPath)
+		return retryFailedUploadsFromFile(ctx, bk, logger, opts.RetryFailedLogPath)
 	}
 
 	if strings.TrimSpace(opts.ManifestPath) != "" {
-		return uploadFromManifest(ctx, uploader, logger, sourcePath, opts)
+		return uploadFromManifest(ctx, bk, logger, sourcePath, opts)
 	}
-	return uploadFromPath(ctx, uploader, logger, sourcePath, opts)
+	return uploadFromPath(ctx, bk, logger, sourcePath, opts)
 }
 
 // Download handles single- and multi-file downloads and manifest expansion.
-func Download(ctx context.Context, api drs.Client, guids []string, opts DownloadOptions) error {
-	downloader, ok := api.(syxfer.Downloader)
-	if !ok {
-		return fmt.Errorf("drs client does not implement xfer.Downloader")
+func Download(ctx context.Context, api *Client, bk transfer.Backend, guids []string, opts DownloadOptions) error {
+	if api == nil {
+		return fmt.Errorf("client is required")
+	}
+	if bk == nil {
+		return fmt.Errorf("backend is required")
 	}
 
 	if strings.TrimSpace(opts.ManifestPath) != "" {
@@ -101,31 +100,22 @@ func Download(ctx context.Context, api drs.Client, guids []string, opts Download
 		downloadPath = "."
 	}
 
-	filenameFormat := strings.TrimSpace(opts.FilenameFormat)
-	if filenameFormat == "" {
-		filenameFormat = "original"
-	}
-
 	if opts.NumParallel <= 0 {
 		opts.NumParallel = 1
 	}
 
 	return sydownload.DownloadMultiple(
 		ctx,
-		api,
-		downloader,
+		api.DRS(),
+		bk,
 		guids,
 		downloadPath,
-		filenameFormat,
-		opts.Rename,
-		opts.NoPrompt,
-		opts.Protocol,
 		opts.NumParallel,
 		opts.SkipCompleted,
 	)
 }
 
-func uploadFromPath(ctx context.Context, bk syxfer.Uploader, logger syxfer.TransferLogger, sourcePath string, opts UploadOptions) error {
+func uploadFromPath(ctx context.Context, bk transfer.Backend, logger transfer.TransferLogger, sourcePath string, opts UploadOptions) error {
 	absUploadPath, err := common.GetAbsolutePath(sourcePath)
 	if err != nil {
 		return fmt.Errorf("resolve upload path: %w", err)
@@ -138,21 +128,12 @@ func uploadFromPath(ctx context.Context, bk syxfer.Uploader, logger syxfer.Trans
 		return fmt.Errorf("no files found under %s", absUploadPath)
 	}
 
-	if opts.Batch {
-		syupload.BatchUpload(ctx, bk, logger, absUploadPath, filePaths, opts.NumParallel, opts.Bucket, opts.IncludeSubDirName, opts.HasMetadata)
-		if len(logger.GetSucceededLogMap()) == 0 {
-			if failed := logger.GetFailedLogMap(); len(failed) > 0 {
-				syupload.RetryFailedUploads(ctx, bk, logger, failed)
-			}
-		}
-		if failed := logger.GetFailedLogMap(); len(failed) > 0 {
-			return fmt.Errorf("%d upload(s) failed", len(failed))
-		}
-		return nil
-	}
-
+	// For Batch uploads, we'll implement a simple loop calling the engine uploader.
+	// This replaces the complex syupload.BatchUpload.
 	var uploadErr error
 	for _, filePath := range filePaths {
+		// Note: ProcessFilename logic still useful for calculating destination object keys.
+		// We'll keep it in syupload/utils.go for now but updated to the new logger.
 		src, key, metadata, err := syupload.ProcessFilename(logger, absUploadPath, filePath, "", opts.IncludeSubDirName, opts.HasMetadata)
 		if err != nil {
 			logger.Failed(filePath, filepath.Base(filePath), common.FileMetadata{}, "", 0, false)
@@ -162,7 +143,7 @@ func uploadFromPath(ctx context.Context, bk syxfer.Uploader, logger syxfer.Trans
 			continue
 		}
 
-		if err := uploadOne(ctx, bk, src, key, opts.GUID, opts.Bucket, metadata, opts.ShowProgress, opts.ForceMultipart); err != nil {
+		if err := syupload.Upload(ctx, bk, src, key, opts.GUID, opts.Bucket, metadata, opts.ShowProgress, opts.ForceMultipart); err != nil {
 			logger.Error("Upload failed", "path", src, "error", err)
 			if uploadErr == nil {
 				uploadErr = err
@@ -170,15 +151,10 @@ func uploadFromPath(ctx context.Context, bk syxfer.Uploader, logger syxfer.Trans
 		}
 	}
 
-	if len(logger.GetSucceededLogMap()) == 0 {
-		if failed := logger.GetFailedLogMap(); len(failed) > 0 {
-			syupload.RetryFailedUploads(ctx, bk, logger, failed)
-		}
-	}
 	return uploadErr
 }
 
-func uploadFromManifest(ctx context.Context, bk syxfer.Uploader, logger syxfer.TransferLogger, uploadPath string, opts UploadOptions) error {
+func uploadFromManifest(ctx context.Context, bk transfer.Backend, logger transfer.TransferLogger, uploadPath string, opts UploadOptions) error {
 	absUploadPath, err := common.GetAbsolutePath(uploadPath)
 	if err != nil {
 		return fmt.Errorf("resolve upload path: %w", err)
@@ -204,7 +180,7 @@ func uploadFromManifest(ctx context.Context, bk syxfer.Uploader, logger syxfer.T
 			}
 			continue
 		}
-		if err := uploadOne(ctx, bk, src, key, obj.GUID, opts.Bucket, metadata, opts.ShowProgress, opts.ForceMultipart); err != nil {
+		if err := syupload.Upload(ctx, bk, src, key, obj.GUID, opts.Bucket, metadata, opts.ShowProgress, opts.ForceMultipart); err != nil {
 			logger.Error("Upload failed", "path", src, "guid", obj.GUID, "error", err)
 			if uploadErr == nil {
 				uploadErr = err
@@ -212,34 +188,10 @@ func uploadFromManifest(ctx context.Context, bk syxfer.Uploader, logger syxfer.T
 		}
 	}
 
-	if len(logger.GetSucceededLogMap()) == 0 {
-		if failed := logger.GetFailedLogMap(); len(failed) > 0 {
-			syupload.RetryFailedUploads(ctx, bk, logger, failed)
-		}
-	}
 	return uploadErr
 }
 
-func uploadOne(
-	ctx context.Context,
-	bk syxfer.Uploader,
-	sourcePath, objectKey, guid, bucket string,
-	metadata common.FileMetadata,
-	showProgress bool,
-	forceMultipart bool,
-) error {
-	if forceMultipart {
-		file, err := os.Open(sourcePath)
-		if err != nil {
-			return fmt.Errorf("cannot open file %s: %w", sourcePath, err)
-		}
-		defer file.Close()
-		return syupload.MultipartUpload(ctx, bk, sourcePath, objectKey, guid, bucket, metadata, file, showProgress)
-	}
-	return syupload.Upload(ctx, bk, sourcePath, objectKey, guid, bucket, metadata, showProgress)
-}
-
-func retryFailedUploadsFromFile(ctx context.Context, bk syxfer.Uploader, logger syxfer.TransferLogger, failedLogPath string) error {
+func retryFailedUploadsFromFile(ctx context.Context, bk transfer.Backend, logger transfer.TransferLogger, failedLogPath string) error {
 	data, err := os.ReadFile(failedLogPath)
 	if err != nil {
 		return fmt.Errorf("read failed log %s: %w", failedLogPath, err)
@@ -248,7 +200,14 @@ func retryFailedUploadsFromFile(ctx context.Context, bk syxfer.Uploader, logger 
 	if err := json.Unmarshal(data, &failedMap); err != nil {
 		return fmt.Errorf("parse failed log %s: %w", failedLogPath, err)
 	}
-	syupload.RetryFailedUploads(ctx, bk, logger, failedMap)
+
+	for _, ro := range failedMap {
+		if err := syupload.Upload(ctx, bk, ro.SourcePath, ro.ObjectKey, ro.GUID, ro.Bucket, ro.FileMetadata, true, ro.Multipart); err != nil {
+			logger.Error("Retry failed", "path", ro.SourcePath, "error", err)
+		} else {
+			logger.DeleteFromFailedLog(ro.SourcePath)
+		}
+	}
 	return nil
 }
 

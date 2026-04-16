@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/calypr/syfon/apigen/drs"
 	"github.com/calypr/syfon/internal/api/internaldrs/logic"
 	"github.com/calypr/syfon/internal/api/routeutil"
 	"github.com/calypr/syfon/internal/config"
@@ -32,43 +31,43 @@ func hasScopedBucketAccess(r *http.Request, scope core.BucketScope, methods ...s
 }
 
 func RegisterInternalDataRoutes(router fiber.Router, database core.DatabaseInterface, uM urlmanager.UrlManager) {
-	router.Get(routeutil.FiberPath(config.RouteInternalDownload), routeutil.Handler(drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	router.Get(routeutil.FiberPath(config.RouteInternalDownload), routeutil.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handleInternalDownload(w, r, database, uM)
-	}), "InternalDownload"), "file_id"))
-	router.Get(routeutil.FiberPath(config.RouteInternalDownloadPart), routeutil.Handler(drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	}), "file_id"))
+	router.Get(routeutil.FiberPath(config.RouteInternalDownloadPart), routeutil.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handleInternalDownloadPart(w, r, database, uM)
-	}), "InternalDownloadPart"), "file_id"))
-	router.Post(routeutil.FiberPath(config.RouteInternalUpload), routeutil.Handler(drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	}), "file_id"))
+	router.Post(routeutil.FiberPath(config.RouteInternalUpload), routeutil.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handleInternalUploadBlank(w, r, database, uM)
-	}), "InternalUploadBlank")))
-	router.Get(routeutil.FiberPath(config.RouteInternalUploadURL), routeutil.Handler(drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	})))
+	router.Get(routeutil.FiberPath(config.RouteInternalUploadURL), routeutil.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handleInternalUploadURL(w, r, database, uM)
-	}), "InternalUploadURL"), "file_id"))
-	router.Post(routeutil.FiberPath(config.RouteInternalUploadBulk), routeutil.Handler(drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	}), "file_id"))
+	router.Post(routeutil.FiberPath(config.RouteInternalUploadBulk), routeutil.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handleInternalUploadBulk(w, r, database, uM)
-	}), "InternalUploadBulk")))
-	router.Post(routeutil.FiberPath(config.RouteInternalMultipartInit), routeutil.Handler(drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	})))
+	router.Post(routeutil.FiberPath(config.RouteInternalMultipartInit), routeutil.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handleInternalMultipartInit(w, r, database, uM)
-	}), "InternalMultipartInit")))
-	router.Post(routeutil.FiberPath(config.RouteInternalMultipartUpload), routeutil.Handler(drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	})))
+	router.Post(routeutil.FiberPath(config.RouteInternalMultipartUpload), routeutil.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handleInternalMultipartUpload(w, r, database, uM)
-	}), "InternalMultipartUpload")))
-	router.Post(routeutil.FiberPath(config.RouteInternalMultipartComplete), routeutil.Handler(drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	})))
+	router.Post(routeutil.FiberPath(config.RouteInternalMultipartComplete), routeutil.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handleInternalMultipartComplete(w, r, database, uM)
-	}), "InternalMultipartComplete")))
+	})))
 
-	router.Get(routeutil.FiberPath(config.RouteInternalBuckets), routeutil.Handler(drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	router.Get(routeutil.FiberPath(config.RouteInternalBuckets), routeutil.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handleInternalBuckets(w, r, database)
-	}), "InternalBuckets")))
-	router.Put(routeutil.FiberPath(config.RouteInternalBuckets), routeutil.Handler(drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	})))
+	router.Put(routeutil.FiberPath(config.RouteInternalBuckets), routeutil.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handleInternalPutBucket(w, r, database)
-	}), "InternalBuckets")))
-	router.Delete(routeutil.FiberPath(config.RouteInternalBucketDetail), routeutil.Handler(drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	})))
+	router.Delete(routeutil.FiberPath(config.RouteInternalBucketDetail), routeutil.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handleInternalDeleteBucket(w, r, database)
-	}), "InternalBucketDetail"), "bucket"))
-	router.Post(routeutil.FiberPath(config.RouteInternalBucketScopes), routeutil.Handler(drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	}), "bucket"))
+	router.Post(routeutil.FiberPath(config.RouteInternalBucketScopes), routeutil.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handleInternalCreateBucketScope(w, r, database)
-	}), "InternalBucketScopes"), "bucket"))
+	}), "bucket"))
 }
 
 func resolveBucket(ctx *http.Request, database core.CredentialStore, requested string) (string, error) {

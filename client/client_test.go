@@ -7,6 +7,9 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/calypr/syfon/apigen/client/internalapi"
+	"github.com/calypr/syfon/client/syfonclient"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -22,7 +25,7 @@ func newTestClient(t *testing.T, fn roundTripFunc) *Client {
 	if err != nil {
 		t.Fatalf("failed to create client: %v", err)
 	}
-	return c
+	return c.(*Client)
 }
 
 func TestClientBasicAuthAndUserAgent(t *testing.T) {
@@ -65,26 +68,28 @@ func TestDataUploadBlank(t *testing.T) {
 		if r.Method != http.MethodPost || r.URL.Path != "/data/upload" {
 			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
 		}
-		var req UploadBlankRequest
+		var req internalapi.InternalUploadBlankRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			t.Fatalf("decode request: %v", err)
 		}
 		if req.Guid == nil || *req.Guid != "abc" {
 			t.Fatalf("unexpected guid: %v", req.Guid)
 		}
-		out := UploadBlankResponse{
+		out := internalapi.InternalUploadBlankOutput{
 			Guid:   ptr("abc"),
 			Url:    ptr("https://signed"),
 			Bucket: ptr("b1"),
 		}
 		data, _ := json.Marshal(out)
+		header := make(http.Header)
+		header.Set("Content-Type", "application/json")
 		return &http.Response{
-			StatusCode: http.StatusOK,
+			StatusCode: http.StatusCreated,
 			Body:       io.NopCloser(strings.NewReader(string(data))),
-			Header:     make(http.Header),
+			Header:     header,
 		}, nil
 	})
-	req := UploadBlankRequest{Guid: ptr("abc")}
+	req := internalapi.InternalUploadBlankRequest{Guid: ptr("abc")}
 	out, err := c.data.UploadBlank(context.Background(), req)
 	if err != nil {
 		t.Fatalf("UploadBlank failed: %v", err)
@@ -96,7 +101,7 @@ func TestDataUploadBlank(t *testing.T) {
 
 func TestIndexListByHash(t *testing.T) {
 	t.Parallel()
-	rec := InternalRecordRequest{
+	rec := internalapi.InternalRecord{
 		Did: "id-1",
 	}
 	c := newTestClient(t, func(r *http.Request) (*http.Response, error) {
@@ -106,14 +111,16 @@ func TestIndexListByHash(t *testing.T) {
 		if got := r.URL.Query().Get("hash"); got != "sha256:deadbeef" {
 			t.Fatalf("unexpected hash query: %q", got)
 		}
-		data, _ := json.Marshal(ListRecordsResponse{Records: &[]InternalRecordRequest{rec}})
+		data, _ := json.Marshal(internalapi.ListRecordsResponse{Records: &[]internalapi.InternalRecord{rec}})
+		header := make(http.Header)
+		header.Set("Content-Type", "application/json")
 		return &http.Response{
 			StatusCode: http.StatusOK,
 			Body:       io.NopCloser(strings.NewReader(string(data))),
-			Header:     make(http.Header),
+			Header:     header,
 		}, nil
 	})
-	out, err := c.index.List(context.Background(), ListRecordsOptions{Hash: "sha256:deadbeef"})
+	out, err := c.index.List(context.Background(), syfonclient.ListRecordsOptions{Hash: "sha256:deadbeef"})
 	if err != nil {
 		t.Fatalf("Index.List failed: %v", err)
 	}
@@ -128,18 +135,22 @@ func TestDataMultipartInitUsesCanonicalUploadId(t *testing.T) {
 		if r.Method != http.MethodPost || r.URL.Path != "/data/multipart/init" {
 			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
 		}
+		header := make(http.Header)
+		header.Set("Content-Type", "application/json")
 		return &http.Response{
-			StatusCode: http.StatusCreated,
+			StatusCode: http.StatusOK,
 			Body:       io.NopCloser(strings.NewReader(`{"guid":"g1","uploadId":"u1"}`)),
-			Header:     make(http.Header),
+			Header:     header,
 		}, nil
 	})
-	req := MultipartInitRequest{Guid: ptr("g1")}
-	out, err := c.data.MultipartInit(context.Background(), req)
+	// InitMultipartUpload returns (uploadID string, respGuid string, err error)
+	// Wait, I updated the service methods.
+	// c.data.InitMultipartUpload(ctx, guid, filename, bucket) -> (string, string, error)
+	uploadID, respGuid, err := c.data.InitMultipartUpload(context.Background(), "g1", "", "")
 	if err != nil {
 		t.Fatalf("MultipartInit failed: %v", err)
 	}
-	if out.Guid == nil || *out.Guid != "g1" || out.UploadId == nil || *out.UploadId != "u1" {
-		t.Fatalf("unexpected response: %+v", out)
+	if respGuid != "g1" || uploadID != "u1" {
+		t.Fatalf("unexpected response: guid=%s uploadID=%s", respGuid, uploadID)
 	}
 }

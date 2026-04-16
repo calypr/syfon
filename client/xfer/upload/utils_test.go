@@ -3,7 +3,7 @@ package upload
 import (
 	"testing"
 
-	"github.com/calypr/syfon/client/pkg/common"
+	"github.com/calypr/syfon/client/common"
 )
 
 func TestOptimalChunkSize(t *testing.T) {

@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	drsapi "github.com/calypr/syfon/apigen/client/drs"
 	syclient "github.com/calypr/syfon/client"
-	"github.com/calypr/syfon/client/drs"
 	"github.com/calypr/syfon/client/xfer/upload"
 	"github.com/spf13/cobra"
 )
@@ -65,29 +65,26 @@ var Cmd = &cobra.Command{
 			did = checksum
 		}
 
-		// Create a DRS client from the SDK
-		dc := drs.NewDrsClient(c.Requestor(), nil, c.Logger())
-
 		name := filepath.Base(srcPath)
 		issuers := []string{authz}
-		drsObj := &drs.DRSObject{
+		drsObj := &drsapi.DrsObject{
 			Id:   did,
 			Name: &name,
 			Size: info.Size(),
-			Checksums: []drs.Checksum{
+			Checksums: []drsapi.Checksum{
 				{
 					Type:     "sha256",
 					Checksum: checksum,
 				},
 			},
-			AccessMethods: &[]drs.AccessMethod{
+			AccessMethods: &[]drsapi.AccessMethod{
 				{
 					Type: "s3", // Default type
 					Authorizations: &struct {
-						BearerAuthIssuers   *[]string                                   `json:"bearer_auth_issuers,omitempty"`
-						DrsObjectId         *string                                     `json:"drs_object_id,omitempty"`
-						PassportAuthIssuers *[]string                                   `json:"passport_auth_issuers,omitempty"`
-						SupportedTypes      *[]syclient.AccessMethodAuthorizationsSupportedTypes `json:"supported_types,omitempty"`
+						BearerAuthIssuers   *[]string                                          `json:"bearer_auth_issuers,omitempty"`
+						DrsObjectId         *string                                            `json:"drs_object_id,omitempty"`
+						PassportAuthIssuers *[]string                                          `json:"passport_auth_issuers,omitempty"`
+						SupportedTypes      *[]drsapi.AccessMethodAuthorizationsSupportedTypes `json:"supported_types,omitempty"`
 					}{
 						BearerAuthIssuers: &issuers,
 					},
@@ -99,7 +96,7 @@ var Cmd = &cobra.Command{
 		fmt.Fprintf(cmd.OutOrStdout(), "Uploading %s (%s)...\n", srcPath, upload.FormatSize(info.Size()))
 		fmt.Fprintf(cmd.OutOrStdout(), "DID: %s\n", did)
 
-		_, err = upload.RegisterFile(ctx, c.Data(), dc, drsObj, srcPath, "")
+		_, err = upload.RegisterFile(ctx, c.Data(), c.DRS(), drsObj, srcPath, "")
 		if err != nil {
 			return fmt.Errorf("upload failed: %w", err)
 		}

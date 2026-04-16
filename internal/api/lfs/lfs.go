@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/calypr/syfon/apigen/lfsapi"
+	"github.com/calypr/syfon/apigen/server/lfsapi"
 	"github.com/calypr/syfon/internal/db/core"
 	"github.com/calypr/syfon/internal/urlmanager"
 	"github.com/gofiber/fiber/v3"

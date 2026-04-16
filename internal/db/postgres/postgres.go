@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/calypr/syfon/apigen/drs"
+	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/db/core"
 
 	// Postgres driver

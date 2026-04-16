@@ -2,37 +2,31 @@ package download
 
 import (
 	"context"
+	"strings"
 
-	"github.com/calypr/syfon/client/drs"
-	"github.com/calypr/syfon/client/xfer"
+	"github.com/calypr/syfon/client/transfer"
 )
 
 func GetFileInfo(
 	ctx context.Context,
-	dc drs.Client,
-	logger xfer.TransferLogger,
+	dc Resolver,
+	logger transfer.TransferLogger,
 	guid, protocol, downloadPath, filenameFormat string,
 	rename bool,
 	renamedFiles *[]RenamedOrSkippedFileInfo,
 ) (*IndexdResponse, error) {
-	drsObj, err := drs.ResolveObject(ctx, dc, guid)
+	drsObj, err := dc.Resolve(ctx, guid)
 	if err != nil {
 		logger.Warn("Failed to get file details", "guid", guid, "error", err)
 		// Fallback: use GUID as filename if failed?
-		// Original code: "All meta-data lookups failed... Using GUID as default"
 		*renamedFiles = append(*renamedFiles, RenamedOrSkippedFileInfo{GUID: guid, OldFilename: guid, NewFilename: guid})
 		return &IndexdResponse{Name: guid, Size: 0}, nil
 	}
 
-	name := ""
-	if drsObj.Name != nil {
-		name = *drsObj.Name
-	}
+	name := strings.TrimSpace(drsObj.Name)
 	if name == "" {
-		// If name is empty (some DRS servers might not return it?), use GUID
 		name = guid
 	}
-
 	finalName := applyFilenameFormat(name, guid, downloadPath, filenameFormat, rename, renamedFiles)
 	return &IndexdResponse{Name: finalName, Size: drsObj.Size}, nil
 }

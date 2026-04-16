@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/calypr/syfon/apigen/drs"
+	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/db/core"
 )
 
@@ -36,10 +36,10 @@ func convertType[T any](in any) (T, error) {
 }
 
 func makeError(msg string, status int) drs.Error {
-	return drsError(msg, status,)
+	return drsError(msg, status)
 }
 
-func errorBody(resp drs.ImplResponse, err error) drs.Error {
+func errorBody(resp ImplResponse, err error) drs.Error {
 	if e, ok := resp.Body.(drs.Error); ok {
 		return e
 	}
@@ -68,7 +68,7 @@ func errorBody(resp drs.ImplResponse, err error) drs.Error {
 	return drsError(msg, status)
 }
 
-func asCode(resp drs.ImplResponse, err error) int {
+func asCode(resp ImplResponse, err error) int {
 	if resp.Code != 0 {
 		return resp.Code
 	}

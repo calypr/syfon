@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/calypr/syfon/apigen/drs"
+	"github.com/calypr/syfon/apigen/server/drs"
 )
 
 func TestWithAndGetRequestID(t *testing.T) {

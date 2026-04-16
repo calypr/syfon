@@ -8,16 +8,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/calypr/syfon/apigen/drs"
+	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/db/core"
 	"github.com/calypr/syfon/internal/urlmanager"
 )
 
-func (s *ObjectsAPIService) PostUploadRequest(ctx context.Context, uploadRequest drs.UploadRequest) (drs.ImplResponse, error) {
+func (s *ObjectsAPIService) PostUploadRequest(ctx context.Context, uploadRequest drs.UploadRequest) (ImplResponse, error) {
 	targetResources := []string{"/data_file"}
 	if core.IsGen3Mode(ctx) && !core.HasMethodAccess(ctx, "file_upload", targetResources) && !core.HasMethodAccess(ctx, "create", targetResources) {
 		code := unauthorizedStatus(ctx)
-		return drs.ImplResponse{
+		return ImplResponse{
 			Code: code,
 			Body: drsError("forbidden: missing file_upload/create permission on /data_file", code),
 		}, nil
@@ -25,10 +25,10 @@ func (s *ObjectsAPIService) PostUploadRequest(ctx context.Context, uploadRequest
 
 	creds, err := s.db.ListS3Credentials(ctx)
 	if err != nil {
-		return drs.ImplResponse{Code: http.StatusInternalServerError, Body: drsError(err.Error(), http.StatusInternalServerError)}, err
+		return ImplResponse{Code: http.StatusInternalServerError, Body: drsError(err.Error(), http.StatusInternalServerError)}, err
 	}
 	if len(creds) == 0 {
-		return drs.ImplResponse{
+		return ImplResponse{
 			Code: http.StatusInternalServerError,
 			Body: drsError("no bucket credentials configured for upload", http.StatusInternalServerError),
 		}, nil
@@ -43,7 +43,7 @@ func (s *ObjectsAPIService) PostUploadRequest(ctx context.Context, uploadRequest
 		credByBucket[b] = cred
 	}
 	if len(credByBucket) == 0 {
-		return drs.ImplResponse{
+		return ImplResponse{
 			Code: http.StatusInternalServerError,
 			Body: drsError("no bucket credentials configured for upload", http.StatusInternalServerError),
 		}, nil
@@ -92,7 +92,7 @@ func (s *ObjectsAPIService) PostUploadRequest(ctx context.Context, uploadRequest
 		s3URL := fmt.Sprintf("s3://%s/%s", bucket, key)
 		signedURL, signErr := s.urlManager.SignUploadURL(ctx, "", s3URL, urlmanager.SignOptions{})
 		if signErr != nil {
-			return drs.ImplResponse{
+			return ImplResponse{
 				Code: http.StatusInternalServerError,
 				Body: drsError(signErr.Error(), http.StatusInternalServerError),
 			}, signErr
@@ -126,7 +126,7 @@ func (s *ObjectsAPIService) PostUploadRequest(ctx context.Context, uploadRequest
 		out.Responses = append(out.Responses, respObj)
 	}
 
-	return drs.ImplResponse{Code: http.StatusOK, Body: out}, nil
+	return ImplResponse{Code: http.StatusOK, Body: out}, nil
 }
 
 func uploadObjectKey(req drs.UploadRequestObject, index int) string {

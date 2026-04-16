@@ -2,39 +2,28 @@ package download
 
 import (
 	"context"
-	"errors"
-	"fmt"
-	"net/http"
-	"strings"
+	"io"
 
-	"github.com/calypr/syfon/client/pkg/common"
-	"github.com/calypr/syfon/client/xfer"
+	"github.com/calypr/syfon/client/transfer"
 )
 
-// GetDownloadResponse gets presigned URL and prepares HTTP response
-func GetDownloadResponse(ctx context.Context, bk xfer.Downloader, fdr *downloadRequest, protocolText string) error {
-	url, err := bk.ResolveDownloadURL(ctx, fdr.guid, protocolText)
-	if err != nil {
-		return fmt.Errorf("failed to resolve download URL for %s: %w", fdr.guid, err)
-	}
-	fdr.presignedURL = url
+// GetDownloadReader prepares a reader for the requested file, optionally with a range.
+func GetDownloadReader(ctx context.Context, bk transfer.Backend, fdr *downloadRequest) (io.ReadCloser, error) {
+	if fdr.rangeBytes > 0 || (fdr.rangeStart != nil || fdr.rangeEnd != nil) {
+		offset := int64(0)
+		if fdr.rangeStart != nil {
+			offset = *fdr.rangeStart
+		} else if fdr.rangeBytes > 0 {
+			offset = fdr.rangeBytes
+		}
 
-	return makeDownloadRequest(ctx, bk, fdr)
-}
+		length := int64(-1)
+		if fdr.rangeEnd != nil {
+			length = (*fdr.rangeEnd - offset) + 1
+		}
 
-func makeDownloadRequest(ctx context.Context, bk xfer.Downloader, fdr *downloadRequest) error {
-	resp, err := bk.Download(ctx, fdr.presignedURL, fdr.rangeStart, fdr.rangeEnd)
-
-	if err != nil {
-		return errors.New("Request failed: " + strings.ReplaceAll(err.Error(), fdr.presignedURL, "<SENSITIVE_URL>"))
-	}
-
-	// Check for non-success status codes
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
-		defer resp.Body.Close() // Ensure the body is closed
-		return common.ResponseBodyError(resp, "non-OK response")
+		return bk.GetRangeReader(ctx, fdr.guid, offset, length)
 	}
 
-	fdr.response = resp
-	return nil
+	return bk.GetReader(ctx, fdr.guid)
 }

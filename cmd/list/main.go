@@ -5,7 +5,9 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/calypr/syfon/apigen/client/internalapi"
 	syclient "github.com/calypr/syfon/client"
+	"github.com/calypr/syfon/client/syfonclient"
 	"github.com/spf13/cobra"
 )
 
@@ -29,7 +31,7 @@ var Cmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		resp, err := c.Index().List(cmd.Context(), syclient.ListRecordsOptions{
+		resp, err := c.Index().List(cmd.Context(), syfonclient.ListRecordsOptions{
 			Limit:        listLimit,
 			Page:         listPage,
 			Organization: strings.TrimSpace(listOrganization),
@@ -39,7 +41,7 @@ var Cmd = &cobra.Command{
 			return err
 		}
 
-		var records []syclient.InternalRecordRequest
+		var records []internalapi.InternalRecord
 		if resp.Records != nil {
 			records = *resp.Records
 		}

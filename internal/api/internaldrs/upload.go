@@ -13,8 +13,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/calypr/syfon/apigen/drs"
-	"github.com/calypr/syfon/apigen/internalapi"
+	"github.com/calypr/syfon/apigen/server/drs"
+	"github.com/calypr/syfon/apigen/server/internalapi"
 	"github.com/calypr/syfon/internal/api/internaldrs/logic"
 	"github.com/calypr/syfon/internal/api/routeutil"
 	"github.com/calypr/syfon/internal/db/core"
@@ -592,7 +592,7 @@ func handleInternalMultipartInit(w http.ResponseWriter, r *http.Request, databas
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	if err := json.NewEncoder(w).Encode(internalapi.InternalMultipartInitResponse{Guid: &guid, UploadId: &uploadID}); err != nil {
+	if err := json.NewEncoder(w).Encode(internalapi.InternalMultipartInitOutput{Guid: &guid, UploadId: &uploadID}); err != nil {
 		slog.Error("internal encode response failed", "request_id", core.GetRequestID(r.Context()), "method", r.Method, "path", r.URL.Path, "err", err)
 	}
 }
@@ -667,7 +667,7 @@ func handleInternalMultipartUpload(w http.ResponseWriter, r *http.Request, datab
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(internalapi.InternalMultipartUploadResponse{PresignedUrl: &signedURL}); err != nil {
+	if err := json.NewEncoder(w).Encode(internalapi.InternalMultipartUploadOutput{PresignedUrl: &signedURL}); err != nil {
 		slog.Error("internal encode response failed", "request_id", core.GetRequestID(r.Context()), "method", r.Method, "path", r.URL.Path, "err", err)
 	}
 }

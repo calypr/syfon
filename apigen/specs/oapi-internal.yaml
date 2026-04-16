@@ -1,12 +1,14 @@
 package: internalapi
 generate:
-  fiber-server: true
   models: true
+  fiber-server: true
   strict-server: true
 output-options:
-  skip-prune: true
+  skip-prune: false
   user-templates:
-    fiber-interface.tmpl: apigen/templates/fiber/fiber-interface.tmpl
-    fiber-middleware.tmpl: apigen/templates/fiber/fiber-middleware.tmpl
-    strict-fiber.tmpl: apigen/templates/strict/strict-fiber.tmpl
-    strict-fiber-interface.tmpl: apigen/templates/strict/strict-fiber-interface.tmpl
+    imports.tmpl: apigen/templates/imports.tmpl
+    fiber/fiber-handler.tmpl: apigen/templates/fiber/fiber-handler.tmpl
+    fiber/fiber-interface.tmpl: apigen/templates/fiber/fiber-interface.tmpl
+    fiber/fiber-middleware.tmpl: apigen/templates/fiber/fiber-middleware.tmpl
+    strict/strict-fiber.tmpl: apigen/templates/strict/strict-fiber.tmpl
+    strict/strict-fiber-interface.tmpl: apigen/templates/strict/strict-fiber-interface.tmpl

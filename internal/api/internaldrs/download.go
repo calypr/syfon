@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/calypr/syfon/apigen/internalapi"
+	"github.com/calypr/syfon/apigen/server/internalapi"
 	"github.com/calypr/syfon/internal/api/routeutil"
 	"github.com/calypr/syfon/internal/config"
 	"github.com/calypr/syfon/internal/db/core"

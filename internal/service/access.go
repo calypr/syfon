@@ -7,14 +7,14 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/calypr/syfon/apigen/drs"
+	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/db/core"
 	"github.com/calypr/syfon/internal/urlmanager"
 )
 
-func (s *ObjectsAPIService) GetAccessURL(ctx context.Context, objectID string, accessID string) (drs.ImplResponse, error) {
+func (s *ObjectsAPIService) GetAccessURL(ctx context.Context, objectID string, accessID string) (ImplResponse, error) {
 	if strings.TrimSpace(objectID) == "" || strings.TrimSpace(accessID) == "" {
-		return drs.ImplResponse{Code: http.StatusBadRequest, Body: drsError("object_id and access_id are required", http.StatusBadRequest)}, nil
+		return ImplResponse{Code: http.StatusBadRequest, Body: drsError("object_id and access_id are required", http.StatusBadRequest)}, nil
 	}
 	obj, err := s.db.GetObject(ctx, objectID)
 	if err != nil {
@@ -23,7 +23,7 @@ func (s *ObjectsAPIService) GetAccessURL(ctx context.Context, objectID string, a
 	}
 	if len(obj.Authorizations) > 0 && !core.HasMethodAccess(ctx, "read", obj.Authorizations) {
 		code := unauthorizedStatus(ctx)
-		return drs.ImplResponse{Code: code, Body: drsError("unauthorized", code)}, nil
+		return ImplResponse{Code: code, Body: drsError("unauthorized", code)}, nil
 	}
 
 	var selectedAccessMethod *drs.AccessMethod
@@ -37,22 +37,22 @@ func (s *ObjectsAPIService) GetAccessURL(ctx context.Context, objectID string, a
 	}
 
 	if selectedAccessMethod == nil {
-		return drs.ImplResponse{Code: http.StatusNotFound, Body: drsError("access_id not found", http.StatusNotFound)}, nil
+		return ImplResponse{Code: http.StatusNotFound, Body: drsError("access_id not found", http.StatusNotFound)}, nil
 	}
 
 	if selectedAccessMethod.AccessUrl == nil || selectedAccessMethod.AccessUrl.Url == "" {
-		return drs.ImplResponse{Code: http.StatusInternalServerError, Body: drsError("access method has no URL", http.StatusInternalServerError)}, nil
+		return ImplResponse{Code: http.StatusInternalServerError, Body: drsError("access method has no URL", http.StatusInternalServerError)}, nil
 	}
 
 	signedURL, err := s.urlManager.SignURL(ctx, accessID, selectedAccessMethod.AccessUrl.Url, urlmanager.SignOptions{})
 	if err != nil {
-		return drs.ImplResponse{Code: http.StatusInternalServerError, Body: drsError(err.Error(), http.StatusInternalServerError)}, err
+		return ImplResponse{Code: http.StatusInternalServerError, Body: drsError(err.Error(), http.StatusInternalServerError)}, err
 	}
 	if recErr := s.db.RecordFileDownload(ctx, objectID); recErr != nil {
 		slog.Debug("failed to record file download metric", "request_id", core.GetRequestID(ctx), "object_id", objectID, "err", recErr)
 	}
 
-	return drs.ImplResponse{
+	return ImplResponse{
 		Code: http.StatusOK,
 		Body: drs.AccessURL{
 			Url: signedURL,
@@ -60,19 +60,19 @@ func (s *ObjectsAPIService) GetAccessURL(ctx context.Context, objectID string, a
 	}, nil
 }
 
-func (s *ObjectsAPIService) PostAccessURL(ctx context.Context, objectID string, accessID string, req drs.PostAccessURLRequestObject) (drs.ImplResponse, error) {
+func (s *ObjectsAPIService) PostAccessURL(ctx context.Context, objectID string, accessID string, req drs.PostAccessURLRequestObject) (ImplResponse, error) {
 	return s.GetAccessURL(ctx, objectID, accessID)
 }
 
-func (s *ObjectsAPIService) GetBulkAccessURL(ctx context.Context, req drs.BulkObjectAccessId) (drs.ImplResponse, error) {
+func (s *ObjectsAPIService) GetBulkAccessURL(ctx context.Context, req drs.BulkObjectAccessId) (ImplResponse, error) {
 	if req.BulkObjectAccessIds == nil || len(*req.BulkObjectAccessIds) == 0 {
-		return drs.ImplResponse{Code: http.StatusBadRequest, Body: drsError("bulk_object_access_ids cannot be empty", http.StatusBadRequest)}, nil
+		return ImplResponse{Code: http.StatusBadRequest, Body: drsError("bulk_object_access_ids cannot be empty", http.StatusBadRequest)}, nil
 	}
 	if len(*req.BulkObjectAccessIds) > defaultMaxBulkRequestLength {
 		return tooLargeResponse(fmt.Sprintf("bulk access request contains %d object mappings but server maximum is %d", len(*req.BulkObjectAccessIds), defaultMaxBulkRequestLength)), nil
 	}
 
-	var results []drs.BulkAccessUrl
+	var results []drs.BulkAccessURL
 	unresolvedByCode := map[int32][]string{}
 	requested := 0
 	for _, mapping := range *req.BulkObjectAccessIds {
@@ -97,7 +97,7 @@ func (s *ObjectsAPIService) GetBulkAccessURL(ctx context.Context, req drs.BulkOb
 			}
 			drsObjectID := core.StringVal(mapping.BulkObjectId)
 			accessIDCopy := accessID
-			results = append(results, drs.BulkAccessUrl{
+			results = append(results, drs.BulkAccessURL{
 				DrsObjectId: &drsObjectID,
 				DrsAccessId: &accessIDCopy,
 				Url:         accessURL.Url,
@@ -108,7 +108,7 @@ func (s *ObjectsAPIService) GetBulkAccessURL(ctx context.Context, req drs.BulkOb
 	requestedCount := requested
 	resolvedCount := len(results)
 	unresolvedCount := 0
-	out := drs.GetBulkAccessUrl200Response{
+	out := drs.N200OkAccessesJSONResponse{
 		Summary: &drs.Summary{
 			Requested:  &requestedCount,
 			Resolved:   &resolvedCount,
@@ -130,5 +130,5 @@ func (s *ObjectsAPIService) GetBulkAccessURL(ctx context.Context, req drs.BulkOb
 		})
 	}
 	out.UnresolvedDrsObjects = &unresolved
-	return drs.ImplResponse{Code: http.StatusOK, Body: out}, nil
+	return ImplResponse{Code: http.StatusOK, Body: out}, nil
 }

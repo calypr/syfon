@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/calypr/syfon/apigen/metricsapi"
+	"github.com/calypr/syfon/apigen/server/metricsapi"
 	"github.com/calypr/syfon/internal/db/core"
 	"github.com/gofiber/fiber/v3"
 )

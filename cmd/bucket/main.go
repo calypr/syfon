@@ -5,7 +5,9 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/calypr/syfon/apigen/client/bucketapi"
 	syclient "github.com/calypr/syfon/client"
+	sybucket "github.com/calypr/syfon/client/bucket"
 	"github.com/spf13/cobra"
 )
 
@@ -45,7 +47,7 @@ var addCmd = &cobra.Command{
 			return fmt.Errorf("--organization and --project-id are required")
 		}
 
-		payload := syclient.PutBucketRequest{
+		payload := bucketapi.PutBucketRequest{
 			Bucket:       bucket,
 			Organization: organization,
 			ProjectId:    projectID,
@@ -71,6 +73,11 @@ var addCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("get server flag: %w", err)
 		}
+		// Validate bucket locally before pushing to server
+		if err := sybucket.ValidateBucket(cmd.Context(), payload); err != nil {
+			return fmt.Errorf("local bucket validation failed: %w", err)
+		}
+
 		c, err := syclient.New(serverURL)
 		if err != nil {
 			return err

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/calypr/syfon/apigen/drs"
+	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/db/core"
 	"github.com/calypr/syfon/internal/testutils"
 	"github.com/google/uuid"
@@ -37,15 +37,15 @@ func testAccessMethods(methods ...drs.AccessMethod) *[]drs.AccessMethod {
 }
 
 func testAccessMethodAuthz(issuers ...string) *struct {
-	BearerAuthIssuers   *[]string `json:"bearer_auth_issuers,omitempty"`
-	DrsObjectId         *string   `json:"drs_object_id,omitempty"`
-	PassportAuthIssuers *[]string `json:"passport_auth_issuers,omitempty"`
+	BearerAuthIssuers   *[]string                                       `json:"bearer_auth_issuers,omitempty"`
+	DrsObjectId         *string                                         `json:"drs_object_id,omitempty"`
+	PassportAuthIssuers *[]string                                       `json:"passport_auth_issuers,omitempty"`
 	SupportedTypes      *[]drs.AccessMethodAuthorizationsSupportedTypes `json:"supported_types,omitempty"`
 } {
 	return &struct {
-		BearerAuthIssuers   *[]string `json:"bearer_auth_issuers,omitempty"`
-		DrsObjectId         *string   `json:"drs_object_id,omitempty"`
-		PassportAuthIssuers *[]string `json:"passport_auth_issuers,omitempty"`
+		BearerAuthIssuers   *[]string                                       `json:"bearer_auth_issuers,omitempty"`
+		DrsObjectId         *string                                         `json:"drs_object_id,omitempty"`
+		PassportAuthIssuers *[]string                                       `json:"passport_auth_issuers,omitempty"`
 		SupportedTypes      *[]drs.AccessMethodAuthorizationsSupportedTypes `json:"supported_types,omitempty"`
 	}{BearerAuthIssuers: &issuers}
 }
@@ -55,7 +55,7 @@ func TestGetAccessURL(t *testing.T) {
 	mockDB := &testutils.MockDatabase{
 		Objects: map[string]*drs.DrsObject{
 			"test-obj-id": {
-				Id: "test-obj-id",
+				Id:            "test-obj-id",
 				AccessMethods: testAccessMethods(testAccessMethod("test-access-id", "s3://bucket/key")),
 			},
 		},
@@ -101,7 +101,7 @@ func TestPostAccessURL(t *testing.T) {
 	mockDB := &testutils.MockDatabase{
 		Objects: map[string]*drs.DrsObject{
 			"test-obj-id": {
-				Id: "test-obj-id",
+				Id:            "test-obj-id",
 				AccessMethods: testAccessMethods(testAccessMethod("test-access-id", "s3://bucket/key")),
 			},
 		},
@@ -189,10 +189,10 @@ func TestBulkUpdateAccessMethods(t *testing.T) {
 	req := drs.BulkAccessMethodUpdateRequest{
 		Updates: []struct {
 			AccessMethods []drs.AccessMethod `json:"access_methods"`
-			ObjectId      string            `json:"object_id"`
+			ObjectId      string             `json:"object_id"`
 		}{
 			{
-				ObjectId: "obj-1",
+				ObjectId:      "obj-1",
 				AccessMethods: []drs.AccessMethod{{Type: "s3", AccessUrl: testAccessURL("s3://b/k")}},
 			},
 		},
@@ -329,8 +329,8 @@ func TestRegisterObjects_ForbiddenWithoutCreatePermission(t *testing.T) {
 					{Type: "sha256", Checksum: "deadbeef"},
 				},
 				AccessMethods: testAccessMethods(drs.AccessMethod{
-					Type:      "s3",
-					AccessUrl: testAccessURL("s3://b/deadbeef"),
+					Type:           "s3",
+					AccessUrl:      testAccessURL("s3://b/deadbeef"),
 					Authorizations: testAccessMethodAuthz("/programs/p/projects/x"),
 				}),
 			},
@@ -362,8 +362,8 @@ func TestRegisterObjects_UsesAccessMethodAuthzScope(t *testing.T) {
 					{Type: "sha256", Checksum: "a1b2"},
 				},
 				AccessMethods: testAccessMethods(drs.AccessMethod{
-					Type:      "s3",
-					AccessUrl: testAccessURL("s3://b/a1b2"),
+					Type:           "s3",
+					AccessUrl:      testAccessURL("s3://b/a1b2"),
 					Authorizations: testAccessMethodAuthz("/programs/cbdsTest/projects/git_drs_e2e_test"),
 				}),
 			},
@@ -464,11 +464,11 @@ func TestGetBulkAccessURL_UnresolvedCodes(t *testing.T) {
 	mockDB := &testutils.MockDatabase{
 		Objects: map[string]*drs.DrsObject{
 			"ok": {
-				Id: "ok",
+				Id:            "ok",
 				AccessMethods: testAccessMethods(testAccessMethod("s3", "s3://bucket/ok")),
 			},
 			"denied": {
-				Id: "denied",
+				Id:            "denied",
 				AccessMethods: testAccessMethods(testAccessMethod("s3", "s3://bucket/denied")),
 			},
 		},
@@ -529,10 +529,10 @@ func TestBulkUpdateAccessMethods_ForbiddenInGen3NoAuthHeader(t *testing.T) {
 	resp, err := service.BulkUpdateAccessMethods(ctx, drs.BulkAccessMethodUpdateRequest{
 		Updates: []struct {
 			AccessMethods []drs.AccessMethod `json:"access_methods"`
-			ObjectId      string            `json:"object_id"`
+			ObjectId      string             `json:"object_id"`
 		}{
 			{
-				ObjectId: "obj-1",
+				ObjectId:      "obj-1",
 				AccessMethods: []drs.AccessMethod{{Type: "s3", AccessUrl: testAccessURL("s3://b/k")}},
 			},
 		},
@@ -641,8 +641,8 @@ func TestService_HelperAndLookupMethods(t *testing.T) {
 					{Type: "sha256", Checksum: "sha-1"},
 				},
 				AccessMethods: testAccessMethods(drs.AccessMethod{
-					Type:      "s3",
-					AccessUrl: testAccessURL("s3://bucket/sha-1"),
+					Type:           "s3",
+					AccessUrl:      testAccessURL("s3://bucket/sha-1"),
 					Authorizations: testAccessMethodAuthz("/programs/a/projects/b"),
 				}),
 			},
@@ -753,7 +753,7 @@ func TestErrorResponseForDBError(t *testing.T) {
 
 func TestAuthorizationsForObjectFallback(t *testing.T) {
 	obj := &drs.DrsObject{
-		Id:            "obj",
+		Id: "obj",
 		AccessMethods: testAccessMethods(drs.AccessMethod{
 			Authorizations: testAccessMethodAuthz("/programs/a/projects/b", "/programs/a/projects/b"),
 		}),
@@ -1078,12 +1078,12 @@ func TestBulkUpdateAccessMethods_TooLarge(t *testing.T) {
 	service := NewObjectsAPIService(&testutils.MockDatabase{}, &testutils.MockUrlManager{})
 	updates := make([]struct {
 		AccessMethods []drs.AccessMethod `json:"access_methods"`
-		ObjectId      string            `json:"object_id"`
+		ObjectId      string             `json:"object_id"`
 	}, defaultMaxBulkAccessMethodUpdateLength+1)
 	for i := range updates {
 		updates[i] = struct {
 			AccessMethods []drs.AccessMethod `json:"access_methods"`
-			ObjectId      string            `json:"object_id"`
+			ObjectId      string             `json:"object_id"`
 		}{ObjectId: "obj"}
 	}
 	resp, err := service.BulkUpdateAccessMethods(context.Background(), drs.BulkAccessMethodUpdateRequest{Updates: updates})

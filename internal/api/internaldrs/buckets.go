@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/calypr/syfon/apigen/bucketapi"
+	"github.com/calypr/syfon/apigen/server/bucketapi"
 	"github.com/calypr/syfon/internal/api/routeutil"
 	"github.com/calypr/syfon/internal/config"
 	"github.com/calypr/syfon/internal/db/core"

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/calypr/syfon/apigen/lfsapi"
+	"github.com/calypr/syfon/apigen/server/lfsapi"
 	"github.com/calypr/syfon/internal/db/core"
 	"github.com/calypr/syfon/internal/urlmanager"
 )
