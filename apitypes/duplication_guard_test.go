@@ -1,4 +1,4 @@
-package types
+package apitypes
 
 import (
 	"os"
@@ -19,7 +19,7 @@ func TestNoDuplicateCoreAPITypesOutsideApigenAndAPITypes(t *testing.T) {
 		}
 		if d.IsDir() {
 			name := d.Name()
-			if name == ".git" || name == ".gocache" || name == ".tmp" || name == "ga4gh" || name == "node_modules" {
+			if name == ".git" || name == ".gocache" || name == ".gomodcache" || name == ".tmp" || name == "ga4gh" || name == "git-drs" || name == "node_modules" {
 				return filepath.SkipDir
 			}
 			return nil

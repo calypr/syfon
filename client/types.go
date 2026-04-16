@@ -1,43 +1,43 @@
 package client
 
 import (
-	"github.com/calypr/syfon/api/types"
+	"github.com/calypr/syfon/apitypes"
 )
 
-// Canonical API model aliases now sourced from the unified api/types package.
-type Checksum = types.Checksum
-type AccessMethod = types.AccessMethod
-type AccessMethodAuthorizationsSupportedTypes = types.AccessMethodAuthorizationsSupportedTypes
-type AccessMethodAccessURL = types.AccessMethodAccessURL
-type ContentsObject = types.ContentsObject
-type DRSObject = types.DRSObject
-type DRSPage = types.DRSPage
-type DRSObjectCandidate = types.DRSObjectCandidate
-type RegisterObjectsRequest = types.RegisterObjectsRequest
-type RegisterObjectsResponse = types.RegisterObjectsResponse
-type InternalRecordRequest = types.InternalRecordRequest
-type InternalRecordResponse = types.InternalRecordResponse
-type ListRecordsResponse = types.ListRecordsResponse
-type BulkCreateRequest = types.BulkCreateRequest
-type BulkHashesRequest = types.BulkHashesRequest
-type BulkSHA256ValidityRequest = types.BulkSHA256ValidityRequest
-type DeleteByQueryResponse = types.DeleteByQueryResponse
-type MultipartPart = types.MultipartPart
-type PutBucketRequest = types.PutBucketRequest
-type BucketScopeRequest = types.BucketScopeRequest
-type BucketsResponse = types.BucketsResponse
-type UploadBulkRequest = types.UploadBulkRequest
-type UploadBulkItem = types.UploadBulkItem
-type UploadBulkResponse = types.UploadBulkResponse
-type UploadBulkResult = types.UploadBulkResult
-type SignedURL = types.SignedURL
-type UploadBlankRequest = types.UploadBlankRequest
-type UploadBlankResponse = types.UploadBlankResponse
-type MultipartInitRequest = types.MultipartInitRequest
-type MultipartInitResponse = types.MultipartInitResponse
-type MultipartUploadRequest = types.MultipartUploadRequest
-type MultipartUploadResponse = types.MultipartUploadResponse
-type MultipartCompleteRequest = types.MultipartCompleteRequest
+// Canonical API model aliases now sourced from the unified apitypes package.
+type Checksum = apitypes.Checksum
+type AccessMethod = apitypes.AccessMethod
+type AccessMethodAuthorizationsSupportedTypes = apitypes.AccessMethodAuthorizationsSupportedTypes
+type AccessMethodAccessURL = apitypes.AccessMethodAccessURL
+type ContentsObject = apitypes.ContentsObject
+type DRSObject = apitypes.DRSObject
+type DRSPage = apitypes.DRSPage
+type DRSObjectCandidate = apitypes.DRSObjectCandidate
+type RegisterObjectsRequest = apitypes.RegisterObjectsRequest
+type RegisterObjectsResponse = apitypes.RegisterObjectsResponse
+type InternalRecordRequest = apitypes.InternalRecordRequest
+type InternalRecordResponse = apitypes.InternalRecordResponse
+type ListRecordsResponse = apitypes.ListRecordsResponse
+type BulkCreateRequest = apitypes.BulkCreateRequest
+type BulkHashesRequest = apitypes.BulkHashesRequest
+type BulkSHA256ValidityRequest = apitypes.BulkSHA256ValidityRequest
+type DeleteByQueryResponse = apitypes.DeleteByQueryResponse
+type MultipartPart = apitypes.MultipartPart
+type PutBucketRequest = apitypes.PutBucketRequest
+type BucketScopeRequest = apitypes.BucketScopeRequest
+type BucketsResponse = apitypes.BucketsResponse
+type UploadBulkRequest = apitypes.UploadBulkRequest
+type UploadBulkItem = apitypes.UploadBulkItem
+type UploadBulkResponse = apitypes.UploadBulkResponse
+type UploadBulkResult = apitypes.UploadBulkResult
+type SignedURL = apitypes.SignedURL
+type UploadBlankRequest = apitypes.UploadBlankRequest
+type UploadBlankResponse = apitypes.UploadBlankResponse
+type MultipartInitRequest = apitypes.MultipartInitRequest
+type MultipartInitResponse = apitypes.MultipartInitResponse
+type MultipartUploadRequest = apitypes.MultipartUploadRequest
+type MultipartUploadResponse = apitypes.MultipartUploadResponse
+type MultipartCompleteRequest = apitypes.MultipartCompleteRequest
 
 type DeleteByQueryOptions struct {
 	Authz        string

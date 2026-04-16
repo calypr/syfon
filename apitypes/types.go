@@ -1,4 +1,4 @@
-package types
+package apitypes
 
 import (
 	bucketapi "github.com/calypr/syfon/apigen/bucketapi"

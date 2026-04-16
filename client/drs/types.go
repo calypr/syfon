@@ -1,38 +1,38 @@
 package drs
 
 import (
-	"github.com/calypr/syfon/api/types"
+	"github.com/calypr/syfon/apitypes"
 	"github.com/calypr/syfon/client/pkg/hash"
 )
 
 type ChecksumType = string
-type Checksum = types.Checksum
+type Checksum = apitypes.Checksum
 type HashInfo = hash.HashInfo
 
-type AccessURL = types.AccessMethodAccessURL
-type Authorizations = types.AccessMethodAuthorizations
-type AccessMethod = types.AccessMethod
+type AccessURL = apitypes.AccessMethodAccessURL
+type Authorizations = apitypes.AccessMethodAuthorizations
+type AccessMethod = apitypes.AccessMethod
 
-type Contents = types.ContentsObject
+type Contents = apitypes.ContentsObject
 
-type DRSPage = types.DRSPage
+type DRSPage = apitypes.DRSPage
 
 type DRSObjectResult struct {
 	Object *DRSObject
 	Error  error
 }
 
-type DRSObject = types.DRSObject
+type DRSObject = apitypes.DRSObject
 
-type DRSObjectCandidate = types.DRSObjectCandidate
-type RegisterObjectsRequest = types.RegisterObjectsRequest
+type DRSObjectCandidate = apitypes.DRSObjectCandidate
+type RegisterObjectsRequest = apitypes.RegisterObjectsRequest
 
-type InternalRecordRequest = types.InternalRecordRequest
-type InternalRecordResponse = types.InternalRecordResponse
-type ListRecordsResponse = types.ListRecordsResponse
-type BulkHashesRequest = types.BulkHashesRequest
-type BulkCreateRequest = types.BulkCreateRequest
-type MultipartPart = types.MultipartPart
+type InternalRecordRequest = apitypes.InternalRecordRequest
+type InternalRecordResponse = apitypes.InternalRecordResponse
+type ListRecordsResponse = apitypes.ListRecordsResponse
+type BulkHashesRequest = apitypes.BulkHashesRequest
+type BulkCreateRequest = apitypes.BulkCreateRequest
+type MultipartPart = apitypes.MultipartPart
 
 // SyncCandidate represents a local file record to be synchronized with DRS.
 // It is the generic version of the git-drs LfsFileInfo.
