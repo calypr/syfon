@@ -22,7 +22,7 @@ curl -sSL https://calypr.org/syfon/install.sh | bash
 
 ## 2. Start Syfon Server
 
-<details><summary><code>config.local.yaml</code></summary>
+<details><summary><code>local.yaml</code></summary>
 
 ```yaml
 port: 8080
@@ -42,7 +42,7 @@ s3_credentials:
 </details>
 
 ```bash
-syfon serve --config config.local.yaml
+syfon serve --config local.yaml
 ```
 
 Smoke test:
@@ -72,7 +72,7 @@ DRS_AUTH_MODE=gen3 \
 DRS_AUTH_MOCK_ENABLED=true \
 DRS_AUTH_MOCK_RESOURCES="/data_file,/programs/cbds/projects/end_to_end_test" \
 DRS_AUTH_MOCK_METHODS="read,file_upload,create,update,delete" \
-go run . serve --config config.local.yaml
+go run . serve --config local.yaml
 ```
 
 Optional:
@@ -135,7 +135,7 @@ This repository intentionally does not ship a separate Postgres init SQL script.
 ```bash
 go test ./... -count=1
 ./db/scripts/init_sqlite_db.sh drs_local.db
-go run . serve --config config.local.yaml
+go run . serve --config local.yaml
 ```
 
 ## Minio Starter Kit
@@ -261,7 +261,7 @@ The runtime wiring then lives in `cmd/server` and `internal/api/*`, where the ge
 You can run integration tests using your own config file:
 
 ```bash
-go test ./cmd/server -v -count=1 -testConfig=config.yaml
+go test ./cmd/server -v -count=1 -testConfig=example.yaml
 ```
 
 Docker-backed MinIO upload and download coverage is available behind an opt-in flag:
@@ -269,6 +269,21 @@ Docker-backed MinIO upload and download coverage is available behind an opt-in f
 ```bash
 SYFON_E2E_DOCKER=1 go test ./cmd -run TestSyfonDockerMinIOE2E -v -count=1
 ```
+
+Docker-backed cloud emulator E2E suites are also available behind the same opt-in flag:
+
+```bash
+SYFON_E2E_DOCKER=1 go test ./cmd -run '^TestSyfonDockerFakeGCSE2E$' -v -count=1
+SYFON_E2E_DOCKER=1 go test ./cmd -run '^TestSyfonDockerAzuriteE2E$' -v -count=1
+```
+
+To run all Docker-backed CLI E2E suites together (MinIO + fake-gcs-server + Azurite):
+
+```bash
+SYFON_E2E_DOCKER=1 go test ./cmd -run '^TestSyfonDocker(MinIOE2E|MultipartUpload|FakeGCSE2E|AzuriteE2E)$' -v -count=1
+```
+
+These suites are executed in CI with Docker; locally they will skip unless `SYFON_E2E_DOCKER=1` is set.
 
 # License
 

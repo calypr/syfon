@@ -35,6 +35,11 @@ func DoUpload(ctx context.Context, req request.Requester, urlStr string, body io
 		return "", err
 	}
 
+	method := http.MethodPut
+	if parsed != nil && useGCSJSONMediaUpload(parsed) {
+		method = http.MethodPost
+	}
+
 	skipAuth := common.IsCloudPresignedURL(urlStr)
 	opts := []request.RequestOption{
 		request.WithTimeout(common.DataTimeout),
@@ -42,12 +47,16 @@ func DoUpload(ctx context.Context, req request.Requester, urlStr string, body io
 	if skipAuth {
 		opts = append(opts, request.WithSkipAuth(true))
 	}
+	if method == http.MethodPut && parsed != nil && needsAzureBlobTypeHeader(parsed) {
+		// Azure Put Blob requires this header for SAS-based uploads.
+		opts = append(opts, request.WithHeader("x-ms-blob-type", "BlockBlob"))
+	}
 	if size > 0 {
 		opts = append(opts, request.WithPartSize(size))
 	}
 
 	var resp *http.Response
-	err = req.Do(ctx, http.MethodPut, urlStr, body, &resp, opts...)
+	err = req.Do(ctx, method, urlStr, body, &resp, opts...)
 	if err != nil {
 		return "", fmt.Errorf("upload to %s failed: %w", urlStr, err)
 	}
@@ -80,4 +89,35 @@ func GenericDownload(ctx context.Context, req request.Requester, signedURL strin
 	var resp *http.Response
 	err := req.Do(ctx, http.MethodGet, signedURL, nil, &resp, opts...)
 	return resp, err
+}
+
+func needsAzureBlobTypeHeader(parsed *url.URL) bool {
+	if parsed == nil {
+		return false
+	}
+	scheme := strings.ToLower(strings.TrimSpace(parsed.Scheme))
+	if scheme != "http" && scheme != "https" {
+		return false
+	}
+	q := parsed.Query()
+	if strings.TrimSpace(q.Get("comp")) != "" {
+		return false
+	}
+	if !strings.EqualFold(strings.TrimSpace(q.Get("sr")), "b") {
+		return false
+	}
+	return strings.TrimSpace(q.Get("sig")) != "" && strings.TrimSpace(q.Get("sv")) != ""
+}
+
+func useGCSJSONMediaUpload(parsed *url.URL) bool {
+	if parsed == nil {
+		return false
+	}
+	if strings.TrimSpace(parsed.Query().Get("uploadType")) != "media" {
+		return false
+	}
+	if strings.TrimSpace(parsed.Query().Get("name")) == "" {
+		return false
+	}
+	return strings.Contains(parsed.EscapedPath(), "/upload/storage/v1/b/")
 }

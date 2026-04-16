@@ -6,15 +6,38 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/calypr/syfon/apigen/internalapi"
+	"github.com/calypr/syfon/internal/api/routeutil"
 	"github.com/calypr/syfon/internal/config"
 	"github.com/calypr/syfon/internal/db/core"
-	"github.com/calypr/syfon/internal/api/routeutil"
 	"github.com/calypr/syfon/internal/provider"
 	"github.com/calypr/syfon/internal/urlmanager"
 )
+
+func isSafeRedirectTarget(raw string) bool {
+	target := strings.TrimSpace(raw)
+	if target == "" {
+		return false
+	}
+
+	u, err := url.Parse(target)
+	if err != nil {
+		return false
+	}
+
+	// Absolute URLs are allowed only for http/https.
+	if u.IsAbs() {
+		s := strings.ToLower(u.Scheme)
+		return s == "http" || s == "https"
+	}
+
+	// Relative redirect must be absolute-path on same host, but reject // and /\.
+	return strings.HasPrefix(target, "/") &&
+		!(len(target) > 1 && (target[1] == '/' || target[1] == '\\'))
+}
 
 func handleInternalDownload(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface, uM urlmanager.UrlManager) {
 	fileID := routeutil.PathParam(r, "file_id")
@@ -78,6 +101,10 @@ func handleInternalDownload(w http.ResponseWriter, r *http.Request, database cor
 	}
 
 	if r.URL.Query().Get("redirect") == "true" {
+		if !isSafeRedirectTarget(signedURL) {
+			writeHTTPError(w, r, http.StatusBadRequest, "Unsafe redirect URL", nil)
+			return
+		}
 		http.Redirect(w, r, signedURL, http.StatusFound)
 		return
 	}
