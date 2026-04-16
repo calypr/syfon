@@ -161,7 +161,7 @@ func (s *AzureSigner) azureSignedURL(serviceURL string, bucketName string, key s
 	}
 
 	qp, err := sas.BlobSignatureValues{
-		Protocol:      sas.ProtocolHTTPS,
+		Protocol:      azureSASProtocol(serviceURL),
 		StartTime:     now.Add(-5 * time.Minute),
 		ExpiryTime:    now.Add(expiry),
 		Permissions:   perm,
@@ -229,4 +229,12 @@ func (s *AzureSigner) azureAccountFromEndpoint(endpoint string) string {
 		return ""
 	}
 	return parts[0]
+}
+
+func azureSASProtocol(serviceURL string) sas.Protocol {
+	u, err := url.Parse(strings.TrimSpace(serviceURL))
+	if err == nil && strings.EqualFold(strings.TrimSpace(u.Scheme), "http") {
+		return sas.ProtocolHTTPSandHTTP
+	}
+	return sas.ProtocolHTTPS
 }

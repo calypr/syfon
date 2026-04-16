@@ -1,4 +1,4 @@
-package urlmanager
+package gcs
 
 import (
 	"net/http"
@@ -7,22 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/sas"
-	"github.com/calypr/syfon/internal/config"
 	"github.com/calypr/syfon/internal/db/core"
 )
-
-func TestAzureSASProtocol(t *testing.T) {
-	if got := azureSASProtocol("http://localhost:10000/devstoreaccount1"); got != sas.ProtocolHTTPSandHTTP {
-		t.Fatalf("expected HTTP endpoint to allow HTTP+HTTPS, got %v", got)
-	}
-	if got := azureSASProtocol("https://acct.blob.core.windows.net"); got != sas.ProtocolHTTPS {
-		t.Fatalf("expected HTTPS endpoint to require HTTPS, got %v", got)
-	}
-	if got := azureSASProtocol("://bad-url"); got != sas.ProtocolHTTPS {
-		t.Fatalf("expected invalid endpoint fallback to HTTPS, got %v", got)
-	}
-}
 
 func TestGCSEndpointObjectURL(t *testing.T) {
 	cred := &core.S3Credential{Endpoint: "http://localhost:4443"}
@@ -69,7 +55,8 @@ func TestGCSEndpointObjectURL_RequiresEndpoint(t *testing.T) {
 
 func TestGCSSignedURL_UsesEndpointWithoutServiceAccountKey(t *testing.T) {
 	cred := &core.S3Credential{Endpoint: "http://localhost:4443"}
-	signed, err := gcsSignedURL("test-bucket", "nested/file.txt", http.MethodGet, 5*time.Minute, "", cred, config.SigningConfig{DefaultExpirySeconds: 900})
+	s := &GCSSigner{}
+	signed, err := s.gcsSignedURL("test-bucket", "nested/file.txt", http.MethodGet, 5*time.Minute, "", cred)
 	if err != nil {
 		t.Fatalf("gcsSignedURL returned error: %v", err)
 	}
@@ -78,24 +65,5 @@ func TestGCSSignedURL_UsesEndpointWithoutServiceAccountKey(t *testing.T) {
 	}
 	if !strings.Contains(signed, "alt=media") {
 		t.Fatalf("expected media download query in signed endpoint url: %s", signed)
-	}
-}
-
-func TestAzureServiceURLAndAccountHelpers(t *testing.T) {
-	if got := azureServiceURL("acct", ""); got != "https://acct.blob.core.windows.net" {
-		t.Fatalf("unexpected default azure service url: %s", got)
-	}
-	if got := azureServiceURL("", "localhost:10000/devstoreaccount1"); got != "https://localhost:10000/devstoreaccount1" {
-		t.Fatalf("unexpected endpoint-normalized azure service url: %s", got)
-	}
-
-	if got := azureAccountFromEndpoint("http://localhost:10000/devstoreaccount1"); got != "localhost" {
-		t.Fatalf("unexpected parsed account from localhost endpoint: %s", got)
-	}
-	if got := azureAccountFromEndpoint("https://myacct.blob.core.windows.net"); got != "myacct" {
-		t.Fatalf("unexpected parsed account from azure endpoint: %s", got)
-	}
-	if got := azureAccountFromEndpoint("not a url"); got != "" {
-		t.Fatalf("expected empty account for invalid endpoint, got %q", got)
 	}
 }
