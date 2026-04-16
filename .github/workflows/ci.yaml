@@ -46,6 +46,8 @@ jobs:
             -v
 
       - name: Run coverage
+        env:
+          SYFON_E2E_MOCK_SERVERS: 1
         run: make coverage
 
       - name: Run client coverage
@@ -135,12 +137,56 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Run Docker-backed MinIO E2E tests
+      - name: Run Docker-backed CLI E2E tests (MinIO, fake-gcs-server, Azurite)
         env:
           SYFON_E2E_DOCKER: 1
         run: |
-          go test ./cmd -run TestSyfonDocker -v
-  
+          mkdir -p coverage
+          go test ./cmd \
+            -run '^TestSyfonDocker(MinIOE2E|MultipartUpload|FakeGCSE2E|AzuriteE2E)$' \
+            -v -count=1 -covermode=atomic -coverprofile=coverage/cmd-docker.out
+
+      - name: Run Docker-backed mock server tests
+        env:
+          SYFON_E2E_MOCK_SERVERS: 1
+        run: |
+          go test ./urlmanager -run TestMVPMockServers_FakeGCSAndAzurite -count=1 -v
+
+      - name: Upload Docker E2E cmd coverage to Codecov (OIDC)
+        id: codecov_docker_cmd_oidc
+        continue-on-error: true
+        uses: codecov/codecov-action@v5
+        env:
+          CODECOV_SLUG: calypr/syfon
+        with:
+          use_oidc: true
+          files: coverage/cmd-docker.out
+          flags: root
+          disable_search: true
+          verbose: true
+          fail_ci_if_error: true
+
+      - name: Upload Docker E2E cmd coverage to Codecov (token fallback)
+        if: steps.codecov_docker_cmd_oidc.outcome == 'failure'
+        continue-on-error: true
+        uses: codecov/codecov-action@v5
+        env:
+          CODECOV_SLUG: calypr/syfon
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage/cmd-docker.out
+          flags: root
+          disable_search: true
+          verbose: true
+          fail_ci_if_error: false
+
+      - name: Upload Docker E2E coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-docker-e2e-${{ github.run_id }}
+          path: coverage/cmd-docker.out
+          if-no-files-found: error
+
   build-and-push:
     name: Build syfon
     runs-on: ${{ matrix.arch == 'amd64' && 'ubuntu-latest' || 'ubuntu-24.04-arm' }}

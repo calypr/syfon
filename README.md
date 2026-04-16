@@ -249,6 +249,21 @@ Docker-backed MinIO upload and download coverage is available behind an opt-in f
 SYFON_E2E_DOCKER=1 go test ./cmd -run TestSyfonDockerMinIOE2E -v -count=1
 ```
 
+Docker-backed cloud emulator E2E suites are also available behind the same opt-in flag:
+
+```bash
+SYFON_E2E_DOCKER=1 go test ./cmd -run '^TestSyfonDockerFakeGCSE2E$' -v -count=1
+SYFON_E2E_DOCKER=1 go test ./cmd -run '^TestSyfonDockerAzuriteE2E$' -v -count=1
+```
+
+To run all Docker-backed CLI E2E suites together (MinIO + fake-gcs-server + Azurite):
+
+```bash
+SYFON_E2E_DOCKER=1 go test ./cmd -run '^TestSyfonDocker(MinIOE2E|MultipartUpload|FakeGCSE2E|AzuriteE2E)$' -v -count=1
+```
+
+These suites are executed in CI with Docker; locally they will skip unless `SYFON_E2E_DOCKER=1` is set.
+
 # License
 
 This project is licensed under the MIT License. See [LICENSE](LICENSE).

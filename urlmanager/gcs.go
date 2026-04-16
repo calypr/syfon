@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"path"
 	"strings"
 	"time"
@@ -102,6 +103,11 @@ type gcsServiceAccountKey struct {
 }
 
 func gcsSignedURL(bucket string, key string, method string, expiry time.Duration, rangeStr string, cred *core.S3Credential, signing config.SigningConfig) (string, error) {
+	if endpointURL, ok := gcsEndpointObjectURL(cred, bucket, key, method); ok {
+		// Local emulators like fake-gcs-server can consume plain HTTP object URLs.
+		return endpointURL, nil
+	}
+
 	googleAccessID := gcsGoogleAccessID(cred)
 	privateKey := gcsPrivateKey(cred)
 	if googleAccessID == "" || privateKey == "" {
@@ -118,6 +124,61 @@ func gcsSignedURL(bucket string, key string, method string, expiry time.Duration
 		opts.Headers = append(opts.Headers, "Range:"+rangeStr)
 	}
 	return storage.SignedURL(bucket, key, opts)
+}
+
+func gcsEndpointObjectURL(cred *core.S3Credential, bucket string, key string, method string) (string, bool) {
+	if cred == nil {
+		return "", false
+	}
+	endpoint := strings.TrimSpace(cred.Endpoint)
+	if endpoint == "" {
+		return "", false
+	}
+	if !strings.HasPrefix(endpoint, "http://") && !strings.HasPrefix(endpoint, "https://") {
+		endpoint = "http://" + endpoint
+	}
+	base, err := url.Parse(endpoint)
+	if err != nil || strings.TrimSpace(base.Host) == "" {
+		return "", false
+	}
+	bucketEscaped := url.PathEscape(strings.TrimSpace(bucket))
+	cleanKey := strings.Trim(strings.TrimSpace(key), "/")
+	keyEscaped := url.PathEscape(cleanKey)
+	prefix := strings.TrimRight(strings.TrimSpace(base.Path), "/")
+	base.RawQuery = ""
+	base.Fragment = ""
+
+	switch strings.ToUpper(strings.TrimSpace(method)) {
+	case http.MethodPut:
+		builtPath := strings.Join([]string{prefix, "upload", "storage", "v1", "b", bucketEscaped, "o"}, "/")
+		builtPath = strings.ReplaceAll(builtPath, "//", "/")
+		if !strings.HasPrefix(builtPath, "/") {
+			builtPath = "/" + builtPath
+		}
+		if len(builtPath) > 1 && (builtPath[1] == '/' || builtPath[1] == '\\') {
+			return "", false
+		}
+		base.Path = builtPath
+		q := base.Query()
+		q.Set("uploadType", "media")
+		q.Set("name", cleanKey)
+		base.RawQuery = q.Encode()
+		return base.String(), true
+	default:
+		builtPath := strings.Join([]string{prefix, "storage", "v1", "b", bucketEscaped, "o", keyEscaped}, "/")
+		builtPath = strings.ReplaceAll(builtPath, "//", "/")
+		if !strings.HasPrefix(builtPath, "/") {
+			builtPath = "/" + builtPath
+		}
+		if len(builtPath) > 1 && (builtPath[1] == '/' || builtPath[1] == '\\') {
+			return "", false
+		}
+		base.Path = builtPath
+		q := base.Query()
+		q.Set("alt", "media")
+		base.RawQuery = q.Encode()
+		return base.String(), true
+	}
 }
 
 func gcsSignedUploadPartURL(bucket string, partKey string, cred *core.S3Credential, signing config.SigningConfig) (string, error) {
