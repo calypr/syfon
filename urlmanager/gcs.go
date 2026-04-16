@@ -155,6 +155,9 @@ func gcsEndpointObjectURL(cred *core.S3Credential, bucket string, key string, me
 		if !strings.HasPrefix(builtPath, "/") {
 			builtPath = "/" + builtPath
 		}
+		if len(builtPath) > 1 && (builtPath[1] == '/' || builtPath[1] == '\\') {
+			return "", false
+		}
 		base.Path = builtPath
 		q := base.Query()
 		q.Set("uploadType", "media")
@@ -166,6 +169,9 @@ func gcsEndpointObjectURL(cred *core.S3Credential, bucket string, key string, me
 		builtPath = strings.ReplaceAll(builtPath, "//", "/")
 		if !strings.HasPrefix(builtPath, "/") {
 			builtPath = "/" + builtPath
+		}
+		if len(builtPath) > 1 && (builtPath[1] == '/' || builtPath[1] == '\\') {
+			return "", false
 		}
 		base.Path = builtPath
 		q := base.Query()
