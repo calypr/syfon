@@ -15,7 +15,7 @@ import (
 	"github.com/calypr/syfon/internal/urlmanager"
 )
 
-func prepareDownloadActions(ctx context.Context, database core.DatabaseInterface, uM urlmanager.UrlManager, oid string) (*lfsapi.BatchActions, *lfsapi.ObjectError) {
+func prepareDownloadActions(ctx context.Context, database core.LFSStore, uM urlmanager.UrlManager, oid string) (*lfsapi.BatchActions, *lfsapi.ObjectError) {
 	obj, err := resolveObjectForOID(ctx, database, oid)
 	if err != nil {
 		return nil, dbErrToBatchError(err, ctx)
@@ -51,7 +51,7 @@ func prepareDownloadActions(ctx context.Context, database core.DatabaseInterface
 	return &lfsapi.BatchActions{Download: &action}, nil
 }
 
-func prepareUploadActions(ctx context.Context, database core.DatabaseInterface, uM urlmanager.UrlManager, oid string, reqSize int64, baseURL string) (*lfsapi.BatchActions, int64, *lfsapi.ObjectError) {
+func prepareUploadActions(ctx context.Context, database core.LFSStore, uM urlmanager.UrlManager, oid string, reqSize int64, baseURL string) (*lfsapi.BatchActions, int64, *lfsapi.ObjectError) {
 	existing, err := resolveObjectForOID(ctx, database, oid)
 	if err == nil {
 		if len(existing.Authorizations) > 0 && !hasMethodAccess(ctx, "read", existing.Authorizations) {

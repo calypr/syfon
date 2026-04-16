@@ -1,4 +1,4 @@
-package coreapi
+package checksumapi
 
 import (
 	"encoding/json"
@@ -10,18 +10,18 @@ import (
 
 	"github.com/calypr/syfon/apigen/drs"
 	"github.com/calypr/syfon/apigen/internalapi"
+	"github.com/calypr/syfon/internal/api/routeutil"
 	"github.com/calypr/syfon/internal/config"
 	"github.com/calypr/syfon/internal/db/core"
-	"github.com/calypr/syfon/internal/api/routeutil"
 	"github.com/gofiber/fiber/v3"
 )
 
-func RegisterCoreRoutes(router fiber.Router, database core.DatabaseInterface) {
+func RegisterCoreRoutes(router fiber.Router, database core.SHA256ValidityStore) {
 	handler := drs.Logger(handleSHA256Validity(database), "CoreSHA256Validity")
 	router.Post(routeutil.FiberPath(config.RouteCoreSHA256), routeutil.Handler(handler))
 }
 
-func handleSHA256Validity(database core.DatabaseInterface) http.HandlerFunc {
+func handleSHA256Validity(database core.SHA256ValidityStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req internalapi.BulkSHA256ValidityRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

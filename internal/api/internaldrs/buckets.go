@@ -7,12 +7,12 @@ import (
 	"strings"
 
 	"github.com/calypr/syfon/apigen/bucketapi"
+	"github.com/calypr/syfon/internal/api/routeutil"
 	"github.com/calypr/syfon/internal/config"
 	"github.com/calypr/syfon/internal/db/core"
-	"github.com/calypr/syfon/internal/api/routeutil"
 )
 
-func handleInternalBuckets(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface) {
+func handleInternalBuckets(w http.ResponseWriter, r *http.Request, database core.CredentialStore) {
 	creds, err := database.ListS3Credentials(r.Context())
 	if err != nil {
 		writeHTTPError(w, r, http.StatusInternalServerError, err.Error(), err)
@@ -74,7 +74,7 @@ func handleInternalBuckets(w http.ResponseWriter, r *http.Request, database core
 	}
 }
 
-func handleInternalPutBucket(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface) {
+func handleInternalPutBucket(w http.ResponseWriter, r *http.Request, database core.CredentialStore) {
 	var req bucketapi.PutBucketRequest
 	if err := decodeStrictJSON(r.Body, &req); err != nil {
 		writeHTTPError(w, r, http.StatusBadRequest, "Invalid request body", nil)
@@ -206,7 +206,7 @@ func handleInternalPutBucket(w http.ResponseWriter, r *http.Request, database co
 	w.WriteHeader(http.StatusCreated)
 }
 
-func handleInternalDeleteBucket(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface) {
+func handleInternalDeleteBucket(w http.ResponseWriter, r *http.Request, database core.CredentialStore) {
 	bucket := routeutil.PathParam(r, "bucket")
 	if bucket == "" {
 		writeHTTPError(w, r, http.StatusBadRequest, "bucket name is required", nil)
@@ -249,7 +249,7 @@ func handleInternalDeleteBucket(w http.ResponseWriter, r *http.Request, database
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func handleInternalCreateBucketScope(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface) {
+func handleInternalCreateBucketScope(w http.ResponseWriter, r *http.Request, database core.CredentialStore) {
 	bucket := strings.TrimSpace(routeutil.PathParam(r, "bucket"))
 	if bucket == "" {
 		writeHTTPError(w, r, http.StatusBadRequest, "bucket name is required", nil)

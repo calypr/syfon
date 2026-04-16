@@ -15,8 +15,9 @@ import (
 
 	"github.com/calypr/syfon/apigen/drs"
 	"github.com/calypr/syfon/apigen/internalapi"
-	"github.com/calypr/syfon/internal/db/core"
+	"github.com/calypr/syfon/internal/api/internaldrs/logic"
 	"github.com/calypr/syfon/internal/api/routeutil"
+	"github.com/calypr/syfon/internal/db/core"
 	"github.com/calypr/syfon/internal/urlmanager"
 	"github.com/google/uuid"
 )
@@ -469,10 +470,7 @@ func signInternalUploadBulkItem(r *http.Request, database core.DatabaseInterface
 }
 
 func authStatusCodeForRequest(r *http.Request) int {
-	if core.IsGen3Mode(r.Context()) && !core.HasAuthHeader(r.Context()) {
-		return http.StatusUnauthorized
-	}
-	return http.StatusForbidden
+	return logic.AuthStatusCodeForRequest(r)
 }
 
 func handleInternalMultipartInit(w http.ResponseWriter, r *http.Request, database core.DatabaseInterface, uM urlmanager.UrlManager) {

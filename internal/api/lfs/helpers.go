@@ -123,7 +123,7 @@ func normalizeOID(raw string) string {
 	return oid
 }
 
-func resolveObjectForOID(ctx context.Context, database core.DatabaseInterface, oid string) (*core.InternalObject, error) {
+func resolveObjectForOID(ctx context.Context, database core.ObjectStore, oid string) (*core.InternalObject, error) {
 	byChecksum, err := database.GetObjectsByChecksum(ctx, oid)
 	if err != nil {
 		return nil, err
@@ -240,9 +240,9 @@ func candidateToInternalObject(c drs.DrsObjectCandidate, now time.Time) (core.In
 					Url     string    `json:"url"`
 				}{Url: url},
 				Authorizations: &struct {
-					BearerAuthIssuers   *[]string                                        `json:"bearer_auth_issuers,omitempty"`
-					DrsObjectId         *string                                          `json:"drs_object_id,omitempty"`
-					PassportAuthIssuers *[]string                                        `json:"passport_auth_issuers,omitempty"`
+					BearerAuthIssuers   *[]string                                       `json:"bearer_auth_issuers,omitempty"`
+					DrsObjectId         *string                                         `json:"drs_object_id,omitempty"`
+					PassportAuthIssuers *[]string                                       `json:"passport_auth_issuers,omitempty"`
 					SupportedTypes      *[]drs.AccessMethodAuthorizationsSupportedTypes `json:"supported_types,omitempty"`
 				}{
 					BearerAuthIssuers: &authz,
@@ -310,9 +310,9 @@ func lfsCandidateToDRS(in lfsapi.DrsObjectCandidate) drs.DrsObjectCandidate {
 			}
 			if am.Authorizations != nil {
 				drsMethod.Authorizations = &struct {
-					BearerAuthIssuers   *[]string                                        `json:"bearer_auth_issuers,omitempty"`
-					DrsObjectId         *string                                          `json:"drs_object_id,omitempty"`
-					PassportAuthIssuers *[]string                                        `json:"passport_auth_issuers,omitempty"`
+					BearerAuthIssuers   *[]string                                       `json:"bearer_auth_issuers,omitempty"`
+					DrsObjectId         *string                                         `json:"drs_object_id,omitempty"`
+					PassportAuthIssuers *[]string                                       `json:"passport_auth_issuers,omitempty"`
 					SupportedTypes      *[]drs.AccessMethodAuthorizationsSupportedTypes `json:"supported_types,omitempty"`
 				}{
 					BearerAuthIssuers: am.Authorizations.BearerAuthIssuers,

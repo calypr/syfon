@@ -23,14 +23,14 @@ type metricsQueryParams struct {
 }
 
 type MetricsServer struct {
-	database core.DatabaseInterface
+	database core.MetricsStore
 }
 
-func NewMetricsServer(database core.DatabaseInterface) *MetricsServer {
+func NewMetricsServer(database core.MetricsStore) *MetricsServer {
 	return &MetricsServer{database: database}
 }
 
-func RegisterMetricsRoutes(router fiber.Router, database core.DatabaseInterface) {
+func RegisterMetricsRoutes(router fiber.Router, database core.MetricsStore) {
 	router.Use(func(c fiber.Ctx) error {
 		params := metricsQueryParams{
 			authz:        strings.TrimSpace(c.Query("authz")),
@@ -268,7 +268,7 @@ func parseScopeQuery(ctx context.Context) (string, bool, error) {
 	return "", false, nil
 }
 
-func collectScopedUsage(ctx context.Context, database core.DatabaseInterface, scopePrefix string, inactiveSince *time.Time) ([]core.FileUsage, core.FileUsageSummary, error) {
+func collectScopedUsage(ctx context.Context, database core.MetricsStore, scopePrefix string, inactiveSince *time.Time) ([]core.FileUsage, core.FileUsageSummary, error) {
 	ids, err := database.ListObjectIDsByResourcePrefix(ctx, scopePrefix)
 	if err != nil {
 		return nil, core.FileUsageSummary{}, err
@@ -313,7 +313,7 @@ func collectScopedUsage(ctx context.Context, database core.DatabaseInterface, sc
 	return usages, summary, nil
 }
 
-func listScopedFileUsage(ctx context.Context, database core.DatabaseInterface, scopePrefix string, limit, offset int, inactiveSince *time.Time) ([]core.FileUsage, core.FileUsageSummary, error) {
+func listScopedFileUsage(ctx context.Context, database core.MetricsStore, scopePrefix string, limit, offset int, inactiveSince *time.Time) ([]core.FileUsage, core.FileUsageSummary, error) {
 	usages, summary, err := collectScopedUsage(ctx, database, scopePrefix, inactiveSince)
 	if err != nil {
 		return nil, core.FileUsageSummary{}, err
@@ -331,7 +331,7 @@ func listScopedFileUsage(ctx context.Context, database core.DatabaseInterface, s
 	return usages[offset:end], summary, nil
 }
 
-func objectInScope(ctx context.Context, database core.DatabaseInterface, objectID, scopePrefix string) (bool, error) {
+func objectInScope(ctx context.Context, database core.MetricsStore, objectID, scopePrefix string) (bool, error) {
 	obj, err := database.GetObject(ctx, objectID)
 	if err != nil {
 		if errors.Is(err, core.ErrNotFound) {

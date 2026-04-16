@@ -7,7 +7,7 @@ import (
 
 // ObjectsAPIService implements the Objects API service.
 type ObjectsAPIService struct {
-	db         core.DatabaseInterface
+	db         core.ObjectsAPIServiceDatabase
 	urlManager urlmanager.UrlManager
 }
 
@@ -21,6 +21,6 @@ const (
 )
 
 // NewObjectsAPIService creates a new ObjectsAPIService.
-func NewObjectsAPIService(db core.DatabaseInterface, urlManager urlmanager.UrlManager) *ObjectsAPIService {
+func NewObjectsAPIService(db core.ObjectsAPIServiceDatabase, urlManager urlmanager.UrlManager) *ObjectsAPIService {
 	return &ObjectsAPIService{db: db, urlManager: urlManager}
 }

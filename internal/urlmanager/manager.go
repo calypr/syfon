@@ -15,13 +15,13 @@ import (
 // Manager is the unified implementation of UrlManager.
 // It delegates to cloud-specific Signers resolved by provider metadata.
 type Manager struct {
-	database        core.DatabaseInterface
+	database        core.CredentialStore
 	signing         config.SigningConfig
 	defaultProvider string
 	signers         map[string]signer.Signer
 }
 
-func NewManager(database core.DatabaseInterface, signing config.SigningConfig) *Manager {
+func NewManager(database core.CredentialStore, signing config.SigningConfig) *Manager {
 	return &Manager{
 		database:        database,
 		signing:         signing,

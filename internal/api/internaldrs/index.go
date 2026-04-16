@@ -15,13 +15,15 @@ import (
 
 	"github.com/calypr/syfon/apigen/drs"
 	"github.com/calypr/syfon/apigen/internalapi"
-	"github.com/calypr/syfon/internal/db/core"
+	"github.com/calypr/syfon/internal/api/internaldrs/logic"
 	"github.com/calypr/syfon/internal/api/routeutil"
 	corelogic "github.com/calypr/syfon/internal/coreapi"
+	"github.com/calypr/syfon/internal/db/core"
 	"github.com/calypr/syfon/internal/provider"
 	"github.com/calypr/syfon/internal/urlmanager"
 	"github.com/gofiber/fiber/v3"
 )
+
 type InternalServer struct {
 	database core.DatabaseInterface
 	uM       urlmanager.UrlManager
@@ -157,32 +159,7 @@ func (s *InternalServer) InternalList(ctx context.Context, request internalapi.I
 }
 
 func parseScopeQueryFromParams(params internalapi.InternalListParams) (string, bool, error) {
-	authz := ""
-	if params.Authz != nil {
-		authz = strings.TrimSpace(*params.Authz)
-	}
-	if authz != "" {
-		return authz, true, nil
-	}
-	org := ""
-	if params.Organization != nil {
-		org = strings.TrimSpace(*params.Organization)
-	}
-	if org == "" && params.Program != nil {
-		org = strings.TrimSpace(*params.Program)
-	}
-	project := ""
-	if params.Project != nil {
-		project = strings.TrimSpace(*params.Project)
-	}
-	if project != "" && org == "" {
-		return "", false, fmt.Errorf("organization is required when project is set")
-	}
-	path := core.ResourcePathForScope(org, project)
-	if path != "" {
-		return path, true, nil
-	}
-	return "", false, nil
+	return logic.ParseScopeQueryFromParams(params)
 }
 
 func (s *InternalServer) InternalCreate(ctx context.Context, request internalapi.InternalCreateRequestObject) (internalapi.InternalCreateResponseObject, error) {
@@ -281,32 +258,7 @@ func (s *InternalServer) InternalDeleteByQuery(ctx context.Context, request inte
 }
 
 func parseScopeQueryFromDeleteParams(params internalapi.InternalDeleteByQueryParams) (string, bool, error) {
-	authz := ""
-	if params.Authz != nil {
-		authz = strings.TrimSpace(*params.Authz)
-	}
-	if authz != "" {
-		return authz, true, nil
-	}
-	org := ""
-	if params.Organization != nil {
-		org = strings.TrimSpace(*params.Organization)
-	}
-	if org == "" && params.Program != nil {
-		org = strings.TrimSpace(*params.Program)
-	}
-	project := ""
-	if params.Project != nil {
-		project = strings.TrimSpace(*params.Project)
-	}
-	if project != "" && org == "" {
-		return "", false, fmt.Errorf("organization is required when project is set")
-	}
-	path := core.ResourcePathForScope(org, project)
-	if path != "" {
-		return path, true, nil
-	}
-	return "", false, nil
+	return logic.ParseScopeQueryFromDeleteParams(params)
 }
 
 func (s *InternalServer) InternalGet(ctx context.Context, request internalapi.InternalGetRequestObject) (internalapi.InternalGetResponseObject, error) {
@@ -369,7 +321,7 @@ func (s *InternalServer) InternalUpdate(ctx context.Context, request internalapi
 				}
 			}
 			am := drs.AccessMethod{
-				Type:      drs.AccessMethodType(pType),
+				Type: drs.AccessMethodType(pType),
 				AccessUrl: &struct {
 					Headers *[]string `json:"headers,omitempty"`
 					Url     string    `json:"url"`
@@ -816,7 +768,7 @@ func handleInternalUpdate(w http.ResponseWriter, r *http.Request, database core.
 				}
 			}
 			am := drs.AccessMethod{
-				Type:      drs.AccessMethodType(pType),
+				Type: drs.AccessMethodType(pType),
 				AccessUrl: &struct {
 					Headers *[]string `json:"headers,omitempty"`
 					Url     string    `json:"url"`
@@ -1098,12 +1050,5 @@ func parseListPagination(r *http.Request) (int, int, error) {
 }
 
 func paginateRecords(records []internalapi.InternalRecord, offset, limit int) []internalapi.InternalRecord {
-	if offset >= len(records) {
-		return []internalapi.InternalRecord{}
-	}
-	end := offset + limit
-	if end > len(records) {
-		end = len(records)
-	}
-	return records[offset:end]
+	return logic.PaginateRecords(records, offset, limit)
 }

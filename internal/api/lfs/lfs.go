@@ -30,7 +30,7 @@ func DefaultOptions() Options {
 	}
 }
 
-func RegisterLFSRoutes(router fiber.Router, database core.DatabaseInterface, uM urlmanager.UrlManager, opts ...Options) {
+func RegisterLFSRoutes(router fiber.Router, database core.LFSStore, uM urlmanager.UrlManager, opts ...Options) {
 	effective := DefaultOptions()
 	if len(opts) > 0 {
 		effective = opts[0]

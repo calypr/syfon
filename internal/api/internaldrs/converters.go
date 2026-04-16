@@ -2,15 +2,14 @@ package internaldrs
 
 import (
 	"fmt"
-	"net/url"
 	"strings"
 	"time"
 
 	"github.com/calypr/syfon/apigen/drs"
 	"github.com/calypr/syfon/apigen/internalapi"
+	"github.com/calypr/syfon/internal/api/internaldrs/logic"
 	"github.com/calypr/syfon/internal/config"
 	"github.com/calypr/syfon/internal/db/core"
-	"github.com/calypr/syfon/internal/provider"
 )
 
 // --- Domain Mapping Tools ---
@@ -76,7 +75,7 @@ func internalToDrs(req *internalapi.InternalRecord) (*core.InternalObject, error
 		methods = make([]drs.AccessMethod, 0, len(*req.Urls))
 		for _, u := range *req.Urls {
 			methods = append(methods, drs.AccessMethod{
-				Type:      drs.AccessMethodType("s3"),
+				Type: drs.AccessMethodType("s3"),
 				AccessUrl: &struct {
 					Headers *[]string `json:"headers,omitempty"`
 					Url     string    `json:"url"`
@@ -202,58 +201,17 @@ func drsToInternal(obj *core.InternalObject) *internalapi.InternalRecordResponse
 // --- Path and URL Helpers ---
 
 func normalizeScopePath(rawPath, bucket string) (string, error) {
-	p := strings.TrimSpace(rawPath)
-	if p == "" {
-		return "", nil
-	}
-	if !strings.HasPrefix(strings.ToLower(p), config.S3Prefix) {
-		return "", fmt.Errorf("path must use %s<bucket>/<prefix> format", config.S3Prefix)
-	}
-	u, err := url.Parse(p)
-	if err != nil {
-		return "", fmt.Errorf("invalid s3 path: %w", err)
-	}
-	if !strings.EqualFold(u.Scheme, "s3") || strings.TrimSpace(u.Host) == "" {
-		return "", fmt.Errorf("invalid s3 path")
-	}
-	if !strings.EqualFold(strings.TrimSpace(u.Host), strings.TrimSpace(bucket)) {
-		return "", fmt.Errorf("s3 path bucket does not match bucket")
-	}
-	return strings.Trim(strings.TrimSpace(u.Path), "/"), nil
+	return logic.NormalizeScopePath(rawPath, bucket)
 }
 
 func objectURLForCredential(cred *core.S3Credential, key string) (string, error) {
-	if cred == nil {
-		return "", fmt.Errorf("credential is required")
-	}
-	cleanKey := strings.TrimPrefix(strings.TrimSpace(key), "/")
-	p := providerForCredential(cred)
-	switch p {
-	case provider.S3:
-		return fmt.Sprintf("%s%s/%s", config.S3Prefix, cred.Bucket, cleanKey), nil
-	case provider.GCS:
-		return fmt.Sprintf("%s%s/%s", config.GCSPrefix, cred.Bucket, cleanKey), nil
-	case provider.Azure:
-		return fmt.Sprintf("%s%s/%s", config.AzurePrefix, cred.Bucket, cleanKey), nil
-	case provider.File:
-		root := strings.TrimSpace(cred.Endpoint)
-		if root != "" {
-			root = strings.TrimSuffix(root, "/")
-			return fmt.Sprintf("%s/%s", root, cleanKey), nil
-		}
-		return fmt.Sprintf("%s%s/%s", config.FilePrefix, strings.TrimPrefix(cred.Bucket, "/"), cleanKey), nil
-	default:
-		return "", fmt.Errorf("unsupported provider: %s", p)
-	}
+	return logic.ObjectURLForCredential(cred, key)
 }
 
 // --- Internal Validation and Normalization Helpers ---
 
 func providerForCredential(cred *core.S3Credential) string {
-	if cred == nil {
-		return provider.S3
-	}
-	return provider.Normalize(cred.Provider, provider.S3)
+	return logic.ProviderForCredential(cred)
 }
 
 func normalizeHashQueryValue(raw string) string {
@@ -274,79 +232,25 @@ func normalizeHashQueryType(raw string) string {
 // parseHashQuery returns normalized hash type (when provided) and normalized value.
 // Type precedence: explicit query `hash_type` first, then `type:value` prefix in `hash`.
 func parseHashQuery(rawHash string, rawType string) (string, string) {
-	hashType := normalizeHashQueryType(rawType)
-	hashValue := normalizeHashQueryValue(rawHash)
-
-	cleanHash := strings.Trim(strings.TrimSpace(rawHash), `"'`)
-	if hashType == "" {
-		if parts := strings.SplitN(cleanHash, ":", 2); len(parts) == 2 {
-			hashType = normalizeHashQueryType(parts[0])
-		}
-	}
-	return hashType, hashValue
+	return logic.ParseHashQuery(rawHash, rawType)
 }
 
 func objectHasChecksumTypeAndValue(obj core.InternalObject, hashType string, hashValue string) bool {
-	targetType := normalizeHashQueryType(hashType)
-	targetValue := normalizeHashQueryValue(hashValue)
-	if targetType == "" || targetValue == "" {
-		return false
-	}
-	for _, cs := range obj.Checksums {
-		if normalizeHashQueryType(cs.Type) != targetType {
-			continue
-		}
-		if normalizeHashQueryValue(cs.Checksum) == targetValue {
-			return true
-		}
-	}
-	return false
+	return logic.ObjectHasChecksumTypeAndValue(obj, hashType, hashValue)
 }
 
 func looksLikeSHA256(v string) bool {
-	s := strings.TrimSpace(strings.ToLower(v))
-	if len(s) != 64 {
-		return false
-	}
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') {
-			continue
-		}
-		return false
-	}
-	return true
+	return logic.LooksLikeSHA256(v)
 }
 
 func checksumHintFromInputs(guid, fileName string) string {
-	g := strings.TrimSpace(guid)
-	if looksLikeSHA256(g) {
-		return g
-	}
-	f := strings.TrimSpace(fileName)
-	if looksLikeSHA256(f) {
-		return f
-	}
-	parts := strings.Split(strings.Trim(f, "/"), "/")
-	if len(parts) > 0 {
-		last := strings.TrimSpace(parts[len(parts)-1])
-		if looksLikeSHA256(last) {
-			return last
-		}
-	}
-	return ""
+	return logic.ChecksumHintFromInputs(guid, fileName)
 }
 
 func targetResourcesFromObject(obj *core.InternalObject) []string {
-	if obj == nil || len(obj.Authorizations) == 0 {
-		return nil
-	}
-	return append([]string(nil), obj.Authorizations...)
+	return logic.TargetResourcesFromObject(obj)
 }
 
 func firstAuthz(authz []string) string {
-	if len(authz) == 0 {
-		return ""
-	}
-	return authz[0]
+	return logic.FirstAuthz(authz)
 }

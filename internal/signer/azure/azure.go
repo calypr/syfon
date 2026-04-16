@@ -19,7 +19,7 @@ import (
 )
 
 type AzureSigner struct {
-	db    core.DatabaseInterface
+	db    core.CredentialStore
 	cache sync.Map // keyed by bucket name, stores *azureCreds
 }
 
@@ -28,7 +28,7 @@ type azureCreds struct {
 	ServiceURL string
 }
 
-func NewAzureSigner(db core.DatabaseInterface) *AzureSigner {
+func NewAzureSigner(db core.CredentialStore) *AzureSigner {
 	return &AzureSigner{db: db}
 }
 

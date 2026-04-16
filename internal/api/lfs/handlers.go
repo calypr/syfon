@@ -15,12 +15,12 @@ import (
 )
 
 type LFSServer struct {
-	database core.DatabaseInterface
+	database core.LFSStore
 	uM       urlmanager.UrlManager
 	opts     Options
 }
 
-func NewLFSServer(database core.DatabaseInterface, uM urlmanager.UrlManager, opts Options) *LFSServer {
+func NewLFSServer(database core.LFSStore, uM urlmanager.UrlManager, opts Options) *LFSServer {
 	return &LFSServer{
 		database: database,
 		uM:       uM,

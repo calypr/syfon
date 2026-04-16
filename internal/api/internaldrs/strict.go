@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/calypr/syfon/apigen/internalapi"
+	"github.com/calypr/syfon/internal/api/internaldrs/logic"
 	"github.com/calypr/syfon/internal/config"
 	"github.com/calypr/syfon/internal/db/core"
 	"github.com/calypr/syfon/internal/provider"
@@ -160,13 +161,9 @@ func (s *InternalServer) InternalMultipartComplete(ctx context.Context, request 
 }
 
 func nilToRequest(ctx context.Context) *http.Request {
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "/", nil)
-	return req
+	return logic.NilToRequest(ctx)
 }
 
 func authStatusCodeForContext(ctx context.Context) int {
-	if core.IsGen3Mode(ctx) && !core.HasAuthHeader(ctx) {
-		return http.StatusUnauthorized
-	}
-	return http.StatusForbidden
+	return logic.AuthStatusCodeForContext(ctx)
 }

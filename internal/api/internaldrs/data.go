@@ -2,52 +2,33 @@ package internaldrs
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"net/http"
-	"net/url"
-	"strings"
 
 	"github.com/calypr/syfon/apigen/drs"
+	"github.com/calypr/syfon/internal/api/internaldrs/logic"
+	"github.com/calypr/syfon/internal/api/routeutil"
 	"github.com/calypr/syfon/internal/config"
 	"github.com/calypr/syfon/internal/db/core"
-	"github.com/calypr/syfon/internal/api/routeutil"
-	"github.com/calypr/syfon/internal/provider"
 	"github.com/calypr/syfon/internal/urlmanager"
 	"github.com/gofiber/fiber/v3"
 )
 
-const bucketControlResource = "/services/internal/buckets"
+const bucketControlResource = logic.BucketControlResource
 
 func hasAnyMethodAccess(ctx *http.Request, resources []string, methods ...string) bool {
-	if !core.IsGen3Mode(ctx.Context()) {
-		return true
-	}
-	if len(resources) == 0 {
-		return true
-	}
-	for _, m := range methods {
-		if core.HasMethodAccess(ctx.Context(), m, resources) {
-			return true
-		}
-	}
-	return false
+	return logic.HasAnyMethodAccess(ctx, resources, methods...)
 }
 
 func hasGlobalBucketControlAccess(r *http.Request, methods ...string) bool {
-	return hasAnyMethodAccess(r, []string{bucketControlResource}, methods...)
+	return logic.HasGlobalBucketControlAccess(r, methods...)
 }
 
 func scopeResource(org, project string) string {
-	return strings.TrimSpace(core.ResourcePathForScope(org, project))
+	return logic.ScopeResource(org, project)
 }
 
 func hasScopedBucketAccess(r *http.Request, scope core.BucketScope, methods ...string) bool {
-	res := scopeResource(scope.Organization, scope.ProjectID)
-	if res == "" {
-		return false
-	}
-	return hasAnyMethodAccess(r, []string{res}, methods...)
+	return logic.HasScopedBucketAccess(r, scope, methods...)
 }
 
 func RegisterInternalDataRoutes(router fiber.Router, database core.DatabaseInterface, uM urlmanager.UrlManager) {
@@ -90,109 +71,18 @@ func RegisterInternalDataRoutes(router fiber.Router, database core.DatabaseInter
 	}), "InternalBucketScopes"), "bucket"))
 }
 
-func resolveBucket(ctx *http.Request, database core.DatabaseInterface, requested string) (string, error) {
-	if requested != "" {
-		return requested, nil
-	}
-
-	scopes, err := database.ListBucketScopes(ctx.Context())
-	if err == nil {
-		for _, scope := range scopes {
-			resource := scopeResource(scope.Organization, scope.ProjectID)
-			if resource == "" {
-				continue
-			}
-			if hasAnyMethodAccess(ctx, []string{resource}, "file_upload", "create", "update", "read") {
-				return scope.Bucket, nil
-			}
-		}
-	}
-
-	creds, err := database.ListS3Credentials(ctx.Context())
-	if err != nil || len(creds) == 0 {
-		return "", fmt.Errorf("no bucket configured")
-	}
-	return creds[0].Bucket, nil
+func resolveBucket(ctx *http.Request, database core.CredentialStore, requested string) (string, error) {
+	return logic.ResolveBucket(ctx, database, requested)
 }
 
-func resolveObjectRemotePath(database core.DatabaseInterface, ctx *http.Request, objectID string, bucket string) (string, bool) {
-	if strings.TrimSpace(objectID) == "" || strings.TrimSpace(bucket) == "" {
-		return "", false
-	}
-	obj, err := resolveObjectByIDOrChecksum(database, ctx.Context(), objectID)
-	if err != nil {
-		return "", false
-	}
-	targetBucket := strings.TrimSpace(bucket)
-	if obj.AccessMethods != nil {
-		for _, am := range *obj.AccessMethods {
-			if am.AccessUrl == nil {
-				continue
-			}
-			raw := strings.TrimSpace(am.AccessUrl.Url)
-			if raw == "" {
-				continue
-			}
-			u, err := url.Parse(raw)
-			if err != nil {
-				continue
-			}
-			// Match any supported protocol scheme.
-			p := provider.FromScheme(u.Scheme)
-			if p == "" {
-				continue
-			}
-			if !strings.EqualFold(strings.TrimSpace(u.Host), targetBucket) {
-				continue
-			}
-			key := strings.TrimPrefix(strings.TrimSpace(u.Path), "/")
-			if key != "" {
-				return key, true
-			}
-		}
-	}
-	return "", false
+func resolveObjectRemotePath(database core.ObjectStore, ctx *http.Request, objectID string, bucket string) (string, bool) {
+	return logic.ResolveObjectRemotePath(database, ctx, objectID, bucket)
 }
 
-func resolveObjectRemotePathWithCtx(database core.DatabaseInterface, ctx context.Context, objectID string, bucket string) (string, bool) {
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "/", nil)
-	return resolveObjectRemotePath(database, req, objectID, bucket)
+func resolveObjectRemotePathWithCtx(database core.ObjectStore, ctx context.Context, objectID string, bucket string) (string, bool) {
+	return logic.ResolveObjectRemotePathWithCtx(database, ctx, objectID, bucket)
 }
 
-func resolveObjectByIDOrChecksum(database core.DatabaseInterface, ctx context.Context, objectID string) (*core.InternalObject, error) {
-	// Checksum-first resolution: internal-compatible routes are commonly called with OID.
-	byChecksum, err := database.GetObjectsByChecksum(ctx, objectID)
-	if err != nil {
-		return nil, err
-	}
-	if len(byChecksum) > 0 {
-		objCopy := byChecksum[0]
-		return &objCopy, nil
-	}
-
-	// Legacy fallback for UUID/DID based lookups.
-	obj, err := database.GetObject(ctx, objectID)
-	if err == nil {
-		return obj, nil
-	}
-	if !errors.Is(err, core.ErrNotFound) {
-		return nil, err
-	}
-	canonicalID, aliasErr := database.ResolveObjectAlias(ctx, objectID)
-	if aliasErr == nil && strings.TrimSpace(canonicalID) != "" {
-		obj, getErr := database.GetObject(ctx, canonicalID)
-		if getErr == nil {
-			objCopy := *obj
-			objCopy.DrsObject.Id = objectID
-			objCopy.DrsObject.SelfUri = "drs://" + objectID
-			return &objCopy, nil
-		}
-		if !errors.Is(getErr, core.ErrNotFound) {
-			return nil, getErr
-		}
-	}
-	if aliasErr != nil && !errors.Is(aliasErr, core.ErrNotFound) {
-		return nil, aliasErr
-	}
-	return nil, core.ErrNotFound
+func resolveObjectByIDOrChecksum(database core.ObjectStore, ctx context.Context, objectID string) (*core.InternalObject, error) {
+	return logic.ResolveObjectByIDOrChecksum(database, ctx, objectID)
 }

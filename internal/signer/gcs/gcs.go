@@ -19,11 +19,11 @@ import (
 )
 
 type GCSSigner struct {
-	db    core.DatabaseInterface
+	db    core.CredentialStore
 	cache sync.Map // keyed by bucket name, stores *storage.Client
 }
 
-func NewGCSSigner(db core.DatabaseInterface) *GCSSigner {
+func NewGCSSigner(db core.CredentialStore) *GCSSigner {
 	return &GCSSigner{db: db}
 }
 

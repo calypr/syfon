@@ -11,7 +11,7 @@ import (
 
 var ErrNoValidSHA256 = errors.New("no valid sha256 values provided")
 
-func ComputeSHA256Validity(ctx context.Context, database core.DatabaseInterface, values []string) (map[string]bool, error) {
+func ComputeSHA256Validity(ctx context.Context, database core.SHA256ValidityStore, values []string) (map[string]bool, error) {
 	targets := NormalizeSHA256(values)
 	if len(targets) == 0 {
 		return nil, ErrNoValidSHA256
@@ -65,7 +65,7 @@ func normalizeOID(oid string) string {
 	return oid
 }
 
-func getRegisteredBucketSet(ctx context.Context, database core.DatabaseInterface) (map[string]struct{}, error) {
+func getRegisteredBucketSet(ctx context.Context, database core.SHA256ValidityStore) (map[string]struct{}, error) {
 	creds, err := database.ListS3Credentials(ctx)
 	if err != nil {
 		return nil, err

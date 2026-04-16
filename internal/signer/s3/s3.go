@@ -19,7 +19,7 @@ import (
 )
 
 type S3Signer struct {
-	db    core.DatabaseInterface
+	db    core.CredentialStore
 	cache sync.Map // keyed by bucket name, stores *s3Clients
 }
 
@@ -28,7 +28,7 @@ type s3Clients struct {
 	presigner *s3.PresignClient
 }
 
-func NewS3Signer(db core.DatabaseInterface) *S3Signer {
+func NewS3Signer(db core.CredentialStore) *S3Signer {
 	return &S3Signer{db: db}
 }
 
