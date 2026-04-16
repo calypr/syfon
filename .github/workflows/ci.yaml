@@ -45,6 +45,15 @@ jobs:
             -run 'Test(AllRegisteredEndpoints_WithMocks|RegisterAPIRoutes_StaticBeforeParamAcrossControllers|RegisterControllerRoutes_StaticBeforeParam)' \
             -v
 
+      - name: Run instrumented binary endpoint tests
+        run: |
+          mkdir -p coverage/gocover-endpoint
+          export GOCOVERDIR="$(pwd)/coverage/gocover-endpoint"
+          CGO_ENABLED=1 go test ./tests/endpoints/... \
+            -run 'Test(AllRegisteredEndpoints_WithMocks|RegisterAPIRoutes_StaticBeforeParamAcrossControllers|RegisterControllerRoutes_StaticBeforeParam)' \
+            -v
+          go tool covdata textfmt -i "$GOCOVERDIR" -o coverage/binary-endpoint.out
+
       - name: Run coverage
         env:
           SYFON_E2E_MOCK_SERVERS: 1
@@ -55,6 +64,34 @@ jobs:
         run: |
           mkdir -p coverage
           go test -count=1 -covermode=atomic -coverprofile=coverage/coverage.out ./...
+
+      - name: Upload binary endpoint coverage to Codecov (OIDC)
+        id: codecov_binary_endpoint_oidc
+        continue-on-error: true
+        uses: codecov/codecov-action@v5
+        env:
+          CODECOV_SLUG: calypr/syfon
+        with:
+          use_oidc: true
+          files: coverage/binary-endpoint.out
+          flags: binary-endpoint
+          disable_search: true
+          verbose: true
+          fail_ci_if_error: true
+
+      - name: Upload binary endpoint coverage to Codecov (token fallback)
+        if: steps.codecov_binary_endpoint_oidc.outcome == 'failure'
+        continue-on-error: true
+        uses: codecov/codecov-action@v5
+        env:
+          CODECOV_SLUG: calypr/syfon
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage/binary-endpoint.out
+          flags: binary-endpoint
+          disable_search: true
+          verbose: true
+          fail_ci_if_error: false
 
       - name: Upload root coverage to Codecov (OIDC)
         id: codecov_root_oidc
@@ -119,6 +156,7 @@ jobs:
             coverage/coverage.out
             coverage/coverage.txt
             coverage/coverage.html
+            coverage/binary-endpoint.out
             client/coverage/coverage.out
 
       - name: Run go vet
