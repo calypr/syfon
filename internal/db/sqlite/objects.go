@@ -312,7 +312,11 @@ func (db *SqliteDB) RegisterObjects(ctx context.Context, objects []models.Intern
 	defer tx.Rollback()
 
 	ids := make([]string, 0, len(objects))
-	mainArgs := make([]interface{}, 0, len(objects)*7)
+	mainCap, err := safeSliceCapacity(len(objects), len(objects), len(objects), len(objects), len(objects), len(objects), len(objects))
+	if err != nil {
+		return err
+	}
+	mainArgs := make([]interface{}, 0, mainCap)
 
 	accessArgs := make([]interface{}, 0)
 	checksumArgs := make([]interface{}, 0)
@@ -566,7 +570,11 @@ func (db *SqliteDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []stri
 	}
 
 	conditions := make([]string, 0, 2)
-	args := make([]interface{}, 0, len(ids)+len(checksums))
+	capArgs, err := safeSliceCapacity(len(ids), len(checksums), len(checksums))
+	if err != nil {
+		return nil, err
+	}
+	args := make([]interface{}, 0, capArgs)
 	if len(ids) > 0 {
 		conditions = append(conditions, fmt.Sprintf("o.id IN (%s)", makePlaceholders(len(ids))))
 		for _, id := range ids {

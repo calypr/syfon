@@ -5,10 +5,11 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"github.com/calypr/syfon/internal/common"
-	"github.com/calypr/syfon/internal/models"
 	"strings"
 	"time"
+
+	"github.com/calypr/syfon/internal/common"
+	"github.com/calypr/syfon/internal/models"
 )
 
 func (db *SqliteDB) flushObjectUsageEventsForIDsTx(ctx context.Context, tx *sql.Tx, ids []string) error {
@@ -17,7 +18,11 @@ func (db *SqliteDB) flushObjectUsageEventsForIDsTx(ctx context.Context, tx *sql.
 	}
 	now := time.Now().UTC()
 	placeholders := make([]string, len(ids))
-	args := make([]interface{}, 0, len(ids)+1)
+	capArgs, err := safeSliceCapacity(len(ids), 1)
+	if err != nil {
+		return err
+	}
+	args := make([]interface{}, 0, capArgs)
 	args = append(args, now)
 	for i, id := range ids {
 		placeholders[i] = "?"

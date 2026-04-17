@@ -1,12 +1,13 @@
 package sqlite
 
 import (
-	"github.com/calypr/syfon/internal/models"
 	"database/sql"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
+	"github.com/calypr/syfon/internal/models"
 )
 
 const sqliteMaxParams = 900
@@ -62,6 +63,20 @@ func execSQLiteDeleteByIDs(tx *sql.Tx, table string, ids []string) error {
 		}
 	}
 	return nil
+}
+
+func safeSliceCapacity(parts ...int) (int, error) {
+	total := int64(0)
+	for _, part := range parts {
+		if part < 0 {
+			return 0, fmt.Errorf("negative capacity component: %d", part)
+		}
+		total += int64(part)
+		if total > int64(math.MaxInt) {
+			return 0, fmt.Errorf("capacity too large: %d", total)
+		}
+	}
+	return int(total), nil
 }
 
 func execSQLiteBulkInsert(tx *sql.Tx, prefix string, rowPlaceholder string, rowArity int, args []interface{}, suffix string) error {
