@@ -1,8 +1,8 @@
 package db
 
 import (
-	"github.com/calypr/syfon/internal/models"
 	"context"
+	"github.com/calypr/syfon/internal/models"
 	"time"
 
 	"github.com/calypr/syfon/apigen/server/drs"
@@ -17,6 +17,7 @@ type ServiceInfoStore interface {
 type ObjectStore interface {
 	GetObject(ctx context.Context, id string) (*models.InternalObject, error)
 	DeleteObject(ctx context.Context, id string) error
+	DeleteObjectAlias(ctx context.Context, aliasID string) error
 	CreateObject(ctx context.Context, obj *models.InternalObject) error
 	GetObjectsByChecksum(ctx context.Context, checksum string) ([]models.InternalObject, error)
 	GetObjectsByChecksums(ctx context.Context, checksums []string) (map[string][]models.InternalObject, error)

@@ -335,8 +335,14 @@ func mergeInternalObjectUpdate(existing, update models.InternalObject, objectID 
 func handleInternalDelete(database db.DatabaseInterface) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		id := c.Params("id")
+		targetID := id
+		if canonicalID, aliasErr := database.ResolveObjectAlias(c.Context(), id); aliasErr == nil && strings.TrimSpace(canonicalID) != "" {
+			targetID = strings.TrimSpace(canonicalID)
+		} else if aliasErr != nil && !errors.Is(aliasErr, common.ErrNotFound) {
+			return writeDBErrorFiber(c, aliasErr)
+		}
 
-		if err := database.DeleteObject(c.Context(), id); err != nil {
+		if err := database.DeleteObject(c.Context(), targetID); err != nil {
 			return writeDBErrorFiber(c, err)
 		}
 

@@ -146,13 +146,14 @@ func exerciseAllClientCommands(t *testing.T, serverURL string, bucketCfg bucketC
 	if err != nil {
 		t.Fatalf("parse uploaded object id: %v output=%s", err, uploadOut)
 	}
+	fileName := filepath.Base(srcPath)
 
 	lsOut, err := executeRootCommand(t, "--server", serverURL, "ls")
 	if err != nil {
 		t.Fatalf("ls failed: %v output=%s", err, lsOut)
 	}
-	if !strings.Contains(lsOut, uploadedID) {
-		t.Fatalf("ls output missing uploaded did %s: %s", uploadedID, lsOut)
+	if !strings.Contains(lsOut, fileName) {
+		t.Fatalf("ls output missing uploaded file name %s (did %s): %s", fileName, uploadedID, lsOut)
 	}
 
 	downloadPath := filepath.Join(t.TempDir(), "provider-downloaded.txt")
@@ -231,8 +232,8 @@ func exerciseAllClientCommands(t *testing.T, serverURL string, bucketCfg bucketC
 	if err != nil {
 		t.Fatalf("ls after rm failed: %v output=%s", err, lsAfterRm)
 	}
-	if strings.Contains(lsAfterRm, uploadedID) || strings.Contains(lsAfterRm, addURLDID) {
-		t.Fatalf("ls output still includes removed IDs: %s", lsAfterRm)
+	if strings.Contains(lsAfterRm, fileName) || strings.Contains(lsAfterRm, addURLDID) {
+		t.Fatalf("ls output still includes removed records: %s", lsAfterRm)
 	}
 
 	bucketName := strings.TrimSpace(bucketCfg.Bucket)

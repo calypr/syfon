@@ -96,12 +96,19 @@ var Cmd = &cobra.Command{
 		fmt.Fprintf(cmd.OutOrStdout(), "Uploading %s (%s)...\n", srcPath, upload.FormatSize(info.Size()))
 		fmt.Fprintf(cmd.OutOrStdout(), "DID: %s\n", did)
 
-		_, err = upload.RegisterFile(ctx, c.Data(), c.DRS(), drsObj, srcPath, "")
+		registered, err := upload.RegisterFile(ctx, c.Data(), c.DRS(), drsObj, srcPath, "")
 		if err != nil {
 			return fmt.Errorf("upload failed: %w", err)
 		}
 
-		fmt.Fprintf(cmd.OutOrStdout(), "\nsuccessfully uploaded %s\n", did)
+		finalID := did
+		if registered != nil && strings.TrimSpace(registered.Id) != "" {
+			finalID = strings.TrimSpace(registered.Id)
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "\nsuccessfully uploaded %s\n", finalID)
+		if finalID != did {
+			fmt.Fprintf(cmd.OutOrStdout(), "requested DID: %s\n", did)
+		}
 		return nil
 	},
 }

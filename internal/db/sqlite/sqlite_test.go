@@ -183,8 +183,8 @@ func TestSqliteDB_ObjectAliasLifecycle(t *testing.T) {
 		t.Fatalf("expected exactly one canonical record for checksum, got %+v", byChecksum)
 	}
 
-	if err := db.DeleteObject(ctx, aliasID); err != nil {
-		t.Fatalf("DeleteObject(alias) failed: %v", err)
+	if err := db.DeleteObjectAlias(ctx, aliasID); err != nil {
+		t.Fatalf("DeleteObjectAlias(alias) failed: %v", err)
 	}
 	if _, err := db.ResolveObjectAlias(ctx, aliasID); err == nil {
 		t.Fatal("expected alias to be deleted")

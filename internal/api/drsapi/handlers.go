@@ -309,7 +309,15 @@ func handleDeleteObject(w http.ResponseWriter, r *http.Request, db db.DatabaseIn
 		return
 	}
 
-	if err := db.DeleteObject(r.Context(), objectID); err != nil {
+	targetID := objectID
+	if canonicalID, aliasErr := db.ResolveObjectAlias(r.Context(), objectID); aliasErr == nil && strings.TrimSpace(canonicalID) != "" {
+		targetID = strings.TrimSpace(canonicalID)
+	} else if aliasErr != nil && !errors.Is(aliasErr, common.ErrNotFound) {
+		writeDRSError(w, r, aliasErr)
+		return
+	}
+
+	if err := db.DeleteObject(r.Context(), targetID); err != nil {
 		writeDRSHTTPError(w, r, http.StatusInternalServerError, err.Error())
 		return
 	}

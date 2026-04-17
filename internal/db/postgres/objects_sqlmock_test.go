@@ -1,10 +1,10 @@
 package postgres
 
 import (
-	"github.com/calypr/syfon/internal/common"
 	"context"
 	"database/sql"
 	"errors"
+	"github.com/calypr/syfon/internal/common"
 	"regexp"
 	"testing"
 	"time"
@@ -17,12 +17,14 @@ func TestDeleteObject(t *testing.T) {
 		pg, mock, rawDB := newMockPostgresDB(t)
 		defer rawDB.Close()
 
+		mock.ExpectBegin()
 		mock.ExpectExec(regexp.QuoteMeta("DELETE FROM drs_object_alias WHERE alias_id = $1")).
 			WithArgs("obj-1").
 			WillReturnResult(sqlmock.NewResult(0, 0))
 		mock.ExpectExec(regexp.QuoteMeta("DELETE FROM drs_object WHERE id = $1")).
 			WithArgs("obj-1").
 			WillReturnResult(sqlmock.NewResult(0, 1))
+		mock.ExpectCommit()
 
 		if err := pg.DeleteObject(context.Background(), "obj-1"); err != nil {
 			t.Fatalf("DeleteObject returned error: %v", err)
@@ -36,16 +38,21 @@ func TestDeleteObject(t *testing.T) {
 		pg, mock, rawDB := newMockPostgresDB(t)
 		defer rawDB.Close()
 
+		mock.ExpectBegin()
 		mock.ExpectExec(regexp.QuoteMeta("DELETE FROM drs_object_alias WHERE alias_id = $1")).
 			WithArgs("missing").
 			WillReturnResult(sqlmock.NewResult(0, 0))
 		mock.ExpectExec(regexp.QuoteMeta("DELETE FROM drs_object WHERE id = $1")).
 			WithArgs("missing").
 			WillReturnResult(sqlmock.NewResult(0, 0))
+		mock.ExpectRollback()
 
 		err := pg.DeleteObject(context.Background(), "missing")
 		if !errors.Is(err, common.ErrNotFound) {
 			t.Fatalf("expected not found error, got %v", err)
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Fatalf("unmet expectations: %v", err)
 		}
 	})
 }

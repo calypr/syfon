@@ -15,12 +15,46 @@ import (
 )
 
 func (db *SqliteDB) DeleteObject(ctx context.Context, id string) error {
-	if aliasResult, aliasErr := db.db.ExecContext(ctx, "DELETE FROM drs_object_alias WHERE alias_id = ?", id); aliasErr == nil {
-		if rows, rowsErr := aliasResult.RowsAffected(); rowsErr == nil && rows > 0 {
-			return nil
+	tx, err := db.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var affected int64
+
+	if aliasResult, aliasErr := tx.ExecContext(ctx, "DELETE FROM drs_object_alias WHERE alias_id = ?", id); aliasErr == nil {
+		if rows, rowsErr := aliasResult.RowsAffected(); rowsErr == nil {
+			affected += rows
 		}
 	}
-	result, err := db.db.ExecContext(ctx, "DELETE FROM drs_object WHERE id = ?", id)
+
+	result, err := tx.ExecContext(ctx, "DELETE FROM drs_object WHERE id = ?", id)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	affected += rows
+
+	if rows > 0 {
+		if aliasCleanup, cleanupErr := tx.ExecContext(ctx, "DELETE FROM drs_object_alias WHERE object_id = ?", id); cleanupErr == nil {
+			if cleanupRows, cleanupRowsErr := aliasCleanup.RowsAffected(); cleanupRowsErr == nil {
+				affected += cleanupRows
+			}
+		}
+	}
+
+	if affected == 0 {
+		return fmt.Errorf("%w: object not found", common.ErrNotFound)
+	}
+	return tx.Commit()
+}
+
+func (db *SqliteDB) DeleteObjectAlias(ctx context.Context, aliasID string) error {
+	result, err := db.db.ExecContext(ctx, "DELETE FROM drs_object_alias WHERE alias_id = ?", aliasID)
 	if err != nil {
 		return err
 	}

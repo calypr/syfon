@@ -140,7 +140,7 @@ func TestMVPMockServers_FakeGCSAndAzurite(t *testing.T) {
 			ContainerRequest: testcontainers.ContainerRequest{
 				Image:        azuriteImage,
 				ExposedPorts: []string{"10000/tcp"},
-				Cmd:          []string{"azurite-blob", "--blobHost", "0.0.0.0", "--blobPort", "10000"},
+				Cmd:          []string{"azurite-blob", "--blobHost", "0.0.0.0", "--blobPort", "10000", "--skipApiVersionCheck"},
 				WaitingFor:   wait.ForListeningPort("10000/tcp").WithStartupTimeout(2 * time.Minute),
 			},
 			Started: true,

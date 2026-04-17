@@ -50,6 +50,13 @@ func (m *MockDatabase) DeleteObject(ctx context.Context, id string) error {
 	return nil
 }
 
+func (m *MockDatabase) DeleteObjectAlias(ctx context.Context, aliasID string) error {
+	if m.Objects != nil {
+		delete(m.Objects, aliasID)
+	}
+	return nil
+}
+
 func (m *MockDatabase) CreateObject(ctx context.Context, obj *models.InternalObject) error {
 	if m.Objects == nil {
 		m.Objects = make(map[string]*drs.DrsObject)
