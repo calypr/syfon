@@ -4,9 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"github.com/calypr/syfon/internal/common"
+	"github.com/calypr/syfon/internal/models"
 	"time"
 
-	"github.com/calypr/syfon/internal/db/core"
 	"github.com/lib/pq"
 )
 
@@ -28,11 +29,11 @@ func (db *PostgresDB) RecordFileDownload(ctx context.Context, objectID string) e
 	return err
 }
 
-func (db *PostgresDB) GetFileUsage(ctx context.Context, objectID string) (*core.FileUsage, error) {
+func (db *PostgresDB) GetFileUsage(ctx context.Context, objectID string) (*models.FileUsage, error) {
 	if err := db.flushObjectUsageEvents(ctx); err != nil {
 		return nil, err
 	}
-	var usage core.FileUsage
+	var usage models.FileUsage
 	var lastUpload sql.NullTime
 	var lastDownload sql.NullTime
 	err := db.db.QueryRowContext(ctx, `
@@ -54,7 +55,7 @@ func (db *PostgresDB) GetFileUsage(ctx context.Context, objectID string) (*core.
 		&lastDownload,
 	)
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("%w: file usage not found", core.ErrNotFound)
+		return nil, fmt.Errorf("%w: file usage not found", common.ErrNotFound)
 	}
 	if err != nil {
 		return nil, err
@@ -71,7 +72,7 @@ func (db *PostgresDB) GetFileUsage(ctx context.Context, objectID string) (*core.
 	return &usage, nil
 }
 
-func (db *PostgresDB) ListFileUsage(ctx context.Context, limit, offset int, inactiveSince *time.Time) ([]core.FileUsage, error) {
+func (db *PostgresDB) ListFileUsage(ctx context.Context, limit, offset int, inactiveSince *time.Time) ([]models.FileUsage, error) {
 	if err := db.flushObjectUsageEvents(ctx); err != nil {
 		return nil, err
 	}
@@ -108,9 +109,9 @@ func (db *PostgresDB) ListFileUsage(ctx context.Context, limit, offset int, inac
 	}
 	defer rows.Close()
 
-	out := make([]core.FileUsage, 0, limit)
+	out := make([]models.FileUsage, 0, limit)
 	for rows.Next() {
-		var usage core.FileUsage
+		var usage models.FileUsage
 		var lastUpload sql.NullTime
 		var lastDownload sql.NullTime
 		if err := rows.Scan(
@@ -138,15 +139,15 @@ func (db *PostgresDB) ListFileUsage(ctx context.Context, limit, offset int, inac
 	return out, nil
 }
 
-func (db *PostgresDB) GetFileUsageSummary(ctx context.Context, inactiveSince *time.Time) (core.FileUsageSummary, error) {
+func (db *PostgresDB) GetFileUsageSummary(ctx context.Context, inactiveSince *time.Time) (models.FileUsageSummary, error) {
 	if err := db.flushObjectUsageEvents(ctx); err != nil {
-		return core.FileUsageSummary{}, err
+		return models.FileUsageSummary{}, err
 	}
 	cutoff := time.Now().UTC().AddDate(0, 0, -730)
 	if inactiveSince != nil {
 		cutoff = inactiveSince.UTC()
 	}
-	var summary core.FileUsageSummary
+	var summary models.FileUsageSummary
 	if err := db.db.QueryRowContext(ctx, `
 		SELECT
 			COUNT(o.id) AS total_files,
@@ -161,7 +162,7 @@ func (db *PostgresDB) GetFileUsageSummary(ctx context.Context, inactiveSince *ti
 		&summary.TotalDownloads,
 		&summary.InactiveFileCount,
 	); err != nil {
-		return core.FileUsageSummary{}, err
+		return models.FileUsageSummary{}, err
 	}
 	return summary, nil
 }

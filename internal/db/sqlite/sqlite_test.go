@@ -3,11 +3,13 @@ package sqlite
 import (
 	"context"
 	"errors"
+	"github.com/calypr/syfon/internal/common"
+	"github.com/calypr/syfon/internal/crypto"
+	"github.com/calypr/syfon/internal/models"
 	"testing"
 	"time"
 
 	"github.com/calypr/syfon/apigen/server/drs"
-	"github.com/calypr/syfon/internal/db/core"
 )
 
 func TestSqliteDB_CRUD(t *testing.T) {
@@ -22,8 +24,8 @@ func TestSqliteDB_CRUD(t *testing.T) {
 		Size:        123,
 		CreatedTime: time.Now(),
 		UpdatedTime: func() *time.Time { t := time.Now(); return &t }(),
-		Version:     core.Ptr("1.0"),
-		Name:        core.Ptr("testing"),
+		Version:     common.Ptr("1.0"),
+		Name:        common.Ptr("testing"),
 		AccessMethods: &[]drs.AccessMethod{
 			{
 				Type: drs.AccessMethodTypeS3,
@@ -39,7 +41,7 @@ func TestSqliteDB_CRUD(t *testing.T) {
 	}
 
 	// Create
-	if err := db.CreateObject(ctx, &core.InternalObject{DrsObject: *obj, Authorizations: []string{}}); err != nil {
+	if err := db.CreateObject(ctx, &models.InternalObject{DrsObject: *obj, Authorizations: []string{}}); err != nil {
 		t.Fatalf("CreateObject failed: %v", err)
 	}
 
@@ -89,8 +91,8 @@ func TestSqliteDB_GetObjectsByChecksum_WhenIDDiffers(t *testing.T) {
 		Size:        10,
 		CreatedTime: time.Now(),
 		UpdatedTime: func() *time.Time { t := time.Now(); return &t }(),
-		Version:     core.Ptr("1.0"),
-		Name:        core.Ptr("oid-object"),
+		Version:     common.Ptr("1.0"),
+		Name:        common.Ptr("oid-object"),
 		AccessMethods: &[]drs.AccessMethod{
 			{
 				Type: drs.AccessMethodTypeS3,
@@ -104,7 +106,7 @@ func TestSqliteDB_GetObjectsByChecksum_WhenIDDiffers(t *testing.T) {
 			{Type: "sha256", Checksum: checksum},
 		},
 	}
-	if err := db.CreateObject(ctx, &core.InternalObject{DrsObject: *obj, Authorizations: []string{}}); err != nil {
+	if err := db.CreateObject(ctx, &models.InternalObject{DrsObject: *obj, Authorizations: []string{}}); err != nil {
 		t.Fatalf("CreateObject failed: %v", err)
 	}
 
@@ -132,7 +134,7 @@ func TestSqliteDB_ObjectAliasLifecycle(t *testing.T) {
 	checksum := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	now := time.Now().UTC()
 
-	if err := db.CreateObject(ctx, &core.InternalObject{
+	if err := db.CreateObject(ctx, &models.InternalObject{
 		DrsObject: drs.DrsObject{
 			Id:          canonicalID,
 			CreatedTime: now,
@@ -193,14 +195,14 @@ func TestSqliteDB_ObjectAliasLifecycle(t *testing.T) {
 }
 
 func TestSqliteDB_S3Credentials(t *testing.T) {
-	t.Setenv(core.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
+	t.Setenv(crypto.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
 	ctx := context.Background()
 	db, err := NewSqliteDB(":memory:")
 	if err != nil {
 		t.Fatalf("failed to create db: %v", err)
 	}
 
-	cred := &core.S3Credential{
+	cred := &models.S3Credential{
 		Bucket:    "test-bucket",
 		Region:    "us-east-1",
 		AccessKey: "key",
@@ -234,14 +236,14 @@ func TestSqliteDB_S3Credentials(t *testing.T) {
 }
 
 func TestSqliteDB_S3Credentials_EncryptedAtRest(t *testing.T) {
-	t.Setenv(core.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
+	t.Setenv(crypto.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
 	ctx := context.Background()
 	db, err := NewSqliteDB(":memory:")
 	if err != nil {
 		t.Fatalf("failed to create db: %v", err)
 	}
 
-	cred := &core.S3Credential{
+	cred := &models.S3Credential{
 		Bucket:    "enc-bucket",
 		Region:    "us-east-1",
 		AccessKey: "plain-ak",
@@ -273,7 +275,7 @@ func TestSqliteDB_BulkOperations(t *testing.T) {
 	ctx := context.Background()
 	db, _ := NewSqliteDB(":memory:")
 
-	objects := []core.InternalObject{
+	objects := []models.InternalObject{
 		{DrsObject: drs.DrsObject{Id: "bulk-1", Size: 10}},
 		{DrsObject: drs.DrsObject{Id: "bulk-2", Size: 20}},
 	}
@@ -297,7 +299,7 @@ func TestSqliteDB_UpdateAccessMethods(t *testing.T) {
 	db, _ := NewSqliteDB(":memory:")
 
 	obj := &drs.DrsObject{Id: "update-me"}
-	if err := db.CreateObject(ctx, &core.InternalObject{DrsObject: *obj, Authorizations: []string{}}); err != nil {
+	if err := db.CreateObject(ctx, &models.InternalObject{DrsObject: *obj, Authorizations: []string{}}); err != nil {
 		t.Fatalf("CreateObject failed: %v", err)
 	}
 
@@ -326,7 +328,7 @@ func TestSqliteDB_GetObjectsByChecksumsAndListByPrefix(t *testing.T) {
 	db, _ := NewSqliteDB(":memory:")
 
 	now := time.Now()
-	objects := []core.InternalObject{
+	objects := []models.InternalObject{
 		{
 			DrsObject: drs.DrsObject{
 				Id:          "sha-x",
@@ -375,7 +377,7 @@ func TestSqliteDB_ListObjectIDsByResourcePrefixRootIncludesUnscoped(t *testing.T
 	db, _ := NewSqliteDB(":memory:")
 	now := time.Now()
 
-	if err := db.RegisterObjects(ctx, []core.InternalObject{
+	if err := db.RegisterObjects(ctx, []models.InternalObject{
 		{
 			DrsObject: drs.DrsObject{
 				Id:          "scoped",
@@ -415,7 +417,7 @@ func TestSqliteDB_BulkUpdateAccessMethods(t *testing.T) {
 	db, _ := NewSqliteDB(":memory:")
 
 	now := time.Now()
-	if err := db.RegisterObjects(ctx, []core.InternalObject{
+	if err := db.RegisterObjects(ctx, []models.InternalObject{
 		{
 			DrsObject: drs.DrsObject{
 				Id:          "obj-a",
@@ -481,14 +483,14 @@ func TestSqliteDB_PendingLFSMetaLifecycle(t *testing.T) {
 	}
 	now := time.Now().UTC()
 	candidate := drs.DrsObjectCandidate{
-		Name: core.Ptr("candidate"),
+		Name: common.Ptr("candidate"),
 		Size: 123,
 		Checksums: []drs.Checksum{
 			{Type: "sha256", Checksum: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
 		},
 	}
 
-	if err := db.SavePendingLFSMeta(ctx, []core.PendingLFSMeta{
+	if err := db.SavePendingLFSMeta(ctx, []models.PendingLFSMeta{
 		{
 			OID:       "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 			Candidate: candidate,
@@ -503,7 +505,7 @@ func TestSqliteDB_PendingLFSMetaLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PopPendingLFSMeta failed: %v", err)
 	}
-	if core.StringVal(entry.Candidate.Name) != "candidate" {
+	if common.StringVal(entry.Candidate.Name) != "candidate" {
 		t.Fatalf("unexpected candidate payload: %+v", entry.Candidate)
 	}
 
@@ -521,13 +523,13 @@ func TestSqliteDB_PendingLFSMetaPrunesExpired(t *testing.T) {
 	now := time.Now().UTC()
 	oid := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	candidate := drs.DrsObjectCandidate{
-		Name: core.Ptr("expired"),
+		Name: common.Ptr("expired"),
 		Checksums: []drs.Checksum{
 			{Type: "sha256", Checksum: oid},
 		},
 	}
 
-	if err := db.SavePendingLFSMeta(ctx, []core.PendingLFSMeta{
+	if err := db.SavePendingLFSMeta(ctx, []models.PendingLFSMeta{
 		{
 			OID:       oid,
 			Candidate: candidate,
@@ -551,14 +553,14 @@ func TestSqliteDB_FileUsageMetrics(t *testing.T) {
 	}
 	now := time.Now().UTC()
 	oid := "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
-	if err := db.CreateObject(ctx, &core.InternalObject{
+	if err := db.CreateObject(ctx, &models.InternalObject{
 		DrsObject: drs.DrsObject{
 			Id:          oid,
-			Name:        core.Ptr("metrics-object"),
+			Name:        common.Ptr("metrics-object"),
 			Size:        42,
 			CreatedTime: now,
 			UpdatedTime: &now,
-			Version:     core.Ptr("1"),
+			Version:     common.Ptr("1"),
 		},
 	}); err != nil {
 		t.Fatalf("CreateObject failed: %v", err)
@@ -620,14 +622,14 @@ func TestSqliteDB_FileUsageMetrics_MissingObjectQueuedAndFlushedOnCreate(t *test
 	}
 
 	now := time.Now().UTC()
-	if err := db.CreateObject(ctx, &core.InternalObject{
+	if err := db.CreateObject(ctx, &models.InternalObject{
 		DrsObject: drs.DrsObject{
 			Id:          oid,
-			Name:        core.Ptr("later-created"),
+			Name:        common.Ptr("later-created"),
 			Size:        11,
 			CreatedTime: now,
 			UpdatedTime: &now,
-			Version:     core.Ptr("1"),
+			Version:     common.Ptr("1"),
 		},
 	}); err != nil {
 		t.Fatalf("CreateObject failed: %v", err)
@@ -652,7 +654,7 @@ func TestSqliteDB_BucketScopeLifecycle(t *testing.T) {
 		t.Fatalf("expected validation error for nil scope")
 	}
 
-	scope := &core.BucketScope{
+	scope := &models.BucketScope{
 		Organization: "calypr",
 		ProjectID:    "proj-a",
 		Bucket:       "bucket-a",
@@ -670,7 +672,7 @@ func TestSqliteDB_BucketScopeLifecycle(t *testing.T) {
 		t.Fatalf("unexpected scope: %+v", got)
 	}
 
-	if err := db.CreateBucketScope(ctx, &core.BucketScope{
+	if err := db.CreateBucketScope(ctx, &models.BucketScope{
 		Organization: "calypr",
 		ProjectID:    "proj-a",
 		Bucket:       "bucket-a",
@@ -679,12 +681,12 @@ func TestSqliteDB_BucketScopeLifecycle(t *testing.T) {
 		t.Fatalf("idempotent create should succeed, got: %v", err)
 	}
 
-	if err := db.CreateBucketScope(ctx, &core.BucketScope{
+	if err := db.CreateBucketScope(ctx, &models.BucketScope{
 		Organization: "calypr",
 		ProjectID:    "proj-a",
 		Bucket:       "bucket-b",
 		PathPrefix:   "data/b",
-	}); !errors.Is(err, core.ErrConflict) {
+	}); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("expected ErrConflict for remap, got: %v", err)
 	}
 
@@ -697,7 +699,7 @@ func TestSqliteDB_BucketScopeLifecycle(t *testing.T) {
 	}
 
 	_, err = db.GetBucketScope(ctx, "calypr", "missing")
-	if !errors.Is(err, core.ErrNotFound) {
+	if !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound for missing scope, got: %v", err)
 	}
 }
@@ -712,13 +714,13 @@ func TestSqliteDB_GetPendingLFSMeta(t *testing.T) {
 	now := time.Now().UTC()
 	oid := "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
 	candidate := drs.DrsObjectCandidate{
-		Name: core.Ptr("candidate-get"),
+		Name: common.Ptr("candidate-get"),
 		Checksums: []drs.Checksum{
 			{Type: "sha256", Checksum: oid},
 		},
 	}
 
-	if err := db.SavePendingLFSMeta(ctx, []core.PendingLFSMeta{
+	if err := db.SavePendingLFSMeta(ctx, []models.PendingLFSMeta{
 		{
 			OID:       oid,
 			Candidate: candidate,
@@ -733,12 +735,12 @@ func TestSqliteDB_GetPendingLFSMeta(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetPendingLFSMeta failed: %v", err)
 	}
-	if core.StringVal(got.Candidate.Name) != "candidate-get" {
+	if common.StringVal(got.Candidate.Name) != "candidate-get" {
 		t.Fatalf("unexpected pending metadata: %+v", got)
 	}
 
 	_, err = db.GetPendingLFSMeta(ctx, "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
-	if !errors.Is(err, core.ErrNotFound) {
+	if !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound for missing pending metadata, got: %v", err)
 	}
 }

@@ -1,40 +1,41 @@
 package internaldrs
 
 import (
+	"github.com/calypr/syfon/internal/authz"
+	"github.com/calypr/syfon/internal/common"
+	"github.com/calypr/syfon/internal/db"
+	"github.com/calypr/syfon/internal/models"
+
 	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
 
 	"github.com/calypr/syfon/apigen/server/bucketapi"
-	"github.com/calypr/syfon/internal/api/routeutil"
 	"github.com/calypr/syfon/internal/config"
-	"github.com/calypr/syfon/internal/db/core"
+	"github.com/gofiber/fiber/v3"
 )
 
-func handleInternalBuckets(w http.ResponseWriter, r *http.Request, database core.CredentialStore) {
-	creds, err := database.ListS3Credentials(r.Context())
+func handleInternalBucketsFiber(c fiber.Ctx, database db.CredentialStore) error {
+	creds, err := database.ListS3Credentials(c.Context())
 	if err != nil {
-		writeHTTPError(w, r, http.StatusInternalServerError, err.Error(), err)
-		return
+		return writeHTTPErrorFiber(c, http.StatusInternalServerError, err.Error(), err)
 	}
-	scopes, _ := database.ListBucketScopes(r.Context())
+	scopes, _ := database.ListBucketScopes(c.Context())
 
 	allowedBuckets := map[string]bool{}
-	allowAll := !core.IsGen3Mode(r.Context()) || hasGlobalBucketControlAccess(r, "read")
+	allowAll := !authz.IsGen3Mode(c.Context()) || authz.HasGlobalBucketControlAccess(c.Context(), "read")
 	if !allowAll {
-		if !core.HasAuthHeader(r.Context()) {
-			writeAuthError(w, r)
-			return
+		if !authz.HasAuthHeader(c.Context()) {
+			return writeAuthErrorFiber(c)
 		}
 		for _, s := range scopes {
-			if hasScopedBucketAccess(r, s, "read", "create", "update", "delete", "file_upload") {
+			if authz.HasScopedBucketAccess(c.Context(), s, "read", "create", "update", "delete", "file_upload") {
 				allowedBuckets[s.Bucket] = true
 			}
 		}
 		if len(allowedBuckets) == 0 {
-			writeAuthError(w, r)
-			return
+			return writeAuthErrorFiber(c)
 		}
 	}
 
@@ -47,7 +48,7 @@ func handleInternalBuckets(w http.ResponseWriter, r *http.Request, database core
 		if !allowAll && !allowedBuckets[s.Bucket] {
 			continue
 		}
-		res := core.ResourcePathForScope(s.Organization, s.ProjectID)
+		res := common.ResourcePathForScope(s.Organization, s.ProjectID)
 		if res == "" {
 			continue
 		}
@@ -58,9 +59,9 @@ func handleInternalBuckets(w http.ResponseWriter, r *http.Request, database core
 			continue
 		}
 		meta := bucketapi.BucketMetadata{
-			EndpointUrl: core.Ptr(c.Endpoint),
-			Provider:    core.Ptr(c.Provider),
-			Region:      core.Ptr(c.Region),
+			EndpointUrl: common.Ptr(c.Endpoint),
+			Provider:    common.Ptr(c.Provider),
+			Region:      common.Ptr(c.Region),
 		}
 		if programs := programsByBucket[c.Bucket]; len(programs) > 0 {
 			meta.Programs = &programs
@@ -68,20 +69,16 @@ func handleInternalBuckets(w http.ResponseWriter, r *http.Request, database core
 		outBuckets[c.Bucket] = meta
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		writeHTTPError(w, r, http.StatusInternalServerError, "Failed to encode response", err)
-	}
+	return c.JSON(resp)
 }
 
-func handleInternalPutBucket(w http.ResponseWriter, r *http.Request, database core.CredentialStore) {
+func handleInternalPutBucketFiber(c fiber.Ctx, database db.CredentialStore) error {
 	var req bucketapi.PutBucketRequest
-	if err := decodeStrictJSON(r.Body, &req); err != nil {
-		writeHTTPError(w, r, http.StatusBadRequest, "Invalid request body", nil)
-		return
+	if err := decodeStrictJSON(c.Body(), &req); err != nil {
+		return writeHTTPErrorFiber(c, http.StatusBadRequest, "Invalid request body", nil)
 	}
 
-	provider := strings.ToLower(strings.TrimSpace(core.StringVal(req.Provider)))
+	provider := strings.ToLower(strings.TrimSpace(common.StringVal(req.Provider)))
 	switch provider {
 	case "", "s3":
 		provider = "s3"
@@ -90,87 +87,79 @@ func handleInternalPutBucket(w http.ResponseWriter, r *http.Request, database co
 	case "azure", "file":
 		// keep as-is
 	default:
-		writeHTTPError(w, r, http.StatusBadRequest, "provider must be one of: s3, gcs, azure, file", nil)
-		return
+		return writeHTTPErrorFiber(c, http.StatusBadRequest, "provider must be one of: s3, gcs, azure, file", nil)
 	}
 
 	req.Bucket = strings.TrimSpace(req.Bucket)
 	req.Organization = strings.TrimSpace(req.Organization)
 	req.ProjectId = strings.TrimSpace(req.ProjectId)
-	if v := strings.TrimSpace(core.StringVal(req.Region)); v != "" {
-		req.Region = core.Ptr(v)
+	if v := strings.TrimSpace(common.StringVal(req.Region)); v != "" {
+		req.Region = common.Ptr(v)
 	}
-	if v := strings.TrimSpace(core.StringVal(req.AccessKey)); v != "" {
-		req.AccessKey = core.Ptr(v)
+	if v := strings.TrimSpace(common.StringVal(req.AccessKey)); v != "" {
+		req.AccessKey = common.Ptr(v)
 	}
-	if v := strings.TrimSpace(core.StringVal(req.SecretKey)); v != "" {
-		req.SecretKey = core.Ptr(v)
+	if v := strings.TrimSpace(common.StringVal(req.SecretKey)); v != "" {
+		req.SecretKey = common.Ptr(v)
 	}
-	if v := strings.TrimSpace(core.StringVal(req.Endpoint)); v != "" {
-		req.Endpoint = core.Ptr(v)
+	if v := strings.TrimSpace(common.StringVal(req.Endpoint)); v != "" {
+		req.Endpoint = common.Ptr(v)
 	}
 	if req.Bucket == "" || req.Organization == "" || req.ProjectId == "" {
-		writeHTTPError(w, r, http.StatusBadRequest, "bucket, organization, and project_id are required", nil)
-		return
+		return writeHTTPErrorFiber(c, http.StatusBadRequest, "bucket, organization, and project_id are required", nil)
 	}
 
-	if core.IsGen3Mode(r.Context()) {
-		if !core.HasAuthHeader(r.Context()) {
-			writeAuthError(w, r)
-			return
+	if authz.IsGen3Mode(c.Context()) {
+		if !authz.HasAuthHeader(c.Context()) {
+			return writeAuthErrorFiber(c)
 		}
-		if !hasGlobalBucketControlAccess(r, "create", "update") {
-			res := scopeResource(req.Organization, req.ProjectId)
-			if res == "" || !hasAnyMethodAccess(r, []string{res}, "create", "update") {
-				writeAuthError(w, r)
-				return
+		if !authz.HasGlobalBucketControlAccess(c.Context(), "create", "update") {
+			res := common.ResourcePathForScope(req.Organization, req.ProjectId)
+			if res == "" || !authz.HasAnyMethodAccess(c.Context(), []string{res}, "create", "update") {
+				return writeAuthErrorFiber(c)
 			}
 		}
 	}
 
-	prefix, err := normalizeScopePath(readOptionalPath(req.Path), req.Bucket)
+	prefix, err := common.NormalizeStoragePath(readOptionalPath(req.Path), req.Bucket)
 	if err != nil {
-		writeHTTPError(w, r, http.StatusBadRequest, err.Error(), err)
-		return
+		return writeHTTPErrorFiber(c, http.StatusBadRequest, err.Error(), err)
 	}
 	if prefix == "" {
 		prefix = strings.Trim(req.Organization+"/"+req.ProjectId, "/")
 	}
 
-	existingCred, credErr := database.GetS3Credential(r.Context(), req.Bucket)
+	existingCred, credErr := database.GetS3Credential(c.Context(), req.Bucket)
 	hasExistingCred := credErr == nil && existingCred != nil
 	scopeOnly := hasExistingCred &&
-		strings.TrimSpace(core.StringVal(req.AccessKey)) == "" &&
-		strings.TrimSpace(core.StringVal(req.SecretKey)) == "" &&
-		strings.TrimSpace(core.StringVal(req.Endpoint)) == "" &&
-		strings.TrimSpace(core.StringVal(req.Region)) == "" &&
-		strings.TrimSpace(core.StringVal(req.Provider)) == ""
+		strings.TrimSpace(common.StringVal(req.AccessKey)) == "" &&
+		strings.TrimSpace(common.StringVal(req.SecretKey)) == "" &&
+		strings.TrimSpace(common.StringVal(req.Endpoint)) == "" &&
+		strings.TrimSpace(common.StringVal(req.Region)) == "" &&
+		strings.TrimSpace(common.StringVal(req.Provider)) == ""
 
 	if !hasExistingCred && provider == "s3" &&
-		(strings.TrimSpace(core.StringVal(req.AccessKey)) == "" || strings.TrimSpace(core.StringVal(req.SecretKey)) == "") {
-		writeHTTPError(w, r, http.StatusBadRequest, "access_key and secret_key are required for new s3 credentials", nil)
-		return
+		(strings.TrimSpace(common.StringVal(req.AccessKey)) == "" || strings.TrimSpace(common.StringVal(req.SecretKey)) == "") {
+		return writeHTTPErrorFiber(c, http.StatusBadRequest, "access_key and secret_key are required for new s3 credentials", nil)
 	}
 
-	if err := database.CreateBucketScope(r.Context(), &core.BucketScope{
+	if err := database.CreateBucketScope(c.Context(), &models.BucketScope{
 		Organization: req.Organization,
 		ProjectID:    req.ProjectId,
 		Bucket:       req.Bucket,
 		PathPrefix:   prefix,
 	}); err != nil {
-		writeDBError(w, r, err)
-		return
+		return writeDBErrorFiber(c, err)
 	}
 
 	if scopeOnly {
-		w.WriteHeader(http.StatusCreated)
-		return
+		return c.SendStatus(http.StatusCreated)
 	}
 
-	region := strings.TrimSpace(core.StringVal(req.Region))
-	accessKey := strings.TrimSpace(core.StringVal(req.AccessKey))
-	secretKey := strings.TrimSpace(core.StringVal(req.SecretKey))
-	endpoint := strings.TrimSpace(core.StringVal(req.Endpoint))
+	region := strings.TrimSpace(common.StringVal(req.Region))
+	accessKey := strings.TrimSpace(common.StringVal(req.AccessKey))
+	secretKey := strings.TrimSpace(common.StringVal(req.SecretKey))
+	endpoint := strings.TrimSpace(common.StringVal(req.Endpoint))
 	if hasExistingCred {
 		if region == "" {
 			region = existingCred.Region
@@ -186,7 +175,7 @@ func handleInternalPutBucket(w http.ResponseWriter, r *http.Request, database co
 		}
 	}
 
-	cred := &core.S3Credential{
+	cred := &models.S3Credential{
 		Bucket:    req.Bucket,
 		Provider:  provider,
 		Region:    region,
@@ -195,34 +184,29 @@ func handleInternalPutBucket(w http.ResponseWriter, r *http.Request, database co
 		Endpoint:  endpoint,
 	}
 	if provider == "s3" && (strings.TrimSpace(cred.AccessKey) == "" || strings.TrimSpace(cred.SecretKey) == "") {
-		writeHTTPError(w, r, http.StatusBadRequest, "access_key and secret_key are required for s3 credentials", nil)
-		return
+		return writeHTTPErrorFiber(c, http.StatusBadRequest, "access_key and secret_key are required for s3 credentials", nil)
 	}
 
-	if err := database.SaveS3Credential(r.Context(), cred); err != nil {
-		writeDBError(w, r, err)
-		return
+	if err := database.SaveS3Credential(c.Context(), cred); err != nil {
+		return writeDBErrorFiber(c, err)
 	}
-	w.WriteHeader(http.StatusCreated)
+	return c.SendStatus(http.StatusCreated)
 }
 
-func handleInternalDeleteBucket(w http.ResponseWriter, r *http.Request, database core.CredentialStore) {
-	bucket := routeutil.PathParam(r, "bucket")
+func handleInternalDeleteBucketFiber(c fiber.Ctx, database db.CredentialStore) error {
+	bucket := c.Params("bucket")
 	if bucket == "" {
-		writeHTTPError(w, r, http.StatusBadRequest, "bucket name is required", nil)
-		return
+		return writeHTTPErrorFiber(c, http.StatusBadRequest, "bucket name is required", nil)
 	}
 
-	if core.IsGen3Mode(r.Context()) {
-		if !core.HasAuthHeader(r.Context()) {
-			writeAuthError(w, r)
-			return
+	if authz.IsGen3Mode(c.Context()) {
+		if !authz.HasAuthHeader(c.Context()) {
+			return writeAuthErrorFiber(c)
 		}
-		if !hasGlobalBucketControlAccess(r, "delete") {
-			scopes, err := database.ListBucketScopes(r.Context())
+		if !authz.HasGlobalBucketControlAccess(c.Context(), "delete") {
+			scopes, err := database.ListBucketScopes(c.Context())
 			if err != nil {
-				writeDBError(w, r, err)
-				return
+				return writeDBErrorFiber(c, err)
 			}
 			matching := 0
 			for _, s := range scopes {
@@ -230,58 +214,49 @@ func handleInternalDeleteBucket(w http.ResponseWriter, r *http.Request, database
 					continue
 				}
 				matching++
-				if !hasScopedBucketAccess(r, s, "delete", "update") {
-					writeAuthError(w, r)
-					return
+				if !authz.HasScopedBucketAccess(c.Context(), s, "delete", "update") {
+					return writeAuthErrorFiber(c)
 				}
 			}
 			if matching == 0 {
-				writeAuthError(w, r)
-				return
+				return writeAuthErrorFiber(c)
 			}
 		}
 	}
 
-	if err := database.DeleteS3Credential(r.Context(), bucket); err != nil {
-		writeDBError(w, r, err)
-		return
+	if err := database.DeleteS3Credential(c.Context(), bucket); err != nil {
+		return writeDBErrorFiber(c, err)
 	}
-	w.WriteHeader(http.StatusNoContent)
+	return c.SendStatus(http.StatusNoContent)
 }
 
-func handleInternalCreateBucketScope(w http.ResponseWriter, r *http.Request, database core.CredentialStore) {
-	bucket := strings.TrimSpace(routeutil.PathParam(r, "bucket"))
+func handleInternalCreateBucketScopeFiber(c fiber.Ctx, database db.CredentialStore) error {
+	bucket := strings.TrimSpace(c.Params("bucket"))
 	if bucket == "" {
-		writeHTTPError(w, r, http.StatusBadRequest, "bucket name is required", nil)
-		return
+		return writeHTTPErrorFiber(c, http.StatusBadRequest, "bucket name is required", nil)
 	}
-	if _, err := database.GetS3Credential(r.Context(), bucket); err != nil {
-		writeDBError(w, r, err)
-		return
+	if _, err := database.GetS3Credential(c.Context(), bucket); err != nil {
+		return writeDBErrorFiber(c, err)
 	}
 
 	var req bucketapi.AddBucketScopeRequest
-	if err := decodeStrictJSON(r.Body, &req); err != nil {
-		writeHTTPError(w, r, http.StatusBadRequest, "Invalid request body", nil)
-		return
+	if err := decodeStrictJSON(c.Body(), &req); err != nil {
+		return writeHTTPErrorFiber(c, http.StatusBadRequest, "Invalid request body", nil)
 	}
 	req.Organization = strings.TrimSpace(req.Organization)
 	req.ProjectId = strings.TrimSpace(req.ProjectId)
 	if req.Organization == "" || req.ProjectId == "" {
-		writeHTTPError(w, r, http.StatusBadRequest, "organization and project_id are required", nil)
-		return
+		return writeHTTPErrorFiber(c, http.StatusBadRequest, "organization and project_id are required", nil)
 	}
 
-	if core.IsGen3Mode(r.Context()) {
-		if !core.HasAuthHeader(r.Context()) {
-			writeAuthError(w, r)
-			return
+	if authz.IsGen3Mode(c.Context()) {
+		if !authz.HasAuthHeader(c.Context()) {
+			return writeAuthErrorFiber(c)
 		}
-		if !hasGlobalBucketControlAccess(r, "create", "update") {
-			res := scopeResource(req.Organization, req.ProjectId)
-			if res == "" || !hasAnyMethodAccess(r, []string{res}, "create", "update") {
-				writeAuthError(w, r)
-				return
+		if !authz.HasGlobalBucketControlAccess(c.Context(), "create", "update") {
+			res := common.ResourcePathForScope(req.Organization, req.ProjectId)
+			if res == "" || !authz.HasAnyMethodAccess(c.Context(), []string{res}, "create", "update") {
+				return writeAuthErrorFiber(c)
 			}
 		}
 	}
@@ -290,21 +265,19 @@ func handleInternalCreateBucketScope(w http.ResponseWriter, r *http.Request, dat
 	if strings.TrimSpace(path) == "" {
 		path = config.S3Prefix + bucket + "/" + strings.Trim(req.Organization+"/"+req.ProjectId, "/")
 	}
-	prefix, err := normalizeScopePath(path, bucket)
+	prefix, err := common.NormalizeStoragePath(path, bucket)
 	if err != nil {
-		writeHTTPError(w, r, http.StatusBadRequest, err.Error(), err)
-		return
+		return writeHTTPErrorFiber(c, http.StatusBadRequest, err.Error(), err)
 	}
-	if err := database.CreateBucketScope(r.Context(), &core.BucketScope{
+	if err := database.CreateBucketScope(c.Context(), &models.BucketScope{
 		Organization: req.Organization,
 		ProjectID:    req.ProjectId,
 		Bucket:       bucket,
 		PathPrefix:   prefix,
 	}); err != nil {
-		writeDBError(w, r, err)
-		return
+		return writeDBErrorFiber(c, err)
 	}
-	w.WriteHeader(http.StatusCreated)
+	return c.SendStatus(http.StatusCreated)
 }
 
 func readOptionalPath(path *string) string {
@@ -314,8 +287,8 @@ func readOptionalPath(path *string) string {
 	return strings.TrimSpace(*path)
 }
 
-func decodeStrictJSON(body io.Reader, dst any) error {
-	dec := json.NewDecoder(body)
+func decodeStrictJSON(body []byte, dst any) error {
+	dec := json.NewDecoder(strings.NewReader(string(body)))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(dst); err != nil {
 		return err

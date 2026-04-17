@@ -1,6 +1,9 @@
 package metrics
 
 import (
+	"github.com/calypr/syfon/internal/models"
+	"github.com/calypr/syfon/internal/common"
+
 	"context"
 	"encoding/json"
 	"io"
@@ -11,7 +14,7 @@ import (
 
 	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/apigen/server/metricsapi"
-	"github.com/calypr/syfon/internal/db/core"
+	
 	"github.com/calypr/syfon/internal/testutils"
 	"github.com/gofiber/fiber/v3"
 )
@@ -20,10 +23,10 @@ func TestMetricsRoutes_ListAndSummary(t *testing.T) {
 	now := time.Now().UTC()
 	db := &testutils.MockDatabase{
 		Objects: map[string]*drs.DrsObject{
-			"sha-1": {Id: "sha-1", Name: core.Ptr("f1"), Size: 1},
-			"sha-2": {Id: "sha-2", Name: core.Ptr("f2"), Size: 2},
+			"sha-1": {Id: "sha-1", Name: common.Ptr("f1"), Size: 1},
+			"sha-2": {Id: "sha-2", Name: common.Ptr("f2"), Size: 2},
 		},
-		Usage: map[string]core.FileUsage{
+		Usage: map[string]models.FileUsage{
 			"sha-1": {
 				ObjectID:      "sha-1",
 				Name:          "f1",
@@ -115,14 +118,14 @@ func TestMetricsRoutes_GetNotFoundAndValidation(t *testing.T) {
 func TestMetricsSummaryAuthzAndScope(t *testing.T) {
 	db := &testutils.MockDatabase{
 		Objects: map[string]*drs.DrsObject{
-			"scoped-1": {Id: "scoped-1", Name: core.Ptr("f1"), Size: 1},
-			"other-1":  {Id: "other-1", Name: core.Ptr("f2"), Size: 2},
+			"scoped-1": {Id: "scoped-1", Name: common.Ptr("f1"), Size: 1},
+			"other-1":  {Id: "other-1", Name: common.Ptr("f2"), Size: 2},
 		},
 		ObjectAuthz: map[string][]string{
 			"scoped-1": {"/programs/cbds/projects/end_to_end_test"},
 			"other-1":  {"/programs/other/projects/other"},
 		},
-		Usage: map[string]core.FileUsage{
+		Usage: map[string]models.FileUsage{
 			"scoped-1": {
 				ObjectID:      "scoped-1",
 				UploadCount:   2,
@@ -139,16 +142,16 @@ func TestMetricsSummaryAuthzAndScope(t *testing.T) {
 	app.Use(func(c fiber.Ctx) error {
 		// Mock auth values from headers for testing
 		if mode := c.Get("X-Test-Auth-Mode"); mode != "" {
-			ctx := context.WithValue(c.Context(), core.AuthModeKey, mode)
+			ctx := context.WithValue(c.Context(), common.AuthModeKey, mode)
 			if c.Get("X-Test-Auth-Header") == "true" {
-				ctx = context.WithValue(ctx, core.AuthHeaderPresentKey, true)
+				ctx = context.WithValue(ctx, common.AuthHeaderPresentKey, true)
 			} else if c.Get("X-Test-Auth-Header") == "false" {
-				ctx = context.WithValue(ctx, core.AuthHeaderPresentKey, false)
+				ctx = context.WithValue(ctx, common.AuthHeaderPresentKey, false)
 			}
 			if privsJSON := c.Get("X-Test-Privileges"); privsJSON != "" {
 				var privs map[string]map[string]bool
 				if err := json.Unmarshal([]byte(privsJSON), &privs); err == nil {
-					ctx = context.WithValue(ctx, core.UserPrivilegesKey, privs)
+					ctx = context.WithValue(ctx, common.UserPrivilegesKey, privs)
 				}
 			}
 			c.SetContext(ctx)
@@ -218,14 +221,14 @@ func TestMetricsSummaryAuthzAndScope(t *testing.T) {
 func TestMetricsFilesAuthzAndScope(t *testing.T) {
 	db := &testutils.MockDatabase{
 		Objects: map[string]*drs.DrsObject{
-			"scoped-1": {Id: "scoped-1", Name: core.Ptr("f1"), Size: 1},
-			"other-1":  {Id: "other-1", Name: core.Ptr("f2"), Size: 2},
+			"scoped-1": {Id: "scoped-1", Name: common.Ptr("f1"), Size: 1},
+			"other-1":  {Id: "other-1", Name: common.Ptr("f2"), Size: 2},
 		},
 		ObjectAuthz: map[string][]string{
 			"scoped-1": {"/programs/cbds/projects/end_to_end_test"},
 			"other-1":  {"/programs/other/projects/other"},
 		},
-		Usage: map[string]core.FileUsage{
+		Usage: map[string]models.FileUsage{
 			"scoped-1": {
 				ObjectID:      "scoped-1",
 				Name:          "f1",
@@ -245,14 +248,14 @@ func TestMetricsFilesAuthzAndScope(t *testing.T) {
 	app := fiber.New()
 	app.Use(func(c fiber.Ctx) error {
 		if mode := c.Get("X-Test-Auth-Mode"); mode != "" {
-			ctx := context.WithValue(c.Context(), core.AuthModeKey, mode)
+			ctx := context.WithValue(c.Context(), common.AuthModeKey, mode)
 			if c.Get("X-Test-Auth-Header") == "true" {
-				ctx = context.WithValue(ctx, core.AuthHeaderPresentKey, true)
+				ctx = context.WithValue(ctx, common.AuthHeaderPresentKey, true)
 			}
 			if privsJSON := c.Get("X-Test-Privileges"); privsJSON != "" {
 				var privs map[string]map[string]bool
 				if err := json.Unmarshal([]byte(privsJSON), &privs); err == nil {
-					ctx = context.WithValue(ctx, core.UserPrivilegesKey, privs)
+					ctx = context.WithValue(ctx, common.UserPrivilegesKey, privs)
 				}
 			}
 			c.SetContext(ctx)

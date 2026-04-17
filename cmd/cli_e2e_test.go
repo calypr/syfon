@@ -18,9 +18,9 @@ import (
 	"github.com/calypr/syfon/internal/api/metrics"
 	"github.com/calypr/syfon/internal/config"
 	"github.com/calypr/syfon/internal/db"
-	"github.com/calypr/syfon/internal/db/core"
-	"github.com/calypr/syfon/internal/provider"
-	"github.com/calypr/syfon/internal/service"
+	"github.com/calypr/syfon/internal/common"
+	"github.com/calypr/syfon/internal/common"
+	"github.com/calypr/syfon/internal/api/drsapi"
 	"github.com/calypr/syfon/internal/signer/file"
 	"github.com/calypr/syfon/internal/urlmanager"
 	"github.com/gofiber/fiber/v3"
@@ -75,7 +75,7 @@ func newSyfonTestServer(t *testing.T) *fiberTestServer {
 	endpoint := "file://" + storageDir
 
 	database := db.NewInMemoryDB()
-	if err := database.SaveS3Credential(context.Background(), &core.S3Credential{
+	if err := database.SaveS3Credential(context.Background(), &models.S3Credential{
 		Bucket:   "syfon-bucket",
 		Provider: "file",
 		Endpoint: endpoint,
@@ -85,15 +85,14 @@ func newSyfonTestServer(t *testing.T) *fiberTestServer {
 
 	uM := urlmanager.NewManager(database, config.SigningConfig{DefaultExpirySeconds: 900})
 	fSigner, _ := file.NewFileSigner("/")
-	uM.RegisterSigner(provider.File, fSigner)
-	svc := service.NewObjectsAPIService(database, uM)
+	uM.RegisterSigner(core.FileProvider, fSigner)
 
 	app := fiber.New()
 	app.Get(config.RouteHealthz, func(c fiber.Ctx) error {
 		return c.SendString("OK")
 	})
 	api := app.Group("/")
-	strict := service.NewStrictServer(svc)
+	strict := drsapi.NewStrictServer(database, uM)
 	drs.RegisterHandlersWithOptions(api, drs.NewStrictHandler(strict, nil), drs.FiberServerOptions{
 		BaseURL: "/ga4gh/drs/v1",
 	})

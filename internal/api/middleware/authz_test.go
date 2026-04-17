@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/calypr/syfon/internal/db/core"
+	"github.com/calypr/syfon/internal/authz"
 	"github.com/gofiber/fiber/v3"
 )
 
@@ -46,10 +46,10 @@ func TestGen3ModeSetsContextWithoutAuthHeader(t *testing.T) {
 	app := fiber.New()
 	app.Use(m.FiberMiddleware())
 	app.Get("/", func(c fiber.Ctx) error {
-		if !core.IsGen3Mode(c.Context()) {
+		if !authz.IsGen3Mode(c.Context()) {
 			t.Fatalf("expected gen3 mode in context")
 		}
-		if core.HasAuthHeader(c.Context()) {
+		if authz.HasAuthHeader(c.Context()) {
 			t.Fatalf("did not expect auth header presence")
 		}
 		return c.SendStatus(http.StatusOK)
@@ -70,7 +70,7 @@ func TestGen3ModeMalformedBearerStillPassesToNext(t *testing.T) {
 	app := fiber.New()
 	app.Use(m.FiberMiddleware())
 	app.Get("/", func(c fiber.Ctx) error {
-		if !core.HasAuthHeader(c.Context()) {
+		if !authz.HasAuthHeader(c.Context()) {
 			t.Fatalf("expected auth header presence to be true")
 		}
 		return c.SendStatus(http.StatusOK)
@@ -194,13 +194,13 @@ func TestGen3MockAuthInjectsPrivileges(t *testing.T) {
 	app := fiber.New()
 	app.Use(m.FiberMiddleware())
 	app.Get("/", func(c fiber.Ctx) error {
-		if !core.IsGen3Mode(c.Context()) {
+		if !authz.IsGen3Mode(c.Context()) {
 			t.Fatalf("expected gen3 mode")
 		}
-		if !core.HasMethodAccess(c.Context(), "read", []string{"/data_file"}) {
+		if !authz.HasMethodAccess(c.Context(), "read", []string{"/data_file"}) {
 			t.Fatalf("expected read on /data_file")
 		}
-		if !core.HasMethodAccess(c.Context(), "create", []string{"/programs/cbds/projects/end_to_end_test"}) {
+		if !authz.HasMethodAccess(c.Context(), "create", []string{"/programs/cbds/projects/end_to_end_test"}) {
 			t.Fatalf("expected create on project resource")
 		}
 		return c.SendStatus(http.StatusOK)
@@ -227,7 +227,7 @@ func TestGen3MockAuthRequireHeader(t *testing.T) {
 	app.Use(m.FiberMiddleware())
 	app.Get("/", func(c fiber.Ctx) error {
 		// Without header, mock privileges should not be injected.
-		if core.HasMethodAccess(c.Context(), "read", []string{"/data_file"}) {
+		if authz.HasMethodAccess(c.Context(), "read", []string{"/data_file"}) {
 			t.Fatalf("did not expect read access without auth header")
 		}
 		return c.SendStatus(http.StatusOK)

@@ -1,10 +1,10 @@
 package postgres
 
 import (
+	"github.com/calypr/syfon/internal/models"
 	"strings"
 	"time"
 
-	"github.com/calypr/syfon/internal/db/core"
 )
 
 func defaultProvider(provider string) string {
@@ -14,9 +14,9 @@ func defaultProvider(provider string) string {
 	return provider
 }
 
-func uniqueObjectsByID(objs []core.InternalObject) []core.InternalObject {
+func uniqueObjectsByID(objs []models.InternalObject) []models.InternalObject {
 	seen := make(map[string]struct{}, len(objs))
-	out := make([]core.InternalObject, 0, len(objs))
+	out := make([]models.InternalObject, 0, len(objs))
 	for _, o := range objs {
 		if _, ok := seen[o.Id]; ok {
 			continue

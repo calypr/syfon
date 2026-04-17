@@ -12,8 +12,8 @@ import (
 	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/api/middleware"
 	"github.com/calypr/syfon/internal/config"
-	"github.com/calypr/syfon/internal/db/core"
-	"github.com/calypr/syfon/internal/service"
+	"github.com/calypr/syfon/internal/common"
+	"github.com/calypr/syfon/internal/api/drsapi"
 	"github.com/calypr/syfon/internal/testutils"
 	"github.com/gofiber/fiber/v3"
 )
@@ -153,15 +153,15 @@ func buildMockServerRouterWithRoutes(routes config.RoutesConfig) *fiber.App {
 		Objects: map[string]*drs.DrsObject{
 			"sha-1": {
 				Id:          "sha-1",
-				Name:        core.Ptr("mock-object"),
+				Name:        common.Ptr("mock-object"),
 				Size:        1,
-				Version:     core.Ptr("1"),
-				Description: core.Ptr("mock"),
+				Version:     common.Ptr("1"),
+				Description: common.Ptr("mock"),
 				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: "sha-1"}},
 				AccessMethods: &[]drs.AccessMethod{
 					{
 						Type:     drs.AccessMethodTypeS3,
-						AccessId: core.Ptr("s3"),
+						AccessId: common.Ptr("s3"),
 						AccessUrl: &struct {
 							Headers *[]string `json:"headers,omitempty"`
 							Url     string    `json:"url"`
@@ -181,7 +181,7 @@ func buildMockServerRouterWithRoutes(routes config.RoutesConfig) *fiber.App {
 		ObjectAuthz: map[string][]string{
 			"sha-1": {"/data_file"},
 		},
-		Credentials: map[string]core.S3Credential{
+		Credentials: map[string]models.S3Credential{
 			"test-bucket-1": {
 				Bucket:    "test-bucket-1",
 				Region:    "us-east-1",
@@ -197,19 +197,11 @@ func buildMockServerRouterWithRoutes(routes config.RoutesConfig) *fiber.App {
 	authzMiddleware := middleware.NewAuthzMiddleware(logger, "local", "", "")
 	requestIDMiddleware := middleware.NewRequestIDMiddleware(logger)
 	cfg := &config.Config{Routes: routes}
-	hasOptionalRoutes := routes.Ga4gh || routes.Docs || routes.Metrics || routes.Internal || routes.LFS
-	var svc *service.ObjectsAPIService
-	if hasOptionalRoutes {
-		if routes.Ga4gh {
-			svc = service.NewObjectsAPIService(database, uM)
-		}
-	}
 	rt := &serverRuntime{
 		app:                 app,
 		cfg:                 cfg,
 		database:            database,
 		uM:                  uM,
-		svc:                 svc,
 		authzMiddleware:     authzMiddleware,
 		requestIDMiddleware: requestIDMiddleware,
 	}

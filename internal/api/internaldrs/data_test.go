@@ -1,6 +1,8 @@
 package internaldrs
 
 import (
+	"github.com/calypr/syfon/internal/models"
+
 	"bytes"
 	"context"
 	"encoding/json"
@@ -14,12 +16,14 @@ import (
 	"github.com/calypr/syfon/apigen/server/bucketapi"
 	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/apigen/server/internalapi"
-	"github.com/calypr/syfon/internal/db/core"
+	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/api/routeutil"
 	"github.com/calypr/syfon/internal/testutils"
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 )
+
+func ptr[T any](v T) *T { return &v }
 
 func TestHandleInternalDownload(t *testing.T) {
 	mockDB := &testutils.MockDatabase{
@@ -58,8 +62,8 @@ func TestHandleInternalDownload(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if !strings.Contains(core.StringVal(resp.Url), "signed=true") {
-		t.Errorf("expected signed url, got %v", core.StringVal(resp.Url))
+	if !strings.Contains(common.StringVal(resp.Url), "signed=true") {
+		t.Errorf("expected signed url, got %v", common.StringVal(resp.Url))
 	}
 }
 
@@ -95,8 +99,8 @@ func TestHandleInternalDownloadPart(t *testing.T) {
 
 		var resp internalapi.InternalSignedURL
 		json.NewDecoder(rr.Body).Decode(&resp)
-		if !strings.Contains(core.StringVal(resp.Url), "range=0-1024") {
-			t.Errorf("expected signed range url, got %v", core.StringVal(resp.Url))
+		if !strings.Contains(common.StringVal(resp.Url), "range=0-1024") {
+			t.Errorf("expected signed range url, got %v", common.StringVal(resp.Url))
 		}
 	})
 
@@ -174,8 +178,8 @@ func TestHandleInternalDownload_ResolvesByChecksum(t *testing.T) {
 	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(core.StringVal(resp.Url), "/"+did+"/"+oid) {
-		t.Fatalf("expected signed url to include DID-backed key, got %s", core.StringVal(resp.Url))
+	if !strings.Contains(common.StringVal(resp.Url), "/"+did+"/"+oid) {
+		t.Fatalf("expected signed url to include DID-backed key, got %s", common.StringVal(resp.Url))
 	}
 }
 
@@ -222,8 +226,8 @@ func TestHandleInternalDownload_ResolvesByUUID(t *testing.T) {
 	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(core.StringVal(resp.Url), "/"+did) {
-		t.Fatalf("expected signed url to include UUID-backed key, got %s", core.StringVal(resp.Url))
+	if !strings.Contains(common.StringVal(resp.Url), "/"+did) {
+		t.Fatalf("expected signed url to include UUID-backed key, got %s", common.StringVal(resp.Url))
 	}
 }
 
@@ -300,16 +304,16 @@ func TestHandleInternalUploadBlank(t *testing.T) {
 		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusCreated)
 	}
 
-	var resp internalapi.InternalUploadBlankResponse
+	var resp internalapi.InternalUploadBlankOutput
 	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := uuid.Parse(core.StringVal(resp.Guid)); err != nil {
-		t.Fatalf("expected minted UUID guid, got %q", core.StringVal(resp.Guid))
+	if _, err := uuid.Parse(common.StringVal(resp.Guid)); err != nil {
+		t.Fatalf("expected minted UUID guid, got %q", common.StringVal(resp.Guid))
 	}
-	if !strings.Contains(core.StringVal(resp.Url), "upload=true") {
-		t.Errorf("expected upload url, got %v", core.StringVal(resp.Url))
+	if !strings.Contains(common.StringVal(resp.Url), "upload=true") {
+		t.Errorf("expected upload url, got %v", common.StringVal(resp.Url))
 	}
 }
 
@@ -334,16 +338,16 @@ func TestHandleInternalMultipartInit(t *testing.T) {
 	}
 
 	bodyBytes := rr.Body.Bytes()
-	var resp internalapi.InternalMultipartInitResponse
+	var resp internalapi.InternalMultipartInitOutput
 	if err := json.Unmarshal(bodyBytes, &resp); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := uuid.Parse(core.StringVal(resp.Guid)); err != nil {
-		t.Fatalf("expected UUID guid, got %q", core.StringVal(resp.Guid))
+	if _, err := uuid.Parse(common.StringVal(resp.Guid)); err != nil {
+		t.Fatalf("expected UUID guid, got %q", common.StringVal(resp.Guid))
 	}
 
-	if core.StringVal(resp.UploadId) != "mock-upload-id" {
-		t.Errorf("expected mock-upload-id, got %v", core.StringVal(resp.UploadId))
+	if common.StringVal(resp.UploadId) != "mock-upload-id" {
+		t.Errorf("expected mock-upload-id, got %v", common.StringVal(resp.UploadId))
 	}
 
 	var raw map[string]any
@@ -377,16 +381,16 @@ func TestHandleInternalMultipartInit_MintsUUIDForChecksumInput(t *testing.T) {
 		t.Fatalf("handler returned wrong status code: got %v want %v body=%s", status, http.StatusCreated, rr.Body.String())
 	}
 
-	var resp internalapi.InternalMultipartInitResponse
+	var resp internalapi.InternalMultipartInitOutput
 	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := uuid.Parse(core.StringVal(resp.Guid)); err != nil {
-		t.Fatalf("expected minted UUID guid, got %q", core.StringVal(resp.Guid))
+	if _, err := uuid.Parse(common.StringVal(resp.Guid)); err != nil {
+		t.Fatalf("expected minted UUID guid, got %q", common.StringVal(resp.Guid))
 	}
-	obj, ok := mockDB.Objects[core.StringVal(resp.Guid)]
+	obj, ok := mockDB.Objects[common.StringVal(resp.Guid)]
 	if !ok {
-		t.Fatalf("expected created object for guid %s", core.StringVal(resp.Guid))
+		t.Fatalf("expected created object for guid %s", common.StringVal(resp.Guid))
 	}
 	if len(obj.Checksums) == 0 || obj.Checksums[0].Checksum != checksum {
 		t.Fatalf("expected checksum %s to be persisted, got %+v", checksum, obj.Checksums)
@@ -431,12 +435,12 @@ func TestHandleInternalMultipartInit_ResolvesExistingByChecksumGUID(t *testing.T
 		t.Fatalf("handler returned wrong status code: got %v want %v body=%s", status, http.StatusCreated, rr.Body.String())
 	}
 
-	var resp internalapi.InternalMultipartInitResponse
+	var resp internalapi.InternalMultipartInitOutput
 	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
 		t.Fatal(err)
 	}
-	if core.StringVal(resp.Guid) != existingID {
-		t.Fatalf("expected resolved existing UUID guid %s, got %s", existingID, core.StringVal(resp.Guid))
+	if common.StringVal(resp.Guid) != existingID {
+		t.Fatalf("expected resolved existing UUID guid %s, got %s", existingID, common.StringVal(resp.Guid))
 	}
 }
 
@@ -462,11 +466,11 @@ func TestHandleInternalMultipartUpload(t *testing.T) {
 		t.Fatalf("handler returned wrong status code: got %v want %v", status, http.StatusOK)
 	}
 
-	var resp internalapi.InternalMultipartUploadResponse
+	var resp internalapi.InternalMultipartUploadOutput
 	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
 		t.Fatal(err)
 	}
-	if core.StringVal(resp.PresignedUrl) == "" {
+	if common.StringVal(resp.PresignedUrl) == "" {
 		t.Fatal("expected presigned_url to be set")
 	}
 }
@@ -520,8 +524,8 @@ func TestHandleInternalDownload_Gen3Auth(t *testing.T) {
 
 	req401, _ := http.NewRequest("GET", "/data/download/secure-id", nil)
 	req401 = routeutil.WithPathParams(req401, map[string]string{"file_id": "secure-id"})
-	ctx401 := context.WithValue(req401.Context(), core.AuthModeKey, "gen3")
-	ctx401 = context.WithValue(ctx401, core.AuthHeaderPresentKey, false)
+	ctx401 := context.WithValue(req401.Context(), common.AuthModeKey, "gen3")
+	ctx401 = context.WithValue(ctx401, common.AuthHeaderPresentKey, false)
 	req401 = req401.WithContext(ctx401)
 	rr401 := httptest.NewRecorder()
 	handleInternalDownload(rr401, req401, mockDB, mockUM)
@@ -531,9 +535,9 @@ func TestHandleInternalDownload_Gen3Auth(t *testing.T) {
 
 	req403, _ := http.NewRequest("GET", "/data/download/secure-id", nil)
 	req403 = routeutil.WithPathParams(req403, map[string]string{"file_id": "secure-id"})
-	ctx403 := context.WithValue(req403.Context(), core.AuthModeKey, "gen3")
-	ctx403 = context.WithValue(ctx403, core.AuthHeaderPresentKey, true)
-	ctx403 = context.WithValue(ctx403, core.UserPrivilegesKey, map[string]map[string]bool{
+	ctx403 := context.WithValue(req403.Context(), common.AuthModeKey, "gen3")
+	ctx403 = context.WithValue(ctx403, common.AuthHeaderPresentKey, true)
+	ctx403 = context.WithValue(ctx403, common.UserPrivilegesKey, map[string]map[string]bool{
 		"/programs/p/projects/q": {"create": true},
 	})
 	req403 = req403.WithContext(ctx403)
@@ -545,9 +549,9 @@ func TestHandleInternalDownload_Gen3Auth(t *testing.T) {
 
 	req200, _ := http.NewRequest("GET", "/data/download/secure-id", nil)
 	req200 = routeutil.WithPathParams(req200, map[string]string{"file_id": "secure-id"})
-	ctx200 := context.WithValue(req200.Context(), core.AuthModeKey, "gen3")
-	ctx200 = context.WithValue(ctx200, core.AuthHeaderPresentKey, true)
-	ctx200 = context.WithValue(ctx200, core.UserPrivilegesKey, map[string]map[string]bool{
+	ctx200 := context.WithValue(req200.Context(), common.AuthModeKey, "gen3")
+	ctx200 = context.WithValue(ctx200, common.AuthHeaderPresentKey, true)
+	ctx200 = context.WithValue(ctx200, common.UserPrivilegesKey, map[string]map[string]bool{
 		"/programs/p/projects/q": {"read": true},
 	})
 	req200 = req200.WithContext(ctx200)
@@ -563,8 +567,8 @@ func TestHandleInternalUploadURL_Gen3Unauthorized(t *testing.T) {
 	mockUM := &testutils.MockUrlManager{}
 	req, _ := http.NewRequest("GET", "/data/upload/some-id?bucket=test-bucket", nil)
 	req = routeutil.WithPathParams(req, map[string]string{"file_id": "some-id"})
-	ctx := context.WithValue(req.Context(), core.AuthModeKey, "gen3")
-	ctx = context.WithValue(ctx, core.AuthHeaderPresentKey, false)
+	ctx := context.WithValue(req.Context(), common.AuthModeKey, "gen3")
+	ctx = context.WithValue(ctx, common.AuthHeaderPresentKey, false)
 	req = req.WithContext(ctx)
 	rr := httptest.NewRecorder()
 	handleInternalUploadURL(rr, req, mockDB, mockUM)
@@ -575,10 +579,10 @@ func TestHandleInternalUploadURL_Gen3Unauthorized(t *testing.T) {
 
 func TestHandleInternalBuckets_Gen3Auth(t *testing.T) {
 	mockDB := &testutils.MockDatabase{
-		Credentials: map[string]core.S3Credential{
+		Credentials: map[string]models.S3Credential{
 			"b1": {Bucket: "b1", Region: "us-east-1"},
 		},
-		BucketScopes: map[string]core.BucketScope{
+		BucketScopes: map[string]models.BucketScope{
 			"cbds|proj1": {
 				Organization: "cbds",
 				ProjectID:    "proj1",
@@ -592,8 +596,8 @@ func TestHandleInternalBuckets_Gen3Auth(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx401 := context.WithValue(req401.Context(), core.AuthModeKey, "gen3")
-	ctx401 = context.WithValue(ctx401, core.AuthHeaderPresentKey, false)
+	ctx401 := context.WithValue(req401.Context(), common.AuthModeKey, "gen3")
+	ctx401 = context.WithValue(ctx401, common.AuthHeaderPresentKey, false)
 	req401 = req401.WithContext(ctx401)
 	rr401 := httptest.NewRecorder()
 	handleInternalBuckets(rr401, req401, mockDB)
@@ -602,9 +606,9 @@ func TestHandleInternalBuckets_Gen3Auth(t *testing.T) {
 	}
 
 	req403, _ := http.NewRequest("GET", "/data/buckets", nil)
-	ctx403 := context.WithValue(req403.Context(), core.AuthModeKey, "gen3")
-	ctx403 = context.WithValue(ctx403, core.AuthHeaderPresentKey, true)
-	ctx403 = context.WithValue(ctx403, core.UserPrivilegesKey, map[string]map[string]bool{
+	ctx403 := context.WithValue(req403.Context(), common.AuthModeKey, "gen3")
+	ctx403 = context.WithValue(ctx403, common.AuthHeaderPresentKey, true)
+	ctx403 = context.WithValue(ctx403, common.UserPrivilegesKey, map[string]map[string]bool{
 		bucketControlResource: {"create": true},
 	})
 	req403 = req403.WithContext(ctx403)
@@ -615,9 +619,9 @@ func TestHandleInternalBuckets_Gen3Auth(t *testing.T) {
 	}
 
 	req200, _ := http.NewRequest("GET", "/data/buckets", nil)
-	ctx200 := context.WithValue(req200.Context(), core.AuthModeKey, "gen3")
-	ctx200 = context.WithValue(ctx200, core.AuthHeaderPresentKey, true)
-	ctx200 = context.WithValue(ctx200, core.UserPrivilegesKey, map[string]map[string]bool{
+	ctx200 := context.WithValue(req200.Context(), common.AuthModeKey, "gen3")
+	ctx200 = context.WithValue(ctx200, common.AuthHeaderPresentKey, true)
+	ctx200 = context.WithValue(ctx200, common.UserPrivilegesKey, map[string]map[string]bool{
 		bucketControlResource: {"read": true},
 	})
 	req200 = req200.WithContext(ctx200)
@@ -628,9 +632,9 @@ func TestHandleInternalBuckets_Gen3Auth(t *testing.T) {
 	}
 
 	reqScoped, _ := http.NewRequest("GET", "/data/buckets", nil)
-	ctxScoped := context.WithValue(reqScoped.Context(), core.AuthModeKey, "gen3")
-	ctxScoped = context.WithValue(ctxScoped, core.AuthHeaderPresentKey, true)
-	ctxScoped = context.WithValue(ctxScoped, core.UserPrivilegesKey, map[string]map[string]bool{
+	ctxScoped := context.WithValue(reqScoped.Context(), common.AuthModeKey, "gen3")
+	ctxScoped = context.WithValue(ctxScoped, common.AuthHeaderPresentKey, true)
+	ctxScoped = context.WithValue(ctxScoped, common.UserPrivilegesKey, map[string]map[string]bool{
 		"/programs/cbds/projects/proj1": {"read": true},
 	})
 	reqScoped = reqScoped.WithContext(ctxScoped)
@@ -653,7 +657,7 @@ func TestHandleInternalBuckets_Gen3Auth(t *testing.T) {
 }
 
 func TestHandleInternalPutDeleteBucket_Gen3Auth(t *testing.T) {
-	mockDB := &testutils.MockDatabase{Credentials: map[string]core.S3Credential{}}
+	mockDB := &testutils.MockDatabase{Credentials: map[string]models.S3Credential{}}
 	path := "s3://b2/cbds/proj1"
 
 	region := "us-east-1"
@@ -672,8 +676,8 @@ func TestHandleInternalPutDeleteBucket_Gen3Auth(t *testing.T) {
 	})
 
 	putReq401, _ := http.NewRequest("PUT", "/data/buckets", bytes.NewBuffer(putBody))
-	ctxPut401 := context.WithValue(putReq401.Context(), core.AuthModeKey, "gen3")
-	ctxPut401 = context.WithValue(ctxPut401, core.AuthHeaderPresentKey, false)
+	ctxPut401 := context.WithValue(putReq401.Context(), common.AuthModeKey, "gen3")
+	ctxPut401 = context.WithValue(ctxPut401, common.AuthHeaderPresentKey, false)
 	putReq401 = putReq401.WithContext(ctxPut401)
 	putRR401 := httptest.NewRecorder()
 	handleInternalPutBucket(putRR401, putReq401, mockDB)
@@ -682,9 +686,9 @@ func TestHandleInternalPutDeleteBucket_Gen3Auth(t *testing.T) {
 	}
 
 	putReq201, _ := http.NewRequest("PUT", "/data/buckets", bytes.NewBuffer(putBody))
-	ctxPut201 := context.WithValue(putReq201.Context(), core.AuthModeKey, "gen3")
-	ctxPut201 = context.WithValue(ctxPut201, core.AuthHeaderPresentKey, true)
-	ctxPut201 = context.WithValue(ctxPut201, core.UserPrivilegesKey, map[string]map[string]bool{
+	ctxPut201 := context.WithValue(putReq201.Context(), common.AuthModeKey, "gen3")
+	ctxPut201 = context.WithValue(ctxPut201, common.AuthHeaderPresentKey, true)
+	ctxPut201 = context.WithValue(ctxPut201, common.UserPrivilegesKey, map[string]map[string]bool{
 		"/programs/cbds/projects/proj1": {"create": true},
 	})
 	putReq201 = putReq201.WithContext(ctxPut201)
@@ -700,9 +704,9 @@ func TestHandleInternalPutDeleteBucket_Gen3Auth(t *testing.T) {
 		"organization":"cbds",
 		"project_id":"proj2"
 	}`))
-	ctxPutScopeOnly := context.WithValue(putScopeOnlyReq.Context(), core.AuthModeKey, "gen3")
-	ctxPutScopeOnly = context.WithValue(ctxPutScopeOnly, core.AuthHeaderPresentKey, true)
-	ctxPutScopeOnly = context.WithValue(ctxPutScopeOnly, core.UserPrivilegesKey, map[string]map[string]bool{
+	ctxPutScopeOnly := context.WithValue(putScopeOnlyReq.Context(), common.AuthModeKey, "gen3")
+	ctxPutScopeOnly = context.WithValue(ctxPutScopeOnly, common.AuthHeaderPresentKey, true)
+	ctxPutScopeOnly = context.WithValue(ctxPutScopeOnly, common.UserPrivilegesKey, map[string]map[string]bool{
 		"/programs/cbds/projects/proj2": {"create": true},
 	})
 	putScopeOnlyReq = putScopeOnlyReq.WithContext(ctxPutScopeOnly)
@@ -718,9 +722,9 @@ func TestHandleInternalPutDeleteBucket_Gen3Auth(t *testing.T) {
 		"project_id":"proj3"
 	}`))
 	postScopeReq = routeutil.WithPathParams(postScopeReq, map[string]string{"bucket": "b2"})
-	ctxPostScope := context.WithValue(postScopeReq.Context(), core.AuthModeKey, "gen3")
-	ctxPostScope = context.WithValue(ctxPostScope, core.AuthHeaderPresentKey, true)
-	ctxPostScope = context.WithValue(ctxPostScope, core.UserPrivilegesKey, map[string]map[string]bool{
+	ctxPostScope := context.WithValue(postScopeReq.Context(), common.AuthModeKey, "gen3")
+	ctxPostScope = context.WithValue(ctxPostScope, common.AuthHeaderPresentKey, true)
+	ctxPostScope = context.WithValue(ctxPostScope, common.UserPrivilegesKey, map[string]map[string]bool{
 		"/programs/cbds/projects/proj3": {"create": true},
 	})
 	postScopeReq = postScopeReq.WithContext(ctxPostScope)
@@ -732,9 +736,9 @@ func TestHandleInternalPutDeleteBucket_Gen3Auth(t *testing.T) {
 
 	delReq403, _ := http.NewRequest("DELETE", "/data/buckets/b2", nil)
 	delReq403 = routeutil.WithPathParams(delReq403, map[string]string{"bucket": "b2"})
-	ctxDel403 := context.WithValue(delReq403.Context(), core.AuthModeKey, "gen3")
-	ctxDel403 = context.WithValue(ctxDel403, core.AuthHeaderPresentKey, true)
-	ctxDel403 = context.WithValue(ctxDel403, core.UserPrivilegesKey, map[string]map[string]bool{
+	ctxDel403 := context.WithValue(delReq403.Context(), common.AuthModeKey, "gen3")
+	ctxDel403 = context.WithValue(ctxDel403, common.AuthHeaderPresentKey, true)
+	ctxDel403 = context.WithValue(ctxDel403, common.UserPrivilegesKey, map[string]map[string]bool{
 		bucketControlResource: {"update": true},
 	})
 	delReq403 = delReq403.WithContext(ctxDel403)
@@ -746,9 +750,9 @@ func TestHandleInternalPutDeleteBucket_Gen3Auth(t *testing.T) {
 
 	delReq204, _ := http.NewRequest("DELETE", "/data/buckets/b2", nil)
 	delReq204 = routeutil.WithPathParams(delReq204, map[string]string{"bucket": "b2"})
-	ctxDel204 := context.WithValue(delReq204.Context(), core.AuthModeKey, "gen3")
-	ctxDel204 = context.WithValue(ctxDel204, core.AuthHeaderPresentKey, true)
-	ctxDel204 = context.WithValue(ctxDel204, core.UserPrivilegesKey, map[string]map[string]bool{
+	ctxDel204 := context.WithValue(delReq204.Context(), common.AuthModeKey, "gen3")
+	ctxDel204 = context.WithValue(ctxDel204, common.AuthHeaderPresentKey, true)
+	ctxDel204 = context.WithValue(ctxDel204, common.UserPrivilegesKey, map[string]map[string]bool{
 		"/programs/cbds/projects/proj1": {"update": true},
 		"/programs/cbds/projects/proj2": {"update": true},
 		"/programs/cbds/projects/proj3": {"update": true},
@@ -762,7 +766,7 @@ func TestHandleInternalPutDeleteBucket_Gen3Auth(t *testing.T) {
 }
 
 func TestHandleInternalPutBucket_RejectsInvalidGeneratedPayloads(t *testing.T) {
-	mockDB := &testutils.MockDatabase{Credentials: map[string]core.S3Credential{}}
+	mockDB := &testutils.MockDatabase{Credentials: map[string]models.S3Credential{}}
 
 	t.Run("missing required project_id", func(t *testing.T) {
 		req, _ := http.NewRequest("PUT", "/data/buckets", bytes.NewBufferString(`{
@@ -773,9 +777,9 @@ func TestHandleInternalPutBucket_RejectsInvalidGeneratedPayloads(t *testing.T) {
 			"endpoint":"https://s3.amazonaws.com",
 			"organization":"cbds"
 		}`))
-		ctx := context.WithValue(req.Context(), core.AuthModeKey, "gen3")
-		ctx = context.WithValue(ctx, core.AuthHeaderPresentKey, true)
-		ctx = context.WithValue(ctx, core.UserPrivilegesKey, map[string]map[string]bool{
+		ctx := context.WithValue(req.Context(), common.AuthModeKey, "gen3")
+		ctx = context.WithValue(ctx, common.AuthHeaderPresentKey, true)
+		ctx = context.WithValue(ctx, common.UserPrivilegesKey, map[string]map[string]bool{
 			bucketControlResource: {"create": true},
 		})
 		req = req.WithContext(ctx)
@@ -797,9 +801,9 @@ func TestHandleInternalPutBucket_RejectsInvalidGeneratedPayloads(t *testing.T) {
 			"project_id":"proj1",
 			"unexpected":"boom"
 		}`))
-		ctx := context.WithValue(req.Context(), core.AuthModeKey, "gen3")
-		ctx = context.WithValue(ctx, core.AuthHeaderPresentKey, true)
-		ctx = context.WithValue(ctx, core.UserPrivilegesKey, map[string]map[string]bool{
+		ctx := context.WithValue(req.Context(), common.AuthModeKey, "gen3")
+		ctx = context.WithValue(ctx, common.AuthHeaderPresentKey, true)
+		ctx = context.WithValue(ctx, common.UserPrivilegesKey, map[string]map[string]bool{
 			bucketControlResource: {"create": true},
 		})
 		req = req.WithContext(ctx)
@@ -815,15 +819,15 @@ func TestWriteDBErrorBranches(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 
 	rr401 := httptest.NewRecorder()
-	ctx401 := context.WithValue(req.Context(), core.AuthModeKey, "gen3")
-	ctx401 = context.WithValue(ctx401, core.AuthHeaderPresentKey, false)
-	writeDBError(rr401, req.WithContext(ctx401), core.ErrUnauthorized)
+	ctx401 := context.WithValue(req.Context(), common.AuthModeKey, "gen3")
+	ctx401 = context.WithValue(ctx401, common.AuthHeaderPresentKey, false)
+	writeDBError(rr401, req.WithContext(ctx401), common.ErrUnauthorized)
 	if rr401.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d", rr401.Code)
 	}
 
 	rr404 := httptest.NewRecorder()
-	writeDBError(rr404, req, core.ErrNotFound)
+	writeDBError(rr404, req, common.ErrNotFound)
 	if rr404.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d", rr404.Code)
 	}
@@ -881,14 +885,14 @@ func TestHandleInternalUploadBulk_MixedResults(t *testing.T) {
 					},
 			},
 		},
-		Credentials: map[string]core.S3Credential{
+		Credentials: map[string]models.S3Credential{
 			"b1": {Bucket: "b1", Provider: "s3", Region: "us-east-1"},
 		},
 	}
 
 	reqBody := internalapi.InternalUploadBulkRequest{
 		Requests: []internalapi.InternalUploadBulkItem{
-			{FileId: "obj-1", Bucket: internalapi.PtrString("b1")},
+			{FileId: "obj-1", Bucket: ptr("b1")},
 			{FileId: ""},
 		},
 	}
@@ -902,7 +906,7 @@ func TestHandleInternalUploadBulk_MixedResults(t *testing.T) {
 		t.Fatalf("expected 207 for mixed batch results, got %d body=%s", rr.Code, rr.Body.String())
 	}
 
-	var resp internalapi.InternalUploadBulkResponse
+	var resp internalapi.InternalUploadBulkOutput
 	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
@@ -915,8 +919,8 @@ func TestHandleInternalUploadBulk_MixedResults(t *testing.T) {
 	if !strings.Contains(*(*resp.Results)[0].Url, "upload=true") {
 		t.Fatalf("expected signed upload URL in first result, got %+v", (*resp.Results)[0])
 	}
-	if core.StringVal((*resp.Results)[0].FileName) != "prefix/from-existing.bin" {
-		t.Fatalf("expected resolved key from existing object, got %q", core.StringVal((*resp.Results)[0].FileName))
+	if common.StringVal((*resp.Results)[0].FileName) != "prefix/from-existing.bin" {
+		t.Fatalf("expected resolved key from existing object, got %q", common.StringVal((*resp.Results)[0].FileName))
 	}
 	if (*resp.Results)[1].Status != int32(http.StatusBadRequest) {
 		t.Fatalf("expected second result 400, got %+v", (*resp.Results)[1])
@@ -938,13 +942,13 @@ func TestHandleInternalUploadBulk_Gen3UnauthorizedPerItem(t *testing.T) {
 
 	reqBody := internalapi.InternalUploadBulkRequest{
 		Requests: []internalapi.InternalUploadBulkItem{
-			{FileId: "secure-id", Bucket: internalapi.PtrString("b1")},
+			{FileId: "secure-id", Bucket: ptr("b1")},
 		},
 	}
 	body, _ := json.Marshal(reqBody)
 	req := httptest.NewRequest(http.MethodPost, "/data/upload/bulk", bytes.NewReader(body))
-	ctx := context.WithValue(req.Context(), core.AuthModeKey, "gen3")
-	ctx = context.WithValue(ctx, core.AuthHeaderPresentKey, false)
+	ctx := context.WithValue(req.Context(), common.AuthModeKey, "gen3")
+	ctx = context.WithValue(ctx, common.AuthHeaderPresentKey, false)
 	req = req.WithContext(ctx)
 	rr := httptest.NewRecorder()
 
@@ -953,7 +957,7 @@ func TestHandleInternalUploadBulk_Gen3UnauthorizedPerItem(t *testing.T) {
 	if rr.Code != http.StatusMultiStatus {
 		t.Fatalf("expected 207, got %d body=%s", rr.Code, rr.Body.String())
 	}
-	var resp internalapi.InternalUploadBulkResponse
+	var resp internalapi.InternalUploadBulkOutput
 	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}

@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"github.com/calypr/syfon/internal/common"
 	"context"
 	"database/sql"
 	"errors"
@@ -9,7 +10,6 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/calypr/syfon/internal/db/core"
 )
 
 func TestDeleteObject(t *testing.T) {
@@ -44,7 +44,7 @@ func TestDeleteObject(t *testing.T) {
 			WillReturnResult(sqlmock.NewResult(0, 0))
 
 		err := pg.DeleteObject(context.Background(), "missing")
-		if !errors.Is(err, core.ErrNotFound) {
+		if !errors.Is(err, common.ErrNotFound) {
 			t.Fatalf("expected not found error, got %v", err)
 		}
 	})
@@ -64,7 +64,7 @@ func TestGetObject_NotFound(t *testing.T) {
 		WillReturnError(sql.ErrNoRows)
 
 	_, err := pg.GetObject(context.Background(), "missing")
-	if !errors.Is(err, core.ErrNotFound) {
+	if !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("expected not found error, got %v", err)
 	}
 }
@@ -155,11 +155,11 @@ func TestGetObject_Gen3Unauthorized(t *testing.T) {
 		WithArgs("obj-2", sqlmock.AnyArg()).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 
-	ctx := context.WithValue(context.Background(), core.AuthModeKey, "gen3")
-	ctx = context.WithValue(ctx, core.UserAuthzKey, []string{"/programs/p1/projects/other"})
+	ctx := context.WithValue(context.Background(), common.AuthModeKey, "gen3")
+	ctx = context.WithValue(ctx, common.UserAuthzKey, []string{"/programs/p1/projects/other"})
 
 	_, err := pg.GetObject(ctx, "obj-2")
-	if !errors.Is(err, core.ErrUnauthorized) {
+	if !errors.Is(err, common.ErrUnauthorized) {
 		t.Fatalf("expected unauthorized error, got %v", err)
 	}
 }

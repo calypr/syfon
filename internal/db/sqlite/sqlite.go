@@ -8,12 +8,10 @@ import (
 	"time"
 
 	"github.com/calypr/syfon/apigen/server/drs"
-	"github.com/calypr/syfon/internal/db/core"
 	_ "github.com/mattn/go-sqlite3"
 )
 
 // SqliteDB implements DatabaseInterface
-var _ core.DatabaseInterface = (*SqliteDB)(nil)
 
 type SqliteDB struct {
 	db *sql.DB

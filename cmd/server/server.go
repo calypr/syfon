@@ -12,11 +12,12 @@ import (
 
 	"github.com/calypr/syfon/internal/api/middleware"
 	"github.com/calypr/syfon/internal/config"
-	"github.com/calypr/syfon/internal/db/core"
+	"github.com/calypr/syfon/internal/crypto"
+	"github.com/calypr/syfon/internal/common"
+	"github.com/calypr/syfon/internal/db"
 	"github.com/calypr/syfon/internal/db/postgres"
 	"github.com/calypr/syfon/internal/db/sqlite"
-	"github.com/calypr/syfon/internal/provider"
-	"github.com/calypr/syfon/internal/service"
+	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/signer/azure"
 	"github.com/calypr/syfon/internal/signer/file"
 	"github.com/calypr/syfon/internal/signer/gcs"
@@ -50,7 +51,7 @@ var Cmd = &cobra.Command{
 		}
 
 		// Init DB
-		var database core.DatabaseInterface
+		var database db.DatabaseInterface
 		var errDb error
 
 		if cfg.Database.Sqlite != nil {
@@ -81,18 +82,18 @@ var Cmd = &cobra.Command{
 
 		// Load S3 Credentials from Config if present
 		if len(cfg.S3Credentials) > 0 {
-			encryptionEnabled, encErr := core.CredentialEncryptionEnabled()
+			encryptionEnabled, encErr := crypto.CredentialEncryptionEnabled()
 			if encErr != nil {
-				fatal("invalid credential encryption configuration", "env", core.CredentialMasterKeyEnv, "err", encErr)
+				fatal("invalid credential encryption configuration", "env", crypto.CredentialMasterKeyEnv, "err", encErr)
 			}
 			if !encryptionEnabled {
-				fatal("s3 credential encryption key is required", "env", core.CredentialMasterKeyEnv)
+				fatal("s3 credential encryption key is required", "env", crypto.CredentialMasterKeyEnv)
 			}
 
 			logger.Info("loading configured s3 credentials", "count", len(cfg.S3Credentials))
 			// S3 credentials are encrypted before persistence and audited on read/write/delete/list.
 			for _, c := range cfg.S3Credentials {
-				cred := &core.S3Credential{
+				cred := &models.S3Credential{
 					Bucket:    c.Bucket,
 					Provider:  c.Provider,
 					Region:    c.Region,
@@ -109,21 +110,17 @@ var Cmd = &cobra.Command{
 		// Init unified URL manager.
 		needsUrlManager := cfg.Routes.Ga4gh || cfg.Routes.Internal || cfg.Routes.LFS
 		var uM *urlmanager.Manager
-		var svc *service.ObjectsAPIService
 		if needsUrlManager {
 			uM = urlmanager.NewManager(database, cfg.Signing)
-			uM.RegisterSigner(provider.S3, s3.NewS3Signer(database))
-			uM.RegisterSigner(provider.GCS, gcs.NewGCSSigner(database))
-			uM.RegisterSigner(provider.Azure, azure.NewAzureSigner(database))
+			uM.RegisterSigner(common.S3Provider, s3.NewS3Signer(database))
+			uM.RegisterSigner(common.GCSProvider, gcs.NewGCSSigner(database))
+			uM.RegisterSigner(common.AzureProvider, azure.NewAzureSigner(database))
 			fSigner, fErr := file.NewFileSigner("/")
 			if fErr == nil {
-				uM.RegisterSigner(provider.File, fSigner)
+				uM.RegisterSigner(common.FileProvider, fSigner)
 			} else {
 				logger.Warn("failed to initialize file signer", "err", fErr)
 			}
-		}
-		if cfg.Routes.Ga4gh {
-			svc = service.NewObjectsAPIService(database, uM)
 		}
 
 		// Build Fiber runtime and middleware pipeline.
@@ -151,7 +148,6 @@ var Cmd = &cobra.Command{
 			cfg:                 cfg,
 			database:            database,
 			uM:                  uM,
-			svc:                 svc,
 			authzMiddleware:     authzMiddleware,
 			requestIDMiddleware: requestIDMiddleware,
 		}

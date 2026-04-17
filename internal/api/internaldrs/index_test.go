@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/calypr/syfon/apigen/server/drs"
-	"github.com/calypr/syfon/internal/db/core"
+	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/testutils"
 	"github.com/gofiber/fiber/v3"
 )
@@ -65,9 +65,9 @@ func TestHandleInternalList_ScopeFilteringByReadPrivilege(t *testing.T) {
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/?organization=org", nil)
-	ctx := context.WithValue(req.Context(), core.AuthModeKey, "gen3")
-	ctx = context.WithValue(ctx, core.AuthHeaderPresentKey, true)
-	ctx = context.WithValue(ctx, core.UserPrivilegesKey, map[string]map[string]bool{
+	ctx := context.WithValue(req.Context(), common.AuthModeKey, "gen3")
+	ctx = context.WithValue(ctx, common.AuthHeaderPresentKey, true)
+	ctx = context.WithValue(ctx, common.UserPrivilegesKey, map[string]map[string]bool{
 		"/programs/org/projects/p1": {"read": true},
 	})
 	req = req.WithContext(ctx)
@@ -315,7 +315,7 @@ func TestHandleInternalDeleteByQuery(t *testing.T) {
 	t.Run("requires auth header in gen3 mode", func(t *testing.T) {
 		mockDB := &testutils.MockDatabase{}
 		req := httptest.NewRequest(http.MethodDelete, "/?organization=org", nil)
-		ctx := context.WithValue(req.Context(), core.AuthModeKey, "gen3")
+		ctx := context.WithValue(req.Context(), common.AuthModeKey, "gen3")
 		req = req.WithContext(ctx)
 		rr := httptest.NewRecorder()
 
@@ -339,9 +339,9 @@ func TestHandleInternalDeleteByQuery(t *testing.T) {
 			},
 		}
 		req := httptest.NewRequest(http.MethodDelete, "/?organization=org&project=a", nil)
-		ctx := context.WithValue(req.Context(), core.AuthModeKey, "gen3")
-		ctx = context.WithValue(ctx, core.AuthHeaderPresentKey, true)
-		ctx = context.WithValue(ctx, core.UserPrivilegesKey, map[string]map[string]bool{
+		ctx := context.WithValue(req.Context(), common.AuthModeKey, "gen3")
+		ctx = context.WithValue(ctx, common.AuthHeaderPresentKey, true)
+		ctx = context.WithValue(ctx, common.UserPrivilegesKey, map[string]map[string]bool{
 			"/programs/org/projects/a": {"delete": true},
 		})
 		req = req.WithContext(ctx)

@@ -1,6 +1,8 @@
 package sqlite
 
 import (
+	"github.com/calypr/syfon/internal/models"
+	"github.com/calypr/syfon/internal/common"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -9,10 +11,9 @@ import (
 	"time"
 
 	"github.com/calypr/syfon/apigen/server/drs"
-	"github.com/calypr/syfon/internal/db/core"
 )
 
-func (db *SqliteDB) SavePendingLFSMeta(ctx context.Context, entries []core.PendingLFSMeta) error {
+func (db *SqliteDB) SavePendingLFSMeta(ctx context.Context, entries []models.PendingLFSMeta) error {
 	if len(entries) == 0 {
 		return nil
 	}
@@ -45,7 +46,7 @@ func (db *SqliteDB) SavePendingLFSMeta(ctx context.Context, entries []core.Pendi
 	return tx.Commit()
 }
 
-func (db *SqliteDB) GetPendingLFSMeta(ctx context.Context, oid string) (*core.PendingLFSMeta, error) {
+func (db *SqliteDB) GetPendingLFSMeta(ctx context.Context, oid string) (*models.PendingLFSMeta, error) {
 	if _, err := db.db.ExecContext(ctx, `DELETE FROM lfs_pending_metadata WHERE expires_time <= ?`, time.Now().UTC()); err != nil {
 		return nil, fmt.Errorf("failed to prune expired pending metadata: %w", err)
 	}
@@ -61,7 +62,7 @@ func (db *SqliteDB) GetPendingLFSMeta(ctx context.Context, oid string) (*core.Pe
 		WHERE oid = ? AND expires_time > ?
 	`, oid, time.Now().UTC()).Scan(&raw, &createdAt, &expiresAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, fmt.Errorf("%w: pending metadata not found", core.ErrNotFound)
+			return nil, fmt.Errorf("%w: pending metadata not found", common.ErrNotFound)
 		}
 		return nil, fmt.Errorf("failed to load pending metadata for oid %s: %w", oid, err)
 	}
@@ -71,7 +72,7 @@ func (db *SqliteDB) GetPendingLFSMeta(ctx context.Context, oid string) (*core.Pe
 		return nil, fmt.Errorf("failed to parse pending metadata candidate for oid %s: %w", oid, err)
 	}
 
-	return &core.PendingLFSMeta{
+	return &models.PendingLFSMeta{
 		OID:       oid,
 		Candidate: c,
 		CreatedAt: createdAt,
@@ -79,7 +80,7 @@ func (db *SqliteDB) GetPendingLFSMeta(ctx context.Context, oid string) (*core.Pe
 	}, nil
 }
 
-func (db *SqliteDB) PopPendingLFSMeta(ctx context.Context, oid string) (*core.PendingLFSMeta, error) {
+func (db *SqliteDB) PopPendingLFSMeta(ctx context.Context, oid string) (*models.PendingLFSMeta, error) {
 	tx, err := db.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -101,7 +102,7 @@ func (db *SqliteDB) PopPendingLFSMeta(ctx context.Context, oid string) (*core.Pe
 		WHERE oid = ? AND expires_time > ?
 	`, oid, time.Now().UTC()).Scan(&raw, &createdAt, &expiresAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, fmt.Errorf("%w: pending metadata not found", core.ErrNotFound)
+			return nil, fmt.Errorf("%w: pending metadata not found", common.ErrNotFound)
 		}
 		return nil, fmt.Errorf("failed to load pending metadata for oid %s: %w", oid, err)
 	}
@@ -118,7 +119,7 @@ func (db *SqliteDB) PopPendingLFSMeta(ctx context.Context, oid string) (*core.Pe
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	return &core.PendingLFSMeta{
+	return &models.PendingLFSMeta{
 		OID:       oid,
 		Candidate: c,
 		CreatedAt: createdAt,

@@ -6,26 +6,27 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/config"
-	"github.com/calypr/syfon/internal/db/core"
-	"github.com/calypr/syfon/internal/provider"
+	"github.com/calypr/syfon/internal/db"
+	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/signer"
 )
 
 // Manager is the unified implementation of UrlManager.
 // It delegates to cloud-specific Signers resolved by provider metadata.
 type Manager struct {
-	database        core.CredentialStore
+	database        db.CredentialStore
 	signing         config.SigningConfig
 	defaultProvider string
 	signers         map[string]signer.Signer
 }
 
-func NewManager(database core.CredentialStore, signing config.SigningConfig) *Manager {
+func NewManager(database db.CredentialStore, signing config.SigningConfig) *Manager {
 	return &Manager{
 		database:        database,
 		signing:         signing,
-		defaultProvider: provider.S3,
+		defaultProvider: common.S3Provider,
 		signers:         make(map[string]signer.Signer),
 	}
 }
@@ -124,7 +125,7 @@ func (m *Manager) resolve(ctx context.Context, accessId string, urlStr string) (
 		if u.Host != "" {
 			key = u.Host + "/" + key
 		}
-		return bucket, key, provider.File, nil
+		return bucket, key, common.FileProvider, nil
 	}
 
 	bucket = u.Host
@@ -143,8 +144,8 @@ func (m *Manager) resolve(ctx context.Context, accessId string, urlStr string) (
 	}
 
 	// Fallback to URL scheme
-	schemeProvider := provider.FromScheme(u.Scheme)
-	p = provider.Normalize(schemeProvider, m.defaultProvider)
+	schemeProvider := common.ProviderFromScheme(u.Scheme)
+	p = common.NormalizeProvider(schemeProvider, m.defaultProvider)
 	return bucket, key, p, nil
 }
 
@@ -153,10 +154,10 @@ func (m *Manager) resolveProviderForBucket(ctx context.Context, bucket string) (
 	if err != nil {
 		return "", err
 	}
-	return provider.Normalize(cred.Provider, m.defaultProvider), nil
+	return common.NormalizeProvider(cred.Provider, m.defaultProvider), nil
 }
 
-func (m *Manager) credentialForBucket(ctx context.Context, bucket string) (*core.S3Credential, error) {
+func (m *Manager) credentialForBucket(ctx context.Context, bucket string) (*models.S3Credential, error) {
 	key := strings.TrimSpace(bucket)
 	if key == "" {
 		return nil, fmt.Errorf("bucket is required")

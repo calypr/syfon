@@ -1,0 +1,17 @@
+package common
+
+type AuthzContextKey string
+
+const (
+	// UserAuthzKey is the context key for the user's authorized resources list
+	UserAuthzKey AuthzContextKey = "user_authz"
+	// UserPrivilegesKey stores method-aware privileges (resource -> method -> allowed).
+	UserPrivilegesKey AuthzContextKey = "user_privileges"
+	// AuthHeaderPresentKey indicates whether the incoming request had an Authorization header.
+	AuthHeaderPresentKey AuthzContextKey = "auth_header_present"
+	// AuthModeKey contains the configured server mode: local or gen3.
+	AuthModeKey AuthzContextKey = "auth_mode"
+
+	// BucketControlResource is the resource path for internal bucket management.
+	BucketControlResource = "/services/internal/buckets"
+)

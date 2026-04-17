@@ -15,9 +15,9 @@ import (
 
 	"github.com/calypr/syfon/internal/config"
 	"github.com/calypr/syfon/internal/db"
-	"github.com/calypr/syfon/internal/db/core"
+	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/api/internaldrs"
-	"github.com/calypr/syfon/internal/provider"
+	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/signer/s3"
 	"github.com/calypr/syfon/internal/urlmanager"
 	"github.com/gofiber/fiber/v3"
@@ -84,7 +84,7 @@ s3_credentials:
 
 	// Pre-load credentials from config (mimic server startup logic)
 	for _, c := range cfg.S3Credentials {
-		cred := &core.S3Credential{
+		cred := &models.S3Credential{
 			Bucket:    c.Bucket,
 			Region:    c.Region,
 			AccessKey: c.AccessKey,
@@ -97,7 +97,7 @@ s3_credentials:
 	}
 
 	uM := urlmanager.NewManager(database, cfg.Signing)
-	uM.RegisterSigner(provider.S3, s3.NewS3Signer(database))
+	uM.RegisterSigner(core.S3Provider, s3.NewS3Signer(database))
 	app := fiber.New()
 	internaldrs.RegisterInternalIndexRoutes(app, database, uM)
 	internaldrs.RegisterInternalDataRoutes(app, database, uM)

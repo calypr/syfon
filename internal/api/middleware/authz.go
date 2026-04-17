@@ -19,7 +19,8 @@ import (
 	"github.com/calypr/syfon/client/conf"
 	"github.com/calypr/syfon/client/logs"
 	"github.com/calypr/syfon/client/request"
-	"github.com/calypr/syfon/internal/db/core"
+	"github.com/calypr/syfon/internal/common"
+	"github.com/calypr/syfon/internal/authz"
 	"github.com/gofiber/fiber/v3"
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/sync/singleflight"
@@ -83,8 +84,8 @@ func NewAuthzMiddleware(logger *slog.Logger, mode, basicUser, basicPass string) 
 // FiberMiddleware returns a fiber middleware that extracts the token and fetches user info.
 func (m *AuthzMiddleware) FiberMiddleware() fiber.Handler {
 	return func(c fiber.Ctx) error {
-		ctx := context.WithValue(c.Context(), core.AuthHeaderPresentKey, false)
-		ctx = context.WithValue(ctx, core.AuthModeKey, m.mode)
+		ctx := context.WithValue(c.Context(), common.AuthHeaderPresentKey, false)
+		ctx = context.WithValue(ctx, common.AuthModeKey, m.mode)
 		
 		authHeader := c.Get(fiber.HeaderAuthorization)
 
@@ -113,14 +114,14 @@ func (m *AuthzMiddleware) FiberMiddleware() fiber.Handler {
 			return c.Next()
 		}
 		if m.mock.Enabled {
-			if m.mock.RequireAuthHeader && !core.HasAuthHeader(ctx) {
+			if m.mock.RequireAuthHeader && !authz.HasAuthHeader(ctx) {
 				c.SetContext(ctx)
 				return c.Next()
 			}
 			// In mock mode, mark auth header as present so gen3 authorization checks
 			// in service/DB layers evaluate injected privileges.
-			if !core.HasAuthHeader(ctx) {
-				ctx = context.WithValue(ctx, core.AuthHeaderPresentKey, true)
+			if !authz.HasAuthHeader(ctx) {
+				ctx = context.WithValue(ctx, common.AuthHeaderPresentKey, true)
 			}
 			resources := append([]string(nil), m.mock.Resources...)
 			privs := make(map[string]map[string]bool, len(resources))
@@ -131,8 +132,8 @@ func (m *AuthzMiddleware) FiberMiddleware() fiber.Handler {
 				}
 				privs[resource] = methods
 			}
-			ctx = context.WithValue(ctx, core.UserAuthzKey, resources)
-			ctx = context.WithValue(ctx, core.UserPrivilegesKey, privs)
+			ctx = context.WithValue(ctx, common.UserAuthzKey, resources)
+			ctx = context.WithValue(ctx, common.UserPrivilegesKey, privs)
 			c.SetContext(ctx)
 			return c.Next()
 		}
@@ -140,7 +141,7 @@ func (m *AuthzMiddleware) FiberMiddleware() fiber.Handler {
 			c.SetContext(ctx)
 			return c.Next()
 		}
-		ctx = context.WithValue(ctx, core.AuthHeaderPresentKey, true)
+		ctx = context.WithValue(ctx, common.AuthHeaderPresentKey, true)
 		tokenString, err := extractBearerLikeToken(authHeader)
 		if err != nil {
 			m.logger.Debug("failed to parse authorization header", "error", err)
@@ -155,8 +156,8 @@ func (m *AuthzMiddleware) FiberMiddleware() fiber.Handler {
 					c.SetContext(ctx)
 					return c.Next()
 				}
-				ctx = context.WithValue(ctx, core.UserAuthzKey, resources)
-				ctx = context.WithValue(ctx, core.UserPrivilegesKey, privileges)
+				ctx = context.WithValue(ctx, common.UserAuthzKey, resources)
+				ctx = context.WithValue(ctx, common.UserPrivilegesKey, privileges)
 				c.SetContext(ctx)
 				return c.Next()
 			}
@@ -212,8 +213,8 @@ func (m *AuthzMiddleware) FiberMiddleware() fiber.Handler {
 			return c.Next()
 		}
 
-		ctx = context.WithValue(ctx, core.UserAuthzKey, res.resources)
-		ctx = context.WithValue(ctx, core.UserPrivilegesKey, res.privileges)
+		ctx = context.WithValue(ctx, common.UserAuthzKey, res.resources)
+		ctx = context.WithValue(ctx, common.UserPrivilegesKey, res.privileges)
 
 		c.SetContext(ctx)
 		return c.Next()

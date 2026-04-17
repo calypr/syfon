@@ -1,12 +1,12 @@
 package sqlite
 
 import (
+	"github.com/calypr/syfon/internal/models"
 	"database/sql"
 	"fmt"
 	"strings"
 	"time"
 
-	"github.com/calypr/syfon/internal/db/core"
 )
 
 const sqliteMaxParams = 900
@@ -29,9 +29,9 @@ func makePlaceholders(n int) string {
 	return strings.Join(parts, ",")
 }
 
-func uniqueObjectsByID(objs []core.InternalObject) []core.InternalObject {
+func uniqueObjectsByID(objs []models.InternalObject) []models.InternalObject {
 	seen := make(map[string]struct{}, len(objs))
-	out := make([]core.InternalObject, 0, len(objs))
+	out := make([]models.InternalObject, 0, len(objs))
 	for _, o := range objs {
 		if _, ok := seen[o.Id]; ok {
 			continue

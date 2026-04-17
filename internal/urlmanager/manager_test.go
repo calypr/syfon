@@ -7,23 +7,23 @@ import (
 	"testing"
 
 	"github.com/calypr/syfon/internal/config"
-	"github.com/calypr/syfon/internal/db/core"
+	"github.com/calypr/syfon/internal/crypto"
 	"github.com/calypr/syfon/internal/db/sqlite"
-	"github.com/calypr/syfon/internal/provider"
+	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/signer/azure"
 	"github.com/calypr/syfon/internal/signer/file"
 	"github.com/calypr/syfon/internal/signer/s3"
 )
 
 func TestManager_SignURL(t *testing.T) {
-	t.Setenv(core.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
+	t.Setenv(crypto.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
 	ctx := context.Background()
 	database, err := sqlite.NewSqliteDB(":memory:")
 	if err != nil {
 		t.Fatalf("failed to init db: %v", err)
 	}
 
-	cred := &core.S3Credential{
+	cred := &models.S3Credential{
 		Bucket:    "my-bucket",
 		Provider:  "s3",
 		Region:    "us-east-1",
@@ -35,7 +35,7 @@ func TestManager_SignURL(t *testing.T) {
 	}
 
 	manager := NewManager(database, config.SigningConfig{DefaultExpirySeconds: 900})
-	manager.RegisterSigner(provider.S3, s3.NewS3Signer(database))
+	manager.RegisterSigner("s3", s3.NewS3Signer(database))
 
 	urlStr := "s3://my-bucket/my-obj"
 	signedURL, err := manager.SignURL(ctx, "resource-1", urlStr, SignOptions{})
@@ -68,7 +68,7 @@ func TestManager_FileScheme(t *testing.T) {
 	}
 	manager := NewManager(database, config.SigningConfig{DefaultExpirySeconds: 900})
 	fSigner, _ := file.NewFileSigner("/")
-	manager.RegisterSigner(provider.File, fSigner)
+	manager.RegisterSigner("file", fSigner)
 
 	// file:// should work without DB credentials
 	urlStr := "file:///tmp/test.txt"
@@ -82,13 +82,13 @@ func TestManager_FileScheme(t *testing.T) {
 }
 
 func TestManager_MultipartMethods(t *testing.T) {
-	t.Setenv(core.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
+	t.Setenv(crypto.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
 	ctx := context.Background()
 	database, err := sqlite.NewSqliteDB(":memory:")
 	if err != nil {
 		t.Fatalf("failed to init db: %v", err)
 	}
-	if err := database.SaveS3Credential(ctx, &core.S3Credential{
+	if err := database.SaveS3Credential(ctx, &models.S3Credential{
 		Bucket:    "mp-bucket",
 		Provider:  "s3",
 		Region:    "us-east-1",
@@ -100,7 +100,7 @@ func TestManager_MultipartMethods(t *testing.T) {
 	}
 
 	manager := NewManager(database, config.SigningConfig{DefaultExpirySeconds: 900})
-	manager.RegisterSigner(provider.S3, s3.NewS3Signer(database))
+	manager.RegisterSigner("s3", s3.NewS3Signer(database))
 
 	// Presigning upload part is local.
 	partURL, err := manager.SignMultipartPart(ctx, "mp-bucket", "obj", "upload-id", 1)
@@ -118,13 +118,13 @@ func TestManager_MultipartMethods(t *testing.T) {
 }
 
 func TestManager_ResolveFallbackFromAccessIDToURLBucket(t *testing.T) {
-	t.Setenv(core.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
+	t.Setenv(crypto.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
 	ctx := context.Background()
 	database, err := sqlite.NewSqliteDB(":memory:")
 	if err != nil {
 		t.Fatalf("failed to init db: %v", err)
 	}
-	if err := database.SaveS3Credential(ctx, &core.S3Credential{
+	if err := database.SaveS3Credential(ctx, &models.S3Credential{
 		Bucket:    "cbds",
 		Provider:  "s3",
 		Region:    "us-east-1",
@@ -135,7 +135,7 @@ func TestManager_ResolveFallbackFromAccessIDToURLBucket(t *testing.T) {
 	}
 
 	manager := NewManager(database, config.SigningConfig{DefaultExpirySeconds: 900})
-	manager.RegisterSigner(provider.S3, s3.NewS3Signer(database))
+	manager.RegisterSigner("s3", s3.NewS3Signer(database))
 
 	signedURL, err := manager.SignURL(ctx, "s3", "s3://cbds/path/to/object", SignOptions{})
 	if err != nil {
@@ -147,13 +147,13 @@ func TestManager_ResolveFallbackFromAccessIDToURLBucket(t *testing.T) {
 }
 
 func TestManager_AzureSignURLAndUploadURL(t *testing.T) {
-	t.Setenv(core.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
+	t.Setenv(crypto.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
 	ctx := context.Background()
 	database, err := sqlite.NewSqliteDB(":memory:")
 	if err != nil {
 		t.Fatalf("failed to init db: %v", err)
 	}
-	if err := database.SaveS3Credential(ctx, &core.S3Credential{
+	if err := database.SaveS3Credential(ctx, &models.S3Credential{
 		Bucket:    "az-container",
 		Provider:  "azure",
 		AccessKey: "devstoreaccount1",
@@ -164,7 +164,7 @@ func TestManager_AzureSignURLAndUploadURL(t *testing.T) {
 	}
 
 	manager := NewManager(database, config.SigningConfig{DefaultExpirySeconds: 900})
-	manager.RegisterSigner(provider.Azure, azure.NewAzureSigner(database))
+	manager.RegisterSigner("azure", azure.NewAzureSigner(database))
 
 	signedURL, err := manager.SignURL(ctx, "", "azblob://az-container/path/to/object.bin", SignOptions{})
 	if err != nil {
@@ -198,13 +198,13 @@ func TestManager_AzureSignURLAndUploadURL(t *testing.T) {
 }
 
 func TestManager_SignDownloadPart_S3(t *testing.T) {
-	t.Setenv(core.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
+	t.Setenv(crypto.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
 	ctx := context.Background()
 	database, err := sqlite.NewSqliteDB(":memory:")
 	if err != nil {
 		t.Fatalf("failed to init db: %v", err)
 	}
-	if err := database.SaveS3Credential(ctx, &core.S3Credential{
+	if err := database.SaveS3Credential(ctx, &models.S3Credential{
 		Bucket:    "download-bucket",
 		Provider:  "s3",
 		Region:    "us-east-1",
@@ -215,7 +215,7 @@ func TestManager_SignDownloadPart_S3(t *testing.T) {
 	}
 
 	manager := NewManager(database, config.SigningConfig{DefaultExpirySeconds: 900})
-	manager.RegisterSigner(provider.S3, s3.NewS3Signer(database))
+	manager.RegisterSigner("s3", s3.NewS3Signer(database))
 	signed, err := manager.SignDownloadPart(ctx, "", "s3://download-bucket/path/to/object.bin", 0, 9, SignOptions{})
 	if err != nil {
 		t.Fatalf("SignDownloadPart failed: %v", err)
@@ -226,13 +226,13 @@ func TestManager_SignDownloadPart_S3(t *testing.T) {
 }
 
 func TestManager_CompleteMultipartUpload_FailsOnUnreachableS3(t *testing.T) {
-	t.Setenv(core.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
+	t.Setenv(crypto.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
 	ctx := context.Background()
 	database, err := sqlite.NewSqliteDB(":memory:")
 	if err != nil {
 		t.Fatalf("failed to init db: %v", err)
 	}
-	if err := database.SaveS3Credential(ctx, &core.S3Credential{
+	if err := database.SaveS3Credential(ctx, &models.S3Credential{
 		Bucket:    "mp-complete-bucket",
 		Provider:  "s3",
 		Region:    "us-east-1",
@@ -244,7 +244,7 @@ func TestManager_CompleteMultipartUpload_FailsOnUnreachableS3(t *testing.T) {
 	}
 
 	manager := NewManager(database, config.SigningConfig{DefaultExpirySeconds: 900})
-	manager.RegisterSigner(provider.S3, s3.NewS3Signer(database))
+	manager.RegisterSigner("s3", s3.NewS3Signer(database))
 	err = manager.CompleteMultipartUpload(ctx, "mp-complete-bucket", "obj", "upload-id", []MultipartPart{{PartNumber: 1, ETag: "etag1"}})
 	if err == nil {
 		t.Fatal("expected CompleteMultipartUpload to fail against unreachable endpoint")

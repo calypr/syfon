@@ -13,13 +13,13 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blockblob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/sas"
-	"github.com/calypr/syfon/internal/db/core"
+	"github.com/calypr/syfon/internal/db"
 	"github.com/calypr/syfon/internal/signer"
 	"github.com/google/uuid"
 )
 
 type AzureSigner struct {
-	db    core.CredentialStore
+	db    db.CredentialStore
 	cache sync.Map // keyed by bucket name, stores *azureCreds
 }
 
@@ -28,7 +28,7 @@ type azureCreds struct {
 	ServiceURL string
 }
 
-func NewAzureSigner(db core.CredentialStore) *AzureSigner {
+func NewAzureSigner(db db.CredentialStore) *AzureSigner {
 	return &AzureSigner{db: db}
 }
 
@@ -205,7 +205,7 @@ func (s *AzureSigner) azureServiceURL(accountName string, endpoint string) strin
 		}
 		return strings.TrimRight(ep, "/")
 	}
-	return "https://" + strings.TrimSpace(accountName) + ".blob.core.windows.net"
+	return "https://" + strings.TrimSpace(accountName) + ".blob.db.windows.net"
 }
 
 func (s *AzureSigner) azureAccountFromEndpoint(endpoint string) string {

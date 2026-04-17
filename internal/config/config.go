@@ -8,15 +8,16 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/calypr/syfon/internal/common"
 	"gopkg.in/yaml.v3"
 )
 
 const (
-	S3Prefix        = "s3://"
-	GCSPrefix       = "gs://"
-	AzurePrefix     = "azblob://"
-	FilePrefix      = "file:///"
-	DRSPrefix       = "drs://"
+	S3Prefix        = common.S3Prefix
+	GCSPrefix       = common.GCSPrefix
+	AzurePrefix     = common.AzurePrefix
+	FilePrefix      = common.FilePrefix
+	DRSPrefix       = common.DRSPrefix
 	DefaultS3Region = "us-east-1"
 
 	DefaultSigningExpirySeconds = 900 // 15 minutes

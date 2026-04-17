@@ -11,7 +11,8 @@ import (
 
 	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/apigen/server/lfsapi"
-	"github.com/calypr/syfon/internal/db/core"
+	"github.com/calypr/syfon/internal/common"
+	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/testutils"
 	"github.com/gofiber/fiber/v3"
 )
@@ -123,15 +124,15 @@ func TestResolveObjectForOIDFallsBackToChecksum(t *testing.T) {
 	did := "did:example:bbbb"
 	db.Objects[oid] = &drs.DrsObject{
 		Id: did,
-			AccessMethods: &[]drs.AccessMethod{
-				{
-					Type:      drs.AccessMethodTypeS3,
-					AccessUrl: &struct {
-						Headers *[]string `json:"headers,omitempty"`
-						Url     string    `json:"url"`
-					}{Url: "s3://test-bucket-1/cbds/end_to_end_test/" + oid},
-				},
+		AccessMethods: &[]drs.AccessMethod{
+			{
+				Type: drs.AccessMethodTypeS3,
+				AccessUrl: &struct {
+					Headers *[]string `json:"headers,omitempty"`
+					Url     string    `json:"url"`
+				}{Url: "s3://test-bucket-1/cbds/end_to_end_test/" + oid},
 			},
+		},
 	}
 
 	obj, err := resolveObjectForOID(context.Background(), db, oid)
@@ -267,8 +268,8 @@ func TestLFSBatchGen3MissingAuthReturns401(t *testing.T) {
 	uM := &testutils.MockUrlManager{}
 	app := fiber.New()
 	app.Use(func(c fiber.Ctx) error {
-		ctx := context.WithValue(c.Context(), core.AuthModeKey, "gen3")
-		ctx = context.WithValue(ctx, core.AuthHeaderPresentKey, false)
+		ctx := context.WithValue(c.Context(), common.AuthModeKey, "gen3")
+		ctx = context.WithValue(ctx, common.AuthHeaderPresentKey, false)
 		c.SetContext(ctx)
 		return c.Next()
 	})
@@ -398,7 +399,7 @@ func TestLFSBatchPayloadLimit413(t *testing.T) {
 func TestLFSUploadProxyNoBucket507(t *testing.T) {
 	resetLFSLimitersForTest()
 	router, db := newLFSRouter()
-	db.Credentials = map[string]core.S3Credential{}
+	db.Credentials = map[string]models.S3Credential{}
 	db.NoDefaultCreds = true
 	req := httptest.NewRequest(http.MethodPut, "/info/lfs/objects/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", bytes.NewReader([]byte("x")))
 	rr := httptest.NewRecorder()

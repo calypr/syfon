@@ -1,15 +1,14 @@
 package server
 
 import (
-	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/api/docs"
+	"github.com/calypr/syfon/internal/api/drsapi"
 	"github.com/calypr/syfon/internal/api/internaldrs"
 	"github.com/calypr/syfon/internal/api/lfs"
 	"github.com/calypr/syfon/internal/api/metrics"
 	"github.com/calypr/syfon/internal/api/middleware"
 	"github.com/calypr/syfon/internal/config"
-	"github.com/calypr/syfon/internal/db/core"
-	"github.com/calypr/syfon/internal/service"
+	"github.com/calypr/syfon/internal/db"
 	"github.com/calypr/syfon/internal/urlmanager"
 	"github.com/gofiber/fiber/v3"
 )
@@ -17,9 +16,8 @@ import (
 type serverRuntime struct {
 	app                 *fiber.App
 	cfg                 *config.Config
-	database            core.DatabaseInterface
+	database            db.DatabaseInterface
 	uM                  urlmanager.UrlManager
-	svc                 *service.ObjectsAPIService
 	authzMiddleware     *middleware.AuthzMiddleware
 	requestIDMiddleware *middleware.RequestIDMiddleware
 	apiGroup            fiber.Router
@@ -43,14 +41,8 @@ func WithDocsRoutes() ServerOption {
 
 func WithGa4ghRoutes() ServerOption {
 	return func(rt *serverRuntime) {
-		if rt.svc == nil {
-			return
-		}
-		strict := service.NewStrictServer(rt.svc)
-		drsServer := drs.NewStrictHandler(strict, nil)
-		drs.RegisterHandlersWithOptions(rt.ensureAPIGroup(), drsServer, drs.FiberServerOptions{
-			BaseURL: "/ga4gh/drs/v1",
-		})
+		api := rt.ensureAPIGroup().Group("/ga4gh/drs/v1")
+		drsapi.RegisterDRSRoutes(api, rt.database, rt.uM)
 	}
 }
 

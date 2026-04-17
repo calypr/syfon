@@ -13,7 +13,7 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/calypr/syfon/internal/db/core"
+	"github.com/calypr/syfon/internal/common"
 )
 
 type bucketCommandConfig struct {

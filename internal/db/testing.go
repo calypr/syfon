@@ -4,13 +4,12 @@ package db
 // The actual implementations are in subpackages.
 
 import (
-	"github.com/calypr/syfon/internal/db/core"
 	"github.com/calypr/syfon/internal/db/sqlite"
 )
 
 // NewInMemoryDB returns a new database interface backed by an in-memory SQLite database.
 // This is used primarily for testing.
-func NewInMemoryDB() core.DatabaseInterface {
+func NewInMemoryDB() DatabaseInterface {
 	// Use SQLite in-memory mode
 	db, err := sqlite.NewSqliteDB(":memory:")
 	if err != nil {

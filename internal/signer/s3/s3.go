@@ -14,12 +14,12 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 
-	"github.com/calypr/syfon/internal/db/core"
+	"github.com/calypr/syfon/internal/db"
 	"github.com/calypr/syfon/internal/signer"
 )
 
 type S3Signer struct {
-	db    core.CredentialStore
+	db    db.CredentialStore
 	cache sync.Map // keyed by bucket name, stores *s3Clients
 }
 
@@ -28,7 +28,7 @@ type s3Clients struct {
 	presigner *s3.PresignClient
 }
 
-func NewS3Signer(db core.CredentialStore) *S3Signer {
+func NewS3Signer(db db.CredentialStore) *S3Signer {
 	return &S3Signer{db: db}
 }
 

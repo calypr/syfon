@@ -1,6 +1,10 @@
 package lfs
 
 import (
+	"github.com/calypr/syfon/internal/authz"
+	"github.com/calypr/syfon/internal/db"
+	"github.com/calypr/syfon/internal/models"
+
 	"context"
 	"fmt"
 	"io"
@@ -10,17 +14,17 @@ import (
 	"time"
 
 	"github.com/calypr/syfon/apigen/server/lfsapi"
-	"github.com/calypr/syfon/internal/db/core"
+
 	"github.com/calypr/syfon/internal/urlmanager"
 )
 
 type LFSServer struct {
-	database core.LFSStore
+	database db.LFSStore
 	uM       urlmanager.UrlManager
 	opts     Options
 }
 
-func NewLFSServer(database core.LFSStore, uM urlmanager.UrlManager, opts Options) *LFSServer {
+func NewLFSServer(database db.LFSStore, uM urlmanager.UrlManager, opts Options) *LFSServer {
 	return &LFSServer{
 		database: database,
 		uM:       uM,
@@ -144,7 +148,7 @@ func (s *LFSServer) LfsVerify(ctx context.Context, request lfsapi.LfsVerifyReque
 	if !hasCtxMethodAccess(ctx, "create", targetResources) && !hasGlobalAccess(ctx, "file_upload") {
 		return lfsapi.LfsVerify403ApplicationVndGitLfsPlusJSONResponse{Message: "Unauthorized"}, nil
 	}
-	if regErr := s.database.RegisterObjects(ctx, []core.InternalObject{internalObj}); regErr != nil && !isAlreadyExists(regErr) {
+	if regErr := s.database.RegisterObjects(ctx, []models.InternalObject{internalObj}); regErr != nil && !isAlreadyExists(regErr) {
 		return lfsapi.LfsVerify500ApplicationVndGitLfsPlusJSONResponse{Message: regErr.Error()}, nil
 	}
 	usageObjectID := oid
@@ -181,7 +185,7 @@ func (s *LFSServer) LfsStageMetadata(ctx context.Context, request lfsapi.LfsStag
 	}
 
 	now := time.Now().UTC()
-	entries := make([]core.PendingLFSMeta, 0, len(req.Candidates))
+	entries := make([]models.PendingLFSMeta, 0, len(req.Candidates))
 	for i, c := range req.Candidates {
 		drsCandidate := lfsCandidateToDRS(c)
 		oid, ok := canonicalSHA256(drsCandidate.Checksums)
@@ -200,7 +204,7 @@ func (s *LFSServer) LfsStageMetadata(ctx context.Context, request lfsapi.LfsStag
 		} else if !hasCtxMethodAccess(ctx, "create", targetResources) && !hasGlobalAccess(ctx, "file_upload") {
 			return lfsapi.LfsStageMetadata403JSONResponse{Message: "Unauthorized"}, nil
 		}
-		entries = append(entries, core.PendingLFSMeta{
+		entries = append(entries, models.PendingLFSMeta{
 			OID:       oid,
 			Candidate: drsCandidate,
 			CreatedAt: now,
@@ -317,9 +321,9 @@ func (s *LFSServer) handleUploadInternal(ctx context.Context, body io.Reader, bu
 }
 
 func hasGlobalAccess(ctx context.Context, method string) bool {
-	return core.HasMethodAccess(ctx, method, []string{"/data_file"})
+	return authz.HasMethodAccess(ctx, method, []string{"/data_file"})
 }
 
 func hasCtxMethodAccess(ctx context.Context, method string, resources []string) bool {
-	return core.HasMethodAccess(ctx, method, resources)
+	return authz.HasMethodAccess(ctx, method, resources)
 }

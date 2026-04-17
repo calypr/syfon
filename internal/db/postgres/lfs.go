@@ -1,16 +1,16 @@
 package postgres
 
 import (
+	"github.com/calypr/syfon/internal/models"
 	"context"
 	"encoding/json"
 	"fmt"
 	"time"
 
 	"github.com/calypr/syfon/apigen/server/drs"
-	"github.com/calypr/syfon/internal/db/core"
 )
 
-func (db *PostgresDB) SavePendingLFSMeta(ctx context.Context, entries []core.PendingLFSMeta) error {
+func (db *PostgresDB) SavePendingLFSMeta(ctx context.Context, entries []models.PendingLFSMeta) error {
 	if len(entries) == 0 {
 		return nil
 	}
@@ -46,7 +46,7 @@ func (db *PostgresDB) SavePendingLFSMeta(ctx context.Context, entries []core.Pen
 	return tx.Commit()
 }
 
-func (db *PostgresDB) GetPendingLFSMeta(ctx context.Context, oid string) (*core.PendingLFSMeta, error) {
+func (db *PostgresDB) GetPendingLFSMeta(ctx context.Context, oid string) (*models.PendingLFSMeta, error) {
 	// Housekeeping (optional here but good for safety)
 	_, _ = db.db.ExecContext(ctx, "DELETE FROM lfs_pending_metadata WHERE expires_time <= $1", time.Now().UTC())
 
@@ -70,7 +70,7 @@ func (db *PostgresDB) GetPendingLFSMeta(ctx context.Context, oid string) (*core.
 		return nil, fmt.Errorf("failed to unmarshal candidate: %w", err)
 	}
 
-	return &core.PendingLFSMeta{
+	return &models.PendingLFSMeta{
 		OID:       oid,
 		Candidate: candidate,
 		CreatedAt: createdAt,
@@ -78,7 +78,7 @@ func (db *PostgresDB) GetPendingLFSMeta(ctx context.Context, oid string) (*core.
 	}, nil
 }
 
-func (db *PostgresDB) PopPendingLFSMeta(ctx context.Context, oid string) (*core.PendingLFSMeta, error) {
+func (db *PostgresDB) PopPendingLFSMeta(ctx context.Context, oid string) (*models.PendingLFSMeta, error) {
 	tx, err := db.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -118,7 +118,7 @@ func (db *PostgresDB) PopPendingLFSMeta(ctx context.Context, oid string) (*core.
 		return nil, fmt.Errorf("failed to unmarshal candidate: %w", err)
 	}
 
-	return &core.PendingLFSMeta{
+	return &models.PendingLFSMeta{
 		OID:       oid,
 		Candidate: candidate,
 		CreatedAt: createdAt,

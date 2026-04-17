@@ -5,10 +5,10 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/calypr/syfon/internal/common"
+	"github.com/calypr/syfon/internal/models"
 	"strings"
 	"time"
-
-	"github.com/calypr/syfon/internal/db/core"
 )
 
 func (db *SqliteDB) flushObjectUsageEventsForIDsTx(ctx context.Context, tx *sql.Tx, ids []string) error {
@@ -77,11 +77,11 @@ func (db *SqliteDB) RecordFileDownload(ctx context.Context, objectID string) err
 	return err
 }
 
-func (db *SqliteDB) GetFileUsage(ctx context.Context, objectID string) (*core.FileUsage, error) {
+func (db *SqliteDB) GetFileUsage(ctx context.Context, objectID string) (*models.FileUsage, error) {
 	if err := db.flushObjectUsageEvents(ctx); err != nil {
 		return nil, err
 	}
-	var usage core.FileUsage
+	var usage models.FileUsage
 	var lastUpload sql.NullTime
 	var lastDownload sql.NullTime
 	err := db.db.QueryRowContext(ctx, `
@@ -103,7 +103,7 @@ func (db *SqliteDB) GetFileUsage(ctx context.Context, objectID string) (*core.Fi
 		&lastDownload,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, fmt.Errorf("%w: file usage not found", core.ErrNotFound)
+		return nil, fmt.Errorf("%w: file usage not found", common.ErrNotFound)
 	}
 	if err != nil {
 		return nil, err
@@ -120,7 +120,7 @@ func (db *SqliteDB) GetFileUsage(ctx context.Context, objectID string) (*core.Fi
 	return &usage, nil
 }
 
-func (db *SqliteDB) ListFileUsage(ctx context.Context, limit, offset int, inactiveSince *time.Time) ([]core.FileUsage, error) {
+func (db *SqliteDB) ListFileUsage(ctx context.Context, limit, offset int, inactiveSince *time.Time) ([]models.FileUsage, error) {
 	if err := db.flushObjectUsageEvents(ctx); err != nil {
 		return nil, err
 	}
@@ -157,9 +157,9 @@ func (db *SqliteDB) ListFileUsage(ctx context.Context, limit, offset int, inacti
 	}
 	defer rows.Close()
 
-	out := make([]core.FileUsage, 0, limit)
+	out := make([]models.FileUsage, 0, limit)
 	for rows.Next() {
-		var usage core.FileUsage
+		var usage models.FileUsage
 		var lastUpload sql.NullTime
 		var lastDownload sql.NullTime
 		if err := rows.Scan(
@@ -187,11 +187,11 @@ func (db *SqliteDB) ListFileUsage(ctx context.Context, limit, offset int, inacti
 	return out, nil
 }
 
-func (db *SqliteDB) GetFileUsageSummary(ctx context.Context, inactiveSince *time.Time) (core.FileUsageSummary, error) {
+func (db *SqliteDB) GetFileUsageSummary(ctx context.Context, inactiveSince *time.Time) (models.FileUsageSummary, error) {
 	if err := db.flushObjectUsageEvents(ctx); err != nil {
-		return core.FileUsageSummary{}, err
+		return models.FileUsageSummary{}, err
 	}
-	summary := core.FileUsageSummary{}
+	summary := models.FileUsageSummary{}
 	query := `
 		SELECT
 			COUNT(o.id) AS total_files,
@@ -211,7 +211,7 @@ func (db *SqliteDB) GetFileUsageSummary(ctx context.Context, inactiveSince *time
 		&summary.TotalDownloads,
 		&summary.InactiveFileCount,
 	); err != nil {
-		return core.FileUsageSummary{}, err
+		return models.FileUsageSummary{}, err
 	}
 	return summary, nil
 }

@@ -7,15 +7,12 @@ import (
 	"time"
 
 	"github.com/calypr/syfon/apigen/server/drs"
-	"github.com/calypr/syfon/internal/db/core"
 
 	// Postgres driver
 	_ "github.com/lib/pq"
 )
 
 // PostgresDB implements DatabaseInterface
-var _ core.DatabaseInterface = (*PostgresDB)(nil)
-
 type PostgresDB struct {
 	db *sql.DB
 }

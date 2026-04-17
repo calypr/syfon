@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"github.com/calypr/syfon/apigen/server/drs"
-	"github.com/calypr/syfon/internal/db/core"
+	"github.com/calypr/syfon/internal/authz"
+	"github.com/calypr/syfon/internal/common"
+	"github.com/calypr/syfon/internal/models"
 	"github.com/lib/pq"
 )
 
@@ -28,7 +30,7 @@ func (db *PostgresDB) DeleteObject(ctx context.Context, id string) error {
 		return err
 	}
 	if rows == 0 {
-		return fmt.Errorf("%w: object not found", core.ErrNotFound)
+		return fmt.Errorf("%w: object not found", common.ErrNotFound)
 	}
 	return nil
 }
@@ -45,7 +47,7 @@ func (db *PostgresDB) CreateObjectAlias(ctx context.Context, aliasID, canonicalO
 	var exists string
 	err := db.db.QueryRowContext(ctx, "SELECT id FROM drs_object WHERE id = $1", canonicalObjectID).Scan(&exists)
 	if err == sql.ErrNoRows {
-		return fmt.Errorf("%w: object not found", core.ErrNotFound)
+		return fmt.Errorf("%w: object not found", common.ErrNotFound)
 	}
 	if err != nil {
 		return err
@@ -61,12 +63,12 @@ func (db *PostgresDB) CreateObjectAlias(ctx context.Context, aliasID, canonicalO
 func (db *PostgresDB) ResolveObjectAlias(ctx context.Context, aliasID string) (string, error) {
 	aliasID = strings.TrimSpace(aliasID)
 	if aliasID == "" {
-		return "", fmt.Errorf("%w: object not found", core.ErrNotFound)
+		return "", fmt.Errorf("%w: object not found", common.ErrNotFound)
 	}
 	var canonicalID string
 	err := db.db.QueryRowContext(ctx, "SELECT object_id FROM drs_object_alias WHERE alias_id = $1", aliasID).Scan(&canonicalID)
 	if err == sql.ErrNoRows {
-		return "", fmt.Errorf("%w: object not found", core.ErrNotFound)
+		return "", fmt.Errorf("%w: object not found", common.ErrNotFound)
 	}
 	if err != nil {
 		return "", err
@@ -74,14 +76,14 @@ func (db *PostgresDB) ResolveObjectAlias(ctx context.Context, aliasID string) (s
 	return canonicalID, nil
 }
 
-func (db *PostgresDB) GetObject(ctx context.Context, id string) (*core.InternalObject, error) {
+func (db *PostgresDB) GetObject(ctx context.Context, id string) (*models.InternalObject, error) {
 	requestID := strings.TrimSpace(id)
 	lookupID := requestID
 	resolvedAlias := false
 
 retryLookup:
 	// 1. Fetch main record
-	var r core.DrsObjectRecord
+	var r models.DrsObjectRecord
 	err := db.db.QueryRowContext(ctx, `
 		SELECT id, size, created_time, updated_time, name, version, description
 		FROM drs_object WHERE id = $1`, lookupID).Scan(
@@ -95,11 +97,11 @@ retryLookup:
 				resolvedAlias = true
 				goto retryLookup
 			}
-			if aliasErr != nil && !errors.Is(aliasErr, core.ErrNotFound) {
+			if aliasErr != nil && !errors.Is(aliasErr, common.ErrNotFound) {
 				return nil, aliasErr
 			}
 		}
-		return nil, fmt.Errorf("%w: object not found", core.ErrNotFound)
+		return nil, fmt.Errorf("%w: object not found", common.ErrNotFound)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch record: %w", err)
@@ -109,15 +111,15 @@ retryLookup:
 		objectID = requestID
 	}
 
-	obj := &core.InternalObject{
+	obj := &models.InternalObject{
 		DrsObject: drs.DrsObject{
 			Id:          objectID,
 			Size:        r.Size,
 			CreatedTime: r.CreatedTime,
-			UpdatedTime: core.Ptr(r.UpdatedTime),
-			Version:     core.Ptr(r.Version),
-			Description: core.Ptr(r.Description),
-			Name:        core.Ptr(r.Name),
+			UpdatedTime: common.Ptr(r.UpdatedTime),
+			Version:     common.Ptr(r.Version),
+			Description: common.Ptr(r.Description),
+			Name:        common.Ptr(r.Name),
 			SelfUri:     "drs://" + objectID,
 		},
 	}
@@ -192,12 +194,12 @@ retryLookup:
 		obj.Authorizations = append(obj.Authorizations, res)
 	}
 	// 5. RBAC Check (gen3 mode only)
-	if !core.IsGen3Mode(ctx) {
+	if !authz.IsGen3Mode(ctx) {
 		return obj, nil
 	}
 
 	// Optimized in SQL for gen3 mode.
-	userResources := core.GetUserAuthz(ctx)
+	userResources := authz.GetUserAuthz(ctx)
 
 	var count int
 	err = db.db.QueryRowContext(ctx, `
@@ -211,13 +213,13 @@ retryLookup:
 		return nil, fmt.Errorf("authorization check failed: %w", err)
 	}
 	if count == 0 {
-		return nil, fmt.Errorf("%w: access to object denied", core.ErrUnauthorized)
+		return nil, fmt.Errorf("%w: access to object denied", common.ErrUnauthorized)
 	}
 
 	return obj, nil
 }
 
-func (db *PostgresDB) CreateObject(ctx context.Context, obj *core.InternalObject) error {
+func (db *PostgresDB) CreateObject(ctx context.Context, obj *models.InternalObject) error {
 	tx, err := db.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -228,7 +230,7 @@ func (db *PostgresDB) CreateObject(ctx context.Context, obj *core.InternalObject
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO drs_object (id, size, created_time, updated_time, name, version, description)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-		obj.Id, obj.Size, obj.CreatedTime, core.TimeVal(obj.UpdatedTime), core.StringVal(obj.Name), core.StringVal(obj.Version), core.StringVal(obj.Description),
+		obj.Id, obj.Size, obj.CreatedTime, common.TimeVal(obj.UpdatedTime), common.StringVal(obj.Name), common.StringVal(obj.Version), common.StringVal(obj.Description),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to insert drs_object: %w", err)
@@ -273,7 +275,7 @@ func (db *PostgresDB) CreateObject(ctx context.Context, obj *core.InternalObject
 	return tx.Commit()
 }
 
-func (db *PostgresDB) RegisterObjects(ctx context.Context, objects []core.InternalObject) error {
+func (db *PostgresDB) RegisterObjects(ctx context.Context, objects []models.InternalObject) error {
 	if len(objects) == 0 {
 		return nil
 	}
@@ -307,10 +309,10 @@ func (db *PostgresDB) RegisterObjects(ctx context.Context, objects []core.Intern
 		ids = append(ids, obj.Id)
 		sizes = append(sizes, obj.Size)
 		createdTimes = append(createdTimes, obj.CreatedTime)
-		updatedTimes = append(updatedTimes, core.TimeVal(obj.UpdatedTime))
-		names = append(names, core.StringVal(obj.Name))
-		versions = append(versions, core.StringVal(obj.Version))
-		descriptions = append(descriptions, core.StringVal(obj.Description))
+		updatedTimes = append(updatedTimes, common.TimeVal(obj.UpdatedTime))
+		names = append(names, common.StringVal(obj.Name))
+		versions = append(versions, common.StringVal(obj.Version))
+		descriptions = append(descriptions, common.StringVal(obj.Description))
 
 		seenAccess := make(map[string]struct{})
 		if obj.AccessMethods != nil {
@@ -415,15 +417,15 @@ func (db *PostgresDB) RegisterObjects(ctx context.Context, objects []core.Intern
 	return tx.Commit()
 }
 
-func (db *PostgresDB) GetBulkObjects(ctx context.Context, ids []string) ([]core.InternalObject, error) {
+func (db *PostgresDB) GetBulkObjects(ctx context.Context, ids []string) ([]models.InternalObject, error) {
 	if len(ids) == 0 {
-		return []core.InternalObject{}, nil
+		return []models.InternalObject{}, nil
 	}
 	objectsByID, err := db.fetchObjectsByIDsOrChecksums(ctx, ids, nil)
 	if err != nil {
 		return nil, err
 	}
-	objects := make([]core.InternalObject, 0, len(ids))
+	objects := make([]models.InternalObject, 0, len(ids))
 	seen := make(map[string]struct{}, len(ids))
 	for _, id := range ids {
 		if _, ok := seen[id]; ok {
@@ -437,26 +439,26 @@ func (db *PostgresDB) GetBulkObjects(ctx context.Context, ids []string) ([]core.
 	return objects, nil
 }
 
-func (db *PostgresDB) GetObjectsByChecksum(ctx context.Context, checksum string) ([]core.InternalObject, error) {
+func (db *PostgresDB) GetObjectsByChecksum(ctx context.Context, checksum string) ([]models.InternalObject, error) {
 	checksum = strings.TrimSpace(checksum)
 	if checksum == "" {
-		return []core.InternalObject{}, nil
+		return []models.InternalObject{}, nil
 	}
 	objectsByID, err := db.fetchObjectsByIDsOrChecksums(ctx, nil, []string{checksum})
 	if err != nil {
 		return nil, err
 	}
 	if len(objectsByID) == 0 {
-		return []core.InternalObject{}, nil
+		return []models.InternalObject{}, nil
 	}
-	out := make([]core.InternalObject, 0, len(objectsByID))
+	out := make([]models.InternalObject, 0, len(objectsByID))
 	for _, obj := range objectsByID {
 		out = append(out, *obj)
 	}
 	return uniqueObjectsByID(out), nil
 }
 
-func (db *PostgresDB) GetObjectsByChecksums(ctx context.Context, checksums []string) (map[string][]core.InternalObject, error) {
+func (db *PostgresDB) GetObjectsByChecksums(ctx context.Context, checksums []string) (map[string][]models.InternalObject, error) {
 	if len(checksums) == 0 {
 		return nil, nil
 	}
@@ -464,7 +466,7 @@ func (db *PostgresDB) GetObjectsByChecksums(ctx context.Context, checksums []str
 	if err != nil {
 		return nil, err
 	}
-	index := make(map[string][]core.InternalObject, len(objectsByID)*2)
+	index := make(map[string][]models.InternalObject, len(objectsByID)*2)
 	for _, obj := range objectsByID {
 		index[obj.Id] = append(index[obj.Id], *obj)
 		for _, cs := range obj.Checksums {
@@ -475,7 +477,7 @@ func (db *PostgresDB) GetObjectsByChecksums(ctx context.Context, checksums []str
 			index[value] = append(index[value], *obj)
 		}
 	}
-	result := make(map[string][]core.InternalObject, len(checksums))
+	result := make(map[string][]models.InternalObject, len(checksums))
 	for _, cs := range checksums {
 		normalized := strings.TrimSpace(cs)
 		if normalized == "" {
@@ -549,12 +551,12 @@ func (db *PostgresDB) BulkDeleteObjects(ctx context.Context, ids []string) error
 	return tx.Commit()
 }
 
-func (db *PostgresDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []string, checksums []string) (map[string]*core.InternalObject, error) {
+func (db *PostgresDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []string, checksums []string) (map[string]*models.InternalObject, error) {
 	if len(ids) == 0 && len(checksums) == 0 {
-		return map[string]*core.InternalObject{}, nil
+		return map[string]*models.InternalObject{}, nil
 	}
 
-	userResources := core.GetUserAuthz(ctx)
+	userResources := authz.GetUserAuthz(ctx)
 	rows, err := db.db.QueryContext(ctx, `
 		SELECT
 			o.id,
@@ -596,7 +598,7 @@ func (db *PostgresDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []st
 	}
 	defer rows.Close()
 
-	objectsByID := make(map[string]*core.InternalObject)
+	objectsByID := make(map[string]*models.InternalObject)
 	seenAccess := make(map[string]map[string]struct{})
 	seenChecksum := make(map[string]map[string]struct{})
 	seenAuthz := make(map[string]map[string]struct{})
@@ -618,15 +620,15 @@ func (db *PostgresDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []st
 
 		obj, ok := objectsByID[id]
 		if !ok {
-			obj = &core.InternalObject{
+			obj = &models.InternalObject{
 				DrsObject: drs.DrsObject{
 					Id:          id,
 					Size:        size,
 					CreatedTime: createdTime,
-					UpdatedTime: core.Ptr(updatedTime),
-					Name:        core.Ptr(name),
-					Version:     core.Ptr(version),
-					Description: core.Ptr(description),
+					UpdatedTime: common.Ptr(updatedTime),
+					Name:        common.Ptr(name),
+					Version:     common.Ptr(version),
+					Description: common.Ptr(description),
 					SelfUri:     "drs://" + id,
 				},
 			}

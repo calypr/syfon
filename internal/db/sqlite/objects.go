@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"github.com/calypr/syfon/apigen/server/drs"
-	"github.com/calypr/syfon/internal/db/core"
+	"github.com/calypr/syfon/internal/authz"
+	"github.com/calypr/syfon/internal/common"
+	"github.com/calypr/syfon/internal/models"
 )
 
 func (db *SqliteDB) DeleteObject(ctx context.Context, id string) error {
@@ -27,7 +29,7 @@ func (db *SqliteDB) DeleteObject(ctx context.Context, id string) error {
 		return err
 	}
 	if rows == 0 {
-		return fmt.Errorf("%w: object not found", core.ErrNotFound)
+		return fmt.Errorf("%w: object not found", common.ErrNotFound)
 	}
 	return nil
 }
@@ -45,7 +47,7 @@ func (db *SqliteDB) CreateObjectAlias(ctx context.Context, aliasID, canonicalObj
 	var exists string
 	err := db.db.QueryRowContext(ctx, "SELECT id FROM drs_object WHERE id = ?", canonicalObjectID).Scan(&exists)
 	if err == sql.ErrNoRows {
-		return fmt.Errorf("%w: object not found", core.ErrNotFound)
+		return fmt.Errorf("%w: object not found", common.ErrNotFound)
 	}
 	if err != nil {
 		return err
@@ -62,12 +64,12 @@ func (db *SqliteDB) CreateObjectAlias(ctx context.Context, aliasID, canonicalObj
 func (db *SqliteDB) ResolveObjectAlias(ctx context.Context, aliasID string) (string, error) {
 	aliasID = strings.TrimSpace(aliasID)
 	if aliasID == "" {
-		return "", fmt.Errorf("%w: object not found", core.ErrNotFound)
+		return "", fmt.Errorf("%w: object not found", common.ErrNotFound)
 	}
 	var canonicalID string
 	err := db.db.QueryRowContext(ctx, "SELECT object_id FROM drs_object_alias WHERE alias_id = ?", aliasID).Scan(&canonicalID)
 	if err == sql.ErrNoRows {
-		return "", fmt.Errorf("%w: object not found", core.ErrNotFound)
+		return "", fmt.Errorf("%w: object not found", common.ErrNotFound)
 	}
 	if err != nil {
 		return "", err
@@ -75,14 +77,14 @@ func (db *SqliteDB) ResolveObjectAlias(ctx context.Context, aliasID string) (str
 	return canonicalID, nil
 }
 
-func (db *SqliteDB) GetObject(ctx context.Context, id string) (*core.InternalObject, error) {
+func (db *SqliteDB) GetObject(ctx context.Context, id string) (*models.InternalObject, error) {
 	requestID := strings.TrimSpace(id)
 	lookupID := requestID
 	resolvedAlias := false
 
 retryLookup:
 	// 1. Fetch main record
-	var r core.DrsObjectRecord
+	var r models.DrsObjectRecord
 	err := db.db.QueryRowContext(ctx, `
 		SELECT id, size, created_time, updated_time, name, version, description
 		FROM drs_object WHERE id = ?`, lookupID).Scan(
@@ -96,11 +98,11 @@ retryLookup:
 				resolvedAlias = true
 				goto retryLookup
 			}
-			if aliasErr != nil && !errors.Is(aliasErr, core.ErrNotFound) {
+			if aliasErr != nil && !errors.Is(aliasErr, common.ErrNotFound) {
 				return nil, aliasErr
 			}
 		}
-		return nil, fmt.Errorf("%w: object not found", core.ErrNotFound)
+		return nil, fmt.Errorf("%w: object not found", common.ErrNotFound)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch record: %w", err)
@@ -110,15 +112,15 @@ retryLookup:
 		objectID = requestID
 	}
 
-	obj := &core.InternalObject{
+	obj := &models.InternalObject{
 		DrsObject: drs.DrsObject{
 			Id:          objectID,
 			Size:        r.Size,
 			CreatedTime: r.CreatedTime,
-			UpdatedTime: core.Ptr(r.UpdatedTime),
-			Version:     core.Ptr(r.Version),
-			Description: core.Ptr(r.Description),
-			Name:        core.Ptr(r.Name),
+			UpdatedTime: common.Ptr(r.UpdatedTime),
+			Version:     common.Ptr(r.Version),
+			Description: common.Ptr(r.Description),
+			Name:        common.Ptr(r.Name),
 			SelfUri:     "drs://" + objectID,
 		},
 	}
@@ -171,8 +173,8 @@ retryLookup:
 				Headers *[]string `json:"headers,omitempty"`
 				Url     string    `json:"url"`
 			}{Url: u},
-			Type:      drs.AccessMethodType(t),
-			AccessId:  &t,
+			Type:     drs.AccessMethodType(t),
+			AccessId: &t,
 		}
 		*obj.AccessMethods = append(*obj.AccessMethods, am)
 	}
@@ -198,17 +200,17 @@ retryLookup:
 	}
 
 	// 5. RBAC Check (gen3 mode only)
-	if core.IsGen3Mode(ctx) {
-		userResources := core.GetUserAuthz(ctx)
-		if !core.CheckAccess(recordResources, userResources) {
-			return nil, fmt.Errorf("%w: access to object denied", core.ErrUnauthorized)
+	if authz.IsGen3Mode(ctx) {
+		userResources := authz.GetUserAuthz(ctx)
+		if !authz.CheckAccess(recordResources, userResources) {
+			return nil, fmt.Errorf("%w: access to object denied", common.ErrUnauthorized)
 		}
 	}
 
 	return obj, nil
 }
 
-func (db *SqliteDB) CreateObject(ctx context.Context, obj *core.InternalObject) error {
+func (db *SqliteDB) CreateObject(ctx context.Context, obj *models.InternalObject) error {
 	tx, err := db.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -219,7 +221,7 @@ func (db *SqliteDB) CreateObject(ctx context.Context, obj *core.InternalObject) 
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO drs_object (id, size, created_time, updated_time, name, version, description)
 		VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		obj.Id, obj.Size, obj.CreatedTime, core.TimeVal(obj.UpdatedTime), core.StringVal(obj.Name), core.StringVal(obj.Version), core.StringVal(obj.Description),
+		obj.Id, obj.Size, obj.CreatedTime, common.TimeVal(obj.UpdatedTime), common.StringVal(obj.Name), common.StringVal(obj.Version), common.StringVal(obj.Description),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to insert drs_object: %w", err)
@@ -264,7 +266,7 @@ func (db *SqliteDB) CreateObject(ctx context.Context, obj *core.InternalObject) 
 	return tx.Commit()
 }
 
-func (db *SqliteDB) RegisterObjects(ctx context.Context, objects []core.InternalObject) error {
+func (db *SqliteDB) RegisterObjects(ctx context.Context, objects []models.InternalObject) error {
 	if len(objects) == 0 {
 		return nil
 	}
@@ -284,7 +286,7 @@ func (db *SqliteDB) RegisterObjects(ctx context.Context, objects []core.Internal
 
 	for _, obj := range objects {
 		ids = append(ids, obj.Id)
-		mainArgs = append(mainArgs, obj.Id, obj.Size, obj.CreatedTime, core.TimeVal(obj.UpdatedTime), core.StringVal(obj.Name), core.StringVal(obj.Version), core.StringVal(obj.Description))
+		mainArgs = append(mainArgs, obj.Id, obj.Size, obj.CreatedTime, common.TimeVal(obj.UpdatedTime), common.StringVal(obj.Name), common.StringVal(obj.Version), common.StringVal(obj.Description))
 
 		seenAccess := make(map[string]struct{})
 		if obj.AccessMethods != nil {
@@ -387,7 +389,7 @@ func (db *SqliteDB) RegisterObjects(ctx context.Context, objects []core.Internal
 	return tx.Commit()
 }
 
-func (db *SqliteDB) GetBulkObjects(ctx context.Context, ids []string) ([]core.InternalObject, error) {
+func (db *SqliteDB) GetBulkObjects(ctx context.Context, ids []string) ([]models.InternalObject, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
@@ -395,7 +397,7 @@ func (db *SqliteDB) GetBulkObjects(ctx context.Context, ids []string) ([]core.In
 	if err != nil {
 		return nil, err
 	}
-	objects := make([]core.InternalObject, 0, len(ids))
+	objects := make([]models.InternalObject, 0, len(ids))
 	seen := make(map[string]struct{}, len(ids))
 	for _, id := range ids {
 		if _, ok := seen[id]; ok {
@@ -409,7 +411,7 @@ func (db *SqliteDB) GetBulkObjects(ctx context.Context, ids []string) ([]core.In
 	return objects, nil
 }
 
-func (db *SqliteDB) GetObjectsByChecksums(ctx context.Context, checksums []string) (map[string][]core.InternalObject, error) {
+func (db *SqliteDB) GetObjectsByChecksums(ctx context.Context, checksums []string) (map[string][]models.InternalObject, error) {
 	if len(checksums) == 0 {
 		return nil, nil
 	}
@@ -417,7 +419,7 @@ func (db *SqliteDB) GetObjectsByChecksums(ctx context.Context, checksums []strin
 	if err != nil {
 		return nil, err
 	}
-	index := make(map[string][]core.InternalObject, len(objectsByID)*2)
+	index := make(map[string][]models.InternalObject, len(objectsByID)*2)
 	for _, obj := range objectsByID {
 		index[obj.Id] = append(index[obj.Id], *obj)
 		for _, cs := range obj.Checksums {
@@ -428,7 +430,7 @@ func (db *SqliteDB) GetObjectsByChecksums(ctx context.Context, checksums []strin
 			index[value] = append(index[value], *obj)
 		}
 	}
-	result := make(map[string][]core.InternalObject, len(checksums))
+	result := make(map[string][]models.InternalObject, len(checksums))
 	for _, cs := range checksums {
 		normalized := strings.TrimSpace(cs)
 		if normalized == "" {
@@ -483,19 +485,19 @@ func (db *SqliteDB) ListObjectIDsByResourcePrefix(ctx context.Context, resourceP
 	return ids, nil
 }
 
-func (db *SqliteDB) GetObjectsByChecksum(ctx context.Context, checksum string) ([]core.InternalObject, error) {
+func (db *SqliteDB) GetObjectsByChecksum(ctx context.Context, checksum string) ([]models.InternalObject, error) {
 	checksum = strings.TrimSpace(checksum)
 	if checksum == "" {
-		return []core.InternalObject{}, nil
+		return []models.InternalObject{}, nil
 	}
 	objectsByID, err := db.fetchObjectsByIDsOrChecksums(ctx, nil, []string{checksum})
 	if err != nil {
 		return nil, err
 	}
 	if len(objectsByID) == 0 {
-		return []core.InternalObject{}, nil
+		return []models.InternalObject{}, nil
 	}
-	out := make([]core.InternalObject, 0, len(objectsByID))
+	out := make([]models.InternalObject, 0, len(objectsByID))
 	for _, obj := range objectsByID {
 		out = append(out, *obj)
 	}
@@ -524,9 +526,9 @@ func (db *SqliteDB) BulkDeleteObjects(ctx context.Context, ids []string) error {
 	return tx.Commit()
 }
 
-func (db *SqliteDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []string, checksums []string) (map[string]*core.InternalObject, error) {
+func (db *SqliteDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []string, checksums []string) (map[string]*models.InternalObject, error) {
 	if len(ids) == 0 && len(checksums) == 0 {
-		return map[string]*core.InternalObject{}, nil
+		return map[string]*models.InternalObject{}, nil
 	}
 
 	conditions := make([]string, 0, 2)
@@ -573,7 +575,7 @@ func (db *SqliteDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []stri
 	}
 	defer rows.Close()
 
-	objectsByID := make(map[string]*core.InternalObject)
+	objectsByID := make(map[string]*models.InternalObject)
 	seenAccess := make(map[string]map[string]struct{})
 	seenChecksum := make(map[string]map[string]struct{})
 	seenAuthz := make(map[string]map[string]struct{})
@@ -595,15 +597,15 @@ func (db *SqliteDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []stri
 
 		obj, ok := objectsByID[id]
 		if !ok {
-			obj = &core.InternalObject{
+			obj = &models.InternalObject{
 				DrsObject: drs.DrsObject{
 					Id:          id,
 					Size:        size,
 					CreatedTime: createdTime,
-					UpdatedTime: core.Ptr(updatedTime),
-					Name:        core.Ptr(name),
-					Version:     core.Ptr(version),
-					Description: core.Ptr(description),
+					UpdatedTime: common.Ptr(updatedTime),
+					Name:        common.Ptr(name),
+					Version:     common.Ptr(version),
+					Description: common.Ptr(description),
 					SelfUri:     "drs://" + id,
 				},
 			}
@@ -626,8 +628,8 @@ func (db *SqliteDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []stri
 						Headers *[]string `json:"headers,omitempty"`
 						Url     string    `json:"url"`
 					}{Url: accessURL.String},
-					Type:      drs.AccessMethodType(accessType.String),
-					AccessId:  &t,
+					Type:     drs.AccessMethodType(accessType.String),
+					AccessId: &t,
 				})
 			}
 		}
@@ -652,10 +654,10 @@ func (db *SqliteDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []stri
 	}
 
 	// Apply gen3 RBAC filtering to mimic GetObject behavior.
-	if core.IsGen3Mode(ctx) {
-		userResources := core.GetUserAuthz(ctx)
+	if authz.IsGen3Mode(ctx) {
+		userResources := authz.GetUserAuthz(ctx)
 		for id, obj := range objectsByID {
-			if !core.CheckAccess(obj.Authorizations, userResources) {
+			if !authz.CheckAccess(obj.Authorizations, userResources) {
 				delete(objectsByID, id)
 				continue
 			}

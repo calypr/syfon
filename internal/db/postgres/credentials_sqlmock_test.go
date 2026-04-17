@@ -4,11 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"github.com/calypr/syfon/internal/common"
+	"github.com/calypr/syfon/internal/crypto"
+	"github.com/calypr/syfon/internal/models"
 	"regexp"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/calypr/syfon/internal/db/core"
 )
 
 func newMockPostgresDB(t *testing.T) (*PostgresDB, sqlmock.Sqlmock, *sql.DB) {
@@ -45,12 +47,12 @@ func TestGetS3Credential(t *testing.T) {
 }
 
 func TestGetS3Credential_DecryptsEncryptedSecrets(t *testing.T) {
-	t.Setenv(core.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
-	encAK, err := core.EncryptCredentialField("ak")
+	t.Setenv(crypto.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
+	encAK, err := crypto.EncryptCredentialField("ak")
 	if err != nil {
 		t.Fatalf("encrypt access key: %v", err)
 	}
-	encSK, err := core.EncryptCredentialField("sk")
+	encSK, err := crypto.EncryptCredentialField("sk")
 	if err != nil {
 		t.Fatalf("encrypt secret key: %v", err)
 	}
@@ -92,7 +94,7 @@ func TestGetS3CredentialNotFound(t *testing.T) {
 }
 
 func TestSaveS3Credential(t *testing.T) {
-	t.Setenv(core.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
+	t.Setenv(crypto.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
 	pg, mock, rawDB := newMockPostgresDB(t)
 	defer rawDB.Close()
 
@@ -108,7 +110,7 @@ func TestSaveS3Credential(t *testing.T) {
 		WithArgs("b1", "s3", "us-east-1", sqlmock.AnyArg(), sqlmock.AnyArg(), "https://s3.example").
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
-	err := pg.SaveS3Credential(context.Background(), &core.S3Credential{
+	err := pg.SaveS3Credential(context.Background(), &models.S3Credential{
 		Bucket:    "b1",
 		Provider:  "",
 		Region:    "us-east-1",
@@ -183,7 +185,7 @@ func TestCreateBucketScope(t *testing.T) {
 		if err := pg.CreateBucketScope(context.Background(), nil); err == nil {
 			t.Fatal("expected nil scope validation error")
 		}
-		if err := pg.CreateBucketScope(context.Background(), &core.BucketScope{}); err == nil {
+		if err := pg.CreateBucketScope(context.Background(), &models.BucketScope{}); err == nil {
 			t.Fatal("expected required field validation error")
 		}
 	})
@@ -202,7 +204,7 @@ func TestCreateBucketScope(t *testing.T) {
 			WithArgs("org", "proj").
 			WillReturnRows(rows)
 
-		err := pg.CreateBucketScope(context.Background(), &core.BucketScope{
+		err := pg.CreateBucketScope(context.Background(), &models.BucketScope{
 			Organization: "org",
 			ProjectID:    "proj",
 			Bucket:       "bucket-a",
@@ -227,13 +229,13 @@ func TestCreateBucketScope(t *testing.T) {
 			WithArgs("org", "proj").
 			WillReturnRows(rows)
 
-		err := pg.CreateBucketScope(context.Background(), &core.BucketScope{
+		err := pg.CreateBucketScope(context.Background(), &models.BucketScope{
 			Organization: "org",
 			ProjectID:    "proj",
 			Bucket:       "bucket-b",
 			PathPrefix:   "prefix-b",
 		})
-		if !errors.Is(err, core.ErrConflict) {
+		if !errors.Is(err, common.ErrConflict) {
 			t.Fatalf("expected conflict error, got %v", err)
 		}
 	})
@@ -257,7 +259,7 @@ func TestCreateBucketScope(t *testing.T) {
 			WithArgs("org", "proj", "bucket-a", "nested/path").
 			WillReturnResult(sqlmock.NewResult(1, 1))
 
-		err := pg.CreateBucketScope(context.Background(), &core.BucketScope{
+		err := pg.CreateBucketScope(context.Background(), &models.BucketScope{
 			Organization: " org ",
 			ProjectID:    " proj ",
 			Bucket:       " bucket-a ",
@@ -283,7 +285,7 @@ func TestGetAndListBucketScopes(t *testing.T) {
 			WillReturnError(sql.ErrNoRows)
 
 		_, err := pg.GetBucketScope(context.Background(), "org", "proj")
-		if !errors.Is(err, core.ErrNotFound) {
+		if !errors.Is(err, common.ErrNotFound) {
 			t.Fatalf("expected not found error, got %v", err)
 		}
 	})

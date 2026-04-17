@@ -7,11 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/calypr/syfon/internal/db/core"
+	"github.com/calypr/syfon/internal/models"
 )
 
 func TestGCSEndpointObjectURL(t *testing.T) {
-	cred := &core.S3Credential{Endpoint: "http://localhost:4443"}
+	cred := &models.S3Credential{Endpoint: "http://localhost:4443"}
 
 	uploadURL, ok := gcsEndpointObjectURL(cred, "test-bucket", "path/to/file.txt", http.MethodPut)
 	if !ok {
@@ -48,13 +48,13 @@ func TestGCSEndpointObjectURL(t *testing.T) {
 }
 
 func TestGCSEndpointObjectURL_RequiresEndpoint(t *testing.T) {
-	if _, ok := gcsEndpointObjectURL(&core.S3Credential{}, "bucket", "obj", http.MethodGet); ok {
+	if _, ok := gcsEndpointObjectURL(&models.S3Credential{}, "bucket", "obj", http.MethodGet); ok {
 		t.Fatal("expected false when endpoint is missing")
 	}
 }
 
 func TestGCSSignedURL_UsesEndpointWithoutServiceAccountKey(t *testing.T) {
-	cred := &core.S3Credential{Endpoint: "http://localhost:4443"}
+	cred := &models.S3Credential{Endpoint: "http://localhost:4443"}
 	s := &GCSSigner{}
 	signed, err := s.gcsSignedURL("test-bucket", "nested/file.txt", http.MethodGet, 5*time.Minute, "", cred)
 	if err != nil {

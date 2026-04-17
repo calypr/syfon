@@ -1,11 +1,11 @@
 package postgres
 
 import (
+	"github.com/calypr/syfon/internal/models"
 	"testing"
 	"time"
 
 	"github.com/calypr/syfon/apigen/server/drs"
-	"github.com/calypr/syfon/internal/db/core"
 )
 
 func TestDefaultProvider(t *testing.T) {
@@ -18,7 +18,7 @@ func TestDefaultProvider(t *testing.T) {
 }
 
 func TestUniqueObjectsByID(t *testing.T) {
-	in := []core.InternalObject{
+	in := []models.InternalObject{
 		{DrsObject: drs.DrsObject{Id: "1"}},
 		{DrsObject: drs.DrsObject{Id: "1"}},
 		{DrsObject: drs.DrsObject{Id: "2"}},
