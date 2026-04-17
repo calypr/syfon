@@ -10,7 +10,6 @@ import (
 	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/apigen/server/internalapi"
 	"github.com/calypr/syfon/internal/api/apiutil"
-	"github.com/calypr/syfon/internal/authz"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/models"
@@ -24,8 +23,8 @@ var multipartUploadSessions sync.Map // uploadID -> multipartSession
 
 func handleInternalUploadBlankFiber(om *core.ObjectManager) fiber.Handler {
 	return func(c fiber.Ctx) error {
-		if authz.IsGen3Mode(c.Context()) && !authz.HasAuthHeader(c.Context()) {
-			return c.SendStatus(fiber.StatusUnauthorized)
+		if err := requireGen3AuthFiber(c); err != nil {
+			return err
 		}
 
 		var req internalapi.InternalUploadBlankRequest
@@ -69,8 +68,8 @@ func handleInternalUploadBlankFiber(om *core.ObjectManager) fiber.Handler {
 
 func handleInternalUploadURLFiber(om *core.ObjectManager) fiber.Handler {
 	return func(c fiber.Ctx) error {
-		if authz.IsGen3Mode(c.Context()) && !authz.HasAuthHeader(c.Context()) {
-			return c.SendStatus(fiber.StatusUnauthorized)
+		if err := requireGen3AuthFiber(c); err != nil {
+			return err
 		}
 
 		fileID := c.Params("file_id")

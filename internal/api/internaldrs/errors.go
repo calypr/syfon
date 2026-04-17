@@ -1,13 +1,11 @@
 package internaldrs
 
 import (
-
 	"errors"
 	"log/slog"
 	"net/http"
 
 	"github.com/calypr/syfon/internal/common"
-	"github.com/calypr/syfon/internal/authz"
 	"github.com/gofiber/fiber/v3"
 )
 
@@ -32,19 +30,11 @@ func writeHTTPErrorFiber(c fiber.Ctx, status int, msg string, err error) error {
 }
 
 func writeAuthError(w http.ResponseWriter, r *http.Request) {
-	code := http.StatusForbidden
-	if authz.IsGen3Mode(r.Context()) && !authz.HasAuthHeader(r.Context()) {
-		code = http.StatusUnauthorized
-	}
-	writeHTTPError(w, r, code, "Unauthorized", nil)
+	writeHTTPError(w, r, authStatusCode(r.Context()), "Unauthorized", nil)
 }
 
 func writeAuthErrorFiber(c fiber.Ctx) error {
-	code := http.StatusForbidden
-	if authz.IsGen3Mode(c.Context()) && !authz.HasAuthHeader(c.Context()) {
-		code = http.StatusUnauthorized
-	}
-	return writeHTTPErrorFiber(c, code, "Unauthorized", nil)
+	return writeHTTPErrorFiber(c, authStatusCode(c.Context()), "Unauthorized", nil)
 }
 
 func writeDBError(w http.ResponseWriter, r *http.Request, err error) {

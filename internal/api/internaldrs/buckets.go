@@ -7,7 +7,6 @@ import (
 
 	"github.com/calypr/syfon/apigen/server/bucketapi"
 	"github.com/calypr/syfon/internal/api/apiutil"
-	"github.com/calypr/syfon/internal/authz"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/config"
 	"github.com/calypr/syfon/internal/core"
@@ -23,16 +22,12 @@ func handleInternalBucketsFiber(c fiber.Ctx, om *core.ObjectManager) error {
 	scopes, _ := om.ListBucketScopes(c.Context())
 
 	allowedBuckets := map[string]bool{}
-	allowAll := !authz.IsGen3Mode(c.Context()) || authz.HasGlobalBucketControlAccess(c.Context(), "read")
+	allowAll := bucketControlOpenAccess(c.Context(), "read")
 	if !allowAll {
-		if !authz.HasAuthHeader(c.Context()) {
+		if err := requireGen3AuthFiber(c); err != nil {
 			return apiutil.HandleError(c, common.ErrUnauthorized)
 		}
-		for _, s := range scopes {
-			if authz.HasScopedBucketAccess(c.Context(), s, "read", "create", "update", "delete", "file_upload") {
-				allowedBuckets[s.Bucket] = true
-			}
-		}
+		allowedBuckets = allowedBucketsForScopes(c.Context(), scopes, "read", "create", "update", "delete", "file_upload")
 		if len(allowedBuckets) == 0 {
 			return apiutil.HandleError(c, common.ErrUnauthorized)
 		}
@@ -96,15 +91,13 @@ func handleInternalPutBucketFiber(c fiber.Ctx, om *core.ObjectManager) error {
 		return c.Status(fiber.StatusBadRequest).SendString("bucket, organization, and project_id are required")
 	}
 
-	if authz.IsGen3Mode(c.Context()) {
-		if !authz.HasAuthHeader(c.Context()) {
+	if !bucketControlAllowed(c.Context(), "create", "update") {
+		if err := requireGen3AuthFiber(c); err != nil {
 			return apiutil.HandleError(c, common.ErrUnauthorized)
 		}
-		if !authz.HasGlobalBucketControlAccess(c.Context(), "create", "update") {
-			res := common.ResourcePathForScope(req.Organization, req.ProjectId)
-			if res == "" || !authz.HasAnyMethodAccess(c.Context(), []string{res}, "create", "update") {
-				return apiutil.HandleError(c, common.ErrUnauthorized)
-			}
+		res := common.ResourcePathForScope(req.Organization, req.ProjectId)
+		if res == "" || !resourceAllowed(c.Context(), res, "create", "update") {
+			return apiutil.HandleError(c, common.ErrUnauthorized)
 		}
 	}
 
@@ -186,28 +179,16 @@ func handleInternalDeleteBucketFiber(c fiber.Ctx, om *core.ObjectManager) error 
 		return c.Status(fiber.StatusBadRequest).SendString("bucket name is required")
 	}
 
-	if authz.IsGen3Mode(c.Context()) {
-		if !authz.HasAuthHeader(c.Context()) {
+	if !bucketControlAllowed(c.Context(), "delete") {
+		if err := requireGen3AuthFiber(c); err != nil {
 			return apiutil.HandleError(c, common.ErrUnauthorized)
 		}
-		if !authz.HasGlobalBucketControlAccess(c.Context(), "delete") {
-			scopes, err := om.ListBucketScopes(c.Context())
-			if err != nil {
-				return apiutil.HandleError(c, err)
-			}
-			matching := 0
-			for _, s := range scopes {
-				if s.Bucket != bucket {
-					continue
-				}
-				matching++
-				if !authz.HasScopedBucketAccess(c.Context(), s, "delete", "update") {
-					return apiutil.HandleError(c, common.ErrUnauthorized)
-				}
-			}
-			if matching == 0 {
-				return apiutil.HandleError(c, common.ErrUnauthorized)
-			}
+		scopes, err := om.ListBucketScopes(c.Context())
+		if err != nil {
+			return apiutil.HandleError(c, err)
+		}
+		if !bucketsAllowedByNames(c.Context(), scopes, bucket, "delete", "update") {
+			return apiutil.HandleError(c, common.ErrUnauthorized)
 		}
 	}
 
@@ -236,15 +217,13 @@ func handleInternalCreateBucketScopeFiber(c fiber.Ctx, om *core.ObjectManager) e
 		return c.Status(fiber.StatusBadRequest).SendString("organization and project_id are required")
 	}
 
-	if authz.IsGen3Mode(c.Context()) {
-		if !authz.HasAuthHeader(c.Context()) {
+	if !bucketControlAllowed(c.Context(), "create", "update") {
+		if err := requireGen3AuthFiber(c); err != nil {
 			return apiutil.HandleError(c, common.ErrUnauthorized)
 		}
-		if !authz.HasGlobalBucketControlAccess(c.Context(), "create", "update") {
-			res := common.ResourcePathForScope(req.Organization, req.ProjectId)
-			if res == "" || !authz.HasAnyMethodAccess(c.Context(), []string{res}, "create", "update") {
-				return apiutil.HandleError(c, common.ErrUnauthorized)
-			}
+		res := common.ResourcePathForScope(req.Organization, req.ProjectId)
+		if res == "" || !resourceAllowed(c.Context(), res, "create", "update") {
+			return apiutil.HandleError(c, common.ErrUnauthorized)
 		}
 	}
 

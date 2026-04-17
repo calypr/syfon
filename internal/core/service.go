@@ -46,38 +46,68 @@ func (m *ObjectManager) GetObject(ctx context.Context, ident string, requiredMet
 		return nil, common.ErrNotFound
 	}
 
-	// 1. Try resolving by checksum
-	byChecksum, err := m.db.GetObjectsByChecksum(ctx, ident)
-	if err == nil && len(byChecksum) > 0 {
+	if byChecksum, ok := m.lookupObjectByChecksum(ctx, ident); ok {
 		return m.checkAccessAndReturn(&byChecksum[0], requiredMethod, ctx)
 	}
 
-	// 2. Try direct ID lookup
-	obj, err := m.db.GetObject(ctx, ident)
-	if err == nil {
+	if obj, found, err := m.lookupObjectByID(ctx, ident); err != nil {
+		return nil, err
+	} else if found {
 		return m.checkAccessAndReturn(obj, requiredMethod, ctx)
 	}
-	if !common.IsNotFoundError(err) {
-		return nil, err
-	}
 
-	// 3. Try alias resolution
-	canonicalID, aliasErr := m.db.ResolveObjectAlias(ctx, ident)
-	if aliasErr == nil && strings.TrimSpace(canonicalID) != "" {
-		obj, getErr := m.db.GetObject(ctx, canonicalID)
-		if getErr == nil {
-			// Map the alias identifying ID back to the object for transparent consumption
-			objCopy := *obj
-			objCopy.DrsObject.Id = ident
-			objCopy.DrsObject.SelfUri = "drs://" + ident
-			return m.checkAccessAndReturn(&objCopy, requiredMethod, ctx)
-		}
-		if !common.IsNotFoundError(getErr) {
-			return nil, getErr
-		}
+	if obj, found, err := m.lookupObjectByAlias(ctx, ident); err != nil {
+		return nil, err
+	} else if found {
+		return m.checkAccessAndReturn(obj, requiredMethod, ctx)
 	}
 
 	return nil, common.ErrNotFound
+}
+
+func (m *ObjectManager) lookupObjectByChecksum(ctx context.Context, ident string) ([]models.InternalObject, bool) {
+	byChecksum, err := m.db.GetObjectsByChecksum(ctx, ident)
+	if err != nil || len(byChecksum) == 0 {
+		return nil, false
+	}
+	return byChecksum, true
+}
+
+func (m *ObjectManager) lookupObjectByID(ctx context.Context, ident string) (*models.InternalObject, bool, error) {
+	obj, err := m.db.GetObject(ctx, ident)
+	if err == nil {
+		return obj, true, nil
+	}
+	if common.IsNotFoundError(err) {
+		return nil, false, nil
+	}
+	return nil, false, err
+}
+
+func (m *ObjectManager) lookupObjectByAlias(ctx context.Context, ident string) (*models.InternalObject, bool, error) {
+	canonicalID, aliasErr := m.db.ResolveObjectAlias(ctx, ident)
+	if aliasErr != nil {
+		if common.IsNotFoundError(aliasErr) {
+			return nil, false, nil
+		}
+		return nil, false, aliasErr
+	}
+	if strings.TrimSpace(canonicalID) == "" {
+		return nil, false, nil
+	}
+
+	obj, err := m.db.GetObject(ctx, canonicalID)
+	if err != nil {
+		if common.IsNotFoundError(err) {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+
+	objCopy := *obj
+	objCopy.DrsObject.Id = ident
+	objCopy.DrsObject.SelfUri = "drs://" + ident
+	return &objCopy, true, nil
 }
 
 func (m *ObjectManager) checkAccessAndReturn(obj *models.InternalObject, method string, ctx context.Context) (*models.InternalObject, error) {
@@ -112,13 +142,7 @@ func (m *ObjectManager) DeleteBulkByResourcePrefix(ctx context.Context, prefix s
 		return 0, err
 	}
 
-	toDelete := make([]string, 0, len(ids))
-	for _, id := range ids {
-		// Verify individual delete permission (Gen3 scoped auth)
-		if _, err := m.GetObject(ctx, id, "delete"); err == nil {
-			toDelete = append(toDelete, id)
-		}
-	}
+	toDelete := m.filterDeletableObjectIDs(ctx, ids)
 
 	if len(toDelete) == 0 {
 		return 0, nil
@@ -132,28 +156,7 @@ func (m *ObjectManager) DeleteBulkByResourcePrefix(ctx context.Context, prefix s
 
 // SignURL generates a signed URL for an object's access method.
 func (m *ObjectManager) SignURL(ctx context.Context, accessURL string, options urlmanager.SignOptions) (string, error) {
-	bucketID := ""
-	if bucket, _, ok := common.ParseS3URL(accessURL); ok {
-		bucketID = bucket
-	} else if strings.HasPrefix(accessURL, "s3://") {
-		parts := strings.Split(strings.TrimPrefix(accessURL, "s3://"), "/")
-		if len(parts) > 0 {
-			bucketID = parts[0]
-		}
-	}
-	if bucketID == "" {
-		if parsed, err := url.Parse(strings.TrimSpace(accessURL)); err == nil && parsed.Scheme == "" && strings.TrimSpace(parsed.Path) != "" {
-			if creds, err := m.ListS3Credentials(ctx); err == nil {
-				for _, cred := range creds {
-					if common.NormalizeProvider(cred.Provider, "") == common.FileProvider {
-						bucketID = cred.Bucket
-						break
-					}
-				}
-			}
-		}
-	}
-	return m.uM.SignURL(ctx, bucketID, accessURL, options)
+	return m.uM.SignURL(ctx, m.resolveSigningBucket(ctx, accessURL), accessURL, options)
 }
 
 // ResolveBucket validates a bucket name or returns the default one.
@@ -162,20 +165,7 @@ func (m *ObjectManager) ResolveBucket(ctx context.Context, bucketName string) (s
 	if err != nil {
 		return "", err
 	}
-	if len(creds) == 0 {
-		return "", fmt.Errorf("no buckets configured")
-	}
-
-	if bucketName == "" {
-		return creds[0].Bucket, nil
-	}
-
-	for _, c := range creds {
-		if c.Bucket == bucketName {
-			return c.Bucket, nil
-		}
-	}
-	return "", fmt.Errorf("bucket %q not configured", bucketName)
+	return resolveBucketName(creds, bucketName)
 }
 
 func (m *ObjectManager) SignDownloadPart(ctx context.Context, bucket, accessURL string, start, end int64, options urlmanager.SignOptions) (string, error) {
@@ -282,4 +272,56 @@ func (m *ObjectManager) CreateObjectAlias(ctx context.Context, aliasID, canonica
 
 func (m *ObjectManager) ListObjectIDsByResourcePrefix(ctx context.Context, prefix string) ([]string, error) {
 	return m.db.ListObjectIDsByResourcePrefix(ctx, prefix)
+}
+
+func (m *ObjectManager) filterDeletableObjectIDs(ctx context.Context, ids []string) []string {
+	toDelete := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if m.canDeleteObject(ctx, id) {
+			toDelete = append(toDelete, id)
+		}
+	}
+	return toDelete
+}
+
+func (m *ObjectManager) canDeleteObject(ctx context.Context, id string) bool {
+	_, err := m.GetObject(ctx, id, "delete")
+	return err == nil
+}
+
+func (m *ObjectManager) resolveSigningBucket(ctx context.Context, accessURL string) string {
+	if bucket, _, ok := common.ParseS3URL(accessURL); ok {
+		return bucket
+	}
+	if strings.HasPrefix(accessURL, "s3://") {
+		parts := strings.Split(strings.TrimPrefix(accessURL, "s3://"), "/")
+		if len(parts) > 0 {
+			return parts[0]
+		}
+	}
+	if parsed, err := url.Parse(strings.TrimSpace(accessURL)); err == nil && parsed.Scheme == "" && strings.TrimSpace(parsed.Path) != "" {
+		if creds, err := m.ListS3Credentials(ctx); err == nil {
+			for _, cred := range creds {
+				if common.NormalizeProvider(cred.Provider, "") == common.FileProvider {
+					return cred.Bucket
+				}
+			}
+		}
+	}
+	return ""
+}
+
+func resolveBucketName(creds []models.S3Credential, bucketName string) (string, error) {
+	if len(creds) == 0 {
+		return "", fmt.Errorf("no buckets configured")
+	}
+	if bucketName == "" {
+		return creds[0].Bucket, nil
+	}
+	for _, c := range creds {
+		if c.Bucket == bucketName {
+			return c.Bucket, nil
+		}
+	}
+	return "", fmt.Errorf("bucket %q not configured", bucketName)
 }

@@ -7,7 +7,6 @@ import (
 
 	"github.com/calypr/syfon/apigen/server/internalapi"
 	"github.com/calypr/syfon/internal/api/apiutil"
-	"github.com/calypr/syfon/internal/authz"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/models"
@@ -153,8 +152,8 @@ func handleInternalCreateFiber(om *core.ObjectManager) fiber.Handler {
 
 func handleInternalDeleteByQueryFiber(om *core.ObjectManager) fiber.Handler {
 	return func(c fiber.Ctx) error {
-		if authz.IsGen3Mode(c.Context()) && !authz.HasAuthHeader(c.Context()) {
-			return c.SendStatus(fiber.StatusUnauthorized)
+		if err := requireGen3AuthFiber(c); err != nil {
+			return err
 		}
 
 		scopePrefix, hasScope, err := parseScopeQueryFiber(c)
@@ -165,7 +164,7 @@ func handleInternalDeleteByQueryFiber(om *core.ObjectManager) fiber.Handler {
 			return c.Status(fiber.StatusBadRequest).SendString("No scope specified")
 		}
 
-		if authz.IsGen3Mode(c.Context()) && !authz.HasMethodAccess(c.Context(), "delete", []string{scopePrefix}) {
+		if !resourceAllowed(c.Context(), scopePrefix, "delete") {
 			return c.SendStatus(fiber.StatusForbidden)
 		}
 
@@ -258,8 +257,8 @@ func handleInternalBulkDocumentsFiber(om *core.ObjectManager) fiber.Handler {
 
 func handleInternalBulkDeleteFiber(om *core.ObjectManager) fiber.Handler {
 	return func(c fiber.Ctx) error {
-		if authz.IsGen3Mode(c.Context()) && !authz.HasAuthHeader(c.Context()) {
-			return c.SendStatus(fiber.StatusUnauthorized)
+		if err := requireGen3AuthFiber(c); err != nil {
+			return err
 		}
 
 		var req internalapi.BulkHashesRequest
@@ -291,7 +290,7 @@ func handleInternalBulkDeleteFiber(om *core.ObjectManager) fiber.Handler {
 		seen := make(map[string]struct{})
 		for _, hash := range normalized {
 			for _, obj := range matches[hash] {
-				if authz.IsGen3Mode(c.Context()) && !authz.HasMethodAccess(c.Context(), "delete", obj.Authorizations) {
+				if !methodAllowedForAuthorizations(c.Context(), "delete", obj.Authorizations) {
 					continue
 				}
 				if _, ok := seen[obj.Id]; ok {
@@ -337,24 +336,4 @@ func handleInternalUpdateFiber(c fiber.Ctx, om *core.ObjectManager) error {
 	}
 
 	return c.JSON(merged)
-}
-
-func parseScopeQueryFiber(c fiber.Ctx) (string, bool, error) {
-	authzParam := strings.TrimSpace(c.Query("authz"))
-	if authzParam != "" {
-		return authzParam, true, nil
-	}
-	org := strings.TrimSpace(c.Query("organization"))
-	if org == "" {
-		org = strings.TrimSpace(c.Query("program"))
-	}
-	project := strings.TrimSpace(c.Query("project"))
-	if project != "" && org == "" {
-		return "", false, fmt.Errorf("organization is required when project is set")
-	}
-	path := common.ResourcePathForScope(org, project)
-	if path != "" {
-		return path, true, nil
-	}
-	return "", false, nil
 }

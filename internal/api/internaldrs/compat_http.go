@@ -1,7 +1,6 @@
 package internaldrs
 
 import (
-	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -12,6 +11,14 @@ import (
 )
 
 const bucketControlResource = common.BucketControlResource
+
+func rejectMissingGen3AuthHTTP(w http.ResponseWriter, r *http.Request) bool {
+	if authStatusCode(r.Context()) == http.StatusUnauthorized {
+		writeAuthError(w, r)
+		return true
+	}
+	return false
+}
 
 func serveFiberHandlerHTTP(w http.ResponseWriter, r *http.Request, pattern string, handler fiber.Handler) {
 	app := fiber.New()
@@ -66,12 +73,18 @@ func handleInternalDownloadPart(w http.ResponseWriter, r *http.Request, om *core
 }
 
 func handleInternalUploadBlank(w http.ResponseWriter, r *http.Request, om *core.ObjectManager) {
+	if rejectMissingGen3AuthHTTP(w, r) {
+		return
+	}
 	serveFiberHandlerHTTP(w, r, "/data/upload", func(c fiber.Ctx) error {
 		return handleInternalUploadBlankFiber(om)(c)
 	})
 }
 
 func handleInternalUploadURL(w http.ResponseWriter, r *http.Request, om *core.ObjectManager) {
+	if rejectMissingGen3AuthHTTP(w, r) {
+		return
+	}
 	serveFiberHandlerHTTP(w, r, "/data/upload/:file_id", func(c fiber.Ctx) error {
 		return handleInternalUploadURLFiber(om)(c)
 	})
@@ -84,65 +97,75 @@ func handleInternalUploadBulk(w http.ResponseWriter, r *http.Request, om *core.O
 }
 
 func handleInternalMultipartInit(w http.ResponseWriter, r *http.Request, om *core.ObjectManager) {
+	if rejectMissingGen3AuthHTTP(w, r) {
+		return
+	}
 	serveFiberHandlerHTTP(w, r, "/data/multipart/init", func(c fiber.Ctx) error {
 		return handleInternalMultipartInitFiber(om)(c)
 	})
 }
 
 func handleInternalMultipartUpload(w http.ResponseWriter, r *http.Request, om *core.ObjectManager) {
+	if rejectMissingGen3AuthHTTP(w, r) {
+		return
+	}
 	serveFiberHandlerHTTP(w, r, "/data/multipart/upload", func(c fiber.Ctx) error {
 		return handleInternalMultipartUploadFiber(om)(c)
 	})
 }
 
 func handleInternalMultipartComplete(w http.ResponseWriter, r *http.Request, om *core.ObjectManager) {
+	if rejectMissingGen3AuthHTTP(w, r) {
+		return
+	}
 	serveFiberHandlerHTTP(w, r, "/data/multipart/complete", func(c fiber.Ctx) error {
 		return handleInternalMultipartCompleteFiber(om)(c)
 	})
 }
 
 func handleInternalBuckets(w http.ResponseWriter, r *http.Request, om *core.ObjectManager) {
+	if rejectMissingGen3AuthHTTP(w, r) {
+		return
+	}
 	serveFiberHandlerHTTP(w, r, "/data/buckets", func(c fiber.Ctx) error {
 		return handleInternalBucketsFiber(c, om)
 	})
 }
 
 func handleInternalPutBucket(w http.ResponseWriter, r *http.Request, om *core.ObjectManager) {
+	if rejectMissingGen3AuthHTTP(w, r) {
+		return
+	}
 	serveFiberHandlerHTTP(w, r, "/data/buckets", func(c fiber.Ctx) error {
 		return handleInternalPutBucketFiber(c, om)
 	})
 }
 
 func handleInternalDeleteBucket(w http.ResponseWriter, r *http.Request, om *core.ObjectManager) {
+	if rejectMissingGen3AuthHTTP(w, r) {
+		return
+	}
 	serveFiberHandlerHTTP(w, r, "/data/buckets/:bucket", func(c fiber.Ctx) error {
 		return handleInternalDeleteBucketFiber(c, om)
 	})
 }
 
 func handleInternalCreateBucketScope(w http.ResponseWriter, r *http.Request, om *core.ObjectManager) {
+	if rejectMissingGen3AuthHTTP(w, r) {
+		return
+	}
 	serveFiberHandlerHTTP(w, r, "/data/buckets/:bucket/scopes", func(c fiber.Ctx) error {
 		return handleInternalCreateBucketScopeFiber(c, om)
 	})
 }
 
 func parseScopeQuery(r *http.Request) (string, bool, error) {
-	authz := strings.TrimSpace(r.URL.Query().Get("authz"))
-	if authz != "" {
-		return authz, true, nil
-	}
-	org := strings.TrimSpace(r.URL.Query().Get("organization"))
-	if org == "" {
-		org = strings.TrimSpace(r.URL.Query().Get("program"))
-	}
-	project := strings.TrimSpace(r.URL.Query().Get("project"))
-	if project != "" && org == "" {
-		return "", false, fmt.Errorf("organization is required when project is set")
-	}
-	path := common.ResourcePathForScope(org, project)
-	if path != "" {
-		return path, true, nil
-	}
-	return "", false, nil
+	return parseScopeQueryParts(
+		r.URL.Query().Get("authz"),
+		r.URL.Query().Get("organization"),
+		r.URL.Query().Get("program"),
+		r.URL.Query().Get("project"),
+	)
 }
 
 func handleInternalList(w http.ResponseWriter, r *http.Request, om *core.ObjectManager) {
@@ -158,6 +181,9 @@ func handleInternalCreate(w http.ResponseWriter, r *http.Request, om *core.Objec
 }
 
 func handleInternalDeleteByQuery(w http.ResponseWriter, r *http.Request, om *core.ObjectManager) {
+	if rejectMissingGen3AuthHTTP(w, r) {
+		return
+	}
 	serveFiberHandlerHTTP(w, r, "/", func(c fiber.Ctx) error {
 		return handleInternalDeleteByQueryFiber(om)(c)
 	})
