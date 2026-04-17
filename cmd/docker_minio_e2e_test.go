@@ -113,12 +113,16 @@ func TestSyfonDockerMinIOE2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to parse DID from upload output: %v", err)
 	}
-	t.Logf("Object registered with DID: %s", uploadedID)
+	storageID, err := parseRequestedUploadedObjectID(uploadOut)
+	if err != nil {
+		t.Fatalf("Failed to parse requested DID from upload output: %v", err)
+	}
+	t.Logf("Object registered with canonical DID: %s (storage DID: %s)", uploadedID, storageID)
 
 	t.Logf("STEP 5: Verifying object existence in MinIO directly...")
 	if _, err := minioEnv.s3Client.HeadObject(ctx, &s3.HeadObjectInput{
 		Bucket: aws.String(minioEnv.bucket),
-		Key:    aws.String(uploadedID),
+		Key:    aws.String(storageID),
 	}); err != nil {
 		t.Fatalf("Data check failed: Object is missing from MinIO bucket: %v", err)
 	}
