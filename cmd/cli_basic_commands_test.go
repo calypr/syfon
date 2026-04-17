@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/calypr/syfon/apigen/client/bucketapi"
+	"github.com/calypr/syfon/apigen/client/internalapi"
 	syclient "github.com/calypr/syfon/client"
 )
 
@@ -22,7 +24,7 @@ func TestSyfonListAndRemoveCommands(t *testing.T) {
 	fileName := "README.md"
 	size := int64(123)
 	urls := []string{"s3://syfon-bucket/path/README.md"}
-	rec := syclient.InternalRecordRequest{
+	rec := internalapi.InternalRecord{
 		Did:      did,
 		Authz:    []string{"/programs/syfon/projects/e2e"},
 		FileName: &fileName,
@@ -107,7 +109,7 @@ func TestSyfonBucketListAndRemoveCommands(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := c.Buckets().Put(context.Background(), syclient.PutBucketRequest{
+	if err := c.Buckets().Put(context.Background(), bucketapi.PutBucketRequest{
 		Bucket:       "test-bucket-cli",
 		Provider:     stringPtr("s3"),
 		Region:       stringPtr("us-east-1"),

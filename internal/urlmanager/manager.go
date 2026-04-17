@@ -3,6 +3,7 @@ package urlmanager
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"net/url"
 	"strings"
 
@@ -50,6 +51,9 @@ func (m *Manager) SignURL(ctx context.Context, accessId string, urlStr string, o
 }
 
 func (m *Manager) SignUploadURL(ctx context.Context, accessId string, urlStr string, opts SignOptions) (string, error) {
+	if strings.TrimSpace(opts.Method) == "" {
+		opts.Method = http.MethodPut
+	}
 	bucketName, key, p, err := m.resolve(ctx, accessId, urlStr)
 	if err != nil {
 		return "", err

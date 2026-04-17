@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/calypr/syfon/apigen/server/drs"
@@ -31,6 +32,50 @@ func RegisterDRSRoutes(router fiber.Router, database db.DatabaseInterface, uM ur
 
 	router.Post("/objects/register", routeutil.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handleRegisterObjects(w, r, database)
+	})))
+
+	router.Post("/objects/access", routeutil.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handleGetBulkAccessURL(w, r, database, uM)
+	})))
+
+	router.Post("/objects/access-methods", routeutil.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeDRSHTTPError(w, r, http.StatusNotImplemented, "bulk access-method updates are not implemented")
+	})))
+
+	router.Get("/objects/checksum/:checksum", routeutil.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handleGetObjectsByChecksum(w, r, database)
+	}), "checksum"))
+
+	router.Post("/objects/delete", routeutil.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeDRSHTTPError(w, r, http.StatusNotImplemented, "bulk delete is not implemented")
+	})))
+
+	router.Post("/objects/:object_id/access-methods", routeutil.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeDRSHTTPError(w, r, http.StatusNotImplemented, "access-method updates are not implemented")
+	}), "object_id"))
+
+	router.Post("/objects/:object_id/delete", routeutil.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handleDeleteObject(w, r, database)
+	}), "object_id"))
+
+	router.Options("/objects", routeutil.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})))
+
+	router.Options("/objects/:object_id", routeutil.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}), "object_id"))
+
+	router.Post("/objects/:object_id", routeutil.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handleGetObject(w, r, database)
+	}), "object_id"))
+
+	router.Post("/objects/:object_id/access/:access_id", routeutil.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handleGetAccessURL(w, r, database, uM)
+	}), "object_id", "access_id"))
+
+	router.Post("/upload-request", routeutil.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeDRSHTTPError(w, r, http.StatusNotImplemented, "upload request is not implemented")
 	})))
 
 	// Helper for bulk resolution
@@ -137,6 +182,9 @@ func handleRegisterObjects(w http.ResponseWriter, r *http.Request, db db.Databas
 		if c.AccessMethods != nil {
 			obj.AccessMethods = c.AccessMethods
 		}
+		if c.Aliases != nil {
+			obj.Aliases = c.Aliases
+		}
 
 		id := common.MintObjectIDFromChecksum(sha, authz)
 		obj.Id = id
@@ -152,6 +200,22 @@ func handleRegisterObjects(w http.ResponseWriter, r *http.Request, db db.Databas
 	if err := db.RegisterObjects(r.Context(), internalObjs); err != nil {
 		writeDRSHTTPError(w, r, http.StatusInternalServerError, err.Error())
 		return
+	}
+
+	for i, c := range body.Candidates {
+		if c.Aliases == nil {
+			continue
+		}
+		canonicalID := externalObjs[i].Id
+		for _, alias := range *c.Aliases {
+			if strings.TrimSpace(alias) == "" || strings.TrimSpace(alias) == canonicalID {
+				continue
+			}
+			if err := db.CreateObjectAlias(r.Context(), alias, canonicalID); err != nil {
+				writeDRSHTTPError(w, r, http.StatusInternalServerError, err.Error())
+				return
+			}
+		}
 	}
 
 	w.WriteHeader(http.StatusCreated)
@@ -186,6 +250,37 @@ func handleGetBulkObjects(w http.ResponseWriter, r *http.Request, db db.Database
 		ResolvedDrsObject: &resolved,
 		Summary: &drs.Summary{
 			Requested: common.Ptr(len(body.BulkObjectIds)),
+			Resolved:  common.Ptr(len(resolved)),
+		},
+	})
+}
+
+func handleGetBulkAccessURL(w http.ResponseWriter, r *http.Request, db db.DatabaseInterface, uM urlmanager.UrlManager) {
+	writeDRSHTTPError(w, r, http.StatusNotImplemented, "bulk access lookup is not implemented")
+}
+
+func handleGetObjectsByChecksum(w http.ResponseWriter, r *http.Request, db db.DatabaseInterface) {
+	checksum := routeutil.PathParam(r, "checksum")
+	if strings.TrimSpace(checksum) == "" {
+		writeDRSHTTPError(w, r, http.StatusBadRequest, "checksum is required")
+		return
+	}
+	fetched, err := db.GetObjectsByChecksum(r.Context(), checksum)
+	if err != nil {
+		writeDRSError(w, r, err)
+		return
+	}
+	resolved := make([]drs.DrsObject, 0, len(fetched))
+	for _, obj := range fetched {
+		if authz.HasMethodAccess(r.Context(), "read", obj.Authorizations) {
+			resolved = append(resolved, obj.DrsObject)
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(drs.N200OkDrsObjectsJSONResponse{
+		ResolvedDrsObject: &resolved,
+		Summary: &drs.Summary{
+			Requested: common.Ptr(1),
 			Resolved:  common.Ptr(len(resolved)),
 		},
 	})

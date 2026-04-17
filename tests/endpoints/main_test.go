@@ -65,6 +65,7 @@ func runTests(m *testing.M) int {
 		"DRS_PORT=9005",
 		"DRS_DB_SQLITE_FILE=drs_test.db",
 		"DRS_AUTH_MODE=local",
+		"DRS_ENABLE_GA4GH=true",
 	)
 
 	// Put the child in its own process group so we can kill the whole tree.

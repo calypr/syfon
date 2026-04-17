@@ -29,6 +29,8 @@ func RegisterFile(ctx context.Context, bk UploadBackend, dc MetadataClient, drsO
 	if drsObject == nil {
 		return nil, fmt.Errorf("drsObject must be provided (containing at least checksums/size)")
 	}
+	requestedID := strings.TrimSpace(drsObject.Id)
+	storageID := requestedID
 
 	// 2. Register with DRS server
 	candidates := []drsapi.DrsObjectCandidate{{
@@ -92,7 +94,7 @@ func RegisterFile(ctx context.Context, bk UploadBackend, dc MetadataClient, drsO
 
 	threshold := int64(4.5 * float64(common.GB)) // Default threshold with safety buffer
 	if stat.Size() < threshold {
-		uploadURL, err := bk.ResolveUploadURL(ctx, drsObject.Id, uploadFilename, common.FileMetadata{}, bucketName)
+		uploadURL, err := bk.ResolveUploadURL(ctx, storageID, uploadFilename, common.FileMetadata{}, bucketName)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get upload URL: %w", err)
 		}
@@ -101,7 +103,7 @@ func RegisterFile(ctx context.Context, bk UploadBackend, dc MetadataClient, drsO
 		}
 
 		// 6. Finalize registration for single-part (Multipart handles its own completion)
-		canonical, err := bk.CanonicalObjectURL(uploadURL, bucketName, drsObject.Id)
+		canonical, err := bk.CanonicalObjectURL(uploadURL, bucketName, storageID)
 		if err != nil || canonical == "" {
 			if err == nil {
 				err = fmt.Errorf("empty canonical URL returned")
@@ -174,7 +176,10 @@ func RegisterFile(ctx context.Context, bk UploadBackend, dc MetadataClient, drsO
 		// Finalize registration by updating with the access method
 		candidates = []drsapi.DrsObjectCandidate{{
 			// We use Aliases to reference the existing ID if we can't use id field
-			Aliases: &[]string{drsObject.Id},
+			Name:      drsObject.Name,
+			Size:      drsObject.Size,
+			Checksums: drsObject.Checksums,
+			Aliases:   &[]string{requestedID},
 			AccessMethods: &[]drsapi.AccessMethod{{
 				Type:           drsapi.AccessMethodType(pType),
 				AccessUrl:      am.AccessUrl,
@@ -187,7 +192,7 @@ func RegisterFile(ctx context.Context, bk UploadBackend, dc MetadataClient, drsO
 			return nil, fmt.Errorf("failed to finalize registration with server: %w", updateErr)
 		}
 	} else {
-		if err := Upload(ctx, bk, filePath, uploadFilename, drsObject.Id, bucketName, common.FileMetadata{}, false, true); err != nil {
+		if err := Upload(ctx, bk, filePath, uploadFilename, storageID, bucketName, common.FileMetadata{}, false, true); err != nil {
 			return nil, fmt.Errorf("multipart upload failed: %w", err)
 		}
 	}

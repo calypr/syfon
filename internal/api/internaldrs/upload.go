@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"math"
 	"strconv"
 	"strings"
 	"sync"
@@ -393,7 +394,7 @@ func handleInternalMultipartUploadFiber(database db.DatabaseInterface, uM urlman
 		}
 		if req.PartNumber <= 0 {
 			if raw := c.Query("partNumber"); raw != "" {
-				if v, err := strconv.Atoi(raw); err == nil {
+				if v, err := strconv.ParseInt(raw, 10, 32); err == nil && v > 0 && v <= math.MaxInt32 {
 					req.PartNumber = int32(v)
 				}
 			}

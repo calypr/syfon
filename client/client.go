@@ -174,9 +174,10 @@ func (c *Client) initServices() {
 	l := c.Logger()
 
 	server := c.baseURL
+	drsServer := strings.TrimRight(server+"/ga4gh/drs/v1", "/")
 	httpClient := c.HTTPClient()
 
-	c.drsGen, _ = drs.NewClientWithResponses(server, drs.WithHTTPClient(httpClient))
+	c.drsGen, _ = drs.NewClientWithResponses(drsServer, drs.WithHTTPClient(httpClient))
 	c.lfsGen, _ = lfsapi.NewClientWithResponses(server, lfsapi.WithHTTPClient(httpClient))
 	c.internalGen, _ = internalapi.NewClientWithResponses(server, internalapi.WithHTTPClient(httpClient))
 	c.bucketGen, _ = bucketapi.NewClientWithResponses(server, bucketapi.WithHTTPClient(httpClient))

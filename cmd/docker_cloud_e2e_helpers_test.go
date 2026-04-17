@@ -13,7 +13,7 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/calypr/syfon/internal/common"
+	"github.com/calypr/syfon/internal/crypto"
 )
 
 type bucketCommandConfig struct {
@@ -37,7 +37,7 @@ func startSyfonServerProcessWithConfigPath(t *testing.T, configPath string, extr
 
 	cmd := exec.Command(binaryPath, "serve", "--config", configPath)
 	cmd.Dir = rootDir
-	cmd.Env = append(os.Environ(), core.CredentialMasterKeyEnv+"="+dockerE2ECredentialKey)
+	cmd.Env = append(os.Environ(), crypto.CredentialMasterKeyEnv+"="+dockerE2ECredentialKey)
 	for key, val := range extraEnv {
 		cmd.Env = append(cmd.Env, key+"="+val)
 	}

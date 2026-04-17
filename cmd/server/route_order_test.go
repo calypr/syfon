@@ -5,16 +5,16 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/calypr/syfon/internal/config"
+	"github.com/calypr/syfon/internal/common"
 	"github.com/gofiber/fiber/v3"
 )
 
 func TestGinStaticRouteOverridesParamRoute(t *testing.T) {
 	app := fiber.New()
-	app.Post(config.RouteInternalIndex+"/register", func(c fiber.Ctx) error {
+	app.Post(common.RouteInternalIndex+"/register", func(c fiber.Ctx) error {
 		return c.SendStatus(http.StatusCreated)
 	})
-	app.Post(config.RouteInternalIndex+"/:object_id", func(c fiber.Ctx) error {
+	app.Post(common.RouteInternalIndex+"/:object_id", func(c fiber.Ctx) error {
 		return c.SendStatus(http.StatusTeapot)
 	})
 
