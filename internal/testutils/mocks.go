@@ -5,6 +5,7 @@ import (
 
 	"context"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -441,7 +442,11 @@ func (m *MockDatabase) GetFileUsageSummary(ctx context.Context, inactiveSince *t
 type MockUrlManager struct{}
 
 func (m *MockUrlManager) SignURL(ctx context.Context, accessId string, url string, opts urlmanager.SignOptions) (string, error) {
-	return url + "?signed=true", nil
+	suffix := "?signed=true"
+	if opts.Method == http.MethodPut || opts.Method == http.MethodPost {
+		suffix += "&upload=true"
+	}
+	return url + suffix, nil
 }
 
 func (m *MockUrlManager) SignUploadURL(ctx context.Context, accessId string, url string, opts urlmanager.SignOptions) (string, error) {

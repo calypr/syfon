@@ -76,8 +76,12 @@ func readURLBytes(ctx context.Context, rawURL string, c syfonclient.SyfonClient)
 		return nil, fmt.Errorf("parse download url: %w", err)
 	}
 	switch strings.ToLower(parsed.Scheme) {
-	case "file":
-		data, err := os.ReadFile(parsed.Path)
+	case "", "file":
+		srcPath := parsed.Path
+		if srcPath == "" {
+			srcPath = rawURL
+		}
+		data, err := os.ReadFile(srcPath)
 		if err != nil {
 			return nil, fmt.Errorf("read file source: %w", err)
 		}

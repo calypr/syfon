@@ -67,7 +67,7 @@ func TestSyfonDownloadDefaultsToRecordFilename(t *testing.T) {
 	tmp := t.TempDir()
 	t.Chdir(tmp)
 
-	srcPath := filepath.Join(tmp, "source.txt")
+	srcPath := filepath.Join(server.StorageDir, "source.txt")
 	srcData := []byte("download default filename test")
 	if err := os.WriteFile(srcPath, srcData, 0o644); err != nil {
 		t.Fatalf("write source: %v", err)
@@ -78,8 +78,8 @@ func TestSyfonDownloadDefaultsToRecordFilename(t *testing.T) {
 		t.Fatal(err)
 	}
 	did := "22222222-2222-2222-2222-222222222222"
-	// Store record with explicit filename and file:// URL so download can resolve locally.
-	if err := c.Index().Upsert(context.Background(), did, "file://"+srcPath, "README.md", int64(len(srcData)), "", []string{"/programs/syfon/projects/e2e"}); err != nil {
+	// Store record with explicit filename and a storage-root URL so download can resolve locally.
+	if err := c.Index().Upsert(context.Background(), did, "s3://syfon-bucket/source.txt", "README.md", int64(len(srcData)), "", []string{"/programs/syfon/projects/e2e"}); err != nil {
 		t.Fatalf("seed record with file url: %v", err)
 	}
 

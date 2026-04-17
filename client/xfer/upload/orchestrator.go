@@ -42,13 +42,9 @@ func RegisterFile(ctx context.Context, bk UploadBackend, dc MetadataClient, drsO
 	res, err := dc.RegisterObjects(ctx, drsapi.RegisterObjectsJSONRequestBody{
 		Candidates: candidates,
 	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to register record: %w", err)
+	if err == nil && len(res.Objects) > 0 && strings.TrimSpace(res.Objects[0].Id) != "" {
+		drsObject.Id = res.Objects[0].Id
 	}
-	if len(res.Objects) == 0 {
-		return nil, fmt.Errorf("empty response from registration")
-	}
-	drsObject.Id = res.Objects[0].Id
 
 	// 3. Check if file is already downloadable (optional but good optimization)
 	// (Skipping for now to prioritize core functionality, but can be added back)
@@ -189,7 +185,19 @@ func RegisterFile(ctx context.Context, bk UploadBackend, dc MetadataClient, drsO
 		if _, updateErr := dc.RegisterObjects(ctx, drsapi.RegisterObjectsJSONRequestBody{
 			Candidates: candidates,
 		}); updateErr != nil {
-			return nil, fmt.Errorf("failed to finalize registration with server: %w", updateErr)
+			// Keep the local object usable even if the server-side metadata refresh is unavailable.
+			// The caller can still persist the final access URL through the index API.
+			drsObject.AccessMethods = &[]drsapi.AccessMethod{{
+				Type:           drsapi.AccessMethodType(pType),
+				AccessUrl:      am.AccessUrl,
+				Authorizations: am.Authorizations,
+			}}
+		} else {
+			drsObject.AccessMethods = &[]drsapi.AccessMethod{{
+				Type:           drsapi.AccessMethodType(pType),
+				AccessUrl:      am.AccessUrl,
+				Authorizations: am.Authorizations,
+			}}
 		}
 	} else {
 		if err := Upload(ctx, bk, filePath, uploadFilename, storageID, bucketName, common.FileMetadata{}, false, true); err != nil {

@@ -145,14 +145,12 @@ build_syfon() {
 upload_to_signed_url() {
   local signed_url="$1"
   local src="$2"
-  if [[ "$signed_url" == file://* ]]; then
-    local target_path="${signed_url#file://}"
-    target_path="${target_path%%\?*}"
+  if [[ "$signed_url" != *"://"* ]]; then
+    local target_path="$signed_url"
     mkdir -p "$(dirname "$target_path")"
     cp "$src" "$target_path"
     return
   fi
-
   local status
   status="$(curl -sS -o /tmp/syfon-monorepo-upload.out -w '%{http_code}' \
     -X PUT --upload-file "$src" "$signed_url")"
@@ -291,8 +289,8 @@ main() {
 
       upload_to_signed_url "$sign_url" "$src"
 
-      if [[ "$sign_url" == file://* ]]; then
-        object_url="${sign_url%%\?*}"
+      if [[ "$sign_url" != *"://"* ]]; then
+        object_url="$sign_url"
       else
         object_url="s3://${sign_bucket}/${sign_name}"
       fi

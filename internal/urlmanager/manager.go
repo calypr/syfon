@@ -123,15 +123,6 @@ func (m *Manager) resolve(ctx context.Context, accessId string, urlStr string) (
 		return "", "", "", fmt.Errorf("failed to parse url: %w", err)
 	}
 
-	if u.Scheme == "file" {
-		bucket = config.FilePrefix
-		key = strings.TrimPrefix(u.Path, "/")
-		if u.Host != "" {
-			key = u.Host + "/" + key
-		}
-		return bucket, key, common.FileProvider, nil
-	}
-
 	bucket = u.Host
 	key = strings.TrimPrefix(u.Path, "/")
 

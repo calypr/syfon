@@ -11,9 +11,10 @@ import (
 	"time"
 
 	"github.com/calypr/syfon/internal/api/middleware"
-	"github.com/calypr/syfon/internal/config"
-	"github.com/calypr/syfon/internal/crypto"
 	"github.com/calypr/syfon/internal/common"
+	"github.com/calypr/syfon/internal/config"
+	"github.com/calypr/syfon/internal/core"
+	"github.com/calypr/syfon/internal/crypto"
 	"github.com/calypr/syfon/internal/db"
 	"github.com/calypr/syfon/internal/db/postgres"
 	"github.com/calypr/syfon/internal/db/sqlite"
@@ -123,6 +124,9 @@ var Cmd = &cobra.Command{
 			}
 		}
 
+		// Init unified Object Manager.
+		om := core.NewObjectManager(database, uM)
+
 		// Build Fiber runtime and middleware pipeline.
 		app := fiber.New(fiber.Config{
 			ReadTimeout:  30 * time.Second,
@@ -147,6 +151,7 @@ var Cmd = &cobra.Command{
 			app:                 app,
 			cfg:                 cfg,
 			database:            database,
+			om:                  om,
 			uM:                  uM,
 			authzMiddleware:     authzMiddleware,
 			requestIDMiddleware: requestIDMiddleware,

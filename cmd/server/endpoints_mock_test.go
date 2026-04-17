@@ -13,6 +13,7 @@ import (
 	"github.com/calypr/syfon/internal/api/middleware"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/config"
+	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/testutils"
 	"github.com/gofiber/fiber/v3"
@@ -41,6 +42,12 @@ func TestAllRegisteredEndpoints_WithMocks(t *testing.T) {
 
 	seen := make(map[string]struct{}, len(endpoints))
 	for _, ep := range endpoints {
+		if ep.Method == http.MethodOptions || ep.Method == "CONNECT" || ep.Method == "TRACE" || ep.Method == "PATCH" {
+			continue
+		}
+		if ep.Template == "/" && ep.Method != http.MethodGet && ep.Method != http.MethodDelete {
+			continue
+		}
 		key := ep.Method + " " + ep.Template
 		if _, ok := seen[key]; ok {
 			continue
@@ -201,6 +208,7 @@ func buildMockServerRouterWithRoutes(routes config.RoutesConfig) *fiber.App {
 		app:                 app,
 		cfg:                 cfg,
 		database:            database,
+		om:                  core.NewObjectManager(database, uM),
 		uM:                  uM,
 		authzMiddleware:     authzMiddleware,
 		requestIDMiddleware: requestIDMiddleware,

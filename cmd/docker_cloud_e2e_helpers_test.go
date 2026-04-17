@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"syscall"
 	"testing"
 
+	syclient "github.com/calypr/syfon/client"
 	"github.com/calypr/syfon/internal/crypto"
 )
 
@@ -179,10 +181,16 @@ func exerciseAllClientCommands(t *testing.T, serverURL string, bucketCfg bucketC
 		t.Fatalf("sha256sum output missing expected hash %s: %s", expectedSum, sumOut)
 	}
 
-	externalSource := filepath.Join(t.TempDir(), "provider-existing-url-source.txt")
-	externalData := []byte("provider add-url payload")
-	if err := os.WriteFile(externalSource, externalData, 0o644); err != nil {
-		t.Fatalf("write external source file: %v", err)
+	client, err := syclient.New(serverURL)
+	if err != nil {
+		t.Fatalf("init client: %v", err)
+	}
+	rec, err := client.Index().Get(context.Background(), uploadedID)
+	if err != nil {
+		t.Fatalf("fetch uploaded record: %v", err)
+	}
+	if rec.Urls == nil || len(*rec.Urls) == 0 || strings.TrimSpace((*rec.Urls)[0]) == "" {
+		t.Fatalf("uploaded record missing access url")
 	}
 	addURLDID := "33333333-3333-3333-3333-333333333333"
 	addURLOut, err := executeRootCommand(
@@ -190,10 +198,10 @@ func exerciseAllClientCommands(t *testing.T, serverURL string, bucketCfg bucketC
 		"--server", serverURL,
 		"add-url",
 		"--did", addURLDID,
-		"--url", "file://"+externalSource,
+		"--url", (*rec.Urls)[0],
 		"--authz", "/programs/syfon/projects/e2e",
-		"--name", filepath.Base(externalSource),
-		"--size", strconv.Itoa(len(externalData)),
+		"--name", fileName,
+		"--size", strconv.Itoa(len(srcData)),
 	)
 	if err != nil {
 		t.Fatalf("add-url failed: %v output=%s", err, addURLOut)
@@ -208,7 +216,7 @@ func exerciseAllClientCommands(t *testing.T, serverURL string, bucketCfg bucketC
 	if err != nil {
 		t.Fatalf("read add-url downloaded file: %v", err)
 	}
-	if !bytes.Equal(got2, externalData) {
+	if !bytes.Equal(got2, srcData) {
 		t.Fatalf("downloaded add-url bytes mismatch")
 	}
 

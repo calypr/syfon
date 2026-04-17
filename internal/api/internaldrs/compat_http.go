@@ -7,8 +7,7 @@ import (
 	"strings"
 
 	"github.com/calypr/syfon/internal/common"
-	"github.com/calypr/syfon/internal/db"
-	"github.com/calypr/syfon/internal/urlmanager"
+	"github.com/calypr/syfon/internal/core"
 	"github.com/gofiber/fiber/v3"
 )
 
@@ -54,75 +53,75 @@ func fiberRoutePath(path string) string {
 	return strings.ReplaceAll(strings.ReplaceAll(path, "{", ":"), "}", "")
 }
 
-func handleInternalDownload(w http.ResponseWriter, r *http.Request, database db.DatabaseInterface, uM urlmanager.UrlManager) {
+func handleInternalDownload(w http.ResponseWriter, r *http.Request, om *core.ObjectManager) {
 	serveFiberHandlerHTTP(w, r, "/data/download/:file_id", func(c fiber.Ctx) error {
-		return handleInternalDownloadFiber(c, database, uM)
+		return handleInternalDownloadFiber(c, om)
 	})
 }
 
-func handleInternalDownloadPart(w http.ResponseWriter, r *http.Request, database db.DatabaseInterface, uM urlmanager.UrlManager) {
+func handleInternalDownloadPart(w http.ResponseWriter, r *http.Request, om *core.ObjectManager) {
 	serveFiberHandlerHTTP(w, r, "/data/download/:file_id/part", func(c fiber.Ctx) error {
-		return handleInternalDownloadPartFiber(c, database, uM)
+		return handleInternalDownloadPartFiber(c, om)
 	})
 }
 
-func handleInternalUploadBlank(w http.ResponseWriter, r *http.Request, database db.DatabaseInterface, uM urlmanager.UrlManager) {
+func handleInternalUploadBlank(w http.ResponseWriter, r *http.Request, om *core.ObjectManager) {
 	serveFiberHandlerHTTP(w, r, "/data/upload", func(c fiber.Ctx) error {
-		return handleInternalUploadBlankFiber(database, uM)(c)
+		return handleInternalUploadBlankFiber(om)(c)
 	})
 }
 
-func handleInternalUploadURL(w http.ResponseWriter, r *http.Request, database db.DatabaseInterface, uM urlmanager.UrlManager) {
+func handleInternalUploadURL(w http.ResponseWriter, r *http.Request, om *core.ObjectManager) {
 	serveFiberHandlerHTTP(w, r, "/data/upload/:file_id", func(c fiber.Ctx) error {
-		return handleInternalUploadURLFiber(database, uM)(c)
+		return handleInternalUploadURLFiber(om)(c)
 	})
 }
 
-func handleInternalUploadBulk(w http.ResponseWriter, r *http.Request, database db.DatabaseInterface, uM urlmanager.UrlManager) {
+func handleInternalUploadBulk(w http.ResponseWriter, r *http.Request, om *core.ObjectManager) {
 	serveFiberHandlerHTTP(w, r, "/data/upload/bulk", func(c fiber.Ctx) error {
-		return handleInternalUploadBulkFiber(database, uM)(c)
+		return handleInternalUploadBulkFiber(om)(c)
 	})
 }
 
-func handleInternalMultipartInit(w http.ResponseWriter, r *http.Request, database db.DatabaseInterface, uM urlmanager.UrlManager) {
+func handleInternalMultipartInit(w http.ResponseWriter, r *http.Request, om *core.ObjectManager) {
 	serveFiberHandlerHTTP(w, r, "/data/multipart/init", func(c fiber.Ctx) error {
-		return handleInternalMultipartInitFiber(database, uM)(c)
+		return handleInternalMultipartInitFiber(om)(c)
 	})
 }
 
-func handleInternalMultipartUpload(w http.ResponseWriter, r *http.Request, database db.DatabaseInterface, uM urlmanager.UrlManager) {
+func handleInternalMultipartUpload(w http.ResponseWriter, r *http.Request, om *core.ObjectManager) {
 	serveFiberHandlerHTTP(w, r, "/data/multipart/upload", func(c fiber.Ctx) error {
-		return handleInternalMultipartUploadFiber(database, uM)(c)
+		return handleInternalMultipartUploadFiber(om)(c)
 	})
 }
 
-func handleInternalMultipartComplete(w http.ResponseWriter, r *http.Request, database db.DatabaseInterface, uM urlmanager.UrlManager) {
+func handleInternalMultipartComplete(w http.ResponseWriter, r *http.Request, om *core.ObjectManager) {
 	serveFiberHandlerHTTP(w, r, "/data/multipart/complete", func(c fiber.Ctx) error {
-		return handleInternalMultipartCompleteFiber(database, uM)(c)
+		return handleInternalMultipartCompleteFiber(om)(c)
 	})
 }
 
-func handleInternalBuckets(w http.ResponseWriter, r *http.Request, database db.CredentialStore) {
+func handleInternalBuckets(w http.ResponseWriter, r *http.Request, om *core.ObjectManager) {
 	serveFiberHandlerHTTP(w, r, "/data/buckets", func(c fiber.Ctx) error {
-		return handleInternalBucketsFiber(c, database)
+		return handleInternalBucketsFiber(c, om)
 	})
 }
 
-func handleInternalPutBucket(w http.ResponseWriter, r *http.Request, database db.CredentialStore) {
+func handleInternalPutBucket(w http.ResponseWriter, r *http.Request, om *core.ObjectManager) {
 	serveFiberHandlerHTTP(w, r, "/data/buckets", func(c fiber.Ctx) error {
-		return handleInternalPutBucketFiber(c, database)
+		return handleInternalPutBucketFiber(c, om)
 	})
 }
 
-func handleInternalDeleteBucket(w http.ResponseWriter, r *http.Request, database db.CredentialStore) {
+func handleInternalDeleteBucket(w http.ResponseWriter, r *http.Request, om *core.ObjectManager) {
 	serveFiberHandlerHTTP(w, r, "/data/buckets/:bucket", func(c fiber.Ctx) error {
-		return handleInternalDeleteBucketFiber(c, database)
+		return handleInternalDeleteBucketFiber(c, om)
 	})
 }
 
-func handleInternalCreateBucketScope(w http.ResponseWriter, r *http.Request, database db.CredentialStore) {
+func handleInternalCreateBucketScope(w http.ResponseWriter, r *http.Request, om *core.ObjectManager) {
 	serveFiberHandlerHTTP(w, r, "/data/buckets/:bucket/scopes", func(c fiber.Ctx) error {
-		return handleInternalCreateBucketScopeFiber(c, database)
+		return handleInternalCreateBucketScopeFiber(c, om)
 	})
 }
 
@@ -146,36 +145,44 @@ func parseScopeQuery(r *http.Request) (string, bool, error) {
 	return "", false, nil
 }
 
-func handleInternalList(w http.ResponseWriter, r *http.Request, database db.DatabaseInterface) {
+func handleInternalList(w http.ResponseWriter, r *http.Request, om *core.ObjectManager) {
 	serveFiberHandlerHTTP(w, r, "/", func(c fiber.Ctx) error {
-		return handleInternalListFiber(database)(c)
+		return handleInternalListFiber(om)(c)
 	})
 }
 
-func handleInternalCreate(w http.ResponseWriter, r *http.Request, database db.DatabaseInterface) {
+func handleInternalCreate(w http.ResponseWriter, r *http.Request, om *core.ObjectManager) {
 	serveFiberHandlerHTTP(w, r, "/index", func(c fiber.Ctx) error {
-		return handleInternalCreateFiber(database)(c)
+		return handleInternalCreateFiber(om)(c)
 	})
 }
 
-func handleInternalDeleteByQuery(w http.ResponseWriter, r *http.Request, database db.DatabaseInterface) {
+func handleInternalDeleteByQuery(w http.ResponseWriter, r *http.Request, om *core.ObjectManager) {
 	serveFiberHandlerHTTP(w, r, "/", func(c fiber.Ctx) error {
-		return handleInternalDeleteByQueryFiber(database)(c)
+		return handleInternalDeleteByQueryFiber(om)(c)
 	})
 }
 
-func handleInternalBulkHashes(database db.DatabaseInterface) http.Handler {
+func handleInternalBulkHashes(om *core.ObjectManager) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		serveFiberHandlerHTTP(w, r, "/bulk/hashes", func(c fiber.Ctx) error {
-			return handleInternalBulkHashesFiber(database)(c)
+			return handleInternalBulkHashesFiber(om)(c)
 		})
 	})
 }
 
-func handleInternalBulkCreate(database db.DatabaseInterface) http.Handler {
+func handleInternalBulkCreate(om *core.ObjectManager) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		serveFiberHandlerHTTP(w, r, "/bulk/create", func(c fiber.Ctx) error {
-			return handleInternalBulkCreateFiber(database)(c)
+			return handleInternalBulkCreateFiber(om)(c)
+		})
+	})
+}
+
+func handleInternalBulkDocuments(om *core.ObjectManager) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		serveFiberHandlerHTTP(w, r, "/bulk/documents", func(c fiber.Ctx) error {
+			return handleInternalBulkDocumentsFiber(om)(c)
 		})
 	})
 }

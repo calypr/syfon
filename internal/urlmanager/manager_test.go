@@ -3,6 +3,7 @@ package urlmanager
 import (
 	"context"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -66,18 +67,25 @@ func TestManager_FileScheme(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to init db: %v", err)
 	}
+	root := t.TempDir()
+	if err := database.SaveS3Credential(ctx, &models.S3Credential{
+		Bucket:   "local-bucket",
+		Provider: "file",
+		Endpoint: root,
+	}); err != nil {
+		t.Fatalf("failed to save file credential: %v", err)
+	}
 	manager := NewManager(database, config.SigningConfig{DefaultExpirySeconds: 900})
-	fSigner, _ := file.NewFileSigner("/")
+	fSigner, _ := file.NewFileSigner(root)
 	manager.RegisterSigner("file", fSigner)
 
-	// file:// should work without DB credentials
-	urlStr := "file:///tmp/test.txt"
-	signedURL, err := manager.SignURL(ctx, "", urlStr, SignOptions{})
+	urlStr := "s3://local-bucket/test.txt"
+	signedURL, err := manager.SignURL(ctx, "local-bucket", urlStr, SignOptions{})
 	if err != nil {
-		t.Fatalf("SignURL failed for file scheme: %v", err)
+		t.Fatalf("SignURL failed for file-backed bucket: %v", err)
 	}
-	if !strings.Contains(signedURL, "test.txt") {
-		t.Errorf("expected file URL to contain filename, got: %s", signedURL)
+	if signedURL != filepath.ToSlash(filepath.Join(root, "test.txt")) {
+		t.Errorf("expected raw filesystem path, got: %s", signedURL)
 	}
 }
 

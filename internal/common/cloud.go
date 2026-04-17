@@ -3,6 +3,7 @@ package common
 import (
 	"fmt"
 	"net/url"
+	"path/filepath"
 	"strings"
 
 	"github.com/calypr/syfon/internal/models"
@@ -17,7 +18,6 @@ const (
 	S3Prefix    = "s3://"
 	GCSPrefix   = "gs://"
 	AzurePrefix = "azblob://"
-	FilePrefix  = "file:///"
 	DRSPrefix   = "drs://"
 )
 
@@ -46,8 +46,6 @@ func ProviderFromScheme(scheme string) string {
 		return GCSProvider
 	case "azblob":
 		return AzureProvider
-	case "file":
-		return FileProvider
 	default:
 		return ""
 	}
@@ -83,12 +81,14 @@ func ObjectURLForCredential(cred *models.S3Credential, key string) (string, erro
 	case AzureProvider:
 		return fmt.Sprintf("%s%s/%s", AzurePrefix, cred.Bucket, cleanKey), nil
 	case FileProvider:
-		root := strings.TrimSpace(cred.Endpoint)
-		if root != "" {
-			root = strings.TrimSuffix(root, "/")
-			return fmt.Sprintf("%s/%s", root, cleanKey), nil
+		root := filepath.Clean(strings.TrimSpace(cred.Endpoint))
+		if root == "." || root == "" {
+			root = strings.TrimPrefix(strings.TrimSpace(cred.Bucket), "/")
 		}
-		return fmt.Sprintf("%s%s/%s", FilePrefix, strings.TrimPrefix(cred.Bucket, "/"), cleanKey), nil
+		if root == "" {
+			return "", fmt.Errorf("file provider requires an endpoint or bucket root")
+		}
+		return filepath.ToSlash(filepath.Join(root, cleanKey)), nil
 	default:
 		return "", fmt.Errorf("unsupported provider: %s", provider)
 	}

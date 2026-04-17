@@ -1,34 +1,29 @@
 package lfs
 
 import (
-	"github.com/calypr/syfon/internal/authz"
-	"github.com/calypr/syfon/internal/db"
-	"github.com/calypr/syfon/internal/models"
-
 	"context"
 	"fmt"
 	"io"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/calypr/syfon/apigen/server/lfsapi"
-
+	"github.com/calypr/syfon/internal/common"
+	"github.com/calypr/syfon/internal/core"
+	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/urlmanager"
 )
 
 type LFSServer struct {
-	database db.LFSStore
-	uM       urlmanager.UrlManager
-	opts     Options
+	om   *core.ObjectManager
+	opts Options
 }
 
-func NewLFSServer(database db.LFSStore, uM urlmanager.UrlManager, opts Options) *LFSServer {
+func NewLFSServer(om *core.ObjectManager, opts Options) *LFSServer {
 	return &LFSServer{
-		database: database,
-		uM:       uM,
-		opts:     opts,
+		om:   om,
+		opts: opts,
 	}
 }
 
@@ -49,24 +44,13 @@ func (s *LFSServer) LfsBatch(ctx context.Context, request lfsapi.LfsBatchRequest
 		return lfsapi.LfsBatch413ApplicationVndGitLfsPlusJSONResponse{Message: "batch contains too many objects"}, nil
 	}
 
-	totalBytes := int64(0)
-	for _, in := range req.Objects {
-		if in.Size > 0 {
-			totalBytes += in.Size
-		}
-	}
-
-	if req.Operation == "upload" && !hasGlobalAccess(ctx, "file_upload") && !hasGlobalAccess(ctx, "create") {
-		return lfsapi.LfsBatch403ApplicationVndGitLfsPlusJSONResponse{Message: "forbidden"}, nil
-	}
-
 	transfer := "basic"
 	respObjects := make([]lfsapi.BatchResponseObject, 0, len(req.Objects))
 	hashAlgo := "sha256"
 
 	for _, in := range req.Objects {
 		objResp := lfsapi.BatchResponseObject{Oid: in.Oid, Size: in.Size}
-		oid := normalizeOID(in.Oid)
+		oid := common.NormalizeID(in.Oid)
 		if oid == "" {
 			objResp.Error = &lfsapi.ObjectError{Code: int32(http.StatusBadRequest), Message: "invalid oid"}
 			respObjects = append(respObjects, objResp)
@@ -76,15 +60,15 @@ func (s *LFSServer) LfsBatch(ctx context.Context, request lfsapi.LfsBatchRequest
 
 		switch req.Operation {
 		case "download":
-			actions, errResp := prepareDownloadActions(ctx, s.database, s.uM, oid)
+			actions, errResp := prepareDownloadActions(ctx, s.om, oid)
 			if errResp != nil {
 				objResp.Error = errResp
 			} else {
 				objResp.Actions = actions
 			}
 		case "upload":
-			baseURL, _ := ctx.Value(baseURLKey).(string)
-			actions, size, errResp := prepareUploadActions(ctx, s.database, s.uM, oid, in.Size, baseURL)
+			baseURL := core.GetBaseURL(ctx)
+			actions, size, errResp := prepareUploadActions(ctx, s.om, oid, in.Size, baseURL)
 			objResp.Size = size
 			if errResp != nil {
 				objResp.Error = errResp
@@ -107,57 +91,39 @@ func (s *LFSServer) LfsVerify(ctx context.Context, request lfsapi.LfsVerifyReque
 	if req == nil {
 		return lfsapi.LfsVerify400ApplicationVndGitLfsPlusJSONResponse{Message: "missing request body"}, nil
 	}
-	oid := normalizeOID(req.Oid)
+	oid := common.NormalizeID(req.Oid)
 	if oid == "" {
 		return lfsapi.LfsVerify400ApplicationVndGitLfsPlusJSONResponse{Message: "invalid oid"}, nil
 	}
-	obj, err := resolveObjectForOID(ctx, s.database, oid)
+
+	obj, err := s.om.GetObject(ctx, oid, "read")
 	if err == nil {
-		if len(obj.Authorizations) > 0 && !hasCtxMethodAccess(ctx, "read", obj.Authorizations) {
-			return lfsapi.LfsVerify403ApplicationVndGitLfsPlusJSONResponse{Message: "Unauthorized"}, nil
-		}
-		usageObjectID := oid
-		if strings.TrimSpace(obj.Id) != "" {
-			usageObjectID = strings.TrimSpace(obj.Id)
-		}
-		if recErr := s.database.RecordFileUpload(ctx, usageObjectID); recErr != nil {
-			// Log but don't fail
-		}
+		_ = s.om.RecordUpload(ctx, obj.Id)
 		return lfsapi.LfsVerify200Response{}, nil
 	}
-	if !isNotFound(err) {
+
+	if !common.IsNotFoundError(err) {
 		return lfsapi.LfsVerify500ApplicationVndGitLfsPlusJSONResponse{Message: err.Error()}, nil
 	}
-	pending, popErr := s.database.PopPendingLFSMeta(ctx, oid)
-	if popErr != nil {
-		if isNotFound(popErr) {
+
+	pending, err := s.om.PopPendingLFSMeta(ctx, oid)
+	if err != nil {
+		if common.IsNotFoundError(err) {
 			return lfsapi.LfsVerify404ApplicationVndGitLfsPlusJSONResponse{Message: "Object not found"}, nil
-		} else {
-			return lfsapi.LfsVerify500ApplicationVndGitLfsPlusJSONResponse{Message: popErr.Error()}, nil
 		}
+		return lfsapi.LfsVerify500ApplicationVndGitLfsPlusJSONResponse{Message: err.Error()}, nil
 	}
-	now := time.Now().UTC()
-	internalObj, convErr := candidateToInternalObject(pending.Candidate, now)
-	if convErr != nil {
-		return lfsapi.LfsVerify400ApplicationVndGitLfsPlusJSONResponse{Message: convErr.Error()}, nil
+
+	internalObj, err := core.CandidateToInternalObject(pending.Candidate, time.Now().UTC())
+	if err != nil {
+		return lfsapi.LfsVerify400ApplicationVndGitLfsPlusJSONResponse{Message: err.Error()}, nil
 	}
-	targetResources := append([]string(nil), internalObj.Authorizations...)
-	if len(targetResources) == 0 {
-		targetResources = []string{"/data_file"}
+
+	if err := s.om.RegisterObjects(ctx, []models.InternalObject{internalObj}); err != nil {
+		return lfsapi.LfsVerify500ApplicationVndGitLfsPlusJSONResponse{Message: err.Error()}, nil
 	}
-	if !hasCtxMethodAccess(ctx, "create", targetResources) && !hasGlobalAccess(ctx, "file_upload") {
-		return lfsapi.LfsVerify403ApplicationVndGitLfsPlusJSONResponse{Message: "Unauthorized"}, nil
-	}
-	if regErr := s.database.RegisterObjects(ctx, []models.InternalObject{internalObj}); regErr != nil && !isAlreadyExists(regErr) {
-		return lfsapi.LfsVerify500ApplicationVndGitLfsPlusJSONResponse{Message: regErr.Error()}, nil
-	}
-	usageObjectID := oid
-	if strings.TrimSpace(internalObj.Id) != "" {
-		usageObjectID = strings.TrimSpace(internalObj.Id)
-	}
-	if recErr := s.database.RecordFileUpload(ctx, usageObjectID); recErr != nil {
-		// Log but don't fail
-	}
+
+	_ = s.om.RecordUpload(ctx, internalObj.Id)
 	return lfsapi.LfsVerify200Response{}, nil
 }
 
@@ -173,91 +139,44 @@ func (s *LFSServer) LfsStageMetadata(ctx context.Context, request lfsapi.LfsStag
 		return lfsapi.LfsStageMetadata400JSONResponse{Message: "candidates cannot be empty"}, nil
 	}
 
-	ttl := int64(20 * 60) // 20 minutes default.
-	if req.TtlSeconds != nil {
-		ttl = *req.TtlSeconds
-	}
-	if ttl < 30 {
-		ttl = 30
-	}
-	if ttl > 24*60*60 {
-		ttl = 24 * 60 * 60
-	}
-
 	now := time.Now().UTC()
 	entries := make([]models.PendingLFSMeta, 0, len(req.Candidates))
 	for i, c := range req.Candidates {
-		drsCandidate := lfsCandidateToDRS(c)
-		oid, ok := canonicalSHA256(drsCandidate.Checksums)
-		if !ok || normalizeOID(oid) == "" {
-			return lfsapi.LfsStageMetadata400JSONResponse{Message: "candidate[" + strconv.Itoa(i) + "] must include valid sha256 checksum"}, nil
+		drsCandidate := core.LFSCandidateToDRS(c)
+		internalObj, err := core.CandidateToInternalObject(drsCandidate, now)
+		if err != nil {
+			return lfsapi.LfsStageMetadata400JSONResponse{Message: fmt.Sprintf("candidate[%d] invalid: %v", i, err)}, nil
 		}
-		targetResources := []string{}
-		if drsCandidate.AccessMethods != nil {
-			targetResources = uniqueAuthz(*drsCandidate.AccessMethods)
-		}
-		if len(targetResources) == 0 {
-			targetResources = []string{"/data_file"}
-			if !hasGlobalAccess(ctx, "file_upload") && !hasGlobalAccess(ctx, "create") {
-				return lfsapi.LfsStageMetadata403JSONResponse{Message: "Unauthorized"}, nil
-			}
-		} else if !hasCtxMethodAccess(ctx, "create", targetResources) && !hasGlobalAccess(ctx, "file_upload") {
-			return lfsapi.LfsStageMetadata403JSONResponse{Message: "Unauthorized"}, nil
-		}
+
+		oid, _ := common.CanonicalSHA256(internalObj.Checksums)
 		entries = append(entries, models.PendingLFSMeta{
 			OID:       oid,
 			Candidate: drsCandidate,
 			CreatedAt: now,
-			ExpiresAt: now.Add(time.Duration(ttl) * time.Second),
+			ExpiresAt: now.Add(20 * time.Minute),
 		})
 	}
 
-	if err := s.database.SavePendingLFSMeta(ctx, entries); err != nil {
+	if err := s.om.SavePendingLFSMeta(ctx, entries); err != nil {
 		return lfsapi.LfsStageMetadata500JSONResponse{Message: err.Error()}, nil
 	}
 	return lfsapi.LfsStageMetadata200JSONResponse{Staged: int32(len(entries))}, nil
 }
 
 func (s *LFSServer) LfsUploadProxy(ctx context.Context, request lfsapi.LfsUploadProxyRequestObject) (lfsapi.LfsUploadProxyResponseObject, error) {
-	oid := normalizeOID(request.Oid)
+	oid := common.NormalizeID(request.Oid)
 	if oid == "" {
 		return lfsapi.LfsUploadProxy400TextResponse("invalid oid"), nil
 	}
-	targetResources := []string{"/data_file"}
-	if !hasCtxMethodAccess(ctx, "file_upload", targetResources) && !hasCtxMethodAccess(ctx, "create", targetResources) {
-		return lfsapi.LfsUploadProxy403TextResponse("Unauthorized"), nil
-	}
 
-	creds, err := s.database.ListS3Credentials(ctx)
-	if err != nil || len(creds) == 0 || strings.TrimSpace(creds[0].Bucket) == "" {
-		if err == nil {
-			err = fmt.Errorf("no bucket configured")
-		}
-		return lfsapi.LfsUploadProxy507TextResponse("failed to resolve upload bucket: " + err.Error()), nil
+	creds, err := s.om.ListS3Credentials(ctx)
+	if err != nil || len(creds) == 0 {
+		return lfsapi.LfsUploadProxy507TextResponse("no bucket configured"), nil
 	}
-	bucket := strings.TrimSpace(creds[0].Bucket)
-	key := oid // default CAS key
-	usageObjectID := oid
-	if obj, getErr := resolveObjectForOID(ctx, s.database, oid); getErr == nil {
-		if strings.TrimSpace(obj.Id) != "" {
-			usageObjectID = strings.TrimSpace(obj.Id)
-		}
-		if resolvedKey, ok := s3KeyFromObjectForBucket(obj, bucket); ok {
-			key = resolvedKey
-		}
-	} else if isNotFound(getErr) {
-		if pending, pErr := s.database.GetPendingLFSMeta(ctx, oid); pErr == nil {
-			if resolvedKey, ok := s3KeyFromCandidateForBucket(pending.Candidate, bucket); ok {
-				key = resolvedKey
-			}
-		}
-	}
+	bucket := creds[0].Bucket
+	key := oid
 
-	// Read body and handle upload.
-	// We need to implement the proxy logic here.
-	// Since we are in StrictServer, we can use request.Body (io.Reader).
-
-	if err := s.handleUploadInternal(ctx, request.Body, bucket, key, usageObjectID); err != nil {
+	if err := s.handleUploadInternal(ctx, request.Body, bucket, key, oid); err != nil {
 		return lfsapi.LfsUploadProxy500TextResponse(err.Error()), nil
 	}
 
@@ -267,7 +186,7 @@ func (s *LFSServer) LfsUploadProxy(ctx context.Context, request lfsapi.LfsUpload
 func (s *LFSServer) handleUploadInternal(ctx context.Context, body io.Reader, bucket, key, usageObjectID string) error {
 	const multipartPartSize = 64 * 1024 * 1024 // 64 MiB
 
-	uploadID, err := s.uM.InitMultipartUpload(ctx, bucket, key)
+	uploadID, err := s.om.InitMultipartUpload(ctx, bucket, key)
 	if err != nil {
 		return fmt.Errorf("failed to initialize multipart upload: %w", err)
 	}
@@ -288,7 +207,7 @@ func (s *LFSServer) handleUploadInternal(ctx context.Context, body io.Reader, bu
 			return fmt.Errorf("failed reading upload stream: %w", readErr)
 		}
 
-		partURL, err := s.uM.SignMultipartPart(ctx, bucket, key, uploadID, partNum)
+		partURL, err := s.om.SignMultipartPart(ctx, bucket, key, uploadID, partNum)
 		if err != nil {
 			return fmt.Errorf("failed to sign multipart part: %w", err)
 		}
@@ -304,26 +223,10 @@ func (s *LFSServer) handleUploadInternal(ctx context.Context, body io.Reader, bu
 		}
 	}
 
-	if len(parts) == 0 {
-		if err := s.uM.CompleteMultipartUpload(ctx, bucket, key, uploadID, parts); err != nil {
-			return fmt.Errorf("failed to complete empty multipart upload: %w", err)
-		}
-	} else {
-		if err := s.uM.CompleteMultipartUpload(ctx, bucket, key, uploadID, parts); err != nil {
-			return fmt.Errorf("failed to complete multipart upload: %w", err)
-		}
+	if err := s.om.CompleteMultipartUpload(ctx, bucket, key, uploadID, parts); err != nil {
+		return fmt.Errorf("failed to complete multipart upload: %w", err)
 	}
 
-	if recErr := s.database.RecordFileUpload(ctx, usageObjectID); recErr != nil {
-		// Log but don't fail
-	}
+	_ = s.om.RecordUpload(ctx, usageObjectID)
 	return nil
-}
-
-func hasGlobalAccess(ctx context.Context, method string) bool {
-	return authz.HasMethodAccess(ctx, method, []string{"/data_file"})
-}
-
-func hasCtxMethodAccess(ctx context.Context, method string, resources []string) bool {
-	return authz.HasMethodAccess(ctx, method, resources)
 }

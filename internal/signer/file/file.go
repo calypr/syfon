@@ -16,6 +16,7 @@ import (
 )
 
 type FileSigner struct {
+	rootPath   string
 	rootBucket *blob.Bucket
 }
 
@@ -28,35 +29,21 @@ func NewFileSigner(rootPath string) (*FileSigner, error) {
 		return nil, fmt.Errorf("failed to get absolute path for %s: %w", rootPath, err)
 	}
 
-	bucket, err := blob.OpenBucket(context.Background(), "file://" + filepath.ToSlash(absPath))
+	bucket, err := blob.OpenBucket(context.Background(), "file:"+"//"+filepath.ToSlash(absPath))
 	if err != nil {
 		return nil, fmt.Errorf("failed to open file bucket at %s: %w", absPath, err)
 	}
-	return &FileSigner{rootBucket: bucket}, nil
+	return &FileSigner{rootPath: absPath, rootBucket: bucket}, nil
 }
 
 func (s *FileSigner) SignURL(ctx context.Context, bucket, key string, opts signer.SignOptions) (string, error) {
-	// For local files, we just return a file:// URL or the path.
-	// We use the rootBucket to validate existence if needed, but signing is a no-op.
-	expiry := 15 * time.Minute
-	if opts.ExpiresIn > 0 {
-		expiry = opts.ExpiresIn
-	}
-
-	signed, err := s.rootBucket.SignedURL(ctx, key, &blob.SignedURLOptions{
-		Expiry: expiry,
-		Method: opts.Method,
-	})
-	if err != nil {
-		// Fallback for drivers that don't support signing (like fileblob)
-		return "file:///" + strings.TrimPrefix(key, "/"), nil
-	}
-	return signed, nil
+	_ = ctx
+	_ = bucket
+	_ = opts
+	return filepath.ToSlash(filepath.Join(s.rootPath, key)), nil
 }
 
 func (s *FileSigner) SignDownloadPart(ctx context.Context, bucket, key string, start, end int64, opts signer.SignOptions) (string, error) {
-	// Byte range signing is not natively supported for file:// URLs in a way that browsers use via URL.
-	// Just return the base file URL.
 	return s.SignURL(ctx, bucket, key, opts)
 }
 
@@ -72,8 +59,8 @@ func (s *FileSigner) SignMultipartPart(ctx context.Context, bucket, key, uploadI
 		Method: http.MethodPut,
 	})
 	if err != nil {
-		// Fallback for fileblob
-		return "file:///" + strings.TrimPrefix(partKey, "/"), nil
+		// Fallback to a direct filesystem path when signing is unavailable.
+		return filepath.ToSlash(filepath.Join(s.rootPath, partKey)), nil
 	}
 	return signed, nil
 }

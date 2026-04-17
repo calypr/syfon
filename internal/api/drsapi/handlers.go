@@ -1,353 +1,315 @@
 package drsapi
 
 import (
-	"encoding/json"
-	"errors"
-	"log/slog"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
 	"github.com/calypr/syfon/apigen/server/drs"
-	"github.com/calypr/syfon/internal/api/routeutil"
+	"github.com/calypr/syfon/apigen/server/lfsapi"
+	"github.com/calypr/syfon/internal/api/apiutil"
 	"github.com/calypr/syfon/internal/authz"
 	"github.com/calypr/syfon/internal/common"
-	"github.com/calypr/syfon/internal/db"
+	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/urlmanager"
 	"github.com/gofiber/fiber/v3"
 )
 
 // RegisterDRSRoutes binds standard GA4GH DRS handlers to the router.
-func RegisterDRSRoutes(router fiber.Router, database db.DatabaseInterface, uM urlmanager.UrlManager) {
-	// Standard GA4GH Routes
-	router.Get("/objects/:object_id", routeutil.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		handleGetObject(w, r, database)
-	}), "object_id"))
+func RegisterDRSRoutes(router fiber.Router, om *core.ObjectManager) {
+	router.Get("/objects/:object_id", handleGetObjectFiber(om))
+	router.Post("/objects/:object_id", handleGetObjectFiber(om))
+	router.Get("/objects/:object_id/access/:access_id", handleGetAccessURLFiber(om))
+	router.Post("/objects/:object_id/access/:access_id", handleGetAccessURLFiber(om))
 
-	router.Get("/objects/:object_id/access/:access_id", routeutil.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		handleGetAccessURL(w, r, database, uM)
-	}), "object_id", "access_id"))
+	router.Post("/objects/register", handleRegisterObjectsFiber(om))
+	router.Post("/objects/access", handleGetBulkAccessURLFiber(om))
+	router.Get("/objects/checksum/:checksum", handleGetObjectsByChecksumFiber(om))
+	router.Post("/objects", handleGetBulkObjectsFiber(om))
+	router.Get("/service-info", handleGetServiceInfoFiber(om))
+	router.Post("/upload-request", handleUploadRequestFiber(om))
+	router.Options("/objects", handleOptionsBulkObjectFiber(om))
+	router.Options("/objects/:object_id", handleOptionsBulkObjectFiber(om))
 
-	router.Post("/objects/register", routeutil.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		handleRegisterObjects(w, r, database)
-	})))
+	router.Delete("/objects/:object_id", handleDeleteObjectFiber(om))
+	router.Post("/objects/:object_id/delete", handleDeleteObjectFiber(om))
+	router.Post("/objects/delete", handleBulkDeleteObjectsFiber(om))
 
-	router.Post("/objects/access", routeutil.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		handleGetBulkAccessURL(w, r, database, uM)
-	})))
-
-	router.Post("/objects/access-methods", routeutil.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		writeDRSHTTPError(w, r, http.StatusNotImplemented, "bulk access-method updates are not implemented")
-	})))
-
-	router.Get("/objects/checksum/:checksum", routeutil.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		handleGetObjectsByChecksum(w, r, database)
-	}), "checksum"))
-
-	router.Post("/objects/delete", routeutil.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		writeDRSHTTPError(w, r, http.StatusNotImplemented, "bulk delete is not implemented")
-	})))
-
-	router.Post("/objects/:object_id/access-methods", routeutil.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		writeDRSHTTPError(w, r, http.StatusNotImplemented, "access-method updates are not implemented")
-	}), "object_id"))
-
-	router.Post("/objects/:object_id/delete", routeutil.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		handleDeleteObject(w, r, database)
-	}), "object_id"))
-
-	router.Options("/objects", routeutil.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNoContent)
-	})))
-
-	router.Options("/objects/:object_id", routeutil.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNoContent)
-	}), "object_id"))
-
-	router.Post("/objects/:object_id", routeutil.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		handleGetObject(w, r, database)
-	}), "object_id"))
-
-	router.Post("/objects/:object_id/access/:access_id", routeutil.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		handleGetAccessURL(w, r, database, uM)
-	}), "object_id", "access_id"))
-
-	router.Post("/upload-request", routeutil.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		writeDRSHTTPError(w, r, http.StatusNotImplemented, "upload request is not implemented")
-	})))
-
-	// Helper for bulk resolution
-	router.Post("/objects", routeutil.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		handleGetBulkObjects(w, r, database)
-	})))
-
-	router.Get("/service-info", routeutil.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		handleGetServiceInfo(w, r, database)
-	})))
-
-	router.Delete("/objects/:object_id", routeutil.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		handleDeleteObject(w, r, database)
-	}), "object_id"))
+	router.Post("/objects/:object_id/access-methods", handleUpdateAccessMethodsFiber(om))
+	router.Post("/objects/access-methods", handleUpdateAccessMethodsFiber(om))
 }
 
-func handleGetObject(w http.ResponseWriter, r *http.Request, db db.DatabaseInterface) {
-	objectID := routeutil.PathParam(r, "object_id")
-	obj, err := db.GetObject(r.Context(), objectID)
-	if err != nil {
-		writeDRSError(w, r, err)
-		return
+func handleGetObjectFiber(om *core.ObjectManager) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		id := c.Params("object_id")
+		obj, err := om.GetObject(c.Context(), id, "read")
+		if err != nil {
+			return apiutil.HandleError(c, err)
+		}
+		return c.JSON(obj.DrsObject)
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(obj.DrsObject)
 }
 
-func handleGetAccessURL(w http.ResponseWriter, r *http.Request, db db.DatabaseInterface, uM urlmanager.UrlManager) {
-	objectID := routeutil.PathParam(r, "object_id")
-	accessID := routeutil.PathParam(r, "access_id")
+func handleGetAccessURLFiber(om *core.ObjectManager) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		id := c.Params("object_id")
+		accessID := c.Params("access_id")
 
-	obj, err := db.GetObject(r.Context(), objectID)
-	if err != nil {
-		writeDRSError(w, r, err)
-		return
-	}
+		obj, err := om.GetObject(c.Context(), id, "read")
+		if err != nil {
+			return apiutil.HandleError(c, err)
+		}
 
-	if !authz.HasMethodAccess(r.Context(), "read", obj.Authorizations) {
-		writeDRSAuthError(w, r)
-		return
-	}
+		if obj.AccessMethods == nil {
+			return c.Status(fiber.StatusNotFound).JSON(drs.Error{Msg: common.Ptr("No access methods found")})
+		}
 
-	var accessURL string
-	if obj.AccessMethods != nil {
+		var targetURL string
 		for _, am := range *obj.AccessMethods {
-			if am.AccessId != nil && *am.AccessId == accessID {
-				accessURL = am.AccessUrl.Url
+			if strings.EqualFold(common.StringVal(am.AccessId), accessID) {
+				if am.AccessUrl != nil {
+					targetURL = am.AccessUrl.Url
+				}
 				break
 			}
-			if string(am.Type) == accessID {
-				accessURL = am.AccessUrl.Url
-			}
 		}
-	}
 
-	if accessURL == "" {
-		writeDRSHTTPError(w, r, http.StatusNotFound, "access_id not found")
-		return
-	}
+		if targetURL == "" {
+			return c.Status(fiber.StatusNotFound).JSON(drs.Error{Msg: common.Ptr("Access ID not found or has no URL")})
+		}
 
-	bucketID := ""
-	if parsed, err := url.Parse(accessURL); err == nil {
-		bucketID = parsed.Host
-	}
+		signed, err := om.SignURL(c.Context(), targetURL, urlmanager.SignOptions{Method: http.MethodGet})
+		if err != nil {
+			return apiutil.HandleError(c, err)
+		}
 
-	signed, err := uM.SignURL(r.Context(), bucketID, accessURL, urlmanager.SignOptions{})
-	if err != nil {
-		writeDRSHTTPError(w, r, http.StatusInternalServerError, err.Error())
-		return
+		return c.JSON(drs.AccessURL{Url: signed})
 	}
-
-	_ = db.RecordFileDownload(r.Context(), objectID)
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(drs.AccessURL{Url: signed})
 }
 
-func handleRegisterObjects(w http.ResponseWriter, r *http.Request, db db.DatabaseInterface) {
-	var body drs.RegisterObjectsBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeDRSHTTPError(w, r, http.StatusBadRequest, "invalid request body")
-		return
+func handleRegisterObjectsFiber(om *core.ObjectManager) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		// Use a local struct that carries 'id' fields if present in candidates
+		var body struct {
+			Candidates []lfsapi.DrsObjectCandidate `json:"candidates"`
+		}
+		if err := c.Bind().JSON(&body); err != nil || len(body.Candidates) == 0 {
+			// If batch bind fails or is empty, try single candidate
+			var single lfsapi.DrsObjectCandidate
+			if err2 := c.Bind().JSON(&single); err2 == nil && (single.Id != nil || (single.Checksums != nil && len(*single.Checksums) > 0)) {
+				internalObj, err := core.CandidateToInternalObject(core.LFSCandidateToDRS(single), time.Now().UTC())
+				if err != nil {
+					return apiutil.HandleError(c, err)
+				}
+				if single.Id != nil {
+					internalObj.Id = *single.Id
+					internalObj.DrsObject.Id = *single.Id
+					internalObj.DrsObject.SelfUri = "drs://" + *single.Id
+				}
+				if err := om.RegisterObjects(c.Context(), []models.InternalObject{internalObj}); err != nil {
+					return apiutil.HandleError(c, err)
+				}
+				// Fetch back for full population (SelfUri, and access methods)
+				finalObj, _ := om.GetObject(c.Context(), internalObj.Id, "read")
+				if finalObj == nil {
+					finalObj = &internalObj
+				}
+				return c.Status(fiber.StatusCreated).JSON(drs.N201ObjectsCreated{
+					Objects: []drs.DrsObject{finalObj.DrsObject},
+				})
+			}
+			return c.Status(fiber.StatusBadRequest).JSON(drs.Error{Msg: common.Ptr("Invalid request body")})
+		}
+
+		// List of internal objects to register
+		toRegister := make([]models.InternalObject, 0, len(body.Candidates))
+		for _, cand := range body.Candidates {
+			internalObj, err := core.CandidateToInternalObject(core.LFSCandidateToDRS(cand), time.Now().UTC())
+			if err != nil {
+				return apiutil.HandleError(c, err)
+			}
+			if cand.Id != nil {
+				internalObj.Id = *cand.Id
+				internalObj.DrsObject.Id = *cand.Id
+				internalObj.DrsObject.SelfUri = "drs://" + *cand.Id
+			}
+			toRegister = append(toRegister, internalObj)
+		}
+
+		if err := om.RegisterObjects(c.Context(), toRegister); err != nil {
+			return apiutil.HandleError(c, err)
+		}
+
+		// Reconstruct registered objects summary for response
+		registered := make([]drs.DrsObject, len(toRegister))
+		for i, internal := range toRegister {
+			// Fetch back to ensure full population
+			obj, err := om.GetObject(c.Context(), internal.Id, "read")
+			if err == nil {
+				registered[i] = obj.DrsObject
+			} else {
+				// Fallback to what we have if fetch fails
+				registered[i] = internal.DrsObject
+			}
+		}
+
+		return c.Status(fiber.StatusCreated).JSON(drs.N201ObjectsCreated{Objects: registered})
 	}
+}
 
-	now := time.Now()
-	internalObjs := make([]models.InternalObject, 0, len(body.Candidates))
-	externalObjs := make([]drs.DrsObject, 0, len(body.Candidates))
-
-	for _, c := range body.Candidates {
-		sha, ok := common.CanonicalSHA256(c.Checksums)
-		if !ok {
-			writeDRSHTTPError(w, r, http.StatusBadRequest, "missing sha256 checksums")
-			return
+func handleGetBulkObjectsFiber(om *core.ObjectManager) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		var body struct {
+			BulkObjectIds []string `json:"bulk_object_ids"`
+		}
+		if err := c.Bind().JSON(&body); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(drs.Error{Msg: common.Ptr("Invalid request body")})
 		}
 
-		authz := []string{"/data_file"}
-		obj := drs.DrsObject{
-			Name:        c.Name,
-			Size:        c.Size,
-			CreatedTime: now,
-			UpdatedTime: &now,
-			Checksums:   []drs.Checksum{{Type: "sha256", Checksum: sha}},
+		resolved := make([]drs.DrsObject, 0)
+		for _, id := range body.BulkObjectIds {
+			obj, err := om.GetObject(c.Context(), id, "read")
+			if err == nil {
+				resolved = append(resolved, obj.DrsObject)
+			}
 		}
 
-		if c.AccessMethods != nil {
-			obj.AccessMethods = c.AccessMethods
-		}
-		if c.Aliases != nil {
-			obj.Aliases = c.Aliases
-		}
-
-		id := common.MintObjectIDFromChecksum(sha, authz)
-		obj.Id = id
-		obj.SelfUri = "drs://" + id
-
-		internalObjs = append(internalObjs, models.InternalObject{
-			DrsObject:      obj,
-			Authorizations: authz,
+		return c.JSON(drs.N200OkDrsObjectsJSONResponse{
+			ResolvedDrsObject: &resolved,
+			Summary: &drs.Summary{
+				Requested: common.Ptr(len(body.BulkObjectIds)),
+				Resolved:  common.Ptr(len(resolved)),
+			},
 		})
-		externalObjs = append(externalObjs, obj)
 	}
+}
 
-	if err := db.RegisterObjects(r.Context(), internalObjs); err != nil {
-		writeDRSHTTPError(w, r, http.StatusInternalServerError, err.Error())
-		return
+func handleGetBulkAccessURLFiber(om *core.ObjectManager) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		return c.Status(fiber.StatusNotImplemented).JSON(drs.Error{Msg: common.Ptr("Bulk access lookup not implemented")})
 	}
+}
 
-	for i, c := range body.Candidates {
-		if c.Aliases == nil {
-			continue
+func handleGetObjectsByChecksumFiber(om *core.ObjectManager) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		checksum := c.Params("checksum")
+		fetched, err := om.GetObjectsByChecksum(c.Context(), checksum)
+		if err != nil {
+			return apiutil.HandleError(c, err)
 		}
-		canonicalID := externalObjs[i].Id
-		for _, alias := range *c.Aliases {
-			if strings.TrimSpace(alias) == "" || strings.TrimSpace(alias) == canonicalID {
-				continue
+
+		resolved := make([]drs.DrsObject, 0)
+		for _, obj := range fetched {
+			// Reuse GetObject to verify access consistently
+			if _, err := om.GetObject(c.Context(), obj.Id, "read"); err == nil {
+				resolved = append(resolved, obj.DrsObject)
 			}
-			if err := db.CreateObjectAlias(r.Context(), alias, canonicalID); err != nil {
-				writeDRSHTTPError(w, r, http.StatusInternalServerError, err.Error())
-				return
+		}
+
+		return c.JSON(drs.N200OkDrsObjectsJSONResponse{
+			ResolvedDrsObject: &resolved,
+			Summary: &drs.Summary{
+				Requested: common.Ptr(1),
+				Resolved:  common.Ptr(len(resolved)),
+			},
+		})
+	}
+}
+
+func handleGetServiceInfoFiber(om *core.ObjectManager) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		info, err := om.GetServiceInfo(c.Context())
+		if err != nil {
+			return apiutil.HandleError(c, err)
+		}
+		return c.JSON(info)
+	}
+}
+
+func handleUploadRequestFiber(om *core.ObjectManager) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		if authz.IsGen3Mode(c.Context()) && !authz.HasAuthHeader(c.Context()) {
+			return c.SendStatus(fiber.StatusUnauthorized)
+		}
+
+		var req drs.UploadRequest
+		if err := c.Bind().JSON(&req); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(drs.Error{Msg: common.Ptr("Invalid request body")})
+		}
+		if len(req.Requests) == 0 {
+			return c.Status(fiber.StatusBadRequest).JSON(drs.Error{Msg: common.Ptr("Invalid request body")})
+		}
+
+		bucket, err := om.ResolveBucket(c.Context(), "")
+		if err != nil {
+			return apiutil.HandleError(c, err)
+		}
+
+		responses := make([]drs.UploadResponseObject, 0, len(req.Requests))
+		for _, item := range req.Requests {
+			key := strings.TrimSpace(item.Name)
+			if oid, ok := common.CanonicalSHA256(item.Checksums); ok && oid != "" {
+				key = oid
 			}
+			if key == "" {
+				return c.Status(fiber.StatusBadRequest).JSON(drs.Error{Msg: common.Ptr("Invalid request body")})
+			}
+
+			signedURL, err := om.SignURL(c.Context(), common.BucketToURL(bucket, key), urlmanager.SignOptions{
+				Method: http.MethodPut,
+			})
+			if err != nil {
+				return apiutil.HandleError(c, err)
+			}
+
+			method := drs.UploadMethod{
+				Type: drs.Https,
+				AccessUrl: struct {
+					Headers *[]string `json:"headers,omitempty"`
+					Url     string    `json:"url"`
+				}{Url: signedURL},
+			}
+
+			responses = append(responses, drs.UploadResponseObject{
+				Name:          item.Name,
+				Size:          item.Size,
+				MimeType:      item.MimeType,
+				Checksums:     item.Checksums,
+				Description:   item.Description,
+				Aliases:       item.Aliases,
+				UploadMethods: &[]drs.UploadMethod{method},
+			})
 		}
-	}
 
-	w.WriteHeader(http.StatusCreated)
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(drs.N201ObjectsCreatedJSONResponse{Objects: externalObjs})
+		return c.Status(fiber.StatusOK).JSON(drs.N200UploadRequest{Responses: responses})
+	}
 }
 
-func handleGetBulkObjects(w http.ResponseWriter, r *http.Request, db db.DatabaseInterface) {
-	var body struct {
-		BulkObjectIds []string `json:"bulk_object_ids"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeDRSHTTPError(w, r, http.StatusBadRequest, "invalid request body")
-		return
-	}
-
-	fetched, err := db.GetBulkObjects(r.Context(), body.BulkObjectIds)
-	if err != nil {
-		writeDRSError(w, r, err)
-		return
-	}
-
-	resolved := make([]drs.DrsObject, 0)
-	for _, obj := range fetched {
-		if authz.HasMethodAccess(r.Context(), "read", obj.Authorizations) {
-			resolved = append(resolved, obj.DrsObject)
+func handleDeleteObjectFiber(om *core.ObjectManager) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		id := c.Params("object_id")
+		if err := om.DeleteObject(c.Context(), id); err != nil {
+			return apiutil.HandleError(c, err)
 		}
+		return c.SendStatus(fiber.StatusNoContent)
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(drs.N200OkDrsObjectsJSONResponse{
-		ResolvedDrsObject: &resolved,
-		Summary: &drs.Summary{
-			Requested: common.Ptr(len(body.BulkObjectIds)),
-			Resolved:  common.Ptr(len(resolved)),
-		},
-	})
 }
 
-func handleGetBulkAccessURL(w http.ResponseWriter, r *http.Request, db db.DatabaseInterface, uM urlmanager.UrlManager) {
-	writeDRSHTTPError(w, r, http.StatusNotImplemented, "bulk access lookup is not implemented")
+func handleUpdateAccessMethodsFiber(om *core.ObjectManager) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		return c.Status(fiber.StatusNotImplemented).JSON(drs.Error{Msg: common.Ptr("Access method update not implemented")})
+	}
 }
 
-func handleGetObjectsByChecksum(w http.ResponseWriter, r *http.Request, db db.DatabaseInterface) {
-	checksum := routeutil.PathParam(r, "checksum")
-	if strings.TrimSpace(checksum) == "" {
-		writeDRSHTTPError(w, r, http.StatusBadRequest, "checksum is required")
-		return
+func handleBulkDeleteObjectsFiber(om *core.ObjectManager) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		return c.Status(fiber.StatusNotImplemented).JSON(drs.Error{Msg: common.Ptr("Bulk delete not implemented")})
 	}
-	fetched, err := db.GetObjectsByChecksum(r.Context(), checksum)
-	if err != nil {
-		writeDRSError(w, r, err)
-		return
-	}
-	resolved := make([]drs.DrsObject, 0, len(fetched))
-	for _, obj := range fetched {
-		if authz.HasMethodAccess(r.Context(), "read", obj.Authorizations) {
-			resolved = append(resolved, obj.DrsObject)
-		}
-	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(drs.N200OkDrsObjectsJSONResponse{
-		ResolvedDrsObject: &resolved,
-		Summary: &drs.Summary{
-			Requested: common.Ptr(1),
-			Resolved:  common.Ptr(len(resolved)),
-		},
-	})
 }
 
-func handleGetServiceInfo(w http.ResponseWriter, r *http.Request, db db.DatabaseInterface) {
-	info, err := db.GetServiceInfo(r.Context())
-	if err != nil {
-		writeDRSHTTPError(w, r, http.StatusInternalServerError, err.Error())
-		return
+func handleOptionsBulkObjectFiber(om *core.ObjectManager) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		return c.SendStatus(fiber.StatusNoContent)
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(info)
-}
-
-func handleDeleteObject(w http.ResponseWriter, r *http.Request, db db.DatabaseInterface) {
-	objectID := routeutil.PathParam(r, "object_id")
-	obj, err := db.GetObject(r.Context(), objectID)
-	if err != nil {
-		writeDRSError(w, r, err)
-		return
-	}
-
-	if !authz.HasMethodAccess(r.Context(), "delete", obj.Authorizations) {
-		writeDRSAuthError(w, r)
-		return
-	}
-
-	targetID := objectID
-	if canonicalID, aliasErr := db.ResolveObjectAlias(r.Context(), objectID); aliasErr == nil && strings.TrimSpace(canonicalID) != "" {
-		targetID = strings.TrimSpace(canonicalID)
-	} else if aliasErr != nil && !errors.Is(aliasErr, common.ErrNotFound) {
-		writeDRSError(w, r, aliasErr)
-		return
-	}
-
-	if err := db.DeleteObject(r.Context(), targetID); err != nil {
-		writeDRSHTTPError(w, r, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// Errors
-func writeDRSHTTPError(w http.ResponseWriter, r *http.Request, status int, msg string) {
-	slog.Warn("drs request error", "status", status, "msg", msg, "path", r.URL.Path)
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(drs.Error{
-		Msg:        common.Ptr(msg),
-		StatusCode: common.Ptr(status),
-	})
-}
-
-func writeDRSAuthError(w http.ResponseWriter, r *http.Request) {
-	code := http.StatusForbidden
-	if authz.IsGen3Mode(r.Context()) && !authz.HasAuthHeader(r.Context()) {
-		code = http.StatusUnauthorized
-	}
-	writeDRSHTTPError(w, r, code, "Forbidden")
-}
-
-func writeDRSError(w http.ResponseWriter, r *http.Request, err error) {
-	if errors.Is(err, common.ErrNotFound) {
-		writeDRSHTTPError(w, r, http.StatusNotFound, "Not Found")
-		return
-	}
-	writeDRSHTTPError(w, r, http.StatusInternalServerError, err.Error())
 }

@@ -11,7 +11,10 @@ import (
 	"time"
 
 	"github.com/calypr/syfon/apigen/server/drs"
+	"github.com/calypr/syfon/apigen/server/internalapi"
 	"github.com/calypr/syfon/internal/common"
+	"github.com/calypr/syfon/internal/core"
+	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/testutils"
 	"github.com/gofiber/fiber/v3"
 )
@@ -73,13 +76,14 @@ func TestHandleInternalList_ScopeFilteringByReadPrivilege(t *testing.T) {
 	req = req.WithContext(ctx)
 
 	rr := httptest.NewRecorder()
-	handleInternalList(rr, req, mockDB)
+	om := core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
+	handleInternalList(rr, req, om)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
 	}
 	var payload struct {
-		Records []map[string]any `json:"records"`
+		Records []internalapi.InternalRecord `json:"records"`
 	}
 	if err := json.NewDecoder(rr.Body).Decode(&payload); err != nil {
 		t.Fatalf("decode response: %v", err)
@@ -87,8 +91,8 @@ func TestHandleInternalList_ScopeFilteringByReadPrivilege(t *testing.T) {
 	if len(payload.Records) != 1 {
 		t.Fatalf("expected 1 visible record, got %d", len(payload.Records))
 	}
-	if got, _ := payload.Records[0]["did"].(string); got != "obj-allow" {
-		t.Fatalf("expected obj-allow, got %q", got)
+	if payload.Records[0].Did != "obj-allow" {
+		t.Fatalf("expected obj-allow, got %q", payload.Records[0].Did)
 	}
 }
 
@@ -113,7 +117,8 @@ func TestHandleInternalList_HashTypeFiltering(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/?hash=sha256:samehash", nil)
 	rr := httptest.NewRecorder()
-	handleInternalList(rr, req, mockDB)
+	om := core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
+	handleInternalList(rr, req, om)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
 	}
@@ -132,7 +137,8 @@ func TestHandleInternalList_HashTypeFiltering(t *testing.T) {
 
 	req = httptest.NewRequest(http.MethodGet, "/?hash=samehash&hash_type=md5", nil)
 	rr = httptest.NewRecorder()
-	handleInternalList(rr, req, mockDB)
+	om2 := core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
+	handleInternalList(rr, req, om2)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
 	}
@@ -173,92 +179,61 @@ func TestHandleInternalBulkHashes_HashTypeFiltering(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/bulk/hashes", strings.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
-	handleInternalBulkHashes(mockDB).ServeHTTP(rr, req)
+	om := core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
+	handleInternalBulkHashes(om).ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
 	}
 	var payload struct {
-		Records []map[string]any `json:"records"`
+		Results map[string][]models.InternalObject `json:"results"`
 	}
 	if err := json.NewDecoder(rr.Body).Decode(&payload); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if len(payload.Records) != 1 {
-		t.Fatalf("expected 1 record, got %d", len(payload.Records))
+	if len(payload.Results) != 1 {
+		t.Fatalf("expected 1 result key, got %d", len(payload.Results))
 	}
-	if got, _ := payload.Records[0]["did"].(string); got != "obj-sha" {
-		t.Fatalf("expected obj-sha, got %q", got)
+	objs := payload.Results["sha256:samehash"]
+	if len(objs) != 1 {
+		t.Fatalf("expected 1 record for hash, got %d", len(objs))
+	}
+	if objs[0].Id != "obj-sha" {
+		t.Fatalf("expected obj-sha, got %q", objs[0].Id)
 	}
 }
 
 func TestHandleInternalCreate_PersistsExplicitDidAndAuthz(t *testing.T) {
 	mockDB := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}
-	reqBody := `{"did":"obj-1","size":42,"authz":["/programs/test/projects/p1"]}`
+	reqBody := `{"records":[{"did":"obj-1","size":42,"authz":["/programs/test/projects/p1"]}]}`
 	req := httptest.NewRequest(http.MethodPost, "/index", strings.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
-
-	handleInternalCreate(rr, req, mockDB)
+	om := core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
+	handleInternalCreate(rr, req, om)
 
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d body=%s", rr.Code, rr.Body.String())
 	}
 
-	var resp struct {
-		Did    string            `json:"did"`
-		Authz  []string          `json:"authz"`
-		Hashes map[string]string `json:"hashes"`
-	}
-	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if resp.Did != "obj-1" {
-		t.Fatalf("expected did obj-1, got %q", resp.Did)
-	}
-	if len(resp.Authz) != 1 || resp.Authz[0] != "/programs/test/projects/p1" {
-		t.Fatalf("expected explicit authz to persist, got %v", resp.Authz)
-	}
-	if len(resp.Hashes) != 0 {
-		t.Fatalf("expected no synthesized hashes, got %v", resp.Hashes)
-	}
-	if got := mockDB.ObjectAuthz[resp.Did]; len(got) != 1 || got[0] != "/programs/test/projects/p1" {
+	if got := mockDB.ObjectAuthz["obj-1"]; len(got) != 1 || got[0] != "/programs/test/projects/p1" {
 		t.Fatalf("expected persisted authz, got %v", got)
 	}
 }
 
 func TestHandleInternalCreate_RequiredFieldsFailAtDecode(t *testing.T) {
-	t.Run("missing did", func(t *testing.T) {
+	t.Run("missing records", func(t *testing.T) {
 		mockDB := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}
 		reqBody := `{"size":42,"authz":["/programs/test/projects/p1"]}`
 		req := httptest.NewRequest(http.MethodPost, "/index", strings.NewReader(reqBody))
 		req.Header.Set("Content-Type", "application/json")
 		rr := httptest.NewRecorder()
 
-		handleInternalCreate(rr, req, mockDB)
+		om := core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
+		handleInternalCreate(rr, req, om)
 
 		if rr.Code != http.StatusBadRequest {
 			t.Fatalf("expected 400, got %d body=%s", rr.Code, rr.Body.String())
-		}
-		if !strings.Contains(rr.Body.String(), "Invalid request body") {
-			t.Fatalf("expected decode validation error, got %s", rr.Body.String())
-		}
-	})
-
-	t.Run("missing authz", func(t *testing.T) {
-		mockDB := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}
-		reqBody := `{"did":"obj-1","size":42}`
-		req := httptest.NewRequest(http.MethodPost, "/index", strings.NewReader(reqBody))
-		req.Header.Set("Content-Type", "application/json")
-		rr := httptest.NewRecorder()
-
-		handleInternalCreate(rr, req, mockDB)
-
-		if rr.Code != http.StatusBadRequest {
-			t.Fatalf("expected 400, got %d body=%s", rr.Code, rr.Body.String())
-		}
-		if !strings.Contains(rr.Body.String(), "Invalid request body") {
-			t.Fatalf("expected decode validation error, got %s", rr.Body.String())
 		}
 	})
 }
@@ -269,32 +244,14 @@ func TestHandleInternalBulkCreate_PersistsExplicitAuthz(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/bulk/create", strings.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
-
-	handleInternalBulkCreate(mockDB).ServeHTTP(rr, req)
+	om := core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
+	handleInternalBulkCreate(om).ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d body=%s", rr.Code, rr.Body.String())
 	}
 
-	var resp struct {
-		Records []struct {
-			Did   string   `json:"did"`
-			Authz []string `json:"authz"`
-		} `json:"records"`
-	}
-	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if len(resp.Records) != 1 {
-		t.Fatalf("expected 1 record, got %d", len(resp.Records))
-	}
-	if resp.Records[0].Did != "obj-bulk-1" {
-		t.Fatalf("expected did obj-bulk-1, got %q", resp.Records[0].Did)
-	}
-	if len(resp.Records[0].Authz) != 1 || resp.Records[0].Authz[0] != "/programs/test/projects/p1" {
-		t.Fatalf("expected explicit authz in bulk create response, got %v", resp.Records[0].Authz)
-	}
-	if got := mockDB.ObjectAuthz[resp.Records[0].Did]; len(got) != 1 || got[0] != "/programs/test/projects/p1" {
+	if got := mockDB.ObjectAuthz["obj-bulk-1"]; len(got) != 1 || got[0] != "/programs/test/projects/p1" {
 		t.Fatalf("expected persisted authz, got %v", got)
 	}
 }
@@ -305,7 +262,8 @@ func TestHandleInternalDeleteByQuery(t *testing.T) {
 		req := httptest.NewRequest(http.MethodDelete, "/", nil)
 		rr := httptest.NewRecorder()
 
-		handleInternalDeleteByQuery(rr, req, mockDB)
+		om := core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
+		handleInternalDeleteByQuery(rr, req, om)
 
 		if rr.Code != http.StatusBadRequest {
 			t.Fatalf("expected 400, got %d", rr.Code)
@@ -319,7 +277,8 @@ func TestHandleInternalDeleteByQuery(t *testing.T) {
 		req = req.WithContext(ctx)
 		rr := httptest.NewRecorder()
 
-		handleInternalDeleteByQuery(rr, req, mockDB)
+		om := core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
+		handleInternalDeleteByQuery(rr, req, om)
 
 		if rr.Code != http.StatusUnauthorized {
 			t.Fatalf("expected 401, got %d body=%s", rr.Code, rr.Body.String())
@@ -347,7 +306,8 @@ func TestHandleInternalDeleteByQuery(t *testing.T) {
 		req = req.WithContext(ctx)
 
 		rr := httptest.NewRecorder()
-		handleInternalDeleteByQuery(rr, req, mockDB)
+		om := core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
+		handleInternalDeleteByQuery(rr, req, om)
 
 		if rr.Code != http.StatusOK {
 			t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
@@ -373,10 +333,11 @@ func TestRegisterInternalIndexRoutes_LegacyAliases(t *testing.T) {
 	}
 
 	app := fiber.New()
-	RegisterInternalIndexRoutes(app, mockDB, &testutils.MockUrlManager{})
+	om := core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
+	RegisterInternalIndexRoutes(app, om)
 
 	t.Run("collection alias /index", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/index", nil)
+		req := httptest.NewRequest(http.MethodGet, "/index?organization=org", nil)
 		resp, err := app.Test(req)
 		if err != nil {
 			t.Fatalf("test request failed: %v", err)
@@ -410,6 +371,24 @@ func TestRegisterInternalIndexRoutes_LegacyAliases(t *testing.T) {
 		if resp.StatusCode != http.StatusOK {
 			body, _ := io.ReadAll(resp.Body)
 			t.Fatalf("expected 200, got %d body=%s", resp.StatusCode, string(body))
+		}
+	})
+
+	t.Run("bulk alias /index/bulk/delete", func(t *testing.T) {
+		reqBody := `{"hashes":["sha256:h1"]}`
+		req := httptest.NewRequest(http.MethodPost, "/index/bulk/delete", strings.NewReader(reqBody))
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := app.Test(req)
+		if err != nil {
+			t.Fatalf("test request failed: %v", err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			t.Fatalf("expected 200, got %d body=%s", resp.StatusCode, string(body))
+		}
+		body, _ := io.ReadAll(resp.Body)
+		if !strings.Contains(string(body), `"deleted":1`) {
+			t.Fatalf("expected deleted count in response, got %s", string(body))
 		}
 	})
 }

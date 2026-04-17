@@ -1,6 +1,7 @@
 package common
 
 import (
+	"fmt"
 	"strings"
 )
 
@@ -37,4 +38,26 @@ func UniqueStringsCaseInsensitive(values []string) []string {
 		out = append(out, v)
 	}
 	return out
+}
+
+// SchemeFromURL extracts the scheme from a URL string.
+func SchemeFromURL(raw string) string {
+	if i := strings.Index(raw, "://"); i != -1 {
+		return strings.ToLower(raw[:i])
+	}
+	return ""
+}
+
+// NormalizeUploadKey ensures a key is valid for upload and defaults to ID if empty.
+func NormalizeUploadKey(inputKey, id string) string {
+	k := strings.TrimSpace(inputKey)
+	if k == "" {
+		return id
+	}
+	return k
+}
+
+// BucketToURL converts a bucket and key to an s3:// URL.
+func BucketToURL(bucket, key string) string {
+	return fmt.Sprintf("s3://%s/%s", strings.TrimPrefix(bucket, "s3://"), strings.TrimPrefix(key, "/"))
 }

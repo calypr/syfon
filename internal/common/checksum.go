@@ -90,12 +90,27 @@ func MergeAdditionalChecksums(existing []drs.Checksum, additions []drs.Checksum)
 	return out
 }
 
+// NormalizeID cleans a hex string (lowercase, 64 chars) to ensure consistency.
+func NormalizeID(raw string) string {
+	v := strings.TrimSpace(strings.ToLower(raw))
+	v = strings.TrimPrefix(v, "sha256:")
+	if len(v) != 64 {
+		return ""
+	}
+	for _, ch := range v {
+		if (ch < '0' || ch > '9') && (ch < 'a' || ch > 'f') {
+			return ""
+		}
+	}
+	return v
+}
+
 // CanonicalSHA256 pulls the sha256 value from a list of checksums if it exists.
 func CanonicalSHA256(checksums []drs.Checksum) (string, bool) {
 	for _, cs := range checksums {
 		checksumType := strings.ToLower(strings.TrimSpace(cs.Type))
 		if checksumType == "sha256" || checksumType == "sha-256" {
-			normalized := NormalizeChecksum(strings.TrimSpace(cs.Checksum))
+			normalized := NormalizeID(cs.Checksum)
 			if normalized != "" {
 				return normalized, true
 			}

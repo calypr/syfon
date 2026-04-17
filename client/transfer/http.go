@@ -18,8 +18,11 @@ import (
 // DoUpload performs a presigned PUT request and returns ETag when available.
 func DoUpload(ctx context.Context, req request.Requester, urlStr string, body io.Reader, size int64) (string, error) {
 	parsed, err := url.Parse(strings.TrimSpace(urlStr))
-	if err == nil && strings.ToLower(parsed.Scheme) == "file" {
+	if err == nil && (parsed.Scheme == "" || strings.ToLower(parsed.Scheme) == "file") {
 		dstPath := parsed.Path
+		if dstPath == "" {
+			dstPath = urlStr
+		}
 		if dstPath == "" {
 			return "", fmt.Errorf("invalid file upload url: %s", urlStr)
 		}

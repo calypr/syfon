@@ -8,6 +8,7 @@ import (
 	"github.com/calypr/syfon/internal/api/metrics"
 	"github.com/calypr/syfon/internal/api/middleware"
 	"github.com/calypr/syfon/internal/config"
+	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/db"
 	"github.com/calypr/syfon/internal/urlmanager"
 	"github.com/gofiber/fiber/v3"
@@ -17,6 +18,7 @@ type serverRuntime struct {
 	app                 *fiber.App
 	cfg                 *config.Config
 	database            db.DatabaseInterface
+	om                  *core.ObjectManager
 	uM                  urlmanager.UrlManager
 	authzMiddleware     *middleware.AuthzMiddleware
 	requestIDMiddleware *middleware.RequestIDMiddleware
@@ -42,7 +44,7 @@ func WithDocsRoutes() ServerOption {
 func WithGa4ghRoutes() ServerOption {
 	return func(rt *serverRuntime) {
 		api := rt.ensureAPIGroup().Group("/ga4gh/drs/v1")
-		drsapi.RegisterDRSRoutes(api, rt.database, rt.uM)
+		drsapi.RegisterDRSRoutes(api, rt.om)
 	}
 }
 
@@ -55,14 +57,14 @@ func WithMetricsRoutes() ServerOption {
 func WithInternalRoutes() ServerOption {
 	return func(rt *serverRuntime) {
 		api := rt.ensureAPIGroup()
-		internaldrs.RegisterInternalIndexRoutes(api, rt.database, rt.uM)
-		internaldrs.RegisterInternalDataRoutes(api, rt.database, rt.uM)
+		internaldrs.RegisterInternalIndexRoutes(api, rt.om)
+		internaldrs.RegisterInternalDataRoutes(api, rt.om)
 	}
 }
 
 func WithLFSRoutes() ServerOption {
 	return func(rt *serverRuntime) {
-		lfs.RegisterLFSRoutes(rt.ensureAPIGroup(), rt.database, rt.uM, lfs.Options{
+		lfs.RegisterLFSRoutes(rt.ensureAPIGroup(), rt.om, lfs.Options{
 			MaxBatchObjects:              rt.cfg.LFS.MaxBatchObjects,
 			MaxBatchBodyBytes:            rt.cfg.LFS.MaxBatchBodyBytes,
 			RequestLimitPerMinute:        rt.cfg.LFS.RequestLimitPerMinute,

@@ -16,8 +16,9 @@ import (
 	"github.com/calypr/syfon/apigen/server/bucketapi"
 	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/apigen/server/internalapi"
-	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/api/routeutil"
+	"github.com/calypr/syfon/internal/common"
+	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/testutils"
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
@@ -29,16 +30,16 @@ func TestHandleInternalDownload(t *testing.T) {
 	mockDB := &testutils.MockDatabase{
 		Objects: map[string]*drs.DrsObject{
 			"test-file-id": {
-					Id: "test-file-id",
-					AccessMethods: &[]drs.AccessMethod{
-						{
-							Type:     drs.AccessMethodTypeS3,
-							AccessUrl: &struct {
-								Headers *[]string `json:"headers,omitempty"`
-								Url     string    `json:"url"`
-							}{Url: "s3://bucket/key"},
-						},
+				Id: "test-file-id",
+				AccessMethods: &[]drs.AccessMethod{
+					{
+						Type: drs.AccessMethodTypeS3,
+						AccessUrl: &struct {
+							Headers *[]string `json:"headers,omitempty"`
+							Url     string    `json:"url"`
+						}{Url: "s3://bucket/key"},
 					},
+				},
 			},
 		},
 	}
@@ -51,7 +52,8 @@ func TestHandleInternalDownload(t *testing.T) {
 	req = routeutil.WithPathParams(req, map[string]string{"file_id": "test-file-id"})
 
 	rr := httptest.NewRecorder()
-	handleInternalDownload(rr, req, mockDB, mockUM)
+	om := core.NewObjectManager(mockDB, mockUM)
+	handleInternalDownload(rr, req, om)
 
 	if status := rr.Code; status != http.StatusOK {
 		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusOK)
@@ -71,16 +73,16 @@ func TestHandleInternalDownloadPart(t *testing.T) {
 	mockDB := &testutils.MockDatabase{
 		Objects: map[string]*drs.DrsObject{
 			"test-file-id": {
-					Id: "test-file-id",
-					AccessMethods: &[]drs.AccessMethod{
-						{
-							Type:     drs.AccessMethodTypeS3,
-							AccessUrl: &struct {
-								Headers *[]string `json:"headers,omitempty"`
-								Url     string    `json:"url"`
-							}{Url: "s3://bucket/key"},
-						},
+				Id: "test-file-id",
+				AccessMethods: &[]drs.AccessMethod{
+					{
+						Type: drs.AccessMethodTypeS3,
+						AccessUrl: &struct {
+							Headers *[]string `json:"headers,omitempty"`
+							Url     string    `json:"url"`
+						}{Url: "s3://bucket/key"},
 					},
+				},
 			},
 		},
 	}
@@ -91,7 +93,8 @@ func TestHandleInternalDownloadPart(t *testing.T) {
 		req = routeutil.WithPathParams(req, map[string]string{"file_id": "test-file-id"})
 
 		rr := httptest.NewRecorder()
-		handleInternalDownloadPart(rr, req, mockDB, mockUM)
+		om := core.NewObjectManager(mockDB, mockUM)
+		handleInternalDownloadPart(rr, req, om)
 
 		if rr.Code != http.StatusOK {
 			t.Errorf("expected 200, got %d", rr.Code)
@@ -108,7 +111,8 @@ func TestHandleInternalDownloadPart(t *testing.T) {
 		req, _ := http.NewRequest("GET", "/data/download/test-file-id/part?start=0", nil)
 		req = routeutil.WithPathParams(req, map[string]string{"file_id": "test-file-id"})
 		rr := httptest.NewRecorder()
-		handleInternalDownloadPart(rr, req, mockDB, mockUM)
+		om := core.NewObjectManager(mockDB, mockUM)
+		handleInternalDownloadPart(rr, req, om)
 		if rr.Code != http.StatusBadRequest {
 			t.Errorf("expected 400 for missing param, got %d", rr.Code)
 		}
@@ -118,7 +122,8 @@ func TestHandleInternalDownloadPart(t *testing.T) {
 		req, _ := http.NewRequest("GET", "/data/download/test-file-id/part?start=100&end=50", nil)
 		req = routeutil.WithPathParams(req, map[string]string{"file_id": "test-file-id"})
 		rr := httptest.NewRecorder()
-		handleInternalDownloadPart(rr, req, mockDB, mockUM)
+		om := core.NewObjectManager(mockDB, mockUM)
+		handleInternalDownloadPart(rr, req, om)
 		if rr.Code != http.StatusBadRequest {
 			t.Errorf("expected 400 for invalid range, got %d", rr.Code)
 		}
@@ -128,7 +133,8 @@ func TestHandleInternalDownloadPart(t *testing.T) {
 		req, _ := http.NewRequest("GET", "/data/download/unknown/part?start=0&end=100", nil)
 		req = routeutil.WithPathParams(req, map[string]string{"file_id": "unknown"})
 		rr := httptest.NewRecorder()
-		handleInternalDownloadPart(rr, req, mockDB, mockUM)
+		om := core.NewObjectManager(mockDB, mockUM)
+		handleInternalDownloadPart(rr, req, om)
 		if rr.Code != http.StatusNotFound {
 			t.Errorf("expected 404, got %d", rr.Code)
 		}
@@ -147,15 +153,15 @@ func TestHandleInternalDownload_ResolvesByChecksum(t *testing.T) {
 				Checksums: []drs.Checksum{
 					{Type: "sha256", Checksum: oid},
 				},
-					AccessMethods: &[]drs.AccessMethod{
-						{
-							Type:     drs.AccessMethodTypeS3,
-							AccessUrl: &struct {
-								Headers *[]string `json:"headers,omitempty"`
-								Url     string    `json:"url"`
-							}{Url: "s3://bucket/cbds/end_to_end_test/" + did + "/" + oid},
-						},
+				AccessMethods: &[]drs.AccessMethod{
+					{
+						Type: drs.AccessMethodTypeS3,
+						AccessUrl: &struct {
+							Headers *[]string `json:"headers,omitempty"`
+							Url     string    `json:"url"`
+						}{Url: "s3://bucket/cbds/end_to_end_test/" + did + "/" + oid},
 					},
+				},
 			},
 		},
 	}
@@ -168,7 +174,8 @@ func TestHandleInternalDownload_ResolvesByChecksum(t *testing.T) {
 	req = routeutil.WithPathParams(req, map[string]string{"file_id": oid})
 
 	rr := httptest.NewRecorder()
-	handleInternalDownload(rr, req, mockDB, mockUM)
+	om := core.NewObjectManager(mockDB, mockUM)
+	handleInternalDownload(rr, req, om)
 
 	if status := rr.Code; status != http.StatusOK {
 		t.Errorf("handler returned wrong status code: got %v want %v body=%s", status, http.StatusOK, rr.Body.String())
@@ -195,15 +202,15 @@ func TestHandleInternalDownload_ResolvesByUUID(t *testing.T) {
 				Checksums: []drs.Checksum{
 					{Type: "sha256", Checksum: oid},
 				},
-					AccessMethods: &[]drs.AccessMethod{
-						{
-							Type:     drs.AccessMethodTypeS3,
-							AccessUrl: &struct {
-								Headers *[]string `json:"headers,omitempty"`
-								Url     string    `json:"url"`
-							}{Url: "s3://bucket/cbds/end_to_end_test/" + did},
-						},
+				AccessMethods: &[]drs.AccessMethod{
+					{
+						Type: drs.AccessMethodTypeS3,
+						AccessUrl: &struct {
+							Headers *[]string `json:"headers,omitempty"`
+							Url     string    `json:"url"`
+						}{Url: "s3://bucket/cbds/end_to_end_test/" + did},
 					},
+				},
 			},
 		},
 	}
@@ -216,7 +223,8 @@ func TestHandleInternalDownload_ResolvesByUUID(t *testing.T) {
 	req = routeutil.WithPathParams(req, map[string]string{"file_id": did})
 
 	rr := httptest.NewRecorder()
-	handleInternalDownload(rr, req, mockDB, mockUM)
+	om := core.NewObjectManager(mockDB, mockUM)
+	handleInternalDownload(rr, req, om)
 
 	if status := rr.Code; status != http.StatusOK {
 		t.Errorf("handler returned wrong status code: got %v want %v body=%s", status, http.StatusOK, rr.Body.String())
@@ -235,28 +243,28 @@ func TestHandleInternalDownload_MultiCloud(t *testing.T) {
 	mockDB := &testutils.MockDatabase{
 		Objects: map[string]*drs.DrsObject{
 			"gcs-file": {
-					Id: "gcs-file",
-					AccessMethods: &[]drs.AccessMethod{
-						{
-							Type:     drs.AccessMethodTypeGs,
-							AccessUrl: &struct {
-								Headers *[]string `json:"headers,omitempty"`
-								Url     string    `json:"url"`
-							}{Url: "gs://gcs-bucket/obj"},
-						},
+				Id: "gcs-file",
+				AccessMethods: &[]drs.AccessMethod{
+					{
+						Type: drs.AccessMethodTypeGs,
+						AccessUrl: &struct {
+							Headers *[]string `json:"headers,omitempty"`
+							Url     string    `json:"url"`
+						}{Url: "gs://gcs-bucket/obj"},
 					},
+				},
 			},
 			"azure-file": {
-					Id: "azure-file",
-					AccessMethods: &[]drs.AccessMethod{
-						{
-							Type:     drs.AccessMethodType("azblob"),
-							AccessUrl: &struct {
-								Headers *[]string `json:"headers,omitempty"`
-								Url     string    `json:"url"`
-							}{Url: "azblob://azure-bucket/obj"},
-						},
+				Id: "azure-file",
+				AccessMethods: &[]drs.AccessMethod{
+					{
+						Type: drs.AccessMethodType("azblob"),
+						AccessUrl: &struct {
+							Headers *[]string `json:"headers,omitempty"`
+							Url     string    `json:"url"`
+						}{Url: "azblob://azure-bucket/obj"},
 					},
+				},
 			},
 		},
 	}
@@ -266,7 +274,8 @@ func TestHandleInternalDownload_MultiCloud(t *testing.T) {
 		req, _ := http.NewRequest("GET", "/data/download/gcs-file", nil)
 		req = routeutil.WithPathParams(req, map[string]string{"file_id": "gcs-file"})
 		rr := httptest.NewRecorder()
-		handleInternalDownload(rr, req, mockDB, mockUM)
+		om := core.NewObjectManager(mockDB, mockUM)
+		handleInternalDownload(rr, req, om)
 		if rr.Code != http.StatusOK {
 			t.Errorf("expected 200 for GCS, got %d", rr.Code)
 		}
@@ -276,7 +285,8 @@ func TestHandleInternalDownload_MultiCloud(t *testing.T) {
 		req, _ := http.NewRequest("GET", "/data/download/azure-file", nil)
 		req = routeutil.WithPathParams(req, map[string]string{"file_id": "azure-file"})
 		rr := httptest.NewRecorder()
-		handleInternalDownload(rr, req, mockDB, mockUM)
+		om := core.NewObjectManager(mockDB, mockUM)
+		handleInternalDownload(rr, req, om)
 		if rr.Code != http.StatusOK {
 			t.Errorf("expected 200 for Azure, got %d", rr.Code)
 		}
@@ -298,7 +308,8 @@ func TestHandleInternalUploadBlank(t *testing.T) {
 	}
 
 	rr := httptest.NewRecorder()
-	handleInternalUploadBlank(rr, req, mockDB, mockUM)
+	om := core.NewObjectManager(mockDB, mockUM)
+	handleInternalUploadBlank(rr, req, om)
 
 	if status := rr.Code; status != http.StatusCreated {
 		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusCreated)
@@ -331,7 +342,8 @@ func TestHandleInternalMultipartInit(t *testing.T) {
 	}
 
 	rr := httptest.NewRecorder()
-	handleInternalMultipartInit(rr, req, mockDB, mockUM)
+	om := core.NewObjectManager(mockDB, mockUM)
+	handleInternalMultipartInit(rr, req, om)
 
 	if status := rr.Code; status != http.StatusCreated {
 		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusCreated)
@@ -375,7 +387,8 @@ func TestHandleInternalMultipartInit_MintsUUIDForChecksumInput(t *testing.T) {
 	}
 
 	rr := httptest.NewRecorder()
-	handleInternalMultipartInit(rr, req, mockDB, mockUM)
+	om := core.NewObjectManager(mockDB, mockUM)
+	handleInternalMultipartInit(rr, req, om)
 
 	if status := rr.Code; status != http.StatusCreated {
 		t.Fatalf("handler returned wrong status code: got %v want %v body=%s", status, http.StatusCreated, rr.Body.String())
@@ -407,15 +420,15 @@ func TestHandleInternalMultipartInit_ResolvesExistingByChecksumGUID(t *testing.T
 				Checksums: []drs.Checksum{
 					{Type: "sha256", Checksum: checksum},
 				},
-					AccessMethods: &[]drs.AccessMethod{
-						{
-							Type:     drs.AccessMethodTypeS3,
-							AccessUrl: &struct {
-								Headers *[]string `json:"headers,omitempty"`
-								Url     string    `json:"url"`
-							}{Url: "s3://test-bucket-1/cbds/end_to_end_test/" + checksum},
-						},
+				AccessMethods: &[]drs.AccessMethod{
+					{
+						Type: drs.AccessMethodTypeS3,
+						AccessUrl: &struct {
+							Headers *[]string `json:"headers,omitempty"`
+							Url     string    `json:"url"`
+						}{Url: "s3://test-bucket-1/cbds/end_to_end_test/" + checksum},
 					},
+				},
 			},
 		},
 	}
@@ -429,7 +442,8 @@ func TestHandleInternalMultipartInit_ResolvesExistingByChecksumGUID(t *testing.T
 	}
 
 	rr := httptest.NewRecorder()
-	handleInternalMultipartInit(rr, req, mockDB, mockUM)
+	om := core.NewObjectManager(mockDB, mockUM)
+	handleInternalMultipartInit(rr, req, om)
 
 	if status := rr.Code; status != http.StatusCreated {
 		t.Fatalf("handler returned wrong status code: got %v want %v body=%s", status, http.StatusCreated, rr.Body.String())
@@ -460,7 +474,8 @@ func TestHandleInternalMultipartUpload(t *testing.T) {
 	}
 
 	rr := httptest.NewRecorder()
-	handleInternalMultipartUpload(rr, req, mockDB, mockUM)
+	om := core.NewObjectManager(mockDB, mockUM)
+	handleInternalMultipartUpload(rr, req, om)
 
 	if status := rr.Code; status != http.StatusOK {
 		t.Fatalf("handler returned wrong status code: got %v want %v", status, http.StatusOK)
@@ -493,7 +508,8 @@ func TestHandleInternalMultipartComplete(t *testing.T) {
 	}
 
 	rr := httptest.NewRecorder()
-	handleInternalMultipartComplete(rr, req, mockDB, mockUM)
+	om := core.NewObjectManager(mockDB, mockUM)
+	handleInternalMultipartComplete(rr, req, om)
 
 	if status := rr.Code; status != http.StatusOK {
 		t.Fatalf("handler returned wrong status code: got %v want %v", status, http.StatusOK)
@@ -504,16 +520,16 @@ func TestHandleInternalDownload_Gen3Auth(t *testing.T) {
 	mockDB := &testutils.MockDatabase{
 		Objects: map[string]*drs.DrsObject{
 			"secure-id": {
-					Id: "secure-id",
-					AccessMethods: &[]drs.AccessMethod{
-						{
-							Type:     drs.AccessMethodTypeS3,
-							AccessUrl: &struct {
-								Headers *[]string `json:"headers,omitempty"`
-								Url     string    `json:"url"`
-							}{Url: "s3://bucket/key"},
-						},
+				Id: "secure-id",
+				AccessMethods: &[]drs.AccessMethod{
+					{
+						Type: drs.AccessMethodTypeS3,
+						AccessUrl: &struct {
+							Headers *[]string `json:"headers,omitempty"`
+							Url     string    `json:"url"`
+						}{Url: "s3://bucket/key"},
 					},
+				},
 			},
 		},
 		ObjectAuthz: map[string][]string{
@@ -528,7 +544,8 @@ func TestHandleInternalDownload_Gen3Auth(t *testing.T) {
 	ctx401 = context.WithValue(ctx401, common.AuthHeaderPresentKey, false)
 	req401 = req401.WithContext(ctx401)
 	rr401 := httptest.NewRecorder()
-	handleInternalDownload(rr401, req401, mockDB, mockUM)
+	om := core.NewObjectManager(mockDB, mockUM)
+	handleInternalDownload(rr401, req401, om)
 	if rr401.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d body=%s", rr401.Code, rr401.Body.String())
 	}
@@ -542,7 +559,8 @@ func TestHandleInternalDownload_Gen3Auth(t *testing.T) {
 	})
 	req403 = req403.WithContext(ctx403)
 	rr403 := httptest.NewRecorder()
-	handleInternalDownload(rr403, req403, mockDB, mockUM)
+	om = core.NewObjectManager(mockDB, mockUM)
+	handleInternalDownload(rr403, req403, om)
 	if rr403.Code != http.StatusForbidden {
 		t.Fatalf("expected 403, got %d body=%s", rr403.Code, rr403.Body.String())
 	}
@@ -556,7 +574,8 @@ func TestHandleInternalDownload_Gen3Auth(t *testing.T) {
 	})
 	req200 = req200.WithContext(ctx200)
 	rr200 := httptest.NewRecorder()
-	handleInternalDownload(rr200, req200, mockDB, mockUM)
+	om = core.NewObjectManager(mockDB, mockUM)
+	handleInternalDownload(rr200, req200, om)
 	if rr200.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rr200.Code, rr200.Body.String())
 	}
@@ -571,7 +590,8 @@ func TestHandleInternalUploadURL_Gen3Unauthorized(t *testing.T) {
 	ctx = context.WithValue(ctx, common.AuthHeaderPresentKey, false)
 	req = req.WithContext(ctx)
 	rr := httptest.NewRecorder()
-	handleInternalUploadURL(rr, req, mockDB, mockUM)
+	om := core.NewObjectManager(mockDB, mockUM)
+	handleInternalUploadURL(rr, req, om)
 	if rr.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d body=%s", rr.Code, rr.Body.String())
 	}
@@ -600,7 +620,8 @@ func TestHandleInternalBuckets_Gen3Auth(t *testing.T) {
 	ctx401 = context.WithValue(ctx401, common.AuthHeaderPresentKey, false)
 	req401 = req401.WithContext(ctx401)
 	rr401 := httptest.NewRecorder()
-	handleInternalBuckets(rr401, req401, mockDB)
+	om := core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
+	handleInternalBuckets(rr401, req401, om)
 	if rr401.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d body=%s", rr401.Code, rr401.Body.String())
 	}
@@ -613,7 +634,8 @@ func TestHandleInternalBuckets_Gen3Auth(t *testing.T) {
 	})
 	req403 = req403.WithContext(ctx403)
 	rr403 := httptest.NewRecorder()
-	handleInternalBuckets(rr403, req403, mockDB)
+	om = core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
+	handleInternalBuckets(rr403, req403, om)
 	if rr403.Code != http.StatusForbidden {
 		t.Fatalf("expected 403, got %d body=%s", rr403.Code, rr403.Body.String())
 	}
@@ -626,7 +648,8 @@ func TestHandleInternalBuckets_Gen3Auth(t *testing.T) {
 	})
 	req200 = req200.WithContext(ctx200)
 	rr200 := httptest.NewRecorder()
-	handleInternalBuckets(rr200, req200, mockDB)
+	om = core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
+	handleInternalBuckets(rr200, req200, om)
 	if rr200.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rr200.Code, rr200.Body.String())
 	}
@@ -639,7 +662,8 @@ func TestHandleInternalBuckets_Gen3Auth(t *testing.T) {
 	})
 	reqScoped = reqScoped.WithContext(ctxScoped)
 	rrScoped := httptest.NewRecorder()
-	handleInternalBuckets(rrScoped, reqScoped, mockDB)
+	om = core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
+	handleInternalBuckets(rrScoped, reqScoped, om)
 	if rrScoped.Code != http.StatusOK {
 		t.Fatalf("expected scoped GET 200, got %d body=%s", rrScoped.Code, rrScoped.Body.String())
 	}
@@ -649,7 +673,10 @@ func TestHandleInternalBuckets_Gen3Auth(t *testing.T) {
 	}
 	bucketsRaw, ok := resp["S3_BUCKETS"].(map[string]any)
 	if !ok {
-		t.Fatalf("expected S3_BUCKETS object in response")
+		bucketsRaw, ok = resp["S3BUCKETS"].(map[string]any)
+	}
+	if !ok {
+		t.Fatalf("expected S3_BUCKETS object in response, got %v", resp)
 	}
 	if _, ok := bucketsRaw["b1"]; !ok {
 		t.Fatalf("expected scoped response to include b1")
@@ -680,7 +707,8 @@ func TestHandleInternalPutDeleteBucket_Gen3Auth(t *testing.T) {
 	ctxPut401 = context.WithValue(ctxPut401, common.AuthHeaderPresentKey, false)
 	putReq401 = putReq401.WithContext(ctxPut401)
 	putRR401 := httptest.NewRecorder()
-	handleInternalPutBucket(putRR401, putReq401, mockDB)
+	om := core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
+	handleInternalPutBucket(putRR401, putReq401, om)
 	if putRR401.Code != http.StatusUnauthorized {
 		t.Fatalf("expected PUT 401, got %d body=%s", putRR401.Code, putRR401.Body.String())
 	}
@@ -693,7 +721,8 @@ func TestHandleInternalPutDeleteBucket_Gen3Auth(t *testing.T) {
 	})
 	putReq201 = putReq201.WithContext(ctxPut201)
 	putRR201 := httptest.NewRecorder()
-	handleInternalPutBucket(putRR201, putReq201, mockDB)
+	om = core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
+	handleInternalPutBucket(putRR201, putReq201, om)
 	if putRR201.Code != http.StatusCreated {
 		t.Fatalf("expected PUT 201, got %d body=%s", putRR201.Code, putRR201.Body.String())
 	}
@@ -711,7 +740,8 @@ func TestHandleInternalPutDeleteBucket_Gen3Auth(t *testing.T) {
 	})
 	putScopeOnlyReq = putScopeOnlyReq.WithContext(ctxPutScopeOnly)
 	putScopeOnlyRR := httptest.NewRecorder()
-	handleInternalPutBucket(putScopeOnlyRR, putScopeOnlyReq, mockDB)
+	om = core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
+	handleInternalPutBucket(putScopeOnlyRR, putScopeOnlyReq, om)
 	if putScopeOnlyRR.Code != http.StatusCreated {
 		t.Fatalf("expected scope-only PUT 201, got %d body=%s", putScopeOnlyRR.Code, putScopeOnlyRR.Body.String())
 	}
@@ -729,7 +759,8 @@ func TestHandleInternalPutDeleteBucket_Gen3Auth(t *testing.T) {
 	})
 	postScopeReq = postScopeReq.WithContext(ctxPostScope)
 	postScopeRR := httptest.NewRecorder()
-	handleInternalCreateBucketScope(postScopeRR, postScopeReq, mockDB)
+	om = core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
+	handleInternalCreateBucketScope(postScopeRR, postScopeReq, om)
 	if postScopeRR.Code != http.StatusCreated {
 		t.Fatalf("expected scope POST 201, got %d body=%s", postScopeRR.Code, postScopeRR.Body.String())
 	}
@@ -743,7 +774,8 @@ func TestHandleInternalPutDeleteBucket_Gen3Auth(t *testing.T) {
 	})
 	delReq403 = delReq403.WithContext(ctxDel403)
 	delRR403 := httptest.NewRecorder()
-	handleInternalDeleteBucket(delRR403, delReq403, mockDB)
+	om = core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
+	handleInternalDeleteBucket(delRR403, delReq403, om)
 	if delRR403.Code != http.StatusForbidden {
 		t.Fatalf("expected DELETE 403, got %d body=%s", delRR403.Code, delRR403.Body.String())
 	}
@@ -759,7 +791,8 @@ func TestHandleInternalPutDeleteBucket_Gen3Auth(t *testing.T) {
 	})
 	delReq204 = delReq204.WithContext(ctxDel204)
 	delRR204 := httptest.NewRecorder()
-	handleInternalDeleteBucket(delRR204, delReq204, mockDB)
+	om = core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
+	handleInternalDeleteBucket(delRR204, delReq204, om)
 	if delRR204.Code != http.StatusNoContent {
 		t.Fatalf("expected DELETE 204, got %d body=%s", delRR204.Code, delRR204.Body.String())
 	}
@@ -784,7 +817,8 @@ func TestHandleInternalPutBucket_RejectsInvalidGeneratedPayloads(t *testing.T) {
 		})
 		req = req.WithContext(ctx)
 		rr := httptest.NewRecorder()
-		handleInternalPutBucket(rr, req, mockDB)
+		om := core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
+		handleInternalPutBucket(rr, req, om)
 		if rr.Code != http.StatusBadRequest {
 			t.Fatalf("expected 400, got %d body=%s", rr.Code, rr.Body.String())
 		}
@@ -808,7 +842,8 @@ func TestHandleInternalPutBucket_RejectsInvalidGeneratedPayloads(t *testing.T) {
 		})
 		req = req.WithContext(ctx)
 		rr := httptest.NewRecorder()
-		handleInternalPutBucket(rr, req, mockDB)
+		om := core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
+		handleInternalPutBucket(rr, req, om)
 		if rr.Code != http.StatusBadRequest {
 			t.Fatalf("expected 400, got %d body=%s", rr.Code, rr.Body.String())
 		}
@@ -842,23 +877,31 @@ func TestWriteDBErrorBranches(t *testing.T) {
 func TestHandleInternalUploadURL_Branches(t *testing.T) {
 	mockUM := &testutils.MockUrlManager{}
 
-	t.Run("no bucket configured", func(t *testing.T) {
-		db := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}
+	t.Run("no_bucket_configured", func(t *testing.T) {
+		db := &testutils.MockDatabase{
+			Objects:     map[string]*drs.DrsObject{},
+			Credentials: map[string]models.S3Credential{"b1": {Bucket: "b1"}},
+		}
 		req := httptest.NewRequest(http.MethodGet, "/data/upload/abc", nil)
 		req = routeutil.WithPathParams(req, map[string]string{"file_id": "abc"})
 		rr := httptest.NewRecorder()
-		handleInternalUploadURL(rr, req, db, mockUM)
+		om := core.NewObjectManager(db, mockUM)
+		handleInternalUploadURL(rr, req, om)
 		if rr.Code != http.StatusOK {
 			t.Fatalf("expected 200 with default mock bucket, got %d body=%s", rr.Code, rr.Body.String())
 		}
 	})
 
-	t.Run("query bucket and filename signs upload url", func(t *testing.T) {
-		db := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}
+	t.Run("query_bucket_and_filename_signs_upload_url", func(t *testing.T) {
+		db := &testutils.MockDatabase{
+			Objects:     map[string]*drs.DrsObject{},
+			Credentials: map[string]models.S3Credential{"b1": {Bucket: "b1"}},
+		}
 		req := httptest.NewRequest(http.MethodGet, "/data/upload/abc?bucket=b1&filename=f1", nil)
 		req = routeutil.WithPathParams(req, map[string]string{"file_id": "abc"})
 		rr := httptest.NewRecorder()
-		handleInternalUploadURL(rr, req, db, mockUM)
+		om := core.NewObjectManager(db, mockUM)
+		handleInternalUploadURL(rr, req, om)
 		if rr.Code != http.StatusOK {
 			t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
 		}
@@ -873,16 +916,16 @@ func TestHandleInternalUploadBulk_MixedResults(t *testing.T) {
 	db := &testutils.MockDatabase{
 		Objects: map[string]*drs.DrsObject{
 			"obj-1": {
-					Id: "obj-1",
-					AccessMethods: &[]drs.AccessMethod{
-						{
-							Type:     drs.AccessMethodTypeS3,
-							AccessUrl: &struct {
-								Headers *[]string `json:"headers,omitempty"`
-								Url     string    `json:"url"`
-							}{Url: "s3://b1/prefix/from-existing.bin"},
-						},
+				Id: "obj-1",
+				AccessMethods: &[]drs.AccessMethod{
+					{
+						Type: drs.AccessMethodTypeS3,
+						AccessUrl: &struct {
+							Headers *[]string `json:"headers,omitempty"`
+							Url     string    `json:"url"`
+						}{Url: "s3://b1/prefix/from-existing.bin"},
 					},
+				},
 			},
 		},
 		Credentials: map[string]models.S3Credential{
@@ -899,8 +942,9 @@ func TestHandleInternalUploadBulk_MixedResults(t *testing.T) {
 	body, _ := json.Marshal(reqBody)
 	req := httptest.NewRequest(http.MethodPost, "/data/upload/bulk", bytes.NewReader(body))
 	rr := httptest.NewRecorder()
+	om := core.NewObjectManager(db, mockUM)
 
-	handleInternalUploadBulk(rr, req, db, mockUM)
+	handleInternalUploadBulk(rr, req, om)
 
 	if rr.Code != http.StatusMultiStatus {
 		t.Fatalf("expected 207 for mixed batch results, got %d body=%s", rr.Code, rr.Body.String())
@@ -951,8 +995,8 @@ func TestHandleInternalUploadBulk_Gen3UnauthorizedPerItem(t *testing.T) {
 	ctx = context.WithValue(ctx, common.AuthHeaderPresentKey, false)
 	req = req.WithContext(ctx)
 	rr := httptest.NewRecorder()
-
-	handleInternalUploadBulk(rr, req, db, mockUM)
+	om := core.NewObjectManager(db, mockUM)
+	handleInternalUploadBulk(rr, req, om)
 
 	if rr.Code != http.StatusMultiStatus {
 		t.Fatalf("expected 207, got %d body=%s", rr.Code, rr.Body.String())
@@ -975,14 +1019,16 @@ func TestHandleInternalMultipartValidationErrors(t *testing.T) {
 
 	reqUpload := httptest.NewRequest(http.MethodPost, "/data/multipart/upload", strings.NewReader(`{}`))
 	rrUpload := httptest.NewRecorder()
-	handleInternalMultipartUpload(rrUpload, reqUpload, db, um)
+	om := core.NewObjectManager(db, um)
+	handleInternalMultipartUpload(rrUpload, reqUpload, om)
 	if rrUpload.Code != http.StatusBadRequest {
 		t.Fatalf("expected upload 400, got %d body=%s", rrUpload.Code, rrUpload.Body.String())
 	}
 
 	reqComplete := httptest.NewRequest(http.MethodPost, "/data/multipart/complete", strings.NewReader(`{}`))
 	rrComplete := httptest.NewRecorder()
-	handleInternalMultipartComplete(rrComplete, reqComplete, db, um)
+	om = core.NewObjectManager(db, um)
+	handleInternalMultipartComplete(rrComplete, reqComplete, om)
 	if rrComplete.Code != http.StatusBadRequest {
 		t.Fatalf("expected complete 400, got %d body=%s", rrComplete.Code, rrComplete.Body.String())
 	}
@@ -990,24 +1036,30 @@ func TestHandleInternalMultipartValidationErrors(t *testing.T) {
 	// Strict contract: only uploadId is accepted as query fallback.
 	reqLegacyUpload := httptest.NewRequest(http.MethodPost, "/data/multipart/upload?key=k&upload_id=u&partNumber=1", nil)
 	rrLegacyUpload := httptest.NewRecorder()
-	handleInternalMultipartUpload(rrLegacyUpload, reqLegacyUpload, db, um)
+	om = core.NewObjectManager(db, um)
+	handleInternalMultipartUpload(rrLegacyUpload, reqLegacyUpload, om)
 	if rrLegacyUpload.Code != http.StatusBadRequest {
 		t.Fatalf("expected legacy upload_id upload request to fail with 400, got %d body=%s", rrLegacyUpload.Code, rrLegacyUpload.Body.String())
 	}
 
 	reqLegacyComplete := httptest.NewRequest(http.MethodPost, "/data/multipart/complete?key=k&upload_id=u", nil)
 	rrLegacyComplete := httptest.NewRecorder()
-	handleInternalMultipartComplete(rrLegacyComplete, reqLegacyComplete, db, um)
+	om = core.NewObjectManager(db, um)
+	handleInternalMultipartComplete(rrLegacyComplete, reqLegacyComplete, om)
 	if rrLegacyComplete.Code != http.StatusBadRequest {
 		t.Fatalf("expected legacy upload_id complete request to fail with 400, got %d body=%s", rrLegacyComplete.Code, rrLegacyComplete.Body.String())
 	}
 }
 
 func TestRegisterInternalRoutes_Smoke(t *testing.T) {
-	db := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}
+	db := &testutils.MockDatabase{
+		Objects:     map[string]*drs.DrsObject{},
+		Credentials: map[string]models.S3Credential{"b1": {Bucket: "b1"}},
+	}
 	um := &testutils.MockUrlManager{}
 	app := fiber.New()
-	RegisterInternalDataRoutes(app, db, um)
+	om := core.NewObjectManager(db, um)
+	RegisterInternalDataRoutes(app, om)
 
 	req := httptest.NewRequest(http.MethodGet, "/data/upload/abc?bucket=b1", nil)
 	resp, err := app.Test(req)

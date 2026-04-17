@@ -16,8 +16,9 @@ import (
 	"github.com/calypr/syfon/internal/api/internaldrs"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/config"
-	"github.com/calypr/syfon/internal/db"
+	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/crypto"
+	"github.com/calypr/syfon/internal/db"
 	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/signer/s3"
 	"github.com/calypr/syfon/internal/urlmanager"
@@ -100,8 +101,9 @@ s3_credentials:
 	uM := urlmanager.NewManager(database, cfg.Signing)
 	uM.RegisterSigner(common.S3Provider, s3.NewS3Signer(database))
 	app := fiber.New()
-	internaldrs.RegisterInternalIndexRoutes(app, database, uM)
-	internaldrs.RegisterInternalDataRoutes(app, database, uM)
+	om := core.NewObjectManager(database, uM)
+	internaldrs.RegisterInternalIndexRoutes(app, om)
+	internaldrs.RegisterInternalDataRoutes(app, om)
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

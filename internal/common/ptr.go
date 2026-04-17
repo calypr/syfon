@@ -52,6 +52,14 @@ func IntVal(p *int) int {
 	return *p
 }
 
+// Int64Val returns the int64 value if not nil, otherwise 0.
+func Int64Val(p *int64) int64 {
+	if p == nil {
+		return 0
+	}
+	return *p
+}
+
 // FloatVal returns the float64 value if not nil, otherwise 0.0.
 func FloatVal(p *float64) float64 {
 	if p == nil {

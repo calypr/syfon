@@ -16,7 +16,6 @@ const (
 	S3Prefix        = common.S3Prefix
 	GCSPrefix       = common.GCSPrefix
 	AzurePrefix     = common.AzurePrefix
-	FilePrefix      = common.FilePrefix
 	DRSPrefix       = common.DRSPrefix
 	DefaultS3Region = "us-east-1"
 

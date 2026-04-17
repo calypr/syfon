@@ -12,6 +12,7 @@ import (
 	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/apigen/server/lfsapi"
 	"github.com/calypr/syfon/internal/common"
+	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/testutils"
 	"github.com/gofiber/fiber/v3"
@@ -44,7 +45,8 @@ func newLFSRouterWithOptions(opts Options) (*fiberTestRouter, *testutils.MockDat
 	}
 	uM := &testutils.MockUrlManager{}
 	app := fiber.New()
-	RegisterLFSRoutes(app, db, uM, opts)
+	om := core.NewObjectManager(db, uM)
+	RegisterLFSRoutes(app, om, opts)
 	return &fiberTestRouter{app: app}, db
 }
 
@@ -142,6 +144,11 @@ func TestResolveObjectForOIDFallsBackToChecksum(t *testing.T) {
 	if obj == nil || obj.Id != did {
 		t.Fatalf("expected object id %s, got %+v", did, obj)
 	}
+}
+
+func resolveObjectForOID(ctx context.Context, database *testutils.MockDatabase, oid string) (*models.InternalObject, error) {
+	om := core.NewObjectManager(database, nil)
+	return om.GetObject(ctx, oid, "")
 }
 
 func TestLFSMetadataThenVerifyRegistersObject(t *testing.T) {
@@ -273,7 +280,8 @@ func TestLFSBatchGen3MissingAuthReturns401(t *testing.T) {
 		c.SetContext(ctx)
 		return c.Next()
 	})
-	RegisterLFSRoutes(app, db, uM, DefaultOptions())
+	om := core.NewObjectManager(db, uM)
+	RegisterLFSRoutes(app, om, DefaultOptions())
 	router := &fiberTestRouter{app: app}
 	body := map[string]any{
 		"operation": "download",
@@ -298,7 +306,7 @@ func TestLFSBatchGen3MissingAuthReturns401(t *testing.T) {
 }
 
 func TestLFSBatchTooManyObjects413(t *testing.T) {
-	resetLFSLimitersForTest()
+	ResetLFSLimitersForTest()
 	opts := DefaultOptions()
 	opts.MaxBatchObjects = 1
 	router, _ := newLFSRouterWithOptions(opts)
@@ -321,7 +329,7 @@ func TestLFSBatchTooManyObjects413(t *testing.T) {
 }
 
 func TestLFSBatchRateLimit429(t *testing.T) {
-	resetLFSLimitersForTest()
+	ResetLFSLimitersForTest()
 	opts := DefaultOptions()
 	opts.RequestLimitPerMinute = 1
 	router, _ := newLFSRouterWithOptions(opts)
@@ -352,7 +360,7 @@ func TestLFSBatchRateLimit429(t *testing.T) {
 }
 
 func TestLFSBatchBandwidthLimit509(t *testing.T) {
-	resetLFSLimitersForTest()
+	ResetLFSLimitersForTest()
 	opts := DefaultOptions()
 	opts.BandwidthLimitBytesPerMinute = 5
 	router, _ := newLFSRouterWithOptions(opts)
@@ -373,7 +381,7 @@ func TestLFSBatchBandwidthLimit509(t *testing.T) {
 }
 
 func TestLFSBatchPayloadLimit413(t *testing.T) {
-	resetLFSLimitersForTest()
+	ResetLFSLimitersForTest()
 	opts := DefaultOptions()
 	opts.MaxBatchBodyBytes = 20
 	router, _ := newLFSRouterWithOptions(opts)
@@ -397,7 +405,7 @@ func TestLFSBatchPayloadLimit413(t *testing.T) {
 }
 
 func TestLFSUploadProxyNoBucket507(t *testing.T) {
-	resetLFSLimitersForTest()
+	ResetLFSLimitersForTest()
 	router, db := newLFSRouter()
 	db.Credentials = map[string]models.S3Credential{}
 	db.NoDefaultCreds = true
