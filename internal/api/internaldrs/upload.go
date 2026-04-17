@@ -252,7 +252,7 @@ func handleInternalMultipartInitFiber(om *core.ObjectManager) fiber.Handler {
 		}
 
 		multipartUploadSessions.Store(uploadID, multipartSession{Bucket: bucket, Key: internalID})
-		return c.Status(fiber.StatusCreated).JSON(internalapi.InternalMultipartInitOutput{
+		return c.Status(fiber.StatusOK).JSON(internalapi.InternalMultipartInitOutput{
 			UploadId: &uploadID,
 			Guid:     &internalID,
 		})
