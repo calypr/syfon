@@ -345,8 +345,8 @@ func TestHandleInternalMultipartInit(t *testing.T) {
 	om := core.NewObjectManager(mockDB, mockUM)
 	handleInternalMultipartInit(rr, req, om)
 
-	if status := rr.Code; status != http.StatusCreated {
-		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusCreated)
+	if status := rr.Code; status != http.StatusOK {
+		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusOK)
 	}
 
 	bodyBytes := rr.Body.Bytes()
@@ -390,8 +390,8 @@ func TestHandleInternalMultipartInit_MintsUUIDForChecksumInput(t *testing.T) {
 	om := core.NewObjectManager(mockDB, mockUM)
 	handleInternalMultipartInit(rr, req, om)
 
-	if status := rr.Code; status != http.StatusCreated {
-		t.Fatalf("handler returned wrong status code: got %v want %v body=%s", status, http.StatusCreated, rr.Body.String())
+	if status := rr.Code; status != http.StatusOK {
+		t.Fatalf("handler returned wrong status code: got %v want %v body=%s", status, http.StatusOK, rr.Body.String())
 	}
 
 	var resp internalapi.InternalMultipartInitOutput
@@ -445,8 +445,8 @@ func TestHandleInternalMultipartInit_ResolvesExistingByChecksumGUID(t *testing.T
 	om := core.NewObjectManager(mockDB, mockUM)
 	handleInternalMultipartInit(rr, req, om)
 
-	if status := rr.Code; status != http.StatusCreated {
-		t.Fatalf("handler returned wrong status code: got %v want %v body=%s", status, http.StatusCreated, rr.Body.String())
+	if status := rr.Code; status != http.StatusOK {
+		t.Fatalf("handler returned wrong status code: got %v want %v body=%s", status, http.StatusOK, rr.Body.String())
 	}
 
 	var resp internalapi.InternalMultipartInitOutput
