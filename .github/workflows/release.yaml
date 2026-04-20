@@ -1,18 +1,25 @@
-# Publishes releases to GitHub when a new semver tag is pushed.
-# Ref: https://semver.org
+# Publishes releases to GitHub on semver tag pushes, and auto-tags successful
+# development CI runs so those tags can trigger the release path.
 #
-# Strategy: build natively on each target runner, then combine artifacts into
-# a GitHub Release. This avoids CGO cross-compilation entirely and does not
-# require a GoReleaser Pro subscription.
+# Strategy: compute the release tag in this workflow, build natively on each
+# target runner, then combine artifacts into a GitHub Release. This avoids
+# CGO cross-compilation entirely and keeps release creation in one place.
 
 name: Release
 on:
   push:
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+'
+  workflow_run:
+    workflows:
+      - Syfon CI
+    types:
+      - completed
+    branches:
+      - development
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.workflow_run.head_sha || github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -21,15 +28,72 @@ permissions:
   id-token: write
 
 jobs:
-  test:
-    name: CI
-    uses: ./.github/workflows/ci.yaml
-    secrets: inherit
+  auto-tag:
+    name: Auto-tag development release
+    runs-on: ubuntu-latest
+    if: github.event.workflow_run.conclusion == 'success'
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Fetch tags
+        run: git fetch --tags --force
+
+      - name: Compute release tag
+        id: version
+        env:
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+
+          if git tag --points-at "$HEAD_SHA" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Head commit is already tagged with a semver release; skipping auto-tag."
+            exit 0
+          fi
+
+          latest=$(git tag --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1 || true)
+
+          [[ -n "$HEAD_SHA" ]] || { echo "workflow_run head SHA missing"; exit 1; }
+
+          if [[ -z "$latest" ]]; then
+            next="v0.1.0"
+          else
+            base="${latest#v}"
+            IFS=. read -r major minor patch <<<"$base"
+            patch=$((10#$patch))
+            minor=$((10#$minor))
+            major=$((10#$major))
+
+            patch=$((patch + 1))
+            if [[ "$patch" -gt 9 ]]; then
+              patch=0
+              minor=$((minor + 1))
+              if [[ "$minor" -gt 9 ]]; then
+                minor=0
+                major=$((major + 1))
+              fi
+            fi
+
+            next="v${major}.${minor}.${patch}"
+          fi
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$next" -m "Release $next"
+          git push origin "$next"
+          echo "Tagged $next"
 
   build:
     name: Build (${{ matrix.os }}/${{ matrix.arch }})
-    needs: [test]
     runs-on: ${{ matrix.runner }}
+    if: github.event_name == 'push'
     strategy:
       fail-fast: false
       matrix:
@@ -44,6 +108,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.ref }}
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -73,6 +138,7 @@ jobs:
     name: Release
     needs: [build]
     runs-on: ubuntu-latest
+    if: github.event_name == 'push'
 
     permissions:
       contents: write
@@ -84,6 +150,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.ref }}
 
       - name: Download artifacts
         uses: actions/download-artifact@v4
@@ -93,30 +160,35 @@ jobs:
           merge-multiple: true
 
       - name: Package archives and checksums
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           cd dist
           for binary in syfon-linux-* syfon-darwin-*; do
             [[ -f "$binary" ]] || continue
-            archive="${binary}-${{ github.ref_name }}.tar.gz"
+            archive="${binary}-${RELEASE_TAG}.tar.gz"
             # Rename to plain "syfon" inside the archive so the install script
             # can extract and mv syfon $DEST without any platform-specific logic.
             cp "$binary" syfon
             tar -czf "$archive" syfon
             rm syfon
           done
-          sha256sum *.tar.gz > syfon-${{ github.ref_name }}-checksums.txt
+          sha256sum *.tar.gz > "syfon-${RELEASE_TAG}-checksums.txt"
           ls -lh
 
       - name: Generate changelog
         id: changelog
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
         run: |
+          set -euo pipefail
+          prev=$(git tag --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sed -n '2p' || true)
           # Emit commits between the previous tag and this one as the release notes.
-          prev=$(git tag --sort=-version:refname | grep -E '^v[0-9]' | sed -n '2p')
-          if [[ -n "$prev" ]]; then
-            notes=$(git log "${prev}".."${{ github.ref_name }}" --pretty=format:'- %s (%h)' --no-merges)
+          if [[ -n "${prev}" ]]; then
+            notes=$(git log "${prev}".."${RELEASE_TAG}" --pretty=format:'- %s (%h)' --no-merges)
           else
-            notes=$(git log "${{ github.ref_name }}" --pretty=format:'- %s (%h)' --no-merges)
+            notes=$(git log "${RELEASE_TAG}" --pretty=format:'- %s (%h)' --no-merges)
           fi
           # Write to a file to safely handle multi-line content
           echo "$notes" > release-notes.md
@@ -124,33 +196,42 @@ jobs:
       - name: Create GitHub Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          tag="${{ github.ref_name }}"
-          gh release create "$tag" \
-            --title "$tag" \
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Release already exists: $RELEASE_TAG"
+            exit 0
+          fi
+          gh release create "$RELEASE_TAG" \
+            --title "$RELEASE_TAG" \
             --notes-file release-notes.md \
             dist/*.tar.gz \
-            dist/syfon-${{ github.ref_name }}-checksums.txt
+            dist/syfon-${RELEASE_TAG}-checksums.txt
 
       - name: Tag submodules
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          version="${{ github.ref_name }}"
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
           # Find the previous root tag to diff against
-          prev=$(git tag --sort=-version:refname | grep -E '^v[0-9]' | sed -n '2p')
+          prev=$(git tag --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sed -n '2p' || true)
 
           for prefix in apigen client; do
-            subtag="${prefix}/${version}"
+            subtag="${prefix}/${RELEASE_TAG}"
 
             # Only tag if the submodule directory has changed since the previous release
             if [[ -n "$prev" ]] && git diff --quiet "${prev}" HEAD -- "${prefix}/"; then
               echo "No changes in ${prefix}/ since ${prev}, skipping ${subtag}"
+              continue
+            fi
+
+            if git rev-parse -q --verify "refs/tags/$subtag" >/dev/null; then
+              echo "Submodule tag already exists: ${subtag}"
               continue
             fi
 
