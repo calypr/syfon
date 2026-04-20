@@ -1,210 +1,23 @@
 package internaldrs
 
 import (
-	"context"
-	"errors"
-	"fmt"
-	"net/http"
-	"net/url"
-	"strings"
-
-	"github.com/calypr/syfon/apigen/drs"
-	"github.com/calypr/syfon/config"
-	"github.com/calypr/syfon/db/core"
-	"github.com/calypr/syfon/internal/provider"
-	"github.com/calypr/syfon/urlmanager"
-	"github.com/gorilla/mux"
+	"github.com/calypr/syfon/internal/common"
+	"github.com/calypr/syfon/internal/core"
+	"github.com/gofiber/fiber/v3"
 )
 
-const bucketControlResource = "/services/internal/buckets"
+func RegisterInternalDataRoutes(router fiber.Router, om *core.ObjectManager) {
+	router.Get(fiberRoutePath(common.RouteInternalDownload), func(c fiber.Ctx) error { return handleInternalDownloadFiber(c, om) })
+	router.Get(fiberRoutePath(common.RouteInternalDownloadPart), func(c fiber.Ctx) error { return handleInternalDownloadPartFiber(c, om) })
+	router.Post(common.RouteInternalUpload, handleInternalUploadBlankFiber(om))
+	router.Get(fiberRoutePath(common.RouteInternalUploadURL), handleInternalUploadURLFiber(om))
+	router.Post(common.RouteInternalUploadBulk, handleInternalUploadBulkFiber(om))
+	router.Post(common.RouteInternalMultipartInit, handleInternalMultipartInitFiber(om))
+	router.Post(common.RouteInternalMultipartUpload, handleInternalMultipartUploadFiber(om))
+	router.Post(common.RouteInternalMultipartComplete, handleInternalMultipartCompleteFiber(om))
 
-func hasAnyMethodAccess(ctx *http.Request, resources []string, methods ...string) bool {
-	if !core.IsGen3Mode(ctx.Context()) {
-		return true
-	}
-	if len(resources) == 0 {
-		return true
-	}
-	for _, m := range methods {
-		if core.HasMethodAccess(ctx.Context(), m, resources) {
-			return true
-		}
-	}
-	return false
-}
-
-func hasGlobalBucketControlAccess(r *http.Request, methods ...string) bool {
-	return hasAnyMethodAccess(r, []string{bucketControlResource}, methods...)
-}
-
-func scopeResource(org, project string) string {
-	return strings.TrimSpace(core.ResourcePathForScope(org, project))
-}
-
-func hasScopedBucketAccess(r *http.Request, scope core.BucketScope, methods ...string) bool {
-	res := scopeResource(scope.Organization, scope.ProjectID)
-	if res == "" {
-		return false
-	}
-	return hasAnyMethodAccess(r, []string{res}, methods...)
-}
-
-func RegisterInternalDataRoutes(router *mux.Router, database core.DatabaseInterface, uM urlmanager.UrlManager) {
-	// Data routes exposed under /data to match gateway contract.
-	router.Handle(config.RouteInternalDownload, drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		handleInternalDownload(w, r, database, uM)
-	}), "InternalDownload")).Methods(http.MethodGet)
-
-	router.Handle(config.RouteInternalDownloadPart, drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		handleInternalDownloadPart(w, r, database, uM)
-	}), "InternalDownloadPart")).Methods(http.MethodGet)
-
-	router.Handle(config.RouteInternalUpload, drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		handleInternalUploadBlank(w, r, database, uM)
-	}), "InternalUploadBlank")).Methods(http.MethodPost)
-
-	router.Handle(config.RouteInternalUploadURL, drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		handleInternalUploadURL(w, r, database, uM)
-	}), "InternalUploadURL")).Methods(http.MethodGet)
-
-	router.Handle(config.RouteInternalUploadBulk, drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		handleInternalUploadBulk(w, r, database, uM)
-	}), "InternalUploadBulk")).Methods(http.MethodPost)
-
-	router.Handle(config.RouteInternalMultipartInit, drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		handleInternalMultipartInit(w, r, database, uM)
-	}), "InternalMultipartInit")).Methods(http.MethodPost)
-
-	router.Handle(config.RouteInternalMultipartUpload, drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		handleInternalMultipartUpload(w, r, database, uM)
-	}), "InternalMultipartUpload")).Methods(http.MethodPost)
-
-	router.Handle(config.RouteInternalMultipartComplete, drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		handleInternalMultipartComplete(w, r, database, uM)
-	}), "InternalMultipartComplete")).Methods(http.MethodPost)
-
-	// Bucket endpoints.
-	router.Handle(config.RouteInternalBuckets, drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodGet:
-			handleInternalBuckets(w, r, database)
-		case http.MethodPut:
-			handleInternalPutBucket(w, r, database)
-		default:
-			writeHTTPError(w, r, http.StatusMethodNotAllowed, "Method not allowed", nil)
-		}
-	}), "InternalBuckets")).Methods(http.MethodGet, http.MethodPut)
-
-	router.Handle(config.RouteInternalBucketDetail, drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodDelete {
-			handleInternalDeleteBucket(w, r, database)
-			return
-		}
-		writeHTTPError(w, r, http.StatusMethodNotAllowed, "Method not allowed", nil)
-	}), "InternalBucketDetail")).Methods(http.MethodDelete)
-
-	router.Handle(config.RouteInternalBucketScopes, drs.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPost {
-			handleInternalCreateBucketScope(w, r, database)
-			return
-		}
-		writeHTTPError(w, r, http.StatusMethodNotAllowed, "Method not allowed", nil)
-	}), "InternalBucketScopes")).Methods(http.MethodPost)
-}
-
-func resolveBucket(ctx *http.Request, database core.DatabaseInterface, requested string) (string, error) {
-	if requested != "" {
-		return requested, nil
-	}
-
-	scopes, err := database.ListBucketScopes(ctx.Context())
-	if err == nil {
-		for _, scope := range scopes {
-			resource := scopeResource(scope.Organization, scope.ProjectID)
-			if resource == "" {
-				continue
-			}
-			if hasAnyMethodAccess(ctx, []string{resource}, "file_upload", "create", "update", "read") {
-				return scope.Bucket, nil
-			}
-		}
-	}
-
-	creds, err := database.ListS3Credentials(ctx.Context())
-	if err != nil || len(creds) == 0 {
-		return "", fmt.Errorf("no bucket configured")
-	}
-	return creds[0].Bucket, nil
-}
-
-func resolveObjectRemotePath(database core.DatabaseInterface, ctx *http.Request, objectID string, bucket string) (string, bool) {
-	if strings.TrimSpace(objectID) == "" || strings.TrimSpace(bucket) == "" {
-		return "", false
-	}
-	obj, err := resolveObjectByIDOrChecksum(database, ctx.Context(), objectID)
-	if err != nil {
-		return "", false
-	}
-	targetBucket := strings.TrimSpace(bucket)
-	for _, am := range obj.AccessMethods {
-		raw := strings.TrimSpace(am.AccessUrl.Url)
-		if raw == "" {
-			continue
-		}
-		u, err := url.Parse(raw)
-		if err != nil {
-			continue
-		}
-		// Match any supported protocol scheme.
-		p := provider.FromScheme(u.Scheme)
-		if p == "" {
-			continue
-		}
-		if !strings.EqualFold(strings.TrimSpace(u.Host), targetBucket) {
-			continue
-		}
-		key := strings.TrimPrefix(strings.TrimSpace(u.Path), "/")
-		if key != "" {
-			return key, true
-		}
-	}
-	return "", false
-}
-
-func resolveObjectByIDOrChecksum(database core.DatabaseInterface, ctx context.Context, objectID string) (*core.InternalObject, error) {
-	// Checksum-first resolution: internal-compatible routes are commonly called with OID.
-	byChecksum, err := database.GetObjectsByChecksum(ctx, objectID)
-	if err != nil {
-		return nil, err
-	}
-	if len(byChecksum) > 0 {
-		objCopy := byChecksum[0]
-		return &objCopy, nil
-	}
-
-	// Legacy fallback for UUID/DID based lookups.
-	obj, err := database.GetObject(ctx, objectID)
-	if err == nil {
-		return obj, nil
-	}
-	if !errors.Is(err, core.ErrNotFound) {
-		return nil, err
-	}
-	canonicalID, aliasErr := database.ResolveObjectAlias(ctx, objectID)
-	if aliasErr == nil && strings.TrimSpace(canonicalID) != "" {
-		obj, getErr := database.GetObject(ctx, canonicalID)
-		if getErr == nil {
-			objCopy := *obj
-			objCopy.DrsObject.Id = objectID
-			objCopy.DrsObject.SelfUri = "drs://" + objectID
-			return &objCopy, nil
-		}
-		if !errors.Is(getErr, core.ErrNotFound) {
-			return nil, getErr
-		}
-	}
-	if aliasErr != nil && !errors.Is(aliasErr, core.ErrNotFound) {
-		return nil, aliasErr
-	}
-	return nil, core.ErrNotFound
+	router.Get(common.RouteInternalBuckets, func(c fiber.Ctx) error { return handleInternalBucketsFiber(c, om) })
+	router.Put(common.RouteInternalBuckets, func(c fiber.Ctx) error { return handleInternalPutBucketFiber(c, om) })
+	router.Delete(fiberRoutePath(common.RouteInternalBucketDetail), func(c fiber.Ctx) error { return handleInternalDeleteBucketFiber(c, om) })
+	router.Post(fiberRoutePath(common.RouteInternalBucketScopes), func(c fiber.Ctx) error { return handleInternalCreateBucketScopeFiber(c, om) })
 }

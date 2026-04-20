@@ -15,7 +15,7 @@ import (
 	reflect "reflect"
 
 	conf "github.com/calypr/syfon/client/conf"
-	request "github.com/calypr/syfon/client/pkg/request"
+	request "github.com/calypr/syfon/client/request"
 	gomock "go.uber.org/mock/gomock"
 )
 

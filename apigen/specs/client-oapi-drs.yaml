@@ -1,0 +1,4 @@
+package: drs
+generate:
+  client: true
+  models: true

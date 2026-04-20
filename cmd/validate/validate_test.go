@@ -1,6 +1,7 @@
 package validate
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -8,44 +9,52 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gin-gonic/gin"
+	"github.com/gofiber/fiber/v3"
 )
 
 func writeSpec(t *testing.T, body string) string {
 	t.Helper()
 	dir := t.TempDir()
 	p := filepath.Join(dir, "openapi.yaml")
-	if err := os.WriteFile(p, []byte(body), 0644); err != nil {
+	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 	return p
 }
 
 func TestRegisterRoutes(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	r := gin.New()
-	registerHealthzRoute(r)
-	registerServiceInfoRoute(r)
+	app := fiber.New()
+	registerHealthzRoute(app)
+	registerServiceInfoRoute(app)
 
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
-	r.ServeHTTP(w, req)
-	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"status":"ok"`) {
-		t.Fatalf("unexpected /healthz response: code=%d body=%s", w.Code, w.Body.String())
+	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	if err != nil {
+		t.Fatalf("test request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected /healthz code: %d", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), `"status":"ok"`) {
+		t.Fatalf("unexpected /healthz body: %s", string(body))
 	}
 
 	os.Setenv("SERVICE_VERSION", "v1.2.3")
 	defer os.Unsetenv("SERVICE_VERSION")
-	w = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodGet, "/service-info", nil)
-	r.ServeHTTP(w, req)
-	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"version":"v1.2.3"`) {
-		t.Fatalf("unexpected /service-info response: code=%d body=%s", w.Code, w.Body.String())
+	resp, err = app.Test(httptest.NewRequest(http.MethodGet, "/service-info", nil))
+	if err != nil {
+		t.Fatalf("test request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected /service-info code: %d", resp.StatusCode)
+	}
+	body, _ = io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), `"version":"v1.2.3"`) {
+		t.Fatalf("unexpected /service-info body: %s", string(body))
 	}
 }
 
 func TestSpecValidatorModesAndValidation(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	spec := `openapi: 3.0.3
 info:
   title: test
@@ -70,38 +79,42 @@ paths:
 		t.Fatalf("validator init failed: %v", err)
 	}
 
-	r := gin.New()
-	r.Use(validator)
-	r.GET("/requires-header", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"ok": true}) })
+	app := fiber.New()
+	app.Use(validator)
+	app.Get("/requires-header", func(c fiber.Ctx) error { return c.JSON(fiber.Map{"ok": true}) })
 
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/requires-header", nil)
-	r.ServeHTTP(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for missing required header, got %d body=%s", w.Code, w.Body.String())
+	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/requires-header", nil))
+	if err != nil {
+		t.Fatalf("test request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 for missing required header, got %d", resp.StatusCode)
 	}
 
-	w = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodGet, "/requires-header", nil)
+	req := httptest.NewRequest(http.MethodGet, "/requires-header", nil)
 	req.Header.Set("X-Token", "abc")
-	r.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200 for valid request, got %d body=%s", w.Code, w.Body.String())
+	resp, err = app.Test(req)
+	if err != nil {
+		t.Fatalf("test request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 for valid request, got %d", resp.StatusCode)
 	}
 
 	lenient, err := newSpecValidator(specPath, true)
 	if err != nil {
 		t.Fatalf("lenient validator init failed: %v", err)
 	}
-	r2 := gin.New()
-	r2.Use(lenient)
-	r2.GET("/not-in-spec", func(c *gin.Context) { c.Status(http.StatusNoContent) })
+	app2 := fiber.New()
+	app2.Use(lenient)
+	app2.Get("/not-in-spec", func(c fiber.Ctx) error { return c.SendStatus(http.StatusNoContent) })
 
-	w = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodGet, "/not-in-spec", nil)
-	r2.ServeHTTP(w, req)
-	if w.Code != http.StatusNoContent {
-		t.Fatalf("expected lenient pass-through for unknown route, got %d", w.Code)
+	resp, err = app2.Test(httptest.NewRequest(http.MethodGet, "/not-in-spec", nil))
+	if err != nil {
+		t.Fatalf("test request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("expected lenient pass-through for unknown route, got %d", resp.StatusCode)
 	}
 }
 

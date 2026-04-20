@@ -60,6 +60,9 @@ func TestSyfonDockerFakeGCSE2E(t *testing.T) {
 	configPath := writeProviderConfig(t, fmt.Sprintf(`port: %d
 auth:
   mode: local
+routes:
+  ga4gh: true
+  internal: true
 database:
   sqlite:
     file: %q

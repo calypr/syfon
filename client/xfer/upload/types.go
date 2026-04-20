@@ -1,6 +1,6 @@
 package upload
 
-import "github.com/calypr/syfon/client/pkg/common"
+import "github.com/calypr/syfon/client/common"
 
 type UploadConfig struct {
 	BucketName        string

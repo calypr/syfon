@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/calypr/syfon/apigen/client/bucketapi"
+	"github.com/calypr/syfon/apigen/client/internalapi"
 	syclient "github.com/calypr/syfon/client"
 )
 
@@ -19,12 +21,16 @@ func TestSyfonListAndRemoveCommands(t *testing.T) {
 		t.Fatal(err)
 	}
 	did := "11111111-1111-1111-1111-111111111111"
-	rec := syclient.InternalRecord{}
-	rec.SetDid(did)
-	rec.SetAuthz([]string{"/programs/syfon/projects/e2e"})
-	rec.SetFileName("README.md")
-	rec.SetSize(123)
-	rec.SetUrls([]string{"s3://syfon-bucket/path/README.md"})
+	fileName := "README.md"
+	size := int64(123)
+	urls := []string{"s3://syfon-bucket/path/README.md"}
+	rec := internalapi.InternalRecord{
+		Did:      did,
+		Authz:    []string{"/programs/syfon/projects/e2e"},
+		FileName: &fileName,
+		Size:     &size,
+		Urls:     &urls,
+	}
 	if _, err := c.Index().Create(context.Background(), rec); err != nil {
 		t.Fatalf("seed record: %v", err)
 	}
@@ -61,7 +67,7 @@ func TestSyfonDownloadDefaultsToRecordFilename(t *testing.T) {
 	tmp := t.TempDir()
 	t.Chdir(tmp)
 
-	srcPath := filepath.Join(tmp, "source.txt")
+	srcPath := filepath.Join(server.StorageDir, "source.txt")
 	srcData := []byte("download default filename test")
 	if err := os.WriteFile(srcPath, srcData, 0o644); err != nil {
 		t.Fatalf("write source: %v", err)
@@ -72,8 +78,8 @@ func TestSyfonDownloadDefaultsToRecordFilename(t *testing.T) {
 		t.Fatal(err)
 	}
 	did := "22222222-2222-2222-2222-222222222222"
-	// Store record with explicit filename and file:// URL so download can resolve locally.
-	if err := c.Index().Upsert(context.Background(), did, "file://"+srcPath, "README.md", int64(len(srcData)), "", []string{"/programs/syfon/projects/e2e"}); err != nil {
+	// Store record with explicit filename and a storage-root URL so download can resolve locally.
+	if err := c.Index().Upsert(context.Background(), did, "s3://syfon-bucket/source.txt", "README.md", int64(len(srcData)), "", []string{"/programs/syfon/projects/e2e"}); err != nil {
 		t.Fatalf("seed record with file url: %v", err)
 	}
 
@@ -103,7 +109,7 @@ func TestSyfonBucketListAndRemoveCommands(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := c.Buckets().Put(context.Background(), syclient.PutBucketRequest{
+	if err := c.Buckets().Put(context.Background(), bucketapi.PutBucketRequest{
 		Bucket:       "test-bucket-cli",
 		Provider:     stringPtr("s3"),
 		Region:       stringPtr("us-east-1"),

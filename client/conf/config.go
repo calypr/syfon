@@ -11,7 +11,7 @@ import (
 	"path"
 	"strings"
 
-	"github.com/calypr/syfon/client/pkg/common"
+	"github.com/calypr/syfon/client/common"
 	"gopkg.in/ini.v1"
 )
 

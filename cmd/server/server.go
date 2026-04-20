@@ -2,31 +2,30 @@ package server
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"os"
 	"os/signal"
-	"sort"
 	"strings"
 	"syscall"
 	"time"
 
-	"github.com/calypr/syfon/apigen/drs"
-	"github.com/calypr/syfon/config"
-	"github.com/calypr/syfon/db/core"
-	"github.com/calypr/syfon/db/postgres"
-	"github.com/calypr/syfon/db/sqlite"
-	coreapi "github.com/calypr/syfon/internal/api/coreapi"
-	"github.com/calypr/syfon/internal/api/docs"
-	"github.com/calypr/syfon/internal/api/internaldrs"
-	"github.com/calypr/syfon/internal/api/lfs"
-	"github.com/calypr/syfon/internal/api/metrics"
 	"github.com/calypr/syfon/internal/api/middleware"
-	"github.com/calypr/syfon/service"
-	"github.com/calypr/syfon/urlmanager"
-	"github.com/gorilla/mux"
+	"github.com/calypr/syfon/internal/common"
+	"github.com/calypr/syfon/internal/config"
+	"github.com/calypr/syfon/internal/core"
+	"github.com/calypr/syfon/internal/crypto"
+	"github.com/calypr/syfon/internal/db"
+	"github.com/calypr/syfon/internal/db/postgres"
+	"github.com/calypr/syfon/internal/db/sqlite"
+	"github.com/calypr/syfon/internal/models"
+	"github.com/calypr/syfon/internal/signer/azure"
+	"github.com/calypr/syfon/internal/signer/file"
+	"github.com/calypr/syfon/internal/signer/gcs"
+	"github.com/calypr/syfon/internal/signer/s3"
+	"github.com/calypr/syfon/internal/urlmanager"
+	"github.com/gofiber/fiber/v3"
+	"github.com/gofiber/fiber/v3/middleware/recover"
 	"github.com/spf13/cobra"
 )
 
@@ -53,7 +52,7 @@ var Cmd = &cobra.Command{
 		}
 
 		// Init DB
-		var database core.DatabaseInterface
+		var database db.DatabaseInterface
 		var errDb error
 
 		if cfg.Database.Sqlite != nil {
@@ -84,18 +83,18 @@ var Cmd = &cobra.Command{
 
 		// Load S3 Credentials from Config if present
 		if len(cfg.S3Credentials) > 0 {
-			encryptionEnabled, encErr := core.CredentialEncryptionEnabled()
+			encryptionEnabled, encErr := crypto.CredentialEncryptionEnabled()
 			if encErr != nil {
-				fatal("invalid credential encryption configuration", "env", core.CredentialMasterKeyEnv, "err", encErr)
+				fatal("invalid credential encryption configuration", "env", crypto.CredentialMasterKeyEnv, "err", encErr)
 			}
 			if !encryptionEnabled {
-				fatal("s3 credential encryption key is required", "env", core.CredentialMasterKeyEnv)
+				fatal("s3 credential encryption key is required", "env", crypto.CredentialMasterKeyEnv)
 			}
 
 			logger.Info("loading configured s3 credentials", "count", len(cfg.S3Credentials))
 			// S3 credentials are encrypted before persistence and audited on read/write/delete/list.
 			for _, c := range cfg.S3Credentials {
-				cred := &core.S3Credential{
+				cred := &models.S3Credential{
 					Bucket:    c.Bucket,
 					Provider:  c.Provider,
 					Region:    c.Region,
@@ -110,28 +109,32 @@ var Cmd = &cobra.Command{
 		}
 
 		// Init unified URL manager.
-		uM := urlmanager.NewManager(database, cfg.Signing)
+		needsUrlManager := cfg.Routes.Ga4gh || cfg.Routes.Internal || cfg.Routes.LFS
+		var uM *urlmanager.Manager
+		if needsUrlManager {
+			uM = urlmanager.NewManager(database, cfg.Signing)
+			uM.RegisterSigner(common.S3Provider, s3.NewS3Signer(database))
+			uM.RegisterSigner(common.GCSProvider, gcs.NewGCSSigner(database))
+			uM.RegisterSigner(common.AzureProvider, azure.NewAzureSigner(database))
+			fSigner, fErr := file.NewFileSigner("/")
+			if fErr == nil {
+				uM.RegisterSigner(common.FileProvider, fSigner)
+			} else {
+				logger.Warn("failed to initialize file signer", "err", fErr)
+			}
+		}
 
-		// Init Service
-		service := service.NewObjectsAPIService(database, uM)
+		// Init unified Object Manager.
+		om := core.NewObjectManager(database, uM)
 
-		// Init Controller
-		objectsController := drs.NewObjectsAPIController(service)
-		serviceInfoController := drs.NewServiceInfoAPIController(service)
-		uploadRequestController := drs.NewUploadRequestAPIController(service)
-
-		// Init Router
-		router := mux.NewRouter().StrictSlash(true)
-
-		// 1. Health check endpoint remains public and bypasses all middleware
-		router.HandleFunc(config.RouteHealthz, func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("OK"))
-		}).Methods(http.MethodGet)
-
-		// 2. All other routes are registered on a subrouter that uses authentication and tracing middleware
-		api := router.PathPrefix("/").Subrouter()
-		registerAPIRoutes(api, objectsController, serviceInfoController, uploadRequestController)
+		// Build Fiber runtime and middleware pipeline.
+		app := fiber.New(fiber.Config{
+			ReadTimeout:  30 * time.Second,
+			WriteTimeout: 120 * time.Second,
+			IdleTimeout:  120 * time.Second,
+			AppName:      "Syfon DRS Server",
+		})
+		app.Use(recover.New())
 
 		// Init AuthZ Middleware
 		// We use a standard slog.Logger for data-client compatibility
@@ -144,41 +147,23 @@ var Cmd = &cobra.Command{
 		)
 		requestIDMiddleware := middleware.NewRequestIDMiddleware(slogLogger)
 
-		// Apply Middlewares to the protected API subrouter
-		api.Use(requestIDMiddleware.Middleware)
-		api.Use(authzMiddleware.Middleware)
-
-		docs.RegisterSwaggerRoutes(api)
-		coreapi.RegisterCoreRoutes(api, database)
-		metrics.RegisterMetricsRoutes(api, database)
-
-		internaldrs.RegisterInternalIndexRoutes(api, database)
-
-		internaldrs.RegisterInternalDataRoutes(api, database, uM)
-		logger.Info("internal drs compatibility routes enabled")
-
-		// Register Git LFS API routes
-		lfs.RegisterLFSRoutes(api, database, uM, lfs.Options{
-			MaxBatchObjects:              cfg.LFS.MaxBatchObjects,
-			MaxBatchBodyBytes:            cfg.LFS.MaxBatchBodyBytes,
-			RequestLimitPerMinute:        cfg.LFS.RequestLimitPerMinute,
-			BandwidthLimitBytesPerMinute: cfg.LFS.BandwidthLimitBytesPerMinute,
-		})
+		rt := &serverRuntime{
+			app:                 app,
+			cfg:                 cfg,
+			database:            database,
+			om:                  om,
+			uM:                  uM,
+			authzMiddleware:     authzMiddleware,
+			requestIDMiddleware: requestIDMiddleware,
+		}
+		applyServerOptions(rt, buildServerOptions(cfg)...)
 
 		addr := fmt.Sprintf(":%d", cfg.Port)
 		logger.Info("server starting", "addr", addr)
-		server := &http.Server{
-			Addr:              addr,
-			Handler:           router,
-			ReadHeaderTimeout: 10 * time.Second,
-			ReadTimeout:       30 * time.Second,
-			WriteTimeout:      120 * time.Second,
-			IdleTimeout:       120 * time.Second,
-		}
 
 		errCh := make(chan error, 1)
 		go func() {
-			if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			if err := app.Listen(addr); err != nil {
 				errCh <- err
 			}
 		}()
@@ -196,9 +181,9 @@ var Cmd = &cobra.Command{
 			logger.Info("shutdown requested by context cancellation")
 		}
 
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		if err := server.Shutdown(shutdownCtx); err != nil {
+		if err := app.ShutdownWithContext(shutdownCtx); err != nil {
 			fatal("server shutdown failed", "err", err)
 		}
 		logger.Info("server shutdown complete")
@@ -217,48 +202,4 @@ func isMockAuthEnabled() bool {
 	default:
 		return false
 	}
-}
-
-func registerControllerRoutes(router *mux.Router, api drs.Router) {
-	registerSortedRoutes(router, append([]drs.Route(nil), api.OrderedRoutes()...))
-}
-
-func registerAPIRoutes(router *mux.Router, apis ...drs.Router) {
-	routes := make([]drs.Route, 0)
-	for _, api := range apis {
-		routes = append(routes, api.OrderedRoutes()...)
-	}
-	registerSortedRoutes(router, routes)
-}
-
-func registerSortedRoutes(router *mux.Router, routes []drs.Route) {
-	sort.SliceStable(routes, func(i, j int) bool {
-		a := routes[i]
-		b := routes[j]
-		aParams := strings.Count(a.Pattern, "{")
-		bParams := strings.Count(b.Pattern, "{")
-		if aParams != bParams {
-			return aParams < bParams
-		}
-		aSegs := segmentCount(a.Pattern)
-		bSegs := segmentCount(b.Pattern)
-		if aSegs != bSegs {
-			return aSegs > bSegs
-		}
-		return len(a.Pattern) > len(b.Pattern)
-	})
-
-	for _, route := range routes {
-		var handler http.Handler = route.HandlerFunc
-		handler = drs.Logger(handler, route.Name)
-		router.Methods(route.Method).Path(route.Pattern).Name(route.Name).Handler(handler)
-	}
-}
-
-func segmentCount(pattern string) int {
-	trimmed := strings.Trim(pattern, "/")
-	if trimmed == "" {
-		return 0
-	}
-	return strings.Count(trimmed, "/") + 1
 }

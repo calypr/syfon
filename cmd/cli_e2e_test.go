@@ -5,23 +5,25 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"net/http"
-	"net/http/httptest"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/calypr/syfon/apigen/drs"
 	syclient "github.com/calypr/syfon/client"
-	"github.com/calypr/syfon/config"
-	"github.com/calypr/syfon/db"
-	"github.com/calypr/syfon/db/core"
-	"github.com/calypr/syfon/internal/api/coreapi"
+	"github.com/calypr/syfon/internal/api/docs"
+	"github.com/calypr/syfon/internal/api/drsapi"
 	"github.com/calypr/syfon/internal/api/internaldrs"
 	"github.com/calypr/syfon/internal/api/metrics"
-	"github.com/calypr/syfon/service"
-	"github.com/calypr/syfon/urlmanager"
+	"github.com/calypr/syfon/internal/common"
+	"github.com/calypr/syfon/internal/config"
+	"github.com/calypr/syfon/internal/core"
+	"github.com/calypr/syfon/internal/db"
+	"github.com/calypr/syfon/internal/models"
+	"github.com/calypr/syfon/internal/signer/file"
+	"github.com/calypr/syfon/internal/urlmanager"
+	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -54,38 +56,65 @@ func resetFlagSet(fs *pflag.FlagSet) {
 	})
 }
 
-func newSyfonTestServer(t *testing.T) *httptest.Server {
+type fiberTestServer struct {
+	URL        string
+	StorageDir string
+	app        *fiber.App
+	ln         net.Listener
+}
+
+func (s *fiberTestServer) Close() {
+	_ = s.app.Shutdown()
+	if s.ln != nil {
+		_ = s.ln.Close()
+	}
+}
+
+func newSyfonTestServer(t *testing.T) *fiberTestServer {
 	t.Helper()
 	storageDir := t.TempDir()
-	endpoint := "file://" + storageDir
 
 	database := db.NewInMemoryDB()
-	if err := database.SaveS3Credential(context.Background(), &core.S3Credential{
+	if err := database.SaveS3Credential(context.Background(), &models.S3Credential{
 		Bucket:   "syfon-bucket",
 		Provider: "file",
-		Endpoint: endpoint,
+		Endpoint: storageDir,
 	}); err != nil {
 		t.Fatalf("save test credential: %v", err)
 	}
 
 	uM := urlmanager.NewManager(database, config.SigningConfig{DefaultExpirySeconds: 900})
-	svc := service.NewObjectsAPIService(database, uM)
+	fSigner, _ := file.NewFileSigner(storageDir)
+	uM.RegisterSigner(common.FileProvider, fSigner)
 
-	objectsController := drs.NewObjectsAPIController(svc)
-	serviceInfoController := drs.NewServiceInfoAPIController(svc)
-	uploadController := drs.NewUploadRequestAPIController(svc)
-
-	router := drs.NewRouter(objectsController, serviceInfoController, uploadController)
-	router.HandleFunc(config.RouteHealthz, func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("OK"))
+	app := fiber.New()
+	app.Get(config.RouteHealthz, func(c fiber.Ctx) error {
+		return c.SendString("OK")
 	})
-	coreapi.RegisterCoreRoutes(router, database)
-	metrics.RegisterMetricsRoutes(router, database)
-	internaldrs.RegisterInternalIndexRoutes(router, database)
-	internaldrs.RegisterInternalDataRoutes(router, database, uM)
+	api := app.Group("/")
+	om := core.NewObjectManager(database, uM)
 
-	return httptest.NewServer(router)
+	drsAPI := api.Group("/ga4gh/drs/v1")
+	drsapi.RegisterDRSRoutes(drsAPI, om)
+	docs.RegisterSwaggerRoutes(app)
+	metrics.RegisterMetricsRoutes(api, database)
+	internaldrs.RegisterInternalIndexRoutes(api, om)
+	internaldrs.RegisterInternalDataRoutes(api, om)
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Skipf("listen not available in this environment: %v", err)
+	}
+	go func() {
+		_ = app.Listener(ln)
+	}()
+
+	return &fiberTestServer{
+		URL:        "http://" + ln.Addr().String(),
+		StorageDir: storageDir,
+		app:        app,
+		ln:         ln,
+	}
 }
 
 func TestSyfonVersionAndPing(t *testing.T) {
@@ -159,24 +188,25 @@ func TestSyfonUploadDownloadAddURLAndSHA256(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fetch updated record: %v", err)
 	}
-	hashes := rec.GetHashes()
-	if hashes["sha256"] != expectedSum {
-		t.Fatalf("expected sha256 in record: %s got: %s", expectedSum, hashes["sha256"])
+	if rec.Hashes == nil {
+		t.Fatalf("expected hashes in record, got nil")
+	}
+	if (*rec.Hashes)["sha256"] != expectedSum {
+		t.Fatalf("expected sha256 in record: %s got: %s", expectedSum, (*rec.Hashes)["sha256"])
 	}
 
-	externalSource := filepath.Join(t.TempDir(), "existing-url-source.txt")
+	externalSource := filepath.Join(server.StorageDir, "existing-url-source.txt")
 	externalData := []byte("syfon add-url payload")
 	if err := os.WriteFile(externalSource, externalData, 0o644); err != nil {
 		t.Fatalf("write external source file: %v", err)
 	}
-	fileURL := "file://" + externalSource
 	addURLDID := uuid.NewString()
 	out, err = executeRootCommand(
 		t,
 		"--server", server.URL,
 		"add-url",
 		"--did", addURLDID,
-		"--url", fileURL,
+		"--url", "s3://syfon-bucket/"+filepath.Base(externalSource),
 		"--authz", "/programs/syfon/projects/e2e",
 		"--name", "existing-url-source.txt",
 		"--size", "21",

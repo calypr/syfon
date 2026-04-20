@@ -60,6 +60,9 @@ func TestSyfonDockerAzuriteE2E(t *testing.T) {
 	configPath := writeProviderConfig(t, fmt.Sprintf(`port: %d
 auth:
   mode: local
+routes:
+  ga4gh: true
+  internal: true
 database:
   sqlite:
     file: %q
@@ -97,7 +100,7 @@ func startAzuriteContainer(ctx context.Context) (*azuriteContainer, error) {
 		ContainerRequest: testcontainers.ContainerRequest{
 			Image:        dockerE2EAzuriteImage,
 			ExposedPorts: []string{dockerE2EAzuritePort},
-			Cmd:          []string{"azurite-blob", "--blobHost", "0.0.0.0", "--blobPort", "10000"},
+			Cmd:          []string{"azurite-blob", "--blobHost", "0.0.0.0", "--blobPort", "10000", "--skipApiVersionCheck"},
 			WaitingFor:   wait.ForListeningPort(dockerE2EAzuritePort).WithStartupTimeout(2 * time.Minute),
 		},
 		Started: true,

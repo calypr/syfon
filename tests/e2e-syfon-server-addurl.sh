@@ -128,9 +128,8 @@ ensure_bucket_config() {
 upload_to_signed_url() {
   local signed_url="$1"
   local src="$2"
-  if [[ "$signed_url" == file://* ]]; then
-    local target_path="${signed_url#file://}"
-    target_path="${target_path%%\?*}"
+  if [[ "$signed_url" != *"://"* ]]; then
+    local target_path="$signed_url"
     mkdir -p "$(dirname "$target_path")"
     cp "$src" "$target_path"
     return
@@ -194,8 +193,8 @@ main() {
   sign_bucket="$(jq -r '.results[0].bucket // ""' /tmp/syfon-addurl-sign.out)"
   [[ -n "$signed_url" ]] || fail "bulk upload signing returned empty URL"
   upload_to_signed_url "$signed_url" "$src"
-  if [[ "$signed_url" == file://* ]]; then
-    object_url="${signed_url%%\?*}"
+  if [[ "$signed_url" != *"://"* ]]; then
+    object_url="$signed_url"
   else
     object_url="s3://${sign_bucket}/${sign_name}"
   fi

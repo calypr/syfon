@@ -7,19 +7,22 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"testing"
 	"time"
 
-	"github.com/calypr/syfon/apigen/drs"
-	"github.com/calypr/syfon/config"
-	"github.com/calypr/syfon/db"
-	"github.com/calypr/syfon/db/core"
 	"github.com/calypr/syfon/internal/api/internaldrs"
-	"github.com/calypr/syfon/service"
-	"github.com/calypr/syfon/urlmanager"
+	"github.com/calypr/syfon/internal/common"
+	"github.com/calypr/syfon/internal/config"
+	"github.com/calypr/syfon/internal/core"
+	"github.com/calypr/syfon/internal/crypto"
+	"github.com/calypr/syfon/internal/db"
+	"github.com/calypr/syfon/internal/models"
+	"github.com/calypr/syfon/internal/signer/s3"
+	"github.com/calypr/syfon/internal/urlmanager"
+	"github.com/gofiber/fiber/v3"
 )
 
 var (
@@ -32,7 +35,7 @@ func TestMain(m *testing.M) {
 }
 
 func TestS3Integration(t *testing.T) {
-	t.Setenv(core.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
+	t.Setenv(crypto.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
 	configPath := *testConfigPath
 	if configPath == "" {
 		// Create a temporary config for testing if none provided
@@ -83,7 +86,7 @@ s3_credentials:
 
 	// Pre-load credentials from config (mimic server startup logic)
 	for _, c := range cfg.S3Credentials {
-		cred := &core.S3Credential{
+		cred := &models.S3Credential{
 			Bucket:    c.Bucket,
 			Region:    c.Region,
 			AccessKey: c.AccessKey,
@@ -96,20 +99,28 @@ s3_credentials:
 	}
 
 	uM := urlmanager.NewManager(database, cfg.Signing)
-	svc := service.NewObjectsAPIService(database, uM)
+	uM.RegisterSigner(common.S3Provider, s3.NewS3Signer(database))
+	app := fiber.New()
+	om := core.NewObjectManager(database, uM)
+	internaldrs.RegisterInternalIndexRoutes(app, om)
+	internaldrs.RegisterInternalDataRoutes(app, om)
 
-	objectsController := drs.NewObjectsAPIController(svc)
-	serviceInfoController := drs.NewServiceInfoAPIController(svc)
-	router := drs.NewRouter(objectsController, serviceInfoController)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Skipf("listen not available in this environment: %v", err)
+	}
+	defer ln.Close()
 
-	// Register Internal Routes
-	internaldrs.RegisterInternalIndexRoutes(router, database)
-	internaldrs.RegisterInternalDataRoutes(router, database, uM)
+	go func() {
+		_ = app.Listener(ln)
+	}()
 
-	server := httptest.NewServer(router)
-	defer server.Close()
+	serverURL := "http://" + ln.Addr().String()
+	defer func() {
+		_ = app.Shutdown()
+	}()
 
-	client := server.Client()
+	client := &http.Client{}
 
 	// 1. Verify credentials preloaded into the DB
 	creds, err := database.ListS3Credentials(context.Background())
@@ -131,7 +142,7 @@ s3_credentials:
 	key := fmt.Sprintf("test-upload-%d", time.Now().Unix())
 	internalUploadReq := map[string]interface{}{"guid": key}
 	internalBody, _ := json.Marshal(internalUploadReq)
-	resp, err := client.Post(server.URL+"/data/upload", "application/json", bytes.NewReader(internalBody))
+	resp, err := client.Post(serverURL+"/data/upload", "application/json", bytes.NewReader(internalBody))
 	if err != nil {
 		t.Fatalf("Internal upload blank failed: %v", err)
 	}
@@ -174,7 +185,7 @@ s3_credentials:
 		"bucket":    bucketName,
 	}
 	mpBody, _ := json.Marshal(internalMultipartReq)
-	resp, err = client.Post(server.URL+"/data/multipart/init", "application/json", bytes.NewReader(mpBody))
+	resp, err = client.Post(serverURL+"/data/multipart/init", "application/json", bytes.NewReader(mpBody))
 	if err != nil {
 		t.Fatalf("Internal multipart init failed: %v", err)
 	}
@@ -186,7 +197,7 @@ s3_credentials:
 	}
 
 	// 5. Internal download for blank object should not resolve yet (no access method registered).
-	resp, err = client.Get(server.URL + "/data/download/" + guid)
+	resp, err = client.Get(serverURL + "/data/download/" + guid)
 	if err != nil {
 		t.Fatalf("Internal download req failed: %v", err)
 	}

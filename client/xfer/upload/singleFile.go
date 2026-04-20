@@ -6,11 +6,11 @@ import (
 	"io"
 	"os"
 
-	"github.com/calypr/syfon/client/pkg/common"
-	"github.com/calypr/syfon/client/xfer"
+	"github.com/calypr/syfon/client/common"
+	"github.com/calypr/syfon/client/transfer"
 )
 
-func UploadSingle(ctx context.Context, bk xfer.Uploader, logger xfer.TransferLogger, sourcePath, objectKey, guid, bucket string, metadata common.FileMetadata, showProgress bool) error {
+func UploadSingle(ctx context.Context, bk transfer.Uploader, logger transfer.TransferLogger, sourcePath, objectKey, guid, bucket string, metadata common.FileMetadata, showProgress bool) error {
 	req := uploadRequest{
 		sourcePath: sourcePath,
 		objectKey:  objectKey,

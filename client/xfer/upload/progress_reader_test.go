@@ -5,7 +5,7 @@ import (
 	"io"
 	"testing"
 
-	"github.com/calypr/syfon/client/pkg/common"
+	"github.com/calypr/syfon/client/common"
 )
 
 func TestProgressReaderFinalizes(t *testing.T) {

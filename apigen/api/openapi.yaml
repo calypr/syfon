@@ -2346,6 +2346,7 @@ components:
       description: A `checksum` value from the `checksums` list of a `DrsObject`
       schema:
         type: string
+      x-go-name: ChecksumParam
   requestBodies:
     PostObjectBody:
       required: true
