@@ -46,9 +46,51 @@ The repository contains multiple generation tasks (not only DRS). All are implem
 1. Validate input and (optionally) init submodule.
 2. Bundle upstream GA4GH DRS schema with Redocly into `.tmp/drs.base.yaml`.
 3. Merge Syfon overlay (`apigen/specs/drs-extensions-overlay.yaml`) into `apigen/api/openapi.yaml` via `yq`.
-4. Generate server stubs (`go-server`) into `.tmp/apigen.gen/drs`.
+4. Generate DRS server stubs and interface code (`go-server`) into `.tmp/apigen.gen/drs`.
 5. Copy generated server package to `apigen/drs` and generator metadata files into `apigen/`.
-6. Chain into `gen-lfs`, `gen-bucket`, `gen-metrics`, and `gen-internal` when their specs are present.
+6. Re-run the package-specific model generation targets when their specs are present so the shared `apigen/*` contracts stay in sync.
+
+### How generated code is used
+
+The generated surface is split deliberately:
+
+- `apigen/drs` contains the generated DRS server interfaces, routers, models, and helper types. The handwritten server implementation in `cmd/server` wires those generated interfaces into the runtime router and middleware.
+- `apigen/lfsapi`, `apigen/bucketapi`, `apigen/metricsapi`, and `apigen/internalapi` contain generated model packages used by the runtime code and client-side helpers.
+- The `client` module is handwritten, but it consumes the generated `apigen` types so request/response shapes remain aligned with the OpenAPI contracts.
+- Custom behavior that should not be regenerated lives behind the `.openapi-generator-ignore` files and the handwritten router/service code.
+
+The practical result is that OpenAPI generation keeps both sides of the API in sync:
+
+- server changes regenerate the DRS stub and model surface
+- client-side request/response types track the same contract
+- handwritten business logic stays stable while the schema evolves
+
+### Common change recipes
+
+Use this section when you are deciding what to edit and what command to run next.
+
+| Change you are making | Edit these files first | Regenerate with | Why |
+|---|---|---|---|
+| Add or remove a DRS endpoint | `ga4gh/data-repository-service-schemas` submodule or `apigen/specs/drs-extensions-overlay.yaml` | `make gen` | Keeps the bundled DRS spec and generated server stub package aligned. |
+| Add or change a DRS field or model | Upstream spec or overlay | `make gen` | Regenerates `apigen/drs` models and request/response shapes. |
+| Change LFS/Bucket/Metrics/Internal request or response shapes | `apigen/api/*.openapi.yaml` | `make gen-lfs`, `make gen-bucket`, `make gen-metrics`, or `make gen-internal` | Refreshes the package that owns that contract. |
+| Change route behavior, auth, middleware, or validation logic only | `cmd/server`, `internal/api/*`, `internal/api/middleware/*` | No regen needed | These are handwritten runtime concerns, not generated contracts. |
+| Update docs served at `/index/openapi.yaml` | `apigen/api/*.openapi.yaml` and any asset/embed code | The relevant `make gen*` target plus tests | The runtime docs endpoint reads the bundled spec files. |
+
+### Practical workflow
+
+1. Make the schema or handler change.
+2. Regenerate the affected package(s).
+3. Review the diff in both the spec and generated code.
+4. Run the impacted tests, not just `go test ./...` by habit.
+5. Commit the generated files together with the source change so the branch stays reproducible.
+
+### What usually changes in git
+
+- DRS changes usually touch the submodule pointer, `apigen/api/openapi.yaml`, `apigen/drs/*`, and sometimes `docs/index.md` or `README.md`.
+- LFS changes usually touch `apigen/api/lfs.openapi.yaml` and `apigen/lfsapi/*`.
+- Bucket, metrics, and internal schema changes follow the same pattern in their corresponding `apigen/api/*.openapi.yaml` and generated package directory.
+- Pure runtime changes usually do not touch `apigen/` at all.
 
 ## 3) Runtime serving path to Swagger
 
@@ -61,6 +103,17 @@ Swagger/OpenAPI serving flow:
    - required: `openapi.yaml` (DRS), `lfs.openapi.yaml`
    - optional: `bucket.openapi.yaml`, `metrics.openapi.yaml`, `internal.openapi.yaml`, `compat.openapi.yaml`
 5. Spec files are read from embedded assets first via `apigen/api/specs_embed.go` (`ReadSpec`), with filesystem fallback for local dev.
+
+### Sanity checks
+
+- `make gen` or the specific `make gen-*` target should complete without leaving unexpected files under `.tmp/`.
+- `go test ./cmd/server ./tests/endpoints/...` should pass for DRS route and coverage changes.
+- `go test ./...` is the broadest check, but route/spec changes should also be validated against the affected docs endpoints:
+  - `/index/swagger`
+  - `/index/openapi.yaml`
+  - `/index/lfs.openapi.yaml`
+  - `/index/bucket.openapi.yaml`
+  - `/index/internal.openapi.yaml`
 
 ## 4) Confirming currently pinned GA4GH schema version
 
@@ -133,4 +186,3 @@ After schema/codegen changes:
 ## 7) Requested GA4GH reference branch
 
 - <https://github.com/ga4gh/data-repository-service-schemas/tree/feature/issue-416-drs-upload>
-

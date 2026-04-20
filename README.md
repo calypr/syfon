@@ -222,18 +222,40 @@ replace github.com/calypr/syfon/client => ./client
 # Development
 
 The project uses a Makefile for common tasks:
-- `make gen`: Generates the DRS server code from the official GA4GH OpenAPI spec (Git submodule).
+- `make gen`: Generates the DRS server stubs from the official GA4GH OpenAPI spec (Git submodule) and refreshes the shared `apigen/*` OpenAPI outputs.
 - `make test`: Runs all unit and integration tests.
 - `make test-unit`: Runs unit tests only (excludes integration packages).
 - `make coverage`: Runs coverage for core production packages (db/service/middleware/url signing) and writes `coverage/coverage.out`, `coverage/coverage.txt`, and `coverage/coverage.html`.
 - `make coverage-full`: Runs broader compatibility-layer coverage (includes internal compatibility and LFS packages).
 - `make serve`: Starts the DRS server.
 
-## apigen Scope (Current vs Future)
+## OpenAPI Codegen
 
-The `apigen` module is currently used as a shared model/types package, not a full server/client operation generator. In practice, we generate and commit schemas/models from OpenAPI (`components/schemas`), while route handlers and request wiring are implemented manually under `internal/api/internaldrs` and related packages. This means path/operation updates in `apigen/api/*.openapi.yaml` may change contract/docs without producing new generated handler code.
+Syfon currently uses OpenAPI Generator for both server-side and client-facing API artifacts:
 
-This is intentional for now to keep control of runtime behavior and compatibility logic. We can expand `apigen` later to include operation-level generation (`apis`/server interfaces) once we decide to move more routing and handler contracts to generated code.
+- `make gen` produces the DRS server stub package in `apigen/drs` from the GA4GH spec.
+- `make gen-lfs`, `make gen-bucket`, `make gen-metrics`, and `make gen-internal` refresh the generated model packages under `apigen/` that the client and server code both consume.
+- The runtime HTTP wiring, middleware, and compatibility behavior still live in handwritten code under `cmd/server` and `internal/api/*`.
+- The client module itself is handwritten, but its request and response shapes come from the same generated OpenAPI contracts, so client and server stay aligned.
+
+This split is intentional: generated code keeps the schema surface in sync, while handwritten runtime code preserves control over routing, auth, and compatibility behavior.
+
+### Quick rules of thumb
+
+- If you change the upstream GA4GH DRS schema or the Syfon overlay, run `make gen`.
+- If you change `apigen/api/lfs.openapi.yaml`, run `make gen-lfs`.
+- If you change `apigen/api/bucket.openapi.yaml`, run `make gen-bucket`.
+- If you change `apigen/api/metrics.openapi.yaml`, run `make gen-metrics`.
+- If you change `apigen/api/internal.openapi.yaml`, run `make gen-internal`.
+- If you only change runtime wiring, auth, handlers, or business logic, you usually do not need codegen.
+- If a PR touches OpenAPI files, include the regenerated `apigen/*` output in the same commit.
+
+### What to expect after regeneration
+
+- `apigen/drs` is overwritten with generated server code and generated DRS models.
+- The relevant `apigen/*api` package is overwritten with generated Go models and helper files.
+- `apigen/api/*.openapi.yaml` files are the bundled spec inputs that the runtime docs endpoint serves.
+- `go test ./...` or the affected package tests should still pass after the regen.
 
 ## Running Integration Tests
 
