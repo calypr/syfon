@@ -133,9 +133,7 @@ var Cmd = &cobra.Command{
 			}
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "\nsuccessfully uploaded %s\n", finalID)
-		if finalID != did {
-			fmt.Fprintf(cmd.OutOrStdout(), "requested DID: %s\n", did)
-		}
+		fmt.Fprintf(cmd.OutOrStdout(), "requested DID: %s\n", did)
 		return nil
 	},
 }

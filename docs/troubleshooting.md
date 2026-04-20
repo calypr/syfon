@@ -24,6 +24,26 @@ Restart the server after changing the config for it to take effect.
 
 ---
 
+### Upload prints both `successful uploaded` and `requested DID`
+
+**Symptom:** The CLI upload output shows two IDs, for example:
+
+```text
+successfully uploaded 4c2f...
+requested DID: e3b0...
+```
+
+**Meaning:** These are intentionally different concepts:
+
+- `requested DID` is the ID the CLI asked the server to register.
+- `successfully uploaded <id>` is the canonical object ID that Syfon stored.
+
+When `--did` is omitted, the CLI uses the file checksum as the requested DID, but the server may mint a different canonical ID based on the checksum plus authz context. In that case, the checksum can still be recorded as an alias.
+
+**Rule of thumb:** Use the canonical ID from `successfully uploaded ...` for follow-up operations like `download`, `sha256sum`, and `rm`. Keep `requested DID` as the trace of what the client originally asked for.
+
+---
+
 ### `bucket credential not found`
 
 **Symptom:**
