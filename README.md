@@ -227,7 +227,7 @@ The project uses a Makefile for common tasks:
 - `make test-unit`: Runs unit tests only (excludes integration packages).
 - `make coverage`: Runs coverage for core production packages (db/service/middleware/url signing) and writes `coverage/coverage.out`, `coverage/coverage.txt`, and `coverage/coverage.html`.
 - `make coverage-full`: Runs broader compatibility-layer coverage (includes internal compatibility and LFS packages).
-- `make serve`: Starts the DRS server.
+- `make serve ARGS="--config /path/to/config.yaml"`: Starts the DRS server.
 
 ## OpenAPI Codegen
 
