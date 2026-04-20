@@ -159,13 +159,11 @@ func bootstrapExternalBucketCredential(serverURL, bucket string) (bool, error) {
 		payload["project_id"] = projectID
 	}
 
-	if !strings.EqualFold(provider, "file") {
-		if accessKey == "" || secretKey == "" {
-			return false, nil
-		}
-		payload["access_key"] = accessKey
-		payload["secret_key"] = secretKey
+	if accessKey == "" || secretKey == "" {
+		return false, nil
 	}
+	payload["access_key"] = accessKey
+	payload["secret_key"] = secretKey
 
 	data, err := json.Marshal(payload)
 	if err != nil {

@@ -151,7 +151,7 @@ var removeCmd = &cobra.Command{
 }
 
 func init() {
-	addCmd.Flags().StringVar(&bucketProvider, "provider", "s3", "Bucket provider: s3|gcs|azure|file")
+	addCmd.Flags().StringVar(&bucketProvider, "provider", "s3", "Bucket provider: s3|gcs|azure")
 	addCmd.Flags().StringVar(&bucketRegion, "region", "us-east-1", "Bucket region")
 	addCmd.Flags().StringVar(&bucketAccessKey, "access-key", "", "S3 access key (required for new s3 creds)")
 	addCmd.Flags().StringVar(&bucketSecretKey, "secret-key", "", "S3 secret key (required for new s3 creds)")

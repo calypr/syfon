@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 
+	"github.com/calypr/syfon/internal/provider"
 	"gopkg.in/yaml.v3"
 )
 
@@ -16,7 +16,6 @@ const (
 	S3Prefix        = "s3://"
 	GCSPrefix       = "gs://"
 	AzurePrefix     = "azblob://"
-	FilePrefix      = "file:///"
 	DRSPrefix       = "drs://"
 	DefaultS3Region = "us-east-1"
 
@@ -58,19 +57,17 @@ const (
 	RouteInternalBucketScopes      = "/data/buckets/{bucket}/scopes"
 
 	// Internal DRS Index
-	RouteInternalIndex       = "/index"
-	RouteInternalIndexDetail = "/index/{id}"
-	RouteInternalBulkHashes  = "/index/bulk/hashes"
+	RouteInternalIndex            = "/index"
+	RouteInternalIndexDetail      = "/index/{id}"
+	RouteInternalBulkHashes       = "/index/bulk/hashes"
 	RouteInternalBulkDeleteHashes = "/index/bulk/delete"
-	RouteInternalBulkSHA256  = "/index/bulk/sha256/validity"
-	RouteInternalBulkCreate  = "/index/bulk"
-	RouteInternalBulkDocs    = "/index/bulk/documents"
+	RouteInternalBulkSHA256       = "/index/bulk/sha256/validity"
+	RouteInternalBulkCreate       = "/index/bulk"
+	RouteInternalBulkDocs         = "/index/bulk/documents"
 
 	// Core API
 	RouteCoreSHA256 = "/index/v1/sha256/validity"
 )
-
-var validBucketNameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9\-]{1,61}[a-z0-9]$`)
 
 type Config struct {
 	Port          int            `json:"port" yaml:"port"`
@@ -303,35 +300,24 @@ func LoadConfig(configFile string) (*Config, error) {
 
 	// Validate S3 Credentials
 	for i, cred := range cfg.S3Credentials {
-		provider := strings.ToLower(strings.TrimSpace(cred.Provider))
-		if provider == "" {
-			provider = "s3"
+		bucketProvider, err := provider.ParseBucketProvider(cred.Provider)
+		if err != nil {
+			return nil, fmt.Errorf("s3_credentials[%d]: %w", i, err)
 		}
-		cfg.S3Credentials[i].Provider = provider
-		if cred.Bucket == "" {
-			return nil, fmt.Errorf("s3_credentials[%d]: bucket is required", i)
+		cfg.S3Credentials[i].Provider = bucketProvider
+		if err := provider.ValidateBucketName(bucketProvider, cred.Bucket); err != nil {
+			return nil, fmt.Errorf("s3_credentials[%d]: %w", i, err)
 		}
-		switch provider {
-		case "s3":
-			if len(cred.Bucket) < 3 || len(cred.Bucket) > 63 {
-				return nil, fmt.Errorf("s3_credentials[%d]: bucket name %q must be 3-63 characters", i, cred.Bucket)
-			}
-			if !ValidBucketName.MatchString(cred.Bucket) {
-				return nil, fmt.Errorf("s3_credentials[%d]: bucket name %q is invalid (lowercase letters, numbers, hyphens only; must start and end with letter or number)", i, cred.Bucket)
-			}
+		if bucketProvider == provider.S3 {
 			if cred.Region == "" {
-				return nil, fmt.Errorf("s3_credentials[%d]: region is required for provider=s3", i)
+				return nil, fmt.Errorf("s3_credentials[%d]: region is required for provider=%s", i, bucketProvider)
 			}
 			if cred.AccessKey == "" {
-				return nil, fmt.Errorf("s3_credentials[%d]: access_key is required for provider=s3", i)
+				return nil, fmt.Errorf("s3_credentials[%d]: access_key is required for provider=%s", i, bucketProvider)
 			}
 			if cred.SecretKey == "" {
-				return nil, fmt.Errorf("s3_credentials[%d]: secret_key is required for provider=s3", i)
+				return nil, fmt.Errorf("s3_credentials[%d]: secret_key is required for provider=%s", i, bucketProvider)
 			}
-		case "gcs", "azure", "file":
-			// Non-S3 backends can rely on ambient credentials/config.
-		default:
-			return nil, fmt.Errorf("s3_credentials[%d]: unsupported provider %q", i, provider)
 		}
 	}
 	cfg.Auth.Mode = strings.ToLower(strings.TrimSpace(cfg.Auth.Mode))

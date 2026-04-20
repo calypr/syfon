@@ -173,13 +173,6 @@ func objectURLForCredential(cred *core.S3Credential, key string) (string, error)
 		return fmt.Sprintf("%s%s/%s", config.GCSPrefix, cred.Bucket, cleanKey), nil
 	case provider.Azure:
 		return fmt.Sprintf("%s%s/%s", config.AzurePrefix, cred.Bucket, cleanKey), nil
-	case provider.File:
-		root := strings.TrimSpace(cred.Endpoint)
-		if root != "" {
-			root = strings.TrimSuffix(root, "/")
-			return fmt.Sprintf("%s/%s", root, cleanKey), nil
-		}
-		return fmt.Sprintf("%s%s/%s", config.FilePrefix, strings.TrimPrefix(cred.Bucket, "/"), cleanKey), nil
 	default:
 		return "", fmt.Errorf("unsupported provider: %s", p)
 	}
@@ -191,7 +184,17 @@ func providerForCredential(cred *core.S3Credential) string {
 	if cred == nil {
 		return provider.S3
 	}
-	return provider.Normalize(cred.Provider, provider.S3)
+	raw := strings.ToLower(strings.TrimSpace(cred.Provider))
+	switch raw {
+	case "", provider.S3:
+		return provider.S3
+	case provider.GCS, "gs":
+		return provider.GCS
+	case provider.Azure, "azblob":
+		return provider.Azure
+	default:
+		return ""
+	}
 }
 
 func normalizeHashQueryValue(raw string) string {

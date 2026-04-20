@@ -29,8 +29,6 @@ func (m *Manager) getMultipartBackend(ctx context.Context, bucketName string, p 
 		return &gcsMultipartBackend{m: m, item: item}, nil
 	case provider.Azure:
 		return &azureMultipartBackend{m: m, item: item}, nil
-	case provider.File:
-		return &fileMultipartBackend{m: m, item: item}, nil
 	default:
 		return nil, fmt.Errorf("unsupported multipart provider: %s", p)
 	}
@@ -48,4 +46,3 @@ func multipartPartObjectKey(key string, uploadID string, partNumber int32) strin
 	cleanKey := strings.Trim(strings.TrimSpace(key), "/")
 	return path.Join(".syfon-multipart", strings.TrimSpace(uploadID), cleanKey, "parts", strconv.Itoa(int(partNumber)))
 }
-

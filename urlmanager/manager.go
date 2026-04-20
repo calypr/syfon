@@ -22,7 +22,6 @@ import (
 
 	"gocloud.dev/blob"
 	_ "gocloud.dev/blob/azureblob"
-	_ "gocloud.dev/blob/fileblob"
 	_ "gocloud.dev/blob/gcsblob"
 	"gocloud.dev/blob/s3blob"
 )
@@ -282,12 +281,7 @@ func (m *Manager) resolve(ctx context.Context, accessId string, urlStr string) (
 	}
 
 	if u.Scheme == "file" {
-		bucket = config.FilePrefix
-		key = strings.TrimPrefix(u.Path, "/")
-		if u.Host != "" {
-			key = u.Host + "/" + key
-		}
-		return bucket, key, provider.File, nil
+		return "", "", "", fmt.Errorf("file scheme is not supported")
 	}
 
 	bucket = u.Host
@@ -316,7 +310,19 @@ func (m *Manager) resolveProviderForBucket(ctx context.Context, bucket string) (
 	if err != nil {
 		return "", err
 	}
-	return provider.Normalize(cred.Provider, m.defaultProvider), nil
+	raw := strings.ToLower(strings.TrimSpace(cred.Provider))
+	switch raw {
+	case "":
+		return strings.ToLower(strings.TrimSpace(m.defaultProvider)), nil
+	case provider.S3:
+		return provider.S3, nil
+	case provider.GCS, "gs":
+		return provider.GCS, nil
+	case provider.Azure, "azblob":
+		return provider.Azure, nil
+	default:
+		return "", fmt.Errorf("unsupported provider: %s", cred.Provider)
+	}
 }
 
 func (m *Manager) credentialForBucket(ctx context.Context, bucket string) (*core.S3Credential, error) {
@@ -355,13 +361,6 @@ func (m *Manager) getBucket(ctx context.Context, bucketName string, p string) (*
 	switch p {
 	case provider.S3:
 		item, err = m.openS3Bucket(ctx, bucketName)
-	case provider.File:
-		bucket, bErr := blob.OpenBucket(ctx, config.FilePrefix)
-		if bErr == nil {
-			item = &cacheItem{Bucket: bucket}
-		} else {
-			err = bErr
-		}
 	case provider.GCS:
 		item, err = m.openGCSBucket(ctx, bucketName)
 	case provider.Azure:
@@ -379,7 +378,7 @@ func (m *Manager) getBucket(ctx context.Context, bucketName string, p string) (*
 }
 
 func providerBucketCacheKey(p string, bucketName string) string {
-	return "bucket|" + strings.TrimSpace(provider.Normalize(p, "")) + "|" + strings.TrimSpace(bucketName)
+	return "bucket|" + strings.ToLower(strings.TrimSpace(p)) + "|" + strings.TrimSpace(bucketName)
 }
 
 func isSigningNotSupported(err error) bool {

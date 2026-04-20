@@ -10,6 +10,7 @@ import (
 	"github.com/calypr/syfon/apigen/bucketapi"
 	"github.com/calypr/syfon/config"
 	"github.com/calypr/syfon/db/core"
+	"github.com/calypr/syfon/internal/provider"
 	"github.com/gorilla/mux"
 )
 
@@ -84,18 +85,12 @@ func handleInternalPutBucket(w http.ResponseWriter, r *http.Request, database co
 		return
 	}
 
-	provider := strings.ToLower(strings.TrimSpace(req.GetProvider()))
-	switch provider {
-	case "", "s3":
-		provider = "s3"
-	case "gs", "gcs":
-		provider = "gcs"
-	case "azure", "file":
-		// keep as-is
-	default:
-		writeHTTPError(w, r, http.StatusBadRequest, "provider must be one of: s3, gcs, azure, file", nil)
+	bucketProvider, err := provider.ParseBucketProvider(req.GetProvider())
+	if err != nil {
+		writeHTTPError(w, r, http.StatusBadRequest, "provider must be one of: s3, gcs, azure", nil)
 		return
 	}
+	req.SetProvider(bucketProvider)
 
 	req.Bucket = strings.TrimSpace(req.Bucket)
 	req.Organization = strings.TrimSpace(req.Organization)
@@ -149,7 +144,7 @@ func handleInternalPutBucket(w http.ResponseWriter, r *http.Request, database co
 		strings.TrimSpace(req.GetRegion()) == "" &&
 		strings.TrimSpace(req.GetProvider()) == ""
 
-	if !hasExistingCred && provider == "s3" &&
+	if !hasExistingCred && bucketProvider == "s3" &&
 		(strings.TrimSpace(req.GetAccessKey()) == "" || strings.TrimSpace(req.GetSecretKey()) == "") {
 		writeHTTPError(w, r, http.StatusBadRequest, "access_key and secret_key are required for new s3 credentials", nil)
 		return
@@ -191,13 +186,13 @@ func handleInternalPutBucket(w http.ResponseWriter, r *http.Request, database co
 
 	cred := &core.S3Credential{
 		Bucket:    req.Bucket,
-		Provider:  provider,
+		Provider:  bucketProvider,
 		Region:    region,
 		AccessKey: accessKey,
 		SecretKey: secretKey,
 		Endpoint:  endpoint,
 	}
-	if provider == "s3" && (strings.TrimSpace(cred.AccessKey) == "" || strings.TrimSpace(cred.SecretKey) == "") {
+	if bucketProvider == "s3" && (strings.TrimSpace(cred.AccessKey) == "" || strings.TrimSpace(cred.SecretKey) == "") {
 		writeHTTPError(w, r, http.StatusBadRequest, "access_key and secret_key are required for s3 credentials", nil)
 		return
 	}
