@@ -60,10 +60,8 @@ jobs:
         run: make coverage
 
       - name: Run client coverage
-        working-directory: client
         run: |
-          mkdir -p coverage
-          go test -count=1 -covermode=atomic -coverprofile=coverage/coverage.out ./...
+          COVERAGE_SCOPE=client ./scripts/run_coverage.sh
 
       - name: Upload binary endpoint coverage to Codecov (OIDC)
         id: codecov_binary_endpoint_oidc
@@ -199,7 +197,7 @@ jobs:
         with:
           use_oidc: true
           files: coverage/cmd-docker.out
-          flags: root
+          flags: docker-e2e
           disable_search: true
           verbose: true
           fail_ci_if_error: true
@@ -213,7 +211,7 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: coverage/cmd-docker.out
-          flags: root
+          flags: docker-e2e
           disable_search: true
           verbose: true
           fail_ci_if_error: false

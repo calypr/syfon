@@ -2,10 +2,25 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-OUT_DIR="${ROOT_DIR}/coverage"
+SCOPE="${COVERAGE_SCOPE:-meaningful}"
+
+WORK_DIR="${ROOT_DIR}"
+case "${SCOPE}" in
+  full|meaningful)
+    WORK_DIR="${ROOT_DIR}"
+    ;;
+  client)
+    WORK_DIR="${ROOT_DIR}/client"
+    ;;
+  *)
+    echo "unknown COVERAGE_SCOPE='${SCOPE}'. valid: full, meaningful, client"
+    exit 1
+    ;;
+esac
+
+OUT_DIR="${WORK_DIR}/coverage"
 OUT_FILE="${OUT_DIR}/coverage.out"
 HTML_FILE="${OUT_DIR}/coverage.html"
-SCOPE="${COVERAGE_SCOPE:-meaningful}"
 
 mkdir -p "${OUT_DIR}"
 
@@ -14,14 +29,10 @@ case "${SCOPE}" in
     PKGS="$(cd "${ROOT_DIR}" && go list ./...)"
     ;;
   meaningful)
-    PKGS="$(cd "${ROOT_DIR}" && go list ./... | grep -Ev '^github.com/calypr/syfon$|/apigen/|/tests/endpoints$|/testutils$|/cmd$|/cmd/openapi-remove-examples$|/db$')"
+    PKGS="$(cd "${ROOT_DIR}" && go list ./... | grep -Ev '^github.com/calypr/syfon$|/apigen/|/tests/endpoints$|/testutils$|/cmd$|/cmd/openapi-remove-examples$')"
     ;;
-  core)
-    PKGS="github.com/calypr/syfon/db/core github.com/calypr/syfon/db/sqlite github.com/calypr/syfon/internal/api/middleware github.com/calypr/syfon/service github.com/calypr/syfon/urlmanager"
-    ;;
-  *)
-    echo "unknown COVERAGE_SCOPE='${SCOPE}'. valid: full, meaningful, core"
-    exit 1
+  client)
+    PKGS="./..."
     ;;
 esac
 
@@ -30,7 +41,7 @@ if [[ -z "${PKGS}" ]]; then
   exit 1
 fi
 
-cd "${ROOT_DIR}"
+cd "${WORK_DIR}"
 go test -count=1 -covermode=atomic -coverprofile "${OUT_FILE}" ${PKGS}
 go tool cover -func="${OUT_FILE}" | tee "${OUT_DIR}/coverage.txt"
 go tool cover -html="${OUT_FILE}" -o "${HTML_FILE}"
