@@ -21,15 +21,16 @@ func (db *SqliteDB) DeleteObject(ctx context.Context, id string) error {
 	}
 	defer tx.Rollback()
 
-	var affected int64
-
-	if aliasResult, aliasErr := tx.ExecContext(ctx, "DELETE FROM drs_object_alias WHERE alias_id = ?", id); aliasErr == nil {
-		if rows, rowsErr := aliasResult.RowsAffected(); rowsErr == nil {
-			affected += rows
-		}
+	canonicalID := strings.TrimSpace(id)
+	if canonicalID == "" {
+		return fmt.Errorf("%w: object not found", common.ErrNotFound)
 	}
 
-	result, err := tx.ExecContext(ctx, "DELETE FROM drs_object WHERE id = ?", id)
+	if err := tx.QueryRowContext(ctx, "SELECT object_id FROM drs_object_alias WHERE alias_id = ?", canonicalID).Scan(&canonicalID); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+
+	result, err := tx.ExecContext(ctx, "DELETE FROM drs_object WHERE id = ?", canonicalID)
 	if err != nil {
 		return err
 	}
@@ -37,17 +38,7 @@ func (db *SqliteDB) DeleteObject(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	affected += rows
-
-	if rows > 0 {
-		if aliasCleanup, cleanupErr := tx.ExecContext(ctx, "DELETE FROM drs_object_alias WHERE object_id = ?", id); cleanupErr == nil {
-			if cleanupRows, cleanupRowsErr := aliasCleanup.RowsAffected(); cleanupRowsErr == nil {
-				affected += cleanupRows
-			}
-		}
-	}
-
-	if affected == 0 {
+	if rows == 0 {
 		return fmt.Errorf("%w: object not found", common.ErrNotFound)
 	}
 	return tx.Commit()
@@ -504,8 +495,9 @@ func (db *SqliteDB) ListObjectIDsByResourcePrefix(ctx context.Context, resourceP
 	}
 
 	rows, err := db.db.QueryContext(ctx, `
-		SELECT DISTINCT object_id
-		FROM drs_object_authz
+		SELECT DISTINCT a.object_id
+		FROM drs_object_authz a
+		INNER JOIN drs_object o ON o.id = a.object_id
 		WHERE resource = ? OR resource LIKE ?`, resourcePrefix, resourcePrefix+"/%")
 	if err != nil {
 		return nil, err

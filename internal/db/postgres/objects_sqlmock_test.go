@@ -18,9 +18,9 @@ func TestDeleteObject(t *testing.T) {
 		defer rawDB.Close()
 
 		mock.ExpectBegin()
-		mock.ExpectExec(regexp.QuoteMeta("DELETE FROM drs_object_alias WHERE alias_id = $1")).
+		mock.ExpectQuery(regexp.QuoteMeta("SELECT object_id FROM drs_object_alias WHERE alias_id = $1")).
 			WithArgs("obj-1").
-			WillReturnResult(sqlmock.NewResult(0, 0))
+			WillReturnError(sql.ErrNoRows)
 		mock.ExpectExec(regexp.QuoteMeta("DELETE FROM drs_object WHERE id = $1")).
 			WithArgs("obj-1").
 			WillReturnResult(sqlmock.NewResult(0, 1))
@@ -39,9 +39,9 @@ func TestDeleteObject(t *testing.T) {
 		defer rawDB.Close()
 
 		mock.ExpectBegin()
-		mock.ExpectExec(regexp.QuoteMeta("DELETE FROM drs_object_alias WHERE alias_id = $1")).
+		mock.ExpectQuery(regexp.QuoteMeta("SELECT object_id FROM drs_object_alias WHERE alias_id = $1")).
 			WithArgs("missing").
-			WillReturnResult(sqlmock.NewResult(0, 0))
+			WillReturnError(sql.ErrNoRows)
 		mock.ExpectExec(regexp.QuoteMeta("DELETE FROM drs_object WHERE id = $1")).
 			WithArgs("missing").
 			WillReturnResult(sqlmock.NewResult(0, 0))
@@ -50,6 +50,27 @@ func TestDeleteObject(t *testing.T) {
 		err := pg.DeleteObject(context.Background(), "missing")
 		if !errors.Is(err, common.ErrNotFound) {
 			t.Fatalf("expected not found error, got %v", err)
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Fatalf("unmet expectations: %v", err)
+		}
+	})
+
+	t.Run("alias", func(t *testing.T) {
+		pg, mock, rawDB := newMockPostgresDB(t)
+		defer rawDB.Close()
+
+		mock.ExpectBegin()
+		mock.ExpectQuery(regexp.QuoteMeta("SELECT object_id FROM drs_object_alias WHERE alias_id = $1")).
+			WithArgs("alias-1").
+			WillReturnRows(sqlmock.NewRows([]string{"object_id"}).AddRow("obj-1"))
+		mock.ExpectExec(regexp.QuoteMeta("DELETE FROM drs_object WHERE id = $1")).
+			WithArgs("obj-1").
+			WillReturnResult(sqlmock.NewResult(0, 1))
+		mock.ExpectCommit()
+
+		if err := pg.DeleteObject(context.Background(), "alias-1"); err != nil {
+			t.Fatalf("DeleteObject returned error: %v", err)
 		}
 		if err := mock.ExpectationsWereMet(); err != nil {
 			t.Fatalf("unmet expectations: %v", err)

@@ -194,6 +194,50 @@ func TestSqliteDB_ObjectAliasLifecycle(t *testing.T) {
 	}
 }
 
+func TestSqliteDB_DeleteObjectByAliasRemovesCanonicalObject(t *testing.T) {
+	ctx := context.Background()
+	db, err := NewSqliteDB(":memory:")
+	if err != nil {
+		t.Fatalf("failed to create db: %v", err)
+	}
+
+	canonicalID := "11111111-1111-4111-8111-111111111111"
+	aliasID := "22222222-2222-4222-8222-222222222222"
+	now := time.Now().UTC()
+
+	if err := db.CreateObject(ctx, &models.InternalObject{
+		DrsObject: drs.DrsObject{
+			Id:          canonicalID,
+			CreatedTime: now,
+			UpdatedTime: &now,
+			Name:        common.Ptr("object.txt"),
+		},
+		Authorizations: []string{"/programs/a/projects/b"},
+	}); err != nil {
+		t.Fatalf("CreateObject failed: %v", err)
+	}
+	if err := db.CreateObjectAlias(ctx, aliasID, canonicalID); err != nil {
+		t.Fatalf("CreateObjectAlias failed: %v", err)
+	}
+
+	if err := db.DeleteObject(ctx, aliasID); err != nil {
+		t.Fatalf("DeleteObject(alias) failed: %v", err)
+	}
+	if _, err := db.GetObject(ctx, canonicalID); err == nil {
+		t.Fatal("expected canonical object to be deleted")
+	}
+	if _, err := db.ResolveObjectAlias(ctx, aliasID); err == nil {
+		t.Fatal("expected alias mapping to be deleted")
+	}
+	ids, err := db.ListObjectIDsByResourcePrefix(ctx, "/programs/a/projects/b")
+	if err != nil {
+		t.Fatalf("ListObjectIDsByResourcePrefix failed: %v", err)
+	}
+	if len(ids) != 0 {
+		t.Fatalf("expected no listed ids after delete, got %v", ids)
+	}
+}
+
 func TestSqliteDB_S3Credentials(t *testing.T) {
 	t.Setenv(crypto.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
 	ctx := context.Background()

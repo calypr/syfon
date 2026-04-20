@@ -182,7 +182,7 @@ func RegisterFile(ctx context.Context, bk UploadBackend, dc MetadataClient, drsO
 			Name:      drsObject.Name,
 			Size:      drsObject.Size,
 			Checksums: drsObject.Checksums,
-			Aliases:   &[]string{requestedID},
+			Aliases:   &finalAliases,
 			AccessMethods: &[]drsapi.AccessMethod{{
 				Type:           drsapi.AccessMethodType(pType),
 				AccessUrl:      am.AccessUrl,

@@ -89,7 +89,8 @@ Bucket-level signing credentials.
 ### Local schema behavior
 
 - SQLite schema is initialized in `sqlite.initSchema()`.
-- PostgreSQL schema is expected to exist (via Helm init job/templates in `helm/syfon`).
+- PostgreSQL object schema is initialized in `postgres.NewPostgresDB()`.
+- Helm init jobs remain optional for deployments that want to pre-create schema outside the app.
 - SQLite helper scripts are provided in `db/scripts/`:
   - `init_sqlite.sql`
   - `init_sqlite_db.sh`
