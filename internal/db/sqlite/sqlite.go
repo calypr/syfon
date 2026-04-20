@@ -18,7 +18,7 @@ type SqliteDB struct {
 }
 
 func NewSqliteDB(dsn string) (*SqliteDB, error) {
-	db, err := sql.Open("sqlite3", dsn)
+	db, err := sql.Open("sqlite3", sqliteDSN(dsn))
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
@@ -36,6 +36,20 @@ func NewSqliteDB(dsn string) (*SqliteDB, error) {
 	}
 
 	return s, nil
+}
+
+func sqliteDSN(dsn string) string {
+	if strings.Contains(dsn, "_foreign_keys=") {
+		return dsn
+	}
+	if dsn == ":memory:" {
+		return "file::memory:?_foreign_keys=on"
+	}
+	separator := "?"
+	if strings.Contains(dsn, "?") {
+		separator = "&"
+	}
+	return dsn + separator + "_foreign_keys=on"
 }
 
 func (db *SqliteDB) initSchema() error {
