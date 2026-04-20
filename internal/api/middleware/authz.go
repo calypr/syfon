@@ -6,9 +6,7 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -19,9 +17,11 @@ import (
 	"time"
 
 	"github.com/calypr/syfon/client/conf"
-	"github.com/calypr/syfon/client/pkg/logs"
-	"github.com/calypr/syfon/client/pkg/request"
-	"github.com/calypr/syfon/db/core"
+	"github.com/calypr/syfon/client/logs"
+	"github.com/calypr/syfon/client/request"
+	"github.com/calypr/syfon/internal/authz"
+	"github.com/calypr/syfon/internal/common"
+	"github.com/gofiber/fiber/v3"
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/sync/singleflight"
 )
@@ -81,152 +81,185 @@ func NewAuthzMiddleware(logger *slog.Logger, mode, basicUser, basicPass string) 
 	}
 }
 
-// Middleware returns a mux middleware that extracts the token and fetches user info.
-func (m *AuthzMiddleware) Middleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx := context.WithValue(r.Context(), core.AuthHeaderPresentKey, false)
-		ctx = context.WithValue(ctx, core.AuthModeKey, m.mode)
+// FiberMiddleware returns a fiber middleware that extracts the token and fetches user info.
+func (m *AuthzMiddleware) FiberMiddleware() fiber.Handler {
+	return func(c fiber.Ctx) error {
+		ctx, authHeader := m.prepareRequestContext(c)
 		if m.mode != "gen3" {
-			if m.basicUser != "" || m.basicPass != "" {
-				user, pass, ok := r.BasicAuth()
-				if !ok ||
-					subtle.ConstantTimeCompare([]byte(user), []byte(m.basicUser)) != 1 ||
-					subtle.ConstantTimeCompare([]byte(pass), []byte(m.basicPass)) != 1 {
-					w.Header().Set("WWW-Authenticate", `Basic realm="syfon"`)
-					http.Error(w, "Unauthorized", http.StatusUnauthorized)
-					return
-				}
-			}
-			next.ServeHTTP(w, r.WithContext(ctx))
-			return
+			return m.handleLocalAuth(c, ctx, authHeader)
 		}
-		if m.mock.Enabled {
-			if m.mock.RequireAuthHeader && !core.HasAuthHeader(ctx) {
-				next.ServeHTTP(w, r.WithContext(ctx))
-				return
-			}
-			// In mock mode, mark auth header as present so gen3 authorization checks
-			// in service/DB layers evaluate injected privileges.
-			if !core.HasAuthHeader(ctx) {
-				ctx = context.WithValue(ctx, core.AuthHeaderPresentKey, true)
-			}
-			resources := append([]string(nil), m.mock.Resources...)
-			privs := make(map[string]map[string]bool, len(resources))
-			for _, resource := range resources {
-				methods := make(map[string]bool, len(m.mock.Methods))
-				for _, method := range m.mock.Methods {
-					methods[method] = true
-				}
-				privs[resource] = methods
-			}
-			ctx = context.WithValue(ctx, core.UserAuthzKey, resources)
-			ctx = context.WithValue(ctx, core.UserPrivilegesKey, privs)
-			next.ServeHTTP(w, r.WithContext(ctx))
-			return
-		}
-		authHeader := r.Header.Get("Authorization")
-		if authHeader == "" {
-			next.ServeHTTP(w, r.WithContext(ctx))
-			return
-		}
-		ctx = context.WithValue(ctx, core.AuthHeaderPresentKey, true)
-		tokenString, err := extractBearerLikeToken(authHeader)
-		if err != nil {
-			m.logger.Debug("failed to parse authorization header", "error", err)
-			next.ServeHTTP(w, r.WithContext(ctx))
-			return
-		}
-
-		cacheKey := tokenCacheKey(tokenString)
-		if m.cache != nil {
-			if resources, privileges, negative, ok := m.cache.get(cacheKey); ok {
-				if negative {
-					next.ServeHTTP(w, r.WithContext(ctx))
-					return
-				}
-				ctx = context.WithValue(ctx, core.UserAuthzKey, resources)
-				ctx = context.WithValue(ctx, core.UserPrivilegesKey, privileges)
-				next.ServeHTTP(w, r.WithContext(ctx))
-				return
-			}
-		}
-
-		type authFetchResult struct {
-			resources  []string
-			privileges map[string]map[string]bool
-			negative   bool
-		}
-
-		v, _, _ := m.sf.Do(cacheKey, func() (interface{}, error) {
-			// 1. Discover Fence API endpoint from token 'iss' claim
-			apiEndpoint, _, err := m.parseToken(tokenString)
-			if err != nil {
-				m.logger.Debug("failed to parse token", "error", err)
-				return authFetchResult{negative: true}, nil
-			}
-
-			// 2. Initialize request client for authz lookup.
-			cred := &conf.Credential{
-				AccessToken: tokenString,
-				APIEndpoint: apiEndpoint,
-			}
-
-			// We use a no-op gen3 logger for the request client to avoid unnecessary side effects in middleware
-			gen3Logger := logs.NewGen3Logger(m.logger, "", "syfon")
-			reqClient := request.NewRequestInterface(gen3Logger, cred, nil, apiEndpoint, "syfon-server", nil)
-
-			// 3. Fetch user info (privileges)
-			privs, err := fetchPrivileges(r.Context(), reqClient, cred)
-			if err != nil {
-				m.logger.Debug("failed to check privileges with internal auth", "error", err)
-				return authFetchResult{negative: true}, nil
-			}
-
-			// 4. Map privileges to authorized resources + methods
-			authorizedResources, privileges := m.extractPrivileges(privs)
-			return authFetchResult{
-				resources:  authorizedResources,
-				privileges: privileges,
-				negative:   false,
-			}, nil
-		})
-		res, _ := v.(authFetchResult)
-
-		if m.cache != nil {
-			m.cache.set(cacheKey, res.resources, res.privileges, res.negative)
-		}
-
-		if res.negative {
-			next.ServeHTTP(w, r.WithContext(ctx))
-			return
-		}
-
-		ctx = context.WithValue(ctx, core.UserAuthzKey, res.resources)
-		ctx = context.WithValue(ctx, core.UserPrivilegesKey, res.privileges)
-
-		next.ServeHTTP(w, r.WithContext(ctx))
-	})
+		return m.handleGen3Auth(c, ctx, authHeader)
+	}
 }
 
-func fetchPrivileges(ctx context.Context, reqClient request.RequestInterface, cred *conf.Credential) (map[string]any, error) {
-	resp, err := reqClient.Do(ctx, &request.RequestBuilder{
-		Url:    strings.TrimRight(cred.APIEndpoint, "/") + "/user/user",
-		Method: http.MethodGet,
-		Token:  cred.AccessToken,
+func (m *AuthzMiddleware) prepareRequestContext(c fiber.Ctx) (context.Context, string) {
+	ctx := context.WithValue(c.Context(), common.AuthHeaderPresentKey, false)
+	ctx = context.WithValue(ctx, common.AuthModeKey, m.mode)
+	return ctx, c.Get(fiber.HeaderAuthorization)
+}
+
+func (m *AuthzMiddleware) handleLocalAuth(c fiber.Ctx, ctx context.Context, authHeader string) error {
+	if m.basicUser != "" || m.basicPass != "" {
+		if err := validateBasicAuth(authHeader, m.basicUser, m.basicPass); err != nil {
+			c.Set(fiber.HeaderWWWAuthenticate, `Basic realm="syfon"`)
+			return c.SendStatus(fiber.StatusUnauthorized)
+		}
+	}
+	c.SetContext(ctx)
+	return c.Next()
+}
+
+func validateBasicAuth(authHeader, expectedUser, expectedPass string) error {
+	if authHeader == "" || !strings.HasPrefix(strings.ToLower(authHeader), "basic ") {
+		return fmt.Errorf("missing basic auth header")
+	}
+
+	payload := authHeader[len("basic "):]
+	decoded, err := base64.StdEncoding.DecodeString(payload)
+	if err != nil {
+		return fmt.Errorf("decode basic auth header: %w", err)
+	}
+	parts := strings.SplitN(string(decoded), ":", 2)
+	if len(parts) != 2 ||
+		subtle.ConstantTimeCompare([]byte(parts[0]), []byte(expectedUser)) != 1 ||
+		subtle.ConstantTimeCompare([]byte(parts[1]), []byte(expectedPass)) != 1 {
+		return fmt.Errorf("invalid basic auth credentials")
+	}
+	return nil
+}
+
+func (m *AuthzMiddleware) handleGen3Auth(c fiber.Ctx, ctx context.Context, authHeader string) error {
+	if m.mock.Enabled {
+		return m.handleMockAuth(c, ctx)
+	}
+	if authHeader == "" {
+		c.SetContext(ctx)
+		return c.Next()
+	}
+
+	ctx = context.WithValue(ctx, common.AuthHeaderPresentKey, true)
+	tokenString, err := extractBearerLikeToken(authHeader)
+	if err != nil {
+		m.logger.Debug("failed to parse authorization header", "error", err)
+		c.SetContext(ctx)
+		return c.Next()
+	}
+
+	res := m.resolveTokenAuth(c.Context(), tokenString)
+	if res.negative {
+		c.SetContext(ctx)
+		return c.Next()
+	}
+
+	return m.populateAuthContextAndNext(c, ctx, res.resources, res.privileges)
+}
+
+func (m *AuthzMiddleware) handleMockAuth(c fiber.Ctx, ctx context.Context) error {
+	if m.mock.RequireAuthHeader && !authz.HasAuthHeader(ctx) {
+		c.SetContext(ctx)
+		return c.Next()
+	}
+	// In mock mode, mark auth header as present so gen3 authorization checks
+	// in service/DB layers evaluate injected privileges.
+	if !authz.HasAuthHeader(ctx) {
+		ctx = context.WithValue(ctx, common.AuthHeaderPresentKey, true)
+	}
+	resources, privileges := m.mockAuthPrivileges()
+	return m.populateAuthContextAndNext(c, ctx, resources, privileges)
+}
+
+func (m *AuthzMiddleware) mockAuthPrivileges() ([]string, map[string]map[string]bool) {
+	resources := append([]string(nil), m.mock.Resources...)
+	privs := make(map[string]map[string]bool, len(resources))
+	for _, resource := range resources {
+		methods := make(map[string]bool, len(m.mock.Methods))
+		for _, method := range m.mock.Methods {
+			methods[method] = true
+		}
+		privs[resource] = methods
+	}
+	return resources, privs
+}
+
+type authFetchResult struct {
+	resources  []string
+	privileges map[string]map[string]bool
+	negative   bool
+}
+
+func (m *AuthzMiddleware) resolveTokenAuth(ctx context.Context, tokenString string) authFetchResult {
+	cacheKey := tokenCacheKey(tokenString)
+	if resources, privileges, negative, ok := m.cachedAuthResult(cacheKey); ok {
+		return authFetchResult{
+			resources:  resources,
+			privileges: privileges,
+			negative:   negative,
+		}
+	}
+
+	v, _, _ := m.sf.Do(cacheKey, func() (interface{}, error) {
+		return m.fetchTokenAuth(ctx, tokenString)
 	})
+	res, _ := v.(authFetchResult)
+	if m.cache != nil {
+		m.cache.set(cacheKey, res.resources, res.privileges, res.negative)
+	}
+	return res
+}
+
+func (m *AuthzMiddleware) cachedAuthResult(cacheKey string) ([]string, map[string]map[string]bool, bool, bool) {
+	if m.cache == nil {
+		return nil, nil, false, false
+	}
+	return m.cache.get(cacheKey)
+}
+
+func (m *AuthzMiddleware) fetchTokenAuth(ctx context.Context, tokenString string) (interface{}, error) {
+	// 1. Discover Fence API endpoint from token 'iss' claim
+	apiEndpoint, _, err := m.parseToken(tokenString)
+	if err != nil {
+		m.logger.Debug("failed to parse token", "error", err)
+		return authFetchResult{negative: true}, nil
+	}
+
+	// 2. Initialize request client for authz lookup.
+	cred := &conf.Credential{
+		AccessToken: tokenString,
+		APIEndpoint: apiEndpoint,
+	}
+
+	// We use a no-op gen3 logger for the request client to avoid unnecessary side effects in middleware
+	gen3Logger := logs.NewGen3Logger(m.logger, "", "syfon")
+	reqClient := request.NewRequestor(gen3Logger, cred, nil, apiEndpoint, "syfon-server", nil)
+
+	// 3. Fetch user info (privileges)
+	privs, err := fetchPrivileges(ctx, reqClient, cred)
+	if err != nil {
+		m.logger.Debug("failed to check privileges with internal auth", "error", err)
+		return authFetchResult{negative: true}, nil
+	}
+
+	// 4. Map privileges to authorized resources + methods
+	authorizedResources, privileges := m.extractPrivileges(privs)
+	return authFetchResult{
+		resources:  authorizedResources,
+		privileges: privileges,
+		negative:   false,
+	}, nil
+}
+
+func (m *AuthzMiddleware) populateAuthContextAndNext(c fiber.Ctx, ctx context.Context, resources []string, privileges map[string]map[string]bool) error {
+	ctx = context.WithValue(ctx, common.UserAuthzKey, resources)
+	ctx = context.WithValue(ctx, common.UserPrivilegesKey, privileges)
+	c.SetContext(ctx)
+	return c.Next()
+}
+
+func fetchPrivileges(ctx context.Context, reqClient request.Requester, cred *conf.Credential) (map[string]any, error) {
+	var data map[string]any
+	err := reqClient.Do(ctx, http.MethodGet, "/user/user", nil, &data)
 	if err != nil {
 		return nil, fmt.Errorf("request user info: %w", err)
-	}
-	defer resp.Body.Close()
-
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read user info response: %w", err)
-	}
-
-	var data map[string]any
-	if err := json.Unmarshal(bodyBytes, &data); err != nil {
-		return nil, fmt.Errorf("parse user info response: %w", err)
 	}
 
 	resourceAccess, ok := data["authz"].(map[string]any)

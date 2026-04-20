@@ -3,11 +3,27 @@ package lfs
 import (
 	"sync"
 
-	"github.com/calypr/syfon/config"
-	"github.com/calypr/syfon/db/core"
-	"github.com/calypr/syfon/urlmanager"
-	"github.com/gorilla/mux"
+	"github.com/calypr/syfon/apigen/server/lfsapi"
+	"github.com/calypr/syfon/internal/core"
+	"github.com/gofiber/fiber/v3"
 )
+
+type Options struct {
+	MaxBatchObjects              int
+	MaxBatchBodyBytes            int64
+	RequestLimitPerMinute        int
+	BandwidthLimitBytesPerMinute int64
+}
+
+type windowCounter struct {
+	Minute int64
+	Count  int
+}
+
+type windowBytes struct {
+	Minute int64
+	Bytes  int64
+}
 
 var (
 	limitMu            sync.Mutex
@@ -24,18 +40,23 @@ func DefaultOptions() Options {
 	}
 }
 
-func RegisterLFSRoutes(router *mux.Router, database core.DatabaseInterface, uM urlmanager.UrlManager, opts ...Options) {
+func RegisterLFSRoutes(router fiber.Router, om *core.ObjectManager, opts ...Options) {
 	effective := DefaultOptions()
 	if len(opts) > 0 {
 		effective = opts[0]
 	}
-	router.HandleFunc(config.RouteLFSBatch, handleBatch(database, uM, effective)).Methods("POST")
-	router.HandleFunc(config.RouteLFSMetadata, handleMetadata(database)).Methods("POST")
-	router.HandleFunc(config.RouteLFSObject, handleUploadProxy(database, uM)).Methods("PUT")
-	router.HandleFunc(config.RouteLFSVerify, handleVerify(database)).Methods("POST")
+	server := NewLFSServer(om, effective)
+	strict := lfsapi.NewStrictHandler(server, []lfsapi.StrictMiddlewareFunc{
+		LFSRequestMiddleware(effective),
+	})
+	router.Use(func(c fiber.Ctx) error {
+		c.SetContext(core.WithBaseURL(c.Context(), c.BaseURL()))
+		return c.Next()
+	})
+	lfsapi.RegisterHandlers(router, strict)
 }
 
-func resetLFSLimitersForTest() {
+func ResetLFSLimitersForTest() {
 	limitMu.Lock()
 	defer limitMu.Unlock()
 	requestWindowMap = map[string]windowCounter{}

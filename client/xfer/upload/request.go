@@ -5,18 +5,18 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/calypr/syfon/client/pkg/common"
-	"github.com/calypr/syfon/client/xfer"
+	"github.com/calypr/syfon/client/common"
+	"github.com/calypr/syfon/client/transfer"
 	"github.com/vbauerster/mpb/v8"
 	"github.com/vbauerster/mpb/v8/decor"
 )
 
 // GeneratePresignedUploadURL resolves a signed upload URL using plain inputs.
-func GeneratePresignedUploadURL(ctx context.Context, bk xfer.Uploader, filename string, metadata common.FileMetadata, bucket string) (string, error) {
+func GeneratePresignedUploadURL(ctx context.Context, bk transfer.Uploader, filename string, metadata common.FileMetadata, bucket string) (string, error) {
 	return bk.ResolveUploadURL(ctx, "", filename, metadata, bucket)
 }
 
-func generateUploadRequest(ctx context.Context, bk xfer.Uploader, req uploadRequest, file *os.File, p *mpb.Progress) (uploadRequest, error) {
+func generateUploadRequest(ctx context.Context, bk transfer.Uploader, req uploadRequest, file *os.File, p *mpb.Progress) (uploadRequest, error) {
 	if req.presignedURL == "" {
 		url, err := bk.ResolveUploadURL(ctx, req.guid, req.objectKey, req.metadata, req.bucket)
 		if err != nil {

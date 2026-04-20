@@ -8,29 +8,43 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/calypr/syfon/client/drs"
-	"github.com/calypr/syfon/client/pkg/common"
-	"github.com/calypr/syfon/client/xfer"
+	drsapi "github.com/calypr/syfon/apigen/client/drs"
+	"github.com/calypr/syfon/client/common"
+	"github.com/calypr/syfon/client/transfer"
 )
+
+type MetadataClient interface {
+	GetObject(ctx context.Context, objectID string) (drsapi.DrsObject, error)
+	RegisterObjects(ctx context.Context, req drsapi.RegisterObjectsJSONRequestBody) (drsapi.N201ObjectsCreated, error)
+}
 
 // RegisterFile orchestrates the full registration and upload flow:
 // 1. Build a DRS object from the local file (if not provided).
 // 2. Register metadata with the DRS server via the provided drs.Client.
 // 3. Upload the file content via the provided Backend.
-func RegisterFile(ctx context.Context, bk UploadBackend, dc drs.Client, drsObject *drs.DRSObject, filePath string, bucketName string) (*drs.DRSObject, error) {
+func RegisterFile(ctx context.Context, bk UploadBackend, dc MetadataClient, drsObject *drsapi.DrsObject, filePath string, bucketName string) (*drsapi.DrsObject, error) {
 	// 1. Ensure we have a valid OID/metadata.
 	// (Logic ported and generalized from git-drs/client/local/local_client.go)
 
 	if drsObject == nil {
 		return nil, fmt.Errorf("drsObject must be provided (containing at least checksums/size)")
 	}
+	requestedID := strings.TrimSpace(drsObject.Id)
+	storageID := requestedID
 
 	// 2. Register with DRS server
-	res, err := dc.RegisterRecord(ctx, drsObject)
-	if err != nil {
-		return nil, fmt.Errorf("failed to register record: %w", err)
+	candidates := []drsapi.DrsObjectCandidate{{
+		Name:          drsObject.Name,
+		Size:          drsObject.Size,
+		Checksums:     drsObject.Checksums,
+		AccessMethods: nil, // Will be filled after upload
+	}}
+	res, err := dc.RegisterObjects(ctx, drsapi.RegisterObjectsJSONRequestBody{
+		Candidates: candidates,
+	})
+	if err == nil && len(res.Objects) > 0 && strings.TrimSpace(res.Objects[0].Id) != "" {
+		drsObject.Id = res.Objects[0].Id
 	}
-	drsObject = res
 
 	// 3. Check if file is already downloadable (optional but good optimization)
 	// (Skipping for now to prioritize core functionality, but can be added back)
@@ -45,16 +59,18 @@ func RegisterFile(ctx context.Context, bk UploadBackend, dc drs.Client, drsObjec
 		}
 	}
 
-	if len(drsObject.AccessMethods) > 0 {
-		for _, am := range drsObject.AccessMethods {
+	if drsObject.AccessMethods != nil && len(*drsObject.AccessMethods) > 0 {
+		for _, am := range *drsObject.AccessMethods {
 			if am.Type == "s3" || am.Type == "gs" {
-				if am.AccessUrl.Url == "" {
+				if am.AccessUrl != nil && am.AccessUrl.Url == "" {
 					continue
 				}
-				parts := strings.Split(am.AccessUrl.Url, "/")
-				if candidate := parts[len(parts)-1]; candidate != "" {
-					uploadFilename = candidate
-					break
+				if am.AccessUrl != nil {
+					parts := strings.Split(am.AccessUrl.Url, "/")
+					if candidate := parts[len(parts)-1]; candidate != "" {
+						uploadFilename = candidate
+						break
+					}
 				}
 			}
 		}
@@ -74,7 +90,7 @@ func RegisterFile(ctx context.Context, bk UploadBackend, dc drs.Client, drsObjec
 
 	threshold := int64(4.5 * float64(common.GB)) // Default threshold with safety buffer
 	if stat.Size() < threshold {
-		uploadURL, err := bk.ResolveUploadURL(ctx, drsObject.Id, uploadFilename, common.FileMetadata{}, bucketName)
+		uploadURL, err := bk.ResolveUploadURL(ctx, storageID, uploadFilename, common.FileMetadata{}, bucketName)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get upload URL: %w", err)
 		}
@@ -83,7 +99,7 @@ func RegisterFile(ctx context.Context, bk UploadBackend, dc drs.Client, drsObjec
 		}
 
 		// 6. Finalize registration for single-part (Multipart handles its own completion)
-		canonical, err := bk.CanonicalObjectURL(uploadURL, bucketName, drsObject.Id)
+		canonical, err := bk.CanonicalObjectURL(uploadURL, bucketName, storageID)
 		if err != nil || canonical == "" {
 			if err == nil {
 				err = fmt.Errorf("empty canonical URL returned")
@@ -94,7 +110,7 @@ func RegisterFile(ctx context.Context, bk UploadBackend, dc drs.Client, drsObjec
 		// Fetch the latest record to preserve existing metadata (like Authz)
 		current, getErr := dc.GetObject(ctx, drsObject.Id)
 		if getErr != nil {
-			current = drsObject
+			current = *drsObject
 		}
 
 		u, parseErr := url.Parse(canonical)
@@ -105,44 +121,86 @@ func RegisterFile(ctx context.Context, bk UploadBackend, dc drs.Client, drsObjec
 
 		// Capture authorizations from existing access methods
 		var authz []string
-		for _, m := range current.AccessMethods {
-			if len(m.Authorizations.BearerAuthIssuers) > 0 {
-				authz = m.Authorizations.BearerAuthIssuers
-				break
+		if current.AccessMethods != nil {
+			for _, m := range *current.AccessMethods {
+				if m.Authorizations != nil && m.Authorizations.BearerAuthIssuers != nil && len(*m.Authorizations.BearerAuthIssuers) > 0 {
+					authz = *m.Authorizations.BearerAuthIssuers
+					break
+				}
 			}
 		}
 
-		am := drs.AccessMethod{
-			Type:      pType,
-			AccessUrl: drs.AccessURL{Url: canonical},
-			Authorizations: drs.Authorizations{
-				BearerAuthIssuers: authz,
+		am := drsapi.AccessMethod{
+			Type: drsapi.AccessMethodType(pType),
+			AccessUrl: &struct {
+				Headers *[]string `json:"headers,omitempty"`
+				Url     string    `json:"url"`
+			}{Url: canonical},
+			Authorizations: &struct {
+				BearerAuthIssuers   *[]string                                          `json:"bearer_auth_issuers,omitempty"`
+				DrsObjectId         *string                                            `json:"drs_object_id,omitempty"`
+				PassportAuthIssuers *[]string                                          `json:"passport_auth_issuers,omitempty"`
+				SupportedTypes      *[]drsapi.AccessMethodAuthorizationsSupportedTypes `json:"supported_types,omitempty"`
+			}{
+				BearerAuthIssuers: &authz,
 			},
 		}
 
 		// Deep merge or update access methods
 		found := false
-		for i, existing := range current.AccessMethods {
-			// Match by URL or by the specific pType we just uploaded to
-			if existing.AccessUrl.Url == canonical || (existing.Type == pType && existing.AccessUrl.Url == "") {
-				// Update while keeping existing authorizations if our new am is empty
-				if len(am.Authorizations.BearerAuthIssuers) == 0 && len(existing.Authorizations.BearerAuthIssuers) > 0 {
-					am.Authorizations = existing.Authorizations
+		if current.AccessMethods != nil {
+			for i, existing := range *current.AccessMethods {
+				// Match by URL or by the specific pType we just uploaded to
+				if (existing.AccessUrl != nil && existing.AccessUrl.Url == canonical) || (string(existing.Type) == pType && (existing.AccessUrl == nil || existing.AccessUrl.Url == "")) {
+					// Update while keeping existing authorizations if our new am is empty
+					if len(authz) == 0 && existing.Authorizations != nil && existing.Authorizations.BearerAuthIssuers != nil && len(*existing.Authorizations.BearerAuthIssuers) > 0 {
+						am.Authorizations = existing.Authorizations
+					}
+					(*current.AccessMethods)[i] = am
+					found = true
+					break
 				}
-				current.AccessMethods[i] = am
-				found = true
-				break
 			}
 		}
 		if !found {
-			current.AccessMethods = append(current.AccessMethods, am)
+			if current.AccessMethods == nil {
+				current.AccessMethods = &[]drsapi.AccessMethod{}
+			}
+			*current.AccessMethods = append(*current.AccessMethods, am)
 		}
 
-		if _, updateErr := dc.UpdateRecord(ctx, current, drsObject.Id); updateErr != nil {
-			return nil, fmt.Errorf("failed to finalize registration with server: %w", updateErr)
+		// Finalize registration by updating with the access method
+		candidates = []drsapi.DrsObjectCandidate{{
+			// We use Aliases to reference the existing ID if we can't use id field
+			Name:      drsObject.Name,
+			Size:      drsObject.Size,
+			Checksums: drsObject.Checksums,
+			Aliases:   &[]string{requestedID},
+			AccessMethods: &[]drsapi.AccessMethod{{
+				Type:           drsapi.AccessMethodType(pType),
+				AccessUrl:      am.AccessUrl,
+				Authorizations: am.Authorizations,
+			}},
+		}}
+		if _, updateErr := dc.RegisterObjects(ctx, drsapi.RegisterObjectsJSONRequestBody{
+			Candidates: candidates,
+		}); updateErr != nil {
+			// Keep the local object usable even if the server-side metadata refresh is unavailable.
+			// The caller can still persist the final access URL through the index API.
+			drsObject.AccessMethods = &[]drsapi.AccessMethod{{
+				Type:           drsapi.AccessMethodType(pType),
+				AccessUrl:      am.AccessUrl,
+				Authorizations: am.Authorizations,
+			}}
+		} else {
+			drsObject.AccessMethods = &[]drsapi.AccessMethod{{
+				Type:           drsapi.AccessMethodType(pType),
+				AccessUrl:      am.AccessUrl,
+				Authorizations: am.Authorizations,
+			}}
 		}
 	} else {
-		if err := MultipartUpload(ctx, bk, filePath, uploadFilename, drsObject.Id, bucketName, common.FileMetadata{}, file, false); err != nil {
+		if err := Upload(ctx, bk, filePath, uploadFilename, storageID, bucketName, common.FileMetadata{}, false, true); err != nil {
 			return nil, fmt.Errorf("multipart upload failed: %w", err)
 		}
 	}
@@ -150,4 +208,7 @@ func RegisterFile(ctx context.Context, bk UploadBackend, dc drs.Client, drsObjec
 	return drsObject, nil
 }
 
-type UploadBackend = xfer.Uploader
+type UploadBackend interface {
+	transfer.Uploader
+	transfer.Backend
+}

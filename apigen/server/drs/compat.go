@@ -1,0 +1,7 @@
+package drs
+
+// Compatibility aliases for generator-emitted service-info field names.
+type N200ServiceInfoDrsSupportedUploadMethods = DrsServiceDrsSupportedUploadMethods
+type N200ServiceInfoTypeArtifact = DrsServiceTypeArtifact
+type N200ServiceInfoJSONResponseDrsSupportedUploadMethods = DrsServiceDrsSupportedUploadMethods
+type N200ServiceInfoJSONResponseTypeArtifact = DrsServiceTypeArtifact

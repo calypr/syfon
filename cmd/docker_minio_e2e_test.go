@@ -22,7 +22,7 @@ import (
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
-	"github.com/calypr/syfon/db/core"
+	"github.com/calypr/syfon/internal/crypto"
 	testcontainers "github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
 )
@@ -113,12 +113,16 @@ func TestSyfonDockerMinIOE2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to parse DID from upload output: %v", err)
 	}
-	t.Logf("Object registered with DID: %s", uploadedID)
+	storageID, err := parseRequestedUploadedObjectID(uploadOut)
+	if err != nil {
+		t.Fatalf("Failed to parse requested DID from upload output: %v", err)
+	}
+	t.Logf("Object registered with canonical DID: %s (storage DID: %s)", uploadedID, storageID)
 
 	t.Logf("STEP 5: Verifying object existence in MinIO directly...")
 	if _, err := minioEnv.s3Client.HeadObject(ctx, &s3.HeadObjectInput{
 		Bucket: aws.String(minioEnv.bucket),
-		Key:    aws.String(uploadedID),
+		Key:    aws.String(storageID),
 	}); err != nil {
 		t.Fatalf("Data check failed: Object is missing from MinIO bucket: %v", err)
 	}
@@ -253,7 +257,7 @@ func startSyfonServerProcess(t *testing.T, minioEnv *minioContainer) *syfonServe
 
 	cmd := exec.Command(binaryPath, "serve", "--config", configPath)
 	cmd.Dir = rootDir
-	cmd.Env = append(os.Environ(), core.CredentialMasterKeyEnv+"="+dockerE2ECredentialKey)
+	cmd.Env = append(os.Environ(), crypto.CredentialMasterKeyEnv+"="+dockerE2ECredentialKey)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	stdoutPipe, err := cmd.StdoutPipe()
@@ -380,6 +384,9 @@ func writeSyfonDockerConfig(t *testing.T, port int, dbPath string, minioEnv *min
 	content := fmt.Sprintf(`port: %d
 auth:
   mode: local
+routes:
+  ga4gh: true
+  internal: true
 database:
   sqlite:
     file: %q

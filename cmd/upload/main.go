@@ -6,10 +6,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
+	drsapi "github.com/calypr/syfon/apigen/client/drs"
 	syclient "github.com/calypr/syfon/client"
-	"github.com/calypr/syfon/client/drs"
 	"github.com/calypr/syfon/client/xfer/upload"
 	"github.com/spf13/cobra"
 )
@@ -52,6 +53,18 @@ var Cmd = &cobra.Command{
 			return err
 		}
 
+		bucketName := ""
+		if buckets, listErr := c.Buckets().List(ctx); listErr == nil {
+			names := make([]string, 0, len(buckets.S3BUCKETS))
+			for name := range buckets.S3BUCKETS {
+				names = append(names, name)
+			}
+			sort.Strings(names)
+			if len(names) > 0 {
+				bucketName = names[0]
+			}
+		}
+
 		// Calculate SHA256 hash of the file to use as the content-addressable ID
 		fileBytes, err := os.ReadFile(srcPath)
 		if err != nil {
@@ -65,24 +78,28 @@ var Cmd = &cobra.Command{
 			did = checksum
 		}
 
-		// Create a DRS client from the SDK
-		dc := drs.NewDrsClient(c.Requestor(), nil, c.Logger())
-
-		drsObj := &drs.DRSObject{
+		name := filepath.Base(srcPath)
+		issuers := []string{authz}
+		drsObj := &drsapi.DrsObject{
 			Id:   did,
-			Name: filepath.Base(srcPath),
+			Name: &name,
 			Size: info.Size(),
-			Checksums: []drs.Checksum{
+			Checksums: []drsapi.Checksum{
 				{
 					Type:     "sha256",
 					Checksum: checksum,
 				},
 			},
-			AccessMethods: []drs.AccessMethod{
+			AccessMethods: &[]drsapi.AccessMethod{
 				{
 					Type: "s3", // Default type
-					Authorizations: drs.Authorizations{
-						BearerAuthIssuers: []string{authz},
+					Authorizations: &struct {
+						BearerAuthIssuers   *[]string                                          `json:"bearer_auth_issuers,omitempty"`
+						DrsObjectId         *string                                            `json:"drs_object_id,omitempty"`
+						PassportAuthIssuers *[]string                                          `json:"passport_auth_issuers,omitempty"`
+						SupportedTypes      *[]drsapi.AccessMethodAuthorizationsSupportedTypes `json:"supported_types,omitempty"`
+					}{
+						BearerAuthIssuers: &issuers,
 					},
 				},
 			},
@@ -92,12 +109,31 @@ var Cmd = &cobra.Command{
 		fmt.Fprintf(cmd.OutOrStdout(), "Uploading %s (%s)...\n", srcPath, upload.FormatSize(info.Size()))
 		fmt.Fprintf(cmd.OutOrStdout(), "DID: %s\n", did)
 
-		_, err = upload.RegisterFile(ctx, c.Data(), dc, drsObj, srcPath, "")
+		registered, err := upload.RegisterFile(ctx, c.Data(), c.DRS(), drsObj, srcPath, bucketName)
 		if err != nil {
 			return fmt.Errorf("upload failed: %w", err)
 		}
 
-		fmt.Fprintf(cmd.OutOrStdout(), "\nsuccessfully uploaded %s\n", did)
+		finalID := did
+		if registered != nil && strings.TrimSpace(registered.Id) != "" {
+			finalID = strings.TrimSpace(registered.Id)
+		}
+		if registered != nil && registered.AccessMethods != nil && len(*registered.AccessMethods) > 0 {
+			objectURL := ""
+			for _, am := range *registered.AccessMethods {
+				if am.AccessUrl != nil && strings.TrimSpace(am.AccessUrl.Url) != "" {
+					objectURL = strings.TrimSpace(am.AccessUrl.Url)
+					break
+				}
+			}
+			if objectURL != "" {
+				if err := c.Index().Upsert(ctx, finalID, objectURL, name, info.Size(), checksum, []string{authz}); err != nil {
+					return fmt.Errorf("sync index record: %w", err)
+				}
+			}
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "\nsuccessfully uploaded %s\n", finalID)
+		fmt.Fprintf(cmd.OutOrStdout(), "requested DID: %s\n", did)
 		return nil
 	},
 }

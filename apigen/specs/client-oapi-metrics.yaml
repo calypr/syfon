@@ -1,0 +1,4 @@
+package: metricsapi
+generate:
+  client: true
+  models: true

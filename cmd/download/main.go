@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	syclient "github.com/calypr/syfon/client"
+	"github.com/calypr/syfon/client/syfonclient"
 	"github.com/spf13/cobra"
 )
 
@@ -42,9 +43,9 @@ var Cmd = &cobra.Command{
 			if err != nil {
 				return fmt.Errorf("resolve output filename from record: %w", err)
 			}
-			name := strings.TrimSpace(rec.GetFileName())
-			if name == "" {
-				name = did
+			name := did
+			if rec.FileName != nil {
+				name = strings.TrimSpace(*rec.FileName)
 			}
 			outPath = name
 		}
@@ -56,7 +57,10 @@ var Cmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("get download url: %w", err)
 		}
-		downloadURL := strings.TrimSpace((&signed).GetUrl())
+		downloadURL := ""
+		if signed.Url != nil {
+			downloadURL = strings.TrimSpace(*signed.Url)
+		}
 		if downloadURL == "" {
 			return fmt.Errorf("empty download url for did %s", did)
 		}
@@ -68,14 +72,18 @@ var Cmd = &cobra.Command{
 	},
 }
 
-func downloadURLToPath(ctx context.Context, rawURL, outPath string, c *syclient.Client) error {
+func downloadURLToPath(ctx context.Context, rawURL, outPath string, c syfonclient.SyfonClient) error {
 	parsed, err := url.Parse(strings.TrimSpace(rawURL))
 	if err != nil {
 		return fmt.Errorf("parse download url: %w", err)
 	}
 	switch strings.ToLower(parsed.Scheme) {
-	case "file":
-		data, err := os.ReadFile(parsed.Path)
+	case "", "file":
+		srcPath := parsed.Path
+		if srcPath == "" {
+			srcPath = rawURL
+		}
+		data, err := os.ReadFile(srcPath)
 		if err != nil {
 			return fmt.Errorf("read file source: %w", err)
 		}
@@ -84,8 +92,12 @@ func downloadURLToPath(ctx context.Context, rawURL, outPath string, c *syclient.
 		}
 		return nil
 	case "http", "https":
-		rb := c.Requestor().New(http.MethodGet, rawURL)
-		resp, err := c.Requestor().Do(ctx, rb)
+		var resp *http.Response
+		concrete, ok := c.(*syclient.Client)
+		if !ok {
+			return fmt.Errorf("client implementation does not support raw requests")
+		}
+		err := concrete.Requestor().Do(ctx, http.MethodGet, rawURL, nil, &resp)
 		if err != nil {
 			return fmt.Errorf("download request failed: %w", err)
 		}

@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	syclient "github.com/calypr/syfon/client"
+	"github.com/calypr/syfon/client/syfonclient"
 	"github.com/spf13/cobra"
 )
 
@@ -39,7 +40,10 @@ var Cmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("get download url: %w", err)
 		}
-		downloadURL := strings.TrimSpace((&signed).GetUrl())
+		downloadURL := ""
+		if signed.Url != nil {
+			downloadURL = strings.TrimSpace(*signed.Url)
+		}
 		if downloadURL == "" {
 			return fmt.Errorf("empty download url for did %s", did)
 		}
@@ -54,7 +58,7 @@ var Cmd = &cobra.Command{
 		// Fetch the latest record to preserve authorizations during upsert
 		var authz []string
 		if rec, err := c.Index().Get(ctx, did); err == nil {
-			authz = rec.GetAuthz()
+			authz = rec.Authz
 		}
 
 		if err := c.Index().Upsert(ctx, did, "", "", 0, sum, authz); err != nil {
@@ -66,21 +70,29 @@ var Cmd = &cobra.Command{
 	},
 }
 
-func readURLBytes(ctx context.Context, rawURL string, c *syclient.Client) ([]byte, error) {
+func readURLBytes(ctx context.Context, rawURL string, c syfonclient.SyfonClient) ([]byte, error) {
 	parsed, err := url.Parse(strings.TrimSpace(rawURL))
 	if err != nil {
 		return nil, fmt.Errorf("parse download url: %w", err)
 	}
 	switch strings.ToLower(parsed.Scheme) {
-	case "file":
-		data, err := os.ReadFile(parsed.Path)
+	case "", "file":
+		srcPath := parsed.Path
+		if srcPath == "" {
+			srcPath = rawURL
+		}
+		data, err := os.ReadFile(srcPath)
 		if err != nil {
 			return nil, fmt.Errorf("read file source: %w", err)
 		}
 		return data, nil
 	case "http", "https":
-		rb := c.Requestor().New(http.MethodGet, rawURL)
-		resp, err := c.Requestor().Do(ctx, rb)
+		var resp *http.Response
+		concrete, ok := c.(*syclient.Client)
+		if !ok {
+			return nil, fmt.Errorf("client implementation does not support raw requests")
+		}
+		err := concrete.Requestor().Do(ctx, http.MethodGet, rawURL, nil, &resp)
 		if err != nil {
 			return nil, fmt.Errorf("download request failed: %w", err)
 		}

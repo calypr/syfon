@@ -8,8 +8,9 @@ import (
 	"runtime"
 
 	openapispec "github.com/calypr/syfon/apigen/api"
-	"github.com/calypr/syfon/config"
-	"github.com/gorilla/mux"
+	"github.com/calypr/syfon/internal/config"
+	"github.com/calypr/syfon/internal/api/routeutil"
+	"github.com/gofiber/fiber/v3"
 	"gopkg.in/yaml.v3"
 )
 
@@ -37,14 +38,14 @@ const swaggerUIHTML = `<!doctype html>
 `
 
 // RegisterSwaggerRoutes adds Swagger/OpenAPI docs endpoints.
-func RegisterSwaggerRoutes(router *mux.Router) {
-	router.HandleFunc(config.RouteSwaggerUI, handleSwaggerUI).Methods(http.MethodGet)
-	router.HandleFunc(config.RouteSwaggerUIAlt, handleSwaggerUI).Methods(http.MethodGet)
+func RegisterSwaggerRoutes(router fiber.Router) {
+	router.Get(routeutil.FiberPath(config.RouteSwaggerUI), routeutil.Handler(handleSwaggerUI))
+	router.Get(routeutil.FiberPath(config.RouteSwaggerUIAlt), routeutil.Handler(handleSwaggerUI))
 	// OpenAPI is intentionally exposed only under /index for proxy compatibility.
-	router.HandleFunc(config.RouteOpenAPISpec, handleOpenAPISpec).Methods(http.MethodGet)
-	router.HandleFunc(config.RouteLFSSpec, handleLFSOpenAPISpec).Methods(http.MethodGet)
-	router.HandleFunc(config.RouteBucketSpec, handleBucketOpenAPISpec).Methods(http.MethodGet)
-	router.HandleFunc(config.RouteInternalSpec, handleInternalOpenAPISpec).Methods(http.MethodGet)
+	router.Get(routeutil.FiberPath(config.RouteOpenAPISpec), routeutil.Handler(handleOpenAPISpec))
+	router.Get(routeutil.FiberPath(config.RouteLFSSpec), routeutil.Handler(handleLFSOpenAPISpec))
+	router.Get(routeutil.FiberPath(config.RouteBucketSpec), routeutil.Handler(handleBucketOpenAPISpec))
+	router.Get(routeutil.FiberPath(config.RouteInternalSpec), routeutil.Handler(handleInternalOpenAPISpec))
 }
 
 func handleSwaggerUI(w http.ResponseWriter, _ *http.Request) {
