@@ -15,6 +15,7 @@ config_sample.yaml
 *.cover
 *.prof
 *.log
+*.gocache
 coverage.*
 
 # Local build directories
@@ -30,7 +31,7 @@ coverage.*
 .DS_Store
 .idea/
 .vscode/
-
+.gomodcache/*
 site/
 
 syfon

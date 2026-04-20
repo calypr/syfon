@@ -1,12 +1,22 @@
 name: Syfon CI
 
+permissions:
+  actions: write
+  contents: read
+  id-token: write
+
 on:
-  push:
   pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches:
+      - main
+      - development
   workflow_dispatch:
+  workflow_call:
 
 concurrency:
-  group: "${{ github.workflow }} @ ${{ github.event.pull_request.head.label || github.head_ref || github.ref }}"
+  group: syfon-${{ github.event.pull_request.head.ref || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -31,31 +41,248 @@ jobs:
 
       - name: Run server endpoint router tests
         run: |
-          go test ./cmd/server \
+          CGO_ENABLED=1 go test ./cmd/server \
             -run 'Test(AllRegisteredEndpoints_WithMocks|RegisterAPIRoutes_StaticBeforeParamAcrossControllers|RegisterControllerRoutes_StaticBeforeParam)' \
             -v
 
       - name: Run coverage
+        env:
+          SYFON_E2E_MOCK_SERVERS: 1
         run: make coverage
 
+      - name: Run client coverage
+        working-directory: client
+        run: |
+          mkdir -p coverage
+          go test -count=1 -covermode=atomic -coverprofile=coverage/coverage.out ./...
+
+      - name: Upload root coverage to Codecov (OIDC)
+        id: codecov_root_oidc
+        continue-on-error: true
+        uses: codecov/codecov-action@v5
+        env:
+          CODECOV_SLUG: calypr/syfon
+        with:
+          use_oidc: true
+          files: coverage/coverage.out
+          flags: root
+          disable_search: true
+          verbose: true
+          fail_ci_if_error: true
+
+      - name: Upload root coverage to Codecov (token fallback)
+        if: steps.codecov_root_oidc.outcome == 'failure'
+        continue-on-error: true
+        uses: codecov/codecov-action@v5
+        env:
+          CODECOV_SLUG: calypr/syfon
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage/coverage.out
+          flags: root
+          disable_search: true
+          verbose: true
+          fail_ci_if_error: false
+
+      - name: Upload client coverage to Codecov (OIDC)
+        id: codecov_client_oidc
+        continue-on-error: true
+        uses: codecov/codecov-action@v5
+        env:
+          CODECOV_SLUG: calypr/syfon
+        with:
+          use_oidc: true
+          files: client/coverage/coverage.out
+          flags: client
+          disable_search: true
+          verbose: true
+          fail_ci_if_error: true
+
+      - name: Upload client coverage to Codecov (token fallback)
+        if: steps.codecov_client_oidc.outcome == 'failure'
+        continue-on-error: true
+        uses: codecov/codecov-action@v5
+        env:
+          CODECOV_SLUG: calypr/syfon
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: client/coverage/coverage.out
+          flags: client
+          disable_search: true
+          verbose: true
+          fail_ci_if_error: false
       - name: Upload coverage artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: coverage
+          name: coverage-${{ github.run_id }}
           path: |
             coverage/coverage.out
             coverage/coverage.txt
             coverage/coverage.html
+            client/coverage/coverage.out
 
       - name: Run go vet
         run: go vet ./...
 
-  docker-build-smoke:
-    name: Docker Build Smoke Test
+  integration-test:
+    name: Docker Integration Test
     runs-on: ubuntu-latest
     steps:
       - name: Check out code
         uses: actions/checkout@v4
 
-      - name: Build container image
-        run: docker build -t syfon:ci .
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run Docker-backed CLI E2E tests (MinIO, fake-gcs-server, Azurite)
+        env:
+          SYFON_E2E_DOCKER: 1
+        run: |
+          mkdir -p coverage
+          go test ./cmd \
+            -run '^TestSyfonDocker(MinIOE2E|MultipartUpload|FakeGCSE2E|AzuriteE2E)$' \
+            -v -count=1 -covermode=atomic -coverprofile=coverage/cmd-docker.out
+
+      - name: Run Docker-backed mock server tests
+        env:
+          SYFON_E2E_MOCK_SERVERS: 1
+        run: |
+          go test ./urlmanager -run TestMVPMockServers_FakeGCSAndAzurite -count=1 -v
+
+      - name: Upload Docker E2E cmd coverage to Codecov (OIDC)
+        id: codecov_docker_cmd_oidc
+        continue-on-error: true
+        uses: codecov/codecov-action@v5
+        env:
+          CODECOV_SLUG: calypr/syfon
+        with:
+          use_oidc: true
+          files: coverage/cmd-docker.out
+          flags: root
+          disable_search: true
+          verbose: true
+          fail_ci_if_error: true
+
+      - name: Upload Docker E2E cmd coverage to Codecov (token fallback)
+        if: steps.codecov_docker_cmd_oidc.outcome == 'failure'
+        continue-on-error: true
+        uses: codecov/codecov-action@v5
+        env:
+          CODECOV_SLUG: calypr/syfon
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage/cmd-docker.out
+          flags: root
+          disable_search: true
+          verbose: true
+          fail_ci_if_error: false
+
+      - name: Upload Docker E2E coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-docker-e2e-${{ github.run_id }}
+          path: coverage/cmd-docker.out
+          if-no-files-found: error
+
+  build-and-push:
+    name: Build syfon
+    runs-on: ${{ matrix.arch == 'amd64' && 'ubuntu-latest' || 'ubuntu-24.04-arm' }}
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    needs: [test]
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: quay.io/ohsu-comp-bio/syfon
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,format=short
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable=${{ github.ref_type == 'tag' && !contains(github.ref_name, '-rc.') }}
+
+      - name: Login to Quay.io
+        uses: docker/login-action@v3
+        with:
+          registry: quay.io
+          username: ${{ secrets.QUAY_USERNAME }}
+          password: ${{ secrets.QUAY_ROBOT_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/${{ matrix.arch }}
+          # We push by digest first so we can merge them in the next job
+          outputs: type=image,name=quay.io/ohsu-comp-bio/syfon,push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=syfon-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=syfon-${{ matrix.arch }}
+
+      - name: Export digest
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/digests
+          printf '%s\n' "${{ steps.build.outputs.digest }}" > "/tmp/digests/${{ matrix.arch }}.txt"
+          
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-syfon-${{ matrix.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    name: Merge and Tag
+    runs-on: ubuntu-latest
+    needs: [build-and-push]
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-syfon-*
+          merge-multiple: true
+
+      - name: Docker meta (re-run for tags)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: quay.io/ohsu-comp-bio/syfon
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,format=short
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ github.ref_type == 'tag' && !contains(github.ref_name, '-rc.') }}
+
+      - name: Login to Quay.io
+        uses: docker/login-action@v3
+        with:
+          registry: quay.io
+          username: ${{ secrets.QUAY_USERNAME }}
+          password: ${{ secrets.QUAY_ROBOT_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Create manifest list and push
+        run: |
+          set -euo pipefail
+          mapfile -t digests < <(cat /tmp/digests/*.txt)
+          docker buildx imagetools create $(echo $DOCKER_METADATA_OUTPUT_TAGS | xargs -n 1 echo -t) \
+            $(printf 'quay.io/ohsu-comp-bio/syfon@%s ' "${digests[@]}")

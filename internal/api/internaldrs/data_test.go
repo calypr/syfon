@@ -60,6 +60,73 @@ func TestHandleInternalDownload(t *testing.T) {
 	}
 }
 
+func TestHandleInternalDownloadPart(t *testing.T) {
+	mockDB := &testutils.MockDatabase{
+		Objects: map[string]*drs.DrsObject{
+			"test-file-id": {
+				Id: "test-file-id",
+				AccessMethods: []drs.AccessMethod{
+					{
+						Type: "s3",
+						AccessUrl: drs.AccessMethodAccessUrl{
+							Url: "s3://bucket/key",
+						},
+					},
+				},
+			},
+		},
+	}
+	mockUM := &testutils.MockUrlManager{}
+
+	t.Run("success", func(t *testing.T) {
+		req, _ := http.NewRequest("GET", "/data/download/test-file-id/part?start=0&end=1024", nil)
+		req = mux.SetURLVars(req, map[string]string{"file_id": "test-file-id"})
+
+		rr := httptest.NewRecorder()
+		handleInternalDownloadPart(rr, req, mockDB, mockUM)
+
+		if rr.Code != http.StatusOK {
+			t.Errorf("expected 200, got %d", rr.Code)
+		}
+
+		var resp internalapi.InternalSignedURL
+		json.NewDecoder(rr.Body).Decode(&resp)
+		if !strings.Contains(resp.GetUrl(), "range=0-1024") {
+			t.Errorf("expected signed range url, got %v", resp.GetUrl())
+		}
+	})
+
+	t.Run("missing parameters", func(t *testing.T) {
+		req, _ := http.NewRequest("GET", "/data/download/test-file-id/part?start=0", nil)
+		req = mux.SetURLVars(req, map[string]string{"file_id": "test-file-id"})
+		rr := httptest.NewRecorder()
+		handleInternalDownloadPart(rr, req, mockDB, mockUM)
+		if rr.Code != http.StatusBadRequest {
+			t.Errorf("expected 400 for missing param, got %d", rr.Code)
+		}
+	})
+
+	t.Run("invalid range", func(t *testing.T) {
+		req, _ := http.NewRequest("GET", "/data/download/test-file-id/part?start=100&end=50", nil)
+		req = mux.SetURLVars(req, map[string]string{"file_id": "test-file-id"})
+		rr := httptest.NewRecorder()
+		handleInternalDownloadPart(rr, req, mockDB, mockUM)
+		if rr.Code != http.StatusBadRequest {
+			t.Errorf("expected 400 for invalid range, got %d", rr.Code)
+		}
+	})
+
+	t.Run("file not found", func(t *testing.T) {
+		req, _ := http.NewRequest("GET", "/data/download/unknown/part?start=0&end=100", nil)
+		req = mux.SetURLVars(req, map[string]string{"file_id": "unknown"})
+		rr := httptest.NewRecorder()
+		handleInternalDownloadPart(rr, req, mockDB, mockUM)
+		if rr.Code != http.StatusNotFound {
+			t.Errorf("expected 404, got %d", rr.Code)
+		}
+	})
+}
+
 func TestHandleInternalDownload_ResolvesByChecksum(t *testing.T) {
 	const (
 		did = "did-123"
@@ -152,6 +219,56 @@ func TestHandleInternalDownload_ResolvesByUUID(t *testing.T) {
 	if !strings.Contains(resp.GetUrl(), "/"+did) {
 		t.Fatalf("expected signed url to include UUID-backed key, got %s", resp.GetUrl())
 	}
+}
+
+func TestHandleInternalDownload_MultiCloud(t *testing.T) {
+	mockDB := &testutils.MockDatabase{
+		Objects: map[string]*drs.DrsObject{
+			"gcs-file": {
+				Id: "gcs-file",
+				AccessMethods: []drs.AccessMethod{
+					{
+						Type: "gs",
+						AccessUrl: drs.AccessMethodAccessUrl{
+							Url: "gs://gcs-bucket/obj",
+						},
+					},
+				},
+			},
+			"azure-file": {
+				Id: "azure-file",
+				AccessMethods: []drs.AccessMethod{
+					{
+						Type: "azblob",
+						AccessUrl: drs.AccessMethodAccessUrl{
+							Url: "azblob://azure-bucket/obj",
+						},
+					},
+				},
+			},
+		},
+	}
+	mockUM := &testutils.MockUrlManager{}
+
+	t.Run("gcs", func(t *testing.T) {
+		req, _ := http.NewRequest("GET", "/data/download/gcs-file", nil)
+		req = mux.SetURLVars(req, map[string]string{"file_id": "gcs-file"})
+		rr := httptest.NewRecorder()
+		handleInternalDownload(rr, req, mockDB, mockUM)
+		if rr.Code != http.StatusOK {
+			t.Errorf("expected 200 for GCS, got %d", rr.Code)
+		}
+	})
+
+	t.Run("azure", func(t *testing.T) {
+		req, _ := http.NewRequest("GET", "/data/download/azure-file", nil)
+		req = mux.SetURLVars(req, map[string]string{"file_id": "azure-file"})
+		rr := httptest.NewRecorder()
+		handleInternalDownload(rr, req, mockDB, mockUM)
+		if rr.Code != http.StatusOK {
+			t.Errorf("expected 200 for Azure, got %d", rr.Code)
+		}
+	})
 }
 
 func TestHandleInternalUploadBlank(t *testing.T) {

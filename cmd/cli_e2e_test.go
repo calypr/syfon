@@ -23,10 +23,13 @@ import (
 	"github.com/calypr/syfon/service"
 	"github.com/calypr/syfon/urlmanager"
 	"github.com/google/uuid"
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 func executeRootCommand(t *testing.T, args ...string) (string, error) {
 	t.Helper()
+	resetCommandFlags(RootCmd)
 	var out bytes.Buffer
 	var errOut bytes.Buffer
 	RootCmd.SetOut(&out)
@@ -34,6 +37,21 @@ func executeRootCommand(t *testing.T, args ...string) (string, error) {
 	RootCmd.SetArgs(args)
 	err := RootCmd.Execute()
 	return strings.TrimSpace(out.String() + errOut.String()), err
+}
+
+func resetCommandFlags(cmd *cobra.Command) {
+	resetFlagSet(cmd.PersistentFlags())
+	resetFlagSet(cmd.Flags())
+	for _, child := range cmd.Commands() {
+		resetCommandFlags(child)
+	}
+}
+
+func resetFlagSet(fs *pflag.FlagSet) {
+	fs.VisitAll(func(f *pflag.Flag) {
+		_ = f.Value.Set(f.DefValue)
+		f.Changed = false
+	})
 }
 
 func newSyfonTestServer(t *testing.T) *httptest.Server {
@@ -102,7 +120,7 @@ func TestSyfonUploadDownloadAddURLAndSHA256(t *testing.T) {
 	}
 
 	uploadDID := uuid.NewString()
-	out, err := executeRootCommand(t, "--server", server.URL, "upload", "--file", srcPath, "--did", uploadDID)
+	out, err := executeRootCommand(t, "--server", server.URL, "upload", "--file", srcPath, "--did", uploadDID, "--authz", "/programs/syfon/projects/e2e")
 	if err != nil {
 		t.Fatalf("upload command failed: %v output=%s", err, out)
 	}
@@ -133,7 +151,11 @@ func TestSyfonUploadDownloadAddURLAndSHA256(t *testing.T) {
 		t.Fatalf("sha256sum output missing expected hash: %s", hashOut)
 	}
 
-	rec, err := syclient.New(server.URL).GetRecord(context.Background(), uploadDID)
+	c, err := syclient.New(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, err := c.Index().Get(context.Background(), uploadDID)
 	if err != nil {
 		t.Fatalf("fetch updated record: %v", err)
 	}
@@ -155,6 +177,7 @@ func TestSyfonUploadDownloadAddURLAndSHA256(t *testing.T) {
 		"add-url",
 		"--did", addURLDID,
 		"--url", fileURL,
+		"--authz", "/programs/syfon/projects/e2e",
 		"--name", "existing-url-source.txt",
 		"--size", "21",
 	)

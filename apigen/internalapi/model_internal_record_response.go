@@ -12,6 +12,8 @@ package internalapi
 
 import (
 	"encoding/json"
+	"bytes"
+	"fmt"
 )
 
 // checks if the InternalRecordResponse type satisfies the MappedNullable interface at compile time
@@ -19,15 +21,19 @@ var _ MappedNullable = &InternalRecordResponse{}
 
 // InternalRecordResponse struct for InternalRecordResponse
 type InternalRecordResponse struct {
-	Did *string `json:"did,omitempty"`
+	Did string `json:"did"`
 	// Hash map, e.g. {\"sha256\":\"...\"}
 	Hashes *map[string]string `json:"hashes,omitempty"`
 	Size *int64 `json:"size,omitempty"`
 	Urls []string `json:"urls,omitempty"`
-	Authz []string `json:"authz,omitempty"`
+	Authz []string `json:"authz"`
 	FileName *string `json:"file_name,omitempty"`
 	Organization *string `json:"organization,omitempty"`
 	Project *string `json:"project,omitempty"`
+	Version *string `json:"version,omitempty"`
+	Description *string `json:"description,omitempty"`
+	CreatedTime *string `json:"created_time,omitempty"`
+	UpdatedTime *string `json:"updated_time,omitempty"`
 	Baseid *string `json:"baseid,omitempty"`
 	Rev *string `json:"rev,omitempty"`
 	CreatedDate *string `json:"created_date,omitempty"`
@@ -35,12 +41,16 @@ type InternalRecordResponse struct {
 	Uploader *string `json:"uploader,omitempty"`
 }
 
+type _InternalRecordResponse InternalRecordResponse
+
 // NewInternalRecordResponse instantiates a new InternalRecordResponse object
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewInternalRecordResponse() *InternalRecordResponse {
+func NewInternalRecordResponse(did string, authz []string) *InternalRecordResponse {
 	this := InternalRecordResponse{}
+	this.Did = did
+	this.Authz = authz
 	return &this
 }
 
@@ -52,36 +62,28 @@ func NewInternalRecordResponseWithDefaults() *InternalRecordResponse {
 	return &this
 }
 
-// GetDid returns the Did field value if set, zero value otherwise.
+// GetDid returns the Did field value
 func (o *InternalRecordResponse) GetDid() string {
-	if o == nil || IsNil(o.Did) {
+	if o == nil {
 		var ret string
 		return ret
 	}
-	return *o.Did
+
+	return o.Did
 }
 
-// GetDidOk returns a tuple with the Did field value if set, nil otherwise
+// GetDidOk returns a tuple with the Did field value
 // and a boolean to check if the value has been set.
 func (o *InternalRecordResponse) GetDidOk() (*string, bool) {
-	if o == nil || IsNil(o.Did) {
+	if o == nil {
 		return nil, false
 	}
-	return o.Did, true
+	return &o.Did, true
 }
 
-// HasDid returns a boolean if a field has been set.
-func (o *InternalRecordResponse) HasDid() bool {
-	if o != nil && !IsNil(o.Did) {
-		return true
-	}
-
-	return false
-}
-
-// SetDid gets a reference to the given string and assigns it to the Did field.
+// SetDid sets field value
 func (o *InternalRecordResponse) SetDid(v string) {
-	o.Did = &v
+	o.Did = v
 }
 
 // GetHashes returns the Hashes field value if set, zero value otherwise.
@@ -180,34 +182,26 @@ func (o *InternalRecordResponse) SetUrls(v []string) {
 	o.Urls = v
 }
 
-// GetAuthz returns the Authz field value if set, zero value otherwise.
+// GetAuthz returns the Authz field value
 func (o *InternalRecordResponse) GetAuthz() []string {
-	if o == nil || IsNil(o.Authz) {
+	if o == nil {
 		var ret []string
 		return ret
 	}
+
 	return o.Authz
 }
 
-// GetAuthzOk returns a tuple with the Authz field value if set, nil otherwise
+// GetAuthzOk returns a tuple with the Authz field value
 // and a boolean to check if the value has been set.
 func (o *InternalRecordResponse) GetAuthzOk() ([]string, bool) {
-	if o == nil || IsNil(o.Authz) {
+	if o == nil {
 		return nil, false
 	}
 	return o.Authz, true
 }
 
-// HasAuthz returns a boolean if a field has been set.
-func (o *InternalRecordResponse) HasAuthz() bool {
-	if o != nil && !IsNil(o.Authz) {
-		return true
-	}
-
-	return false
-}
-
-// SetAuthz gets a reference to the given []string and assigns it to the Authz field.
+// SetAuthz sets field value
 func (o *InternalRecordResponse) SetAuthz(v []string) {
 	o.Authz = v
 }
@@ -306,6 +300,134 @@ func (o *InternalRecordResponse) HasProject() bool {
 // SetProject gets a reference to the given string and assigns it to the Project field.
 func (o *InternalRecordResponse) SetProject(v string) {
 	o.Project = &v
+}
+
+// GetVersion returns the Version field value if set, zero value otherwise.
+func (o *InternalRecordResponse) GetVersion() string {
+	if o == nil || IsNil(o.Version) {
+		var ret string
+		return ret
+	}
+	return *o.Version
+}
+
+// GetVersionOk returns a tuple with the Version field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *InternalRecordResponse) GetVersionOk() (*string, bool) {
+	if o == nil || IsNil(o.Version) {
+		return nil, false
+	}
+	return o.Version, true
+}
+
+// HasVersion returns a boolean if a field has been set.
+func (o *InternalRecordResponse) HasVersion() bool {
+	if o != nil && !IsNil(o.Version) {
+		return true
+	}
+
+	return false
+}
+
+// SetVersion gets a reference to the given string and assigns it to the Version field.
+func (o *InternalRecordResponse) SetVersion(v string) {
+	o.Version = &v
+}
+
+// GetDescription returns the Description field value if set, zero value otherwise.
+func (o *InternalRecordResponse) GetDescription() string {
+	if o == nil || IsNil(o.Description) {
+		var ret string
+		return ret
+	}
+	return *o.Description
+}
+
+// GetDescriptionOk returns a tuple with the Description field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *InternalRecordResponse) GetDescriptionOk() (*string, bool) {
+	if o == nil || IsNil(o.Description) {
+		return nil, false
+	}
+	return o.Description, true
+}
+
+// HasDescription returns a boolean if a field has been set.
+func (o *InternalRecordResponse) HasDescription() bool {
+	if o != nil && !IsNil(o.Description) {
+		return true
+	}
+
+	return false
+}
+
+// SetDescription gets a reference to the given string and assigns it to the Description field.
+func (o *InternalRecordResponse) SetDescription(v string) {
+	o.Description = &v
+}
+
+// GetCreatedTime returns the CreatedTime field value if set, zero value otherwise.
+func (o *InternalRecordResponse) GetCreatedTime() string {
+	if o == nil || IsNil(o.CreatedTime) {
+		var ret string
+		return ret
+	}
+	return *o.CreatedTime
+}
+
+// GetCreatedTimeOk returns a tuple with the CreatedTime field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *InternalRecordResponse) GetCreatedTimeOk() (*string, bool) {
+	if o == nil || IsNil(o.CreatedTime) {
+		return nil, false
+	}
+	return o.CreatedTime, true
+}
+
+// HasCreatedTime returns a boolean if a field has been set.
+func (o *InternalRecordResponse) HasCreatedTime() bool {
+	if o != nil && !IsNil(o.CreatedTime) {
+		return true
+	}
+
+	return false
+}
+
+// SetCreatedTime gets a reference to the given string and assigns it to the CreatedTime field.
+func (o *InternalRecordResponse) SetCreatedTime(v string) {
+	o.CreatedTime = &v
+}
+
+// GetUpdatedTime returns the UpdatedTime field value if set, zero value otherwise.
+func (o *InternalRecordResponse) GetUpdatedTime() string {
+	if o == nil || IsNil(o.UpdatedTime) {
+		var ret string
+		return ret
+	}
+	return *o.UpdatedTime
+}
+
+// GetUpdatedTimeOk returns a tuple with the UpdatedTime field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *InternalRecordResponse) GetUpdatedTimeOk() (*string, bool) {
+	if o == nil || IsNil(o.UpdatedTime) {
+		return nil, false
+	}
+	return o.UpdatedTime, true
+}
+
+// HasUpdatedTime returns a boolean if a field has been set.
+func (o *InternalRecordResponse) HasUpdatedTime() bool {
+	if o != nil && !IsNil(o.UpdatedTime) {
+		return true
+	}
+
+	return false
+}
+
+// SetUpdatedTime gets a reference to the given string and assigns it to the UpdatedTime field.
+func (o *InternalRecordResponse) SetUpdatedTime(v string) {
+	o.UpdatedTime = &v
 }
 
 // GetBaseid returns the Baseid field value if set, zero value otherwise.
@@ -478,9 +600,7 @@ func (o InternalRecordResponse) MarshalJSON() ([]byte, error) {
 
 func (o InternalRecordResponse) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
-	if !IsNil(o.Did) {
-		toSerialize["did"] = o.Did
-	}
+	toSerialize["did"] = o.Did
 	if !IsNil(o.Hashes) {
 		toSerialize["hashes"] = o.Hashes
 	}
@@ -490,9 +610,7 @@ func (o InternalRecordResponse) ToMap() (map[string]interface{}, error) {
 	if !IsNil(o.Urls) {
 		toSerialize["urls"] = o.Urls
 	}
-	if !IsNil(o.Authz) {
-		toSerialize["authz"] = o.Authz
-	}
+	toSerialize["authz"] = o.Authz
 	if !IsNil(o.FileName) {
 		toSerialize["file_name"] = o.FileName
 	}
@@ -501,6 +619,18 @@ func (o InternalRecordResponse) ToMap() (map[string]interface{}, error) {
 	}
 	if !IsNil(o.Project) {
 		toSerialize["project"] = o.Project
+	}
+	if !IsNil(o.Version) {
+		toSerialize["version"] = o.Version
+	}
+	if !IsNil(o.Description) {
+		toSerialize["description"] = o.Description
+	}
+	if !IsNil(o.CreatedTime) {
+		toSerialize["created_time"] = o.CreatedTime
+	}
+	if !IsNil(o.UpdatedTime) {
+		toSerialize["updated_time"] = o.UpdatedTime
 	}
 	if !IsNil(o.Baseid) {
 		toSerialize["baseid"] = o.Baseid
@@ -518,6 +648,44 @@ func (o InternalRecordResponse) ToMap() (map[string]interface{}, error) {
 		toSerialize["uploader"] = o.Uploader
 	}
 	return toSerialize, nil
+}
+
+func (o *InternalRecordResponse) UnmarshalJSON(data []byte) (err error) {
+	// This validates that all required properties are included in the JSON object
+	// by unmarshalling the object into a generic map with string keys and checking
+	// that every required field exists as a key in the generic map.
+	requiredProperties := []string{
+		"did",
+		"authz",
+	}
+
+	allProperties := make(map[string]interface{})
+
+	err = json.Unmarshal(data, &allProperties)
+
+	if err != nil {
+		return err;
+	}
+
+	for _, requiredProperty := range(requiredProperties) {
+		if _, exists := allProperties[requiredProperty]; !exists {
+			return fmt.Errorf("no value given for required property %v", requiredProperty)
+		}
+	}
+
+	varInternalRecordResponse := _InternalRecordResponse{}
+
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	err = decoder.Decode(&varInternalRecordResponse)
+
+	if err != nil {
+		return err
+	}
+
+	*o = InternalRecordResponse(varInternalRecordResponse)
+
+	return err
 }
 
 type NullableInternalRecordResponse struct {

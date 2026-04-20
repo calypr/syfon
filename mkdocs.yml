@@ -1,16 +1,52 @@
-site_name: sifon
+site_name: Syfon
+site_url: https://calypr.org/syfon/
+site_description: A lightweight, production-grade GA4GH DRS server in Go.
 theme:
-  name: readthedocs
-  custom_dir: overrides
+  name: material
+  logo: images/syfon-logo.png
+  favicon: images/syfon-logo.png
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+
 markdown_extensions:
+  - admonition
+  - pymdownx.details
   - pymdownx.superfences:
       custom_fences:
         - name: mermaid
           class: mermaid
           format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - tables
+  - toc:
+      permalink: true
+
 nav:
   - Home: index.md
   - Configuration: configuration.md
   - Encryption: encryption.md
   - Deployment: deployment.md
   - Troubleshooting: troubleshooting.md
+  - Advanced:
+    - Multi-Cloud Multipart Downloads: multi-cloud-multipart.md
+    - apigen Module Release: apigen-module-release.md
+  - Architecture Decisions:
+    - Internal vs GA4GH DRS API: adr-internal-vs-ga4gh-drs.md
+    - One-Time Bootstrap Claim: adr-one-time-program-bootstrap-claim.md

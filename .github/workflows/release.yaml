@@ -1,0 +1,166 @@
+# Publishes releases to GitHub when a new semver tag is pushed.
+# Ref: https://semver.org
+#
+# Strategy: build natively on each target runner, then combine artifacts into
+# a GitHub Release. This avoids CGO cross-compilation entirely and does not
+# require a GoReleaser Pro subscription.
+
+name: Release
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  actions: write
+  id-token: write
+
+jobs:
+  test:
+    name: CI
+    uses: ./.github/workflows/ci.yaml
+    secrets: inherit
+
+  build:
+    name: Build (${{ matrix.os }}/${{ matrix.arch }})
+    needs: [test]
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: linux, arch: amd64, runner: ubuntu-latest }
+          - { os: linux, arch: arm64, runner: ubuntu-24.04-arm }
+          - { os: darwin, arch: amd64, runner: macos-latest }
+          - { os: darwin, arch: arm64, runner: macos-latest }
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.os == 'linux' && 'linux' || 'darwin' }}
+          GOARCH: ${{ matrix.arch }}
+          GIT_BRANCH: ${{ github.ref_name }}
+          GIT_UPSTREAM: ${{ github.server_url }}/${{ github.repository }}
+        run: |
+          CGO_ENABLED=1 make build
+          mv syfon syfon-${{ matrix.os }}-${{ matrix.arch }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: syfon-${{ matrix.os }}-${{ matrix.arch }}
+          path: syfon-${{ matrix.os }}-${{ matrix.arch }}
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    name: Release
+    needs: [build]
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: syfon-*
+          merge-multiple: true
+
+      - name: Package archives and checksums
+        run: |
+          set -euo pipefail
+          cd dist
+          for binary in syfon-linux-* syfon-darwin-*; do
+            [[ -f "$binary" ]] || continue
+            archive="${binary}-${{ github.ref_name }}.tar.gz"
+            # Rename to plain "syfon" inside the archive so the install script
+            # can extract and mv syfon $DEST without any platform-specific logic.
+            cp "$binary" syfon
+            tar -czf "$archive" syfon
+            rm syfon
+          done
+          sha256sum *.tar.gz > syfon-${{ github.ref_name }}-checksums.txt
+          ls -lh
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          # Emit commits between the previous tag and this one as the release notes.
+          prev=$(git tag --sort=-version:refname | grep -E '^v[0-9]' | sed -n '2p')
+          if [[ -n "$prev" ]]; then
+            notes=$(git log "${prev}".."${{ github.ref_name }}" --pretty=format:'- %s (%h)' --no-merges)
+          else
+            notes=$(git log "${{ github.ref_name }}" --pretty=format:'- %s (%h)' --no-merges)
+          fi
+          # Write to a file to safely handle multi-line content
+          echo "$notes" > release-notes.md
+
+      - name: Create GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${{ github.ref_name }}"
+          flags=""
+          if [[ "$tag" =~ -rc\.[0-9]+$ ]]; then
+            flags="--prerelease"
+          fi
+          gh release create "$tag" \
+            --title "$tag" \
+            --notes-file release-notes.md \
+            $flags \
+            dist/*.tar.gz \
+            dist/syfon-${{ github.ref_name }}-checksums.txt
+
+      - name: Tag submodules
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          version="${{ github.ref_name }}"
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Find the previous root tag to diff against
+          prev=$(git tag --sort=-version:refname | grep -E '^v[0-9]' | sed -n '2p')
+
+          for prefix in apigen client; do
+            subtag="${prefix}/${version}"
+
+            # Only tag if the submodule directory has changed since the previous release
+            if [[ -n "$prev" ]] && git diff --quiet "${prev}" HEAD -- "${prefix}/"; then
+              echo "No changes in ${prefix}/ since ${prev}, skipping ${subtag}"
+              continue
+            fi
+
+            git tag "$subtag"
+            git push origin "$subtag"
+            echo "Tagged ${subtag}"
+          done

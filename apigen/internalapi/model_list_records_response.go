@@ -19,7 +19,7 @@ var _ MappedNullable = &ListRecordsResponse{}
 
 // ListRecordsResponse struct for ListRecordsResponse
 type ListRecordsResponse struct {
-	Records []InternalRecordResponse `json:"records,omitempty"`
+	Records []InternalRecord `json:"records,omitempty"`
 }
 
 // NewListRecordsResponse instantiates a new ListRecordsResponse object
@@ -40,9 +40,9 @@ func NewListRecordsResponseWithDefaults() *ListRecordsResponse {
 }
 
 // GetRecords returns the Records field value if set, zero value otherwise.
-func (o *ListRecordsResponse) GetRecords() []InternalRecordResponse {
+func (o *ListRecordsResponse) GetRecords() []InternalRecord {
 	if o == nil || IsNil(o.Records) {
-		var ret []InternalRecordResponse
+		var ret []InternalRecord
 		return ret
 	}
 	return o.Records
@@ -50,7 +50,7 @@ func (o *ListRecordsResponse) GetRecords() []InternalRecordResponse {
 
 // GetRecordsOk returns a tuple with the Records field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *ListRecordsResponse) GetRecordsOk() ([]InternalRecordResponse, bool) {
+func (o *ListRecordsResponse) GetRecordsOk() ([]InternalRecord, bool) {
 	if o == nil || IsNil(o.Records) {
 		return nil, false
 	}
@@ -66,8 +66,8 @@ func (o *ListRecordsResponse) HasRecords() bool {
 	return false
 }
 
-// SetRecords gets a reference to the given []InternalRecordResponse and assigns it to the Records field.
-func (o *ListRecordsResponse) SetRecords(v []InternalRecordResponse) {
+// SetRecords gets a reference to the given []InternalRecord and assigns it to the Records field.
+func (o *ListRecordsResponse) SetRecords(v []InternalRecord) {
 	o.Records = v
 }
 

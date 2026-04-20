@@ -152,7 +152,7 @@ func handleInternalUploadURL(w http.ResponseWriter, r *http.Request, database co
 	}
 
 	if fileName == "" {
-		if resolvedKey, ok := resolveObjectS3Key(database, r, fileID, bucket); ok {
+		if resolvedKey, ok := resolveObjectRemotePath(database, r, fileID, bucket); ok {
 			fileName = resolvedKey
 		} else {
 			fileName = fileID
@@ -283,7 +283,7 @@ func signInternalUploadBulkItem(r *http.Request, database core.DatabaseInterface
 
 	fileName := strings.TrimSpace(item.GetFileName())
 	if fileName == "" {
-		if resolvedKey, ok := resolveObjectS3Key(database, r, result.GetFileId(), bucket); ok {
+		if resolvedKey, ok := resolveObjectRemotePath(database, r, result.GetFileId(), bucket); ok {
 			fileName = resolvedKey
 		} else {
 			fileName = result.GetFileId()
@@ -405,7 +405,7 @@ func handleInternalMultipartInit(w http.ResponseWriter, r *http.Request, databas
 	if fileName == "" {
 		if checksumHint != "" {
 			fileName = checksumHint
-		} else if resolvedKey, ok := resolveObjectS3Key(database, r, guid, bucket); ok {
+		} else if resolvedKey, ok := resolveObjectRemotePath(database, r, guid, bucket); ok {
 			fileName = resolvedKey
 		} else {
 			fileName = guid

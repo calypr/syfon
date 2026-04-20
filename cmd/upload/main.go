@@ -8,69 +8,102 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/calypr/syfon/cmd/cliutil"
+	syclient "github.com/calypr/syfon/client"
+	"github.com/calypr/syfon/client/drs"
+	"github.com/calypr/syfon/client/xfer/upload"
 	"github.com/spf13/cobra"
 )
 
 var (
-	uploadFile string
-	uploadDid  string
+	uploadFile  string
+	uploadDID   string
+	uploadAuthz string
 )
 
 var Cmd = &cobra.Command{
 	Use:   "upload",
-	Short: "Upload a local file via Syfon internal upload endpoints and register it",
+	Short: "Upload a file and register/update its DRS record",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 		if strings.TrimSpace(uploadFile) == "" {
 			return fmt.Errorf("--file is required")
 		}
-		data, err := os.ReadFile(uploadFile)
+
+		srcPath := strings.TrimSpace(uploadFile)
+		info, err := os.Stat(srcPath)
+		if err != nil {
+			return fmt.Errorf("stat source file: %w", err)
+		}
+		if info.IsDir() {
+			return fmt.Errorf("--file must be a regular file")
+		}
+
+		authz := strings.TrimSpace(uploadAuthz)
+		if authz == "" {
+			return fmt.Errorf("--authz is required")
+		}
+
+		serverURL, err := cmd.Flags().GetString("server")
+		if err != nil {
+			return fmt.Errorf("get server flag: %w", err)
+		}
+		c, err := syclient.New(serverURL)
 		if err != nil {
 			return err
 		}
-		requestedDID := strings.TrimSpace(uploadDid)
-		did := requestedDID
+
+		// Calculate SHA256 hash of the file to use as the content-addressable ID
+		fileBytes, err := os.ReadFile(srcPath)
+		if err != nil {
+			return fmt.Errorf("read file for hashing: %w", err)
+		}
+		hash := sha256.Sum256(fileBytes)
+		checksum := hex.EncodeToString(hash[:])
+
+		did := strings.TrimSpace(uploadDID)
 		if did == "" {
-			did = filepath.Base(uploadFile)
+			did = checksum
 		}
 
-		c := cliutil.NewSyfonClient(cmd)
-		signed, err := c.RequestUploadURL(ctx, did)
+		// Create a DRS client from the SDK
+		dc := drs.NewDrsClient(c.Requestor(), nil, c.Logger())
+
+		drsObj := &drs.DRSObject{
+			Id:   did,
+			Name: filepath.Base(srcPath),
+			Size: info.Size(),
+			Checksums: []drs.Checksum{
+				{
+					Type:     "sha256",
+					Checksum: checksum,
+				},
+			},
+			AccessMethods: []drs.AccessMethod{
+				{
+					Type: "s3", // Default type
+					Authorizations: drs.Authorizations{
+						BearerAuthIssuers: []string{authz},
+					},
+				},
+			},
+		}
+
+		// Register and upload using the SDK's orchestrator
+		fmt.Fprintf(cmd.OutOrStdout(), "Uploading %s (%s)...\n", srcPath, upload.FormatSize(info.Size()))
+		fmt.Fprintf(cmd.OutOrStdout(), "DID: %s\n", did)
+
+		_, err = upload.RegisterFile(ctx, c.Data(), dc, drsObj, srcPath, "")
 		if err != nil {
-			return err
-		}
-		serverGUID := strings.TrimSpace(signed.GUID)
-		if requestedDID != "" && serverGUID != "" && serverGUID != requestedDID {
-			return fmt.Errorf("server returned guid %q but --did %q was requested", serverGUID, requestedDID)
-		}
-		if serverGUID != "" {
-			did = serverGUID
-		}
-		if strings.TrimSpace(signed.URL) == "" {
-			return fmt.Errorf("server returned empty upload URL")
-		}
-		if err := cliutil.UploadBytesToSignedURL(ctx, signed.URL, data); err != nil {
-			return err
+			return fmt.Errorf("upload failed: %w", err)
 		}
 
-		sha := sha256.Sum256(data)
-		sum := hex.EncodeToString(sha[:])
-		objectURL, err := cliutil.CanonicalObjectURLFromSignedURL(signed.URL, strings.TrimSpace(signed.Bucket), did)
-		if err != nil {
-			return err
-		}
-		if err := cliutil.EnsureRecordWithURL(ctx, c, did, objectURL, filepath.Base(uploadFile), int64(len(data)), sum); err != nil {
-			return err
-		}
-
-		fmt.Fprintf(cmd.OutOrStdout(), "uploaded %s as %s\n", uploadFile, did)
-		fmt.Fprintf(cmd.OutOrStdout(), "sha256: %s\n", sum)
+		fmt.Fprintf(cmd.OutOrStdout(), "\nsuccessfully uploaded %s\n", did)
 		return nil
 	},
 }
 
 func init() {
-	Cmd.Flags().StringVar(&uploadFile, "file", "", "Local file to upload")
-	Cmd.Flags().StringVar(&uploadDid, "did", "", "Optional DID to require for the uploaded object (fails if server returns a different guid)")
+	Cmd.Flags().StringVar(&uploadFile, "file", "", "Path to source file")
+	Cmd.Flags().StringVar(&uploadDID, "did", "", "Optional object DID (generated when omitted)")
+	Cmd.Flags().StringVar(&uploadAuthz, "authz", "", "Required authz scope for the record")
 }

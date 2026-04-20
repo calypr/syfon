@@ -18,32 +18,41 @@ func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
 func newTestClient(t *testing.T, fn roundTripFunc) *Client {
 	t.Helper()
 	httpClient := &http.Client{Transport: fn}
-	return New("http://example.test", WithHTTPClient(httpClient))
+	c, err := New("http://example.test", WithHTTPClient(httpClient))
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+	return c
 }
 
 func TestClientBasicAuthAndUserAgent(t *testing.T) {
 	t.Parallel()
-	c := New("http://example.test",
+	httpClient := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path != "/healthz" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		user, pass, ok := r.BasicAuth()
+		if !ok || user != "u" || pass != "p" {
+			t.Fatalf("missing/invalid basic auth user=%q pass=%q ok=%v", user, pass, ok)
+		}
+		if got := r.Header.Get("User-Agent"); got != "syfon-test-client" {
+			t.Fatalf("unexpected user agent: %q", got)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader("")),
+			Header:     make(http.Header),
+		}, nil
+	})}
+
+	c, err := New("http://example.test",
 		WithBasicAuth("u", "p"),
 		WithUserAgent("syfon-test-client"),
-		WithHTTPClient(&http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
-			if r.URL.Path != "/healthz" {
-				t.Fatalf("unexpected path: %s", r.URL.Path)
-			}
-			user, pass, ok := r.BasicAuth()
-			if !ok || user != "u" || pass != "p" {
-				t.Fatalf("missing/invalid basic auth user=%q pass=%q ok=%v", user, pass, ok)
-			}
-			if got := r.Header.Get("User-Agent"); got != "syfon-test-client" {
-				t.Fatalf("unexpected user agent: %q", got)
-			}
-			return &http.Response{
-				StatusCode: http.StatusOK,
-				Body:       io.NopCloser(strings.NewReader("")),
-				Header:     make(http.Header),
-			}, nil
-		})}))
-	if err := c.Ping(context.Background()); err != nil {
+		WithHTTPClient(httpClient))
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+	if err := c.Health().Ping(context.Background()); err != nil {
 		t.Fatalf("ping failed: %v", err)
 	}
 }
@@ -58,29 +67,35 @@ func TestDataUploadBlank(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			t.Fatalf("decode request: %v", err)
 		}
-		if req.GUID != "abc" {
-			t.Fatalf("unexpected guid: %q", req.GUID)
+		if (&req).GetGuid() != "abc" {
+			t.Fatalf("unexpected guid: %q", (&req).GetGuid())
 		}
-		data, _ := json.Marshal(SignedURL{GUID: "abc", URL: "https://signed", Bucket: "b1"})
+		out := UploadBlankResponse{}
+		(&out).SetGuid("abc")
+		(&out).SetUrl("https://signed")
+		(&out).SetBucket("b1")
+		data, _ := json.Marshal(out)
 		return &http.Response{
 			StatusCode: http.StatusOK,
 			Body:       io.NopCloser(strings.NewReader(string(data))),
 			Header:     make(http.Header),
 		}, nil
 	})
-	out, err := c.Data().UploadBlank(context.Background(), UploadBlankRequest{GUID: "abc"})
+	req := UploadBlankRequest{}
+	req.SetGuid("abc")
+	out, err := c.data.UploadBlank(context.Background(), req)
 	if err != nil {
 		t.Fatalf("UploadBlank failed: %v", err)
 	}
-	if out.URL != "https://signed" || out.Bucket != "b1" {
+	if (&out).GetUrl() != "https://signed" || (&out).GetBucket() != "b1" {
 		t.Fatalf("unexpected response: %+v", out)
 	}
 }
 
 func TestIndexListByHash(t *testing.T) {
 	t.Parallel()
-	rec := InternalRecord{}
-	rec.SetDid("id-1")
+	rec := InternalRecordRequest{}
+	(&rec).SetDid("id-1")
 	c := newTestClient(t, func(r *http.Request) (*http.Response, error) {
 		if r.Method != http.MethodGet || r.URL.Path != "/index" {
 			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
@@ -88,18 +103,18 @@ func TestIndexListByHash(t *testing.T) {
 		if got := r.URL.Query().Get("hash"); got != "sha256:deadbeef" {
 			t.Fatalf("unexpected hash query: %q", got)
 		}
-		data, _ := json.Marshal(ListRecordsResponse{Records: []InternalRecord{rec}})
+		data, _ := json.Marshal(ListRecordsResponse{Records: []InternalRecordRequest{rec}})
 		return &http.Response{
 			StatusCode: http.StatusOK,
 			Body:       io.NopCloser(strings.NewReader(string(data))),
 			Header:     make(http.Header),
 		}, nil
 	})
-	out, err := c.Index().List(context.Background(), ListRecordsOptions{Hash: "sha256:deadbeef"})
+	out, err := c.index.List(context.Background(), ListRecordsOptions{Hash: "sha256:deadbeef"})
 	if err != nil {
 		t.Fatalf("Index.List failed: %v", err)
 	}
-	if len(out.Records) != 1 || out.Records[0].GetDid() != "id-1" {
+	if len(out.Records) != 1 || (&out.Records[0]).GetDid() != "id-1" {
 		t.Fatalf("unexpected response: %+v", out)
 	}
 }
@@ -116,11 +131,13 @@ func TestDataMultipartInitUsesCanonicalUploadId(t *testing.T) {
 			Header:     make(http.Header),
 		}, nil
 	})
-	out, err := c.Data().MultipartInit(context.Background(), MultipartInitRequest{GUID: "g1"})
+	req := MultipartInitRequest{}
+	req.SetGuid("g1")
+	out, err := c.data.MultipartInit(context.Background(), req)
 	if err != nil {
 		t.Fatalf("MultipartInit failed: %v", err)
 	}
-	if out.GUID != "g1" || out.UploadID != "u1" {
+	if (&out).GetGuid() != "g1" || (&out).GetUploadId() != "u1" {
 		t.Fatalf("unexpected response: %+v", out)
 	}
 }

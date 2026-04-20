@@ -1,0 +1,698 @@
+package download
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"io"
+	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+
+	internalapi "github.com/calypr/syfon/apigen/internalapi"
+	"github.com/calypr/syfon/client/drs"
+	"github.com/calypr/syfon/client/pkg/common"
+	"github.com/calypr/syfon/client/pkg/hash"
+	"github.com/calypr/syfon/client/pkg/logs"
+	"github.com/calypr/syfon/client/pkg/request"
+	"github.com/calypr/syfon/client/xfer"
+)
+
+type fakeBackend struct {
+	logger                 *logs.Gen3Logger
+	doFunc                 func(context.Context, string, *int64, *int64) (*http.Response, error)
+	resolveDownloadURLFunc func(context.Context, string, string) (string, error)
+	data                   []byte
+	size                   int64
+}
+
+func (f *fakeBackend) Name() string             { return "Fake" }
+func (f *fakeBackend) Logger() xfer.TransferLogger { return f.logger }
+
+func (f *fakeBackend) fileDetails(guid string) *drs.DRSObject {
+	size := f.size
+	if size == 0 && len(f.data) > 0 {
+		size = int64(len(f.data))
+	}
+	if size == 0 {
+		size = 64
+	}
+	name := "payload.bin"
+	accessID := "s3"
+	return &drs.DRSObject{
+		Name: name,
+		Size: size,
+		AccessMethods: []drs.AccessMethod{
+			{AccessId: accessID, Type: "s3"},
+		},
+	}
+}
+
+func (f *fakeBackend) ResolveDownloadURL(ctx context.Context, guid string, accessID string) (string, error) {
+	if f.resolveDownloadURLFunc != nil {
+		return f.resolveDownloadURLFunc(ctx, guid, accessID)
+	}
+	if guid == "test-fallback" {
+		return "", errors.New("fallback")
+	}
+	return "https://download.example.com/object", nil
+}
+
+func (f *fakeBackend) ResolveUploadURL(ctx context.Context, guid string, filename string, metadata common.FileMetadata, bucket string) (string, error) {
+	return "", errors.New("not implemented")
+}
+
+func (f *fakeBackend) InitMultipartUpload(ctx context.Context, guid string, filename string, bucket string) (string, string, error) {
+	return "", "", errors.New("not implemented")
+}
+
+func (f *fakeBackend) GetMultipartUploadURL(ctx context.Context, key string, uploadID string, partNumber int32, bucket string) (string, error) {
+	return "", errors.New("not implemented")
+}
+
+func (f *fakeBackend) CompleteMultipartUpload(ctx context.Context, key string, uploadID string, parts []internalapi.InternalMultipartPart, bucket string) error {
+	return errors.New("not implemented")
+}
+
+func (f *fakeBackend) Upload(ctx context.Context, url string, body io.Reader, size int64) error {
+	return errors.New("not implemented")
+}
+
+func (f *fakeBackend) UploadPart(ctx context.Context, url string, body io.Reader, size int64) (string, error) {
+	return "", errors.New("not implemented")
+}
+
+func (f *fakeBackend) DeleteFile(ctx context.Context, guid string) (string, error) {
+	return "", errors.New("not implemented")
+}
+
+func (f *fakeBackend) Download(ctx context.Context, url string, rangeStart, rangeEnd *int64) (*http.Response, error) {
+	if f.doFunc != nil {
+		return f.doFunc(ctx, url, rangeStart, rangeEnd)
+	}
+	if rangeStart != nil {
+		start := *rangeStart
+		if start < 0 || start > int64(len(f.data)) {
+			return nil, errors.New("invalid resume range")
+		}
+		if start == int64(len(f.data)) {
+			return newDownloadResponse(url, []byte{}, http.StatusPartialContent), nil
+		}
+		return newDownloadResponse(url, f.data[start:], http.StatusPartialContent), nil
+	}
+	if rangeStart != nil && rangeEnd != nil {
+		start, end := *rangeStart, *rangeEnd
+		if start < 0 || end >= int64(len(f.data)) || start > end {
+			return nil, errors.New("invalid range")
+		}
+		return newDownloadResponse(url, f.data[start:end+1], http.StatusPartialContent), nil
+	}
+	return newDownloadResponse(url, f.data, http.StatusOK), nil
+}
+
+type fakeDrsClient struct {
+	backend *fakeBackend
+}
+
+func (f *fakeDrsClient) GetObject(ctx context.Context, id string) (*drs.DRSObject, error) {
+	return f.backend.fileDetails(id), nil
+}
+
+func (f *fakeDrsClient) GetObjectByHash(ctx context.Context, checksum *hash.Checksum) ([]drs.DRSObject, error) {
+	obj := f.backend.fileDetails(checksum.Checksum)
+	return []drs.DRSObject{*obj}, nil
+}
+
+func (f *fakeDrsClient) BatchGetObjectsByHash(ctx context.Context, hashes []string) (map[string][]drs.DRSObject, error) {
+	return map[string][]drs.DRSObject{}, nil
+}
+
+func (f *fakeDrsClient) ListObjects(ctx context.Context) (chan drs.DRSObjectResult, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (f *fakeDrsClient) ListObjectsByProject(ctx context.Context, projectId string) (chan drs.DRSObjectResult, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (f *fakeDrsClient) GetProjectSample(ctx context.Context, projectId string, limit int) ([]drs.DRSObject, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (f *fakeDrsClient) RegisterRecord(ctx context.Context, record *drs.DRSObject) (*drs.DRSObject, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (f *fakeDrsClient) RegisterRecords(ctx context.Context, records []*drs.DRSObject) ([]*drs.DRSObject, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (f *fakeDrsClient) UpdateRecord(ctx context.Context, updateInfo *drs.DRSObject, did string) (*drs.DRSObject, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (f *fakeDrsClient) DeleteRecord(ctx context.Context, did string) error {
+	return errors.New("not implemented")
+}
+
+func (f *fakeDrsClient) DeleteRecordByOID(ctx context.Context, oid string) error {
+	return errors.New("not implemented")
+}
+
+func (f *fakeDrsClient) DeleteRecordsByChecksums(ctx context.Context, checksums []*hash.Checksum) (int, error) {
+	return 0, errors.New("not implemented")
+}
+
+func (f *fakeDrsClient) DeleteRecordsByProject(ctx context.Context, projectId string) error {
+	return errors.New("not implemented")
+}
+
+func (f *fakeDrsClient) Delete(ctx context.Context, guid string) error {
+	return errors.New("not implemented")
+}
+
+func (f *fakeDrsClient) GetDownloadURL(ctx context.Context, id string, accessType string) (*drs.AccessURL, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (f *fakeDrsClient) GetDownloadPartURL(ctx context.Context, id string, start, end int64) (*xfer.SignedURL, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (f *fakeDrsClient) GetUploadURL(ctx context.Context, id string) (*drs.AccessURL, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (f *fakeDrsClient) ResolveDownloadURL(ctx context.Context, guid string, accessID string) (string, error) {
+	return f.backend.ResolveDownloadURL(ctx, guid, accessID)
+}
+
+func (f *fakeDrsClient) Download(ctx context.Context, url string, rangeStart, rangeEnd *int64) (*http.Response, error) {
+	return f.backend.Download(ctx, url, rangeStart, rangeEnd)
+}
+
+func (f *fakeDrsClient) ResolveUploadURL(ctx context.Context, guid, filename string, metadata common.FileMetadata, bucket string) (string, error) {
+	return "", errors.New("not implemented")
+}
+
+func (f *fakeDrsClient) Resolve(ctx context.Context, id string) (*xfer.ResolvedObject, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (f *fakeDrsClient) Stat(ctx context.Context, guid string) (*xfer.ObjectMetadata, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (f *fakeDrsClient) GetReader(ctx context.Context, guid string) (io.ReadCloser, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (f *fakeDrsClient) GetRangeReader(ctx context.Context, guid string, offset, length int64) (io.ReadCloser, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (f *fakeDrsClient) GetWriter(ctx context.Context, guid string) (io.WriteCloser, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (f *fakeDrsClient) MultipartInit(ctx context.Context, guid string) (string, error) {
+	return "", errors.New("not implemented")
+}
+
+func (f *fakeDrsClient) MultipartPart(ctx context.Context, guid string, uploadID string, partNum int, body io.Reader) (string, error) {
+	return "", errors.New("not implemented")
+}
+
+func (f *fakeDrsClient) MultipartComplete(ctx context.Context, guid string, uploadID string, parts []hash.HashInfo) error {
+	return errors.New("not implemented")
+}
+
+func (f *fakeDrsClient) GetStorageLocation(ctx context.Context, guid string) (bucket, key string, err error) {
+	return "", "", errors.New("not implemented")
+}
+
+func (f *fakeDrsClient) AddURL(ctx context.Context, blobURL, sha256 string, opts ...drs.AddURLOption) (*drs.DRSObject, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (f *fakeDrsClient) UpsertRecord(ctx context.Context, url string, sha256 string, fileSize int64, projectId string) (*drs.DRSObject, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (f *fakeDrsClient) BuildDrsObj(fileName string, checksum string, size int64, drsId string) (*drs.DRSObject, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (f *fakeDrsClient) RegisterFile(ctx context.Context, oid, path string) (*drs.DRSObject, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (f *fakeDrsClient) Name() string {
+	return f.backend.Name()
+}
+
+func (f *fakeDrsClient) Logger() xfer.TransferLogger {
+	return f.backend.Logger()
+}
+
+func (f *fakeDrsClient) GetProjectId() string                            { return "" }
+func (f *fakeDrsClient) GetBucketName() string                           { return "" }
+func (f *fakeDrsClient) GetOrganization() string                         { return "" }
+func (f *fakeDrsClient) WithProject(projectId string) drs.Client         { return f }
+func (f *fakeDrsClient) WithOrganization(organization string) drs.Client { return f }
+func (f *fakeDrsClient) WithBucket(bucketName string) drs.Client         { return f }
+func (f *fakeDrsClient) New(method, url string) *request.RequestBuilder {
+	return &request.RequestBuilder{Method: method, Url: url}
+}
+func (f *fakeDrsClient) Do(ctx context.Context, req *request.RequestBuilder) (*http.Response, error) {
+	return nil, errors.New("not implemented")
+}
+
+func TestDownloadSingleWithProgressEmitsEvents(t *testing.T) {
+	payload := bytes.Repeat([]byte("d"), 64)
+	downloadDir := t.TempDir()
+	downloadPath := downloadDir + string(os.PathSeparator)
+
+	var events []common.ProgressEvent
+	progress := func(event common.ProgressEvent) error {
+		events = append(events, event)
+		return nil
+	}
+
+	fake := &fakeBackend{
+		logger: logs.NewGen3Logger(nil, "", ""),
+		data:   payload,
+	}
+	dc := &fakeDrsClient{backend: fake}
+
+	ctx := common.WithProgress(context.Background(), progress)
+	err := DownloadSingleWithProgress(ctx, dc, fake, "guid-123", downloadPath, "")
+	if err != nil {
+		t.Fatalf("download failed: %v", err)
+	}
+
+	if len(events) == 0 {
+		t.Fatal("expected progress events")
+	}
+	for i := 1; i < len(events); i++ {
+		if events[i].BytesSoFar < events[i-1].BytesSoFar {
+			t.Fatalf("bytesSoFar not monotonic: %d then %d", events[i-1].BytesSoFar, events[i].BytesSoFar)
+		}
+	}
+	last := events[len(events)-1]
+	if last.BytesSoFar != int64(len(payload)) {
+		t.Fatalf("expected final bytesSoFar %d, got %d", len(payload), last.BytesSoFar)
+	}
+	fullPath := filepath.Join(downloadPath, "payload.bin")
+	if _, err := os.Stat(fullPath); err != nil {
+		t.Fatalf("expected file to exist: %v", err)
+	}
+}
+
+func TestDownloadSingleWithProgressFinalizeOnError(t *testing.T) {
+	downloadDir := t.TempDir()
+	downloadPath := downloadDir + string(os.PathSeparator)
+
+	var events []common.ProgressEvent
+	progress := func(event common.ProgressEvent) error {
+		events = append(events, event)
+		return nil
+	}
+
+	fake := &fakeBackend{
+		logger: logs.NewGen3Logger(nil, "", ""),
+		data:   []byte("short"),
+		size:   64,
+	}
+	dc := &fakeDrsClient{backend: fake}
+
+	ctx := common.WithProgress(context.Background(), progress)
+	err := DownloadSingleWithProgress(ctx, dc, fake, "guid-123", downloadPath, "")
+	if err == nil {
+		t.Fatal("expected download error")
+	}
+
+	if len(events) == 0 {
+		t.Fatal("expected progress events")
+	}
+	last := events[len(events)-1]
+	if last.BytesSoFar != 64 {
+		t.Fatalf("expected finalize bytesSoFar 64, got %d", last.BytesSoFar)
+	}
+}
+
+func newDownloadJSONResponse(rawURL, body string) *http.Response {
+	parsedURL, err := url.Parse(rawURL)
+	if err != nil {
+		parsedURL = &url.URL{}
+	}
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Request:    &http.Request{URL: parsedURL},
+		Header:     make(http.Header),
+	}
+}
+
+func TestDownloadToPathMultipart(t *testing.T) {
+	payload := bytes.Repeat([]byte("z"), 2*1024*1024) // 2MB
+	tmpDir := t.TempDir()
+	dst := filepath.Join(tmpDir, "multipart.bin")
+
+	fake := &fakeBackend{
+		logger: logs.NewGen3Logger(nil, "", ""),
+		data:   payload,
+		size:   int64(len(payload)),
+	}
+	dc := &fakeDrsClient{backend: fake}
+
+	err := DownloadToPathWithOptions(
+		context.Background(),
+		dc,
+		fake,
+		fake.Logger().Slog(),
+		"guid-789",
+		dst,
+		"",
+		DownloadOptions{
+			MultipartThreshold: 1 * 1024 * 1024,
+			ChunkSize:          256 * 1024,
+			Concurrency:        4,
+		},
+	)
+	if err != nil {
+		t.Fatalf("multipart download failed: %v", err)
+	}
+
+	got, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatalf("read failed: %v", err)
+	}
+	if !bytes.Equal(payload, got) {
+		t.Fatal("downloaded payload mismatch")
+	}
+}
+
+func TestDownloadToPathMultipartUsesProtocolAccessID(t *testing.T) {
+	payload := bytes.Repeat([]byte("p"), 2*1024*1024)
+	tmpDir := t.TempDir()
+	dst := filepath.Join(tmpDir, "multipart-protocol.bin")
+
+	var resolvedAccessID string
+	fake := &fakeBackend{
+		logger: logs.NewGen3Logger(nil, "", ""),
+		data:   payload,
+		size:   int64(len(payload)),
+		resolveDownloadURLFunc: func(_ context.Context, _ string, accessID string) (string, error) {
+			resolvedAccessID = accessID
+			return "https://download.example.com/object", nil
+		},
+	}
+	dc := &fakeDrsClient{backend: fake}
+
+	err := DownloadToPathWithOptions(
+		context.Background(),
+		dc,
+		fake,
+		fake.Logger().Slog(),
+		"guid-protocol",
+		dst,
+		"s3",
+		DownloadOptions{
+			MultipartThreshold: 1 * 1024 * 1024,
+			ChunkSize:          256 * 1024,
+			Concurrency:        4,
+		},
+	)
+	if err != nil {
+		t.Fatalf("multipart download failed: %v", err)
+	}
+	if resolvedAccessID != "s3" {
+		t.Fatalf("expected access ID %q, got %q", "s3", resolvedAccessID)
+	}
+}
+
+func TestDownloadToPathMultipartErrorPropagation(t *testing.T) {
+	payload := bytes.Repeat([]byte("e"), 2*1024*1024)
+	tmpDir := t.TempDir()
+	dst := filepath.Join(tmpDir, "multipart-error.bin")
+
+	fake := &fakeBackend{
+		logger: logs.NewGen3Logger(nil, "", ""),
+		data:   payload,
+		size:   int64(len(payload)),
+		doFunc: func(_ context.Context, url string, rangeStart, rangeEnd *int64) (*http.Response, error) {
+			if rangeStart != nil && rangeEnd != nil && *rangeStart == 256*1024 {
+				return nil, errors.New("boom")
+			}
+			if rangeStart != nil && rangeEnd != nil {
+				start, end := *rangeStart, *rangeEnd
+				return newDownloadResponse(url, payload[start:end+1], http.StatusPartialContent), nil
+			}
+			return newDownloadResponse(url, payload, http.StatusOK), nil
+		},
+	}
+	dc := &fakeDrsClient{backend: fake}
+
+	err := DownloadToPathWithOptions(
+		context.Background(),
+		dc,
+		fake,
+		fake.Logger().Slog(),
+		"guid-multipart-error",
+		dst,
+		"",
+		DownloadOptions{
+			MultipartThreshold: 1 * 1024 * 1024,
+			ChunkSize:          256 * 1024,
+			Concurrency:        4,
+		},
+	)
+	if err == nil {
+		t.Fatal("expected multipart download error")
+	}
+	if !strings.Contains(err.Error(), "range download") {
+		t.Fatalf("expected range error context, got: %v", err)
+	}
+}
+
+func TestDownloadToPathMultipartProgressAccounting(t *testing.T) {
+	payload := bytes.Repeat([]byte("q"), 2*1024*1024)
+	tmpDir := t.TempDir()
+	dst := filepath.Join(tmpDir, "multipart-progress.bin")
+
+	var (
+		mu     sync.Mutex
+		events []common.ProgressEvent
+	)
+	progress := func(event common.ProgressEvent) error {
+		mu.Lock()
+		defer mu.Unlock()
+		events = append(events, event)
+		return nil
+	}
+
+	fake := &fakeBackend{
+		logger: logs.NewGen3Logger(nil, "", ""),
+		data:   payload,
+		size:   int64(len(payload)),
+	}
+	dc := &fakeDrsClient{backend: fake}
+	ctx := common.WithProgress(context.Background(), progress)
+
+	err := DownloadToPathWithOptions(
+		ctx,
+		dc,
+		fake,
+		fake.Logger().Slog(),
+		"guid-progress",
+		dst,
+		"",
+		DownloadOptions{
+			MultipartThreshold: 1 * 1024 * 1024,
+			ChunkSize:          256 * 1024,
+			Concurrency:        4,
+		},
+	)
+	if err != nil {
+		t.Fatalf("multipart download failed: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(events) == 0 {
+		t.Fatal("expected progress events")
+	}
+
+	var sum int64
+	for _, event := range events {
+		sum += event.BytesSinceLast
+	}
+	if sum != int64(len(payload)) {
+		t.Fatalf("expected progress sum %d, got %d", len(payload), sum)
+	}
+
+	last := events[len(events)-1]
+	if last.BytesSoFar != int64(len(payload)) {
+		t.Fatalf("expected final bytesSoFar %d, got %d", len(payload), last.BytesSoFar)
+	}
+}
+
+func TestDownloadToPathSingleResumeFromPartial(t *testing.T) {
+	payload := bytes.Repeat([]byte("r"), 1024)
+	tmpDir := t.TempDir()
+	dst := filepath.Join(tmpDir, "resume.bin")
+	prefix := payload[:300]
+	if err := os.WriteFile(dst, prefix, 0o666); err != nil {
+		t.Fatalf("write partial file: %v", err)
+	}
+
+	var gotRange int64 = -1
+	fake := &fakeBackend{
+		logger: logs.NewGen3Logger(nil, "", ""),
+		data:   payload,
+		size:   int64(len(payload)),
+		doFunc: func(_ context.Context, url string, rangeStart, rangeEnd *int64) (*http.Response, error) {
+			if rangeStart == nil {
+				gotRange = 0
+			} else {
+				gotRange = *rangeStart
+			}
+			if gotRange <= 0 {
+				return nil, errors.New("expected resume range")
+			}
+			return newDownloadResponse(url, payload[gotRange:], http.StatusPartialContent), nil
+		},
+	}
+	dc := &fakeDrsClient{backend: fake}
+
+	err := DownloadToPathWithOptions(
+		context.Background(),
+		dc,
+		fake,
+		fake.Logger().Slog(),
+		"guid-resume",
+		dst,
+		"",
+		DownloadOptions{
+			MultipartThreshold: 1 * common.GB, // force single-stream path
+			ChunkSize:          64 * common.MB,
+			Concurrency:        2,
+		},
+	)
+	if err != nil {
+		t.Fatalf("resume download failed: %v", err)
+	}
+	if gotRange != int64(len(prefix)) {
+		t.Fatalf("expected range %d, got %d", len(prefix), gotRange)
+	}
+
+	got, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatalf("read result: %v", err)
+	}
+	if !bytes.Equal(got, payload) {
+		t.Fatal("resumed file mismatch")
+	}
+}
+
+func TestDownloadToPathSingleRangeIgnoredRestarts(t *testing.T) {
+	payload := bytes.Repeat([]byte("k"), 2048)
+	tmpDir := t.TempDir()
+	dst := filepath.Join(tmpDir, "range-ignored.bin")
+	if err := os.WriteFile(dst, payload[:500], 0o666); err != nil {
+		t.Fatalf("write partial: %v", err)
+	}
+
+	fake := &fakeBackend{
+		logger: logs.NewGen3Logger(nil, "", ""),
+		data:   payload,
+		size:   int64(len(payload)),
+		doFunc: func(_ context.Context, url string, rangeStart, rangeEnd *int64) (*http.Response, error) {
+			// Simulate server ignoring Range and returning full body with 200.
+			if rangeStart == nil || *rangeStart <= 0 {
+				return nil, errors.New("expected range request")
+			}
+			return newDownloadResponse(url, payload, http.StatusOK), nil
+		},
+	}
+	dc := &fakeDrsClient{backend: fake}
+
+	err := DownloadToPathWithOptions(
+		context.Background(),
+		dc,
+		fake,
+		fake.Logger().Slog(),
+		"guid-range-ignored",
+		dst,
+		"",
+		DownloadOptions{MultipartThreshold: 1 * common.GB, ChunkSize: 64 * common.MB, Concurrency: 2},
+	)
+	if err != nil {
+		t.Fatalf("download failed: %v", err)
+	}
+
+	got, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatalf("read result: %v", err)
+	}
+	if !bytes.Equal(got, payload) {
+		t.Fatal("range-ignored restart did not produce full file")
+	}
+}
+
+func TestDownloadToPathAlreadyCompleteSkipsDownload(t *testing.T) {
+	payload := bytes.Repeat([]byte("c"), 512)
+	tmpDir := t.TempDir()
+	dst := filepath.Join(tmpDir, "complete.bin")
+	if err := os.WriteFile(dst, payload, 0o666); err != nil {
+		t.Fatalf("write complete file: %v", err)
+	}
+
+	calls := 0
+	fake := &fakeBackend{
+		logger: logs.NewGen3Logger(nil, "", ""),
+		data:   payload,
+		size:   int64(len(payload)),
+		doFunc: func(_ context.Context, _ string, _ *int64, _ *int64) (*http.Response, error) {
+			calls++
+			return newDownloadResponse("https://download.example.com/object", payload, http.StatusOK), nil
+		},
+	}
+	dc := &fakeDrsClient{backend: fake}
+
+	err := DownloadToPathWithOptions(
+		context.Background(),
+		dc,
+		fake,
+		fake.Logger().Slog(),
+		"guid-complete",
+		dst,
+		"",
+		DownloadOptions{MultipartThreshold: 1 * common.GB, ChunkSize: 64 * common.MB, Concurrency: 2},
+	)
+	if err != nil {
+		t.Fatalf("download call failed: %v", err)
+	}
+	if calls != 0 {
+		t.Fatalf("expected no backend download calls, got %d", calls)
+	}
+}
+
+func newDownloadResponse(rawURL string, payload []byte, status int) *http.Response {
+	parsedURL, err := url.Parse(rawURL)
+	if err != nil {
+		parsedURL = &url.URL{}
+	}
+	return &http.Response{
+		StatusCode:    status,
+		Body:          io.NopCloser(bytes.NewReader(payload)),
+		ContentLength: int64(len(payload)),
+		Request:       &http.Request{URL: parsedURL},
+		Header:        make(http.Header),
+	}
+}

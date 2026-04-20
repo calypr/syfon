@@ -11,36 +11,16 @@ import (
 	"github.com/calypr/syfon/config"
 	"github.com/calypr/syfon/db/core"
 	"github.com/calypr/syfon/internal/provider"
-	"github.com/google/uuid"
 )
 
 // --- Domain Mapping Tools ---
 
-func canonicalIDFromInternal(req internalapi.InternalRecord) string {
-	if did := strings.TrimSpace(req.GetDid()); did != "" {
-		if _, err := uuid.Parse(did); err == nil {
-			return did
-		}
-	}
-	hashes := req.GetHashes()
-	if v, ok := hashes["sha256"]; ok && strings.TrimSpace(v) != "" {
-		authz := append([]string(nil), req.GetAuthz()...)
-		if len(authz) == 0 && req.HasOrganization() {
-			path := core.ResourcePathForScope(req.GetOrganization(), req.GetProject())
-			if path != "" {
-				authz = append(authz, path)
-			}
-		}
-		return core.MintObjectIDFromChecksum(v, authz)
-	}
-	return ""
+func canonicalIDFromInternal(req *internalapi.InternalRecord) string {
+	return strings.TrimSpace(req.GetDid())
 }
 
-func internalToDrs(req internalapi.InternalRecord) (*core.InternalObject, error) {
+func internalToDrs(req *internalapi.InternalRecord) (*core.InternalObject, error) {
 	id := canonicalIDFromInternal(req)
-	if id == "" {
-		return nil, fmt.Errorf("sha256 hash is required unless did is a UUID")
-	}
 	now := time.Now()
 	obj := &drs.DrsObject{
 		Id:          id,
@@ -49,12 +29,22 @@ func internalToDrs(req internalapi.InternalRecord) (*core.InternalObject, error)
 		CreatedTime: now,
 		UpdatedTime: now,
 		Name:        req.GetFileName(),
+		Version:     req.GetVersion(),
+		Description: req.GetDescription(),
+	}
+
+	if ct := req.GetCreatedTime(); ct != "" {
+		if t, err := time.Parse(time.RFC3339, ct); err == nil {
+			obj.CreatedTime = t
+		}
+	}
+	if ut := req.GetUpdatedTime(); ut != "" {
+		if t, err := time.Parse(time.RFC3339, ut); err == nil {
+			obj.UpdatedTime = t
+		}
 	}
 	for t, v := range req.GetHashes() {
 		obj.Checksums = append(obj.Checksums, drs.Checksum{Type: t, Checksum: v})
-	}
-	if len(obj.Checksums) == 0 {
-		obj.Checksums = append(obj.Checksums, drs.Checksum{Type: "sha256", Checksum: id})
 	}
 	for _, u := range req.GetUrls() {
 		obj.AccessMethods = append(obj.AccessMethods, drs.AccessMethod{
@@ -64,12 +54,6 @@ func internalToDrs(req internalapi.InternalRecord) (*core.InternalObject, error)
 		})
 	}
 	authz := append([]string(nil), req.GetAuthz()...)
-	if len(authz) == 0 && req.HasOrganization() {
-		path := core.ResourcePathForScope(req.GetOrganization(), req.GetProject())
-		if path != "" {
-			authz = append(authz, path)
-		}
-	}
 	for i := range obj.AccessMethods {
 		obj.AccessMethods[i].Authorizations = drs.AccessMethodAuthorizations{
 			BearerAuthIssuers: authz,
@@ -78,13 +62,10 @@ func internalToDrs(req internalapi.InternalRecord) (*core.InternalObject, error)
 	return &core.InternalObject{DrsObject: *obj, Authorizations: authz}, nil
 }
 
-func drsToInternal(obj *core.InternalObject) internalapi.InternalRecordResponse {
+func drsToInternalRecord(obj *core.InternalObject) *internalapi.InternalRecord {
 	hashes := make(map[string]string, len(obj.Checksums))
 	for _, c := range obj.Checksums {
 		hashes[c.Type] = c.Checksum
-	}
-	if len(hashes) == 0 && obj.Id != "" {
-		hashes["sha256"] = obj.Id
 	}
 
 	var urls []string
@@ -97,13 +78,8 @@ func drsToInternal(obj *core.InternalObject) internalapi.InternalRecordResponse 
 		}
 	}
 	scope := core.ParseResourcePath(firstAuthz(authz))
-	resp := internalapi.InternalRecordResponse{
-		Authz: authz,
-		Urls:  urls,
-	}
-	if obj.Id != "" {
-		resp.SetDid(obj.Id)
-	}
+	resp := internalapi.NewInternalRecord(obj.Id, authz)
+	resp.SetUrls(urls)
 	resp.SetSize(obj.Size)
 	if len(hashes) > 0 {
 		resp.SetHashes(hashes)
@@ -117,12 +93,47 @@ func drsToInternal(obj *core.InternalObject) internalapi.InternalRecordResponse 
 	if scope.Project != "" {
 		resp.SetProject(scope.Project)
 	}
-	if !obj.CreatedTime.IsZero() {
-		resp.SetCreatedDate(obj.CreatedTime.Format(time.RFC3339))
+	return resp
+}
+
+func drsToInternal(obj *core.InternalObject) *internalapi.InternalRecordResponse {
+	hashes := make(map[string]string, len(obj.Checksums))
+	for _, c := range obj.Checksums {
+		hashes[c.Type] = c.Checksum
 	}
-	if !obj.UpdatedTime.IsZero() {
-		resp.SetUpdatedDate(obj.UpdatedTime.Format(time.RFC3339))
+
+	var urls []string
+	authz := append([]string(nil), obj.Authorizations...)
+	if len(obj.AccessMethods) > 0 {
+		for _, am := range obj.AccessMethods {
+			if am.AccessUrl.Url != "" {
+				urls = append(urls, am.AccessUrl.Url)
+			}
+		}
 	}
+	scope := core.ParseResourcePath(firstAuthz(authz))
+
+	resp := internalapi.NewInternalRecordResponse(obj.Id, authz)
+	resp.SetSize(obj.Size)
+	resp.SetFileName(obj.Name)
+	resp.SetVersion(obj.Version)
+	resp.SetDescription(obj.Description)
+	resp.SetHashes(hashes)
+	resp.SetUrls(urls)
+
+	if scope.Organization != "" {
+		resp.SetOrganization(scope.Organization)
+	}
+	if scope.Project != "" {
+		resp.SetProject(scope.Project)
+	}
+
+	resp.SetCreatedTime(obj.CreatedTime.Format(time.RFC3339))
+	resp.SetUpdatedTime(obj.UpdatedTime.Format(time.RFC3339))
+
+	resp.SetCreatedDate(obj.CreatedTime.Format(time.RFC3339))
+	resp.SetUpdatedDate(obj.UpdatedTime.Format(time.RFC3339))
+
 	return resp
 }
 
@@ -189,6 +200,45 @@ func normalizeHashQueryValue(raw string) string {
 		return strings.Trim(strings.TrimSpace(parts[1]), `"'`)
 	}
 	return clean
+}
+
+func normalizeHashQueryType(raw string) string {
+	clean := strings.Trim(strings.TrimSpace(raw), `"'`)
+	clean = strings.ToLower(clean)
+	clean = strings.ReplaceAll(clean, "-", "")
+	return clean
+}
+
+// parseHashQuery returns normalized hash type (when provided) and normalized value.
+// Type precedence: explicit query `hash_type` first, then `type:value` prefix in `hash`.
+func parseHashQuery(rawHash string, rawType string) (string, string) {
+	hashType := normalizeHashQueryType(rawType)
+	hashValue := normalizeHashQueryValue(rawHash)
+
+	cleanHash := strings.Trim(strings.TrimSpace(rawHash), `"'`)
+	if hashType == "" {
+		if parts := strings.SplitN(cleanHash, ":", 2); len(parts) == 2 {
+			hashType = normalizeHashQueryType(parts[0])
+		}
+	}
+	return hashType, hashValue
+}
+
+func objectHasChecksumTypeAndValue(obj core.InternalObject, hashType string, hashValue string) bool {
+	targetType := normalizeHashQueryType(hashType)
+	targetValue := normalizeHashQueryValue(hashValue)
+	if targetType == "" || targetValue == "" {
+		return false
+	}
+	for _, cs := range obj.Checksums {
+		if normalizeHashQueryType(cs.Type) != targetType {
+			continue
+		}
+		if normalizeHashQueryValue(cs.Checksum) == targetValue {
+			return true
+		}
+	}
+	return false
 }
 
 func looksLikeSHA256(v string) bool {

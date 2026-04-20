@@ -2,34 +2,46 @@ package client
 
 import (
 	"context"
+	"fmt"
 	"net/url"
 	"strconv"
+	"strings"
 )
 
 type IndexService struct {
-	c *Client
+	base *baseService
 }
 
 func (s *IndexService) Get(ctx context.Context, did string) (InternalRecord, error) {
 	var out InternalRecord
-	err := s.c.doJSON(ctx, "GET", "/index/"+url.PathEscape(did), nil, nil, &out)
+	rb := s.base.requestor.New("GET", "/index/"+url.PathEscape(did))
+	err := s.base.requestor.DoJSON(ctx, rb, &out)
 	return out, err
 }
 
 func (s *IndexService) Create(ctx context.Context, rec InternalRecord) (InternalRecord, error) {
 	var out InternalRecord
-	err := s.c.doJSON(ctx, "POST", "/index", nil, rec, &out)
+	rb, err := s.base.requestor.New("POST", "/index").WithJSONBody(rec)
+	if err != nil {
+		return out, err
+	}
+	err = s.base.requestor.DoJSON(ctx, rb, &out)
 	return out, err
 }
 
 func (s *IndexService) Update(ctx context.Context, did string, rec InternalRecord) (InternalRecord, error) {
 	var out InternalRecord
-	err := s.c.doJSON(ctx, "PUT", "/index/"+url.PathEscape(did), nil, rec, &out)
+	rb, err := s.base.requestor.New("PUT", "/index/"+url.PathEscape(did)).WithJSONBody(rec)
+	if err != nil {
+		return out, err
+	}
+	err = s.base.requestor.DoJSON(ctx, rb, &out)
 	return out, err
 }
 
 func (s *IndexService) Delete(ctx context.Context, did string) error {
-	return s.c.doJSON(ctx, "DELETE", "/index/"+url.PathEscape(did), nil, nil, nil)
+	rb := s.base.requestor.New("DELETE", "/index/"+url.PathEscape(did))
+	return s.base.requestor.DoJSON(ctx, rb, nil)
 }
 
 func (s *IndexService) List(ctx context.Context, opts ListRecordsOptions) (ListRecordsResponse, error) {
@@ -53,11 +65,12 @@ func (s *IndexService) List(ctx context.Context, opts ListRecordsOptions) (ListR
 		q.Set("page", strconv.Itoa(opts.Page))
 	}
 	var out ListRecordsResponse
-	err := s.c.doJSON(ctx, "GET", "/index", q, nil, &out)
+	rb := s.base.requestor.New("GET", "/index").WithQueryValues(q)
+	err := s.base.requestor.DoJSON(ctx, rb, &out)
 	return out, err
 }
 
-func (s *IndexService) DeleteByQuery(ctx context.Context, opts DeleteByQueryOptions) (map[string]int, error) {
+func (s *IndexService) DeleteByQuery(ctx context.Context, opts DeleteByQueryOptions) (DeleteByQueryResponse, error) {
 	q := url.Values{}
 	if opts.Authz != "" {
 		q.Set("authz", opts.Authz)
@@ -68,46 +81,140 @@ func (s *IndexService) DeleteByQuery(ctx context.Context, opts DeleteByQueryOpti
 	if opts.ProjectID != "" {
 		q.Set("project", opts.ProjectID)
 	}
-	out := map[string]int{}
-	err := s.c.doJSON(ctx, "DELETE", "/index", q, nil, &out)
+	if opts.Hash != "" {
+		q.Set("hash", opts.Hash)
+	}
+	if opts.HashType != "" {
+		q.Set("hash_type", opts.HashType)
+	}
+	var out DeleteByQueryResponse
+	rb := s.base.requestor.New("DELETE", "/index").WithQueryValues(q)
+	err := s.base.requestor.DoJSON(ctx, rb, &out)
 	return out, err
 }
 
 func (s *IndexService) BulkCreate(ctx context.Context, req BulkCreateRequest) (ListRecordsResponse, error) {
 	var out ListRecordsResponse
-	err := s.c.doJSON(ctx, "POST", "/index/bulk", nil, req, &out)
+	rb, err := s.base.requestor.New("POST", "/index/bulk").WithJSONBody(req)
+	if err != nil {
+		return out, err
+	}
+	err = s.base.requestor.DoJSON(ctx, rb, &out)
 	return out, err
 }
 
 func (s *IndexService) BulkHashes(ctx context.Context, req BulkHashesRequest) (ListRecordsResponse, error) {
 	var out ListRecordsResponse
-	err := s.c.doJSON(ctx, "POST", "/index/bulk/hashes", nil, req, &out)
+	rb, err := s.base.requestor.New("POST", "/index/bulk/hashes").WithJSONBody(req)
+	if err != nil {
+		return out, err
+	}
+	err = s.base.requestor.DoJSON(ctx, rb, &out)
+	return out, err
+}
+
+func (s *IndexService) BulkDeleteByHashes(ctx context.Context, req BulkHashesRequest) (DeleteByQueryResponse, error) {
+	var out DeleteByQueryResponse
+	rb, err := s.base.requestor.New("POST", "/index/bulk/delete").WithJSONBody(req)
+	if err != nil {
+		return out, err
+	}
+	err = s.base.requestor.DoJSON(ctx, rb, &out)
 	return out, err
 }
 
 func (s *IndexService) BulkSHA256Validity(ctx context.Context, req BulkSHA256ValidityRequest) (map[string]bool, error) {
 	out := map[string]bool{}
-	err := s.c.doJSON(ctx, "POST", "/index/bulk/sha256/validity", nil, req, &out)
+	rb, err := s.base.requestor.New("POST", "/index/bulk/sha256/validity").WithJSONBody(req)
+	if err != nil {
+		return out, err
+	}
+	err = s.base.requestor.DoJSON(ctx, rb, &out)
 	return out, err
 }
 
 func (s *IndexService) BulkDocuments(ctx context.Context, dids []string) ([]InternalRecord, error) {
 	var out []InternalRecord
-	err := s.c.doJSON(ctx, "POST", "/index/bulk/documents", nil, dids, &out)
+	rb, err := s.base.requestor.New("POST", "/index/bulk/documents").WithJSONBody(dids)
+	if err != nil {
+		return out, err
+	}
+	err = s.base.requestor.DoJSON(ctx, rb, &out)
 	return out, err
 }
 
-// Compatibility wrappers used by current CLI code.
-func (c *Client) GetRecord(ctx context.Context, did string) (InternalRecord, error) {
-	return c.Index().Get(ctx, did)
+func (s *IndexService) SHA256Validity(ctx context.Context, values []string) (map[string]bool, error) {
+	payload := map[string][]string{"sha256": values}
+	out := map[string]bool{}
+	rb, err := s.base.requestor.New("POST", "/index/v1/sha256/validity").WithJSONBody(payload)
+	if err != nil {
+		return out, err
+	}
+	err = s.base.requestor.DoJSON(ctx, rb, &out)
+	return out, err
 }
 
-func (c *Client) PutRecord(ctx context.Context, did string, rec InternalRecord) error {
-	_, err := c.Index().Update(ctx, did, rec)
+func (s *IndexService) Upsert(ctx context.Context, did, objectURL, fileName string, size int64, sha256sum string, authz []string) error {
+	existing, err := s.Get(ctx, did)
+	if err == nil {
+		if strings.TrimSpace((&existing).GetDid()) == "" {
+			(&existing).SetDid(did)
+		}
+		if len((&existing).GetAuthz()) == 0 {
+			if len(authz) == 0 {
+				return fmt.Errorf("authz is required to upsert record %s", did)
+			}
+			(&existing).SetAuthz(append([]string(nil), authz...))
+		}
+		if fileName != "" {
+			(&existing).SetFileName(fileName)
+		}
+		if size > 0 {
+			(&existing).SetSize(size)
+		}
+		if objectURL != "" {
+			urls := append([]string(nil), (&existing).GetUrls()...)
+			seen := map[string]bool{}
+			for _, u := range urls {
+				seen[u] = true
+			}
+			if !seen[objectURL] {
+				urls = append(urls, objectURL)
+				(&existing).SetUrls(urls)
+			}
+		}
+		if sha256sum != "" {
+			hashes := (&existing).GetHashes()
+			if hashes == nil {
+				hashes = map[string]string{}
+			}
+			hashes["sha256"] = sha256sum
+			(&existing).SetHashes(hashes)
+		}
+		_, err := s.Update(ctx, did, existing)
+		return err
+	}
+
+	payload := InternalRecord{}
+	(&payload).SetDid(did)
+	if len(authz) == 0 {
+		return fmt.Errorf("authz is required to create record %s", did)
+	}
+	(&payload).SetAuthz(append([]string(nil), authz...))
+	if size > 0 {
+		(&payload).SetSize(size)
+	}
+	if objectURL != "" {
+		(&payload).SetUrls([]string{objectURL})
+	}
+	if fileName != "" {
+		(&payload).SetFileName(fileName)
+	}
+	if sha256sum != "" {
+		(&payload).SetHashes(map[string]string{"sha256": sha256sum})
+	}
+	_, err = s.Create(ctx, payload)
 	return err
 }
 
-func (c *Client) PostRecord(ctx context.Context, rec InternalRecord) error {
-	_, err := c.Index().Create(ctx, rec)
-	return err
-}
+// --- IndexService ---

@@ -15,7 +15,38 @@ fi
 TEST_DRS_URL="${TEST_DRS_URL:-${SYFON_E2E_SERVER_URL:-${DRS_URL:-http://127.0.0.1:8080}}}"
 
 log() { printf '[syfon-e2e-hash-lookup] %s\n' "$*"; }
+log_warn() { printf '[syfon-e2e-hash-lookup][warn] %s\n' "$*" >&2; }
 fail() { printf '[syfon-e2e-hash-lookup] ERROR: %s\n' "$*" >&2; exit 1; }
+phase() { log "PHASE: $1"; }
+
+CURRENT_PHASE="init"
+TEST_OUTCOME="FAIL"
+FAIL_LINE=""
+FAIL_CMD=""
+
+on_error() {
+  local line="${BASH_LINENO[0]:-}"
+  local cmd="${BASH_COMMAND:-unknown}"
+  FAIL_LINE="${FAIL_LINE:-$line}"
+  FAIL_CMD="${FAIL_CMD:-$cmd}"
+}
+
+cleanup() {
+  local exit_code=$?
+  rm -f /tmp/syfon-hash-lookup-create.out /tmp/syfon-hash-lookup-query.out
+  if [[ "$exit_code" -eq 0 && "$TEST_OUTCOME" == "PASS" ]]; then
+    log "RESULT: PASS"
+  else
+    log_warn "RESULT: FAIL (phase=${CURRENT_PHASE}, line=${FAIL_LINE:-unknown}, exit_code=$exit_code)"
+    if [[ -n "${FAIL_CMD:-}" ]]; then
+      log_warn "Failed command: ${FAIL_CMD}"
+    fi
+  fi
+  exit "$exit_code"
+}
+
+trap on_error ERR
+trap cleanup EXIT
 
 new_uuid() {
   if command -v uuidgen >/dev/null 2>&1; then
@@ -60,6 +91,7 @@ post_index_record() {
 }
 
 main() {
+  CURRENT_PHASE="validation"
   log "using server: ${TEST_DRS_URL%/}"
   health_check
 
@@ -69,14 +101,14 @@ main() {
   fixture="syfon-hash-lookup-$(date +%s)-$RANDOM"
   sha="$(printf '%s' "$fixture" | sha256sum | awk '{print $1}')"
 
-  trap 'rm -f /tmp/syfon-hash-lookup-create.out /tmp/syfon-hash-lookup-query.out' EXIT
-
+  CURRENT_PHASE="seed-records"
   log "create canonical record did=$canonical_did"
   post_index_record "$canonical_did" "$sha" "hash-lookup-canonical.txt"
 
   log "create alias record did=$alias_did (same sha256)"
   post_index_record "$alias_did" "$sha" "hash-lookup-alias.txt"
 
+  CURRENT_PHASE="query-verify"
   log "lookup by checksum"
   query_file="/tmp/syfon-hash-lookup-query.out"
   status="$(curl -sS -o "$query_file" -w '%{http_code}' \
@@ -92,6 +124,7 @@ main() {
   [[ "$has_alias" == "0" ]] || fail "expected checksum lookup to exclude alias did=$alias_did"
 
   log "PASS sha256=$sha canonical_did=$canonical_did alias_did=$alias_did records=$record_count"
+  TEST_OUTCOME="PASS"
 }
 
 main "$@"

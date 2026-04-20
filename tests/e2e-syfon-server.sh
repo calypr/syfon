@@ -23,7 +23,41 @@ TEST_ORGANIZATION="${TEST_ORGANIZATION:-syfon}"
 TEST_PROJECT_ID="${TEST_PROJECT_ID:-e2e}"
 
 log() { printf '[syfon-e2e] %s\n' "$*"; }
+log_warn() { printf '[syfon-e2e][warn] %s\n' "$*" >&2; }
 fail() { printf '[syfon-e2e] ERROR: %s\n' "$*" >&2; exit 1; }
+phase() { log "PHASE: $1"; }
+
+CURRENT_PHASE="init"
+TEST_OUTCOME="FAIL"
+FAIL_LINE=""
+FAIL_CMD=""
+SYFON_BIN=""
+SRC_FILE=""
+DST_FILE=""
+
+on_error() {
+  local line="${BASH_LINENO[0]:-}"
+  local cmd="${BASH_COMMAND:-unknown}"
+  FAIL_LINE="${FAIL_LINE:-$line}"
+  FAIL_CMD="${FAIL_CMD:-$cmd}"
+}
+
+cleanup() {
+  local exit_code=$?
+  rm -f "${SYFON_BIN:-}" /tmp/syfon-bucket-create.out "${SRC_FILE:-}" "${DST_FILE:-}"
+  if [[ "$exit_code" -eq 0 && "$TEST_OUTCOME" == "PASS" ]]; then
+    log "RESULT: PASS"
+  else
+    log_warn "RESULT: FAIL (phase=${CURRENT_PHASE}, line=${FAIL_LINE:-unknown}, exit_code=$exit_code)"
+    if [[ -n "${FAIL_CMD:-}" ]]; then
+      log_warn "Failed command: ${FAIL_CMD}"
+    fi
+  fi
+  exit "$exit_code"
+}
+
+trap on_error ERR
+trap cleanup EXIT
 
 request() {
   local method="$1"
@@ -96,39 +130,48 @@ build_syfon() {
 }
 
 main() {
+  CURRENT_PHASE="validation"
   log "using server: ${TEST_DRS_URL%/}"
   health_check
+
+  CURRENT_PHASE="auth-setup"
   ensure_bucket_config
 
-  local syfon_bin
-  syfon_bin="$(build_syfon)"
-  trap 'rm -f "${syfon_bin:-}" /tmp/syfon-bucket-create.out /tmp/syfon-e2e-src.* /tmp/syfon-e2e-dst.*' EXIT
+  CURRENT_PHASE="build-cli"
+  SYFON_BIN="$(build_syfon)"
 
   local src dst did object_id sum expected upload_out
   src="$(mktemp /tmp/syfon-e2e-src.XXXXXX)"
   dst="$(mktemp /tmp/syfon-e2e-dst.XXXXXX)"
+  SRC_FILE="$src"
+  DST_FILE="$dst"
   did="syfon-e2e-$(date +%s)"
   printf 'syfon external e2e %s\n' "$did" >"$src"
 
+  CURRENT_PHASE="ping"
   log "ping"
-  "$syfon_bin" --server "${TEST_DRS_URL%/}" ping
+  "$SYFON_BIN" --server "${TEST_DRS_URL%/}" ping
 
+  CURRENT_PHASE="upload"
   log "upload"
-  upload_out="$("$syfon_bin" --server "${TEST_DRS_URL%/}" upload --file "$src")"
+  upload_out="$("$SYFON_BIN" --server "${TEST_DRS_URL%/}" upload --file "$src")"
   printf '%s\n' "$upload_out"
   object_id="$(printf '%s\n' "$upload_out" | awk '/^uploaded /{print $NF}' | tail -n1)"
   [[ -n "$object_id" ]] || fail "unable to parse uploaded object id from syfon upload output"
 
+  CURRENT_PHASE="download"
   log "download"
-  "$syfon_bin" --server "${TEST_DRS_URL%/}" download --did "$object_id" --out "$dst"
+  "$SYFON_BIN" --server "${TEST_DRS_URL%/}" download --did "$object_id" --out "$dst"
   cmp "$src" "$dst" || fail "downloaded file differs from uploaded file"
 
+  CURRENT_PHASE="hash-verify"
   log "sha256sum"
-  sum="$("$syfon_bin" --server "${TEST_DRS_URL%/}" sha256sum --did "$object_id" | tail -n1 | tr -d '\r\n')"
+  sum="$("$SYFON_BIN" --server "${TEST_DRS_URL%/}" sha256sum --did "$object_id" | tail -n1 | tr -d '\r\n')"
   expected="$(sha256sum "$src" | awk '{print $1}')"
   [[ "$sum" == "$expected" ]] || fail "sha256 mismatch: expected=$expected got=$sum"
 
   log "PASS requested_did=$did object_id=$object_id sha256=$sum"
+  TEST_OUTCOME="PASS"
 }
 
 main "$@"

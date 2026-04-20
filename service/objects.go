@@ -279,11 +279,38 @@ func (s *ObjectsAPIService) RegisterObjects(ctx context.Context, req drs.Registe
 }
 
 func (s *ObjectsAPIService) GetObjectsByChecksums(ctx context.Context, checksums []string) (drs.ImplResponse, error) {
-	objsMap, err := s.db.GetObjectsByChecksums(ctx, checksums)
+	lookupValues := make([]string, len(checksums))
+	lookupTypes := make([]string, len(checksums))
+	for i := range checksums {
+		lookupTypes[i], lookupValues[i] = parseChecksumQuery(checksums[i])
+	}
+
+	objsMap, err := s.db.GetObjectsByChecksums(ctx, lookupValues)
 	if err != nil {
 		return drs.ImplResponse{Code: http.StatusInternalServerError, Body: drs.Error{Msg: err.Error(), StatusCode: http.StatusInternalServerError}}, err
 	}
-	out := drsmap.ToExternalMap(objsMap)
+
+	filtered := make(map[string][]core.InternalObject, len(checksums))
+	for i := range checksums {
+		rawKey := checksums[i]
+		valueKey := lookupValues[i]
+		objs := objsMap[valueKey]
+		if lookupTypes[i] != "" {
+			typed := make([]core.InternalObject, 0, len(objs))
+			for _, obj := range objs {
+				for _, cs := range obj.Checksums {
+					if normalizeChecksumType(cs.Type) == lookupTypes[i] && normalizeChecksum(cs.Checksum) == valueKey {
+						typed = append(typed, obj)
+						break
+					}
+				}
+			}
+			objs = typed
+		}
+		filtered[rawKey] = objs
+	}
+
+	out := drsmap.ToExternalMap(filtered)
 	return drs.ImplResponse{Code: http.StatusOK, Body: out}, nil
 }
 
@@ -413,9 +440,22 @@ func (s *ObjectsAPIService) UpdateObjectAccessMethods(ctx context.Context, objec
 }
 
 func (s *ObjectsAPIService) GetObjectsByChecksum(ctx context.Context, checksum string) (drs.ImplResponse, error) {
-	objs, err := s.db.GetObjectsByChecksum(ctx, normalizeChecksum(checksum))
+	checksumType, checksumValue := parseChecksumQuery(checksum)
+	objs, err := s.db.GetObjectsByChecksum(ctx, checksumValue)
 	if err != nil {
 		return drs.ImplResponse{Code: http.StatusInternalServerError, Body: drs.Error{Msg: err.Error(), StatusCode: http.StatusInternalServerError}}, err
+	}
+	if checksumType != "" {
+		filtered := make([]core.InternalObject, 0, len(objs))
+		for _, obj := range objs {
+			for _, cs := range obj.Checksums {
+				if normalizeChecksumType(cs.Type) == checksumType && normalizeChecksum(cs.Checksum) == checksumValue {
+					filtered = append(filtered, obj)
+					break
+				}
+			}
+		}
+		objs = filtered
 	}
 	if len(objs) == 0 {
 		return drs.ImplResponse{Code: http.StatusNotFound, Body: drs.Error{Msg: "object not found for checksum", StatusCode: http.StatusNotFound}}, nil
