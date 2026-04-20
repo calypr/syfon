@@ -222,39 +222,40 @@ replace github.com/calypr/syfon/client => ./client
 # Development
 
 The project uses a Makefile for common tasks:
-- `make gen`: Generates the DRS server code from the official GA4GH OpenAPI spec (Git submodule).
+- `make gen`: Generates the DRS server stubs from the official GA4GH OpenAPI spec (Git submodule) and refreshes the shared `apigen/*` OpenAPI outputs.
 - `make test`: Runs all unit and integration tests.
 - `make test-unit`: Runs unit tests only (excludes integration packages).
 - `make coverage`: Runs coverage for core production packages (db/service/middleware/url signing) and writes `coverage/coverage.out`, `coverage/coverage.txt`, and `coverage/coverage.html`.
 - `make coverage-full`: Runs broader compatibility-layer coverage (includes internal compatibility and LFS packages).
 - `make serve`: Starts the DRS server.
 
-## apigen Scope (Current vs Future)
+## OpenAPI Codegen
 
-Syfon uses `oapi-codegen` to generate the HTTP boundary, but it does not use the stock generator output directly. The repo keeps a set of user templates that adapt the generated server to Fiber v3.
+Syfon currently uses OpenAPI Generator for both server-side and client-facing API artifacts:
 
-The pieces are:
+- `make gen` produces the DRS server stub package in `apigen/drs` from the GA4GH spec.
+- `make gen-lfs`, `make gen-bucket`, `make gen-metrics`, and `make gen-internal` refresh the generated model packages under `apigen/` that the client and server code both consume.
+- The runtime HTTP wiring, middleware, and compatibility behavior still live in handwritten code under `cmd/server` and `internal/api/*`.
+- The client module itself is handwritten, but its request and response shapes come from the same generated OpenAPI contracts, so client and server stay aligned.
 
-- `apigen/api/*.openapi.yaml`: the source OpenAPI specs.
-- `apigen/specs/oapi-*.yaml`: generator configs that select Fiber server generation and wire in local templates.
-- `apigen/templates/fiber/*.tmpl`: Fiber-specific interface and middleware templates.
-- `apigen/templates/strict/*.tmpl`: strict-handler templates that generate request/response wrapper types and strict server glue.
-- `apigen/{drs,internalapi,lfsapi,metricsapi,bucketapi}`: generated packages committed to the repo.
+This split is intentional: generated code keeps the schema surface in sync, while handwritten runtime code preserves control over routing, auth, and compatibility behavior.
 
-What the templates do:
+### Quick rules of thumb
 
-- `fiber-interface.tmpl` generates server interfaces that take `fiber.Ctx` plus path/query/header params.
-- `fiber-middleware.tmpl` converts Fiber request data into typed params and calls the server interface.
-- `strict-fiber.tmpl` generates strict-handler request objects and the request/response bridge used by `NewStrictHandler(...)`.
-- `strict-fiber-interface.tmpl` generates the strict server interface and response object types.
+- If you change the upstream GA4GH DRS schema or the Syfon overlay, run `make gen`.
+- If you change `apigen/api/lfs.openapi.yaml`, run `make gen-lfs`.
+- If you change `apigen/api/bucket.openapi.yaml`, run `make gen-bucket`.
+- If you change `apigen/api/metrics.openapi.yaml`, run `make gen-metrics`.
+- If you change `apigen/api/internal.openapi.yaml`, run `make gen-internal`.
+- If you only change runtime wiring, auth, handlers, or business logic, you usually do not need codegen.
+- If a PR touches OpenAPI files, include the regenerated `apigen/*` output in the same commit.
 
-Practical rule of thumb:
+### What to expect after regeneration
 
-- Edit the OpenAPI spec when the API contract changes.
-- Edit the templates when the Fiber binding behavior needs to change.
-- Do not hand-edit generated code in `apigen/*`; regenerate it with `make gen` instead.
-
-The runtime wiring then lives in `cmd/server` and `internal/api/*`, where the generated handlers are attached to Fiber routers.
+- `apigen/drs` is overwritten with generated server code and generated DRS models.
+- The relevant `apigen/*api` package is overwritten with generated Go models and helper files.
+- `apigen/api/*.openapi.yaml` files are the bundled spec inputs that the runtime docs endpoint serves.
+- `go test ./...` or the affected package tests should still pass after the regen.
 
 ## Running Integration Tests
 
