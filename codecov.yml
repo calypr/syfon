@@ -13,10 +13,11 @@ coverage:
   round: down
   range: "60...100"
   ignore:
-    - "apigen"
-    - "tests"
-    - "testutils"
-    - "cmd/openapi-remove-examples"
+    - "/apigen/"
+    - "/tests/endpoints/"
+    - "/testutils/"
+    - "/cmd/"
+    - "/cmd/openapi-remove-examples/"
   status:
     project:
       default:
