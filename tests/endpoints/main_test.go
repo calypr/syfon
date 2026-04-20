@@ -52,7 +52,12 @@ func runTests(m *testing.M) int {
 	}
 	defer os.Remove(binaryPath)
 
-	buildCmd := exec.Command("go", "build", "-o", binaryPath, ".")
+	buildArgs := []string{"build", "-o", binaryPath}
+	if gocoverdir := os.Getenv("GOCOVERDIR"); gocoverdir != "" {
+		buildArgs = append(buildArgs, "-cover", "-covermode=atomic", "-coverpkg=./...")
+	}
+	buildArgs = append(buildArgs, ".")
+	buildCmd := exec.Command("go", buildArgs...)
 	buildCmd.Dir = rootDir
 	if out, err := buildCmd.CombinedOutput(); err != nil {
 		panic(fmt.Sprintf("failed to build binary: %v\n%s", err, string(out)))
@@ -60,13 +65,18 @@ func runTests(m *testing.M) int {
 
 	cmd := exec.Command(binaryPath, "serve")
 	cmd.Dir = rootDir
-	cmd.Env = append(
+	serverEnv := append(
 		os.Environ(),
 		"DRS_PORT=9005",
 		"DRS_DB_SQLITE_FILE=drs_test.db",
 		"DRS_AUTH_MODE=local",
 		"DRS_ENABLE_GA4GH=true",
 	)
+	// Coverage-instrumented binaries write their data to GOCOVERDIR on exit.
+	if gocoverdir := os.Getenv("GOCOVERDIR"); gocoverdir != "" {
+		serverEnv = append(serverEnv, "GOCOVERDIR="+gocoverdir)
+	}
+	cmd.Env = serverEnv
 
 	// Put the child in its own process group so we can kill the whole tree.
 	cmd.SysProcAttr = &syscall.SysProcAttr{
