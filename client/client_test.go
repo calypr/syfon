@@ -7,6 +7,9 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/calypr/syfon/apigen/client/internalapi"
+	"github.com/calypr/syfon/client/syfonclient"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -22,7 +25,7 @@ func newTestClient(t *testing.T, fn roundTripFunc) *Client {
 	if err != nil {
 		t.Fatalf("failed to create client: %v", err)
 	}
-	return c
+	return c.(*Client)
 }
 
 func TestClientBasicAuthAndUserAgent(t *testing.T) {
@@ -57,45 +60,50 @@ func TestClientBasicAuthAndUserAgent(t *testing.T) {
 	}
 }
 
+func ptr[T any](v T) *T { return &v }
+
 func TestDataUploadBlank(t *testing.T) {
 	t.Parallel()
 	c := newTestClient(t, func(r *http.Request) (*http.Response, error) {
 		if r.Method != http.MethodPost || r.URL.Path != "/data/upload" {
 			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
 		}
-		var req UploadBlankRequest
+		var req internalapi.InternalUploadBlankRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			t.Fatalf("decode request: %v", err)
 		}
-		if (&req).GetGuid() != "abc" {
-			t.Fatalf("unexpected guid: %q", (&req).GetGuid())
+		if req.Guid == nil || *req.Guid != "abc" {
+			t.Fatalf("unexpected guid: %v", req.Guid)
 		}
-		out := UploadBlankResponse{}
-		(&out).SetGuid("abc")
-		(&out).SetUrl("https://signed")
-		(&out).SetBucket("b1")
+		out := internalapi.InternalUploadBlankOutput{
+			Guid:   ptr("abc"),
+			Url:    ptr("https://signed"),
+			Bucket: ptr("b1"),
+		}
 		data, _ := json.Marshal(out)
+		header := make(http.Header)
+		header.Set("Content-Type", "application/json")
 		return &http.Response{
-			StatusCode: http.StatusOK,
+			StatusCode: http.StatusCreated,
 			Body:       io.NopCloser(strings.NewReader(string(data))),
-			Header:     make(http.Header),
+			Header:     header,
 		}, nil
 	})
-	req := UploadBlankRequest{}
-	req.SetGuid("abc")
+	req := internalapi.InternalUploadBlankRequest{Guid: ptr("abc")}
 	out, err := c.data.UploadBlank(context.Background(), req)
 	if err != nil {
 		t.Fatalf("UploadBlank failed: %v", err)
 	}
-	if (&out).GetUrl() != "https://signed" || (&out).GetBucket() != "b1" {
+	if out.Url == nil || *out.Url != "https://signed" || out.Bucket == nil || *out.Bucket != "b1" {
 		t.Fatalf("unexpected response: %+v", out)
 	}
 }
 
 func TestIndexListByHash(t *testing.T) {
 	t.Parallel()
-	rec := InternalRecordRequest{}
-	(&rec).SetDid("id-1")
+	rec := internalapi.InternalRecord{
+		Did: "id-1",
+	}
 	c := newTestClient(t, func(r *http.Request) (*http.Response, error) {
 		if r.Method != http.MethodGet || r.URL.Path != "/index" {
 			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
@@ -103,18 +111,20 @@ func TestIndexListByHash(t *testing.T) {
 		if got := r.URL.Query().Get("hash"); got != "sha256:deadbeef" {
 			t.Fatalf("unexpected hash query: %q", got)
 		}
-		data, _ := json.Marshal(ListRecordsResponse{Records: []InternalRecordRequest{rec}})
+		data, _ := json.Marshal(internalapi.ListRecordsResponse{Records: &[]internalapi.InternalRecord{rec}})
+		header := make(http.Header)
+		header.Set("Content-Type", "application/json")
 		return &http.Response{
 			StatusCode: http.StatusOK,
 			Body:       io.NopCloser(strings.NewReader(string(data))),
-			Header:     make(http.Header),
+			Header:     header,
 		}, nil
 	})
-	out, err := c.index.List(context.Background(), ListRecordsOptions{Hash: "sha256:deadbeef"})
+	out, err := c.index.List(context.Background(), syfonclient.ListRecordsOptions{Hash: "sha256:deadbeef"})
 	if err != nil {
 		t.Fatalf("Index.List failed: %v", err)
 	}
-	if len(out.Records) != 1 || (&out.Records[0]).GetDid() != "id-1" {
+	if out.Records == nil || len(*out.Records) != 1 || (*out.Records)[0].Did != "id-1" {
 		t.Fatalf("unexpected response: %+v", out)
 	}
 }
@@ -125,19 +135,22 @@ func TestDataMultipartInitUsesCanonicalUploadId(t *testing.T) {
 		if r.Method != http.MethodPost || r.URL.Path != "/data/multipart/init" {
 			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
 		}
+		header := make(http.Header)
+		header.Set("Content-Type", "application/json")
 		return &http.Response{
-			StatusCode: http.StatusCreated,
+			StatusCode: http.StatusOK,
 			Body:       io.NopCloser(strings.NewReader(`{"guid":"g1","uploadId":"u1"}`)),
-			Header:     make(http.Header),
+			Header:     header,
 		}, nil
 	})
-	req := MultipartInitRequest{}
-	req.SetGuid("g1")
-	out, err := c.data.MultipartInit(context.Background(), req)
+	// InitMultipartUpload returns (uploadID string, respGuid string, err error)
+	// Wait, I updated the service methods.
+	// c.data.InitMultipartUpload(ctx, guid, filename, bucket) -> (string, string, error)
+	uploadID, respGuid, err := c.data.InitMultipartUpload(context.Background(), "g1", "", "")
 	if err != nil {
 		t.Fatalf("MultipartInit failed: %v", err)
 	}
-	if (&out).GetGuid() != "g1" || (&out).GetUploadId() != "u1" {
-		t.Fatalf("unexpected response: %+v", out)
+	if respGuid != "g1" || uploadID != "u1" {
+		t.Fatalf("unexpected response: guid=%s uploadID=%s", respGuid, uploadID)
 	}
 }

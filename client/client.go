@@ -6,9 +6,15 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/calypr/syfon/apigen/client/bucketapi"
+	"github.com/calypr/syfon/apigen/client/drs"
+	"github.com/calypr/syfon/apigen/client/internalapi"
+	"github.com/calypr/syfon/apigen/client/lfsapi"
+	"github.com/calypr/syfon/apigen/client/metricsapi"
 	"github.com/calypr/syfon/client/conf"
-	"github.com/calypr/syfon/client/pkg/logs"
-	"github.com/calypr/syfon/client/pkg/request"
+	"github.com/calypr/syfon/client/logs"
+	"github.com/calypr/syfon/client/request"
+	"github.com/calypr/syfon/client/syfonclient"
 )
 
 const (
@@ -22,9 +28,6 @@ type Config struct {
 	UserAgent  string
 	BasicAuth  *BasicAuth
 	Token      string
-
-	// Requestor allows overriding the default HTTP backend.
-	Requestor request.RequestInterface
 }
 
 type BasicAuth struct {
@@ -32,23 +35,25 @@ type BasicAuth struct {
 	Password string
 }
 
+// Client implements syfonclient.SyfonClient
 type Client struct {
-	baseService
-
-	health  *HealthService
-	data    *DataService
-	index   *IndexService
-	drs     *DRSService
-	buckets *BucketsService
-	metrics *MetricsService
-}
-
-type baseService struct {
+	requestor request.Requester
 	baseURL   string
-	userAgent string
-	basicAuth *BasicAuth
-	token     string
-	requestor request.RequestInterface
+
+	health  *syfonclient.HealthService
+	data    *syfonclient.DataService
+	index   *syfonclient.IndexService
+	drs     *syfonclient.DRSService
+	buckets *syfonclient.BucketsService
+	metrics *syfonclient.MetricsService
+	lfs     *syfonclient.LFSService
+
+	// Generated schema-specific clients
+	drsGen      *drs.ClientWithResponses
+	lfsGen      *lfsapi.ClientWithResponses
+	internalGen *internalapi.ClientWithResponses
+	bucketGen   *bucketapi.ClientWithResponses
+	metricsGen  *metricsapi.ClientWithResponses
 }
 
 type Option func(*Config)
@@ -58,12 +63,6 @@ func WithHTTPClient(h *http.Client) Option {
 		if h != nil {
 			c.HTTPClient = h
 		}
-	}
-}
-
-func WithRequestor(r request.RequestInterface) Option {
-	return func(c *Config) {
-		c.Requestor = r
 	}
 }
 
@@ -102,7 +101,7 @@ func DefaultConfig() *Config {
 	}
 }
 
-func New(baseURL string, opts ...Option) (*Client, error) {
+func New(baseURL string, opts ...Option) (syfonclient.SyfonClient, error) {
 	baseURL = strings.TrimSpace(baseURL)
 	if baseURL == "" {
 		baseURL = "http://127.0.0.1:8080"
@@ -135,27 +134,19 @@ func NewClient(cfg *Config) (*Client, error) {
 		userAgent = defaultUA
 	}
 
-	req := cfg.Requestor
-	if req == nil {
-		// Initialize the hardened requestor
-		cred := &conf.Credential{
-			AccessToken: cfg.Token,
-		}
-		if cfg.BasicAuth != nil {
-			cred.KeyID = cfg.BasicAuth.Username
-			cred.APIKey = cfg.BasicAuth.Password
-		}
-		req = request.NewRequestInterface(nil, cred, nil, bu, userAgent, cfg.HTTPClient)
+	// Initialize the hardened requestor
+	cred := &conf.Credential{
+		AccessToken: cfg.Token,
 	}
+	if cfg.BasicAuth != nil {
+		cred.KeyID = cfg.BasicAuth.Username
+		cred.APIKey = cfg.BasicAuth.Password
+	}
+	req := request.NewRequestor(nil, cred, nil, bu, userAgent, cfg.HTTPClient)
 
 	client := &Client{
-		baseService: baseService{
-			baseURL:   bu,
-			userAgent: userAgent,
-			basicAuth: cfg.BasicAuth,
-			token:     strings.TrimSpace(cfg.Token),
-			requestor: req,
-		},
+		requestor: req,
+		baseURL:   bu,
 	}
 	client.initServices()
 	return client, nil
@@ -180,27 +171,55 @@ func parseBaseURL(addr string) (string, error) {
 }
 
 func (c *Client) initServices() {
-	c.health = &HealthService{base: &c.baseService}
-	c.index = &IndexService{base: &c.baseService}
-	c.drs = &DRSService{base: &c.baseService, index: c.index}
-	c.data = &DataService{base: &c.baseService, drs: c.drs}
-	c.buckets = &BucketsService{base: &c.baseService}
-	c.metrics = &MetricsService{base: &c.baseService}
+	l := c.Logger()
+
+	server := c.baseURL
+	drsServer := strings.TrimRight(server+"/ga4gh/drs/v1", "/")
+	httpClient := c.HTTPClient()
+
+	c.drsGen, _ = drs.NewClientWithResponses(drsServer, drs.WithHTTPClient(httpClient))
+	c.lfsGen, _ = lfsapi.NewClientWithResponses(server, lfsapi.WithHTTPClient(httpClient))
+	c.internalGen, _ = internalapi.NewClientWithResponses(server, internalapi.WithHTTPClient(httpClient))
+	c.bucketGen, _ = bucketapi.NewClientWithResponses(server, bucketapi.WithHTTPClient(httpClient))
+	c.metricsGen, _ = metricsapi.NewClientWithResponses(server, metricsapi.WithHTTPClient(httpClient))
+
+	c.health = syfonclient.NewHealthService(c.requestor)
+	c.index = syfonclient.NewIndexService(c.internalGen, c.requestor)
+	c.drs = syfonclient.NewDRSService(c.drsGen, c.index)
+	c.lfs = syfonclient.NewLFSService(c.lfsGen)
+	c.data = syfonclient.NewDataService(c.internalGen, c.requestor, l, c.drs)
+	c.buckets = syfonclient.NewBucketsService(c.bucketGen)
+	c.metrics = syfonclient.NewMetricsService(c.metricsGen)
+}
+
+func (c *Client) HTTPClient() *http.Client {
+	if r, ok := c.requestor.(*request.Request); ok {
+		return r.RetryClient.StandardClient()
+	}
+	return http.DefaultClient
 }
 
 func (c *Client) Address() string { return c.baseURL }
 
-func (c *Client) Health() *HealthService   { return c.health }
-func (c *Client) Data() *DataService       { return c.data }
-func (c *Client) Index() *IndexService     { return c.index }
-func (c *Client) DRS() *DRSService         { return c.drs }
-func (c *Client) Buckets() *BucketsService { return c.buckets }
-func (c *Client) Metrics() *MetricsService { return c.metrics }
+func (c *Client) Health() *syfonclient.HealthService   { return c.health }
+func (c *Client) Data() *syfonclient.DataService       { return c.data }
+func (c *Client) Index() *syfonclient.IndexService     { return c.index }
+func (c *Client) DRS() *syfonclient.DRSService         { return c.drs }
+func (c *Client) Buckets() *syfonclient.BucketsService { return c.buckets }
+func (c *Client) Metrics() *syfonclient.MetricsService { return c.metrics }
+func (c *Client) LFS() *syfonclient.LFSService         { return c.lfs }
 
-func (c *Client) Requestor() request.RequestInterface { return c.baseService.requestor }
+// Schema-specific generated clients
+func (c *Client) LFSAPI() *lfsapi.ClientWithResponses           { return c.lfsGen }
+func (c *Client) InternalAPI() *internalapi.ClientWithResponses { return c.internalGen }
+func (c *Client) BucketAPI() *bucketapi.ClientWithResponses     { return c.bucketGen }
+func (c *Client) MetricsAPI() *metricsapi.ClientWithResponses   { return c.metricsGen }
+func (c *Client) DRSAPI() *drs.ClientWithResponses              { return c.drsGen }
+
+func (c *Client) Requestor() request.Requester { return c.requestor }
 
 func (c *Client) Logger() *logs.Gen3Logger {
-	if r, ok := c.Requestor().(*request.Request); ok {
+	if r, ok := c.requestor.(*request.Request); ok {
 		return r.Logs
 	}
 	return logs.NewGen3Logger(nil, "", "")

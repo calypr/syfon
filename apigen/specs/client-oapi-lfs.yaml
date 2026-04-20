@@ -1,0 +1,4 @@
+package: lfsapi
+generate:
+  client: true
+  models: true

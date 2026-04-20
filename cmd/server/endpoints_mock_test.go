@@ -9,17 +9,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/calypr/syfon/apigen/drs"
-	"github.com/calypr/syfon/db/core"
-	coreapi "github.com/calypr/syfon/internal/api/coreapi"
-	"github.com/calypr/syfon/internal/api/docs"
-	"github.com/calypr/syfon/internal/api/internaldrs"
-	"github.com/calypr/syfon/internal/api/lfs"
-	"github.com/calypr/syfon/internal/api/metrics"
+	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/api/middleware"
-	"github.com/calypr/syfon/service"
-	"github.com/calypr/syfon/testutils"
-	"github.com/gorilla/mux"
+	"github.com/calypr/syfon/internal/common"
+	"github.com/calypr/syfon/internal/config"
+	"github.com/calypr/syfon/internal/core"
+	"github.com/calypr/syfon/internal/models"
+	"github.com/calypr/syfon/internal/testutils"
+	"github.com/gofiber/fiber/v3"
 )
 
 type endpointCase struct {
@@ -27,18 +24,30 @@ type endpointCase struct {
 	Template string
 }
 
-var pathVarPattern = regexp.MustCompile(`\{([^}]+)\}`)
+var pathVarPattern = regexp.MustCompile(`:([A-Za-z0-9_]+)`)
 
 func TestAllRegisteredEndpoints_WithMocks(t *testing.T) {
-	router := buildMockServerRouter()
+	app := buildMockServerRouterWithRoutes(config.RoutesConfig{
+		Docs:     true,
+		Ga4gh:    true,
+		Metrics:  true,
+		Internal: true,
+		LFS:      true,
+	})
 
-	endpoints := collectEndpoints(t, router)
+	endpoints := collectEndpoints(t, app)
 	if len(endpoints) == 0 {
 		t.Fatal("no endpoints discovered from router")
 	}
 
 	seen := make(map[string]struct{}, len(endpoints))
 	for _, ep := range endpoints {
+		if ep.Method == http.MethodOptions || ep.Method == "CONNECT" || ep.Method == "TRACE" || ep.Method == "PATCH" {
+			continue
+		}
+		if ep.Template == "/" && ep.Method != http.MethodGet && ep.Method != http.MethodDelete {
+			continue
+		}
 		key := ep.Method + " " + ep.Template
 		if _, ok := seen[key]; ok {
 			continue
@@ -56,24 +65,19 @@ func TestAllRegisteredEndpoints_WithMocks(t *testing.T) {
 				req.Header.Set("Accept", "application/vnd.git-lfs+json")
 			}
 
-			match := &mux.RouteMatch{}
-			if ok := router.Match(req, match); !ok {
-				t.Fatalf("router did not match request for %s %s", ep.Method, path)
+			resp, err := app.Test(req)
+			if err != nil {
+				t.Fatalf("test request failed: %v", err)
 			}
-
-			rr := httptest.NewRecorder()
-			router.ServeHTTP(rr, req)
-
-			if rr.Code <= 0 {
-				t.Fatalf("invalid status code for %s %s: %d", ep.Method, path, rr.Code)
+			if resp.StatusCode <= 0 {
+				t.Fatalf("invalid status code for %s %s: %d", ep.Method, path, resp.StatusCode)
 			}
-			if rr.Code == http.StatusMethodNotAllowed {
+			if resp.StatusCode == http.StatusMethodNotAllowed {
 				t.Fatalf("unexpected 405 for matched route %s %s", ep.Method, path)
 			}
 		})
 	}
 
-	// Critical endpoints used by clients should always be present.
 	required := []endpointCase{
 		{Method: http.MethodPost, Template: "/ga4gh/drs/v1/objects/register"},
 		{Method: http.MethodPost, Template: "/ga4gh/drs/v1/objects"},
@@ -81,7 +85,6 @@ func TestAllRegisteredEndpoints_WithMocks(t *testing.T) {
 		{Method: http.MethodPost, Template: "/ga4gh/drs/v1/objects/access-methods"},
 		{Method: http.MethodPost, Template: "/ga4gh/drs/v1/objects/delete"},
 		{Method: http.MethodPost, Template: "/info/lfs/objects/batch"},
-		{Method: http.MethodPost, Template: "/index/bulk/sha256/validity"},
 		{Method: http.MethodPost, Template: "/index/bulk/sha256/validity"},
 		{Method: http.MethodGet, Template: "/index/v1/metrics/summary"},
 		{Method: http.MethodGet, Template: "/index/v1/metrics/files"},
@@ -94,43 +97,89 @@ func TestAllRegisteredEndpoints_WithMocks(t *testing.T) {
 }
 
 func TestAdminRoutesNotRegistered(t *testing.T) {
-	router := buildMockServerRouter()
+	app := buildMockServerRouterWithRoutes(config.RoutesConfig{
+		Docs:     true,
+		Ga4gh:    true,
+		Metrics:  true,
+		Internal: true,
+		LFS:      true,
+	})
 
 	reqSign := httptest.NewRequest(http.MethodPost, "/admin/sign_url", bytes.NewBufferString(`{"url":"s3://b/k","method":"GET"}`))
 	reqSign.Header.Set("Content-Type", "application/json")
-	rrSign := httptest.NewRecorder()
-	router.ServeHTTP(rrSign, reqSign)
-	if rrSign.Code != http.StatusNotFound {
-		t.Fatalf("expected /admin/sign_url to be absent (404), got %d", rrSign.Code)
+	respSign, err := app.Test(reqSign)
+	if err != nil {
+		t.Fatalf("test request failed: %v", err)
+	}
+	if respSign.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected /admin/sign_url to be absent (404), got %d", respSign.StatusCode)
 	}
 
 	reqCreds := httptest.NewRequest(http.MethodGet, "/admin/credentials", nil)
-	rrCreds := httptest.NewRecorder()
-	router.ServeHTTP(rrCreds, reqCreds)
-	if rrCreds.Code != http.StatusNotFound {
-		t.Fatalf("expected /admin/credentials to be absent (404), got %d", rrCreds.Code)
+	respCreds, err := app.Test(reqCreds)
+	if err != nil {
+		t.Fatalf("test request failed: %v", err)
+	}
+	if respCreds.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected /admin/credentials to be absent (404), got %d", respCreds.StatusCode)
 	}
 }
 
-func buildMockServerRouter() *mux.Router {
+func buildMockServerRouter() *fiber.App {
+	return buildMockServerRouterWithRoutes(config.RoutesConfig{
+		Docs:     true,
+		Ga4gh:    true,
+		Metrics:  true,
+		Internal: true,
+		LFS:      true,
+	})
+}
+
+func TestHealthOnlyServerExposesNoOptionalRoutes(t *testing.T) {
+	app := buildMockServerRouterWithRoutes(config.RoutesConfig{})
+
+	endpoints := collectEndpoints(t, app)
+	foundHealth := false
+	for _, ep := range endpoints {
+		if ep.Template == "/healthz" {
+			foundHealth = true
+			continue
+		}
+		if ep.Template == "/" {
+			continue
+		}
+		t.Fatalf("expected only healthz route when no modules are enabled, found %s %s", ep.Method, ep.Template)
+	}
+	if !foundHealth {
+		t.Fatal("expected /healthz route when no modules are enabled")
+	}
+}
+
+func buildMockServerRouterWithRoutes(routes config.RoutesConfig) *fiber.App {
 	database := &testutils.MockDatabase{
 		Objects: map[string]*drs.DrsObject{
 			"sha-1": {
 				Id:          "sha-1",
-				Name:        "mock-object",
+				Name:        common.Ptr("mock-object"),
 				Size:        1,
-				Version:     "1",
-				Description: "mock",
-				Checksums: []drs.Checksum{
-					{Type: "sha256", Checksum: "sha-1"},
-				},
-				AccessMethods: []drs.AccessMethod{
+				Version:     common.Ptr("1"),
+				Description: common.Ptr("mock"),
+				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: "sha-1"}},
+				AccessMethods: &[]drs.AccessMethod{
 					{
-						Type:      "s3",
-						AccessId:  "s3",
-						AccessUrl: drs.AccessMethodAccessUrl{Url: "s3://test-bucket-1/sha-1"},
-						Authorizations: drs.AccessMethodAuthorizations{
-							BearerAuthIssuers: []string{"/data_file"},
+						Type:     drs.AccessMethodTypeS3,
+						AccessId: common.Ptr("s3"),
+						AccessUrl: &struct {
+							Headers *[]string `json:"headers,omitempty"`
+							Url     string    `json:"url"`
+						}{Url: "s3://test-bucket-1/sha-1"},
+						Authorizations: &struct {
+							BearerAuthIssuers   *[]string                                       `json:"bearer_auth_issuers,omitempty"`
+							DrsObjectId         *string                                         `json:"drs_object_id,omitempty"`
+							PassportAuthIssuers *[]string                                       `json:"passport_auth_issuers,omitempty"`
+							SupportedTypes      *[]drs.AccessMethodAuthorizationsSupportedTypes `json:"supported_types,omitempty"`
+						}{
+							BearerAuthIssuers: &[]string{"/data_file"},
 						},
 					},
 				},
@@ -139,7 +188,7 @@ func buildMockServerRouter() *mux.Router {
 		ObjectAuthz: map[string][]string{
 			"sha-1": {"/data_file"},
 		},
-		Credentials: map[string]core.S3Credential{
+		Credentials: map[string]models.S3Credential{
 			"test-bucket-1": {
 				Bucket:    "test-bucket-1",
 				Region:    "us-east-1",
@@ -149,64 +198,41 @@ func buildMockServerRouter() *mux.Router {
 		},
 	}
 	uM := &testutils.MockUrlManager{}
-	svc := service.NewObjectsAPIService(database, uM)
+	app := fiber.New()
 
-	objectsController := drs.NewObjectsAPIController(svc)
-	serviceInfoController := drs.NewServiceInfoAPIController(svc)
-	uploadRequestController := drs.NewUploadRequestAPIController(svc)
-
-	router := mux.NewRouter().StrictSlash(true)
-	registerAPIRoutes(router, objectsController, serviceInfoController, uploadRequestController)
-
-	// Local mode for deterministic no-network auth behavior in tests.
 	logger := slog.New(slog.NewTextHandler(bytes.NewBuffer(nil), nil))
 	authzMiddleware := middleware.NewAuthzMiddleware(logger, "local", "", "")
 	requestIDMiddleware := middleware.NewRequestIDMiddleware(logger)
-	router.Use(requestIDMiddleware.Middleware)
-	router.Use(authzMiddleware.Middleware)
-
-	router.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("OK"))
-	})
-
-	docs.RegisterSwaggerRoutes(router)
-	coreapi.RegisterCoreRoutes(router, database)
-	metrics.RegisterMetricsRoutes(router, database)
-	internaldrs.RegisterInternalIndexRoutes(router, database)
-	internaldrs.RegisterInternalDataRoutes(router, database, uM)
-	lfs.RegisterLFSRoutes(router, database, uM)
-	return router
+	cfg := &config.Config{Routes: routes}
+	rt := &serverRuntime{
+		app:                 app,
+		cfg:                 cfg,
+		database:            database,
+		om:                  core.NewObjectManager(database, uM),
+		uM:                  uM,
+		authzMiddleware:     authzMiddleware,
+		requestIDMiddleware: requestIDMiddleware,
+	}
+	applyServerOptions(rt, buildServerOptions(cfg)...)
+	return app
 }
 
-func collectEndpoints(t *testing.T, router *mux.Router) []endpointCase {
+func collectEndpoints(t *testing.T, app *fiber.App) []endpointCase {
 	t.Helper()
-	out := make([]endpointCase, 0, 64)
-	if err := router.Walk(func(route *mux.Route, _ *mux.Router, _ []*mux.Route) error {
-		methods, err := route.GetMethods()
-		if err != nil {
-			return nil
+	routes := app.GetRoutes(false)
+	out := make([]endpointCase, 0, len(routes))
+	for _, route := range routes {
+		if route.Method == http.MethodHead {
+			continue
 		}
-		template, err := route.GetPathTemplate()
-		if err != nil || template == "" {
-			return nil
-		}
-		for _, m := range methods {
-			if m == http.MethodHead {
-				continue
-			}
-			out = append(out, endpointCase{Method: m, Template: template})
-		}
-		return nil
-	}); err != nil {
-		t.Fatalf("failed to walk routes: %v", err)
+		out = append(out, endpointCase{Method: route.Method, Template: route.Path})
 	}
 	return out
 }
 
 func materializePath(template string) string {
 	return pathVarPattern.ReplaceAllStringFunc(template, func(v string) string {
-		name := strings.TrimSuffix(strings.TrimPrefix(v, "{"), "}")
+		name := strings.TrimPrefix(v, ":")
 		switch name {
 		case "object_id", "id", "did", "guid", "file_id", "oid":
 			return "sha-1"
@@ -234,15 +260,15 @@ func requestBodyFor(method, template string) ([]byte, string) {
 		return []byte(`{"bulk_object_access_ids":[{"bulk_object_id":"sha-1","bulk_access_ids":["s3"]}]}`), "application/json"
 	case "/ga4gh/drs/v1/objects/access-methods":
 		return []byte(`{"updates":[{"object_id":"sha-1","access_methods":[{"type":"s3","access_id":"s3","access_url":{"url":"s3://test-bucket-1/sha-1"}}]}]}`), "application/json"
-	case "/ga4gh/drs/v1/objects/{object_id}/checksums":
+	case "/ga4gh/drs/v1/objects/:object_id/checksums":
 		return []byte(`{"checksums":[{"type":"md5","checksum":"md5sum"}]}`), "application/json"
 	case "/ga4gh/drs/v1/objects/delete":
 		return []byte(`{"bulk_object_ids":["sha-1"],"delete_storage_data":false}`), "application/json"
-	case "/ga4gh/drs/v1/objects/{object_id}/delete":
+	case "/ga4gh/drs/v1/objects/:object_id/delete":
 		return []byte(`{"delete_storage_data":false}`), "application/json"
 	case "/ga4gh/drs/v1/upload-request":
 		return []byte(`{"requests":[{"size":1,"checksums":[{"type":"sha256","checksum":"sha-1"}],"name":"obj.bin"}]}`), "application/json"
-	case "/index/v1/sha256/validity", "/index/bulk/sha256/validity":
+	case "/index/bulk/sha256/validity":
 		return []byte(`{"sha256":["sha-1"]}`), "application/json"
 	case "/index/bulk/hashes":
 		return []byte(`{"hashes":["sha-1"]}`), "application/json"
@@ -250,7 +276,7 @@ func requestBodyFor(method, template string) ([]byte, string) {
 		return []byte(`{"records":[{"did":"sha-1","hashes":{"sha256":"sha-1"},"size":1,"urls":["s3://test-bucket-1/sha-1"],"authz":["/data_file"]}]}`), "application/json"
 	case "/index/bulk/documents":
 		return []byte(`["sha-1"]`), "application/json"
-	case "/data/upload", "/data/upload/{file_id}":
+	case "/data/upload", "/data/upload/:file_id":
 		if template == "/data/upload" {
 			return []byte(`{"guid":"sha-1","authz":["/data_file"]}`), "application/json"
 		}
@@ -267,7 +293,8 @@ func requestBodyFor(method, template string) ([]byte, string) {
 		if method == http.MethodPut {
 			return []byte(`{"bucket":"test-bucket-3","region":"us-east-1","access_key":"k","secret_key":"s","endpoint":""}`), "application/json"
 		}
-	case "/data/buckets/{bucket}/scopes":
+		return []byte(`{}`), "application/json"
+	case "/data/buckets/:bucket/scopes":
 		return []byte(`{"organization":"cbds","project_id":"proj2"}`), "application/json"
 	case "/info/lfs/objects/batch":
 		return []byte(`{"operation":"download","objects":[{"oid":"sha-1","size":1}]}`), "application/json"
@@ -275,6 +302,9 @@ func requestBodyFor(method, template string) ([]byte, string) {
 		return []byte(`{"candidates":[{"name":"obj","size":1,"checksums":[{"type":"sha256","checksum":"sha-1"}],"access_methods":[{"type":"s3","access_url":{"url":"s3://test-bucket-1/sha-1"},"authorizations":{"bearer_auth_issuers":["/data_file"]}}]}]}`), "application/json"
 	case "/info/lfs/verify":
 		return []byte(`{"oid":"sha-1","size":1}`), "application/json"
+	case "/info/lfs/objects/:oid":
+		return []byte(`{}`), "application/octet-stream"
+	default:
+		return []byte(`{}`), "application/json"
 	}
-	return []byte(`{}`), "application/json"
 }

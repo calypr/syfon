@@ -5,7 +5,9 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/calypr/syfon/apigen/client/bucketapi"
 	syclient "github.com/calypr/syfon/client"
+	sybucket "github.com/calypr/syfon/client/bucket"
 	"github.com/spf13/cobra"
 )
 
@@ -45,32 +47,37 @@ var addCmd = &cobra.Command{
 			return fmt.Errorf("--organization and --project-id are required")
 		}
 
-		payload := syclient.PutBucketRequest{
+		payload := bucketapi.PutBucketRequest{
 			Bucket:       bucket,
 			Organization: organization,
 			ProjectId:    projectID,
 		}
-		payload.SetProvider(provider)
+		payload.Provider = &provider
 		if v := strings.TrimSpace(bucketRegion); v != "" {
-			payload.SetRegion(v)
+			payload.Region = &v
 		}
 		if v := strings.TrimSpace(bucketAccessKey); v != "" {
-			payload.SetAccessKey(v)
+			payload.AccessKey = &v
 		}
 		if v := strings.TrimSpace(bucketSecretKey); v != "" {
-			payload.SetSecretKey(v)
+			payload.SecretKey = &v
 		}
 		if v := strings.TrimSpace(bucketEndpoint); v != "" {
-			payload.SetEndpoint(v)
+			payload.Endpoint = &v
 		}
 		if v := strings.TrimSpace(bucketPath); v != "" {
-			payload.SetPath(v)
+			payload.Path = &v
 		}
 
 		serverURL, err := cmd.Flags().GetString("server")
 		if err != nil {
 			return fmt.Errorf("get server flag: %w", err)
 		}
+		// Validate bucket locally before pushing to server
+		if err := sybucket.ValidateBucket(cmd.Context(), payload); err != nil {
+			return fmt.Errorf("local bucket validation failed: %w", err)
+		}
+
 		c, err := syclient.New(serverURL)
 		if err != nil {
 			return err
@@ -99,7 +106,7 @@ var listCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		buckets := resp.GetS3BUCKETS()
+		buckets := resp.S3BUCKETS
 		if len(buckets) == 0 {
 			fmt.Fprintln(cmd.OutOrStdout(), "no buckets configured")
 			return nil
@@ -111,13 +118,25 @@ var listCmd = &cobra.Command{
 		sort.Strings(names)
 		for _, name := range names {
 			md := buckets[name]
+			provider := ""
+			if md.Provider != nil {
+				provider = *md.Provider
+			}
+			region := ""
+			if md.Region != nil {
+				region = *md.Region
+			}
+			programs := []string{}
+			if md.Programs != nil {
+				programs = *md.Programs
+			}
 			fmt.Fprintf(
 				cmd.OutOrStdout(),
 				"%s\tprovider=%s\tregion=%s\tprograms=%s\n",
 				name,
-				strings.TrimSpace(md.GetProvider()),
-				strings.TrimSpace(md.GetRegion()),
-				strings.Join(md.GetPrograms(), ","),
+				strings.TrimSpace(provider),
+				strings.TrimSpace(region),
+				strings.Join(programs, ","),
 			)
 		}
 		return nil

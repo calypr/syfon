@@ -1,4 +1,7 @@
 components:
+  parameters:
+    Checksum:
+      x-go-name: ChecksumParam
   schemas:
     DRSPage:
       type: object

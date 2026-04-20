@@ -341,7 +341,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/InternalUploadBlankResponse'
+                $ref: '#/components/schemas/InternalUploadBlankOutput'
         '400':
           description: Validation error
         '401':
@@ -491,13 +491,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/InternalUploadBulkResponse'
+                $ref: '#/components/schemas/InternalUploadBulkOutput'
         '207':
           description: Partial success
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/InternalUploadBulkResponse'
+                $ref: '#/components/schemas/InternalUploadBulkOutput'
         '400':
           description: Validation error
         '401':
@@ -523,7 +523,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/InternalMultipartInitResponse'
+                $ref: '#/components/schemas/InternalMultipartInitOutput'
         '400':
           description: Validation error
         '401':
@@ -549,7 +549,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/InternalMultipartUploadResponse'
+                $ref: '#/components/schemas/InternalMultipartUploadOutput'
         '400':
           description: Validation error
         '401':
@@ -709,7 +709,7 @@ components:
           type: array
           items:
             type: string
-    InternalUploadBlankResponse:
+    InternalUploadBlankOutput:
       type: object
       properties:
         guid:
@@ -741,7 +741,7 @@ components:
         expires_in:
           type: integer
           format: int32
-    InternalUploadBulkResponse:
+    InternalUploadBulkOutput:
       type: object
       properties:
         results:
@@ -776,7 +776,7 @@ components:
           type: string
         bucket:
           type: string
-    InternalMultipartInitResponse:
+    InternalMultipartInitOutput:
       type: object
       properties:
         guid:
@@ -799,7 +799,7 @@ components:
         partNumber:
           type: integer
           format: int32
-    InternalMultipartUploadResponse:
+    InternalMultipartUploadOutput:
       type: object
       properties:
         presigned_url:

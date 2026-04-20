@@ -1,75 +1,88 @@
 package docs
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
-	"github.com/gorilla/mux"
+	"github.com/gofiber/fiber/v3"
 )
 
 func TestSwaggerUIRouteRootServed(t *testing.T) {
-	router := mux.NewRouter()
-	RegisterSwaggerRoutes(router)
+	app := fiber.New()
+	RegisterSwaggerRoutes(app)
 
 	req := httptest.NewRequest(http.MethodGet, "/index/swagger", nil)
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("test request failed: %v", err)
+	}
 
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", resp.StatusCode, string(body))
 	}
 }
 
 func TestSwaggerUIRouteTrailingSlash(t *testing.T) {
-	router := mux.NewRouter()
-	RegisterSwaggerRoutes(router)
+	app := fiber.New()
+	RegisterSwaggerRoutes(app)
 
 	req := httptest.NewRequest(http.MethodGet, "/index/swagger/", nil)
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rr.Code)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("test request failed: %v", err)
 	}
-	if !strings.Contains(rr.Body.String(), "SwaggerUIBundle") {
-		t.Fatalf("expected swagger html, got: %s", rr.Body.String())
+	body, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	if !strings.Contains(string(body), "SwaggerUIBundle") {
+		t.Fatalf("expected swagger html, got: %s", string(body))
 	}
 }
 
 func TestOpenAPIRouteRootServed(t *testing.T) {
-	router := mux.NewRouter()
-	RegisterSwaggerRoutes(router)
+	app := fiber.New()
+	RegisterSwaggerRoutes(app)
 
 	req := httptest.NewRequest(http.MethodGet, "/index/openapi.yaml", nil)
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("test request failed: %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
 
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", resp.StatusCode, string(body))
 	}
 }
 
 func TestOpenAPIRouteServed(t *testing.T) {
-	router := mux.NewRouter()
-	RegisterSwaggerRoutes(router)
+	app := fiber.New()
+	RegisterSwaggerRoutes(app)
 
 	req := httptest.NewRequest(http.MethodGet, "/index/openapi.yaml", nil)
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("test request failed: %v", err)
 	}
-	if !strings.Contains(rr.Body.String(), "openapi: 3.0.3") {
-		t.Fatalf("expected openapi spec body, got: %s", rr.Body.String())
+	body, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", resp.StatusCode, string(body))
+	}
+	if !strings.Contains(string(body), "openapi: 3.0.3") {
+		t.Fatalf("expected openapi spec body, got: %s", string(body))
 	}
 }
 
 func TestAuxOpenAPIRoutesServed(t *testing.T) {
-	router := mux.NewRouter()
-	RegisterSwaggerRoutes(router)
+	app := fiber.New()
+	RegisterSwaggerRoutes(app)
 
 	paths := []string{
 		"/index/openapi-lfs.yaml",
@@ -78,10 +91,13 @@ func TestAuxOpenAPIRoutesServed(t *testing.T) {
 	}
 	for _, p := range paths {
 		req := httptest.NewRequest(http.MethodGet, p, nil)
-		rr := httptest.NewRecorder()
-		router.ServeHTTP(rr, req)
-		if rr.Code != http.StatusOK {
-			t.Fatalf("expected 200 for %s, got %d body=%s", p, rr.Code, rr.Body.String())
+		resp, err := app.Test(req)
+		if err != nil {
+			t.Fatalf("test request failed: %v", err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200 for %s, got %d body=%s", p, resp.StatusCode, string(body))
 		}
 	}
 }

@@ -1,0 +1,1748 @@
+@startuml
+namespace client {
+    class "BasicAuth" << (S,Aquamarine) >> {
+        + Username string
+        + Password string
+
+    }
+    class "Client" << (S,Aquamarine) >> {
+        - requestor request.Requester
+        - baseURL string
+        - health *syfonclient.HealthService
+        - data *syfonclient.DataService
+        - index *syfonclient.IndexService
+        - drs *syfonclient.DRSService
+        - buckets *syfonclient.BucketsService
+        - metrics *syfonclient.MetricsService
+        - lfs *syfonclient.LFSService
+        - drsGen *drs.ClientWithResponses
+        - lfsGen *lfsapi.ClientWithResponses
+        - internalGen *internalapi.ClientWithResponses
+        - bucketGen *bucketapi.ClientWithResponses
+        - metricsGen *metricsapi.ClientWithResponses
+
+        - initServices() 
+
+        + HTTPClient() *http.Client
+        + Address() string
+        + Health() *syfonclient.HealthService
+        + Data() *syfonclient.DataService
+        + Index() *syfonclient.IndexService
+        + DRS() *syfonclient.DRSService
+        + Buckets() *syfonclient.BucketsService
+        + Metrics() *syfonclient.MetricsService
+        + LFS() *syfonclient.LFSService
+        + LFSAPI() *lfsapi.ClientWithResponses
+        + InternalAPI() *internalapi.ClientWithResponses
+        + BucketAPI() *bucketapi.ClientWithResponses
+        + MetricsAPI() *metricsapi.ClientWithResponses
+        + DRSAPI() *drs.ClientWithResponses
+        + Requestor() request.Requester
+        + Logger() *logs.Gen3Logger
+
+    }
+    class "Config" << (S,Aquamarine) >> {
+        + Address string
+        + HTTPClient *http.Client
+        + UserAgent string
+        + BasicAuth *BasicAuth
+        + Token string
+
+    }
+    class "DownloadOptions" << (S,Aquamarine) >> {
+        + DownloadPath string
+        + FilenameFormat string
+        + Rename bool
+        + NoPrompt bool
+        + Protocol string
+        + NumParallel int
+        + SkipCompleted bool
+        + ManifestPath string
+
+    }
+    class "UploadOptions" << (S,Aquamarine) >> {
+        + Bucket string
+        + IncludeSubDirName bool
+        + HasMetadata bool
+        + Batch bool
+        + NumParallel int
+        + ManifestPath string
+        + RetryFailedLogPath string
+        + ShowProgress bool
+        + ForceMultipart bool
+        + GUID string
+
+    }
+    class "client.Option" << (T, #FF7700) >>  {
+    }
+    class "downloadManifestEntry" << (S,Aquamarine) >> {
+        + GUID string
+
+    }
+    class "uploadManifestEntry" << (S,Aquamarine) >> {
+        + GUID string
+        + Title string
+
+    }
+}
+namespace cmd {
+    namespace addurl {
+    }
+    namespace bucket {
+    }
+    namespace download {
+    }
+    namespace list {
+    }
+    namespace openapi-remove-examples {
+    }
+    namespace ping {
+    }
+    namespace rm {
+    }
+    namespace server {
+    class "cmd.server.ServerOption" << (T, #FF7700) >>  {
+    }
+    class "serverRuntime" << (S,Aquamarine) >> {
+        - app *fiber.App
+        - cfg *config.Config
+        - database db.DatabaseInterface
+        - uM urlmanager.UrlManager
+        - authzMiddleware *middleware.AuthzMiddleware
+        - requestIDMiddleware *middleware.RequestIDMiddleware
+        - apiGroup fiber.Router
+
+        - ensureAPIGroup() fiber.Router
+
+    }
+    }
+    namespace sha256sum {
+    }
+    namespace upload {
+    }
+    namespace validate {
+    }
+    namespace version {
+    }
+}
+namespace syfon {
+}
+namespace bucket {
+}
+namespace common {
+    class "FileMetadata" << (S,Aquamarine) >> {
+        + Authz []string
+        + Aliases []string
+        + Metadata <font color=blue>map</font>[string]any
+
+    }
+    class "ProgressEvent" << (S,Aquamarine) >> {
+        + Event string
+        + Oid string
+        + BytesSoFar int64
+        + BytesSinceLast int64
+        + Message string
+        + Level string
+        + Attrs <font color=blue>map</font>[string]any
+
+    }
+    class "RetryObject" << (S,Aquamarine) >> {
+        + SourcePath string
+        + ObjectKey string
+        + FileMetadata FileMetadata
+        + GUID string
+        + RetryCount int
+        + Multipart bool
+        + Bucket string
+
+    }
+    class "syfon.client.common.ProgressCallback" << (T, #FF7700) >>  {
+    }
+    class "syfon.client.common.contextKey" << (T, #FF7700) >>  {
+    }
+}
+namespace conf {
+    class "Credential" << (S,Aquamarine) >> {
+        + Profile string
+        + KeyID string
+        + APIKey string
+        + AccessToken string
+        + APIEndpoint string
+        + UseShepherd string
+        + MinShepherdVersion string
+        + Bucket string
+        + ProjectID string
+
+    }
+    class "Manager" << (S,Aquamarine) >> {
+        + Logger *slog.Logger
+
+        - configPath() (string, error)
+
+        + Load(profile string) (*Credential, error)
+        + Save(profileConfig *Credential) error
+        + EnsureExists() error
+        + Import(filePath string, fenceToken string) (*Credential, error)
+        + IsTokenValid(tokenStr string) (bool, error)
+        + IsCredentialValid(profileConfig *Credential) (bool, error)
+        + IsValid(profileConfig *Credential) (bool, error)
+
+    }
+    interface "ManagerInterface"  {
+        + Import(filePath string, fenceToken string) (*Credential, error)
+        + Load(profile string) (*Credential, error)
+        + Save(cred *Credential) error
+        + EnsureExists() error
+        + IsCredentialValid( *Credential) (bool, error)
+        + IsTokenValid( string) (bool, error)
+
+    }
+}
+namespace credentials {
+    interface "Manager"  {
+        + Export(ctx context.Context, cred *conf.Credential) error
+
+    }
+    interface "Reader"  {
+        + Current() *conf.Credential
+
+    }
+}
+namespace hash {
+    class "ChecksumType" << (S,Aquamarine) >> {
+        + IsValid() bool
+        + String() string
+
+    }
+    class "HashInfo" << (S,Aquamarine) >> {
+        + MD5 string
+        + SHA string
+        + SHA256 string
+        + SHA512 string
+        + CRC string
+        + ETag string
+
+        + UnmarshalJSON(data []byte) error
+
+    }
+    class "syfon.client.hash.Checksum" << (T, #FF7700) >>  {
+    }
+    class "syfon.client.hash.ChecksumType" << (T, #FF7700) >>  {
+    }
+}
+namespace logs {
+    class "Gen3Logger" << (S,Aquamarine) >> {
+        - mu sync.RWMutex
+        - scoreboard *Scoreboard
+        - failedMu sync.Mutex
+        - failedPath string
+        - succeededMu sync.Mutex
+        - succeededMap <font color=blue>map</font>[string]string
+        - succeededPath string
+
+        + FailedMap <font color=blue>map</font>[string]common.RetryObject
+
+        - logWithSkip(ctx context.Context, level slog.Level, skip int, msg string, args ...any) 
+        - writeFailedSync(e common.RetryObject) 
+        - writeSucceededSync(path string, guid string) 
+        - failedHelper(ctx context.Context, filePath string, filename string, metadata common.FileMetadata, guid string, retryCount int, multipart bool, skip int) 
+        - succeededHelper(ctx context.Context, filePath string, guid string, skip int) 
+
+        + Info(msg string, args ...any) 
+        + InfoContext(ctx context.Context, msg string, args ...any) 
+        + Error(msg string, args ...any) 
+        + ErrorContext(ctx context.Context, msg string, args ...any) 
+        + Warn(msg string, args ...any) 
+        + WarnContext(ctx context.Context, msg string, args ...any) 
+        + Debug(msg string, args ...any) 
+        + DebugContext(ctx context.Context, msg string, args ...any) 
+        + Printf(format string, v ...any) 
+        + Println(v ...any) 
+        + Fatalf(format string, v ...any) 
+        + Fatal(v ...any) 
+        + Writer() io.Writer
+        + Slog() *slog.Logger
+        + Scoreboard() *Scoreboard
+        + GetSucceededLogMap() <font color=blue>map</font>[string]string
+        + GetFailedLogMap() <font color=blue>map</font>[string]common.RetryObject
+        + DeleteFromFailedLog(path string) 
+        + GetSucceededCount() int
+        + Failed(filePath string, filename string, metadata common.FileMetadata, guid string, retryCount int, multipart bool) 
+        + FailedContext(ctx context.Context, filePath string, filename string, metadata common.FileMetadata, guid string, retryCount int, multipart bool) 
+        + Succeeded(filePath string, guid string) 
+        + SucceededContext(ctx context.Context, filePath string, guid string) 
+
+    }
+    class "ProgressHandler" << (S,Aquamarine) >> {
+        - next slog.Handler
+
+        + Enabled(ctx context.Context, level slog.Level) bool
+        + Handle(ctx context.Context, r slog.Record) error
+        + WithAttrs(attrs []slog.Attr) slog.Handler
+        + WithGroup(name string) slog.Handler
+
+    }
+    class "Scoreboard" << (S,Aquamarine) >> {
+        - mu sync.Mutex
+        - logger *slog.Logger
+        - writer io.Writer
+
+        + Counts []int
+
+        + IncrementSB(retryCount int) 
+        + PrintSB() 
+
+    }
+    class "TeeHandler" << (S,Aquamarine) >> {
+        - handlers []slog.Handler
+
+        + Enabled(ctx context.Context, level slog.Level) bool
+        + Handle(ctx context.Context, r slog.Record) error
+        + WithAttrs(attrs []slog.Attr) slog.Handler
+        + WithGroup(name string) slog.Handler
+
+    }
+    class "config" << (S,Aquamarine) >> {
+        - console bool
+        - messageFile bool
+        - failedLog bool
+        - succeededLog bool
+        - enableScoreboard bool
+        - baseLogger *slog.Logger
+
+    }
+    class "syfon.client.logs.Option" << (T, #FF7700) >>  {
+    }
+}
+namespace mocks {
+    class "MockFunctionInterface" << (S,Aquamarine) >> {
+        - ctrl *gomock.Controller
+        - recorder *MockFunctionInterfaceMockRecorder
+        - isgomock <font color=blue>struct</font>{}
+
+        + EXPECT() *MockFunctionInterfaceMockRecorder
+        + CheckForShepherdAPI(ctx context.Context) (bool, error)
+        + CheckPrivileges(ctx context.Context) (<font color=blue>map</font>[string]any, error)
+        + DeleteRecord(ctx context.Context, guid string) (string, error)
+        + Do(ctx context.Context, req *request.RequestBuilder) (*http.Response, error)
+        + ExportCredential(ctx context.Context, cred *conf.Credential) error
+        + GetDownloadPresignedUrl(ctx context.Context, guid string, protocolText string) (string, error)
+        + New(method string, url string) *request.RequestBuilder
+        + NewAccessToken(ctx context.Context) error
+
+    }
+    class "MockFunctionInterfaceMockRecorder" << (S,Aquamarine) >> {
+        - mock *MockFunctionInterface
+
+        + CheckForShepherdAPI(ctx any) *gomock.Call
+        + CheckPrivileges(ctx any) *gomock.Call
+        + DeleteRecord(ctx any, guid any) *gomock.Call
+        + Do(ctx any, req any) *gomock.Call
+        + ExportCredential(ctx any, cred any) *gomock.Call
+        + GetDownloadPresignedUrl(ctx any, guid any, protocolText any) *gomock.Call
+        + New(method any, url any) *gomock.Call
+        + NewAccessToken(ctx any) *gomock.Call
+
+    }
+    class "MockManagerInterface" << (S,Aquamarine) >> {
+        - ctrl *gomock.Controller
+        - recorder *MockManagerInterfaceMockRecorder
+        - isgomock <font color=blue>struct</font>{}
+
+        + EXPECT() *MockManagerInterfaceMockRecorder
+        + EnsureExists() error
+        + Import(filePath string, fenceToken string) (*conf.Credential, error)
+        + IsCredentialValid(arg0 *conf.Credential) (bool, error)
+        + IsTokenValid(arg0 string) (bool, error)
+        + Load(profile string) (*conf.Credential, error)
+        + Save(cred *conf.Credential) error
+
+    }
+    class "MockManagerInterfaceMockRecorder" << (S,Aquamarine) >> {
+        - mock *MockManagerInterface
+
+        + EnsureExists() *gomock.Call
+        + Import(filePath any, fenceToken any) *gomock.Call
+        + IsCredentialValid(arg0 any) *gomock.Call
+        + IsTokenValid(arg0 any) *gomock.Call
+        + Load(profile any) *gomock.Call
+        + Save(cred any) *gomock.Call
+
+    }
+    class "MockRequestInterface" << (S,Aquamarine) >> {
+        - ctrl *gomock.Controller
+        - recorder *MockRequestInterfaceMockRecorder
+        - isgomock <font color=blue>struct</font>{}
+
+        + EXPECT() *MockRequestInterfaceMockRecorder
+        + Do(ctx context.Context, req *request.RequestBuilder) (*http.Response, error)
+        + New(method string, url string) *request.RequestBuilder
+
+    }
+    class "MockRequestInterfaceMockRecorder" << (S,Aquamarine) >> {
+        - mock *MockRequestInterface
+
+        + Do(ctx any, req any) *gomock.Call
+        + New(method any, url any) *gomock.Call
+
+    }
+}
+namespace request {
+    class "AuthTransport" << (S,Aquamarine) >> {
+        - mu sync.RWMutex
+        - refreshMu sync.Mutex
+
+        + Manager conf.ManagerInterface
+        + Base http.RoundTripper
+        + Cred *conf.Credential
+
+        - refreshOnce(ctx context.Context) error
+
+        + NewAccessToken(ctx context.Context) error
+        + RoundTrip(req *http.Request) (*http.Response, error)
+
+    }
+    class "Request" << (S,Aquamarine) >> {
+        + Logs *logs.Gen3Logger
+        + RetryClient *retryablehttp.Client
+        + BaseURL string
+        + UserAgent string
+        + Token string
+        + User string
+        + Pass string
+
+        - newBuilder(method string, path string) *RequestBuilder
+
+        + Do(ctx context.Context, method string, path string, body any, out any, opts ...RequestOption) error
+
+    }
+    class "RequestBuilder" << (S,Aquamarine) >> {
+        + Method string
+        + Url string
+        + Body io.Reader
+        + Headers <font color=blue>map</font>[string]string
+        + Token string
+        + PartSize int64
+        + SkipAuth bool
+        + Timeout time.Duration
+
+        + WithToken(token string) *RequestBuilder
+        + WithJSONBody(v any) (*RequestBuilder, error)
+        + WithBody(body io.Reader) *RequestBuilder
+        + WithHeader(key string, value string) *RequestBuilder
+        + WithQuery(key string, value string) *RequestBuilder
+        + WithQueryValues(v url.Values) *RequestBuilder
+        + WithSkipAuth(skip bool) *RequestBuilder
+        + WithPartSize(size int64) *RequestBuilder
+        + WithTimeout(d time.Duration) *RequestBuilder
+
+    }
+    interface "Requester"  {
+        + Do(ctx context.Context, method string, path string, body any, out any, opts ...RequestOption) error
+
+    }
+    class "ResponseError" << (S,Aquamarine) >> {
+        + Method string
+        + URL string
+        + Status int
+        + Body string
+        + Headers http.Header
+
+        + Error() string
+
+    }
+    class "accessTokenResponse" << (S,Aquamarine) >> {
+        + AccessToken string
+
+    }
+    class "syfon.client.request.RequestOption" << (T, #FF7700) >>  {
+    }
+}
+namespace syfonclient {
+    class "BucketsService" << (S,Aquamarine) >> {
+        - gen bucketapi.ClientWithResponsesInterface
+
+        + List(ctx context.Context) (bucketapi.BucketsResponse, error)
+        + Put(ctx context.Context, req bucketapi.PutBucketRequest) error
+        + Delete(ctx context.Context, bucket string) error
+        + AddScope(ctx context.Context, bucket string, req bucketapi.AddBucketScopeRequest) error
+
+    }
+    class "DRSPage" << (S,Aquamarine) >> {
+        + DrsObjects []drs.DrsObject
+
+    }
+    class "DRSService" << (S,Aquamarine) >> {
+        - gen drs.ClientWithResponsesInterface
+        - index *IndexService
+
+        + Resolve(ctx context.Context, id string) (*transfer.ResolvedObject, error)
+        + GetObject(ctx context.Context, objectID string) (drs.DrsObject, error)
+        + ListObjects(ctx context.Context, limit int, page int) (DRSPage, error)
+        + GetAccessURL(ctx context.Context, objectID string, accessID string) (drs.AccessURL, error)
+        + RegisterObjects(ctx context.Context, req drs.RegisterObjectsJSONRequestBody) (drs.N201ObjectsCreated, error)
+        + ListObjectsByProject(ctx context.Context, projectID string, limit int, page int) (DRSPage, error)
+        + GetProjectSample(ctx context.Context, projectID string, limit int) (DRSPage, error)
+        + BatchGetObjectsByHash(ctx context.Context, hashes []string) (DRSPage, error)
+
+    }
+    class "DataService" << (S,Aquamarine) >> {
+        - gen internalapi.ClientWithResponsesInterface
+        - requestor request.Requester
+        - logger *logs.Gen3Logger
+        - drs *DRSService
+
+        - multipartInitRequest(ctx context.Context, req internalapi.InternalMultipartInitRequest) (internalapi.InternalMultipartInitOutput, error)
+        - multipartUploadRequest(ctx context.Context, req internalapi.InternalMultipartUploadRequest) (internalapi.InternalMultipartUploadOutput, error)
+        - multipartCompleteRequest(ctx context.Context, req internalapi.InternalMultipartCompleteRequest) error
+
+        + UploadBlank(ctx context.Context, req internalapi.InternalUploadBlankRequest) (internalapi.InternalUploadBlankOutput, error)
+        + UploadURL(ctx context.Context, req UploadURLRequest) (internalapi.InternalSignedURL, error)
+        + UploadBulk(ctx context.Context, req internalapi.InternalUploadBulkRequest) (internalapi.InternalUploadBulkOutput, error)
+        + DownloadURL(ctx context.Context, did string, expiresIn int, redirect bool) (internalapi.InternalSignedURL, error)
+        + GetWriter(ctx context.Context, guid string) (io.WriteCloser, error)
+        + Stat(ctx context.Context, guid string) (*transfer.ObjectMetadata, error)
+        + GetReader(ctx context.Context, guid string) (io.ReadCloser, error)
+        + GetRangeReader(ctx context.Context, guid string, offset int64, length int64) (io.ReadCloser, error)
+        + ResolveDownloadURL(ctx context.Context, guid string, accessID string) (string, error)
+        + Download(ctx context.Context, signedURL string, rangeStart *int64, rangeEnd *int64) (*http.Response, error)
+        + ResolveUploadURL(ctx context.Context, guid string, filename string, metadata common.FileMetadata, bucket string) (string, error)
+        + Upload(ctx context.Context, url string, body io.Reader, size int64) error
+        + UploadPart(ctx context.Context, url string, body io.Reader, size int64) (string, error)
+        + DeleteFile(ctx context.Context, guid string) (string, error)
+        + Delete(ctx context.Context, guid string) error
+        + Name() string
+        + Logger() transfer.TransferLogger
+        + Validate(ctx context.Context, bucket string) error
+        + InitMultipartUpload(ctx context.Context, guid string, filename string, bucket string) (string, string, error)
+        + GetMultipartUploadURL(ctx context.Context, key string, uploadID string, partNum int32, bucket string) (string, error)
+        + CompleteMultipartUpload(ctx context.Context, key string, uploadID string, parts []internalapi.InternalMultipartPart, bucket string) error
+        + MultipartInit(ctx context.Context, guid string) (string, error)
+        + MultipartPart(ctx context.Context, guid string, uploadID string, partNum int, body io.Reader) (string, error)
+        + MultipartComplete(ctx context.Context, guid string, uploadID string, parts []transfer.MultipartPart) error
+        + CanonicalObjectURL(signedURL string, bucketHint string, fallbackDID string) (string, error)
+
+    }
+    class "DeleteByQueryOptions" << (S,Aquamarine) >> {
+        + Authz string
+        + Organization string
+        + ProjectID string
+        + Hash string
+        + HashType string
+
+    }
+    class "HealthService" << (S,Aquamarine) >> {
+        - requestor request.Requester
+
+        + Ping(ctx context.Context) error
+
+    }
+    class "IndexService" << (S,Aquamarine) >> {
+        - gen internalapi.ClientWithResponsesInterface
+        - requestor request.Requester
+
+        + Get(ctx context.Context, did string) (internalapi.InternalRecordResponse, error)
+        + GetByHash(ctx context.Context, hash string) (internalapi.ListRecordsResponse, error)
+        + Create(ctx context.Context, rec internalapi.InternalRecord) (internalapi.InternalRecordResponse, error)
+        + Update(ctx context.Context, did string, rec internalapi.InternalRecord) (internalapi.InternalRecordResponse, error)
+        + Delete(ctx context.Context, did string) error
+        + List(ctx context.Context, opts ListRecordsOptions) (internalapi.ListRecordsResponse, error)
+        + DeleteByQuery(ctx context.Context, opts DeleteByQueryOptions) (internalapi.DeleteByQueryResponse, error)
+        + CreateBulk(ctx context.Context, req internalapi.BulkCreateRequest) (internalapi.ListRecordsResponse, error)
+        + BulkHashes(ctx context.Context, req internalapi.BulkHashesRequest) (internalapi.ListRecordsResponse, error)
+        + DeleteBulk(ctx context.Context, req internalapi.BulkHashesRequest) (int, error)
+        + BulkSHA256Validity(ctx context.Context, req internalapi.BulkSHA256ValidityRequest) (<font color=blue>map</font>[string]bool, error)
+        + BulkDocuments(ctx context.Context, dids []string) ([]internalapi.InternalRecordResponse, error)
+        + SHA256Validity(ctx context.Context, values []string) (<font color=blue>map</font>[string]bool, error)
+        + Upsert(ctx context.Context, did string, objectURL string, fileName string, size int64, sha256sum string, authz []string) error
+
+    }
+    class "LFSService" << (S,Aquamarine) >> {
+        - gen lfsapi.ClientWithResponsesInterface
+
+        + Batch(ctx context.Context, op lfsapi.BatchRequestOperation, objects []lfsapi.BatchRequestObject) (*lfsapi.BatchResponse, error)
+        + StageMetadata(ctx context.Context, candidates []lfsapi.DrsObjectCandidate, ttl *int64) (int32, error)
+        + Verify(ctx context.Context, oid string, size int64) error
+
+    }
+    class "ListRecordsOptions" << (S,Aquamarine) >> {
+        + Hash string
+        + URL string
+        + Authz string
+        + Organization string
+        + ProjectID string
+        + Limit int
+        + Page int
+
+    }
+    class "MetricsFilesOptions" << (S,Aquamarine) >> {
+        + Limit int
+        + Offset int
+        + InactiveDays int
+        + Organization string
+        + ProjectID string
+
+    }
+    class "MetricsService" << (S,Aquamarine) >> {
+        - gen metricsapi.ClientWithResponsesInterface
+
+        + Summary(ctx context.Context, opts MetricsSummaryOptions) (metricsapi.FileUsageSummary, error)
+        + Files(ctx context.Context, opts MetricsFilesOptions) ([]metricsapi.FileUsage, error)
+        + File(ctx context.Context, objectID string) (metricsapi.FileUsage, error)
+
+    }
+    class "MetricsSummaryOptions" << (S,Aquamarine) >> {
+        + InactiveDays int
+        + Organization string
+        + ProjectID string
+
+    }
+    interface "SyfonClient"  {
+        + Health() *HealthService
+        + Data() *DataService
+        + Index() *IndexService
+        + DRS() *DRSService
+        + Buckets() *BucketsService
+        + Metrics() *MetricsService
+        + LFS() *LFSService
+
+    }
+    class "UploadURLRequest" << (S,Aquamarine) >> {
+        + FileID string
+        + Bucket string
+        + FileName string
+        + ExpiresIn int
+
+    }
+}
+namespace transfer {
+    interface "Backend"  {
+        + Validate(ctx context.Context, bucket string) error
+
+    }
+    class "Chunk" << (S,Aquamarine) >> {
+        + Index int
+        + Offset int64
+        + Length int64
+        + Status ChunkStatus
+
+    }
+    interface "Downloader"  {
+        + ResolveDownloadURL(ctx context.Context, guid string, accessID string) (string, error)
+        + Download(ctx context.Context, url string, rangeStart *int64, rangeEnd *int64) (*http.Response, error)
+
+    }
+    class "ExponentialBackoff" << (S,Aquamarine) >> {
+        + MaxWaitSeconds int64
+
+        + WaitTime(retryCount int) time.Duration
+
+    }
+    class "MultipartPart" << (S,Aquamarine) >> {
+        + PartNumber int32
+        + ETag string
+
+    }
+    interface "MultipartWriter"  {
+        + MultipartInit(ctx context.Context, guid string) (string, error)
+        + MultipartPart(ctx context.Context, guid string, uploadID string, partNum int, body io.Reader) (string, error)
+        + MultipartComplete(ctx context.Context, guid string, uploadID string, parts []MultipartPart) error
+
+    }
+    class "NoOpLogger" << (S,Aquamarine) >> {
+        + Slog() *slog.Logger
+        + Info( string,  ...any) 
+        + InfoContext( context.Context,  string,  ...any) 
+        + Error( string,  ...any) 
+        + ErrorContext( context.Context,  string,  ...any) 
+        + Warn( string,  ...any) 
+        + WarnContext( context.Context,  string,  ...any) 
+        + Debug( string,  ...any) 
+        + DebugContext( context.Context,  string,  ...any) 
+        + Printf( string,  ...any) 
+        + Println( ...any) 
+        + Failed( string,  string,  common.FileMetadata,  string,  int,  bool) 
+        + FailedContext( context.Context,  string,  string,  common.FileMetadata,  string,  int,  bool) 
+        + Succeeded( string,  string) 
+        + SucceededContext( context.Context,  string,  string) 
+        + GetSucceededLogMap() <font color=blue>map</font>[string]string
+        + GetFailedLogMap() <font color=blue>map</font>[string]common.RetryObject
+        + DeleteFromFailedLog( string) 
+        + Scoreboard() *logs.Scoreboard
+
+    }
+    interface "ObjectDeleter"  {
+        + Delete(ctx context.Context, guid string) error
+
+    }
+    class "ObjectMetadata" << (S,Aquamarine) >> {
+        + Size int64
+        + Checksums []hash.HashInfo
+        + MD5 string
+        + AcceptRanges bool
+        + Provider string
+
+    }
+    interface "ObjectReader"  {
+        + Stat(ctx context.Context, guid string) (*ObjectMetadata, error)
+        + GetReader(ctx context.Context, guid string) (io.ReadCloser, error)
+
+    }
+    interface "ObjectWriter"  {
+        + GetWriter(ctx context.Context, guid string) (io.WriteCloser, error)
+        + Upload(ctx context.Context, guid string, body io.Reader, size int64) error
+
+    }
+    interface "PartSigner"  {
+        + GetDownloadPartURL(ctx context.Context, id string, start int64, end int64) (*SignedURL, error)
+        + Logger() TransferLogger
+
+    }
+    interface "Planner"  {
+        + PlanDownload(ctx context.Context, obj ResolvedObject) (*TransferPlan, error)
+        + PlanUpload(ctx context.Context, obj ResolvedObject) (*TransferPlan, error)
+
+    }
+    interface "Provider"  {
+        + GetStorageLocation(ctx context.Context, guid string) (string, string, error)
+
+    }
+    interface "RangeReader"  {
+        + GetRangeReader(ctx context.Context, guid string, offset int64, length int64) (io.ReadCloser, error)
+
+    }
+    class "ResolvedObject" << (S,Aquamarine) >> {
+        + Id string
+        + Name string
+        + Size int64
+        + Checksums hash.HashInfo
+        + ProviderURL string
+        + AccessMethod string
+
+    }
+    interface "Resolver"  {
+        + Resolve(ctx context.Context, id string) (*ResolvedObject, error)
+
+    }
+    interface "RetryStrategy"  {
+        + WaitTime(retryCount int) time.Duration
+
+    }
+    interface "Service"  {
+        + Name() string
+        + Logger() TransferLogger
+
+    }
+    class "SignedURL" << (S,Aquamarine) >> {
+        + URL string
+        + Headers <font color=blue>map</font>[string]string
+
+    }
+    interface "TransferLogger"  {
+        + Slog() *slog.Logger
+        + Info(msg string, args ...any) 
+        + InfoContext(ctx context.Context, msg string, args ...any) 
+        + Error(msg string, args ...any) 
+        + ErrorContext(ctx context.Context, msg string, args ...any) 
+        + Warn(msg string, args ...any) 
+        + WarnContext(ctx context.Context, msg string, args ...any) 
+        + Debug(msg string, args ...any) 
+        + DebugContext(ctx context.Context, msg string, args ...any) 
+        + Printf(format string, v ...any) 
+        + Println(v ...any) 
+        + Failed(filePath string, filename string, metadata common.FileMetadata, guid string, retryCount int, multipart bool) 
+        + FailedContext(ctx context.Context, filePath string, filename string, metadata common.FileMetadata, guid string, retryCount int, multipart bool) 
+        + Succeeded(filePath string, guid string) 
+        + SucceededContext(ctx context.Context, filePath string, guid string) 
+        + GetSucceededLogMap() <font color=blue>map</font>[string]string
+        + GetFailedLogMap() <font color=blue>map</font>[string]common.RetryObject
+        + DeleteFromFailedLog(path string) 
+        + Scoreboard() *logs.Scoreboard
+
+    }
+    class "TransferPlan" << (S,Aquamarine) >> {
+        + Strategy TransferStrategy
+        + TotalSize int64
+        + Chunks []Chunk
+        + CheckpointPath string
+
+    }
+    class "TransferRequest" << (S,Aquamarine) >> {
+        + SourcePath string
+        + ObjectKey string
+        + GUID string
+        + Bucket string
+        + Metadata common.FileMetadata
+        + ForceMultipart bool
+
+    }
+    interface "Uploader"  {
+        + ResolveUploadURL(ctx context.Context, guid string, filename string, metadata common.FileMetadata, bucket string) (string, error)
+        + InitMultipartUpload(ctx context.Context, guid string, filename string, bucket string) (string, string, error)
+        + GetMultipartUploadURL(ctx context.Context, key string, uploadID string, partNumber int32, bucket string) (string, error)
+        + CompleteMultipartUpload(ctx context.Context, key string, uploadID string, parts []internalapi.InternalMultipartPart, bucket string) error
+        + Upload(ctx context.Context, url string, body io.Reader, size int64) error
+        + UploadPart(ctx context.Context, url string, body io.Reader, size int64) (string, error)
+        + DeleteFile(ctx context.Context, guid string) (string, error)
+        + CanonicalObjectURL(signedURL string, bucketHint string, fallbackDID string) (string, error)
+
+    }
+    class "syfon.client.transfer.ChunkStatus" << (T, #FF7700) >>  {
+    }
+    class "syfon.client.transfer.TransferStrategy" << (T, #FF7700) >>  {
+    }
+    namespace engine {
+    class "GenericDownloader" << (S,Aquamarine) >> {
+        + Backend transfer.Backend
+
+        - downloadSingle(ctx context.Context, guid string, dstPath string, expectedSize int64) error
+        - downloadParallel(ctx context.Context, guid string, dstPath string, totalSize int64, concurrency int, chunkSize int64) error
+
+        + Download(ctx context.Context, guid string, dstPath string, concurrency int, chunkSize int64, multipartThreshold int64) error
+
+    }
+    class "GenericUploader" << (S,Aquamarine) >> {
+        + Backend transfer.Backend
+
+        - uploadSingle(ctx context.Context, req transfer.TransferRequest, file *os.File, size int64, showProgress bool) error
+        - uploadMultipart(ctx context.Context, req transfer.TransferRequest, file *os.File, fileSize int64, showProgress bool) error
+        - loadState(path string) (*uploaderResumeState, bool)
+        - saveState(path string, state *uploaderResumeState) 
+        - matches(s *uploaderResumeState, req transfer.TransferRequest, info os.FileInfo, chunkSize int64) bool
+
+        + Upload(ctx context.Context, req transfer.TransferRequest, showProgress bool) error
+
+    }
+    class "uploaderResumeState" << (S,Aquamarine) >> {
+        + SourcePath string
+        + ObjectKey string
+        + GUID string
+        + Bucket string
+        + FileSize int64
+        + FileModUnixNano int64
+        + ChunkSize int64
+        + UploadID string
+        + Completed <font color=blue>map</font>[int]string
+
+    }
+    }
+}
+namespace download {
+    class "DownloadOptions" << (S,Aquamarine) >> {
+        + MultipartThreshold int64
+        + ChunkSize int64
+        + Concurrency int
+
+    }
+    class "IndexdResponse" << (S,Aquamarine) >> {
+        + Name string
+        + Size int64
+
+    }
+    class "RenamedOrSkippedFileInfo" << (S,Aquamarine) >> {
+        + GUID string
+        + OldFilename string
+        + NewFilename string
+
+    }
+    interface "Resolver"  {
+        + Resolve(ctx context.Context, id string) (*transfer.ResolvedObject, error)
+
+    }
+    class "downloadRequest" << (S,Aquamarine) >> {
+        - downloadPath string
+        - filename string
+        - guid string
+        - presignedURL string
+        - rangeBytes int64
+        - rangeStart *int64
+        - rangeEnd *int64
+        - overwrite bool
+        - skip bool
+        - response *http.Response
+        - writer io.Writer
+
+    }
+    class "progressWriter" << (S,Aquamarine) >> {
+        - writer io.Writer
+        - onProgress common.ProgressCallback
+        - hash string
+        - total int64
+        - bytesSoFar int64
+        - bytesSinceReport int64
+
+        + Write(p []byte) (int, error)
+        + Finalize() error
+
+    }
+}
+namespace azure {
+    class "backend" << (S,Aquamarine) >> {
+        - logger transfer.TransferLogger
+        - client *azblob.Client
+        - container string
+
+        + Name() string
+        + Logger() transfer.TransferLogger
+        + Validate(ctx context.Context, containerName string) error
+        + Stat(ctx context.Context, key string) (*transfer.ObjectMetadata, error)
+        + GetReader(ctx context.Context, key string) (io.ReadCloser, error)
+        + GetRangeReader(ctx context.Context, key string, offset int64, length int64) (io.ReadCloser, error)
+        + GetWriter(ctx context.Context, key string) (io.WriteCloser, error)
+        + Upload(ctx context.Context, key string, body io.Reader, size int64) error
+        + Delete(ctx context.Context, key string) error
+        + MultipartInit(ctx context.Context, key string) (string, error)
+        + MultipartPart(ctx context.Context, key string, uploadID string, partNum int, body io.Reader) (string, error)
+        + MultipartComplete(ctx context.Context, key string, uploadID string, parts []transfer.MultipartPart) error
+
+    }
+    class "readSeekCloser" << (S,Aquamarine) >> {
+        + Close() error
+
+    }
+}
+namespace gcs {
+    class "backend" << (S,Aquamarine) >> {
+        - logger transfer.TransferLogger
+        - client *storage.Client
+        - bucket string
+
+        - composeAll(ctx context.Context, destKey string, uploadID string, partKeys []string) ([]string, error)
+        - composeBatch(ctx context.Context, dst string, src []string) error
+
+        + Name() string
+        + Logger() transfer.TransferLogger
+        + Validate(ctx context.Context, bucket string) error
+        + Stat(ctx context.Context, key string) (*transfer.ObjectMetadata, error)
+        + GetReader(ctx context.Context, key string) (io.ReadCloser, error)
+        + GetRangeReader(ctx context.Context, key string, offset int64, length int64) (io.ReadCloser, error)
+        + GetWriter(ctx context.Context, key string) (io.WriteCloser, error)
+        + Upload(ctx context.Context, key string, body io.Reader, size int64) error
+        + Delete(ctx context.Context, key string) error
+        + MultipartInit(ctx context.Context, key string) (string, error)
+        + MultipartPart(ctx context.Context, key string, uploadID string, partNum int, body io.Reader) (string, error)
+        + MultipartComplete(ctx context.Context, key string, uploadID string, parts []transfer.MultipartPart) error
+
+    }
+}
+namespace s3 {
+    class "backend" << (S,Aquamarine) >> {
+        - logger transfer.TransferLogger
+        - client *s3.Client
+        - bucket string
+
+        + Name() string
+        + Logger() transfer.TransferLogger
+        + Validate(ctx context.Context, bucket string) error
+        + Stat(ctx context.Context, key string) (*transfer.ObjectMetadata, error)
+        + GetReader(ctx context.Context, key string) (io.ReadCloser, error)
+        + GetRangeReader(ctx context.Context, key string, offset int64, length int64) (io.ReadCloser, error)
+        + GetWriter(ctx context.Context, key string) (io.WriteCloser, error)
+        + Upload(ctx context.Context, key string, body io.Reader, size int64) error
+        + Delete(ctx context.Context, key string) error
+        + MultipartInit(ctx context.Context, key string) (string, error)
+        + MultipartPart(ctx context.Context, key string, uploadID string, partNum int, body io.Reader) (string, error)
+        + MultipartComplete(ctx context.Context, key string, uploadID string, parts []transfer.MultipartPart) error
+
+    }
+}
+namespace syfon {
+    class "backend" << (S,Aquamarine) >> {
+        - logger transfer.TransferLogger
+        - requestor request.Requester
+
+        - uploadURL(ctx context.Context, guid string, filename string, bucket string, expires int) (internalapi.InternalSignedURL, error)
+        - downloadURL(ctx context.Context, did string, expiresIn int, redirect bool) (internalapi.InternalSignedURL, error)
+
+        + Name() string
+        + Logger() transfer.TransferLogger
+        + Validate(ctx context.Context, bucket string) error
+        + Stat(ctx context.Context, guid string) (*transfer.ObjectMetadata, error)
+        + GetReader(ctx context.Context, guid string) (io.ReadCloser, error)
+        + GetRangeReader(ctx context.Context, guid string, offset int64, length int64) (io.ReadCloser, error)
+        + GetWriter(ctx context.Context, guid string) (io.WriteCloser, error)
+        + Upload(ctx context.Context, guid string, body io.Reader, size int64) error
+        + Delete(ctx context.Context, guid string) error
+        + MultipartInit(ctx context.Context, guid string) (string, error)
+        + MultipartPart(ctx context.Context, guid string, uploadID string, partNum int, body io.Reader) (string, error)
+        + MultipartComplete(ctx context.Context, guid string, uploadID string, parts []transfer.MultipartPart) error
+
+    }
+}
+namespace upload {
+    interface "MetadataClient"  {
+        + GetObject(ctx context.Context, objectID string) (drs.DrsObject, error)
+        + RegisterObjects(ctx context.Context, req drs.RegisterObjectsJSONRequestBody) (drs.N201ObjectsCreated, error)
+
+    }
+    class "RenamedOrSkippedFileInfo" << (S,Aquamarine) >> {
+        + GUID string
+        + OldFilename string
+        + NewFilename string
+
+    }
+    interface "UploadBackend"  {
+    }
+    class "UploadConfig" << (S,Aquamarine) >> {
+        + BucketName string
+        + NumParallel int
+        + ForceMultipart bool
+        + IncludeSubDirName bool
+        + HasMetadata bool
+        + ShowProgress bool
+
+    }
+    class "progressReader" << (S,Aquamarine) >> {
+        - reader io.Reader
+        - onProgress common.ProgressCallback
+        - hash string
+        - total int64
+        - bytesSoFar int64
+        - bytesSinceReport int64
+
+        + Read(p []byte) (int, error)
+        + Finalize() error
+
+    }
+    class "uploadRequest" << (S,Aquamarine) >> {
+        - sourcePath string
+        - objectKey string
+        - metadata common.FileMetadata
+        - guid string
+        - presignedURL string
+        - bucket string
+
+    }
+}
+namespace docs {
+}
+namespace drsapi {
+}
+namespace internaldrs {
+    class "multipartSession" << (S,Aquamarine) >> {
+        + Bucket string
+        + Key string
+
+    }
+    class "uploadBulkCredentialCache" << (S,Aquamarine) >> {
+        - defaultBucket string
+        - credentials <font color=blue>map</font>[string]models.S3Credential
+
+    }
+}
+namespace lfs {
+    class "LFSServer" << (S,Aquamarine) >> {
+        - database db.LFSStore
+        - uM urlmanager.UrlManager
+        - opts Options
+
+        - handleUploadInternal(ctx context.Context, body io.Reader, bucket string, key string, usageObjectID string) error
+
+        + LfsBatch(ctx context.Context, request lfsapi.LfsBatchRequestObject) (lfsapi.LfsBatchResponseObject, error)
+        + LfsVerify(ctx context.Context, request lfsapi.LfsVerifyRequestObject) (lfsapi.LfsVerifyResponseObject, error)
+        + LfsStageMetadata(ctx context.Context, request lfsapi.LfsStageMetadataRequestObject) (lfsapi.LfsStageMetadataResponseObject, error)
+        + LfsUploadProxy(ctx context.Context, request lfsapi.LfsUploadProxyRequestObject) (lfsapi.LfsUploadProxyResponseObject, error)
+
+    }
+    class "syfon.internal.api.lfs.Options" << (T, #FF7700) >>  {
+    }
+}
+namespace metrics {
+    class "MetricsServer" << (S,Aquamarine) >> {
+        - database db.MetricsStore
+
+        - checkAuth(ctx context.Context) (metricsAccess, int, bool)
+
+        + ListMetricsFiles(ctx context.Context, request metricsapi.ListMetricsFilesRequestObject) (metricsapi.ListMetricsFilesResponseObject, error)
+        + GetMetricsFile(ctx context.Context, request metricsapi.GetMetricsFileRequestObject) (metricsapi.GetMetricsFileResponseObject, error)
+        + GetMetricsSummary(ctx context.Context, request metricsapi.GetMetricsSummaryRequestObject) (metricsapi.GetMetricsSummaryResponseObject, error)
+
+    }
+    class "metricsAccess" << (S,Aquamarine) >> {
+        - scopePrefix string
+
+        - isScoped() bool
+
+    }
+    class "metricsQueryContextKey" << (S,Aquamarine) >> {
+    }
+    class "metricsQueryParams" << (S,Aquamarine) >> {
+        - authz string
+        - organization string
+        - program string
+        - project string
+
+    }
+}
+namespace middleware {
+    class "AuthzMiddleware" << (S,Aquamarine) >> {
+        - logger *slog.Logger
+        - mode string
+        - basicUser string
+        - basicPass string
+        - mock mockAuthConfig
+        - cache *authzCache
+        - sf singleflight.Group
+
+        - parseToken(tokenString string) (string, float64, error)
+        - extractPrivileges(privs <font color=blue>map</font>[string]any) ([]string, <font color=blue>map</font>[string]<font color=blue>map</font>[string]bool)
+
+        + FiberMiddleware() fiber.Handler
+
+    }
+    class "RequestIDMiddleware" << (S,Aquamarine) >> {
+        - logger *slog.Logger
+
+        + FiberMiddleware() fiber.Handler
+
+    }
+    class "authCacheConfig" << (S,Aquamarine) >> {
+        + Enabled bool
+        + TTL time.Duration
+        + NegativeTTL time.Duration
+        + MaxEntries int
+        + CleanupEvery time.Duration
+
+    }
+    class "authzCache" << (S,Aquamarine) >> {
+        - cfg authCacheConfig
+        - mu sync.RWMutex
+        - entries <font color=blue>map</font>[string]authzCacheEntry
+
+        - get(key string) ([]string, <font color=blue>map</font>[string]<font color=blue>map</font>[string]bool, bool, bool)
+        - set(key string, resources []string, privileges <font color=blue>map</font>[string]<font color=blue>map</font>[string]bool, negative bool) 
+        - evictExpiredOrOldestLocked() 
+
+    }
+    class "authzCacheEntry" << (S,Aquamarine) >> {
+        - resources []string
+        - privileges <font color=blue>map</font>[string]<font color=blue>map</font>[string]bool
+        - negative bool
+        - expiresAt time.Time
+
+    }
+    class "mockAuthConfig" << (S,Aquamarine) >> {
+        + Enabled bool
+        + RequireAuthHeader bool
+        + Resources []string
+        + Methods []string
+
+    }
+}
+namespace routeutil {
+    class "pathParamsKey" << (S,Aquamarine) >> {
+    }
+}
+namespace authz {
+}
+namespace common {
+    class "ResourceScope" << (S,Aquamarine) >> {
+        + Organization string
+        + Project string
+
+    }
+    class "syfon.internal.common.AuthzContextKey" << (T, #FF7700) >>  {
+    }
+}
+namespace config {
+    class "AuthConfig" << (S,Aquamarine) >> {
+        + Mode string
+        + Basic BasicAuthConfig
+
+    }
+    class "BasicAuthConfig" << (S,Aquamarine) >> {
+        + Username string
+        + Password string
+
+    }
+    class "Config" << (S,Aquamarine) >> {
+        + Port int
+        + Database DatabaseConfig
+        + S3Credentials []S3Config
+        + Auth AuthConfig
+        + LFS LFSConfig
+        + Signing SigningConfig
+        + Routes RoutesConfig
+
+    }
+    class "DatabaseConfig" << (S,Aquamarine) >> {
+        + Sqlite *SqliteConfig
+        + Postgres *PostgresConfig
+
+    }
+    class "LFSConfig" << (S,Aquamarine) >> {
+        + MaxBatchObjects int
+        + MaxBatchBodyBytes int64
+        + RequestLimitPerMinute int
+        + BandwidthLimitBytesPerMinute int64
+
+    }
+    class "PostgresConfig" << (S,Aquamarine) >> {
+        + Host string
+        + Port int
+        + User string
+        + Password string
+        + Database string
+        + SSLMode string
+
+    }
+    class "RoutesConfig" << (S,Aquamarine) >> {
+        + Docs bool
+        + Ga4gh bool
+        + Metrics bool
+        + Internal bool
+        + LFS bool
+
+    }
+    class "S3Config" << (S,Aquamarine) >> {
+        + Bucket string
+        + Provider string
+        + Region string
+        + AccessKey string
+        + SecretKey string
+        + Endpoint string
+
+    }
+    class "SigningConfig" << (S,Aquamarine) >> {
+        + DefaultExpirySeconds int
+
+    }
+    class "SqliteConfig" << (S,Aquamarine) >> {
+        + File string
+
+    }
+}
+namespace converters {
+}
+namespace crypto {
+    interface "CredentialKeyManager"  {
+        + Name() string
+        + WrapDataKey(ctx context.Context, dataKey []byte) (*WrappedDataKey, error)
+        + UnwrapDataKey(ctx context.Context, wrapped *WrappedDataKey) ([]byte, error)
+
+    }
+    class "WrappedDataKey" << (S,Aquamarine) >> {
+        + Manager string
+        + KeyID string
+        + Ciphertext string
+
+    }
+    class "awsKMSKeyManager" << (S,Aquamarine) >> {
+        - client *kms.Client
+        - keyID string
+
+        + Name() string
+        + WrapDataKey(ctx context.Context, dataKey []byte) (*WrappedDataKey, error)
+        + UnwrapDataKey(ctx context.Context, wrapped *WrappedDataKey) ([]byte, error)
+
+    }
+    class "credentialEnvelopeV2" << (S,Aquamarine) >> {
+        + Manager string
+        + KeyID string
+        + WrappedDEK string
+        + Nonce string
+        + Ciphertext string
+
+    }
+    class "localKeyManager" << (S,Aquamarine) >> {
+        + Name() string
+        + WrapDataKey(_ context.Context, dataKey []byte) (*WrappedDataKey, error)
+        + UnwrapDataKey(_ context.Context, wrapped *WrappedDataKey) ([]byte, error)
+
+    }
+}
+namespace db {
+    interface "CredentialStore"  {
+        + GetS3Credential(ctx context.Context, bucket string) (*models.S3Credential, error)
+        + ListS3Credentials(ctx context.Context) ([]models.S3Credential, error)
+        + SaveS3Credential(ctx context.Context, cred *models.S3Credential) error
+        + DeleteS3Credential(ctx context.Context, bucket string) error
+        + CreateBucketScope(ctx context.Context, scope *models.BucketScope) error
+        + GetBucketScope(ctx context.Context, organization string, projectID string) (*models.BucketScope, error)
+        + ListBucketScopes(ctx context.Context) ([]models.BucketScope, error)
+
+    }
+    interface "DatabaseInterface"  {
+    }
+    interface "LFSStore"  {
+    }
+    interface "MetricsStore"  {
+        + ListObjectIDsByResourcePrefix(ctx context.Context, resourcePrefix string) ([]string, error)
+        + GetObject(ctx context.Context, id string) (*models.InternalObject, error)
+        + GetFileUsage(ctx context.Context, objectID string) (*models.FileUsage, error)
+        + ListFileUsage(ctx context.Context, limit int, offset int, inactiveSince *time.Time) ([]models.FileUsage, error)
+        + GetFileUsageSummary(ctx context.Context, inactiveSince *time.Time) (models.FileUsageSummary, error)
+
+    }
+    interface "ObjectStore"  {
+        + GetObject(ctx context.Context, id string) (*models.InternalObject, error)
+        + DeleteObject(ctx context.Context, id string) error
+        + DeleteObjectAlias(ctx context.Context, aliasID string) error
+        + CreateObject(ctx context.Context, obj *models.InternalObject) error
+        + GetObjectsByChecksum(ctx context.Context, checksum string) ([]models.InternalObject, error)
+        + GetObjectsByChecksums(ctx context.Context, checksums []string) (<font color=blue>map</font>[string][]models.InternalObject, error)
+        + ListObjectIDsByResourcePrefix(ctx context.Context, resourcePrefix string) ([]string, error)
+        + CreateObjectAlias(ctx context.Context, aliasID string, canonicalObjectID string) error
+        + ResolveObjectAlias(ctx context.Context, aliasID string) (string, error)
+        + GetBulkObjects(ctx context.Context, ids []string) ([]models.InternalObject, error)
+        + BulkDeleteObjects(ctx context.Context, ids []string) error
+        + RegisterObjects(ctx context.Context, objects []models.InternalObject) error
+        + UpdateObjectAccessMethods(ctx context.Context, objectID string, accessMethods []drs.AccessMethod) error
+        + BulkUpdateAccessMethods(ctx context.Context, updates <font color=blue>map</font>[string][]drs.AccessMethod) error
+
+    }
+    interface "ObjectsAPIServiceDatabase"  {
+    }
+    interface "PendingLFSMetaStore"  {
+        + SavePendingLFSMeta(ctx context.Context, entries []models.PendingLFSMeta) error
+        + GetPendingLFSMeta(ctx context.Context, oid string) (*models.PendingLFSMeta, error)
+        + PopPendingLFSMeta(ctx context.Context, oid string) (*models.PendingLFSMeta, error)
+
+    }
+    interface "SHA256ValidityStore"  {
+        + GetObjectsByChecksums(ctx context.Context, checksums []string) (<font color=blue>map</font>[string][]models.InternalObject, error)
+        + ListS3Credentials(ctx context.Context) ([]models.S3Credential, error)
+
+    }
+    interface "ServiceInfoStore"  {
+        + GetServiceInfo(ctx context.Context) (*drs.Service, error)
+
+    }
+    interface "UsageStore"  {
+        + RecordFileUpload(ctx context.Context, objectID string) error
+        + RecordFileDownload(ctx context.Context, objectID string) error
+        + GetFileUsage(ctx context.Context, objectID string) (*models.FileUsage, error)
+        + ListFileUsage(ctx context.Context, limit int, offset int, inactiveSince *time.Time) ([]models.FileUsage, error)
+        + GetFileUsageSummary(ctx context.Context, inactiveSince *time.Time) (models.FileUsageSummary, error)
+
+    }
+    namespace postgres {
+    class "PostgresDB" << (S,Aquamarine) >> {
+        - db *sql.DB
+
+        - flushObjectUsageEvents(ctx context.Context) error
+        - existingObjectIDsWithEvents(ctx context.Context, tx *sql.Tx) ([]string, error)
+        - flushObjectUsageEventsForIDsTx(ctx context.Context, tx *sql.Tx, ids []string) error
+        - fetchObjectsByIDsOrChecksums(ctx context.Context, ids []string, checksums []string) (<font color=blue>map</font>[string]*models.InternalObject, error)
+        - ensureS3CredentialSchema() error
+        - ensureBucketScopeSchema() error
+        - ensureLFSPendingSchema() error
+        - ensureObjectUsageSchema() error
+        - ensurePendingObjectUsageSchema() error
+        - ensureObjectAliasSchema() error
+
+        + GetS3Credential(ctx context.Context, bucket string) (*models.S3Credential, error)
+        + SaveS3Credential(ctx context.Context, cred *models.S3Credential) error
+        + DeleteS3Credential(ctx context.Context, bucket string) error
+        + ListS3Credentials(ctx context.Context) ([]models.S3Credential, error)
+        + CreateBucketScope(ctx context.Context, scope *models.BucketScope) error
+        + GetBucketScope(ctx context.Context, organization string, projectID string) (*models.BucketScope, error)
+        + ListBucketScopes(ctx context.Context) ([]models.BucketScope, error)
+        + SavePendingLFSMeta(ctx context.Context, entries []models.PendingLFSMeta) error
+        + GetPendingLFSMeta(ctx context.Context, oid string) (*models.PendingLFSMeta, error)
+        + PopPendingLFSMeta(ctx context.Context, oid string) (*models.PendingLFSMeta, error)
+        + RecordFileUpload(ctx context.Context, objectID string) error
+        + RecordFileDownload(ctx context.Context, objectID string) error
+        + GetFileUsage(ctx context.Context, objectID string) (*models.FileUsage, error)
+        + ListFileUsage(ctx context.Context, limit int, offset int, inactiveSince *time.Time) ([]models.FileUsage, error)
+        + GetFileUsageSummary(ctx context.Context, inactiveSince *time.Time) (models.FileUsageSummary, error)
+        + DeleteObject(ctx context.Context, id string) error
+        + DeleteObjectAlias(ctx context.Context, aliasID string) error
+        + CreateObjectAlias(ctx context.Context, aliasID string, canonicalObjectID string) error
+        + ResolveObjectAlias(ctx context.Context, aliasID string) (string, error)
+        + GetObject(ctx context.Context, id string) (*models.InternalObject, error)
+        + CreateObject(ctx context.Context, obj *models.InternalObject) error
+        + RegisterObjects(ctx context.Context, objects []models.InternalObject) error
+        + GetBulkObjects(ctx context.Context, ids []string) ([]models.InternalObject, error)
+        + GetObjectsByChecksum(ctx context.Context, checksum string) ([]models.InternalObject, error)
+        + GetObjectsByChecksums(ctx context.Context, checksums []string) (<font color=blue>map</font>[string][]models.InternalObject, error)
+        + ListObjectIDsByResourcePrefix(ctx context.Context, resourcePrefix string) ([]string, error)
+        + BulkDeleteObjects(ctx context.Context, ids []string) error
+        + UpdateObjectAccessMethods(ctx context.Context, objectID string, accessMethods []drs.AccessMethod) error
+        + BulkUpdateAccessMethods(ctx context.Context, updates <font color=blue>map</font>[string][]drs.AccessMethod) error
+        + GetServiceInfo(ctx context.Context) (*drs.Service, error)
+
+    }
+    }
+    namespace sqlite {
+    class "SqliteDB" << (S,Aquamarine) >> {
+        - db *sql.DB
+
+        - flushObjectUsageEventsForIDsTx(ctx context.Context, tx *sql.Tx, ids []string) error
+        - flushObjectUsageEvents(ctx context.Context) error
+        - fetchObjectsByIDsOrChecksums(ctx context.Context, ids []string, checksums []string) (<font color=blue>map</font>[string]*models.InternalObject, error)
+        - initSchema() error
+
+        + GetS3Credential(ctx context.Context, bucket string) (*models.S3Credential, error)
+        + SaveS3Credential(ctx context.Context, cred *models.S3Credential) error
+        + DeleteS3Credential(ctx context.Context, bucket string) error
+        + ListS3Credentials(ctx context.Context) ([]models.S3Credential, error)
+        + CreateBucketScope(ctx context.Context, scope *models.BucketScope) error
+        + GetBucketScope(ctx context.Context, organization string, projectID string) (*models.BucketScope, error)
+        + ListBucketScopes(ctx context.Context) ([]models.BucketScope, error)
+        + SavePendingLFSMeta(ctx context.Context, entries []models.PendingLFSMeta) error
+        + GetPendingLFSMeta(ctx context.Context, oid string) (*models.PendingLFSMeta, error)
+        + PopPendingLFSMeta(ctx context.Context, oid string) (*models.PendingLFSMeta, error)
+        + RecordFileUpload(ctx context.Context, objectID string) error
+        + RecordFileDownload(ctx context.Context, objectID string) error
+        + GetFileUsage(ctx context.Context, objectID string) (*models.FileUsage, error)
+        + ListFileUsage(ctx context.Context, limit int, offset int, inactiveSince *time.Time) ([]models.FileUsage, error)
+        + GetFileUsageSummary(ctx context.Context, inactiveSince *time.Time) (models.FileUsageSummary, error)
+        + DeleteObject(ctx context.Context, id string) error
+        + DeleteObjectAlias(ctx context.Context, aliasID string) error
+        + CreateObjectAlias(ctx context.Context, aliasID string, canonicalObjectID string) error
+        + ResolveObjectAlias(ctx context.Context, aliasID string) (string, error)
+        + GetObject(ctx context.Context, id string) (*models.InternalObject, error)
+        + CreateObject(ctx context.Context, obj *models.InternalObject) error
+        + RegisterObjects(ctx context.Context, objects []models.InternalObject) error
+        + GetBulkObjects(ctx context.Context, ids []string) ([]models.InternalObject, error)
+        + GetObjectsByChecksums(ctx context.Context, checksums []string) (<font color=blue>map</font>[string][]models.InternalObject, error)
+        + ListObjectIDsByResourcePrefix(ctx context.Context, resourcePrefix string) ([]string, error)
+        + GetObjectsByChecksum(ctx context.Context, checksum string) ([]models.InternalObject, error)
+        + BulkDeleteObjects(ctx context.Context, ids []string) error
+        + UpdateObjectAccessMethods(ctx context.Context, objectID string, accessMethods []drs.AccessMethod) error
+        + BulkUpdateAccessMethods(ctx context.Context, updates <font color=blue>map</font>[string][]drs.AccessMethod) error
+        + GetServiceInfo(ctx context.Context) (*drs.Service, error)
+
+    }
+    }
+}
+namespace models {
+    class "BucketScope" << (S,Aquamarine) >> {
+        + Organization string
+        + ProjectID string
+        + Bucket string
+        + PathPrefix string
+
+    }
+    class "DrsObjectRecord" << (S,Aquamarine) >> {
+        + ID string
+        + Size int64
+        + CreatedTime time.Time
+        + UpdatedTime time.Time
+        + Name string
+        + Version string
+        + Description string
+
+    }
+    class "FileUsage" << (S,Aquamarine) >> {
+        + ObjectID string
+        + Name string
+        + Size int64
+        + UploadCount int64
+        + DownloadCount int64
+        + LastUploadTime *time.Time
+        + LastDownloadTime *time.Time
+        + LastAccessTime *time.Time
+
+    }
+    class "FileUsageSummary" << (S,Aquamarine) >> {
+        + TotalFiles int64
+        + TotalUploads int64
+        + TotalDownloads int64
+        + InactiveFileCount int64
+
+    }
+    class "InternalObject" << (S,Aquamarine) >> {
+        + Authorizations []string
+        + Properties <font color=blue>map</font>[string]<font color=blue>interface</font>{}
+
+        + UnmarshalJSON(data []byte) error
+        + MarshalJSON() ([]byte, error)
+        + External() drs.DrsObject
+
+    }
+    class "PendingLFSMeta" << (S,Aquamarine) >> {
+        + OID string
+        + Candidate drs.DrsObjectCandidate
+        + CreatedAt time.Time
+        + ExpiresAt time.Time
+
+    }
+    class "S3Credential" << (S,Aquamarine) >> {
+        + Bucket string
+        + Provider string
+        + Region string
+        + AccessKey string
+        + SecretKey string
+        + Endpoint string
+
+    }
+    class "syfon.internal.models.DrsObjectWithAuthz" << (T, #FF7700) >>  {
+    }
+}
+namespace service {
+    class "LFSServer" << (S,Aquamarine) >> {
+        - database db.LFSStore
+        - uM urlmanager.UrlManager
+        - opts Options
+
+        - handleUploadInternal(ctx context.Context, body io.Reader, bucket string, key string, usageObjectID string) error
+
+        + LfsBatch(ctx context.Context, request lfsapi.LfsBatchRequestObject) (lfsapi.LfsBatchResponseObject, error)
+        + LfsVerify(ctx context.Context, request lfsapi.LfsVerifyRequestObject) (lfsapi.LfsVerifyResponseObject, error)
+        + LfsStageMetadata(ctx context.Context, request lfsapi.LfsStageMetadataRequestObject) (lfsapi.LfsStageMetadataResponseObject, error)
+        + LfsUploadProxy(ctx context.Context, request lfsapi.LfsUploadProxyRequestObject) (lfsapi.LfsUploadProxyResponseObject, error)
+
+    }
+    class "Options" << (S,Aquamarine) >> {
+        + MaxBatchObjects int
+        + MaxBatchBodyBytes int64
+        + RequestLimitPerMinute int
+        + BandwidthLimitBytesPerMinute int64
+
+    }
+    class "syfon.internal.service.contextKey" << (T, #FF7700) >>  {
+    }
+    class "windowBytes" << (S,Aquamarine) >> {
+        + Minute int64
+        + Bytes int64
+
+    }
+    class "windowCounter" << (S,Aquamarine) >> {
+        + Minute int64
+        + Count int
+
+    }
+}
+namespace signer {
+    class "MultipartPart" << (S,Aquamarine) >> {
+        + PartNumber int32
+        + ETag string
+
+    }
+    class "SignOptions" << (S,Aquamarine) >> {
+        + ExpiresIn time.Duration
+        + Method string
+
+    }
+    interface "Signer"  {
+        + SignURL(ctx context.Context, bucket string, key string, opts SignOptions) (string, error)
+        + SignDownloadPart(ctx context.Context, bucket string, key string, start int64, end int64, opts SignOptions) (string, error)
+        + InitMultipartUpload(ctx context.Context, bucket string, key string) (string, error)
+        + SignMultipartPart(ctx context.Context, bucket string, key string, uploadID string, partNumber int32) (string, error)
+        + CompleteMultipartUpload(ctx context.Context, bucket string, key string, uploadID string, parts []MultipartPart) error
+
+    }
+    namespace azure {
+    class "AzureSigner" << (S,Aquamarine) >> {
+        - db db.CredentialStore
+        - cache sync.Map
+
+        - getCreds(ctx context.Context, bucket string) (*azureCreds, error)
+        - azureSignedURL(serviceURL string, bucketName string, key string, method string, expiry time.Duration, rangeStr string, sharedKey *azblob.SharedKeyCredential) (string, error)
+        - azureBlockID(uploadID string, partNumber int32) string
+        - azureBlobURL(serviceURL string, bucket string, key string) string
+        - azureServiceURL(accountName string, endpoint string) string
+        - azureAccountFromEndpoint(endpoint string) string
+
+        + SignURL(ctx context.Context, bucket string, key string, opts signer.SignOptions) (string, error)
+        + SignDownloadPart(ctx context.Context, bucket string, key string, start int64, end int64, opts signer.SignOptions) (string, error)
+        + InitMultipartUpload(ctx context.Context, bucket string, key string) (string, error)
+        + SignMultipartPart(ctx context.Context, bucket string, key string, uploadID string, partNumber int32) (string, error)
+        + CompleteMultipartUpload(ctx context.Context, bucket string, key string, uploadID string, parts []signer.MultipartPart) error
+
+    }
+    class "azureCreds" << (S,Aquamarine) >> {
+        + SharedKey *azblob.SharedKeyCredential
+        + ServiceURL string
+
+    }
+    }
+    namespace file {
+    class "FileSigner" << (S,Aquamarine) >> {
+        - rootBucket *blob.Bucket
+
+        + SignURL(ctx context.Context, bucket string, key string, opts signer.SignOptions) (string, error)
+        + SignDownloadPart(ctx context.Context, bucket string, key string, start int64, end int64, opts signer.SignOptions) (string, error)
+        + InitMultipartUpload(ctx context.Context, bucket string, key string) (string, error)
+        + SignMultipartPart(ctx context.Context, bucket string, key string, uploadID string, partNumber int32) (string, error)
+        + CompleteMultipartUpload(ctx context.Context, bucket string, key string, uploadID string, parts []signer.MultipartPart) error
+
+    }
+    }
+    namespace gcs {
+    class "GCSSigner" << (S,Aquamarine) >> {
+        - db db.CredentialStore
+        - cache sync.Map
+
+        - gcsSignedURL(bucket string, key string, method string, expiry time.Duration, rangeStr string, cred *models.S3Credential) (string, error)
+        - gcsGoogleAccessID(cred *models.S3Credential) string
+        - gcsPrivateKey(cred *models.S3Credential) string
+        - getClient(ctx context.Context, bucket string) (*storage.Client, error)
+        - composeGCSObjects(ctx context.Context, client *storage.Client, bucket string, destinationKey string, uploadID string, partKeys []string) ([]string, error)
+        - composeGCSBatch(ctx context.Context, client *storage.Client, bucket string, dst string, src []string) error
+
+        + SignURL(ctx context.Context, bucket string, key string, opts signer.SignOptions) (string, error)
+        + SignDownloadPart(ctx context.Context, bucket string, key string, start int64, end int64, opts signer.SignOptions) (string, error)
+        + InitMultipartUpload(ctx context.Context, bucket string, key string) (string, error)
+        + SignMultipartPart(ctx context.Context, bucket string, key string, uploadID string, partNumber int32) (string, error)
+        + CompleteMultipartUpload(ctx context.Context, bucket string, key string, uploadID string, parts []signer.MultipartPart) error
+
+    }
+    }
+    namespace s3 {
+    class "S3Signer" << (S,Aquamarine) >> {
+        - db db.CredentialStore
+        - cache sync.Map
+
+        - getClients(ctx context.Context, bucket string) (*s3Clients, error)
+
+        + SignURL(ctx context.Context, bucket string, key string, opts signer.SignOptions) (string, error)
+        + SignDownloadPart(ctx context.Context, bucket string, key string, start int64, end int64, opts signer.SignOptions) (string, error)
+        + InitMultipartUpload(ctx context.Context, bucket string, key string) (string, error)
+        + SignMultipartPart(ctx context.Context, bucket string, key string, uploadID string, partNumber int32) (string, error)
+        + CompleteMultipartUpload(ctx context.Context, bucket string, key string, uploadID string, parts []signer.MultipartPart) error
+
+    }
+    class "s3Clients" << (S,Aquamarine) >> {
+        - client *s3.Client
+        - presigner *s3.PresignClient
+
+    }
+    }
+}
+namespace testutils {
+    class "MockDatabase" << (S,Aquamarine) >> {
+        + Objects <font color=blue>map</font>[string]*drs.DrsObject
+        + ObjectAuthz <font color=blue>map</font>[string][]string
+        + Credentials <font color=blue>map</font>[string]models.S3Credential
+        + BucketScopes <font color=blue>map</font>[string]models.BucketScope
+        + PendingMeta <font color=blue>map</font>[string]models.PendingLFSMeta
+        + Usage <font color=blue>map</font>[string]models.FileUsage
+        + NoDefaultCreds bool
+        + GetObjectErr error
+
+        + GetServiceInfo(ctx context.Context) (*drs.Service, error)
+        + GetObject(ctx context.Context, id string) (*models.InternalObject, error)
+        + DeleteObject(ctx context.Context, id string) error
+        + DeleteObjectAlias(ctx context.Context, aliasID string) error
+        + CreateObject(ctx context.Context, obj *models.InternalObject) error
+        + GetObjectsByChecksum(ctx context.Context, checksum string) ([]models.InternalObject, error)
+        + GetObjectsByChecksums(ctx context.Context, checksums []string) (<font color=blue>map</font>[string][]models.InternalObject, error)
+        + ListObjectIDsByResourcePrefix(ctx context.Context, resourcePrefix string) ([]string, error)
+        + CreateObjectAlias(ctx context.Context, aliasID string, canonicalObjectID string) error
+        + ResolveObjectAlias(ctx context.Context, aliasID string) (string, error)
+        + RegisterObjects(ctx context.Context, objects []models.InternalObject) error
+        + GetBulkObjects(ctx context.Context, ids []string) ([]models.InternalObject, error)
+        + BulkDeleteObjects(ctx context.Context, ids []string) error
+        + UpdateObjectAccessMethods(ctx context.Context, objectID string, accessMethods []drs.AccessMethod) error
+        + BulkUpdateAccessMethods(ctx context.Context, updates <font color=blue>map</font>[string][]drs.AccessMethod) error
+        + GetS3Credential(ctx context.Context, bucket string) (*models.S3Credential, error)
+        + SaveS3Credential(ctx context.Context, cred *models.S3Credential) error
+        + DeleteS3Credential(ctx context.Context, bucket string) error
+        + ListS3Credentials(ctx context.Context) ([]models.S3Credential, error)
+        + CreateBucketScope(ctx context.Context, scope *models.BucketScope) error
+        + GetBucketScope(ctx context.Context, organization string, projectID string) (*models.BucketScope, error)
+        + ListBucketScopes(ctx context.Context) ([]models.BucketScope, error)
+        + SavePendingLFSMeta(ctx context.Context, entries []models.PendingLFSMeta) error
+        + GetPendingLFSMeta(ctx context.Context, oid string) (*models.PendingLFSMeta, error)
+        + PopPendingLFSMeta(ctx context.Context, oid string) (*models.PendingLFSMeta, error)
+        + RecordFileUpload(ctx context.Context, objectID string) error
+        + RecordFileDownload(ctx context.Context, objectID string) error
+        + GetFileUsage(ctx context.Context, objectID string) (*models.FileUsage, error)
+        + ListFileUsage(ctx context.Context, limit int, offset int, inactiveSince *time.Time) ([]models.FileUsage, error)
+        + GetFileUsageSummary(ctx context.Context, inactiveSince *time.Time) (models.FileUsageSummary, error)
+
+    }
+    class "MockUrlManager" << (S,Aquamarine) >> {
+        + SignURL(ctx context.Context, accessId string, url string, opts urlmanager.SignOptions) (string, error)
+        + SignUploadURL(ctx context.Context, accessId string, url string, opts urlmanager.SignOptions) (string, error)
+        + InitMultipartUpload(ctx context.Context, bucket string, key string) (string, error)
+        + SignMultipartPart(ctx context.Context, bucket string, key string, uploadId string, partNumber int32) (string, error)
+        + SignDownloadPart(ctx context.Context, accessId string, url string, start int64, end int64, opts urlmanager.SignOptions) (string, error)
+        + CompleteMultipartUpload(ctx context.Context, bucket string, key string, uploadId string, parts []urlmanager.MultipartPart) error
+
+    }
+}
+namespace urlmanager {
+    class "Manager" << (S,Aquamarine) >> {
+        - database db.CredentialStore
+        - signing config.SigningConfig
+        - defaultProvider string
+        - signers <font color=blue>map</font>[string]signer.Signer
+
+        - resolve(ctx context.Context, accessId string, urlStr string) (string, string, string, error)
+        - resolveProviderForBucket(ctx context.Context, bucket string) (string, error)
+        - credentialForBucket(ctx context.Context, bucket string) (*models.S3Credential, error)
+
+        + RegisterSigner(p string, s signer.Signer) 
+        + SignURL(ctx context.Context, accessId string, urlStr string, opts SignOptions) (string, error)
+        + SignUploadURL(ctx context.Context, accessId string, urlStr string, opts SignOptions) (string, error)
+        + SignDownloadPart(ctx context.Context, accessId string, urlStr string, start int64, end int64, opts SignOptions) (string, error)
+        + InitMultipartUpload(ctx context.Context, bucketName string, key string) (string, error)
+        + SignMultipartPart(ctx context.Context, bucketName string, key string, uploadId string, partNumber int32) (string, error)
+        + CompleteMultipartUpload(ctx context.Context, bucketName string, key string, uploadId string, parts []MultipartPart) error
+
+    }
+    interface "MultipartManager"  {
+        + InitMultipartUpload(ctx context.Context, bucket string, key string) (string, error)
+        + SignMultipartPart(ctx context.Context, bucket string, key string, uploadId string, partNumber int32) (string, error)
+        + CompleteMultipartUpload(ctx context.Context, bucket string, key string, uploadId string, parts []MultipartPart) error
+
+    }
+    interface "SignedURLManager"  {
+        + SignURL(ctx context.Context, accessId string, url string, opts SignOptions) (string, error)
+        + SignUploadURL(ctx context.Context, accessId string, url string, opts SignOptions) (string, error)
+        + SignDownloadPart(ctx context.Context, accessId string, url string, start int64, end int64, opts SignOptions) (string, error)
+
+    }
+    interface "UrlManager"  {
+    }
+    class "syfon.internal.urlmanager.MultipartPart" << (T, #FF7700) >>  {
+    }
+    class "syfon.internal.urlmanager.SignOptions" << (T, #FF7700) >>  {
+    }
+}
+namespace version {
+}
+namespace endpoints {
+}
+"__builtin__.string" #.. "syfon.client.common.contextKey"
+"__builtin__.string" #.. "syfon.client.hash.ChecksumType"
+"__builtin__.string" #.. "syfon.client.transfer.ChunkStatus"
+"__builtin__.string" #.. "syfon.client.transfer.TransferStrategy"
+"__builtin__.string" #.. "syfon.internal.common.AuthzContextKey"
+"__builtin__.string" #.. "syfon.internal.service.contextKey"
+"client.<font color=blue>func</font>(*Config) " #.. "client.Option"
+"cmd.serverfontcolorbluefuncfontserverRuntime" #.. "cmd.server.ServerOption"
+"syfon.clientcommonfontcolorbluefuncfontProgressEventerror" #.. "syfon.client.common.ProgressCallback"
+"syfon.clienthashdrsChecksum" #.. "syfon.client.hash.Checksum"
+"syfon.clientlogsfontcolorbluefuncfontconfig" #.. "syfon.client.logs.Option"
+"syfon.clientrequestfontcolorbluefuncfontRequestBuilder" #.. "syfon.client.request.RequestOption"
+"syfon.internalapilfsserviceOptions" #.. "syfon.internal.api.lfs.Options"
+"syfon.internalmodelsInternalObject" #.. "syfon.internal.models.DrsObjectWithAuthz"
+"syfon.internalurlmanagersignerMultipartPart" #.. "syfon.internal.urlmanager.MultipartPart"
+"syfon.internalurlmanagersignerSignOptions" #.. "syfon.internal.urlmanager.SignOptions"
+"syfon.client.credentials.Reader" *-- "syfon.client.credentials.Manager"
+"slog.Logger" *-- "syfon.client.logs.Gen3Logger"
+"syfon.client.transfer.MultipartWriter" *-- "syfon.client.transfer.Backend"
+"syfon.client.transfer.ObjectDeleter" *-- "syfon.client.transfer.Backend"
+"syfon.client.transfer.ObjectWriter" *-- "syfon.client.transfer.Backend"
+"syfon.client.transfer.RangeReader" *-- "syfon.client.transfer.Backend"
+"syfon.client.transfer.Service" *-- "syfon.client.transfer.Backend"
+"syfon.client.transfer.Service" *-- "syfon.client.transfer.Downloader"
+"syfon.client.transfer.ObjectWriter" *-- "syfon.client.transfer.MultipartWriter"
+"syfon.client.transfer.ObjectReader" *-- "syfon.client.transfer.RangeReader"
+"syfon.client.transfer.Service" *-- "syfon.client.transfer.Uploader"
+"bytes.Reader" *-- "syfon.client.xfer.providers.azure.readSeekCloser"
+"syfon.internal.db.CredentialStore" *-- "syfon.internal.db.DatabaseInterface"
+"syfon.internal.db.ObjectStore" *-- "syfon.internal.db.DatabaseInterface"
+"syfon.internal.db.PendingLFSMetaStore" *-- "syfon.internal.db.DatabaseInterface"
+"syfon.internal.db.ServiceInfoStore" *-- "syfon.internal.db.DatabaseInterface"
+"syfon.internal.db.UsageStore" *-- "syfon.internal.db.DatabaseInterface"
+"syfon.internal.db.CredentialStore" *-- "syfon.internal.db.LFSStore"
+"syfon.internal.db.ObjectStore" *-- "syfon.internal.db.LFSStore"
+"syfon.internal.db.PendingLFSMetaStore" *-- "syfon.internal.db.LFSStore"
+"syfon.internal.db.UsageStore" *-- "syfon.internal.db.LFSStore"
+"syfon.internal.db.CredentialStore" *-- "syfon.internal.db.ObjectsAPIServiceDatabase"
+"syfon.internal.db.ObjectStore" *-- "syfon.internal.db.ObjectsAPIServiceDatabase"
+"syfon.internal.db.ServiceInfoStore" *-- "syfon.internal.db.ObjectsAPIServiceDatabase"
+"syfon.internal.db.UsageStore" *-- "syfon.internal.db.ObjectsAPIServiceDatabase"
+"drs.DrsObject" *-- "syfon.internal.models.InternalObject"
+"syfon.internal.urlmanager.MultipartManager" *-- "syfon.internal.urlmanager.UrlManager"
+"syfon.internal.urlmanager.SignedURLManager" *-- "syfon.internal.urlmanager.UrlManager"
+
+
+
+@enduml

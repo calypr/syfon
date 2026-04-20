@@ -1,0 +1,92 @@
+package internaldrs
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+	"strings"
+
+	"github.com/calypr/syfon/internal/authz"
+	"github.com/calypr/syfon/internal/common"
+	"github.com/calypr/syfon/internal/models"
+	"github.com/gofiber/fiber/v3"
+)
+
+func authStatusCode(ctx context.Context) int {
+	if authz.IsGen3Mode(ctx) && !authz.HasAuthHeader(ctx) {
+		return http.StatusUnauthorized
+	}
+	return http.StatusForbidden
+}
+
+func requireGen3AuthFiber(c fiber.Ctx) error {
+	if authStatusCode(c.Context()) == http.StatusUnauthorized {
+		return c.SendStatus(http.StatusUnauthorized)
+	}
+	return nil
+}
+
+func parseScopeQueryParts(authzParam, organization, program, project string) (string, bool, error) {
+	if authzParam = strings.TrimSpace(authzParam); authzParam != "" {
+		return authzParam, true, nil
+	}
+	org := strings.TrimSpace(organization)
+	if org == "" {
+		org = strings.TrimSpace(program)
+	}
+	project = strings.TrimSpace(project)
+	if project != "" && org == "" {
+		return "", false, fmt.Errorf("organization is required when project is set")
+	}
+	path := common.ResourcePathForScope(org, project)
+	if path != "" {
+		return path, true, nil
+	}
+	return "", false, nil
+}
+
+func parseScopeQueryFiber(c fiber.Ctx) (string, bool, error) {
+	return parseScopeQueryParts(c.Query("authz"), c.Query("organization"), c.Query("program"), c.Query("project"))
+}
+
+func bucketControlAllowed(ctx context.Context, methods ...string) bool {
+	return authz.HasGlobalBucketControlAccess(ctx, methods...)
+}
+
+func bucketControlOpenAccess(ctx context.Context, methods ...string) bool {
+	return !authz.IsGen3Mode(ctx) || bucketControlAllowed(ctx, methods...)
+}
+
+func bucketScopeAllowed(ctx context.Context, scope models.BucketScope, methods ...string) bool {
+	return authz.HasScopedBucketAccess(ctx, scope, methods...)
+}
+
+func resourceAllowed(ctx context.Context, resource string, methods ...string) bool {
+	return authz.HasAnyMethodAccess(ctx, []string{resource}, methods...)
+}
+
+func methodAllowedForAuthorizations(ctx context.Context, method string, authorizations []string) bool {
+	return authz.HasMethodAccess(ctx, method, authorizations)
+}
+
+func allowedBucketsForScopes(ctx context.Context, scopes []models.BucketScope, methods ...string) map[string]bool {
+	allowed := make(map[string]bool)
+	for _, scope := range scopes {
+		if bucketScopeAllowed(ctx, scope, methods...) {
+			allowed[scope.Bucket] = true
+		}
+	}
+	return allowed
+}
+
+func bucketsAllowedByNames(ctx context.Context, scopes []models.BucketScope, bucket string, methods ...string) bool {
+	for _, scope := range scopes {
+		if scope.Bucket != bucket {
+			continue
+		}
+		if bucketScopeAllowed(ctx, scope, methods...) {
+			return true
+		}
+	}
+	return false
+}

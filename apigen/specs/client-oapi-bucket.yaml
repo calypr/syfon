@@ -1,0 +1,4 @@
+package: bucketapi
+generate:
+  client: true
+  models: true

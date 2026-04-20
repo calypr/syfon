@@ -3,7 +3,7 @@ package version
 import (
 	"fmt"
 
-	"github.com/calypr/syfon/version"
+	"github.com/calypr/syfon/internal/version"
 	"github.com/spf13/cobra"
 )
 
