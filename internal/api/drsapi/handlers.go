@@ -18,15 +18,18 @@ import (
 
 // RegisterDRSRoutes binds standard GA4GH DRS handlers to the router.
 func RegisterDRSRoutes(router fiber.Router, om *core.ObjectManager) {
+	router.Post("/objects/register", handleRegisterObjectsFiber(om))
+	router.Post("/objects/access", handleGetBulkAccessURLFiber(om))
+	router.Get("/objects/checksum/:checksum", handleGetObjectsByChecksumFiber(om))
+	router.Post("/objects/delete", handleBulkDeleteObjectsFiber(om))
+	router.Post("/objects/access-methods", handleUpdateAccessMethodsFiber(om))
+	router.Post("/objects", handleGetBulkObjectsFiber(om))
+
 	router.Get("/objects/:object_id", handleGetObjectFiber(om))
 	router.Post("/objects/:object_id", handleGetObjectFiber(om))
 	router.Get("/objects/:object_id/access/:access_id", handleGetAccessURLFiber(om))
 	router.Post("/objects/:object_id/access/:access_id", handleGetAccessURLFiber(om))
 
-	router.Post("/objects/register", handleRegisterObjectsFiber(om))
-	router.Post("/objects/access", handleGetBulkAccessURLFiber(om))
-	router.Get("/objects/checksum/:checksum", handleGetObjectsByChecksumFiber(om))
-	router.Post("/objects", handleGetBulkObjectsFiber(om))
 	router.Get("/service-info", handleGetServiceInfoFiber(om))
 	router.Post("/upload-request", handleUploadRequestFiber(om))
 	router.Options("/objects", handleOptionsBulkObjectFiber(om))
@@ -34,10 +37,8 @@ func RegisterDRSRoutes(router fiber.Router, om *core.ObjectManager) {
 
 	router.Delete("/objects/:object_id", handleDeleteObjectFiber(om))
 	router.Post("/objects/:object_id/delete", handleDeleteObjectFiber(om))
-	router.Post("/objects/delete", handleBulkDeleteObjectsFiber(om))
 
 	router.Post("/objects/:object_id/access-methods", handleUpdateAccessMethodsFiber(om))
-	router.Post("/objects/access-methods", handleUpdateAccessMethodsFiber(om))
 }
 
 func handleGetObjectFiber(om *core.ObjectManager) fiber.Handler {
