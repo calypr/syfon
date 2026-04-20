@@ -226,6 +226,8 @@ paths:
           description: Authentication required
         '403':
           description: Forbidden
+        '413':
+          description: Content too large
         '500':
           description: Internal server error
   /index/bulk/hashes:
@@ -248,6 +250,8 @@ paths:
                 $ref: '#/components/schemas/ListRecordsResponse'
         '400':
           description: Validation error
+        '413':
+          description: Content too large
         '500':
           description: Internal server error
   /index/bulk/delete:
@@ -274,6 +278,8 @@ paths:
           description: Authentication required
         '403':
           description: Forbidden
+        '413':
+          description: Content too large
         '500':
           description: Internal server error
   /index/bulk/sha256/validity:
@@ -298,6 +304,8 @@ paths:
                   type: boolean
         '400':
           description: Validation error
+        '413':
+          description: Content too large
         '500':
           description: Internal server error
   /index/bulk/documents:
@@ -322,6 +330,8 @@ paths:
                   $ref: '#/components/schemas/InternalRecordResponse'
         '400':
           description: Validation error
+        '413':
+          description: Content too large
         '500':
           description: Internal server error
   /data/upload:
@@ -504,6 +514,8 @@ paths:
           description: Authentication required
         '403':
           description: Forbidden
+        '413':
+          description: Content too large
         '500':
           description: Internal server error
   /data/multipart/init:

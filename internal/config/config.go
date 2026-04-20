@@ -42,6 +42,31 @@ const (
 	RouteLFSSpec      = "/index/openapi-lfs.yaml"
 	RouteBucketSpec   = "/index/openapi-bucket.yaml"
 	RouteInternalSpec = "/index/openapi-internal.yaml"
+
+	// Internal DRS Data
+	RouteInternalDownload          = "/data/download/{file_id}"
+	RouteInternalDownloadPart      = "/data/download/{file_id}/part"
+	RouteInternalUpload            = "/data/upload"
+	RouteInternalUploadURL         = "/data/upload/{file_id}"
+	RouteInternalUploadBulk        = "/data/upload/bulk"
+	RouteInternalMultipartInit     = "/data/multipart/init"
+	RouteInternalMultipartUpload   = "/data/multipart/upload"
+	RouteInternalMultipartComplete = "/data/multipart/complete"
+	RouteInternalBuckets           = "/data/buckets"
+	RouteInternalBucketDetail      = "/data/buckets/{bucket}"
+	RouteInternalBucketScopes      = "/data/buckets/{bucket}/scopes"
+
+	// Internal DRS Index
+	RouteInternalIndex            = "/index"
+	RouteInternalIndexDetail      = "/index/{id}"
+	RouteInternalBulkHashes       = "/index/bulk/hashes"
+	RouteInternalBulkDeleteHashes = "/index/bulk/delete"
+	RouteInternalBulkSHA256       = "/index/bulk/sha256/validity"
+	RouteInternalBulkCreate       = "/index/bulk"
+	RouteInternalBulkDocs         = "/index/bulk/documents"
+
+	// Core API
+	RouteCoreSHA256 = "/index/v1/sha256/validity"
 )
 
 type Config struct {
@@ -319,29 +344,24 @@ func LoadConfig(configFile string) (*Config, error) {
 
 	// Validate S3 Credentials
 	for i, cred := range cfg.S3Credentials {
-		provider := strings.ToLower(strings.TrimSpace(cred.Provider))
-		if provider == "" {
-			provider = "s3"
+		bucketProvider, err := common.ParseBucketProvider(cred.Provider)
+		if err != nil {
+			return nil, fmt.Errorf("s3_credentials[%d]: %w", i, err)
 		}
-		cfg.S3Credentials[i].Provider = provider
-		if cred.Bucket == "" {
-			return nil, fmt.Errorf("s3_credentials[%d]: bucket is required", i)
+		cfg.S3Credentials[i].Provider = bucketProvider
+		if err := common.ValidateBucketName(bucketProvider, cred.Bucket); err != nil {
+			return nil, fmt.Errorf("s3_credentials[%d]: %w", i, err)
 		}
-		switch provider {
-		case "s3":
+		if bucketProvider == common.S3Provider {
 			if cred.Region == "" {
-				return nil, fmt.Errorf("s3_credentials[%d]: region is required for provider=s3", i)
+				return nil, fmt.Errorf("s3_credentials[%d]: region is required for provider=%s", i, bucketProvider)
 			}
 			if cred.AccessKey == "" {
-				return nil, fmt.Errorf("s3_credentials[%d]: access_key is required for provider=s3", i)
+				return nil, fmt.Errorf("s3_credentials[%d]: access_key is required for provider=%s", i, bucketProvider)
 			}
 			if cred.SecretKey == "" {
-				return nil, fmt.Errorf("s3_credentials[%d]: secret_key is required for provider=s3", i)
+				return nil, fmt.Errorf("s3_credentials[%d]: secret_key is required for provider=%s", i, bucketProvider)
 			}
-		case "gcs", "azure", "file":
-			// Non-S3 backends can rely on ambient credentials/config.
-		default:
-			return nil, fmt.Errorf("s3_credentials[%d]: unsupported provider %q", i, provider)
 		}
 	}
 	cfg.Auth.Mode = strings.ToLower(strings.TrimSpace(cfg.Auth.Mode))

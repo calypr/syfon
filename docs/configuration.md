@@ -75,9 +75,8 @@ If both are set, config load fails.
 Supported providers in config:
 
 - `s3` (default when omitted)
-- `gcs`
-- `azure`
-- `file`
+- `gcs` or `gs` (normalized to `gcs`)
+- `azure` or `azblob` (normalized to `azure`)
 
 For `provider: s3`, required fields are:
 
@@ -87,6 +86,12 @@ For `provider: s3`, required fields are:
 - `secret_key`
 
 `endpoint` is optional and commonly used for S3-compatible storage.
+
+Bucket validation follows provider rules:
+
+- `s3`: DNS-style bucket names with lowercase letters, numbers, and hyphens.
+- `gcs`: lowercase letters, numbers, hyphens, underscores, and dots; dotted names are allowed if each dot-separated segment is 1-63 characters.
+- `azure`: lowercase letters, numbers, and hyphens only; consecutive hyphens are rejected.
 
 ## Environment variable overrides
 

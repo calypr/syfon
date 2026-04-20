@@ -8,7 +8,6 @@ import (
 	"github.com/calypr/syfon/apigen/server/bucketapi"
 	"github.com/calypr/syfon/internal/api/apiutil"
 	"github.com/calypr/syfon/internal/common"
-	"github.com/calypr/syfon/internal/config"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/models"
 	"github.com/gofiber/fiber/v3"
@@ -72,23 +71,21 @@ func handleInternalPutBucketFiber(c fiber.Ctx, om *core.ObjectManager) error {
 		return c.Status(fiber.StatusBadRequest).SendString("Invalid request body")
 	}
 
-	provider := strings.ToLower(strings.TrimSpace(common.StringVal(req.Provider)))
-	switch provider {
-	case "", "s3":
-		provider = "s3"
-	case "gs", "gcs":
-		provider = "gcs"
-	case "azure", "file":
-		// keep as-is
-	default:
-		return c.Status(fiber.StatusBadRequest).SendString("provider must be one of: s3, gcs, azure, file")
+	bucketProvider, err := common.ParseBucketProvider(common.StringVal(req.Provider))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).SendString("provider must be one of: s3, gcs, azure")
 	}
+	req.Provider = common.Ptr(bucketProvider)
 
 	req.Bucket = strings.TrimSpace(req.Bucket)
 	req.Organization = strings.TrimSpace(req.Organization)
 	req.ProjectId = strings.TrimSpace(req.ProjectId)
 	if req.Bucket == "" || req.Organization == "" || req.ProjectId == "" {
 		return c.Status(fiber.StatusBadRequest).SendString("bucket, organization, and project_id are required")
+	}
+
+	if err := common.ValidateBucketName(bucketProvider, req.Bucket); err != nil {
+		return c.Status(fiber.StatusBadRequest).SendString(err.Error())
 	}
 
 	if !bucketControlAllowed(c.Context(), "create", "update") {
@@ -118,7 +115,7 @@ func handleInternalPutBucketFiber(c fiber.Ctx, om *core.ObjectManager) error {
 		strings.TrimSpace(common.StringVal(req.Region)) == "" &&
 		strings.TrimSpace(common.StringVal(req.Provider)) == ""
 
-	if !hasExistingCred && provider == "s3" &&
+	if !hasExistingCred && bucketProvider == common.S3Provider &&
 		(strings.TrimSpace(common.StringVal(req.AccessKey)) == "" || strings.TrimSpace(common.StringVal(req.SecretKey)) == "") {
 		return c.Status(fiber.StatusBadRequest).SendString("access_key and secret_key are required for new s3 credentials")
 	}
@@ -157,13 +154,13 @@ func handleInternalPutBucketFiber(c fiber.Ctx, om *core.ObjectManager) error {
 
 	cred := &models.S3Credential{
 		Bucket:    req.Bucket,
-		Provider:  provider,
+		Provider:  bucketProvider,
 		Region:    region,
 		AccessKey: accessKey,
 		SecretKey: secretKey,
 		Endpoint:  endpoint,
 	}
-	if provider == "s3" && (strings.TrimSpace(cred.AccessKey) == "" || strings.TrimSpace(cred.SecretKey) == "") {
+	if bucketProvider == common.S3Provider && (strings.TrimSpace(cred.AccessKey) == "" || strings.TrimSpace(cred.SecretKey) == "") {
 		return c.Status(fiber.StatusBadRequest).SendString("access_key and secret_key are required for s3 credentials")
 	}
 
@@ -229,7 +226,7 @@ func handleInternalCreateBucketScopeFiber(c fiber.Ctx, om *core.ObjectManager) e
 
 	path := readOptionalPath(req.Path)
 	if strings.TrimSpace(path) == "" {
-		path = config.S3Prefix + bucket + "/" + strings.Trim(req.Organization+"/"+req.ProjectId, "/")
+		path = common.S3Prefix + bucket + "/" + strings.Trim(req.Organization+"/"+req.ProjectId, "/")
 	}
 	prefix, err := common.NormalizeStoragePath(path, bucket)
 	if err != nil {

@@ -79,7 +79,7 @@ health_check() {
 ensure_bucket_config() {
   local payload
   if [[ "$TEST_BUCKET_PROVIDER" == "file" ]]; then
-    [[ -n "$TEST_BUCKET_ENDPOINT" ]] || fail "TEST_BUCKET_ENDPOINT is required when TEST_BUCKET_PROVIDER=file"
+    [[ -n "$TEST_BUCKET_ENDPOINT" ]] || fail "TEST_BUCKET_ENDPOINT is required when TEST_BUCKET_PROVIDER uses a custom endpoint"
     mkdir -p "$TEST_BUCKET_ENDPOINT"
     payload="$(jq -n \
       --arg bucket "$TEST_BUCKET_NAME" \

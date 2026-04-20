@@ -685,14 +685,14 @@ func TestHandleInternalBuckets_Gen3Auth(t *testing.T) {
 
 func TestHandleInternalPutDeleteBucket_Gen3Auth(t *testing.T) {
 	mockDB := &testutils.MockDatabase{Credentials: map[string]models.S3Credential{}}
-	path := "s3://b2/cbds/proj1"
+	path := "s3://bucket2/cbds/proj1"
 
 	region := "us-east-1"
 	accessKey := "ak"
 	secretKey := "sk"
 	endpoint := "https://s3.amazonaws.com"
 	putBody, _ := json.Marshal(bucketapi.PutBucketRequest{
-		Bucket:       "b2",
+		Bucket:       "bucket2",
 		Region:       &region,
 		AccessKey:    &accessKey,
 		SecretKey:    &secretKey,
@@ -729,7 +729,7 @@ func TestHandleInternalPutDeleteBucket_Gen3Auth(t *testing.T) {
 
 	// Extend the same credential to a second scope without resupplying secrets.
 	putScopeOnlyReq, _ := http.NewRequest("PUT", "/data/buckets", bytes.NewBufferString(`{
-		"bucket":"b2",
+		"bucket":"bucket2",
 		"organization":"cbds",
 		"project_id":"proj2"
 	}`))
@@ -747,11 +747,11 @@ func TestHandleInternalPutDeleteBucket_Gen3Auth(t *testing.T) {
 	}
 
 	// Dedicated scope extension endpoint.
-	postScopeReq, _ := http.NewRequest("POST", "/data/buckets/b2/scopes", bytes.NewBufferString(`{
+	postScopeReq, _ := http.NewRequest("POST", "/data/buckets/bucket2/scopes", bytes.NewBufferString(`{
 		"organization":"cbds",
 		"project_id":"proj3"
 	}`))
-	postScopeReq = routeutil.WithPathParams(postScopeReq, map[string]string{"bucket": "b2"})
+	postScopeReq = routeutil.WithPathParams(postScopeReq, map[string]string{"bucket": "bucket2"})
 	ctxPostScope := context.WithValue(postScopeReq.Context(), common.AuthModeKey, "gen3")
 	ctxPostScope = context.WithValue(ctxPostScope, common.AuthHeaderPresentKey, true)
 	ctxPostScope = context.WithValue(ctxPostScope, common.UserPrivilegesKey, map[string]map[string]bool{
@@ -765,8 +765,8 @@ func TestHandleInternalPutDeleteBucket_Gen3Auth(t *testing.T) {
 		t.Fatalf("expected scope POST 201, got %d body=%s", postScopeRR.Code, postScopeRR.Body.String())
 	}
 
-	delReq403, _ := http.NewRequest("DELETE", "/data/buckets/b2", nil)
-	delReq403 = routeutil.WithPathParams(delReq403, map[string]string{"bucket": "b2"})
+	delReq403, _ := http.NewRequest("DELETE", "/data/buckets/bucket2", nil)
+	delReq403 = routeutil.WithPathParams(delReq403, map[string]string{"bucket": "bucket2"})
 	ctxDel403 := context.WithValue(delReq403.Context(), common.AuthModeKey, "gen3")
 	ctxDel403 = context.WithValue(ctxDel403, common.AuthHeaderPresentKey, true)
 	ctxDel403 = context.WithValue(ctxDel403, common.UserPrivilegesKey, map[string]map[string]bool{
@@ -780,8 +780,8 @@ func TestHandleInternalPutDeleteBucket_Gen3Auth(t *testing.T) {
 		t.Fatalf("expected DELETE 403, got %d body=%s", delRR403.Code, delRR403.Body.String())
 	}
 
-	delReq204, _ := http.NewRequest("DELETE", "/data/buckets/b2", nil)
-	delReq204 = routeutil.WithPathParams(delReq204, map[string]string{"bucket": "b2"})
+	delReq204, _ := http.NewRequest("DELETE", "/data/buckets/bucket2", nil)
+	delReq204 = routeutil.WithPathParams(delReq204, map[string]string{"bucket": "bucket2"})
 	ctxDel204 := context.WithValue(delReq204.Context(), common.AuthModeKey, "gen3")
 	ctxDel204 = context.WithValue(ctxDel204, common.AuthHeaderPresentKey, true)
 	ctxDel204 = context.WithValue(ctxDel204, common.UserPrivilegesKey, map[string]map[string]bool{
