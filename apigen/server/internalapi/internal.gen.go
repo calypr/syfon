@@ -1224,6 +1224,14 @@ func (response InternalUploadBulk403Response) VisitInternalUploadBulkResponse(ct
 	return nil
 }
 
+type InternalUploadBulk413Response struct {
+}
+
+func (response InternalUploadBulk413Response) VisitInternalUploadBulkResponse(ctx fiber.Ctx) error {
+	ctx.Status(413)
+	return nil
+}
+
 type InternalUploadBulk500Response struct {
 }
 
@@ -1478,6 +1486,14 @@ func (response InternalBulkCreate403Response) VisitInternalBulkCreateResponse(ct
 	return nil
 }
 
+type InternalBulkCreate413Response struct {
+}
+
+func (response InternalBulkCreate413Response) VisitInternalBulkCreateResponse(ctx fiber.Ctx) error {
+	ctx.Status(413)
+	return nil
+}
+
 type InternalBulkCreate500Response struct {
 }
 
@@ -1527,6 +1543,14 @@ func (response InternalBulkDeleteHashes403Response) VisitInternalBulkDeleteHashe
 	return nil
 }
 
+type InternalBulkDeleteHashes413Response struct {
+}
+
+func (response InternalBulkDeleteHashes413Response) VisitInternalBulkDeleteHashesResponse(ctx fiber.Ctx) error {
+	ctx.Status(413)
+	return nil
+}
+
 type InternalBulkDeleteHashes500Response struct {
 }
 
@@ -1557,6 +1581,14 @@ type InternalBulkDocuments400Response struct {
 
 func (response InternalBulkDocuments400Response) VisitInternalBulkDocumentsResponse(ctx fiber.Ctx) error {
 	ctx.Status(400)
+	return nil
+}
+
+type InternalBulkDocuments413Response struct {
+}
+
+func (response InternalBulkDocuments413Response) VisitInternalBulkDocumentsResponse(ctx fiber.Ctx) error {
+	ctx.Status(413)
 	return nil
 }
 
@@ -1593,6 +1625,14 @@ func (response InternalBulkHashes400Response) VisitInternalBulkHashesResponse(ct
 	return nil
 }
 
+type InternalBulkHashes413Response struct {
+}
+
+func (response InternalBulkHashes413Response) VisitInternalBulkHashesResponse(ctx fiber.Ctx) error {
+	ctx.Status(413)
+	return nil
+}
+
 type InternalBulkHashes500Response struct {
 }
 
@@ -1623,6 +1663,14 @@ type InternalBulkSHA256Validity400Response struct {
 
 func (response InternalBulkSHA256Validity400Response) VisitInternalBulkSHA256ValidityResponse(ctx fiber.Ctx) error {
 	ctx.Status(400)
+	return nil
+}
+
+type InternalBulkSHA256Validity413Response struct {
+}
+
+func (response InternalBulkSHA256Validity413Response) VisitInternalBulkSHA256ValidityResponse(ctx fiber.Ctx) error {
+	ctx.Status(413)
 	return nil
 }
 
