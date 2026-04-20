@@ -94,7 +94,8 @@ data:
 
 ### PostgreSQL schema initialization
 
-Schema initialization is managed by the Helm chart (`helm/syfon/templates/postgres-schema-configmap.yaml` + init Job). This repository does not ship a standalone Postgres init SQL script.
+The server bootstraps the object schema on startup, including the tables and foreign keys needed for cascade delete behavior.
+The Helm chart still provides an init job for deployments that prefer pre-created schema, but it is no longer required for a fresh Postgres database.
 
 ### Health and readiness probes
 

@@ -127,8 +127,8 @@ Detailed configuration reference (including env overrides): [docs/configuration.
 
 ## Gen3/PostgreSQL Schema Initialization
 
-For deployment environments using PostgreSQL, schema initialization is managed by the Helm chart (`helm/syfon/templates/postgres-schema-configmap.yaml` + init Job).
-This repository intentionally does not ship a separate Postgres init SQL script.
+The Postgres backend bootstraps its object tables and required foreign keys on startup.
+The Helm chart still ships an init job for deployments that want pre-provisioned schema, but it is no longer required for local startup.
 
 ## Local Development Workflow
 

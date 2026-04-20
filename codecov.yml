@@ -12,6 +12,11 @@ coverage:
   precision: 2
   round: down
   range: "60...100"
+  ignore:
+    - "apigen"
+    - "tests"
+    - "testutils"
+    - "cmd/openapi-remove-examples"
   status:
     project:
       default:
