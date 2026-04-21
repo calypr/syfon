@@ -1,0 +1,5 @@
+cloud.google.com/go/compute v1.58.0 h1:WQamD8d9Vxu+m5IJBxgUzqsbHxXwx/T7Ol4V5GyVCZE=
+github.com/calypr/syfon/apigen v0.1.4/go.mod h1:2oqNkseovHqbU8kYu4nU+w5VrwhzAj6KfPL7YTBQEGk=
+github.com/calypr/syfon/client v0.1.5/go.mod h1:LA+07PI2ztRlLND0lxOSjgkBm62CT6+02Cc/iBjVPaY=
+github.com/go-openapi/swag v0.23.0 h1:vsEVJDUo2hPJ2tu0/Xc+4noaxyEffXNIs3cOULZ+GrE=
+github.com/oapi-codegen/runtime v1.4.0/go.mod h1:5sw5fxCDmnOzKNYmkVNF8d34kyUeejJEY8HNT2WaPec=
