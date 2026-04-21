@@ -12,14 +12,11 @@ coverage:
   precision: 2
   round: down
   range: "60...100"
-<<<<<<< Updated upstream
-=======
   ignore:
     - "/apigen/"
     - "/tests/endpoints/"
     - "/testutils/"
     - "/cmd/"
->>>>>>> Stashed changes
   status:
     project:
       default:

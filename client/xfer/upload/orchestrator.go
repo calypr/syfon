@@ -33,10 +33,17 @@ func RegisterFile(ctx context.Context, bk UploadBackend, dc MetadataClient, drsO
 	storageID := requestedID
 
 	// 2. Register with DRS server
+	requestedAlias := "id:" + requestedID
+	finalAliases := []string{requestedAlias}
+	if drsObject.Aliases != nil {
+		finalAliases = append(finalAliases, *drsObject.Aliases...)
+	}
+
 	candidates := []drsapi.DrsObjectCandidate{{
 		Name:          drsObject.Name,
 		Size:          drsObject.Size,
 		Checksums:     drsObject.Checksums,
+		Aliases:       &finalAliases,
 		AccessMethods: nil, // Will be filled after upload
 	}}
 	res, err := dc.RegisterObjects(ctx, drsapi.RegisterObjectsJSONRequestBody{
@@ -175,7 +182,7 @@ func RegisterFile(ctx context.Context, bk UploadBackend, dc MetadataClient, drsO
 			Name:      drsObject.Name,
 			Size:      drsObject.Size,
 			Checksums: drsObject.Checksums,
-			Aliases:   &[]string{requestedID},
+			Aliases:   &finalAliases,
 			AccessMethods: &[]drsapi.AccessMethod{{
 				Type:           drsapi.AccessMethodType(pType),
 				AccessUrl:      am.AccessUrl,

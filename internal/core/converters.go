@@ -161,6 +161,15 @@ func CandidateToInternalObject(c drs.DrsObjectCandidate, now time.Time) (models.
 	}
 
 	id := ""
+	if c.Aliases != nil {
+		for _, a := range *c.Aliases {
+			if strings.HasPrefix(a, "id:") {
+				id = strings.TrimPrefix(a, "id:")
+				break
+			}
+		}
+	}
+
 	if id == "" {
 		id = common.MintObjectIDFromChecksum(oid, authzList)
 	}

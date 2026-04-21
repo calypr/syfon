@@ -226,6 +226,9 @@ func (m *MockDatabase) GetS3Credential(ctx context.Context, bucket string) (*mod
 			return &c, nil
 		}
 	}
+	if m.NoDefaultCreds {
+		return nil, nil
+	}
 	return &models.S3Credential{
 		Bucket:    bucket,
 		Provider:  "s3",

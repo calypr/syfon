@@ -26,6 +26,9 @@ func NewPostgresDB(dsn string) (*PostgresDB, error) {
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 	pg := &PostgresDB{db: db}
+	if err := pg.ensureObjectSchema(); err != nil {
+		return nil, err
+	}
 	if err := pg.ensureBucketScopeSchema(); err != nil {
 		return nil, err
 	}
@@ -41,10 +44,20 @@ func NewPostgresDB(dsn string) (*PostgresDB, error) {
 	if err := pg.ensurePendingObjectUsageSchema(); err != nil {
 		return nil, err
 	}
-	if err := pg.ensureObjectAliasSchema(); err != nil {
-		return nil, err
-	}
 	return pg, nil
+}
+
+func (db *PostgresDB) ensureObjectSchema() error {
+	queries, err := objectSchemaStatements()
+	if err != nil {
+		return fmt.Errorf("failed to load object schema: %w", err)
+	}
+	for _, q := range queries {
+		if _, err := db.db.Exec(q); err != nil {
+			return fmt.Errorf("failed to initialize object schema: %w", err)
+		}
+	}
+	return nil
 }
 
 func (db *PostgresDB) ensureS3CredentialSchema() error {
@@ -131,22 +144,6 @@ func (db *PostgresDB) ensurePendingObjectUsageSchema() error {
 	for _, q := range queries {
 		if _, err := db.db.Exec(q); err != nil {
 			return fmt.Errorf("failed to initialize object usage event schema: %w", err)
-		}
-	}
-	return nil
-}
-
-func (db *PostgresDB) ensureObjectAliasSchema() error {
-	queries := []string{
-		`CREATE TABLE IF NOT EXISTS drs_object_alias (
-			alias_id TEXT PRIMARY KEY,
-			object_id TEXT NOT NULL REFERENCES drs_object(id) ON DELETE CASCADE
-		)`,
-		`CREATE INDEX IF NOT EXISTS idx_drs_object_alias_object_id ON drs_object_alias(object_id)`,
-	}
-	for _, q := range queries {
-		if _, err := db.db.Exec(q); err != nil {
-			return fmt.Errorf("failed to initialize object alias schema: %w", err)
 		}
 	}
 	return nil
