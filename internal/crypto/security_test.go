@@ -2,6 +2,7 @@ package crypto
 
 import (
 	"encoding/hex"
+	"encoding/base64"
 	"os"
 	"strings"
 	"testing"
@@ -78,11 +79,13 @@ func TestLocalKeyManager_KeyIDLength(t *testing.T) {
 		os.Unsetenv("DRS_CREDENTIAL_MASTER_KEY")
 	}()
 
-	// Create a test key (32 bytes for AES-256)
-	// 32 bytes => 64 hex chars
-	testKeyHex := "000102030405060708090a0b0c0d0e0f" +
-		"101112131415161718191a1b1c1d1e1f"
-	os.Setenv("DRS_CREDENTIAL_MASTER_KEY", testKeyHex)
+	// Create a test key (32 bytes for AES-256) as base64-encoded
+	testKeyBytes := make([]byte, 32)
+	for i := 0; i < 32; i++ {
+		testKeyBytes[i] = byte(i)
+	}
+	testKeyB64 := base64.StdEncoding.EncodeToString(testKeyBytes)
+	os.Setenv("DRS_CREDENTIAL_MASTER_KEY", testKeyB64)
 	manager := &localKeyManager{}
 
 	// Wrap a data key
