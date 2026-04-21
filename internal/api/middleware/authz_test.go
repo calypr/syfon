@@ -20,6 +20,11 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
+
+func injectDummyPluginManager(m *AuthzMiddleware) {
+	m.pluginManager = &DummyPluginManager{}
+}
+
 func TestLocalModeBasicAuthEnforced(t *testing.T) {
 	m := NewAuthzMiddleware(slog.Default(), "local", "user", "pass")
 	app := fiber.New()
@@ -74,6 +79,7 @@ func TestGen3ModeSetsContextWithoutAuthHeader(t *testing.T) {
 
 func TestGen3ModeMalformedBearerStillPassesToNext(t *testing.T) {
 	m := NewAuthzMiddleware(slog.Default(), "gen3", "", "")
+	injectDummyPluginManager(m)
 	app := fiber.New()
 	app.Use(m.FiberMiddleware())
 	app.Get("/", func(c fiber.Ctx) error {
@@ -475,6 +481,10 @@ func TestAuthzMiddlewareScenarios(t *testing.T) {
 			}
 
 			m := NewAuthzMiddleware(slog.Default(), tc.mode, tc.basicUser, tc.basicPass)
+			// Inject dummy plugin manager for malformed bearer scenario
+			if tc.name == "gen3 malformed bearer" {
+				injectDummyPluginManager(m)
+			}
 			app := fiber.New()
 			handlerCalled := false
 			app.Use(m.FiberMiddleware())

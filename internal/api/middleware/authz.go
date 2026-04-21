@@ -24,16 +24,18 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/sync/singleflight"
+
 )
 
 type AuthzMiddleware struct {
-	logger    *slog.Logger
-	mode      string
-	basicUser string
-	basicPass string
-	mock      mockAuthConfig
-	cache     *authzCache
-	sf        singleflight.Group
+	logger        *slog.Logger
+	mode          string
+	basicUser     string
+	basicPass     string
+	mock          mockAuthConfig
+	cache         *authzCache
+	sf            singleflight.Group
+	pluginManager pluginManagerInterface // interface for testability
 }
 
 type mockAuthConfig struct {
@@ -71,7 +73,7 @@ func NewAuthzMiddleware(logger *slog.Logger, mode, basicUser, basicPass string) 
 	if cfg.Enabled {
 		cache = newAuthzCache(cfg)
 	}
-	return &AuthzMiddleware{
+	m := &AuthzMiddleware{
 		logger:    logger,
 		mode:      strings.ToLower(strings.TrimSpace(mode)),
 		basicUser: basicUser,
@@ -79,6 +81,15 @@ func NewAuthzMiddleware(logger *slog.Logger, mode, basicUser, basicPass string) 
 		mock:      loadMockAuthConfigFromEnv(),
 		cache:     cache,
 	}
+	// TODO: Make plugin path configurable; for now, use default path or env var
+	pluginPath := os.Getenv("SYFON_AUTHZ_PLUGIN_PATH")
+	if pluginPath != "" {
+		pm, err := NewPluginManager(pluginPath)
+		if err == nil {
+		m.pluginManager = pm
+		}
+	}
+	return m
 }
 
 // FiberMiddleware returns a fiber middleware that extracts the token and fetches user info.
@@ -145,13 +156,111 @@ func (m *AuthzMiddleware) handleGen3Auth(c fiber.Ctx, ctx context.Context, authH
 		return c.Next()
 	}
 
-	res := m.resolveTokenAuth(c.Context(), tokenString)
-	if res.negative {
-		c.SetContext(ctx)
-		return c.Next()
+	if m.pluginManager == nil {
+		m.logger.Debug("authorization plugin manager unavailable")
+		return c.SendStatus(fiber.StatusUnauthorized)
 	}
 
-	return m.populateAuthContextAndNext(c, ctx, res.resources, res.privileges)
+	// Extract plugin input fields from request/context
+	input := buildAuthorizationInput(c, ctx, tokenString)
+	output, err := m.pluginManager.Authorize(ctx, input)
+	if err != nil {
+		m.logger.Debug("authorization failed", "error", err)
+		return c.SendStatus(fiber.StatusUnauthorized)
+	}
+	if !output.Allow {
+		return c.SendStatus(fiber.StatusForbidden)
+	}
+
+	// Map plugin output to resources/privileges for context
+	resources, privileges := mapPluginOutputToContext(output)
+	return m.populateAuthContextAndNext(c, ctx, resources, privileges)
+}
+
+// --- Plugin input/output mapping helpers ---
+
+func buildAuthorizationInput(c fiber.Ctx, ctx context.Context, tokenString string) *AuthorizationInput {
+	claims := extractClaimsFromToken(tokenString)
+	return &AuthorizationInput{
+		RequestID: extractRequestID(c),
+		Subject:   extractSubjectFromClaims(claims),
+		Action:    c.Method(),
+		Resource:  c.Path(),
+		Claims:    claims,
+		Metadata:  extractRequestMetadata(c, ctx),
+	}
+}
+
+func extractClaimsFromToken(tokenString string) map[string]interface{} {
+	claims := map[string]interface{}{}
+	token, _ := jwt.Parse(tokenString, nil)
+	if token != nil {
+		if mapClaims, ok := token.Claims.(jwt.MapClaims); ok {
+			for k, v := range mapClaims {
+				claims[k] = v
+			}
+		}
+	}
+	return claims
+}
+
+func extractRequestID(c fiber.Ctx) string {
+	rid := c.Get("X-Request-Id")
+	if rid == "" {
+		if v := c.Locals("requestid"); v != nil {
+			if s, ok := v.(string); ok {
+				rid = s
+			}
+		}
+	}
+	if rid == "" {
+		rid = fmt.Sprintf("req-%d", time.Now().UnixNano())
+	}
+	return rid
+}
+
+func extractSubjectFromClaims(claims map[string]interface{}) string {
+	if sub, ok := claims["sub"].(string); ok {
+		return sub
+	}
+	return ""
+}
+
+func extractRequestMetadata(c fiber.Ctx, ctx context.Context) map[string]interface{} {
+	meta := map[string]interface{}{
+		"ip":         c.IP(),
+		"user_agent": c.Get(fiber.HeaderUserAgent),
+		"host":       c.Hostname(),
+		"url":        c.OriginalURL(),
+	}
+	return meta
+}
+
+func mapPluginOutputToContext(output *AuthorizationOutput) ([]string, map[string]map[string]bool) {
+	resources := []string{}
+	privileges := map[string]map[string]bool{}
+	if output.Obligations != nil {
+		if res, ok := output.Obligations["resources"].([]interface{}); ok {
+			for _, r := range res {
+				if s, ok := r.(string); ok {
+					resources = append(resources, s)
+				}
+			}
+		}
+		if priv, ok := output.Obligations["privileges"].(map[string]interface{}); ok {
+			for res, methods := range priv {
+				if arr, ok := methods.([]interface{}); ok {
+					privileges[res] = map[string]bool{}
+					for _, m := range arr {
+						if ms, ok := m.(string); ok {
+							privileges[res][ms] = true
+						}
+					}
+				}
+			}
+		}
+	}
+	return resources, privileges
 }
 
 func (m *AuthzMiddleware) handleMockAuth(c fiber.Ctx, ctx context.Context) error {
@@ -657,3 +766,8 @@ func (m *AuthzMiddleware) extractPrivileges(privs map[string]any) ([]string, map
 	}
 	return resources, out
 }
+
+type pluginManagerInterface interface {
+	Authorize(ctx context.Context, in *AuthorizationInput) (*AuthorizationOutput, error)
+}
+
