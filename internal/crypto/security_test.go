@@ -79,9 +79,10 @@ func TestLocalKeyManager_KeyIDLength(t *testing.T) {
 	}()
 
 	// Create a test key (32 bytes for AES-256)
-	testKey := "0123456789abcdef0123456789abcdef"
-	os.Setenv("DRS_CREDENTIAL_MASTER_KEY", testKey)
-
+	// 32 bytes => 64 hex chars
+	testKeyHex := "000102030405060708090a0b0c0d0e0f" +
+		"101112131415161718191a1b1c1d1e1f"
+	os.Setenv("DRS_CREDENTIAL_MASTER_KEY", testKeyHex)
 	manager := &localKeyManager{}
 
 	// Wrap a data key
@@ -110,4 +111,3 @@ func TestLocalKeyManager_KeyIDLength(t *testing.T) {
 		t.Errorf("Fingerprint is not valid hex: %v", err)
 	}
 }
-

@@ -210,14 +210,25 @@ func TestJWTSignatureVerification_IssuerAllowlist(t *testing.T) {
 			// Try to parse
 			parser := jwt.NewParser()
 			_, err := parser.ParseWithClaims(tokenString, &jwt.MapClaims{}, func(t *jwt.Token) (interface{}, error) {
-				// In real code, this would check issuer allowlist
-				issuer := t.Claims.(jwt.MapClaims)["iss"].(string)
+				claimsPtr, ok := t.Claims.(*jwt.MapClaims)
+				if !ok || claimsPtr == nil {
+					return nil, fmt.Errorf("unexpected claims type: %T", t.Claims)
+				}
+
+				issAny, ok := (*claimsPtr)["iss"]
+				if !ok {
+					return nil, fmt.Errorf("missing iss claim")
+				}
+				issuer, ok := issAny.(string)
+				if !ok {
+					return nil, fmt.Errorf("iss claim is not a string")
+				}
+
 				if !isIssuerAllowed(issuer) {
 					return nil, fmt.Errorf("issuer not allowed")
 				}
 				return &key.PublicKey, nil
 			})
-
 			if tt.shouldPass && err != nil {
 				t.Errorf("Expected to pass but got error: %v", err)
 			}
@@ -284,4 +295,3 @@ func TestSecurityFix_CRIT1_CompleteCoverage(t *testing.T) {
 	t.Log("  ├─ Issuer allowlist check")
 	t.Log("  └─ Expiration validation")
 }
-
