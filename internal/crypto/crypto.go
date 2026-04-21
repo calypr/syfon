@@ -252,8 +252,13 @@ func localCredentialKeyPath() string {
 	if sqlitePath := strings.TrimSpace(os.Getenv(DatabaseSQLiteFileEnv)); sqlitePath != "" {
 		return filepath.Join(filepath.Dir(sqlitePath), ".syfon-credential-kek")
 	}
-	// SECURITY FIX HIGH-3: Use /app instead of /tmp for better container isolation
-	return "/app/.syfon-credential-kek"
+	if configDir, err := os.UserConfigDir(); err == nil && strings.TrimSpace(configDir) != "" {
+		return filepath.Join(configDir, "syfon", ".syfon-credential-kek")
+	}
+	if homeDir, err := os.UserHomeDir(); err == nil && strings.TrimSpace(homeDir) != "" {
+		return filepath.Join(homeDir, ".config", "syfon", ".syfon-credential-kek")
+	}
+	return ".syfon-credential-kek"
 }
 
 func loadOrCreateLocalCredentialKey() ([]byte, error) {

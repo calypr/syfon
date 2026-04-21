@@ -7,7 +7,9 @@ set -e
 echo "=== Syfon Security Fixes Test Suite ==="
 echo ""
 
-cd ~/calypr/syfon
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$REPO_ROOT"
 
 # Test authentication/authorization fixes (CRIT-1, HIGH-1, HIGH-2)
 echo "[1/5] Testing Authentication & Authorization Fixes (CRIT-1, HIGH-1, HIGH-2)..."
