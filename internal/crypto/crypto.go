@@ -76,9 +76,10 @@ func (m *localKeyManager) WrapDataKey(_ context.Context, dataKey []byte) (*Wrapp
 	}
 	payload := append(nonce, ciphertext...)
 	fingerprint := sha256.Sum256(kek)
+	// SECURITY FIX LOW-2: Use 16 bytes (128-bit) instead of 8 bytes for fingerprint
 	return &WrappedDataKey{
 		Manager:    m.Name(),
-		KeyID:      "local:" + hex.EncodeToString(fingerprint[:8]),
+		KeyID:      "local:" + hex.EncodeToString(fingerprint[:16]),
 		Ciphertext: base64.RawStdEncoding.EncodeToString(payload),
 	}, nil
 }
@@ -251,7 +252,8 @@ func localCredentialKeyPath() string {
 	if sqlitePath := strings.TrimSpace(os.Getenv(DatabaseSQLiteFileEnv)); sqlitePath != "" {
 		return filepath.Join(filepath.Dir(sqlitePath), ".syfon-credential-kek")
 	}
-	return "/tmp/.syfon-credential-kek"
+	// SECURITY FIX HIGH-3: Use /app instead of /tmp for better container isolation
+	return "/app/.syfon-credential-kek"
 }
 
 func loadOrCreateLocalCredentialKey() ([]byte, error) {

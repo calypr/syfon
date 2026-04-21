@@ -105,6 +105,18 @@ type PostgresConfig struct {
 	SSLMode  string `json:"sslmode" yaml:"sslmode"`
 }
 
+// SECURITY FIX MED-1: Redact password when marshaling to JSON
+func (p PostgresConfig) MarshalJSON() ([]byte, error) {
+	type Alias PostgresConfig
+	return json.Marshal(&struct {
+		Password string `json:"password"`
+		*Alias
+	}{
+		Password: "***REDACTED***",
+		Alias: (*Alias)(&p),
+	})
+}
+
 type S3Config struct {
 	Bucket    string `json:"bucket" yaml:"bucket"`
 	Provider  string `json:"provider,omitempty" yaml:"provider,omitempty"`
@@ -112,6 +124,20 @@ type S3Config struct {
 	AccessKey string `json:"access_key" yaml:"access_key"`
 	SecretKey string `json:"secret_key" yaml:"secret_key"`
 	Endpoint  string `json:"endpoint,omitempty" yaml:"endpoint,omitempty"`
+}
+
+// SECURITY FIX MED-1: Redact secret key when marshaling to JSON
+func (s S3Config) MarshalJSON() ([]byte, error) {
+	type Alias S3Config
+	return json.Marshal(&struct {
+		SecretKey string `json:"secret_key"`
+		AccessKey string `json:"access_key"`
+		*Alias
+	}{
+		SecretKey: "***REDACTED***",
+		AccessKey: "***REDACTED***",
+		Alias: (*Alias)(&s),
+	})
 }
 
 type AuthConfig struct {
@@ -127,6 +153,18 @@ const (
 type BasicAuthConfig struct {
 	Username string `json:"username" yaml:"username"`
 	Password string `json:"password" yaml:"password"`
+}
+
+// SECURITY FIX MED-1: Redact password when marshaling to JSON
+func (b BasicAuthConfig) MarshalJSON() ([]byte, error) {
+	type Alias BasicAuthConfig
+	return json.Marshal(&struct {
+		Password string `json:"password"`
+		*Alias
+	}{
+		Password: "***REDACTED***",
+		Alias: (*Alias)(&b),
+	})
 }
 
 type SigningConfig struct {
@@ -281,7 +319,7 @@ func LoadConfig(configFile string) (*Config, error) {
 			cfg.Database.Postgres = &PostgresConfig{
 				Host:    "localhost",
 				Port:    5432,
-				SSLMode: "disable",
+				SSLMode: "require", // SECURITY FIX MED-2: Default to TLS required
 			}
 		}
 		// If env vars specify postgres, we should probably disable the default sqlite if it was still active
@@ -376,6 +414,16 @@ func LoadConfig(configFile string) (*Config, error) {
 	}
 	if (cfg.Auth.Basic.Username == "") != (cfg.Auth.Basic.Password == "") {
 		return nil, fmt.Errorf("both auth.basic.username and auth.basic.password must be set together")
+	}
+
+	// SECURITY FIX HIGH-1: Warn if local auth mode is configured without basic auth
+	if cfg.Auth.Mode == AuthModeLocal && (cfg.Auth.Basic.Username == "" || cfg.Auth.Basic.Password == "") {
+		fmt.Fprintf(os.Stderr, "WARNING: local auth mode configured without basic auth credentials—all endpoints will be unauthenticated and unrestricted. This is only safe for development/testing. Set DRS_BASIC_AUTH_USER and DRS_BASIC_AUTH_PASSWORD to enable basic auth.\n")
+	}
+
+	// SECURITY FIX HIGH-2: Mock auth only allowed in local mode
+	if isMockAuthEnabledFromEnv() && cfg.Auth.Mode != AuthModeLocal {
+		return nil, fmt.Errorf("mock auth (DRS_AUTH_MOCK_ENABLED) is only allowed in local auth mode, not in %q", cfg.Auth.Mode)
 	}
 	if cfg.LFS.MaxBatchObjects < 0 {
 		return nil, fmt.Errorf("lfs.max_batch_objects must be >= 0")

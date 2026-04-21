@@ -473,6 +473,8 @@ func splitCSV(raw string) []string {
 }
 
 func (m *AuthzMiddleware) parseToken(tokenString string) (endpoint string, exp float64, err error) {
+	// Parse token WITHOUT verification first to extract claims
+	// (This is safe here since we only extract the issuer and exp, and validate iss below)
 	parser := jwt.NewParser()
 	claims := jwt.MapClaims{}
 	_, _, err = parser.ParseUnverified(tokenString, claims)
@@ -485,9 +487,19 @@ func (m *AuthzMiddleware) parseToken(tokenString string) (endpoint string, exp f
 		return "", 0, fmt.Errorf("token missing 'iss' claim")
 	}
 
+	// SECURITY FIX: Validate issuer against allowlist to prevent SSRF
+	if !isIssuerAllowed(iss) {
+		return "", 0, fmt.Errorf("token issuer %q not in allowed list", iss)
+	}
+
 	parsedURL, err := url.Parse(iss)
 	if err != nil {
 		return "", 0, fmt.Errorf("failed to parse 'iss' URL: %w", err)
+	}
+
+	// SECURITY FIX: Enforce HTTPS-only for outbound requests
+	if parsedURL.Scheme != "https" {
+		return "", 0, fmt.Errorf("issuer URL must use https scheme, got %q", parsedURL.Scheme)
 	}
 
 	endpoint = fmt.Sprintf("%s://%s", parsedURL.Scheme, parsedURL.Host)
@@ -495,6 +507,22 @@ func (m *AuthzMiddleware) parseToken(tokenString string) (endpoint string, exp f
 	exp, _ = claims["exp"].(float64)
 
 	return endpoint, exp, nil
+}
+
+// isIssuerAllowed checks if an issuer URL is in the allowed list.
+// The allowlist is configured via DRS_ALLOWED_ISSUERS (comma-separated URLs).
+func isIssuerAllowed(iss string) bool {
+	allowlist := splitCSV(os.Getenv("DRS_ALLOWED_ISSUERS"))
+	if len(allowlist) == 0 {
+		// If no allowlist is configured, reject all issuers
+		return false
+	}
+	for _, allowed := range allowlist {
+		if iss == allowed {
+			return true
+		}
+	}
+	return false
 }
 
 func extractBearerLikeToken(authHeader string) (string, error) {

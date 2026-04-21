@@ -203,7 +203,8 @@ func (man *Manager) EnsureExists() error {
 	}
 
 	if _, err := os.Stat(path.Dir(configPath)); os.IsNotExist(err) {
-		osErr := os.Mkdir(path.Join(path.Dir(configPath)), os.FileMode(0777))
+		// SECURITY FIX MED-3: Create directory with 0700 (owner-only) instead of 0777
+		osErr := os.Mkdir(path.Join(path.Dir(configPath)), os.FileMode(0700))
 		if osErr != nil {
 			return err
 		}
