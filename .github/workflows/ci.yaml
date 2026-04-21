@@ -157,8 +157,14 @@ jobs:
             coverage/binary-endpoint.out
             client/coverage/coverage.out
 
-      - name: Run go vet
-        run: go vet ./...
+       - name: Run go vet
+         run: go vet ./...
+
+       - name: Check for Go CVEs - Root module
+         run: govulncheck ./...
+
+       - name: Check for Go CVEs - Client module
+         run: cd client && govulncheck ./...
 
   integration-test:
     name: Docker Integration Test
