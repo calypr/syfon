@@ -42,7 +42,7 @@ if [[ -z "${PKGS}" ]]; then
 fi
 
 cd "${WORK_DIR}"
-go test -count=1 -covermode=atomic -coverprofile "${OUT_FILE}" ${PKGS}
+CGO_ENABLED=1 go test -count=1 -covermode=atomic -coverprofile "${OUT_FILE}" ${PKGS}
 go tool cover -func="${OUT_FILE}" | tee "${OUT_DIR}/coverage.txt"
 go tool cover -html="${OUT_FILE}" -o "${HTML_FILE}"
 

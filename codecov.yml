@@ -17,7 +17,6 @@ coverage:
     - "/tests/endpoints/"
     - "/testutils/"
     - "/cmd/"
-    - "/cmd/openapi-remove-examples/"
   status:
     project:
       default:
@@ -38,4 +37,6 @@ flags:
   root:
     carryforward: true
   client:
+    carryforward: true
+  binary-endpoint:
     carryforward: true

@@ -154,3 +154,92 @@ func TestDataMultipartInitUsesCanonicalUploadId(t *testing.T) {
 		t.Fatalf("unexpected response: guid=%s uploadID=%s", respGuid, uploadID)
 	}
 }
+
+func TestParseBaseURL(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		input   string
+		want    string
+		wantErr bool
+	}{
+		{name: "empty uses default", input: "", want: defaultAddress},
+		{name: "missing scheme", input: "example.test:8080", want: "http://example.test:8080"},
+		{name: "trim trailing slash", input: "https://example.test/root/", want: "https://example.test/root"},
+		{name: "invalid address", input: "http://", wantErr: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseBaseURL(tc.input)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error for %q", tc.input)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parseBaseURL(%q) returned error: %v", tc.input, err)
+			}
+			if got != tc.want {
+				t.Fatalf("parseBaseURL(%q) = %q, want %q", tc.input, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestNewClientDefaultWiring(t *testing.T) {
+	t.Parallel()
+
+	httpClient := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader("")),
+			Header:     make(http.Header),
+		}, nil
+	})}
+
+	raw, err := New("example.test:8080/", WithHTTPClient(httpClient), WithUserAgent("   "), WithBasicAuth("   ", "ignored"))
+	if err != nil {
+		t.Fatalf("New returned error: %v", err)
+	}
+
+	c := raw.(*Client)
+	if c.Address() != "http://example.test:8080" {
+		t.Fatalf("unexpected address: %q", c.Address())
+	}
+	if c.Health() == nil || c.Data() == nil || c.Index() == nil || c.DRS() == nil || c.Buckets() == nil || c.Metrics() == nil || c.LFS() == nil {
+		t.Fatal("expected all service getters to be initialized")
+	}
+	if c.DRSAPI() == nil || c.BucketAPI() == nil || c.InternalAPI() == nil || c.MetricsAPI() == nil || c.LFSAPI() == nil {
+		t.Fatal("expected generated clients to be initialized")
+	}
+	if c.HTTPClient() == http.DefaultClient {
+		t.Fatal("expected request-backed HTTP client, got default client")
+	}
+	if c.Logger() == nil {
+		t.Fatal("expected logger to be initialized")
+	}
+}
+
+func TestNewClientNilConfigAndFallbackHelpers(t *testing.T) {
+	t.Parallel()
+
+	c, err := NewClient(nil)
+	if err != nil {
+		t.Fatalf("NewClient(nil) returned error: %v", err)
+	}
+	if c.Address() != defaultAddress {
+		t.Fatalf("unexpected default address: %q", c.Address())
+	}
+
+	bare := &Client{}
+	if bare.HTTPClient() != http.DefaultClient {
+		t.Fatal("expected default HTTP client fallback")
+	}
+	if bare.Logger() == nil {
+		t.Fatal("expected default logger fallback")
+	}
+}
+
