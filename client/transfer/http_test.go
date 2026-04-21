@@ -58,7 +58,7 @@ func TestDoUploadLocalPathAndFileScheme(t *testing.T) {
 		t.Fatalf("unexpected raw path payload %q", got)
 	}
 
-	fileURL := (&url.URL{Scheme: "file", Path: filepath.Join(tmp, "url", "payload.txt")}).String()
+	fileURL := (&url.URL{Scheme: "file", Path: filepath.ToSlash(filepath.Join(tmp, "url", "payload.txt"))}).String()
 	if _, err := DoUpload(ctx, req, fileURL, strings.NewReader(body), int64(len(body))); err != nil {
 		t.Fatalf("DoUpload file URL returned error: %v", err)
 	}

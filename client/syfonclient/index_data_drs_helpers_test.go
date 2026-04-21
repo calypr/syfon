@@ -73,11 +73,17 @@ func mustDRSClient(t *testing.T, serverURL string) *drsapi.ClientWithResponses {
 
 func writeJSON(t *testing.T, w http.ResponseWriter, status int, v any) {
 	t.Helper()
+
+	var sb strings.Builder
+	if err := json.NewEncoder(&sb).Encode(v); err != nil {
+		t.Errorf("Encode returned error: %v", err)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(v); err != nil {
-		t.Fatalf("Encode returned error: %v", err)
-	}
+	_, _ = io.WriteString(w, sb.String())
 }
 
 func toRecordResponse(rec internalapi.InternalRecord) internalapi.InternalRecordResponse {
