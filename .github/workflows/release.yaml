@@ -242,22 +242,28 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          prev=$(git tag --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sed -n '2p' || true)
+          # Bump cross-module require versions in go.mod files to match the new release.
+          # apigen is consumed by both root and client; client is consumed by root.
+          sed -i "s|github.com/calypr/syfon/apigen v[0-9][^ ]*|github.com/calypr/syfon/apigen ${RELEASE_TAG}|g" go.mod client/go.mod
+          sed -i "s|github.com/calypr/syfon/client v[0-9][^ ]*|github.com/calypr/syfon/client ${RELEASE_TAG}|g" go.mod
+
+          git add go.mod client/go.mod
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: bump cross-module requires to ${RELEASE_TAG} [skip ci]"
+            git push origin HEAD:development
+          fi
+
+          TAG_SHA=$(git rev-parse HEAD)
 
           for prefix in apigen client; do
             subtag="${prefix}/${RELEASE_TAG}"
-
-            if [[ -n "$prev" ]] && git diff --quiet "${prev}" HEAD -- "${prefix}/"; then
-              echo "No changes in ${prefix}/ since ${prev}, skipping ${subtag}"
-              continue
-            fi
 
             if git rev-parse -q --verify "refs/tags/$subtag" >/dev/null; then
               echo "Submodule tag already exists: ${subtag}"
               continue
             fi
 
-            git tag "$subtag"
+            git tag "$subtag" "$TAG_SHA"
             git push origin "$subtag"
-            echo "Tagged ${subtag}"
+            echo "Tagged ${subtag} at $TAG_SHA"
           done
