@@ -1,16 +1,23 @@
 package middleware
 
 import (
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/tls"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/calypr/syfon/internal/authz"
 	"github.com/gofiber/fiber/v3"
+	"github.com/golang-jwt/jwt/v5"
 )
 
 func TestLocalModeBasicAuthEnforced(t *testing.T) {
@@ -89,37 +96,85 @@ func TestGen3ModeMalformedBearerStillPassesToNext(t *testing.T) {
 
 func TestParseToken(t *testing.T) {
 	m := NewAuthzMiddleware(slog.Default(), "gen3", "", "")
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate rsa key: %v", err)
+	}
+
+	kid := "test-kid"
+	jwks := map[string]any{
+		"keys": []map[string]any{
+			{
+				"kty": "RSA",
+				"use": "sig",
+				"kid": kid,
+				"n":   base64.RawURLEncoding.EncodeToString(privateKey.PublicKey.N.Bytes()),
+				"e":   base64.RawURLEncoding.EncodeToString(big.NewInt(int64(privateKey.PublicKey.E)).Bytes()),
+			},
+		},
+	}
+
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/.well-known/jwks.json" {
+			http.NotFound(w, r)
+			return
+		}
+		if err := json.NewEncoder(w).Encode(jwks); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+	}))
+	defer server.Close()
+
+	oldTransport := http.DefaultTransport
+	http.DefaultTransport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
+	defer func() { http.DefaultTransport = oldTransport }()
+
+	issuerOrigin := server.URL
+	t.Setenv("DRS_ALLOWED_ISSUERS", issuerOrigin)
+
+	buildToken := func(claims jwt.MapClaims) string {
+		tok := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+		tok.Header["kid"] = kid
+		s, signErr := tok.SignedString(privateKey)
+		if signErr != nil {
+			t.Fatalf("sign token: %v", signErr)
+		}
+		return s
+	}
 
 	t.Run("valid token extracts endpoint and exp", func(t *testing.T) {
-		header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none","typ":"JWT"}`))
-		payload := base64.RawURLEncoding.EncodeToString([]byte(`{"iss":"https://fence.example.org/user","exp":123.5}`))
-		token := header + "." + payload + "."
+		const farFutureExp = 4102444800.0 // 2100-01-01T00:00:00Z
+		token := buildToken(jwt.MapClaims{
+			"iss": issuerOrigin + "/user",
+			"exp": farFutureExp,
+		})
 
-		endpoint, exp, err := m.parseToken(token)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
+		endpoint, exp, parseErr := m.parseToken(token)
+		if parseErr != nil {
+			t.Fatalf("unexpected error: %v", parseErr)
 		}
-		if endpoint != "https://fence.example.org" {
-			t.Fatalf("expected endpoint https://fence.example.org, got %q", endpoint)
+		if endpoint != issuerOrigin {
+			t.Fatalf("expected endpoint %s, got %q", issuerOrigin, endpoint)
 		}
-		if exp != 123.5 {
-			t.Fatalf("expected exp 123.5, got %v", exp)
+		if exp != farFutureExp {
+			t.Fatalf("expected exp %v, got %v", farFutureExp, exp)
 		}
 	})
 
 	t.Run("missing iss fails", func(t *testing.T) {
-		header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none","typ":"JWT"}`))
-		payload := base64.RawURLEncoding.EncodeToString([]byte(`{"exp":42}`))
-		token := header + "." + payload + "."
-		_, _, err := m.parseToken(token)
-		if err == nil {
+		token := buildToken(jwt.MapClaims{"exp": 42})
+		_, _, parseErr := m.parseToken(token)
+		if parseErr == nil {
 			t.Fatalf("expected parse error for missing iss claim")
+		}
+		if !strings.Contains(parseErr.Error(), "missing or invalid 'iss' claim") {
+			t.Fatalf("unexpected error: %v", parseErr)
 		}
 	})
 
 	t.Run("invalid token fails", func(t *testing.T) {
-		_, _, err := m.parseToken("not-a-token")
-		if err == nil {
+		_, _, parseErr := m.parseToken("not-a-token")
+		if parseErr == nil {
 			t.Fatalf("expected parse error")
 		}
 	})
