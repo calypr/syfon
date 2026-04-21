@@ -29,6 +29,13 @@ case "${SCOPE}" in
     PKGS="$(cd "${ROOT_DIR}" && go list ./...)"
     ;;
   meaningful)
+    # Exclude generated code, test helpers, and all cmd/* subpackages — the latter
+    # are ignored by codecov.yml (/cmd/) so including them skews coverage numbers.
+    PKGS="$(cd "${ROOT_DIR}" && go list ./... | grep -Ev '^github.com/calypr/syfon$|/apigen/|/tests/endpoints|/testutils$|/cmd/')"
+    ;;
+  client)
+    PKGS="./..."
+    ;;
 esac
 
 if [[ -z "${PKGS}" ]]; then
@@ -36,8 +43,9 @@ if [[ -z "${PKGS}" ]]; then
   exit 1
 fi
 
-cd "${ROOT_DIR}"
-go test -count=1 -covermode=atomic -coverprofile "${OUT_FILE}" ${PKGS}go tool cover -func="${OUT_FILE}" | tee "${OUT_DIR}/coverage.txt"
+cd "${WORK_DIR}"
+CGO_ENABLED=1 go test -count=1 -covermode=atomic -coverprofile "${OUT_FILE}" ${PKGS}
+go tool cover -func="${OUT_FILE}" | tee "${OUT_DIR}/coverage.txt"
 go tool cover -html="${OUT_FILE}" -o "${HTML_FILE}"
 
 echo "coverage scope:    ${SCOPE}"
