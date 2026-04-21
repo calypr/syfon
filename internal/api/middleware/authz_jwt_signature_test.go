@@ -14,9 +14,6 @@ import (
 // TestJWTSignatureVerification tests that parseToken properly verifies JWT signatures
 func TestJWTSignatureVerification_ValidSignature(t *testing.T) {
 	// Setup allowed issuer
-	os.Setenv("DRS_ALLOWED_ISSUERS", "https://fence.example.com")
-	defer os.Unsetenv("DRS_ALLOWED_ISSUERS")
-
 	// Generate RSA key pair for signing
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -158,92 +155,11 @@ func TestJWTSignatureVerification_ExpiredToken(t *testing.T) {
 	t.Logf("✓ Expired token correctly rejected: %v", err)
 }
 
-// TestJWTSignatureVerification_IssuerAllowlist tests issuer validation
-func TestJWTSignatureVerification_IssuerAllowlist(t *testing.T) {
-	tests := []struct {
-		name           string
-		allowedIssuers string
-		tokenIss       string
-		shouldPass     bool
-	}{
-		{
-			name:           "allowed issuer",
-			allowedIssuers: "https://fence.example.com",
-			tokenIss:       "https://fence.example.com",
-			shouldPass:     true,
-		},
-		{
-			name:           "disallowed issuer",
-			allowedIssuers: "https://fence.example.com",
-			tokenIss:       "https://attacker.example.com",
-			shouldPass:     false,
-		},
-		{
-			name:           "multiple allowed, first matches",
-			allowedIssuers: "https://fence1.example.com,https://fence2.example.com",
-			tokenIss:       "https://fence1.example.com",
-			shouldPass:     true,
-		},
-		{
-			name:           "http scheme rejected",
-			allowedIssuers: "https://fence.example.com",
-			tokenIss:       "http://fence.example.com",
-			shouldPass:     false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			os.Setenv("DRS_ALLOWED_ISSUERS", tt.allowedIssuers)
-			defer os.Unsetenv("DRS_ALLOWED_ISSUERS")
-
-			key, _ := rsa.GenerateKey(rand.Reader, 2048)
-
-			claims := jwt.MapClaims{
-				"iss": tt.tokenIss,
-				"exp": time.Now().Add(1 * time.Hour).Unix(),
-			}
-
-			token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
-			tokenString, _ := token.SignedString(key)
-
-			// Try to parse
-			parser := jwt.NewParser()
-			_, err := parser.ParseWithClaims(tokenString, &jwt.MapClaims{}, func(t *jwt.Token) (interface{}, error) {
-				claimsPtr, ok := t.Claims.(*jwt.MapClaims)
-				if !ok || claimsPtr == nil {
-					return nil, fmt.Errorf("unexpected claims type: %T", t.Claims)
-				}
-
-				issAny, ok := (*claimsPtr)["iss"]
-				if !ok {
-					return nil, fmt.Errorf("missing iss claim")
-				}
-				issuer, ok := issAny.(string)
-				if !ok {
-					return nil, fmt.Errorf("iss claim is not a string")
-				}
-
-				if !isIssuerAllowed(issuer) {
-					return nil, fmt.Errorf("issuer not allowed")
-				}
-				return &key.PublicKey, nil
-			})
-			if tt.shouldPass && err != nil {
-				t.Errorf("Expected to pass but got error: %v", err)
-			}
-			if !tt.shouldPass && err == nil {
-				t.Errorf("Expected to fail but parsing succeeded")
-			}
-		})
-	}
-}
-
 // TestJWKSCache tests JWKS caching and key retrieval
 func TestJWKSCache_KeyRetrieval(t *testing.T) {
-	cache := NewJWKSCache("https://fence.example.com/.well-known/jwks.json", 15*time.Minute)
+	cache := NewJWKSCache("https://fence.example.com/user/jwt/keys", 15*time.Minute)
 
-	if cache.jwksURL != "https://fence.example.com/.well-known/jwks.json" {
+	if cache.jwksURL != "https://fence.example.com/user/jwt/keys" {
 		t.Errorf("JWKS URL not set correctly")
 	}
 
@@ -277,8 +193,8 @@ func TestSecurityFix_CRIT1_CompleteCoverage(t *testing.T) {
 	t.Log("✓ 2. KID extraction and validation")
 	t.Log("✓ 3. Algorithm whitelist (RS256, RS384, RS512 only)")
 	t.Log("✓ 4. Rejection of 'none' algorithm")
-	t.Log("✓ 5. Issuer allowlist validation")
-	t.Log("✓ 6. HTTPS-only enforcement for JWKS endpoints")
+	t.Log("✓ 5. HTTPS-only issuer enforcement")
+	t.Log("✓ 6. Public key fetch from Fence /user/jwt/keys endpoint")
 	t.Log("✓ 7. Public key caching via JWKS")
 	t.Log("✓ 8. Token expiration validation")
 
@@ -292,6 +208,6 @@ func TestSecurityFix_CRIT1_CompleteCoverage(t *testing.T) {
 	t.Log("  ├─ Cryptographic signature verification")
 	t.Log("  ├─ Public key validation via JWKS")
 	t.Log("  ├─ Algorithm enforcement")
-	t.Log("  ├─ Issuer allowlist check")
+	t.Log("  ├─ HTTPS-only issuer enforcement")
 	t.Log("  └─ Expiration validation")
 }

@@ -6,10 +6,10 @@ import (
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
+	"log/slog"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 
@@ -41,7 +41,7 @@ func TestParseToken_IssuerAllowlistValidation(t *testing.T) {
 	}
 
 	httpsJWKS := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/.well-known/jwks.json" {
+		if r.URL.Path != "/user/jwt/keys" {
 			http.NotFound(w, r)
 			return
 		}
@@ -50,7 +50,7 @@ func TestParseToken_IssuerAllowlistValidation(t *testing.T) {
 	defer httpsJWKS.Close()
 
 	httpJWKS := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/.well-known/jwks.json" {
+		if r.URL.Path != "/user/jwt/keys" {
 			http.NotFound(w, r)
 			return
 		}
@@ -72,61 +72,31 @@ func TestParseToken_IssuerAllowlistValidation(t *testing.T) {
 	httpOrigin := httpJWKS.URL
 
 	tests := []struct {
-		name           string
-		allowedIssuers string
-		issuerClaim    string
-		expUnix        int64
-		wantErr        bool
-		errContains    string
-		wantEndpoint   string
+		name         string
+		issuerClaim  string
+		expUnix      int64
+		wantErr      bool
+		errContains  string
+		wantEndpoint string
 	}{
 		{
-			name:           "valid issuer with path in token matches allowlist origin",
-			allowedIssuers: httpsOrigin,
-			issuerClaim:    httpsOrigin + "/user",
-			expUnix:        1893456000,
-			wantEndpoint:   httpsOrigin,
+			name:         "valid https issuer with path — endpoint is normalized origin",
+			issuerClaim:  httpsOrigin + "/user",
+			expUnix:      1893456000,
+			wantEndpoint: httpsOrigin,
 		},
 		{
-			name:           "issuer not in allowlist",
-			allowedIssuers: httpsOrigin,
-			issuerClaim:    "https://attacker.example.com/user",
-			expUnix:        1893456000,
-			wantErr:        true,
-			errContains:    "not in allowed list",
-		},
-		{
-			name:           "http scheme rejected by jwks https enforcement",
-			allowedIssuers: httpOrigin,
-			issuerClaim:    httpOrigin + "/user",
-			expUnix:        1893456000,
-			wantErr:        true,
-			errContains:    "must use HTTPS",
-		},
-		{
-			name:           "empty allowlist rejects all",
-			allowedIssuers: "",
-			issuerClaim:    httpsOrigin,
-			expUnix:        1893456000,
-			wantErr:        true,
-			errContains:    "not in allowed list",
+			name:        "http issuer rejected — must use HTTPS",
+			issuerClaim: httpOrigin + "/user",
+			expUnix:     1893456000,
+			wantErr:     true,
+			errContains: "must use HTTPS",
 		},
 	}
 
-	m := &AuthzMiddleware{}
+	m := NewAuthzMiddleware(slog.Default(), "gen3", "", "")
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			oldEnv := os.Getenv("DRS_ALLOWED_ISSUERS")
-			defer func() {
-				if oldEnv == "" {
-					_ = os.Unsetenv("DRS_ALLOWED_ISSUERS")
-					return
-				}
-				_ = os.Setenv("DRS_ALLOWED_ISSUERS", oldEnv)
-			}()
-
-			_ = os.Setenv("DRS_ALLOWED_ISSUERS", tt.allowedIssuers)
-
 			tokenString := buildTokenWithClaims(jwt.MapClaims{
 				"iss": tt.issuerClaim,
 				"exp": tt.expUnix,
@@ -156,16 +126,6 @@ func TestParseToken_IssuerAllowlistValidation(t *testing.T) {
 	}
 
 	t.Run("malformed iss claim rejects token", func(t *testing.T) {
-		oldEnv := os.Getenv("DRS_ALLOWED_ISSUERS")
-		defer func() {
-			if oldEnv == "" {
-				_ = os.Unsetenv("DRS_ALLOWED_ISSUERS")
-				return
-			}
-			_ = os.Setenv("DRS_ALLOWED_ISSUERS", oldEnv)
-		}()
-		_ = os.Setenv("DRS_ALLOWED_ISSUERS", httpsOrigin)
-
 		tokenString := buildTokenWithClaims(jwt.MapClaims{
 			"iss": 12345,
 			"exp": int64(1893456000),
@@ -187,108 +147,37 @@ func TestParseToken_IssuerAllowlistValidation(t *testing.T) {
 	})
 }
 
-func TestIsIssuerAllowed(t *testing.T) {
+func TestNormalizeIssuerOrigin(t *testing.T) {
 	tests := []struct {
-		name           string
-		allowedIssuers string
-		testIssuer     string
-		want           bool
+		name    string
+		input   string
+		want    string
+		wantErr bool
 	}{
-		{
-			name:           "exact match",
-			allowedIssuers: "https://fence.example.com",
-			testIssuer:     "https://fence.example.com",
-			want:           true,
-		},
-		{
-			name:           "no match",
-			allowedIssuers: "https://fence.example.com",
-			testIssuer:     "https://other.example.com",
-			want:           false,
-		},
-		{
-			name:           "multiple issuers - first matches",
-			allowedIssuers: "https://fence1.example.com,https://fence2.example.com",
-			testIssuer:     "https://fence1.example.com",
-			want:           true,
-		},
-		{
-			name:           "multiple issuers - second matches",
-			allowedIssuers: "https://fence1.example.com,https://fence2.example.com",
-			testIssuer:     "https://fence2.example.com",
-			want:           true,
-		},
-		{
-			name:           "empty allowlist",
-			allowedIssuers: "",
-			testIssuer:     "https://fence.example.com",
-			want:           false,
-		},
-		{
-			name:           "whitespace handling",
-			allowedIssuers: "https://fence1.example.com , https://fence2.example.com ",
-			testIssuer:     "https://fence2.example.com",
-			want:           true,
-		},
-		{
-			name:           "issuer path matches allowlist origin",
-			allowedIssuers: "https://fence.example.com",
-			testIssuer:     "https://fence.example.com/user",
-			want:           true,
-		},
-		{
-			name:           "allowlist path matches issuer origin",
-			allowedIssuers: "https://fence.example.com/user",
-			testIssuer:     "https://fence.example.com",
-			want:           true,
-		},
-		{
-			name:           "trailing slash ignored for origin match",
-			allowedIssuers: "https://fence.example.com/",
-			testIssuer:     "https://fence.example.com",
-			want:           true,
-		},
-		{
-			name:           "query and fragment ignored for origin match",
-			allowedIssuers: "https://fence.example.com",
-			testIssuer:     "https://fence.example.com/user?x=1#frag",
-			want:           true,
-		},
-		{
-			name:           "host case-insensitive match",
-			allowedIssuers: "https://FENCE.EXAMPLE.COM",
-			testIssuer:     "https://fence.example.com/user",
-			want:           true,
-		},
-		{
-			name:           "different host still rejected",
-			allowedIssuers: "https://fence.example.com",
-			testIssuer:     "https://evil.example.com/user",
-			want:           false,
-		},
-		{
-			name:           "invalid allowlist entries are ignored",
-			allowedIssuers: "not-a-url,https://fence.example.com/path",
-			testIssuer:     "https://fence.example.com",
-			want:           true,
-		},
+		{name: "bare origin", input: "https://fence.example.com", want: "https://fence.example.com"},
+		{name: "path stripped", input: "https://fence.example.com/user", want: "https://fence.example.com"},
+		{name: "path and query stripped", input: "https://fence.example.com/user?x=1#frag", want: "https://fence.example.com"},
+		{name: "trailing slash stripped", input: "https://fence.example.com/", want: "https://fence.example.com"},
+		{name: "host lowercased", input: "https://FENCE.EXAMPLE.COM", want: "https://fence.example.com"},
+		{name: "scheme lowercased", input: "HTTPS://fence.example.com", want: "https://fence.example.com"},
+		{name: "missing scheme errors", input: "fence.example.com", wantErr: true},
+		{name: "missing host errors", input: "https://", wantErr: true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			oldEnv := os.Getenv("DRS_ALLOWED_ISSUERS")
-			defer func() {
-				if oldEnv != "" {
-					os.Setenv("DRS_ALLOWED_ISSUERS", oldEnv)
-				} else {
-					os.Unsetenv("DRS_ALLOWED_ISSUERS")
+			got, err := normalizeIssuerOrigin(tt.input)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got %q", got)
 				}
-			}()
-
-			os.Setenv("DRS_ALLOWED_ISSUERS", tt.allowedIssuers)
-			got := isIssuerAllowed(tt.testIssuer)
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
 			if got != tt.want {
-				t.Errorf("isIssuerAllowed(%q) = %v, want %v", tt.testIssuer, got, tt.want)
+				t.Errorf("normalizeIssuerOrigin(%q) = %q, want %q", tt.input, got, tt.want)
 			}
 		})
 	}

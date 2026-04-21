@@ -115,7 +115,7 @@ func TestParseToken(t *testing.T) {
 	}
 
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/.well-known/jwks.json" {
+		if r.URL.Path != "/user/jwt/keys" {
 			http.NotFound(w, r)
 			return
 		}
@@ -130,7 +130,6 @@ func TestParseToken(t *testing.T) {
 	defer func() { http.DefaultTransport = oldTransport }()
 
 	issuerOrigin := server.URL
-	t.Setenv("DRS_ALLOWED_ISSUERS", issuerOrigin)
 
 	buildToken := func(claims jwt.MapClaims) string {
 		tok := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
