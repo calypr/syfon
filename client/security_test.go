@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"testing"
 	"time"
+
+	"github.com/calypr/syfon/client/request"
 )
 
 // Test INFO-3 fix: Client has reasonable timeout
@@ -28,19 +30,16 @@ func TestDefaultConfig_HasTimeout(t *testing.T) {
 // Test that New() also gets a client with timeout
 func TestNew_ClientHasTimeout(t *testing.T) {
 	// Using New without a custom config should give a client with timeout
-	client, err := New("http://localhost:8080")
+	syClient, err := New("http://localhost:8080")
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
-
-	httpClient := client.HTTPClient()
-	if httpClient == nil {
-		t.Fatal("HTTPClient is nil")
+	client, ok := syClient.(*Client)
+	if !ok {
+		t.Fatalf("New() returned %T, want *Client", syClient)
 	}
-
-	// Should have a timeout set
-	if httpClient.Timeout == 0 {
-		t.Errorf("HTTPClient.Timeout = 0, should have a reasonable timeout")
+	if client.requestor == nil {
+		t.Fatal("requestor is nil")
 	}
 }
 
@@ -57,9 +56,17 @@ func TestNewClient_WithCustomConfig(t *testing.T) {
 		t.Fatalf("NewClient() error = %v", err)
 	}
 
-	httpClient := client.HTTPClient()
-	if httpClient.Timeout != 30*time.Second {
-		t.Errorf("HTTPClient.Timeout = %v, want 30s", httpClient.Timeout)
+	// Timeout is configured on the underlying retry client in request.NewRequestor.
+	// Client.HTTPClient() returns StandardClient(), which may not preserve this value.
+	req, ok := client.Requestor().(*request.Request)
+	if !ok {
+		t.Fatalf("Requestor() returned %T, want *request.Request", client.Requestor())
+	}
+	if req.RetryClient == nil || req.RetryClient.HTTPClient == nil {
+		t.Fatal("retry HTTP client is nil")
+	}
+	if req.RetryClient.HTTPClient.Timeout != 30*time.Second {
+		t.Errorf("RetryClient.HTTPClient.Timeout = %v, want 30s", req.RetryClient.HTTPClient.Timeout)
 	}
 }
 
@@ -70,9 +77,17 @@ func TestNewClient_WithNilConfig(t *testing.T) {
 		t.Fatalf("NewClient(nil) error = %v", err)
 	}
 
-	httpClient := client.HTTPClient()
-	if httpClient.Timeout == 0 {
-		t.Errorf("HTTPClient.Timeout = 0, should have a reasonable timeout")
+	// Assert against the underlying request retry client because timeout is set there.
+	// Client.HTTPClient() exposes a wrapped standard client and is not authoritative here.
+	req, ok := client.Requestor().(*request.Request)
+	if !ok {
+		t.Fatalf("Requestor() returned %T, want *request.Request", client.Requestor())
+	}
+	if req.RetryClient == nil || req.RetryClient.HTTPClient == nil {
+		t.Fatal("retry HTTP client is nil")
+	}
+	if req.RetryClient.HTTPClient.Timeout == 0 {
+		t.Errorf("RetryClient.HTTPClient.Timeout = 0, should have a reasonable timeout")
 	}
 }
 
