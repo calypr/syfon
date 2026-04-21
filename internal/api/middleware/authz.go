@@ -473,36 +473,87 @@ func splitCSV(raw string) []string {
 }
 
 func (m *AuthzMiddleware) parseToken(tokenString string) (endpoint string, exp float64, err error) {
-	// Parse token WITHOUT verification first to extract claims
-	// (This is safe here since we only extract the issuer and exp, and validate iss below)
-	parser := jwt.NewParser()
-	claims := jwt.MapClaims{}
-	_, _, err = parser.ParseUnverified(tokenString, claims)
+	// SECURITY FIX CRIT-1: Verify JWT signature cryptographically
+	// This is the PRIMARY defense against token forgery attacks
+
+	// 1. Parse the JWT header to get KID and ISS claim
+	parser := jwt.NewParser(jwt.WithValidMethods([]string{"RS256", "RS384", "RS512"}))
+	var claims jwt.MapClaims
+
+	token, err := parser.ParseWithClaims(tokenString, &claims, func(token *jwt.Token) (interface{}, error) {
+		// CRITICAL: Verify the signing method is RSA (not "none" or symmetric)
+		if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v (expected RSA)", token.Header["alg"])
+		}
+
+		// Extract KID from header
+		kid, ok := token.Header["kid"].(string)
+		if !ok || kid == "" {
+			return nil, fmt.Errorf("missing KID in token header")
+		}
+
+		// Extract ISS claim to determine which JWKS endpoint to use
+		iss, ok := claims["iss"].(string)
+		if !ok || iss == "" {
+			return nil, fmt.Errorf("missing or invalid 'iss' claim in token")
+		}
+
+		origin, err := normalizeIssuerOrigin(iss)
+		if err != nil {
+			return nil, fmt.Errorf("invalid issuer URL: %w", err)
+		}
+
+		// SECURITY FIX: Validate issuer against allowlist BEFORE fetching keys.
+		// Matching is done on normalized origin (scheme://host), not raw iss text.
+		if !isIssuerAllowed(origin) {
+			return nil, fmt.Errorf("issuer %q not in allowed list", iss)
+		}
+
+		// SECURITY FIX: Enforce HTTPS-only for JWKS fetching
+		jwksURL := origin + "/.well-known/jwks.json"
+		if !strings.HasPrefix(jwksURL, "https://") {
+			return nil, fmt.Errorf("JWKS endpoint must use HTTPS, got: %s", jwksURL)
+		}
+
+		// Fetch and cache JWKS keys
+		cache := NewJWKSCache(jwksURL, 15*time.Minute)
+		if err := cache.FetchKeys(); err != nil {
+			return nil, fmt.Errorf("fetch JWKS: %w", err)
+		}
+
+		// Get the public key for this KID
+		publicKey, err := cache.GetKey(kid)
+		if err != nil {
+			return nil, fmt.Errorf("key not found in JWKS (kid=%s): %w", kid, err)
+		}
+
+		return publicKey, nil
+	})
+
 	if err != nil {
-		return "", 0, fmt.Errorf("failed to parse token: %w", err)
+		return "", 0, fmt.Errorf("JWT signature verification failed: %w", err)
 	}
 
+	// Verify the token is valid
+	if !token.Valid {
+		return "", 0, fmt.Errorf("invalid token")
+	}
+
+	// Extract claims after successful verification
 	iss, ok := claims["iss"].(string)
 	if !ok || iss == "" {
-		return "", 0, fmt.Errorf("token missing 'iss' claim")
+		return "", 0, fmt.Errorf("missing 'iss' claim")
 	}
 
-	// SECURITY FIX: Validate issuer against allowlist to prevent SSRF
-	if !isIssuerAllowed(iss) {
-		return "", 0, fmt.Errorf("token issuer %q not in allowed list", iss)
-	}
-
-	parsedURL, err := url.Parse(iss)
+	origin, err := normalizeIssuerOrigin(iss)
 	if err != nil {
-		return "", 0, fmt.Errorf("failed to parse 'iss' URL: %w", err)
+		return "", 0, fmt.Errorf("failed to normalize issuer URL: %w", err)
+	}
+	if !strings.HasPrefix(origin, "https://") {
+		return "", 0, fmt.Errorf("issuer URL must use https scheme, got %q", iss)
 	}
 
-	// SECURITY FIX: Enforce HTTPS-only for outbound requests
-	if parsedURL.Scheme != "https" {
-		return "", 0, fmt.Errorf("issuer URL must use https scheme, got %q", parsedURL.Scheme)
-	}
-
-	endpoint = fmt.Sprintf("%s://%s", parsedURL.Scheme, parsedURL.Host)
+	endpoint = origin
 
 	exp, _ = claims["exp"].(float64)
 
@@ -512,17 +563,37 @@ func (m *AuthzMiddleware) parseToken(tokenString string) (endpoint string, exp f
 // isIssuerAllowed checks if an issuer URL is in the allowed list.
 // The allowlist is configured via DRS_ALLOWED_ISSUERS (comma-separated URLs).
 func isIssuerAllowed(iss string) bool {
+	issuerOrigin, err := normalizeIssuerOrigin(iss)
+	if err != nil {
+		return false
+	}
+
 	allowlist := splitCSV(os.Getenv("DRS_ALLOWED_ISSUERS"))
 	if len(allowlist) == 0 {
 		// If no allowlist is configured, reject all issuers
 		return false
 	}
 	for _, allowed := range allowlist {
-		if iss == allowed {
+		allowedOrigin, err := normalizeIssuerOrigin(allowed)
+		if err != nil {
+			continue
+		}
+		if issuerOrigin == allowedOrigin {
 			return true
 		}
 	}
 	return false
+}
+
+func normalizeIssuerOrigin(raw string) (string, error) {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return "", err
+	}
+	if u.Scheme == "" || u.Host == "" {
+		return "", fmt.Errorf("issuer must include scheme and host")
+	}
+	return strings.ToLower(u.Scheme) + "://" + strings.ToLower(u.Host), nil
 }
 
 func extractBearerLikeToken(authHeader string) (string, error) {
