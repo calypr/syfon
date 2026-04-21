@@ -62,7 +62,9 @@ func (f *fakeBackend) GetReader(ctx context.Context, guid string) (io.ReadCloser
 }
 
 func (f *fakeBackend) GetRangeReader(ctx context.Context, guid string, offset, length int64) (io.ReadCloser, error) {
+	f.mu.Lock()
 	f.rangeCalls = append(f.rangeCalls, [2]int64{offset, length})
+	f.mu.Unlock()
 	if f.rangeIgnoredOnce {
 		f.rangeIgnoredOnce = false
 		return nil, transfer.ErrRangeIgnored
@@ -372,10 +374,13 @@ func TestGenericDownloaderDownloadAndParallel(t *testing.T) {
 	d := &GenericDownloader{Backend: backend}
 	dst := filepath.Join(t.TempDir(), "parallel.bin")
 
+	var eventsMu sync.Mutex
 	var events []common.ProgressEvent
 	ctx := common.WithOid(context.Background(), "parallel-oid")
 	ctx = common.WithProgress(ctx, func(ev common.ProgressEvent) error {
+		eventsMu.Lock()
 		events = append(events, ev)
+		eventsMu.Unlock()
 		return nil
 	})
 
