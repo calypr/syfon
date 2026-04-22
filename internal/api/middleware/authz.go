@@ -27,6 +27,10 @@ import (
 
 )
 
+type authenticationPluginManagerInterface interface {
+	Authenticate(ctx context.Context, in *AuthenticationInput) (*AuthenticationOutput, error)
+}
+
 type AuthzMiddleware struct {
 	logger        *slog.Logger
 	mode          string
@@ -36,6 +40,7 @@ type AuthzMiddleware struct {
 	cache         *authzCache
 	sf            singleflight.Group
 	pluginManager pluginManagerInterface // interface for testability
+	authnPluginManager authenticationPluginManagerInterface // authentication plugin (interface)
 }
 
 type mockAuthConfig struct {
@@ -89,6 +94,14 @@ func NewAuthzMiddleware(logger *slog.Logger, mode, basicUser, basicPass string) 
 		m.pluginManager = pm
 		}
 	}
+	// Authentication plugin
+	authnPluginPath := os.Getenv("SYFON_AUTHN_PLUGIN_PATH")
+	if authnPluginPath != "" {
+		apm, err := NewAuthenticationPluginManager(authnPluginPath)
+		if err == nil {
+			m.authnPluginManager = apm
+		}
+	}
 	return m
 }
 
@@ -110,6 +123,22 @@ func (m *AuthzMiddleware) prepareRequestContext(c fiber.Ctx) (context.Context, s
 }
 
 func (m *AuthzMiddleware) handleLocalAuth(c fiber.Ctx, ctx context.Context, authHeader string) error {
+	if m.authnPluginManager != nil {
+		input := &AuthenticationInput{
+			RequestID: extractRequestID(c),
+			AuthHeader: authHeader,
+			Metadata: extractRequestMetadata(c, ctx),
+		}
+		output, err := m.authnPluginManager.Authenticate(ctx, input)
+		if err != nil || !output.Authenticated {
+			c.Set(fiber.HeaderWWWAuthenticate, `Basic realm="syfon"`)
+			return c.SendStatus(fiber.StatusUnauthorized)
+		}
+		// Optionally set subject/claims in context here
+		c.SetContext(ctx)
+		return c.Next()
+	}
+	// Fallback to built-in logic if no plugin
 	if m.basicUser != "" || m.basicPass != "" {
 		if err := validateBasicAuth(authHeader, m.basicUser, m.basicPass); err != nil {
 			c.Set(fiber.HeaderWWWAuthenticate, `Basic realm="syfon"`)
@@ -142,6 +171,21 @@ func validateBasicAuth(authHeader, expectedUser, expectedPass string) error {
 func (m *AuthzMiddleware) handleGen3Auth(c fiber.Ctx, ctx context.Context, authHeader string) error {
 	if m.mock.Enabled {
 		return m.handleMockAuth(c, ctx)
+	}
+	if m.authnPluginManager != nil {
+		input := &AuthenticationInput{
+			RequestID: extractRequestID(c),
+			AuthHeader: authHeader,
+			Metadata: extractRequestMetadata(c, ctx),
+		}
+		output, err := m.authnPluginManager.Authenticate(ctx, input)
+		if err != nil || !output.Authenticated {
+			m.logger.Debug("authentication failed", "error", err)
+			return c.SendStatus(fiber.StatusUnauthorized)
+		}
+		// Optionally set subject/claims in context here
+		c.SetContext(ctx)
+		return c.Next()
 	}
 	if authHeader == "" {
 		c.SetContext(ctx)

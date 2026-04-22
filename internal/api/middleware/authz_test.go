@@ -18,11 +18,31 @@ import (
 	"github.com/calypr/syfon/internal/authz"
 	"github.com/gofiber/fiber/v3"
 	"github.com/golang-jwt/jwt/v5"
+	"context"
 )
 
 
 func injectDummyPluginManager(m *AuthzMiddleware) {
 	m.pluginManager = &DummyPluginManager{}
+}
+
+func injectDummyAuthenticationPluginManager(m *AuthzMiddleware, authenticated bool) {
+	m.authnPluginManager = &DummyAuthenticationPluginManager{
+		Authenticated: authenticated,
+	}
+}
+
+// DummyAuthenticationPluginManager implements authenticationPluginManagerInterface for testing.
+type DummyAuthenticationPluginManager struct {
+	Authenticated bool
+}
+
+func (d *DummyAuthenticationPluginManager) Authenticate(ctx context.Context, in *AuthenticationInput) (*AuthenticationOutput, error) {
+	return &AuthenticationOutput{
+		Authenticated: d.Authenticated,
+		Subject:       "dummy",
+		Claims:        map[string]interface{}{"role": "test"},
+	}, nil
 }
 
 func TestLocalModeBasicAuthEnforced(t *testing.T) {
@@ -472,6 +492,46 @@ func TestAuthzMiddlewareScenarios(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "local authn plugin allows access",
+			mode: "local",
+			env: map[string]string{
+				"DRS_AUTHN_PLUGIN_ENABLED": "true",
+			},
+			wantStatus: http.StatusOK,
+			assert: func(t *testing.T, c fiber.Ctx) {
+				if authz.IsGen3Mode(c.Context()) {
+					t.Fatalf("did not expect gen3 mode in local auth")
+				}
+				if authz.HasAuthHeader(c.Context()) {
+					t.Fatalf("did not expect auth header presence in local auth")
+				}
+			},
+		},
+		{
+			name: "local authn plugin denies access",
+			mode: "local",
+			env: map[string]string{
+				"DRS_AUTHN_PLUGIN_ENABLED": "true",
+			},
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name: "gen3 authn plugin allows access",
+			mode: "gen3",
+			env: map[string]string{
+				"DRS_AUTHN_PLUGIN_ENABLED": "true",
+			},
+			wantStatus: http.StatusOK,
+		},
+		{
+			name: "gen3 authn plugin denies access",
+			mode: "gen3",
+			env: map[string]string{
+				"DRS_AUTHN_PLUGIN_ENABLED": "true",
+			},
+			wantStatus: http.StatusUnauthorized,
+		},
 	}
 
 	for _, tc := range cases {
@@ -484,6 +544,13 @@ func TestAuthzMiddlewareScenarios(t *testing.T) {
 			// Inject dummy plugin manager for malformed bearer scenario
 			if tc.name == "gen3 malformed bearer" {
 				injectDummyPluginManager(m)
+			}
+			// Inject dummy authn plugin manager for authn plugin scenarios
+			if strings.HasPrefix(tc.name, "local authn") {
+				injectDummyAuthenticationPluginManager(m, strings.HasSuffix(tc.name, "allows access"))
+			}
+			if strings.HasPrefix(tc.name, "gen3 authn") {
+				injectDummyAuthenticationPluginManager(m, strings.HasSuffix(tc.name, "allows access"))
 			}
 			app := fiber.New()
 			handlerCalled := false

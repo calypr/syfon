@@ -32,6 +32,88 @@ type AuthorizationPlugin interface {
 	Authorize(ctx context.Context, in *AuthorizationInput) (*AuthorizationOutput, error)
 }
 
+// AuthenticationInput is the request sent to the plugin for authentication.
+type AuthenticationInput struct {
+	RequestID string
+	AuthHeader string
+	Metadata  map[string]interface{}
+}
+
+// AuthenticationOutput is the plugin's response.
+type AuthenticationOutput struct {
+	Authenticated bool
+	Subject       string
+	Claims        map[string]interface{}
+	Reason        string
+}
+
+// AuthenticationPlugin is the interface plugins must implement.
+type AuthenticationPlugin interface {
+	Authenticate(ctx context.Context, in *AuthenticationInput) (*AuthenticationOutput, error)
+}
+
+// AuthenticationPluginManager manages the plugin process and calls Authenticate.
+type AuthenticationPluginManager struct {
+	client *PluginClient
+}
+
+// NewAuthenticationPluginManager loads the plugin binary and returns a manager.
+func NewAuthenticationPluginManager(pluginPath string) (*AuthenticationPluginManager, error) {
+	client := plugin.NewClient(&plugin.ClientConfig{
+		HandshakeConfig: Handshake,
+		Plugins: map[string]plugin.Plugin{
+			"authn": &AuthnPluginRPC{},
+		},
+		Cmd:              exec.Command(pluginPath),
+		AllowedProtocols: []plugin.Protocol{plugin.ProtocolNetRPC},
+	})
+
+	rpcClient, err := client.Client()
+	if err != nil {
+		return nil, err
+	}
+
+	raw, err := rpcClient.Dispense("authn")
+	if err != nil {
+		return nil, err
+	}
+
+	return &AuthenticationPluginManager{client: &PluginClient{client: client, raw: raw}}, nil
+}
+
+// Authenticate delegates to the plugin.
+func (pm *AuthenticationPluginManager) Authenticate(ctx context.Context, in *AuthenticationInput) (*AuthenticationOutput, error) {
+	pm.client.mu.Lock()
+	defer pm.client.mu.Unlock()
+	pluginImpl, ok := pm.client.raw.(AuthenticationPlugin)
+	if !ok {
+		return nil, os.ErrInvalid
+	}
+	return pluginImpl.Authenticate(ctx, in)
+}
+
+// AuthnPluginRPC is the plugin.Plugin implementation for go-plugin.
+type AuthnPluginRPC struct{ plugin.Plugin }
+
+func (p *AuthnPluginRPC) Server(*plugin.MuxBroker) (interface{}, error) {
+	return nil, nil // Not used in client
+}
+func (p *AuthnPluginRPC) Client(b *plugin.MuxBroker, c *rpc.Client) (interface{}, error) {
+	return &AuthnRPC{client: c}, nil
+}
+
+// AuthnRPC implements AuthenticationPlugin over RPC.
+type AuthnRPC struct {
+	client *rpc.Client
+}
+
+func (a *AuthnRPC) Authenticate(ctx context.Context, in *AuthenticationInput) (*AuthenticationOutput, error) {
+	var out AuthenticationOutput
+	err := a.client.Call("Plugin.Authenticate", in, &out)
+	return &out, err
+}
+
+
 // Plugin handshake config for go-plugin
 var Handshake = plugin.HandshakeConfig{
 	ProtocolVersion:  1,
