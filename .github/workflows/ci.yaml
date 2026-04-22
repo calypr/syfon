@@ -27,13 +27,6 @@ jobs:
       - name: Check out code
         uses: actions/checkout@v4
 
-      - name: Build plugin binaries (local_auth_plugin and gen3_auth_plugin)
-        run: |
-          mkdir -p bin
-          go build -o bin/local_auth_plugin ./bin/local_auth_plugin
-          go build -o bin/gen3_auth_plugin ./bin/gen3_auth_plugin
-        shell: bash
-
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
