@@ -53,7 +53,7 @@ LDFLAGS     := -X github.com/calypr/syfon/internal/version.Version=$(GIT_VERSION
                -X github.com/calypr/syfon/internal/version.GitUpstream=$(GIT_UPSTREAM)
 
 .PHONY: build
-build: gen
+build:
 	CGO_ENABLED=1 GOCACHE="$(GOCACHE)" go build -ldflags "$(LDFLAGS)" -o syfon .
 
 .PHONY: install
