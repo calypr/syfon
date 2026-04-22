@@ -74,6 +74,10 @@ jobs:
         run: make build-plugins
         shell: bash
 
+      - name: Verify Security Tests
+        run: ./scripts/run-security-tests.sh
+        shell: bash
+
       - name: Upload binary endpoint coverage to Codecov (OIDC)
         id: codecov_binary_endpoint_oidc
         continue-on-error: true
