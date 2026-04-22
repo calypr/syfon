@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/calypr/syfon/apigen/server/lfsapi"
+	sycommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/models"
@@ -50,7 +51,7 @@ func (s *LFSServer) LfsBatch(ctx context.Context, request lfsapi.LfsBatchRequest
 
 	for _, in := range req.Objects {
 		objResp := lfsapi.BatchResponseObject{Oid: in.Oid, Size: in.Size}
-		oid := common.NormalizeID(in.Oid)
+		oid := sycommon.NormalizeOid(in.Oid)
 		if oid == "" {
 			objResp.Error = &lfsapi.ObjectError{Code: int32(http.StatusBadRequest), Message: "invalid oid"}
 			respObjects = append(respObjects, objResp)
@@ -91,7 +92,7 @@ func (s *LFSServer) LfsVerify(ctx context.Context, request lfsapi.LfsVerifyReque
 	if req == nil {
 		return lfsapi.LfsVerify400ApplicationVndGitLfsPlusJSONResponse{Message: "missing request body"}, nil
 	}
-	oid := common.NormalizeID(req.Oid)
+	oid := sycommon.NormalizeOid(req.Oid)
 	if oid == "" {
 		return lfsapi.LfsVerify400ApplicationVndGitLfsPlusJSONResponse{Message: "invalid oid"}, nil
 	}
@@ -164,7 +165,7 @@ func (s *LFSServer) LfsStageMetadata(ctx context.Context, request lfsapi.LfsStag
 }
 
 func (s *LFSServer) LfsUploadProxy(ctx context.Context, request lfsapi.LfsUploadProxyRequestObject) (lfsapi.LfsUploadProxyResponseObject, error) {
-	oid := common.NormalizeID(request.Oid)
+	oid := sycommon.NormalizeOid(request.Oid)
 	if oid == "" {
 		return lfsapi.LfsUploadProxy400TextResponse("invalid oid"), nil
 	}

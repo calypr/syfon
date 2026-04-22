@@ -3,6 +3,7 @@ package authz
 import (
 	"context"
 
+	sycommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/models"
 )
@@ -118,8 +119,8 @@ func HasGlobalBucketControlAccess(ctx context.Context, methods ...string) bool {
 
 // HasScopedBucketAccess checks if a user has access to a specific bucket based on a project/org scope.
 func HasScopedBucketAccess(ctx context.Context, scope models.BucketScope, methods ...string) bool {
-	resource := common.ResourcePathForScope(scope.Organization, scope.ProjectID)
-	if resource == "" {
+	resource, err := sycommon.ResourcePath(scope.Organization, scope.ProjectID)
+	if err != nil || resource == "" {
 		return false
 	}
 	return HasAnyMethodAccess(ctx, []string{resource}, methods...)

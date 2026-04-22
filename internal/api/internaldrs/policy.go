@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"strings"
 
+	sycommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/authz"
-	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/models"
 	"github.com/gofiber/fiber/v3"
 )
@@ -38,7 +38,10 @@ func parseScopeQueryParts(authzParam, organization, program, project string) (st
 	if project != "" && org == "" {
 		return "", false, fmt.Errorf("organization is required when project is set")
 	}
-	path := common.ResourcePathForScope(org, project)
+	path, err := sycommon.ResourcePath(org, project)
+	if err != nil {
+		return "", false, err
+	}
 	if path != "" {
 		return path, true, nil
 	}

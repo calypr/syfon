@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	sycommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/models"
 	"github.com/gofiber/fiber/v3"
@@ -117,7 +118,7 @@ func TestBucketPolicyHelpers(t *testing.T) {
 		ProjectID:    "proj",
 		Bucket:       "bucket-a",
 	}
-	resource := common.ResourcePathForScope("org", "proj")
+	resource, _ := sycommon.ResourcePath("org", "proj")
 
 	t.Run("global bucket control access", func(t *testing.T) {
 		ctx := context.WithValue(context.Background(), common.AuthModeKey, "gen3")

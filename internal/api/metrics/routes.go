@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	sycommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/db"
 	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/common"
@@ -264,7 +265,10 @@ func parseScopeQuery(ctx context.Context) (string, bool, error) {
 	if project != "" && org == "" {
 		return "", false, errors.New("organization is required when project is set")
 	}
-	scope := common.ResourcePathForScope(org, project)
+	scope, err := sycommon.ResourcePath(org, project)
+	if err != nil {
+		return "", false, err
+	}
 	if scope != "" {
 		return scope, true, nil
 	}

@@ -2,27 +2,6 @@ package common
 
 import "testing"
 
-func TestResourcePathForScope(t *testing.T) {
-	tests := []struct {
-		name    string
-		org     string
-		project string
-		want    string
-	}{
-		{name: "empty org", org: "", project: "p1", want: ""},
-		{name: "org only", org: "cbds", project: "", want: "/programs/cbds"},
-		{name: "org and project", org: "cbds", project: "proj", want: "/programs/cbds/projects/proj"},
-		{name: "trimmed", org: " cbds ", project: " proj ", want: "/programs/cbds/projects/proj"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := ResourcePathForScope(tc.org, tc.project); got != tc.want {
-				t.Fatalf("expected %q, got %q", tc.want, got)
-			}
-		})
-	}
-}
-
 func TestParseResourcePath(t *testing.T) {
 	tests := []struct {
 		name string

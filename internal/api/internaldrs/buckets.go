@@ -5,6 +5,7 @@ import (
 	"io"
 	"strings"
 
+	sycommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/apigen/server/bucketapi"
 	"github.com/calypr/syfon/internal/api/apiutil"
 	"github.com/calypr/syfon/internal/common"
@@ -41,8 +42,8 @@ func handleInternalBucketsFiber(c fiber.Ctx, om *core.ObjectManager) error {
 		if !allowAll && !allowedBuckets[s.Bucket] {
 			continue
 		}
-		res := common.ResourcePathForScope(s.Organization, s.ProjectID)
-		if res == "" {
+		res, err := sycommon.ResourcePath(s.Organization, s.ProjectID)
+		if err != nil || res == "" {
 			continue
 		}
 		programsByBucket[s.Bucket] = append(programsByBucket[s.Bucket], res)
@@ -92,7 +93,10 @@ func handleInternalPutBucketFiber(c fiber.Ctx, om *core.ObjectManager) error {
 		if err := requireGen3AuthFiber(c); err != nil {
 			return apiutil.HandleError(c, common.ErrUnauthorized)
 		}
-		res := common.ResourcePathForScope(req.Organization, req.ProjectId)
+		res, err := sycommon.ResourcePath(req.Organization, req.ProjectId)
+		if err != nil {
+			return apiutil.HandleError(c, err)
+		}
 		if res == "" || !resourceAllowed(c.Context(), res, "create", "update") {
 			return apiutil.HandleError(c, common.ErrUnauthorized)
 		}
@@ -218,7 +222,10 @@ func handleInternalCreateBucketScopeFiber(c fiber.Ctx, om *core.ObjectManager) e
 		if err := requireGen3AuthFiber(c); err != nil {
 			return apiutil.HandleError(c, common.ErrUnauthorized)
 		}
-		res := common.ResourcePathForScope(req.Organization, req.ProjectId)
+		res, err := sycommon.ResourcePath(req.Organization, req.ProjectId)
+		if err != nil {
+			return apiutil.HandleError(c, err)
+		}
 		if res == "" || !resourceAllowed(c.Context(), res, "create", "update") {
 			return apiutil.HandleError(c, common.ErrUnauthorized)
 		}

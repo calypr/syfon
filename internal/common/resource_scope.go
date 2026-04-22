@@ -7,18 +7,6 @@ type ResourceScope struct {
 	Project      string
 }
 
-func ResourcePathForScope(org, project string) string {
-	org = strings.TrimSpace(org)
-	project = strings.TrimSpace(project)
-	if org == "" {
-		return ""
-	}
-	if project == "" {
-		return "/programs/" + org
-	}
-	return "/programs/" + org + "/projects/" + project
-}
-
 func ParseResourcePath(path string) ResourceScope {
 	path = strings.TrimSpace(path)
 	parts := strings.Split(path, "/")
