@@ -715,3 +715,96 @@ func TestAuthzCacheLifecycle(t *testing.T) {
 		})
 	}
 }
+
+func TestJWKSDiscovery_OpenIDConfigPreferred(t *testing.T) {
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate rsa key: %v", err)
+	}
+	kid := "test-kid"
+	jwks := map[string]any{
+		"keys": []map[string]any{{
+			"kty": "RSA",
+			"use": "sig",
+			"kid": kid,
+			"n":   base64.RawURLEncoding.EncodeToString(privateKey.PublicKey.N.Bytes()),
+			"e":   base64.RawURLEncoding.EncodeToString(big.NewInt(int64(privateKey.PublicKey.E)).Bytes()),
+		}},
+	}
+	jwksServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewEncoder(w).Encode(jwks); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+	}))
+	defer jwksServer.Close()
+	openidConfig := map[string]any{"jwks_uri": jwksServer.URL}
+	openidServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/.well-known/openid-configuration" {
+			_ = json.NewEncoder(w).Encode(openidConfig)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer openidServer.Close()
+	oldTransport := http.DefaultTransport
+	http.DefaultTransport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
+	defer func() { http.DefaultTransport = oldTransport }()
+	issuer := openidServer.URL
+	t.Setenv("DRS_FENCE_URL", issuer)
+	m := NewAuthzMiddleware(slog.Default(), "gen3", "", "")
+	tok := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims{"iss": issuer, "exp": time.Now().Add(time.Hour).Unix()})
+	tok.Header["kid"] = kid
+	s, err := tok.SignedString(privateKey)
+	if err != nil {
+		t.Fatalf("sign token: %v", err)
+	}
+	_, _, parseErr := m.parseToken(s)
+	if parseErr != nil {
+		t.Fatalf("unexpected error: %v", parseErr)
+	}
+}
+
+func TestJWKSDiscovery_FallbackJWKS(t *testing.T) {
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate rsa key: %v", err)
+	}
+	kid := "test-kid"
+	jwks := map[string]any{
+		"keys": []map[string]any{{
+			"kty": "RSA",
+			"use": "sig",
+			"kid": kid,
+			"n":   base64.RawURLEncoding.EncodeToString(privateKey.PublicKey.N.Bytes()),
+			"e":   base64.RawURLEncoding.EncodeToString(big.NewInt(int64(privateKey.PublicKey.E)).Bytes()),
+		}},
+	}
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/.well-known/jwks.json" {
+			_ = json.NewEncoder(w).Encode(jwks)
+			return
+		}
+		if r.URL.Path == "/.well-known/openid-configuration" {
+			http.NotFound(w, r)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+	oldTransport := http.DefaultTransport
+	http.DefaultTransport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
+	defer func() { http.DefaultTransport = oldTransport }()
+	issuer := server.URL
+	t.Setenv("DRS_FENCE_URL", issuer)
+	m := NewAuthzMiddleware(slog.Default(), "gen3", "", "")
+	tok := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims{"iss": issuer, "exp": time.Now().Add(time.Hour).Unix()})
+	tok.Header["kid"] = kid
+	s, err := tok.SignedString(privateKey)
+	if err != nil {
+		t.Fatalf("sign token: %v", err)
+	}
+	_, _, parseErr := m.parseToken(s)
+	if parseErr != nil {
+		t.Fatalf("unexpected error: %v", parseErr)
+	}
+}

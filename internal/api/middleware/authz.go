@@ -1,30 +1,54 @@
-
 package middleware
 
 import (
-    "context"
-    "crypto/sha256"
-    "encoding/base64"
-    "encoding/hex"
-    "fmt"
-    "log/slog"
-    "net/http"
-    "net/url"
-    "os"
-    "sort"
-    "strings"
-    "sync"
-    "time"
+	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"net/url"
+	"os"
+	"sort"
+	"strings"
+	"sync"
+	"time"
 
-    "github.com/calypr/syfon/client/conf"
-    "github.com/calypr/syfon/client/logs"
-    "github.com/calypr/syfon/client/request"
-    "github.com/calypr/syfon/internal/authz"
-    "github.com/calypr/syfon/internal/common"
-    "github.com/gofiber/fiber/v3"
-    "github.com/golang-jwt/jwt/v5"
-    "golang.org/x/sync/singleflight"
+	"github.com/calypr/syfon/client/conf"
+	"github.com/calypr/syfon/client/logs"
+	"github.com/calypr/syfon/client/request"
+	"github.com/calypr/syfon/internal/authz"
+	"github.com/calypr/syfon/internal/common"
+	"github.com/gofiber/fiber/v3"
+	"github.com/golang-jwt/jwt/v5"
+	"golang.org/x/sync/singleflight"
 )
+
+// discoverJWKSURL tries to fetch /.well-known/openid-configuration and extract jwks_uri, falling back to /.well-known/jwks.json
+func discoverJWKSURL(issuer string) (string, error) {
+	// Always ensure issuer does not end with a slash
+	issuer = strings.TrimRight(issuer, "/")
+	openidConfigURL := issuer + "/.well-known/openid-configuration"
+	resp, err := http.Get(openidConfigURL)
+	if err == nil {
+		if resp.StatusCode == http.StatusOK {
+			var data struct {
+				JWKSURI string `json:"jwks_uri"`
+			}
+			err := json.NewDecoder(resp.Body).Decode(&data)
+			_ = resp.Body.Close()
+			if err == nil && data.JWKSURI != "" {
+				return data.JWKSURI, nil
+			}
+		} else {
+			_ = resp.Body.Close()
+		}
+	}
+	// Fallback
+	return issuer + "/.well-known/jwks.json", nil
+}
 
 type authenticationPluginManagerInterface interface {
 	Authenticate(ctx context.Context, in *AuthenticationInput) (*AuthenticationOutput, error)
@@ -124,16 +148,16 @@ func (m *AuthzMiddleware) FiberMiddleware() fiber.Handler {
 }
 
 func (m *AuthzMiddleware) prepareRequestContext(c fiber.Ctx) (context.Context, string) {
-		   authHeader := c.Get(fiber.HeaderAuthorization)
-		   var hasAuthHeader bool
-		   if m.mode == "gen3" {
-				   hasAuthHeader = strings.TrimSpace(authHeader) != ""
-		   } else {
-				   hasAuthHeader = false
-		   }
-		   ctx := context.WithValue(c.Context(), common.AuthHeaderPresentKey, hasAuthHeader)
-		   ctx = context.WithValue(ctx, common.AuthModeKey, m.mode)
-		   return ctx, authHeader
+	authHeader := c.Get(fiber.HeaderAuthorization)
+	var hasAuthHeader bool
+	if m.mode == "gen3" {
+		hasAuthHeader = strings.TrimSpace(authHeader) != ""
+	} else {
+		hasAuthHeader = false
+	}
+	ctx := context.WithValue(c.Context(), common.AuthHeaderPresentKey, hasAuthHeader)
+	ctx = context.WithValue(ctx, common.AuthModeKey, m.mode)
+	return ctx, authHeader
 }
 
 func (m *AuthzMiddleware) handleLocalAuth(c fiber.Ctx, ctx context.Context, authHeader string) error {
@@ -578,7 +602,10 @@ func (m *AuthzMiddleware) parseToken(tokenString string) (endpoint string, exp f
 		}
 
 		// SECURITY FIX: Enforce HTTPS-only for JWKS fetching
-		jwksURL := origin + "/.well-known/jwks.json"
+		jwksURL, err := discoverJWKSURL(origin)
+		if err != nil {
+			return nil, fmt.Errorf("JWKS discovery failed: %w", err)
+		}
 		if !strings.HasPrefix(jwksURL, "https://") {
 			return nil, fmt.Errorf("JWKS endpoint must use HTTPS, got: %s", jwksURL)
 		}
@@ -631,24 +658,24 @@ func (m *AuthzMiddleware) parseToken(tokenString string) (endpoint string, exp f
 // isIssuerAllowed checks if an issuer URL is in the allowed list.
 // The allowlist is configured via DRS_ALLOWED_ISSUERS (comma-separated URLs).
 func isIssuerAllowed(iss string) bool {
-	   fenceURL := strings.TrimSpace(os.Getenv("DRS_FENCE_URL"))
-	   if fenceURL == "" {
-			   return false
-	   }
-	   // Must be a valid https:// URL
-	   u, err := url.Parse(fenceURL)
-	   if err != nil || u.Scheme != "https" || u.Host == "" {
-			   return false
-	   }
-	   allowedOrigin, err := normalizeIssuerOrigin(fenceURL)
-	   if err != nil {
-			   return false
-	   }
-	   issuerOrigin, err := normalizeIssuerOrigin(iss)
-	   if err != nil {
-			   return false
-	   }
-	   return issuerOrigin == allowedOrigin
+	fenceURL := strings.TrimSpace(os.Getenv("DRS_FENCE_URL"))
+	if fenceURL == "" {
+		return false
+	}
+	// Must be a valid https:// URL
+	u, err := url.Parse(fenceURL)
+	if err != nil || u.Scheme != "https" || u.Host == "" {
+		return false
+	}
+	allowedOrigin, err := normalizeIssuerOrigin(fenceURL)
+	if err != nil {
+		return false
+	}
+	issuerOrigin, err := normalizeIssuerOrigin(iss)
+	if err != nil {
+		return false
+	}
+	return issuerOrigin == allowedOrigin
 }
 
 func normalizeIssuerOrigin(raw string) (string, error) {
@@ -727,6 +754,4 @@ func (m *AuthzMiddleware) extractPrivileges(privs map[string]any) ([]string, map
 type pluginManagerInterface interface {
 	Authorize(ctx context.Context, in *AuthorizationInput) (*AuthorizationOutput, error)
 }
-
-
 
