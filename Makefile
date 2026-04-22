@@ -330,3 +330,14 @@ release-client: release-check-clean-client release-check-client-tag release-test
 	git tag -a "$$tag" -m "Release $$tag"; \
 	git push "$(REMOTE)" "$$tag"; \
 	echo "Released $$tag"
+
+.PHONY: build-local-auth-plugin
+build-local-auth-plugin:
+	cd plugins/local_auth && go build -o ../../bin/local_auth_plugin .
+
+.PHONY: build-gen3-auth-plugin
+build-gen3-auth-plugin:
+	cd plugins/gen3_auth && go build -o ../../bin/gen3_auth_plugin .
+
+.PHONY: build-plugins
+build-plugins: build-local-auth-plugin build-gen3-auth-plugin

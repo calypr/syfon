@@ -14,8 +14,14 @@ import (
 // TestJWTSignatureVerification tests that parseToken properly verifies JWT signatures
 func TestJWTSignatureVerification_ValidSignature(t *testing.T) {
 	// Setup allowed issuer
-	os.Setenv("DRS_ALLOWED_ISSUERS", "https://fence.example.com")
-	defer os.Unsetenv("DRS_ALLOWED_ISSUERS")
+ 	if err := os.Setenv("DRS_FENCE_URL", "https://fence.example.com"); err != nil {
+ 		t.Fatalf("Setenv failed: %v", err)
+ 	}
+ 	defer func() {
+ 		if err := os.Unsetenv("DRS_FENCE_URL"); err != nil {
+ 			t.Fatalf("Unsetenv failed: %v", err)
+ 		}
+ 	}()
 
 	// Generate RSA key pair for signing
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -46,8 +52,14 @@ func TestJWTSignatureVerification_ValidSignature(t *testing.T) {
 
 // TestJWTSignatureVerification_InvalidSignature tests that forged tokens are rejected
 func TestJWTSignatureVerification_InvalidSignature(t *testing.T) {
-	os.Setenv("DRS_ALLOWED_ISSUERS", "https://fence.example.com")
-	defer os.Unsetenv("DRS_ALLOWED_ISSUERS")
+											 	if err := os.Setenv("DRS_FENCE_URL", "https://fence.example.com"); err != nil {
+											 		t.Fatalf("Setenv failed: %v", err)
+											 	}
+											 	defer func() {
+											 		if err := os.Unsetenv("DRS_FENCE_URL"); err != nil {
+											 			t.Fatalf("Unsetenv failed: %v", err)
+											 		}
+											 	}()
 
 	// Create token with one key, sign with different key
 	key1, _ := rsa.GenerateKey(rand.Reader, 2048)
@@ -75,8 +87,14 @@ func TestJWTSignatureVerification_InvalidSignature(t *testing.T) {
 
 // TestJWTSignatureVerification_NoneAlgorithm tests that non-RSA algorithms are rejected
 func TestJWTSignatureVerification_NoneAlgorithm(t *testing.T) {
-	os.Setenv("DRS_ALLOWED_ISSUERS", "https://fence.example.com")
-	defer os.Unsetenv("DRS_ALLOWED_ISSUERS")
+											 	if err := os.Setenv("DRS_FENCE_URL", "https://fence.example.com"); err != nil {
+											 		t.Fatalf("Setenv failed: %v", err)
+											 	}
+											 	defer func() {
+											 		if err := os.Unsetenv("DRS_FENCE_URL"); err != nil {
+											 			t.Fatalf("Unsetenv failed: %v", err)
+											 		}
+											 	}()
 
 	// Create token with HS256 algorithm (should be rejected by RS256-only parser)
 	claims := jwt.MapClaims{
@@ -101,8 +119,14 @@ func TestJWTSignatureVerification_NoneAlgorithm(t *testing.T) {
 
 // TestJWTSignatureVerification_MissingKID tests that tokens without KID are rejected
 func TestJWTSignatureVerification_MissingKID(t *testing.T) {
-	os.Setenv("DRS_ALLOWED_ISSUERS", "https://fence.example.com")
-	defer os.Unsetenv("DRS_ALLOWED_ISSUERS")
+											 	if err := os.Setenv("DRS_FENCE_URL", "https://fence.example.com"); err != nil {
+											 		t.Fatalf("Setenv failed: %v", err)
+											 	}
+											 	defer func() {
+											 		if err := os.Unsetenv("DRS_FENCE_URL"); err != nil {
+											 			t.Fatalf("Unsetenv failed: %v", err)
+											 		}
+											 	}()
 
 	key, _ := rsa.GenerateKey(rand.Reader, 2048)
 
@@ -133,8 +157,14 @@ func TestJWTSignatureVerification_MissingKID(t *testing.T) {
 
 // TestJWTSignatureVerification_ExpiredToken tests that expired tokens are rejected
 func TestJWTSignatureVerification_ExpiredToken(t *testing.T) {
-	os.Setenv("DRS_ALLOWED_ISSUERS", "https://fence.example.com")
-	defer os.Unsetenv("DRS_ALLOWED_ISSUERS")
+											 	if err := os.Setenv("DRS_FENCE_URL", "https://fence.example.com"); err != nil {
+											 		t.Fatalf("Setenv failed: %v", err)
+											 	}
+											 	defer func() {
+											 		if err := os.Unsetenv("DRS_FENCE_URL"); err != nil {
+											 			t.Fatalf("Unsetenv failed: %v", err)
+											 		}
+											 	}()
 
 	key, _ := rsa.GenerateKey(rand.Reader, 2048)
 
@@ -161,41 +191,41 @@ func TestJWTSignatureVerification_ExpiredToken(t *testing.T) {
 // TestJWTSignatureVerification_IssuerAllowlist tests issuer validation
 func TestJWTSignatureVerification_IssuerAllowlist(t *testing.T) {
 	tests := []struct {
-		name           string
-		allowedIssuers string
-		tokenIss       string
-		shouldPass     bool
+		name          string
+		allowedIssuer string
+		tokenIss      string
+		shouldPass    bool
 	}{
 		{
-			name:           "allowed issuer",
-			allowedIssuers: "https://fence.example.com",
-			tokenIss:       "https://fence.example.com",
-			shouldPass:     true,
+			name:          "allowed issuer",
+			allowedIssuer: "https://fence.example.com",
+			tokenIss:      "https://fence.example.com",
+			shouldPass:    true,
 		},
 		{
-			name:           "disallowed issuer",
-			allowedIssuers: "https://fence.example.com",
-			tokenIss:       "https://attacker.example.com",
-			shouldPass:     false,
+			name:          "disallowed issuer",
+			allowedIssuer: "https://fence.example.com",
+			tokenIss:      "https://attacker.example.com",
+			shouldPass:    false,
 		},
 		{
-			name:           "multiple allowed, first matches",
-			allowedIssuers: "https://fence1.example.com,https://fence2.example.com",
-			tokenIss:       "https://fence1.example.com",
-			shouldPass:     true,
-		},
-		{
-			name:           "http scheme rejected",
-			allowedIssuers: "https://fence.example.com",
-			tokenIss:       "http://fence.example.com",
-			shouldPass:     false,
+			name:          "http scheme rejected",
+			allowedIssuer: "https://fence.example.com",
+			tokenIss:      "http://fence.example.com",
+			shouldPass:    false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			os.Setenv("DRS_ALLOWED_ISSUERS", tt.allowedIssuers)
-			defer os.Unsetenv("DRS_ALLOWED_ISSUERS")
+ 			if err := os.Setenv("DRS_FENCE_URL", tt.allowedIssuer); err != nil {
+ 				t.Fatalf("Setenv failed: %v", err)
+ 			}
+ 			defer func() {
+ 				if err := os.Unsetenv("DRS_FENCE_URL"); err != nil {
+ 					t.Fatalf("Unsetenv failed: %v", err)
+ 				}
+ 			}()
 
 			key, _ := rsa.GenerateKey(rand.Reader, 2048)
 

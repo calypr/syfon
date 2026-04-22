@@ -1,6 +1,6 @@
 # Syfon Authentication Plugin System
 
-Syfon supports external authentication plugins using the same go-plugin architecture as authorization plugins. This allows operators to implement custom authentication logic (e.g., Basic Auth, JWT, OAuth2, Gen3, etc.) outside the main server binary.
+Syfon supports external authentication plugins using the same go-plugin architecture as authorization plugins. This allows operators to implement custom authentication logic (e.g., Basic Auth, JWT, OAuth2, Gen3, etc.) outside the main server binary. **Plugins are loaded at server startup (not build time) via the `SYFON_AUTHN_PLUGIN_PATH` environment variable.**
 
 ## Operator Guide
 
@@ -8,7 +8,7 @@ Syfon supports external authentication plugins using the same go-plugin architec
 
 1. Build or obtain a compatible authentication plugin binary implementing the Syfon AuthenticationPlugin interface.
 2. Set the environment variable `SYFON_AUTHN_PLUGIN_PATH` to the path of the plugin binary.
-3. Restart the Syfon server. All authentication requests will be delegated to the plugin.
+3. Restart the Syfon server. **Plugin integration occurs at server startup, not build time.** All authentication requests will be delegated to the plugin.
 
 ### Fallback Behavior
 - If no plugin is configured, Syfon uses built-in authentication (Basic Auth for local mode, JWT for Gen3 mode).
@@ -43,6 +43,7 @@ type AuthenticationPlugin interface {
 
 ### Plugin Registration
 - The plugin must register itself with the go-plugin framework under the key `"authn"`.
+- **Plugin integration occurs at server startup. No Syfon code changes or rebuilds are required to add or update a plugin.**
 - See the Syfon source for an example of plugin RPC wiring.
 
 ### Example Plugin Skeleton
@@ -79,5 +80,4 @@ func main() {
 
 ## Migration Notes
 - Existing authentication logic is preserved as a fallback if no plugin is configured.
-- For full migration, implement all required authentication flows in your plugin.
-
+- For full migration, implement all required authentication flows in your plugin

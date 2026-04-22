@@ -156,7 +156,7 @@ func TestParseToken(t *testing.T) {
 	defer func() { http.DefaultTransport = oldTransport }()
 
 	issuerOrigin := server.URL
-	t.Setenv("DRS_ALLOWED_ISSUERS", issuerOrigin)
+	   t.Setenv("DRS_FENCE_URL", issuerOrigin)
 
 	buildToken := func(claims jwt.MapClaims) string {
 		tok := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
@@ -540,18 +540,28 @@ func TestAuthzMiddlewareScenarios(t *testing.T) {
 				t.Setenv(k, v)
 			}
 
-			m := NewAuthzMiddleware(slog.Default(), tc.mode, tc.basicUser, tc.basicPass)
-			// Inject dummy plugin manager for malformed bearer scenario
-			if tc.name == "gen3 malformed bearer" {
-				injectDummyPluginManager(m)
-			}
-			// Inject dummy authn plugin manager for authn plugin scenarios
-			if strings.HasPrefix(tc.name, "local authn") {
-				injectDummyAuthenticationPluginManager(m, strings.HasSuffix(tc.name, "allows access"))
-			}
-			if strings.HasPrefix(tc.name, "gen3 authn") {
-				injectDummyAuthenticationPluginManager(m, strings.HasSuffix(tc.name, "allows access"))
-			}
+			   m := NewAuthzMiddleware(slog.Default(), tc.mode, tc.basicUser, tc.basicPass)
+			   // Always inject dummy plugin manager for malformed bearer scenario
+			   if tc.name == "gen3 malformed bearer" {
+				   injectDummyPluginManager(m)
+			   }
+			   // Always inject dummy authn plugin manager for authn plugin scenarios
+			   if tc.name == "local authn plugin allows access" {
+				   injectDummyAuthenticationPluginManager(m, true)
+			   }
+			   if tc.name == "local authn plugin denies access" {
+				   injectDummyAuthenticationPluginManager(m, false)
+			   }
+			   if tc.name == "gen3 authn plugin allows access" {
+				   injectDummyAuthenticationPluginManager(m, true)
+			   }
+						   if tc.name == "gen3 authn plugin denies access" {
+							   injectDummyAuthenticationPluginManager(m, false)
+						   }
+						   // For gen3 authn plugin denies access, ensure an Authorization header is set
+						   if tc.name == "gen3 authn plugin denies access" && tc.authHeader == "" {
+							   tc.authHeader = "Bearer dummy-deny-token"
+			   }
 			app := fiber.New()
 			handlerCalled := false
 			app.Use(m.FiberMiddleware())

@@ -14,4 +14,9 @@ const (
 
 	// BucketControlResource is the resource path for internal bucket management.
 	BucketControlResource = "/services/internal/buckets"
+
+	// SubjectKey is the context key for the authenticated subject (user/principal)
+	SubjectKey AuthzContextKey = "subject"
+	// ClaimsKey is the context key for the authenticated claims (map[string]interface{})
+	ClaimsKey AuthzContextKey = "claims"
 )
