@@ -69,6 +69,11 @@ const (
 	RouteCoreSHA256 = "/index/v1/sha256/validity"
 )
 
+const (
+	AuthModeLocal = "local"
+	AuthModeGen3  = "gen3"
+)
+
 type Config struct {
 	Port          int            `json:"port" yaml:"port"`
 	Database      DatabaseConfig `json:"database" yaml:"database"`
@@ -141,14 +146,33 @@ func (s S3Config) MarshalJSON() ([]byte, error) {
 }
 
 type AuthConfig struct {
-	Mode  string          `json:"mode" yaml:"mode"`
-	Basic BasicAuthConfig `json:"basic" yaml:"basic"`
+	Mode        string          `json:"mode" yaml:"mode"`
+	Basic       BasicAuthConfig `json:"basic" yaml:"basic"`
+	Mock        MockAuthConfig  `json:"mock" yaml:"mock"`
+	Cache       AuthCacheConfig `json:"cache" yaml:"cache"`
+	PluginPaths PluginPaths     `json:"plugin_paths" yaml:"plugin_paths"`
+	FenceURL    string          `json:"fence_url" yaml:"fence_url"`
 }
 
-const (
-	AuthModeLocal = "local"
-	AuthModeGen3  = "gen3"
-)
+type MockAuthConfig struct {
+	Enabled           bool     `json:"enabled" yaml:"enabled"`
+	RequireAuthHeader bool     `json:"require_auth_header" yaml:"require_auth_header"`
+	Resources         []string `json:"resources" yaml:"resources"`
+	Methods           []string `json:"methods" yaml:"methods"`
+}
+
+type AuthCacheConfig struct {
+	Enabled      bool   `json:"enabled" yaml:"enabled"`
+	TTLSeconds   int    `json:"ttl_seconds" yaml:"ttl_seconds"`
+	NegativeTTL  int    `json:"negative_ttl_seconds" yaml:"negative_ttl_seconds"`
+	MaxEntries   int    `json:"max_entries" yaml:"max_entries"`
+	CleanupEvery int    `json:"cleanup_seconds" yaml:"cleanup_seconds"`
+}
+
+type PluginPaths struct {
+	Authz string `json:"authz" yaml:"authz"`
+	Authn string `json:"authn" yaml:"authn"`
+}
 
 type BasicAuthConfig struct {
 	Username string `json:"username" yaml:"username"`
@@ -436,6 +460,47 @@ func LoadConfig(configFile string) (*Config, error) {
 	}
 	if cfg.LFS.BandwidthLimitBytesPerMinute < 0 {
 		return nil, fmt.Errorf("lfs.bandwidth_limit_bytes_per_minute must be >= 0")
+	}
+
+	// 4. Override with Auth.Mock config if set
+	if cfg.Auth.Mock.Enabled {
+		os.Setenv("DRS_AUTH_MOCK_ENABLED", "true")
+	}
+	if cfg.Auth.Mock.RequireAuthHeader {
+		os.Setenv("DRS_AUTH_MOCK_REQUIRE_AUTH_HEADER", "true")
+	}
+	if len(cfg.Auth.Mock.Resources) > 0 {
+		os.Setenv("DRS_AUTH_MOCK_RESOURCES", strings.Join(cfg.Auth.Mock.Resources, ","))
+	}
+	if len(cfg.Auth.Mock.Methods) > 0 {
+		os.Setenv("DRS_AUTH_MOCK_METHODS", strings.Join(cfg.Auth.Mock.Methods, ","))
+	}
+	// Auth cache config
+	if cfg.Auth.Cache.Enabled {
+		os.Setenv("DRS_AUTH_CACHE_ENABLED", "true")
+	}
+	if cfg.Auth.Cache.TTLSeconds > 0 {
+		os.Setenv("DRS_AUTH_CACHE_TTL_SECONDS", strconv.Itoa(cfg.Auth.Cache.TTLSeconds))
+	}
+	if cfg.Auth.Cache.NegativeTTL > 0 {
+		os.Setenv("DRS_AUTH_CACHE_NEGATIVE_TTL_SECONDS", strconv.Itoa(cfg.Auth.Cache.NegativeTTL))
+	}
+	if cfg.Auth.Cache.MaxEntries > 0 {
+		os.Setenv("DRS_AUTH_CACHE_MAX_ENTRIES", strconv.Itoa(cfg.Auth.Cache.MaxEntries))
+	}
+	if cfg.Auth.Cache.CleanupEvery > 0 {
+		os.Setenv("DRS_AUTH_CACHE_CLEANUP_SECONDS", strconv.Itoa(cfg.Auth.Cache.CleanupEvery))
+	}
+	// Plugin paths
+	if cfg.Auth.PluginPaths.Authz != "" {
+		os.Setenv("SYFON_AUTHZ_PLUGIN_PATH", cfg.Auth.PluginPaths.Authz)
+	}
+	if cfg.Auth.PluginPaths.Authn != "" {
+		os.Setenv("SYFON_AUTHN_PLUGIN_PATH", cfg.Auth.PluginPaths.Authn)
+	}
+	// Fence URL
+	if cfg.Auth.FenceURL != "" {
+		os.Setenv("DRS_FENCE_URL", cfg.Auth.FenceURL)
 	}
 
 	return cfg, nil
