@@ -6,6 +6,8 @@ import (
 	"encoding/base64"
 	"fmt"
 	"strings"
+
+	"github.com/calypr/syfon/plugin"
 )
 
 // LocalAuthPlugin implements AuthenticationPlugin for local mode.
@@ -14,14 +16,14 @@ type LocalAuthPlugin struct {
 	BasicPass string
 }
 
-func (p *LocalAuthPlugin) Authenticate(ctx context.Context, in *AuthenticationInput) (*AuthenticationOutput, error) {
+func (p *LocalAuthPlugin) Authenticate(ctx context.Context, in *plugin.AuthenticationInput) (*plugin.AuthenticationOutput, error) {
 	if p.BasicUser != "" || p.BasicPass != "" {
 		err := validateBasicAuth(in.AuthHeader, p.BasicUser, p.BasicPass)
 		if err != nil {
-			return &AuthenticationOutput{Authenticated: false, Reason: err.Error()}, nil
+			return &plugin.AuthenticationOutput{Authenticated: false, Reason: err.Error()}, nil
 		}
 	}
-	return &AuthenticationOutput{Authenticated: true}, nil
+	return &plugin.AuthenticationOutput{Authenticated: true}, nil
 }
 
 func validateBasicAuth(authHeader, expectedUser, expectedPass string) error {

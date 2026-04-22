@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/calypr/syfon/internal/authz"
+	"github.com/calypr/syfon/plugin"
 	"github.com/gofiber/fiber/v3"
 	"github.com/golang-jwt/jwt/v5"
 	"context"
@@ -37,8 +38,8 @@ type DummyAuthenticationPluginManager struct {
 	Authenticated bool
 }
 
-func (d *DummyAuthenticationPluginManager) Authenticate(ctx context.Context, in *AuthenticationInput) (*AuthenticationOutput, error) {
-	return &AuthenticationOutput{
+func (d *DummyAuthenticationPluginManager) Authenticate(ctx context.Context, in *plugin.AuthenticationInput) (*plugin.AuthenticationOutput, error) {
+	return &plugin.AuthenticationOutput{
 		Authenticated: d.Authenticated,
 		Subject:       "dummy",
 		Claims:        map[string]interface{}{"role": "test"},

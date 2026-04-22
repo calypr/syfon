@@ -2,8 +2,8 @@ package main
 
 import (
 	"context"
-	"github.com/hashicorp/go-plugin"
-	"github.com/calypr/syfon/internal/api/middleware"
+	hplugin "github.com/hashicorp/go-plugin"
+	"github.com/calypr/syfon/plugin"
 	"net/rpc"
 	"os"
 )
@@ -13,35 +13,35 @@ type LocalAuthPlugin struct {
 	BasicPass string
 }
 
-func (p *LocalAuthPlugin) Authenticate(ctx context.Context, in *middleware.AuthenticationInput) (*middleware.AuthenticationOutput, error) {
+func (p *LocalAuthPlugin) Authenticate(ctx context.Context, in *plugin.AuthenticationInput) (*plugin.AuthenticationOutput, error) {
 	if p.BasicUser != "" || p.BasicPass != "" {
 		err := ValidateBasicAuth(in.AuthHeader, p.BasicUser, p.BasicPass)
 		if err != nil {
-			return &middleware.AuthenticationOutput{Authenticated: false, Reason: err.Error()}, nil
+			return &plugin.AuthenticationOutput{Authenticated: false, Reason: err.Error()}, nil
 		}
 	}
-	return &middleware.AuthenticationOutput{Authenticated: true}, nil
+	return &plugin.AuthenticationOutput{Authenticated: true}, nil
 }
 
 type LocalAuthPluginRPC struct {
-	plugin.Plugin
+	hplugin.Plugin
 	Impl *LocalAuthPlugin
 }
 
-func (p *LocalAuthPluginRPC) Server(*plugin.MuxBroker) (interface{}, error) {
+func (p *LocalAuthPluginRPC) Server(*hplugin.MuxBroker) (interface{}, error) {
 	return p.Impl, nil
 }
 
-func (p *LocalAuthPluginRPC) Client(b *plugin.MuxBroker, c *rpc.Client) (interface{}, error) {
+func (p *LocalAuthPluginRPC) Client(b *hplugin.MuxBroker, c *rpc.Client) (interface{}, error) {
 	return nil, nil // Not used in plugin binary
 }
 
 func main() {
 	user := os.Getenv("DRS_BASIC_AUTH_USER")
 	pass := os.Getenv("DRS_BASIC_AUTH_PASSWORD")
-	plugin.Serve(&plugin.ServeConfig{
-		HandshakeConfig: middleware.Handshake,
-		Plugins: map[string]plugin.Plugin{
+	hplugin.Serve(&hplugin.ServeConfig{
+		HandshakeConfig: plugin.Handshake,
+		Plugins: map[string]hplugin.Plugin{
 			"authn": &LocalAuthPluginRPC{Impl: &LocalAuthPlugin{BasicUser: user, BasicPass: pass}},
 		},
 	})

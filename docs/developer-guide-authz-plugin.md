@@ -32,7 +32,7 @@ type AuthorizationPlugin interface {
 - Your plugin should return obligations in the expected format for Syfon to map to context.
 
 ## Example Plugin
-See the `examples/` directory for a sample plugin implementation.
+See the `plugins/` directory for a sample plugin implementation.
 
 ## Testing
 - Unit test your plugin logic.

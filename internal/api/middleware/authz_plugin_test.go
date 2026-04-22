@@ -9,15 +9,16 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/calypr/syfon/plugin"
 	"github.com/gofiber/fiber/v3"
 )
 
 type mockPlugin struct {
-	output *AuthorizationOutput
+	output *plugin.AuthorizationOutput
 	err    error
 }
 
-func (m *mockPlugin) Authorize(ctx context.Context, in *AuthorizationInput) (*AuthorizationOutput, error) {
+func (m *mockPlugin) Authorize(ctx context.Context, in *plugin.AuthorizationInput) (*plugin.AuthorizationOutput, error) {
 	return m.output, m.err
 }
 
@@ -39,7 +40,7 @@ func newTestLogger() *slog.Logger {
 func TestPluginIntegrationAllow(t *testing.T) {
 	pm := &PluginManager{client: nil}
 	pm.client = &PluginClient{raw: &mockPlugin{
-		output: &AuthorizationOutput{
+		output: &plugin.AuthorizationOutput{
 			Allow: true,
 			Obligations: map[string]interface{}{
 				"resources": []interface{}{ "/foo", "/bar" },
@@ -72,7 +73,7 @@ func TestPluginIntegrationAllow(t *testing.T) {
 func TestPluginIntegrationDeny(t *testing.T) {
 	pm := &PluginManager{client: nil}
 	pm.client = &PluginClient{raw: &mockPlugin{
-		output: &AuthorizationOutput{Allow: false, Reason: "denied"},
+		output: &plugin.AuthorizationOutput{Allow: false, Reason: "denied"},
 		err: nil,
 	}}
 	mw := &AuthzMiddleware{pluginManager: pm, mode: "gen3", logger: newTestLogger()}
@@ -120,7 +121,7 @@ func TestPluginIntegrationError(t *testing.T) {
 func TestPluginIntegration_MissingClaims(t *testing.T) {
 	pm := &PluginManager{client: nil}
 	pm.client = &PluginClient{raw: &mockPlugin{
-		output: &AuthorizationOutput{Allow: true, Obligations: map[string]interface{}{}},
+		output: &plugin.AuthorizationOutput{Allow: true, Obligations: map[string]interface{}{}},
 		err: nil,
 	}}
 	mw := &AuthzMiddleware{pluginManager: pm, mode: "gen3", logger: newTestLogger()}
@@ -163,7 +164,7 @@ func TestPluginIntegration_PluginUnavailable(t *testing.T) {
 func TestPluginIntegration_UnexpectedObligations(t *testing.T) {
 	pm := &PluginManager{client: nil}
 	pm.client = &PluginClient{raw: &mockPlugin{
-		output: &AuthorizationOutput{
+		output: &plugin.AuthorizationOutput{
 			Allow: true,
 			Obligations: map[string]interface{}{
 				"resources": 123, // Not a []interface{}
@@ -193,7 +194,7 @@ func TestPluginIntegration_UnexpectedObligations(t *testing.T) {
 func TestPluginIntegration_NoAuthHeader(t *testing.T) {
 	pm := &PluginManager{client: nil}
 	pm.client = &PluginClient{raw: &mockPlugin{
-		output: &AuthorizationOutput{Allow: true, Obligations: map[string]interface{}{}},
+		output: &plugin.AuthorizationOutput{Allow: true, Obligations: map[string]interface{}{}},
 		err: nil,
 	}}
 	mw := &AuthzMiddleware{pluginManager: pm, mode: "gen3", logger: newTestLogger()}

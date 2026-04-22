@@ -21,6 +21,7 @@ import (
 	"github.com/calypr/syfon/client/request"
 	"github.com/calypr/syfon/internal/authz"
 	"github.com/calypr/syfon/internal/common"
+	"github.com/calypr/syfon/plugin"
 	"github.com/gofiber/fiber/v3"
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/sync/singleflight"
@@ -51,7 +52,7 @@ func discoverJWKSURL(issuer string) (string, error) {
 }
 
 type authenticationPluginManagerInterface interface {
-	Authenticate(ctx context.Context, in *AuthenticationInput) (*AuthenticationOutput, error)
+	Authenticate(ctx context.Context, in *plugin.AuthenticationInput) (*plugin.AuthenticationOutput, error)
 }
 
 type AuthzMiddleware struct {
@@ -162,7 +163,7 @@ func (m *AuthzMiddleware) prepareRequestContext(c fiber.Ctx) (context.Context, s
 
 func (m *AuthzMiddleware) handleLocalAuth(c fiber.Ctx, ctx context.Context, authHeader string) error {
 	if m.authnPluginManager != nil {
-		input := &AuthenticationInput{
+		input := &plugin.AuthenticationInput{
 			RequestID: common.GetRequestID(ctx),
 			AuthHeader: authHeader,
 			Metadata: map[string]interface{}{},
@@ -190,18 +191,18 @@ func (m *AuthzMiddleware) handleGen3Auth(c fiber.Ctx, ctx context.Context, authH
 	}
 	// Authenticate first
 	var (
-		output *AuthenticationOutput
+		output *plugin.AuthenticationOutput
 		err error
 	)
 	if m.authnPluginManager == nil {
 		// TEST MODE: If pluginManager is set but no authnPluginManager, treat as authenticated (for plugin integration tests)
 		if m.pluginManager != nil {
-			output = &AuthenticationOutput{Authenticated: true}
+			output = &plugin.AuthenticationOutput{Authenticated: true}
 		} else {
 			return c.SendStatus(fiber.StatusUnauthorized)
 		}
 	} else {
-		input := &AuthenticationInput{
+		input := &plugin.AuthenticationInput{
 			RequestID: common.GetRequestID(ctx),
 			AuthHeader: authHeader,
 			Metadata: map[string]interface{}{},
@@ -226,7 +227,7 @@ func (m *AuthzMiddleware) handleGen3Auth(c fiber.Ctx, ctx context.Context, authH
 	}
 	// Now call authorization plugin if present
 	if m.pluginManager != nil {
-		authzInput := &AuthorizationInput{
+		authzInput := &plugin.AuthorizationInput{
 			RequestID: common.GetRequestID(ctx),
 			Subject:   output.Subject,
 			Action:    c.Method(),
@@ -752,6 +753,6 @@ func (m *AuthzMiddleware) extractPrivileges(privs map[string]any) ([]string, map
 }
 
 type pluginManagerInterface interface {
-	Authorize(ctx context.Context, in *AuthorizationInput) (*AuthorizationOutput, error)
+	Authorize(ctx context.Context, in *plugin.AuthorizationInput) (*plugin.AuthorizationOutput, error)
 }
 

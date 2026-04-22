@@ -7,50 +7,10 @@ import (
 	"os/exec"
 	"sync"
 
-	"github.com/hashicorp/go-plugin"
+	hplugin "github.com/hashicorp/go-plugin"
+
+	"github.com/calypr/syfon/plugin"
 )
-
-// AuthorizationInput is the request sent to the plugin for an authz decision.
-type AuthorizationInput struct {
-	RequestID string
-	Subject   string
-	Action    string
-	Resource  string
-	Claims    map[string]interface{}
-	Metadata  map[string]interface{}
-}
-
-// AuthorizationOutput is the plugin's response.
-type AuthorizationOutput struct {
-	Allow      bool
-	Reason     string
-	Obligations map[string]interface{}
-}
-
-// AuthorizationPlugin is the interface plugins must implement.
-type AuthorizationPlugin interface {
-	Authorize(ctx context.Context, in *AuthorizationInput) (*AuthorizationOutput, error)
-}
-
-// AuthenticationInput is the request sent to the plugin for authentication.
-type AuthenticationInput struct {
-	RequestID string
-	AuthHeader string
-	Metadata  map[string]interface{}
-}
-
-// AuthenticationOutput is the plugin's response.
-type AuthenticationOutput struct {
-	Authenticated bool
-	Subject       string
-	Claims        map[string]interface{}
-	Reason        string
-}
-
-// AuthenticationPlugin is the interface plugins must implement.
-type AuthenticationPlugin interface {
-	Authenticate(ctx context.Context, in *AuthenticationInput) (*AuthenticationOutput, error)
-}
 
 // AuthenticationPluginManager manages the plugin process and calls Authenticate.
 type AuthenticationPluginManager struct {
@@ -59,13 +19,13 @@ type AuthenticationPluginManager struct {
 
 // NewAuthenticationPluginManager loads the plugin binary and returns a manager.
 func NewAuthenticationPluginManager(pluginPath string) (*AuthenticationPluginManager, error) {
-	client := plugin.NewClient(&plugin.ClientConfig{
+	client := hplugin.NewClient(&hplugin.ClientConfig{
 		HandshakeConfig: Handshake,
-		Plugins: map[string]plugin.Plugin{
+		Plugins: map[string]hplugin.Plugin{
 			"authn": &AuthnPluginRPC{},
 		},
 		Cmd:              exec.Command(pluginPath),
-		AllowedProtocols: []plugin.Protocol{plugin.ProtocolNetRPC},
+		AllowedProtocols: []hplugin.Protocol{hplugin.ProtocolNetRPC},
 	})
 
 	rpcClient, err := client.Client()
@@ -82,23 +42,23 @@ func NewAuthenticationPluginManager(pluginPath string) (*AuthenticationPluginMan
 }
 
 // Authenticate delegates to the plugin.
-func (pm *AuthenticationPluginManager) Authenticate(ctx context.Context, in *AuthenticationInput) (*AuthenticationOutput, error) {
+func (pm *AuthenticationPluginManager) Authenticate(ctx context.Context, in *plugin.AuthenticationInput) (*plugin.AuthenticationOutput, error) {
 	pm.client.mu.Lock()
 	defer pm.client.mu.Unlock()
-	pluginImpl, ok := pm.client.raw.(AuthenticationPlugin)
+	pluginImpl, ok := pm.client.raw.(plugin.AuthenticationPlugin)
 	if !ok {
 		return nil, os.ErrInvalid
 	}
 	return pluginImpl.Authenticate(ctx, in)
 }
 
-// AuthnPluginRPC is the plugin.Plugin implementation for go-plugin.
-type AuthnPluginRPC struct{ plugin.Plugin }
+// AuthnPluginRPC is the hplugin.Plugin implementation for go-plugin.
+type AuthnPluginRPC struct{ hplugin.Plugin }
 
-func (p *AuthnPluginRPC) Server(*plugin.MuxBroker) (interface{}, error) {
+func (p *AuthnPluginRPC) Server(*hplugin.MuxBroker) (interface{}, error) {
 	return nil, nil // Not used in client
 }
-func (p *AuthnPluginRPC) Client(b *plugin.MuxBroker, c *rpc.Client) (interface{}, error) {
+func (p *AuthnPluginRPC) Client(b *hplugin.MuxBroker, c *rpc.Client) (interface{}, error) {
 	return &AuthnRPC{client: c}, nil
 }
 
@@ -107,15 +67,15 @@ type AuthnRPC struct {
 	client *rpc.Client
 }
 
-func (a *AuthnRPC) Authenticate(ctx context.Context, in *AuthenticationInput) (*AuthenticationOutput, error) {
-	var out AuthenticationOutput
+func (a *AuthnRPC) Authenticate(ctx context.Context, in *plugin.AuthenticationInput) (*plugin.AuthenticationOutput, error) {
+	var out plugin.AuthenticationOutput
 	err := a.client.Call("Plugin.Authenticate", in, &out)
 	return &out, err
 }
 
 
 // Plugin handshake config for go-plugin
-var Handshake = plugin.HandshakeConfig{
+var Handshake = hplugin.HandshakeConfig{
 	ProtocolVersion:  1,
 	MagicCookieKey:   "SYFON_AUTHZ_PLUGIN",
 	MagicCookieValue: "syfon_authz_plugin_v1",
@@ -123,7 +83,7 @@ var Handshake = plugin.HandshakeConfig{
 
 // PluginClient is the concrete implementation for plugin communication.
 type PluginClient struct {
-	client *plugin.Client
+	client *hplugin.Client
 	raw    interface{}
 	mu     sync.Mutex
 }
@@ -135,13 +95,13 @@ type PluginManager struct {
 
 // NewPluginManager loads the plugin binary and returns a manager.
 func NewPluginManager(pluginPath string) (*PluginManager, error) {
-	client := plugin.NewClient(&plugin.ClientConfig{
+	client := hplugin.NewClient(&hplugin.ClientConfig{
 		HandshakeConfig: Handshake,
-		Plugins: map[string]plugin.Plugin{
+		Plugins: map[string]hplugin.Plugin{
 			"authz": &AuthzPluginRPC{},
 		},
 		Cmd:              exec.Command(pluginPath),
-		AllowedProtocols: []plugin.Protocol{plugin.ProtocolNetRPC},
+		AllowedProtocols: []hplugin.Protocol{hplugin.ProtocolNetRPC},
 	})
 
 	rpcClient, err := client.Client()
@@ -158,23 +118,23 @@ func NewPluginManager(pluginPath string) (*PluginManager, error) {
 }
 
 // Authorize delegates to the plugin.
-func (pm *PluginManager) Authorize(ctx context.Context, in *AuthorizationInput) (*AuthorizationOutput, error) {
+func (pm *PluginManager) Authorize(ctx context.Context, in *plugin.AuthorizationInput) (*plugin.AuthorizationOutput, error) {
 	pm.client.mu.Lock()
 	defer pm.client.mu.Unlock()
-	pluginImpl, ok := pm.client.raw.(AuthorizationPlugin)
+	pluginImpl, ok := pm.client.raw.(plugin.AuthorizationPlugin)
 	if !ok {
 		return nil, os.ErrInvalid
 	}
 	return pluginImpl.Authorize(ctx, in)
 }
 
-// AuthzPluginRPC is the plugin.Plugin implementation for go-plugin.
-type AuthzPluginRPC struct{ plugin.Plugin }
+// AuthzPluginRPC is the hplugin.Plugin implementation for go-plugin.
+type AuthzPluginRPC struct{ hplugin.Plugin }
 
-func (p *AuthzPluginRPC) Server(*plugin.MuxBroker) (interface{}, error) {
+func (p *AuthzPluginRPC) Server(*hplugin.MuxBroker) (interface{}, error) {
 	return nil, nil // Not used in client
 }
-func (p *AuthzPluginRPC) Client(b *plugin.MuxBroker, c *rpc.Client) (interface{}, error) {
+func (p *AuthzPluginRPC) Client(b *hplugin.MuxBroker, c *rpc.Client) (interface{}, error) {
 	return &AuthzRPC{client: c}, nil
 }
 
@@ -183,8 +143,8 @@ type AuthzRPC struct {
 	client *rpc.Client
 }
 
-func (a *AuthzRPC) Authorize(ctx context.Context, in *AuthorizationInput) (*AuthorizationOutput, error) {
-	var out AuthorizationOutput
+func (a *AuthzRPC) Authorize(ctx context.Context, in *plugin.AuthorizationInput) (*plugin.AuthorizationOutput, error) {
+	var out plugin.AuthorizationOutput
 	err := a.client.Call("Plugin.Authorize", in, &out)
 	return &out, err
 }
@@ -192,8 +152,8 @@ func (a *AuthzRPC) Authorize(ctx context.Context, in *AuthorizationInput) (*Auth
 // DummyPluginManager implements the same interface as PluginManager for testing.
 type DummyPluginManager struct{}
 
-func (d *DummyPluginManager) Authorize(ctx context.Context, in *AuthorizationInput) (*AuthorizationOutput, error) {
-	return &AuthorizationOutput{Allow: true}, nil
+func (d *DummyPluginManager) Authorize(ctx context.Context, in *plugin.AuthorizationInput) (*plugin.AuthorizationOutput, error) {
+	return &plugin.AuthorizationOutput{Allow: true}, nil
 }
 
 // Ensure PluginManager implements pluginManagerInterface
