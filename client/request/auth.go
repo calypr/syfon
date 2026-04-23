@@ -14,13 +14,26 @@ import (
 	"github.com/calypr/syfon/client/common"
 )
 
+type AuthMode string
+
+const (
+	AuthModeBasic  AuthMode = "basic"
+	AuthModeBearer AuthMode = "bearer"
+)
+
 type accessTokenResponse struct {
 	AccessToken string `json:"access_token"`
 }
 
 func (t *AuthTransport) NewAccessToken(ctx context.Context) error {
+	if t.Mode != AuthModeBearer {
+		return nil
+	}
 	if t.Cred == nil || t.Cred.APIKey == "" {
 		return errors.New("APIKey is required to refresh access token")
+	}
+	if strings.TrimSpace(t.Cred.APIEndpoint) == "" {
+		return errors.New("APIEndpoint is required to refresh access token")
 	}
 
 	refreshClient := &http.Client{Transport: t.Base}
@@ -71,32 +84,51 @@ type AuthTransport struct {
 	Manager   conf.ManagerInterface
 	Base      http.RoundTripper
 	Cred      *conf.Credential
+	Mode      AuthMode
 	mu        sync.RWMutex
 	refreshMu sync.Mutex
 }
 
-func (t *AuthTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+func (t *AuthTransport) apply(req *http.Request) {
 	if req.Header.Get("X-Skip-Auth") == "true" {
 		req.Header.Del("X-Skip-Auth")
-		return t.Base.RoundTrip(req)
+		return
+	}
+	if req.Header.Get("Authorization") != "" {
+		return
+	}
+	if t.Cred == nil {
+		return
 	}
 
-	var token string
-	if t.Cred != nil {
-		t.mu.RLock()
-		token = t.Cred.AccessToken
-		t.mu.RUnlock()
-	}
+	t.mu.RLock()
+	defer t.mu.RUnlock()
 
-	// Just add the header and pass it down
-	if token != "" && req.Header.Get("Authorization") == "" {
-		req.Header.Set("Authorization", "Bearer "+token)
+	switch t.Mode {
+	case AuthModeBearer:
+		if token := strings.TrimSpace(t.Cred.AccessToken); token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+	case AuthModeBasic:
+		if user := strings.TrimSpace(t.Cred.KeyID); user != "" {
+			req.SetBasicAuth(user, t.Cred.APIKey)
+		}
 	}
+}
+
+func (t *AuthTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	t.apply(req)
 	return t.Base.RoundTrip(req)
 }
 
 func (t *AuthTransport) refreshOnce(ctx context.Context) error {
+	if t.Mode != AuthModeBearer {
+		return nil
+	}
 	if t.Cred == nil {
+		return nil
+	}
+	if strings.TrimSpace(t.Cred.APIEndpoint) == "" {
 		return nil
 	}
 	t.refreshMu.Lock()

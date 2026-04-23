@@ -8,6 +8,7 @@ import (
 	"os"
 	"sort"
 	"sync"
+	"strings"
 
 	"github.com/calypr/syfon/client/common"
 	"github.com/calypr/syfon/client/transfer"
@@ -29,6 +30,17 @@ type GenericUploader struct {
 	Backend transfer.Backend
 }
 
+type uploadURLResolver interface {
+	ResolveUploadURL(ctx context.Context, guid string, filename string, metadata common.FileMetadata, bucket string) (string, error)
+}
+
+func effectiveObjectKey(req transfer.TransferRequest) string {
+	if key := strings.TrimSpace(req.ObjectKey); key != "" {
+		return key
+	}
+	return strings.TrimSpace(req.GUID)
+}
+
 func (u *GenericUploader) Upload(ctx context.Context, req transfer.TransferRequest, showProgress bool) error {
 	file, err := os.Open(req.SourcePath)
 	if err != nil {
@@ -48,12 +60,21 @@ func (u *GenericUploader) Upload(ctx context.Context, req transfer.TransferReque
 }
 
 func (u *GenericUploader) uploadSingle(ctx context.Context, req transfer.TransferRequest, file *os.File, size int64, showProgress bool) error {
+	objectKey := effectiveObjectKey(req)
+	uploadTarget := objectKey
+	if uploader, ok := u.Backend.(uploadURLResolver); ok {
+		presignedURL, err := uploader.ResolveUploadURL(ctx, req.GUID, objectKey, req.Metadata, req.Bucket)
+		if err != nil {
+			return err
+		}
+		uploadTarget = presignedURL
+	}
 	strategy := transfer.DefaultBackoff()
 	if err := transfer.RetryAction(ctx, u.Backend.Logger(), strategy, common.MaxRetryCount, func() error {
 		if _, err := file.Seek(0, io.SeekStart); err != nil {
 			return err
 		}
-		return u.Backend.Upload(ctx, req.GUID, file, size)
+		return u.Backend.Upload(ctx, uploadTarget, file, size)
 	}); err != nil {
 		return err
 	}
@@ -72,15 +93,16 @@ func (u *GenericUploader) uploadMultipart(ctx context.Context, req transfer.Tran
 
 	state, loaded := u.loadState(checkpointPath)
 	stat, _ := file.Stat()
+	objectKey := effectiveObjectKey(req)
 
 	if !loaded || !u.matches(state, req, stat, chunkSize) {
-		uploadID, err := u.Backend.MultipartInit(ctx, req.GUID)
+		uploadID, err := u.Backend.MultipartInit(ctx, objectKey)
 		if err != nil {
 			return err
 		}
 		state = &uploaderResumeState{
 			SourcePath:      req.SourcePath,
-			ObjectKey:       req.ObjectKey,
+			ObjectKey:       objectKey,
 			GUID:            req.GUID,
 			Bucket:          req.Bucket,
 			FileSize:        fileSize,
@@ -123,7 +145,7 @@ func (u *GenericUploader) uploadMultipart(ctx context.Context, req transfer.Tran
 				strategy := transfer.DefaultBackoff()
 				err := transfer.RetryAction(ctx, logger, strategy, common.MaxRetryCount, func() error {
 					section := io.NewSectionReader(file, offset, partSize)
-					etag, retryErr := u.Backend.MultipartPart(ctx, req.GUID, state.UploadID, partNum, section)
+					etag, retryErr := u.Backend.MultipartPart(ctx, objectKey, state.UploadID, partNum, section)
 					if retryErr != nil {
 						return retryErr
 					}
@@ -163,7 +185,7 @@ func (u *GenericUploader) uploadMultipart(ctx context.Context, req transfer.Tran
 	}
 	sort.Slice(parts, func(i, j int) bool { return parts[i].PartNumber < parts[j].PartNumber })
 
-	if err := u.Backend.MultipartComplete(ctx, req.GUID, state.UploadID, parts); err != nil {
+	if err := u.Backend.MultipartComplete(ctx, objectKey, state.UploadID, parts); err != nil {
 		return err
 	}
 
@@ -195,7 +217,11 @@ func (u *GenericUploader) matches(s *uploaderResumeState, req transfer.TransferR
 	if s == nil {
 		return false
 	}
-	return s.SourcePath == req.SourcePath && s.GUID == req.GUID && s.FileSize == info.Size() && s.ChunkSize == chunkSize
+	return s.SourcePath == req.SourcePath &&
+		s.GUID == req.GUID &&
+		s.ObjectKey == effectiveObjectKey(req) &&
+		s.FileSize == info.Size() &&
+		s.ChunkSize == chunkSize
 }
 
 func emitProgress(ctx context.Context, delta, total int64) {

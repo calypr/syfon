@@ -19,6 +19,8 @@ require (
 	gopkg.in/ini.v1 v1.67.1
 )
 
+replace github.com/calypr/syfon/apigen => ../apigen
+
 require (
 	cel.dev/expr v0.25.1 // indirect
 	cloud.google.com/go v0.123.0 // indirect

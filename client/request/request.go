@@ -4,7 +4,6 @@ package request
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -23,12 +22,10 @@ import (
 type Request struct {
 	Logs        *logs.Gen3Logger
 	RetryClient *retryablehttp.Client
+	Auth        *AuthTransport
 
 	BaseURL   string
 	UserAgent string
-	Token     string
-	User      string
-	Pass      string
 }
 
 type ResponseError struct {
@@ -91,13 +88,36 @@ type Requester interface {
 	Do(ctx context.Context, method, path string, body, out any, opts ...RequestOption) error
 }
 
-func NewRequestor(
+func NewBasicAuthRequestor(
 	logger *logs.Gen3Logger,
 	cred *conf.Credential,
 	conf conf.ManagerInterface,
 	baseURL string,
 	userAgent string,
 	baseHTTPClient *http.Client,
+) Requester {
+	return newRequestor(logger, cred, conf, baseURL, userAgent, baseHTTPClient, AuthModeBasic)
+}
+
+func NewBearerTokenRequestor(
+	logger *logs.Gen3Logger,
+	cred *conf.Credential,
+	conf conf.ManagerInterface,
+	baseURL string,
+	userAgent string,
+	baseHTTPClient *http.Client,
+) Requester {
+	return newRequestor(logger, cred, conf, baseURL, userAgent, baseHTTPClient, AuthModeBearer)
+}
+
+func newRequestor(
+	logger *logs.Gen3Logger,
+	cred *conf.Credential,
+	conf conf.ManagerInterface,
+	baseURL string,
+	userAgent string,
+	baseHTTPClient *http.Client,
+	mode AuthMode,
 ) Requester {
 	if logger == nil {
 		logger = logs.NewGen3Logger(nil, "", "")
@@ -126,9 +146,10 @@ func NewRequestor(
 
 	authTransport := &AuthTransport{
 		Base:    baseTransport,
-		Cred:    cred,
 		Manager: conf,
+		Mode:    mode,
 	}
+	authTransport.Cred = cred
 	retryClient.HTTPClient = &http.Client{
 		Timeout:   0,
 		Transport: authTransport,
@@ -143,6 +164,9 @@ func NewRequestor(
 
 		if resp != nil &&
 			(resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusBadGateway) {
+			if authTransport.Mode != AuthModeBearer || authTransport.Cred == nil || strings.TrimSpace(authTransport.Cred.APIEndpoint) == "" || strings.TrimSpace(authTransport.Cred.APIKey) == "" {
+				return shouldRetry, retryErr
+			}
 			err := authTransport.refreshOnce(ctx)
 			if err != nil {
 				return false, err
@@ -154,14 +178,10 @@ func NewRequestor(
 
 	r := &Request{
 		RetryClient: retryClient,
+		Auth:        authTransport,
 		Logs:        logger,
 		BaseURL:     strings.TrimRight(baseURL, "/"),
 		UserAgent:   userAgent,
-	}
-	if cred != nil {
-		r.Token = cred.AccessToken
-		r.User = cred.KeyID
-		r.Pass = cred.APIKey
 	}
 	return r
 }
@@ -208,16 +228,12 @@ func (r *Request) Do(ctx context.Context, method, path string, body, out any, op
 		httpReq.Header.Set("X-Skip-Auth", "true")
 	}
 
-	// Apply Auth
-	token := rb.Token
-	if token == "" {
-		token = r.Token
-	}
-	if token != "" {
+	// Apply auth via the shared transport so direct request calls and generated
+	// API clients behave the same way.
+	if token := rb.Token; token != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+token)
-	} else if r.User != "" {
-		auth := base64.StdEncoding.EncodeToString([]byte(r.User + ":" + r.Pass))
-		httpReq.Header.Set("Authorization", "Basic "+auth)
+	} else if r.Auth != nil {
+		r.Auth.apply(httpReq)
 	}
 
 	if rb.PartSize != 0 {

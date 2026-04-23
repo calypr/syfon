@@ -2,6 +2,7 @@ package syfonclient
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -16,7 +17,6 @@ import (
 func TestDRSServiceResolveAndList(t *testing.T) {
 	t.Parallel()
 
-	var lastIndexQuery url.Values
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/objects/obj-1":
@@ -38,21 +38,23 @@ func TestDRSServiceResolveAndList(t *testing.T) {
 		case r.Method == http.MethodPost && r.URL.Path == "/objects/register":
 			name := "registered.bin"
 			writeJSON(t, w, http.StatusCreated, drsapi.N201ObjectsCreated{Objects: []drsapi.DrsObject{{Id: "obj-created", Name: &name, Checksums: []drsapi.Checksum{{Type: "sha256", Checksum: "abc"}}, CreatedTime: time.Now()}}})
-		case r.Method == http.MethodGet && r.URL.Path == "/index":
-			lastIndexQuery = r.URL.Query()
-			name := "record.bin"
-			size := int64(77)
-			urls := []string{"https://storage.example/record.bin"}
-			hashes := internalapi.HashInfo{"sha256": "abc123"}
-			records := []internalapi.InternalRecord{{Did: "did-record", Authz: []string{"/programs/p1"}, FileName: &name, Size: &size, Urls: &urls, Hashes: &hashes}}
-			writeJSON(t, w, http.StatusOK, internalapi.ListRecordsResponse{Records: &records})
 		default:
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
 		}
 	}))
 	defer server.Close()
 
-	index := NewIndexService(mustInternalClient(t, server.URL), &fakeRequester{})
+	recordName := "record.bin"
+	recordSize := int64(77)
+	recordUrls := []string{"https://storage.example/record.bin"}
+	recordHashes := internalapi.HashInfo{"sha256": "abc123"}
+	records := []internalapi.InternalRecord{{Did: "did-record", Authz: []string{"/programs/p1"}, FileName: &recordName, Size: &recordSize, Urls: &recordUrls, Hashes: &recordHashes}}
+	listResp, err := json.Marshal(internalapi.ListRecordsResponse{Records: &records})
+	if err != nil {
+		t.Fatalf("marshal list response: %v", err)
+	}
+	requester := &fakeRequester{responseJSON: listResp}
+	index := NewIndexService(mustInternalClient(t, server.URL), requester)
 	service := NewDRSService(mustDRSClient(t, server.URL), index)
 	ctx := context.Background()
 
@@ -77,8 +79,12 @@ func TestDRSServiceResolveAndList(t *testing.T) {
 	if err != nil || len(page.DrsObjects) != 1 || page.DrsObjects[0].Id != "did-record" {
 		t.Fatalf("ListObjects returned page=%+v err=%v", page, err)
 	}
-	if lastIndexQuery.Get("limit") != "5" || lastIndexQuery.Get("page") != "2" {
-		t.Fatalf("unexpected list query values: %v", lastIndexQuery)
+	query, err := url.ParseQuery(strings.TrimPrefix(requester.builder.Url, "/index?"))
+	if err != nil {
+		t.Fatalf("parse list query: %v", err)
+	}
+	if query.Get("limit") != "5" || query.Get("page") != "2" {
+		t.Fatalf("unexpected list query values: %v", query)
 	}
 	if page.DrsObjects[0].AccessMethods == nil || len(*page.DrsObjects[0].AccessMethods) != 1 {
 		t.Fatalf("expected mapped access methods, got %+v", page.DrsObjects[0])
@@ -92,24 +98,36 @@ func TestDRSServiceResolveAndList(t *testing.T) {
 	if err != nil || len(projectPage.DrsObjects) != 1 {
 		t.Fatalf("ListObjectsByProject returned page=%+v err=%v", projectPage, err)
 	}
-	if lastIndexQuery.Get("project") != "proj-1" || lastIndexQuery.Get("limit") != "10" || lastIndexQuery.Get("page") != "3" {
-		t.Fatalf("unexpected project list query values: %v", lastIndexQuery)
+	query, err = url.ParseQuery(strings.TrimPrefix(requester.builder.Url, "/index?"))
+	if err != nil {
+		t.Fatalf("parse project list query: %v", err)
+	}
+	if query.Get("project") != "proj-1" || query.Get("limit") != "10" || query.Get("page") != "3" {
+		t.Fatalf("unexpected project list query values: %v", query)
 	}
 
 	sample, err := service.GetProjectSample(ctx, "proj-2", 4)
 	if err != nil || len(sample.DrsObjects) != 1 {
 		t.Fatalf("GetProjectSample returned page=%+v err=%v", sample, err)
 	}
-	if lastIndexQuery.Get("project") != "proj-2" || lastIndexQuery.Get("page") != "1" {
-		t.Fatalf("unexpected sample query values: %v", lastIndexQuery)
+	query, err = url.ParseQuery(strings.TrimPrefix(requester.builder.Url, "/index?"))
+	if err != nil {
+		t.Fatalf("parse sample list query: %v", err)
+	}
+	if query.Get("project") != "proj-2" || query.Get("page") != "1" {
+		t.Fatalf("unexpected sample query values: %v", query)
 	}
 
 	hashPage, err := service.BatchGetObjectsByHash(ctx, []string{"abc", "def"})
 	if err != nil || len(hashPage.DrsObjects) != 1 {
 		t.Fatalf("BatchGetObjectsByHash returned page=%+v err=%v", hashPage, err)
 	}
-	if lastIndexQuery.Get("hash") != "abc,def" {
-		t.Fatalf("expected joined hash query, got %v", lastIndexQuery)
+	query, err = url.ParseQuery(strings.TrimPrefix(requester.builder.Url, "/index?"))
+	if err != nil {
+		t.Fatalf("parse hash query: %v", err)
+	}
+	if query.Get("hash") != "abc,def" {
+		t.Fatalf("expected joined hash query, got %v", query)
 	}
 
 	accessURL, err := service.GetAccessURL(ctx, "obj-1", "acc-1")
@@ -122,4 +140,3 @@ func TestDRSServiceResolveAndList(t *testing.T) {
 		t.Fatalf("RegisterObjects returned registered=%+v err=%v", registered, err)
 	}
 }
-

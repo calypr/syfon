@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/calypr/syfon/apigen/client/internalapi"
@@ -78,33 +79,30 @@ func (s *IndexService) Delete(ctx context.Context, did string) error {
 }
 
 func (s *IndexService) List(ctx context.Context, opts ListRecordsOptions) (internalapi.ListRecordsResponse, error) {
-	params := &internalapi.InternalListParams{}
+	params := url.Values{}
 	if opts.Hash != "" {
-		params.Hash = &opts.Hash
+		params.Set("hash", opts.Hash)
 	}
 	if opts.Authz != "" {
-		params.Authz = &opts.Authz
+		params.Set("authz", opts.Authz)
 	}
 	if opts.Organization != "" {
-		params.Organization = &opts.Organization
+		params.Set("organization", opts.Organization)
 	}
 	if opts.ProjectID != "" {
-		params.Project = &opts.ProjectID
+		params.Set("project", opts.ProjectID)
 	}
 	if opts.Limit != 0 {
-		params.Limit = &opts.Limit
+		params.Set("limit", fmt.Sprintf("%d", opts.Limit))
 	}
 	if opts.Page != 0 {
-		params.Page = &opts.Page
+		params.Set("page", fmt.Sprintf("%d", opts.Page))
 	}
-	resp, err := s.gen.InternalListWithResponse(ctx, params)
-	if err != nil {
+	var out internalapi.ListRecordsResponse
+	if err := s.requestor.Do(ctx, http.MethodGet, "/index", nil, &out, request.WithQueryValues(params)); err != nil {
 		return internalapi.ListRecordsResponse{}, err
 	}
-	if resp.JSON200 == nil {
-		return internalapi.ListRecordsResponse{}, fmt.Errorf("failed to list records: %d", resp.StatusCode())
-	}
-	return *resp.JSON200, nil
+	return out, nil
 }
 
 func (s *IndexService) DeleteByQuery(ctx context.Context, opts DeleteByQueryOptions) (internalapi.DeleteByQueryResponse, error) {

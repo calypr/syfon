@@ -202,5 +202,14 @@ func (d *GenericDownloader) downloadParallel(ctx context.Context, guid string, d
 		})
 	}
 
-	return g.Wait()
+	if err := g.Wait(); err != nil {
+		// Parallel downloads pre-allocate the destination file to its final size.
+		// If any part fails, remove the incomplete file so retries do not mistake it
+		// for a completed cache entry.
+		_ = file.Close()
+		_ = os.Remove(dstPath)
+		return err
+	}
+
+	return nil
 }

@@ -119,6 +119,14 @@ func TestLFSBatchUploadReturnsActionsWithoutPlaceholder(t *testing.T) {
 	}
 }
 
+func TestUploadPartToSignedURLFaultInjection(t *testing.T) {
+	t.Setenv(multipartUploadPartFaultEnv, "1")
+
+	if _, err := uploadPartToSignedURL(context.Background(), "http://example.org/upload", []byte("payload")); err == nil {
+		t.Fatal("expected multipart upload part fault injection to fail the first call")
+	}
+}
+
 func TestResolveObjectForOIDFallsBackToChecksum(t *testing.T) {
 	db := &testutils.MockDatabase{
 		Objects: map[string]*drs.DrsObject{},

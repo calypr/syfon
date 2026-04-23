@@ -2,9 +2,11 @@ package syfonclient
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,17 +17,42 @@ import (
 )
 
 type fakeRequester struct {
-	method string
-	path   string
-	body   any
-	err    error
+	method       string
+	path         string
+	body         any
+	err          error
+	responseJSON []byte
+	builder      request.RequestBuilder
 }
 
 func (f *fakeRequester) Do(ctx context.Context, method, path string, body, out any, opts ...request.RequestOption) error {
 	f.method = method
 	f.path = path
 	f.body = body
+	f.builder = request.RequestBuilder{Method: method, Url: path, Headers: map[string]string{}}
+	for _, opt := range opts {
+		opt(&f.builder)
+	}
+	if outResp, ok := out.(**http.Response); ok {
+		resp := &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader("")),
+			Header:     make(http.Header),
+		}
+		*outResp = resp
+		return f.err
+	}
+	if err := f.decodeInto(out); err != nil {
+		return err
+	}
 	return f.err
+}
+
+func (f *fakeRequester) decodeInto(out any) error {
+	if out == nil || len(f.responseJSON) == 0 {
+		return nil
+	}
+	return json.Unmarshal(f.responseJSON, out)
 }
 
 type fakeBucketClient struct {
@@ -385,4 +412,3 @@ func TestLFSService(t *testing.T) {
 		}
 	})
 }
-

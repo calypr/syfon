@@ -20,11 +20,41 @@ import (
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/testutils"
+	"github.com/calypr/syfon/internal/urlmanager"
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 )
 
 func ptr[T any](v T) *T { return &v }
+
+type capturingMultipartURLManager struct {
+	key string
+}
+
+func (m *capturingMultipartURLManager) SignURL(ctx context.Context, accessId string, url string, opts urlmanager.SignOptions) (string, error) {
+	return url, nil
+}
+
+func (m *capturingMultipartURLManager) SignUploadURL(ctx context.Context, accessId string, url string, opts urlmanager.SignOptions) (string, error) {
+	return url, nil
+}
+
+func (m *capturingMultipartURLManager) InitMultipartUpload(ctx context.Context, bucket string, key string) (string, error) {
+	m.key = key
+	return "upload-1", nil
+}
+
+func (m *capturingMultipartURLManager) SignMultipartPart(ctx context.Context, bucket string, key string, uploadId string, partNumber int32) (string, error) {
+	return "", nil
+}
+
+func (m *capturingMultipartURLManager) SignDownloadPart(ctx context.Context, accessId string, url string, start int64, end int64, opts urlmanager.SignOptions) (string, error) {
+	return "", nil
+}
+
+func (m *capturingMultipartURLManager) CompleteMultipartUpload(ctx context.Context, bucket string, key string, uploadId string, parts []urlmanager.MultipartPart) error {
+	return nil
+}
 
 func TestHandleInternalDownload(t *testing.T) {
 	mockDB := &testutils.MockDatabase{
@@ -371,6 +401,30 @@ func TestHandleInternalMultipartInit(t *testing.T) {
 	}
 	if _, ok := raw["upload_id"]; ok {
 		t.Fatalf("unexpected legacy upload_id field in response, got %v", raw)
+	}
+}
+
+func TestHandleInternalMultipartInit_PreservesRequestedKey(t *testing.T) {
+	mockDB := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}
+	mockUM := &capturingMultipartURLManager{}
+
+	key := "programs/programs/projects/e2e/sha256-value"
+	reqBody := internalapi.InternalMultipartInitRequest{Guid: &key}
+	body, _ := json.Marshal(reqBody)
+	req, err := http.NewRequest("POST", "/data/multipart/init", bytes.NewBuffer(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rr := httptest.NewRecorder()
+	om := core.NewObjectManager(mockDB, mockUM)
+	handleInternalMultipartInit(rr, req, om)
+
+	if status := rr.Code; status != http.StatusOK {
+		t.Fatalf("handler returned wrong status code: got %v want %v body=%s", status, http.StatusOK, rr.Body.String())
+	}
+	if mockUM.key != key {
+		t.Fatalf("expected multipart init key %q, got %q", key, mockUM.key)
 	}
 }
 
