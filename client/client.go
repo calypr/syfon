@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/calypr/syfon/apigen/client/bucketapi"
 	"github.com/calypr/syfon/apigen/client/drs"
@@ -94,9 +95,8 @@ func WithBearerToken(token string) Option {
 func DefaultConfig() *Config {
 	return &Config{
 		Address: defaultAddress,
-		// We set absolute Timeout to 0 to allow per-request context timeouts
-		// to control the deadline (essential for large uploads).
-		HTTPClient: &http.Client{Timeout: 0},
+		// SECURITY FIX INFO-3: Set reasonable timeout for overall client (10 minutes for large transfers)
+		HTTPClient: &http.Client{Timeout: 10 * time.Minute},
 		UserAgent:  defaultUA,
 	}
 }

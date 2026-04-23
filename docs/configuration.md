@@ -151,6 +151,54 @@ If `DRS_CREDENTIAL_KMS_KEY_ID` is set (or `DRS_CREDENTIAL_KEY_MANAGER=aws-kms`),
 - `DRS_AUTH_CACHE_MAX_ENTRIES`
 - `DRS_AUTH_CACHE_CLEANUP_SECONDS`
 
+## Auth plugin setup
+
+### LocalAuth (local mode)
+
+- Set `auth.mode: local` in your config file.
+- Optionally set HTTP basic auth credentials:
+  - `auth.basic.username`
+  - `auth.basic.password`
+- Or use environment variables:
+  - `DRS_BASIC_AUTH_USER`
+  - `DRS_BASIC_AUTH_PASSWORD`
+- **To use the plugin-based local auth:**
+  - Build the plugin:
+    ```sh
+    make build-local-auth-plugin
+    ```
+  - Set:
+    ```sh
+    export SYFON_AUTHN_PLUGIN_PATH=bin/local_auth_plugin
+    syfon serve --config config.yaml
+    ```
+- No external dependencies required for local mode.
+
+### Gen3Auth (gen3 mode)
+
+- Set `auth.mode: gen3` in your config file.
+- Requires PostgreSQL unless mock auth is enabled.
+- For local testing, enable mock auth with environment variables:
+  - `DRS_AUTH_MOCK_ENABLED=true`
+  - `DRS_AUTH_MOCK_RESOURCES="/data_file,/programs/my-org/projects/my-project"`
+  - `DRS_AUTH_MOCK_METHODS="read,file_upload,create,update,delete"`
+  - `DRS_AUTH_MOCK_REQUIRE_AUTH_HEADER=true` (optional)
+- In production, set the trusted Fence instance URL with `DRS_FENCE_URL` (must be a single valid `https://` URL, not a CSV list).
+  - Example: `export DRS_FENCE_URL="https://fence.example.com"`
+  - The server will only accept JWTs with an `iss` claim matching this URL, and will fetch JWKS from this endpoint.
+- **To use the plugin-based Gen3 auth:**
+  - Build the plugin:
+    ```sh
+    make build-gen3-auth-plugin
+    ```
+  - Set:
+    ```sh
+    export SYFON_AUTHN_PLUGIN_PATH=bin/gen3_auth_plugin
+    syfon serve --config config.yaml
+    ```
+
+See README.md and deployment docs for more details.
+
 ## CLI usage
 
 Run server:

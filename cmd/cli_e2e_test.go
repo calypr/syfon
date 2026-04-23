@@ -72,6 +72,12 @@ func (s *fiberTestServer) Close() {
 
 func newSyfonTestServer(t *testing.T) *fiberTestServer {
 	t.Helper()
+
+	kek := filepath.Join(t.TempDir(), ".syfon-credential-kek")
+	t.Setenv("DRS_CREDENTIAL_LOCAL_KEY_FILE", kek)
+	t.Setenv("SYFON_CREDENTIAL_KEK_DIR", kek)
+	// start server...
+
 	storageDir := t.TempDir()
 
 	database := db.NewInMemoryDB()

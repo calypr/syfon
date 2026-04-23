@@ -63,6 +63,14 @@ jobs:
         run: |
           COVERAGE_SCOPE=client ./scripts/run_coverage.sh
 
+      - name: Build plugin binaries (local_authn_plugin and gen3_authn_plugin)
+        run: make build-plugins
+        shell: bash
+
+      - name: Verify Security Tests
+        run: ./scripts/run-security-tests.sh
+        shell: bash
+
       - name: Upload binary endpoint coverage to Codecov (OIDC)
         id: codecov_binary_endpoint_oidc
         continue-on-error: true
@@ -157,9 +165,17 @@ jobs:
             coverage/binary-endpoint.out
             client/coverage/coverage.out
 
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
       - name: Run go vet
         run: go vet ./...
 
+      - name: Check for Go CVEs - Root module
+        run: $(go env GOPATH)/bin/govulncheck ./...
+
+      - name: Check for Go CVEs - Client module
+        run: cd client && $(go env GOPATH)/bin/govulncheck ./...
   integration-test:
     name: Docker Integration Test
     runs-on: ubuntu-latest
