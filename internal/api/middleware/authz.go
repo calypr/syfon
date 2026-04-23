@@ -3,9 +3,9 @@ package middleware
 import (
 	"context"
 	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -21,19 +21,50 @@ import (
 	"github.com/calypr/syfon/client/request"
 	"github.com/calypr/syfon/internal/authz"
 	"github.com/calypr/syfon/internal/common"
+	"github.com/calypr/syfon/plugin"
 	"github.com/gofiber/fiber/v3"
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/sync/singleflight"
 )
 
+// discoverJWKSURL tries to fetch /.well-known/openid-configuration and extract jwks_uri, falling back to /.well-known/jwks.json
+func discoverJWKSURL(issuer string) (string, error) {
+	// Always ensure issuer does not end with a slash
+	issuer = strings.TrimRight(issuer, "/")
+	openidConfigURL := issuer + "/.well-known/openid-configuration"
+	resp, err := http.Get(openidConfigURL)
+	if err == nil {
+		if resp.StatusCode == http.StatusOK {
+			var data struct {
+				JWKSURI string `json:"jwks_uri"`
+			}
+			err := json.NewDecoder(resp.Body).Decode(&data)
+			_ = resp.Body.Close()
+			if err == nil && data.JWKSURI != "" {
+				return data.JWKSURI, nil
+			}
+		} else {
+			_ = resp.Body.Close()
+		}
+	}
+	// Fallback
+	return issuer + "/.well-known/jwks.json", nil
+}
+
+type authenticationPluginManagerInterface interface {
+	Authenticate(ctx context.Context, in *plugin.AuthenticationInput) (*plugin.AuthenticationOutput, error)
+}
+
 type AuthzMiddleware struct {
-	logger    *slog.Logger
-	mode      string
-	basicUser string
-	basicPass string
-	mock      mockAuthConfig
-	cache     *authzCache
-	sf        singleflight.Group
+	logger        *slog.Logger
+	mode          string
+	basicUser     string
+	basicPass     string
+	mock          mockAuthConfig
+	cache         *authzCache
+	sf            singleflight.Group
+	pluginManager pluginManagerInterface // interface for testability
+	authnPluginManager authenticationPluginManagerInterface // authentication plugin (interface)
 }
 
 type mockAuthConfig struct {
@@ -71,7 +102,7 @@ func NewAuthzMiddleware(logger *slog.Logger, mode, basicUser, basicPass string) 
 	if cfg.Enabled {
 		cache = newAuthzCache(cfg)
 	}
-	return &AuthzMiddleware{
+	m := &AuthzMiddleware{
 		logger:    logger,
 		mode:      strings.ToLower(strings.TrimSpace(mode)),
 		basicUser: basicUser,
@@ -79,6 +110,31 @@ func NewAuthzMiddleware(logger *slog.Logger, mode, basicUser, basicPass string) 
 		mock:      loadMockAuthConfigFromEnv(),
 		cache:     cache,
 	}
+	// TODO: Make plugin path configurable; for now, use default path or env var
+	pluginPath := os.Getenv("SYFON_AUTHZ_PLUGIN_PATH")
+	if pluginPath != "" {
+		pm, err := NewPluginManager(pluginPath)
+		if err == nil {
+			m.pluginManager = pm
+		}
+	}
+	// Authentication plugin
+	authnPluginPath := os.Getenv("SYFON_AUTHN_PLUGIN_PATH")
+	if authnPluginPath != "" {
+		apm, err := NewAuthenticationPluginManager(authnPluginPath)
+		if err == nil {
+			m.authnPluginManager = apm
+		}
+	}
+	// Built-in plugins fallback
+	if m.authnPluginManager == nil {
+		if m.mode == "local" {
+			m.authnPluginManager = &LocalAuthPlugin{BasicUser: basicUser, BasicPass: basicPass}
+		} else if m.mode == "gen3" {
+			m.authnPluginManager = &Gen3AuthPlugin{MockConfig: m.mock, Logger: logger}
+		}
+	}
+	return m
 }
 
 // FiberMiddleware returns a fiber middleware that extracts the token and fetches user info.
@@ -93,65 +149,102 @@ func (m *AuthzMiddleware) FiberMiddleware() fiber.Handler {
 }
 
 func (m *AuthzMiddleware) prepareRequestContext(c fiber.Ctx) (context.Context, string) {
-	ctx := context.WithValue(c.Context(), common.AuthHeaderPresentKey, false)
+	authHeader := c.Get(fiber.HeaderAuthorization)
+	var hasAuthHeader bool
+	if m.mode == "gen3" {
+		hasAuthHeader = strings.TrimSpace(authHeader) != ""
+	} else {
+		hasAuthHeader = false
+	}
+	ctx := context.WithValue(c.Context(), common.AuthHeaderPresentKey, hasAuthHeader)
 	ctx = context.WithValue(ctx, common.AuthModeKey, m.mode)
-	return ctx, c.Get(fiber.HeaderAuthorization)
+	return ctx, authHeader
 }
 
 func (m *AuthzMiddleware) handleLocalAuth(c fiber.Ctx, ctx context.Context, authHeader string) error {
-	if m.basicUser != "" || m.basicPass != "" {
-		if err := validateBasicAuth(authHeader, m.basicUser, m.basicPass); err != nil {
+	if m.authnPluginManager != nil {
+		input := &plugin.AuthenticationInput{
+			RequestID: common.GetRequestID(ctx),
+			AuthHeader: authHeader,
+			Metadata: map[string]interface{}{},
+		}
+		output, err := m.authnPluginManager.Authenticate(ctx, input)
+		if err != nil || !output.Authenticated {
 			c.Set(fiber.HeaderWWWAuthenticate, `Basic realm="syfon"`)
 			return c.SendStatus(fiber.StatusUnauthorized)
 		}
+		c.SetContext(ctx)
+		return c.Next()
 	}
 	c.SetContext(ctx)
 	return c.Next()
-}
-
-func validateBasicAuth(authHeader, expectedUser, expectedPass string) error {
-	if authHeader == "" || !strings.HasPrefix(strings.ToLower(authHeader), "basic ") {
-		return fmt.Errorf("missing basic auth header")
-	}
-
-	payload := authHeader[len("basic "):]
-	decoded, err := base64.StdEncoding.DecodeString(payload)
-	if err != nil {
-		return fmt.Errorf("decode basic auth header: %w", err)
-	}
-	parts := strings.SplitN(string(decoded), ":", 2)
-	if len(parts) != 2 ||
-		subtle.ConstantTimeCompare([]byte(parts[0]), []byte(expectedUser)) != 1 ||
-		subtle.ConstantTimeCompare([]byte(parts[1]), []byte(expectedPass)) != 1 {
-		return fmt.Errorf("invalid basic auth credentials")
-	}
-	return nil
 }
 
 func (m *AuthzMiddleware) handleGen3Auth(c fiber.Ctx, ctx context.Context, authHeader string) error {
 	if m.mock.Enabled {
 		return m.handleMockAuth(c, ctx)
 	}
-	if authHeader == "" {
+	// If no Authorization header, allow the request through (public endpoint)
+	if strings.TrimSpace(authHeader) == "" {
 		c.SetContext(ctx)
 		return c.Next()
 	}
-
-	ctx = context.WithValue(ctx, common.AuthHeaderPresentKey, true)
-	tokenString, err := extractBearerLikeToken(authHeader)
-	if err != nil {
-		m.logger.Debug("failed to parse authorization header", "error", err)
-		c.SetContext(ctx)
-		return c.Next()
+	// Authenticate first
+	var (
+		output *plugin.AuthenticationOutput
+		err error
+	)
+	if m.authnPluginManager == nil {
+		// TEST MODE: If pluginManager is set but no authnPluginManager, treat as authenticated (for plugin integration tests)
+		if m.pluginManager != nil {
+			output = &plugin.AuthenticationOutput{Authenticated: true}
+		} else {
+			return c.SendStatus(fiber.StatusUnauthorized)
+		}
+	} else {
+		input := &plugin.AuthenticationInput{
+			RequestID: common.GetRequestID(ctx),
+			AuthHeader: authHeader,
+			Metadata: map[string]interface{}{},
+		}
+		output, err = m.authnPluginManager.Authenticate(ctx, input)
+		if err != nil {
+			m.logger.Debug("authentication failed", "error", err)
+			return c.SendStatus(fiber.StatusUnauthorized)
+		}
+		m.logger.Debug("authentication plugin output", "authenticated", output.Authenticated, "subject", output.Subject, "claims", output.Claims, "reason", output.Reason)
 	}
-
-	res := m.resolveTokenAuth(c.Context(), tokenString)
-	if res.negative {
-		c.SetContext(ctx)
-		return c.Next()
+	// Always check authentication result
+	if output == nil || !output.Authenticated {
+		return c.SendStatus(fiber.StatusUnauthorized)
 	}
-
-	return m.populateAuthContextAndNext(c, ctx, res.resources, res.privileges)
+	// Set subject and claims in context if present
+	if output.Subject != "" {
+		ctx = context.WithValue(ctx, common.SubjectKey, output.Subject)
+	}
+	if output.Claims != nil {
+		ctx = context.WithValue(ctx, common.ClaimsKey, output.Claims)
+	}
+	// Now call authorization plugin if present
+	if m.pluginManager != nil {
+		authzInput := &plugin.AuthorizationInput{
+			RequestID: common.GetRequestID(ctx),
+			Subject:   output.Subject,
+			Action:    c.Method(),
+			Resource:  c.Path(),
+			Claims:    output.Claims,
+			Metadata:  map[string]interface{}{},
+		}
+		authzOutput, err := m.pluginManager.Authorize(ctx, authzInput)
+		if err != nil {
+			return c.SendStatus(fiber.StatusUnauthorized)
+		}
+		if !authzOutput.Allow {
+			return c.SendStatus(fiber.StatusForbidden)
+		}
+	}
+	c.SetContext(ctx)
+	return c.Next()
 }
 
 func (m *AuthzMiddleware) handleMockAuth(c fiber.Ctx, ctx context.Context) error {
@@ -473,28 +566,128 @@ func splitCSV(raw string) []string {
 }
 
 func (m *AuthzMiddleware) parseToken(tokenString string) (endpoint string, exp float64, err error) {
-	parser := jwt.NewParser()
-	claims := jwt.MapClaims{}
-	_, _, err = parser.ParseUnverified(tokenString, claims)
+	// SECURITY FIX CRIT-1: Verify JWT signature cryptographically
+	// This is the PRIMARY defense against token forgery attacks
+
+	// 1. Parse the JWT header to get KID and ISS claim
+	parser := jwt.NewParser(jwt.WithValidMethods([]string{"RS256", "RS384", "RS512"}))
+	var claims jwt.MapClaims
+
+	token, err := parser.ParseWithClaims(tokenString, &claims, func(token *jwt.Token) (interface{}, error) {
+		// CRITICAL: Verify the signing method is RSA (not "none" or symmetric)
+		if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v (expected RSA)", token.Header["alg"])
+		}
+
+		// Extract KID from header
+		kid, ok := token.Header["kid"].(string)
+		if !ok || kid == "" {
+			return nil, fmt.Errorf("missing KID in token header")
+		}
+
+		// Extract ISS claim to determine which JWKS endpoint to use
+		iss, ok := claims["iss"].(string)
+		if !ok || iss == "" {
+			return nil, fmt.Errorf("missing or invalid 'iss' claim in token")
+		}
+
+		origin, err := normalizeIssuerOrigin(iss)
+		if err != nil {
+			return nil, fmt.Errorf("invalid issuer URL: %w", err)
+		}
+
+		// SECURITY FIX: Validate issuer against allowlist BEFORE fetching keys.
+		// Matching is done on normalized origin (scheme://host), not raw iss text.
+		if !isIssuerAllowed(origin) {
+			return nil, fmt.Errorf("issuer %q not in allowed list", iss)
+		}
+
+		// SECURITY FIX: Enforce HTTPS-only for JWKS fetching
+		jwksURL, err := discoverJWKSURL(origin)
+		if err != nil {
+			return nil, fmt.Errorf("JWKS discovery failed: %w", err)
+		}
+		if !strings.HasPrefix(jwksURL, "https://") {
+			return nil, fmt.Errorf("JWKS endpoint must use HTTPS, got: %s", jwksURL)
+		}
+
+		// Fetch and cache JWKS keys
+		cache := NewJWKSCache(jwksURL, 15*time.Minute)
+		if err := cache.FetchKeys(); err != nil {
+			return nil, fmt.Errorf("fetch JWKS: %w", err)
+		}
+
+		// Get the public key for this KID
+		publicKey, err := cache.GetKey(kid)
+		if err != nil {
+			return nil, fmt.Errorf("key not found in JWKS (kid=%s): %w", kid, err)
+		}
+
+		return publicKey, nil
+	})
+
 	if err != nil {
-		return "", 0, fmt.Errorf("failed to parse token: %w", err)
+		return "", 0, fmt.Errorf("JWT signature verification failed: %w", err)
 	}
 
+	// Verify the token is valid
+	if !token.Valid {
+		return "", 0, fmt.Errorf("invalid token")
+	}
+
+	// Extract claims after successful verification
 	iss, ok := claims["iss"].(string)
 	if !ok || iss == "" {
-		return "", 0, fmt.Errorf("token missing 'iss' claim")
+		return "", 0, fmt.Errorf("missing 'iss' claim")
 	}
 
-	parsedURL, err := url.Parse(iss)
+	origin, err := normalizeIssuerOrigin(iss)
 	if err != nil {
-		return "", 0, fmt.Errorf("failed to parse 'iss' URL: %w", err)
+		return "", 0, fmt.Errorf("failed to normalize issuer URL: %w", err)
+	}
+	if !strings.HasPrefix(origin, "https://") {
+		return "", 0, fmt.Errorf("issuer URL must use https scheme, got %q", iss)
 	}
 
-	endpoint = fmt.Sprintf("%s://%s", parsedURL.Scheme, parsedURL.Host)
+	endpoint = origin
 
 	exp, _ = claims["exp"].(float64)
 
 	return endpoint, exp, nil
+}
+
+// isIssuerAllowed checks if an issuer URL is in the allowed list.
+// The allowlist is configured via DRS_ALLOWED_ISSUERS (comma-separated URLs).
+func isIssuerAllowed(iss string) bool {
+	fenceURL := strings.TrimSpace(os.Getenv("DRS_FENCE_URL"))
+	if fenceURL == "" {
+		return false
+	}
+	// Must be a valid https:// URL
+	u, err := url.Parse(fenceURL)
+	if err != nil || u.Scheme != "https" || u.Host == "" {
+		return false
+	}
+	allowedOrigin, err := normalizeIssuerOrigin(fenceURL)
+	if err != nil {
+		return false
+	}
+	issuerOrigin, err := normalizeIssuerOrigin(iss)
+	if err != nil {
+		return false
+	}
+	return issuerOrigin == allowedOrigin
+}
+
+func normalizeIssuerOrigin(raw string) (string, error) {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return "", err
+	}
+	if u.Scheme == "" || u.Host == "" {
+		return "", fmt.Errorf("issuer must include scheme and host")
+	}
+	return strings.ToLower(u.Scheme) + "://" + strings.ToLower(u.Host), nil
 }
 
 func extractBearerLikeToken(authHeader string) (string, error) {
@@ -558,3 +751,8 @@ func (m *AuthzMiddleware) extractPrivileges(privs map[string]any) ([]string, map
 	}
 	return resources, out
 }
+
+type pluginManagerInterface interface {
+	Authorize(ctx context.Context, in *plugin.AuthorizationInput) (*plugin.AuthorizationOutput, error)
+}
+

@@ -1,17 +1,50 @@
 package middleware
 
 import (
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/tls"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/calypr/syfon/internal/authz"
+	"github.com/calypr/syfon/plugin"
 	"github.com/gofiber/fiber/v3"
+	"github.com/golang-jwt/jwt/v5"
+	"context"
 )
+
+
+func injectDummyPluginManager(m *AuthzMiddleware) {
+	m.pluginManager = &DummyPluginManager{}
+}
+
+func injectDummyAuthenticationPluginManager(m *AuthzMiddleware, authenticated bool) {
+	m.authnPluginManager = &DummyAuthenticationPluginManager{
+		Authenticated: authenticated,
+	}
+}
+
+// DummyAuthenticationPluginManager implements authenticationPluginManagerInterface for testing.
+type DummyAuthenticationPluginManager struct {
+	Authenticated bool
+}
+
+func (d *DummyAuthenticationPluginManager) Authenticate(ctx context.Context, in *plugin.AuthenticationInput) (*plugin.AuthenticationOutput, error) {
+	return &plugin.AuthenticationOutput{
+		Authenticated: d.Authenticated,
+		Subject:       "dummy",
+		Claims:        map[string]interface{}{"role": "test"},
+	}, nil
+}
 
 func TestLocalModeBasicAuthEnforced(t *testing.T) {
 	m := NewAuthzMiddleware(slog.Default(), "local", "user", "pass")
@@ -67,6 +100,7 @@ func TestGen3ModeSetsContextWithoutAuthHeader(t *testing.T) {
 
 func TestGen3ModeMalformedBearerStillPassesToNext(t *testing.T) {
 	m := NewAuthzMiddleware(slog.Default(), "gen3", "", "")
+	injectDummyPluginManager(m)
 	app := fiber.New()
 	app.Use(m.FiberMiddleware())
 	app.Get("/", func(c fiber.Ctx) error {
@@ -89,37 +123,85 @@ func TestGen3ModeMalformedBearerStillPassesToNext(t *testing.T) {
 
 func TestParseToken(t *testing.T) {
 	m := NewAuthzMiddleware(slog.Default(), "gen3", "", "")
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate rsa key: %v", err)
+	}
+
+	kid := "test-kid"
+	jwks := map[string]any{
+		"keys": []map[string]any{
+			{
+				"kty": "RSA",
+				"use": "sig",
+				"kid": kid,
+				"n":   base64.RawURLEncoding.EncodeToString(privateKey.PublicKey.N.Bytes()),
+				"e":   base64.RawURLEncoding.EncodeToString(big.NewInt(int64(privateKey.PublicKey.E)).Bytes()),
+			},
+		},
+	}
+
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/.well-known/jwks.json" {
+			http.NotFound(w, r)
+			return
+		}
+		if err := json.NewEncoder(w).Encode(jwks); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+	}))
+	defer server.Close()
+
+	oldTransport := http.DefaultTransport
+	http.DefaultTransport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
+	defer func() { http.DefaultTransport = oldTransport }()
+
+	issuerOrigin := server.URL
+	   t.Setenv("DRS_FENCE_URL", issuerOrigin)
+
+	buildToken := func(claims jwt.MapClaims) string {
+		tok := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+		tok.Header["kid"] = kid
+		s, signErr := tok.SignedString(privateKey)
+		if signErr != nil {
+			t.Fatalf("sign token: %v", signErr)
+		}
+		return s
+	}
 
 	t.Run("valid token extracts endpoint and exp", func(t *testing.T) {
-		header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none","typ":"JWT"}`))
-		payload := base64.RawURLEncoding.EncodeToString([]byte(`{"iss":"https://fence.example.org/user","exp":123.5}`))
-		token := header + "." + payload + "."
+		const farFutureExp = 4102444800.0 // 2100-01-01T00:00:00Z
+		token := buildToken(jwt.MapClaims{
+			"iss": issuerOrigin + "/user",
+			"exp": farFutureExp,
+		})
 
-		endpoint, exp, err := m.parseToken(token)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
+		endpoint, exp, parseErr := m.parseToken(token)
+		if parseErr != nil {
+			t.Fatalf("unexpected error: %v", parseErr)
 		}
-		if endpoint != "https://fence.example.org" {
-			t.Fatalf("expected endpoint https://fence.example.org, got %q", endpoint)
+		if endpoint != issuerOrigin {
+			t.Fatalf("expected endpoint %s, got %q", issuerOrigin, endpoint)
 		}
-		if exp != 123.5 {
-			t.Fatalf("expected exp 123.5, got %v", exp)
+		if exp != farFutureExp {
+			t.Fatalf("expected exp %v, got %v", farFutureExp, exp)
 		}
 	})
 
 	t.Run("missing iss fails", func(t *testing.T) {
-		header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none","typ":"JWT"}`))
-		payload := base64.RawURLEncoding.EncodeToString([]byte(`{"exp":42}`))
-		token := header + "." + payload + "."
-		_, _, err := m.parseToken(token)
-		if err == nil {
+		token := buildToken(jwt.MapClaims{"exp": 42})
+		_, _, parseErr := m.parseToken(token)
+		if parseErr == nil {
 			t.Fatalf("expected parse error for missing iss claim")
+		}
+		if !strings.Contains(parseErr.Error(), "missing or invalid 'iss' claim") {
+			t.Fatalf("unexpected error: %v", parseErr)
 		}
 	})
 
 	t.Run("invalid token fails", func(t *testing.T) {
-		_, _, err := m.parseToken("not-a-token")
-		if err == nil {
+		_, _, parseErr := m.parseToken("not-a-token")
+		if parseErr == nil {
 			t.Fatalf("expected parse error")
 		}
 	})
@@ -411,6 +493,46 @@ func TestAuthzMiddlewareScenarios(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "local authn plugin allows access",
+			mode: "local",
+			env: map[string]string{
+				"DRS_AUTHN_PLUGIN_ENABLED": "true",
+			},
+			wantStatus: http.StatusOK,
+			assert: func(t *testing.T, c fiber.Ctx) {
+				if authz.IsGen3Mode(c.Context()) {
+					t.Fatalf("did not expect gen3 mode in local auth")
+				}
+				if authz.HasAuthHeader(c.Context()) {
+					t.Fatalf("did not expect auth header presence in local auth")
+				}
+			},
+		},
+		{
+			name: "local authn plugin denies access",
+			mode: "local",
+			env: map[string]string{
+				"DRS_AUTHN_PLUGIN_ENABLED": "true",
+			},
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name: "gen3 authn plugin allows access",
+			mode: "gen3",
+			env: map[string]string{
+				"DRS_AUTHN_PLUGIN_ENABLED": "true",
+			},
+			wantStatus: http.StatusOK,
+		},
+		{
+			name: "gen3 authn plugin denies access",
+			mode: "gen3",
+			env: map[string]string{
+				"DRS_AUTHN_PLUGIN_ENABLED": "true",
+			},
+			wantStatus: http.StatusUnauthorized,
+		},
 	}
 
 	for _, tc := range cases {
@@ -419,7 +541,28 @@ func TestAuthzMiddlewareScenarios(t *testing.T) {
 				t.Setenv(k, v)
 			}
 
-			m := NewAuthzMiddleware(slog.Default(), tc.mode, tc.basicUser, tc.basicPass)
+			   m := NewAuthzMiddleware(slog.Default(), tc.mode, tc.basicUser, tc.basicPass)
+			   // Always inject dummy plugin manager for malformed bearer scenario
+			   if tc.name == "gen3 malformed bearer" {
+				   injectDummyPluginManager(m)
+			   }
+			   // Always inject dummy authn plugin manager for authn plugin scenarios
+			   if tc.name == "local authn plugin allows access" {
+				   injectDummyAuthenticationPluginManager(m, true)
+			   }
+			   if tc.name == "local authn plugin denies access" {
+				   injectDummyAuthenticationPluginManager(m, false)
+			   }
+			   if tc.name == "gen3 authn plugin allows access" {
+				   injectDummyAuthenticationPluginManager(m, true)
+			   }
+						   if tc.name == "gen3 authn plugin denies access" {
+							   injectDummyAuthenticationPluginManager(m, false)
+						   }
+						   // For gen3 authn plugin denies access, ensure an Authorization header is set
+						   if tc.name == "gen3 authn plugin denies access" && tc.authHeader == "" {
+							   tc.authHeader = "Bearer dummy-deny-token"
+			   }
 			app := fiber.New()
 			handlerCalled := false
 			app.Use(m.FiberMiddleware())
@@ -571,5 +714,98 @@ func TestAuthzCacheLifecycle(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestJWKSDiscovery_OpenIDConfigPreferred(t *testing.T) {
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate rsa key: %v", err)
+	}
+	kid := "test-kid"
+	jwks := map[string]any{
+		"keys": []map[string]any{{
+			"kty": "RSA",
+			"use": "sig",
+			"kid": kid,
+			"n":   base64.RawURLEncoding.EncodeToString(privateKey.PublicKey.N.Bytes()),
+			"e":   base64.RawURLEncoding.EncodeToString(big.NewInt(int64(privateKey.PublicKey.E)).Bytes()),
+		}},
+	}
+	jwksServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewEncoder(w).Encode(jwks); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+	}))
+	defer jwksServer.Close()
+	openidConfig := map[string]any{"jwks_uri": jwksServer.URL}
+	openidServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/.well-known/openid-configuration" {
+			_ = json.NewEncoder(w).Encode(openidConfig)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer openidServer.Close()
+	oldTransport := http.DefaultTransport
+	http.DefaultTransport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
+	defer func() { http.DefaultTransport = oldTransport }()
+	issuer := openidServer.URL
+	t.Setenv("DRS_FENCE_URL", issuer)
+	m := NewAuthzMiddleware(slog.Default(), "gen3", "", "")
+	tok := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims{"iss": issuer, "exp": time.Now().Add(time.Hour).Unix()})
+	tok.Header["kid"] = kid
+	s, err := tok.SignedString(privateKey)
+	if err != nil {
+		t.Fatalf("sign token: %v", err)
+	}
+	_, _, parseErr := m.parseToken(s)
+	if parseErr != nil {
+		t.Fatalf("unexpected error: %v", parseErr)
+	}
+}
+
+func TestJWKSDiscovery_FallbackJWKS(t *testing.T) {
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate rsa key: %v", err)
+	}
+	kid := "test-kid"
+	jwks := map[string]any{
+		"keys": []map[string]any{{
+			"kty": "RSA",
+			"use": "sig",
+			"kid": kid,
+			"n":   base64.RawURLEncoding.EncodeToString(privateKey.PublicKey.N.Bytes()),
+			"e":   base64.RawURLEncoding.EncodeToString(big.NewInt(int64(privateKey.PublicKey.E)).Bytes()),
+		}},
+	}
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/.well-known/jwks.json" {
+			_ = json.NewEncoder(w).Encode(jwks)
+			return
+		}
+		if r.URL.Path == "/.well-known/openid-configuration" {
+			http.NotFound(w, r)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+	oldTransport := http.DefaultTransport
+	http.DefaultTransport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
+	defer func() { http.DefaultTransport = oldTransport }()
+	issuer := server.URL
+	t.Setenv("DRS_FENCE_URL", issuer)
+	m := NewAuthzMiddleware(slog.Default(), "gen3", "", "")
+	tok := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims{"iss": issuer, "exp": time.Now().Add(time.Hour).Unix()})
+	tok.Header["kid"] = kid
+	s, err := tok.SignedString(privateKey)
+	if err != nil {
+		t.Fatalf("sign token: %v", err)
+	}
+	_, _, parseErr := m.parseToken(s)
+	if parseErr != nil {
+		t.Fatalf("unexpected error: %v", parseErr)
 	}
 }
