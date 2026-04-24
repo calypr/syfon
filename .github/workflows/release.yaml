@@ -1,10 +1,10 @@
 # Cuts a GitHub release when the root binary or one of the sibling Go modules
 # materially changes on development, and also on manual semver/rc tag pushes.
-# Avoids the GITHUB_TOKEN two-hop problem by computing package tags in a
-# `prepare` job and passing them as outputs to the subsequent jobs within the
-# same workflow run.
+# For development-triggered releases, tags the merged commit first, then commits
+# go.mod cleanup back to development after the GitHub Release is created.
 
 name: Release
+
 on:
   push:
     tags:
@@ -28,12 +28,6 @@ permissions:
   id-token: write
 
 jobs:
-  # ── Prepare ───────────────────────────────────────────────────────────────
-  # On a tag push: resolve the existing tag.
-  # On workflow_run: bump the patch version, create + push the tag, then pass
-  # it downstream so build/release can run in this same workflow run.
-  # Tags pushed by GITHUB_TOKEN don't re-trigger workflows, so we can't rely
-  # on a second workflow invocation — we do everything in one shot instead.
   prepare:
     name: Prepare release tag
     runs-on: ubuntu-latest
@@ -60,7 +54,7 @@ jobs:
       - name: Fetch tags
         run: git fetch --tags --force
 
-      - name: Resolve or compute tag
+      - name: Resolve versions and tag merged commit
         id: version
         env:
           HEAD_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
@@ -69,8 +63,9 @@ jobs:
         run: |
           set -euo pipefail
 
-          # On a manual tag push, respect the pushed tag exactly and skip the
-          # change-detection logic.
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
           if [[ "$EVENT_NAME" == 'push' ]]; then
             {
               echo "root_tag=$REF_NAME"
@@ -121,10 +116,6 @@ jobs:
             fi
           }
 
-          root_base_changed=false
-          apigen_base_changed=false
-          client_base_changed=false
-
           root_latest=$(latest_tag_for 'v[0-9]*' '^v[0-9]+\.[0-9]+\.[0-9]+$')
           apigen_latest=$(latest_tag_for 'apigen/v[0-9]*' '^apigen/v[0-9]+\.[0-9]+\.[0-9]+$')
           client_latest=$(latest_tag_for 'client/v[0-9]*' '^client/v[0-9]+\.[0-9]+\.[0-9]+$')
@@ -133,10 +124,14 @@ jobs:
           apigen_files=$(changed_files_from "$apigen_latest" apigen)
           client_files=$(changed_files_from "$client_latest" client)
 
+          root_base_changed=false
+          apigen_base_changed=false
+          client_base_changed=false
+
           if printf '%s\n' "$root_files" \
             | grep -Ev '^(apigen/|client/)' \
             | grep -Ev '(_test\.go$|^$)' \
-            | grep -Eq '(^|/).+\.go$|^go\.(mod|sum)$|^Makefile$|^Dockerfile$|^install\.sh$'; then
+            | grep -Eq '(^|/).+\.go$|^go\.(mod|sum)$|^Makefile$|^Dockerfile$|^install\.sh$|^\.github/workflows/release\.yml$'; then
             root_base_changed=true
           fi
 
@@ -152,56 +147,74 @@ jobs:
             client_base_changed=true
           fi
 
-          root_changed=false
-          apigen_changed=false
-          client_changed=false
-
           root_existing=$(git tag --points-at "$HEAD_SHA" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1 || true)
           apigen_existing=$(git tag --points-at "$HEAD_SHA" | grep -E '^apigen/v[0-9]+\.[0-9]+\.[0-9]+$' | head -1 || true)
           client_existing=$(git tag --points-at "$HEAD_SHA" | grep -E '^client/v[0-9]+\.[0-9]+\.[0-9]+$' | head -1 || true)
 
           if [[ -n "$apigen_existing" ]]; then
-            apigen_changed=true
             apigen_tag="$apigen_existing"
           elif [[ "$apigen_base_changed" == true ]]; then
-            apigen_changed=true
             apigen_tag="apigen/$(bump_patch "$apigen_latest")"
           else
             apigen_tag=""
           fi
 
           if [[ -n "$client_existing" ]]; then
-            client_changed=true
             client_tag="$client_existing"
-          elif [[ "$client_base_changed" == true || "$apigen_changed" == true ]]; then
-            client_changed=true
+          elif [[ "$client_base_changed" == true || -n "$apigen_tag" ]]; then
             client_tag="client/$(bump_patch "$client_latest")"
           else
             client_tag=""
           fi
 
           if [[ -n "$root_existing" ]]; then
-            root_changed=true
             root_tag="$root_existing"
-          elif [[ "$root_base_changed" == true || "$client_changed" == true || "$apigen_changed" == true ]]; then
-            root_changed=true
+          elif [[ "$root_base_changed" == true || -n "$client_tag" || -n "$apigen_tag" ]]; then
             root_tag="$(bump_patch "$root_latest")"
           else
             root_tag=""
           fi
 
+          if [[ -z "$root_tag" ]]; then
+            {
+              echo "root_tag="
+              echo "apigen_tag=$apigen_tag"
+              echo "client_tag=$client_tag"
+              echo "sha=$HEAD_SHA"
+            } >> "$GITHUB_OUTPUT"
+            echo "No release needed."
+            exit 0
+          fi
+
+          release_sha="$HEAD_SHA"
+
+          for tag in "$apigen_tag" "$client_tag" "$root_tag"; do
+            if [[ -z "$tag" ]]; then
+              continue
+            fi
+
+            if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+              echo "Tag already exists: $tag"
+              continue
+            fi
+
+            git tag "$tag" "$release_sha"
+            git push origin "$tag"
+            echo "Tagged $tag at $release_sha"
+          done
+
           {
             echo "root_tag=$root_tag"
             echo "apigen_tag=$apigen_tag"
             echo "client_tag=$client_tag"
-            echo "sha=$HEAD_SHA"
+            echo "sha=$release_sha"
           } >> "$GITHUB_OUTPUT"
 
-          printf 'Root release: base=%s final=%s tag=%s\n' "$root_base_changed" "$root_changed" "$root_tag"
-          printf 'Apigen release: base=%s final=%s tag=%s\n' "$apigen_base_changed" "$apigen_changed" "$apigen_tag"
-          printf 'Client release: base=%s final=%s tag=%s\n' "$client_base_changed" "$client_changed" "$client_tag"
+          printf 'Root release tag: %s\n' "$root_tag"
+          printf 'Apigen release tag: %s\n' "$apigen_tag"
+          printf 'Client release tag: %s\n' "$client_tag"
+          printf 'Release SHA: %s\n' "$release_sha"
 
-  # ── Build ─────────────────────────────────────────────────────────────────
   build:
     name: Build (${{ matrix.os }}/${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
@@ -247,7 +260,6 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  # ── Release ───────────────────────────────────────────────────────────────
   release:
     name: Release
     needs: [prepare, build]
@@ -285,8 +297,6 @@ jobs:
           for binary in syfon-linux-* syfon-darwin-*; do
             [[ -f "$binary" ]] || continue
             archive="${binary}-${RELEASE_TAG}.tar.gz"
-            # Rename to plain "syfon" inside the archive so the install script
-            # can extract and mv syfon $DEST without any platform-specific logic.
             cp "$binary" syfon
             tar -czf "$archive" syfon
             rm syfon
@@ -317,10 +327,12 @@ jobs:
             echo "Release already exists: $RELEASE_TAG"
             exit 0
           fi
+
           flags=""
           if [[ "$RELEASE_TAG" =~ -rc\.[0-9]+$ ]]; then
             flags="--prerelease"
           fi
+
           gh release create "$RELEASE_TAG" \
             --title "$RELEASE_TAG" \
             --notes-file release-notes.md \
@@ -328,52 +340,90 @@ jobs:
             dist/*.tar.gz \
             "dist/syfon-${RELEASE_TAG}-checksums.txt"
 
-      - name: Sync module versions and tag packages
+  sync-module-versions:
+    name: Sync module versions
+    needs: [prepare, release]
+    runs-on: ubuntu-latest
+    if: needs.prepare.outputs.root_tag != ''
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout development
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: development
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Replace local module links with released versions
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ROOT_TAG: ${{ needs.prepare.outputs.root_tag }}
           APIGEN_TAG: ${{ needs.prepare.outputs.apigen_tag }}
           CLIENT_TAG: ${{ needs.prepare.outputs.client_tag }}
         run: |
           set -euo pipefail
+
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
           apigen_version="${APIGEN_TAG#apigen/}"
           client_version="${CLIENT_TAG#client/}"
 
+          drop_replace_if_present() {
+            local module_dir="$1"
+            local target="$2"
+            if [[ -f "${module_dir}/go.mod" ]]; then
+              (cd "$module_dir" && go mod edit -dropreplace "$target") || true
+            fi
+          }
+
+          require_if_set() {
+            local module_dir="$1"
+            local target="$2"
+            local version="$3"
+            if [[ -n "$version" && -f "${module_dir}/go.mod" ]]; then
+              (cd "$module_dir" && go mod edit -require="${target}@${version}")
+            fi
+          }
+
+          tidy_if_present() {
+            local module_dir="$1"
+            if [[ -f "${module_dir}/go.mod" ]]; then
+              (cd "$module_dir" && go mod tidy)
+            fi
+          }
+
+          for module_dir in . client apigen; do
+            drop_replace_if_present "$module_dir" github.com/calypr/syfon/apigen
+            drop_replace_if_present "$module_dir" github.com/calypr/syfon/client
+          done
+
           if [[ -n "$APIGEN_TAG" ]]; then
-            sed -i "s|github.com/calypr/syfon/apigen v[0-9][^ ]*|github.com/calypr/syfon/apigen ${apigen_version}|g" go.mod client/go.mod
+            require_if_set . github.com/calypr/syfon/apigen "$apigen_version"
+            require_if_set client github.com/calypr/syfon/apigen "$apigen_version"
           fi
 
           if [[ -n "$CLIENT_TAG" ]]; then
-            sed -i "s|github.com/calypr/syfon/client v[0-9][^ ]*|github.com/calypr/syfon/client ${client_version}|g" go.mod
+            require_if_set . github.com/calypr/syfon/client "$client_version"
           fi
 
-          git add go.mod client/go.mod
-          if ! git diff --cached --quiet; then
-            git commit -m "chore: sync module versions after ${ROOT_TAG} [skip ci]"
-            git push origin HEAD:development
+          tidy_if_present apigen
+          tidy_if_present client
+          tidy_if_present .
+
+          git add go.mod go.sum client/go.mod client/go.sum apigen/go.mod apigen/go.sum 2>/dev/null || true
+
+          if git diff --cached --quiet; then
+            echo "No module-version cleanup needed."
+            exit 0
           fi
 
-          TAG_SHA=$(git rev-parse HEAD)
-
-          for prefix in apigen client; do
-            case "$prefix" in
-              apigen) subtag="$APIGEN_TAG" ;;
-              client) subtag="$CLIENT_TAG" ;;
-            esac
-
-            if [[ -z "$subtag" ]]; then
-              continue
-            fi
-
-            if git rev-parse -q --verify "refs/tags/$subtag" >/dev/null; then
-              echo "Package tag already exists: ${subtag}"
-              continue
-            fi
-
-            git tag "$subtag" "$TAG_SHA"
-            git push origin "$subtag"
-            echo "Tagged ${subtag} at $TAG_SHA"
-          done
+          git commit -m "chore: sync module versions after ${ROOT_TAG} [skip ci]"
+          git push origin HEAD:development
