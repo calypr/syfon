@@ -46,7 +46,7 @@ func TestSyfonExternalServerE2E(t *testing.T) {
 	if err := os.WriteFile(srcPath, srcData, 0o644); err != nil {
 		t.Fatalf("write source file: %v", err)
 	}
-	out, err = executeRootCommand(t, "--server", serverURL, "upload", "--file", srcPath, "--authz", "/programs/syfon/projects/e2e")
+	out, err = executeRootCommand(t, "--server", serverURL, "upload", "--file", srcPath, "--org", "syfon", "--project", "e2e")
 	if err != nil {
 		t.Fatalf("upload failed: %v output=%s", err, out)
 	}

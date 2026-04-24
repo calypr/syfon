@@ -104,7 +104,7 @@ func TestSyfonDockerMinIOE2E(t *testing.T) {
 		t.Fatalf("Failed to write source file: %v", err)
 	}
 
-	uploadOut, err := executeRootCommand(t, "--server", server.url, "upload", "--file", srcPath, "--authz", "/programs/syfon/projects/e2e")
+	uploadOut, err := executeRootCommand(t, "--server", server.url, "upload", "--file", srcPath, "--org", "syfon", "--project", "e2e")
 	t.Logf("Upload Output:\n%s", uploadOut)
 	if err != nil {
 		t.Fatalf("Upload failed: %v", err)
@@ -520,7 +520,7 @@ func TestSyfonDockerMultipartUpload(t *testing.T) {
 	}
 
 	t.Logf("STEP 4: Executing Multipart Upload (7MB)...")
-	uploadOut, err := executeRootCommand(t, "--server", server.url, "upload", "--file", srcPath, "--authz", "/programs/syfon/projects/e2e")
+	uploadOut, err := executeRootCommand(t, "--server", server.url, "upload", "--file", srcPath, "--org", "syfon", "--project", "e2e")
 	t.Logf("Multipart Upload Output:\n%s", uploadOut)
 	if err != nil {
 		t.Fatalf("Multipart upload command failed: %v", err)
