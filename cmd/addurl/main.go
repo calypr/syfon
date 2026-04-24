@@ -9,12 +9,13 @@ import (
 )
 
 var (
-	addURLDid    string
-	addURL       string
-	addURLSize   int64
-	addURLName   string
-	addURLSHA256 string
-	addURLAuthz  string
+	addURLDid     string
+	addURL        string
+	addURLSize    int64
+	addURLName    string
+	addURLSHA256  string
+	addURLOrg     string
+	addURLProject string
 )
 
 var Cmd = &cobra.Command{
@@ -29,8 +30,9 @@ var Cmd = &cobra.Command{
 		if strings.TrimSpace(addURL) == "" {
 			return fmt.Errorf("--url is required")
 		}
-		if strings.TrimSpace(addURLAuthz) == "" {
-			return fmt.Errorf("--authz is required")
+		org := strings.TrimSpace(addURLOrg)
+		if org == "" {
+			return fmt.Errorf("--org is required")
 		}
 		serverURL, err := cmd.Flags().GetString("server")
 		if err != nil {
@@ -40,7 +42,15 @@ var Cmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		if err := c.Index().Upsert(ctx, addURLDid, addURL, addURLName, addURLSize, addURLSHA256, []string{strings.TrimSpace(addURLAuthz)}); err != nil {
+		// Construct resource path for internal index storage.
+		project := strings.TrimSpace(addURLProject)
+		var resourcePath string
+		if project == "" {
+			resourcePath = "/programs/" + org
+		} else {
+			resourcePath = "/programs/" + org + "/projects/" + project
+		}
+		if err := c.Index().Upsert(ctx, addURLDid, addURL, addURLName, addURLSize, addURLSHA256, []string{resourcePath}); err != nil {
 			return err
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "record updated: %s\n", addURLDid)
@@ -51,7 +61,8 @@ var Cmd = &cobra.Command{
 func init() {
 	Cmd.Flags().StringVar(&addURLDid, "did", "", "DRS object DID")
 	Cmd.Flags().StringVar(&addURL, "url", "", "Access URL to register")
-	Cmd.Flags().StringVar(&addURLAuthz, "authz", "", "Required authz scope for the record")
+	Cmd.Flags().StringVar(&addURLOrg, "org", "", "Required organization for the authz scope")
+	Cmd.Flags().StringVar(&addURLProject, "project", "", "Optional project for the authz scope (omit for org-wide)")
 	Cmd.Flags().Int64Var(&addURLSize, "size", 0, "Object size in bytes")
 	Cmd.Flags().StringVar(&addURLName, "name", "", "Object file name")
 	Cmd.Flags().StringVar(&addURLSHA256, "sha256", "", "Optional sha256 checksum")

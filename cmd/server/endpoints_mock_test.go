@@ -173,14 +173,7 @@ func buildMockServerRouterWithRoutes(routes config.RoutesConfig) *fiber.App {
 							Headers *[]string `json:"headers,omitempty"`
 							Url     string    `json:"url"`
 						}{Url: "s3://test-bucket-1/sha-1"},
-						Authorizations: &struct {
-							BearerAuthIssuers   *[]string                                       `json:"bearer_auth_issuers,omitempty"`
-							DrsObjectId         *string                                         `json:"drs_object_id,omitempty"`
-							PassportAuthIssuers *[]string                                       `json:"passport_auth_issuers,omitempty"`
-							SupportedTypes      *[]drs.AccessMethodAuthorizationsSupportedTypes `json:"supported_types,omitempty"`
-						}{
-							BearerAuthIssuers: &[]string{"/data_file"},
-						},
+						Authorizations: &map[string][]string{"data": {}},
 					},
 				},
 			},
@@ -253,7 +246,7 @@ func requestBodyFor(method, template string) ([]byte, string) {
 
 	switch template {
 	case "/ga4gh/drs/v1/objects/register":
-		return []byte(`{"candidates":[{"name":"obj","size":1,"checksums":[{"type":"sha256","checksum":"sha-1"}],"access_methods":[{"type":"s3","access_url":{"url":"s3://test-bucket-1/sha-1"},"authorizations":{"bearer_auth_issuers":["/data_file"]}}]}]}`), "application/json"
+		return []byte(`{"candidates":[{"name":"obj","size":1,"checksums":[{"type":"sha256","checksum":"sha-1"}],"access_methods":[{"type":"s3","access_url":{"url":"s3://test-bucket-1/sha-1"},"authorizations":{"data":[]}}]}]}`), "application/json"
 	case "/ga4gh/drs/v1/objects":
 		return []byte(`{"bulk_object_ids":["sha-1"]}`), "application/json"
 	case "/ga4gh/drs/v1/objects/access":
@@ -299,7 +292,7 @@ func requestBodyFor(method, template string) ([]byte, string) {
 	case "/info/lfs/objects/batch":
 		return []byte(`{"operation":"download","objects":[{"oid":"sha-1","size":1}]}`), "application/json"
 	case "/info/lfs/objects/metadata":
-		return []byte(`{"candidates":[{"name":"obj","size":1,"checksums":[{"type":"sha256","checksum":"sha-1"}],"access_methods":[{"type":"s3","access_url":{"url":"s3://test-bucket-1/sha-1"},"authorizations":{"bearer_auth_issuers":["/data_file"]}}]}]}`), "application/json"
+		return []byte(`{"candidates":[{"name":"obj","size":1,"checksums":[{"type":"sha256","checksum":"sha-1"}],"access_methods":[{"type":"s3","access_url":{"url":"s3://test-bucket-1/sha-1"},"authorizations":{"data":[]}}]}]}`), "application/json"
 	case "/info/lfs/verify":
 		return []byte(`{"oid":"sha-1","size":1}`), "application/json"
 	case "/info/lfs/objects/:oid":

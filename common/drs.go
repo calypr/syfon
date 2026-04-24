@@ -19,17 +19,17 @@ func DrsUUID(org, project, hash string) string {
 // ObjectBuilder constructs DRS objects for a given bucket and project scope.
 type ObjectBuilder struct {
 	Bucket        string
-	ProjectID     string
+	Project       string
 	Organization  string
 	StoragePrefix string
 	PathStyle     string
 }
 
 // NewObjectBuilder creates an ObjectBuilder for the given bucket and project.
-func NewObjectBuilder(bucket, projectId string) ObjectBuilder {
+func NewObjectBuilder(bucket, project string) ObjectBuilder {
 	return ObjectBuilder{
-		Bucket:    bucket,
-		ProjectID: projectId,
+		Bucket:  bucket,
+		Project: project,
 	}
 }
 
@@ -37,21 +37,16 @@ func NewObjectBuilder(bucket, projectId string) ObjectBuilder {
 func (b ObjectBuilder) Build(fileName string, checksum string, size int64, drsId string) (*drsapi.DrsObject, error) {
 	prefix := b.StoragePrefix
 	if prefix == "" {
-		prefix = StoragePrefix(b.Organization, b.ProjectID)
+		prefix = StoragePrefix(b.Organization, b.Project)
 	}
-	return BuildDrsObjWithPrefix(fileName, checksum, size, drsId, b.Bucket, b.Organization, b.ProjectID, prefix)
+	return BuildDrsObjWithPrefix(fileName, checksum, size, drsId, b.Bucket, b.Organization, b.Project, prefix)
 }
 
 // BuildDrsObjWithPrefix builds a DRS object with an S3 access URL derived from
 // the provided bucket, org, project, and storage prefix.
-func BuildDrsObjWithPrefix(fileName string, checksum string, size int64, drsId string, bucket string, org string, projectId string, prefix string) (*drsapi.DrsObject, error) {
+func BuildDrsObjWithPrefix(fileName string, checksum string, size int64, drsId string, bucket string, org string, project string, prefix string) (*drsapi.DrsObject, error) {
 	if checksum == "" {
 		return nil, fmt.Errorf("checksum is required")
-	}
-
-	resourcePath, err := ResourcePath(org, projectId)
-	if err != nil {
-		return nil, err
 	}
 
 	obj := &drsapi.DrsObject{
@@ -83,16 +78,8 @@ func BuildDrsObjWithPrefix(fileName string, checksum string, size int64, drsId s
 		}{Url: accessURL},
 	}
 
-	if resourcePath != "" {
-		issuers := []string{resourcePath}
-		am.Authorizations = &struct {
-			BearerAuthIssuers   *[]string                                          `json:"bearer_auth_issuers,omitempty"`
-			DrsObjectId         *string                                            `json:"drs_object_id,omitempty"`
-			PassportAuthIssuers *[]string                                          `json:"passport_auth_issuers,omitempty"`
-			SupportedTypes      *[]drsapi.AccessMethodAuthorizationsSupportedTypes `json:"supported_types,omitempty"`
-		}{
-			BearerAuthIssuers: &issuers,
-		}
+	if authzMap := AuthzMapFromScope(org, project); authzMap != nil {
+		am.Authorizations = &authzMap
 	}
 
 	ams := []drsapi.AccessMethod{am}

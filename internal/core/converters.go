@@ -8,11 +8,12 @@ import (
 	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/apigen/server/internalapi"
 	"github.com/calypr/syfon/apigen/server/lfsapi"
+	syfoncommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/models"
 )
 
-// UniqueAuthz extracts unique bearer auth issuers from access methods.
+// UniqueAuthz extracts unique resource-path strings from access method authz maps.
 func UniqueAuthz(accessMethods []drs.AccessMethod) []string {
 	if len(accessMethods) == 0 {
 		return nil
@@ -20,18 +21,19 @@ func UniqueAuthz(accessMethods []drs.AccessMethod) []string {
 	seen := make(map[string]struct{})
 	out := make([]string, 0)
 	for _, am := range accessMethods {
-		if am.Authorizations != nil && am.Authorizations.BearerAuthIssuers != nil {
-			for _, issuer := range *am.Authorizations.BearerAuthIssuers {
-				issuer = strings.TrimSpace(issuer)
-				if issuer == "" {
-					continue
-				}
-				if _, ok := seen[issuer]; ok {
-					continue
-				}
-				seen[issuer] = struct{}{}
-				out = append(out, issuer)
+		if am.Authorizations == nil {
+			continue
+		}
+		for _, path := range syfoncommon.AuthzMapToList(*am.Authorizations) {
+			path = strings.TrimSpace(path)
+			if path == "" {
+				continue
 			}
+			if _, ok := seen[path]; ok {
+				continue
+			}
+			seen[path] = struct{}{}
+			out = append(out, path)
 		}
 	}
 	return out
@@ -62,28 +64,15 @@ func LFSCandidateToDRS(in lfsapi.DrsObjectCandidate) drs.DrsObjectCandidate {
 				}{Url: *am.AccessUrl.Url}
 			}
 
-			var authz *struct {
-				BearerAuthIssuers   *[]string                                       `json:"bearer_auth_issuers,omitempty"`
-				DrsObjectId         *string                                         `json:"drs_object_id,omitempty"`
-				PassportAuthIssuers *[]string                                       `json:"passport_auth_issuers,omitempty"`
-				SupportedTypes      *[]drs.AccessMethodAuthorizationsSupportedTypes `json:"supported_types,omitempty"`
-			}
-			if am.Authorizations != nil {
-				authz = &struct {
-					BearerAuthIssuers   *[]string                                       `json:"bearer_auth_issuers,omitempty"`
-					DrsObjectId         *string                                         `json:"drs_object_id,omitempty"`
-					PassportAuthIssuers *[]string                                       `json:"passport_auth_issuers,omitempty"`
-					SupportedTypes      *[]drs.AccessMethodAuthorizationsSupportedTypes `json:"supported_types,omitempty"`
-				}{
-					BearerAuthIssuers: am.Authorizations.BearerAuthIssuers,
-				}
-			}
-
 			converted[i] = drs.AccessMethod{
-				AccessId:       am.AccessId,
-				AccessUrl:      accessURL,
-				Authorizations: authz,
-				Cloud:          am.Region,
+				AccessId:  am.AccessId,
+				AccessUrl: accessURL,
+				Cloud:     am.Region,
+			}
+			if am.Authorizations != nil && am.Authorizations.BearerAuthIssuers != nil {
+				if authzMap := syfoncommon.AuthzListToMap(*am.Authorizations.BearerAuthIssuers); authzMap != nil {
+					converted[i].Authorizations = &authzMap
+				}
 			}
 			if am.Type != nil {
 				converted[i].Type = drs.AccessMethodType(*am.Type)

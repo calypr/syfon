@@ -48,7 +48,7 @@ func TestDRSServiceResolveAndList(t *testing.T) {
 	recordSize := int64(77)
 	recordUrls := []string{"https://storage.example/record.bin"}
 	recordHashes := internalapi.HashInfo{"sha256": "abc123"}
-	records := []internalapi.InternalRecord{{Did: "did-record", Authz: []string{"/programs/p1"}, FileName: &recordName, Size: &recordSize, Urls: &recordUrls, Hashes: &recordHashes}}
+	records := []internalapi.InternalRecord{{Did: "did-record", Authz: []string{"/programs/org1/projects/p1"}, FileName: &recordName, Size: &recordSize, Urls: &recordUrls, Hashes: &recordHashes}}
 	listResp, err := json.Marshal(internalapi.ListRecordsResponse{Records: &records})
 	if err != nil {
 		t.Fatalf("marshal list response: %v", err)
@@ -90,8 +90,11 @@ func TestDRSServiceResolveAndList(t *testing.T) {
 		t.Fatalf("expected mapped access methods, got %+v", page.DrsObjects[0])
 	}
 	method := (*page.DrsObjects[0].AccessMethods)[0]
-	if method.Authorizations == nil || method.Authorizations.BearerAuthIssuers == nil || len(*method.Authorizations.BearerAuthIssuers) != 1 {
+	if method.Authorizations == nil || len(*method.Authorizations) == 0 {
 		t.Fatalf("expected authz mapping, got %+v", method)
+	}
+	if _, ok := (*method.Authorizations)["org1"]; !ok {
+		t.Fatalf("expected org1 in authz map, got %+v", *method.Authorizations)
 	}
 
 	projectPage, err := service.ListObjectsByProject(ctx, "proj-1", 10, 3)

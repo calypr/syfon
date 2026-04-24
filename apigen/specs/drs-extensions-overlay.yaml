@@ -22,11 +22,13 @@ components:
             headers: { type: array, items: { type: string }, description: "GA4GH-compatible list of HTTP headers." }
         authorizations:
           type: object
-          properties:
-            drs_object_id: { type: string }
-            supported_types: { type: array, items: { type: string } }
-            passport_auth_issuers: { type: array, items: { type: string } }
-            bearer_auth_issuers: { type: array, items: { type: string } }
+          description: >-
+            A map of organization to project list. An empty array means org-wide access.
+            A non-empty array grants access scoped to the listed projects.
+          additionalProperties:
+            type: array
+            items:
+              type: string
     UploadMethod:
       properties:
         access_url:

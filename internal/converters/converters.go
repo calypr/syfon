@@ -7,6 +7,7 @@ import (
 
 	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/apigen/server/lfsapi"
+	syfoncommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/models"
 )
@@ -63,22 +64,18 @@ func CandidateToInternalObject(c drs.DrsObjectCandidate, now time.Time) (models.
 				obj.AccessMethods = &[]drs.AccessMethod{}
 			}
 
-			*obj.AccessMethods = append(*obj.AccessMethods, drs.AccessMethod{
+			newMethod := drs.AccessMethod{
 				Type:     drs.AccessMethodType(am.Type),
 				AccessId: accessID,
 				AccessUrl: &struct {
 					Headers *[]string `json:"headers,omitempty"`
 					Url     string    `json:"url"`
 				}{Url: url},
-				Authorizations: &struct {
-					BearerAuthIssuers   *[]string                                       `json:"bearer_auth_issuers,omitempty"`
-					DrsObjectId         *string                                         `json:"drs_object_id,omitempty"`
-					PassportAuthIssuers *[]string                                       `json:"passport_auth_issuers,omitempty"`
-					SupportedTypes      *[]drs.AccessMethodAuthorizationsSupportedTypes `json:"supported_types,omitempty"`
-				}{
-					BearerAuthIssuers: &authz,
-				},
-			})
+			}
+			if authzMap := syfoncommon.AuthzListToMap(authz); authzMap != nil {
+				newMethod.Authorizations = &authzMap
+			}
+			*obj.AccessMethods = append(*obj.AccessMethods, newMethod)
 		}
 	}
 	return models.InternalObject{
@@ -125,14 +122,9 @@ func LFSCandidateToDRS(in lfsapi.DrsObjectCandidate) drs.DrsObjectCandidate {
 					drsMethod.AccessUrl.Url = *am.AccessUrl.Url
 				}
 			}
-			if am.Authorizations != nil {
-				drsMethod.Authorizations = &struct {
-					BearerAuthIssuers   *[]string                                       `json:"bearer_auth_issuers,omitempty"`
-					DrsObjectId         *string                                         `json:"drs_object_id,omitempty"`
-					PassportAuthIssuers *[]string                                       `json:"passport_auth_issuers,omitempty"`
-					SupportedTypes      *[]drs.AccessMethodAuthorizationsSupportedTypes `json:"supported_types,omitempty"`
-				}{
-					BearerAuthIssuers: am.Authorizations.BearerAuthIssuers,
+			if am.Authorizations != nil && am.Authorizations.BearerAuthIssuers != nil {
+				if authzMap := syfoncommon.AuthzListToMap(*am.Authorizations.BearerAuthIssuers); authzMap != nil {
+					drsMethod.Authorizations = &authzMap
 				}
 			}
 			ams = append(ams, drsMethod)

@@ -127,11 +127,11 @@ func RegisterFile(ctx context.Context, bk UploadBackend, dc MetadataClient, drsO
 		pType := u.Scheme
 
 		// Capture authorizations from existing access methods
-		var authz []string
+		var authz *map[string][]string
 		if current.AccessMethods != nil {
 			for _, m := range *current.AccessMethods {
-				if m.Authorizations != nil && m.Authorizations.BearerAuthIssuers != nil && len(*m.Authorizations.BearerAuthIssuers) > 0 {
-					authz = *m.Authorizations.BearerAuthIssuers
+				if m.Authorizations != nil && len(*m.Authorizations) > 0 {
+					authz = m.Authorizations
 					break
 				}
 			}
@@ -143,14 +143,7 @@ func RegisterFile(ctx context.Context, bk UploadBackend, dc MetadataClient, drsO
 				Headers *[]string `json:"headers,omitempty"`
 				Url     string    `json:"url"`
 			}{Url: canonical},
-			Authorizations: &struct {
-				BearerAuthIssuers   *[]string                                          `json:"bearer_auth_issuers,omitempty"`
-				DrsObjectId         *string                                            `json:"drs_object_id,omitempty"`
-				PassportAuthIssuers *[]string                                          `json:"passport_auth_issuers,omitempty"`
-				SupportedTypes      *[]drsapi.AccessMethodAuthorizationsSupportedTypes `json:"supported_types,omitempty"`
-			}{
-				BearerAuthIssuers: &authz,
-			},
+			Authorizations: authz,
 		}
 
 		// Deep merge or update access methods
@@ -159,8 +152,8 @@ func RegisterFile(ctx context.Context, bk UploadBackend, dc MetadataClient, drsO
 			for i, existing := range *current.AccessMethods {
 				// Match by URL or by the specific pType we just uploaded to
 				if (existing.AccessUrl != nil && existing.AccessUrl.Url == canonical) || (string(existing.Type) == pType && (existing.AccessUrl == nil || existing.AccessUrl.Url == "")) {
-					// Update while keeping existing authorizations if our new am is empty
-					if len(authz) == 0 && existing.Authorizations != nil && existing.Authorizations.BearerAuthIssuers != nil && len(*existing.Authorizations.BearerAuthIssuers) > 0 {
+					// Update while keeping existing authorizations if our new am has none
+					if (authz == nil || len(*authz) == 0) && existing.Authorizations != nil && len(*existing.Authorizations) > 0 {
 						am.Authorizations = existing.Authorizations
 					}
 					(*current.AccessMethods)[i] = am
