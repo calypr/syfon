@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 
 	drsapi "github.com/calypr/syfon/apigen/client/drs"
