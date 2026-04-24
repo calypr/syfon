@@ -3,6 +3,8 @@ package syfonclient
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -142,4 +144,133 @@ func TestDRSServiceResolveAndList(t *testing.T) {
 	if err != nil || len(registered.Objects) != 1 || registered.Objects[0].Id != "obj-created" {
 		t.Fatalf("RegisterObjects returned registered=%+v err=%v", registered, err)
 	}
+}
+
+func TestDRSServiceResourceAuthzAndDelete(t *testing.T) {
+	t.Parallel()
+
+	recordName := "object.bin"
+	recordSize := int64(77)
+	recordURLs := []string{"https://storage.example/object.bin"}
+	recordHashes := internalapi.HashInfo{"sha256": "abc"}
+	records := []internalapi.InternalRecord{
+		{
+			Did:      "obj-1",
+			Authz:    []string{"/programs/org1/projects/proj1"},
+			FileName: &recordName,
+			Size:     &recordSize,
+			Urls:     &recordURLs,
+			Hashes:   &recordHashes,
+		},
+		{
+			Did:      "obj-2",
+			Authz:    []string{"/programs/org1"},
+			FileName: &recordName,
+			Size:     &recordSize,
+			Urls:     &recordURLs,
+			Hashes:   &recordHashes,
+		},
+	}
+	listResp, err := json.Marshal(internalapi.ListRecordsResponse{Records: &records})
+	if err != nil {
+		t.Fatalf("marshal list response: %v", err)
+	}
+	requester := &fakeRequester{responseJSON: listResp}
+	httpClient := &http.Client{Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/objects/obj-1/access/https":
+			return jsonResponse(http.StatusOK, drsapi.AccessURL{Url: "https://signed.example/object.bin"})
+		case r.Method == http.MethodDelete && (r.URL.Path == "/index/obj-1" || r.URL.Path == "/index/obj-2"):
+			return emptyResponse(http.StatusNoContent), nil
+		default:
+			return nil, fmt.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+	})}
+	index := NewIndexService(mustInternalClientWithHTTPClient(httpClient), requester)
+	service := NewDRSService(mustDRSClientWithHTTPClient(httpClient), index)
+	ctx := context.Background()
+
+	matches, err := service.GetObjectsByHashForResource(ctx, "sha256:abc", "org1", "proj1")
+	if err != nil {
+		t.Fatalf("GetObjectsByHashForResource returned error: %v", err)
+	}
+	if len(matches) != 2 {
+		t.Fatalf("expected both scoped and org-wide records, got %+v", matches)
+	}
+
+	orgWideOnly, err := service.GetObjectsByHashForResource(ctx, "abc", "org1", "proj2")
+	if err != nil {
+		t.Fatalf("GetObjectsByHashForResource returned error: %v", err)
+	}
+	if len(orgWideOnly) != 1 || orgWideOnly[0].Id != "obj-2" {
+		t.Fatalf("expected org-wide record only, got %+v", orgWideOnly)
+	}
+
+	if _, err := service.GetObjectsByHashForResource(ctx, "abc", "", "proj2"); err != nil {
+		t.Fatalf("empty org should not error: %v", err)
+	}
+	if zero, err := service.GetObjectsByHashForResource(ctx, "abc", "", "proj2"); err != nil || len(zero) != 0 {
+		t.Fatalf("expected no matches for empty org, got %+v err=%v", zero, err)
+	}
+
+	accessURL, err := service.ResolveResourceAccessURL(ctx, "sha256:abc", "org1", "proj1")
+	if err != nil {
+		t.Fatalf("ResolveResourceAccessURL returned error: %v", err)
+	}
+	if accessURL == nil || accessURL.Url != "https://signed.example/object.bin" {
+		t.Fatalf("unexpected resolved access url: %+v", accessURL)
+	}
+
+	if err := service.DeleteRecordsByHash(ctx, "sha256:abc"); err != nil {
+		t.Fatalf("DeleteRecordsByHash returned error: %v", err)
+	}
+
+	emptyRequester := &fakeRequester{responseJSON: []byte(`{"records":[]}`)}
+	emptyIndex := NewIndexService(mustInternalClientWithHTTPClient(httpClient), emptyRequester)
+	emptyService := NewDRSService(mustDRSClientWithHTTPClient(httpClient), emptyIndex)
+	if err := emptyService.DeleteRecordsByHash(ctx, "sha256:abc"); err == nil {
+		t.Fatal("expected no-records error from DeleteRecordsByHash")
+	}
+}
+
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
+}
+
+func jsonResponse(status int, v any) (*http.Response, error) {
+	body, err := json.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+	return &http.Response{
+		StatusCode: status,
+		Body:       io.NopCloser(strings.NewReader(string(body))),
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+	}, nil
+}
+
+func emptyResponse(status int) *http.Response {
+	return &http.Response{
+		StatusCode: status,
+		Body:       io.NopCloser(strings.NewReader("")),
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+	}
+}
+
+func mustInternalClientWithHTTPClient(client *http.Client) *internalapi.ClientWithResponses {
+	c, err := internalapi.NewClientWithResponses("http://example.invalid", internalapi.WithHTTPClient(client))
+	if err != nil {
+		panic(err)
+	}
+	return c
+}
+
+func mustDRSClientWithHTTPClient(client *http.Client) *drsapi.ClientWithResponses {
+	c, err := drsapi.NewClientWithResponses("http://example.invalid", drsapi.WithHTTPClient(client))
+	if err != nil {
+		panic(err)
+	}
+	return c
 }
