@@ -2,14 +2,17 @@ package syfonclient
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"net/url"
 	"strings"
 
 	drsapi "github.com/calypr/syfon/apigen/client/drs"
 	"github.com/calypr/syfon/apigen/client/internalapi"
 	"github.com/calypr/syfon/client/transfer"
+	sycommon "github.com/calypr/syfon/common"
 )
+
+var ErrNoRecordsForHash = errors.New("no records found for hash")
 
 type DRSService struct {
 	gen   drsapi.ClientWithResponsesInterface
@@ -145,6 +148,97 @@ func (s *DRSService) BatchGetObjectsByHash(ctx context.Context, hashes []string)
 		out.DrsObjects = append(out.DrsObjects, internalRecordToDRSObject(&rec))
 	}
 	return out, nil
+}
+
+func (s *DRSService) GetObjectsByHashForResource(ctx context.Context, hash string, organization string, projectID string) ([]drsapi.DrsObject, error) {
+	page, err := s.BatchGetObjectsByHash(ctx, []string{sycommon.NormalizeChecksum(hash)})
+	if err != nil {
+		return nil, err
+	}
+	resourcePath, err := sycommon.ResourcePath(organization, projectID)
+	if err != nil {
+		return nil, err
+	}
+	filtered := make([]drsapi.DrsObject, 0, len(page.DrsObjects))
+	for _, obj := range page.DrsObjects {
+		if hasBearerIssuer(obj, resourcePath) {
+			filtered = append(filtered, obj)
+		}
+	}
+	return filtered, nil
+}
+
+func (s *DRSService) ResolveResourceAccessURL(ctx context.Context, hash string, organization string, projectID string) (*drsapi.AccessURL, error) {
+	records, err := s.GetObjectsByHashForResource(ctx, hash, organization, projectID)
+	if err != nil {
+		return nil, err
+	}
+	if len(records) == 0 {
+		return nil, fmt.Errorf("%w %s", ErrNoRecordsForHash, hash)
+	}
+
+	matchingRecord := records[0]
+	if matchingRecord.AccessMethods == nil || len(*matchingRecord.AccessMethods) == 0 {
+		return nil, fmt.Errorf("no access methods available for DRS object %s", matchingRecord.Id)
+	}
+
+	accessType := (*matchingRecord.AccessMethods)[0].Type
+	if accessType == "" {
+		return nil, fmt.Errorf("no access type found in access method for DRS object %s", matchingRecord.Id)
+	}
+
+	accessURL, err := s.GetAccessURL(ctx, matchingRecord.Id, string(accessType))
+	if err != nil {
+		return nil, err
+	}
+	return &accessURL, nil
+}
+
+func (s *DRSService) DeleteRecordsByHash(ctx context.Context, hash string) error {
+	hash = sycommon.NormalizeChecksum(hash)
+	page, err := s.BatchGetObjectsByHash(ctx, []string{hash})
+	if err != nil {
+		return fmt.Errorf("error resolving DRS object for hash %s: %w", hash, err)
+	}
+	if len(page.DrsObjects) == 0 {
+		return fmt.Errorf("%w %s", ErrNoRecordsForHash, hash)
+	}
+
+	seen := make(map[string]struct{}, len(page.DrsObjects))
+	for _, record := range page.DrsObjects {
+		did := strings.TrimSpace(record.Id)
+		if did == "" {
+			continue
+		}
+		if _, exists := seen[did]; exists {
+			continue
+		}
+		seen[did] = struct{}{}
+		if err := s.index.Delete(ctx, did); err != nil {
+			return fmt.Errorf("error deleting DID %s for hash %s: %w", did, hash, err)
+		}
+	}
+	if len(seen) == 0 {
+		return fmt.Errorf("no deleteable DIDs found for hash %s", hash)
+	}
+	return nil
+}
+
+func hasBearerIssuer(obj drsapi.DrsObject, resourcePath string) bool {
+	if obj.AccessMethods == nil {
+		return false
+	}
+	for _, am := range *obj.AccessMethods {
+		if am.Authorizations == nil || am.Authorizations.BearerAuthIssuers == nil {
+			continue
+		}
+		for _, issuer := range *am.Authorizations.BearerAuthIssuers {
+			if issuer == resourcePath {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func internalRecordToDRSObject(rec *internalapi.InternalRecord) drsapi.DrsObject {

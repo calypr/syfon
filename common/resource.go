@@ -35,3 +35,10 @@ func StoragePrefix(org, project string) string {
 	}
 	return "programs/" + org + "/projects/" + project
 }
+
+// NormalizeChecksum trims whitespace and an optional sha256: prefix.
+func NormalizeChecksum(raw string) string {
+	raw = strings.TrimSpace(raw)
+	raw = strings.TrimPrefix(raw, "sha256:")
+	return strings.TrimSpace(raw)
+}
