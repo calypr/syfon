@@ -323,7 +323,7 @@ func (m *AuthzMiddleware) fetchTokenAuth(ctx context.Context, tokenString string
 
 	// We use a no-op gen3 logger for the request client to avoid unnecessary side effects in middleware
 	gen3Logger := logs.NewGen3Logger(m.logger, "", "syfon")
-	reqClient := request.NewRequestor(gen3Logger, cred, nil, apiEndpoint, "syfon-server", nil)
+	reqClient := request.NewBearerTokenRequestor(gen3Logger, cred, nil, apiEndpoint, "syfon-server", nil)
 
 	// 3. Fetch user info (privileges)
 	privs, err := fetchPrivileges(ctx, reqClient, cred)
@@ -755,4 +755,3 @@ func (m *AuthzMiddleware) extractPrivileges(privs map[string]any) ([]string, map
 type pluginManagerInterface interface {
 	Authorize(ctx context.Context, in *plugin.AuthorizationInput) (*plugin.AuthorizationOutput, error)
 }
-

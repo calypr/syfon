@@ -140,7 +140,7 @@ func exerciseAllClientCommands(t *testing.T, serverURL string, bucketCfg bucketC
 		t.Fatalf("write source file: %v", err)
 	}
 
-	uploadOut, err := executeRootCommand(t, "--server", serverURL, "upload", "--file", srcPath, "--authz", "/programs/syfon/projects/e2e")
+	uploadOut, err := executeRootCommand(t, "--server", serverURL, "upload", "--file", srcPath, "--org", "syfon", "--project", "e2e")
 	if err != nil {
 		t.Fatalf("upload failed: %v output=%s", err, uploadOut)
 	}
@@ -199,7 +199,8 @@ func exerciseAllClientCommands(t *testing.T, serverURL string, bucketCfg bucketC
 		"add-url",
 		"--did", addURLDID,
 		"--url", (*rec.Urls)[0],
-		"--authz", "/programs/syfon/projects/e2e",
+		"--org", "syfon",
+		"--project", "e2e",
 		"--name", fileName,
 		"--size", strconv.Itoa(len(srcData)),
 	)

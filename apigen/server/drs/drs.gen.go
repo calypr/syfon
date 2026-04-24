@@ -20,14 +20,6 @@ const (
 	PassportAuthScopes = "PassportAuth.Scopes"
 )
 
-// Defines values for AccessMethodAuthorizationsSupportedTypes.
-const (
-	AccessMethodAuthorizationsSupportedTypesBasicAuth    AccessMethodAuthorizationsSupportedTypes = "BasicAuth"
-	AccessMethodAuthorizationsSupportedTypesBearerAuth   AccessMethodAuthorizationsSupportedTypes = "BearerAuth"
-	AccessMethodAuthorizationsSupportedTypesNone         AccessMethodAuthorizationsSupportedTypes = "None"
-	AccessMethodAuthorizationsSupportedTypesPassportAuth AccessMethodAuthorizationsSupportedTypes = "PassportAuth"
-)
-
 // Defines values for AccessMethodType.
 const (
 	AccessMethodTypeFile   AccessMethodType = "file"
@@ -38,14 +30,6 @@ const (
 	AccessMethodTypeHtsget AccessMethodType = "htsget"
 	AccessMethodTypeHttps  AccessMethodType = "https"
 	AccessMethodTypeS3     AccessMethodType = "s3"
-)
-
-// Defines values for AuthorizationsSupportedTypes.
-const (
-	AuthorizationsSupportedTypesBasicAuth    AuthorizationsSupportedTypes = "BasicAuth"
-	AuthorizationsSupportedTypesBearerAuth   AuthorizationsSupportedTypes = "BearerAuth"
-	AuthorizationsSupportedTypesNone         AuthorizationsSupportedTypes = "None"
-	AuthorizationsSupportedTypesPassportAuth AuthorizationsSupportedTypes = "PassportAuth"
 )
 
 // Defines values for DrsServiceDrsSupportedUploadMethods.
@@ -84,17 +68,9 @@ type AccessMethod struct {
 		// Url A fully resolvable URL that can be used to fetch the actual object bytes.
 		Url string `json:"url"`
 	} `json:"access_url,omitempty"`
-	Authorizations *struct {
-		// BearerAuthIssuers If authorizations contain `BearerAuth` this is an optional list of issuers that may authorize access to this object. The caller must provide a token from one of these issuers. If this is empty or missing it assumed the caller knows which token to send via other means. It is strongly recommended that the caller validate that it is appropriate to send the requested token to the DRS server to mitigate attacks by malicious DRS servers requesting credentials they should not have.
-		BearerAuthIssuers *[]string `json:"bearer_auth_issuers,omitempty"`
-		DrsObjectId       *string   `json:"drs_object_id,omitempty"`
 
-		// PassportAuthIssuers If authorizations contain `PassportAuth` this is a required list of visa issuers (as found in a visa's `iss` claim) that may authorize access to this object. The caller must only provide passports that contain visas from this list. It is strongly recommended that the caller validate that it is appropriate to send the requested passport/visa to the DRS server to mitigate attacks by malicious DRS servers requesting credentials they should not have.
-		PassportAuthIssuers *[]string `json:"passport_auth_issuers,omitempty"`
-
-		// SupportedTypes An Optional list of support authorization types. More than one can be supported and tried in sequence. Defaults to `None` if empty or missing.
-		SupportedTypes *[]AccessMethodAuthorizationsSupportedTypes `json:"supported_types,omitempty"`
-	} `json:"authorizations,omitempty"`
+	// Authorizations A map of organization to project list. An empty array means org-wide access. A non-empty array grants access scoped to the listed projects.
+	Authorizations *map[string][]string `json:"authorizations,omitempty"`
 
 	// Available Availablity of file in the cloud. This label defines if this file is immediately accessible via DRS. Any delay or requirement of thawing mechanism if the file is in offline/archival storage is classified as false, meaning it is unavailable.
 	Available *bool `json:"available,omitempty"`
@@ -108,9 +84,6 @@ type AccessMethod struct {
 	// Type Type of the access method.
 	Type AccessMethodType `json:"type"`
 }
-
-// AccessMethodAuthorizationsSupportedTypes defines model for AccessMethod.Authorizations.SupportedTypes.
-type AccessMethodAuthorizationsSupportedTypes string
 
 // AccessMethodType Type of the access method.
 type AccessMethodType string
@@ -133,21 +106,8 @@ type AccessURL struct {
 	Url string `json:"url"`
 }
 
-// Authorizations defines model for Authorizations.
-type Authorizations struct {
-	// BearerAuthIssuers If authorizations contain `BearerAuth` this is an optional list of issuers that may authorize access to this object. The caller must provide a token from one of these issuers. If this is empty or missing it assumed the caller knows which token to send via other means. It is strongly recommended that the caller validate that it is appropriate to send the requested token to the DRS server to mitigate attacks by malicious DRS servers requesting credentials they should not have.
-	BearerAuthIssuers *[]string `json:"bearer_auth_issuers,omitempty"`
-	DrsObjectId       *string   `json:"drs_object_id,omitempty"`
-
-	// PassportAuthIssuers If authorizations contain `PassportAuth` this is a required list of visa issuers (as found in a visa's `iss` claim) that may authorize access to this object. The caller must only provide passports that contain visas from this list. It is strongly recommended that the caller validate that it is appropriate to send the requested passport/visa to the DRS server to mitigate attacks by malicious DRS servers requesting credentials they should not have.
-	PassportAuthIssuers *[]string `json:"passport_auth_issuers,omitempty"`
-
-	// SupportedTypes An Optional list of support authorization types. More than one can be supported and tried in sequence. Defaults to `None` if empty or missing.
-	SupportedTypes *[]AuthorizationsSupportedTypes `json:"supported_types,omitempty"`
-}
-
-// AuthorizationsSupportedTypes defines model for Authorizations.SupportedTypes.
-type AuthorizationsSupportedTypes string
+// Authorizations A map of organization to project list. Each key is an organization name. An empty array value means org-wide access for that organization. A non-empty array grants access scoped to the listed projects only.
+type Authorizations map[string][]string
 
 // BulkAccessMethodUpdateRequest defines model for BulkAccessMethodUpdateRequest.
 type BulkAccessMethodUpdateRequest struct {
@@ -624,7 +584,7 @@ type N200OkAccesses struct {
 	UnresolvedDrsObjects *Unresolved `json:"unresolved_drs_objects,omitempty"`
 }
 
-// N200OkAuthorizations defines model for 200OkAuthorizations.
+// N200OkAuthorizations A map of organization to project list. Each key is an organization name. An empty array value means org-wide access for that organization. A non-empty array grants access scoped to the listed projects only.
 type N200OkAuthorizations = Authorizations
 
 // N200OkBulkAuthorizations defines model for 200OkBulkAuthorizations.

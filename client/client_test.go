@@ -60,6 +60,39 @@ func TestClientBasicAuthAndUserAgent(t *testing.T) {
 	}
 }
 
+func TestGeneratedClientUsesBasicAuthTransport(t *testing.T) {
+	t.Parallel()
+	httpClient := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path != "/index" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		user, pass, ok := r.BasicAuth()
+		if !ok || user != "u" || pass != "p" {
+			t.Fatalf("missing/invalid basic auth user=%q pass=%q ok=%v", user, pass, ok)
+		}
+		header := make(http.Header)
+		header.Set("Content-Type", "application/json")
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Status:     "200 OK",
+			Body:       io.NopCloser(strings.NewReader(`{"records":[]}`)),
+			Header:     header,
+			Request:    r,
+		}, nil
+	})}
+
+	raw, err := New("http://example.test",
+		WithBasicAuth("u", "p"),
+		WithHTTPClient(httpClient))
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+	c := raw.(*Client)
+	if _, err := c.InternalAPI().InternalListWithResponse(context.Background(), &internalapi.InternalListParams{}); err != nil {
+		t.Fatalf("generated client list failed: %v", err)
+	}
+}
+
 func ptr[T any](v T) *T { return &v }
 
 func TestDataUploadBlank(t *testing.T) {
@@ -242,4 +275,3 @@ func TestNewClientNilConfigAndFallbackHelpers(t *testing.T) {
 		t.Fatal("expected default logger fallback")
 	}
 }
-

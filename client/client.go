@@ -142,7 +142,12 @@ func NewClient(cfg *Config) (*Client, error) {
 		cred.KeyID = cfg.BasicAuth.Username
 		cred.APIKey = cfg.BasicAuth.Password
 	}
-	req := request.NewRequestor(nil, cred, nil, bu, userAgent, cfg.HTTPClient)
+	var req request.Requester
+	if cfg.Token != "" {
+		req = request.NewBearerTokenRequestor(nil, cred, nil, bu, userAgent, cfg.HTTPClient)
+	} else {
+		req = request.NewBasicAuthRequestor(nil, cred, nil, bu, userAgent, cfg.HTTPClient)
+	}
 
 	client := &Client{
 		requestor: req,
@@ -194,7 +199,7 @@ func (c *Client) initServices() {
 
 func (c *Client) HTTPClient() *http.Client {
 	if r, ok := c.requestor.(*request.Request); ok {
-		return r.RetryClient.StandardClient()
+		return r.RetryClient.HTTPClient
 	}
 	return http.DefaultClient
 }

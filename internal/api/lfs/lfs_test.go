@@ -119,6 +119,31 @@ func TestLFSBatchUploadReturnsActionsWithoutPlaceholder(t *testing.T) {
 	}
 }
 
+func TestUploadPartToSignedURLFaultInjection(t *testing.T) {
+	origClient := http.DefaultClient
+	defer func() { http.DefaultClient = origClient }()
+	http.DefaultClient = &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(bytes.NewBufferString("ok")),
+				Header:     http.Header{},
+				Request:    req,
+			}, nil
+		}),
+	}
+
+	if _, err := uploadPartToSignedURL(context.Background(), "http://example.org/upload", []byte("payload")); err == nil {
+		t.Fatal("expected multipart upload part to fail when no etag is returned")
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
 func TestResolveObjectForOIDFallsBackToChecksum(t *testing.T) {
 	db := &testutils.MockDatabase{
 		Objects: map[string]*drs.DrsObject{},

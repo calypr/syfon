@@ -4,6 +4,7 @@ import (
 	"sort"
 
 	"github.com/calypr/syfon/apigen/server/drs"
+	syfoncommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/models"
 )
@@ -22,10 +23,10 @@ func UniqueAuthz(values any) []string {
 	case []drs.AccessMethod:
 		out := make([]string, 0)
 		for _, method := range v {
-			if method.Authorizations == nil || method.Authorizations.BearerAuthIssuers == nil {
+			if method.Authorizations == nil {
 				continue
 			}
-			out = append(out, (*method.Authorizations.BearerAuthIssuers)...)
+			out = append(out, syfoncommon.AuthzMapToList(*method.Authorizations)...)
 		}
 		return common.UniqueStrings(out)
 	case *[]drs.AccessMethod:

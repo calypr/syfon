@@ -104,7 +104,16 @@ func TestIndexServiceOperationsAndUpsert(t *testing.T) {
 	}))
 	defer server.Close()
 
-	service := NewIndexService(mustInternalClient(t, server.URL), &fakeRequester{})
+	listName := "file.txt"
+	listSize := int64(12)
+	listUrls := []string{"s3://bucket/object"}
+	listRecords := []internalapi.InternalRecord{{Did: "did-list", Authz: []string{"/programs/p1"}, FileName: &listName, Size: &listSize, Urls: &listUrls}}
+	listResp, err := json.Marshal(internalapi.ListRecordsResponse{Records: &listRecords})
+	if err != nil {
+		t.Fatalf("marshal list response: %v", err)
+	}
+	requester := &fakeRequester{responseJSON: listResp}
+	service := NewIndexService(mustInternalClient(t, server.URL), requester)
 	ctx := context.Background()
 
 	if got, err := service.Get(ctx, "did-update"); err != nil || got.Did != "did-update" {
@@ -145,8 +154,12 @@ func TestIndexServiceOperationsAndUpsert(t *testing.T) {
 	if _, err := service.List(ctx, ListRecordsOptions{Hash: "sha", Authz: "/programs/p1", Organization: "org", ProjectID: "proj", Limit: 3, Page: 2}); err != nil {
 		t.Fatalf("List returned error: %v", err)
 	}
-	if lastListQuery.Get("hash") != "sha" || lastListQuery.Get("authz") != "/programs/p1" || lastListQuery.Get("organization") != "org" || lastListQuery.Get("project") != "proj" || lastListQuery.Get("limit") != "3" || lastListQuery.Get("page") != "2" {
-		t.Fatalf("unexpected list query values: %v", lastListQuery)
+	query, err := url.ParseQuery(strings.TrimPrefix(requester.builder.Url, "/index?"))
+	if err != nil {
+		t.Fatalf("parse list query: %v", err)
+	}
+	if query.Get("hash") != "sha" || query.Get("authz") != "/programs/p1" || query.Get("organization") != "org" || query.Get("project") != "proj" || query.Get("limit") != "3" || query.Get("page") != "2" {
+		t.Fatalf("unexpected list query values: %v", query)
 	}
 
 	if _, err := service.DeleteByQuery(ctx, DeleteByQueryOptions{Authz: "/programs/p1", Organization: "org", ProjectID: "proj", Hash: "abc", HashType: "sha256"}); err != nil {
@@ -232,4 +245,3 @@ func TestIndexServiceOperationsAndUpsert(t *testing.T) {
 		t.Fatalf("expected missing authz create error, got %v", err)
 	}
 }
-

@@ -2,6 +2,9 @@ package syfonclient
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -16,7 +19,6 @@ import (
 func TestDRSServiceResolveAndList(t *testing.T) {
 	t.Parallel()
 
-	var lastIndexQuery url.Values
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/objects/obj-1":
@@ -38,21 +40,23 @@ func TestDRSServiceResolveAndList(t *testing.T) {
 		case r.Method == http.MethodPost && r.URL.Path == "/objects/register":
 			name := "registered.bin"
 			writeJSON(t, w, http.StatusCreated, drsapi.N201ObjectsCreated{Objects: []drsapi.DrsObject{{Id: "obj-created", Name: &name, Checksums: []drsapi.Checksum{{Type: "sha256", Checksum: "abc"}}, CreatedTime: time.Now()}}})
-		case r.Method == http.MethodGet && r.URL.Path == "/index":
-			lastIndexQuery = r.URL.Query()
-			name := "record.bin"
-			size := int64(77)
-			urls := []string{"https://storage.example/record.bin"}
-			hashes := internalapi.HashInfo{"sha256": "abc123"}
-			records := []internalapi.InternalRecord{{Did: "did-record", Authz: []string{"/programs/p1"}, FileName: &name, Size: &size, Urls: &urls, Hashes: &hashes}}
-			writeJSON(t, w, http.StatusOK, internalapi.ListRecordsResponse{Records: &records})
 		default:
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
 		}
 	}))
 	defer server.Close()
 
-	index := NewIndexService(mustInternalClient(t, server.URL), &fakeRequester{})
+	recordName := "record.bin"
+	recordSize := int64(77)
+	recordUrls := []string{"https://storage.example/record.bin"}
+	recordHashes := internalapi.HashInfo{"sha256": "abc123"}
+	records := []internalapi.InternalRecord{{Did: "did-record", Authz: []string{"/programs/org1/projects/p1"}, FileName: &recordName, Size: &recordSize, Urls: &recordUrls, Hashes: &recordHashes}}
+	listResp, err := json.Marshal(internalapi.ListRecordsResponse{Records: &records})
+	if err != nil {
+		t.Fatalf("marshal list response: %v", err)
+	}
+	requester := &fakeRequester{responseJSON: listResp}
+	index := NewIndexService(mustInternalClient(t, server.URL), requester)
 	service := NewDRSService(mustDRSClient(t, server.URL), index)
 	ctx := context.Background()
 
@@ -77,39 +81,58 @@ func TestDRSServiceResolveAndList(t *testing.T) {
 	if err != nil || len(page.DrsObjects) != 1 || page.DrsObjects[0].Id != "did-record" {
 		t.Fatalf("ListObjects returned page=%+v err=%v", page, err)
 	}
-	if lastIndexQuery.Get("limit") != "5" || lastIndexQuery.Get("page") != "2" {
-		t.Fatalf("unexpected list query values: %v", lastIndexQuery)
+	query, err := url.ParseQuery(strings.TrimPrefix(requester.builder.Url, "/index?"))
+	if err != nil {
+		t.Fatalf("parse list query: %v", err)
+	}
+	if query.Get("limit") != "5" || query.Get("page") != "2" {
+		t.Fatalf("unexpected list query values: %v", query)
 	}
 	if page.DrsObjects[0].AccessMethods == nil || len(*page.DrsObjects[0].AccessMethods) != 1 {
 		t.Fatalf("expected mapped access methods, got %+v", page.DrsObjects[0])
 	}
 	method := (*page.DrsObjects[0].AccessMethods)[0]
-	if method.Authorizations == nil || method.Authorizations.BearerAuthIssuers == nil || len(*method.Authorizations.BearerAuthIssuers) != 1 {
+	if method.Authorizations == nil || len(*method.Authorizations) == 0 {
 		t.Fatalf("expected authz mapping, got %+v", method)
+	}
+	if _, ok := (*method.Authorizations)["org1"]; !ok {
+		t.Fatalf("expected org1 in authz map, got %+v", *method.Authorizations)
 	}
 
 	projectPage, err := service.ListObjectsByProject(ctx, "proj-1", 10, 3)
 	if err != nil || len(projectPage.DrsObjects) != 1 {
 		t.Fatalf("ListObjectsByProject returned page=%+v err=%v", projectPage, err)
 	}
-	if lastIndexQuery.Get("project") != "proj-1" || lastIndexQuery.Get("limit") != "10" || lastIndexQuery.Get("page") != "3" {
-		t.Fatalf("unexpected project list query values: %v", lastIndexQuery)
+	query, err = url.ParseQuery(strings.TrimPrefix(requester.builder.Url, "/index?"))
+	if err != nil {
+		t.Fatalf("parse project list query: %v", err)
+	}
+	if query.Get("project") != "proj-1" || query.Get("limit") != "10" || query.Get("page") != "3" {
+		t.Fatalf("unexpected project list query values: %v", query)
 	}
 
 	sample, err := service.GetProjectSample(ctx, "proj-2", 4)
 	if err != nil || len(sample.DrsObjects) != 1 {
 		t.Fatalf("GetProjectSample returned page=%+v err=%v", sample, err)
 	}
-	if lastIndexQuery.Get("project") != "proj-2" || lastIndexQuery.Get("page") != "1" {
-		t.Fatalf("unexpected sample query values: %v", lastIndexQuery)
+	query, err = url.ParseQuery(strings.TrimPrefix(requester.builder.Url, "/index?"))
+	if err != nil {
+		t.Fatalf("parse sample list query: %v", err)
+	}
+	if query.Get("project") != "proj-2" || query.Get("page") != "1" {
+		t.Fatalf("unexpected sample query values: %v", query)
 	}
 
 	hashPage, err := service.BatchGetObjectsByHash(ctx, []string{"abc", "def"})
 	if err != nil || len(hashPage.DrsObjects) != 1 {
 		t.Fatalf("BatchGetObjectsByHash returned page=%+v err=%v", hashPage, err)
 	}
-	if lastIndexQuery.Get("hash") != "abc,def" {
-		t.Fatalf("expected joined hash query, got %v", lastIndexQuery)
+	query, err = url.ParseQuery(strings.TrimPrefix(requester.builder.Url, "/index?"))
+	if err != nil {
+		t.Fatalf("parse hash query: %v", err)
+	}
+	if query.Get("hash") != "abc,def" {
+		t.Fatalf("expected joined hash query, got %v", query)
 	}
 
 	accessURL, err := service.GetAccessURL(ctx, "obj-1", "acc-1")
@@ -123,3 +146,131 @@ func TestDRSServiceResolveAndList(t *testing.T) {
 	}
 }
 
+func TestDRSServiceResourceAuthzAndDelete(t *testing.T) {
+	t.Parallel()
+
+	recordName := "object.bin"
+	recordSize := int64(77)
+	recordURLs := []string{"https://storage.example/object.bin"}
+	recordHashes := internalapi.HashInfo{"sha256": "abc"}
+	records := []internalapi.InternalRecord{
+		{
+			Did:      "obj-1",
+			Authz:    []string{"/programs/org1/projects/proj1"},
+			FileName: &recordName,
+			Size:     &recordSize,
+			Urls:     &recordURLs,
+			Hashes:   &recordHashes,
+		},
+		{
+			Did:      "obj-2",
+			Authz:    []string{"/programs/org1"},
+			FileName: &recordName,
+			Size:     &recordSize,
+			Urls:     &recordURLs,
+			Hashes:   &recordHashes,
+		},
+	}
+	listResp, err := json.Marshal(internalapi.ListRecordsResponse{Records: &records})
+	if err != nil {
+		t.Fatalf("marshal list response: %v", err)
+	}
+	requester := &fakeRequester{responseJSON: listResp}
+	httpClient := &http.Client{Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/objects/obj-1/access/https":
+			return jsonResponse(http.StatusOK, drsapi.AccessURL{Url: "https://signed.example/object.bin"})
+		case r.Method == http.MethodDelete && (r.URL.Path == "/index/obj-1" || r.URL.Path == "/index/obj-2"):
+			return emptyResponse(http.StatusNoContent), nil
+		default:
+			return nil, fmt.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+	})}
+	index := NewIndexService(mustInternalClientWithHTTPClient(httpClient), requester)
+	service := NewDRSService(mustDRSClientWithHTTPClient(httpClient), index)
+	ctx := context.Background()
+
+	matches, err := service.GetObjectsByHashForResource(ctx, "sha256:abc", "org1", "proj1")
+	if err != nil {
+		t.Fatalf("GetObjectsByHashForResource returned error: %v", err)
+	}
+	if len(matches) != 2 {
+		t.Fatalf("expected both scoped and org-wide records, got %+v", matches)
+	}
+
+	orgWideOnly, err := service.GetObjectsByHashForResource(ctx, "abc", "org1", "proj2")
+	if err != nil {
+		t.Fatalf("GetObjectsByHashForResource returned error: %v", err)
+	}
+	if len(orgWideOnly) != 1 || orgWideOnly[0].Id != "obj-2" {
+		t.Fatalf("expected org-wide record only, got %+v", orgWideOnly)
+	}
+
+	if _, err := service.GetObjectsByHashForResource(ctx, "abc", "", "proj2"); err != nil {
+		t.Fatalf("empty org should not error: %v", err)
+	}
+	if zero, err := service.GetObjectsByHashForResource(ctx, "abc", "", "proj2"); err != nil || len(zero) != 0 {
+		t.Fatalf("expected no matches for empty org, got %+v err=%v", zero, err)
+	}
+
+	accessURL, err := service.ResolveResourceAccessURL(ctx, "sha256:abc", "org1", "proj1")
+	if err != nil {
+		t.Fatalf("ResolveResourceAccessURL returned error: %v", err)
+	}
+	if accessURL == nil || accessURL.Url != "https://signed.example/object.bin" {
+		t.Fatalf("unexpected resolved access url: %+v", accessURL)
+	}
+
+	if err := service.DeleteRecordsByHash(ctx, "sha256:abc"); err != nil {
+		t.Fatalf("DeleteRecordsByHash returned error: %v", err)
+	}
+
+	emptyRequester := &fakeRequester{responseJSON: []byte(`{"records":[]}`)}
+	emptyIndex := NewIndexService(mustInternalClientWithHTTPClient(httpClient), emptyRequester)
+	emptyService := NewDRSService(mustDRSClientWithHTTPClient(httpClient), emptyIndex)
+	if err := emptyService.DeleteRecordsByHash(ctx, "sha256:abc"); err == nil {
+		t.Fatal("expected no-records error from DeleteRecordsByHash")
+	}
+}
+
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
+}
+
+func jsonResponse(status int, v any) (*http.Response, error) {
+	body, err := json.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+	return &http.Response{
+		StatusCode: status,
+		Body:       io.NopCloser(strings.NewReader(string(body))),
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+	}, nil
+}
+
+func emptyResponse(status int) *http.Response {
+	return &http.Response{
+		StatusCode: status,
+		Body:       io.NopCloser(strings.NewReader("")),
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+	}
+}
+
+func mustInternalClientWithHTTPClient(client *http.Client) *internalapi.ClientWithResponses {
+	c, err := internalapi.NewClientWithResponses("http://example.invalid", internalapi.WithHTTPClient(client))
+	if err != nil {
+		panic(err)
+	}
+	return c
+}
+
+func mustDRSClientWithHTTPClient(client *http.Client) *drsapi.ClientWithResponses {
+	c, err := drsapi.NewClientWithResponses("http://example.invalid", drsapi.WithHTTPClient(client))
+	if err != nil {
+		panic(err)
+	}
+	return c
+}

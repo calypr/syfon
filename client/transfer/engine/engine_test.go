@@ -28,11 +28,14 @@ type fakeBackend struct {
 	rangeCalls         [][2]int64
 	uploaded           []byte
 	uploadSize         int64
+	uploadKey          string
+	resolveUploadKey   string
 	multipartInitID    string
 	multipartInitCalls int
+	multipartInitKey   string
 	partUploads        map[int][]byte
 	partEtags          map[int]string
-	completedGUID      string
+	completedKey       string
 	completedUploadID  string
 	completedParts     []transfer.MultipartPart
 	completeErr        error
@@ -89,25 +92,32 @@ func (f *fakeBackend) GetWriter(ctx context.Context, guid string) (io.WriteClose
 	return nil, fmt.Errorf("unused")
 }
 
-func (f *fakeBackend) Upload(ctx context.Context, guid string, body io.Reader, size int64) error {
+func (f *fakeBackend) ResolveUploadURL(ctx context.Context, guid string, filename string, metadata common.FileMetadata, bucket string) (string, error) {
+	f.resolveUploadKey = filename
+	return "https://upload.example/" + filename, nil
+}
+
+func (f *fakeBackend) Upload(ctx context.Context, url string, body io.Reader, size int64) error {
 	data, err := io.ReadAll(body)
 	if err != nil {
 		return err
 	}
+	f.uploadKey = url
 	f.uploaded = append([]byte(nil), data...)
 	f.uploadSize = size
 	return nil
 }
 
-func (f *fakeBackend) MultipartInit(ctx context.Context, guid string) (string, error) {
+func (f *fakeBackend) MultipartInit(ctx context.Context, key string) (string, error) {
 	f.multipartInitCalls++
+	f.multipartInitKey = key
 	if f.multipartInitID == "" {
 		f.multipartInitID = "upload-1"
 	}
 	return f.multipartInitID, nil
 }
 
-func (f *fakeBackend) MultipartPart(ctx context.Context, guid string, uploadID string, partNum int, body io.Reader) (string, error) {
+func (f *fakeBackend) MultipartPart(ctx context.Context, key string, uploadID string, partNum int, body io.Reader) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.partUploads == nil {
@@ -128,8 +138,8 @@ func (f *fakeBackend) MultipartPart(ctx context.Context, guid string, uploadID s
 	return etag, nil
 }
 
-func (f *fakeBackend) MultipartComplete(ctx context.Context, guid string, uploadID string, parts []transfer.MultipartPart) error {
-	f.completedGUID = guid
+func (f *fakeBackend) MultipartComplete(ctx context.Context, key string, uploadID string, parts []transfer.MultipartPart) error {
+	f.completedKey = key
 	f.completedUploadID = uploadID
 	f.completedParts = append([]transfer.MultipartPart(nil), parts...)
 	return f.completeErr
@@ -193,9 +203,15 @@ func TestGenericUploaderUploadSingle(t *testing.T) {
 		return nil
 	})
 
-	err := uploader.Upload(ctx, transfer.TransferRequest{SourcePath: file, GUID: "guid-1"}, true)
+	err := uploader.Upload(ctx, transfer.TransferRequest{SourcePath: file, GUID: "guid-1", ObjectKey: "object-1"}, true)
 	if err != nil {
 		t.Fatalf("Upload returned error: %v", err)
+	}
+	if backend.resolveUploadKey != "object-1" {
+		t.Fatalf("unexpected resolved upload key %q", backend.resolveUploadKey)
+	}
+	if backend.uploadKey != "https://upload.example/object-1" {
+		t.Fatalf("unexpected upload url %q", backend.uploadKey)
 	}
 	if !bytes.Equal(backend.uploaded, content) || backend.uploadSize != int64(len(content)) {
 		t.Fatalf("unexpected uploaded payload size=%d body=%q", backend.uploadSize, backend.uploaded)
@@ -232,15 +248,18 @@ func TestGenericUploaderMultipartAndState(t *testing.T) {
 		return nil
 	})
 
-	err = uploader.Upload(ctx, transfer.TransferRequest{SourcePath: file, GUID: "guid-large", ForceMultipart: true}, true)
+	err = uploader.Upload(ctx, transfer.TransferRequest{SourcePath: file, GUID: "guid-large", ObjectKey: "object-large", ForceMultipart: true}, true)
 	if err != nil {
 		t.Fatalf("Upload returned error: %v", err)
 	}
 	if backend.multipartInitCalls != 1 {
 		t.Fatalf("expected one multipart init call, got %d", backend.multipartInitCalls)
 	}
-	if backend.completedGUID != "guid-large" || backend.completedUploadID != "upload-123" {
-		t.Fatalf("unexpected completion target guid=%q uploadID=%q", backend.completedGUID, backend.completedUploadID)
+	if backend.multipartInitKey != "object-large" {
+		t.Fatalf("unexpected multipart init key %q", backend.multipartInitKey)
+	}
+	if backend.completedKey != "object-large" || backend.completedUploadID != "upload-123" {
+		t.Fatalf("unexpected completion target key=%q uploadID=%q", backend.completedKey, backend.completedUploadID)
 	}
 	if len(backend.completedParts) < 2 {
 		t.Fatalf("expected multiple completed parts, got %+v", backend.completedParts)
@@ -262,7 +281,7 @@ func TestGenericUploaderMultipartAndState(t *testing.T) {
 		t.Fatalf("expected checkpoint to be removed, stat err=%v", err)
 	}
 
-	state := &uploaderResumeState{SourcePath: file, GUID: "guid-large", FileSize: 101 * common.MB, ChunkSize: 10 * common.MB, Completed: map[int]string{1: "etag-1"}}
+	state := &uploaderResumeState{SourcePath: file, GUID: "guid-large", ObjectKey: "object-large", FileSize: 101 * common.MB, ChunkSize: 10 * common.MB, Completed: map[int]string{1: "etag-1"}}
 	uploader.saveState(checkpointPath, state)
 	loaded, ok := uploader.loadState(checkpointPath)
 	if !ok || !reflect.DeepEqual(loaded, state) {
@@ -272,7 +291,7 @@ func TestGenericUploaderMultipartAndState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stat returned error: %v", err)
 	}
-	if !uploader.matches(loaded, transfer.TransferRequest{SourcePath: file, GUID: "guid-large"}, info, 10*common.MB) {
+	if !uploader.matches(loaded, transfer.TransferRequest{SourcePath: file, GUID: "guid-large", ObjectKey: "object-large"}, info, 10*common.MB) {
 		t.Fatal("expected resume state to match request")
 	}
 	if uploader.matches(nil, transfer.TransferRequest{}, info, 10*common.MB) {
@@ -419,4 +438,22 @@ func TestGenericDownloaderDownloadAndParallel(t *testing.T) {
 	if len(backend3.rangeCalls) != 0 {
 		t.Fatalf("expected single-stream fallback when ranges unsupported, got %+v", backend3.rangeCalls)
 	}
+
+	t.Run("parallel failure removes preallocated destination", func(t *testing.T) {
+		backend := &fakeBackend{
+			data:     content,
+			rangeErr: fmt.Errorf("boom"),
+			meta:     &transfer.ObjectMetadata{Size: int64(len(content)), AcceptRanges: true, Provider: "http"},
+		}
+		d := &GenericDownloader{Backend: backend}
+		dst := filepath.Join(t.TempDir(), "failed-parallel.bin")
+
+		err := d.Download(context.Background(), "guid-fail", dst, 2, 1*common.MB, 1*common.MB)
+		if err == nil || !strings.Contains(err.Error(), "range download") {
+			t.Fatalf("expected range download error, got %v", err)
+		}
+		if _, statErr := os.Stat(dst); !os.IsNotExist(statErr) {
+			t.Fatalf("expected failed parallel download to remove %q, stat err=%v", dst, statErr)
+		}
+	})
 }

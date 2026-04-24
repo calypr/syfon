@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/apigen/server/internalapi"
@@ -16,7 +17,6 @@ import (
 	"github.com/calypr/syfon/internal/urlmanager"
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
-	"time"
 )
 
 var multipartUploadSessions sync.Map // uploadID -> multipartSession
@@ -217,6 +217,21 @@ func handleInternalMultipartInitFiber(om *core.ObjectManager) fiber.Handler {
 			return c.Status(fiber.StatusBadRequest).SendString("key/guid/file_name is required")
 		}
 
+		// Path-like keys are already storage keys and should be preserved as-is.
+		// Legacy checksum/UUID inputs still use the historic mint/resolve flow.
+		if strings.Contains(key, "/") {
+			internalID := uuid.NewString()
+			uploadID, err := om.InitMultipartUpload(c.Context(), bucket, key)
+			if err != nil {
+				return apiutil.HandleError(c, err)
+			}
+			multipartUploadSessions.Store(uploadID, multipartSession{Bucket: bucket, Key: key})
+			return c.Status(fiber.StatusOK).JSON(internalapi.InternalMultipartInitOutput{
+				UploadId: &uploadID,
+				Guid:     &internalID,
+			})
+		}
+
 		// Syfon internal convention: IDs should be UUIDs.
 		// If the provided 'key' looks like a checksum, we mint a UUID from it.
 		// If it's already a UUID, we use it. If it's neither, we might need to mint one anyway.
@@ -242,7 +257,7 @@ func handleInternalMultipartInitFiber(om *core.ObjectManager) fiber.Handler {
 		} else if _, err := uuid.Parse(key); err != nil {
 			// Not a UUID and not a checksum, let's minted a random one or use a stable one?
 			// For testing compatibility, we'll mint a random UUID if it's not a UUID.
-			internalID = uuid.New().String()
+			internalID = uuid.NewString()
 		}
 
 		uploadID, err := om.InitMultipartUpload(c.Context(), bucket, internalID)

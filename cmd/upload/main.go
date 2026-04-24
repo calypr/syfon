@@ -12,13 +12,15 @@ import (
 	drsapi "github.com/calypr/syfon/apigen/client/drs"
 	syclient "github.com/calypr/syfon/client"
 	"github.com/calypr/syfon/client/xfer/upload"
+	syfoncommon "github.com/calypr/syfon/common"
 	"github.com/spf13/cobra"
 )
 
 var (
-	uploadFile  string
-	uploadDID   string
-	uploadAuthz string
+	uploadFile    string
+	uploadDID     string
+	uploadOrg     string
+	uploadProject string
 )
 
 var Cmd = &cobra.Command{
@@ -39,9 +41,9 @@ var Cmd = &cobra.Command{
 			return fmt.Errorf("--file must be a regular file")
 		}
 
-		authz := strings.TrimSpace(uploadAuthz)
-		if authz == "" {
-			return fmt.Errorf("--authz is required")
+		org := strings.TrimSpace(uploadOrg)
+		if org == "" {
+			return fmt.Errorf("--org is required")
 		}
 
 		serverURL, err := cmd.Flags().GetString("server")
@@ -79,30 +81,20 @@ var Cmd = &cobra.Command{
 		}
 
 		name := filepath.Base(srcPath)
-		issuers := []string{authz}
+		authzMap := syfoncommon.AuthzMapFromScope(org, strings.TrimSpace(uploadProject))
+
+		am := drsapi.AccessMethod{Type: "s3"}
+		if authzMap != nil {
+			am.Authorizations = &authzMap
+		}
 		drsObj := &drsapi.DrsObject{
 			Id:   did,
 			Name: &name,
 			Size: info.Size(),
 			Checksums: []drsapi.Checksum{
-				{
-					Type:     "sha256",
-					Checksum: checksum,
-				},
+				{Type: "sha256", Checksum: checksum},
 			},
-			AccessMethods: &[]drsapi.AccessMethod{
-				{
-					Type: "s3", // Default type
-					Authorizations: &struct {
-						BearerAuthIssuers   *[]string                                          `json:"bearer_auth_issuers,omitempty"`
-						DrsObjectId         *string                                            `json:"drs_object_id,omitempty"`
-						PassportAuthIssuers *[]string                                          `json:"passport_auth_issuers,omitempty"`
-						SupportedTypes      *[]drsapi.AccessMethodAuthorizationsSupportedTypes `json:"supported_types,omitempty"`
-					}{
-						BearerAuthIssuers: &issuers,
-					},
-				},
-			},
+			AccessMethods: &[]drsapi.AccessMethod{am},
 		}
 
 		// Register and upload using the SDK's orchestrator
@@ -127,7 +119,8 @@ var Cmd = &cobra.Command{
 				}
 			}
 			if objectURL != "" {
-				if err := c.Index().Upsert(ctx, finalID, objectURL, name, info.Size(), checksum, []string{authz}); err != nil {
+				authzList := syfoncommon.AuthzMapToList(authzMap)
+				if err := c.Index().Upsert(ctx, finalID, objectURL, name, info.Size(), checksum, authzList); err != nil {
 					return fmt.Errorf("sync index record: %w", err)
 				}
 			}
@@ -141,5 +134,6 @@ var Cmd = &cobra.Command{
 func init() {
 	Cmd.Flags().StringVar(&uploadFile, "file", "", "Path to source file")
 	Cmd.Flags().StringVar(&uploadDID, "did", "", "Optional object DID (generated when omitted)")
-	Cmd.Flags().StringVar(&uploadAuthz, "authz", "", "Required authz scope for the record")
+	Cmd.Flags().StringVar(&uploadOrg, "org", "", "Required organization for the authz scope")
+	Cmd.Flags().StringVar(&uploadProject, "project", "", "Optional project for the authz scope (omit for org-wide)")
 }

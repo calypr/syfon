@@ -41,6 +41,20 @@ func TestAuthTransportRoundTrip(t *testing.T) {
 		}
 	})
 
+	t.Run("injects basic auth when absent", func(t *testing.T) {
+		base := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			if got := req.Header.Get("Authorization"); got != "Basic dXNlcjpwYXNz" {
+				t.Fatalf("expected basic auth, got %q", got)
+			}
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("ok")), Header: make(http.Header), Request: req}, nil
+		})
+		transport := &AuthTransport{Base: base, Mode: AuthModeBasic, Cred: &conf.Credential{KeyID: "user", APIKey: "pass"}}
+		req, _ := http.NewRequest(http.MethodGet, "https://example.test", nil)
+		if _, err := transport.RoundTrip(req); err != nil {
+			t.Fatalf("RoundTrip returned error: %v", err)
+		}
+	})
+
 	t.Run("injects bearer token when absent", func(t *testing.T) {
 		base := roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			if got := req.Header.Get("Authorization"); got != "Bearer tok" {
@@ -48,7 +62,7 @@ func TestAuthTransportRoundTrip(t *testing.T) {
 			}
 			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("ok")), Header: make(http.Header), Request: req}, nil
 		})
-		transport := &AuthTransport{Base: base, Cred: &conf.Credential{AccessToken: "tok"}}
+		transport := &AuthTransport{Base: base, Mode: AuthModeBearer, Cred: &conf.Credential{AccessToken: "tok"}}
 		req, _ := http.NewRequest(http.MethodGet, "https://example.test", nil)
 		if _, err := transport.RoundTrip(req); err != nil {
 			t.Fatalf("RoundTrip returned error: %v", err)
@@ -62,7 +76,7 @@ func TestAuthTransportRoundTrip(t *testing.T) {
 			}
 			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("ok")), Header: make(http.Header), Request: req}, nil
 		})
-		transport := &AuthTransport{Base: base, Cred: &conf.Credential{AccessToken: "tok"}}
+		transport := &AuthTransport{Base: base, Mode: AuthModeBearer, Cred: &conf.Credential{AccessToken: "tok"}}
 		req, _ := http.NewRequest(http.MethodGet, "https://example.test", nil)
 		req.Header.Set("Authorization", "Basic abc")
 		if _, err := transport.RoundTrip(req); err != nil {
@@ -79,9 +93,14 @@ func TestAuthTransportRefreshOnce(t *testing.T) {
 		t.Fatalf("refreshOnce with nil cred returned error: %v", err)
 	}
 
-	transport = &AuthTransport{Cred: &conf.Credential{AccessToken: "already-present", APIEndpoint: "https://example.test"}}
+	transport = &AuthTransport{Mode: AuthModeBearer, Cred: &conf.Credential{AccessToken: "already-present", APIEndpoint: "https://example.test"}}
 	if err := transport.refreshOnce(context.Background()); err != nil {
 		t.Fatalf("refreshOnce with existing token returned error: %v", err)
+	}
+
+	transport = &AuthTransport{Mode: AuthModeBasic, Cred: &conf.Credential{APIKey: "basic-pass"}}
+	if err := transport.refreshOnce(context.Background()); err != nil {
+		t.Fatalf("refreshOnce without APIEndpoint should no-op, got error: %v", err)
 	}
 }
 
@@ -91,14 +110,22 @@ func TestAuthTransportNewAccessToken(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("requires api key", func(t *testing.T) {
-		transport := &AuthTransport{Cred: &conf.Credential{APIEndpoint: "https://example.test"}}
+		transport := &AuthTransport{Mode: AuthModeBearer, Cred: &conf.Credential{APIEndpoint: "https://example.test"}}
 		if err := transport.NewAccessToken(ctx); err == nil || !strings.Contains(err.Error(), "APIKey is required") {
 			t.Fatalf("expected APIKey required error, got %v", err)
 		}
 	})
 
+	t.Run("requires api endpoint", func(t *testing.T) {
+		transport := &AuthTransport{Mode: AuthModeBearer, Cred: &conf.Credential{APIKey: "key"}}
+		if err := transport.NewAccessToken(ctx); err == nil || !strings.Contains(err.Error(), "APIEndpoint is required") {
+			t.Fatalf("expected APIEndpoint required error, got %v", err)
+		}
+	})
+
 	t.Run("non-200 includes response body", func(t *testing.T) {
 		transport := &AuthTransport{
+			Mode: AuthModeBearer,
 			Base: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 				return &http.Response{StatusCode: http.StatusUnauthorized, Status: "401 Unauthorized", Body: io.NopCloser(strings.NewReader("nope")), Header: make(http.Header), Request: req}, nil
 			}),
@@ -111,6 +138,7 @@ func TestAuthTransportNewAccessToken(t *testing.T) {
 
 	t.Run("decode failure bubbles up", func(t *testing.T) {
 		transport := &AuthTransport{
+			Mode: AuthModeBearer,
 			Base: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 				return &http.Response{StatusCode: http.StatusOK, Status: "200 OK", Body: io.NopCloser(strings.NewReader("{")), Header: make(http.Header), Request: req}, nil
 			}),
@@ -124,6 +152,7 @@ func TestAuthTransportNewAccessToken(t *testing.T) {
 	t.Run("success stores refreshed token and persists", func(t *testing.T) {
 		mgr := &trackingManager{}
 		transport := &AuthTransport{
+			Mode: AuthModeBearer,
 			Base: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 				if req.Method != http.MethodPost {
 					t.Fatalf("expected POST refresh request, got %s", req.Method)
@@ -148,4 +177,3 @@ func TestAuthTransportNewAccessToken(t *testing.T) {
 		}
 	})
 }
-

@@ -25,7 +25,7 @@ func TestNewRequestor(t *testing.T) {
 	// Create a mock config manager
 	mockConf := &mockConfigManager{}
 
-	reqInterface := NewRequestor(logs.NewGen3Logger(logger, "", ""), cred, mockConf, "https://example.com", "test-ua", nil)
+	reqInterface := NewBasicAuthRequestor(logs.NewGen3Logger(logger, "", ""), cred, mockConf, "https://example.com", "test-ua", nil)
 
 	if reqInterface == nil {
 		t.Fatal("Expected non-nil request interface")
@@ -49,7 +49,7 @@ func TestRequest_NewBuilder(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	mockConf := &mockConfigManager{}
 
-	reqInterface := NewRequestor(logs.NewGen3Logger(logger, "", ""), nil, mockConf, "https://example.com", "test-ua", nil)
+	reqInterface := NewBasicAuthRequestor(logs.NewGen3Logger(logger, "", ""), nil, mockConf, "https://example.com", "test-ua", nil)
 	req := reqInterface.(*Request)
 
 	// Test relative path
@@ -90,7 +90,7 @@ func TestRequest_Do_Success(t *testing.T) {
 		}),
 	}
 
-	reqInterface := NewRequestor(logs.NewGen3Logger(logger, "", ""), nil, mockConf, "https://example.com", "test-ua", client)
+	reqInterface := NewBasicAuthRequestor(logs.NewGen3Logger(logger, "", ""), nil, mockConf, "https://example.com", "test-ua", client)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -129,7 +129,7 @@ func TestRequest_Do_WithCustomHeaders(t *testing.T) {
 		}),
 	}
 
-	reqInterface := NewRequestor(logs.NewGen3Logger(logger, "", ""), nil, mockConf, "https://example.com", "test-ua", client)
+	reqInterface := NewBasicAuthRequestor(logs.NewGen3Logger(logger, "", ""), nil, mockConf, "https://example.com", "test-ua", client)
 
 	ctx := context.Background()
 	err := reqInterface.Do(ctx, "GET", "/api/test", nil, nil, WithHeader("X-Custom-Header", "test-value"))
@@ -152,7 +152,7 @@ func TestRequest_Do_RawMode(t *testing.T) {
 			}, nil
 		}),
 	}
-	reqInterface := NewRequestor(logs.NewGen3Logger(logger, "", ""), nil, nil, "https://example.com", "test-ua", client)
+	reqInterface := NewBasicAuthRequestor(logs.NewGen3Logger(logger, "", ""), nil, nil, "https://example.com", "test-ua", client)
 
 	var resp *http.Response
 	err := reqInterface.Do(context.Background(), "GET", "/raw", nil, &resp)
@@ -167,6 +167,45 @@ func TestRequest_Do_RawMode(t *testing.T) {
 	body, _ := io.ReadAll(resp.Body)
 	if string(body) != "raw content" {
 		t.Errorf("Expected 'raw content', got '%s'", string(body))
+	}
+}
+
+func TestRequest_Do_BasicAuthDoesNotRefreshOn401(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	mockConf := &mockConfigManager{}
+	calls := 0
+
+	client := &http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			calls++
+			if r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/user/credentials/api/access_token") {
+				t.Fatalf("unexpected refresh request in local basic-auth mode: %s %s", r.Method, r.URL.String())
+			}
+			return &http.Response{
+				StatusCode: http.StatusUnauthorized,
+				Status:     "401 Unauthorized",
+				Body:       io.NopCloser(strings.NewReader("nope")),
+				Header:     make(http.Header),
+				Request:    r,
+			}, nil
+		}),
+	}
+
+	reqInterface := NewBasicAuthRequestor(
+		logs.NewGen3Logger(logger, "", ""),
+		&conf.Credential{KeyID: "user", APIKey: "pass"},
+		mockConf,
+		"https://example.com",
+		"test-ua",
+		client,
+	)
+
+	err := reqInterface.Do(context.Background(), "GET", "/api/test", nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "status 401") {
+		t.Fatalf("expected 401 response error, got %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("expected one request, got %d", calls)
 	}
 }
 

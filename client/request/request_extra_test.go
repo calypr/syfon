@@ -37,7 +37,7 @@ func TestRequestDo_ResponseAndDecodeErrors(t *testing.T) {
 			return &http.Response{StatusCode: http.StatusOK, Status: "200 OK", Body: io.NopCloser(strings.NewReader("{}")), Header: make(http.Header), Request: r}, nil
 		}
 	})}
-	req := NewRequestor(logs.NewGen3Logger(logger, "", ""), nil, &mockConfigManager{}, "https://example.test", "ua", baseClient)
+	req := NewBasicAuthRequestor(logs.NewGen3Logger(logger, "", ""), nil, &mockConfigManager{}, "https://example.test", "ua", baseClient)
 
 	var out map[string]any
 	err := req.Do(context.Background(), http.MethodGet, "/forbidden", nil, &out)
@@ -76,11 +76,10 @@ func TestRequestDo_BasicAuthAndPartSize(t *testing.T) {
 		}
 		return &http.Response{StatusCode: http.StatusOK, Status: "200 OK", Body: io.NopCloser(strings.NewReader("{}")), Header: make(http.Header), Request: r}, nil
 	})}
-	req := NewRequestor(logs.NewGen3Logger(logger, "", ""), cred, &mockConfigManager{}, "https://example.test", "ua", baseClient)
+	req := NewBasicAuthRequestor(logs.NewGen3Logger(logger, "", ""), cred, &mockConfigManager{}, "https://example.test", "ua", baseClient)
 
 	payload := strings.NewReader("hello")
 	if err := req.Do(context.Background(), http.MethodPut, "/upload", payload, nil, WithPartSize(5)); err != nil {
 		t.Fatalf("Do returned error: %v", err)
 	}
 }
-
