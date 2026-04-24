@@ -11,8 +11,8 @@ require (
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.14
 	github.com/aws/aws-sdk-go-v2/service/kms v1.50.4
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.99.0
-	github.com/calypr/syfon/apigen v0.2.3
-	github.com/calypr/syfon/client v0.2.3
+	github.com/calypr/syfon/apigen v0.2.4
+	github.com/calypr/syfon/client v0.2.4
 	github.com/getkin/kin-openapi v0.135.0
 	github.com/gofiber/fiber/v3 v3.1.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
@@ -28,9 +28,6 @@ require (
 	google.golang.org/api v0.276.0
 	gopkg.in/yaml.v3 v3.0.1
 )
-
-replace github.com/calypr/syfon/apigen => ./apigen
-replace github.com/calypr/syfon/client => ./client
 
 require (
 	cel.dev/expr v0.25.1 // indirect

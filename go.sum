@@ -102,10 +102,12 @@ github.com/aws/aws-sdk-go-v2/service/sts v1.41.10/go.mod h1:60dv0eZJfeVXfbT1tFJi
 github.com/aws/smithy-go v1.24.3 h1:XgOAaUgx+HhVBoP4v8n6HCQoTRDhoMghKqw4LNHsDNg=
 github.com/aws/smithy-go v1.24.3/go.mod h1:YE2RhdIuDbA5E5bTdciG9KrW3+TiEONeUWCqxX9i1Fc=
 github.com/bmatcuk/doublestar v1.1.1/go.mod h1:UD6OnuiIn0yFxxA2le/rnRU1G4RaI4UvFv1sNto9p6w=
-github.com/calypr/syfon/apigen v0.2.3 h1:32Wk60IN18Ir8aTjo2UfMpB/yeOfF2XItiqk6/33Kkk=
-github.com/calypr/syfon/apigen v0.2.3/go.mod h1:9JNwTgR57yKJlWqZpdqP+/l4zCNzH1EIFrW+e20PyMQ=
-github.com/calypr/syfon/client v0.2.3 h1:5vIwLgAoEZd9/LjxmyjPfjJkfOpop4Y2ZFgjPoaCmis=
-github.com/calypr/syfon/client v0.2.3/go.mod h1:Yb0nHJER/8BWUwiBNY3idqQQO087do9gS9kXn1+UOik=
+github.com/bufbuild/protocompile v0.14.1 h1:iA73zAf/fyljNjQKwYzUHD6AD4R8KMasmwa/FBatYVw=
+github.com/bufbuild/protocompile v0.14.1/go.mod h1:ppVdAIhbr2H8asPk6k4pY7t9zB1OU5DoEw9xY/FUi1c=
+github.com/calypr/syfon/apigen v0.2.4 h1:LMK7IChGjDZ/7u7mTlVQTW4BR+TnF+4we/qLouk/S6Q=
+github.com/calypr/syfon/apigen v0.2.4/go.mod h1:9JNwTgR57yKJlWqZpdqP+/l4zCNzH1EIFrW+e20PyMQ=
+github.com/calypr/syfon/client v0.2.4 h1:9wOleoF86lGoE7/CLhMLmkdUrBVLbuKRiBHrGILZdmE=
+github.com/calypr/syfon/client v0.2.4/go.mod h1:44Xfegl+Ti5FQB/KJHq3cJP8hEUa7L0P059iqAVW2kg=
 github.com/cenkalti/backoff/v4 v4.3.0 h1:MyRJ/UdXutAwSAT+s3wNd7MfTIcy71VQueUuFK343L8=
 github.com/cenkalti/backoff/v4 v4.3.0/go.mod h1:Y3VNntkOUPxTVeUxJ/G5vcM//AlwfmyYozVcomhLiZE=
 github.com/cespare/xxhash/v2 v2.3.0 h1:UL815xU9SqsFlibzuggzjXhog7bL6oX9BbNZnL2UFvs=
@@ -381,6 +383,9 @@ golang.org/x/sys v0.0.0-20200116001909-b77594299b42/go.mod h1:h1NjWce9XRLGQEsW7w
 golang.org/x/sys v0.0.0-20200223170610-d5e6a3e2c0ae/go.mod h1:h1NjWce9XRLGQEsW7wpKNCjG9DtNlClVuFLEZdDNbEs=
 golang.org/x/sys v0.0.0-20201204225414-ed752295db88/go.mod h1:h1NjWce9XRLGQEsW7wpKNCjG9DtNlClVuFLEZdDNbEs=
 golang.org/x/sys v0.0.0-20210616094352-59db8d763f22/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
+golang.org/x/sys v0.0.0-20210630005230-0f9fa26af87c/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
+golang.org/x/sys v0.0.0-20210927094055-39ccf1dd6fa6/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
+golang.org/x/sys v0.0.0-20220503163025-988cb79eb6c6/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
 golang.org/x/sys v0.43.0 h1:Rlag2XtaFTxp19wS8MXlJwTvoh8ArU6ezoyFsMyCTNI=
 golang.org/x/sys v0.43.0/go.mod h1:4GL1E5IUh+htKOUEOaiffhrAeqysfVGipDYzABqnCmw=
 golang.org/x/term v0.42.0 h1:UiKe+zDFmJobeJ5ggPwOshJIVt6/Ft0rcfrXZDLWAWY=
