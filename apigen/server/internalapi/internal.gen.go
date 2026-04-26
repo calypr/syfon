@@ -94,11 +94,12 @@ type InternalMultipartUploadRequest struct {
 
 // InternalRecord defines model for InternalRecord.
 type InternalRecord struct {
-	Authz       []string `json:"authz"`
-	CreatedTime *string  `json:"created_time,omitempty"`
-	Description *string  `json:"description,omitempty"`
-	Did         string   `json:"did"`
-	FileName    *string  `json:"file_name,omitempty"`
+	// Authorizations GA4GH authorization map keyed by organization. Empty project list grants org-wide access.
+	Authorizations *map[string][]string `json:"authorizations,omitempty"`
+	CreatedTime    *string              `json:"created_time,omitempty"`
+	Description    *string              `json:"description,omitempty"`
+	Did            string               `json:"did"`
+	FileName       *string              `json:"file_name,omitempty"`
 
 	// Hashes Hash map, e.g. {"sha256":"..."}
 	Hashes       *HashInfo `json:"hashes,omitempty"`
@@ -112,13 +113,14 @@ type InternalRecord struct {
 
 // InternalRecordResponse defines model for InternalRecordResponse.
 type InternalRecordResponse struct {
-	Authz       []string `json:"authz"`
-	Baseid      *string  `json:"baseid,omitempty"`
-	CreatedDate *string  `json:"created_date,omitempty"`
-	CreatedTime *string  `json:"created_time,omitempty"`
-	Description *string  `json:"description,omitempty"`
-	Did         string   `json:"did"`
-	FileName    *string  `json:"file_name,omitempty"`
+	// Authorizations GA4GH authorization map keyed by organization. Empty project list grants org-wide access.
+	Authorizations *map[string][]string `json:"authorizations,omitempty"`
+	Baseid         *string              `json:"baseid,omitempty"`
+	CreatedDate    *string              `json:"created_date,omitempty"`
+	CreatedTime    *string              `json:"created_time,omitempty"`
+	Description    *string              `json:"description,omitempty"`
+	Did            string               `json:"did"`
+	FileName       *string              `json:"file_name,omitempty"`
 
 	// Hashes Hash map, e.g. {"sha256":"..."}
 	Hashes       *HashInfo `json:"hashes,omitempty"`
@@ -147,8 +149,7 @@ type InternalUploadBlankOutput struct {
 
 // InternalUploadBlankRequest defines model for InternalUploadBlankRequest.
 type InternalUploadBlankRequest struct {
-	Authz *[]string `json:"authz,omitempty"`
-	Guid  *string   `json:"guid,omitempty"`
+	Guid *string `json:"guid,omitempty"`
 }
 
 // InternalUploadBulkItem defines model for InternalUploadBulkItem.
@@ -205,7 +206,6 @@ type InternalUploadURLParams struct {
 
 // InternalDeleteByQueryParams defines parameters for InternalDeleteByQuery.
 type InternalDeleteByQueryParams struct {
-	Authz        *string `form:"authz,omitempty" json:"authz,omitempty"`
 	Organization *string `form:"organization,omitempty" json:"organization,omitempty"`
 	Program      *string `form:"program,omitempty" json:"program,omitempty"`
 	Project      *string `form:"project,omitempty" json:"project,omitempty"`
@@ -216,7 +216,6 @@ type InternalDeleteByQueryParams struct {
 // InternalListParams defines parameters for InternalList.
 type InternalListParams struct {
 	Hash         *string `form:"hash,omitempty" json:"hash,omitempty"`
-	Authz        *string `form:"authz,omitempty" json:"authz,omitempty"`
 	Organization *string `form:"organization,omitempty" json:"organization,omitempty"`
 	Program      *string `form:"program,omitempty" json:"program,omitempty"`
 	Project      *string `form:"project,omitempty" json:"project,omitempty"`
@@ -557,17 +556,6 @@ func (siw *ServerInterfaceWrapper) InternalDeleteByQuery(c fiber.Ctx) error {
 	var err error
 	var params InternalDeleteByQueryParams
 
-	// ------------- Optional query parameter "authz" -------------
-	if paramValue := c.Query("authz"); paramValue != "" {
-
-		var value string
-		err = runtime.BindStyledParameterWithOptions("form", "authz", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
-		if err != nil {
-			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter authz: %w", err).Error())
-		}
-		params.Authz = &value
-
-	}
 	// ------------- Optional query parameter "organization" -------------
 	if paramValue := c.Query("organization"); paramValue != "" {
 
@@ -641,17 +629,6 @@ func (siw *ServerInterfaceWrapper) InternalList(c fiber.Ctx) error {
 			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter hash: %w", err).Error())
 		}
 		params.Hash = &value
-
-	}
-	// ------------- Optional query parameter "authz" -------------
-	if paramValue := c.Query("authz"); paramValue != "" {
-
-		var value string
-		err = runtime.BindStyledParameterWithOptions("form", "authz", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
-		if err != nil {
-			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter authz: %w", err).Error())
-		}
-		params.Authz = &value
 
 	}
 	// ------------- Optional query parameter "organization" -------------

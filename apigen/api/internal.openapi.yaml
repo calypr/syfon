@@ -22,10 +22,6 @@ paths:
           schema:
             type: string
         - in: query
-          name: authz
-          schema:
-            type: string
-        - in: query
           name: organization
           schema:
             type: string
@@ -95,10 +91,6 @@ paths:
         - internal-index
       operationId: internalDeleteByQuery
       parameters:
-        - in: query
-          name: authz
-          schema:
-            type: string
         - in: query
           name: organization
           schema:
@@ -603,7 +595,6 @@ components:
       type: object
       required:
         - did
-        - authz
       properties:
         did:
           type: string
@@ -617,11 +608,13 @@ components:
           type: array
           items:
             type: string
-        authz:
-          type: array
-          items:
-            type: string
-          minItems: 1
+        authorizations:
+          description: GA4GH authorization map keyed by organization. Empty project list grants org-wide access.
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: string
         file_name:
           type: string
         organization:
@@ -717,10 +710,6 @@ components:
       properties:
         guid:
           type: string
-        authz:
-          type: array
-          items:
-            type: string
     InternalUploadBlankOutput:
       type: object
       properties:

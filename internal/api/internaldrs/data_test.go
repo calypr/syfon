@@ -586,8 +586,8 @@ func TestHandleInternalDownload_Gen3Auth(t *testing.T) {
 				},
 			},
 		},
-		ObjectAuthz: map[string][]string{
-			"secure-id": {"/programs/p/projects/q"},
+		ObjectAuthz: map[string]map[string][]string{
+			"secure-id": {"p": {"q"}},
 		},
 	}
 	mockUM := &testutils.MockUrlManager{}
@@ -1033,8 +1033,8 @@ func TestHandleInternalUploadBulk_Gen3UnauthorizedPerItem(t *testing.T) {
 				Id: "secure-id",
 			},
 		},
-		ObjectAuthz: map[string][]string{
-			"secure-id": {"/programs/p/projects/q"},
+		ObjectAuthz: map[string]map[string][]string{
+			"secure-id": {"p": {"q"}},
 		},
 	}
 

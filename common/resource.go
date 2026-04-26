@@ -95,6 +95,11 @@ func AuthzMapToList(authzMap map[string][]string) []string {
 			out = append(out, "/programs/"+org)
 		} else {
 			for _, project := range projects {
+				project = strings.TrimSpace(project)
+				if project == "" {
+					out = append(out, "/programs/"+org)
+					continue
+				}
 				out = append(out, "/programs/"+org+"/projects/"+project)
 			}
 		}

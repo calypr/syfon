@@ -188,9 +188,9 @@ func TestLoadFailedLog(t *testing.T) {
 			RetryCount: 2,
 			Bucket:     "bucket-1",
 			FileMetadata: FileMetadata{
-				Authz:    []string{"/programs/test"},
-				Aliases:  []string{"alias-1"},
-				Metadata: map[string]any{"k": "v"},
+				Authorizations: map[string][]string{"test": {}},
+				Aliases:        []string{"alias-1"},
+				Metadata:       map[string]any{"k": "v"},
 			},
 		},
 	}
@@ -275,5 +275,3 @@ func toPathSet(paths []string) map[string]bool {
 	}
 	return result
 }
-
-

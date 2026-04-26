@@ -131,37 +131,49 @@ func (s *DRSService) GetProjectSample(ctx context.Context, projectID string, lim
 }
 
 func (s *DRSService) BatchGetObjectsByHash(ctx context.Context, hashes []string) (DRSPage, error) {
-	listResp, err := s.index.List(ctx, ListRecordsOptions{
-		Hash: strings.Join(hashes, ","),
-	})
-	if err != nil {
-		return DRSPage{}, err
-	}
-	records := make([]internalapi.InternalRecord, 0)
-	if listResp.Records != nil {
-		records = *listResp.Records
-	}
-	out := DRSPage{
-		DrsObjects: make([]drsapi.DrsObject, 0, len(records)),
-	}
-	for _, rec := range records {
-		out.DrsObjects = append(out.DrsObjects, internalRecordToDRSObject(&rec))
+	out := DRSPage{DrsObjects: make([]drsapi.DrsObject, 0, len(hashes))}
+	seen := make(map[string]struct{})
+	for _, h := range hashes {
+		checksum := normalizeChecksum(h)
+		if checksum == "" {
+			continue
+		}
+		resp, err := s.gen.GetObjectsByChecksumWithResponse(ctx, drsapi.ChecksumParam(checksum))
+		if err != nil {
+			continue
+		}
+		if resp.JSON200 == nil || resp.JSON200.ResolvedDrsObject == nil {
+			continue
+		}
+		for _, obj := range *resp.JSON200.ResolvedDrsObject {
+			id := strings.TrimSpace(obj.Id)
+			if _, exists := seen[id]; exists {
+				continue
+			}
+			seen[id] = struct{}{}
+			out.DrsObjects = append(out.DrsObjects, obj)
+		}
 	}
 	return out, nil
 }
 
 func (s *DRSService) GetObjectsByHashForResource(ctx context.Context, hash string, organization string, project string) ([]drsapi.DrsObject, error) {
-	page, err := s.BatchGetObjectsByHash(ctx, []string{normalizeChecksum(hash)})
+	organization = strings.TrimSpace(organization)
+	if organization == "" {
+		return nil, nil
+	}
+	page, err := s.BatchGetObjectsByHash(ctx, []string{hash})
 	if err != nil {
 		return nil, err
 	}
-	filtered := make([]drsapi.DrsObject, 0, len(page.DrsObjects))
+	project = strings.TrimSpace(project)
+	result := make([]drsapi.DrsObject, 0, len(page.DrsObjects))
 	for _, obj := range page.DrsObjects {
-		if hasAuthzForScope(obj, organization, project) {
-			filtered = append(filtered, obj)
+		if drsObjectMatchesAuthzScope(&obj, organization, project) {
+			result = append(result, obj)
 		}
 	}
-	return filtered, nil
+	return result, nil
 }
 
 func (s *DRSService) ResolveResourceAccessURL(ctx context.Context, hash string, organization string, project string) (*drsapi.AccessURL, error) {
@@ -220,70 +232,46 @@ func (s *DRSService) DeleteRecordsByHash(ctx context.Context, hash string) error
 	return nil
 }
 
-func hasAuthzForScope(obj drsapi.DrsObject, organization string, project string) bool {
-	organization = strings.TrimSpace(organization)
-	project = strings.TrimSpace(project)
-	if organization == "" {
-		return false
-	}
-	if obj.AccessMethods == nil {
-		return false
-	}
-	for _, am := range *obj.AccessMethods {
-		if am.Authorizations == nil || len(*am.Authorizations) == 0 {
-			continue
-		}
-		projects, ok := (*am.Authorizations)[organization]
-		if !ok {
-			continue
-		}
-		if len(projects) == 0 {
-			return true // org-wide access
-		}
-		for _, p := range projects {
-			if p == project {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 func normalizeChecksum(raw string) string {
 	raw = strings.TrimSpace(raw)
 	raw = strings.TrimPrefix(raw, "sha256:")
 	return strings.TrimSpace(raw)
 }
 
-
-// authzListToMap converts a list of GA4GH resource-path strings to the wire
-// org→projects map. Lives here to avoid a circular import with syfon/common.
-func authzListToMap(paths []string) map[string][]string {
-	if len(paths) == 0 {
-		return nil
+func drsObjectMatchesAuthzScope(obj *drsapi.DrsObject, organization, project string) bool {
+	if obj == nil || obj.AccessMethods == nil {
+		return false
 	}
-	result := make(map[string][]string)
-	for _, path := range paths {
-		path = strings.TrimSpace(path)
-		path = strings.TrimPrefix(path, "/programs/")
-		parts := strings.SplitN(path, "/projects/", 2)
-		org := strings.TrimSpace(parts[0])
-		if org == "" {
+	for _, method := range *obj.AccessMethods {
+		if method.Authorizations == nil {
 			continue
 		}
-		if _, ok := result[org]; !ok {
-			result[org] = []string{}
-		}
-		if len(parts) == 2 {
-			if proj := strings.TrimSpace(parts[1]); proj != "" {
-				result[org] = append(result[org], proj)
-			}
+		if authzMapMatchesScope(*method.Authorizations, organization, project) {
+			return true
 		}
 	}
-	if len(result) == 0 {
-		return nil
+	return false
+}
+
+func authzMapMatchesScope(authorizations map[string][]string, organization, project string) bool {
+	organization = strings.TrimSpace(organization)
+	project = strings.TrimSpace(project)
+	if organization == "" || len(authorizations) == 0 {
+		return false
 	}
-	return result
+	projects, ok := authorizations[organization]
+	if !ok {
+		return false
+	}
+	if len(projects) == 0 {
+		return true
+	}
+	for _, candidate := range projects {
+		if strings.TrimSpace(candidate) == project {
+			return true
+		}
+	}
+	return false
 }
 
 func internalRecordToDRSObject(rec *internalapi.InternalRecord) drsapi.DrsObject {
@@ -312,7 +300,6 @@ func internalRecordToDRSObject(rec *internalapi.InternalRecord) drsapi.DrsObject
 	if rec.Urls != nil {
 		urls = *rec.Urls
 	}
-	authz := rec.Authz
 	ams := make([]drsapi.AccessMethod, 0, len(urls))
 	for _, rawURL := range urls {
 		method := drsapi.AccessMethod{
@@ -325,10 +312,8 @@ func internalRecordToDRSObject(rec *internalapi.InternalRecord) drsapi.DrsObject
 		if parsed, err := url.Parse(rawURL); err == nil && parsed.Scheme != "" {
 			method.Type = drsapi.AccessMethodType(parsed.Scheme)
 		}
-		if len(authz) > 0 {
-			if m := authzListToMap(authz); m != nil {
-				method.Authorizations = &m
-			}
+		if rec.Authorizations != nil {
+			method.Authorizations = rec.Authorizations
 		}
 		ams = append(ams, method)
 	}

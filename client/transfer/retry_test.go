@@ -126,7 +126,7 @@ func TestNoOpLogger(t *testing.T) {
 
 	logger := NoOpLogger{}
 	ctx := context.Background()
-	metadata := common.FileMetadata{Authz: []string{"/programs/test"}}
+	metadata := common.FileMetadata{Authorizations: map[string][]string{"test": {}}}
 
 	if logger.Slog() == nil {
 		t.Fatal("expected slog logger")
@@ -157,4 +157,3 @@ func TestNoOpLogger(t *testing.T) {
 		t.Fatal("expected nil scoreboard")
 	}
 }
-

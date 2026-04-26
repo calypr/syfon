@@ -21,7 +21,7 @@ type ObjectStore interface {
 	CreateObject(ctx context.Context, obj *models.InternalObject) error
 	GetObjectsByChecksum(ctx context.Context, checksum string) ([]models.InternalObject, error)
 	GetObjectsByChecksums(ctx context.Context, checksums []string) (map[string][]models.InternalObject, error)
-	ListObjectIDsByResourcePrefix(ctx context.Context, resourcePrefix string) ([]string, error)
+	ListObjectIDsByScope(ctx context.Context, organization, project string) ([]string, error)
 	CreateObjectAlias(ctx context.Context, aliasID, canonicalObjectID string) error
 	ResolveObjectAlias(ctx context.Context, aliasID string) (string, error)
 	GetBulkObjects(ctx context.Context, ids []string) ([]models.InternalObject, error)
@@ -74,7 +74,7 @@ type SHA256ValidityStore interface {
 
 // MetricsStore is the minimum storage surface needed by the metrics API.
 type MetricsStore interface {
-	ListObjectIDsByResourcePrefix(ctx context.Context, resourcePrefix string) ([]string, error)
+	ListObjectIDsByScope(ctx context.Context, organization, project string) ([]string, error)
 	GetObject(ctx context.Context, id string) (*models.InternalObject, error)
 	GetFileUsage(ctx context.Context, objectID string) (*models.FileUsage, error)
 	ListFileUsage(ctx context.Context, limit, offset int, inactiveSince *time.Time) ([]models.FileUsage, error)

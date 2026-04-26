@@ -1,11 +1,6 @@
 package metrics
 
 import (
-	sycommon "github.com/calypr/syfon/common"
-	"github.com/calypr/syfon/internal/db"
-	"github.com/calypr/syfon/internal/models"
-	"github.com/calypr/syfon/internal/common"
-	"github.com/calypr/syfon/internal/authz"
 	"context"
 	"errors"
 	"net/http"
@@ -14,13 +9,17 @@ import (
 	"time"
 
 	"github.com/calypr/syfon/apigen/server/metricsapi"
+	sycommon "github.com/calypr/syfon/common"
+	"github.com/calypr/syfon/internal/authz"
+	"github.com/calypr/syfon/internal/common"
+	"github.com/calypr/syfon/internal/db"
+	"github.com/calypr/syfon/internal/models"
 	"github.com/gofiber/fiber/v3"
 )
 
 type metricsQueryContextKey struct{}
 
 type metricsQueryParams struct {
-	authz        string
 	organization string
 	program      string
 	project      string
@@ -37,7 +36,6 @@ func NewMetricsServer(database db.MetricsStore) *MetricsServer {
 func RegisterMetricsRoutes(router fiber.Router, database db.MetricsStore) {
 	router.Use(func(c fiber.Ctx) error {
 		params := metricsQueryParams{
-			authz:        strings.TrimSpace(c.Query("authz")),
 			organization: strings.TrimSpace(c.Query("organization")),
 			program:      strings.TrimSpace(c.Query("program")),
 			project:      strings.TrimSpace(c.Query("project")),
@@ -84,7 +82,7 @@ func (s *MetricsServer) ListMetricsFiles(ctx context.Context, request metricsapi
 
 	var data []models.FileUsage
 	if access.isScoped() {
-		data, _, err = listScopedFileUsage(ctx, s.database, access.scopePrefix, limit, offset, inactiveSince)
+		data, _, err = listScopedFileUsage(ctx, s.database, access.organization, access.project, limit, offset, inactiveSince)
 	} else {
 		data, err = s.database.ListFileUsage(ctx, limit, offset, inactiveSince)
 	}
@@ -123,7 +121,7 @@ func (s *MetricsServer) GetMetricsFile(ctx context.Context, request metricsapi.G
 	}
 
 	if access.isScoped() {
-		inside, err := objectInScope(ctx, s.database, objectID, access.scopePrefix)
+		inside, err := objectInScope(ctx, s.database, objectID, access.organization, access.project)
 		if err != nil {
 			return metricsapi.GetMetricsFile500Response{}, nil
 		}
@@ -163,7 +161,7 @@ func (s *MetricsServer) GetMetricsSummary(ctx context.Context, request metricsap
 
 	var summary models.FileUsageSummary
 	if access.isScoped() {
-		_, summary, err = listScopedFileUsage(ctx, s.database, access.scopePrefix, 0, 0, inactiveSince)
+		_, summary, err = listScopedFileUsage(ctx, s.database, access.organization, access.project, 0, 0, inactiveSince)
 	} else {
 		summary, err = s.database.GetFileUsageSummary(ctx, inactiveSince)
 	}
@@ -198,8 +196,14 @@ func (s *MetricsServer) checkAuth(ctx context.Context) (metricsAccess, int, bool
 		return access, 0, true
 	}
 
-	if access.isScoped() && authz.HasMethodAccess(ctx, "read", []string{access.scopePrefix}) {
-		return access, 0, true
+	if access.isScoped() {
+		scope, err := sycommon.ResourcePath(access.organization, access.project)
+		if err != nil {
+			return access, http.StatusBadRequest, false
+		}
+		if authz.HasMethodAccess(ctx, "read", []string{scope}) {
+			return access, 0, true
+		}
 	}
 
 	return access, http.StatusForbidden, false
@@ -231,19 +235,20 @@ func parseInactiveSince(inactiveDays *int) (*time.Time, error) {
 }
 
 type metricsAccess struct {
-	scopePrefix string
+	organization string
+	project      string
 }
 
 func (a metricsAccess) isScoped() bool {
-	return strings.TrimSpace(a.scopePrefix) != ""
+	return strings.TrimSpace(a.organization) != ""
 }
 
 func resolveMetricsAccess(ctx context.Context) (metricsAccess, error) {
-	scopePrefix, _, err := parseScopeQuery(ctx)
+	org, project, _, err := parseScopeQuery(ctx)
 	if err != nil {
 		return metricsAccess{}, err
 	}
-	return metricsAccess{scopePrefix: scopePrefix}, nil
+	return metricsAccess{organization: org, project: project}, nil
 }
 
 func hasGlobalMetricsReadAccess(ctx context.Context) bool {
@@ -251,32 +256,24 @@ func hasGlobalMetricsReadAccess(ctx context.Context) bool {
 		authz.HasMethodAccess(ctx, "read", []string{"/programs"})
 }
 
-func parseScopeQuery(ctx context.Context) (string, bool, error) {
+func parseScopeQuery(ctx context.Context) (string, string, bool, error) {
 	params, _ := ctx.Value(metricsQueryContextKey{}).(metricsQueryParams)
-	authz := strings.TrimSpace(params.authz)
-	if authz != "" {
-		return authz, true, nil
-	}
 	org := strings.TrimSpace(params.organization)
 	if org == "" {
 		org = strings.TrimSpace(params.program)
 	}
 	project := strings.TrimSpace(params.project)
 	if project != "" && org == "" {
-		return "", false, errors.New("organization is required when project is set")
+		return "", "", false, errors.New("organization is required when project is set")
 	}
-	scope, err := sycommon.ResourcePath(org, project)
-	if err != nil {
-		return "", false, err
+	if org != "" {
+		return org, project, true, nil
 	}
-	if scope != "" {
-		return scope, true, nil
-	}
-	return "", false, nil
+	return "", "", false, nil
 }
 
-func collectScopedUsage(ctx context.Context, database db.MetricsStore, scopePrefix string, inactiveSince *time.Time) ([]models.FileUsage, models.FileUsageSummary, error) {
-	ids, err := database.ListObjectIDsByResourcePrefix(ctx, scopePrefix)
+func collectScopedUsage(ctx context.Context, database db.MetricsStore, organization, project string, inactiveSince *time.Time) ([]models.FileUsage, models.FileUsageSummary, error) {
+	ids, err := database.ListObjectIDsByScope(ctx, organization, project)
 	if err != nil {
 		return nil, models.FileUsageSummary{}, err
 	}
@@ -320,8 +317,8 @@ func collectScopedUsage(ctx context.Context, database db.MetricsStore, scopePref
 	return usages, summary, nil
 }
 
-func listScopedFileUsage(ctx context.Context, database db.MetricsStore, scopePrefix string, limit, offset int, inactiveSince *time.Time) ([]models.FileUsage, models.FileUsageSummary, error) {
-	usages, summary, err := collectScopedUsage(ctx, database, scopePrefix, inactiveSince)
+func listScopedFileUsage(ctx context.Context, database db.MetricsStore, organization, project string, limit, offset int, inactiveSince *time.Time) ([]models.FileUsage, models.FileUsageSummary, error) {
+	usages, summary, err := collectScopedUsage(ctx, database, organization, project, inactiveSince)
 	if err != nil {
 		return nil, models.FileUsageSummary{}, err
 	}
@@ -338,7 +335,7 @@ func listScopedFileUsage(ctx context.Context, database db.MetricsStore, scopePre
 	return usages[offset:end], summary, nil
 }
 
-func objectInScope(ctx context.Context, database db.MetricsStore, objectID, scopePrefix string) (bool, error) {
+func objectInScope(ctx context.Context, database db.MetricsStore, objectID, organization, project string) (bool, error) {
 	obj, err := database.GetObject(ctx, objectID)
 	if err != nil {
 		if errors.Is(err, common.ErrNotFound) {
@@ -346,8 +343,18 @@ func objectInScope(ctx context.Context, database db.MetricsStore, objectID, scop
 		}
 		return false, err
 	}
-	for _, authz := range obj.Authorizations {
-		if authz == scopePrefix || strings.HasPrefix(authz, scopePrefix+"/") {
+	if strings.TrimSpace(organization) == "" {
+		return true, nil
+	}
+	projects, ok := obj.Authorizations[organization]
+	if !ok {
+		return false, nil
+	}
+	if strings.TrimSpace(project) == "" || len(projects) == 0 {
+		return true, nil
+	}
+	for _, p := range projects {
+		if p == project {
 			return true, nil
 		}
 	}

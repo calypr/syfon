@@ -13,28 +13,37 @@ import (
 	"github.com/calypr/syfon/internal/models"
 )
 
-// UniqueAuthz extracts unique resource-path strings from access method authz maps.
-func UniqueAuthz(accessMethods []drs.AccessMethod) []string {
+// UniqueAuthz merges authorizations from all access methods into a single map.
+func UniqueAuthz(accessMethods []drs.AccessMethod) map[string][]string {
 	if len(accessMethods) == 0 {
 		return nil
 	}
-	seen := make(map[string]struct{})
-	out := make([]string, 0)
+	out := make(map[string][]string)
 	for _, am := range accessMethods {
 		if am.Authorizations == nil {
 			continue
 		}
-		for _, path := range syfoncommon.AuthzMapToList(*am.Authorizations) {
-			path = strings.TrimSpace(path)
-			if path == "" {
+		for org, projects := range *am.Authorizations {
+			if len(projects) == 0 {
+				if _, ok := out[org]; !ok {
+					out[org] = []string{}
+				}
 				continue
 			}
-			if _, ok := seen[path]; ok {
-				continue
+			seen := make(map[string]struct{}, len(out[org]))
+			for _, p := range out[org] {
+				seen[p] = struct{}{}
 			}
-			seen[path] = struct{}{}
-			out = append(out, path)
+			for _, p := range projects {
+				if _, ok := seen[p]; !ok {
+					out[org] = append(out[org], p)
+					seen[p] = struct{}{}
+				}
+			}
 		}
+	}
+	if len(out) == 0 {
+		return nil
 	}
 	return out
 }
@@ -144,10 +153,6 @@ func CandidateToInternalObject(c drs.DrsObjectCandidate, now time.Time) (models.
 		ams = *c.AccessMethods
 	}
 	authzList := UniqueAuthz(ams)
-	if len(authzList) == 0 {
-		// Default authorization if none provided
-		authzList = []string{"/data_file"}
-	}
 
 	id := ""
 	if c.Aliases != nil {
@@ -160,7 +165,7 @@ func CandidateToInternalObject(c drs.DrsObjectCandidate, now time.Time) (models.
 	}
 
 	if id == "" {
-		id = common.MintObjectIDFromChecksum(oid, authzList)
+		id = common.MintObjectIDFromChecksum(oid, syfoncommon.AuthzMapToList(authzList))
 	}
 
 	obj := drs.DrsObject{
@@ -189,6 +194,9 @@ func CandidateToInternalObject(c drs.DrsObjectCandidate, now time.Time) (models.
 			method := am
 			if method.AccessId == nil || *method.AccessId == "" {
 				method.AccessId = common.Ptr(string(method.Type))
+			}
+			if method.Authorizations == nil && len(authzList) > 0 {
+				method.Authorizations = &authzList
 			}
 			newMethods = append(newMethods, method)
 		}
@@ -269,34 +277,46 @@ func InternalRecordToInternalObject(r internalapi.InternalRecord, now time.Time)
 		methods := make([]drs.AccessMethod, 0, len(*r.Urls))
 		for _, u := range *r.Urls {
 			scheme := common.SchemeFromURL(u)
-			methods = append(methods, drs.AccessMethod{
+			method := drs.AccessMethod{
 				Type:     drs.AccessMethodType(scheme),
 				AccessId: common.Ptr(scheme),
 				AccessUrl: &struct {
 					Headers *[]string `json:"headers,omitempty"`
 					Url     string    "json:\"url\""
 				}{Url: u},
-			})
+			}
+			if r.Authorizations != nil {
+				method.Authorizations = r.Authorizations
+			}
+			methods = append(methods, method)
 		}
 		obj.AccessMethods = &methods
 	}
 
+	var authzMap map[string][]string
+	if r.Authorizations != nil {
+		authzMap = *r.Authorizations
+	}
 	return models.InternalObject{
 		DrsObject:      obj,
-		Authorizations: r.Authz,
+		Authorizations: authzMap,
 	}, nil
 }
 
 // InternalObjectToInternalRecord converts our internal domain model back to an API record.
 func InternalObjectToInternalRecord(obj models.InternalObject) internalapi.InternalRecord {
+	var authzPtr *map[string][]string
+	if len(obj.Authorizations) > 0 {
+		authzPtr = &obj.Authorizations
+	}
 	res := internalapi.InternalRecord{
-		Did:         obj.Id,
-		Size:        &obj.Size,
-		CreatedTime: common.Ptr(obj.CreatedTime.Format(time.RFC3339)),
-		Description: obj.Description,
-		FileName:    obj.Name,
-		Version:     obj.Version,
-		Authz:       obj.Authorizations,
+		Did:            obj.Id,
+		Size:           &obj.Size,
+		CreatedTime:    common.Ptr(obj.CreatedTime.Format(time.RFC3339)),
+		Description:    obj.Description,
+		FileName:       obj.Name,
+		Version:        obj.Version,
+		Authorizations: authzPtr,
 	}
 	if obj.UpdatedTime != nil {
 		res.UpdatedTime = common.Ptr(obj.UpdatedTime.Format(time.RFC3339))
@@ -324,17 +344,17 @@ func InternalObjectToInternalRecord(obj models.InternalObject) internalapi.Inter
 func InternalObjectToInternalRecordResponse(obj models.InternalObject) internalapi.InternalRecordResponse {
 	rec := InternalObjectToInternalRecord(obj)
 	return internalapi.InternalRecordResponse{
-		Did:          rec.Did,
-		Size:         rec.Size,
-		CreatedTime:  rec.CreatedTime,
-		Description:  rec.Description,
-		FileName:     rec.FileName,
-		Version:      rec.Version,
-		Authz:        rec.Authz,
-		UpdatedTime:  rec.UpdatedTime,
-		Hashes:       rec.Hashes,
-		Urls:         rec.Urls,
-		Organization: rec.Organization,
-		Project:      rec.Project,
+		Did:            rec.Did,
+		Size:           rec.Size,
+		CreatedTime:    rec.CreatedTime,
+		Description:    rec.Description,
+		FileName:       rec.FileName,
+		Version:        rec.Version,
+		Authorizations: rec.Authorizations,
+		UpdatedTime:    rec.UpdatedTime,
+		Hashes:         rec.Hashes,
+		Urls:           rec.Urls,
+		Organization:   rec.Organization,
+		Project:        rec.Project,
 	}
 }

@@ -21,9 +21,9 @@ func CandidateToInternalObject(c drs.DrsObjectCandidate, now time.Time) (models.
 	if c.AccessMethods != nil {
 		ams = *c.AccessMethods
 	}
-	authz := common.UniqueStrings(UniqueAuthz(ams))
+	authzMap := UniqueAuthz(ams)
 	obj := drs.DrsObject{
-		Id:          common.MintObjectIDFromChecksum(oid, authz),
+		Id:          common.MintObjectIDFromChecksum(oid, syfoncommon.AuthzMapToList(authzMap)),
 		Size:        c.Size,
 		CreatedTime: now,
 		UpdatedTime: &now,
@@ -72,7 +72,7 @@ func CandidateToInternalObject(c drs.DrsObjectCandidate, now time.Time) (models.
 					Url     string    `json:"url"`
 				}{Url: url},
 			}
-			if authzMap := syfoncommon.AuthzListToMap(authz); authzMap != nil {
+			if len(authzMap) > 0 {
 				newMethod.Authorizations = &authzMap
 			}
 			*obj.AccessMethods = append(*obj.AccessMethods, newMethod)
@@ -80,7 +80,7 @@ func CandidateToInternalObject(c drs.DrsObjectCandidate, now time.Time) (models.
 	}
 	return models.InternalObject{
 		DrsObject:      obj,
-		Authorizations: authz,
+		Authorizations: authzMap,
 	}, nil
 }
 

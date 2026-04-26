@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/calypr/syfon/apigen/server/drs"
-	"github.com/calypr/syfon/apigen/server/lfsapi"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/testutils"
@@ -111,14 +110,21 @@ func TestRegisterObjects(t *testing.T) {
 	RegisterDRSRoutes(app, om)
 
 	t.Run("Register_Single", func(t *testing.T) {
-		id := "new-id"
 		size := int64(50)
-		cand := lfsapi.DrsObjectCandidate{
-			Id:   &id,
-			Size: &size,
-			Checksums: &[]lfsapi.Checksum{
+		authz := map[string][]string{"org1": {"proj1"}}
+		cand := drs.DrsObjectCandidate{
+			Size: size,
+			Checksums: []drs.Checksum{
 				{Type: "sha256", Checksum: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
 			},
+			AccessMethods: &[]drs.AccessMethod{{
+				Type: "s3",
+				AccessUrl: &struct {
+					Headers *[]string `json:"headers,omitempty"`
+					Url     string    `json:"url"`
+				}{Url: "s3://bucket/org1/proj1/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+				Authorizations: &authz,
+			}},
 		}
 		body, _ := json.Marshal(cand)
 		req := httptest.NewRequest("POST", "/objects/register", bytes.NewBuffer(body))
@@ -133,21 +139,25 @@ func TestRegisterObjects(t *testing.T) {
 		if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
 			t.Fatalf("failed to decode response: %v", err)
 		}
-		if len(created.Objects) != 1 || created.Objects[0].Id != "new-id" {
+		if len(created.Objects) != 1 || created.Objects[0].Id == "" {
 			t.Errorf("unexpected response: %+v", created)
+		}
+		if created.Objects[0].AccessMethods == nil || len(*created.Objects[0].AccessMethods) == 0 {
+			t.Fatalf("expected access methods in response: %+v", created.Objects[0])
+		}
+		if (*created.Objects[0].AccessMethods)[0].Authorizations == nil || len(*(*created.Objects[0].AccessMethods)[0].Authorizations) == 0 {
+			t.Fatalf("expected authorizations in response: %+v", created.Objects[0].AccessMethods)
 		}
 	})
 
 	t.Run("Register_Bulk", func(t *testing.T) {
-		id1 := "bulk-1"
-		id2 := "bulk-2"
 		size := int64(100)
 		bodyObj := struct {
-			Candidates []lfsapi.DrsObjectCandidate `json:"candidates"`
+			Candidates []drs.DrsObjectCandidate `json:"candidates"`
 		}{
-			Candidates: []lfsapi.DrsObjectCandidate{
-				{Id: &id1, Size: &size, Checksums: &[]lfsapi.Checksum{{Type: "sha256", Checksum: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}}},
-				{Id: &id2, Size: &size, Checksums: &[]lfsapi.Checksum{{Type: "sha256", Checksum: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}}},
+			Candidates: []drs.DrsObjectCandidate{
+				{Size: size, Checksums: []drs.Checksum{{Type: "sha256", Checksum: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}}},
+				{Size: size, Checksums: []drs.Checksum{{Type: "sha256", Checksum: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}}},
 			},
 		}
 		body, _ := json.Marshal(bodyObj)

@@ -200,30 +200,56 @@ retryLookup:
 		obj.Checksums = append(obj.Checksums, drs.Checksum{Type: t, Checksum: v})
 	}
 
-	// 4. Fetch object-level authz resources.
-	authzRows, err := db.db.QueryContext(ctx, "SELECT resource FROM drs_object_authz WHERE object_id = $1", lookupID)
+	// 4. Fetch object-level authz scopes.
+	authzRows, err := db.db.QueryContext(ctx, "SELECT org, project FROM drs_object_authz WHERE object_id = $1", lookupID)
 	if err != nil {
 		return nil, err
 	}
 	defer authzRows.Close()
+	authzMap := make(map[string][]string)
 	seenAuthz := make(map[string]struct{})
 	for authzRows.Next() {
-		var res string
-		if err := authzRows.Scan(&res); err != nil {
+		var org, project string
+		if err := authzRows.Scan(&org, &project); err != nil {
 			return nil, err
 		}
-		if _, ok := seenAuthz[res]; ok {
+		if org == "" {
 			continue
 		}
-		seenAuthz[res] = struct{}{}
-		obj.Authorizations = append(obj.Authorizations, res)
+		key := org + "|" + project
+		if _, ok := seenAuthz[key]; ok {
+			continue
+		}
+		seenAuthz[key] = struct{}{}
+		if project == "" {
+			if _, ok := authzMap[org]; !ok {
+				authzMap[org] = []string{}
+			}
+		} else {
+			authzMap[org] = append(authzMap[org], project)
+		}
+	}
+	if err := authzRows.Err(); err != nil {
+		return nil, err
+	}
+	if len(authzMap) > 0 {
+		obj.Authorizations = authzMap
+		if obj.AccessMethods != nil {
+			for i := range *obj.AccessMethods {
+				am := &(*obj.AccessMethods)[i]
+				if am.Authorizations == nil {
+					am.Authorizations = &authzMap
+				}
+			}
+		}
 	}
 	// 5. RBAC Check (gen3 mode only)
 	if !authz.IsGen3Mode(ctx) {
 		return obj, nil
 	}
 
-	// Optimized in SQL for gen3 mode.
+	// Optimized in SQL for gen3 mode: reconstruct resource paths from org/project columns
+	// and compare against the user's authorized resources.
 	userResources := authz.GetUserAuthz(ctx)
 
 	var count int
@@ -231,7 +257,8 @@ retryLookup:
 		SELECT COUNT(*) FROM drs_object o
 		WHERE o.id = $1 AND (
 			NOT EXISTS (SELECT 1 FROM drs_object_authz a WHERE a.object_id = o.id)
-			OR EXISTS (SELECT 1 FROM drs_object_authz a WHERE a.object_id = o.id AND a.resource = ANY($2))
+			OR EXISTS (SELECT 1 FROM drs_object_authz a WHERE a.object_id = o.id
+				AND ('/programs/' || a.org || CASE WHEN a.project != '' THEN '/projects/' || a.project ELSE '' END) = ANY($2))
 		)`, lookupID, pq.Array(userResources)).Scan(&count)
 
 	if err != nil {
@@ -286,10 +313,19 @@ func (db *PostgresDB) CreateObject(ctx context.Context, obj *models.InternalObje
 	}
 
 	// Insert Authz
-	for _, res := range obj.Authorizations {
-		_, err = tx.ExecContext(ctx, `INSERT INTO drs_object_authz (object_id, resource) VALUES ($1, $2)`, obj.Id, res)
-		if err != nil {
-			return fmt.Errorf("failed to insert authz: %w", err)
+	for org, projects := range obj.Authorizations {
+		if len(projects) == 0 {
+			_, err = tx.ExecContext(ctx, `INSERT INTO drs_object_authz (object_id, org, project) VALUES ($1, $2, '')`, obj.Id, org)
+			if err != nil {
+				return fmt.Errorf("failed to insert authz: %w", err)
+			}
+		} else {
+			for _, p := range projects {
+				_, err = tx.ExecContext(ctx, `INSERT INTO drs_object_authz (object_id, org, project) VALUES ($1, $2, $3)`, obj.Id, org, p)
+				if err != nil {
+					return fmt.Errorf("failed to insert authz: %w", err)
+				}
+			}
 		}
 	}
 
@@ -328,7 +364,8 @@ func (db *PostgresDB) RegisterObjects(ctx context.Context, objects []models.Inte
 	checksumValues := make([]string, 0)
 
 	authzObjectIDs := make([]string, 0)
-	authzResources := make([]string, 0)
+	authzOrgs := make([]string, 0)
+	authzProjects := make([]string, 0)
 
 	for _, obj := range objects {
 		ids = append(ids, obj.Id)
@@ -369,13 +406,26 @@ func (db *PostgresDB) RegisterObjects(ctx context.Context, objects []models.Inte
 		}
 
 		seenAuthz := make(map[string]struct{})
-		for _, res := range obj.Authorizations {
-			if _, ok := seenAuthz[res]; ok {
-				continue
+		for org, projects := range obj.Authorizations {
+			if len(projects) == 0 {
+				key := org + "|"
+				if _, ok := seenAuthz[key]; !ok {
+					seenAuthz[key] = struct{}{}
+					authzObjectIDs = append(authzObjectIDs, obj.Id)
+					authzOrgs = append(authzOrgs, org)
+					authzProjects = append(authzProjects, "")
+				}
+			} else {
+				for _, p := range projects {
+					key := org + "|" + p
+					if _, ok := seenAuthz[key]; !ok {
+						seenAuthz[key] = struct{}{}
+						authzObjectIDs = append(authzObjectIDs, obj.Id)
+						authzOrgs = append(authzOrgs, org)
+						authzProjects = append(authzProjects, p)
+					}
+				}
 			}
-			seenAuthz[res] = struct{}{}
-			authzObjectIDs = append(authzObjectIDs, obj.Id)
-			authzResources = append(authzResources, res)
 		}
 	}
 
@@ -427,9 +477,9 @@ func (db *PostgresDB) RegisterObjects(ctx context.Context, objects []models.Inte
 
 	if len(authzObjectIDs) > 0 {
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO drs_object_authz (object_id, resource)
-			SELECT * FROM UNNEST($1::text[], $2::text[])`,
-			pq.Array(authzObjectIDs), pq.Array(authzResources),
+			INSERT INTO drs_object_authz (object_id, org, project)
+			SELECT * FROM UNNEST($1::text[], $2::text[], $3::text[])`,
+			pq.Array(authzObjectIDs), pq.Array(authzOrgs), pq.Array(authzProjects),
 		); err != nil {
 			return fmt.Errorf("failed bulk insert authz: %w", err)
 		}
@@ -515,8 +565,10 @@ func (db *PostgresDB) GetObjectsByChecksums(ctx context.Context, checksums []str
 	return result, nil
 }
 
-func (db *PostgresDB) ListObjectIDsByResourcePrefix(ctx context.Context, resourcePrefix string) ([]string, error) {
-	if resourcePrefix == "/" {
+func (db *PostgresDB) ListObjectIDsByScope(ctx context.Context, organization, project string) ([]string, error) {
+	organization = strings.TrimSpace(organization)
+	project = strings.TrimSpace(project)
+	if organization == "" {
 		rows, err := db.db.QueryContext(ctx, `SELECT id FROM drs_object`)
 		if err != nil {
 			return nil, err
@@ -537,11 +589,23 @@ func (db *PostgresDB) ListObjectIDsByResourcePrefix(ctx context.Context, resourc
 		return ids, nil
 	}
 
-	rows, err := db.db.QueryContext(ctx, `
-		SELECT DISTINCT a.object_id
-		FROM drs_object_authz a
-		INNER JOIN drs_object o ON o.id = a.object_id
-		WHERE resource = $1 OR resource LIKE $2`, resourcePrefix, resourcePrefix+"/%")
+	var (
+		rows *sql.Rows
+		err  error
+	)
+	if project != "" {
+		rows, err = db.db.QueryContext(ctx, `
+			SELECT DISTINCT a.object_id
+			FROM drs_object_authz a
+			INNER JOIN drs_object o ON o.id = a.object_id
+			WHERE a.org = $1 AND a.project = $2`, organization, project)
+	} else {
+		rows, err = db.db.QueryContext(ctx, `
+			SELECT DISTINCT a.object_id
+			FROM drs_object_authz a
+			INNER JOIN drs_object o ON o.id = a.object_id
+			WHERE a.org = $1`, organization)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -582,6 +646,7 @@ func (db *PostgresDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []st
 		return map[string]*models.InternalObject{}, nil
 	}
 
+	gen3Mode := authz.IsGen3Mode(ctx)
 	userResources := authz.GetUserAuthz(ctx)
 	rows, err := db.db.QueryContext(ctx, `
 		SELECT
@@ -596,7 +661,8 @@ func (db *PostgresDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []st
 			am.type,
 			cs.type,
 			cs.checksum,
-			oa.resource
+			oa.org,
+			oa.project
 		FROM drs_object o
 		LEFT JOIN drs_object_access_method am ON am.object_id = o.id
 		LEFT JOIN drs_object_checksum cs ON cs.object_id = o.id
@@ -614,10 +680,13 @@ func (db *PostgresDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []st
 			))
 		)
 		AND (
+			$4::boolean = false
+			OR
 			NOT EXISTS (SELECT 1 FROM drs_object_authz a WHERE a.object_id = o.id)
-			OR EXISTS (SELECT 1 FROM drs_object_authz a WHERE a.object_id = o.id AND a.resource = ANY($3))
+			OR EXISTS (SELECT 1 FROM drs_object_authz a WHERE a.object_id = o.id
+				AND ('/programs/' || a.org || CASE WHEN a.project != '' THEN '/projects/' || a.project ELSE '' END) = ANY($3))
 		)`,
-		pq.Array(ids), pq.Array(checksums), pq.Array(userResources),
+		pq.Array(ids), pq.Array(checksums), pq.Array(userResources), gen3Mode,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch bulk objects: %w", err)
@@ -635,11 +704,11 @@ func (db *PostgresDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []st
 			size                                        int64
 			createdTime, updatedTime                    time.Time
 			accessURL, accessType, checksumType, sumVal sql.NullString
-			authzResource                               sql.NullString
+			authzOrg, authzProject                      sql.NullString
 		)
 		if err := rows.Scan(
 			&id, &size, &createdTime, &updatedTime, &name, &version, &description,
-			&accessURL, &accessType, &checksumType, &sumVal, &authzResource,
+			&accessURL, &accessType, &checksumType, &sumVal, &authzOrg, &authzProject,
 		); err != nil {
 			return nil, err
 		}
@@ -691,11 +760,37 @@ func (db *PostgresDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []st
 			}
 		}
 
-		if authzResource.Valid && strings.TrimSpace(authzResource.String) != "" {
-			res := authzResource.String
-			if _, exists := seenAuthz[id][res]; !exists {
-				seenAuthz[id][res] = struct{}{}
-				obj.Authorizations = append(obj.Authorizations, res)
+		if authzOrg.Valid && strings.TrimSpace(authzOrg.String) != "" {
+			org := authzOrg.String
+			proj := ""
+			if authzProject.Valid {
+				proj = authzProject.String
+			}
+			key := org + "|" + proj
+			if _, exists := seenAuthz[id][key]; !exists {
+				seenAuthz[id][key] = struct{}{}
+				if obj.Authorizations == nil {
+					obj.Authorizations = make(map[string][]string)
+				}
+				if proj == "" {
+					if _, ok := obj.Authorizations[org]; !ok {
+						obj.Authorizations[org] = []string{}
+					}
+				} else {
+					obj.Authorizations[org] = append(obj.Authorizations[org], proj)
+				}
+			}
+		}
+	}
+
+	for _, obj := range objectsByID {
+		if len(obj.Authorizations) == 0 || obj.DrsObject.AccessMethods == nil {
+			continue
+		}
+		for i := range *obj.DrsObject.AccessMethods {
+			am := &(*obj.DrsObject.AccessMethods)[i]
+			if am.Authorizations == nil {
+				am.Authorizations = &obj.Authorizations
 			}
 		}
 	}

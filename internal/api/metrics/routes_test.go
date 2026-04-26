@@ -1,8 +1,8 @@
 package metrics
 
 import (
-	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/common"
+	"github.com/calypr/syfon/internal/models"
 
 	"context"
 	"encoding/json"
@@ -14,7 +14,7 @@ import (
 
 	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/apigen/server/metricsapi"
-	
+
 	"github.com/calypr/syfon/internal/testutils"
 	"github.com/gofiber/fiber/v3"
 )
@@ -121,9 +121,9 @@ func TestMetricsSummaryAuthzAndScope(t *testing.T) {
 			"scoped-1": {Id: "scoped-1", Name: common.Ptr("f1"), Size: 1},
 			"other-1":  {Id: "other-1", Name: common.Ptr("f2"), Size: 2},
 		},
-		ObjectAuthz: map[string][]string{
-			"scoped-1": {"/programs/cbds/projects/end_to_end_test"},
-			"other-1":  {"/programs/other/projects/other"},
+		ObjectAuthz: map[string]map[string][]string{
+			"scoped-1": {"cbds": {"end_to_end_test"}},
+			"other-1":  {"other": {"other"}},
 		},
 		Usage: map[string]models.FileUsage{
 			"scoped-1": {
@@ -224,9 +224,9 @@ func TestMetricsFilesAuthzAndScope(t *testing.T) {
 			"scoped-1": {Id: "scoped-1", Name: common.Ptr("f1"), Size: 1},
 			"other-1":  {Id: "other-1", Name: common.Ptr("f2"), Size: 2},
 		},
-		ObjectAuthz: map[string][]string{
-			"scoped-1": {"/programs/cbds/projects/end_to_end_test"},
-			"other-1":  {"/programs/other/projects/other"},
+		ObjectAuthz: map[string]map[string][]string{
+			"scoped-1": {"cbds": {"end_to_end_test"}},
+			"other-1":  {"other": {"other"}},
 		},
 		Usage: map[string]models.FileUsage{
 			"scoped-1": {

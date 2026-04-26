@@ -11,7 +11,6 @@ type DRSPage struct {
 }
 
 type DeleteByQueryOptions struct {
-	Authz        string
 	Organization string
 	ProjectID    string
 	Hash         string
@@ -21,7 +20,6 @@ type DeleteByQueryOptions struct {
 type ListRecordsOptions struct {
 	Hash         string
 	URL          string
-	Authz        string
 	Organization string
 	ProjectID    string
 	Limit        int

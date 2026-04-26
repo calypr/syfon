@@ -54,23 +54,32 @@ func handleInternalListFiber(om *core.ObjectManager) fiber.Handler {
 				return apiutil.HandleError(c, err)
 			}
 
-			var records []models.InternalObject
+			filterOrg := strings.TrimSpace(c.Query("organization"))
+			filterProject := strings.TrimSpace(c.Query("project"))
+
+			records := make([]internalapi.InternalRecord, 0, len(objs))
 			for _, o := range objs {
 				if hashType != "" && !common.ObjectHasChecksumTypeAndValue(o, hashType, hash) {
 					continue
 				}
-				records = append(records, o)
+				if filterOrg != "" && !objectAuthzMatchesScope(o, filterOrg, filterProject) {
+					continue
+				}
+				records = append(records, core.InternalObjectToInternalRecord(o))
 			}
-			return c.JSON(map[string]any{"records": records})
+			return c.JSON(internalapi.ListRecordsResponse{Records: &records})
 		}
 
-		scopePrefix, _, err := parseScopeQueryFiber(c)
+		filterOrg, filterProject, hasScope, err := parseScopeQueryFiber(c)
 		if err != nil {
 			return c.Status(fiber.StatusBadRequest).SendString(err.Error())
 		}
 
-		// List objects by prefix (empty prefix matches everything if no hash specified)
-		ids, err := om.ListObjectIDsByResourcePrefix(c.Context(), scopePrefix)
+		// List objects by scope (empty scope matches everything if no hash specified).
+		if !hasScope {
+			filterOrg, filterProject = "", ""
+		}
+		ids, err := om.ListObjectIDsByScope(c.Context(), filterOrg, filterProject)
 		if err != nil {
 			return apiutil.HandleError(c, err)
 		}
@@ -156,7 +165,7 @@ func handleInternalDeleteByQueryFiber(om *core.ObjectManager) fiber.Handler {
 			return err
 		}
 
-		scopePrefix, hasScope, err := parseScopeQueryFiber(c)
+		org, project, hasScope, err := parseScopeQueryFiber(c)
 		if err != nil {
 			return c.Status(fiber.StatusBadRequest).SendString(err.Error())
 		}
@@ -164,11 +173,15 @@ func handleInternalDeleteByQueryFiber(om *core.ObjectManager) fiber.Handler {
 			return c.Status(fiber.StatusBadRequest).SendString("No scope specified")
 		}
 
-		if !resourceAllowed(c.Context(), scopePrefix, "delete") {
+		scope, err := scopeResource(org, project)
+		if err != nil {
+			return c.Status(fiber.StatusBadRequest).SendString(err.Error())
+		}
+		if !resourceAllowed(c.Context(), scope, "delete") {
 			return c.SendStatus(fiber.StatusForbidden)
 		}
 
-		count, err := om.DeleteBulkByResourcePrefix(c.Context(), scopePrefix)
+		count, err := om.DeleteBulkByScope(c.Context(), org, project)
 		if err != nil {
 			return apiutil.HandleError(c, err)
 		}

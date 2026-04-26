@@ -20,31 +20,20 @@ import (
 )
 
 func TestParseScopeQuery(t *testing.T) {
-	t.Run("authz takes precedence", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/?authz=/programs/a&organization=ignored", nil)
-		got, ok, err := parseScopeQuery(req)
-		if err != nil {
-			t.Fatalf("parseScopeQuery returned error: %v", err)
-		}
-		if !ok || got != "/programs/a" {
-			t.Fatalf("unexpected scope parse result: ok=%v got=%q", ok, got)
-		}
-	})
-
 	t.Run("organization and project", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/?organization=prog&project=study", nil)
-		got, ok, err := parseScopeQuery(req)
+		org, project, ok, err := parseScopeQuery(req)
 		if err != nil {
 			t.Fatalf("parseScopeQuery returned error: %v", err)
 		}
-		if !ok || got != "/programs/prog/projects/study" {
-			t.Fatalf("unexpected scope parse result: ok=%v got=%q", ok, got)
+		if !ok || org != "prog" || project != "study" {
+			t.Fatalf("unexpected scope parse result: ok=%v org=%q project=%q", ok, org, project)
 		}
 	})
 
 	t.Run("project without organization fails", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/?project=study", nil)
-		_, ok, err := parseScopeQuery(req)
+		_, _, ok, err := parseScopeQuery(req)
 		if err == nil {
 			t.Fatal("expected validation error")
 		}
@@ -61,9 +50,9 @@ func TestHandleInternalList_ScopeFilteringByReadPrivilege(t *testing.T) {
 			"obj-allow": {Id: "obj-allow", CreatedTime: now, UpdatedTime: &now, Checksums: []drs.Checksum{{Type: "sha256", Checksum: "h1"}}},
 			"obj-deny":  {Id: "obj-deny", CreatedTime: now, UpdatedTime: &now, Checksums: []drs.Checksum{{Type: "sha256", Checksum: "h2"}}},
 		},
-		ObjectAuthz: map[string][]string{
-			"obj-allow": {"/programs/org/projects/p1"},
-			"obj-deny":  {"/programs/org/projects/p2"},
+		ObjectAuthz: map[string]map[string][]string{
+			"obj-allow": {"org": {"p1"}},
+			"obj-deny":  {"org": {"p2"}},
 		},
 	}
 
@@ -122,16 +111,14 @@ func TestHandleInternalList_HashTypeFiltering(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
 	}
-	var payload struct {
-		Records []map[string]any `json:"records"`
-	}
+	var payload internalapi.ListRecordsResponse
 	if err := json.NewDecoder(rr.Body).Decode(&payload); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if len(payload.Records) != 1 {
-		t.Fatalf("expected 1 record, got %d", len(payload.Records))
+	if payload.Records == nil || len(*payload.Records) != 1 {
+		t.Fatalf("expected 1 record, got %+v", payload.Records)
 	}
-	if got, _ := payload.Records[0]["did"].(string); got != "obj-sha" {
+	if got := (*payload.Records)[0].Did; got != "obj-sha" {
 		t.Fatalf("expected obj-sha, got %q", got)
 	}
 
@@ -142,16 +129,14 @@ func TestHandleInternalList_HashTypeFiltering(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
 	}
-	payload = struct {
-		Records []map[string]any `json:"records"`
-	}{}
+	payload = internalapi.ListRecordsResponse{}
 	if err := json.NewDecoder(rr.Body).Decode(&payload); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if len(payload.Records) != 1 {
-		t.Fatalf("expected 1 record, got %d", len(payload.Records))
+	if payload.Records == nil || len(*payload.Records) != 1 {
+		t.Fatalf("expected 1 record, got %+v", payload.Records)
 	}
-	if got, _ := payload.Records[0]["did"].(string); got != "obj-md5" {
+	if got := (*payload.Records)[0].Did; got != "obj-md5" {
 		t.Fatalf("expected obj-md5, got %q", got)
 	}
 }
@@ -205,7 +190,7 @@ func TestHandleInternalBulkHashes_HashTypeFiltering(t *testing.T) {
 
 func TestHandleInternalCreate_PersistsExplicitDidAndAuthz(t *testing.T) {
 	mockDB := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}
-	reqBody := `{"records":[{"did":"obj-1","size":42,"authz":["/programs/test/projects/p1"]}]}`
+	reqBody := `{"records":[{"did":"obj-1","size":42,"authorizations":{"test":["p1"]}}]}`
 	req := httptest.NewRequest(http.MethodPost, "/index", strings.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
@@ -216,7 +201,7 @@ func TestHandleInternalCreate_PersistsExplicitDidAndAuthz(t *testing.T) {
 		t.Fatalf("expected 201, got %d body=%s", rr.Code, rr.Body.String())
 	}
 
-	if got := mockDB.ObjectAuthz["obj-1"]; len(got) != 1 || got[0] != "/programs/test/projects/p1" {
+	if got := mockDB.ObjectAuthz["obj-1"]; len(got["test"]) != 1 || got["test"][0] != "p1" {
 		t.Fatalf("expected persisted authz, got %v", got)
 	}
 }
@@ -224,7 +209,7 @@ func TestHandleInternalCreate_PersistsExplicitDidAndAuthz(t *testing.T) {
 func TestHandleInternalCreate_RequiredFieldsFailAtDecode(t *testing.T) {
 	t.Run("missing records", func(t *testing.T) {
 		mockDB := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}
-		reqBody := `{"size":42,"authz":["/programs/test/projects/p1"]}`
+		reqBody := `{"size":42,"authorizations":{"test":["p1"]}}`
 		req := httptest.NewRequest(http.MethodPost, "/index", strings.NewReader(reqBody))
 		req.Header.Set("Content-Type", "application/json")
 		rr := httptest.NewRecorder()
@@ -240,7 +225,7 @@ func TestHandleInternalCreate_RequiredFieldsFailAtDecode(t *testing.T) {
 
 func TestHandleInternalBulkCreate_PersistsExplicitAuthz(t *testing.T) {
 	mockDB := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}
-	reqBody := `{"records":[{"did":"obj-bulk-1","size":7,"authz":["/programs/test/projects/p1"]}]}`
+	reqBody := `{"records":[{"did":"obj-bulk-1","size":7,"authorizations":{"test":["p1"]}}]}`
 	req := httptest.NewRequest(http.MethodPost, "/bulk/create", strings.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
@@ -251,7 +236,7 @@ func TestHandleInternalBulkCreate_PersistsExplicitAuthz(t *testing.T) {
 		t.Fatalf("expected 201, got %d body=%s", rr.Code, rr.Body.String())
 	}
 
-	if got := mockDB.ObjectAuthz["obj-bulk-1"]; len(got) != 1 || got[0] != "/programs/test/projects/p1" {
+	if got := mockDB.ObjectAuthz["obj-bulk-1"]; len(got["test"]) != 1 || got["test"][0] != "p1" {
 		t.Fatalf("expected persisted authz, got %v", got)
 	}
 }
@@ -292,9 +277,9 @@ func TestHandleInternalDeleteByQuery(t *testing.T) {
 				"obj-1": {Id: "obj-1", CreatedTime: now, UpdatedTime: &now},
 				"obj-2": {Id: "obj-2", CreatedTime: now, UpdatedTime: &now},
 			},
-			ObjectAuthz: map[string][]string{
-				"obj-1": {"/programs/org/projects/a"},
-				"obj-2": {"/programs/org/projects/a"},
+			ObjectAuthz: map[string]map[string][]string{
+				"obj-1": {"org": {"a"}},
+				"obj-2": {"org": {"a"}},
 			},
 		}
 		req := httptest.NewRequest(http.MethodDelete, "/?organization=org&project=a", nil)

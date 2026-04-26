@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	syclient "github.com/calypr/syfon/client"
+	syfoncommon "github.com/calypr/syfon/common"
 	"github.com/spf13/cobra"
 )
 
@@ -42,15 +43,8 @@ var Cmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		// Construct resource path for internal index storage.
-		project := strings.TrimSpace(addURLProject)
-		var resourcePath string
-		if project == "" {
-			resourcePath = "/programs/" + org
-		} else {
-			resourcePath = "/programs/" + org + "/projects/" + project
-		}
-		if err := c.Index().Upsert(ctx, addURLDid, addURL, addURLName, addURLSize, addURLSHA256, []string{resourcePath}); err != nil {
+		authzMap := syfoncommon.AuthzMapFromScope(org, strings.TrimSpace(addURLProject))
+		if err := c.Index().Upsert(ctx, addURLDid, addURL, addURLName, addURLSize, addURLSHA256, authzMap); err != nil {
 			return err
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "record updated: %s\n", addURLDid)

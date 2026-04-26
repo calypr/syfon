@@ -59,7 +59,7 @@ func TestInternalObjectExternal(t *testing.T) {
 }
 
 func TestInternalObjectJSONAliases(t *testing.T) {
-	raw := []byte(`{"did":"obj-1","size":7,"authz":["/programs/test"],"hashes":{"sha256":"abc"},"urls":["https://example.org/file"],"extra":"keep-me"}`)
+	raw := []byte(`{"did":"obj-1","size":7,"authorizations":{"test":[]},"hashes":{"sha256":"abc"},"urls":["https://example.org/file"],"extra":"keep-me"}`)
 
 	var obj models.InternalObject
 	if err := json.Unmarshal(raw, &obj); err != nil {
@@ -72,8 +72,8 @@ func TestInternalObjectJSONAliases(t *testing.T) {
 	if obj.Size != 7 {
 		t.Fatalf("expected size 7, got %d", obj.Size)
 	}
-	if len(obj.Authorizations) != 1 || obj.Authorizations[0] != "/programs/test" {
-		t.Fatalf("expected authz to map, got %v", obj.Authorizations)
+	if got := obj.Authorizations["test"]; got == nil || len(got) != 0 {
+		t.Fatalf("expected authorizations map to be preserved, got %v", obj.Authorizations)
 	}
 	if len(obj.Checksums) != 1 || obj.Checksums[0].Type != "sha256" || obj.Checksums[0].Checksum != "abc" {
 		t.Fatalf("expected hashes to map to checksums, got %+v", obj.Checksums)

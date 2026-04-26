@@ -24,7 +24,8 @@ CREATE TABLE IF NOT EXISTS drs_object_checksum (
 
 CREATE TABLE IF NOT EXISTS drs_object_authz (
   object_id TEXT NOT NULL,
-  resource TEXT NOT NULL,
+  org TEXT NOT NULL DEFAULT '',
+  project TEXT NOT NULL DEFAULT '',
   FOREIGN KEY(object_id) REFERENCES drs_object(id) ON DELETE CASCADE
 );
 
@@ -46,8 +47,8 @@ CREATE INDEX IF NOT EXISTS drs_object_checksum_checksum_idx
 CREATE INDEX IF NOT EXISTS drs_object_authz_object_id_idx
   ON drs_object_authz(object_id);
 
-CREATE INDEX IF NOT EXISTS drs_object_authz_resource_idx
-  ON drs_object_authz(resource);
+CREATE INDEX IF NOT EXISTS drs_object_authz_scope_idx
+  ON drs_object_authz(org, project);
 
 CREATE INDEX IF NOT EXISTS drs_object_alias_object_id_idx
   ON drs_object_alias(object_id);

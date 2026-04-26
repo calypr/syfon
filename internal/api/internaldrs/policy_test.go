@@ -15,34 +15,26 @@ import (
 func TestParseScopeQueryParts(t *testing.T) {
 	tests := []struct {
 		name         string
-		authz        string
 		organization string
 		program      string
 		project      string
-		want         string
+		wantOrg      string
+		wantProject  string
 		wantOK       bool
 		wantErr      bool
 	}{
 		{
-			name:         "authz takes precedence",
-			authz:        "/programs/explicit/projects/path",
-			organization: "ignored",
-			program:      "ignored",
-			project:      "ignored",
-			want:         "/programs/explicit/projects/path",
-			wantOK:       true,
-		},
-		{
 			name:         "organization and project build a resource path",
 			organization: "org",
 			project:      "proj",
-			want:         "/programs/org/projects/proj",
+			wantOrg:      "org",
+			wantProject:  "proj",
 			wantOK:       true,
 		},
 		{
 			name:    "program falls back when organization is empty",
 			program: "org",
-			want:    "/programs/org",
+			wantOrg: "org",
 			wantOK:  true,
 		},
 		{
@@ -57,7 +49,7 @@ func TestParseScopeQueryParts(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, ok, err := parseScopeQueryParts(tt.authz, tt.organization, tt.program, tt.project)
+			gotOrg, gotProject, ok, err := parseScopeQueryParts(tt.organization, tt.program, tt.project)
 			if tt.wantErr {
 				if err == nil {
 					t.Fatal("expected error")
@@ -73,8 +65,8 @@ func TestParseScopeQueryParts(t *testing.T) {
 			if ok != tt.wantOK {
 				t.Fatalf("unexpected ok: got %v want %v", ok, tt.wantOK)
 			}
-			if got != tt.want {
-				t.Fatalf("unexpected scope: got %q want %q", got, tt.want)
+			if gotOrg != tt.wantOrg || gotProject != tt.wantProject {
+				t.Fatalf("unexpected scope: got org=%q project=%q want org=%q project=%q", gotOrg, gotProject, tt.wantOrg, tt.wantProject)
 			}
 		})
 	}
@@ -153,8 +145,8 @@ func TestBucketPolicyHelpers(t *testing.T) {
 		if !resourceAllowed(ctx, resource, "delete") {
 			t.Fatal("expected resource access")
 		}
-		if !methodAllowedForAuthorizations(ctx, "delete", []string{resource}) {
-			t.Fatal("expected authorization list access")
+		if !methodAllowedForAuthorizations(ctx, "delete", map[string][]string{"org": {"proj"}}) {
+			t.Fatal("expected authorization map access")
 		}
 	})
 

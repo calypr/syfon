@@ -83,9 +83,6 @@ func (s *IndexService) List(ctx context.Context, opts ListRecordsOptions) (inter
 	if opts.Hash != "" {
 		params.Set("hash", opts.Hash)
 	}
-	if opts.Authz != "" {
-		params.Set("authz", opts.Authz)
-	}
 	if opts.Organization != "" {
 		params.Set("organization", opts.Organization)
 	}
@@ -107,9 +104,6 @@ func (s *IndexService) List(ctx context.Context, opts ListRecordsOptions) (inter
 
 func (s *IndexService) DeleteByQuery(ctx context.Context, opts DeleteByQueryOptions) (internalapi.DeleteByQueryResponse, error) {
 	params := &internalapi.InternalDeleteByQueryParams{}
-	if opts.Authz != "" {
-		params.Authz = &opts.Authz
-	}
 	if opts.Organization != "" {
 		params.Organization = &opts.Organization
 	}
@@ -199,30 +193,30 @@ func (s *IndexService) SHA256Validity(ctx context.Context, values []string) (map
 	return s.BulkSHA256Validity(ctx, internalapi.BulkSHA256ValidityRequest{Sha256: &values})
 }
 
-func (s *IndexService) Upsert(ctx context.Context, did, objectURL, fileName string, size int64, sha256sum string, authz []string) error {
+func (s *IndexService) Upsert(ctx context.Context, did, objectURL, fileName string, size int64, sha256sum string, authorizations map[string][]string) error {
 	existing, err := s.Get(ctx, did)
 	if err == nil {
 		req := internalapi.InternalRecord{
-			Did:          existing.Did,
-			Authz:        existing.Authz,
-			Description:  existing.Description,
-			FileName:     existing.FileName,
-			Hashes:       existing.Hashes,
-			Size:         existing.Size,
-			Urls:         existing.Urls,
-			Version:      existing.Version,
-			Organization: existing.Organization,
-			Project:      existing.Project,
+			Did:            existing.Did,
+			Authorizations: existing.Authorizations,
+			Description:    existing.Description,
+			FileName:       existing.FileName,
+			Hashes:         existing.Hashes,
+			Size:           existing.Size,
+			Urls:           existing.Urls,
+			Version:        existing.Version,
+			Organization:   existing.Organization,
+			Project:        existing.Project,
 		}
 
 		if strings.TrimSpace(req.Did) == "" {
 			req.Did = did
 		}
-		if len(req.Authz) == 0 {
-			if len(authz) == 0 {
-				return fmt.Errorf("authz is required to upsert record %s", did)
+		if req.Authorizations == nil || len(*req.Authorizations) == 0 {
+			if len(authorizations) == 0 {
+				return fmt.Errorf("authorizations are required to upsert record %s", did)
 			}
-			req.Authz = append([]string(nil), authz...)
+			req.Authorizations = &authorizations
 		}
 		if fileName != "" {
 			req.FileName = &fileName
@@ -258,10 +252,10 @@ func (s *IndexService) Upsert(ctx context.Context, did, objectURL, fileName stri
 	payload := internalapi.InternalRecord{
 		Did: did,
 	}
-	if len(authz) == 0 {
-		return fmt.Errorf("authz is required to create record %s", did)
+	if len(authorizations) == 0 {
+		return fmt.Errorf("authorizations are required to create record %s", did)
 	}
-	payload.Authz = append([]string(nil), authz...)
+	payload.Authorizations = &authorizations
 	if size > 0 {
 		payload.Size = &size
 	}

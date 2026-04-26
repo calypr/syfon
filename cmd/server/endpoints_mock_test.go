@@ -178,8 +178,8 @@ func buildMockServerRouterWithRoutes(routes config.RoutesConfig) *fiber.App {
 				},
 			},
 		},
-		ObjectAuthz: map[string][]string{
-			"sha-1": {"/data_file"},
+		ObjectAuthz: map[string]map[string][]string{
+			"sha-1": {"data_file": {}},
 		},
 		Credentials: map[string]models.S3Credential{
 			"test-bucket-1": {
@@ -266,12 +266,12 @@ func requestBodyFor(method, template string) ([]byte, string) {
 	case "/index/bulk/hashes":
 		return []byte(`{"hashes":["sha-1"]}`), "application/json"
 	case "/index/bulk":
-		return []byte(`{"records":[{"did":"sha-1","hashes":{"sha256":"sha-1"},"size":1,"urls":["s3://test-bucket-1/sha-1"],"authz":["/data_file"]}]}`), "application/json"
+		return []byte(`{"records":[{"did":"sha-1","hashes":{"sha256":"sha-1"},"size":1,"urls":["s3://test-bucket-1/sha-1"],"authorizations":{"data_file":[]}}]}`), "application/json"
 	case "/index/bulk/documents":
 		return []byte(`["sha-1"]`), "application/json"
 	case "/data/upload", "/data/upload/:file_id":
 		if template == "/data/upload" {
-			return []byte(`{"guid":"sha-1","authz":["/data_file"]}`), "application/json"
+			return []byte(`{"guid":"sha-1","authorizations":{"data_file":[]}}`), "application/json"
 		}
 		return []byte(`{}`), "application/json"
 	case "/data/upload/bulk":

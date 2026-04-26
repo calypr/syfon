@@ -37,6 +37,18 @@ func TestDRSServiceResolveAndList(t *testing.T) {
 			writeJSON(t, w, http.StatusOK, drsapi.DrsObject{Id: "no-access", Checksums: []drsapi.Checksum{{Type: "sha256", Checksum: "abc"}}, CreatedTime: time.Now()})
 		case r.Method == http.MethodGet && r.URL.Path == "/objects/obj-1/access/acc-1":
 			writeJSON(t, w, http.StatusOK, drsapi.AccessURL{Url: "https://signed.example/access"})
+		case r.Method == http.MethodGet && r.URL.Path == "/objects/checksum/abc":
+			name := "hash.bin"
+			resolved := []drsapi.DrsObject{{
+				Id:        "did-hash",
+				Name:      &name,
+				Size:      12,
+				Checksums: []drsapi.Checksum{{Type: "sha256", Checksum: "abc"}},
+			}}
+			writeJSON(t, w, http.StatusOK, drsapi.N200OkDrsObjects{ResolvedDrsObject: &resolved})
+		case r.Method == http.MethodGet && r.URL.Path == "/objects/checksum/def":
+			resolved := []drsapi.DrsObject{}
+			writeJSON(t, w, http.StatusOK, drsapi.N200OkDrsObjects{ResolvedDrsObject: &resolved})
 		case r.Method == http.MethodPost && r.URL.Path == "/objects/register":
 			name := "registered.bin"
 			writeJSON(t, w, http.StatusCreated, drsapi.N201ObjectsCreated{Objects: []drsapi.DrsObject{{Id: "obj-created", Name: &name, Checksums: []drsapi.Checksum{{Type: "sha256", Checksum: "abc"}}, CreatedTime: time.Now()}}})
@@ -50,7 +62,8 @@ func TestDRSServiceResolveAndList(t *testing.T) {
 	recordSize := int64(77)
 	recordUrls := []string{"https://storage.example/record.bin"}
 	recordHashes := internalapi.HashInfo{"sha256": "abc123"}
-	records := []internalapi.InternalRecord{{Did: "did-record", Authz: []string{"/programs/org1/projects/p1"}, FileName: &recordName, Size: &recordSize, Urls: &recordUrls, Hashes: &recordHashes}}
+	recordAuthz := map[string][]string{"org1": {"p1"}}
+	records := []internalapi.InternalRecord{{Did: "did-record", Authorizations: &recordAuthz, FileName: &recordName, Size: &recordSize, Urls: &recordUrls, Hashes: &recordHashes}}
 	listResp, err := json.Marshal(internalapi.ListRecordsResponse{Records: &records})
 	if err != nil {
 		t.Fatalf("marshal list response: %v", err)
@@ -124,15 +137,8 @@ func TestDRSServiceResolveAndList(t *testing.T) {
 	}
 
 	hashPage, err := service.BatchGetObjectsByHash(ctx, []string{"abc", "def"})
-	if err != nil || len(hashPage.DrsObjects) != 1 {
+	if err != nil || len(hashPage.DrsObjects) != 1 || hashPage.DrsObjects[0].Id != "did-hash" {
 		t.Fatalf("BatchGetObjectsByHash returned page=%+v err=%v", hashPage, err)
-	}
-	query, err = url.ParseQuery(strings.TrimPrefix(requester.builder.Url, "/index?"))
-	if err != nil {
-		t.Fatalf("parse hash query: %v", err)
-	}
-	if query.Get("hash") != "abc,def" {
-		t.Fatalf("expected joined hash query, got %v", query)
 	}
 
 	accessURL, err := service.GetAccessURL(ctx, "obj-1", "acc-1")
@@ -153,22 +159,56 @@ func TestDRSServiceResourceAuthzAndDelete(t *testing.T) {
 	recordSize := int64(77)
 	recordURLs := []string{"https://storage.example/object.bin"}
 	recordHashes := internalapi.HashInfo{"sha256": "abc"}
-	records := []internalapi.InternalRecord{
+	authzProject := map[string][]string{"org1": {"proj1"}}
+	authzOrg := map[string][]string{"org1": {}}
+	projectMethods := []drsapi.AccessMethod{{
+		Type:           "https",
+		Authorizations: &authzProject,
+		AccessUrl: &struct {
+			Headers *[]string `json:"headers,omitempty"`
+			Url     string    `json:"url"`
+		}{Url: recordURLs[0]},
+	}}
+	orgMethods := []drsapi.AccessMethod{{
+		Type:           "https",
+		Authorizations: &authzOrg,
+		AccessUrl: &struct {
+			Headers *[]string `json:"headers,omitempty"`
+			Url     string    `json:"url"`
+		}{Url: recordURLs[0]},
+	}}
+	drsRecords := []drsapi.DrsObject{
 		{
-			Did:      "obj-1",
-			Authz:    []string{"/programs/org1/projects/proj1"},
-			FileName: &recordName,
-			Size:     &recordSize,
-			Urls:     &recordURLs,
-			Hashes:   &recordHashes,
+			Id:            "obj-1",
+			Name:          &recordName,
+			Size:          recordSize,
+			Checksums:     []drsapi.Checksum{{Type: "sha256", Checksum: "abc"}},
+			AccessMethods: &projectMethods,
 		},
 		{
-			Did:      "obj-2",
-			Authz:    []string{"/programs/org1"},
-			FileName: &recordName,
-			Size:     &recordSize,
-			Urls:     &recordURLs,
-			Hashes:   &recordHashes,
+			Id:            "obj-2",
+			Name:          &recordName,
+			Size:          recordSize,
+			Checksums:     []drsapi.Checksum{{Type: "sha256", Checksum: "abc"}},
+			AccessMethods: &orgMethods,
+		},
+	}
+	records := []internalapi.InternalRecord{
+		{
+			Did:            "obj-1",
+			Authorizations: &authzProject,
+			FileName:       &recordName,
+			Size:           &recordSize,
+			Urls:           &recordURLs,
+			Hashes:         &recordHashes,
+		},
+		{
+			Did:            "obj-2",
+			Authorizations: &authzOrg,
+			FileName:       &recordName,
+			Size:           &recordSize,
+			Urls:           &recordURLs,
+			Hashes:         &recordHashes,
 		},
 	}
 	listResp, err := json.Marshal(internalapi.ListRecordsResponse{Records: &records})
@@ -178,6 +218,8 @@ func TestDRSServiceResourceAuthzAndDelete(t *testing.T) {
 	requester := &fakeRequester{responseJSON: listResp}
 	httpClient := &http.Client{Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
 		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/objects/checksum/abc":
+			return jsonResponse(http.StatusOK, drsapi.N200OkDrsObjects{ResolvedDrsObject: &drsRecords})
 		case r.Method == http.MethodGet && r.URL.Path == "/objects/obj-1/access/https":
 			return jsonResponse(http.StatusOK, drsapi.AccessURL{Url: "https://signed.example/object.bin"})
 		case r.Method == http.MethodDelete && (r.URL.Path == "/index/obj-1" || r.URL.Path == "/index/obj-2"):
@@ -225,9 +267,16 @@ func TestDRSServiceResourceAuthzAndDelete(t *testing.T) {
 		t.Fatalf("DeleteRecordsByHash returned error: %v", err)
 	}
 
+	emptyHTTPClient := &http.Client{Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method == http.MethodGet && r.URL.Path == "/objects/checksum/abc" {
+			empty := []drsapi.DrsObject{}
+			return jsonResponse(http.StatusOK, drsapi.N200OkDrsObjects{ResolvedDrsObject: &empty})
+		}
+		return nil, fmt.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
+	})}
 	emptyRequester := &fakeRequester{responseJSON: []byte(`{"records":[]}`)}
-	emptyIndex := NewIndexService(mustInternalClientWithHTTPClient(httpClient), emptyRequester)
-	emptyService := NewDRSService(mustDRSClientWithHTTPClient(httpClient), emptyIndex)
+	emptyIndex := NewIndexService(mustInternalClientWithHTTPClient(emptyHTTPClient), emptyRequester)
+	emptyService := NewDRSService(mustDRSClientWithHTTPClient(emptyHTTPClient), emptyIndex)
 	if err := emptyService.DeleteRecordsByHash(ctx, "sha256:abc"); err == nil {
 		t.Fatal("expected no-records error from DeleteRecordsByHash")
 	}

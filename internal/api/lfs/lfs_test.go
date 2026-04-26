@@ -294,8 +294,8 @@ func TestLFSBatchGen3MissingAuthReturns401(t *testing.T) {
 				},
 			},
 		},
-		ObjectAuthz: map[string][]string{
-			oid: []string{"/programs/syfon/projects/e2e"},
+		ObjectAuthz: map[string]map[string][]string{
+			oid: {"syfon": {"e2e"}},
 		},
 	}
 	uM := &testutils.MockUrlManager{}

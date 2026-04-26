@@ -11,11 +11,11 @@ import (
 // and adds Syfon-specific authorization metadata.
 type InternalObject struct {
 	drs.DrsObject
-	Authorizations []string               `json:"authorizations,omitempty"`
+	Authorizations map[string][]string    `json:"authorizations,omitempty"`
 	Properties     map[string]interface{} `json:"-"`
 }
 
-// DrsObjectWithAuthz is a compatibility alias for InternalObject.
+// DrsObjectWithAuthz is an alias for InternalObject retained for older Go call sites.
 type DrsObjectWithAuthz = InternalObject
 
 func (o *InternalObject) UnmarshalJSON(data []byte) error {
@@ -33,12 +33,11 @@ func (o *InternalObject) UnmarshalJSON(data []byte) error {
 
 	type wireObject struct {
 		drs.DrsObject
-		Authz         []string          `json:"authz,omitempty"`
-		Authorizations []string         `json:"authorizations,omitempty"`
-		Did           string            `json:"did,omitempty"`
-		Hashes        map[string]string `json:"hashes,omitempty"`
-		Urls          []string          `json:"urls,omitempty"`
-		FileName      *string           `json:"file_name,omitempty"`
+		Authorizations map[string][]string `json:"authorizations,omitempty"`
+		Did            string              `json:"did,omitempty"`
+		Hashes         map[string]string   `json:"hashes,omitempty"`
+		Urls           []string            `json:"urls,omitempty"`
+		FileName       *string             `json:"file_name,omitempty"`
 	}
 
 	var wire wireObject
@@ -91,10 +90,9 @@ func (o *InternalObject) UnmarshalJSON(data []byte) error {
 	o.MimeType = wire.MimeType
 	o.SelfUri = wire.SelfUri
 	o.Version = wire.Version
+
 	if len(wire.Authorizations) > 0 {
-		o.Authorizations = append([]string(nil), wire.Authorizations...)
-	} else if len(wire.Authz) > 0 {
-		o.Authorizations = append([]string(nil), wire.Authz...)
+		o.Authorizations = wire.Authorizations
 	}
 
 	return nil
@@ -138,9 +136,6 @@ func (o InternalObject) MarshalJSON() ([]byte, error) {
 
 	// Ensure Gen3 compatibility fields are also present.
 	out["did"] = o.Id
-	if len(o.Authorizations) > 0 {
-		out["authz"] = o.Authorizations
-	}
 	if o.Name != nil {
 		out["file_name"] = *o.Name
 	}

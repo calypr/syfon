@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/calypr/syfon/apigen/server/drs"
-	"github.com/calypr/syfon/apigen/server/lfsapi"
 	"github.com/calypr/syfon/internal/api/apiutil"
 	"github.com/calypr/syfon/internal/authz"
 	"github.com/calypr/syfon/internal/common"
@@ -92,22 +91,15 @@ func handleGetAccessURLFiber(om *core.ObjectManager) fiber.Handler {
 
 func handleRegisterObjectsFiber(om *core.ObjectManager) fiber.Handler {
 	return func(c fiber.Ctx) error {
-		// Use a local struct that carries 'id' fields if present in candidates
 		var body struct {
-			Candidates []lfsapi.DrsObjectCandidate `json:"candidates"`
+			Candidates []drs.DrsObjectCandidate `json:"candidates"`
 		}
 		if err := c.Bind().JSON(&body); err != nil || len(body.Candidates) == 0 {
-			// If batch bind fails or is empty, try single candidate
-			var single lfsapi.DrsObjectCandidate
-			if err2 := c.Bind().JSON(&single); err2 == nil && (single.Id != nil || (single.Checksums != nil && len(*single.Checksums) > 0)) {
-				internalObj, err := core.CandidateToInternalObject(core.LFSCandidateToDRS(single), time.Now().UTC())
+			var single drs.DrsObjectCandidate
+			if err2 := c.Bind().JSON(&single); err2 == nil && len(single.Checksums) > 0 {
+				internalObj, err := core.CandidateToInternalObject(single, time.Now().UTC())
 				if err != nil {
 					return apiutil.HandleError(c, err)
-				}
-				if single.Id != nil {
-					internalObj.Id = *single.Id
-					internalObj.DrsObject.Id = *single.Id
-					internalObj.DrsObject.SelfUri = "drs://" + *single.Id
 				}
 				if err := om.RegisterObjects(c.Context(), []models.InternalObject{internalObj}); err != nil {
 					return apiutil.HandleError(c, err)
@@ -127,14 +119,9 @@ func handleRegisterObjectsFiber(om *core.ObjectManager) fiber.Handler {
 		// List of internal objects to register
 		toRegister := make([]models.InternalObject, 0, len(body.Candidates))
 		for _, cand := range body.Candidates {
-			internalObj, err := core.CandidateToInternalObject(core.LFSCandidateToDRS(cand), time.Now().UTC())
+			internalObj, err := core.CandidateToInternalObject(cand, time.Now().UTC())
 			if err != nil {
 				return apiutil.HandleError(c, err)
-			}
-			if cand.Id != nil {
-				internalObj.Id = *cand.Id
-				internalObj.DrsObject.Id = *cand.Id
-				internalObj.DrsObject.SelfUri = "drs://" + *cand.Id
 			}
 			toRegister = append(toRegister, internalObj)
 		}

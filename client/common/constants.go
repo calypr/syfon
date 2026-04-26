@@ -102,7 +102,6 @@ const (
 
 	// Query Parameters
 	QueryParamHash         = "hash"
-	QueryParamAuthz        = "authz"
 	QueryParamOrganization = "organization"
 	QueryParamProject      = "project"
 	QueryParamLimit        = "limit"

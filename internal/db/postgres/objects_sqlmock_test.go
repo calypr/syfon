@@ -125,12 +125,12 @@ func TestGetObject_DeduplicatesAndPropagatesAuthz(t *testing.T) {
 			AddRow("sha256", "abc").
 			AddRow("md5", "def"))
 
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT resource FROM drs_object_authz WHERE object_id = $1")).
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT org, project FROM drs_object_authz WHERE object_id = $1")).
 		WithArgs("obj-1").
-		WillReturnRows(sqlmock.NewRows([]string{"resource"}).
-			AddRow("/programs/p1/projects/a").
-			AddRow("/programs/p1/projects/a").
-			AddRow("/programs/p1/projects/b"))
+		WillReturnRows(sqlmock.NewRows([]string{"org", "project"}).
+			AddRow("p1", "a").
+			AddRow("p1", "a").
+			AddRow("p1", "b"))
 
 	obj, err := pg.GetObject(context.Background(), "obj-1")
 	if err != nil {
@@ -145,8 +145,8 @@ func TestGetObject_DeduplicatesAndPropagatesAuthz(t *testing.T) {
 	if len(obj.Checksums) != 2 {
 		t.Fatalf("expected 2 deduplicated checksums, got %d", len(obj.Checksums))
 	}
-	if len(obj.Authorizations) != 2 {
-		t.Fatalf("expected 2 deduplicated authz resources, got %d", len(obj.Authorizations))
+	if got := obj.Authorizations["p1"]; len(got) != 2 {
+		t.Fatalf("expected 2 deduplicated authz projects, got %+v", obj.Authorizations)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet expectations: %v", err)
@@ -171,14 +171,15 @@ func TestGetObject_Gen3Unauthorized(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT type, checksum FROM drs_object_checksum WHERE object_id = $1")).
 		WithArgs("obj-2").
 		WillReturnRows(sqlmock.NewRows([]string{"type", "checksum"}))
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT resource FROM drs_object_authz WHERE object_id = $1")).
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT org, project FROM drs_object_authz WHERE object_id = $1")).
 		WithArgs("obj-2").
-		WillReturnRows(sqlmock.NewRows([]string{"resource"}).AddRow("/programs/p1/projects/a"))
+		WillReturnRows(sqlmock.NewRows([]string{"org", "project"}).AddRow("p1", "a"))
 	mock.ExpectQuery(regexp.QuoteMeta(`
 		SELECT COUNT(*) FROM drs_object o
 		WHERE o.id = $1 AND (
 			NOT EXISTS (SELECT 1 FROM drs_object_authz a WHERE a.object_id = o.id)
-			OR EXISTS (SELECT 1 FROM drs_object_authz a WHERE a.object_id = o.id AND a.resource = ANY($2))
+			OR EXISTS (SELECT 1 FROM drs_object_authz a WHERE a.object_id = o.id
+				AND ('/programs/' || a.org || CASE WHEN a.project != '' THEN '/projects/' || a.project ELSE '' END) = ANY($2))
 		)`)).
 		WithArgs("obj-2", sqlmock.AnyArg()).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))

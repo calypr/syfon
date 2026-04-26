@@ -132,14 +132,14 @@ func TestObjectManagerGetObjectLookupPaths(t *testing.T) {
 							},
 						},
 					},
-					ObjectAuthz: map[string][]string{
-						"obj-1": {"/data_file"},
+					ObjectAuthz: map[string]map[string][]string{
+						"obj-1": {"data_file": {}},
 					},
 				},
 			},
 			ident:   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 			method:  "read",
-			ctx:     buildGen3Context(map[string]map[string]bool{"/data_file": {"read": true}}),
+			ctx:     buildGen3Context(map[string]map[string]bool{"/programs/data_file": {"read": true}}),
 			wantID:  "obj-1",
 			wantURI: "drs://obj-1",
 		},
@@ -150,14 +150,14 @@ func TestObjectManagerGetObjectLookupPaths(t *testing.T) {
 					Objects: map[string]*drs.DrsObject{
 						"obj-2": {Id: "obj-2", SelfUri: "drs://obj-2"},
 					},
-					ObjectAuthz: map[string][]string{
-						"obj-2": {"/data_file"},
+					ObjectAuthz: map[string]map[string][]string{
+						"obj-2": {"data_file": {}},
 					},
 				},
 			},
 			ident:   "obj-2",
 			method:  "read",
-			ctx:     buildGen3Context(map[string]map[string]bool{"/data_file": {"read": true}}),
+			ctx:     buildGen3Context(map[string]map[string]bool{"/programs/data_file": {"read": true}}),
 			wantID:  "obj-2",
 			wantURI: "drs://obj-2",
 		},
@@ -168,8 +168,8 @@ func TestObjectManagerGetObjectLookupPaths(t *testing.T) {
 					Objects: map[string]*drs.DrsObject{
 						"canonical-1": {Id: "canonical-1", SelfUri: "drs://canonical-1"},
 					},
-					ObjectAuthz: map[string][]string{
-						"canonical-1": {"/data_file"},
+					ObjectAuthz: map[string]map[string][]string{
+						"canonical-1": {"data_file": {}},
 					},
 				},
 				aliases: map[string]string{
@@ -178,7 +178,7 @@ func TestObjectManagerGetObjectLookupPaths(t *testing.T) {
 			},
 			ident:   "alias-1",
 			method:  "read",
-			ctx:     buildGen3Context(map[string]map[string]bool{"/data_file": {"read": true}}),
+			ctx:     buildGen3Context(map[string]map[string]bool{"/programs/data_file": {"read": true}}),
 			wantID:  "alias-1",
 			wantURI: "drs://alias-1",
 		},
@@ -189,8 +189,8 @@ func TestObjectManagerGetObjectLookupPaths(t *testing.T) {
 					Objects: map[string]*drs.DrsObject{
 						"obj-3": {Id: "obj-3"},
 					},
-					ObjectAuthz: map[string][]string{
-						"obj-3": {"/programs/a"},
+					ObjectAuthz: map[string]map[string][]string{
+						"obj-3": {"a": {}},
 					},
 				},
 			},
@@ -237,16 +237,16 @@ func TestObjectManagerGetObjectLookupPaths(t *testing.T) {
 }
 
 func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
-	t.Run("delete by prefix filters unauthorized objects", func(t *testing.T) {
+	t.Run("delete by scope filters unauthorized objects", func(t *testing.T) {
 		db := &coreTestDB{
 			MockDatabase: &testutils.MockDatabase{
 				Objects: map[string]*drs.DrsObject{
 					"obj-a": {Id: "obj-a"},
 					"obj-b": {Id: "obj-b"},
 				},
-				ObjectAuthz: map[string][]string{
-					"obj-a": {"/programs/a/projects/one"},
-					"obj-b": {"/programs/a/projects/two"},
+				ObjectAuthz: map[string]map[string][]string{
+					"obj-a": {"a": {"one"}},
+					"obj-b": {"a": {"two"}},
 				},
 			},
 		}
@@ -255,9 +255,9 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 			"/programs/a/projects/one": {"delete": true},
 		})
 
-		count, err := om.DeleteBulkByResourcePrefix(ctx, "/programs/a")
+		count, err := om.DeleteBulkByScope(ctx, "a", "")
 		if err != nil {
-			t.Fatalf("DeleteBulkByResourcePrefix failed: %v", err)
+			t.Fatalf("DeleteBulkByScope failed: %v", err)
 		}
 		if count != 1 {
 			t.Fatalf("expected 1 deletion, got %d", count)

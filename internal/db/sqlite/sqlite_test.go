@@ -41,7 +41,7 @@ func TestSqliteDB_CRUD(t *testing.T) {
 	}
 
 	// Create
-	if err := db.CreateObject(ctx, &models.InternalObject{DrsObject: *obj, Authorizations: []string{}}); err != nil {
+	if err := db.CreateObject(ctx, &models.InternalObject{DrsObject: *obj}); err != nil {
 		t.Fatalf("CreateObject failed: %v", err)
 	}
 
@@ -106,7 +106,7 @@ func TestSqliteDB_GetObjectsByChecksum_WhenIDDiffers(t *testing.T) {
 			{Type: "sha256", Checksum: checksum},
 		},
 	}
-	if err := db.CreateObject(ctx, &models.InternalObject{DrsObject: *obj, Authorizations: []string{}}); err != nil {
+	if err := db.CreateObject(ctx, &models.InternalObject{DrsObject: *obj}); err != nil {
 		t.Fatalf("CreateObject failed: %v", err)
 	}
 
@@ -147,7 +147,7 @@ func TestSqliteDB_ObjectAliasLifecycle(t *testing.T) {
 				}{Url: "s3://bucket/path/object"}},
 			},
 		},
-		Authorizations: []string{"/programs/a/projects/b"},
+		Authorizations: map[string][]string{"a": {"b"}},
 	}); err != nil {
 		t.Fatalf("CreateObject failed: %v", err)
 	}
@@ -212,7 +212,7 @@ func TestSqliteDB_DeleteObjectByAliasRemovesCanonicalObject(t *testing.T) {
 			UpdatedTime: &now,
 			Name:        common.Ptr("object.txt"),
 		},
-		Authorizations: []string{"/programs/a/projects/b"},
+		Authorizations: map[string][]string{"a": {"b"}},
 	}); err != nil {
 		t.Fatalf("CreateObject failed: %v", err)
 	}
@@ -229,9 +229,9 @@ func TestSqliteDB_DeleteObjectByAliasRemovesCanonicalObject(t *testing.T) {
 	if _, err := db.ResolveObjectAlias(ctx, aliasID); err == nil {
 		t.Fatal("expected alias mapping to be deleted")
 	}
-	ids, err := db.ListObjectIDsByResourcePrefix(ctx, "/programs/a/projects/b")
+	ids, err := db.ListObjectIDsByScope(ctx, "a", "b")
 	if err != nil {
-		t.Fatalf("ListObjectIDsByResourcePrefix failed: %v", err)
+		t.Fatalf("ListObjectIDsByScope failed: %v", err)
 	}
 	if len(ids) != 0 {
 		t.Fatalf("expected no listed ids after delete, got %v", ids)
@@ -343,7 +343,7 @@ func TestSqliteDB_UpdateAccessMethods(t *testing.T) {
 	db, _ := NewSqliteDB(":memory:")
 
 	obj := &drs.DrsObject{Id: "update-me"}
-	if err := db.CreateObject(ctx, &models.InternalObject{DrsObject: *obj, Authorizations: []string{}}); err != nil {
+	if err := db.CreateObject(ctx, &models.InternalObject{DrsObject: *obj}); err != nil {
 		t.Fatalf("CreateObject failed: %v", err)
 	}
 
@@ -380,7 +380,7 @@ func TestSqliteDB_GetObjectsByChecksumsAndListByPrefix(t *testing.T) {
 				UpdatedTime: &now,
 				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: "sha-x"}},
 			},
-			Authorizations: []string{"/programs/a/projects/b"},
+			Authorizations: map[string][]string{"a": {"b"}},
 		},
 		{
 			DrsObject: drs.DrsObject{
@@ -389,7 +389,7 @@ func TestSqliteDB_GetObjectsByChecksumsAndListByPrefix(t *testing.T) {
 				UpdatedTime: &now,
 				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: "sha-y"}},
 			},
-			Authorizations: []string{"/programs/a/projects/c"},
+			Authorizations: map[string][]string{"a": {"c"}},
 		},
 	}
 	if err := db.RegisterObjects(ctx, objects); err != nil {
@@ -407,16 +407,16 @@ func TestSqliteDB_GetObjectsByChecksumsAndListByPrefix(t *testing.T) {
 		t.Fatalf("expected empty results for missing checksum")
 	}
 
-	ids, err := db.ListObjectIDsByResourcePrefix(ctx, "/programs/a/projects/b")
+	ids, err := db.ListObjectIDsByScope(ctx, "a", "b")
 	if err != nil {
-		t.Fatalf("ListObjectIDsByResourcePrefix failed: %v", err)
+		t.Fatalf("ListObjectIDsByScope failed: %v", err)
 	}
 	if len(ids) != 1 || ids[0] != "sha-x" {
 		t.Fatalf("unexpected ids for prefix query: %+v", ids)
 	}
 }
 
-func TestSqliteDB_ListObjectIDsByResourcePrefixRootIncludesUnscoped(t *testing.T) {
+func TestSqliteDB_ListObjectIDsByScopeRootIncludesUnscoped(t *testing.T) {
 	ctx := context.Background()
 	db, _ := NewSqliteDB(":memory:")
 	now := time.Now()
@@ -429,7 +429,7 @@ func TestSqliteDB_ListObjectIDsByResourcePrefixRootIncludesUnscoped(t *testing.T
 				UpdatedTime: &now,
 				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: "scoped"}},
 			},
-			Authorizations: []string{"/programs/a/projects/b"},
+			Authorizations: map[string][]string{"a": {"b"}},
 		},
 		{
 			DrsObject: drs.DrsObject{
@@ -443,9 +443,9 @@ func TestSqliteDB_ListObjectIDsByResourcePrefixRootIncludesUnscoped(t *testing.T
 		t.Fatalf("RegisterObjects failed: %v", err)
 	}
 
-	ids, err := db.ListObjectIDsByResourcePrefix(ctx, "/")
+	ids, err := db.ListObjectIDsByScope(ctx, "", "")
 	if err != nil {
-		t.Fatalf("ListObjectIDsByResourcePrefix root failed: %v", err)
+		t.Fatalf("ListObjectIDsByScope root failed: %v", err)
 	}
 	seen := map[string]bool{}
 	for _, id := range ids {

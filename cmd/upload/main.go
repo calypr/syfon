@@ -119,8 +119,7 @@ var Cmd = &cobra.Command{
 				}
 			}
 			if objectURL != "" {
-				authzList := syfoncommon.AuthzMapToList(authzMap)
-				if err := c.Index().Upsert(ctx, finalID, objectURL, name, info.Size(), checksum, authzList); err != nil {
+				if err := c.Index().Upsert(ctx, finalID, objectURL, name, info.Size(), checksum, authzMap); err != nil {
 					return fmt.Errorf("sync index record: %w", err)
 				}
 			}

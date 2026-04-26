@@ -159,9 +159,8 @@ func handleInternalCreateBucketScope(w http.ResponseWriter, r *http.Request, om 
 	})
 }
 
-func parseScopeQuery(r *http.Request) (string, bool, error) {
+func parseScopeQuery(r *http.Request) (string, string, bool, error) {
 	return parseScopeQueryParts(
-		r.URL.Query().Get("authz"),
 		r.URL.Query().Get("organization"),
 		r.URL.Query().Get("program"),
 		r.URL.Query().Get("project"),

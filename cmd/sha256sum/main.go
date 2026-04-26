@@ -55,13 +55,13 @@ var Cmd = &cobra.Command{
 		sumArr := sha256.Sum256(data)
 		sum := hex.EncodeToString(sumArr[:])
 
-		// Fetch the latest record to preserve authorizations during upsert
-		var authz []string
-		if rec, err := c.Index().Get(ctx, did); err == nil {
-			authz = rec.Authz
+		// Fetch the latest record to preserve authorizations during upsert.
+		var authorizations map[string][]string
+		if rec, err := c.Index().Get(ctx, did); err == nil && rec.Authorizations != nil {
+			authorizations = *rec.Authorizations
 		}
 
-		if err := c.Index().Upsert(ctx, did, "", "", 0, sum, authz); err != nil {
+		if err := c.Index().Upsert(ctx, did, "", "", 0, sum, authorizations); err != nil {
 			return fmt.Errorf("persist sha256: %w", err)
 		}
 

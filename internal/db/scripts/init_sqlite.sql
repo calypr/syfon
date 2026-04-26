@@ -26,7 +26,8 @@ CREATE TABLE IF NOT EXISTS drs_object_checksum (
 
 CREATE TABLE IF NOT EXISTS drs_object_authz (
   object_id TEXT,
-  resource TEXT,
+  org TEXT NOT NULL DEFAULT '',
+  project TEXT NOT NULL DEFAULT '',
   FOREIGN KEY(object_id) REFERENCES drs_object(id) ON DELETE CASCADE
 );
 
