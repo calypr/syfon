@@ -23,14 +23,12 @@ func TestSyfonListAndRemoveCommands(t *testing.T) {
 	did := "11111111-1111-1111-1111-111111111111"
 	fileName := "README.md"
 	size := int64(123)
-	urls := []string{"s3://syfon-bucket/path/README.md"}
-	authz := map[string][]string{"syfon": {"e2e"}}
+	auth := internalapi.AuthPathMap{"syfon": {"e2e": {"s3://syfon-bucket/path/README.md"}}}
 	rec := internalapi.InternalRecord{
-		Did:            did,
-		Authorizations: &authz,
-		FileName:       &fileName,
-		Size:           &size,
-		Urls:           &urls,
+		Did:      did,
+		Auth:     &auth,
+		FileName: &fileName,
+		Size:     &size,
 	}
 	if _, err := c.Index().Create(context.Background(), rec); err != nil {
 		t.Fatalf("seed record: %v", err)

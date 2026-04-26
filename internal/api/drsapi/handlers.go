@@ -1,6 +1,7 @@
 package drsapi
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 	"time"
@@ -48,7 +49,7 @@ func handleGetObjectFiber(om *core.ObjectManager) fiber.Handler {
 		if err != nil {
 			return apiutil.HandleError(c, err)
 		}
-		return c.JSON(obj.DrsObject)
+		return c.JSON(drsObjectPayload(*obj))
 	}
 }
 
@@ -91,13 +92,11 @@ func handleGetAccessURLFiber(om *core.ObjectManager) fiber.Handler {
 
 func handleRegisterObjectsFiber(om *core.ObjectManager) fiber.Handler {
 	return func(c fiber.Ctx) error {
-		var body struct {
-			Candidates []drs.DrsObjectCandidate `json:"candidates"`
-		}
-		if err := c.Bind().JSON(&body); err != nil || len(body.Candidates) == 0 {
-			var single drs.DrsObjectCandidate
-			if err2 := c.Bind().JSON(&single); err2 == nil && len(single.Checksums) > 0 {
-				internalObj, err := core.CandidateToInternalObject(single, time.Now().UTC())
+		var body registerObjectsRequest
+		if err := json.Unmarshal(c.Body(), &body); err != nil || len(body.Candidates) == 0 {
+			var single registerObjectCandidate
+			if err2 := json.Unmarshal(c.Body(), &single); err2 == nil && len(single.Checksums) > 0 {
+				internalObj, err := registerCandidateToInternalObject(single, time.Now().UTC())
 				if err != nil {
 					return apiutil.HandleError(c, err)
 				}
@@ -109,8 +108,8 @@ func handleRegisterObjectsFiber(om *core.ObjectManager) fiber.Handler {
 				if finalObj == nil {
 					finalObj = &internalObj
 				}
-				return c.Status(fiber.StatusCreated).JSON(drs.N201ObjectsCreated{
-					Objects: []drs.DrsObject{finalObj.DrsObject},
+				return c.Status(fiber.StatusCreated).JSON(fiber.Map{
+					"objects": []any{drsObjectPayload(*finalObj)},
 				})
 			}
 			return c.Status(fiber.StatusBadRequest).JSON(drs.Error{Msg: common.Ptr("Invalid request body")})
@@ -119,7 +118,7 @@ func handleRegisterObjectsFiber(om *core.ObjectManager) fiber.Handler {
 		// List of internal objects to register
 		toRegister := make([]models.InternalObject, 0, len(body.Candidates))
 		for _, cand := range body.Candidates {
-			internalObj, err := core.CandidateToInternalObject(cand, time.Now().UTC())
+			internalObj, err := registerCandidateToInternalObject(cand, time.Now().UTC())
 			if err != nil {
 				return apiutil.HandleError(c, err)
 			}
@@ -131,20 +130,47 @@ func handleRegisterObjectsFiber(om *core.ObjectManager) fiber.Handler {
 		}
 
 		// Reconstruct registered objects summary for response
-		registered := make([]drs.DrsObject, len(toRegister))
+		registered := make([]any, len(toRegister))
 		for i, internal := range toRegister {
 			// Fetch back to ensure full population
 			obj, err := om.GetObject(c.Context(), internal.Id, "read")
 			if err == nil {
-				registered[i] = obj.DrsObject
+				registered[i] = drsObjectPayload(*obj)
 			} else {
 				// Fallback to what we have if fetch fails
-				registered[i] = internal.DrsObject
+				registered[i] = drsObjectPayload(internal)
 			}
 		}
 
-		return c.Status(fiber.StatusCreated).JSON(drs.N201ObjectsCreated{Objects: registered})
+		return c.Status(fiber.StatusCreated).JSON(fiber.Map{"objects": registered})
 	}
+}
+
+type registerObjectsRequest struct {
+	Candidates []registerObjectCandidate `json:"candidates"`
+}
+
+type registerObjectCandidate struct {
+	drs.DrsObjectCandidate
+	Auth models.AuthPathMap `json:"auth,omitempty"`
+}
+
+func registerCandidateToInternalObject(c registerObjectCandidate, now time.Time) (models.InternalObject, error) {
+	obj, err := core.CandidateToInternalObject(c.DrsObjectCandidate, now)
+	if err != nil {
+		return models.InternalObject{}, err
+	}
+	if len(c.Auth) == 0 {
+		return obj, nil
+	}
+
+	obj.Auth = c.Auth
+	obj.Authorizations = models.AuthPathMapToAuthorizations(c.Auth)
+	methods := core.AccessMethodsFromAuthPathMap(c.Auth)
+	if len(methods) > 0 {
+		obj.AccessMethods = &methods
+	}
+	return obj, nil
 }
 
 func handleGetBulkObjectsFiber(om *core.ObjectManager) fiber.Handler {
@@ -156,17 +182,17 @@ func handleGetBulkObjectsFiber(om *core.ObjectManager) fiber.Handler {
 			return c.Status(fiber.StatusBadRequest).JSON(drs.Error{Msg: common.Ptr("Invalid request body")})
 		}
 
-		resolved := make([]drs.DrsObject, 0)
+		resolved := make([]any, 0)
 		for _, id := range body.BulkObjectIds {
 			obj, err := om.GetObject(c.Context(), id, "read")
 			if err == nil {
-				resolved = append(resolved, obj.DrsObject)
+				resolved = append(resolved, drsObjectPayload(*obj))
 			}
 		}
 
-		return c.JSON(drs.N200OkDrsObjectsJSONResponse{
-			ResolvedDrsObject: &resolved,
-			Summary: &drs.Summary{
+		return c.JSON(fiber.Map{
+			"resolved_drs_object": resolved,
+			"summary": drs.Summary{
 				Requested: common.Ptr(len(body.BulkObjectIds)),
 				Resolved:  common.Ptr(len(resolved)),
 			},
@@ -188,22 +214,37 @@ func handleGetObjectsByChecksumFiber(om *core.ObjectManager) fiber.Handler {
 			return apiutil.HandleError(c, err)
 		}
 
-		resolved := make([]drs.DrsObject, 0)
+		resolved := make([]any, 0)
 		for _, obj := range fetched {
 			// Reuse GetObject to verify access consistently
 			if _, err := om.GetObject(c.Context(), obj.Id, "read"); err == nil {
-				resolved = append(resolved, obj.DrsObject)
+				resolved = append(resolved, drsObjectPayload(obj))
 			}
 		}
 
-		return c.JSON(drs.N200OkDrsObjectsJSONResponse{
-			ResolvedDrsObject: &resolved,
-			Summary: &drs.Summary{
+		return c.JSON(fiber.Map{
+			"resolved_drs_object": resolved,
+			"summary": drs.Summary{
 				Requested: common.Ptr(1),
 				Resolved:  common.Ptr(len(resolved)),
 			},
 		})
 	}
+}
+
+func drsObjectPayload(obj models.InternalObject) map[string]any {
+	var payload map[string]any
+	data, err := json.Marshal(obj.DrsObject)
+	if err == nil {
+		_ = json.Unmarshal(data, &payload)
+	}
+	if payload == nil {
+		payload = map[string]any{}
+	}
+	if len(obj.Auth) > 0 {
+		payload["auth"] = obj.Auth
+	}
+	return payload
 }
 
 func handleGetServiceInfoFiber(om *core.ObjectManager) fiber.Handler {

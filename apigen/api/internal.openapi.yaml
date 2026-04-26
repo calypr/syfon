@@ -591,6 +591,15 @@ components:
       additionalProperties:
         type: string
       description: Hash map, e.g. {"sha256":"..."}
+    AuthPathMap:
+      description: Organization/project keyed storage paths. Values are concrete object paths such as s3://bucket/path/to/file.
+      type: object
+      additionalProperties:
+        type: object
+        additionalProperties:
+          type: array
+          items:
+            type: string
     InternalRecord:
       type: object
       required:
@@ -604,17 +613,8 @@ components:
         size:
           type: integer
           format: int64
-        urls:
-          type: array
-          items:
-            type: string
-        authorizations:
-          description: GA4GH authorization map keyed by organization. Empty project list grants org-wide access.
-          type: object
-          additionalProperties:
-            type: array
-            items:
-              type: string
+        auth:
+          $ref: '#/components/schemas/AuthPathMap'
         file_name:
           type: string
         organization:

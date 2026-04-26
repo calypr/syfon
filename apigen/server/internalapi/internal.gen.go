@@ -14,6 +14,9 @@ import (
 	"github.com/oapi-codegen/runtime"
 )
 
+// AuthPathMap Organization/project keyed storage paths. Values are concrete object paths such as s3://bucket/path/to/file.
+type AuthPathMap map[string]map[string][]string
+
 // BulkCreateRequest defines model for BulkCreateRequest.
 type BulkCreateRequest struct {
 	Records []InternalRecord `json:"records"`
@@ -94,12 +97,12 @@ type InternalMultipartUploadRequest struct {
 
 // InternalRecord defines model for InternalRecord.
 type InternalRecord struct {
-	// Authorizations GA4GH authorization map keyed by organization. Empty project list grants org-wide access.
-	Authorizations *map[string][]string `json:"authorizations,omitempty"`
-	CreatedTime    *string              `json:"created_time,omitempty"`
-	Description    *string              `json:"description,omitempty"`
-	Did            string               `json:"did"`
-	FileName       *string              `json:"file_name,omitempty"`
+	// Auth Organization/project keyed storage paths. Values are concrete object paths such as s3://bucket/path/to/file.
+	Auth        *AuthPathMap `json:"auth,omitempty"`
+	CreatedTime *string      `json:"created_time,omitempty"`
+	Description *string      `json:"description,omitempty"`
+	Did         string       `json:"did"`
+	FileName    *string      `json:"file_name,omitempty"`
 
 	// Hashes Hash map, e.g. {"sha256":"..."}
 	Hashes       *HashInfo `json:"hashes,omitempty"`
@@ -107,20 +110,19 @@ type InternalRecord struct {
 	Project      *string   `json:"project,omitempty"`
 	Size         *int64    `json:"size,omitempty"`
 	UpdatedTime  *string   `json:"updated_time,omitempty"`
-	Urls         *[]string `json:"urls,omitempty"`
 	Version      *string   `json:"version,omitempty"`
 }
 
 // InternalRecordResponse defines model for InternalRecordResponse.
 type InternalRecordResponse struct {
-	// Authorizations GA4GH authorization map keyed by organization. Empty project list grants org-wide access.
-	Authorizations *map[string][]string `json:"authorizations,omitempty"`
-	Baseid         *string              `json:"baseid,omitempty"`
-	CreatedDate    *string              `json:"created_date,omitempty"`
-	CreatedTime    *string              `json:"created_time,omitempty"`
-	Description    *string              `json:"description,omitempty"`
-	Did            string               `json:"did"`
-	FileName       *string              `json:"file_name,omitempty"`
+	// Auth Organization/project keyed storage paths. Values are concrete object paths such as s3://bucket/path/to/file.
+	Auth        *AuthPathMap `json:"auth,omitempty"`
+	Baseid      *string      `json:"baseid,omitempty"`
+	CreatedDate *string      `json:"created_date,omitempty"`
+	CreatedTime *string      `json:"created_time,omitempty"`
+	Description *string      `json:"description,omitempty"`
+	Did         string       `json:"did"`
+	FileName    *string      `json:"file_name,omitempty"`
 
 	// Hashes Hash map, e.g. {"sha256":"..."}
 	Hashes       *HashInfo `json:"hashes,omitempty"`
@@ -131,7 +133,6 @@ type InternalRecordResponse struct {
 	UpdatedDate  *string   `json:"updated_date,omitempty"`
 	UpdatedTime  *string   `json:"updated_time,omitempty"`
 	Uploader     *string   `json:"uploader,omitempty"`
-	Urls         *[]string `json:"urls,omitempty"`
 	Version      *string   `json:"version,omitempty"`
 }
 

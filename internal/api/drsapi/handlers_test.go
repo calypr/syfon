@@ -130,11 +130,11 @@ func TestRegisterObjects(t *testing.T) {
 		req := httptest.NewRequest("POST", "/objects/register", bytes.NewBuffer(body))
 		req.Header.Set("Content-Type", "application/json")
 		resp, _ := app.Test(req)
-		
+
 		if resp.StatusCode != http.StatusCreated {
 			t.Fatalf("expected 201, got %d. check internal/api/apiutil/error.go for mapping", resp.StatusCode)
 		}
-		
+
 		var created drs.N201ObjectsCreated
 		if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
 			t.Fatalf("failed to decode response: %v", err)
@@ -147,6 +147,46 @@ func TestRegisterObjects(t *testing.T) {
 		}
 		if (*created.Objects[0].AccessMethods)[0].Authorizations == nil || len(*(*created.Objects[0].AccessMethods)[0].Authorizations) == 0 {
 			t.Fatalf("expected authorizations in response: %+v", created.Objects[0].AccessMethods)
+		}
+	})
+
+	t.Run("Register_Single_AuthExtension", func(t *testing.T) {
+		body := []byte(`{
+			"size": 64,
+			"checksums": [{"type": "sha256", "checksum": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"}],
+			"auth": {
+				"org2": {
+					"proj2": ["s3://bucket/path/to/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"]
+				}
+			}
+		}`)
+		req := httptest.NewRequest("POST", "/objects/register", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		resp, _ := app.Test(req)
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("expected 201, got %d", resp.StatusCode)
+		}
+
+		var created struct {
+			Objects []map[string]any `json:"objects"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+		if len(created.Objects) != 1 {
+			t.Fatalf("expected one object, got %+v", created)
+		}
+		auth, ok := created.Objects[0]["auth"].(map[string]any)
+		if !ok {
+			t.Fatalf("expected auth extension in response: %+v", created.Objects[0])
+		}
+		org, ok := auth["org2"].(map[string]any)
+		if !ok {
+			t.Fatalf("expected org2 auth scope in response: %+v", auth)
+		}
+		paths, ok := org["proj2"].([]any)
+		if !ok || len(paths) != 1 || paths[0] != "s3://bucket/path/to/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd" {
+			t.Fatalf("expected project path in auth extension: %+v", org)
 		}
 	})
 

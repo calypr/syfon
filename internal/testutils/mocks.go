@@ -17,6 +17,7 @@ import (
 // MockDatabase implements db.DatabaseInterface for testing
 type MockDatabase struct {
 	Objects        map[string]*drs.DrsObject
+	ObjectAuth     map[string]models.AuthPathMap
 	ObjectAuthz    map[string]map[string][]string
 	Credentials    map[string]models.S3Credential
 	BucketScopes   map[string]models.BucketScope
@@ -38,6 +39,10 @@ func (m *MockDatabase) GetObject(ctx context.Context, id string) (*models.Intern
 		wrapped := models.InternalObject{DrsObject: *obj}
 		if authz, ok := m.ObjectAuthz[id]; ok {
 			wrapped.Authorizations = cloneAuthzMap(authz)
+		}
+		if auth, ok := m.ObjectAuth[id]; ok {
+			wrapped.Auth = cloneAuthPathMap(auth)
+			wrapped.Authorizations = models.AuthPathMapToAuthorizations(wrapped.Auth)
 		}
 		attachAuthorizationsToAccessMethods(&wrapped)
 		return &wrapped, nil
@@ -71,6 +76,12 @@ func (m *MockDatabase) CreateObject(ctx context.Context, obj *models.InternalObj
 		}
 		m.ObjectAuthz[obj.Id] = cloneAuthzMap(obj.Authorizations)
 	}
+	if len(obj.Auth) > 0 {
+		if m.ObjectAuth == nil {
+			m.ObjectAuth = make(map[string]models.AuthPathMap)
+		}
+		m.ObjectAuth[obj.Id] = cloneAuthPathMap(obj.Auth)
+	}
 	return nil
 }
 
@@ -85,6 +96,10 @@ func (m *MockDatabase) GetObjectsByChecksum(ctx context.Context, checksum string
 			if authz, ok := m.ObjectAuthz[id]; ok {
 				wrapped.Authorizations = cloneAuthzMap(authz)
 			}
+			if auth, ok := m.ObjectAuth[id]; ok {
+				wrapped.Auth = cloneAuthPathMap(auth)
+				wrapped.Authorizations = models.AuthPathMapToAuthorizations(wrapped.Auth)
+			}
 			attachAuthorizationsToAccessMethods(&wrapped)
 			out = append(out, wrapped)
 			continue
@@ -94,6 +109,10 @@ func (m *MockDatabase) GetObjectsByChecksum(ctx context.Context, checksum string
 				wrapped := models.InternalObject{DrsObject: *obj}
 				if authz, ok := m.ObjectAuthz[id]; ok {
 					wrapped.Authorizations = cloneAuthzMap(authz)
+				}
+				if auth, ok := m.ObjectAuth[id]; ok {
+					wrapped.Auth = cloneAuthPathMap(auth)
+					wrapped.Authorizations = models.AuthPathMapToAuthorizations(wrapped.Auth)
 				}
 				attachAuthorizationsToAccessMethods(&wrapped)
 				out = append(out, wrapped)
@@ -163,6 +182,11 @@ func (m *MockDatabase) CreateObjectAlias(ctx context.Context, aliasID, canonical
 			m.ObjectAuthz[aliasID] = cloneAuthzMap(authz)
 		}
 	}
+	if m.ObjectAuth != nil {
+		if auth, ok := m.ObjectAuth[canonicalObjectID]; ok {
+			m.ObjectAuth[aliasID] = cloneAuthPathMap(auth)
+		}
+	}
 	return nil
 }
 
@@ -186,6 +210,12 @@ func (m *MockDatabase) RegisterObjects(ctx context.Context, objects []models.Int
 			m.ObjectAuthz = make(map[string]map[string][]string)
 		}
 		m.ObjectAuthz[obj.Id] = cloneAuthzMap(obj.Authorizations)
+		if len(obj.Auth) > 0 {
+			if m.ObjectAuth == nil {
+				m.ObjectAuth = make(map[string]models.AuthPathMap)
+			}
+			m.ObjectAuth[obj.Id] = cloneAuthPathMap(obj.Auth)
+		}
 	}
 	return nil
 }
@@ -197,6 +227,10 @@ func (m *MockDatabase) GetBulkObjects(ctx context.Context, ids []string) ([]mode
 			wrapped := models.InternalObject{DrsObject: *obj}
 			if authz, ok := m.ObjectAuthz[id]; ok {
 				wrapped.Authorizations = cloneAuthzMap(authz)
+			}
+			if auth, ok := m.ObjectAuth[id]; ok {
+				wrapped.Auth = cloneAuthPathMap(auth)
+				wrapped.Authorizations = models.AuthPathMapToAuthorizations(wrapped.Auth)
 			}
 			attachAuthorizationsToAccessMethods(&wrapped)
 			out = append(out, wrapped)
@@ -460,6 +494,20 @@ func cloneAuthzMap(in map[string][]string) map[string][]string {
 	out := make(map[string][]string, len(in))
 	for org, projects := range in {
 		out[org] = append([]string(nil), projects...)
+	}
+	return out
+}
+
+func cloneAuthPathMap(in models.AuthPathMap) models.AuthPathMap {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(models.AuthPathMap, len(in))
+	for org, projects := range in {
+		out[org] = make(map[string][]string, len(projects))
+		for project, paths := range projects {
+			out[org][project] = append([]string(nil), paths...)
+		}
 	}
 	return out
 }

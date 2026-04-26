@@ -7,11 +7,14 @@ import (
 	"github.com/calypr/syfon/apigen/server/drs"
 )
 
+type AuthPathMap map[string]map[string][]string
+
 // InternalObject is the primary DRS domain model. It wraps the GA4GH DrsObject
 // and adds Syfon-specific authorization metadata.
 type InternalObject struct {
 	drs.DrsObject
-	Authorizations map[string][]string    `json:"authorizations,omitempty"`
+	Auth           AuthPathMap            `json:"auth,omitempty"`
+	Authorizations map[string][]string    `json:"-"`
 	Properties     map[string]interface{} `json:"-"`
 }
 
@@ -33,11 +36,10 @@ func (o *InternalObject) UnmarshalJSON(data []byte) error {
 
 	type wireObject struct {
 		drs.DrsObject
-		Authorizations map[string][]string `json:"authorizations,omitempty"`
-		Did            string              `json:"did,omitempty"`
-		Hashes         map[string]string   `json:"hashes,omitempty"`
-		Urls           []string            `json:"urls,omitempty"`
-		FileName       *string             `json:"file_name,omitempty"`
+		Auth     AuthPathMap       `json:"auth,omitempty"`
+		Did      string            `json:"did,omitempty"`
+		Hashes   map[string]string `json:"hashes,omitempty"`
+		FileName *string           `json:"file_name,omitempty"`
 	}
 
 	var wire wireObject
@@ -61,24 +63,6 @@ func (o *InternalObject) UnmarshalJSON(data []byte) error {
 		}
 	}
 	o.AccessMethods = wire.AccessMethods
-	if o.AccessMethods == nil && len(wire.Urls) > 0 {
-		methods := make([]drs.AccessMethod, 0, len(wire.Urls))
-		for _, rawURL := range wire.Urls {
-			if rawURL == "" {
-				continue
-			}
-			methods = append(methods, drs.AccessMethod{
-				Type: "https",
-				AccessUrl: &struct {
-					Headers *[]string `json:"headers,omitempty"`
-					Url     string    `json:"url"`
-				}{Url: rawURL},
-			})
-		}
-		if len(methods) > 0 {
-			o.AccessMethods = &methods
-		}
-	}
 	o.CreatedTime = wire.CreatedTime
 	o.UpdatedTime = wire.UpdatedTime
 	o.Size = wire.Size
@@ -91,8 +75,9 @@ func (o *InternalObject) UnmarshalJSON(data []byte) error {
 	o.SelfUri = wire.SelfUri
 	o.Version = wire.Version
 
-	if len(wire.Authorizations) > 0 {
-		o.Authorizations = wire.Authorizations
+	if len(wire.Auth) > 0 {
+		o.Auth = wire.Auth
+		o.Authorizations = AuthPathMapToAuthorizations(wire.Auth)
 	}
 
 	return nil
@@ -103,6 +88,9 @@ func (o InternalObject) MarshalJSON() ([]byte, error) {
 
 	// Preserve original request fields, then layer canonical aliases on top.
 	for k, v := range o.Properties {
+		if isRetiredInternalAuthField(k) {
+			continue
+		}
 		out[k] = v
 	}
 
@@ -130,8 +118,8 @@ func (o InternalObject) MarshalJSON() ([]byte, error) {
 	if o.Size > 0 {
 		out["size"] = o.Size
 	}
-	if len(o.Authorizations) > 0 {
-		out["authorizations"] = o.Authorizations
+	if len(o.Auth) > 0 {
+		out["auth"] = o.Auth
 	}
 
 	// Ensure Gen3 compatibility fields are also present.
@@ -153,24 +141,43 @@ func (o InternalObject) MarshalJSON() ([]byte, error) {
 		}
 	}
 
-	if o.AccessMethods != nil && len(*o.AccessMethods) > 0 {
-		urls := make([]string, 0, len(*o.AccessMethods))
-		for _, method := range *o.AccessMethods {
-			if method.AccessUrl == nil {
-				continue
-			}
-			if url := method.AccessUrl.Url; url != "" {
-				urls = append(urls, url)
-			}
-		}
-		if len(urls) > 0 {
-			out["urls"] = urls
-		}
-	}
-
 	return json.Marshal(out)
+}
+
+func isRetiredInternalAuthField(key string) bool {
+	switch key {
+	case "authz", "authorizations", "urls":
+		return true
+	default:
+		return false
+	}
 }
 
 func (o InternalObject) External() drs.DrsObject {
 	return o.DrsObject
+}
+
+func AuthPathMapToAuthorizations(auth AuthPathMap) map[string][]string {
+	out := make(map[string][]string)
+	for org, projects := range auth {
+		if org == "" {
+			continue
+		}
+		seen := map[string]bool{}
+		for project := range projects {
+			if project == "" {
+				out[org] = []string{}
+				seen = nil
+				break
+			}
+			if !seen[project] {
+				out[org] = append(out[org], project)
+				seen[project] = true
+			}
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }

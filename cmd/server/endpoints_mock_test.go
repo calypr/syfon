@@ -266,7 +266,7 @@ func requestBodyFor(method, template string) ([]byte, string) {
 	case "/index/bulk/hashes":
 		return []byte(`{"hashes":["sha-1"]}`), "application/json"
 	case "/index/bulk":
-		return []byte(`{"records":[{"did":"sha-1","hashes":{"sha256":"sha-1"},"size":1,"urls":["s3://test-bucket-1/sha-1"],"authorizations":{"data_file":[]}}]}`), "application/json"
+		return []byte(`{"records":[{"did":"sha-1","hashes":{"sha256":"sha-1"},"size":1,"auth":{"data_file":{"":["s3://test-bucket-1/sha-1"]}}}]}`), "application/json"
 	case "/index/bulk/documents":
 		return []byte(`["sha-1"]`), "application/json"
 	case "/data/upload", "/data/upload/:file_id":

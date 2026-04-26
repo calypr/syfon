@@ -148,36 +148,51 @@ retryLookup:
 			SelfUri:     "drs://" + objectID,
 		},
 	}
+	authzMap := make(map[string][]string)
+	authPaths := make(models.AuthPathMap)
 
-	// 2. Fetch URLs (Access Methods)
-	urlRows, err := db.db.QueryContext(ctx, "SELECT url, type FROM drs_object_access_method WHERE object_id = $1", lookupID)
+	// 2. Fetch scoped URLs (Access Methods)
+	urlRows, err := db.db.QueryContext(ctx, "SELECT url, type, org, project FROM drs_object_access_method WHERE object_id = $1", lookupID)
 	if err != nil {
 		return nil, err
 	}
 	defer urlRows.Close()
 	seenAccess := make(map[string]struct{})
 	for urlRows.Next() {
-		var u, t string
-		if err := urlRows.Scan(&u, &t); err != nil {
+		var u, t, org, project string
+		if err := urlRows.Scan(&u, &t, &org, &project); err != nil {
 			return nil, err
 		}
-		key := t + "|" + u
+		key := t + "|" + u + "|" + org + "|" + project
 		if _, ok := seenAccess[key]; ok {
 			continue
 		}
 		seenAccess[key] = struct{}{}
+		methodAuthz := authzMapFromScopeRow(org, project)
+		addScopeToAuthzMap(authzMap, org, project)
+		addPathToAuthMap(authPaths, org, project, u)
 		if obj.AccessMethods == nil {
 			obj.AccessMethods = &[]drs.AccessMethod{}
 		}
 		amID := t
-		*obj.AccessMethods = append(*obj.AccessMethods, drs.AccessMethod{
+		am := drs.AccessMethod{
 			AccessUrl: &struct {
 				Headers *[]string `json:"headers,omitempty"`
 				Url     string    `json:"url"`
 			}{Url: u},
 			Type:     drs.AccessMethodType(t),
 			AccessId: &amID,
-		})
+		}
+		if len(methodAuthz) > 0 {
+			am.Authorizations = &methodAuthz
+		}
+		*obj.AccessMethods = append(*obj.AccessMethods, am)
+	}
+	if len(authzMap) > 0 {
+		obj.Authorizations = authzMap
+	}
+	if len(authPaths) > 0 {
+		obj.Auth = authPaths
 	}
 
 	// 3. Fetch Checksums
@@ -200,50 +215,7 @@ retryLookup:
 		obj.Checksums = append(obj.Checksums, drs.Checksum{Type: t, Checksum: v})
 	}
 
-	// 4. Fetch object-level authz scopes.
-	authzRows, err := db.db.QueryContext(ctx, "SELECT org, project FROM drs_object_authz WHERE object_id = $1", lookupID)
-	if err != nil {
-		return nil, err
-	}
-	defer authzRows.Close()
-	authzMap := make(map[string][]string)
-	seenAuthz := make(map[string]struct{})
-	for authzRows.Next() {
-		var org, project string
-		if err := authzRows.Scan(&org, &project); err != nil {
-			return nil, err
-		}
-		if org == "" {
-			continue
-		}
-		key := org + "|" + project
-		if _, ok := seenAuthz[key]; ok {
-			continue
-		}
-		seenAuthz[key] = struct{}{}
-		if project == "" {
-			if _, ok := authzMap[org]; !ok {
-				authzMap[org] = []string{}
-			}
-		} else {
-			authzMap[org] = append(authzMap[org], project)
-		}
-	}
-	if err := authzRows.Err(); err != nil {
-		return nil, err
-	}
-	if len(authzMap) > 0 {
-		obj.Authorizations = authzMap
-		if obj.AccessMethods != nil {
-			for i := range *obj.AccessMethods {
-				am := &(*obj.AccessMethods)[i]
-				if am.Authorizations == nil {
-					am.Authorizations = &authzMap
-				}
-			}
-		}
-	}
-	// 5. RBAC Check (gen3 mode only)
+	// 4. RBAC Check (gen3 mode only)
 	if !authz.IsGen3Mode(ctx) {
 		return obj, nil
 	}
@@ -256,8 +228,8 @@ retryLookup:
 	err = db.db.QueryRowContext(ctx, `
 		SELECT COUNT(*) FROM drs_object o
 		WHERE o.id = $1 AND (
-			NOT EXISTS (SELECT 1 FROM drs_object_authz a WHERE a.object_id = o.id)
-			OR EXISTS (SELECT 1 FROM drs_object_authz a WHERE a.object_id = o.id
+			NOT EXISTS (SELECT 1 FROM drs_object_access_method a WHERE a.object_id = o.id AND a.org != '')
+			OR EXISTS (SELECT 1 FROM drs_object_access_method a WHERE a.object_id = o.id
 				AND ('/programs/' || a.org || CASE WHEN a.project != '' THEN '/projects/' || a.project ELSE '' END) = ANY($2))
 		)`, lookupID, pq.Array(userResources)).Scan(&count)
 
@@ -288,15 +260,24 @@ func (db *PostgresDB) CreateObject(ctx context.Context, obj *models.InternalObje
 		return fmt.Errorf("failed to insert drs_object: %w", err)
 	}
 
-	// Insert URLs
-	if obj.AccessMethods != nil {
+	// Insert scoped URLs
+	if len(obj.Auth) > 0 {
+		for _, scope := range authPathMapToScopes(obj.Auth) {
+			_, err = tx.ExecContext(ctx, `INSERT INTO drs_object_access_method (object_id, url, type, org, project) VALUES ($1, $2, $3, $4, $5)`, obj.Id, scope.path, methodTypeForURL(scope.path), scope.org, scope.project)
+			if err != nil {
+				return err
+			}
+		}
+	} else if obj.AccessMethods != nil {
 		for _, am := range *obj.AccessMethods {
 			if am.AccessUrl == nil || am.AccessUrl.Url == "" {
 				continue
 			}
-			_, err = tx.ExecContext(ctx, `INSERT INTO drs_object_access_method (object_id, url, type) VALUES ($1, $2, $3)`, obj.Id, am.AccessUrl.Url, am.Type)
-			if err != nil {
-				return fmt.Errorf("failed to insert url: %w", err)
+			for _, scope := range accessMethodScopes(am, obj.Authorizations) {
+				_, err = tx.ExecContext(ctx, `INSERT INTO drs_object_access_method (object_id, url, type, org, project) VALUES ($1, $2, $3, $4, $5)`, obj.Id, am.AccessUrl.Url, am.Type, scope.org, scope.project)
+				if err != nil {
+					return fmt.Errorf("failed to insert scoped access method: %w", err)
+				}
 			}
 		}
 	}
@@ -309,23 +290,6 @@ func (db *PostgresDB) CreateObject(ctx context.Context, obj *models.InternalObje
 		_, err = tx.ExecContext(ctx, `INSERT INTO drs_object_checksum (object_id, type, checksum) VALUES ($1, $2, $3)`, obj.Id, cs.Type, cs.Checksum)
 		if err != nil {
 			return fmt.Errorf("failed to insert checksum: %w", err)
-		}
-	}
-
-	// Insert Authz
-	for org, projects := range obj.Authorizations {
-		if len(projects) == 0 {
-			_, err = tx.ExecContext(ctx, `INSERT INTO drs_object_authz (object_id, org, project) VALUES ($1, $2, '')`, obj.Id, org)
-			if err != nil {
-				return fmt.Errorf("failed to insert authz: %w", err)
-			}
-		} else {
-			for _, p := range projects {
-				_, err = tx.ExecContext(ctx, `INSERT INTO drs_object_authz (object_id, org, project) VALUES ($1, $2, $3)`, obj.Id, org, p)
-				if err != nil {
-					return fmt.Errorf("failed to insert authz: %w", err)
-				}
-			}
 		}
 	}
 
@@ -358,14 +322,12 @@ func (db *PostgresDB) RegisterObjects(ctx context.Context, objects []models.Inte
 	accessObjectIDs := make([]string, 0)
 	accessURLs := make([]string, 0)
 	accessTypes := make([]string, 0)
+	accessOrgs := make([]string, 0)
+	accessProjects := make([]string, 0)
 
 	checksumObjectIDs := make([]string, 0)
 	checksumTypes := make([]string, 0)
 	checksumValues := make([]string, 0)
-
-	authzObjectIDs := make([]string, 0)
-	authzOrgs := make([]string, 0)
-	authzProjects := make([]string, 0)
 
 	for _, obj := range objects {
 		ids = append(ids, obj.Id)
@@ -377,19 +339,31 @@ func (db *PostgresDB) RegisterObjects(ctx context.Context, objects []models.Inte
 		descriptions = append(descriptions, common.StringVal(obj.Description))
 
 		seenAccess := make(map[string]struct{})
-		if obj.AccessMethods != nil {
+		if len(obj.Auth) > 0 {
+			for _, scope := range authPathMapToScopes(obj.Auth) {
+				accessObjectIDs = append(accessObjectIDs, obj.Id)
+				accessURLs = append(accessURLs, scope.path)
+				accessTypes = append(accessTypes, methodTypeForURL(scope.path))
+				accessOrgs = append(accessOrgs, scope.org)
+				accessProjects = append(accessProjects, scope.project)
+			}
+		} else if obj.AccessMethods != nil {
 			for _, am := range *obj.AccessMethods {
 				if am.AccessUrl == nil || am.AccessUrl.Url == "" {
 					continue
 				}
-				key := string(am.Type) + "|" + am.AccessUrl.Url
-				if _, ok := seenAccess[key]; ok {
-					continue
+				for _, scope := range accessMethodScopes(am, obj.Authorizations) {
+					key := string(am.Type) + "|" + am.AccessUrl.Url + "|" + scope.org + "|" + scope.project
+					if _, ok := seenAccess[key]; ok {
+						continue
+					}
+					seenAccess[key] = struct{}{}
+					accessObjectIDs = append(accessObjectIDs, obj.Id)
+					accessURLs = append(accessURLs, am.AccessUrl.Url)
+					accessTypes = append(accessTypes, string(am.Type))
+					accessOrgs = append(accessOrgs, scope.org)
+					accessProjects = append(accessProjects, scope.project)
 				}
-				seenAccess[key] = struct{}{}
-				accessObjectIDs = append(accessObjectIDs, obj.Id)
-				accessURLs = append(accessURLs, am.AccessUrl.Url)
-				accessTypes = append(accessTypes, string(am.Type))
 			}
 		}
 
@@ -403,29 +377,6 @@ func (db *PostgresDB) RegisterObjects(ctx context.Context, objects []models.Inte
 			checksumObjectIDs = append(checksumObjectIDs, obj.Id)
 			checksumTypes = append(checksumTypes, cs.Type)
 			checksumValues = append(checksumValues, cs.Checksum)
-		}
-
-		seenAuthz := make(map[string]struct{})
-		for org, projects := range obj.Authorizations {
-			if len(projects) == 0 {
-				key := org + "|"
-				if _, ok := seenAuthz[key]; !ok {
-					seenAuthz[key] = struct{}{}
-					authzObjectIDs = append(authzObjectIDs, obj.Id)
-					authzOrgs = append(authzOrgs, org)
-					authzProjects = append(authzProjects, "")
-				}
-			} else {
-				for _, p := range projects {
-					key := org + "|" + p
-					if _, ok := seenAuthz[key]; !ok {
-						seenAuthz[key] = struct{}{}
-						authzObjectIDs = append(authzObjectIDs, obj.Id)
-						authzOrgs = append(authzOrgs, org)
-						authzProjects = append(authzProjects, p)
-					}
-				}
-			}
 		}
 	}
 
@@ -451,15 +402,12 @@ func (db *PostgresDB) RegisterObjects(ctx context.Context, objects []models.Inte
 	if _, err := tx.ExecContext(ctx, `DELETE FROM drs_object_checksum WHERE object_id = ANY($1)`, pq.Array(ids)); err != nil {
 		return fmt.Errorf("failed bulk clear checksums: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM drs_object_authz WHERE object_id = ANY($1)`, pq.Array(ids)); err != nil {
-		return fmt.Errorf("failed bulk clear authz: %w", err)
-	}
 
 	if len(accessObjectIDs) > 0 {
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO drs_object_access_method (object_id, url, type)
-			SELECT * FROM UNNEST($1::text[], $2::text[], $3::text[])`,
-			pq.Array(accessObjectIDs), pq.Array(accessURLs), pq.Array(accessTypes),
+			INSERT INTO drs_object_access_method (object_id, url, type, org, project)
+			SELECT * FROM UNNEST($1::text[], $2::text[], $3::text[], $4::text[], $5::text[])`,
+			pq.Array(accessObjectIDs), pq.Array(accessURLs), pq.Array(accessTypes), pq.Array(accessOrgs), pq.Array(accessProjects),
 		); err != nil {
 			return fmt.Errorf("failed bulk insert access methods: %w", err)
 		}
@@ -472,16 +420,6 @@ func (db *PostgresDB) RegisterObjects(ctx context.Context, objects []models.Inte
 			pq.Array(checksumObjectIDs), pq.Array(checksumTypes), pq.Array(checksumValues),
 		); err != nil {
 			return fmt.Errorf("failed bulk insert checksums: %w", err)
-		}
-	}
-
-	if len(authzObjectIDs) > 0 {
-		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO drs_object_authz (object_id, org, project)
-			SELECT * FROM UNNEST($1::text[], $2::text[], $3::text[])`,
-			pq.Array(authzObjectIDs), pq.Array(authzOrgs), pq.Array(authzProjects),
-		); err != nil {
-			return fmt.Errorf("failed bulk insert authz: %w", err)
 		}
 	}
 
@@ -596,13 +534,13 @@ func (db *PostgresDB) ListObjectIDsByScope(ctx context.Context, organization, pr
 	if project != "" {
 		rows, err = db.db.QueryContext(ctx, `
 			SELECT DISTINCT a.object_id
-			FROM drs_object_authz a
+			FROM drs_object_access_method a
 			INNER JOIN drs_object o ON o.id = a.object_id
 			WHERE a.org = $1 AND a.project = $2`, organization, project)
 	} else {
 		rows, err = db.db.QueryContext(ctx, `
 			SELECT DISTINCT a.object_id
-			FROM drs_object_authz a
+			FROM drs_object_access_method a
 			INNER JOIN drs_object o ON o.id = a.object_id
 			WHERE a.org = $1`, organization)
 	}
@@ -659,14 +597,13 @@ func (db *PostgresDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []st
 			o.description,
 			am.url,
 			am.type,
+			am.org,
+			am.project,
 			cs.type,
-			cs.checksum,
-			oa.org,
-			oa.project
+			cs.checksum
 		FROM drs_object o
 		LEFT JOIN drs_object_access_method am ON am.object_id = o.id
 		LEFT JOIN drs_object_checksum cs ON cs.object_id = o.id
-		LEFT JOIN drs_object_authz oa ON oa.object_id = o.id
 		WHERE (
 			(COALESCE(array_length($1::text[], 1), 0) > 0 AND o.id = ANY($1))
 			OR
@@ -682,8 +619,8 @@ func (db *PostgresDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []st
 		AND (
 			$4::boolean = false
 			OR
-			NOT EXISTS (SELECT 1 FROM drs_object_authz a WHERE a.object_id = o.id)
-			OR EXISTS (SELECT 1 FROM drs_object_authz a WHERE a.object_id = o.id
+			NOT EXISTS (SELECT 1 FROM drs_object_access_method a WHERE a.object_id = o.id AND a.org != '')
+			OR EXISTS (SELECT 1 FROM drs_object_access_method a WHERE a.object_id = o.id
 				AND ('/programs/' || a.org || CASE WHEN a.project != '' THEN '/projects/' || a.project ELSE '' END) = ANY($3))
 		)`,
 		pq.Array(ids), pq.Array(checksums), pq.Array(userResources), gen3Mode,
@@ -696,19 +633,18 @@ func (db *PostgresDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []st
 	objectsByID := make(map[string]*models.InternalObject)
 	seenAccess := make(map[string]map[string]struct{})
 	seenChecksum := make(map[string]map[string]struct{})
-	seenAuthz := make(map[string]map[string]struct{})
 
 	for rows.Next() {
 		var (
-			id, name, version, description              string
-			size                                        int64
-			createdTime, updatedTime                    time.Time
-			accessURL, accessType, checksumType, sumVal sql.NullString
-			authzOrg, authzProject                      sql.NullString
+			id, name, version, description                  string
+			size                                            int64
+			createdTime, updatedTime                        time.Time
+			accessURL, accessType, accessOrg, accessProject sql.NullString
+			checksumType, sumVal                            sql.NullString
 		)
 		if err := rows.Scan(
 			&id, &size, &createdTime, &updatedTime, &name, &version, &description,
-			&accessURL, &accessType, &checksumType, &sumVal, &authzOrg, &authzProject,
+			&accessURL, &accessType, &accessOrg, &accessProject, &checksumType, &sumVal,
 		); err != nil {
 			return nil, err
 		}
@@ -726,29 +662,44 @@ func (db *PostgresDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []st
 					Description: common.Ptr(description),
 					SelfUri:     "drs://" + id,
 				},
+				Authorizations: make(map[string][]string),
+				Auth:           make(models.AuthPathMap),
 			}
 			objectsByID[id] = obj
 			seenAccess[id] = make(map[string]struct{})
 			seenChecksum[id] = make(map[string]struct{})
-			seenAuthz[id] = make(map[string]struct{})
 		}
 
 		if accessURL.Valid && accessType.Valid {
-			key := accessType.String + "|" + accessURL.String
+			org, proj := "", ""
+			if accessOrg.Valid {
+				org = accessOrg.String
+			}
+			if accessProject.Valid {
+				proj = accessProject.String
+			}
+			key := accessType.String + "|" + accessURL.String + "|" + org + "|" + proj
 			if _, exists := seenAccess[id][key]; !exists {
 				seenAccess[id][key] = struct{}{}
+				methodAuthz := authzMapFromScopeRow(org, proj)
+				addScopeToAuthzMap(obj.Authorizations, org, proj)
+				addPathToAuthMap(obj.Auth, org, proj, accessURL.String)
 				if obj.DrsObject.AccessMethods == nil {
 					obj.DrsObject.AccessMethods = &[]drs.AccessMethod{}
 				}
 				amID := accessType.String
-				*obj.DrsObject.AccessMethods = append(*obj.DrsObject.AccessMethods, drs.AccessMethod{
+				am := drs.AccessMethod{
 					AccessUrl: &struct {
 						Headers *[]string `json:"headers,omitempty"`
 						Url     string    `json:"url"`
 					}{Url: accessURL.String},
 					Type:     drs.AccessMethodType(accessType.String),
 					AccessId: &amID,
-				})
+				}
+				if len(methodAuthz) > 0 {
+					am.Authorizations = &methodAuthz
+				}
+				*obj.DrsObject.AccessMethods = append(*obj.DrsObject.AccessMethods, am)
 			}
 		}
 
@@ -757,40 +708,6 @@ func (db *PostgresDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []st
 			if _, exists := seenChecksum[id][key]; !exists {
 				seenChecksum[id][key] = struct{}{}
 				obj.DrsObject.Checksums = append(obj.DrsObject.Checksums, drs.Checksum{Type: checksumType.String, Checksum: sumVal.String})
-			}
-		}
-
-		if authzOrg.Valid && strings.TrimSpace(authzOrg.String) != "" {
-			org := authzOrg.String
-			proj := ""
-			if authzProject.Valid {
-				proj = authzProject.String
-			}
-			key := org + "|" + proj
-			if _, exists := seenAuthz[id][key]; !exists {
-				seenAuthz[id][key] = struct{}{}
-				if obj.Authorizations == nil {
-					obj.Authorizations = make(map[string][]string)
-				}
-				if proj == "" {
-					if _, ok := obj.Authorizations[org]; !ok {
-						obj.Authorizations[org] = []string{}
-					}
-				} else {
-					obj.Authorizations[org] = append(obj.Authorizations[org], proj)
-				}
-			}
-		}
-	}
-
-	for _, obj := range objectsByID {
-		if len(obj.Authorizations) == 0 || obj.DrsObject.AccessMethods == nil {
-			continue
-		}
-		for i := range *obj.DrsObject.AccessMethods {
-			am := &(*obj.DrsObject.AccessMethods)[i]
-			if am.Authorizations == nil {
-				am.Authorizations = &obj.Authorizations
 			}
 		}
 	}
@@ -803,6 +720,10 @@ func (db *PostgresDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []st
 }
 
 func (db *PostgresDB) UpdateObjectAccessMethods(ctx context.Context, objectID string, accessMethods []drs.AccessMethod) error {
+	existing, err := db.GetObject(ctx, objectID)
+	if err != nil {
+		return err
+	}
 	tx, err := db.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -818,15 +739,26 @@ func (db *PostgresDB) UpdateObjectAccessMethods(ctx context.Context, objectID st
 		if am.AccessUrl == nil || am.AccessUrl.Url == "" {
 			continue
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO drs_object_access_method (object_id, url, type) VALUES ($1, $2, $3)`, objectID, am.AccessUrl.Url, am.Type)
-		if err != nil {
-			return err
+		for _, scope := range accessMethodScopes(am, existing.Authorizations) {
+			_, err = tx.ExecContext(ctx, `INSERT INTO drs_object_access_method (object_id, url, type, org, project) VALUES ($1, $2, $3, $4, $5)`, objectID, am.AccessUrl.Url, am.Type, scope.org, scope.project)
+			if err != nil {
+				return err
+			}
 		}
 	}
 	return tx.Commit()
 }
 
 func (db *PostgresDB) BulkUpdateAccessMethods(ctx context.Context, updates map[string][]drs.AccessMethod) error {
+	existingAuthz := make(map[string]map[string][]string, len(updates))
+	for objectID := range updates {
+		existing, err := db.GetObject(ctx, objectID)
+		if err != nil {
+			return err
+		}
+		existingAuthz[objectID] = existing.Authorizations
+	}
+
 	tx, err := db.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -842,11 +774,119 @@ func (db *PostgresDB) BulkUpdateAccessMethods(ctx context.Context, updates map[s
 			if am.AccessUrl == nil || am.AccessUrl.Url == "" {
 				continue
 			}
-			_, err = tx.ExecContext(ctx, `INSERT INTO drs_object_access_method (object_id, url, type) VALUES ($1, $2, $3)`, objectID, am.AccessUrl.Url, am.Type)
-			if err != nil {
-				return err
+			for _, scope := range accessMethodScopes(am, existingAuthz[objectID]) {
+				_, err = tx.ExecContext(ctx, `INSERT INTO drs_object_access_method (object_id, url, type, org, project) VALUES ($1, $2, $3, $4, $5)`, objectID, am.AccessUrl.Url, am.Type, scope.org, scope.project)
+				if err != nil {
+					return err
+				}
 			}
 		}
 	}
 	return tx.Commit()
+}
+
+type accessScope struct {
+	org     string
+	project string
+	path    string
+}
+
+func authPathMapToScopes(authMap models.AuthPathMap) []accessScope {
+	scopes := make([]accessScope, 0)
+	for org, projects := range authMap {
+		org = strings.TrimSpace(org)
+		if org == "" {
+			continue
+		}
+		for project, paths := range projects {
+			project = strings.TrimSpace(project)
+			for _, path := range paths {
+				path = strings.TrimSpace(path)
+				if path == "" {
+					continue
+				}
+				scopes = append(scopes, accessScope{org: org, project: project, path: path})
+			}
+		}
+	}
+	return scopes
+}
+
+func methodTypeForURL(rawURL string) string {
+	parts := strings.SplitN(rawURL, ":", 2)
+	if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" {
+		return "https"
+	}
+	return strings.TrimSpace(parts[0])
+}
+
+func accessMethodScopes(am drs.AccessMethod, objectAuthz map[string][]string) []accessScope {
+	if am.Authorizations != nil {
+		return authzMapToScopes(*am.Authorizations)
+	}
+	scopes := authzMapToScopes(objectAuthz)
+	if len(scopes) > 0 {
+		return scopes
+	}
+	return []accessScope{{}}
+}
+
+func authzMapToScopes(authzMap map[string][]string) []accessScope {
+	scopes := make([]accessScope, 0)
+	for org, projects := range authzMap {
+		org = strings.TrimSpace(org)
+		if org == "" {
+			continue
+		}
+		if len(projects) == 0 {
+			scopes = append(scopes, accessScope{org: org})
+			continue
+		}
+		for _, project := range projects {
+			scopes = append(scopes, accessScope{org: org, project: strings.TrimSpace(project)})
+		}
+	}
+	return scopes
+}
+
+func addScopeToAuthzMap(authzMap map[string][]string, org, project string) {
+	org = strings.TrimSpace(org)
+	project = strings.TrimSpace(project)
+	if org == "" {
+		return
+	}
+	if project == "" {
+		if _, ok := authzMap[org]; !ok {
+			authzMap[org] = []string{}
+		}
+		return
+	}
+	for _, existing := range authzMap[org] {
+		if existing == project {
+			return
+		}
+	}
+	authzMap[org] = append(authzMap[org], project)
+}
+
+func authzMapFromScopeRow(org, project string) map[string][]string {
+	authzMap := make(map[string][]string)
+	addScopeToAuthzMap(authzMap, org, project)
+	if len(authzMap) == 0 {
+		return nil
+	}
+	return authzMap
+}
+
+func addPathToAuthMap(authMap models.AuthPathMap, org, project, path string) {
+	org = strings.TrimSpace(org)
+	project = strings.TrimSpace(project)
+	path = strings.TrimSpace(path)
+	if org == "" || path == "" {
+		return
+	}
+	if authMap[org] == nil {
+		authMap[org] = make(map[string][]string)
+	}
+	authMap[org][project] = append(authMap[org][project], path)
 }

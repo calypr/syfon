@@ -59,7 +59,7 @@ func TestInternalObjectExternal(t *testing.T) {
 }
 
 func TestInternalObjectJSONAliases(t *testing.T) {
-	raw := []byte(`{"did":"obj-1","size":7,"authorizations":{"test":[]},"hashes":{"sha256":"abc"},"urls":["https://example.org/file"],"extra":"keep-me"}`)
+	raw := []byte(`{"did":"obj-1","size":7,"auth":{"test":{"proj":["s3://bucket/path/to/obj-1"]}},"authorizations":{"legacy":[]},"hashes":{"sha256":"abc"},"extra":"keep-me"}`)
 
 	var obj models.InternalObject
 	if err := json.Unmarshal(raw, &obj); err != nil {
@@ -72,19 +72,12 @@ func TestInternalObjectJSONAliases(t *testing.T) {
 	if obj.Size != 7 {
 		t.Fatalf("expected size 7, got %d", obj.Size)
 	}
-	if got := obj.Authorizations["test"]; got == nil || len(got) != 0 {
-		t.Fatalf("expected authorizations map to be preserved, got %v", obj.Authorizations)
+	if got := obj.Authorizations["test"]; len(got) != 1 || got[0] != "proj" {
+		t.Fatalf("expected auth map to derive authorizations, got %v", obj.Authorizations)
 	}
 	if len(obj.Checksums) != 1 || obj.Checksums[0].Type != "sha256" || obj.Checksums[0].Checksum != "abc" {
 		t.Fatalf("expected hashes to map to checksums, got %+v", obj.Checksums)
 	}
-	if obj.AccessMethods == nil || len(*obj.AccessMethods) != 1 {
-		t.Fatalf("expected urls to map to access methods, got %+v", obj.AccessMethods)
-	}
-	if got := (*obj.AccessMethods)[0].AccessUrl; got == nil || got.Url != "https://example.org/file" {
-		t.Fatalf("expected mapped access url, got %+v", got)
-	}
-
 	out, err := json.Marshal(obj)
 	if err != nil {
 		t.Fatalf("marshal failed: %v", err)
@@ -101,5 +94,11 @@ func TestInternalObjectJSONAliases(t *testing.T) {
 	}
 	if got := roundTripped["extra"]; got != "keep-me" {
 		t.Fatalf("expected unknown fields to survive, got %v", got)
+	}
+	if _, ok := roundTripped["authorizations"]; ok {
+		t.Fatalf("expected retired authorizations field to be omitted, got %v", roundTripped)
+	}
+	if _, ok := roundTripped["auth"]; !ok {
+		t.Fatalf("expected auth field in output, got %v", roundTripped)
 	}
 }

@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"testing"
 
+	"github.com/calypr/syfon/apigen/client/internalapi"
 	syclient "github.com/calypr/syfon/client"
 	"github.com/calypr/syfon/internal/crypto"
 )
@@ -189,7 +190,8 @@ func exerciseAllClientCommands(t *testing.T, serverURL string, bucketCfg bucketC
 	if err != nil {
 		t.Fatalf("fetch uploaded record: %v", err)
 	}
-	if rec.Urls == nil || len(*rec.Urls) == 0 || strings.TrimSpace((*rec.Urls)[0]) == "" {
+	recordURL := firstAuthPath(rec.Auth)
+	if strings.TrimSpace(recordURL) == "" {
 		t.Fatalf("uploaded record missing access url")
 	}
 	addURLDID := "33333333-3333-3333-3333-333333333333"
@@ -198,7 +200,7 @@ func exerciseAllClientCommands(t *testing.T, serverURL string, bucketCfg bucketC
 		"--server", serverURL,
 		"add-url",
 		"--did", addURLDID,
-		"--url", (*rec.Urls)[0],
+		"--url", recordURL,
 		"--org", "syfon",
 		"--project", "e2e",
 		"--name", fileName,
@@ -321,4 +323,20 @@ func exerciseAllClientCommands(t *testing.T, serverURL string, bucketCfg bucketC
 	if !strings.Contains(headlineOut, "Syfon is reachable") {
 		t.Fatalf("unexpected post-cleanup ping output: %s", headlineOut)
 	}
+}
+
+func firstAuthPath(auth *internalapi.AuthPathMap) string {
+	if auth == nil {
+		return ""
+	}
+	for _, projects := range *auth {
+		for _, paths := range projects {
+			for _, path := range paths {
+				if strings.TrimSpace(path) != "" {
+					return path
+				}
+			}
+		}
+	}
+	return ""
 }

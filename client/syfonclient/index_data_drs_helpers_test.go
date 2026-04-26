@@ -88,16 +88,15 @@ func writeJSON(t *testing.T, w http.ResponseWriter, status int, v any) {
 
 func toRecordResponse(rec internalapi.InternalRecord) internalapi.InternalRecordResponse {
 	return internalapi.InternalRecordResponse{
-		Did:            rec.Did,
-		Authorizations: rec.Authorizations,
-		Description:    rec.Description,
-		FileName:       rec.FileName,
-		Hashes:         rec.Hashes,
-		Size:           rec.Size,
-		Urls:           rec.Urls,
-		Version:        rec.Version,
-		Organization:   rec.Organization,
-		Project:        rec.Project,
+		Did:          rec.Did,
+		Auth:         rec.Auth,
+		Description:  rec.Description,
+		FileName:     rec.FileName,
+		Hashes:       rec.Hashes,
+		Size:         rec.Size,
+		Version:      rec.Version,
+		Organization: rec.Organization,
+		Project:      rec.Project,
 	}
 }
 

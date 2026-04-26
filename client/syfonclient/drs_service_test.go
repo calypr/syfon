@@ -60,10 +60,10 @@ func TestDRSServiceResolveAndList(t *testing.T) {
 
 	recordName := "record.bin"
 	recordSize := int64(77)
-	recordUrls := []string{"https://storage.example/record.bin"}
 	recordHashes := internalapi.HashInfo{"sha256": "abc123"}
 	recordAuthz := map[string][]string{"org1": {"p1"}}
-	records := []internalapi.InternalRecord{{Did: "did-record", Authorizations: &recordAuthz, FileName: &recordName, Size: &recordSize, Urls: &recordUrls, Hashes: &recordHashes}}
+	recordAuth := authPathMapForURL("https://storage.example/record.bin", recordAuthz)
+	records := []internalapi.InternalRecord{{Did: "did-record", Auth: &recordAuth, FileName: &recordName, Size: &recordSize, Hashes: &recordHashes}}
 	listResp, err := json.Marshal(internalapi.ListRecordsResponse{Records: &records})
 	if err != nil {
 		t.Fatalf("marshal list response: %v", err)
@@ -161,6 +161,8 @@ func TestDRSServiceResourceAuthzAndDelete(t *testing.T) {
 	recordHashes := internalapi.HashInfo{"sha256": "abc"}
 	authzProject := map[string][]string{"org1": {"proj1"}}
 	authzOrg := map[string][]string{"org1": {}}
+	projectAuth := authPathMapForURL(recordURLs[0], authzProject)
+	orgAuth := authPathMapForURL(recordURLs[0], authzOrg)
 	projectMethods := []drsapi.AccessMethod{{
 		Type:           "https",
 		Authorizations: &authzProject,
@@ -195,20 +197,18 @@ func TestDRSServiceResourceAuthzAndDelete(t *testing.T) {
 	}
 	records := []internalapi.InternalRecord{
 		{
-			Did:            "obj-1",
-			Authorizations: &authzProject,
-			FileName:       &recordName,
-			Size:           &recordSize,
-			Urls:           &recordURLs,
-			Hashes:         &recordHashes,
+			Did:      "obj-1",
+			Auth:     &projectAuth,
+			FileName: &recordName,
+			Size:     &recordSize,
+			Hashes:   &recordHashes,
 		},
 		{
-			Did:            "obj-2",
-			Authorizations: &authzOrg,
-			FileName:       &recordName,
-			Size:           &recordSize,
-			Urls:           &recordURLs,
-			Hashes:         &recordHashes,
+			Did:      "obj-2",
+			Auth:     &orgAuth,
+			FileName: &recordName,
+			Size:     &recordSize,
+			Hashes:   &recordHashes,
 		},
 	}
 	listResp, err := json.Marshal(internalapi.ListRecordsResponse{Records: &records})

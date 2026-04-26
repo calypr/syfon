@@ -33,9 +33,9 @@ func TestIndexServiceOperationsAndUpsert(t *testing.T) {
 			lastListQuery = r.URL.Query()
 			name := "file.txt"
 			size := int64(12)
-			urls := []string{"s3://bucket/object"}
 			authz := map[string][]string{"p1": {}}
-			records := []internalapi.InternalRecord{{Did: "did-list", Authorizations: &authz, FileName: &name, Size: &size, Urls: &urls}}
+			auth := authPathMapForURL("s3://bucket/object", authz)
+			records := []internalapi.InternalRecord{{Did: "did-list", Auth: &auth, FileName: &name, Size: &size}}
 			writeJSON(t, w, http.StatusOK, internalapi.ListRecordsResponse{Records: &records})
 		case r.Method == http.MethodDelete && r.URL.Path == "/index":
 			lastDeleteByQueryQuery = r.URL.Query()
@@ -73,20 +73,20 @@ func TestIndexServiceOperationsAndUpsert(t *testing.T) {
 			writeJSON(t, w, http.StatusOK, map[string]bool{"abc": true, "def": false})
 		case r.Method == http.MethodPost && r.URL.Path == "/index/bulk/documents":
 			authz := map[string][]string{"p1": {}}
-			writeJSON(t, w, http.StatusOK, []internalapi.InternalRecordResponse{{Did: "did-doc", Authorizations: &authz}})
+			auth := authPathMapForURL("s3://bucket/doc", authz)
+			writeJSON(t, w, http.StatusOK, []internalapi.InternalRecordResponse{{Did: "did-doc", Auth: &auth}})
 		case r.Method == http.MethodGet && r.URL.Path == "/index/did-update":
 			fileName := "existing.txt"
 			size := int64(42)
-			urls := []string{"s3://bucket/existing"}
 			hashes := internalapi.HashInfo{"md5": "md5sum"}
 			authz := map[string][]string{"existing": {}}
+			auth := authPathMapForURL("s3://bucket/existing", authz)
 			writeJSON(t, w, http.StatusOK, internalapi.InternalRecordResponse{
-				Did:            "did-update",
-				Authorizations: &authz,
-				FileName:       &fileName,
-				Size:           &size,
-				Urls:           &urls,
-				Hashes:         &hashes,
+				Did:      "did-update",
+				Auth:     &auth,
+				FileName: &fileName,
+				Size:     &size,
+				Hashes:   &hashes,
 			})
 		case r.Method == http.MethodGet && r.URL.Path == "/index/did-no-authz":
 			writeJSON(t, w, http.StatusOK, internalapi.InternalRecordResponse{Did: "did-no-authz"})
@@ -109,9 +109,9 @@ func TestIndexServiceOperationsAndUpsert(t *testing.T) {
 
 	listName := "file.txt"
 	listSize := int64(12)
-	listUrls := []string{"s3://bucket/object"}
 	listAuthz := map[string][]string{"p1": {}}
-	listRecords := []internalapi.InternalRecord{{Did: "did-list", Authorizations: &listAuthz, FileName: &listName, Size: &listSize, Urls: &listUrls}}
+	listAuth := authPathMapForURL("s3://bucket/object", listAuthz)
+	listRecords := []internalapi.InternalRecord{{Did: "did-list", Auth: &listAuth, FileName: &listName, Size: &listSize}}
 	listResp, err := json.Marshal(internalapi.ListRecordsResponse{Records: &listRecords})
 	if err != nil {
 		t.Fatalf("marshal list response: %v", err)
@@ -133,7 +133,8 @@ func TestIndexServiceOperationsAndUpsert(t *testing.T) {
 	createFile := "created.txt"
 	createSize := int64(55)
 	createAuthz := map[string][]string{"p1": {}}
-	createRec := internalapi.InternalRecord{Did: "did-new", Authorizations: &createAuthz, FileName: &createFile, Size: &createSize}
+	createAuth := authPathMapForURL("s3://bucket/created", createAuthz)
+	createRec := internalapi.InternalRecord{Did: "did-new", Auth: &createAuth, FileName: &createFile, Size: &createSize}
 	if _, err := service.Create(ctx, createRec); err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
@@ -142,11 +143,12 @@ func TestIndexServiceOperationsAndUpsert(t *testing.T) {
 	}
 
 	updateAuthz := map[string][]string{"p2": {}}
-	updateRec := internalapi.InternalRecord{Did: "did-update", Authorizations: &updateAuthz}
+	updateAuth := authPathMapForURL("s3://bucket/updated", updateAuthz)
+	updateRec := internalapi.InternalRecord{Did: "did-update", Auth: &updateAuth}
 	if _, err := service.Update(ctx, "did-update", updateRec); err != nil {
 		t.Fatalf("Update returned error: %v", err)
 	}
-	if lastUpdated.Did != "did-update" || lastUpdated.Authorizations == nil || len((*lastUpdated.Authorizations)["p2"]) != 0 {
+	if lastUpdated.Did != "did-update" || lastUpdated.Auth == nil || len((*lastUpdated.Auth)["p2"][""]) != 1 {
 		t.Fatalf("unexpected update payload: %+v", lastUpdated)
 	}
 
@@ -176,7 +178,8 @@ func TestIndexServiceOperationsAndUpsert(t *testing.T) {
 	}
 
 	bulkAuthz := map[string][]string{"p1": {}}
-	bulkReq := internalapi.BulkCreateRequest{Records: []internalapi.InternalRecord{{Did: "bulk-1", Authorizations: &bulkAuthz}}}
+	bulkAuth := authPathMapForURL("s3://bucket/bulk", bulkAuthz)
+	bulkReq := internalapi.BulkCreateRequest{Records: []internalapi.InternalRecord{{Did: "bulk-1", Auth: &bulkAuth}}}
 	if _, err := service.CreateBulk(ctx, bulkReq); err != nil {
 		t.Fatalf("CreateBulk returned error: %v", err)
 	}
@@ -227,8 +230,8 @@ func TestIndexServiceOperationsAndUpsert(t *testing.T) {
 	if lastUpdated.Hashes == nil || (*lastUpdated.Hashes)["sha256"] != "sha256sum" || (*lastUpdated.Hashes)["md5"] != "md5sum" {
 		t.Fatalf("expected merged hashes, got %+v", lastUpdated.Hashes)
 	}
-	if lastUpdated.Urls == nil || len(*lastUpdated.Urls) != 2 {
-		t.Fatalf("expected appended URL, got %+v", lastUpdated.Urls)
+	if lastUpdated.Auth == nil || len((*lastUpdated.Auth)["p2"][""]) != 1 {
+		t.Fatalf("expected appended auth path, got %+v", lastUpdated.Auth)
 	}
 
 	err = service.Upsert(ctx, "did-no-authz", "s3://bucket/noauthz", "x.txt", 1, "sha", nil)
@@ -241,7 +244,7 @@ func TestIndexServiceOperationsAndUpsert(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Upsert create returned error: %v", err)
 	}
-	if lastCreated.Did != "did-create" || lastCreated.Authorizations == nil || len((*lastCreated.Authorizations)["new"]) != 0 {
+	if lastCreated.Did != "did-create" || lastCreated.Auth == nil || len((*lastCreated.Auth)["new"][""]) != 1 {
 		t.Fatalf("unexpected create-on-upsert payload: %+v", lastCreated)
 	}
 	if lastCreated.FileName == nil || *lastCreated.FileName != "created.txt" || lastCreated.Size == nil || *lastCreated.Size != 99 {

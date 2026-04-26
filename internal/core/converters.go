@@ -2,6 +2,7 @@ package core
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -273,50 +274,38 @@ func InternalRecordToInternalObject(r internalapi.InternalRecord, now time.Time)
 		obj.Checksums = checksums
 	}
 
-	if r.Urls != nil {
-		methods := make([]drs.AccessMethod, 0, len(*r.Urls))
-		for _, u := range *r.Urls {
-			scheme := common.SchemeFromURL(u)
-			method := drs.AccessMethod{
-				Type:     drs.AccessMethodType(scheme),
-				AccessId: common.Ptr(scheme),
-				AccessUrl: &struct {
-					Headers *[]string `json:"headers,omitempty"`
-					Url     string    "json:\"url\""
-				}{Url: u},
-			}
-			if r.Authorizations != nil {
-				method.Authorizations = r.Authorizations
-			}
-			methods = append(methods, method)
-		}
-		obj.AccessMethods = &methods
-	}
-
+	var auth models.AuthPathMap
 	var authzMap map[string][]string
-	if r.Authorizations != nil {
-		authzMap = *r.Authorizations
+	if r.Auth != nil {
+		auth = models.AuthPathMap(*r.Auth)
+		authzMap = models.AuthPathMapToAuthorizations(auth)
+		methods := AccessMethodsFromAuthPathMap(auth)
+		if len(methods) > 0 {
+			obj.AccessMethods = &methods
+		}
 	}
 	return models.InternalObject{
 		DrsObject:      obj,
+		Auth:           auth,
 		Authorizations: authzMap,
 	}, nil
 }
 
 // InternalObjectToInternalRecord converts our internal domain model back to an API record.
 func InternalObjectToInternalRecord(obj models.InternalObject) internalapi.InternalRecord {
-	var authzPtr *map[string][]string
-	if len(obj.Authorizations) > 0 {
-		authzPtr = &obj.Authorizations
+	var authPtr *internalapi.AuthPathMap
+	if len(obj.Auth) > 0 {
+		auth := internalapi.AuthPathMap(obj.Auth)
+		authPtr = &auth
 	}
 	res := internalapi.InternalRecord{
-		Did:            obj.Id,
-		Size:           &obj.Size,
-		CreatedTime:    common.Ptr(obj.CreatedTime.Format(time.RFC3339)),
-		Description:    obj.Description,
-		FileName:       obj.Name,
-		Version:        obj.Version,
-		Authorizations: authzPtr,
+		Did:         obj.Id,
+		Size:        &obj.Size,
+		CreatedTime: common.Ptr(obj.CreatedTime.Format(time.RFC3339)),
+		Description: obj.Description,
+		FileName:    obj.Name,
+		Version:     obj.Version,
+		Auth:        authPtr,
 	}
 	if obj.UpdatedTime != nil {
 		res.UpdatedTime = common.Ptr(obj.UpdatedTime.Format(time.RFC3339))
@@ -328,15 +317,6 @@ func InternalObjectToInternalRecord(obj models.InternalObject) internalapi.Inter
 		}
 		res.Hashes = &h
 	}
-	if obj.AccessMethods != nil {
-		urls := make([]string, 0, len(*obj.AccessMethods))
-		for _, am := range *obj.AccessMethods {
-			if am.AccessUrl != nil {
-				urls = append(urls, am.AccessUrl.Url)
-			}
-		}
-		res.Urls = &urls
-	}
 	return res
 }
 
@@ -344,17 +324,48 @@ func InternalObjectToInternalRecord(obj models.InternalObject) internalapi.Inter
 func InternalObjectToInternalRecordResponse(obj models.InternalObject) internalapi.InternalRecordResponse {
 	rec := InternalObjectToInternalRecord(obj)
 	return internalapi.InternalRecordResponse{
-		Did:            rec.Did,
-		Size:           rec.Size,
-		CreatedTime:    rec.CreatedTime,
-		Description:    rec.Description,
-		FileName:       rec.FileName,
-		Version:        rec.Version,
-		Authorizations: rec.Authorizations,
-		UpdatedTime:    rec.UpdatedTime,
-		Hashes:         rec.Hashes,
-		Urls:           rec.Urls,
-		Organization:   rec.Organization,
-		Project:        rec.Project,
+		Did:          rec.Did,
+		Size:         rec.Size,
+		CreatedTime:  rec.CreatedTime,
+		Description:  rec.Description,
+		FileName:     rec.FileName,
+		Version:      rec.Version,
+		Auth:         rec.Auth,
+		UpdatedTime:  rec.UpdatedTime,
+		Hashes:       rec.Hashes,
+		Organization: rec.Organization,
+		Project:      rec.Project,
 	}
+}
+
+func AccessMethodsFromAuthPathMap(auth models.AuthPathMap) []drs.AccessMethod {
+	methods := make([]drs.AccessMethod, 0)
+	for org, projects := range auth {
+		for project, paths := range projects {
+			methodAuthz := map[string][]string{org: {project}}
+			if project == "" {
+				methodAuthz[org] = []string{}
+			}
+			for _, rawPath := range paths {
+				rawPath = strings.TrimSpace(rawPath)
+				if rawPath == "" {
+					continue
+				}
+				scheme := "https"
+				if parsed, err := url.Parse(rawPath); err == nil && parsed.Scheme != "" {
+					scheme = parsed.Scheme
+				}
+				methods = append(methods, drs.AccessMethod{
+					Type:     drs.AccessMethodType(scheme),
+					AccessId: common.Ptr(scheme),
+					AccessUrl: &struct {
+						Headers *[]string `json:"headers,omitempty"`
+						Url     string    `json:"url"`
+					}{Url: rawPath},
+					Authorizations: &methodAuthz,
+				})
+			}
+		}
+	}
+	return methods
 }

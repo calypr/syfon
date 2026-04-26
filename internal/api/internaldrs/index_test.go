@@ -190,7 +190,7 @@ func TestHandleInternalBulkHashes_HashTypeFiltering(t *testing.T) {
 
 func TestHandleInternalCreate_PersistsExplicitDidAndAuthz(t *testing.T) {
 	mockDB := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}
-	reqBody := `{"records":[{"did":"obj-1","size":42,"authorizations":{"test":["p1"]}}]}`
+	reqBody := `{"records":[{"did":"obj-1","size":42,"auth":{"test":{"p1":["s3://bucket/path/obj-1"]}}}]}`
 	req := httptest.NewRequest(http.MethodPost, "/index", strings.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
@@ -209,7 +209,7 @@ func TestHandleInternalCreate_PersistsExplicitDidAndAuthz(t *testing.T) {
 func TestHandleInternalCreate_RequiredFieldsFailAtDecode(t *testing.T) {
 	t.Run("missing records", func(t *testing.T) {
 		mockDB := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}
-		reqBody := `{"size":42,"authorizations":{"test":["p1"]}}`
+		reqBody := `{"size":42,"auth":{"test":{"p1":["s3://bucket/path/obj"]}}}`
 		req := httptest.NewRequest(http.MethodPost, "/index", strings.NewReader(reqBody))
 		req.Header.Set("Content-Type", "application/json")
 		rr := httptest.NewRecorder()
@@ -225,7 +225,7 @@ func TestHandleInternalCreate_RequiredFieldsFailAtDecode(t *testing.T) {
 
 func TestHandleInternalBulkCreate_PersistsExplicitAuthz(t *testing.T) {
 	mockDB := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}
-	reqBody := `{"records":[{"did":"obj-bulk-1","size":7,"authorizations":{"test":["p1"]}}]}`
+	reqBody := `{"records":[{"did":"obj-bulk-1","size":7,"auth":{"test":{"p1":["s3://bucket/path/obj-bulk-1"]}}}]}`
 	req := httptest.NewRequest(http.MethodPost, "/bulk/create", strings.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()

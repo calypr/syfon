@@ -14,6 +14,8 @@ CREATE TABLE IF NOT EXISTS drs_object_access_method (
   object_id TEXT,
   url TEXT,
   type TEXT,
+  org TEXT NOT NULL DEFAULT '',
+  project TEXT NOT NULL DEFAULT '',
   FOREIGN KEY(object_id) REFERENCES drs_object(id) ON DELETE CASCADE
 );
 
@@ -21,13 +23,6 @@ CREATE TABLE IF NOT EXISTS drs_object_checksum (
   object_id TEXT,
   type TEXT,
   checksum TEXT,
-  FOREIGN KEY(object_id) REFERENCES drs_object(id) ON DELETE CASCADE
-);
-
-CREATE TABLE IF NOT EXISTS drs_object_authz (
-  object_id TEXT,
-  org TEXT NOT NULL DEFAULT '',
-  project TEXT NOT NULL DEFAULT '',
   FOREIGN KEY(object_id) REFERENCES drs_object(id) ON DELETE CASCADE
 );
 

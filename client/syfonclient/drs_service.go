@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/url"
 	"strings"
 
 	drsapi "github.com/calypr/syfon/apigen/client/drs"
@@ -296,29 +295,40 @@ func internalRecordToDRSObject(rec *internalapi.InternalRecord) drsapi.DrsObject
 		}
 	}
 
-	var urls []string
-	if rec.Urls != nil {
-		urls = *rec.Urls
-	}
-	ams := make([]drsapi.AccessMethod, 0, len(urls))
-	for _, rawURL := range urls {
-		method := drsapi.AccessMethod{
-			AccessUrl: &struct {
-				Headers *[]string `json:"headers,omitempty"`
-				Url     string    `json:"url"`
-			}{Url: rawURL},
-			Type: "https",
+	if rec.Auth != nil {
+		ams := make([]drsapi.AccessMethod, 0)
+		for org, projects := range *rec.Auth {
+			for project, paths := range projects {
+				methodAuthz := map[string][]string{org: {project}}
+				if project == "" {
+					methodAuthz[org] = []string{}
+				}
+				for _, rawPath := range paths {
+					scheme := "https"
+					if parts := strings.SplitN(rawPath, ":", 2); len(parts) == 2 && strings.TrimSpace(parts[0]) != "" {
+						scheme = strings.TrimSpace(parts[0])
+					}
+					ams = append(ams, drsapi.AccessMethod{
+						AccessId: commonStringPtr(scheme),
+						Type:     drsapi.AccessMethodType(scheme),
+						AccessUrl: &struct {
+							Headers *[]string `json:"headers,omitempty"`
+							Url     string    `json:"url"`
+						}{Url: rawPath},
+						Authorizations: &methodAuthz,
+					})
+				}
+			}
 		}
-		if parsed, err := url.Parse(rawURL); err == nil && parsed.Scheme != "" {
-			method.Type = drsapi.AccessMethodType(parsed.Scheme)
+		if len(ams) > 0 {
+			obj.AccessMethods = &ams
 		}
-		if rec.Authorizations != nil {
-			method.Authorizations = rec.Authorizations
-		}
-		ams = append(ams, method)
+		return obj
 	}
-	if len(ams) > 0 {
-		obj.AccessMethods = &ams
-	}
+
 	return obj
+}
+
+func commonStringPtr(value string) *string {
+	return &value
 }

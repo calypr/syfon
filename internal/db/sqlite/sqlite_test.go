@@ -379,6 +379,9 @@ func TestSqliteDB_GetObjectsByChecksumsAndListByPrefix(t *testing.T) {
 				CreatedTime: now,
 				UpdatedTime: &now,
 				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: "sha-x"}},
+				AccessMethods: &[]drs.AccessMethod{
+					testAccessMethod("s3://bucket/programs/a/projects/b/sha-x"),
+				},
 			},
 			Authorizations: map[string][]string{"a": {"b"}},
 		},
@@ -388,6 +391,9 @@ func TestSqliteDB_GetObjectsByChecksumsAndListByPrefix(t *testing.T) {
 				CreatedTime: now,
 				UpdatedTime: &now,
 				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: "sha-y"}},
+				AccessMethods: &[]drs.AccessMethod{
+					testAccessMethod("s3://bucket/programs/a/projects/c/sha-y"),
+				},
 			},
 			Authorizations: map[string][]string{"a": {"c"}},
 		},
@@ -428,6 +434,9 @@ func TestSqliteDB_ListObjectIDsByScopeRootIncludesUnscoped(t *testing.T) {
 				CreatedTime: now,
 				UpdatedTime: &now,
 				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: "scoped"}},
+				AccessMethods: &[]drs.AccessMethod{
+					testAccessMethod("s3://bucket/programs/a/projects/b/scoped"),
+				},
 			},
 			Authorizations: map[string][]string{"a": {"b"}},
 		},
@@ -453,6 +462,16 @@ func TestSqliteDB_ListObjectIDsByScopeRootIncludesUnscoped(t *testing.T) {
 	}
 	if !seen["scoped"] || !seen["unscoped"] {
 		t.Fatalf("expected scoped and unscoped ids, got %+v", ids)
+	}
+}
+
+func testAccessMethod(url string) drs.AccessMethod {
+	return drs.AccessMethod{
+		Type: drs.AccessMethodTypeS3,
+		AccessUrl: &struct {
+			Headers *[]string `json:"headers,omitempty"`
+			Url     string    `json:"url"`
+		}{Url: url},
 	}
 }
 
