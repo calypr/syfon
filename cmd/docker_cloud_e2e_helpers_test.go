@@ -268,8 +268,6 @@ func exerciseAllClientCommands(t *testing.T, serverURL string, bucketCfg bucketC
 		"--server", serverURL,
 		"bucket", "add", bucketName,
 		"--provider", providerName,
-		"--organization", org,
-		"--project-id", project,
 	}
 	if v := strings.TrimSpace(bucketCfg.Region); v != "" {
 		bucketAddArgs = append(bucketAddArgs, "--region", v)
@@ -289,6 +287,20 @@ func exerciseAllClientCommands(t *testing.T, serverURL string, bucketCfg bucketC
 		t.Fatalf("bucket add failed: %v output=%s", err, bucketAddOut)
 	}
 	if !strings.Contains(bucketAddOut, "bucket configured: "+bucketName) {
+		if !strings.Contains(bucketAddOut, "bucket credential configured: "+bucketName) {
+			t.Fatalf("unexpected bucket add output: %s", bucketAddOut)
+		}
+	}
+
+	scopeOut, err := executeRootCommand(t,
+		"--server", serverURL,
+		"bucket", "add-project", org, project,
+		"--path", providerScheme(providerName)+"://"+bucketName+"/"+org+"/"+project,
+	)
+	if err != nil {
+		t.Fatalf("bucket add-project failed: %v output=%s", err, scopeOut)
+	}
+	if !strings.Contains(scopeOut, "bucket project scope configured: bucket="+bucketName) {
 		t.Fatalf("unexpected bucket add output: %s", bucketAddOut)
 	}
 
@@ -322,6 +334,17 @@ func exerciseAllClientCommands(t *testing.T, serverURL string, bucketCfg bucketC
 	}
 	if !strings.Contains(headlineOut, "Syfon is reachable") {
 		t.Fatalf("unexpected post-cleanup ping output: %s", headlineOut)
+	}
+}
+
+func providerScheme(provider string) string {
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "gcs", "gs":
+		return "gs"
+	case "azure", "azblob":
+		return "azblob"
+	default:
+		return "s3"
 	}
 }
 

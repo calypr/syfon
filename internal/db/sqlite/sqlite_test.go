@@ -761,6 +761,21 @@ func TestSqliteDB_BucketScopeLifecycle(t *testing.T) {
 		t.Fatalf("expected 1 scope, got %d", len(all))
 	}
 
+	if err := db.CreateBucketScope(ctx, &models.BucketScope{
+		Organization: "calypr",
+		Bucket:       "bucket-root",
+		PathPrefix:   "",
+	}); err != nil {
+		t.Fatalf("program-level CreateBucketScope failed: %v", err)
+	}
+	root, err := db.GetBucketScope(ctx, "calypr", "")
+	if err != nil {
+		t.Fatalf("program-level GetBucketScope failed: %v", err)
+	}
+	if root.Bucket != "bucket-root" || root.PathPrefix != "" {
+		t.Fatalf("unexpected program-level scope: %+v", root)
+	}
+
 	_, err = db.GetBucketScope(ctx, "calypr", "missing")
 	if !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound for missing scope, got: %v", err)

@@ -145,4 +145,46 @@ func TestSyfonBucketListAndRemoveCommands(t *testing.T) {
 	}
 }
 
+func TestSyfonBucketAddCredentialAndScopesCommands(t *testing.T) {
+	server := newSyfonTestServer(t)
+	defer server.Close()
+
+	out, err := executeRootCommand(t,
+		"--server", server.URL,
+		"bucket", "add", "test-bucket-cli",
+		"--provider", "gcs",
+		"--region", "us-east-1",
+	)
+	if err != nil {
+		t.Fatalf("bucket add failed: %v output=%s", err, out)
+	}
+	if !strings.Contains(out, "bucket credential configured: test-bucket-cli") {
+		t.Fatalf("unexpected bucket add output: %s", out)
+	}
+
+	out, err = executeRootCommand(t,
+		"--server", server.URL,
+		"bucket", "add-organization", "syfon",
+		"--path", "gs://test-bucket-cli/program-root",
+	)
+	if err != nil {
+		t.Fatalf("bucket add-organization failed: %v output=%s", err, out)
+	}
+	if !strings.Contains(out, "bucket organization scope configured: bucket=test-bucket-cli org=syfon") {
+		t.Fatalf("unexpected bucket add-organization output: %s", out)
+	}
+
+	out, err = executeRootCommand(t,
+		"--server", server.URL,
+		"bucket", "add-project", "syfon", "e2e",
+		"--path", "gs://test-bucket-cli/program-root/project-subpath",
+	)
+	if err != nil {
+		t.Fatalf("bucket add-project failed: %v output=%s", err, out)
+	}
+	if !strings.Contains(out, "bucket project scope configured: bucket=test-bucket-cli org=syfon project=e2e") {
+		t.Fatalf("unexpected bucket add-project output: %s", out)
+	}
+}
+
 func stringPtr(v string) *string { return &v }

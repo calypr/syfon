@@ -124,6 +124,13 @@ Environment variables override config file values.
 
 By default, Syfon uses `local` key management and auto-creates a server-side local KEK file. If `DRS_DB_SQLITE_FILE` is set, the local KEK defaults to the same directory (`.syfon-credential-kek`).
 
+The local key file path can also be set in the Syfon config:
+
+```yaml
+credential_encryption:
+  local_key_file: ".syfon-credential-kek"
+```
+
 If `DRS_CREDENTIAL_KMS_KEY_ID` is set (or `DRS_CREDENTIAL_KEY_MANAGER=aws-kms`), Syfon uses AWS KMS to wrap/unwrap per-record DEKs.
 
 ### SQLite/Postgres

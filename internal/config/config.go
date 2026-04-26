@@ -75,13 +75,14 @@ const (
 )
 
 type Config struct {
-	Port          int            `json:"port" yaml:"port"`
-	Database      DatabaseConfig `json:"database" yaml:"database"`
-	S3Credentials []S3Config     `json:"s3_credentials" yaml:"s3_credentials"`
-	Auth          AuthConfig     `json:"auth" yaml:"auth"`
-	LFS           LFSConfig      `json:"lfs" yaml:"lfs"`
-	Signing       SigningConfig  `json:"signing" yaml:"signing"`
-	Routes        RoutesConfig   `json:"routes" yaml:"routes"`
+	Port                 int                        `json:"port" yaml:"port"`
+	Database             DatabaseConfig             `json:"database" yaml:"database"`
+	S3Credentials        []S3Config                 `json:"s3_credentials" yaml:"s3_credentials"`
+	CredentialEncryption CredentialEncryptionConfig `json:"credential_encryption" yaml:"credential_encryption"`
+	Auth                 AuthConfig                 `json:"auth" yaml:"auth"`
+	LFS                  LFSConfig                  `json:"lfs" yaml:"lfs"`
+	Signing              SigningConfig              `json:"signing" yaml:"signing"`
+	Routes               RoutesConfig               `json:"routes" yaml:"routes"`
 }
 
 type RoutesConfig struct {
@@ -110,6 +111,10 @@ type PostgresConfig struct {
 	SSLMode  string `json:"sslmode" yaml:"sslmode"`
 }
 
+type CredentialEncryptionConfig struct {
+	LocalKeyFile string `json:"local_key_file" yaml:"local_key_file"`
+}
+
 // SECURITY FIX MED-1: Redact password when marshaling to JSON
 func (p PostgresConfig) MarshalJSON() ([]byte, error) {
 	type Alias PostgresConfig
@@ -118,7 +123,7 @@ func (p PostgresConfig) MarshalJSON() ([]byte, error) {
 		*Alias
 	}{
 		Password: "***REDACTED***",
-		Alias: (*Alias)(&p),
+		Alias:    (*Alias)(&p),
 	})
 }
 
@@ -141,7 +146,7 @@ func (s S3Config) MarshalJSON() ([]byte, error) {
 	}{
 		SecretKey: "***REDACTED***",
 		AccessKey: "***REDACTED***",
-		Alias: (*Alias)(&s),
+		Alias:     (*Alias)(&s),
 	})
 }
 
@@ -162,11 +167,11 @@ type MockAuthConfig struct {
 }
 
 type AuthCacheConfig struct {
-	Enabled      bool   `json:"enabled" yaml:"enabled"`
-	TTLSeconds   int    `json:"ttl_seconds" yaml:"ttl_seconds"`
-	NegativeTTL  int    `json:"negative_ttl_seconds" yaml:"negative_ttl_seconds"`
-	MaxEntries   int    `json:"max_entries" yaml:"max_entries"`
-	CleanupEvery int    `json:"cleanup_seconds" yaml:"cleanup_seconds"`
+	Enabled      bool `json:"enabled" yaml:"enabled"`
+	TTLSeconds   int  `json:"ttl_seconds" yaml:"ttl_seconds"`
+	NegativeTTL  int  `json:"negative_ttl_seconds" yaml:"negative_ttl_seconds"`
+	MaxEntries   int  `json:"max_entries" yaml:"max_entries"`
+	CleanupEvery int  `json:"cleanup_seconds" yaml:"cleanup_seconds"`
 }
 
 type PluginPaths struct {
@@ -187,7 +192,7 @@ func (b BasicAuthConfig) MarshalJSON() ([]byte, error) {
 		*Alias
 	}{
 		Password: "***REDACTED***",
-		Alias: (*Alias)(&b),
+		Alias:    (*Alias)(&b),
 	})
 }
 
@@ -264,6 +269,9 @@ func LoadConfig(configFile string) (*Config, error) {
 	}
 	if pass := os.Getenv("DRS_BASIC_AUTH_PASSWORD"); pass != "" {
 		cfg.Auth.Basic.Password = pass
+	}
+	if v := os.Getenv("DRS_CREDENTIAL_LOCAL_KEY_FILE"); v != "" {
+		cfg.CredentialEncryption.LocalKeyFile = v
 	}
 	if v := os.Getenv("DRS_LFS_MAX_BATCH_OBJECTS"); v != "" {
 		i, err := strconv.Atoi(v)

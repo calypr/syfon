@@ -63,20 +63,7 @@ func handleGetAccessURLFiber(om *core.ObjectManager) fiber.Handler {
 			return apiutil.HandleError(c, err)
 		}
 
-		if obj.AccessMethods == nil {
-			return c.Status(fiber.StatusNotFound).JSON(drs.Error{Msg: common.Ptr("No access methods found")})
-		}
-
-		var targetURL string
-		for _, am := range *obj.AccessMethods {
-			if strings.EqualFold(common.StringVal(am.AccessId), accessID) {
-				if am.AccessUrl != nil {
-					targetURL = am.AccessUrl.Url
-				}
-				break
-			}
-		}
-
+		targetURL := accessURLForID(obj, accessID)
 		if targetURL == "" {
 			return c.Status(fiber.StatusNotFound).JSON(drs.Error{Msg: common.Ptr("Access ID not found or has no URL")})
 		}
@@ -88,6 +75,18 @@ func handleGetAccessURLFiber(om *core.ObjectManager) fiber.Handler {
 
 		return c.JSON(drs.AccessURL{Url: signed})
 	}
+}
+
+func accessURLForID(obj *models.InternalObject, accessID string) string {
+	if obj == nil || obj.AccessMethods == nil {
+		return ""
+	}
+	for _, am := range *obj.AccessMethods {
+		if strings.EqualFold(common.StringVal(am.AccessId), accessID) && am.AccessUrl != nil {
+			return am.AccessUrl.Url
+		}
+	}
+	return ""
 }
 
 func handleRegisterObjectsFiber(om *core.ObjectManager) fiber.Handler {
@@ -202,7 +201,69 @@ func handleGetBulkObjectsFiber(om *core.ObjectManager) fiber.Handler {
 
 func handleGetBulkAccessURLFiber(om *core.ObjectManager) fiber.Handler {
 	return func(c fiber.Ctx) error {
-		return c.Status(fiber.StatusNotImplemented).JSON(drs.Error{Msg: common.Ptr("Bulk access lookup not implemented")})
+		var body drs.BulkObjectAccessId
+		if err := c.Bind().JSON(&body); err != nil || body.BulkObjectAccessIds == nil {
+			return c.Status(fiber.StatusBadRequest).JSON(drs.Error{Msg: common.Ptr("Invalid request body")})
+		}
+
+		requested := 0
+		resolved := make([]drs.BulkAccessURL, 0)
+		unresolvedIDs := make([]string, 0)
+
+		for _, item := range *body.BulkObjectAccessIds {
+			objectID := strings.TrimSpace(common.StringVal(item.BulkObjectId))
+			if objectID == "" || item.BulkAccessIds == nil || len(*item.BulkAccessIds) == 0 {
+				requested++
+				if objectID != "" {
+					unresolvedIDs = append(unresolvedIDs, objectID)
+				}
+				continue
+			}
+
+			obj, err := om.GetObject(c.Context(), objectID, "read")
+			if err != nil {
+				requested += len(*item.BulkAccessIds)
+				unresolvedIDs = append(unresolvedIDs, objectID)
+				continue
+			}
+
+			for _, rawAccessID := range *item.BulkAccessIds {
+				requested++
+				accessID := strings.TrimSpace(rawAccessID)
+				targetURL := accessURLForID(obj, accessID)
+				if accessID == "" || targetURL == "" {
+					unresolvedIDs = append(unresolvedIDs, objectID)
+					continue
+				}
+
+				signed, err := om.SignURL(c.Context(), targetURL, urlmanager.SignOptions{Method: http.MethodGet})
+				if err != nil {
+					unresolvedIDs = append(unresolvedIDs, objectID)
+					continue
+				}
+				resolved = append(resolved, drs.BulkAccessURL{
+					DrsObjectId: common.Ptr(objectID),
+					DrsAccessId: common.Ptr(accessID),
+					Url:         signed,
+				})
+			}
+		}
+
+		resp := fiber.Map{
+			"resolved_drs_object_access_urls": resolved,
+			"summary": drs.Summary{
+				Requested:  common.Ptr(requested),
+				Resolved:   common.Ptr(len(resolved)),
+				Unresolved: common.Ptr(requested - len(resolved)),
+			},
+		}
+		if len(unresolvedIDs) > 0 {
+			resp["unresolved_drs_objects"] = []fiber.Map{{
+				"error_code": fiber.StatusNotFound,
+				"object_ids": unresolvedIDs,
+			}}
+		}
+		return c.JSON(resp)
 	}
 }
 
@@ -328,13 +389,93 @@ func handleDeleteObjectFiber(om *core.ObjectManager) fiber.Handler {
 
 func handleUpdateAccessMethodsFiber(om *core.ObjectManager) fiber.Handler {
 	return func(c fiber.Ctx) error {
-		return c.Status(fiber.StatusNotImplemented).JSON(drs.Error{Msg: common.Ptr("Access method update not implemented")})
+		objectID := strings.TrimSpace(c.Params("object_id"))
+		if objectID != "" {
+			var body drs.AccessMethodUpdateRequest
+			if err := c.Bind().JSON(&body); err != nil || len(body.AccessMethods) == 0 {
+				return c.Status(fiber.StatusBadRequest).JSON(drs.Error{Msg: common.Ptr("Invalid request body")})
+			}
+			if _, err := om.GetObject(c.Context(), objectID, "write"); err != nil {
+				return apiutil.HandleError(c, err)
+			}
+			if err := om.UpdateObjectAccessMethods(c.Context(), objectID, body.AccessMethods); err != nil {
+				return apiutil.HandleError(c, err)
+			}
+			obj, err := om.GetObject(c.Context(), objectID, "read")
+			if err != nil {
+				return apiutil.HandleError(c, err)
+			}
+			return c.JSON(drsObjectPayload(*obj))
+		}
+
+		var body drs.BulkAccessMethodUpdateRequest
+		if err := c.Bind().JSON(&body); err != nil || len(body.Updates) == 0 {
+			return c.Status(fiber.StatusBadRequest).JSON(drs.Error{Msg: common.Ptr("Invalid request body")})
+		}
+
+		updates := make(map[string][]drs.AccessMethod, len(body.Updates))
+		orderedIDs := make([]string, 0, len(body.Updates))
+		for _, update := range body.Updates {
+			id := strings.TrimSpace(update.ObjectId)
+			if id == "" || len(update.AccessMethods) == 0 {
+				return c.Status(fiber.StatusBadRequest).JSON(drs.Error{Msg: common.Ptr("Invalid request body")})
+			}
+			if _, err := om.GetObject(c.Context(), id, "write"); err != nil {
+				return apiutil.HandleError(c, err)
+			}
+			if _, exists := updates[id]; !exists {
+				orderedIDs = append(orderedIDs, id)
+			}
+			updates[id] = update.AccessMethods
+		}
+
+		if err := om.BulkUpdateAccessMethods(c.Context(), updates); err != nil {
+			return apiutil.HandleError(c, err)
+		}
+
+		objects := make([]any, 0, len(orderedIDs))
+		for _, id := range orderedIDs {
+			obj, err := om.GetObject(c.Context(), id, "read")
+			if err != nil {
+				return apiutil.HandleError(c, err)
+			}
+			objects = append(objects, drsObjectPayload(*obj))
+		}
+		return c.JSON(fiber.Map{"objects": objects})
 	}
 }
 
 func handleBulkDeleteObjectsFiber(om *core.ObjectManager) fiber.Handler {
 	return func(c fiber.Ctx) error {
-		return c.Status(fiber.StatusNotImplemented).JSON(drs.Error{Msg: common.Ptr("Bulk delete not implemented")})
+		var body drs.BulkDeleteRequest
+		if err := c.Bind().JSON(&body); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(drs.Error{Msg: common.Ptr("Invalid request body")})
+		}
+		if len(body.BulkObjectIds) == 0 {
+			return c.Status(fiber.StatusBadRequest).JSON(drs.Error{Msg: common.Ptr("bulk_object_ids cannot be empty")})
+		}
+
+		ids := make([]string, 0, len(body.BulkObjectIds))
+		seen := make(map[string]struct{}, len(body.BulkObjectIds))
+		for _, rawID := range body.BulkObjectIds {
+			id := strings.TrimSpace(rawID)
+			if id == "" {
+				return c.Status(fiber.StatusBadRequest).JSON(drs.Error{Msg: common.Ptr("bulk_object_ids cannot contain empty values")})
+			}
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			if _, err := om.GetObject(c.Context(), id, "delete"); err != nil {
+				return apiutil.HandleError(c, err)
+			}
+			ids = append(ids, id)
+		}
+
+		if err := om.BulkDeleteObjects(c.Context(), ids); err != nil {
+			return apiutil.HandleError(c, err)
+		}
+		return c.SendStatus(fiber.StatusNoContent)
 	}
 }
 

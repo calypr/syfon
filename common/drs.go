@@ -36,9 +36,6 @@ func NewObjectBuilder(bucket, project string) ObjectBuilder {
 // Build constructs a DRS object with the given file metadata.
 func (b ObjectBuilder) Build(fileName string, checksum string, size int64, drsId string) (*drsapi.DrsObject, error) {
 	prefix := b.StoragePrefix
-	if prefix == "" {
-		prefix = StoragePrefix(b.Organization, b.Project)
-	}
 	return BuildDrsObjWithPrefix(fileName, checksum, size, drsId, b.Bucket, b.Organization, b.Project, prefix)
 }
 

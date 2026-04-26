@@ -262,6 +262,11 @@ func (m *MockDatabase) UpdateObjectAccessMethods(ctx context.Context, objectID s
 }
 
 func (m *MockDatabase) BulkUpdateAccessMethods(ctx context.Context, updates map[string][]drs.AccessMethod) error {
+	for objectID, accessMethods := range updates {
+		if err := m.UpdateObjectAccessMethods(ctx, objectID, accessMethods); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

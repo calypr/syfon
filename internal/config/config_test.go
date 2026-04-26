@@ -48,6 +48,7 @@ func TestLoadConfig_EnvOverrides(t *testing.T) {
 	t.Setenv("DRS_PORT", "9090")
 	t.Setenv("DRS_DB_SQLITE_FILE", "test_env.db")
 	t.Setenv("DRS_AUTH_MODE", "local")
+	t.Setenv("DRS_CREDENTIAL_LOCAL_KEY_FILE", "/tmp/test-env-kek")
 
 	cfg, err := LoadConfig("")
 	if err != nil {
@@ -60,6 +61,40 @@ func TestLoadConfig_EnvOverrides(t *testing.T) {
 
 	if cfg.Database.Sqlite.File != "test_env.db" {
 		t.Errorf("expected test_env.db, got %s", cfg.Database.Sqlite.File)
+	}
+	if cfg.CredentialEncryption.LocalKeyFile != "/tmp/test-env-kek" {
+		t.Errorf("expected credential local key file override, got %s", cfg.CredentialEncryption.LocalKeyFile)
+	}
+}
+
+func TestLoadConfig_CredentialEncryptionConfig(t *testing.T) {
+	content := `
+auth:
+  mode: local
+database:
+  sqlite:
+    file: "test.db"
+credential_encryption:
+  local_key_file: ".syfon-credential-kek"
+`
+	tmpfile, err := os.CreateTemp("", "config-credential-encryption-*.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpfile.Name())
+	if _, err := tmpfile.Write([]byte(content)); err != nil {
+		t.Fatal(err)
+	}
+	if err := tmpfile.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadConfig(tmpfile.Name())
+	if err != nil {
+		t.Fatalf("LoadConfig failed: %v", err)
+	}
+	if cfg.CredentialEncryption.LocalKeyFile != ".syfon-credential-kek" {
+		t.Fatalf("expected configured local key file, got %q", cfg.CredentialEncryption.LocalKeyFile)
 	}
 }
 
@@ -173,7 +208,6 @@ func TestLoadConfig_LFSEnvOverrides(t *testing.T) {
 		t.Fatalf("expected 999, got %d", cfg.LFS.BandwidthLimitBytesPerMinute)
 	}
 }
-
 
 func TestLoadConfig_InvalidBucketNames(t *testing.T) {
 	cases := []struct {

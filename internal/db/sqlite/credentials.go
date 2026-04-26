@@ -127,8 +127,8 @@ func (db *SqliteDB) CreateBucketScope(ctx context.Context, scope *models.BucketS
 	project := strings.TrimSpace(scope.ProjectID)
 	bucket := strings.TrimSpace(scope.Bucket)
 	prefix := strings.Trim(strings.TrimSpace(scope.PathPrefix), "/")
-	if org == "" || project == "" || bucket == "" {
-		return fmt.Errorf("organization, project_id and bucket are required")
+	if org == "" || bucket == "" {
+		return fmt.Errorf("organization and bucket are required")
 	}
 
 	existing, err := db.GetBucketScope(ctx, org, project)

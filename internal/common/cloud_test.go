@@ -24,7 +24,11 @@ func TestNormalizeProvider(t *testing.T) {
 }
 
 func TestSchemeMappings(t *testing.T) {
-	if ProviderFromScheme("s3") != S3Provider || ProviderFromScheme("gs") != GCSProvider || ProviderFromScheme("azblob") != AzureProvider {
+	if ProviderFromScheme("s3") != S3Provider ||
+		ProviderFromScheme("gs") != GCSProvider ||
+		ProviderFromScheme("gcs") != GCSProvider ||
+		ProviderFromScheme("azblob") != AzureProvider ||
+		ProviderFromScheme("az") != AzureProvider {
 		t.Fatalf("unexpected ProviderFromScheme mapping")
 	}
 	if ProviderFromScheme("http") != "" {

@@ -190,6 +190,14 @@ func (m *ObjectManager) BulkDeleteObjects(ctx context.Context, ids []string) err
 	return m.db.BulkDeleteObjects(ctx, ids)
 }
 
+func (m *ObjectManager) UpdateObjectAccessMethods(ctx context.Context, objectID string, accessMethods []drs.AccessMethod) error {
+	return m.db.UpdateObjectAccessMethods(ctx, objectID, accessMethods)
+}
+
+func (m *ObjectManager) BulkUpdateAccessMethods(ctx context.Context, updates map[string][]drs.AccessMethod) error {
+	return m.db.BulkUpdateAccessMethods(ctx, updates)
+}
+
 func (m *ObjectManager) RegisterObjects(ctx context.Context, objs []models.InternalObject) error {
 	return m.db.RegisterObjects(ctx, objs)
 }

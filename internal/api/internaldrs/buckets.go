@@ -5,8 +5,8 @@ import (
 	"io"
 	"strings"
 
-	sycommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/apigen/server/bucketapi"
+	sycommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/api/apiutil"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/core"
@@ -81,8 +81,11 @@ func handleInternalPutBucketFiber(c fiber.Ctx, om *core.ObjectManager) error {
 	req.Bucket = strings.TrimSpace(req.Bucket)
 	req.Organization = strings.TrimSpace(req.Organization)
 	req.ProjectId = strings.TrimSpace(req.ProjectId)
-	if req.Bucket == "" || req.Organization == "" || req.ProjectId == "" {
-		return c.Status(fiber.StatusBadRequest).SendString("bucket, organization, and project_id are required")
+	if req.Bucket == "" {
+		return c.Status(fiber.StatusBadRequest).SendString("bucket is required")
+	}
+	if req.Organization == "" && req.ProjectId != "" {
+		return c.Status(fiber.StatusBadRequest).SendString("organization is required when project_id is set")
 	}
 
 	if err := common.ValidateBucketName(bucketProvider, req.Bucket); err != nil {
@@ -91,6 +94,9 @@ func handleInternalPutBucketFiber(c fiber.Ctx, om *core.ObjectManager) error {
 
 	if !bucketControlAllowed(c.Context(), "create", "update") {
 		if err := requireGen3AuthFiber(c); err != nil {
+			return apiutil.HandleError(c, common.ErrUnauthorized)
+		}
+		if req.Organization == "" {
 			return apiutil.HandleError(c, common.ErrUnauthorized)
 		}
 		res, err := sycommon.ResourcePath(req.Organization, req.ProjectId)
@@ -106,9 +112,6 @@ func handleInternalPutBucketFiber(c fiber.Ctx, om *core.ObjectManager) error {
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).SendString(err.Error())
 	}
-	if prefix == "" {
-		prefix = strings.Trim(req.Organization+"/"+req.ProjectId, "/")
-	}
 
 	existingCred, credErr := om.GetS3Credential(c.Context(), req.Bucket)
 	hasExistingCred := credErr == nil && existingCred != nil
@@ -117,20 +120,23 @@ func handleInternalPutBucketFiber(c fiber.Ctx, om *core.ObjectManager) error {
 		strings.TrimSpace(common.StringVal(req.SecretKey)) == "" &&
 		strings.TrimSpace(common.StringVal(req.Endpoint)) == "" &&
 		strings.TrimSpace(common.StringVal(req.Region)) == "" &&
-		strings.TrimSpace(common.StringVal(req.Provider)) == ""
+		strings.TrimSpace(common.StringVal(req.Provider)) == "" &&
+		req.Organization != ""
 
 	if !hasExistingCred && bucketProvider == common.S3Provider &&
 		(strings.TrimSpace(common.StringVal(req.AccessKey)) == "" || strings.TrimSpace(common.StringVal(req.SecretKey)) == "") {
 		return c.Status(fiber.StatusBadRequest).SendString("access_key and secret_key are required for new s3 credentials")
 	}
 
-	if err := om.CreateBucketScope(c.Context(), &models.BucketScope{
-		Organization: req.Organization,
-		ProjectID:    req.ProjectId,
-		Bucket:       req.Bucket,
-		PathPrefix:   prefix,
-	}); err != nil {
-		return apiutil.HandleError(c, err)
+	if req.Organization != "" {
+		if err := om.CreateBucketScope(c.Context(), &models.BucketScope{
+			Organization: req.Organization,
+			ProjectID:    req.ProjectId,
+			Bucket:       req.Bucket,
+			PathPrefix:   prefix,
+		}); err != nil {
+			return apiutil.HandleError(c, err)
+		}
 	}
 
 	if scopeOnly {
@@ -214,8 +220,8 @@ func handleInternalCreateBucketScopeFiber(c fiber.Ctx, om *core.ObjectManager) e
 	}
 	req.Organization = strings.TrimSpace(req.Organization)
 	req.ProjectId = strings.TrimSpace(req.ProjectId)
-	if req.Organization == "" || req.ProjectId == "" {
-		return c.Status(fiber.StatusBadRequest).SendString("organization and project_id are required")
+	if req.Organization == "" {
+		return c.Status(fiber.StatusBadRequest).SendString("organization is required")
 	}
 
 	if !bucketControlAllowed(c.Context(), "create", "update") {
@@ -232,9 +238,6 @@ func handleInternalCreateBucketScopeFiber(c fiber.Ctx, om *core.ObjectManager) e
 	}
 
 	path := readOptionalPath(req.Path)
-	if strings.TrimSpace(path) == "" {
-		path = common.S3Prefix + bucket + "/" + strings.Trim(req.Organization+"/"+req.ProjectId, "/")
-	}
 	prefix, err := common.NormalizeStoragePath(path, bucket)
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).SendString(err.Error())

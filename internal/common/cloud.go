@@ -50,9 +50,9 @@ func ProviderFromScheme(scheme string) string {
 	switch strings.ToLower(strings.TrimSuffix(strings.TrimSpace(scheme), "://")) {
 	case "s3":
 		return S3Provider
-	case "gs":
+	case "gs", "gcs":
 		return GCSProvider
-	case "azblob":
+	case "az", "azblob":
 		return AzureProvider
 	default:
 		return ""

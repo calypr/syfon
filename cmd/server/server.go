@@ -59,6 +59,7 @@ var Cmd = &cobra.Command{
 			dbPath := cfg.Database.Sqlite.File
 			if dbPath == "" {
 				dbPath = "drs.db"
+				cfg.Database.Sqlite.File = dbPath
 			}
 			logger.Info("initializing sqlite database", "file", dbPath)
 			database, errDb = sqlite.NewSqliteDB(dbPath)
@@ -80,6 +81,8 @@ var Cmd = &cobra.Command{
 		if errDb != nil {
 			fatal("failed to initialize database", "err", errDb)
 		}
+
+		applyCredentialEncryptionConfig(cfg)
 
 		// Load S3 Credentials from Config if present
 		if len(cfg.S3Credentials) > 0 {
@@ -188,6 +191,22 @@ var Cmd = &cobra.Command{
 		}
 		logger.Info("server shutdown complete")
 	},
+}
+
+func applyCredentialEncryptionConfig(cfg *config.Config) {
+	if cfg == nil {
+		return
+	}
+	if strings.TrimSpace(os.Getenv(crypto.CredentialLocalKeyFileEnv)) == "" {
+		if localKeyFile := strings.TrimSpace(cfg.CredentialEncryption.LocalKeyFile); localKeyFile != "" {
+			os.Setenv(crypto.CredentialLocalKeyFileEnv, localKeyFile)
+		}
+	}
+	if strings.TrimSpace(os.Getenv(crypto.DatabaseSQLiteFileEnv)) == "" && cfg.Database.Sqlite != nil {
+		if sqliteFile := strings.TrimSpace(cfg.Database.Sqlite.File); sqliteFile != "" {
+			os.Setenv(crypto.DatabaseSQLiteFileEnv, sqliteFile)
+		}
+	}
 }
 
 func init() {

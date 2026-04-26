@@ -25,7 +25,7 @@ func RegisterInternalIndexRoutes(router fiber.Router, om *core.ObjectManager) {
 	router.Delete(common.RouteInternalIndex, handleInternalDeleteByQueryFiber(om))
 
 	router.Post(common.RouteInternalBulkHashes, handleInternalBulkHashesFiber(om))
-	router.Post(common.RouteInternalBulkSHA256, handleInternalBulkHashesFiber(om))
+	router.Post(common.RouteInternalBulkSHA256, handleInternalBulkSHA256ValidityFiber(om))
 	router.Post(common.RouteInternalBulkCreate, handleInternalBulkCreateFiber(om))
 	router.Post(common.RouteInternalBulkDocs, handleInternalBulkDocumentsFiber(om))
 	router.Post(common.RouteInternalBulkDeleteHashes, handleInternalBulkDeleteFiber(om))
@@ -228,6 +228,46 @@ func handleInternalBulkHashesFiber(om *core.ObjectManager) fiber.Handler {
 		return c.JSON(struct {
 			Results map[string][]models.InternalObject
 		}{Results: finalRes})
+	}
+}
+
+func handleInternalBulkSHA256ValidityFiber(om *core.ObjectManager) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		var req internalapi.BulkSHA256ValidityRequest
+		if err := c.Bind().JSON(&req); err != nil {
+			return c.Status(fiber.StatusBadRequest).SendString("Invalid request body")
+		}
+		if req.Sha256 == nil || len(*req.Sha256) == 0 {
+			return c.Status(fiber.StatusBadRequest).SendString("Invalid request body: sha256 values are required")
+		}
+
+		hashes := make([]string, 0, len(*req.Sha256))
+		out := make(map[string]bool, len(*req.Sha256))
+		for _, raw := range *req.Sha256 {
+			hash := strings.TrimSpace(raw)
+			if hash == "" {
+				continue
+			}
+			hashes = append(hashes, hash)
+			out[hash] = false
+		}
+		if len(hashes) == 0 {
+			return c.Status(fiber.StatusBadRequest).SendString("Invalid request body: sha256 values are required")
+		}
+
+		records, err := om.GetObjectsByChecksums(c.Context(), hashes)
+		if err != nil {
+			return apiutil.HandleError(c, err)
+		}
+		for _, hash := range hashes {
+			for _, obj := range records[hash] {
+				if common.ObjectHasChecksumTypeAndValue(obj, "sha256", hash) {
+					out[hash] = true
+					break
+				}
+			}
+		}
+		return c.JSON(out)
 	}
 }
 

@@ -59,6 +59,9 @@ func TestDrsUUIDAndBuilder(t *testing.T) {
 		if built.AccessMethods == nil || len(*built.AccessMethods) != 1 {
 			t.Fatalf("expected builder access methods, got %+v", built.AccessMethods)
 		}
+		if got := (*built.AccessMethods)[0].AccessUrl.Url; got != "s3://bucket/sha-2" {
+			t.Fatalf("unexpected default access url: %q", got)
+		}
 		if got := (*built.AccessMethods)[0].Authorizations; got == nil || !reflect.DeepEqual(*got, map[string][]string{"syfon": []string{"e2e"}}) {
 			t.Fatalf("expected org/project authz on built object, got %+v", got)
 		}

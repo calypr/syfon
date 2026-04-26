@@ -188,6 +188,53 @@ func TestHandleInternalBulkHashes_HashTypeFiltering(t *testing.T) {
 	}
 }
 
+func TestHandleInternalBulkSHA256Validity(t *testing.T) {
+	now := time.Now().UTC()
+	mockDB := &testutils.MockDatabase{
+		Objects: map[string]*drs.DrsObject{
+			"obj-sha": {
+				Id:          "obj-sha",
+				CreatedTime: now,
+				UpdatedTime: &now,
+				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: "present"}},
+			},
+			"obj-md5": {
+				Id:          "obj-md5",
+				CreatedTime: now,
+				UpdatedTime: &now,
+				Checksums:   []drs.Checksum{{Type: "md5", Checksum: "md5-only"}},
+			},
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/index/bulk/sha256/validity", strings.NewReader(`{"sha256":["present","md5-only","missing"]}`))
+	req.Header.Set("Content-Type", "application/json")
+	app := fiber.New()
+	om := core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
+	app.Post("/index/bulk/sha256/validity", handleInternalBulkSHA256ValidityFiber(om))
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 200, got %d body=%s", resp.StatusCode, string(body))
+	}
+	var payload map[string]bool
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !payload["present"] {
+		t.Fatalf("expected present=true, got %+v", payload)
+	}
+	if payload["md5-only"] {
+		t.Fatalf("expected md5-only=false, got %+v", payload)
+	}
+	if payload["missing"] {
+		t.Fatalf("expected missing=false, got %+v", payload)
+	}
+}
+
 func TestHandleInternalCreate_PersistsExplicitDidAndAuthz(t *testing.T) {
 	mockDB := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}
 	reqBody := `{"records":[{"did":"obj-1","size":42,"auth":{"test":{"p1":["s3://bucket/path/obj-1"]}}}]}`
