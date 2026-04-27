@@ -49,6 +49,8 @@ func TestDRSServiceResolveAndList(t *testing.T) {
 		case r.Method == http.MethodGet && r.URL.Path == "/objects/checksum/def":
 			resolved := []drsapi.DrsObject{}
 			writeJSON(t, w, http.StatusOK, drsapi.N200OkDrsObjects{ResolvedDrsObject: &resolved})
+		case r.Method == http.MethodGet && r.URL.Path == "/objects/checksum/fail":
+			http.Error(w, "backend unavailable", http.StatusBadGateway)
 		case r.Method == http.MethodPost && r.URL.Path == "/objects/register":
 			name := "registered.bin"
 			writeJSON(t, w, http.StatusCreated, drsapi.N201ObjectsCreated{Objects: []drsapi.DrsObject{{Id: "obj-created", Name: &name, Checksums: []drsapi.Checksum{{Type: "sha256", Checksum: "abc"}}, CreatedTime: time.Now()}}})
@@ -139,6 +141,9 @@ func TestDRSServiceResolveAndList(t *testing.T) {
 	hashPage, err := service.BatchGetObjectsByHash(ctx, []string{"abc", "def"})
 	if err != nil || len(hashPage.DrsObjects) != 1 || hashPage.DrsObjects[0].Id != "did-hash" {
 		t.Fatalf("BatchGetObjectsByHash returned page=%+v err=%v", hashPage, err)
+	}
+	if _, err := service.BatchGetObjectsByHash(ctx, []string{"abc", "fail"}); err == nil || !strings.Contains(err.Error(), "unexpected response: 502") {
+		t.Fatalf("expected batch checksum lookup to fail on backend error, got %v", err)
 	}
 
 	accessURL, err := service.GetAccessURL(ctx, "obj-1", "acc-1")

@@ -30,6 +30,12 @@ CREATE TABLE IF NOT EXISTS drs_object_alias (
   FOREIGN KEY(object_id) REFERENCES drs_object(id) ON DELETE CASCADE
 );
 
+ALTER TABLE drs_object_access_method
+  ADD COLUMN IF NOT EXISTS org TEXT NOT NULL DEFAULT '';
+
+ALTER TABLE drs_object_access_method
+  ADD COLUMN IF NOT EXISTS project TEXT NOT NULL DEFAULT '';
+
 CREATE INDEX IF NOT EXISTS drs_object_access_method_object_id_idx
   ON drs_object_access_method(object_id);
 

@@ -223,6 +223,16 @@ func (db *SqliteDB) initSchema() error {
 			return err
 		}
 	}
+	for _, stmt := range []string{
+		`ALTER TABLE drs_object_access_method ADD COLUMN org TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE drs_object_access_method ADD COLUMN project TEXT NOT NULL DEFAULT ''`,
+	} {
+		if _, err := db.db.Exec(stmt); err != nil {
+			if !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
+				return err
+			}
+		}
+	}
 	if _, err := db.db.Exec(`ALTER TABLE s3_credential ADD COLUMN provider TEXT NOT NULL DEFAULT 's3'`); err != nil {
 		if !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
 			return err

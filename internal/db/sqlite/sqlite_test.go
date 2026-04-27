@@ -2,14 +2,17 @@ package sqlite
 
 import (
 	"context"
+	"database/sql"
 	"errors"
-	"github.com/calypr/syfon/internal/common"
-	"github.com/calypr/syfon/internal/crypto"
-	"github.com/calypr/syfon/internal/models"
+	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
 	"github.com/calypr/syfon/apigen/server/drs"
+	"github.com/calypr/syfon/internal/common"
+	"github.com/calypr/syfon/internal/crypto"
+	"github.com/calypr/syfon/internal/models"
 )
 
 func TestSqliteDB_CRUD(t *testing.T) {
@@ -75,6 +78,58 @@ func TestSqliteDB_CRUD(t *testing.T) {
 	_, err = db.GetObject(ctx, "abc")
 	if err == nil {
 		t.Fatal("expected error getting deleted object, got nil")
+	}
+}
+
+func TestSqliteDB_MigratesLegacyAccessMethodScopeColumns(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "legacy.db")
+	raw, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		t.Fatalf("open legacy db: %v", err)
+	}
+	if _, err := raw.Exec(`CREATE TABLE drs_object_access_method (
+		object_id TEXT,
+		url TEXT,
+		type TEXT
+	)`); err != nil {
+		t.Fatalf("create legacy access method table: %v", err)
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatalf("close legacy db: %v", err)
+	}
+
+	db, err := NewSqliteDB(dbPath)
+	if err != nil {
+		t.Fatalf("open migrated db: %v", err)
+	}
+	defer db.db.Close()
+
+	rows, err := db.db.Query(`PRAGMA table_info(drs_object_access_method)`)
+	if err != nil {
+		t.Fatalf("inspect migrated columns: %v", err)
+	}
+	defer rows.Close()
+
+	columns := make([]string, 0)
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull int
+		var defaultValue sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
+			t.Fatalf("scan table_info row: %v", err)
+		}
+		columns = append(columns, name)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("read table_info rows: %v", err)
+	}
+	if !slices.Contains(columns, "org") {
+		t.Fatalf("expected migrated org column, got %v", columns)
+	}
+	if !slices.Contains(columns, "project") {
+		t.Fatalf("expected migrated project column, got %v", columns)
 	}
 }
 

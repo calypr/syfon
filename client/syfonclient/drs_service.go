@@ -139,10 +139,10 @@ func (s *DRSService) BatchGetObjectsByHash(ctx context.Context, hashes []string)
 		}
 		resp, err := s.gen.GetObjectsByChecksumWithResponse(ctx, drsapi.ChecksumParam(checksum))
 		if err != nil {
-			continue
+			return DRSPage{}, fmt.Errorf("get objects by checksum %s: %w", checksum, err)
 		}
 		if resp.JSON200 == nil || resp.JSON200.ResolvedDrsObject == nil {
-			continue
+			return DRSPage{}, fmt.Errorf("get objects by checksum %s failed: unexpected response: %d", checksum, resp.StatusCode())
 		}
 		for _, obj := range *resp.JSON200.ResolvedDrsObject {
 			id := strings.TrimSpace(obj.Id)
