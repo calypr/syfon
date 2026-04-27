@@ -86,6 +86,9 @@ func TestDRSHandlers(t *testing.T) {
 		if ev.EventType != "access_issued" || ev.ObjectID != "test-obj" || ev.SHA256 != "sha-1" || ev.Organization != "calypr" || ev.Project != "proj-a" || ev.Provider != "s3" || ev.Bucket != "bucket" {
 			t.Fatalf("unexpected access-issued event: %+v", ev)
 		}
+		if ev.AccessGrantID == "" || ev.AccessGrantID == ev.EventID {
+			t.Fatalf("expected stable grant id distinct from audit event id: %+v", ev)
+		}
 	})
 
 	t.Run("GetAccessURL_NotFound", func(t *testing.T) {

@@ -65,7 +65,30 @@ const (
 	ProviderTransferUnmatched = "unmatched"
 )
 
-// TransferAttributionEvent captures durable byte attribution for billing and audit.
+// AccessGrant captures the canonical billing identity for a signed/direct
+// storage access authorization. Repeated access issuance events for the same
+// object/scope/storage URL should point at one grant.
+type AccessGrant struct {
+	AccessGrantID string
+	FirstIssuedAt time.Time
+	LastIssuedAt  time.Time
+	IssueCount    int64
+	ObjectID      string
+	SHA256        string
+	ObjectSize    int64
+	Organization  string
+	Project       string
+	AccessID      string
+	Provider      string
+	Bucket        string
+	StorageURL    string
+	ActorEmail    string
+	ActorSubject  string
+	AuthMode      string
+}
+
+// TransferAttributionEvent is the append-only access-issued audit log. Billing
+// metrics are based on matched ProviderTransferEvent rows, not these events.
 type TransferAttributionEvent struct {
 	EventID           string
 	AccessGrantID     string

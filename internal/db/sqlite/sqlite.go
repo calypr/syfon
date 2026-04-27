@@ -154,6 +154,24 @@ func (db *SqliteDB) initSchema() error {
 			client_version TEXT NOT NULL DEFAULT '',
 			transfer_session_id TEXT NOT NULL DEFAULT ''
 		)`,
+		`CREATE TABLE IF NOT EXISTS access_grant (
+			access_grant_id TEXT PRIMARY KEY,
+			first_issued_at TIMESTAMP NOT NULL,
+			last_issued_at TIMESTAMP NOT NULL,
+			issue_count INTEGER NOT NULL DEFAULT 0,
+			object_id TEXT NOT NULL DEFAULT '',
+			sha256 TEXT NOT NULL DEFAULT '',
+			object_size INTEGER NOT NULL DEFAULT 0,
+			organization TEXT NOT NULL DEFAULT '',
+			project TEXT NOT NULL DEFAULT '',
+			access_id TEXT NOT NULL DEFAULT '',
+			provider TEXT NOT NULL DEFAULT '',
+			bucket TEXT NOT NULL DEFAULT '',
+			storage_url TEXT NOT NULL DEFAULT '',
+			actor_email TEXT NOT NULL DEFAULT '',
+			actor_subject TEXT NOT NULL DEFAULT '',
+			auth_mode TEXT NOT NULL DEFAULT ''
+		)`,
 		`CREATE TABLE IF NOT EXISTS provider_transfer_event (
 			provider_event_id TEXT PRIMARY KEY,
 			access_grant_id TEXT NOT NULL DEFAULT '',
@@ -208,6 +226,9 @@ func (db *SqliteDB) initSchema() error {
 		`CREATE INDEX IF NOT EXISTS idx_transfer_attr_provider_time ON transfer_attribution_event(provider, bucket, event_time)`,
 		`CREATE INDEX IF NOT EXISTS idx_transfer_attr_sha_time ON transfer_attribution_event(sha256, event_time)`,
 		`CREATE INDEX IF NOT EXISTS idx_transfer_attr_session ON transfer_attribution_event(transfer_session_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_access_grant_storage_time ON access_grant(provider, bucket, storage_url, last_issued_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_access_grant_scope_time ON access_grant(organization, project, last_issued_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_access_grant_sha_time ON access_grant(sha256, last_issued_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_provider_transfer_scope_time ON provider_transfer_event(organization, project, direction, event_time)`,
 		`CREATE INDEX IF NOT EXISTS idx_provider_transfer_actor_time ON provider_transfer_event(actor_email, actor_subject, event_time)`,
 		`CREATE INDEX IF NOT EXISTS idx_provider_transfer_provider_time ON provider_transfer_event(provider, bucket, event_time)`,
@@ -252,6 +273,9 @@ func (db *SqliteDB) initSchema() error {
 		if !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
 			return err
 		}
+	}
+	if err := db.backfillAccessGrants(context.Background()); err != nil {
+		return err
 	}
 	return nil
 }

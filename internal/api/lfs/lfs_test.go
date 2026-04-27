@@ -100,6 +100,9 @@ func TestLFSBatchDownloadFound(t *testing.T) {
 	if ev.EventType != models.TransferEventAccessIssued || ev.ObjectID != oid || ev.SHA256 != oid || ev.Provider != "s3" || ev.Bucket != "bucket" || ev.BytesRequested != 10 {
 		t.Fatalf("unexpected LFS access-issued event: %+v", ev)
 	}
+	if ev.AccessGrantID == "" || ev.AccessGrantID == ev.EventID {
+		t.Fatalf("expected stable grant id distinct from audit event id: %+v", ev)
+	}
 }
 
 func TestLFSBatchUploadReturnsActionsWithoutPlaceholder(t *testing.T) {

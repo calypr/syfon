@@ -92,8 +92,23 @@ func EventFromObject(ctx context.Context, obj *models.InternalObject, eventType 
 		ClientVersion:  details.ClientVersion,
 	}
 	ev.EventID = EventID(ev)
-	ev.AccessGrantID = ev.EventID
+	ev.AccessGrantID = AccessGrantID(ev)
 	return ev
+}
+
+func AccessGrantID(ev models.TransferAttributionEvent) string {
+	parts := []string{
+		ev.ObjectID,
+		ev.SHA256,
+		ev.Organization,
+		ev.Project,
+		ev.AccessID,
+		ev.Provider,
+		ev.Bucket,
+		ev.StorageURL,
+	}
+	sum := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
+	return hex.EncodeToString(sum[:])
 }
 
 func EventID(ev models.TransferAttributionEvent) string {

@@ -643,10 +643,11 @@ func mockMergeAccessGrantIntoProviderEvent(ev *models.ProviderTransferEvent, gra
 	if ev.StorageURL == "" {
 		ev.StorageURL = grant.StorageURL
 	}
-	if ev.ActorEmail == "" {
+	hasActor := ev.ActorEmail != "" || ev.ActorSubject != ""
+	if !hasActor {
 		ev.ActorEmail = grant.ActorEmail
 	}
-	if ev.ActorSubject == "" {
+	if !hasActor {
 		ev.ActorSubject = grant.ActorSubject
 	}
 	if ev.AuthMode == "" {

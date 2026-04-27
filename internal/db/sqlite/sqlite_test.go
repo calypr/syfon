@@ -133,6 +133,70 @@ func TestSqliteDB_MigratesLegacyAccessMethodScopeColumns(t *testing.T) {
 	}
 }
 
+func TestSqliteDB_BackfillsAccessGrantsFromExistingAccessEvents(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "legacy-access-events.db")
+	raw, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		t.Fatalf("open legacy db: %v", err)
+	}
+	if _, err := raw.Exec(`CREATE TABLE transfer_attribution_event (
+		event_id TEXT PRIMARY KEY,
+		event_type TEXT NOT NULL,
+		event_time TIMESTAMP NOT NULL,
+		request_id TEXT NOT NULL DEFAULT '',
+		object_id TEXT NOT NULL DEFAULT '',
+		sha256 TEXT NOT NULL DEFAULT '',
+		object_size INTEGER NOT NULL DEFAULT 0,
+		organization TEXT NOT NULL DEFAULT '',
+		project TEXT NOT NULL DEFAULT '',
+		access_id TEXT NOT NULL DEFAULT '',
+		provider TEXT NOT NULL DEFAULT '',
+		bucket TEXT NOT NULL DEFAULT '',
+		storage_url TEXT NOT NULL DEFAULT '',
+		range_start INTEGER NULL,
+		range_end INTEGER NULL,
+		bytes_requested INTEGER NOT NULL DEFAULT 0,
+		bytes_completed INTEGER NOT NULL DEFAULT 0,
+		actor_email TEXT NOT NULL DEFAULT '',
+		actor_subject TEXT NOT NULL DEFAULT '',
+		auth_mode TEXT NOT NULL DEFAULT '',
+		client_name TEXT NOT NULL DEFAULT '',
+		client_version TEXT NOT NULL DEFAULT '',
+		transfer_session_id TEXT NOT NULL DEFAULT ''
+	)`); err != nil {
+		t.Fatalf("create legacy transfer table: %v", err)
+	}
+	now := time.Now().UTC()
+	for _, eventID := range []string{"legacy-access-1", "legacy-access-2"} {
+		if _, err := raw.Exec(`INSERT INTO transfer_attribution_event (
+			event_id, event_type, event_time, object_id, sha256, object_size,
+			organization, project, access_id, provider, bucket, storage_url, bytes_requested
+		) VALUES (?, 'access_issued', ?, 'did-1', 'sha-1', 42, 'calypr', 'proj-a', 's3', 's3', 'bucket-a', 's3://bucket-a/root/sha-1', 42)`, eventID, now); err != nil {
+			t.Fatalf("insert legacy access event: %v", err)
+		}
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatalf("close legacy db: %v", err)
+	}
+
+	db, err := NewSqliteDB(dbPath)
+	if err != nil {
+		t.Fatalf("open migrated db: %v", err)
+	}
+	defer db.db.Close()
+
+	var grants, issueCount, distinctEventGrants int
+	if err := db.db.QueryRow(`SELECT COUNT(*), COALESCE(MAX(issue_count), 0) FROM access_grant`).Scan(&grants, &issueCount); err != nil {
+		t.Fatalf("inspect access_grant rows: %v", err)
+	}
+	if err := db.db.QueryRow(`SELECT COUNT(DISTINCT access_grant_id) FROM transfer_attribution_event`).Scan(&distinctEventGrants); err != nil {
+		t.Fatalf("inspect migrated event grant ids: %v", err)
+	}
+	if grants != 1 || issueCount != 2 || distinctEventGrants != 1 {
+		t.Fatalf("expected legacy events to backfill one canonical grant, got grants=%d issue_count=%d event_grants=%d", grants, issueCount, distinctEventGrants)
+	}
+}
+
 func TestSqliteDB_GetObjectsByChecksum_WhenIDDiffers(t *testing.T) {
 	ctx := context.Background()
 	db, err := NewSqliteDB(":memory:")
@@ -848,7 +912,6 @@ func TestSqliteDB_TransferAttributionMetrics(t *testing.T) {
 	providerEvents := []models.ProviderTransferEvent{
 		{
 			ProviderEventID:  "provider-download-1",
-			AccessGrantID:    "grant-download-1",
 			Direction:        models.ProviderTransferDirectionDownload,
 			EventTime:        now.Add(2 * time.Second),
 			Provider:         "s3",
@@ -863,7 +926,6 @@ func TestSqliteDB_TransferAttributionMetrics(t *testing.T) {
 		},
 		{
 			ProviderEventID:  "provider-upload-1",
-			AccessGrantID:    "grant-upload-1",
 			Direction:        models.ProviderTransferDirectionUpload,
 			EventTime:        now.Add(3 * time.Second),
 			Provider:         "s3",
@@ -873,6 +935,7 @@ func TestSqliteDB_TransferAttributionMetrics(t *testing.T) {
 			BytesTransferred: 42,
 			HTTPMethod:       "PUT",
 			HTTPStatus:       200,
+			ActorSubject:     "local-user",
 		},
 	}
 	if err := db.RecordProviderTransferEvents(ctx, providerEvents); err != nil {
@@ -990,6 +1053,78 @@ func TestSqliteDB_TransferAttributionMetrics(t *testing.T) {
 	}
 	if len(listed) != 1 || listed[0].SyncID != "sync-bucket-a" || listed[0].Status != models.ProviderTransferSyncCompleted {
 		t.Fatalf("unexpected provider sync runs: %+v", listed)
+	}
+
+	var grantCount, issueCount int
+	if err := db.db.QueryRowContext(ctx, `SELECT COUNT(*), COALESCE(MAX(issue_count), 0) FROM access_grant`).Scan(&grantCount, &issueCount); err != nil {
+		t.Fatalf("count access grants: %v", err)
+	}
+	if grantCount != 1 || issueCount != 2 {
+		t.Fatalf("expected one canonical access grant with two issues, got count=%d issue_count=%d", grantCount, issueCount)
+	}
+}
+
+func TestSqliteDB_AccessGrantReconciliationAmbiguousOnlyForDifferentGrants(t *testing.T) {
+	ctx := context.Background()
+	db, err := NewSqliteDB(":memory:")
+	if err != nil {
+		t.Fatalf("failed to create db: %v", err)
+	}
+	now := time.Now().UTC()
+	events := []models.TransferAttributionEvent{
+		{
+			EventID:        "access-root",
+			EventType:      models.TransferEventAccessIssued,
+			EventTime:      now,
+			ObjectID:       "did-root",
+			SHA256:         "sha-root",
+			ObjectSize:     10,
+			Organization:   "calypr",
+			Project:        "proj-a",
+			AccessID:       "s3",
+			Provider:       "s3",
+			Bucket:         "bucket-a",
+			StorageURL:     "s3://bucket-a/root/shared-key",
+			BytesRequested: 10,
+		},
+		{
+			EventID:        "access-other",
+			EventType:      models.TransferEventAccessIssued,
+			EventTime:      now.Add(time.Second),
+			ObjectID:       "did-other",
+			SHA256:         "sha-other",
+			ObjectSize:     10,
+			Organization:   "calypr",
+			Project:        "proj-b",
+			AccessID:       "s3",
+			Provider:       "s3",
+			Bucket:         "bucket-a",
+			StorageURL:     "s3://bucket-a/other/shared-key",
+			BytesRequested: 10,
+		},
+	}
+	if err := db.RecordTransferAttributionEvents(ctx, events); err != nil {
+		t.Fatalf("RecordTransferAttributionEvents failed: %v", err)
+	}
+	if err := db.RecordProviderTransferEvents(ctx, []models.ProviderTransferEvent{{
+		ProviderEventID:  "ambiguous-provider-event",
+		Direction:        models.ProviderTransferDirectionDownload,
+		EventTime:        now.Add(2 * time.Second),
+		Provider:         "s3",
+		Bucket:           "bucket-a",
+		ObjectKey:        "shared-key",
+		BytesTransferred: 10,
+		HTTPMethod:       "GET",
+		HTTPStatus:       200,
+	}}); err != nil {
+		t.Fatalf("RecordProviderTransferEvents failed: %v", err)
+	}
+	var status string
+	if err := db.db.QueryRowContext(ctx, `SELECT reconciliation_status FROM provider_transfer_event WHERE provider_event_id = 'ambiguous-provider-event'`).Scan(&status); err != nil {
+		t.Fatalf("read provider event status: %v", err)
+	}
+	if status != models.ProviderTransferAmbiguous {
+		t.Fatalf("expected ambiguous provider event, got %q", status)
 	}
 }
 

@@ -440,7 +440,7 @@ func transferPayloadToModel(ctx context.Context, item transferEventPayload) (mod
 		ev.EventID = attribution.EventID(ev)
 	}
 	if ev.AccessGrantID == "" {
-		ev.AccessGrantID = ev.EventID
+		ev.AccessGrantID = attribution.AccessGrantID(ev)
 	}
 	return ev, nil
 }
