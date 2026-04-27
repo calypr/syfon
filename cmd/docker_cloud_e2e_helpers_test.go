@@ -26,6 +26,8 @@ type bucketCommandConfig struct {
 	AccessKey    string
 	SecretKey    string
 	Endpoint     string
+	LogBucket    string
+	LogPrefix    string
 	Organization string
 	ProjectID    string
 }
@@ -280,6 +282,20 @@ func exerciseAllClientCommands(t *testing.T, serverURL string, bucketCfg bucketC
 	}
 	if v := strings.TrimSpace(bucketCfg.Endpoint); v != "" {
 		bucketAddArgs = append(bucketAddArgs, "--endpoint", v)
+	}
+	logBucket := strings.TrimSpace(bucketCfg.LogBucket)
+	if logBucket == "" {
+		logBucket = bucketName
+	}
+	if logBucket != "" {
+		bucketAddArgs = append(bucketAddArgs, "--billing-log-bucket", logBucket)
+	}
+	logPrefix := strings.Trim(strings.TrimSpace(bucketCfg.LogPrefix), "/")
+	if logPrefix == "" {
+		logPrefix = ".syfon/provider-transfer-events"
+	}
+	if logPrefix != "" {
+		bucketAddArgs = append(bucketAddArgs, "--billing-log-prefix", logPrefix)
 	}
 
 	bucketAddOut, err := executeRootCommand(t, bucketAddArgs...)

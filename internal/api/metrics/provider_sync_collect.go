@@ -464,9 +464,9 @@ func providerLogJSONToPayload(raw map[string]any, rawRef string) (providerTransf
 	if direction == models.ProviderTransferDirectionUpload && bytesTransferred == 0 {
 		bytesTransferred = firstInt64(raw, "requestBodySize", "RequestBodySize", "objectSize", "ObjectSize")
 	}
-	httpStatus := int(firstInt64(raw, "http_status", "status", "StatusCode", "statusCode"))
+	httpStatus := providerHTTPStatus(firstInt64(raw, "http_status", "status", "StatusCode", "statusCode"))
 	if httpStatus == 0 {
-		httpStatus = int(nestedInt64(raw, "httpRequest", "status"))
+		httpStatus = providerHTTPStatus(nestedInt64(raw, "httpRequest", "status"))
 	}
 	if bytesTransferred == 0 {
 		bytesTransferred = nestedInt64(raw, "httpRequest", "responseSize")
@@ -533,7 +533,7 @@ func s3ServerAccessLogLineToPayload(line, rawRef string) (providerTransferPayloa
 		StorageURL:         "s3://" + fields[1] + "/" + strings.TrimLeft(fields[7], "/"),
 		ObjectSize:         objectSize,
 		BytesTransferred:   bytesTransferred,
-		HTTPStatus:         int(parseProviderInt64(fields[9])),
+		HTTPStatus:         providerHTTPStatus(parseProviderInt64(fields[9])),
 		RequesterPrincipal: fields[4],
 		SourceIP:           fields[3],
 		UserAgent:          fields[17],
@@ -737,6 +737,17 @@ func anyInt64(v any) int64 {
 func parseProviderInt64(v string) int64 {
 	n, _ := strconv.ParseInt(strings.TrimSpace(v), 10, 64)
 	return n
+}
+
+func providerHTTPStatus(v int64) int {
+	if v <= 0 || v > 999 {
+		return 0
+	}
+	status, err := strconv.Atoi(strconv.FormatInt(v, 10))
+	if err != nil {
+		return 0
+	}
+	return status
 }
 
 func providerTransferEventID(item providerTransferPayload) string {
