@@ -104,10 +104,10 @@ github.com/aws/smithy-go v1.24.3/go.mod h1:YE2RhdIuDbA5E5bTdciG9KrW3+TiEONeUWCqx
 github.com/bmatcuk/doublestar v1.1.1/go.mod h1:UD6OnuiIn0yFxxA2le/rnRU1G4RaI4UvFv1sNto9p6w=
 github.com/bufbuild/protocompile v0.14.1 h1:iA73zAf/fyljNjQKwYzUHD6AD4R8KMasmwa/FBatYVw=
 github.com/bufbuild/protocompile v0.14.1/go.mod h1:ppVdAIhbr2H8asPk6k4pY7t9zB1OU5DoEw9xY/FUi1c=
-github.com/calypr/syfon/apigen v0.2.4 h1:LMK7IChGjDZ/7u7mTlVQTW4BR+TnF+4we/qLouk/S6Q=
-github.com/calypr/syfon/apigen v0.2.4/go.mod h1:9JNwTgR57yKJlWqZpdqP+/l4zCNzH1EIFrW+e20PyMQ=
-github.com/calypr/syfon/client v0.2.4 h1:9wOleoF86lGoE7/CLhMLmkdUrBVLbuKRiBHrGILZdmE=
-github.com/calypr/syfon/client v0.2.4/go.mod h1:44Xfegl+Ti5FQB/KJHq3cJP8hEUa7L0P059iqAVW2kg=
+github.com/calypr/syfon/apigen v0.2.5 h1:TBZU0EfXh/6iabkFdsQIjcEnLFKZfRYvMd1lnUd14sg=
+github.com/calypr/syfon/apigen v0.2.5/go.mod h1:9JNwTgR57yKJlWqZpdqP+/l4zCNzH1EIFrW+e20PyMQ=
+github.com/calypr/syfon/client v0.2.5 h1:iOzgTE3g2RXHV5ajXZe9D/i4wWOKEzlMqwCXw2NDB0E=
+github.com/calypr/syfon/client v0.2.5/go.mod h1:xQIeLInPHylj/PXx4tMV55ygZrI44Zl9W8E99N1nW4A=
 github.com/cenkalti/backoff/v4 v4.3.0 h1:MyRJ/UdXutAwSAT+s3wNd7MfTIcy71VQueUuFK343L8=
 github.com/cenkalti/backoff/v4 v4.3.0/go.mod h1:Y3VNntkOUPxTVeUxJ/G5vcM//AlwfmyYozVcomhLiZE=
 github.com/cespare/xxhash/v2 v2.3.0 h1:UL815xU9SqsFlibzuggzjXhog7bL6oX9BbNZnL2UFvs=
