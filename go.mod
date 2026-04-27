@@ -12,7 +12,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/kms v1.50.4
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.99.0
 	github.com/calypr/syfon/apigen v0.2.5
-	github.com/calypr/syfon/client v0.2.5
+	github.com/calypr/syfon/client v0.2.6
 	github.com/getkin/kin-openapi v0.135.0
 	github.com/gofiber/fiber/v3 v3.1.0
 	github.com/golang-jwt/jwt/v5 v5.3.1

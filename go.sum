@@ -106,8 +106,8 @@ github.com/bufbuild/protocompile v0.14.1 h1:iA73zAf/fyljNjQKwYzUHD6AD4R8KMasmwa/
 github.com/bufbuild/protocompile v0.14.1/go.mod h1:ppVdAIhbr2H8asPk6k4pY7t9zB1OU5DoEw9xY/FUi1c=
 github.com/calypr/syfon/apigen v0.2.5 h1:TBZU0EfXh/6iabkFdsQIjcEnLFKZfRYvMd1lnUd14sg=
 github.com/calypr/syfon/apigen v0.2.5/go.mod h1:9JNwTgR57yKJlWqZpdqP+/l4zCNzH1EIFrW+e20PyMQ=
-github.com/calypr/syfon/client v0.2.5 h1:iOzgTE3g2RXHV5ajXZe9D/i4wWOKEzlMqwCXw2NDB0E=
-github.com/calypr/syfon/client v0.2.5/go.mod h1:xQIeLInPHylj/PXx4tMV55ygZrI44Zl9W8E99N1nW4A=
+github.com/calypr/syfon/client v0.2.6 h1:ZCT7BrfaIhiGm3mikZXbDprXlDYqEq8ciJrsjp1M+1c=
+github.com/calypr/syfon/client v0.2.6/go.mod h1:DQSqNkxl9V3w08BiMconcJh3xtc+/Je7Xeo7qRH7wto=
 github.com/cenkalti/backoff/v4 v4.3.0 h1:MyRJ/UdXutAwSAT+s3wNd7MfTIcy71VQueUuFK343L8=
 github.com/cenkalti/backoff/v4 v4.3.0/go.mod h1:Y3VNntkOUPxTVeUxJ/G5vcM//AlwfmyYozVcomhLiZE=
 github.com/cespare/xxhash/v2 v2.3.0 h1:UL815xU9SqsFlibzuggzjXhog7bL6oX9BbNZnL2UFvs=
