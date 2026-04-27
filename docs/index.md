@@ -63,6 +63,8 @@ s3_credentials:
     access_key: "minio-user"
     secret_key: "minio-pass"
     endpoint: "http://localhost:9000"
+    billing_log_bucket: "my-bucket"
+    billing_log_prefix: ".syfon/provider-logs/"
 ```
 
 ### 4. Start the server
@@ -109,6 +111,7 @@ syfon/
 ## Next Steps
 
 - [Configuration](configuration.md) — full config file reference and environment variable overrides
+- [Provider billing logs](provider-billing-logs.md) — required S3/GCS/Azure access-log setup for transfer billing metrics
 - [Deployment](deployment.md) — Docker, Kubernetes, and production guidance
 - [Encryption](encryption.md) — credential encryption at rest
 - [Troubleshooting](troubleshooting.md) — common issues and fixes

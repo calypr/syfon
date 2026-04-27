@@ -134,6 +134,8 @@ func ParseBucketProvider(raw string) (string, error) {
 		return GCSProvider, nil
 	case AzureProvider, "azblob":
 		return AzureProvider, nil
+	case FileProvider:
+		return FileProvider, nil
 	default:
 		return "", fmt.Errorf("unsupported provider %q", raw)
 	}
@@ -157,6 +159,8 @@ func ValidateBucketName(providerName, bucketName string) error {
 		return validateGCSBucketName(bucketName)
 	case AzureProvider:
 		return validateAzureBucketName(bucketName)
+	case FileProvider:
+		return nil
 	default:
 		return fmt.Errorf("unsupported provider %q", providerName)
 	}

@@ -12,6 +12,43 @@ import (
 	"github.com/oapi-codegen/runtime"
 )
 
+// Defines values for ProviderTransferDirection.
+const (
+	Download ProviderTransferDirection = "download"
+	Upload   ProviderTransferDirection = "upload"
+)
+
+// Defines values for ProviderTransferReconciliationStatus.
+const (
+	All       ProviderTransferReconciliationStatus = "all"
+	Ambiguous ProviderTransferReconciliationStatus = "ambiguous"
+	Matched   ProviderTransferReconciliationStatus = "matched"
+	Unmatched ProviderTransferReconciliationStatus = "unmatched"
+)
+
+// Defines values for ProviderTransferSyncStatus.
+const (
+	Completed ProviderTransferSyncStatus = "completed"
+	Failed    ProviderTransferSyncStatus = "failed"
+	Pending   ProviderTransferSyncStatus = "pending"
+)
+
+// Defines values for TransferBreakdownResponseGroupBy.
+const (
+	TransferBreakdownResponseGroupByObject   TransferBreakdownResponseGroupBy = "object"
+	TransferBreakdownResponseGroupByProvider TransferBreakdownResponseGroupBy = "provider"
+	TransferBreakdownResponseGroupByScope    TransferBreakdownResponseGroupBy = "scope"
+	TransferBreakdownResponseGroupByUser     TransferBreakdownResponseGroupBy = "user"
+)
+
+// Defines values for GetTransferBreakdownParamsGroupBy.
+const (
+	GetTransferBreakdownParamsGroupByObject   GetTransferBreakdownParamsGroupBy = "object"
+	GetTransferBreakdownParamsGroupByProvider GetTransferBreakdownParamsGroupBy = "provider"
+	GetTransferBreakdownParamsGroupByScope    GetTransferBreakdownParamsGroupBy = "scope"
+	GetTransferBreakdownParamsGroupByUser     GetTransferBreakdownParamsGroupBy = "user"
+)
+
 // FileUsage defines model for FileUsage.
 type FileUsage struct {
 	DownloadCount    *int64     `json:"download_count,omitempty"`
@@ -39,17 +76,298 @@ type MetricsListResponse struct {
 	Offset *int         `json:"offset,omitempty"`
 }
 
+// ProviderTransferDirection defines model for ProviderTransferDirection.
+type ProviderTransferDirection string
+
+// ProviderTransferEvent defines model for ProviderTransferEvent.
+type ProviderTransferEvent struct {
+	AccessGrantId    *string                   `json:"access_grant_id,omitempty"`
+	AccessId         *string                   `json:"access_id,omitempty"`
+	ActorEmail       *string                   `json:"actor_email,omitempty"`
+	ActorSubject     *string                   `json:"actor_subject,omitempty"`
+	AuthMode         *string                   `json:"auth_mode,omitempty"`
+	Bucket           string                    `json:"bucket"`
+	BytesTransferred int64                     `json:"bytes_transferred"`
+	Direction        ProviderTransferDirection `json:"direction"`
+	EventTime        *time.Time                `json:"event_time,omitempty"`
+	HttpMethod       *string                   `json:"http_method,omitempty"`
+	HttpStatus       *int                      `json:"http_status,omitempty"`
+
+	// ObjectId DRS object DID when known.
+	ObjectId     *string `json:"object_id,omitempty"`
+	ObjectKey    *string `json:"object_key,omitempty"`
+	ObjectSize   *int64  `json:"object_size,omitempty"`
+	Organization *string `json:"organization,omitempty"`
+	Project      *string `json:"project,omitempty"`
+	Provider     string  `json:"provider"`
+
+	// ProviderEventId Provider/importer idempotency key.
+	ProviderEventId      string                                `json:"provider_event_id"`
+	ProviderRequestId    *string                               `json:"provider_request_id,omitempty"`
+	RangeEnd             *int64                                `json:"range_end"`
+	RangeStart           *int64                                `json:"range_start"`
+	RawEventRef          *string                               `json:"raw_event_ref,omitempty"`
+	ReconciliationStatus *ProviderTransferReconciliationStatus `json:"reconciliation_status,omitempty"`
+	RequestId            *string                               `json:"request_id,omitempty"`
+	RequesterPrincipal   *string                               `json:"requester_principal,omitempty"`
+	Sha256               *string                               `json:"sha256,omitempty"`
+	SourceIp             *string                               `json:"source_ip,omitempty"`
+	StorageUrl           *string                               `json:"storage_url,omitempty"`
+	UserAgent            *string                               `json:"user_agent,omitempty"`
+}
+
+// ProviderTransferEventsRequest defines model for ProviderTransferEventsRequest.
+type ProviderTransferEventsRequest struct {
+	Events []ProviderTransferEvent `json:"events"`
+}
+
+// ProviderTransferReconciliationStatus defines model for ProviderTransferReconciliationStatus.
+type ProviderTransferReconciliationStatus string
+
+// ProviderTransferSyncRequest defines model for ProviderTransferSyncRequest.
+type ProviderTransferSyncRequest struct {
+	AmbiguousEvents *int64 `json:"ambiguous_events,omitempty"`
+
+	// Bucket Bucket filter. When omitted, all configured buckets are recorded.
+	Bucket         *string   `json:"bucket,omitempty"`
+	ErrorMessage   *string   `json:"error_message,omitempty"`
+	From           time.Time `json:"from"`
+	ImportedEvents *int64    `json:"imported_events,omitempty"`
+	MatchedEvents  *int64    `json:"matched_events,omitempty"`
+	Organization   *string   `json:"organization,omitempty"`
+	Project        *string   `json:"project,omitempty"`
+
+	// Provider Provider filter. When omitted, all configured buckets are recorded.
+	Provider        *string                     `json:"provider,omitempty"`
+	Status          *ProviderTransferSyncStatus `json:"status,omitempty"`
+	To              time.Time                   `json:"to"`
+	UnmatchedEvents *int64                      `json:"unmatched_events,omitempty"`
+}
+
+// ProviderTransferSyncResponse defines model for ProviderTransferSyncResponse.
+type ProviderTransferSyncResponse struct {
+	Recorded *int                       `json:"recorded,omitempty"`
+	SyncRuns *[]ProviderTransferSyncRun `json:"sync_runs,omitempty"`
+}
+
+// ProviderTransferSyncRun defines model for ProviderTransferSyncRun.
+type ProviderTransferSyncRun struct {
+	AmbiguousEvents *int64                      `json:"ambiguous_events,omitempty"`
+	Bucket          *string                     `json:"bucket,omitempty"`
+	CompletedAt     *time.Time                  `json:"completed_at"`
+	ErrorMessage    *string                     `json:"error_message,omitempty"`
+	From            *time.Time                  `json:"from,omitempty"`
+	ImportedEvents  *int64                      `json:"imported_events,omitempty"`
+	MatchedEvents   *int64                      `json:"matched_events,omitempty"`
+	Organization    *string                     `json:"organization,omitempty"`
+	Project         *string                     `json:"project,omitempty"`
+	Provider        *string                     `json:"provider,omitempty"`
+	RequestedAt     *time.Time                  `json:"requested_at,omitempty"`
+	StartedAt       *time.Time                  `json:"started_at"`
+	Status          *ProviderTransferSyncStatus `json:"status,omitempty"`
+	SyncId          *string                     `json:"sync_id,omitempty"`
+	To              *time.Time                  `json:"to,omitempty"`
+	UnmatchedEvents *int64                      `json:"unmatched_events,omitempty"`
+}
+
+// ProviderTransferSyncStatus defines model for ProviderTransferSyncStatus.
+type ProviderTransferSyncStatus string
+
+// TransferAttributionBreakdown defines model for TransferAttributionBreakdown.
+type TransferAttributionBreakdown struct {
+	ActorEmail       *string    `json:"actor_email,omitempty"`
+	ActorSubject     *string    `json:"actor_subject,omitempty"`
+	Bucket           *string    `json:"bucket,omitempty"`
+	BytesDownloaded  *int64     `json:"bytes_downloaded,omitempty"`
+	BytesRequested   *int64     `json:"bytes_requested,omitempty"`
+	BytesUploaded    *int64     `json:"bytes_uploaded,omitempty"`
+	EventCount       *int64     `json:"event_count,omitempty"`
+	Key              *string    `json:"key,omitempty"`
+	LastTransferTime *time.Time `json:"last_transfer_time"`
+	Organization     *string    `json:"organization,omitempty"`
+	Project          *string    `json:"project,omitempty"`
+	Provider         *string    `json:"provider,omitempty"`
+	Sha256           *string    `json:"sha256,omitempty"`
+}
+
+// TransferAttributionSummary defines model for TransferAttributionSummary.
+type TransferAttributionSummary struct {
+	AccessIssuedCount  *int64                    `json:"access_issued_count,omitempty"`
+	BytesDownloaded    *int64                    `json:"bytes_downloaded,omitempty"`
+	BytesRequested     *int64                    `json:"bytes_requested,omitempty"`
+	BytesUploaded      *int64                    `json:"bytes_uploaded,omitempty"`
+	DownloadEventCount *int64                    `json:"download_event_count,omitempty"`
+	EventCount         *int64                    `json:"event_count,omitempty"`
+	Freshness          *TransferMetricsFreshness `json:"freshness,omitempty"`
+	UploadEventCount   *int64                    `json:"upload_event_count,omitempty"`
+}
+
+// TransferBreakdownResponse defines model for TransferBreakdownResponse.
+type TransferBreakdownResponse struct {
+	Data      *[]TransferAttributionBreakdown   `json:"data,omitempty"`
+	Freshness *TransferMetricsFreshness         `json:"freshness,omitempty"`
+	GroupBy   *TransferBreakdownResponseGroupBy `json:"group_by,omitempty"`
+}
+
+// TransferBreakdownResponseGroupBy defines model for TransferBreakdownResponse.GroupBy.
+type TransferBreakdownResponseGroupBy string
+
+// TransferEventsRecordedResponse defines model for TransferEventsRecordedResponse.
+type TransferEventsRecordedResponse struct {
+	Recorded *int `json:"recorded,omitempty"`
+}
+
+// TransferMetricsFreshness defines model for TransferMetricsFreshness.
+type TransferMetricsFreshness struct {
+	IsStale             *bool      `json:"is_stale,omitempty"`
+	LatestCompletedSync *time.Time `json:"latest_completed_sync"`
+	MissingBuckets      *[]string  `json:"missing_buckets,omitempty"`
+	RequiredFrom        *time.Time `json:"required_from"`
+	RequiredTo          *time.Time `json:"required_to"`
+}
+
+// AllowStale defines model for AllowStale.
+type AllowStale = bool
+
+// Bucket defines model for Bucket.
+type Bucket = string
+
+// Direction defines model for Direction.
+type Direction = ProviderTransferDirection
+
+// From defines model for From.
+type From = time.Time
+
+// Organization defines model for Organization.
+type Organization = string
+
+// Project defines model for Project.
+type Project = string
+
+// Provider defines model for Provider.
+type Provider = string
+
+// ReconciliationStatus defines model for ReconciliationStatus.
+type ReconciliationStatus = ProviderTransferReconciliationStatus
+
+// SHA256 defines model for SHA256.
+type SHA256 = string
+
+// To defines model for To.
+type To = time.Time
+
+// User defines model for User.
+type User = string
+
 // ListMetricsFilesParams defines parameters for ListMetricsFiles.
 type ListMetricsFilesParams struct {
 	Limit        *int `form:"limit,omitempty" json:"limit,omitempty"`
 	Offset       *int `form:"offset,omitempty" json:"offset,omitempty"`
 	InactiveDays *int `form:"inactive_days,omitempty" json:"inactive_days,omitempty"`
+
+	// Organization Organization/program scope filter.
+	Organization *Organization `form:"organization,omitempty" json:"organization,omitempty"`
+
+	// Project Project scope filter. Requires organization when set.
+	Project *Project `form:"project,omitempty" json:"project,omitempty"`
+}
+
+// GetMetricsFileParams defines parameters for GetMetricsFile.
+type GetMetricsFileParams struct {
+	// Organization Organization/program scope filter.
+	Organization *Organization `form:"organization,omitempty" json:"organization,omitempty"`
+
+	// Project Project scope filter. Requires organization when set.
+	Project *Project `form:"project,omitempty" json:"project,omitempty"`
+}
+
+// RecordProviderTransferEventsParams defines parameters for RecordProviderTransferEvents.
+type RecordProviderTransferEventsParams struct {
+	// Organization Organization/program scope filter.
+	Organization *Organization `form:"organization,omitempty" json:"organization,omitempty"`
+
+	// Project Project scope filter. Requires organization when set.
+	Project *Project `form:"project,omitempty" json:"project,omitempty"`
+}
+
+// ListProviderTransferSyncParams defines parameters for ListProviderTransferSync.
+type ListProviderTransferSyncParams struct {
+	// Organization Organization/program scope filter.
+	Organization *Organization `form:"organization,omitempty" json:"organization,omitempty"`
+
+	// Project Project scope filter. Requires organization when set.
+	Project  *Project  `form:"project,omitempty" json:"project,omitempty"`
+	From     *From     `form:"from,omitempty" json:"from,omitempty"`
+	To       *To       `form:"to,omitempty" json:"to,omitempty"`
+	Provider *Provider `form:"provider,omitempty" json:"provider,omitempty"`
+	Bucket   *Bucket   `form:"bucket,omitempty" json:"bucket,omitempty"`
+	Limit    *int      `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
 // GetMetricsSummaryParams defines parameters for GetMetricsSummary.
 type GetMetricsSummaryParams struct {
 	InactiveDays *int `form:"inactive_days,omitempty" json:"inactive_days,omitempty"`
+
+	// Organization Organization/program scope filter.
+	Organization *Organization `form:"organization,omitempty" json:"organization,omitempty"`
+
+	// Project Project scope filter. Requires organization when set.
+	Project *Project `form:"project,omitempty" json:"project,omitempty"`
 }
+
+// GetTransferBreakdownParams defines parameters for GetTransferBreakdown.
+type GetTransferBreakdownParams struct {
+	// Organization Organization/program scope filter.
+	Organization *Organization `form:"organization,omitempty" json:"organization,omitempty"`
+
+	// Project Project scope filter. Requires organization when set.
+	Project              *Project              `form:"project,omitempty" json:"project,omitempty"`
+	Direction            *Direction            `form:"direction,omitempty" json:"direction,omitempty"`
+	ReconciliationStatus *ReconciliationStatus `form:"reconciliation_status,omitempty" json:"reconciliation_status,omitempty"`
+	From                 *From                 `form:"from,omitempty" json:"from,omitempty"`
+	To                   *To                   `form:"to,omitempty" json:"to,omitempty"`
+	Provider             *Provider             `form:"provider,omitempty" json:"provider,omitempty"`
+	Bucket               *Bucket               `form:"bucket,omitempty" json:"bucket,omitempty"`
+	Sha256               *SHA256               `form:"sha256,omitempty" json:"sha256,omitempty"`
+
+	// User Actor email or subject filter.
+	User *User `form:"user,omitempty" json:"user,omitempty"`
+
+	// AllowStale Deprecated. Transfer metrics always return persisted provider events with freshness metadata, including missing sync windows and latest completed sync time.
+	AllowStale *AllowStale                        `form:"allow_stale,omitempty" json:"allow_stale,omitempty"`
+	GroupBy    *GetTransferBreakdownParamsGroupBy `form:"group_by,omitempty" json:"group_by,omitempty"`
+}
+
+// GetTransferBreakdownParamsGroupBy defines parameters for GetTransferBreakdown.
+type GetTransferBreakdownParamsGroupBy string
+
+// GetTransferSummaryParams defines parameters for GetTransferSummary.
+type GetTransferSummaryParams struct {
+	// Organization Organization/program scope filter.
+	Organization *Organization `form:"organization,omitempty" json:"organization,omitempty"`
+
+	// Project Project scope filter. Requires organization when set.
+	Project              *Project              `form:"project,omitempty" json:"project,omitempty"`
+	Direction            *Direction            `form:"direction,omitempty" json:"direction,omitempty"`
+	ReconciliationStatus *ReconciliationStatus `form:"reconciliation_status,omitempty" json:"reconciliation_status,omitempty"`
+	From                 *From                 `form:"from,omitempty" json:"from,omitempty"`
+	To                   *To                   `form:"to,omitempty" json:"to,omitempty"`
+	Provider             *Provider             `form:"provider,omitempty" json:"provider,omitempty"`
+	Bucket               *Bucket               `form:"bucket,omitempty" json:"bucket,omitempty"`
+	Sha256               *SHA256               `form:"sha256,omitempty" json:"sha256,omitempty"`
+
+	// User Actor email or subject filter.
+	User *User `form:"user,omitempty" json:"user,omitempty"`
+
+	// AllowStale Deprecated. Transfer metrics always return persisted provider events with freshness metadata, including missing sync windows and latest completed sync time.
+	AllowStale *AllowStale `form:"allow_stale,omitempty" json:"allow_stale,omitempty"`
+}
+
+// RecordProviderTransferEventsJSONRequestBody defines body for RecordProviderTransferEvents for application/json ContentType.
+type RecordProviderTransferEventsJSONRequestBody = ProviderTransferEventsRequest
+
+// RecordProviderTransferSyncJSONRequestBody defines body for RecordProviderTransferSync for application/json ContentType.
+type RecordProviderTransferSyncJSONRequestBody = ProviderTransferSyncRequest
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
@@ -58,10 +376,25 @@ type ServerInterface interface {
 	ListMetricsFiles(c fiber.Ctx, params ListMetricsFilesParams) error
 
 	// (GET /index/v1/metrics/files/{object_id})
-	GetMetricsFile(c fiber.Ctx, objectId string) error
+	GetMetricsFile(c fiber.Ctx, objectId string, params GetMetricsFileParams) error
+	// Record provider-observed transfer events
+	// (POST /index/v1/metrics/provider-transfer-events)
+	RecordProviderTransferEvents(c fiber.Ctx, params RecordProviderTransferEventsParams) error
+	// List provider transfer log sync status
+	// (GET /index/v1/metrics/provider-transfer-sync)
+	ListProviderTransferSync(c fiber.Ctx, params ListProviderTransferSyncParams) error
+	// Record provider transfer log sync status
+	// (POST /index/v1/metrics/provider-transfer-sync)
+	RecordProviderTransferSync(c fiber.Ctx) error
 
 	// (GET /index/v1/metrics/summary)
 	GetMetricsSummary(c fiber.Ctx, params GetMetricsSummaryParams) error
+	// Group transfer attribution events
+	// (GET /index/v1/metrics/transfers/breakdown)
+	GetTransferBreakdown(c fiber.Ctx, params GetTransferBreakdownParams) error
+	// Summarize transfer attribution events
+	// (GET /index/v1/metrics/transfers/summary)
+	GetTransferSummary(c fiber.Ctx, params GetTransferSummaryParams) error
 }
 
 // ServerInterfaceWrapper converts contexts to parameters.
@@ -109,6 +442,28 @@ func (siw *ServerInterfaceWrapper) ListMetricsFiles(c fiber.Ctx) error {
 		params.InactiveDays = &value
 
 	}
+	// ------------- Optional query parameter "organization" -------------
+	if paramValue := c.Query("organization"); paramValue != "" {
+
+		var value Organization
+		err = runtime.BindStyledParameterWithOptions("form", "organization", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
+		if err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter organization: %w", err).Error())
+		}
+		params.Organization = &value
+
+	}
+	// ------------- Optional query parameter "project" -------------
+	if paramValue := c.Query("project"); paramValue != "" {
+
+		var value Project
+		err = runtime.BindStyledParameterWithOptions("form", "project", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
+		if err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter project: %w", err).Error())
+		}
+		params.Project = &value
+
+	}
 
 	return siw.Handler.ListMetricsFiles(c, params)
 }
@@ -116,6 +471,7 @@ func (siw *ServerInterfaceWrapper) ListMetricsFiles(c fiber.Ctx) error {
 // GetMetricsFile operation middleware
 func (siw *ServerInterfaceWrapper) GetMetricsFile(c fiber.Ctx) error {
 	var err error
+	var params GetMetricsFileParams
 
 	// ------------- Path parameter "object_id" -------------
 	var objectId string
@@ -125,7 +481,153 @@ func (siw *ServerInterfaceWrapper) GetMetricsFile(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter object_id: %w", err).Error())
 	}
 
-	return siw.Handler.GetMetricsFile(c, objectId)
+	// ------------- Optional query parameter "organization" -------------
+	if paramValue := c.Query("organization"); paramValue != "" {
+
+		var value Organization
+		err = runtime.BindStyledParameterWithOptions("form", "organization", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
+		if err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter organization: %w", err).Error())
+		}
+		params.Organization = &value
+
+	}
+	// ------------- Optional query parameter "project" -------------
+	if paramValue := c.Query("project"); paramValue != "" {
+
+		var value Project
+		err = runtime.BindStyledParameterWithOptions("form", "project", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
+		if err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter project: %w", err).Error())
+		}
+		params.Project = &value
+
+	}
+
+	return siw.Handler.GetMetricsFile(c, objectId, params)
+}
+
+// RecordProviderTransferEvents operation middleware
+func (siw *ServerInterfaceWrapper) RecordProviderTransferEvents(c fiber.Ctx) error {
+	var err error
+	var params RecordProviderTransferEventsParams
+
+	// ------------- Optional query parameter "organization" -------------
+	if paramValue := c.Query("organization"); paramValue != "" {
+
+		var value Organization
+		err = runtime.BindStyledParameterWithOptions("form", "organization", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
+		if err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter organization: %w", err).Error())
+		}
+		params.Organization = &value
+
+	}
+	// ------------- Optional query parameter "project" -------------
+	if paramValue := c.Query("project"); paramValue != "" {
+
+		var value Project
+		err = runtime.BindStyledParameterWithOptions("form", "project", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
+		if err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter project: %w", err).Error())
+		}
+		params.Project = &value
+
+	}
+
+	return siw.Handler.RecordProviderTransferEvents(c, params)
+}
+
+// ListProviderTransferSync operation middleware
+func (siw *ServerInterfaceWrapper) ListProviderTransferSync(c fiber.Ctx) error {
+	var err error
+	var params ListProviderTransferSyncParams
+
+	// ------------- Optional query parameter "organization" -------------
+	if paramValue := c.Query("organization"); paramValue != "" {
+
+		var value Organization
+		err = runtime.BindStyledParameterWithOptions("form", "organization", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
+		if err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter organization: %w", err).Error())
+		}
+		params.Organization = &value
+
+	}
+	// ------------- Optional query parameter "project" -------------
+	if paramValue := c.Query("project"); paramValue != "" {
+
+		var value Project
+		err = runtime.BindStyledParameterWithOptions("form", "project", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
+		if err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter project: %w", err).Error())
+		}
+		params.Project = &value
+
+	}
+	// ------------- Optional query parameter "from" -------------
+	if paramValue := c.Query("from"); paramValue != "" {
+
+		var value From
+		err = runtime.BindStyledParameterWithOptions("form", "from", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
+		if err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter from: %w", err).Error())
+		}
+		params.From = &value
+
+	}
+	// ------------- Optional query parameter "to" -------------
+	if paramValue := c.Query("to"); paramValue != "" {
+
+		var value To
+		err = runtime.BindStyledParameterWithOptions("form", "to", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
+		if err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter to: %w", err).Error())
+		}
+		params.To = &value
+
+	}
+	// ------------- Optional query parameter "provider" -------------
+	if paramValue := c.Query("provider"); paramValue != "" {
+
+		var value Provider
+		err = runtime.BindStyledParameterWithOptions("form", "provider", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
+		if err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter provider: %w", err).Error())
+		}
+		params.Provider = &value
+
+	}
+	// ------------- Optional query parameter "bucket" -------------
+	if paramValue := c.Query("bucket"); paramValue != "" {
+
+		var value Bucket
+		err = runtime.BindStyledParameterWithOptions("form", "bucket", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
+		if err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter bucket: %w", err).Error())
+		}
+		params.Bucket = &value
+
+	}
+	// ------------- Optional query parameter "limit" -------------
+	if paramValue := c.Query("limit"); paramValue != "" {
+
+		var value int
+		err = runtime.BindStyledParameterWithOptions("form", "limit", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
+		if err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter limit: %w", err).Error())
+		}
+		params.Limit = &value
+
+	}
+
+	return siw.Handler.ListProviderTransferSync(c, params)
+}
+
+// RecordProviderTransferSync operation middleware
+func (siw *ServerInterfaceWrapper) RecordProviderTransferSync(c fiber.Ctx) error {
+
+	return siw.Handler.RecordProviderTransferSync(c)
 }
 
 // GetMetricsSummary operation middleware
@@ -144,8 +646,301 @@ func (siw *ServerInterfaceWrapper) GetMetricsSummary(c fiber.Ctx) error {
 		params.InactiveDays = &value
 
 	}
+	// ------------- Optional query parameter "organization" -------------
+	if paramValue := c.Query("organization"); paramValue != "" {
+
+		var value Organization
+		err = runtime.BindStyledParameterWithOptions("form", "organization", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
+		if err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter organization: %w", err).Error())
+		}
+		params.Organization = &value
+
+	}
+	// ------------- Optional query parameter "project" -------------
+	if paramValue := c.Query("project"); paramValue != "" {
+
+		var value Project
+		err = runtime.BindStyledParameterWithOptions("form", "project", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
+		if err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter project: %w", err).Error())
+		}
+		params.Project = &value
+
+	}
 
 	return siw.Handler.GetMetricsSummary(c, params)
+}
+
+// GetTransferBreakdown operation middleware
+func (siw *ServerInterfaceWrapper) GetTransferBreakdown(c fiber.Ctx) error {
+	var err error
+	var params GetTransferBreakdownParams
+
+	// ------------- Optional query parameter "organization" -------------
+	if paramValue := c.Query("organization"); paramValue != "" {
+
+		var value Organization
+		err = runtime.BindStyledParameterWithOptions("form", "organization", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
+		if err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter organization: %w", err).Error())
+		}
+		params.Organization = &value
+
+	}
+	// ------------- Optional query parameter "project" -------------
+	if paramValue := c.Query("project"); paramValue != "" {
+
+		var value Project
+		err = runtime.BindStyledParameterWithOptions("form", "project", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
+		if err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter project: %w", err).Error())
+		}
+		params.Project = &value
+
+	}
+	// ------------- Optional query parameter "direction" -------------
+	if paramValue := c.Query("direction"); paramValue != "" {
+
+		var value Direction
+		err = runtime.BindStyledParameterWithOptions("form", "direction", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
+		if err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter direction: %w", err).Error())
+		}
+		params.Direction = &value
+
+	}
+	// ------------- Optional query parameter "reconciliation_status" -------------
+	if paramValue := c.Query("reconciliation_status"); paramValue != "" {
+
+		var value ReconciliationStatus
+		err = runtime.BindStyledParameterWithOptions("form", "reconciliation_status", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
+		if err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter reconciliation_status: %w", err).Error())
+		}
+		params.ReconciliationStatus = &value
+
+	}
+	// ------------- Optional query parameter "from" -------------
+	if paramValue := c.Query("from"); paramValue != "" {
+
+		var value From
+		err = runtime.BindStyledParameterWithOptions("form", "from", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
+		if err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter from: %w", err).Error())
+		}
+		params.From = &value
+
+	}
+	// ------------- Optional query parameter "to" -------------
+	if paramValue := c.Query("to"); paramValue != "" {
+
+		var value To
+		err = runtime.BindStyledParameterWithOptions("form", "to", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
+		if err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter to: %w", err).Error())
+		}
+		params.To = &value
+
+	}
+	// ------------- Optional query parameter "provider" -------------
+	if paramValue := c.Query("provider"); paramValue != "" {
+
+		var value Provider
+		err = runtime.BindStyledParameterWithOptions("form", "provider", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
+		if err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter provider: %w", err).Error())
+		}
+		params.Provider = &value
+
+	}
+	// ------------- Optional query parameter "bucket" -------------
+	if paramValue := c.Query("bucket"); paramValue != "" {
+
+		var value Bucket
+		err = runtime.BindStyledParameterWithOptions("form", "bucket", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
+		if err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter bucket: %w", err).Error())
+		}
+		params.Bucket = &value
+
+	}
+	// ------------- Optional query parameter "sha256" -------------
+	if paramValue := c.Query("sha256"); paramValue != "" {
+
+		var value SHA256
+		err = runtime.BindStyledParameterWithOptions("form", "sha256", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
+		if err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter sha256: %w", err).Error())
+		}
+		params.Sha256 = &value
+
+	}
+	// ------------- Optional query parameter "user" -------------
+	if paramValue := c.Query("user"); paramValue != "" {
+
+		var value User
+		err = runtime.BindStyledParameterWithOptions("form", "user", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
+		if err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter user: %w", err).Error())
+		}
+		params.User = &value
+
+	}
+	// ------------- Optional query parameter "allow_stale" -------------
+	if paramValue := c.Query("allow_stale"); paramValue != "" {
+
+		var value AllowStale
+		err = runtime.BindStyledParameterWithOptions("form", "allow_stale", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
+		if err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter allow_stale: %w", err).Error())
+		}
+		params.AllowStale = &value
+
+	}
+	// ------------- Optional query parameter "group_by" -------------
+	if paramValue := c.Query("group_by"); paramValue != "" {
+
+		var value GetTransferBreakdownParamsGroupBy
+		err = runtime.BindStyledParameterWithOptions("form", "group_by", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
+		if err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter group_by: %w", err).Error())
+		}
+		params.GroupBy = &value
+
+	}
+
+	return siw.Handler.GetTransferBreakdown(c, params)
+}
+
+// GetTransferSummary operation middleware
+func (siw *ServerInterfaceWrapper) GetTransferSummary(c fiber.Ctx) error {
+	var err error
+	var params GetTransferSummaryParams
+
+	// ------------- Optional query parameter "organization" -------------
+	if paramValue := c.Query("organization"); paramValue != "" {
+
+		var value Organization
+		err = runtime.BindStyledParameterWithOptions("form", "organization", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
+		if err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter organization: %w", err).Error())
+		}
+		params.Organization = &value
+
+	}
+	// ------------- Optional query parameter "project" -------------
+	if paramValue := c.Query("project"); paramValue != "" {
+
+		var value Project
+		err = runtime.BindStyledParameterWithOptions("form", "project", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
+		if err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter project: %w", err).Error())
+		}
+		params.Project = &value
+
+	}
+	// ------------- Optional query parameter "direction" -------------
+	if paramValue := c.Query("direction"); paramValue != "" {
+
+		var value Direction
+		err = runtime.BindStyledParameterWithOptions("form", "direction", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
+		if err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter direction: %w", err).Error())
+		}
+		params.Direction = &value
+
+	}
+	// ------------- Optional query parameter "reconciliation_status" -------------
+	if paramValue := c.Query("reconciliation_status"); paramValue != "" {
+
+		var value ReconciliationStatus
+		err = runtime.BindStyledParameterWithOptions("form", "reconciliation_status", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
+		if err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter reconciliation_status: %w", err).Error())
+		}
+		params.ReconciliationStatus = &value
+
+	}
+	// ------------- Optional query parameter "from" -------------
+	if paramValue := c.Query("from"); paramValue != "" {
+
+		var value From
+		err = runtime.BindStyledParameterWithOptions("form", "from", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
+		if err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter from: %w", err).Error())
+		}
+		params.From = &value
+
+	}
+	// ------------- Optional query parameter "to" -------------
+	if paramValue := c.Query("to"); paramValue != "" {
+
+		var value To
+		err = runtime.BindStyledParameterWithOptions("form", "to", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
+		if err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter to: %w", err).Error())
+		}
+		params.To = &value
+
+	}
+	// ------------- Optional query parameter "provider" -------------
+	if paramValue := c.Query("provider"); paramValue != "" {
+
+		var value Provider
+		err = runtime.BindStyledParameterWithOptions("form", "provider", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
+		if err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter provider: %w", err).Error())
+		}
+		params.Provider = &value
+
+	}
+	// ------------- Optional query parameter "bucket" -------------
+	if paramValue := c.Query("bucket"); paramValue != "" {
+
+		var value Bucket
+		err = runtime.BindStyledParameterWithOptions("form", "bucket", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
+		if err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter bucket: %w", err).Error())
+		}
+		params.Bucket = &value
+
+	}
+	// ------------- Optional query parameter "sha256" -------------
+	if paramValue := c.Query("sha256"); paramValue != "" {
+
+		var value SHA256
+		err = runtime.BindStyledParameterWithOptions("form", "sha256", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
+		if err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter sha256: %w", err).Error())
+		}
+		params.Sha256 = &value
+
+	}
+	// ------------- Optional query parameter "user" -------------
+	if paramValue := c.Query("user"); paramValue != "" {
+
+		var value User
+		err = runtime.BindStyledParameterWithOptions("form", "user", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
+		if err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter user: %w", err).Error())
+		}
+		params.User = &value
+
+	}
+	// ------------- Optional query parameter "allow_stale" -------------
+	if paramValue := c.Query("allow_stale"); paramValue != "" {
+
+		var value AllowStale
+		err = runtime.BindStyledParameterWithOptions("form", "allow_stale", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
+		if err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter allow_stale: %w", err).Error())
+		}
+		params.AllowStale = &value
+
+	}
+
+	return siw.Handler.GetTransferSummary(c, params)
 }
 
 // FiberServerOptions provides options for the Fiber server.
@@ -173,7 +968,17 @@ func RegisterHandlersWithOptions(router fiber.Router, si ServerInterface, option
 
 	router.Get(options.BaseURL+"/index/v1/metrics/files/:object_id", wrapper.GetMetricsFile)
 
+	router.Post(options.BaseURL+"/index/v1/metrics/provider-transfer-events", wrapper.RecordProviderTransferEvents)
+
+	router.Get(options.BaseURL+"/index/v1/metrics/provider-transfer-sync", wrapper.ListProviderTransferSync)
+
+	router.Post(options.BaseURL+"/index/v1/metrics/provider-transfer-sync", wrapper.RecordProviderTransferSync)
+
 	router.Get(options.BaseURL+"/index/v1/metrics/summary", wrapper.GetMetricsSummary)
+
+	router.Get(options.BaseURL+"/index/v1/metrics/transfers/breakdown", wrapper.GetTransferBreakdown)
+
+	router.Get(options.BaseURL+"/index/v1/metrics/transfers/summary", wrapper.GetTransferSummary)
 
 }
 
@@ -228,6 +1033,7 @@ func (response ListMetricsFiles500Response) VisitListMetricsFilesResponse(ctx fi
 
 type GetMetricsFileRequestObject struct {
 	ObjectId string `json:"object_id"`
+	Params   GetMetricsFileParams
 }
 
 type GetMetricsFileResponseObject interface {
@@ -283,6 +1089,154 @@ func (response GetMetricsFile500Response) VisitGetMetricsFileResponse(ctx fiber.
 	return nil
 }
 
+type RecordProviderTransferEventsRequestObject struct {
+	Params RecordProviderTransferEventsParams
+	Body   *RecordProviderTransferEventsJSONRequestBody
+}
+
+type RecordProviderTransferEventsResponseObject interface {
+	VisitRecordProviderTransferEventsResponse(ctx fiber.Ctx) error
+}
+
+type RecordProviderTransferEvents201JSONResponse TransferEventsRecordedResponse
+
+func (response RecordProviderTransferEvents201JSONResponse) VisitRecordProviderTransferEventsResponse(ctx fiber.Ctx) error {
+	ctx.Response().Header.Set("Content-Type", "application/json")
+	ctx.Status(201)
+
+	return ctx.JSON(&response)
+}
+
+type RecordProviderTransferEvents400Response struct {
+}
+
+func (response RecordProviderTransferEvents400Response) VisitRecordProviderTransferEventsResponse(ctx fiber.Ctx) error {
+	ctx.Status(400)
+	return nil
+}
+
+type RecordProviderTransferEvents401Response struct {
+}
+
+func (response RecordProviderTransferEvents401Response) VisitRecordProviderTransferEventsResponse(ctx fiber.Ctx) error {
+	ctx.Status(401)
+	return nil
+}
+
+type RecordProviderTransferEvents403Response struct {
+}
+
+func (response RecordProviderTransferEvents403Response) VisitRecordProviderTransferEventsResponse(ctx fiber.Ctx) error {
+	ctx.Status(403)
+	return nil
+}
+
+type RecordProviderTransferEvents500Response struct {
+}
+
+func (response RecordProviderTransferEvents500Response) VisitRecordProviderTransferEventsResponse(ctx fiber.Ctx) error {
+	ctx.Status(500)
+	return nil
+}
+
+type ListProviderTransferSyncRequestObject struct {
+	Params ListProviderTransferSyncParams
+}
+
+type ListProviderTransferSyncResponseObject interface {
+	VisitListProviderTransferSyncResponse(ctx fiber.Ctx) error
+}
+
+type ListProviderTransferSync200JSONResponse ProviderTransferSyncResponse
+
+func (response ListProviderTransferSync200JSONResponse) VisitListProviderTransferSyncResponse(ctx fiber.Ctx) error {
+	ctx.Response().Header.Set("Content-Type", "application/json")
+	ctx.Status(200)
+
+	return ctx.JSON(&response)
+}
+
+type ListProviderTransferSync400Response struct {
+}
+
+func (response ListProviderTransferSync400Response) VisitListProviderTransferSyncResponse(ctx fiber.Ctx) error {
+	ctx.Status(400)
+	return nil
+}
+
+type ListProviderTransferSync401Response struct {
+}
+
+func (response ListProviderTransferSync401Response) VisitListProviderTransferSyncResponse(ctx fiber.Ctx) error {
+	ctx.Status(401)
+	return nil
+}
+
+type ListProviderTransferSync403Response struct {
+}
+
+func (response ListProviderTransferSync403Response) VisitListProviderTransferSyncResponse(ctx fiber.Ctx) error {
+	ctx.Status(403)
+	return nil
+}
+
+type ListProviderTransferSync500Response struct {
+}
+
+func (response ListProviderTransferSync500Response) VisitListProviderTransferSyncResponse(ctx fiber.Ctx) error {
+	ctx.Status(500)
+	return nil
+}
+
+type RecordProviderTransferSyncRequestObject struct {
+	Body *RecordProviderTransferSyncJSONRequestBody
+}
+
+type RecordProviderTransferSyncResponseObject interface {
+	VisitRecordProviderTransferSyncResponse(ctx fiber.Ctx) error
+}
+
+type RecordProviderTransferSync201JSONResponse ProviderTransferSyncResponse
+
+func (response RecordProviderTransferSync201JSONResponse) VisitRecordProviderTransferSyncResponse(ctx fiber.Ctx) error {
+	ctx.Response().Header.Set("Content-Type", "application/json")
+	ctx.Status(201)
+
+	return ctx.JSON(&response)
+}
+
+type RecordProviderTransferSync400Response struct {
+}
+
+func (response RecordProviderTransferSync400Response) VisitRecordProviderTransferSyncResponse(ctx fiber.Ctx) error {
+	ctx.Status(400)
+	return nil
+}
+
+type RecordProviderTransferSync401Response struct {
+}
+
+func (response RecordProviderTransferSync401Response) VisitRecordProviderTransferSyncResponse(ctx fiber.Ctx) error {
+	ctx.Status(401)
+	return nil
+}
+
+type RecordProviderTransferSync403Response struct {
+}
+
+func (response RecordProviderTransferSync403Response) VisitRecordProviderTransferSyncResponse(ctx fiber.Ctx) error {
+	ctx.Status(403)
+	return nil
+}
+
+type RecordProviderTransferSync500Response struct {
+}
+
+func (response RecordProviderTransferSync500Response) VisitRecordProviderTransferSyncResponse(ctx fiber.Ctx) error {
+	ctx.Status(500)
+	return nil
+}
+
 type GetMetricsSummaryRequestObject struct {
 	Params GetMetricsSummaryParams
 }
@@ -332,6 +1286,104 @@ func (response GetMetricsSummary500Response) VisitGetMetricsSummaryResponse(ctx 
 	return nil
 }
 
+type GetTransferBreakdownRequestObject struct {
+	Params GetTransferBreakdownParams
+}
+
+type GetTransferBreakdownResponseObject interface {
+	VisitGetTransferBreakdownResponse(ctx fiber.Ctx) error
+}
+
+type GetTransferBreakdown200JSONResponse TransferBreakdownResponse
+
+func (response GetTransferBreakdown200JSONResponse) VisitGetTransferBreakdownResponse(ctx fiber.Ctx) error {
+	ctx.Response().Header.Set("Content-Type", "application/json")
+	ctx.Status(200)
+
+	return ctx.JSON(&response)
+}
+
+type GetTransferBreakdown400Response struct {
+}
+
+func (response GetTransferBreakdown400Response) VisitGetTransferBreakdownResponse(ctx fiber.Ctx) error {
+	ctx.Status(400)
+	return nil
+}
+
+type GetTransferBreakdown401Response struct {
+}
+
+func (response GetTransferBreakdown401Response) VisitGetTransferBreakdownResponse(ctx fiber.Ctx) error {
+	ctx.Status(401)
+	return nil
+}
+
+type GetTransferBreakdown403Response struct {
+}
+
+func (response GetTransferBreakdown403Response) VisitGetTransferBreakdownResponse(ctx fiber.Ctx) error {
+	ctx.Status(403)
+	return nil
+}
+
+type GetTransferBreakdown500Response struct {
+}
+
+func (response GetTransferBreakdown500Response) VisitGetTransferBreakdownResponse(ctx fiber.Ctx) error {
+	ctx.Status(500)
+	return nil
+}
+
+type GetTransferSummaryRequestObject struct {
+	Params GetTransferSummaryParams
+}
+
+type GetTransferSummaryResponseObject interface {
+	VisitGetTransferSummaryResponse(ctx fiber.Ctx) error
+}
+
+type GetTransferSummary200JSONResponse TransferAttributionSummary
+
+func (response GetTransferSummary200JSONResponse) VisitGetTransferSummaryResponse(ctx fiber.Ctx) error {
+	ctx.Response().Header.Set("Content-Type", "application/json")
+	ctx.Status(200)
+
+	return ctx.JSON(&response)
+}
+
+type GetTransferSummary400Response struct {
+}
+
+func (response GetTransferSummary400Response) VisitGetTransferSummaryResponse(ctx fiber.Ctx) error {
+	ctx.Status(400)
+	return nil
+}
+
+type GetTransferSummary401Response struct {
+}
+
+func (response GetTransferSummary401Response) VisitGetTransferSummaryResponse(ctx fiber.Ctx) error {
+	ctx.Status(401)
+	return nil
+}
+
+type GetTransferSummary403Response struct {
+}
+
+func (response GetTransferSummary403Response) VisitGetTransferSummaryResponse(ctx fiber.Ctx) error {
+	ctx.Status(403)
+	return nil
+}
+
+type GetTransferSummary500Response struct {
+}
+
+func (response GetTransferSummary500Response) VisitGetTransferSummaryResponse(ctx fiber.Ctx) error {
+	ctx.Status(500)
+	return nil
+}
+
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
 
@@ -340,9 +1392,24 @@ type StrictServerInterface interface {
 
 	// (GET /index/v1/metrics/files/{object_id})
 	GetMetricsFile(ctx context.Context, request GetMetricsFileRequestObject) (GetMetricsFileResponseObject, error)
+	// Record provider-observed transfer events
+	// (POST /index/v1/metrics/provider-transfer-events)
+	RecordProviderTransferEvents(ctx context.Context, request RecordProviderTransferEventsRequestObject) (RecordProviderTransferEventsResponseObject, error)
+	// List provider transfer log sync status
+	// (GET /index/v1/metrics/provider-transfer-sync)
+	ListProviderTransferSync(ctx context.Context, request ListProviderTransferSyncRequestObject) (ListProviderTransferSyncResponseObject, error)
+	// Record provider transfer log sync status
+	// (POST /index/v1/metrics/provider-transfer-sync)
+	RecordProviderTransferSync(ctx context.Context, request RecordProviderTransferSyncRequestObject) (RecordProviderTransferSyncResponseObject, error)
 
 	// (GET /index/v1/metrics/summary)
 	GetMetricsSummary(ctx context.Context, request GetMetricsSummaryRequestObject) (GetMetricsSummaryResponseObject, error)
+	// Group transfer attribution events
+	// (GET /index/v1/metrics/transfers/breakdown)
+	GetTransferBreakdown(ctx context.Context, request GetTransferBreakdownRequestObject) (GetTransferBreakdownResponseObject, error)
+	// Summarize transfer attribution events
+	// (GET /index/v1/metrics/transfers/summary)
+	GetTransferSummary(ctx context.Context, request GetTransferSummaryRequestObject) (GetTransferSummaryResponseObject, error)
 }
 
 type StrictHandlerFunc func(ctx fiber.Ctx, args interface{}) (interface{}, error)
@@ -386,10 +1453,11 @@ func (sh *strictHandler) ListMetricsFiles(ctx fiber.Ctx, params ListMetricsFiles
 }
 
 // GetMetricsFile operation middleware
-func (sh *strictHandler) GetMetricsFile(ctx fiber.Ctx, objectId string) error {
+func (sh *strictHandler) GetMetricsFile(ctx fiber.Ctx, objectId string, params GetMetricsFileParams) error {
 	var request GetMetricsFileRequestObject
 
 	request.ObjectId = objectId
+	request.Params = params
 
 	handler := func(ctx fiber.Ctx, request interface{}) (interface{}, error) {
 		return sh.ssi.GetMetricsFile(ctx.Context(), request.(GetMetricsFileRequestObject))
@@ -404,6 +1472,97 @@ func (sh *strictHandler) GetMetricsFile(ctx fiber.Ctx, objectId string) error {
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	} else if validResponse, ok := response.(GetMetricsFileResponseObject); ok {
 		if err := validResponse.VisitGetMetricsFileResponse(ctx); err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, err.Error())
+		}
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// RecordProviderTransferEvents operation middleware
+func (sh *strictHandler) RecordProviderTransferEvents(ctx fiber.Ctx, params RecordProviderTransferEventsParams) error {
+	var request RecordProviderTransferEventsRequestObject
+
+	request.Params = params
+
+	var body RecordProviderTransferEventsJSONRequestBody
+	if err := ctx.Bind().Body(&body); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	}
+	request.Body = &body
+
+	handler := func(ctx fiber.Ctx, request interface{}) (interface{}, error) {
+		return sh.ssi.RecordProviderTransferEvents(ctx.Context(), request.(RecordProviderTransferEventsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RecordProviderTransferEvents")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	} else if validResponse, ok := response.(RecordProviderTransferEventsResponseObject); ok {
+		if err := validResponse.VisitRecordProviderTransferEventsResponse(ctx); err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, err.Error())
+		}
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// ListProviderTransferSync operation middleware
+func (sh *strictHandler) ListProviderTransferSync(ctx fiber.Ctx, params ListProviderTransferSyncParams) error {
+	var request ListProviderTransferSyncRequestObject
+
+	request.Params = params
+
+	handler := func(ctx fiber.Ctx, request interface{}) (interface{}, error) {
+		return sh.ssi.ListProviderTransferSync(ctx.Context(), request.(ListProviderTransferSyncRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListProviderTransferSync")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	} else if validResponse, ok := response.(ListProviderTransferSyncResponseObject); ok {
+		if err := validResponse.VisitListProviderTransferSyncResponse(ctx); err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, err.Error())
+		}
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// RecordProviderTransferSync operation middleware
+func (sh *strictHandler) RecordProviderTransferSync(ctx fiber.Ctx) error {
+	var request RecordProviderTransferSyncRequestObject
+
+	var body RecordProviderTransferSyncJSONRequestBody
+	if err := ctx.Bind().Body(&body); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	}
+	request.Body = &body
+
+	handler := func(ctx fiber.Ctx, request interface{}) (interface{}, error) {
+		return sh.ssi.RecordProviderTransferSync(ctx.Context(), request.(RecordProviderTransferSyncRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RecordProviderTransferSync")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	} else if validResponse, ok := response.(RecordProviderTransferSyncResponseObject); ok {
+		if err := validResponse.VisitRecordProviderTransferSyncResponse(ctx); err != nil {
 			return fiber.NewError(fiber.StatusBadRequest, err.Error())
 		}
 	} else if response != nil {
@@ -431,6 +1590,60 @@ func (sh *strictHandler) GetMetricsSummary(ctx fiber.Ctx, params GetMetricsSumma
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	} else if validResponse, ok := response.(GetMetricsSummaryResponseObject); ok {
 		if err := validResponse.VisitGetMetricsSummaryResponse(ctx); err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, err.Error())
+		}
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// GetTransferBreakdown operation middleware
+func (sh *strictHandler) GetTransferBreakdown(ctx fiber.Ctx, params GetTransferBreakdownParams) error {
+	var request GetTransferBreakdownRequestObject
+
+	request.Params = params
+
+	handler := func(ctx fiber.Ctx, request interface{}) (interface{}, error) {
+		return sh.ssi.GetTransferBreakdown(ctx.Context(), request.(GetTransferBreakdownRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetTransferBreakdown")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	} else if validResponse, ok := response.(GetTransferBreakdownResponseObject); ok {
+		if err := validResponse.VisitGetTransferBreakdownResponse(ctx); err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, err.Error())
+		}
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// GetTransferSummary operation middleware
+func (sh *strictHandler) GetTransferSummary(ctx fiber.Ctx, params GetTransferSummaryParams) error {
+	var request GetTransferSummaryRequestObject
+
+	request.Params = params
+
+	handler := func(ctx fiber.Ctx, request interface{}) (interface{}, error) {
+		return sh.ssi.GetTransferSummary(ctx.Context(), request.(GetTransferSummaryRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetTransferSummary")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	} else if validResponse, ok := response.(GetTransferSummaryResponseObject); ok {
+		if err := validResponse.VisitGetTransferSummaryResponse(ctx); err != nil {
 			return fiber.NewError(fiber.StatusBadRequest, err.Error())
 		}
 	} else if response != nil {

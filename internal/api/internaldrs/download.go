@@ -6,6 +6,7 @@ import (
 
 	"github.com/calypr/syfon/apigen/server/internalapi"
 	"github.com/calypr/syfon/internal/api/apiutil"
+	"github.com/calypr/syfon/internal/api/attribution"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/config"
 	"github.com/calypr/syfon/internal/core"
@@ -42,6 +43,9 @@ func handleInternalDownloadFiber(c fiber.Ctx, om *core.ObjectManager) error {
 	}
 
 	_ = om.RecordDownload(c.Context(), obj.Id)
+	attribution.RecordAccessIssued(c.Context(), om, obj, attribution.AccessDetails{
+		StorageURL: objectURL,
+	})
 
 	if c.Query("redirect") == "true" {
 		return c.Redirect().To(signedURL)
@@ -94,6 +98,12 @@ func handleInternalDownloadPartFiber(c fiber.Ctx, om *core.ObjectManager) error 
 	if err != nil {
 		return apiutil.HandleError(c, err)
 	}
+	attribution.RecordAccessIssued(c.Context(), om, obj, attribution.AccessDetails{
+		StorageURL:     objectURL,
+		RangeStart:     &start,
+		RangeEnd:       &end,
+		BytesRequested: end - start + 1,
+	})
 
 	return c.JSON(internalapi.InternalSignedURL{
 		Url: &signedURL,

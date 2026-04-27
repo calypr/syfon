@@ -4,6 +4,7 @@
 package metricsapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -14,6 +15,43 @@ import (
 	"time"
 
 	"github.com/oapi-codegen/runtime"
+)
+
+// Defines values for ProviderTransferDirection.
+const (
+	Download ProviderTransferDirection = "download"
+	Upload   ProviderTransferDirection = "upload"
+)
+
+// Defines values for ProviderTransferReconciliationStatus.
+const (
+	All       ProviderTransferReconciliationStatus = "all"
+	Ambiguous ProviderTransferReconciliationStatus = "ambiguous"
+	Matched   ProviderTransferReconciliationStatus = "matched"
+	Unmatched ProviderTransferReconciliationStatus = "unmatched"
+)
+
+// Defines values for ProviderTransferSyncStatus.
+const (
+	Completed ProviderTransferSyncStatus = "completed"
+	Failed    ProviderTransferSyncStatus = "failed"
+	Pending   ProviderTransferSyncStatus = "pending"
+)
+
+// Defines values for TransferBreakdownResponseGroupBy.
+const (
+	TransferBreakdownResponseGroupByObject   TransferBreakdownResponseGroupBy = "object"
+	TransferBreakdownResponseGroupByProvider TransferBreakdownResponseGroupBy = "provider"
+	TransferBreakdownResponseGroupByScope    TransferBreakdownResponseGroupBy = "scope"
+	TransferBreakdownResponseGroupByUser     TransferBreakdownResponseGroupBy = "user"
+)
+
+// Defines values for GetTransferBreakdownParamsGroupBy.
+const (
+	GetTransferBreakdownParamsGroupByObject   GetTransferBreakdownParamsGroupBy = "object"
+	GetTransferBreakdownParamsGroupByProvider GetTransferBreakdownParamsGroupBy = "provider"
+	GetTransferBreakdownParamsGroupByScope    GetTransferBreakdownParamsGroupBy = "scope"
+	GetTransferBreakdownParamsGroupByUser     GetTransferBreakdownParamsGroupBy = "user"
 )
 
 // FileUsage defines model for FileUsage.
@@ -43,17 +81,298 @@ type MetricsListResponse struct {
 	Offset *int         `json:"offset,omitempty"`
 }
 
+// ProviderTransferDirection defines model for ProviderTransferDirection.
+type ProviderTransferDirection string
+
+// ProviderTransferEvent defines model for ProviderTransferEvent.
+type ProviderTransferEvent struct {
+	AccessGrantId    *string                   `json:"access_grant_id,omitempty"`
+	AccessId         *string                   `json:"access_id,omitempty"`
+	ActorEmail       *string                   `json:"actor_email,omitempty"`
+	ActorSubject     *string                   `json:"actor_subject,omitempty"`
+	AuthMode         *string                   `json:"auth_mode,omitempty"`
+	Bucket           string                    `json:"bucket"`
+	BytesTransferred int64                     `json:"bytes_transferred"`
+	Direction        ProviderTransferDirection `json:"direction"`
+	EventTime        *time.Time                `json:"event_time,omitempty"`
+	HttpMethod       *string                   `json:"http_method,omitempty"`
+	HttpStatus       *int                      `json:"http_status,omitempty"`
+
+	// ObjectId DRS object DID when known.
+	ObjectId     *string `json:"object_id,omitempty"`
+	ObjectKey    *string `json:"object_key,omitempty"`
+	ObjectSize   *int64  `json:"object_size,omitempty"`
+	Organization *string `json:"organization,omitempty"`
+	Project      *string `json:"project,omitempty"`
+	Provider     string  `json:"provider"`
+
+	// ProviderEventId Provider/importer idempotency key.
+	ProviderEventId      string                                `json:"provider_event_id"`
+	ProviderRequestId    *string                               `json:"provider_request_id,omitempty"`
+	RangeEnd             *int64                                `json:"range_end"`
+	RangeStart           *int64                                `json:"range_start"`
+	RawEventRef          *string                               `json:"raw_event_ref,omitempty"`
+	ReconciliationStatus *ProviderTransferReconciliationStatus `json:"reconciliation_status,omitempty"`
+	RequestId            *string                               `json:"request_id,omitempty"`
+	RequesterPrincipal   *string                               `json:"requester_principal,omitempty"`
+	Sha256               *string                               `json:"sha256,omitempty"`
+	SourceIp             *string                               `json:"source_ip,omitempty"`
+	StorageUrl           *string                               `json:"storage_url,omitempty"`
+	UserAgent            *string                               `json:"user_agent,omitempty"`
+}
+
+// ProviderTransferEventsRequest defines model for ProviderTransferEventsRequest.
+type ProviderTransferEventsRequest struct {
+	Events []ProviderTransferEvent `json:"events"`
+}
+
+// ProviderTransferReconciliationStatus defines model for ProviderTransferReconciliationStatus.
+type ProviderTransferReconciliationStatus string
+
+// ProviderTransferSyncRequest defines model for ProviderTransferSyncRequest.
+type ProviderTransferSyncRequest struct {
+	AmbiguousEvents *int64 `json:"ambiguous_events,omitempty"`
+
+	// Bucket Bucket filter. When omitted, all configured buckets are recorded.
+	Bucket         *string   `json:"bucket,omitempty"`
+	ErrorMessage   *string   `json:"error_message,omitempty"`
+	From           time.Time `json:"from"`
+	ImportedEvents *int64    `json:"imported_events,omitempty"`
+	MatchedEvents  *int64    `json:"matched_events,omitempty"`
+	Organization   *string   `json:"organization,omitempty"`
+	Project        *string   `json:"project,omitempty"`
+
+	// Provider Provider filter. When omitted, all configured buckets are recorded.
+	Provider        *string                     `json:"provider,omitempty"`
+	Status          *ProviderTransferSyncStatus `json:"status,omitempty"`
+	To              time.Time                   `json:"to"`
+	UnmatchedEvents *int64                      `json:"unmatched_events,omitempty"`
+}
+
+// ProviderTransferSyncResponse defines model for ProviderTransferSyncResponse.
+type ProviderTransferSyncResponse struct {
+	Recorded *int                       `json:"recorded,omitempty"`
+	SyncRuns *[]ProviderTransferSyncRun `json:"sync_runs,omitempty"`
+}
+
+// ProviderTransferSyncRun defines model for ProviderTransferSyncRun.
+type ProviderTransferSyncRun struct {
+	AmbiguousEvents *int64                      `json:"ambiguous_events,omitempty"`
+	Bucket          *string                     `json:"bucket,omitempty"`
+	CompletedAt     *time.Time                  `json:"completed_at"`
+	ErrorMessage    *string                     `json:"error_message,omitempty"`
+	From            *time.Time                  `json:"from,omitempty"`
+	ImportedEvents  *int64                      `json:"imported_events,omitempty"`
+	MatchedEvents   *int64                      `json:"matched_events,omitempty"`
+	Organization    *string                     `json:"organization,omitempty"`
+	Project         *string                     `json:"project,omitempty"`
+	Provider        *string                     `json:"provider,omitempty"`
+	RequestedAt     *time.Time                  `json:"requested_at,omitempty"`
+	StartedAt       *time.Time                  `json:"started_at"`
+	Status          *ProviderTransferSyncStatus `json:"status,omitempty"`
+	SyncId          *string                     `json:"sync_id,omitempty"`
+	To              *time.Time                  `json:"to,omitempty"`
+	UnmatchedEvents *int64                      `json:"unmatched_events,omitempty"`
+}
+
+// ProviderTransferSyncStatus defines model for ProviderTransferSyncStatus.
+type ProviderTransferSyncStatus string
+
+// TransferAttributionBreakdown defines model for TransferAttributionBreakdown.
+type TransferAttributionBreakdown struct {
+	ActorEmail       *string    `json:"actor_email,omitempty"`
+	ActorSubject     *string    `json:"actor_subject,omitempty"`
+	Bucket           *string    `json:"bucket,omitempty"`
+	BytesDownloaded  *int64     `json:"bytes_downloaded,omitempty"`
+	BytesRequested   *int64     `json:"bytes_requested,omitempty"`
+	BytesUploaded    *int64     `json:"bytes_uploaded,omitempty"`
+	EventCount       *int64     `json:"event_count,omitempty"`
+	Key              *string    `json:"key,omitempty"`
+	LastTransferTime *time.Time `json:"last_transfer_time"`
+	Organization     *string    `json:"organization,omitempty"`
+	Project          *string    `json:"project,omitempty"`
+	Provider         *string    `json:"provider,omitempty"`
+	Sha256           *string    `json:"sha256,omitempty"`
+}
+
+// TransferAttributionSummary defines model for TransferAttributionSummary.
+type TransferAttributionSummary struct {
+	AccessIssuedCount  *int64                    `json:"access_issued_count,omitempty"`
+	BytesDownloaded    *int64                    `json:"bytes_downloaded,omitempty"`
+	BytesRequested     *int64                    `json:"bytes_requested,omitempty"`
+	BytesUploaded      *int64                    `json:"bytes_uploaded,omitempty"`
+	DownloadEventCount *int64                    `json:"download_event_count,omitempty"`
+	EventCount         *int64                    `json:"event_count,omitempty"`
+	Freshness          *TransferMetricsFreshness `json:"freshness,omitempty"`
+	UploadEventCount   *int64                    `json:"upload_event_count,omitempty"`
+}
+
+// TransferBreakdownResponse defines model for TransferBreakdownResponse.
+type TransferBreakdownResponse struct {
+	Data      *[]TransferAttributionBreakdown   `json:"data,omitempty"`
+	Freshness *TransferMetricsFreshness         `json:"freshness,omitempty"`
+	GroupBy   *TransferBreakdownResponseGroupBy `json:"group_by,omitempty"`
+}
+
+// TransferBreakdownResponseGroupBy defines model for TransferBreakdownResponse.GroupBy.
+type TransferBreakdownResponseGroupBy string
+
+// TransferEventsRecordedResponse defines model for TransferEventsRecordedResponse.
+type TransferEventsRecordedResponse struct {
+	Recorded *int `json:"recorded,omitempty"`
+}
+
+// TransferMetricsFreshness defines model for TransferMetricsFreshness.
+type TransferMetricsFreshness struct {
+	IsStale             *bool      `json:"is_stale,omitempty"`
+	LatestCompletedSync *time.Time `json:"latest_completed_sync"`
+	MissingBuckets      *[]string  `json:"missing_buckets,omitempty"`
+	RequiredFrom        *time.Time `json:"required_from"`
+	RequiredTo          *time.Time `json:"required_to"`
+}
+
+// AllowStale defines model for AllowStale.
+type AllowStale = bool
+
+// Bucket defines model for Bucket.
+type Bucket = string
+
+// Direction defines model for Direction.
+type Direction = ProviderTransferDirection
+
+// From defines model for From.
+type From = time.Time
+
+// Organization defines model for Organization.
+type Organization = string
+
+// Project defines model for Project.
+type Project = string
+
+// Provider defines model for Provider.
+type Provider = string
+
+// ReconciliationStatus defines model for ReconciliationStatus.
+type ReconciliationStatus = ProviderTransferReconciliationStatus
+
+// SHA256 defines model for SHA256.
+type SHA256 = string
+
+// To defines model for To.
+type To = time.Time
+
+// User defines model for User.
+type User = string
+
 // ListMetricsFilesParams defines parameters for ListMetricsFiles.
 type ListMetricsFilesParams struct {
 	Limit        *int `form:"limit,omitempty" json:"limit,omitempty"`
 	Offset       *int `form:"offset,omitempty" json:"offset,omitempty"`
 	InactiveDays *int `form:"inactive_days,omitempty" json:"inactive_days,omitempty"`
+
+	// Organization Organization/program scope filter.
+	Organization *Organization `form:"organization,omitempty" json:"organization,omitempty"`
+
+	// Project Project scope filter. Requires organization when set.
+	Project *Project `form:"project,omitempty" json:"project,omitempty"`
+}
+
+// GetMetricsFileParams defines parameters for GetMetricsFile.
+type GetMetricsFileParams struct {
+	// Organization Organization/program scope filter.
+	Organization *Organization `form:"organization,omitempty" json:"organization,omitempty"`
+
+	// Project Project scope filter. Requires organization when set.
+	Project *Project `form:"project,omitempty" json:"project,omitempty"`
+}
+
+// RecordProviderTransferEventsParams defines parameters for RecordProviderTransferEvents.
+type RecordProviderTransferEventsParams struct {
+	// Organization Organization/program scope filter.
+	Organization *Organization `form:"organization,omitempty" json:"organization,omitempty"`
+
+	// Project Project scope filter. Requires organization when set.
+	Project *Project `form:"project,omitempty" json:"project,omitempty"`
+}
+
+// ListProviderTransferSyncParams defines parameters for ListProviderTransferSync.
+type ListProviderTransferSyncParams struct {
+	// Organization Organization/program scope filter.
+	Organization *Organization `form:"organization,omitempty" json:"organization,omitempty"`
+
+	// Project Project scope filter. Requires organization when set.
+	Project  *Project  `form:"project,omitempty" json:"project,omitempty"`
+	From     *From     `form:"from,omitempty" json:"from,omitempty"`
+	To       *To       `form:"to,omitempty" json:"to,omitempty"`
+	Provider *Provider `form:"provider,omitempty" json:"provider,omitempty"`
+	Bucket   *Bucket   `form:"bucket,omitempty" json:"bucket,omitempty"`
+	Limit    *int      `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
 // GetMetricsSummaryParams defines parameters for GetMetricsSummary.
 type GetMetricsSummaryParams struct {
 	InactiveDays *int `form:"inactive_days,omitempty" json:"inactive_days,omitempty"`
+
+	// Organization Organization/program scope filter.
+	Organization *Organization `form:"organization,omitempty" json:"organization,omitempty"`
+
+	// Project Project scope filter. Requires organization when set.
+	Project *Project `form:"project,omitempty" json:"project,omitempty"`
 }
+
+// GetTransferBreakdownParams defines parameters for GetTransferBreakdown.
+type GetTransferBreakdownParams struct {
+	// Organization Organization/program scope filter.
+	Organization *Organization `form:"organization,omitempty" json:"organization,omitempty"`
+
+	// Project Project scope filter. Requires organization when set.
+	Project              *Project              `form:"project,omitempty" json:"project,omitempty"`
+	Direction            *Direction            `form:"direction,omitempty" json:"direction,omitempty"`
+	ReconciliationStatus *ReconciliationStatus `form:"reconciliation_status,omitempty" json:"reconciliation_status,omitempty"`
+	From                 *From                 `form:"from,omitempty" json:"from,omitempty"`
+	To                   *To                   `form:"to,omitempty" json:"to,omitempty"`
+	Provider             *Provider             `form:"provider,omitempty" json:"provider,omitempty"`
+	Bucket               *Bucket               `form:"bucket,omitempty" json:"bucket,omitempty"`
+	Sha256               *SHA256               `form:"sha256,omitempty" json:"sha256,omitempty"`
+
+	// User Actor email or subject filter.
+	User *User `form:"user,omitempty" json:"user,omitempty"`
+
+	// AllowStale Deprecated. Transfer metrics always return persisted provider events with freshness metadata, including missing sync windows and latest completed sync time.
+	AllowStale *AllowStale                        `form:"allow_stale,omitempty" json:"allow_stale,omitempty"`
+	GroupBy    *GetTransferBreakdownParamsGroupBy `form:"group_by,omitempty" json:"group_by,omitempty"`
+}
+
+// GetTransferBreakdownParamsGroupBy defines parameters for GetTransferBreakdown.
+type GetTransferBreakdownParamsGroupBy string
+
+// GetTransferSummaryParams defines parameters for GetTransferSummary.
+type GetTransferSummaryParams struct {
+	// Organization Organization/program scope filter.
+	Organization *Organization `form:"organization,omitempty" json:"organization,omitempty"`
+
+	// Project Project scope filter. Requires organization when set.
+	Project              *Project              `form:"project,omitempty" json:"project,omitempty"`
+	Direction            *Direction            `form:"direction,omitempty" json:"direction,omitempty"`
+	ReconciliationStatus *ReconciliationStatus `form:"reconciliation_status,omitempty" json:"reconciliation_status,omitempty"`
+	From                 *From                 `form:"from,omitempty" json:"from,omitempty"`
+	To                   *To                   `form:"to,omitempty" json:"to,omitempty"`
+	Provider             *Provider             `form:"provider,omitempty" json:"provider,omitempty"`
+	Bucket               *Bucket               `form:"bucket,omitempty" json:"bucket,omitempty"`
+	Sha256               *SHA256               `form:"sha256,omitempty" json:"sha256,omitempty"`
+
+	// User Actor email or subject filter.
+	User *User `form:"user,omitempty" json:"user,omitempty"`
+
+	// AllowStale Deprecated. Transfer metrics always return persisted provider events with freshness metadata, including missing sync windows and latest completed sync time.
+	AllowStale *AllowStale `form:"allow_stale,omitempty" json:"allow_stale,omitempty"`
+}
+
+// RecordProviderTransferEventsJSONRequestBody defines body for RecordProviderTransferEvents for application/json ContentType.
+type RecordProviderTransferEventsJSONRequestBody = ProviderTransferEventsRequest
+
+// RecordProviderTransferSyncJSONRequestBody defines body for RecordProviderTransferSync for application/json ContentType.
+type RecordProviderTransferSyncJSONRequestBody = ProviderTransferSyncRequest
 
 // RequestEditorFn  is the function signature for the RequestEditor callback function
 type RequestEditorFn func(ctx context.Context, req *http.Request) error
@@ -132,10 +451,29 @@ type ClientInterface interface {
 	ListMetricsFiles(ctx context.Context, params *ListMetricsFilesParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetMetricsFile request
-	GetMetricsFile(ctx context.Context, objectId string, reqEditors ...RequestEditorFn) (*http.Response, error)
+	GetMetricsFile(ctx context.Context, objectId string, params *GetMetricsFileParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RecordProviderTransferEventsWithBody request with any body
+	RecordProviderTransferEventsWithBody(ctx context.Context, params *RecordProviderTransferEventsParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	RecordProviderTransferEvents(ctx context.Context, params *RecordProviderTransferEventsParams, body RecordProviderTransferEventsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListProviderTransferSync request
+	ListProviderTransferSync(ctx context.Context, params *ListProviderTransferSyncParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RecordProviderTransferSyncWithBody request with any body
+	RecordProviderTransferSyncWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	RecordProviderTransferSync(ctx context.Context, body RecordProviderTransferSyncJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetMetricsSummary request
 	GetMetricsSummary(ctx context.Context, params *GetMetricsSummaryParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetTransferBreakdown request
+	GetTransferBreakdown(ctx context.Context, params *GetTransferBreakdownParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetTransferSummary request
+	GetTransferSummary(ctx context.Context, params *GetTransferSummaryParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 }
 
 func (c *Client) ListMetricsFiles(ctx context.Context, params *ListMetricsFilesParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -150,8 +488,68 @@ func (c *Client) ListMetricsFiles(ctx context.Context, params *ListMetricsFilesP
 	return c.Client.Do(req)
 }
 
-func (c *Client) GetMetricsFile(ctx context.Context, objectId string, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewGetMetricsFileRequest(c.Server, objectId)
+func (c *Client) GetMetricsFile(ctx context.Context, objectId string, params *GetMetricsFileParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetMetricsFileRequest(c.Server, objectId, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) RecordProviderTransferEventsWithBody(ctx context.Context, params *RecordProviderTransferEventsParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRecordProviderTransferEventsRequestWithBody(c.Server, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) RecordProviderTransferEvents(ctx context.Context, params *RecordProviderTransferEventsParams, body RecordProviderTransferEventsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRecordProviderTransferEventsRequest(c.Server, params, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListProviderTransferSync(ctx context.Context, params *ListProviderTransferSyncParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListProviderTransferSyncRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) RecordProviderTransferSyncWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRecordProviderTransferSyncRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) RecordProviderTransferSync(ctx context.Context, body RecordProviderTransferSyncJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRecordProviderTransferSyncRequest(c.Server, body)
 	if err != nil {
 		return nil, err
 	}
@@ -164,6 +562,30 @@ func (c *Client) GetMetricsFile(ctx context.Context, objectId string, reqEditors
 
 func (c *Client) GetMetricsSummary(ctx context.Context, params *GetMetricsSummaryParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetMetricsSummaryRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetTransferBreakdown(ctx context.Context, params *GetTransferBreakdownParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetTransferBreakdownRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetTransferSummary(ctx context.Context, params *GetTransferSummaryParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetTransferSummaryRequest(c.Server, params)
 	if err != nil {
 		return nil, err
 	}
@@ -244,6 +666,38 @@ func NewListMetricsFilesRequest(server string, params *ListMetricsFilesParams) (
 
 		}
 
+		if params.Organization != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "organization", runtime.ParamLocationQuery, *params.Organization); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Project != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "project", runtime.ParamLocationQuery, *params.Project); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
 		queryURL.RawQuery = queryValues.Encode()
 	}
 
@@ -256,7 +710,7 @@ func NewListMetricsFilesRequest(server string, params *ListMetricsFilesParams) (
 }
 
 // NewGetMetricsFileRequest generates requests for GetMetricsFile
-func NewGetMetricsFileRequest(server string, objectId string) (*http.Request, error) {
+func NewGetMetricsFileRequest(server string, objectId string, params *GetMetricsFileParams) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
@@ -281,10 +735,311 @@ func NewGetMetricsFileRequest(server string, objectId string) (*http.Request, er
 		return nil, err
 	}
 
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if params.Organization != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "organization", runtime.ParamLocationQuery, *params.Organization); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Project != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "project", runtime.ParamLocationQuery, *params.Project); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
+	}
+
 	req, err := http.NewRequest("GET", queryURL.String(), nil)
 	if err != nil {
 		return nil, err
 	}
+
+	return req, nil
+}
+
+// NewRecordProviderTransferEventsRequest calls the generic RecordProviderTransferEvents builder with application/json body
+func NewRecordProviderTransferEventsRequest(server string, params *RecordProviderTransferEventsParams, body RecordProviderTransferEventsJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewRecordProviderTransferEventsRequestWithBody(server, params, "application/json", bodyReader)
+}
+
+// NewRecordProviderTransferEventsRequestWithBody generates requests for RecordProviderTransferEvents with any type of body
+func NewRecordProviderTransferEventsRequestWithBody(server string, params *RecordProviderTransferEventsParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/index/v1/metrics/provider-transfer-events")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if params.Organization != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "organization", runtime.ParamLocationQuery, *params.Organization); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Project != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "project", runtime.ParamLocationQuery, *params.Project); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewListProviderTransferSyncRequest generates requests for ListProviderTransferSync
+func NewListProviderTransferSyncRequest(server string, params *ListProviderTransferSyncParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/index/v1/metrics/provider-transfer-sync")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if params.Organization != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "organization", runtime.ParamLocationQuery, *params.Organization); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Project != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "project", runtime.ParamLocationQuery, *params.Project); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.From != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "from", runtime.ParamLocationQuery, *params.From); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.To != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "to", runtime.ParamLocationQuery, *params.To); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Provider != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "provider", runtime.ParamLocationQuery, *params.Provider); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Bucket != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "bucket", runtime.ParamLocationQuery, *params.Bucket); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "limit", runtime.ParamLocationQuery, *params.Limit); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewRecordProviderTransferSyncRequest calls the generic RecordProviderTransferSync builder with application/json body
+func NewRecordProviderTransferSyncRequest(server string, body RecordProviderTransferSyncJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewRecordProviderTransferSyncRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewRecordProviderTransferSyncRequestWithBody generates requests for RecordProviderTransferSync with any type of body
+func NewRecordProviderTransferSyncRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/index/v1/metrics/provider-transfer-sync")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
 
 	return req, nil
 }
@@ -314,6 +1069,472 @@ func NewGetMetricsSummaryRequest(server string, params *GetMetricsSummaryParams)
 		if params.InactiveDays != nil {
 
 			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "inactive_days", runtime.ParamLocationQuery, *params.InactiveDays); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Organization != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "organization", runtime.ParamLocationQuery, *params.Organization); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Project != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "project", runtime.ParamLocationQuery, *params.Project); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetTransferBreakdownRequest generates requests for GetTransferBreakdown
+func NewGetTransferBreakdownRequest(server string, params *GetTransferBreakdownParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/index/v1/metrics/transfers/breakdown")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if params.Organization != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "organization", runtime.ParamLocationQuery, *params.Organization); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Project != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "project", runtime.ParamLocationQuery, *params.Project); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Direction != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "direction", runtime.ParamLocationQuery, *params.Direction); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.ReconciliationStatus != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "reconciliation_status", runtime.ParamLocationQuery, *params.ReconciliationStatus); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.From != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "from", runtime.ParamLocationQuery, *params.From); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.To != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "to", runtime.ParamLocationQuery, *params.To); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Provider != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "provider", runtime.ParamLocationQuery, *params.Provider); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Bucket != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "bucket", runtime.ParamLocationQuery, *params.Bucket); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Sha256 != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "sha256", runtime.ParamLocationQuery, *params.Sha256); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.User != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "user", runtime.ParamLocationQuery, *params.User); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.AllowStale != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "allow_stale", runtime.ParamLocationQuery, *params.AllowStale); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.GroupBy != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "group_by", runtime.ParamLocationQuery, *params.GroupBy); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetTransferSummaryRequest generates requests for GetTransferSummary
+func NewGetTransferSummaryRequest(server string, params *GetTransferSummaryParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/index/v1/metrics/transfers/summary")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if params.Organization != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "organization", runtime.ParamLocationQuery, *params.Organization); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Project != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "project", runtime.ParamLocationQuery, *params.Project); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Direction != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "direction", runtime.ParamLocationQuery, *params.Direction); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.ReconciliationStatus != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "reconciliation_status", runtime.ParamLocationQuery, *params.ReconciliationStatus); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.From != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "from", runtime.ParamLocationQuery, *params.From); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.To != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "to", runtime.ParamLocationQuery, *params.To); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Provider != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "provider", runtime.ParamLocationQuery, *params.Provider); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Bucket != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "bucket", runtime.ParamLocationQuery, *params.Bucket); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Sha256 != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "sha256", runtime.ParamLocationQuery, *params.Sha256); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.User != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "user", runtime.ParamLocationQuery, *params.User); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.AllowStale != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "allow_stale", runtime.ParamLocationQuery, *params.AllowStale); err != nil {
 				return nil, err
 			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
 				return nil, err
@@ -385,10 +1606,29 @@ type ClientWithResponsesInterface interface {
 	ListMetricsFilesWithResponse(ctx context.Context, params *ListMetricsFilesParams, reqEditors ...RequestEditorFn) (*ListMetricsFilesResponse, error)
 
 	// GetMetricsFileWithResponse request
-	GetMetricsFileWithResponse(ctx context.Context, objectId string, reqEditors ...RequestEditorFn) (*GetMetricsFileResponse, error)
+	GetMetricsFileWithResponse(ctx context.Context, objectId string, params *GetMetricsFileParams, reqEditors ...RequestEditorFn) (*GetMetricsFileResponse, error)
+
+	// RecordProviderTransferEventsWithBodyWithResponse request with any body
+	RecordProviderTransferEventsWithBodyWithResponse(ctx context.Context, params *RecordProviderTransferEventsParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RecordProviderTransferEventsResponse, error)
+
+	RecordProviderTransferEventsWithResponse(ctx context.Context, params *RecordProviderTransferEventsParams, body RecordProviderTransferEventsJSONRequestBody, reqEditors ...RequestEditorFn) (*RecordProviderTransferEventsResponse, error)
+
+	// ListProviderTransferSyncWithResponse request
+	ListProviderTransferSyncWithResponse(ctx context.Context, params *ListProviderTransferSyncParams, reqEditors ...RequestEditorFn) (*ListProviderTransferSyncResponse, error)
+
+	// RecordProviderTransferSyncWithBodyWithResponse request with any body
+	RecordProviderTransferSyncWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RecordProviderTransferSyncResponse, error)
+
+	RecordProviderTransferSyncWithResponse(ctx context.Context, body RecordProviderTransferSyncJSONRequestBody, reqEditors ...RequestEditorFn) (*RecordProviderTransferSyncResponse, error)
 
 	// GetMetricsSummaryWithResponse request
 	GetMetricsSummaryWithResponse(ctx context.Context, params *GetMetricsSummaryParams, reqEditors ...RequestEditorFn) (*GetMetricsSummaryResponse, error)
+
+	// GetTransferBreakdownWithResponse request
+	GetTransferBreakdownWithResponse(ctx context.Context, params *GetTransferBreakdownParams, reqEditors ...RequestEditorFn) (*GetTransferBreakdownResponse, error)
+
+	// GetTransferSummaryWithResponse request
+	GetTransferSummaryWithResponse(ctx context.Context, params *GetTransferSummaryParams, reqEditors ...RequestEditorFn) (*GetTransferSummaryResponse, error)
 }
 
 type ListMetricsFilesResponse struct {
@@ -435,6 +1675,72 @@ func (r GetMetricsFileResponse) StatusCode() int {
 	return 0
 }
 
+type RecordProviderTransferEventsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON201      *TransferEventsRecordedResponse
+}
+
+// Status returns HTTPResponse.Status
+func (r RecordProviderTransferEventsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RecordProviderTransferEventsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type ListProviderTransferSyncResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ProviderTransferSyncResponse
+}
+
+// Status returns HTTPResponse.Status
+func (r ListProviderTransferSyncResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListProviderTransferSyncResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type RecordProviderTransferSyncResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON201      *ProviderTransferSyncResponse
+}
+
+// Status returns HTTPResponse.Status
+func (r RecordProviderTransferSyncResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RecordProviderTransferSyncResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type GetMetricsSummaryResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -457,6 +1763,50 @@ func (r GetMetricsSummaryResponse) StatusCode() int {
 	return 0
 }
 
+type GetTransferBreakdownResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *TransferBreakdownResponse
+}
+
+// Status returns HTTPResponse.Status
+func (r GetTransferBreakdownResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetTransferBreakdownResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type GetTransferSummaryResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *TransferAttributionSummary
+}
+
+// Status returns HTTPResponse.Status
+func (r GetTransferSummaryResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetTransferSummaryResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 // ListMetricsFilesWithResponse request returning *ListMetricsFilesResponse
 func (c *ClientWithResponses) ListMetricsFilesWithResponse(ctx context.Context, params *ListMetricsFilesParams, reqEditors ...RequestEditorFn) (*ListMetricsFilesResponse, error) {
 	rsp, err := c.ListMetricsFiles(ctx, params, reqEditors...)
@@ -467,12 +1817,55 @@ func (c *ClientWithResponses) ListMetricsFilesWithResponse(ctx context.Context, 
 }
 
 // GetMetricsFileWithResponse request returning *GetMetricsFileResponse
-func (c *ClientWithResponses) GetMetricsFileWithResponse(ctx context.Context, objectId string, reqEditors ...RequestEditorFn) (*GetMetricsFileResponse, error) {
-	rsp, err := c.GetMetricsFile(ctx, objectId, reqEditors...)
+func (c *ClientWithResponses) GetMetricsFileWithResponse(ctx context.Context, objectId string, params *GetMetricsFileParams, reqEditors ...RequestEditorFn) (*GetMetricsFileResponse, error) {
+	rsp, err := c.GetMetricsFile(ctx, objectId, params, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
 	return ParseGetMetricsFileResponse(rsp)
+}
+
+// RecordProviderTransferEventsWithBodyWithResponse request with arbitrary body returning *RecordProviderTransferEventsResponse
+func (c *ClientWithResponses) RecordProviderTransferEventsWithBodyWithResponse(ctx context.Context, params *RecordProviderTransferEventsParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RecordProviderTransferEventsResponse, error) {
+	rsp, err := c.RecordProviderTransferEventsWithBody(ctx, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRecordProviderTransferEventsResponse(rsp)
+}
+
+func (c *ClientWithResponses) RecordProviderTransferEventsWithResponse(ctx context.Context, params *RecordProviderTransferEventsParams, body RecordProviderTransferEventsJSONRequestBody, reqEditors ...RequestEditorFn) (*RecordProviderTransferEventsResponse, error) {
+	rsp, err := c.RecordProviderTransferEvents(ctx, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRecordProviderTransferEventsResponse(rsp)
+}
+
+// ListProviderTransferSyncWithResponse request returning *ListProviderTransferSyncResponse
+func (c *ClientWithResponses) ListProviderTransferSyncWithResponse(ctx context.Context, params *ListProviderTransferSyncParams, reqEditors ...RequestEditorFn) (*ListProviderTransferSyncResponse, error) {
+	rsp, err := c.ListProviderTransferSync(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListProviderTransferSyncResponse(rsp)
+}
+
+// RecordProviderTransferSyncWithBodyWithResponse request with arbitrary body returning *RecordProviderTransferSyncResponse
+func (c *ClientWithResponses) RecordProviderTransferSyncWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RecordProviderTransferSyncResponse, error) {
+	rsp, err := c.RecordProviderTransferSyncWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRecordProviderTransferSyncResponse(rsp)
+}
+
+func (c *ClientWithResponses) RecordProviderTransferSyncWithResponse(ctx context.Context, body RecordProviderTransferSyncJSONRequestBody, reqEditors ...RequestEditorFn) (*RecordProviderTransferSyncResponse, error) {
+	rsp, err := c.RecordProviderTransferSync(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRecordProviderTransferSyncResponse(rsp)
 }
 
 // GetMetricsSummaryWithResponse request returning *GetMetricsSummaryResponse
@@ -482,6 +1875,24 @@ func (c *ClientWithResponses) GetMetricsSummaryWithResponse(ctx context.Context,
 		return nil, err
 	}
 	return ParseGetMetricsSummaryResponse(rsp)
+}
+
+// GetTransferBreakdownWithResponse request returning *GetTransferBreakdownResponse
+func (c *ClientWithResponses) GetTransferBreakdownWithResponse(ctx context.Context, params *GetTransferBreakdownParams, reqEditors ...RequestEditorFn) (*GetTransferBreakdownResponse, error) {
+	rsp, err := c.GetTransferBreakdown(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetTransferBreakdownResponse(rsp)
+}
+
+// GetTransferSummaryWithResponse request returning *GetTransferSummaryResponse
+func (c *ClientWithResponses) GetTransferSummaryWithResponse(ctx context.Context, params *GetTransferSummaryParams, reqEditors ...RequestEditorFn) (*GetTransferSummaryResponse, error) {
+	rsp, err := c.GetTransferSummary(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetTransferSummaryResponse(rsp)
 }
 
 // ParseListMetricsFilesResponse parses an HTTP response from a ListMetricsFilesWithResponse call
@@ -536,6 +1947,84 @@ func ParseGetMetricsFileResponse(rsp *http.Response) (*GetMetricsFileResponse, e
 	return response, nil
 }
 
+// ParseRecordProviderTransferEventsResponse parses an HTTP response from a RecordProviderTransferEventsWithResponse call
+func ParseRecordProviderTransferEventsResponse(rsp *http.Response) (*RecordProviderTransferEventsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RecordProviderTransferEventsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest TransferEventsRecordedResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListProviderTransferSyncResponse parses an HTTP response from a ListProviderTransferSyncWithResponse call
+func ParseListProviderTransferSyncResponse(rsp *http.Response) (*ListProviderTransferSyncResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListProviderTransferSyncResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ProviderTransferSyncResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseRecordProviderTransferSyncResponse parses an HTTP response from a RecordProviderTransferSyncWithResponse call
+func ParseRecordProviderTransferSyncResponse(rsp *http.Response) (*RecordProviderTransferSyncResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RecordProviderTransferSyncResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest ProviderTransferSyncResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseGetMetricsSummaryResponse parses an HTTP response from a GetMetricsSummaryWithResponse call
 func ParseGetMetricsSummaryResponse(rsp *http.Response) (*GetMetricsSummaryResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -552,6 +2041,58 @@ func ParseGetMetricsSummaryResponse(rsp *http.Response) (*GetMetricsSummaryRespo
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest FileUsageSummary
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetTransferBreakdownResponse parses an HTTP response from a GetTransferBreakdownWithResponse call
+func ParseGetTransferBreakdownResponse(rsp *http.Response) (*GetTransferBreakdownResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetTransferBreakdownResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest TransferBreakdownResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetTransferSummaryResponse parses an HTTP response from a GetTransferSummaryWithResponse call
+func ParseGetTransferSummaryResponse(rsp *http.Response) (*GetTransferSummaryResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetTransferSummaryResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest TransferAttributionSummary
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

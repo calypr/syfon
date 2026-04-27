@@ -706,6 +706,238 @@ func TestSqliteDB_FileUsageMetrics_MissingObjectQueuedAndFlushedOnCreate(t *test
 	}
 }
 
+func TestSqliteDB_TransferAttributionMetrics(t *testing.T) {
+	ctx := context.Background()
+	db, err := NewSqliteDB(":memory:")
+	if err != nil {
+		t.Fatalf("failed to create db: %v", err)
+	}
+	now := time.Now().UTC()
+	oid := "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+	if err := db.CreateObject(ctx, &models.InternalObject{
+		Authorizations: map[string][]string{"calypr": {"proj-a"}},
+		DrsObject: drs.DrsObject{
+			Id:          "did-1",
+			Name:        common.Ptr("transfer-object"),
+			Size:        42,
+			CreatedTime: now,
+			UpdatedTime: &now,
+			Version:     common.Ptr("1"),
+			Checksums: []drs.Checksum{
+				{Type: "sha256", Checksum: oid},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("CreateObject failed: %v", err)
+	}
+
+	rangeStart := int64(0)
+	rangeEnd := int64(41)
+	grants := []models.TransferAttributionEvent{
+		{
+			EventID:           "grant-download-1",
+			AccessGrantID:     "grant-download-1",
+			EventType:         models.TransferEventAccessIssued,
+			EventTime:         now,
+			RequestID:         "request-1",
+			ObjectID:          "did-1",
+			SHA256:            oid,
+			ObjectSize:        42,
+			Organization:      "calypr",
+			Project:           "proj-a",
+			AccessID:          "s3",
+			Provider:          "s3",
+			Bucket:            "bucket-a",
+			StorageURL:        "s3://bucket-a/program/proj/" + oid,
+			RangeStart:        &rangeStart,
+			RangeEnd:          &rangeEnd,
+			BytesRequested:    42,
+			BytesCompleted:    42,
+			ActorEmail:        "user@example.com",
+			ActorSubject:      "user@example.com",
+			AuthMode:          "gen3",
+			ClientName:        "git-drs",
+			ClientVersion:     "test",
+			TransferSessionID: "session-1",
+		},
+		{
+			EventID:           "grant-upload-1",
+			AccessGrantID:     "grant-upload-1",
+			EventType:         models.TransferEventAccessIssued,
+			EventTime:         now.Add(time.Second),
+			RequestID:         "request-2",
+			ObjectID:          "did-1",
+			SHA256:            oid,
+			ObjectSize:        42,
+			Organization:      "calypr",
+			Project:           "proj-a",
+			AccessID:          "s3",
+			Provider:          "s3",
+			Bucket:            "bucket-a",
+			StorageURL:        "s3://bucket-a/program/proj/" + oid,
+			BytesRequested:    42,
+			BytesCompleted:    42,
+			ActorSubject:      "local-user",
+			AuthMode:          "local",
+			ClientName:        "git-drs",
+			ClientVersion:     "test",
+			TransferSessionID: "session-2",
+		},
+	}
+	if err := db.RecordTransferAttributionEvents(ctx, grants); err != nil {
+		t.Fatalf("RecordTransferAttributionEvents failed: %v", err)
+	}
+	if err := db.RecordTransferAttributionEvents(ctx, grants[:1]); err != nil {
+		t.Fatalf("duplicate RecordTransferAttributionEvents failed: %v", err)
+	}
+	providerEvents := []models.ProviderTransferEvent{
+		{
+			ProviderEventID:  "provider-download-1",
+			AccessGrantID:    "grant-download-1",
+			Direction:        models.ProviderTransferDirectionDownload,
+			EventTime:        now.Add(2 * time.Second),
+			Provider:         "s3",
+			Bucket:           "bucket-a",
+			ObjectKey:        "program/proj/" + oid,
+			StorageURL:       "s3://bucket-a/program/proj/" + oid,
+			RangeStart:       &rangeStart,
+			RangeEnd:         &rangeEnd,
+			BytesTransferred: 42,
+			HTTPMethod:       "GET",
+			HTTPStatus:       200,
+		},
+		{
+			ProviderEventID:  "provider-upload-1",
+			AccessGrantID:    "grant-upload-1",
+			Direction:        models.ProviderTransferDirectionUpload,
+			EventTime:        now.Add(3 * time.Second),
+			Provider:         "s3",
+			Bucket:           "bucket-a",
+			ObjectKey:        "program/proj/" + oid,
+			StorageURL:       "s3://bucket-a/program/proj/" + oid,
+			BytesTransferred: 42,
+			HTTPMethod:       "PUT",
+			HTTPStatus:       200,
+		},
+	}
+	if err := db.RecordProviderTransferEvents(ctx, providerEvents); err != nil {
+		t.Fatalf("RecordProviderTransferEvents failed: %v", err)
+	}
+	if err := db.RecordProviderTransferEvents(ctx, providerEvents[:1]); err != nil {
+		t.Fatalf("duplicate RecordProviderTransferEvents failed: %v", err)
+	}
+
+	summary, err := db.GetTransferAttributionSummary(ctx, models.TransferAttributionFilter{
+		Organization: "calypr",
+		Project:      "proj-a",
+	})
+	if err != nil {
+		t.Fatalf("GetTransferAttributionSummary failed: %v", err)
+	}
+	if summary.EventCount != 2 || summary.DownloadEventCount != 1 || summary.UploadEventCount != 1 || summary.BytesDownloaded != 42 || summary.BytesUploaded != 42 {
+		t.Fatalf("unexpected transfer summary: %+v", summary)
+	}
+
+	userBreakdown, err := db.GetTransferAttributionBreakdown(ctx, models.TransferAttributionFilter{Organization: "calypr"}, "user")
+	if err != nil {
+		t.Fatalf("GetTransferAttributionBreakdown(user) failed: %v", err)
+	}
+	if len(userBreakdown) != 2 {
+		t.Fatalf("expected two user breakdown rows, got %+v", userBreakdown)
+	}
+	providerBreakdown, err := db.GetTransferAttributionBreakdown(ctx, models.TransferAttributionFilter{Provider: "s3", Bucket: "bucket-a"}, "provider")
+	if err != nil {
+		t.Fatalf("GetTransferAttributionBreakdown(provider) failed: %v", err)
+	}
+	if len(providerBreakdown) != 1 || providerBreakdown[0].BytesDownloaded != 42 || providerBreakdown[0].BytesUploaded != 42 {
+		t.Fatalf("unexpected provider breakdown: %+v", providerBreakdown)
+	}
+	objectBreakdown, err := db.GetTransferAttributionBreakdown(ctx, models.TransferAttributionFilter{SHA256: oid}, "object")
+	if err != nil {
+		t.Fatalf("GetTransferAttributionBreakdown(object) failed: %v", err)
+	}
+	if len(objectBreakdown) != 1 || objectBreakdown[0].SHA256 != oid {
+		t.Fatalf("unexpected object breakdown: %+v", objectBreakdown)
+	}
+
+	if err := db.DeleteObject(ctx, "did-1"); err != nil {
+		t.Fatalf("DeleteObject failed: %v", err)
+	}
+	afterDelete, err := db.GetTransferAttributionSummary(ctx, models.TransferAttributionFilter{SHA256: oid})
+	if err != nil {
+		t.Fatalf("GetTransferAttributionSummary after delete failed: %v", err)
+	}
+	if afterDelete.EventCount != 2 || afterDelete.BytesDownloaded != 42 || afterDelete.BytesUploaded != 42 {
+		t.Fatalf("expected transfer events to survive object deletion, got %+v", afterDelete)
+	}
+	unmatched := models.ProviderTransferEvent{
+		ProviderEventID:  "provider-unmatched-1",
+		Direction:        models.ProviderTransferDirectionDownload,
+		EventTime:        now,
+		Provider:         "s3",
+		Bucket:           "bucket-a",
+		ObjectKey:        "missing",
+		BytesTransferred: 10,
+		HTTPMethod:       "GET",
+		HTTPStatus:       200,
+	}
+	if err := db.RecordProviderTransferEvents(ctx, []models.ProviderTransferEvent{unmatched}); err != nil {
+		t.Fatalf("RecordProviderTransferEvents unmatched failed: %v", err)
+	}
+	defaultSummary, err := db.GetTransferAttributionSummary(ctx, models.TransferAttributionFilter{Bucket: "bucket-a"})
+	if err != nil {
+		t.Fatalf("GetTransferAttributionSummary default failed: %v", err)
+	}
+	if defaultSummary.EventCount != 2 {
+		t.Fatalf("unmatched provider event should not be billed by default: %+v", defaultSummary)
+	}
+	allSummary, err := db.GetTransferAttributionSummary(ctx, models.TransferAttributionFilter{Bucket: "bucket-a", ReconciliationStatus: "all"})
+	if err != nil {
+		t.Fatalf("GetTransferAttributionSummary all failed: %v", err)
+	}
+	if allSummary.EventCount != 3 {
+		t.Fatalf("expected all reconciliation states when requested, got %+v", allSummary)
+	}
+
+	completedAt := now.Add(5 * time.Second)
+	runs := []models.ProviderTransferSyncRun{
+		{
+			SyncID:         "sync-bucket-a",
+			Provider:       "s3",
+			Bucket:         "bucket-a",
+			Organization:   "calypr",
+			Project:        "proj-a",
+			From:           now.Add(-time.Hour),
+			To:             now.Add(time.Hour),
+			Status:         models.ProviderTransferSyncCompleted,
+			RequestedAt:    now,
+			CompletedAt:    &completedAt,
+			ImportedEvents: 2,
+			MatchedEvents:  2,
+		},
+	}
+	if err := db.RecordProviderTransferSyncRuns(ctx, runs); err != nil {
+		t.Fatalf("RecordProviderTransferSyncRuns failed: %v", err)
+	}
+	if err := db.RecordProviderTransferSyncRuns(ctx, runs); err != nil {
+		t.Fatalf("duplicate RecordProviderTransferSyncRuns failed: %v", err)
+	}
+	listed, err := db.ListProviderTransferSyncRuns(ctx, models.TransferAttributionFilter{
+		Organization: "calypr",
+		Project:      "proj-a",
+		Provider:     "s3",
+		Bucket:       "bucket-a",
+		From:         common.Ptr(now.Add(-time.Minute)),
+		To:           common.Ptr(now.Add(time.Minute)),
+	}, 10)
+	if err != nil {
+		t.Fatalf("ListProviderTransferSyncRuns failed: %v", err)
+	}
+	if len(listed) != 1 || listed[0].SyncID != "sync-bucket-a" || listed[0].Status != models.ProviderTransferSyncCompleted {
+		t.Fatalf("unexpected provider sync runs: %+v", listed)
+	}
+}
+
 func TestSqliteDB_BucketScopeLifecycle(t *testing.T) {
 	ctx := context.Background()
 	db, err := NewSqliteDB(":memory:")

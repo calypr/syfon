@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	metricapi "github.com/calypr/syfon/internal/api/metrics"
 	"github.com/calypr/syfon/internal/api/middleware"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/config"
@@ -98,12 +99,17 @@ var Cmd = &cobra.Command{
 			// S3 credentials are encrypted before persistence and audited on read/write/delete/list.
 			for _, c := range cfg.S3Credentials {
 				cred := &models.S3Credential{
-					Bucket:    c.Bucket,
-					Provider:  c.Provider,
-					Region:    c.Region,
-					AccessKey: c.AccessKey,
-					SecretKey: c.SecretKey,
-					Endpoint:  c.Endpoint,
+					Bucket:           c.Bucket,
+					Provider:         c.Provider,
+					Region:           c.Region,
+					AccessKey:        c.AccessKey,
+					SecretKey:        c.SecretKey,
+					Endpoint:         c.Endpoint,
+					BillingLogBucket: c.BillingLogBucket,
+					BillingLogPrefix: c.BillingLogPrefix,
+				}
+				if err := metricapi.ValidateProviderTransferLogSource(cmd.Context(), *cred); err != nil {
+					fatal("invalid provider billing log configuration", "bucket", c.Bucket, "err", err)
 				}
 				if err := database.SaveS3Credential(cmd.Context(), cred); err != nil {
 					logger.Error("failed to save s3 credential", "bucket", c.Bucket, "err", err)

@@ -5,11 +5,14 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	syclient "github.com/calypr/syfon/client"
 	"github.com/calypr/syfon/internal/api/docs"
@@ -41,6 +44,174 @@ func executeRootCommand(t *testing.T, args ...string) (string, error) {
 	return strings.TrimSpace(out.String() + errOut.String()), err
 }
 
+func TestSyfonMetricsTransfersCLI(t *testing.T) {
+	server := newSyfonTestServer(t)
+	defer server.Close()
+
+	now := time.Now().UTC()
+	if err := server.DB.RecordTransferAttributionEvents(context.Background(), []models.TransferAttributionEvent{
+		{
+			EventID:       "cli-grant-1",
+			AccessGrantID: "cli-grant-1",
+			EventType:     models.TransferEventAccessIssued,
+			EventTime:     now.Add(-time.Minute),
+			ObjectID:      "did-cli-1",
+			SHA256:        "sha-cli-1",
+			ObjectSize:    123,
+			Organization:  "syfon",
+			Project:       "e2e",
+			AccessID:      "s3",
+			Provider:      "file",
+			Bucket:        "syfon-bucket",
+			StorageURL:    "file://syfon-bucket/sha-cli-1",
+			ActorEmail:    "user@example.com",
+			ActorSubject:  "user@example.com",
+		},
+	}); err != nil {
+		t.Fatalf("record access grant: %v", err)
+	}
+	if err := server.DB.RecordProviderTransferEvents(context.Background(), []models.ProviderTransferEvent{
+		{
+			ProviderEventID:      "cli-transfer-1",
+			AccessGrantID:        "cli-grant-1",
+			Direction:            models.ProviderTransferDirectionDownload,
+			EventTime:            now,
+			ObjectID:             "did-cli-1",
+			SHA256:               "sha-cli-1",
+			Organization:         "syfon",
+			Project:              "e2e",
+			Provider:             "file",
+			Bucket:               "syfon-bucket",
+			StorageURL:           "file://syfon-bucket/sha-cli-1",
+			BytesTransferred:     123,
+			ActorEmail:           "user@example.com",
+			ActorSubject:         "user@example.com",
+			ReconciliationStatus: models.ProviderTransferMatched,
+		},
+	}); err != nil {
+		t.Fatalf("record transfer event: %v", err)
+	}
+	syncFrom := now.Add(-2 * time.Minute).Format(time.RFC3339)
+	syncTo := now.Add(2 * time.Minute).Format(time.RFC3339)
+	out, err := executeRootCommand(
+		t,
+		"--server", server.URL,
+		"metrics", "transfers", "sync",
+		"--organization", "syfon",
+		"--project", "e2e",
+		"--provider", "file",
+		"--bucket", "syfon-bucket",
+		"--from", syncFrom,
+		"--to", syncTo,
+		"--status", models.ProviderTransferSyncCompleted,
+		"--imported-events", "1",
+		"--matched-events", "1",
+	)
+	if err != nil {
+		t.Fatalf("metrics transfers sync command failed: %v output=%s", err, out)
+	}
+	var syncRuns []models.ProviderTransferSyncRun
+	if err := json.Unmarshal([]byte(out), &syncRuns); err != nil {
+		t.Fatalf("decode sync output %q: %v", out, err)
+	}
+	if len(syncRuns) != 1 || syncRuns[0].Status != models.ProviderTransferSyncCompleted {
+		t.Fatalf("unexpected sync output: %+v", syncRuns)
+	}
+	out, err = executeRootCommand(
+		t,
+		"--server", server.URL,
+		"metrics", "transfers", "sync-status",
+		"--provider", "file",
+		"--bucket", "syfon-bucket",
+		"--from", syncFrom,
+		"--to", syncTo,
+	)
+	if err != nil {
+		t.Fatalf("metrics transfers sync-status command failed: %v output=%s", err, out)
+	}
+	var listedSyncRuns []models.ProviderTransferSyncRun
+	if err := json.Unmarshal([]byte(out), &listedSyncRuns); err != nil {
+		t.Fatalf("decode sync-status output %q: %v", out, err)
+	}
+	if len(listedSyncRuns) != 1 || listedSyncRuns[0].Bucket != "syfon-bucket" {
+		t.Fatalf("unexpected sync-status output: %+v", listedSyncRuns)
+	}
+
+	out, err = executeRootCommand(t, "--server", server.URL, "metrics", "transfers", "summary", "--organization", "syfon", "--project", "e2e", "--user", "user@example.com", "--provider", "file", "--bucket", "syfon-bucket", "--from", syncFrom, "--to", syncTo)
+	if err != nil {
+		t.Fatalf("metrics transfers summary command failed: %v output=%s", err, out)
+	}
+	var summary models.TransferAttributionSummary
+	if err := json.Unmarshal([]byte(out), &summary); err != nil {
+		t.Fatalf("decode summary output %q: %v", out, err)
+	}
+	if summary.EventCount != 1 || summary.BytesDownloaded != 123 {
+		t.Fatalf("unexpected summary output: %+v", summary)
+	}
+	if summary.Freshness == nil || summary.Freshness.IsStale {
+		t.Fatalf("expected summary output to include fresh sync metadata, got %+v", summary.Freshness)
+	}
+
+	out, err = executeRootCommand(t, "--server", server.URL, "metrics", "transfers", "breakdown", "--organization", "syfon", "--project", "e2e", "--group-by", "user", "--provider", "file", "--bucket", "syfon-bucket", "--from", syncFrom, "--to", syncTo)
+	if err != nil {
+		t.Fatalf("metrics transfers breakdown command failed: %v output=%s", err, out)
+	}
+	var breakdown struct {
+		GroupBy   string                                `json:"group_by"`
+		Data      []models.TransferAttributionBreakdown `json:"data"`
+		Freshness *models.TransferMetricsFreshness      `json:"freshness"`
+	}
+	if err := json.Unmarshal([]byte(out), &breakdown); err != nil {
+		t.Fatalf("decode breakdown output %q: %v", out, err)
+	}
+	if breakdown.GroupBy != "user" || len(breakdown.Data) != 1 || breakdown.Data[0].Key != "user@example.com" || breakdown.Data[0].BytesDownloaded != 123 {
+		t.Fatalf("unexpected breakdown output: %+v", breakdown)
+	}
+	if breakdown.Freshness == nil || breakdown.Freshness.IsStale {
+		t.Fatalf("expected breakdown output to include fresh sync metadata, got %+v", breakdown.Freshness)
+	}
+}
+
+func providerDownloadEventFromObject(eventID string, obj *models.InternalObject, bytes int64) models.ProviderTransferEvent {
+	ev := models.ProviderTransferEvent{
+		ProviderEventID:  eventID,
+		Direction:        models.ProviderTransferDirectionDownload,
+		EventTime:        time.Now().UTC(),
+		Provider:         "s3",
+		Bucket:           "syfon-bucket",
+		BytesTransferred: bytes,
+		HTTPMethod:       "GET",
+		HTTPStatus:       200,
+	}
+	if obj == nil {
+		return ev
+	}
+	ev.ObjectID = obj.Id
+	ev.ObjectSize = obj.Size
+	for _, checksum := range obj.Checksums {
+		if checksum.Type == "sha256" {
+			ev.SHA256 = checksum.Checksum
+			break
+		}
+	}
+	if obj.AccessMethods != nil {
+		for _, am := range *obj.AccessMethods {
+			if am.AccessUrl != nil && strings.TrimSpace(am.AccessUrl.Url) != "" {
+				ev.StorageURL = strings.TrimSpace(am.AccessUrl.Url)
+				if parsed, err := url.Parse(ev.StorageURL); err == nil {
+					if parsed.Scheme != "" {
+						ev.Provider = common.ProviderFromScheme(parsed.Scheme)
+					}
+					ev.Bucket = parsed.Host
+					ev.ObjectKey = strings.TrimLeft(parsed.Path, "/")
+				}
+				break
+			}
+		}
+	}
+	return ev
+}
+
 func resetCommandFlags(cmd *cobra.Command) {
 	resetFlagSet(cmd.PersistentFlags())
 	resetFlagSet(cmd.Flags())
@@ -59,6 +230,7 @@ func resetFlagSet(fs *pflag.FlagSet) {
 type fiberTestServer struct {
 	URL        string
 	StorageDir string
+	DB         db.DatabaseInterface
 	app        *fiber.App
 	ln         net.Listener
 }
@@ -118,6 +290,7 @@ func newSyfonTestServer(t *testing.T) *fiberTestServer {
 	return &fiberTestServer{
 		URL:        "http://" + ln.Addr().String(),
 		StorageDir: storageDir,
+		DB:         database,
 		app:        app,
 		ln:         ln,
 	}
@@ -232,5 +405,79 @@ func TestSyfonUploadDownloadAddURLAndSHA256(t *testing.T) {
 	}
 	if !bytes.Equal(got2, externalData) {
 		t.Fatalf("download(add-url) bytes mismatch")
+	}
+
+	uploadObj, err := server.DB.GetObject(context.Background(), uploadDID)
+	if err != nil {
+		t.Fatalf("fetch upload object for provider metrics: %v", err)
+	}
+	addURLObj, err := server.DB.GetObject(context.Background(), addURLDID)
+	if err != nil {
+		t.Fatalf("fetch add-url object for provider metrics: %v", err)
+	}
+	providerEvents := []models.ProviderTransferEvent{
+		providerDownloadEventFromObject("cli-provider-download-1", uploadObj, int64(len(srcData))),
+		providerDownloadEventFromObject("cli-provider-download-2", addURLObj, int64(len(externalData))),
+	}
+	if err := server.DB.RecordProviderTransferEvents(context.Background(), providerEvents); err != nil {
+		t.Fatalf("record provider transfer metrics: %v", err)
+	}
+
+	out, err = executeRootCommand(
+		t,
+		"--server", server.URL,
+		"metrics", "transfers", "summary",
+		"--organization", "syfon",
+		"--project", "e2e",
+		"--direction", models.ProviderTransferDirectionDownload,
+	)
+	if err != nil {
+		t.Fatalf("metrics transfers summary command failed: %v output=%s", err, out)
+	}
+	var accessSummary models.TransferAttributionSummary
+	if err := json.Unmarshal([]byte(out), &accessSummary); err != nil {
+		t.Fatalf("decode metrics summary output %q: %v", out, err)
+	}
+	if accessSummary.DownloadEventCount < 1 || accessSummary.EventCount < 1 {
+		t.Fatalf("expected provider transfer metrics for downloads, got %+v", accessSummary)
+	}
+	if accessSummary.BytesDownloaded <= 0 {
+		t.Fatalf("expected provider bytes to cover downloaded payloads, got %+v", accessSummary)
+	}
+	if accessSummary.Freshness == nil || !accessSummary.Freshness.IsStale {
+		t.Fatalf("expected unsynced provider metrics to include stale freshness metadata, got %+v", accessSummary.Freshness)
+	}
+
+	out, err = executeRootCommand(
+		t,
+		"--server", server.URL,
+		"metrics", "transfers", "breakdown",
+		"--organization", "syfon",
+		"--project", "e2e",
+		"--direction", models.ProviderTransferDirectionDownload,
+		"--group-by", "scope",
+	)
+	if err != nil {
+		t.Fatalf("metrics transfers breakdown command failed: %v output=%s", err, out)
+	}
+	var accessBreakdown struct {
+		GroupBy string                                `json:"group_by"`
+		Data    []models.TransferAttributionBreakdown `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(out), &accessBreakdown); err != nil {
+		t.Fatalf("decode metrics breakdown output %q: %v", out, err)
+	}
+	if accessBreakdown.GroupBy != "scope" || len(accessBreakdown.Data) == 0 {
+		t.Fatalf("expected scoped transfer breakdown, got %+v", accessBreakdown)
+	}
+	foundScope := false
+	for _, row := range accessBreakdown.Data {
+		if row.Organization == "syfon" && row.Project == "e2e" && row.EventCount >= 1 {
+			foundScope = true
+			break
+		}
+	}
+	if !foundScope {
+		t.Fatalf("expected syfon/e2e transfer metrics row, got %+v", accessBreakdown.Data)
 	}
 }

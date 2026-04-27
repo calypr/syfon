@@ -26,6 +26,8 @@ coverage.*
 /out/
 /.tmp/
 /.gocache/
+/.gomodcache/
+/.gopath/
 
 # Editor and OS cruft
 .DS_Store
@@ -39,6 +41,7 @@ syfon
 # Local runtime/test databases
 /drs.db
 /drs_test.db
+/.syfon-credential-kek
 
 
 # Local one-off configs and DBs
@@ -47,3 +50,4 @@ syfon
 
 # Test reports
 test_report.json
+meaningful_report.txt

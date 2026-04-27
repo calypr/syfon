@@ -41,6 +41,10 @@ func TestSchemaEnsurers(t *testing.T) {
 		ALTER TABLE s3_credential
 		ADD COLUMN IF NOT EXISTS provider TEXT NOT NULL DEFAULT 's3'
 	`)).WillReturnResult(sqlmock.NewResult(0, 0))
+		mock.ExpectExec(regexp.QuoteMeta(`ALTER TABLE s3_credential ADD COLUMN IF NOT EXISTS billing_log_bucket TEXT`)).
+			WillReturnResult(sqlmock.NewResult(0, 0))
+		mock.ExpectExec(regexp.QuoteMeta(`ALTER TABLE s3_credential ADD COLUMN IF NOT EXISTS billing_log_prefix TEXT`)).
+			WillReturnResult(sqlmock.NewResult(0, 0))
 
 		if err := pg.ensureS3CredentialSchema(); err != nil {
 			t.Fatalf("unexpected error: %v", err)

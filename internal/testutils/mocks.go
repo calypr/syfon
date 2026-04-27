@@ -16,15 +16,18 @@ import (
 
 // MockDatabase implements db.DatabaseInterface for testing
 type MockDatabase struct {
-	Objects        map[string]*drs.DrsObject
-	ObjectAuth     map[string]models.AuthPathMap
-	ObjectAuthz    map[string]map[string][]string
-	Credentials    map[string]models.S3Credential
-	BucketScopes   map[string]models.BucketScope
-	PendingMeta    map[string]models.PendingLFSMeta
-	Usage          map[string]models.FileUsage
-	NoDefaultCreds bool
-	GetObjectErr   error
+	Objects                map[string]*drs.DrsObject
+	ObjectAuth             map[string]models.AuthPathMap
+	ObjectAuthz            map[string]map[string][]string
+	Credentials            map[string]models.S3Credential
+	BucketScopes           map[string]models.BucketScope
+	PendingMeta            map[string]models.PendingLFSMeta
+	Usage                  map[string]models.FileUsage
+	TransferEvents         []models.TransferAttributionEvent
+	ProviderTransferEvents []models.ProviderTransferEvent
+	ProviderSyncRuns       []models.ProviderTransferSyncRun
+	NoDefaultCreds         bool
+	GetObjectErr           error
 }
 
 func (m *MockDatabase) GetServiceInfo(ctx context.Context) (*drs.Service, error) {
@@ -490,6 +493,331 @@ func (m *MockDatabase) GetFileUsageSummary(ctx context.Context, inactiveSince *t
 		}
 	}
 	return s, nil
+}
+
+func (m *MockDatabase) RecordTransferAttributionEvents(ctx context.Context, events []models.TransferAttributionEvent) error {
+	if len(events) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool, len(m.TransferEvents))
+	for _, ev := range m.TransferEvents {
+		if ev.EventID != "" {
+			seen[ev.EventID] = true
+		}
+	}
+	for _, ev := range events {
+		if ev.EventID != "" && seen[ev.EventID] {
+			continue
+		}
+		if ev.EventID != "" {
+			seen[ev.EventID] = true
+		}
+		m.TransferEvents = append(m.TransferEvents, ev)
+	}
+	return nil
+}
+
+func (m *MockDatabase) RecordProviderTransferEvents(ctx context.Context, events []models.ProviderTransferEvent) error {
+	if len(events) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool, len(m.ProviderTransferEvents))
+	for _, ev := range m.ProviderTransferEvents {
+		if ev.ProviderEventID != "" {
+			seen[ev.ProviderEventID] = true
+		}
+	}
+	for i := range events {
+		ev := m.reconcileProviderTransferEvent(events[i])
+		events[i] = ev
+		if ev.ProviderEventID != "" && seen[ev.ProviderEventID] {
+			continue
+		}
+		if ev.ProviderEventID != "" {
+			seen[ev.ProviderEventID] = true
+		}
+		m.ProviderTransferEvents = append(m.ProviderTransferEvents, ev)
+	}
+	return nil
+}
+
+func (m *MockDatabase) RecordProviderTransferSyncRuns(ctx context.Context, runs []models.ProviderTransferSyncRun) error {
+	byID := make(map[string]int, len(m.ProviderSyncRuns))
+	for i, run := range m.ProviderSyncRuns {
+		byID[run.SyncID] = i
+	}
+	for _, run := range runs {
+		if run.SyncID == "" {
+			continue
+		}
+		if idx, ok := byID[run.SyncID]; ok {
+			m.ProviderSyncRuns[idx] = run
+			continue
+		}
+		byID[run.SyncID] = len(m.ProviderSyncRuns)
+		m.ProviderSyncRuns = append(m.ProviderSyncRuns, run)
+	}
+	return nil
+}
+
+func (m *MockDatabase) ListProviderTransferSyncRuns(ctx context.Context, filter models.TransferAttributionFilter, limit int) ([]models.ProviderTransferSyncRun, error) {
+	if limit <= 0 || limit > 1000 {
+		limit = 100
+	}
+	out := make([]models.ProviderTransferSyncRun, 0, len(m.ProviderSyncRuns))
+	for _, run := range m.ProviderSyncRuns {
+		if filter.Organization != "" && run.Organization != filter.Organization {
+			continue
+		}
+		if filter.Project != "" && run.Project != filter.Project {
+			continue
+		}
+		if filter.Provider != "" && run.Provider != filter.Provider {
+			continue
+		}
+		if filter.Bucket != "" && run.Bucket != filter.Bucket {
+			continue
+		}
+		if filter.From != nil && run.To.Before(*filter.From) {
+			continue
+		}
+		if filter.To != nil && run.From.After(*filter.To) {
+			continue
+		}
+		out = append(out, run)
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
+}
+
+func (m *MockDatabase) reconcileProviderTransferEvent(ev models.ProviderTransferEvent) models.ProviderTransferEvent {
+	if ev.ReconciliationStatus == "" {
+		ev.ReconciliationStatus = models.ProviderTransferUnmatched
+	}
+	for _, grant := range m.TransferEvents {
+		if grant.EventType != models.TransferEventAccessIssued {
+			continue
+		}
+		if ev.AccessGrantID != "" && (ev.AccessGrantID == grant.AccessGrantID || ev.AccessGrantID == grant.EventID) {
+			mockMergeAccessGrantIntoProviderEvent(&ev, grant)
+			ev.ReconciliationStatus = models.ProviderTransferMatched
+			return ev
+		}
+		if ev.AccessGrantID == "" && ev.Provider == grant.Provider && ev.Bucket == grant.Bucket &&
+			(ev.StorageURL == grant.StorageURL || ev.StorageURL == "" && strings.HasSuffix(grant.StorageURL, "/"+strings.TrimLeft(ev.ObjectKey, "/"))) {
+			mockMergeAccessGrantIntoProviderEvent(&ev, grant)
+			ev.ReconciliationStatus = models.ProviderTransferMatched
+			return ev
+		}
+	}
+	return ev
+}
+
+func mockMergeAccessGrantIntoProviderEvent(ev *models.ProviderTransferEvent, grant models.TransferAttributionEvent) {
+	if ev.AccessGrantID == "" {
+		ev.AccessGrantID = grant.AccessGrantID
+		if ev.AccessGrantID == "" {
+			ev.AccessGrantID = grant.EventID
+		}
+	}
+	if ev.ObjectID == "" {
+		ev.ObjectID = grant.ObjectID
+	}
+	if ev.SHA256 == "" {
+		ev.SHA256 = grant.SHA256
+	}
+	if ev.ObjectSize == 0 {
+		ev.ObjectSize = grant.ObjectSize
+	}
+	if ev.Organization == "" {
+		ev.Organization = grant.Organization
+	}
+	if ev.Project == "" {
+		ev.Project = grant.Project
+	}
+	if ev.AccessID == "" {
+		ev.AccessID = grant.AccessID
+	}
+	if ev.StorageURL == "" {
+		ev.StorageURL = grant.StorageURL
+	}
+	if ev.ActorEmail == "" {
+		ev.ActorEmail = grant.ActorEmail
+	}
+	if ev.ActorSubject == "" {
+		ev.ActorSubject = grant.ActorSubject
+	}
+	if ev.AuthMode == "" {
+		ev.AuthMode = grant.AuthMode
+	}
+}
+
+func (m *MockDatabase) GetTransferAttributionSummary(ctx context.Context, filter models.TransferAttributionFilter) (models.TransferAttributionSummary, error) {
+	var summary models.TransferAttributionSummary
+	for _, ev := range m.ProviderTransferEvents {
+		if !providerTransferEventMatchesFilter(ev, filter) {
+			continue
+		}
+		summary.EventCount++
+		summary.BytesRequested += ev.BytesTransferred
+		switch ev.Direction {
+		case models.ProviderTransferDirectionDownload:
+			summary.DownloadEventCount++
+			summary.BytesDownloaded += ev.BytesTransferred
+		case models.ProviderTransferDirectionUpload:
+			summary.UploadEventCount++
+			summary.BytesUploaded += ev.BytesTransferred
+		}
+	}
+	return summary, nil
+}
+
+func (m *MockDatabase) GetTransferAttributionBreakdown(ctx context.Context, filter models.TransferAttributionFilter, groupBy string) ([]models.TransferAttributionBreakdown, error) {
+	items := map[string]*models.TransferAttributionBreakdown{}
+	for _, ev := range m.ProviderTransferEvents {
+		if !providerTransferEventMatchesFilter(ev, filter) {
+			continue
+		}
+		key := providerTransferBreakdownKey(ev, groupBy)
+		item := items[key]
+		if item == nil {
+			item = &models.TransferAttributionBreakdown{
+				Key:          key,
+				Organization: ev.Organization,
+				Project:      ev.Project,
+				Provider:     ev.Provider,
+				Bucket:       ev.Bucket,
+				SHA256:       ev.SHA256,
+				ActorEmail:   ev.ActorEmail,
+				ActorSubject: ev.ActorSubject,
+			}
+			items[key] = item
+		}
+		item.EventCount++
+		item.BytesRequested += ev.BytesTransferred
+		if ev.Direction == models.ProviderTransferDirectionDownload {
+			item.BytesDownloaded += ev.BytesTransferred
+		}
+		if ev.Direction == models.ProviderTransferDirectionUpload {
+			item.BytesUploaded += ev.BytesTransferred
+		}
+		t := ev.EventTime
+		if item.LastTransferTime == nil || (!t.IsZero() && t.After(*item.LastTransferTime)) {
+			item.LastTransferTime = &t
+		}
+	}
+	out := make([]models.TransferAttributionBreakdown, 0, len(items))
+	for _, item := range items {
+		out = append(out, *item)
+	}
+	return out, nil
+}
+
+func providerTransferEventMatchesFilter(ev models.ProviderTransferEvent, filter models.TransferAttributionFilter) bool {
+	status := filter.ReconciliationStatus
+	if status == "" {
+		status = models.ProviderTransferMatched
+	}
+	if status != "all" && ev.ReconciliationStatus != status {
+		return false
+	}
+	if filter.Organization != "" && ev.Organization != filter.Organization {
+		return false
+	}
+	if filter.Project != "" && ev.Project != filter.Project {
+		return false
+	}
+	direction := filter.Direction
+	if direction == "" {
+		direction = filter.EventType
+	}
+	if direction != "" && direction != "all" && ev.Direction != direction {
+		return false
+	}
+	if filter.From != nil && ev.EventTime.Before(*filter.From) {
+		return false
+	}
+	if filter.To != nil && ev.EventTime.After(*filter.To) {
+		return false
+	}
+	if filter.Provider != "" && ev.Provider != filter.Provider {
+		return false
+	}
+	if filter.Bucket != "" && ev.Bucket != filter.Bucket {
+		return false
+	}
+	if filter.SHA256 != "" && ev.SHA256 != filter.SHA256 {
+		return false
+	}
+	if filter.User != "" && ev.ActorEmail != filter.User && ev.ActorSubject != filter.User {
+		return false
+	}
+	return true
+}
+
+func providerTransferBreakdownKey(ev models.ProviderTransferEvent, groupBy string) string {
+	switch groupBy {
+	case "user":
+		if ev.ActorEmail != "" {
+			return ev.ActorEmail
+		}
+		return ev.ActorSubject
+	case "provider":
+		return ev.Provider + ":" + ev.Bucket
+	case "object":
+		return ev.SHA256
+	default:
+		return ev.Organization + "/" + ev.Project
+	}
+}
+
+func transferEventMatchesFilter(ev models.TransferAttributionEvent, filter models.TransferAttributionFilter) bool {
+	if filter.Organization != "" && ev.Organization != filter.Organization {
+		return false
+	}
+	if filter.Project != "" && ev.Project != filter.Project {
+		return false
+	}
+	if filter.EventType != "" && filter.EventType != "all" && ev.EventType != filter.EventType {
+		return false
+	}
+	if filter.From != nil && ev.EventTime.Before(*filter.From) {
+		return false
+	}
+	if filter.To != nil && ev.EventTime.After(*filter.To) {
+		return false
+	}
+	if filter.Provider != "" && ev.Provider != filter.Provider {
+		return false
+	}
+	if filter.Bucket != "" && ev.Bucket != filter.Bucket {
+		return false
+	}
+	if filter.SHA256 != "" && ev.SHA256 != filter.SHA256 {
+		return false
+	}
+	if filter.User != "" && ev.ActorEmail != filter.User && ev.ActorSubject != filter.User {
+		return false
+	}
+	return true
+}
+
+func transferBreakdownKey(ev models.TransferAttributionEvent, groupBy string) string {
+	switch groupBy {
+	case "user":
+		if ev.ActorEmail != "" {
+			return ev.ActorEmail
+		}
+		return ev.ActorSubject
+	case "provider":
+		return ev.Provider + ":" + ev.Bucket
+	case "object":
+		return ev.SHA256
+	default:
+		return ev.Organization + "/" + ev.Project
+	}
 }
 
 func cloneAuthzMap(in map[string][]string) map[string][]string {

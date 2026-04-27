@@ -8,6 +8,7 @@ import (
 
 	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/api/apiutil"
+	"github.com/calypr/syfon/internal/api/attribution"
 	"github.com/calypr/syfon/internal/authz"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/core"
@@ -72,6 +73,10 @@ func handleGetAccessURLFiber(om *core.ObjectManager) fiber.Handler {
 		if err != nil {
 			return apiutil.HandleError(c, err)
 		}
+		attribution.RecordAccessIssued(c.Context(), om, obj, attribution.AccessDetails{
+			AccessID:   accessID,
+			StorageURL: targetURL,
+		})
 
 		return c.JSON(drs.AccessURL{Url: signed})
 	}
@@ -241,6 +246,10 @@ func handleGetBulkAccessURLFiber(om *core.ObjectManager) fiber.Handler {
 					unresolvedIDs = append(unresolvedIDs, objectID)
 					continue
 				}
+				attribution.RecordAccessIssued(c.Context(), om, obj, attribution.AccessDetails{
+					AccessID:   accessID,
+					StorageURL: targetURL,
+				})
 				resolved = append(resolved, drs.BulkAccessURL{
 					DrsObjectId: common.Ptr(objectID),
 					DrsAccessId: common.Ptr(accessID),

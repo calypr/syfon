@@ -331,8 +331,6 @@ func TestDownloadToPathMultipartUsesProtocolAccessID(t *testing.T) {
 }
 
 func TestDownloadToPathMultipartErrorPropagation(t *testing.T) {
-	t.Skip("temporarily skipped while the multipart retry path is being refactored")
-
 	payload := bytes.Repeat([]byte("e"), 2*1024*1024)
 	tmpDir := t.TempDir()
 	dst := filepath.Join(tmpDir, "multipart-error.bin")

@@ -311,9 +311,14 @@ func TestGenericDownloaderDownloadSingleVariants(t *testing.T) {
 		}
 
 		var events []common.ProgressEvent
+		var completed []common.TransferCompletionEvent
 		ctx := common.WithOid(context.Background(), "oid-download")
 		ctx = common.WithProgress(ctx, func(ev common.ProgressEvent) error {
 			events = append(events, ev)
+			return nil
+		})
+		ctx = common.WithTransferCompletion(ctx, func(ev common.TransferCompletionEvent) error {
+			completed = append(completed, ev)
 			return nil
 		})
 
@@ -332,6 +337,12 @@ func TestGenericDownloaderDownloadSingleVariants(t *testing.T) {
 		}
 		if len(events) != 1 || events[0].BytesSinceLast != 5 || events[0].BytesSoFar != 11 {
 			t.Fatalf("unexpected progress events: %+v", events)
+		}
+		if len(completed) != 1 {
+			t.Fatalf("expected one transfer completion event, got %+v", completed)
+		}
+		if completed[0].Direction != "download" || completed[0].GUID != "guid-1" || completed[0].RangeStart != 6 || completed[0].RangeEnd != 10 || completed[0].Bytes != 5 || completed[0].Strategy != "single" {
+			t.Fatalf("unexpected transfer completion event: %+v", completed[0])
 		}
 	})
 
@@ -395,10 +406,17 @@ func TestGenericDownloaderDownloadAndParallel(t *testing.T) {
 
 	var eventsMu sync.Mutex
 	var events []common.ProgressEvent
+	var completions []common.TransferCompletionEvent
 	ctx := common.WithOid(context.Background(), "parallel-oid")
 	ctx = common.WithProgress(ctx, func(ev common.ProgressEvent) error {
 		eventsMu.Lock()
 		events = append(events, ev)
+		eventsMu.Unlock()
+		return nil
+	})
+	ctx = common.WithTransferCompletion(ctx, func(ev common.TransferCompletionEvent) error {
+		eventsMu.Lock()
+		completions = append(completions, ev)
 		eventsMu.Unlock()
 		return nil
 	})
@@ -418,6 +436,19 @@ func TestGenericDownloaderDownloadAndParallel(t *testing.T) {
 	}
 	if len(events) != 3 {
 		t.Fatalf("expected progress per chunk, got %+v", events)
+	}
+	if len(completions) != 3 {
+		t.Fatalf("expected transfer completion per chunk, got %+v", completions)
+	}
+	var completedBytes int64
+	for _, ev := range completions {
+		if ev.Direction != "download" || ev.GUID != "guid-p" || ev.Strategy != "multipart" || ev.Bytes <= 0 || ev.RangeEnd < ev.RangeStart {
+			t.Fatalf("unexpected transfer completion event: %+v", ev)
+		}
+		completedBytes += ev.Bytes
+	}
+	if completedBytes != int64(len(content)) {
+		t.Fatalf("expected completed bytes %d, got %d events=%+v", len(content), completedBytes, completions)
 	}
 
 	backend2 := &fakeBackend{data: []byte("single"), meta: &transfer.ObjectMetadata{Size: 6, AcceptRanges: true}}
@@ -447,10 +478,18 @@ func TestGenericDownloaderDownloadAndParallel(t *testing.T) {
 		}
 		d := &GenericDownloader{Backend: backend}
 		dst := filepath.Join(t.TempDir(), "failed-parallel.bin")
+		var completions []common.TransferCompletionEvent
+		ctx := common.WithTransferCompletion(context.Background(), func(ev common.TransferCompletionEvent) error {
+			completions = append(completions, ev)
+			return nil
+		})
 
-		err := d.Download(context.Background(), "guid-fail", dst, 2, 1*common.MB, 1*common.MB)
+		err := d.Download(ctx, "guid-fail", dst, 2, 1*common.MB, 1*common.MB)
 		if err == nil || !strings.Contains(err.Error(), "range download") {
 			t.Fatalf("expected range download error, got %v", err)
+		}
+		if len(completions) != 0 {
+			t.Fatalf("failed transfer should not emit completion events, got %+v", completions)
 		}
 		if _, statErr := os.Stat(dst); !os.IsNotExist(statErr) {
 			t.Fatalf("expected failed parallel download to remove %q, stat err=%v", dst, statErr)

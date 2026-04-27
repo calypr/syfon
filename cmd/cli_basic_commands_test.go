@@ -110,7 +110,7 @@ func TestSyfonBucketListAndRemoveCommands(t *testing.T) {
 	}
 	if err := c.Buckets().Put(context.Background(), bucketapi.PutBucketRequest{
 		Bucket:       "test-bucket-cli",
-		Provider:     stringPtr("s3"),
+		Provider:     stringPtr("file"),
 		Region:       stringPtr("us-east-1"),
 		AccessKey:    stringPtr("ak"),
 		SecretKey:    stringPtr("sk"),
@@ -152,7 +152,7 @@ func TestSyfonBucketAddCredentialAndScopesCommands(t *testing.T) {
 	out, err := executeRootCommand(t,
 		"--server", server.URL,
 		"bucket", "add", "test-bucket-cli",
-		"--provider", "gcs",
+		"--provider", "file",
 		"--region", "us-east-1",
 	)
 	if err != nil {

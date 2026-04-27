@@ -61,6 +61,12 @@ type PendingLFSMetaStore interface {
 type UsageStore interface {
 	RecordFileUpload(ctx context.Context, objectID string) error
 	RecordFileDownload(ctx context.Context, objectID string) error
+	RecordTransferAttributionEvents(ctx context.Context, events []models.TransferAttributionEvent) error
+	RecordProviderTransferEvents(ctx context.Context, events []models.ProviderTransferEvent) error
+	RecordProviderTransferSyncRuns(ctx context.Context, runs []models.ProviderTransferSyncRun) error
+	ListProviderTransferSyncRuns(ctx context.Context, filter models.TransferAttributionFilter, limit int) ([]models.ProviderTransferSyncRun, error)
+	GetTransferAttributionSummary(ctx context.Context, filter models.TransferAttributionFilter) (models.TransferAttributionSummary, error)
+	GetTransferAttributionBreakdown(ctx context.Context, filter models.TransferAttributionFilter, groupBy string) ([]models.TransferAttributionBreakdown, error)
 	GetFileUsage(ctx context.Context, objectID string) (*models.FileUsage, error)
 	ListFileUsage(ctx context.Context, limit, offset int, inactiveSince *time.Time) ([]models.FileUsage, error)
 	GetFileUsageSummary(ctx context.Context, inactiveSince *time.Time) (models.FileUsageSummary, error)
@@ -76,6 +82,13 @@ type SHA256ValidityStore interface {
 type MetricsStore interface {
 	ListObjectIDsByScope(ctx context.Context, organization, project string) ([]string, error)
 	GetObject(ctx context.Context, id string) (*models.InternalObject, error)
+	RecordTransferAttributionEvents(ctx context.Context, events []models.TransferAttributionEvent) error
+	RecordProviderTransferEvents(ctx context.Context, events []models.ProviderTransferEvent) error
+	RecordProviderTransferSyncRuns(ctx context.Context, runs []models.ProviderTransferSyncRun) error
+	ListProviderTransferSyncRuns(ctx context.Context, filter models.TransferAttributionFilter, limit int) ([]models.ProviderTransferSyncRun, error)
+	ListS3Credentials(ctx context.Context) ([]models.S3Credential, error)
+	GetTransferAttributionSummary(ctx context.Context, filter models.TransferAttributionFilter) (models.TransferAttributionSummary, error)
+	GetTransferAttributionBreakdown(ctx context.Context, filter models.TransferAttributionFilter, groupBy string) ([]models.TransferAttributionBreakdown, error)
 	GetFileUsage(ctx context.Context, objectID string) (*models.FileUsage, error)
 	ListFileUsage(ctx context.Context, limit, offset int, inactiveSince *time.Time) ([]models.FileUsage, error)
 	GetFileUsageSummary(ctx context.Context, inactiveSince *time.Time) (models.FileUsageSummary, error)

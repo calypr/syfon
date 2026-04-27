@@ -8,6 +8,7 @@ import (
 	"github.com/calypr/syfon/apigen/server/bucketapi"
 	sycommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/api/apiutil"
+	metricapi "github.com/calypr/syfon/internal/api/metrics"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/models"
@@ -57,6 +58,12 @@ func handleInternalBucketsFiber(c fiber.Ctx, om *core.ObjectManager) error {
 			Provider:    common.Ptr(c.Provider),
 			Region:      common.Ptr(c.Region),
 		}
+		if strings.TrimSpace(c.BillingLogBucket) != "" {
+			meta.BillingLogBucket = common.Ptr(c.BillingLogBucket)
+		}
+		if strings.TrimSpace(c.BillingLogPrefix) != "" {
+			meta.BillingLogPrefix = common.Ptr(c.BillingLogPrefix)
+		}
 		if programs := programsByBucket[c.Bucket]; len(programs) > 0 {
 			meta.Programs = &programs
 		}
@@ -66,13 +73,21 @@ func handleInternalBucketsFiber(c fiber.Ctx, om *core.ObjectManager) error {
 	return c.JSON(resp)
 }
 
+func validateBucketBillingLogs(ctx fiber.Ctx, cred *models.S3Credential) error {
+	if cred == nil {
+		return nil
+	}
+	return metricapi.ValidateProviderTransferLogSource(ctx.Context(), *cred)
+}
+
 func handleInternalPutBucketFiber(c fiber.Ctx, om *core.ObjectManager) error {
 	var req bucketapi.PutBucketRequest
 	if err := decodeStrictJSON(c.Body(), &req); err != nil {
 		return c.Status(fiber.StatusBadRequest).SendString("Invalid request body")
 	}
 
-	bucketProvider, err := common.ParseBucketProvider(common.StringVal(req.Provider))
+	rawProvider := strings.TrimSpace(common.StringVal(req.Provider))
+	bucketProvider, err := common.ParseBucketProvider(rawProvider)
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).SendString("provider must be one of: s3, gcs, azure")
 	}
@@ -120,7 +135,9 @@ func handleInternalPutBucketFiber(c fiber.Ctx, om *core.ObjectManager) error {
 		strings.TrimSpace(common.StringVal(req.SecretKey)) == "" &&
 		strings.TrimSpace(common.StringVal(req.Endpoint)) == "" &&
 		strings.TrimSpace(common.StringVal(req.Region)) == "" &&
-		strings.TrimSpace(common.StringVal(req.Provider)) == "" &&
+		strings.TrimSpace(common.StringVal(req.BillingLogBucket)) == "" &&
+		strings.TrimSpace(common.StringVal(req.BillingLogPrefix)) == "" &&
+		rawProvider == "" &&
 		req.Organization != ""
 
 	if !hasExistingCred && bucketProvider == common.S3Provider &&
@@ -147,6 +164,8 @@ func handleInternalPutBucketFiber(c fiber.Ctx, om *core.ObjectManager) error {
 	accessKey := strings.TrimSpace(common.StringVal(req.AccessKey))
 	secretKey := strings.TrimSpace(common.StringVal(req.SecretKey))
 	endpoint := strings.TrimSpace(common.StringVal(req.Endpoint))
+	billingLogBucket := strings.TrimSpace(common.StringVal(req.BillingLogBucket))
+	billingLogPrefix := strings.Trim(strings.TrimSpace(common.StringVal(req.BillingLogPrefix)), "/")
 	if hasExistingCred {
 		if region == "" {
 			region = existingCred.Region
@@ -160,18 +179,28 @@ func handleInternalPutBucketFiber(c fiber.Ctx, om *core.ObjectManager) error {
 		if endpoint == "" {
 			endpoint = existingCred.Endpoint
 		}
+		if billingLogBucket == "" {
+			billingLogBucket = existingCred.BillingLogBucket
+		}
+		if billingLogPrefix == "" {
+			billingLogPrefix = existingCred.BillingLogPrefix
+		}
 	}
-
 	cred := &models.S3Credential{
-		Bucket:    req.Bucket,
-		Provider:  bucketProvider,
-		Region:    region,
-		AccessKey: accessKey,
-		SecretKey: secretKey,
-		Endpoint:  endpoint,
+		Bucket:           req.Bucket,
+		Provider:         bucketProvider,
+		Region:           region,
+		AccessKey:        accessKey,
+		SecretKey:        secretKey,
+		Endpoint:         endpoint,
+		BillingLogBucket: billingLogBucket,
+		BillingLogPrefix: billingLogPrefix,
 	}
 	if bucketProvider == common.S3Provider && (strings.TrimSpace(cred.AccessKey) == "" || strings.TrimSpace(cred.SecretKey) == "") {
 		return c.Status(fiber.StatusBadRequest).SendString("access_key and secret_key are required for s3 credentials")
+	}
+	if err := validateBucketBillingLogs(c, cred); err != nil {
+		return c.Status(fiber.StatusBadRequest).SendString(err.Error())
 	}
 
 	if err := om.SaveS3Credential(c.Context(), cred); err != nil {

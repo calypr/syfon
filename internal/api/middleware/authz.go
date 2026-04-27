@@ -56,14 +56,14 @@ type authenticationPluginManagerInterface interface {
 }
 
 type AuthzMiddleware struct {
-	logger        *slog.Logger
-	mode          string
-	basicUser     string
-	basicPass     string
-	mock          mockAuthConfig
-	cache         *authzCache
-	sf            singleflight.Group
-	pluginManager pluginManagerInterface // interface for testability
+	logger             *slog.Logger
+	mode               string
+	basicUser          string
+	basicPass          string
+	mock               mockAuthConfig
+	cache              *authzCache
+	sf                 singleflight.Group
+	pluginManager      pluginManagerInterface               // interface for testability
 	authnPluginManager authenticationPluginManagerInterface // authentication plugin (interface)
 }
 
@@ -110,7 +110,7 @@ func NewAuthzMiddleware(logger *slog.Logger, mode, basicUser, basicPass string) 
 		mock:      loadMockAuthConfigFromEnv(),
 		cache:     cache,
 	}
-	// TODO: Make plugin path configurable; for now, use default path or env var
+	// Config loading maps auth.plugin_paths.authz to this environment variable.
 	pluginPath := os.Getenv("SYFON_AUTHZ_PLUGIN_PATH")
 	if pluginPath != "" {
 		pm, err := NewPluginManager(pluginPath)
@@ -164,14 +164,20 @@ func (m *AuthzMiddleware) prepareRequestContext(c fiber.Ctx) (context.Context, s
 func (m *AuthzMiddleware) handleLocalAuth(c fiber.Ctx, ctx context.Context, authHeader string) error {
 	if m.authnPluginManager != nil {
 		input := &plugin.AuthenticationInput{
-			RequestID: common.GetRequestID(ctx),
+			RequestID:  common.GetRequestID(ctx),
 			AuthHeader: authHeader,
-			Metadata: map[string]interface{}{},
+			Metadata:   map[string]interface{}{},
 		}
 		output, err := m.authnPluginManager.Authenticate(ctx, input)
 		if err != nil || !output.Authenticated {
 			c.Set(fiber.HeaderWWWAuthenticate, `Basic realm="syfon"`)
 			return c.SendStatus(fiber.StatusUnauthorized)
+		}
+		if output.Subject != "" {
+			ctx = context.WithValue(ctx, common.SubjectKey, output.Subject)
+		}
+		if output.Claims != nil {
+			ctx = context.WithValue(ctx, common.ClaimsKey, output.Claims)
 		}
 		c.SetContext(ctx)
 		return c.Next()
@@ -192,7 +198,7 @@ func (m *AuthzMiddleware) handleGen3Auth(c fiber.Ctx, ctx context.Context, authH
 	// Authenticate first
 	var (
 		output *plugin.AuthenticationOutput
-		err error
+		err    error
 	)
 	if m.authnPluginManager == nil {
 		// TEST MODE: If pluginManager is set but no authnPluginManager, treat as authenticated (for plugin integration tests)
@@ -203,9 +209,9 @@ func (m *AuthzMiddleware) handleGen3Auth(c fiber.Ctx, ctx context.Context, authH
 		}
 	} else {
 		input := &plugin.AuthenticationInput{
-			RequestID: common.GetRequestID(ctx),
+			RequestID:  common.GetRequestID(ctx),
 			AuthHeader: authHeader,
-			Metadata: map[string]interface{}{},
+			Metadata:   map[string]interface{}{},
 		}
 		output, err = m.authnPluginManager.Authenticate(ctx, input)
 		if err != nil {

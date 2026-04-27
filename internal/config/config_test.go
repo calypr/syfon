@@ -325,7 +325,7 @@ database:
     file: "test.db"
 s3_credentials:
   - bucket: "local-bucket"
-    provider: "file"
+    provider: "bogus"
 `
 
 	tmpfile, err := os.CreateTemp("", "config-unsupported-provider-*.yaml")
@@ -342,7 +342,7 @@ s3_credentials:
 
 	_, err = LoadConfig(tmpfile.Name())
 	if err == nil {
-		t.Fatal("expected error for unsupported provider file")
+		t.Fatal("expected error for unsupported provider bogus")
 	}
 	if !strings.Contains(err.Error(), "unsupported provider") {
 		t.Fatalf("expected unsupported provider error, got %v", err)
@@ -371,11 +371,10 @@ func TestLoadConfig_BucketProviderValidationRegression(t *testing.T) {
 			wantProvider: "azure",
 		},
 		{
-			name:         "file provider rejected",
+			name:         "file provider accepted",
 			provider:     "file",
 			bucket:       "local-bucket",
-			wantErr:      true,
-			errSubstring: "unsupported provider",
+			wantProvider: "file",
 		},
 		{
 			name:         "gcs invalid bucket rejected",

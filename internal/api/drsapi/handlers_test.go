@@ -22,6 +22,9 @@ func TestDRSHandlers(t *testing.T) {
 				Name:    common.Ptr("test-file"),
 				Size:    100,
 				SelfUri: "drs://test-obj",
+				Checksums: []drs.Checksum{
+					{Type: "sha256", Checksum: "sha-1"},
+				},
 				AccessMethods: &[]drs.AccessMethod{
 					{
 						AccessId: common.Ptr("s3-access"),
@@ -33,6 +36,9 @@ func TestDRSHandlers(t *testing.T) {
 					},
 				},
 			},
+		},
+		ObjectAuthz: map[string]map[string][]string{
+			"test-obj": {"calypr": {"proj-a"}},
 		},
 	}
 	um := &testutils.MockUrlManager{}
@@ -62,6 +68,7 @@ func TestDRSHandlers(t *testing.T) {
 	})
 
 	t.Run("GetAccessURL_Success", func(t *testing.T) {
+		db.TransferEvents = nil
 		req := httptest.NewRequest("GET", "/objects/test-obj/access/s3-access", nil)
 		resp, _ := app.Test(req)
 		if resp.StatusCode != http.StatusOK {
@@ -71,6 +78,13 @@ func TestDRSHandlers(t *testing.T) {
 		json.NewDecoder(resp.Body).Decode(&access)
 		if access.Url == "" {
 			t.Error("expected signed URL, got empty")
+		}
+		if len(db.TransferEvents) != 1 {
+			t.Fatalf("expected one access-issued event, got %+v", db.TransferEvents)
+		}
+		ev := db.TransferEvents[0]
+		if ev.EventType != "access_issued" || ev.ObjectID != "test-obj" || ev.SHA256 != "sha-1" || ev.Organization != "calypr" || ev.Project != "proj-a" || ev.Provider != "s3" || ev.Bucket != "bucket" {
+			t.Fatalf("unexpected access-issued event: %+v", ev)
 		}
 	})
 
@@ -83,6 +97,7 @@ func TestDRSHandlers(t *testing.T) {
 	})
 
 	t.Run("GetBulkAccessURL_Success", func(t *testing.T) {
+		db.TransferEvents = nil
 		bodyObj := drs.BulkObjectAccessId{
 			BulkObjectAccessIds: &[]struct {
 				BulkAccessIds *[]string `json:"bulk_access_ids,omitempty"`
@@ -108,6 +123,13 @@ func TestDRSHandlers(t *testing.T) {
 		}
 		if access.ResolvedDrsObjectAccessUrls == nil || len(*access.ResolvedDrsObjectAccessUrls) != 1 || (*access.ResolvedDrsObjectAccessUrls)[0].Url == "" {
 			t.Fatalf("expected signed bulk access URL, got %+v", access.ResolvedDrsObjectAccessUrls)
+		}
+		if len(db.TransferEvents) != 1 {
+			t.Fatalf("expected one bulk access-issued event, got %+v", db.TransferEvents)
+		}
+		ev := db.TransferEvents[0]
+		if ev.EventType != "access_issued" || ev.AccessID != "s3-access" || ev.ObjectID != "test-obj" {
+			t.Fatalf("unexpected bulk access-issued event: %+v", ev)
 		}
 	})
 

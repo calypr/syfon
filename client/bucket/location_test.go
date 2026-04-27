@@ -57,10 +57,15 @@ func TestValidateBucketNonS3Providers(t *testing.T) {
 				ProjectId:    "proj",
 				Provider:     &provider,
 			}
+			if provider != "custom" {
+				logBucket := "logs"
+				logPrefix := "provider-logs"
+				req.BillingLogBucket = &logBucket
+				req.BillingLogPrefix = &logPrefix
+			}
 			if err := ValidateBucket(ctx, req); err != nil {
 				t.Fatalf("ValidateBucket returned error for provider %q: %v", provider, err)
 			}
 		})
 	}
 }
-

@@ -28,10 +28,13 @@ CREATE TABLE IF NOT EXISTS drs_object_checksum (
 
 CREATE TABLE IF NOT EXISTS s3_credential (
   bucket TEXT PRIMARY KEY,
+  provider TEXT NOT NULL DEFAULT 's3',
   region TEXT,
   access_key TEXT,
   secret_key TEXT,
-  endpoint TEXT
+  endpoint TEXT,
+  billing_log_bucket TEXT,
+  billing_log_prefix TEXT
 );
 
 CREATE TABLE IF NOT EXISTS bucket_scope (

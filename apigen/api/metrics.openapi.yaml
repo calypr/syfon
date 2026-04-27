@@ -32,6 +32,8 @@ paths:
           schema:
             type: integer
             minimum: 0
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Project'
       responses:
         '200':
           description: Paginated file usage metrics
@@ -58,6 +60,8 @@ paths:
           required: true
           schema:
             type: string
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Project'
       responses:
         '200':
           description: File usage metric
@@ -86,6 +90,8 @@ paths:
           schema:
             type: integer
             minimum: 0
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Project'
       responses:
         '200':
           description: Aggregate summary metrics
@@ -101,7 +107,242 @@ paths:
           description: Forbidden
         '500':
           description: Internal server error
+  /index/v1/metrics/provider-transfer-events:
+    post:
+      tags:
+        - metrics
+      operationId: recordProviderTransferEvents
+      summary: Record provider-observed transfer events
+      description: |
+        Records idempotent storage-provider observed transfer events from trusted
+        importers. These provider events are the billing-grade source of truth.
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Project'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProviderTransferEventsRequest'
+      responses:
+        '201':
+          description: Provider transfer events accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransferEventsRecordedResponse'
+        '400':
+          description: Invalid request body
+        '401':
+          description: Authentication required
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
+  /index/v1/metrics/provider-transfer-sync:
+    post:
+      tags:
+        - metrics
+      operationId: recordProviderTransferSync
+      summary: Record provider transfer log sync status
+      description: |
+        Records trusted provider-log sync status for provider/bucket/time windows.
+        Metrics queries return persisted provider-observed billing data together
+        with freshness metadata that shows whether completed sync windows cover
+        the requested billing range.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProviderTransferSyncRequest'
+      responses:
+        '201':
+          description: Provider transfer sync windows recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProviderTransferSyncResponse'
+        '400':
+          description: Invalid request body
+        '401':
+          description: Authentication required
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
+    get:
+      tags:
+        - metrics
+      operationId: listProviderTransferSync
+      summary: List provider transfer log sync status
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Project'
+        - $ref: '#/components/parameters/From'
+        - $ref: '#/components/parameters/To'
+        - $ref: '#/components/parameters/Provider'
+        - $ref: '#/components/parameters/Bucket'
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 100
+      responses:
+        '200':
+          description: Provider transfer sync windows
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProviderTransferSyncResponse'
+        '400':
+          description: Invalid query params
+        '401':
+          description: Authentication required
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
+  /index/v1/metrics/transfers/summary:
+    get:
+      tags:
+        - metrics
+      operationId: getTransferSummary
+      summary: Summarize transfer attribution events
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Project'
+        - $ref: '#/components/parameters/Direction'
+        - $ref: '#/components/parameters/ReconciliationStatus'
+        - $ref: '#/components/parameters/From'
+        - $ref: '#/components/parameters/To'
+        - $ref: '#/components/parameters/Provider'
+        - $ref: '#/components/parameters/Bucket'
+        - $ref: '#/components/parameters/SHA256'
+        - $ref: '#/components/parameters/User'
+        - $ref: '#/components/parameters/AllowStale'
+      responses:
+        '200':
+          description: Aggregate transfer attribution metrics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransferAttributionSummary'
+        '400':
+          description: Invalid query params
+        '401':
+          description: Authentication required
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
+  /index/v1/metrics/transfers/breakdown:
+    get:
+      tags:
+        - metrics
+      operationId: getTransferBreakdown
+      summary: Group transfer attribution events
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Project'
+        - $ref: '#/components/parameters/Direction'
+        - $ref: '#/components/parameters/ReconciliationStatus'
+        - $ref: '#/components/parameters/From'
+        - $ref: '#/components/parameters/To'
+        - $ref: '#/components/parameters/Provider'
+        - $ref: '#/components/parameters/Bucket'
+        - $ref: '#/components/parameters/SHA256'
+        - $ref: '#/components/parameters/User'
+        - $ref: '#/components/parameters/AllowStale'
+        - in: query
+          name: group_by
+          schema:
+            type: string
+            enum: [scope, user, provider, object]
+            default: scope
+      responses:
+        '200':
+          description: Grouped transfer attribution metrics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransferBreakdownResponse'
+        '400':
+          description: Invalid query params
+        '401':
+          description: Authentication required
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
 components:
+  parameters:
+    Organization:
+      in: query
+      name: organization
+      schema:
+        type: string
+      description: Organization/program scope filter.
+    Project:
+      in: query
+      name: project
+      schema:
+        type: string
+      description: Project scope filter. Requires organization when set.
+    Direction:
+      in: query
+      name: direction
+      schema:
+        $ref: '#/components/schemas/ProviderTransferDirection'
+    ReconciliationStatus:
+      in: query
+      name: reconciliation_status
+      schema:
+        $ref: '#/components/schemas/ProviderTransferReconciliationStatus'
+    From:
+      in: query
+      name: from
+      schema:
+        type: string
+        format: date-time
+    To:
+      in: query
+      name: to
+      schema:
+        type: string
+        format: date-time
+    Provider:
+      in: query
+      name: provider
+      schema:
+        type: string
+    Bucket:
+      in: query
+      name: bucket
+      schema:
+        type: string
+    SHA256:
+      in: query
+      name: sha256
+      schema:
+        type: string
+    User:
+      in: query
+      name: user
+      schema:
+        type: string
+      description: Actor email or subject filter.
+    AllowStale:
+      in: query
+      name: allow_stale
+      deprecated: true
+      schema:
+        type: boolean
+        default: false
+      description: Deprecated. Transfer metrics always return persisted provider events with freshness metadata, including missing sync windows and latest completed sync time.
   schemas:
     FileUsage:
       type: object
@@ -157,3 +398,300 @@ components:
           type: integer
         offset:
           type: integer
+    ProviderTransferDirection:
+      type: string
+      enum:
+        - download
+        - upload
+    ProviderTransferReconciliationStatus:
+      type: string
+      enum:
+        - matched
+        - ambiguous
+        - unmatched
+        - all
+    ProviderTransferEvent:
+      type: object
+      required:
+        - provider_event_id
+        - direction
+        - provider
+        - bucket
+        - bytes_transferred
+      properties:
+        provider_event_id:
+          type: string
+          description: Provider/importer idempotency key.
+        access_grant_id:
+          type: string
+        direction:
+          $ref: '#/components/schemas/ProviderTransferDirection'
+        event_time:
+          type: string
+          format: date-time
+        request_id:
+          type: string
+        provider_request_id:
+          type: string
+        object_id:
+          type: string
+          description: DRS object DID when known.
+        sha256:
+          type: string
+        object_size:
+          type: integer
+          format: int64
+        organization:
+          type: string
+        project:
+          type: string
+        access_id:
+          type: string
+        provider:
+          type: string
+        bucket:
+          type: string
+        object_key:
+          type: string
+        storage_url:
+          type: string
+        range_start:
+          type: integer
+          format: int64
+          nullable: true
+        range_end:
+          type: integer
+          format: int64
+          nullable: true
+        bytes_transferred:
+          type: integer
+          format: int64
+          minimum: 0
+        http_method:
+          type: string
+        http_status:
+          type: integer
+        requester_principal:
+          type: string
+        source_ip:
+          type: string
+        user_agent:
+          type: string
+        raw_event_ref:
+          type: string
+        actor_email:
+          type: string
+        actor_subject:
+          type: string
+        auth_mode:
+          type: string
+        reconciliation_status:
+          $ref: '#/components/schemas/ProviderTransferReconciliationStatus'
+    ProviderTransferEventsRequest:
+      type: object
+      required:
+        - events
+      properties:
+        events:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/ProviderTransferEvent'
+    TransferEventsRecordedResponse:
+      type: object
+      properties:
+        recorded:
+          type: integer
+    ProviderTransferSyncStatus:
+      type: string
+      enum:
+        - pending
+        - completed
+        - failed
+    ProviderTransferSyncRequest:
+      type: object
+      required:
+        - from
+        - to
+      properties:
+        provider:
+          type: string
+          description: Provider filter. When omitted, all configured buckets are recorded.
+        bucket:
+          type: string
+          description: Bucket filter. When omitted, all configured buckets are recorded.
+        organization:
+          type: string
+        project:
+          type: string
+        from:
+          type: string
+          format: date-time
+        to:
+          type: string
+          format: date-time
+        status:
+          $ref: '#/components/schemas/ProviderTransferSyncStatus'
+        imported_events:
+          type: integer
+          format: int64
+        matched_events:
+          type: integer
+          format: int64
+        ambiguous_events:
+          type: integer
+          format: int64
+        unmatched_events:
+          type: integer
+          format: int64
+        error_message:
+          type: string
+    ProviderTransferSyncRun:
+      type: object
+      properties:
+        sync_id:
+          type: string
+        provider:
+          type: string
+        bucket:
+          type: string
+        organization:
+          type: string
+        project:
+          type: string
+        from:
+          type: string
+          format: date-time
+        to:
+          type: string
+          format: date-time
+        status:
+          $ref: '#/components/schemas/ProviderTransferSyncStatus'
+        requested_at:
+          type: string
+          format: date-time
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+        imported_events:
+          type: integer
+          format: int64
+        matched_events:
+          type: integer
+          format: int64
+        ambiguous_events:
+          type: integer
+          format: int64
+        unmatched_events:
+          type: integer
+          format: int64
+        error_message:
+          type: string
+    ProviderTransferSyncResponse:
+      type: object
+      properties:
+        recorded:
+          type: integer
+        sync_runs:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProviderTransferSyncRun'
+    TransferMetricsFreshness:
+      type: object
+      properties:
+        is_stale:
+          type: boolean
+        required_from:
+          type: string
+          format: date-time
+          nullable: true
+        required_to:
+          type: string
+          format: date-time
+          nullable: true
+        missing_buckets:
+          type: array
+          items:
+            type: string
+        latest_completed_sync:
+          type: string
+          format: date-time
+          nullable: true
+    TransferAttributionSummary:
+      type: object
+      properties:
+        event_count:
+          type: integer
+          format: int64
+        access_issued_count:
+          type: integer
+          format: int64
+        download_event_count:
+          type: integer
+          format: int64
+        upload_event_count:
+          type: integer
+          format: int64
+        bytes_requested:
+          type: integer
+          format: int64
+        bytes_downloaded:
+          type: integer
+          format: int64
+        bytes_uploaded:
+          type: integer
+          format: int64
+        freshness:
+          $ref: '#/components/schemas/TransferMetricsFreshness'
+    TransferAttributionBreakdown:
+      type: object
+      properties:
+        key:
+          type: string
+        organization:
+          type: string
+        project:
+          type: string
+        provider:
+          type: string
+        bucket:
+          type: string
+        sha256:
+          type: string
+        actor_email:
+          type: string
+        actor_subject:
+          type: string
+        event_count:
+          type: integer
+          format: int64
+        bytes_requested:
+          type: integer
+          format: int64
+        bytes_downloaded:
+          type: integer
+          format: int64
+        bytes_uploaded:
+          type: integer
+          format: int64
+        last_transfer_time:
+          type: string
+          format: date-time
+          nullable: true
+    TransferBreakdownResponse:
+      type: object
+      properties:
+        group_by:
+          type: string
+          enum: [scope, user, provider, object]
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/TransferAttributionBreakdown'
+        freshness:
+          $ref: '#/components/schemas/TransferMetricsFreshness'

@@ -46,3 +46,34 @@ type MetricsSummaryOptions struct {
 	Organization string
 	ProjectID    string
 }
+
+type TransferMetricsOptions struct {
+	Organization         string
+	ProjectID            string
+	Direction            string
+	From                 string
+	To                   string
+	Provider             string
+	Bucket               string
+	SHA256               string
+	User                 string
+	GroupBy              string
+	ReconciliationStatus string
+	AllowStale           bool
+}
+
+type ProviderTransferSyncOptions struct {
+	Organization    string
+	ProjectID       string
+	Provider        string
+	Bucket          string
+	From            string
+	To              string
+	Status          string
+	ImportedEvents  int64
+	MatchedEvents   int64
+	AmbiguousEvents int64
+	UnmatchedEvents int64
+	ErrorMessage    string
+	Limit           int
+}

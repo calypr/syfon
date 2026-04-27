@@ -132,6 +132,12 @@ components:
           type: string
         endpoint:
           type: string
+        billing_log_bucket:
+          type: string
+          description: Bucket/container where provider access logs are delivered. Required for s3, gcs, and azure.
+        billing_log_prefix:
+          type: string
+          description: Prefix under billing_log_bucket where provider access logs are delivered. Required for s3, gcs, and azure.
         organization:
           type: string
         project_id:
@@ -160,6 +166,10 @@ components:
         provider:
           type: string
         region:
+          type: string
+        billing_log_bucket:
+          type: string
+        billing_log_prefix:
           type: string
         programs:
           type: array

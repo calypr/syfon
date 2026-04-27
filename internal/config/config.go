@@ -128,12 +128,14 @@ func (p PostgresConfig) MarshalJSON() ([]byte, error) {
 }
 
 type S3Config struct {
-	Bucket    string `json:"bucket" yaml:"bucket"`
-	Provider  string `json:"provider,omitempty" yaml:"provider,omitempty"`
-	Region    string `json:"region" yaml:"region"`
-	AccessKey string `json:"access_key" yaml:"access_key"`
-	SecretKey string `json:"secret_key" yaml:"secret_key"`
-	Endpoint  string `json:"endpoint,omitempty" yaml:"endpoint,omitempty"`
+	Bucket           string `json:"bucket" yaml:"bucket"`
+	Provider         string `json:"provider,omitempty" yaml:"provider,omitempty"`
+	Region           string `json:"region" yaml:"region"`
+	AccessKey        string `json:"access_key" yaml:"access_key"`
+	SecretKey        string `json:"secret_key" yaml:"secret_key"`
+	Endpoint         string `json:"endpoint,omitempty" yaml:"endpoint,omitempty"`
+	BillingLogBucket string `json:"billing_log_bucket,omitempty" yaml:"billing_log_bucket,omitempty"`
+	BillingLogPrefix string `json:"billing_log_prefix,omitempty" yaml:"billing_log_prefix,omitempty"`
 }
 
 // SECURITY FIX MED-1: Redact secret key when marshaling to JSON

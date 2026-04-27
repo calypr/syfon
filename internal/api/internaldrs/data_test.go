@@ -97,6 +97,13 @@ func TestHandleInternalDownload(t *testing.T) {
 	if !strings.Contains(common.StringVal(resp.Url), "signed=true") {
 		t.Errorf("expected signed url, got %v", common.StringVal(resp.Url))
 	}
+	if len(mockDB.TransferEvents) != 1 {
+		t.Fatalf("expected one access-issued event, got %+v", mockDB.TransferEvents)
+	}
+	ev := mockDB.TransferEvents[0]
+	if ev.EventType != models.TransferEventAccessIssued || ev.ObjectID != "test-file-id" || ev.Provider != "s3" || ev.Bucket != "bucket" {
+		t.Fatalf("unexpected access-issued event: %+v", ev)
+	}
 }
 
 func TestHandleInternalDownloadPart(t *testing.T) {
@@ -119,6 +126,7 @@ func TestHandleInternalDownloadPart(t *testing.T) {
 	mockUM := &testutils.MockUrlManager{}
 
 	t.Run("success", func(t *testing.T) {
+		mockDB.TransferEvents = nil
 		req, _ := http.NewRequest("GET", "/data/download/test-file-id/part?start=0&end=1024", nil)
 		req = routeutil.WithPathParams(req, map[string]string{"file_id": "test-file-id"})
 
@@ -134,6 +142,13 @@ func TestHandleInternalDownloadPart(t *testing.T) {
 		json.NewDecoder(rr.Body).Decode(&resp)
 		if !strings.Contains(common.StringVal(resp.Url), "range=0-1024") {
 			t.Errorf("expected signed range url, got %v", common.StringVal(resp.Url))
+		}
+		if len(mockDB.TransferEvents) != 1 {
+			t.Fatalf("expected one ranged access-issued event, got %+v", mockDB.TransferEvents)
+		}
+		ev := mockDB.TransferEvents[0]
+		if ev.EventType != models.TransferEventAccessIssued || ev.RangeStart == nil || ev.RangeEnd == nil || *ev.RangeStart != 0 || *ev.RangeEnd != 1024 || ev.BytesRequested != 1025 {
+			t.Fatalf("unexpected ranged access-issued event: %+v", ev)
 		}
 	})
 
@@ -744,9 +759,11 @@ func TestHandleInternalPutDeleteBucket_Gen3Auth(t *testing.T) {
 	region := "us-east-1"
 	accessKey := "ak"
 	secretKey := "sk"
-	endpoint := "https://s3.amazonaws.com"
+	endpoint := t.TempDir()
+	provider := "file"
 	putBody, _ := json.Marshal(bucketapi.PutBucketRequest{
 		Bucket:       "bucket2",
+		Provider:     &provider,
 		Region:       &region,
 		AccessKey:    &accessKey,
 		SecretKey:    &secretKey,

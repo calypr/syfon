@@ -118,6 +118,14 @@ func (d *GenericDownloader) downloadSingle(ctx context.Context, guid string, dst
 		}
 		return fmt.Errorf("short download: got %d, expected %d", startOffset+written, expectedSize)
 	}
+	emitTransferCompletion(ctx, common.TransferCompletionEvent{
+		Direction:  "download",
+		GUID:       guid,
+		RangeStart: startOffset,
+		RangeEnd:   startOffset + written - 1,
+		Bytes:      written,
+		Strategy:   "single",
+	})
 	return nil
 }
 
@@ -197,6 +205,15 @@ func (d *GenericDownloader) downloadParallel(ctx context.Context, guid string, d
 						BytesSoFar:     current,
 					})
 				}
+				emitTransferCompletion(gctx, common.TransferCompletionEvent{
+					Direction:  "download",
+					GUID:       guid,
+					RangeStart: partStart,
+					RangeEnd:   partEnd,
+					Bytes:      written,
+					PartNumber: partNum(partStart, chunkSize),
+					Strategy:   "multipart",
+				})
 				return nil
 			})
 		})
@@ -212,4 +229,20 @@ func (d *GenericDownloader) downloadParallel(ctx context.Context, guid string, d
 	}
 
 	return nil
+}
+
+func emitTransferCompletion(ctx context.Context, ev common.TransferCompletionEvent) {
+	if ev.Bytes <= 0 {
+		return
+	}
+	if cb := common.GetTransferCompletion(ctx); cb != nil {
+		_ = cb(ev)
+	}
+}
+
+func partNum(start, chunkSize int64) int {
+	if chunkSize <= 0 {
+		return 0
+	}
+	return int(start/chunkSize) + 1
 }

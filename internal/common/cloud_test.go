@@ -82,7 +82,8 @@ func TestParseBucketProvider(t *testing.T) {
 		{in: "s3", want: S3Provider, ok: true},
 		{in: "gs", want: GCSProvider, ok: true},
 		{in: "azure", want: AzureProvider, ok: true},
-		{in: "file", ok: false},
+		{in: "file", want: FileProvider, ok: true},
+		{in: "unsupported", ok: false},
 	}
 
 	for _, tt := range tests {

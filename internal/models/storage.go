@@ -8,12 +8,14 @@ import (
 
 // S3Credential represents the 's3_credential' table
 type S3Credential struct {
-	Bucket    string `db:"bucket"`
-	Provider  string `db:"provider"`
-	Region    string `db:"region"`
-	AccessKey string `db:"access_key"`
-	SecretKey string `db:"secret_key"`
-	Endpoint  string `db:"endpoint"`
+	Bucket           string `db:"bucket"`
+	Provider         string `db:"provider"`
+	Region           string `db:"region"`
+	AccessKey        string `db:"access_key"`
+	SecretKey        string `db:"secret_key"`
+	Endpoint         string `db:"endpoint"`
+	BillingLogBucket string `db:"billing_log_bucket"`
+	BillingLogPrefix string `db:"billing_log_prefix"`
 }
 
 type BucketScope struct {
@@ -50,6 +52,152 @@ type FileUsageSummary struct {
 	TotalUploads      int64
 	TotalDownloads    int64
 	InactiveFileCount int64
+}
+
+const (
+	TransferEventAccessIssued = "access_issued"
+
+	ProviderTransferDirectionDownload = "download"
+	ProviderTransferDirectionUpload   = "upload"
+
+	ProviderTransferMatched   = "matched"
+	ProviderTransferAmbiguous = "ambiguous"
+	ProviderTransferUnmatched = "unmatched"
+)
+
+// TransferAttributionEvent captures durable byte attribution for billing and audit.
+type TransferAttributionEvent struct {
+	EventID           string
+	AccessGrantID     string
+	EventType         string
+	EventTime         time.Time
+	RequestID         string
+	ObjectID          string
+	SHA256            string
+	ObjectSize        int64
+	Organization      string
+	Project           string
+	AccessID          string
+	Provider          string
+	Bucket            string
+	StorageURL        string
+	RangeStart        *int64
+	RangeEnd          *int64
+	BytesRequested    int64
+	BytesCompleted    int64
+	ActorEmail        string
+	ActorSubject      string
+	AuthMode          string
+	ClientName        string
+	ClientVersion     string
+	TransferSessionID string
+}
+
+// ProviderTransferEvent captures provider-observed transfer bytes for billing.
+type ProviderTransferEvent struct {
+	ProviderEventID      string
+	AccessGrantID        string
+	Direction            string
+	EventTime            time.Time
+	RequestID            string
+	ProviderRequestID    string
+	ObjectID             string
+	SHA256               string
+	ObjectSize           int64
+	Organization         string
+	Project              string
+	AccessID             string
+	Provider             string
+	Bucket               string
+	ObjectKey            string
+	StorageURL           string
+	RangeStart           *int64
+	RangeEnd             *int64
+	BytesTransferred     int64
+	HTTPMethod           string
+	HTTPStatus           int
+	RequesterPrincipal   string
+	SourceIP             string
+	UserAgent            string
+	RawEventRef          string
+	ActorEmail           string
+	ActorSubject         string
+	AuthMode             string
+	ReconciliationStatus string
+}
+
+const (
+	ProviderTransferSyncPending   = "pending"
+	ProviderTransferSyncCompleted = "completed"
+	ProviderTransferSyncFailed    = "failed"
+)
+
+type ProviderTransferSyncRun struct {
+	SyncID          string     `json:"sync_id"`
+	Provider        string     `json:"provider"`
+	Bucket          string     `json:"bucket"`
+	Organization    string     `json:"organization"`
+	Project         string     `json:"project"`
+	From            time.Time  `json:"from"`
+	To              time.Time  `json:"to"`
+	Status          string     `json:"status"`
+	RequestedAt     time.Time  `json:"requested_at"`
+	StartedAt       *time.Time `json:"started_at"`
+	CompletedAt     *time.Time `json:"completed_at"`
+	ImportedEvents  int64      `json:"imported_events"`
+	MatchedEvents   int64      `json:"matched_events"`
+	AmbiguousEvents int64      `json:"ambiguous_events"`
+	UnmatchedEvents int64      `json:"unmatched_events"`
+	ErrorMessage    string     `json:"error_message"`
+}
+
+type TransferAttributionFilter struct {
+	Organization         string
+	Project              string
+	EventType            string
+	Direction            string
+	From                 *time.Time
+	To                   *time.Time
+	Provider             string
+	Bucket               string
+	SHA256               string
+	User                 string
+	ReconciliationStatus string
+}
+
+type TransferAttributionSummary struct {
+	EventCount         int64                     `json:"event_count"`
+	AccessIssuedCount  int64                     `json:"access_issued_count"`
+	DownloadEventCount int64                     `json:"download_event_count"`
+	UploadEventCount   int64                     `json:"upload_event_count"`
+	BytesRequested     int64                     `json:"bytes_requested"`
+	BytesDownloaded    int64                     `json:"bytes_downloaded"`
+	BytesUploaded      int64                     `json:"bytes_uploaded"`
+	Freshness          *TransferMetricsFreshness `json:"freshness,omitempty"`
+}
+
+type TransferMetricsFreshness struct {
+	IsStale             bool       `json:"is_stale"`
+	MissingBuckets      []string   `json:"missing_buckets,omitempty"`
+	LatestCompletedSync *time.Time `json:"latest_completed_sync,omitempty"`
+	RequiredFrom        *time.Time `json:"required_from,omitempty"`
+	RequiredTo          *time.Time `json:"required_to,omitempty"`
+}
+
+type TransferAttributionBreakdown struct {
+	Key              string     `json:"key"`
+	Organization     string     `json:"organization"`
+	Project          string     `json:"project"`
+	Provider         string     `json:"provider"`
+	Bucket           string     `json:"bucket"`
+	SHA256           string     `json:"sha256"`
+	ActorEmail       string     `json:"actor_email"`
+	ActorSubject     string     `json:"actor_subject"`
+	EventCount       int64      `json:"event_count"`
+	BytesRequested   int64      `json:"bytes_requested"`
+	BytesDownloaded  int64      `json:"bytes_downloaded"`
+	BytesUploaded    int64      `json:"bytes_uploaded"`
+	LastTransferTime *time.Time `json:"last_transfer_time"`
 }
 
 // DrsObjectRecord mirrors the subset of drs_object columns returned by storage queries.
