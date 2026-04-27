@@ -72,7 +72,9 @@ s3_credentials:
     access_key: %q
     secret_key: %q
     endpoint: %q
-`, port, dbPath, azurite.bucket, "azure", dockerE2EAzureAccountName, dockerE2EAzureAccountKey, azurite.serviceURL))
+    billing_log_bucket: %q
+    billing_log_prefix: %q
+`, port, dbPath, azurite.bucket, "azure", dockerE2EAzureAccountName, dockerE2EAzureAccountKey, azurite.serviceURL, azurite.bucket, ".syfon/provider-transfer-events"))
 
 	server := startSyfonServerProcessWithConfigPath(t, configPath, map[string]string{
 		"AZURE_STORAGE_ACCOUNT":           dockerE2EAzureAccountName,
@@ -84,12 +86,14 @@ s3_credentials:
 	t.Cleanup(func() { stopSyfonServerProcess(t, server) })
 
 	exerciseAllClientCommands(t, server.url, bucketCommandConfig{
-		Bucket:       "syfon-e2e-azurite-cli-bucket",
+		Bucket:       azurite.bucket,
 		Provider:     "azure",
 		Region:       "local",
 		AccessKey:    dockerE2EAzureAccountName,
 		SecretKey:    dockerE2EAzureAccountKey,
 		Endpoint:     azurite.serviceURL,
+		LogBucket:    azurite.bucket,
+		LogPrefix:    ".syfon/provider-transfer-events",
 		Organization: "syfon",
 		ProjectID:    "e2e",
 	})

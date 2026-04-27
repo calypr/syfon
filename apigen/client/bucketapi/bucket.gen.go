@@ -27,10 +27,12 @@ type AddBucketScopeRequest struct {
 
 // BucketMetadata defines model for BucketMetadata.
 type BucketMetadata struct {
-	EndpointUrl *string   `json:"endpoint_url,omitempty"`
-	Programs    *[]string `json:"programs,omitempty"`
-	Provider    *string   `json:"provider,omitempty"`
-	Region      *string   `json:"region,omitempty"`
+	BillingLogBucket *string   `json:"billing_log_bucket,omitempty"`
+	BillingLogPrefix *string   `json:"billing_log_prefix,omitempty"`
+	EndpointUrl      *string   `json:"endpoint_url,omitempty"`
+	Programs         *[]string `json:"programs,omitempty"`
+	Provider         *string   `json:"provider,omitempty"`
+	Region           *string   `json:"region,omitempty"`
 }
 
 // BucketsResponse defines model for BucketsResponse.
@@ -40,10 +42,16 @@ type BucketsResponse struct {
 
 // PutBucketRequest defines model for PutBucketRequest.
 type PutBucketRequest struct {
-	AccessKey    *string `json:"access_key,omitempty"`
-	Bucket       string  `json:"bucket"`
-	Endpoint     *string `json:"endpoint,omitempty"`
-	Organization string  `json:"organization"`
+	AccessKey *string `json:"access_key,omitempty"`
+
+	// BillingLogBucket Bucket/container where provider access logs are delivered. Required for s3, gcs, and azure.
+	BillingLogBucket *string `json:"billing_log_bucket,omitempty"`
+
+	// BillingLogPrefix Prefix under billing_log_bucket where provider access logs are delivered. Required for s3, gcs, and azure.
+	BillingLogPrefix *string `json:"billing_log_prefix,omitempty"`
+	Bucket           string  `json:"bucket"`
+	Endpoint         *string `json:"endpoint,omitempty"`
+	Organization     string  `json:"organization"`
 
 	// Path Optional s3://bucket/prefix path override
 	Path      *string `json:"path,omitempty"`

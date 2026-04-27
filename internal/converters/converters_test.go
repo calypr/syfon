@@ -33,8 +33,8 @@ func TestCandidateToInternalObjectAndLFSCandidateToDRS(t *testing.T) {
 		if err != nil {
 			t.Fatalf("CandidateToInternalObject returned error: %v", err)
 		}
-		if len(obj.Authorizations) != 1 || obj.Authorizations[0] != "/programs/syfon/projects/e2e" {
-			t.Fatalf("unexpected internal authz list: %+v", obj.Authorizations)
+		if got := obj.Authorizations["syfon"]; len(got) != 1 || got[0] != "e2e" {
+			t.Fatalf("unexpected internal authz map: %+v", obj.Authorizations)
 		}
 		if obj.DrsObject.AccessMethods == nil || len(*obj.DrsObject.AccessMethods) != 1 {
 			t.Fatalf("expected one access method, got %+v", obj.DrsObject.AccessMethods)

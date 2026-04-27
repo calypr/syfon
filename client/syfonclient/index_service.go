@@ -83,9 +83,6 @@ func (s *IndexService) List(ctx context.Context, opts ListRecordsOptions) (inter
 	if opts.Hash != "" {
 		params.Set("hash", opts.Hash)
 	}
-	if opts.Authz != "" {
-		params.Set("authz", opts.Authz)
-	}
 	if opts.Organization != "" {
 		params.Set("organization", opts.Organization)
 	}
@@ -107,9 +104,6 @@ func (s *IndexService) List(ctx context.Context, opts ListRecordsOptions) (inter
 
 func (s *IndexService) DeleteByQuery(ctx context.Context, opts DeleteByQueryOptions) (internalapi.DeleteByQueryResponse, error) {
 	params := &internalapi.InternalDeleteByQueryParams{}
-	if opts.Authz != "" {
-		params.Authz = &opts.Authz
-	}
 	if opts.Organization != "" {
 		params.Organization = &opts.Organization
 	}
@@ -199,17 +193,16 @@ func (s *IndexService) SHA256Validity(ctx context.Context, values []string) (map
 	return s.BulkSHA256Validity(ctx, internalapi.BulkSHA256ValidityRequest{Sha256: &values})
 }
 
-func (s *IndexService) Upsert(ctx context.Context, did, objectURL, fileName string, size int64, sha256sum string, authz []string) error {
+func (s *IndexService) Upsert(ctx context.Context, did, objectURL, fileName string, size int64, sha256sum string, authorizations map[string][]string) error {
 	existing, err := s.Get(ctx, did)
 	if err == nil {
 		req := internalapi.InternalRecord{
 			Did:          existing.Did,
-			Authz:        existing.Authz,
+			Auth:         existing.Auth,
 			Description:  existing.Description,
 			FileName:     existing.FileName,
 			Hashes:       existing.Hashes,
 			Size:         existing.Size,
-			Urls:         existing.Urls,
 			Version:      existing.Version,
 			Organization: existing.Organization,
 			Project:      existing.Project,
@@ -218,11 +211,12 @@ func (s *IndexService) Upsert(ctx context.Context, did, objectURL, fileName stri
 		if strings.TrimSpace(req.Did) == "" {
 			req.Did = did
 		}
-		if len(req.Authz) == 0 {
-			if len(authz) == 0 {
-				return fmt.Errorf("authz is required to upsert record %s", did)
+		if req.Auth == nil || len(*req.Auth) == 0 {
+			if len(authorizations) == 0 {
+				return fmt.Errorf("authorizations are required to upsert record %s", did)
 			}
-			req.Authz = append([]string(nil), authz...)
+			auth := authPathMapForURL(objectURL, authorizations)
+			req.Auth = &auth
 		}
 		if fileName != "" {
 			req.FileName = &fileName
@@ -231,18 +225,12 @@ func (s *IndexService) Upsert(ctx context.Context, did, objectURL, fileName stri
 			req.Size = &size
 		}
 		if objectURL != "" {
-			var urls []string
-			if req.Urls != nil {
-				urls = *req.Urls
+			if req.Auth == nil {
+				auth := make(internalapi.AuthPathMap)
+				req.Auth = &auth
 			}
-			seen := map[string]bool{}
-			for _, u := range urls {
-				seen[u] = true
-			}
-			if !seen[objectURL] {
-				urls = append(urls, objectURL)
-				req.Urls = &urls
-			}
+			appendURLToAuthPathMap(*req.Auth, objectURL, authorizations)
+
 		}
 		if sha256sum != "" {
 			if req.Hashes == nil {
@@ -258,16 +246,13 @@ func (s *IndexService) Upsert(ctx context.Context, did, objectURL, fileName stri
 	payload := internalapi.InternalRecord{
 		Did: did,
 	}
-	if len(authz) == 0 {
-		return fmt.Errorf("authz is required to create record %s", did)
+	if len(authorizations) == 0 {
+		return fmt.Errorf("authorizations are required to create record %s", did)
 	}
-	payload.Authz = append([]string(nil), authz...)
+	auth := authPathMapForURL(objectURL, authorizations)
+	payload.Auth = &auth
 	if size > 0 {
 		payload.Size = &size
-	}
-	if objectURL != "" {
-		u := []string{objectURL}
-		payload.Urls = &u
 	}
 	if fileName != "" {
 		payload.FileName = &fileName
@@ -278,6 +263,39 @@ func (s *IndexService) Upsert(ctx context.Context, did, objectURL, fileName stri
 	}
 	_, err = s.Create(ctx, payload)
 	return err
+}
+
+func authPathMapForURL(rawURL string, authorizations map[string][]string) internalapi.AuthPathMap {
+	auth := make(internalapi.AuthPathMap)
+	appendURLToAuthPathMap(auth, rawURL, authorizations)
+	return auth
+}
+
+func appendURLToAuthPathMap(auth internalapi.AuthPathMap, rawURL string, authorizations map[string][]string) {
+	if rawURL == "" {
+		return
+	}
+	for org, projects := range authorizations {
+		if auth[org] == nil {
+			auth[org] = make(map[string][]string)
+		}
+		if len(projects) == 0 {
+			auth[org][""] = appendUniqueString(auth[org][""], rawURL)
+			continue
+		}
+		for _, project := range projects {
+			auth[org][project] = appendUniqueString(auth[org][project], rawURL)
+		}
+	}
+}
+
+func appendUniqueString(values []string, value string) []string {
+	for _, existing := range values {
+		if existing == value {
+			return values
+		}
+	}
+	return append(values, value)
 }
 
 // --- IndexService ---

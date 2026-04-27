@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"testing"
 
+	"github.com/calypr/syfon/apigen/client/internalapi"
 	syclient "github.com/calypr/syfon/client"
 	"github.com/calypr/syfon/internal/crypto"
 )
@@ -25,6 +26,8 @@ type bucketCommandConfig struct {
 	AccessKey    string
 	SecretKey    string
 	Endpoint     string
+	LogBucket    string
+	LogPrefix    string
 	Organization string
 	ProjectID    string
 }
@@ -189,7 +192,8 @@ func exerciseAllClientCommands(t *testing.T, serverURL string, bucketCfg bucketC
 	if err != nil {
 		t.Fatalf("fetch uploaded record: %v", err)
 	}
-	if rec.Urls == nil || len(*rec.Urls) == 0 || strings.TrimSpace((*rec.Urls)[0]) == "" {
+	recordURL := firstAuthPath(rec.Auth)
+	if strings.TrimSpace(recordURL) == "" {
 		t.Fatalf("uploaded record missing access url")
 	}
 	addURLDID := "33333333-3333-3333-3333-333333333333"
@@ -198,7 +202,7 @@ func exerciseAllClientCommands(t *testing.T, serverURL string, bucketCfg bucketC
 		"--server", serverURL,
 		"add-url",
 		"--did", addURLDID,
-		"--url", (*rec.Urls)[0],
+		"--url", recordURL,
 		"--org", "syfon",
 		"--project", "e2e",
 		"--name", fileName,
@@ -266,8 +270,6 @@ func exerciseAllClientCommands(t *testing.T, serverURL string, bucketCfg bucketC
 		"--server", serverURL,
 		"bucket", "add", bucketName,
 		"--provider", providerName,
-		"--organization", org,
-		"--project-id", project,
 	}
 	if v := strings.TrimSpace(bucketCfg.Region); v != "" {
 		bucketAddArgs = append(bucketAddArgs, "--region", v)
@@ -281,12 +283,40 @@ func exerciseAllClientCommands(t *testing.T, serverURL string, bucketCfg bucketC
 	if v := strings.TrimSpace(bucketCfg.Endpoint); v != "" {
 		bucketAddArgs = append(bucketAddArgs, "--endpoint", v)
 	}
+	logBucket := strings.TrimSpace(bucketCfg.LogBucket)
+	if logBucket == "" {
+		logBucket = bucketName
+	}
+	if logBucket != "" {
+		bucketAddArgs = append(bucketAddArgs, "--billing-log-bucket", logBucket)
+	}
+	logPrefix := strings.Trim(strings.TrimSpace(bucketCfg.LogPrefix), "/")
+	if logPrefix == "" {
+		logPrefix = ".syfon/provider-transfer-events"
+	}
+	if logPrefix != "" {
+		bucketAddArgs = append(bucketAddArgs, "--billing-log-prefix", logPrefix)
+	}
 
 	bucketAddOut, err := executeRootCommand(t, bucketAddArgs...)
 	if err != nil {
 		t.Fatalf("bucket add failed: %v output=%s", err, bucketAddOut)
 	}
 	if !strings.Contains(bucketAddOut, "bucket configured: "+bucketName) {
+		if !strings.Contains(bucketAddOut, "bucket credential configured: "+bucketName) {
+			t.Fatalf("unexpected bucket add output: %s", bucketAddOut)
+		}
+	}
+
+	scopeOut, err := executeRootCommand(t,
+		"--server", serverURL,
+		"bucket", "add-project", org, project,
+		"--path", providerScheme(providerName)+"://"+bucketName+"/"+org+"/"+project,
+	)
+	if err != nil {
+		t.Fatalf("bucket add-project failed: %v output=%s", err, scopeOut)
+	}
+	if !strings.Contains(scopeOut, "bucket project scope configured: bucket="+bucketName) {
 		t.Fatalf("unexpected bucket add output: %s", bucketAddOut)
 	}
 
@@ -321,4 +351,31 @@ func exerciseAllClientCommands(t *testing.T, serverURL string, bucketCfg bucketC
 	if !strings.Contains(headlineOut, "Syfon is reachable") {
 		t.Fatalf("unexpected post-cleanup ping output: %s", headlineOut)
 	}
+}
+
+func providerScheme(provider string) string {
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "gcs", "gs":
+		return "gs"
+	case "azure", "azblob":
+		return "azblob"
+	default:
+		return "s3"
+	}
+}
+
+func firstAuthPath(auth *internalapi.AuthPathMap) string {
+	if auth == nil {
+		return ""
+	}
+	for _, projects := range *auth {
+		for _, paths := range projects {
+			for _, path := range paths {
+				if strings.TrimSpace(path) != "" {
+					return path
+				}
+			}
+		}
+	}
+	return ""
 }

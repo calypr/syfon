@@ -4,31 +4,42 @@ import (
 	"sort"
 
 	"github.com/calypr/syfon/apigen/server/drs"
-	syfoncommon "github.com/calypr/syfon/common"
-	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/models"
 )
 
-func UniqueAuthz(values any) []string {
+func UniqueAuthz(values any) map[string][]string {
 	switch v := values.(type) {
 	case nil:
 		return nil
-	case []string:
-		return common.UniqueStrings(v)
-	case *[]string:
-		if v == nil {
-			return nil
-		}
-		return common.UniqueStrings(*v)
 	case []drs.AccessMethod:
-		out := make([]string, 0)
+		out := make(map[string][]string)
 		for _, method := range v {
 			if method.Authorizations == nil {
 				continue
 			}
-			out = append(out, syfoncommon.AuthzMapToList(*method.Authorizations)...)
+			for org, projects := range *method.Authorizations {
+				if len(projects) == 0 {
+					if _, ok := out[org]; !ok {
+						out[org] = []string{}
+					}
+					continue
+				}
+				seen := make(map[string]struct{}, len(out[org]))
+				for _, p := range out[org] {
+					seen[p] = struct{}{}
+				}
+				for _, p := range projects {
+					if _, ok := seen[p]; !ok {
+						out[org] = append(out[org], p)
+						seen[p] = struct{}{}
+					}
+				}
+			}
 		}
-		return common.UniqueStrings(out)
+		if len(out) == 0 {
+			return nil
+		}
+		return out
 	case *[]drs.AccessMethod:
 		if v == nil {
 			return nil

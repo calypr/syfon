@@ -45,10 +45,10 @@ func TestResourceAndAuthzHelpers(t *testing.T) {
 		if got := StoragePrefix("", ""); got != "" {
 			t.Fatalf("expected empty prefix, got %q", got)
 		}
-		if got := StoragePrefix("syfon", ""); got != "programs/syfon" {
+		if got := StoragePrefix("syfon", ""); got != "" {
 			t.Fatalf("unexpected org prefix: %q", got)
 		}
-		if got := StoragePrefix("syfon", "e2e"); got != "programs/syfon/projects/e2e" {
+		if got := StoragePrefix("syfon", "e2e"); got != "" {
 			t.Fatalf("unexpected project prefix: %q", got)
 		}
 	})

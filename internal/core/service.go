@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/calypr/syfon/apigen/server/drs"
+	syfoncommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/authz"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/db"
@@ -111,7 +112,7 @@ func (m *ObjectManager) lookupObjectByAlias(ctx context.Context, ident string) (
 }
 
 func (m *ObjectManager) checkAccessAndReturn(obj *models.InternalObject, method string, ctx context.Context) (*models.InternalObject, error) {
-	if method != "" && !authz.HasMethodAccess(ctx, method, obj.Authorizations) {
+	if method != "" && !authz.HasMethodAccess(ctx, method, syfoncommon.AuthzMapToList(obj.Authorizations)) {
 		return nil, common.ErrUnauthorized
 	}
 	return obj, nil
@@ -135,9 +136,9 @@ func (m *ObjectManager) RegisterBulk(ctx context.Context, candidates []drs.DrsOb
 	return len(toRegister), nil
 }
 
-// DeleteBulkByResourcePrefix removes all objects matching a prefix after verifying permissions.
-func (m *ObjectManager) DeleteBulkByResourcePrefix(ctx context.Context, prefix string) (int, error) {
-	ids, err := m.db.ListObjectIDsByResourcePrefix(ctx, prefix)
+// DeleteBulkByScope removes all objects matching an organization/project scope after verifying permissions.
+func (m *ObjectManager) DeleteBulkByScope(ctx context.Context, organization, project string) (int, error) {
+	ids, err := m.db.ListObjectIDsByScope(ctx, organization, project)
 	if err != nil {
 		return 0, err
 	}
@@ -187,6 +188,14 @@ func (m *ObjectManager) DeleteObject(ctx context.Context, id string) error {
 
 func (m *ObjectManager) BulkDeleteObjects(ctx context.Context, ids []string) error {
 	return m.db.BulkDeleteObjects(ctx, ids)
+}
+
+func (m *ObjectManager) UpdateObjectAccessMethods(ctx context.Context, objectID string, accessMethods []drs.AccessMethod) error {
+	return m.db.UpdateObjectAccessMethods(ctx, objectID, accessMethods)
+}
+
+func (m *ObjectManager) BulkUpdateAccessMethods(ctx context.Context, updates map[string][]drs.AccessMethod) error {
+	return m.db.BulkUpdateAccessMethods(ctx, updates)
 }
 
 func (m *ObjectManager) RegisterObjects(ctx context.Context, objs []models.InternalObject) error {
@@ -262,6 +271,14 @@ func (m *ObjectManager) RecordUpload(ctx context.Context, id string) error {
 	return m.db.RecordFileUpload(ctx, id)
 }
 
+func (m *ObjectManager) RecordTransferAttributionEvents(ctx context.Context, events []models.TransferAttributionEvent) error {
+	return m.db.RecordTransferAttributionEvents(ctx, events)
+}
+
+func (m *ObjectManager) RecordProviderTransferEvents(ctx context.Context, events []models.ProviderTransferEvent) error {
+	return m.db.RecordProviderTransferEvents(ctx, events)
+}
+
 func (m *ObjectManager) GetBulkObjects(ctx context.Context, ids []string) ([]models.InternalObject, error) {
 	return m.db.GetBulkObjects(ctx, ids)
 }
@@ -270,8 +287,8 @@ func (m *ObjectManager) CreateObjectAlias(ctx context.Context, aliasID, canonica
 	return m.db.CreateObjectAlias(ctx, aliasID, canonicalID)
 }
 
-func (m *ObjectManager) ListObjectIDsByResourcePrefix(ctx context.Context, prefix string) ([]string, error) {
-	return m.db.ListObjectIDsByResourcePrefix(ctx, prefix)
+func (m *ObjectManager) ListObjectIDsByScope(ctx context.Context, organization, project string) ([]string, error) {
+	return m.db.ListObjectIDsByScope(ctx, organization, project)
 }
 
 func (m *ObjectManager) filterDeletableObjectIDs(ctx context.Context, ids []string) []string {

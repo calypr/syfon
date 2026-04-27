@@ -31,11 +31,13 @@ Core record row (one row per object).
 
 ### `drs_object_access_method`
 
-One-to-many access locations for each object.
+One-to-many scoped access locations for each object.
 
 - `object_id` (FK -> `drs_object.id`)
 - `url` (text), e.g. `s3://bucket/key`
 - `type` (text), e.g. `s3`
+- `org` (text), e.g. `my-program`
+- `project` (text), e.g. `my-project`
 
 ### `drs_object_checksum`
 
@@ -44,15 +46,6 @@ One-to-many checksum values for each object.
 - `object_id` (FK -> `drs_object.id`)
 - `type` (text), e.g. `sha256`, `md5`
 - `checksum` (text)
-
-### `drs_object_authz`
-
-One-to-many resource scopes used for RBAC checks.
-
-- `object_id` (FK -> `drs_object.id`)
-- `resource` (text), typically Arborist-style paths:
-  - `/programs/<organization>/projects/<project>`
-  - `/programs/<organization>`
 
 ### `s3_credential`
 

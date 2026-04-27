@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/calypr/syfon/apigen/server/lfsapi"
+	"github.com/calypr/syfon/internal/api/attribution"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/urlmanager"
@@ -21,10 +22,16 @@ func prepareDownloadActions(ctx context.Context, om *core.ObjectManager, oid str
 	}
 
 	var src string
+	var accessID string
 	if obj.AccessMethods != nil {
 		for _, am := range *obj.AccessMethods {
 			if am.AccessUrl != nil && strings.TrimSpace(am.AccessUrl.Url) != "" {
 				src = am.AccessUrl.Url
+				if am.AccessId != nil && strings.TrimSpace(*am.AccessId) != "" {
+					accessID = strings.TrimSpace(*am.AccessId)
+				} else {
+					accessID = strings.TrimSpace(string(am.Type))
+				}
 				break
 			}
 		}
@@ -39,6 +46,10 @@ func prepareDownloadActions(ctx context.Context, om *core.ObjectManager, oid str
 	}
 
 	_ = om.RecordDownload(ctx, oid)
+	attribution.RecordAccessIssued(ctx, om, obj, attribution.AccessDetails{
+		AccessID:   accessID,
+		StorageURL: src,
+	})
 	action := lfsapi.Action{Href: signed}
 	return &lfsapi.BatchActions{Download: &action}, nil
 }

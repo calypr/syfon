@@ -23,13 +23,12 @@ func TestSyfonListAndRemoveCommands(t *testing.T) {
 	did := "11111111-1111-1111-1111-111111111111"
 	fileName := "README.md"
 	size := int64(123)
-	urls := []string{"s3://syfon-bucket/path/README.md"}
+	auth := internalapi.AuthPathMap{"syfon": {"e2e": {"s3://syfon-bucket/path/README.md"}}}
 	rec := internalapi.InternalRecord{
 		Did:      did,
-		Authz:    []string{"/programs/syfon/projects/e2e"},
+		Auth:     &auth,
 		FileName: &fileName,
 		Size:     &size,
-		Urls:     &urls,
 	}
 	if _, err := c.Index().Create(context.Background(), rec); err != nil {
 		t.Fatalf("seed record: %v", err)
@@ -79,7 +78,7 @@ func TestSyfonDownloadDefaultsToRecordFilename(t *testing.T) {
 	}
 	did := "22222222-2222-2222-2222-222222222222"
 	// Store record with explicit filename and a storage-root URL so download can resolve locally.
-	if err := c.Index().Upsert(context.Background(), did, "s3://syfon-bucket/source.txt", "README.md", int64(len(srcData)), "", []string{"/programs/syfon/projects/e2e"}); err != nil {
+	if err := c.Index().Upsert(context.Background(), did, "s3://syfon-bucket/source.txt", "README.md", int64(len(srcData)), "", map[string][]string{"syfon": {"e2e"}}); err != nil {
 		t.Fatalf("seed record with file url: %v", err)
 	}
 
@@ -111,7 +110,7 @@ func TestSyfonBucketListAndRemoveCommands(t *testing.T) {
 	}
 	if err := c.Buckets().Put(context.Background(), bucketapi.PutBucketRequest{
 		Bucket:       "test-bucket-cli",
-		Provider:     stringPtr("s3"),
+		Provider:     stringPtr("file"),
 		Region:       stringPtr("us-east-1"),
 		AccessKey:    stringPtr("ak"),
 		SecretKey:    stringPtr("sk"),
@@ -143,6 +142,48 @@ func TestSyfonBucketListAndRemoveCommands(t *testing.T) {
 	}
 	if strings.Contains(out, "test-bucket-cli") {
 		t.Fatalf("expected bucket to be removed, output=%s", out)
+	}
+}
+
+func TestSyfonBucketAddCredentialAndScopesCommands(t *testing.T) {
+	server := newSyfonTestServer(t)
+	defer server.Close()
+
+	out, err := executeRootCommand(t,
+		"--server", server.URL,
+		"bucket", "add", "test-bucket-cli",
+		"--provider", "file",
+		"--region", "us-east-1",
+	)
+	if err != nil {
+		t.Fatalf("bucket add failed: %v output=%s", err, out)
+	}
+	if !strings.Contains(out, "bucket credential configured: test-bucket-cli") {
+		t.Fatalf("unexpected bucket add output: %s", out)
+	}
+
+	out, err = executeRootCommand(t,
+		"--server", server.URL,
+		"bucket", "add-organization", "syfon",
+		"--path", "gs://test-bucket-cli/program-root",
+	)
+	if err != nil {
+		t.Fatalf("bucket add-organization failed: %v output=%s", err, out)
+	}
+	if !strings.Contains(out, "bucket organization scope configured: bucket=test-bucket-cli org=syfon") {
+		t.Fatalf("unexpected bucket add-organization output: %s", out)
+	}
+
+	out, err = executeRootCommand(t,
+		"--server", server.URL,
+		"bucket", "add-project", "syfon", "e2e",
+		"--path", "gs://test-bucket-cli/program-root/project-subpath",
+	)
+	if err != nil {
+		t.Fatalf("bucket add-project failed: %v output=%s", err, out)
+	}
+	if !strings.Contains(out, "bucket project scope configured: bucket=test-bucket-cli org=syfon project=e2e") {
+		t.Fatalf("unexpected bucket add-project output: %s", out)
 	}
 }
 

@@ -67,17 +67,14 @@ func (db *SqliteDB) initSchema() error {
 			object_id TEXT,
 			url TEXT,
 			type TEXT,
+			org TEXT NOT NULL DEFAULT '',
+			project TEXT NOT NULL DEFAULT '',
 			FOREIGN KEY(object_id) REFERENCES drs_object(id) ON DELETE CASCADE
 		)`,
 		`CREATE TABLE IF NOT EXISTS drs_object_checksum (
 			object_id TEXT,
 			type TEXT,
 			checksum TEXT,
-			FOREIGN KEY(object_id) REFERENCES drs_object(id) ON DELETE CASCADE
-		)`,
-		`CREATE TABLE IF NOT EXISTS drs_object_authz (
-			object_id TEXT,
-			resource TEXT,
 			FOREIGN KEY(object_id) REFERENCES drs_object(id) ON DELETE CASCADE
 		)`,
 		`CREATE TABLE IF NOT EXISTS drs_object_alias (
@@ -92,7 +89,9 @@ func (db *SqliteDB) initSchema() error {
 			region TEXT,
 			access_key TEXT,
 			secret_key TEXT,
-			endpoint TEXT
+			endpoint TEXT,
+			billing_log_bucket TEXT,
+			billing_log_prefix TEXT
 		)`,
 		`CREATE TABLE IF NOT EXISTS bucket_scope (
 			organization TEXT NOT NULL,
@@ -129,6 +128,94 @@ func (db *SqliteDB) initSchema() error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_object_usage_event_object_id ON object_usage_event(object_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_object_usage_event_event_time ON object_usage_event(event_time)`,
+		`CREATE TABLE IF NOT EXISTS transfer_attribution_event (
+			event_id TEXT PRIMARY KEY,
+			access_grant_id TEXT NOT NULL DEFAULT '',
+			event_type TEXT NOT NULL CHECK(event_type IN ('access_issued')),
+			event_time TIMESTAMP NOT NULL,
+			request_id TEXT NOT NULL DEFAULT '',
+			object_id TEXT NOT NULL DEFAULT '',
+			sha256 TEXT NOT NULL DEFAULT '',
+			object_size INTEGER NOT NULL DEFAULT 0,
+			organization TEXT NOT NULL DEFAULT '',
+			project TEXT NOT NULL DEFAULT '',
+			access_id TEXT NOT NULL DEFAULT '',
+			provider TEXT NOT NULL DEFAULT '',
+			bucket TEXT NOT NULL DEFAULT '',
+			storage_url TEXT NOT NULL DEFAULT '',
+			range_start INTEGER NULL,
+			range_end INTEGER NULL,
+			bytes_requested INTEGER NOT NULL DEFAULT 0,
+			bytes_completed INTEGER NOT NULL DEFAULT 0,
+			actor_email TEXT NOT NULL DEFAULT '',
+			actor_subject TEXT NOT NULL DEFAULT '',
+			auth_mode TEXT NOT NULL DEFAULT '',
+			client_name TEXT NOT NULL DEFAULT '',
+			client_version TEXT NOT NULL DEFAULT '',
+			transfer_session_id TEXT NOT NULL DEFAULT ''
+		)`,
+		`CREATE TABLE IF NOT EXISTS provider_transfer_event (
+			provider_event_id TEXT PRIMARY KEY,
+			access_grant_id TEXT NOT NULL DEFAULT '',
+			direction TEXT NOT NULL CHECK(direction IN ('download','upload')),
+			event_time TIMESTAMP NOT NULL,
+			request_id TEXT NOT NULL DEFAULT '',
+			provider_request_id TEXT NOT NULL DEFAULT '',
+			object_id TEXT NOT NULL DEFAULT '',
+			sha256 TEXT NOT NULL DEFAULT '',
+			object_size INTEGER NOT NULL DEFAULT 0,
+			organization TEXT NOT NULL DEFAULT '',
+			project TEXT NOT NULL DEFAULT '',
+			access_id TEXT NOT NULL DEFAULT '',
+			provider TEXT NOT NULL DEFAULT '',
+			bucket TEXT NOT NULL DEFAULT '',
+			object_key TEXT NOT NULL DEFAULT '',
+			storage_url TEXT NOT NULL DEFAULT '',
+			range_start INTEGER NULL,
+			range_end INTEGER NULL,
+			bytes_transferred INTEGER NOT NULL DEFAULT 0,
+			http_method TEXT NOT NULL DEFAULT '',
+			http_status INTEGER NOT NULL DEFAULT 0,
+			requester_principal TEXT NOT NULL DEFAULT '',
+			source_ip TEXT NOT NULL DEFAULT '',
+			user_agent TEXT NOT NULL DEFAULT '',
+			raw_event_ref TEXT NOT NULL DEFAULT '',
+			actor_email TEXT NOT NULL DEFAULT '',
+			actor_subject TEXT NOT NULL DEFAULT '',
+			auth_mode TEXT NOT NULL DEFAULT '',
+			reconciliation_status TEXT NOT NULL DEFAULT 'unmatched' CHECK(reconciliation_status IN ('matched','ambiguous','unmatched'))
+		)`,
+		`CREATE TABLE IF NOT EXISTS provider_transfer_sync_run (
+			sync_id TEXT PRIMARY KEY,
+			provider TEXT NOT NULL DEFAULT '',
+			bucket TEXT NOT NULL DEFAULT '',
+			organization TEXT NOT NULL DEFAULT '',
+			project TEXT NOT NULL DEFAULT '',
+			from_time TIMESTAMP NOT NULL,
+			to_time TIMESTAMP NOT NULL,
+			status TEXT NOT NULL CHECK(status IN ('pending','completed','failed')),
+			requested_at TIMESTAMP NOT NULL,
+			started_at TIMESTAMP NULL,
+			completed_at TIMESTAMP NULL,
+			imported_events INTEGER NOT NULL DEFAULT 0,
+			matched_events INTEGER NOT NULL DEFAULT 0,
+			ambiguous_events INTEGER NOT NULL DEFAULT 0,
+			unmatched_events INTEGER NOT NULL DEFAULT 0,
+			error_message TEXT NOT NULL DEFAULT ''
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_transfer_attr_scope_time ON transfer_attribution_event(organization, project, event_type, event_time)`,
+		`CREATE INDEX IF NOT EXISTS idx_transfer_attr_actor_time ON transfer_attribution_event(actor_email, actor_subject, event_time)`,
+		`CREATE INDEX IF NOT EXISTS idx_transfer_attr_provider_time ON transfer_attribution_event(provider, bucket, event_time)`,
+		`CREATE INDEX IF NOT EXISTS idx_transfer_attr_sha_time ON transfer_attribution_event(sha256, event_time)`,
+		`CREATE INDEX IF NOT EXISTS idx_transfer_attr_session ON transfer_attribution_event(transfer_session_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_provider_transfer_scope_time ON provider_transfer_event(organization, project, direction, event_time)`,
+		`CREATE INDEX IF NOT EXISTS idx_provider_transfer_actor_time ON provider_transfer_event(actor_email, actor_subject, event_time)`,
+		`CREATE INDEX IF NOT EXISTS idx_provider_transfer_provider_time ON provider_transfer_event(provider, bucket, event_time)`,
+		`CREATE INDEX IF NOT EXISTS idx_provider_transfer_sha_time ON provider_transfer_event(sha256, event_time)`,
+		`CREATE INDEX IF NOT EXISTS idx_provider_transfer_status ON provider_transfer_event(reconciliation_status, event_time)`,
+		`CREATE INDEX IF NOT EXISTS idx_provider_transfer_grant ON provider_transfer_event(access_grant_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_provider_sync_bucket_time ON provider_transfer_sync_run(provider, bucket, requested_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_provider_sync_scope_time ON provider_transfer_sync_run(organization, project, requested_at)`,
 	}
 
 	for _, q := range queries {
@@ -136,7 +223,32 @@ func (db *SqliteDB) initSchema() error {
 			return err
 		}
 	}
+	for _, stmt := range []string{
+		`ALTER TABLE drs_object_access_method ADD COLUMN org TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE drs_object_access_method ADD COLUMN project TEXT NOT NULL DEFAULT ''`,
+	} {
+		if _, err := db.db.Exec(stmt); err != nil {
+			if !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
+				return err
+			}
+		}
+	}
 	if _, err := db.db.Exec(`ALTER TABLE s3_credential ADD COLUMN provider TEXT NOT NULL DEFAULT 's3'`); err != nil {
+		if !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
+			return err
+		}
+	}
+	for _, stmt := range []string{
+		`ALTER TABLE s3_credential ADD COLUMN billing_log_bucket TEXT`,
+		`ALTER TABLE s3_credential ADD COLUMN billing_log_prefix TEXT`,
+	} {
+		if _, err := db.db.Exec(stmt); err != nil {
+			if !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
+				return err
+			}
+		}
+	}
+	if _, err := db.db.Exec(`ALTER TABLE transfer_attribution_event ADD COLUMN access_grant_id TEXT NOT NULL DEFAULT ''`); err != nil {
 		if !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
 			return err
 		}

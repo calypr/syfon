@@ -55,19 +55,37 @@ var Cmd = &cobra.Command{
 		sumArr := sha256.Sum256(data)
 		sum := hex.EncodeToString(sumArr[:])
 
-		// Fetch the latest record to preserve authorizations during upsert
-		var authz []string
-		if rec, err := c.Index().Get(ctx, did); err == nil {
-			authz = rec.Authz
+		// Fetch the latest record to preserve scoped auth paths during upsert.
+		var authorizations map[string][]string
+		if rec, err := c.Index().Get(ctx, did); err == nil && rec.Auth != nil {
+			authorizations = authorizationsFromAuthPathMap(*rec.Auth)
 		}
 
-		if err := c.Index().Upsert(ctx, did, "", "", 0, sum, authz); err != nil {
+		if err := c.Index().Upsert(ctx, did, "", "", 0, sum, authorizations); err != nil {
 			return fmt.Errorf("persist sha256: %w", err)
 		}
 
 		fmt.Fprintln(cmd.OutOrStdout(), sum)
 		return nil
 	},
+}
+
+func authorizationsFromAuthPathMap(auth map[string]map[string][]string) map[string][]string {
+	out := make(map[string][]string)
+	for org, projects := range auth {
+		if strings.TrimSpace(org) == "" {
+			continue
+		}
+		for project := range projects {
+			project = strings.TrimSpace(project)
+			if project == "" {
+				out[org] = []string{}
+				break
+			}
+			out[org] = append(out[org], project)
+		}
+	}
+	return out
 }
 
 func readURLBytes(ctx context.Context, rawURL string, c syfonclient.SyfonClient) ([]byte, error) {

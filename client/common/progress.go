@@ -14,11 +14,24 @@ type ProgressEvent struct {
 
 type ProgressCallback func(ProgressEvent) error
 
+type TransferCompletionEvent struct {
+	Direction  string
+	GUID       string
+	RangeStart int64
+	RangeEnd   int64
+	Bytes      int64
+	PartNumber int
+	Strategy   string
+}
+
+type TransferCompletionCallback func(TransferCompletionEvent) error
+
 type contextKey string
 
 const (
-	progressKey contextKey = "progressCallback"
-	oidKey      contextKey = "activeOid"
+	progressKey           contextKey = "progressCallback"
+	oidKey                contextKey = "activeOid"
+	transferCompletionKey contextKey = "transferCompletionCallback"
 )
 
 func WithProgress(ctx context.Context, cb ProgressCallback) context.Context {
@@ -41,4 +54,15 @@ func GetOid(ctx context.Context) string {
 		return oid
 	}
 	return ""
+}
+
+func WithTransferCompletion(ctx context.Context, cb TransferCompletionCallback) context.Context {
+	return context.WithValue(ctx, transferCompletionKey, cb)
+}
+
+func GetTransferCompletion(ctx context.Context) TransferCompletionCallback {
+	if cb, ok := ctx.Value(transferCompletionKey).(TransferCompletionCallback); ok {
+		return cb
+	}
+	return nil
 }

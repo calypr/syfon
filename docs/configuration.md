@@ -84,8 +84,19 @@ For `provider: s3`, required fields are:
 - `region`
 - `access_key`
 - `secret_key`
+- `billing_log_bucket`
+- `billing_log_prefix`
 
 `endpoint` is optional and commonly used for S3-compatible storage.
+
+For `provider: gcs` and `provider: azure`, cloud billing log source fields are also required:
+
+- `billing_log_bucket`
+- `billing_log_prefix`
+
+The same credential used for the data bucket must be able to list and read the billing log bucket/prefix. Syfon validates that log source when the bucket credential is added. Local `file` provider credentials are exempt from this cloud log requirement.
+
+Transfer metrics do not block dashboard responses when a sync window is missing. Instead, metrics responses include freshness metadata showing whether the requested provider/bucket/time range is covered and when the latest completed sync ran.
 
 Bucket validation follows provider rules:
 
@@ -123,6 +134,13 @@ Environment variables override config file values.
 - `DRS_CREDENTIAL_LOCAL_KEY_FILE` (optional local key file path)
 
 By default, Syfon uses `local` key management and auto-creates a server-side local KEK file. If `DRS_DB_SQLITE_FILE` is set, the local KEK defaults to the same directory (`.syfon-credential-kek`).
+
+The local key file path can also be set in the Syfon config:
+
+```yaml
+credential_encryption:
+  local_key_file: ".syfon-credential-kek"
+```
 
 If `DRS_CREDENTIAL_KMS_KEY_ID` is set (or `DRS_CREDENTIAL_KEY_MANAGER=aws-kms`), Syfon uses AWS KMS to wrap/unwrap per-record DEKs.
 

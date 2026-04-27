@@ -111,12 +111,10 @@ func (t *Gen3Logger) Println(v ...any) {
 
 func (t *Gen3Logger) Fatalf(format string, v ...any) {
 	t.logWithSkip(context.Background(), slog.LevelError, 3, fmt.Sprintf(format, v...))
-	os.Exit(1)
 }
 
 func (t *Gen3Logger) Fatal(v ...any) {
 	t.logWithSkip(context.Background(), slog.LevelError, 3, fmt.Sprint(v...))
-	os.Exit(1)
 }
 
 // Writer returns os.Stderr for legacy compatibility (used by Scoreboard's tabwriter).

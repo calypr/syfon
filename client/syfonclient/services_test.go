@@ -14,6 +14,7 @@ import (
 	lfsapi "github.com/calypr/syfon/apigen/client/lfsapi"
 	metricsapi "github.com/calypr/syfon/apigen/client/metricsapi"
 	"github.com/calypr/syfon/client/request"
+	"github.com/calypr/syfon/internal/models"
 )
 
 type fakeRequester struct {
@@ -101,15 +102,19 @@ func (f *fakeBucketClient) AddBucketScopeWithResponse(ctx context.Context, bucke
 }
 
 type fakeMetricsClient struct {
-	summaryResp   *metricsapi.GetMetricsSummaryResponse
-	summaryErr    error
-	summaryParams *metricsapi.GetMetricsSummaryParams
-	filesResp     *metricsapi.ListMetricsFilesResponse
-	filesErr      error
-	filesParams   *metricsapi.ListMetricsFilesParams
-	fileResp      *metricsapi.GetMetricsFileResponse
-	fileErr       error
-	fileObjectID  string
+	summaryResp    *metricsapi.GetMetricsSummaryResponse
+	summaryErr     error
+	summaryParams  *metricsapi.GetMetricsSummaryParams
+	filesResp      *metricsapi.ListMetricsFilesResponse
+	filesErr       error
+	filesParams    *metricsapi.ListMetricsFilesParams
+	fileResp       *metricsapi.GetMetricsFileResponse
+	fileErr        error
+	fileObjectID   string
+	listSyncResp   *metricsapi.ListProviderTransferSyncResponse
+	listSyncParams *metricsapi.ListProviderTransferSyncParams
+	recordSyncResp *metricsapi.RecordProviderTransferSyncResponse
+	recordSyncReq  *metricsapi.RecordProviderTransferSyncJSONRequestBody
 }
 
 func (f *fakeMetricsClient) ListMetricsFilesWithResponse(ctx context.Context, params *metricsapi.ListMetricsFilesParams, reqEditors ...metricsapi.RequestEditorFn) (*metricsapi.ListMetricsFilesResponse, error) {
@@ -117,7 +122,7 @@ func (f *fakeMetricsClient) ListMetricsFilesWithResponse(ctx context.Context, pa
 	return f.filesResp, f.filesErr
 }
 
-func (f *fakeMetricsClient) GetMetricsFileWithResponse(ctx context.Context, objectId string, reqEditors ...metricsapi.RequestEditorFn) (*metricsapi.GetMetricsFileResponse, error) {
+func (f *fakeMetricsClient) GetMetricsFileWithResponse(ctx context.Context, objectId string, params *metricsapi.GetMetricsFileParams, reqEditors ...metricsapi.RequestEditorFn) (*metricsapi.GetMetricsFileResponse, error) {
 	f.fileObjectID = objectId
 	return f.fileResp, f.fileErr
 }
@@ -127,16 +132,52 @@ func (f *fakeMetricsClient) GetMetricsSummaryWithResponse(ctx context.Context, p
 	return f.summaryResp, f.summaryErr
 }
 
+func (f *fakeMetricsClient) RecordProviderTransferEventsWithBodyWithResponse(ctx context.Context, params *metricsapi.RecordProviderTransferEventsParams, contentType string, body io.Reader, reqEditors ...metricsapi.RequestEditorFn) (*metricsapi.RecordProviderTransferEventsResponse, error) {
+	return &metricsapi.RecordProviderTransferEventsResponse{HTTPResponse: &http.Response{StatusCode: http.StatusNotImplemented}}, nil
+}
+
+func (f *fakeMetricsClient) RecordProviderTransferEventsWithResponse(ctx context.Context, params *metricsapi.RecordProviderTransferEventsParams, body metricsapi.RecordProviderTransferEventsJSONRequestBody, reqEditors ...metricsapi.RequestEditorFn) (*metricsapi.RecordProviderTransferEventsResponse, error) {
+	return &metricsapi.RecordProviderTransferEventsResponse{HTTPResponse: &http.Response{StatusCode: http.StatusNotImplemented}}, nil
+}
+
+func (f *fakeMetricsClient) ListProviderTransferSyncWithResponse(ctx context.Context, params *metricsapi.ListProviderTransferSyncParams, reqEditors ...metricsapi.RequestEditorFn) (*metricsapi.ListProviderTransferSyncResponse, error) {
+	f.listSyncParams = params
+	if f.listSyncResp != nil {
+		return f.listSyncResp, nil
+	}
+	return &metricsapi.ListProviderTransferSyncResponse{HTTPResponse: &http.Response{StatusCode: http.StatusNotImplemented}}, nil
+}
+
+func (f *fakeMetricsClient) RecordProviderTransferSyncWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...metricsapi.RequestEditorFn) (*metricsapi.RecordProviderTransferSyncResponse, error) {
+	return &metricsapi.RecordProviderTransferSyncResponse{HTTPResponse: &http.Response{StatusCode: http.StatusNotImplemented}}, nil
+}
+
+func (f *fakeMetricsClient) RecordProviderTransferSyncWithResponse(ctx context.Context, body metricsapi.RecordProviderTransferSyncJSONRequestBody, reqEditors ...metricsapi.RequestEditorFn) (*metricsapi.RecordProviderTransferSyncResponse, error) {
+	f.recordSyncReq = &body
+	if f.recordSyncResp != nil {
+		return f.recordSyncResp, nil
+	}
+	return &metricsapi.RecordProviderTransferSyncResponse{HTTPResponse: &http.Response{StatusCode: http.StatusNotImplemented}}, nil
+}
+
+func (f *fakeMetricsClient) GetTransferBreakdownWithResponse(ctx context.Context, params *metricsapi.GetTransferBreakdownParams, reqEditors ...metricsapi.RequestEditorFn) (*metricsapi.GetTransferBreakdownResponse, error) {
+	return &metricsapi.GetTransferBreakdownResponse{HTTPResponse: &http.Response{StatusCode: http.StatusNotImplemented}}, nil
+}
+
+func (f *fakeMetricsClient) GetTransferSummaryWithResponse(ctx context.Context, params *metricsapi.GetTransferSummaryParams, reqEditors ...metricsapi.RequestEditorFn) (*metricsapi.GetTransferSummaryResponse, error) {
+	return &metricsapi.GetTransferSummaryResponse{HTTPResponse: &http.Response{StatusCode: http.StatusNotImplemented}}, nil
+}
+
 type fakeLFSClient struct {
-	batchResp   *lfsapi.LfsBatchResponse
-	batchErr    error
-	batchReq    *lfsapi.LfsBatchApplicationVndGitLfsPlusJSONRequestBody
-	stageResp   *lfsapi.LfsStageMetadataResponse
-	stageErr    error
-	stageReq    *lfsapi.LfsStageMetadataApplicationVndGitLfsPlusJSONRequestBody
-	verifyResp  *lfsapi.LfsVerifyResponse
-	verifyErr   error
-	verifyReq   *lfsapi.LfsVerifyApplicationVndGitLfsPlusJSONRequestBody
+	batchResp  *lfsapi.LfsBatchResponse
+	batchErr   error
+	batchReq   *lfsapi.LfsBatchApplicationVndGitLfsPlusJSONRequestBody
+	stageResp  *lfsapi.LfsStageMetadataResponse
+	stageErr   error
+	stageReq   *lfsapi.LfsStageMetadataApplicationVndGitLfsPlusJSONRequestBody
+	verifyResp *lfsapi.LfsVerifyResponse
+	verifyErr  error
+	verifyReq  *lfsapi.LfsVerifyApplicationVndGitLfsPlusJSONRequestBody
 }
 
 func (f *fakeLFSClient) LfsBatchWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...lfsapi.RequestEditorFn) (*lfsapi.LfsBatchResponse, error) {
@@ -348,6 +389,66 @@ func TestMetricsService(t *testing.T) {
 		}
 		if got.ObjectId == nil || *got.ObjectId != objectID || fake.fileObjectID != objectID {
 			t.Fatalf("unexpected file response: %+v / requested %q", got, fake.fileObjectID)
+		}
+	})
+
+	t.Run("provider transfer sync record and list", func(t *testing.T) {
+		status := metricsapi.Completed
+		syncID := "sync-1"
+		bucket := "bucket-a"
+		provider := "s3"
+		from := time.Date(2026, 4, 26, 19, 0, 0, 0, time.UTC)
+		to := time.Date(2026, 4, 26, 21, 0, 0, 0, time.UTC)
+		recordedRuns := []metricsapi.ProviderTransferSyncRun{{
+			SyncId:   &syncID,
+			Provider: &provider,
+			Bucket:   &bucket,
+			From:     &from,
+			To:       &to,
+			Status:   &status,
+		}}
+		fake := &fakeMetricsClient{
+			recordSyncResp: &metricsapi.RecordProviderTransferSyncResponse{
+				HTTPResponse: &http.Response{StatusCode: http.StatusCreated},
+				JSON201:      &metricsapi.ProviderTransferSyncResponse{SyncRuns: &recordedRuns},
+			},
+			listSyncResp: &metricsapi.ListProviderTransferSyncResponse{
+				HTTPResponse: &http.Response{StatusCode: http.StatusOK},
+				JSON200:      &metricsapi.ProviderTransferSyncResponse{SyncRuns: &recordedRuns},
+			},
+		}
+		service := NewMetricsService(fake)
+		opts := ProviderTransferSyncOptions{
+			Organization:   "calypr",
+			ProjectID:      "proj-a",
+			Provider:       "s3",
+			Bucket:         "bucket-a",
+			From:           "2026-04-26T19:00:00Z",
+			To:             "2026-04-26T21:00:00Z",
+			Status:         models.ProviderTransferSyncCompleted,
+			ImportedEvents: 1,
+			MatchedEvents:  1,
+			Limit:          25,
+		}
+		got, err := service.RecordProviderTransferSync(context.Background(), opts)
+		if err != nil {
+			t.Fatalf("RecordProviderTransferSync returned error: %v", err)
+		}
+		if len(got) != 1 || got[0].SyncID != syncID || got[0].Status != models.ProviderTransferSyncCompleted {
+			t.Fatalf("unexpected recorded sync runs: %+v", got)
+		}
+		if fake.recordSyncReq == nil || fake.recordSyncReq.Bucket == nil || *fake.recordSyncReq.Bucket != "bucket-a" || fake.recordSyncReq.Status == nil || *fake.recordSyncReq.Status != metricsapi.Completed {
+			t.Fatalf("unexpected record sync request: %+v", fake.recordSyncReq)
+		}
+		listed, err := service.ProviderTransferSyncStatus(context.Background(), opts)
+		if err != nil {
+			t.Fatalf("ProviderTransferSyncStatus returned error: %v", err)
+		}
+		if len(listed) != 1 || listed[0].Bucket != bucket || listed[0].Provider != provider {
+			t.Fatalf("unexpected listed sync runs: %+v", listed)
+		}
+		if fake.listSyncParams == nil || fake.listSyncParams.Limit == nil || *fake.listSyncParams.Limit != 25 {
+			t.Fatalf("unexpected list sync params: %+v", fake.listSyncParams)
 		}
 	})
 }

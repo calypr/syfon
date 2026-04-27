@@ -26,30 +26,23 @@ func requireGen3AuthFiber(c fiber.Ctx) error {
 	return nil
 }
 
-func parseScopeQueryParts(authzParam, organization, program, project string) (string, bool, error) {
-	if authzParam = strings.TrimSpace(authzParam); authzParam != "" {
-		return authzParam, true, nil
-	}
+func parseScopeQueryParts(organization, program, project string) (string, string, bool, error) {
 	org := strings.TrimSpace(organization)
 	if org == "" {
 		org = strings.TrimSpace(program)
 	}
 	project = strings.TrimSpace(project)
 	if project != "" && org == "" {
-		return "", false, fmt.Errorf("organization is required when project is set")
+		return "", "", false, fmt.Errorf("organization is required when project is set")
 	}
-	path, err := sycommon.ResourcePath(org, project)
-	if err != nil {
-		return "", false, err
+	if org != "" {
+		return org, project, true, nil
 	}
-	if path != "" {
-		return path, true, nil
-	}
-	return "", false, nil
+	return "", "", false, nil
 }
 
-func parseScopeQueryFiber(c fiber.Ctx) (string, bool, error) {
-	return parseScopeQueryParts(c.Query("authz"), c.Query("organization"), c.Query("program"), c.Query("project"))
+func parseScopeQueryFiber(c fiber.Ctx) (string, string, bool, error) {
+	return parseScopeQueryParts(c.Query("organization"), c.Query("program"), c.Query("project"))
 }
 
 func bucketControlAllowed(ctx context.Context, methods ...string) bool {
@@ -68,8 +61,31 @@ func resourceAllowed(ctx context.Context, resource string, methods ...string) bo
 	return authz.HasAnyMethodAccess(ctx, []string{resource}, methods...)
 }
 
-func methodAllowedForAuthorizations(ctx context.Context, method string, authorizations []string) bool {
-	return authz.HasMethodAccess(ctx, method, authorizations)
+func scopeResource(organization, project string) (string, error) {
+	return sycommon.ResourcePath(organization, project)
+}
+
+func methodAllowedForAuthorizations(ctx context.Context, method string, authorizations map[string][]string) bool {
+	return authz.HasMethodAccess(ctx, method, sycommon.AuthzMapToList(authorizations))
+}
+
+func objectAuthzMatchesScope(obj models.InternalObject, org, project string) bool {
+	if len(obj.Authorizations) == 0 {
+		return false
+	}
+	projects, ok := obj.Authorizations[org]
+	if !ok {
+		return false
+	}
+	if len(projects) == 0 {
+		return true
+	}
+	for _, p := range projects {
+		if p == project {
+			return true
+		}
+	}
+	return false
 }
 
 func allowedBucketsForScopes(ctx context.Context, scopes []models.BucketScope, methods ...string) map[string]bool {

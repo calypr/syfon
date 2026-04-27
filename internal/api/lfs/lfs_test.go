@@ -59,7 +59,11 @@ func TestLFSBatchDownloadFound(t *testing.T) {
 	router, db := newLFSRouter()
 	oid := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	db.Objects[oid] = &drs.DrsObject{
-		Id: oid,
+		Id:   oid,
+		Size: 10,
+		Checksums: []drs.Checksum{
+			{Type: "sha256", Checksum: oid},
+		},
 		AccessMethods: &[]drs.AccessMethod{
 			{Type: drs.AccessMethodTypeS3, AccessUrl: &struct {
 				Headers *[]string `json:"headers,omitempty"`
@@ -88,6 +92,13 @@ func TestLFSBatchDownloadFound(t *testing.T) {
 	}
 	if len(resp.Objects) != 1 || resp.Objects[0].Actions == nil || resp.Objects[0].Actions.Download == nil || resp.Objects[0].Actions.Download.Href == "" {
 		t.Fatalf("expected download action, got %+v", resp)
+	}
+	if len(db.TransferEvents) != 1 {
+		t.Fatalf("expected one LFS access-issued event, got %+v", db.TransferEvents)
+	}
+	ev := db.TransferEvents[0]
+	if ev.EventType != models.TransferEventAccessIssued || ev.ObjectID != oid || ev.SHA256 != oid || ev.Provider != "s3" || ev.Bucket != "bucket" || ev.BytesRequested != 10 {
+		t.Fatalf("unexpected LFS access-issued event: %+v", ev)
 	}
 }
 
@@ -294,8 +305,8 @@ func TestLFSBatchGen3MissingAuthReturns401(t *testing.T) {
 				},
 			},
 		},
-		ObjectAuthz: map[string][]string{
-			oid: []string{"/programs/syfon/projects/e2e"},
+		ObjectAuthz: map[string]map[string][]string{
+			oid: {"syfon": {"e2e"}},
 		},
 	}
 	uM := &testutils.MockUrlManager{}

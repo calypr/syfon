@@ -70,7 +70,9 @@ s3_credentials:
   - bucket: %q
     provider: %q
     endpoint: %q
-`, port, dbPath, fakeGCS.bucket, "gcs", fakeGCS.endpoint))
+    billing_log_bucket: %q
+    billing_log_prefix: %q
+`, port, dbPath, fakeGCS.bucket, "gcs", fakeGCS.endpoint, fakeGCS.bucket, ".syfon/provider-transfer-events"))
 
 	server := startSyfonServerProcessWithConfigPath(t, configPath, map[string]string{
 		"STORAGE_EMULATOR_HOST": strings.TrimPrefix(strings.TrimPrefix(fakeGCS.endpoint, "http://"), "https://"),
@@ -78,10 +80,12 @@ s3_credentials:
 	t.Cleanup(func() { stopSyfonServerProcess(t, server) })
 
 	exerciseAllClientCommands(t, server.url, bucketCommandConfig{
-		Bucket:       "syfon-e2e-fakegcs-cli-bucket",
+		Bucket:       fakeGCS.bucket,
 		Provider:     "gcs",
 		Region:       "us-central1",
 		Endpoint:     fakeGCS.endpoint,
+		LogBucket:    fakeGCS.bucket,
+		LogPrefix:    ".syfon/provider-transfer-events",
 		Organization: "syfon",
 		ProjectID:    "e2e",
 	})

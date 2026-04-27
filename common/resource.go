@@ -25,15 +25,9 @@ func ResourcePath(org, project string) (string, error) {
 // StoragePrefix returns the storage path prefix for an org/project scope
 // (no leading slash), e.g. "programs/myorg/projects/myproject".
 func StoragePrefix(org, project string) string {
-	org = strings.TrimSpace(org)
-	project = strings.TrimSpace(project)
-	if org == "" {
-		return ""
-	}
-	if project == "" {
-		return "programs/" + org
-	}
-	return "programs/" + org + "/projects/" + project
+	_ = org
+	_ = project
+	return ""
 }
 
 // NormalizeChecksum trims whitespace and an optional sha256: prefix.
@@ -95,6 +89,11 @@ func AuthzMapToList(authzMap map[string][]string) []string {
 			out = append(out, "/programs/"+org)
 		} else {
 			for _, project := range projects {
+				project = strings.TrimSpace(project)
+				if project == "" {
+					out = append(out, "/programs/"+org)
+					continue
+				}
 				out = append(out, "/programs/"+org+"/projects/"+project)
 			}
 		}

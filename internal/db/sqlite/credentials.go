@@ -15,9 +15,11 @@ import (
 func (db *SqliteDB) GetS3Credential(ctx context.Context, bucket string) (*models.S3Credential, error) {
 	var c models.S3Credential
 	err := db.db.QueryRowContext(ctx, `
-		SELECT bucket, provider, region, access_key, secret_key, endpoint
+		SELECT bucket, provider, region, access_key, secret_key, endpoint,
+		       COALESCE(billing_log_bucket, ''), COALESCE(billing_log_prefix, '')
 		FROM s3_credential WHERE bucket = ?`, bucket).Scan(
 		&c.Bucket, &c.Provider, &c.Region, &c.AccessKey, &c.SecretKey, &c.Endpoint,
+		&c.BillingLogBucket, &c.BillingLogPrefix,
 	)
 	if err == sql.ErrNoRows {
 		notFoundErr := fmt.Errorf("credential not found")
@@ -53,15 +55,18 @@ func (db *SqliteDB) SaveS3Credential(ctx context.Context, cred *models.S3Credent
 
 	// SQLite UPSERT syntax: INSERT INTO ... ON CONFLICT (...) DO UPDATE SET ...
 	_, err = db.db.ExecContext(ctx, `
-		INSERT INTO s3_credential (bucket, provider, region, access_key, secret_key, endpoint)
-		VALUES (?, ?, ?, ?, ?, ?)
+		INSERT INTO s3_credential (bucket, provider, region, access_key, secret_key, endpoint, billing_log_bucket, billing_log_prefix)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (bucket) DO UPDATE SET
 			provider = excluded.provider,
 			region = excluded.region,
 			access_key = excluded.access_key,
 			secret_key = excluded.secret_key,
-			endpoint = excluded.endpoint`,
+			endpoint = excluded.endpoint,
+			billing_log_bucket = excluded.billing_log_bucket,
+			billing_log_prefix = excluded.billing_log_prefix`,
 		stored.Bucket, strings.ToLower(strings.TrimSpace(defaultProvider(stored.Provider))), stored.Region, stored.AccessKey, stored.SecretKey, stored.Endpoint,
+		stored.BillingLogBucket, strings.Trim(strings.TrimSpace(stored.BillingLogPrefix), "/"),
 	)
 	if err != nil {
 		wrapped := fmt.Errorf("failed to save credential: %w", err)
@@ -94,7 +99,7 @@ func (db *SqliteDB) DeleteS3Credential(ctx context.Context, bucket string) error
 }
 
 func (db *SqliteDB) ListS3Credentials(ctx context.Context) ([]models.S3Credential, error) {
-	rows, err := db.db.QueryContext(ctx, "SELECT bucket, provider, region, access_key, secret_key, endpoint FROM s3_credential")
+	rows, err := db.db.QueryContext(ctx, "SELECT bucket, provider, region, access_key, secret_key, endpoint, COALESCE(billing_log_bucket, ''), COALESCE(billing_log_prefix, '') FROM s3_credential")
 	if err != nil {
 		return nil, err
 	}
@@ -103,7 +108,7 @@ func (db *SqliteDB) ListS3Credentials(ctx context.Context) ([]models.S3Credentia
 	var creds []models.S3Credential
 	for rows.Next() {
 		var c models.S3Credential
-		if err := rows.Scan(&c.Bucket, &c.Provider, &c.Region, &c.AccessKey, &c.SecretKey, &c.Endpoint); err != nil {
+		if err := rows.Scan(&c.Bucket, &c.Provider, &c.Region, &c.AccessKey, &c.SecretKey, &c.Endpoint, &c.BillingLogBucket, &c.BillingLogPrefix); err != nil {
 			common.AuditS3CredentialAccess(ctx, "list", "", err)
 			return nil, err
 		}
@@ -127,8 +132,8 @@ func (db *SqliteDB) CreateBucketScope(ctx context.Context, scope *models.BucketS
 	project := strings.TrimSpace(scope.ProjectID)
 	bucket := strings.TrimSpace(scope.Bucket)
 	prefix := strings.Trim(strings.TrimSpace(scope.PathPrefix), "/")
-	if org == "" || project == "" || bucket == "" {
-		return fmt.Errorf("organization, project_id and bucket are required")
+	if org == "" || bucket == "" {
+		return fmt.Errorf("organization and bucket are required")
 	}
 
 	existing, err := db.GetBucketScope(ctx, org, project)

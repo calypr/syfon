@@ -24,7 +24,11 @@ func TestNormalizeProvider(t *testing.T) {
 }
 
 func TestSchemeMappings(t *testing.T) {
-	if ProviderFromScheme("s3") != S3Provider || ProviderFromScheme("gs") != GCSProvider || ProviderFromScheme("azblob") != AzureProvider {
+	if ProviderFromScheme("s3") != S3Provider ||
+		ProviderFromScheme("gs") != GCSProvider ||
+		ProviderFromScheme("gcs") != GCSProvider ||
+		ProviderFromScheme("azblob") != AzureProvider ||
+		ProviderFromScheme("az") != AzureProvider {
 		t.Fatalf("unexpected ProviderFromScheme mapping")
 	}
 	if ProviderFromScheme("http") != "" {
@@ -78,7 +82,8 @@ func TestParseBucketProvider(t *testing.T) {
 		{in: "s3", want: S3Provider, ok: true},
 		{in: "gs", want: GCSProvider, ok: true},
 		{in: "azure", want: AzureProvider, ok: true},
-		{in: "file", ok: false},
+		{in: "file", want: FileProvider, ok: true},
+		{in: "unsupported", ok: false},
 	}
 
 	for _, tt := range tests {

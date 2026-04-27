@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/calypr/syfon/apigen/server/drs"
-	"github.com/calypr/syfon/apigen/server/lfsapi"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/testutils"
@@ -23,6 +22,9 @@ func TestDRSHandlers(t *testing.T) {
 				Name:    common.Ptr("test-file"),
 				Size:    100,
 				SelfUri: "drs://test-obj",
+				Checksums: []drs.Checksum{
+					{Type: "sha256", Checksum: "sha-1"},
+				},
 				AccessMethods: &[]drs.AccessMethod{
 					{
 						AccessId: common.Ptr("s3-access"),
@@ -34,6 +36,9 @@ func TestDRSHandlers(t *testing.T) {
 					},
 				},
 			},
+		},
+		ObjectAuthz: map[string]map[string][]string{
+			"test-obj": {"calypr": {"proj-a"}},
 		},
 	}
 	um := &testutils.MockUrlManager{}
@@ -63,6 +68,7 @@ func TestDRSHandlers(t *testing.T) {
 	})
 
 	t.Run("GetAccessURL_Success", func(t *testing.T) {
+		db.TransferEvents = nil
 		req := httptest.NewRequest("GET", "/objects/test-obj/access/s3-access", nil)
 		resp, _ := app.Test(req)
 		if resp.StatusCode != http.StatusOK {
@@ -72,6 +78,13 @@ func TestDRSHandlers(t *testing.T) {
 		json.NewDecoder(resp.Body).Decode(&access)
 		if access.Url == "" {
 			t.Error("expected signed URL, got empty")
+		}
+		if len(db.TransferEvents) != 1 {
+			t.Fatalf("expected one access-issued event, got %+v", db.TransferEvents)
+		}
+		ev := db.TransferEvents[0]
+		if ev.EventType != "access_issued" || ev.ObjectID != "test-obj" || ev.SHA256 != "sha-1" || ev.Organization != "calypr" || ev.Project != "proj-a" || ev.Provider != "s3" || ev.Bucket != "bucket" {
+			t.Fatalf("unexpected access-issued event: %+v", ev)
 		}
 	})
 
@@ -83,11 +96,72 @@ func TestDRSHandlers(t *testing.T) {
 		}
 	})
 
+	t.Run("GetBulkAccessURL_Success", func(t *testing.T) {
+		db.TransferEvents = nil
+		bodyObj := drs.BulkObjectAccessId{
+			BulkObjectAccessIds: &[]struct {
+				BulkAccessIds *[]string `json:"bulk_access_ids,omitempty"`
+				BulkObjectId  *string   `json:"bulk_object_id,omitempty"`
+			}{{
+				BulkObjectId:  common.Ptr("test-obj"),
+				BulkAccessIds: &[]string{"s3-access"},
+			}},
+		}
+		body, _ := json.Marshal(bodyObj)
+		req := httptest.NewRequest("POST", "/objects/access", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		resp, _ := app.Test(req)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200, got %d", resp.StatusCode)
+		}
+		var access drs.N200OkAccesses
+		if err := json.NewDecoder(resp.Body).Decode(&access); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+		if access.Summary == nil || access.Summary.Resolved == nil || *access.Summary.Resolved != 1 {
+			t.Fatalf("expected one resolved access URL, got %+v", access.Summary)
+		}
+		if access.ResolvedDrsObjectAccessUrls == nil || len(*access.ResolvedDrsObjectAccessUrls) != 1 || (*access.ResolvedDrsObjectAccessUrls)[0].Url == "" {
+			t.Fatalf("expected signed bulk access URL, got %+v", access.ResolvedDrsObjectAccessUrls)
+		}
+		if len(db.TransferEvents) != 1 {
+			t.Fatalf("expected one bulk access-issued event, got %+v", db.TransferEvents)
+		}
+		ev := db.TransferEvents[0]
+		if ev.EventType != "access_issued" || ev.AccessID != "s3-access" || ev.ObjectID != "test-obj" {
+			t.Fatalf("unexpected bulk access-issued event: %+v", ev)
+		}
+	})
+
 	t.Run("GetServiceInfo", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/service-info", nil)
 		resp, _ := app.Test(req)
 		if resp.StatusCode != http.StatusOK {
 			t.Errorf("expected 200, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("UpdateObjectAccessMethods_Success", func(t *testing.T) {
+		bodyObj := drs.AccessMethodUpdateRequest{
+			AccessMethods: []drs.AccessMethod{{
+				AccessId: common.Ptr("s3"),
+				Type:     drs.AccessMethodTypeS3,
+				AccessUrl: &struct {
+					Headers *[]string `json:"headers,omitempty"`
+					Url     string    `json:"url"`
+				}{Url: "s3://bucket/new-key"},
+			}},
+		}
+		body, _ := json.Marshal(bodyObj)
+		req := httptest.NewRequest("POST", "/objects/test-obj/access-methods", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		resp, _ := app.Test(req)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200, got %d", resp.StatusCode)
+		}
+		updated := db.Objects["test-obj"]
+		if updated.AccessMethods == nil || len(*updated.AccessMethods) != 1 || (*updated.AccessMethods)[0].AccessUrl.Url != "s3://bucket/new-key" {
+			t.Fatalf("expected updated access method, got %+v", updated.AccessMethods)
 		}
 	})
 
@@ -111,43 +185,94 @@ func TestRegisterObjects(t *testing.T) {
 	RegisterDRSRoutes(app, om)
 
 	t.Run("Register_Single", func(t *testing.T) {
-		id := "new-id"
 		size := int64(50)
-		cand := lfsapi.DrsObjectCandidate{
-			Id:   &id,
-			Size: &size,
-			Checksums: &[]lfsapi.Checksum{
+		authz := map[string][]string{"org1": {"proj1"}}
+		cand := drs.DrsObjectCandidate{
+			Size: size,
+			Checksums: []drs.Checksum{
 				{Type: "sha256", Checksum: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
 			},
+			AccessMethods: &[]drs.AccessMethod{{
+				Type: "s3",
+				AccessUrl: &struct {
+					Headers *[]string `json:"headers,omitempty"`
+					Url     string    `json:"url"`
+				}{Url: "s3://bucket/org1/proj1/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+				Authorizations: &authz,
+			}},
 		}
 		body, _ := json.Marshal(cand)
 		req := httptest.NewRequest("POST", "/objects/register", bytes.NewBuffer(body))
 		req.Header.Set("Content-Type", "application/json")
 		resp, _ := app.Test(req)
-		
+
 		if resp.StatusCode != http.StatusCreated {
 			t.Fatalf("expected 201, got %d. check internal/api/apiutil/error.go for mapping", resp.StatusCode)
 		}
-		
+
 		var created drs.N201ObjectsCreated
 		if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
 			t.Fatalf("failed to decode response: %v", err)
 		}
-		if len(created.Objects) != 1 || created.Objects[0].Id != "new-id" {
+		if len(created.Objects) != 1 || created.Objects[0].Id == "" {
 			t.Errorf("unexpected response: %+v", created)
+		}
+		if created.Objects[0].AccessMethods == nil || len(*created.Objects[0].AccessMethods) == 0 {
+			t.Fatalf("expected access methods in response: %+v", created.Objects[0])
+		}
+		if (*created.Objects[0].AccessMethods)[0].Authorizations == nil || len(*(*created.Objects[0].AccessMethods)[0].Authorizations) == 0 {
+			t.Fatalf("expected authorizations in response: %+v", created.Objects[0].AccessMethods)
+		}
+	})
+
+	t.Run("Register_Single_AuthExtension", func(t *testing.T) {
+		body := []byte(`{
+			"size": 64,
+			"checksums": [{"type": "sha256", "checksum": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"}],
+			"auth": {
+				"org2": {
+					"proj2": ["s3://bucket/path/to/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"]
+				}
+			}
+		}`)
+		req := httptest.NewRequest("POST", "/objects/register", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		resp, _ := app.Test(req)
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("expected 201, got %d", resp.StatusCode)
+		}
+
+		var created struct {
+			Objects []map[string]any `json:"objects"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+		if len(created.Objects) != 1 {
+			t.Fatalf("expected one object, got %+v", created)
+		}
+		auth, ok := created.Objects[0]["auth"].(map[string]any)
+		if !ok {
+			t.Fatalf("expected auth extension in response: %+v", created.Objects[0])
+		}
+		org, ok := auth["org2"].(map[string]any)
+		if !ok {
+			t.Fatalf("expected org2 auth scope in response: %+v", auth)
+		}
+		paths, ok := org["proj2"].([]any)
+		if !ok || len(paths) != 1 || paths[0] != "s3://bucket/path/to/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd" {
+			t.Fatalf("expected project path in auth extension: %+v", org)
 		}
 	})
 
 	t.Run("Register_Bulk", func(t *testing.T) {
-		id1 := "bulk-1"
-		id2 := "bulk-2"
 		size := int64(100)
 		bodyObj := struct {
-			Candidates []lfsapi.DrsObjectCandidate `json:"candidates"`
+			Candidates []drs.DrsObjectCandidate `json:"candidates"`
 		}{
-			Candidates: []lfsapi.DrsObjectCandidate{
-				{Id: &id1, Size: &size, Checksums: &[]lfsapi.Checksum{{Type: "sha256", Checksum: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}}},
-				{Id: &id2, Size: &size, Checksums: &[]lfsapi.Checksum{{Type: "sha256", Checksum: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}}},
+			Candidates: []drs.DrsObjectCandidate{
+				{Size: size, Checksums: []drs.Checksum{{Type: "sha256", Checksum: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}}},
+				{Size: size, Checksums: []drs.Checksum{{Type: "sha256", Checksum: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}}},
 			},
 		}
 		body, _ := json.Marshal(bodyObj)
@@ -226,21 +351,68 @@ func TestAdditionalDRSHandlers(t *testing.T) {
 		}
 	})
 
-	t.Run("NotImplemented", func(t *testing.T) {
-		endpoints := []struct {
-			method string
-			path   string
-		}{
-			{"POST", "/objects/access"},
-			{"POST", "/objects/delete"},
-			{"POST", "/objects/access-methods"},
+	t.Run("BulkDeleteObjects", func(t *testing.T) {
+		db.Objects["bulk-delete-a"] = &drs.DrsObject{Id: "bulk-delete-a", Size: 1}
+		db.Objects["bulk-delete-b"] = &drs.DrsObject{Id: "bulk-delete-b", Size: 1}
+		bodyObj := drs.BulkDeleteRequest{
+			BulkObjectIds: []string{"bulk-delete-a", "bulk-delete-b"},
 		}
-		for _, ep := range endpoints {
-			req := httptest.NewRequest(ep.method, ep.path, bytes.NewBufferString("{}"))
-			req.Header.Set("Content-Type", "application/json")
-			resp, _ := app.Test(req)
-			if resp.StatusCode != http.StatusNotImplemented {
-				t.Errorf("%s %s: expected 501, got %d", ep.method, ep.path, resp.StatusCode)
+		body, _ := json.Marshal(bodyObj)
+		req := httptest.NewRequest("POST", "/objects/delete", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		resp, _ := app.Test(req)
+		if resp.StatusCode != http.StatusNoContent {
+			t.Fatalf("expected 204, got %d", resp.StatusCode)
+		}
+		if _, ok := db.Objects["bulk-delete-a"]; ok {
+			t.Fatal("expected bulk-delete-a to be deleted")
+		}
+		if _, ok := db.Objects["bulk-delete-b"]; ok {
+			t.Fatal("expected bulk-delete-b to be deleted")
+		}
+	})
+
+	t.Run("BulkUpdateAccessMethods", func(t *testing.T) {
+		db.Objects["bulk-update-a"] = &drs.DrsObject{Id: "bulk-update-a", Size: 1}
+		db.Objects["bulk-update-b"] = &drs.DrsObject{Id: "bulk-update-b", Size: 1}
+		bodyObj := drs.BulkAccessMethodUpdateRequest{
+			Updates: []struct {
+				AccessMethods []drs.AccessMethod `json:"access_methods"`
+				ObjectId      string             `json:"object_id"`
+			}{
+				{
+					ObjectId: "bulk-update-a",
+					AccessMethods: []drs.AccessMethod{{
+						Type: drs.AccessMethodTypeS3,
+						AccessUrl: &struct {
+							Headers *[]string `json:"headers,omitempty"`
+							Url     string    `json:"url"`
+						}{Url: "s3://bucket/a"},
+					}},
+				},
+				{
+					ObjectId: "bulk-update-b",
+					AccessMethods: []drs.AccessMethod{{
+						Type: drs.AccessMethodTypeS3,
+						AccessUrl: &struct {
+							Headers *[]string `json:"headers,omitempty"`
+							Url     string    `json:"url"`
+						}{Url: "s3://bucket/b"},
+					}},
+				},
+			},
+		}
+		body, _ := json.Marshal(bodyObj)
+		req := httptest.NewRequest("POST", "/objects/access-methods", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		resp, _ := app.Test(req)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200, got %d", resp.StatusCode)
+		}
+		for id, want := range map[string]string{"bulk-update-a": "s3://bucket/a", "bulk-update-b": "s3://bucket/b"} {
+			got := db.Objects[id]
+			if got.AccessMethods == nil || len(*got.AccessMethods) != 1 || (*got.AccessMethods)[0].AccessUrl.Url != want {
+				t.Fatalf("expected %s access method %s, got %+v", id, want, got.AccessMethods)
 			}
 		}
 	})

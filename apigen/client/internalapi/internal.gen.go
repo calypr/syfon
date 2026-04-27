@@ -16,6 +16,9 @@ import (
 	"github.com/oapi-codegen/runtime"
 )
 
+// AuthPathMap Organization/project keyed storage paths. Values are concrete object paths such as s3://bucket/path/to/file.
+type AuthPathMap map[string]map[string][]string
+
 // BulkCreateRequest defines model for BulkCreateRequest.
 type BulkCreateRequest struct {
 	Records []InternalRecord `json:"records"`
@@ -96,11 +99,12 @@ type InternalMultipartUploadRequest struct {
 
 // InternalRecord defines model for InternalRecord.
 type InternalRecord struct {
-	Authz       []string `json:"authz"`
-	CreatedTime *string  `json:"created_time,omitempty"`
-	Description *string  `json:"description,omitempty"`
-	Did         string   `json:"did"`
-	FileName    *string  `json:"file_name,omitempty"`
+	// Auth Organization/project keyed storage paths. Values are concrete object paths such as s3://bucket/path/to/file.
+	Auth        *AuthPathMap `json:"auth,omitempty"`
+	CreatedTime *string      `json:"created_time,omitempty"`
+	Description *string      `json:"description,omitempty"`
+	Did         string       `json:"did"`
+	FileName    *string      `json:"file_name,omitempty"`
 
 	// Hashes Hash map, e.g. {"sha256":"..."}
 	Hashes       *HashInfo `json:"hashes,omitempty"`
@@ -108,19 +112,19 @@ type InternalRecord struct {
 	Project      *string   `json:"project,omitempty"`
 	Size         *int64    `json:"size,omitempty"`
 	UpdatedTime  *string   `json:"updated_time,omitempty"`
-	Urls         *[]string `json:"urls,omitempty"`
 	Version      *string   `json:"version,omitempty"`
 }
 
 // InternalRecordResponse defines model for InternalRecordResponse.
 type InternalRecordResponse struct {
-	Authz       []string `json:"authz"`
-	Baseid      *string  `json:"baseid,omitempty"`
-	CreatedDate *string  `json:"created_date,omitempty"`
-	CreatedTime *string  `json:"created_time,omitempty"`
-	Description *string  `json:"description,omitempty"`
-	Did         string   `json:"did"`
-	FileName    *string  `json:"file_name,omitempty"`
+	// Auth Organization/project keyed storage paths. Values are concrete object paths such as s3://bucket/path/to/file.
+	Auth        *AuthPathMap `json:"auth,omitempty"`
+	Baseid      *string      `json:"baseid,omitempty"`
+	CreatedDate *string      `json:"created_date,omitempty"`
+	CreatedTime *string      `json:"created_time,omitempty"`
+	Description *string      `json:"description,omitempty"`
+	Did         string       `json:"did"`
+	FileName    *string      `json:"file_name,omitempty"`
 
 	// Hashes Hash map, e.g. {"sha256":"..."}
 	Hashes       *HashInfo `json:"hashes,omitempty"`
@@ -131,7 +135,6 @@ type InternalRecordResponse struct {
 	UpdatedDate  *string   `json:"updated_date,omitempty"`
 	UpdatedTime  *string   `json:"updated_time,omitempty"`
 	Uploader     *string   `json:"uploader,omitempty"`
-	Urls         *[]string `json:"urls,omitempty"`
 	Version      *string   `json:"version,omitempty"`
 }
 
@@ -149,8 +152,7 @@ type InternalUploadBlankOutput struct {
 
 // InternalUploadBlankRequest defines model for InternalUploadBlankRequest.
 type InternalUploadBlankRequest struct {
-	Authz *[]string `json:"authz,omitempty"`
-	Guid  *string   `json:"guid,omitempty"`
+	Guid *string `json:"guid,omitempty"`
 }
 
 // InternalUploadBulkItem defines model for InternalUploadBulkItem.
@@ -207,7 +209,6 @@ type InternalUploadURLParams struct {
 
 // InternalDeleteByQueryParams defines parameters for InternalDeleteByQuery.
 type InternalDeleteByQueryParams struct {
-	Authz        *string `form:"authz,omitempty" json:"authz,omitempty"`
 	Organization *string `form:"organization,omitempty" json:"organization,omitempty"`
 	Program      *string `form:"program,omitempty" json:"program,omitempty"`
 	Project      *string `form:"project,omitempty" json:"project,omitempty"`
@@ -218,7 +219,6 @@ type InternalDeleteByQueryParams struct {
 // InternalListParams defines parameters for InternalList.
 type InternalListParams struct {
 	Hash         *string `form:"hash,omitempty" json:"hash,omitempty"`
-	Authz        *string `form:"authz,omitempty" json:"authz,omitempty"`
 	Organization *string `form:"organization,omitempty" json:"organization,omitempty"`
 	Program      *string `form:"program,omitempty" json:"program,omitempty"`
 	Project      *string `form:"project,omitempty" json:"project,omitempty"`
@@ -1297,22 +1297,6 @@ func NewInternalDeleteByQueryRequest(server string, params *InternalDeleteByQuer
 	if params != nil {
 		queryValues := queryURL.Query()
 
-		if params.Authz != nil {
-
-			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "authz", runtime.ParamLocationQuery, *params.Authz); err != nil {
-				return nil, err
-			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
-				return nil, err
-			} else {
-				for k, v := range parsed {
-					for _, v2 := range v {
-						queryValues.Add(k, v2)
-					}
-				}
-			}
-
-		}
-
 		if params.Organization != nil {
 
 			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "organization", runtime.ParamLocationQuery, *params.Organization); err != nil {
@@ -1429,22 +1413,6 @@ func NewInternalListRequest(server string, params *InternalListParams) (*http.Re
 		if params.Hash != nil {
 
 			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "hash", runtime.ParamLocationQuery, *params.Hash); err != nil {
-				return nil, err
-			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
-				return nil, err
-			} else {
-				for k, v := range parsed {
-					for _, v2 := range v {
-						queryValues.Add(k, v2)
-					}
-				}
-			}
-
-		}
-
-		if params.Authz != nil {
-
-			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "authz", runtime.ParamLocationQuery, *params.Authz); err != nil {
 				return nil, err
 			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
 				return nil, err

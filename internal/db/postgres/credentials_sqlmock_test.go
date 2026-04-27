@@ -26,10 +26,11 @@ func TestGetS3Credential(t *testing.T) {
 	pg, mock, rawDB := newMockPostgresDB(t)
 	defer rawDB.Close()
 
-	rows := sqlmock.NewRows([]string{"bucket", "provider", "region", "access_key", "secret_key", "endpoint"}).
-		AddRow("b1", "s3", "us-east-1", "ak", "sk", "https://s3.example")
+	rows := sqlmock.NewRows([]string{"bucket", "provider", "region", "access_key", "secret_key", "endpoint", "billing_log_bucket", "billing_log_prefix"}).
+		AddRow("b1", "s3", "us-east-1", "ak", "sk", "https://s3.example", "logs", "prefix")
 	mock.ExpectQuery(regexp.QuoteMeta(`
-		SELECT bucket, provider, region, access_key, secret_key, endpoint
+		SELECT bucket, provider, region, access_key, secret_key, endpoint,
+		       COALESCE(billing_log_bucket, ''), COALESCE(billing_log_prefix, '')
 		FROM s3_credential WHERE bucket = $1`)).
 		WithArgs("b1").
 		WillReturnRows(rows)
@@ -60,10 +61,11 @@ func TestGetS3Credential_DecryptsEncryptedSecrets(t *testing.T) {
 	pg, mock, rawDB := newMockPostgresDB(t)
 	defer rawDB.Close()
 
-	rows := sqlmock.NewRows([]string{"bucket", "provider", "region", "access_key", "secret_key", "endpoint"}).
-		AddRow("b1", "s3", "us-east-1", encAK, encSK, "https://s3.example")
+	rows := sqlmock.NewRows([]string{"bucket", "provider", "region", "access_key", "secret_key", "endpoint", "billing_log_bucket", "billing_log_prefix"}).
+		AddRow("b1", "s3", "us-east-1", encAK, encSK, "https://s3.example", "", "")
 	mock.ExpectQuery(regexp.QuoteMeta(`
-		SELECT bucket, provider, region, access_key, secret_key, endpoint
+		SELECT bucket, provider, region, access_key, secret_key, endpoint,
+		       COALESCE(billing_log_bucket, ''), COALESCE(billing_log_prefix, '')
 		FROM s3_credential WHERE bucket = $1`)).
 		WithArgs("b1").
 		WillReturnRows(rows)
@@ -82,7 +84,8 @@ func TestGetS3CredentialNotFound(t *testing.T) {
 	defer rawDB.Close()
 
 	mock.ExpectQuery(regexp.QuoteMeta(`
-		SELECT bucket, provider, region, access_key, secret_key, endpoint
+		SELECT bucket, provider, region, access_key, secret_key, endpoint,
+		       COALESCE(billing_log_bucket, ''), COALESCE(billing_log_prefix, '')
 		FROM s3_credential WHERE bucket = $1`)).
 		WithArgs("missing").
 		WillReturnError(sql.ErrNoRows)
@@ -99,24 +102,28 @@ func TestSaveS3Credential(t *testing.T) {
 	defer rawDB.Close()
 
 	mock.ExpectExec(regexp.QuoteMeta(`
-		INSERT INTO s3_credential (bucket, provider, region, access_key, secret_key, endpoint)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO s3_credential (bucket, provider, region, access_key, secret_key, endpoint, billing_log_bucket, billing_log_prefix)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		ON CONFLICT (bucket) DO UPDATE SET
 			provider = EXCLUDED.provider,
 			region = EXCLUDED.region,
 			access_key = EXCLUDED.access_key,
 			secret_key = EXCLUDED.secret_key,
-			endpoint = EXCLUDED.endpoint`)).
-		WithArgs("b1", "s3", "us-east-1", sqlmock.AnyArg(), sqlmock.AnyArg(), "https://s3.example").
+			endpoint = EXCLUDED.endpoint,
+			billing_log_bucket = EXCLUDED.billing_log_bucket,
+			billing_log_prefix = EXCLUDED.billing_log_prefix`)).
+		WithArgs("b1", "s3", "us-east-1", sqlmock.AnyArg(), sqlmock.AnyArg(), "https://s3.example", "logs", "prefix").
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	err := pg.SaveS3Credential(context.Background(), &models.S3Credential{
-		Bucket:    "b1",
-		Provider:  "",
-		Region:    "us-east-1",
-		AccessKey: "ak",
-		SecretKey: "sk",
-		Endpoint:  "https://s3.example",
+		Bucket:           "b1",
+		Provider:         "",
+		Region:           "us-east-1",
+		AccessKey:        "ak",
+		SecretKey:        "sk",
+		Endpoint:         "https://s3.example",
+		BillingLogBucket: "logs",
+		BillingLogPrefix: "prefix",
 	})
 	if err != nil {
 		t.Fatalf("SaveS3Credential returned error: %v", err)
@@ -162,10 +169,10 @@ func TestListS3Credentials(t *testing.T) {
 	pg, mock, rawDB := newMockPostgresDB(t)
 	defer rawDB.Close()
 
-	rows := sqlmock.NewRows([]string{"bucket", "provider", "region", "access_key", "secret_key", "endpoint"}).
-		AddRow("b1", "s3", "us-east-1", "ak1", "sk1", "").
-		AddRow("b2", "gcs", "us-central1", "ak2", "sk2", "https://example")
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT bucket, provider, region, access_key, secret_key, endpoint FROM s3_credential")).
+	rows := sqlmock.NewRows([]string{"bucket", "provider", "region", "access_key", "secret_key", "endpoint", "billing_log_bucket", "billing_log_prefix"}).
+		AddRow("b1", "s3", "us-east-1", "ak1", "sk1", "", "logs1", "prefix1").
+		AddRow("b2", "gcs", "us-central1", "ak2", "sk2", "https://example", "logs2", "prefix2")
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT bucket, provider, region, access_key, secret_key, endpoint, COALESCE(billing_log_bucket, ''), COALESCE(billing_log_prefix, '') FROM s3_credential")).
 		WillReturnRows(rows)
 
 	got, err := pg.ListS3Credentials(context.Background())

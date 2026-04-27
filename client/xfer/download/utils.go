@@ -22,7 +22,7 @@ func AskForConfirmation(logger *slog.Logger, s string) bool {
 		response, err := reader.ReadString('\n')
 		if err != nil {
 			logger.Error("Error occurred during parsing user's confirmation: " + err.Error())
-			os.Exit(1)
+			return false
 		}
 
 		switch strings.ToLower(strings.TrimSpace(response)) {

@@ -22,6 +22,11 @@ func (p *LocalAuthPlugin) Authenticate(ctx context.Context, in *plugin.Authentic
 		if err != nil {
 			return &plugin.AuthenticationOutput{Authenticated: false, Reason: err.Error()}, nil
 		}
+		claims := map[string]interface{}{"username": p.BasicUser}
+		if strings.Contains(p.BasicUser, "@") {
+			claims["email"] = p.BasicUser
+		}
+		return &plugin.AuthenticationOutput{Authenticated: true, Subject: p.BasicUser, Claims: claims}, nil
 	}
 	return &plugin.AuthenticationOutput{Authenticated: true}, nil
 }

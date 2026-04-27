@@ -22,10 +22,6 @@ paths:
           schema:
             type: string
         - in: query
-          name: authz
-          schema:
-            type: string
-        - in: query
           name: organization
           schema:
             type: string
@@ -95,10 +91,6 @@ paths:
         - internal-index
       operationId: internalDeleteByQuery
       parameters:
-        - in: query
-          name: authz
-          schema:
-            type: string
         - in: query
           name: organization
           schema:
@@ -599,11 +591,19 @@ components:
       additionalProperties:
         type: string
       description: Hash map, e.g. {"sha256":"..."}
+    AuthPathMap:
+      description: Organization/project keyed storage paths. Values are concrete object paths such as s3://bucket/path/to/file.
+      type: object
+      additionalProperties:
+        type: object
+        additionalProperties:
+          type: array
+          items:
+            type: string
     InternalRecord:
       type: object
       required:
         - did
-        - authz
       properties:
         did:
           type: string
@@ -613,15 +613,8 @@ components:
         size:
           type: integer
           format: int64
-        urls:
-          type: array
-          items:
-            type: string
-        authz:
-          type: array
-          items:
-            type: string
-          minItems: 1
+        auth:
+          $ref: '#/components/schemas/AuthPathMap'
         file_name:
           type: string
         organization:
@@ -717,10 +710,6 @@ components:
       properties:
         guid:
           type: string
-        authz:
-          type: array
-          items:
-            type: string
     InternalUploadBlankOutput:
       type: object
       properties:

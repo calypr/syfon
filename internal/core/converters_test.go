@@ -1,7 +1,6 @@
 package core
 
 import (
-	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -19,16 +18,14 @@ func TestUniqueAuthzAndConverters(t *testing.T) {
 		got := UniqueAuthz([]drs.AccessMethod{{
 			Authorizations: &authz,
 		}})
-		want := []string{"/programs/syfon/projects/e2e", "/programs/syfon/projects/e2e-2", "/programs/other"}
-		sort.Strings(got)
-		sort.Strings(want)
-		if len(got) != len(want) {
-			t.Fatalf("unexpected authz list length: got=%v want=%v", got, want)
+		if len(got) != 2 {
+			t.Fatalf("unexpected authz map length: got=%v", got)
 		}
-		for i := range want {
-			if got[i] != want[i] {
-				t.Fatalf("unexpected authz list: got=%v want=%v", got, want)
-			}
+		if projects := got["syfon"]; len(projects) != 2 || projects[0] != "e2e" || projects[1] != "e2e-2" {
+			t.Fatalf("unexpected syfon projects: got=%v", got)
+		}
+		if projects := got["other"]; len(projects) != 0 {
+			t.Fatalf("expected org-wide other authz, got=%v", got)
 		}
 	})
 
@@ -55,7 +52,7 @@ func TestUniqueAuthzAndConverters(t *testing.T) {
 		if err != nil {
 			t.Fatalf("CandidateToInternalObject returned error: %v", err)
 		}
-		if len(obj.Authorizations) != 1 || obj.Authorizations[0] != "/programs/syfon/projects/e2e" {
+		if projects := obj.Authorizations["syfon"]; len(projects) != 1 || projects[0] != "e2e" {
 			t.Fatalf("unexpected internal authz list: %+v", obj.Authorizations)
 		}
 	})

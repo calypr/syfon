@@ -44,6 +44,9 @@ func NewPostgresDB(dsn string) (*PostgresDB, error) {
 	if err := pg.ensurePendingObjectUsageSchema(); err != nil {
 		return nil, err
 	}
+	if err := pg.ensureTransferAttributionSchema(); err != nil {
+		return nil, err
+	}
 	return pg, nil
 }
 
@@ -67,6 +70,14 @@ func (db *PostgresDB) ensureS3CredentialSchema() error {
 	`)
 	if err != nil {
 		return fmt.Errorf("failed to initialize s3_credential provider schema: %w", err)
+	}
+	for _, stmt := range []string{
+		`ALTER TABLE s3_credential ADD COLUMN IF NOT EXISTS billing_log_bucket TEXT`,
+		`ALTER TABLE s3_credential ADD COLUMN IF NOT EXISTS billing_log_prefix TEXT`,
+	} {
+		if _, err := db.db.Exec(stmt); err != nil {
+			return fmt.Errorf("failed to initialize s3_credential billing log schema: %w", err)
+		}
 	}
 	return nil
 }
@@ -144,6 +155,106 @@ func (db *PostgresDB) ensurePendingObjectUsageSchema() error {
 	for _, q := range queries {
 		if _, err := db.db.Exec(q); err != nil {
 			return fmt.Errorf("failed to initialize object usage event schema: %w", err)
+		}
+	}
+	return nil
+}
+
+func (db *PostgresDB) ensureTransferAttributionSchema() error {
+	queries := []string{
+		`CREATE TABLE IF NOT EXISTS transfer_attribution_event (
+			event_id TEXT PRIMARY KEY,
+			access_grant_id TEXT NOT NULL DEFAULT '',
+			event_type TEXT NOT NULL CHECK (event_type IN ('access_issued')),
+			event_time TIMESTAMPTZ NOT NULL,
+			request_id TEXT NOT NULL DEFAULT '',
+			object_id TEXT NOT NULL DEFAULT '',
+			sha256 TEXT NOT NULL DEFAULT '',
+			object_size BIGINT NOT NULL DEFAULT 0,
+			organization TEXT NOT NULL DEFAULT '',
+			project TEXT NOT NULL DEFAULT '',
+			access_id TEXT NOT NULL DEFAULT '',
+			provider TEXT NOT NULL DEFAULT '',
+			bucket TEXT NOT NULL DEFAULT '',
+			storage_url TEXT NOT NULL DEFAULT '',
+			range_start BIGINT NULL,
+			range_end BIGINT NULL,
+			bytes_requested BIGINT NOT NULL DEFAULT 0,
+			bytes_completed BIGINT NOT NULL DEFAULT 0,
+			actor_email TEXT NOT NULL DEFAULT '',
+			actor_subject TEXT NOT NULL DEFAULT '',
+			auth_mode TEXT NOT NULL DEFAULT '',
+			client_name TEXT NOT NULL DEFAULT '',
+			client_version TEXT NOT NULL DEFAULT '',
+			transfer_session_id TEXT NOT NULL DEFAULT ''
+		)`,
+		`CREATE TABLE IF NOT EXISTS provider_transfer_event (
+			provider_event_id TEXT PRIMARY KEY,
+			access_grant_id TEXT NOT NULL DEFAULT '',
+			direction TEXT NOT NULL CHECK (direction IN ('download','upload')),
+			event_time TIMESTAMPTZ NOT NULL,
+			request_id TEXT NOT NULL DEFAULT '',
+			provider_request_id TEXT NOT NULL DEFAULT '',
+			object_id TEXT NOT NULL DEFAULT '',
+			sha256 TEXT NOT NULL DEFAULT '',
+			object_size BIGINT NOT NULL DEFAULT 0,
+			organization TEXT NOT NULL DEFAULT '',
+			project TEXT NOT NULL DEFAULT '',
+			access_id TEXT NOT NULL DEFAULT '',
+			provider TEXT NOT NULL DEFAULT '',
+			bucket TEXT NOT NULL DEFAULT '',
+			object_key TEXT NOT NULL DEFAULT '',
+			storage_url TEXT NOT NULL DEFAULT '',
+			range_start BIGINT NULL,
+			range_end BIGINT NULL,
+			bytes_transferred BIGINT NOT NULL DEFAULT 0,
+			http_method TEXT NOT NULL DEFAULT '',
+			http_status INTEGER NOT NULL DEFAULT 0,
+			requester_principal TEXT NOT NULL DEFAULT '',
+			source_ip TEXT NOT NULL DEFAULT '',
+			user_agent TEXT NOT NULL DEFAULT '',
+			raw_event_ref TEXT NOT NULL DEFAULT '',
+			actor_email TEXT NOT NULL DEFAULT '',
+			actor_subject TEXT NOT NULL DEFAULT '',
+			auth_mode TEXT NOT NULL DEFAULT '',
+			reconciliation_status TEXT NOT NULL DEFAULT 'unmatched' CHECK (reconciliation_status IN ('matched','ambiguous','unmatched'))
+		)`,
+		`CREATE TABLE IF NOT EXISTS provider_transfer_sync_run (
+			sync_id TEXT PRIMARY KEY,
+			provider TEXT NOT NULL DEFAULT '',
+			bucket TEXT NOT NULL DEFAULT '',
+			organization TEXT NOT NULL DEFAULT '',
+			project TEXT NOT NULL DEFAULT '',
+			from_time TIMESTAMPTZ NOT NULL,
+			to_time TIMESTAMPTZ NOT NULL,
+			status TEXT NOT NULL CHECK (status IN ('pending','completed','failed')),
+			requested_at TIMESTAMPTZ NOT NULL,
+			started_at TIMESTAMPTZ NULL,
+			completed_at TIMESTAMPTZ NULL,
+			imported_events BIGINT NOT NULL DEFAULT 0,
+			matched_events BIGINT NOT NULL DEFAULT 0,
+			ambiguous_events BIGINT NOT NULL DEFAULT 0,
+			unmatched_events BIGINT NOT NULL DEFAULT 0,
+			error_message TEXT NOT NULL DEFAULT ''
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_transfer_attr_scope_time ON transfer_attribution_event(organization, project, event_type, event_time)`,
+		`CREATE INDEX IF NOT EXISTS idx_transfer_attr_actor_time ON transfer_attribution_event(actor_email, actor_subject, event_time)`,
+		`CREATE INDEX IF NOT EXISTS idx_transfer_attr_provider_time ON transfer_attribution_event(provider, bucket, event_time)`,
+		`CREATE INDEX IF NOT EXISTS idx_transfer_attr_sha_time ON transfer_attribution_event(sha256, event_time)`,
+		`CREATE INDEX IF NOT EXISTS idx_transfer_attr_session ON transfer_attribution_event(transfer_session_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_provider_transfer_scope_time ON provider_transfer_event(organization, project, direction, event_time)`,
+		`CREATE INDEX IF NOT EXISTS idx_provider_transfer_actor_time ON provider_transfer_event(actor_email, actor_subject, event_time)`,
+		`CREATE INDEX IF NOT EXISTS idx_provider_transfer_provider_time ON provider_transfer_event(provider, bucket, event_time)`,
+		`CREATE INDEX IF NOT EXISTS idx_provider_transfer_sha_time ON provider_transfer_event(sha256, event_time)`,
+		`CREATE INDEX IF NOT EXISTS idx_provider_transfer_status ON provider_transfer_event(reconciliation_status, event_time)`,
+		`CREATE INDEX IF NOT EXISTS idx_provider_transfer_grant ON provider_transfer_event(access_grant_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_provider_sync_bucket_time ON provider_transfer_sync_run(provider, bucket, requested_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_provider_sync_scope_time ON provider_transfer_sync_run(organization, project, requested_at)`,
+		`ALTER TABLE transfer_attribution_event ADD COLUMN IF NOT EXISTS access_grant_id TEXT NOT NULL DEFAULT ''`,
+	}
+	for _, q := range queries {
+		if _, err := db.db.Exec(q); err != nil {
+			return fmt.Errorf("failed to initialize transfer attribution schema: %w", err)
 		}
 	}
 	return nil

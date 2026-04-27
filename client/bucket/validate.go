@@ -23,16 +23,34 @@ func ValidateBucket(ctx context.Context, req bucketapi.PutBucketRequest) error {
 
 	switch provider {
 	case "s3":
+		if err := validateBillingLogConfig(req); err != nil {
+			return err
+		}
 		return validateS3(ctx, req)
 	case "gcs", "gs":
-		// GCS and Azure drivers could be initialized here as well.
-		// For brevity in this refactor, we'll focus on S3 as the primary target.
-		return nil
+		return validateBillingLogConfig(req)
 	case "azure":
-		return nil
+		return validateBillingLogConfig(req)
 	default:
 		return nil
 	}
+}
+
+func validateBillingLogConfig(req bucketapi.PutBucketRequest) error {
+	provider := "s3"
+	if req.Provider != nil {
+		provider = strings.ToLower(strings.TrimSpace(*req.Provider))
+	}
+	if provider == "file" {
+		return nil
+	}
+	if req.BillingLogBucket == nil || strings.TrimSpace(*req.BillingLogBucket) == "" {
+		return fmt.Errorf("billing_log_bucket is required for provider=%s", provider)
+	}
+	if req.BillingLogPrefix == nil || strings.TrimSpace(*req.BillingLogPrefix) == "" {
+		return fmt.Errorf("billing_log_prefix is required for provider=%s", provider)
+	}
+	return nil
 }
 
 func validateS3(ctx context.Context, req bucketapi.PutBucketRequest) error {

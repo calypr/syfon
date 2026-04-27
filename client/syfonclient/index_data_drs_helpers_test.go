@@ -89,12 +89,11 @@ func writeJSON(t *testing.T, w http.ResponseWriter, status int, v any) {
 func toRecordResponse(rec internalapi.InternalRecord) internalapi.InternalRecordResponse {
 	return internalapi.InternalRecordResponse{
 		Did:          rec.Did,
-		Authz:        append([]string(nil), rec.Authz...),
+		Auth:         rec.Auth,
 		Description:  rec.Description,
 		FileName:     rec.FileName,
 		Hashes:       rec.Hashes,
 		Size:         rec.Size,
-		Urls:         rec.Urls,
 		Version:      rec.Version,
 		Organization: rec.Organization,
 		Project:      rec.Project,
@@ -104,4 +103,3 @@ func toRecordResponse(rec internalapi.InternalRecord) internalapi.InternalRecord
 func ptrString(s string) *string { return &s }
 
 func ptrInt64(v int64) *int64 { return &v }
-

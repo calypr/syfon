@@ -397,7 +397,9 @@ s3_credentials:
     access_key: %q
     secret_key: %q
     endpoint: %q
-`, port, dbPath, minioEnv.bucket, "s3", minioEnv.region, minioEnv.accessKey, minioEnv.secretKey, minioEnv.endpoint)
+    billing_log_bucket: %q
+    billing_log_prefix: %q
+`, port, dbPath, minioEnv.bucket, "s3", minioEnv.region, minioEnv.accessKey, minioEnv.secretKey, minioEnv.endpoint, minioEnv.bucket, ".syfon/provider-transfer-events")
 
 	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
 		t.Fatalf("write config file: %v", err)
