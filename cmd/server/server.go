@@ -143,10 +143,11 @@ var Cmd = &cobra.Command{
 
 		// Build Fiber runtime and middleware pipeline.
 		app := fiber.New(fiber.Config{
-			ReadTimeout:  30 * time.Second,
-			WriteTimeout: 120 * time.Second,
-			IdleTimeout:  120 * time.Second,
-			AppName:      "Syfon DRS Server",
+			ReadTimeout:    30 * time.Second,
+			WriteTimeout:   120 * time.Second,
+			IdleTimeout:    120 * time.Second,
+			ReadBufferSize: 64 * 1024,
+			AppName:        "Syfon DRS Server",
 		})
 		app.Use(recover.New())
 
