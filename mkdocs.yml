@@ -43,6 +43,7 @@ nav:
   - Configuration: configuration.md
   - Encryption: encryption.md
   - Deployment: deployment.md
+  - Indexd to Syfon Migration: operator-guide-migration-indexd.md
   - Troubleshooting: troubleshooting.md
   - Code Generation: operator-guide-code-generation.md
   - Advanced:

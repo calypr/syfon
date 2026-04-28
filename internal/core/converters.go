@@ -254,11 +254,12 @@ func InternalRecordToInternalObject(r internalapi.InternalRecord, now time.Time)
 	obj := drs.DrsObject{
 		Id:          id,
 		Size:        common.Int64Val(r.Size),
-		CreatedTime: now,
-		UpdatedTime: &now,
+		CreatedTime: parseInternalRecordTime(r.CreatedTime, now),
 		Version:     common.Ptr("1"),
 		Description: r.Description,
 	}
+	updatedTime := parseInternalRecordTime(r.UpdatedTime, obj.CreatedTime)
+	obj.UpdatedTime = &updatedTime
 	if r.FileName != nil {
 		obj.Name = r.FileName
 	}
@@ -289,6 +290,18 @@ func InternalRecordToInternalObject(r internalapi.InternalRecord, now time.Time)
 		Auth:           auth,
 		Authorizations: authzMap,
 	}, nil
+}
+
+func parseInternalRecordTime(raw *string, fallback time.Time) time.Time {
+	if raw == nil || strings.TrimSpace(*raw) == "" {
+		return fallback.UTC()
+	}
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02T15:04:05.999999", "2006-01-02 15:04:05.999999", "2006-01-02T15:04:05", "2006-01-02 15:04:05"} {
+		if parsed, err := time.Parse(layout, strings.TrimSpace(*raw)); err == nil {
+			return parsed.UTC()
+		}
+	}
+	return fallback.UTC()
 }
 
 // InternalObjectToInternalRecord converts our internal domain model back to an API record.
