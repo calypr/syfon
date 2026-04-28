@@ -206,6 +206,10 @@ func handleInternalCreateFiber(om *core.ObjectManager) fiber.Handler {
 			return c.Status(fiber.StatusBadRequest).SendString("Invalid request body: no records found")
 		}
 
+		if err := requireMethodForObjectBatchAuthorizationsFiber(c, "create", candidates); err != nil {
+			return err
+		}
+
 		if err := om.RegisterObjects(c.Context(), candidates); err != nil {
 			return apiutil.HandleError(c, err)
 		}
@@ -447,6 +451,10 @@ func handleInternalUpdateFiber(c fiber.Ctx, om *core.ObjectManager) error {
 	merged, err := core.MergeInternalObjectUpdate(*existing, req, id, time.Now().UTC())
 	if err != nil {
 		return apiutil.HandleError(c, err)
+	}
+
+	if err := requireMethodForObjectBatchAuthorizationsFiber(c, "update", []models.InternalObject{merged}); err != nil {
+		return err
 	}
 
 	if err := om.RegisterObjects(c.Context(), []models.InternalObject{merged}); err != nil {

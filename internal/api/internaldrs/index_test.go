@@ -12,6 +12,7 @@ import (
 
 	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/apigen/server/internalapi"
+	"github.com/calypr/syfon/internal/authz"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/models"
@@ -378,6 +379,38 @@ func TestHandleInternalBulkCreate_PersistsExplicitAuthz(t *testing.T) {
 
 	if got := mockDB.ObjectAuthz["obj-bulk-1"]; len(got["test"]) != 1 || got["test"][0] != "p1" {
 		t.Fatalf("expected persisted authz, got %v", got)
+	}
+}
+
+func TestHandleInternalBulkCreate_RequiresCreateAccessForEveryAuthzScope(t *testing.T) {
+	ctx := context.WithValue(context.Background(), common.AuthModeKey, "gen3")
+	ctx = context.WithValue(ctx, common.AuthHeaderPresentKey, true)
+	ctx = context.WithValue(ctx, common.UserPrivilegesKey, map[string]map[string]bool{
+		"/programs/test/projects/p1": {"create": true},
+	})
+	obj, err := core.InternalRecordToInternalObject(internalapi.InternalRecord{
+		Did:  "obj-bulk-denied",
+		Size: common.Ptr(int64(7)),
+		Auth: &internalapi.AuthPathMap{
+			"test": map[string][]string{
+				"p1": []string{"s3://bucket/path/obj-bulk-denied"},
+				"p2": []string{"s3://bucket/path/obj-bulk-denied"},
+			},
+		},
+	}, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("InternalRecordToInternalObject failed: %v", err)
+	}
+
+	resources := objectBatchAuthorizationResources([]models.InternalObject{obj})
+	if len(resources) != 2 {
+		t.Fatalf("expected two resources, got %+v", resources)
+	}
+	if methodAllowedForAuthorizations(ctx, "create", obj.Authorizations) {
+		t.Fatal("expected per-object authz to deny when one scope is missing create")
+	}
+	if authz.HasMethodAccess(ctx, "create", resources) {
+		t.Fatal("expected aggregate authz to deny when one scope is missing create")
 	}
 }
 

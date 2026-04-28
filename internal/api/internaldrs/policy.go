@@ -69,6 +69,33 @@ func methodAllowedForAuthorizations(ctx context.Context, method string, authoriz
 	return authz.HasMethodAccess(ctx, method, sycommon.AuthzMapToList(authorizations))
 }
 
+func requireMethodForObjectBatchAuthorizationsFiber(c fiber.Ctx, method string, objects []models.InternalObject) error {
+	resources := objectBatchAuthorizationResources(objects)
+	if !authz.HasMethodAccess(c.Context(), method, resources) {
+		return c.Status(authStatusCode(c.Context())).SendString(
+			fmt.Sprintf("unauthorized: %s access denied for object authorizations", method),
+		)
+	}
+	return nil
+}
+
+func objectBatchAuthorizationResources(objects []models.InternalObject) []string {
+	seen := make(map[string]struct{})
+	for _, obj := range objects {
+		for _, resource := range sycommon.AuthzMapToList(obj.Authorizations) {
+			if resource == "" {
+				continue
+			}
+			seen[resource] = struct{}{}
+		}
+	}
+	resources := make([]string, 0, len(seen))
+	for resource := range seen {
+		resources = append(resources, resource)
+	}
+	return resources
+}
+
 func objectAuthzMatchesScope(obj models.InternalObject, org, project string) bool {
 	if len(obj.Authorizations) == 0 {
 		return false
