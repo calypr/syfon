@@ -17,54 +17,60 @@ import (
 var Cmd = &cobra.Command{
 	Use:   "migrate",
 	Short: "Export and import Gen3 Indexd records for Syfon migration",
-	Long:  "Export records from a Gen3 Indexd-compatible /index API into a local SQLite dump, then import that dump into Syfon using the existing /index/bulk loader.",
+	Long:  "Export records from a Gen3-mounted Indexd API into a local SQLite dump, then import that dump into Syfon using the existing /index/bulk loader.",
 }
 
 var (
-	indexdURL     string
-	dumpPath      string
-	sourceProfile string
-	targetProfile string
-	sourceToken   string
-	targetToken   string
-	batchSize     int
-	limit         int
-	sweeps        int
-	dryRun        bool
-	defaultAuthz  []string
+	dumpPath            string
+	sourceProfile       string
+	targetProfile       string
+	sourceToken         string
+	targetToken         string
+	targetBasicUser     string
+	targetBasicPassword string
+	batchSize           int
+	limit               int
+	sweeps              int
+	dryRun              bool
+	defaultAuthz        []string
 )
 
 var exportCmd = &cobra.Command{
 	Use:   "export",
 	Short: "Export records from Gen3 Indexd into a SQLite dump",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		sourceURL := strings.TrimRight(strings.TrimSpace(indexdURL), "/")
-		if sourceURL == "" {
-			return fmt.Errorf("--indexd-url is required")
+		sourceURL, err := indexdURLFromServer(cmd)
+		if err != nil {
+			return err
 		}
-		if strings.TrimSpace(dumpPath) == "" {
-			return fmt.Errorf("--dump is required")
-		}
+		dumpPath = normalizedDumpPath(dumpPath)
 
 		sourceAuth, err := authFromInputs(sourceProfile, sourceToken)
 		if err != nil {
 			return fmt.Errorf("source auth: %w", err)
 		}
-		httpClient := &http.Client{Timeout: 90 * time.Second}
+		httpClient := migrationHTTPClient()
 		source, err := migrate.NewHTTPClient(sourceURL, sourceAuth, httpClient)
 		if err != nil {
 			return err
 		}
-		dump, err := migrate.OpenExistingSQLiteDump(dumpPath)
-		if err != nil {
-			return err
+		var dump *migrate.SQLiteDump
+		if !dryRun {
+			dump, err = migrate.OpenSQLiteDump(dumpPath)
+			if err != nil {
+				return err
+			}
+			defer dump.Close()
 		}
-		defer dump.Close()
 
 		if dryRun {
 			cmd.Println("dry-run: no records will be written to the dump")
 		}
-		cmd.Printf("migration export starting: indexd=%s dump=%s batch=%d limit=%d sweeps=%d\n", sourceURL, dumpPath, batchSize, limit, sweeps)
+		displayDump := dumpPath
+		if dryRun {
+			displayDump = "<dry-run: not written>"
+		}
+		cmd.Printf("migration export starting: indexd=%s dump=%s batch=%d limit=%d sweeps=%d\n", sourceURL, displayDump, batchSize, limit, sweeps)
 		stats, err := migrate.Run(context.Background(), source, dump, migrate.Config{
 			BatchSize:    batchSize,
 			Limit:        limit,
@@ -75,9 +81,24 @@ var exportCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		count, countErr := dump.Count(context.Background())
-		if countErr != nil {
-			return countErr
+		count := 0
+		if dump != nil {
+			var countErr error
+			count, countErr = dump.Count(context.Background())
+			if countErr != nil {
+				return countErr
+			}
+		}
+		if dryRun {
+			cmd.Printf("migration export dry-run complete: fetched=%d transformed=%d valid=%d skipped=%d errors=%d unique_ids=%d dump_records=0\n",
+				stats.Fetched,
+				stats.Transformed,
+				stats.Loaded,
+				stats.Skipped,
+				stats.Errors,
+				stats.CountOfUniqueIDs,
+			)
+			return nil
 		}
 		cmd.Printf("migration export complete: fetched=%d transformed=%d dumped=%d skipped=%d errors=%d unique_ids=%d dump_records=%d\n",
 			stats.Fetched,
@@ -106,15 +127,15 @@ var importCmd = &cobra.Command{
 		if strings.TrimSpace(targetProfile) == "" {
 			targetProfile = sourceProfile
 		}
-		targetAuth, err := authFromInputs(targetProfile, targetToken)
+		targetAuth, err := targetAuthFromInputs(targetProfile, targetToken, targetBasicUser, targetBasicPassword)
 		if err != nil {
 			return fmt.Errorf("target auth: %w", err)
 		}
-		target, err := migrate.NewHTTPClient(targetURL, targetAuth, &http.Client{Timeout: 90 * time.Second})
+		target, err := migrate.NewHTTPClient(targetURL, targetAuth, migrationHTTPClient())
 		if err != nil {
 			return err
 		}
-		dump, err := migrate.OpenSQLiteDump(dumpPath)
+		dump, err := migrate.OpenExistingSQLiteDump(dumpPath)
 		if err != nil {
 			return err
 		}
@@ -139,8 +160,7 @@ func init() {
 	Cmd.AddCommand(exportCmd)
 	Cmd.AddCommand(importCmd)
 
-	exportCmd.Flags().StringVar(&indexdURL, "indexd-url", "", "Source Gen3 or Indexd base URL; may be the Gen3 root or /index URL")
-	exportCmd.Flags().StringVar(&dumpPath, "dump", "", "SQLite dump file to write")
+	exportCmd.Flags().StringVar(&dumpPath, "dump", "", "SQLite dump file to write (default ./indexd-records.sqlite)")
 	exportCmd.Flags().StringVar(&sourceProfile, "source-profile", "", "Gen3 profile for source reads from ~/.gen3/gen3_client_config.ini")
 	exportCmd.Flags().StringVar(&sourceToken, "source-token", "", "Bearer token for source reads; overrides --source-profile")
 	exportCmd.Flags().IntVar(&batchSize, "batch-size", 500, "Records to fetch per batch; capped at Indexd's 1024 max")
@@ -152,7 +172,35 @@ func init() {
 	importCmd.Flags().StringVar(&dumpPath, "dump", "", "SQLite dump file to read")
 	importCmd.Flags().StringVar(&targetProfile, "target-profile", "", "Gen3 profile for target writes")
 	importCmd.Flags().StringVar(&targetToken, "target-token", "", "Bearer token for target writes; overrides --target-profile")
+	importCmd.Flags().StringVar(&targetBasicUser, "target-basic-user", "", "Basic auth username for local target Syfon writes")
+	importCmd.Flags().StringVar(&targetBasicPassword, "target-basic-password", "", "Basic auth password for local target Syfon writes")
 	importCmd.Flags().IntVar(&batchSize, "batch-size", 500, "Records to load per /index/bulk request")
+}
+
+func indexdURLFromServer(cmd *cobra.Command) (string, error) {
+	server, err := targetServerURL(cmd)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimRight(server, "/") + "/index/index", nil
+}
+
+func normalizedDumpPath(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "indexd-records.sqlite"
+	}
+	return path
+}
+
+func migrationHTTPClient() *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.TLSHandshakeTimeout = 60 * time.Second
+	transport.ResponseHeaderTimeout = 90 * time.Second
+	return &http.Client{
+		Timeout:   3 * time.Minute,
+		Transport: transport,
+	}
 }
 
 func targetServerURL(cmd *cobra.Command) (string, error) {
@@ -190,4 +238,22 @@ func authFromInputs(profile, token string) (migrate.AuthConfig, error) {
 		return migrate.AuthConfig{Basic: &migrate.BasicAuth{Username: credential.KeyID, Password: credential.APIKey}}, nil
 	}
 	return migrate.AuthConfig{}, fmt.Errorf("profile %q has no access_token or key_id/api_key", profile)
+}
+
+func targetAuthFromInputs(profile, token, basicUser, basicPassword string) (migrate.AuthConfig, error) {
+	basicUser = strings.TrimSpace(basicUser)
+	basicPassword = strings.TrimSpace(basicPassword)
+	if basicUser != "" || basicPassword != "" {
+		if basicUser == "" || basicPassword == "" {
+			return migrate.AuthConfig{}, fmt.Errorf("--target-basic-user and --target-basic-password must be set together")
+		}
+		if strings.TrimSpace(token) != "" {
+			return migrate.AuthConfig{}, fmt.Errorf("--target-token cannot be combined with --target-basic-user/--target-basic-password")
+		}
+		if strings.TrimSpace(profile) != "" {
+			return migrate.AuthConfig{}, fmt.Errorf("--target-profile cannot be combined with --target-basic-user/--target-basic-password")
+		}
+		return migrate.AuthConfig{Basic: &migrate.BasicAuth{Username: basicUser, Password: basicPassword}}, nil
+	}
+	return authFromInputs(profile, token)
 }

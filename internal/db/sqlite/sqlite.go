@@ -77,6 +77,9 @@ func (db *SqliteDB) initSchema() error {
 			checksum TEXT,
 			FOREIGN KEY(object_id) REFERENCES drs_object(id) ON DELETE CASCADE
 		)`,
+		`CREATE INDEX IF NOT EXISTS idx_drs_object_access_method_object_id ON drs_object_access_method(object_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_drs_object_checksum_object_id ON drs_object_checksum(object_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_drs_object_checksum_checksum ON drs_object_checksum(checksum)`,
 		`CREATE TABLE IF NOT EXISTS drs_object_alias (
 			alias_id TEXT PRIMARY KEY,
 			object_id TEXT NOT NULL,
@@ -253,6 +256,9 @@ func (db *SqliteDB) initSchema() error {
 				return err
 			}
 		}
+	}
+	if _, err := db.db.Exec(`CREATE INDEX IF NOT EXISTS idx_drs_object_access_method_scope ON drs_object_access_method(org, project)`); err != nil {
+		return err
 	}
 	if _, err := db.db.Exec(`ALTER TABLE s3_credential ADD COLUMN provider TEXT NOT NULL DEFAULT 's3'`); err != nil {
 		if !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {

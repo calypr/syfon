@@ -113,6 +113,21 @@ type PostgresConfig struct {
 
 type CredentialEncryptionConfig struct {
 	LocalKeyFile string `json:"local_key_file" yaml:"local_key_file"`
+	MasterKey    string `json:"master_key" yaml:"master_key"`
+}
+
+func (c CredentialEncryptionConfig) MarshalJSON() ([]byte, error) {
+	masterKey := ""
+	if c.MasterKey != "" {
+		masterKey = "***REDACTED***"
+	}
+	return json.Marshal(&struct {
+		LocalKeyFile string `json:"local_key_file"`
+		MasterKey    string `json:"master_key"`
+	}{
+		LocalKeyFile: c.LocalKeyFile,
+		MasterKey:    masterKey,
+	})
 }
 
 // SECURITY FIX MED-1: Redact password when marshaling to JSON
@@ -128,14 +143,19 @@ func (p PostgresConfig) MarshalJSON() ([]byte, error) {
 }
 
 type S3Config struct {
-	Bucket           string `json:"bucket" yaml:"bucket"`
-	Provider         string `json:"provider,omitempty" yaml:"provider,omitempty"`
-	Region           string `json:"region" yaml:"region"`
-	AccessKey        string `json:"access_key" yaml:"access_key"`
-	SecretKey        string `json:"secret_key" yaml:"secret_key"`
-	Endpoint         string `json:"endpoint,omitempty" yaml:"endpoint,omitempty"`
-	BillingLogBucket string `json:"billing_log_bucket,omitempty" yaml:"billing_log_bucket,omitempty"`
-	BillingLogPrefix string `json:"billing_log_prefix,omitempty" yaml:"billing_log_prefix,omitempty"`
+	Bucket             string `json:"bucket" yaml:"bucket"`
+	Provider           string `json:"provider,omitempty" yaml:"provider,omitempty"`
+	Region             string `json:"region" yaml:"region"`
+	AccessKey          string `json:"access_key" yaml:"access_key"`
+	SecretKey          string `json:"secret_key" yaml:"secret_key"`
+	Endpoint           string `json:"endpoint,omitempty" yaml:"endpoint,omitempty"`
+	BillingLogsEnabled *bool  `json:"billing_logs_enabled,omitempty" yaml:"billing_logs_enabled,omitempty"`
+	BillingLogBucket   string `json:"billing_log_bucket,omitempty" yaml:"billing_log_bucket,omitempty"`
+	BillingLogPrefix   string `json:"billing_log_prefix,omitempty" yaml:"billing_log_prefix,omitempty"`
+}
+
+func (s S3Config) ProviderBillingLogsEnabled() bool {
+	return s.BillingLogsEnabled == nil || *s.BillingLogsEnabled
 }
 
 // SECURITY FIX MED-1: Redact secret key when marshaling to JSON

@@ -85,6 +85,99 @@ func TestHandleInternalList_ScopeFilteringByReadPrivilege(t *testing.T) {
 	}
 }
 
+func TestHandleInternalList_PaginatesIDs(t *testing.T) {
+	now := time.Now().UTC()
+	mockDB := &testutils.MockDatabase{
+		Objects: map[string]*drs.DrsObject{
+			"obj-1": {Id: "obj-1", CreatedTime: now, UpdatedTime: &now, Checksums: []drs.Checksum{{Type: "sha256", Checksum: "h1"}}},
+			"obj-2": {Id: "obj-2", CreatedTime: now, UpdatedTime: &now, Checksums: []drs.Checksum{{Type: "sha256", Checksum: "h2"}}},
+			"obj-3": {Id: "obj-3", CreatedTime: now, UpdatedTime: &now, Checksums: []drs.Checksum{{Type: "sha256", Checksum: "h3"}}},
+		},
+	}
+	app := fiber.New()
+	om := core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
+	RegisterInternalIndexRoutes(app, om)
+
+	req := httptest.NewRequest(http.MethodGet, "/index?limit=1&start=obj-1", nil)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("test request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 200, got %d body=%s", resp.StatusCode, string(body))
+	}
+	var payload internalapi.ListRecordsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Records == nil || len(*payload.Records) != 1 {
+		t.Fatalf("expected one paged record, got %+v", payload.Records)
+	}
+	if (*payload.Records)[0].Did != "obj-2" {
+		t.Fatalf("expected obj-2 after start cursor, got %+v", (*payload.Records)[0])
+	}
+}
+
+func TestHandleInternalList_PagePaginatesIDs(t *testing.T) {
+	now := time.Now().UTC()
+	mockDB := &testutils.MockDatabase{
+		Objects: map[string]*drs.DrsObject{
+			"obj-1": {Id: "obj-1", CreatedTime: now, UpdatedTime: &now, Checksums: []drs.Checksum{{Type: "sha256", Checksum: "h1"}}},
+			"obj-2": {Id: "obj-2", CreatedTime: now, UpdatedTime: &now, Checksums: []drs.Checksum{{Type: "sha256", Checksum: "h2"}}},
+			"obj-3": {Id: "obj-3", CreatedTime: now, UpdatedTime: &now, Checksums: []drs.Checksum{{Type: "sha256", Checksum: "h3"}}},
+		},
+	}
+	app := fiber.New()
+	om := core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
+	RegisterInternalIndexRoutes(app, om)
+
+	req := httptest.NewRequest(http.MethodGet, "/index?limit=1&page=1", nil)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("test request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 200, got %d body=%s", resp.StatusCode, string(body))
+	}
+	var payload internalapi.ListRecordsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Records == nil || len(*payload.Records) != 1 {
+		t.Fatalf("expected one paged record, got %+v", payload.Records)
+	}
+	if (*payload.Records)[0].Did != "obj-2" {
+		t.Fatalf("expected obj-2 on page 1 with zero-based offset, got %+v", (*payload.Records)[0])
+	}
+}
+
+func TestPaginateInternalListIDsFiberDefaultLimit(t *testing.T) {
+	ids := make([]string, defaultInternalListLimit+5)
+	for i := range ids {
+		ids[i] = "obj"
+	}
+	app := fiber.New()
+	app.Get("/", func(c fiber.Ctx) error {
+		paged, err := paginateInternalListIDsFiber(c, ids)
+		if err != nil {
+			return err
+		}
+		if len(paged) != defaultInternalListLimit {
+			t.Fatalf("expected default limit %d, got %d", defaultInternalListLimit, len(paged))
+		}
+		return c.SendStatus(fiber.StatusOK)
+	})
+	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/", nil))
+	if err != nil {
+		t.Fatalf("test request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+}
+
 func TestHandleInternalList_HashTypeFiltering(t *testing.T) {
 	now := time.Now().UTC()
 	mockDB := &testutils.MockDatabase{

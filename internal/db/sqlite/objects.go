@@ -451,7 +451,7 @@ func (db *SqliteDB) ListObjectIDsByScope(ctx context.Context, organization, proj
 	organization = strings.TrimSpace(organization)
 	project = strings.TrimSpace(project)
 	if organization == "" {
-		rows, err := db.db.QueryContext(ctx, `SELECT id FROM drs_object`)
+		rows, err := db.db.QueryContext(ctx, `SELECT id FROM drs_object ORDER BY id`)
 		if err != nil {
 			return nil, err
 		}
@@ -480,13 +480,15 @@ func (db *SqliteDB) ListObjectIDsByScope(ctx context.Context, organization, proj
 			SELECT DISTINCT a.object_id
 			FROM drs_object_access_method a
 			INNER JOIN drs_object o ON o.id = a.object_id
-			WHERE a.org = ? AND a.project = ?`, organization, project)
+			WHERE a.org = ? AND a.project = ?
+			ORDER BY a.object_id`, organization, project)
 	} else {
 		rows, err = db.db.QueryContext(ctx, `
 			SELECT DISTINCT a.object_id
 			FROM drs_object_access_method a
 			INNER JOIN drs_object o ON o.id = a.object_id
-			WHERE a.org = ?`, organization)
+			WHERE a.org = ?
+			ORDER BY a.object_id`, organization)
 	}
 	if err != nil {
 		return nil, err

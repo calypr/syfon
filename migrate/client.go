@@ -4,13 +4,17 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 )
+
+const maxHTTPAttempts = 3
 
 type BasicAuth struct {
 	Username string
@@ -63,7 +67,7 @@ func (c *HTTPClient) ListPage(ctx context.Context, limit int, start string) ([]I
 		return nil, err
 	}
 	c.applyHeaders(req)
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return nil, fmt.Errorf("GET %s: %w", endpoint, err)
 	}
@@ -115,7 +119,7 @@ func (c *HTTPClient) bulkDocuments(ctx context.Context, ids []string) ([]IndexdR
 	}
 	c.applyHeaders(req)
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return nil, fmt.Errorf("POST %s: %w", endpoint, err)
 	}
@@ -138,7 +142,7 @@ func (c *HTTPClient) getRecord(ctx context.Context, id string) (IndexdRecord, er
 		return IndexdRecord{}, err
 	}
 	c.applyHeaders(req)
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return IndexdRecord{}, fmt.Errorf("GET %s: %w", endpoint, err)
 	}
@@ -166,7 +170,7 @@ func (c *HTTPClient) LoadBatch(ctx context.Context, records []MigrationRecord) e
 	}
 	c.applyHeaders(req)
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return fmt.Errorf("POST %s: %w", endpoint, err)
 	}
@@ -280,6 +284,54 @@ func (c *HTTPClient) endpoint(path string) string {
 		return c.baseURL + strings.TrimPrefix(path, "/index")
 	}
 	return c.baseURL + path
+}
+
+func (c *HTTPClient) do(req *http.Request) (*http.Response, error) {
+	var lastErr error
+	for attempt := 1; attempt <= maxHTTPAttempts; attempt++ {
+		if attempt > 1 && req.GetBody != nil {
+			body, err := req.GetBody()
+			if err != nil {
+				return nil, err
+			}
+			req.Body = body
+		}
+
+		resp, err := c.httpClient.Do(req)
+		if !shouldRetryHTTP(resp, err) || attempt == maxHTTPAttempts {
+			return resp, err
+		}
+		if err != nil {
+			lastErr = err
+		}
+		if resp != nil && resp.Body != nil {
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
+		}
+
+		timer := time.NewTimer(time.Duration(attempt) * 750 * time.Millisecond)
+		select {
+		case <-req.Context().Done():
+			timer.Stop()
+			if lastErr != nil {
+				return nil, lastErr
+			}
+			return nil, req.Context().Err()
+		case <-timer.C:
+		}
+	}
+	return nil, lastErr
+}
+
+func shouldRetryHTTP(resp *http.Response, err error) bool {
+	if err != nil {
+		var netErr net.Error
+		return errors.As(err, &netErr) && netErr.Timeout()
+	}
+	if resp == nil {
+		return false
+	}
+	return resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= http.StatusInternalServerError
 }
 
 func (c *HTTPClient) applyHeaders(req *http.Request) {

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -76,6 +77,7 @@ database:
     file: "test.db"
 credential_encryption:
   local_key_file: ".syfon-credential-kek"
+  master_key: "ee605db033f6992534def23f9594ffaa58142f8bd9b7ee8ae3de199aed435d97"
 `
 	tmpfile, err := os.CreateTemp("", "config-credential-encryption-*.yaml")
 	if err != nil {
@@ -95,6 +97,100 @@ credential_encryption:
 	}
 	if cfg.CredentialEncryption.LocalKeyFile != ".syfon-credential-kek" {
 		t.Fatalf("expected configured local key file, got %q", cfg.CredentialEncryption.LocalKeyFile)
+	}
+	if cfg.CredentialEncryption.MasterKey != "ee605db033f6992534def23f9594ffaa58142f8bd9b7ee8ae3de199aed435d97" {
+		t.Fatalf("expected configured master key, got %q", cfg.CredentialEncryption.MasterKey)
+	}
+}
+
+func TestCredentialEncryptionConfigMarshalJSONRedactsMasterKey(t *testing.T) {
+	cfg := CredentialEncryptionConfig{
+		LocalKeyFile: ".syfon-credential-kek",
+		MasterKey:    "ee605db033f6992534def23f9594ffaa58142f8bd9b7ee8ae3de199aed435d97",
+	}
+
+	b, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatalf("MarshalJSON failed: %v", err)
+	}
+	got := string(b)
+	if strings.Contains(got, "ee605db033f6992534def23f9594ffaa58142f8bd9b7ee8ae3de199aed435d97") {
+		t.Fatalf("expected master key to be redacted, got %s", got)
+	}
+	if !strings.Contains(got, `"master_key":"***REDACTED***"`) {
+		t.Fatalf("expected redacted master key, got %s", got)
+	}
+}
+
+func TestLoadConfig_BillingLogsEnabledDefaultsTrue(t *testing.T) {
+	content := `
+auth:
+  mode: local
+database:
+  sqlite:
+    file: "test.db"
+s3_credentials:
+  - bucket: "test-bucket"
+    provider: "s3"
+    region: "us-east-1"
+    access_key: "test-key"
+    secret_key: "test-secret"
+`
+	tmpfile, err := os.CreateTemp("", "config-billing-logs-default-*.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpfile.Name())
+	if _, err := tmpfile.Write([]byte(content)); err != nil {
+		t.Fatal(err)
+	}
+	if err := tmpfile.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadConfig(tmpfile.Name())
+	if err != nil {
+		t.Fatalf("LoadConfig failed: %v", err)
+	}
+	if !cfg.S3Credentials[0].ProviderBillingLogsEnabled() {
+		t.Fatal("expected billing logs to default to enabled")
+	}
+}
+
+func TestLoadConfig_BillingLogsCanBeDisabledForS3Compatible(t *testing.T) {
+	content := `
+auth:
+  mode: local
+database:
+  sqlite:
+    file: "test.db"
+s3_credentials:
+  - bucket: "test-bucket"
+    provider: "s3"
+    region: "us-east-1"
+    access_key: "test-key"
+    secret_key: "test-secret"
+    endpoint: "https://s3-compatible.example.org"
+    billing_logs_enabled: false
+`
+	tmpfile, err := os.CreateTemp("", "config-billing-logs-disabled-*.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpfile.Name())
+	if _, err := tmpfile.Write([]byte(content)); err != nil {
+		t.Fatal(err)
+	}
+	if err := tmpfile.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadConfig(tmpfile.Name())
+	if err != nil {
+		t.Fatalf("LoadConfig failed: %v", err)
+	}
+	if cfg.S3Credentials[0].ProviderBillingLogsEnabled() {
+		t.Fatal("expected billing logs to be disabled")
 	}
 }
 

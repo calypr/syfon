@@ -3,8 +3,10 @@ package migrate
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -33,6 +35,21 @@ func TestRunPaginatesAndLoadsAllRecords(t *testing.T) {
 	}
 	if len(loader.records) != 3 {
 		t.Fatalf("expected 3 loaded records, got %d", len(loader.records))
+	}
+}
+
+func TestRunDryRunDoesNotRequireLoader(t *testing.T) {
+	size := int64(1)
+	source := &fakeSource{pages: [][]IndexdRecord{{
+		{DID: "a", Size: &size, Hashes: map[string]string{"sha256": "sha-a"}},
+	}}}
+
+	stats, err := Run(context.Background(), source, nil, Config{BatchSize: 100, DryRun: true})
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if stats.Fetched != 1 || stats.Loaded != 1 || stats.CountOfUniqueIDs != 1 {
+		t.Fatalf("unexpected stats: %+v", stats)
 	}
 }
 
@@ -92,6 +109,25 @@ func TestHTTPClientEndToEndWithMockIndexdAndSyfon(t *testing.T) {
 	}
 }
 
+func TestHTTPClientRetriesTimeout(t *testing.T) {
+	transport := &retryTransport{}
+	client, err := NewHTTPClient("https://example.org/index", AuthConfig{}, &http.Client{Transport: transport})
+	if err != nil {
+		t.Fatalf("NewHTTPClient: %v", err)
+	}
+
+	records, err := client.ListPage(context.Background(), 1, "")
+	if err != nil {
+		t.Fatalf("ListPage returned error: %v", err)
+	}
+	if transport.calls != 2 {
+		t.Fatalf("expected one retry, got %d calls", transport.calls)
+	}
+	if len(records) != 1 || records[0].DID != "a" {
+		t.Fatalf("unexpected records: %+v", records)
+	}
+}
+
 type fakeSource struct {
 	pages  [][]IndexdRecord
 	starts []string
@@ -113,3 +149,26 @@ func (l *fakeLoader) LoadBatch(ctx context.Context, records []MigrationRecord) e
 	l.records = append(l.records, records...)
 	return nil
 }
+
+type retryTransport struct {
+	calls int
+}
+
+func (t *retryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	t.calls++
+	if t.calls == 1 {
+		return nil, timeoutErr{}
+	}
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(`{"records":[{"did":"a","size":1,"hashes":{"sha256":"sha-a"}}]}`)),
+		Header:     make(http.Header),
+		Request:    req,
+	}, nil
+}
+
+type timeoutErr struct{}
+
+func (timeoutErr) Error() string   { return "timeout" }
+func (timeoutErr) Timeout() bool   { return true }
+func (timeoutErr) Temporary() bool { return true }

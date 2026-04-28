@@ -33,8 +33,9 @@ import (
 var configFile string
 
 var Cmd = &cobra.Command{
-	Use:   "serve",
-	Short: "Starts the DRS Object API server",
+	Use:     "serve",
+	Aliases: []string{"run"},
+	Short:   "Starts the DRS Object API server",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 		slog.SetDefault(logger)
@@ -108,8 +109,12 @@ var Cmd = &cobra.Command{
 					BillingLogBucket: c.BillingLogBucket,
 					BillingLogPrefix: c.BillingLogPrefix,
 				}
-				if err := metricapi.ValidateProviderTransferLogSource(cmd.Context(), *cred); err != nil {
-					fatal("invalid provider billing log configuration", "bucket", c.Bucket, "err", err)
+				if c.ProviderBillingLogsEnabled() {
+					if err := metricapi.ValidateProviderTransferLogSource(cmd.Context(), *cred); err != nil {
+						fatal("invalid provider billing log configuration", "bucket", c.Bucket, "err", err)
+					}
+				} else {
+					logger.Info("provider billing log validation disabled", "bucket", c.Bucket, "provider", c.Provider)
 				}
 				if err := database.SaveS3Credential(cmd.Context(), cred); err != nil {
 					logger.Error("failed to save s3 credential", "bucket", c.Bucket, "err", err)
@@ -202,6 +207,11 @@ var Cmd = &cobra.Command{
 func applyCredentialEncryptionConfig(cfg *config.Config) {
 	if cfg == nil {
 		return
+	}
+	if strings.TrimSpace(os.Getenv(crypto.CredentialMasterKeyEnv)) == "" {
+		if masterKey := strings.TrimSpace(cfg.CredentialEncryption.MasterKey); masterKey != "" {
+			os.Setenv(crypto.CredentialMasterKeyEnv, masterKey)
+		}
 	}
 	if strings.TrimSpace(os.Getenv(crypto.CredentialLocalKeyFileEnv)) == "" {
 		if localKeyFile := strings.TrimSpace(cfg.CredentialEncryption.LocalKeyFile); localKeyFile != "" {
