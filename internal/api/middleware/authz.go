@@ -55,6 +55,8 @@ type authenticationPluginManagerInterface interface {
 	Authenticate(ctx context.Context, in *plugin.AuthenticationInput) (*plugin.AuthenticationOutput, error)
 }
 
+var newBearerTokenRequestor = request.NewBearerTokenRequestor
+
 type AuthzMiddleware struct {
 	logger             *slog.Logger
 	mode               string
@@ -231,6 +233,21 @@ func (m *AuthzMiddleware) handleGen3Auth(c fiber.Ctx, ctx context.Context, authH
 	if output.Claims != nil {
 		ctx = context.WithValue(ctx, common.ClaimsKey, output.Claims)
 	}
+
+	tokenString, err := extractBearerLikeToken(authHeader)
+	if err != nil {
+		m.logger.Debug("failed to extract bearer token for authorization lookup", "error", err)
+	} else {
+		authResult := m.resolveTokenAuth(ctx, tokenString)
+		if authResult.negative {
+			m.logger.Debug("authorization lookup failed or returned no usable privileges")
+		} else {
+			m.logger.Debug("authorization lookup complete", "resources", len(authResult.resources))
+			ctx = context.WithValue(ctx, common.UserAuthzKey, authResult.resources)
+			ctx = context.WithValue(ctx, common.UserPrivilegesKey, authResult.privileges)
+		}
+	}
+
 	// Now call authorization plugin if present
 	if m.pluginManager != nil {
 		authzInput := &plugin.AuthorizationInput{
@@ -329,7 +346,7 @@ func (m *AuthzMiddleware) fetchTokenAuth(ctx context.Context, tokenString string
 
 	// We use a no-op gen3 logger for the request client to avoid unnecessary side effects in middleware
 	gen3Logger := logs.NewGen3Logger(m.logger, "", "syfon")
-	reqClient := request.NewBearerTokenRequestor(gen3Logger, cred, nil, apiEndpoint, "syfon-server", nil)
+	reqClient := newBearerTokenRequestor(gen3Logger, cred, nil, apiEndpoint, "syfon-server", nil)
 
 	// 3. Fetch user info (privileges)
 	privs, err := fetchPrivileges(ctx, reqClient, cred)

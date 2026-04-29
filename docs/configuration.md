@@ -32,6 +32,7 @@ s3_credentials:
     access_key: "cbds-user"
     secret_key: "<secret>"
     endpoint: "https://aced-storage.ohsu.edu/"
+    billing_logs_enabled: false
 lfs:
   max_batch_objects: 1000
   max_batch_body_bytes: 10485760
@@ -84,17 +85,20 @@ For `provider: s3`, required fields are:
 - `region`
 - `access_key`
 - `secret_key`
-- `billing_log_bucket`
-- `billing_log_prefix`
 
 `endpoint` is optional and commonly used for S3-compatible storage.
 
-For `provider: gcs` and `provider: azure`, cloud billing log source fields are also required:
+For cloud transfer billing metrics, set or omit `billing_logs_enabled` as follows:
+
+- Omit `billing_logs_enabled` or set it to `true` when provider access logs are configured.
+- Set `billing_logs_enabled: false` for S3-compatible/non-AWS buckets that do not expose provider access logs.
+
+When billing logs are enabled for `s3`, `gcs`, or `azure`, these fields are required:
 
 - `billing_log_bucket`
 - `billing_log_prefix`
 
-The same credential used for the data bucket must be able to list and read the billing log bucket/prefix. Syfon validates that log source when the bucket credential is added. Local `file` provider credentials are exempt from this cloud log requirement.
+The same credential used for the data bucket must be able to list and read the billing log bucket/prefix. Syfon validates that log source when the bucket credential is added or loaded from config. Local `file` provider credentials and credentials with `billing_logs_enabled: false` are exempt from this cloud log requirement.
 
 Transfer metrics do not block dashboard responses when a sync window is missing. Instead, metrics responses include freshness metadata showing whether the requested provider/bucket/time range is covered and when the latest completed sync ran.
 

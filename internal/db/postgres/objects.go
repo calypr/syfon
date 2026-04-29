@@ -507,7 +507,7 @@ func (db *PostgresDB) ListObjectIDsByScope(ctx context.Context, organization, pr
 	organization = strings.TrimSpace(organization)
 	project = strings.TrimSpace(project)
 	if organization == "" {
-		rows, err := db.db.QueryContext(ctx, `SELECT id FROM drs_object`)
+		rows, err := db.db.QueryContext(ctx, `SELECT id FROM drs_object ORDER BY id`)
 		if err != nil {
 			return nil, err
 		}
@@ -536,13 +536,15 @@ func (db *PostgresDB) ListObjectIDsByScope(ctx context.Context, organization, pr
 			SELECT DISTINCT a.object_id
 			FROM drs_object_access_method a
 			INNER JOIN drs_object o ON o.id = a.object_id
-			WHERE a.org = $1 AND a.project = $2`, organization, project)
+			WHERE a.org = $1 AND a.project = $2
+			ORDER BY a.object_id`, organization, project)
 	} else {
 		rows, err = db.db.QueryContext(ctx, `
 			SELECT DISTINCT a.object_id
 			FROM drs_object_access_method a
 			INNER JOIN drs_object o ON o.id = a.object_id
-			WHERE a.org = $1`, organization)
+			WHERE a.org = $1
+			ORDER BY a.object_id`, organization)
 	}
 	if err != nil {
 		return nil, err

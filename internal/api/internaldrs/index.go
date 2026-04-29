@@ -2,6 +2,8 @@ package internaldrs
 
 import (
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -11,6 +13,11 @@ import (
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/models"
 	"github.com/gofiber/fiber/v3"
+)
+
+const (
+	defaultInternalListLimit = 1000
+	maxInternalListLimit     = 1024
 )
 
 func RegisterInternalIndexRoutes(router fiber.Router, om *core.ObjectManager) {
@@ -83,18 +90,76 @@ func handleInternalListFiber(om *core.ObjectManager) fiber.Handler {
 		if err != nil {
 			return apiutil.HandleError(c, err)
 		}
+		sort.Strings(ids)
+		ids, err = paginateInternalListIDsFiber(c, ids)
+		if err != nil {
+			return c.Status(fiber.StatusBadRequest).SendString(err.Error())
+		}
 
-		records := make([]internalapi.InternalRecord, 0, len(ids))
-		for _, id := range ids {
-			obj, err := om.GetObject(c.Context(), id, "read")
-			if err != nil {
-				continue // Skip if access denied or deleted
+		objs, err := om.GetBulkObjects(c.Context(), ids)
+		if err != nil {
+			return apiutil.HandleError(c, err)
+		}
+		records := make([]internalapi.InternalRecord, 0, len(objs))
+		for _, obj := range objs {
+			if !methodAllowedForAuthorizations(c.Context(), "read", obj.Authorizations) {
+				continue
 			}
-			records = append(records, core.InternalObjectToInternalRecord(*obj))
+			records = append(records, core.InternalObjectToInternalRecord(obj))
 		}
 
 		return c.JSON(internalapi.ListRecordsResponse{Records: &records})
 	}
+}
+
+func paginateInternalListIDsFiber(c fiber.Ctx, ids []string) ([]string, error) {
+	limit := defaultInternalListLimit
+	rawLimit := strings.TrimSpace(c.Query("limit"))
+	if rawLimit != "" {
+		parsed, err := strconv.Atoi(rawLimit)
+		if err != nil {
+			return nil, fmt.Errorf("limit must be an integer")
+		}
+		if parsed < 0 {
+			return nil, fmt.Errorf("limit must be >= 0")
+		}
+		limit = parsed
+	}
+	if limit > maxInternalListLimit {
+		limit = maxInternalListLimit
+	}
+	if limit == 0 || len(ids) == 0 {
+		return []string{}, nil
+	}
+
+	start := strings.TrimSpace(c.Query("start"))
+	offset := 0
+	if start != "" {
+		offset = sort.SearchStrings(ids, start)
+		for offset < len(ids) && ids[offset] <= start {
+			offset++
+		}
+	} else {
+		rawPage := strings.TrimSpace(c.Query("page"))
+		if rawPage != "" {
+			page, err := strconv.Atoi(rawPage)
+			if err != nil {
+				return nil, fmt.Errorf("page must be an integer")
+			}
+			if page < 0 {
+				return nil, fmt.Errorf("page must be >= 0")
+			}
+			offset = page * limit
+		}
+	}
+	if offset >= len(ids) {
+		return []string{}, nil
+	}
+	end := offset + limit
+	if end > len(ids) {
+		end = len(ids)
+	}
+	return ids[offset:end], nil
 }
 
 func handleInternalDeleteFiber(om *core.ObjectManager) fiber.Handler {
@@ -139,6 +204,10 @@ func handleInternalCreateFiber(om *core.ObjectManager) fiber.Handler {
 
 		if len(candidates) == 0 {
 			return c.Status(fiber.StatusBadRequest).SendString("Invalid request body: no records found")
+		}
+
+		if err := requireMethodForObjectBatchAuthorizationsFiber(c, "create", candidates); err != nil {
+			return err
 		}
 
 		if err := om.RegisterObjects(c.Context(), candidates); err != nil {
@@ -382,6 +451,10 @@ func handleInternalUpdateFiber(c fiber.Ctx, om *core.ObjectManager) error {
 	merged, err := core.MergeInternalObjectUpdate(*existing, req, id, time.Now().UTC())
 	if err != nil {
 		return apiutil.HandleError(c, err)
+	}
+
+	if err := requireMethodForObjectBatchAuthorizationsFiber(c, "update", []models.InternalObject{merged}); err != nil {
+		return err
 	}
 
 	if err := om.RegisterObjects(c.Context(), []models.InternalObject{merged}); err != nil {

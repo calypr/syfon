@@ -47,10 +47,6 @@ func (m *ObjectManager) GetObject(ctx context.Context, ident string, requiredMet
 		return nil, common.ErrNotFound
 	}
 
-	if byChecksum, ok := m.lookupObjectByChecksum(ctx, ident); ok {
-		return m.checkAccessAndReturn(&byChecksum[0], requiredMethod, ctx)
-	}
-
 	if obj, found, err := m.lookupObjectByID(ctx, ident); err != nil {
 		return nil, err
 	} else if found {
@@ -61,6 +57,10 @@ func (m *ObjectManager) GetObject(ctx context.Context, ident string, requiredMet
 		return nil, err
 	} else if found {
 		return m.checkAccessAndReturn(obj, requiredMethod, ctx)
+	}
+
+	if byChecksum, ok := m.lookupObjectByChecksum(ctx, ident); ok {
+		return m.checkAccessAndReturn(&byChecksum[0], requiredMethod, ctx)
 	}
 
 	return nil, common.ErrNotFound

@@ -12,6 +12,7 @@ import (
 
 	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/apigen/server/internalapi"
+	"github.com/calypr/syfon/internal/authz"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/models"
@@ -82,6 +83,99 @@ func TestHandleInternalList_ScopeFilteringByReadPrivilege(t *testing.T) {
 	}
 	if payload.Records[0].Did != "obj-allow" {
 		t.Fatalf("expected obj-allow, got %q", payload.Records[0].Did)
+	}
+}
+
+func TestHandleInternalList_PaginatesIDs(t *testing.T) {
+	now := time.Now().UTC()
+	mockDB := &testutils.MockDatabase{
+		Objects: map[string]*drs.DrsObject{
+			"obj-1": {Id: "obj-1", CreatedTime: now, UpdatedTime: &now, Checksums: []drs.Checksum{{Type: "sha256", Checksum: "h1"}}},
+			"obj-2": {Id: "obj-2", CreatedTime: now, UpdatedTime: &now, Checksums: []drs.Checksum{{Type: "sha256", Checksum: "h2"}}},
+			"obj-3": {Id: "obj-3", CreatedTime: now, UpdatedTime: &now, Checksums: []drs.Checksum{{Type: "sha256", Checksum: "h3"}}},
+		},
+	}
+	app := fiber.New()
+	om := core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
+	RegisterInternalIndexRoutes(app, om)
+
+	req := httptest.NewRequest(http.MethodGet, "/index?limit=1&start=obj-1", nil)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("test request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 200, got %d body=%s", resp.StatusCode, string(body))
+	}
+	var payload internalapi.ListRecordsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Records == nil || len(*payload.Records) != 1 {
+		t.Fatalf("expected one paged record, got %+v", payload.Records)
+	}
+	if (*payload.Records)[0].Did != "obj-2" {
+		t.Fatalf("expected obj-2 after start cursor, got %+v", (*payload.Records)[0])
+	}
+}
+
+func TestHandleInternalList_PagePaginatesIDs(t *testing.T) {
+	now := time.Now().UTC()
+	mockDB := &testutils.MockDatabase{
+		Objects: map[string]*drs.DrsObject{
+			"obj-1": {Id: "obj-1", CreatedTime: now, UpdatedTime: &now, Checksums: []drs.Checksum{{Type: "sha256", Checksum: "h1"}}},
+			"obj-2": {Id: "obj-2", CreatedTime: now, UpdatedTime: &now, Checksums: []drs.Checksum{{Type: "sha256", Checksum: "h2"}}},
+			"obj-3": {Id: "obj-3", CreatedTime: now, UpdatedTime: &now, Checksums: []drs.Checksum{{Type: "sha256", Checksum: "h3"}}},
+		},
+	}
+	app := fiber.New()
+	om := core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
+	RegisterInternalIndexRoutes(app, om)
+
+	req := httptest.NewRequest(http.MethodGet, "/index?limit=1&page=1", nil)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("test request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 200, got %d body=%s", resp.StatusCode, string(body))
+	}
+	var payload internalapi.ListRecordsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Records == nil || len(*payload.Records) != 1 {
+		t.Fatalf("expected one paged record, got %+v", payload.Records)
+	}
+	if (*payload.Records)[0].Did != "obj-2" {
+		t.Fatalf("expected obj-2 on page 1 with zero-based offset, got %+v", (*payload.Records)[0])
+	}
+}
+
+func TestPaginateInternalListIDsFiberDefaultLimit(t *testing.T) {
+	ids := make([]string, defaultInternalListLimit+5)
+	for i := range ids {
+		ids[i] = "obj"
+	}
+	app := fiber.New()
+	app.Get("/", func(c fiber.Ctx) error {
+		paged, err := paginateInternalListIDsFiber(c, ids)
+		if err != nil {
+			return err
+		}
+		if len(paged) != defaultInternalListLimit {
+			t.Fatalf("expected default limit %d, got %d", defaultInternalListLimit, len(paged))
+		}
+		return c.SendStatus(fiber.StatusOK)
+	})
+	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/", nil))
+	if err != nil {
+		t.Fatalf("test request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
 }
 
@@ -285,6 +379,38 @@ func TestHandleInternalBulkCreate_PersistsExplicitAuthz(t *testing.T) {
 
 	if got := mockDB.ObjectAuthz["obj-bulk-1"]; len(got["test"]) != 1 || got["test"][0] != "p1" {
 		t.Fatalf("expected persisted authz, got %v", got)
+	}
+}
+
+func TestHandleInternalBulkCreate_RequiresCreateAccessForEveryAuthzScope(t *testing.T) {
+	ctx := context.WithValue(context.Background(), common.AuthModeKey, "gen3")
+	ctx = context.WithValue(ctx, common.AuthHeaderPresentKey, true)
+	ctx = context.WithValue(ctx, common.UserPrivilegesKey, map[string]map[string]bool{
+		"/programs/test/projects/p1": {"create": true},
+	})
+	obj, err := core.InternalRecordToInternalObject(internalapi.InternalRecord{
+		Did:  "obj-bulk-denied",
+		Size: common.Ptr(int64(7)),
+		Auth: &internalapi.AuthPathMap{
+			"test": map[string][]string{
+				"p1": []string{"s3://bucket/path/obj-bulk-denied"},
+				"p2": []string{"s3://bucket/path/obj-bulk-denied"},
+			},
+		},
+	}, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("InternalRecordToInternalObject failed: %v", err)
+	}
+
+	resources := objectBatchAuthorizationResources([]models.InternalObject{obj})
+	if len(resources) != 2 {
+		t.Fatalf("expected two resources, got %+v", resources)
+	}
+	if methodAllowedForAuthorizations(ctx, "create", obj.Authorizations) {
+		t.Fatal("expected per-object authz to deny when one scope is missing create")
+	}
+	if authz.HasMethodAccess(ctx, "create", resources) {
+		t.Fatal("expected aggregate authz to deny when one scope is missing create")
 	}
 }
 

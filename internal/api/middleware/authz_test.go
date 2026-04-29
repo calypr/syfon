@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/tls"
@@ -15,13 +16,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/calypr/syfon/client/conf"
+	"github.com/calypr/syfon/client/logs"
+	"github.com/calypr/syfon/client/request"
 	"github.com/calypr/syfon/internal/authz"
 	"github.com/calypr/syfon/plugin"
 	"github.com/gofiber/fiber/v3"
 	"github.com/golang-jwt/jwt/v5"
-	"context"
 )
-
 
 func injectDummyPluginManager(m *AuthzMiddleware) {
 	m.pluginManager = &DummyPluginManager{}
@@ -157,7 +159,7 @@ func TestParseToken(t *testing.T) {
 	defer func() { http.DefaultTransport = oldTransport }()
 
 	issuerOrigin := server.URL
-	   t.Setenv("DRS_FENCE_URL", issuerOrigin)
+	t.Setenv("DRS_FENCE_URL", issuerOrigin)
 
 	buildToken := func(claims jwt.MapClaims) string {
 		tok := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
@@ -205,6 +207,100 @@ func TestParseToken(t *testing.T) {
 			t.Fatalf("expected parse error")
 		}
 	})
+}
+
+func TestGen3ModePopulatesUserPrivilegesFromFence(t *testing.T) {
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate rsa key: %v", err)
+	}
+
+	kid := "test-kid"
+	jwks := map[string]any{
+		"keys": []map[string]any{
+			{
+				"kty": "RSA",
+				"use": "sig",
+				"kid": kid,
+				"n":   base64.RawURLEncoding.EncodeToString(privateKey.PublicKey.N.Bytes()),
+				"e":   base64.RawURLEncoding.EncodeToString(big.NewInt(int64(privateKey.PublicKey.E)).Bytes()),
+			},
+		},
+	}
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/jwks.json":
+			if err := json.NewEncoder(w).Encode(jwks); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+			}
+		case "/user/user":
+			if got := r.Header.Get("Authorization"); !strings.HasPrefix(got, "Bearer ") {
+				t.Fatalf("expected bearer auth forwarded to user lookup, got %q", got)
+			}
+			resp := map[string]any{
+				"authz": map[string]any{
+					"/programs/test/projects/p1": []any{
+						map[string]any{"service": "indexd", "method": "read"},
+						map[string]any{"service": "drs", "method": "create"},
+					},
+				},
+			}
+			if err := json.NewEncoder(w).Encode(resp); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	oldTransport := http.DefaultTransport
+	http.DefaultTransport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
+	defer func() { http.DefaultTransport = oldTransport }()
+	t.Setenv("DRS_FENCE_URL", server.URL)
+	oldRequestor := newBearerTokenRequestor
+	newBearerTokenRequestor = func(logger *logs.Gen3Logger, cred *conf.Credential, mgr conf.ManagerInterface, baseURL string, userAgent string, _ *http.Client) request.Requester {
+		return request.NewBearerTokenRequestor(logger, cred, mgr, baseURL, userAgent, server.Client())
+	}
+	t.Cleanup(func() { newBearerTokenRequestor = oldRequestor })
+
+	token := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims{
+		"iss": server.URL,
+		"exp": float64(time.Now().Add(time.Hour).Unix()),
+	})
+	token.Header["kid"] = kid
+	tokenString, err := token.SignedString(privateKey)
+	if err != nil {
+		t.Fatalf("sign token: %v", err)
+	}
+
+	m := NewAuthzMiddleware(newTestLogger(), "gen3", "", "")
+	injectDummyAuthenticationPluginManager(m, true)
+	app := fiber.New()
+	app.Use(m.FiberMiddleware())
+	app.Get("/", func(c fiber.Ctx) error {
+		resources := authz.GetUserAuthz(c.Context())
+		if len(resources) != 1 || resources[0] != "/programs/test/projects/p1" {
+			t.Fatalf("expected populated user resources, got %+v", resources)
+		}
+		if !authz.HasMethodAccess(c.Context(), "read", []string{"/programs/test/projects/p1"}) {
+			t.Fatalf("expected read access from Fence authz")
+		}
+		if !authz.HasMethodAccess(c.Context(), "create", []string{"/programs/test/projects/p1"}) {
+			t.Fatalf("expected create access from Fence authz")
+		}
+		return c.SendStatus(http.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Authorization", "Bearer "+tokenString)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("test request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
 }
 
 func TestExtractPrivileges(t *testing.T) {
@@ -541,28 +637,28 @@ func TestAuthzMiddlewareScenarios(t *testing.T) {
 				t.Setenv(k, v)
 			}
 
-			   m := NewAuthzMiddleware(slog.Default(), tc.mode, tc.basicUser, tc.basicPass)
-			   // Always inject dummy plugin manager for malformed bearer scenario
-			   if tc.name == "gen3 malformed bearer" {
-				   injectDummyPluginManager(m)
-			   }
-			   // Always inject dummy authn plugin manager for authn plugin scenarios
-			   if tc.name == "local authn plugin allows access" {
-				   injectDummyAuthenticationPluginManager(m, true)
-			   }
-			   if tc.name == "local authn plugin denies access" {
-				   injectDummyAuthenticationPluginManager(m, false)
-			   }
-			   if tc.name == "gen3 authn plugin allows access" {
-				   injectDummyAuthenticationPluginManager(m, true)
-			   }
-						   if tc.name == "gen3 authn plugin denies access" {
-							   injectDummyAuthenticationPluginManager(m, false)
-						   }
-						   // For gen3 authn plugin denies access, ensure an Authorization header is set
-						   if tc.name == "gen3 authn plugin denies access" && tc.authHeader == "" {
-							   tc.authHeader = "Bearer dummy-deny-token"
-			   }
+			m := NewAuthzMiddleware(slog.Default(), tc.mode, tc.basicUser, tc.basicPass)
+			// Always inject dummy plugin manager for malformed bearer scenario
+			if tc.name == "gen3 malformed bearer" {
+				injectDummyPluginManager(m)
+			}
+			// Always inject dummy authn plugin manager for authn plugin scenarios
+			if tc.name == "local authn plugin allows access" {
+				injectDummyAuthenticationPluginManager(m, true)
+			}
+			if tc.name == "local authn plugin denies access" {
+				injectDummyAuthenticationPluginManager(m, false)
+			}
+			if tc.name == "gen3 authn plugin allows access" {
+				injectDummyAuthenticationPluginManager(m, true)
+			}
+			if tc.name == "gen3 authn plugin denies access" {
+				injectDummyAuthenticationPluginManager(m, false)
+			}
+			// For gen3 authn plugin denies access, ensure an Authorization header is set
+			if tc.name == "gen3 authn plugin denies access" && tc.authHeader == "" {
+				tc.authHeader = "Bearer dummy-deny-token"
+			}
 			app := fiber.New()
 			handlerCalled := false
 			app.Use(m.FiberMiddleware())

@@ -26,6 +26,11 @@ CREATE TABLE IF NOT EXISTS drs_object_checksum (
   FOREIGN KEY(object_id) REFERENCES drs_object(id) ON DELETE CASCADE
 );
 
+CREATE INDEX IF NOT EXISTS idx_drs_object_access_method_object_id ON drs_object_access_method(object_id);
+CREATE INDEX IF NOT EXISTS idx_drs_object_access_method_scope ON drs_object_access_method(org, project);
+CREATE INDEX IF NOT EXISTS idx_drs_object_checksum_object_id ON drs_object_checksum(object_id);
+CREATE INDEX IF NOT EXISTS idx_drs_object_checksum_checksum ON drs_object_checksum(checksum);
+
 CREATE TABLE IF NOT EXISTS s3_credential (
   bucket TEXT PRIMARY KEY,
   provider TEXT NOT NULL DEFAULT 's3',

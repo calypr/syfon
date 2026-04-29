@@ -9,6 +9,7 @@ import (
 )
 
 func TestApplyCredentialEncryptionConfig(t *testing.T) {
+	t.Setenv(crypto.CredentialMasterKeyEnv, "")
 	t.Setenv(crypto.CredentialLocalKeyFileEnv, "")
 	t.Setenv(crypto.DatabaseSQLiteFileEnv, "")
 
@@ -31,7 +32,24 @@ func TestApplyCredentialEncryptionConfig(t *testing.T) {
 	}
 }
 
+func TestApplyCredentialEncryptionConfigSetsMasterKey(t *testing.T) {
+	t.Setenv(crypto.CredentialMasterKeyEnv, "")
+
+	cfg := &config.Config{
+		CredentialEncryption: config.CredentialEncryptionConfig{
+			MasterKey: "ee605db033f6992534def23f9594ffaa58142f8bd9b7ee8ae3de199aed435d97",
+		},
+	}
+
+	applyCredentialEncryptionConfig(cfg)
+
+	if got := os.Getenv(crypto.CredentialMasterKeyEnv); got != "ee605db033f6992534def23f9594ffaa58142f8bd9b7ee8ae3de199aed435d97" {
+		t.Fatalf("expected master key env to be set from config, got %q", got)
+	}
+}
+
 func TestApplyCredentialEncryptionConfigDoesNotOverrideEnv(t *testing.T) {
+	t.Setenv(crypto.CredentialMasterKeyEnv, "existing-master-key")
 	t.Setenv(crypto.CredentialLocalKeyFileEnv, "/existing/kek")
 	t.Setenv(crypto.DatabaseSQLiteFileEnv, "/existing/drs.db")
 
@@ -41,11 +59,15 @@ func TestApplyCredentialEncryptionConfigDoesNotOverrideEnv(t *testing.T) {
 		},
 		CredentialEncryption: config.CredentialEncryptionConfig{
 			LocalKeyFile: ".syfon-credential-kek",
+			MasterKey:    "ee605db033f6992534def23f9594ffaa58142f8bd9b7ee8ae3de199aed435d97",
 		},
 	}
 
 	applyCredentialEncryptionConfig(cfg)
 
+	if got := os.Getenv(crypto.CredentialMasterKeyEnv); got != "existing-master-key" {
+		t.Fatalf("expected existing master key env to win, got %q", got)
+	}
 	if got := os.Getenv(crypto.CredentialLocalKeyFileEnv); got != "/existing/kek" {
 		t.Fatalf("expected existing local key file env to win, got %q", got)
 	}
