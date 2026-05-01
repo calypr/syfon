@@ -63,8 +63,6 @@ type UsageStore interface {
 	RecordFileDownload(ctx context.Context, objectID string) error
 	RecordTransferAttributionEvents(ctx context.Context, events []models.TransferAttributionEvent) error
 	RecordProviderTransferEvents(ctx context.Context, events []models.ProviderTransferEvent) error
-	RecordProviderTransferSyncRuns(ctx context.Context, runs []models.ProviderTransferSyncRun) error
-	ListProviderTransferSyncRuns(ctx context.Context, filter models.TransferAttributionFilter, limit int) ([]models.ProviderTransferSyncRun, error)
 	GetTransferAttributionSummary(ctx context.Context, filter models.TransferAttributionFilter) (models.TransferAttributionSummary, error)
 	GetTransferAttributionBreakdown(ctx context.Context, filter models.TransferAttributionFilter, groupBy string) ([]models.TransferAttributionBreakdown, error)
 	GetFileUsage(ctx context.Context, objectID string) (*models.FileUsage, error)
@@ -84,8 +82,6 @@ type MetricsStore interface {
 	GetObject(ctx context.Context, id string) (*models.InternalObject, error)
 	RecordTransferAttributionEvents(ctx context.Context, events []models.TransferAttributionEvent) error
 	RecordProviderTransferEvents(ctx context.Context, events []models.ProviderTransferEvent) error
-	RecordProviderTransferSyncRuns(ctx context.Context, runs []models.ProviderTransferSyncRun) error
-	ListProviderTransferSyncRuns(ctx context.Context, filter models.TransferAttributionFilter, limit int) ([]models.ProviderTransferSyncRun, error)
 	ListS3Credentials(ctx context.Context) ([]models.S3Credential, error)
 	GetTransferAttributionSummary(ctx context.Context, filter models.TransferAttributionFilter) (models.TransferAttributionSummary, error)
 	GetTransferAttributionBreakdown(ctx context.Context, filter models.TransferAttributionFilter, groupBy string) ([]models.TransferAttributionBreakdown, error)

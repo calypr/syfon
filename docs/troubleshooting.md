@@ -149,7 +149,7 @@ echo "cmd/**/__debug_bin*" >> .gitignore
 
 ## Documentation
 
-### `make docs` shows outdated content
+### `make docs-serve` shows outdated content
 
 MkDocs serves from source files directly in watch mode. If content appears stale, hard-refresh your browser (`Cmd+Shift+R` / `Ctrl+Shift+R`).
 

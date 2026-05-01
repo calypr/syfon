@@ -14,9 +14,13 @@ import (
 type LocalAuthPlugin struct {
 	BasicUser string
 	BasicPass string
+	Users     *localAuthzStore
 }
 
 func (p *LocalAuthPlugin) Authenticate(ctx context.Context, in *plugin.AuthenticationInput) (*plugin.AuthenticationOutput, error) {
+	if p.Users != nil {
+		return p.Users.authenticate(in.AuthHeader)
+	}
 	if p.BasicUser != "" || p.BasicPass != "" {
 		err := validateBasicAuth(in.AuthHeader, p.BasicUser, p.BasicPass)
 		if err != nil {

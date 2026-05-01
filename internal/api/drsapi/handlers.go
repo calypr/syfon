@@ -23,7 +23,10 @@ func RegisterDRSRoutes(router fiber.Router, om *core.ObjectManager) {
 	router.Post("/objects/register", handleRegisterObjectsFiber(om))
 	router.Post("/objects/access", handleGetBulkAccessURLFiber(om))
 	router.Post("/objects/delete", handleBulkDeleteObjectsFiber(om))
+	router.Put("/objects/delete", handleBulkDeleteObjectsFiber(om))
+	router.Put("/objects/checksums", handleUnsupportedChecksumAdditionFiber())
 	router.Post("/objects/access-methods", handleUpdateAccessMethodsFiber(om))
+	router.Put("/objects/access-methods", handleUpdateAccessMethodsFiber(om))
 	router.Get("/objects/checksum/:checksum", handleGetObjectsByChecksumFiber(om))
 	router.Post("/objects", handleGetBulkObjectsFiber(om))
 	router.Get("/service-info", handleGetServiceInfoFiber(om))
@@ -34,13 +37,22 @@ func RegisterDRSRoutes(router fiber.Router, om *core.ObjectManager) {
 	router.Post("/objects/:object_id", handleGetObjectFiber(om))
 	router.Delete("/objects/:object_id", handleDeleteObjectFiber(om))
 	router.Post("/objects/:object_id/delete", handleDeleteObjectFiber(om))
+	router.Put("/objects/:object_id/delete", handleDeleteObjectFiber(om))
+	router.Put("/objects/:object_id/checksums", handleUnsupportedChecksumAdditionFiber())
 	router.Get("/objects/:object_id/access/:access_id", handleGetAccessURLFiber(om))
 	router.Post("/objects/:object_id/access/:access_id", handleGetAccessURLFiber(om))
 	router.Post("/objects/:object_id/access-methods", handleUpdateAccessMethodsFiber(om))
+	router.Put("/objects/:object_id/access-methods", handleUpdateAccessMethodsFiber(om))
 
 	// Options
 	router.Options("/objects", handleOptionsBulkObjectFiber(om))
 	router.Options("/objects/:object_id", handleOptionsBulkObjectFiber(om))
+}
+
+func handleUnsupportedChecksumAdditionFiber() fiber.Handler {
+	return func(c fiber.Ctx) error {
+		return c.Status(fiber.StatusNotFound).JSON(drs.Error{Msg: common.Ptr("Checksum addition is not supported")})
+	}
 }
 
 func handleGetObjectFiber(om *core.ObjectManager) fiber.Handler {
@@ -74,6 +86,7 @@ func handleGetAccessURLFiber(om *core.ObjectManager) fiber.Handler {
 			return apiutil.HandleError(c, err)
 		}
 		attribution.RecordAccessIssued(c.Context(), om, obj, attribution.AccessDetails{
+			Direction:  models.ProviderTransferDirectionDownload,
 			AccessID:   accessID,
 			StorageURL: targetURL,
 		})
@@ -247,6 +260,7 @@ func handleGetBulkAccessURLFiber(om *core.ObjectManager) fiber.Handler {
 					continue
 				}
 				attribution.RecordAccessIssued(c.Context(), om, obj, attribution.AccessDetails{
+					Direction:  models.ProviderTransferDirectionDownload,
 					AccessID:   accessID,
 					StorageURL: targetURL,
 				})

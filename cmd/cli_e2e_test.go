@@ -51,21 +51,42 @@ func TestSyfonMetricsTransfersCLI(t *testing.T) {
 	now := time.Now().UTC()
 	if err := server.DB.RecordTransferAttributionEvents(context.Background(), []models.TransferAttributionEvent{
 		{
-			EventID:       "cli-grant-1",
-			AccessGrantID: "cli-grant-1",
-			EventType:     models.TransferEventAccessIssued,
-			EventTime:     now.Add(-time.Minute),
-			ObjectID:      "did-cli-1",
-			SHA256:        "sha-cli-1",
-			ObjectSize:    123,
-			Organization:  "syfon",
-			Project:       "e2e",
-			AccessID:      "s3",
-			Provider:      "file",
-			Bucket:        "syfon-bucket",
-			StorageURL:    "file://syfon-bucket/sha-cli-1",
-			ActorEmail:    "user@example.com",
-			ActorSubject:  "user@example.com",
+			EventID:        "cli-grant-1",
+			AccessGrantID:  "cli-grant-1",
+			EventType:      models.TransferEventAccessIssued,
+			Direction:      models.ProviderTransferDirectionDownload,
+			EventTime:      now.Add(-time.Minute),
+			ObjectID:       "did-cli-1",
+			SHA256:         "sha-cli-1",
+			ObjectSize:     123,
+			Organization:   "syfon",
+			Project:        "e2e",
+			AccessID:       "s3",
+			Provider:       "file",
+			Bucket:         "syfon-bucket",
+			StorageURL:     "file://syfon-bucket/sha-cli-1",
+			BytesRequested: 123,
+			ActorEmail:     "user@example.com",
+			ActorSubject:   "user@example.com",
+		},
+		{
+			EventID:        "cli-grant-2",
+			AccessGrantID:  "cli-grant-2",
+			EventType:      models.TransferEventAccessIssued,
+			Direction:      models.ProviderTransferDirectionUpload,
+			EventTime:      now.Add(-30 * time.Second),
+			ObjectID:       "did-cli-2",
+			SHA256:         "sha-cli-2",
+			ObjectSize:     50,
+			Organization:   "syfon",
+			Project:        "e2e",
+			AccessID:       "s3",
+			Provider:       "file",
+			Bucket:         "syfon-bucket",
+			StorageURL:     "file://syfon-bucket/sha-cli-2",
+			BytesRequested: 50,
+			ActorEmail:     "user@example.com",
+			ActorSubject:   "user@example.com",
 		},
 	}); err != nil {
 		t.Fatalf("record access grant: %v", err)
@@ -93,51 +114,8 @@ func TestSyfonMetricsTransfersCLI(t *testing.T) {
 	}
 	syncFrom := now.Add(-2 * time.Minute).Format(time.RFC3339)
 	syncTo := now.Add(2 * time.Minute).Format(time.RFC3339)
-	out, err := executeRootCommand(
-		t,
-		"--server", server.URL,
-		"metrics", "transfers", "sync",
-		"--organization", "syfon",
-		"--project", "e2e",
-		"--provider", "file",
-		"--bucket", "syfon-bucket",
-		"--from", syncFrom,
-		"--to", syncTo,
-		"--status", models.ProviderTransferSyncCompleted,
-		"--imported-events", "1",
-		"--matched-events", "1",
-	)
-	if err != nil {
-		t.Fatalf("metrics transfers sync command failed: %v output=%s", err, out)
-	}
-	var syncRuns []models.ProviderTransferSyncRun
-	if err := json.Unmarshal([]byte(out), &syncRuns); err != nil {
-		t.Fatalf("decode sync output %q: %v", out, err)
-	}
-	if len(syncRuns) != 1 || syncRuns[0].Status != models.ProviderTransferSyncCompleted {
-		t.Fatalf("unexpected sync output: %+v", syncRuns)
-	}
-	out, err = executeRootCommand(
-		t,
-		"--server", server.URL,
-		"metrics", "transfers", "sync-status",
-		"--provider", "file",
-		"--bucket", "syfon-bucket",
-		"--from", syncFrom,
-		"--to", syncTo,
-	)
-	if err != nil {
-		t.Fatalf("metrics transfers sync-status command failed: %v output=%s", err, out)
-	}
-	var listedSyncRuns []models.ProviderTransferSyncRun
-	if err := json.Unmarshal([]byte(out), &listedSyncRuns); err != nil {
-		t.Fatalf("decode sync-status output %q: %v", out, err)
-	}
-	if len(listedSyncRuns) != 1 || listedSyncRuns[0].Bucket != "syfon-bucket" {
-		t.Fatalf("unexpected sync-status output: %+v", listedSyncRuns)
-	}
 
-	out, err = executeRootCommand(t, "--server", server.URL, "metrics", "transfers", "summary", "--organization", "syfon", "--project", "e2e", "--user", "user@example.com", "--provider", "file", "--bucket", "syfon-bucket", "--from", syncFrom, "--to", syncTo)
+	out, err := executeRootCommand(t, "--server", server.URL, "metrics", "transfers", "summary", "--organization", "syfon", "--project", "e2e", "--user", "user@example.com", "--provider", "file", "--bucket", "syfon-bucket", "--from", syncFrom, "--to", syncTo)
 	if err != nil {
 		t.Fatalf("metrics transfers summary command failed: %v output=%s", err, out)
 	}
@@ -145,11 +123,11 @@ func TestSyfonMetricsTransfersCLI(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &summary); err != nil {
 		t.Fatalf("decode summary output %q: %v", out, err)
 	}
-	if summary.EventCount != 1 || summary.BytesDownloaded != 123 {
+	if summary.EventCount != 2 || summary.BytesDownloaded != 123 || summary.BytesUploaded != 50 {
 		t.Fatalf("unexpected summary output: %+v", summary)
 	}
 	if summary.Freshness == nil || summary.Freshness.IsStale {
-		t.Fatalf("expected summary output to include fresh sync metadata, got %+v", summary.Freshness)
+		t.Fatalf("expected summary output to include freshness metadata, got %+v", summary.Freshness)
 	}
 
 	out, err = executeRootCommand(t, "--server", server.URL, "metrics", "transfers", "breakdown", "--organization", "syfon", "--project", "e2e", "--group-by", "user", "--provider", "file", "--bucket", "syfon-bucket", "--from", syncFrom, "--to", syncTo)
@@ -168,7 +146,29 @@ func TestSyfonMetricsTransfersCLI(t *testing.T) {
 		t.Fatalf("unexpected breakdown output: %+v", breakdown)
 	}
 	if breakdown.Freshness == nil || breakdown.Freshness.IsStale {
-		t.Fatalf("expected breakdown output to include fresh sync metadata, got %+v", breakdown.Freshness)
+		t.Fatalf("expected breakdown output to include freshness metadata, got %+v", breakdown.Freshness)
+	}
+
+	out, err = executeRootCommand(t, "--server", server.URL, "metrics", "transfers", "billing", "--organization", "syfon", "--project", "e2e", "--user", "user@example.com", "--from", syncFrom, "--to", syncTo)
+	if err != nil {
+		t.Fatalf("metrics transfers billing command failed: %v output=%s", err, out)
+	}
+	var billing struct {
+		Summary          models.TransferAttributionSummary     `json:"summary"`
+		StorageLocations []models.TransferAttributionBreakdown `json:"storage_locations"`
+		Files            []models.TransferAttributionBreakdown `json:"files"`
+	}
+	if err := json.Unmarshal([]byte(out), &billing); err != nil {
+		t.Fatalf("decode billing output %q: %v", out, err)
+	}
+	if billing.Summary.BytesDownloaded != 123 || billing.Summary.BytesUploaded != 50 {
+		t.Fatalf("unexpected billing summary: %+v", billing.Summary)
+	}
+	if len(billing.StorageLocations) != 1 || billing.StorageLocations[0].Provider != "file" || billing.StorageLocations[0].Bucket != "syfon-bucket" {
+		t.Fatalf("expected storage-location billing row, got %+v", billing.StorageLocations)
+	}
+	if len(billing.Files) != 2 {
+		t.Fatalf("expected file-level billing rows, got %+v", billing.Files)
 	}
 }
 
@@ -444,8 +444,8 @@ func TestSyfonUploadDownloadAddURLAndSHA256(t *testing.T) {
 	if accessSummary.BytesDownloaded <= 0 {
 		t.Fatalf("expected provider bytes to cover downloaded payloads, got %+v", accessSummary)
 	}
-	if accessSummary.Freshness == nil || !accessSummary.Freshness.IsStale {
-		t.Fatalf("expected unsynced provider metrics to include stale freshness metadata, got %+v", accessSummary.Freshness)
+	if accessSummary.Freshness == nil || accessSummary.Freshness.IsStale {
+		t.Fatalf("expected signed-url billing metrics to include non-stale freshness metadata, got %+v", accessSummary.Freshness)
 	}
 
 	out, err = executeRootCommand(

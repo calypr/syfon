@@ -12,6 +12,8 @@ import (
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -418,6 +420,102 @@ func TestGen3MockAuthRequireHeader(t *testing.T) {
 	}
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+}
+
+func TestLocalAuthzCSVInjectsMethodAwarePrivileges(t *testing.T) {
+	csvPath := filepath.Join(t.TempDir(), "local-authz.csv")
+	content := strings.Join([]string{
+		"username,password,organization,project,methods",
+		"alice,alice-pass,cbds,end_to_end_test,read|write",
+		"bob,bob-pass,cbds,end_to_end_test,read",
+	}, "\n")
+	if err := os.WriteFile(csvPath, []byte(content), 0o600); err != nil {
+		t.Fatalf("write csv: %v", err)
+	}
+	t.Setenv("DRS_LOCAL_AUTHZ_CSV", csvPath)
+
+	m := NewAuthzMiddleware(slog.Default(), "local", "admin", "admin-pass")
+	app := fiber.New()
+	app.Use(m.FiberMiddleware())
+	app.Get("/", func(c fiber.Ctx) error {
+		if authz.IsGen3Mode(c.Context()) {
+			t.Fatalf("did not expect gen3 mode")
+		}
+		if !authz.IsAuthzEnforced(c.Context()) {
+			t.Fatalf("expected local authz enforcement")
+		}
+		resource := []string{"/programs/cbds/projects/end_to_end_test"}
+		if !authz.HasMethodAccess(c.Context(), "read", resource) {
+			t.Fatalf("expected read access")
+		}
+		if !authz.HasMethodAccess(c.Context(), "file_upload", resource) {
+			t.Fatalf("expected write alias to grant file_upload access")
+		}
+		if authz.HasMethodAccess(c.Context(), "read", []string{"/programs/other/projects/nope"}) {
+			t.Fatalf("did not expect access to another project")
+		}
+		return c.SendStatus(http.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.SetBasicAuth("alice", "alice-pass")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("test request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+}
+
+func TestLocalAuthzCSVReplacesSingleAdminCredentials(t *testing.T) {
+	csvPath := filepath.Join(t.TempDir(), "local-authz.csv")
+	if err := os.WriteFile(csvPath, []byte("username,password,resource,methods\nalice,alice-pass,/data_file,read\n"), 0o600); err != nil {
+		t.Fatalf("write csv: %v", err)
+	}
+	t.Setenv("DRS_LOCAL_AUTHZ_CSV", csvPath)
+
+	m := NewAuthzMiddleware(slog.Default(), "local", "admin", "admin-pass")
+	app := fiber.New()
+	app.Use(m.FiberMiddleware())
+	app.Get("/", func(c fiber.Ctx) error {
+		return c.SendStatus(http.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.SetBasicAuth("admin", "admin-pass")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("test request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected csv users to replace admin basic credentials, got %d", resp.StatusCode)
+	}
+}
+
+func TestLocalAuthzCSVDeniesAuthenticatedSubjectMissingFromCSV(t *testing.T) {
+	csvPath := filepath.Join(t.TempDir(), "local-authz.csv")
+	if err := os.WriteFile(csvPath, []byte("username,password,resource,methods\nalice,alice-pass,/data_file,read\n"), 0o600); err != nil {
+		t.Fatalf("write csv: %v", err)
+	}
+	t.Setenv("DRS_LOCAL_AUTHZ_CSV", csvPath)
+
+	m := NewAuthzMiddleware(slog.Default(), "local", "", "")
+	injectDummyAuthenticationPluginManager(m, true)
+	app := fiber.New()
+	app.Use(m.FiberMiddleware())
+	app.Get("/", func(c fiber.Ctx) error {
+		return c.SendStatus(http.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("test request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected subject missing from csv to be forbidden, got %d", resp.StatusCode)
 	}
 }
 

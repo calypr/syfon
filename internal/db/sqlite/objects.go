@@ -218,8 +218,8 @@ retryLookup:
 		obj.Checksums = append(obj.Checksums, drs.Checksum{Type: t, Checksum: v})
 	}
 
-	// 5. RBAC Check (gen3 mode only)
-	if authz.IsGen3Mode(ctx) {
+	// 5. RBAC Check when method-aware authz is enabled.
+	if authz.IsAuthzEnforced(ctx) {
 		userResources := authz.GetUserAuthz(ctx)
 		if !authz.CheckAccess(sycommon.AuthzMapToList(obj.Authorizations), userResources) {
 			return nil, fmt.Errorf("%w: access to object denied", common.ErrUnauthorized)
@@ -684,8 +684,8 @@ func (db *SqliteDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []stri
 		return nil, err
 	}
 
-	// Apply gen3 RBAC filtering to mimic GetObject behavior.
-	if authz.IsGen3Mode(ctx) {
+	// Apply RBAC filtering to mimic GetObject behavior.
+	if authz.IsAuthzEnforced(ctx) {
 		userResources := authz.GetUserAuthz(ctx)
 		for id, obj := range objectsByID {
 			if !authz.CheckAccess(sycommon.AuthzMapToList(obj.Authorizations), userResources) {

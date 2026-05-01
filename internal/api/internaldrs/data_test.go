@@ -31,6 +31,22 @@ type capturingMultipartURLManager struct {
 	key string
 }
 
+func withTestAuthzContext(req *http.Request, mode string, privileges map[string]map[string]bool) *http.Request {
+	ctx := req.Context()
+	switch mode {
+	case "gen3":
+		ctx = context.WithValue(ctx, common.AuthModeKey, "gen3")
+		ctx = context.WithValue(ctx, common.AuthHeaderPresentKey, true)
+	case "local-authz":
+		ctx = context.WithValue(ctx, common.AuthModeKey, "local")
+		ctx = context.WithValue(ctx, common.AuthzEnforcedKey, true)
+	default:
+		panic("unknown authz test mode: " + mode)
+	}
+	ctx = context.WithValue(ctx, common.UserPrivilegesKey, privileges)
+	return req.WithContext(ctx)
+}
+
 func (m *capturingMultipartURLManager) SignURL(ctx context.Context, accessId string, url string, opts urlmanager.SignOptions) (string, error) {
 	return url, nil
 }
@@ -650,6 +666,55 @@ func TestHandleInternalDownload_Gen3Auth(t *testing.T) {
 	handleInternalDownload(rr200, req200, om)
 	if rr200.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rr200.Code, rr200.Body.String())
+	}
+}
+
+func TestHandleInternalDownload_AuthzParity(t *testing.T) {
+	for _, mode := range []string{"gen3", "local-authz"} {
+		t.Run(mode, func(t *testing.T) {
+			mockDB := &testutils.MockDatabase{
+				Objects: map[string]*drs.DrsObject{
+					"secure-id": {
+						Id: "secure-id",
+						AccessMethods: &[]drs.AccessMethod{
+							{
+								Type: drs.AccessMethodTypeS3,
+								AccessUrl: &struct {
+									Headers *[]string `json:"headers,omitempty"`
+									Url     string    `json:"url"`
+								}{Url: "s3://bucket/key"},
+							},
+						},
+					},
+				},
+				ObjectAuthz: map[string]map[string][]string{
+					"secure-id": {"p": {"q"}},
+				},
+			}
+			om := core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
+
+			req403, _ := http.NewRequest("GET", "/data/download/secure-id", nil)
+			req403 = routeutil.WithPathParams(req403, map[string]string{"file_id": "secure-id"})
+			req403 = withTestAuthzContext(req403, mode, map[string]map[string]bool{
+				"/programs/p/projects/q": {"create": true},
+			})
+			rr403 := httptest.NewRecorder()
+			handleInternalDownload(rr403, req403, om)
+			if rr403.Code != http.StatusForbidden {
+				t.Fatalf("expected 403, got %d body=%s", rr403.Code, rr403.Body.String())
+			}
+
+			req200, _ := http.NewRequest("GET", "/data/download/secure-id", nil)
+			req200 = routeutil.WithPathParams(req200, map[string]string{"file_id": "secure-id"})
+			req200 = withTestAuthzContext(req200, mode, map[string]map[string]bool{
+				"/programs/p/projects/q": {"read": true},
+			})
+			rr200 := httptest.NewRecorder()
+			handleInternalDownload(rr200, req200, om)
+			if rr200.Code != http.StatusOK {
+				t.Fatalf("expected 200, got %d body=%s", rr200.Code, rr200.Body.String())
+			}
+		})
 	}
 }
 

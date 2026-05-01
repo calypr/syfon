@@ -13,6 +13,14 @@ const (
 	PassportAuthScopes = "PassportAuth.Scopes"
 )
 
+// Defines values for AccessMethodAuthorizationsSupportedTypes.
+const (
+	AccessMethodAuthorizationsSupportedTypesBasicAuth    AccessMethodAuthorizationsSupportedTypes = "BasicAuth"
+	AccessMethodAuthorizationsSupportedTypesBearerAuth   AccessMethodAuthorizationsSupportedTypes = "BearerAuth"
+	AccessMethodAuthorizationsSupportedTypesNone         AccessMethodAuthorizationsSupportedTypes = "None"
+	AccessMethodAuthorizationsSupportedTypesPassportAuth AccessMethodAuthorizationsSupportedTypes = "PassportAuth"
+)
+
 // Defines values for AccessMethodType.
 const (
 	AccessMethodTypeFile   AccessMethodType = "file"
@@ -25,13 +33,31 @@ const (
 	AccessMethodTypeS3     AccessMethodType = "s3"
 )
 
-// Defines values for DrsServiceDrsSupportedUploadMethods.
+// Defines values for AuthorizationsSupportedTypes.
 const (
-	DrsServiceDrsSupportedUploadMethodsFtp   DrsServiceDrsSupportedUploadMethods = "ftp"
-	DrsServiceDrsSupportedUploadMethodsGs    DrsServiceDrsSupportedUploadMethods = "gs"
-	DrsServiceDrsSupportedUploadMethodsHttps DrsServiceDrsSupportedUploadMethods = "https"
-	DrsServiceDrsSupportedUploadMethodsS3    DrsServiceDrsSupportedUploadMethods = "s3"
-	DrsServiceDrsSupportedUploadMethodsSftp  DrsServiceDrsSupportedUploadMethods = "sftp"
+	AuthorizationsSupportedTypesBasicAuth    AuthorizationsSupportedTypes = "BasicAuth"
+	AuthorizationsSupportedTypesBearerAuth   AuthorizationsSupportedTypes = "BearerAuth"
+	AuthorizationsSupportedTypesNone         AuthorizationsSupportedTypes = "None"
+	AuthorizationsSupportedTypesPassportAuth AuthorizationsSupportedTypes = "PassportAuth"
+)
+
+// Defines values for DrsServiceDrsControlledAccessClaimFormat.
+const (
+	Ga4ghPassportUrlClaim DrsServiceDrsControlledAccessClaimFormat = "ga4gh-passport-url-claim"
+)
+
+// Defines values for DrsServiceDrsControlledAccessDefault.
+const (
+	OpenAccessRead DrsServiceDrsControlledAccessDefault = "open-access-read"
+)
+
+// Defines values for DrsServiceDrsSupportedUploadMethodTypes.
+const (
+	DrsServiceDrsSupportedUploadMethodTypesFtp   DrsServiceDrsSupportedUploadMethodTypes = "ftp"
+	DrsServiceDrsSupportedUploadMethodTypesGs    DrsServiceDrsSupportedUploadMethodTypes = "gs"
+	DrsServiceDrsSupportedUploadMethodTypesHttps DrsServiceDrsSupportedUploadMethodTypes = "https"
+	DrsServiceDrsSupportedUploadMethodTypesS3    DrsServiceDrsSupportedUploadMethodTypes = "s3"
+	DrsServiceDrsSupportedUploadMethodTypesSftp  DrsServiceDrsSupportedUploadMethodTypes = "sftp"
 )
 
 // Defines values for DrsServiceTypeArtifact.
@@ -63,7 +89,17 @@ type AccessMethod struct {
 	} `json:"access_url,omitempty"`
 
 	// Authorizations A map of organization to project list. An empty array means org-wide access. A non-empty array grants access scoped to the listed projects.
-	Authorizations *map[string][]string `json:"authorizations,omitempty"`
+	Authorizations *struct {
+		// BearerAuthIssuers If authorizations contain `BearerAuth` this is an optional list of issuers that may authorize access to this object. The caller must provide a token from one of these issuers. If this is empty or missing it assumed the caller knows which token to send via other means. It is strongly recommended that the caller validate that it is appropriate to send the requested token to the DRS server to mitigate attacks by malicious DRS servers requesting credentials they should not have.
+		BearerAuthIssuers *[]string `json:"bearer_auth_issuers,omitempty"`
+		DrsObjectId       *string   `json:"drs_object_id,omitempty"`
+
+		// PassportAuthIssuers If authorizations contain `PassportAuth` this is a required list of visa issuers (as found in a visa's `iss` claim) that may authorize access to this object. The caller must only provide passports that contain visas from this list. It is strongly recommended that the caller validate that it is appropriate to send the requested passport/visa to the DRS server to mitigate attacks by malicious DRS servers requesting credentials they should not have.
+		PassportAuthIssuers *[]string `json:"passport_auth_issuers,omitempty"`
+
+		// SupportedTypes An Optional list of support authorization types. More than one can be supported and tried in sequence. Defaults to `None` if empty or missing.
+		SupportedTypes *[]AccessMethodAuthorizationsSupportedTypes `json:"supported_types,omitempty"`
+	} `json:"authorizations,omitempty"`
 
 	// Available Availablity of file in the cloud. This label defines if this file is immediately accessible via DRS. Any delay or requirement of thawing mechanism if the file is in offline/archival storage is classified as false, meaning it is unavailable.
 	Available *bool `json:"available,omitempty"`
@@ -77,6 +113,9 @@ type AccessMethod struct {
 	// Type Type of the access method.
 	Type AccessMethodType `json:"type"`
 }
+
+// AccessMethodAuthorizationsSupportedTypes defines model for AccessMethod.Authorizations.SupportedTypes.
+type AccessMethodAuthorizationsSupportedTypes string
 
 // AccessMethodType Type of the access method.
 type AccessMethodType string
@@ -99,8 +138,21 @@ type AccessURL struct {
 	Url string `json:"url"`
 }
 
-// Authorizations A map of organization to project list. Each key is an organization name. An empty array value means org-wide access for that organization. A non-empty array grants access scoped to the listed projects only.
-type Authorizations map[string][]string
+// Authorizations defines model for Authorizations.
+type Authorizations struct {
+	// BearerAuthIssuers If authorizations contain `BearerAuth` this is an optional list of issuers that may authorize access to this object. The caller must provide a token from one of these issuers. If this is empty or missing it assumed the caller knows which token to send via other means. It is strongly recommended that the caller validate that it is appropriate to send the requested token to the DRS server to mitigate attacks by malicious DRS servers requesting credentials they should not have.
+	BearerAuthIssuers *[]string `json:"bearer_auth_issuers,omitempty"`
+	DrsObjectId       *string   `json:"drs_object_id,omitempty"`
+
+	// PassportAuthIssuers If authorizations contain `PassportAuth` this is a required list of visa issuers (as found in a visa's `iss` claim) that may authorize access to this object. The caller must only provide passports that contain visas from this list. It is strongly recommended that the caller validate that it is appropriate to send the requested passport/visa to the DRS server to mitigate attacks by malicious DRS servers requesting credentials they should not have.
+	PassportAuthIssuers *[]string `json:"passport_auth_issuers,omitempty"`
+
+	// SupportedTypes An Optional list of support authorization types. More than one can be supported and tried in sequence. Defaults to `None` if empty or missing.
+	SupportedTypes *[]AuthorizationsSupportedTypes `json:"supported_types,omitempty"`
+}
+
+// AuthorizationsSupportedTypes defines model for Authorizations.SupportedTypes.
+type AuthorizationsSupportedTypes string
 
 // BulkAccessMethodUpdateRequest defines model for BulkAccessMethodUpdateRequest.
 type BulkAccessMethodUpdateRequest struct {
@@ -129,12 +181,30 @@ type BulkAccessURL struct {
 	Url string `json:"url"`
 }
 
+// BulkChecksumAdditionRequest defines model for BulkChecksumAdditionRequest.
+type BulkChecksumAdditionRequest struct {
+	// Additions Array of checksum additions
+	Additions []struct {
+		// Checksums New checksums for this object
+		Checksums []Checksum `json:"checksums"`
+
+		// ObjectId DRS object ID to add checksum for
+		ObjectId string `json:"object_id"`
+	} `json:"additions"`
+
+	// Passports Optional GA4GH Passport JWTs for authorization
+	Passports *[]string `json:"passports,omitempty"`
+}
+
 // BulkDeleteRequest Request body for bulk delete operations
 type BulkDeleteRequest struct {
 	// BulkObjectIds Array of DRS object IDs to delete
 	BulkObjectIds []string `json:"bulk_object_ids"`
 
-	// DeleteStorageData If true, delete both DRS object metadata and underlying storage data (follows server's deleteStorageDataSupported capability). If false (default), only delete DRS object metadata while preserving underlying storage data. Clients must explicitly set this to true to enable storage data deletion, ensuring intentional choice for this potentially destructive operation.
+	// DeleteObjectMetadata If true, permanently remove the DRS object metadata record. The object ID will no longer resolve and cannot be recovered. If false (default), the server marks the object as deleted but preserves the metadata record, enabling potential recovery. Read and access endpoints return 410 Gone for objects in this state. Servers that support this mode advertise metadataRetentionSupported in service-info. Only applicable when the server advertises deleteSupported in service-info. Servers that do not support metadata retention SHOULD silently ignore this parameter and permanently delete metadata regardless of the value provided.
+	DeleteObjectMetadata *bool `json:"delete_object_metadata,omitempty"`
+
+	// DeleteStorageData If true, the server attempts to delete the underlying storage data (follows server's deleteStorageDataSupported capability). If false (default), underlying storage data is preserved. This parameter is independent of delete_object_metadata and controls only the storage layer. Clients must explicitly set this to true to enable storage data deletion, ensuring intentional choice for this potentially destructive operation. Only applicable when the server advertises deleteSupported in service-info.
 	DeleteStorageData *bool `json:"delete_storage_data,omitempty"`
 
 	// Passports the encoded JWT GA4GH Passport that contains embedded Visas.  The overall JWT is signed as are the individual Passport Visas.
@@ -153,12 +223,6 @@ type BulkObjectAccessId struct {
 	Passports *[]string `json:"passports,omitempty"`
 }
 
-// BulkObjectIdNoPassport The object that contains the DRS object IDs array
-type BulkObjectIdNoPassport struct {
-	// BulkObjectIds An array of ObjectIDs.
-	BulkObjectIds *[]string `json:"bulk_object_ids,omitempty"`
-}
-
 // Checksum defines model for Checksum.
 type Checksum struct {
 	// Checksum The hex-string encoded checksum for the data
@@ -168,6 +232,15 @@ type Checksum struct {
 	// The value (e.g. `sha-256`) SHOULD be listed as `Hash Name String` in the https://www.iana.org/assignments/named-information/named-information.xhtml#hash-alg[IANA Named Information Hash Algorithm Registry]. Other values MAY be used, as long as implementors are aware of the issues discussed in https://tools.ietf.org/html/rfc6920#section-9.4[RFC6920].
 	// GA4GH may provide more explicit guidance for use of non-IANA-registered algorithms in the future. Until then, if implementers do choose such an algorithm (e.g. because it's implemented by their storage provider), they SHOULD use an existing standard `type` value such as `md5`, `etag`, `crc32c`, `trunc512`, or `sha1`.
 	Type string `json:"type"`
+}
+
+// ChecksumAdditionRequest defines model for ChecksumAdditionRequest.
+type ChecksumAdditionRequest struct {
+	// Checksums New checksums for the DRS object
+	Checksums []Checksum `json:"checksums"`
+
+	// Passports Optional GA4GH Passport JWTs for authorization
+	Passports *[]string `json:"passports,omitempty"`
 }
 
 // ContentsObject defines model for ContentsObject.
@@ -192,7 +265,10 @@ type DRSPage struct {
 
 // DeleteRequest Request body for single object delete operations
 type DeleteRequest struct {
-	// DeleteStorageData If true, delete both DRS object metadata and underlying storage data (follows server's deleteStorageDataSupported capability). If false (default), only delete DRS object metadata while preserving underlying storage data. Clients must explicitly set this to true to enable storage data deletion, ensuring intentional choice for this potentially destructive operation.
+	// DeleteObjectMetadata If true, permanently remove the DRS object metadata record. The object ID will no longer resolve and cannot be recovered. If false (default), the server marks the object as deleted but preserves the metadata record, enabling potential recovery. Read and access endpoints return 410 Gone for objects in this state. Servers that support this mode advertise metadataRetentionSupported in service-info. Only applicable when the server advertises deleteSupported in service-info. Servers that do not support metadata retention SHOULD silently ignore this parameter and permanently delete metadata regardless of the value provided.
+	DeleteObjectMetadata *bool `json:"delete_object_metadata,omitempty"`
+
+	// DeleteStorageData If true, the server attempts to delete the underlying storage data (follows server's deleteStorageDataSupported capability). If false (default), underlying storage data is preserved. This parameter is independent of delete_object_metadata and controls only the storage layer. Clients must explicitly set this to true to enable storage data deletion, ensuring intentional choice for this potentially destructive operation. Only applicable when the server advertises deleteSupported in service-info.
 	DeleteStorageData *bool `json:"delete_storage_data,omitempty"`
 
 	// Passports the encoded JWT GA4GH Passport that contains embedded Visas.  The overall JWT is signed as are the individual Passport Visas.
@@ -225,6 +301,19 @@ type DrsObject struct {
 	// Contents If not set, this `DrsObject` is a single blob.
 	// If set, this `DrsObject` is a bundle containing the listed `ContentsObject` s (some of which may be further nested).
 	Contents *[]ContentsObject `json:"contents,omitempty"`
+
+	// ControlledAccess A list of authorization claims representing controlled-access
+	// requirements for this `DrsObject`.
+	//
+	// Claims SHOULD be represented as strings using URL claim semantics
+	// compatible with GA4GH Passport visa claim values:
+	// https://github.com/ga4gh-duri/ga4gh-duri.github.io/blob/master/researcher_ids/ga4gh_passport_v1.md#url-claims
+	//
+	// If this field is missing or empty, the `DrsObject` MUST be treated as
+	// open access for read operations.
+	//
+	// This field is required for write operations.
+	ControlledAccess *[]string `json:"controlled_access,omitempty"`
 
 	// CreatedTime Timestamp of content creation in RFC3339.
 	// (This is the creation time of the underlying content, not of the JSON object.)
@@ -286,6 +375,22 @@ type DrsObjectCandidate struct {
 	// If set, this `DrsObject` is a bundle containing the listed `ContentsObject` s (some of which may be further nested).
 	Contents *[]ContentsObject `json:"contents,omitempty"`
 
+	// ControlledAccess A list of authorization claims representing controlled-access
+	// requirements to assign to the registered `DrsObject`.
+	//
+	// Claims SHOULD be represented as strings using URL claim semantics
+	// compatible with GA4GH Passport visa claim values:
+	// https://github.com/ga4gh-duri/ga4gh-duri.github.io/blob/master/researcher_ids/ga4gh_passport_v1.md#url-claims
+	//
+	// During `/objects/register`, the server SHOULD verify that the supplied
+	// Passport or bearer token authorizes the caller to assign these claims.
+	//
+	// If this field is missing or empty, the resulting `DrsObject` MUST be
+	// treated as open access for read operations.
+	//
+	// This field is required for write operations.
+	ControlledAccess *[]string `json:"controlled_access,omitempty"`
+
 	// Description A human readable description of the `DrsObject`.
 	Description *string `json:"description,omitempty"`
 
@@ -311,14 +416,32 @@ type DrsService struct {
 		// AccessMethodUpdateSupported Indicates whether this DRS server supports updating access methods for existing objects. If true, clients can update access methods using `/objects/{object_id}/access-methods` and `/objects/access-methods` endpoints. If false or missing, the server does not support access method updates.
 		AccessMethodUpdateSupported *bool `json:"accessMethodUpdateSupported,omitempty"`
 
+		// ChecksumAdditionSupported Indicates whether this DRS server supports adding new checksums for for existing objects. If true, clients can update access methods using `/objects/{object_id}/checksums` and `/objects/checksums` endpoints. If false or missing, the server does not support checksum addition.
+		ChecksumAdditionSupported *bool `json:"checksumAdditionSupported,omitempty"`
+
+		// ControlledAccessClaimFormat Describes the expected format for entries in the `controlled_access` array. The value `ga4gh-passport-url-claim` indicates that claims are represented as strings using URL claim semantics compatible with GA4GH Passport visa claim values.
+		ControlledAccessClaimFormat *DrsServiceDrsControlledAccessClaimFormat `json:"controlledAccessClaimFormat,omitempty"`
+
+		// ControlledAccessDefault Describes how the service interprets a missing or empty `controlled_access` array. The value `open-access-read` means that if `controlled_access` is missing or empty, the `DrsObject` is treated as open access for read operations.
+		ControlledAccessDefault *DrsServiceDrsControlledAccessDefault `json:"controlledAccessDefault,omitempty"`
+
+		// ControlledAccessSupported Indicates whether this DRS server supports the `controlled_access` field on `DrsObject` and `DrsObjectCandidate`. If true, clients may include controlled-access claims when registering objects and may expect returned `DrsObject` resources to include controlled-access claims when applicable. If false or missing, the server does not advertise support for controlled-access claims.
+		ControlledAccessSupported *bool `json:"controlledAccessSupported,omitempty"`
+
 		// DeleteStorageDataSupported Indicates whether this DRS server supports attempting to delete underlying storage data when clients request it. If true, the server will attempt to delete both metadata and storage files when `delete_storage_data: true` is specified in delete requests. If false or missing, the server only supports metadata deletion regardless of client request, preserving underlying storage data. Only present when deleteSupported is true. This is a capability flag indicating what the server can attempt, not a default behavior setting. Note: Storage deletion attempts may fail due to permissions, network issues, or storage service errors.
 		DeleteStorageDataSupported *bool `json:"deleteStorageDataSupported,omitempty"`
 
-		// DeleteSupported Indicates whether this DRS server supports delete operations via the delete endpoints. If true, clients can delete DRS objects using POST requests to `/objects/{object_id}/delete` and `/objects/delete`. If false or missing, the server does not support delete operations and will return 404 for delete endpoint requests. Like upload functionality, delete support is entirely optional and servers remain DRS compliant without it.
+		// DeleteSupported Indicates whether this DRS server supports delete operations via the delete endpoints. If true, clients can delete DRS objects using PUT requests to `/objects/{object_id}/delete` and `/objects/delete`. If false or missing, the server does not support delete operations and will return 404 for delete endpoint requests. Like upload functionality, delete support is entirely optional and servers remain DRS compliant without it.
 		DeleteSupported *bool `json:"deleteSupported,omitempty"`
+
+		// FetchByChecksumSupported Indicates whether this DRS server supports fetching objects by checksum. If true, clients can fetch DRS objects using `/objects/checksum/{checksum}`, noting that it is possible for  multiple objects to have the same checksum. If false or missing, the server does not support fetching by cejcsum.
+		FetchByChecksumSupported *bool `json:"fetchByChecksumSupported,omitempty"`
 
 		// MaxBulkAccessMethodUpdateLength Maximum number of objects that can be updated in a single bulk access method update request. Only present when accessMethodUpdateSupported is true. If not specified, defaults to maxBulkRequestLength.
 		MaxBulkAccessMethodUpdateLength *int `json:"maxBulkAccessMethodUpdateLength,omitempty"`
+
+		// MaxBulkChecksumAdditionLength Maximum number of objects that can be updated in a single bulk checksum addition request. Only present when checksumAdditionSupported is true. If not specified, defaults to maxBulkRequestLength.
+		MaxBulkChecksumAdditionLength *int `json:"maxBulkChecksumAdditionLength,omitempty"`
 
 		// MaxBulkDeleteLength Maximum number of objects that can be deleted in a single bulk delete request via `/objects/delete`. Only present when deleteSupported is true. If not specified when delete is supported, defaults to the same value as maxBulkRequestLength. Servers may enforce lower limits for delete operations compared to other bulk operations for safety reasons.
 		MaxBulkDeleteLength *int `json:"maxBulkDeleteLength,omitempty"`
@@ -335,6 +458,9 @@ type DrsService struct {
 		// MaxUploadSize Maximum file size in bytes that can be uploaded via the upload endpoints. Only present when uploadRequestSupported is true. If not specified, there is no explicit size limit.
 		MaxUploadSize *int64 `json:"maxUploadSize,omitempty"`
 
+		// MetadataRetentionSupported Indicates whether this DRS server supports preserving object metadata after deletion. If true, the server honours `delete_object_metadata: false` in delete requests by marking the object as deleted rather than permanently removing it. Read and access endpoints return 410 Gone for objects in this state. Only present when deleteSupported is true.
+		MetadataRetentionSupported *bool `json:"metadataRetentionSupported,omitempty"`
+
 		// ObjectCount The total number of objects in this DRS service.
 		ObjectCount *int `json:"objectCount,omitempty"`
 
@@ -344,9 +470,9 @@ type DrsService struct {
 		// RelatedFileStorageSupported Indicates whether this DRS server supports storing files from the same upload request under a common prefix or folder structure. If true, the server will organize related files together in storage, enabling bioinformatics workflows that expect co-located files (e.g., CRAM + CRAI, VCF + TBI). If false or missing, the server may distribute files across different storage locations or prefixes. Only present when uploadRequestSupported is true. This feature is particularly valuable for genomics tools like samtools that expect index files to be co-located with data files.
 		RelatedFileStorageSupported *bool `json:"relatedFileStorageSupported,omitempty"`
 
-		// SupportedUploadMethods List of upload methods supported by this DRS server. Only present when uploadRequestSupported is true. Clients can use this information to determine which upload methods are available before making upload requests.
+		// SupportedUploadMethodTypes List of upload methods supported by this DRS server. Only present when uploadRequestSupported is true. Clients can use this information to determine which upload methods are available before making upload requests.
 		// - **s3**: Direct S3 upload with temporary AWS credentials - **gs**: Google Cloud Storage upload with access tokens   - **https**: Presigned POST URL for HTTP uploads - **ftp**: File Transfer Protocol uploads - **sftp**: Secure File Transfer Protocol uploads - **gsiftp**: GridFTP secure file transfer - **globus**: Globus transfer service for high-performance data movement
-		SupportedUploadMethods *[]DrsServiceDrsSupportedUploadMethods `json:"supportedUploadMethods,omitempty"`
+		SupportedUploadMethodTypes *[]DrsServiceDrsSupportedUploadMethodTypes `json:"supportedUploadMethodTypes,omitempty"`
 
 		// TotalObjectSize The total size of all objects in this DRS service in bytes.  As a general best practice, file bytes are counted for each unique file and not cloud mirrors or other redundant copies.
 		TotalObjectSize *int `json:"totalObjectSize,omitempty"`
@@ -354,14 +480,14 @@ type DrsService struct {
 		// UploadRequestSupported Indicates whether this DRS server supports upload request operations via the `/upload-request` endpoint. If true, clients can request upload methods and credentials for uploading files. If false or missing, the server does not support upload request coordination.
 		UploadRequestSupported *bool `json:"uploadRequestSupported,omitempty"`
 
-		// ValidateAccessMethodUpdates Indicates whether this DRS server validates new access methods by verifying they point to the same data. If true, the server will attempt to verify checksums/content before updating access methods. If false or missing, the server trusts client-provided access methods without validation. Only present when accessMethodUpdateSupported is true.
-		ValidateAccessMethodUpdates *bool `json:"validateAccessMethodUpdates,omitempty"`
+		// ValidateAccessMethods Indicates whether this DRS server validates access methods by following the URLs to check that they resolve to the expected objects  (e.g. by checking that the file sizes and checksums match) If true, the server will attempt to verify checksums/content before accepting access methods. If false or missing, the server trusts client-provided access methods without validation. Only present when at least one of objectRegistrationSupported or accessMethodUpdateSupported are true.
+		ValidateAccessMethods *bool `json:"validateAccessMethods,omitempty"`
 
-		// ValidateUploadChecksums Indicates whether this DRS server validates uploaded file checksums against the provided metadata. If true, the server will verify that uploaded files match their declared checksums and may reject uploads with mismatches. If false or missing, the server does not perform checksum validation and relies on client-provided metadata. Only present when uploadRequestSupported or objectRegistrationSupported is true.
-		ValidateUploadChecksums *bool `json:"validateUploadChecksums,omitempty"`
+		// ValidateChecksums Indicates whether this DRS server validates file checksums against the provided metadata. If true, the server will verify that uploaded and registered files match their declared checksums and may reject objects with mismatches. If false or missing, the server does not perform checksum validation and relies on client-provided metadata. Only present when at least one of uploadRequestSupported or objectRegistrationSupported or checksumAdditionSupported are true.
+		ValidateChecksums *bool `json:"validateChecksums,omitempty"`
 
-		// ValidateUploadFileSizes Indicates whether this DRS server validates uploaded file sizes against the provided metadata. If true, the server will verify that uploaded files match their declared sizes and may reject uploads with mismatches. If false or missing, the server does not perform file size validation and relies on client-provided metadata. Only present when uploadRequestSupported or objectRegistrationSupported is true.
-		ValidateUploadFileSizes *bool `json:"validateUploadFileSizes,omitempty"`
+		// ValidateFileSizes Indicates whether this DRS server validates file sizes against the provided metadata. If true, the server will verify that uploaded files match their declared sizes and may reject uploads with mismatches. If false or missing, the server does not perform file size validation and relies on client-provided metadata. Only present when uploadRequestSupported or objectRegistrationSupported is true.
+		ValidateFileSizes *bool `json:"validateFileSizes,omitempty"`
 	} `json:"drs,omitempty"`
 
 	// MaxBulkRequestLength DEPRECATED - In 2.0 this will move to under the drs section of service info and not at the root level. The max length the bulk request endpoints can handle (>= 1) before generating a 413 error e.g. how long can the arrays bulk_object_ids and bulk_object_access_ids be for this server.
@@ -371,8 +497,14 @@ type DrsService struct {
 	} `json:"type"`
 }
 
-// DrsServiceDrsSupportedUploadMethods defines model for DrsService.Drs.SupportedUploadMethods.
-type DrsServiceDrsSupportedUploadMethods string
+// DrsServiceDrsControlledAccessClaimFormat Describes the expected format for entries in the `controlled_access` array. The value `ga4gh-passport-url-claim` indicates that claims are represented as strings using URL claim semantics compatible with GA4GH Passport visa claim values.
+type DrsServiceDrsControlledAccessClaimFormat string
+
+// DrsServiceDrsControlledAccessDefault Describes how the service interprets a missing or empty `controlled_access` array. The value `open-access-read` means that if `controlled_access` is missing or empty, the `DrsObject` is treated as open access for read operations.
+type DrsServiceDrsControlledAccessDefault string
+
+// DrsServiceDrsSupportedUploadMethodTypes defines model for DrsService.Drs.SupportedUploadMethodTypes.
+type DrsServiceDrsSupportedUploadMethodTypes string
 
 // DrsServiceTypeArtifact defines model for DrsService.Type.Artifact.
 type DrsServiceTypeArtifact string
@@ -459,7 +591,7 @@ type UploadMethod struct {
 	// Other common implementations include 'gs' for Google Cloud Storage and 'sftp' for secure FTP uploads.
 	Type UploadMethodType `json:"type"`
 
-	// UploadDetails A dictionary of upload-specific configuration details that vary by upload method type. The contents and structure depend on the specific upload method being used.
+	// UploadDetails A dictionary of storage provider specific configuration details that vary by upload method type. The contents and structure depend on the specific upload method being used.
 	UploadDetails *map[string]interface{} `json:"upload_details,omitempty"`
 }
 
@@ -497,6 +629,9 @@ type UploadRequestObject struct {
 
 	// Size Size of the file in bytes
 	Size int64 `json:"size"`
+
+	// UploadMethodTypes Optional array of requested upload method types which should match those published by  the server in the `supportedUploadMethodsTypes` field in  the `/service-info` response.  Servers SHALL try to honour requests, but the server may not be able to offer the  requested upload type for specific file types/sizes etc. The server MAY return a  400 error if it cannot honour the request, or MAY return an alternative  supported upload method.
+	UploadMethodTypes *[]string `json:"upload_method_types,omitempty"`
 }
 
 // UploadResponse defines model for UploadResponse.
@@ -568,6 +703,15 @@ type N200BulkAccessMethodUpdate struct {
 	Objects []DrsObject `json:"objects"`
 }
 
+// N200BulkChecksumAddition defines model for 200BulkChecksumAddition.
+type N200BulkChecksumAddition struct {
+	// Objects Array of updated DRS objects
+	Objects []DrsObject `json:"objects"`
+}
+
+// N200ChecksumAddition defines model for 200ChecksumAddition.
+type N200ChecksumAddition = DrsObject
+
 // N200OkAccess defines model for 200OkAccess.
 type N200OkAccess = AccessURL
 
@@ -582,7 +726,7 @@ type N200OkAccesses struct {
 	UnresolvedDrsObjects *Unresolved `json:"unresolved_drs_objects,omitempty"`
 }
 
-// N200OkAuthorizations A map of organization to project list. Each key is an organization name. An empty array value means org-wide access for that organization. A non-empty array grants access scoped to the listed projects only.
+// N200OkAuthorizations defines model for 200OkAuthorizations.
 type N200OkAuthorizations = Authorizations
 
 // N200OkBulkAuthorizations defines model for 200OkBulkAuthorizations.
@@ -627,14 +771,32 @@ type N200ServiceInfo struct {
 		// AccessMethodUpdateSupported Indicates whether this DRS server supports updating access methods for existing objects. If true, clients can update access methods using `/objects/{object_id}/access-methods` and `/objects/access-methods` endpoints. If false or missing, the server does not support access method updates.
 		AccessMethodUpdateSupported *bool `json:"accessMethodUpdateSupported,omitempty"`
 
+		// ChecksumAdditionSupported Indicates whether this DRS server supports adding new checksums for for existing objects. If true, clients can update access methods using `/objects/{object_id}/checksums` and `/objects/checksums` endpoints. If false or missing, the server does not support checksum addition.
+		ChecksumAdditionSupported *bool `json:"checksumAdditionSupported,omitempty"`
+
+		// ControlledAccessClaimFormat Describes the expected format for entries in the `controlled_access` array. The value `ga4gh-passport-url-claim` indicates that claims are represented as strings using URL claim semantics compatible with GA4GH Passport visa claim values.
+		ControlledAccessClaimFormat *N200ServiceInfoDrsControlledAccessClaimFormat `json:"controlledAccessClaimFormat,omitempty"`
+
+		// ControlledAccessDefault Describes how the service interprets a missing or empty `controlled_access` array. The value `open-access-read` means that if `controlled_access` is missing or empty, the `DrsObject` is treated as open access for read operations.
+		ControlledAccessDefault *N200ServiceInfoDrsControlledAccessDefault `json:"controlledAccessDefault,omitempty"`
+
+		// ControlledAccessSupported Indicates whether this DRS server supports the `controlled_access` field on `DrsObject` and `DrsObjectCandidate`. If true, clients may include controlled-access claims when registering objects and may expect returned `DrsObject` resources to include controlled-access claims when applicable. If false or missing, the server does not advertise support for controlled-access claims.
+		ControlledAccessSupported *bool `json:"controlledAccessSupported,omitempty"`
+
 		// DeleteStorageDataSupported Indicates whether this DRS server supports attempting to delete underlying storage data when clients request it. If true, the server will attempt to delete both metadata and storage files when `delete_storage_data: true` is specified in delete requests. If false or missing, the server only supports metadata deletion regardless of client request, preserving underlying storage data. Only present when deleteSupported is true. This is a capability flag indicating what the server can attempt, not a default behavior setting. Note: Storage deletion attempts may fail due to permissions, network issues, or storage service errors.
 		DeleteStorageDataSupported *bool `json:"deleteStorageDataSupported,omitempty"`
 
-		// DeleteSupported Indicates whether this DRS server supports delete operations via the delete endpoints. If true, clients can delete DRS objects using POST requests to `/objects/{object_id}/delete` and `/objects/delete`. If false or missing, the server does not support delete operations and will return 404 for delete endpoint requests. Like upload functionality, delete support is entirely optional and servers remain DRS compliant without it.
+		// DeleteSupported Indicates whether this DRS server supports delete operations via the delete endpoints. If true, clients can delete DRS objects using PUT requests to `/objects/{object_id}/delete` and `/objects/delete`. If false or missing, the server does not support delete operations and will return 404 for delete endpoint requests. Like upload functionality, delete support is entirely optional and servers remain DRS compliant without it.
 		DeleteSupported *bool `json:"deleteSupported,omitempty"`
+
+		// FetchByChecksumSupported Indicates whether this DRS server supports fetching objects by checksum. If true, clients can fetch DRS objects using `/objects/checksum/{checksum}`, noting that it is possible for  multiple objects to have the same checksum. If false or missing, the server does not support fetching by cejcsum.
+		FetchByChecksumSupported *bool `json:"fetchByChecksumSupported,omitempty"`
 
 		// MaxBulkAccessMethodUpdateLength Maximum number of objects that can be updated in a single bulk access method update request. Only present when accessMethodUpdateSupported is true. If not specified, defaults to maxBulkRequestLength.
 		MaxBulkAccessMethodUpdateLength *int `json:"maxBulkAccessMethodUpdateLength,omitempty"`
+
+		// MaxBulkChecksumAdditionLength Maximum number of objects that can be updated in a single bulk checksum addition request. Only present when checksumAdditionSupported is true. If not specified, defaults to maxBulkRequestLength.
+		MaxBulkChecksumAdditionLength *int `json:"maxBulkChecksumAdditionLength,omitempty"`
 
 		// MaxBulkDeleteLength Maximum number of objects that can be deleted in a single bulk delete request via `/objects/delete`. Only present when deleteSupported is true. If not specified when delete is supported, defaults to the same value as maxBulkRequestLength. Servers may enforce lower limits for delete operations compared to other bulk operations for safety reasons.
 		MaxBulkDeleteLength *int `json:"maxBulkDeleteLength,omitempty"`
@@ -651,6 +813,9 @@ type N200ServiceInfo struct {
 		// MaxUploadSize Maximum file size in bytes that can be uploaded via the upload endpoints. Only present when uploadRequestSupported is true. If not specified, there is no explicit size limit.
 		MaxUploadSize *int64 `json:"maxUploadSize,omitempty"`
 
+		// MetadataRetentionSupported Indicates whether this DRS server supports preserving object metadata after deletion. If true, the server honours `delete_object_metadata: false` in delete requests by marking the object as deleted rather than permanently removing it. Read and access endpoints return 410 Gone for objects in this state. Only present when deleteSupported is true.
+		MetadataRetentionSupported *bool `json:"metadataRetentionSupported,omitempty"`
+
 		// ObjectCount The total number of objects in this DRS service.
 		ObjectCount *int `json:"objectCount,omitempty"`
 
@@ -660,9 +825,9 @@ type N200ServiceInfo struct {
 		// RelatedFileStorageSupported Indicates whether this DRS server supports storing files from the same upload request under a common prefix or folder structure. If true, the server will organize related files together in storage, enabling bioinformatics workflows that expect co-located files (e.g., CRAM + CRAI, VCF + TBI). If false or missing, the server may distribute files across different storage locations or prefixes. Only present when uploadRequestSupported is true. This feature is particularly valuable for genomics tools like samtools that expect index files to be co-located with data files.
 		RelatedFileStorageSupported *bool `json:"relatedFileStorageSupported,omitempty"`
 
-		// SupportedUploadMethods List of upload methods supported by this DRS server. Only present when uploadRequestSupported is true. Clients can use this information to determine which upload methods are available before making upload requests.
+		// SupportedUploadMethodTypes List of upload methods supported by this DRS server. Only present when uploadRequestSupported is true. Clients can use this information to determine which upload methods are available before making upload requests.
 		// - **s3**: Direct S3 upload with temporary AWS credentials - **gs**: Google Cloud Storage upload with access tokens   - **https**: Presigned POST URL for HTTP uploads - **ftp**: File Transfer Protocol uploads - **sftp**: Secure File Transfer Protocol uploads - **gsiftp**: GridFTP secure file transfer - **globus**: Globus transfer service for high-performance data movement
-		SupportedUploadMethods *[]N200ServiceInfoDrsSupportedUploadMethods `json:"supportedUploadMethods,omitempty"`
+		SupportedUploadMethodTypes *[]N200ServiceInfoDrsSupportedUploadMethodTypes `json:"supportedUploadMethodTypes,omitempty"`
 
 		// TotalObjectSize The total size of all objects in this DRS service in bytes.  As a general best practice, file bytes are counted for each unique file and not cloud mirrors or other redundant copies.
 		TotalObjectSize *int `json:"totalObjectSize,omitempty"`
@@ -670,14 +835,14 @@ type N200ServiceInfo struct {
 		// UploadRequestSupported Indicates whether this DRS server supports upload request operations via the `/upload-request` endpoint. If true, clients can request upload methods and credentials for uploading files. If false or missing, the server does not support upload request coordination.
 		UploadRequestSupported *bool `json:"uploadRequestSupported,omitempty"`
 
-		// ValidateAccessMethodUpdates Indicates whether this DRS server validates new access methods by verifying they point to the same data. If true, the server will attempt to verify checksums/content before updating access methods. If false or missing, the server trusts client-provided access methods without validation. Only present when accessMethodUpdateSupported is true.
-		ValidateAccessMethodUpdates *bool `json:"validateAccessMethodUpdates,omitempty"`
+		// ValidateAccessMethods Indicates whether this DRS server validates access methods by following the URLs to check that they resolve to the expected objects  (e.g. by checking that the file sizes and checksums match) If true, the server will attempt to verify checksums/content before accepting access methods. If false or missing, the server trusts client-provided access methods without validation. Only present when at least one of objectRegistrationSupported or accessMethodUpdateSupported are true.
+		ValidateAccessMethods *bool `json:"validateAccessMethods,omitempty"`
 
-		// ValidateUploadChecksums Indicates whether this DRS server validates uploaded file checksums against the provided metadata. If true, the server will verify that uploaded files match their declared checksums and may reject uploads with mismatches. If false or missing, the server does not perform checksum validation and relies on client-provided metadata. Only present when uploadRequestSupported or objectRegistrationSupported is true.
-		ValidateUploadChecksums *bool `json:"validateUploadChecksums,omitempty"`
+		// ValidateChecksums Indicates whether this DRS server validates file checksums against the provided metadata. If true, the server will verify that uploaded and registered files match their declared checksums and may reject objects with mismatches. If false or missing, the server does not perform checksum validation and relies on client-provided metadata. Only present when at least one of uploadRequestSupported or objectRegistrationSupported or checksumAdditionSupported are true.
+		ValidateChecksums *bool `json:"validateChecksums,omitempty"`
 
-		// ValidateUploadFileSizes Indicates whether this DRS server validates uploaded file sizes against the provided metadata. If true, the server will verify that uploaded files match their declared sizes and may reject uploads with mismatches. If false or missing, the server does not perform file size validation and relies on client-provided metadata. Only present when uploadRequestSupported or objectRegistrationSupported is true.
-		ValidateUploadFileSizes *bool `json:"validateUploadFileSizes,omitempty"`
+		// ValidateFileSizes Indicates whether this DRS server validates file sizes against the provided metadata. If true, the server will verify that uploaded files match their declared sizes and may reject uploads with mismatches. If false or missing, the server does not perform file size validation and relies on client-provided metadata. Only present when uploadRequestSupported or objectRegistrationSupported is true.
+		ValidateFileSizes *bool `json:"validateFileSizes,omitempty"`
 	} `json:"drs,omitempty"`
 
 	// Environment Environment the service is running in. Use this to distinguish between production, development and testing/staging deployments. Suggested values are prod, test, dev, staging. However this is advised and not enforced.
@@ -756,6 +921,9 @@ type AccessMethodUpdateBody = AccessMethodUpdateRequest
 // BulkAccessMethodUpdateBody defines model for BulkAccessMethodUpdateBody.
 type BulkAccessMethodUpdateBody = BulkAccessMethodUpdateRequest
 
+// BulkChecksumAdditionBody defines model for BulkChecksumAdditionBody.
+type BulkChecksumAdditionBody = BulkChecksumAdditionRequest
+
 // BulkDeleteBody Request body for bulk delete operations
 type BulkDeleteBody = BulkDeleteRequest
 
@@ -767,6 +935,9 @@ type BulkObjectBody struct {
 	// Passports the encoded JWT GA4GH Passport that contains embedded Visas.  The overall JWT is signed as are the individual Passport Visas.
 	Passports *[]string `json:"passports,omitempty"`
 }
+
+// ChecksumAdditionBody defines model for ChecksumAdditionBody.
+type ChecksumAdditionBody = ChecksumAdditionRequest
 
 // DeleteBody Request body for single object delete operations
 type DeleteBody = DeleteRequest
@@ -851,9 +1022,6 @@ type PostAccessURLJSONBody struct {
 	Passports *[]string `json:"passports,omitempty"`
 }
 
-// OptionsBulkObjectJSONRequestBody defines body for OptionsBulkObject for application/json ContentType.
-type OptionsBulkObjectJSONRequestBody = BulkObjectIdNoPassport
-
 // GetBulkObjectsJSONRequestBody defines body for GetBulkObjects for application/json ContentType.
 type GetBulkObjectsJSONRequestBody GetBulkObjectsJSONBody
 
@@ -862,6 +1030,9 @@ type GetBulkAccessURLJSONRequestBody = BulkObjectAccessId
 
 // BulkUpdateAccessMethodsJSONRequestBody defines body for BulkUpdateAccessMethods for application/json ContentType.
 type BulkUpdateAccessMethodsJSONRequestBody = BulkAccessMethodUpdateRequest
+
+// BulkAddChecksumsJSONRequestBody defines body for BulkAddChecksums for application/json ContentType.
+type BulkAddChecksumsJSONRequestBody = BulkChecksumAdditionRequest
 
 // BulkDeleteObjectsJSONRequestBody defines body for BulkDeleteObjects for application/json ContentType.
 type BulkDeleteObjectsJSONRequestBody = BulkDeleteRequest
@@ -877,6 +1048,9 @@ type UpdateObjectAccessMethodsJSONRequestBody = AccessMethodUpdateRequest
 
 // PostAccessURLJSONRequestBody defines body for PostAccessURL for application/json ContentType.
 type PostAccessURLJSONRequestBody PostAccessURLJSONBody
+
+// AddChecksumsJSONRequestBody defines body for AddChecksums for application/json ContentType.
+type AddChecksumsJSONRequestBody = ChecksumAdditionRequest
 
 // DeleteObjectJSONRequestBody defines body for DeleteObject for application/json ContentType.
 type DeleteObjectJSONRequestBody = DeleteRequest

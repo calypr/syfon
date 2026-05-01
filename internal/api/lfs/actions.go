@@ -12,6 +12,7 @@ import (
 	"github.com/calypr/syfon/internal/api/attribution"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/core"
+	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/urlmanager"
 )
 
@@ -47,6 +48,7 @@ func prepareDownloadActions(ctx context.Context, om *core.ObjectManager, oid str
 
 	_ = om.RecordDownload(ctx, oid)
 	attribution.RecordAccessIssued(ctx, om, obj, attribution.AccessDetails{
+		Direction:  models.ProviderTransferDirectionDownload,
 		AccessID:   accessID,
 		StorageURL: src,
 	})

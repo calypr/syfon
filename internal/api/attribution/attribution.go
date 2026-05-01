@@ -17,6 +17,7 @@ import (
 
 type AccessDetails struct {
 	AccessID       string
+	Direction      string
 	StorageURL     string
 	RangeStart     *int64
 	RangeEnd       *int64
@@ -60,6 +61,12 @@ func EventFromObject(ctx context.Context, obj *models.InternalObject, eventType 
 	}
 	org, project := scopeForAccess(obj, accessID)
 	provider, bucket := providerBucket(storageURL)
+	direction := strings.ToLower(strings.TrimSpace(details.Direction))
+	switch direction {
+	case models.ProviderTransferDirectionUpload:
+	default:
+		direction = models.ProviderTransferDirectionDownload
+	}
 	sha := sha256ForObject(obj)
 	bytesRequested := details.BytesRequested
 	if bytesRequested <= 0 && details.RangeStart != nil && details.RangeEnd != nil && *details.RangeEnd >= *details.RangeStart {
@@ -71,6 +78,7 @@ func EventFromObject(ctx context.Context, obj *models.InternalObject, eventType 
 	when := time.Now().UTC()
 	ev := models.TransferAttributionEvent{
 		EventType:      eventType,
+		Direction:      direction,
 		EventTime:      when,
 		RequestID:      common.GetRequestID(ctx),
 		ObjectID:       obj.Id,
@@ -117,6 +125,7 @@ func EventID(ev models.TransferAttributionEvent) string {
 	}
 	parts := []string{
 		ev.EventType,
+		ev.Direction,
 		ev.RequestID,
 		ev.ObjectID,
 		ev.SHA256,

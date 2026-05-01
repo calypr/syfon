@@ -8,7 +8,6 @@ import (
 	"github.com/calypr/syfon/apigen/server/bucketapi"
 	sycommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/api/apiutil"
-	metricapi "github.com/calypr/syfon/internal/api/metrics"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/models"
@@ -71,13 +70,6 @@ func handleInternalBucketsFiber(c fiber.Ctx, om *core.ObjectManager) error {
 	}
 
 	return c.JSON(resp)
-}
-
-func validateBucketBillingLogs(ctx fiber.Ctx, cred *models.S3Credential) error {
-	if cred == nil {
-		return nil
-	}
-	return metricapi.ValidateProviderTransferLogSource(ctx.Context(), *cred)
 }
 
 func handleInternalPutBucketFiber(c fiber.Ctx, om *core.ObjectManager) error {
@@ -199,10 +191,6 @@ func handleInternalPutBucketFiber(c fiber.Ctx, om *core.ObjectManager) error {
 	if bucketProvider == common.S3Provider && (strings.TrimSpace(cred.AccessKey) == "" || strings.TrimSpace(cred.SecretKey) == "") {
 		return c.Status(fiber.StatusBadRequest).SendString("access_key and secret_key are required for s3 credentials")
 	}
-	if err := validateBucketBillingLogs(c, cred); err != nil {
-		return c.Status(fiber.StatusBadRequest).SendString(err.Error())
-	}
-
 	if err := om.SaveS3Credential(c.Context(), cred); err != nil {
 		return apiutil.HandleError(c, err)
 	}

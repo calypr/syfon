@@ -313,6 +313,77 @@ func TestSqliteDB_ObjectAliasLifecycle(t *testing.T) {
 	}
 }
 
+func TestSqliteDB_AuthzFilteringParity(t *testing.T) {
+	buildCtx := map[string]func([]string) context.Context{
+		"gen3": func(resources []string) context.Context {
+			ctx := context.Background()
+			ctx = context.WithValue(ctx, common.AuthModeKey, "gen3")
+			ctx = context.WithValue(ctx, common.AuthHeaderPresentKey, true)
+			ctx = context.WithValue(ctx, common.UserAuthzKey, resources)
+			return ctx
+		},
+		"local-authz": func(resources []string) context.Context {
+			ctx := context.Background()
+			ctx = context.WithValue(ctx, common.AuthModeKey, "local")
+			ctx = context.WithValue(ctx, common.AuthzEnforcedKey, true)
+			ctx = context.WithValue(ctx, common.UserAuthzKey, resources)
+			return ctx
+		},
+	}
+
+	for mode, makeCtx := range buildCtx {
+		t.Run(mode, func(t *testing.T) {
+			db, err := NewSqliteDB(":memory:")
+			if err != nil {
+				t.Fatalf("failed to create db: %v", err)
+			}
+			now := time.Now().UTC()
+			checksum := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+			if err := db.CreateObject(context.Background(), &models.InternalObject{
+				DrsObject: drs.DrsObject{
+					Id:          "obj-authz",
+					CreatedTime: now,
+					UpdatedTime: &now,
+					Checksums:   []drs.Checksum{{Type: "sha256", Checksum: checksum}},
+					AccessMethods: &[]drs.AccessMethod{
+						{Type: drs.AccessMethodTypeS3, AccessUrl: &struct {
+							Headers *[]string `json:"headers,omitempty"`
+							Url     string    `json:"url"`
+						}{Url: "s3://bucket/path/object"}},
+					},
+				},
+				Authorizations: map[string][]string{"org": {"project"}},
+			}); err != nil {
+				t.Fatalf("CreateObject failed: %v", err)
+			}
+
+			allowedCtx := makeCtx([]string{"/programs/org/projects/project"})
+			if _, err := db.GetObject(allowedCtx, "obj-authz"); err != nil {
+				t.Fatalf("expected authorized GetObject to succeed: %v", err)
+			}
+			byChecksum, err := db.GetObjectsByChecksum(allowedCtx, checksum)
+			if err != nil {
+				t.Fatalf("expected authorized checksum lookup to succeed: %v", err)
+			}
+			if len(byChecksum) != 1 || byChecksum[0].Id != "obj-authz" {
+				t.Fatalf("expected authorized checksum lookup to return object, got %+v", byChecksum)
+			}
+
+			deniedCtx := makeCtx([]string{"/programs/org/projects/other"})
+			if _, err := db.GetObject(deniedCtx, "obj-authz"); !errors.Is(err, common.ErrUnauthorized) {
+				t.Fatalf("expected unauthorized GetObject to be denied, got %v", err)
+			}
+			byChecksum, err = db.GetObjectsByChecksum(deniedCtx, checksum)
+			if err != nil {
+				t.Fatalf("expected denied checksum lookup to return empty result without error: %v", err)
+			}
+			if len(byChecksum) != 0 {
+				t.Fatalf("expected denied checksum lookup to hide object, got %+v", byChecksum)
+			}
+		})
+	}
+}
+
 func TestSqliteDB_DeleteObjectByAliasRemovesCanonicalObject(t *testing.T) {
 	ctx := context.Background()
 	db, err := NewSqliteDB(":memory:")
@@ -857,6 +928,7 @@ func TestSqliteDB_TransferAttributionMetrics(t *testing.T) {
 			EventID:           "grant-download-1",
 			AccessGrantID:     "grant-download-1",
 			EventType:         models.TransferEventAccessIssued,
+			Direction:         models.ProviderTransferDirectionDownload,
 			EventTime:         now,
 			RequestID:         "request-1",
 			ObjectID:          "did-1",
@@ -883,6 +955,7 @@ func TestSqliteDB_TransferAttributionMetrics(t *testing.T) {
 			EventID:           "grant-upload-1",
 			AccessGrantID:     "grant-upload-1",
 			EventType:         models.TransferEventAccessIssued,
+			Direction:         models.ProviderTransferDirectionUpload,
 			EventTime:         now.Add(time.Second),
 			RequestID:         "request-2",
 			ObjectID:          "did-1",
@@ -1013,46 +1086,8 @@ func TestSqliteDB_TransferAttributionMetrics(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetTransferAttributionSummary all failed: %v", err)
 	}
-	if allSummary.EventCount != 3 {
+	if allSummary.EventCount != 2 {
 		t.Fatalf("expected all reconciliation states when requested, got %+v", allSummary)
-	}
-
-	completedAt := now.Add(5 * time.Second)
-	runs := []models.ProviderTransferSyncRun{
-		{
-			SyncID:         "sync-bucket-a",
-			Provider:       "s3",
-			Bucket:         "bucket-a",
-			Organization:   "calypr",
-			Project:        "proj-a",
-			From:           now.Add(-time.Hour),
-			To:             now.Add(time.Hour),
-			Status:         models.ProviderTransferSyncCompleted,
-			RequestedAt:    now,
-			CompletedAt:    &completedAt,
-			ImportedEvents: 2,
-			MatchedEvents:  2,
-		},
-	}
-	if err := db.RecordProviderTransferSyncRuns(ctx, runs); err != nil {
-		t.Fatalf("RecordProviderTransferSyncRuns failed: %v", err)
-	}
-	if err := db.RecordProviderTransferSyncRuns(ctx, runs); err != nil {
-		t.Fatalf("duplicate RecordProviderTransferSyncRuns failed: %v", err)
-	}
-	listed, err := db.ListProviderTransferSyncRuns(ctx, models.TransferAttributionFilter{
-		Organization: "calypr",
-		Project:      "proj-a",
-		Provider:     "s3",
-		Bucket:       "bucket-a",
-		From:         common.Ptr(now.Add(-time.Minute)),
-		To:           common.Ptr(now.Add(time.Minute)),
-	}, 10)
-	if err != nil {
-		t.Fatalf("ListProviderTransferSyncRuns failed: %v", err)
-	}
-	if len(listed) != 1 || listed[0].SyncID != "sync-bucket-a" || listed[0].Status != models.ProviderTransferSyncCompleted {
-		t.Fatalf("unexpected provider sync runs: %+v", listed)
 	}
 
 	var grantCount, issueCount int

@@ -87,12 +87,13 @@ type AccessGrant struct {
 	AuthMode      string
 }
 
-// TransferAttributionEvent is the append-only access-issued audit log. Billing
-// metrics are based on matched ProviderTransferEvent rows, not these events.
+// TransferAttributionEvent is the append-only signed-access audit log. Billing
+// metrics assume each signed access is used and are based on these events.
 type TransferAttributionEvent struct {
 	EventID           string
 	AccessGrantID     string
 	EventType         string
+	Direction         string
 	EventTime         time.Time
 	RequestID         string
 	ObjectID          string
@@ -147,31 +148,6 @@ type ProviderTransferEvent struct {
 	ActorSubject         string
 	AuthMode             string
 	ReconciliationStatus string
-}
-
-const (
-	ProviderTransferSyncPending   = "pending"
-	ProviderTransferSyncCompleted = "completed"
-	ProviderTransferSyncFailed    = "failed"
-)
-
-type ProviderTransferSyncRun struct {
-	SyncID          string     `json:"sync_id"`
-	Provider        string     `json:"provider"`
-	Bucket          string     `json:"bucket"`
-	Organization    string     `json:"organization"`
-	Project         string     `json:"project"`
-	From            time.Time  `json:"from"`
-	To              time.Time  `json:"to"`
-	Status          string     `json:"status"`
-	RequestedAt     time.Time  `json:"requested_at"`
-	StartedAt       *time.Time `json:"started_at"`
-	CompletedAt     *time.Time `json:"completed_at"`
-	ImportedEvents  int64      `json:"imported_events"`
-	MatchedEvents   int64      `json:"matched_events"`
-	AmbiguousEvents int64      `json:"ambiguous_events"`
-	UnmatchedEvents int64      `json:"unmatched_events"`
-	ErrorMessage    string     `json:"error_message"`
 }
 
 type TransferAttributionFilter struct {

@@ -55,6 +55,15 @@ func IsGen3Mode(ctx context.Context) bool {
 	return mode == "gen3"
 }
 
+func IsAuthzEnforced(ctx context.Context) bool {
+	if IsGen3Mode(ctx) {
+		return true
+	}
+	v := ctx.Value(common.AuthzEnforcedKey)
+	enforced, _ := v.(bool)
+	return enforced
+}
+
 func GetUserPrivileges(ctx context.Context) map[string]map[string]bool {
 	v := ctx.Value(common.UserPrivilegesKey)
 	if v == nil {
@@ -67,10 +76,10 @@ func GetUserPrivileges(ctx context.Context) map[string]map[string]bool {
 }
 
 func HasMethodAccess(ctx context.Context, method string, resources []string) bool {
-	if !IsGen3Mode(ctx) {
+	if !IsAuthzEnforced(ctx) {
 		return true
 	}
-	if !HasAuthHeader(ctx) {
+	if IsGen3Mode(ctx) && !HasAuthHeader(ctx) {
 		return false
 	}
 	privs := GetUserPrivileges(ctx)
@@ -91,7 +100,7 @@ func HasMethodAccess(ctx context.Context, method string, resources []string) boo
 }
 
 func HasAnyMethodAccess(ctx context.Context, resources []string, methods ...string) bool {
-	if !IsGen3Mode(ctx) {
+	if !IsAuthzEnforced(ctx) {
 		return true
 	}
 	if len(resources) == 0 {

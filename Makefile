@@ -183,7 +183,15 @@ serve:
 
 .PHONY: docs
 docs:
-	docker run --rm -it \
+	docker run --rm \
+	  -v "$(PWD):/docs" \
+	  --user "$$(id -u):$$(id -g)" \
+	  $(MKDOCS_IMAGE) \
+	  build --strict
+
+.PHONY: docs-serve
+docs-serve:
+	docker run --rm $$(test -t 0 && echo -it) \
 	  -v "$(PWD):/docs" \
 	  --user "$$(id -u):$$(id -g)" \
 	  -p 8000:8000 \

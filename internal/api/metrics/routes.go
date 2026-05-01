@@ -2,10 +2,7 @@ package metrics
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
-	"log/slog"
 	"net/http"
 	"sort"
 	"strings"
@@ -87,6 +84,8 @@ func (s *MetricsServer) ListMetricsFiles(ctx context.Context, request metricsapi
 	var data []models.FileUsage
 	if access.isScoped() {
 		data, _, err = listScopedFileUsage(ctx, s.database, access.organization, access.project, limit, offset, inactiveSince)
+	} else if access.hasScopeAggregate() {
+		data, _, err = listMultiScopedFileUsage(ctx, s.database, access.scopes, limit, offset, inactiveSince)
 	} else {
 		data, err = s.database.ListFileUsage(ctx, limit, offset, inactiveSince)
 	}
@@ -132,6 +131,14 @@ func (s *MetricsServer) GetMetricsFile(ctx context.Context, request metricsapi.G
 		if !inside {
 			return metricsapi.GetMetricsFile404Response{}, nil
 		}
+	} else if access.hasScopeAggregate() {
+		inside, err := objectInAnyScope(ctx, s.database, objectID, access.scopes)
+		if err != nil {
+			return metricsapi.GetMetricsFile500Response{}, nil
+		}
+		if !inside {
+			return metricsapi.GetMetricsFile404Response{}, nil
+		}
 	}
 
 	usage, err := s.database.GetFileUsage(ctx, objectID)
@@ -166,6 +173,8 @@ func (s *MetricsServer) GetMetricsSummary(ctx context.Context, request metricsap
 	var summary models.FileUsageSummary
 	if access.isScoped() {
 		_, summary, err = listScopedFileUsage(ctx, s.database, access.organization, access.project, 0, 0, inactiveSince)
+	} else if access.hasScopeAggregate() {
+		_, summary, err = listMultiScopedFileUsage(ctx, s.database, access.scopes, 0, 0, inactiveSince)
 	} else {
 		summary, err = s.database.GetFileUsageSummary(ctx, inactiveSince)
 	}
@@ -187,10 +196,10 @@ func (s *MetricsServer) checkAuth(ctx context.Context) (metricsAccess, int, bool
 		return metricsAccess{}, http.StatusBadRequest, false
 	}
 
-	if !authz.IsGen3Mode(ctx) {
+	if !authz.IsAuthzEnforced(ctx) {
 		return access, 0, true
 	}
-	if !authz.HasAuthHeader(ctx) {
+	if authz.IsGen3Mode(ctx) && !authz.HasAuthHeader(ctx) {
 		return access, http.StatusUnauthorized, false
 	}
 
@@ -208,6 +217,13 @@ func (s *MetricsServer) checkAuth(ctx context.Context) (metricsAccess, int, bool
 		if authz.HasMethodAccess(ctx, "read", []string{scope}) {
 			return access, 0, true
 		}
+		return access, http.StatusForbidden, false
+	}
+
+	scopes := readableMetricsScopes(ctx)
+	if len(scopes) > 0 {
+		access.scopes = scopes
+		return access, 0, true
 	}
 
 	return access, http.StatusForbidden, false
@@ -220,6 +236,7 @@ type transferEventsRequest struct {
 type transferEventPayload struct {
 	EventID           string `json:"event_id"`
 	EventType         string `json:"event_type"`
+	Direction         string `json:"direction"`
 	EventTime         string `json:"event_time"`
 	RequestID         string `json:"request_id"`
 	ObjectID          string `json:"object_id"`
@@ -298,69 +315,6 @@ func (s *MetricsServer) RecordProviderTransferEvents(ctx context.Context, reques
 	return metricsapi.RecordProviderTransferEvents201JSONResponse{Recorded: &recorded}, nil
 }
 
-func (s *MetricsServer) RecordProviderTransferSync(ctx context.Context, request metricsapi.RecordProviderTransferSyncRequestObject) (metricsapi.RecordProviderTransferSyncResponseObject, error) {
-	statusCode, ok := checkProviderMetricsIngestAuth(ctx)
-	if !ok {
-		return recordProviderTransferSyncAuthResponse(statusCode), nil
-	}
-	if request.Body == nil || !request.Body.From.Before(request.Body.To) {
-		return metricsapi.RecordProviderTransferSync400Response{}, nil
-	}
-
-	runs, err := s.providerSyncRunsForRequest(ctx, *request.Body)
-	if err != nil {
-		if errors.Is(err, common.ErrNotFound) {
-			return metricsapi.RecordProviderTransferSync400Response{}, nil
-		}
-		return metricsapi.RecordProviderTransferSync500Response{}, nil
-	}
-	if len(runs) == 0 {
-		return metricsapi.RecordProviderTransferSync400Response{}, nil
-	}
-	if shouldCollectProviderTransferSync(*request.Body) {
-		runs = s.collectProviderTransferSyncRuns(ctx, *request.Body, runs)
-	}
-	if err := s.database.RecordProviderTransferSyncRuns(ctx, runs); err != nil {
-		return metricsapi.RecordProviderTransferSync500Response{}, nil
-	}
-	recorded := len(runs)
-	generated := make([]metricsapi.ProviderTransferSyncRun, 0, len(runs))
-	for _, run := range runs {
-		generated = append(generated, toGeneratedProviderTransferSyncRun(run))
-	}
-	return metricsapi.RecordProviderTransferSync201JSONResponse{
-		Recorded: &recorded,
-		SyncRuns: &generated,
-	}, nil
-}
-
-func (s *MetricsServer) ListProviderTransferSync(ctx context.Context, request metricsapi.ListProviderTransferSyncRequestObject) (metricsapi.ListProviderTransferSyncResponseObject, error) {
-	if _, statusCode, ok := s.checkAuth(ctx); !ok {
-		return listProviderTransferSyncAuthResponse(statusCode), nil
-	}
-	filter := providerTransferSyncParamsToFilter(request.Params)
-	limit := 100
-	if request.Params.Limit != nil {
-		limit = *request.Params.Limit
-	}
-	if limit < 1 || limit > 1000 {
-		return metricsapi.ListProviderTransferSync400Response{}, nil
-	}
-	runs, err := s.database.ListProviderTransferSyncRuns(ctx, filter, limit)
-	if err != nil {
-		return metricsapi.ListProviderTransferSync500Response{}, nil
-	}
-	generated := make([]metricsapi.ProviderTransferSyncRun, 0, len(runs))
-	for _, run := range runs {
-		generated = append(generated, toGeneratedProviderTransferSyncRun(run))
-	}
-	recorded := len(generated)
-	return metricsapi.ListProviderTransferSync200JSONResponse{
-		Recorded: &recorded,
-		SyncRuns: &generated,
-	}, nil
-}
-
 func checkProviderMetricsIngestAuth(ctx context.Context) (int, bool) {
 	if !authz.IsGen3Mode(ctx) {
 		return 0, true
@@ -400,6 +354,7 @@ func transferPayloadToModel(ctx context.Context, item transferEventPayload) (mod
 	ev := models.TransferAttributionEvent{
 		EventID:           strings.TrimSpace(item.EventID),
 		EventType:         eventType,
+		Direction:         normalizeTransferDirection(item.Direction),
 		EventTime:         when,
 		RequestID:         strings.TrimSpace(item.RequestID),
 		ObjectID:          strings.TrimSpace(item.ObjectID),
@@ -443,6 +398,15 @@ func transferPayloadToModel(ctx context.Context, item transferEventPayload) (mod
 		ev.AccessGrantID = attribution.AccessGrantID(ev)
 	}
 	return ev, nil
+}
+
+func normalizeTransferDirection(direction string) string {
+	switch strings.ToLower(strings.TrimSpace(direction)) {
+	case models.ProviderTransferDirectionUpload:
+		return models.ProviderTransferDirectionUpload
+	default:
+		return models.ProviderTransferDirectionDownload
+	}
 }
 
 func providerTransferPayloadToModel(item providerTransferPayload) (models.ProviderTransferEvent, error) {
@@ -506,7 +470,8 @@ func providerTransferPayloadToModel(item providerTransferPayload) (models.Provid
 }
 
 func (s *MetricsServer) GetTransferSummary(ctx context.Context, request metricsapi.GetTransferSummaryRequestObject) (metricsapi.GetTransferSummaryResponseObject, error) {
-	if _, statusCode, ok := s.checkAuth(ctx); !ok {
+	access, statusCode, ok := s.checkAuth(ctx)
+	if !ok {
 		return getTransferSummaryAuthResponse(statusCode), nil
 	}
 	filter := transferSummaryParamsToFilter(request.Params)
@@ -514,7 +479,12 @@ func (s *MetricsServer) GetTransferSummary(ctx context.Context, request metricsa
 	if err != nil {
 		return metricsapi.GetTransferSummary500Response{}, nil
 	}
-	summary, err := s.database.GetTransferAttributionSummary(ctx, filter)
+	var summary models.TransferAttributionSummary
+	if access.hasScopeAggregate() && filter.Organization == "" {
+		summary, err = s.getScopedTransferAttributionSummary(ctx, filter, access.scopes)
+	} else {
+		summary, err = s.database.GetTransferAttributionSummary(ctx, filter)
+	}
 	if err != nil {
 		return metricsapi.GetTransferSummary500Response{}, nil
 	}
@@ -524,7 +494,8 @@ func (s *MetricsServer) GetTransferSummary(ctx context.Context, request metricsa
 }
 
 func (s *MetricsServer) GetTransferBreakdown(ctx context.Context, request metricsapi.GetTransferBreakdownRequestObject) (metricsapi.GetTransferBreakdownResponseObject, error) {
-	if _, statusCode, ok := s.checkAuth(ctx); !ok {
+	access, statusCode, ok := s.checkAuth(ctx)
+	if !ok {
 		return getTransferBreakdownAuthResponse(statusCode), nil
 	}
 	filter := transferBreakdownParamsToFilter(request.Params)
@@ -541,7 +512,12 @@ func (s *MetricsServer) GetTransferBreakdown(ctx context.Context, request metric
 	default:
 		return metricsapi.GetTransferBreakdown400Response{}, nil
 	}
-	items, err := s.database.GetTransferAttributionBreakdown(ctx, filter, groupBy)
+	var items []models.TransferAttributionBreakdown
+	if access.hasScopeAggregate() && filter.Organization == "" {
+		items, err = s.getScopedTransferAttributionBreakdown(ctx, filter, groupBy, access.scopes)
+	} else {
+		items, err = s.database.GetTransferAttributionBreakdown(ctx, filter, groupBy)
+	}
 	if err != nil {
 		return metricsapi.GetTransferBreakdown500Response{}, nil
 	}
@@ -565,28 +541,6 @@ func recordProviderTransferEventsAuthResponse(statusCode int) metricsapi.RecordP
 		return metricsapi.RecordProviderTransferEvents403Response{}
 	default:
 		return metricsapi.RecordProviderTransferEvents400Response{}
-	}
-}
-
-func recordProviderTransferSyncAuthResponse(statusCode int) metricsapi.RecordProviderTransferSyncResponseObject {
-	switch statusCode {
-	case http.StatusUnauthorized:
-		return metricsapi.RecordProviderTransferSync401Response{}
-	case http.StatusForbidden:
-		return metricsapi.RecordProviderTransferSync403Response{}
-	default:
-		return metricsapi.RecordProviderTransferSync400Response{}
-	}
-}
-
-func listProviderTransferSyncAuthResponse(statusCode int) metricsapi.ListProviderTransferSyncResponseObject {
-	switch statusCode {
-	case http.StatusUnauthorized:
-		return metricsapi.ListProviderTransferSync401Response{}
-	case http.StatusForbidden:
-		return metricsapi.ListProviderTransferSync403Response{}
-	default:
-		return metricsapi.ListProviderTransferSync400Response{}
 	}
 }
 
@@ -721,17 +675,6 @@ func transferBreakdownParamsToFilter(params metricsapi.GetTransferBreakdownParam
 	}
 }
 
-func providerTransferSyncParamsToFilter(params metricsapi.ListProviderTransferSyncParams) models.TransferAttributionFilter {
-	return models.TransferAttributionFilter{
-		Organization: generatedString(params.Organization),
-		Project:      generatedString(params.Project),
-		From:         generatedTime(params.From),
-		To:           generatedTime(params.To),
-		Provider:     generatedString(params.Provider),
-		Bucket:       generatedString(params.Bucket),
-	}
-}
-
 func generatedString[T ~string](v *T) string {
 	if v == nil {
 		return ""
@@ -756,31 +699,6 @@ func toGeneratedTransferSummary(summary models.TransferAttributionSummary) metri
 		BytesRequested:     &summary.BytesRequested,
 		BytesDownloaded:    &summary.BytesDownloaded,
 		BytesUploaded:      &summary.BytesUploaded,
-	}
-}
-
-func toGeneratedProviderTransferSyncRun(run models.ProviderTransferSyncRun) metricsapi.ProviderTransferSyncRun {
-	status := metricsapi.ProviderTransferSyncStatus(run.Status)
-	from := run.From.UTC()
-	to := run.To.UTC()
-	requested := run.RequestedAt.UTC()
-	return metricsapi.ProviderTransferSyncRun{
-		SyncId:          stringPtr(run.SyncID),
-		Provider:        stringPtr(run.Provider),
-		Bucket:          stringPtr(run.Bucket),
-		Organization:    stringPtr(run.Organization),
-		Project:         stringPtr(run.Project),
-		From:            &from,
-		To:              &to,
-		Status:          &status,
-		RequestedAt:     &requested,
-		StartedAt:       run.StartedAt,
-		CompletedAt:     run.CompletedAt,
-		ImportedEvents:  int64Ptr(run.ImportedEvents),
-		MatchedEvents:   int64Ptr(run.MatchedEvents),
-		AmbiguousEvents: int64Ptr(run.AmbiguousEvents),
-		UnmatchedEvents: int64Ptr(run.UnmatchedEvents),
-		ErrorMessage:    stringPtr(run.ErrorMessage),
 	}
 }
 
@@ -826,257 +744,6 @@ func toMetricsFileUsage(v models.FileUsage) metricsapi.FileUsage {
 	}
 }
 
-func (s *MetricsServer) providerSyncRunsForRequest(ctx context.Context, body metricsapi.ProviderTransferSyncRequest) ([]models.ProviderTransferSyncRun, error) {
-	status := models.ProviderTransferSyncPending
-	if body.Status != nil {
-		status = string(*body.Status)
-	}
-	switch status {
-	case models.ProviderTransferSyncPending, models.ProviderTransferSyncCompleted, models.ProviderTransferSyncFailed:
-	default:
-		return nil, common.ErrNotFound
-	}
-
-	provider := strings.TrimSpace(generatedString(body.Provider))
-	bucket := strings.TrimSpace(generatedString(body.Bucket))
-	buckets, err := s.providerSyncCredentials(ctx, provider, bucket)
-	if err != nil {
-		return nil, err
-	}
-
-	now := time.Now().UTC()
-	var startedAt, completedAt *time.Time
-	if status == models.ProviderTransferSyncCompleted || status == models.ProviderTransferSyncFailed {
-		t := now
-		startedAt = &t
-		completedAt = &t
-	}
-
-	org := strings.TrimSpace(generatedString(body.Organization))
-	project := strings.TrimSpace(generatedString(body.Project))
-	from := body.From.UTC()
-	to := body.To.UTC()
-	runs := make([]models.ProviderTransferSyncRun, 0, len(buckets))
-	for _, target := range buckets {
-		run := models.ProviderTransferSyncRun{
-			SyncID:          providerSyncID(target.provider, target.bucket, org, project, from, to),
-			Provider:        target.provider,
-			Bucket:          target.bucket,
-			Organization:    org,
-			Project:         project,
-			From:            from,
-			To:              to,
-			Status:          status,
-			RequestedAt:     now,
-			StartedAt:       startedAt,
-			CompletedAt:     completedAt,
-			ImportedEvents:  int64PtrVal(body.ImportedEvents),
-			MatchedEvents:   int64PtrVal(body.MatchedEvents),
-			AmbiguousEvents: int64PtrVal(body.AmbiguousEvents),
-			UnmatchedEvents: int64PtrVal(body.UnmatchedEvents),
-			ErrorMessage:    strings.TrimSpace(generatedString(body.ErrorMessage)),
-		}
-		runs = append(runs, run)
-	}
-	return runs, nil
-}
-
-type providerSyncTarget struct {
-	provider string
-	bucket   string
-	cred     models.S3Credential
-}
-
-func (s *MetricsServer) providerSyncBuckets(ctx context.Context, provider, bucket string) ([]providerSyncTarget, error) {
-	if bucket != "" {
-		if provider == "" {
-			provider = common.S3Provider
-		}
-		return []providerSyncTarget{{provider: provider, bucket: bucket}}, nil
-	}
-	creds, err := s.database.ListS3Credentials(ctx)
-	if err != nil {
-		return nil, err
-	}
-	targets := make([]providerSyncTarget, 0, len(creds))
-	for _, cred := range creds {
-		credProvider := common.NormalizeProvider(cred.Provider, common.S3Provider)
-		if provider != "" && provider != credProvider {
-			continue
-		}
-		if strings.TrimSpace(cred.Bucket) == "" {
-			continue
-		}
-		targets = append(targets, providerSyncTarget{provider: credProvider, bucket: strings.TrimSpace(cred.Bucket), cred: cred})
-	}
-	return targets, nil
-}
-
-func (s *MetricsServer) providerSyncCredentials(ctx context.Context, provider, bucket string) ([]providerSyncTarget, error) {
-	creds, err := s.database.ListS3Credentials(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if bucket != "" {
-		if provider == "" {
-			provider = "s3"
-		}
-		for _, cred := range creds {
-			credProvider := common.NormalizeProvider(cred.Provider, common.S3Provider)
-			if strings.TrimSpace(cred.Bucket) == bucket && credProvider == provider {
-				return []providerSyncTarget{{provider: provider, bucket: bucket, cred: cred}}, nil
-			}
-		}
-		return nil, common.ErrNotFound
-	}
-	targets := make([]providerSyncTarget, 0, len(creds))
-	for _, cred := range creds {
-		credProvider := common.NormalizeProvider(cred.Provider, common.S3Provider)
-		if provider != "" && provider != credProvider {
-			continue
-		}
-		if strings.TrimSpace(cred.Bucket) == "" {
-			continue
-		}
-		targets = append(targets, providerSyncTarget{provider: credProvider, bucket: strings.TrimSpace(cred.Bucket), cred: cred})
-	}
-	return targets, nil
-}
-
-func shouldCollectProviderTransferSync(body metricsapi.ProviderTransferSyncRequest) bool {
-	if body.Status == nil {
-		return true
-	}
-	return string(*body.Status) == models.ProviderTransferSyncPending
-}
-
-func (s *MetricsServer) collectProviderTransferSyncRuns(ctx context.Context, body metricsapi.ProviderTransferSyncRequest, runs []models.ProviderTransferSyncRun) []models.ProviderTransferSyncRun {
-	targets, err := s.providerSyncCredentials(ctx, strings.TrimSpace(generatedString(body.Provider)), strings.TrimSpace(generatedString(body.Bucket)))
-	if err != nil {
-		now := time.Now().UTC()
-		for i := range runs {
-			runs[i].Status = models.ProviderTransferSyncFailed
-			runs[i].StartedAt = &now
-			runs[i].CompletedAt = &now
-			runs[i].ErrorMessage = err.Error()
-		}
-		return runs
-	}
-	targetByKey := make(map[string]providerSyncTarget, len(targets))
-	for _, target := range targets {
-		targetByKey[target.provider+"\x00"+target.bucket] = target
-	}
-
-	org := strings.TrimSpace(generatedString(body.Organization))
-	project := strings.TrimSpace(generatedString(body.Project))
-	for i := range runs {
-		started := time.Now().UTC()
-		runs[i].StartedAt = &started
-		target, ok := targetByKey[runs[i].Provider+"\x00"+runs[i].Bucket]
-		if !ok {
-			completed := time.Now().UTC()
-			runs[i].Status = models.ProviderTransferSyncFailed
-			runs[i].CompletedAt = &completed
-			runs[i].ErrorMessage = "bucket credential not found"
-			continue
-		}
-
-		events, err := s.collectProviderTransferEvents(ctx, target.cred, runs[i].From, runs[i].To, org, project)
-		completed := time.Now().UTC()
-		runs[i].CompletedAt = &completed
-		if err != nil {
-			runs[i].Status = models.ProviderTransferSyncFailed
-			runs[i].ErrorMessage = err.Error()
-			slog.Warn("provider transfer sync failed",
-				"provider", runs[i].Provider,
-				"bucket", runs[i].Bucket,
-				"prefix", strings.Trim(strings.TrimSpace(target.cred.BillingLogPrefix), "/"),
-				"organization", org,
-				"project", project,
-				"from", runs[i].From.Format(time.RFC3339Nano),
-				"to", runs[i].To.Format(time.RFC3339Nano),
-				"duration_ms", completed.Sub(started).Milliseconds(),
-				"err", err,
-			)
-			continue
-		}
-		if len(events) > 0 {
-			if err := s.database.RecordProviderTransferEvents(ctx, events); err != nil {
-				runs[i].Status = models.ProviderTransferSyncFailed
-				runs[i].ErrorMessage = err.Error()
-				slog.Warn("provider transfer sync failed to persist events",
-					"provider", runs[i].Provider,
-					"bucket", runs[i].Bucket,
-					"prefix", strings.Trim(strings.TrimSpace(target.cred.BillingLogPrefix), "/"),
-					"organization", org,
-					"project", project,
-					"from", runs[i].From.Format(time.RFC3339Nano),
-					"to", runs[i].To.Format(time.RFC3339Nano),
-					"imported", len(events),
-					"duration_ms", completed.Sub(started).Milliseconds(),
-					"err", err,
-				)
-				continue
-			}
-		} else {
-			runs[i].ErrorMessage = "provider sync completed but no billable transfer events were found in the configured log source"
-		}
-		runs[i].Status = models.ProviderTransferSyncCompleted
-		runs[i].ImportedEvents = int64(len(events))
-		runs[i].MatchedEvents, runs[i].AmbiguousEvents, runs[i].UnmatchedEvents = providerTransferEventStatusCounts(events)
-		slog.Info("provider transfer sync complete",
-			"provider", runs[i].Provider,
-			"bucket", runs[i].Bucket,
-			"prefix", strings.Trim(strings.TrimSpace(target.cred.BillingLogPrefix), "/"),
-			"organization", org,
-			"project", project,
-			"from", runs[i].From.Format(time.RFC3339Nano),
-			"to", runs[i].To.Format(time.RFC3339Nano),
-			"imported", runs[i].ImportedEvents,
-			"matched", runs[i].MatchedEvents,
-			"ambiguous", runs[i].AmbiguousEvents,
-			"unmatched", runs[i].UnmatchedEvents,
-			"duration_ms", completed.Sub(started).Milliseconds(),
-			"warning", runs[i].ErrorMessage,
-		)
-	}
-	return runs
-}
-
-func providerTransferEventStatusCounts(events []models.ProviderTransferEvent) (matched, ambiguous, unmatched int64) {
-	for _, ev := range events {
-		switch ev.ReconciliationStatus {
-		case models.ProviderTransferMatched:
-			matched++
-		case models.ProviderTransferAmbiguous:
-			ambiguous++
-		default:
-			unmatched++
-		}
-	}
-	return matched, ambiguous, unmatched
-}
-
-func providerSyncID(provider, bucket, organization, project string, from, to time.Time) string {
-	raw := strings.Join([]string{
-		strings.TrimSpace(provider),
-		strings.TrimSpace(bucket),
-		strings.TrimSpace(organization),
-		strings.TrimSpace(project),
-		from.UTC().Format(time.RFC3339Nano),
-		to.UTC().Format(time.RFC3339Nano),
-	}, "\x00")
-	sum := sha256.Sum256([]byte(raw))
-	return "sync-" + hex.EncodeToString(sum[:16])
-}
-
-func int64PtrVal(v *int64) int64 {
-	if v == nil {
-		return 0
-	}
-	return *v
-}
-
 func (s *MetricsServer) transferFreshness(ctx context.Context, filter models.TransferAttributionFilter) (metricsapi.TransferMetricsFreshness, bool, error) {
 	stale := false
 	missing := make([]string, 0)
@@ -1086,60 +753,6 @@ func (s *MetricsServer) transferFreshness(ctx context.Context, filter models.Tra
 		RequiredFrom:   filter.From,
 		RequiredTo:     filter.To,
 	}
-	if filter.From == nil || filter.To == nil || !filter.From.Before(*filter.To) {
-		stale = true
-		missing = append(missing, "time_window")
-		freshness.IsStale = &stale
-		freshness.MissingBuckets = &missing
-		return freshness, stale, nil
-	}
-
-	targets, err := s.providerSyncBuckets(ctx, strings.TrimSpace(filter.Provider), strings.TrimSpace(filter.Bucket))
-	if err != nil {
-		return freshness, false, err
-	}
-	if len(targets) == 0 {
-		stale = true
-		missing = append(missing, "provider_bucket")
-	}
-
-	var latest *time.Time
-	for _, target := range targets {
-		syncFilter := models.TransferAttributionFilter{
-			Organization: filter.Organization,
-			Project:      filter.Project,
-			From:         filter.From,
-			To:           filter.To,
-			Provider:     target.provider,
-			Bucket:       target.bucket,
-		}
-		runs, err := s.database.ListProviderTransferSyncRuns(ctx, syncFilter, 50)
-		if err != nil {
-			return freshness, false, err
-		}
-		covered := false
-		for _, run := range runs {
-			if run.Status != models.ProviderTransferSyncCompleted {
-				continue
-			}
-			if run.From.After(*filter.From) || run.To.Before(*filter.To) {
-				continue
-			}
-			covered = true
-			if run.CompletedAt != nil && (latest == nil || run.CompletedAt.After(*latest)) {
-				t := run.CompletedAt.UTC()
-				latest = &t
-			}
-			break
-		}
-		if !covered {
-			stale = true
-			missing = append(missing, target.provider+":"+target.bucket)
-		}
-	}
-	freshness.IsStale = &stale
-	freshness.MissingBuckets = &missing
-	freshness.LatestCompletedSync = latest
 	return freshness, stale, nil
 }
 
@@ -1158,10 +771,20 @@ func parseInactiveSince(inactiveDays *int) (*time.Time, error) {
 type metricsAccess struct {
 	organization string
 	project      string
+	scopes       []metricsScope
 }
 
 func (a metricsAccess) isScoped() bool {
 	return strings.TrimSpace(a.organization) != ""
+}
+
+func (a metricsAccess) hasScopeAggregate() bool {
+	return !a.isScoped() && len(a.scopes) > 0
+}
+
+type metricsScope struct {
+	organization string
+	project      string
 }
 
 func resolveMetricsAccess(ctx context.Context) (metricsAccess, error) {
@@ -1175,6 +798,61 @@ func resolveMetricsAccess(ctx context.Context) (metricsAccess, error) {
 func hasGlobalMetricsReadAccess(ctx context.Context) bool {
 	return authz.HasMethodAccess(ctx, "read", []string{"/data_file"}) ||
 		authz.HasMethodAccess(ctx, "read", []string{"/programs"})
+}
+
+func readableMetricsScopes(ctx context.Context) []metricsScope {
+	privs := authz.GetUserPrivileges(ctx)
+	scopes := make([]metricsScope, 0, len(privs))
+	seen := map[string]bool{}
+	for resource, methods := range privs {
+		if !(methods["read"] || methods["*"]) {
+			continue
+		}
+		scope, ok := metricsScopeFromResource(resource)
+		if !ok {
+			continue
+		}
+		key := scope.organization + "\x00" + scope.project
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		scopes = append(scopes, scope)
+	}
+	orgWide := map[string]bool{}
+	for _, scope := range scopes {
+		if scope.project == "" {
+			orgWide[scope.organization] = true
+		}
+	}
+	if len(orgWide) > 0 {
+		filtered := scopes[:0]
+		for _, scope := range scopes {
+			if scope.project != "" && orgWide[scope.organization] {
+				continue
+			}
+			filtered = append(filtered, scope)
+		}
+		scopes = filtered
+	}
+	sort.Slice(scopes, func(i, j int) bool {
+		if scopes[i].organization == scopes[j].organization {
+			return scopes[i].project < scopes[j].project
+		}
+		return scopes[i].organization < scopes[j].organization
+	})
+	return scopes
+}
+
+func metricsScopeFromResource(resource string) (metricsScope, bool) {
+	parts := strings.Split(strings.Trim(resource, "/"), "/")
+	if len(parts) == 2 && parts[0] == "programs" && parts[1] != "" {
+		return metricsScope{organization: parts[1]}, true
+	}
+	if len(parts) == 4 && parts[0] == "programs" && parts[2] == "projects" && parts[1] != "" && parts[3] != "" {
+		return metricsScope{organization: parts[1], project: parts[3]}, true
+	}
+	return metricsScope{}, false
 }
 
 func parseScopeQuery(ctx context.Context) (string, string, bool, error) {
@@ -1256,6 +934,42 @@ func listScopedFileUsage(ctx context.Context, database db.MetricsStore, organiza
 	return usages[offset:end], summary, nil
 }
 
+func listMultiScopedFileUsage(ctx context.Context, database db.MetricsStore, scopes []metricsScope, limit, offset int, inactiveSince *time.Time) ([]models.FileUsage, models.FileUsageSummary, error) {
+	byID := map[string]models.FileUsage{}
+	var summary models.FileUsageSummary
+	for _, scope := range scopes {
+		usages, scopedSummary, err := collectScopedUsage(ctx, database, scope.organization, scope.project, inactiveSince)
+		if err != nil {
+			return nil, models.FileUsageSummary{}, err
+		}
+		summary.TotalFiles += scopedSummary.TotalFiles
+		summary.TotalUploads += scopedSummary.TotalUploads
+		summary.TotalDownloads += scopedSummary.TotalDownloads
+		summary.InactiveFileCount += scopedSummary.InactiveFileCount
+		for _, usage := range usages {
+			byID[usage.ObjectID] = usage
+		}
+	}
+	usages := make([]models.FileUsage, 0, len(byID))
+	for _, usage := range byID {
+		usages = append(usages, usage)
+	}
+	sort.Slice(usages, func(i, j int) bool {
+		return usages[i].ObjectID < usages[j].ObjectID
+	})
+	if limit <= 0 {
+		return usages, summary, nil
+	}
+	if offset >= len(usages) {
+		return []models.FileUsage{}, summary, nil
+	}
+	end := offset + limit
+	if end > len(usages) {
+		end = len(usages)
+	}
+	return usages[offset:end], summary, nil
+}
+
 func objectInScope(ctx context.Context, database db.MetricsStore, objectID, organization, project string) (bool, error) {
 	obj, err := database.GetObject(ctx, objectID)
 	if err != nil {
@@ -1280,4 +994,82 @@ func objectInScope(ctx context.Context, database db.MetricsStore, objectID, orga
 		}
 	}
 	return false, nil
+}
+
+func objectInAnyScope(ctx context.Context, database db.MetricsStore, objectID string, scopes []metricsScope) (bool, error) {
+	for _, scope := range scopes {
+		inside, err := objectInScope(ctx, database, objectID, scope.organization, scope.project)
+		if err != nil || inside {
+			return inside, err
+		}
+	}
+	return false, nil
+}
+
+func (s *MetricsServer) getScopedTransferAttributionSummary(ctx context.Context, filter models.TransferAttributionFilter, scopes []metricsScope) (models.TransferAttributionSummary, error) {
+	var out models.TransferAttributionSummary
+	for _, scope := range scopes {
+		scoped := filter
+		scoped.Organization = scope.organization
+		scoped.Project = scope.project
+		summary, err := s.database.GetTransferAttributionSummary(ctx, scoped)
+		if err != nil {
+			return models.TransferAttributionSummary{}, err
+		}
+		out.EventCount += summary.EventCount
+		out.AccessIssuedCount += summary.AccessIssuedCount
+		out.DownloadEventCount += summary.DownloadEventCount
+		out.UploadEventCount += summary.UploadEventCount
+		out.BytesRequested += summary.BytesRequested
+		out.BytesDownloaded += summary.BytesDownloaded
+		out.BytesUploaded += summary.BytesUploaded
+	}
+	return out, nil
+}
+
+func (s *MetricsServer) getScopedTransferAttributionBreakdown(ctx context.Context, filter models.TransferAttributionFilter, groupBy string, scopes []metricsScope) ([]models.TransferAttributionBreakdown, error) {
+	byKey := map[string]*models.TransferAttributionBreakdown{}
+	for _, scope := range scopes {
+		scoped := filter
+		scoped.Organization = scope.organization
+		scoped.Project = scope.project
+		items, err := s.database.GetTransferAttributionBreakdown(ctx, scoped, groupBy)
+		if err != nil {
+			return nil, err
+		}
+		for _, item := range items {
+			key := item.Key
+			if key == "" {
+				key = item.Organization + "/" + item.Project + "/" + item.Provider + "/" + item.Bucket + "/" + item.SHA256 + "/" + item.ActorEmail + "/" + item.ActorSubject
+			}
+			merged := byKey[key]
+			if merged == nil {
+				copy := item
+				byKey[key] = &copy
+				continue
+			}
+			merged.EventCount += item.EventCount
+			merged.BytesRequested += item.BytesRequested
+			merged.BytesDownloaded += item.BytesDownloaded
+			merged.BytesUploaded += item.BytesUploaded
+			if item.LastTransferTime != nil && (merged.LastTransferTime == nil || item.LastTransferTime.After(*merged.LastTransferTime)) {
+				t := *item.LastTransferTime
+				merged.LastTransferTime = &t
+			}
+		}
+	}
+	out := make([]models.TransferAttributionBreakdown, 0, len(byKey))
+	for _, item := range byKey {
+		out = append(out, *item)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].LastTransferTime == nil || out[j].LastTransferTime == nil {
+			return out[i].Key < out[j].Key
+		}
+		if out[i].LastTransferTime.Equal(*out[j].LastTransferTime) {
+			return out[i].Key < out[j].Key
+		}
+		return out[i].LastTransferTime.After(*out[j].LastTransferTime)
+	})
+	return out, nil
 }

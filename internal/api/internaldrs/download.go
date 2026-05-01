@@ -10,6 +10,7 @@ import (
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/config"
 	"github.com/calypr/syfon/internal/core"
+	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/urlmanager"
 	"github.com/gofiber/fiber/v3"
 )
@@ -37,13 +38,14 @@ func handleInternalDownloadFiber(c fiber.Ctx, om *core.ObjectManager) error {
 		opts.ExpiresIn = time.Duration(config.DefaultSigningExpirySeconds) * time.Second
 	}
 
-	signedURL, err := om.SignURL(c.Context(), objectURL, opts)
+	signedURL, err := om.SignObjectURL(c.Context(), obj, objectURL, opts)
 	if err != nil {
 		return apiutil.HandleError(c, err)
 	}
 
 	_ = om.RecordDownload(c.Context(), obj.Id)
 	attribution.RecordAccessIssued(c.Context(), om, obj, attribution.AccessDetails{
+		Direction:  models.ProviderTransferDirectionDownload,
 		StorageURL: objectURL,
 	})
 
@@ -94,11 +96,12 @@ func handleInternalDownloadPartFiber(c fiber.Ctx, om *core.ObjectManager) error 
 		ExpiresIn: time.Duration(config.DefaultSigningExpirySeconds) * time.Second,
 	}
 
-	signedURL, err := om.SignDownloadPart(c.Context(), bucketID, objectURL, start, end, opts)
+	signedURL, err := om.SignObjectDownloadPart(c.Context(), obj, bucketID, objectURL, start, end, opts)
 	if err != nil {
 		return apiutil.HandleError(c, err)
 	}
 	attribution.RecordAccessIssued(c.Context(), om, obj, attribution.AccessDetails{
+		Direction:      models.ProviderTransferDirectionDownload,
 		StorageURL:     objectURL,
 		RangeStart:     &start,
 		RangeEnd:       &end,

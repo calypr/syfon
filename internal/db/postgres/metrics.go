@@ -44,11 +44,11 @@ func (db *PostgresDB) RecordTransferAttributionEvents(ctx context.Context, event
 	defer tx.Rollback()
 	stmt, err := tx.PrepareContext(ctx, `
 		INSERT INTO transfer_attribution_event (
-			event_id, access_grant_id, event_type, event_time, request_id, object_id, sha256, object_size,
+			event_id, access_grant_id, event_type, direction, event_time, request_id, object_id, sha256, object_size,
 			organization, project, access_id, provider, bucket, storage_url,
 			range_start, range_end, bytes_requested, bytes_completed,
 			actor_email, actor_subject, auth_mode, client_name, client_version, transfer_session_id
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
 		ON CONFLICT (event_id) DO NOTHING
 	`)
 	if err != nil {
@@ -68,8 +68,9 @@ func (db *PostgresDB) RecordTransferAttributionEvents(ctx context.Context, event
 		}
 		ev.AccessGrantID = accessGrantIDFromEvent(ev)
 		ev.EventTime = when.UTC()
+		ev.Direction = normalizeTransferDirection(ev.Direction)
 		result, err := stmt.ExecContext(ctx,
-			ev.EventID, ev.AccessGrantID, ev.EventType, ev.EventTime, ev.RequestID, ev.ObjectID, ev.SHA256, ev.ObjectSize,
+			ev.EventID, ev.AccessGrantID, ev.EventType, ev.Direction, ev.EventTime, ev.RequestID, ev.ObjectID, ev.SHA256, ev.ObjectSize,
 			ev.Organization, ev.Project, ev.AccessID, ev.Provider, ev.Bucket, ev.StorageURL,
 			nullableInt64(ev.RangeStart), nullableInt64(ev.RangeEnd), ev.BytesRequested, ev.BytesCompleted,
 			ev.ActorEmail, ev.ActorSubject, ev.AuthMode, ev.ClientName, ev.ClientVersion, ev.TransferSessionID,
@@ -135,91 +136,19 @@ func (db *PostgresDB) RecordProviderTransferEvents(ctx context.Context, events [
 	return tx.Commit()
 }
 
-func (db *PostgresDB) RecordProviderTransferSyncRuns(ctx context.Context, runs []models.ProviderTransferSyncRun) error {
-	if len(runs) == 0 {
-		return nil
-	}
-	tx, err := db.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	stmt, err := tx.PrepareContext(ctx, `
-		INSERT INTO provider_transfer_sync_run (
-			sync_id, provider, bucket, organization, project, from_time, to_time, status,
-			requested_at, started_at, completed_at, imported_events, matched_events,
-			ambiguous_events, unmatched_events, error_message
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
-		ON CONFLICT (sync_id) DO UPDATE SET
-			provider = EXCLUDED.provider,
-			bucket = EXCLUDED.bucket,
-			organization = EXCLUDED.organization,
-			project = EXCLUDED.project,
-			from_time = EXCLUDED.from_time,
-			to_time = EXCLUDED.to_time,
-			status = EXCLUDED.status,
-			requested_at = EXCLUDED.requested_at,
-			started_at = EXCLUDED.started_at,
-			completed_at = EXCLUDED.completed_at,
-			imported_events = EXCLUDED.imported_events,
-			matched_events = EXCLUDED.matched_events,
-			ambiguous_events = EXCLUDED.ambiguous_events,
-			unmatched_events = EXCLUDED.unmatched_events,
-			error_message = EXCLUDED.error_message
-	`)
-	if err != nil {
-		return err
-	}
-	defer stmt.Close()
-	for _, run := range runs {
-		if run.SyncID == "" {
-			continue
-		}
-		if _, err := stmt.ExecContext(ctx,
-			run.SyncID, run.Provider, run.Bucket, run.Organization, run.Project, run.From.UTC(), run.To.UTC(), run.Status,
-			run.RequestedAt.UTC(), nullableTime(run.StartedAt), nullableTime(run.CompletedAt), run.ImportedEvents, run.MatchedEvents,
-			run.AmbiguousEvents, run.UnmatchedEvents, run.ErrorMessage,
-		); err != nil {
-			return err
-		}
-	}
-	return tx.Commit()
-}
-
-func (db *PostgresDB) ListProviderTransferSyncRuns(ctx context.Context, filter models.TransferAttributionFilter, limit int) ([]models.ProviderTransferSyncRun, error) {
-	if limit <= 0 || limit > 1000 {
-		limit = 100
-	}
-	where, args := providerSyncWhere(filter)
-	args = append(args, limit)
-	query := fmt.Sprintf(`
-		SELECT sync_id, provider, bucket, organization, project, from_time, to_time, status,
-			requested_at, started_at, completed_at, imported_events, matched_events,
-			ambiguous_events, unmatched_events, error_message
-		FROM provider_transfer_sync_run%s
-		ORDER BY requested_at DESC, sync_id ASC
-		LIMIT $%d`, where, len(args))
-	rows, err := db.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	return scanProviderSyncRuns(rows)
-}
-
 func (db *PostgresDB) GetTransferAttributionSummary(ctx context.Context, filter models.TransferAttributionFilter) (models.TransferAttributionSummary, error) {
-	where, args := providerTransferWhere(filter)
+	where, args := transferAttributionWhere(filter)
 	var out models.TransferAttributionSummary
 	err := db.db.QueryRowContext(ctx, `
 		SELECT
 			COUNT(*),
-			0,
+			COALESCE(SUM(CASE WHEN event_type = 'access_issued' THEN 1 ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN direction = 'download' THEN 1 ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN direction = 'upload' THEN 1 ELSE 0 END), 0),
-			COALESCE(SUM(bytes_transferred), 0),
-			COALESCE(SUM(CASE WHEN direction = 'download' THEN bytes_transferred ELSE 0 END), 0),
-			COALESCE(SUM(CASE WHEN direction = 'upload' THEN bytes_transferred ELSE 0 END), 0)
-		FROM provider_transfer_event`+where, args...).Scan(
+			COALESCE(SUM(bytes_requested), 0),
+			COALESCE(SUM(CASE WHEN direction = 'download' THEN bytes_requested ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN direction = 'upload' THEN bytes_requested ELSE 0 END), 0)
+		FROM transfer_attribution_event`+where, args...).Scan(
 		&out.EventCount,
 		&out.AccessIssuedCount,
 		&out.DownloadEventCount,
@@ -232,16 +161,16 @@ func (db *PostgresDB) GetTransferAttributionSummary(ctx context.Context, filter 
 }
 
 func (db *PostgresDB) GetTransferAttributionBreakdown(ctx context.Context, filter models.TransferAttributionFilter, groupBy string) ([]models.TransferAttributionBreakdown, error) {
-	keyExpr, selectExpr := providerTransferGroupExpr(groupBy)
-	where, args := providerTransferWhere(filter)
+	keyExpr, selectExpr := transferAttributionGroupExpr(groupBy)
+	where, args := transferAttributionWhere(filter)
 	query := fmt.Sprintf(`
 		SELECT %s,
 			COUNT(*),
-			COALESCE(SUM(bytes_transferred), 0),
-			COALESCE(SUM(CASE WHEN direction = 'download' THEN bytes_transferred ELSE 0 END), 0),
-			COALESCE(SUM(CASE WHEN direction = 'upload' THEN bytes_transferred ELSE 0 END), 0),
+			COALESCE(SUM(bytes_requested), 0),
+			COALESCE(SUM(CASE WHEN direction = 'download' THEN bytes_requested ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN direction = 'upload' THEN bytes_requested ELSE 0 END), 0),
 			MAX(event_time)
-		FROM provider_transfer_event%s
+		FROM transfer_attribution_event%s
 		GROUP BY %s
 		ORDER BY MAX(event_time) DESC, key ASC
 		LIMIT 1000
@@ -495,7 +424,7 @@ func (db *PostgresDB) backfillAccessGrants(ctx context.Context) error {
 	defer tx.Rollback()
 
 	rows, err := tx.QueryContext(ctx, `
-		SELECT event_id, access_grant_id, event_type, event_time, request_id, object_id, sha256, object_size,
+		SELECT event_id, access_grant_id, event_type, direction, event_time, request_id, object_id, sha256, object_size,
 			organization, project, access_id, provider, bucket, storage_url, range_start, range_end,
 			bytes_requested, bytes_completed, actor_email, actor_subject, auth_mode, client_name, client_version,
 			transfer_session_id
@@ -511,7 +440,7 @@ func (db *PostgresDB) backfillAccessGrants(ctx context.Context) error {
 	for rows.Next() {
 		var ev models.TransferAttributionEvent
 		if err := rows.Scan(
-			&ev.EventID, &ev.AccessGrantID, &ev.EventType, &ev.EventTime, &ev.RequestID, &ev.ObjectID, &ev.SHA256, &ev.ObjectSize,
+			&ev.EventID, &ev.AccessGrantID, &ev.EventType, &ev.Direction, &ev.EventTime, &ev.RequestID, &ev.ObjectID, &ev.SHA256, &ev.ObjectSize,
 			&ev.Organization, &ev.Project, &ev.AccessID, &ev.Provider, &ev.Bucket, &ev.StorageURL, &ev.RangeStart, &ev.RangeEnd,
 			&ev.BytesRequested, &ev.BytesCompleted, &ev.ActorEmail, &ev.ActorSubject, &ev.AuthMode, &ev.ClientName, &ev.ClientVersion,
 			&ev.TransferSessionID,
@@ -598,80 +527,6 @@ func accessGrantIDFromEvent(ev models.TransferAttributionEvent) string {
 	}
 	sum := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
 	return hex.EncodeToString(sum[:])
-}
-
-func providerSyncWhere(filter models.TransferAttributionFilter) (string, []any) {
-	parts := make([]string, 0)
-	args := make([]any, 0)
-	add := func(column string, value any) {
-		args = append(args, value)
-		parts = append(parts, fmt.Sprintf("%s = $%d", column, len(args)))
-	}
-	if strings.TrimSpace(filter.Organization) != "" {
-		add("organization", strings.TrimSpace(filter.Organization))
-	}
-	if strings.TrimSpace(filter.Project) != "" {
-		add("project", strings.TrimSpace(filter.Project))
-	}
-	if strings.TrimSpace(filter.Provider) != "" {
-		add("provider", strings.TrimSpace(filter.Provider))
-	}
-	if strings.TrimSpace(filter.Bucket) != "" {
-		add("bucket", strings.TrimSpace(filter.Bucket))
-	}
-	if filter.From != nil {
-		args = append(args, filter.From.UTC())
-		parts = append(parts, fmt.Sprintf("to_time >= $%d", len(args)))
-	}
-	if filter.To != nil {
-		args = append(args, filter.To.UTC())
-		parts = append(parts, fmt.Sprintf("from_time <= $%d", len(args)))
-	}
-	if len(parts) == 0 {
-		return "", args
-	}
-	return " WHERE " + strings.Join(parts, " AND "), args
-}
-
-func scanProviderSyncRuns(rows transferRows) ([]models.ProviderTransferSyncRun, error) {
-	out := make([]models.ProviderTransferSyncRun, 0)
-	for rows.Next() {
-		var run models.ProviderTransferSyncRun
-		var started, completed sql.NullTime
-		if err := rows.Scan(
-			&run.SyncID,
-			&run.Provider,
-			&run.Bucket,
-			&run.Organization,
-			&run.Project,
-			&run.From,
-			&run.To,
-			&run.Status,
-			&run.RequestedAt,
-			&started,
-			&completed,
-			&run.ImportedEvents,
-			&run.MatchedEvents,
-			&run.AmbiguousEvents,
-			&run.UnmatchedEvents,
-			&run.ErrorMessage,
-		); err != nil {
-			return nil, err
-		}
-		run.From = run.From.UTC()
-		run.To = run.To.UTC()
-		run.RequestedAt = run.RequestedAt.UTC()
-		if started.Valid {
-			t := started.Time.UTC()
-			run.StartedAt = &t
-		}
-		if completed.Valid {
-			t := completed.Time.UTC()
-			run.CompletedAt = &t
-		}
-		out = append(out, run)
-	}
-	return out, rows.Err()
 }
 
 func (db *PostgresDB) reconcileProviderTransferEvent(ctx context.Context, tx *sql.Tx, ev models.ProviderTransferEvent) (models.ProviderTransferEvent, error) {
@@ -879,6 +734,18 @@ func transferAttributionWhere(filter models.TransferAttributionFilter) (string, 
 	if strings.TrimSpace(filter.EventType) != "" && strings.TrimSpace(filter.EventType) != "all" {
 		add("event_type", strings.TrimSpace(filter.EventType))
 	}
+	direction := strings.TrimSpace(filter.Direction)
+	if direction == "" {
+		switch strings.TrimSpace(filter.EventType) {
+		case models.ProviderTransferDirectionDownload:
+			direction = models.ProviderTransferDirectionDownload
+		case models.ProviderTransferDirectionUpload:
+			direction = models.ProviderTransferDirectionUpload
+		}
+	}
+	if direction != "" && direction != "all" {
+		add("direction", direction)
+	}
 	if filter.From != nil {
 		args = append(args, filter.From.UTC())
 		parts = append(parts, fmt.Sprintf("event_time >= $%d", len(args)))
@@ -990,6 +857,15 @@ func transferAttributionGroupExpr(groupBy string) (string, string) {
 		return "sha256", "sha256 AS key, '' AS organization, '' AS project, '' AS provider, '' AS bucket, sha256, '' AS actor_email, '' AS actor_subject"
 	default:
 		return "organization, project", "organization || '/' || project AS key, organization, project, '' AS provider, '' AS bucket, '' AS sha256, '' AS actor_email, '' AS actor_subject"
+	}
+}
+
+func normalizeTransferDirection(direction string) string {
+	switch strings.ToLower(strings.TrimSpace(direction)) {
+	case models.ProviderTransferDirectionUpload:
+		return models.ProviderTransferDirectionUpload
+	default:
+		return models.ProviderTransferDirectionDownload
 	}
 }
 

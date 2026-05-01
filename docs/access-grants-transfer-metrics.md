@@ -1,31 +1,45 @@
 # Access Grants and Transfer Metrics
 
-Syfon separates authorization telemetry from billable transfer usage.
+Syfon records transfer billing telemetry when it successfully issues signed upload
+and download URLs.
 
 ## Concepts
 
 - `access_grant` is the canonical billing identity for a signed or direct storage access authorization. A grant is keyed by object DID, SHA256, organization, project, access ID, provider, bucket, and storage URL.
-- `access_issued` is an append-only audit event recorded every time Syfon returns an access URL. It proves authorization was issued, not that bytes moved.
-- `provider_transfer_event` is provider-observed storage activity imported from S3, GCS, Azure, or file-provider logs. These events are the source of truth for billable upload and download bytes.
+- `access_issued` is an append-only audit event recorded every time Syfon returns an access URL. Transfer totals are computed from these signed-url rows.
+- Transfer summaries expose aggregate `bytes_downloaded` and `bytes_uploaded`.
+- Transfer breakdowns can group those bytes by scope, user, storage provider/bucket, or object SHA256.
 
-## Reconciliation
+## Billing Report
 
-When provider transfer events are imported, Syfon reconciles each event to an `access_grant`.
+Use the combined CLI report when you need the billing shape used by dashboards:
 
-1. If the provider event includes an `access_grant_id`, Syfon matches that grant directly.
-2. Otherwise Syfon matches by provider, bucket, object key or storage URL, and the access grant issue time window.
-3. A single match is marked `matched`.
-4. No match is marked `unmatched`.
-5. Multiple different candidate grants are marked `ambiguous`.
+```bash
+syfon metrics transfers billing --organization cbds --project end_to_end_test
+```
 
-Billing summaries and breakdowns count matched provider transfer events only. `access_issued` audit rows are useful for debugging and visibility, but they are never counted as completed transfer usage by themselves.
+The response includes:
 
-## Why Signed URLs Are Not Usage
+- `summary`: total download and upload event counts and byte totals.
+- `storage_locations`: provider/bucket rows with download and upload bytes.
+- `files`: object SHA256 rows with download and upload bytes.
 
-Issuing a signed URL only means Syfon authorized a client to access a storage object. The client might never use the URL, might read a partial range, might retry, or might receive an error from the provider. Provider logs are required to know which bucket request actually happened and how many bytes moved.
+The same data is also available as separate calls:
+
+```bash
+syfon metrics transfers summary
+syfon metrics transfers breakdown --group-by provider
+syfon metrics transfers breakdown --group-by object
+```
+
+When authz is enforced and no explicit organization/project filter is provided,
+transfer metrics aggregate across the project scopes the caller can read.
 
 ## Operational Notes
 
-- Configure provider log collection for each bucket before using transfer metrics for billing.
-- Use provider transfer sync metadata to identify the latest completed sync window.
-- Missing or stale sync windows should be shown to dashboard users so they know whether reported usage is complete for the selected time range.
+- No provider access-log sync is required for signed-url billing metrics.
+- The old provider transfer sync API is retained for compatibility and diagnostics,
+  but the CLI no longer exposes sync commands for normal billing workflows.
+- Blank uploads and multipart part signing cannot always be attributed to a DRS
+  object at URL-issue time; object-backed upload/download URL signing is recorded
+  with file, scope, provider, bucket, and byte metadata.

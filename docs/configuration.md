@@ -51,6 +51,10 @@ signing:
 - Optional HTTP basic auth:
   - `auth.basic.username`
   - `auth.basic.password`
+- Optional CSV-backed local authorization:
+  - `auth.local_authz_csv`
+  - or `DRS_LOCAL_AUTHZ_CSV`
+  - when omitted, local basic auth remains admin/unrestricted
 
 ### `auth.mode: gen3`
 
@@ -61,6 +65,19 @@ Validation rules:
 
 - `auth.mode` is required and must be `local` or `gen3`.
 - If one of `auth.basic.username/password` is set, both must be set.
+
+Local authorization CSV columns:
+
+```csv
+username,password,organization,project,methods
+alice,alice-pass,cbds,end_to_end_test,read|write
+bob,bob-pass,cbds,end_to_end_test,read
+```
+
+Use `resource` instead of `organization,project` when you want to provide a full Gen3 resource path such as `/programs/cbds/projects/end_to_end_test`. The `write` alias expands to `file_upload`, `create`, `update`, and `delete`.
+
+For a full sample config, CSV examples, and expected request behavior, see
+[Local Basic Authz CSV](local-authz-csv.md).
 
 ## Database
 
@@ -88,19 +105,8 @@ For `provider: s3`, required fields are:
 
 `endpoint` is optional and commonly used for S3-compatible storage.
 
-For cloud transfer billing metrics, set or omit `billing_logs_enabled` as follows:
-
-- Omit `billing_logs_enabled` or set it to `true` when provider access logs are configured.
-- Set `billing_logs_enabled: false` for S3-compatible/non-AWS buckets that do not expose provider access logs.
-
-When billing logs are enabled for `s3`, `gcs`, or `azure`, these fields are required:
-
-- `billing_log_bucket`
-- `billing_log_prefix`
-
-The same credential used for the data bucket must be able to list and read the billing log bucket/prefix. Syfon validates that log source when the bucket credential is added or loaded from config. Local `file` provider credentials and credentials with `billing_logs_enabled: false` are exempt from this cloud log requirement.
-
-Transfer metrics do not block dashboard responses when a sync window is missing. Instead, metrics responses include freshness metadata showing whether the requested provider/bucket/time range is covered and when the latest completed sync ran.
+Transfer metrics assume each signed URL issued by Syfon is used. No provider
+access-log bucket setup is required for billing metrics.
 
 Bucket validation follows provider rules:
 
@@ -184,6 +190,8 @@ If `DRS_CREDENTIAL_KMS_KEY_ID` is set (or `DRS_CREDENTIAL_KEY_MANAGER=aws-kms`),
 - Or use environment variables:
   - `DRS_BASIC_AUTH_USER`
   - `DRS_BASIC_AUTH_PASSWORD`
+- For multi-user local authz tests, set `auth.local_authz_csv` or `DRS_LOCAL_AUTHZ_CSV`.
+  If this is set, users are authenticated from the CSV and method-aware authorization is enforced.
 - **To use the plugin-based local auth:**
   - Build the plugin:
     ```sh

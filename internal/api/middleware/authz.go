@@ -67,6 +67,8 @@ type AuthzMiddleware struct {
 	sf                 singleflight.Group
 	pluginManager      pluginManagerInterface               // interface for testability
 	authnPluginManager authenticationPluginManagerInterface // authentication plugin (interface)
+	localUsers         *localAuthzStore
+	localUsersErr      error
 }
 
 type mockAuthConfig struct {
@@ -112,6 +114,18 @@ func NewAuthzMiddleware(logger *slog.Logger, mode, basicUser, basicPass string) 
 		mock:      loadMockAuthConfigFromEnv(),
 		cache:     cache,
 	}
+	if m.mode == "local" {
+		localCSV := strings.TrimSpace(os.Getenv("DRS_LOCAL_AUTHZ_CSV"))
+		if localCSV != "" {
+			users, err := loadLocalAuthzCSV(localCSV)
+			if err != nil {
+				m.localUsersErr = err
+				logger.Error("failed to load local authz csv", "path", localCSV, "err", err)
+			} else {
+				m.localUsers = users
+			}
+		}
+	}
 	// Config loading maps auth.plugin_paths.authz to this environment variable.
 	pluginPath := os.Getenv("SYFON_AUTHZ_PLUGIN_PATH")
 	if pluginPath != "" {
@@ -131,7 +145,7 @@ func NewAuthzMiddleware(logger *slog.Logger, mode, basicUser, basicPass string) 
 	// Built-in plugins fallback
 	if m.authnPluginManager == nil {
 		if m.mode == "local" {
-			m.authnPluginManager = &LocalAuthPlugin{BasicUser: basicUser, BasicPass: basicPass}
+			m.authnPluginManager = &LocalAuthPlugin{BasicUser: basicUser, BasicPass: basicPass, Users: m.localUsers}
 		} else if m.mode == "gen3" {
 			m.authnPluginManager = &Gen3AuthPlugin{MockConfig: m.mock, Logger: logger}
 		}
@@ -164,6 +178,10 @@ func (m *AuthzMiddleware) prepareRequestContext(c fiber.Ctx) (context.Context, s
 }
 
 func (m *AuthzMiddleware) handleLocalAuth(c fiber.Ctx, ctx context.Context, authHeader string) error {
+	if m.localUsersErr != nil {
+		m.logger.Error("local authz csv is configured but could not be loaded", "err", m.localUsersErr)
+		return c.SendStatus(fiber.StatusInternalServerError)
+	}
 	if m.authnPluginManager != nil {
 		input := &plugin.AuthenticationInput{
 			RequestID:  common.GetRequestID(ctx),
@@ -181,11 +199,41 @@ func (m *AuthzMiddleware) handleLocalAuth(c fiber.Ctx, ctx context.Context, auth
 		if output.Claims != nil {
 			ctx = context.WithValue(ctx, common.ClaimsKey, output.Claims)
 		}
+		if m.applyLocalAuthzClaims(&ctx, output) {
+			ctx = context.WithValue(ctx, common.AuthzEnforcedKey, true)
+		} else if m.localUsers != nil && output.Subject != "" {
+			if resources, privileges, ok := m.localUsers.authzForSubject(output.Subject); ok {
+				ctx = context.WithValue(ctx, common.UserAuthzKey, resources)
+				ctx = context.WithValue(ctx, common.UserPrivilegesKey, privileges)
+				ctx = context.WithValue(ctx, common.AuthzEnforcedKey, true)
+			} else {
+				return c.SendStatus(fiber.StatusForbidden)
+			}
+		} else if m.localUsers != nil {
+			return c.SendStatus(fiber.StatusForbidden)
+		}
 		c.SetContext(ctx)
 		return c.Next()
 	}
 	c.SetContext(ctx)
 	return c.Next()
+}
+
+func (m *AuthzMiddleware) applyLocalAuthzClaims(ctx *context.Context, output *plugin.AuthenticationOutput) bool {
+	if output == nil || output.Claims == nil {
+		return false
+	}
+	resources, ok := output.Claims[localAuthzResourcesClaim].([]string)
+	if !ok {
+		return false
+	}
+	privileges, ok := output.Claims[localAuthzPrivilegesClaim].(map[string]map[string]bool)
+	if !ok {
+		return false
+	}
+	*ctx = context.WithValue(*ctx, common.UserAuthzKey, append([]string(nil), resources...))
+	*ctx = context.WithValue(*ctx, common.UserPrivilegesKey, clonePrivMap(privileges))
+	return true
 }
 
 func (m *AuthzMiddleware) handleGen3Auth(c fiber.Ctx, ctx context.Context, authHeader string) error {

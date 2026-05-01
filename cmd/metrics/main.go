@@ -7,6 +7,7 @@ import (
 
 	syclient "github.com/calypr/syfon/client"
 	"github.com/calypr/syfon/client/syfonclient"
+	"github.com/calypr/syfon/internal/models"
 	"github.com/spf13/cobra"
 )
 
@@ -23,13 +24,6 @@ var (
 	metricsUser         string
 	metricsGroupBy      string
 	metricsAllowStale   bool
-	metricsSyncStatus   string
-	metricsSyncLimit    int
-	metricsImported     int64
-	metricsMatched      int64
-	metricsAmbiguous    int64
-	metricsUnmatched    int64
-	metricsError        string
 	metricsToken        string
 	metricsUsername     string
 	metricsPassword     string
@@ -83,35 +77,42 @@ var transfersBreakdownCmd = &cobra.Command{
 	},
 }
 
-var transfersSyncCmd = &cobra.Command{
-	Use:   "sync",
-	Short: "Record provider transfer sync status",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		c, err := newMetricsClient(cmd)
-		if err != nil {
-			return err
-		}
-		runs, err := c.Metrics().RecordProviderTransferSync(cmd.Context(), syncOptions())
-		if err != nil {
-			return err
-		}
-		return writeJSON(cmd, runs)
-	},
+type transferBillingReport struct {
+	Summary          models.TransferAttributionSummary     `json:"summary"`
+	StorageLocations []models.TransferAttributionBreakdown `json:"storage_locations"`
+	Files            []models.TransferAttributionBreakdown `json:"files"`
 }
 
-var transfersSyncStatusCmd = &cobra.Command{
-	Use:   "sync-status",
-	Short: "List provider transfer sync status",
+var transfersBillingCmd = &cobra.Command{
+	Use:   "billing",
+	Short: "Report transfer billing totals by storage location and file",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		c, err := newMetricsClient(cmd)
 		if err != nil {
 			return err
 		}
-		runs, err := c.Metrics().ProviderTransferSyncStatus(cmd.Context(), syncOptions())
+		opts := transferOptions()
+		summary, err := c.Metrics().TransferSummary(cmd.Context(), opts)
 		if err != nil {
 			return err
 		}
-		return writeJSON(cmd, runs)
+		providerOpts := opts
+		providerOpts.GroupBy = "provider"
+		storageLocations, err := c.Metrics().TransferBreakdown(cmd.Context(), providerOpts)
+		if err != nil {
+			return err
+		}
+		objectOpts := opts
+		objectOpts.GroupBy = "object"
+		files, err := c.Metrics().TransferBreakdown(cmd.Context(), objectOpts)
+		if err != nil {
+			return err
+		}
+		return writeJSON(cmd, transferBillingReport{
+			Summary:          summary,
+			StorageLocations: storageLocations.Data,
+			Files:            files.Data,
+		})
 	},
 }
 
@@ -119,10 +120,9 @@ func init() {
 	Cmd.AddCommand(transfersCmd)
 	transfersCmd.AddCommand(transfersSummaryCmd)
 	transfersCmd.AddCommand(transfersBreakdownCmd)
-	transfersCmd.AddCommand(transfersSyncCmd)
-	transfersCmd.AddCommand(transfersSyncStatusCmd)
+	transfersCmd.AddCommand(transfersBillingCmd)
 
-	for _, c := range []*cobra.Command{transfersSummaryCmd, transfersBreakdownCmd, transfersSyncCmd, transfersSyncStatusCmd} {
+	for _, c := range []*cobra.Command{transfersSummaryCmd, transfersBreakdownCmd, transfersBillingCmd} {
 		c.Flags().StringVar(&metricsOrganization, "organization", "", "Organization/program filter")
 		c.Flags().StringVar(&metricsProject, "project", "", "Project filter")
 		c.Flags().StringVar(&metricsFrom, "from", "", "RFC3339 start time filter")
@@ -133,7 +133,7 @@ func init() {
 		c.Flags().StringVar(&metricsUsername, "username", "", "Basic auth username")
 		c.Flags().StringVar(&metricsPassword, "password", "", "Basic auth password")
 	}
-	for _, c := range []*cobra.Command{transfersSummaryCmd, transfersBreakdownCmd} {
+	for _, c := range []*cobra.Command{transfersSummaryCmd, transfersBreakdownCmd, transfersBillingCmd} {
 		c.Flags().StringVar(&metricsDirection, "direction", "", "Transfer direction filter: download or upload")
 		c.Flags().StringVar(&metricsReconcile, "reconciliation-status", "", "Provider reconciliation filter: matched, ambiguous, unmatched, or all")
 		c.Flags().StringVar(&metricsSHA256, "sha256", "", "SHA256 filter")
@@ -141,13 +141,6 @@ func init() {
 		c.Flags().BoolVar(&metricsAllowStale, "allow-stale", false, "Deprecated: metrics always return persisted data with freshness metadata")
 	}
 	transfersBreakdownCmd.Flags().StringVar(&metricsGroupBy, "group-by", "scope", "Breakdown grouping: scope, user, provider, or object")
-	transfersSyncCmd.Flags().StringVar(&metricsSyncStatus, "status", "pending", "Sync status to record: pending, completed, or failed")
-	transfersSyncCmd.Flags().Int64Var(&metricsImported, "imported-events", 0, "Provider events imported in this sync window")
-	transfersSyncCmd.Flags().Int64Var(&metricsMatched, "matched-events", 0, "Imported provider events matched to Syfon access grants")
-	transfersSyncCmd.Flags().Int64Var(&metricsAmbiguous, "ambiguous-events", 0, "Imported provider events with ambiguous attribution")
-	transfersSyncCmd.Flags().Int64Var(&metricsUnmatched, "unmatched-events", 0, "Imported provider events not matched to Syfon access grants")
-	transfersSyncCmd.Flags().StringVar(&metricsError, "error-message", "", "Error message for failed sync status")
-	transfersSyncStatusCmd.Flags().IntVar(&metricsSyncLimit, "limit", 100, "Maximum sync windows to return")
 }
 
 func newMetricsClient(cmd *cobra.Command) (syfonclient.SyfonClient, error) {
@@ -179,24 +172,6 @@ func transferOptions() syfonclient.TransferMetricsOptions {
 		User:                 strings.TrimSpace(metricsUser),
 		GroupBy:              strings.TrimSpace(metricsGroupBy),
 		AllowStale:           metricsAllowStale,
-	}
-}
-
-func syncOptions() syfonclient.ProviderTransferSyncOptions {
-	return syfonclient.ProviderTransferSyncOptions{
-		Organization:    strings.TrimSpace(metricsOrganization),
-		ProjectID:       strings.TrimSpace(metricsProject),
-		Provider:        strings.TrimSpace(metricsProvider),
-		Bucket:          strings.TrimSpace(metricsBucket),
-		From:            strings.TrimSpace(metricsFrom),
-		To:              strings.TrimSpace(metricsTo),
-		Status:          strings.TrimSpace(metricsSyncStatus),
-		ImportedEvents:  metricsImported,
-		MatchedEvents:   metricsMatched,
-		AmbiguousEvents: metricsAmbiguous,
-		UnmatchedEvents: metricsUnmatched,
-		ErrorMessage:    strings.TrimSpace(metricsError),
-		Limit:           metricsSyncLimit,
 	}
 }
 

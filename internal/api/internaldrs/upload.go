@@ -11,6 +11,7 @@ import (
 	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/apigen/server/internalapi"
 	"github.com/calypr/syfon/internal/api/apiutil"
+	"github.com/calypr/syfon/internal/api/attribution"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/models"
@@ -104,6 +105,12 @@ func handleInternalUploadURLFiber(om *core.ObjectManager) fiber.Handler {
 		if err != nil {
 			return apiutil.HandleError(c, err)
 		}
+		if obj != nil {
+			attribution.RecordAccessIssued(c.Context(), om, obj, attribution.AccessDetails{
+				Direction:  models.ProviderTransferDirectionUpload,
+				StorageURL: urlStr,
+			})
+		}
 
 		return c.JSON(internalapi.InternalSignedURL{
 			Url: &signedURL,
@@ -174,6 +181,10 @@ func handleInternalUploadBulkFiber(om *core.ObjectManager) fiber.Handler {
 				res.Error = &errMsg
 				res.Status = http.StatusInternalServerError
 			} else {
+				attribution.RecordAccessIssued(c.Context(), om, obj, attribution.AccessDetails{
+					Direction:  models.ProviderTransferDirectionUpload,
+					StorageURL: urlStr,
+				})
 				res.Url = &signedURL
 				res.Bucket = &bucket
 				res.FileName = &key

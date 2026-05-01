@@ -13,14 +13,12 @@ import (
 )
 
 var (
-	bucketProvider   string
-	bucketRegion     string
-	bucketAccessKey  string
-	bucketSecretKey  string
-	bucketEndpoint   string
-	bucketPath       string
-	billingLogBucket string
-	billingLogPrefix string
+	bucketProvider  string
+	bucketRegion    string
+	bucketAccessKey string
+	bucketSecretKey string
+	bucketEndpoint  string
+	bucketPath      string
 )
 
 var Cmd = &cobra.Command{
@@ -56,13 +54,6 @@ var addCmd = &cobra.Command{
 		if v := strings.TrimSpace(bucketEndpoint); v != "" {
 			payload.Endpoint = &v
 		}
-		if v := strings.TrimSpace(billingLogBucket); v != "" {
-			payload.BillingLogBucket = &v
-		}
-		if v := strings.Trim(strings.TrimSpace(billingLogPrefix), "/"); v != "" {
-			payload.BillingLogPrefix = &v
-		}
-
 		serverURL, err := cmd.Flags().GetString("server")
 		if err != nil {
 			return fmt.Errorf("get server flag: %w", err)
@@ -200,26 +191,16 @@ var listCmd = &cobra.Command{
 			if md.Region != nil {
 				region = *md.Region
 			}
-			logBucket := ""
-			if md.BillingLogBucket != nil {
-				logBucket = *md.BillingLogBucket
-			}
-			logPrefix := ""
-			if md.BillingLogPrefix != nil {
-				logPrefix = *md.BillingLogPrefix
-			}
 			programs := []string{}
 			if md.Programs != nil {
 				programs = *md.Programs
 			}
 			fmt.Fprintf(
 				cmd.OutOrStdout(),
-				"%s\tprovider=%s\tregion=%s\tbilling_logs=%s/%s\tprograms=%s\n",
+				"%s\tprovider=%s\tregion=%s\tprograms=%s\n",
 				name,
 				strings.TrimSpace(provider),
 				strings.TrimSpace(region),
-				strings.TrimSpace(logBucket),
-				strings.Trim(strings.TrimSpace(logPrefix), "/"),
 				strings.Join(programs, ","),
 			)
 		}
@@ -259,8 +240,6 @@ func init() {
 	addCmd.Flags().StringVar(&bucketAccessKey, "access-key", "", "S3 access key (required for new s3 creds)")
 	addCmd.Flags().StringVar(&bucketSecretKey, "secret-key", "", "S3 secret key (required for new s3 creds)")
 	addCmd.Flags().StringVar(&bucketEndpoint, "endpoint", "", "Custom endpoint URL")
-	addCmd.Flags().StringVar(&billingLogBucket, "billing-log-bucket", "", "Bucket/container where provider access logs are delivered")
-	addCmd.Flags().StringVar(&billingLogPrefix, "billing-log-prefix", "", "Prefix where provider access logs are delivered")
 
 	addOrganizationCmd.Flags().StringVar(&bucketPath, "path", "", "Organization storage root as <scheme>://<bucket>/<prefix>")
 	addProjectCmd.Flags().StringVar(&bucketPath, "path", "", "Project storage root as <scheme>://<bucket>/<prefix>")

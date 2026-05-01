@@ -482,6 +482,45 @@ func TestHandleInternalDeleteByQuery(t *testing.T) {
 	})
 }
 
+func TestHandleInternalDeleteByQuery_AuthzParity(t *testing.T) {
+	for _, mode := range []string{"gen3", "local-authz"} {
+		t.Run(mode, func(t *testing.T) {
+			now := time.Now().UTC()
+			mockDB := &testutils.MockDatabase{
+				Objects: map[string]*drs.DrsObject{
+					"obj-1": {Id: "obj-1", CreatedTime: now, UpdatedTime: &now},
+					"obj-2": {Id: "obj-2", CreatedTime: now, UpdatedTime: &now},
+				},
+				ObjectAuthz: map[string]map[string][]string{
+					"obj-1": {"org": {"a"}},
+					"obj-2": {"org": {"a"}},
+				},
+			}
+
+			req := httptest.NewRequest(http.MethodDelete, "/?organization=org&project=a", nil)
+			req = withTestAuthzContext(req, mode, map[string]map[string]bool{
+				"/programs/org/projects/a": {"delete": true},
+			})
+			rr := httptest.NewRecorder()
+			om := core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
+			handleInternalDeleteByQuery(rr, req, om)
+
+			if rr.Code != http.StatusOK {
+				t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+			}
+			if _, ok := mockDB.Objects["obj-1"]; ok {
+				t.Fatal("expected obj-1 to be deleted")
+			}
+			if _, ok := mockDB.Objects["obj-2"]; ok {
+				t.Fatal("expected obj-2 to be deleted")
+			}
+			if !strings.Contains(rr.Body.String(), `"deleted":2`) {
+				t.Fatalf("expected deleted count in response, got %s", rr.Body.String())
+			}
+		})
+	}
+}
+
 func TestRegisterInternalIndexRoutes_LegacyAliases(t *testing.T) {
 	now := time.Now().UTC()
 	mockDB := &testutils.MockDatabase{

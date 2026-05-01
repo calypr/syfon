@@ -48,6 +48,7 @@ syfon
 # Local one-off configs and DBs
 /drs_local.db
 /drs_mock.db
+/indexd-records.sqlite
 
 # Test reports
 test_report.json

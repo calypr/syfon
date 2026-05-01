@@ -85,6 +85,12 @@ Use this section when you are deciding what to edit and what command to run next
 4. Run the impacted tests, not just `go test ./...` by habit.
 5. Commit the generated files together with the source change so the branch stays reproducible.
 
+### Service-info enum alias failures
+
+If `make gen` succeeds but `make build` fails with missing `N200ServiceInfo...` enum types, see [Problem and Solution: GA4GH Service Info Codegen Type Errors](problem-solution-oapi-codegen-service-info.md).
+
+That failure usually means a new GA4GH schema introduced an inline nested enum inside the composed `/service-info` response. Handwritten `compat.go` aliases can unblock a branch without changing the source GA4GH schema.
+
 ### What usually changes in git
 
 - DRS changes usually touch the submodule pointer, `apigen/api/openapi.yaml`, `apigen/drs/*`, and sometimes `docs/index.md` or `README.md`.

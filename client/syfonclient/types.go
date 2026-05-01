@@ -61,19 +61,3 @@ type TransferMetricsOptions struct {
 	ReconciliationStatus string
 	AllowStale           bool
 }
-
-type ProviderTransferSyncOptions struct {
-	Organization    string
-	ProjectID       string
-	Provider        string
-	Bucket          string
-	From            string
-	To              string
-	Status          string
-	ImportedEvents  int64
-	MatchedEvents   int64
-	AmbiguousEvents int64
-	UnmatchedEvents int64
-	ErrorMessage    string
-	Limit           int
-}

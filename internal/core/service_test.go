@@ -108,6 +108,14 @@ func buildGen3Context(privileges map[string]map[string]bool) context.Context {
 	return ctx
 }
 
+func buildLocalAuthzContext(privileges map[string]map[string]bool) context.Context {
+	ctx := context.Background()
+	ctx = context.WithValue(ctx, common.AuthModeKey, "local")
+	ctx = context.WithValue(ctx, common.AuthzEnforcedKey, true)
+	ctx = context.WithValue(ctx, common.UserPrivilegesKey, privileges)
+	return ctx
+}
+
 func TestObjectManagerGetObjectLookupPaths(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -236,6 +244,42 @@ func TestObjectManagerGetObjectLookupPaths(t *testing.T) {
 	}
 }
 
+func TestObjectManagerGetObjectAuthzParity(t *testing.T) {
+	builders := map[string]func(map[string]map[string]bool) context.Context{
+		"gen3":        buildGen3Context,
+		"local-authz": buildLocalAuthzContext,
+	}
+	for mode, buildCtx := range builders {
+		t.Run(mode, func(t *testing.T) {
+			db := &coreTestDB{
+				MockDatabase: &testutils.MockDatabase{
+					Objects: map[string]*drs.DrsObject{
+						"obj-1": {Id: "obj-1", SelfUri: "drs://obj-1"},
+					},
+					ObjectAuthz: map[string]map[string][]string{
+						"obj-1": {"org": {"project"}},
+					},
+				},
+			}
+			om := NewObjectManager(db, &capturingURLManager{})
+			resource := "/programs/org/projects/project"
+
+			if _, err := om.GetObject(buildCtx(map[string]map[string]bool{
+				resource: {"read": true},
+			}), "obj-1", "read"); err != nil {
+				t.Fatalf("expected read to succeed: %v", err)
+			}
+
+			_, err := om.GetObject(buildCtx(map[string]map[string]bool{
+				resource: {"create": true},
+			}), "obj-1", "read")
+			if !errors.Is(err, common.ErrUnauthorized) {
+				t.Fatalf("expected missing read privilege to be unauthorized, got %v", err)
+			}
+		})
+	}
+}
+
 func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 	t.Run("delete by scope filters unauthorized objects", func(t *testing.T) {
 		db := &coreTestDB{
@@ -349,6 +393,100 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 		}
 		if um.partBucket != "bucket-c" || um.completeBucket != "bucket-c" {
 			t.Fatalf("expected multipart delegation to bucket-c, got part=%q complete=%q", um.partBucket, um.completeBucket)
+		}
+	})
+
+	t.Run("object signing prepends configured bucket scope prefix to imported relative key", func(t *testing.T) {
+		mockDB := &testutils.MockDatabase{
+			BucketScopes: map[string]models.BucketScope{
+				"calypr|training": {
+					Organization: "calypr",
+					ProjectID:    "training",
+					Bucket:       "calypr",
+					PathPrefix:   "org-root/project-root",
+				},
+			},
+		}
+		db := &coreTestDB{
+			MockDatabase: mockDB,
+		}
+		um := &capturingURLManager{}
+		om := NewObjectManager(db, um)
+		obj := &models.InternalObject{
+			Authorizations: map[string][]string{"calypr": {"training"}},
+		}
+
+		signed, err := om.SignObjectURL(context.Background(), obj, "s3://calypr/008b435e-c1da-58b8-80f1-3ad2882c43cd/542504", urlmanager.SignOptions{})
+		if err != nil {
+			t.Fatalf("SignObjectURL failed: %v", err)
+		}
+		wantURL := "s3://calypr/org-root/project-root/008b435e-c1da-58b8-80f1-3ad2882c43cd/542504"
+		if signed != "signed:"+wantURL {
+			t.Fatalf("unexpected signed url: %s", signed)
+		}
+		if um.signURLAccessURL != wantURL {
+			t.Fatalf("expected scoped storage url %q, got %q", wantURL, um.signURLAccessURL)
+		}
+		if _, err := om.SignObjectURL(context.Background(), obj, "s3://calypr/another-object", urlmanager.SignOptions{}); err != nil {
+			t.Fatalf("second SignObjectURL failed: %v", err)
+		}
+		if mockDB.GetBucketScopeCalls != 1 {
+			t.Fatalf("expected bucket scope to be cached after first lookup, got %d db lookups", mockDB.GetBucketScopeCalls)
+		}
+	})
+
+	t.Run("object signing does not double prepend existing bucket scope prefix", func(t *testing.T) {
+		db := &coreTestDB{
+			MockDatabase: &testutils.MockDatabase{
+				BucketScopes: map[string]models.BucketScope{
+					"calypr|training": {
+						Organization: "calypr",
+						ProjectID:    "training",
+						Bucket:       "calypr",
+						PathPrefix:   "org-root/project-root",
+					},
+				},
+			},
+		}
+		um := &capturingURLManager{}
+		om := NewObjectManager(db, um)
+		obj := &models.InternalObject{
+			Authorizations: map[string][]string{"calypr": {"training"}},
+		}
+
+		input := "s3://calypr/org-root/project-root/008b435e-c1da-58b8-80f1-3ad2882c43cd/542504"
+		if _, err := om.SignObjectURL(context.Background(), obj, input, urlmanager.SignOptions{}); err != nil {
+			t.Fatalf("SignObjectURL failed: %v", err)
+		}
+		if um.signURLAccessURL != input {
+			t.Fatalf("expected already-scoped storage url to be unchanged, got %q", um.signURLAccessURL)
+		}
+	})
+
+	t.Run("create bucket scope updates signing cache", func(t *testing.T) {
+		mockDB := &testutils.MockDatabase{}
+		db := &coreTestDB{MockDatabase: mockDB}
+		um := &capturingURLManager{}
+		om := NewObjectManager(db, um)
+		if err := om.CreateBucketScope(context.Background(), &models.BucketScope{
+			Organization: "calypr",
+			ProjectID:    "training",
+			Bucket:       "calypr",
+			PathPrefix:   "org-root/project-root",
+		}); err != nil {
+			t.Fatalf("CreateBucketScope failed: %v", err)
+		}
+		obj := &models.InternalObject{
+			Authorizations: map[string][]string{"calypr": {"training"}},
+		}
+		if _, err := om.SignObjectURL(context.Background(), obj, "s3://calypr/relative-key", urlmanager.SignOptions{}); err != nil {
+			t.Fatalf("SignObjectURL failed: %v", err)
+		}
+		if mockDB.GetBucketScopeCalls != 0 {
+			t.Fatalf("expected create to populate signing cache without db lookup, got %d lookups", mockDB.GetBucketScopeCalls)
+		}
+		if want := "s3://calypr/org-root/project-root/relative-key"; um.signURLAccessURL != want {
+			t.Fatalf("expected scoped storage url %q, got %q", want, um.signURLAccessURL)
 		}
 	})
 }

@@ -135,6 +135,7 @@ func (db *SqliteDB) initSchema() error {
 			event_id TEXT PRIMARY KEY,
 			access_grant_id TEXT NOT NULL DEFAULT '',
 			event_type TEXT NOT NULL CHECK(event_type IN ('access_issued')),
+			direction TEXT NOT NULL DEFAULT 'download' CHECK(direction IN ('download','upload')),
 			event_time TIMESTAMP NOT NULL,
 			request_id TEXT NOT NULL DEFAULT '',
 			object_id TEXT NOT NULL DEFAULT '',
@@ -206,24 +207,6 @@ func (db *SqliteDB) initSchema() error {
 			auth_mode TEXT NOT NULL DEFAULT '',
 			reconciliation_status TEXT NOT NULL DEFAULT 'unmatched' CHECK(reconciliation_status IN ('matched','ambiguous','unmatched'))
 		)`,
-		`CREATE TABLE IF NOT EXISTS provider_transfer_sync_run (
-			sync_id TEXT PRIMARY KEY,
-			provider TEXT NOT NULL DEFAULT '',
-			bucket TEXT NOT NULL DEFAULT '',
-			organization TEXT NOT NULL DEFAULT '',
-			project TEXT NOT NULL DEFAULT '',
-			from_time TIMESTAMP NOT NULL,
-			to_time TIMESTAMP NOT NULL,
-			status TEXT NOT NULL CHECK(status IN ('pending','completed','failed')),
-			requested_at TIMESTAMP NOT NULL,
-			started_at TIMESTAMP NULL,
-			completed_at TIMESTAMP NULL,
-			imported_events INTEGER NOT NULL DEFAULT 0,
-			matched_events INTEGER NOT NULL DEFAULT 0,
-			ambiguous_events INTEGER NOT NULL DEFAULT 0,
-			unmatched_events INTEGER NOT NULL DEFAULT 0,
-			error_message TEXT NOT NULL DEFAULT ''
-		)`,
 		`CREATE INDEX IF NOT EXISTS idx_transfer_attr_scope_time ON transfer_attribution_event(organization, project, event_type, event_time)`,
 		`CREATE INDEX IF NOT EXISTS idx_transfer_attr_actor_time ON transfer_attribution_event(actor_email, actor_subject, event_time)`,
 		`CREATE INDEX IF NOT EXISTS idx_transfer_attr_provider_time ON transfer_attribution_event(provider, bucket, event_time)`,
@@ -238,8 +221,6 @@ func (db *SqliteDB) initSchema() error {
 		`CREATE INDEX IF NOT EXISTS idx_provider_transfer_sha_time ON provider_transfer_event(sha256, event_time)`,
 		`CREATE INDEX IF NOT EXISTS idx_provider_transfer_status ON provider_transfer_event(reconciliation_status, event_time)`,
 		`CREATE INDEX IF NOT EXISTS idx_provider_transfer_grant ON provider_transfer_event(access_grant_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_provider_sync_bucket_time ON provider_transfer_sync_run(provider, bucket, requested_at)`,
-		`CREATE INDEX IF NOT EXISTS idx_provider_sync_scope_time ON provider_transfer_sync_run(organization, project, requested_at)`,
 	}
 
 	for _, q := range queries {
@@ -279,6 +260,14 @@ func (db *SqliteDB) initSchema() error {
 		if !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
 			return err
 		}
+	}
+	if _, err := db.db.Exec(`ALTER TABLE transfer_attribution_event ADD COLUMN direction TEXT NOT NULL DEFAULT 'download'`); err != nil {
+		if !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
+			return err
+		}
+	}
+	if _, err := db.db.Exec(`CREATE INDEX IF NOT EXISTS idx_transfer_attr_direction_time ON transfer_attribution_event(direction, event_time)`); err != nil {
+		return err
 	}
 	if err := db.backfillAccessGrants(context.Background()); err != nil {
 		return err

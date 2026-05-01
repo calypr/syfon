@@ -215,12 +215,12 @@ retryLookup:
 		obj.Checksums = append(obj.Checksums, drs.Checksum{Type: t, Checksum: v})
 	}
 
-	// 4. RBAC Check (gen3 mode only)
-	if !authz.IsGen3Mode(ctx) {
+	// 4. RBAC Check when method-aware authz is enabled.
+	if !authz.IsAuthzEnforced(ctx) {
 		return obj, nil
 	}
 
-	// Optimized in SQL for gen3 mode: reconstruct resource paths from org/project columns
+	// Optimized in SQL: reconstruct resource paths from org/project columns
 	// and compare against the user's authorized resources.
 	userResources := authz.GetUserAuthz(ctx)
 
@@ -586,7 +586,7 @@ func (db *PostgresDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []st
 		return map[string]*models.InternalObject{}, nil
 	}
 
-	gen3Mode := authz.IsGen3Mode(ctx)
+	authzEnforced := authz.IsAuthzEnforced(ctx)
 	userResources := authz.GetUserAuthz(ctx)
 	rows, err := db.db.QueryContext(ctx, `
 		SELECT
@@ -625,7 +625,7 @@ func (db *PostgresDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []st
 			OR EXISTS (SELECT 1 FROM drs_object_access_method a WHERE a.object_id = o.id
 				AND ('/programs/' || a.org || CASE WHEN a.project != '' THEN '/projects/' || a.project ELSE '' END) = ANY($3))
 		)`,
-		pq.Array(ids), pq.Array(checksums), pq.Array(userResources), gen3Mode,
+		pq.Array(ids), pq.Array(checksums), pq.Array(userResources), authzEnforced,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch bulk objects: %w", err)

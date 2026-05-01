@@ -11,6 +11,8 @@ const (
 	AuthHeaderPresentKey AuthzContextKey = "auth_header_present"
 	// AuthModeKey contains the configured server mode: local or gen3.
 	AuthModeKey AuthzContextKey = "auth_mode"
+	// AuthzEnforcedKey marks requests that should use method-aware authorization checks.
+	AuthzEnforcedKey AuthzContextKey = "authz_enforced"
 
 	// BucketControlResource is the resource path for internal bucket management.
 	BucketControlResource = "/services/internal/buckets"

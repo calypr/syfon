@@ -194,6 +194,158 @@ s3_credentials:
 	}
 }
 
+func TestLoadConfig_LocalAuthzCSV(t *testing.T) {
+	t.Cleanup(func() { os.Unsetenv("DRS_LOCAL_AUTHZ_CSV") })
+	content := `
+auth:
+  mode: local
+  local_authz_csv: "/tmp/local-authz.csv"
+database:
+  sqlite:
+    file: "test.db"
+`
+	tmpfile, err := os.CreateTemp("", "config-local-authz-*.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpfile.Name())
+	if _, err := tmpfile.Write([]byte(content)); err != nil {
+		t.Fatal(err)
+	}
+	if err := tmpfile.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadConfig(tmpfile.Name())
+	if err != nil {
+		t.Fatalf("LoadConfig failed: %v", err)
+	}
+	if cfg.Auth.LocalAuthzCSV != "/tmp/local-authz.csv" {
+		t.Fatalf("expected local authz csv path, got %q", cfg.Auth.LocalAuthzCSV)
+	}
+	if got := os.Getenv("DRS_LOCAL_AUTHZ_CSV"); got != "/tmp/local-authz.csv" {
+		t.Fatalf("expected DRS_LOCAL_AUTHZ_CSV to be set, got %q", got)
+	}
+}
+
+func TestLoadConfig_BucketScopes(t *testing.T) {
+	content := `
+auth:
+  mode: local
+database:
+  sqlite:
+    file: "test.db"
+bucket_scopes:
+  - organization: calypr
+    project_id: training
+    path: s3://calypr/008b435e-c1da-58b8-80f1-3ad2882c43cd/nested/project/root
+  - organization: calypr
+    project_id: analysis
+    bucket: calypr
+    path_prefix: project/analysis
+  - organization: calypr
+    project_id: upload
+    bucket: calypr
+    organization_sub_path: organizations/calypr
+    project_sub_path: projects/upload
+`
+	tmpfile, err := os.CreateTemp("", "config-bucket-scopes-*.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpfile.Name())
+	if _, err := tmpfile.Write([]byte(content)); err != nil {
+		t.Fatal(err)
+	}
+	if err := tmpfile.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadConfig(tmpfile.Name())
+	if err != nil {
+		t.Fatalf("LoadConfig failed: %v", err)
+	}
+	if len(cfg.BucketScopes) != 3 {
+		t.Fatalf("expected 3 bucket scopes, got %d", len(cfg.BucketScopes))
+	}
+	if got := cfg.BucketScopes[0]; got.Organization != "calypr" || got.ProjectID != "training" || got.Bucket != "calypr" || got.PathPrefix != "008b435e-c1da-58b8-80f1-3ad2882c43cd/nested/project/root" {
+		t.Fatalf("unexpected path-derived bucket scope: %+v", got)
+	}
+	if got := cfg.BucketScopes[1]; got.Organization != "calypr" || got.ProjectID != "analysis" || got.Bucket != "calypr" || got.PathPrefix != "project/analysis" {
+		t.Fatalf("unexpected explicit bucket scope: %+v", got)
+	}
+	if got := cfg.BucketScopes[2]; got.Organization != "calypr" || got.ProjectID != "upload" || got.Bucket != "calypr" || got.PathPrefix != "organizations/calypr/projects/upload" {
+		t.Fatalf("unexpected composed bucket scope: %+v", got)
+	}
+}
+
+func TestLoadConfig_BucketScopePathBucketMismatch(t *testing.T) {
+	content := `
+auth:
+  mode: local
+database:
+  sqlite:
+    file: "test.db"
+bucket_scopes:
+  - organization: calypr
+    project_id: training
+    bucket: other
+    path: s3://calypr/project
+`
+	tmpfile, err := os.CreateTemp("", "config-bucket-scope-mismatch-*.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpfile.Name())
+	if _, err := tmpfile.Write([]byte(content)); err != nil {
+		t.Fatal(err)
+	}
+	if err := tmpfile.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = LoadConfig(tmpfile.Name())
+	if err == nil {
+		t.Fatal("expected bucket/path mismatch error")
+	}
+	if !strings.Contains(err.Error(), "does not match path bucket") {
+		t.Fatalf("expected bucket mismatch error, got %v", err)
+	}
+}
+
+func TestLoadConfig_BucketScopeRejectsPathLikeOrganization(t *testing.T) {
+	content := `
+auth:
+  mode: local
+database:
+  sqlite:
+    file: "test.db"
+bucket_scopes:
+  - organization: calypr/faliper
+    project_id: training
+    path: s3://calypr/calypr/faliper
+`
+	tmpfile, err := os.CreateTemp("", "config-bucket-scope-path-org-*.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpfile.Name())
+	if _, err := tmpfile.Write([]byte(content)); err != nil {
+		t.Fatal(err)
+	}
+	if err := tmpfile.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = LoadConfig(tmpfile.Name())
+	if err == nil {
+		t.Fatal("expected path-like organization error")
+	}
+	if !strings.Contains(err.Error(), "organization must be a Gen3 program name") {
+		t.Fatalf("expected path-like organization error, got %v", err)
+	}
+}
+
 func TestLoadConfig_PostgresEnv(t *testing.T) {
 	t.Setenv("DRS_DB_HOST", "myhost")
 	t.Setenv("DRS_DB_DATABASE", "mydb")

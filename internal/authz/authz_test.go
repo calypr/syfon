@@ -3,7 +3,7 @@ package authz
 import (
 	"context"
 	"testing"
- 
+
 	"github.com/calypr/syfon/internal/common"
 )
 
@@ -134,6 +134,19 @@ func TestHasMethodAccess(t *testing.T) {
 	t.Run("local mode allows", func(t *testing.T) {
 		if !HasMethodAccess(context.Background(), "read", []string{resource}) {
 			t.Fatalf("expected local mode to allow access")
+		}
+	})
+
+	t.Run("local authz-enforced mode checks privileges", func(t *testing.T) {
+		ctx := context.WithValue(context.Background(), common.AuthzEnforcedKey, true)
+		ctx = context.WithValue(ctx, common.UserPrivilegesKey, map[string]map[string]bool{
+			resource: {"read": true},
+		})
+		if !HasMethodAccess(ctx, "read", []string{resource}) {
+			t.Fatalf("expected read access")
+		}
+		if HasMethodAccess(ctx, "update", []string{resource}) {
+			t.Fatalf("expected update to be denied")
 		}
 	})
 

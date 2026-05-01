@@ -115,73 +115,6 @@ func (s *MetricsService) TransferBreakdown(ctx context.Context, opts TransferMet
 	return out, nil
 }
 
-func (s *MetricsService) RecordProviderTransferSync(ctx context.Context, opts ProviderTransferSyncOptions) ([]models.ProviderTransferSyncRun, error) {
-	from, err := optionalMetricsTime(opts.From)
-	if err != nil {
-		return nil, err
-	}
-	to, err := optionalMetricsTime(opts.To)
-	if err != nil {
-		return nil, err
-	}
-	if from == nil || to == nil {
-		return nil, fmt.Errorf("provider transfer sync requires from and to")
-	}
-	body := metricsapi.ProviderTransferSyncRequest{
-		From: *from,
-		To:   *to,
-	}
-	body.Organization = stringPtr[string](opts.Organization)
-	body.Project = stringPtr[string](opts.ProjectID)
-	body.Provider = stringPtr[string](opts.Provider)
-	body.Bucket = stringPtr[string](opts.Bucket)
-	body.Status = stringPtr[metricsapi.ProviderTransferSyncStatus](opts.Status)
-	body.ImportedEvents = nonzeroInt64Ptr(opts.ImportedEvents)
-	body.MatchedEvents = nonzeroInt64Ptr(opts.MatchedEvents)
-	body.AmbiguousEvents = nonzeroInt64Ptr(opts.AmbiguousEvents)
-	body.UnmatchedEvents = nonzeroInt64Ptr(opts.UnmatchedEvents)
-	body.ErrorMessage = stringPtr[string](opts.ErrorMessage)
-
-	resp, err := s.gen.RecordProviderTransferSyncWithResponse(ctx, body)
-	if err != nil {
-		return nil, err
-	}
-	if resp.JSON201 == nil {
-		return nil, fmt.Errorf("failed to record provider transfer sync: %d", resp.StatusCode())
-	}
-	return generatedSyncRunsToModel(resp.JSON201.SyncRuns), nil
-}
-
-func (s *MetricsService) ProviderTransferSyncStatus(ctx context.Context, opts ProviderTransferSyncOptions) ([]models.ProviderTransferSyncRun, error) {
-	from, err := optionalMetricsTime(opts.From)
-	if err != nil {
-		return nil, err
-	}
-	to, err := optionalMetricsTime(opts.To)
-	if err != nil {
-		return nil, err
-	}
-	params := &metricsapi.ListProviderTransferSyncParams{
-		Organization: stringPtr[metricsapi.Organization](opts.Organization),
-		Project:      stringPtr[metricsapi.Project](opts.ProjectID),
-		From:         from,
-		To:           to,
-		Provider:     stringPtr[metricsapi.Provider](opts.Provider),
-		Bucket:       stringPtr[metricsapi.Bucket](opts.Bucket),
-	}
-	if opts.Limit > 0 {
-		params.Limit = &opts.Limit
-	}
-	resp, err := s.gen.ListProviderTransferSyncWithResponse(ctx, params)
-	if err != nil {
-		return nil, err
-	}
-	if resp.JSON200 == nil {
-		return nil, fmt.Errorf("failed to list provider transfer sync status: %d", resp.StatusCode())
-	}
-	return generatedSyncRunsToModel(resp.JSON200.SyncRuns), nil
-}
-
 func transferSummaryParams(opts TransferMetricsOptions) (*metricsapi.GetTransferSummaryParams, error) {
 	from, err := optionalMetricsTime(opts.From)
 	if err != nil {
@@ -255,13 +188,6 @@ func boolPtr[T ~bool](raw bool) *T {
 	return &v
 }
 
-func nonzeroInt64Ptr(raw int64) *int64 {
-	if raw == 0 {
-		return nil
-	}
-	return &raw
-}
-
 func generatedTransferSummaryToModel(v metricsapi.TransferAttributionSummary) models.TransferAttributionSummary {
 	return models.TransferAttributionSummary{
 		EventCount:         int64Val(v.EventCount),
@@ -289,49 +215,6 @@ func generatedFreshnessToModel(v *metricsapi.TransferMetricsFreshness) *models.T
 		out.MissingBuckets = append(out.MissingBuckets, (*v.MissingBuckets)...)
 	}
 	return out
-}
-
-func generatedSyncRunsToModel(items *[]metricsapi.ProviderTransferSyncRun) []models.ProviderTransferSyncRun {
-	if items == nil {
-		return []models.ProviderTransferSyncRun{}
-	}
-	out := make([]models.ProviderTransferSyncRun, 0, len(*items))
-	for _, item := range *items {
-		out = append(out, generatedSyncRunToModel(item))
-	}
-	return out
-}
-
-func generatedSyncRunToModel(v metricsapi.ProviderTransferSyncRun) models.ProviderTransferSyncRun {
-	status := ""
-	if v.Status != nil {
-		status = string(*v.Status)
-	}
-	run := models.ProviderTransferSyncRun{
-		SyncID:          stringVal(v.SyncId),
-		Provider:        stringVal(v.Provider),
-		Bucket:          stringVal(v.Bucket),
-		Organization:    stringVal(v.Organization),
-		Project:         stringVal(v.Project),
-		Status:          status,
-		StartedAt:       v.StartedAt,
-		CompletedAt:     v.CompletedAt,
-		ImportedEvents:  int64Val(v.ImportedEvents),
-		MatchedEvents:   int64Val(v.MatchedEvents),
-		AmbiguousEvents: int64Val(v.AmbiguousEvents),
-		UnmatchedEvents: int64Val(v.UnmatchedEvents),
-		ErrorMessage:    stringVal(v.ErrorMessage),
-	}
-	if v.From != nil {
-		run.From = v.From.UTC()
-	}
-	if v.To != nil {
-		run.To = v.To.UTC()
-	}
-	if v.RequestedAt != nil {
-		run.RequestedAt = v.RequestedAt.UTC()
-	}
-	return run
 }
 
 func generatedTransferBreakdownToModel(v metricsapi.TransferAttributionBreakdown) models.TransferAttributionBreakdown {

@@ -25,9 +25,9 @@ type MockDatabase struct {
 	Usage                  map[string]models.FileUsage
 	TransferEvents         []models.TransferAttributionEvent
 	ProviderTransferEvents []models.ProviderTransferEvent
-	ProviderSyncRuns       []models.ProviderTransferSyncRun
 	NoDefaultCreds         bool
 	GetObjectErr           error
+	GetBucketScopeCalls    int
 }
 
 func (m *MockDatabase) GetServiceInfo(ctx context.Context) (*drs.Service, error) {
@@ -346,6 +346,7 @@ func (m *MockDatabase) CreateBucketScope(ctx context.Context, scope *models.Buck
 }
 
 func (m *MockDatabase) GetBucketScope(ctx context.Context, organization, projectID string) (*models.BucketScope, error) {
+	m.GetBucketScopeCalls++
 	if m.BucketScopes == nil {
 		return nil, fmt.Errorf("%w: bucket scope not found", common.ErrNotFound)
 	}
@@ -541,57 +542,6 @@ func (m *MockDatabase) RecordProviderTransferEvents(ctx context.Context, events 
 	return nil
 }
 
-func (m *MockDatabase) RecordProviderTransferSyncRuns(ctx context.Context, runs []models.ProviderTransferSyncRun) error {
-	byID := make(map[string]int, len(m.ProviderSyncRuns))
-	for i, run := range m.ProviderSyncRuns {
-		byID[run.SyncID] = i
-	}
-	for _, run := range runs {
-		if run.SyncID == "" {
-			continue
-		}
-		if idx, ok := byID[run.SyncID]; ok {
-			m.ProviderSyncRuns[idx] = run
-			continue
-		}
-		byID[run.SyncID] = len(m.ProviderSyncRuns)
-		m.ProviderSyncRuns = append(m.ProviderSyncRuns, run)
-	}
-	return nil
-}
-
-func (m *MockDatabase) ListProviderTransferSyncRuns(ctx context.Context, filter models.TransferAttributionFilter, limit int) ([]models.ProviderTransferSyncRun, error) {
-	if limit <= 0 || limit > 1000 {
-		limit = 100
-	}
-	out := make([]models.ProviderTransferSyncRun, 0, len(m.ProviderSyncRuns))
-	for _, run := range m.ProviderSyncRuns {
-		if filter.Organization != "" && run.Organization != filter.Organization {
-			continue
-		}
-		if filter.Project != "" && run.Project != filter.Project {
-			continue
-		}
-		if filter.Provider != "" && run.Provider != filter.Provider {
-			continue
-		}
-		if filter.Bucket != "" && run.Bucket != filter.Bucket {
-			continue
-		}
-		if filter.From != nil && run.To.Before(*filter.From) {
-			continue
-		}
-		if filter.To != nil && run.From.After(*filter.To) {
-			continue
-		}
-		out = append(out, run)
-		if len(out) >= limit {
-			break
-		}
-	}
-	return out, nil
-}
-
 func (m *MockDatabase) reconcileProviderTransferEvent(ev models.ProviderTransferEvent) models.ProviderTransferEvent {
 	if ev.ReconciliationStatus == "" {
 		ev.ReconciliationStatus = models.ProviderTransferUnmatched
@@ -657,19 +607,22 @@ func mockMergeAccessGrantIntoProviderEvent(ev *models.ProviderTransferEvent, gra
 
 func (m *MockDatabase) GetTransferAttributionSummary(ctx context.Context, filter models.TransferAttributionFilter) (models.TransferAttributionSummary, error) {
 	var summary models.TransferAttributionSummary
-	for _, ev := range m.ProviderTransferEvents {
-		if !providerTransferEventMatchesFilter(ev, filter) {
+	for _, ev := range m.TransferEvents {
+		if !transferEventMatchesFilter(ev, filter) {
 			continue
 		}
 		summary.EventCount++
-		summary.BytesRequested += ev.BytesTransferred
+		if ev.EventType == models.TransferEventAccessIssued {
+			summary.AccessIssuedCount++
+		}
+		summary.BytesRequested += ev.BytesRequested
 		switch ev.Direction {
 		case models.ProviderTransferDirectionDownload:
 			summary.DownloadEventCount++
-			summary.BytesDownloaded += ev.BytesTransferred
+			summary.BytesDownloaded += ev.BytesRequested
 		case models.ProviderTransferDirectionUpload:
 			summary.UploadEventCount++
-			summary.BytesUploaded += ev.BytesTransferred
+			summary.BytesUploaded += ev.BytesRequested
 		}
 	}
 	return summary, nil
@@ -677,11 +630,11 @@ func (m *MockDatabase) GetTransferAttributionSummary(ctx context.Context, filter
 
 func (m *MockDatabase) GetTransferAttributionBreakdown(ctx context.Context, filter models.TransferAttributionFilter, groupBy string) ([]models.TransferAttributionBreakdown, error) {
 	items := map[string]*models.TransferAttributionBreakdown{}
-	for _, ev := range m.ProviderTransferEvents {
-		if !providerTransferEventMatchesFilter(ev, filter) {
+	for _, ev := range m.TransferEvents {
+		if !transferEventMatchesFilter(ev, filter) {
 			continue
 		}
-		key := providerTransferBreakdownKey(ev, groupBy)
+		key := transferBreakdownKey(ev, groupBy)
 		item := items[key]
 		if item == nil {
 			item = &models.TransferAttributionBreakdown{
@@ -697,12 +650,12 @@ func (m *MockDatabase) GetTransferAttributionBreakdown(ctx context.Context, filt
 			items[key] = item
 		}
 		item.EventCount++
-		item.BytesRequested += ev.BytesTransferred
+		item.BytesRequested += ev.BytesRequested
 		if ev.Direction == models.ProviderTransferDirectionDownload {
-			item.BytesDownloaded += ev.BytesTransferred
+			item.BytesDownloaded += ev.BytesRequested
 		}
 		if ev.Direction == models.ProviderTransferDirectionUpload {
-			item.BytesUploaded += ev.BytesTransferred
+			item.BytesUploaded += ev.BytesRequested
 		}
 		t := ev.EventTime
 		if item.LastTransferTime == nil || (!t.IsZero() && t.After(*item.LastTransferTime)) {
@@ -782,6 +735,18 @@ func transferEventMatchesFilter(ev models.TransferAttributionEvent, filter model
 		return false
 	}
 	if filter.EventType != "" && filter.EventType != "all" && ev.EventType != filter.EventType {
+		return false
+	}
+	direction := filter.Direction
+	if direction == "" {
+		switch filter.EventType {
+		case models.ProviderTransferDirectionDownload:
+			direction = models.ProviderTransferDirectionDownload
+		case models.ProviderTransferDirectionUpload:
+			direction = models.ProviderTransferDirectionUpload
+		}
+	}
+	if direction != "" && direction != "all" && ev.Direction != direction {
 		return false
 	}
 	if filter.From != nil && ev.EventTime.Before(*filter.From) {

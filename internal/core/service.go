@@ -4,7 +4,10 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"path"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/calypr/syfon/apigen/server/drs"
@@ -33,12 +36,17 @@ func GetBaseURL(ctx context.Context) string {
 
 // ObjectManager standardizes object lifecycle operations across all API surfaces.
 type ObjectManager struct {
-	db db.DatabaseInterface
-	uM urlmanager.UrlManager
+	db               db.DatabaseInterface
+	uM               urlmanager.UrlManager
+	bucketScopeCache *bucketScopeCache
 }
 
 func NewObjectManager(db db.DatabaseInterface, uM urlmanager.UrlManager) *ObjectManager {
-	return &ObjectManager{db: db, uM: uM}
+	return &ObjectManager{
+		db:               db,
+		uM:               uM,
+		bucketScopeCache: newBucketScopeCache(30 * time.Second),
+	}
 }
 
 // GetObject retrieves an internal object by ID, Alias, or Checksum and validates access.
@@ -160,6 +168,14 @@ func (m *ObjectManager) SignURL(ctx context.Context, accessURL string, options u
 	return m.uM.SignURL(ctx, m.resolveSigningBucket(ctx, accessURL), accessURL, options)
 }
 
+func (m *ObjectManager) SignObjectURL(ctx context.Context, obj *models.InternalObject, accessURL string, options urlmanager.SignOptions) (string, error) {
+	scopedURL, err := m.resolveScopedStorageURL(ctx, obj, accessURL)
+	if err != nil {
+		return "", err
+	}
+	return m.SignURL(ctx, scopedURL, options)
+}
+
 // ResolveBucket validates a bucket name or returns the default one.
 func (m *ObjectManager) ResolveBucket(ctx context.Context, bucketName string) (string, error) {
 	creds, err := m.ListS3Credentials(ctx)
@@ -171,6 +187,17 @@ func (m *ObjectManager) ResolveBucket(ctx context.Context, bucketName string) (s
 
 func (m *ObjectManager) SignDownloadPart(ctx context.Context, bucket, accessURL string, start, end int64, options urlmanager.SignOptions) (string, error) {
 	return m.uM.SignDownloadPart(ctx, bucket, accessURL, start, end, options)
+}
+
+func (m *ObjectManager) SignObjectDownloadPart(ctx context.Context, obj *models.InternalObject, bucket, accessURL string, start, end int64, options urlmanager.SignOptions) (string, error) {
+	scopedURL, err := m.resolveScopedStorageURL(ctx, obj, accessURL)
+	if err != nil {
+		return "", err
+	}
+	if b, _, ok := common.ParseS3URL(scopedURL); ok {
+		bucket = b
+	}
+	return m.SignDownloadPart(ctx, bucket, scopedURL, start, end, options)
 }
 
 // ResolveObjectRemotePath returns the key for an object in a specific bucket.
@@ -236,7 +263,11 @@ func (m *ObjectManager) SaveS3Credential(ctx context.Context, cred *models.S3Cre
 }
 
 func (m *ObjectManager) DeleteS3Credential(ctx context.Context, bucket string) error {
-	return m.db.DeleteS3Credential(ctx, bucket)
+	if err := m.db.DeleteS3Credential(ctx, bucket); err != nil {
+		return err
+	}
+	m.bucketScopeCache.clear()
+	return nil
 }
 
 func (m *ObjectManager) ListBucketScopes(ctx context.Context) ([]models.BucketScope, error) {
@@ -244,7 +275,11 @@ func (m *ObjectManager) ListBucketScopes(ctx context.Context) ([]models.BucketSc
 }
 
 func (m *ObjectManager) CreateBucketScope(ctx context.Context, scope *models.BucketScope) error {
-	return m.db.CreateBucketScope(ctx, scope)
+	if err := m.db.CreateBucketScope(ctx, scope); err != nil {
+		return err
+	}
+	m.bucketScopeCache.set(normalizeBucketScope(scope), true)
+	return nil
 }
 
 func (m *ObjectManager) InitMultipartUpload(ctx context.Context, bucket, key string) (string, error) {
@@ -326,6 +361,174 @@ func (m *ObjectManager) resolveSigningBucket(ctx context.Context, accessURL stri
 		}
 	}
 	return ""
+}
+
+func (m *ObjectManager) resolveScopedStorageURL(ctx context.Context, obj *models.InternalObject, accessURL string) (string, error) {
+	bucket, key, ok := common.ParseS3URL(accessURL)
+	if !ok || obj == nil || len(obj.Authorizations) == 0 {
+		return accessURL, nil
+	}
+	scope, ok, err := m.bucketScopeForObjectURL(ctx, obj, bucket)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return accessURL, nil
+	}
+	prefix := strings.Trim(strings.TrimSpace(scope.PathPrefix), "/")
+	if prefix == "" || keyHasStoragePrefix(key, prefix) {
+		return accessURL, nil
+	}
+	return common.S3Prefix + bucket + "/" + path.Join(prefix, strings.Trim(key, "/")), nil
+}
+
+func (m *ObjectManager) bucketScopeForObjectURL(ctx context.Context, obj *models.InternalObject, bucket string) (models.BucketScope, bool, error) {
+	bucket = strings.TrimSpace(bucket)
+	if bucket == "" {
+		return models.BucketScope{}, false, nil
+	}
+	for _, candidate := range sortedObjectScopes(obj.Authorizations) {
+		scope, found, err := m.lookupBucketScope(ctx, candidate.organization, candidate.project)
+		if err != nil {
+			return models.BucketScope{}, false, err
+		}
+		if !found {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(scope.Bucket), bucket) {
+			return scope, true, nil
+		}
+	}
+	return models.BucketScope{}, false, nil
+}
+
+func (m *ObjectManager) lookupBucketScope(ctx context.Context, organization, project string) (models.BucketScope, bool, error) {
+	if scope, found, cached := m.bucketScopeCache.get(organization, project); cached {
+		return scope, found, nil
+	}
+
+	scope, err := m.db.GetBucketScope(ctx, organization, project)
+	if err != nil {
+		if common.IsNotFoundError(err) {
+			m.bucketScopeCache.set(models.BucketScope{Organization: organization, ProjectID: project}, false)
+			return models.BucketScope{}, false, nil
+		}
+		return models.BucketScope{}, false, err
+	}
+	if scope == nil {
+		m.bucketScopeCache.set(models.BucketScope{Organization: organization, ProjectID: project}, false)
+		return models.BucketScope{}, false, nil
+	}
+
+	normalized := normalizeBucketScope(scope)
+	m.bucketScopeCache.set(normalized, true)
+	return normalized, true, nil
+}
+
+type objectScopeCandidate struct {
+	organization string
+	project      string
+}
+
+func sortedObjectScopes(authz map[string][]string) []objectScopeCandidate {
+	candidates := make([]objectScopeCandidate, 0)
+	orgs := make([]string, 0, len(authz))
+	for org := range authz {
+		orgs = append(orgs, org)
+	}
+	sort.Strings(orgs)
+	for _, org := range orgs {
+		projects := append([]string(nil), authz[org]...)
+		if len(projects) == 0 {
+			candidates = append(candidates, objectScopeCandidate{organization: org})
+			continue
+		}
+		sort.Strings(projects)
+		for _, project := range projects {
+			candidates = append(candidates, objectScopeCandidate{organization: org, project: project})
+		}
+		candidates = append(candidates, objectScopeCandidate{organization: org})
+	}
+	return candidates
+}
+
+func keyHasStoragePrefix(key, prefix string) bool {
+	key = strings.Trim(strings.TrimSpace(key), "/")
+	prefix = strings.Trim(strings.TrimSpace(prefix), "/")
+	return key == prefix || strings.HasPrefix(key, prefix+"/")
+}
+
+type bucketScopeCache struct {
+	mu      sync.RWMutex
+	ttl     time.Duration
+	entries map[string]cachedBucketScope
+}
+
+type cachedBucketScope struct {
+	scope   models.BucketScope
+	found   bool
+	expires time.Time
+}
+
+func newBucketScopeCache(ttl time.Duration) *bucketScopeCache {
+	return &bucketScopeCache{
+		ttl:     ttl,
+		entries: make(map[string]cachedBucketScope),
+	}
+}
+
+func (c *bucketScopeCache) get(organization, project string) (models.BucketScope, bool, bool) {
+	if c == nil {
+		return models.BucketScope{}, false, false
+	}
+	key := bucketScopeCacheKey(organization, project)
+	now := time.Now()
+	c.mu.RLock()
+	entry, ok := c.entries[key]
+	c.mu.RUnlock()
+	if !ok || now.After(entry.expires) {
+		return models.BucketScope{}, false, false
+	}
+	return entry.scope, entry.found, true
+}
+
+func (c *bucketScopeCache) set(scope models.BucketScope, found bool) {
+	if c == nil {
+		return
+	}
+	scope = normalizeBucketScope(&scope)
+	c.mu.Lock()
+	c.entries[bucketScopeCacheKey(scope.Organization, scope.ProjectID)] = cachedBucketScope{
+		scope:   scope,
+		found:   found,
+		expires: time.Now().Add(c.ttl),
+	}
+	c.mu.Unlock()
+}
+
+func (c *bucketScopeCache) clear() {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	c.entries = make(map[string]cachedBucketScope)
+	c.mu.Unlock()
+}
+
+func bucketScopeCacheKey(organization, project string) string {
+	return strings.TrimSpace(organization) + "\x00" + strings.TrimSpace(project)
+}
+
+func normalizeBucketScope(scope *models.BucketScope) models.BucketScope {
+	if scope == nil {
+		return models.BucketScope{}
+	}
+	return models.BucketScope{
+		Organization: strings.TrimSpace(scope.Organization),
+		ProjectID:    strings.TrimSpace(scope.ProjectID),
+		Bucket:       strings.TrimSpace(scope.Bucket),
+		PathPrefix:   strings.Trim(strings.TrimSpace(scope.PathPrefix), "/"),
+	}
 }
 
 func resolveBucketName(creds []models.S3Credential, bucketName string) (string, error) {
