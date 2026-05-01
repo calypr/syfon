@@ -103,7 +103,10 @@ func downloadURLToPath(ctx context.Context, rawURL, outPath string, c syfonclien
 		}
 		defer resp.Body.Close()
 		if resp.StatusCode >= 400 {
-			body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+			body, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
+			if err != nil {
+				return fmt.Errorf("read error response body: %w", err)
+			}
 			return fmt.Errorf("download failed status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(body)))
 		}
 		data, err := io.ReadAll(resp.Body)

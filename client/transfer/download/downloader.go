@@ -81,7 +81,9 @@ func DownloadMultiple(
 		})
 	}
 
-	_ = g.Wait()
+	if err := g.Wait(); err != nil && len(allErrors) == 0 {
+		return err
+	}
 
 	printRenamed(ctx, logger.Slog(), renamed)
 	printSkipped(ctx, logger.Slog(), skipped)

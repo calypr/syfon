@@ -67,11 +67,15 @@ func handleInternalDownloadFiber(c fiber.Ctx, om *core.ObjectManager) error {
 		return apiutil.HandleError(c, err)
 	}
 
-	_ = om.RecordDownload(c.Context(), obj.Id)
-	attribution.RecordAccessIssued(c.Context(), om, obj, attribution.AccessDetails{
+	if err := om.RecordDownload(c.Context(), obj.Id); err != nil {
+		return apiutil.HandleError(c, err)
+	}
+	if err := attribution.RecordAccessIssued(c.Context(), om, obj, attribution.AccessDetails{
 		Direction:  models.ProviderTransferDirectionDownload,
 		StorageURL: objectURL,
-	})
+	}); err != nil {
+		return apiutil.HandleError(c, err)
+	}
 
 	if c.Query("redirect") == "true" {
 		return c.Redirect().To(signedURL)
@@ -118,13 +122,15 @@ func handleInternalDownloadPartFiber(c fiber.Ctx, om *core.ObjectManager) error 
 	if err != nil {
 		return apiutil.HandleError(c, err)
 	}
-	attribution.RecordAccessIssued(c.Context(), om, obj, attribution.AccessDetails{
+	if err := attribution.RecordAccessIssued(c.Context(), om, obj, attribution.AccessDetails{
 		Direction:      models.ProviderTransferDirectionDownload,
 		StorageURL:     objectURL,
 		RangeStart:     &start,
 		RangeEnd:       &end,
 		BytesRequested: end - start + 1,
-	})
+	}); err != nil {
+		return apiutil.HandleError(c, err)
+	}
 
 	return c.JSON(internalapi.InternalSignedURL{Url: &signedURL})
 }
@@ -205,10 +211,12 @@ func handleInternalUploadURLFiber(om *core.ObjectManager) fiber.Handler {
 			return apiutil.HandleError(c, err)
 		}
 		if obj != nil {
-			attribution.RecordAccessIssued(c.Context(), om, obj, attribution.AccessDetails{
+			if err := attribution.RecordAccessIssued(c.Context(), om, obj, attribution.AccessDetails{
 				Direction:  models.ProviderTransferDirectionUpload,
 				StorageURL: urlStr,
-			})
+			}); err != nil {
+				return apiutil.HandleError(c, err)
+			}
 		}
 
 		return c.JSON(internalapi.InternalSignedURL{Url: &signedURL})
@@ -273,11 +281,14 @@ func handleInternalUploadBulkFiber(om *core.ObjectManager) fiber.Handler {
 				errMsg := err.Error()
 				res.Error = &errMsg
 				res.Status = http.StatusInternalServerError
+			} else if err := attribution.RecordAccessIssued(c.Context(), om, obj, attribution.AccessDetails{
+				Direction:  models.ProviderTransferDirectionUpload,
+				StorageURL: urlStr,
+			}); err != nil {
+				errMsg := err.Error()
+				res.Error = &errMsg
+				res.Status = http.StatusInternalServerError
 			} else {
-				attribution.RecordAccessIssued(c.Context(), om, obj, attribution.AccessDetails{
-					Direction:  models.ProviderTransferDirectionUpload,
-					StorageURL: urlStr,
-				})
 				res.Url = &signedURL
 				res.Bucket = &bucket
 				res.FileName = &key

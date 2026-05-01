@@ -10,6 +10,7 @@ import (
 	syfoncommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/authz"
 	"github.com/calypr/syfon/internal/common"
+	"github.com/calypr/syfon/internal/db"
 	"github.com/calypr/syfon/internal/models"
 )
 
@@ -43,8 +44,17 @@ func (m *ObjectManager) DeleteBulkByScope(ctx context.Context, organization, pro
 	if err != nil {
 		return 0, err
 	}
+	if lister, ok := m.db.(db.ObjectAuthorizedLister); ok {
+		resources, _, restrictToResources := objectMethodResourceFilter(ctx, objectMethodDelete)
+		if optimized, err := lister.ListObjectIDsByScopeAndResources(ctx, organization, project, resources, restrictToResources); err == nil {
+			ids = optimized
+		}
+	}
 
-	toDelete := m.filterDeletableObjectIDs(ctx, ids)
+	toDelete, err := m.deletableObjectIDs(ctx, ids)
+	if err != nil {
+		return 0, err
+	}
 
 	if len(toDelete) == 0 {
 		return 0, nil
@@ -90,10 +100,26 @@ func (m *ObjectManager) UpdateObjectAccessMethods(ctx context.Context, objectID 
 }
 
 func (m *ObjectManager) BulkUpdateAccessMethods(ctx context.Context, updates map[string][]drs.AccessMethod) error {
+	if len(updates) == 0 {
+		return nil
+	}
+
+	ids := make([]string, 0, len(updates))
 	for objectID := range updates {
-		obj, err := m.db.GetObject(ctx, objectID)
-		if err != nil {
-			return err
+		ids = append(ids, objectID)
+	}
+	objects, err := m.db.GetBulkObjects(ctx, ids)
+	if err != nil {
+		return err
+	}
+	byID := make(map[string]*models.InternalObject, len(objects))
+	for i := range objects {
+		byID[objects[i].Id] = &objects[i]
+	}
+	for _, objectID := range ids {
+		obj, ok := byID[objectID]
+		if !ok {
+			return common.ErrNotFound
 		}
 		if err := m.requireObjectMethod(ctx, obj, objectMethodUpdate); err != nil {
 			return err
@@ -126,6 +152,30 @@ func (m *ObjectManager) ReplaceObjects(ctx context.Context, objs []models.Intern
 }
 
 func (m *ObjectManager) DeleteObjectsByChecksums(ctx context.Context, hashes []string) (int, error) {
+	if lister, ok := m.db.(db.ObjectAuthorizedLister); ok {
+		resources, includeUnscoped, restrictToResources := objectMethodResourceFilter(ctx, objectMethodDelete)
+		if byChecksum, err := lister.ListObjectIDsByChecksumsAndResources(ctx, hashes, resources, includeUnscoped, restrictToResources); err == nil {
+			seen := make(map[string]struct{})
+			toDelete := make([]string, 0)
+			for _, hash := range hashes {
+				for _, objectID := range byChecksum[hash] {
+					if _, ok := seen[objectID]; ok {
+						continue
+					}
+					seen[objectID] = struct{}{}
+					toDelete = append(toDelete, objectID)
+				}
+			}
+			if len(toDelete) == 0 {
+				return 0, nil
+			}
+			if err := m.db.BulkDeleteObjects(ctx, toDelete); err != nil {
+				return 0, err
+			}
+			return len(toDelete), nil
+		}
+	}
+
 	objectsByChecksum, err := m.db.GetObjectsByChecksums(ctx, hashes)
 	if err != nil {
 		return 0, err
@@ -162,11 +212,6 @@ func (m *ObjectManager) CreateObjectAlias(ctx context.Context, aliasID, canonica
 		return err
 	}
 	return m.db.CreateObjectAlias(ctx, aliasID, canonicalID)
-}
-
-func (m *ObjectManager) filterDeletableObjectIDs(ctx context.Context, ids []string) []string {
-	toDelete, _ := m.deletableObjectIDs(ctx, ids)
-	return toDelete
 }
 
 func (m *ObjectManager) deletableObjectIDs(ctx context.Context, ids []string) ([]string, error) {

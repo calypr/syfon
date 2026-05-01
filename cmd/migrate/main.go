@@ -2,6 +2,7 @@ package migratecmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -32,6 +33,7 @@ var (
 	limit               int
 	sweeps              int
 	dryRun              bool
+	skipAuthPreflight   bool
 	defaultAuthz        []string
 )
 
@@ -142,6 +144,26 @@ var importCmd = &cobra.Command{
 		defer dump.Close()
 
 		cmd.Printf("migration import starting: dump=%s syfon=%s batch=%d\n", dumpPath, targetURL, batchSize)
+		if !skipAuthPreflight && strings.TrimSpace(targetAuth.BearerToken) != "" {
+			cmd.Println("migration import preflight: checking target create privileges")
+			report, err := migrate.PreflightImport(context.Background(), dump, target, batchSize)
+			if err != nil {
+				var preflightErr *migrate.ImportPreflightError
+				if errors.As(err, &preflightErr) {
+					printImportPreflightFailure(cmd, preflightErr.Report)
+					return fmt.Errorf("target authorization preflight failed: missing create access for %d/%d records across %d scopes; copy/paste scope list printed above",
+						preflightErr.Report.MissingRecords,
+						preflightErr.Report.Records,
+						len(preflightErr.Report.MissingResources),
+					)
+				}
+				return fmt.Errorf("target authorization preflight failed: %w", err)
+			}
+			cmd.Printf("migration import preflight complete: records=%d required_scopes=%d missing_scopes=0\n",
+				report.Records,
+				len(report.RequiredResources),
+			)
+		}
 		stats, err := migrate.Import(context.Background(), dump, target, batchSize)
 		if err != nil {
 			return err
@@ -154,6 +176,22 @@ var importCmd = &cobra.Command{
 		)
 		return nil
 	},
+}
+
+func printImportPreflightFailure(cmd *cobra.Command, report migrate.ImportPreflightReport) {
+	scopes := migrate.FormatPreflightScopes(report.MissingResources)
+	cmd.Printf("migration import preflight failed: missing create access for %d/%d records across %d scopes\n",
+		report.MissingRecords,
+		report.Records,
+		len(scopes),
+	)
+	if report.FirstDeniedRecord != "" {
+		cmd.Printf("first denied record: %s\n", report.FirstDeniedRecord)
+	}
+	cmd.Println()
+	cmd.Println("Copy/paste scope list:")
+	cmd.Println(strings.Join(scopes, ", "))
+	cmd.Println()
 }
 
 func init() {
@@ -176,6 +214,7 @@ func init() {
 	importCmd.Flags().StringVar(&targetBasicUser, "target-basic-user", "", "Basic auth username for local target Syfon writes")
 	importCmd.Flags().StringVar(&targetBasicPassword, "target-basic-password", "", "Basic auth password for local target Syfon writes")
 	importCmd.Flags().IntVar(&batchSize, "batch-size", 500, "Records to load per controlled_access-aware /index/bulk request")
+	importCmd.Flags().BoolVar(&skipAuthPreflight, "skip-auth-preflight", false, "Skip target create-privilege preflight before importing")
 }
 
 func indexdURLFromServer(cmd *cobra.Command) (string, error) {

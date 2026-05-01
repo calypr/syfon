@@ -1,10 +1,10 @@
 package gcs
 
 import (
-	"github.com/calypr/syfon/internal/models"
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/calypr/syfon/internal/models"
 	"net/http"
 	"net/url"
 	"path"
@@ -103,7 +103,9 @@ func (s *GCSSigner) CompleteMultipartUpload(ctx context.Context, bucket, key, up
 	}
 
 	for _, k := range append(partKeys, tempKeys...) {
-		_ = client.Bucket(bucket).Object(k).Delete(ctx)
+		if err := client.Bucket(bucket).Object(k).Delete(ctx); err != nil {
+			return fmt.Errorf("delete multipart component %s: %w", k, err)
+		}
 	}
 	return nil
 }

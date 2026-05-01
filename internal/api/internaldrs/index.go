@@ -62,21 +62,22 @@ func handleInternalListFiber(om *core.ObjectManager) fiber.Handler {
 
 		if hash != "" {
 			hashType, hash = common.ParseHashQuery(hash, hashType)
-			objs, err := om.GetObjectsByChecksum(c.Context(), hash, "read")
+			filterOrg := strings.TrimSpace(c.Query("organization"))
+			filterProject := strings.TrimSpace(c.Query("project"))
+			limit, start, offset, err := parseInternalListPaginationFiber(c)
+			if err != nil {
+				return c.Status(fiber.StatusBadRequest).SendString(err.Error())
+			}
+			ids, err := om.ListObjectIDsPageByChecksum(c.Context(), hash, hashType, filterOrg, filterProject, "read", start, limit, offset)
 			if err != nil {
 				return apiutil.HandleError(c, err)
 			}
-
-			filterOrg := strings.TrimSpace(c.Query("organization"))
-			filterProject := strings.TrimSpace(c.Query("project"))
+			objs, err := om.GetBulkObjects(c.Context(), ids, "read")
+			if err != nil {
+				return apiutil.HandleError(c, err)
+			}
 			records := make([]internalapi.InternalRecord, 0, len(objs))
 			for _, o := range objs {
-				if hashType != "" && !common.ObjectHasChecksumTypeAndValue(o, hashType, hash) {
-					continue
-				}
-				if filterOrg != "" && !objectAuthzMatchesScope(o, filterOrg, filterProject) {
-					continue
-				}
 				records = append(records, core.InternalObjectToInternalRecord(o))
 			}
 			return c.JSON(internalapi.ListRecordsResponse{Records: &records})
@@ -90,14 +91,14 @@ func handleInternalListFiber(om *core.ObjectManager) fiber.Handler {
 			filterOrg, filterProject = "", ""
 		}
 
-		ids, err := om.ListObjectIDsByScope(c.Context(), filterOrg, filterProject, "read")
-		if err != nil {
-			return apiutil.HandleError(c, err)
-		}
-		sort.Strings(ids)
-		ids, err = paginateInternalListIDsFiber(c, ids)
+		limit, start, offset, err := parseInternalListPaginationFiber(c)
 		if err != nil {
 			return c.Status(fiber.StatusBadRequest).SendString(err.Error())
+		}
+
+		ids, err := om.ListObjectIDsPageByScope(c.Context(), filterOrg, filterProject, "read", start, limit, offset)
+		if err != nil {
+			return apiutil.HandleError(c, err)
 		}
 
 		objs, err := om.GetBulkObjects(c.Context(), ids, "read")
@@ -350,43 +351,17 @@ func parseScopeQuery(r *http.Request) (string, string, bool, error) {
 }
 
 func paginateInternalListIDsFiber(c fiber.Ctx, ids []string) ([]string, error) {
-	limit := defaultInternalListLimit
-	rawLimit := strings.TrimSpace(c.Query("limit"))
-	if rawLimit != "" {
-		parsed, err := strconv.Atoi(rawLimit)
-		if err != nil {
-			return nil, fmt.Errorf("limit must be an integer")
-		}
-		if parsed < 0 {
-			return nil, fmt.Errorf("limit must be >= 0")
-		}
-		limit = parsed
-	}
-	if limit > maxInternalListLimit {
-		limit = maxInternalListLimit
+	limit, start, offset, err := parseInternalListPaginationFiber(c)
+	if err != nil {
+		return nil, err
 	}
 	if limit == 0 || len(ids) == 0 {
 		return []string{}, nil
 	}
-
-	start := strings.TrimSpace(c.Query("start"))
-	offset := 0
 	if start != "" {
 		offset = sort.SearchStrings(ids, start)
 		for offset < len(ids) && ids[offset] <= start {
 			offset++
-		}
-	} else {
-		rawPage := strings.TrimSpace(c.Query("page"))
-		if rawPage != "" {
-			page, err := strconv.Atoi(rawPage)
-			if err != nil {
-				return nil, fmt.Errorf("page must be an integer")
-			}
-			if page < 0 {
-				return nil, fmt.Errorf("page must be >= 0")
-			}
-			offset = page * limit
 		}
 	}
 	if offset >= len(ids) {
@@ -397,6 +372,41 @@ func paginateInternalListIDsFiber(c fiber.Ctx, ids []string) ([]string, error) {
 		end = len(ids)
 	}
 	return ids[offset:end], nil
+}
+
+func parseInternalListPaginationFiber(c fiber.Ctx) (int, string, int, error) {
+	limit := defaultInternalListLimit
+	rawLimit := strings.TrimSpace(c.Query("limit"))
+	if rawLimit != "" {
+		parsed, err := strconv.Atoi(rawLimit)
+		if err != nil {
+			return 0, "", 0, fmt.Errorf("limit must be an integer")
+		}
+		if parsed < 0 {
+			return 0, "", 0, fmt.Errorf("limit must be >= 0")
+		}
+		limit = parsed
+	}
+	if limit > maxInternalListLimit {
+		limit = maxInternalListLimit
+	}
+
+	start := strings.TrimSpace(c.Query("start"))
+	offset := 0
+	if start == "" {
+		rawPage := strings.TrimSpace(c.Query("page"))
+		if rawPage != "" {
+			page, err := strconv.Atoi(rawPage)
+			if err != nil {
+				return 0, "", 0, fmt.Errorf("page must be an integer")
+			}
+			if page < 0 {
+				return 0, "", 0, fmt.Errorf("page must be >= 0")
+			}
+			offset = page * limit
+		}
+	}
+	return limit, start, offset, nil
 }
 
 func decodeInternalCreateCandidates(c fiber.Ctx, now time.Time) ([]models.InternalObject, error) {

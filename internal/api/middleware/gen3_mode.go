@@ -116,10 +116,18 @@ func (m *AuthzMiddleware) resolveTokenAuth(ctx context.Context, tokenString stri
 		}
 	}
 
-	v, _, _ := m.sf.Do(cacheKey, func() (interface{}, error) {
+	v, err, _ := m.sf.Do(cacheKey, func() (interface{}, error) {
 		return m.fetchTokenAuth(ctx, tokenString)
 	})
-	res, _ := v.(authFetchResult)
+	if err != nil {
+		m.logger.Debug("failed to resolve token auth", "error", err)
+		return authFetchResult{negative: true}
+	}
+	res, ok := v.(authFetchResult)
+	if !ok {
+		m.logger.Debug("unexpected token auth result type")
+		return authFetchResult{negative: true}
+	}
 	if m.cache != nil {
 		m.cache.set(cacheKey, res.resources, res.privileges, res.negative)
 	}

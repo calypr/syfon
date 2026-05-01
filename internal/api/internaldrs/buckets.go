@@ -21,12 +21,12 @@ func registerInternalBucketRoutes(router fiber.Router, om *core.ObjectManager) {
 }
 
 func handleInternalBucketsFiber(c fiber.Ctx, om *core.ObjectManager) error {
+	if apimiddleware.MissingGen3AuthHeader(c.Context()) {
+		return apiutil.HandleError(c, common.ErrUnauthorized)
+	}
 	visible, err := om.ListVisibleBuckets(c.Context())
 	if err != nil {
 		return apiutil.HandleError(c, err)
-	}
-	if apimiddleware.MissingGen3AuthHeader(c.Context()) {
-		return apiutil.HandleError(c, common.ErrUnauthorized)
 	}
 
 	resp := bucketapi.BucketsResponse{S3BUCKETS: map[string]bucketapi.BucketMetadata{}}

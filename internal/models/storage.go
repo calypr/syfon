@@ -54,6 +54,14 @@ type FileUsageSummary struct {
 	InactiveFileCount int64
 }
 
+// BucketVisibilityRow is the minimum storage projection needed to build bucket
+// visibility responses without hydrating full objects.
+type BucketVisibilityRow struct {
+	AccessURL  string
+	AccessType string
+	Resource   string
+}
+
 const (
 	TransferEventAccessIssued = "access_issued"
 

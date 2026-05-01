@@ -78,7 +78,10 @@ func (db *SqliteDB) SaveS3Credential(ctx context.Context, cred *models.S3Credent
 }
 
 func (db *SqliteDB) DeleteS3Credential(ctx context.Context, bucket string) error {
-	_, _ = db.db.ExecContext(ctx, "DELETE FROM bucket_scope WHERE bucket = ?", bucket)
+	if _, err := db.db.ExecContext(ctx, "DELETE FROM bucket_scope WHERE bucket = ?", bucket); err != nil {
+		common.AuditS3CredentialAccess(ctx, "delete", bucket, err)
+		return fmt.Errorf("failed to delete bucket scopes for %s: %w", bucket, err)
+	}
 	res, err := db.db.ExecContext(ctx, "DELETE FROM s3_credential WHERE bucket = ?", bucket)
 	if err != nil {
 		common.AuditS3CredentialAccess(ctx, "delete", bucket, err)

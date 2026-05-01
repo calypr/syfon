@@ -506,6 +506,430 @@ func (db *SqliteDB) ListObjectIDsByScope(ctx context.Context, organization, proj
 	return ids, nil
 }
 
+func (db *SqliteDB) ListObjectIDsByResources(ctx context.Context, resources []string, includeUnscoped bool) ([]string, error) {
+	resources = sycommon.NormalizeAccessResources(resources)
+	if len(resources) == 0 && !includeUnscoped {
+		return []string{}, nil
+	}
+
+	args := make([]any, 0, len(resources))
+	parts := make([]string, 0, 2)
+	if len(resources) > 0 {
+		placeholders := make([]string, 0, len(resources))
+		for _, resource := range resources {
+			args = append(args, resource)
+			placeholders = append(placeholders, "?")
+		}
+		parts = append(parts, `EXISTS (
+			SELECT 1
+			FROM drs_object_controlled_access ca
+			WHERE ca.object_id = o.id AND ca.resource IN (`+strings.Join(placeholders, ",")+`)
+		)`)
+	}
+	if includeUnscoped {
+		parts = append(parts, `NOT EXISTS (
+			SELECT 1
+			FROM drs_object_controlled_access ca
+			WHERE ca.object_id = o.id
+		)`)
+	}
+
+	rows, err := db.db.QueryContext(ctx, `
+		SELECT DISTINCT o.id
+		FROM drs_object o
+		WHERE `+strings.Join(parts, " OR ")+`
+		ORDER BY o.id`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	ids := make([]string, 0)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return ids, nil
+}
+
+func (db *SqliteDB) ListObjectIDsPageByScope(ctx context.Context, organization, project, startAfter string, limit, offset int) ([]string, error) {
+	organization = strings.TrimSpace(organization)
+	project = strings.TrimSpace(project)
+	startAfter = strings.TrimSpace(startAfter)
+	if limit <= 0 {
+		return []string{}, nil
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	args := make([]any, 0, 4)
+	conditions := make([]string, 0, 2)
+	baseQuery := `SELECT id FROM drs_object`
+	orderBy := ` ORDER BY id`
+	objectIDExpr := "id"
+
+	if organization != "" {
+		resource, err := sycommon.ResourcePath(organization, project)
+		if err != nil {
+			return nil, err
+		}
+		args = append(args, resource)
+		baseQuery = `
+			SELECT DISTINCT ca.object_id AS id
+			FROM drs_object_controlled_access ca
+			INNER JOIN drs_object o ON o.id = ca.object_id
+		`
+		objectIDExpr = "ca.object_id"
+		conditions = append(conditions, "ca.resource = ?")
+		orderBy = ` ORDER BY ca.object_id`
+	}
+	if startAfter != "" {
+		args = append(args, startAfter)
+		conditions = append(conditions, objectIDExpr+" > ?")
+	}
+	query := baseQuery
+	if len(conditions) > 0 {
+		query += ` WHERE ` + strings.Join(conditions, ` AND `)
+	}
+	query += orderBy + ` LIMIT ? OFFSET ?`
+	args = append(args, limit, offset)
+	rows, err := db.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanObjectIDs(rows)
+}
+
+func (db *SqliteDB) ListObjectIDsPageByResources(ctx context.Context, resources []string, includeUnscoped bool, startAfter string, limit, offset int) ([]string, error) {
+	resources = sycommon.NormalizeAccessResources(resources)
+	startAfter = strings.TrimSpace(startAfter)
+	if limit <= 0 || (len(resources) == 0 && !includeUnscoped) {
+		return []string{}, nil
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	args := make([]any, 0, len(resources)+3)
+	parts := make([]string, 0, 2)
+	if len(resources) > 0 {
+		placeholders := make([]string, 0, len(resources))
+		for _, resource := range resources {
+			args = append(args, resource)
+			placeholders = append(placeholders, "?")
+		}
+		parts = append(parts, `EXISTS (
+			SELECT 1
+			FROM drs_object_controlled_access ca
+			WHERE ca.object_id = o.id AND ca.resource IN (`+strings.Join(placeholders, ",")+`)
+		)`)
+	}
+	if includeUnscoped {
+		parts = append(parts, `NOT EXISTS (
+			SELECT 1
+			FROM drs_object_controlled_access ca
+			WHERE ca.object_id = o.id
+		)`)
+	}
+
+	query := `
+		SELECT DISTINCT o.id
+		FROM drs_object o
+		WHERE ((` + strings.Join(parts, " OR ") + `))
+	`
+	if startAfter != "" {
+		query += ` AND o.id > ?`
+		args = append(args, startAfter)
+	}
+	query += ` ORDER BY o.id LIMIT ? OFFSET ?`
+	args = append(args, limit, offset)
+	rows, err := db.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanObjectIDs(rows)
+}
+
+func (db *SqliteDB) ListObjectIDsPageByChecksum(ctx context.Context, checksum, checksumType, organization, project, startAfter string, limit, offset int, resources []string, includeUnscoped, restrictToResources bool) ([]string, error) {
+	checksum = strings.TrimSpace(checksum)
+	checksumType = strings.TrimSpace(checksumType)
+	organization = strings.TrimSpace(organization)
+	project = strings.TrimSpace(project)
+	startAfter = strings.TrimSpace(startAfter)
+	if checksum == "" || limit <= 0 {
+		return []string{}, nil
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	args := make([]any, 0, 8)
+	conditions := make([]string, 0, 4)
+
+	args = append(args, checksum)
+	if checksumType == "" {
+		conditions = append(conditions, `(o.id = ? OR EXISTS (
+			SELECT 1
+			FROM drs_object_checksum c2
+			WHERE c2.object_id = o.id AND c2.checksum = ?
+		))`)
+		args = append(args, checksum)
+	} else {
+		conditions = append(conditions, `EXISTS (
+			SELECT 1
+			FROM drs_object_checksum c2
+			WHERE c2.object_id = o.id AND c2.checksum = ? AND c2.type = ?
+		)`)
+		args = append(args, checksumType)
+	}
+	if organization != "" {
+		resource, err := sycommon.ResourcePath(organization, project)
+		if err != nil {
+			return nil, err
+		}
+		args = append(args, resource)
+		conditions = append(conditions, `EXISTS (
+			SELECT 1
+			FROM drs_object_controlled_access ca_scope
+			WHERE ca_scope.object_id = o.id AND ca_scope.resource = ?
+		)`)
+	}
+	if restrictToResources {
+		resources = sycommon.NormalizeAccessResources(resources)
+		if len(resources) == 0 && !includeUnscoped {
+			return []string{}, nil
+		}
+		parts := make([]string, 0, 2)
+		if len(resources) > 0 {
+			placeholders := make([]string, 0, len(resources))
+			for _, resource := range resources {
+				args = append(args, resource)
+				placeholders = append(placeholders, "?")
+			}
+			parts = append(parts, `EXISTS (
+				SELECT 1
+				FROM drs_object_controlled_access ca_auth
+				WHERE ca_auth.object_id = o.id AND ca_auth.resource IN (`+strings.Join(placeholders, ",")+`)
+			)`)
+		}
+		if includeUnscoped {
+			parts = append(parts, `NOT EXISTS (
+				SELECT 1
+				FROM drs_object_controlled_access ca_auth
+				WHERE ca_auth.object_id = o.id
+			)`)
+		}
+		conditions = append(conditions, `(`+strings.Join(parts, " OR ")+`)`)
+	}
+	if startAfter != "" {
+		args = append(args, startAfter)
+		conditions = append(conditions, `o.id > ?`)
+	}
+
+	query := `
+		SELECT o.id
+		FROM drs_object o
+		WHERE ` + strings.Join(conditions, ` AND `) + `
+		ORDER BY o.id LIMIT ? OFFSET ?`
+	args = append(args, limit, offset)
+	rows, err := db.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanObjectIDs(rows)
+}
+
+func (db *SqliteDB) ListObjectIDsByScopeAndResources(ctx context.Context, organization, project string, resources []string, restrictToResources bool) ([]string, error) {
+	organization = strings.TrimSpace(organization)
+	project = strings.TrimSpace(project)
+	if organization == "" {
+		if !restrictToResources {
+			rows, err := db.db.QueryContext(ctx, `SELECT id FROM drs_object ORDER BY id`)
+			if err != nil {
+				return nil, err
+			}
+			defer rows.Close()
+			return scanObjectIDs(rows)
+		}
+		return db.ListObjectIDsByResources(ctx, resources, false)
+	}
+
+	scopeResource, err := sycommon.ResourcePath(organization, project)
+	if err != nil {
+		return nil, err
+	}
+	args := make([]any, 0, len(resources)+1)
+	args = append(args, scopeResource)
+	query := `
+		SELECT DISTINCT o.id
+		FROM drs_object o
+		WHERE EXISTS (
+			SELECT 1
+			FROM drs_object_controlled_access ca_scope
+			WHERE ca_scope.object_id = o.id AND ca_scope.resource = ?
+		)`
+	if restrictToResources {
+		resources = sycommon.NormalizeAccessResources(resources)
+		if len(resources) == 0 {
+			return []string{}, nil
+		}
+		placeholders := make([]string, 0, len(resources))
+		for _, resource := range resources {
+			args = append(args, resource)
+			placeholders = append(placeholders, "?")
+		}
+		query += `
+		AND EXISTS (
+			SELECT 1
+			FROM drs_object_controlled_access ca_auth
+			WHERE ca_auth.object_id = o.id AND ca_auth.resource IN (` + strings.Join(placeholders, ",") + `)
+		)`
+	}
+	query += ` ORDER BY o.id`
+	rows, err := db.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanObjectIDs(rows)
+}
+
+func (db *SqliteDB) ListObjectIDsByChecksumsAndResources(ctx context.Context, checksums []string, resources []string, includeUnscoped, restrictToResources bool) (map[string][]string, error) {
+	normalized := make([]string, 0, len(checksums))
+	for _, checksum := range checksums {
+		if trimmed := strings.TrimSpace(checksum); trimmed != "" {
+			normalized = append(normalized, trimmed)
+		}
+	}
+	checksums = normalized
+	if len(checksums) == 0 {
+		return map[string][]string{}, nil
+	}
+
+	args := make([]any, 0, len(checksums)*2+len(resources))
+	idPlaceholders := make([]string, 0, len(checksums))
+	checksumPlaceholders := make([]string, 0, len(checksums))
+	for _, checksum := range checksums {
+		args = append(args, checksum)
+		idPlaceholders = append(idPlaceholders, "?")
+	}
+	for _, checksum := range checksums {
+		args = append(args, checksum)
+		checksumPlaceholders = append(checksumPlaceholders, "?")
+	}
+	query := `
+		WITH matched AS (
+			SELECT id AS object_id, id AS match_key
+			FROM drs_object
+			WHERE id IN (` + strings.Join(idPlaceholders, ",") + `)
+			UNION
+			SELECT c.object_id, c.checksum AS match_key
+			FROM drs_object_checksum c
+			WHERE c.checksum IN (` + strings.Join(checksumPlaceholders, ",") + `)
+		)
+		SELECT m.match_key, m.object_id
+		FROM matched m
+		INNER JOIN drs_object o ON o.id = m.object_id`
+	if restrictToResources {
+		resources = sycommon.NormalizeAccessResources(resources)
+		if len(resources) == 0 && !includeUnscoped {
+			return map[string][]string{}, nil
+		}
+		parts := make([]string, 0, 2)
+		if len(resources) > 0 {
+			placeholders := make([]string, 0, len(resources))
+			for _, resource := range resources {
+				args = append(args, resource)
+				placeholders = append(placeholders, "?")
+			}
+			parts = append(parts, `EXISTS (
+				SELECT 1
+				FROM drs_object_controlled_access ca_auth
+				WHERE ca_auth.object_id = o.id AND ca_auth.resource IN (`+strings.Join(placeholders, ",")+`)
+			)`)
+		}
+		if includeUnscoped {
+			parts = append(parts, `NOT EXISTS (
+				SELECT 1
+				FROM drs_object_controlled_access ca_auth
+				WHERE ca_auth.object_id = o.id
+			)`)
+		}
+		query += ` WHERE (` + strings.Join(parts, " OR ") + `)`
+	}
+	query += ` ORDER BY m.match_key, m.object_id`
+	rows, err := db.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanChecksumMatchRows(rows)
+}
+
+func (db *SqliteDB) ListBucketVisibilityRows(ctx context.Context, resources []string, includeUnscoped, restrictToResources bool) ([]models.BucketVisibilityRow, error) {
+	args := make([]any, 0, len(resources))
+	query := `
+		SELECT DISTINCT am.url, am.type, COALESCE(ca.resource, '')
+		FROM drs_object o
+		INNER JOIN drs_object_access_method am ON am.object_id = o.id
+		LEFT JOIN drs_object_controlled_access ca ON ca.object_id = o.id`
+	if restrictToResources {
+		resources = sycommon.NormalizeAccessResources(resources)
+		if len(resources) == 0 && !includeUnscoped {
+			return []models.BucketVisibilityRow{}, nil
+		}
+		parts := make([]string, 0, 2)
+		if len(resources) > 0 {
+			placeholders := make([]string, 0, len(resources))
+			for _, resource := range resources {
+				args = append(args, resource)
+				placeholders = append(placeholders, "?")
+			}
+			parts = append(parts, `EXISTS (
+				SELECT 1
+				FROM drs_object_controlled_access ca_auth
+				WHERE ca_auth.object_id = o.id AND ca_auth.resource IN (`+strings.Join(placeholders, ",")+`)
+			)`)
+		}
+		if includeUnscoped {
+			parts = append(parts, `NOT EXISTS (
+				SELECT 1
+				FROM drs_object_controlled_access ca_auth
+				WHERE ca_auth.object_id = o.id
+			)`)
+		}
+		query += ` WHERE (` + strings.Join(parts, " OR ") + `)`
+	}
+	rows, err := db.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]models.BucketVisibilityRow, 0)
+	for rows.Next() {
+		var row models.BucketVisibilityRow
+		if err := rows.Scan(&row.AccessURL, &row.AccessType, &row.Resource); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (db *SqliteDB) GetObjectsByChecksum(ctx context.Context, checksum string) ([]models.InternalObject, error) {
 	checksum = strings.TrimSpace(checksum)
 	if checksum == "" {
@@ -545,6 +969,40 @@ func (db *SqliteDB) BulkDeleteObjects(ctx context.Context, ids []string) error {
 		return err
 	}
 	return tx.Commit()
+}
+
+func scanObjectIDs(rows *sql.Rows) ([]string, error) {
+	ids := make([]string, 0)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return ids, nil
+}
+
+func scanChecksumMatchRows(rows *sql.Rows) (map[string][]string, error) {
+	out := make(map[string][]string)
+	for rows.Next() {
+		var checksum, objectID string
+		if err := rows.Scan(&checksum, &objectID); err != nil {
+			return nil, err
+		}
+		ids := out[checksum]
+		if len(ids) > 0 && ids[len(ids)-1] == objectID {
+			continue
+		}
+		out[checksum] = append(ids, objectID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (db *SqliteDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []string, checksums []string) (map[string]*models.InternalObject, error) {
@@ -713,11 +1171,43 @@ func (db *SqliteDB) controlledAccessForObject(ctx context.Context, objectID stri
 }
 
 func (db *SqliteDB) attachControlledAccess(ctx context.Context, objectsByID map[string]*models.InternalObject) error {
-	for id, obj := range objectsByID {
-		controlled, err := db.controlledAccessForObject(ctx, id)
-		if err != nil {
+	if len(objectsByID) == 0 {
+		return nil
+	}
+	ids := make([]any, 0, len(objectsByID))
+	placeholders := make([]string, 0, len(objectsByID))
+	for id := range objectsByID {
+		ids = append(ids, id)
+		placeholders = append(placeholders, "?")
+	}
+	rows, err := db.db.QueryContext(ctx, `
+		SELECT object_id, resource
+		FROM drs_object_controlled_access
+		WHERE object_id IN (`+strings.Join(placeholders, ",")+`)
+		ORDER BY object_id, resource`, ids...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	byObject := make(map[string][]string, len(objectsByID))
+	for rows.Next() {
+		var objectID, resource string
+		if err := rows.Scan(&objectID, &resource); err != nil {
 			return err
 		}
+		byObject[objectID] = append(byObject[objectID], resource)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	for id, resources := range byObject {
+		obj, ok := objectsByID[id]
+		if !ok {
+			continue
+		}
+		controlled := sycommon.NormalizeAccessResources(resources)
 		if len(controlled) == 0 {
 			continue
 		}

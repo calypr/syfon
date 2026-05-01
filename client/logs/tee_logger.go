@@ -45,9 +45,17 @@ func NewGen3Logger(logger *slog.Logger, logDir, profile string) *Gen3Logger {
 
 // loadJSON is an internal helper to load JSON from a file path.
 func loadJSON(path string, v any) {
-	data, _ := os.ReadFile(path)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			fmt.Fprintf(os.Stderr, "read log state %s: %v\n", path, err)
+		}
+		return
+	}
 	if len(data) > 0 {
-		json.Unmarshal(data, v)
+		if err := json.Unmarshal(data, v); err != nil {
+			fmt.Fprintf(os.Stderr, "decode log state %s: %v\n", path, err)
+		}
 	}
 }
 
@@ -62,7 +70,9 @@ func (t *Gen3Logger) logWithSkip(ctx context.Context, level slog.Level, skip int
 	runtime.Callers(skip, pcs[:])
 	r := slog.NewRecord(time.Now(), level, msg, pcs[0])
 	r.Add(args...)
-	_ = t.Handler().Handle(ctx, r)
+	if err := t.Handler().Handle(ctx, r); err != nil {
+		fmt.Fprintf(os.Stderr, "handle log record: %v\n", err)
+	}
 }
 
 // --- slog.Logger Method Overrides for accurate source attribution ---
@@ -164,16 +174,28 @@ func (t *Gen3Logger) writeFailedSync(e common.RetryObject) {
 	t.failedMu.Lock()
 	defer t.failedMu.Unlock()
 	t.FailedMap[e.SourcePath] = e
-	data, _ := json.MarshalIndent(t.FailedMap, "", "  ")
-	os.WriteFile(t.failedPath, data, 0644)
+	data, err := json.MarshalIndent(t.FailedMap, "", "  ")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "marshal failed log state: %v\n", err)
+		return
+	}
+	if err := os.WriteFile(t.failedPath, data, 0o644); err != nil {
+		fmt.Fprintf(os.Stderr, "write failed log state %s: %v\n", t.failedPath, err)
+	}
 }
 
 func (t *Gen3Logger) writeSucceededSync(path, guid string) {
 	t.succeededMu.Lock()
 	defer t.succeededMu.Unlock()
 	t.succeededMap[path] = guid
-	data, _ := json.MarshalIndent(t.succeededMap, "", "  ")
-	os.WriteFile(t.succeededPath, data, 0644)
+	data, err := json.MarshalIndent(t.succeededMap, "", "  ")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "marshal succeeded log state: %v\n", err)
+		return
+	}
+	if err := os.WriteFile(t.succeededPath, data, 0o644); err != nil {
+		fmt.Fprintf(os.Stderr, "write succeeded log state %s: %v\n", t.succeededPath, err)
+	}
 }
 
 // --- Tracking Methods ---

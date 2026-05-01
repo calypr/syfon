@@ -343,8 +343,8 @@ func TestObjectManagerLifecycleAuthorization(t *testing.T) {
 		if !errors.Is(err, common.ErrUnauthorized) {
 			t.Fatalf("expected register without create privilege to be unauthorized, got %v", err)
 		}
-		if !strings.Contains(err.Error(), "new-object") || !strings.Contains(err.Error(), "/programs/org/projects/project") {
-			t.Fatalf("expected denied register error to include object id and resource path, got %v", err)
+		if !strings.Contains(err.Error(), "new-object") || !strings.Contains(err.Error(), "org/project") {
+			t.Fatalf("expected denied register error to include object id and scope, got %v", err)
 		}
 		if _, ok := db.Objects["new-object"]; ok {
 			t.Fatalf("unauthorized register wrote object")
@@ -537,6 +537,45 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 		}
 		if _, ok := db.Objects["obj-b"]; !ok {
 			t.Fatalf("expected obj-b to remain")
+		}
+	})
+
+	t.Run("bulk update access methods checks authorization in one bulk read", func(t *testing.T) {
+		db := &coreTestDB{
+			MockDatabase: &testutils.MockDatabase{
+				Objects: map[string]*drs.DrsObject{
+					"obj-a": {Id: "obj-a"},
+					"obj-b": {Id: "obj-b"},
+				},
+				ObjectAuthz: map[string]map[string][]string{
+					"obj-a": {"a": {"one"}},
+					"obj-b": {"a": {"two"}},
+				},
+			},
+		}
+		om := NewObjectManager(db, &capturingURLManager{})
+		ctx := buildGen3Context(map[string]map[string]bool{
+			"/programs/a/projects/one": {"update": true},
+		})
+
+		err := om.BulkUpdateAccessMethods(ctx, map[string][]drs.AccessMethod{
+			"obj-a": {{
+				Type: drs.AccessMethodTypeS3,
+				AccessUrl: &struct {
+					Headers *[]string `json:"headers,omitempty"`
+					Url     string    `json:"url"`
+				}{Url: "s3://bucket/a"},
+			}},
+			"obj-b": {{
+				Type: drs.AccessMethodTypeS3,
+				AccessUrl: &struct {
+					Headers *[]string `json:"headers,omitempty"`
+					Url     string    `json:"url"`
+				}{Url: "s3://bucket/b"},
+			}},
+		})
+		if !errors.Is(err, common.ErrUnauthorized) {
+			t.Fatalf("expected unauthorized error, got %v", err)
 		}
 	})
 

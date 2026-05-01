@@ -3,11 +3,14 @@ package migrate
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/calypr/syfon/apigen/server/drs"
 )
 
 func TestRunPaginatesAndLoadsAllRecords(t *testing.T) {
@@ -141,6 +144,82 @@ func TestHTTPClientRetriesTimeout(t *testing.T) {
 	}
 }
 
+func TestPreflightImportReportsAllMissingCreateScopes(t *testing.T) {
+	reader := &fakeDumpReader{batches: [][]MigrationRecord{
+		{
+			{ID: "allowed", Checksums: []drs.Checksum{{Type: "sha256", Checksum: "sha-1"}}, Authz: []string{"/programs/cbds/projects/allowed"}},
+			{ID: "denied-1", Checksums: []drs.Checksum{{Type: "sha256", Checksum: "sha-2"}}, Authz: []string{"/programs/cbds/projects/missing-one"}},
+		},
+		{
+			{ID: "denied-2", Checksums: []drs.Checksum{{Type: "sha256", Checksum: "sha-3"}}, ControlledAccess: []string{"/programs/aced/projects/missing-two"}},
+		},
+	}}
+	privileges := fakePrivilegeLister{privileges: map[string]map[string]bool{
+		"/programs/cbds/projects/allowed": {"create": true},
+	}}
+
+	_, err := PreflightImport(context.Background(), reader, privileges, 500)
+	if err == nil {
+		t.Fatal("expected preflight to fail")
+	}
+	var preflightErr *ImportPreflightError
+	if !errors.As(err, &preflightErr) {
+		t.Fatalf("expected ImportPreflightError, got %T %v", err, err)
+	}
+	report := preflightErr.Report
+	if report.Records != 3 || report.MissingRecords != 2 {
+		t.Fatalf("unexpected report counts: %+v", report)
+	}
+	if report.FirstDeniedRecord != "denied-1" {
+		t.Fatalf("unexpected first denied record: %q", report.FirstDeniedRecord)
+	}
+	body := err.Error()
+	if !strings.Contains(body, "cbds/missing-one") || !strings.Contains(body, "aced/missing-two") {
+		t.Fatalf("expected formatted missing scopes in error, got %q", body)
+	}
+}
+
+func TestHTTPClientUserPrivileges(t *testing.T) {
+	var gotAuth string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/user/user" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		gotAuth = r.Header.Get("Authorization")
+		resp := map[string]any{
+			"authz": map[string]any{
+				"/programs/cbds/projects/p1": []any{
+					map[string]any{"service": "indexd", "method": "read"},
+					map[string]any{"service": "drs", "method": "create"},
+				},
+				"/programs/cbds/projects/p2": []any{
+					map[string]any{"service": "fence", "method": "create"},
+				},
+			},
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	client, err := NewHTTPClient(server.URL+"/index", AuthConfig{BearerToken: "tok"}, server.Client())
+	if err != nil {
+		t.Fatalf("NewHTTPClient: %v", err)
+	}
+	privileges, err := client.UserPrivileges(context.Background())
+	if err != nil {
+		t.Fatalf("UserPrivileges returned error: %v", err)
+	}
+	if gotAuth != "Bearer tok" {
+		t.Fatalf("expected bearer auth header, got %q", gotAuth)
+	}
+	if !privileges["/programs/cbds/projects/p1"]["create"] {
+		t.Fatalf("expected create privilege for p1, got %+v", privileges)
+	}
+	if privileges["/programs/cbds/projects/p2"]["create"] {
+		t.Fatalf("did not expect non-indexd/drs create privilege to be retained: %+v", privileges)
+	}
+}
+
 type fakeSource struct {
 	pages  [][]IndexdRecord
 	starts []string
@@ -161,6 +240,27 @@ type fakeLoader struct {
 func (l *fakeLoader) LoadBatch(ctx context.Context, records []MigrationRecord) error {
 	l.records = append(l.records, records...)
 	return nil
+}
+
+type fakeDumpReader struct {
+	batches [][]MigrationRecord
+}
+
+func (r *fakeDumpReader) ReadBatches(ctx context.Context, batchSize int, fn func([]MigrationRecord) error) error {
+	for _, batch := range r.batches {
+		if err := fn(batch); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+type fakePrivilegeLister struct {
+	privileges map[string]map[string]bool
+}
+
+func (l fakePrivilegeLister) UserPrivileges(ctx context.Context) (map[string]map[string]bool, error) {
+	return l.privileges, nil
 }
 
 type retryTransport struct {

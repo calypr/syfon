@@ -11,6 +11,7 @@ import (
 	syfoncommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/authz"
 	"github.com/calypr/syfon/internal/common"
+	"github.com/calypr/syfon/internal/db"
 	"github.com/calypr/syfon/internal/models"
 )
 
@@ -45,6 +46,10 @@ func (m *ObjectManager) ListVisibleBuckets(ctx context.Context) (map[string]Visi
 	}
 	if len(creds) == 0 {
 		return map[string]VisibleBucket{}, nil
+	}
+
+	if lister, ok := m.db.(db.BucketVisibilityLister); ok {
+		return m.listVisibleBucketsFromRows(ctx, lister, creds)
 	}
 
 	objects, err := m.listBucketsVisibleObjects(ctx)
@@ -90,6 +95,64 @@ func (m *ObjectManager) ListVisibleBuckets(ctx context.Context) (map[string]Visi
 	filtered := make(map[string]VisibleBucket)
 	for bucket, entry := range byBucket {
 		if len(programsSeen[bucket]) == 0 && !bucketReferencedByPublicObject(objects, entry.Credential, creds) {
+			continue
+		}
+		sort.Strings(entry.Programs)
+		filtered[bucket] = entry
+	}
+	return filtered, nil
+}
+
+func (m *ObjectManager) listVisibleBucketsFromRows(ctx context.Context, lister db.BucketVisibilityLister, creds []models.S3Credential) (map[string]VisibleBucket, error) {
+	restrictToResources := authz.IsAuthzEnforced(ctx) &&
+		!authz.HasMethodAccess(ctx, objectMethodRead, []string{"/programs"}) &&
+		!authz.HasMethodAccess(ctx, objectMethodRead, []string{"/data_file"})
+	rows, err := lister.ListBucketVisibilityRows(ctx, readableResources(ctx), true, restrictToResources)
+	if err != nil {
+		return nil, err
+	}
+
+	byBucket := make(map[string]VisibleBucket, len(creds))
+	programsSeen := make(map[string]map[string]struct{}, len(creds))
+	publicSeen := make(map[string]bool, len(creds))
+	for _, cred := range creds {
+		byBucket[cred.Bucket] = VisibleBucket{Credential: cred}
+		programsSeen[cred.Bucket] = map[string]struct{}{}
+	}
+
+	for _, row := range rows {
+		methodType := drs.AccessMethodType(strings.TrimSpace(row.AccessType))
+		method := drs.AccessMethod{
+			Type: methodType,
+			AccessUrl: &struct {
+				Headers *[]string `json:"headers,omitempty"`
+				Url     string    `json:"url"`
+			}{Url: row.AccessURL},
+		}
+		bucket, ok := bucketForAccessMethod(method, creds)
+		if !ok {
+			continue
+		}
+		entry, exists := byBucket[bucket]
+		if !exists {
+			continue
+		}
+		resource := strings.TrimSpace(row.Resource)
+		if resource == "" {
+			publicSeen[bucket] = true
+			continue
+		}
+		if _, seen := programsSeen[bucket][resource]; seen {
+			continue
+		}
+		programsSeen[bucket][resource] = struct{}{}
+		entry.Programs = append(entry.Programs, resource)
+		byBucket[bucket] = entry
+	}
+
+	filtered := make(map[string]VisibleBucket)
+	for bucket, entry := range byBucket {
+		if len(entry.Programs) == 0 && !publicSeen[bucket] {
 			continue
 		}
 		sort.Strings(entry.Programs)

@@ -118,7 +118,9 @@ func (b *backend) MultipartComplete(ctx context.Context, key string, uploadID st
 
 	// Cleanup temp files
 	for _, k := range append(currentParts, tempKeys...) {
-		_ = b.client.Bucket(b.bucket).Object(k).Delete(ctx)
+		if err := b.client.Bucket(b.bucket).Object(k).Delete(ctx); err != nil {
+			return fmt.Errorf("delete multipart temp object %s: %w", k, err)
+		}
 	}
 
 	return nil

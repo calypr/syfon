@@ -183,6 +183,16 @@ func AuthzMapMatchesScope(authzMap map[string][]string, org, project string) boo
 	return false
 }
 
+// ResourceScope parses a canonical or raw access resource into (organization, project).
+// It accepts "/programs/org" and "/programs/org/projects/proj" forms.
+func ResourceScope(resource string) (string, string, bool) {
+	org, project := parseResourcePath(resource)
+	if org == "" {
+		return "", "", false
+	}
+	return org, project, true
+}
+
 // parseResourcePath splits "/programs/org" or "/programs/org/projects/proj" into (org, project).
 func parseResourcePath(path string) (string, string) {
 	path = NormalizeAccessResource(path)

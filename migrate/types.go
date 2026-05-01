@@ -52,6 +52,10 @@ type Loader interface {
 	LoadBatch(ctx context.Context, records []MigrationRecord) error
 }
 
+type PrivilegeLister interface {
+	UserPrivileges(ctx context.Context) (map[string]map[string]bool, error)
+}
+
 type DumpReader interface {
 	ReadBatches(ctx context.Context, batchSize int, fn func([]MigrationRecord) error) error
 }

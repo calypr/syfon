@@ -43,11 +43,20 @@ CREATE INDEX IF NOT EXISTS drs_object_checksum_object_id_idx
 CREATE INDEX IF NOT EXISTS drs_object_checksum_checksum_idx
   ON drs_object_checksum(checksum);
 
+CREATE INDEX IF NOT EXISTS drs_object_checksum_checksum_type_object_id_idx
+  ON drs_object_checksum(checksum, type, object_id);
+
 CREATE INDEX IF NOT EXISTS drs_object_controlled_access_object_id_idx
   ON drs_object_controlled_access(object_id);
 
 CREATE INDEX IF NOT EXISTS drs_object_controlled_access_resource_idx
   ON drs_object_controlled_access(resource);
+
+CREATE INDEX IF NOT EXISTS drs_object_controlled_access_resource_object_id_idx
+  ON drs_object_controlled_access(resource, object_id);
+
+CREATE INDEX IF NOT EXISTS drs_object_controlled_access_object_id_resource_idx
+  ON drs_object_controlled_access(object_id, resource);
 
 CREATE INDEX IF NOT EXISTS drs_object_alias_object_id_idx
   ON drs_object_alias(object_id);

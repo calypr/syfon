@@ -24,9 +24,15 @@ func TestSchemaEnsurers(t *testing.T) {
 			WillReturnResult(sqlmock.NewResult(0, 0))
 		mock.ExpectExec(regexp.QuoteMeta("CREATE INDEX IF NOT EXISTS drs_object_checksum_checksum_idx ON drs_object_checksum(checksum)")).
 			WillReturnResult(sqlmock.NewResult(0, 0))
+		mock.ExpectExec(regexp.QuoteMeta("CREATE INDEX IF NOT EXISTS drs_object_checksum_checksum_type_object_id_idx ON drs_object_checksum(checksum, type, object_id)")).
+			WillReturnResult(sqlmock.NewResult(0, 0))
 		mock.ExpectExec(regexp.QuoteMeta("CREATE INDEX IF NOT EXISTS drs_object_controlled_access_object_id_idx ON drs_object_controlled_access(object_id)")).
 			WillReturnResult(sqlmock.NewResult(0, 0))
 		mock.ExpectExec(regexp.QuoteMeta("CREATE INDEX IF NOT EXISTS drs_object_controlled_access_resource_idx ON drs_object_controlled_access(resource)")).
+			WillReturnResult(sqlmock.NewResult(0, 0))
+		mock.ExpectExec(regexp.QuoteMeta("CREATE INDEX IF NOT EXISTS drs_object_controlled_access_resource_object_id_idx ON drs_object_controlled_access(resource, object_id)")).
+			WillReturnResult(sqlmock.NewResult(0, 0))
+		mock.ExpectExec(regexp.QuoteMeta("CREATE INDEX IF NOT EXISTS drs_object_controlled_access_object_id_resource_idx ON drs_object_controlled_access(object_id, resource)")).
 			WillReturnResult(sqlmock.NewResult(0, 0))
 		mock.ExpectExec(regexp.QuoteMeta("CREATE INDEX IF NOT EXISTS drs_object_alias_object_id_idx ON drs_object_alias(object_id)")).
 			WillReturnResult(sqlmock.NewResult(0, 0))
@@ -92,6 +98,7 @@ func TestSchemaEnsurers(t *testing.T) {
 
 		mock.ExpectExec("CREATE TABLE IF NOT EXISTS object_usage").WillReturnResult(sqlmock.NewResult(0, 0))
 		mock.ExpectExec("CREATE INDEX IF NOT EXISTS idx_object_usage_last_download_time").WillReturnResult(sqlmock.NewResult(0, 0))
+		mock.ExpectExec("CREATE INDEX IF NOT EXISTS idx_object_usage_last_download_time_object_id").WillReturnResult(sqlmock.NewResult(0, 0))
 		mock.ExpectExec("CREATE INDEX IF NOT EXISTS idx_object_usage_last_upload_time").WillReturnResult(sqlmock.NewResult(0, 0))
 
 		if err := pg.ensureObjectUsageSchema(); err != nil {

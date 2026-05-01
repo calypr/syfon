@@ -75,8 +75,11 @@ func (c *HTTPClient) ListPage(ctx context.Context, limit int, start string) ([]I
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("GET %s: unexpected status %d: %s", endpoint, resp.StatusCode, strings.TrimSpace(string(body)))
+		body, err := readTrimmedBody(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("GET %s: read error response body: %w", endpoint, err)
+		}
+		return nil, fmt.Errorf("GET %s: unexpected status %d: %s", endpoint, resp.StatusCode, body)
 	}
 
 	var page IndexdPage
@@ -127,8 +130,11 @@ func (c *HTTPClient) bulkDocuments(ctx context.Context, ids []string) ([]IndexdR
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("POST %s: unexpected status %d: %s", endpoint, resp.StatusCode, strings.TrimSpace(string(body)))
+		body, err := readTrimmedBody(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("POST %s: read error response body: %w", endpoint, err)
+		}
+		return nil, fmt.Errorf("POST %s: unexpected status %d: %s", endpoint, resp.StatusCode, body)
 	}
 	var records []IndexdRecord
 	if err := json.NewDecoder(resp.Body).Decode(&records); err != nil {
@@ -150,8 +156,11 @@ func (c *HTTPClient) getRecord(ctx context.Context, id string) (IndexdRecord, er
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return IndexdRecord{}, fmt.Errorf("GET %s: unexpected status %d: %s", endpoint, resp.StatusCode, strings.TrimSpace(string(body)))
+		body, err := readTrimmedBody(resp.Body)
+		if err != nil {
+			return IndexdRecord{}, fmt.Errorf("GET %s: read error response body: %w", endpoint, err)
+		}
+		return IndexdRecord{}, fmt.Errorf("GET %s: unexpected status %d: %s", endpoint, resp.StatusCode, body)
 	}
 	var record IndexdRecord
 	if err := json.NewDecoder(resp.Body).Decode(&record); err != nil {
@@ -178,10 +187,47 @@ func (c *HTTPClient) LoadBatch(ctx context.Context, records []MigrationRecord) e
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("POST %s: unexpected status %d: %s", endpoint, resp.StatusCode, strings.TrimSpace(string(body)))
+		body, err := readTrimmedBody(resp.Body)
+		if err != nil {
+			return fmt.Errorf("POST %s: read error response body: %w", endpoint, err)
+		}
+		return fmt.Errorf("POST %s: unexpected status %d: %s", endpoint, resp.StatusCode, body)
 	}
 	return nil
+}
+
+func (c *HTTPClient) UserPrivileges(ctx context.Context) (map[string]map[string]bool, error) {
+	endpoint := c.userEndpoint("/user/user")
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	c.applyHeaders(req)
+	resp, err := c.do(req)
+	if err != nil {
+		return nil, fmt.Errorf("GET %s: %w", endpoint, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, err := readTrimmedBody(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("GET %s: read error response body: %w", endpoint, err)
+		}
+		return nil, fmt.Errorf("GET %s: unexpected status %d: %s", endpoint, resp.StatusCode, body)
+	}
+
+	var data map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		return nil, fmt.Errorf("decode %s: %w", endpoint, err)
+	}
+	resourceAccess, ok := data["authz"].(map[string]any)
+	if !ok || len(resourceAccess) == 0 {
+		resourceAccess, ok = data["project_access"].(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("no authz/project_access found in user response")
+		}
+	}
+	return extractUserPrivileges(resourceAccess), nil
 }
 
 type bulkCreateRequest struct {
@@ -251,6 +297,15 @@ func (c *HTTPClient) endpoint(path string) string {
 	return c.baseURL + path
 }
 
+func (c *HTTPClient) userEndpoint(path string) string {
+	path = "/" + strings.TrimLeft(path, "/")
+	base := c.baseURL
+	if strings.HasSuffix(base, "/index") {
+		base = strings.TrimSuffix(base, "/index")
+	}
+	return base + path
+}
+
 func (c *HTTPClient) do(req *http.Request) (*http.Response, error) {
 	var lastErr error
 	for attempt := 1; attempt <= maxHTTPAttempts; attempt++ {
@@ -270,8 +325,12 @@ func (c *HTTPClient) do(req *http.Request) (*http.Response, error) {
 			lastErr = err
 		}
 		if resp != nil && resp.Body != nil {
-			_, _ = io.Copy(io.Discard, resp.Body)
-			_ = resp.Body.Close()
+			if _, copyErr := io.Copy(io.Discard, resp.Body); copyErr != nil && lastErr == nil {
+				lastErr = fmt.Errorf("discard retry response body: %w", copyErr)
+			}
+			if closeErr := resp.Body.Close(); closeErr != nil && lastErr == nil {
+				lastErr = fmt.Errorf("close retry response body: %w", closeErr)
+			}
 		}
 
 		timer := time.NewTimer(time.Duration(attempt) * 750 * time.Millisecond)
@@ -286,6 +345,14 @@ func (c *HTTPClient) do(req *http.Request) (*http.Response, error) {
 		}
 	}
 	return nil, lastErr
+}
+
+func readTrimmedBody(r io.Reader) (string, error) {
+	body, err := io.ReadAll(r)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(body)), nil
 }
 
 func shouldRetryHTTP(resp *http.Response, err error) bool {

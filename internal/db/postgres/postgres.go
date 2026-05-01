@@ -131,6 +131,7 @@ func (db *PostgresDB) ensureObjectUsageSchema() error {
 			updated_time TIMESTAMPTZ NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_object_usage_last_download_time ON object_usage(last_download_time)`,
+		`CREATE INDEX IF NOT EXISTS idx_object_usage_last_download_time_object_id ON object_usage(last_download_time, object_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_object_usage_last_upload_time ON object_usage(last_upload_time)`,
 	}
 	for _, q := range queries {
@@ -241,6 +242,7 @@ func (db *PostgresDB) ensureTransferAttributionSchema() error {
 		`ALTER TABLE transfer_attribution_event ADD COLUMN IF NOT EXISTS access_grant_id TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE transfer_attribution_event ADD COLUMN IF NOT EXISTS direction TEXT NOT NULL DEFAULT 'download'`,
 		`CREATE INDEX IF NOT EXISTS idx_transfer_attr_scope_time ON transfer_attribution_event(organization, project, event_type, event_time)`,
+		`CREATE INDEX IF NOT EXISTS idx_transfer_attr_scope_event_time ON transfer_attribution_event(organization, project, event_time)`,
 		`CREATE INDEX IF NOT EXISTS idx_transfer_attr_direction_time ON transfer_attribution_event(direction, event_time)`,
 		`CREATE INDEX IF NOT EXISTS idx_transfer_attr_actor_time ON transfer_attribution_event(actor_email, actor_subject, event_time)`,
 		`CREATE INDEX IF NOT EXISTS idx_transfer_attr_provider_time ON transfer_attribution_event(provider, bucket, event_time)`,

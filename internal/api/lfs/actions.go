@@ -47,12 +47,16 @@ func prepareDownloadActions(ctx context.Context, om *core.ObjectManager, oid str
 		return nil, &lfsapi.ObjectError{Code: int32(http.StatusInternalServerError), Message: err.Error()}
 	}
 
-	_ = om.RecordDownload(ctx, oid)
-	attribution.RecordAccessIssued(ctx, om, obj, attribution.AccessDetails{
+	if err := om.RecordDownload(ctx, oid); err != nil {
+		return nil, &lfsapi.ObjectError{Code: int32(http.StatusInternalServerError), Message: err.Error()}
+	}
+	if err := attribution.RecordAccessIssued(ctx, om, obj, attribution.AccessDetails{
 		Direction:  models.ProviderTransferDirectionDownload,
 		AccessID:   accessID,
 		StorageURL: src,
-	})
+	}); err != nil {
+		return nil, &lfsapi.ObjectError{Code: int32(http.StatusInternalServerError), Message: err.Error()}
+	}
 	action := lfsapi.Action{Href: signed}
 	return &lfsapi.BatchActions{Download: &action}, nil
 }
@@ -98,7 +102,10 @@ func uploadPartToSignedURL(ctx context.Context, signedURL string, content []byte
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		body, err := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		if err != nil {
+			return "", fmt.Errorf("read multipart part error body: %w", err)
+		}
 		return "", fmt.Errorf("multipart part put failed status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	etag := strings.TrimSpace(resp.Header.Get("ETag"))

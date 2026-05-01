@@ -83,8 +83,11 @@ func (db *SqliteDB) initSchema() error {
 		`CREATE INDEX IF NOT EXISTS idx_drs_object_access_method_object_id ON drs_object_access_method(object_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_drs_object_controlled_access_object_id ON drs_object_controlled_access(object_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_drs_object_controlled_access_resource ON drs_object_controlled_access(resource)`,
+		`CREATE INDEX IF NOT EXISTS idx_drs_object_controlled_access_resource_object_id ON drs_object_controlled_access(resource, object_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_drs_object_controlled_access_object_id_resource ON drs_object_controlled_access(object_id, resource)`,
 		`CREATE INDEX IF NOT EXISTS idx_drs_object_checksum_object_id ON drs_object_checksum(object_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_drs_object_checksum_checksum ON drs_object_checksum(checksum)`,
+		`CREATE INDEX IF NOT EXISTS idx_drs_object_checksum_checksum_type_object_id ON drs_object_checksum(checksum, type, object_id)`,
 		`CREATE TABLE IF NOT EXISTS drs_object_alias (
 			alias_id TEXT PRIMARY KEY,
 			object_id TEXT NOT NULL,
@@ -127,6 +130,7 @@ func (db *SqliteDB) initSchema() error {
 			FOREIGN KEY(object_id) REFERENCES drs_object(id) ON DELETE CASCADE
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_object_usage_last_download_time ON object_usage(last_download_time)`,
+		`CREATE INDEX IF NOT EXISTS idx_object_usage_last_download_time_object_id ON object_usage(last_download_time, object_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_object_usage_last_upload_time ON object_usage(last_upload_time)`,
 		`CREATE TABLE IF NOT EXISTS object_usage_event (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -213,6 +217,7 @@ func (db *SqliteDB) initSchema() error {
 			reconciliation_status TEXT NOT NULL DEFAULT 'unmatched' CHECK(reconciliation_status IN ('matched','ambiguous','unmatched'))
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_transfer_attr_scope_time ON transfer_attribution_event(organization, project, event_type, event_time)`,
+		`CREATE INDEX IF NOT EXISTS idx_transfer_attr_scope_event_time ON transfer_attribution_event(organization, project, event_time)`,
 		`CREATE INDEX IF NOT EXISTS idx_transfer_attr_actor_time ON transfer_attribution_event(actor_email, actor_subject, event_time)`,
 		`CREATE INDEX IF NOT EXISTS idx_transfer_attr_provider_time ON transfer_attribution_event(provider, bucket, event_time)`,
 		`CREATE INDEX IF NOT EXISTS idx_transfer_attr_sha_time ON transfer_attribution_event(sha256, event_time)`,

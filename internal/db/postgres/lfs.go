@@ -1,10 +1,10 @@
 package postgres
 
 import (
-	"github.com/calypr/syfon/internal/models"
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/calypr/syfon/internal/models"
 	"time"
 
 	"github.com/calypr/syfon/apigen/server/drs"
@@ -48,7 +48,9 @@ func (db *PostgresDB) SavePendingLFSMeta(ctx context.Context, entries []models.P
 
 func (db *PostgresDB) GetPendingLFSMeta(ctx context.Context, oid string) (*models.PendingLFSMeta, error) {
 	// Housekeeping (optional here but good for safety)
-	_, _ = db.db.ExecContext(ctx, "DELETE FROM lfs_pending_metadata WHERE expires_time <= $1", time.Now().UTC())
+	if _, err := db.db.ExecContext(ctx, "DELETE FROM lfs_pending_metadata WHERE expires_time <= $1", time.Now().UTC()); err != nil {
+		return nil, fmt.Errorf("failed to prune expired pending metadata: %w", err)
+	}
 
 	var (
 		raw       []byte
@@ -86,7 +88,9 @@ func (db *PostgresDB) PopPendingLFSMeta(ctx context.Context, oid string) (*model
 	defer tx.Rollback()
 
 	// 1. Housekeeping
-	_, _ = tx.ExecContext(ctx, "DELETE FROM lfs_pending_metadata WHERE expires_time <= $1", time.Now().UTC())
+	if _, err := tx.ExecContext(ctx, "DELETE FROM lfs_pending_metadata WHERE expires_time <= $1", time.Now().UTC()); err != nil {
+		return nil, fmt.Errorf("failed to prune expired pending metadata: %w", err)
+	}
 
 	// 2. Fetch
 	var (

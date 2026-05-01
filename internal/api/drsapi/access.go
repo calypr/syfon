@@ -33,11 +33,13 @@ func handleGetAccessURLFiber(om *core.ObjectManager) fiber.Handler {
 		if err != nil {
 			return apiutil.HandleError(c, err)
 		}
-		attribution.RecordAccessIssued(c.Context(), om, obj, attribution.AccessDetails{
+		if err := attribution.RecordAccessIssued(c.Context(), om, obj, attribution.AccessDetails{
 			Direction:  models.ProviderTransferDirectionDownload,
 			AccessID:   accessID,
 			StorageURL: targetURL,
-		})
+		}); err != nil {
+			return apiutil.HandleError(c, err)
+		}
 
 		return c.JSON(drs.AccessURL{Url: signed})
 	}
@@ -97,11 +99,14 @@ func handleGetBulkAccessURLFiber(om *core.ObjectManager) fiber.Handler {
 					unresolvedIDs = append(unresolvedIDs, objectID)
 					continue
 				}
-				attribution.RecordAccessIssued(c.Context(), om, obj, attribution.AccessDetails{
+				if err := attribution.RecordAccessIssued(c.Context(), om, obj, attribution.AccessDetails{
 					Direction:  models.ProviderTransferDirectionDownload,
 					AccessID:   accessID,
 					StorageURL: targetURL,
-				})
+				}); err != nil {
+					unresolvedIDs = append(unresolvedIDs, objectID)
+					continue
+				}
 				resolved = append(resolved, drs.BulkAccessURL{
 					DrsObjectId: common.Ptr(objectID),
 					DrsAccessId: common.Ptr(accessID),

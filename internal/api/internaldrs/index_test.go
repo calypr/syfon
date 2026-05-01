@@ -238,6 +238,40 @@ func TestHandleInternalList_HashTypeFiltering(t *testing.T) {
 	}
 }
 
+func TestHandleInternalList_HashPagination(t *testing.T) {
+	now := time.Now().UTC()
+	mockDB := &testutils.MockDatabase{
+		Objects: map[string]*drs.DrsObject{
+			"obj-1": {Id: "obj-1", CreatedTime: now, UpdatedTime: &now, Checksums: []drs.Checksum{{Type: "sha256", Checksum: "samehash"}}},
+			"obj-2": {Id: "obj-2", CreatedTime: now, UpdatedTime: &now, Checksums: []drs.Checksum{{Type: "sha256", Checksum: "samehash"}}},
+			"obj-3": {Id: "obj-3", CreatedTime: now, UpdatedTime: &now, Checksums: []drs.Checksum{{Type: "sha256", Checksum: "samehash"}}},
+		},
+	}
+	app := fiber.New()
+	om := core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
+	RegisterInternalRoutes(app, om)
+
+	req := httptest.NewRequest(http.MethodGet, "/index?hash=sha256:samehash&limit=1&page=1", nil)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("test request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 200, got %d body=%s", resp.StatusCode, string(body))
+	}
+	var payload internalapi.ListRecordsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Records == nil || len(*payload.Records) != 1 {
+		t.Fatalf("expected one paged record, got %+v", payload.Records)
+	}
+	if (*payload.Records)[0].Did != "obj-2" {
+		t.Fatalf("expected obj-2 on paged hash lookup, got %+v", (*payload.Records)[0])
+	}
+}
+
 func TestHandleInternalBulkHashes_HashTypeFiltering(t *testing.T) {
 	now := time.Now().UTC()
 	mockDB := &testutils.MockDatabase{
@@ -420,8 +454,11 @@ func TestHandleInternalBulkCreate_ReportsDeniedCreateResources(t *testing.T) {
 		t.Fatalf("expected 403, got %d body=%s", rr.Code, rr.Body.String())
 	}
 	body := rr.Body.String()
-	if !strings.Contains(body, "obj-denied") || !strings.Contains(body, "/programs/test/projects/p2") {
+	if !strings.Contains(body, "obj-denied") || !strings.Contains(body, "test/p2") {
 		t.Fatalf("expected denied resource detail in response body, got %q", body)
+	}
+	if strings.Contains(body, "/programs/test/projects/p2") {
+		t.Fatalf("expected user-facing organization/project scope, got raw resource path in %q", body)
 	}
 	if _, ok := mockDB.Objects["obj-denied"]; ok {
 		t.Fatal("unauthorized bulk create wrote object")

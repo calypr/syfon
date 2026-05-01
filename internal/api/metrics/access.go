@@ -122,15 +122,27 @@ func readableMetricsScopes(ctx context.Context) []metricsScope {
 	return scopes
 }
 
+func metricsResources(scopes []metricsScope) []string {
+	resources := make([]string, 0, len(scopes))
+	seen := map[string]bool{}
+	for _, scope := range scopes {
+		resource, err := sycommon.ResourcePath(scope.organization, scope.project)
+		if err != nil || resource == "" || seen[resource] {
+			continue
+		}
+		seen[resource] = true
+		resources = append(resources, resource)
+	}
+	sort.Strings(resources)
+	return resources
+}
+
 func metricsScopeFromResource(resource string) (metricsScope, bool) {
-	parts := strings.Split(strings.Trim(resource, "/"), "/")
-	if len(parts) == 2 && parts[0] == "programs" && parts[1] != "" {
-		return metricsScope{organization: parts[1]}, true
+	org, project, ok := sycommon.ResourceScope(resource)
+	if !ok {
+		return metricsScope{}, false
 	}
-	if len(parts) == 4 && parts[0] == "programs" && parts[2] == "projects" && parts[1] != "" && parts[3] != "" {
-		return metricsScope{organization: parts[1], project: parts[3]}, true
-	}
-	return metricsScope{}, false
+	return metricsScope{organization: org, project: project}, true
 }
 
 func parseScopeQuery(ctx context.Context) (string, string, bool, error) {

@@ -264,7 +264,10 @@ func (r *Request) Do(ctx context.Context, method, path string, body, out any, op
 		// JSON/Void Mode: We close the body.
 		defer resp.Body.Close()
 
-		data, _ := io.ReadAll(resp.Body)
+		data, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("read response body: %w", err)
+		}
 		if resp.StatusCode >= 400 {
 			return &ResponseError{
 				Method:  method,

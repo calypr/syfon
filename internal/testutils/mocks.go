@@ -150,6 +150,48 @@ func (m *MockDatabase) ListObjectIDsByScope(ctx context.Context, organization, p
 	return ids, nil
 }
 
+func (m *MockDatabase) ListObjectIDsByResources(ctx context.Context, resources []string, includeUnscoped bool) ([]string, error) {
+	allowed := map[string]struct{}{}
+	for _, resource := range resources {
+		resource = strings.TrimSpace(resource)
+		if resource != "" {
+			allowed[resource] = struct{}{}
+		}
+	}
+	ids := make([]string, 0)
+	for id := range m.Objects {
+		authz := map[string][]string{}
+		if m.ObjectAuthz != nil {
+			if v, ok := m.ObjectAuthz[id]; ok {
+				authz = v
+			}
+		}
+		resourcesForObject := []string{}
+		for org, projects := range authz {
+			if len(projects) == 0 {
+				resourcesForObject = append(resourcesForObject, "/programs/"+org)
+				continue
+			}
+			for _, project := range projects {
+				resourcesForObject = append(resourcesForObject, "/programs/"+org+"/projects/"+project)
+			}
+		}
+		if len(resourcesForObject) == 0 {
+			if includeUnscoped {
+				ids = append(ids, id)
+			}
+			continue
+		}
+		for _, resource := range resourcesForObject {
+			if _, ok := allowed[resource]; ok {
+				ids = append(ids, id)
+				break
+			}
+		}
+	}
+	return ids, nil
+}
+
 func (m *MockDatabase) CreateObjectAlias(ctx context.Context, aliasID, canonicalObjectID string) error {
 	if m.Objects == nil {
 		return fmt.Errorf("%w: object not found", common.ErrNotFound)
@@ -418,6 +460,26 @@ func (m *MockDatabase) GetFileUsage(ctx context.Context, objectID string) (*mode
 	}
 	copyUsage := u
 	return &copyUsage, nil
+}
+
+func (m *MockDatabase) ListFileUsageByObjectIDs(ctx context.Context, ids []string) ([]models.FileUsage, error) {
+	out := make([]models.FileUsage, 0, len(ids))
+	for _, id := range ids {
+		if m.Usage != nil {
+			if usage, ok := m.Usage[id]; ok {
+				out = append(out, usage)
+				continue
+			}
+		}
+		if obj, ok := m.Objects[id]; ok {
+			out = append(out, models.FileUsage{
+				ObjectID: id,
+				Name:     common.StringVal(obj.Name),
+				Size:     obj.Size,
+			})
+		}
+	}
+	return out, nil
 }
 
 func (m *MockDatabase) ListFileUsage(ctx context.Context, limit, offset int, inactiveSince *time.Time) ([]models.FileUsage, error) {

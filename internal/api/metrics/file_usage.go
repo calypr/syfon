@@ -47,9 +47,17 @@ func (s *MetricsServer) ListMetricsFiles(ctx context.Context, request metricsapi
 
 	var data []models.FileUsage
 	if access.isScoped() {
-		data, _, err = listScopedFileUsage(ctx, s.database, s.objects, access.organization, access.project, limit, offset, inactiveSince)
+		if scopedStore, ok := s.database.(db.FileUsageScopedLister); ok {
+			data, err = scopedStore.ListFileUsagePageByScope(ctx, access.organization, access.project, limit, offset, inactiveSince)
+		} else {
+			data, _, err = listScopedFileUsage(ctx, s.database, s.objects, access.organization, access.project, limit, offset, inactiveSince)
+		}
 	} else if access.hasScopeAggregate() {
-		data, _, err = listMultiScopedFileUsage(ctx, s.database, s.objects, access.scopes, limit, offset, inactiveSince)
+		if scopedStore, ok := s.database.(db.FileUsageScopedLister); ok {
+			data, err = scopedStore.ListFileUsagePageByResources(ctx, metricsResources(access.scopes), false, limit, offset, inactiveSince)
+		} else {
+			data, _, err = listMultiScopedFileUsage(ctx, s.database, s.objects, access.scopes, limit, offset, inactiveSince)
+		}
 	} else {
 		data, err = s.database.ListFileUsage(ctx, limit, offset, inactiveSince)
 	}
@@ -136,9 +144,17 @@ func (s *MetricsServer) GetMetricsSummary(ctx context.Context, request metricsap
 
 	var summary models.FileUsageSummary
 	if access.isScoped() {
-		_, summary, err = listScopedFileUsage(ctx, s.database, s.objects, access.organization, access.project, 0, 0, inactiveSince)
+		if scopedStore, ok := s.database.(db.FileUsageScopedLister); ok {
+			summary, err = scopedStore.GetFileUsageSummaryByScope(ctx, access.organization, access.project, inactiveSince)
+		} else {
+			_, summary, err = listScopedFileUsage(ctx, s.database, s.objects, access.organization, access.project, 0, 0, inactiveSince)
+		}
 	} else if access.hasScopeAggregate() {
-		_, summary, err = listMultiScopedFileUsage(ctx, s.database, s.objects, access.scopes, 0, 0, inactiveSince)
+		if scopedStore, ok := s.database.(db.FileUsageScopedLister); ok {
+			summary, err = scopedStore.GetFileUsageSummaryByResources(ctx, metricsResources(access.scopes), false, inactiveSince)
+		} else {
+			_, summary, err = listMultiScopedFileUsage(ctx, s.database, s.objects, access.scopes, 0, 0, inactiveSince)
+		}
 	} else {
 		summary, err = s.database.GetFileUsageSummary(ctx, inactiveSince)
 	}
@@ -188,28 +204,33 @@ func collectScopedUsage(ctx context.Context, database db.MetricsStore, objects m
 
 	summary := models.FileUsageSummary{TotalFiles: int64(len(ids))}
 	usages := make([]models.FileUsage, 0, len(ids))
+	bulkUsage, err := database.ListFileUsageByObjectIDs(ctx, ids)
+	if err != nil {
+		return nil, models.FileUsageSummary{}, err
+	}
+	usageByID := make(map[string]models.FileUsage, len(bulkUsage))
+	for _, usage := range bulkUsage {
+		usageByID[usage.ObjectID] = usage
+	}
 	for _, id := range ids {
-		usage, err := database.GetFileUsage(ctx, id)
-		if err != nil {
-			if errors.Is(err, common.ErrNotFound) {
-				if inactiveSince != nil {
-					summary.InactiveFileCount++
-				}
-				obj, objErr := objects.GetObject(ctx, id, "read")
-				if objErr != nil {
-					if errors.Is(objErr, common.ErrNotFound) || errors.Is(objErr, common.ErrUnauthorized) {
-						continue
-					}
-					return nil, models.FileUsageSummary{}, objErr
-				}
-				usages = append(usages, models.FileUsage{
-					ObjectID: id,
-					Name:     common.StringVal(obj.Name),
-					Size:     obj.Size,
-				})
-				continue
+		usage, ok := usageByID[id]
+		if !ok {
+			if inactiveSince != nil {
+				summary.InactiveFileCount++
 			}
-			return nil, models.FileUsageSummary{}, err
+			obj, objErr := objects.GetObject(ctx, id, "read")
+			if objErr != nil {
+				if errors.Is(objErr, common.ErrNotFound) || errors.Is(objErr, common.ErrUnauthorized) {
+					continue
+				}
+				return nil, models.FileUsageSummary{}, objErr
+			}
+			usages = append(usages, models.FileUsage{
+				ObjectID: id,
+				Name:     common.StringVal(obj.Name),
+				Size:     obj.Size,
+			})
+			continue
 		}
 		summary.TotalUploads += usage.UploadCount
 		summary.TotalDownloads += usage.DownloadCount
@@ -219,7 +240,7 @@ func collectScopedUsage(ctx context.Context, database db.MetricsStore, objects m
 		if inactiveSince != nil && usage.LastDownloadTime != nil && !usage.LastDownloadTime.Before(*inactiveSince) {
 			continue
 		}
-		usages = append(usages, *usage)
+		usages = append(usages, usage)
 	}
 	return usages, summary, nil
 }

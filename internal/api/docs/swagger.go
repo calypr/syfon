@@ -2,6 +2,7 @@ package docs
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -50,7 +51,9 @@ func RegisterSwaggerRoutes(router fiber.Router) {
 
 func handleSwaggerUI(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write([]byte(swaggerUIHTML))
+	if _, err := w.Write([]byte(swaggerUIHTML)); err != nil {
+		log.Printf("write swagger ui response: %v", err)
+	}
 }
 
 func handleOpenAPISpec(w http.ResponseWriter, r *http.Request) {
@@ -60,7 +63,9 @@ func handleOpenAPISpec(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/yaml")
-	_, _ = w.Write(merged)
+	if _, err := w.Write(merged); err != nil {
+		log.Printf("write merged openapi spec response: %v", err)
+	}
 }
 
 func handleLFSOpenAPISpec(w http.ResponseWriter, r *http.Request) {
@@ -70,7 +75,9 @@ func handleLFSOpenAPISpec(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/yaml")
-	_, _ = w.Write(specBytes)
+	if _, err := w.Write(specBytes); err != nil {
+		log.Printf("write lfs openapi spec response: %v", err)
+	}
 }
 
 func handleBucketOpenAPISpec(w http.ResponseWriter, r *http.Request) {
@@ -80,7 +87,9 @@ func handleBucketOpenAPISpec(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/yaml")
-	_, _ = w.Write(specBytes)
+	if _, err := w.Write(specBytes); err != nil {
+		log.Printf("write bucket openapi spec response: %v", err)
+	}
 }
 
 func handleInternalOpenAPISpec(w http.ResponseWriter, r *http.Request) {
@@ -90,7 +99,9 @@ func handleInternalOpenAPISpec(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/yaml")
-	_, _ = w.Write(specBytes)
+	if _, err := w.Write(specBytes); err != nil {
+		log.Printf("write internal openapi spec response: %v", err)
+	}
 }
 
 func findOpenAPISpecPath() (string, bool) {

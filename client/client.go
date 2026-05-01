@@ -153,7 +153,9 @@ func NewClient(cfg *Config) (*Client, error) {
 		requestor: req,
 		baseURL:   bu,
 	}
-	client.initServices()
+	if err := client.initServices(); err != nil {
+		return nil, err
+	}
 	return client, nil
 }
 
@@ -175,18 +177,29 @@ func parseBaseURL(addr string) (string, error) {
 	return strings.TrimRight(u.String(), "/"), nil
 }
 
-func (c *Client) initServices() {
+func (c *Client) initServices() error {
 	l := c.Logger()
 
 	server := c.baseURL
 	drsServer := strings.TrimRight(server+"/ga4gh/drs/v1", "/")
 	httpClient := c.HTTPClient()
 
-	c.drsGen, _ = drs.NewClientWithResponses(drsServer, drs.WithHTTPClient(httpClient))
-	c.lfsGen, _ = lfsapi.NewClientWithResponses(server, lfsapi.WithHTTPClient(httpClient))
-	c.internalGen, _ = internalapi.NewClientWithResponses(server, internalapi.WithHTTPClient(httpClient))
-	c.bucketGen, _ = bucketapi.NewClientWithResponses(server, bucketapi.WithHTTPClient(httpClient))
-	c.metricsGen, _ = metricsapi.NewClientWithResponses(server, metricsapi.WithHTTPClient(httpClient))
+	var err error
+	if c.drsGen, err = drs.NewClientWithResponses(drsServer, drs.WithHTTPClient(httpClient)); err != nil {
+		return fmt.Errorf("initialize drs client: %w", err)
+	}
+	if c.lfsGen, err = lfsapi.NewClientWithResponses(server, lfsapi.WithHTTPClient(httpClient)); err != nil {
+		return fmt.Errorf("initialize lfs client: %w", err)
+	}
+	if c.internalGen, err = internalapi.NewClientWithResponses(server, internalapi.WithHTTPClient(httpClient)); err != nil {
+		return fmt.Errorf("initialize internal client: %w", err)
+	}
+	if c.bucketGen, err = bucketapi.NewClientWithResponses(server, bucketapi.WithHTTPClient(httpClient)); err != nil {
+		return fmt.Errorf("initialize bucket client: %w", err)
+	}
+	if c.metricsGen, err = metricsapi.NewClientWithResponses(server, metricsapi.WithHTTPClient(httpClient)); err != nil {
+		return fmt.Errorf("initialize metrics client: %w", err)
+	}
 
 	c.health = syfonclient.NewHealthService(c.requestor)
 	c.index = syfonclient.NewIndexService(c.internalGen, c.requestor)
@@ -195,6 +208,7 @@ func (c *Client) initServices() {
 	c.data = syfonclient.NewDataService(c.internalGen, c.requestor, l, c.drs)
 	c.buckets = syfonclient.NewBucketsService(c.bucketGen)
 	c.metrics = syfonclient.NewMetricsService(c.metricsGen)
+	return nil
 }
 
 func (c *Client) HTTPClient() *http.Client {

@@ -92,7 +92,10 @@ func readURLBytes(ctx context.Context, rawURL string, c syfonclient.SyfonClient)
 		}
 		defer resp.Body.Close()
 		if resp.StatusCode >= 400 {
-			body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+			body, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
+			if err != nil {
+				return nil, fmt.Errorf("read error response body: %w", err)
+			}
 			return nil, fmt.Errorf("download failed status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(body)))
 		}
 		data, err := io.ReadAll(resp.Body)

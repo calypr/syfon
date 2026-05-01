@@ -27,15 +27,15 @@ type AccessDetails struct {
 	ClientVersion  string
 }
 
-func RecordAccessIssued(ctx context.Context, om *core.ObjectManager, obj *models.InternalObject, details AccessDetails) {
+func RecordAccessIssued(ctx context.Context, om *core.ObjectManager, obj *models.InternalObject, details AccessDetails) error {
 	if om == nil || obj == nil {
-		return
+		return nil
 	}
 	ev := EventFromObject(ctx, obj, models.TransferEventAccessIssued, details)
 	if ev.EventID == "" {
-		return
+		return nil
 	}
-	_ = om.RecordTransferAttributionEvents(ctx, []models.TransferAttributionEvent{ev})
+	return om.RecordTransferAttributionEvents(ctx, []models.TransferAttributionEvent{ev})
 }
 
 func EventFromObject(ctx context.Context, obj *models.InternalObject, eventType string, details AccessDetails) models.TransferAttributionEvent {

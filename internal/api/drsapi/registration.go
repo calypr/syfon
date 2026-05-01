@@ -26,9 +26,9 @@ func handleRegisterObjectsFiber(om *core.ObjectManager) fiber.Handler {
 					return apiutil.HandleError(c, err)
 				}
 				// Fetch back for full population (SelfUri, and access methods)
-				finalObj, _ := om.GetObject(c.Context(), internalObj.Id, "read")
-				if finalObj == nil {
-					finalObj = &internalObj
+				finalObj, err := om.GetObject(c.Context(), internalObj.Id, "read")
+				if err != nil {
+					return apiutil.HandleError(c, err)
 				}
 				return c.Status(fiber.StatusCreated).JSON(fiber.Map{
 					"objects": []any{drsObjectPayload(*finalObj)},
@@ -56,12 +56,10 @@ func handleRegisterObjectsFiber(om *core.ObjectManager) fiber.Handler {
 		for i, internal := range toRegister {
 			// Fetch back to ensure full population
 			obj, err := om.GetObject(c.Context(), internal.Id, "read")
-			if err == nil {
-				registered[i] = drsObjectPayload(*obj)
-			} else {
-				// Fallback to what we have if fetch fails
-				registered[i] = drsObjectPayload(internal)
+			if err != nil {
+				return apiutil.HandleError(c, err)
 			}
+			registered[i] = drsObjectPayload(*obj)
 		}
 
 		return c.Status(fiber.StatusCreated).JSON(fiber.Map{"objects": registered})

@@ -24,12 +24,17 @@ func discoverJWKSURL(issuer string) (string, error) {
 				JWKSURI string `json:"jwks_uri"`
 			}
 			err := json.NewDecoder(resp.Body).Decode(&data)
-			_ = resp.Body.Close()
+			closeErr := resp.Body.Close()
+			if closeErr != nil {
+				return "", fmt.Errorf("close openid configuration response: %w", closeErr)
+			}
 			if err == nil && data.JWKSURI != "" {
 				return data.JWKSURI, nil
 			}
 		} else {
-			_ = resp.Body.Close()
+			if closeErr := resp.Body.Close(); closeErr != nil {
+				return "", fmt.Errorf("close openid configuration response: %w", closeErr)
+			}
 		}
 	}
 	return issuer + "/.well-known/jwks.json", nil
@@ -85,7 +90,10 @@ func (c *JWKSCache) FetchKeys() error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		body, err := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		if err != nil {
+			return fmt.Errorf("JWKS fetch failed with status %d and unreadable body: %w", resp.StatusCode, err)
+		}
 		return fmt.Errorf("JWKS fetch failed with status %d: %s", resp.StatusCode, string(body))
 	}
 

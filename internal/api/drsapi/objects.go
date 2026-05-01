@@ -78,10 +78,14 @@ func drsObjectPayload(obj models.InternalObject) map[string]any {
 	var payload map[string]any
 	data, err := json.Marshal(obj.DrsObject)
 	if err == nil {
-		_ = json.Unmarshal(data, &payload)
+		if err := json.Unmarshal(data, &payload); err == nil {
+			return payload
+		}
 	}
-	if payload == nil {
-		payload = map[string]any{}
+	payload = map[string]any{}
+	if obj.Id != "" {
+		payload["id"] = obj.Id
 	}
+	payload["self_uri"] = obj.SelfUri
 	return payload
 }

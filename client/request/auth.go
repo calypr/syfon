@@ -58,7 +58,10 @@ func (t *AuthTransport) NewAccessToken(ctx context.Context) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		body, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		if err != nil {
+			return fmt.Errorf("failed to refresh token: read error response body: %w", err)
+		}
 		bodyText := strings.TrimSpace(string(body))
 		if bodyText == "" {
 			return fmt.Errorf("failed to refresh token: %s", resp.Status)
