@@ -94,11 +94,24 @@ func (m *ObjectManager) resolveScopedStorageURL(ctx context.Context, obj *models
 	if !ok {
 		return accessURL, nil
 	}
-	prefix := strings.Trim(strings.TrimSpace(scope.PathPrefix), "/")
-	if prefix == "" || keyHasStoragePrefix(key, prefix) {
-		return accessURL, nil
+	targetBucket := strings.TrimSpace(scope.Bucket)
+	if targetBucket == "" {
+		targetBucket = bucket
 	}
-	return common.S3Prefix + bucket + "/" + path.Join(prefix, strings.Trim(key, "/")), nil
+	prefix := strings.Trim(strings.TrimSpace(scope.PathPrefix), "/")
+	if prefix == "" {
+		if strings.EqualFold(targetBucket, bucket) {
+			return accessURL, nil
+		}
+		return common.S3Prefix + targetBucket + "/" + strings.Trim(key, "/"), nil
+	}
+	if keyHasStoragePrefix(key, prefix) {
+		if strings.EqualFold(targetBucket, bucket) {
+			return accessURL, nil
+		}
+		return common.S3Prefix + targetBucket + "/" + strings.Trim(key, "/"), nil
+	}
+	return common.S3Prefix + targetBucket + "/" + path.Join(prefix, strings.Trim(key, "/")), nil
 }
 
 func (m *ObjectManager) bucketScopeForObjectURL(ctx context.Context, obj *models.InternalObject, bucket string) (models.BucketScope, bool, error) {
@@ -106,6 +119,7 @@ func (m *ObjectManager) bucketScopeForObjectURL(ctx context.Context, obj *models
 	if bucket == "" {
 		return models.BucketScope{}, false, nil
 	}
+	var fallback *models.BucketScope
 	for _, candidate := range sortedObjectScopes(syfoncommon.ControlledAccessToAuthzMap(ObjectAccessResources(obj))) {
 		scope, found, err := m.lookupBucketScope(ctx, candidate.organization, candidate.project)
 		if err != nil {
@@ -117,6 +131,13 @@ func (m *ObjectManager) bucketScopeForObjectURL(ctx context.Context, obj *models
 		if strings.EqualFold(strings.TrimSpace(scope.Bucket), bucket) {
 			return scope, true, nil
 		}
+		if fallback == nil {
+			copyScope := scope
+			fallback = &copyScope
+		}
+	}
+	if fallback != nil {
+		return *fallback, true, nil
 	}
 	return models.BucketScope{}, false, nil
 }

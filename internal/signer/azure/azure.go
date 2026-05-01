@@ -32,6 +32,14 @@ func NewAzureSigner(db db.CredentialStore) *AzureSigner {
 	return &AzureSigner{db: db}
 }
 
+func (s *AzureSigner) InvalidateBucket(bucket string) {
+	bucket = strings.TrimSpace(bucket)
+	if bucket == "" {
+		return
+	}
+	s.cache.Delete(bucket)
+}
+
 func (s *AzureSigner) SignURL(ctx context.Context, bucket, key string, opts signer.SignOptions) (string, error) {
 	creds, err := s.getCreds(ctx, bucket)
 	if err != nil {

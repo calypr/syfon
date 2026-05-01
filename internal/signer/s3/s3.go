@@ -32,6 +32,14 @@ func NewS3Signer(db db.CredentialStore) *S3Signer {
 	return &S3Signer{db: db}
 }
 
+func (s *S3Signer) InvalidateBucket(bucket string) {
+	bucket = strings.TrimSpace(bucket)
+	if bucket == "" {
+		return
+	}
+	s.cache.Delete(bucket)
+}
+
 func (s *S3Signer) SignURL(ctx context.Context, bucket, key string, opts signer.SignOptions) (string, error) {
 	clients, err := s.getClients(ctx, bucket)
 	if err != nil {

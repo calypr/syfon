@@ -258,3 +258,70 @@ func TestManager_CompleteMultipartUpload_FailsOnUnreachableS3(t *testing.T) {
 		t.Fatal("expected CompleteMultipartUpload to fail against unreachable endpoint")
 	}
 }
+
+func TestManager_InvalidateBucketRefreshesSignerCache(t *testing.T) {
+	t.Setenv(crypto.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
+	ctx := context.Background()
+	database, err := sqlite.NewSqliteDB(":memory:")
+	if err != nil {
+		t.Fatalf("failed to init db: %v", err)
+	}
+
+	cred := &models.S3Credential{
+		Bucket:    "ceph-bucket",
+		Provider:  "s3",
+		Region:    "us-east-1",
+		AccessKey: "test-key-id",
+		SecretKey: "test-secret-key",
+		Endpoint:  "https://rgw-a.example.org",
+	}
+	if err := database.SaveS3Credential(ctx, cred); err != nil {
+		t.Fatalf("failed to save initial credential: %v", err)
+	}
+
+	manager := NewManager(database, config.SigningConfig{DefaultExpirySeconds: 900})
+	manager.RegisterSigner("s3", s3.NewS3Signer(database))
+
+	signedA, err := manager.SignURL(ctx, "", "s3://ceph-bucket/path/to/object.bin", SignOptions{})
+	if err != nil {
+		t.Fatalf("initial SignURL failed: %v", err)
+	}
+	parsedA, err := url.Parse(signedA)
+	if err != nil {
+		t.Fatalf("parse initial signed url: %v", err)
+	}
+	if got, want := parsedA.Host, "rgw-a.example.org"; got != want {
+		t.Fatalf("unexpected initial host: got %q want %q", got, want)
+	}
+
+	cred.Endpoint = "https://rgw-b.example.org"
+	if err := database.SaveS3Credential(ctx, cred); err != nil {
+		t.Fatalf("failed to save updated credential: %v", err)
+	}
+
+	signedStale, err := manager.SignURL(ctx, "", "s3://ceph-bucket/path/to/object.bin", SignOptions{})
+	if err != nil {
+		t.Fatalf("stale SignURL failed: %v", err)
+	}
+	parsedStale, err := url.Parse(signedStale)
+	if err != nil {
+		t.Fatalf("parse stale signed url: %v", err)
+	}
+	if got, want := parsedStale.Host, "rgw-a.example.org"; got != want {
+		t.Fatalf("expected cached host before invalidation: got %q want %q", got, want)
+	}
+
+	manager.InvalidateBucket("ceph-bucket")
+
+	signedB, err := manager.SignURL(ctx, "", "s3://ceph-bucket/path/to/object.bin", SignOptions{})
+	if err != nil {
+		t.Fatalf("refreshed SignURL failed: %v", err)
+	}
+	parsedB, err := url.Parse(signedB)
+	if err != nil {
+		t.Fatalf("parse refreshed signed url: %v", err)
+	}
+	if got, want := parsedB.Host, "rgw-b.example.org"; got != want {
+		t.Fatalf("unexpected refreshed host: got %q want %q", got, want)
+	}
+}

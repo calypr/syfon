@@ -59,6 +59,7 @@ type capturingURLManager struct {
 	completeKey         string
 	completeUploadID    string
 	completeParts       []urlmanager.MultipartPart
+	invalidatedBuckets  []string
 }
 
 func (m *capturingURLManager) SignURL(ctx context.Context, accessId string, url string, opts urlmanager.SignOptions) (string, error) {
@@ -99,6 +100,10 @@ func (m *capturingURLManager) CompleteMultipartUpload(ctx context.Context, bucke
 	m.completeUploadID = uploadId
 	m.completeParts = append([]urlmanager.MultipartPart(nil), parts...)
 	return nil
+}
+
+func (m *capturingURLManager) InvalidateBucket(bucket string) {
+	m.invalidatedBuckets = append(m.invalidatedBuckets, strings.TrimSpace(bucket))
 }
 
 func buildGen3Context(privileges map[string]map[string]bool) context.Context {
@@ -276,6 +281,28 @@ func TestObjectManagerGetObjectAuthzParity(t *testing.T) {
 				t.Fatalf("expected missing read privilege to be unauthorized, got %v", err)
 			}
 		})
+	}
+}
+
+func TestObjectManagerCredentialWritesInvalidateSignerCache(t *testing.T) {
+	ctx := context.Background()
+	db := &coreTestDB{MockDatabase: &testutils.MockDatabase{}}
+	um := &capturingURLManager{}
+	om := NewObjectManager(db, um)
+
+	cred := &models.S3Credential{Bucket: "b1", Provider: "s3", Region: "us-east-1", AccessKey: "a", SecretKey: "s"}
+	if err := om.SaveS3Credential(ctx, cred); err != nil {
+		t.Fatalf("SaveS3Credential failed: %v", err)
+	}
+	if got, want := um.invalidatedBuckets, []string{"b1"}; len(got) != len(want) || got[0] != want[0] {
+		t.Fatalf("unexpected invalidated buckets after save: got %v want %v", got, want)
+	}
+
+	if err := om.DeleteS3Credential(ctx, "b1"); err != nil {
+		t.Fatalf("DeleteS3Credential failed: %v", err)
+	}
+	if got, want := um.invalidatedBuckets, []string{"b1", "b1"}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("unexpected invalidated buckets after delete: got %v want %v", got, want)
 	}
 }
 
@@ -697,6 +724,36 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 		}
 		if mockDB.GetBucketScopeCalls != 1 {
 			t.Fatalf("expected bucket scope to be cached after first lookup, got %d db lookups", mockDB.GetBucketScopeCalls)
+		}
+	})
+
+	t.Run("object signing rewrites alias bucket to scoped canonical bucket", func(t *testing.T) {
+		mockDB := &testutils.MockDatabase{
+			BucketScopes: map[string]models.BucketScope{
+				"gdc_mirror|gdc_mirror": {
+					Organization: "gdc_mirror",
+					ProjectID:    "gdc_mirror",
+					Bucket:       "bforepc-prod",
+					PathPrefix:   "bforepc",
+				},
+			},
+		}
+		db := &coreTestDB{MockDatabase: mockDB}
+		um := &capturingURLManager{}
+		om := NewObjectManager(db, um)
+		obj := &models.InternalObject{
+			DrsObject: drs.DrsObject{
+				ControlledAccess: &[]string{"/programs/gdc_mirror/projects/gdc_mirror"},
+			},
+		}
+
+		_, err := om.SignObjectURL(context.Background(), obj, "s3://calypr/223bebff-debb-555c-bd59-5372f106c76c/4413832f86f331fc270de6d2263e13ac865d4524eef701ec8f4a342feb2f4300", urlmanager.SignOptions{})
+		if err != nil {
+			t.Fatalf("SignObjectURL failed: %v", err)
+		}
+		wantURL := "s3://bforepc-prod/bforepc/223bebff-debb-555c-bd59-5372f106c76c/4413832f86f331fc270de6d2263e13ac865d4524eef701ec8f4a342feb2f4300"
+		if um.signURLAccessURL != wantURL {
+			t.Fatalf("expected scoped storage url %q, got %q", wantURL, um.signURLAccessURL)
 		}
 	})
 

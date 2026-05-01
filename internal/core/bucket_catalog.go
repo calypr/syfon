@@ -13,6 +13,7 @@ import (
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/db"
 	"github.com/calypr/syfon/internal/models"
+	"github.com/calypr/syfon/internal/urlmanager"
 )
 
 func (m *ObjectManager) ListS3Credentials(ctx context.Context) ([]models.S3Credential, error) {
@@ -24,7 +25,11 @@ func (m *ObjectManager) GetS3Credential(ctx context.Context, bucket string) (*mo
 }
 
 func (m *ObjectManager) SaveS3Credential(ctx context.Context, cred *models.S3Credential) error {
-	return m.db.SaveS3Credential(ctx, cred)
+	if err := m.db.SaveS3Credential(ctx, cred); err != nil {
+		return err
+	}
+	m.invalidateBucketSignerCache(cred.Bucket)
+	return nil
 }
 
 func (m *ObjectManager) DeleteS3Credential(ctx context.Context, bucket string) error {
@@ -32,7 +37,16 @@ func (m *ObjectManager) DeleteS3Credential(ctx context.Context, bucket string) e
 		return err
 	}
 	m.bucketScopeCache.clear()
+	m.invalidateBucketSignerCache(bucket)
 	return nil
+}
+
+func (m *ObjectManager) invalidateBucketSignerCache(bucket string) {
+	invalidator, ok := m.uM.(urlmanager.BucketCacheInvalidator)
+	if !ok {
+		return
+	}
+	invalidator.InvalidateBucket(bucket)
 }
 
 func (m *ObjectManager) ListBucketScopes(ctx context.Context) ([]models.BucketScope, error) {

@@ -28,6 +28,14 @@ func NewGCSSigner(db db.CredentialStore) *GCSSigner {
 	return &GCSSigner{db: db}
 }
 
+func (s *GCSSigner) InvalidateBucket(bucket string) {
+	bucket = strings.TrimSpace(bucket)
+	if bucket == "" {
+		return
+	}
+	s.cache.Delete(bucket)
+}
+
 func (s *GCSSigner) SignURL(ctx context.Context, bucket, key string, opts signer.SignOptions) (string, error) {
 	cred, err := s.db.GetS3Credential(ctx, bucket)
 	if err != nil {
