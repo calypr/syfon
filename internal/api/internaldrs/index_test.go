@@ -403,6 +403,31 @@ func TestHandleInternalBulkCreate_AllowsCreateAccessForAnyControlledAccessScope(
 	}
 }
 
+func TestHandleInternalBulkCreate_ReportsDeniedCreateResources(t *testing.T) {
+	reqBody := `{"records":[{"did":"obj-denied","size":7,"controlled_access":["/programs/test/projects/p2"],"access_methods":[{"type":"s3","access_url":{"url":"s3://bucket/path/obj-denied"}}]}]}`
+	req := httptest.NewRequest(http.MethodPost, "/index/bulk", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	ctx := indexTestAuthContext(req.Context(), "gen3", true, map[string]map[string]bool{
+		"/programs/test/projects/p1": {"create": true},
+	})
+	req = req.WithContext(ctx)
+
+	mockDB := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}
+	om := core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
+	rr := doInternalDRSTestRequest(req, om)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, "obj-denied") || !strings.Contains(body, "/programs/test/projects/p2") {
+		t.Fatalf("expected denied resource detail in response body, got %q", body)
+	}
+	if _, ok := mockDB.Objects["obj-denied"]; ok {
+		t.Fatal("unauthorized bulk create wrote object")
+	}
+}
+
 func TestHandleInternalDeleteByQuery(t *testing.T) {
 	t.Run("requires scope query", func(t *testing.T) {
 		mockDB := &testutils.MockDatabase{}

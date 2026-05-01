@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"sort"
 	"strings"
 	"time"
 
@@ -11,6 +12,8 @@ import (
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/models"
 )
+
+const maxDeniedAccessResources = 25
 
 // RegisterBulk saves multiple internal objects as a single logical operation.
 func (m *ObjectManager) RegisterBulk(ctx context.Context, candidates []drs.DrsObjectCandidate) (int, error) {
@@ -100,10 +103,8 @@ func (m *ObjectManager) BulkUpdateAccessMethods(ctx context.Context, updates map
 }
 
 func (m *ObjectManager) RegisterObjects(ctx context.Context, objs []models.InternalObject) error {
-	for i := range objs {
-		if err := m.requireObjectMethod(ctx, &objs[i], objectMethodCreate); err != nil {
-			return err
-		}
+	if err := m.bulkObjectMethodError(ctx, objs, objectMethodCreate); err != nil {
+		return err
 	}
 	return m.db.RegisterObjects(ctx, objs)
 }
@@ -215,4 +216,49 @@ func (m *ObjectManager) hasObjectMethod(ctx context.Context, obj *models.Interna
 		return true
 	}
 	return authz.HasObjectMethodAccess(ctx, method, ObjectAccessResources(obj))
+}
+
+func (m *ObjectManager) bulkObjectMethodError(ctx context.Context, objs []models.InternalObject, method string) error {
+	resources := make(map[string]struct{})
+	var firstDeniedID string
+	deniedRecords := 0
+	for i := range objs {
+		if m.hasObjectMethod(ctx, &objs[i], method) {
+			continue
+		}
+		deniedRecords++
+		if firstDeniedID == "" {
+			firstDeniedID = objs[i].Id
+		}
+		for _, resource := range ObjectAccessResources(&objs[i]) {
+			if strings.TrimSpace(resource) == "" {
+				continue
+			}
+			resources[resource] = struct{}{}
+		}
+	}
+	if deniedRecords == 0 {
+		return nil
+	}
+
+	resourceList := make([]string, 0, len(resources))
+	for resource := range resources {
+		resourceList = append(resourceList, resource)
+	}
+	sort.Strings(resourceList)
+
+	truncated := 0
+	if len(resourceList) > maxDeniedAccessResources {
+		truncated = len(resourceList) - maxDeniedAccessResources
+		resourceList = resourceList[:maxDeniedAccessResources]
+	}
+
+	return &common.AuthorizationError{
+		Method:             method,
+		RecordID:           firstDeniedID,
+		Resources:          resourceList,
+		DeniedRecords:      deniedRecords,
+		TotalRecords:       len(objs),
+		TruncatedResources: truncated,
+	}
 }

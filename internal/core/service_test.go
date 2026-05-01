@@ -339,8 +339,12 @@ func TestObjectManagerLifecycleAuthorization(t *testing.T) {
 		deniedCtx := buildGen3Context(map[string]map[string]bool{
 			"/programs/org/projects/project": {"read": true},
 		})
-		if err := om.RegisterObjects(deniedCtx, []models.InternalObject{obj}); !errors.Is(err, common.ErrUnauthorized) {
+		err := om.RegisterObjects(deniedCtx, []models.InternalObject{obj})
+		if !errors.Is(err, common.ErrUnauthorized) {
 			t.Fatalf("expected register without create privilege to be unauthorized, got %v", err)
+		}
+		if !strings.Contains(err.Error(), "new-object") || !strings.Contains(err.Error(), "/programs/org/projects/project") {
+			t.Fatalf("expected denied register error to include object id and resource path, got %v", err)
 		}
 		if _, ok := db.Objects["new-object"]; ok {
 			t.Fatalf("unauthorized register wrote object")
