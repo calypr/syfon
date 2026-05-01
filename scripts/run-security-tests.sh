@@ -28,9 +28,9 @@ go test -v ./internal/config -run TestLoadConfig_PostgresSSLModeDefault
 go test -v ./internal/config -run TestSecretRedaction_BasicAuthConfig
 go test -v ./internal/config -run TestSecretRedaction_PostgresConfig
 go test -v ./internal/config -run TestSecretRedaction_S3Config
-go test -v ./client/conf -run TestEnsureExists_DirectoryPermissions
-go test -v ./client/conf -run TestEnsureExists_ConfigFileCreation
-go test -v ./client/conf -run TestConfigPath_NestedDirectoryStructure
+go test -v ./client/config -run TestEnsureExists_DirectoryPermissions
+go test -v ./client/config -run TestEnsureExists_ConfigFileCreation
+go test -v ./client/config -run TestConfigPath_NestedDirectoryStructure
 echo "✓ MED-1: Secrets redacted in JSON marshaling"
 echo "✓ MED-2: Postgres SSL defaults to 'require'"
 echo "✓ MED-3: Client config directory 0700 permissions"
@@ -79,4 +79,3 @@ echo "  ✓ KEK fingerprint extended from 64 to 128 bits"
 echo "  ✓ Client HTTP timeout set to 10 minutes"
 echo ""
 echo "Test suite completed successfully!"
-

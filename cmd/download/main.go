@@ -11,7 +11,7 @@ import (
 	"strings"
 
 	syclient "github.com/calypr/syfon/client"
-	"github.com/calypr/syfon/client/syfonclient"
+	syfonclient "github.com/calypr/syfon/client/services"
 	"github.com/spf13/cobra"
 )
 

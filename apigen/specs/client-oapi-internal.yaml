@@ -1,4 +1,0 @@
-package: internalapi
-generate:
-  client: true
-  models: true

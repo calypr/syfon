@@ -2,7 +2,6 @@ package core
 
 import (
 	"fmt"
-	"net/url"
 	"strings"
 	"time"
 
@@ -21,10 +20,10 @@ func UniqueAuthz(accessMethods []drs.AccessMethod) map[string][]string {
 	}
 	out := make(map[string][]string)
 	for _, am := range accessMethods {
-		if am.Authorizations == nil {
+		if am.Authorizations == nil || am.Authorizations.BearerAuthIssuers == nil {
 			continue
 		}
-		for org, projects := range *am.Authorizations {
+		for org, projects := range syfoncommon.AuthzListToMap(*am.Authorizations.BearerAuthIssuers) {
 			if len(projects) == 0 {
 				if _, ok := out[org]; !ok {
 					out[org] = []string{}
@@ -78,11 +77,6 @@ func LFSCandidateToDRS(in lfsapi.DrsObjectCandidate) drs.DrsObjectCandidate {
 				AccessId:  am.AccessId,
 				AccessUrl: accessURL,
 				Cloud:     am.Region,
-			}
-			if am.Authorizations != nil && am.Authorizations.BearerAuthIssuers != nil {
-				if authzMap := syfoncommon.AuthzListToMap(*am.Authorizations.BearerAuthIssuers); authzMap != nil {
-					converted[i].Authorizations = &authzMap
-				}
 			}
 			if am.Type != nil {
 				converted[i].Type = drs.AccessMethodType(*am.Type)
@@ -153,7 +147,10 @@ func CandidateToInternalObject(c drs.DrsObjectCandidate, now time.Time) (models.
 	if c.AccessMethods != nil {
 		ams = *c.AccessMethods
 	}
-	authzList := UniqueAuthz(ams)
+	authzList := syfoncommon.ControlledAccessToAuthzMap(common.DerefStringSlice(c.ControlledAccess))
+	if authzList == nil {
+		authzList = UniqueAuthz(ams)
+	}
 
 	id := ""
 	if c.Aliases != nil {
@@ -180,6 +177,10 @@ func CandidateToInternalObject(c drs.DrsObjectCandidate, now time.Time) (models.
 		Aliases:     c.Aliases,
 		Checksums:   []drs.Checksum{{Type: "sha256", Checksum: oid}},
 	}
+	if c.ControlledAccess != nil {
+		controlled := syfoncommon.NormalizeAccessResources(*c.ControlledAccess)
+		obj.ControlledAccess = &controlled
+	}
 	if c.Name != nil {
 		obj.Name = c.Name
 	}
@@ -195,9 +196,6 @@ func CandidateToInternalObject(c drs.DrsObjectCandidate, now time.Time) (models.
 			method := am
 			if method.AccessId == nil || *method.AccessId == "" {
 				method.AccessId = common.Ptr(string(method.Type))
-			}
-			if method.Authorizations == nil && len(authzList) > 0 {
-				method.Authorizations = &authzList
 			}
 			newMethods = append(newMethods, method)
 		}
@@ -233,6 +231,10 @@ func MergeInternalObjectUpdate(existing models.InternalObject, update models.Int
 	}
 	if update.Authorizations != nil {
 		merged.Authorizations = update.Authorizations
+	}
+	if update.ControlledAccess != nil {
+		merged.ControlledAccess = update.ControlledAccess
+		merged.Authorizations = syfoncommon.ControlledAccessToAuthzMap(*update.ControlledAccess)
 	}
 	if update.AccessMethods != nil {
 		merged.AccessMethods = update.AccessMethods
@@ -275,19 +277,18 @@ func InternalRecordToInternalObject(r internalapi.InternalRecord, now time.Time)
 		obj.Checksums = checksums
 	}
 
-	var auth models.AuthPathMap
 	var authzMap map[string][]string
-	if r.Auth != nil {
-		auth = models.AuthPathMap(*r.Auth)
-		authzMap = models.AuthPathMapToAuthorizations(auth)
-		methods := AccessMethodsFromAuthPathMap(auth)
-		if len(methods) > 0 {
-			obj.AccessMethods = &methods
-		}
+	if r.ControlledAccess != nil {
+		controlled := syfoncommon.NormalizeAccessResources(*r.ControlledAccess)
+		obj.ControlledAccess = &controlled
+		authzMap = syfoncommon.ControlledAccessToAuthzMap(controlled)
+	}
+	if r.AccessMethods != nil {
+		methods := append([]drs.AccessMethod(nil), (*r.AccessMethods)...)
+		obj.AccessMethods = &methods
 	}
 	return models.InternalObject{
 		DrsObject:      obj,
-		Auth:           auth,
 		Authorizations: authzMap,
 	}, nil
 }
@@ -306,19 +307,17 @@ func parseInternalRecordTime(raw *string, fallback time.Time) time.Time {
 
 // InternalObjectToInternalRecord converts our internal domain model back to an API record.
 func InternalObjectToInternalRecord(obj models.InternalObject) internalapi.InternalRecord {
-	var authPtr *internalapi.AuthPathMap
-	if len(obj.Auth) > 0 {
-		auth := internalapi.AuthPathMap(obj.Auth)
-		authPtr = &auth
-	}
 	res := internalapi.InternalRecord{
-		Did:         obj.Id,
-		Size:        &obj.Size,
-		CreatedTime: common.Ptr(obj.CreatedTime.Format(time.RFC3339)),
-		Description: obj.Description,
-		FileName:    obj.Name,
-		Version:     obj.Version,
-		Auth:        authPtr,
+		Did:           obj.Id,
+		Size:          &obj.Size,
+		CreatedTime:   common.Ptr(obj.CreatedTime.Format(time.RFC3339)),
+		Description:   obj.Description,
+		FileName:      obj.Name,
+		Version:       obj.Version,
+		AccessMethods: obj.AccessMethods,
+	}
+	if controlled := ObjectAccessResources(&obj); len(controlled) > 0 {
+		res.ControlledAccess = &controlled
 	}
 	if obj.UpdatedTime != nil {
 		res.UpdatedTime = common.Ptr(obj.UpdatedTime.Format(time.RFC3339))
@@ -337,48 +336,17 @@ func InternalObjectToInternalRecord(obj models.InternalObject) internalapi.Inter
 func InternalObjectToInternalRecordResponse(obj models.InternalObject) internalapi.InternalRecordResponse {
 	rec := InternalObjectToInternalRecord(obj)
 	return internalapi.InternalRecordResponse{
-		Did:          rec.Did,
-		Size:         rec.Size,
-		CreatedTime:  rec.CreatedTime,
-		Description:  rec.Description,
-		FileName:     rec.FileName,
-		Version:      rec.Version,
-		Auth:         rec.Auth,
-		UpdatedTime:  rec.UpdatedTime,
-		Hashes:       rec.Hashes,
-		Organization: rec.Organization,
-		Project:      rec.Project,
+		Did:              rec.Did,
+		AccessMethods:    rec.AccessMethods,
+		ControlledAccess: rec.ControlledAccess,
+		Size:             rec.Size,
+		CreatedTime:      rec.CreatedTime,
+		Description:      rec.Description,
+		FileName:         rec.FileName,
+		Version:          rec.Version,
+		UpdatedTime:      rec.UpdatedTime,
+		Hashes:           rec.Hashes,
+		Organization:     rec.Organization,
+		Project:          rec.Project,
 	}
-}
-
-func AccessMethodsFromAuthPathMap(auth models.AuthPathMap) []drs.AccessMethod {
-	methods := make([]drs.AccessMethod, 0)
-	for org, projects := range auth {
-		for project, paths := range projects {
-			methodAuthz := map[string][]string{org: {project}}
-			if project == "" {
-				methodAuthz[org] = []string{}
-			}
-			for _, rawPath := range paths {
-				rawPath = strings.TrimSpace(rawPath)
-				if rawPath == "" {
-					continue
-				}
-				scheme := "https"
-				if parsed, err := url.Parse(rawPath); err == nil && parsed.Scheme != "" {
-					scheme = parsed.Scheme
-				}
-				methods = append(methods, drs.AccessMethod{
-					Type:     drs.AccessMethodType(scheme),
-					AccessId: common.Ptr(scheme),
-					AccessUrl: &struct {
-						Headers *[]string `json:"headers,omitempty"`
-						Url     string    `json:"url"`
-					}{Url: rawPath},
-					Authorizations: &methodAuthz,
-				})
-			}
-		}
-	}
-	return methods
 }

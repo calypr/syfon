@@ -14,6 +14,27 @@ import (
 	"time"
 )
 
+func discoverJWKSURL(issuer string) (string, error) {
+	issuer = strings.TrimRight(issuer, "/")
+	openidConfigURL := issuer + "/.well-known/openid-configuration"
+	resp, err := http.Get(openidConfigURL)
+	if err == nil {
+		if resp.StatusCode == http.StatusOK {
+			var data struct {
+				JWKSURI string `json:"jwks_uri"`
+			}
+			err := json.NewDecoder(resp.Body).Decode(&data)
+			_ = resp.Body.Close()
+			if err == nil && data.JWKSURI != "" {
+				return data.JWKSURI, nil
+			}
+		} else {
+			_ = resp.Body.Close()
+		}
+	}
+	return issuer + "/.well-known/jwks.json", nil
+}
+
 // JWKSCache holds JWKS public keys for JWT signature verification
 type JWKSCache struct {
 	mu        sync.RWMutex
@@ -159,5 +180,3 @@ func bytesToInt(b []byte) int {
 	// For larger values, use the last 4 bytes
 	return int(binary.BigEndian.Uint32(b[len(b)-4:]))
 }
-
-

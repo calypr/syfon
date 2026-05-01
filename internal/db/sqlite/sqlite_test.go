@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/calypr/syfon/apigen/server/drs"
+	internalauth "github.com/calypr/syfon/internal/auth"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/crypto"
 	"github.com/calypr/syfon/internal/models"
@@ -81,7 +82,7 @@ func TestSqliteDB_CRUD(t *testing.T) {
 	}
 }
 
-func TestSqliteDB_MigratesLegacyAccessMethodScopeColumns(t *testing.T) {
+func TestSqliteDB_InitializesControlledAccessTable(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "legacy.db")
 	raw, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
@@ -104,9 +105,9 @@ func TestSqliteDB_MigratesLegacyAccessMethodScopeColumns(t *testing.T) {
 	}
 	defer db.db.Close()
 
-	rows, err := db.db.Query(`PRAGMA table_info(drs_object_access_method)`)
+	rows, err := db.db.Query(`PRAGMA table_info(drs_object_controlled_access)`)
 	if err != nil {
-		t.Fatalf("inspect migrated columns: %v", err)
+		t.Fatalf("inspect controlled access table: %v", err)
 	}
 	defer rows.Close()
 
@@ -125,11 +126,11 @@ func TestSqliteDB_MigratesLegacyAccessMethodScopeColumns(t *testing.T) {
 	if err := rows.Err(); err != nil {
 		t.Fatalf("read table_info rows: %v", err)
 	}
-	if !slices.Contains(columns, "org") {
-		t.Fatalf("expected migrated org column, got %v", columns)
+	if !slices.Contains(columns, "object_id") {
+		t.Fatalf("expected object_id column, got %v", columns)
 	}
-	if !slices.Contains(columns, "project") {
-		t.Fatalf("expected migrated project column, got %v", columns)
+	if !slices.Contains(columns, "resource") {
+		t.Fatalf("expected resource column, got %v", columns)
 	}
 }
 
@@ -313,21 +314,19 @@ func TestSqliteDB_ObjectAliasLifecycle(t *testing.T) {
 	}
 }
 
-func TestSqliteDB_AuthzFilteringParity(t *testing.T) {
+func TestSqliteDB_ObjectReadsIgnoreAuthContext(t *testing.T) {
 	buildCtx := map[string]func([]string) context.Context{
 		"gen3": func(resources []string) context.Context {
-			ctx := context.Background()
-			ctx = context.WithValue(ctx, common.AuthModeKey, "gen3")
-			ctx = context.WithValue(ctx, common.AuthHeaderPresentKey, true)
-			ctx = context.WithValue(ctx, common.UserAuthzKey, resources)
-			return ctx
+			session := internalauth.NewSession("gen3")
+			session.AuthHeaderPresent = true
+			session.SetAuthorizations(resources, nil, true)
+			return internalauth.WithSession(context.Background(), session)
 		},
 		"local-authz": func(resources []string) context.Context {
-			ctx := context.Background()
-			ctx = context.WithValue(ctx, common.AuthModeKey, "local")
-			ctx = context.WithValue(ctx, common.AuthzEnforcedKey, true)
-			ctx = context.WithValue(ctx, common.UserAuthzKey, resources)
-			return ctx
+			session := internalauth.NewSession("local")
+			session.AuthzEnforced = true
+			session.SetAuthorizations(resources, nil, true)
+			return internalauth.WithSession(context.Background(), session)
 		},
 	}
 
@@ -359,26 +358,26 @@ func TestSqliteDB_AuthzFilteringParity(t *testing.T) {
 
 			allowedCtx := makeCtx([]string{"/programs/org/projects/project"})
 			if _, err := db.GetObject(allowedCtx, "obj-authz"); err != nil {
-				t.Fatalf("expected authorized GetObject to succeed: %v", err)
+				t.Fatalf("expected GetObject to ignore auth context: %v", err)
 			}
 			byChecksum, err := db.GetObjectsByChecksum(allowedCtx, checksum)
 			if err != nil {
-				t.Fatalf("expected authorized checksum lookup to succeed: %v", err)
+				t.Fatalf("expected checksum lookup to ignore auth context: %v", err)
 			}
 			if len(byChecksum) != 1 || byChecksum[0].Id != "obj-authz" {
-				t.Fatalf("expected authorized checksum lookup to return object, got %+v", byChecksum)
+				t.Fatalf("expected checksum lookup to return object, got %+v", byChecksum)
 			}
 
 			deniedCtx := makeCtx([]string{"/programs/org/projects/other"})
-			if _, err := db.GetObject(deniedCtx, "obj-authz"); !errors.Is(err, common.ErrUnauthorized) {
-				t.Fatalf("expected unauthorized GetObject to be denied, got %v", err)
+			if _, err := db.GetObject(deniedCtx, "obj-authz"); err != nil {
+				t.Fatalf("expected GetObject to ignore denied auth context, got %v", err)
 			}
 			byChecksum, err = db.GetObjectsByChecksum(deniedCtx, checksum)
 			if err != nil {
-				t.Fatalf("expected denied checksum lookup to return empty result without error: %v", err)
+				t.Fatalf("expected denied checksum lookup to still return object: %v", err)
 			}
-			if len(byChecksum) != 0 {
-				t.Fatalf("expected denied checksum lookup to hide object, got %+v", byChecksum)
+			if len(byChecksum) != 1 || byChecksum[0].Id != "obj-authz" {
+				t.Fatalf("expected denied checksum lookup to return object, got %+v", byChecksum)
 			}
 		})
 	}

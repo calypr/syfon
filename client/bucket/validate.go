@@ -11,7 +11,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	bucketapi "github.com/calypr/syfon/apigen/client/bucketapi"
 	"github.com/calypr/syfon/client/transfer"
-	s3driver "github.com/calypr/syfon/client/xfer/providers/s3"
+	s3driver "github.com/calypr/syfon/client/transfer/providers/s3"
 )
 
 // ValidateBucket verifies that the bucket exists and is accessible using native provider SDKs.

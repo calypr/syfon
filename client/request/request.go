@@ -1,6 +1,6 @@
 package request
 
-//go:generate mockgen -destination=../mocks/mock_request.go -package=mocks github.com/calypr/syfon/client/request RequestInterface
+//go:generate mockgen -destination=../internal/testmocks/requester_mock.go -package=testmocks github.com/calypr/syfon/client/request Requester
 
 import (
 	"context"
@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/calypr/syfon/client/conf"
+	conf "github.com/calypr/syfon/client/config"
 	"github.com/calypr/syfon/client/logs"
 	"github.com/hashicorp/go-retryablehttp"
 )
@@ -91,29 +91,29 @@ type Requester interface {
 func NewBasicAuthRequestor(
 	logger *logs.Gen3Logger,
 	cred *conf.Credential,
-	conf conf.ManagerInterface,
+	manager conf.ManagerInterface,
 	baseURL string,
 	userAgent string,
 	baseHTTPClient *http.Client,
 ) Requester {
-	return newRequestor(logger, cred, conf, baseURL, userAgent, baseHTTPClient, AuthModeBasic)
+	return newRequestor(logger, cred, manager, baseURL, userAgent, baseHTTPClient, AuthModeBasic)
 }
 
 func NewBearerTokenRequestor(
 	logger *logs.Gen3Logger,
 	cred *conf.Credential,
-	conf conf.ManagerInterface,
+	manager conf.ManagerInterface,
 	baseURL string,
 	userAgent string,
 	baseHTTPClient *http.Client,
 ) Requester {
-	return newRequestor(logger, cred, conf, baseURL, userAgent, baseHTTPClient, AuthModeBearer)
+	return newRequestor(logger, cred, manager, baseURL, userAgent, baseHTTPClient, AuthModeBearer)
 }
 
 func newRequestor(
 	logger *logs.Gen3Logger,
 	cred *conf.Credential,
-	conf conf.ManagerInterface,
+	manager conf.ManagerInterface,
 	baseURL string,
 	userAgent string,
 	baseHTTPClient *http.Client,
@@ -146,7 +146,7 @@ func newRequestor(
 
 	authTransport := &AuthTransport{
 		Base:    baseTransport,
-		Manager: conf,
+		Manager: manager,
 		Mode:    mode,
 	}
 	authTransport.Cred = cred

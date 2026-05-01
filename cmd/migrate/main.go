@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/calypr/syfon/client/conf"
+	conf "github.com/calypr/syfon/client/config"
 	"github.com/calypr/syfon/migrate"
 	"github.com/spf13/cobra"
 )
@@ -17,7 +17,7 @@ import (
 var Cmd = &cobra.Command{
 	Use:   "migrate",
 	Short: "Export and import Gen3 Indexd records for Syfon migration",
-	Long:  "Export records from a Gen3-mounted Indexd API into a local SQLite dump, then import that dump into Syfon using the existing /index/bulk loader.",
+	Long:  "Export records from a Gen3-mounted Indexd API into a local SQLite dump, then import that dump into Syfon using the controlled_access-aware /index/bulk loader.",
 }
 
 var (
@@ -167,14 +167,15 @@ func init() {
 	exportCmd.Flags().IntVar(&limit, "limit", 0, "Maximum number of unique records to export; 0 means all records")
 	exportCmd.Flags().IntVar(&sweeps, "sweeps", 1, "Full start-cursor sweeps to run; increase only for non-quiescent or inconsistent Indexd sources")
 	exportCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Fetch, transform, and validate only; do not write the dump")
-	exportCmd.Flags().StringArrayVar(&defaultAuthz, "default-authz", nil, "Default authz resource for source records with no authz; repeatable")
+	exportCmd.Flags().StringArrayVar(&defaultAuthz, "default-controlled-access", nil, "Default controlled_access resource for source records with no authz; repeatable")
+	exportCmd.Flags().StringArrayVar(&defaultAuthz, "default-authz", nil, "Deprecated alias for --default-controlled-access")
 
 	importCmd.Flags().StringVar(&dumpPath, "dump", "", "SQLite dump file to read")
 	importCmd.Flags().StringVar(&targetProfile, "target-profile", "", "Gen3 profile for target writes")
 	importCmd.Flags().StringVar(&targetToken, "target-token", "", "Bearer token for target writes; overrides --target-profile")
 	importCmd.Flags().StringVar(&targetBasicUser, "target-basic-user", "", "Basic auth username for local target Syfon writes")
 	importCmd.Flags().StringVar(&targetBasicPassword, "target-basic-password", "", "Basic auth password for local target Syfon writes")
-	importCmd.Flags().IntVar(&batchSize, "batch-size", 500, "Records to load per /index/bulk request")
+	importCmd.Flags().IntVar(&batchSize, "batch-size", 500, "Records to load per controlled_access-aware /index/bulk request")
 }
 
 func indexdURLFromServer(cmd *cobra.Command) (string, error) {

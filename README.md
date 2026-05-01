@@ -232,10 +232,9 @@ The project uses a Makefile for common tasks:
 
 ## OpenAPI Codegen
 
-Syfon currently uses OpenAPI Generator for both server-side and client-facing API artifacts:
+Syfon currently uses `oapi-codegen` for both server-side and client-facing API artifacts:
 
-- `make gen` produces the DRS server stub package in `apigen/drs` from the GA4GH spec.
-- `make gen-lfs`, `make gen-bucket`, `make gen-metrics`, and `make gen-internal` refresh the generated model packages under `apigen/` that the client and server code both consume.
+- `make gen` bundles the GA4GH DRS spec into `apigen/openapi/openapi.yaml` and refreshes all generated packages under `apigen/client/*` and `apigen/server/*`.
 - The runtime HTTP wiring, middleware, and compatibility behavior still live in handwritten code under `cmd/server` and `internal/api/*`.
 - The client module itself is handwritten, but its request and response shapes come from the same generated OpenAPI contracts, so client and server stay aligned.
 
@@ -244,18 +243,15 @@ This split is intentional: generated code keeps the schema surface in sync, whil
 ### Quick rules of thumb
 
 - If you change the upstream GA4GH DRS schema or the Syfon overlay, run `make gen`.
-- If you change `apigen/api/lfs.openapi.yaml`, run `make gen-lfs`.
-- If you change `apigen/api/bucket.openapi.yaml`, run `make gen-bucket`.
-- If you change `apigen/api/metrics.openapi.yaml`, run `make gen-metrics`.
-- If you change `apigen/api/internal.openapi.yaml`, run `make gen-internal`.
+- If you change `apigen/openapi/lfs.openapi.yaml`, `apigen/openapi/bucket.openapi.yaml`, `apigen/openapi/metrics.openapi.yaml`, or `apigen/openapi/internal.openapi.yaml`, run `make gen`.
 - If you only change runtime wiring, auth, handlers, or business logic, you usually do not need codegen.
 - If a PR touches OpenAPI files, include the regenerated `apigen/*` output in the same commit.
 
 ### What to expect after regeneration
 
-- `apigen/drs` is overwritten with generated server code and generated DRS models.
-- The relevant `apigen/*api` package is overwritten with generated Go models and helper files.
-- `apigen/api/*.openapi.yaml` files are the bundled spec inputs that the runtime docs endpoint serves.
+- `apigen/server/drs` is overwritten with generated server code and generated DRS models.
+- The relevant `apigen/client/*` and `apigen/server/*` packages are overwritten with generated Go types and helper files.
+- `apigen/openapi/*.yaml` files are the bundled spec inputs that the runtime docs endpoint serves.
 - `go test ./...` or the affected package tests should still pass after the regen.
 
 ## Running Integration Tests

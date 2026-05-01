@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/calypr/syfon/apigen/server/drs"
+	internalauth "github.com/calypr/syfon/internal/auth"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/models"
@@ -151,14 +152,11 @@ func EventID(ev models.TransferAttributionEvent) string {
 }
 
 func ActorSubject(ctx context.Context) string {
-	if s, ok := ctx.Value(common.SubjectKey).(string); ok {
-		return strings.TrimSpace(s)
-	}
-	return ""
+	return strings.TrimSpace(internalauth.FromContext(ctx).Subject)
 }
 
 func ActorEmail(ctx context.Context) string {
-	claims, _ := ctx.Value(common.ClaimsKey).(map[string]interface{})
+	claims := internalauth.FromContext(ctx).Claims
 	for _, key := range []string{"email", "preferred_username", "username"} {
 		if v, ok := claims[key].(string); ok && strings.Contains(v, "@") {
 			return strings.TrimSpace(v)
@@ -172,10 +170,7 @@ func ActorEmail(ctx context.Context) string {
 }
 
 func authMode(ctx context.Context) string {
-	if s, ok := ctx.Value(common.AuthModeKey).(string); ok {
-		return strings.TrimSpace(s)
-	}
-	return ""
+	return strings.TrimSpace(internalauth.FromContext(ctx).Mode)
 }
 
 func accessMethods(obj *models.InternalObject) []drs.AccessMethod {
@@ -197,14 +192,6 @@ func scopeForAccess(obj *models.InternalObject, accessID string) (string, string
 		if accessID != "" && !strings.EqualFold(accessMethodID(am), accessID) {
 			continue
 		}
-		if am.Authorizations != nil {
-			for org, projects := range *am.Authorizations {
-				if len(projects) == 0 {
-					return org, ""
-				}
-				return org, projects[0]
-			}
-		}
 	}
 	if len(obj.Authorizations) > 0 {
 		for org, projects := range obj.Authorizations {
@@ -212,14 +199,6 @@ func scopeForAccess(obj *models.InternalObject, accessID string) (string, string
 				return org, ""
 			}
 			return org, projects[0]
-		}
-	}
-	if len(obj.Auth) > 0 {
-		for org, projects := range obj.Auth {
-			for project := range projects {
-				return org, project
-			}
-			return org, ""
 		}
 	}
 	return "", ""

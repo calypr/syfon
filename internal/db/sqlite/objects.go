@@ -10,7 +10,6 @@ import (
 
 	"github.com/calypr/syfon/apigen/server/drs"
 	sycommon "github.com/calypr/syfon/common"
-	"github.com/calypr/syfon/internal/authz"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/models"
 )
@@ -151,11 +150,8 @@ retryLookup:
 		},
 	}
 
-	authzMap := make(map[string][]string)
-	authPaths := make(models.AuthPathMap)
-
-	// 2. Fetch scoped URLs (Access Methods)
-	urlRows, err := db.db.QueryContext(ctx, "SELECT url, type, org, project FROM drs_object_access_method WHERE object_id = ?", lookupID)
+	// 2. Fetch storage access methods.
+	urlRows, err := db.db.QueryContext(ctx, "SELECT url, type FROM drs_object_access_method WHERE object_id = ?", lookupID)
 	if err != nil {
 		return nil, err
 	}
@@ -163,18 +159,15 @@ retryLookup:
 
 	seenAccess := make(map[string]struct{})
 	for urlRows.Next() {
-		var u, t, org, project string
-		if err := urlRows.Scan(&u, &t, &org, &project); err != nil {
+		var u, t string
+		if err := urlRows.Scan(&u, &t); err != nil {
 			return nil, err
 		}
-		k := t + "|" + u + "|" + org + "|" + project
+		k := t + "|" + u
 		if _, ok := seenAccess[k]; ok {
 			continue
 		}
 		seenAccess[k] = struct{}{}
-		methodAuthz := authzMapFromScopeRow(org, project)
-		addScopeToAuthzMap(authzMap, org, project)
-		addPathToAuthMap(authPaths, org, project, u)
 		if obj.AccessMethods == nil {
 			obj.AccessMethods = &[]drs.AccessMethod{}
 		}
@@ -186,16 +179,15 @@ retryLookup:
 			Type:     drs.AccessMethodType(t),
 			AccessId: &t,
 		}
-		if len(methodAuthz) > 0 {
-			am.Authorizations = &methodAuthz
-		}
 		*obj.AccessMethods = append(*obj.AccessMethods, am)
 	}
-	if len(authzMap) > 0 {
-		obj.Authorizations = authzMap
+	controlled, err := db.controlledAccessForObject(ctx, lookupID)
+	if err != nil {
+		return nil, err
 	}
-	if len(authPaths) > 0 {
-		obj.Auth = authPaths
+	if len(controlled) > 0 {
+		obj.ControlledAccess = &controlled
+		obj.Authorizations = sycommon.ControlledAccessToAuthzMap(controlled)
 	}
 
 	// 3. Fetch Checksums
@@ -218,14 +210,6 @@ retryLookup:
 		obj.Checksums = append(obj.Checksums, drs.Checksum{Type: t, Checksum: v})
 	}
 
-	// 5. RBAC Check when method-aware authz is enabled.
-	if authz.IsAuthzEnforced(ctx) {
-		userResources := authz.GetUserAuthz(ctx)
-		if !authz.CheckAccess(sycommon.AuthzMapToList(obj.Authorizations), userResources) {
-			return nil, fmt.Errorf("%w: access to object denied", common.ErrUnauthorized)
-		}
-	}
-
 	return obj, nil
 }
 
@@ -246,24 +230,19 @@ func (db *SqliteDB) CreateObject(ctx context.Context, obj *models.InternalObject
 		return fmt.Errorf("failed to insert drs_object: %w", err)
 	}
 
-	// Insert scoped URLs
-	if len(obj.Auth) > 0 {
-		for _, scope := range authPathMapToScopes(obj.Auth) {
-			_, err = tx.ExecContext(ctx, `INSERT INTO drs_object_access_method (object_id, url, type, org, project) VALUES (?, ?, ?, ?, ?)`, obj.Id, scope.path, methodTypeForURL(scope.path), scope.org, scope.project)
-			if err != nil {
-				return err
-			}
-		}
-	} else if obj.AccessMethods != nil {
+	if err := insertControlledAccessTx(ctx, tx, obj.Id, objectAccessResources(obj)); err != nil {
+		return err
+	}
+
+	// Insert storage access methods.
+	if obj.AccessMethods != nil {
 		for _, am := range *obj.AccessMethods {
 			if am.AccessUrl == nil || am.AccessUrl.Url == "" {
 				continue
 			}
-			for _, scope := range accessMethodScopes(am, obj.Authorizations) {
-				_, err = tx.ExecContext(ctx, `INSERT INTO drs_object_access_method (object_id, url, type, org, project) VALUES (?, ?, ?, ?, ?)`, obj.Id, am.AccessUrl.Url, am.Type, scope.org, scope.project)
-				if err != nil {
-					return fmt.Errorf("failed to insert scoped access method: %w", err)
-				}
+			_, err = tx.ExecContext(ctx, `INSERT INTO drs_object_access_method (object_id, url, type) VALUES (?, ?, ?)`, obj.Id, am.AccessUrl.Url, am.Type)
+			if err != nil {
+				return fmt.Errorf("failed to insert access method: %w", err)
 			}
 		}
 	}
@@ -305,6 +284,7 @@ func (db *SqliteDB) RegisterObjects(ctx context.Context, objects []models.Intern
 	mainArgs := make([]interface{}, 0, mainCap)
 
 	accessArgs := make([]interface{}, 0)
+	controlledArgs := make([]interface{}, 0)
 	checksumArgs := make([]interface{}, 0)
 
 	for _, obj := range objects {
@@ -312,23 +292,20 @@ func (db *SqliteDB) RegisterObjects(ctx context.Context, objects []models.Intern
 		mainArgs = append(mainArgs, obj.Id, obj.Size, obj.CreatedTime, common.TimeVal(obj.UpdatedTime), common.StringVal(obj.Name), common.StringVal(obj.Version), common.StringVal(obj.Description))
 
 		seenAccess := make(map[string]struct{})
-		if len(obj.Auth) > 0 {
-			for _, scope := range authPathMapToScopes(obj.Auth) {
-				accessArgs = append(accessArgs, obj.Id, scope.path, methodTypeForURL(scope.path), scope.org, scope.project)
-			}
-		} else if obj.AccessMethods != nil {
+		for _, resource := range objectAccessResources(&obj) {
+			controlledArgs = append(controlledArgs, obj.Id, resource)
+		}
+		if obj.AccessMethods != nil {
 			for _, am := range *obj.AccessMethods {
 				if am.AccessUrl == nil || am.AccessUrl.Url == "" {
 					continue
 				}
-				for _, scope := range accessMethodScopes(am, obj.Authorizations) {
-					key := string(am.Type) + "|" + am.AccessUrl.Url + "|" + scope.org + "|" + scope.project
-					if _, ok := seenAccess[key]; ok {
-						continue
-					}
-					seenAccess[key] = struct{}{}
-					accessArgs = append(accessArgs, obj.Id, am.AccessUrl.Url, am.Type, scope.org, scope.project)
+				key := string(am.Type) + "|" + am.AccessUrl.Url
+				if _, ok := seenAccess[key]; ok {
+					continue
 				}
+				seenAccess[key] = struct{}{}
+				accessArgs = append(accessArgs, obj.Id, am.AccessUrl.Url, am.Type)
 			}
 		}
 
@@ -358,6 +335,9 @@ func (db *SqliteDB) RegisterObjects(ctx context.Context, objects []models.Intern
 	if err := execSQLiteDeleteByIDs(tx, "drs_object_access_method", ids); err != nil {
 		return fmt.Errorf("failed bulk clear access methods: %w", err)
 	}
+	if err := execSQLiteDeleteByIDs(tx, "drs_object_controlled_access", ids); err != nil {
+		return fmt.Errorf("failed bulk clear controlled access: %w", err)
+	}
 	if err := execSQLiteDeleteByIDs(tx, "drs_object_checksum", ids); err != nil {
 		return fmt.Errorf("failed bulk clear checksums: %w", err)
 	}
@@ -365,13 +345,25 @@ func (db *SqliteDB) RegisterObjects(ctx context.Context, objects []models.Intern
 	if len(accessArgs) > 0 {
 		if err := execSQLiteBulkInsert(
 			tx,
-			"INSERT INTO drs_object_access_method (object_id, url, type, org, project) VALUES ",
-			"(?, ?, ?, ?, ?)",
-			5,
+			"INSERT INTO drs_object_access_method (object_id, url, type) VALUES ",
+			"(?, ?, ?)",
+			3,
 			accessArgs,
 			"",
 		); err != nil {
 			return fmt.Errorf("failed bulk insert access methods: %w", err)
+		}
+	}
+	if len(controlledArgs) > 0 {
+		if err := execSQLiteBulkInsert(
+			tx,
+			"INSERT INTO drs_object_controlled_access (object_id, resource) VALUES ",
+			"(?, ?)",
+			2,
+			controlledArgs,
+			"",
+		); err != nil {
+			return fmt.Errorf("failed bulk insert controlled access: %w", err)
 		}
 	}
 	if len(checksumArgs) > 0 {
@@ -476,19 +468,27 @@ func (db *SqliteDB) ListObjectIDsByScope(ctx context.Context, organization, proj
 		err  error
 	)
 	if project != "" {
+		resource, err := sycommon.ResourcePath(organization, project)
+		if err != nil {
+			return nil, err
+		}
 		rows, err = db.db.QueryContext(ctx, `
-			SELECT DISTINCT a.object_id
-			FROM drs_object_access_method a
-			INNER JOIN drs_object o ON o.id = a.object_id
-			WHERE a.org = ? AND a.project = ?
-			ORDER BY a.object_id`, organization, project)
+			SELECT DISTINCT ca.object_id
+			FROM drs_object_controlled_access ca
+			INNER JOIN drs_object o ON o.id = ca.object_id
+			WHERE ca.resource = ?
+			ORDER BY ca.object_id`, resource)
 	} else {
+		resource, err := sycommon.ResourcePath(organization, "")
+		if err != nil {
+			return nil, err
+		}
 		rows, err = db.db.QueryContext(ctx, `
-			SELECT DISTINCT a.object_id
-			FROM drs_object_access_method a
-			INNER JOIN drs_object o ON o.id = a.object_id
-			WHERE a.org = ?
-			ORDER BY a.object_id`, organization)
+			SELECT DISTINCT ca.object_id
+			FROM drs_object_controlled_access ca
+			INNER JOIN drs_object o ON o.id = ca.object_id
+			WHERE ca.resource = ?
+			ORDER BY ca.object_id`, resource)
 	}
 	if err != nil {
 		return nil, err
@@ -585,8 +585,6 @@ func (db *SqliteDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []stri
 			o.description,
 			am.url,
 			am.type,
-			am.org,
-			am.project,
 			cs.type,
 			cs.checksum
 		FROM drs_object o
@@ -606,15 +604,15 @@ func (db *SqliteDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []stri
 
 	for rows.Next() {
 		var (
-			id, name, version, description                  string
-			size                                            int64
-			createdTime, updatedTime                        time.Time
-			accessURL, accessType, accessOrg, accessProject sql.NullString
-			checksumType, sumVal                            sql.NullString
+			id, name, version, description string
+			size                           int64
+			createdTime, updatedTime       time.Time
+			accessURL, accessType          sql.NullString
+			checksumType, sumVal           sql.NullString
 		)
 		if err := rows.Scan(
 			&id, &size, &createdTime, &updatedTime, &name, &version, &description,
-			&accessURL, &accessType, &accessOrg, &accessProject, &checksumType, &sumVal,
+			&accessURL, &accessType, &checksumType, &sumVal,
 		); err != nil {
 			return nil, err
 		}
@@ -632,8 +630,6 @@ func (db *SqliteDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []stri
 					Description: common.Ptr(description),
 					SelfUri:     "drs://" + id,
 				},
-				Authorizations: make(map[string][]string),
-				Auth:           make(models.AuthPathMap),
 			}
 			objectsByID[id] = obj
 			seenAccess[id] = make(map[string]struct{})
@@ -641,19 +637,9 @@ func (db *SqliteDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []stri
 		}
 
 		if accessURL.Valid && accessType.Valid {
-			org, proj := "", ""
-			if accessOrg.Valid {
-				org = accessOrg.String
-			}
-			if accessProject.Valid {
-				proj = accessProject.String
-			}
-			key := accessType.String + "|" + accessURL.String + "|" + org + "|" + proj
+			key := accessType.String + "|" + accessURL.String
 			if _, exists := seenAccess[id][key]; !exists {
 				seenAccess[id][key] = struct{}{}
-				methodAuthz := authzMapFromScopeRow(org, proj)
-				addScopeToAuthzMap(obj.Authorizations, org, proj)
-				addPathToAuthMap(obj.Auth, org, proj, accessURL.String)
 				if obj.DrsObject.AccessMethods == nil {
 					obj.DrsObject.AccessMethods = &[]drs.AccessMethod{}
 				}
@@ -666,9 +652,6 @@ func (db *SqliteDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []stri
 					Type:     drs.AccessMethodType(accessType.String),
 					AccessId: &t,
 				})
-				if len(methodAuthz) > 0 {
-					(*obj.DrsObject.AccessMethods)[len(*obj.DrsObject.AccessMethods)-1].Authorizations = &methodAuthz
-				}
 			}
 		}
 		if checksumType.Valid && sumVal.Valid {
@@ -683,26 +666,68 @@ func (db *SqliteDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []stri
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-
-	// Apply RBAC filtering to mimic GetObject behavior.
-	if authz.IsAuthzEnforced(ctx) {
-		userResources := authz.GetUserAuthz(ctx)
-		for id, obj := range objectsByID {
-			if !authz.CheckAccess(sycommon.AuthzMapToList(obj.Authorizations), userResources) {
-				delete(objectsByID, id)
-				continue
-			}
-		}
+	if err := db.attachControlledAccess(ctx, objectsByID); err != nil {
+		return nil, err
 	}
 
 	return objectsByID, nil
 }
 
-func (db *SqliteDB) UpdateObjectAccessMethods(ctx context.Context, objectID string, accessMethods []drs.AccessMethod) error {
-	existing, err := db.GetObject(ctx, objectID)
-	if err != nil {
-		return err
+func objectAccessResources(obj *models.InternalObject) []string {
+	if obj == nil {
+		return nil
 	}
+	if obj.ControlledAccess != nil {
+		return sycommon.NormalizeAccessResources(*obj.ControlledAccess)
+	}
+	return sycommon.AuthzMapToList(obj.Authorizations)
+}
+
+func insertControlledAccessTx(ctx context.Context, tx *sql.Tx, objectID string, resources []string) error {
+	for _, resource := range sycommon.NormalizeAccessResources(resources) {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO drs_object_controlled_access (object_id, resource) VALUES (?, ?)`, objectID, resource); err != nil {
+			return fmt.Errorf("failed to insert controlled access: %w", err)
+		}
+	}
+	return nil
+}
+
+func (db *SqliteDB) controlledAccessForObject(ctx context.Context, objectID string) ([]string, error) {
+	rows, err := db.db.QueryContext(ctx, `SELECT resource FROM drs_object_controlled_access WHERE object_id = ? ORDER BY resource`, objectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var resources []string
+	for rows.Next() {
+		var resource string
+		if err := rows.Scan(&resource); err != nil {
+			return nil, err
+		}
+		resources = append(resources, resource)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return sycommon.NormalizeAccessResources(resources), nil
+}
+
+func (db *SqliteDB) attachControlledAccess(ctx context.Context, objectsByID map[string]*models.InternalObject) error {
+	for id, obj := range objectsByID {
+		controlled, err := db.controlledAccessForObject(ctx, id)
+		if err != nil {
+			return err
+		}
+		if len(controlled) == 0 {
+			continue
+		}
+		obj.ControlledAccess = &controlled
+		obj.Authorizations = sycommon.ControlledAccessToAuthzMap(controlled)
+	}
+	return nil
+}
+
+func (db *SqliteDB) UpdateObjectAccessMethods(ctx context.Context, objectID string, accessMethods []drs.AccessMethod) error {
 	tx, err := db.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -718,26 +743,15 @@ func (db *SqliteDB) UpdateObjectAccessMethods(ctx context.Context, objectID stri
 		if am.AccessUrl == nil || am.AccessUrl.Url == "" {
 			continue
 		}
-		for _, scope := range accessMethodScopes(am, existing.Authorizations) {
-			_, err = tx.ExecContext(ctx, `INSERT INTO drs_object_access_method (object_id, url, type, org, project) VALUES (?, ?, ?, ?, ?)`, objectID, am.AccessUrl.Url, am.Type, scope.org, scope.project)
-			if err != nil {
-				return err
-			}
+		_, err = tx.ExecContext(ctx, `INSERT INTO drs_object_access_method (object_id, url, type) VALUES (?, ?, ?)`, objectID, am.AccessUrl.Url, am.Type)
+		if err != nil {
+			return err
 		}
 	}
 	return tx.Commit()
 }
 
 func (db *SqliteDB) BulkUpdateAccessMethods(ctx context.Context, updates map[string][]drs.AccessMethod) error {
-	existingAuthz := make(map[string]map[string][]string, len(updates))
-	for objectID := range updates {
-		existing, err := db.GetObject(ctx, objectID)
-		if err != nil {
-			return err
-		}
-		existingAuthz[objectID] = existing.Authorizations
-	}
-
 	tx, err := db.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -753,119 +767,11 @@ func (db *SqliteDB) BulkUpdateAccessMethods(ctx context.Context, updates map[str
 			if am.AccessUrl == nil || am.AccessUrl.Url == "" {
 				continue
 			}
-			for _, scope := range accessMethodScopes(am, existingAuthz[objectID]) {
-				_, err = tx.ExecContext(ctx, `INSERT INTO drs_object_access_method (object_id, url, type, org, project) VALUES (?, ?, ?, ?, ?)`, objectID, am.AccessUrl.Url, am.Type, scope.org, scope.project)
-				if err != nil {
-					return err
-				}
+			_, err = tx.ExecContext(ctx, `INSERT INTO drs_object_access_method (object_id, url, type) VALUES (?, ?, ?)`, objectID, am.AccessUrl.Url, am.Type)
+			if err != nil {
+				return err
 			}
 		}
 	}
 	return tx.Commit()
-}
-
-type accessScope struct {
-	org     string
-	project string
-	path    string
-}
-
-func authPathMapToScopes(authMap models.AuthPathMap) []accessScope {
-	scopes := make([]accessScope, 0)
-	for org, projects := range authMap {
-		org = strings.TrimSpace(org)
-		if org == "" {
-			continue
-		}
-		for project, paths := range projects {
-			project = strings.TrimSpace(project)
-			for _, path := range paths {
-				path = strings.TrimSpace(path)
-				if path == "" {
-					continue
-				}
-				scopes = append(scopes, accessScope{org: org, project: project, path: path})
-			}
-		}
-	}
-	return scopes
-}
-
-func methodTypeForURL(rawURL string) string {
-	scheme := common.SchemeFromURL(rawURL)
-	if strings.TrimSpace(scheme) == "" {
-		return "https"
-	}
-	return scheme
-}
-
-func accessMethodScopes(am drs.AccessMethod, objectAuthz map[string][]string) []accessScope {
-	if am.Authorizations != nil {
-		return authzMapToScopes(*am.Authorizations)
-	}
-	scopes := authzMapToScopes(objectAuthz)
-	if len(scopes) > 0 {
-		return scopes
-	}
-	return []accessScope{{}}
-}
-
-func authzMapToScopes(authzMap map[string][]string) []accessScope {
-	scopes := make([]accessScope, 0)
-	for org, projects := range authzMap {
-		org = strings.TrimSpace(org)
-		if org == "" {
-			continue
-		}
-		if len(projects) == 0 {
-			scopes = append(scopes, accessScope{org: org})
-			continue
-		}
-		for _, project := range projects {
-			scopes = append(scopes, accessScope{org: org, project: strings.TrimSpace(project)})
-		}
-	}
-	return scopes
-}
-
-func addScopeToAuthzMap(authzMap map[string][]string, org, project string) {
-	org = strings.TrimSpace(org)
-	project = strings.TrimSpace(project)
-	if org == "" {
-		return
-	}
-	if project == "" {
-		if _, ok := authzMap[org]; !ok {
-			authzMap[org] = []string{}
-		}
-		return
-	}
-	for _, existing := range authzMap[org] {
-		if existing == project {
-			return
-		}
-	}
-	authzMap[org] = append(authzMap[org], project)
-}
-
-func authzMapFromScopeRow(org, project string) map[string][]string {
-	authzMap := make(map[string][]string)
-	addScopeToAuthzMap(authzMap, org, project)
-	if len(authzMap) == 0 {
-		return nil
-	}
-	return authzMap
-}
-
-func addPathToAuthMap(authMap models.AuthPathMap, org, project, path string) {
-	org = strings.TrimSpace(org)
-	project = strings.TrimSpace(project)
-	path = strings.TrimSpace(path)
-	if org == "" || path == "" {
-		return
-	}
-	if authMap[org] == nil {
-		authMap[org] = make(map[string][]string)
-	}
-	authMap[org][project] = append(authMap[org][project], path)
 }

@@ -7,8 +7,8 @@ import (
 	"io"
 	"os"
 	"sort"
-	"sync"
 	"strings"
+	"sync"
 
 	"github.com/calypr/syfon/client/common"
 	"github.com/calypr/syfon/client/transfer"
@@ -27,7 +27,7 @@ type uploaderResumeState struct {
 }
 
 type GenericUploader struct {
-	Backend transfer.Backend
+	Backend transfer.MultipartBackend
 }
 
 type uploadURLResolver interface {

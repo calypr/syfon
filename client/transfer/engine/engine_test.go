@@ -304,7 +304,7 @@ func TestGenericDownloaderDownloadSingleVariants(t *testing.T) {
 
 	t.Run("resume range download", func(t *testing.T) {
 		backend := &fakeBackend{data: []byte("hello world"), meta: &transfer.ObjectMetadata{Size: 11}}
-		d := &GenericDownloader{Backend: backend}
+		d := &GenericDownloader{Source: backend}
 		dst := filepath.Join(t.TempDir(), "resume.bin")
 		if err := os.WriteFile(dst, []byte("hello "), 0o644); err != nil {
 			t.Fatalf("WriteFile returned error: %v", err)
@@ -348,7 +348,7 @@ func TestGenericDownloaderDownloadSingleVariants(t *testing.T) {
 
 	t.Run("range ignored restarts from zero", func(t *testing.T) {
 		backend := &fakeBackend{data: []byte("abcdef"), rangeIgnoredOnce: true}
-		d := &GenericDownloader{Backend: backend}
+		d := &GenericDownloader{Source: backend}
 		dst := filepath.Join(t.TempDir(), "ignored.bin")
 		if err := os.WriteFile(dst, []byte("abc"), 0o644); err != nil {
 			t.Fatalf("WriteFile returned error: %v", err)
@@ -368,7 +368,7 @@ func TestGenericDownloaderDownloadSingleVariants(t *testing.T) {
 
 	t.Run("already complete returns early", func(t *testing.T) {
 		backend := &fakeBackend{data: []byte("abc")}
-		d := &GenericDownloader{Backend: backend}
+		d := &GenericDownloader{Source: backend}
 		dst := filepath.Join(t.TempDir(), "done.bin")
 		if err := os.WriteFile(dst, []byte("abc"), 0o644); err != nil {
 			t.Fatalf("WriteFile returned error: %v", err)
@@ -384,7 +384,7 @@ func TestGenericDownloaderDownloadSingleVariants(t *testing.T) {
 
 	t.Run("short download returns error", func(t *testing.T) {
 		backend := &fakeBackend{data: []byte("abc")}
-		d := &GenericDownloader{Backend: backend}
+		d := &GenericDownloader{Source: backend}
 		err := d.downloadSingle(context.Background(), "guid-4", filepath.Join(t.TempDir(), "short.bin"), 5)
 		if err == nil || !strings.Contains(err.Error(), "short download") {
 			t.Fatalf("expected short download error, got %v", err)
@@ -401,7 +401,7 @@ func TestGenericDownloaderDownloadAndParallel(t *testing.T) {
 		data: content,
 		meta: &transfer.ObjectMetadata{Size: int64(len(content)), AcceptRanges: true, Provider: "http"},
 	}
-	d := &GenericDownloader{Backend: backend}
+	d := &GenericDownloader{Source: backend}
 	dst := filepath.Join(t.TempDir(), "parallel.bin")
 
 	var eventsMu sync.Mutex
@@ -452,7 +452,7 @@ func TestGenericDownloaderDownloadAndParallel(t *testing.T) {
 	}
 
 	backend2 := &fakeBackend{data: []byte("single"), meta: &transfer.ObjectMetadata{Size: 6, AcceptRanges: true}}
-	d2 := &GenericDownloader{Backend: backend2}
+	d2 := &GenericDownloader{Source: backend2}
 	dst2 := filepath.Join(t.TempDir(), "single.bin")
 	if err := d2.Download(context.Background(), "guid-s", dst2, 4, 1*common.MB, 1*common.MB); err != nil {
 		t.Fatalf("Download returned error: %v", err)
@@ -462,7 +462,7 @@ func TestGenericDownloaderDownloadAndParallel(t *testing.T) {
 	}
 
 	backend3 := &fakeBackend{data: []byte("norange"), meta: &transfer.ObjectMetadata{Size: 7, AcceptRanges: false}}
-	d3 := &GenericDownloader{Backend: backend3}
+	d3 := &GenericDownloader{Source: backend3}
 	if err := d3.Download(context.Background(), "guid-nr", filepath.Join(t.TempDir(), "norange.bin"), 2, 1*common.MB, 0); err != nil {
 		t.Fatalf("Download returned error: %v", err)
 	}
@@ -476,7 +476,7 @@ func TestGenericDownloaderDownloadAndParallel(t *testing.T) {
 			rangeErr: fmt.Errorf("boom"),
 			meta:     &transfer.ObjectMetadata{Size: int64(len(content)), AcceptRanges: true, Provider: "http"},
 		}
-		d := &GenericDownloader{Backend: backend}
+		d := &GenericDownloader{Source: backend}
 		dst := filepath.Join(t.TempDir(), "failed-parallel.bin")
 		var completions []common.TransferCompletionEvent
 		ctx := common.WithTransferCompletion(context.Background(), func(ev common.TransferCompletionEvent) error {

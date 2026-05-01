@@ -92,8 +92,6 @@ s3_credentials:
 		AccessKey:    dockerE2EAzureAccountName,
 		SecretKey:    dockerE2EAzureAccountKey,
 		Endpoint:     azurite.serviceURL,
-		LogBucket:    azurite.bucket,
-		LogPrefix:    ".syfon/provider-transfer-events",
 		Organization: "syfon",
 		ProjectID:    "e2e",
 	})

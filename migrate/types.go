@@ -57,16 +57,17 @@ type DumpReader interface {
 }
 
 type MigrationRecord struct {
-	ID            string             `json:"id"`
-	Name          *string            `json:"name,omitempty"`
-	Size          int64              `json:"size"`
-	Version       *string            `json:"version,omitempty"`
-	Description   *string            `json:"description,omitempty"`
-	CreatedTime   time.Time          `json:"created_time"`
-	UpdatedTime   *time.Time         `json:"updated_time,omitempty"`
-	Checksums     []drs.Checksum     `json:"checksums"`
-	AccessMethods []drs.AccessMethod `json:"access_methods,omitempty"`
-	Authz         []string           `json:"authz,omitempty"`
+	ID               string             `json:"id"`
+	Name             *string            `json:"name,omitempty"`
+	Size             int64              `json:"size"`
+	Version          *string            `json:"version,omitempty"`
+	Description      *string            `json:"description,omitempty"`
+	CreatedTime      time.Time          `json:"created_time"`
+	UpdatedTime      *time.Time         `json:"updated_time,omitempty"`
+	Checksums        []drs.Checksum     `json:"checksums"`
+	AccessMethods    []drs.AccessMethod `json:"access_methods,omitempty"`
+	ControlledAccess []string           `json:"controlled_access,omitempty"`
+	Authz            []string           `json:"authz,omitempty"`
 }
 
 type MigrationRequest struct {

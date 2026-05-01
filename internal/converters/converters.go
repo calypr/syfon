@@ -21,7 +21,10 @@ func CandidateToInternalObject(c drs.DrsObjectCandidate, now time.Time) (models.
 	if c.AccessMethods != nil {
 		ams = *c.AccessMethods
 	}
-	authzMap := UniqueAuthz(ams)
+	authzMap := syfoncommon.ControlledAccessToAuthzMap(common.DerefStringSlice(c.ControlledAccess))
+	if authzMap == nil {
+		authzMap = UniqueAuthz(ams)
+	}
 	obj := drs.DrsObject{
 		Id:          common.MintObjectIDFromChecksum(oid, syfoncommon.AuthzMapToList(authzMap)),
 		Size:        c.Size,
@@ -32,6 +35,10 @@ func CandidateToInternalObject(c drs.DrsObjectCandidate, now time.Time) (models.
 		Description: c.Description,
 		Aliases:     common.Ptr(append([]string(nil), common.DerefStringSlice(c.Aliases)...)),
 		Checksums:   []drs.Checksum{{Type: "sha256", Checksum: oid}},
+	}
+	if c.ControlledAccess != nil {
+		controlled := syfoncommon.NormalizeAccessResources(*c.ControlledAccess)
+		obj.ControlledAccess = &controlled
 	}
 	if c.Name != nil {
 		obj.Name = c.Name
@@ -71,9 +78,6 @@ func CandidateToInternalObject(c drs.DrsObjectCandidate, now time.Time) (models.
 					Headers *[]string `json:"headers,omitempty"`
 					Url     string    `json:"url"`
 				}{Url: url},
-			}
-			if len(authzMap) > 0 {
-				newMethod.Authorizations = &authzMap
 			}
 			*obj.AccessMethods = append(*obj.AccessMethods, newMethod)
 		}
@@ -120,11 +124,6 @@ func LFSCandidateToDRS(in lfsapi.DrsObjectCandidate) drs.DrsObjectCandidate {
 				}{}
 				if am.AccessUrl.Url != nil {
 					drsMethod.AccessUrl.Url = *am.AccessUrl.Url
-				}
-			}
-			if am.Authorizations != nil && am.Authorizations.BearerAuthIssuers != nil {
-				if authzMap := syfoncommon.AuthzListToMap(*am.Authorizations.BearerAuthIssuers); authzMap != nil {
-					drsMethod.Authorizations = &authzMap
 				}
 			}
 			ams = append(ams, drsMethod)

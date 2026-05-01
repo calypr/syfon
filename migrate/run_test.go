@@ -57,8 +57,14 @@ func TestHTTPClientEndToEndWithMockIndexdAndSyfon(t *testing.T) {
 	size := int64(7)
 	var loaded struct {
 		Records []struct {
-			Did  string                         `json:"did"`
-			Auth map[string]map[string][]string `json:"auth"`
+			Did              string   `json:"did"`
+			ControlledAccess []string `json:"controlled_access"`
+			AccessMethods    []struct {
+				Type      string `json:"type"`
+				AccessUrl struct {
+					Url string `json:"url"`
+				} `json:"access_url"`
+			} `json:"access_methods"`
 		} `json:"records"`
 	}
 	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -73,6 +79,7 @@ func TestHTTPClientEndToEndWithMockIndexdAndSyfon(t *testing.T) {
 			Size:   &size,
 			URLs:   []string{"s3://bucket/key"},
 			Hashes: map[string]string{"sha256": "sha"},
+			Authz:  []string{"https://calypr.org/program/foo/project/bar"},
 		}}})
 	}))
 	defer source.Close()
@@ -106,6 +113,12 @@ func TestHTTPClientEndToEndWithMockIndexdAndSyfon(t *testing.T) {
 	}
 	if loaded.Records[0].Did != "dg.test/1" {
 		t.Fatalf("unexpected loaded payload: %+v", loaded.Records[0])
+	}
+	if len(loaded.Records[0].ControlledAccess) != 1 || loaded.Records[0].ControlledAccess[0] != "/programs/foo/projects/bar" {
+		t.Fatalf("expected controlled_access payload, got %+v", loaded.Records[0])
+	}
+	if len(loaded.Records[0].AccessMethods) != 1 || loaded.Records[0].AccessMethods[0].AccessUrl.Url != "s3://bucket/key" {
+		t.Fatalf("expected access_methods payload, got %+v", loaded.Records[0])
 	}
 }
 

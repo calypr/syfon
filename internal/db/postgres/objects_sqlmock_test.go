@@ -4,12 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"github.com/calypr/syfon/internal/common"
 	"regexp"
 	"testing"
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	internalauth "github.com/calypr/syfon/internal/auth"
+	"github.com/calypr/syfon/internal/common"
 )
 
 func TestDeleteObject(t *testing.T) {
@@ -111,12 +112,18 @@ func TestGetObject_DeduplicatesAndPropagatesAuthz(t *testing.T) {
 			"id", "size", "created_time", "updated_time", "name", "version", "description",
 		}).AddRow("obj-1", int64(123), created, updated, "file.txt", "v1", "desc"))
 
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT url, type, org, project FROM drs_object_access_method WHERE object_id = $1")).
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT url, type FROM drs_object_access_method WHERE object_id = $1")).
 		WithArgs("obj-1").
-		WillReturnRows(sqlmock.NewRows([]string{"url", "type", "org", "project"}).
-			AddRow("s3://bucket/key-1", "s3", "p1", "a").
-			AddRow("s3://bucket/key-1", "s3", "p1", "a").
-			AddRow("gs://bucket/key-2", "gs", "p1", "b"))
+		WillReturnRows(sqlmock.NewRows([]string{"url", "type"}).
+			AddRow("s3://bucket/key-1", "s3").
+			AddRow("s3://bucket/key-1", "s3").
+			AddRow("gs://bucket/key-2", "gs"))
+
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT resource FROM drs_object_controlled_access WHERE object_id = $1 ORDER BY resource")).
+		WithArgs("obj-1").
+		WillReturnRows(sqlmock.NewRows([]string{"resource"}).
+			AddRow("/programs/p1/projects/a").
+			AddRow("/programs/p1/projects/b"))
 
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT type, checksum FROM drs_object_checksum WHERE object_id = $1")).
 		WithArgs("obj-1").
@@ -146,7 +153,7 @@ func TestGetObject_DeduplicatesAndPropagatesAuthz(t *testing.T) {
 	}
 }
 
-func TestGetObject_Gen3Unauthorized(t *testing.T) {
+func TestGetObject_IgnoresAuthContext(t *testing.T) {
 	pg, mock, rawDB := newMockPostgresDB(t)
 	defer rawDB.Close()
 
@@ -158,28 +165,25 @@ func TestGetObject_Gen3Unauthorized(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "size", "created_time", "updated_time", "name", "version", "description",
 		}).AddRow("obj-2", int64(1), now, now, "n", "v", "d"))
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT url, type, org, project FROM drs_object_access_method WHERE object_id = $1")).
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT url, type FROM drs_object_access_method WHERE object_id = $1")).
 		WithArgs("obj-2").
-		WillReturnRows(sqlmock.NewRows([]string{"url", "type", "org", "project"}).
-			AddRow("s3://bucket/key", "s3", "p1", "a"))
+		WillReturnRows(sqlmock.NewRows([]string{"url", "type"}).
+			AddRow("s3://bucket/key", "s3"))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT resource FROM drs_object_controlled_access WHERE object_id = $1 ORDER BY resource")).
+		WithArgs("obj-2").
+		WillReturnRows(sqlmock.NewRows([]string{"resource"}).AddRow("/programs/p1/projects/a"))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT type, checksum FROM drs_object_checksum WHERE object_id = $1")).
 		WithArgs("obj-2").
 		WillReturnRows(sqlmock.NewRows([]string{"type", "checksum"}))
-	mock.ExpectQuery(regexp.QuoteMeta(`
-		SELECT COUNT(*) FROM drs_object o
-		WHERE o.id = $1 AND (
-			NOT EXISTS (SELECT 1 FROM drs_object_access_method a WHERE a.object_id = o.id AND a.org != '')
-			OR EXISTS (SELECT 1 FROM drs_object_access_method a WHERE a.object_id = o.id
-				AND ('/programs/' || a.org || CASE WHEN a.project != '' THEN '/projects/' || a.project ELSE '' END) = ANY($2))
-		)`)).
-		WithArgs("obj-2", sqlmock.AnyArg()).
-		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	session := internalauth.NewSession("gen3")
+	session.SetAuthorizations([]string{"/programs/p1/projects/other"}, nil, true)
+	ctx := internalauth.WithSession(context.Background(), session)
 
-	ctx := context.WithValue(context.Background(), common.AuthModeKey, "gen3")
-	ctx = context.WithValue(ctx, common.UserAuthzKey, []string{"/programs/p1/projects/other"})
-
-	_, err := pg.GetObject(ctx, "obj-2")
-	if !errors.Is(err, common.ErrUnauthorized) {
-		t.Fatalf("expected unauthorized error, got %v", err)
+	obj, err := pg.GetObject(ctx, "obj-2")
+	if err != nil {
+		t.Fatalf("expected object fetch to ignore auth context, got %v", err)
+	}
+	if obj.Id != "obj-2" {
+		t.Fatalf("expected obj-2, got %+v", obj)
 	}
 }

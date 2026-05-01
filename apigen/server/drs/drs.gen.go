@@ -94,8 +94,6 @@ type AccessMethod struct {
 		// Url A fully resolvable URL that can be used to fetch the actual object bytes.
 		Url string `json:"url"`
 	} `json:"access_url,omitempty"`
-
-	// Authorizations A map of organization to project list. An empty array means org-wide access. A non-empty array grants access scoped to the listed projects.
 	Authorizations *struct {
 		// BearerAuthIssuers If authorizations contain `BearerAuth` this is an optional list of issuers that may authorize access to this object. The caller must provide a token from one of these issuers. If this is empty or missing it assumed the caller knows which token to send via other means. It is strongly recommended that the caller validate that it is appropriate to send the requested token to the DRS server to mitigate attacks by malicious DRS servers requesting credentials they should not have.
 		BearerAuthIssuers *[]string `json:"bearer_auth_issuers,omitempty"`
@@ -687,8 +685,8 @@ type Unresolved = []struct {
 // AccessId defines model for AccessId.
 type AccessId = string
 
-// ChecksumParam defines model for Checksum.
-type ChecksumParam = string
+// ChecksumParameter defines model for Checksum.
+type ChecksumParameter = string
 
 // Expand defines model for Expand.
 type Expand = bool
@@ -1076,7 +1074,7 @@ type ServerInterface interface {
 	BulkUpdateAccessMethods(c fiber.Ctx) error
 	// Get DRS objects that are a match for the checksum.
 	// (GET /objects/checksum/{checksum})
-	GetObjectsByChecksum(c fiber.Ctx, checksumParam ChecksumParam) error
+	GetObjectsByChecksum(c fiber.Ctx, checksumParameter ChecksumParameter) error
 	// Add additional checksums for multiple DRS objects
 	// (PUT /objects/checksums)
 	BulkAddChecksums(c fiber.Ctx) error
@@ -1168,14 +1166,14 @@ func (siw *ServerInterfaceWrapper) GetObjectsByChecksum(c fiber.Ctx) error {
 	var err error
 
 	// ------------- Path parameter "checksum" -------------
-	var checksumParam ChecksumParam
+	var checksumParameter ChecksumParameter
 
-	err = runtime.BindStyledParameterWithOptions("simple", "checksum", c.Params("checksum"), &checksumParam, runtime.BindStyledParameterOptions{Explode: false, Required: true})
+	err = runtime.BindStyledParameterWithOptions("simple", "checksum", c.Params("checksum"), &checksumParameter, runtime.BindStyledParameterOptions{Explode: false, Required: true})
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter checksum: %w", err).Error())
 	}
 
-	return siw.Handler.GetObjectsByChecksum(c, checksumParam)
+	return siw.Handler.GetObjectsByChecksum(c, checksumParameter)
 }
 
 // BulkAddChecksums operation middleware
@@ -1951,7 +1949,7 @@ func (response BulkUpdateAccessMethods500JSONResponse) VisitBulkUpdateAccessMeth
 }
 
 type GetObjectsByChecksumRequestObject struct {
-	ChecksumParam ChecksumParam `json:"checksum"`
+	ChecksumParameter ChecksumParameter `json:"checksum"`
 }
 
 type GetObjectsByChecksumResponseObject interface {
@@ -3096,10 +3094,10 @@ func (sh *strictHandler) BulkUpdateAccessMethods(ctx fiber.Ctx) error {
 }
 
 // GetObjectsByChecksum operation middleware
-func (sh *strictHandler) GetObjectsByChecksum(ctx fiber.Ctx, checksumParam ChecksumParam) error {
+func (sh *strictHandler) GetObjectsByChecksum(ctx fiber.Ctx, checksumParameter ChecksumParameter) error {
 	var request GetObjectsByChecksumRequestObject
 
-	request.ChecksumParam = checksumParam
+	request.ChecksumParameter = checksumParameter
 
 	handler := func(ctx fiber.Ctx, request interface{}) (interface{}, error) {
 		return sh.ssi.GetObjectsByChecksum(ctx.Context(), request.(GetObjectsByChecksumRequestObject))

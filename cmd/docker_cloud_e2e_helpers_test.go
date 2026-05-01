@@ -14,7 +14,7 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/calypr/syfon/apigen/client/internalapi"
+	"github.com/calypr/syfon/apigen/client/drs"
 	syclient "github.com/calypr/syfon/client"
 	"github.com/calypr/syfon/internal/crypto"
 )
@@ -26,8 +26,6 @@ type bucketCommandConfig struct {
 	AccessKey    string
 	SecretKey    string
 	Endpoint     string
-	LogBucket    string
-	LogPrefix    string
 	Organization string
 	ProjectID    string
 }
@@ -192,7 +190,7 @@ func exerciseAllClientCommands(t *testing.T, serverURL string, bucketCfg bucketC
 	if err != nil {
 		t.Fatalf("fetch uploaded record: %v", err)
 	}
-	recordURL := firstAuthPath(rec.Auth)
+	recordURL := firstAccessMethodURL(rec.AccessMethods)
 	if strings.TrimSpace(recordURL) == "" {
 		t.Fatalf("uploaded record missing access url")
 	}
@@ -223,30 +221,6 @@ func exerciseAllClientCommands(t *testing.T, serverURL string, bucketCfg bucketC
 	}
 	if !bytes.Equal(got2, srcData) {
 		t.Fatalf("downloaded add-url bytes mismatch")
-	}
-
-	rmOut, err := executeRootCommand(t, "--server", serverURL, "rm", "--did", uploadedID)
-	if err != nil {
-		t.Fatalf("rm(uploaded) failed: %v output=%s", err, rmOut)
-	}
-	if !strings.Contains(rmOut, "removed "+uploadedID) {
-		t.Fatalf("unexpected rm output for uploaded did: %s", rmOut)
-	}
-
-	rmOut2, err := executeRootCommand(t, "--server", serverURL, "rm", "--did", addURLDID)
-	if err != nil {
-		t.Fatalf("rm(add-url) failed: %v output=%s", err, rmOut2)
-	}
-	if !strings.Contains(rmOut2, "removed "+addURLDID) {
-		t.Fatalf("unexpected rm output for add-url did: %s", rmOut2)
-	}
-
-	lsAfterRm, err := executeRootCommand(t, "--server", serverURL, "ls")
-	if err != nil {
-		t.Fatalf("ls after rm failed: %v output=%s", err, lsAfterRm)
-	}
-	if strings.Contains(lsAfterRm, fileName) || strings.Contains(lsAfterRm, addURLDID) {
-		t.Fatalf("ls output still includes removed records: %s", lsAfterRm)
 	}
 
 	bucketName := strings.TrimSpace(bucketCfg.Bucket)
@@ -282,20 +256,6 @@ func exerciseAllClientCommands(t *testing.T, serverURL string, bucketCfg bucketC
 	}
 	if v := strings.TrimSpace(bucketCfg.Endpoint); v != "" {
 		bucketAddArgs = append(bucketAddArgs, "--endpoint", v)
-	}
-	logBucket := strings.TrimSpace(bucketCfg.LogBucket)
-	if logBucket == "" {
-		logBucket = bucketName
-	}
-	if logBucket != "" {
-		bucketAddArgs = append(bucketAddArgs, "--billing-log-bucket", logBucket)
-	}
-	logPrefix := strings.Trim(strings.TrimSpace(bucketCfg.LogPrefix), "/")
-	if logPrefix == "" {
-		logPrefix = ".syfon/provider-transfer-events"
-	}
-	if logPrefix != "" {
-		bucketAddArgs = append(bucketAddArgs, "--billing-log-prefix", logPrefix)
 	}
 
 	bucketAddOut, err := executeRootCommand(t, bucketAddArgs...)
@@ -344,6 +304,30 @@ func exerciseAllClientCommands(t *testing.T, serverURL string, bucketCfg bucketC
 		t.Fatalf("expected removed bucket %s to be absent from list: %s", bucketName, bucketListOut2)
 	}
 
+	rmOut, err := executeRootCommand(t, "--server", serverURL, "rm", "--did", uploadedID)
+	if err != nil {
+		t.Fatalf("rm(uploaded) failed: %v output=%s", err, rmOut)
+	}
+	if !strings.Contains(rmOut, "removed "+uploadedID) {
+		t.Fatalf("unexpected rm output for uploaded did: %s", rmOut)
+	}
+
+	rmOut2, err := executeRootCommand(t, "--server", serverURL, "rm", "--did", addURLDID)
+	if err != nil {
+		t.Fatalf("rm(add-url) failed: %v output=%s", err, rmOut2)
+	}
+	if !strings.Contains(rmOut2, "removed "+addURLDID) {
+		t.Fatalf("unexpected rm output for add-url did: %s", rmOut2)
+	}
+
+	lsAfterRm, err := executeRootCommand(t, "--server", serverURL, "ls")
+	if err != nil {
+		t.Fatalf("ls after rm failed: %v output=%s", err, lsAfterRm)
+	}
+	if strings.Contains(lsAfterRm, fileName) || strings.Contains(lsAfterRm, addURLDID) {
+		t.Fatalf("ls output still includes removed records: %s", lsAfterRm)
+	}
+
 	headlineOut, err := executeRootCommand(t, "--server", serverURL, "ping")
 	if err != nil {
 		t.Fatalf("post-cleanup ping failed: %v output=%s", err, headlineOut)
@@ -364,17 +348,13 @@ func providerScheme(provider string) string {
 	}
 }
 
-func firstAuthPath(auth *internalapi.AuthPathMap) string {
-	if auth == nil {
+func firstAccessMethodURL(methods *[]drs.AccessMethod) string {
+	if methods == nil {
 		return ""
 	}
-	for _, projects := range *auth {
-		for _, paths := range projects {
-			for _, path := range paths {
-				if strings.TrimSpace(path) != "" {
-					return path
-				}
-			}
+	for _, method := range *methods {
+		if method.AccessUrl != nil && strings.TrimSpace(method.AccessUrl.Url) != "" {
+			return strings.TrimSpace(method.AccessUrl.Url)
 		}
 	}
 	return ""

@@ -10,8 +10,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/calypr/syfon/client/conf"
 	"github.com/calypr/syfon/client/common"
+	conf "github.com/calypr/syfon/client/config"
 )
 
 type AuthMode string

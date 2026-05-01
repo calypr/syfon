@@ -2,6 +2,7 @@ package common
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 )
 
@@ -101,8 +102,90 @@ func AuthzMapToList(authzMap map[string][]string) []string {
 	return out
 }
 
+// NormalizeAccessResource converts GA4GH controlled_access URL claims and
+// Gen3 resource paths into the canonical resource form used for privilege
+// checks: /programs/<program>[/projects/<project>].
+func NormalizeAccessResource(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	path := raw
+	if parsed, err := url.Parse(raw); err == nil && parsed.Path != "" {
+		path = parsed.Path
+	}
+	path = "/" + strings.Trim(path, "/")
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) >= 2 && (parts[0] == "program" || parts[0] == "programs") {
+		org := strings.TrimSpace(parts[1])
+		if org == "" {
+			return ""
+		}
+		if len(parts) >= 4 && (parts[2] == "project" || parts[2] == "projects") {
+			project := strings.TrimSpace(parts[3])
+			if project != "" {
+				return "/programs/" + org + "/projects/" + project
+			}
+		}
+		return "/programs/" + org
+	}
+	return raw
+}
+
+func NormalizeAccessResources(resources []string) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(resources))
+	for _, raw := range resources {
+		resource := NormalizeAccessResource(raw)
+		if resource == "" {
+			continue
+		}
+		if _, ok := seen[resource]; ok {
+			continue
+		}
+		seen[resource] = struct{}{}
+		out = append(out, resource)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func ControlledAccessToAuthzMap(claims []string) map[string][]string {
+	return AuthzListToMap(NormalizeAccessResources(claims))
+}
+
+func AuthzMapToControlledAccess(authzMap map[string][]string) []string {
+	return NormalizeAccessResources(AuthzMapToList(authzMap))
+}
+
+// AuthzMapMatchesScope reports whether the authz map grants access for the given
+// org and project. An empty project list in the map means org-wide access.
+func AuthzMapMatchesScope(authzMap map[string][]string, org, project string) bool {
+	org = strings.TrimSpace(org)
+	project = strings.TrimSpace(project)
+	if len(authzMap) == 0 || org == "" {
+		return false
+	}
+	projects, ok := authzMap[org]
+	if !ok {
+		return false
+	}
+	if len(projects) == 0 {
+		return true
+	}
+	for _, candidate := range projects {
+		if strings.TrimSpace(candidate) == project {
+			return true
+		}
+	}
+	return false
+}
+
 // parseResourcePath splits "/programs/org" or "/programs/org/projects/proj" into (org, project).
 func parseResourcePath(path string) (string, string) {
+	path = NormalizeAccessResource(path)
 	path = strings.TrimPrefix(path, "/programs/")
 	parts := strings.SplitN(path, "/projects/", 2)
 	if len(parts) == 1 {

@@ -2,69 +2,30 @@
 
 ## Problem
 
-The updated GA4GH DRS schema can make `make gen` succeed while `make build` fails with errors like:
+The GA4GH DRS `/service-info` response is composed from multiple schemas, and `oapi-codegen` currently emits broken response-scoped enum references for some nested `drs` fields.
+
+The failure looks like this:
 
 ```text
 undefined: N200ServiceInfoDrsControlledAccessClaimFormat
 undefined: N200ServiceInfoDrsControlledAccessDefault
 undefined: N200ServiceInfoDrsSupportedUploadMethodTypes
-undefined: DrsServiceDrsSupportedUploadMethods
 ```
 
-This is a Go code generation problem, not a runtime DRS behavior problem.
-
-The failure comes from the `/service-info` response. In DRS, `/service-info` is the endpoint that advertises server capabilities, such as supported upload methods, delete support, and controlled-access support.
-
-The schema for that response is composed from two schemas:
-
-```yaml
-200ServiceInfo:
-  content:
-    application/json:
-      schema:
-        allOf:
-          - $ref: ga4gh-service-info Service
-          - $ref: DrsService
-```
-
-The updated `DrsService` schema adds or renames enum-like fields under `drs`, including:
-
-```yaml
-supportedUploadMethodTypes:
-  type: array
-  items:
-    type: string
-    enum:
-      - s3
-      - gs
-      - https
-      - ftp
-      - sftp
-
-controlledAccessClaimFormat:
-  type: string
-  enum:
-    - ga4gh-passport-url-claim
-
-controlledAccessDefault:
-  type: string
-  enum:
-    - open-access-read
-```
-
-Those fields are valid OpenAPI, but they are awkward for `oapi-codegen` because they are inline enums inside a nested object inside a composed response.
+This is a code generation problem, not a runtime DRS behavior problem.
 
 ## Why Build Fails
 
-`oapi-codegen` generates the real enum types using the named schema path:
+`oapi-codegen` emits the real enum types under the named `DrsService` schema path:
 
 ```go
 type DrsServiceDrsControlledAccessClaimFormat string
 type DrsServiceDrsControlledAccessDefault string
 type DrsServiceDrsSupportedUploadMethodTypes string
+type DrsServiceTypeArtifact string
 ```
 
-But in the generated `/service-info` response structs, it references response-specific names:
+But the generated `/service-info` response structs reference names that are never defined:
 
 ```go
 ControlledAccessClaimFormat *N200ServiceInfoDrsControlledAccessClaimFormat
@@ -72,27 +33,16 @@ ControlledAccessDefault *N200ServiceInfoDrsControlledAccessDefault
 SupportedUploadMethodTypes *[]N200ServiceInfoDrsSupportedUploadMethodTypes
 ```
 
-Those `N200ServiceInfo...` types are not emitted by the generator, so Go compilation fails.
+The same issue appears in strict server JSON response structs as `N200ServiceInfoJSONResponse...`.
 
-There is also a rename involved. Older generated code used:
+## Current Fix
 
-```go
-DrsServiceDrsSupportedUploadMethods
-```
+Syfon fixes this with handwritten compatibility aliases:
 
-The updated schema uses:
+- `apigen/client/drs/compat.go`
+- `apigen/server/drs/compat.go`
 
-```go
-DrsServiceDrsSupportedUploadMethodTypes
-```
-
-That makes the old handwritten compatibility alias point at a type that no longer exists.
-
-## Easy Fix Without Changing the GA4GH Schema
-
-Keep the GA4GH schema as-is and update the handwritten `compat.go` aliases to match the new generated type names.
-
-For the client package:
+Those files define the missing response-scoped names as aliases to the real generated enum types:
 
 ```go
 type N200ServiceInfoDrsControlledAccessClaimFormat = DrsServiceDrsControlledAccessClaimFormat
@@ -101,36 +51,20 @@ type N200ServiceInfoDrsSupportedUploadMethodTypes = DrsServiceDrsSupportedUpload
 type N200ServiceInfoTypeArtifact = DrsServiceTypeArtifact
 ```
 
-For the server package, include both the normal response and strict JSON response aliases:
+The server package also needs the strict JSON response aliases:
 
 ```go
-type N200ServiceInfoDrsControlledAccessClaimFormat = DrsServiceDrsControlledAccessClaimFormat
-type N200ServiceInfoDrsControlledAccessDefault = DrsServiceDrsControlledAccessDefault
-type N200ServiceInfoDrsSupportedUploadMethodTypes = DrsServiceDrsSupportedUploadMethodTypes
-type N200ServiceInfoTypeArtifact = DrsServiceTypeArtifact
-
 type N200ServiceInfoJSONResponseDrsControlledAccessClaimFormat = DrsServiceDrsControlledAccessClaimFormat
 type N200ServiceInfoJSONResponseDrsControlledAccessDefault = DrsServiceDrsControlledAccessDefault
 type N200ServiceInfoJSONResponseDrsSupportedUploadMethodTypes = DrsServiceDrsSupportedUploadMethodTypes
 type N200ServiceInfoJSONResponseTypeArtifact = DrsServiceTypeArtifact
 ```
 
-For the shared model package, add the same non-JSON-response aliases:
-
-```go
-type N200ServiceInfoDrsControlledAccessClaimFormat = DrsServiceDrsControlledAccessClaimFormat
-type N200ServiceInfoDrsControlledAccessDefault = DrsServiceDrsControlledAccessDefault
-type N200ServiceInfoDrsSupportedUploadMethodTypes = DrsServiceDrsSupportedUploadMethodTypes
-type N200ServiceInfoTypeArtifact = DrsServiceTypeArtifact
-```
-
-Also remove or replace old aliases for `DrsServiceDrsSupportedUploadMethods`, because that old type name is no longer generated after the schema rename.
-
 ## Why This Fix Works
 
-Go type aliases make the generated response-specific names resolve to the actual generated enum types.
+The aliases leave the wire API untouched and only repair the generated Go type graph at compile time.
 
-This does not change the wire API. JSON still uses the same fields:
+JSON still uses the same fields:
 
 ```json
 {
@@ -142,78 +76,15 @@ This does not change the wire API. JSON still uses the same fields:
 }
 ```
 
-The aliases only repair the Go package's type graph after code generation.
-
 ## Tradeoffs
-
-This is the fastest and lowest-risk fix when the source GA4GH schema cannot be changed.
 
 Pros:
 
 - No GA4GH schema changes.
-- No OpenAPI overlay changes.
-- Small handwritten patch.
-- Keeps generated client, server, and model packages compiling.
+- Small, obvious workaround in normal Go source.
+- Keeps committed generated output compiling cleanly.
 
 Cons:
 
-- It keeps depending on `oapi-codegen` naming behavior.
-- Future inline enum additions under `/service-info` may need more aliases.
-- `make gen` can still produce code that requires these compatibility files to compile.
-
-## More Durable Fixes
-
-If schema changes are allowed later, the cleaner fix is to avoid inline enums for these fields.
-
-Define named schemas:
-
-```yaml
-DrsControlledAccessClaimFormat:
-  type: string
-  enum:
-    - ga4gh-passport-url-claim
-
-DrsControlledAccessDefault:
-  type: string
-  enum:
-    - open-access-read
-
-DrsSupportedUploadMethodType:
-  type: string
-  enum:
-    - s3
-    - gs
-    - https
-    - ftp
-    - sftp
-```
-
-Then reference them:
-
-```yaml
-controlledAccessClaimFormat:
-  $ref: './DrsControlledAccessClaimFormat.yaml'
-
-controlledAccessDefault:
-  $ref: './DrsControlledAccessDefault.yaml'
-
-supportedUploadMethodTypes:
-  type: array
-  items:
-    $ref: './DrsSupportedUploadMethodType.yaml'
-```
-
-That gives `oapi-codegen` stable names and removes the need for response-specific alias patches.
-
-If upstream GA4GH cannot change, Syfon could also normalize the schema through a local OpenAPI overlay before code generation. That is more maintainable than chasing aliases forever, but it is more work than the immediate compatibility fix.
-
-## Recommended Short-Term Policy
-
-For this branch:
-
-1. Keep the GA4GH schema unchanged.
-2. Update `apigen/*/compat.go` aliases for the new generated names.
-3. Run `make build`.
-4. Commit regenerated API files and compatibility aliases together.
-
-If another schema update later adds more inline enums under `/service-info`, expect the same class of failure and either add aliases or move those enums to named schemas.
+- It still depends on current `oapi-codegen` naming behavior.
+- Future inline enum additions under `/service-info` may require more aliases.

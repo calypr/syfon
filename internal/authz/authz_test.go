@@ -4,8 +4,16 @@ import (
 	"context"
 	"testing"
 
-	"github.com/calypr/syfon/internal/common"
+	internalauth "github.com/calypr/syfon/internal/auth"
 )
+
+func testSessionContext(mode string, header bool, enforced bool, resources []string, privileges map[string]map[string]bool) context.Context {
+	session := internalauth.NewSession(mode)
+	session.AuthHeaderPresent = header
+	session.AuthzEnforced = enforced
+	session.SetAuthorizations(resources, privileges, enforced)
+	return internalauth.WithSession(context.Background(), session)
+}
 
 func TestGetUserAuthz(t *testing.T) {
 	t.Run("missing key returns empty", func(t *testing.T) {
@@ -15,17 +23,9 @@ func TestGetUserAuthz(t *testing.T) {
 		}
 	})
 
-	t.Run("wrong type returns empty", func(t *testing.T) {
-		ctx := context.WithValue(context.Background(), common.UserAuthzKey, "not-a-list")
-		got := GetUserAuthz(ctx)
-		if len(got) != 0 {
-			t.Fatalf("expected empty authz, got %v", got)
-		}
-	})
-
 	t.Run("list returned as-is", func(t *testing.T) {
 		expected := []string{"/programs/a", "/programs/a/projects/b"}
-		ctx := context.WithValue(context.Background(), common.UserAuthzKey, expected)
+		ctx := testSessionContext("", false, false, expected, nil)
 		got := GetUserAuthz(ctx)
 		if len(got) != len(expected) {
 			t.Fatalf("expected %d resources, got %d", len(expected), len(got))
@@ -90,8 +90,7 @@ func TestAuthHeaderAndMode(t *testing.T) {
 		t.Fatalf("expected not gen3 in empty context")
 	}
 
-	ctx = context.WithValue(ctx, common.AuthHeaderPresentKey, true)
-	ctx = context.WithValue(ctx, common.AuthModeKey, "gen3")
+	ctx = testSessionContext("gen3", true, true, nil, nil)
 	if !HasAuthHeader(ctx) {
 		t.Fatalf("expected auth header to be present")
 	}
@@ -108,22 +107,30 @@ func TestGetUserPrivileges(t *testing.T) {
 		}
 	})
 
-	t.Run("wrong type returns empty map", func(t *testing.T) {
-		ctx := context.WithValue(context.Background(), common.UserPrivilegesKey, "bad")
-		got := GetUserPrivileges(ctx)
-		if len(got) != 0 {
-			t.Fatalf("expected empty privileges, got %v", got)
-		}
-	})
-
 	t.Run("valid map returned", func(t *testing.T) {
 		expected := map[string]map[string]bool{
 			"/programs/a/projects/b": {"read": true, "*": false},
 		}
-		ctx := context.WithValue(context.Background(), common.UserPrivilegesKey, expected)
+		ctx := testSessionContext("", false, false, nil, expected)
 		got := GetUserPrivileges(ctx)
 		if !got["/programs/a/projects/b"]["read"] {
 			t.Fatalf("expected read=true in privileges")
+		}
+	})
+
+	t.Run("write alias is normalized before storage", func(t *testing.T) {
+		resource := "/programs/a/projects/b"
+		ctx := testSessionContext("", false, false, nil, map[string]map[string]bool{
+			resource: {"write": true},
+		})
+		got := GetUserPrivileges(ctx)
+		if got[resource]["write"] {
+			t.Fatalf("did not expect write to persist in session privileges")
+		}
+		for _, method := range []string{"file_upload", "create", "update", "delete"} {
+			if !got[resource][method] {
+				t.Fatalf("expected write alias to grant %s", method)
+			}
 		}
 	})
 }
@@ -138,8 +145,7 @@ func TestHasMethodAccess(t *testing.T) {
 	})
 
 	t.Run("local authz-enforced mode checks privileges", func(t *testing.T) {
-		ctx := context.WithValue(context.Background(), common.AuthzEnforcedKey, true)
-		ctx = context.WithValue(ctx, common.UserPrivilegesKey, map[string]map[string]bool{
+		ctx := testSessionContext("local", false, true, nil, map[string]map[string]bool{
 			resource: {"read": true},
 		})
 		if !HasMethodAccess(ctx, "read", []string{resource}) {
@@ -151,16 +157,14 @@ func TestHasMethodAccess(t *testing.T) {
 	})
 
 	t.Run("gen3 without auth header denies", func(t *testing.T) {
-		ctx := context.WithValue(context.Background(), common.AuthModeKey, "gen3")
+		ctx := testSessionContext("gen3", false, true, nil, nil)
 		if HasMethodAccess(ctx, "read", []string{resource}) {
 			t.Fatalf("expected deny without auth header")
 		}
 	})
 
 	t.Run("gen3 with empty resources denies", func(t *testing.T) {
-		ctx := context.WithValue(context.Background(), common.AuthModeKey, "gen3")
-		ctx = context.WithValue(ctx, common.AuthHeaderPresentKey, true)
-		ctx = context.WithValue(ctx, common.UserPrivilegesKey, map[string]map[string]bool{
+		ctx := testSessionContext("gen3", true, true, nil, map[string]map[string]bool{
 			resource: {"read": true},
 		})
 		if HasMethodAccess(ctx, "read", nil) {
@@ -169,9 +173,7 @@ func TestHasMethodAccess(t *testing.T) {
 	})
 
 	t.Run("gen3 allows method on all resources", func(t *testing.T) {
-		ctx := context.WithValue(context.Background(), common.AuthModeKey, "gen3")
-		ctx = context.WithValue(ctx, common.AuthHeaderPresentKey, true)
-		ctx = context.WithValue(ctx, common.UserPrivilegesKey, map[string]map[string]bool{
+		ctx := testSessionContext("gen3", true, true, nil, map[string]map[string]bool{
 			resource:        {"read": true},
 			"/programs/a/x": {"*": true},
 		})
@@ -181,9 +183,7 @@ func TestHasMethodAccess(t *testing.T) {
 	})
 
 	t.Run("gen3 denies missing resource privilege", func(t *testing.T) {
-		ctx := context.WithValue(context.Background(), common.AuthModeKey, "gen3")
-		ctx = context.WithValue(ctx, common.AuthHeaderPresentKey, true)
-		ctx = context.WithValue(ctx, common.UserPrivilegesKey, map[string]map[string]bool{
+		ctx := testSessionContext("gen3", true, true, nil, map[string]map[string]bool{
 			resource: {"read": true},
 		})
 		if HasMethodAccess(ctx, "read", []string{resource, "/programs/missing"}) {
@@ -192,9 +192,7 @@ func TestHasMethodAccess(t *testing.T) {
 	})
 
 	t.Run("gen3 denies when method missing", func(t *testing.T) {
-		ctx := context.WithValue(context.Background(), common.AuthModeKey, "gen3")
-		ctx = context.WithValue(ctx, common.AuthHeaderPresentKey, true)
-		ctx = context.WithValue(ctx, common.UserPrivilegesKey, map[string]map[string]bool{
+		ctx := testSessionContext("gen3", true, true, nil, map[string]map[string]bool{
 			resource: {"create": true},
 		})
 		if HasMethodAccess(ctx, "read", []string{resource}) {

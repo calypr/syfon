@@ -11,7 +11,7 @@ import (
 
 func TestCandidateToInternalObjectAndLFSCandidateToDRS(t *testing.T) {
 	t.Run("candidate to internal object", func(t *testing.T) {
-		authz := map[string][]string{"syfon": []string{"e2e"}}
+		authz := []string{"/programs/syfon/projects/e2e"}
 		url := "https://storage.example/object.bin"
 		name := "object.bin"
 		size := int64(42)
@@ -25,8 +25,8 @@ func TestCandidateToInternalObjectAndLFSCandidateToDRS(t *testing.T) {
 					Headers *[]string `json:"headers,omitempty"`
 					Url     string    `json:"url"`
 				}{Url: url},
-				Authorizations: &authz,
 			}},
+			ControlledAccess: &authz,
 		}
 
 		obj, err := CandidateToInternalObject(candidate, time.Unix(123, 0))
@@ -39,9 +39,8 @@ func TestCandidateToInternalObjectAndLFSCandidateToDRS(t *testing.T) {
 		if obj.DrsObject.AccessMethods == nil || len(*obj.DrsObject.AccessMethods) != 1 {
 			t.Fatalf("expected one access method, got %+v", obj.DrsObject.AccessMethods)
 		}
-		gotAuthz := (*obj.DrsObject.AccessMethods)[0].Authorizations
-		if gotAuthz == nil || len(*gotAuthz) != 1 {
-			t.Fatalf("expected mapped authz map, got %+v", gotAuthz)
+		if (*obj.DrsObject.AccessMethods)[0].Authorizations != nil {
+			t.Fatalf("did not expect per-method authz, got %+v", (*obj.DrsObject.AccessMethods)[0].Authorizations)
 		}
 	})
 
@@ -70,8 +69,8 @@ func TestCandidateToInternalObjectAndLFSCandidateToDRS(t *testing.T) {
 		if got.AccessMethods == nil || len(*got.AccessMethods) != 1 {
 			t.Fatalf("expected one access method, got %+v", got.AccessMethods)
 		}
-		if (*got.AccessMethods)[0].Authorizations == nil || len(*(*got.AccessMethods)[0].Authorizations) != 1 {
-			t.Fatalf("expected authz map on access method, got %+v", (*got.AccessMethods)[0].Authorizations)
+		if (*got.AccessMethods)[0].Authorizations != nil {
+			t.Fatalf("did not expect authz map on access method, got %+v", (*got.AccessMethods)[0].Authorizations)
 		}
 	})
 }

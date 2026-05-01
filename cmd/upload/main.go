@@ -11,7 +11,7 @@ import (
 
 	drsapi "github.com/calypr/syfon/apigen/client/drs"
 	syclient "github.com/calypr/syfon/client"
-	"github.com/calypr/syfon/client/xfer/upload"
+	"github.com/calypr/syfon/client/transfer/upload"
 	syfoncommon "github.com/calypr/syfon/common"
 	"github.com/spf13/cobra"
 )
@@ -84,9 +84,6 @@ var Cmd = &cobra.Command{
 		authzMap := syfoncommon.AuthzMapFromScope(org, strings.TrimSpace(uploadProject))
 
 		am := drsapi.AccessMethod{Type: "s3"}
-		if authzMap != nil {
-			am.Authorizations = &authzMap
-		}
 		drsObj := &drsapi.DrsObject{
 			Id:   did,
 			Name: &name,
@@ -95,6 +92,10 @@ var Cmd = &cobra.Command{
 				{Type: "sha256", Checksum: checksum},
 			},
 			AccessMethods: &[]drsapi.AccessMethod{am},
+		}
+		if authzMap != nil {
+			controlled := syfoncommon.AuthzMapToControlledAccess(authzMap)
+			drsObj.ControlledAccess = &controlled
 		}
 
 		// Register and upload using the SDK's orchestrator

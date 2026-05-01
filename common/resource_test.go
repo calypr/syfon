@@ -102,4 +102,22 @@ func TestResourceAndAuthzHelpers(t *testing.T) {
 			t.Fatalf("AuthzMapToList mismatch:\n got: %+v\nwant: %+v", got, want)
 		}
 	})
+
+	t.Run("authz map matches scope", func(t *testing.T) {
+		projectScoped := map[string][]string{"syfon": {"e2e"}}
+		if !AuthzMapMatchesScope(projectScoped, "syfon", "e2e") {
+			t.Fatal("expected project-scoped match")
+		}
+		if AuthzMapMatchesScope(projectScoped, "syfon", "other") {
+			t.Fatal("expected project-scoped miss")
+		}
+
+		orgWide := map[string][]string{"syfon": {}}
+		if !AuthzMapMatchesScope(orgWide, "syfon", "anything") {
+			t.Fatal("expected org-wide match")
+		}
+		if AuthzMapMatchesScope(nil, "syfon", "e2e") {
+			t.Fatal("expected nil map miss")
+		}
+	})
 }

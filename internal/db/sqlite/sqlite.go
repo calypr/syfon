@@ -67,8 +67,11 @@ func (db *SqliteDB) initSchema() error {
 			object_id TEXT,
 			url TEXT,
 			type TEXT,
-			org TEXT NOT NULL DEFAULT '',
-			project TEXT NOT NULL DEFAULT '',
+			FOREIGN KEY(object_id) REFERENCES drs_object(id) ON DELETE CASCADE
+		)`,
+		`CREATE TABLE IF NOT EXISTS drs_object_controlled_access (
+			object_id TEXT,
+			resource TEXT,
 			FOREIGN KEY(object_id) REFERENCES drs_object(id) ON DELETE CASCADE
 		)`,
 		`CREATE TABLE IF NOT EXISTS drs_object_checksum (
@@ -78,6 +81,8 @@ func (db *SqliteDB) initSchema() error {
 			FOREIGN KEY(object_id) REFERENCES drs_object(id) ON DELETE CASCADE
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_drs_object_access_method_object_id ON drs_object_access_method(object_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_drs_object_controlled_access_object_id ON drs_object_controlled_access(object_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_drs_object_controlled_access_resource ON drs_object_controlled_access(resource)`,
 		`CREATE INDEX IF NOT EXISTS idx_drs_object_checksum_object_id ON drs_object_checksum(object_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_drs_object_checksum_checksum ON drs_object_checksum(checksum)`,
 		`CREATE TABLE IF NOT EXISTS drs_object_alias (
@@ -227,19 +232,6 @@ func (db *SqliteDB) initSchema() error {
 		if _, err := db.db.Exec(q); err != nil {
 			return err
 		}
-	}
-	for _, stmt := range []string{
-		`ALTER TABLE drs_object_access_method ADD COLUMN org TEXT NOT NULL DEFAULT ''`,
-		`ALTER TABLE drs_object_access_method ADD COLUMN project TEXT NOT NULL DEFAULT ''`,
-	} {
-		if _, err := db.db.Exec(stmt); err != nil {
-			if !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
-				return err
-			}
-		}
-	}
-	if _, err := db.db.Exec(`CREATE INDEX IF NOT EXISTS idx_drs_object_access_method_scope ON drs_object_access_method(org, project)`); err != nil {
-		return err
 	}
 	if _, err := db.db.Exec(`ALTER TABLE s3_credential ADD COLUMN provider TEXT NOT NULL DEFAULT 's3'`); err != nil {
 		if !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {

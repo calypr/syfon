@@ -10,6 +10,7 @@ import (
 
 	"github.com/calypr/syfon/apigen/server/lfsapi"
 	"github.com/calypr/syfon/internal/api/attribution"
+	apimiddleware "github.com/calypr/syfon/internal/api/middleware"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/models"
@@ -19,7 +20,7 @@ import (
 func prepareDownloadActions(ctx context.Context, om *core.ObjectManager, oid string) (*lfsapi.BatchActions, *lfsapi.ObjectError) {
 	obj, err := om.GetObject(ctx, oid, "read")
 	if err != nil {
-		return nil, dbErrToBatchError(err)
+		return nil, dbErrToBatchError(ctx, err)
 	}
 
 	var src string
@@ -62,13 +63,11 @@ func prepareUploadActions(ctx context.Context, om *core.ObjectManager, oid strin
 		return nil, existing.Size, nil
 	}
 	if !common.IsNotFoundError(err) {
-		return nil, reqSize, dbErrToBatchError(err)
+		return nil, reqSize, dbErrToBatchError(ctx, err)
 	}
 
-	// Permission check for upload
-	_, err = om.GetObject(ctx, "/data_file", "create") // Proxy check using default resource
-	if err != nil && !common.IsNotFoundError(err) {
-		return nil, reqSize, dbErrToBatchError(common.ErrUnauthorized)
+	if err := om.RequireObjectResources(ctx, "create", []string{"/programs/data_file"}); err != nil {
+		return nil, reqSize, dbErrToBatchError(ctx, err)
 	}
 
 	creds, credErr := om.ListS3Credentials(ctx)
@@ -110,12 +109,12 @@ func uploadPartToSignedURL(ctx context.Context, signedURL string, content []byte
 	return etag, nil
 }
 
-func dbErrToBatchError(err error) *lfsapi.ObjectError {
+func dbErrToBatchError(ctx context.Context, err error) *lfsapi.ObjectError {
 	if common.IsNotFoundError(err) {
 		return &lfsapi.ObjectError{Code: int32(http.StatusNotFound), Message: "object not found"}
 	}
 	if err == common.ErrUnauthorized {
-		return &lfsapi.ObjectError{Code: int32(http.StatusUnauthorized), Message: "unauthorized"}
+		return &lfsapi.ObjectError{Code: int32(apimiddleware.AuthFailureStatus(ctx)), Message: "unauthorized"}
 	}
 	return &lfsapi.ObjectError{Code: int32(http.StatusInternalServerError), Message: err.Error()}
 }

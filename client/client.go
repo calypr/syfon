@@ -12,10 +12,10 @@ import (
 	"github.com/calypr/syfon/apigen/client/internalapi"
 	"github.com/calypr/syfon/apigen/client/lfsapi"
 	"github.com/calypr/syfon/apigen/client/metricsapi"
-	"github.com/calypr/syfon/client/conf"
+	conf "github.com/calypr/syfon/client/config"
 	"github.com/calypr/syfon/client/logs"
 	"github.com/calypr/syfon/client/request"
-	"github.com/calypr/syfon/client/syfonclient"
+	syfonclient "github.com/calypr/syfon/client/services"
 )
 
 const (

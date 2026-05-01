@@ -12,6 +12,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/calypr/syfon/apigen/server/drs"
 )
 
 const maxHTTPAttempts = 3
@@ -187,15 +189,16 @@ type bulkCreateRequest struct {
 }
 
 type bulkInternalRecord struct {
-	Auth        *map[string]map[string][]string `json:"auth,omitempty"`
-	CreatedTime *string                         `json:"created_time,omitempty"`
-	Description *string                         `json:"description,omitempty"`
-	Did         string                          `json:"did"`
-	FileName    *string                         `json:"file_name,omitempty"`
-	Hashes      *map[string]string              `json:"hashes,omitempty"`
-	Size        *int64                          `json:"size,omitempty"`
-	UpdatedTime *string                         `json:"updated_time,omitempty"`
-	Version     *string                         `json:"version,omitempty"`
+	AccessMethods    []drs.AccessMethod `json:"access_methods,omitempty"`
+	ControlledAccess []string           `json:"controlled_access,omitempty"`
+	CreatedTime      *string            `json:"created_time,omitempty"`
+	Description      *string            `json:"description,omitempty"`
+	Did              string             `json:"did"`
+	FileName         *string            `json:"file_name,omitempty"`
+	Hashes           *map[string]string `json:"hashes,omitempty"`
+	Size             *int64             `json:"size,omitempty"`
+	UpdatedTime      *string            `json:"updated_time,omitempty"`
+	Version          *string            `json:"version,omitempty"`
 }
 
 func bulkCreateRequestFromMigration(records []MigrationRecord) bulkCreateRequest {
@@ -214,65 +217,27 @@ func bulkCreateRequestFromMigration(records []MigrationRecord) bulkCreateRequest
 				hashes[checksum.Type] = checksum.Checksum
 			}
 		}
-		auth := authPathMapFromMigration(record)
 		out.Records = append(out.Records, bulkInternalRecord{
-			Did:         record.ID,
-			Size:        &size,
-			FileName:    record.Name,
-			Version:     record.Version,
-			Description: record.Description,
-			CreatedTime: &created,
-			UpdatedTime: updated,
-			Hashes:      &hashes,
-			Auth:        auth,
+			Did:              record.ID,
+			Size:             &size,
+			FileName:         record.Name,
+			Version:          record.Version,
+			Description:      record.Description,
+			CreatedTime:      &created,
+			UpdatedTime:      updated,
+			Hashes:           &hashes,
+			AccessMethods:    record.AccessMethods,
+			ControlledAccess: migrationRecordControlledAccess(record),
 		})
 	}
 	return out
 }
 
-func authPathMapFromMigration(record MigrationRecord) *map[string]map[string][]string {
-	if len(record.AccessMethods) == 0 || len(record.Authz) == 0 {
-		return nil
+func migrationRecordControlledAccess(record MigrationRecord) []string {
+	if len(record.ControlledAccess) > 0 {
+		return record.ControlledAccess
 	}
-	auth := make(map[string]map[string][]string)
-	for _, resource := range record.Authz {
-		org, project := parseResourcePath(resource)
-		if org == "" {
-			continue
-		}
-		if auth[org] == nil {
-			auth[org] = make(map[string][]string)
-		}
-		for _, method := range record.AccessMethods {
-			if method.AccessUrl == nil || method.AccessUrl.Url == "" {
-				continue
-			}
-			auth[org][project] = appendUnique(auth[org][project], method.AccessUrl.Url)
-		}
-	}
-	if len(auth) == 0 {
-		return nil
-	}
-	return &auth
-}
-
-func parseResourcePath(path string) (string, string) {
-	path = strings.TrimSpace(path)
-	path = strings.TrimPrefix(path, "/programs/")
-	parts := strings.SplitN(path, "/projects/", 2)
-	if len(parts) == 1 {
-		return strings.TrimSpace(parts[0]), ""
-	}
-	return strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
-}
-
-func appendUnique(values []string, value string) []string {
-	for _, existing := range values {
-		if existing == value {
-			return values
-		}
-	}
-	return append(values, value)
+	return record.Authz
 }
 
 func (c *HTTPClient) endpoint(path string) string {
