@@ -85,7 +85,7 @@ func TestRegisterObjects(t *testing.T) {
 			t.Fatalf("expected one object, got %+v", created)
 		}
 		controlled, ok := created.Objects[0]["controlled_access"].([]any)
-		if !ok || len(controlled) != 1 || controlled[0] != "/programs/org2/projects/proj2" {
+		if !ok || len(controlled) != 1 || controlled[0] != "/organization/org2/project/proj2" {
 			t.Fatalf("expected controlled_access in response: %+v", created.Objects[0])
 		}
 		methods, ok := created.Objects[0]["access_methods"].([]any)
