@@ -1096,7 +1096,7 @@ func providerTransferWhere(filter models.TransferAttributionFilter) (string, []a
 func providerTransferGroupExpr(groupBy string) (string, string) {
 	switch strings.ToLower(strings.TrimSpace(groupBy)) {
 	case "user":
-		return "COALESCE(NULLIF(actor_email, ''), actor_subject)", "COALESCE(NULLIF(actor_email, ''), actor_subject) AS key, '' AS organization, '' AS project, '' AS provider, '' AS bucket, '' AS sha256, actor_email, actor_subject"
+		return "COALESCE(NULLIF(actor_email, ''), actor_subject), actor_email, actor_subject", "COALESCE(NULLIF(actor_email, ''), actor_subject) AS key, '' AS organization, '' AS project, '' AS provider, '' AS bucket, '' AS sha256, actor_email, actor_subject"
 	case "provider":
 		return "provider, bucket", "provider || ':' || bucket AS key, '' AS organization, '' AS project, provider, bucket, '' AS sha256, '' AS actor_email, '' AS actor_subject"
 	case "object":
@@ -1109,7 +1109,7 @@ func providerTransferGroupExpr(groupBy string) (string, string) {
 func transferAttributionGroupExpr(groupBy string) (string, string) {
 	switch strings.ToLower(strings.TrimSpace(groupBy)) {
 	case "user":
-		return "COALESCE(NULLIF(actor_email, ''), actor_subject)", "COALESCE(NULLIF(actor_email, ''), actor_subject) AS key, '' AS organization, '' AS project, '' AS provider, '' AS bucket, '' AS sha256, actor_email, actor_subject"
+		return "COALESCE(NULLIF(actor_email, ''), actor_subject), actor_email, actor_subject", "COALESCE(NULLIF(actor_email, ''), actor_subject) AS key, '' AS organization, '' AS project, '' AS provider, '' AS bucket, '' AS sha256, actor_email, actor_subject"
 	case "provider":
 		return "provider, bucket", "provider || ':' || bucket AS key, '' AS organization, '' AS project, provider, bucket, '' AS sha256, '' AS actor_email, '' AS actor_subject"
 	case "object":

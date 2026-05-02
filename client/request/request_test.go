@@ -209,6 +209,43 @@ func TestRequest_Do_BasicAuthDoesNotRefreshOn401(t *testing.T) {
 	}
 }
 
+func TestRequest_Do_SkipAuthSuppressesTransportAuth(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	mockConf := &mockConfigManager{}
+
+	client := &http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			if got := r.Header.Get("Authorization"); got != "" {
+				t.Fatalf("expected no authorization header, got %q", got)
+			}
+			if got := r.Header.Get("X-Skip-Auth"); got != "" {
+				t.Fatalf("expected X-Skip-Auth to be stripped before send, got %q", got)
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Status:     "200 OK",
+				Body:       io.NopCloser(strings.NewReader("")),
+				Header:     make(http.Header),
+				Request:    r,
+			}, nil
+		}),
+	}
+
+	reqInterface := NewBasicAuthRequestor(
+		logs.NewGen3Logger(logger, "", ""),
+		&conf.Credential{KeyID: "user", APIKey: "pass"},
+		mockConf,
+		"https://example.com",
+		"test-ua",
+		client,
+	)
+
+	err := reqInterface.Do(context.Background(), "PUT", "https://signed.example/upload?X-Amz-Signature=sig", strings.NewReader("payload"), nil, WithSkipAuth(true))
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+}
+
 // Mock config manager for testing
 type mockConfigManager struct{}
 

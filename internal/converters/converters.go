@@ -25,8 +25,12 @@ func CandidateToInternalObject(c drs.DrsObjectCandidate, now time.Time) (models.
 	if authzMap == nil {
 		authzMap = UniqueAuthz(ams)
 	}
+	id, err := common.MintObjectIDFromChecksum(oid, syfoncommon.AuthzMapToList(authzMap))
+	if err != nil {
+		return models.InternalObject{}, err
+	}
 	obj := drs.DrsObject{
-		Id:          common.MintObjectIDFromChecksum(oid, syfoncommon.AuthzMapToList(authzMap)),
+		Id:          id,
 		Size:        c.Size,
 		CreatedTime: now,
 		UpdatedTime: &now,

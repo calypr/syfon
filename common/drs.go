@@ -19,7 +19,12 @@ type AccessMethodAuthorizations = struct {
 
 // DrsUUID generates a deterministic UUID for a DRS object from org, project, and hash.
 func DrsUUID(org, project, hash string) string {
-	name := org + "/" + project + "/" + hash
+	hash = NormalizeOid(hash)
+	resource, err := ResourcePath(org, project)
+	if err != nil || hash == "" || project == "" || resource == "" {
+		return ""
+	}
+	name := "sha256:" + hash + "|" + resource
 	return uuid.NewSHA1(drsUUIDNamespace, []byte(name)).String()
 }
 

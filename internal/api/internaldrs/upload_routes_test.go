@@ -57,8 +57,8 @@ func TestHandleInternalMultipartInit_MintsUUIDForChecksumInput(t *testing.T) {
 	body, _ := json.Marshal(internalapi.InternalMultipartInitRequest{FileName: &checksum})
 	mockDB := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}
 	rr := doInternalDRSTestRequest(httptest.NewRequest(http.MethodPost, "/data/multipart/init", bytes.NewBuffer(body)), core.NewObjectManager(mockDB, &testutils.MockUrlManager{}))
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rr.Code)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rr.Code)
 	}
 }
 

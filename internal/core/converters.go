@@ -163,7 +163,11 @@ func CandidateToInternalObject(c drs.DrsObjectCandidate, now time.Time) (models.
 	}
 
 	if id == "" {
-		id = common.MintObjectIDFromChecksum(oid, syfoncommon.AuthzMapToList(authzList))
+		mintedID, mintErr := common.MintObjectIDFromChecksum(oid, syfoncommon.AuthzMapToList(authzList))
+		if mintErr != nil {
+			return models.InternalObject{}, mintErr
+		}
+		id = mintedID
 	}
 
 	obj := drs.DrsObject{

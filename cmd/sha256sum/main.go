@@ -12,7 +12,9 @@ import (
 	"strings"
 
 	syclient "github.com/calypr/syfon/client"
+	"github.com/calypr/syfon/client/request"
 	syfonclient "github.com/calypr/syfon/client/services"
+	"github.com/calypr/syfon/cmd/cliauth"
 	"github.com/spf13/cobra"
 )
 
@@ -27,11 +29,7 @@ var Cmd = &cobra.Command{
 			return fmt.Errorf("--did is required")
 		}
 
-		serverURL, err := cmd.Flags().GetString("server")
-		if err != nil {
-			return fmt.Errorf("get server flag: %w", err)
-		}
-		c, err := syclient.New(serverURL)
+		c, err := cliauth.NewServerClient(cmd)
 		if err != nil {
 			return err
 		}
@@ -86,7 +84,7 @@ func readURLBytes(ctx context.Context, rawURL string, c syfonclient.SyfonClient)
 		if !ok {
 			return nil, fmt.Errorf("client implementation does not support raw requests")
 		}
-		err := concrete.Requestor().Do(ctx, http.MethodGet, rawURL, nil, &resp)
+		err := concrete.Requestor().Do(ctx, http.MethodGet, rawURL, nil, &resp, request.WithSkipAuth(true))
 		if err != nil {
 			return nil, fmt.Errorf("download request failed: %w", err)
 		}

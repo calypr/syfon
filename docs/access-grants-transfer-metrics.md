@@ -9,6 +9,7 @@ and download URLs.
 - `access_issued` is an append-only audit event recorded every time Syfon returns an access URL. Transfer totals are computed from these signed-url rows.
 - Transfer summaries expose aggregate `bytes_downloaded` and `bytes_uploaded`.
 - Transfer breakdowns can group those bytes by scope, user, storage provider/bucket, or object SHA256.
+- For day-to-day triage, the CLI defaults `syfon metrics transfers breakdown` to user grouping and exposes a dedicated `users` report with client-side sorting and limits.
 
 ## Billing Report
 
@@ -28,8 +29,18 @@ The same data is also available as separate calls:
 
 ```bash
 syfon metrics transfers summary
+syfon metrics transfers users
+syfon metrics transfers breakdown
 syfon metrics transfers breakdown --group-by provider
 syfon metrics transfers breakdown --group-by object
+```
+
+Useful variants:
+
+```bash
+syfon metrics transfers users --sort-by downloaded
+syfon metrics transfers users --direction upload --sort-by uploaded --limit 25
+syfon metrics transfers breakdown --group-by scope --sort-by last-transfer
 ```
 
 When authz is enforced and no explicit organization/project filter is provided,

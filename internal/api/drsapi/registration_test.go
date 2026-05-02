@@ -96,12 +96,14 @@ func TestRegisterObjects(t *testing.T) {
 
 	t.Run("Register_Bulk", func(t *testing.T) {
 		size := int64(100)
+		authz1 := []string{"/organization/org1/project/proj1"}
+		authz2 := []string{"/organization/org1/project/proj2"}
 		bodyObj := struct {
 			Candidates []drs.DrsObjectCandidate `json:"candidates"`
 		}{
 			Candidates: []drs.DrsObjectCandidate{
-				{Size: size, Checksums: []drs.Checksum{{Type: "sha256", Checksum: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}}},
-				{Size: size, Checksums: []drs.Checksum{{Type: "sha256", Checksum: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}}},
+				{Size: size, Checksums: []drs.Checksum{{Type: "sha256", Checksum: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}}, ControlledAccess: &authz1},
+				{Size: size, Checksums: []drs.Checksum{{Type: "sha256", Checksum: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}}, ControlledAccess: &authz2},
 			},
 		}
 		body, _ := json.Marshal(bodyObj)
@@ -110,6 +112,24 @@ func TestRegisterObjects(t *testing.T) {
 		resp, _ := app.Test(req)
 		if resp.StatusCode != http.StatusCreated {
 			t.Fatalf("expected 201, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("Register_WithoutIDOrProjectScope_Fails", func(t *testing.T) {
+		size := int64(100)
+		cand := drs.DrsObjectCandidate{
+			Size: size,
+			Checksums: []drs.Checksum{
+				{Type: "sha256", Checksum: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"},
+			},
+			ControlledAccess: &[]string{"/organization/org1"},
+		}
+		body, _ := json.Marshal(cand)
+		req := httptest.NewRequest("POST", "/objects/register", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		resp, _ := app.Test(req)
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d", resp.StatusCode)
 		}
 	})
 }

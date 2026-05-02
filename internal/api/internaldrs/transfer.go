@@ -9,7 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/apigen/server/internalapi"
 	"github.com/calypr/syfon/internal/api/apiutil"
 	"github.com/calypr/syfon/internal/api/attribution"
@@ -348,17 +347,7 @@ func handleInternalMultipartInitFiber(om *core.ObjectManager) fiber.Handler {
 			if existing, err := om.GetObjectsByChecksum(c.Context(), key, "read"); err == nil && len(existing) > 0 {
 				internalID = existing[0].Id
 			} else {
-				internalID = common.MintObjectIDFromChecksum(key, []string{"/data_file"})
-				obj := models.InternalObject{
-					DrsObject: drs.DrsObject{
-						Id:          internalID,
-						CreatedTime: time.Now().UTC(),
-						Checksums:   []drs.Checksum{{Type: "sha256", Checksum: key}},
-					},
-				}
-				if err := om.RegisterObjects(c.Context(), []models.InternalObject{obj}); err != nil {
-					return apiutil.HandleError(c, err)
-				}
+				return c.Status(fiber.StatusBadRequest).SendString("checksum-only multipart init requires an explicit guid or a project-scoped object id")
 			}
 		} else if _, err := uuid.Parse(key); err != nil {
 			internalID = uuid.NewString()

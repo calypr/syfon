@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	"github.com/calypr/syfon/apigen/client/bucketapi"
-	syclient "github.com/calypr/syfon/client"
 	sybucket "github.com/calypr/syfon/client/bucket"
+	"github.com/calypr/syfon/cmd/cliauth"
 	"github.com/spf13/cobra"
 )
 
@@ -54,15 +54,11 @@ var addCmd = &cobra.Command{
 		if v := strings.TrimSpace(bucketEndpoint); v != "" {
 			payload.Endpoint = &v
 		}
-		serverURL, err := cmd.Flags().GetString("server")
-		if err != nil {
-			return fmt.Errorf("get server flag: %w", err)
-		}
 		if err := sybucket.ValidateBucket(cmd.Context(), payload); err != nil {
 			return fmt.Errorf("local bucket validation failed: %w", err)
 		}
 
-		c, err := syclient.New(serverURL)
+		c, err := cliauth.NewServerClient(cmd)
 		if err != nil {
 			return err
 		}
@@ -140,11 +136,7 @@ func bucketFromStoragePath(raw string) (string, error) {
 }
 
 func addBucketScope(cmd *cobra.Command, bucket string, req bucketapi.AddBucketScopeRequest, message string) error {
-	serverURL, err := cmd.Flags().GetString("server")
-	if err != nil {
-		return fmt.Errorf("get server flag: %w", err)
-	}
-	c, err := syclient.New(serverURL)
+	c, err := cliauth.NewServerClient(cmd)
 	if err != nil {
 		return err
 	}
@@ -159,11 +151,7 @@ var listCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List configured buckets",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		serverURL, err := cmd.Flags().GetString("server")
-		if err != nil {
-			return fmt.Errorf("get server flag: %w", err)
-		}
-		c, err := syclient.New(serverURL)
+		c, err := cliauth.NewServerClient(cmd)
 		if err != nil {
 			return err
 		}
@@ -181,6 +169,7 @@ var listCmd = &cobra.Command{
 			names = append(names, name)
 		}
 		sort.Strings(names)
+		fmt.Fprintf(cmd.OutOrStdout(), "%-20s  %-10s  %-12s  %-24s  %s\n", "BUCKET", "PROVIDER", "REGION", "PROGRAMS", "ENDPOINT")
 		for _, name := range names {
 			md := buckets[name]
 			provider := ""
@@ -195,13 +184,18 @@ var listCmd = &cobra.Command{
 			if md.Programs != nil {
 				programs = *md.Programs
 			}
+			endpoint := ""
+			if md.EndpointUrl != nil {
+				endpoint = *md.EndpointUrl
+			}
 			fmt.Fprintf(
 				cmd.OutOrStdout(),
-				"%s\tprovider=%s\tregion=%s\tprograms=%s\n",
+				"%-20s  %-10s  %-12s  %-24s  %s\n",
 				name,
 				strings.TrimSpace(provider),
 				strings.TrimSpace(region),
 				strings.Join(programs, ","),
+				strings.TrimSpace(endpoint),
 			)
 		}
 		return nil
@@ -218,11 +212,7 @@ var removeCmd = &cobra.Command{
 		if bucket == "" {
 			return fmt.Errorf("bucket is required")
 		}
-		serverURL, err := cmd.Flags().GetString("server")
-		if err != nil {
-			return fmt.Errorf("get server flag: %w", err)
-		}
-		c, err := syclient.New(serverURL)
+		c, err := cliauth.NewServerClient(cmd)
 		if err != nil {
 			return err
 		}

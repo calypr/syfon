@@ -11,6 +11,7 @@ import (
 	"time"
 
 	conf "github.com/calypr/syfon/client/config"
+	"github.com/calypr/syfon/cmd/cliauth"
 	"github.com/calypr/syfon/migrate"
 	"github.com/spf13/cobra"
 )
@@ -244,15 +245,7 @@ func migrationHTTPClient() *http.Client {
 }
 
 func targetServerURL(cmd *cobra.Command) (string, error) {
-	flag := cmd.Root().PersistentFlags().Lookup("server")
-	if flag == nil {
-		return "", fmt.Errorf("target --server flag not found")
-	}
-	target := strings.TrimRight(strings.TrimSpace(flag.Value.String()), "/")
-	if target == "" {
-		return "", fmt.Errorf("--server cannot be empty")
-	}
-	return target, nil
+	return cliauth.ResolveServerURL(cmd)
 }
 
 func authFromInputs(profile, token string) (migrate.AuthConfig, error) {

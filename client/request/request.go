@@ -230,7 +230,10 @@ func (r *Request) Do(ctx context.Context, method, path string, body, out any, op
 
 	// Apply auth via the shared transport so direct request calls and generated
 	// API clients behave the same way.
-	if token := rb.Token; token != "" {
+	if rb.SkipAuth {
+		// Leave auth handling to the transport so X-Skip-Auth can suppress both
+		// manual and transport-level auth injection for presigned URLs.
+	} else if token := rb.Token; token != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+token)
 	} else if r.Auth != nil {
 		r.Auth.apply(httpReq)

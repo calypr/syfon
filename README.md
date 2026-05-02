@@ -188,8 +188,15 @@ syfon server --config local.yaml
 
 Upload a file
 ```
-syfon upload --file README.md
+syfon upload --file README.md --org syfon --project e2e
 ```
+
+When `--did` is omitted, Syfon deterministically mints the object ID from the
+file's SHA256 plus the canonical project scope
+(`/organization/<org>/project/<project>`). Because of that, `--project` is
+required whenever `--did` is omitted. The same file uploaded into the same
+project gets the same DID across Syfon/Gen3 instances; the same file in a
+different project gets a different DID.
 
 List records
 ```
