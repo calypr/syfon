@@ -19,6 +19,21 @@ import (
 	"github.com/calypr/syfon/internal/crypto"
 )
 
+type providerServerConfig struct {
+	Port             int
+	DBPath           string
+	Bucket           string
+	Provider         string
+	Region           string
+	AccessKey        string
+	SecretKey        string
+	Endpoint         string
+	BillingLogBucket string
+	BillingLogPrefix string
+	Organization     string
+	ProjectID        string
+}
+
 type bucketCommandConfig struct {
 	Bucket       string
 	Provider     string
@@ -115,6 +130,58 @@ func writeProviderConfig(t *testing.T, content string) string {
 		t.Fatalf("write provider config: %v", err)
 	}
 	return configPath
+}
+
+func writeScopedProviderConfig(t *testing.T, cfg providerServerConfig) string {
+	t.Helper()
+
+	content := fmt.Sprintf(`port: %d
+auth:
+  mode: local
+  basic:
+    username: %q
+    password: %q
+routes:
+  ga4gh: true
+  internal: true
+database:
+  sqlite:
+    file: %q
+s3_credentials:
+  - bucket: %q
+    provider: %q
+`, cfg.Port, dockerE2EBasicUser, dockerE2EBasicPass, cfg.DBPath, cfg.Bucket, cfg.Provider)
+
+	if strings.TrimSpace(cfg.Region) != "" {
+		content += fmt.Sprintf("    region: %q\n", cfg.Region)
+	}
+	if strings.TrimSpace(cfg.AccessKey) != "" {
+		content += fmt.Sprintf("    access_key: %q\n", cfg.AccessKey)
+	}
+	if strings.TrimSpace(cfg.SecretKey) != "" {
+		content += fmt.Sprintf("    secret_key: %q\n", cfg.SecretKey)
+	}
+	if strings.TrimSpace(cfg.Endpoint) != "" {
+		content += fmt.Sprintf("    endpoint: %q\n", cfg.Endpoint)
+	}
+	if strings.TrimSpace(cfg.BillingLogBucket) != "" {
+		content += fmt.Sprintf("    billing_log_bucket: %q\n", cfg.BillingLogBucket)
+	}
+	if strings.TrimSpace(cfg.BillingLogPrefix) != "" {
+		content += fmt.Sprintf("    billing_log_prefix: %q\n", cfg.BillingLogPrefix)
+	}
+	if strings.TrimSpace(cfg.Organization) != "" || strings.TrimSpace(cfg.ProjectID) != "" {
+		content += "bucket_scopes:\n"
+		content += fmt.Sprintf("  - bucket: %q\n", cfg.Bucket)
+		if strings.TrimSpace(cfg.Organization) != "" {
+			content += fmt.Sprintf("    organization: %q\n", cfg.Organization)
+		}
+		if strings.TrimSpace(cfg.ProjectID) != "" {
+			content += fmt.Sprintf("    project_id: %q\n", cfg.ProjectID)
+		}
+	}
+
+	return writeProviderConfig(t, content)
 }
 
 func exerciseAllClientCommands(t *testing.T, serverURL string, bucketCfg bucketCommandConfig) {

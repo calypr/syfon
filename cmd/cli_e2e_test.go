@@ -327,6 +327,13 @@ func newSyfonTestServer(t *testing.T) *fiberTestServer {
 	}); err != nil {
 		t.Fatalf("save test credential: %v", err)
 	}
+	if err := database.CreateBucketScope(context.Background(), &models.BucketScope{
+		Organization: "syfon",
+		ProjectID:    "e2e",
+		Bucket:       "syfon-bucket",
+	}); err != nil {
+		t.Fatalf("save test bucket scope: %v", err)
+	}
 
 	uM := urlmanager.NewManager(database, config.SigningConfig{DefaultExpirySeconds: 900})
 	fSigner, _ := file.NewFileSigner(storageDir)

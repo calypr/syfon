@@ -383,34 +383,20 @@ func waitForServerReady(baseURL string, waitErrCh <-chan error, timeout time.Dur
 func writeSyfonDockerConfig(t *testing.T, port int, dbPath string, minioEnv *minioContainer) string {
 	t.Helper()
 
-	configPath := filepath.Join(t.TempDir(), "config.yaml")
-	content := fmt.Sprintf(`port: %d
-auth:
-  mode: local
-  basic:
-    username: %q
-    password: %q
-routes:
-  ga4gh: true
-  internal: true
-database:
-  sqlite:
-    file: %q
-s3_credentials:
-  - bucket: %q
-    provider: %q
-    region: %q
-    access_key: %q
-    secret_key: %q
-    endpoint: %q
-    billing_log_bucket: %q
-    billing_log_prefix: %q
-`, port, dockerE2EBasicUser, dockerE2EBasicPass, dbPath, minioEnv.bucket, "s3", minioEnv.region, minioEnv.accessKey, minioEnv.secretKey, minioEnv.endpoint, minioEnv.bucket, ".syfon/provider-transfer-events")
-
-	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
-		t.Fatalf("write config file: %v", err)
-	}
-	return configPath
+	return writeScopedProviderConfig(t, providerServerConfig{
+		Port:             port,
+		DBPath:           dbPath,
+		Bucket:           minioEnv.bucket,
+		Provider:         "s3",
+		Region:           minioEnv.region,
+		AccessKey:        minioEnv.accessKey,
+		SecretKey:        minioEnv.secretKey,
+		Endpoint:         minioEnv.endpoint,
+		BillingLogBucket: minioEnv.bucket,
+		BillingLogPrefix: ".syfon/provider-transfer-events",
+		Organization:     "syfon",
+		ProjectID:        "e2e",
+	})
 }
 
 func buildSyfonBinary(t *testing.T, rootDir string) string {
