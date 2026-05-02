@@ -2,8 +2,11 @@ package azure
 
 import (
 	"encoding/base64"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/sas"
 )
 
@@ -57,5 +60,20 @@ func TestAzureMultipartHelpers(t *testing.T) {
 	}
 	if got := string(raw); got != "upload-abc:00000042" {
 		t.Fatalf("unexpected block ID payload: %s", got)
+	}
+}
+
+func TestAzureSignedURL_UsesDownloadFilenameOverride(t *testing.T) {
+	s := &AzureSigner{}
+	sharedKey, err := azblob.NewSharedKeyCredential("acct", "dGVzdA==")
+	if err != nil {
+		t.Fatalf("create shared key: %v", err)
+	}
+	signed, err := s.azureSignedURL("https://acct.blob.db.windows.net", "bucket", "nested/object.txt", "GET", 5*time.Minute, "", "nested/report final.txt", sharedKey)
+	if err != nil {
+		t.Fatalf("azureSignedURL returned error: %v", err)
+	}
+	if !strings.Contains(signed, "rscd=") || !strings.Contains(signed, "report") {
+		t.Fatalf("expected content disposition override in sas url: %s", signed)
 	}
 }

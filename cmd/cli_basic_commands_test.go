@@ -77,8 +77,9 @@ func TestSyfonDownloadDefaultsToRecordFilename(t *testing.T) {
 		t.Fatal(err)
 	}
 	did := "22222222-2222-2222-2222-222222222222"
+	recordName := "nested/path/README.md"
 	// Store record with explicit filename and a storage-root URL so download can resolve locally.
-	if err := c.Index().Upsert(context.Background(), did, "s3://syfon-bucket/source.txt", "README.md", int64(len(srcData)), "", map[string][]string{"syfon": {"e2e"}}); err != nil {
+	if err := c.Index().Upsert(context.Background(), did, "s3://syfon-bucket/source.txt", recordName, int64(len(srcData)), "", map[string][]string{"syfon": {"e2e"}}); err != nil {
 		t.Fatalf("seed record with file url: %v", err)
 	}
 
@@ -97,6 +98,9 @@ func TestSyfonDownloadDefaultsToRecordFilename(t *testing.T) {
 	}
 	if string(got) != string(srcData) {
 		t.Fatalf("downloaded data mismatch")
+	}
+	if _, err := os.Stat(filepath.Join(tmp, "nested")); !os.IsNotExist(err) {
+		t.Fatalf("expected nested path prefix to be ignored, stat err=%v", err)
 	}
 }
 

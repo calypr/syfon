@@ -14,6 +14,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 
+	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/db"
 	"github.com/calypr/syfon/internal/signer"
 )
@@ -65,8 +66,9 @@ func (s *S3Signer) SignURL(ctx context.Context, bucket, key string, opts signer.
 	}
 
 	req, err := clients.presigner.PresignGetObject(ctx, &s3.GetObjectInput{
-		Bucket: aws.String(bucket),
-		Key:    aws.String(key),
+		Bucket:                     aws.String(bucket),
+		Key:                        aws.String(key),
+		ResponseContentDisposition: responseContentDisposition(opts.DownloadFilename),
 	}, func(o *s3.PresignOptions) {
 		o.Expires = expiry
 	})
@@ -89,9 +91,10 @@ func (s *S3Signer) SignDownloadPart(ctx context.Context, bucket, key string, sta
 
 	rangeStr := fmt.Sprintf("bytes=%d-%d", start, end)
 	req, err := clients.presigner.PresignGetObject(ctx, &s3.GetObjectInput{
-		Bucket: aws.String(bucket),
-		Key:    aws.String(key),
-		Range:  aws.String(rangeStr),
+		Bucket:                     aws.String(bucket),
+		Key:                        aws.String(key),
+		Range:                      aws.String(rangeStr),
+		ResponseContentDisposition: responseContentDisposition(opts.DownloadFilename),
 	}, func(o *s3.PresignOptions) {
 		o.Expires = expiry
 	})
@@ -99,6 +102,14 @@ func (s *S3Signer) SignDownloadPart(ctx context.Context, bucket, key string, sta
 		return "", err
 	}
 	return req.URL, nil
+}
+
+func responseContentDisposition(name string) *string {
+	disposition := common.ContentDispositionAttachment(name)
+	if disposition == "" {
+		return nil
+	}
+	return aws.String(disposition)
 }
 
 func (s *S3Signer) InitMultipartUpload(ctx context.Context, bucket, key string) (string, error) {

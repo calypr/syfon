@@ -63,7 +63,9 @@ func TestUniqueAuthzAndConverters(t *testing.T) {
 		url := "https://storage.example/object.bin"
 		size := int64(42)
 		authz := []string{"/programs/syfon/projects/e2e"}
+		lfsID := "lfs-explicit-id"
 		candidate := lfsapi.DrsObjectCandidate{
+			Id:   strPtr(lfsID),
 			Name: strPtr("object.bin"),
 			Size: &size,
 			Checksums: &[]lfsapi.Checksum{{
@@ -86,6 +88,26 @@ func TestUniqueAuthzAndConverters(t *testing.T) {
 		}
 		if (*got.AccessMethods)[0].Authorizations != nil {
 			t.Fatalf("did not expect authz map on access method, got %+v", (*got.AccessMethods)[0].Authorizations)
+		}
+		if got.Aliases == nil || len(*got.Aliases) == 0 || (*got.Aliases)[0] != "id:"+lfsID {
+			t.Fatalf("expected explicit lfs id alias, got %+v", got.Aliases)
+		}
+	})
+
+	t.Run("lfs candidate to drs defaults id alias to sha256 oid", func(t *testing.T) {
+		size := int64(42)
+		oid := strings.Repeat("b", 64)
+		candidate := lfsapi.DrsObjectCandidate{
+			Name: strPtr("object.bin"),
+			Size: &size,
+			Checksums: &[]lfsapi.Checksum{{
+				Type: "sha256", Checksum: oid,
+			}},
+		}
+
+		got := LFSCandidateToDRS(candidate)
+		if got.Aliases == nil || len(*got.Aliases) == 0 || (*got.Aliases)[0] != "id:"+oid {
+			t.Fatalf("expected oid-derived id alias, got %+v", got.Aliases)
 		}
 	})
 }

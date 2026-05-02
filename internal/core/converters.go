@@ -50,12 +50,25 @@ func UniqueAuthz(accessMethods []drs.AccessMethod) map[string][]string {
 
 // LFSCandidateToDRS converts an LFS-specific candidate to a DRS-generic one.
 func LFSCandidateToDRS(in lfsapi.DrsObjectCandidate) drs.DrsObjectCandidate {
+	aliases := append([]string(nil), common.DerefStringSlice(in.Aliases)...)
+	explicitID := strings.TrimSpace(common.DerefString(in.Id))
 	var checksums []drs.Checksum
 	if in.Checksums != nil {
 		checksums = make([]drs.Checksum, len(*in.Checksums))
 		for i, c := range *in.Checksums {
 			checksums[i] = drs.Checksum{Type: c.Type, Checksum: c.Checksum}
 		}
+		if explicitID == "" {
+			for _, c := range checksums {
+				if strings.EqualFold(strings.TrimSpace(c.Type), "sha256") {
+					explicitID = syfoncommon.NormalizeOid(c.Checksum)
+					break
+				}
+			}
+		}
+	}
+	if explicitID != "" {
+		aliases = append([]string{"id:" + explicitID}, aliases...)
 	}
 
 	var ams *[]drs.AccessMethod
@@ -90,7 +103,7 @@ func LFSCandidateToDRS(in lfsapi.DrsObjectCandidate) drs.DrsObjectCandidate {
 		Size:          *in.Size,
 		MimeType:      in.MimeType,
 		Description:   in.Description,
-		Aliases:       in.Aliases,
+		Aliases:       common.Ptr(aliases),
 		Checksums:     checksums,
 		AccessMethods: ams,
 	}

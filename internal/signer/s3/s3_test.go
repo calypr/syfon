@@ -4,9 +4,18 @@ import (
 	"context"
 	"testing"
 
+	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/testutils"
 )
+
+func TestResponseContentDisposition(t *testing.T) {
+	got := responseContentDisposition("nested/README final.md")
+	want := common.ContentDispositionAttachment("nested/README final.md")
+	if got == nil || *got != want {
+		t.Fatalf("unexpected response content disposition: got %v want %q", got, want)
+	}
+}
 
 func TestS3Signer_getClients(t *testing.T) {
 	db := &testutils.MockDatabase{

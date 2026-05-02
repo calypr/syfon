@@ -13,7 +13,7 @@ import (
 func TestGCSEndpointObjectURL(t *testing.T) {
 	cred := &models.S3Credential{Endpoint: "http://localhost:4443"}
 
-	uploadURL, ok := gcsEndpointObjectURL(cred, "test-bucket", "path/to/file.txt", http.MethodPut)
+	uploadURL, ok := gcsEndpointObjectURL(cred, "test-bucket", "path/to/file.txt", http.MethodPut, "")
 	if !ok {
 		t.Fatal("expected upload endpoint URL")
 	}
@@ -31,7 +31,7 @@ func TestGCSEndpointObjectURL(t *testing.T) {
 		t.Fatalf("expected upload name to preserve object key, got %q", got)
 	}
 
-	downloadURL, ok := gcsEndpointObjectURL(cred, "test-bucket", "path/to/file.txt", http.MethodGet)
+	downloadURL, ok := gcsEndpointObjectURL(cred, "test-bucket", "path/to/file.txt", http.MethodGet, "nested/pretty-name.txt")
 	if !ok {
 		t.Fatal("expected download endpoint URL")
 	}
@@ -45,10 +45,13 @@ func TestGCSEndpointObjectURL(t *testing.T) {
 	if got := dl.Query().Get("alt"); got != "media" {
 		t.Fatalf("expected alt=media, got %q", got)
 	}
+	if got := dl.Query().Get("response-content-disposition"); !strings.Contains(got, `pretty-name.txt`) {
+		t.Fatalf("expected response-content-disposition override, got %q", got)
+	}
 }
 
 func TestGCSEndpointObjectURL_RequiresEndpoint(t *testing.T) {
-	if _, ok := gcsEndpointObjectURL(&models.S3Credential{}, "bucket", "obj", http.MethodGet); ok {
+	if _, ok := gcsEndpointObjectURL(&models.S3Credential{}, "bucket", "obj", http.MethodGet, ""); ok {
 		t.Fatal("expected false when endpoint is missing")
 	}
 }
@@ -56,7 +59,7 @@ func TestGCSEndpointObjectURL_RequiresEndpoint(t *testing.T) {
 func TestGCSSignedURL_UsesEndpointWithoutServiceAccountKey(t *testing.T) {
 	cred := &models.S3Credential{Endpoint: "http://localhost:4443"}
 	s := &GCSSigner{}
-	signed, err := s.gcsSignedURL("test-bucket", "nested/file.txt", http.MethodGet, 5*time.Minute, "", cred)
+	signed, err := s.gcsSignedURL("test-bucket", "nested/file.txt", http.MethodGet, 5*time.Minute, "", "nested/report.txt", cred)
 	if err != nil {
 		t.Fatalf("gcsSignedURL returned error: %v", err)
 	}
@@ -65,5 +68,8 @@ func TestGCSSignedURL_UsesEndpointWithoutServiceAccountKey(t *testing.T) {
 	}
 	if !strings.Contains(signed, "alt=media") {
 		t.Fatalf("expected media download query in signed endpoint url: %s", signed)
+	}
+	if !strings.Contains(signed, "response-content-disposition=") || !strings.Contains(signed, "report.txt") {
+		t.Fatalf("expected download filename override in signed endpoint url: %s", signed)
 	}
 }

@@ -1,6 +1,7 @@
 package internaldrs
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -13,13 +14,27 @@ import (
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/testutils"
+	"github.com/calypr/syfon/internal/urlmanager"
 )
+
+type captureURLManager struct {
+	testutils.MockUrlManager
+	lastOptions urlmanager.SignOptions
+}
+
+func stringPtr(s string) *string { return &s }
+
+func (m *captureURLManager) SignURL(ctx context.Context, accessId string, url string, opts urlmanager.SignOptions) (string, error) {
+	m.lastOptions = opts
+	return m.MockUrlManager.SignURL(ctx, accessId, url, opts)
+}
 
 func TestHandleInternalDownload(t *testing.T) {
 	mockDB := &testutils.MockDatabase{
 		Objects: map[string]*drs.DrsObject{
 			"test-file-id": {
-				Id: "test-file-id",
+				Id:   "test-file-id",
+				Name: stringPtr("sha/LP6008050-DNA_B01__pv.2.0o__rg.grch38__alleleFrequencies_chr17.txt"),
 				AccessMethods: &[]drs.AccessMethod{{
 					Type: drs.AccessMethodTypeS3,
 					AccessUrl: &struct {
@@ -31,7 +46,8 @@ func TestHandleInternalDownload(t *testing.T) {
 		},
 	}
 	req := routeutil.WithPathParams(httptest.NewRequest(http.MethodGet, "/data/download/test-file-id", nil), map[string]string{"file_id": "test-file-id"})
-	om := core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
+	um := &captureURLManager{}
+	om := core.NewObjectManager(mockDB, um)
 	rr := doInternalDRSTestRequest(req, om)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rr.Code)
@@ -42,6 +58,9 @@ func TestHandleInternalDownload(t *testing.T) {
 	}
 	if !strings.Contains(common.StringVal(resp.Url), "signed=true") {
 		t.Fatalf("expected signed url, got %v", common.StringVal(resp.Url))
+	}
+	if got, want := um.lastOptions.DownloadFilename, "LP6008050-DNA_B01__pv.2.0o__rg.grch38__alleleFrequencies_chr17.txt"; got != want {
+		t.Fatalf("unexpected download filename override: got %q want %q", got, want)
 	}
 	if len(mockDB.TransferEvents) != 1 {
 		t.Fatalf("expected one event, got %+v", mockDB.TransferEvents)

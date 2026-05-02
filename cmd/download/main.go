@@ -14,6 +14,7 @@ import (
 	"github.com/calypr/syfon/client/request"
 	syfonclient "github.com/calypr/syfon/client/services"
 	"github.com/calypr/syfon/cmd/cliauth"
+	"github.com/calypr/syfon/internal/common"
 	"github.com/spf13/cobra"
 )
 
@@ -43,7 +44,9 @@ var Cmd = &cobra.Command{
 			}
 			name := did
 			if rec.FileName != nil {
-				name = strings.TrimSpace(*rec.FileName)
+				if pretty := common.DownloadFilename(*rec.FileName); pretty != "" {
+					name = pretty
+				}
 			}
 			outPath = name
 		}

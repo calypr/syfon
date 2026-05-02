@@ -97,12 +97,13 @@ func LFSCandidateToDRS(in lfsapi.DrsObjectCandidate) drs.DrsObjectCandidate {
 	if in.Size != nil {
 		size = *in.Size
 	}
+	aliases := append([]string(nil), common.DerefStringSlice(in.Aliases)...)
+	explicitID := strings.TrimSpace(common.DerefString(in.Id))
 	out := drs.DrsObjectCandidate{
 		Name:        in.Name,
 		Size:        size,
 		MimeType:    in.MimeType,
 		Description: in.Description,
-		Aliases:     in.Aliases,
 	}
 	if in.Checksums != nil {
 		out.Checksums = make([]drs.Checksum, 0, len(*in.Checksums))
@@ -112,7 +113,19 @@ func LFSCandidateToDRS(in lfsapi.DrsObjectCandidate) drs.DrsObjectCandidate {
 				Checksum: c.Checksum,
 			})
 		}
+		if explicitID == "" {
+			for _, c := range out.Checksums {
+				if strings.EqualFold(strings.TrimSpace(c.Type), "sha256") {
+					explicitID = syfoncommon.NormalizeOid(c.Checksum)
+					break
+				}
+			}
+		}
 	}
+	if explicitID != "" {
+		aliases = append([]string{"id:" + explicitID}, aliases...)
+	}
+	out.Aliases = common.Ptr(aliases)
 	if in.AccessMethods != nil {
 		ams := make([]drs.AccessMethod, 0, len(*in.AccessMethods))
 		for _, am := range *in.AccessMethods {
