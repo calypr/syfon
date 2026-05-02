@@ -60,6 +60,9 @@ func TestSyfonDockerFakeGCSE2E(t *testing.T) {
 	configPath := writeProviderConfig(t, fmt.Sprintf(`port: %d
 auth:
   mode: local
+  basic:
+    username: %q
+    password: %q
 routes:
   ga4gh: true
   internal: true
@@ -72,7 +75,7 @@ s3_credentials:
     endpoint: %q
     billing_log_bucket: %q
     billing_log_prefix: %q
-`, port, dbPath, fakeGCS.bucket, "gcs", fakeGCS.endpoint, fakeGCS.bucket, ".syfon/provider-transfer-events"))
+`, port, dockerE2EBasicUser, dockerE2EBasicPass, dbPath, fakeGCS.bucket, "gcs", fakeGCS.endpoint, fakeGCS.bucket, ".syfon/provider-transfer-events"))
 
 	server := startSyfonServerProcessWithConfigPath(t, configPath, map[string]string{
 		"STORAGE_EMULATOR_HOST": strings.TrimPrefix(strings.TrimPrefix(fakeGCS.endpoint, "http://"), "https://"),

@@ -36,7 +36,8 @@ func startSyfonServerProcessWithConfigPath(t *testing.T, configPath string, extr
 	rootDir := findRepoRoot(t)
 	binaryPath := buildSyfonBinary(t, rootDir)
 	serverPort := extractPortFromConfig(t, configPath)
-	serverURL := fmt.Sprintf("http://127.0.0.1:%d", serverPort)
+	serverURL := fmt.Sprintf("http://%s:%s@127.0.0.1:%d", dockerE2EBasicUser, dockerE2EBasicPass, serverPort)
+	readyURL := fmt.Sprintf("http://127.0.0.1:%d", serverPort)
 
 	cmd := exec.Command(binaryPath, "serve", "--config", configPath)
 	cmd.Dir = rootDir
@@ -70,8 +71,8 @@ func startSyfonServerProcessWithConfigPath(t *testing.T, configPath string, extr
 		waitErrCh <- cmd.Wait()
 	}()
 
-	if err := waitForServerReady(serverURL, waitErrCh, dockerE2EServerReadyWait); err != nil {
-		logServerProcessOutput(t, serverURL, stdoutBuf, stderrBuf)
+	if err := waitForServerReady(readyURL, waitErrCh, dockerE2EServerReadyWait); err != nil {
+		logServerProcessOutput(t, readyURL, stdoutBuf, stderrBuf)
 		stopSyfonServerProcess(t, &syfonServerProcess{cmd: cmd, waitErrCh: waitErrCh, stdout: stdoutBuf, stderr: stderrBuf})
 		t.Fatalf("wait for server ready: %v", err)
 	}

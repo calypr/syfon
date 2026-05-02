@@ -60,6 +60,9 @@ func TestSyfonDockerAzuriteE2E(t *testing.T) {
 	configPath := writeProviderConfig(t, fmt.Sprintf(`port: %d
 auth:
   mode: local
+  basic:
+    username: %q
+    password: %q
 routes:
   ga4gh: true
   internal: true
@@ -74,7 +77,7 @@ s3_credentials:
     endpoint: %q
     billing_log_bucket: %q
     billing_log_prefix: %q
-`, port, dbPath, azurite.bucket, "azure", dockerE2EAzureAccountName, dockerE2EAzureAccountKey, azurite.serviceURL, azurite.bucket, ".syfon/provider-transfer-events"))
+`, port, dockerE2EBasicUser, dockerE2EBasicPass, dbPath, azurite.bucket, "azure", dockerE2EAzureAccountName, dockerE2EAzureAccountKey, azurite.serviceURL, azurite.bucket, ".syfon/provider-transfer-events"))
 
 	server := startSyfonServerProcessWithConfigPath(t, configPath, map[string]string{
 		"AZURE_STORAGE_ACCOUNT":           dockerE2EAzureAccountName,

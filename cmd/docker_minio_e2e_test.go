@@ -36,6 +36,8 @@ const (
 	dockerE2EMinioSecretKey  = "minioadmin123"
 	dockerE2ECredentialKey   = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
 	dockerE2EServerReadyWait = 20 * time.Second
+	dockerE2EBasicUser       = "drs-user"
+	dockerE2EBasicPass       = "drs-pass"
 )
 
 type minioContainer struct {
@@ -253,7 +255,8 @@ func startSyfonServerProcess(t *testing.T, minioEnv *minioContainer) *syfonServe
 	port := reserveTCPPort(t)
 	dbPath := filepath.Join(t.TempDir(), "docker-minio-e2e.db")
 	configPath := writeSyfonDockerConfig(t, port, dbPath, minioEnv)
-	serverURL := fmt.Sprintf("http://127.0.0.1:%d", port)
+	serverURL := fmt.Sprintf("http://%s:%s@127.0.0.1:%d", dockerE2EBasicUser, dockerE2EBasicPass, port)
+	readyURL := fmt.Sprintf("http://127.0.0.1:%d", port)
 
 	cmd := exec.Command(binaryPath, "serve", "--config", configPath)
 	cmd.Dir = rootDir
@@ -285,8 +288,8 @@ func startSyfonServerProcess(t *testing.T, minioEnv *minioContainer) *syfonServe
 		waitErrCh <- cmd.Wait()
 	}()
 
-	if err := waitForServerReady(serverURL, waitErrCh, dockerE2EServerReadyWait); err != nil {
-		logServerProcessOutput(t, serverURL, stdoutBuf, stderrBuf)
+	if err := waitForServerReady(readyURL, waitErrCh, dockerE2EServerReadyWait); err != nil {
+		logServerProcessOutput(t, readyURL, stdoutBuf, stderrBuf)
 		stopSyfonServerProcess(t, &syfonServerProcess{cmd: cmd, waitErrCh: waitErrCh, stdout: stdoutBuf, stderr: stderrBuf})
 		t.Fatalf("wait for server ready: %v", err)
 	}
@@ -384,6 +387,9 @@ func writeSyfonDockerConfig(t *testing.T, port int, dbPath string, minioEnv *min
 	content := fmt.Sprintf(`port: %d
 auth:
   mode: local
+  basic:
+    username: %q
+    password: %q
 routes:
   ga4gh: true
   internal: true
@@ -399,7 +405,7 @@ s3_credentials:
     endpoint: %q
     billing_log_bucket: %q
     billing_log_prefix: %q
-`, port, dbPath, minioEnv.bucket, "s3", minioEnv.region, minioEnv.accessKey, minioEnv.secretKey, minioEnv.endpoint, minioEnv.bucket, ".syfon/provider-transfer-events")
+`, port, dockerE2EBasicUser, dockerE2EBasicPass, dbPath, minioEnv.bucket, "s3", minioEnv.region, minioEnv.accessKey, minioEnv.secretKey, minioEnv.endpoint, minioEnv.bucket, ".syfon/provider-transfer-events")
 
 	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
 		t.Fatalf("write config file: %v", err)
