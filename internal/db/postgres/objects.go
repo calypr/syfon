@@ -510,16 +510,16 @@ func (db *PostgresDB) ListObjectIDsByScope(ctx context.Context, organization, pr
 			WHERE ca.resource = $1
 			ORDER BY ca.object_id`, resource)
 	} else {
-		resource, err := sycommon.ResourcePath(organization, "")
-		if err != nil {
-			return nil, err
+		scopeCondition, scopeArgs, scopeErr := postgresScopeResourceCondition("ca.resource", organization, "")
+		if scopeErr != nil {
+			return nil, scopeErr
 		}
 		rows, err = db.db.QueryContext(ctx, `
-			SELECT DISTINCT ca.object_id
-			FROM drs_object_controlled_access ca
-			INNER JOIN drs_object o ON o.id = ca.object_id
-			WHERE ca.resource = $1
-			ORDER BY ca.object_id`, resource)
+				SELECT DISTINCT ca.object_id
+				FROM drs_object_controlled_access ca
+				INNER JOIN drs_object o ON o.id = ca.object_id
+				WHERE `+postgresRebindQuestionPlaceholders(scopeCondition, 1)+`
+				ORDER BY ca.object_id`, scopeArgs...)
 	}
 	if err != nil {
 		return nil, err
@@ -558,18 +558,18 @@ func (db *PostgresDB) ListObjectIDsPageByScope(ctx context.Context, organization
 	objectIDExpr := "id"
 
 	if organization != "" {
-		resource, err := sycommon.ResourcePath(organization, project)
+		scopeCondition, scopeArgs, err := postgresScopeResourceCondition("ca.resource", organization, project)
 		if err != nil {
 			return nil, err
 		}
-		queryArgs = append(queryArgs, resource)
+		queryArgs = append(queryArgs, scopeArgs...)
 		baseQuery = `
 			SELECT DISTINCT ca.object_id AS id
 			FROM drs_object_controlled_access ca
 			INNER JOIN drs_object o ON o.id = ca.object_id
 		`
 		objectIDExpr = "ca.object_id"
-		conditions = append(conditions, fmt.Sprintf("ca.resource = $%d", len(queryArgs)))
+		conditions = append(conditions, postgresRebindQuestionPlaceholders(scopeCondition, len(queryArgs)-len(scopeArgs)+1))
 		orderBy = ` ORDER BY ca.object_id`
 	}
 	if startAfter != "" {
@@ -712,16 +712,16 @@ func (db *PostgresDB) ListObjectIDsPageByChecksum(ctx context.Context, checksum,
 		)`, len(args)))
 	}
 	if organization != "" {
-		resource, err := sycommon.ResourcePath(organization, project)
+		scopeCondition, scopeArgs, err := postgresScopeResourceCondition("ca_scope.resource", organization, project)
 		if err != nil {
 			return nil, err
 		}
-		args = append(args, resource)
+		args = append(args, scopeArgs...)
 		conditions = append(conditions, fmt.Sprintf(`EXISTS (
 			SELECT 1
 			FROM drs_object_controlled_access ca_scope
-			WHERE ca_scope.object_id = o.id AND ca_scope.resource = $%d
-		)`, len(args)))
+			WHERE ca_scope.object_id = o.id AND %s
+		)`, postgresRebindQuestionPlaceholders(scopeCondition, len(args)-len(scopeArgs)+1)))
 	}
 	if restrictToResources {
 		resources = sycommon.NormalizeAccessResources(resources)
@@ -778,19 +778,19 @@ func (db *PostgresDB) ListObjectIDsByScopeAndResources(ctx context.Context, orga
 		return db.ListObjectIDsByResources(ctx, resources, false)
 	}
 
-	scopeResource, err := sycommon.ResourcePath(organization, project)
+	scopeCondition, scopeArgs, err := postgresScopeResourceCondition("ca_scope.resource", organization, project)
 	if err != nil {
 		return nil, err
 	}
 	args := make([]any, 0, 3)
-	args = append(args, scopeResource)
+	args = append(args, scopeArgs...)
 	query := `
 		SELECT DISTINCT o.id
 		FROM drs_object o
 		WHERE EXISTS (
 			SELECT 1
 			FROM drs_object_controlled_access ca_scope
-			WHERE ca_scope.object_id = o.id AND ca_scope.resource = $1
+			WHERE ca_scope.object_id = o.id AND ` + postgresRebindQuestionPlaceholders(scopeCondition, 1) + `
 		)`
 	if restrictToResources {
 		resources = sycommon.NormalizeAccessResources(resources)
@@ -937,6 +937,36 @@ func (db *PostgresDB) BulkDeleteObjects(ctx context.Context, ids []string) error
 		return err
 	}
 	return tx.Commit()
+}
+
+func postgresScopeResourceCondition(column, organization, project string) (string, []any, error) {
+	resource, err := sycommon.ResourcePath(organization, project)
+	if err != nil {
+		return "", nil, err
+	}
+	if strings.TrimSpace(project) != "" {
+		return column + " = ?", []any{resource}, nil
+	}
+	return "(" + column + " = ? OR " + column + " LIKE ? ESCAPE '\\')", []any{resource, postgresLikeEscape(resource+"/project/") + "%"}, nil
+}
+
+func postgresLikeEscape(value string) string {
+	replacer := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	return replacer.Replace(value)
+}
+
+func postgresRebindQuestionPlaceholders(query string, start int) string {
+	var b strings.Builder
+	next := start
+	for _, r := range query {
+		if r == '?' {
+			b.WriteString(fmt.Sprintf("$%d", next))
+			next++
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }
 
 func scanObjectIDs(rows *sql.Rows) ([]string, error) {

@@ -54,6 +54,9 @@ make test-unit
 port: 8080
 auth:
   mode: local
+  basic:
+    username: "drs-user"
+    password: "drs-pass"
 database:
   sqlite:
     file: "drs_local.db"

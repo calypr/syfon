@@ -18,6 +18,8 @@ func TestLoadConfig_NoDatabaseError(t *testing.T) {
 func TestLoadConfig_MinimalValid(t *testing.T) {
 	t.Setenv("DRS_DB_SQLITE_FILE", "drs.db")
 	t.Setenv("DRS_AUTH_MODE", "local")
+	t.Setenv("DRS_BASIC_AUTH_USER", "drs-user")
+	t.Setenv("DRS_BASIC_AUTH_PASSWORD", "drs-pass")
 
 	cfg, err := LoadConfig("")
 	if err != nil {
@@ -40,8 +42,8 @@ func TestLoadConfig_MinimalValid(t *testing.T) {
 	if cfg.LFS.RequestLimitPerMinute != DefaultLFSRequestLimitPerMinute {
 		t.Fatalf("expected default lfs.request_limit_per_minute=%d, got %d", DefaultLFSRequestLimitPerMinute, cfg.LFS.RequestLimitPerMinute)
 	}
-	if cfg.Routes != (RoutesConfig{}) {
-		t.Fatalf("expected route modules to default to disabled, got %+v", cfg.Routes)
+	if !cfg.Routes.Ga4gh || !cfg.Routes.Internal || !cfg.Routes.LFS || !cfg.Routes.Metrics || !cfg.Routes.Docs {
+		t.Fatalf("expected route modules to default enabled, got %+v", cfg.Routes)
 	}
 }
 
@@ -49,6 +51,8 @@ func TestLoadConfig_EnvOverrides(t *testing.T) {
 	t.Setenv("DRS_PORT", "9090")
 	t.Setenv("DRS_DB_SQLITE_FILE", "test_env.db")
 	t.Setenv("DRS_AUTH_MODE", "local")
+	t.Setenv("DRS_BASIC_AUTH_USER", "drs-user")
+	t.Setenv("DRS_BASIC_AUTH_PASSWORD", "drs-pass")
 	t.Setenv("DRS_CREDENTIAL_LOCAL_KEY_FILE", "/tmp/test-env-kek")
 
 	cfg, err := LoadConfig("")
@@ -72,6 +76,9 @@ func TestLoadConfig_CredentialEncryptionConfig(t *testing.T) {
 	content := `
 auth:
   mode: local
+  basic:
+    username: "drs-user"
+    password: "drs-pass"
 database:
   sqlite:
     file: "test.db"
@@ -126,6 +133,9 @@ func TestLoadConfig_BillingLogsEnabledDefaultsTrue(t *testing.T) {
 	content := `
 auth:
   mode: local
+  basic:
+    username: "drs-user"
+    password: "drs-pass"
 database:
   sqlite:
     file: "test.db"
@@ -161,6 +171,9 @@ func TestLoadConfig_BillingLogsCanBeDisabledForS3Compatible(t *testing.T) {
 	content := `
 auth:
   mode: local
+  basic:
+    username: "drs-user"
+    password: "drs-pass"
 database:
   sqlite:
     file: "test.db"
@@ -232,6 +245,7 @@ func TestLoadConfig_BucketScopes(t *testing.T) {
 	content := `
 auth:
   mode: local
+  allow_unauthenticated: true
 database:
   sqlite:
     file: "test.db"
@@ -283,6 +297,7 @@ func TestLoadConfig_BucketScopePathBucketMismatch(t *testing.T) {
 	content := `
 auth:
   mode: local
+  allow_unauthenticated: true
 database:
   sqlite:
     file: "test.db"
@@ -317,6 +332,7 @@ func TestLoadConfig_BucketScopeRejectsPathLikeOrganization(t *testing.T) {
 	content := `
 auth:
   mode: local
+  allow_unauthenticated: true
 database:
   sqlite:
     file: "test.db"
@@ -434,6 +450,7 @@ func TestLoadConfig_InvalidDBPortEnv(t *testing.T) {
 func TestLoadConfig_LFSEnvOverrides(t *testing.T) {
 	t.Setenv("DRS_DB_SQLITE_FILE", "drs.db")
 	t.Setenv("DRS_AUTH_MODE", "local")
+	t.Setenv("DRS_ALLOW_UNAUTHENTICATED_LOCAL", "true")
 	t.Setenv("DRS_LFS_MAX_BATCH_OBJECTS", "200")
 	t.Setenv("DRS_LFS_MAX_BATCH_BODY_BYTES", "123456")
 	t.Setenv("DRS_LFS_REQUEST_LIMIT_PER_MINUTE", "33")
@@ -478,6 +495,7 @@ func TestLoadConfig_InvalidBucketNames(t *testing.T) {
 			content := fmt.Sprintf(`
 auth:
   mode: local
+  allow_unauthenticated: true
 database:
   sqlite:
     file: "test.db"
@@ -530,6 +548,7 @@ func TestLoadConfig_NonS3ProviderBucketNames(t *testing.T) {
 			content := fmt.Sprintf(`
 auth:
   mode: local
+  allow_unauthenticated: true
 database:
   sqlite:
     file: "test.db"
@@ -568,6 +587,7 @@ func TestLoadConfig_UnsupportedBucketProvider(t *testing.T) {
 	content := `
 auth:
   mode: local
+  allow_unauthenticated: true
 database:
   sqlite:
     file: "test.db"
@@ -646,6 +666,7 @@ func TestLoadConfig_BucketProviderValidationRegression(t *testing.T) {
 			content := fmt.Sprintf(`
 auth:
   mode: local
+  allow_unauthenticated: true
 database:
   sqlite:
     file: "test.db"
@@ -753,6 +774,7 @@ func TestLoadConfig_ValidBucketNames(t *testing.T) {
 			content := fmt.Sprintf(`
 auth:
   mode: local
+  allow_unauthenticated: true
 database:
   sqlite:
     file: "test.db"
@@ -788,6 +810,7 @@ func TestLoadConfig_S3CompatibleCustomEndpointAllowsNonAWSDNSBucketNames(t *test
 	content := `
 auth:
   mode: local
+  allow_unauthenticated: true
 database:
   sqlite:
     file: "test.db"
@@ -820,6 +843,7 @@ s3_credentials:
 func TestLoadConfig_RouteEnvOverrides(t *testing.T) {
 	t.Setenv("DRS_DB_SQLITE_FILE", "drs.db")
 	t.Setenv("DRS_AUTH_MODE", "local")
+	t.Setenv("DRS_ALLOW_UNAUTHENTICATED_LOCAL", "true")
 	t.Setenv("DRS_ENABLE_GA4GH", "true")
 	t.Setenv("DRS_ENABLE_INTERNAL", "1")
 	t.Setenv("DRS_ENABLE_LFS", "true")

@@ -187,3 +187,49 @@ func TestGetObject_IgnoresAuthContext(t *testing.T) {
 		t.Fatalf("expected obj-2, got %+v", obj)
 	}
 }
+
+func TestListObjectIDsByScopeOrgIncludesProjectScopes(t *testing.T) {
+	pg, mock, rawDB := newMockPostgresDB(t)
+	defer rawDB.Close()
+
+	mock.ExpectQuery("ca\\.resource = \\$1 OR ca\\.resource LIKE \\$2").
+		WithArgs("/organization/calypr", "/organization/calypr/project/%").
+		WillReturnRows(sqlmock.NewRows([]string{"object_id"}).
+			AddRow("org-wide").
+			AddRow("project-scoped"))
+
+	ids, err := pg.ListObjectIDsByScope(context.Background(), "calypr", "")
+	if err != nil {
+		t.Fatalf("ListObjectIDsByScope returned error: %v", err)
+	}
+	if len(ids) != 2 || ids[0] != "org-wide" || ids[1] != "project-scoped" {
+		t.Fatalf("unexpected ids: %+v", ids)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestPostgresScopeResourceCondition(t *testing.T) {
+	condition, args, err := postgresScopeResourceCondition("ca.resource", "org", "")
+	if err != nil {
+		t.Fatalf("postgresScopeResourceCondition returned error: %v", err)
+	}
+	if want := "(ca.resource = ? OR ca.resource LIKE ? ESCAPE '\\')"; condition != want {
+		t.Fatalf("unexpected condition: got %q want %q", condition, want)
+	}
+	if len(args) != 2 || args[0] != "/organization/org" || args[1] != "/organization/org/project/%" {
+		t.Fatalf("unexpected args: %+v", args)
+	}
+
+	condition, args, err = postgresScopeResourceCondition("ca.resource", "org", "project")
+	if err != nil {
+		t.Fatalf("postgresScopeResourceCondition returned error: %v", err)
+	}
+	if condition != "ca.resource = ?" {
+		t.Fatalf("unexpected project condition: %q", condition)
+	}
+	if len(args) != 1 || args[0] != "/organization/org/project/project" {
+		t.Fatalf("unexpected project args: %+v", args)
+	}
+}

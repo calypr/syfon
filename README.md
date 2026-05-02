@@ -29,6 +29,9 @@ curl -sSL https://calypr.org/syfon/install.sh | bash
 port: 8080
 auth:
   mode: local
+  basic:
+    username: "drs-user"
+    password: "drs-pass"
 database:
   sqlite:
     file: "drs_local.db"
@@ -55,8 +58,9 @@ curl -s http://localhost:8080/healthz
 Notes:
 - `auth.mode` is required and must be `local` or `gen3`.
 - Local development should run `auth.mode: local` with SQLite only.
-- In `local` mode, set `auth.basic.username/password` (or env `DRS_BASIC_AUTH_USER` / `DRS_BASIC_AUTH_PASSWORD`) to enforce HTTP basic auth.
+- In `local` mode, set `auth.basic.username/password` (or env `DRS_BASIC_AUTH_USER` / `DRS_BASIC_AUTH_PASSWORD`) to enforce HTTP basic auth. Unauthenticated local mode now requires the explicit development-only opt-in `auth.allow_unauthenticated: true`.
 - `gen3` mode is for deployed environments and requires PostgreSQL.
+- API route groups are enabled by default. Set `routes.*: false` or the matching `DRS_ENABLE_*` env var only when you intentionally want a reduced surface.
 
 Record scope note:
 - Syfon supports both scoped records (with `authz`, such as `/programs/<org>/projects/<project>`) and unscoped records (empty `authz`).
@@ -98,9 +102,9 @@ The server is configured via a YAML or JSON file. Use the following structure to
 port: 8080
 auth:
   mode: "local" # required: "local" or "gen3"
-  # basic:
-  #   username: "user"
-  #   password: "pass"
+  basic:
+    username: "user"
+    password: "pass"
 
 database:
   sqlite:
@@ -123,6 +127,7 @@ s3_credentials:
 ```
 
 In `gen3` mode, PostgreSQL is required unless `DRS_AUTH_MOCK_ENABLED=true` is set for local mock-auth testing.
+In `local` mode, Basic Auth or local CSV auth is required unless `auth.allow_unauthenticated: true` is explicitly set for development/testing.
 
 Detailed configuration reference (including env overrides): [docs/configuration.md](docs/configuration.md)
 
@@ -158,6 +163,9 @@ port: 8080
 
 auth:
     mode: local
+    basic:
+      username: "drs-user"
+      password: "drs-pass"
 
 database:
   sqlite:

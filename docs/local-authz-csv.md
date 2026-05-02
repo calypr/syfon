@@ -5,8 +5,9 @@ small method-aware authorization system. This is intended for local development
 and CI tests that need to exercise the same read/write authorization checks used
 in Gen3 mode, without decoding Gen3 tokens or calling Fence/Arborist services.
 
-If no CSV is configured, local Basic Auth remains the legacy single-user
-admin/unrestricted mode.
+If no CSV is configured, set `auth.basic.username/password` for the legacy
+single-user admin/unrestricted local mode. Fully unauthenticated local mode
+requires the explicit development-only opt-in `auth.allow_unauthenticated: true`.
 
 ## Configure
 

@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/calypr/syfon/apigen/server/drs"
-	sycommon "github.com/calypr/syfon/common"
 
 	// Postgres driver
 	_ "github.com/lib/pq"
@@ -28,9 +27,6 @@ func NewPostgresDB(dsn string) (*PostgresDB, error) {
 	}
 	pg := &PostgresDB{db: db}
 	if err := pg.ensureObjectSchema(); err != nil {
-		return nil, err
-	}
-	if err := pg.normalizeControlledAccessResources(context.Background()); err != nil {
 		return nil, err
 	}
 	if err := pg.ensureBucketScopeSchema(); err != nil {
@@ -54,61 +50,6 @@ func NewPostgresDB(dsn string) (*PostgresDB, error) {
 	return pg, nil
 }
 
-func (db *PostgresDB) normalizeControlledAccessResources(ctx context.Context) error {
-	rows, err := db.db.QueryContext(ctx, `SELECT object_id, resource FROM drs_object_controlled_access`)
-	if err != nil {
-		return fmt.Errorf("failed to scan controlled access resources: %w", err)
-	}
-	defer rows.Close()
-
-	type rewrite struct {
-		objectID string
-		old      string
-		new      string
-	}
-	rewrites := []rewrite{}
-	for rows.Next() {
-		var objectID, resource string
-		if err := rows.Scan(&objectID, &resource); err != nil {
-			return fmt.Errorf("failed to scan controlled access resource row: %w", err)
-		}
-		normalized := sycommon.NormalizeAccessResource(resource)
-		if normalized == "" || normalized == resource {
-			continue
-		}
-		rewrites = append(rewrites, rewrite{objectID: objectID, old: resource, new: normalized})
-	}
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("failed while scanning controlled access resources: %w", err)
-	}
-	if len(rewrites) == 0 {
-		return nil
-	}
-
-	tx, err := db.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin controlled access resource normalization: %w", err)
-	}
-	defer tx.Rollback()
-	for _, rw := range rewrites {
-		if _, err := tx.ExecContext(ctx, `
-			DELETE FROM drs_object_controlled_access
-			WHERE object_id = $1 AND resource = $2`, rw.objectID, rw.new); err != nil {
-			return fmt.Errorf("remove duplicate normalized controlled access resource: %w", err)
-		}
-		if _, err := tx.ExecContext(ctx, `
-			UPDATE drs_object_controlled_access
-			SET resource = $3
-			WHERE object_id = $1 AND resource = $2`, rw.objectID, rw.old, rw.new); err != nil {
-			return fmt.Errorf("rewrite controlled access resource: %w", err)
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit controlled access resource normalization: %w", err)
-	}
-	return nil
-}
-
 func (db *PostgresDB) ensureObjectSchema() error {
 	queries, err := objectSchemaStatements()
 	if err != nil {
@@ -119,7 +60,64 @@ func (db *PostgresDB) ensureObjectSchema() error {
 			return fmt.Errorf("failed to initialize object schema: %w", err)
 		}
 	}
+	if err := db.validateLegacyAccessMethodScopes(context.Background()); err != nil {
+		return fmt.Errorf("legacy object scope validation failed: %w", err)
+	}
 	return nil
+}
+
+func (db *PostgresDB) validateLegacyAccessMethodScopes(ctx context.Context) error {
+	hasLegacyColumns, err := db.hasLegacyAccessMethodScopeColumns(ctx)
+	if err != nil {
+		return err
+	}
+	if !hasLegacyColumns {
+		return nil
+	}
+	var mismatches int
+	err = db.db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM (
+			SELECT DISTINCT
+				am.object_id,
+				CASE
+					WHEN btrim(COALESCE(am.project, '')) = ''
+						THEN '/organization/' || btrim(am.org)
+					ELSE '/organization/' || btrim(am.org) || '/project/' || btrim(am.project)
+				END AS resource
+			FROM drs_object_access_method am
+			INNER JOIN drs_object o ON o.id = am.object_id
+			WHERE btrim(COALESCE(am.org, '')) <> ''
+		) legacy_scope
+		WHERE NOT EXISTS (
+			SELECT 1
+			FROM drs_object_controlled_access ca
+			WHERE ca.object_id = legacy_scope.object_id
+				AND ca.resource = legacy_scope.resource
+		)
+	`).Scan(&mismatches)
+	if err != nil {
+		return err
+	}
+	if mismatches > 0 {
+		return fmt.Errorf("%d scoped drs_object_access_method rows are missing matching drs_object_controlled_access entries", mismatches)
+	}
+	return nil
+}
+
+func (db *PostgresDB) hasLegacyAccessMethodScopeColumns(ctx context.Context) (bool, error) {
+	var count int
+	err := db.db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM information_schema.columns
+		WHERE table_name = 'drs_object_access_method'
+			AND column_name IN ('org', 'project')
+			AND table_schema = ANY (current_schemas(false))
+	`).Scan(&count)
+	if err != nil {
+		return false, err
+	}
+	return count == 2, nil
 }
 
 func (db *PostgresDB) ensureS3CredentialSchema() error {

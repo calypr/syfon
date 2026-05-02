@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/calypr/syfon/apigen/server/drs"
-	sycommon "github.com/calypr/syfon/common"
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -34,9 +33,6 @@ func NewSqliteDB(dsn string) (*SqliteDB, error) {
 	s := &SqliteDB{db: db}
 	if err := s.initSchema(); err != nil {
 		return nil, fmt.Errorf("failed to init schema: %w", err)
-	}
-	if err := s.normalizeControlledAccessResources(context.Background()); err != nil {
-		return nil, fmt.Errorf("failed to normalize controlled access resources: %w", err)
 	}
 
 	return s, nil
@@ -274,58 +270,6 @@ func (db *SqliteDB) initSchema() error {
 		return err
 	}
 	return nil
-}
-
-func (db *SqliteDB) normalizeControlledAccessResources(ctx context.Context) error {
-	rows, err := db.db.QueryContext(ctx, `SELECT object_id, resource FROM drs_object_controlled_access`)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-
-	type rewrite struct {
-		objectID string
-		old      string
-		new      string
-	}
-	rewrites := []rewrite{}
-	for rows.Next() {
-		var objectID, resource string
-		if err := rows.Scan(&objectID, &resource); err != nil {
-			return err
-		}
-		normalized := sycommon.NormalizeAccessResource(resource)
-		if normalized == "" || normalized == resource {
-			continue
-		}
-		rewrites = append(rewrites, rewrite{objectID: objectID, old: resource, new: normalized})
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	if len(rewrites) == 0 {
-		return nil
-	}
-
-	tx, err := db.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	for _, rw := range rewrites {
-		if _, err := tx.ExecContext(ctx, `
-			DELETE FROM drs_object_controlled_access
-			WHERE object_id = ? AND resource = ?`, rw.objectID, rw.new); err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, `
-			UPDATE drs_object_controlled_access
-			SET resource = ?
-			WHERE object_id = ? AND resource = ?`, rw.new, rw.objectID, rw.old); err != nil {
-			return err
-		}
-	}
-	return tx.Commit()
 }
 
 func (db *SqliteDB) GetServiceInfo(ctx context.Context) (*drs.Service, error) {

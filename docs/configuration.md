@@ -10,6 +10,7 @@ This document describes the `syfon` configuration model used by `serve --config 
 - `auth`
 - `database`
 - `s3_credentials`
+- `routes`
 - `lfs`
 - `signing`
 
@@ -38,6 +39,12 @@ lfs:
   max_batch_body_bytes: 10485760
   request_limit_per_minute: 1200
   bandwidth_limit_bytes_per_minute: 0
+routes:
+  ga4gh: true
+  internal: true
+  lfs: true
+  metrics: true
+  docs: true
 signing:
   default_expiry_seconds: 900
 ```
@@ -48,13 +55,13 @@ signing:
 
 - Intended for local/dev flows.
 - Works with SQLite.
-- Optional HTTP basic auth:
+- HTTP basic auth:
   - `auth.basic.username`
   - `auth.basic.password`
 - Optional CSV-backed local authorization:
   - `auth.local_authz_csv`
   - or `DRS_LOCAL_AUTHZ_CSV`
-  - when omitted, local basic auth remains admin/unrestricted
+- If both Basic Auth and local CSV auth are omitted, config loading fails. Use `auth.allow_unauthenticated: true` only for development/testing.
 
 ### `auth.mode: gen3`
 
@@ -65,6 +72,19 @@ Validation rules:
 
 - `auth.mode` is required and must be `local` or `gen3`.
 - If one of `auth.basic.username/password` is set, both must be set.
+- `auth.mode: local` requires `auth.basic.username/password` or `auth.local_authz_csv` unless `auth.allow_unauthenticated: true` is explicitly set.
+
+## Routes
+
+All route groups are enabled by default:
+
+- `routes.ga4gh`
+- `routes.internal`
+- `routes.lfs`
+- `routes.metrics`
+- `routes.docs`
+
+Set a route field to `false`, or set the matching `DRS_ENABLE_*` environment variable, when deploying a reduced API surface.
 
 Local authorization CSV columns:
 
@@ -124,6 +144,7 @@ Environment variables override config file values.
 - `DRS_AUTH_MODE`
 - `DRS_BASIC_AUTH_USER`
 - `DRS_BASIC_AUTH_PASSWORD`
+- `DRS_ALLOW_UNAUTHENTICATED_LOCAL`
 
 ### LFS limits
 
@@ -184,7 +205,7 @@ If `DRS_CREDENTIAL_KMS_KEY_ID` is set (or `DRS_CREDENTIAL_KEY_MANAGER=aws-kms`),
 ### LocalAuth (local mode)
 
 - Set `auth.mode: local` in your config file.
-- Optionally set HTTP basic auth credentials:
+- Set HTTP basic auth credentials:
   - `auth.basic.username`
   - `auth.basic.password`
 - Or use environment variables:
@@ -192,6 +213,7 @@ If `DRS_CREDENTIAL_KMS_KEY_ID` is set (or `DRS_CREDENTIAL_KEY_MANAGER=aws-kms`),
   - `DRS_BASIC_AUTH_PASSWORD`
 - For multi-user local authz tests, set `auth.local_authz_csv` or `DRS_LOCAL_AUTHZ_CSV`.
   If this is set, users are authenticated from the CSV and method-aware authorization is enforced.
+- Fully unauthenticated local mode is rejected unless `auth.allow_unauthenticated: true` or `DRS_ALLOW_UNAUTHENTICATED_LOCAL=true` is set for development/testing.
 - **To use the plugin-based local auth:**
   - Build the plugin:
     ```sh
@@ -248,7 +270,7 @@ curl -s http://localhost:8080/healthz
 For `git-drs` local e2e tests, use:
 
 - `auth.mode: local`
-- optional basic auth configured in `auth.basic` or env
+- basic auth configured in `auth.basic` or env, or an explicit local authz CSV
 - valid `s3_credentials` entry for the bucket used by test scripts (`TEST_BUCKET`)
 
 If tests fail with `bucket credential not found`, ensure bucket credentials exist for that bucket or enable test-side bootstrap (`TEST_CREATE_BUCKET_BEFORE_TEST=true` with bucket envs).

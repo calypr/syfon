@@ -43,6 +43,9 @@ func TestS3Integration(t *testing.T) {
 port: 8081
 auth:
   mode: local
+  basic:
+    username: "drs-user"
+    password: "drs-pass"
 database:
   sqlite:
     file: "test_integration.db"

@@ -186,13 +186,14 @@ func (s S3Config) MarshalJSON() ([]byte, error) {
 }
 
 type AuthConfig struct {
-	Mode          string          `json:"mode" yaml:"mode"`
-	Basic         BasicAuthConfig `json:"basic" yaml:"basic"`
-	LocalAuthzCSV string          `json:"local_authz_csv" yaml:"local_authz_csv"`
-	Mock          MockAuthConfig  `json:"mock" yaml:"mock"`
-	Cache         AuthCacheConfig `json:"cache" yaml:"cache"`
-	PluginPaths   PluginPaths     `json:"plugin_paths" yaml:"plugin_paths"`
-	FenceURL      string          `json:"fence_url" yaml:"fence_url"`
+	Mode                 string          `json:"mode" yaml:"mode"`
+	Basic                BasicAuthConfig `json:"basic" yaml:"basic"`
+	LocalAuthzCSV        string          `json:"local_authz_csv" yaml:"local_authz_csv"`
+	AllowUnauthenticated bool            `json:"allow_unauthenticated" yaml:"allow_unauthenticated"`
+	Mock                 MockAuthConfig  `json:"mock" yaml:"mock"`
+	Cache                AuthCacheConfig `json:"cache" yaml:"cache"`
+	PluginPaths          PluginPaths     `json:"plugin_paths" yaml:"plugin_paths"`
+	FenceURL             string          `json:"fence_url" yaml:"fence_url"`
 }
 
 type MockAuthConfig struct {
@@ -256,6 +257,13 @@ func LoadConfig(configFile string) (*Config, error) {
 		Port:     8080,
 		Database: DatabaseConfig{},
 		Auth:     AuthConfig{},
+		Routes: RoutesConfig{
+			Docs:     true,
+			Ga4gh:    true,
+			Metrics:  true,
+			Internal: true,
+			LFS:      true,
+		},
 		LFS: LFSConfig{
 			MaxBatchObjects:              DefaultLFSMaxBatchObjects,
 			MaxBatchBodyBytes:            DefaultLFSMaxBatchBodyBytes,
@@ -308,6 +316,13 @@ func LoadConfig(configFile string) (*Config, error) {
 	}
 	if v := os.Getenv("DRS_LOCAL_AUTHZ_CSV"); v != "" {
 		cfg.Auth.LocalAuthzCSV = v
+	}
+	if v := os.Getenv("DRS_ALLOW_UNAUTHENTICATED_LOCAL"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return nil, fmt.Errorf("invalid DRS_ALLOW_UNAUTHENTICATED_LOCAL: %s", v)
+		}
+		cfg.Auth.AllowUnauthenticated = b
 	}
 	if v := os.Getenv("DRS_CREDENTIAL_LOCAL_KEY_FILE"); v != "" {
 		cfg.CredentialEncryption.LocalKeyFile = v
@@ -550,9 +565,8 @@ func LoadConfig(configFile string) (*Config, error) {
 		return nil, fmt.Errorf("both auth.basic.username and auth.basic.password must be set together")
 	}
 
-	// SECURITY FIX HIGH-1: Warn if local auth mode is configured without basic auth
-	if cfg.Auth.Mode == AuthModeLocal && cfg.Auth.LocalAuthzCSV == "" && (cfg.Auth.Basic.Username == "" || cfg.Auth.Basic.Password == "") {
-		fmt.Fprintf(os.Stderr, "WARNING: local auth mode configured without basic auth credentials—all endpoints will be unauthenticated and unrestricted. This is only safe for development/testing. Set DRS_BASIC_AUTH_USER and DRS_BASIC_AUTH_PASSWORD to enable basic auth.\n")
+	if cfg.Auth.Mode == AuthModeLocal && cfg.Auth.LocalAuthzCSV == "" && (cfg.Auth.Basic.Username == "" || cfg.Auth.Basic.Password == "") && !cfg.Auth.AllowUnauthenticated {
+		return nil, fmt.Errorf("auth.mode %q requires auth.basic.username/password or auth.local_authz_csv; set auth.allow_unauthenticated=true only for development/testing", AuthModeLocal)
 	}
 
 	// Gen3 mock auth is the supported local integration-testing path for Gen3 mode.
