@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/calypr/syfon/apigen/client/internalapi"
-	"github.com/calypr/syfon/client/syfonclient"
+	syfonclient "github.com/calypr/syfon/client/services"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)

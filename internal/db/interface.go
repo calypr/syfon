@@ -31,6 +31,40 @@ type ObjectStore interface {
 	BulkUpdateAccessMethods(ctx context.Context, updates map[string][]drs.AccessMethod) error
 }
 
+type ObjectIDResourceLister interface {
+	ListObjectIDsByResources(ctx context.Context, resources []string, includeUnscoped bool) ([]string, error)
+}
+
+type ObjectIDPageLister interface {
+	ListObjectIDsPageByScope(ctx context.Context, organization, project, startAfter string, limit, offset int) ([]string, error)
+	ListObjectIDsPageByResources(ctx context.Context, resources []string, includeUnscoped bool, startAfter string, limit, offset int) ([]string, error)
+}
+
+type ObjectChecksumPageLister interface {
+	ListObjectIDsPageByChecksum(ctx context.Context, checksum, checksumType, organization, project, startAfter string, limit, offset int, resources []string, includeUnscoped, restrictToResources bool) ([]string, error)
+}
+
+type ObjectAuthorizedLister interface {
+	ListObjectIDsByScopeAndResources(ctx context.Context, organization, project string, resources []string, restrictToResources bool) ([]string, error)
+	ListObjectIDsByChecksumsAndResources(ctx context.Context, checksums []string, resources []string, includeUnscoped, restrictToResources bool) (map[string][]string, error)
+}
+
+type FileUsageScopedLister interface {
+	ListFileUsagePageByScope(ctx context.Context, organization, project string, limit, offset int, inactiveSince *time.Time) ([]models.FileUsage, error)
+	ListFileUsagePageByResources(ctx context.Context, resources []string, includeUnscoped bool, limit, offset int, inactiveSince *time.Time) ([]models.FileUsage, error)
+	GetFileUsageSummaryByScope(ctx context.Context, organization, project string, inactiveSince *time.Time) (models.FileUsageSummary, error)
+	GetFileUsageSummaryByResources(ctx context.Context, resources []string, includeUnscoped bool, inactiveSince *time.Time) (models.FileUsageSummary, error)
+}
+
+type TransferAttributionScopedStore interface {
+	GetTransferAttributionSummaryByResources(ctx context.Context, filter models.TransferAttributionFilter, resources []string) (models.TransferAttributionSummary, error)
+	GetTransferAttributionBreakdownByResources(ctx context.Context, filter models.TransferAttributionFilter, groupBy string, resources []string) ([]models.TransferAttributionBreakdown, error)
+}
+
+type BucketVisibilityLister interface {
+	ListBucketVisibilityRows(ctx context.Context, resources []string, includeUnscoped, restrictToResources bool) ([]models.BucketVisibilityRow, error)
+}
+
 // CredentialStore groups bucket credential and scope management.
 type CredentialStore interface {
 	GetS3Credential(ctx context.Context, bucket string) (*models.S3Credential, error)
@@ -66,6 +100,7 @@ type UsageStore interface {
 	GetTransferAttributionSummary(ctx context.Context, filter models.TransferAttributionFilter) (models.TransferAttributionSummary, error)
 	GetTransferAttributionBreakdown(ctx context.Context, filter models.TransferAttributionFilter, groupBy string) ([]models.TransferAttributionBreakdown, error)
 	GetFileUsage(ctx context.Context, objectID string) (*models.FileUsage, error)
+	ListFileUsageByObjectIDs(ctx context.Context, ids []string) ([]models.FileUsage, error)
 	ListFileUsage(ctx context.Context, limit, offset int, inactiveSince *time.Time) ([]models.FileUsage, error)
 	GetFileUsageSummary(ctx context.Context, inactiveSince *time.Time) (models.FileUsageSummary, error)
 }
@@ -86,6 +121,7 @@ type MetricsStore interface {
 	GetTransferAttributionSummary(ctx context.Context, filter models.TransferAttributionFilter) (models.TransferAttributionSummary, error)
 	GetTransferAttributionBreakdown(ctx context.Context, filter models.TransferAttributionFilter, groupBy string) ([]models.TransferAttributionBreakdown, error)
 	GetFileUsage(ctx context.Context, objectID string) (*models.FileUsage, error)
+	ListFileUsageByObjectIDs(ctx context.Context, ids []string) ([]models.FileUsage, error)
 	ListFileUsage(ctx context.Context, limit, offset int, inactiveSince *time.Time) ([]models.FileUsage, error)
 	GetFileUsageSummary(ctx context.Context, inactiveSince *time.Time) (models.FileUsageSummary, error)
 }

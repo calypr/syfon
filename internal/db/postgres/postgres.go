@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/calypr/syfon/apigen/server/drs"
+	sycommon "github.com/calypr/syfon/common"
 
 	// Postgres driver
 	_ "github.com/lib/pq"
@@ -29,6 +30,9 @@ func NewPostgresDB(dsn string) (*PostgresDB, error) {
 	if err := pg.ensureObjectSchema(); err != nil {
 		return nil, err
 	}
+	if err := pg.normalizeControlledAccessResources(context.Background()); err != nil {
+		return nil, err
+	}
 	if err := pg.ensureBucketScopeSchema(); err != nil {
 		return nil, err
 	}
@@ -48,6 +52,61 @@ func NewPostgresDB(dsn string) (*PostgresDB, error) {
 		return nil, err
 	}
 	return pg, nil
+}
+
+func (db *PostgresDB) normalizeControlledAccessResources(ctx context.Context) error {
+	rows, err := db.db.QueryContext(ctx, `SELECT object_id, resource FROM drs_object_controlled_access`)
+	if err != nil {
+		return fmt.Errorf("failed to scan controlled access resources: %w", err)
+	}
+	defer rows.Close()
+
+	type rewrite struct {
+		objectID string
+		old      string
+		new      string
+	}
+	rewrites := []rewrite{}
+	for rows.Next() {
+		var objectID, resource string
+		if err := rows.Scan(&objectID, &resource); err != nil {
+			return fmt.Errorf("failed to scan controlled access resource row: %w", err)
+		}
+		normalized := sycommon.NormalizeAccessResource(resource)
+		if normalized == "" || normalized == resource {
+			continue
+		}
+		rewrites = append(rewrites, rewrite{objectID: objectID, old: resource, new: normalized})
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("failed while scanning controlled access resources: %w", err)
+	}
+	if len(rewrites) == 0 {
+		return nil
+	}
+
+	tx, err := db.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin controlled access resource normalization: %w", err)
+	}
+	defer tx.Rollback()
+	for _, rw := range rewrites {
+		if _, err := tx.ExecContext(ctx, `
+			DELETE FROM drs_object_controlled_access
+			WHERE object_id = $1 AND resource = $2`, rw.objectID, rw.new); err != nil {
+			return fmt.Errorf("remove duplicate normalized controlled access resource: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE drs_object_controlled_access
+			SET resource = $3
+			WHERE object_id = $1 AND resource = $2`, rw.objectID, rw.old, rw.new); err != nil {
+			return fmt.Errorf("rewrite controlled access resource: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit controlled access resource normalization: %w", err)
+	}
+	return nil
 }
 
 func (db *PostgresDB) ensureObjectSchema() error {
@@ -131,6 +190,7 @@ func (db *PostgresDB) ensureObjectUsageSchema() error {
 			updated_time TIMESTAMPTZ NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_object_usage_last_download_time ON object_usage(last_download_time)`,
+		`CREATE INDEX IF NOT EXISTS idx_object_usage_last_download_time_object_id ON object_usage(last_download_time, object_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_object_usage_last_upload_time ON object_usage(last_upload_time)`,
 	}
 	for _, q := range queries {
@@ -238,7 +298,10 @@ func (db *PostgresDB) ensureTransferAttributionSchema() error {
 			auth_mode TEXT NOT NULL DEFAULT '',
 			reconciliation_status TEXT NOT NULL DEFAULT 'unmatched' CHECK (reconciliation_status IN ('matched','ambiguous','unmatched'))
 		)`,
+		`ALTER TABLE transfer_attribution_event ADD COLUMN IF NOT EXISTS access_grant_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE transfer_attribution_event ADD COLUMN IF NOT EXISTS direction TEXT NOT NULL DEFAULT 'download'`,
 		`CREATE INDEX IF NOT EXISTS idx_transfer_attr_scope_time ON transfer_attribution_event(organization, project, event_type, event_time)`,
+		`CREATE INDEX IF NOT EXISTS idx_transfer_attr_scope_event_time ON transfer_attribution_event(organization, project, event_time)`,
 		`CREATE INDEX IF NOT EXISTS idx_transfer_attr_direction_time ON transfer_attribution_event(direction, event_time)`,
 		`CREATE INDEX IF NOT EXISTS idx_transfer_attr_actor_time ON transfer_attribution_event(actor_email, actor_subject, event_time)`,
 		`CREATE INDEX IF NOT EXISTS idx_transfer_attr_provider_time ON transfer_attribution_event(provider, bucket, event_time)`,
@@ -253,8 +316,6 @@ func (db *PostgresDB) ensureTransferAttributionSchema() error {
 		`CREATE INDEX IF NOT EXISTS idx_provider_transfer_sha_time ON provider_transfer_event(sha256, event_time)`,
 		`CREATE INDEX IF NOT EXISTS idx_provider_transfer_status ON provider_transfer_event(reconciliation_status, event_time)`,
 		`CREATE INDEX IF NOT EXISTS idx_provider_transfer_grant ON provider_transfer_event(access_grant_id)`,
-		`ALTER TABLE transfer_attribution_event ADD COLUMN IF NOT EXISTS access_grant_id TEXT NOT NULL DEFAULT ''`,
-		`ALTER TABLE transfer_attribution_event ADD COLUMN IF NOT EXISTS direction TEXT NOT NULL DEFAULT 'download'`,
 	}
 	for _, q := range queries {
 		if _, err := db.db.Exec(q); err != nil {

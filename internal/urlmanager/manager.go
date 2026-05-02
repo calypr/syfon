@@ -23,6 +23,10 @@ type Manager struct {
 	signers         map[string]signer.Signer
 }
 
+type bucketInvalidatingSigner interface {
+	InvalidateBucket(bucket string)
+}
+
 func NewManager(database db.CredentialStore, signing config.SigningConfig) *Manager {
 	return &Manager{
 		database:        database,
@@ -34,6 +38,20 @@ func NewManager(database db.CredentialStore, signing config.SigningConfig) *Mana
 
 func (m *Manager) RegisterSigner(p string, s signer.Signer) {
 	m.signers[p] = s
+}
+
+func (m *Manager) InvalidateBucket(bucket string) {
+	bucket = strings.TrimSpace(bucket)
+	if bucket == "" {
+		return
+	}
+	for _, s := range m.signers {
+		invalidator, ok := s.(bucketInvalidatingSigner)
+		if !ok {
+			continue
+		}
+		invalidator.InvalidateBucket(bucket)
+	}
 }
 
 func (m *Manager) SignURL(ctx context.Context, accessId string, urlStr string, opts SignOptions) (string, error) {

@@ -458,7 +458,7 @@ func LoadConfig(configFile string) (*Config, error) {
 			return nil, fmt.Errorf("s3_credentials[%d]: %w", i, err)
 		}
 		cfg.S3Credentials[i].Provider = bucketProvider
-		if err := common.ValidateBucketName(bucketProvider, cred.Bucket); err != nil {
+		if err := common.ValidateBucketNameWithEndpoint(bucketProvider, cred.Bucket, cred.Endpoint); err != nil {
 			return nil, fmt.Errorf("s3_credentials[%d]: %w", i, err)
 		}
 		if bucketProvider == common.S3Provider {
@@ -555,9 +555,9 @@ func LoadConfig(configFile string) (*Config, error) {
 		fmt.Fprintf(os.Stderr, "WARNING: local auth mode configured without basic auth credentials—all endpoints will be unauthenticated and unrestricted. This is only safe for development/testing. Set DRS_BASIC_AUTH_USER and DRS_BASIC_AUTH_PASSWORD to enable basic auth.\n")
 	}
 
-	// SECURITY FIX HIGH-2: Mock auth only allowed in local mode
-	if isMockAuthEnabledFromEnv() && cfg.Auth.Mode != AuthModeLocal {
-		return nil, fmt.Errorf("mock auth (DRS_AUTH_MOCK_ENABLED) is only allowed in local auth mode, not in %q", cfg.Auth.Mode)
+	// Gen3 mock auth is the supported local integration-testing path for Gen3 mode.
+	if isMockAuthEnabledFromEnv() && cfg.Auth.Mode != AuthModeGen3 {
+		return nil, fmt.Errorf("mock auth (DRS_AUTH_MOCK_ENABLED) is only allowed in gen3 auth mode, not in %q", cfg.Auth.Mode)
 	}
 	if cfg.LFS.MaxBatchObjects < 0 {
 		return nil, fmt.Errorf("lfs.max_batch_objects must be >= 0")

@@ -49,24 +49,26 @@ func TestLoadConfig_LocalModeWithoutBasicAuthWarning(t *testing.T) {
 	}
 }
 
-// Test HIGH-2 fix: Mock auth rejected in gen3 mode
-func TestLoadConfig_MockAuthRejectsGen3Mode(t *testing.T) {
+// Test HIGH-2 fix: Mock auth is supported in gen3 mode
+func TestLoadConfig_MockAuthAllowsGen3Mode(t *testing.T) {
 	defer func() {
 		os.Unsetenv("DRS_AUTH_MODE")
 		os.Unsetenv("DRS_AUTH_MOCK_ENABLED")
-		os.Unsetenv("DRS_DB_SQLITE_FILE")
+		os.Unsetenv("DRS_DB_HOST")
+		os.Unsetenv("DRS_DB_DATABASE")
 	}()
 
 	os.Setenv("DRS_AUTH_MODE", "gen3")
 	os.Setenv("DRS_AUTH_MOCK_ENABLED", "true")
-	os.Setenv("DRS_DB_SQLITE_FILE", ":memory:")
+	os.Setenv("DRS_DB_HOST", "localhost")
+	os.Setenv("DRS_DB_DATABASE", "testdb")
 
-	_, err := LoadConfig("")
-	if err == nil {
-		t.Errorf("LoadConfig() expected error for mock auth in gen3 mode, got nil")
+	cfg, err := LoadConfig("")
+	if err != nil {
+		t.Fatalf("LoadConfig() unexpected error = %v", err)
 	}
-	if err.Error() != "mock auth (DRS_AUTH_MOCK_ENABLED) is only allowed in local auth mode, not in \"gen3\"" {
-		t.Errorf("LoadConfig() error = %v, want mock auth error", err)
+	if cfg.Auth.Mode != AuthModeGen3 {
+		t.Errorf("Auth.Mode = %q, want gen3", cfg.Auth.Mode)
 	}
 }
 
@@ -171,4 +173,3 @@ func TestSecretRedaction_S3Config(t *testing.T) {
 		t.Errorf("Expected at least 2 REDACTED markers, got %d: %s", redactCount, output)
 	}
 }
-

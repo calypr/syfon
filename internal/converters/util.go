@@ -4,6 +4,7 @@ import (
 	"sort"
 
 	"github.com/calypr/syfon/apigen/server/drs"
+	syfoncommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/models"
 )
 
@@ -17,7 +18,10 @@ func UniqueAuthz(values any) map[string][]string {
 			if method.Authorizations == nil {
 				continue
 			}
-			for org, projects := range *method.Authorizations {
+			if method.Authorizations.BearerAuthIssuers == nil {
+				continue
+			}
+			for org, projects := range syfoncommon.AuthzListToMap(*method.Authorizations.BearerAuthIssuers) {
 				if len(projects) == 0 {
 					if _, ok := out[org]; !ok {
 						out[org] = []string{}

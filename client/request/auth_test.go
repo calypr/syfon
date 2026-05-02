@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/calypr/syfon/client/conf"
+	conf "github.com/calypr/syfon/client/config"
 )
 
 type trackingManager struct {

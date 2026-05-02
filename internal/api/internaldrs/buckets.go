@@ -1,74 +1,54 @@
 package internaldrs
 
 import (
-	"encoding/json"
-	"io"
 	"strings"
 
 	"github.com/calypr/syfon/apigen/server/bucketapi"
-	sycommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/api/apiutil"
+	apimiddleware "github.com/calypr/syfon/internal/api/middleware"
+	"github.com/calypr/syfon/internal/api/routeutil"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/models"
 	"github.com/gofiber/fiber/v3"
 )
 
+func registerInternalBucketRoutes(router fiber.Router, om *core.ObjectManager) {
+	router.Get(common.RouteInternalBuckets, func(c fiber.Ctx) error { return handleInternalBucketsFiber(c, om) })
+	router.Put(common.RouteInternalBuckets, func(c fiber.Ctx) error { return handleInternalPutBucketFiber(c, om) })
+	router.Delete(routeutil.FiberPath(common.RouteInternalBucketDetail), func(c fiber.Ctx) error { return handleInternalDeleteBucketFiber(c, om) })
+	router.Post(routeutil.FiberPath(common.RouteInternalBucketScopes), func(c fiber.Ctx) error { return handleInternalCreateBucketScopeFiber(c, om) })
+}
+
 func handleInternalBucketsFiber(c fiber.Ctx, om *core.ObjectManager) error {
-	creds, err := om.ListS3Credentials(c.Context())
+	if apimiddleware.MissingGen3AuthHeader(c.Context()) {
+		return apiutil.HandleError(c, common.ErrUnauthorized)
+	}
+	visible, err := om.ListVisibleBuckets(c.Context())
 	if err != nil {
 		return apiutil.HandleError(c, err)
 	}
-	scopes, _ := om.ListBucketScopes(c.Context())
 
-	allowedBuckets := map[string]bool{}
-	allowAll := bucketControlOpenAccess(c.Context(), "read")
-	if !allowAll {
-		if err := requireGen3AuthFiber(c); err != nil {
-			return apiutil.HandleError(c, common.ErrUnauthorized)
-		}
-		allowedBuckets = allowedBucketsForScopes(c.Context(), scopes, "read", "create", "update", "delete", "file_upload")
-		if len(allowedBuckets) == 0 {
-			return apiutil.HandleError(c, common.ErrUnauthorized)
-		}
-	}
-
-	resp := bucketapi.BucketsResponse{
-		S3BUCKETS: map[string]bucketapi.BucketMetadata{},
-	}
-	outBuckets := resp.S3BUCKETS
-	programsByBucket := map[string][]string{}
-	for _, s := range scopes {
-		if !allowAll && !allowedBuckets[s.Bucket] {
-			continue
-		}
-		res, err := sycommon.ResourcePath(s.Organization, s.ProjectID)
-		if err != nil || res == "" {
-			continue
-		}
-		programsByBucket[s.Bucket] = append(programsByBucket[s.Bucket], res)
-	}
-	for _, c := range creds {
-		if !allowAll && !allowedBuckets[c.Bucket] {
-			continue
-		}
+	resp := bucketapi.BucketsResponse{S3BUCKETS: map[string]bucketapi.BucketMetadata{}}
+	for _, entry := range visible {
+		cred := entry.Credential
 		meta := bucketapi.BucketMetadata{
-			EndpointUrl: common.Ptr(c.Endpoint),
-			Provider:    common.Ptr(c.Provider),
-			Region:      common.Ptr(c.Region),
+			EndpointUrl: common.Ptr(cred.Endpoint),
+			Provider:    common.Ptr(cred.Provider),
+			Region:      common.Ptr(cred.Region),
 		}
-		if strings.TrimSpace(c.BillingLogBucket) != "" {
-			meta.BillingLogBucket = common.Ptr(c.BillingLogBucket)
+		if strings.TrimSpace(cred.BillingLogBucket) != "" {
+			meta.BillingLogBucket = common.Ptr(cred.BillingLogBucket)
 		}
-		if strings.TrimSpace(c.BillingLogPrefix) != "" {
-			meta.BillingLogPrefix = common.Ptr(c.BillingLogPrefix)
+		if strings.TrimSpace(cred.BillingLogPrefix) != "" {
+			meta.BillingLogPrefix = common.Ptr(cred.BillingLogPrefix)
 		}
-		if programs := programsByBucket[c.Bucket]; len(programs) > 0 {
+		if len(entry.Programs) > 0 {
+			programs := append([]string(nil), entry.Programs...)
 			meta.Programs = &programs
 		}
-		outBuckets[c.Bucket] = meta
+		resp.S3BUCKETS[cred.Bucket] = meta
 	}
-
 	return c.JSON(resp)
 }
 
@@ -94,25 +74,8 @@ func handleInternalPutBucketFiber(c fiber.Ctx, om *core.ObjectManager) error {
 	if req.Organization == "" && req.ProjectId != "" {
 		return c.Status(fiber.StatusBadRequest).SendString("organization is required when project_id is set")
 	}
-
-	if err := common.ValidateBucketName(bucketProvider, req.Bucket); err != nil {
-		return c.Status(fiber.StatusBadRequest).SendString(err.Error())
-	}
-
-	if !bucketControlAllowed(c.Context(), "create", "update") {
-		if err := requireGen3AuthFiber(c); err != nil {
-			return apiutil.HandleError(c, common.ErrUnauthorized)
-		}
-		if req.Organization == "" {
-			return apiutil.HandleError(c, common.ErrUnauthorized)
-		}
-		res, err := sycommon.ResourcePath(req.Organization, req.ProjectId)
-		if err != nil {
-			return apiutil.HandleError(c, err)
-		}
-		if res == "" || !resourceAllowed(c.Context(), res, "create", "update") {
-			return apiutil.HandleError(c, common.ErrUnauthorized)
-		}
+	if err := authorizeBucketScopeWrite(c.Context(), req.Organization, req.ProjectId, "create", "update"); err != nil {
+		return apiutil.HandleError(c, err)
 	}
 
 	prefix, err := common.NormalizeStoragePath(readOptionalPath(req.Path), req.Bucket)
@@ -147,7 +110,6 @@ func handleInternalPutBucketFiber(c fiber.Ctx, om *core.ObjectManager) error {
 			return apiutil.HandleError(c, err)
 		}
 	}
-
 	if scopeOnly {
 		return c.SendStatus(fiber.StatusCreated)
 	}
@@ -178,6 +140,10 @@ func handleInternalPutBucketFiber(c fiber.Ctx, om *core.ObjectManager) error {
 			billingLogPrefix = existingCred.BillingLogPrefix
 		}
 	}
+	if err := common.ValidateBucketNameWithEndpoint(bucketProvider, req.Bucket, endpoint); err != nil {
+		return c.Status(fiber.StatusBadRequest).SendString(err.Error())
+	}
+
 	cred := &models.S3Credential{
 		Bucket:           req.Bucket,
 		Provider:         bucketProvider,
@@ -198,24 +164,13 @@ func handleInternalPutBucketFiber(c fiber.Ctx, om *core.ObjectManager) error {
 }
 
 func handleInternalDeleteBucketFiber(c fiber.Ctx, om *core.ObjectManager) error {
-	bucket := c.Params("bucket")
+	bucket := strings.TrimSpace(c.Params("bucket"))
 	if bucket == "" {
 		return c.Status(fiber.StatusBadRequest).SendString("bucket name is required")
 	}
-
-	if !bucketControlAllowed(c.Context(), "delete") {
-		if err := requireGen3AuthFiber(c); err != nil {
-			return apiutil.HandleError(c, common.ErrUnauthorized)
-		}
-		scopes, err := om.ListBucketScopes(c.Context())
-		if err != nil {
-			return apiutil.HandleError(c, err)
-		}
-		if !bucketsAllowedByNames(c.Context(), scopes, bucket, "delete", "update") {
-			return apiutil.HandleError(c, common.ErrUnauthorized)
-		}
+	if err := authorizeBucketDelete(c.Context(), om, bucket); err != nil {
+		return apiutil.HandleError(c, err)
 	}
-
 	if err := om.DeleteS3Credential(c.Context(), bucket); err != nil {
 		return apiutil.HandleError(c, err)
 	}
@@ -240,22 +195,11 @@ func handleInternalCreateBucketScopeFiber(c fiber.Ctx, om *core.ObjectManager) e
 	if req.Organization == "" {
 		return c.Status(fiber.StatusBadRequest).SendString("organization is required")
 	}
-
-	if !bucketControlAllowed(c.Context(), "create", "update") {
-		if err := requireGen3AuthFiber(c); err != nil {
-			return apiutil.HandleError(c, common.ErrUnauthorized)
-		}
-		res, err := sycommon.ResourcePath(req.Organization, req.ProjectId)
-		if err != nil {
-			return apiutil.HandleError(c, err)
-		}
-		if res == "" || !resourceAllowed(c.Context(), res, "create", "update") {
-			return apiutil.HandleError(c, common.ErrUnauthorized)
-		}
+	if err := authorizeBucketScopeWrite(c.Context(), req.Organization, req.ProjectId, "create", "update"); err != nil {
+		return apiutil.HandleError(c, err)
 	}
 
-	path := readOptionalPath(req.Path)
-	prefix, err := common.NormalizeStoragePath(path, bucket)
+	prefix, err := common.NormalizeStoragePath(readOptionalPath(req.Path), bucket)
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).SendString(err.Error())
 	}
@@ -268,24 +212,4 @@ func handleInternalCreateBucketScopeFiber(c fiber.Ctx, om *core.ObjectManager) e
 		return apiutil.HandleError(c, err)
 	}
 	return c.SendStatus(fiber.StatusCreated)
-}
-
-func readOptionalPath(path *string) string {
-	if path == nil {
-		return ""
-	}
-	return strings.TrimSpace(*path)
-}
-
-func decodeStrictJSON(body []byte, dst any) error {
-	dec := json.NewDecoder(strings.NewReader(string(body)))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(dst); err != nil {
-		return err
-	}
-	var extra any
-	if err := dec.Decode(&extra); err == nil {
-		return io.ErrUnexpectedEOF
-	}
-	return nil
 }

@@ -23,12 +23,12 @@ func TestSyfonListAndRemoveCommands(t *testing.T) {
 	did := "11111111-1111-1111-1111-111111111111"
 	fileName := "README.md"
 	size := int64(123)
-	auth := internalapi.AuthPathMap{"syfon": {"e2e": {"s3://syfon-bucket/path/README.md"}}}
+	controlled := []string{"/programs/syfon/projects/e2e"}
 	rec := internalapi.InternalRecord{
-		Did:      did,
-		Auth:     &auth,
-		FileName: &fileName,
-		Size:     &size,
+		Did:              did,
+		ControlledAccess: &controlled,
+		FileName:         &fileName,
+		Size:             &size,
 	}
 	if _, err := c.Index().Create(context.Background(), rec); err != nil {
 		t.Fatalf("seed record: %v", err)
@@ -118,6 +118,9 @@ func TestSyfonBucketListAndRemoveCommands(t *testing.T) {
 		ProjectId:    "e2e",
 	}); err != nil {
 		t.Fatalf("seed bucket: %v", err)
+	}
+	if err := c.Index().Upsert(context.Background(), "bucket-visible-object", "s3://test-bucket-cli/visible.txt", "visible.txt", 7, "", map[string][]string{"syfon": {"e2e"}}); err != nil {
+		t.Fatalf("seed visible object: %v", err)
 	}
 
 	out, err := executeRootCommand(t, "--server", server.URL, "bucket", "list")

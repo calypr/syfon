@@ -39,11 +39,15 @@ func TestTransformIndexdRecord(t *testing.T) {
 	if len(got.AccessMethods) != 2 {
 		t.Fatalf("expected de-duplicated access methods, got %+v", got.AccessMethods)
 	}
-	if got.AccessMethods[0].Authorizations == nil || len((*got.AccessMethods[0].Authorizations)["ohsu"]) != 1 {
-		t.Fatalf("expected authz map on access method, got %+v", got.AccessMethods[0].Authorizations)
-	}
 	if got.CreatedTime.Format(time.RFC3339) != created {
 		t.Fatalf("created time not parsed: %s", got.CreatedTime.Format(time.RFC3339))
+	}
+	internal, err := MigrationRecordToInternalObject(got)
+	if err != nil {
+		t.Fatalf("MigrationRecordToInternalObject returned error: %v", err)
+	}
+	if internal.ControlledAccess == nil || len(*internal.ControlledAccess) != 1 || (*internal.ControlledAccess)[0] != "/organization/ohsu/project/brca" {
+		t.Fatalf("expected controlled access on object, got %+v", internal.ControlledAccess)
 	}
 }
 
@@ -60,8 +64,8 @@ func TestTransformAppliesDefaultAuthz(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Transform returned error: %v", err)
 	}
-	if len(got.Authz) != 1 || got.Authz[0] != "/programs/open" {
-		t.Fatalf("expected default authz, got %+v", got.Authz)
+	if len(got.ControlledAccess) != 1 || got.ControlledAccess[0] != "/organization/open" {
+		t.Fatalf("expected default controlled access, got %+v", got.ControlledAccess)
 	}
 	internal, err := MigrationRecordToInternalObject(got)
 	if err != nil {

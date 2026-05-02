@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	sycommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/models"
 
@@ -183,6 +184,53 @@ func (db *PostgresDB) GetTransferAttributionBreakdown(ctx context.Context, filte
 	return scanTransferAttributionBreakdown(rows)
 }
 
+func (db *PostgresDB) GetTransferAttributionSummaryByResources(ctx context.Context, filter models.TransferAttributionFilter, resources []string) (models.TransferAttributionSummary, error) {
+	where, args := transferAttributionWhereByResources(filter, resources)
+	var out models.TransferAttributionSummary
+	err := db.db.QueryRowContext(ctx, `
+		SELECT
+			COUNT(*),
+			COALESCE(SUM(CASE WHEN event_type = 'access_issued' THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN direction = 'download' THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN direction = 'upload' THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(bytes_requested), 0),
+			COALESCE(SUM(CASE WHEN direction = 'download' THEN bytes_requested ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN direction = 'upload' THEN bytes_requested ELSE 0 END), 0)
+		FROM transfer_attribution_event`+where, args...).Scan(
+		&out.EventCount,
+		&out.AccessIssuedCount,
+		&out.DownloadEventCount,
+		&out.UploadEventCount,
+		&out.BytesRequested,
+		&out.BytesDownloaded,
+		&out.BytesUploaded,
+	)
+	return out, err
+}
+
+func (db *PostgresDB) GetTransferAttributionBreakdownByResources(ctx context.Context, filter models.TransferAttributionFilter, groupBy string, resources []string) ([]models.TransferAttributionBreakdown, error) {
+	keyExpr, selectExpr := transferAttributionGroupExpr(groupBy)
+	where, args := transferAttributionWhereByResources(filter, resources)
+	query := fmt.Sprintf(`
+		SELECT %s,
+			COUNT(*),
+			COALESCE(SUM(bytes_requested), 0),
+			COALESCE(SUM(CASE WHEN direction = 'download' THEN bytes_requested ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN direction = 'upload' THEN bytes_requested ELSE 0 END), 0),
+			MAX(event_time)
+		FROM transfer_attribution_event%s
+		GROUP BY %s
+		ORDER BY MAX(event_time) DESC, key ASC
+		LIMIT 1000
+	`, selectExpr, where, keyExpr)
+	rows, err := db.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanTransferAttributionBreakdown(rows)
+}
+
 func (db *PostgresDB) GetFileUsage(ctx context.Context, objectID string) (*models.FileUsage, error) {
 	if err := db.flushObjectUsageEvents(ctx); err != nil {
 		return nil, err
@@ -226,6 +274,31 @@ func (db *PostgresDB) GetFileUsage(ctx context.Context, objectID string) (*model
 	return &usage, nil
 }
 
+func (db *PostgresDB) ListFileUsageByObjectIDs(ctx context.Context, ids []string) ([]models.FileUsage, error) {
+	if len(ids) == 0 {
+		return []models.FileUsage{}, nil
+	}
+	if err := db.flushObjectUsageEvents(ctx); err != nil {
+		return nil, err
+	}
+	rows, err := db.db.QueryContext(ctx, `
+		SELECT o.id, o.name, o.size,
+			COALESCE(u.upload_count, 0),
+			COALESCE(u.download_count, 0),
+			u.last_upload_time,
+			u.last_download_time
+		FROM drs_object o
+		LEFT JOIN object_usage u ON u.object_id = o.id
+		WHERE o.id = ANY($1)
+		ORDER BY o.id
+	`, pq.Array(ids))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanFileUsageRows(rows, len(ids))
+}
+
 func (db *PostgresDB) ListFileUsage(ctx context.Context, limit, offset int, inactiveSince *time.Time) ([]models.FileUsage, error) {
 	if err := db.flushObjectUsageEvents(ctx); err != nil {
 		return nil, err
@@ -263,7 +336,35 @@ func (db *PostgresDB) ListFileUsage(ctx context.Context, limit, offset int, inac
 	}
 	defer rows.Close()
 
-	out := make([]models.FileUsage, 0, limit)
+	return scanFileUsageRows(rows, limit)
+}
+
+func (db *PostgresDB) ListFileUsagePageByScope(ctx context.Context, organization, project string, limit, offset int, inactiveSince *time.Time) ([]models.FileUsage, error) {
+	resource, err := sycommon.ResourcePath(strings.TrimSpace(organization), strings.TrimSpace(project))
+	if err != nil {
+		return nil, err
+	}
+	return db.listScopedFileUsagePage(ctx, []string{resource}, false, limit, offset, inactiveSince)
+}
+
+func (db *PostgresDB) ListFileUsagePageByResources(ctx context.Context, resources []string, includeUnscoped bool, limit, offset int, inactiveSince *time.Time) ([]models.FileUsage, error) {
+	return db.listScopedFileUsagePage(ctx, resources, includeUnscoped, limit, offset, inactiveSince)
+}
+
+func (db *PostgresDB) GetFileUsageSummaryByScope(ctx context.Context, organization, project string, inactiveSince *time.Time) (models.FileUsageSummary, error) {
+	resource, err := sycommon.ResourcePath(strings.TrimSpace(organization), strings.TrimSpace(project))
+	if err != nil {
+		return models.FileUsageSummary{}, err
+	}
+	return db.getScopedFileUsageSummary(ctx, []string{resource}, false, inactiveSince)
+}
+
+func (db *PostgresDB) GetFileUsageSummaryByResources(ctx context.Context, resources []string, includeUnscoped bool, inactiveSince *time.Time) (models.FileUsageSummary, error) {
+	return db.getScopedFileUsageSummary(ctx, resources, includeUnscoped, inactiveSince)
+}
+
+func scanFileUsageRows(rows *sql.Rows, capacity int) ([]models.FileUsage, error) {
+	out := make([]models.FileUsage, 0, capacity)
 	for rows.Next() {
 		var usage models.FileUsage
 		var lastUpload sql.NullTime
@@ -290,7 +391,112 @@ func (db *PostgresDB) ListFileUsage(ctx context.Context, limit, offset int, inac
 		usage.LastAccessTime = latestUsageTime(usage.LastUploadTime, usage.LastDownloadTime)
 		out = append(out, usage)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 	return out, nil
+}
+
+func (db *PostgresDB) listScopedFileUsagePage(ctx context.Context, resources []string, includeUnscoped bool, limit, offset int, inactiveSince *time.Time) ([]models.FileUsage, error) {
+	if err := db.flushObjectUsageEvents(ctx); err != nil {
+		return nil, err
+	}
+	if limit <= 0 {
+		return []models.FileUsage{}, nil
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	resources = sycommon.NormalizeAccessResources(resources)
+	if len(resources) == 0 && !includeUnscoped {
+		return []models.FileUsage{}, nil
+	}
+
+	query, args := postgresScopedFileUsageQuery(resources, includeUnscoped, inactiveSince, false)
+	args = append(args, limit, offset)
+	query += fmt.Sprintf(` ORDER BY COALESCE(u.last_download_time, '1970-01-01T00:00:00Z') ASC, o.id ASC LIMIT $%d OFFSET $%d`, len(args)-1, len(args))
+	rows, err := db.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanFileUsageRows(rows, limit)
+}
+
+func (db *PostgresDB) getScopedFileUsageSummary(ctx context.Context, resources []string, includeUnscoped bool, inactiveSince *time.Time) (models.FileUsageSummary, error) {
+	if err := db.flushObjectUsageEvents(ctx); err != nil {
+		return models.FileUsageSummary{}, err
+	}
+	resources = sycommon.NormalizeAccessResources(resources)
+	if len(resources) == 0 && !includeUnscoped {
+		return models.FileUsageSummary{}, nil
+	}
+
+	query, args := postgresScopedFileUsageQuery(resources, includeUnscoped, inactiveSince, true)
+	var summary models.FileUsageSummary
+	if err := db.db.QueryRowContext(ctx, query, args...).Scan(
+		&summary.TotalFiles,
+		&summary.TotalUploads,
+		&summary.TotalDownloads,
+		&summary.InactiveFileCount,
+	); err != nil {
+		return models.FileUsageSummary{}, err
+	}
+	return summary, nil
+}
+
+func postgresScopedFileUsageQuery(resources []string, includeUnscoped bool, inactiveSince *time.Time, summary bool) (string, []any) {
+	args := []any{pq.Array(resources), includeUnscoped}
+	var selectClause string
+	if summary {
+		if inactiveSince != nil {
+			args = append(args, inactiveSince.UTC())
+			selectClause = `
+		SELECT
+			COUNT(o.id) AS total_files,
+			COALESCE(SUM(COALESCE(u.upload_count, 0)), 0) AS total_uploads,
+			COALESCE(SUM(COALESCE(u.download_count, 0)), 0) AS total_downloads,
+			COALESCE(SUM(CASE WHEN u.last_download_time IS NULL OR u.last_download_time < $3 THEN 1 ELSE 0 END), 0) AS inactive_files`
+		} else {
+			selectClause = `
+		SELECT
+			COUNT(o.id) AS total_files,
+			COALESCE(SUM(COALESCE(u.upload_count, 0)), 0) AS total_uploads,
+			COALESCE(SUM(COALESCE(u.download_count, 0)), 0) AS total_downloads,
+			0 AS inactive_files`
+		}
+	} else {
+		selectClause = `
+		SELECT o.id, o.name, o.size,
+			COALESCE(u.upload_count, 0),
+			COALESCE(u.download_count, 0),
+			u.last_upload_time,
+			u.last_download_time`
+	}
+
+	query := selectClause + `
+		FROM drs_object o
+		LEFT JOIN object_usage u ON u.object_id = o.id
+		WHERE ((
+			COALESCE(array_length($1::text[], 1), 0) > 0
+			AND EXISTS (
+				SELECT 1
+				FROM drs_object_controlled_access ca
+				WHERE ca.object_id = o.id AND ca.resource = ANY($1)
+			)
+		) OR (
+			$2
+			AND NOT EXISTS (
+				SELECT 1
+				FROM drs_object_controlled_access ca
+				WHERE ca.object_id = o.id
+			)
+		))`
+	if !summary && inactiveSince != nil {
+		args = append(args, inactiveSince.UTC())
+		query += fmt.Sprintf(" AND (u.last_download_time IS NULL OR u.last_download_time < $%d)", len(args))
+	}
+	return query, args
 }
 
 func (db *PostgresDB) GetFileUsageSummary(ctx context.Context, inactiveSince *time.Time) (models.FileUsageSummary, error) {
@@ -772,6 +978,59 @@ func transferAttributionWhere(filter models.TransferAttributionFilter) (string, 
 		return "", args
 	}
 	return " WHERE " + strings.Join(parts, " AND "), args
+}
+
+func transferAttributionWhereByResources(filter models.TransferAttributionFilter, resources []string) (string, []any) {
+	where, args := transferAttributionWhere(filter)
+	clause, clauseArgs := postgresTransferResourceClause(resources, len(args)+1)
+	if clause == "" {
+		if where == "" {
+			return " WHERE 1 = 0", args
+		}
+		return where + " AND 1 = 0", args
+	}
+	if where == "" {
+		return " WHERE " + clause, append(args, clauseArgs...)
+	}
+	return where + " AND (" + clause + ")", append(args, clauseArgs...)
+}
+
+func postgresTransferResourceClause(resources []string, startIndex int) (string, []any) {
+	resources = sycommon.NormalizeAccessResources(resources)
+	if len(resources) == 0 {
+		return "", nil
+	}
+
+	orgOnly := make([]string, 0)
+	orgSeen := make(map[string]struct{})
+	projectClauses := make([]string, 0)
+	args := make([]any, 0, len(resources)*2)
+	for _, resource := range resources {
+		org, project, ok := sycommon.ResourceScope(resource)
+		if !ok {
+			continue
+		}
+		if project == "" {
+			if _, exists := orgSeen[org]; exists {
+				continue
+			}
+			orgSeen[org] = struct{}{}
+			orgOnly = append(orgOnly, org)
+			continue
+		}
+		args = append(args, org, project)
+		projectClauses = append(projectClauses, fmt.Sprintf("(organization = $%d AND project = $%d)", startIndex+len(args)-2, startIndex+len(args)-1))
+	}
+
+	clauses := make([]string, 0, 2)
+	if len(orgOnly) > 0 {
+		args = append(args, pq.Array(orgOnly))
+		clauses = append(clauses, fmt.Sprintf("organization = ANY($%d)", startIndex+len(args)-1))
+	}
+	if len(projectClauses) > 0 {
+		clauses = append(clauses, strings.Join(projectClauses, " OR "))
+	}
+	return strings.Join(clauses, " OR "), args
 }
 
 func providerTransferWhere(filter models.TransferAttributionFilter) (string, []any) {

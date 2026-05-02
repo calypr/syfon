@@ -109,8 +109,7 @@ s3_credentials:
 	uM.RegisterSigner(common.S3Provider, s3.NewS3Signer(database))
 	app := fiber.New()
 	om := core.NewObjectManager(database, uM)
-	internaldrs.RegisterInternalIndexRoutes(app, om)
-	internaldrs.RegisterInternalDataRoutes(app, om)
+	internaldrs.RegisterInternalRoutes(app, om)
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

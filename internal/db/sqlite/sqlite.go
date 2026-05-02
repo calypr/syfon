@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/calypr/syfon/apigen/server/drs"
+	sycommon "github.com/calypr/syfon/common"
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -33,6 +34,9 @@ func NewSqliteDB(dsn string) (*SqliteDB, error) {
 	s := &SqliteDB{db: db}
 	if err := s.initSchema(); err != nil {
 		return nil, fmt.Errorf("failed to init schema: %w", err)
+	}
+	if err := s.normalizeControlledAccessResources(context.Background()); err != nil {
+		return nil, fmt.Errorf("failed to normalize controlled access resources: %w", err)
 	}
 
 	return s, nil
@@ -67,8 +71,11 @@ func (db *SqliteDB) initSchema() error {
 			object_id TEXT,
 			url TEXT,
 			type TEXT,
-			org TEXT NOT NULL DEFAULT '',
-			project TEXT NOT NULL DEFAULT '',
+			FOREIGN KEY(object_id) REFERENCES drs_object(id) ON DELETE CASCADE
+		)`,
+		`CREATE TABLE IF NOT EXISTS drs_object_controlled_access (
+			object_id TEXT,
+			resource TEXT,
 			FOREIGN KEY(object_id) REFERENCES drs_object(id) ON DELETE CASCADE
 		)`,
 		`CREATE TABLE IF NOT EXISTS drs_object_checksum (
@@ -78,8 +85,13 @@ func (db *SqliteDB) initSchema() error {
 			FOREIGN KEY(object_id) REFERENCES drs_object(id) ON DELETE CASCADE
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_drs_object_access_method_object_id ON drs_object_access_method(object_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_drs_object_controlled_access_object_id ON drs_object_controlled_access(object_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_drs_object_controlled_access_resource ON drs_object_controlled_access(resource)`,
+		`CREATE INDEX IF NOT EXISTS idx_drs_object_controlled_access_resource_object_id ON drs_object_controlled_access(resource, object_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_drs_object_controlled_access_object_id_resource ON drs_object_controlled_access(object_id, resource)`,
 		`CREATE INDEX IF NOT EXISTS idx_drs_object_checksum_object_id ON drs_object_checksum(object_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_drs_object_checksum_checksum ON drs_object_checksum(checksum)`,
+		`CREATE INDEX IF NOT EXISTS idx_drs_object_checksum_checksum_type_object_id ON drs_object_checksum(checksum, type, object_id)`,
 		`CREATE TABLE IF NOT EXISTS drs_object_alias (
 			alias_id TEXT PRIMARY KEY,
 			object_id TEXT NOT NULL,
@@ -122,6 +134,7 @@ func (db *SqliteDB) initSchema() error {
 			FOREIGN KEY(object_id) REFERENCES drs_object(id) ON DELETE CASCADE
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_object_usage_last_download_time ON object_usage(last_download_time)`,
+		`CREATE INDEX IF NOT EXISTS idx_object_usage_last_download_time_object_id ON object_usage(last_download_time, object_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_object_usage_last_upload_time ON object_usage(last_upload_time)`,
 		`CREATE TABLE IF NOT EXISTS object_usage_event (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -208,6 +221,7 @@ func (db *SqliteDB) initSchema() error {
 			reconciliation_status TEXT NOT NULL DEFAULT 'unmatched' CHECK(reconciliation_status IN ('matched','ambiguous','unmatched'))
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_transfer_attr_scope_time ON transfer_attribution_event(organization, project, event_type, event_time)`,
+		`CREATE INDEX IF NOT EXISTS idx_transfer_attr_scope_event_time ON transfer_attribution_event(organization, project, event_time)`,
 		`CREATE INDEX IF NOT EXISTS idx_transfer_attr_actor_time ON transfer_attribution_event(actor_email, actor_subject, event_time)`,
 		`CREATE INDEX IF NOT EXISTS idx_transfer_attr_provider_time ON transfer_attribution_event(provider, bucket, event_time)`,
 		`CREATE INDEX IF NOT EXISTS idx_transfer_attr_sha_time ON transfer_attribution_event(sha256, event_time)`,
@@ -227,19 +241,6 @@ func (db *SqliteDB) initSchema() error {
 		if _, err := db.db.Exec(q); err != nil {
 			return err
 		}
-	}
-	for _, stmt := range []string{
-		`ALTER TABLE drs_object_access_method ADD COLUMN org TEXT NOT NULL DEFAULT ''`,
-		`ALTER TABLE drs_object_access_method ADD COLUMN project TEXT NOT NULL DEFAULT ''`,
-	} {
-		if _, err := db.db.Exec(stmt); err != nil {
-			if !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
-				return err
-			}
-		}
-	}
-	if _, err := db.db.Exec(`CREATE INDEX IF NOT EXISTS idx_drs_object_access_method_scope ON drs_object_access_method(org, project)`); err != nil {
-		return err
 	}
 	if _, err := db.db.Exec(`ALTER TABLE s3_credential ADD COLUMN provider TEXT NOT NULL DEFAULT 's3'`); err != nil {
 		if !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
@@ -273,6 +274,58 @@ func (db *SqliteDB) initSchema() error {
 		return err
 	}
 	return nil
+}
+
+func (db *SqliteDB) normalizeControlledAccessResources(ctx context.Context) error {
+	rows, err := db.db.QueryContext(ctx, `SELECT object_id, resource FROM drs_object_controlled_access`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	type rewrite struct {
+		objectID string
+		old      string
+		new      string
+	}
+	rewrites := []rewrite{}
+	for rows.Next() {
+		var objectID, resource string
+		if err := rows.Scan(&objectID, &resource); err != nil {
+			return err
+		}
+		normalized := sycommon.NormalizeAccessResource(resource)
+		if normalized == "" || normalized == resource {
+			continue
+		}
+		rewrites = append(rewrites, rewrite{objectID: objectID, old: resource, new: normalized})
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if len(rewrites) == 0 {
+		return nil
+	}
+
+	tx, err := db.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, rw := range rewrites {
+		if _, err := tx.ExecContext(ctx, `
+			DELETE FROM drs_object_controlled_access
+			WHERE object_id = ? AND resource = ?`, rw.objectID, rw.new); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE drs_object_controlled_access
+			SET resource = ?
+			WHERE object_id = ? AND resource = ?`, rw.new, rw.objectID, rw.old); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func (db *SqliteDB) GetServiceInfo(ctx context.Context) (*drs.Service, error) {

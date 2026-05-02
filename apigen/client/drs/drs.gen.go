@@ -97,8 +97,6 @@ type AccessMethod struct {
 		// Url A fully resolvable URL that can be used to fetch the actual object bytes.
 		Url string `json:"url"`
 	} `json:"access_url,omitempty"`
-
-	// Authorizations A map of organization to project list. An empty array means org-wide access. A non-empty array grants access scoped to the listed projects.
 	Authorizations *struct {
 		// BearerAuthIssuers If authorizations contain `BearerAuth` this is an optional list of issuers that may authorize access to this object. The caller must provide a token from one of these issuers. If this is empty or missing it assumed the caller knows which token to send via other means. It is strongly recommended that the caller validate that it is appropriate to send the requested token to the DRS server to mitigate attacks by malicious DRS servers requesting credentials they should not have.
 		BearerAuthIssuers *[]string `json:"bearer_auth_issuers,omitempty"`
@@ -690,8 +688,8 @@ type Unresolved = []struct {
 // AccessId defines model for AccessId.
 type AccessId = string
 
-// ChecksumParam defines model for Checksum.
-type ChecksumParam = string
+// ChecksumParameter defines model for Checksum.
+type ChecksumParameter = string
 
 // Expand defines model for Expand.
 type Expand = bool
@@ -1155,7 +1153,7 @@ type ClientInterface interface {
 	BulkUpdateAccessMethods(ctx context.Context, body BulkUpdateAccessMethodsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetObjectsByChecksum request
-	GetObjectsByChecksum(ctx context.Context, checksumParam ChecksumParam, reqEditors ...RequestEditorFn) (*http.Response, error)
+	GetObjectsByChecksum(ctx context.Context, checksumParameter ChecksumParameter, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// BulkAddChecksumsWithBody request with any body
 	BulkAddChecksumsWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -1299,8 +1297,8 @@ func (c *Client) BulkUpdateAccessMethods(ctx context.Context, body BulkUpdateAcc
 	return c.Client.Do(req)
 }
 
-func (c *Client) GetObjectsByChecksum(ctx context.Context, checksumParam ChecksumParam, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewGetObjectsByChecksumRequest(c.Server, checksumParam)
+func (c *Client) GetObjectsByChecksum(ctx context.Context, checksumParameter ChecksumParameter, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetObjectsByChecksumRequest(c.Server, checksumParameter)
 	if err != nil {
 		return nil, err
 	}
@@ -1745,12 +1743,12 @@ func NewBulkUpdateAccessMethodsRequestWithBody(server string, contentType string
 }
 
 // NewGetObjectsByChecksumRequest generates requests for GetObjectsByChecksum
-func NewGetObjectsByChecksumRequest(server string, checksumParam ChecksumParam) (*http.Request, error) {
+func NewGetObjectsByChecksumRequest(server string, checksumParameter ChecksumParameter) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
 
-	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "checksum", runtime.ParamLocationPath, checksumParam)
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "checksum", runtime.ParamLocationPath, checksumParameter)
 	if err != nil {
 		return nil, err
 	}
@@ -2400,7 +2398,7 @@ type ClientWithResponsesInterface interface {
 	BulkUpdateAccessMethodsWithResponse(ctx context.Context, body BulkUpdateAccessMethodsJSONRequestBody, reqEditors ...RequestEditorFn) (*BulkUpdateAccessMethodsResponse, error)
 
 	// GetObjectsByChecksumWithResponse request
-	GetObjectsByChecksumWithResponse(ctx context.Context, checksumParam ChecksumParam, reqEditors ...RequestEditorFn) (*GetObjectsByChecksumResponse, error)
+	GetObjectsByChecksumWithResponse(ctx context.Context, checksumParameter ChecksumParameter, reqEditors ...RequestEditorFn) (*GetObjectsByChecksumResponse, error)
 
 	// BulkAddChecksumsWithBodyWithResponse request with any body
 	BulkAddChecksumsWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*BulkAddChecksumsResponse, error)
@@ -3007,8 +3005,8 @@ func (c *ClientWithResponses) BulkUpdateAccessMethodsWithResponse(ctx context.Co
 }
 
 // GetObjectsByChecksumWithResponse request returning *GetObjectsByChecksumResponse
-func (c *ClientWithResponses) GetObjectsByChecksumWithResponse(ctx context.Context, checksumParam ChecksumParam, reqEditors ...RequestEditorFn) (*GetObjectsByChecksumResponse, error) {
-	rsp, err := c.GetObjectsByChecksum(ctx, checksumParam, reqEditors...)
+func (c *ClientWithResponses) GetObjectsByChecksumWithResponse(ctx context.Context, checksumParameter ChecksumParameter, reqEditors ...RequestEditorFn) (*GetObjectsByChecksumResponse, error) {
+	rsp, err := c.GetObjectsByChecksum(ctx, checksumParameter, reqEditors...)
 	if err != nil {
 		return nil, err
 	}

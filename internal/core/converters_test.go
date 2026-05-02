@@ -11,12 +11,14 @@ import (
 
 func TestUniqueAuthzAndConverters(t *testing.T) {
 	t.Run("unique authz flattens map", func(t *testing.T) {
-		authz := map[string][]string{
-			"syfon": []string{"e2e", "e2e-2"},
-			"other": []string{},
-		}
+		authz := []string{"/programs/syfon/projects/e2e", "/programs/syfon/projects/e2e-2", "/programs/other"}
 		got := UniqueAuthz([]drs.AccessMethod{{
-			Authorizations: &authz,
+			Authorizations: &struct {
+				BearerAuthIssuers   *[]string                                       `json:"bearer_auth_issuers,omitempty"`
+				DrsObjectId         *string                                         `json:"drs_object_id,omitempty"`
+				PassportAuthIssuers *[]string                                       `json:"passport_auth_issuers,omitempty"`
+				SupportedTypes      *[]drs.AccessMethodAuthorizationsSupportedTypes `json:"supported_types,omitempty"`
+			}{BearerAuthIssuers: &authz},
 		}})
 		if len(got) != 2 {
 			t.Fatalf("unexpected authz map length: got=%v", got)
@@ -30,7 +32,7 @@ func TestUniqueAuthzAndConverters(t *testing.T) {
 	})
 
 	t.Run("candidate to internal object", func(t *testing.T) {
-		authz := map[string][]string{"syfon": []string{"e2e"}}
+		authz := []string{"/programs/syfon/projects/e2e"}
 		url := "https://storage.example/object.bin"
 		name := "object.bin"
 		size := int64(42)
@@ -44,8 +46,8 @@ func TestUniqueAuthzAndConverters(t *testing.T) {
 					Headers *[]string `json:"headers,omitempty"`
 					Url     string    `json:"url"`
 				}{Url: url},
-				Authorizations: &authz,
 			}},
+			ControlledAccess: &authz,
 		}
 
 		obj, err := CandidateToInternalObject(candidate, time.Unix(123, 0))
@@ -82,8 +84,8 @@ func TestUniqueAuthzAndConverters(t *testing.T) {
 		if got.AccessMethods == nil || len(*got.AccessMethods) != 1 {
 			t.Fatalf("expected one access method, got %+v", got.AccessMethods)
 		}
-		if (*got.AccessMethods)[0].Authorizations == nil || len(*(*got.AccessMethods)[0].Authorizations) != 1 {
-			t.Fatalf("expected authz map on access method, got %+v", (*got.AccessMethods)[0].Authorizations)
+		if (*got.AccessMethods)[0].Authorizations != nil {
+			t.Fatalf("did not expect authz map on access method, got %+v", (*got.AccessMethods)[0].Authorizations)
 		}
 	})
 }

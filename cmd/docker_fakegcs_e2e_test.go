@@ -84,8 +84,6 @@ s3_credentials:
 		Provider:     "gcs",
 		Region:       "us-central1",
 		Endpoint:     fakeGCS.endpoint,
-		LogBucket:    fakeGCS.bucket,
-		LogPrefix:    ".syfon/provider-transfer-events",
 		Organization: "syfon",
 		ProjectID:    "e2e",
 	})

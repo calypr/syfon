@@ -56,21 +56,17 @@ type ObjectMetadata struct {
 	Provider     string
 }
 
-// ObjectReader provides metadata and single-stream read access.
-type ObjectReader interface {
+// ReadBackend provides metadata, single-stream reads, and ranged reads.
+type ReadBackend interface {
+	Service
 	Stat(ctx context.Context, guid string) (*ObjectMetadata, error)
 	GetReader(ctx context.Context, guid string) (io.ReadCloser, error)
-}
-
-// RangeReader enables high-performance parallel downloads.
-type RangeReader interface {
-	ObjectReader
 	GetRangeReader(ctx context.Context, guid string, offset, length int64) (io.ReadCloser, error)
 }
 
-// ObjectWriter provides write access.
-type ObjectWriter interface {
-	GetWriter(ctx context.Context, guid string) (io.WriteCloser, error)
+// WriteBackend provides single-stream write access.
+type WriteBackend interface {
+	Service
 	Upload(ctx context.Context, guid string, body io.Reader, size int64) error
 }
 
@@ -80,9 +76,9 @@ type MultipartPart struct {
 	ETag       string
 }
 
-// MultipartWriter enables specialized multipart uploads (init/part/complete).
-type MultipartWriter interface {
-	ObjectWriter
+// MultipartBackend enables specialized multipart uploads (init/part/complete).
+type MultipartBackend interface {
+	WriteBackend
 	MultipartInit(ctx context.Context, guid string) (string, error)
 	MultipartPart(ctx context.Context, guid string, uploadID string, partNum int, body io.Reader) (string, error)
 	MultipartComplete(ctx context.Context, guid string, uploadID string, parts []MultipartPart) error
@@ -91,6 +87,11 @@ type MultipartWriter interface {
 // ObjectDeleter handles cleanup.
 type ObjectDeleter interface {
 	Delete(ctx context.Context, guid string) error
+}
+
+// Validator checks bucket/provider configuration.
+type Validator interface {
+	Validate(ctx context.Context, bucket string) error
 }
 
 // SignedURL contains a URL and any mandatory headers for access.
@@ -117,12 +118,10 @@ type Resolver interface {
 
 // Backend embeds capabilities and includes bucket validation.
 type Backend interface {
-	Service
-	RangeReader
-	ObjectWriter
-	MultipartWriter
+	ReadBackend
+	MultipartBackend
 	ObjectDeleter
-	Validate(ctx context.Context, bucket string) error
+	Validator
 }
 
 // Downloader is the signed URL resolution and byte download surface.

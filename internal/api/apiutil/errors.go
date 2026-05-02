@@ -30,6 +30,10 @@ func HandleError(c fiber.Ctx, err error) error {
 			status = http.StatusUnauthorized
 		}
 		msg = "Unauthorized"
+		var publicErr common.PublicError
+		if status == http.StatusForbidden && errors.As(err, &publicErr) {
+			msg = publicErr.PublicMessage()
+		}
 	case errors.Is(err, common.ErrConflict):
 		status = http.StatusConflict
 	case errors.Is(err, common.ErrNoValidSHA256):

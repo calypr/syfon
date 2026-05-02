@@ -14,8 +14,12 @@ CREATE TABLE IF NOT EXISTS drs_object_access_method (
   object_id TEXT,
   url TEXT,
   type TEXT,
-  org TEXT NOT NULL DEFAULT '',
-  project TEXT NOT NULL DEFAULT '',
+  FOREIGN KEY(object_id) REFERENCES drs_object(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS drs_object_controlled_access (
+  object_id TEXT,
+  resource TEXT,
   FOREIGN KEY(object_id) REFERENCES drs_object(id) ON DELETE CASCADE
 );
 
@@ -27,7 +31,8 @@ CREATE TABLE IF NOT EXISTS drs_object_checksum (
 );
 
 CREATE INDEX IF NOT EXISTS idx_drs_object_access_method_object_id ON drs_object_access_method(object_id);
-CREATE INDEX IF NOT EXISTS idx_drs_object_access_method_scope ON drs_object_access_method(org, project);
+CREATE INDEX IF NOT EXISTS idx_drs_object_controlled_access_object_id ON drs_object_controlled_access(object_id);
+CREATE INDEX IF NOT EXISTS idx_drs_object_controlled_access_resource ON drs_object_controlled_access(resource);
 CREATE INDEX IF NOT EXISTS idx_drs_object_checksum_object_id ON drs_object_checksum(object_id);
 CREATE INDEX IF NOT EXISTS idx_drs_object_checksum_checksum ON drs_object_checksum(checksum);
 

@@ -2,8 +2,10 @@ package authz
 
 import (
 	"context"
+	"strings"
 
 	sycommon "github.com/calypr/syfon/common"
+	internalauth "github.com/calypr/syfon/internal/auth"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/models"
 )
@@ -11,14 +13,7 @@ import (
 // GetUserAuthz returns the list of resources the user is authorized to access.
 // If not found, returns empty list (no access to protected resources).
 func GetUserAuthz(ctx context.Context) []string {
-	val := ctx.Value(common.UserAuthzKey)
-	if val == nil {
-		return []string{}
-	}
-	if list, ok := val.([]string); ok {
-		return list
-	}
-	return []string{}
+	return internalauth.FromContext(ctx).Resources
 }
 
 // CheckAccess verifies if a user has access to a record based on RBAC resources.
@@ -26,13 +21,16 @@ func GetUserAuthz(ctx context.Context) []string {
 // 1. It has NO required resources (public).
 // 2. OR the user has at least one of the resources listed on the record.
 func CheckAccess(recordResources []string, userResources []string) bool {
+	recordResources = sycommon.NormalizeAccessResources(recordResources)
 	if len(recordResources) == 0 {
 		return true // Public
 	}
 	// Create map for O(1) check
 	userMap := make(map[string]bool)
 	for _, r := range userResources {
-		userMap[r] = true
+		if normalized := sycommon.NormalizeAccessResource(r); normalized != "" {
+			userMap[normalized] = true
+		}
 	}
 
 	for _, r := range recordResources {
@@ -44,35 +42,23 @@ func CheckAccess(recordResources []string, userResources []string) bool {
 }
 
 func HasAuthHeader(ctx context.Context) bool {
-	v := ctx.Value(common.AuthHeaderPresentKey)
-	ok, _ := v.(bool)
-	return ok
+	return internalauth.FromContext(ctx).AuthHeaderPresent
 }
 
 func IsGen3Mode(ctx context.Context) bool {
-	v := ctx.Value(common.AuthModeKey)
-	mode, _ := v.(string)
-	return mode == "gen3"
+	return internalauth.FromContext(ctx).Mode == "gen3"
 }
 
 func IsAuthzEnforced(ctx context.Context) bool {
-	if IsGen3Mode(ctx) {
+	session := internalauth.FromContext(ctx)
+	if session.Mode == "gen3" {
 		return true
 	}
-	v := ctx.Value(common.AuthzEnforcedKey)
-	enforced, _ := v.(bool)
-	return enforced
+	return session.AuthzEnforced
 }
 
 func GetUserPrivileges(ctx context.Context) map[string]map[string]bool {
-	v := ctx.Value(common.UserPrivilegesKey)
-	if v == nil {
-		return map[string]map[string]bool{}
-	}
-	if p, ok := v.(map[string]map[string]bool); ok {
-		return p
-	}
-	return map[string]map[string]bool{}
+	return internalauth.FromContext(ctx).Privileges
 }
 
 func HasMethodAccess(ctx context.Context, method string, resources []string) bool {
@@ -82,7 +68,8 @@ func HasMethodAccess(ctx context.Context, method string, resources []string) boo
 	if IsGen3Mode(ctx) && !HasAuthHeader(ctx) {
 		return false
 	}
-	privs := GetUserPrivileges(ctx)
+	privs := normalizePrivileges(GetUserPrivileges(ctx))
+	resources = sycommon.NormalizeAccessResources(resources)
 	if len(resources) == 0 {
 		return false
 	}
@@ -99,6 +86,33 @@ func HasMethodAccess(ctx context.Context, method string, resources []string) boo
 	return true
 }
 
+func HasObjectMethodAccess(ctx context.Context, method string, resources []string) bool {
+	if !IsAuthzEnforced(ctx) {
+		return true
+	}
+	if IsGen3Mode(ctx) && !HasAuthHeader(ctx) {
+		return false
+	}
+	resources = sycommon.NormalizeAccessResources(resources)
+	if len(resources) == 0 {
+		return strings.EqualFold(strings.TrimSpace(method), "read")
+	}
+	privs := normalizePrivileges(GetUserPrivileges(ctx))
+	if len(privs) == 0 {
+		return CheckAccess(resources, GetUserAuthz(ctx))
+	}
+	for _, resource := range resources {
+		methods, ok := privs[resource]
+		if !ok {
+			continue
+		}
+		if methods[method] || methods["*"] {
+			return true
+		}
+	}
+	return false
+}
+
 func HasAnyMethodAccess(ctx context.Context, resources []string, methods ...string) bool {
 	if !IsAuthzEnforced(ctx) {
 		return true
@@ -112,6 +126,25 @@ func HasAnyMethodAccess(ctx context.Context, resources []string, methods ...stri
 		}
 	}
 	return false
+}
+
+func normalizePrivileges(in map[string]map[string]bool) map[string]map[string]bool {
+	out := make(map[string]map[string]bool, len(in))
+	for rawResource, methods := range in {
+		resource := sycommon.NormalizeAccessResource(rawResource)
+		if resource == "" {
+			continue
+		}
+		if out[resource] == nil {
+			out[resource] = map[string]bool{}
+		}
+		for method, allowed := range methods {
+			if allowed {
+				out[resource][method] = true
+			}
+		}
+	}
+	return out
 }
 
 func AuthStatusCode(ctx context.Context) int {
