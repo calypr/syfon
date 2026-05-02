@@ -54,6 +54,7 @@ func PreflightImport(ctx context.Context, reader DumpReader, privileges Privileg
 	if err != nil {
 		return ImportPreflightReport{}, fmt.Errorf("load target privileges: %w", err)
 	}
+	userPrivileges = normalizePrivileges(userPrivileges)
 
 	report := ImportPreflightReport{}
 	required := map[string]struct{}{}
@@ -145,6 +146,28 @@ func hasCreateAccess(privileges map[string]map[string]bool, resources []string) 
 	return false
 }
 
+func normalizePrivileges(privileges map[string]map[string]bool) map[string]map[string]bool {
+	if len(privileges) == 0 {
+		return nil
+	}
+	out := make(map[string]map[string]bool, len(privileges))
+	for rawResource, methods := range privileges {
+		resource := syfoncommon.NormalizeAccessResource(rawResource)
+		if resource == "" {
+			continue
+		}
+		if out[resource] == nil {
+			out[resource] = map[string]bool{}
+		}
+		for method, allowed := range methods {
+			if allowed {
+				out[resource][method] = true
+			}
+		}
+	}
+	return out
+}
+
 func sortedMapKeys(in map[string]struct{}) []string {
 	out := make([]string, 0, len(in))
 	for key := range in {
@@ -168,16 +191,15 @@ func FormatPreflightScopes(resources []string) []string {
 
 func formatPreflightScope(resource string) string {
 	resource = syfoncommon.NormalizeAccessResource(resource)
-	trimmed := strings.TrimPrefix(resource, "/programs/")
-	if trimmed == resource {
+	org, project, ok := syfoncommon.ResourceScope(resource)
+	if !ok {
 		return resource
 	}
-	parts := strings.SplitN(trimmed, "/projects/", 2)
-	if len(parts) == 2 && parts[0] != "" && parts[1] != "" {
-		return parts[0] + "/" + parts[1]
+	if org != "" && project != "" {
+		return org + "/" + project
 	}
-	if strings.TrimSpace(parts[0]) != "" {
-		return parts[0] + "/*"
+	if strings.TrimSpace(org) != "" {
+		return org + "/*"
 	}
 	return resource
 }

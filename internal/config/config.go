@@ -458,7 +458,7 @@ func LoadConfig(configFile string) (*Config, error) {
 			return nil, fmt.Errorf("s3_credentials[%d]: %w", i, err)
 		}
 		cfg.S3Credentials[i].Provider = bucketProvider
-		if err := common.ValidateBucketName(bucketProvider, cred.Bucket); err != nil {
+		if err := common.ValidateBucketNameWithEndpoint(bucketProvider, cred.Bucket, cred.Endpoint); err != nil {
 			return nil, fmt.Errorf("s3_credentials[%d]: %w", i, err)
 		}
 		if bucketProvider == common.S3Provider {

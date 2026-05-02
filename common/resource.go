@@ -6,8 +6,8 @@ import (
 	"strings"
 )
 
-// ResourcePath returns the GA4GH resource path for an org/project scope,
-// e.g. "/programs/myorg/projects/myproject".
+// ResourcePath returns the canonical resource path for an org/project scope,
+// e.g. "/organization/myorg/project/myproject".
 func ResourcePath(org, project string) (string, error) {
 	org = strings.TrimSpace(org)
 	project = strings.TrimSpace(project)
@@ -18,9 +18,9 @@ func ResourcePath(org, project string) (string, error) {
 		return "", fmt.Errorf("organization required when project is specified")
 	}
 	if project == "" {
-		return "/programs/" + org, nil
+		return "/organization/" + org, nil
 	}
-	return "/programs/" + org + "/projects/" + project, nil
+	return "/organization/" + org + "/project/" + project, nil
 }
 
 // StoragePrefix returns the storage path prefix for an org/project scope
@@ -52,8 +52,9 @@ func AuthzMapFromScope(org, project string) map[string][]string {
 	return map[string][]string{org: {project}}
 }
 
-// AuthzListToMap converts a list of GA4GH resource-path strings (e.g.
-// "/programs/org/projects/proj") to the wire-format org→projects map.
+// AuthzListToMap converts a list of resource-path strings (for example
+// "/organization/org/project/proj" or legacy "/programs/org/projects/proj")
+// to the wire-format org→projects map.
 func AuthzListToMap(paths []string) map[string][]string {
 	if len(paths) == 0 {
 		return nil
@@ -79,7 +80,7 @@ func AuthzListToMap(paths []string) map[string][]string {
 }
 
 // AuthzMapToList converts the wire-format org→projects map back to a list of
-// GA4GH resource-path strings for internal storage.
+// canonical resource-path strings for internal storage.
 func AuthzMapToList(authzMap map[string][]string) []string {
 	if len(authzMap) == 0 {
 		return nil
@@ -87,15 +88,15 @@ func AuthzMapToList(authzMap map[string][]string) []string {
 	out := make([]string, 0, len(authzMap))
 	for org, projects := range authzMap {
 		if len(projects) == 0 {
-			out = append(out, "/programs/"+org)
+			out = append(out, "/organization/"+org)
 		} else {
 			for _, project := range projects {
 				project = strings.TrimSpace(project)
 				if project == "" {
-					out = append(out, "/programs/"+org)
+					out = append(out, "/organization/"+org)
 					continue
 				}
-				out = append(out, "/programs/"+org+"/projects/"+project)
+				out = append(out, "/organization/"+org+"/project/"+project)
 			}
 		}
 	}
@@ -103,8 +104,8 @@ func AuthzMapToList(authzMap map[string][]string) []string {
 }
 
 // NormalizeAccessResource converts GA4GH controlled_access URL claims and
-// Gen3 resource paths into the canonical resource form used for privilege
-// checks: /programs/<program>[/projects/<project>].
+// accepted resource path aliases into the canonical resource form used for
+// privilege checks: /organization/<organization>[/project/<project>].
 func NormalizeAccessResource(raw string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -116,7 +117,7 @@ func NormalizeAccessResource(raw string) string {
 	}
 	path = "/" + strings.Trim(path, "/")
 	parts := strings.Split(strings.Trim(path, "/"), "/")
-	if len(parts) >= 2 && (parts[0] == "program" || parts[0] == "programs") {
+	if len(parts) >= 2 && (parts[0] == "program" || parts[0] == "programs" || parts[0] == "organization" || parts[0] == "organizations") {
 		org := strings.TrimSpace(parts[1])
 		if org == "" {
 			return ""
@@ -124,10 +125,10 @@ func NormalizeAccessResource(raw string) string {
 		if len(parts) >= 4 && (parts[2] == "project" || parts[2] == "projects") {
 			project := strings.TrimSpace(parts[3])
 			if project != "" {
-				return "/programs/" + org + "/projects/" + project
+				return "/organization/" + org + "/project/" + project
 			}
 		}
-		return "/programs/" + org
+		return "/organization/" + org
 	}
 	return raw
 }
@@ -183,8 +184,10 @@ func AuthzMapMatchesScope(authzMap map[string][]string, org, project string) boo
 	return false
 }
 
-// ResourceScope parses a canonical or raw access resource into (organization, project).
-// It accepts "/programs/org" and "/programs/org/projects/proj" forms.
+// ResourceScope parses a canonical or raw access resource into
+// (organization, project). It accepts "/organization/org",
+// "/organization/org/project/proj", and legacy
+// "/programs/org/projects/proj" alias forms.
 func ResourceScope(resource string) (string, string, bool) {
 	org, project := parseResourcePath(resource)
 	if org == "" {
@@ -193,11 +196,14 @@ func ResourceScope(resource string) (string, string, bool) {
 	return org, project, true
 }
 
-// parseResourcePath splits "/programs/org" or "/programs/org/projects/proj" into (org, project).
+// parseResourcePath splits supported resource-path forms into (org, project).
 func parseResourcePath(path string) (string, string) {
 	path = NormalizeAccessResource(path)
-	path = strings.TrimPrefix(path, "/programs/")
-	parts := strings.SplitN(path, "/projects/", 2)
+	if !strings.HasPrefix(path, "/organization/") {
+		return "", ""
+	}
+	path = strings.TrimPrefix(path, "/organization/")
+	parts := strings.SplitN(path, "/project/", 2)
 	if len(parts) == 1 {
 		return strings.TrimSpace(parts[0]), ""
 	}

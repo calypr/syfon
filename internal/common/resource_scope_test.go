@@ -10,12 +10,22 @@ func TestParseResourcePath(t *testing.T) {
 	}{
 		{
 			name: "full scope",
-			path: "/programs/cbds/projects/proj",
+			path: "/organization/cbds/project/proj",
 			want: ResourceScope{Organization: "cbds", Project: "proj"},
 		},
 		{
 			name: "organization only",
-			path: "/programs/cbds",
+			path: "/organization/cbds",
+			want: ResourceScope{Organization: "cbds"},
+		},
+		{
+			name: "organization alias full scope",
+			path: "/organization/cbds/project/proj",
+			want: ResourceScope{Organization: "cbds", Project: "proj"},
+		},
+		{
+			name: "organization alias organization only",
+			path: "/organization/cbds",
 			want: ResourceScope{Organization: "cbds"},
 		},
 		{
@@ -25,7 +35,7 @@ func TestParseResourcePath(t *testing.T) {
 		},
 		{
 			name: "trimmed path",
-			path: "   /programs/cbds/projects/proj  ",
+			path: "   /organization/cbds/project/proj  ",
 			want: ResourceScope{Organization: "cbds", Project: "proj"},
 		},
 	}

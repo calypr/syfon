@@ -46,7 +46,7 @@ func TestTransformIndexdRecord(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MigrationRecordToInternalObject returned error: %v", err)
 	}
-	if internal.ControlledAccess == nil || len(*internal.ControlledAccess) != 1 || (*internal.ControlledAccess)[0] != "/programs/ohsu/projects/brca" {
+	if internal.ControlledAccess == nil || len(*internal.ControlledAccess) != 1 || (*internal.ControlledAccess)[0] != "/organization/ohsu/project/brca" {
 		t.Fatalf("expected controlled access on object, got %+v", internal.ControlledAccess)
 	}
 }
@@ -64,7 +64,7 @@ func TestTransformAppliesDefaultAuthz(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Transform returned error: %v", err)
 	}
-	if len(got.ControlledAccess) != 1 || got.ControlledAccess[0] != "/programs/open" {
+	if len(got.ControlledAccess) != 1 || got.ControlledAccess[0] != "/organization/open" {
 		t.Fatalf("expected default controlled access, got %+v", got.ControlledAccess)
 	}
 	internal, err := MigrationRecordToInternalObject(got)

@@ -117,7 +117,7 @@ func TestHTTPClientEndToEndWithMockIndexdAndSyfon(t *testing.T) {
 	if loaded.Records[0].Did != "dg.test/1" {
 		t.Fatalf("unexpected loaded payload: %+v", loaded.Records[0])
 	}
-	if len(loaded.Records[0].ControlledAccess) != 1 || loaded.Records[0].ControlledAccess[0] != "/programs/foo/projects/bar" {
+	if len(loaded.Records[0].ControlledAccess) != 1 || loaded.Records[0].ControlledAccess[0] != "/organization/foo/project/bar" {
 		t.Fatalf("expected controlled_access payload, got %+v", loaded.Records[0])
 	}
 	if len(loaded.Records[0].AccessMethods) != 1 || loaded.Records[0].AccessMethods[0].AccessUrl.Url != "s3://bucket/key" {
@@ -212,10 +212,10 @@ func TestHTTPClientUserPrivileges(t *testing.T) {
 	if gotAuth != "Bearer tok" {
 		t.Fatalf("expected bearer auth header, got %q", gotAuth)
 	}
-	if !privileges["/programs/cbds/projects/p1"]["create"] {
+	if !privileges["/organization/cbds/project/p1"]["create"] {
 		t.Fatalf("expected create privilege for p1, got %+v", privileges)
 	}
-	if privileges["/programs/cbds/projects/p2"]["create"] {
+	if privileges["/organization/cbds/project/p2"]["create"] {
 		t.Fatalf("did not expect non-indexd/drs create privilege to be retained: %+v", privileges)
 	}
 }

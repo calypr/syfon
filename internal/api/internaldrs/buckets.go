@@ -74,9 +74,6 @@ func handleInternalPutBucketFiber(c fiber.Ctx, om *core.ObjectManager) error {
 	if req.Organization == "" && req.ProjectId != "" {
 		return c.Status(fiber.StatusBadRequest).SendString("organization is required when project_id is set")
 	}
-	if err := common.ValidateBucketName(bucketProvider, req.Bucket); err != nil {
-		return c.Status(fiber.StatusBadRequest).SendString(err.Error())
-	}
 	if err := authorizeBucketScopeWrite(c.Context(), req.Organization, req.ProjectId, "create", "update"); err != nil {
 		return apiutil.HandleError(c, err)
 	}
@@ -142,6 +139,9 @@ func handleInternalPutBucketFiber(c fiber.Ctx, om *core.ObjectManager) error {
 		if billingLogPrefix == "" {
 			billingLogPrefix = existingCred.BillingLogPrefix
 		}
+	}
+	if err := common.ValidateBucketNameWithEndpoint(bucketProvider, req.Bucket, endpoint); err != nil {
+		return c.Status(fiber.StatusBadRequest).SendString(err.Error())
 	}
 
 	cred := &models.S3Credential{

@@ -784,6 +784,39 @@ s3_credentials:
 	}
 }
 
+func TestLoadConfig_S3CompatibleCustomEndpointAllowsNonAWSDNSBucketNames(t *testing.T) {
+	content := `
+auth:
+  mode: local
+database:
+  sqlite:
+    file: "test.db"
+s3_credentials:
+  - bucket: "EllrottLab"
+    provider: "s3"
+    endpoint: "https://rgw.ohsu.edu"
+    region: "us-east-1"
+    access_key: "test-key"
+    secret_key: "test-secret"
+`
+
+	tmpfile, err := os.CreateTemp("", "config-s3-compatible-bucket-*.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpfile.Name())
+	if _, err := tmpfile.Write([]byte(content)); err != nil {
+		t.Fatal(err)
+	}
+	if err := tmpfile.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := LoadConfig(tmpfile.Name()); err != nil {
+		t.Fatalf("expected custom-endpoint s3 bucket to pass validation, got error: %v", err)
+	}
+}
+
 func TestLoadConfig_RouteEnvOverrides(t *testing.T) {
 	t.Setenv("DRS_DB_SQLITE_FILE", "drs.db")
 	t.Setenv("DRS_AUTH_MODE", "local")

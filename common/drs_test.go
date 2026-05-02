@@ -77,7 +77,7 @@ func TestEnsureAccessMethodAuthorizations(t *testing.T) {
 func TestDrsObjectMatchesScope(t *testing.T) {
 	t.Run("controlled access", func(t *testing.T) {
 		obj := &drsapi.DrsObject{
-			ControlledAccess: &[]string{"/programs/org/projects/proj"},
+			ControlledAccess: &[]string{"/organization/org/project/proj"},
 		}
 		if !DrsObjectMatchesScope(obj, "org", "proj") {
 			t.Fatal("expected controlled-access match")
