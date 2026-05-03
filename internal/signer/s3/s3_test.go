@@ -2,10 +2,13 @@ package s3
 
 import (
 	"context"
+	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/models"
+	"github.com/calypr/syfon/internal/signer"
 	"github.com/calypr/syfon/internal/testutils"
 )
 
@@ -86,4 +89,39 @@ func TestS3Signer_getClients(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestS3Signer_SignURL_EmbedsDownloadFilename(t *testing.T) {
+	db := &testutils.MockDatabase{
+		Credentials: map[string]models.S3Credential{
+			"test-bucket": {
+				Bucket:    "test-bucket",
+				Region:    "us-east-1",
+				AccessKey: "key",
+				SecretKey: "secret",
+				Endpoint:  "https://rgw.example.test",
+			},
+		},
+	}
+	s := NewS3Signer(db)
+
+	signedURL, err := s.SignURL(context.Background(), "test-bucket", "prefix/object.bin", signer.SignOptions{
+		DownloadFilename: "nested/README final.md",
+	})
+	if err != nil {
+		t.Fatalf("SignURL failed: %v", err)
+	}
+
+	parsed, err := url.Parse(signedURL)
+	if err != nil {
+		t.Fatalf("failed to parse signed url: %v", err)
+	}
+	got := parsed.Query().Get("response-content-disposition")
+	want := common.ContentDispositionAttachment("nested/README final.md")
+	if got != want {
+		t.Fatalf("unexpected response-content-disposition: got %q want %q url=%s", got, want, signedURL)
+	}
+	if !strings.Contains(parsed.Path, "/test-bucket/prefix/object.bin") {
+		t.Fatalf("unexpected signed path: %s", parsed.Path)
+	}
 }

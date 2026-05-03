@@ -29,7 +29,11 @@ func handleGetAccessURLFiber(om *core.ObjectManager) fiber.Handler {
 			return c.Status(fiber.StatusNotFound).JSON(drs.Error{Msg: common.Ptr("Access ID not found or has no URL")})
 		}
 
-		signed, err := om.SignURL(c.Context(), targetURL, urlmanager.SignOptions{Method: http.MethodGet})
+		opts := urlmanager.SignOptions{Method: http.MethodGet}
+		if obj.Name != nil {
+			opts.DownloadFilename = common.DownloadFilename(*obj.Name)
+		}
+		signed, err := om.SignURL(c.Context(), targetURL, opts)
 		if err != nil {
 			return apiutil.HandleError(c, err)
 		}
@@ -94,7 +98,11 @@ func handleGetBulkAccessURLFiber(om *core.ObjectManager) fiber.Handler {
 					continue
 				}
 
-				signed, err := om.SignURL(c.Context(), targetURL, urlmanager.SignOptions{Method: http.MethodGet})
+				opts := urlmanager.SignOptions{Method: http.MethodGet}
+				if obj.Name != nil {
+					opts.DownloadFilename = common.DownloadFilename(*obj.Name)
+				}
+				signed, err := om.SignURL(c.Context(), targetURL, opts)
 				if err != nil {
 					unresolvedIDs = append(unresolvedIDs, objectID)
 					continue

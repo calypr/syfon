@@ -2,6 +2,7 @@ package drsapi
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -11,8 +12,19 @@ import (
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/testutils"
+	"github.com/calypr/syfon/internal/urlmanager"
 	"github.com/gofiber/fiber/v3"
 )
+
+type captureURLManager struct {
+	testutils.MockUrlManager
+	lastOptions urlmanager.SignOptions
+}
+
+func (m *captureURLManager) SignURL(ctx context.Context, accessId string, url string, opts urlmanager.SignOptions) (string, error) {
+	m.lastOptions = opts
+	return m.MockUrlManager.SignURL(ctx, accessId, url, opts)
+}
 
 func TestDRSHandlers(t *testing.T) {
 	db := &testutils.MockDatabase{
@@ -41,7 +53,7 @@ func TestDRSHandlers(t *testing.T) {
 			"test-obj": {"calypr": {"proj-a"}},
 		},
 	}
-	um := &testutils.MockUrlManager{}
+	um := &captureURLManager{}
 	om := core.NewObjectManager(db, um)
 	app := fiber.New()
 	RegisterDRSRoutes(app, om)
@@ -78,6 +90,9 @@ func TestDRSHandlers(t *testing.T) {
 		json.NewDecoder(resp.Body).Decode(&access)
 		if access.Url == "" {
 			t.Error("expected signed URL, got empty")
+		}
+		if got, want := um.lastOptions.DownloadFilename, "test-file"; got != want {
+			t.Fatalf("unexpected download filename override: got %q want %q", got, want)
 		}
 		if len(db.TransferEvents) != 1 {
 			t.Fatalf("expected one access-issued event, got %+v", db.TransferEvents)
@@ -126,6 +141,9 @@ func TestDRSHandlers(t *testing.T) {
 		}
 		if access.ResolvedDrsObjectAccessUrls == nil || len(*access.ResolvedDrsObjectAccessUrls) != 1 || (*access.ResolvedDrsObjectAccessUrls)[0].Url == "" {
 			t.Fatalf("expected signed bulk access URL, got %+v", access.ResolvedDrsObjectAccessUrls)
+		}
+		if got, want := um.lastOptions.DownloadFilename, "test-file"; got != want {
+			t.Fatalf("unexpected bulk download filename override: got %q want %q", got, want)
 		}
 		if len(db.TransferEvents) != 1 {
 			t.Fatalf("expected one bulk access-issued event, got %+v", db.TransferEvents)
