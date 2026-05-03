@@ -118,12 +118,12 @@ func TestSyfonBucketListAndRemoveCommands(t *testing.T) {
 		Region:       stringPtr("us-east-1"),
 		AccessKey:    stringPtr("ak"),
 		SecretKey:    stringPtr("sk"),
-		Organization: "syfon",
-		ProjectId:    "e2e",
+		Organization: "cli-tests",
+		ProjectId:    "bucket-list",
 	}); err != nil {
 		t.Fatalf("seed bucket: %v", err)
 	}
-	if err := c.Index().Upsert(context.Background(), "bucket-visible-object", "s3://test-bucket-cli/visible.txt", "visible.txt", 7, "", map[string][]string{"syfon": {"e2e"}}); err != nil {
+	if err := c.Index().Upsert(context.Background(), "bucket-visible-object", "s3://test-bucket-cli/visible.txt", "visible.txt", 7, "", map[string][]string{"cli-tests": {"bucket-list"}}); err != nil {
 		t.Fatalf("seed visible object: %v", err)
 	}
 
@@ -171,25 +171,25 @@ func TestSyfonBucketAddCredentialAndScopesCommands(t *testing.T) {
 
 	out, err = executeRootCommand(t,
 		"--server", server.URL,
-		"bucket", "add-organization", "syfon",
+		"bucket", "add-organization", "cli-tests",
 		"--path", "gs://test-bucket-cli/program-root",
 	)
 	if err != nil {
 		t.Fatalf("bucket add-organization failed: %v output=%s", err, out)
 	}
-	if !strings.Contains(out, "bucket organization scope configured: bucket=test-bucket-cli org=syfon") {
+	if !strings.Contains(out, "bucket organization scope configured: bucket=test-bucket-cli org=cli-tests") {
 		t.Fatalf("unexpected bucket add-organization output: %s", out)
 	}
 
 	out, err = executeRootCommand(t,
 		"--server", server.URL,
-		"bucket", "add-project", "syfon", "e2e",
+		"bucket", "add-project", "cli-tests", "bucket-cli",
 		"--path", "gs://test-bucket-cli/program-root/project-subpath",
 	)
 	if err != nil {
 		t.Fatalf("bucket add-project failed: %v output=%s", err, out)
 	}
-	if !strings.Contains(out, "bucket project scope configured: bucket=test-bucket-cli org=syfon project=e2e") {
+	if !strings.Contains(out, "bucket project scope configured: bucket=test-bucket-cli org=cli-tests project=bucket-cli") {
 		t.Fatalf("unexpected bucket add-project output: %s", out)
 	}
 }

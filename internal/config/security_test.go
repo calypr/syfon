@@ -9,6 +9,10 @@ import (
 func TestLoadConfig_LocalModeWithoutBasicAuthRejected(t *testing.T) {
 	t.Setenv("DRS_AUTH_MODE", "local")
 	t.Setenv("DRS_DB_SQLITE_FILE", ":memory:")
+	t.Setenv("DRS_BASIC_AUTH_USER", "")
+	t.Setenv("DRS_BASIC_AUTH_PASSWORD", "")
+	t.Setenv("DRS_LOCAL_AUTHZ_CSV", "")
+	t.Setenv("DRS_ALLOW_UNAUTHENTICATED_LOCAL", "")
 
 	_, err := LoadConfig("")
 	if err == nil {

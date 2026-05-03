@@ -78,6 +78,33 @@ func (m *ObjectManager) ListVisibleBuckets(ctx context.Context) (map[string]Visi
 		programsSeen[cred.Bucket] = map[string]struct{}{}
 	}
 
+	// Configured bucket scopes must be visible even before any objects are
+	// written into a bucket, otherwise scoped uploads cannot resolve a target
+	// bucket from the catalog on a fresh deployment.
+	scopes, err := m.db.ListBucketScopes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, scope := range scopes {
+		entry, exists := byBucket[scope.Bucket]
+		if !exists {
+			continue
+		}
+		resource, resourceErr := syfoncommon.ResourcePath(scope.Organization, scope.ProjectID)
+		if resourceErr != nil || strings.TrimSpace(resource) == "" {
+			continue
+		}
+		if authz.IsAuthzEnforced(ctx) && !authz.HasMethodAccess(ctx, objectMethodRead, []string{resource}) {
+			continue
+		}
+		if _, seen := programsSeen[scope.Bucket][resource]; seen {
+			continue
+		}
+		programsSeen[scope.Bucket][resource] = struct{}{}
+		entry.Programs = append(entry.Programs, resource)
+		byBucket[scope.Bucket] = entry
+	}
+
 	for _, obj := range objects {
 		programs := ObjectAccessResources(&obj)
 		if obj.AccessMethods == nil {
@@ -132,6 +159,30 @@ func (m *ObjectManager) listVisibleBucketsFromRows(ctx context.Context, lister d
 	for _, cred := range creds {
 		byBucket[cred.Bucket] = VisibleBucket{Credential: cred}
 		programsSeen[cred.Bucket] = map[string]struct{}{}
+	}
+
+	scopes, err := m.db.ListBucketScopes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, scope := range scopes {
+		entry, exists := byBucket[scope.Bucket]
+		if !exists {
+			continue
+		}
+		resource, resourceErr := syfoncommon.ResourcePath(scope.Organization, scope.ProjectID)
+		if resourceErr != nil || strings.TrimSpace(resource) == "" {
+			continue
+		}
+		if restrictToResources && !authz.HasMethodAccess(ctx, objectMethodRead, []string{resource}) {
+			continue
+		}
+		if _, seen := programsSeen[scope.Bucket][resource]; seen {
+			continue
+		}
+		programsSeen[scope.Bucket][resource] = struct{}{}
+		entry.Programs = append(entry.Programs, resource)
+		byBucket[scope.Bucket] = entry
 	}
 
 	for _, row := range rows {

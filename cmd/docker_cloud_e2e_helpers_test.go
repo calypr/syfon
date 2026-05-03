@@ -308,44 +308,52 @@ func exerciseAllClientCommands(t *testing.T, serverURL string, bucketCfg bucketC
 		project = "e2e"
 	}
 
-	bucketAddArgs := []string{
-		"--server", serverURL,
-		"bucket", "add", bucketName,
-		"--provider", providerName,
-	}
-	if v := strings.TrimSpace(bucketCfg.Region); v != "" {
-		bucketAddArgs = append(bucketAddArgs, "--region", v)
-	}
-	if v := strings.TrimSpace(bucketCfg.AccessKey); v != "" {
-		bucketAddArgs = append(bucketAddArgs, "--access-key", v)
-	}
-	if v := strings.TrimSpace(bucketCfg.SecretKey); v != "" {
-		bucketAddArgs = append(bucketAddArgs, "--secret-key", v)
-	}
-	if v := strings.TrimSpace(bucketCfg.Endpoint); v != "" {
-		bucketAddArgs = append(bucketAddArgs, "--endpoint", v)
-	}
-
-	bucketAddOut, err := executeRootCommand(t, bucketAddArgs...)
+	existingBucketListOut, err := executeRootCommand(t, "--server", serverURL, "bucket", "list")
 	if err != nil {
-		t.Fatalf("bucket add failed: %v output=%s", err, bucketAddOut)
+		t.Fatalf("initial bucket list failed: %v output=%s", err, existingBucketListOut)
 	}
-	if !strings.Contains(bucketAddOut, "bucket configured: "+bucketName) {
-		if !strings.Contains(bucketAddOut, "bucket credential configured: "+bucketName) {
-			t.Fatalf("unexpected bucket add output: %s", bucketAddOut)
+	bucketAlreadyConfigured := strings.Contains(existingBucketListOut, bucketName)
+
+	if !bucketAlreadyConfigured {
+		bucketAddArgs := []string{
+			"--server", serverURL,
+			"bucket", "add", bucketName,
+			"--provider", providerName,
 		}
-	}
+		if v := strings.TrimSpace(bucketCfg.Region); v != "" {
+			bucketAddArgs = append(bucketAddArgs, "--region", v)
+		}
+		if v := strings.TrimSpace(bucketCfg.AccessKey); v != "" {
+			bucketAddArgs = append(bucketAddArgs, "--access-key", v)
+		}
+		if v := strings.TrimSpace(bucketCfg.SecretKey); v != "" {
+			bucketAddArgs = append(bucketAddArgs, "--secret-key", v)
+		}
+		if v := strings.TrimSpace(bucketCfg.Endpoint); v != "" {
+			bucketAddArgs = append(bucketAddArgs, "--endpoint", v)
+		}
 
-	scopeOut, err := executeRootCommand(t,
-		"--server", serverURL,
-		"bucket", "add-project", org, project,
-		"--path", providerScheme(providerName)+"://"+bucketName+"/"+org+"/"+project,
-	)
-	if err != nil {
-		t.Fatalf("bucket add-project failed: %v output=%s", err, scopeOut)
-	}
-	if !strings.Contains(scopeOut, "bucket project scope configured: bucket="+bucketName) {
-		t.Fatalf("unexpected bucket add output: %s", bucketAddOut)
+		bucketAddOut, err := executeRootCommand(t, bucketAddArgs...)
+		if err != nil {
+			t.Fatalf("bucket add failed: %v output=%s", err, bucketAddOut)
+		}
+		if !strings.Contains(bucketAddOut, "bucket configured: "+bucketName) {
+			if !strings.Contains(bucketAddOut, "bucket credential configured: "+bucketName) {
+				t.Fatalf("unexpected bucket add output: %s", bucketAddOut)
+			}
+		}
+
+		scopeOut, err := executeRootCommand(t,
+			"--server", serverURL,
+			"bucket", "add-project", org, project,
+			"--path", providerScheme(providerName)+"://"+bucketName+"/"+org+"/"+project,
+		)
+		if err != nil {
+			t.Fatalf("bucket add-project failed: %v output=%s", err, scopeOut)
+		}
+		if !strings.Contains(scopeOut, "bucket project scope configured: bucket="+bucketName) {
+			t.Fatalf("unexpected bucket add-project output: %s", scopeOut)
+		}
 	}
 
 	bucketListOut, err := executeRootCommand(t, "--server", serverURL, "bucket", "list")
