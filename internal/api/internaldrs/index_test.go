@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -122,6 +123,69 @@ func TestHandleInternalList_PaginatesIDs(t *testing.T) {
 	}
 	if (*payload.Records)[0].Did != "obj-2" {
 		t.Fatalf("expected obj-2 after start cursor, got %+v", (*payload.Records)[0])
+	}
+}
+
+func TestHandleInternalList_FiltersByAccessURL(t *testing.T) {
+	now := time.Now().UTC()
+	offsetsURL := "s3://bucket/path/image.offsets.json"
+	sourceURL := "s3://bucket/path/image.ome.tif"
+	offsetsAccessID := "offsets-s3"
+	sourceAccessID := "source-s3"
+	mockDB := &testutils.MockDatabase{
+		Objects: map[string]*drs.DrsObject{
+			"offsets": {
+				Id:          "offsets",
+				CreatedTime: now,
+				UpdatedTime: &now,
+				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: "offsets-hash"}},
+				AccessMethods: &[]drs.AccessMethod{{
+					Type:     drs.AccessMethodType("s3"),
+					AccessId: &offsetsAccessID,
+					AccessUrl: &struct {
+						Headers *[]string `json:"headers,omitempty"`
+						Url     string    `json:"url"`
+					}{Url: offsetsURL},
+				}},
+			},
+			"source": {
+				Id:          "source",
+				CreatedTime: now,
+				UpdatedTime: &now,
+				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: "source-hash"}},
+				AccessMethods: &[]drs.AccessMethod{{
+					Type:     drs.AccessMethodType("s3"),
+					AccessId: &sourceAccessID,
+					AccessUrl: &struct {
+						Headers *[]string `json:"headers,omitempty"`
+						Url     string    `json:"url"`
+					}{Url: sourceURL},
+				}},
+			},
+		},
+	}
+	app := fiber.New()
+	om := core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
+	RegisterInternalRoutes(app, om)
+
+	req := httptest.NewRequest(http.MethodGet, "/index?url="+url.QueryEscape(offsetsURL), nil)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("test request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 200, got %d body=%s", resp.StatusCode, string(body))
+	}
+	var payload internalapi.ListRecordsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Records == nil || len(*payload.Records) != 1 {
+		t.Fatalf("expected one record for access URL, got %+v", payload.Records)
+	}
+	if (*payload.Records)[0].Did != "offsets" {
+		t.Fatalf("expected offsets record, got %+v", (*payload.Records)[0])
 	}
 }
 

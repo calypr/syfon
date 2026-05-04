@@ -22,6 +22,10 @@ paths:
           schema:
             type: string
         - in: query
+          name: url
+          schema:
+            type: string
+        - in: query
           name: organization
           schema:
             type: string

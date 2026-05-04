@@ -168,14 +168,14 @@ func TestIndexServiceOperationsAndUpsert(t *testing.T) {
 		t.Fatal("expected delete error for non-success status")
 	}
 
-	if _, err := service.List(ctx, ListRecordsOptions{Hash: "sha", Organization: "org", ProjectID: "proj", Limit: 3, Page: 2}); err != nil {
+	if _, err := service.List(ctx, ListRecordsOptions{Hash: "sha", URL: "s3://bucket/path", Organization: "org", ProjectID: "proj", Limit: 3, Page: 2}); err != nil {
 		t.Fatalf("List returned error: %v", err)
 	}
 	query, err := url.ParseQuery(strings.TrimPrefix(requester.builder.Url, "/index?"))
 	if err != nil {
 		t.Fatalf("parse list query: %v", err)
 	}
-	if query.Get("hash") != "sha" || query.Get("organization") != "org" || query.Get("project") != "proj" || query.Get("limit") != "3" || query.Get("page") != "2" {
+	if query.Get("hash") != "sha" || query.Get("url") != "s3://bucket/path" || query.Get("organization") != "org" || query.Get("project") != "proj" || query.Get("limit") != "3" || query.Get("page") != "2" {
 		t.Fatalf("unexpected list query values: %v", query)
 	}
 
