@@ -294,6 +294,7 @@ func TestUpdateObjectAccessMethods(t *testing.T) {
 func TestBulkUpdateAccessMethods(t *testing.T) {
 	pg, mock, rawDB := newMockPostgresDB(t)
 	defer rawDB.Close()
+	mock.MatchExpectationsInOrder(false)
 
 	mock.ExpectBegin()
 	mock.ExpectExec(regexp.QuoteMeta("DELETE FROM drs_object_access_method WHERE object_id = $1")).
