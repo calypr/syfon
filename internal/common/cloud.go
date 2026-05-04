@@ -24,9 +24,10 @@ const (
 )
 
 var (
-	s3BucketNameRE    = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$`)
-	azureBucketNameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$`)
-	gcsBucketNameRE   = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]$`)
+	s3BucketNameRE           = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$`)
+	s3CompatibleBucketNameRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,253}[A-Za-z0-9]$`)
+	azureBucketNameRE        = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$`)
+	gcsBucketNameRE          = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]$`)
 )
 
 func NormalizeProvider(p string, fallback string) string {
@@ -147,6 +148,13 @@ func ParseBucketProvider(raw string) (string, error) {
 // - s3 and azure share the stricter DNS-style naming rules.
 // - gcs permits dots and underscores but still requires a DNS-safe shape.
 func ValidateBucketName(providerName, bucketName string) error {
+	return ValidateBucketNameWithEndpoint(providerName, bucketName, "")
+}
+
+// ValidateBucketNameWithEndpoint validates a bucket/container name for the
+// given provider and endpoint. S3-compatible backends with a custom endpoint
+// may allow bucket names that would be invalid for AWS virtual-hosted DNS names.
+func ValidateBucketNameWithEndpoint(providerName, bucketName, endpoint string) error {
 	bucketName = strings.TrimSpace(bucketName)
 	if bucketName == "" {
 		return fmt.Errorf("bucket name is required")
@@ -154,6 +162,9 @@ func ValidateBucketName(providerName, bucketName string) error {
 
 	switch NormalizeProvider(providerName, "") {
 	case S3Provider:
+		if strings.TrimSpace(endpoint) != "" {
+			return validateS3CompatibleBucketName(bucketName)
+		}
 		return validateS3BucketName(bucketName)
 	case GCSProvider:
 		return validateGCSBucketName(bucketName)
@@ -164,6 +175,19 @@ func ValidateBucketName(providerName, bucketName string) error {
 	default:
 		return fmt.Errorf("unsupported provider %q", providerName)
 	}
+}
+
+func validateS3CompatibleBucketName(bucketName string) error {
+	if len(bucketName) < 1 || len(bucketName) > 255 {
+		return fmt.Errorf("bucket name %q must be 1-255 characters", bucketName)
+	}
+	if strings.ContainsAny(bucketName, " \t\n\r/\\") {
+		return fmt.Errorf("bucket name %q is invalid (spaces and path separators are not allowed)", bucketName)
+	}
+	if !s3CompatibleBucketNameRE.MatchString(bucketName) {
+		return fmt.Errorf("bucket name %q is invalid (letters, numbers, hyphens, underscores, and dots only; must start and end with letter or number)", bucketName)
+	}
+	return nil
 }
 
 func validateS3BucketName(bucketName string) error {

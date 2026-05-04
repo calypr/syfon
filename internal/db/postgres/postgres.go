@@ -60,7 +60,64 @@ func (db *PostgresDB) ensureObjectSchema() error {
 			return fmt.Errorf("failed to initialize object schema: %w", err)
 		}
 	}
+	if err := db.validateLegacyAccessMethodScopes(context.Background()); err != nil {
+		return fmt.Errorf("legacy object scope validation failed: %w", err)
+	}
 	return nil
+}
+
+func (db *PostgresDB) validateLegacyAccessMethodScopes(ctx context.Context) error {
+	hasLegacyColumns, err := db.hasLegacyAccessMethodScopeColumns(ctx)
+	if err != nil {
+		return err
+	}
+	if !hasLegacyColumns {
+		return nil
+	}
+	var mismatches int
+	err = db.db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM (
+			SELECT DISTINCT
+				am.object_id,
+				CASE
+					WHEN btrim(COALESCE(am.project, '')) = ''
+						THEN '/organization/' || btrim(am.org)
+					ELSE '/organization/' || btrim(am.org) || '/project/' || btrim(am.project)
+				END AS resource
+			FROM drs_object_access_method am
+			INNER JOIN drs_object o ON o.id = am.object_id
+			WHERE btrim(COALESCE(am.org, '')) <> ''
+		) legacy_scope
+		WHERE NOT EXISTS (
+			SELECT 1
+			FROM drs_object_controlled_access ca
+			WHERE ca.object_id = legacy_scope.object_id
+				AND ca.resource = legacy_scope.resource
+		)
+	`).Scan(&mismatches)
+	if err != nil {
+		return err
+	}
+	if mismatches > 0 {
+		return fmt.Errorf("%d scoped drs_object_access_method rows are missing matching drs_object_controlled_access entries", mismatches)
+	}
+	return nil
+}
+
+func (db *PostgresDB) hasLegacyAccessMethodScopeColumns(ctx context.Context) (bool, error) {
+	var count int
+	err := db.db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM information_schema.columns
+		WHERE table_name = 'drs_object_access_method'
+			AND column_name IN ('org', 'project')
+			AND table_schema = ANY (current_schemas(false))
+	`).Scan(&count)
+	if err != nil {
+		return false, err
+	}
+	return count == 2, nil
 }
 
 func (db *PostgresDB) ensureS3CredentialSchema() error {
@@ -131,6 +188,7 @@ func (db *PostgresDB) ensureObjectUsageSchema() error {
 			updated_time TIMESTAMPTZ NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_object_usage_last_download_time ON object_usage(last_download_time)`,
+		`CREATE INDEX IF NOT EXISTS idx_object_usage_last_download_time_object_id ON object_usage(last_download_time, object_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_object_usage_last_upload_time ON object_usage(last_upload_time)`,
 	}
 	for _, q := range queries {
@@ -166,6 +224,7 @@ func (db *PostgresDB) ensureTransferAttributionSchema() error {
 			event_id TEXT PRIMARY KEY,
 			access_grant_id TEXT NOT NULL DEFAULT '',
 			event_type TEXT NOT NULL CHECK (event_type IN ('access_issued')),
+			direction TEXT NOT NULL DEFAULT 'download' CHECK (direction IN ('download','upload')),
 			event_time TIMESTAMPTZ NOT NULL,
 			request_id TEXT NOT NULL DEFAULT '',
 			object_id TEXT NOT NULL DEFAULT '',
@@ -237,25 +296,11 @@ func (db *PostgresDB) ensureTransferAttributionSchema() error {
 			auth_mode TEXT NOT NULL DEFAULT '',
 			reconciliation_status TEXT NOT NULL DEFAULT 'unmatched' CHECK (reconciliation_status IN ('matched','ambiguous','unmatched'))
 		)`,
-		`CREATE TABLE IF NOT EXISTS provider_transfer_sync_run (
-			sync_id TEXT PRIMARY KEY,
-			provider TEXT NOT NULL DEFAULT '',
-			bucket TEXT NOT NULL DEFAULT '',
-			organization TEXT NOT NULL DEFAULT '',
-			project TEXT NOT NULL DEFAULT '',
-			from_time TIMESTAMPTZ NOT NULL,
-			to_time TIMESTAMPTZ NOT NULL,
-			status TEXT NOT NULL CHECK (status IN ('pending','completed','failed')),
-			requested_at TIMESTAMPTZ NOT NULL,
-			started_at TIMESTAMPTZ NULL,
-			completed_at TIMESTAMPTZ NULL,
-			imported_events BIGINT NOT NULL DEFAULT 0,
-			matched_events BIGINT NOT NULL DEFAULT 0,
-			ambiguous_events BIGINT NOT NULL DEFAULT 0,
-			unmatched_events BIGINT NOT NULL DEFAULT 0,
-			error_message TEXT NOT NULL DEFAULT ''
-		)`,
+		`ALTER TABLE transfer_attribution_event ADD COLUMN IF NOT EXISTS access_grant_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE transfer_attribution_event ADD COLUMN IF NOT EXISTS direction TEXT NOT NULL DEFAULT 'download'`,
 		`CREATE INDEX IF NOT EXISTS idx_transfer_attr_scope_time ON transfer_attribution_event(organization, project, event_type, event_time)`,
+		`CREATE INDEX IF NOT EXISTS idx_transfer_attr_scope_event_time ON transfer_attribution_event(organization, project, event_time)`,
+		`CREATE INDEX IF NOT EXISTS idx_transfer_attr_direction_time ON transfer_attribution_event(direction, event_time)`,
 		`CREATE INDEX IF NOT EXISTS idx_transfer_attr_actor_time ON transfer_attribution_event(actor_email, actor_subject, event_time)`,
 		`CREATE INDEX IF NOT EXISTS idx_transfer_attr_provider_time ON transfer_attribution_event(provider, bucket, event_time)`,
 		`CREATE INDEX IF NOT EXISTS idx_transfer_attr_sha_time ON transfer_attribution_event(sha256, event_time)`,
@@ -269,9 +314,6 @@ func (db *PostgresDB) ensureTransferAttributionSchema() error {
 		`CREATE INDEX IF NOT EXISTS idx_provider_transfer_sha_time ON provider_transfer_event(sha256, event_time)`,
 		`CREATE INDEX IF NOT EXISTS idx_provider_transfer_status ON provider_transfer_event(reconciliation_status, event_time)`,
 		`CREATE INDEX IF NOT EXISTS idx_provider_transfer_grant ON provider_transfer_event(access_grant_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_provider_sync_bucket_time ON provider_transfer_sync_run(provider, bucket, requested_at)`,
-		`CREATE INDEX IF NOT EXISTS idx_provider_sync_scope_time ON provider_transfer_sync_run(organization, project, requested_at)`,
-		`ALTER TABLE transfer_attribution_event ADD COLUMN IF NOT EXISTS access_grant_id TEXT NOT NULL DEFAULT ''`,
 	}
 	for _, q := range queries {
 		if _, err := db.db.Exec(q); err != nil {

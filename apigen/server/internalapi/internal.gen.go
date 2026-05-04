@@ -10,12 +10,10 @@ import (
 	"fmt"
 	"io"
 
+	externalRef0 "github.com/calypr/syfon/apigen/server/drs"
 	"github.com/gofiber/fiber/v3"
 	"github.com/oapi-codegen/runtime"
 )
-
-// AuthPathMap Organization/project keyed storage paths. Values are concrete object paths such as s3://bucket/path/to/file.
-type AuthPathMap map[string]map[string][]string
 
 // BulkCreateRequest defines model for BulkCreateRequest.
 type BulkCreateRequest struct {
@@ -97,12 +95,12 @@ type InternalMultipartUploadRequest struct {
 
 // InternalRecord defines model for InternalRecord.
 type InternalRecord struct {
-	// Auth Organization/project keyed storage paths. Values are concrete object paths such as s3://bucket/path/to/file.
-	Auth        *AuthPathMap `json:"auth,omitempty"`
-	CreatedTime *string      `json:"created_time,omitempty"`
-	Description *string      `json:"description,omitempty"`
-	Did         string       `json:"did"`
-	FileName    *string      `json:"file_name,omitempty"`
+	AccessMethods    *[]externalRef0.AccessMethod `json:"access_methods,omitempty"`
+	ControlledAccess *[]string                    `json:"controlled_access,omitempty"`
+	CreatedTime      *string                      `json:"created_time,omitempty"`
+	Description      *string                      `json:"description,omitempty"`
+	Did              string                       `json:"did"`
+	FileName         *string                      `json:"file_name,omitempty"`
 
 	// Hashes Hash map, e.g. {"sha256":"..."}
 	Hashes       *HashInfo `json:"hashes,omitempty"`
@@ -115,14 +113,14 @@ type InternalRecord struct {
 
 // InternalRecordResponse defines model for InternalRecordResponse.
 type InternalRecordResponse struct {
-	// Auth Organization/project keyed storage paths. Values are concrete object paths such as s3://bucket/path/to/file.
-	Auth        *AuthPathMap `json:"auth,omitempty"`
-	Baseid      *string      `json:"baseid,omitempty"`
-	CreatedDate *string      `json:"created_date,omitempty"`
-	CreatedTime *string      `json:"created_time,omitempty"`
-	Description *string      `json:"description,omitempty"`
-	Did         string       `json:"did"`
-	FileName    *string      `json:"file_name,omitempty"`
+	AccessMethods    *[]externalRef0.AccessMethod `json:"access_methods,omitempty"`
+	Baseid           *string                      `json:"baseid,omitempty"`
+	ControlledAccess *[]string                    `json:"controlled_access,omitempty"`
+	CreatedDate      *string                      `json:"created_date,omitempty"`
+	CreatedTime      *string                      `json:"created_time,omitempty"`
+	Description      *string                      `json:"description,omitempty"`
+	Did              string                       `json:"did"`
+	FileName         *string                      `json:"file_name,omitempty"`
 
 	// Hashes Hash map, e.g. {"sha256":"..."}
 	Hashes       *HashInfo `json:"hashes,omitempty"`

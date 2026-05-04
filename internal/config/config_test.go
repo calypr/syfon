@@ -18,6 +18,8 @@ func TestLoadConfig_NoDatabaseError(t *testing.T) {
 func TestLoadConfig_MinimalValid(t *testing.T) {
 	t.Setenv("DRS_DB_SQLITE_FILE", "drs.db")
 	t.Setenv("DRS_AUTH_MODE", "local")
+	t.Setenv("DRS_BASIC_AUTH_USER", "drs-user")
+	t.Setenv("DRS_BASIC_AUTH_PASSWORD", "drs-pass")
 
 	cfg, err := LoadConfig("")
 	if err != nil {
@@ -40,8 +42,8 @@ func TestLoadConfig_MinimalValid(t *testing.T) {
 	if cfg.LFS.RequestLimitPerMinute != DefaultLFSRequestLimitPerMinute {
 		t.Fatalf("expected default lfs.request_limit_per_minute=%d, got %d", DefaultLFSRequestLimitPerMinute, cfg.LFS.RequestLimitPerMinute)
 	}
-	if cfg.Routes != (RoutesConfig{}) {
-		t.Fatalf("expected route modules to default to disabled, got %+v", cfg.Routes)
+	if !cfg.Routes.Ga4gh || !cfg.Routes.Internal || !cfg.Routes.LFS || !cfg.Routes.Metrics || !cfg.Routes.Docs {
+		t.Fatalf("expected route modules to default enabled, got %+v", cfg.Routes)
 	}
 }
 
@@ -49,6 +51,8 @@ func TestLoadConfig_EnvOverrides(t *testing.T) {
 	t.Setenv("DRS_PORT", "9090")
 	t.Setenv("DRS_DB_SQLITE_FILE", "test_env.db")
 	t.Setenv("DRS_AUTH_MODE", "local")
+	t.Setenv("DRS_BASIC_AUTH_USER", "drs-user")
+	t.Setenv("DRS_BASIC_AUTH_PASSWORD", "drs-pass")
 	t.Setenv("DRS_CREDENTIAL_LOCAL_KEY_FILE", "/tmp/test-env-kek")
 
 	cfg, err := LoadConfig("")
@@ -72,6 +76,9 @@ func TestLoadConfig_CredentialEncryptionConfig(t *testing.T) {
 	content := `
 auth:
   mode: local
+  basic:
+    username: "drs-user"
+    password: "drs-pass"
 database:
   sqlite:
     file: "test.db"
@@ -126,6 +133,9 @@ func TestLoadConfig_BillingLogsEnabledDefaultsTrue(t *testing.T) {
 	content := `
 auth:
   mode: local
+  basic:
+    username: "drs-user"
+    password: "drs-pass"
 database:
   sqlite:
     file: "test.db"
@@ -161,6 +171,9 @@ func TestLoadConfig_BillingLogsCanBeDisabledForS3Compatible(t *testing.T) {
 	content := `
 auth:
   mode: local
+  basic:
+    username: "drs-user"
+    password: "drs-pass"
 database:
   sqlite:
     file: "test.db"
@@ -191,6 +204,161 @@ s3_credentials:
 	}
 	if cfg.S3Credentials[0].ProviderBillingLogsEnabled() {
 		t.Fatal("expected billing logs to be disabled")
+	}
+}
+
+func TestLoadConfig_LocalAuthzCSV(t *testing.T) {
+	t.Cleanup(func() { os.Unsetenv("DRS_LOCAL_AUTHZ_CSV") })
+	content := `
+auth:
+  mode: local
+  local_authz_csv: "/tmp/local-authz.csv"
+database:
+  sqlite:
+    file: "test.db"
+`
+	tmpfile, err := os.CreateTemp("", "config-local-authz-*.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpfile.Name())
+	if _, err := tmpfile.Write([]byte(content)); err != nil {
+		t.Fatal(err)
+	}
+	if err := tmpfile.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadConfig(tmpfile.Name())
+	if err != nil {
+		t.Fatalf("LoadConfig failed: %v", err)
+	}
+	if cfg.Auth.LocalAuthzCSV != "/tmp/local-authz.csv" {
+		t.Fatalf("expected local authz csv path, got %q", cfg.Auth.LocalAuthzCSV)
+	}
+	if got := os.Getenv("DRS_LOCAL_AUTHZ_CSV"); got != "/tmp/local-authz.csv" {
+		t.Fatalf("expected DRS_LOCAL_AUTHZ_CSV to be set, got %q", got)
+	}
+}
+
+func TestLoadConfig_BucketScopes(t *testing.T) {
+	content := `
+auth:
+  mode: local
+  allow_unauthenticated: true
+database:
+  sqlite:
+    file: "test.db"
+bucket_scopes:
+  - organization: calypr
+    project_id: training
+    path: s3://calypr/008b435e-c1da-58b8-80f1-3ad2882c43cd/nested/project/root
+  - organization: calypr
+    project_id: analysis
+    bucket: calypr
+    path_prefix: project/analysis
+  - organization: calypr
+    project_id: upload
+    bucket: calypr
+    organization_sub_path: organizations/calypr
+    project_sub_path: projects/upload
+`
+	tmpfile, err := os.CreateTemp("", "config-bucket-scopes-*.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpfile.Name())
+	if _, err := tmpfile.Write([]byte(content)); err != nil {
+		t.Fatal(err)
+	}
+	if err := tmpfile.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadConfig(tmpfile.Name())
+	if err != nil {
+		t.Fatalf("LoadConfig failed: %v", err)
+	}
+	if len(cfg.BucketScopes) != 3 {
+		t.Fatalf("expected 3 bucket scopes, got %d", len(cfg.BucketScopes))
+	}
+	if got := cfg.BucketScopes[0]; got.Organization != "calypr" || got.ProjectID != "training" || got.Bucket != "calypr" || got.PathPrefix != "008b435e-c1da-58b8-80f1-3ad2882c43cd/nested/project/root" {
+		t.Fatalf("unexpected path-derived bucket scope: %+v", got)
+	}
+	if got := cfg.BucketScopes[1]; got.Organization != "calypr" || got.ProjectID != "analysis" || got.Bucket != "calypr" || got.PathPrefix != "project/analysis" {
+		t.Fatalf("unexpected explicit bucket scope: %+v", got)
+	}
+	if got := cfg.BucketScopes[2]; got.Organization != "calypr" || got.ProjectID != "upload" || got.Bucket != "calypr" || got.PathPrefix != "organizations/calypr/projects/upload" {
+		t.Fatalf("unexpected composed bucket scope: %+v", got)
+	}
+}
+
+func TestLoadConfig_BucketScopePathBucketMismatch(t *testing.T) {
+	content := `
+auth:
+  mode: local
+  allow_unauthenticated: true
+database:
+  sqlite:
+    file: "test.db"
+bucket_scopes:
+  - organization: calypr
+    project_id: training
+    bucket: other
+    path: s3://calypr/project
+`
+	tmpfile, err := os.CreateTemp("", "config-bucket-scope-mismatch-*.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpfile.Name())
+	if _, err := tmpfile.Write([]byte(content)); err != nil {
+		t.Fatal(err)
+	}
+	if err := tmpfile.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = LoadConfig(tmpfile.Name())
+	if err == nil {
+		t.Fatal("expected bucket/path mismatch error")
+	}
+	if !strings.Contains(err.Error(), "does not match path bucket") {
+		t.Fatalf("expected bucket mismatch error, got %v", err)
+	}
+}
+
+func TestLoadConfig_BucketScopeRejectsPathLikeOrganization(t *testing.T) {
+	content := `
+auth:
+  mode: local
+  allow_unauthenticated: true
+database:
+  sqlite:
+    file: "test.db"
+bucket_scopes:
+  - organization: calypr/faliper
+    project_id: training
+    path: s3://calypr/calypr/faliper
+`
+	tmpfile, err := os.CreateTemp("", "config-bucket-scope-path-org-*.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpfile.Name())
+	if _, err := tmpfile.Write([]byte(content)); err != nil {
+		t.Fatal(err)
+	}
+	if err := tmpfile.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = LoadConfig(tmpfile.Name())
+	if err == nil {
+		t.Fatal("expected path-like organization error")
+	}
+	if !strings.Contains(err.Error(), "organization must be a Gen3 program name") {
+		t.Fatalf("expected path-like organization error, got %v", err)
 	}
 }
 
@@ -282,6 +450,7 @@ func TestLoadConfig_InvalidDBPortEnv(t *testing.T) {
 func TestLoadConfig_LFSEnvOverrides(t *testing.T) {
 	t.Setenv("DRS_DB_SQLITE_FILE", "drs.db")
 	t.Setenv("DRS_AUTH_MODE", "local")
+	t.Setenv("DRS_ALLOW_UNAUTHENTICATED_LOCAL", "true")
 	t.Setenv("DRS_LFS_MAX_BATCH_OBJECTS", "200")
 	t.Setenv("DRS_LFS_MAX_BATCH_BODY_BYTES", "123456")
 	t.Setenv("DRS_LFS_REQUEST_LIMIT_PER_MINUTE", "33")
@@ -326,6 +495,7 @@ func TestLoadConfig_InvalidBucketNames(t *testing.T) {
 			content := fmt.Sprintf(`
 auth:
   mode: local
+  allow_unauthenticated: true
 database:
   sqlite:
     file: "test.db"
@@ -378,6 +548,7 @@ func TestLoadConfig_NonS3ProviderBucketNames(t *testing.T) {
 			content := fmt.Sprintf(`
 auth:
   mode: local
+  allow_unauthenticated: true
 database:
   sqlite:
     file: "test.db"
@@ -416,6 +587,7 @@ func TestLoadConfig_UnsupportedBucketProvider(t *testing.T) {
 	content := `
 auth:
   mode: local
+  allow_unauthenticated: true
 database:
   sqlite:
     file: "test.db"
@@ -494,6 +666,7 @@ func TestLoadConfig_BucketProviderValidationRegression(t *testing.T) {
 			content := fmt.Sprintf(`
 auth:
   mode: local
+  allow_unauthenticated: true
 database:
   sqlite:
     file: "test.db"
@@ -601,6 +774,7 @@ func TestLoadConfig_ValidBucketNames(t *testing.T) {
 			content := fmt.Sprintf(`
 auth:
   mode: local
+  allow_unauthenticated: true
 database:
   sqlite:
     file: "test.db"
@@ -632,9 +806,44 @@ s3_credentials:
 	}
 }
 
+func TestLoadConfig_S3CompatibleCustomEndpointAllowsNonAWSDNSBucketNames(t *testing.T) {
+	content := `
+auth:
+  mode: local
+  allow_unauthenticated: true
+database:
+  sqlite:
+    file: "test.db"
+s3_credentials:
+  - bucket: "EllrottLab"
+    provider: "s3"
+    endpoint: "https://rgw.ohsu.edu"
+    region: "us-east-1"
+    access_key: "test-key"
+    secret_key: "test-secret"
+`
+
+	tmpfile, err := os.CreateTemp("", "config-s3-compatible-bucket-*.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpfile.Name())
+	if _, err := tmpfile.Write([]byte(content)); err != nil {
+		t.Fatal(err)
+	}
+	if err := tmpfile.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := LoadConfig(tmpfile.Name()); err != nil {
+		t.Fatalf("expected custom-endpoint s3 bucket to pass validation, got error: %v", err)
+	}
+}
+
 func TestLoadConfig_RouteEnvOverrides(t *testing.T) {
 	t.Setenv("DRS_DB_SQLITE_FILE", "drs.db")
 	t.Setenv("DRS_AUTH_MODE", "local")
+	t.Setenv("DRS_ALLOW_UNAUTHENTICATED_LOCAL", "true")
 	t.Setenv("DRS_ENABLE_GA4GH", "true")
 	t.Setenv("DRS_ENABLE_INTERNAL", "1")
 	t.Setenv("DRS_ENABLE_LFS", "true")

@@ -57,24 +57,19 @@ func TestSyfonDockerAzuriteE2E(t *testing.T) {
 
 	port := reserveTCPPort(t)
 	dbPath := filepath.Join(t.TempDir(), "docker-azurite-e2e.db")
-	configPath := writeProviderConfig(t, fmt.Sprintf(`port: %d
-auth:
-  mode: local
-routes:
-  ga4gh: true
-  internal: true
-database:
-  sqlite:
-    file: %q
-s3_credentials:
-  - bucket: %q
-    provider: %q
-    access_key: %q
-    secret_key: %q
-    endpoint: %q
-    billing_log_bucket: %q
-    billing_log_prefix: %q
-`, port, dbPath, azurite.bucket, "azure", dockerE2EAzureAccountName, dockerE2EAzureAccountKey, azurite.serviceURL, azurite.bucket, ".syfon/provider-transfer-events"))
+	configPath := writeScopedProviderConfig(t, providerServerConfig{
+		Port:             port,
+		DBPath:           dbPath,
+		Bucket:           azurite.bucket,
+		Provider:         "azure",
+		AccessKey:        dockerE2EAzureAccountName,
+		SecretKey:        dockerE2EAzureAccountKey,
+		Endpoint:         azurite.serviceURL,
+		BillingLogBucket: azurite.bucket,
+		BillingLogPrefix: ".syfon/provider-transfer-events",
+		Organization:     "syfon",
+		ProjectID:        "e2e",
+	})
 
 	server := startSyfonServerProcessWithConfigPath(t, configPath, map[string]string{
 		"AZURE_STORAGE_ACCOUNT":           dockerE2EAzureAccountName,
@@ -92,8 +87,6 @@ s3_credentials:
 		AccessKey:    dockerE2EAzureAccountName,
 		SecretKey:    dockerE2EAzureAccountKey,
 		Endpoint:     azurite.serviceURL,
-		LogBucket:    azurite.bucket,
-		LogPrefix:    ".syfon/provider-transfer-events",
 		Organization: "syfon",
 		ProjectID:    "e2e",
 	})

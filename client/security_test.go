@@ -90,4 +90,3 @@ func TestNewClient_WithNilConfig(t *testing.T) {
 		t.Errorf("RetryClient.HTTPClient.Timeout = 0, should have a reasonable timeout")
 	}
 }
-

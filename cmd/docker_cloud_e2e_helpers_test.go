@@ -14,10 +14,25 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/calypr/syfon/apigen/client/internalapi"
+	"github.com/calypr/syfon/apigen/client/drs"
 	syclient "github.com/calypr/syfon/client"
 	"github.com/calypr/syfon/internal/crypto"
 )
+
+type providerServerConfig struct {
+	Port             int
+	DBPath           string
+	Bucket           string
+	Provider         string
+	Region           string
+	AccessKey        string
+	SecretKey        string
+	Endpoint         string
+	BillingLogBucket string
+	BillingLogPrefix string
+	Organization     string
+	ProjectID        string
+}
 
 type bucketCommandConfig struct {
 	Bucket       string
@@ -26,8 +41,6 @@ type bucketCommandConfig struct {
 	AccessKey    string
 	SecretKey    string
 	Endpoint     string
-	LogBucket    string
-	LogPrefix    string
 	Organization string
 	ProjectID    string
 }
@@ -38,7 +51,8 @@ func startSyfonServerProcessWithConfigPath(t *testing.T, configPath string, extr
 	rootDir := findRepoRoot(t)
 	binaryPath := buildSyfonBinary(t, rootDir)
 	serverPort := extractPortFromConfig(t, configPath)
-	serverURL := fmt.Sprintf("http://127.0.0.1:%d", serverPort)
+	serverURL := fmt.Sprintf("http://%s:%s@127.0.0.1:%d", dockerE2EBasicUser, dockerE2EBasicPass, serverPort)
+	readyURL := fmt.Sprintf("http://127.0.0.1:%d", serverPort)
 
 	cmd := exec.Command(binaryPath, "serve", "--config", configPath)
 	cmd.Dir = rootDir
@@ -72,8 +86,8 @@ func startSyfonServerProcessWithConfigPath(t *testing.T, configPath string, extr
 		waitErrCh <- cmd.Wait()
 	}()
 
-	if err := waitForServerReady(serverURL, waitErrCh, dockerE2EServerReadyWait); err != nil {
-		logServerProcessOutput(t, serverURL, stdoutBuf, stderrBuf)
+	if err := waitForServerReady(readyURL, waitErrCh, dockerE2EServerReadyWait); err != nil {
+		logServerProcessOutput(t, readyURL, stdoutBuf, stderrBuf)
 		stopSyfonServerProcess(t, &syfonServerProcess{cmd: cmd, waitErrCh: waitErrCh, stdout: stdoutBuf, stderr: stderrBuf})
 		t.Fatalf("wait for server ready: %v", err)
 	}
@@ -116,6 +130,58 @@ func writeProviderConfig(t *testing.T, content string) string {
 		t.Fatalf("write provider config: %v", err)
 	}
 	return configPath
+}
+
+func writeScopedProviderConfig(t *testing.T, cfg providerServerConfig) string {
+	t.Helper()
+
+	content := fmt.Sprintf(`port: %d
+auth:
+  mode: local
+  basic:
+    username: %q
+    password: %q
+routes:
+  ga4gh: true
+  internal: true
+database:
+  sqlite:
+    file: %q
+s3_credentials:
+  - bucket: %q
+    provider: %q
+`, cfg.Port, dockerE2EBasicUser, dockerE2EBasicPass, cfg.DBPath, cfg.Bucket, cfg.Provider)
+
+	if strings.TrimSpace(cfg.Region) != "" {
+		content += fmt.Sprintf("    region: %q\n", cfg.Region)
+	}
+	if strings.TrimSpace(cfg.AccessKey) != "" {
+		content += fmt.Sprintf("    access_key: %q\n", cfg.AccessKey)
+	}
+	if strings.TrimSpace(cfg.SecretKey) != "" {
+		content += fmt.Sprintf("    secret_key: %q\n", cfg.SecretKey)
+	}
+	if strings.TrimSpace(cfg.Endpoint) != "" {
+		content += fmt.Sprintf("    endpoint: %q\n", cfg.Endpoint)
+	}
+	if strings.TrimSpace(cfg.BillingLogBucket) != "" {
+		content += fmt.Sprintf("    billing_log_bucket: %q\n", cfg.BillingLogBucket)
+	}
+	if strings.TrimSpace(cfg.BillingLogPrefix) != "" {
+		content += fmt.Sprintf("    billing_log_prefix: %q\n", cfg.BillingLogPrefix)
+	}
+	if strings.TrimSpace(cfg.Organization) != "" || strings.TrimSpace(cfg.ProjectID) != "" {
+		content += "bucket_scopes:\n"
+		content += fmt.Sprintf("  - bucket: %q\n", cfg.Bucket)
+		if strings.TrimSpace(cfg.Organization) != "" {
+			content += fmt.Sprintf("    organization: %q\n", cfg.Organization)
+		}
+		if strings.TrimSpace(cfg.ProjectID) != "" {
+			content += fmt.Sprintf("    project_id: %q\n", cfg.ProjectID)
+		}
+	}
+
+	return writeProviderConfig(t, content)
 }
 
 func exerciseAllClientCommands(t *testing.T, serverURL string, bucketCfg bucketCommandConfig) {
@@ -192,7 +258,7 @@ func exerciseAllClientCommands(t *testing.T, serverURL string, bucketCfg bucketC
 	if err != nil {
 		t.Fatalf("fetch uploaded record: %v", err)
 	}
-	recordURL := firstAuthPath(rec.Auth)
+	recordURL := firstAccessMethodURL(rec.AccessMethods)
 	if strings.TrimSpace(recordURL) == "" {
 		t.Fatalf("uploaded record missing access url")
 	}
@@ -225,30 +291,6 @@ func exerciseAllClientCommands(t *testing.T, serverURL string, bucketCfg bucketC
 		t.Fatalf("downloaded add-url bytes mismatch")
 	}
 
-	rmOut, err := executeRootCommand(t, "--server", serverURL, "rm", "--did", uploadedID)
-	if err != nil {
-		t.Fatalf("rm(uploaded) failed: %v output=%s", err, rmOut)
-	}
-	if !strings.Contains(rmOut, "removed "+uploadedID) {
-		t.Fatalf("unexpected rm output for uploaded did: %s", rmOut)
-	}
-
-	rmOut2, err := executeRootCommand(t, "--server", serverURL, "rm", "--did", addURLDID)
-	if err != nil {
-		t.Fatalf("rm(add-url) failed: %v output=%s", err, rmOut2)
-	}
-	if !strings.Contains(rmOut2, "removed "+addURLDID) {
-		t.Fatalf("unexpected rm output for add-url did: %s", rmOut2)
-	}
-
-	lsAfterRm, err := executeRootCommand(t, "--server", serverURL, "ls")
-	if err != nil {
-		t.Fatalf("ls after rm failed: %v output=%s", err, lsAfterRm)
-	}
-	if strings.Contains(lsAfterRm, fileName) || strings.Contains(lsAfterRm, addURLDID) {
-		t.Fatalf("ls output still includes removed records: %s", lsAfterRm)
-	}
-
 	bucketName := strings.TrimSpace(bucketCfg.Bucket)
 	if bucketName == "" {
 		bucketName = "syfon-provider-cli-bucket"
@@ -266,58 +308,52 @@ func exerciseAllClientCommands(t *testing.T, serverURL string, bucketCfg bucketC
 		project = "e2e"
 	}
 
-	bucketAddArgs := []string{
-		"--server", serverURL,
-		"bucket", "add", bucketName,
-		"--provider", providerName,
-	}
-	if v := strings.TrimSpace(bucketCfg.Region); v != "" {
-		bucketAddArgs = append(bucketAddArgs, "--region", v)
-	}
-	if v := strings.TrimSpace(bucketCfg.AccessKey); v != "" {
-		bucketAddArgs = append(bucketAddArgs, "--access-key", v)
-	}
-	if v := strings.TrimSpace(bucketCfg.SecretKey); v != "" {
-		bucketAddArgs = append(bucketAddArgs, "--secret-key", v)
-	}
-	if v := strings.TrimSpace(bucketCfg.Endpoint); v != "" {
-		bucketAddArgs = append(bucketAddArgs, "--endpoint", v)
-	}
-	logBucket := strings.TrimSpace(bucketCfg.LogBucket)
-	if logBucket == "" {
-		logBucket = bucketName
-	}
-	if logBucket != "" {
-		bucketAddArgs = append(bucketAddArgs, "--billing-log-bucket", logBucket)
-	}
-	logPrefix := strings.Trim(strings.TrimSpace(bucketCfg.LogPrefix), "/")
-	if logPrefix == "" {
-		logPrefix = ".syfon/provider-transfer-events"
-	}
-	if logPrefix != "" {
-		bucketAddArgs = append(bucketAddArgs, "--billing-log-prefix", logPrefix)
-	}
-
-	bucketAddOut, err := executeRootCommand(t, bucketAddArgs...)
+	existingBucketListOut, err := executeRootCommand(t, "--server", serverURL, "bucket", "list")
 	if err != nil {
-		t.Fatalf("bucket add failed: %v output=%s", err, bucketAddOut)
+		t.Fatalf("initial bucket list failed: %v output=%s", err, existingBucketListOut)
 	}
-	if !strings.Contains(bucketAddOut, "bucket configured: "+bucketName) {
-		if !strings.Contains(bucketAddOut, "bucket credential configured: "+bucketName) {
-			t.Fatalf("unexpected bucket add output: %s", bucketAddOut)
+	bucketAlreadyConfigured := strings.Contains(existingBucketListOut, bucketName)
+
+	if !bucketAlreadyConfigured {
+		bucketAddArgs := []string{
+			"--server", serverURL,
+			"bucket", "add", bucketName,
+			"--provider", providerName,
 		}
-	}
+		if v := strings.TrimSpace(bucketCfg.Region); v != "" {
+			bucketAddArgs = append(bucketAddArgs, "--region", v)
+		}
+		if v := strings.TrimSpace(bucketCfg.AccessKey); v != "" {
+			bucketAddArgs = append(bucketAddArgs, "--access-key", v)
+		}
+		if v := strings.TrimSpace(bucketCfg.SecretKey); v != "" {
+			bucketAddArgs = append(bucketAddArgs, "--secret-key", v)
+		}
+		if v := strings.TrimSpace(bucketCfg.Endpoint); v != "" {
+			bucketAddArgs = append(bucketAddArgs, "--endpoint", v)
+		}
 
-	scopeOut, err := executeRootCommand(t,
-		"--server", serverURL,
-		"bucket", "add-project", org, project,
-		"--path", providerScheme(providerName)+"://"+bucketName+"/"+org+"/"+project,
-	)
-	if err != nil {
-		t.Fatalf("bucket add-project failed: %v output=%s", err, scopeOut)
-	}
-	if !strings.Contains(scopeOut, "bucket project scope configured: bucket="+bucketName) {
-		t.Fatalf("unexpected bucket add output: %s", bucketAddOut)
+		bucketAddOut, err := executeRootCommand(t, bucketAddArgs...)
+		if err != nil {
+			t.Fatalf("bucket add failed: %v output=%s", err, bucketAddOut)
+		}
+		if !strings.Contains(bucketAddOut, "bucket configured: "+bucketName) {
+			if !strings.Contains(bucketAddOut, "bucket credential configured: "+bucketName) {
+				t.Fatalf("unexpected bucket add output: %s", bucketAddOut)
+			}
+		}
+
+		scopeOut, err := executeRootCommand(t,
+			"--server", serverURL,
+			"bucket", "add-project", org, project,
+			"--path", providerScheme(providerName)+"://"+bucketName+"/"+org+"/"+project,
+		)
+		if err != nil {
+			t.Fatalf("bucket add-project failed: %v output=%s", err, scopeOut)
+		}
+		if !strings.Contains(scopeOut, "bucket project scope configured: bucket="+bucketName) {
+			t.Fatalf("unexpected bucket add-project output: %s", scopeOut)
+		}
 	}
 
 	bucketListOut, err := executeRootCommand(t, "--server", serverURL, "bucket", "list")
@@ -344,6 +380,30 @@ func exerciseAllClientCommands(t *testing.T, serverURL string, bucketCfg bucketC
 		t.Fatalf("expected removed bucket %s to be absent from list: %s", bucketName, bucketListOut2)
 	}
 
+	rmOut, err := executeRootCommand(t, "--server", serverURL, "rm", "--did", uploadedID)
+	if err != nil {
+		t.Fatalf("rm(uploaded) failed: %v output=%s", err, rmOut)
+	}
+	if !strings.Contains(rmOut, "removed "+uploadedID) {
+		t.Fatalf("unexpected rm output for uploaded did: %s", rmOut)
+	}
+
+	rmOut2, err := executeRootCommand(t, "--server", serverURL, "rm", "--did", addURLDID)
+	if err != nil {
+		t.Fatalf("rm(add-url) failed: %v output=%s", err, rmOut2)
+	}
+	if !strings.Contains(rmOut2, "removed "+addURLDID) {
+		t.Fatalf("unexpected rm output for add-url did: %s", rmOut2)
+	}
+
+	lsAfterRm, err := executeRootCommand(t, "--server", serverURL, "ls")
+	if err != nil {
+		t.Fatalf("ls after rm failed: %v output=%s", err, lsAfterRm)
+	}
+	if strings.Contains(lsAfterRm, fileName) || strings.Contains(lsAfterRm, addURLDID) {
+		t.Fatalf("ls output still includes removed records: %s", lsAfterRm)
+	}
+
 	headlineOut, err := executeRootCommand(t, "--server", serverURL, "ping")
 	if err != nil {
 		t.Fatalf("post-cleanup ping failed: %v output=%s", err, headlineOut)
@@ -364,17 +424,13 @@ func providerScheme(provider string) string {
 	}
 }
 
-func firstAuthPath(auth *internalapi.AuthPathMap) string {
-	if auth == nil {
+func firstAccessMethodURL(methods *[]drs.AccessMethod) string {
+	if methods == nil {
 		return ""
 	}
-	for _, projects := range *auth {
-		for _, paths := range projects {
-			for _, path := range paths {
-				if strings.TrimSpace(path) != "" {
-					return path
-				}
-			}
+	for _, method := range *methods {
+		if method.AccessUrl != nil && strings.TrimSpace(method.AccessUrl.Url) != "" {
+			return strings.TrimSpace(method.AccessUrl.Url)
 		}
 	}
 	return ""

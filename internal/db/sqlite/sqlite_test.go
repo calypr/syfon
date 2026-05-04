@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/calypr/syfon/apigen/server/drs"
+	internalauth "github.com/calypr/syfon/internal/auth"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/crypto"
 	"github.com/calypr/syfon/internal/models"
@@ -81,7 +82,7 @@ func TestSqliteDB_CRUD(t *testing.T) {
 	}
 }
 
-func TestSqliteDB_MigratesLegacyAccessMethodScopeColumns(t *testing.T) {
+func TestSqliteDB_InitializesControlledAccessTable(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "legacy.db")
 	raw, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
@@ -104,9 +105,9 @@ func TestSqliteDB_MigratesLegacyAccessMethodScopeColumns(t *testing.T) {
 	}
 	defer db.db.Close()
 
-	rows, err := db.db.Query(`PRAGMA table_info(drs_object_access_method)`)
+	rows, err := db.db.Query(`PRAGMA table_info(drs_object_controlled_access)`)
 	if err != nil {
-		t.Fatalf("inspect migrated columns: %v", err)
+		t.Fatalf("inspect controlled access table: %v", err)
 	}
 	defer rows.Close()
 
@@ -125,11 +126,11 @@ func TestSqliteDB_MigratesLegacyAccessMethodScopeColumns(t *testing.T) {
 	if err := rows.Err(); err != nil {
 		t.Fatalf("read table_info rows: %v", err)
 	}
-	if !slices.Contains(columns, "org") {
-		t.Fatalf("expected migrated org column, got %v", columns)
+	if !slices.Contains(columns, "object_id") {
+		t.Fatalf("expected object_id column, got %v", columns)
 	}
-	if !slices.Contains(columns, "project") {
-		t.Fatalf("expected migrated project column, got %v", columns)
+	if !slices.Contains(columns, "resource") {
+		t.Fatalf("expected resource column, got %v", columns)
 	}
 }
 
@@ -313,6 +314,75 @@ func TestSqliteDB_ObjectAliasLifecycle(t *testing.T) {
 	}
 }
 
+func TestSqliteDB_ObjectReadsIgnoreAuthContext(t *testing.T) {
+	buildCtx := map[string]func([]string) context.Context{
+		"gen3": func(resources []string) context.Context {
+			session := internalauth.NewSession("gen3")
+			session.AuthHeaderPresent = true
+			session.SetAuthorizations(resources, nil, true)
+			return internalauth.WithSession(context.Background(), session)
+		},
+		"local-authz": func(resources []string) context.Context {
+			session := internalauth.NewSession("local")
+			session.AuthzEnforced = true
+			session.SetAuthorizations(resources, nil, true)
+			return internalauth.WithSession(context.Background(), session)
+		},
+	}
+
+	for mode, makeCtx := range buildCtx {
+		t.Run(mode, func(t *testing.T) {
+			db, err := NewSqliteDB(":memory:")
+			if err != nil {
+				t.Fatalf("failed to create db: %v", err)
+			}
+			now := time.Now().UTC()
+			checksum := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+			if err := db.CreateObject(context.Background(), &models.InternalObject{
+				DrsObject: drs.DrsObject{
+					Id:          "obj-authz",
+					CreatedTime: now,
+					UpdatedTime: &now,
+					Checksums:   []drs.Checksum{{Type: "sha256", Checksum: checksum}},
+					AccessMethods: &[]drs.AccessMethod{
+						{Type: drs.AccessMethodTypeS3, AccessUrl: &struct {
+							Headers *[]string `json:"headers,omitempty"`
+							Url     string    `json:"url"`
+						}{Url: "s3://bucket/path/object"}},
+					},
+				},
+				Authorizations: map[string][]string{"org": {"project"}},
+			}); err != nil {
+				t.Fatalf("CreateObject failed: %v", err)
+			}
+
+			allowedCtx := makeCtx([]string{"/programs/org/projects/project"})
+			if _, err := db.GetObject(allowedCtx, "obj-authz"); err != nil {
+				t.Fatalf("expected GetObject to ignore auth context: %v", err)
+			}
+			byChecksum, err := db.GetObjectsByChecksum(allowedCtx, checksum)
+			if err != nil {
+				t.Fatalf("expected checksum lookup to ignore auth context: %v", err)
+			}
+			if len(byChecksum) != 1 || byChecksum[0].Id != "obj-authz" {
+				t.Fatalf("expected checksum lookup to return object, got %+v", byChecksum)
+			}
+
+			deniedCtx := makeCtx([]string{"/programs/org/projects/other"})
+			if _, err := db.GetObject(deniedCtx, "obj-authz"); err != nil {
+				t.Fatalf("expected GetObject to ignore denied auth context, got %v", err)
+			}
+			byChecksum, err = db.GetObjectsByChecksum(deniedCtx, checksum)
+			if err != nil {
+				t.Fatalf("expected denied checksum lookup to still return object: %v", err)
+			}
+			if len(byChecksum) != 1 || byChecksum[0].Id != "obj-authz" {
+				t.Fatalf("expected denied checksum lookup to return object, got %+v", byChecksum)
+			}
+		})
+	}
+}
+
 func TestSqliteDB_DeleteObjectByAliasRemovesCanonicalObject(t *testing.T) {
 	ctx := context.Background()
 	db, err := NewSqliteDB(":memory:")
@@ -439,8 +509,8 @@ func TestSqliteDB_BulkOperations(t *testing.T) {
 	db, _ := NewSqliteDB(":memory:")
 
 	objects := []models.InternalObject{
-		{DrsObject: drs.DrsObject{Id: "bulk-1", Size: 10}},
-		{DrsObject: drs.DrsObject{Id: "bulk-2", Size: 20}},
+		{DrsObject: drs.DrsObject{Id: "bulk-1", Size: 10}, Authorizations: map[string][]string{"org": {"p1"}}},
+		{DrsObject: drs.DrsObject{Id: "bulk-2", Size: 20}, Authorizations: map[string][]string{"org": {"p2"}}},
 	}
 
 	if err := db.RegisterObjects(ctx, objects); err != nil {
@@ -450,6 +520,11 @@ func TestSqliteDB_BulkOperations(t *testing.T) {
 	fetched, _ := db.GetBulkObjects(ctx, []string{"bulk-1", "bulk-2"})
 	if len(fetched) != 2 {
 		t.Errorf("expected 2 objects, got %d", len(fetched))
+	}
+	for _, obj := range fetched {
+		if obj.ControlledAccess == nil || len(*obj.ControlledAccess) != 1 {
+			t.Fatalf("expected controlled access on %s, got %+v", obj.Id, obj.ControlledAccess)
+		}
 	}
 
 	if err := db.BulkDeleteObjects(ctx, []string{"bulk-1", "bulk-2"}); err != nil {
@@ -825,6 +900,292 @@ func TestSqliteDB_FileUsageMetrics_MissingObjectQueuedAndFlushedOnCreate(t *test
 	}
 }
 
+func TestSqliteDB_ListObjectIDsPageByChecksum(t *testing.T) {
+	ctx := context.Background()
+	db, err := NewSqliteDB(":memory:")
+	if err != nil {
+		t.Fatalf("failed to create db: %v", err)
+	}
+	now := time.Now().UTC()
+	for _, obj := range []models.InternalObject{
+		{
+			Authorizations: map[string][]string{"org": {"p1"}},
+			DrsObject: drs.DrsObject{
+				Id:          "obj-a",
+				CreatedTime: now,
+				UpdatedTime: &now,
+				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: "same"}},
+			},
+		},
+		{
+			Authorizations: map[string][]string{"org": {"p1"}},
+			DrsObject: drs.DrsObject{
+				Id:          "obj-b",
+				CreatedTime: now,
+				UpdatedTime: &now,
+				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: "same"}},
+			},
+		},
+		{
+			Authorizations: map[string][]string{"org": {"p2"}},
+			DrsObject: drs.DrsObject{
+				Id:          "obj-c",
+				CreatedTime: now,
+				UpdatedTime: &now,
+				Checksums:   []drs.Checksum{{Type: "md5", Checksum: "same"}},
+			},
+		},
+	} {
+		if err := db.CreateObject(ctx, &obj); err != nil {
+			t.Fatalf("CreateObject failed: %v", err)
+		}
+	}
+
+	ids, err := db.ListObjectIDsPageByChecksum(ctx, "same", "sha256", "org", "p1", "obj-a", 10, 0, nil, false, false)
+	if err != nil {
+		t.Fatalf("ListObjectIDsPageByChecksum failed: %v", err)
+	}
+	if !slices.Equal(ids, []string{"obj-b"}) {
+		t.Fatalf("unexpected checksum page: %v", ids)
+	}
+}
+
+func TestSqliteDB_AuthorizedObjectLookupQueries(t *testing.T) {
+	ctx := context.Background()
+	db, err := NewSqliteDB(":memory:")
+	if err != nil {
+		t.Fatalf("failed to create db: %v", err)
+	}
+	now := time.Now().UTC()
+	for _, obj := range []models.InternalObject{
+		{
+			Authorizations: map[string][]string{"org": {"p1"}},
+			DrsObject: drs.DrsObject{
+				Id:          "obj-a",
+				CreatedTime: now,
+				UpdatedTime: &now,
+				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: "same"}},
+			},
+		},
+		{
+			Authorizations: map[string][]string{"org": {"p2"}},
+			DrsObject: drs.DrsObject{
+				Id:          "obj-b",
+				CreatedTime: now,
+				UpdatedTime: &now,
+				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: "same"}},
+			},
+		},
+		{
+			DrsObject: drs.DrsObject{
+				Id:          "obj-public",
+				CreatedTime: now,
+				UpdatedTime: &now,
+				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: "same"}},
+			},
+		},
+	} {
+		if err := db.CreateObject(ctx, &obj); err != nil {
+			t.Fatalf("CreateObject failed: %v", err)
+		}
+	}
+
+	scopeIDs, err := db.ListObjectIDsByScopeAndResources(ctx, "org", "p1", []string{"/programs/org/projects/p1"}, true)
+	if err != nil {
+		t.Fatalf("ListObjectIDsByScopeAndResources failed: %v", err)
+	}
+	if !slices.Equal(scopeIDs, []string{"obj-a"}) {
+		t.Fatalf("unexpected scoped ids: %v", scopeIDs)
+	}
+
+	byChecksum, err := db.ListObjectIDsByChecksumsAndResources(ctx, []string{"same"}, []string{"/programs/org/projects/p1"}, true, true)
+	if err != nil {
+		t.Fatalf("ListObjectIDsByChecksumsAndResources failed: %v", err)
+	}
+	if !slices.Equal(byChecksum["same"], []string{"obj-a", "obj-public"}) {
+		t.Fatalf("unexpected checksum auth ids: %+v", byChecksum)
+	}
+}
+
+func TestSqliteDB_ScopedFileUsageQueries(t *testing.T) {
+	ctx := context.Background()
+	db, err := NewSqliteDB(":memory:")
+	if err != nil {
+		t.Fatalf("failed to create db: %v", err)
+	}
+	now := time.Now().UTC()
+	for _, obj := range []models.InternalObject{
+		{
+			Authorizations: map[string][]string{"org": {"p1"}},
+			DrsObject: drs.DrsObject{
+				Id:          "obj-1",
+				Name:        common.Ptr("one"),
+				Size:        1,
+				CreatedTime: now,
+				UpdatedTime: &now,
+			},
+		},
+		{
+			Authorizations: map[string][]string{"org": {"p1"}},
+			DrsObject: drs.DrsObject{
+				Id:          "obj-2",
+				Name:        common.Ptr("two"),
+				Size:        2,
+				CreatedTime: now,
+				UpdatedTime: &now,
+			},
+		},
+		{
+			Authorizations: map[string][]string{"org": {"p2"}},
+			DrsObject: drs.DrsObject{
+				Id:          "obj-3",
+				Name:        common.Ptr("three"),
+				Size:        3,
+				CreatedTime: now,
+				UpdatedTime: &now,
+			},
+		},
+	} {
+		if err := db.CreateObject(ctx, &obj); err != nil {
+			t.Fatalf("CreateObject failed: %v", err)
+		}
+	}
+	if err := db.RecordFileUpload(ctx, "obj-2"); err != nil {
+		t.Fatalf("RecordFileUpload failed: %v", err)
+	}
+	if err := db.RecordFileDownload(ctx, "obj-2"); err != nil {
+		t.Fatalf("RecordFileDownload failed: %v", err)
+	}
+
+	rows, err := db.ListFileUsagePageByScope(ctx, "org", "p1", 1, 1, nil)
+	if err != nil {
+		t.Fatalf("ListFileUsagePageByScope failed: %v", err)
+	}
+	if len(rows) != 1 || rows[0].ObjectID != "obj-2" {
+		t.Fatalf("unexpected scoped usage page: %+v", rows)
+	}
+
+	summary, err := db.GetFileUsageSummaryByScope(ctx, "org", "p1", nil)
+	if err != nil {
+		t.Fatalf("GetFileUsageSummaryByScope failed: %v", err)
+	}
+	if summary.TotalFiles != 2 || summary.TotalUploads != 1 || summary.TotalDownloads != 1 || summary.InactiveFileCount != 0 {
+		t.Fatalf("unexpected scoped summary: %+v", summary)
+	}
+}
+
+func TestSqliteDB_TransferAttributionByResources(t *testing.T) {
+	ctx := context.Background()
+	db, err := NewSqliteDB(":memory:")
+	if err != nil {
+		t.Fatalf("failed to create db: %v", err)
+	}
+	now := time.Now().UTC()
+	events := []models.TransferAttributionEvent{
+		{
+			EventID:           "ev-a",
+			AccessGrantID:     "grant-a",
+			EventType:         models.TransferEventAccessIssued,
+			Direction:         models.ProviderTransferDirectionDownload,
+			EventTime:         now,
+			Organization:      "org",
+			Project:           "p1",
+			Provider:          "s3",
+			Bucket:            "bucket-a",
+			BytesRequested:    11,
+			BytesCompleted:    11,
+			ActorEmail:        "user-a@example.com",
+			StorageURL:        "s3://bucket-a/a",
+		},
+		{
+			EventID:           "ev-b",
+			AccessGrantID:     "grant-b",
+			EventType:         models.TransferEventAccessIssued,
+			Direction:         models.ProviderTransferDirectionDownload,
+			EventTime:         now.Add(time.Minute),
+			Organization:      "org",
+			Project:           "p2",
+			Provider:          "s3",
+			Bucket:            "bucket-b",
+			BytesRequested:    29,
+			BytesCompleted:    29,
+			ActorEmail:        "user-b@example.com",
+			StorageURL:        "s3://bucket-b/b",
+		},
+	}
+	if err := db.RecordTransferAttributionEvents(ctx, events); err != nil {
+		t.Fatalf("RecordTransferAttributionEvents failed: %v", err)
+	}
+
+	summary, err := db.GetTransferAttributionSummaryByResources(ctx, models.TransferAttributionFilter{}, []string{"/programs/org/projects/p1"})
+	if err != nil {
+		t.Fatalf("GetTransferAttributionSummaryByResources failed: %v", err)
+	}
+	if summary.EventCount != 1 || summary.BytesDownloaded != 11 {
+		t.Fatalf("unexpected scoped transfer summary: %+v", summary)
+	}
+
+	breakdown, err := db.GetTransferAttributionBreakdownByResources(ctx, models.TransferAttributionFilter{}, "user", []string{"/programs/org/projects/p1"})
+	if err != nil {
+		t.Fatalf("GetTransferAttributionBreakdownByResources failed: %v", err)
+	}
+	if len(breakdown) != 1 || breakdown[0].ActorEmail != "user-a@example.com" || breakdown[0].BytesDownloaded != 11 {
+		t.Fatalf("unexpected scoped transfer breakdown: %+v", breakdown)
+	}
+}
+
+func TestSqliteDB_ListBucketVisibilityRows(t *testing.T) {
+	ctx := context.Background()
+	db, err := NewSqliteDB(":memory:")
+	if err != nil {
+		t.Fatalf("failed to create db: %v", err)
+	}
+	now := time.Now().UTC()
+	for _, obj := range []models.InternalObject{
+		{
+			Authorizations: map[string][]string{"org": {"p1"}},
+			DrsObject: drs.DrsObject{
+				Id:          "obj-scoped",
+				CreatedTime: now,
+				UpdatedTime: &now,
+				AccessMethods: &[]drs.AccessMethod{{
+					Type: drs.AccessMethodTypeS3,
+					AccessUrl: &struct {
+						Headers *[]string `json:"headers,omitempty"`
+						Url     string    `json:"url"`
+					}{Url: "s3://bucket-a/scoped"},
+				}},
+			},
+		},
+		{
+			DrsObject: drs.DrsObject{
+				Id:          "obj-public",
+				CreatedTime: now,
+				UpdatedTime: &now,
+				AccessMethods: &[]drs.AccessMethod{{
+					Type: drs.AccessMethodTypeS3,
+					AccessUrl: &struct {
+						Headers *[]string `json:"headers,omitempty"`
+						Url     string    `json:"url"`
+					}{Url: "s3://bucket-b/public"},
+				}},
+			},
+		},
+	} {
+		if err := db.CreateObject(ctx, &obj); err != nil {
+			t.Fatalf("CreateObject failed: %v", err)
+		}
+	}
+
+	rows, err := db.ListBucketVisibilityRows(ctx, []string{"/programs/org/projects/p1"}, true, true)
+	if err != nil {
+		t.Fatalf("ListBucketVisibilityRows failed: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("expected 2 visibility rows, got %d (%+v)", len(rows), rows)
+	}
+}
+
 func TestSqliteDB_TransferAttributionMetrics(t *testing.T) {
 	ctx := context.Background()
 	db, err := NewSqliteDB(":memory:")
@@ -857,6 +1218,7 @@ func TestSqliteDB_TransferAttributionMetrics(t *testing.T) {
 			EventID:           "grant-download-1",
 			AccessGrantID:     "grant-download-1",
 			EventType:         models.TransferEventAccessIssued,
+			Direction:         models.ProviderTransferDirectionDownload,
 			EventTime:         now,
 			RequestID:         "request-1",
 			ObjectID:          "did-1",
@@ -883,6 +1245,7 @@ func TestSqliteDB_TransferAttributionMetrics(t *testing.T) {
 			EventID:           "grant-upload-1",
 			AccessGrantID:     "grant-upload-1",
 			EventType:         models.TransferEventAccessIssued,
+			Direction:         models.ProviderTransferDirectionUpload,
 			EventTime:         now.Add(time.Second),
 			RequestID:         "request-2",
 			ObjectID:          "did-1",
@@ -1013,46 +1376,8 @@ func TestSqliteDB_TransferAttributionMetrics(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetTransferAttributionSummary all failed: %v", err)
 	}
-	if allSummary.EventCount != 3 {
+	if allSummary.EventCount != 2 {
 		t.Fatalf("expected all reconciliation states when requested, got %+v", allSummary)
-	}
-
-	completedAt := now.Add(5 * time.Second)
-	runs := []models.ProviderTransferSyncRun{
-		{
-			SyncID:         "sync-bucket-a",
-			Provider:       "s3",
-			Bucket:         "bucket-a",
-			Organization:   "calypr",
-			Project:        "proj-a",
-			From:           now.Add(-time.Hour),
-			To:             now.Add(time.Hour),
-			Status:         models.ProviderTransferSyncCompleted,
-			RequestedAt:    now,
-			CompletedAt:    &completedAt,
-			ImportedEvents: 2,
-			MatchedEvents:  2,
-		},
-	}
-	if err := db.RecordProviderTransferSyncRuns(ctx, runs); err != nil {
-		t.Fatalf("RecordProviderTransferSyncRuns failed: %v", err)
-	}
-	if err := db.RecordProviderTransferSyncRuns(ctx, runs); err != nil {
-		t.Fatalf("duplicate RecordProviderTransferSyncRuns failed: %v", err)
-	}
-	listed, err := db.ListProviderTransferSyncRuns(ctx, models.TransferAttributionFilter{
-		Organization: "calypr",
-		Project:      "proj-a",
-		Provider:     "s3",
-		Bucket:       "bucket-a",
-		From:         common.Ptr(now.Add(-time.Minute)),
-		To:           common.Ptr(now.Add(time.Minute)),
-	}, 10)
-	if err != nil {
-		t.Fatalf("ListProviderTransferSyncRuns failed: %v", err)
-	}
-	if len(listed) != 1 || listed[0].SyncID != "sync-bucket-a" || listed[0].Status != models.ProviderTransferSyncCompleted {
-		t.Fatalf("unexpected provider sync runs: %+v", listed)
 	}
 
 	var grantCount, issueCount int

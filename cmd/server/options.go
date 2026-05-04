@@ -57,8 +57,7 @@ func WithMetricsRoutes() ServerOption {
 func WithInternalRoutes() ServerOption {
 	return func(rt *serverRuntime) {
 		api := rt.ensureAPIGroup()
-		internaldrs.RegisterInternalIndexRoutes(api, rt.om)
-		internaldrs.RegisterInternalDataRoutes(api, rt.om)
+		internaldrs.RegisterInternalRoutes(api, rt.om)
 	}
 }
 

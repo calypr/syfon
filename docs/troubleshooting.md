@@ -38,7 +38,13 @@ requested DID: e3b0...
 - `requested DID` is the ID the CLI asked the server to register.
 - `successfully uploaded <id>` is the canonical object ID that Syfon stored.
 
-When `--did` is omitted, the CLI uses the file checksum as the requested DID, but the server may mint a different canonical ID based on the checksum plus authz context. In that case, the checksum can still be recorded as an alias.
+When `--did` is omitted, the CLI deterministically mints the requested DID from
+the file SHA256 plus the canonical project scope path
+(`/organization/<org>/project/<project>`). The server uses the same rule when
+it needs to mint an ID from checksum+scope data.
+
+If no explicit `--did` is provided, `--project` must be provided. Organization-
+only scope is not enough to mint a deterministic object ID.
 
 **Rule of thumb:** Use the canonical ID from `successfully uploaded ...` for follow-up operations like `download`, `sha256sum`, and `rm`. Keep `requested DID` as the trace of what the client originally asked for.
 
@@ -149,7 +155,7 @@ echo "cmd/**/__debug_bin*" >> .gitignore
 
 ## Documentation
 
-### `make docs` shows outdated content
+### `make docs-serve` shows outdated content
 
 MkDocs serves from source files directly in watch mode. If content appears stale, hard-refresh your browser (`Cmd+Shift+R` / `Ctrl+Shift+R`).
 

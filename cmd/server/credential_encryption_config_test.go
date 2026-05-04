@@ -1,11 +1,15 @@
 package server
 
 import (
+	"context"
+	"io"
+	"log/slog"
 	"os"
 	"testing"
 
 	"github.com/calypr/syfon/internal/config"
 	"github.com/calypr/syfon/internal/crypto"
+	"github.com/calypr/syfon/internal/testutils"
 )
 
 func TestApplyCredentialEncryptionConfig(t *testing.T) {
@@ -73,5 +77,30 @@ func TestApplyCredentialEncryptionConfigDoesNotOverrideEnv(t *testing.T) {
 	}
 	if got := os.Getenv(crypto.DatabaseSQLiteFileEnv); got != "/existing/drs.db" {
 		t.Fatalf("expected existing sqlite file env to win, got %q", got)
+	}
+}
+
+func TestLoadConfiguredBucketScopes(t *testing.T) {
+	database := &testutils.MockDatabase{}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	err := loadConfiguredBucketScopes(context.Background(), database, []config.BucketScopeConfig{
+		{
+			Organization: "calypr",
+			ProjectID:    "training",
+			Bucket:       "calypr",
+			PathPrefix:   "008b435e-c1da-58b8-80f1-3ad2882c43cd",
+		},
+	}, logger)
+	if err != nil {
+		t.Fatalf("loadConfiguredBucketScopes returned error: %v", err)
+	}
+
+	scope, err := database.GetBucketScope(context.Background(), "calypr", "training")
+	if err != nil {
+		t.Fatalf("expected bucket scope to be saved: %v", err)
+	}
+	if scope.Bucket != "calypr" || scope.PathPrefix != "008b435e-c1da-58b8-80f1-3ad2882c43cd" {
+		t.Fatalf("unexpected saved bucket scope: %+v", scope)
 	}
 }

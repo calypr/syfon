@@ -15,25 +15,61 @@ func TestSchemaEnsurers(t *testing.T) {
 
 		mock.ExpectExec("CREATE TABLE IF NOT EXISTS drs_object").WillReturnResult(sqlmock.NewResult(0, 0))
 		mock.ExpectExec("CREATE TABLE IF NOT EXISTS drs_object_access_method").WillReturnResult(sqlmock.NewResult(0, 0))
+		mock.ExpectExec("CREATE TABLE IF NOT EXISTS drs_object_controlled_access").WillReturnResult(sqlmock.NewResult(0, 0))
 		mock.ExpectExec("CREATE TABLE IF NOT EXISTS drs_object_checksum").WillReturnResult(sqlmock.NewResult(0, 0))
 		mock.ExpectExec("CREATE TABLE IF NOT EXISTS drs_object_alias").WillReturnResult(sqlmock.NewResult(0, 0))
-		mock.ExpectExec(regexp.QuoteMeta("ALTER TABLE drs_object_access_method ADD COLUMN IF NOT EXISTS org TEXT NOT NULL DEFAULT ''")).
-			WillReturnResult(sqlmock.NewResult(0, 0))
-		mock.ExpectExec(regexp.QuoteMeta("ALTER TABLE drs_object_access_method ADD COLUMN IF NOT EXISTS project TEXT NOT NULL DEFAULT ''")).
-			WillReturnResult(sqlmock.NewResult(0, 0))
 		mock.ExpectExec(regexp.QuoteMeta("CREATE INDEX IF NOT EXISTS drs_object_access_method_object_id_idx ON drs_object_access_method(object_id)")).
 			WillReturnResult(sqlmock.NewResult(0, 0))
 		mock.ExpectExec(regexp.QuoteMeta("CREATE INDEX IF NOT EXISTS drs_object_checksum_object_id_idx ON drs_object_checksum(object_id)")).
 			WillReturnResult(sqlmock.NewResult(0, 0))
 		mock.ExpectExec(regexp.QuoteMeta("CREATE INDEX IF NOT EXISTS drs_object_checksum_checksum_idx ON drs_object_checksum(checksum)")).
 			WillReturnResult(sqlmock.NewResult(0, 0))
-		mock.ExpectExec(regexp.QuoteMeta("CREATE INDEX IF NOT EXISTS drs_object_access_method_scope_idx ON drs_object_access_method(org, project)")).
+		mock.ExpectExec(regexp.QuoteMeta("CREATE INDEX IF NOT EXISTS drs_object_checksum_checksum_type_object_id_idx ON drs_object_checksum(checksum, type, object_id)")).
+			WillReturnResult(sqlmock.NewResult(0, 0))
+		mock.ExpectExec(regexp.QuoteMeta("CREATE INDEX IF NOT EXISTS drs_object_controlled_access_object_id_idx ON drs_object_controlled_access(object_id)")).
+			WillReturnResult(sqlmock.NewResult(0, 0))
+		mock.ExpectExec(regexp.QuoteMeta("CREATE INDEX IF NOT EXISTS drs_object_controlled_access_resource_idx ON drs_object_controlled_access(resource)")).
+			WillReturnResult(sqlmock.NewResult(0, 0))
+		mock.ExpectExec(regexp.QuoteMeta("CREATE INDEX IF NOT EXISTS drs_object_controlled_access_resource_object_id_idx ON drs_object_controlled_access(resource, object_id)")).
+			WillReturnResult(sqlmock.NewResult(0, 0))
+		mock.ExpectExec(regexp.QuoteMeta("CREATE INDEX IF NOT EXISTS drs_object_controlled_access_object_id_resource_idx ON drs_object_controlled_access(object_id, resource)")).
 			WillReturnResult(sqlmock.NewResult(0, 0))
 		mock.ExpectExec(regexp.QuoteMeta("CREATE INDEX IF NOT EXISTS drs_object_alias_object_id_idx ON drs_object_alias(object_id)")).
 			WillReturnResult(sqlmock.NewResult(0, 0))
+		mock.ExpectQuery("information_schema\\.columns").
+			WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 
 		if err := pg.ensureObjectSchema(); err != nil {
 			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("validateLegacyAccessMethodScopes_legacyColumnsWithoutScopedRows", func(t *testing.T) {
+		pg, mock, rawDB := newMockPostgresDB(t)
+		defer rawDB.Close()
+
+		mock.ExpectQuery("information_schema\\.columns").
+			WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(2))
+		mock.ExpectQuery("SELECT COUNT\\(\\*\\)").
+			WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+
+		if err := pg.validateLegacyAccessMethodScopes(context.Background()); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("validateLegacyAccessMethodScopes_rejectsMismatchedScopedRows", func(t *testing.T) {
+		pg, mock, rawDB := newMockPostgresDB(t)
+		defer rawDB.Close()
+
+		mock.ExpectQuery("information_schema\\.columns").
+			WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(2))
+		mock.ExpectQuery("SELECT COUNT\\(\\*\\)").
+			WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(3))
+
+		err := pg.validateLegacyAccessMethodScopes(context.Background())
+		if err == nil {
+			t.Fatal("expected mismatch validation error")
 		}
 	})
 
@@ -93,6 +129,7 @@ func TestSchemaEnsurers(t *testing.T) {
 
 		mock.ExpectExec("CREATE TABLE IF NOT EXISTS object_usage").WillReturnResult(sqlmock.NewResult(0, 0))
 		mock.ExpectExec("CREATE INDEX IF NOT EXISTS idx_object_usage_last_download_time").WillReturnResult(sqlmock.NewResult(0, 0))
+		mock.ExpectExec("CREATE INDEX IF NOT EXISTS idx_object_usage_last_download_time_object_id").WillReturnResult(sqlmock.NewResult(0, 0))
 		mock.ExpectExec("CREATE INDEX IF NOT EXISTS idx_object_usage_last_upload_time").WillReturnResult(sqlmock.NewResult(0, 0))
 
 		if err := pg.ensureObjectUsageSchema(); err != nil {

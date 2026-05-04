@@ -7,8 +7,8 @@ import (
 	"io"
 	"os"
 	"sort"
-	"sync"
 	"strings"
+	"sync"
 
 	"github.com/calypr/syfon/client/common"
 	"github.com/calypr/syfon/client/transfer"
@@ -27,7 +27,7 @@ type uploaderResumeState struct {
 }
 
 type GenericUploader struct {
-	Backend transfer.Backend
+	Backend transfer.MultipartBackend
 }
 
 type uploadURLResolver interface {
@@ -92,7 +92,10 @@ func (u *GenericUploader) uploadMultipart(ctx context.Context, req transfer.Tran
 	}
 
 	state, loaded := u.loadState(checkpointPath)
-	stat, _ := file.Stat()
+	stat, err := file.Stat()
+	if err != nil {
+		return fmt.Errorf("stat upload source: %w", err)
+	}
 	objectKey := effectiveObjectKey(req)
 
 	if !loaded || !u.matches(state, req, stat, chunkSize) {
@@ -111,7 +114,9 @@ func (u *GenericUploader) uploadMultipart(ctx context.Context, req transfer.Tran
 			UploadID:        uploadID,
 			Completed:       map[int]string{},
 		}
-		u.saveState(checkpointPath, state)
+		if err := u.saveState(checkpointPath, state); err != nil {
+			return fmt.Errorf("persist multipart checkpoint: %w", err)
+		}
 	}
 
 	numChunks := int((fileSize + chunkSize - 1) / chunkSize)
@@ -152,10 +157,13 @@ func (u *GenericUploader) uploadMultipart(ctx context.Context, req transfer.Tran
 
 					mu.Lock()
 					state.Completed[partNum] = etag
-					u.saveState(checkpointPath, state)
+					saveErr := u.saveState(checkpointPath, state)
 					totalBytes += partSize
 					progressed = true
 					mu.Unlock()
+					if saveErr != nil {
+						return fmt.Errorf("persist multipart checkpoint: %w", saveErr)
+					}
 
 					emitProgress(ctx, partSize, totalBytes)
 					return nil
@@ -189,7 +197,9 @@ func (u *GenericUploader) uploadMultipart(ctx context.Context, req transfer.Tran
 		return err
 	}
 
-	_ = os.Remove(checkpointPath)
+	if err := os.Remove(checkpointPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove multipart checkpoint: %w", err)
+	}
 	return nil
 }
 
@@ -208,9 +218,15 @@ func (u *GenericUploader) loadState(path string) (*uploaderResumeState, bool) {
 	return &st, true
 }
 
-func (u *GenericUploader) saveState(path string, state *uploaderResumeState) {
-	data, _ := json.Marshal(state)
-	_ = os.WriteFile(path, data, 0o644)
+func (u *GenericUploader) saveState(path string, state *uploaderResumeState) error {
+	data, err := json.Marshal(state)
+	if err != nil {
+		return fmt.Errorf("marshal upload checkpoint: %w", err)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return fmt.Errorf("write upload checkpoint: %w", err)
+	}
+	return nil
 }
 
 func (u *GenericUploader) matches(s *uploaderResumeState, req transfer.TransferRequest, info os.FileInfo, chunkSize int64) bool {

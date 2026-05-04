@@ -14,7 +14,10 @@ func ResponseBodyError(resp *http.Response, prefix string) error {
 	}
 
 	const maxBodyPreview = 4 << 10
-	bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, maxBodyPreview))
+	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, maxBodyPreview))
+	if err != nil {
+		return fmt.Errorf("%s: status %d body-read-error=%v", prefix, resp.StatusCode, err)
+	}
 	body := strings.TrimSpace(string(bodyBytes))
 	if body == "" {
 		return fmt.Errorf("%s: status %d", prefix, resp.StatusCode)

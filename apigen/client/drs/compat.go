@@ -1,5 +1,7 @@
 package drs
 
 // Compatibility aliases for generator-emitted service-info field names.
-type N200ServiceInfoDrsSupportedUploadMethods = DrsServiceDrsSupportedUploadMethods
+type N200ServiceInfoDrsControlledAccessClaimFormat = DrsServiceDrsControlledAccessClaimFormat
+type N200ServiceInfoDrsControlledAccessDefault = DrsServiceDrsControlledAccessDefault
+type N200ServiceInfoDrsSupportedUploadMethodTypes = DrsServiceDrsSupportedUploadMethodTypes
 type N200ServiceInfoTypeArtifact = DrsServiceTypeArtifact

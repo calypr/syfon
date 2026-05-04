@@ -173,9 +173,9 @@ func buildMockServerRouterWithRoutes(routes config.RoutesConfig) *fiber.App {
 							Headers *[]string `json:"headers,omitempty"`
 							Url     string    `json:"url"`
 						}{Url: "s3://test-bucket-1/sha-1"},
-						Authorizations: &map[string][]string{"data": {}},
 					},
 				},
+				ControlledAccess: &[]string{"/programs/data_file"},
 			},
 		},
 		ObjectAuthz: map[string]map[string][]string{

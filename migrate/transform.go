@@ -41,28 +41,28 @@ func Transform(rec IndexdRecord, defaultAuthz []string, now time.Time) (Migratio
 		now = time.Now().UTC()
 	}
 
-	authz := uniqueStrings(rec.Authz)
-	if len(authz) == 0 {
-		authz = uniqueStrings(defaultAuthz)
+	controlledAccess := syfoncommon.NormalizeAccessResources(rec.Authz)
+	if len(controlledAccess) == 0 {
+		controlledAccess = syfoncommon.NormalizeAccessResources(defaultAuthz)
 	}
-	authzMap := syfoncommon.AuthzListToMap(authz)
 
 	checksums := checksumsFromHashes(rec.Hashes)
 	created := firstParsedTime(now, rec.CreatedTime, rec.CreatedDate, rec.ContentCreatedDate)
 	updated := firstParsedTime(created, rec.UpdatedTime, rec.UpdatedDate, rec.ContentUpdatedDate)
-	accessMethods := accessMethodsFromURLs(rec.URLs, authzMap)
+	accessMethods := accessMethodsFromURLs(rec.URLs)
 
 	return MigrationRecord{
-		ID:            did,
-		Name:          stringPtrValue(rec.FileName),
-		Size:          int64PtrValue(rec.Size),
-		Version:       stringPtrValue(rec.Version),
-		Description:   stringPtrValue(rec.Description),
-		CreatedTime:   created,
-		UpdatedTime:   &updated,
-		Checksums:     checksums,
-		AccessMethods: accessMethods,
-		Authz:         authz,
+		ID:               did,
+		Name:             stringPtrValue(rec.FileName),
+		Size:             int64PtrValue(rec.Size),
+		Version:          stringPtrValue(rec.Version),
+		Description:      stringPtrValue(rec.Description),
+		CreatedTime:      created,
+		UpdatedTime:      &updated,
+		Checksums:        checksums,
+		AccessMethods:    accessMethods,
+		ControlledAccess: controlledAccess,
+		Authz:            controlledAccess,
 	}, nil
 }
 
@@ -99,7 +99,12 @@ func MigrationRecordToInternalObject(record MigrationRecord) (models.InternalObj
 	if err := Validate(record); err != nil {
 		return models.InternalObject{}, err
 	}
-	authzMap := syfoncommon.AuthzListToMap(record.Authz)
+	controlledAccess := record.ControlledAccess
+	if len(controlledAccess) == 0 {
+		controlledAccess = record.Authz
+	}
+	controlledAccess = syfoncommon.NormalizeAccessResources(controlledAccess)
+	authzMap := syfoncommon.ControlledAccessToAuthzMap(controlledAccess)
 	updated := record.UpdatedTime
 	if updated == nil {
 		t := record.CreatedTime
@@ -117,13 +122,11 @@ func MigrationRecordToInternalObject(record MigrationRecord) (models.InternalObj
 		Checksums:     append([]drs.Checksum(nil), record.Checksums...),
 		AccessMethods: nil,
 	}
+	if authzMap != nil {
+		obj.ControlledAccess = &controlledAccess
+	}
 	if len(record.AccessMethods) > 0 {
 		methods := append([]drs.AccessMethod(nil), record.AccessMethods...)
-		for i := range methods {
-			if methods[i].Authorizations == nil && authzMap != nil {
-				methods[i].Authorizations = &authzMap
-			}
-		}
 		obj.AccessMethods = &methods
 	}
 	return models.InternalObject{
@@ -178,7 +181,7 @@ func checksumsFromHashes(hashes map[string]string) []drs.Checksum {
 	return out
 }
 
-func accessMethodsFromURLs(urls []string, authzMap map[string][]string) []drs.AccessMethod {
+func accessMethodsFromURLs(urls []string) []drs.AccessMethod {
 	if len(urls) == 0 {
 		return nil
 	}
@@ -202,9 +205,6 @@ func accessMethodsFromURLs(urls []string, authzMap map[string][]string) []drs.Ac
 				Headers *[]string `json:"headers,omitempty"`
 				Url     string    `json:"url"`
 			}{Url: rawURL},
-		}
-		if authzMap != nil {
-			method.Authorizations = &authzMap
 		}
 		out = append(out, method)
 	}

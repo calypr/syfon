@@ -7,20 +7,18 @@ import (
 	"strings"
 
 	"github.com/calypr/syfon/apigen/client/bucketapi"
-	syclient "github.com/calypr/syfon/client"
 	sybucket "github.com/calypr/syfon/client/bucket"
+	"github.com/calypr/syfon/cmd/cliauth"
 	"github.com/spf13/cobra"
 )
 
 var (
-	bucketProvider   string
-	bucketRegion     string
-	bucketAccessKey  string
-	bucketSecretKey  string
-	bucketEndpoint   string
-	bucketPath       string
-	billingLogBucket string
-	billingLogPrefix string
+	bucketProvider  string
+	bucketRegion    string
+	bucketAccessKey string
+	bucketSecretKey string
+	bucketEndpoint  string
+	bucketPath      string
 )
 
 var Cmd = &cobra.Command{
@@ -56,22 +54,11 @@ var addCmd = &cobra.Command{
 		if v := strings.TrimSpace(bucketEndpoint); v != "" {
 			payload.Endpoint = &v
 		}
-		if v := strings.TrimSpace(billingLogBucket); v != "" {
-			payload.BillingLogBucket = &v
-		}
-		if v := strings.Trim(strings.TrimSpace(billingLogPrefix), "/"); v != "" {
-			payload.BillingLogPrefix = &v
-		}
-
-		serverURL, err := cmd.Flags().GetString("server")
-		if err != nil {
-			return fmt.Errorf("get server flag: %w", err)
-		}
 		if err := sybucket.ValidateBucket(cmd.Context(), payload); err != nil {
 			return fmt.Errorf("local bucket validation failed: %w", err)
 		}
 
-		c, err := syclient.New(serverURL)
+		c, err := cliauth.NewServerClient(cmd)
 		if err != nil {
 			return err
 		}
@@ -149,11 +136,7 @@ func bucketFromStoragePath(raw string) (string, error) {
 }
 
 func addBucketScope(cmd *cobra.Command, bucket string, req bucketapi.AddBucketScopeRequest, message string) error {
-	serverURL, err := cmd.Flags().GetString("server")
-	if err != nil {
-		return fmt.Errorf("get server flag: %w", err)
-	}
-	c, err := syclient.New(serverURL)
+	c, err := cliauth.NewServerClient(cmd)
 	if err != nil {
 		return err
 	}
@@ -168,11 +151,7 @@ var listCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List configured buckets",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		serverURL, err := cmd.Flags().GetString("server")
-		if err != nil {
-			return fmt.Errorf("get server flag: %w", err)
-		}
-		c, err := syclient.New(serverURL)
+		c, err := cliauth.NewServerClient(cmd)
 		if err != nil {
 			return err
 		}
@@ -190,6 +169,7 @@ var listCmd = &cobra.Command{
 			names = append(names, name)
 		}
 		sort.Strings(names)
+		fmt.Fprintf(cmd.OutOrStdout(), "%-20s  %-10s  %-12s  %-24s  %s\n", "BUCKET", "PROVIDER", "REGION", "PROGRAMS", "ENDPOINT")
 		for _, name := range names {
 			md := buckets[name]
 			provider := ""
@@ -200,27 +180,22 @@ var listCmd = &cobra.Command{
 			if md.Region != nil {
 				region = *md.Region
 			}
-			logBucket := ""
-			if md.BillingLogBucket != nil {
-				logBucket = *md.BillingLogBucket
-			}
-			logPrefix := ""
-			if md.BillingLogPrefix != nil {
-				logPrefix = *md.BillingLogPrefix
-			}
 			programs := []string{}
 			if md.Programs != nil {
 				programs = *md.Programs
 			}
+			endpoint := ""
+			if md.EndpointUrl != nil {
+				endpoint = *md.EndpointUrl
+			}
 			fmt.Fprintf(
 				cmd.OutOrStdout(),
-				"%s\tprovider=%s\tregion=%s\tbilling_logs=%s/%s\tprograms=%s\n",
+				"%-20s  %-10s  %-12s  %-24s  %s\n",
 				name,
 				strings.TrimSpace(provider),
 				strings.TrimSpace(region),
-				strings.TrimSpace(logBucket),
-				strings.Trim(strings.TrimSpace(logPrefix), "/"),
 				strings.Join(programs, ","),
+				strings.TrimSpace(endpoint),
 			)
 		}
 		return nil
@@ -237,11 +212,7 @@ var removeCmd = &cobra.Command{
 		if bucket == "" {
 			return fmt.Errorf("bucket is required")
 		}
-		serverURL, err := cmd.Flags().GetString("server")
-		if err != nil {
-			return fmt.Errorf("get server flag: %w", err)
-		}
-		c, err := syclient.New(serverURL)
+		c, err := cliauth.NewServerClient(cmd)
 		if err != nil {
 			return err
 		}
@@ -259,8 +230,6 @@ func init() {
 	addCmd.Flags().StringVar(&bucketAccessKey, "access-key", "", "S3 access key (required for new s3 creds)")
 	addCmd.Flags().StringVar(&bucketSecretKey, "secret-key", "", "S3 secret key (required for new s3 creds)")
 	addCmd.Flags().StringVar(&bucketEndpoint, "endpoint", "", "Custom endpoint URL")
-	addCmd.Flags().StringVar(&billingLogBucket, "billing-log-bucket", "", "Bucket/container where provider access logs are delivered")
-	addCmd.Flags().StringVar(&billingLogPrefix, "billing-log-prefix", "", "Prefix where provider access logs are delivered")
 
 	addOrganizationCmd.Flags().StringVar(&bucketPath, "path", "", "Organization storage root as <scheme>://<bucket>/<prefix>")
 	addProjectCmd.Flags().StringVar(&bucketPath, "path", "", "Project storage root as <scheme>://<bucket>/<prefix>")

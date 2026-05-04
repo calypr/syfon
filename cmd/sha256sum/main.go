@@ -12,7 +12,9 @@ import (
 	"strings"
 
 	syclient "github.com/calypr/syfon/client"
-	"github.com/calypr/syfon/client/syfonclient"
+	"github.com/calypr/syfon/client/request"
+	syfonclient "github.com/calypr/syfon/client/services"
+	"github.com/calypr/syfon/cmd/cliauth"
 	"github.com/spf13/cobra"
 )
 
@@ -27,11 +29,7 @@ var Cmd = &cobra.Command{
 			return fmt.Errorf("--did is required")
 		}
 
-		serverURL, err := cmd.Flags().GetString("server")
-		if err != nil {
-			return fmt.Errorf("get server flag: %w", err)
-		}
-		c, err := syclient.New(serverURL)
+		c, err := cliauth.NewServerClient(cmd)
 		if err != nil {
 			return err
 		}
@@ -55,37 +53,13 @@ var Cmd = &cobra.Command{
 		sumArr := sha256.Sum256(data)
 		sum := hex.EncodeToString(sumArr[:])
 
-		// Fetch the latest record to preserve scoped auth paths during upsert.
-		var authorizations map[string][]string
-		if rec, err := c.Index().Get(ctx, did); err == nil && rec.Auth != nil {
-			authorizations = authorizationsFromAuthPathMap(*rec.Auth)
-		}
-
-		if err := c.Index().Upsert(ctx, did, "", "", 0, sum, authorizations); err != nil {
+		if err := c.Index().Upsert(ctx, did, "", "", 0, sum, nil); err != nil {
 			return fmt.Errorf("persist sha256: %w", err)
 		}
 
 		fmt.Fprintln(cmd.OutOrStdout(), sum)
 		return nil
 	},
-}
-
-func authorizationsFromAuthPathMap(auth map[string]map[string][]string) map[string][]string {
-	out := make(map[string][]string)
-	for org, projects := range auth {
-		if strings.TrimSpace(org) == "" {
-			continue
-		}
-		for project := range projects {
-			project = strings.TrimSpace(project)
-			if project == "" {
-				out[org] = []string{}
-				break
-			}
-			out[org] = append(out[org], project)
-		}
-	}
-	return out
 }
 
 func readURLBytes(ctx context.Context, rawURL string, c syfonclient.SyfonClient) ([]byte, error) {
@@ -110,13 +84,16 @@ func readURLBytes(ctx context.Context, rawURL string, c syfonclient.SyfonClient)
 		if !ok {
 			return nil, fmt.Errorf("client implementation does not support raw requests")
 		}
-		err := concrete.Requestor().Do(ctx, http.MethodGet, rawURL, nil, &resp)
+		err := concrete.Requestor().Do(ctx, http.MethodGet, rawURL, nil, &resp, request.WithSkipAuth(true))
 		if err != nil {
 			return nil, fmt.Errorf("download request failed: %w", err)
 		}
 		defer resp.Body.Close()
 		if resp.StatusCode >= 400 {
-			body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+			body, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
+			if err != nil {
+				return nil, fmt.Errorf("read error response body: %w", err)
+			}
 			return nil, fmt.Errorf("download failed status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(body)))
 		}
 		data, err := io.ReadAll(resp.Body)

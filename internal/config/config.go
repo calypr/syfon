@@ -3,7 +3,9 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -78,6 +80,7 @@ type Config struct {
 	Port                 int                        `json:"port" yaml:"port"`
 	Database             DatabaseConfig             `json:"database" yaml:"database"`
 	S3Credentials        []S3Config                 `json:"s3_credentials" yaml:"s3_credentials"`
+	BucketScopes         []BucketScopeConfig        `json:"bucket_scopes" yaml:"bucket_scopes"`
 	CredentialEncryption CredentialEncryptionConfig `json:"credential_encryption" yaml:"credential_encryption"`
 	Auth                 AuthConfig                 `json:"auth" yaml:"auth"`
 	LFS                  LFSConfig                  `json:"lfs" yaml:"lfs"`
@@ -158,6 +161,16 @@ func (s S3Config) ProviderBillingLogsEnabled() bool {
 	return s.BillingLogsEnabled == nil || *s.BillingLogsEnabled
 }
 
+type BucketScopeConfig struct {
+	Organization        string `json:"organization" yaml:"organization"`
+	ProjectID           string `json:"project_id" yaml:"project_id"`
+	Bucket              string `json:"bucket,omitempty" yaml:"bucket,omitempty"`
+	Path                string `json:"path,omitempty" yaml:"path,omitempty"`
+	PathPrefix          string `json:"path_prefix,omitempty" yaml:"path_prefix,omitempty"`
+	OrganizationSubPath string `json:"organization_sub_path,omitempty" yaml:"organization_sub_path,omitempty"`
+	ProjectSubPath      string `json:"project_sub_path,omitempty" yaml:"project_sub_path,omitempty"`
+}
+
 // SECURITY FIX MED-1: Redact secret key when marshaling to JSON
 func (s S3Config) MarshalJSON() ([]byte, error) {
 	type Alias S3Config
@@ -173,12 +186,14 @@ func (s S3Config) MarshalJSON() ([]byte, error) {
 }
 
 type AuthConfig struct {
-	Mode        string          `json:"mode" yaml:"mode"`
-	Basic       BasicAuthConfig `json:"basic" yaml:"basic"`
-	Mock        MockAuthConfig  `json:"mock" yaml:"mock"`
-	Cache       AuthCacheConfig `json:"cache" yaml:"cache"`
-	PluginPaths PluginPaths     `json:"plugin_paths" yaml:"plugin_paths"`
-	FenceURL    string          `json:"fence_url" yaml:"fence_url"`
+	Mode                 string          `json:"mode" yaml:"mode"`
+	Basic                BasicAuthConfig `json:"basic" yaml:"basic"`
+	LocalAuthzCSV        string          `json:"local_authz_csv" yaml:"local_authz_csv"`
+	AllowUnauthenticated bool            `json:"allow_unauthenticated" yaml:"allow_unauthenticated"`
+	Mock                 MockAuthConfig  `json:"mock" yaml:"mock"`
+	Cache                AuthCacheConfig `json:"cache" yaml:"cache"`
+	PluginPaths          PluginPaths     `json:"plugin_paths" yaml:"plugin_paths"`
+	FenceURL             string          `json:"fence_url" yaml:"fence_url"`
 }
 
 type MockAuthConfig struct {
@@ -242,6 +257,13 @@ func LoadConfig(configFile string) (*Config, error) {
 		Port:     8080,
 		Database: DatabaseConfig{},
 		Auth:     AuthConfig{},
+		Routes: RoutesConfig{
+			Docs:     true,
+			Ga4gh:    true,
+			Metrics:  true,
+			Internal: true,
+			LFS:      true,
+		},
 		LFS: LFSConfig{
 			MaxBatchObjects:              DefaultLFSMaxBatchObjects,
 			MaxBatchBodyBytes:            DefaultLFSMaxBatchBodyBytes,
@@ -291,6 +313,16 @@ func LoadConfig(configFile string) (*Config, error) {
 	}
 	if pass := os.Getenv("DRS_BASIC_AUTH_PASSWORD"); pass != "" {
 		cfg.Auth.Basic.Password = pass
+	}
+	if v := os.Getenv("DRS_LOCAL_AUTHZ_CSV"); v != "" {
+		cfg.Auth.LocalAuthzCSV = v
+	}
+	if v := os.Getenv("DRS_ALLOW_UNAUTHENTICATED_LOCAL"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return nil, fmt.Errorf("invalid DRS_ALLOW_UNAUTHENTICATED_LOCAL: %s", v)
+		}
+		cfg.Auth.AllowUnauthenticated = b
 	}
 	if v := os.Getenv("DRS_CREDENTIAL_LOCAL_KEY_FILE"); v != "" {
 		cfg.CredentialEncryption.LocalKeyFile = v
@@ -441,7 +473,7 @@ func LoadConfig(configFile string) (*Config, error) {
 			return nil, fmt.Errorf("s3_credentials[%d]: %w", i, err)
 		}
 		cfg.S3Credentials[i].Provider = bucketProvider
-		if err := common.ValidateBucketName(bucketProvider, cred.Bucket); err != nil {
+		if err := common.ValidateBucketNameWithEndpoint(bucketProvider, cred.Bucket, cred.Endpoint); err != nil {
 			return nil, fmt.Errorf("s3_credentials[%d]: %w", i, err)
 		}
 		if bucketProvider == common.S3Provider {
@@ -456,6 +488,69 @@ func LoadConfig(configFile string) (*Config, error) {
 			}
 		}
 	}
+
+	for i := range cfg.BucketScopes {
+		scope := &cfg.BucketScopes[i]
+		scope.Organization = strings.TrimSpace(scope.Organization)
+		scope.ProjectID = strings.TrimSpace(scope.ProjectID)
+		scope.Bucket = strings.TrimSpace(scope.Bucket)
+		scope.Path = strings.TrimSpace(scope.Path)
+		scope.PathPrefix = strings.Trim(strings.TrimSpace(scope.PathPrefix), "/")
+		scope.OrganizationSubPath = cleanBucketScopeSubPath(scope.OrganizationSubPath)
+		scope.ProjectSubPath = cleanBucketScopeSubPath(scope.ProjectSubPath)
+
+		if scope.Organization == "" {
+			return nil, fmt.Errorf("bucket_scopes[%d]: organization is required", i)
+		}
+		if strings.Contains(scope.Organization, "/") {
+			return nil, fmt.Errorf("bucket_scopes[%d]: organization must be a Gen3 program name, not a storage path", i)
+		}
+		if strings.Contains(scope.ProjectID, "/") {
+			return nil, fmt.Errorf("bucket_scopes[%d]: project_id must be a Gen3 project id, not a storage path", i)
+		}
+		hasComposedSubPaths := scope.OrganizationSubPath != "" || scope.ProjectSubPath != ""
+		if hasComposedSubPaths && scope.Path != "" {
+			return nil, fmt.Errorf("bucket_scopes[%d]: path cannot be combined with organization_sub_path or project_sub_path", i)
+		}
+		if hasComposedSubPaths && scope.PathPrefix != "" {
+			return nil, fmt.Errorf("bucket_scopes[%d]: path_prefix cannot be combined with organization_sub_path or project_sub_path", i)
+		}
+		if scope.Path != "" {
+			u, err := url.Parse(scope.Path)
+			if err != nil {
+				return nil, fmt.Errorf("bucket_scopes[%d]: invalid path: %w", i, err)
+			}
+			if common.ProviderFromScheme(u.Scheme) == "" {
+				return nil, fmt.Errorf("bucket_scopes[%d]: unsupported storage scheme: %s", i, u.Scheme)
+			}
+			pathBucket := strings.TrimSpace(u.Host)
+			if pathBucket == "" {
+				return nil, fmt.Errorf("bucket_scopes[%d]: path must include a bucket", i)
+			}
+			if scope.Bucket != "" && !strings.EqualFold(scope.Bucket, pathBucket) {
+				return nil, fmt.Errorf("bucket_scopes[%d]: bucket %q does not match path bucket %q", i, scope.Bucket, pathBucket)
+			}
+			prefix, err := common.NormalizeStoragePath(scope.Path, pathBucket)
+			if err != nil {
+				return nil, fmt.Errorf("bucket_scopes[%d]: %w", i, err)
+			}
+			if scope.PathPrefix != "" && scope.PathPrefix != prefix {
+				return nil, fmt.Errorf("bucket_scopes[%d]: path_prefix %q does not match path prefix %q", i, scope.PathPrefix, prefix)
+			}
+			scope.Bucket = pathBucket
+			scope.PathPrefix = prefix
+		}
+		if hasComposedSubPaths {
+			if scope.Bucket == "" {
+				return nil, fmt.Errorf("bucket_scopes[%d]: bucket is required when organization_sub_path or project_sub_path is set", i)
+			}
+			scope.PathPrefix = joinBucketScopeSubPaths(scope.OrganizationSubPath, scope.ProjectSubPath)
+		}
+		if scope.Bucket == "" {
+			return nil, fmt.Errorf("bucket_scopes[%d]: bucket or path is required", i)
+		}
+	}
+
 	cfg.Auth.Mode = strings.ToLower(strings.TrimSpace(cfg.Auth.Mode))
 	if cfg.Auth.Mode == "" {
 		return nil, fmt.Errorf("auth.mode is required and must be one of %q or %q", AuthModeLocal, AuthModeGen3)
@@ -470,14 +565,13 @@ func LoadConfig(configFile string) (*Config, error) {
 		return nil, fmt.Errorf("both auth.basic.username and auth.basic.password must be set together")
 	}
 
-	// SECURITY FIX HIGH-1: Warn if local auth mode is configured without basic auth
-	if cfg.Auth.Mode == AuthModeLocal && (cfg.Auth.Basic.Username == "" || cfg.Auth.Basic.Password == "") {
-		fmt.Fprintf(os.Stderr, "WARNING: local auth mode configured without basic auth credentials—all endpoints will be unauthenticated and unrestricted. This is only safe for development/testing. Set DRS_BASIC_AUTH_USER and DRS_BASIC_AUTH_PASSWORD to enable basic auth.\n")
+	if cfg.Auth.Mode == AuthModeLocal && cfg.Auth.LocalAuthzCSV == "" && (cfg.Auth.Basic.Username == "" || cfg.Auth.Basic.Password == "") && !cfg.Auth.AllowUnauthenticated {
+		return nil, fmt.Errorf("auth.mode %q requires auth.basic.username/password or auth.local_authz_csv; set auth.allow_unauthenticated=true only for development/testing", AuthModeLocal)
 	}
 
-	// SECURITY FIX HIGH-2: Mock auth only allowed in local mode
-	if isMockAuthEnabledFromEnv() && cfg.Auth.Mode != AuthModeLocal {
-		return nil, fmt.Errorf("mock auth (DRS_AUTH_MOCK_ENABLED) is only allowed in local auth mode, not in %q", cfg.Auth.Mode)
+	// Gen3 mock auth is the supported local integration-testing path for Gen3 mode.
+	if isMockAuthEnabledFromEnv() && cfg.Auth.Mode != AuthModeGen3 {
+		return nil, fmt.Errorf("mock auth (DRS_AUTH_MOCK_ENABLED) is only allowed in gen3 auth mode, not in %q", cfg.Auth.Mode)
 	}
 	if cfg.LFS.MaxBatchObjects < 0 {
 		return nil, fmt.Errorf("lfs.max_batch_objects must be >= 0")
@@ -504,6 +598,9 @@ func LoadConfig(configFile string) (*Config, error) {
 	}
 	if len(cfg.Auth.Mock.Methods) > 0 {
 		os.Setenv("DRS_AUTH_MOCK_METHODS", strings.Join(cfg.Auth.Mock.Methods, ","))
+	}
+	if cfg.Auth.LocalAuthzCSV != "" {
+		os.Setenv("DRS_LOCAL_AUTHZ_CSV", cfg.Auth.LocalAuthzCSV)
 	}
 	// Auth cache config
 	if cfg.Auth.Cache.Enabled {
@@ -534,6 +631,23 @@ func LoadConfig(configFile string) (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func cleanBucketScopeSubPath(raw string) string {
+	return strings.Trim(path.Clean("/"+strings.TrimSpace(raw)), "/")
+}
+
+func joinBucketScopeSubPaths(parts ...string) string {
+	cleaned := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if p := cleanBucketScopeSubPath(part); p != "" {
+			cleaned = append(cleaned, p)
+		}
+	}
+	if len(cleaned) == 0 {
+		return ""
+	}
+	return path.Join(cleaned...)
 }
 
 func isMockAuthEnabledFromEnv() bool {

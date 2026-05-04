@@ -78,7 +78,10 @@ func (db *PostgresDB) SaveS3Credential(ctx context.Context, cred *models.S3Crede
 
 func (db *PostgresDB) DeleteS3Credential(ctx context.Context, bucket string) error {
 	// 1. Delete bucket scopes first (cascade delete is on object_id, but bucket_scope is manual link)
-	_, _ = db.db.ExecContext(ctx, "DELETE FROM bucket_scope WHERE bucket = $1", bucket)
+	if _, err := db.db.ExecContext(ctx, "DELETE FROM bucket_scope WHERE bucket = $1", bucket); err != nil {
+		common.AuditS3CredentialAccess(ctx, "delete", bucket, err)
+		return fmt.Errorf("failed to delete bucket scopes for %s: %w", bucket, err)
+	}
 
 	result, err := db.db.ExecContext(ctx, "DELETE FROM s3_credential WHERE bucket = $1", bucket)
 	if err != nil {

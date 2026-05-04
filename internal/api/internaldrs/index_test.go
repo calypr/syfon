@@ -12,13 +12,21 @@ import (
 
 	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/apigen/server/internalapi"
-	"github.com/calypr/syfon/internal/authz"
+	internalauth "github.com/calypr/syfon/internal/auth"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/testutils"
 	"github.com/gofiber/fiber/v3"
 )
+
+func indexTestAuthContext(base context.Context, mode string, authHeader bool, privileges map[string]map[string]bool) context.Context {
+	session := internalauth.NewSession(mode)
+	session.AuthHeaderPresent = authHeader
+	session.AuthzEnforced = mode == "gen3" || mode == "local"
+	session.SetAuthorizations(nil, privileges, session.AuthzEnforced)
+	return internalauth.WithSession(base, session)
+}
 
 func TestParseScopeQuery(t *testing.T) {
 	t.Run("organization and project", func(t *testing.T) {
@@ -58,16 +66,13 @@ func TestHandleInternalList_ScopeFilteringByReadPrivilege(t *testing.T) {
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/?organization=org", nil)
-	ctx := context.WithValue(req.Context(), common.AuthModeKey, "gen3")
-	ctx = context.WithValue(ctx, common.AuthHeaderPresentKey, true)
-	ctx = context.WithValue(ctx, common.UserPrivilegesKey, map[string]map[string]bool{
+	ctx := indexTestAuthContext(req.Context(), "gen3", true, map[string]map[string]bool{
 		"/programs/org/projects/p1": {"read": true},
 	})
 	req = req.WithContext(ctx)
 
-	rr := httptest.NewRecorder()
 	om := core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
-	handleInternalList(rr, req, om)
+	rr := doInternalDRSTestRequest(req, om)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
@@ -97,7 +102,7 @@ func TestHandleInternalList_PaginatesIDs(t *testing.T) {
 	}
 	app := fiber.New()
 	om := core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
-	RegisterInternalIndexRoutes(app, om)
+	RegisterInternalRoutes(app, om)
 
 	req := httptest.NewRequest(http.MethodGet, "/index?limit=1&start=obj-1", nil)
 	resp, err := app.Test(req)
@@ -131,7 +136,7 @@ func TestHandleInternalList_PagePaginatesIDs(t *testing.T) {
 	}
 	app := fiber.New()
 	om := core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
-	RegisterInternalIndexRoutes(app, om)
+	RegisterInternalRoutes(app, om)
 
 	req := httptest.NewRequest(http.MethodGet, "/index?limit=1&page=1", nil)
 	resp, err := app.Test(req)
@@ -199,9 +204,8 @@ func TestHandleInternalList_HashTypeFiltering(t *testing.T) {
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/?hash=sha256:samehash", nil)
-	rr := httptest.NewRecorder()
 	om := core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
-	handleInternalList(rr, req, om)
+	rr := doInternalDRSTestRequest(req, om)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
 	}
@@ -217,9 +221,8 @@ func TestHandleInternalList_HashTypeFiltering(t *testing.T) {
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/?hash=samehash&hash_type=md5", nil)
-	rr = httptest.NewRecorder()
 	om2 := core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
-	handleInternalList(rr, req, om2)
+	rr = doInternalDRSTestRequest(req, om2)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
 	}
@@ -232,6 +235,40 @@ func TestHandleInternalList_HashTypeFiltering(t *testing.T) {
 	}
 	if got := (*payload.Records)[0].Did; got != "obj-md5" {
 		t.Fatalf("expected obj-md5, got %q", got)
+	}
+}
+
+func TestHandleInternalList_HashPagination(t *testing.T) {
+	now := time.Now().UTC()
+	mockDB := &testutils.MockDatabase{
+		Objects: map[string]*drs.DrsObject{
+			"obj-1": {Id: "obj-1", CreatedTime: now, UpdatedTime: &now, Checksums: []drs.Checksum{{Type: "sha256", Checksum: "samehash"}}},
+			"obj-2": {Id: "obj-2", CreatedTime: now, UpdatedTime: &now, Checksums: []drs.Checksum{{Type: "sha256", Checksum: "samehash"}}},
+			"obj-3": {Id: "obj-3", CreatedTime: now, UpdatedTime: &now, Checksums: []drs.Checksum{{Type: "sha256", Checksum: "samehash"}}},
+		},
+	}
+	app := fiber.New()
+	om := core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
+	RegisterInternalRoutes(app, om)
+
+	req := httptest.NewRequest(http.MethodGet, "/index?hash=sha256:samehash&limit=1&page=1", nil)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("test request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 200, got %d body=%s", resp.StatusCode, string(body))
+	}
+	var payload internalapi.ListRecordsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Records == nil || len(*payload.Records) != 1 {
+		t.Fatalf("expected one paged record, got %+v", payload.Records)
+	}
+	if (*payload.Records)[0].Did != "obj-2" {
+		t.Fatalf("expected obj-2 on paged hash lookup, got %+v", (*payload.Records)[0])
 	}
 }
 
@@ -257,9 +294,8 @@ func TestHandleInternalBulkHashes_HashTypeFiltering(t *testing.T) {
 	reqBody := `{"hashes":["sha256:samehash"]}`
 	req := httptest.NewRequest(http.MethodPost, "/bulk/hashes", strings.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
-	rr := httptest.NewRecorder()
 	om := core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
-	handleInternalBulkHashes(om).ServeHTTP(rr, req)
+	rr := doInternalDRSTestRequestWithAlias(req, om, http.MethodPost, "/bulk/hashes", handleInternalBulkHashesFiber(om))
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
@@ -329,14 +365,13 @@ func TestHandleInternalBulkSHA256Validity(t *testing.T) {
 	}
 }
 
-func TestHandleInternalCreate_PersistsExplicitDidAndAuthz(t *testing.T) {
+func TestHandleInternalCreate_PersistsControlledAccess(t *testing.T) {
 	mockDB := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}
-	reqBody := `{"records":[{"did":"obj-1","size":42,"auth":{"test":{"p1":["s3://bucket/path/obj-1"]}}}]}`
+	reqBody := `{"records":[{"did":"obj-1","size":42,"controlled_access":["https://calypr.org/program/test/project/p1"],"access_methods":[{"type":"s3","access_url":{"url":"s3://bucket/path/obj-1"}}]}]}`
 	req := httptest.NewRequest(http.MethodPost, "/index", strings.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
-	rr := httptest.NewRecorder()
 	om := core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
-	handleInternalCreate(rr, req, om)
+	rr := doInternalDRSTestRequest(req, om)
 
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d body=%s", rr.Code, rr.Body.String())
@@ -353,10 +388,8 @@ func TestHandleInternalCreate_RequiredFieldsFailAtDecode(t *testing.T) {
 		reqBody := `{"size":42,"auth":{"test":{"p1":["s3://bucket/path/obj"]}}}`
 		req := httptest.NewRequest(http.MethodPost, "/index", strings.NewReader(reqBody))
 		req.Header.Set("Content-Type", "application/json")
-		rr := httptest.NewRecorder()
-
 		om := core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
-		handleInternalCreate(rr, req, om)
+		rr := doInternalDRSTestRequest(req, om)
 
 		if rr.Code != http.StatusBadRequest {
 			t.Fatalf("expected 400, got %d body=%s", rr.Code, rr.Body.String())
@@ -364,14 +397,13 @@ func TestHandleInternalCreate_RequiredFieldsFailAtDecode(t *testing.T) {
 	})
 }
 
-func TestHandleInternalBulkCreate_PersistsExplicitAuthz(t *testing.T) {
+func TestHandleInternalBulkCreate_PersistsControlledAccess(t *testing.T) {
 	mockDB := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}
-	reqBody := `{"records":[{"did":"obj-bulk-1","size":7,"auth":{"test":{"p1":["s3://bucket/path/obj-bulk-1"]}}}]}`
+	reqBody := `{"records":[{"did":"obj-bulk-1","size":7,"controlled_access":["/programs/test/projects/p1"],"access_methods":[{"type":"s3","access_url":{"url":"s3://bucket/path/obj-bulk-1"}}]}]}`
 	req := httptest.NewRequest(http.MethodPost, "/bulk/create", strings.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
-	rr := httptest.NewRecorder()
 	om := core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
-	handleInternalBulkCreate(om).ServeHTTP(rr, req)
+	rr := doInternalDRSTestRequestWithAlias(req, om, http.MethodPost, "/bulk/create", handleInternalBulkCreateFiber(om))
 
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d body=%s", rr.Code, rr.Body.String())
@@ -382,35 +414,54 @@ func TestHandleInternalBulkCreate_PersistsExplicitAuthz(t *testing.T) {
 	}
 }
 
-func TestHandleInternalBulkCreate_RequiresCreateAccessForEveryAuthzScope(t *testing.T) {
-	ctx := context.WithValue(context.Background(), common.AuthModeKey, "gen3")
-	ctx = context.WithValue(ctx, common.AuthHeaderPresentKey, true)
-	ctx = context.WithValue(ctx, common.UserPrivilegesKey, map[string]map[string]bool{
+func TestHandleInternalBulkCreate_AllowsCreateAccessForAnyControlledAccessScope(t *testing.T) {
+	ctx := indexTestAuthContext(context.Background(), "gen3", true, map[string]map[string]bool{
 		"/programs/test/projects/p1": {"create": true},
 	})
 	obj, err := core.InternalRecordToInternalObject(internalapi.InternalRecord{
-		Did:  "obj-bulk-denied",
-		Size: common.Ptr(int64(7)),
-		Auth: &internalapi.AuthPathMap{
-			"test": map[string][]string{
-				"p1": []string{"s3://bucket/path/obj-bulk-denied"},
-				"p2": []string{"s3://bucket/path/obj-bulk-denied"},
-			},
-		},
+		Did:              "obj-bulk-denied",
+		Size:             common.Ptr(int64(7)),
+		ControlledAccess: &[]string{"/programs/test/projects/p1", "/programs/test/projects/p2"},
 	}, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("InternalRecordToInternalObject failed: %v", err)
 	}
 
-	resources := objectBatchAuthorizationResources([]models.InternalObject{obj})
-	if len(resources) != 2 {
-		t.Fatalf("expected two resources, got %+v", resources)
+	mockDB := &testutils.MockDatabase{}
+	om := core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
+	if err := om.RegisterObjects(ctx, []models.InternalObject{obj}); err != nil {
+		t.Fatalf("expected object manager create policy to allow when one controlled_access scope matches: %v", err)
 	}
-	if methodAllowedForAuthorizations(ctx, "create", obj.Authorizations) {
-		t.Fatal("expected per-object authz to deny when one scope is missing create")
+	if _, ok := mockDB.Objects[obj.Id]; !ok {
+		t.Fatal("expected object to be registered")
 	}
-	if authz.HasMethodAccess(ctx, "create", resources) {
-		t.Fatal("expected aggregate authz to deny when one scope is missing create")
+}
+
+func TestHandleInternalBulkCreate_ReportsDeniedCreateResources(t *testing.T) {
+	reqBody := `{"records":[{"did":"obj-denied","size":7,"controlled_access":["/programs/test/projects/p2"],"access_methods":[{"type":"s3","access_url":{"url":"s3://bucket/path/obj-denied"}}]}]}`
+	req := httptest.NewRequest(http.MethodPost, "/index/bulk", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	ctx := indexTestAuthContext(req.Context(), "gen3", true, map[string]map[string]bool{
+		"/programs/test/projects/p1": {"create": true},
+	})
+	req = req.WithContext(ctx)
+
+	mockDB := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}
+	om := core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
+	rr := doInternalDRSTestRequest(req, om)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, "obj-denied") || !strings.Contains(body, "test/p2") {
+		t.Fatalf("expected denied resource detail in response body, got %q", body)
+	}
+	if strings.Contains(body, "/programs/test/projects/p2") {
+		t.Fatalf("expected user-facing organization/project scope, got raw resource path in %q", body)
+	}
+	if _, ok := mockDB.Objects["obj-denied"]; ok {
+		t.Fatal("unauthorized bulk create wrote object")
 	}
 }
 
@@ -418,10 +469,8 @@ func TestHandleInternalDeleteByQuery(t *testing.T) {
 	t.Run("requires scope query", func(t *testing.T) {
 		mockDB := &testutils.MockDatabase{}
 		req := httptest.NewRequest(http.MethodDelete, "/", nil)
-		rr := httptest.NewRecorder()
-
 		om := core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
-		handleInternalDeleteByQuery(rr, req, om)
+		rr := doInternalDRSTestRequest(req, om)
 
 		if rr.Code != http.StatusBadRequest {
 			t.Fatalf("expected 400, got %d", rr.Code)
@@ -431,12 +480,10 @@ func TestHandleInternalDeleteByQuery(t *testing.T) {
 	t.Run("requires auth header in gen3 mode", func(t *testing.T) {
 		mockDB := &testutils.MockDatabase{}
 		req := httptest.NewRequest(http.MethodDelete, "/?organization=org", nil)
-		ctx := context.WithValue(req.Context(), common.AuthModeKey, "gen3")
+		ctx := indexTestAuthContext(req.Context(), "gen3", false, nil)
 		req = req.WithContext(ctx)
-		rr := httptest.NewRecorder()
-
 		om := core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
-		handleInternalDeleteByQuery(rr, req, om)
+		rr := doInternalDRSTestRequest(req, om)
 
 		if rr.Code != http.StatusUnauthorized {
 			t.Fatalf("expected 401, got %d body=%s", rr.Code, rr.Body.String())
@@ -456,16 +503,13 @@ func TestHandleInternalDeleteByQuery(t *testing.T) {
 			},
 		}
 		req := httptest.NewRequest(http.MethodDelete, "/?organization=org&project=a", nil)
-		ctx := context.WithValue(req.Context(), common.AuthModeKey, "gen3")
-		ctx = context.WithValue(ctx, common.AuthHeaderPresentKey, true)
-		ctx = context.WithValue(ctx, common.UserPrivilegesKey, map[string]map[string]bool{
+		ctx := indexTestAuthContext(req.Context(), "gen3", true, map[string]map[string]bool{
 			"/programs/org/projects/a": {"delete": true},
 		})
 		req = req.WithContext(ctx)
 
-		rr := httptest.NewRecorder()
 		om := core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
-		handleInternalDeleteByQuery(rr, req, om)
+		rr := doInternalDRSTestRequest(req, om)
 
 		if rr.Code != http.StatusOK {
 			t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
@@ -482,6 +526,44 @@ func TestHandleInternalDeleteByQuery(t *testing.T) {
 	})
 }
 
+func TestHandleInternalDeleteByQuery_AuthzParity(t *testing.T) {
+	for _, mode := range []string{"gen3", "local-authz"} {
+		t.Run(mode, func(t *testing.T) {
+			now := time.Now().UTC()
+			mockDB := &testutils.MockDatabase{
+				Objects: map[string]*drs.DrsObject{
+					"obj-1": {Id: "obj-1", CreatedTime: now, UpdatedTime: &now},
+					"obj-2": {Id: "obj-2", CreatedTime: now, UpdatedTime: &now},
+				},
+				ObjectAuthz: map[string]map[string][]string{
+					"obj-1": {"org": {"a"}},
+					"obj-2": {"org": {"a"}},
+				},
+			}
+
+			req := httptest.NewRequest(http.MethodDelete, "/?organization=org&project=a", nil)
+			req = withTestAuthzContext(req, mode, map[string]map[string]bool{
+				"/programs/org/projects/a": {"delete": true},
+			})
+			om := core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
+			rr := doInternalDRSTestRequest(req, om)
+
+			if rr.Code != http.StatusOK {
+				t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+			}
+			if _, ok := mockDB.Objects["obj-1"]; ok {
+				t.Fatal("expected obj-1 to be deleted")
+			}
+			if _, ok := mockDB.Objects["obj-2"]; ok {
+				t.Fatal("expected obj-2 to be deleted")
+			}
+			if !strings.Contains(rr.Body.String(), `"deleted":2`) {
+				t.Fatalf("expected deleted count in response, got %s", rr.Body.String())
+			}
+		})
+	}
+}
+
 func TestRegisterInternalIndexRoutes_LegacyAliases(t *testing.T) {
 	now := time.Now().UTC()
 	mockDB := &testutils.MockDatabase{
@@ -492,7 +574,7 @@ func TestRegisterInternalIndexRoutes_LegacyAliases(t *testing.T) {
 
 	app := fiber.New()
 	om := core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
-	RegisterInternalIndexRoutes(app, om)
+	RegisterInternalRoutes(app, om)
 
 	t.Run("collection alias /index", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/index?organization=org", nil)

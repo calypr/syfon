@@ -70,6 +70,7 @@ func runTests(m *testing.M) int {
 		"DRS_PORT=9005",
 		"DRS_DB_SQLITE_FILE=drs_test.db",
 		"DRS_AUTH_MODE=local",
+		"DRS_ALLOW_UNAUTHENTICATED_LOCAL=true",
 		"DRS_ENABLE_GA4GH=true",
 	)
 	// Coverage-instrumented binaries write their data to GOCOVERDIR on exit.

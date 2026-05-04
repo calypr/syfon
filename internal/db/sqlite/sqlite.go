@@ -67,8 +67,11 @@ func (db *SqliteDB) initSchema() error {
 			object_id TEXT,
 			url TEXT,
 			type TEXT,
-			org TEXT NOT NULL DEFAULT '',
-			project TEXT NOT NULL DEFAULT '',
+			FOREIGN KEY(object_id) REFERENCES drs_object(id) ON DELETE CASCADE
+		)`,
+		`CREATE TABLE IF NOT EXISTS drs_object_controlled_access (
+			object_id TEXT,
+			resource TEXT,
 			FOREIGN KEY(object_id) REFERENCES drs_object(id) ON DELETE CASCADE
 		)`,
 		`CREATE TABLE IF NOT EXISTS drs_object_checksum (
@@ -78,8 +81,13 @@ func (db *SqliteDB) initSchema() error {
 			FOREIGN KEY(object_id) REFERENCES drs_object(id) ON DELETE CASCADE
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_drs_object_access_method_object_id ON drs_object_access_method(object_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_drs_object_controlled_access_object_id ON drs_object_controlled_access(object_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_drs_object_controlled_access_resource ON drs_object_controlled_access(resource)`,
+		`CREATE INDEX IF NOT EXISTS idx_drs_object_controlled_access_resource_object_id ON drs_object_controlled_access(resource, object_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_drs_object_controlled_access_object_id_resource ON drs_object_controlled_access(object_id, resource)`,
 		`CREATE INDEX IF NOT EXISTS idx_drs_object_checksum_object_id ON drs_object_checksum(object_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_drs_object_checksum_checksum ON drs_object_checksum(checksum)`,
+		`CREATE INDEX IF NOT EXISTS idx_drs_object_checksum_checksum_type_object_id ON drs_object_checksum(checksum, type, object_id)`,
 		`CREATE TABLE IF NOT EXISTS drs_object_alias (
 			alias_id TEXT PRIMARY KEY,
 			object_id TEXT NOT NULL,
@@ -122,6 +130,7 @@ func (db *SqliteDB) initSchema() error {
 			FOREIGN KEY(object_id) REFERENCES drs_object(id) ON DELETE CASCADE
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_object_usage_last_download_time ON object_usage(last_download_time)`,
+		`CREATE INDEX IF NOT EXISTS idx_object_usage_last_download_time_object_id ON object_usage(last_download_time, object_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_object_usage_last_upload_time ON object_usage(last_upload_time)`,
 		`CREATE TABLE IF NOT EXISTS object_usage_event (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -135,6 +144,7 @@ func (db *SqliteDB) initSchema() error {
 			event_id TEXT PRIMARY KEY,
 			access_grant_id TEXT NOT NULL DEFAULT '',
 			event_type TEXT NOT NULL CHECK(event_type IN ('access_issued')),
+			direction TEXT NOT NULL DEFAULT 'download' CHECK(direction IN ('download','upload')),
 			event_time TIMESTAMP NOT NULL,
 			request_id TEXT NOT NULL DEFAULT '',
 			object_id TEXT NOT NULL DEFAULT '',
@@ -206,25 +216,8 @@ func (db *SqliteDB) initSchema() error {
 			auth_mode TEXT NOT NULL DEFAULT '',
 			reconciliation_status TEXT NOT NULL DEFAULT 'unmatched' CHECK(reconciliation_status IN ('matched','ambiguous','unmatched'))
 		)`,
-		`CREATE TABLE IF NOT EXISTS provider_transfer_sync_run (
-			sync_id TEXT PRIMARY KEY,
-			provider TEXT NOT NULL DEFAULT '',
-			bucket TEXT NOT NULL DEFAULT '',
-			organization TEXT NOT NULL DEFAULT '',
-			project TEXT NOT NULL DEFAULT '',
-			from_time TIMESTAMP NOT NULL,
-			to_time TIMESTAMP NOT NULL,
-			status TEXT NOT NULL CHECK(status IN ('pending','completed','failed')),
-			requested_at TIMESTAMP NOT NULL,
-			started_at TIMESTAMP NULL,
-			completed_at TIMESTAMP NULL,
-			imported_events INTEGER NOT NULL DEFAULT 0,
-			matched_events INTEGER NOT NULL DEFAULT 0,
-			ambiguous_events INTEGER NOT NULL DEFAULT 0,
-			unmatched_events INTEGER NOT NULL DEFAULT 0,
-			error_message TEXT NOT NULL DEFAULT ''
-		)`,
 		`CREATE INDEX IF NOT EXISTS idx_transfer_attr_scope_time ON transfer_attribution_event(organization, project, event_type, event_time)`,
+		`CREATE INDEX IF NOT EXISTS idx_transfer_attr_scope_event_time ON transfer_attribution_event(organization, project, event_time)`,
 		`CREATE INDEX IF NOT EXISTS idx_transfer_attr_actor_time ON transfer_attribution_event(actor_email, actor_subject, event_time)`,
 		`CREATE INDEX IF NOT EXISTS idx_transfer_attr_provider_time ON transfer_attribution_event(provider, bucket, event_time)`,
 		`CREATE INDEX IF NOT EXISTS idx_transfer_attr_sha_time ON transfer_attribution_event(sha256, event_time)`,
@@ -238,27 +231,12 @@ func (db *SqliteDB) initSchema() error {
 		`CREATE INDEX IF NOT EXISTS idx_provider_transfer_sha_time ON provider_transfer_event(sha256, event_time)`,
 		`CREATE INDEX IF NOT EXISTS idx_provider_transfer_status ON provider_transfer_event(reconciliation_status, event_time)`,
 		`CREATE INDEX IF NOT EXISTS idx_provider_transfer_grant ON provider_transfer_event(access_grant_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_provider_sync_bucket_time ON provider_transfer_sync_run(provider, bucket, requested_at)`,
-		`CREATE INDEX IF NOT EXISTS idx_provider_sync_scope_time ON provider_transfer_sync_run(organization, project, requested_at)`,
 	}
 
 	for _, q := range queries {
 		if _, err := db.db.Exec(q); err != nil {
 			return err
 		}
-	}
-	for _, stmt := range []string{
-		`ALTER TABLE drs_object_access_method ADD COLUMN org TEXT NOT NULL DEFAULT ''`,
-		`ALTER TABLE drs_object_access_method ADD COLUMN project TEXT NOT NULL DEFAULT ''`,
-	} {
-		if _, err := db.db.Exec(stmt); err != nil {
-			if !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
-				return err
-			}
-		}
-	}
-	if _, err := db.db.Exec(`CREATE INDEX IF NOT EXISTS idx_drs_object_access_method_scope ON drs_object_access_method(org, project)`); err != nil {
-		return err
 	}
 	if _, err := db.db.Exec(`ALTER TABLE s3_credential ADD COLUMN provider TEXT NOT NULL DEFAULT 's3'`); err != nil {
 		if !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
@@ -279,6 +257,14 @@ func (db *SqliteDB) initSchema() error {
 		if !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
 			return err
 		}
+	}
+	if _, err := db.db.Exec(`ALTER TABLE transfer_attribution_event ADD COLUMN direction TEXT NOT NULL DEFAULT 'download'`); err != nil {
+		if !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
+			return err
+		}
+	}
+	if _, err := db.db.Exec(`CREATE INDEX IF NOT EXISTS idx_transfer_attr_direction_time ON transfer_attribution_event(direction, event_time)`); err != nil {
+		return err
 	}
 	if err := db.backfillAccessGrants(context.Background()); err != nil {
 		return err

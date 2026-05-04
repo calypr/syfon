@@ -1,6 +1,6 @@
 package request
 
-//go:generate mockgen -destination=../mocks/mock_request.go -package=mocks github.com/calypr/syfon/client/request RequestInterface
+//go:generate mockgen -destination=../internal/testmocks/requester_mock.go -package=testmocks github.com/calypr/syfon/client/request Requester
 
 import (
 	"context"
@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/calypr/syfon/client/conf"
+	conf "github.com/calypr/syfon/client/config"
 	"github.com/calypr/syfon/client/logs"
 	"github.com/hashicorp/go-retryablehttp"
 )
@@ -91,29 +91,29 @@ type Requester interface {
 func NewBasicAuthRequestor(
 	logger *logs.Gen3Logger,
 	cred *conf.Credential,
-	conf conf.ManagerInterface,
+	manager conf.ManagerInterface,
 	baseURL string,
 	userAgent string,
 	baseHTTPClient *http.Client,
 ) Requester {
-	return newRequestor(logger, cred, conf, baseURL, userAgent, baseHTTPClient, AuthModeBasic)
+	return newRequestor(logger, cred, manager, baseURL, userAgent, baseHTTPClient, AuthModeBasic)
 }
 
 func NewBearerTokenRequestor(
 	logger *logs.Gen3Logger,
 	cred *conf.Credential,
-	conf conf.ManagerInterface,
+	manager conf.ManagerInterface,
 	baseURL string,
 	userAgent string,
 	baseHTTPClient *http.Client,
 ) Requester {
-	return newRequestor(logger, cred, conf, baseURL, userAgent, baseHTTPClient, AuthModeBearer)
+	return newRequestor(logger, cred, manager, baseURL, userAgent, baseHTTPClient, AuthModeBearer)
 }
 
 func newRequestor(
 	logger *logs.Gen3Logger,
 	cred *conf.Credential,
-	conf conf.ManagerInterface,
+	manager conf.ManagerInterface,
 	baseURL string,
 	userAgent string,
 	baseHTTPClient *http.Client,
@@ -146,7 +146,7 @@ func newRequestor(
 
 	authTransport := &AuthTransport{
 		Base:    baseTransport,
-		Manager: conf,
+		Manager: manager,
 		Mode:    mode,
 	}
 	authTransport.Cred = cred
@@ -230,7 +230,10 @@ func (r *Request) Do(ctx context.Context, method, path string, body, out any, op
 
 	// Apply auth via the shared transport so direct request calls and generated
 	// API clients behave the same way.
-	if token := rb.Token; token != "" {
+	if rb.SkipAuth {
+		// Leave auth handling to the transport so X-Skip-Auth can suppress both
+		// manual and transport-level auth injection for presigned URLs.
+	} else if token := rb.Token; token != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+token)
 	} else if r.Auth != nil {
 		r.Auth.apply(httpReq)
@@ -264,7 +267,10 @@ func (r *Request) Do(ctx context.Context, method, path string, body, out any, op
 		// JSON/Void Mode: We close the body.
 		defer resp.Body.Close()
 
-		data, _ := io.ReadAll(resp.Body)
+		data, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("read response body: %w", err)
+		}
 		if resp.StatusCode >= 400 {
 			return &ResponseError{
 				Method:  method,

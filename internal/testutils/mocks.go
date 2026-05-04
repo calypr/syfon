@@ -17,7 +17,6 @@ import (
 // MockDatabase implements db.DatabaseInterface for testing
 type MockDatabase struct {
 	Objects                map[string]*drs.DrsObject
-	ObjectAuth             map[string]models.AuthPathMap
 	ObjectAuthz            map[string]map[string][]string
 	Credentials            map[string]models.S3Credential
 	BucketScopes           map[string]models.BucketScope
@@ -25,9 +24,9 @@ type MockDatabase struct {
 	Usage                  map[string]models.FileUsage
 	TransferEvents         []models.TransferAttributionEvent
 	ProviderTransferEvents []models.ProviderTransferEvent
-	ProviderSyncRuns       []models.ProviderTransferSyncRun
 	NoDefaultCreds         bool
 	GetObjectErr           error
+	GetBucketScopeCalls    int
 }
 
 func (m *MockDatabase) GetServiceInfo(ctx context.Context) (*drs.Service, error) {
@@ -42,10 +41,6 @@ func (m *MockDatabase) GetObject(ctx context.Context, id string) (*models.Intern
 		wrapped := models.InternalObject{DrsObject: *obj}
 		if authz, ok := m.ObjectAuthz[id]; ok {
 			wrapped.Authorizations = cloneAuthzMap(authz)
-		}
-		if auth, ok := m.ObjectAuth[id]; ok {
-			wrapped.Auth = cloneAuthPathMap(auth)
-			wrapped.Authorizations = models.AuthPathMapToAuthorizations(wrapped.Auth)
 		}
 		attachAuthorizationsToAccessMethods(&wrapped)
 		return &wrapped, nil
@@ -79,12 +74,6 @@ func (m *MockDatabase) CreateObject(ctx context.Context, obj *models.InternalObj
 		}
 		m.ObjectAuthz[obj.Id] = cloneAuthzMap(obj.Authorizations)
 	}
-	if len(obj.Auth) > 0 {
-		if m.ObjectAuth == nil {
-			m.ObjectAuth = make(map[string]models.AuthPathMap)
-		}
-		m.ObjectAuth[obj.Id] = cloneAuthPathMap(obj.Auth)
-	}
 	return nil
 }
 
@@ -99,10 +88,6 @@ func (m *MockDatabase) GetObjectsByChecksum(ctx context.Context, checksum string
 			if authz, ok := m.ObjectAuthz[id]; ok {
 				wrapped.Authorizations = cloneAuthzMap(authz)
 			}
-			if auth, ok := m.ObjectAuth[id]; ok {
-				wrapped.Auth = cloneAuthPathMap(auth)
-				wrapped.Authorizations = models.AuthPathMapToAuthorizations(wrapped.Auth)
-			}
 			attachAuthorizationsToAccessMethods(&wrapped)
 			out = append(out, wrapped)
 			continue
@@ -112,10 +97,6 @@ func (m *MockDatabase) GetObjectsByChecksum(ctx context.Context, checksum string
 				wrapped := models.InternalObject{DrsObject: *obj}
 				if authz, ok := m.ObjectAuthz[id]; ok {
 					wrapped.Authorizations = cloneAuthzMap(authz)
-				}
-				if auth, ok := m.ObjectAuth[id]; ok {
-					wrapped.Auth = cloneAuthPathMap(auth)
-					wrapped.Authorizations = models.AuthPathMapToAuthorizations(wrapped.Auth)
 				}
 				attachAuthorizationsToAccessMethods(&wrapped)
 				out = append(out, wrapped)
@@ -169,6 +150,48 @@ func (m *MockDatabase) ListObjectIDsByScope(ctx context.Context, organization, p
 	return ids, nil
 }
 
+func (m *MockDatabase) ListObjectIDsByResources(ctx context.Context, resources []string, includeUnscoped bool) ([]string, error) {
+	allowed := map[string]struct{}{}
+	for _, resource := range resources {
+		resource = strings.TrimSpace(resource)
+		if resource != "" {
+			allowed[resource] = struct{}{}
+		}
+	}
+	ids := make([]string, 0)
+	for id := range m.Objects {
+		authz := map[string][]string{}
+		if m.ObjectAuthz != nil {
+			if v, ok := m.ObjectAuthz[id]; ok {
+				authz = v
+			}
+		}
+		resourcesForObject := []string{}
+		for org, projects := range authz {
+			if len(projects) == 0 {
+				resourcesForObject = append(resourcesForObject, "/programs/"+org)
+				continue
+			}
+			for _, project := range projects {
+				resourcesForObject = append(resourcesForObject, "/programs/"+org+"/projects/"+project)
+			}
+		}
+		if len(resourcesForObject) == 0 {
+			if includeUnscoped {
+				ids = append(ids, id)
+			}
+			continue
+		}
+		for _, resource := range resourcesForObject {
+			if _, ok := allowed[resource]; ok {
+				ids = append(ids, id)
+				break
+			}
+		}
+	}
+	return ids, nil
+}
+
 func (m *MockDatabase) CreateObjectAlias(ctx context.Context, aliasID, canonicalObjectID string) error {
 	if m.Objects == nil {
 		return fmt.Errorf("%w: object not found", common.ErrNotFound)
@@ -183,11 +206,6 @@ func (m *MockDatabase) CreateObjectAlias(ctx context.Context, aliasID, canonical
 	if m.ObjectAuthz != nil {
 		if authz, ok := m.ObjectAuthz[canonicalObjectID]; ok {
 			m.ObjectAuthz[aliasID] = cloneAuthzMap(authz)
-		}
-	}
-	if m.ObjectAuth != nil {
-		if auth, ok := m.ObjectAuth[canonicalObjectID]; ok {
-			m.ObjectAuth[aliasID] = cloneAuthPathMap(auth)
 		}
 	}
 	return nil
@@ -213,12 +231,6 @@ func (m *MockDatabase) RegisterObjects(ctx context.Context, objects []models.Int
 			m.ObjectAuthz = make(map[string]map[string][]string)
 		}
 		m.ObjectAuthz[obj.Id] = cloneAuthzMap(obj.Authorizations)
-		if len(obj.Auth) > 0 {
-			if m.ObjectAuth == nil {
-				m.ObjectAuth = make(map[string]models.AuthPathMap)
-			}
-			m.ObjectAuth[obj.Id] = cloneAuthPathMap(obj.Auth)
-		}
 	}
 	return nil
 }
@@ -230,10 +242,6 @@ func (m *MockDatabase) GetBulkObjects(ctx context.Context, ids []string) ([]mode
 			wrapped := models.InternalObject{DrsObject: *obj}
 			if authz, ok := m.ObjectAuthz[id]; ok {
 				wrapped.Authorizations = cloneAuthzMap(authz)
-			}
-			if auth, ok := m.ObjectAuth[id]; ok {
-				wrapped.Auth = cloneAuthPathMap(auth)
-				wrapped.Authorizations = models.AuthPathMapToAuthorizations(wrapped.Auth)
 			}
 			attachAuthorizationsToAccessMethods(&wrapped)
 			out = append(out, wrapped)
@@ -346,6 +354,7 @@ func (m *MockDatabase) CreateBucketScope(ctx context.Context, scope *models.Buck
 }
 
 func (m *MockDatabase) GetBucketScope(ctx context.Context, organization, projectID string) (*models.BucketScope, error) {
+	m.GetBucketScopeCalls++
 	if m.BucketScopes == nil {
 		return nil, fmt.Errorf("%w: bucket scope not found", common.ErrNotFound)
 	}
@@ -453,6 +462,26 @@ func (m *MockDatabase) GetFileUsage(ctx context.Context, objectID string) (*mode
 	return &copyUsage, nil
 }
 
+func (m *MockDatabase) ListFileUsageByObjectIDs(ctx context.Context, ids []string) ([]models.FileUsage, error) {
+	out := make([]models.FileUsage, 0, len(ids))
+	for _, id := range ids {
+		if m.Usage != nil {
+			if usage, ok := m.Usage[id]; ok {
+				out = append(out, usage)
+				continue
+			}
+		}
+		if obj, ok := m.Objects[id]; ok {
+			out = append(out, models.FileUsage{
+				ObjectID: id,
+				Name:     common.StringVal(obj.Name),
+				Size:     obj.Size,
+			})
+		}
+	}
+	return out, nil
+}
+
 func (m *MockDatabase) ListFileUsage(ctx context.Context, limit, offset int, inactiveSince *time.Time) ([]models.FileUsage, error) {
 	out := make([]models.FileUsage, 0)
 	if m.Usage == nil {
@@ -541,57 +570,6 @@ func (m *MockDatabase) RecordProviderTransferEvents(ctx context.Context, events 
 	return nil
 }
 
-func (m *MockDatabase) RecordProviderTransferSyncRuns(ctx context.Context, runs []models.ProviderTransferSyncRun) error {
-	byID := make(map[string]int, len(m.ProviderSyncRuns))
-	for i, run := range m.ProviderSyncRuns {
-		byID[run.SyncID] = i
-	}
-	for _, run := range runs {
-		if run.SyncID == "" {
-			continue
-		}
-		if idx, ok := byID[run.SyncID]; ok {
-			m.ProviderSyncRuns[idx] = run
-			continue
-		}
-		byID[run.SyncID] = len(m.ProviderSyncRuns)
-		m.ProviderSyncRuns = append(m.ProviderSyncRuns, run)
-	}
-	return nil
-}
-
-func (m *MockDatabase) ListProviderTransferSyncRuns(ctx context.Context, filter models.TransferAttributionFilter, limit int) ([]models.ProviderTransferSyncRun, error) {
-	if limit <= 0 || limit > 1000 {
-		limit = 100
-	}
-	out := make([]models.ProviderTransferSyncRun, 0, len(m.ProviderSyncRuns))
-	for _, run := range m.ProviderSyncRuns {
-		if filter.Organization != "" && run.Organization != filter.Organization {
-			continue
-		}
-		if filter.Project != "" && run.Project != filter.Project {
-			continue
-		}
-		if filter.Provider != "" && run.Provider != filter.Provider {
-			continue
-		}
-		if filter.Bucket != "" && run.Bucket != filter.Bucket {
-			continue
-		}
-		if filter.From != nil && run.To.Before(*filter.From) {
-			continue
-		}
-		if filter.To != nil && run.From.After(*filter.To) {
-			continue
-		}
-		out = append(out, run)
-		if len(out) >= limit {
-			break
-		}
-	}
-	return out, nil
-}
-
 func (m *MockDatabase) reconcileProviderTransferEvent(ev models.ProviderTransferEvent) models.ProviderTransferEvent {
 	if ev.ReconciliationStatus == "" {
 		ev.ReconciliationStatus = models.ProviderTransferUnmatched
@@ -657,19 +635,22 @@ func mockMergeAccessGrantIntoProviderEvent(ev *models.ProviderTransferEvent, gra
 
 func (m *MockDatabase) GetTransferAttributionSummary(ctx context.Context, filter models.TransferAttributionFilter) (models.TransferAttributionSummary, error) {
 	var summary models.TransferAttributionSummary
-	for _, ev := range m.ProviderTransferEvents {
-		if !providerTransferEventMatchesFilter(ev, filter) {
+	for _, ev := range m.TransferEvents {
+		if !transferEventMatchesFilter(ev, filter) {
 			continue
 		}
 		summary.EventCount++
-		summary.BytesRequested += ev.BytesTransferred
+		if ev.EventType == models.TransferEventAccessIssued {
+			summary.AccessIssuedCount++
+		}
+		summary.BytesRequested += ev.BytesRequested
 		switch ev.Direction {
 		case models.ProviderTransferDirectionDownload:
 			summary.DownloadEventCount++
-			summary.BytesDownloaded += ev.BytesTransferred
+			summary.BytesDownloaded += ev.BytesRequested
 		case models.ProviderTransferDirectionUpload:
 			summary.UploadEventCount++
-			summary.BytesUploaded += ev.BytesTransferred
+			summary.BytesUploaded += ev.BytesRequested
 		}
 	}
 	return summary, nil
@@ -677,11 +658,11 @@ func (m *MockDatabase) GetTransferAttributionSummary(ctx context.Context, filter
 
 func (m *MockDatabase) GetTransferAttributionBreakdown(ctx context.Context, filter models.TransferAttributionFilter, groupBy string) ([]models.TransferAttributionBreakdown, error) {
 	items := map[string]*models.TransferAttributionBreakdown{}
-	for _, ev := range m.ProviderTransferEvents {
-		if !providerTransferEventMatchesFilter(ev, filter) {
+	for _, ev := range m.TransferEvents {
+		if !transferEventMatchesFilter(ev, filter) {
 			continue
 		}
-		key := providerTransferBreakdownKey(ev, groupBy)
+		key := transferBreakdownKey(ev, groupBy)
 		item := items[key]
 		if item == nil {
 			item = &models.TransferAttributionBreakdown{
@@ -697,12 +678,12 @@ func (m *MockDatabase) GetTransferAttributionBreakdown(ctx context.Context, filt
 			items[key] = item
 		}
 		item.EventCount++
-		item.BytesRequested += ev.BytesTransferred
+		item.BytesRequested += ev.BytesRequested
 		if ev.Direction == models.ProviderTransferDirectionDownload {
-			item.BytesDownloaded += ev.BytesTransferred
+			item.BytesDownloaded += ev.BytesRequested
 		}
 		if ev.Direction == models.ProviderTransferDirectionUpload {
-			item.BytesUploaded += ev.BytesTransferred
+			item.BytesUploaded += ev.BytesRequested
 		}
 		t := ev.EventTime
 		if item.LastTransferTime == nil || (!t.IsZero() && t.After(*item.LastTransferTime)) {
@@ -784,6 +765,18 @@ func transferEventMatchesFilter(ev models.TransferAttributionEvent, filter model
 	if filter.EventType != "" && filter.EventType != "all" && ev.EventType != filter.EventType {
 		return false
 	}
+	direction := filter.Direction
+	if direction == "" {
+		switch filter.EventType {
+		case models.ProviderTransferDirectionDownload:
+			direction = models.ProviderTransferDirectionDownload
+		case models.ProviderTransferDirectionUpload:
+			direction = models.ProviderTransferDirectionUpload
+		}
+	}
+	if direction != "" && direction != "all" && ev.Direction != direction {
+		return false
+	}
 	if filter.From != nil && ev.EventTime.Before(*filter.From) {
 		return false
 	}
@@ -832,30 +825,7 @@ func cloneAuthzMap(in map[string][]string) map[string][]string {
 	return out
 }
 
-func cloneAuthPathMap(in models.AuthPathMap) models.AuthPathMap {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make(models.AuthPathMap, len(in))
-	for org, projects := range in {
-		out[org] = make(map[string][]string, len(projects))
-		for project, paths := range projects {
-			out[org][project] = append([]string(nil), paths...)
-		}
-	}
-	return out
-}
-
 func attachAuthorizationsToAccessMethods(obj *models.InternalObject) {
-	if obj == nil || len(obj.Authorizations) == 0 || obj.AccessMethods == nil {
-		return
-	}
-	for i := range *obj.AccessMethods {
-		am := &(*obj.AccessMethods)[i]
-		if am.Authorizations == nil {
-			am.Authorizations = &obj.Authorizations
-		}
-	}
 }
 
 // MockUrlManager implements urlmanager.UrlManager for testing

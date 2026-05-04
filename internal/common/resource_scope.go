@@ -1,6 +1,9 @@
 package common
 
-import "strings"
+import (
+	syfoncommon "github.com/calypr/syfon/common"
+	"strings"
+)
 
 type ResourceScope struct {
 	Organization string
@@ -8,14 +11,17 @@ type ResourceScope struct {
 }
 
 func ParseResourcePath(path string) ResourceScope {
-	path = strings.TrimSpace(path)
-	parts := strings.Split(path, "/")
-	if len(parts) < 3 || parts[1] != "programs" {
+	normalized := syfoncommon.NormalizeAccessResource(path)
+	if !strings.HasPrefix(normalized, "/organization/") {
 		return ResourceScope{}
 	}
-	scope := ResourceScope{Organization: parts[2]}
-	if len(parts) >= 5 && parts[3] == "projects" {
-		scope.Project = parts[4]
+	org, project, ok := syfoncommon.ResourceScope(normalized)
+	if !ok {
+		return ResourceScope{}
+	}
+	scope := ResourceScope{Organization: org}
+	if project != "" {
+		scope.Project = project
 	}
 	return scope
 }
