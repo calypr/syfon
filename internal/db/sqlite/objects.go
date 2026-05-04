@@ -876,6 +876,80 @@ func (db *SqliteDB) ListObjectIDsByChecksumsAndResources(ctx context.Context, ch
 	return scanChecksumMatchRows(rows)
 }
 
+func (db *SqliteDB) ListObjectIDsPageByURL(ctx context.Context, objectURL, organization, project, startAfter string, limit, offset int, resources []string, includeUnscoped, restrictToResources bool) ([]string, error) {
+	objectURL = strings.TrimSpace(objectURL)
+	organization = strings.TrimSpace(organization)
+	project = strings.TrimSpace(project)
+	startAfter = strings.TrimSpace(startAfter)
+	if objectURL == "" || limit <= 0 {
+		return []string{}, nil
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	args := []any{objectURL}
+	conditions := []string{"am.url = ?"}
+	if organization != "" {
+		resource, err := sycommon.ResourcePath(organization, project)
+		if err != nil {
+			return nil, err
+		}
+		args = append(args, resource)
+		conditions = append(conditions, `EXISTS (
+			SELECT 1
+			FROM drs_object_controlled_access ca_scope
+			WHERE ca_scope.object_id = o.id AND ca_scope.resource = ?
+		)`)
+	}
+	if restrictToResources {
+		resources = sycommon.NormalizeAccessResources(resources)
+		if len(resources) == 0 && !includeUnscoped {
+			return []string{}, nil
+		}
+		parts := make([]string, 0, 2)
+		if len(resources) > 0 {
+			placeholders := make([]string, 0, len(resources))
+			for _, resource := range resources {
+				args = append(args, resource)
+				placeholders = append(placeholders, "?")
+			}
+			parts = append(parts, `EXISTS (
+				SELECT 1
+				FROM drs_object_controlled_access ca_auth
+				WHERE ca_auth.object_id = o.id AND ca_auth.resource IN (`+strings.Join(placeholders, ",")+`)
+			)`)
+		}
+		if includeUnscoped {
+			parts = append(parts, `NOT EXISTS (
+				SELECT 1
+				FROM drs_object_controlled_access ca_auth
+				WHERE ca_auth.object_id = o.id
+			)`)
+		}
+		conditions = append(conditions, "("+strings.Join(parts, " OR ")+")")
+	}
+	if startAfter != "" {
+		args = append(args, startAfter)
+		conditions = append(conditions, "o.id > ?")
+	}
+
+	query := `
+		SELECT DISTINCT o.id
+		FROM drs_object o
+		INNER JOIN drs_object_access_method am ON am.object_id = o.id
+		WHERE ` + strings.Join(conditions, " AND ") + `
+		ORDER BY o.id
+		LIMIT ? OFFSET ?`
+	args = append(args, limit, offset)
+	rows, err := db.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanObjectIDs(rows)
+}
+
 func (db *SqliteDB) ListBucketVisibilityRows(ctx context.Context, resources []string, includeUnscoped, restrictToResources bool) ([]models.BucketVisibilityRow, error) {
 	args := make([]any, 0, len(resources))
 	query := `

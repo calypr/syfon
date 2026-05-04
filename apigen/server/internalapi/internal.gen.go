@@ -215,6 +215,7 @@ type InternalDeleteByQueryParams struct {
 // InternalListParams defines parameters for InternalList.
 type InternalListParams struct {
 	Hash         *string `form:"hash,omitempty" json:"hash,omitempty"`
+	Url          *string `form:"url,omitempty" json:"url,omitempty"`
 	Organization *string `form:"organization,omitempty" json:"organization,omitempty"`
 	Program      *string `form:"program,omitempty" json:"program,omitempty"`
 	Project      *string `form:"project,omitempty" json:"project,omitempty"`
@@ -628,6 +629,17 @@ func (siw *ServerInterfaceWrapper) InternalList(c fiber.Ctx) error {
 			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter hash: %w", err).Error())
 		}
 		params.Hash = &value
+
+	}
+	// ------------- Optional query parameter "url" -------------
+	if paramValue := c.Query("url"); paramValue != "" {
+
+		var value string
+		err = runtime.BindStyledParameterWithOptions("form", "url", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
+		if err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter url: %w", err).Error())
+		}
+		params.Url = &value
 
 	}
 	// ------------- Optional query parameter "organization" -------------

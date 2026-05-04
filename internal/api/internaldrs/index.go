@@ -59,6 +59,7 @@ func handleInternalListFiber(om *core.ObjectManager) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		hash := c.Query("hash")
 		hashType := c.Query("hash_type")
+		objectURL := strings.TrimSpace(c.Query("url"))
 
 		if hash != "" {
 			hashType, hash = common.ParseHashQuery(hash, hashType)
@@ -96,7 +97,12 @@ func handleInternalListFiber(om *core.ObjectManager) fiber.Handler {
 			return c.Status(fiber.StatusBadRequest).SendString(err.Error())
 		}
 
-		ids, err := om.ListObjectIDsPageByScope(c.Context(), filterOrg, filterProject, "read", start, limit, offset)
+		var ids []string
+		if objectURL != "" {
+			ids, err = om.ListObjectIDsPageByURL(c.Context(), objectURL, filterOrg, filterProject, "read", start, limit, offset)
+		} else {
+			ids, err = om.ListObjectIDsPageByScope(c.Context(), filterOrg, filterProject, "read", start, limit, offset)
+		}
 		if err != nil {
 			return apiutil.HandleError(c, err)
 		}

@@ -238,6 +238,50 @@ func (m *ObjectManager) ListObjectIDsPageByScope(ctx context.Context, organizati
 	return ids[offset:end], nil
 }
 
+func (m *ObjectManager) ListObjectIDsPageByURL(ctx context.Context, objectURL, organization, project, requiredMethod, startAfter string, limit, offset int) ([]string, error) {
+	if limit <= 0 {
+		return []string{}, nil
+	}
+	objectURL = strings.TrimSpace(objectURL)
+	if objectURL == "" {
+		return []string{}, nil
+	}
+	if lister, ok := m.db.(db.ObjectURLPageLister); ok {
+		resources, includeUnscoped, restrictToResources := objectMethodResourceFilter(ctx, requiredMethod)
+		if authz.IsGen3Mode(ctx) && authz.IsAuthzEnforced(ctx) && !authz.HasAuthHeader(ctx) {
+			return []string{}, nil
+		}
+		return lister.ListObjectIDsPageByURL(ctx, objectURL, organization, project, startAfter, limit, offset, resources, includeUnscoped, restrictToResources)
+	}
+
+	ids, err := m.ListObjectIDsByScope(ctx, organization, project, requiredMethod)
+	if err != nil {
+		return nil, err
+	}
+	objects, err := m.db.GetBulkObjects(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(objects))
+	for _, obj := range objects {
+		if objectHasAccessURL(&obj, objectURL) {
+			out = append(out, obj.Id)
+		}
+	}
+	sort.Strings(out)
+	if startAfter != "" {
+		offset = searchAfterID(out, startAfter)
+	}
+	if offset >= len(out) {
+		return []string{}, nil
+	}
+	end := offset + limit
+	if end > len(out) {
+		end = len(out)
+	}
+	return out[offset:end], nil
+}
+
 func (m *ObjectManager) ListObjectIDsByScope(ctx context.Context, organization, project string, requiredMethod string) ([]string, error) {
 	if strings.TrimSpace(organization) == "" && strings.EqualFold(strings.TrimSpace(requiredMethod), objectMethodRead) {
 		if ids, ok, err := m.listReadableObjectIDs(ctx); ok || err != nil {
@@ -258,6 +302,18 @@ func (m *ObjectManager) ListObjectIDsByScope(ctx context.Context, organization, 
 		out = append(out, obj.Id)
 	}
 	return out, nil
+}
+
+func objectHasAccessURL(obj *models.InternalObject, objectURL string) bool {
+	if obj == nil || obj.AccessMethods == nil {
+		return false
+	}
+	for _, method := range *obj.AccessMethods {
+		if method.AccessUrl != nil && strings.TrimSpace(method.AccessUrl.Url) == objectURL {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *ObjectManager) listReadableObjectIDs(ctx context.Context) ([]string, bool, error) {

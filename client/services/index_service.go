@@ -85,6 +85,9 @@ func (s *IndexService) List(ctx context.Context, opts ListRecordsOptions) (inter
 	if opts.Hash != "" {
 		params.Set("hash", opts.Hash)
 	}
+	if opts.URL != "" {
+		params.Set("url", opts.URL)
+	}
 	if opts.Organization != "" {
 		params.Set("organization", opts.Organization)
 	}

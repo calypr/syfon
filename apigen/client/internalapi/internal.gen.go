@@ -217,6 +217,7 @@ type InternalDeleteByQueryParams struct {
 // InternalListParams defines parameters for InternalList.
 type InternalListParams struct {
 	Hash         *string `form:"hash,omitempty" json:"hash,omitempty"`
+	Url          *string `form:"url,omitempty" json:"url,omitempty"`
 	Organization *string `form:"organization,omitempty" json:"organization,omitempty"`
 	Program      *string `form:"program,omitempty" json:"program,omitempty"`
 	Project      *string `form:"project,omitempty" json:"project,omitempty"`
@@ -1411,6 +1412,22 @@ func NewInternalListRequest(server string, params *InternalListParams) (*http.Re
 		if params.Hash != nil {
 
 			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "hash", runtime.ParamLocationQuery, *params.Hash); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Url != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "url", runtime.ParamLocationQuery, *params.Url); err != nil {
 				return nil, err
 			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
 				return nil, err

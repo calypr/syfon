@@ -873,6 +873,79 @@ func (db *PostgresDB) ListObjectIDsByChecksumsAndResources(ctx context.Context, 
 	return scanChecksumMatchRows(rows)
 }
 
+func (db *PostgresDB) ListObjectIDsPageByURL(ctx context.Context, objectURL, organization, project, startAfter string, limit, offset int, resources []string, includeUnscoped, restrictToResources bool) ([]string, error) {
+	objectURL = strings.TrimSpace(objectURL)
+	organization = strings.TrimSpace(organization)
+	project = strings.TrimSpace(project)
+	startAfter = strings.TrimSpace(startAfter)
+	if objectURL == "" || limit <= 0 {
+		return []string{}, nil
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	args := []any{objectURL}
+	conditions := []string{"am.url = $1"}
+	if organization != "" {
+		scopeCondition, scopeArgs, err := postgresScopeResourceCondition("ca_scope.resource", organization, project)
+		if err != nil {
+			return nil, err
+		}
+		args = append(args, scopeArgs...)
+		conditions = append(conditions, `EXISTS (
+			SELECT 1
+			FROM drs_object_controlled_access ca_scope
+			WHERE ca_scope.object_id = o.id AND `+postgresRebindQuestionPlaceholders(scopeCondition, len(args)-len(scopeArgs)+1)+`
+		)`)
+	}
+	if restrictToResources {
+		resources = sycommon.NormalizeAccessResources(resources)
+		if len(resources) == 0 && !includeUnscoped {
+			return []string{}, nil
+		}
+		args = append(args, pq.Array(resources), includeUnscoped)
+		resourcesArg := len(args) - 1
+		includeUnscopedArg := len(args)
+		conditions = append(conditions, fmt.Sprintf(`(
+			(
+				COALESCE(array_length($%d::text[], 1), 0) > 0
+				AND EXISTS (
+					SELECT 1
+					FROM drs_object_controlled_access ca_auth
+					WHERE ca_auth.object_id = o.id AND ca_auth.resource = ANY($%d)
+				)
+			) OR (
+				$%d
+				AND NOT EXISTS (
+					SELECT 1
+					FROM drs_object_controlled_access ca_auth
+					WHERE ca_auth.object_id = o.id
+				)
+			)
+		)`, resourcesArg, resourcesArg, includeUnscopedArg))
+	}
+	if startAfter != "" {
+		args = append(args, startAfter)
+		conditions = append(conditions, fmt.Sprintf("o.id > $%d", len(args)))
+	}
+
+	args = append(args, limit, offset)
+	query := `
+		SELECT DISTINCT o.id
+		FROM drs_object o
+		INNER JOIN drs_object_access_method am ON am.object_id = o.id
+		WHERE ` + strings.Join(conditions, " AND ") + fmt.Sprintf(`
+		ORDER BY o.id
+		LIMIT $%d OFFSET $%d`, len(args)-1, len(args))
+	rows, err := db.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanObjectIDs(rows)
+}
+
 func (db *PostgresDB) ListBucketVisibilityRows(ctx context.Context, resources []string, includeUnscoped, restrictToResources bool) ([]models.BucketVisibilityRow, error) {
 	args := make([]any, 0, 2)
 	query := `
