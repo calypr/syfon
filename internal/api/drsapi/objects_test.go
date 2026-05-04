@@ -11,6 +11,7 @@ import (
 	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/core"
+	"github.com/calypr/syfon/internal/db"
 	"github.com/calypr/syfon/internal/testutils"
 	"github.com/calypr/syfon/internal/urlmanager"
 	"github.com/gofiber/fiber/v3"
@@ -330,3 +331,47 @@ func TestAdditionalDRSHandlers(t *testing.T) {
 		}
 	})
 }
+
+func TestChecksumRouteRegression_WithRealCoreAndDB(t *testing.T) {
+	database := db.NewInMemoryDB()
+	om := core.NewObjectManager(database, &testutils.MockUrlManager{})
+	checksum := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+	controlled := []string{"/organization/testorg/project/testproj"}
+	_, err := om.RegisterBulk(context.Background(), []drs.DrsObjectCandidate{{
+		Aliases:          common.Ptr([]string{"id:checksum-regression-obj"}),
+		ControlledAccess: &controlled,
+		Checksums: []drs.Checksum{{
+			Type:     "sha256",
+			Checksum: checksum,
+		}},
+		Size: 123,
+	}})
+	if err != nil {
+		t.Fatalf("seed register bulk failed: %v", err)
+	}
+
+	app := fiber.New()
+	RegisterDRSRoutes(app, om)
+
+	req := httptest.NewRequest("GET", "/objects/checksum/"+checksum, nil)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var body drs.N200OkDrsObjectsJSONResponse
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Summary.Resolved == nil || *body.Summary.Resolved != 1 {
+		t.Fatalf("expected one resolved object, got %+v", body.Summary)
+	}
+	if body.ResolvedDrsObject == nil || len(*body.ResolvedDrsObject) != 1 || (*body.ResolvedDrsObject)[0].Id != "checksum-regression-obj" {
+		t.Fatalf("unexpected resolved objects: %+v", body.ResolvedDrsObject)
+	}
+}
+

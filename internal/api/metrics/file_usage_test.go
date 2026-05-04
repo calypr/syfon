@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -15,6 +16,18 @@ import (
 	"github.com/calypr/syfon/internal/testutils"
 	"github.com/gofiber/fiber/v3"
 )
+
+type metricsObjectReaderAdapter struct {
+	db *testutils.MockDatabase
+}
+
+func (a metricsObjectReaderAdapter) ListObjectIDsByScope(ctx context.Context, organization, project, requiredMethod string) ([]string, error) {
+	return a.db.ListObjectIDsByScope(ctx, organization, project)
+}
+
+func (a metricsObjectReaderAdapter) GetObject(ctx context.Context, id, requiredMethod string) (*models.InternalObject, error) {
+	return a.db.GetObject(ctx, id)
+}
 
 func TestMetricsRoutes_ListAndSummary(t *testing.T) {
 	now := time.Now().UTC()
@@ -322,3 +335,64 @@ func TestMetricsFilesAuthzAndScope(t *testing.T) {
 		}
 	})
 }
+
+func TestFileUsageScopeHelpers(t *testing.T) {
+	now := time.Now().UTC()
+	objects := &testutils.MockDatabase{
+		Objects: map[string]*drs.DrsObject{
+			"obj-a": {Id: "obj-a", CreatedTime: now, UpdatedTime: &now},
+			"obj-b": {Id: "obj-b", CreatedTime: now, UpdatedTime: &now},
+		},
+		ObjectAuthz: map[string]map[string][]string{
+			"obj-a": {"org1": {"p1"}},
+			"obj-b": {"org2": {"p2"}},
+		},
+	}
+
+	adapter := metricsObjectReaderAdapter{db: objects}
+
+	inside, err := objectInScope(context.Background(), adapter, "obj-a", "org1", "p1")
+	if err != nil || !inside {
+		t.Fatalf("expected obj-a in scope org1/p1, inside=%v err=%v", inside, err)
+	}
+	inside, err = objectInScope(context.Background(), adapter, "obj-b", "org1", "p1")
+	if err != nil {
+		t.Fatalf("objectInScope error: %v", err)
+	}
+	if inside {
+		t.Fatalf("expected obj-b outside org1/p1")
+	}
+
+	inside, err = objectInAnyScope(context.Background(), adapter, "obj-b", []metricsScope{{organization: "org1", project: "p1"}, {organization: "org2", project: "p2"}})
+	if err != nil || !inside {
+		t.Fatalf("expected obj-b in one of scopes, inside=%v err=%v", inside, err)
+	}
+}
+
+func TestListMultiScopedFileUsage_DeduplicatesAcrossScopes(t *testing.T) {
+	now := time.Now().UTC()
+	objects := &testutils.MockDatabase{
+		Objects: map[string]*drs.DrsObject{
+			"obj-a": {Id: "obj-a", CreatedTime: now, UpdatedTime: &now},
+		},
+		ObjectAuthz: map[string]map[string][]string{
+			"obj-a": {"org1": {"p1"}},
+		},
+		Usage: map[string]models.FileUsage{
+			"obj-a": {ObjectID: "obj-a", UploadCount: 1, DownloadCount: 2},
+		},
+	}
+
+	adapter := metricsObjectReaderAdapter{db: objects}
+	usages, summary, err := listMultiScopedFileUsage(context.Background(), objects, adapter, []metricsScope{{organization: "org1", project: "p1"}, {organization: "org1", project: "p1"}}, 0, 0, nil)
+	if err != nil {
+		t.Fatalf("listMultiScopedFileUsage error: %v", err)
+	}
+	if len(usages) != 1 || usages[0].ObjectID != "obj-a" {
+		t.Fatalf("expected one deduplicated usage record, got %+v", usages)
+	}
+	if summary.TotalFiles < 1 {
+		t.Fatalf("expected summary total files > 0, got %+v", summary)
+	}
+}
+

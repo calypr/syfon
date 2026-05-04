@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/calypr/syfon/apigen/server/drs"
 	internalauth "github.com/calypr/syfon/internal/auth"
 	"github.com/calypr/syfon/internal/common"
 )
@@ -233,3 +234,99 @@ func TestPostgresScopeResourceCondition(t *testing.T) {
 		t.Fatalf("unexpected project args: %+v", args)
 	}
 }
+
+func TestBulkDeleteObjects(t *testing.T) {
+	t.Run("empty ids is noop", func(t *testing.T) {
+		pg, _, rawDB := newMockPostgresDB(t)
+		defer rawDB.Close()
+		if err := pg.BulkDeleteObjects(context.Background(), nil); err != nil {
+			t.Fatalf("expected nil on empty ids, got %v", err)
+		}
+	})
+
+	t.Run("deletes provided ids", func(t *testing.T) {
+		pg, mock, rawDB := newMockPostgresDB(t)
+		defer rawDB.Close()
+
+		mock.ExpectBegin()
+		mock.ExpectExec(regexp.QuoteMeta("DELETE FROM drs_object WHERE id = ANY($1)")).
+			WithArgs(sqlmock.AnyArg()).
+			WillReturnResult(sqlmock.NewResult(0, 2))
+		mock.ExpectCommit()
+
+		if err := pg.BulkDeleteObjects(context.Background(), []string{"a", "b"}); err != nil {
+			t.Fatalf("BulkDeleteObjects returned error: %v", err)
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Fatalf("unmet expectations: %v", err)
+		}
+	})
+}
+
+func TestUpdateObjectAccessMethods(t *testing.T) {
+	pg, mock, rawDB := newMockPostgresDB(t)
+	defer rawDB.Close()
+
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta("DELETE FROM drs_object_access_method WHERE object_id = $1")).
+		WithArgs("obj-1").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO drs_object_access_method (object_id, url, type) VALUES ($1, $2, $3)")).
+		WithArgs("obj-1", "s3://bucket/key", drs.AccessMethodTypeS3).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+
+	err := pg.UpdateObjectAccessMethods(context.Background(), "obj-1", []drs.AccessMethod{{
+		Type: drs.AccessMethodTypeS3,
+		AccessUrl: &struct {
+			Headers *[]string `json:"headers,omitempty"`
+			Url     string    `json:"url"`
+		}{Url: "s3://bucket/key"},
+	}})
+	if err != nil {
+		t.Fatalf("UpdateObjectAccessMethods returned error: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestBulkUpdateAccessMethods(t *testing.T) {
+	pg, mock, rawDB := newMockPostgresDB(t)
+	defer rawDB.Close()
+	mock.MatchExpectationsInOrder(false)
+
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta("DELETE FROM drs_object_access_method WHERE object_id = $1")).
+		WithArgs("obj-1").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO drs_object_access_method (object_id, url, type) VALUES ($1, $2, $3)")).
+		WithArgs("obj-1", "s3://bucket/key", drs.AccessMethodTypeS3).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec(regexp.QuoteMeta("DELETE FROM drs_object_access_method WHERE object_id = $1")).
+		WithArgs("obj-2").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	err := pg.BulkUpdateAccessMethods(context.Background(), map[string][]drs.AccessMethod{
+		"obj-1": {
+			{
+				Type: drs.AccessMethodTypeS3,
+				AccessUrl: &struct {
+					Headers *[]string `json:"headers,omitempty"`
+					Url     string    `json:"url"`
+				}{Url: "s3://bucket/key"},
+			},
+		},
+		"obj-2": {
+			{Type: drs.AccessMethodTypeS3}, // no URL, should be skipped after delete
+		},
+	})
+	if err != nil {
+		t.Fatalf("BulkUpdateAccessMethods returned error: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
