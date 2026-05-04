@@ -70,7 +70,7 @@ func prepareUploadActions(ctx context.Context, om *core.ObjectManager, oid strin
 		return nil, reqSize, dbErrToBatchError(ctx, err)
 	}
 
-	if err := om.RequireObjectResources(ctx, "create", []string{"/programs/data_file"}); err != nil {
+	if err := om.RequireObjectResources(ctx, "create", []string{"/data_file"}); err != nil {
 		return nil, reqSize, dbErrToBatchError(ctx, err)
 	}
 
