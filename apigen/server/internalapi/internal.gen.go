@@ -69,6 +69,7 @@ type InternalMultipartInitOutput struct {
 
 // InternalMultipartInitRequest defines model for InternalMultipartInitRequest.
 type InternalMultipartInitRequest struct {
+	// Bucket Required for new unscoped uploads. Ignored when an existing scoped object provides the canonical storage location.
 	Bucket   *string `json:"bucket,omitempty"`
 	FileName *string `json:"file_name,omitempty"`
 	Guid     *string `json:"guid,omitempty"`
@@ -148,7 +149,8 @@ type InternalUploadBlankOutput struct {
 
 // InternalUploadBlankRequest defines model for InternalUploadBlankRequest.
 type InternalUploadBlankRequest struct {
-	Guid *string `json:"guid,omitempty"`
+	Bucket string  `json:"bucket"`
+	Guid   *string `json:"guid,omitempty"`
 }
 
 // InternalUploadBulkItem defines model for InternalUploadBulkItem.
@@ -198,6 +200,7 @@ type InternalDownloadPartParams struct {
 
 // InternalUploadURLParams defines parameters for InternalUploadURL.
 type InternalUploadURLParams struct {
+	// Bucket Required when the object does not already have a backing storage location.
 	Bucket    *string `form:"bucket,omitempty" json:"bucket,omitempty"`
 	FileName  *string `form:"file_name,omitempty" json:"file_name,omitempty"`
 	ExpiresIn *int32  `form:"expires_in,omitempty" json:"expires_in,omitempty"`

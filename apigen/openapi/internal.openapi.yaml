@@ -335,6 +335,7 @@ paths:
       tags:
         - internal-data
       operationId: internalUploadBlank
+      description: Issue a presigned upload URL for a new unscoped object. An explicit bucket is required; the server will not choose a default bucket.
       requestBody:
         required: false
         content:
@@ -370,6 +371,7 @@ paths:
         - in: query
           name: bucket
           required: false
+          description: Required when the object does not already have a backing storage location.
           schema:
             type: string
         - in: query
@@ -519,6 +521,7 @@ paths:
       tags:
         - internal-data
       operationId: internalMultipartInit
+      description: Initialize multipart upload state. New unscoped uploads require an explicit bucket. Existing scoped objects derive their canonical bucket and key from the backing record.
       requestBody:
         required: true
         content:
@@ -708,7 +711,11 @@ components:
           type: string
     InternalUploadBlankRequest:
       type: object
+      required:
+        - bucket
       properties:
+        bucket:
+          type: string
         guid:
           type: string
     InternalUploadBlankOutput:
@@ -778,6 +785,7 @@ components:
           type: string
         bucket:
           type: string
+          description: Required for new unscoped uploads. Ignored when an existing scoped object provides the canonical storage location.
     InternalMultipartInitOutput:
       type: object
       properties:

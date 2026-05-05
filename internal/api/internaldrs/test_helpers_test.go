@@ -15,7 +15,12 @@ import (
 func ptr[T any](v T) *T { return &v }
 
 type capturingMultipartURLManager struct {
-	key string
+	bucket    string
+	key       string
+	signURL   string
+	signID    string
+	signOpts  urlmanager.SignOptions
+	uploadURL string
 }
 
 func withTestAuthzContext(req *http.Request, mode string, privileges map[string]map[string]bool) *http.Request {
@@ -43,14 +48,21 @@ func policyTestContext(mode string, authHeader bool, privileges map[string]map[s
 }
 
 func (m *capturingMultipartURLManager) SignURL(ctx context.Context, accessId string, url string, opts urlmanager.SignOptions) (string, error) {
+	m.signID = accessId
+	m.signURL = url
+	m.signOpts = opts
 	return url, nil
 }
 
 func (m *capturingMultipartURLManager) SignUploadURL(ctx context.Context, accessId string, url string, opts urlmanager.SignOptions) (string, error) {
+	m.signID = accessId
+	m.signURL = url
+	m.signOpts = opts
 	return url, nil
 }
 
 func (m *capturingMultipartURLManager) InitMultipartUpload(ctx context.Context, bucket string, key string) (string, error) {
+	m.bucket = bucket
 	m.key = key
 	return "upload-1", nil
 }

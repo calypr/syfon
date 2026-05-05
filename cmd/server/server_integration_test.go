@@ -56,8 +56,6 @@ s3_credentials:
     access_key: "test-key"
     secret_key: "test-secret"
     endpoint: "` + os.TempDir() + `"
-    billing_log_bucket: "test-bucket"
-    billing_log_prefix: ".syfon/provider-transfer-events"
 `
 		tmpfile, err := os.CreateTemp("", "test_config*.yaml")
 		if err != nil {
@@ -94,14 +92,12 @@ s3_credentials:
 	// Pre-load credentials from config (mimic server startup logic)
 	for _, c := range cfg.S3Credentials {
 		cred := &models.S3Credential{
-			Bucket:           c.Bucket,
-			Provider:         c.Provider,
-			Region:           c.Region,
-			AccessKey:        c.AccessKey,
-			SecretKey:        c.SecretKey,
-			Endpoint:         c.Endpoint,
-			BillingLogBucket: c.BillingLogBucket,
-			BillingLogPrefix: c.BillingLogPrefix,
+			Bucket:    c.Bucket,
+			Provider:  c.Provider,
+			Region:    c.Region,
+			AccessKey: c.AccessKey,
+			SecretKey: c.SecretKey,
+			Endpoint:  c.Endpoint,
 		}
 		if err := database.SaveS3Credential(context.Background(), cred); err != nil {
 			t.Fatalf("Failed to preload credential: %v", err)

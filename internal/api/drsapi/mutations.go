@@ -1,7 +1,6 @@
 package drsapi
 
 import (
-	"net/http"
 	"strings"
 
 	"github.com/calypr/syfon/apigen/server/drs"
@@ -9,11 +8,11 @@ import (
 	apimiddleware "github.com/calypr/syfon/internal/api/middleware"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/core"
-	"github.com/calypr/syfon/internal/urlmanager"
 	"github.com/gofiber/fiber/v3"
 )
 
 func handleUploadRequestFiber(om *core.ObjectManager) fiber.Handler {
+	const uploadRequestRoutingError = "upload-request requires explicit upload routing; default bucket selection is disabled"
 	return func(c fiber.Ctx) error {
 		if apimiddleware.MissingGen3AuthHeader(c.Context()) {
 			return c.SendStatus(fiber.StatusUnauthorized)
@@ -26,13 +25,6 @@ func handleUploadRequestFiber(om *core.ObjectManager) fiber.Handler {
 		if len(req.Requests) == 0 {
 			return c.Status(fiber.StatusBadRequest).JSON(drs.Error{Msg: common.Ptr("Invalid request body")})
 		}
-
-		bucket, err := om.ResolveBucket(c.Context(), "")
-		if err != nil {
-			return apiutil.HandleError(c, err)
-		}
-
-		responses := make([]drs.UploadResponseObject, 0, len(req.Requests))
 		for _, item := range req.Requests {
 			key := strings.TrimSpace(item.Name)
 			if oid, ok := common.CanonicalSHA256(item.Checksums); ok && oid != "" {
@@ -41,34 +33,9 @@ func handleUploadRequestFiber(om *core.ObjectManager) fiber.Handler {
 			if key == "" {
 				return c.Status(fiber.StatusBadRequest).JSON(drs.Error{Msg: common.Ptr("Invalid request body")})
 			}
-
-			signedURL, err := om.SignURL(c.Context(), common.BucketToURL(bucket, key), urlmanager.SignOptions{
-				Method: http.MethodPut,
-			})
-			if err != nil {
-				return apiutil.HandleError(c, err)
-			}
-
-			method := drs.UploadMethod{
-				Type: drs.Https,
-				AccessUrl: struct {
-					Headers *[]string `json:"headers,omitempty"`
-					Url     string    `json:"url"`
-				}{Url: signedURL},
-			}
-
-			responses = append(responses, drs.UploadResponseObject{
-				Name:          item.Name,
-				Size:          item.Size,
-				MimeType:      item.MimeType,
-				Checksums:     item.Checksums,
-				Description:   item.Description,
-				Aliases:       item.Aliases,
-				UploadMethods: &[]drs.UploadMethod{method},
-			})
 		}
 
-		return c.Status(fiber.StatusOK).JSON(drs.N200UploadRequest{Responses: responses})
+		return c.Status(fiber.StatusBadRequest).JSON(drs.Error{Msg: common.Ptr(uploadRequestRoutingError)})
 	}
 }
 

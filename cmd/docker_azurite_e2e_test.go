@@ -58,17 +58,15 @@ func TestSyfonDockerAzuriteE2E(t *testing.T) {
 	port := reserveTCPPort(t)
 	dbPath := filepath.Join(t.TempDir(), "docker-azurite-e2e.db")
 	configPath := writeScopedProviderConfig(t, providerServerConfig{
-		Port:             port,
-		DBPath:           dbPath,
-		Bucket:           azurite.bucket,
-		Provider:         "azure",
-		AccessKey:        dockerE2EAzureAccountName,
-		SecretKey:        dockerE2EAzureAccountKey,
-		Endpoint:         azurite.serviceURL,
-		BillingLogBucket: azurite.bucket,
-		BillingLogPrefix: ".syfon/provider-transfer-events",
-		Organization:     "syfon",
-		ProjectID:        "e2e",
+		Port:         port,
+		DBPath:       dbPath,
+		Bucket:       azurite.bucket,
+		Provider:     "azure",
+		AccessKey:    dockerE2EAzureAccountName,
+		SecretKey:    dockerE2EAzureAccountKey,
+		Endpoint:     azurite.serviceURL,
+		Organization: "syfon",
+		ProjectID:    "e2e",
 	})
 
 	server := startSyfonServerProcessWithConfigPath(t, configPath, map[string]string{

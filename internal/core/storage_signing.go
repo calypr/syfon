@@ -27,6 +27,10 @@ func (m *ObjectManager) SignObjectURL(ctx context.Context, obj *models.InternalO
 	return m.SignURL(ctx, scopedURL, options)
 }
 
+func (m *ObjectManager) ResolveObjectScopedStorageURL(ctx context.Context, obj *models.InternalObject, accessURL string) (string, error) {
+	return m.resolveScopedStorageURL(ctx, obj, accessURL)
+}
+
 // ResolveBucket validates a bucket name or returns the default one.
 func (m *ObjectManager) ResolveBucket(ctx context.Context, bucketName string) (string, error) {
 	creds, err := m.ListS3Credentials(ctx)

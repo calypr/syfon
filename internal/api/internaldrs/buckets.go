@@ -37,12 +37,6 @@ func handleInternalBucketsFiber(c fiber.Ctx, om *core.ObjectManager) error {
 			Provider:    common.Ptr(cred.Provider),
 			Region:      common.Ptr(cred.Region),
 		}
-		if strings.TrimSpace(cred.BillingLogBucket) != "" {
-			meta.BillingLogBucket = common.Ptr(cred.BillingLogBucket)
-		}
-		if strings.TrimSpace(cred.BillingLogPrefix) != "" {
-			meta.BillingLogPrefix = common.Ptr(cred.BillingLogPrefix)
-		}
 		if len(entry.Programs) > 0 {
 			programs := append([]string(nil), entry.Programs...)
 			meta.Programs = &programs
@@ -90,8 +84,6 @@ func handleInternalPutBucketFiber(c fiber.Ctx, om *core.ObjectManager) error {
 		strings.TrimSpace(common.StringVal(req.SecretKey)) == "" &&
 		strings.TrimSpace(common.StringVal(req.Endpoint)) == "" &&
 		strings.TrimSpace(common.StringVal(req.Region)) == "" &&
-		strings.TrimSpace(common.StringVal(req.BillingLogBucket)) == "" &&
-		strings.TrimSpace(common.StringVal(req.BillingLogPrefix)) == "" &&
 		rawProvider == "" &&
 		req.Organization != ""
 
@@ -118,8 +110,6 @@ func handleInternalPutBucketFiber(c fiber.Ctx, om *core.ObjectManager) error {
 	accessKey := strings.TrimSpace(common.StringVal(req.AccessKey))
 	secretKey := strings.TrimSpace(common.StringVal(req.SecretKey))
 	endpoint := strings.TrimSpace(common.StringVal(req.Endpoint))
-	billingLogBucket := strings.TrimSpace(common.StringVal(req.BillingLogBucket))
-	billingLogPrefix := strings.Trim(strings.TrimSpace(common.StringVal(req.BillingLogPrefix)), "/")
 	if hasExistingCred {
 		if region == "" {
 			region = existingCred.Region
@@ -133,26 +123,18 @@ func handleInternalPutBucketFiber(c fiber.Ctx, om *core.ObjectManager) error {
 		if endpoint == "" {
 			endpoint = existingCred.Endpoint
 		}
-		if billingLogBucket == "" {
-			billingLogBucket = existingCred.BillingLogBucket
-		}
-		if billingLogPrefix == "" {
-			billingLogPrefix = existingCred.BillingLogPrefix
-		}
 	}
 	if err := common.ValidateBucketNameWithEndpoint(bucketProvider, req.Bucket, endpoint); err != nil {
 		return c.Status(fiber.StatusBadRequest).SendString(err.Error())
 	}
 
 	cred := &models.S3Credential{
-		Bucket:           req.Bucket,
-		Provider:         bucketProvider,
-		Region:           region,
-		AccessKey:        accessKey,
-		SecretKey:        secretKey,
-		Endpoint:         endpoint,
-		BillingLogBucket: billingLogBucket,
-		BillingLogPrefix: billingLogPrefix,
+		Bucket:    req.Bucket,
+		Provider:  bucketProvider,
+		Region:    region,
+		AccessKey: accessKey,
+		SecretKey: secretKey,
+		Endpoint:  endpoint,
 	}
 	if bucketProvider == common.S3Provider && (strings.TrimSpace(cred.AccessKey) == "" || strings.TrimSpace(cred.SecretKey) == "") {
 		return c.Status(fiber.StatusBadRequest).SendString("access_key and secret_key are required for s3 credentials")

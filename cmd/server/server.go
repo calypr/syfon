@@ -85,8 +85,8 @@ var Cmd = &cobra.Command{
 
 		applyCredentialEncryptionConfig(cfg)
 
-		// Load S3 Credentials from Config if present
-		if len(cfg.S3Credentials) > 0 {
+		// Load configured bucket credentials if present.
+		if len(cfg.Buckets) > 0 {
 			encryptionEnabled, encErr := crypto.CredentialEncryptionEnabled()
 			if encErr != nil {
 				fatal("invalid credential encryption configuration", "env", crypto.CredentialMasterKeyEnv, "err", encErr)
@@ -95,18 +95,16 @@ var Cmd = &cobra.Command{
 				fatal("s3 credential encryption key is required", "env", crypto.CredentialMasterKeyEnv)
 			}
 
-			logger.Info("loading configured s3 credentials", "count", len(cfg.S3Credentials))
-			// S3 credentials are encrypted before persistence and audited on read/write/delete/list.
-			for _, c := range cfg.S3Credentials {
+			logger.Info("loading configured bucket credentials", "count", len(cfg.Buckets))
+			// Bucket credentials are encrypted before persistence and audited on read/write/delete/list.
+			for _, c := range cfg.Buckets {
 				cred := &models.S3Credential{
-					Bucket:           c.Bucket,
-					Provider:         c.Provider,
-					Region:           c.Region,
-					AccessKey:        c.AccessKey,
-					SecretKey:        c.SecretKey,
-					Endpoint:         c.Endpoint,
-					BillingLogBucket: c.BillingLogBucket,
-					BillingLogPrefix: c.BillingLogPrefix,
+					Bucket:    c.Bucket,
+					Provider:  c.Provider,
+					Region:    c.Region,
+					AccessKey: c.AccessKey,
+					SecretKey: c.SecretKey,
+					Endpoint:  c.Endpoint,
 				}
 				if err := database.SaveS3Credential(cmd.Context(), cred); err != nil {
 					logger.Error("failed to save s3 credential", "bucket", c.Bucket, "err", err)

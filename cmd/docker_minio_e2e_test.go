@@ -384,18 +384,16 @@ func writeSyfonDockerConfig(t *testing.T, port int, dbPath string, minioEnv *min
 	t.Helper()
 
 	return writeScopedProviderConfig(t, providerServerConfig{
-		Port:             port,
-		DBPath:           dbPath,
-		Bucket:           minioEnv.bucket,
-		Provider:         "s3",
-		Region:           minioEnv.region,
-		AccessKey:        minioEnv.accessKey,
-		SecretKey:        minioEnv.secretKey,
-		Endpoint:         minioEnv.endpoint,
-		BillingLogBucket: minioEnv.bucket,
-		BillingLogPrefix: ".syfon/provider-transfer-events",
-		Organization:     "syfon",
-		ProjectID:        "e2e",
+		Port:         port,
+		DBPath:       dbPath,
+		Bucket:       minioEnv.bucket,
+		Provider:     "s3",
+		Region:       minioEnv.region,
+		AccessKey:    minioEnv.accessKey,
+		SecretKey:    minioEnv.secretKey,
+		Endpoint:     minioEnv.endpoint,
+		Organization: "syfon",
+		ProjectID:    "e2e",
 	})
 }
 

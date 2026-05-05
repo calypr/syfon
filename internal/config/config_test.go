@@ -129,84 +129,6 @@ func TestCredentialEncryptionConfigMarshalJSONRedactsMasterKey(t *testing.T) {
 	}
 }
 
-func TestLoadConfig_BillingLogsEnabledDefaultsTrue(t *testing.T) {
-	content := `
-auth:
-  mode: local
-  basic:
-    username: "drs-user"
-    password: "drs-pass"
-database:
-  sqlite:
-    file: "test.db"
-s3_credentials:
-  - bucket: "test-bucket"
-    provider: "s3"
-    region: "us-east-1"
-    access_key: "test-key"
-    secret_key: "test-secret"
-`
-	tmpfile, err := os.CreateTemp("", "config-billing-logs-default-*.yaml")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.Remove(tmpfile.Name())
-	if _, err := tmpfile.Write([]byte(content)); err != nil {
-		t.Fatal(err)
-	}
-	if err := tmpfile.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	cfg, err := LoadConfig(tmpfile.Name())
-	if err != nil {
-		t.Fatalf("LoadConfig failed: %v", err)
-	}
-	if !cfg.S3Credentials[0].ProviderBillingLogsEnabled() {
-		t.Fatal("expected billing logs to default to enabled")
-	}
-}
-
-func TestLoadConfig_BillingLogsCanBeDisabledForS3Compatible(t *testing.T) {
-	content := `
-auth:
-  mode: local
-  basic:
-    username: "drs-user"
-    password: "drs-pass"
-database:
-  sqlite:
-    file: "test.db"
-s3_credentials:
-  - bucket: "test-bucket"
-    provider: "s3"
-    region: "us-east-1"
-    access_key: "test-key"
-    secret_key: "test-secret"
-    endpoint: "https://s3-compatible.example.org"
-    billing_logs_enabled: false
-`
-	tmpfile, err := os.CreateTemp("", "config-billing-logs-disabled-*.yaml")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.Remove(tmpfile.Name())
-	if _, err := tmpfile.Write([]byte(content)); err != nil {
-		t.Fatal(err)
-	}
-	if err := tmpfile.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	cfg, err := LoadConfig(tmpfile.Name())
-	if err != nil {
-		t.Fatalf("LoadConfig failed: %v", err)
-	}
-	if cfg.S3Credentials[0].ProviderBillingLogsEnabled() {
-		t.Fatal("expected billing logs to be disabled")
-	}
-}
-
 func TestLoadConfig_LocalAuthzCSV(t *testing.T) {
 	t.Cleanup(func() { os.Unsetenv("DRS_LOCAL_AUTHZ_CSV") })
 	content := `
@@ -290,6 +212,67 @@ bucket_scopes:
 	}
 	if got := cfg.BucketScopes[2]; got.Organization != "calypr" || got.ProjectID != "upload" || got.Bucket != "calypr" || got.PathPrefix != "organizations/calypr/projects/upload" {
 		t.Fatalf("unexpected composed bucket scope: %+v", got)
+	}
+}
+
+func TestLoadConfig_BucketsResources(t *testing.T) {
+	content := `
+auth:
+  mode: local
+  allow_unauthenticated: true
+database:
+  sqlite:
+    file: "test.db"
+buckets:
+  - bucket: calypr
+    provider: s3
+    region: us-east-1
+    access_key: testing
+    secret_key: testing-secret
+    resources:
+      - organization: calypr
+        org_path: organizations/calypr
+        projects:
+          - project_id: training
+            project_path: projects/training
+          - project: analysis
+            project_path: projects/analysis
+      - organization: root_only
+        org_path: roots/root_only
+`
+	tmpfile, err := os.CreateTemp("", "config-buckets-resources-*.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpfile.Name())
+	if _, err := tmpfile.Write([]byte(content)); err != nil {
+		t.Fatal(err)
+	}
+	if err := tmpfile.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadConfig(tmpfile.Name())
+	if err != nil {
+		t.Fatalf("LoadConfig failed: %v", err)
+	}
+	if len(cfg.Buckets) != 1 {
+		t.Fatalf("expected 1 bucket, got %d", len(cfg.Buckets))
+	}
+	if len(cfg.S3Credentials) != 1 {
+		t.Fatalf("expected legacy s3_credentials alias to be populated, got %d", len(cfg.S3Credentials))
+	}
+	if len(cfg.BucketScopes) != 3 {
+		t.Fatalf("expected 3 derived bucket scopes, got %d", len(cfg.BucketScopes))
+	}
+	if got := cfg.BucketScopes[0]; got.Organization != "calypr" || got.ProjectID != "training" || got.Bucket != "calypr" || got.PathPrefix != "organizations/calypr/projects/training" {
+		t.Fatalf("unexpected nested training scope: %+v", got)
+	}
+	if got := cfg.BucketScopes[1]; got.Organization != "calypr" || got.ProjectID != "analysis" || got.Bucket != "calypr" || got.PathPrefix != "organizations/calypr/projects/analysis" {
+		t.Fatalf("unexpected nested analysis scope: %+v", got)
+	}
+	if got := cfg.BucketScopes[2]; got.Organization != "root_only" || got.ProjectID != "" || got.Bucket != "calypr" || got.PathPrefix != "roots/root_only" {
+		t.Fatalf("unexpected org-only scope: %+v", got)
 	}
 }
 

@@ -36,6 +36,11 @@ jobs:
       - name: Download dependencies
         run: go mod download
 
+      - name: Verify generated API bindings are up to date
+        run: |
+          make gen-server gen-client
+          git diff --exit-code -- apigen/server apigen/client apigen/openapi/internal.openapi.yaml apigen/openapi/bucket.openapi.yaml
+
       - name: Run unit tests
         run: make test-unit
 

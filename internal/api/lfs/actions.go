@@ -42,7 +42,7 @@ func prepareDownloadActions(ctx context.Context, om *core.ObjectManager, oid str
 		return nil, &lfsapi.ObjectError{Code: int32(http.StatusNotFound), Message: "no object location available"}
 	}
 
-	signed, err := om.SignURL(ctx, src, urlmanager.SignOptions{})
+	signed, err := om.SignObjectURL(ctx, obj, src, urlmanager.SignOptions{})
 	if err != nil {
 		return nil, &lfsapi.ObjectError{Code: int32(http.StatusInternalServerError), Message: err.Error()}
 	}

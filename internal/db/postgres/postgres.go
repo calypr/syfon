@@ -128,14 +128,6 @@ func (db *PostgresDB) ensureS3CredentialSchema() error {
 	if err != nil {
 		return fmt.Errorf("failed to initialize s3_credential provider schema: %w", err)
 	}
-	for _, stmt := range []string{
-		`ALTER TABLE s3_credential ADD COLUMN IF NOT EXISTS billing_log_bucket TEXT`,
-		`ALTER TABLE s3_credential ADD COLUMN IF NOT EXISTS billing_log_prefix TEXT`,
-	} {
-		if _, err := db.db.Exec(stmt); err != nil {
-			return fmt.Errorf("failed to initialize s3_credential billing log schema: %w", err)
-		}
-	}
 	return nil
 }
 

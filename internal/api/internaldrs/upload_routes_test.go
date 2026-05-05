@@ -20,8 +20,12 @@ import (
 
 func TestHandleInternalUploadBlank(t *testing.T) {
 	guid := "new-guid"
-	body, _ := json.Marshal(internalapi.InternalUploadBlankRequest{Guid: &guid})
-	rr := doInternalDRSTestRequest(httptest.NewRequest(http.MethodPost, "/data/upload", bytes.NewBuffer(body)), core.NewObjectManager(&testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}, &testutils.MockUrlManager{}))
+	bucket := "b1"
+	body, _ := json.Marshal(internalapi.InternalUploadBlankRequest{Guid: &guid, Bucket: bucket})
+	rr := doInternalDRSTestRequest(httptest.NewRequest(http.MethodPost, "/data/upload", bytes.NewBuffer(body)), core.NewObjectManager(&testutils.MockDatabase{
+		Objects:     map[string]*drs.DrsObject{},
+		Credentials: map[string]models.S3Credential{"b1": {Bucket: "b1"}},
+	}, &testutils.MockUrlManager{}))
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d", rr.Code)
 	}
@@ -32,21 +36,48 @@ func TestHandleInternalUploadBlank(t *testing.T) {
 	}
 }
 
+func TestHandleInternalUploadBlank_RequiresBucket(t *testing.T) {
+	guid := "new-guid"
+	body, _ := json.Marshal(internalapi.InternalUploadBlankRequest{Guid: &guid})
+	rr := doInternalDRSTestRequest(httptest.NewRequest(http.MethodPost, "/data/upload", bytes.NewBuffer(body)), core.NewObjectManager(&testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}, &testutils.MockUrlManager{}))
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rr.Code)
+	}
+}
+
 func TestHandleInternalMultipartInit(t *testing.T) {
 	fileName := "test.bam"
 	guid := "multipart-guid"
-	body, _ := json.Marshal(internalapi.InternalMultipartInitRequest{Guid: &guid, FileName: &fileName})
-	rr := doInternalDRSTestRequest(httptest.NewRequest(http.MethodPost, "/data/multipart/init", bytes.NewBuffer(body)), core.NewObjectManager(&testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}, &testutils.MockUrlManager{}))
+	bucket := "b1"
+	body, _ := json.Marshal(internalapi.InternalMultipartInitRequest{Guid: &guid, FileName: &fileName, Bucket: &bucket})
+	rr := doInternalDRSTestRequest(httptest.NewRequest(http.MethodPost, "/data/multipart/init", bytes.NewBuffer(body)), core.NewObjectManager(&testutils.MockDatabase{
+		Objects:     map[string]*drs.DrsObject{},
+		Credentials: map[string]models.S3Credential{"b1": {Bucket: "b1"}},
+	}, &testutils.MockUrlManager{}))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rr.Code)
 	}
 }
 
+func TestHandleInternalMultipartInit_RequiresBucketForUnscopedUpload(t *testing.T) {
+	fileName := "test.bam"
+	guid := "multipart-guid"
+	body, _ := json.Marshal(internalapi.InternalMultipartInitRequest{Guid: &guid, FileName: &fileName})
+	rr := doInternalDRSTestRequest(httptest.NewRequest(http.MethodPost, "/data/multipart/init", bytes.NewBuffer(body)), core.NewObjectManager(&testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}, &testutils.MockUrlManager{}))
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rr.Code)
+	}
+}
+
 func TestHandleInternalMultipartInit_PreservesRequestedKey(t *testing.T) {
 	key := "programs/programs/projects/e2e/sha256-value"
-	body, _ := json.Marshal(internalapi.InternalMultipartInitRequest{Guid: &key})
+	bucket := "b1"
+	body, _ := json.Marshal(internalapi.InternalMultipartInitRequest{Guid: &key, Bucket: &bucket})
 	mockUM := &capturingMultipartURLManager{}
-	rr := doInternalDRSTestRequest(httptest.NewRequest(http.MethodPost, "/data/multipart/init", bytes.NewBuffer(body)), core.NewObjectManager(&testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}, mockUM))
+	rr := doInternalDRSTestRequest(httptest.NewRequest(http.MethodPost, "/data/multipart/init", bytes.NewBuffer(body)), core.NewObjectManager(&testutils.MockDatabase{
+		Objects:     map[string]*drs.DrsObject{},
+		Credentials: map[string]models.S3Credential{"b1": {Bucket: "b1"}},
+	}, mockUM))
 	if rr.Code != http.StatusOK || mockUM.key != key {
 		t.Fatalf("expected preserved key, got status=%d key=%q", rr.Code, mockUM.key)
 	}
@@ -67,13 +98,64 @@ func TestHandleInternalMultipartInit_ResolvesExistingByChecksumGUID(t *testing.T
 	existingID := "ee53f5ce-8069-4f99-bd59-0517e6a2f1ea"
 	mockDB := &testutils.MockDatabase{
 		Objects: map[string]*drs.DrsObject{
-			existingID: {Id: existingID, Checksums: []drs.Checksum{{Type: "sha256", Checksum: checksum}}},
+			existingID: {
+				Id:        existingID,
+				Checksums: []drs.Checksum{{Type: "sha256", Checksum: checksum}},
+				AccessMethods: &[]drs.AccessMethod{{
+					Type: drs.AccessMethodTypeS3,
+					AccessUrl: &struct {
+						Headers *[]string `json:"headers,omitempty"`
+						Url     string    `json:"url"`
+					}{Url: "s3://b1/" + existingID},
+				}},
+			},
 		},
 	}
 	body, _ := json.Marshal(internalapi.InternalMultipartInitRequest{Guid: &checksum})
 	rr := doInternalDRSTestRequest(httptest.NewRequest(http.MethodPost, "/data/multipart/init", bytes.NewBuffer(body)), core.NewObjectManager(mockDB, &testutils.MockUrlManager{}))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+}
+
+func TestHandleInternalMultipartInit_ExistingScopedObjectUsesMappedLocation(t *testing.T) {
+	checksum := strings.Repeat("c", 64)
+	existingID := "ee53f5ce-8069-4f99-bd59-0517e6a2f1ea"
+	mockDB := &testutils.MockDatabase{
+		Objects: map[string]*drs.DrsObject{
+			existingID: {
+				Id:               existingID,
+				ControlledAccess: &[]string{"/organization/HTAN_INT/project/BForePC"},
+				Checksums:        []drs.Checksum{{Type: "sha256", Checksum: checksum}},
+				AccessMethods: &[]drs.AccessMethod{{
+					Type: drs.AccessMethodTypeS3,
+					AccessUrl: &struct {
+						Headers *[]string `json:"headers,omitempty"`
+						Url     string    `json:"url"`
+					}{Url: "s3://bforepc-prod/OHSU/slide.ome.tiff"},
+				}},
+			},
+		},
+		Credentials: map[string]models.S3Credential{
+			"bforepc": {Bucket: "bforepc", Provider: "s3", Region: "us-west-2"},
+		},
+		BucketScopes: map[string]models.BucketScope{
+			"HTAN_INT|BForePC": {
+				Organization: "HTAN_INT",
+				ProjectID:    "BForePC",
+				Bucket:       "bforepc",
+				PathPrefix:   "bforepc-prod",
+			},
+		},
+	}
+	mockUM := &capturingMultipartURLManager{}
+	body, _ := json.Marshal(internalapi.InternalMultipartInitRequest{Guid: &checksum})
+	rr := doInternalDRSTestRequest(httptest.NewRequest(http.MethodPost, "/data/multipart/init", bytes.NewBuffer(body)), core.NewObjectManager(mockDB, mockUM))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if mockUM.bucket != "bforepc" || mockUM.key != "bforepc-prod/OHSU/slide.ome.tiff" {
+		t.Fatalf("expected mapped multipart target bforepc/bforepc-prod/OHSU/slide.ome.tiff, got %q/%q", mockUM.bucket, mockUM.key)
 	}
 }
 
@@ -108,6 +190,57 @@ func TestHandleInternalUploadURL_Branches(t *testing.T) {
 	rr := doInternalDRSTestRequest(req, core.NewObjectManager(db, &testutils.MockUrlManager{}))
 	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "upload=true") {
 		t.Fatalf("expected signed upload URL, got status=%d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleInternalUploadURL_MissingObjectRequiresBucket(t *testing.T) {
+	db := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}, Credentials: map[string]models.S3Credential{"b1": {Bucket: "b1"}}}
+	req := routeutil.WithPathParams(httptest.NewRequest(http.MethodGet, "/data/upload/abc", nil), map[string]string{"file_id": "abc"})
+	rr := doInternalDRSTestRequest(req, core.NewObjectManager(db, &testutils.MockUrlManager{}))
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleInternalUploadURL_RewritesScopedObjectURL(t *testing.T) {
+	db := &testutils.MockDatabase{
+		Objects: map[string]*drs.DrsObject{
+			"scoped-obj": {
+				Id:               "scoped-obj",
+				ControlledAccess: &[]string{"/organization/HTAN_INT/project/BForePC"},
+				AccessMethods: &[]drs.AccessMethod{{
+					Type: drs.AccessMethodTypeS3,
+					AccessUrl: &struct {
+						Headers *[]string `json:"headers,omitempty"`
+						Url     string    `json:"url"`
+					}{Url: "s3://bforepc-prod/OHSU/slide.ome.tiff"},
+				}},
+			},
+		},
+		Credentials: map[string]models.S3Credential{
+			"bforepc": {Bucket: "bforepc", Provider: "s3", Region: "us-west-2"},
+		},
+		BucketScopes: map[string]models.BucketScope{
+			"HTAN_INT|BForePC": {
+				Organization: "HTAN_INT",
+				ProjectID:    "BForePC",
+				Bucket:       "bforepc",
+				PathPrefix:   "bforepc-prod",
+			},
+		},
+	}
+	mockUM := &capturingMultipartURLManager{}
+	req := routeutil.WithPathParams(httptest.NewRequest(http.MethodGet, "/data/upload/scoped-obj?bucket=bforepc", nil), map[string]string{"file_id": "scoped-obj"})
+	rr := doInternalDRSTestRequest(req, core.NewObjectManager(db, mockUM))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	wantURL := "s3://bforepc/bforepc-prod/OHSU/slide.ome.tiff"
+	if mockUM.signURL != wantURL {
+		t.Fatalf("expected scoped upload URL %q, got %q", wantURL, mockUM.signURL)
+	}
+	if mockUM.signID != "bforepc" {
+		t.Fatalf("expected signer credential bucket bforepc, got %q", mockUM.signID)
 	}
 }
 

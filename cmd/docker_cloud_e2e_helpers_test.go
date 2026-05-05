@@ -20,18 +20,16 @@ import (
 )
 
 type providerServerConfig struct {
-	Port             int
-	DBPath           string
-	Bucket           string
-	Provider         string
-	Region           string
-	AccessKey        string
-	SecretKey        string
-	Endpoint         string
-	BillingLogBucket string
-	BillingLogPrefix string
-	Organization     string
-	ProjectID        string
+	Port         int
+	DBPath       string
+	Bucket       string
+	Provider     string
+	Region       string
+	AccessKey    string
+	SecretKey    string
+	Endpoint     string
+	Organization string
+	ProjectID    string
 }
 
 type bucketCommandConfig struct {
@@ -163,12 +161,6 @@ s3_credentials:
 	}
 	if strings.TrimSpace(cfg.Endpoint) != "" {
 		content += fmt.Sprintf("    endpoint: %q\n", cfg.Endpoint)
-	}
-	if strings.TrimSpace(cfg.BillingLogBucket) != "" {
-		content += fmt.Sprintf("    billing_log_bucket: %q\n", cfg.BillingLogBucket)
-	}
-	if strings.TrimSpace(cfg.BillingLogPrefix) != "" {
-		content += fmt.Sprintf("    billing_log_prefix: %q\n", cfg.BillingLogPrefix)
 	}
 	if strings.TrimSpace(cfg.Organization) != "" || strings.TrimSpace(cfg.ProjectID) != "" {
 		content += "bucket_scopes:\n"

@@ -329,8 +329,8 @@ func TestAdditionalDRSHandlers(t *testing.T) {
 		req := httptest.NewRequest("POST", "/upload-request", bytes.NewBuffer(body))
 		req.Header.Set("Content-Type", "application/json")
 		resp, _ := app.Test(req)
-		if resp.StatusCode != http.StatusOK {
-			t.Errorf("expected 200, got %d", resp.StatusCode)
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("expected 400, got %d", resp.StatusCode)
 		}
 	})
 

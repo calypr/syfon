@@ -42,9 +42,7 @@ CREATE TABLE IF NOT EXISTS s3_credential (
   region TEXT,
   access_key TEXT,
   secret_key TEXT,
-  endpoint TEXT,
-  billing_log_bucket TEXT,
-  billing_log_prefix TEXT
+  endpoint TEXT
 );
 
 CREATE TABLE IF NOT EXISTS bucket_scope (

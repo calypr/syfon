@@ -100,9 +100,7 @@ func (db *SqliteDB) initSchema() error {
 			region TEXT,
 			access_key TEXT,
 			secret_key TEXT,
-			endpoint TEXT,
-			billing_log_bucket TEXT,
-			billing_log_prefix TEXT
+			endpoint TEXT
 		)`,
 		`CREATE TABLE IF NOT EXISTS bucket_scope (
 			organization TEXT NOT NULL,
@@ -241,16 +239,6 @@ func (db *SqliteDB) initSchema() error {
 	if _, err := db.db.Exec(`ALTER TABLE s3_credential ADD COLUMN provider TEXT NOT NULL DEFAULT 's3'`); err != nil {
 		if !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
 			return err
-		}
-	}
-	for _, stmt := range []string{
-		`ALTER TABLE s3_credential ADD COLUMN billing_log_bucket TEXT`,
-		`ALTER TABLE s3_credential ADD COLUMN billing_log_prefix TEXT`,
-	} {
-		if _, err := db.db.Exec(stmt); err != nil {
-			if !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
-				return err
-			}
 		}
 	}
 	if _, err := db.db.Exec(`ALTER TABLE transfer_attribution_event ADD COLUMN access_grant_id TEXT NOT NULL DEFAULT ''`); err != nil {

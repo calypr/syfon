@@ -785,6 +785,82 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 		}
 	})
 
+	t.Run("object signing routes upload and download paths through bucket scope mapping", func(t *testing.T) {
+		db := &coreTestDB{
+			MockDatabase: &testutils.MockDatabase{
+				BucketScopes: map[string]models.BucketScope{
+					"HTAN_INT|BForePC": {
+						Organization: "HTAN_INT",
+						ProjectID:    "BForePC",
+						Bucket:       "bforepc",
+						PathPrefix:   "bforepc-prod",
+					},
+				},
+			},
+		}
+		obj := &models.InternalObject{
+			DrsObject: drs.DrsObject{
+				ControlledAccess: &[]string{"/organization/HTAN_INT/project/BForePC"},
+			},
+		}
+		sourceURL := "s3://bforepc-prod/OHSU/koei_chin/slide.ome.tiff"
+		wantURL := "s3://bforepc/bforepc-prod/OHSU/koei_chin/slide.ome.tiff"
+
+		t.Run("download", func(t *testing.T) {
+			um := &capturingURLManager{}
+			om := NewObjectManager(db, um)
+			signed, err := om.SignObjectURL(context.Background(), obj, sourceURL, urlmanager.SignOptions{})
+			if err != nil {
+				t.Fatalf("SignObjectURL download failed: %v", err)
+			}
+			if signed != "signed:"+wantURL {
+				t.Fatalf("unexpected signed download URL: got %q want %q", signed, "signed:"+wantURL)
+			}
+			if um.signURLBucket != "bforepc" {
+				t.Fatalf("expected download signer bucket bforepc, got %q", um.signURLBucket)
+			}
+			if um.signURLAccessURL != wantURL {
+				t.Fatalf("expected download storage URL %q, got %q", wantURL, um.signURLAccessURL)
+			}
+		})
+
+		t.Run("upload", func(t *testing.T) {
+			um := &capturingURLManager{}
+			om := NewObjectManager(db, um)
+			signed, err := om.SignObjectURL(context.Background(), obj, sourceURL, urlmanager.SignOptions{Method: "PUT"})
+			if err != nil {
+				t.Fatalf("SignObjectURL upload failed: %v", err)
+			}
+			if signed != "signed:"+wantURL {
+				t.Fatalf("unexpected signed upload URL: got %q want %q", signed, "signed:"+wantURL)
+			}
+			if um.signURLBucket != "bforepc" {
+				t.Fatalf("expected upload signer bucket bforepc, got %q", um.signURLBucket)
+			}
+			if um.signURLAccessURL != wantURL {
+				t.Fatalf("expected upload storage URL %q, got %q", wantURL, um.signURLAccessURL)
+			}
+		})
+
+		t.Run("download part", func(t *testing.T) {
+			um := &capturingURLManager{}
+			om := NewObjectManager(db, um)
+			partURL, err := om.SignObjectDownloadPart(context.Background(), obj, "bforepc-prod", sourceURL, 0, 1023, urlmanager.SignOptions{})
+			if err != nil {
+				t.Fatalf("SignObjectDownloadPart failed: %v", err)
+			}
+			if partURL != "download:"+wantURL {
+				t.Fatalf("unexpected signed part URL: got %q want %q", partURL, "download:"+wantURL)
+			}
+			if um.signDownloadBucket != "bforepc" {
+				t.Fatalf("expected part signer bucket bforepc, got %q", um.signDownloadBucket)
+			}
+			if um.signDownloadURL != wantURL {
+				t.Fatalf("expected part storage URL %q, got %q", wantURL, um.signDownloadURL)
+			}
+		})
+	})
+
 	t.Run("create bucket scope updates signing cache", func(t *testing.T) {
 		mockDB := &testutils.MockDatabase{}
 		db := &coreTestDB{MockDatabase: mockDB}

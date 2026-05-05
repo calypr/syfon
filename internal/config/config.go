@@ -79,7 +79,8 @@ const (
 type Config struct {
 	Port                 int                        `json:"port" yaml:"port"`
 	Database             DatabaseConfig             `json:"database" yaml:"database"`
-	S3Credentials        []S3Config                 `json:"s3_credentials" yaml:"s3_credentials"`
+	Buckets              []BucketConfig             `json:"buckets,omitempty" yaml:"buckets,omitempty"`
+	S3Credentials        []BucketConfig             `json:"s3_credentials,omitempty" yaml:"s3_credentials,omitempty"`
 	BucketScopes         []BucketScopeConfig        `json:"bucket_scopes" yaml:"bucket_scopes"`
 	CredentialEncryption CredentialEncryptionConfig `json:"credential_encryption" yaml:"credential_encryption"`
 	Auth                 AuthConfig                 `json:"auth" yaml:"auth"`
@@ -145,20 +146,31 @@ func (p PostgresConfig) MarshalJSON() ([]byte, error) {
 	})
 }
 
-type S3Config struct {
-	Bucket             string `json:"bucket" yaml:"bucket"`
-	Provider           string `json:"provider,omitempty" yaml:"provider,omitempty"`
-	Region             string `json:"region" yaml:"region"`
-	AccessKey          string `json:"access_key" yaml:"access_key"`
-	SecretKey          string `json:"secret_key" yaml:"secret_key"`
-	Endpoint           string `json:"endpoint,omitempty" yaml:"endpoint,omitempty"`
-	BillingLogsEnabled *bool  `json:"billing_logs_enabled,omitempty" yaml:"billing_logs_enabled,omitempty"`
-	BillingLogBucket   string `json:"billing_log_bucket,omitempty" yaml:"billing_log_bucket,omitempty"`
-	BillingLogPrefix   string `json:"billing_log_prefix,omitempty" yaml:"billing_log_prefix,omitempty"`
+type BucketConfig struct {
+	Bucket    string                 `json:"bucket" yaml:"bucket"`
+	Provider  string                 `json:"provider,omitempty" yaml:"provider,omitempty"`
+	Region    string                 `json:"region" yaml:"region"`
+	AccessKey string                 `json:"access_key" yaml:"access_key"`
+	SecretKey string                 `json:"secret_key" yaml:"secret_key"`
+	Endpoint  string                 `json:"endpoint,omitempty" yaml:"endpoint,omitempty"`
+	Resources []BucketResourceConfig `json:"resources,omitempty" yaml:"resources,omitempty"`
 }
 
-func (s S3Config) ProviderBillingLogsEnabled() bool {
-	return s.BillingLogsEnabled == nil || *s.BillingLogsEnabled
+type S3Config = BucketConfig
+
+type BucketResourceConfig struct {
+	Organization string `json:"organization" yaml:"organization"`
+	OrgPath      string `json:"org_path,omitempty" yaml:"org_path,omitempty"`
+
+	Projects []BucketProjectConfig `json:"projects,omitempty" yaml:"projects,omitempty"`
+}
+
+type BucketProjectConfig struct {
+	ProjectID   string `json:"project_id,omitempty" yaml:"project_id,omitempty"`
+	Project     string `json:"project,omitempty" yaml:"project,omitempty"`
+	ProjectPath string `json:"project_path,omitempty" yaml:"project_path,omitempty"`
+	Path        string `json:"path,omitempty" yaml:"path,omitempty"`
+	PathPrefix  string `json:"path_prefix,omitempty" yaml:"path_prefix,omitempty"`
 }
 
 type BucketScopeConfig struct {
@@ -172,8 +184,8 @@ type BucketScopeConfig struct {
 }
 
 // SECURITY FIX MED-1: Redact secret key when marshaling to JSON
-func (s S3Config) MarshalJSON() ([]byte, error) {
-	type Alias S3Config
+func (b BucketConfig) MarshalJSON() ([]byte, error) {
+	type Alias BucketConfig
 	return json.Marshal(&struct {
 		SecretKey string `json:"secret_key"`
 		AccessKey string `json:"access_key"`
@@ -181,7 +193,7 @@ func (s S3Config) MarshalJSON() ([]byte, error) {
 	}{
 		SecretKey: "***REDACTED***",
 		AccessKey: "***REDACTED***",
-		Alias:     (*Alias)(&s),
+		Alias:     (*Alias)(&b),
 	})
 }
 
@@ -466,28 +478,41 @@ func LoadConfig(configFile string) (*Config, error) {
 		return nil, fmt.Errorf("no database specified in config")
 	}
 
-	// Validate S3 Credentials
-	for i, cred := range cfg.S3Credentials {
+	if len(cfg.Buckets) > 0 && len(cfg.S3Credentials) > 0 {
+		return nil, fmt.Errorf("config may specify only one of 'buckets' or legacy 's3_credentials'")
+	}
+	if len(cfg.Buckets) == 0 && len(cfg.S3Credentials) > 0 {
+		cfg.Buckets = append([]BucketConfig(nil), cfg.S3Credentials...)
+	}
+
+	// Validate configured bucket credentials.
+	for i, cred := range cfg.Buckets {
 		bucketProvider, err := common.ParseBucketProvider(cred.Provider)
 		if err != nil {
-			return nil, fmt.Errorf("s3_credentials[%d]: %w", i, err)
+			return nil, fmt.Errorf("buckets[%d]: %w", i, err)
 		}
-		cfg.S3Credentials[i].Provider = bucketProvider
+		cfg.Buckets[i].Provider = bucketProvider
 		if err := common.ValidateBucketNameWithEndpoint(bucketProvider, cred.Bucket, cred.Endpoint); err != nil {
-			return nil, fmt.Errorf("s3_credentials[%d]: %w", i, err)
+			return nil, fmt.Errorf("buckets[%d]: %w", i, err)
 		}
 		if bucketProvider == common.S3Provider {
 			if cred.Region == "" {
-				return nil, fmt.Errorf("s3_credentials[%d]: region is required for provider=%s", i, bucketProvider)
+				return nil, fmt.Errorf("buckets[%d]: region is required for provider=%s", i, bucketProvider)
 			}
 			if cred.AccessKey == "" {
-				return nil, fmt.Errorf("s3_credentials[%d]: access_key is required for provider=%s", i, bucketProvider)
+				return nil, fmt.Errorf("buckets[%d]: access_key is required for provider=%s", i, bucketProvider)
 			}
 			if cred.SecretKey == "" {
-				return nil, fmt.Errorf("s3_credentials[%d]: secret_key is required for provider=%s", i, bucketProvider)
+				return nil, fmt.Errorf("buckets[%d]: secret_key is required for provider=%s", i, bucketProvider)
 			}
 		}
 	}
+
+	derivedScopes, err := deriveBucketScopesFromBuckets(cfg.Buckets)
+	if err != nil {
+		return nil, err
+	}
+	cfg.BucketScopes = append(append([]BucketScopeConfig(nil), cfg.BucketScopes...), derivedScopes...)
 
 	for i := range cfg.BucketScopes {
 		scope := &cfg.BucketScopes[i]
@@ -550,6 +575,8 @@ func LoadConfig(configFile string) (*Config, error) {
 			return nil, fmt.Errorf("bucket_scopes[%d]: bucket or path is required", i)
 		}
 	}
+	// Keep the legacy field populated for older call sites and tests.
+	cfg.S3Credentials = append([]BucketConfig(nil), cfg.Buckets...)
 
 	cfg.Auth.Mode = strings.ToLower(strings.TrimSpace(cfg.Auth.Mode))
 	if cfg.Auth.Mode == "" {
@@ -635,6 +662,57 @@ func LoadConfig(configFile string) (*Config, error) {
 
 func cleanBucketScopeSubPath(raw string) string {
 	return strings.Trim(path.Clean("/"+strings.TrimSpace(raw)), "/")
+}
+
+func deriveBucketScopesFromBuckets(buckets []BucketConfig) ([]BucketScopeConfig, error) {
+	scopes := make([]BucketScopeConfig, 0)
+	for i, bucket := range buckets {
+		for j, resource := range bucket.Resources {
+			resourceScopes, err := bucketResourceScopes(bucket.Bucket, resource)
+			if err != nil {
+				return nil, fmt.Errorf("buckets[%d].resources[%d]: %w", i, j, err)
+			}
+			scopes = append(scopes, resourceScopes...)
+		}
+	}
+	return scopes, nil
+}
+
+func bucketResourceScopes(bucketName string, resource BucketResourceConfig) ([]BucketScopeConfig, error) {
+	org := strings.TrimSpace(resource.Organization)
+	if org == "" {
+		return nil, fmt.Errorf("organization is required")
+	}
+	orgPath := cleanBucketScopeSubPath(resource.OrgPath)
+
+	if len(resource.Projects) == 0 {
+		return []BucketScopeConfig{{
+			Organization:        org,
+			Bucket:              bucketName,
+			OrganizationSubPath: orgPath,
+		}}, nil
+	}
+
+	scopes := make([]BucketScopeConfig, 0, len(resource.Projects))
+	for idx, project := range resource.Projects {
+		projectID := strings.TrimSpace(project.ProjectID)
+		if projectID == "" {
+			projectID = strings.TrimSpace(project.Project)
+		}
+		if projectID == "" {
+			return nil, fmt.Errorf("projects[%d]: project_id is required", idx)
+		}
+		scopes = append(scopes, BucketScopeConfig{
+			Organization:        org,
+			ProjectID:           projectID,
+			Bucket:              bucketName,
+			Path:                strings.TrimSpace(project.Path),
+			PathPrefix:          strings.Trim(strings.TrimSpace(project.PathPrefix), "/"),
+			OrganizationSubPath: orgPath,
+			ProjectSubPath:      cleanBucketScopeSubPath(project.ProjectPath),
+		})
+	}
+	return scopes, nil
 }
 
 func joinBucketScopeSubPaths(parts ...string) string {

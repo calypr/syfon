@@ -58,15 +58,13 @@ func TestSyfonDockerFakeGCSE2E(t *testing.T) {
 	port := reserveTCPPort(t)
 	dbPath := filepath.Join(t.TempDir(), "docker-fakegcs-e2e.db")
 	configPath := writeScopedProviderConfig(t, providerServerConfig{
-		Port:             port,
-		DBPath:           dbPath,
-		Bucket:           fakeGCS.bucket,
-		Provider:         "gcs",
-		Endpoint:         fakeGCS.endpoint,
-		BillingLogBucket: fakeGCS.bucket,
-		BillingLogPrefix: ".syfon/provider-transfer-events",
-		Organization:     "syfon",
-		ProjectID:        "e2e",
+		Port:         port,
+		DBPath:       dbPath,
+		Bucket:       fakeGCS.bucket,
+		Provider:     "gcs",
+		Endpoint:     fakeGCS.endpoint,
+		Organization: "syfon",
+		ProjectID:    "e2e",
 	})
 
 	server := startSyfonServerProcessWithConfigPath(t, configPath, map[string]string{

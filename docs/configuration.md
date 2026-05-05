@@ -26,14 +26,13 @@ auth:
 database:
   sqlite:
     file: "drs.db"
-s3_credentials:
+buckets:
   - bucket: "cbds"
     provider: "s3"
     region: "us-east-1"
     access_key: "cbds-user"
     secret_key: "<secret>"
     endpoint: "https://aced-storage.ohsu.edu/"
-    billing_logs_enabled: false
 lfs:
   max_batch_objects: 1000
   max_batch_body_bytes: 10485760

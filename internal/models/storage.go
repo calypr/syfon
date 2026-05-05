@@ -8,14 +8,12 @@ import (
 
 // S3Credential represents the 's3_credential' table
 type S3Credential struct {
-	Bucket           string `db:"bucket"`
-	Provider         string `db:"provider"`
-	Region           string `db:"region"`
-	AccessKey        string `db:"access_key"`
-	SecretKey        string `db:"secret_key"`
-	Endpoint         string `db:"endpoint"`
-	BillingLogBucket string `db:"billing_log_bucket"`
-	BillingLogPrefix string `db:"billing_log_prefix"`
+	Bucket    string `db:"bucket"`
+	Provider  string `db:"provider"`
+	Region    string `db:"region"`
+	AccessKey string `db:"access_key"`
+	SecretKey string `db:"secret_key"`
+	Endpoint  string `db:"endpoint"`
 }
 
 type BucketScope struct {
