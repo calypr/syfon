@@ -8,13 +8,9 @@ import (
 	"testing"
 
 	"github.com/calypr/syfon/apigen/server/drs"
-<<<<<<< support/image-viewer
-	"github.com/calypr/syfon/internal/core"
-	"github.com/calypr/syfon/internal/models"
-=======
 	internalauth "github.com/calypr/syfon/internal/auth"
 	"github.com/calypr/syfon/internal/core"
->>>>>>> feature/controlled_access
+	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/testutils"
 	"github.com/calypr/syfon/internal/urlmanager"
 )
@@ -78,7 +74,6 @@ func TestResolveObjectForOIDFallsBackToChecksum(t *testing.T) {
 	}
 }
 
-<<<<<<< support/image-viewer
 func TestPrepareDownloadActions_RewritesScopedObjectURL(t *testing.T) {
 	oid := "download-scoped"
 	db := &testutils.MockDatabase{
@@ -122,7 +117,7 @@ func TestPrepareDownloadActions_RewritesScopedObjectURL(t *testing.T) {
 		t.Fatalf("expected signer credential bucket bforepc, got %q", um.signID)
 	}
 }
-=======
+
 func TestPrepareUploadActionsRequiresGlobalDataFileCreate(t *testing.T) {
 	testCases := []struct {
 		name       string
@@ -178,5 +173,3 @@ func TestPrepareUploadActionsRequiresGlobalDataFileCreate(t *testing.T) {
 		})
 	}
 }
-
->>>>>>> feature/controlled_access
