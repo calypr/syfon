@@ -8,8 +8,13 @@ import (
 	"testing"
 
 	"github.com/calypr/syfon/apigen/server/drs"
+<<<<<<< support/image-viewer
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/models"
+=======
+	internalauth "github.com/calypr/syfon/internal/auth"
+	"github.com/calypr/syfon/internal/core"
+>>>>>>> feature/controlled_access
 	"github.com/calypr/syfon/internal/testutils"
 	"github.com/calypr/syfon/internal/urlmanager"
 )
@@ -73,6 +78,7 @@ func TestResolveObjectForOIDFallsBackToChecksum(t *testing.T) {
 	}
 }
 
+<<<<<<< support/image-viewer
 func TestPrepareDownloadActions_RewritesScopedObjectURL(t *testing.T) {
 	oid := "download-scoped"
 	db := &testutils.MockDatabase{
@@ -116,3 +122,61 @@ func TestPrepareDownloadActions_RewritesScopedObjectURL(t *testing.T) {
 		t.Fatalf("expected signer credential bucket bforepc, got %q", um.signID)
 	}
 }
+=======
+func TestPrepareUploadActionsRequiresGlobalDataFileCreate(t *testing.T) {
+	testCases := []struct {
+		name       string
+		privileges map[string]map[string]bool
+		wantCode   int32
+	}{
+		{
+			name:       "allows global create privilege",
+			privileges: map[string]map[string]bool{"/data_file": {"create": true}},
+		},
+		{
+			name:       "rejects org-scoped alias privilege",
+			privileges: map[string]map[string]bool{"/programs/data_file": {"create": true}},
+			wantCode:   int32(http.StatusForbidden),
+		},
+		{
+			name:       "rejects read-only global privilege",
+			privileges: map[string]map[string]bool{"/data_file": {"read": true}},
+			wantCode:   int32(http.StatusForbidden),
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			session := internalauth.NewSession("gen3")
+			session.AuthHeaderPresent = true
+			session.SetAuthorizations(nil, tc.privileges, true)
+			ctx := internalauth.WithSession(context.Background(), session)
+
+			db := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}
+			om := core.NewObjectManager(db, &testutils.MockUrlManager{})
+			actions, size, objErr := prepareUploadActions(ctx, om, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", 123, "https://example.test")
+
+			if tc.wantCode != 0 {
+				if objErr == nil || objErr.Code != tc.wantCode {
+					t.Fatalf("expected object error code %d, got %+v", tc.wantCode, objErr)
+				}
+				if size != 123 {
+					t.Fatalf("expected unchanged requested size on denied upload, got %d", size)
+				}
+				return
+			}
+
+			if objErr != nil {
+				t.Fatalf("expected success, got object error: %+v", objErr)
+			}
+			if actions == nil || actions.Upload == nil || actions.Verify == nil {
+				t.Fatalf("expected upload and verify actions, got %+v", actions)
+			}
+			if size != 123 {
+				t.Fatalf("expected size 123, got %d", size)
+			}
+		})
+	}
+}
+
+>>>>>>> feature/controlled_access
