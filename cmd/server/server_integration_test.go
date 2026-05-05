@@ -145,7 +145,10 @@ s3_credentials:
 
 	// 2. Create internal blank upload and get a signed upload URL
 	key := fmt.Sprintf("test-upload-%d", time.Now().Unix())
-	internalUploadReq := map[string]interface{}{"guid": key}
+	internalUploadReq := map[string]interface{}{
+		"guid":   key,
+		"bucket": bucketName,
+	}
 	internalBody, _ := json.Marshal(internalUploadReq)
 	resp, err := client.Post(serverURL+"/data/upload", "application/json", bytes.NewReader(internalBody))
 	if err != nil {
