@@ -12,6 +12,7 @@ import (
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/db"
+	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/testutils"
 	"github.com/calypr/syfon/internal/urlmanager"
 	"github.com/gofiber/fiber/v3"
@@ -20,10 +21,14 @@ import (
 type captureURLManager struct {
 	testutils.MockUrlManager
 	lastOptions urlmanager.SignOptions
+	lastURL     string
+	lastAccess  string
 }
 
 func (m *captureURLManager) SignURL(ctx context.Context, accessId string, url string, opts urlmanager.SignOptions) (string, error) {
 	m.lastOptions = opts
+	m.lastURL = url
+	m.lastAccess = accessId
 	return m.MockUrlManager.SignURL(ctx, accessId, url, opts)
 }
 
@@ -82,6 +87,8 @@ func TestDRSHandlers(t *testing.T) {
 
 	t.Run("GetAccessURL_Success", func(t *testing.T) {
 		db.TransferEvents = nil
+		um.lastURL = ""
+		um.lastAccess = ""
 		req := httptest.NewRequest("GET", "/objects/test-obj/access/s3-access", nil)
 		resp, _ := app.Test(req)
 		if resp.StatusCode != http.StatusOK {
@@ -95,6 +102,9 @@ func TestDRSHandlers(t *testing.T) {
 		if got, want := um.lastOptions.DownloadFilename, "test-file"; got != want {
 			t.Fatalf("unexpected download filename override: got %q want %q", got, want)
 		}
+		if got, want := um.lastURL, "s3://bucket/key"; got != want {
+			t.Fatalf("unexpected signed storage URL: got %q want %q", got, want)
+		}
 		if len(db.TransferEvents) != 1 {
 			t.Fatalf("expected one access-issued event, got %+v", db.TransferEvents)
 		}
@@ -104,6 +114,60 @@ func TestDRSHandlers(t *testing.T) {
 		}
 		if ev.AccessGrantID == "" || ev.AccessGrantID == ev.EventID {
 			t.Fatalf("expected stable grant id distinct from audit event id: %+v", ev)
+		}
+	})
+
+	t.Run("GetAccessURL_RewritesScopedBucketURL", func(t *testing.T) {
+		db := &testutils.MockDatabase{
+			Objects: map[string]*drs.DrsObject{
+				"scoped-obj": {
+					Id:               "scoped-obj",
+					Name:             common.Ptr("slide.ome.tiff"),
+					Size:             100,
+					SelfUri:          "drs://scoped-obj",
+					ControlledAccess: &[]string{"/organization/HTAN_INT/project/BForePC"},
+					AccessMethods: &[]drs.AccessMethod{{
+						AccessId: common.Ptr("s3"),
+						Type:     drs.AccessMethodTypeS3,
+						AccessUrl: &struct {
+							Headers *[]string `json:"headers,omitempty"`
+							Url     string    `json:"url"`
+						}{Url: "s3://bforepc-prod/OHSU/slide.ome.tiff"},
+					}},
+				},
+			},
+			BucketScopes: map[string]models.BucketScope{
+				"HTAN_INT|BForePC": {
+					Organization: "HTAN_INT",
+					ProjectID:    "BForePC",
+					Bucket:       "bforepc",
+					PathPrefix:   "bforepc-prod",
+				},
+			},
+		}
+		um := &captureURLManager{}
+		om := core.NewObjectManager(db, um)
+		app := fiber.New()
+		RegisterDRSRoutes(app, om)
+
+		req := httptest.NewRequest("GET", "/objects/scoped-obj/access/s3", nil)
+		resp, _ := app.Test(req)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200, got %d", resp.StatusCode)
+		}
+		wantURL := "s3://bforepc/bforepc-prod/OHSU/slide.ome.tiff"
+		if got := um.lastURL; got != wantURL {
+			t.Fatalf("expected scoped storage URL %q, got %q", wantURL, got)
+		}
+		if got := um.lastAccess; got != "bforepc" {
+			t.Fatalf("expected signer credential bucket %q, got %q", "bforepc", got)
+		}
+		var access drs.AccessURL
+		if err := json.NewDecoder(resp.Body).Decode(&access); err != nil {
+			t.Fatalf("failed to decode access URL: %v", err)
+		}
+		if got, want := access.Url, wantURL+"?signed=true"; got != want {
+			t.Fatalf("unexpected signed access URL: got %q want %q", got, want)
 		}
 	})
 
@@ -117,6 +181,8 @@ func TestDRSHandlers(t *testing.T) {
 
 	t.Run("GetBulkAccessURL_Success", func(t *testing.T) {
 		db.TransferEvents = nil
+		um.lastURL = ""
+		um.lastAccess = ""
 		bodyObj := drs.BulkObjectAccessId{
 			BulkObjectAccessIds: &[]struct {
 				BulkAccessIds *[]string `json:"bulk_access_ids,omitempty"`
@@ -145,6 +211,9 @@ func TestDRSHandlers(t *testing.T) {
 		}
 		if got, want := um.lastOptions.DownloadFilename, "test-file"; got != want {
 			t.Fatalf("unexpected bulk download filename override: got %q want %q", got, want)
+		}
+		if got, want := um.lastURL, "s3://bucket/key"; got != want {
+			t.Fatalf("unexpected bulk signed storage URL: got %q want %q", got, want)
 		}
 		if len(db.TransferEvents) != 1 {
 			t.Fatalf("expected one bulk access-issued event, got %+v", db.TransferEvents)
@@ -374,4 +443,3 @@ func TestChecksumRouteRegression_WithRealCoreAndDB(t *testing.T) {
 		t.Fatalf("unexpected resolved objects: %+v", body.ResolvedDrsObject)
 	}
 }
-

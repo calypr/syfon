@@ -33,7 +33,7 @@ func handleGetAccessURLFiber(om *core.ObjectManager) fiber.Handler {
 		if obj.Name != nil {
 			opts.DownloadFilename = common.DownloadFilename(*obj.Name)
 		}
-		signed, err := om.SignURL(c.Context(), targetURL, opts)
+		signed, err := om.SignObjectURL(c.Context(), obj, targetURL, opts)
 		if err != nil {
 			return apiutil.HandleError(c, err)
 		}
@@ -102,7 +102,7 @@ func handleGetBulkAccessURLFiber(om *core.ObjectManager) fiber.Handler {
 				if obj.Name != nil {
 					opts.DownloadFilename = common.DownloadFilename(*obj.Name)
 				}
-				signed, err := om.SignURL(c.Context(), targetURL, opts)
+				signed, err := om.SignObjectURL(c.Context(), obj, targetURL, opts)
 				if err != nil {
 					unresolvedIDs = append(unresolvedIDs, objectID)
 					continue

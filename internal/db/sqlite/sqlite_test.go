@@ -950,6 +950,77 @@ func TestSqliteDB_ListObjectIDsPageByChecksum(t *testing.T) {
 	}
 }
 
+func TestSqliteDB_ListObjectIDsPageByURL(t *testing.T) {
+	ctx := context.Background()
+	db, err := NewSqliteDB(":memory:")
+	if err != nil {
+		t.Fatalf("failed to create db: %v", err)
+	}
+	now := time.Now().UTC()
+	objectWithURL := func(id, rawURL string, authz map[string][]string) models.InternalObject {
+		return models.InternalObject{
+			Authorizations: authz,
+			DrsObject: drs.DrsObject{
+				Id:          id,
+				CreatedTime: now,
+				UpdatedTime: &now,
+				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: id + "-hash"}},
+				AccessMethods: &[]drs.AccessMethod{{
+					Type: drs.AccessMethodTypeS3,
+					AccessUrl: &struct {
+						Headers *[]string `json:"headers,omitempty"`
+						Url     string    `json:"url"`
+					}{Url: rawURL},
+				}},
+			},
+		}
+	}
+	targetURL := "s3://bucket/path/image.offsets.json"
+	for _, obj := range []models.InternalObject{
+		objectWithURL("obj-a", targetURL, map[string][]string{"org": {"p1"}}),
+		objectWithURL("obj-b", targetURL, map[string][]string{"org": {"p2"}}),
+		objectWithURL("obj-c", targetURL, nil),
+		objectWithURL("obj-d", "s3://bucket/path/other.offsets.json", map[string][]string{"org": {"p1"}}),
+		objectWithURL("obj-e", targetURL, map[string][]string{"org": {"p1"}}),
+	} {
+		if err := db.CreateObject(ctx, &obj); err != nil {
+			t.Fatalf("CreateObject failed: %v", err)
+		}
+	}
+
+	ids, err := db.ListObjectIDsPageByURL(ctx, targetURL, "org", "p1", "", 10, 0, nil, false, false)
+	if err != nil {
+		t.Fatalf("ListObjectIDsPageByURL scope query failed: %v", err)
+	}
+	if !slices.Equal(ids, []string{"obj-a", "obj-e"}) {
+		t.Fatalf("unexpected scoped URL IDs: %v", ids)
+	}
+
+	ids, err = db.ListObjectIDsPageByURL(ctx, targetURL, "", "", "", 10, 0, []string{"/programs/org/projects/p2"}, false, true)
+	if err != nil {
+		t.Fatalf("ListObjectIDsPageByURL resource query failed: %v", err)
+	}
+	if !slices.Equal(ids, []string{"obj-b"}) {
+		t.Fatalf("unexpected resource-filtered URL IDs: %v", ids)
+	}
+
+	ids, err = db.ListObjectIDsPageByURL(ctx, targetURL, "", "", "", 10, 0, []string{"/programs/org/projects/p2"}, true, true)
+	if err != nil {
+		t.Fatalf("ListObjectIDsPageByURL unscoped resource query failed: %v", err)
+	}
+	if !slices.Equal(ids, []string{"obj-b", "obj-c"}) {
+		t.Fatalf("unexpected resource-filtered URL IDs with unscoped: %v", ids)
+	}
+
+	ids, err = db.ListObjectIDsPageByURL(ctx, targetURL, "", "", "obj-a", 1, 0, nil, false, false)
+	if err != nil {
+		t.Fatalf("ListObjectIDsPageByURL paged query failed: %v", err)
+	}
+	if !slices.Equal(ids, []string{"obj-b"}) {
+		t.Fatalf("unexpected paged URL IDs: %v", ids)
+	}
+}
+
 func TestSqliteDB_AuthorizedObjectLookupQueries(t *testing.T) {
 	ctx := context.Background()
 	db, err := NewSqliteDB(":memory:")

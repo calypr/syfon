@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"regexp"
+	"slices"
 	"testing"
 	"time"
 
@@ -330,3 +331,98 @@ func TestBulkUpdateAccessMethods(t *testing.T) {
 	}
 }
 
+func TestListObjectIDsPageByURL(t *testing.T) {
+	t.Run("scope and cursor", func(t *testing.T) {
+		pg, mock, rawDB := newMockPostgresDB(t)
+		defer rawDB.Close()
+
+		mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT DISTINCT o.id
+		FROM drs_object o
+		INNER JOIN drs_object_access_method am ON am.object_id = o.id
+		WHERE am.url = $1 AND EXISTS (
+			SELECT 1
+			FROM drs_object_controlled_access ca_scope
+			WHERE ca_scope.object_id = o.id AND ca_scope.resource = $2
+		) AND o.id > $3
+		ORDER BY o.id
+		LIMIT $4 OFFSET $5`)).
+			WithArgs("s3://bucket/path/image.offsets.json", "/organization/org/project/p1", "obj-a", 10, 2).
+			WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("obj-b").AddRow("obj-c"))
+
+		ids, err := pg.ListObjectIDsPageByURL(
+			context.Background(),
+			"s3://bucket/path/image.offsets.json",
+			"org",
+			"p1",
+			"obj-a",
+			10,
+			2,
+			nil,
+			false,
+			false,
+		)
+		if err != nil {
+			t.Fatalf("ListObjectIDsPageByURL returned error: %v", err)
+		}
+		if !slices.Equal(ids, []string{"obj-b", "obj-c"}) {
+			t.Fatalf("unexpected URL IDs: %v", ids)
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Fatalf("unmet expectations: %v", err)
+		}
+	})
+
+	t.Run("resource filter includes unscoped", func(t *testing.T) {
+		pg, mock, rawDB := newMockPostgresDB(t)
+		defer rawDB.Close()
+
+		mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT DISTINCT o.id
+		FROM drs_object o
+		INNER JOIN drs_object_access_method am ON am.object_id = o.id
+		WHERE am.url = $1 AND (
+			(
+				COALESCE(array_length($2::text[], 1), 0) > 0
+				AND EXISTS (
+					SELECT 1
+					FROM drs_object_controlled_access ca_auth
+					WHERE ca_auth.object_id = o.id AND ca_auth.resource = ANY($2)
+				)
+			) OR (
+				$3
+				AND NOT EXISTS (
+					SELECT 1
+					FROM drs_object_controlled_access ca_auth
+					WHERE ca_auth.object_id = o.id
+				)
+			)
+		)
+		ORDER BY o.id
+		LIMIT $4 OFFSET $5`)).
+			WithArgs("s3://bucket/path/image.offsets.json", sqlmock.AnyArg(), true, 5, 0).
+			WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("obj-b").AddRow("obj-c"))
+
+		ids, err := pg.ListObjectIDsPageByURL(
+			context.Background(),
+			"s3://bucket/path/image.offsets.json",
+			"",
+			"",
+			"",
+			5,
+			0,
+			[]string{"/programs/org/projects/p2"},
+			true,
+			true,
+		)
+		if err != nil {
+			t.Fatalf("ListObjectIDsPageByURL returned error: %v", err)
+		}
+		if !slices.Equal(ids, []string{"obj-b", "obj-c"}) {
+			t.Fatalf("unexpected URL IDs: %v", ids)
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Fatalf("unmet expectations: %v", err)
+		}
+	})
+}
