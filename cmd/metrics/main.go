@@ -3,10 +3,13 @@ package metricscmd
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
+	"time"
 
-	syclient "github.com/calypr/syfon/client"
-	"github.com/calypr/syfon/client/syfonclient"
+	syfonclient "github.com/calypr/syfon/client/services"
+	"github.com/calypr/syfon/cmd/cliauth"
+	"github.com/calypr/syfon/internal/models"
 	"github.com/spf13/cobra"
 )
 
@@ -22,17 +25,10 @@ var (
 	metricsSHA256       string
 	metricsUser         string
 	metricsGroupBy      string
+	metricsSortBy       string
+	metricsSortOrder    string
+	metricsLimit        int
 	metricsAllowStale   bool
-	metricsSyncStatus   string
-	metricsSyncLimit    int
-	metricsImported     int64
-	metricsMatched      int64
-	metricsAmbiguous    int64
-	metricsUnmatched    int64
-	metricsError        string
-	metricsToken        string
-	metricsUsername     string
-	metricsPassword     string
 )
 
 var Cmd = &cobra.Command{
@@ -65,53 +61,135 @@ var transfersBreakdownCmd = &cobra.Command{
 	Use:   "breakdown",
 	Short: "Group transfer attribution metrics",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		groupBy := strings.TrimSpace(metricsGroupBy)
-		switch groupBy {
-		case "", "scope", "user", "provider", "object":
-		default:
-			return fmt.Errorf("unsupported group-by %q", groupBy)
+		groupBy, err := normalizedBreakdownGroupBy(metricsGroupBy)
+		if err != nil {
+			return err
 		}
 		c, err := newMetricsClient(cmd)
 		if err != nil {
 			return err
 		}
-		resp, err := c.Metrics().TransferBreakdown(cmd.Context(), transferOptions())
+		opts := transferOptions()
+		opts.GroupBy = groupBy
+		resp, err := c.Metrics().TransferBreakdown(cmd.Context(), opts)
 		if err != nil {
 			return err
 		}
+		resp.GroupBy = groupBy
+		sortBy, order, err := normalizedBreakdownSort(metricsSortBy, metricsSortOrder, groupBy, opts.Direction)
+		if err != nil {
+			return err
+		}
+		sortTransferBreakdowns(resp.Data, sortBy, order)
+		resp.Data = limitedTransferBreakdowns(resp.Data, metricsLimit)
 		return writeJSON(cmd, resp)
 	},
 }
 
-var transfersSyncCmd = &cobra.Command{
-	Use:   "sync",
-	Short: "Record provider transfer sync status",
+type transferUsersReport struct {
+	Summary    models.TransferAttributionSummary `json:"summary"`
+	Users      []transferUserMetrics             `json:"users"`
+	Freshness  *models.TransferMetricsFreshness  `json:"freshness,omitempty"`
+	SortBy     string                            `json:"sort_by"`
+	SortOrder  string                            `json:"sort_order"`
+	TotalUsers int                               `json:"total_users"`
+}
+
+type transferUserMetrics struct {
+	User             string     `json:"user"`
+	ActorEmail       string     `json:"actor_email,omitempty"`
+	ActorSubject     string     `json:"actor_subject,omitempty"`
+	EventCount       int64      `json:"event_count"`
+	BytesRequested   int64      `json:"bytes_requested"`
+	BytesDownloaded  int64      `json:"bytes_downloaded"`
+	BytesUploaded    int64      `json:"bytes_uploaded"`
+	LastTransferTime *time.Time `json:"last_transfer_time,omitempty"`
+}
+
+var transfersUsersCmd = &cobra.Command{
+	Use:   "users",
+	Short: "Rank transfer activity by user",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		c, err := newMetricsClient(cmd)
 		if err != nil {
 			return err
 		}
-		runs, err := c.Metrics().RecordProviderTransferSync(cmd.Context(), syncOptions())
+		opts := transferOptions()
+		summary, err := c.Metrics().TransferSummary(cmd.Context(), opts)
 		if err != nil {
 			return err
 		}
-		return writeJSON(cmd, runs)
+		opts.GroupBy = "user"
+		breakdown, err := c.Metrics().TransferBreakdown(cmd.Context(), opts)
+		if err != nil {
+			return err
+		}
+		sortBy, order, err := normalizedBreakdownSort(metricsSortBy, metricsSortOrder, "user", opts.Direction)
+		if err != nil {
+			return err
+		}
+		sortTransferBreakdowns(breakdown.Data, sortBy, order)
+		breakdown.Data = limitedTransferBreakdowns(breakdown.Data, metricsLimit)
+		users := make([]transferUserMetrics, 0, len(breakdown.Data))
+		for _, item := range breakdown.Data {
+			users = append(users, transferUserMetrics{
+				User:             transferUserLabel(item),
+				ActorEmail:       item.ActorEmail,
+				ActorSubject:     item.ActorSubject,
+				EventCount:       item.EventCount,
+				BytesRequested:   item.BytesRequested,
+				BytesDownloaded:  item.BytesDownloaded,
+				BytesUploaded:    item.BytesUploaded,
+				LastTransferTime: item.LastTransferTime,
+			})
+		}
+		return writeJSON(cmd, transferUsersReport{
+			Summary:    summary,
+			Users:      users,
+			Freshness:  breakdown.Freshness,
+			SortBy:     sortBy,
+			SortOrder:  order,
+			TotalUsers: len(users),
+		})
 	},
 }
 
-var transfersSyncStatusCmd = &cobra.Command{
-	Use:   "sync-status",
-	Short: "List provider transfer sync status",
+type transferBillingReport struct {
+	Summary          models.TransferAttributionSummary     `json:"summary"`
+	StorageLocations []models.TransferAttributionBreakdown `json:"storage_locations"`
+	Files            []models.TransferAttributionBreakdown `json:"files"`
+}
+
+var transfersBillingCmd = &cobra.Command{
+	Use:   "billing",
+	Short: "Report transfer billing totals by storage location and file",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		c, err := newMetricsClient(cmd)
 		if err != nil {
 			return err
 		}
-		runs, err := c.Metrics().ProviderTransferSyncStatus(cmd.Context(), syncOptions())
+		opts := transferOptions()
+		summary, err := c.Metrics().TransferSummary(cmd.Context(), opts)
 		if err != nil {
 			return err
 		}
-		return writeJSON(cmd, runs)
+		providerOpts := opts
+		providerOpts.GroupBy = "provider"
+		storageLocations, err := c.Metrics().TransferBreakdown(cmd.Context(), providerOpts)
+		if err != nil {
+			return err
+		}
+		objectOpts := opts
+		objectOpts.GroupBy = "object"
+		files, err := c.Metrics().TransferBreakdown(cmd.Context(), objectOpts)
+		if err != nil {
+			return err
+		}
+		return writeJSON(cmd, transferBillingReport{
+			Summary:          summary,
+			StorageLocations: storageLocations.Data,
+			Files:            files.Data,
+		})
 	},
 }
 
@@ -119,50 +197,34 @@ func init() {
 	Cmd.AddCommand(transfersCmd)
 	transfersCmd.AddCommand(transfersSummaryCmd)
 	transfersCmd.AddCommand(transfersBreakdownCmd)
-	transfersCmd.AddCommand(transfersSyncCmd)
-	transfersCmd.AddCommand(transfersSyncStatusCmd)
+	transfersCmd.AddCommand(transfersBillingCmd)
+	transfersCmd.AddCommand(transfersUsersCmd)
 
-	for _, c := range []*cobra.Command{transfersSummaryCmd, transfersBreakdownCmd, transfersSyncCmd, transfersSyncStatusCmd} {
+	for _, c := range []*cobra.Command{transfersSummaryCmd, transfersBreakdownCmd, transfersBillingCmd, transfersUsersCmd} {
 		c.Flags().StringVar(&metricsOrganization, "organization", "", "Organization/program filter")
 		c.Flags().StringVar(&metricsProject, "project", "", "Project filter")
 		c.Flags().StringVar(&metricsFrom, "from", "", "RFC3339 start time filter")
 		c.Flags().StringVar(&metricsTo, "to", "", "RFC3339 end time filter")
 		c.Flags().StringVar(&metricsProvider, "provider", "", "Storage provider filter")
 		c.Flags().StringVar(&metricsBucket, "bucket", "", "Bucket filter")
-		c.Flags().StringVar(&metricsToken, "token", "", "Bearer token for Gen3-protected metrics")
-		c.Flags().StringVar(&metricsUsername, "username", "", "Basic auth username")
-		c.Flags().StringVar(&metricsPassword, "password", "", "Basic auth password")
 	}
-	for _, c := range []*cobra.Command{transfersSummaryCmd, transfersBreakdownCmd} {
+	for _, c := range []*cobra.Command{transfersSummaryCmd, transfersBreakdownCmd, transfersBillingCmd, transfersUsersCmd} {
 		c.Flags().StringVar(&metricsDirection, "direction", "", "Transfer direction filter: download or upload")
 		c.Flags().StringVar(&metricsReconcile, "reconciliation-status", "", "Provider reconciliation filter: matched, ambiguous, unmatched, or all")
 		c.Flags().StringVar(&metricsSHA256, "sha256", "", "SHA256 filter")
 		c.Flags().StringVar(&metricsUser, "user", "", "Actor email or subject filter")
 		c.Flags().BoolVar(&metricsAllowStale, "allow-stale", false, "Deprecated: metrics always return persisted data with freshness metadata")
 	}
-	transfersBreakdownCmd.Flags().StringVar(&metricsGroupBy, "group-by", "scope", "Breakdown grouping: scope, user, provider, or object")
-	transfersSyncCmd.Flags().StringVar(&metricsSyncStatus, "status", "pending", "Sync status to record: pending, completed, or failed")
-	transfersSyncCmd.Flags().Int64Var(&metricsImported, "imported-events", 0, "Provider events imported in this sync window")
-	transfersSyncCmd.Flags().Int64Var(&metricsMatched, "matched-events", 0, "Imported provider events matched to Syfon access grants")
-	transfersSyncCmd.Flags().Int64Var(&metricsAmbiguous, "ambiguous-events", 0, "Imported provider events with ambiguous attribution")
-	transfersSyncCmd.Flags().Int64Var(&metricsUnmatched, "unmatched-events", 0, "Imported provider events not matched to Syfon access grants")
-	transfersSyncCmd.Flags().StringVar(&metricsError, "error-message", "", "Error message for failed sync status")
-	transfersSyncStatusCmd.Flags().IntVar(&metricsSyncLimit, "limit", 100, "Maximum sync windows to return")
+	for _, c := range []*cobra.Command{transfersBreakdownCmd, transfersUsersCmd} {
+		c.Flags().StringVar(&metricsSortBy, "sort-by", "", "Sort rows by downloaded, uploaded, requested, events, last-transfer, or key")
+		c.Flags().StringVar(&metricsSortOrder, "sort-order", "desc", "Sort order: asc or desc")
+		c.Flags().IntVar(&metricsLimit, "limit", 0, "Limit the number of returned rows")
+	}
+	transfersBreakdownCmd.Flags().StringVar(&metricsGroupBy, "group-by", "user", "Breakdown grouping: user, scope, provider, or object")
 }
 
 func newMetricsClient(cmd *cobra.Command) (syfonclient.SyfonClient, error) {
-	serverURL, err := cmd.Flags().GetString("server")
-	if err != nil {
-		return nil, fmt.Errorf("get server flag: %w", err)
-	}
-	opts := []syclient.Option{}
-	if token := strings.TrimSpace(metricsToken); token != "" {
-		opts = append(opts, syclient.WithBearerToken(token))
-	}
-	if username := strings.TrimSpace(metricsUsername); username != "" {
-		opts = append(opts, syclient.WithBasicAuth(username, metricsPassword))
-	}
-	return syclient.New(serverURL, opts...)
+	return cliauth.NewServerClient(cmd)
 }
 
 func transferOptions() syfonclient.TransferMetricsOptions {
@@ -182,26 +244,145 @@ func transferOptions() syfonclient.TransferMetricsOptions {
 	}
 }
 
-func syncOptions() syfonclient.ProviderTransferSyncOptions {
-	return syfonclient.ProviderTransferSyncOptions{
-		Organization:    strings.TrimSpace(metricsOrganization),
-		ProjectID:       strings.TrimSpace(metricsProject),
-		Provider:        strings.TrimSpace(metricsProvider),
-		Bucket:          strings.TrimSpace(metricsBucket),
-		From:            strings.TrimSpace(metricsFrom),
-		To:              strings.TrimSpace(metricsTo),
-		Status:          strings.TrimSpace(metricsSyncStatus),
-		ImportedEvents:  metricsImported,
-		MatchedEvents:   metricsMatched,
-		AmbiguousEvents: metricsAmbiguous,
-		UnmatchedEvents: metricsUnmatched,
-		ErrorMessage:    strings.TrimSpace(metricsError),
-		Limit:           metricsSyncLimit,
-	}
-}
-
 func writeJSON(cmd *cobra.Command, v any) error {
 	enc := json.NewEncoder(cmd.OutOrStdout())
 	enc.SetIndent("", "  ")
 	return enc.Encode(v)
+}
+
+func normalizedBreakdownGroupBy(raw string) (string, error) {
+	groupBy := strings.ToLower(strings.TrimSpace(raw))
+	switch groupBy {
+	case "", "user":
+		return "user", nil
+	case "scope", "provider", "object":
+		return groupBy, nil
+	default:
+		return "", fmt.Errorf("unsupported group-by %q", raw)
+	}
+}
+
+func normalizedBreakdownSort(rawSortBy, rawOrder, groupBy, direction string) (string, string, error) {
+	sortBy := strings.ToLower(strings.TrimSpace(rawSortBy))
+	if sortBy == "" {
+		if groupBy == "user" {
+			if strings.EqualFold(strings.TrimSpace(direction), "upload") {
+				sortBy = "uploaded"
+			} else {
+				sortBy = "downloaded"
+			}
+		} else {
+			sortBy = "last-transfer"
+		}
+	}
+	switch sortBy {
+	case "downloaded", "bytes_downloaded":
+		sortBy = "downloaded"
+	case "uploaded", "bytes_uploaded":
+		sortBy = "uploaded"
+	case "requested", "bytes_requested":
+		sortBy = "requested"
+	case "events", "event_count":
+		sortBy = "events"
+	case "last-transfer", "last_transfer":
+		sortBy = "last-transfer"
+	case "key", "user":
+		sortBy = "key"
+	default:
+		return "", "", fmt.Errorf("unsupported sort-by %q", rawSortBy)
+	}
+
+	order := strings.ToLower(strings.TrimSpace(rawOrder))
+	switch order {
+	case "", "desc":
+		order = "desc"
+	case "asc":
+	default:
+		return "", "", fmt.Errorf("unsupported sort-order %q", rawOrder)
+	}
+	return sortBy, order, nil
+}
+
+func sortTransferBreakdowns(items []models.TransferAttributionBreakdown, sortBy, order string) {
+	desc := order != "asc"
+	sort.SliceStable(items, func(i, j int) bool {
+		left := items[i]
+		right := items[j]
+		cmp := compareTransferBreakdown(left, right, sortBy)
+		if cmp == 0 {
+			cmp = compareTransferBreakdown(left, right, "last-transfer")
+		}
+		if cmp == 0 {
+			cmp = strings.Compare(left.Key, right.Key)
+		}
+		if desc {
+			return cmp > 0
+		}
+		return cmp < 0
+	})
+}
+
+func compareTransferBreakdown(left, right models.TransferAttributionBreakdown, sortBy string) int {
+	switch sortBy {
+	case "downloaded":
+		return compareInt64(left.BytesDownloaded, right.BytesDownloaded)
+	case "uploaded":
+		return compareInt64(left.BytesUploaded, right.BytesUploaded)
+	case "requested":
+		return compareInt64(left.BytesRequested, right.BytesRequested)
+	case "events":
+		return compareInt64(left.EventCount, right.EventCount)
+	case "key":
+		return strings.Compare(left.Key, right.Key)
+	default:
+		return compareTimePtr(left.LastTransferTime, right.LastTransferTime)
+	}
+}
+
+func compareInt64(left, right int64) int {
+	switch {
+	case left > right:
+		return 1
+	case left < right:
+		return -1
+	default:
+		return 0
+	}
+}
+
+func compareTimePtr(left, right *time.Time) int {
+	switch {
+	case left == nil && right == nil:
+		return 0
+	case left == nil:
+		return -1
+	case right == nil:
+		return 1
+	case left.After(*right):
+		return 1
+	case left.Before(*right):
+		return -1
+	default:
+		return 0
+	}
+}
+
+func limitedTransferBreakdowns(items []models.TransferAttributionBreakdown, limit int) []models.TransferAttributionBreakdown {
+	if limit <= 0 || len(items) <= limit {
+		return items
+	}
+	return items[:limit]
+}
+
+func transferUserLabel(item models.TransferAttributionBreakdown) string {
+	if key := strings.TrimSpace(item.Key); key != "" {
+		return key
+	}
+	if email := strings.TrimSpace(item.ActorEmail); email != "" {
+		return email
+	}
+	if subject := strings.TrimSpace(item.ActorSubject); subject != "" {
+		return subject
+	}
+	return "(unattributed)"
 }

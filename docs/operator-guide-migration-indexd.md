@@ -3,7 +3,7 @@
 `syfon migrate` is a two-step offline workflow:
 
 1. `syfon migrate export` reads records from a source Gen3-mounted Indexd API and writes a local SQLite dump.
-2. `syfon migrate import` reads that dump and loads records into a target Syfon instance through Syfon's existing `/index/bulk` compatibility loader.
+2. `syfon migrate import` reads that dump and loads records into a target Syfon instance through Syfon's `controlled_access`-aware `/index/bulk` compatibility loader.
 
 No migration-specific Syfon server endpoint is required.
 
@@ -26,7 +26,8 @@ Useful export flags:
 
 - `--limit 1000`: canary export with only the first N unique records.
 - `--dry-run`: fetch, transform, and validate without writing the dump.
-- `--default-authz /programs/open`: apply authz only when a source record has no `authz`.
+- `--default-controlled-access /programs/open`: apply `controlled_access` only when a source record has no `authz`.
+- `--default-authz /programs/open`: deprecated alias for `--default-controlled-access`.
 - `--source-token`: use a raw bearer token instead of a Gen3 profile.
 
 ## Import
@@ -39,7 +40,7 @@ syfon migrate import \
   --batch-size 500
 ```
 
-The import command reads the SQLite dump in batches and posts to the existing `POST /index/bulk` endpoint.
+The import command reads the SQLite dump in batches and posts to the existing `POST /index/bulk` endpoint using `controlled_access` plus `access_methods`. It does not recreate legacy per-path `auth` maps.
 
 For a local Syfon server protected by local basic auth, use:
 
@@ -65,4 +66,4 @@ curl -s -X POST "https://target-gen3-with-syfon.example.org/index/bulk/hashes" \
 
 `GET /index` is paged. Use `limit` for the page size and `start=<last_did_from_previous_page>` for the next page; the server caps list pages at 1024 records.
 
-The migration preserves DIDs, hashes, URLs, file names, descriptions, versions, timestamps, and authz-derived organization/project access scopes for normal Indexd object records. Deprecated Indexd fields such as `baseid`, `rev`, `acl`, `metadata`, `urls_metadata`, `form`, and `uploader` are intentionally not loaded into Syfon.
+The migration preserves DIDs, hashes, URLs, file names, descriptions, versions, timestamps, access methods, and authz-derived `controlled_access` claims for normal Indexd object records. Deprecated Indexd fields such as `baseid`, `rev`, `acl`, `metadata`, `urls_metadata`, `form`, and `uploader` are intentionally not loaded into Syfon.

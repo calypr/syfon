@@ -10,7 +10,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const defaultSpecPath = "apigen/api/openapi.yaml"
+const defaultSpecPath = "apigen/openapi/openapi.yaml"
 
 var Cmd = &cobra.Command{
 	Use:   "validate",

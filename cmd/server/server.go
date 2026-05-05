@@ -10,7 +10,6 @@ import (
 	"syscall"
 	"time"
 
-	metricapi "github.com/calypr/syfon/internal/api/metrics"
 	"github.com/calypr/syfon/internal/api/middleware"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/config"
@@ -86,8 +85,8 @@ var Cmd = &cobra.Command{
 
 		applyCredentialEncryptionConfig(cfg)
 
-		// Load S3 Credentials from Config if present
-		if len(cfg.S3Credentials) > 0 {
+		// Load configured bucket credentials if present.
+		if len(cfg.Buckets) > 0 {
 			encryptionEnabled, encErr := crypto.CredentialEncryptionEnabled()
 			if encErr != nil {
 				fatal("invalid credential encryption configuration", "env", crypto.CredentialMasterKeyEnv, "err", encErr)
@@ -96,30 +95,24 @@ var Cmd = &cobra.Command{
 				fatal("s3 credential encryption key is required", "env", crypto.CredentialMasterKeyEnv)
 			}
 
-			logger.Info("loading configured s3 credentials", "count", len(cfg.S3Credentials))
-			// S3 credentials are encrypted before persistence and audited on read/write/delete/list.
-			for _, c := range cfg.S3Credentials {
+			logger.Info("loading configured bucket credentials", "count", len(cfg.Buckets))
+			// Bucket credentials are encrypted before persistence and audited on read/write/delete/list.
+			for _, c := range cfg.Buckets {
 				cred := &models.S3Credential{
-					Bucket:           c.Bucket,
-					Provider:         c.Provider,
-					Region:           c.Region,
-					AccessKey:        c.AccessKey,
-					SecretKey:        c.SecretKey,
-					Endpoint:         c.Endpoint,
-					BillingLogBucket: c.BillingLogBucket,
-					BillingLogPrefix: c.BillingLogPrefix,
-				}
-				if c.ProviderBillingLogsEnabled() {
-					if err := metricapi.ValidateProviderTransferLogSource(cmd.Context(), *cred); err != nil {
-						fatal("invalid provider billing log configuration", "bucket", c.Bucket, "err", err)
-					}
-				} else {
-					logger.Info("provider billing log validation disabled", "bucket", c.Bucket, "provider", c.Provider)
+					Bucket:    c.Bucket,
+					Provider:  c.Provider,
+					Region:    c.Region,
+					AccessKey: c.AccessKey,
+					SecretKey: c.SecretKey,
+					Endpoint:  c.Endpoint,
 				}
 				if err := database.SaveS3Credential(cmd.Context(), cred); err != nil {
 					logger.Error("failed to save s3 credential", "bucket", c.Bucket, "err", err)
 				}
 			}
+		}
+		if err := loadConfiguredBucketScopes(cmd.Context(), database, cfg.BucketScopes, logger); err != nil {
+			fatal("failed to load configured bucket scopes", "err", err)
 		}
 
 		// Init unified URL manager.
@@ -203,6 +196,31 @@ var Cmd = &cobra.Command{
 		}
 		logger.Info("server shutdown complete")
 	},
+}
+
+func loadConfiguredBucketScopes(ctx context.Context, database db.DatabaseInterface, scopes []config.BucketScopeConfig, logger *slog.Logger) error {
+	if len(scopes) == 0 {
+		return nil
+	}
+	logger.Info("loading configured bucket scopes", "count", len(scopes))
+	for i, scope := range scopes {
+		cred, err := database.GetS3Credential(ctx, scope.Bucket)
+		if err != nil {
+			return fmt.Errorf("bucket_scopes[%d] bucket=%s credential lookup failed: %w", i, scope.Bucket, err)
+		}
+		if cred == nil {
+			return fmt.Errorf("bucket_scopes[%d] bucket=%s credential not found", i, scope.Bucket)
+		}
+		if err := database.CreateBucketScope(ctx, &models.BucketScope{
+			Organization: scope.Organization,
+			ProjectID:    scope.ProjectID,
+			Bucket:       scope.Bucket,
+			PathPrefix:   scope.PathPrefix,
+		}); err != nil {
+			return fmt.Errorf("bucket_scopes[%d] org=%s project=%s bucket=%s: %w", i, scope.Organization, scope.ProjectID, scope.Bucket, err)
+		}
+	}
+	return nil
 }
 
 func applyCredentialEncryptionConfig(cfg *config.Config) {

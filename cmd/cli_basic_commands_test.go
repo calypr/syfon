@@ -23,12 +23,12 @@ func TestSyfonListAndRemoveCommands(t *testing.T) {
 	did := "11111111-1111-1111-1111-111111111111"
 	fileName := "README.md"
 	size := int64(123)
-	auth := internalapi.AuthPathMap{"syfon": {"e2e": {"s3://syfon-bucket/path/README.md"}}}
+	controlled := []string{"/programs/syfon/projects/e2e"}
 	rec := internalapi.InternalRecord{
-		Did:      did,
-		Auth:     &auth,
-		FileName: &fileName,
-		Size:     &size,
+		Did:              did,
+		ControlledAccess: &controlled,
+		FileName:         &fileName,
+		Size:             &size,
 	}
 	if _, err := c.Index().Create(context.Background(), rec); err != nil {
 		t.Fatalf("seed record: %v", err)
@@ -77,8 +77,9 @@ func TestSyfonDownloadDefaultsToRecordFilename(t *testing.T) {
 		t.Fatal(err)
 	}
 	did := "22222222-2222-2222-2222-222222222222"
+	recordName := "nested/path/README.md"
 	// Store record with explicit filename and a storage-root URL so download can resolve locally.
-	if err := c.Index().Upsert(context.Background(), did, "s3://syfon-bucket/source.txt", "README.md", int64(len(srcData)), "", map[string][]string{"syfon": {"e2e"}}); err != nil {
+	if err := c.Index().Upsert(context.Background(), did, "s3://syfon-bucket/source.txt", recordName, int64(len(srcData)), "", map[string][]string{"syfon": {"e2e"}}); err != nil {
 		t.Fatalf("seed record with file url: %v", err)
 	}
 
@@ -98,6 +99,9 @@ func TestSyfonDownloadDefaultsToRecordFilename(t *testing.T) {
 	if string(got) != string(srcData) {
 		t.Fatalf("downloaded data mismatch")
 	}
+	if _, err := os.Stat(filepath.Join(tmp, "nested")); !os.IsNotExist(err) {
+		t.Fatalf("expected nested path prefix to be ignored, stat err=%v", err)
+	}
 }
 
 func TestSyfonBucketListAndRemoveCommands(t *testing.T) {
@@ -114,10 +118,13 @@ func TestSyfonBucketListAndRemoveCommands(t *testing.T) {
 		Region:       stringPtr("us-east-1"),
 		AccessKey:    stringPtr("ak"),
 		SecretKey:    stringPtr("sk"),
-		Organization: "syfon",
-		ProjectId:    "e2e",
+		Organization: "cli-tests",
+		ProjectId:    "bucket-list",
 	}); err != nil {
 		t.Fatalf("seed bucket: %v", err)
+	}
+	if err := c.Index().Upsert(context.Background(), "bucket-visible-object", "s3://test-bucket-cli/visible.txt", "visible.txt", 7, "", map[string][]string{"cli-tests": {"bucket-list"}}); err != nil {
+		t.Fatalf("seed visible object: %v", err)
 	}
 
 	out, err := executeRootCommand(t, "--server", server.URL, "bucket", "list")
@@ -164,25 +171,25 @@ func TestSyfonBucketAddCredentialAndScopesCommands(t *testing.T) {
 
 	out, err = executeRootCommand(t,
 		"--server", server.URL,
-		"bucket", "add-organization", "syfon",
+		"bucket", "add-organization", "cli-tests",
 		"--path", "gs://test-bucket-cli/program-root",
 	)
 	if err != nil {
 		t.Fatalf("bucket add-organization failed: %v output=%s", err, out)
 	}
-	if !strings.Contains(out, "bucket organization scope configured: bucket=test-bucket-cli org=syfon") {
+	if !strings.Contains(out, "bucket organization scope configured: bucket=test-bucket-cli org=cli-tests") {
 		t.Fatalf("unexpected bucket add-organization output: %s", out)
 	}
 
 	out, err = executeRootCommand(t,
 		"--server", server.URL,
-		"bucket", "add-project", "syfon", "e2e",
+		"bucket", "add-project", "cli-tests", "bucket-cli",
 		"--path", "gs://test-bucket-cli/program-root/project-subpath",
 	)
 	if err != nil {
 		t.Fatalf("bucket add-project failed: %v output=%s", err, out)
 	}
-	if !strings.Contains(out, "bucket project scope configured: bucket=test-bucket-cli org=syfon project=e2e") {
+	if !strings.Contains(out, "bucket project scope configured: bucket=test-bucket-cli org=cli-tests project=bucket-cli") {
 		t.Fatalf("unexpected bucket add-project output: %s", out)
 	}
 }

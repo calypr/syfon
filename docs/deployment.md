@@ -19,10 +19,16 @@ Or via Make:
 make serve
 ```
 
-### Serve the docs
+### Build the docs
 
 ```bash
 make docs
+```
+
+### Serve the docs locally
+
+```bash
+make docs-serve
 ```
 
 ---
@@ -121,7 +127,9 @@ readinessProbe:
 ### `local` (development)
 
 - Works with SQLite.
-- Optional HTTP basic auth via `auth.basic.username/password` or `DRS_BASIC_AUTH_USER` / `DRS_BASIC_AUTH_PASSWORD`.
+- Requires HTTP basic auth via `auth.basic.username/password`, `DRS_BASIC_AUTH_USER` / `DRS_BASIC_AUTH_PASSWORD`, or CSV-backed local authorization.
+- Optional CSV-backed local authz via `auth.local_authz_csv` or `DRS_LOCAL_AUTHZ_CSV`.
+  If neither Basic Auth nor CSV auth is provided, config loading fails unless `auth.allow_unauthenticated: true` is explicitly set for development/testing.
 - No external auth service required.
 
 ### `gen3` (production)

@@ -13,6 +13,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blockblob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/sas"
+	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/db"
 	"github.com/calypr/syfon/internal/signer"
 	"github.com/google/uuid"
@@ -32,6 +33,14 @@ func NewAzureSigner(db db.CredentialStore) *AzureSigner {
 	return &AzureSigner{db: db}
 }
 
+func (s *AzureSigner) InvalidateBucket(bucket string) {
+	bucket = strings.TrimSpace(bucket)
+	if bucket == "" {
+		return
+	}
+	s.cache.Delete(bucket)
+}
+
 func (s *AzureSigner) SignURL(ctx context.Context, bucket, key string, opts signer.SignOptions) (string, error) {
 	creds, err := s.getCreds(ctx, bucket)
 	if err != nil {
@@ -48,7 +57,7 @@ func (s *AzureSigner) SignURL(ctx context.Context, bucket, key string, opts sign
 		method = opts.Method
 	}
 
-	return s.azureSignedURL(creds.ServiceURL, bucket, key, method, expiry, "", creds.SharedKey)
+	return s.azureSignedURL(creds.ServiceURL, bucket, key, method, expiry, "", opts.DownloadFilename, creds.SharedKey)
 }
 
 func (s *AzureSigner) SignDownloadPart(ctx context.Context, bucket, key string, start, end int64, opts signer.SignOptions) (string, error) {
@@ -63,7 +72,7 @@ func (s *AzureSigner) SignDownloadPart(ctx context.Context, bucket, key string, 
 	}
 
 	rangeStr := fmt.Sprintf("bytes=%d-%d", start, end)
-	return s.azureSignedURL(creds.ServiceURL, bucket, key, http.MethodGet, expiry, rangeStr, creds.SharedKey)
+	return s.azureSignedURL(creds.ServiceURL, bucket, key, http.MethodGet, expiry, rangeStr, opts.DownloadFilename, creds.SharedKey)
 }
 
 func (s *AzureSigner) InitMultipartUpload(ctx context.Context, bucket, key string) (string, error) {
@@ -76,7 +85,7 @@ func (s *AzureSigner) SignMultipartPart(ctx context.Context, bucket, key, upload
 		return "", err
 	}
 
-	signed, err := s.azureSignedURL(creds.ServiceURL, bucket, key, http.MethodPut, 15*time.Minute, "", creds.SharedKey)
+	signed, err := s.azureSignedURL(creds.ServiceURL, bucket, key, http.MethodPut, 15*time.Minute, "", "", creds.SharedKey)
 	if err != nil {
 		return "", err
 	}
@@ -152,7 +161,7 @@ func (s *AzureSigner) getCreds(ctx context.Context, bucket string) (*azureCreds,
 	return c, nil
 }
 
-func (s *AzureSigner) azureSignedURL(serviceURL string, bucketName string, key string, method string, expiry time.Duration, rangeStr string, sharedKey *azblob.SharedKeyCredential) (string, error) {
+func (s *AzureSigner) azureSignedURL(serviceURL string, bucketName string, key string, method string, expiry time.Duration, rangeStr string, downloadName string, sharedKey *azblob.SharedKeyCredential) (string, error) {
 	blobURL := s.azureBlobURL(serviceURL, bucketName, key)
 	now := time.Now().UTC()
 	perm := (&sas.BlobPermissions{Read: true}).String()
@@ -161,12 +170,13 @@ func (s *AzureSigner) azureSignedURL(serviceURL string, bucketName string, key s
 	}
 
 	qp, err := sas.BlobSignatureValues{
-		Protocol:      azureSASProtocol(serviceURL),
-		StartTime:     now.Add(-5 * time.Minute),
-		ExpiryTime:    now.Add(expiry),
-		Permissions:   perm,
-		ContainerName: bucketName,
-		BlobName:      strings.Trim(strings.TrimSpace(key), "/"),
+		Protocol:           azureSASProtocol(serviceURL),
+		StartTime:          now.Add(-5 * time.Minute),
+		ExpiryTime:         now.Add(expiry),
+		Permissions:        perm,
+		ContainerName:      bucketName,
+		BlobName:           strings.Trim(strings.TrimSpace(key), "/"),
+		ContentDisposition: common.ContentDispositionAttachment(downloadName),
 	}.SignWithSharedKey(sharedKey)
 	if err != nil {
 		return "", err

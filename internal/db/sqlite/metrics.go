@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	sycommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/models"
 )
@@ -95,11 +96,11 @@ func (db *SqliteDB) RecordTransferAttributionEvents(ctx context.Context, events 
 	defer tx.Rollback()
 	stmt, err := tx.PrepareContext(ctx, `
 		INSERT OR IGNORE INTO transfer_attribution_event (
-			event_id, access_grant_id, event_type, event_time, request_id, object_id, sha256, object_size,
+			event_id, access_grant_id, event_type, direction, event_time, request_id, object_id, sha256, object_size,
 			organization, project, access_id, provider, bucket, storage_url,
 			range_start, range_end, bytes_requested, bytes_completed,
 			actor_email, actor_subject, auth_mode, client_name, client_version, transfer_session_id
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		return err
@@ -118,8 +119,9 @@ func (db *SqliteDB) RecordTransferAttributionEvents(ctx context.Context, events 
 		}
 		ev.AccessGrantID = accessGrantIDFromEvent(ev)
 		ev.EventTime = when.UTC()
+		ev.Direction = normalizeTransferDirection(ev.Direction)
 		result, err := stmt.ExecContext(ctx,
-			ev.EventID, ev.AccessGrantID, ev.EventType, ev.EventTime, ev.RequestID, ev.ObjectID, ev.SHA256, ev.ObjectSize,
+			ev.EventID, ev.AccessGrantID, ev.EventType, ev.Direction, ev.EventTime, ev.RequestID, ev.ObjectID, ev.SHA256, ev.ObjectSize,
 			ev.Organization, ev.Project, ev.AccessID, ev.Provider, ev.Bucket, ev.StorageURL,
 			nullableInt64(ev.RangeStart), nullableInt64(ev.RangeEnd), ev.BytesRequested, ev.BytesCompleted,
 			ev.ActorEmail, ev.ActorSubject, ev.AuthMode, ev.ClientName, ev.ClientVersion, ev.TransferSessionID,
@@ -184,61 +186,6 @@ func (db *SqliteDB) RecordProviderTransferEvents(ctx context.Context, events []m
 	return tx.Commit()
 }
 
-func (db *SqliteDB) RecordProviderTransferSyncRuns(ctx context.Context, runs []models.ProviderTransferSyncRun) error {
-	if len(runs) == 0 {
-		return nil
-	}
-	tx, err := db.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	stmt, err := tx.PrepareContext(ctx, `
-		INSERT OR REPLACE INTO provider_transfer_sync_run (
-			sync_id, provider, bucket, organization, project, from_time, to_time, status,
-			requested_at, started_at, completed_at, imported_events, matched_events,
-			ambiguous_events, unmatched_events, error_message
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`)
-	if err != nil {
-		return err
-	}
-	defer stmt.Close()
-	for _, run := range runs {
-		if run.SyncID == "" {
-			continue
-		}
-		if _, err := stmt.ExecContext(ctx,
-			run.SyncID, run.Provider, run.Bucket, run.Organization, run.Project, run.From.UTC(), run.To.UTC(), run.Status,
-			run.RequestedAt.UTC(), nullableTime(run.StartedAt), nullableTime(run.CompletedAt), run.ImportedEvents, run.MatchedEvents,
-			run.AmbiguousEvents, run.UnmatchedEvents, run.ErrorMessage,
-		); err != nil {
-			return err
-		}
-	}
-	return tx.Commit()
-}
-
-func (db *SqliteDB) ListProviderTransferSyncRuns(ctx context.Context, filter models.TransferAttributionFilter, limit int) ([]models.ProviderTransferSyncRun, error) {
-	if limit <= 0 || limit > 1000 {
-		limit = 100
-	}
-	where, args := providerSyncWhere(filter)
-	args = append(args, limit)
-	rows, err := db.db.QueryContext(ctx, `
-		SELECT sync_id, provider, bucket, organization, project, from_time, to_time, status,
-			requested_at, started_at, completed_at, imported_events, matched_events,
-			ambiguous_events, unmatched_events, error_message
-		FROM provider_transfer_sync_run`+where+`
-		ORDER BY requested_at DESC, sync_id ASC
-		LIMIT ?`, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	return scanProviderSyncRuns(rows)
-}
-
 func (db *SqliteDB) reconcileProviderTransferEvent(ctx context.Context, tx *sql.Tx, ev models.ProviderTransferEvent) (models.ProviderTransferEvent, error) {
 	ev.Direction = normalizeProviderDirection(ev.Direction, ev.HTTPMethod)
 	ev.Provider = strings.TrimSpace(ev.Provider)
@@ -272,18 +219,18 @@ func (db *SqliteDB) reconcileProviderTransferEvent(ctx context.Context, tx *sql.
 }
 
 func (db *SqliteDB) GetTransferAttributionSummary(ctx context.Context, filter models.TransferAttributionFilter) (models.TransferAttributionSummary, error) {
-	where, args := providerTransferWhere(filter)
+	where, args := transferAttributionWhere(filter)
 	var out models.TransferAttributionSummary
 	err := db.db.QueryRowContext(ctx, `
 		SELECT
 			COUNT(*),
-			0,
+			COALESCE(SUM(CASE WHEN event_type = 'access_issued' THEN 1 ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN direction = 'download' THEN 1 ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN direction = 'upload' THEN 1 ELSE 0 END), 0),
-			COALESCE(SUM(bytes_transferred), 0),
-			COALESCE(SUM(CASE WHEN direction = 'download' THEN bytes_transferred ELSE 0 END), 0),
-			COALESCE(SUM(CASE WHEN direction = 'upload' THEN bytes_transferred ELSE 0 END), 0)
-		FROM provider_transfer_event`+where, args...).Scan(
+			COALESCE(SUM(bytes_requested), 0),
+			COALESCE(SUM(CASE WHEN direction = 'download' THEN bytes_requested ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN direction = 'upload' THEN bytes_requested ELSE 0 END), 0)
+		FROM transfer_attribution_event`+where, args...).Scan(
 		&out.EventCount,
 		&out.AccessIssuedCount,
 		&out.DownloadEventCount,
@@ -296,16 +243,63 @@ func (db *SqliteDB) GetTransferAttributionSummary(ctx context.Context, filter mo
 }
 
 func (db *SqliteDB) GetTransferAttributionBreakdown(ctx context.Context, filter models.TransferAttributionFilter, groupBy string) ([]models.TransferAttributionBreakdown, error) {
-	keyExpr, selectExpr := providerTransferGroupExpr(groupBy)
-	where, args := providerTransferWhere(filter)
+	keyExpr, selectExpr := transferAttributionGroupExpr(groupBy)
+	where, args := transferAttributionWhere(filter)
 	query := fmt.Sprintf(`
 		SELECT %s,
 			COUNT(*),
-			COALESCE(SUM(bytes_transferred), 0),
-			COALESCE(SUM(CASE WHEN direction = 'download' THEN bytes_transferred ELSE 0 END), 0),
-			COALESCE(SUM(CASE WHEN direction = 'upload' THEN bytes_transferred ELSE 0 END), 0),
+			COALESCE(SUM(bytes_requested), 0),
+			COALESCE(SUM(CASE WHEN direction = 'download' THEN bytes_requested ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN direction = 'upload' THEN bytes_requested ELSE 0 END), 0),
 			MAX(event_time)
-		FROM provider_transfer_event%s
+		FROM transfer_attribution_event%s
+		GROUP BY %s
+		ORDER BY MAX(event_time) DESC, key ASC
+		LIMIT 1000
+	`, selectExpr, where, keyExpr)
+	rows, err := db.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanTransferAttributionBreakdown(rows)
+}
+
+func (db *SqliteDB) GetTransferAttributionSummaryByResources(ctx context.Context, filter models.TransferAttributionFilter, resources []string) (models.TransferAttributionSummary, error) {
+	where, args := transferAttributionWhereByResources(filter, resources)
+	var out models.TransferAttributionSummary
+	err := db.db.QueryRowContext(ctx, `
+		SELECT
+			COUNT(*),
+			COALESCE(SUM(CASE WHEN event_type = 'access_issued' THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN direction = 'download' THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN direction = 'upload' THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(bytes_requested), 0),
+			COALESCE(SUM(CASE WHEN direction = 'download' THEN bytes_requested ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN direction = 'upload' THEN bytes_requested ELSE 0 END), 0)
+		FROM transfer_attribution_event`+where, args...).Scan(
+		&out.EventCount,
+		&out.AccessIssuedCount,
+		&out.DownloadEventCount,
+		&out.UploadEventCount,
+		&out.BytesRequested,
+		&out.BytesDownloaded,
+		&out.BytesUploaded,
+	)
+	return out, err
+}
+
+func (db *SqliteDB) GetTransferAttributionBreakdownByResources(ctx context.Context, filter models.TransferAttributionFilter, groupBy string, resources []string) ([]models.TransferAttributionBreakdown, error) {
+	keyExpr, selectExpr := transferAttributionGroupExpr(groupBy)
+	where, args := transferAttributionWhereByResources(filter, resources)
+	query := fmt.Sprintf(`
+		SELECT %s,
+			COUNT(*),
+			COALESCE(SUM(bytes_requested), 0),
+			COALESCE(SUM(CASE WHEN direction = 'download' THEN bytes_requested ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN direction = 'upload' THEN bytes_requested ELSE 0 END), 0),
+			MAX(event_time)
+		FROM transfer_attribution_event%s
 		GROUP BY %s
 		ORDER BY MAX(event_time) DESC, key ASC
 		LIMIT 1000
@@ -361,6 +355,49 @@ func (db *SqliteDB) GetFileUsage(ctx context.Context, objectID string) (*models.
 	return &usage, nil
 }
 
+func (db *SqliteDB) ListFileUsageByObjectIDs(ctx context.Context, ids []string) ([]models.FileUsage, error) {
+	if len(ids) == 0 {
+		return []models.FileUsage{}, nil
+	}
+	if err := db.flushObjectUsageEvents(ctx); err != nil {
+		return nil, err
+	}
+
+	out := make([]models.FileUsage, 0, len(ids))
+	for start := 0; start < len(ids); start += sqliteMaxParams {
+		end := start + sqliteMaxParams
+		if end > len(ids) {
+			end = len(ids)
+		}
+		chunk := ids[start:end]
+		args := make([]any, 0, len(chunk))
+		for _, id := range chunk {
+			args = append(args, id)
+		}
+		rows, err := db.db.QueryContext(ctx, `
+			SELECT o.id, o.name, o.size,
+				COALESCE(u.upload_count, 0),
+				COALESCE(u.download_count, 0),
+				u.last_upload_time,
+				u.last_download_time
+			FROM drs_object o
+			LEFT JOIN object_usage u ON u.object_id = o.id
+			WHERE o.id IN (`+makePlaceholders(len(chunk))+`)
+			ORDER BY o.id
+		`, args...)
+		if err != nil {
+			return nil, err
+		}
+		usages, err := scanFileUsageRows(rows, len(chunk))
+		rows.Close()
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, usages...)
+	}
+	return out, nil
+}
+
 func (db *SqliteDB) ListFileUsage(ctx context.Context, limit, offset int, inactiveSince *time.Time) ([]models.FileUsage, error) {
 	if err := db.flushObjectUsageEvents(ctx); err != nil {
 		return nil, err
@@ -398,7 +435,35 @@ func (db *SqliteDB) ListFileUsage(ctx context.Context, limit, offset int, inacti
 	}
 	defer rows.Close()
 
-	out := make([]models.FileUsage, 0, limit)
+	return scanFileUsageRows(rows, limit)
+}
+
+func (db *SqliteDB) ListFileUsagePageByScope(ctx context.Context, organization, project string, limit, offset int, inactiveSince *time.Time) ([]models.FileUsage, error) {
+	resource, err := sycommon.ResourcePath(strings.TrimSpace(organization), strings.TrimSpace(project))
+	if err != nil {
+		return nil, err
+	}
+	return db.listScopedFileUsagePage(ctx, []string{resource}, false, limit, offset, inactiveSince)
+}
+
+func (db *SqliteDB) ListFileUsagePageByResources(ctx context.Context, resources []string, includeUnscoped bool, limit, offset int, inactiveSince *time.Time) ([]models.FileUsage, error) {
+	return db.listScopedFileUsagePage(ctx, resources, includeUnscoped, limit, offset, inactiveSince)
+}
+
+func (db *SqliteDB) GetFileUsageSummaryByScope(ctx context.Context, organization, project string, inactiveSince *time.Time) (models.FileUsageSummary, error) {
+	resource, err := sycommon.ResourcePath(strings.TrimSpace(organization), strings.TrimSpace(project))
+	if err != nil {
+		return models.FileUsageSummary{}, err
+	}
+	return db.getScopedFileUsageSummary(ctx, []string{resource}, false, inactiveSince)
+}
+
+func (db *SqliteDB) GetFileUsageSummaryByResources(ctx context.Context, resources []string, includeUnscoped bool, inactiveSince *time.Time) (models.FileUsageSummary, error) {
+	return db.getScopedFileUsageSummary(ctx, resources, includeUnscoped, inactiveSince)
+}
+
+func scanFileUsageRows(rows *sql.Rows, capacity int) ([]models.FileUsage, error) {
+	out := make([]models.FileUsage, 0, capacity)
 	for rows.Next() {
 		var usage models.FileUsage
 		var lastUpload sql.NullTime
@@ -425,7 +490,119 @@ func (db *SqliteDB) ListFileUsage(ctx context.Context, limit, offset int, inacti
 		usage.LastAccessTime = latestTime(usage.LastUploadTime, usage.LastDownloadTime)
 		out = append(out, usage)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 	return out, nil
+}
+
+func (db *SqliteDB) listScopedFileUsagePage(ctx context.Context, resources []string, includeUnscoped bool, limit, offset int, inactiveSince *time.Time) ([]models.FileUsage, error) {
+	if err := db.flushObjectUsageEvents(ctx); err != nil {
+		return nil, err
+	}
+	if limit <= 0 {
+		return []models.FileUsage{}, nil
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	resources = sycommon.NormalizeAccessResources(resources)
+	if len(resources) == 0 && !includeUnscoped {
+		return []models.FileUsage{}, nil
+	}
+
+	query, args := sqliteScopedFileUsageQuery(resources, includeUnscoped, inactiveSince, false)
+	query += ` ORDER BY COALESCE(u.last_download_time, '1970-01-01T00:00:00Z') ASC, o.id ASC LIMIT ? OFFSET ?`
+	args = append(args, limit, offset)
+	rows, err := db.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanFileUsageRows(rows, limit)
+}
+
+func (db *SqliteDB) getScopedFileUsageSummary(ctx context.Context, resources []string, includeUnscoped bool, inactiveSince *time.Time) (models.FileUsageSummary, error) {
+	if err := db.flushObjectUsageEvents(ctx); err != nil {
+		return models.FileUsageSummary{}, err
+	}
+	resources = sycommon.NormalizeAccessResources(resources)
+	if len(resources) == 0 && !includeUnscoped {
+		return models.FileUsageSummary{}, nil
+	}
+
+	query, args := sqliteScopedFileUsageQuery(resources, includeUnscoped, inactiveSince, true)
+	var summary models.FileUsageSummary
+	if err := db.db.QueryRowContext(ctx, query, args...).Scan(
+		&summary.TotalFiles,
+		&summary.TotalUploads,
+		&summary.TotalDownloads,
+		&summary.InactiveFileCount,
+	); err != nil {
+		return models.FileUsageSummary{}, err
+	}
+	return summary, nil
+}
+
+func sqliteScopedFileUsageQuery(resources []string, includeUnscoped bool, inactiveSince *time.Time, summary bool) (string, []any) {
+	args := make([]any, 0, len(resources)+2)
+	parts := make([]string, 0, 2)
+	if len(resources) > 0 {
+		placeholders := make([]string, 0, len(resources))
+		for _, resource := range resources {
+			args = append(args, resource)
+			placeholders = append(placeholders, "?")
+		}
+		parts = append(parts, `EXISTS (
+			SELECT 1
+			FROM drs_object_controlled_access ca
+			WHERE ca.object_id = o.id AND ca.resource IN (`+strings.Join(placeholders, ",")+`)
+		)`)
+	}
+	if includeUnscoped {
+		parts = append(parts, `NOT EXISTS (
+			SELECT 1
+			FROM drs_object_controlled_access ca
+			WHERE ca.object_id = o.id
+		)`)
+	}
+
+	var selectClause string
+	if summary {
+		if inactiveSince != nil {
+			args = append(args, inactiveSince.UTC())
+			selectClause = `
+		SELECT
+			COUNT(o.id) AS total_files,
+			COALESCE(SUM(COALESCE(u.upload_count, 0)), 0) AS total_uploads,
+			COALESCE(SUM(COALESCE(u.download_count, 0)), 0) AS total_downloads,
+			COALESCE(SUM(CASE WHEN u.last_download_time IS NULL OR u.last_download_time < ? THEN 1 ELSE 0 END), 0) AS inactive_files`
+		} else {
+			selectClause = `
+		SELECT
+			COUNT(o.id) AS total_files,
+			COALESCE(SUM(COALESCE(u.upload_count, 0)), 0) AS total_uploads,
+			COALESCE(SUM(COALESCE(u.download_count, 0)), 0) AS total_downloads,
+			0 AS inactive_files`
+		}
+	} else {
+		selectClause = `
+		SELECT o.id, o.name, o.size,
+			COALESCE(u.upload_count, 0),
+			COALESCE(u.download_count, 0),
+			u.last_upload_time,
+			u.last_download_time`
+	}
+
+	query := selectClause + `
+		FROM drs_object o
+		LEFT JOIN object_usage u ON u.object_id = o.id
+		WHERE ((` + strings.Join(parts, " OR ") + `))`
+	if !summary && inactiveSince != nil {
+		args = append(args, inactiveSince.UTC())
+		query += ` AND (u.last_download_time IS NULL OR u.last_download_time < ?)`
+	}
+	return query, args
 }
 
 func (db *SqliteDB) GetFileUsageSummary(ctx context.Context, inactiveSince *time.Time) (models.FileUsageSummary, error) {
@@ -515,7 +692,7 @@ func (db *SqliteDB) backfillAccessGrants(ctx context.Context) error {
 	defer tx.Rollback()
 
 	rows, err := tx.QueryContext(ctx, `
-		SELECT event_id, access_grant_id, event_type, event_time, request_id, object_id, sha256, object_size,
+		SELECT event_id, access_grant_id, event_type, direction, event_time, request_id, object_id, sha256, object_size,
 			organization, project, access_id, provider, bucket, storage_url, range_start, range_end,
 			bytes_requested, bytes_completed, actor_email, actor_subject, auth_mode, client_name, client_version,
 			transfer_session_id
@@ -531,7 +708,7 @@ func (db *SqliteDB) backfillAccessGrants(ctx context.Context) error {
 	for rows.Next() {
 		var ev models.TransferAttributionEvent
 		if err := rows.Scan(
-			&ev.EventID, &ev.AccessGrantID, &ev.EventType, &ev.EventTime, &ev.RequestID, &ev.ObjectID, &ev.SHA256, &ev.ObjectSize,
+			&ev.EventID, &ev.AccessGrantID, &ev.EventType, &ev.Direction, &ev.EventTime, &ev.RequestID, &ev.ObjectID, &ev.SHA256, &ev.ObjectSize,
 			&ev.Organization, &ev.Project, &ev.AccessID, &ev.Provider, &ev.Bucket, &ev.StorageURL, &ev.RangeStart, &ev.RangeEnd,
 			&ev.BytesRequested, &ev.BytesCompleted, &ev.ActorEmail, &ev.ActorSubject, &ev.AuthMode, &ev.ClientName, &ev.ClientVersion,
 			&ev.TransferSessionID,
@@ -617,78 +794,6 @@ func accessGrantIDFromEvent(ev models.TransferAttributionEvent) string {
 	}
 	sum := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
 	return hex.EncodeToString(sum[:])
-}
-
-func providerSyncWhere(filter models.TransferAttributionFilter) (string, []any) {
-	parts := make([]string, 0)
-	args := make([]any, 0)
-	add := func(clause string, value any) {
-		parts = append(parts, clause)
-		args = append(args, value)
-	}
-	if strings.TrimSpace(filter.Organization) != "" {
-		add("organization = ?", strings.TrimSpace(filter.Organization))
-	}
-	if strings.TrimSpace(filter.Project) != "" {
-		add("project = ?", strings.TrimSpace(filter.Project))
-	}
-	if strings.TrimSpace(filter.Provider) != "" {
-		add("provider = ?", strings.TrimSpace(filter.Provider))
-	}
-	if strings.TrimSpace(filter.Bucket) != "" {
-		add("bucket = ?", strings.TrimSpace(filter.Bucket))
-	}
-	if filter.From != nil {
-		add("to_time >= ?", filter.From.UTC())
-	}
-	if filter.To != nil {
-		add("from_time <= ?", filter.To.UTC())
-	}
-	if len(parts) == 0 {
-		return "", args
-	}
-	return " WHERE " + strings.Join(parts, " AND "), args
-}
-
-func scanProviderSyncRuns(rows transferRows) ([]models.ProviderTransferSyncRun, error) {
-	out := make([]models.ProviderTransferSyncRun, 0)
-	for rows.Next() {
-		var run models.ProviderTransferSyncRun
-		var started, completed sql.NullTime
-		if err := rows.Scan(
-			&run.SyncID,
-			&run.Provider,
-			&run.Bucket,
-			&run.Organization,
-			&run.Project,
-			&run.From,
-			&run.To,
-			&run.Status,
-			&run.RequestedAt,
-			&started,
-			&completed,
-			&run.ImportedEvents,
-			&run.MatchedEvents,
-			&run.AmbiguousEvents,
-			&run.UnmatchedEvents,
-			&run.ErrorMessage,
-		); err != nil {
-			return nil, err
-		}
-		run.From = run.From.UTC()
-		run.To = run.To.UTC()
-		run.RequestedAt = run.RequestedAt.UTC()
-		if started.Valid {
-			t := started.Time.UTC()
-			run.StartedAt = &t
-		}
-		if completed.Valid {
-			t := completed.Time.UTC()
-			run.CompletedAt = &t
-		}
-		out = append(out, run)
-	}
-	return out, rows.Err()
 }
 
 func sqliteUpsertAccessGrant(ctx context.Context, tx *sql.Tx, ev models.TransferAttributionEvent) error {
@@ -873,6 +978,18 @@ func transferAttributionWhere(filter models.TransferAttributionFilter) (string, 
 	if strings.TrimSpace(filter.EventType) != "" && strings.TrimSpace(filter.EventType) != "all" {
 		add("event_type = ?", strings.TrimSpace(filter.EventType))
 	}
+	direction := strings.TrimSpace(filter.Direction)
+	if direction == "" {
+		switch strings.TrimSpace(filter.EventType) {
+		case models.ProviderTransferDirectionDownload:
+			direction = models.ProviderTransferDirectionDownload
+		case models.ProviderTransferDirectionUpload:
+			direction = models.ProviderTransferDirectionUpload
+		}
+	}
+	if direction != "" && direction != "all" {
+		add("direction = ?", direction)
+	}
 	if filter.From != nil {
 		add("event_time >= ?", filter.From.UTC())
 	}
@@ -897,6 +1014,63 @@ func transferAttributionWhere(filter models.TransferAttributionFilter) (string, 
 		return "", args
 	}
 	return " WHERE " + strings.Join(parts, " AND "), args
+}
+
+func transferAttributionWhereByResources(filter models.TransferAttributionFilter, resources []string) (string, []any) {
+	where, args := transferAttributionWhere(filter)
+	clause, clauseArgs := sqliteTransferResourceClause(resources)
+	if clause == "" {
+		if where == "" {
+			return " WHERE 1 = 0", args
+		}
+		return where + " AND 1 = 0", args
+	}
+	if where == "" {
+		return " WHERE " + clause, append(args, clauseArgs...)
+	}
+	return where + " AND (" + clause + ")", append(args, clauseArgs...)
+}
+
+func sqliteTransferResourceClause(resources []string) (string, []any) {
+	resources = sycommon.NormalizeAccessResources(resources)
+	if len(resources) == 0 {
+		return "", nil
+	}
+
+	orgOnly := make([]string, 0)
+	orgSeen := make(map[string]struct{})
+	projectClauses := make([]string, 0)
+	args := make([]any, 0, len(resources)*2)
+	for _, resource := range resources {
+		org, project, ok := sycommon.ResourceScope(resource)
+		if !ok {
+			continue
+		}
+		if project == "" {
+			if _, exists := orgSeen[org]; exists {
+				continue
+			}
+			orgSeen[org] = struct{}{}
+			orgOnly = append(orgOnly, org)
+			continue
+		}
+		projectClauses = append(projectClauses, "(organization = ? AND project = ?)")
+		args = append(args, org, project)
+	}
+
+	clauses := make([]string, 0, 2)
+	if len(orgOnly) > 0 {
+		placeholders := make([]string, 0, len(orgOnly))
+		for _, org := range orgOnly {
+			placeholders = append(placeholders, "?")
+			args = append(args, org)
+		}
+		clauses = append(clauses, "organization IN ("+strings.Join(placeholders, ",")+")")
+	}
+	if len(projectClauses) > 0 {
+		clauses = append(clauses, strings.Join(projectClauses, " OR "))
+	}
+	return strings.Join(clauses, " OR "), args
 }
 
 func providerTransferWhere(filter models.TransferAttributionFilter) (string, []any) {
@@ -960,7 +1134,7 @@ func providerTransferWhere(filter models.TransferAttributionFilter) (string, []a
 func providerTransferGroupExpr(groupBy string) (string, string) {
 	switch strings.ToLower(strings.TrimSpace(groupBy)) {
 	case "user":
-		return "COALESCE(NULLIF(actor_email, ''), actor_subject)", "COALESCE(NULLIF(actor_email, ''), actor_subject) AS key, '' AS organization, '' AS project, '' AS provider, '' AS bucket, '' AS sha256, actor_email, actor_subject"
+		return "COALESCE(NULLIF(actor_email, ''), actor_subject), actor_email, actor_subject", "COALESCE(NULLIF(actor_email, ''), actor_subject) AS key, '' AS organization, '' AS project, '' AS provider, '' AS bucket, '' AS sha256, actor_email, actor_subject"
 	case "provider":
 		return "provider, bucket", "provider || ':' || bucket AS key, '' AS organization, '' AS project, provider, bucket, '' AS sha256, '' AS actor_email, '' AS actor_subject"
 	case "object":
@@ -973,13 +1147,22 @@ func providerTransferGroupExpr(groupBy string) (string, string) {
 func transferAttributionGroupExpr(groupBy string) (string, string) {
 	switch strings.ToLower(strings.TrimSpace(groupBy)) {
 	case "user":
-		return "COALESCE(NULLIF(actor_email, ''), actor_subject)", "COALESCE(NULLIF(actor_email, ''), actor_subject) AS key, '' AS organization, '' AS project, '' AS provider, '' AS bucket, '' AS sha256, actor_email, actor_subject"
+		return "COALESCE(NULLIF(actor_email, ''), actor_subject), actor_email, actor_subject", "COALESCE(NULLIF(actor_email, ''), actor_subject) AS key, '' AS organization, '' AS project, '' AS provider, '' AS bucket, '' AS sha256, actor_email, actor_subject"
 	case "provider":
 		return "provider, bucket", "provider || ':' || bucket AS key, '' AS organization, '' AS project, provider, bucket, '' AS sha256, '' AS actor_email, '' AS actor_subject"
 	case "object":
 		return "sha256", "sha256 AS key, '' AS organization, '' AS project, '' AS provider, '' AS bucket, sha256, '' AS actor_email, '' AS actor_subject"
 	default:
 		return "organization, project", "organization || '/' || project AS key, organization, project, '' AS provider, '' AS bucket, '' AS sha256, '' AS actor_email, '' AS actor_subject"
+	}
+}
+
+func normalizeTransferDirection(direction string) string {
+	switch strings.ToLower(strings.TrimSpace(direction)) {
+	case models.ProviderTransferDirectionUpload:
+		return models.ProviderTransferDirectionUpload
+	default:
+		return models.ProviderTransferDirectionDownload
 	}
 }
 

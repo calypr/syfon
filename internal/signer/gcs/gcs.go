@@ -1,7 +1,6 @@
 package gcs
 
 import (
-	"github.com/calypr/syfon/internal/models"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -13,7 +12,9 @@ import (
 	"time"
 
 	"cloud.google.com/go/storage"
+	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/db"
+	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/signer"
 	"github.com/google/uuid"
 	"google.golang.org/api/option"
@@ -26,6 +27,14 @@ type GCSSigner struct {
 
 func NewGCSSigner(db db.CredentialStore) *GCSSigner {
 	return &GCSSigner{db: db}
+}
+
+func (s *GCSSigner) InvalidateBucket(bucket string) {
+	bucket = strings.TrimSpace(bucket)
+	if bucket == "" {
+		return
+	}
+	s.cache.Delete(bucket)
 }
 
 func (s *GCSSigner) SignURL(ctx context.Context, bucket, key string, opts signer.SignOptions) (string, error) {
@@ -47,7 +56,7 @@ func (s *GCSSigner) SignURL(ctx context.Context, bucket, key string, opts signer
 		method = opts.Method
 	}
 
-	return s.gcsSignedURL(bucket, key, method, expiry, "", cred)
+	return s.gcsSignedURL(bucket, key, method, expiry, "", opts.DownloadFilename, cred)
 }
 
 func (s *GCSSigner) SignDownloadPart(ctx context.Context, bucket, key string, start, end int64, opts signer.SignOptions) (string, error) {
@@ -65,7 +74,7 @@ func (s *GCSSigner) SignDownloadPart(ctx context.Context, bucket, key string, st
 	}
 
 	rangeStr := fmt.Sprintf("bytes=%d-%d", start, end)
-	return s.gcsSignedURL(bucket, key, http.MethodGet, expiry, rangeStr, cred)
+	return s.gcsSignedURL(bucket, key, http.MethodGet, expiry, rangeStr, opts.DownloadFilename, cred)
 }
 
 func (s *GCSSigner) InitMultipartUpload(ctx context.Context, bucket, key string) (string, error) {
@@ -82,7 +91,7 @@ func (s *GCSSigner) SignMultipartPart(ctx context.Context, bucket, key, uploadID
 	}
 
 	partKey := signer.MultipartPartObjectKey(key, uploadID, partNumber)
-	return s.gcsSignedURL(bucket, partKey, http.MethodPut, 15*time.Minute, "", cred)
+	return s.gcsSignedURL(bucket, partKey, http.MethodPut, 15*time.Minute, "", "", cred)
 }
 
 func (s *GCSSigner) CompleteMultipartUpload(ctx context.Context, bucket, key, uploadID string, parts []signer.MultipartPart) error {
@@ -103,13 +112,15 @@ func (s *GCSSigner) CompleteMultipartUpload(ctx context.Context, bucket, key, up
 	}
 
 	for _, k := range append(partKeys, tempKeys...) {
-		_ = client.Bucket(bucket).Object(k).Delete(ctx)
+		if err := client.Bucket(bucket).Object(k).Delete(ctx); err != nil {
+			return fmt.Errorf("delete multipart component %s: %w", k, err)
+		}
 	}
 	return nil
 }
 
-func (s *GCSSigner) gcsSignedURL(bucket, key, method string, expiry time.Duration, rangeStr string, cred *models.S3Credential) (string, error) {
-	if endpointURL, ok := gcsEndpointObjectURL(cred, bucket, key, method); ok {
+func (s *GCSSigner) gcsSignedURL(bucket, key, method string, expiry time.Duration, rangeStr string, downloadName string, cred *models.S3Credential) (string, error) {
+	if endpointURL, ok := gcsEndpointObjectURL(cred, bucket, key, method, downloadName); ok {
 		return endpointURL, nil
 	}
 
@@ -128,10 +139,14 @@ func (s *GCSSigner) gcsSignedURL(bucket, key, method string, expiry time.Duratio
 	if rangeStr != "" {
 		opts.Headers = append(opts.Headers, "Range:"+rangeStr)
 	}
+	if disposition := common.ContentDispositionAttachment(downloadName); disposition != "" {
+		opts.QueryParameters = make(url.Values)
+		opts.QueryParameters.Set("response-content-disposition", disposition)
+	}
 	return storage.SignedURL(bucket, key, opts)
 }
 
-func gcsEndpointObjectURL(cred *models.S3Credential, bucket string, key string, method string) (string, bool) {
+func gcsEndpointObjectURL(cred *models.S3Credential, bucket string, key string, method string, downloadName string) (string, bool) {
 	if cred == nil {
 		return "", false
 	}
@@ -181,6 +196,9 @@ func gcsEndpointObjectURL(cred *models.S3Credential, bucket string, key string, 
 		base.Path = builtPath
 		q := base.Query()
 		q.Set("alt", "media")
+		if disposition := common.ContentDispositionAttachment(downloadName); disposition != "" {
+			q.Set("response-content-disposition", disposition)
+		}
 		base.RawQuery = q.Encode()
 		return base.String(), true
 	}

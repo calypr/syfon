@@ -6,6 +6,7 @@ import (
 
 	"github.com/calypr/syfon/cmd/addurl"
 	"github.com/calypr/syfon/cmd/bucket"
+	"github.com/calypr/syfon/cmd/cliauth"
 	"github.com/calypr/syfon/cmd/download"
 	listcmd "github.com/calypr/syfon/cmd/list"
 	metricscmd "github.com/calypr/syfon/cmd/metrics"
@@ -42,6 +43,7 @@ func init() {
 		defaultServerURL = "http://127.0.0.1:8080"
 	}
 	RootCmd.PersistentFlags().StringVar(&serverBaseURL, "server", defaultServerURL, "Syfon server base URL")
+	cliauth.RegisterRootFlags(RootCmd.PersistentFlags())
 
 	RootCmd.AddCommand(validate.Cmd)
 	RootCmd.AddCommand(server.Cmd)

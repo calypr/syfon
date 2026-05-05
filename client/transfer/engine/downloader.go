@@ -15,11 +15,11 @@ import (
 )
 
 type GenericDownloader struct {
-	Backend transfer.Backend
+	Source transfer.ReadBackend
 }
 
 func (d *GenericDownloader) Download(ctx context.Context, guid string, dstPath string, concurrency int, chunkSize, multipartThreshold int64) error {
-	meta, err := d.Backend.Stat(ctx, guid)
+	meta, err := d.Source.Stat(ctx, guid)
 	if err != nil {
 		return fmt.Errorf("stat failed: %w", err)
 	}
@@ -54,14 +54,14 @@ func (d *GenericDownloader) downloadSingle(ctx context.Context, guid string, dst
 	var body io.ReadCloser
 	var err error
 	if startOffset > 0 {
-		body, err = d.Backend.GetRangeReader(ctx, guid, startOffset, expectedSize-startOffset)
+		body, err = d.Source.GetRangeReader(ctx, guid, startOffset, expectedSize-startOffset)
 		if err == transfer.ErrRangeIgnored {
 			// Server ignored our range request, restart from zero.
 			startOffset = 0
-			body, err = d.Backend.GetReader(ctx, guid)
+			body, err = d.Source.GetReader(ctx, guid)
 		}
 	} else {
-		body, err = d.Backend.GetReader(ctx, guid)
+		body, err = d.Source.GetReader(ctx, guid)
 	}
 	if err != nil {
 		return err
@@ -178,8 +178,8 @@ func (d *GenericDownloader) downloadParallel(ctx context.Context, guid string, d
 
 		g.Go(func() error {
 			strategy := transfer.DefaultBackoff()
-			return transfer.RetryAction(gctx, d.Backend.Logger(), strategy, common.MaxRetryCount, func() error {
-				partBody, err := d.Backend.GetRangeReader(gctx, guid, partStart, partLength)
+			return transfer.RetryAction(gctx, d.Source.Logger(), strategy, common.MaxRetryCount, func() error {
+				partBody, err := d.Source.GetRangeReader(gctx, guid, partStart, partLength)
 				if err != nil {
 					return fmt.Errorf("range download [%d,%d]: %w", partStart, partEnd, err)
 				}

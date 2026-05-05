@@ -13,6 +13,9 @@ import (
 type SignOptions struct {
 	ExpiresIn time.Duration
 	Method    string
+	// DownloadFilename, when set for GET-style URLs, asks the backend to serve
+	// the object with this presentation filename.
+	DownloadFilename string
 }
 
 // MultipartPart represents a part in a multipart upload.

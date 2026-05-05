@@ -15,11 +15,12 @@ cd "$REPO_ROOT"
 echo "[1/5] Testing Authentication & Authorization Fixes (CRIT-1, HIGH-1, HIGH-2)..."
 go test -v ./internal/api/middleware -run TestParseToken_IssuerAllowlistValidation
 go test -v ./internal/api/middleware -run TestIsIssuerAllowed
-go test -v ./internal/config -run TestLoadConfig_LocalModeWithoutBasicAuthWarning
-go test -v ./internal/config -run TestLoadConfig_MockAuthRejectsGen3Mode
+go test -v ./internal/config -run TestLoadConfig_LocalModeWithoutBasicAuthRejected
+go test -v ./internal/config -run TestLoadConfig_LocalModeAllowsExplicitUnauthenticatedDevMode
+go test -v ./internal/config -run TestLoadConfig_MockAuthAllowsGen3Mode
 echo "✓ CRIT-1: JWT issuer validation (SSRF prevention)"
-echo "✓ HIGH-1: Basic auth warnings in local mode"
-echo "✓ HIGH-2: Mock auth restricted to local mode"
+echo "✓ HIGH-1: unauthenticated local mode rejected unless explicitly opted in"
+echo "✓ HIGH-2: Mock auth supported only for Gen3 integration testing"
 echo ""
 
 # Test configuration and secrets (MED-1, MED-2, MED-3)
@@ -28,9 +29,9 @@ go test -v ./internal/config -run TestLoadConfig_PostgresSSLModeDefault
 go test -v ./internal/config -run TestSecretRedaction_BasicAuthConfig
 go test -v ./internal/config -run TestSecretRedaction_PostgresConfig
 go test -v ./internal/config -run TestSecretRedaction_S3Config
-go test -v ./client/conf -run TestEnsureExists_DirectoryPermissions
-go test -v ./client/conf -run TestEnsureExists_ConfigFileCreation
-go test -v ./client/conf -run TestConfigPath_NestedDirectoryStructure
+go test -v ./client/config -run TestEnsureExists_DirectoryPermissions
+go test -v ./client/config -run TestEnsureExists_ConfigFileCreation
+go test -v ./client/config -run TestConfigPath_NestedDirectoryStructure
 echo "✓ MED-1: Secrets redacted in JSON marshaling"
 echo "✓ MED-2: Postgres SSL defaults to 'require'"
 echo "✓ MED-3: Client config directory 0700 permissions"
@@ -66,7 +67,7 @@ echo "  ✓ SSRF protection via scheme enforcement (HTTPS only)"
 echo ""
 echo "High-Severity Fixes (HIGH-1, HIGH-2, HIGH-3):"
 echo "  ✓ Authorization bypass prevention in local mode"
-echo "  ✓ Mock auth restricted to local mode only"
+echo "  ✓ Mock auth supported only for Gen3 integration testing"
 echo "  ✓ KEK default path moved from /tmp to /app (0700)"
 echo ""
 echo "Medium-Severity Fixes (MED-1, MED-2, MED-3):"
@@ -79,4 +80,3 @@ echo "  ✓ KEK fingerprint extended from 64 to 128 bits"
 echo "  ✓ Client HTTP timeout set to 10 minutes"
 echo ""
 echo "Test suite completed successfully!"
-

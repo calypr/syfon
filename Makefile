@@ -1,32 +1,27 @@
 SHELL := /bin/bash
 .DEFAULT_GOAL := build
 OPENAPI ?= ga4gh/data-repository-service-schemas/openapi/data_repository_service.openapi.yaml
-OAG_IMAGE ?= openapitools/openapi-generator-cli:latest
 OAPI_CODEGEN ?= go run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.5.0
 REDOCLY_IMAGE ?= redocly/cli:latest
 YQ_IMAGE ?= mikefarah/yq:latest
 MKDOCS_IMAGE ?= squidfunk/mkdocs-material:latest
-LFS_OPENAPI ?= apigen/api/lfs.openapi.yaml
-LFS_GEN_OUT ?= .tmp/apigen-lfs.gen
-BUCKET_OPENAPI ?= apigen/api/bucket.openapi.yaml
-BUCKET_GEN_OUT ?= .tmp/apigen-bucket.gen
-METRICS_OPENAPI ?= apigen/api/metrics.openapi.yaml
-METRICS_GEN_OUT ?= .tmp/apigen-metrics.gen
-INTERNAL_OPENAPI ?= apigen/api/internal.openapi.yaml
-INTERNAL_GEN_OUT ?= .tmp/apigen-internal.gen
-MODEL_OPENAPI ?= apigen/model/openapi.yaml
-MODEL_CONFIG ?= apigen/specs/oapi-model.yaml
+OPENAPI_DIR ?= apigen/openapi
+CODEGEN_CONFIG_DIR ?= apigen/codegen
+LFS_OPENAPI ?= $(OPENAPI_DIR)/lfs.openapi.yaml
+BUCKET_OPENAPI ?= $(OPENAPI_DIR)/bucket.openapi.yaml
+METRICS_OPENAPI ?= $(OPENAPI_DIR)/metrics.openapi.yaml
+INTERNAL_OPENAPI ?= $(OPENAPI_DIR)/internal.openapi.yaml
 SCHEMAS_SUBMODULE ?= ga4gh/data-repository-service-schemas
-OAPI_DRS_GIN_CONFIG ?= apigen/specs/oapi-drs.yaml
-OAPI_LFS_CONFIG ?= apigen/specs/oapi-lfs.yaml
-OAPI_BUCKET_CONFIG ?= apigen/specs/oapi-bucket.yaml
-OAPI_METRICS_CONFIG ?= apigen/specs/oapi-metrics.yaml
-OAPI_INTERNAL_CONFIG ?= apigen/specs/oapi-internal.yaml
-CLIENT_OAPI_DRS_CONFIG ?= apigen/specs/client-oapi-drs.yaml
-CLIENT_OAPI_LFS_CONFIG ?= apigen/specs/client-oapi-lfs.yaml
-CLIENT_OAPI_BUCKET_CONFIG ?= apigen/specs/client-oapi-bucket.yaml
-CLIENT_OAPI_METRICS_CONFIG ?= apigen/specs/client-oapi-metrics.yaml
-CLIENT_OAPI_INTERNAL_CONFIG ?= apigen/specs/client-oapi-internal.yaml
+OAPI_DRS_GIN_CONFIG ?= $(CODEGEN_CONFIG_DIR)/oapi-drs.yaml
+OAPI_LFS_CONFIG ?= $(CODEGEN_CONFIG_DIR)/oapi-lfs.yaml
+OAPI_BUCKET_CONFIG ?= $(CODEGEN_CONFIG_DIR)/oapi-bucket.yaml
+OAPI_METRICS_CONFIG ?= $(CODEGEN_CONFIG_DIR)/oapi-metrics.yaml
+OAPI_INTERNAL_CONFIG ?= $(CODEGEN_CONFIG_DIR)/oapi-internal.yaml
+CLIENT_OAPI_DRS_CONFIG ?= $(CODEGEN_CONFIG_DIR)/client-oapi-drs.yaml
+CLIENT_OAPI_LFS_CONFIG ?= $(CODEGEN_CONFIG_DIR)/client-oapi-lfs.yaml
+CLIENT_OAPI_BUCKET_CONFIG ?= $(CODEGEN_CONFIG_DIR)/client-oapi-bucket.yaml
+CLIENT_OAPI_METRICS_CONFIG ?= $(CODEGEN_CONFIG_DIR)/client-oapi-metrics.yaml
+CLIENT_OAPI_INTERNAL_CONFIG ?= $(CODEGEN_CONFIG_DIR)/client-oapi-internal.yaml
 
 AUTO_INIT_SUBMODULE ?= 0
 GOCACHE ?= $(PWD)/.gocache
@@ -86,48 +81,34 @@ gen:
 	  --user "$$(id -u):$$(id -g)" \
 	  -v "$(PWD):/local" \
 	  $(REDOCLY_IMAGE) bundle /local/$$spec --output /local/.tmp/drs.base.yaml --ext yaml; \
-	echo "Merging internal Extensions with yq..."; \
+	mkdir -p "$(OPENAPI_DIR)" apigen; \
+	cp .tmp/drs.base.yaml "$(OPENAPI_DIR)/openapi.yaml"; \
 	docker run --rm \
 	  --user "$$(id -u):$$(id -g)" \
 	  -v "$(PWD):/local" \
-	  $(YQ_IMAGE) eval-all 'select(fileIndex == 0) * select(fileIndex == 1)' /local/.tmp/drs.base.yaml /local/apigen/specs/drs-extensions-overlay.yaml > apigen/api/openapi.yaml; \
-	mkdir -p apigen/api apigen; \
-	echo "Bundled canonical DRS OpenAPI spec into ./apigen/api/openapi.yaml"; \
-	if [[ ! -f "$(MODEL_CONFIG)" ]]; then \
-	  echo "ERROR: oapi-codegen config '$(MODEL_CONFIG)' not found."; \
-	  exit 1; \
-	fi; \
-	$(MAKE) gen-model; \
+	  $(YQ_IMAGE) eval '.components.parameters.Checksum."x-go-name" = "ChecksumParameter"' -i /local/$(OPENAPI_DIR)/openapi.yaml; \
+	echo "Bundled canonical DRS OpenAPI spec into ./$(OPENAPI_DIR)/openapi.yaml"; \
 	$(MAKE) gen-server; \
 	$(MAKE) gen-client
-
-.PHONY: gen-model
-gen-model:
-	@set -euo pipefail; \
-	mkdir -p apigen/model; \
-	cp apigen/api/openapi.yaml "$(MODEL_OPENAPI)"; \
-	echo "Generating shared model bindings with oapi-codegen..."; \
-	GOTOOLCHAIN=local $(OAPI_CODEGEN) -config "$(MODEL_CONFIG)" "$(MODEL_OPENAPI)" > apigen/model/model.gen.go; \
-	echo "Generated shared model bindings into ./apigen/model/model.gen.go"
 
 .PHONY: gen-server
 gen-server:
 	@set -euo pipefail; \
 	mkdir -p apigen/server/drs apigen/server/lfsapi apigen/server/bucketapi apigen/server/metricsapi apigen/server/internalapi; \
 	echo "Generating Fiber v3 strict server bindings with oapi-codegen..."; \
-	GOTOOLCHAIN=local $(OAPI_CODEGEN) -config "$(OAPI_DRS_GIN_CONFIG)" apigen/api/openapi.yaml > apigen/server/drs/drs.gen.go; \
+	GOTOOLCHAIN=local $(OAPI_CODEGEN) -config "$(OAPI_DRS_GIN_CONFIG)" "$(OPENAPI_DIR)/openapi.yaml" > apigen/server/drs/drs.gen.go; \
 	echo "Generated Fiber v3 strict server bindings into ./apigen/server/drs/drs.gen.go"; \
 	echo "Generating LFS Fiber v3 strict server with oapi-codegen..."; \
-	GOTOOLCHAIN=local $(OAPI_CODEGEN) -config "$(OAPI_LFS_CONFIG)" apigen/api/lfs.openapi.yaml > apigen/server/lfsapi/lfs.gen.go; \
+	GOTOOLCHAIN=local $(OAPI_CODEGEN) -config "$(OAPI_LFS_CONFIG)" "$(LFS_OPENAPI)" > apigen/server/lfsapi/lfs.gen.go; \
 	echo "Generated LFS Fiber v3 strict server into ./apigen/server/lfsapi/lfs.gen.go"; \
 	echo "Generating Bucket Fiber v3 strict server with oapi-codegen..."; \
-	GOTOOLCHAIN=local $(OAPI_CODEGEN) -config "$(OAPI_BUCKET_CONFIG)" apigen/api/bucket.openapi.yaml > apigen/server/bucketapi/bucket.gen.go; \
+	GOTOOLCHAIN=local $(OAPI_CODEGEN) -config "$(OAPI_BUCKET_CONFIG)" "$(BUCKET_OPENAPI)" > apigen/server/bucketapi/bucket.gen.go; \
 	echo "Generated Bucket Fiber v3 strict server into ./apigen/server/bucketapi/bucket.gen.go"; \
 	echo "Generating Metrics Fiber v3 strict server with oapi-codegen..."; \
-	GOTOOLCHAIN=local $(OAPI_CODEGEN) -config "$(OAPI_METRICS_CONFIG)" apigen/api/metrics.openapi.yaml > apigen/server/metricsapi/metrics.gen.go; \
+	GOTOOLCHAIN=local $(OAPI_CODEGEN) -config "$(OAPI_METRICS_CONFIG)" "$(METRICS_OPENAPI)" > apigen/server/metricsapi/metrics.gen.go; \
 	echo "Generated Metrics Fiber v3 strict server into ./apigen/server/metricsapi/metrics.gen.go"; \
 	echo "Generating Internal Fiber v3 strict server with oapi-codegen..."; \
-	GOTOOLCHAIN=local $(OAPI_CODEGEN) -config "$(OAPI_INTERNAL_CONFIG)" apigen/api/internal.openapi.yaml > apigen/server/internalapi/internal.gen.go; \
+	GOTOOLCHAIN=local $(OAPI_CODEGEN) -config "$(OAPI_INTERNAL_CONFIG)" "$(INTERNAL_OPENAPI)" > apigen/server/internalapi/internal.gen.go; \
 	echo "Generated Internal Fiber v3 strict server into ./apigen/server/internalapi/internal.gen.go"
 
 .PHONY: gen-client
@@ -139,15 +120,15 @@ gen-client:
 	  exit 1; \
 	fi; \
 	echo "Generating separate client bindings with oapi-codegen..."; \
-	GOTOOLCHAIN=local $(OAPI_CODEGEN) -config "$(CLIENT_OAPI_DRS_CONFIG)" apigen/api/openapi.yaml > apigen/client/drs/drs.gen.go; \
+	GOTOOLCHAIN=local $(OAPI_CODEGEN) -config "$(CLIENT_OAPI_DRS_CONFIG)" "$(OPENAPI_DIR)/openapi.yaml" > apigen/client/drs/drs.gen.go; \
 	echo "Generated DRS client bindings into ./apigen/client/drs/drs.gen.go"; \
-	GOTOOLCHAIN=local $(OAPI_CODEGEN) -config "$(CLIENT_OAPI_LFS_CONFIG)" apigen/api/lfs.openapi.yaml > apigen/client/lfsapi/lfs.gen.go; \
+	GOTOOLCHAIN=local $(OAPI_CODEGEN) -config "$(CLIENT_OAPI_LFS_CONFIG)" "$(LFS_OPENAPI)" > apigen/client/lfsapi/lfs.gen.go; \
 	echo "Generated LFS client bindings into ./apigen/client/lfsapi/lfs.gen.go"; \
-	GOTOOLCHAIN=local $(OAPI_CODEGEN) -config "$(CLIENT_OAPI_BUCKET_CONFIG)" apigen/api/bucket.openapi.yaml > apigen/client/bucketapi/bucket.gen.go; \
+	GOTOOLCHAIN=local $(OAPI_CODEGEN) -config "$(CLIENT_OAPI_BUCKET_CONFIG)" "$(BUCKET_OPENAPI)" > apigen/client/bucketapi/bucket.gen.go; \
 	echo "Generated Bucket client bindings into ./apigen/client/bucketapi/bucket.gen.go"; \
-	GOTOOLCHAIN=local $(OAPI_CODEGEN) -config "$(CLIENT_OAPI_METRICS_CONFIG)" apigen/api/metrics.openapi.yaml > apigen/client/metricsapi/metrics.gen.go; \
+	GOTOOLCHAIN=local $(OAPI_CODEGEN) -config "$(CLIENT_OAPI_METRICS_CONFIG)" "$(METRICS_OPENAPI)" > apigen/client/metricsapi/metrics.gen.go; \
 	echo "Generated Metrics client bindings into ./apigen/client/metricsapi/metrics.gen.go"; \
-	GOTOOLCHAIN=local $(OAPI_CODEGEN) -config "$(CLIENT_OAPI_INTERNAL_CONFIG)" apigen/api/internal.openapi.yaml > apigen/client/internalapi/internal.gen.go; \
+	GOTOOLCHAIN=local $(OAPI_CODEGEN) -config "$(CLIENT_OAPI_INTERNAL_CONFIG)" "$(INTERNAL_OPENAPI)" > apigen/client/internalapi/internal.gen.go; \
 	echo "Generated Internal client bindings into ./apigen/client/internalapi/internal.gen.go"; \
 	echo "Generated client bindings into ./apigen/client/*"
 
@@ -183,7 +164,15 @@ serve:
 
 .PHONY: docs
 docs:
-	docker run --rm -it \
+	docker run --rm \
+	  -v "$(PWD):/docs" \
+	  --user "$$(id -u):$$(id -g)" \
+	  $(MKDOCS_IMAGE) \
+	  build --strict
+
+.PHONY: docs-serve
+docs-serve:
+	docker run --rm $$(test -t 0 && echo -it) \
 	  -v "$(PWD):/docs" \
 	  --user "$$(id -u):$$(id -g)" \
 	  -p 8000:8000 \

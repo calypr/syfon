@@ -92,7 +92,7 @@ This repository keeps generated sources in version control.
 
 * Generated files in `apigen/` **must be committed** with the PR that changes generation inputs.
 * Regenerate `apigen/` when any of the following change:
-  * OpenAPI documents under `apigen/api/`
+  * OpenAPI documents under `apigen/openapi/`
   * Generator config/templates used by `make gen`
   * GA4GH schema submodule updates that affect generated output
 * PRs that change generation inputs should include:

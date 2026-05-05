@@ -2,14 +2,15 @@ package docs
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
 
-	openapispec "github.com/calypr/syfon/apigen/api"
-	"github.com/calypr/syfon/internal/config"
+	openapispec "github.com/calypr/syfon/apigen/openapi"
 	"github.com/calypr/syfon/internal/api/routeutil"
+	"github.com/calypr/syfon/internal/config"
 	"github.com/gofiber/fiber/v3"
 	"gopkg.in/yaml.v3"
 )
@@ -50,7 +51,9 @@ func RegisterSwaggerRoutes(router fiber.Router) {
 
 func handleSwaggerUI(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write([]byte(swaggerUIHTML))
+	if _, err := w.Write([]byte(swaggerUIHTML)); err != nil {
+		log.Printf("write swagger ui response: %v", err)
+	}
 }
 
 func handleOpenAPISpec(w http.ResponseWriter, r *http.Request) {
@@ -60,7 +63,9 @@ func handleOpenAPISpec(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/yaml")
-	_, _ = w.Write(merged)
+	if _, err := w.Write(merged); err != nil {
+		log.Printf("write merged openapi spec response: %v", err)
+	}
 }
 
 func handleLFSOpenAPISpec(w http.ResponseWriter, r *http.Request) {
@@ -70,7 +75,9 @@ func handleLFSOpenAPISpec(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/yaml")
-	_, _ = w.Write(specBytes)
+	if _, err := w.Write(specBytes); err != nil {
+		log.Printf("write lfs openapi spec response: %v", err)
+	}
 }
 
 func handleBucketOpenAPISpec(w http.ResponseWriter, r *http.Request) {
@@ -80,7 +87,9 @@ func handleBucketOpenAPISpec(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/yaml")
-	_, _ = w.Write(specBytes)
+	if _, err := w.Write(specBytes); err != nil {
+		log.Printf("write bucket openapi spec response: %v", err)
+	}
 }
 
 func handleInternalOpenAPISpec(w http.ResponseWriter, r *http.Request) {
@@ -90,18 +99,20 @@ func handleInternalOpenAPISpec(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/yaml")
-	_, _ = w.Write(specBytes)
+	if _, err := w.Write(specBytes); err != nil {
+		log.Printf("write internal openapi spec response: %v", err)
+	}
 }
 
 func findOpenAPISpecPath() (string, bool) {
 	candidates := []string{
-		"apigen/api/openapi.yaml",
-		filepath.Join(filepath.Dir(os.Args[0]), "apigen", "api", "openapi.yaml"),
+		"apigen/openapi/openapi.yaml",
+		filepath.Join(filepath.Dir(os.Args[0]), "apigen", "openapi", "openapi.yaml"),
 	}
 
 	if _, thisFile, _, ok := runtime.Caller(0); ok {
 		repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", "..", ".."))
-		candidates = append(candidates, filepath.Join(repoRoot, "apigen", "api", "openapi.yaml"))
+		candidates = append(candidates, filepath.Join(repoRoot, "apigen", "openapi", "openapi.yaml"))
 	}
 
 	for _, path := range candidates {
@@ -114,13 +125,13 @@ func findOpenAPISpecPath() (string, bool) {
 
 func findLFSOpenAPISpecPath() (string, bool) {
 	candidates := []string{
-		"apigen/api/lfs.openapi.yaml",
-		filepath.Join(filepath.Dir(os.Args[0]), "apigen", "api", "lfs.openapi.yaml"),
+		"apigen/openapi/lfs.openapi.yaml",
+		filepath.Join(filepath.Dir(os.Args[0]), "apigen", "openapi", "lfs.openapi.yaml"),
 	}
 
 	if _, thisFile, _, ok := runtime.Caller(0); ok {
 		repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", "..", ".."))
-		candidates = append(candidates, filepath.Join(repoRoot, "apigen", "api", "lfs.openapi.yaml"))
+		candidates = append(candidates, filepath.Join(repoRoot, "apigen", "openapi", "lfs.openapi.yaml"))
 	}
 
 	for _, path := range candidates {
@@ -133,13 +144,13 @@ func findLFSOpenAPISpecPath() (string, bool) {
 
 func findCompatOpenAPISpecPath() (string, bool) {
 	candidates := []string{
-		"apigen/api/compat.openapi.yaml",
-		filepath.Join(filepath.Dir(os.Args[0]), "apigen", "api", "compat.openapi.yaml"),
+		"apigen/openapi/compat.openapi.yaml",
+		filepath.Join(filepath.Dir(os.Args[0]), "apigen", "openapi", "compat.openapi.yaml"),
 	}
 
 	if _, thisFile, _, ok := runtime.Caller(0); ok {
 		repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", "..", ".."))
-		candidates = append(candidates, filepath.Join(repoRoot, "apigen", "api", "compat.openapi.yaml"))
+		candidates = append(candidates, filepath.Join(repoRoot, "apigen", "openapi", "compat.openapi.yaml"))
 	}
 
 	for _, path := range candidates {
@@ -152,13 +163,13 @@ func findCompatOpenAPISpecPath() (string, bool) {
 
 func findBucketOpenAPISpecPath() (string, bool) {
 	candidates := []string{
-		"apigen/api/bucket.openapi.yaml",
-		filepath.Join(filepath.Dir(os.Args[0]), "apigen", "api", "bucket.openapi.yaml"),
+		"apigen/openapi/bucket.openapi.yaml",
+		filepath.Join(filepath.Dir(os.Args[0]), "apigen", "openapi", "bucket.openapi.yaml"),
 	}
 
 	if _, thisFile, _, ok := runtime.Caller(0); ok {
 		repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", "..", ".."))
-		candidates = append(candidates, filepath.Join(repoRoot, "apigen", "api", "bucket.openapi.yaml"))
+		candidates = append(candidates, filepath.Join(repoRoot, "apigen", "openapi", "bucket.openapi.yaml"))
 	}
 
 	for _, path := range candidates {
@@ -171,13 +182,13 @@ func findBucketOpenAPISpecPath() (string, bool) {
 
 func findNamedOpenAPISpecPath(fileName string) (string, bool) {
 	candidates := []string{
-		filepath.Join("apigen", "api", fileName),
-		filepath.Join(filepath.Dir(os.Args[0]), "apigen", "api", fileName),
+		filepath.Join("apigen", "openapi", fileName),
+		filepath.Join(filepath.Dir(os.Args[0]), "apigen", "openapi", fileName),
 	}
 
 	if _, thisFile, _, ok := runtime.Caller(0); ok {
 		repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", "..", ".."))
-		candidates = append(candidates, filepath.Join(repoRoot, "apigen", "api", fileName))
+		candidates = append(candidates, filepath.Join(repoRoot, "apigen", "openapi", fileName))
 	}
 
 	for _, path := range candidates {

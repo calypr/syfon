@@ -203,4 +203,3 @@ func TestSignedURLHelpers(t *testing.T) {
 		t.Fatal("wrong path should disable gcs media upload")
 	}
 }
-

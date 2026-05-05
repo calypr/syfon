@@ -3,7 +3,7 @@ package ping
 import (
 	"fmt"
 
-	syclient "github.com/calypr/syfon/client"
+	"github.com/calypr/syfon/cmd/cliauth"
 	"github.com/spf13/cobra"
 )
 
@@ -11,11 +11,11 @@ var Cmd = &cobra.Command{
 	Use:   "ping",
 	Short: "Check Syfon server health endpoint",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		serverURL, err := cmd.Flags().GetString("server")
+		serverURL, err := cliauth.ResolveServerURL(cmd)
 		if err != nil {
-			return fmt.Errorf("get server flag: %w", err)
+			return err
 		}
-		c, err := syclient.New(serverURL)
+		c, err := cliauth.NewServerClient(cmd)
 		if err != nil {
 			return err
 		}

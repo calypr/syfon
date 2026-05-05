@@ -72,6 +72,32 @@ func TestValidateBucketName(t *testing.T) {
 	}
 }
 
+func TestValidateBucketNameWithEndpoint(t *testing.T) {
+	tests := []struct {
+		name     string
+		provider string
+		bucket   string
+		endpoint string
+		wantErr  bool
+	}{
+		{name: "aws s3 still strict", provider: S3Provider, bucket: "EllrottLab", wantErr: true},
+		{name: "custom endpoint s3 compatible accepts uppercase", provider: S3Provider, bucket: "EllrottLab", endpoint: "https://rgw.ohsu.edu"},
+		{name: "custom endpoint still rejects slashes", provider: S3Provider, bucket: "bad/name", endpoint: "https://rgw.ohsu.edu", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateBucketNameWithEndpoint(tt.provider, tt.bucket, tt.endpoint)
+			if tt.wantErr && err == nil {
+				t.Fatalf("expected error for provider=%q bucket=%q endpoint=%q", tt.provider, tt.bucket, tt.endpoint)
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("unexpected error for provider=%q bucket=%q endpoint=%q: %v", tt.provider, tt.bucket, tt.endpoint, err)
+			}
+		})
+	}
+}
+
 func TestParseBucketProvider(t *testing.T) {
 	tests := []struct {
 		in   string

@@ -85,7 +85,9 @@ func (s *FileSigner) CompleteMultipartUpload(ctx context.Context, bucket, key, u
 			return fmt.Errorf("failed to open multipart part %d: %w", p.PartNumber, err)
 		}
 		if _, err := io.Copy(writer, reader); err != nil {
-			_ = reader.Close()
+			if closeErr := reader.Close(); closeErr != nil {
+				return fmt.Errorf("failed to copy multipart part %d: %w (close error: %v)", p.PartNumber, err, closeErr)
+			}
 			return fmt.Errorf("failed to copy multipart part %d: %w", p.PartNumber, err)
 		}
 		if err := reader.Close(); err != nil {
@@ -98,7 +100,9 @@ func (s *FileSigner) CompleteMultipartUpload(ctx context.Context, bucket, key, u
 		return fmt.Errorf("failed to finalize multipart object: %w", err)
 	}
 	for _, partKey := range cleanupKeys {
-		_ = s.rootBucket.Delete(ctx, partKey)
+		if err := s.rootBucket.Delete(ctx, partKey); err != nil {
+			return fmt.Errorf("failed to delete multipart part %s: %w", partKey, err)
+		}
 	}
 	return nil
 }

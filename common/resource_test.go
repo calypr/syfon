@@ -16,8 +16,8 @@ func TestResourceAndAuthzHelpers(t *testing.T) {
 			wantErr bool
 		}{
 			{name: "empty", want: ""},
-			{name: "org only", org: "syfon", want: "/programs/syfon"},
-			{name: "org and project", org: "syfon", project: "e2e", want: "/programs/syfon/projects/e2e"},
+			{name: "org only", org: "syfon", want: "/organization/syfon"},
+			{name: "org and project", org: "syfon", project: "e2e", want: "/organization/syfon/project/e2e"},
 			{name: "project without org", project: "e2e", wantErr: true},
 		}
 
@@ -73,16 +73,35 @@ func TestResourceAndAuthzHelpers(t *testing.T) {
 
 	t.Run("authz list to map", func(t *testing.T) {
 		got := AuthzListToMap([]string{
-			"/programs/syfon",
-			" /programs/syfon/projects/e2e ",
+			"/organization/syfon",
+			" /organization/syfon/project/e2e ",
+			"/organization/aced/project/proj-2",
 			"/programs/other/projects/proj-1",
 		})
 		want := map[string][]string{
 			"syfon": []string{"e2e"},
 			"other": []string{"proj-1"},
+			"aced":  []string{"proj-2"},
 		}
 		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("AuthzListToMap mismatch:\n got: %+v\nwant: %+v", got, want)
+		}
+	})
+
+	t.Run("normalize access resource aliases", func(t *testing.T) {
+		tests := []struct {
+			raw  string
+			want string
+		}{
+			{raw: "/organization/cbds", want: "/organization/cbds"},
+			{raw: "/organization/cbds/project/training", want: "/organization/cbds/project/training"},
+			{raw: "https://example.org/organization/cbds/project/training", want: "/organization/cbds/project/training"},
+			{raw: "/programs/cbds/projects/training", want: "/organization/cbds/project/training"},
+		}
+		for _, tc := range tests {
+			if got := NormalizeAccessResource(tc.raw); got != tc.want {
+				t.Fatalf("NormalizeAccessResource(%q) = %q, want %q", tc.raw, got, tc.want)
+			}
 		}
 	})
 
@@ -93,13 +112,31 @@ func TestResourceAndAuthzHelpers(t *testing.T) {
 		})
 		sort.Strings(got)
 		want := []string{
-			"/programs/other",
-			"/programs/syfon/projects/e2e",
-			"/programs/syfon/projects/e2e-2",
+			"/organization/other",
+			"/organization/syfon/project/e2e",
+			"/organization/syfon/project/e2e-2",
 		}
 		sort.Strings(want)
 		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("AuthzMapToList mismatch:\n got: %+v\nwant: %+v", got, want)
+		}
+	})
+
+	t.Run("authz map matches scope", func(t *testing.T) {
+		projectScoped := map[string][]string{"syfon": {"e2e"}}
+		if !AuthzMapMatchesScope(projectScoped, "syfon", "e2e") {
+			t.Fatal("expected project-scoped match")
+		}
+		if AuthzMapMatchesScope(projectScoped, "syfon", "other") {
+			t.Fatal("expected project-scoped miss")
+		}
+
+		orgWide := map[string][]string{"syfon": {}}
+		if !AuthzMapMatchesScope(orgWide, "syfon", "anything") {
+			t.Fatal("expected org-wide match")
+		}
+		if AuthzMapMatchesScope(nil, "syfon", "e2e") {
+			t.Fatal("expected nil map miss")
 		}
 	})
 }

@@ -12,6 +12,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/calypr/syfon/apigen/server/drs"
 )
 
 const maxHTTPAttempts = 3
@@ -73,8 +75,11 @@ func (c *HTTPClient) ListPage(ctx context.Context, limit int, start string) ([]I
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("GET %s: unexpected status %d: %s", endpoint, resp.StatusCode, strings.TrimSpace(string(body)))
+		body, err := readTrimmedBody(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("GET %s: read error response body: %w", endpoint, err)
+		}
+		return nil, fmt.Errorf("GET %s: unexpected status %d: %s", endpoint, resp.StatusCode, body)
 	}
 
 	var page IndexdPage
@@ -125,8 +130,11 @@ func (c *HTTPClient) bulkDocuments(ctx context.Context, ids []string) ([]IndexdR
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("POST %s: unexpected status %d: %s", endpoint, resp.StatusCode, strings.TrimSpace(string(body)))
+		body, err := readTrimmedBody(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("POST %s: read error response body: %w", endpoint, err)
+		}
+		return nil, fmt.Errorf("POST %s: unexpected status %d: %s", endpoint, resp.StatusCode, body)
 	}
 	var records []IndexdRecord
 	if err := json.NewDecoder(resp.Body).Decode(&records); err != nil {
@@ -148,8 +156,11 @@ func (c *HTTPClient) getRecord(ctx context.Context, id string) (IndexdRecord, er
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return IndexdRecord{}, fmt.Errorf("GET %s: unexpected status %d: %s", endpoint, resp.StatusCode, strings.TrimSpace(string(body)))
+		body, err := readTrimmedBody(resp.Body)
+		if err != nil {
+			return IndexdRecord{}, fmt.Errorf("GET %s: read error response body: %w", endpoint, err)
+		}
+		return IndexdRecord{}, fmt.Errorf("GET %s: unexpected status %d: %s", endpoint, resp.StatusCode, body)
 	}
 	var record IndexdRecord
 	if err := json.NewDecoder(resp.Body).Decode(&record); err != nil {
@@ -176,10 +187,47 @@ func (c *HTTPClient) LoadBatch(ctx context.Context, records []MigrationRecord) e
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("POST %s: unexpected status %d: %s", endpoint, resp.StatusCode, strings.TrimSpace(string(body)))
+		body, err := readTrimmedBody(resp.Body)
+		if err != nil {
+			return fmt.Errorf("POST %s: read error response body: %w", endpoint, err)
+		}
+		return fmt.Errorf("POST %s: unexpected status %d: %s", endpoint, resp.StatusCode, body)
 	}
 	return nil
+}
+
+func (c *HTTPClient) UserPrivileges(ctx context.Context) (map[string]map[string]bool, error) {
+	endpoint := c.userEndpoint("/user/user")
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	c.applyHeaders(req)
+	resp, err := c.do(req)
+	if err != nil {
+		return nil, fmt.Errorf("GET %s: %w", endpoint, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, err := readTrimmedBody(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("GET %s: read error response body: %w", endpoint, err)
+		}
+		return nil, fmt.Errorf("GET %s: unexpected status %d: %s", endpoint, resp.StatusCode, body)
+	}
+
+	var data map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		return nil, fmt.Errorf("decode %s: %w", endpoint, err)
+	}
+	resourceAccess, ok := data["authz"].(map[string]any)
+	if !ok || len(resourceAccess) == 0 {
+		resourceAccess, ok = data["project_access"].(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("no authz/project_access found in user response")
+		}
+	}
+	return extractUserPrivileges(resourceAccess), nil
 }
 
 type bulkCreateRequest struct {
@@ -187,15 +235,16 @@ type bulkCreateRequest struct {
 }
 
 type bulkInternalRecord struct {
-	Auth        *map[string]map[string][]string `json:"auth,omitempty"`
-	CreatedTime *string                         `json:"created_time,omitempty"`
-	Description *string                         `json:"description,omitempty"`
-	Did         string                          `json:"did"`
-	FileName    *string                         `json:"file_name,omitempty"`
-	Hashes      *map[string]string              `json:"hashes,omitempty"`
-	Size        *int64                          `json:"size,omitempty"`
-	UpdatedTime *string                         `json:"updated_time,omitempty"`
-	Version     *string                         `json:"version,omitempty"`
+	AccessMethods    []drs.AccessMethod `json:"access_methods,omitempty"`
+	ControlledAccess []string           `json:"controlled_access,omitempty"`
+	CreatedTime      *string            `json:"created_time,omitempty"`
+	Description      *string            `json:"description,omitempty"`
+	Did              string             `json:"did"`
+	FileName         *string            `json:"file_name,omitempty"`
+	Hashes           *map[string]string `json:"hashes,omitempty"`
+	Size             *int64             `json:"size,omitempty"`
+	UpdatedTime      *string            `json:"updated_time,omitempty"`
+	Version          *string            `json:"version,omitempty"`
 }
 
 func bulkCreateRequestFromMigration(records []MigrationRecord) bulkCreateRequest {
@@ -214,65 +263,27 @@ func bulkCreateRequestFromMigration(records []MigrationRecord) bulkCreateRequest
 				hashes[checksum.Type] = checksum.Checksum
 			}
 		}
-		auth := authPathMapFromMigration(record)
 		out.Records = append(out.Records, bulkInternalRecord{
-			Did:         record.ID,
-			Size:        &size,
-			FileName:    record.Name,
-			Version:     record.Version,
-			Description: record.Description,
-			CreatedTime: &created,
-			UpdatedTime: updated,
-			Hashes:      &hashes,
-			Auth:        auth,
+			Did:              record.ID,
+			Size:             &size,
+			FileName:         record.Name,
+			Version:          record.Version,
+			Description:      record.Description,
+			CreatedTime:      &created,
+			UpdatedTime:      updated,
+			Hashes:           &hashes,
+			AccessMethods:    record.AccessMethods,
+			ControlledAccess: migrationRecordControlledAccess(record),
 		})
 	}
 	return out
 }
 
-func authPathMapFromMigration(record MigrationRecord) *map[string]map[string][]string {
-	if len(record.AccessMethods) == 0 || len(record.Authz) == 0 {
-		return nil
+func migrationRecordControlledAccess(record MigrationRecord) []string {
+	if len(record.ControlledAccess) > 0 {
+		return record.ControlledAccess
 	}
-	auth := make(map[string]map[string][]string)
-	for _, resource := range record.Authz {
-		org, project := parseResourcePath(resource)
-		if org == "" {
-			continue
-		}
-		if auth[org] == nil {
-			auth[org] = make(map[string][]string)
-		}
-		for _, method := range record.AccessMethods {
-			if method.AccessUrl == nil || method.AccessUrl.Url == "" {
-				continue
-			}
-			auth[org][project] = appendUnique(auth[org][project], method.AccessUrl.Url)
-		}
-	}
-	if len(auth) == 0 {
-		return nil
-	}
-	return &auth
-}
-
-func parseResourcePath(path string) (string, string) {
-	path = strings.TrimSpace(path)
-	path = strings.TrimPrefix(path, "/programs/")
-	parts := strings.SplitN(path, "/projects/", 2)
-	if len(parts) == 1 {
-		return strings.TrimSpace(parts[0]), ""
-	}
-	return strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
-}
-
-func appendUnique(values []string, value string) []string {
-	for _, existing := range values {
-		if existing == value {
-			return values
-		}
-	}
-	return append(values, value)
+	return record.Authz
 }
 
 func (c *HTTPClient) endpoint(path string) string {
@@ -284,6 +295,15 @@ func (c *HTTPClient) endpoint(path string) string {
 		return c.baseURL + strings.TrimPrefix(path, "/index")
 	}
 	return c.baseURL + path
+}
+
+func (c *HTTPClient) userEndpoint(path string) string {
+	path = "/" + strings.TrimLeft(path, "/")
+	base := c.baseURL
+	if strings.HasSuffix(base, "/index") {
+		base = strings.TrimSuffix(base, "/index")
+	}
+	return base + path
 }
 
 func (c *HTTPClient) do(req *http.Request) (*http.Response, error) {
@@ -305,8 +325,12 @@ func (c *HTTPClient) do(req *http.Request) (*http.Response, error) {
 			lastErr = err
 		}
 		if resp != nil && resp.Body != nil {
-			_, _ = io.Copy(io.Discard, resp.Body)
-			_ = resp.Body.Close()
+			if _, copyErr := io.Copy(io.Discard, resp.Body); copyErr != nil && lastErr == nil {
+				lastErr = fmt.Errorf("discard retry response body: %w", copyErr)
+			}
+			if closeErr := resp.Body.Close(); closeErr != nil && lastErr == nil {
+				lastErr = fmt.Errorf("close retry response body: %w", closeErr)
+			}
 		}
 
 		timer := time.NewTimer(time.Duration(attempt) * 750 * time.Millisecond)
@@ -321,6 +345,14 @@ func (c *HTTPClient) do(req *http.Request) (*http.Response, error) {
 		}
 	}
 	return nil, lastErr
+}
+
+func readTrimmedBody(r io.Reader) (string, error) {
+	body, err := io.ReadAll(r)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(body)), nil
 }
 
 func shouldRetryHTTP(resp *http.Response, err error) bool {

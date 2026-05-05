@@ -29,6 +29,9 @@ curl -sSL https://calypr.org/syfon/install.sh | bash
 port: 8080
 auth:
   mode: local
+  basic:
+    username: "drs-user"
+    password: "drs-pass"
 database:
   sqlite:
     file: "drs_local.db"
@@ -55,8 +58,9 @@ curl -s http://localhost:8080/healthz
 Notes:
 - `auth.mode` is required and must be `local` or `gen3`.
 - Local development should run `auth.mode: local` with SQLite only.
-- In `local` mode, set `auth.basic.username/password` (or env `DRS_BASIC_AUTH_USER` / `DRS_BASIC_AUTH_PASSWORD`) to enforce HTTP basic auth.
+- In `local` mode, set `auth.basic.username/password` (or env `DRS_BASIC_AUTH_USER` / `DRS_BASIC_AUTH_PASSWORD`) to enforce HTTP basic auth. Unauthenticated local mode now requires the explicit development-only opt-in `auth.allow_unauthenticated: true`.
 - `gen3` mode is for deployed environments and requires PostgreSQL.
+- API route groups are enabled by default. Set `routes.*: false` or the matching `DRS_ENABLE_*` env var only when you intentionally want a reduced surface.
 
 Record scope note:
 - Syfon supports both scoped records (with `authz`, such as `/programs/<org>/projects/<project>`) and unscoped records (empty `authz`).
@@ -98,9 +102,9 @@ The server is configured via a YAML or JSON file. Use the following structure to
 port: 8080
 auth:
   mode: "local" # required: "local" or "gen3"
-  # basic:
-  #   username: "user"
-  #   password: "pass"
+  basic:
+    username: "user"
+    password: "pass"
 
 database:
   sqlite:
@@ -123,6 +127,7 @@ s3_credentials:
 ```
 
 In `gen3` mode, PostgreSQL is required unless `DRS_AUTH_MOCK_ENABLED=true` is set for local mock-auth testing.
+In `local` mode, Basic Auth or local CSV auth is required unless `auth.allow_unauthenticated: true` is explicitly set for development/testing.
 
 Detailed configuration reference (including env overrides): [docs/configuration.md](docs/configuration.md)
 
@@ -158,6 +163,9 @@ port: 8080
 
 auth:
     mode: local
+    basic:
+      username: "drs-user"
+      password: "drs-pass"
 
 database:
   sqlite:
@@ -180,8 +188,15 @@ syfon server --config local.yaml
 
 Upload a file
 ```
-syfon upload --file README.md
+syfon upload --file README.md --org syfon --project e2e
 ```
+
+When `--did` is omitted, Syfon deterministically mints the object ID from the
+file's SHA256 plus the canonical project scope
+(`/organization/<org>/project/<project>`). Because of that, `--project` is
+required whenever `--did` is omitted. The same file uploaded into the same
+project gets the same DID across Syfon/Gen3 instances; the same file in a
+different project gets a different DID.
 
 List records
 ```
@@ -232,10 +247,9 @@ The project uses a Makefile for common tasks:
 
 ## OpenAPI Codegen
 
-Syfon currently uses OpenAPI Generator for both server-side and client-facing API artifacts:
+Syfon currently uses `oapi-codegen` for both server-side and client-facing API artifacts:
 
-- `make gen` produces the DRS server stub package in `apigen/drs` from the GA4GH spec.
-- `make gen-lfs`, `make gen-bucket`, `make gen-metrics`, and `make gen-internal` refresh the generated model packages under `apigen/` that the client and server code both consume.
+- `make gen` bundles the GA4GH DRS spec into `apigen/openapi/openapi.yaml` and refreshes all generated packages under `apigen/client/*` and `apigen/server/*`.
 - The runtime HTTP wiring, middleware, and compatibility behavior still live in handwritten code under `cmd/server` and `internal/api/*`.
 - The client module itself is handwritten, but its request and response shapes come from the same generated OpenAPI contracts, so client and server stay aligned.
 
@@ -244,18 +258,15 @@ This split is intentional: generated code keeps the schema surface in sync, whil
 ### Quick rules of thumb
 
 - If you change the upstream GA4GH DRS schema or the Syfon overlay, run `make gen`.
-- If you change `apigen/api/lfs.openapi.yaml`, run `make gen-lfs`.
-- If you change `apigen/api/bucket.openapi.yaml`, run `make gen-bucket`.
-- If you change `apigen/api/metrics.openapi.yaml`, run `make gen-metrics`.
-- If you change `apigen/api/internal.openapi.yaml`, run `make gen-internal`.
+- If you change `apigen/openapi/lfs.openapi.yaml`, `apigen/openapi/bucket.openapi.yaml`, `apigen/openapi/metrics.openapi.yaml`, or `apigen/openapi/internal.openapi.yaml`, run `make gen`.
 - If you only change runtime wiring, auth, handlers, or business logic, you usually do not need codegen.
 - If a PR touches OpenAPI files, include the regenerated `apigen/*` output in the same commit.
 
 ### What to expect after regeneration
 
-- `apigen/drs` is overwritten with generated server code and generated DRS models.
-- The relevant `apigen/*api` package is overwritten with generated Go models and helper files.
-- `apigen/api/*.openapi.yaml` files are the bundled spec inputs that the runtime docs endpoint serves.
+- `apigen/server/drs` is overwritten with generated server code and generated DRS models.
+- The relevant `apigen/client/*` and `apigen/server/*` packages are overwritten with generated Go types and helper files.
+- `apigen/openapi/*.yaml` files are the bundled spec inputs that the runtime docs endpoint serves.
 - `go test ./...` or the affected package tests should still pass after the regen.
 
 ## Running Integration Tests

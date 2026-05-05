@@ -1,0 +1,176 @@
+openapi: 3.0.3
+info:
+  title: Bucket Credential API (DRS Server)
+  version: 1.0.0
+  description: |
+    Bucket credential and scope management API used by drs-server compatible clients.
+servers:
+  - url: /
+tags:
+  - name: bucket
+paths:
+  /data/buckets:
+    get:
+      tags:
+        - bucket
+      summary: List configured bucket credentials and org/project assignments
+      operationId: listBuckets
+      responses:
+        '200':
+          description: Bucket map
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BucketsResponse'
+        '401':
+          description: Authentication required
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
+    put:
+      tags:
+        - bucket
+      summary: Upsert bucket credential and claim org/project scope
+      operationId: putBucket
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PutBucketRequest'
+      responses:
+        '201':
+          description: Bucket credential and scope created/updated
+        '400':
+          description: Validation error
+        '401':
+          description: Authentication required
+        '403':
+          description: Forbidden
+        '409':
+          description: Scope already assigned to a different bucket/path
+        '500':
+          description: Internal server error
+  /data/buckets/{bucket}:
+    delete:
+      tags:
+        - bucket
+      summary: Delete bucket credential
+      operationId: deleteBucket
+      parameters:
+        - name: bucket
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Deleted
+        '400':
+          description: Validation error
+        '401':
+          description: Authentication required
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found
+        '500':
+          description: Internal server error
+  /data/buckets/{bucket}/scopes:
+    post:
+      tags:
+        - bucket
+      summary: Add an org/project scope to an existing bucket
+      operationId: addBucketScope
+      parameters:
+        - name: bucket
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddBucketScopeRequest'
+      responses:
+        '201':
+          description: Scope created
+        '400':
+          description: Validation error
+        '401':
+          description: Authentication required
+        '403':
+          description: Forbidden
+        '404':
+          description: Bucket not found
+        '409':
+          description: Scope already assigned to a different bucket/path
+        '500':
+          description: Internal server error
+components:
+  schemas:
+    PutBucketRequest:
+      type: object
+      required:
+        - bucket
+        - organization
+        - project_id
+      properties:
+        bucket:
+          type: string
+        provider:
+          type: string
+          description: Storage backend provider (s3|gcs|azure|file). Defaults to s3.
+        region:
+          type: string
+        access_key:
+          type: string
+        secret_key:
+          type: string
+        endpoint:
+          type: string
+        organization:
+          type: string
+        project_id:
+          type: string
+        path:
+          type: string
+          description: Optional s3://bucket/prefix path override
+    AddBucketScopeRequest:
+      type: object
+      required:
+        - organization
+        - project_id
+      properties:
+        organization:
+          type: string
+        project_id:
+          type: string
+        path:
+          type: string
+          description: Optional s3://bucket/prefix path override
+    BucketMetadata:
+      type: object
+      properties:
+        endpoint_url:
+          type: string
+        provider:
+          type: string
+        region:
+          type: string
+        programs:
+          type: array
+          items:
+            type: string
+    BucketsResponse:
+      type: object
+      required:
+        - S3_BUCKETS
+      properties:
+        S3_BUCKETS:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/BucketMetadata'

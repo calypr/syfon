@@ -62,7 +62,11 @@ func ParseFilePaths(filePath string, metadataEnabled bool) ([]string, error) {
 		func(filePath string, file *os.File) {
 			defer file.Close()
 
-			fi, _ := file.Stat()
+			fi, statErr := file.Stat()
+			if statErr != nil {
+				errs = append(errs, fmt.Errorf("file stat error for %s: %w", filePath, statErr))
+				return
+			}
 			if fi.IsDir() {
 				err = filepath.Walk(filePath, func(path string, fileInfo os.FileInfo, err error) error {
 					if err != nil {

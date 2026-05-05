@@ -36,6 +36,11 @@ jobs:
       - name: Download dependencies
         run: go mod download
 
+      - name: Verify generated API bindings are up to date
+        run: |
+          make gen-server gen-client
+          git diff --exit-code -- apigen/server apigen/client apigen/openapi/internal.openapi.yaml apigen/openapi/bucket.openapi.yaml
+
       - name: Run unit tests
         run: make test-unit
 
@@ -72,6 +77,7 @@ jobs:
         shell: bash
 
       - name: Upload binary endpoint coverage to Codecov (OIDC)
+        if: github.actor != 'nektos/act'
         id: codecov_binary_endpoint_oidc
         continue-on-error: true
         uses: codecov/codecov-action@v5
@@ -86,7 +92,7 @@ jobs:
           fail_ci_if_error: true
 
       - name: Upload binary endpoint coverage to Codecov (token fallback)
-        if: steps.codecov_binary_endpoint_oidc.outcome == 'failure'
+        if: github.actor != 'nektos/act' && steps.codecov_binary_endpoint_oidc.outcome == 'failure'
         continue-on-error: true
         uses: codecov/codecov-action@v5
         env:
@@ -100,6 +106,7 @@ jobs:
           fail_ci_if_error: false
 
       - name: Upload root coverage to Codecov (OIDC)
+        if: github.actor != 'nektos/act'
         id: codecov_root_oidc
         continue-on-error: true
         uses: codecov/codecov-action@v5
@@ -114,7 +121,7 @@ jobs:
           fail_ci_if_error: true
 
       - name: Upload root coverage to Codecov (token fallback)
-        if: steps.codecov_root_oidc.outcome == 'failure'
+        if: github.actor != 'nektos/act' && steps.codecov_root_oidc.outcome == 'failure'
         continue-on-error: true
         uses: codecov/codecov-action@v5
         env:
@@ -128,6 +135,7 @@ jobs:
           fail_ci_if_error: false
 
       - name: Upload client coverage to Codecov (OIDC)
+        if: github.actor != 'nektos/act'
         id: codecov_client_oidc
         continue-on-error: true
         uses: codecov/codecov-action@v5
@@ -142,7 +150,7 @@ jobs:
           fail_ci_if_error: true
 
       - name: Upload client coverage to Codecov (token fallback)
-        if: steps.codecov_client_oidc.outcome == 'failure'
+        if: github.actor != 'nektos/act' && steps.codecov_client_oidc.outcome == 'failure'
         continue-on-error: true
         uses: codecov/codecov-action@v5
         env:
@@ -155,6 +163,7 @@ jobs:
           verbose: true
           fail_ci_if_error: false
       - name: Upload coverage artifacts
+        if: github.actor != 'nektos/act'
         uses: actions/upload-artifact@v4
         with:
           name: coverage-${{ github.run_id }}
@@ -205,6 +214,7 @@ jobs:
           go test ./internal/urlmanager -run TestMVPMockServers_FakeGCSAndAzurite -count=1 -v
 
       - name: Upload Docker E2E cmd coverage to Codecov (OIDC)
+        if: github.actor != 'nektos/act'
         id: codecov_docker_cmd_oidc
         continue-on-error: true
         uses: codecov/codecov-action@v5
@@ -219,7 +229,7 @@ jobs:
           fail_ci_if_error: true
 
       - name: Upload Docker E2E cmd coverage to Codecov (token fallback)
-        if: steps.codecov_docker_cmd_oidc.outcome == 'failure'
+        if: github.actor != 'nektos/act' && steps.codecov_docker_cmd_oidc.outcome == 'failure'
         continue-on-error: true
         uses: codecov/codecov-action@v5
         env:
@@ -233,6 +243,7 @@ jobs:
           fail_ci_if_error: false
 
       - name: Upload Docker E2E coverage artifact
+        if: github.actor != 'nektos/act'
         uses: actions/upload-artifact@v4
         with:
           name: coverage-docker-e2e-${{ github.run_id }}

@@ -99,7 +99,9 @@ func (s *LFSServer) LfsVerify(ctx context.Context, request lfsapi.LfsVerifyReque
 
 	obj, err := s.om.GetObject(ctx, oid, "read")
 	if err == nil {
-		_ = s.om.RecordUpload(ctx, obj.Id)
+		if err := s.om.RecordUpload(ctx, obj.Id); err != nil {
+			return lfsapi.LfsVerify500ApplicationVndGitLfsPlusJSONResponse{Message: err.Error()}, nil
+		}
 		return lfsapi.LfsVerify200Response{}, nil
 	}
 
@@ -124,7 +126,9 @@ func (s *LFSServer) LfsVerify(ctx context.Context, request lfsapi.LfsVerifyReque
 		return lfsapi.LfsVerify500ApplicationVndGitLfsPlusJSONResponse{Message: err.Error()}, nil
 	}
 
-	_ = s.om.RecordUpload(ctx, internalObj.Id)
+	if err := s.om.RecordUpload(ctx, internalObj.Id); err != nil {
+		return lfsapi.LfsVerify500ApplicationVndGitLfsPlusJSONResponse{Message: err.Error()}, nil
+	}
 	return lfsapi.LfsVerify200Response{}, nil
 }
 
@@ -149,7 +153,10 @@ func (s *LFSServer) LfsStageMetadata(ctx context.Context, request lfsapi.LfsStag
 			return lfsapi.LfsStageMetadata400JSONResponse{Message: fmt.Sprintf("candidate[%d] invalid: %v", i, err)}, nil
 		}
 
-		oid, _ := common.CanonicalSHA256(internalObj.Checksums)
+		oid, ok := common.CanonicalSHA256(internalObj.Checksums)
+		if !ok {
+			return lfsapi.LfsStageMetadata400JSONResponse{Message: fmt.Sprintf("candidate[%d] missing canonical sha256", i)}, nil
+		}
 		entries = append(entries, models.PendingLFSMeta{
 			OID:       oid,
 			Candidate: drsCandidate,
@@ -171,7 +178,10 @@ func (s *LFSServer) LfsUploadProxy(ctx context.Context, request lfsapi.LfsUpload
 	}
 
 	creds, err := s.om.ListS3Credentials(ctx)
-	if err != nil || len(creds) == 0 {
+	if err != nil {
+		return lfsapi.LfsUploadProxy500TextResponse(err.Error()), nil
+	}
+	if len(creds) == 0 {
 		return lfsapi.LfsUploadProxy507TextResponse("no bucket configured"), nil
 	}
 	bucket := creds[0].Bucket
@@ -228,6 +238,8 @@ func (s *LFSServer) handleUploadInternal(ctx context.Context, body io.Reader, bu
 		return fmt.Errorf("failed to complete multipart upload: %w", err)
 	}
 
-	_ = s.om.RecordUpload(ctx, usageObjectID)
+	if err := s.om.RecordUpload(ctx, usageObjectID); err != nil {
+		return fmt.Errorf("failed to record upload usage: %w", err)
+	}
 	return nil
 }

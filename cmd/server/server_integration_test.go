@@ -43,6 +43,9 @@ func TestS3Integration(t *testing.T) {
 port: 8081
 auth:
   mode: local
+  basic:
+    username: "drs-user"
+    password: "drs-pass"
 database:
   sqlite:
     file: "test_integration.db"
@@ -53,8 +56,6 @@ s3_credentials:
     access_key: "test-key"
     secret_key: "test-secret"
     endpoint: "` + os.TempDir() + `"
-    billing_log_bucket: "test-bucket"
-    billing_log_prefix: ".syfon/provider-transfer-events"
 `
 		tmpfile, err := os.CreateTemp("", "test_config*.yaml")
 		if err != nil {
@@ -91,14 +92,12 @@ s3_credentials:
 	// Pre-load credentials from config (mimic server startup logic)
 	for _, c := range cfg.S3Credentials {
 		cred := &models.S3Credential{
-			Bucket:           c.Bucket,
-			Provider:         c.Provider,
-			Region:           c.Region,
-			AccessKey:        c.AccessKey,
-			SecretKey:        c.SecretKey,
-			Endpoint:         c.Endpoint,
-			BillingLogBucket: c.BillingLogBucket,
-			BillingLogPrefix: c.BillingLogPrefix,
+			Bucket:    c.Bucket,
+			Provider:  c.Provider,
+			Region:    c.Region,
+			AccessKey: c.AccessKey,
+			SecretKey: c.SecretKey,
+			Endpoint:  c.Endpoint,
 		}
 		if err := database.SaveS3Credential(context.Background(), cred); err != nil {
 			t.Fatalf("Failed to preload credential: %v", err)
@@ -109,8 +108,7 @@ s3_credentials:
 	uM.RegisterSigner(common.S3Provider, s3.NewS3Signer(database))
 	app := fiber.New()
 	om := core.NewObjectManager(database, uM)
-	internaldrs.RegisterInternalIndexRoutes(app, om)
-	internaldrs.RegisterInternalDataRoutes(app, om)
+	internaldrs.RegisterInternalRoutes(app, om)
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -147,7 +145,10 @@ s3_credentials:
 
 	// 2. Create internal blank upload and get a signed upload URL
 	key := fmt.Sprintf("test-upload-%d", time.Now().Unix())
-	internalUploadReq := map[string]interface{}{"guid": key}
+	internalUploadReq := map[string]interface{}{
+		"guid":   key,
+		"bucket": bucketName,
+	}
 	internalBody, _ := json.Marshal(internalUploadReq)
 	resp, err := client.Post(serverURL+"/data/upload", "application/json", bytes.NewReader(internalBody))
 	if err != nil {

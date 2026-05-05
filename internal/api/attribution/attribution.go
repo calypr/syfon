@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/calypr/syfon/apigen/server/drs"
+	internalauth "github.com/calypr/syfon/internal/auth"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/models"
@@ -17,6 +18,7 @@ import (
 
 type AccessDetails struct {
 	AccessID       string
+	Direction      string
 	StorageURL     string
 	RangeStart     *int64
 	RangeEnd       *int64
@@ -25,15 +27,15 @@ type AccessDetails struct {
 	ClientVersion  string
 }
 
-func RecordAccessIssued(ctx context.Context, om *core.ObjectManager, obj *models.InternalObject, details AccessDetails) {
+func RecordAccessIssued(ctx context.Context, om *core.ObjectManager, obj *models.InternalObject, details AccessDetails) error {
 	if om == nil || obj == nil {
-		return
+		return nil
 	}
 	ev := EventFromObject(ctx, obj, models.TransferEventAccessIssued, details)
 	if ev.EventID == "" {
-		return
+		return nil
 	}
-	_ = om.RecordTransferAttributionEvents(ctx, []models.TransferAttributionEvent{ev})
+	return om.RecordTransferAttributionEvents(ctx, []models.TransferAttributionEvent{ev})
 }
 
 func EventFromObject(ctx context.Context, obj *models.InternalObject, eventType string, details AccessDetails) models.TransferAttributionEvent {
@@ -60,6 +62,12 @@ func EventFromObject(ctx context.Context, obj *models.InternalObject, eventType 
 	}
 	org, project := scopeForAccess(obj, accessID)
 	provider, bucket := providerBucket(storageURL)
+	direction := strings.ToLower(strings.TrimSpace(details.Direction))
+	switch direction {
+	case models.ProviderTransferDirectionUpload:
+	default:
+		direction = models.ProviderTransferDirectionDownload
+	}
 	sha := sha256ForObject(obj)
 	bytesRequested := details.BytesRequested
 	if bytesRequested <= 0 && details.RangeStart != nil && details.RangeEnd != nil && *details.RangeEnd >= *details.RangeStart {
@@ -71,6 +79,7 @@ func EventFromObject(ctx context.Context, obj *models.InternalObject, eventType 
 	when := time.Now().UTC()
 	ev := models.TransferAttributionEvent{
 		EventType:      eventType,
+		Direction:      direction,
 		EventTime:      when,
 		RequestID:      common.GetRequestID(ctx),
 		ObjectID:       obj.Id,
@@ -117,6 +126,7 @@ func EventID(ev models.TransferAttributionEvent) string {
 	}
 	parts := []string{
 		ev.EventType,
+		ev.Direction,
 		ev.RequestID,
 		ev.ObjectID,
 		ev.SHA256,
@@ -142,14 +152,11 @@ func EventID(ev models.TransferAttributionEvent) string {
 }
 
 func ActorSubject(ctx context.Context) string {
-	if s, ok := ctx.Value(common.SubjectKey).(string); ok {
-		return strings.TrimSpace(s)
-	}
-	return ""
+	return strings.TrimSpace(internalauth.FromContext(ctx).Subject)
 }
 
 func ActorEmail(ctx context.Context) string {
-	claims, _ := ctx.Value(common.ClaimsKey).(map[string]interface{})
+	claims := internalauth.FromContext(ctx).Claims
 	for _, key := range []string{"email", "preferred_username", "username"} {
 		if v, ok := claims[key].(string); ok && strings.Contains(v, "@") {
 			return strings.TrimSpace(v)
@@ -163,10 +170,7 @@ func ActorEmail(ctx context.Context) string {
 }
 
 func authMode(ctx context.Context) string {
-	if s, ok := ctx.Value(common.AuthModeKey).(string); ok {
-		return strings.TrimSpace(s)
-	}
-	return ""
+	return strings.TrimSpace(internalauth.FromContext(ctx).Mode)
 }
 
 func accessMethods(obj *models.InternalObject) []drs.AccessMethod {
@@ -188,14 +192,6 @@ func scopeForAccess(obj *models.InternalObject, accessID string) (string, string
 		if accessID != "" && !strings.EqualFold(accessMethodID(am), accessID) {
 			continue
 		}
-		if am.Authorizations != nil {
-			for org, projects := range *am.Authorizations {
-				if len(projects) == 0 {
-					return org, ""
-				}
-				return org, projects[0]
-			}
-		}
 	}
 	if len(obj.Authorizations) > 0 {
 		for org, projects := range obj.Authorizations {
@@ -203,14 +199,6 @@ func scopeForAccess(obj *models.InternalObject, accessID string) (string, string
 				return org, ""
 			}
 			return org, projects[0]
-		}
-	}
-	if len(obj.Auth) > 0 {
-		for org, projects := range obj.Auth {
-			for project := range projects {
-				return org, project
-			}
-			return org, ""
 		}
 	}
 	return "", ""

@@ -11,8 +11,8 @@ import (
 	"github.com/calypr/syfon/client/common"
 	sylogs "github.com/calypr/syfon/client/logs"
 	"github.com/calypr/syfon/client/transfer"
-	sydownload "github.com/calypr/syfon/client/xfer/download"
-	syupload "github.com/calypr/syfon/client/xfer/upload"
+	sydownload "github.com/calypr/syfon/client/transfer/download"
+	syupload "github.com/calypr/syfon/client/transfer/upload"
 )
 
 type UploadOptions struct {
@@ -49,7 +49,7 @@ type downloadManifestEntry struct {
 }
 
 // Upload handles local file uploads, manifest-driven uploads, and retrying failed uploads.
-func Upload(ctx context.Context, bk transfer.Backend, sourcePath string, opts UploadOptions) error {
+func Upload(ctx context.Context, bk transfer.MultipartBackend, sourcePath string, opts UploadOptions) error {
 	if bk == nil {
 		return fmt.Errorf("backend is required")
 	}
@@ -75,7 +75,7 @@ func Upload(ctx context.Context, bk transfer.Backend, sourcePath string, opts Up
 }
 
 // Download handles single- and multi-file downloads and manifest expansion.
-func Download(ctx context.Context, api *Client, bk transfer.Backend, guids []string, opts DownloadOptions) error {
+func Download(ctx context.Context, api *Client, bk transfer.ReadBackend, guids []string, opts DownloadOptions) error {
 	if api == nil {
 		return fmt.Errorf("client is required")
 	}
@@ -115,7 +115,7 @@ func Download(ctx context.Context, api *Client, bk transfer.Backend, guids []str
 	)
 }
 
-func uploadFromPath(ctx context.Context, bk transfer.Backend, logger transfer.TransferLogger, sourcePath string, opts UploadOptions) error {
+func uploadFromPath(ctx context.Context, bk transfer.MultipartBackend, logger transfer.TransferLogger, sourcePath string, opts UploadOptions) error {
 	absUploadPath, err := common.GetAbsolutePath(sourcePath)
 	if err != nil {
 		return fmt.Errorf("resolve upload path: %w", err)
@@ -154,7 +154,7 @@ func uploadFromPath(ctx context.Context, bk transfer.Backend, logger transfer.Tr
 	return uploadErr
 }
 
-func uploadFromManifest(ctx context.Context, bk transfer.Backend, logger transfer.TransferLogger, uploadPath string, opts UploadOptions) error {
+func uploadFromManifest(ctx context.Context, bk transfer.MultipartBackend, logger transfer.TransferLogger, uploadPath string, opts UploadOptions) error {
 	absUploadPath, err := common.GetAbsolutePath(uploadPath)
 	if err != nil {
 		return fmt.Errorf("resolve upload path: %w", err)
@@ -191,7 +191,7 @@ func uploadFromManifest(ctx context.Context, bk transfer.Backend, logger transfe
 	return uploadErr
 }
 
-func retryFailedUploadsFromFile(ctx context.Context, bk transfer.Backend, logger transfer.TransferLogger, failedLogPath string) error {
+func retryFailedUploadsFromFile(ctx context.Context, bk transfer.MultipartBackend, logger transfer.TransferLogger, failedLogPath string) error {
 	data, err := os.ReadFile(failedLogPath)
 	if err != nil {
 		return fmt.Errorf("read failed log %s: %w", failedLogPath, err)

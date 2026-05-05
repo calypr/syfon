@@ -14,6 +14,32 @@ import (
 	"time"
 )
 
+func discoverJWKSURL(issuer string) (string, error) {
+	issuer = strings.TrimRight(issuer, "/")
+	openidConfigURL := issuer + "/.well-known/openid-configuration"
+	resp, err := http.Get(openidConfigURL)
+	if err == nil {
+		if resp.StatusCode == http.StatusOK {
+			var data struct {
+				JWKSURI string `json:"jwks_uri"`
+			}
+			err := json.NewDecoder(resp.Body).Decode(&data)
+			closeErr := resp.Body.Close()
+			if closeErr != nil {
+				return "", fmt.Errorf("close openid configuration response: %w", closeErr)
+			}
+			if err == nil && data.JWKSURI != "" {
+				return data.JWKSURI, nil
+			}
+		} else {
+			if closeErr := resp.Body.Close(); closeErr != nil {
+				return "", fmt.Errorf("close openid configuration response: %w", closeErr)
+			}
+		}
+	}
+	return issuer + "/.well-known/jwks.json", nil
+}
+
 // JWKSCache holds JWKS public keys for JWT signature verification
 type JWKSCache struct {
 	mu        sync.RWMutex
@@ -64,7 +90,10 @@ func (c *JWKSCache) FetchKeys() error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		body, err := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		if err != nil {
+			return fmt.Errorf("JWKS fetch failed with status %d and unreadable body: %w", resp.StatusCode, err)
+		}
 		return fmt.Errorf("JWKS fetch failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
@@ -159,5 +188,3 @@ func bytesToInt(b []byte) int {
 	// For larger values, use the last 4 bytes
 	return int(binary.BigEndian.Uint32(b[len(b)-4:]))
 }
-
-

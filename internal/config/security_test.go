@@ -3,84 +3,66 @@ package config
 import (
 	"bytes"
 	"encoding/json"
-	"os"
 	"testing"
 )
 
-// Test HIGH-1 fix: Basic auth warning in local mode
-func TestLoadConfig_LocalModeWithoutBasicAuthWarning(t *testing.T) {
-	oldStderr := os.Stderr
-	defer func() { os.Stderr = oldStderr }()
+func TestLoadConfig_LocalModeWithoutBasicAuthRejected(t *testing.T) {
+	t.Setenv("DRS_AUTH_MODE", "local")
+	t.Setenv("DRS_DB_SQLITE_FILE", ":memory:")
+	t.Setenv("DRS_BASIC_AUTH_USER", "")
+	t.Setenv("DRS_BASIC_AUTH_PASSWORD", "")
+	t.Setenv("DRS_LOCAL_AUTHZ_CSV", "")
+	t.Setenv("DRS_ALLOW_UNAUTHENTICATED_LOCAL", "")
 
-	// Capture stderr
-	r, w, _ := os.Pipe()
-	os.Stderr = w
+	_, err := LoadConfig("")
+	if err == nil {
+		t.Fatal("expected local mode without auth to fail")
+	}
+	if !bytes.Contains([]byte(err.Error()), []byte("auth.basic.username/password")) {
+		t.Fatalf("expected auth guidance in error, got: %v", err)
+	}
+}
 
-	// Clean up env vars
-	defer func() {
-		os.Unsetenv("DRS_AUTH_MODE")
-		os.Unsetenv("DRS_BASIC_AUTH_USER")
-		os.Unsetenv("DRS_BASIC_AUTH_PASSWORD")
-		os.Unsetenv("DRS_DB_SQLITE_FILE")
-	}()
-
-	// Set local auth mode without basic auth
-	os.Setenv("DRS_AUTH_MODE", "local")
-	os.Unsetenv("DRS_BASIC_AUTH_USER")
-	os.Unsetenv("DRS_BASIC_AUTH_PASSWORD")
-	os.Setenv("DRS_DB_SQLITE_FILE", ":memory:")
+func TestLoadConfig_LocalModeAllowsExplicitUnauthenticatedDevMode(t *testing.T) {
+	t.Setenv("DRS_AUTH_MODE", "local")
+	t.Setenv("DRS_DB_SQLITE_FILE", ":memory:")
+	t.Setenv("DRS_ALLOW_UNAUTHENTICATED_LOCAL", "true")
 
 	cfg, err := LoadConfig("")
 	if err != nil {
 		t.Fatalf("LoadConfig() error = %v", err)
 	}
-
-	w.Close()
-	var buf bytes.Buffer
-	buf.ReadFrom(r)
-	output := buf.String()
-
 	if cfg.Auth.Mode != AuthModeLocal {
 		t.Errorf("Auth.Mode = %q, want local", cfg.Auth.Mode)
 	}
-
-	if !bytes.Contains([]byte(output), []byte("WARNING")) {
-		t.Errorf("Expected WARNING in stderr, got: %s", output)
+	if !cfg.Auth.AllowUnauthenticated {
+		t.Fatal("expected explicit unauthenticated local opt-in")
 	}
 }
 
-// Test HIGH-2 fix: Mock auth rejected in gen3 mode
-func TestLoadConfig_MockAuthRejectsGen3Mode(t *testing.T) {
-	defer func() {
-		os.Unsetenv("DRS_AUTH_MODE")
-		os.Unsetenv("DRS_AUTH_MOCK_ENABLED")
-		os.Unsetenv("DRS_DB_SQLITE_FILE")
-	}()
+// Test HIGH-2 fix: Mock auth is supported in gen3 mode
+func TestLoadConfig_MockAuthAllowsGen3Mode(t *testing.T) {
+	t.Setenv("DRS_AUTH_MODE", "gen3")
+	t.Setenv("DRS_AUTH_MOCK_ENABLED", "true")
+	t.Setenv("DRS_DB_HOST", "localhost")
+	t.Setenv("DRS_DB_DATABASE", "testdb")
 
-	os.Setenv("DRS_AUTH_MODE", "gen3")
-	os.Setenv("DRS_AUTH_MOCK_ENABLED", "true")
-	os.Setenv("DRS_DB_SQLITE_FILE", ":memory:")
-
-	_, err := LoadConfig("")
-	if err == nil {
-		t.Errorf("LoadConfig() expected error for mock auth in gen3 mode, got nil")
+	cfg, err := LoadConfig("")
+	if err != nil {
+		t.Fatalf("LoadConfig() unexpected error = %v", err)
 	}
-	if err.Error() != "mock auth (DRS_AUTH_MOCK_ENABLED) is only allowed in local auth mode, not in \"gen3\"" {
-		t.Errorf("LoadConfig() error = %v, want mock auth error", err)
+	if cfg.Auth.Mode != AuthModeGen3 {
+		t.Errorf("Auth.Mode = %q, want gen3", cfg.Auth.Mode)
 	}
 }
 
 // Test MED-2 fix: Postgres SSL mode defaults to "require"
 func TestLoadConfig_PostgresSSLModeDefault(t *testing.T) {
-	defer func() {
-		os.Unsetenv("DRS_AUTH_MODE")
-		os.Unsetenv("DRS_DB_HOST")
-		os.Unsetenv("DRS_DB_DATABASE")
-	}()
-
-	os.Setenv("DRS_AUTH_MODE", "local")
-	os.Setenv("DRS_DB_HOST", "localhost")
-	os.Setenv("DRS_DB_DATABASE", "testdb")
+	t.Setenv("DRS_AUTH_MODE", "local")
+	t.Setenv("DRS_BASIC_AUTH_USER", "drs-user")
+	t.Setenv("DRS_BASIC_AUTH_PASSWORD", "drs-pass")
+	t.Setenv("DRS_DB_HOST", "localhost")
+	t.Setenv("DRS_DB_DATABASE", "testdb")
 
 	cfg, err := LoadConfig("")
 	if err != nil {
@@ -171,4 +153,3 @@ func TestSecretRedaction_S3Config(t *testing.T) {
 		t.Errorf("Expected at least 2 REDACTED markers, got %d: %s", redactCount, output)
 	}
 }
-

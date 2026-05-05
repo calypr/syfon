@@ -31,13 +31,6 @@ const (
 	Unmatched ProviderTransferReconciliationStatus = "unmatched"
 )
 
-// Defines values for ProviderTransferSyncStatus.
-const (
-	Completed ProviderTransferSyncStatus = "completed"
-	Failed    ProviderTransferSyncStatus = "failed"
-	Pending   ProviderTransferSyncStatus = "pending"
-)
-
 // Defines values for TransferBreakdownResponseGroupBy.
 const (
 	TransferBreakdownResponseGroupByObject   TransferBreakdownResponseGroupBy = "object"
@@ -128,55 +121,6 @@ type ProviderTransferEventsRequest struct {
 
 // ProviderTransferReconciliationStatus defines model for ProviderTransferReconciliationStatus.
 type ProviderTransferReconciliationStatus string
-
-// ProviderTransferSyncRequest defines model for ProviderTransferSyncRequest.
-type ProviderTransferSyncRequest struct {
-	AmbiguousEvents *int64 `json:"ambiguous_events,omitempty"`
-
-	// Bucket Bucket filter. When omitted, all configured buckets are recorded.
-	Bucket         *string   `json:"bucket,omitempty"`
-	ErrorMessage   *string   `json:"error_message,omitempty"`
-	From           time.Time `json:"from"`
-	ImportedEvents *int64    `json:"imported_events,omitempty"`
-	MatchedEvents  *int64    `json:"matched_events,omitempty"`
-	Organization   *string   `json:"organization,omitempty"`
-	Project        *string   `json:"project,omitempty"`
-
-	// Provider Provider filter. When omitted, all configured buckets are recorded.
-	Provider        *string                     `json:"provider,omitempty"`
-	Status          *ProviderTransferSyncStatus `json:"status,omitempty"`
-	To              time.Time                   `json:"to"`
-	UnmatchedEvents *int64                      `json:"unmatched_events,omitempty"`
-}
-
-// ProviderTransferSyncResponse defines model for ProviderTransferSyncResponse.
-type ProviderTransferSyncResponse struct {
-	Recorded *int                       `json:"recorded,omitempty"`
-	SyncRuns *[]ProviderTransferSyncRun `json:"sync_runs,omitempty"`
-}
-
-// ProviderTransferSyncRun defines model for ProviderTransferSyncRun.
-type ProviderTransferSyncRun struct {
-	AmbiguousEvents *int64                      `json:"ambiguous_events,omitempty"`
-	Bucket          *string                     `json:"bucket,omitempty"`
-	CompletedAt     *time.Time                  `json:"completed_at"`
-	ErrorMessage    *string                     `json:"error_message,omitempty"`
-	From            *time.Time                  `json:"from,omitempty"`
-	ImportedEvents  *int64                      `json:"imported_events,omitempty"`
-	MatchedEvents   *int64                      `json:"matched_events,omitempty"`
-	Organization    *string                     `json:"organization,omitempty"`
-	Project         *string                     `json:"project,omitempty"`
-	Provider        *string                     `json:"provider,omitempty"`
-	RequestedAt     *time.Time                  `json:"requested_at,omitempty"`
-	StartedAt       *time.Time                  `json:"started_at"`
-	Status          *ProviderTransferSyncStatus `json:"status,omitempty"`
-	SyncId          *string                     `json:"sync_id,omitempty"`
-	To              *time.Time                  `json:"to,omitempty"`
-	UnmatchedEvents *int64                      `json:"unmatched_events,omitempty"`
-}
-
-// ProviderTransferSyncStatus defines model for ProviderTransferSyncStatus.
-type ProviderTransferSyncStatus string
 
 // TransferAttributionBreakdown defines model for TransferAttributionBreakdown.
 type TransferAttributionBreakdown struct {
@@ -295,20 +239,6 @@ type RecordProviderTransferEventsParams struct {
 	Project *Project `form:"project,omitempty" json:"project,omitempty"`
 }
 
-// ListProviderTransferSyncParams defines parameters for ListProviderTransferSync.
-type ListProviderTransferSyncParams struct {
-	// Organization Organization/program scope filter.
-	Organization *Organization `form:"organization,omitempty" json:"organization,omitempty"`
-
-	// Project Project scope filter. Requires organization when set.
-	Project  *Project  `form:"project,omitempty" json:"project,omitempty"`
-	From     *From     `form:"from,omitempty" json:"from,omitempty"`
-	To       *To       `form:"to,omitempty" json:"to,omitempty"`
-	Provider *Provider `form:"provider,omitempty" json:"provider,omitempty"`
-	Bucket   *Bucket   `form:"bucket,omitempty" json:"bucket,omitempty"`
-	Limit    *int      `form:"limit,omitempty" json:"limit,omitempty"`
-}
-
 // GetMetricsSummaryParams defines parameters for GetMetricsSummary.
 type GetMetricsSummaryParams struct {
 	InactiveDays *int `form:"inactive_days,omitempty" json:"inactive_days,omitempty"`
@@ -370,9 +300,6 @@ type GetTransferSummaryParams struct {
 
 // RecordProviderTransferEventsJSONRequestBody defines body for RecordProviderTransferEvents for application/json ContentType.
 type RecordProviderTransferEventsJSONRequestBody = ProviderTransferEventsRequest
-
-// RecordProviderTransferSyncJSONRequestBody defines body for RecordProviderTransferSync for application/json ContentType.
-type RecordProviderTransferSyncJSONRequestBody = ProviderTransferSyncRequest
 
 // RequestEditorFn  is the function signature for the RequestEditor callback function
 type RequestEditorFn func(ctx context.Context, req *http.Request) error
@@ -458,14 +385,6 @@ type ClientInterface interface {
 
 	RecordProviderTransferEvents(ctx context.Context, params *RecordProviderTransferEventsParams, body RecordProviderTransferEventsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// ListProviderTransferSync request
-	ListProviderTransferSync(ctx context.Context, params *ListProviderTransferSyncParams, reqEditors ...RequestEditorFn) (*http.Response, error)
-
-	// RecordProviderTransferSyncWithBody request with any body
-	RecordProviderTransferSyncWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
-
-	RecordProviderTransferSync(ctx context.Context, body RecordProviderTransferSyncJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
-
 	// GetMetricsSummary request
 	GetMetricsSummary(ctx context.Context, params *GetMetricsSummaryParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -514,42 +433,6 @@ func (c *Client) RecordProviderTransferEventsWithBody(ctx context.Context, param
 
 func (c *Client) RecordProviderTransferEvents(ctx context.Context, params *RecordProviderTransferEventsParams, body RecordProviderTransferEventsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewRecordProviderTransferEventsRequest(c.Server, params, body)
-	if err != nil {
-		return nil, err
-	}
-	req = req.WithContext(ctx)
-	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
-		return nil, err
-	}
-	return c.Client.Do(req)
-}
-
-func (c *Client) ListProviderTransferSync(ctx context.Context, params *ListProviderTransferSyncParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewListProviderTransferSyncRequest(c.Server, params)
-	if err != nil {
-		return nil, err
-	}
-	req = req.WithContext(ctx)
-	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
-		return nil, err
-	}
-	return c.Client.Do(req)
-}
-
-func (c *Client) RecordProviderTransferSyncWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewRecordProviderTransferSyncRequestWithBody(c.Server, contentType, body)
-	if err != nil {
-		return nil, err
-	}
-	req = req.WithContext(ctx)
-	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
-		return nil, err
-	}
-	return c.Client.Do(req)
-}
-
-func (c *Client) RecordProviderTransferSync(ctx context.Context, body RecordProviderTransferSyncJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewRecordProviderTransferSyncRequest(c.Server, body)
 	if err != nil {
 		return nil, err
 	}
@@ -847,191 +730,6 @@ func NewRecordProviderTransferEventsRequestWithBody(server string, params *Recor
 		}
 
 		queryURL.RawQuery = queryValues.Encode()
-	}
-
-	req, err := http.NewRequest("POST", queryURL.String(), body)
-	if err != nil {
-		return nil, err
-	}
-
-	req.Header.Add("Content-Type", contentType)
-
-	return req, nil
-}
-
-// NewListProviderTransferSyncRequest generates requests for ListProviderTransferSync
-func NewListProviderTransferSyncRequest(server string, params *ListProviderTransferSyncParams) (*http.Request, error) {
-	var err error
-
-	serverURL, err := url.Parse(server)
-	if err != nil {
-		return nil, err
-	}
-
-	operationPath := fmt.Sprintf("/index/v1/metrics/provider-transfer-sync")
-	if operationPath[0] == '/' {
-		operationPath = "." + operationPath
-	}
-
-	queryURL, err := serverURL.Parse(operationPath)
-	if err != nil {
-		return nil, err
-	}
-
-	if params != nil {
-		queryValues := queryURL.Query()
-
-		if params.Organization != nil {
-
-			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "organization", runtime.ParamLocationQuery, *params.Organization); err != nil {
-				return nil, err
-			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
-				return nil, err
-			} else {
-				for k, v := range parsed {
-					for _, v2 := range v {
-						queryValues.Add(k, v2)
-					}
-				}
-			}
-
-		}
-
-		if params.Project != nil {
-
-			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "project", runtime.ParamLocationQuery, *params.Project); err != nil {
-				return nil, err
-			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
-				return nil, err
-			} else {
-				for k, v := range parsed {
-					for _, v2 := range v {
-						queryValues.Add(k, v2)
-					}
-				}
-			}
-
-		}
-
-		if params.From != nil {
-
-			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "from", runtime.ParamLocationQuery, *params.From); err != nil {
-				return nil, err
-			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
-				return nil, err
-			} else {
-				for k, v := range parsed {
-					for _, v2 := range v {
-						queryValues.Add(k, v2)
-					}
-				}
-			}
-
-		}
-
-		if params.To != nil {
-
-			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "to", runtime.ParamLocationQuery, *params.To); err != nil {
-				return nil, err
-			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
-				return nil, err
-			} else {
-				for k, v := range parsed {
-					for _, v2 := range v {
-						queryValues.Add(k, v2)
-					}
-				}
-			}
-
-		}
-
-		if params.Provider != nil {
-
-			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "provider", runtime.ParamLocationQuery, *params.Provider); err != nil {
-				return nil, err
-			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
-				return nil, err
-			} else {
-				for k, v := range parsed {
-					for _, v2 := range v {
-						queryValues.Add(k, v2)
-					}
-				}
-			}
-
-		}
-
-		if params.Bucket != nil {
-
-			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "bucket", runtime.ParamLocationQuery, *params.Bucket); err != nil {
-				return nil, err
-			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
-				return nil, err
-			} else {
-				for k, v := range parsed {
-					for _, v2 := range v {
-						queryValues.Add(k, v2)
-					}
-				}
-			}
-
-		}
-
-		if params.Limit != nil {
-
-			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "limit", runtime.ParamLocationQuery, *params.Limit); err != nil {
-				return nil, err
-			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
-				return nil, err
-			} else {
-				for k, v := range parsed {
-					for _, v2 := range v {
-						queryValues.Add(k, v2)
-					}
-				}
-			}
-
-		}
-
-		queryURL.RawQuery = queryValues.Encode()
-	}
-
-	req, err := http.NewRequest("GET", queryURL.String(), nil)
-	if err != nil {
-		return nil, err
-	}
-
-	return req, nil
-}
-
-// NewRecordProviderTransferSyncRequest calls the generic RecordProviderTransferSync builder with application/json body
-func NewRecordProviderTransferSyncRequest(server string, body RecordProviderTransferSyncJSONRequestBody) (*http.Request, error) {
-	var bodyReader io.Reader
-	buf, err := json.Marshal(body)
-	if err != nil {
-		return nil, err
-	}
-	bodyReader = bytes.NewReader(buf)
-	return NewRecordProviderTransferSyncRequestWithBody(server, "application/json", bodyReader)
-}
-
-// NewRecordProviderTransferSyncRequestWithBody generates requests for RecordProviderTransferSync with any type of body
-func NewRecordProviderTransferSyncRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
-	var err error
-
-	serverURL, err := url.Parse(server)
-	if err != nil {
-		return nil, err
-	}
-
-	operationPath := fmt.Sprintf("/index/v1/metrics/provider-transfer-sync")
-	if operationPath[0] == '/' {
-		operationPath = "." + operationPath
-	}
-
-	queryURL, err := serverURL.Parse(operationPath)
-	if err != nil {
-		return nil, err
 	}
 
 	req, err := http.NewRequest("POST", queryURL.String(), body)
@@ -1613,14 +1311,6 @@ type ClientWithResponsesInterface interface {
 
 	RecordProviderTransferEventsWithResponse(ctx context.Context, params *RecordProviderTransferEventsParams, body RecordProviderTransferEventsJSONRequestBody, reqEditors ...RequestEditorFn) (*RecordProviderTransferEventsResponse, error)
 
-	// ListProviderTransferSyncWithResponse request
-	ListProviderTransferSyncWithResponse(ctx context.Context, params *ListProviderTransferSyncParams, reqEditors ...RequestEditorFn) (*ListProviderTransferSyncResponse, error)
-
-	// RecordProviderTransferSyncWithBodyWithResponse request with any body
-	RecordProviderTransferSyncWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RecordProviderTransferSyncResponse, error)
-
-	RecordProviderTransferSyncWithResponse(ctx context.Context, body RecordProviderTransferSyncJSONRequestBody, reqEditors ...RequestEditorFn) (*RecordProviderTransferSyncResponse, error)
-
 	// GetMetricsSummaryWithResponse request
 	GetMetricsSummaryWithResponse(ctx context.Context, params *GetMetricsSummaryParams, reqEditors ...RequestEditorFn) (*GetMetricsSummaryResponse, error)
 
@@ -1691,50 +1381,6 @@ func (r RecordProviderTransferEventsResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r RecordProviderTransferEventsResponse) StatusCode() int {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.StatusCode
-	}
-	return 0
-}
-
-type ListProviderTransferSyncResponse struct {
-	Body         []byte
-	HTTPResponse *http.Response
-	JSON200      *ProviderTransferSyncResponse
-}
-
-// Status returns HTTPResponse.Status
-func (r ListProviderTransferSyncResponse) Status() string {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.Status
-	}
-	return http.StatusText(0)
-}
-
-// StatusCode returns HTTPResponse.StatusCode
-func (r ListProviderTransferSyncResponse) StatusCode() int {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.StatusCode
-	}
-	return 0
-}
-
-type RecordProviderTransferSyncResponse struct {
-	Body         []byte
-	HTTPResponse *http.Response
-	JSON201      *ProviderTransferSyncResponse
-}
-
-// Status returns HTTPResponse.Status
-func (r RecordProviderTransferSyncResponse) Status() string {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.Status
-	}
-	return http.StatusText(0)
-}
-
-// StatusCode returns HTTPResponse.StatusCode
-func (r RecordProviderTransferSyncResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -1842,32 +1488,6 @@ func (c *ClientWithResponses) RecordProviderTransferEventsWithResponse(ctx conte
 	return ParseRecordProviderTransferEventsResponse(rsp)
 }
 
-// ListProviderTransferSyncWithResponse request returning *ListProviderTransferSyncResponse
-func (c *ClientWithResponses) ListProviderTransferSyncWithResponse(ctx context.Context, params *ListProviderTransferSyncParams, reqEditors ...RequestEditorFn) (*ListProviderTransferSyncResponse, error) {
-	rsp, err := c.ListProviderTransferSync(ctx, params, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseListProviderTransferSyncResponse(rsp)
-}
-
-// RecordProviderTransferSyncWithBodyWithResponse request with arbitrary body returning *RecordProviderTransferSyncResponse
-func (c *ClientWithResponses) RecordProviderTransferSyncWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RecordProviderTransferSyncResponse, error) {
-	rsp, err := c.RecordProviderTransferSyncWithBody(ctx, contentType, body, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseRecordProviderTransferSyncResponse(rsp)
-}
-
-func (c *ClientWithResponses) RecordProviderTransferSyncWithResponse(ctx context.Context, body RecordProviderTransferSyncJSONRequestBody, reqEditors ...RequestEditorFn) (*RecordProviderTransferSyncResponse, error) {
-	rsp, err := c.RecordProviderTransferSync(ctx, body, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseRecordProviderTransferSyncResponse(rsp)
-}
-
 // GetMetricsSummaryWithResponse request returning *GetMetricsSummaryResponse
 func (c *ClientWithResponses) GetMetricsSummaryWithResponse(ctx context.Context, params *GetMetricsSummaryParams, reqEditors ...RequestEditorFn) (*GetMetricsSummaryResponse, error) {
 	rsp, err := c.GetMetricsSummary(ctx, params, reqEditors...)
@@ -1963,58 +1583,6 @@ func ParseRecordProviderTransferEventsResponse(rsp *http.Response) (*RecordProvi
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
 		var dest TransferEventsRecordedResponse
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON201 = &dest
-
-	}
-
-	return response, nil
-}
-
-// ParseListProviderTransferSyncResponse parses an HTTP response from a ListProviderTransferSyncWithResponse call
-func ParseListProviderTransferSyncResponse(rsp *http.Response) (*ListProviderTransferSyncResponse, error) {
-	bodyBytes, err := io.ReadAll(rsp.Body)
-	defer func() { _ = rsp.Body.Close() }()
-	if err != nil {
-		return nil, err
-	}
-
-	response := &ListProviderTransferSyncResponse{
-		Body:         bodyBytes,
-		HTTPResponse: rsp,
-	}
-
-	switch {
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest ProviderTransferSyncResponse
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON200 = &dest
-
-	}
-
-	return response, nil
-}
-
-// ParseRecordProviderTransferSyncResponse parses an HTTP response from a RecordProviderTransferSyncWithResponse call
-func ParseRecordProviderTransferSyncResponse(rsp *http.Response) (*RecordProviderTransferSyncResponse, error) {
-	bodyBytes, err := io.ReadAll(rsp.Body)
-	defer func() { _ = rsp.Body.Close() }()
-	if err != nil {
-		return nil, err
-	}
-
-	response := &RecordProviderTransferSyncResponse{
-		Body:         bodyBytes,
-		HTTPResponse: rsp,
-	}
-
-	switch {
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
-		var dest ProviderTransferSyncResponse
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

@@ -45,12 +45,14 @@ jobs:
         run: cp install.sh ./site/install.sh
 
       - name: Upload Pages artifact
+        if: github.actor != 'nektos/act'
         uses: actions/upload-pages-artifact@v3
         with:
           path: site
 
   deploy:
     name: Deploy to GitHub Pages
+    if: github.actor != 'nektos/act'
     needs: build
     runs-on: ubuntu-latest
     environment:

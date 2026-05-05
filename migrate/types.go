@@ -52,21 +52,26 @@ type Loader interface {
 	LoadBatch(ctx context.Context, records []MigrationRecord) error
 }
 
+type PrivilegeLister interface {
+	UserPrivileges(ctx context.Context) (map[string]map[string]bool, error)
+}
+
 type DumpReader interface {
 	ReadBatches(ctx context.Context, batchSize int, fn func([]MigrationRecord) error) error
 }
 
 type MigrationRecord struct {
-	ID            string             `json:"id"`
-	Name          *string            `json:"name,omitempty"`
-	Size          int64              `json:"size"`
-	Version       *string            `json:"version,omitempty"`
-	Description   *string            `json:"description,omitempty"`
-	CreatedTime   time.Time          `json:"created_time"`
-	UpdatedTime   *time.Time         `json:"updated_time,omitempty"`
-	Checksums     []drs.Checksum     `json:"checksums"`
-	AccessMethods []drs.AccessMethod `json:"access_methods,omitempty"`
-	Authz         []string           `json:"authz,omitempty"`
+	ID               string             `json:"id"`
+	Name             *string            `json:"name,omitempty"`
+	Size             int64              `json:"size"`
+	Version          *string            `json:"version,omitempty"`
+	Description      *string            `json:"description,omitempty"`
+	CreatedTime      time.Time          `json:"created_time"`
+	UpdatedTime      *time.Time         `json:"updated_time,omitempty"`
+	Checksums        []drs.Checksum     `json:"checksums"`
+	AccessMethods    []drs.AccessMethod `json:"access_methods,omitempty"`
+	ControlledAccess []string           `json:"controlled_access,omitempty"`
+	Authz            []string           `json:"authz,omitempty"`
 }
 
 type MigrationRequest struct {

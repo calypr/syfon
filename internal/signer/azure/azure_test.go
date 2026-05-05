@@ -1,10 +1,18 @@
 package azure
 
 import (
+	"context"
 	"encoding/base64"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/sas"
+	"github.com/calypr/syfon/internal/models"
+	"github.com/calypr/syfon/internal/signer"
+	"github.com/calypr/syfon/internal/testutils"
+	"github.com/google/uuid"
 )
 
 func TestAzureSASProtocol(t *testing.T) {
@@ -59,3 +67,67 @@ func TestAzureMultipartHelpers(t *testing.T) {
 		t.Fatalf("unexpected block ID payload: %s", got)
 	}
 }
+
+func TestAzureSignedURL_UsesDownloadFilenameOverride(t *testing.T) {
+	s := &AzureSigner{}
+	sharedKey, err := azblob.NewSharedKeyCredential("acct", "dGVzdA==")
+	if err != nil {
+		t.Fatalf("create shared key: %v", err)
+	}
+	signed, err := s.azureSignedURL("https://acct.blob.db.windows.net", "bucket", "nested/object.txt", "GET", 5*time.Minute, "", "nested/report final.txt", sharedKey)
+	if err != nil {
+		t.Fatalf("azureSignedURL returned error: %v", err)
+	}
+	if !strings.Contains(signed, "rscd=") || !strings.Contains(signed, "report") {
+		t.Fatalf("expected content disposition override in sas url: %s", signed)
+	}
+}
+
+func TestAzureSigner_SignDownloadPart(t *testing.T) {
+	db := &testutils.MockDatabase{Credentials: map[string]models.S3Credential{
+		"test-bucket": {
+			Bucket:    "test-bucket",
+			AccessKey: "acct",
+			SecretKey: "dGVzdA==",
+			Endpoint:  "https://acct.blob.db.windows.net",
+		},
+	}}
+	s := NewAzureSigner(db)
+
+	signed, err := s.SignDownloadPart(context.Background(), "test-bucket", "nested/object.txt", 0, 512, signer.SignOptions{DownloadFilename: "chunk.txt"})
+	if err != nil {
+		t.Fatalf("SignDownloadPart returned error: %v", err)
+	}
+	if !strings.Contains(signed, "rscd=") || !strings.Contains(signed, "chunk") {
+		t.Fatalf("expected content-disposition override in signed URL: %s", signed)
+	}
+}
+
+func TestAzureSigner_MultipartHelpers(t *testing.T) {
+	db := &testutils.MockDatabase{Credentials: map[string]models.S3Credential{
+		"test-bucket": {
+			Bucket:    "test-bucket",
+			AccessKey: "acct",
+			SecretKey: "dGVzdA==",
+			Endpoint:  "https://acct.blob.db.windows.net",
+		},
+	}}
+	s := NewAzureSigner(db)
+
+	uploadID, err := s.InitMultipartUpload(context.Background(), "test-bucket", "obj.bin")
+	if err != nil {
+		t.Fatalf("InitMultipartUpload returned error: %v", err)
+	}
+	if _, err := uuid.Parse(uploadID); err != nil {
+		t.Fatalf("expected UUID upload id, got %q err=%v", uploadID, err)
+	}
+
+	partURL, err := s.SignMultipartPart(context.Background(), "test-bucket", "obj.bin", uploadID, 2)
+	if err != nil {
+		t.Fatalf("SignMultipartPart returned error: %v", err)
+	}
+	if !strings.Contains(partURL, "comp=block") || !strings.Contains(partURL, "blockid=") {
+		t.Fatalf("expected block upload query params in signed part URL: %s", partURL)
+	}
+}
+

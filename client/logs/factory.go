@@ -15,9 +15,11 @@ func New(profile string, opts ...Option) (*Gen3Logger, func()) {
 		o(cfg)
 	}
 
-	usr, _ := user.Current()
-	logDir := filepath.Join(usr.HomeDir, ".gen3", "logs")
-	os.MkdirAll(logDir, 0755)
+	logDir := filepath.Join(userHomeDir(), ".gen3", "logs")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		fmt.Fprintf(os.Stderr, "create log directory %s: %v\n", logDir, err)
+		logDir = os.TempDir()
+	}
 
 	var handlers []slog.Handler
 	var messageFile *os.File
@@ -40,7 +42,11 @@ func New(profile string, opts ...Option) (*Gen3Logger, func()) {
 		if err == nil {
 			messageFile = f
 			handlers = append(handlers, slog.NewTextHandler(f, nil))
-			fmt.Fprintf(f, "[%s] Message log started\n", time.Now().Format(time.RFC3339))
+			if _, err := fmt.Fprintf(f, "[%s] Message log started\n", time.Now().Format(time.RFC3339)); err != nil {
+				fmt.Fprintf(os.Stderr, "write message log start banner: %v\n", err)
+			}
+		} else {
+			fmt.Fprintf(os.Stderr, "open message log file: %v\n", err)
 		}
 	}
 
@@ -73,10 +79,25 @@ func New(profile string, opts ...Option) (*Gen3Logger, func()) {
 
 	cleanup := func() {
 		if messageFile != nil {
-			fmt.Fprintf(messageFile, "[%s] Message log stopped\n", time.Now().Format(time.RFC3339))
-			messageFile.Close()
+			if _, err := fmt.Fprintf(messageFile, "[%s] Message log stopped\n", time.Now().Format(time.RFC3339)); err != nil {
+				fmt.Fprintf(os.Stderr, "write message log stop banner: %v\n", err)
+			}
+			if err := messageFile.Close(); err != nil {
+				fmt.Fprintf(os.Stderr, "close message log file: %v\n", err)
+			}
 		}
 	}
 
 	return t, cleanup
+}
+
+func userHomeDir() string {
+	usr, err := user.Current()
+	if err == nil && usr.HomeDir != "" {
+		return usr.HomeDir
+	}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		return home
+	}
+	return os.TempDir()
 }

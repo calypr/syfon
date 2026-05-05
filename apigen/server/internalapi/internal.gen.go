@@ -10,12 +10,10 @@ import (
 	"fmt"
 	"io"
 
+	externalRef0 "github.com/calypr/syfon/apigen/server/drs"
 	"github.com/gofiber/fiber/v3"
 	"github.com/oapi-codegen/runtime"
 )
-
-// AuthPathMap Organization/project keyed storage paths. Values are concrete object paths such as s3://bucket/path/to/file.
-type AuthPathMap map[string]map[string][]string
 
 // BulkCreateRequest defines model for BulkCreateRequest.
 type BulkCreateRequest struct {
@@ -71,6 +69,7 @@ type InternalMultipartInitOutput struct {
 
 // InternalMultipartInitRequest defines model for InternalMultipartInitRequest.
 type InternalMultipartInitRequest struct {
+	// Bucket Required for new unscoped uploads. Ignored when an existing scoped object provides the canonical storage location.
 	Bucket   *string `json:"bucket,omitempty"`
 	FileName *string `json:"file_name,omitempty"`
 	Guid     *string `json:"guid,omitempty"`
@@ -97,12 +96,12 @@ type InternalMultipartUploadRequest struct {
 
 // InternalRecord defines model for InternalRecord.
 type InternalRecord struct {
-	// Auth Organization/project keyed storage paths. Values are concrete object paths such as s3://bucket/path/to/file.
-	Auth        *AuthPathMap `json:"auth,omitempty"`
-	CreatedTime *string      `json:"created_time,omitempty"`
-	Description *string      `json:"description,omitempty"`
-	Did         string       `json:"did"`
-	FileName    *string      `json:"file_name,omitempty"`
+	AccessMethods    *[]externalRef0.AccessMethod `json:"access_methods,omitempty"`
+	ControlledAccess *[]string                    `json:"controlled_access,omitempty"`
+	CreatedTime      *string                      `json:"created_time,omitempty"`
+	Description      *string                      `json:"description,omitempty"`
+	Did              string                       `json:"did"`
+	FileName         *string                      `json:"file_name,omitempty"`
 
 	// Hashes Hash map, e.g. {"sha256":"..."}
 	Hashes       *HashInfo `json:"hashes,omitempty"`
@@ -115,14 +114,14 @@ type InternalRecord struct {
 
 // InternalRecordResponse defines model for InternalRecordResponse.
 type InternalRecordResponse struct {
-	// Auth Organization/project keyed storage paths. Values are concrete object paths such as s3://bucket/path/to/file.
-	Auth        *AuthPathMap `json:"auth,omitempty"`
-	Baseid      *string      `json:"baseid,omitempty"`
-	CreatedDate *string      `json:"created_date,omitempty"`
-	CreatedTime *string      `json:"created_time,omitempty"`
-	Description *string      `json:"description,omitempty"`
-	Did         string       `json:"did"`
-	FileName    *string      `json:"file_name,omitempty"`
+	AccessMethods    *[]externalRef0.AccessMethod `json:"access_methods,omitempty"`
+	Baseid           *string                      `json:"baseid,omitempty"`
+	ControlledAccess *[]string                    `json:"controlled_access,omitempty"`
+	CreatedDate      *string                      `json:"created_date,omitempty"`
+	CreatedTime      *string                      `json:"created_time,omitempty"`
+	Description      *string                      `json:"description,omitempty"`
+	Did              string                       `json:"did"`
+	FileName         *string                      `json:"file_name,omitempty"`
 
 	// Hashes Hash map, e.g. {"sha256":"..."}
 	Hashes       *HashInfo `json:"hashes,omitempty"`
@@ -150,7 +149,8 @@ type InternalUploadBlankOutput struct {
 
 // InternalUploadBlankRequest defines model for InternalUploadBlankRequest.
 type InternalUploadBlankRequest struct {
-	Guid *string `json:"guid,omitempty"`
+	Bucket string  `json:"bucket"`
+	Guid   *string `json:"guid,omitempty"`
 }
 
 // InternalUploadBulkItem defines model for InternalUploadBulkItem.
@@ -200,6 +200,7 @@ type InternalDownloadPartParams struct {
 
 // InternalUploadURLParams defines parameters for InternalUploadURL.
 type InternalUploadURLParams struct {
+	// Bucket Required when the object does not already have a backing storage location.
 	Bucket    *string `form:"bucket,omitempty" json:"bucket,omitempty"`
 	FileName  *string `form:"file_name,omitempty" json:"file_name,omitempty"`
 	ExpiresIn *int32  `form:"expires_in,omitempty" json:"expires_in,omitempty"`
@@ -217,6 +218,7 @@ type InternalDeleteByQueryParams struct {
 // InternalListParams defines parameters for InternalList.
 type InternalListParams struct {
 	Hash         *string `form:"hash,omitempty" json:"hash,omitempty"`
+	Url          *string `form:"url,omitempty" json:"url,omitempty"`
 	Organization *string `form:"organization,omitempty" json:"organization,omitempty"`
 	Program      *string `form:"program,omitempty" json:"program,omitempty"`
 	Project      *string `form:"project,omitempty" json:"project,omitempty"`
@@ -630,6 +632,17 @@ func (siw *ServerInterfaceWrapper) InternalList(c fiber.Ctx) error {
 			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter hash: %w", err).Error())
 		}
 		params.Hash = &value
+
+	}
+	// ------------- Optional query parameter "url" -------------
+	if paramValue := c.Query("url"); paramValue != "" {
+
+		var value string
+		err = runtime.BindStyledParameterWithOptions("form", "url", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
+		if err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter url: %w", err).Error())
+		}
+		params.Url = &value
 
 	}
 	// ------------- Optional query parameter "organization" -------------

@@ -11,7 +11,10 @@ import (
 	"strings"
 
 	syclient "github.com/calypr/syfon/client"
-	"github.com/calypr/syfon/client/syfonclient"
+	"github.com/calypr/syfon/client/request"
+	syfonclient "github.com/calypr/syfon/client/services"
+	"github.com/calypr/syfon/cmd/cliauth"
+	"github.com/calypr/syfon/internal/common"
 	"github.com/spf13/cobra"
 )
 
@@ -29,11 +32,7 @@ var Cmd = &cobra.Command{
 		if did == "" {
 			return fmt.Errorf("--did is required")
 		}
-		serverURL, err := cmd.Flags().GetString("server")
-		if err != nil {
-			return fmt.Errorf("get server flag: %w", err)
-		}
-		c, err := syclient.New(serverURL)
+		c, err := cliauth.NewServerClient(cmd)
 		if err != nil {
 			return err
 		}
@@ -45,7 +44,9 @@ var Cmd = &cobra.Command{
 			}
 			name := did
 			if rec.FileName != nil {
-				name = strings.TrimSpace(*rec.FileName)
+				if pretty := common.DownloadFilename(*rec.FileName); pretty != "" {
+					name = pretty
+				}
 			}
 			outPath = name
 		}
@@ -97,13 +98,16 @@ func downloadURLToPath(ctx context.Context, rawURL, outPath string, c syfonclien
 		if !ok {
 			return fmt.Errorf("client implementation does not support raw requests")
 		}
-		err := concrete.Requestor().Do(ctx, http.MethodGet, rawURL, nil, &resp)
+		err := concrete.Requestor().Do(ctx, http.MethodGet, rawURL, nil, &resp, request.WithSkipAuth(true))
 		if err != nil {
 			return fmt.Errorf("download request failed: %w", err)
 		}
 		defer resp.Body.Close()
 		if resp.StatusCode >= 400 {
-			body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+			body, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
+			if err != nil {
+				return fmt.Errorf("read error response body: %w", err)
+			}
 			return fmt.Errorf("download failed status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(body)))
 		}
 		data, err := io.ReadAll(resp.Body)

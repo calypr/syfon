@@ -7,7 +7,7 @@ Syfon uses `oapi-codegen` with Fiber v3 templates, not the stock Gin runtime.
 The generated packages under `apigen/*` are committed to the repository so the
 runtime boundary is visible in code review.
 
-The generator configs live in `apigen/specs/`:
+The generator configs live in `apigen/codegen/`:
 
 - `oapi-drs.yaml`
 - `oapi-internal.yaml`
@@ -40,9 +40,9 @@ Each config points at local user templates in `apigen/templates/`:
 
 Use `make gen` from the repo root when changing:
 
-- the OpenAPI specs in `apigen/api/*.openapi.yaml`
+- the OpenAPI specs in `apigen/openapi/*.openapi.yaml`
 - the Fiber templates in `apigen/templates/*`
-- the generator configs in `apigen/specs/*`
+- the generator configs in `apigen/codegen/*`
 
 The generated code is then consumed by:
 

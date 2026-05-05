@@ -201,5 +201,3 @@ func TestIsHexDigest(t *testing.T) {
 		t.Fatal("expected invalid hex digest for wrong length")
 	}
 }
-
-

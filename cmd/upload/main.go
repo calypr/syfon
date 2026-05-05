@@ -9,10 +9,12 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/calypr/syfon/apigen/client/bucketapi"
 	drsapi "github.com/calypr/syfon/apigen/client/drs"
-	syclient "github.com/calypr/syfon/client"
-	"github.com/calypr/syfon/client/xfer/upload"
+	"github.com/calypr/syfon/client/transfer/upload"
+	"github.com/calypr/syfon/cmd/cliauth"
 	syfoncommon "github.com/calypr/syfon/common"
+	intcommon "github.com/calypr/syfon/internal/common"
 	"github.com/spf13/cobra"
 )
 
@@ -45,29 +47,25 @@ var Cmd = &cobra.Command{
 		if org == "" {
 			return fmt.Errorf("--org is required")
 		}
+		project := strings.TrimSpace(uploadProject)
 
-		serverURL, err := cmd.Flags().GetString("server")
-		if err != nil {
-			return fmt.Errorf("get server flag: %w", err)
-		}
-		c, err := syclient.New(serverURL)
+		c, err := cliauth.NewServerClient(cmd)
 		if err != nil {
 			return err
 		}
 
 		bucketName := ""
-		if buckets, listErr := c.Buckets().List(ctx); listErr == nil {
-			names := make([]string, 0, len(buckets.S3BUCKETS))
-			for name := range buckets.S3BUCKETS {
-				names = append(names, name)
+		if buckets, listErr := c.Buckets().List(ctx); listErr != nil {
+			return fmt.Errorf("resolve bucket for scope: %w", listErr)
+		} else {
+			resolvedBucket, resolveErr := resolveUploadBucketForScope(buckets, org, project)
+			if resolveErr != nil {
+				return resolveErr
 			}
-			sort.Strings(names)
-			if len(names) > 0 {
-				bucketName = names[0]
-			}
+			bucketName = resolvedBucket
 		}
 
-		// Calculate SHA256 hash of the file to use as the content-addressable ID
+		// Calculate SHA256 hash so omitted DIDs can be minted deterministically from content+scope.
 		fileBytes, err := os.ReadFile(srcPath)
 		if err != nil {
 			return fmt.Errorf("read file for hashing: %w", err)
@@ -75,18 +73,20 @@ var Cmd = &cobra.Command{
 		hash := sha256.Sum256(fileBytes)
 		checksum := hex.EncodeToString(hash[:])
 
+		name := filepath.Base(srcPath)
+		authzMap := syfoncommon.AuthzMapFromScope(org, project)
 		did := strings.TrimSpace(uploadDID)
 		if did == "" {
-			did = checksum
+			if project == "" {
+				return fmt.Errorf("--project is required when --did is omitted")
+			}
+			did, err = intcommon.MintObjectIDFromChecksum(checksum, syfoncommon.AuthzMapToControlledAccess(authzMap))
+			if err != nil {
+				return err
+			}
 		}
-
-		name := filepath.Base(srcPath)
-		authzMap := syfoncommon.AuthzMapFromScope(org, strings.TrimSpace(uploadProject))
 
 		am := drsapi.AccessMethod{Type: "s3"}
-		if authzMap != nil {
-			am.Authorizations = &authzMap
-		}
 		drsObj := &drsapi.DrsObject{
 			Id:   did,
 			Name: &name,
@@ -95,6 +95,10 @@ var Cmd = &cobra.Command{
 				{Type: "sha256", Checksum: checksum},
 			},
 			AccessMethods: &[]drsapi.AccessMethod{am},
+		}
+		if authzMap != nil {
+			controlled := syfoncommon.AuthzMapToControlledAccess(authzMap)
+			drsObj.ControlledAccess = &controlled
 		}
 
 		// Register and upload using the SDK's orchestrator
@@ -132,7 +136,88 @@ var Cmd = &cobra.Command{
 
 func init() {
 	Cmd.Flags().StringVar(&uploadFile, "file", "", "Path to source file")
-	Cmd.Flags().StringVar(&uploadDID, "did", "", "Optional object DID (generated when omitted)")
+	Cmd.Flags().StringVar(&uploadDID, "did", "", "Optional object DID (generated deterministically from sha256 + project scope when omitted)")
 	Cmd.Flags().StringVar(&uploadOrg, "org", "", "Required organization for the authz scope")
-	Cmd.Flags().StringVar(&uploadProject, "project", "", "Optional project for the authz scope (omit for org-wide)")
+	Cmd.Flags().StringVar(&uploadProject, "project", "", "Project for the authz scope (required when --did is omitted)")
+}
+
+func resolveUploadBucketForScope(buckets bucketapi.BucketsResponse, org, project string) (string, error) {
+	org = strings.TrimSpace(org)
+	project = strings.TrimSpace(project)
+	scope, err := syfoncommon.ResourcePath(org, project)
+	if err != nil {
+		return "", err
+	}
+	orgScope, err := syfoncommon.ResourcePath(org, "")
+	if err != nil {
+		return "", err
+	}
+
+	exactMatches := make([]string, 0)
+	orgWideMatches := make([]string, 0)
+	for bucketName, meta := range buckets.S3BUCKETS {
+		for _, resource := range normalizedBucketPrograms(meta) {
+			switch resource {
+			case scope:
+				exactMatches = append(exactMatches, bucketName)
+			case orgScope:
+				orgWideMatches = append(orgWideMatches, bucketName)
+			}
+		}
+	}
+
+	sort.Strings(exactMatches)
+	sort.Strings(orgWideMatches)
+	exactMatches = uniqueStrings(exactMatches)
+	orgWideMatches = uniqueStrings(orgWideMatches)
+
+	if len(exactMatches) == 1 {
+		return exactMatches[0], nil
+	}
+	if len(exactMatches) > 1 {
+		return "", fmt.Errorf("scope %s maps to multiple buckets: %s", scope, strings.Join(exactMatches, ", "))
+	}
+	if project == "" {
+		if len(orgWideMatches) == 1 {
+			return orgWideMatches[0], nil
+		}
+		if len(orgWideMatches) > 1 {
+			return "", fmt.Errorf("organization scope %s maps to multiple buckets: %s", orgScope, strings.Join(orgWideMatches, ", "))
+		}
+		return "", fmt.Errorf("no bucket configured for organization scope %s", orgScope)
+	}
+	if len(orgWideMatches) == 1 {
+		return orgWideMatches[0], nil
+	}
+	if len(orgWideMatches) > 1 {
+		return "", fmt.Errorf("project scope %s has no exact bucket mapping and organization scope %s maps to multiple buckets: %s", scope, orgScope, strings.Join(orgWideMatches, ", "))
+	}
+	return "", fmt.Errorf("no bucket configured for project scope %s or organization scope %s", scope, orgScope)
+}
+
+func normalizedBucketPrograms(meta bucketapi.BucketMetadata) []string {
+	if meta.Programs == nil {
+		return nil
+	}
+	return syfoncommon.NormalizeAccessResources(*meta.Programs)
+}
+
+func uniqueStrings(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
 }

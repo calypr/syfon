@@ -15,11 +15,9 @@ import (
 func (db *PostgresDB) GetS3Credential(ctx context.Context, bucket string) (*models.S3Credential, error) {
 	var c models.S3Credential
 	err := db.db.QueryRowContext(ctx, `
-		SELECT bucket, provider, region, access_key, secret_key, endpoint,
-		       COALESCE(billing_log_bucket, ''), COALESCE(billing_log_prefix, '')
+		SELECT bucket, provider, region, access_key, secret_key, endpoint
 		FROM s3_credential WHERE bucket = $1`, bucket).Scan(
 		&c.Bucket, &c.Provider, &c.Region, &c.AccessKey, &c.SecretKey, &c.Endpoint,
-		&c.BillingLogBucket, &c.BillingLogPrefix,
 	)
 	if err == sql.ErrNoRows {
 		notFoundErr := fmt.Errorf("credential not found")
@@ -54,18 +52,15 @@ func (db *PostgresDB) SaveS3Credential(ctx context.Context, cred *models.S3Crede
 	}
 
 	_, err = db.db.ExecContext(ctx, `
-		INSERT INTO s3_credential (bucket, provider, region, access_key, secret_key, endpoint, billing_log_bucket, billing_log_prefix)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		INSERT INTO s3_credential (bucket, provider, region, access_key, secret_key, endpoint)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		ON CONFLICT (bucket) DO UPDATE SET
 			provider = EXCLUDED.provider,
 			region = EXCLUDED.region,
 			access_key = EXCLUDED.access_key,
 			secret_key = EXCLUDED.secret_key,
-			endpoint = EXCLUDED.endpoint,
-			billing_log_bucket = EXCLUDED.billing_log_bucket,
-			billing_log_prefix = EXCLUDED.billing_log_prefix`,
+			endpoint = EXCLUDED.endpoint`,
 		stored.Bucket, strings.ToLower(strings.TrimSpace(defaultProvider(stored.Provider))), stored.Region, stored.AccessKey, stored.SecretKey, stored.Endpoint,
-		stored.BillingLogBucket, strings.Trim(strings.TrimSpace(stored.BillingLogPrefix), "/"),
 	)
 	if err != nil {
 		wrapped := fmt.Errorf("failed to save credential: %w", err)
@@ -78,7 +73,10 @@ func (db *PostgresDB) SaveS3Credential(ctx context.Context, cred *models.S3Crede
 
 func (db *PostgresDB) DeleteS3Credential(ctx context.Context, bucket string) error {
 	// 1. Delete bucket scopes first (cascade delete is on object_id, but bucket_scope is manual link)
-	_, _ = db.db.ExecContext(ctx, "DELETE FROM bucket_scope WHERE bucket = $1", bucket)
+	if _, err := db.db.ExecContext(ctx, "DELETE FROM bucket_scope WHERE bucket = $1", bucket); err != nil {
+		common.AuditS3CredentialAccess(ctx, "delete", bucket, err)
+		return fmt.Errorf("failed to delete bucket scopes for %s: %w", bucket, err)
+	}
 
 	result, err := db.db.ExecContext(ctx, "DELETE FROM s3_credential WHERE bucket = $1", bucket)
 	if err != nil {
@@ -100,7 +98,7 @@ func (db *PostgresDB) DeleteS3Credential(ctx context.Context, bucket string) err
 }
 
 func (db *PostgresDB) ListS3Credentials(ctx context.Context) ([]models.S3Credential, error) {
-	rows, err := db.db.QueryContext(ctx, "SELECT bucket, provider, region, access_key, secret_key, endpoint, COALESCE(billing_log_bucket, ''), COALESCE(billing_log_prefix, '') FROM s3_credential")
+	rows, err := db.db.QueryContext(ctx, "SELECT bucket, provider, region, access_key, secret_key, endpoint FROM s3_credential")
 	if err != nil {
 		return nil, err
 	}
@@ -109,7 +107,7 @@ func (db *PostgresDB) ListS3Credentials(ctx context.Context) ([]models.S3Credent
 	var creds []models.S3Credential
 	for rows.Next() {
 		var c models.S3Credential
-		if err := rows.Scan(&c.Bucket, &c.Provider, &c.Region, &c.AccessKey, &c.SecretKey, &c.Endpoint, &c.BillingLogBucket, &c.BillingLogPrefix); err != nil {
+		if err := rows.Scan(&c.Bucket, &c.Provider, &c.Region, &c.AccessKey, &c.SecretKey, &c.Endpoint); err != nil {
 			common.AuditS3CredentialAccess(ctx, "list", "", err)
 			return nil, err
 		}

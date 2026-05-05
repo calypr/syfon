@@ -36,3 +36,9 @@ type UrlManager interface {
 	SignedURLManager
 	MultipartManager
 }
+
+// BucketCacheInvalidator allows callers to evict any cached signer state for a bucket.
+// Implementations should treat missing buckets as a no-op.
+type BucketCacheInvalidator interface {
+	InvalidateBucket(bucket string)
+}
