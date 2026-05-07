@@ -225,6 +225,63 @@ func TestGenericUploaderUploadSingle(t *testing.T) {
 	}
 }
 
+func TestGenericUploaderUploadSingleZeroByteStillEmitsCompletion(t *testing.T) {
+	t.Parallel()
+
+	file := filepath.Join(t.TempDir(), "empty.bin")
+	if err := os.WriteFile(file, nil, 0o644); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+
+	backend := &fakeBackend{}
+	uploader := &GenericUploader{Backend: backend}
+
+	var events []common.ProgressEvent
+	ctx := common.WithOid(context.Background(), "oid-empty")
+	ctx = common.WithProgress(ctx, func(ev common.ProgressEvent) error {
+		events = append(events, ev)
+		return nil
+	})
+
+	if err := uploader.Upload(ctx, transfer.TransferRequest{SourcePath: file, GUID: "guid-empty", ObjectKey: "object-empty"}, true); err != nil {
+		t.Fatalf("Upload returned error: %v", err)
+	}
+	if len(events) == 0 {
+		t.Fatal("expected progress event for zero-byte upload")
+	}
+	last := events[len(events)-1]
+	if last.Oid != "oid-empty" || last.BytesSoFar != 0 || last.BytesSinceLast != 0 {
+		t.Fatalf("unexpected zero-byte progress event: %+v", last)
+	}
+}
+
+func TestGenericUploaderUploadSinglePropagatesFinalizeCallbackError(t *testing.T) {
+	t.Parallel()
+
+	file := filepath.Join(t.TempDir(), "small.bin")
+	content := []byte("hello")
+	if err := os.WriteFile(file, content, 0o644); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+
+	backend := &fakeBackend{}
+	uploader := &GenericUploader{Backend: backend}
+
+	wantErr := fmt.Errorf("progress sink failed")
+	ctx := common.WithOid(context.Background(), "oid-small")
+	ctx = common.WithProgress(ctx, func(ev common.ProgressEvent) error {
+		return wantErr
+	})
+
+	err := uploader.Upload(ctx, transfer.TransferRequest{SourcePath: file, GUID: "guid-small", ObjectKey: "object-small"}, true)
+	if err == nil {
+		t.Fatal("expected finalize callback error")
+	}
+	if !strings.Contains(err.Error(), wantErr.Error()) {
+		t.Fatalf("expected error %q, got %v", wantErr, err)
+	}
+}
+
 func TestGenericUploaderMultipartAndState(t *testing.T) {
 	cache := t.TempDir()
 	t.Setenv("DATA_CLIENT_CACHE_DIR", cache)
