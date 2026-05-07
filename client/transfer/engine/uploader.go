@@ -70,16 +70,32 @@ func (u *GenericUploader) uploadSingle(ctx context.Context, req transfer.Transfe
 		uploadTarget = presignedURL
 	}
 	strategy := transfer.DefaultBackoff()
+	reader := io.Reader(file)
+	if progress := common.GetProgress(ctx); progress != nil {
+		reader = newProgressReader(file, progress, common.GetOid(ctx), size, nil)
+	}
 	if err := transfer.RetryAction(ctx, u.Backend.Logger(), strategy, common.MaxRetryCount, func() error {
 		if _, err := file.Seek(0, io.SeekStart); err != nil {
 			return err
 		}
-		return u.Backend.Upload(ctx, uploadTarget, file, size)
+		if pr, ok := reader.(*progressReader); ok {
+			pr.localBytes = 0
+			pr.bytesSinceReport = 0
+		}
+		err := u.Backend.Upload(ctx, uploadTarget, reader, size)
+		if pr, ok := reader.(*progressReader); ok {
+			if finalizeErr := pr.Finalize(); err == nil && finalizeErr != nil {
+				return finalizeErr
+			}
+		}
+		return err
 	}); err != nil {
 		return err
 	}
 
-	emitProgress(ctx, size, size)
+	if common.GetProgress(ctx) == nil {
+		emitProgress(ctx, size, size)
+	}
 	return nil
 }
 
@@ -133,7 +149,6 @@ func (u *GenericUploader) uploadMultipart(ctx context.Context, req transfer.Tran
 		mu         sync.Mutex
 		uploadErr  error
 		totalBytes int64
-		progressed bool
 	)
 
 	for i := 0; i < common.MaxConcurrentUploads; i++ {
@@ -159,12 +174,10 @@ func (u *GenericUploader) uploadMultipart(ctx context.Context, req transfer.Tran
 					state.Completed[partNum] = etag
 					saveErr := u.saveState(checkpointPath, state)
 					totalBytes += partSize
-					progressed = true
 					mu.Unlock()
 					if saveErr != nil {
 						return fmt.Errorf("persist multipart checkpoint: %w", saveErr)
 					}
-
 					emitProgress(ctx, partSize, totalBytes)
 					return nil
 				})
@@ -183,7 +196,7 @@ func (u *GenericUploader) uploadMultipart(ctx context.Context, req transfer.Tran
 		return fmt.Errorf("multipart upload failed: %w", uploadErr)
 	}
 
-	if !progressed {
+	if totalBytes == 0 {
 		emitProgress(ctx, fileSize, fileSize)
 	}
 

@@ -216,7 +216,11 @@ func TestGenericUploaderUploadSingle(t *testing.T) {
 	if !bytes.Equal(backend.uploaded, content) || backend.uploadSize != int64(len(content)) {
 		t.Fatalf("unexpected uploaded payload size=%d body=%q", backend.uploadSize, backend.uploaded)
 	}
-	if len(events) != 1 || events[0].BytesSoFar != int64(len(content)) || events[0].Oid != "oid-1" {
+	if len(events) == 0 {
+		t.Fatal("expected progress events")
+	}
+	last := events[len(events)-1]
+	if last.BytesSoFar != int64(len(content)) || last.Oid != "oid-1" {
 		t.Fatalf("unexpected progress events: %+v", events)
 	}
 }
@@ -271,6 +275,9 @@ func TestGenericUploaderMultipartAndState(t *testing.T) {
 	}
 	if len(events) == 0 {
 		t.Fatal("expected multipart progress events")
+	}
+	if events[len(events)-1].BytesSoFar != 101*common.MB {
+		t.Fatalf("expected final multipart bytesSoFar=%d, got %+v", 101*common.MB, events[len(events)-1])
 	}
 
 	checkpointPath, err := CheckpointPath(file, "guid-large")

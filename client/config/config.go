@@ -179,15 +179,23 @@ func (man *Manager) Save(profileConfig *Credential) error {
 	section := cfg.Section(profileConfig.Profile)
 	if profileConfig.KeyID != "" {
 		section.Key("key_id").SetValue(profileConfig.KeyID)
+	} else {
+		section.DeleteKey("key_id")
 	}
 	if profileConfig.APIKey != "" {
 		section.Key("api_key").SetValue(profileConfig.APIKey)
+	} else {
+		section.DeleteKey("api_key")
 	}
 	if profileConfig.AccessToken != "" {
 		section.Key("access_token").SetValue(profileConfig.AccessToken)
+	} else {
+		section.DeleteKey("access_token")
 	}
 	if profileConfig.APIEndpoint != "" {
 		section.Key("api_endpoint").SetValue(profileConfig.APIEndpoint)
+	} else {
+		section.DeleteKey("api_endpoint")
 	}
 
 	section.Key("use_shepherd").SetValue(profileConfig.UseShepherd)
