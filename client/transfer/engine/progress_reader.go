@@ -51,13 +51,15 @@ func (pr *progressReader) Read(p []byte) (int, error) {
 }
 
 func (pr *progressReader) Finalize() error {
-	if pr.onProgress != nil && pr.bytesSinceReport > 0 {
-		_ = pr.onProgress(common.ProgressEvent{
+	if pr.onProgress != nil && (pr.bytesSinceReport > 0 || pr.total == 0) {
+		if err := pr.onProgress(common.ProgressEvent{
 			Event:          "progress",
 			Oid:            pr.oid,
 			BytesSoFar:     pr.current(),
 			BytesSinceLast: pr.bytesSinceReport,
-		})
+		}); err != nil {
+			return err
+		}
 		pr.bytesSinceReport = 0
 	}
 	if pr.globalBytes == nil && pr.total > 0 && pr.current() < pr.total {
