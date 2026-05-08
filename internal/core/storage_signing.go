@@ -87,35 +87,36 @@ func (m *ObjectManager) resolveSigningBucket(ctx context.Context, accessURL stri
 }
 
 func (m *ObjectManager) resolveScopedStorageURL(ctx context.Context, obj *models.InternalObject, accessURL string) (string, error) {
-	bucket, key, ok := common.ParseS3URL(accessURL)
-	if !ok || obj == nil || len(ObjectAccessResources(obj)) == 0 {
+	if obj == nil || len(ObjectAccessResources(obj)) == 0 {
 		return accessURL, nil
 	}
-	scope, ok, err := m.bucketScopeForObjectURL(ctx, obj, bucket)
+	bucket, key, _ := parseS3Location(accessURL)
+	scopes, err := m.bucketScopesForObject(ctx, obj)
 	if err != nil {
 		return "", err
 	}
-	if !ok {
+	if len(scopes) == 0 {
 		return accessURL, nil
 	}
-	targetBucket := strings.TrimSpace(scope.Bucket)
+	targetBucket := strings.TrimSpace(bucket)
+	for _, scope := range scopes {
+		if strings.TrimSpace(scope.Bucket) != "" {
+			targetBucket = strings.TrimSpace(scope.Bucket)
+		}
+	}
 	if targetBucket == "" {
-		targetBucket = bucket
+		return accessURL, nil
 	}
-	prefix := strings.Trim(strings.TrimSpace(scope.PathPrefix), "/")
-	if prefix == "" {
-		if strings.EqualFold(targetBucket, bucket) {
-			return accessURL, nil
+	targetKey := normalizeScopedStorageKey(key, scopes)
+	if strings.Trim(strings.TrimSpace(key), "/") == "" {
+		if checksum, ok := common.CanonicalSHA256(obj.Checksums); ok {
+			targetKey = normalizeScopedStorageKey(checksum, scopes)
 		}
-		return common.S3Prefix + targetBucket + "/" + strings.Trim(key, "/"), nil
 	}
-	if keyHasStoragePrefix(key, prefix) {
-		if strings.EqualFold(targetBucket, bucket) {
-			return accessURL, nil
-		}
-		return common.S3Prefix + targetBucket + "/" + strings.Trim(key, "/"), nil
+	if targetKey == "" {
+		return accessURL, nil
 	}
-	return common.S3Prefix + targetBucket + "/" + path.Join(prefix, strings.Trim(key, "/")), nil
+	return common.S3Prefix + targetBucket + "/" + targetKey, nil
 }
 
 func (m *ObjectManager) bucketScopeForObjectURL(ctx context.Context, obj *models.InternalObject, bucket string) (models.BucketScope, bool, error) {
@@ -177,6 +178,95 @@ func keyHasStoragePrefix(key, prefix string) bool {
 	key = strings.Trim(strings.TrimSpace(key), "/")
 	prefix = strings.Trim(strings.TrimSpace(prefix), "/")
 	return key == prefix || strings.HasPrefix(key, prefix+"/")
+}
+
+func parseS3Location(accessURL string) (bucket string, key string, ok bool) {
+	if bucket, key, ok := common.ParseS3URL(accessURL); ok {
+		return bucket, key, true
+	}
+	parsed, err := url.Parse(strings.TrimSpace(accessURL))
+	if err != nil {
+		return "", "", false
+	}
+	if !strings.EqualFold(strings.TrimSpace(parsed.Scheme), "s3") {
+		return "", "", false
+	}
+	return strings.TrimSpace(parsed.Host), strings.Trim(strings.TrimSpace(parsed.Path), "/"), true
+}
+
+func normalizeScopedStorageKey(key string, scopes []models.BucketScope) string {
+	key = strings.Trim(strings.TrimSpace(key), "/")
+	prefixes := make([]string, 0, len(scopes))
+	for _, scope := range scopes {
+		prefix := strings.Trim(strings.TrimSpace(scope.PathPrefix), "/")
+		if prefix == "" {
+			continue
+		}
+		prefixes = append(prefixes, prefix)
+	}
+	remainder := key
+	for _, prefix := range prefixes {
+		remainder = trimLeadingStoragePrefix(remainder, prefix)
+	}
+	composedPrefix := strings.Join(prefixes, "/")
+	switch {
+	case composedPrefix == "":
+		return remainder
+	case remainder == "":
+		return composedPrefix
+	default:
+		return path.Join(composedPrefix, remainder)
+	}
+}
+
+func trimLeadingStoragePrefix(key, prefix string) string {
+	key = strings.Trim(strings.TrimSpace(key), "/")
+	prefix = strings.Trim(strings.TrimSpace(prefix), "/")
+	if key == "" || prefix == "" {
+		return key
+	}
+	if key == prefix {
+		return ""
+	}
+	if strings.HasPrefix(key, prefix+"/") {
+		return strings.TrimPrefix(key, prefix+"/")
+	}
+	return key
+}
+
+func (m *ObjectManager) bucketScopesForObject(ctx context.Context, obj *models.InternalObject) ([]models.BucketScope, error) {
+	if obj == nil {
+		return nil, nil
+	}
+	authz := syfoncommon.ControlledAccessToAuthzMap(ObjectAccessResources(obj))
+	if len(authz) == 0 {
+		return nil, nil
+	}
+	orgs := make([]string, 0, len(authz))
+	for org := range authz {
+		orgs = append(orgs, org)
+	}
+	sort.Strings(orgs)
+	scopes := make([]models.BucketScope, 0, len(orgs)*2)
+	for _, org := range orgs {
+		if scope, found, err := m.lookupBucketScope(ctx, org, ""); err != nil {
+			return nil, err
+		} else if found {
+			scopes = append(scopes, scope)
+		}
+		projects := append([]string(nil), authz[org]...)
+		sort.Strings(projects)
+		for _, project := range projects {
+			scope, found, err := m.lookupBucketScope(ctx, org, project)
+			if err != nil {
+				return nil, err
+			}
+			if found {
+				scopes = append(scopes, scope)
+			}
+		}
+	}
+	return scopes, nil
 }
 
 func resolveBucketName(creds []models.S3Credential, bucketName string) (string, error) {

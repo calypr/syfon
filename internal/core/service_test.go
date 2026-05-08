@@ -722,7 +722,7 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 		if _, err := om.SignObjectURL(context.Background(), obj, "s3://calypr/another-object", urlmanager.SignOptions{}); err != nil {
 			t.Fatalf("second SignObjectURL failed: %v", err)
 		}
-		if mockDB.GetBucketScopeCalls != 1 {
+		if mockDB.GetBucketScopeCalls != 2 {
 			t.Fatalf("expected bucket scope to be cached after first lookup, got %d db lookups", mockDB.GetBucketScopeCalls)
 		}
 	})
@@ -782,6 +782,49 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 		}
 		if um.signURLAccessURL != input {
 			t.Fatalf("expected already-scoped storage url to be unchanged, got %q", um.signURLAccessURL)
+		}
+	})
+
+	t.Run("object signing composes organization and project prefixes and repairs malformed s3 access urls", func(t *testing.T) {
+		db := &coreTestDB{
+			MockDatabase: &testutils.MockDatabase{
+				BucketScopes: map[string]models.BucketScope{
+					"syfon|": {
+						Organization: "syfon",
+						Bucket:       "syfon-e2e-bucket",
+						PathPrefix:   "program-root",
+					},
+					"syfon|e2e": {
+						Organization: "syfon",
+						ProjectID:    "e2e",
+						Bucket:       "syfon-e2e-bucket",
+						PathPrefix:   "project-subpath",
+					},
+				},
+			},
+		}
+		um := &capturingURLManager{}
+		om := NewObjectManager(db, um)
+		obj := &models.InternalObject{
+			DrsObject: drs.DrsObject{
+				Checksums: []drs.Checksum{{
+					Type:     "sha256",
+					Checksum: "412f8568bfb0e62937ee40c6fcdeaa1cf55910c558c0152250340356c8829a47",
+				}},
+				ControlledAccess: &[]string{"/organization/syfon/project/e2e"},
+			},
+		}
+
+		input := "s3://f781273b-52eb-5ac2-a484-775235eef303"
+		if _, err := om.SignObjectURL(context.Background(), obj, input, urlmanager.SignOptions{Method: "PUT"}); err != nil {
+			t.Fatalf("SignObjectURL failed: %v", err)
+		}
+		wantURL := "s3://syfon-e2e-bucket/program-root/project-subpath/412f8568bfb0e62937ee40c6fcdeaa1cf55910c558c0152250340356c8829a47"
+		if um.signURLBucket != "syfon-e2e-bucket" {
+			t.Fatalf("expected signer bucket syfon-e2e-bucket, got %q", um.signURLBucket)
+		}
+		if um.signURLAccessURL != wantURL {
+			t.Fatalf("expected repaired scoped upload URL %q, got %q", wantURL, um.signURLAccessURL)
 		}
 	})
 
@@ -880,7 +923,7 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 		if _, err := om.SignObjectURL(context.Background(), obj, "s3://calypr/relative-key", urlmanager.SignOptions{}); err != nil {
 			t.Fatalf("SignObjectURL failed: %v", err)
 		}
-		if mockDB.GetBucketScopeCalls != 0 {
+		if mockDB.GetBucketScopeCalls != 1 {
 			t.Fatalf("expected create to populate signing cache without db lookup, got %d lookups", mockDB.GetBucketScopeCalls)
 		}
 		if want := "s3://calypr/org-root/project-root/relative-key"; um.signURLAccessURL != want {

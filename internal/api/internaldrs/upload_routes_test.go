@@ -244,6 +244,57 @@ func TestHandleInternalUploadURL_RewritesScopedObjectURL(t *testing.T) {
 	}
 }
 
+func TestHandleInternalUploadURL_RepairsMalformedScopedObjectURL(t *testing.T) {
+	db := &testutils.MockDatabase{
+		Objects: map[string]*drs.DrsObject{
+			"scoped-obj": {
+				Id: "scoped-obj",
+				Checksums: []drs.Checksum{{
+					Type:     "sha256",
+					Checksum: "412f8568bfb0e62937ee40c6fcdeaa1cf55910c558c0152250340356c8829a47",
+				}},
+				ControlledAccess: &[]string{"/organization/syfon/project/e2e"},
+				AccessMethods: &[]drs.AccessMethod{{
+					Type: drs.AccessMethodTypeS3,
+					AccessUrl: &struct {
+						Headers *[]string `json:"headers,omitempty"`
+						Url     string    `json:"url"`
+					}{Url: "s3://f781273b-52eb-5ac2-a484-775235eef303"},
+				}},
+			},
+		},
+		Credentials: map[string]models.S3Credential{
+			"syfon-e2e-bucket": {Bucket: "syfon-e2e-bucket", Provider: "s3", Region: "us-west-2"},
+		},
+		BucketScopes: map[string]models.BucketScope{
+			"syfon|": {
+				Organization: "syfon",
+				Bucket:       "syfon-e2e-bucket",
+				PathPrefix:   "program-root",
+			},
+			"syfon|e2e": {
+				Organization: "syfon",
+				ProjectID:    "e2e",
+				Bucket:       "syfon-e2e-bucket",
+				PathPrefix:   "project-subpath",
+			},
+		},
+	}
+	mockUM := &capturingMultipartURLManager{}
+	req := routeutil.WithPathParams(httptest.NewRequest(http.MethodGet, "/data/upload/scoped-obj", nil), map[string]string{"file_id": "scoped-obj"})
+	rr := doInternalDRSTestRequest(req, core.NewObjectManager(db, mockUM))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	wantURL := "s3://syfon-e2e-bucket/program-root/project-subpath/412f8568bfb0e62937ee40c6fcdeaa1cf55910c558c0152250340356c8829a47"
+	if mockUM.signURL != wantURL {
+		t.Fatalf("expected repaired scoped upload URL %q, got %q", wantURL, mockUM.signURL)
+	}
+	if mockUM.signID != "syfon-e2e-bucket" {
+		t.Fatalf("expected signer credential bucket syfon-e2e-bucket, got %q", mockUM.signID)
+	}
+}
+
 func TestHandleInternalUploadBulk_MixedResults(t *testing.T) {
 	db := &testutils.MockDatabase{
 		Objects: map[string]*drs.DrsObject{"obj-1": {Id: "obj-1", AccessMethods: &[]drs.AccessMethod{{Type: drs.AccessMethodTypeS3, AccessUrl: &struct {
