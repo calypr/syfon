@@ -11,7 +11,9 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/calypr/syfon/client/common"
 	"github.com/calypr/syfon/client/transfer"
@@ -35,10 +37,17 @@ type fakeBackend struct {
 	multipartInitKey   string
 	partUploads        map[int][]byte
 	partEtags          map[int]string
+	partFailures       map[int]int
 	completedKey       string
 	completedUploadID  string
 	completedParts     []transfer.MultipartPart
 	completeErr        error
+	uploadChunkSize    int
+	uploadChunkDelay   time.Duration
+	uploadDone         func()
+	partChunkSize      int
+	partChunkDelay     time.Duration
+	completeGate       <-chan struct{}
 }
 
 func (f *fakeBackend) Name() string { return "fake-backend" }
@@ -98,13 +107,16 @@ func (f *fakeBackend) ResolveUploadURL(ctx context.Context, guid string, filenam
 }
 
 func (f *fakeBackend) Upload(ctx context.Context, url string, body io.Reader, size int64) error {
-	data, err := io.ReadAll(body)
+	data, err := readAllChunked(body, f.uploadChunkSize, f.uploadChunkDelay)
 	if err != nil {
 		return err
 	}
 	f.uploadKey = url
 	f.uploaded = append([]byte(nil), data...)
 	f.uploadSize = size
+	if f.uploadDone != nil {
+		f.uploadDone()
+	}
 	return nil
 }
 
@@ -126,9 +138,13 @@ func (f *fakeBackend) MultipartPart(ctx context.Context, key string, uploadID st
 	if f.partEtags == nil {
 		f.partEtags = map[int]string{}
 	}
-	data, err := io.ReadAll(body)
+	data, err := readAllChunked(body, f.partChunkSize, f.partChunkDelay)
 	if err != nil {
 		return "", err
+	}
+	if remaining := f.partFailures[partNum]; remaining > 0 {
+		f.partFailures[partNum] = remaining - 1
+		return "", fmt.Errorf("forced multipart failure for part %d", partNum)
 	}
 	f.partUploads[partNum] = data
 	etag := f.partEtags[partNum]
@@ -139,6 +155,9 @@ func (f *fakeBackend) MultipartPart(ctx context.Context, key string, uploadID st
 }
 
 func (f *fakeBackend) MultipartComplete(ctx context.Context, key string, uploadID string, parts []transfer.MultipartPart) error {
+	if f.completeGate != nil {
+		<-f.completeGate
+	}
 	f.completedKey = key
 	f.completedUploadID = uploadID
 	f.completedParts = append([]transfer.MultipartPart(nil), parts...)
@@ -146,6 +165,31 @@ func (f *fakeBackend) MultipartComplete(ctx context.Context, key string, uploadI
 }
 
 func (f *fakeBackend) Delete(ctx context.Context, guid string) error { return nil }
+
+func readAllChunked(r io.Reader, chunkSize int, delay time.Duration) ([]byte, error) {
+	if chunkSize <= 0 {
+		return io.ReadAll(r)
+	}
+	buf := make([]byte, chunkSize)
+	var out bytes.Buffer
+	for {
+		n, err := r.Read(buf)
+		if n > 0 {
+			if _, writeErr := out.Write(buf[:n]); writeErr != nil {
+				return nil, writeErr
+			}
+			if delay > 0 {
+				time.Sleep(delay)
+			}
+		}
+		if err != nil {
+			if err == io.EOF {
+				return out.Bytes(), nil
+			}
+			return nil, err
+		}
+	}
+}
 
 func TestChunkHelpers(t *testing.T) {
 	if got := OptimalChunkSize(0); got != 1*common.MB {
@@ -360,6 +404,165 @@ func TestGenericUploaderMultipartAndState(t *testing.T) {
 	}
 	if uploader.matches(nil, transfer.TransferRequest{}, info, 10*common.MB) {
 		t.Fatal("nil state should not match")
+	}
+}
+
+func TestGenericUploaderUploadSingleDelaysTerminalProgressUntilSuccess(t *testing.T) {
+	t.Parallel()
+
+	file := filepath.Join(t.TempDir(), "slow-single.bin")
+	content := bytes.Repeat([]byte("a"), int(3*common.MB+123))
+	if err := os.WriteFile(file, content, 0o644); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+
+	var backendReturned atomic.Bool
+	backend := &fakeBackend{
+		uploadChunkSize:  256 * 1024,
+		uploadChunkDelay: 1 * time.Millisecond,
+		uploadDone: func() {
+			backendReturned.Store(true)
+		},
+	}
+	uploader := &GenericUploader{Backend: backend}
+
+	var events []common.ProgressEvent
+	ctx := common.WithOid(context.Background(), "oid-slow-single")
+	ctx = common.WithProgress(ctx, func(ev common.ProgressEvent) error {
+		events = append(events, ev)
+		if ev.BytesSoFar == int64(len(content)) && !backendReturned.Load() {
+			t.Fatalf("terminal progress emitted before upload success: %+v", ev)
+		}
+		return nil
+	})
+
+	if err := uploader.Upload(ctx, transfer.TransferRequest{SourcePath: file, GUID: "guid-slow-single", ObjectKey: "object-slow-single"}, true); err != nil {
+		t.Fatalf("Upload returned error: %v", err)
+	}
+
+	if len(events) < 3 {
+		t.Fatalf("expected multiple progress events, got %+v", events)
+	}
+	last := events[len(events)-1]
+	if last.BytesSoFar != int64(len(content)) {
+		t.Fatalf("expected final BytesSoFar=%d, got %+v", len(content), last)
+	}
+}
+
+func TestGenericUploaderMultipartStreamsProgressAndCompletesAfterFinalize(t *testing.T) {
+	t.Parallel()
+
+	file := filepath.Join(t.TempDir(), "slow-multipart.bin")
+	f, err := os.Create(file)
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+	if err := f.Truncate(21 * common.MB); err != nil {
+		_ = f.Close()
+		t.Fatalf("Truncate returned error: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("Close returned error: %v", err)
+	}
+
+	completeGate := make(chan struct{})
+	backend := &fakeBackend{
+		multipartInitID: "upload-slow",
+		partChunkSize:   256 * 1024,
+		partChunkDelay:  1 * time.Millisecond,
+		completeGate:    completeGate,
+	}
+	uploader := &GenericUploader{Backend: backend}
+
+	var finalized atomic.Bool
+	var events []common.ProgressEvent
+	ctx := common.WithOid(context.Background(), "oid-slow-multipart")
+	ctx = common.WithProgress(ctx, func(ev common.ProgressEvent) error {
+		events = append(events, ev)
+		if ev.BytesSoFar == 21*common.MB && !finalized.Load() {
+			t.Fatalf("terminal multipart progress emitted before completion: %+v", ev)
+		}
+		return nil
+	})
+
+	done := make(chan error, 1)
+	go func() {
+		done <- uploader.Upload(ctx, transfer.TransferRequest{
+			SourcePath:     file,
+			GUID:           "guid-slow-multipart",
+			ObjectKey:      "object-slow-multipart",
+			ForceMultipart: true,
+		}, true)
+	}()
+
+	time.Sleep(20 * time.Millisecond)
+	if len(events) < 2 {
+		close(completeGate)
+		if err := <-done; err != nil {
+			t.Fatalf("Upload returned error: %v", err)
+		}
+		t.Fatalf("expected streaming multipart progress before completion, got %+v", events)
+	}
+
+	finalized.Store(true)
+	close(completeGate)
+	if err := <-done; err != nil {
+		t.Fatalf("Upload returned error: %v", err)
+	}
+	last := events[len(events)-1]
+	if last.BytesSoFar != 21*common.MB {
+		t.Fatalf("expected final multipart BytesSoFar=%d, got %+v", 21*common.MB, last)
+	}
+}
+
+func TestGenericUploaderMultipartRetryDoesNotOvercountProgress(t *testing.T) {
+	t.Parallel()
+
+	file := filepath.Join(t.TempDir(), "retry-multipart.bin")
+	f, err := os.Create(file)
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+	if err := f.Truncate(21 * common.MB); err != nil {
+		_ = f.Close()
+		t.Fatalf("Truncate returned error: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("Close returned error: %v", err)
+	}
+
+	backend := &fakeBackend{
+		multipartInitID: "upload-retry",
+		partChunkSize:   256 * 1024,
+		partFailures:    map[int]int{2: 1},
+	}
+	uploader := &GenericUploader{Backend: backend}
+
+	var events []common.ProgressEvent
+	ctx := common.WithOid(context.Background(), "oid-retry-multipart")
+	ctx = common.WithProgress(ctx, func(ev common.ProgressEvent) error {
+		events = append(events, ev)
+		if ev.BytesSoFar > 21*common.MB {
+			t.Fatalf("progress overcounted beyond total: %+v", ev)
+		}
+		return nil
+	})
+
+	if err := uploader.Upload(ctx, transfer.TransferRequest{
+		SourcePath:     file,
+		GUID:           "guid-retry-multipart",
+		ObjectKey:      "object-retry-multipart",
+		ForceMultipart: true,
+	}, true); err != nil {
+		t.Fatalf("Upload returned error: %v", err)
+	}
+
+	if len(events) == 0 {
+		t.Fatal("expected multipart progress events")
+	}
+	last := events[len(events)-1]
+	if last.BytesSoFar != 21*common.MB {
+		t.Fatalf("expected final multipart BytesSoFar=%d, got %+v", 21*common.MB, last)
 	}
 }
 

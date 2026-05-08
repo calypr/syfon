@@ -9,13 +9,27 @@ import (
 )
 
 type progressReader struct {
-	reader           io.Reader
-	onProgress       common.ProgressCallback
-	oid              string
-	total            int64
-	localBytes       int64
-	bytesSinceReport int64
-	globalBytes      *int64
+	reader            io.Reader
+	onProgress        common.ProgressCallback
+	oid               string
+	total             int64
+	localBytes        int64
+	bytesSinceReport  int64
+	lastReportedSoFar int64
+	completed         bool
+	globalBytes       *int64
+}
+
+type progressCallbackError struct {
+	err error
+}
+
+func (e progressCallbackError) Error() string {
+	return e.err.Error()
+}
+
+func (e progressCallbackError) Unwrap() error {
+	return e.err
 }
 
 func newProgressReader(reader io.Reader, onProgress common.ProgressCallback, oid string, total int64, globalBytes *int64) *progressReader {
@@ -33,37 +47,36 @@ func (pr *progressReader) Read(p []byte) (int, error) {
 	if n > 0 && pr.onProgress != nil {
 		delta := int64(n)
 		pr.bytesSinceReport += delta
-		bytesSoFar := pr.advance(delta)
+		pr.advance(delta)
 
 		if pr.bytesSinceReport >= common.OnProgressThreshold {
-			if progressErr := pr.onProgress(common.ProgressEvent{
-				Event:          "progress",
-				Oid:            pr.oid,
-				BytesSoFar:     bytesSoFar,
-				BytesSinceLast: pr.bytesSinceReport,
-			}); progressErr != nil {
+			if progressErr := pr.emit(false); progressErr != nil {
 				return n, progressErr
 			}
-			pr.bytesSinceReport = 0
 		}
 	}
 	return n, err
 }
 
+func (pr *progressReader) FlushPendingProgress() error {
+	return pr.emit(false)
+}
+
+func (pr *progressReader) Complete() error {
+	return pr.emit(true)
+}
+
+func (pr *progressReader) ResetForRetry() {
+	pr.localBytes = 0
+	pr.bytesSinceReport = 0
+}
+
 func (pr *progressReader) Finalize() error {
-	if pr.onProgress != nil && (pr.bytesSinceReport > 0 || pr.total == 0) {
-		if err := pr.onProgress(common.ProgressEvent{
-			Event:          "progress",
-			Oid:            pr.oid,
-			BytesSoFar:     pr.current(),
-			BytesSinceLast: pr.bytesSinceReport,
-		}); err != nil {
-			return err
-		}
-		pr.bytesSinceReport = 0
+	if err := pr.Complete(); err != nil {
+		return err
 	}
-	if pr.globalBytes == nil && pr.total > 0 && pr.current() < pr.total {
-		return fmt.Errorf("upload incomplete: %d/%d bytes", pr.current(), pr.total)
+	if pr.globalBytes == nil && pr.total > 0 && pr.currentRaw() < pr.total {
+		return fmt.Errorf("upload incomplete: %d/%d bytes", pr.currentRaw(), pr.total)
 	}
 	return nil
 }
@@ -81,4 +94,48 @@ func (pr *progressReader) current() int64 {
 		return atomic.LoadInt64(pr.globalBytes)
 	}
 	return pr.localBytes
+}
+
+func (pr *progressReader) currentRaw() int64 {
+	if pr.globalBytes != nil {
+		return atomic.LoadInt64(pr.globalBytes)
+	}
+	return pr.localBytes
+}
+
+func (pr *progressReader) visibleCurrent(final bool) int64 {
+	current := pr.currentRaw()
+	if !final && pr.total > 0 && current >= pr.total {
+		return pr.total - 1
+	}
+	return current
+}
+
+func (pr *progressReader) emit(final bool) error {
+	if pr.onProgress == nil {
+		return nil
+	}
+	visible := pr.visibleCurrent(final)
+	if visible < pr.lastReportedSoFar {
+		visible = pr.lastReportedSoFar
+	}
+	delta := visible - pr.lastReportedSoFar
+	emitZeroFinal := final && pr.total == 0 && !pr.completed
+	if delta <= 0 && !emitZeroFinal {
+		return nil
+	}
+	if err := pr.onProgress(common.ProgressEvent{
+		Event:          "progress",
+		Oid:            pr.oid,
+		BytesSoFar:     visible,
+		BytesSinceLast: delta,
+	}); err != nil {
+		return progressCallbackError{err: err}
+	}
+	pr.lastReportedSoFar = visible
+	pr.bytesSinceReport = 0
+	if final {
+		pr.completed = true
+	}
+	return nil
 }

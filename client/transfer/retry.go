@@ -2,6 +2,7 @@ package transfer
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/calypr/syfon/client/common"
@@ -33,6 +34,29 @@ func DefaultBackoff() RetryStrategy {
 	}
 }
 
+type nonRetryableError struct {
+	err error
+}
+
+func (e nonRetryableError) Error() string {
+	return e.err.Error()
+}
+
+func (e nonRetryableError) Unwrap() error {
+	return e.err
+}
+
+func NonRetryable(err error) error {
+	if err == nil {
+		return nil
+	}
+	var target nonRetryableError
+	if errors.As(err, &target) {
+		return err
+	}
+	return nonRetryableError{err: err}
+}
+
 // RetryAction is a helper that executes an action with retries according to a strategy.
 func RetryAction(ctx context.Context, logger TransferLogger, strategy RetryStrategy, maxRetries int, action func() error) error {
 	var lastErr error
@@ -53,6 +77,10 @@ func RetryAction(ctx context.Context, logger TransferLogger, strategy RetryStrat
 				sb.IncrementSB(i)
 			}
 			return nil
+		}
+		var nonRetryable nonRetryableError
+		if errors.As(lastErr, &nonRetryable) {
+			return nonRetryable.err
 		}
 
 		logger.Error("Action failed", "retry", i, "error", lastErr)
