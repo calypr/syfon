@@ -356,22 +356,6 @@ func exerciseAllClientCommands(t *testing.T, serverURL string, bucketCfg bucketC
 		t.Fatalf("bucket list missing %s: %s", bucketName, bucketListOut)
 	}
 
-	bucketRemoveOut, err := executeRootCommand(t, "--server", serverURL, "bucket", "remove", bucketName)
-	if err != nil {
-		t.Fatalf("bucket remove failed: %v output=%s", err, bucketRemoveOut)
-	}
-	if !strings.Contains(bucketRemoveOut, "bucket removed: "+bucketName) {
-		t.Fatalf("unexpected bucket remove output: %s", bucketRemoveOut)
-	}
-
-	bucketListOut2, err := executeRootCommand(t, "--server", serverURL, "bucket", "list")
-	if err != nil {
-		t.Fatalf("bucket list after remove failed: %v output=%s", err, bucketListOut2)
-	}
-	if strings.Contains(bucketListOut2, bucketName) {
-		t.Fatalf("expected removed bucket %s to be absent from list: %s", bucketName, bucketListOut2)
-	}
-
 	rmOut, err := executeRootCommand(t, "--server", serverURL, "rm", "--did", uploadedID)
 	if err != nil {
 		t.Fatalf("rm(uploaded) failed: %v output=%s", err, rmOut)
@@ -394,6 +378,22 @@ func exerciseAllClientCommands(t *testing.T, serverURL string, bucketCfg bucketC
 	}
 	if strings.Contains(lsAfterRm, fileName) || strings.Contains(lsAfterRm, addURLDID) {
 		t.Fatalf("ls output still includes removed records: %s", lsAfterRm)
+	}
+
+	bucketRemoveOut, err := executeRootCommand(t, "--server", serverURL, "bucket", "remove", bucketName)
+	if err != nil {
+		t.Fatalf("bucket remove failed: %v output=%s", err, bucketRemoveOut)
+	}
+	if !strings.Contains(bucketRemoveOut, "bucket removed: "+bucketName) {
+		t.Fatalf("unexpected bucket remove output: %s", bucketRemoveOut)
+	}
+
+	bucketListOut2, err := executeRootCommand(t, "--server", serverURL, "bucket", "list")
+	if err != nil {
+		t.Fatalf("bucket list after remove failed: %v output=%s", err, bucketListOut2)
+	}
+	if strings.Contains(bucketListOut2, bucketName) {
+		t.Fatalf("expected removed bucket %s to be absent from list: %s", bucketName, bucketListOut2)
 	}
 
 	headlineOut, err := executeRootCommand(t, "--server", serverURL, "ping")

@@ -211,7 +211,7 @@ func (m *ObjectManager) deleteGCSObject(ctx context.Context, bucket, key string)
 	if err == nil {
 		return nil
 	}
-	if err == storage.ErrObjectNotExist {
+	if errors.Is(err, storage.ErrObjectNotExist) {
 		return nil
 	}
 	if gerr, ok := err.(*googleapi.Error); ok && gerr.Code == 404 {
