@@ -3,6 +3,7 @@ package internaldrs
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -209,31 +210,22 @@ func handleInternalUploadURLFiber(om *core.ObjectManager) fiber.Handler {
 			key    = fileID
 		)
 		if obj != nil {
-			if existingURL := core.FirstSupportedAccessURL(obj); existingURL != "" {
-				signedURL, err := signUploadURLForObject(c.Context(), om, obj, existingURL)
-				if err != nil {
-					return apiutil.HandleError(c, err)
-				}
-				if err := attribution.RecordAccessIssued(c.Context(), om, obj, attribution.AccessDetails{
-					Direction:  models.ProviderTransferDirectionUpload,
-					StorageURL: existingURL,
-				}); err != nil {
-					return apiutil.HandleError(c, err)
-				}
-				return c.JSON(internalapi.InternalSignedURL{Url: &signedURL})
-			}
 			bucketName := strings.TrimSpace(common.StringVal(params.Bucket))
-			if bucketName == "" {
-				return c.Status(fiber.StatusBadRequest).SendString("bucket is required when object storage location is unavailable")
-			}
-			var err error
-			bucket, err = om.ResolveBucket(c.Context(), bucketName)
+			urlStr, err := resolveObjectUploadURL(c.Context(), om, obj, bucketName)
 			if err != nil {
 				return apiutil.HandleError(c, err)
 			}
-			if k, ok := om.ResolveObjectRemotePath(c.Context(), obj.Id, bucket); ok {
-				key = k
+			signedURL, err := signUploadURLForObject(c.Context(), om, obj, urlStr)
+			if err != nil {
+				return apiutil.HandleError(c, err)
 			}
+			if err := attribution.RecordAccessIssued(c.Context(), om, obj, attribution.AccessDetails{
+				Direction:  models.ProviderTransferDirectionUpload,
+				StorageURL: urlStr,
+			}); err != nil {
+				return apiutil.HandleError(c, err)
+			}
+			return c.JSON(internalapi.InternalSignedURL{Url: &signedURL})
 		} else {
 			bucketName := strings.TrimSpace(common.StringVal(params.Bucket))
 			if bucketName == "" {
@@ -262,6 +254,42 @@ func handleInternalUploadURLFiber(om *core.ObjectManager) fiber.Handler {
 
 		return c.JSON(internalapi.InternalSignedURL{Url: &signedURL})
 	}
+}
+
+func resolveObjectUploadURL(ctx context.Context, om *core.ObjectManager, obj *models.InternalObject, bucketName string) (string, error) {
+	if obj == nil {
+		return "", fmt.Errorf("object is required")
+	}
+	existingURL := core.FirstSupportedAccessURL(obj)
+	if bucketName != "" {
+		bucket, err := om.ResolveBucket(ctx, bucketName)
+		if err != nil {
+			return "", err
+		}
+		if key, ok := om.ResolveObjectRemotePath(ctx, obj.Id, bucket); ok && strings.TrimSpace(key) != "" {
+			return common.BucketToURL(bucket, key), nil
+		}
+		if existingURL != "" {
+			scopedURL, err := om.ResolveObjectScopedStorageURL(ctx, obj, existingURL)
+			if err != nil {
+				return "", err
+			}
+			if strings.TrimSpace(scopedURL) != "" {
+				return scopedURL, nil
+			}
+		}
+	}
+	if existingURL != "" {
+		return existingURL, nil
+	}
+	if bucketName == "" {
+		return "", fmt.Errorf("bucket is required when object storage location is unavailable")
+	}
+	bucket, err := om.ResolveBucket(ctx, bucketName)
+	if err != nil {
+		return "", err
+	}
+	return common.BucketToURL(bucket, obj.Id), nil
 }
 
 func handleInternalUploadBulkFiber(om *core.ObjectManager) fiber.Handler {
@@ -302,20 +330,7 @@ func handleInternalUploadBulkFiber(om *core.ObjectManager) fiber.Handler {
 				continue
 			}
 
-			urlStr := core.FirstSupportedAccessURL(obj)
-			bucket := ""
-			key := obj.Id
-			if urlStr == "" {
-				bucketName := strings.TrimSpace(common.StringVal(item.Bucket))
-				if bucketName == "" {
-					errMsg := "bucket is required when object storage location is unavailable"
-					res.Error = &errMsg
-					res.Status = http.StatusBadRequest
-					results = append(results, res)
-					continue
-				}
-				var err error
-				bucket, err = om.ResolveBucket(c.Context(), bucketName)
+				urlStr, err := resolveObjectUploadURL(c.Context(), om, obj, strings.TrimSpace(common.StringVal(item.Bucket)))
 				if err != nil {
 					errMsg := err.Error()
 					res.Error = &errMsg
@@ -323,14 +338,12 @@ func handleInternalUploadBulkFiber(om *core.ObjectManager) fiber.Handler {
 					results = append(results, res)
 					continue
 				}
-				if resolvedKey, ok := om.ResolveObjectRemotePath(c.Context(), obj.Id, bucket); ok {
-					key = resolvedKey
+				bucket := ""
+				key := obj.Id
+				if parsedBucket, parsedKey, ok := common.ParseS3URL(urlStr); ok {
+					bucket = parsedBucket
+					key = parsedKey
 				}
-				urlStr = common.BucketToURL(bucket, key)
-			} else if parsedBucket, parsedKey, ok := common.ParseS3URL(urlStr); ok {
-				bucket = parsedBucket
-				key = parsedKey
-			}
 			signedURL, err := signUploadURLForObject(c.Context(), om, obj, urlStr)
 			if err != nil {
 				errMsg := err.Error()
