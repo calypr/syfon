@@ -278,6 +278,25 @@ func TestIndexServiceOperationsAndUpsert(t *testing.T) {
 	}
 }
 
+func TestIndexServiceRemoveControlledAccessRequiresJSON200(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/index/did-ca/controlled-access/remove" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+	}))
+	defer server.Close()
+
+	service := NewIndexService(mustInternalClient(t, server.URL), &fakeRequester{})
+	_, err := service.RemoveControlledAccess(context.Background(), "did-ca", "/organization/org/project/proj")
+	if err == nil || !strings.Contains(err.Error(), "failed to remove controlled access: 204") {
+		t.Fatalf("expected 204 failure, got %v", err)
+	}
+}
+
 func testRecordForURL(did, rawURL string, authorizations map[string][]string) internalapi.InternalRecord {
 	controlled := syfoncommon.AuthzMapToControlledAccess(authorizations)
 	methodType := methodTypeForURL(rawURL)

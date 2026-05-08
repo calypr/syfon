@@ -176,6 +176,25 @@ func TestDRSServiceResolveAndList(t *testing.T) {
 	}
 }
 
+func TestDRSServiceDeleteObjectRejectsUnexpectedStatus(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut && r.URL.Path == "/objects/obj-delete/delete" {
+			w.WriteHeader(http.StatusTeapot)
+			return
+		}
+		t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+	}))
+	defer server.Close()
+
+	service := NewDRSService(mustDRSClient(t, server.URL), nil)
+	err := service.DeleteObject(context.Background(), "obj-delete", true)
+	if err == nil || !strings.Contains(err.Error(), "unexpected response: 418") {
+		t.Fatalf("expected unexpected-status error, got %v", err)
+	}
+}
+
 func TestDRSServiceDeleteRecordsByHash(t *testing.T) {
 	t.Parallel()
 
