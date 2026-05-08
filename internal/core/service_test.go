@@ -828,6 +828,55 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 		}
 	})
 
+	t.Run("object storage delete resolves scoped bucket path before deriving delete target", func(t *testing.T) {
+		mockDB := &testutils.MockDatabase{
+			Objects: map[string]*drs.DrsObject{
+				"obj-delete": {
+					Id:               "obj-delete",
+					ControlledAccess: &[]string{"/organization/cbds/project/git_drs_test"},
+					Checksums: []drs.Checksum{{
+						Type:     "sha256",
+						Checksum: "6d1bf6c2-917d-545e-b44d-8e28f96ec170",
+					}},
+					AccessMethods: &[]drs.AccessMethod{{
+						Type: drs.AccessMethodTypeS3,
+						AccessUrl: &struct {
+							Headers *[]string `json:"headers,omitempty"`
+							Url     string    `json:"url"`
+						}{Url: "s3://cbds-minio/6d1bf6c2-917d-545e-b44d-8e28f96ec170"},
+					}},
+				},
+			},
+			BucketScopes: map[string]models.BucketScope{
+				"cbds|git_drs_test": {
+					Organization: "cbds",
+					ProjectID:    "git_drs_test",
+					Bucket:       "cbds-minio",
+					PathPrefix:   "cbds",
+				},
+			},
+		}
+		om := NewObjectManager(mockDB, &capturingURLManager{})
+		obj, err := mockDB.GetObject(context.Background(), "obj-delete")
+		if err != nil {
+			t.Fatalf("GetObject failed: %v", err)
+		}
+
+		targets, err := om.storageTargetsForObject(context.Background(), obj)
+		if err != nil {
+			t.Fatalf("storageTargetsForObject failed: %v", err)
+		}
+		if len(targets) != 1 {
+			t.Fatalf("expected one storage target, got %+v", targets)
+		}
+		if got, want := targets[0].bucket, "cbds-minio"; got != want {
+			t.Fatalf("unexpected target bucket: got %q want %q", got, want)
+		}
+		if got, want := targets[0].key, "cbds/6d1bf6c2-917d-545e-b44d-8e28f96ec170"; got != want {
+			t.Fatalf("unexpected target key: got %q want %q", got, want)
+		}
+	})
+
 	t.Run("object signing routes upload and download paths through bucket scope mapping", func(t *testing.T) {
 		db := &coreTestDB{
 			MockDatabase: &testutils.MockDatabase{

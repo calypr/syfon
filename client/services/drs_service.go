@@ -61,6 +61,21 @@ func (s *DRSService) GetObject(ctx context.Context, objectID string) (drsapi.Drs
 	return *resp.JSON200, nil
 }
 
+func (s *DRSService) DeleteObject(ctx context.Context, objectID string, deleteStorageData bool) error {
+	deleteMetadata := true
+	resp, err := s.gen.DeleteObjectWithResponse(ctx, drsapi.ObjectId(objectID), drsapi.DeleteObjectJSONRequestBody{
+		DeleteObjectMetadata: &deleteMetadata,
+		DeleteStorageData:    &deleteStorageData,
+	})
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode() != 200 && resp.StatusCode() != 204 {
+		return fmt.Errorf("unexpected response: %d", resp.StatusCode())
+	}
+	return nil
+}
+
 func (s *DRSService) ListObjects(ctx context.Context, limit, page int) (DRSPage, error) {
 	listResp, err := s.index.List(ctx, ListRecordsOptions{
 		Limit: limit,

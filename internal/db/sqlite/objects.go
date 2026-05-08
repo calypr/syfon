@@ -1315,6 +1315,33 @@ func (db *SqliteDB) UpdateObjectAccessMethods(ctx context.Context, objectID stri
 	return tx.Commit()
 }
 
+func (db *SqliteDB) RemoveObjectControlledAccess(ctx context.Context, objectID, resource string) error {
+	normalized := sycommon.NormalizeAccessResources([]string{resource})
+	if len(normalized) == 0 {
+		return fmt.Errorf("resource is required")
+	}
+	resource = normalized[0]
+
+	tx, err := db.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var exists int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(1) FROM drs_object_controlled_access WHERE object_id = ? AND resource = ?`, objectID, resource).Scan(&exists); err != nil {
+		return err
+	}
+	if exists == 0 {
+		return common.ErrNotFound
+	}
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM drs_object_controlled_access WHERE object_id = ? AND resource = ?`, objectID, resource); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (db *SqliteDB) BulkUpdateAccessMethods(ctx context.Context, updates map[string][]drs.AccessMethod) error {
 	tx, err := db.db.BeginTx(ctx, nil)
 	if err != nil {

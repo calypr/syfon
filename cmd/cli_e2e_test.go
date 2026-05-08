@@ -64,7 +64,7 @@ func TestSyfonMetricsTransfersCLI(t *testing.T) {
 			AccessID:       "s3",
 			Provider:       "file",
 			Bucket:         "syfon-bucket",
-			StorageURL:     "file://syfon-bucket/sha-cli-1",
+			StorageURL:     "s3://syfon-bucket/sha-cli-1",
 			BytesRequested: 123,
 			ActorEmail:     "user@example.com",
 			ActorSubject:   "user@example.com",
@@ -83,7 +83,7 @@ func TestSyfonMetricsTransfersCLI(t *testing.T) {
 			AccessID:       "s3",
 			Provider:       "file",
 			Bucket:         "syfon-bucket",
-			StorageURL:     "file://syfon-bucket/sha-cli-2",
+			StorageURL:     "s3://syfon-bucket/sha-cli-2",
 			BytesRequested: 50,
 			ActorEmail:     "user@example.com",
 			ActorSubject:   "user@example.com",
@@ -102,7 +102,7 @@ func TestSyfonMetricsTransfersCLI(t *testing.T) {
 			AccessID:       "s3",
 			Provider:       "file",
 			Bucket:         "syfon-bucket",
-			StorageURL:     "file://syfon-bucket/sha-cli-3",
+			StorageURL:     "s3://syfon-bucket/sha-cli-3",
 			BytesRequested: 7,
 			ActorEmail:     "other@example.com",
 			ActorSubject:   "other@example.com",
@@ -122,7 +122,7 @@ func TestSyfonMetricsTransfersCLI(t *testing.T) {
 			Project:              "e2e",
 			Provider:             "file",
 			Bucket:               "syfon-bucket",
-			StorageURL:           "file://syfon-bucket/sha-cli-1",
+			StorageURL:           "s3://syfon-bucket/sha-cli-1",
 			BytesTransferred:     123,
 			ActorEmail:           "user@example.com",
 			ActorSubject:         "user@example.com",
@@ -139,7 +139,7 @@ func TestSyfonMetricsTransfersCLI(t *testing.T) {
 			Project:              "e2e",
 			Provider:             "file",
 			Bucket:               "syfon-bucket",
-			StorageURL:           "file://syfon-bucket/sha-cli-3",
+			StorageURL:           "s3://syfon-bucket/sha-cli-3",
 			BytesTransferred:     7,
 			ActorEmail:           "other@example.com",
 			ActorSubject:         "other@example.com",
@@ -190,14 +190,14 @@ func TestSyfonMetricsTransfersCLI(t *testing.T) {
 		t.Fatalf("metrics transfers users command failed: %v output=%s", err, out)
 	}
 	var users struct {
-		Summary   models.TransferAttributionSummary `json:"summary"`
-		Users     []struct {
+		Summary models.TransferAttributionSummary `json:"summary"`
+		Users   []struct {
 			User            string `json:"user"`
 			BytesDownloaded int64  `json:"bytes_downloaded"`
 			BytesUploaded   int64  `json:"bytes_uploaded"`
 		} `json:"users"`
-		SortBy    string                         `json:"sort_by"`
-		SortOrder string                         `json:"sort_order"`
+		SortBy    string                           `json:"sort_by"`
+		SortOrder string                           `json:"sort_order"`
 		Freshness *models.TransferMetricsFreshness `json:"freshness"`
 	}
 	if err := json.Unmarshal([]byte(out), &users); err != nil {

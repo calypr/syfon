@@ -628,6 +628,39 @@ func TestHandleInternalDeleteByQuery_AuthzParity(t *testing.T) {
 	}
 }
 
+func TestHandleInternalRemoveControlledAccess(t *testing.T) {
+	now := time.Now().UTC()
+	controlled := []string{"/organization/org/project/a", "/organization/org/project/b"}
+	mockDB := &testutils.MockDatabase{
+		Objects: map[string]*drs.DrsObject{
+			"obj-1": {Id: "obj-1", CreatedTime: now, UpdatedTime: &now, ControlledAccess: &controlled},
+		},
+		ObjectAuthz: map[string]map[string][]string{
+			"obj-1": {"org": {"a", "b"}},
+		},
+	}
+
+	body := `{"resource":"/programs/org/projects/a"}`
+	req := httptest.NewRequest(http.MethodPost, "/index/obj-1/controlled-access/remove", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = withTestAuthzContext(req, "local-authz", map[string]map[string]bool{
+		"/programs/org/projects/a": {"update": true},
+		"/programs/org/projects/b": {"read": true},
+	})
+
+	om := core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
+	rr := doInternalDRSTestRequest(req, om)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "/organization/org/project/b") {
+		t.Fatalf("expected remaining controlled access in response, got %s", rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), "/organization/org/project/a") {
+		t.Fatalf("expected removed resource to be absent, got %s", rr.Body.String())
+	}
+}
+
 func TestRegisterInternalIndexRoutes_LegacyAliases(t *testing.T) {
 	now := time.Now().UTC()
 	mockDB := &testutils.MockDatabase{

@@ -198,6 +198,36 @@ paths:
           description: Not found
         '500':
           description: Internal server error
+  /index/{id}/controlled-access/remove:
+    post:
+      tags:
+        - internal-index
+      operationId: internalRemoveControlledAccess
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ControlledAccessRemoveRequest'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalRecordResponse'
+        '400':
+          description: Validation error
+        '404':
+          description: Not found
+        '500':
+          description: Internal server error
   /index/bulk:
     post:
       tags:
@@ -593,6 +623,13 @@ paths:
           description: Internal server error
 components:
   schemas:
+    ControlledAccessRemoveRequest:
+      type: object
+      required:
+        - resource
+      properties:
+        resource:
+          type: string
     HashInfo:
       type: object
       additionalProperties:

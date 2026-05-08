@@ -32,6 +32,7 @@ func RegisterInternalRoutes(router fiber.Router, om *core.ObjectManager) {
 	router.Post(common.RouteInternalIndex, handleInternalCreateFiber(om))
 	router.Put(routeutil.FiberPath(common.RouteInternalIndexDetail), func(c fiber.Ctx) error { return handleInternalUpdateFiber(c, om) })
 	router.Delete(routeutil.FiberPath(common.RouteInternalIndexDetail), handleInternalDeleteFiber(om))
+	router.Post(routeutil.FiberPath(common.RouteInternalIndexControlledAccessRemove), handleInternalRemoveControlledAccessFiber(om))
 	router.Delete("/", handleInternalDeleteByQueryFiber(om))
 	router.Delete(common.RouteInternalIndex, handleInternalDeleteByQueryFiber(om))
 
@@ -126,6 +127,21 @@ func handleInternalDeleteFiber(om *core.ObjectManager) fiber.Handler {
 			return apiutil.HandleError(c, err)
 		}
 		return c.SendStatus(fiber.StatusNoContent)
+	}
+}
+
+func handleInternalRemoveControlledAccessFiber(om *core.ObjectManager) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		id := strings.TrimSpace(c.Params("id"))
+		var req internalapi.ControlledAccessRemoveRequest
+		if err := c.Bind().JSON(&req); err != nil || strings.TrimSpace(req.Resource) == "" {
+			return c.Status(fiber.StatusBadRequest).SendString("Invalid request body")
+		}
+		obj, err := om.RemoveObjectControlledAccess(c.Context(), id, req.Resource)
+		if err != nil {
+			return apiutil.HandleError(c, err)
+		}
+		return c.JSON(core.InternalObjectToInternalRecordResponse(*obj))
 	}
 }
 

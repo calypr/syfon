@@ -79,7 +79,7 @@ func downloadURLToPath(ctx context.Context, rawURL, outPath string, c syfonclien
 		return fmt.Errorf("parse download url: %w", err)
 	}
 	switch strings.ToLower(parsed.Scheme) {
-	case "", "file":
+	case "":
 		srcPath := parsed.Path
 		if srcPath == "" {
 			srcPath = rawURL

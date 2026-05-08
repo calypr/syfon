@@ -80,6 +80,19 @@ func (s *IndexService) Delete(ctx context.Context, did string) error {
 	return nil
 }
 
+func (s *IndexService) RemoveControlledAccess(ctx context.Context, did, resource string) (internalapi.InternalRecordResponse, error) {
+	resp, err := s.gen.InternalRemoveControlledAccessWithResponse(ctx, did, internalapi.InternalRemoveControlledAccessJSONRequestBody{
+		Resource: resource,
+	})
+	if err != nil {
+		return internalapi.InternalRecordResponse{}, err
+	}
+	if resp.JSON200 == nil {
+		return internalapi.InternalRecordResponse{}, fmt.Errorf("failed to remove controlled access: %d", resp.StatusCode())
+	}
+	return *resp.JSON200, nil
+}
+
 func (s *IndexService) List(ctx context.Context, opts ListRecordsOptions) (internalapi.ListRecordsResponse, error) {
 	params := url.Values{}
 	if opts.Hash != "" {

@@ -23,7 +23,7 @@ func TestDownloadRunE_RequiresDID(t *testing.T) {
 	}
 }
 
-func TestDownloadURLToPath_FileScheme(t *testing.T) {
+func TestDownloadURLToPath_LocalPath(t *testing.T) {
 	srcDir := t.TempDir()
 	srcPath := filepath.Join(srcDir, "source.txt")
 	outPath := filepath.Join(srcDir, "out.txt")
@@ -32,9 +32,9 @@ func TestDownloadURLToPath_FileScheme(t *testing.T) {
 		t.Fatalf("write source: %v", err)
 	}
 
-	err := downloadURLToPath(context.Background(), "file://"+srcPath, outPath, nil)
+	err := downloadURLToPath(context.Background(), srcPath, outPath, nil)
 	if err != nil {
-		t.Fatalf("downloadURLToPath(file) error: %v", err)
+		t.Fatalf("downloadURLToPath(local path) error: %v", err)
 	}
 	got, err := os.ReadFile(outPath)
 	if err != nil {
@@ -102,4 +102,3 @@ func TestDownloadURLToPath_HTTP_NonConcreteClient(t *testing.T) {
 		t.Fatalf("expected non-concrete client error, got: %v", err)
 	}
 }
-

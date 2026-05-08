@@ -47,6 +47,11 @@ type BulkSHA256ValidityRequest struct {
 	Sha256 *[]string `json:"sha256,omitempty"`
 }
 
+// ControlledAccessRemoveRequest defines model for ControlledAccessRemoveRequest.
+type ControlledAccessRemoveRequest struct {
+	Resource string `json:"resource"`
+}
+
 // DeleteByQueryResponse defines model for DeleteByQueryResponse.
 type DeleteByQueryResponse struct {
 	Deleted *int `json:"deleted,omitempty"`
@@ -264,6 +269,9 @@ type InternalBulkSHA256ValidityJSONRequestBody = BulkSHA256ValidityRequest
 // InternalUpdateJSONRequestBody defines body for InternalUpdate for application/json ContentType.
 type InternalUpdateJSONRequestBody = InternalRecord
 
+// InternalRemoveControlledAccessJSONRequestBody defines body for InternalRemoveControlledAccess for application/json ContentType.
+type InternalRemoveControlledAccessJSONRequestBody = ControlledAccessRemoveRequest
+
 // AsBulkDocumentsRequest0 returns the union data inside the BulkDocumentsRequest as a BulkDocumentsRequest0
 func (t BulkDocumentsRequest) AsBulkDocumentsRequest0() (BulkDocumentsRequest0, error) {
 	var body BulkDocumentsRequest0
@@ -479,6 +487,11 @@ type ClientInterface interface {
 	InternalUpdateWithBody(ctx context.Context, id string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	InternalUpdate(ctx context.Context, id string, body InternalUpdateJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// InternalRemoveControlledAccessWithBody request with any body
+	InternalRemoveControlledAccessWithBody(ctx context.Context, id string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	InternalRemoveControlledAccess(ctx context.Context, id string, body InternalRemoveControlledAccessJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 }
 
 func (c *Client) InternalDownload(ctx context.Context, fileId string, params *InternalDownloadParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -843,6 +856,30 @@ func (c *Client) InternalUpdateWithBody(ctx context.Context, id string, contentT
 
 func (c *Client) InternalUpdate(ctx context.Context, id string, body InternalUpdateJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewInternalUpdateRequest(c.Server, id, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) InternalRemoveControlledAccessWithBody(ctx context.Context, id string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewInternalRemoveControlledAccessRequestWithBody(c.Server, id, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) InternalRemoveControlledAccess(ctx context.Context, id string, body InternalRemoveControlledAccessJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewInternalRemoveControlledAccessRequest(c.Server, id, body)
 	if err != nil {
 		return nil, err
 	}
@@ -1890,6 +1927,53 @@ func NewInternalUpdateRequestWithBody(server string, id string, contentType stri
 	return req, nil
 }
 
+// NewInternalRemoveControlledAccessRequest calls the generic InternalRemoveControlledAccess builder with application/json body
+func NewInternalRemoveControlledAccessRequest(server string, id string, body InternalRemoveControlledAccessJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewInternalRemoveControlledAccessRequestWithBody(server, id, "application/json", bodyReader)
+}
+
+// NewInternalRemoveControlledAccessRequestWithBody generates requests for InternalRemoveControlledAccess with any type of body
+func NewInternalRemoveControlledAccessRequestWithBody(server string, id string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "id", runtime.ParamLocationPath, id)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/index/%s/controlled-access/remove", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 func (c *Client) applyEditors(ctx context.Context, req *http.Request, additionalEditors []RequestEditorFn) error {
 	for _, r := range c.RequestEditors {
 		if err := r(ctx, req); err != nil {
@@ -2013,6 +2097,11 @@ type ClientWithResponsesInterface interface {
 	InternalUpdateWithBodyWithResponse(ctx context.Context, id string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*InternalUpdateResponse, error)
 
 	InternalUpdateWithResponse(ctx context.Context, id string, body InternalUpdateJSONRequestBody, reqEditors ...RequestEditorFn) (*InternalUpdateResponse, error)
+
+	// InternalRemoveControlledAccessWithBodyWithResponse request with any body
+	InternalRemoveControlledAccessWithBodyWithResponse(ctx context.Context, id string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*InternalRemoveControlledAccessResponse, error)
+
+	InternalRemoveControlledAccessWithResponse(ctx context.Context, id string, body InternalRemoveControlledAccessJSONRequestBody, reqEditors ...RequestEditorFn) (*InternalRemoveControlledAccessResponse, error)
 }
 
 type InternalDownloadResponse struct {
@@ -2432,6 +2521,28 @@ func (r InternalUpdateResponse) StatusCode() int {
 	return 0
 }
 
+type InternalRemoveControlledAccessResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *InternalRecordResponse
+}
+
+// Status returns HTTPResponse.Status
+func (r InternalRemoveControlledAccessResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r InternalRemoveControlledAccessResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 // InternalDownloadWithResponse request returning *InternalDownloadResponse
 func (c *ClientWithResponses) InternalDownloadWithResponse(ctx context.Context, fileId string, params *InternalDownloadParams, reqEditors ...RequestEditorFn) (*InternalDownloadResponse, error) {
 	rsp, err := c.InternalDownload(ctx, fileId, params, reqEditors...)
@@ -2697,6 +2808,23 @@ func (c *ClientWithResponses) InternalUpdateWithResponse(ctx context.Context, id
 		return nil, err
 	}
 	return ParseInternalUpdateResponse(rsp)
+}
+
+// InternalRemoveControlledAccessWithBodyWithResponse request with arbitrary body returning *InternalRemoveControlledAccessResponse
+func (c *ClientWithResponses) InternalRemoveControlledAccessWithBodyWithResponse(ctx context.Context, id string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*InternalRemoveControlledAccessResponse, error) {
+	rsp, err := c.InternalRemoveControlledAccessWithBody(ctx, id, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseInternalRemoveControlledAccessResponse(rsp)
+}
+
+func (c *ClientWithResponses) InternalRemoveControlledAccessWithResponse(ctx context.Context, id string, body InternalRemoveControlledAccessJSONRequestBody, reqEditors ...RequestEditorFn) (*InternalRemoveControlledAccessResponse, error) {
+	rsp, err := c.InternalRemoveControlledAccess(ctx, id, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseInternalRemoveControlledAccessResponse(rsp)
 }
 
 // ParseInternalDownloadResponse parses an HTTP response from a InternalDownloadWithResponse call
@@ -3163,6 +3291,32 @@ func ParseInternalUpdateResponse(rsp *http.Response) (*InternalUpdateResponse, e
 	}
 
 	response := &InternalUpdateResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest InternalRecordResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseInternalRemoveControlledAccessResponse parses an HTTP response from a InternalRemoveControlledAccessWithResponse call
+func ParseInternalRemoveControlledAccessResponse(rsp *http.Response) (*InternalRemoveControlledAccessResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &InternalRemoveControlledAccessResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}

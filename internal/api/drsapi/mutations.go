@@ -42,7 +42,16 @@ func handleUploadRequestFiber(om *core.ObjectManager) fiber.Handler {
 func handleDeleteObjectFiber(om *core.ObjectManager) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		id := c.Params("object_id")
-		if err := om.DeleteObject(c.Context(), id); err != nil {
+		var body drs.DeleteRequest
+		if len(c.Body()) > 0 {
+			if err := c.Bind().JSON(&body); err != nil {
+				return c.Status(fiber.StatusBadRequest).JSON(drs.Error{Msg: common.Ptr("Invalid request body")})
+			}
+		}
+		opts := core.DeleteOptions{
+			DeleteStorageData: body.DeleteStorageData != nil && *body.DeleteStorageData,
+		}
+		if err := om.DeleteObjectWithOptions(c.Context(), id, opts); err != nil {
 			return apiutil.HandleError(c, err)
 		}
 		return c.SendStatus(fiber.StatusNoContent)
