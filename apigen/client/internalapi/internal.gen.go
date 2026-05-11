@@ -76,10 +76,10 @@ type InternalMultipartInitOutput struct {
 
 // InternalMultipartInitRequest defines model for InternalMultipartInitRequest.
 type InternalMultipartInitRequest struct {
-	// Bucket Required for new unscoped uploads. Ignored when an existing scoped object provides the canonical storage location.
-	Bucket   *string `json:"bucket,omitempty"`
-	FileName *string `json:"file_name,omitempty"`
-	Guid     *string `json:"guid,omitempty"`
+	FileName     *string `json:"file_name,omitempty"`
+	Guid         *string `json:"guid,omitempty"`
+	Organization *string `json:"organization,omitempty"`
+	Project      *string `json:"project,omitempty"`
 }
 
 // InternalMultipartPart defines model for InternalMultipartPart.
@@ -156,16 +156,18 @@ type InternalUploadBlankOutput struct {
 
 // InternalUploadBlankRequest defines model for InternalUploadBlankRequest.
 type InternalUploadBlankRequest struct {
-	Bucket string  `json:"bucket"`
-	Guid   *string `json:"guid,omitempty"`
+	Guid         *string `json:"guid,omitempty"`
+	Organization *string `json:"organization,omitempty"`
+	Project      *string `json:"project,omitempty"`
 }
 
 // InternalUploadBulkItem defines model for InternalUploadBulkItem.
 type InternalUploadBulkItem struct {
-	Bucket    *string `json:"bucket,omitempty"`
-	ExpiresIn *int32  `json:"expires_in,omitempty"`
-	FileId    string  `json:"file_id"`
-	FileName  *string `json:"file_name,omitempty"`
+	ExpiresIn    *int32  `json:"expires_in,omitempty"`
+	FileId       string  `json:"file_id"`
+	FileName     *string `json:"file_name,omitempty"`
+	Organization *string `json:"organization,omitempty"`
+	Project      *string `json:"project,omitempty"`
 }
 
 // InternalUploadBulkOutput defines model for InternalUploadBulkOutput.
@@ -207,10 +209,10 @@ type InternalDownloadPartParams struct {
 
 // InternalUploadURLParams defines parameters for InternalUploadURL.
 type InternalUploadURLParams struct {
-	// Bucket Required when the object does not already have a backing storage location.
-	Bucket    *string `form:"bucket,omitempty" json:"bucket,omitempty"`
-	FileName  *string `form:"file_name,omitempty" json:"file_name,omitempty"`
-	ExpiresIn *int32  `form:"expires_in,omitempty" json:"expires_in,omitempty"`
+	Organization *string `form:"organization,omitempty" json:"organization,omitempty"`
+	Project      *string `form:"project,omitempty" json:"project,omitempty"`
+	FileName     *string `form:"file_name,omitempty" json:"file_name,omitempty"`
+	ExpiresIn    *int32  `form:"expires_in,omitempty" json:"expires_in,omitempty"`
 }
 
 // InternalDeleteByQueryParams defines parameters for InternalDeleteByQuery.
@@ -1255,9 +1257,25 @@ func NewInternalUploadURLRequest(server string, fileId string, params *InternalU
 	if params != nil {
 		queryValues := queryURL.Query()
 
-		if params.Bucket != nil {
+		if params.Organization != nil {
 
-			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "bucket", runtime.ParamLocationQuery, *params.Bucket); err != nil {
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "organization", runtime.ParamLocationQuery, *params.Organization); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Project != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "project", runtime.ParamLocationQuery, *params.Project); err != nil {
 				return nil, err
 			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
 				return nil, err

@@ -49,15 +49,18 @@ func (d *DataService) UploadBlank(ctx context.Context, req internalapi.InternalU
 
 func (d *DataService) UploadURL(ctx context.Context, req UploadURLRequest) (internalapi.InternalSignedURL, error) {
 	params := &internalapi.InternalUploadURLParams{}
-	if req.Bucket != "" {
-		params.Bucket = &req.Bucket
-	}
 	if req.FileName != "" {
 		params.FileName = &req.FileName
 	}
 	if req.ExpiresIn > 0 {
 		expires := int32(req.ExpiresIn)
 		params.ExpiresIn = &expires
+	}
+	if req.Organization != "" {
+		params.Organization = &req.Organization
+	}
+	if req.Project != "" {
+		params.Project = &req.Project
 	}
 	resp, err := d.gen.InternalUploadURLWithResponse(ctx, req.FileID, params)
 	if err != nil {
@@ -216,16 +219,12 @@ func (d *DataService) Download(ctx context.Context, signedURL string, rangeStart
 // --- transfer.Uploader interface support ---
 
 func (d *DataService) ResolveUploadURL(ctx context.Context, guid, filename string, metadata common.FileMetadata, bucket string) (string, error) {
-	if strings.TrimSpace(bucket) == "" && strings.TrimSpace(guid) != "" {
-		blank, err := d.UploadBlank(ctx, internalapi.InternalUploadBlankRequest{Guid: &guid})
-		if err == nil && blank.Bucket != nil && strings.TrimSpace(*blank.Bucket) != "" {
-			bucket = strings.TrimSpace(*blank.Bucket)
-		}
-	}
+	organization, project := uploadScopeFromMetadata(metadata)
 	resp, err := d.UploadURL(ctx, UploadURLRequest{
-		FileID:   guid,
-		FileName: filename,
-		Bucket:   bucket,
+		FileID:       guid,
+		FileName:     filename,
+		Organization: organization,
+		Project:      project,
 	})
 	if err != nil {
 		return "", err
@@ -233,8 +232,43 @@ func (d *DataService) ResolveUploadURL(ctx context.Context, guid, filename strin
 	if resp.Url == nil {
 		return "", fmt.Errorf("response missing URL")
 	}
-	d.rememberUploadBucket(guid, bucket)
 	return *resp.Url, nil
+}
+
+func (d *DataService) ResolveScopedUploadURL(ctx context.Context, guid, filename string, metadata common.FileMetadata, organization, project string) (string, error) {
+	resp, err := d.UploadURL(ctx, UploadURLRequest{
+		FileID:       guid,
+		FileName:     filename,
+		Organization: organization,
+		Project:      project,
+	})
+	if err != nil {
+		return "", err
+	}
+	if resp.Url == nil {
+		return "", fmt.Errorf("response missing URL")
+	}
+	return *resp.Url, nil
+}
+
+func uploadScopeFromMetadata(metadata common.FileMetadata) (string, string) {
+	if len(metadata.Authorizations) == 0 {
+		return "", ""
+	}
+	for org, projects := range metadata.Authorizations {
+		org = strings.TrimSpace(org)
+		if org == "" {
+			continue
+		}
+		for _, project := range projects {
+			project = strings.TrimSpace(project)
+			if project != "" {
+				return org, project
+			}
+		}
+		return org, ""
+	}
+	return "", ""
 }
 
 func (d *DataService) Upload(ctx context.Context, url string, body io.Reader, size int64) error {
@@ -284,7 +318,6 @@ func (d *DataService) InitMultipartUpload(ctx context.Context, guid, filename, b
 	req := internalapi.InternalMultipartInitRequest{
 		Guid:     &guid,
 		FileName: &filename,
-		Bucket:   &bucket,
 	}
 	resp, err := d.multipartInitRequest(ctx, req)
 	if err != nil {

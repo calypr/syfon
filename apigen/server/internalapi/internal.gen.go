@@ -74,10 +74,10 @@ type InternalMultipartInitOutput struct {
 
 // InternalMultipartInitRequest defines model for InternalMultipartInitRequest.
 type InternalMultipartInitRequest struct {
-	// Bucket Required for new unscoped uploads. Ignored when an existing scoped object provides the canonical storage location.
-	Bucket   *string `json:"bucket,omitempty"`
-	FileName *string `json:"file_name,omitempty"`
-	Guid     *string `json:"guid,omitempty"`
+	FileName     *string `json:"file_name,omitempty"`
+	Guid         *string `json:"guid,omitempty"`
+	Organization *string `json:"organization,omitempty"`
+	Project      *string `json:"project,omitempty"`
 }
 
 // InternalMultipartPart defines model for InternalMultipartPart.
@@ -154,16 +154,18 @@ type InternalUploadBlankOutput struct {
 
 // InternalUploadBlankRequest defines model for InternalUploadBlankRequest.
 type InternalUploadBlankRequest struct {
-	Bucket string  `json:"bucket"`
-	Guid   *string `json:"guid,omitempty"`
+	Guid         *string `json:"guid,omitempty"`
+	Organization *string `json:"organization,omitempty"`
+	Project      *string `json:"project,omitempty"`
 }
 
 // InternalUploadBulkItem defines model for InternalUploadBulkItem.
 type InternalUploadBulkItem struct {
-	Bucket    *string `json:"bucket,omitempty"`
-	ExpiresIn *int32  `json:"expires_in,omitempty"`
-	FileId    string  `json:"file_id"`
-	FileName  *string `json:"file_name,omitempty"`
+	ExpiresIn    *int32  `json:"expires_in,omitempty"`
+	FileId       string  `json:"file_id"`
+	FileName     *string `json:"file_name,omitempty"`
+	Organization *string `json:"organization,omitempty"`
+	Project      *string `json:"project,omitempty"`
 }
 
 // InternalUploadBulkOutput defines model for InternalUploadBulkOutput.
@@ -205,10 +207,10 @@ type InternalDownloadPartParams struct {
 
 // InternalUploadURLParams defines parameters for InternalUploadURL.
 type InternalUploadURLParams struct {
-	// Bucket Required when the object does not already have a backing storage location.
-	Bucket    *string `form:"bucket,omitempty" json:"bucket,omitempty"`
-	FileName  *string `form:"file_name,omitempty" json:"file_name,omitempty"`
-	ExpiresIn *int32  `form:"expires_in,omitempty" json:"expires_in,omitempty"`
+	Organization *string `form:"organization,omitempty" json:"organization,omitempty"`
+	Project      *string `form:"project,omitempty" json:"project,omitempty"`
+	FileName     *string `form:"file_name,omitempty" json:"file_name,omitempty"`
+	ExpiresIn    *int32  `form:"expires_in,omitempty" json:"expires_in,omitempty"`
 }
 
 // InternalDeleteByQueryParams defines parameters for InternalDeleteByQuery.
@@ -528,15 +530,26 @@ func (siw *ServerInterfaceWrapper) InternalUploadURL(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter file_id: %w", err).Error())
 	}
 
-	// ------------- Optional query parameter "bucket" -------------
-	if paramValue := c.Query("bucket"); paramValue != "" {
+	// ------------- Optional query parameter "organization" -------------
+	if paramValue := c.Query("organization"); paramValue != "" {
 
 		var value string
-		err = runtime.BindStyledParameterWithOptions("form", "bucket", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
+		err = runtime.BindStyledParameterWithOptions("form", "organization", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
 		if err != nil {
-			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter bucket: %w", err).Error())
+			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter organization: %w", err).Error())
 		}
-		params.Bucket = &value
+		params.Organization = &value
+
+	}
+	// ------------- Optional query parameter "project" -------------
+	if paramValue := c.Query("project"); paramValue != "" {
+
+		var value string
+		err = runtime.BindStyledParameterWithOptions("form", "project", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
+		if err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter project: %w", err).Error())
+		}
+		params.Project = &value
 
 	}
 	// ------------- Optional query parameter "file_name" -------------

@@ -365,7 +365,7 @@ paths:
       tags:
         - internal-data
       operationId: internalUploadBlank
-      description: Issue a presigned upload URL for a new unscoped object. An explicit bucket is required; the server will not choose a default bucket.
+      description: Issue a presigned upload URL for a new object. Organization/project are required so the server can resolve bucket routing from configured bucket scopes.
       requestBody:
         required: false
         content:
@@ -399,9 +399,13 @@ paths:
           schema:
             type: string
         - in: query
-          name: bucket
+          name: organization
           required: false
-          description: Required when the object does not already have a backing storage location.
+          schema:
+            type: string
+        - in: query
+          name: project
+          required: false
           schema:
             type: string
         - in: query
@@ -551,7 +555,7 @@ paths:
       tags:
         - internal-data
       operationId: internalMultipartInit
-      description: Initialize multipart upload state. New unscoped uploads require an explicit bucket. Existing scoped objects derive their canonical bucket and key from the backing record.
+      description: Initialize multipart upload state. New uploads require organization/project scope so bucket routing is resolved from configured bucket scopes. Existing scoped objects derive their canonical bucket and key from the backing record.
       requestBody:
         required: true
         content:
@@ -748,12 +752,12 @@ components:
           type: string
     InternalUploadBlankRequest:
       type: object
-      required:
-        - bucket
       properties:
-        bucket:
-          type: string
         guid:
+          type: string
+        organization:
+          type: string
+        project:
           type: string
     InternalUploadBlankOutput:
       type: object
@@ -780,9 +784,11 @@ components:
       properties:
         file_id:
           type: string
-        bucket:
-          type: string
         file_name:
+          type: string
+        organization:
+          type: string
+        project:
           type: string
         expires_in:
           type: integer
@@ -820,9 +826,10 @@ components:
           type: string
         file_name:
           type: string
-        bucket:
+        organization:
           type: string
-          description: Required for new unscoped uploads. Ignored when an existing scoped object provides the canonical storage location.
+        project:
+          type: string
     InternalMultipartInitOutput:
       type: object
       properties:

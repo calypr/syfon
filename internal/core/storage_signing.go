@@ -57,10 +57,9 @@ func (m *ObjectManager) ResolveCanonicalStorageTarget(ctx context.Context, req C
 		existingURL = FirstSupportedAccessURL(obj)
 	}
 	existingBucket, existingKey, existingOK := parseS3Location(existingURL)
-	existingMalformed := existingOK && (strings.EqualFold(strings.TrimSpace(existingBucket), "objects") || strings.TrimSpace(existingKey) == "")
 
-	targetBucket := strings.TrimSpace(req.Bucket)
 	if len(scopes) > 0 {
+		targetBucket := ""
 		for _, scope := range scopes {
 			if strings.TrimSpace(scope.Bucket) != "" {
 				targetBucket = strings.TrimSpace(scope.Bucket)
@@ -69,11 +68,7 @@ func (m *ObjectManager) ResolveCanonicalStorageTarget(ctx context.Context, req C
 		if targetBucket == "" {
 			return CanonicalStorageTarget{}, fmt.Errorf("unable to resolve scoped storage bucket for object %s", obj.Id)
 		}
-		existingKeyHint := existingKey
-		if existingMalformed {
-			existingKeyHint = ""
-		}
-		targetKey := m.canonicalObjectKey(obj, req.Key, existingKeyHint, req.PreferChecksum)
+		targetKey := m.canonicalObjectKey(obj, req.Key, existingKey, req.PreferChecksum)
 		targetKey = normalizeScopedStorageKey(targetKey, scopes)
 		if strings.TrimSpace(targetKey) == "" {
 			return CanonicalStorageTarget{}, fmt.Errorf("unable to resolve scoped storage key for object %s", obj.Id)
@@ -81,36 +76,63 @@ func (m *ObjectManager) ResolveCanonicalStorageTarget(ctx context.Context, req C
 		return newCanonicalStorageTarget(targetBucket, targetKey), nil
 	}
 
-	if targetBucket != "" {
-		resolvedBucket, err := m.ResolveBucket(ctx, targetBucket)
-		if err != nil {
-			return CanonicalStorageTarget{}, err
-		}
-		targetBucket = resolvedBucket
-		targetKey := strings.Trim(strings.TrimSpace(req.Key), "/")
-		if targetKey == "" && existingOK && !existingMalformed && strings.EqualFold(strings.TrimSpace(existingBucket), targetBucket) {
-			targetKey = existingKey
-		}
-		if targetKey == "" {
-			targetKey = m.canonicalObjectKey(obj, "", "", true)
-		}
-		return newCanonicalStorageTarget(targetBucket, targetKey), nil
-	}
-
 	if strings.TrimSpace(existingURL) == "" {
-		return CanonicalStorageTarget{}, fmt.Errorf("object storage location is unavailable")
-	}
-	if existingMalformed {
-		bucket, err := m.ResolveBucket(ctx, "")
-		if err != nil {
-			return CanonicalStorageTarget{}, err
-		}
-		return newCanonicalStorageTarget(bucket, m.canonicalObjectKey(obj, "", "", true)), nil
+		return CanonicalStorageTarget{}, fmt.Errorf("%w: object storage location is unavailable", common.ErrInvalidInput)
 	}
 	if existingOK {
+		if strings.TrimSpace(existingBucket) == "" || strings.TrimSpace(existingKey) == "" {
+			return CanonicalStorageTarget{}, fmt.Errorf("%w: object storage location is invalid", common.ErrInvalidInput)
+		}
 		return newCanonicalStorageTarget(existingBucket, existingKey), nil
 	}
 	return CanonicalStorageTarget{URL: existingURL}, nil
+}
+
+func (m *ObjectManager) ResolveScopedUploadTarget(ctx context.Context, organization, project, key string) (CanonicalStorageTarget, error) {
+	organization = strings.TrimSpace(organization)
+	project = strings.TrimSpace(project)
+	key = strings.Trim(strings.TrimSpace(key), "/")
+	if organization == "" {
+		return CanonicalStorageTarget{}, fmt.Errorf("%w: organization is required", common.ErrInvalidInput)
+	}
+	if _, err := syfoncommon.ResourcePath(organization, project); err != nil {
+		return CanonicalStorageTarget{}, fmt.Errorf("%w: %v", common.ErrInvalidInput, err)
+	}
+
+	scopes := make([]models.BucketScope, 0, 2)
+	if scope, found, err := m.lookupBucketScope(ctx, organization, ""); err != nil {
+		return CanonicalStorageTarget{}, err
+	} else if found {
+		scopes = append(scopes, scope)
+	}
+	if project != "" {
+		if scope, found, err := m.lookupBucketScope(ctx, organization, project); err != nil {
+			return CanonicalStorageTarget{}, err
+		} else if found {
+			scopes = append(scopes, scope)
+		}
+	}
+	if len(scopes) == 0 {
+		if project != "" {
+			return CanonicalStorageTarget{}, fmt.Errorf("%w: no bucket scope configured for organization %q project %q", common.ErrInvalidInput, organization, project)
+		}
+		return CanonicalStorageTarget{}, fmt.Errorf("%w: no bucket scope configured for organization %q", common.ErrInvalidInput, organization)
+	}
+
+	bucket := ""
+	for _, scope := range scopes {
+		if strings.TrimSpace(scope.Bucket) != "" {
+			bucket = strings.TrimSpace(scope.Bucket)
+		}
+	}
+	if bucket == "" {
+		return CanonicalStorageTarget{}, fmt.Errorf("%w: unable to resolve scoped storage bucket for organization %q project %q", common.ErrInvalidInput, organization, project)
+	}
+	key = normalizeScopedStorageKey(key, scopes)
+	if key == "" {
+		return CanonicalStorageTarget{}, fmt.Errorf("%w: unable to resolve scoped storage key for organization %q project %q", common.ErrInvalidInput, organization, project)
+	}
+	return newCanonicalStorageTarget(bucket, key), nil
 }
 
 func (m *ObjectManager) canonicalObjectKey(obj *models.InternalObject, explicitKey string, existingKey string, preferChecksum bool) string {
@@ -178,21 +200,6 @@ func (m *ObjectManager) SignObjectDownloadPart(ctx context.Context, obj *models.
 func (m *ObjectManager) resolveSigningBucket(ctx context.Context, accessURL string) string {
 	if bucket, _, ok := common.ParseS3URL(accessURL); ok {
 		return bucket
-	}
-	if strings.HasPrefix(accessURL, "s3://") {
-		parts := strings.Split(strings.TrimPrefix(accessURL, "s3://"), "/")
-		if len(parts) > 0 {
-			return parts[0]
-		}
-	}
-	if parsed, err := url.Parse(strings.TrimSpace(accessURL)); err == nil && parsed.Scheme == "" && strings.TrimSpace(parsed.Path) != "" {
-		if creds, err := m.ListS3Credentials(ctx); err == nil {
-			for _, cred := range creds {
-				if common.NormalizeProvider(cred.Provider, "") == common.FileProvider {
-					return cred.Bucket
-				}
-			}
-		}
 	}
 	return ""
 }

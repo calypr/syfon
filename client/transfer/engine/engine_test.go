@@ -226,6 +226,21 @@ func TestChunkHelpers(t *testing.T) {
 	if !strings.HasPrefix(p1, filepath.Join(cache, "syfon", "multipart")) || !strings.HasSuffix(p1, ".json") {
 		t.Fatalf("unexpected checkpoint path %q", p1)
 	}
+
+	stale := filepath.Join(cache, "syfon", "multipart", "stale.json")
+	if err := os.WriteFile(stale, []byte(`{}`), 0o644); err != nil {
+		t.Fatalf("write stale checkpoint: %v", err)
+	}
+	old := time.Now().Add(-25 * time.Hour)
+	if err := os.Chtimes(stale, old, old); err != nil {
+		t.Fatalf("age stale checkpoint: %v", err)
+	}
+	if _, err := CheckpointPath("/tmp/other.bin", "guid-2"); err != nil {
+		t.Fatalf("CheckpointPath cleanup call returned error: %v", err)
+	}
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Fatalf("expected stale checkpoint cleanup, stat err=%v", err)
+	}
 }
 
 func TestGenericUploaderUploadSingle(t *testing.T) {

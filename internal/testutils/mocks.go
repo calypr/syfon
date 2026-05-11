@@ -385,12 +385,6 @@ func (m *MockDatabase) CreateBucketScope(ctx context.Context, scope *models.Buck
 		m.BucketScopes = make(map[string]models.BucketScope)
 	}
 	k := bucketScopeKey(scope.Organization, scope.ProjectID)
-	if existing, ok := m.BucketScopes[k]; ok {
-		if existing.Bucket == scope.Bucket && strings.Trim(existing.PathPrefix, "/") == strings.Trim(scope.PathPrefix, "/") {
-			return nil
-		}
-		return fmt.Errorf("%w: scope already exists", common.ErrConflict)
-	}
 	m.BucketScopes[k] = *scope
 	return nil
 }

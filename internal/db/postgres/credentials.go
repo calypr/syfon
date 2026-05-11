@@ -144,7 +144,15 @@ func (db *PostgresDB) CreateBucketScope(ctx context.Context, scope *models.Bucke
 		if strings.EqualFold(strings.TrimSpace(existing.Bucket), bucket) && strings.Trim(strings.TrimSpace(existing.PathPrefix), "/") == prefix {
 			return nil
 		}
-		return fmt.Errorf("%w: scope already assigned to bucket=%s prefix=%s", common.ErrConflict, existing.Bucket, existing.PathPrefix)
+		_, err = db.db.ExecContext(ctx, `
+			UPDATE bucket_scope
+			SET bucket = $1, path_prefix = $2
+			WHERE organization = $3 AND project_id = $4
+		`, bucket, prefix, org, project)
+		if err != nil {
+			return fmt.Errorf("failed to update bucket scope: %w", err)
+		}
+		return nil
 	}
 
 	_, err = db.db.ExecContext(ctx, `

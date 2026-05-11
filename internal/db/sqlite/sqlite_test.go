@@ -1154,34 +1154,34 @@ func TestSqliteDB_TransferAttributionByResources(t *testing.T) {
 	now := time.Now().UTC()
 	events := []models.TransferAttributionEvent{
 		{
-			EventID:           "ev-a",
-			AccessGrantID:     "grant-a",
-			EventType:         models.TransferEventAccessIssued,
-			Direction:         models.ProviderTransferDirectionDownload,
-			EventTime:         now,
-			Organization:      "org",
-			Project:           "p1",
-			Provider:          "s3",
-			Bucket:            "bucket-a",
-			BytesRequested:    11,
-			BytesCompleted:    11,
-			ActorEmail:        "user-a@example.com",
-			StorageURL:        "s3://bucket-a/a",
+			EventID:        "ev-a",
+			AccessGrantID:  "grant-a",
+			EventType:      models.TransferEventAccessIssued,
+			Direction:      models.ProviderTransferDirectionDownload,
+			EventTime:      now,
+			Organization:   "org",
+			Project:        "p1",
+			Provider:       "s3",
+			Bucket:         "bucket-a",
+			BytesRequested: 11,
+			BytesCompleted: 11,
+			ActorEmail:     "user-a@example.com",
+			StorageURL:     "s3://bucket-a/a",
 		},
 		{
-			EventID:           "ev-b",
-			AccessGrantID:     "grant-b",
-			EventType:         models.TransferEventAccessIssued,
-			Direction:         models.ProviderTransferDirectionDownload,
-			EventTime:         now.Add(time.Minute),
-			Organization:      "org",
-			Project:           "p2",
-			Provider:          "s3",
-			Bucket:            "bucket-b",
-			BytesRequested:    29,
-			BytesCompleted:    29,
-			ActorEmail:        "user-b@example.com",
-			StorageURL:        "s3://bucket-b/b",
+			EventID:        "ev-b",
+			AccessGrantID:  "grant-b",
+			EventType:      models.TransferEventAccessIssued,
+			Direction:      models.ProviderTransferDirectionDownload,
+			EventTime:      now.Add(time.Minute),
+			Organization:   "org",
+			Project:        "p2",
+			Provider:       "s3",
+			Bucket:         "bucket-b",
+			BytesRequested: 29,
+			BytesCompleted: 29,
+			ActorEmail:     "user-b@example.com",
+			StorageURL:     "s3://bucket-b/b",
 		},
 	}
 	if err := db.RecordTransferAttributionEvents(ctx, events); err != nil {
@@ -1567,8 +1567,15 @@ func TestSqliteDB_BucketScopeLifecycle(t *testing.T) {
 		ProjectID:    "proj-a",
 		Bucket:       "bucket-b",
 		PathPrefix:   "data/b",
-	}); !errors.Is(err, common.ErrConflict) {
-		t.Fatalf("expected ErrConflict for remap, got: %v", err)
+	}); err != nil {
+		t.Fatalf("expected remap update to succeed, got: %v", err)
+	}
+	got, err = db.GetBucketScope(ctx, "calypr", "proj-a")
+	if err != nil {
+		t.Fatalf("GetBucketScope after remap failed: %v", err)
+	}
+	if got.Bucket != "bucket-b" || got.PathPrefix != "data/b" {
+		t.Fatalf("unexpected remapped scope: %+v", got)
 	}
 
 	all, err := db.ListBucketScopes(ctx)
