@@ -10,13 +10,6 @@ import (
 // drsUUIDNamespace is a fixed namespace UUID for deterministic DRS ID generation.
 var drsUUIDNamespace = uuid.MustParse("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
 
-type AccessMethodAuthorizations = struct {
-	BearerAuthIssuers   *[]string                                          `json:"bearer_auth_issuers,omitempty"`
-	DrsObjectId         *string                                            `json:"drs_object_id,omitempty"`
-	PassportAuthIssuers *[]string                                          `json:"passport_auth_issuers,omitempty"`
-	SupportedTypes      *[]drsapi.AccessMethodAuthorizationsSupportedTypes `json:"supported_types,omitempty"`
-}
-
 // DrsUUID generates a deterministic UUID for a DRS object from org, project, and hash.
 func DrsUUID(org, project, hash string) string {
 	hash = NormalizeOid(hash)
@@ -117,63 +110,11 @@ func ConvertToCandidate(obj *drsapi.DrsObject) drsapi.DrsObjectCandidate {
 	}
 }
 
-func AccessMethodAuthorizationsFromAuthzMap(authzMap map[string][]string) *AccessMethodAuthorizations {
-	if len(authzMap) == 0 {
-		return nil
-	}
-	authzList := AuthzMapToList(authzMap)
-	return &AccessMethodAuthorizations{BearerAuthIssuers: &authzList}
-}
-
-func AuthzMapFromAccessMethodAuthorizations(authz *AccessMethodAuthorizations) map[string][]string {
-	if authz == nil || authz.BearerAuthIssuers == nil {
-		return nil
-	}
-	return AuthzListToMap(*authz.BearerAuthIssuers)
-}
-
-func AccessMethodMatchesScope(method *drsapi.AccessMethod, org, project string) bool {
-	if method == nil || method.Authorizations == nil {
-		return false
-	}
-	return AuthzMapMatchesScope(AuthzMapFromAccessMethodAuthorizations(method.Authorizations), org, project)
-}
-
 func DrsObjectMatchesScope(obj *drsapi.DrsObject, org, project string) bool {
 	if obj == nil {
 		return false
 	}
-	if AuthzMapMatchesScope(ControlledAccessToAuthzMap(derefStringSlice(obj.ControlledAccess)), org, project) {
-		return true
-	}
-	if obj.AccessMethods == nil {
-		return false
-	}
-	for i := range *obj.AccessMethods {
-		if AccessMethodMatchesScope(&(*obj.AccessMethods)[i], org, project) {
-			return true
-		}
-	}
-	return false
-}
-
-// EnsureAccessMethodAuthorizations adds authz to access methods that do not
-// already define any bearer issuer scope. Existing authz and unrelated fields
-// are preserved.
-func EnsureAccessMethodAuthorizations(obj *drsapi.DrsObject, authzMap map[string][]string) (*drsapi.DrsObject, bool) {
-	if obj == nil || obj.AccessMethods == nil || len(*obj.AccessMethods) == 0 || len(authzMap) == 0 {
-		return obj, false
-	}
-	changed := false
-	for i := range *obj.AccessMethods {
-		method := &(*obj.AccessMethods)[i]
-		if AuthzMapFromAccessMethodAuthorizations(method.Authorizations) != nil {
-			continue
-		}
-		method.Authorizations = AccessMethodAuthorizationsFromAuthzMap(authzMap)
-		changed = true
-	}
-	return obj, changed
+	return AuthzMapMatchesScope(ControlledAccessToAuthzMap(derefStringSlice(obj.ControlledAccess)), org, project)
 }
 
 func derefStringSlice(ptr *[]string) []string {

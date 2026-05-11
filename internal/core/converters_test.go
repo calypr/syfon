@@ -6,32 +6,10 @@ import (
 	"time"
 
 	"github.com/calypr/syfon/apigen/server/drs"
-	"github.com/calypr/syfon/apigen/server/internalapi"
 	"github.com/calypr/syfon/apigen/server/lfsapi"
 )
 
-func TestUniqueAuthzAndConverters(t *testing.T) {
-	t.Run("unique authz flattens map", func(t *testing.T) {
-		authz := []string{"/programs/syfon/projects/e2e", "/programs/syfon/projects/e2e-2", "/programs/other"}
-		got := UniqueAuthz([]drs.AccessMethod{{
-			Authorizations: &struct {
-				BearerAuthIssuers   *[]string                                       `json:"bearer_auth_issuers,omitempty"`
-				DrsObjectId         *string                                         `json:"drs_object_id,omitempty"`
-				PassportAuthIssuers *[]string                                       `json:"passport_auth_issuers,omitempty"`
-				SupportedTypes      *[]drs.AccessMethodAuthorizationsSupportedTypes `json:"supported_types,omitempty"`
-			}{BearerAuthIssuers: &authz},
-		}})
-		if len(got) != 2 {
-			t.Fatalf("unexpected authz map length: got=%v", got)
-		}
-		if projects := got["syfon"]; len(projects) != 2 || projects[0] != "e2e" || projects[1] != "e2e-2" {
-			t.Fatalf("unexpected syfon projects: got=%v", got)
-		}
-		if projects := got["other"]; len(projects) != 0 {
-			t.Fatalf("expected org-wide other authz, got=%v", got)
-		}
-	})
-
+func TestConverters(t *testing.T) {
 	t.Run("candidate to internal object", func(t *testing.T) {
 		authz := []string{"/programs/syfon/projects/e2e"}
 		url := "https://storage.example/object.bin"
@@ -60,42 +38,9 @@ func TestUniqueAuthzAndConverters(t *testing.T) {
 		}
 	})
 
-	t.Run("internal record restores authz from access methods when controlled access is absent", func(t *testing.T) {
-		authz := []string{"/programs/syfon/projects/e2e"}
-		url := "s3://syfon-e2e-bucket/bad-id"
-		record := internalapi.InternalRecord{
-			Did: "obj-1",
-			AccessMethods: &[]drs.AccessMethod{{
-				Type: "s3",
-				AccessUrl: &struct {
-					Headers *[]string `json:"headers,omitempty"`
-					Url     string    `json:"url"`
-				}{Url: url},
-				Authorizations: &struct {
-					BearerAuthIssuers   *[]string                                       `json:"bearer_auth_issuers,omitempty"`
-					DrsObjectId         *string                                         `json:"drs_object_id,omitempty"`
-					PassportAuthIssuers *[]string                                       `json:"passport_auth_issuers,omitempty"`
-					SupportedTypes      *[]drs.AccessMethodAuthorizationsSupportedTypes `json:"supported_types,omitempty"`
-				}{BearerAuthIssuers: &authz},
-			}},
-		}
-
-		obj, err := InternalRecordToInternalObject(record, time.Unix(123, 0))
-		if err != nil {
-			t.Fatalf("InternalRecordToInternalObject returned error: %v", err)
-		}
-		if projects := obj.Authorizations["syfon"]; len(projects) != 1 || projects[0] != "e2e" {
-			t.Fatalf("unexpected reconstructed authz list: %+v", obj.Authorizations)
-		}
-		if got := ObjectAccessResources(&obj); len(got) != 1 || got[0] != "/organization/syfon/project/e2e" {
-			t.Fatalf("unexpected reconstructed access resources: %+v", got)
-		}
-	})
-
 	t.Run("lfs candidate to drs", func(t *testing.T) {
 		url := "https://storage.example/object.bin"
 		size := int64(42)
-		authz := []string{"/programs/syfon/projects/e2e"}
 		lfsID := "lfs-explicit-id"
 		candidate := lfsapi.DrsObjectCandidate{
 			Id:   strPtr(lfsID),
@@ -108,9 +53,6 @@ func TestUniqueAuthzAndConverters(t *testing.T) {
 				Type: strPtr("https"),
 				AccessUrl: &lfsapi.AccessMethodAccessUrl{
 					Url: &url,
-				},
-				Authorizations: &lfsapi.AccessMethodAuthorizations{
-					BearerAuthIssuers: &authz,
 				},
 			}},
 		}
