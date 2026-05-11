@@ -7,12 +7,14 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/apigen/server/internalapi"
 	"github.com/calypr/syfon/internal/api/routeutil"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/core"
+	"github.com/calypr/syfon/internal/db"
 	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/testutils"
 	"github.com/google/uuid"
@@ -244,6 +246,56 @@ func TestHandleInternalUploadURL_RewritesScopedObjectURL(t *testing.T) {
 	}
 }
 
+func TestHandleInternalUploadURL_ResolvesRegisteredScopedObjectID(t *testing.T) {
+	ctx := t.Context()
+	database := db.NewInMemoryDB()
+	om := core.NewObjectManager(database, &capturingMultipartURLManager{})
+	if err := om.SaveS3Credential(ctx, &models.S3Credential{Bucket: "syfon-e2e-bucket", Provider: "s3", Region: "us-east-1"}); err != nil {
+		t.Fatalf("SaveS3Credential failed: %v", err)
+	}
+	if err := om.CreateBucketScope(ctx, &models.BucketScope{
+		Organization: "syfon",
+		ProjectID:    "",
+		Bucket:       "syfon-e2e-bucket",
+		PathPrefix:   "program-root",
+	}); err != nil {
+		t.Fatalf("CreateBucketScope failed: %v", err)
+	}
+
+	oid := "3d71f043937a09b77826109db4f2b47c46f19923ef823f6a777a15fde0b2c9c7"
+	name := "program-root.bin"
+	obj, err := core.CandidateToInternalObject(drs.DrsObjectCandidate{
+		Name:             &name,
+		Size:             20,
+		Checksums:        []drs.Checksum{{Type: "sha256", Checksum: oid}},
+		ControlledAccess: &[]string{"/organization/syfon/project/e2e"},
+	}, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("CandidateToInternalObject failed: %v", err)
+	}
+	if err := om.RegisterObjects(ctx, []models.InternalObject{obj}); err != nil {
+		t.Fatalf("RegisterObjects failed: %v", err)
+	}
+	registered, err := om.GetObject(ctx, obj.Id, "read")
+	if err != nil {
+		t.Fatalf("GetObject failed: %v", err)
+	}
+
+	mockUM := &capturingMultipartURLManager{}
+	om = core.NewObjectManager(database, mockUM)
+	req := routeutil.WithPathParams(
+		httptest.NewRequest(http.MethodGet, "/data/upload/"+registered.Id+"?bucket=syfon-e2e-bucket&file_name=program-root/"+oid, nil),
+		map[string]string{"file_id": registered.Id},
+	)
+	rr := doInternalDRSTestRequest(req, om)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if want := "s3://syfon-e2e-bucket/program-root/" + oid; mockUM.signURL != want {
+		t.Fatalf("signed URL target = %q, want %q", mockUM.signURL, want)
+	}
+}
+
 func TestHandleInternalUploadURL_RepairsMalformedScopedObjectURL(t *testing.T) {
 	db := &testutils.MockDatabase{
 		Objects: map[string]*drs.DrsObject{
@@ -339,6 +391,96 @@ func TestHandleInternalUploadURL_PrefersExplicitBucketScopedPathForMalformedObje
 	wantURL := "s3://syfon-e2e-bucket/program-root/3d71f043937a09b77826109db4f2b47c46f19923ef823f6a777a15fde0b2c9c7"
 	if mockUM.signURL != wantURL {
 		t.Fatalf("expected explicit-bucket scoped upload URL %q, got %q", wantURL, mockUM.signURL)
+	}
+	if mockUM.signID != "syfon-e2e-bucket" {
+		t.Fatalf("expected signer credential bucket syfon-e2e-bucket, got %q", mockUM.signID)
+	}
+}
+
+func TestHandleInternalUploadURL_UsesExplicitObjectKeyForExistingObject(t *testing.T) {
+	const checksum = "3d71f043937a09b77826109db4f2b47c46f19923ef823f6a777a15fde0b2c9c7"
+	db := &testutils.MockDatabase{
+		Objects: map[string]*drs.DrsObject{
+			"7b9de5b9-19b2-536f-abcc-fe2a146c4eb5": {
+				Id: "7b9de5b9-19b2-536f-abcc-fe2a146c4eb5",
+				Checksums: []drs.Checksum{{
+					Type:     "sha256",
+					Checksum: checksum,
+				}},
+				ControlledAccess: &[]string{"/organization/syfon/project/e2e"},
+				AccessMethods: &[]drs.AccessMethod{{
+					Type: drs.AccessMethodTypeS3,
+					AccessUrl: &struct {
+						Headers *[]string `json:"headers,omitempty"`
+						Url     string    `json:"url"`
+					}{Url: "s3://7b9de5b9-19b2-536f-abcc-fe2a146c4eb5"},
+				}},
+			},
+		},
+		Credentials: map[string]models.S3Credential{
+			"syfon-e2e-bucket": {Bucket: "syfon-e2e-bucket", Provider: "s3", Region: "us-west-2"},
+		},
+		BucketScopes: map[string]models.BucketScope{
+			"syfon|": {
+				Organization: "syfon",
+				Bucket:       "syfon-e2e-bucket",
+				PathPrefix:   "program-root",
+			},
+		},
+	}
+	mockUM := &capturingMultipartURLManager{}
+	req := routeutil.WithPathParams(
+		httptest.NewRequest(http.MethodGet, "/data/upload/7b9de5b9-19b2-536f-abcc-fe2a146c4eb5?bucket=syfon-e2e-bucket&file_name=program-root/"+checksum, nil),
+		map[string]string{"file_id": "7b9de5b9-19b2-536f-abcc-fe2a146c4eb5"},
+	)
+	rr := doInternalDRSTestRequest(req, core.NewObjectManager(db, mockUM))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	wantURL := "s3://syfon-e2e-bucket/program-root/" + checksum
+	if mockUM.signURL != wantURL {
+		t.Fatalf("expected explicit object-key upload URL %q, got %q", wantURL, mockUM.signURL)
+	}
+	if mockUM.signID != "syfon-e2e-bucket" {
+		t.Fatalf("expected signer credential bucket syfon-e2e-bucket, got %q", mockUM.signID)
+	}
+}
+
+func TestHandleInternalUploadURL_RepairsMalformedObjectURLWithBucketAndChecksum(t *testing.T) {
+	const checksum = "412f8568bfb0e62937ee40c6fcdeaa1cf55910c558c0152250340356c8829a47"
+	db := &testutils.MockDatabase{
+		Objects: map[string]*drs.DrsObject{
+			"f781273b-52eb-5ac2-a484-775235eef303": {
+				Id: "f781273b-52eb-5ac2-a484-775235eef303",
+				Checksums: []drs.Checksum{{
+					Type:     "sha256",
+					Checksum: checksum,
+				}},
+				AccessMethods: &[]drs.AccessMethod{{
+					Type: drs.AccessMethodTypeS3,
+					AccessUrl: &struct {
+						Headers *[]string `json:"headers,omitempty"`
+						Url     string    `json:"url"`
+					}{Url: "s3://f781273b-52eb-5ac2-a484-775235eef303"},
+				}},
+			},
+		},
+		Credentials: map[string]models.S3Credential{
+			"syfon-e2e-bucket": {Bucket: "syfon-e2e-bucket", Provider: "s3", Region: "us-west-2"},
+		},
+	}
+	mockUM := &capturingMultipartURLManager{}
+	req := routeutil.WithPathParams(
+		httptest.NewRequest(http.MethodGet, "/data/upload/f781273b-52eb-5ac2-a484-775235eef303?bucket=syfon-e2e-bucket", nil),
+		map[string]string{"file_id": "f781273b-52eb-5ac2-a484-775235eef303"},
+	)
+	rr := doInternalDRSTestRequest(req, core.NewObjectManager(db, mockUM))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	wantURL := "s3://syfon-e2e-bucket/" + checksum
+	if mockUM.signURL != wantURL {
+		t.Fatalf("expected repaired checksum upload URL %q, got %q", wantURL, mockUM.signURL)
 	}
 	if mockUM.signID != "syfon-e2e-bucket" {
 		t.Fatalf("expected signer credential bucket syfon-e2e-bucket, got %q", mockUM.signID)

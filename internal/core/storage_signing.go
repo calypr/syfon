@@ -27,61 +27,128 @@ func (m *ObjectManager) SignObjectURL(ctx context.Context, obj *models.InternalO
 	return m.SignURL(ctx, scopedURL, options)
 }
 
-func (m *ObjectManager) ResolveObjectScopedStorageURL(ctx context.Context, obj *models.InternalObject, accessURL string) (string, error) {
-	return m.resolveScopedStorageURL(ctx, obj, accessURL)
+type CanonicalStorageTargetRequest struct {
+	Object         *models.InternalObject
+	AccessURL      string
+	Bucket         string
+	Key            string
+	PreferChecksum bool
 }
 
-func (m *ObjectManager) ResolveCanonicalObjectUploadURL(ctx context.Context, obj *models.InternalObject, bucketName string) (string, error) {
+type CanonicalStorageTarget struct {
+	Bucket string
+	Key    string
+	URL    string
+}
+
+func (m *ObjectManager) ResolveCanonicalStorageTarget(ctx context.Context, req CanonicalStorageTargetRequest) (CanonicalStorageTarget, error) {
+	obj := req.Object
 	if obj == nil {
-		return "", fmt.Errorf("object is required")
+		return CanonicalStorageTarget{}, fmt.Errorf("object is required")
 	}
 
 	scopes, err := m.bucketScopesForObject(ctx, obj)
 	if err != nil {
-		return "", err
+		return CanonicalStorageTarget{}, err
 	}
+
+	existingURL := strings.TrimSpace(req.AccessURL)
+	if existingURL == "" {
+		existingURL = FirstSupportedAccessURL(obj)
+	}
+	existingBucket, existingKey, existingOK := parseS3Location(existingURL)
+	existingMalformed := existingOK && (strings.EqualFold(strings.TrimSpace(existingBucket), "objects") || strings.TrimSpace(existingKey) == "")
+
+	targetBucket := strings.TrimSpace(req.Bucket)
 	if len(scopes) > 0 {
-		targetBucket := strings.TrimSpace(bucketName)
 		for _, scope := range scopes {
 			if strings.TrimSpace(scope.Bucket) != "" {
 				targetBucket = strings.TrimSpace(scope.Bucket)
 			}
 		}
 		if targetBucket == "" {
-			return "", fmt.Errorf("unable to resolve scoped upload bucket for object %s", obj.Id)
+			return CanonicalStorageTarget{}, fmt.Errorf("unable to resolve scoped storage bucket for object %s", obj.Id)
 		}
-		targetKey := ""
-		if checksum, ok := common.CanonicalSHA256(obj.Checksums); ok && strings.TrimSpace(checksum) != "" {
-			targetKey = normalizeScopedStorageKey(checksum, scopes)
-		} else if bucket, key, ok := parseS3Location(FirstSupportedAccessURL(obj)); ok {
-			_ = bucket
-			targetKey = normalizeScopedStorageKey(key, scopes)
+		existingKeyHint := existingKey
+		if existingMalformed {
+			existingKeyHint = ""
 		}
+		targetKey := m.canonicalObjectKey(obj, req.Key, existingKeyHint, req.PreferChecksum)
+		targetKey = normalizeScopedStorageKey(targetKey, scopes)
 		if strings.TrimSpace(targetKey) == "" {
-			return "", fmt.Errorf("unable to resolve scoped upload key for object %s", obj.Id)
+			return CanonicalStorageTarget{}, fmt.Errorf("unable to resolve scoped storage key for object %s", obj.Id)
 		}
-		return common.S3Prefix + targetBucket + "/" + targetKey, nil
+		return newCanonicalStorageTarget(targetBucket, targetKey), nil
 	}
 
-	if strings.TrimSpace(bucketName) != "" {
-		bucket, err := m.ResolveBucket(ctx, bucketName)
+	if targetBucket != "" {
+		resolvedBucket, err := m.ResolveBucket(ctx, targetBucket)
 		if err != nil {
-			return "", err
+			return CanonicalStorageTarget{}, err
 		}
-		if key, ok := m.ResolveObjectRemotePath(ctx, obj.Id, bucket); ok && strings.TrimSpace(key) != "" {
-			return common.BucketToURL(bucket, key), nil
+		targetBucket = resolvedBucket
+		targetKey := strings.Trim(strings.TrimSpace(req.Key), "/")
+		if targetKey == "" && existingOK && !existingMalformed && strings.EqualFold(strings.TrimSpace(existingBucket), targetBucket) {
+			targetKey = existingKey
 		}
-		if checksum, ok := common.CanonicalSHA256(obj.Checksums); ok && strings.TrimSpace(checksum) != "" {
-			return common.BucketToURL(bucket, checksum), nil
+		if targetKey == "" {
+			targetKey = m.canonicalObjectKey(obj, "", "", true)
 		}
-		return common.BucketToURL(bucket, obj.Id), nil
+		return newCanonicalStorageTarget(targetBucket, targetKey), nil
 	}
 
-	existingURL := FirstSupportedAccessURL(obj)
 	if strings.TrimSpace(existingURL) == "" {
-		return "", fmt.Errorf("object storage location is unavailable")
+		return CanonicalStorageTarget{}, fmt.Errorf("object storage location is unavailable")
 	}
-	return existingURL, nil
+	if existingMalformed {
+		bucket, err := m.ResolveBucket(ctx, "")
+		if err != nil {
+			return CanonicalStorageTarget{}, err
+		}
+		return newCanonicalStorageTarget(bucket, m.canonicalObjectKey(obj, "", "", true)), nil
+	}
+	if existingOK {
+		return newCanonicalStorageTarget(existingBucket, existingKey), nil
+	}
+	return CanonicalStorageTarget{URL: existingURL}, nil
+}
+
+func (m *ObjectManager) canonicalObjectKey(obj *models.InternalObject, explicitKey string, existingKey string, preferChecksum bool) string {
+	explicitKey = strings.Trim(strings.TrimSpace(explicitKey), "/")
+	if explicitKey != "" {
+		return explicitKey
+	}
+	checksum := ""
+	if sha, ok := common.CanonicalSHA256(obj.Checksums); ok {
+		checksum = strings.Trim(strings.TrimSpace(sha), "/")
+	}
+	existingKey = strings.Trim(strings.TrimSpace(existingKey), "/")
+	if preferChecksum {
+		if checksum != "" {
+			return checksum
+		}
+		if existingKey != "" {
+			return existingKey
+		}
+	} else {
+		if existingKey != "" {
+			return existingKey
+		}
+		if checksum != "" {
+			return checksum
+		}
+	}
+	return strings.Trim(strings.TrimSpace(obj.Id), "/")
+}
+
+func newCanonicalStorageTarget(bucket string, key string) CanonicalStorageTarget {
+	bucket = strings.TrimSpace(bucket)
+	key = strings.Trim(strings.TrimSpace(key), "/")
+	return CanonicalStorageTarget{
+		Bucket: bucket,
+		Key:    key,
+		URL:    common.BucketToURL(bucket, key),
+	}
 }
 
 // ResolveBucket validates a bucket name or returns the default one.
@@ -106,15 +173,6 @@ func (m *ObjectManager) SignObjectDownloadPart(ctx context.Context, obj *models.
 		bucket = b
 	}
 	return m.SignDownloadPart(ctx, bucket, scopedURL, start, end, options)
-}
-
-// ResolveObjectRemotePath returns the key for an object in a specific bucket.
-func (m *ObjectManager) ResolveObjectRemotePath(ctx context.Context, objectID string, bucket string) (string, bool) {
-	obj, err := m.GetObject(ctx, objectID, "")
-	if err != nil {
-		return "", false
-	}
-	return S3KeyFromInternalObjectForBucket(obj, bucket)
 }
 
 func (m *ObjectManager) resolveSigningBucket(ctx context.Context, accessURL string) string {
@@ -143,94 +201,17 @@ func (m *ObjectManager) resolveScopedStorageURL(ctx context.Context, obj *models
 	if obj == nil || len(ObjectAccessResources(obj)) == 0 {
 		return accessURL, nil
 	}
-	bucket, key, _ := parseS3Location(accessURL)
-	scopes, err := m.bucketScopesForObject(ctx, obj)
+	target, err := m.ResolveCanonicalStorageTarget(ctx, CanonicalStorageTargetRequest{
+		Object:    obj,
+		AccessURL: accessURL,
+	})
 	if err != nil {
 		return "", err
 	}
-	if len(scopes) == 0 {
+	if target.URL == "" {
 		return accessURL, nil
 	}
-	targetBucket := strings.TrimSpace(bucket)
-	for _, scope := range scopes {
-		if strings.TrimSpace(scope.Bucket) != "" {
-			targetBucket = strings.TrimSpace(scope.Bucket)
-		}
-	}
-	if targetBucket == "" {
-		return accessURL, nil
-	}
-	targetKey := normalizeScopedStorageKey(key, scopes)
-	if strings.Trim(strings.TrimSpace(key), "/") == "" {
-		if checksum, ok := common.CanonicalSHA256(obj.Checksums); ok {
-			targetKey = normalizeScopedStorageKey(checksum, scopes)
-		}
-	}
-	if targetKey == "" {
-		return accessURL, nil
-	}
-	return common.S3Prefix + targetBucket + "/" + targetKey, nil
-}
-
-func (m *ObjectManager) bucketScopeForObjectURL(ctx context.Context, obj *models.InternalObject, bucket string) (models.BucketScope, bool, error) {
-	bucket = strings.TrimSpace(bucket)
-	if bucket == "" {
-		return models.BucketScope{}, false, nil
-	}
-	var fallback *models.BucketScope
-	for _, candidate := range sortedObjectScopes(syfoncommon.ControlledAccessToAuthzMap(ObjectAccessResources(obj))) {
-		scope, found, err := m.lookupBucketScope(ctx, candidate.organization, candidate.project)
-		if err != nil {
-			return models.BucketScope{}, false, err
-		}
-		if !found {
-			continue
-		}
-		if strings.EqualFold(strings.TrimSpace(scope.Bucket), bucket) {
-			return scope, true, nil
-		}
-		if fallback == nil {
-			copyScope := scope
-			fallback = &copyScope
-		}
-	}
-	if fallback != nil {
-		return *fallback, true, nil
-	}
-	return models.BucketScope{}, false, nil
-}
-
-type objectScopeCandidate struct {
-	organization string
-	project      string
-}
-
-func sortedObjectScopes(authz map[string][]string) []objectScopeCandidate {
-	candidates := make([]objectScopeCandidate, 0)
-	orgs := make([]string, 0, len(authz))
-	for org := range authz {
-		orgs = append(orgs, org)
-	}
-	sort.Strings(orgs)
-	for _, org := range orgs {
-		projects := append([]string(nil), authz[org]...)
-		if len(projects) == 0 {
-			candidates = append(candidates, objectScopeCandidate{organization: org})
-			continue
-		}
-		sort.Strings(projects)
-		for _, project := range projects {
-			candidates = append(candidates, objectScopeCandidate{organization: org, project: project})
-		}
-		candidates = append(candidates, objectScopeCandidate{organization: org})
-	}
-	return candidates
-}
-
-func keyHasStoragePrefix(key, prefix string) bool {
-	key = strings.Trim(strings.TrimSpace(key), "/")
-	prefix = strings.Trim(strings.TrimSpace(prefix), "/")
-	return key == prefix || strings.HasPrefix(key, prefix+"/")
+	return target.URL, nil
 }
 
 func parseS3Location(accessURL string) (bucket string, key string, ok bool) {

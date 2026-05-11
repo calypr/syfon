@@ -127,29 +127,6 @@ func FirstSupportedAccessURL(obj *models.InternalObject) string {
 	return ""
 }
 
-// S3KeyFromInternalObjectForBucket extracts a key for a specific bucket from an object.
-func S3KeyFromInternalObjectForBucket(obj *models.InternalObject, bucket string) (string, bool) {
-	if obj == nil {
-		return "", false
-	}
-	targetBucket := strings.TrimSpace(bucket)
-	if targetBucket == "" {
-		return "", false
-	}
-	if obj.AccessMethods != nil {
-		for _, am := range *obj.AccessMethods {
-			if am.AccessUrl == nil {
-				continue
-			}
-			raw := strings.TrimSpace(am.AccessUrl.Url)
-			if b, key, ok := common.ParseS3URL(raw); ok && strings.EqualFold(b, targetBucket) {
-				return key, true
-			}
-		}
-	}
-	return "", false
-}
-
 // CandidateToInternalObject converts a DRS registration candidate to our internal domain model.
 func CandidateToInternalObject(c drs.DrsObjectCandidate, now time.Time) (models.InternalObject, error) {
 	oid, ok := common.CanonicalSHA256(c.Checksums)

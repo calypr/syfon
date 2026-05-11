@@ -52,6 +52,7 @@ func RegisterFile(ctx context.Context, bk UploadBackend, dc MetadataClient, drsO
 	if err == nil && len(res.Objects) > 0 && strings.TrimSpace(res.Objects[0].Id) != "" {
 		drsObject.Id = res.Objects[0].Id
 	}
+	storageID = strings.TrimSpace(drsObject.Id)
 
 	// 3. Check if file is already downloadable (optional but good optimization)
 	// (Skipping for now to prioritize core functionality, but can be added back)

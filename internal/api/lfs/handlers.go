@@ -230,15 +230,18 @@ func (s *LFSServer) resolveUploadProxyTarget(ctx context.Context, oid string) (b
 }
 
 func canonicalLFSUploadBucketKey(ctx context.Context, om *core.ObjectManager, obj *models.InternalObject, defaultBucket string) (string, string, error) {
-	uploadURL, err := om.ResolveCanonicalObjectUploadURL(ctx, obj, defaultBucket)
+	target, err := om.ResolveCanonicalStorageTarget(ctx, core.CanonicalStorageTargetRequest{
+		Object:         obj,
+		Bucket:         defaultBucket,
+		PreferChecksum: true,
+	})
 	if err != nil {
 		return "", "", err
 	}
-	bucket, key, ok := common.ParseS3URL(uploadURL)
-	if !ok {
+	if target.Bucket == "" || target.Key == "" {
 		return "", "", fmt.Errorf("canonical LFS upload location is not an s3 url")
 	}
-	return bucket, key, nil
+	return target.Bucket, target.Key, nil
 }
 
 func (s *LFSServer) handleUploadInternal(ctx context.Context, body io.Reader, bucket, key, usageObjectID string) error {

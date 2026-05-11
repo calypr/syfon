@@ -60,7 +60,16 @@ func (m *ObjectManager) storageTargetsForObject(ctx context.Context, obj *models
 		scopedURL := rawURL
 		var err error
 		if len(ObjectAccessResources(obj)) > 0 {
-			scopedURL, err = m.ResolveCanonicalObjectUploadURL(ctx, obj, "")
+			target, resolveErr := m.ResolveCanonicalStorageTarget(ctx, CanonicalStorageTargetRequest{
+				Object:         obj,
+				AccessURL:      rawURL,
+				PreferChecksum: true,
+			})
+			if resolveErr != nil {
+				err = resolveErr
+			} else {
+				scopedURL = target.URL
+			}
 		} else {
 			scopedURL, err = m.resolveScopedStorageURL(ctx, obj, rawURL)
 		}

@@ -3,7 +3,6 @@ package internaldrs
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -210,18 +209,22 @@ func handleInternalUploadURLFiber(om *core.ObjectManager) fiber.Handler {
 			key    = fileID
 		)
 		if obj != nil {
-			bucketName := strings.TrimSpace(common.StringVal(params.Bucket))
-			urlStr, err := resolveObjectUploadURL(c.Context(), om, obj, bucketName)
+			target, err := om.ResolveCanonicalStorageTarget(c.Context(), core.CanonicalStorageTargetRequest{
+				Object:         obj,
+				Bucket:         strings.TrimSpace(common.StringVal(params.Bucket)),
+				Key:            strings.TrimSpace(common.StringVal(params.FileName)),
+				PreferChecksum: true,
+			})
 			if err != nil {
 				return apiutil.HandleError(c, err)
 			}
-			signedURL, err := signUploadURLForObject(c.Context(), om, obj, urlStr)
+			signedURL, err := signUploadURLForObject(c.Context(), om, obj, target.URL)
 			if err != nil {
 				return apiutil.HandleError(c, err)
 			}
 			if err := attribution.RecordAccessIssued(c.Context(), om, obj, attribution.AccessDetails{
 				Direction:  models.ProviderTransferDirectionUpload,
-				StorageURL: urlStr,
+				StorageURL: target.URL,
 			}); err != nil {
 				return apiutil.HandleError(c, err)
 			}
@@ -254,13 +257,6 @@ func handleInternalUploadURLFiber(om *core.ObjectManager) fiber.Handler {
 
 		return c.JSON(internalapi.InternalSignedURL{Url: &signedURL})
 	}
-}
-
-func resolveObjectUploadURL(ctx context.Context, om *core.ObjectManager, obj *models.InternalObject, bucketName string) (string, error) {
-	if obj == nil {
-		return "", fmt.Errorf("object is required")
-	}
-	return om.ResolveCanonicalObjectUploadURL(ctx, obj, bucketName)
 }
 
 func handleInternalUploadBulkFiber(om *core.ObjectManager) fiber.Handler {
@@ -301,7 +297,12 @@ func handleInternalUploadBulkFiber(om *core.ObjectManager) fiber.Handler {
 				continue
 			}
 
-			urlStr, err := resolveObjectUploadURL(c.Context(), om, obj, strings.TrimSpace(common.StringVal(item.Bucket)))
+			target, err := om.ResolveCanonicalStorageTarget(c.Context(), core.CanonicalStorageTargetRequest{
+				Object:         obj,
+				Bucket:         strings.TrimSpace(common.StringVal(item.Bucket)),
+				Key:            strings.TrimSpace(common.StringVal(item.FileName)),
+				PreferChecksum: true,
+			})
 			if err != nil {
 				errMsg := err.Error()
 				res.Error = &errMsg
@@ -309,20 +310,19 @@ func handleInternalUploadBulkFiber(om *core.ObjectManager) fiber.Handler {
 				results = append(results, res)
 				continue
 			}
-			bucket := ""
-			key := obj.Id
-			if parsedBucket, parsedKey, ok := common.ParseS3URL(urlStr); ok {
-				bucket = parsedBucket
-				key = parsedKey
+			bucket := target.Bucket
+			key := target.Key
+			if key == "" {
+				key = obj.Id
 			}
-			signedURL, err := signUploadURLForObject(c.Context(), om, obj, urlStr)
+			signedURL, err := signUploadURLForObject(c.Context(), om, obj, target.URL)
 			if err != nil {
 				errMsg := err.Error()
 				res.Error = &errMsg
 				res.Status = http.StatusInternalServerError
 			} else if err := attribution.RecordAccessIssued(c.Context(), om, obj, attribution.AccessDetails{
 				Direction:  models.ProviderTransferDirectionUpload,
-				StorageURL: urlStr,
+				StorageURL: target.URL,
 			}); err != nil {
 				errMsg := err.Error()
 				res.Error = &errMsg
@@ -403,13 +403,16 @@ func handleInternalMultipartInitFiber(om *core.ObjectManager) fiber.Handler {
 			if existing, err := om.GetObjectsByChecksum(c.Context(), key, "read"); err == nil && len(existing) > 0 {
 				obj := &existing[0]
 				internalID = obj.Id
-				scopedURL, err := om.ResolveCanonicalObjectUploadURL(c.Context(), obj, bucketName)
+				target, err := om.ResolveCanonicalStorageTarget(c.Context(), core.CanonicalStorageTargetRequest{
+					Object:         obj,
+					Bucket:         bucketName,
+					PreferChecksum: true,
+				})
 				if err != nil {
 					return apiutil.HandleError(c, err)
 				}
-				var ok bool
-				bucket, multipartKey, ok = common.ParseS3URL(scopedURL)
-				if !ok {
+				bucket, multipartKey = target.Bucket, target.Key
+				if bucket == "" || multipartKey == "" {
 					return c.Status(fiber.StatusBadRequest).SendString("existing object storage location is not an s3 url")
 				}
 			} else {
