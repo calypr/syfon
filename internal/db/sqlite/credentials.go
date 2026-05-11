@@ -142,7 +142,15 @@ func (db *SqliteDB) CreateBucketScope(ctx context.Context, scope *models.BucketS
 		if strings.EqualFold(strings.TrimSpace(existing.Bucket), bucket) && strings.Trim(strings.TrimSpace(existing.PathPrefix), "/") == prefix {
 			return nil
 		}
-		return fmt.Errorf("%w: scope already assigned to bucket=%s prefix=%s", common.ErrConflict, existing.Bucket, existing.PathPrefix)
+		_, err = db.db.ExecContext(ctx, `
+			UPDATE bucket_scope
+			SET bucket = ?, path_prefix = ?
+			WHERE organization = ? AND project_id = ?
+		`, bucket, prefix, org, project)
+		if err != nil {
+			return fmt.Errorf("failed to update bucket scope: %w", err)
+		}
+		return nil
 	}
 
 	_, err = db.db.ExecContext(ctx, `

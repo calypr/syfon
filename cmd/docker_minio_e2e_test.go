@@ -115,16 +115,14 @@ func TestSyfonDockerMinIOE2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to parse DID from upload output: %v", err)
 	}
-	storageID, err := parseRequestedUploadedObjectID(uploadOut)
-	if err != nil {
-		t.Fatalf("Failed to parse requested DID from upload output: %v", err)
-	}
-	t.Logf("Object registered with canonical DID: %s (storage DID: %s)", uploadedID, storageID)
+	expectedHash := sha256.Sum256(srcData)
+	expectedSum := hex.EncodeToString(expectedHash[:])
+	t.Logf("Object registered with canonical DID: %s (storage key: %s)", uploadedID, expectedSum)
 
 	t.Logf("STEP 5: Verifying object existence in MinIO directly...")
 	if _, err := minioEnv.s3Client.HeadObject(ctx, &s3.HeadObjectInput{
 		Bucket: aws.String(minioEnv.bucket),
-		Key:    aws.String(storageID),
+		Key:    aws.String(expectedSum),
 	}); err != nil {
 		t.Fatalf("Data check failed: Object is missing from MinIO bucket: %v", err)
 	}
@@ -152,8 +150,6 @@ func TestSyfonDockerMinIOE2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sha256sum command failed: %v", err)
 	}
-	expectedHash := sha256.Sum256(srcData)
-	expectedSum := hex.EncodeToString(expectedHash[:])
 	if !strings.Contains(sumOut, expectedSum) {
 		t.Fatalf("Hash mismatch: expected %s, got output: %s", expectedSum, sumOut)
 	}

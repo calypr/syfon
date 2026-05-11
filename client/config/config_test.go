@@ -68,6 +68,69 @@ func TestManagerEnsureExistsSaveLoad(t *testing.T) {
 	}
 }
 
+func TestManagerSaveClearsEmptyCredentialKeys(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	man := testManager()
+
+	if err := man.EnsureExists(); err != nil {
+		t.Fatalf("EnsureExists returned error: %v", err)
+	}
+
+	initial := &Credential{
+		Profile:            "origin",
+		KeyID:              "kid",
+		APIKey:             "apikey",
+		AccessToken:        "token",
+		APIEndpoint:        "https://example.org",
+		UseShepherd:        "false",
+		MinShepherdVersion: "",
+	}
+	if err := man.Save(initial); err != nil {
+		t.Fatalf("initial Save returned error: %v", err)
+	}
+
+	tokenOnly := &Credential{
+		Profile:            "origin",
+		KeyID:              "",
+		APIKey:             "",
+		AccessToken:        "replacement-token",
+		APIEndpoint:        "https://example.org",
+		UseShepherd:        "false",
+		MinShepherdVersion: "",
+	}
+	if err := man.Save(tokenOnly); err != nil {
+		t.Fatalf("token-only Save returned error: %v", err)
+	}
+
+	configPath := filepath.Join(home, ".gen3", "gen3_client_config.ini")
+	content, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("ReadFile returned error: %v", err)
+	}
+	text := string(content)
+	if strings.Contains(text, "key_id") {
+		t.Fatalf("expected key_id to be removed, got config:\n%s", text)
+	}
+	if strings.Contains(text, "api_key") {
+		t.Fatalf("expected api_key to be removed, got config:\n%s", text)
+	}
+	if !strings.Contains(text, "replacement-token") {
+		t.Fatalf("expected replacement access token, got config:\n%s", text)
+	}
+
+	got, err := man.Load("origin")
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if got.KeyID != "" || got.APIKey != "" {
+		t.Fatalf("expected cleared key material after token-only save, got %+v", *got)
+	}
+	if got.AccessToken != "replacement-token" {
+		t.Fatalf("unexpected access token after token-only save: %+v", *got)
+	}
+}
+
 func TestManagerLoadErrors(t *testing.T) {
 	t.Run("missing config file", func(t *testing.T) {
 		home := t.TempDir()

@@ -85,6 +85,8 @@ s3_credentials:
 	}
 	testCred := cfg.S3Credentials[0]
 	bucketName := testCred.Bucket
+	organization := "test-org"
+	project := "test-project"
 
 	// Setup Server
 	database := db.NewInMemoryDB()
@@ -102,6 +104,13 @@ s3_credentials:
 		if err := database.SaveS3Credential(context.Background(), cred); err != nil {
 			t.Fatalf("Failed to preload credential: %v", err)
 		}
+	}
+	if err := database.CreateBucketScope(context.Background(), &models.BucketScope{
+		Organization: organization,
+		ProjectID:    project,
+		Bucket:       bucketName,
+	}); err != nil {
+		t.Fatalf("Failed to preload bucket scope: %v", err)
 	}
 
 	uM := urlmanager.NewManager(database, cfg.Signing)
@@ -146,8 +155,9 @@ s3_credentials:
 	// 2. Create internal blank upload and get a signed upload URL
 	key := fmt.Sprintf("test-upload-%d", time.Now().Unix())
 	internalUploadReq := map[string]interface{}{
-		"guid":   key,
-		"bucket": bucketName,
+		"guid":         key,
+		"organization": organization,
+		"project":      project,
 	}
 	internalBody, _ := json.Marshal(internalUploadReq)
 	resp, err := client.Post(serverURL+"/data/upload", "application/json", bytes.NewReader(internalBody))
@@ -188,9 +198,10 @@ s3_credentials:
 
 	// 4. Internal multipart init still works after credential preload.
 	internalMultipartReq := map[string]interface{}{
-		"guid":      guid,
-		"file_name": "test-multipart",
-		"bucket":    bucketName,
+		"guid":         guid,
+		"file_name":    "test-multipart",
+		"organization": organization,
+		"project":      project,
 	}
 	mpBody, _ := json.Marshal(internalMultipartReq)
 	resp, err = client.Post(serverURL+"/data/multipart/init", "application/json", bytes.NewReader(mpBody))

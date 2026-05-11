@@ -215,7 +215,7 @@ func TestCreateBucketScope(t *testing.T) {
 		}
 	})
 
-	t.Run("conflict", func(t *testing.T) {
+	t.Run("updates existing scope", func(t *testing.T) {
 		pg, mock, rawDB := newMockPostgresDB(t)
 		defer rawDB.Close()
 
@@ -229,14 +229,22 @@ func TestCreateBucketScope(t *testing.T) {
 			WithArgs("org", "proj").
 			WillReturnRows(rows)
 
+		mock.ExpectExec(regexp.QuoteMeta(`
+			UPDATE bucket_scope
+			SET bucket = $1, path_prefix = $2
+			WHERE organization = $3 AND project_id = $4
+		`)).
+			WithArgs("bucket-b", "prefix-b", "org", "proj").
+			WillReturnResult(sqlmock.NewResult(0, 1))
+
 		err := pg.CreateBucketScope(context.Background(), &models.BucketScope{
 			Organization: "org",
 			ProjectID:    "proj",
 			Bucket:       "bucket-b",
 			PathPrefix:   "prefix-b",
 		})
-		if !errors.Is(err, common.ErrConflict) {
-			t.Fatalf("expected conflict error, got %v", err)
+		if err != nil {
+			t.Fatalf("expected update success, got %v", err)
 		}
 	})
 

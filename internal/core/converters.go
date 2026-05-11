@@ -13,41 +13,6 @@ import (
 	"github.com/calypr/syfon/internal/models"
 )
 
-// UniqueAuthz merges authorizations from all access methods into a single map.
-func UniqueAuthz(accessMethods []drs.AccessMethod) map[string][]string {
-	if len(accessMethods) == 0 {
-		return nil
-	}
-	out := make(map[string][]string)
-	for _, am := range accessMethods {
-		if am.Authorizations == nil || am.Authorizations.BearerAuthIssuers == nil {
-			continue
-		}
-		for org, projects := range syfoncommon.AuthzListToMap(*am.Authorizations.BearerAuthIssuers) {
-			if len(projects) == 0 {
-				if _, ok := out[org]; !ok {
-					out[org] = []string{}
-				}
-				continue
-			}
-			seen := make(map[string]struct{}, len(out[org]))
-			for _, p := range out[org] {
-				seen[p] = struct{}{}
-			}
-			for _, p := range projects {
-				if _, ok := seen[p]; !ok {
-					out[org] = append(out[org], p)
-					seen[p] = struct{}{}
-				}
-			}
-		}
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
-}
-
 // LFSCandidateToDRS converts an LFS-specific candidate to a DRS-generic one.
 func LFSCandidateToDRS(in lfsapi.DrsObjectCandidate) drs.DrsObjectCandidate {
 	aliases := append([]string(nil), common.DerefStringSlice(in.Aliases)...)
@@ -127,43 +92,13 @@ func FirstSupportedAccessURL(obj *models.InternalObject) string {
 	return ""
 }
 
-// S3KeyFromInternalObjectForBucket extracts a key for a specific bucket from an object.
-func S3KeyFromInternalObjectForBucket(obj *models.InternalObject, bucket string) (string, bool) {
-	if obj == nil {
-		return "", false
-	}
-	targetBucket := strings.TrimSpace(bucket)
-	if targetBucket == "" {
-		return "", false
-	}
-	if obj.AccessMethods != nil {
-		for _, am := range *obj.AccessMethods {
-			if am.AccessUrl == nil {
-				continue
-			}
-			raw := strings.TrimSpace(am.AccessUrl.Url)
-			if b, key, ok := common.ParseS3URL(raw); ok && strings.EqualFold(b, targetBucket) {
-				return key, true
-			}
-		}
-	}
-	return "", false
-}
-
 // CandidateToInternalObject converts a DRS registration candidate to our internal domain model.
 func CandidateToInternalObject(c drs.DrsObjectCandidate, now time.Time) (models.InternalObject, error) {
 	oid, ok := common.CanonicalSHA256(c.Checksums)
 	if !ok {
 		return models.InternalObject{}, common.ErrNoValidSHA256
 	}
-	var ams []drs.AccessMethod
-	if c.AccessMethods != nil {
-		ams = *c.AccessMethods
-	}
 	authzList := syfoncommon.ControlledAccessToAuthzMap(common.DerefStringSlice(c.ControlledAccess))
-	if authzList == nil {
-		authzList = UniqueAuthz(ams)
-	}
 
 	id := ""
 	if c.Aliases != nil {

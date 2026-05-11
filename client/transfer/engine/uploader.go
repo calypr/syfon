@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -70,16 +71,39 @@ func (u *GenericUploader) uploadSingle(ctx context.Context, req transfer.Transfe
 		uploadTarget = presignedURL
 	}
 	strategy := transfer.DefaultBackoff()
+	reader := io.Reader(file)
+	var progressReader *progressReader
+	if progress := common.GetProgress(ctx); progress != nil {
+		progressReader = newProgressReader(file, progress, common.GetOid(ctx), size, nil)
+		reader = progressReader
+	}
 	if err := transfer.RetryAction(ctx, u.Backend.Logger(), strategy, common.MaxRetryCount, func() error {
 		if _, err := file.Seek(0, io.SeekStart); err != nil {
 			return err
 		}
-		return u.Backend.Upload(ctx, uploadTarget, file, size)
+		if progressReader != nil {
+			progressReader.ResetForRetry()
+		}
+		err := u.Backend.Upload(ctx, uploadTarget, reader, size)
+		if err != nil {
+			if isProgressCallbackError(err) {
+				return transfer.NonRetryable(err)
+			}
+			return err
+		}
+		if progressReader != nil {
+			if finalizeErr := progressReader.Complete(); finalizeErr != nil {
+				return transfer.NonRetryable(finalizeErr)
+			}
+		}
+		return nil
 	}); err != nil {
 		return err
 	}
 
-	emitProgress(ctx, size, size)
+	if common.GetProgress(ctx) == nil {
+		emitProgress(ctx, size, size)
+	}
 	return nil
 }
 
@@ -129,12 +153,12 @@ func (u *GenericUploader) uploadMultipart(ctx context.Context, req transfer.Tran
 	close(chunks)
 
 	var (
-		wg         sync.WaitGroup
-		mu         sync.Mutex
-		uploadErr  error
-		totalBytes int64
-		progressed bool
+		wg        sync.WaitGroup
+		mu        sync.Mutex
+		uploadErr error
 	)
+	tracker := newMultipartProgressTracker(ctx, common.GetOid(ctx), fileSize)
+	tracker.committed = completedMultipartBytes(state, fileSize, chunkSize)
 
 	for i := 0; i < common.MaxConcurrentUploads; i++ {
 		wg.Add(1)
@@ -149,23 +173,30 @@ func (u *GenericUploader) uploadMultipart(ctx context.Context, req transfer.Tran
 
 				strategy := transfer.DefaultBackoff()
 				err := transfer.RetryAction(ctx, logger, strategy, common.MaxRetryCount, func() error {
+					tracker.ResetPart(partNum)
 					section := io.NewSectionReader(file, offset, partSize)
-					etag, retryErr := u.Backend.MultipartPart(ctx, objectKey, state.UploadID, partNum, section)
+					partReader := newMultipartPartProgressReader(section, tracker, partNum)
+					etag, retryErr := u.Backend.MultipartPart(ctx, objectKey, state.UploadID, partNum, partReader)
 					if retryErr != nil {
+						if isProgressCallbackError(retryErr) {
+							return transfer.NonRetryable(retryErr)
+						}
 						return retryErr
+					}
+					if flushErr := partReader.FlushPendingProgress(); flushErr != nil {
+						return transfer.NonRetryable(flushErr)
 					}
 
 					mu.Lock()
 					state.Completed[partNum] = etag
 					saveErr := u.saveState(checkpointPath, state)
-					totalBytes += partSize
-					progressed = true
 					mu.Unlock()
 					if saveErr != nil {
 						return fmt.Errorf("persist multipart checkpoint: %w", saveErr)
 					}
-
-					emitProgress(ctx, partSize, totalBytes)
+					if progressErr := tracker.CompletePart(partNum, partSize); progressErr != nil {
+						return transfer.NonRetryable(progressErr)
+					}
 					return nil
 				})
 				if err != nil {
@@ -183,10 +214,6 @@ func (u *GenericUploader) uploadMultipart(ctx context.Context, req transfer.Tran
 		return fmt.Errorf("multipart upload failed: %w", uploadErr)
 	}
 
-	if !progressed {
-		emitProgress(ctx, fileSize, fileSize)
-	}
-
 	parts := make([]transfer.MultipartPart, 0, len(state.Completed))
 	for num, etag := range state.Completed {
 		parts = append(parts, transfer.MultipartPart{PartNumber: int32(num), ETag: etag})
@@ -195,6 +222,9 @@ func (u *GenericUploader) uploadMultipart(ctx context.Context, req transfer.Tran
 
 	if err := u.Backend.MultipartComplete(ctx, objectKey, state.UploadID, parts); err != nil {
 		return err
+	}
+	if err := tracker.CompleteUpload(); err != nil {
+		return transfer.NonRetryable(err)
 	}
 
 	if err := os.Remove(checkpointPath); err != nil && !os.IsNotExist(err) {
@@ -251,4 +281,154 @@ func emitProgress(ctx context.Context, delta, total int64) {
 		BytesSinceLast: delta,
 		BytesSoFar:     total,
 	})
+}
+
+type multipartProgressTracker struct {
+	mu                sync.Mutex
+	onProgress        common.ProgressCallback
+	oid               string
+	total             int64
+	committed         int64
+	active            map[int]int64
+	lastReportedSoFar int64
+}
+
+func newMultipartProgressTracker(ctx context.Context, oid string, total int64) *multipartProgressTracker {
+	return &multipartProgressTracker{
+		onProgress: common.GetProgress(ctx),
+		oid:        oid,
+		total:      total,
+		active:     make(map[int]int64),
+	}
+}
+
+func (m *multipartProgressTracker) ResetPart(partNum int) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.active[partNum] = 0
+}
+
+func (m *multipartProgressTracker) AdvancePart(partNum int, delta int64) error {
+	if m == nil || m.onProgress == nil || delta <= 0 {
+		return nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.active[partNum] += delta
+	return m.emitLocked(false)
+}
+
+func (m *multipartProgressTracker) CompletePart(partNum int, partSize int64) error {
+	if m == nil {
+		return nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.committed += partSize
+	delete(m.active, partNum)
+	return m.emitLocked(false)
+}
+
+func (m *multipartProgressTracker) CompleteUpload() error {
+	if m == nil || m.onProgress == nil {
+		return nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.emitLocked(true)
+}
+
+func (m *multipartProgressTracker) emitLocked(final bool) error {
+	if m.onProgress == nil {
+		return nil
+	}
+	visible := m.currentVisibleLocked(final)
+	if visible < m.lastReportedSoFar {
+		visible = m.lastReportedSoFar
+	}
+	delta := visible - m.lastReportedSoFar
+	if delta <= 0 {
+		return nil
+	}
+	if err := m.onProgress(common.ProgressEvent{
+		Event:          "progress",
+		Oid:            m.oid,
+		BytesSinceLast: delta,
+		BytesSoFar:     visible,
+	}); err != nil {
+		return progressCallbackError{err: err}
+	}
+	m.lastReportedSoFar = visible
+	return nil
+}
+
+func (m *multipartProgressTracker) currentVisibleLocked(final bool) int64 {
+	current := m.committed
+	for _, bytes := range m.active {
+		current += bytes
+	}
+	if !final && m.total > 0 && current >= m.total {
+		return m.total - 1
+	}
+	return current
+}
+
+type multipartPartProgressReader struct {
+	reader           io.Reader
+	tracker          *multipartProgressTracker
+	partNum          int
+	bytesSinceReport int64
+}
+
+func newMultipartPartProgressReader(reader io.Reader, tracker *multipartProgressTracker, partNum int) *multipartPartProgressReader {
+	return &multipartPartProgressReader{reader: reader, tracker: tracker, partNum: partNum}
+}
+
+func (m *multipartPartProgressReader) Read(p []byte) (int, error) {
+	n, err := m.reader.Read(p)
+	if n > 0 && m.tracker != nil {
+		m.bytesSinceReport += int64(n)
+		if m.bytesSinceReport >= common.OnProgressThreshold {
+			if progressErr := m.tracker.AdvancePart(m.partNum, m.bytesSinceReport); progressErr != nil {
+				return n, progressErr
+			}
+			m.bytesSinceReport = 0
+		}
+	}
+	return n, err
+}
+
+func (m *multipartPartProgressReader) FlushPendingProgress() error {
+	if m.tracker == nil || m.bytesSinceReport <= 0 {
+		return nil
+	}
+	delta := m.bytesSinceReport
+	m.bytesSinceReport = 0
+	return m.tracker.AdvancePart(m.partNum, delta)
+}
+
+func completedMultipartBytes(state *uploaderResumeState, fileSize, chunkSize int64) int64 {
+	if state == nil || len(state.Completed) == 0 {
+		return 0
+	}
+	var total int64
+	for partNum := range state.Completed {
+		offset := int64(partNum-1) * chunkSize
+		partSize := chunkSize
+		if offset+partSize > fileSize {
+			partSize = fileSize - offset
+		}
+		if partSize > 0 {
+			total += partSize
+		}
+	}
+	return total
+}
+
+func isProgressCallbackError(err error) bool {
+	var target progressCallbackError
+	return errors.As(err, &target)
 }

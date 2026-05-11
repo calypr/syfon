@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/calypr/syfon/apigen/client/bucketapi"
-	"github.com/calypr/syfon/apigen/client/internalapi"
 	syclient "github.com/calypr/syfon/client"
 )
 
@@ -21,16 +20,11 @@ func TestSyfonListAndRemoveCommands(t *testing.T) {
 		t.Fatal(err)
 	}
 	did := "11111111-1111-1111-1111-111111111111"
-	fileName := "README.md"
-	size := int64(123)
-	controlled := []string{"/programs/syfon/projects/e2e"}
-	rec := internalapi.InternalRecord{
-		Did:              did,
-		ControlledAccess: &controlled,
-		FileName:         &fileName,
-		Size:             &size,
+	storagePath := filepath.Join(server.StorageDir, "README.md")
+	if err := os.WriteFile(storagePath, []byte("rm single scope"), 0o644); err != nil {
+		t.Fatalf("seed storage object: %v", err)
 	}
-	if _, err := c.Index().Create(context.Background(), rec); err != nil {
+	if err := c.Index().Upsert(context.Background(), did, "s3://syfon-bucket/README.md", "README.md", 123, "", map[string][]string{"syfon": {"e2e"}}); err != nil {
 		t.Fatalf("seed record: %v", err)
 	}
 
@@ -46,7 +40,7 @@ func TestSyfonListAndRemoveCommands(t *testing.T) {
 	if err != nil {
 		t.Fatalf("rm failed: %v output=%s", err, out)
 	}
-	if !strings.Contains(out, "removed "+did) {
+	if !strings.Contains(out, "removed "+did+" and attempted storage purge") {
 		t.Fatalf("unexpected rm output: %s", out)
 	}
 
@@ -56,6 +50,50 @@ func TestSyfonListAndRemoveCommands(t *testing.T) {
 	}
 	if strings.Contains(out, did) {
 		t.Fatalf("expected did to be removed, got output: %s", out)
+	}
+	if _, err := os.Stat(storagePath); !os.IsNotExist(err) {
+		t.Fatalf("expected backing storage to be removed, stat err=%v", err)
+	}
+}
+
+func TestSyfonRemoveScopedControlledAccessOnly(t *testing.T) {
+	server := newSyfonTestServer(t)
+	defer server.Close()
+
+	c, err := syclient.New(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	did := "11111111-1111-1111-1111-222222222222"
+	storagePath := filepath.Join(server.StorageDir, "scoped.txt")
+	if err := os.WriteFile(storagePath, []byte("rm scoped"), 0o644); err != nil {
+		t.Fatalf("seed storage object: %v", err)
+	}
+	if err := c.Index().Upsert(context.Background(), did, "s3://syfon-bucket/scoped.txt", "scoped.txt", 99, "", map[string][]string{
+		"syfon": {"e2e"},
+		"other": {"x"},
+	}); err != nil {
+		t.Fatalf("seed multi-scope record: %v", err)
+	}
+
+	out, err := executeRootCommand(t, "--server", server.URL, "rm", "--did", did, "--organization", "syfon", "--project", "e2e")
+	if err != nil {
+		t.Fatalf("rm failed: %v output=%s", err, out)
+	}
+	if !strings.Contains(out, "removed scoped access /organization/syfon/project/e2e from "+did) {
+		t.Fatalf("unexpected rm output: %s", out)
+	}
+
+	rec, err := c.Index().Get(context.Background(), did)
+	if err != nil {
+		t.Fatalf("expected record to remain: %v", err)
+	}
+	controlled := derefCLIStringSlice(rec.ControlledAccess)
+	if len(controlled) != 1 || controlled[0] != "/organization/other/project/x" {
+		t.Fatalf("unexpected controlled access after scoped remove: %+v", controlled)
+	}
+	if _, err := os.Stat(storagePath); err != nil {
+		t.Fatalf("expected backing storage to remain, stat err=%v", err)
 	}
 }
 
@@ -195,3 +233,10 @@ func TestSyfonBucketAddCredentialAndScopesCommands(t *testing.T) {
 }
 
 func stringPtr(v string) *string { return &v }
+
+func derefCLIStringSlice(in *[]string) []string {
+	if in == nil {
+		return nil
+	}
+	return *in
+}

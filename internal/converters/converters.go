@@ -17,14 +17,7 @@ func CandidateToInternalObject(c drs.DrsObjectCandidate, now time.Time) (models.
 	if !ok {
 		return models.InternalObject{}, fmt.Errorf("candidate must include sha256 checksum")
 	}
-	var ams []drs.AccessMethod
-	if c.AccessMethods != nil {
-		ams = *c.AccessMethods
-	}
 	authzMap := syfoncommon.ControlledAccessToAuthzMap(common.DerefStringSlice(c.ControlledAccess))
-	if authzMap == nil {
-		authzMap = UniqueAuthz(ams)
-	}
 	id, err := common.MintObjectIDFromChecksum(oid, syfoncommon.AuthzMapToList(authzMap))
 	if err != nil {
 		return models.InternalObject{}, err

@@ -71,6 +71,10 @@ func TestMVPMockServers_FakeGCSAndAzurite(t *testing.T) {
 		payload := []byte("fake-gcs-server-mvp")
 		endpointBase := fmt.Sprintf("http://%s:%s", host, port.Port())
 
+		if err := waitForFakeGCSReady(ctx, endpointBase, 10*time.Second, 200*time.Millisecond); err != nil {
+			t.Fatalf("wait for fake-gcs readiness: %v", err)
+		}
+
 		bucketBody, err := json.Marshal(map[string]string{"name": bucketName})
 		if err != nil {
 			t.Fatalf("marshal bucket create request: %v", err)
@@ -180,6 +184,10 @@ func TestMVPMockServers_FakeGCSAndAzurite(t *testing.T) {
 			t.Fatalf("create Azurite container client: %v", err)
 		}
 
+		if err := waitForAzuriteReady(ctx, client, 10*time.Second, 200*time.Millisecond); err != nil {
+			t.Fatalf("wait for Azurite readiness: %v", err)
+		}
+
 		if _, err := client.Create(ctx, nil); err != nil {
 			t.Fatalf("create Azurite blob container: %v", err)
 		}
@@ -197,6 +205,55 @@ func TestMVPMockServers_FakeGCSAndAzurite(t *testing.T) {
 			t.Fatalf("unexpected Azurite payload: got %q want %q", string(downloaded), string(payload))
 		}
 	})
+}
+
+func waitForFakeGCSReady(ctx context.Context, endpointBase string, timeout, interval time.Duration) error {
+	readinessURL := endpointBase + "/storage/v1/b?project=syfon-mvp"
+	return retryUntilSuccess(timeout, interval, func() error {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, readinessURL, nil)
+		if err != nil {
+			return err
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode < 200 || resp.StatusCode > 299 {
+			return fmt.Errorf("unexpected fake-gcs readiness status: %s", resp.Status)
+		}
+		return nil
+	})
+}
+
+func waitForAzuriteReady(ctx context.Context, client *azcontainer.Client, timeout, interval time.Duration) error {
+	return retryUntilSuccess(timeout, interval, func() error {
+		_, err := client.GetProperties(ctx, nil)
+		if err == nil {
+			return nil
+		}
+		lower := strings.ToLower(err.Error())
+		if strings.Contains(lower, "containernotfound") || strings.Contains(lower, "resource not found") {
+			return nil
+		}
+		return err
+	})
+}
+
+func retryUntilSuccess(timeout, interval time.Duration, fn func() error) error {
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for {
+		if err := fn(); err == nil {
+			return nil
+		} else {
+			lastErr = err
+		}
+		if time.Now().After(deadline) {
+			return lastErr
+		}
+		time.Sleep(interval)
+	}
 }
 
 func isDockerUnavailableForMockTests(err error) bool {

@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -67,12 +68,25 @@ func (m *ObjectManager) DeleteBulkByScope(ctx context.Context, organization, pro
 }
 
 func (m *ObjectManager) DeleteObject(ctx context.Context, id string) error {
+	return m.DeleteObjectWithOptions(ctx, id, DeleteOptions{})
+}
+
+type DeleteOptions struct {
+	DeleteStorageData bool
+}
+
+func (m *ObjectManager) DeleteObjectWithOptions(ctx context.Context, id string, opts DeleteOptions) error {
 	obj, err := m.db.GetObject(ctx, id)
 	if err != nil {
 		return err
 	}
 	if err := m.requireObjectMethod(ctx, obj, objectMethodDelete); err != nil {
 		return err
+	}
+	if opts.DeleteStorageData {
+		if err := m.deleteObjectStorage(ctx, obj); err != nil {
+			return err
+		}
 	}
 	return m.db.DeleteObject(ctx, id)
 }
@@ -126,6 +140,43 @@ func (m *ObjectManager) BulkUpdateAccessMethods(ctx context.Context, updates map
 		}
 	}
 	return m.db.BulkUpdateAccessMethods(ctx, updates)
+}
+
+func (m *ObjectManager) RemoveObjectControlledAccess(ctx context.Context, objectID, resource string) (*models.InternalObject, error) {
+	obj, err := m.db.GetObject(ctx, objectID)
+	if err != nil {
+		return nil, err
+	}
+	if err := m.requireObjectMethod(ctx, obj, objectMethodUpdate); err != nil {
+		return nil, err
+	}
+
+	normalized := syfoncommon.NormalizeAccessResources([]string{resource})
+	if len(normalized) == 0 {
+		return nil, fmt.Errorf("resource is required")
+	}
+	resource = normalized[0]
+
+	resources := ObjectAccessResources(obj)
+	found := false
+	for _, existing := range resources {
+		if strings.TrimSpace(existing) == resource {
+			found = true
+		}
+	}
+	if !found {
+		return nil, common.ErrNotFound
+	}
+
+	if err := m.db.RemoveObjectControlledAccess(ctx, objectID, resource); err != nil {
+		return nil, err
+	}
+
+	updated, err := m.db.GetObject(ctx, objectID)
+	if err != nil {
+		return nil, err
+	}
+	return updated, nil
 }
 
 func (m *ObjectManager) RegisterObjects(ctx context.Context, objs []models.InternalObject) error {

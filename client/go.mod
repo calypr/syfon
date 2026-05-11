@@ -1,6 +1,6 @@
 module github.com/calypr/syfon/client
 
-go 1.26.2
+go 1.26.3
 
 require (
 	cloud.google.com/go/storage v1.62.1

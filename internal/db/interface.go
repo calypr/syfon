@@ -29,6 +29,7 @@ type ObjectStore interface {
 	RegisterObjects(ctx context.Context, objects []models.InternalObject) error
 	UpdateObjectAccessMethods(ctx context.Context, objectID string, accessMethods []drs.AccessMethod) error
 	BulkUpdateAccessMethods(ctx context.Context, updates map[string][]drs.AccessMethod) error
+	RemoveObjectControlledAccess(ctx context.Context, objectID, resource string) error
 }
 
 type ObjectIDResourceLister interface {

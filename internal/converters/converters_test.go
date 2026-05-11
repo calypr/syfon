@@ -47,7 +47,6 @@ func TestCandidateToInternalObjectAndLFSCandidateToDRS(t *testing.T) {
 	t.Run("lfs candidate to drs", func(t *testing.T) {
 		url := "https://storage.example/object.bin"
 		size := int64(42)
-		authz := []string{"/programs/syfon/projects/e2e"}
 		candidate := lfsapi.DrsObjectCandidate{
 			Name: strPtr("object.bin"),
 			Size: &size,
@@ -58,9 +57,6 @@ func TestCandidateToInternalObjectAndLFSCandidateToDRS(t *testing.T) {
 				Type: strPtr("https"),
 				AccessUrl: &lfsapi.AccessMethodAccessUrl{
 					Url: &url,
-				},
-				Authorizations: &lfsapi.AccessMethodAuthorizations{
-					BearerAuthIssuers: &authz,
 				},
 			}},
 		}

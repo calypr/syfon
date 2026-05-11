@@ -1,8 +1,6 @@
 package testutils
 
 import (
-	"github.com/calypr/syfon/internal/models"
-
 	"context"
 	"fmt"
 	"net/http"
@@ -10,7 +8,9 @@ import (
 	"time"
 
 	"github.com/calypr/syfon/apigen/server/drs"
+	sycommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/common"
+	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/urlmanager"
 )
 
@@ -272,6 +272,48 @@ func (m *MockDatabase) UpdateObjectAccessMethods(ctx context.Context, objectID s
 	return nil
 }
 
+func (m *MockDatabase) RemoveObjectControlledAccess(ctx context.Context, objectID, resource string) error {
+	obj, ok := m.Objects[objectID]
+	if !ok {
+		return common.ErrNotFound
+	}
+	wrapped := models.InternalObject{DrsObject: *obj}
+	if authz, ok := m.ObjectAuthz[objectID]; ok {
+		wrapped.Authorizations = cloneAuthzMap(authz)
+	}
+	resources := sycommon.AuthzMapToControlledAccess(wrapped.Authorizations)
+	if wrapped.ControlledAccess != nil {
+		resources = sycommon.NormalizeAccessResources(*wrapped.ControlledAccess)
+	}
+	target := sycommon.NormalizeAccessResources([]string{resource})
+	if len(target) == 0 {
+		return common.ErrNotFound
+	}
+	found := false
+	filtered := make([]string, 0, len(resources))
+	for _, existing := range resources {
+		if existing == target[0] {
+			found = true
+			continue
+		}
+		filtered = append(filtered, existing)
+	}
+	if !found {
+		return common.ErrNotFound
+	}
+	if len(filtered) == 0 {
+		delete(m.ObjectAuthz, objectID)
+		obj.ControlledAccess = nil
+		return nil
+	}
+	obj.ControlledAccess = &filtered
+	if m.ObjectAuthz == nil {
+		m.ObjectAuthz = make(map[string]map[string][]string)
+	}
+	m.ObjectAuthz[objectID] = sycommon.ControlledAccessToAuthzMap(filtered)
+	return nil
+}
+
 func (m *MockDatabase) BulkUpdateAccessMethods(ctx context.Context, updates map[string][]drs.AccessMethod) error {
 	for objectID, accessMethods := range updates {
 		if err := m.UpdateObjectAccessMethods(ctx, objectID, accessMethods); err != nil {
@@ -343,12 +385,6 @@ func (m *MockDatabase) CreateBucketScope(ctx context.Context, scope *models.Buck
 		m.BucketScopes = make(map[string]models.BucketScope)
 	}
 	k := bucketScopeKey(scope.Organization, scope.ProjectID)
-	if existing, ok := m.BucketScopes[k]; ok {
-		if existing.Bucket == scope.Bucket && strings.Trim(existing.PathPrefix, "/") == strings.Trim(scope.PathPrefix, "/") {
-			return nil
-		}
-		return fmt.Errorf("%w: scope already exists", common.ErrConflict)
-	}
 	m.BucketScopes[k] = *scope
 	return nil
 }

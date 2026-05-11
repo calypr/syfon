@@ -1216,6 +1216,33 @@ func (db *PostgresDB) UpdateObjectAccessMethods(ctx context.Context, objectID st
 	return tx.Commit()
 }
 
+func (db *PostgresDB) RemoveObjectControlledAccess(ctx context.Context, objectID, resource string) error {
+	normalized := sycommon.NormalizeAccessResources([]string{resource})
+	if len(normalized) == 0 {
+		return fmt.Errorf("resource is required")
+	}
+	resource = normalized[0]
+
+	tx, err := db.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var exists int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(1) FROM drs_object_controlled_access WHERE object_id = $1 AND resource = $2`, objectID, resource).Scan(&exists); err != nil {
+		return err
+	}
+	if exists == 0 {
+		return common.ErrNotFound
+	}
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM drs_object_controlled_access WHERE object_id = $1 AND resource = $2`, objectID, resource); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (db *PostgresDB) BulkUpdateAccessMethods(ctx context.Context, updates map[string][]drs.AccessMethod) error {
 	tx, err := db.db.BeginTx(ctx, nil)
 	if err != nil {

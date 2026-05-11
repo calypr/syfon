@@ -38,9 +38,6 @@ func TestDataServiceOperationsAndTransferHelpers(t *testing.T) {
 			}
 			guid := "guid-blank"
 			bucket := "bucket-from-blank"
-			if lastUploadBlank.Guid != nil && *lastUploadBlank.Guid == "bucketless-guid" {
-				guid = "bucketless-guid"
-			}
 			writeJSON(t, w, http.StatusCreated, internalapi.InternalUploadBlankOutput{Guid: &guid, Bucket: &bucket})
 		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/data/upload/"):
 			uploadURLQuery = r.URL.Query()
@@ -108,14 +105,15 @@ func TestDataServiceOperationsAndTransferHelpers(t *testing.T) {
 		t.Fatalf("unexpected upload blank request: %+v", lastUploadBlank)
 	}
 
-	if _, err := service.UploadURL(ctx, UploadURLRequest{FileID: "file-1", Bucket: "bucket-a", FileName: "name.txt", ExpiresIn: 60}); err != nil {
+	if _, err := service.UploadURL(ctx, UploadURLRequest{FileID: "file-1", FileName: "name.txt", ExpiresIn: 60, Organization: "org-a", Project: "proj-a"}); err != nil {
 		t.Fatalf("UploadURL returned error: %v", err)
 	}
-	if uploadURLQuery.Get("bucket") != "bucket-a" || uploadURLQuery.Get("file_name") != "name.txt" || uploadURLQuery.Get("expires_in") != "60" {
+	if uploadURLQuery.Get("organization") != "org-a" || uploadURLQuery.Get("project") != "proj-a" || uploadURLQuery.Get("file_name") != "name.txt" || uploadURLQuery.Get("expires_in") != "60" {
 		t.Fatalf("unexpected upload URL query values: %v", uploadURLQuery)
 	}
 
-	if _, err := service.ResolveUploadURL(ctx, "missing-upload-url", "name.txt", common.FileMetadata{}, "bucket-a"); err == nil || !strings.Contains(err.Error(), "response missing URL") {
+	scopedMetadata := common.FileMetadata{Authorizations: map[string][]string{"org-a": {"proj-a"}}}
+	if _, err := service.ResolveUploadURL(ctx, "missing-upload-url", "name.txt", scopedMetadata, "ignored-bucket"); err == nil || !strings.Contains(err.Error(), "response missing URL") {
 		t.Fatalf("expected missing upload URL error, got %v", err)
 	}
 	if _, err := service.UploadURL(ctx, UploadURLRequest{FileID: "upload-error"}); err == nil {
@@ -142,14 +140,11 @@ func TestDataServiceOperationsAndTransferHelpers(t *testing.T) {
 	if got, err := service.ResolveDownloadURL(ctx, "file-2", ""); err != nil || got != "https://download.example/file-2" {
 		t.Fatalf("ResolveDownloadURL returned got=%q err=%v", got, err)
 	}
-	if got, err := service.ResolveUploadURL(ctx, "file-1", "name.txt", common.FileMetadata{}, "bucket-a"); err != nil || got != "https://upload.example/file-1" {
+	if got, err := service.ResolveUploadURL(ctx, "file-1", "name.txt", scopedMetadata, "ignored-bucket"); err != nil || got != "https://upload.example/file-1" {
 		t.Fatalf("ResolveUploadURL returned got=%q err=%v", got, err)
 	}
-	if got, err := service.ResolveUploadURL(ctx, "bucketless-guid", "name.txt", common.FileMetadata{}, ""); err != nil || got != "https://upload.example/bucketless-guid" {
-		t.Fatalf("ResolveUploadURL without bucket returned got=%q err=%v", got, err)
-	}
-	if uploadURLQuery.Get("bucket") != "bucket-from-blank" {
-		t.Fatalf("expected bucket-from-blank to be forwarded after blank upload, got %v", uploadURLQuery)
+	if uploadURLQuery.Get("bucket") != "" || uploadURLQuery.Get("organization") != "org-a" || uploadURLQuery.Get("project") != "proj-a" {
+		t.Fatalf("expected org/project upload routing and no bucket query, got %v", uploadURLQuery)
 	}
 
 	uploadID, guid, err := service.InitMultipartUpload(ctx, "guid-a", "name.txt", "bucket-a")

@@ -45,6 +45,11 @@ type BulkSHA256ValidityRequest struct {
 	Sha256 *[]string `json:"sha256,omitempty"`
 }
 
+// ControlledAccessRemoveRequest defines model for ControlledAccessRemoveRequest.
+type ControlledAccessRemoveRequest struct {
+	Resource string `json:"resource"`
+}
+
 // DeleteByQueryResponse defines model for DeleteByQueryResponse.
 type DeleteByQueryResponse struct {
 	Deleted *int `json:"deleted,omitempty"`
@@ -69,10 +74,10 @@ type InternalMultipartInitOutput struct {
 
 // InternalMultipartInitRequest defines model for InternalMultipartInitRequest.
 type InternalMultipartInitRequest struct {
-	// Bucket Required for new unscoped uploads. Ignored when an existing scoped object provides the canonical storage location.
-	Bucket   *string `json:"bucket,omitempty"`
-	FileName *string `json:"file_name,omitempty"`
-	Guid     *string `json:"guid,omitempty"`
+	FileName     *string `json:"file_name,omitempty"`
+	Guid         *string `json:"guid,omitempty"`
+	Organization *string `json:"organization,omitempty"`
+	Project      *string `json:"project,omitempty"`
 }
 
 // InternalMultipartPart defines model for InternalMultipartPart.
@@ -149,16 +154,18 @@ type InternalUploadBlankOutput struct {
 
 // InternalUploadBlankRequest defines model for InternalUploadBlankRequest.
 type InternalUploadBlankRequest struct {
-	Bucket string  `json:"bucket"`
-	Guid   *string `json:"guid,omitempty"`
+	Guid         *string `json:"guid,omitempty"`
+	Organization *string `json:"organization,omitempty"`
+	Project      *string `json:"project,omitempty"`
 }
 
 // InternalUploadBulkItem defines model for InternalUploadBulkItem.
 type InternalUploadBulkItem struct {
-	Bucket    *string `json:"bucket,omitempty"`
-	ExpiresIn *int32  `json:"expires_in,omitempty"`
-	FileId    string  `json:"file_id"`
-	FileName  *string `json:"file_name,omitempty"`
+	ExpiresIn    *int32  `json:"expires_in,omitempty"`
+	FileId       string  `json:"file_id"`
+	FileName     *string `json:"file_name,omitempty"`
+	Organization *string `json:"organization,omitempty"`
+	Project      *string `json:"project,omitempty"`
 }
 
 // InternalUploadBulkOutput defines model for InternalUploadBulkOutput.
@@ -200,10 +207,10 @@ type InternalDownloadPartParams struct {
 
 // InternalUploadURLParams defines parameters for InternalUploadURL.
 type InternalUploadURLParams struct {
-	// Bucket Required when the object does not already have a backing storage location.
-	Bucket    *string `form:"bucket,omitempty" json:"bucket,omitempty"`
-	FileName  *string `form:"file_name,omitempty" json:"file_name,omitempty"`
-	ExpiresIn *int32  `form:"expires_in,omitempty" json:"expires_in,omitempty"`
+	Organization *string `form:"organization,omitempty" json:"organization,omitempty"`
+	Project      *string `form:"project,omitempty" json:"project,omitempty"`
+	FileName     *string `form:"file_name,omitempty" json:"file_name,omitempty"`
+	ExpiresIn    *int32  `form:"expires_in,omitempty" json:"expires_in,omitempty"`
 }
 
 // InternalDeleteByQueryParams defines parameters for InternalDeleteByQuery.
@@ -261,6 +268,9 @@ type InternalBulkSHA256ValidityJSONRequestBody = BulkSHA256ValidityRequest
 
 // InternalUpdateJSONRequestBody defines body for InternalUpdate for application/json ContentType.
 type InternalUpdateJSONRequestBody = InternalRecord
+
+// InternalRemoveControlledAccessJSONRequestBody defines body for InternalRemoveControlledAccess for application/json ContentType.
+type InternalRemoveControlledAccessJSONRequestBody = ControlledAccessRemoveRequest
 
 // AsBulkDocumentsRequest0 returns the union data inside the BulkDocumentsRequest as a BulkDocumentsRequest0
 func (t BulkDocumentsRequest) AsBulkDocumentsRequest0() (BulkDocumentsRequest0, error) {
@@ -383,6 +393,9 @@ type ServerInterface interface {
 
 	// (PUT /index/{id})
 	InternalUpdate(c fiber.Ctx, id string) error
+
+	// (POST /index/{id}/controlled-access/remove)
+	InternalRemoveControlledAccess(c fiber.Ctx, id string) error
 }
 
 // ServerInterfaceWrapper converts contexts to parameters.
@@ -517,15 +530,26 @@ func (siw *ServerInterfaceWrapper) InternalUploadURL(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter file_id: %w", err).Error())
 	}
 
-	// ------------- Optional query parameter "bucket" -------------
-	if paramValue := c.Query("bucket"); paramValue != "" {
+	// ------------- Optional query parameter "organization" -------------
+	if paramValue := c.Query("organization"); paramValue != "" {
 
 		var value string
-		err = runtime.BindStyledParameterWithOptions("form", "bucket", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
+		err = runtime.BindStyledParameterWithOptions("form", "organization", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
 		if err != nil {
-			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter bucket: %w", err).Error())
+			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter organization: %w", err).Error())
 		}
-		params.Bucket = &value
+		params.Organization = &value
+
+	}
+	// ------------- Optional query parameter "project" -------------
+	if paramValue := c.Query("project"); paramValue != "" {
+
+		var value string
+		err = runtime.BindStyledParameterWithOptions("form", "project", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
+		if err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter project: %w", err).Error())
+		}
+		params.Project = &value
 
 	}
 	// ------------- Optional query parameter "file_name" -------------
@@ -785,6 +809,21 @@ func (siw *ServerInterfaceWrapper) InternalUpdate(c fiber.Ctx) error {
 	return siw.Handler.InternalUpdate(c, id)
 }
 
+// InternalRemoveControlledAccess operation middleware
+func (siw *ServerInterfaceWrapper) InternalRemoveControlledAccess(c fiber.Ctx) error {
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Params("id"), &id, runtime.BindStyledParameterOptions{Explode: false, Required: true})
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter id: %w", err).Error())
+	}
+
+	return siw.Handler.InternalRemoveControlledAccess(c, id)
+}
+
 // FiberServerOptions provides options for the Fiber server.
 type FiberServerOptions struct {
 	BaseURL     string
@@ -843,6 +882,8 @@ func RegisterHandlersWithOptions(router fiber.Router, si ServerInterface, option
 	router.Get(options.BaseURL+"/index/:id", wrapper.InternalGet)
 
 	router.Put(options.BaseURL+"/index/:id", wrapper.InternalUpdate)
+
+	router.Post(options.BaseURL+"/index/:id/controlled-access/remove", wrapper.InternalRemoveControlledAccess)
 
 }
 
@@ -1780,6 +1821,48 @@ func (response InternalUpdate500Response) VisitInternalUpdateResponse(ctx fiber.
 	return nil
 }
 
+type InternalRemoveControlledAccessRequestObject struct {
+	Id   string `json:"id"`
+	Body *InternalRemoveControlledAccessJSONRequestBody
+}
+
+type InternalRemoveControlledAccessResponseObject interface {
+	VisitInternalRemoveControlledAccessResponse(ctx fiber.Ctx) error
+}
+
+type InternalRemoveControlledAccess200JSONResponse InternalRecordResponse
+
+func (response InternalRemoveControlledAccess200JSONResponse) VisitInternalRemoveControlledAccessResponse(ctx fiber.Ctx) error {
+	ctx.Response().Header.Set("Content-Type", "application/json")
+	ctx.Status(200)
+
+	return ctx.JSON(&response)
+}
+
+type InternalRemoveControlledAccess400Response struct {
+}
+
+func (response InternalRemoveControlledAccess400Response) VisitInternalRemoveControlledAccessResponse(ctx fiber.Ctx) error {
+	ctx.Status(400)
+	return nil
+}
+
+type InternalRemoveControlledAccess404Response struct {
+}
+
+func (response InternalRemoveControlledAccess404Response) VisitInternalRemoveControlledAccessResponse(ctx fiber.Ctx) error {
+	ctx.Status(404)
+	return nil
+}
+
+type InternalRemoveControlledAccess500Response struct {
+}
+
+func (response InternalRemoveControlledAccess500Response) VisitInternalRemoveControlledAccessResponse(ctx fiber.Ctx) error {
+	ctx.Status(500)
+	return nil
+}
+
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
 
@@ -1839,6 +1922,9 @@ type StrictServerInterface interface {
 
 	// (PUT /index/{id})
 	InternalUpdate(ctx context.Context, request InternalUpdateRequestObject) (InternalUpdateResponseObject, error)
+
+	// (POST /index/{id}/controlled-access/remove)
+	InternalRemoveControlledAccess(ctx context.Context, request InternalRemoveControlledAccessRequestObject) (InternalRemoveControlledAccessResponseObject, error)
 }
 
 type StrictHandlerFunc func(ctx fiber.Ctx, args interface{}) (interface{}, error)
@@ -2415,6 +2501,39 @@ func (sh *strictHandler) InternalUpdate(ctx fiber.Ctx, id string) error {
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	} else if validResponse, ok := response.(InternalUpdateResponseObject); ok {
 		if err := validResponse.VisitInternalUpdateResponse(ctx); err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, err.Error())
+		}
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// InternalRemoveControlledAccess operation middleware
+func (sh *strictHandler) InternalRemoveControlledAccess(ctx fiber.Ctx, id string) error {
+	var request InternalRemoveControlledAccessRequestObject
+
+	request.Id = id
+
+	var body InternalRemoveControlledAccessJSONRequestBody
+	if err := ctx.Bind().Body(&body); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	}
+	request.Body = &body
+
+	handler := func(ctx fiber.Ctx, request interface{}) (interface{}, error) {
+		return sh.ssi.InternalRemoveControlledAccess(ctx.Context(), request.(InternalRemoveControlledAccessRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "InternalRemoveControlledAccess")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	} else if validResponse, ok := response.(InternalRemoveControlledAccessResponseObject); ok {
+		if err := validResponse.VisitInternalRemoveControlledAccessResponse(ctx); err != nil {
 			return fiber.NewError(fiber.StatusBadRequest, err.Error())
 		}
 	} else if response != nil {

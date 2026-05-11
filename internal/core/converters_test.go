@@ -9,28 +9,7 @@ import (
 	"github.com/calypr/syfon/apigen/server/lfsapi"
 )
 
-func TestUniqueAuthzAndConverters(t *testing.T) {
-	t.Run("unique authz flattens map", func(t *testing.T) {
-		authz := []string{"/programs/syfon/projects/e2e", "/programs/syfon/projects/e2e-2", "/programs/other"}
-		got := UniqueAuthz([]drs.AccessMethod{{
-			Authorizations: &struct {
-				BearerAuthIssuers   *[]string                                       `json:"bearer_auth_issuers,omitempty"`
-				DrsObjectId         *string                                         `json:"drs_object_id,omitempty"`
-				PassportAuthIssuers *[]string                                       `json:"passport_auth_issuers,omitempty"`
-				SupportedTypes      *[]drs.AccessMethodAuthorizationsSupportedTypes `json:"supported_types,omitempty"`
-			}{BearerAuthIssuers: &authz},
-		}})
-		if len(got) != 2 {
-			t.Fatalf("unexpected authz map length: got=%v", got)
-		}
-		if projects := got["syfon"]; len(projects) != 2 || projects[0] != "e2e" || projects[1] != "e2e-2" {
-			t.Fatalf("unexpected syfon projects: got=%v", got)
-		}
-		if projects := got["other"]; len(projects) != 0 {
-			t.Fatalf("expected org-wide other authz, got=%v", got)
-		}
-	})
-
+func TestConverters(t *testing.T) {
 	t.Run("candidate to internal object", func(t *testing.T) {
 		authz := []string{"/programs/syfon/projects/e2e"}
 		url := "https://storage.example/object.bin"
@@ -62,7 +41,6 @@ func TestUniqueAuthzAndConverters(t *testing.T) {
 	t.Run("lfs candidate to drs", func(t *testing.T) {
 		url := "https://storage.example/object.bin"
 		size := int64(42)
-		authz := []string{"/programs/syfon/projects/e2e"}
 		lfsID := "lfs-explicit-id"
 		candidate := lfsapi.DrsObjectCandidate{
 			Id:   strPtr(lfsID),
@@ -75,9 +53,6 @@ func TestUniqueAuthzAndConverters(t *testing.T) {
 				Type: strPtr("https"),
 				AccessUrl: &lfsapi.AccessMethodAccessUrl{
 					Url: &url,
-				},
-				Authorizations: &lfsapi.AccessMethodAuthorizations{
-					BearerAuthIssuers: &authz,
 				},
 			}},
 		}

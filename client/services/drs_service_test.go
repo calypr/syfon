@@ -19,6 +19,7 @@ import (
 func TestDRSServiceResolveAndList(t *testing.T) {
 	t.Parallel()
 
+	var deleteRequest drsapi.DeleteRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/objects/obj-1":
@@ -54,6 +55,11 @@ func TestDRSServiceResolveAndList(t *testing.T) {
 		case r.Method == http.MethodPost && r.URL.Path == "/objects/register":
 			name := "registered.bin"
 			writeJSON(t, w, http.StatusCreated, drsapi.N201ObjectsCreated{Objects: []drsapi.DrsObject{{Id: "obj-created", Name: &name, Checksums: []drsapi.Checksum{{Type: "sha256", Checksum: "abc"}}, CreatedTime: time.Now()}}})
+		case r.Method == http.MethodPut && r.URL.Path == "/objects/obj-delete/delete":
+			if err := json.NewDecoder(r.Body).Decode(&deleteRequest); err != nil {
+				t.Fatalf("decode delete body: %v", err)
+			}
+			w.WriteHeader(http.StatusNoContent)
 		default:
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
 		}
@@ -157,6 +163,35 @@ func TestDRSServiceResolveAndList(t *testing.T) {
 	registered, err := service.RegisterObjects(ctx, drsapi.RegisterObjectsJSONRequestBody{Candidates: []drsapi.DrsObjectCandidate{{Checksums: []drsapi.Checksum{{Type: "sha256", Checksum: "abc"}}}}})
 	if err != nil || len(registered.Objects) != 1 || registered.Objects[0].Id != "obj-created" {
 		t.Fatalf("RegisterObjects returned registered=%+v err=%v", registered, err)
+	}
+
+	if err := service.DeleteObject(ctx, "obj-delete", true); err != nil {
+		t.Fatalf("DeleteObject returned error: %v", err)
+	}
+	if deleteRequest.DeleteStorageData == nil || !*deleteRequest.DeleteStorageData {
+		t.Fatalf("expected delete_storage_data=true, got %+v", deleteRequest)
+	}
+	if deleteRequest.DeleteObjectMetadata == nil || !*deleteRequest.DeleteObjectMetadata {
+		t.Fatalf("expected delete_object_metadata=true, got %+v", deleteRequest)
+	}
+}
+
+func TestDRSServiceDeleteObjectRejectsUnexpectedStatus(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut && r.URL.Path == "/objects/obj-delete/delete" {
+			w.WriteHeader(http.StatusTeapot)
+			return
+		}
+		t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+	}))
+	defer server.Close()
+
+	service := NewDRSService(mustDRSClient(t, server.URL), nil)
+	err := service.DeleteObject(context.Background(), "obj-delete", true)
+	if err == nil || !strings.Contains(err.Error(), "unexpected response: 418") {
+		t.Fatalf("expected unexpected-status error, got %v", err)
 	}
 }
 

@@ -40,11 +40,15 @@ func RegisterFile(ctx context.Context, bk UploadBackend, dc MetadataClient, drsO
 	}
 
 	candidates := []drsapi.DrsObjectCandidate{{
-		Name:          drsObject.Name,
-		Size:          drsObject.Size,
-		Checksums:     drsObject.Checksums,
-		Aliases:       &finalAliases,
-		AccessMethods: nil, // Will be filled after upload
+		Name:             drsObject.Name,
+		Size:             drsObject.Size,
+		Checksums:        drsObject.Checksums,
+		Aliases:          &finalAliases,
+		AccessMethods:    drsObject.AccessMethods,
+		ControlledAccess: drsObject.ControlledAccess,
+		Description:      drsObject.Description,
+		MimeType:         drsObject.MimeType,
+		Version:          drsObject.Version,
 	}}
 	res, err := dc.RegisterObjects(ctx, drsapi.RegisterObjectsJSONRequestBody{
 		Candidates: candidates,
@@ -52,6 +56,7 @@ func RegisterFile(ctx context.Context, bk UploadBackend, dc MetadataClient, drsO
 	if err == nil && len(res.Objects) > 0 && strings.TrimSpace(res.Objects[0].Id) != "" {
 		drsObject.Id = res.Objects[0].Id
 	}
+	storageID = strings.TrimSpace(drsObject.Id)
 
 	// 3. Check if file is already downloadable (optional but good optimization)
 	// (Skipping for now to prioritize core functionality, but can be added back)
@@ -119,6 +124,10 @@ func RegisterFile(ctx context.Context, bk UploadBackend, dc MetadataClient, drsO
 		if getErr != nil {
 			current = *drsObject
 		}
+		controlledAccess := current.ControlledAccess
+		if controlledAccess == nil {
+			controlledAccess = drsObject.ControlledAccess
+		}
 
 		u, parseErr := url.Parse(canonical)
 		if parseErr != nil || u.Scheme == "" {
@@ -156,30 +165,24 @@ func RegisterFile(ctx context.Context, bk UploadBackend, dc MetadataClient, drsO
 		// Finalize registration by updating with the access method
 		candidates = []drsapi.DrsObjectCandidate{{
 			// We use Aliases to reference the existing ID if we can't use id field
-			Name:      drsObject.Name,
-			Size:      drsObject.Size,
-			Checksums: drsObject.Checksums,
-			Aliases:   &finalAliases,
-			AccessMethods: &[]drsapi.AccessMethod{{
-				Type:      drsapi.AccessMethodType(pType),
-				AccessUrl: am.AccessUrl,
-			}},
+			Name:             drsObject.Name,
+			Size:             drsObject.Size,
+			Checksums:        drsObject.Checksums,
+			Aliases:          &finalAliases,
+			AccessMethods:    current.AccessMethods,
+			ControlledAccess: controlledAccess,
+			Description:      drsObject.Description,
+			MimeType:         drsObject.MimeType,
+			Version:          drsObject.Version,
 		}}
 		if _, updateErr := dc.RegisterObjects(ctx, drsapi.RegisterObjectsJSONRequestBody{
 			Candidates: candidates,
 		}); updateErr != nil {
 			// Keep the local object usable even if the server-side metadata refresh is unavailable.
 			// The caller can still persist the final access URL through the index API.
-			drsObject.AccessMethods = &[]drsapi.AccessMethod{{
-				Type:      drsapi.AccessMethodType(pType),
-				AccessUrl: am.AccessUrl,
-			}}
-		} else {
-			drsObject.AccessMethods = &[]drsapi.AccessMethod{{
-				Type:      drsapi.AccessMethodType(pType),
-				AccessUrl: am.AccessUrl,
-			}}
 		}
+		drsObject.AccessMethods = current.AccessMethods
+		drsObject.ControlledAccess = controlledAccess
 	} else {
 		if err := Upload(ctx, bk, filePath, uploadFilename, storageID, bucketName, common.FileMetadata{}, false, true); err != nil {
 			return nil, fmt.Errorf("multipart upload failed: %w", err)

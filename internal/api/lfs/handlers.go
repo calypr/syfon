@@ -2,6 +2,7 @@ package lfs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -20,6 +21,8 @@ type LFSServer struct {
 	om   *core.ObjectManager
 	opts Options
 }
+
+var errNoBucketConfigured = errors.New("no bucket configured")
 
 func NewLFSServer(om *core.ObjectManager, opts Options) *LFSServer {
 	return &LFSServer{
@@ -177,21 +180,68 @@ func (s *LFSServer) LfsUploadProxy(ctx context.Context, request lfsapi.LfsUpload
 		return lfsapi.LfsUploadProxy400TextResponse("invalid oid"), nil
 	}
 
-	creds, err := s.om.ListS3Credentials(ctx)
+	bucket, key, usageObjectID, err := s.resolveUploadProxyTarget(ctx, oid)
 	if err != nil {
+		if errors.Is(err, errNoBucketConfigured) {
+			return lfsapi.LfsUploadProxy507TextResponse(err.Error()), nil
+		}
 		return lfsapi.LfsUploadProxy500TextResponse(err.Error()), nil
 	}
-	if len(creds) == 0 {
-		return lfsapi.LfsUploadProxy507TextResponse("no bucket configured"), nil
-	}
-	bucket := creds[0].Bucket
-	key := oid
 
-	if err := s.handleUploadInternal(ctx, request.Body, bucket, key, oid); err != nil {
+	if err := s.handleUploadInternal(ctx, request.Body, bucket, key, usageObjectID); err != nil {
 		return lfsapi.LfsUploadProxy500TextResponse(err.Error()), nil
 	}
 
 	return lfsapi.LfsUploadProxy200Response{}, nil
+}
+
+func (s *LFSServer) resolveUploadProxyTarget(ctx context.Context, oid string) (bucket string, key string, usageObjectID string, err error) {
+	creds, err := s.om.ListS3Credentials(ctx)
+	if err != nil {
+		return "", "", "", err
+	}
+	if len(creds) == 0 {
+		return "", "", "", errNoBucketConfigured
+	}
+	defaultBucket := strings.TrimSpace(creds[0].Bucket)
+	if defaultBucket == "" {
+		return "", "", "", errNoBucketConfigured
+	}
+
+	if obj, getErr := s.om.GetObject(ctx, oid, "read"); getErr == nil {
+		bucket, key, err := canonicalLFSUploadBucketKey(ctx, s.om, obj, defaultBucket)
+		return bucket, key, obj.Id, err
+	} else if !common.IsNotFoundError(getErr) {
+		return "", "", "", getErr
+	}
+
+	if pending, getErr := s.om.GetPendingLFSMeta(ctx, oid); getErr == nil {
+		obj, convErr := core.CandidateToInternalObject(pending.Candidate, time.Now().UTC())
+		if convErr != nil {
+			return "", "", "", convErr
+		}
+		bucket, key, err := canonicalLFSUploadBucketKey(ctx, s.om, &obj, defaultBucket)
+		return bucket, key, obj.Id, err
+	} else if !common.IsNotFoundError(getErr) {
+		return "", "", "", getErr
+	}
+
+	return defaultBucket, oid, oid, nil
+}
+
+func canonicalLFSUploadBucketKey(ctx context.Context, om *core.ObjectManager, obj *models.InternalObject, defaultBucket string) (string, string, error) {
+	target, err := om.ResolveCanonicalStorageTarget(ctx, core.CanonicalStorageTargetRequest{
+		Object:         obj,
+		Bucket:         defaultBucket,
+		PreferChecksum: true,
+	})
+	if err != nil {
+		return "", "", err
+	}
+	if target.Bucket == "" || target.Key == "" {
+		return "", "", fmt.Errorf("canonical LFS upload location is not an s3 url")
+	}
+	return target.Bucket, target.Key, nil
 }
 
 func (s *LFSServer) handleUploadInternal(ctx context.Context, body io.Reader, bucket, key, usageObjectID string) error {

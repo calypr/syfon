@@ -27,10 +27,11 @@ type ListRecordsOptions struct {
 }
 
 type UploadURLRequest struct {
-	FileID    string
-	Bucket    string
-	FileName  string
-	ExpiresIn int
+	FileID       string
+	FileName     string
+	ExpiresIn    int
+	Organization string
+	Project      string
 }
 
 type MetricsFilesOptions struct {

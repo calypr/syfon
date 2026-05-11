@@ -17,6 +17,8 @@ type fiberTestRouter struct {
 	app *fiber.App
 }
 
+func ptr[T any](v T) *T { return &v }
+
 func (r *fiberTestRouter) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	resp, err := r.app.Test(req)
 	if err != nil {
@@ -64,11 +66,15 @@ type customMockUrlManager struct {
 	testutils.MockUrlManager
 	uploadURL      string
 	initCalled     int
+	initBucket     string
+	initKey        string
 	completeCalled int
 }
 
 func (m *customMockUrlManager) InitMultipartUpload(ctx context.Context, bucket string, key string) (string, error) {
 	m.initCalled++
+	m.initBucket = bucket
+	m.initKey = key
 	return "mock-upload-id", nil
 }
 

@@ -23,6 +23,7 @@ func TestIndexServiceOperationsAndUpsert(t *testing.T) {
 		lastDeleteByQueryQuery url.Values
 		lastCreated            internalapi.InternalRecord
 		lastUpdated            internalapi.InternalRecord
+		lastRemoveControlled   internalapi.ControlledAccessRemoveRequest
 		lastBulkCreate         internalapi.BulkCreateRequest
 		lastBulkHashes         internalapi.BulkHashesRequest
 		lastBulkDelete         internalapi.BulkHashesRequest
@@ -108,6 +109,12 @@ func TestIndexServiceOperationsAndUpsert(t *testing.T) {
 			w.WriteHeader(http.StatusNoContent)
 		case r.Method == http.MethodDelete && r.URL.Path == "/index/fail-delete":
 			w.WriteHeader(http.StatusTeapot)
+		case r.Method == http.MethodPost && r.URL.Path == "/index/did-ca/controlled-access/remove":
+			if err := json.NewDecoder(r.Body).Decode(&lastRemoveControlled); err != nil {
+				t.Fatalf("Decode remove controlled access body returned error: %v", err)
+			}
+			resp := toRecordResponse(testRecordForURL("did-ca", "s3://bucket/updated", map[string][]string{"other": {"project"}}))
+			writeJSON(t, w, http.StatusOK, resp)
 		default:
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
 		}
@@ -166,6 +173,12 @@ func TestIndexServiceOperationsAndUpsert(t *testing.T) {
 	}
 	if err := service.Delete(ctx, "fail-delete"); err == nil {
 		t.Fatal("expected delete error for non-success status")
+	}
+	if _, err := service.RemoveControlledAccess(ctx, "did-ca", "/organization/org/project/proj"); err != nil {
+		t.Fatalf("RemoveControlledAccess returned error: %v", err)
+	}
+	if lastRemoveControlled.Resource != "/organization/org/project/proj" {
+		t.Fatalf("unexpected remove controlled access payload: %+v", lastRemoveControlled)
 	}
 
 	if _, err := service.List(ctx, ListRecordsOptions{Hash: "sha", URL: "s3://bucket/path", Organization: "org", ProjectID: "proj", Limit: 3, Page: 2}); err != nil {
@@ -262,6 +275,25 @@ func TestIndexServiceOperationsAndUpsert(t *testing.T) {
 	err = service.Upsert(ctx, "did-create", "s3://bucket/create", "created.txt", 99, "sha256create", nil)
 	if err == nil || !strings.Contains(err.Error(), "authorizations are required to create") {
 		t.Fatalf("expected missing authz create error, got %v", err)
+	}
+}
+
+func TestIndexServiceRemoveControlledAccessRequiresJSON200(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/index/did-ca/controlled-access/remove" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+	}))
+	defer server.Close()
+
+	service := NewIndexService(mustInternalClient(t, server.URL), &fakeRequester{})
+	_, err := service.RemoveControlledAccess(context.Background(), "did-ca", "/organization/org/project/proj")
+	if err == nil || !strings.Contains(err.Error(), "failed to remove controlled access: 204") {
+		t.Fatalf("expected 204 failure, got %v", err)
 	}
 }
 
