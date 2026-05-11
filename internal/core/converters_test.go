@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/calypr/syfon/apigen/server/drs"
+	"github.com/calypr/syfon/apigen/server/internalapi"
 	"github.com/calypr/syfon/apigen/server/lfsapi"
 )
 
@@ -56,6 +57,38 @@ func TestUniqueAuthzAndConverters(t *testing.T) {
 		}
 		if projects := obj.Authorizations["syfon"]; len(projects) != 1 || projects[0] != "e2e" {
 			t.Fatalf("unexpected internal authz list: %+v", obj.Authorizations)
+		}
+	})
+
+	t.Run("internal record restores authz from access methods when controlled access is absent", func(t *testing.T) {
+		authz := []string{"/programs/syfon/projects/e2e"}
+		url := "s3://syfon-e2e-bucket/bad-id"
+		record := internalapi.InternalRecord{
+			Did: "obj-1",
+			AccessMethods: &[]drs.AccessMethod{{
+				Type: "s3",
+				AccessUrl: &struct {
+					Headers *[]string `json:"headers,omitempty"`
+					Url     string    `json:"url"`
+				}{Url: url},
+				Authorizations: &struct {
+					BearerAuthIssuers   *[]string                                       `json:"bearer_auth_issuers,omitempty"`
+					DrsObjectId         *string                                         `json:"drs_object_id,omitempty"`
+					PassportAuthIssuers *[]string                                       `json:"passport_auth_issuers,omitempty"`
+					SupportedTypes      *[]drs.AccessMethodAuthorizationsSupportedTypes `json:"supported_types,omitempty"`
+				}{BearerAuthIssuers: &authz},
+			}},
+		}
+
+		obj, err := InternalRecordToInternalObject(record, time.Unix(123, 0))
+		if err != nil {
+			t.Fatalf("InternalRecordToInternalObject returned error: %v", err)
+		}
+		if projects := obj.Authorizations["syfon"]; len(projects) != 1 || projects[0] != "e2e" {
+			t.Fatalf("unexpected reconstructed authz list: %+v", obj.Authorizations)
+		}
+		if got := ObjectAccessResources(&obj); len(got) != 1 || got[0] != "/organization/syfon/project/e2e" {
+			t.Fatalf("unexpected reconstructed access resources: %+v", got)
 		}
 	})
 

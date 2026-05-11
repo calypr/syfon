@@ -31,6 +31,59 @@ func (m *ObjectManager) ResolveObjectScopedStorageURL(ctx context.Context, obj *
 	return m.resolveScopedStorageURL(ctx, obj, accessURL)
 }
 
+func (m *ObjectManager) ResolveCanonicalObjectUploadURL(ctx context.Context, obj *models.InternalObject, bucketName string) (string, error) {
+	if obj == nil {
+		return "", fmt.Errorf("object is required")
+	}
+
+	scopes, err := m.bucketScopesForObject(ctx, obj)
+	if err != nil {
+		return "", err
+	}
+	if len(scopes) > 0 {
+		targetBucket := strings.TrimSpace(bucketName)
+		for _, scope := range scopes {
+			if strings.TrimSpace(scope.Bucket) != "" {
+				targetBucket = strings.TrimSpace(scope.Bucket)
+			}
+		}
+		if targetBucket == "" {
+			return "", fmt.Errorf("unable to resolve scoped upload bucket for object %s", obj.Id)
+		}
+		targetKey := ""
+		if checksum, ok := common.CanonicalSHA256(obj.Checksums); ok && strings.TrimSpace(checksum) != "" {
+			targetKey = normalizeScopedStorageKey(checksum, scopes)
+		} else if bucket, key, ok := parseS3Location(FirstSupportedAccessURL(obj)); ok {
+			_ = bucket
+			targetKey = normalizeScopedStorageKey(key, scopes)
+		}
+		if strings.TrimSpace(targetKey) == "" {
+			return "", fmt.Errorf("unable to resolve scoped upload key for object %s", obj.Id)
+		}
+		return common.S3Prefix + targetBucket + "/" + targetKey, nil
+	}
+
+	if strings.TrimSpace(bucketName) != "" {
+		bucket, err := m.ResolveBucket(ctx, bucketName)
+		if err != nil {
+			return "", err
+		}
+		if key, ok := m.ResolveObjectRemotePath(ctx, obj.Id, bucket); ok && strings.TrimSpace(key) != "" {
+			return common.BucketToURL(bucket, key), nil
+		}
+		if checksum, ok := common.CanonicalSHA256(obj.Checksums); ok && strings.TrimSpace(checksum) != "" {
+			return common.BucketToURL(bucket, checksum), nil
+		}
+		return common.BucketToURL(bucket, obj.Id), nil
+	}
+
+	existingURL := FirstSupportedAccessURL(obj)
+	if strings.TrimSpace(existingURL) == "" {
+		return "", fmt.Errorf("object storage location is unavailable")
+	}
+	return existingURL, nil
+}
+
 // ResolveBucket validates a bucket name or returns the default one.
 func (m *ObjectManager) ResolveBucket(ctx context.Context, bucketName string) (string, error) {
 	creds, err := m.ListS3Credentials(ctx)

@@ -4,8 +4,10 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/testutils"
@@ -76,6 +78,57 @@ func TestDeleteStorageTargetFileProvider(t *testing.T) {
 	}
 	if err := om.deleteStorageTarget(context.Background(), storageTarget{provider: common.FileProvider, path: targetPath}); err != nil {
 		t.Fatalf("deleteStorageTarget(missing) failed: %v", err)
+	}
+}
+
+func TestStorageTargetsForScopedObjectUseCanonicalChecksumPath(t *testing.T) {
+	checksum := strings.Repeat("a", 64)
+	om := NewObjectManager(&testutils.MockDatabase{
+		Credentials: map[string]models.S3Credential{
+			"syfon-e2e-bucket": {Bucket: "syfon-e2e-bucket", Provider: "s3", Region: "us-west-2"},
+		},
+		BucketScopes: map[string]models.BucketScope{
+			"syfon|": {
+				Organization: "syfon",
+				Bucket:       "syfon-e2e-bucket",
+				PathPrefix:   "program-root",
+			},
+			"syfon|e2e": {
+				Organization: "syfon",
+				ProjectID:    "e2e",
+				Bucket:       "syfon-e2e-bucket",
+				PathPrefix:   "project-subpath",
+			},
+		},
+	}, &capturingURLManager{})
+
+	obj := &models.InternalObject{
+		DrsObject: drs.DrsObject{
+			Id:               "f781273b-52eb-5ac2-a484-775235eef303",
+			ControlledAccess: &[]string{"/organization/syfon/project/e2e"},
+			Checksums:        []drs.Checksum{{Type: "sha256", Checksum: checksum}},
+			AccessMethods: &[]drs.AccessMethod{{
+				Type: drs.AccessMethodTypeS3,
+				AccessUrl: &struct {
+					Headers *[]string `json:"headers,omitempty"`
+					Url     string    `json:"url"`
+				}{Url: "s3://objects/f781273b-52eb-5ac2-a484-775235eef303"},
+			}},
+		},
+	}
+
+	targets, err := om.storageTargetsForObject(context.Background(), obj)
+	if err != nil {
+		t.Fatalf("storageTargetsForObject failed: %v", err)
+	}
+	if len(targets) != 1 {
+		t.Fatalf("expected one canonical target, got %+v", targets)
+	}
+	if targets[0].bucket != "syfon-e2e-bucket" {
+		t.Fatalf("expected scoped bucket syfon-e2e-bucket, got %q", targets[0].bucket)
+	}
+	if want := "program-root/project-subpath/" + checksum; targets[0].key != want {
+		t.Fatalf("expected canonical delete key %q, got %q", want, targets[0].key)
 	}
 }
 

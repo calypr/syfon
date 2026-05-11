@@ -260,36 +260,7 @@ func resolveObjectUploadURL(ctx context.Context, om *core.ObjectManager, obj *mo
 	if obj == nil {
 		return "", fmt.Errorf("object is required")
 	}
-	existingURL := core.FirstSupportedAccessURL(obj)
-	if bucketName != "" {
-		bucket, err := om.ResolveBucket(ctx, bucketName)
-		if err != nil {
-			return "", err
-		}
-		if key, ok := om.ResolveObjectRemotePath(ctx, obj.Id, bucket); ok && strings.TrimSpace(key) != "" {
-			return common.BucketToURL(bucket, key), nil
-		}
-		if existingURL != "" {
-			scopedURL, err := om.ResolveObjectScopedStorageURL(ctx, obj, existingURL)
-			if err != nil {
-				return "", err
-			}
-			if strings.TrimSpace(scopedURL) != "" {
-				return scopedURL, nil
-			}
-		}
-	}
-	if existingURL != "" {
-		return existingURL, nil
-	}
-	if bucketName == "" {
-		return "", fmt.Errorf("bucket is required when object storage location is unavailable")
-	}
-	bucket, err := om.ResolveBucket(ctx, bucketName)
-	if err != nil {
-		return "", err
-	}
-	return common.BucketToURL(bucket, obj.Id), nil
+	return om.ResolveCanonicalObjectUploadURL(ctx, obj, bucketName)
 }
 
 func handleInternalUploadBulkFiber(om *core.ObjectManager) fiber.Handler {
@@ -330,20 +301,20 @@ func handleInternalUploadBulkFiber(om *core.ObjectManager) fiber.Handler {
 				continue
 			}
 
-				urlStr, err := resolveObjectUploadURL(c.Context(), om, obj, strings.TrimSpace(common.StringVal(item.Bucket)))
-				if err != nil {
-					errMsg := err.Error()
-					res.Error = &errMsg
-					res.Status = http.StatusBadRequest
-					results = append(results, res)
-					continue
-				}
-				bucket := ""
-				key := obj.Id
-				if parsedBucket, parsedKey, ok := common.ParseS3URL(urlStr); ok {
-					bucket = parsedBucket
-					key = parsedKey
-				}
+			urlStr, err := resolveObjectUploadURL(c.Context(), om, obj, strings.TrimSpace(common.StringVal(item.Bucket)))
+			if err != nil {
+				errMsg := err.Error()
+				res.Error = &errMsg
+				res.Status = http.StatusBadRequest
+				results = append(results, res)
+				continue
+			}
+			bucket := ""
+			key := obj.Id
+			if parsedBucket, parsedKey, ok := common.ParseS3URL(urlStr); ok {
+				bucket = parsedBucket
+				key = parsedKey
+			}
 			signedURL, err := signUploadURLForObject(c.Context(), om, obj, urlStr)
 			if err != nil {
 				errMsg := err.Error()
@@ -432,11 +403,7 @@ func handleInternalMultipartInitFiber(om *core.ObjectManager) fiber.Handler {
 			if existing, err := om.GetObjectsByChecksum(c.Context(), key, "read"); err == nil && len(existing) > 0 {
 				obj := &existing[0]
 				internalID = obj.Id
-				accessURL := core.FirstSupportedAccessURL(obj)
-				if accessURL == "" {
-					return c.Status(fiber.StatusBadRequest).SendString("existing object missing storage location")
-				}
-				scopedURL, err := om.ResolveObjectScopedStorageURL(c.Context(), obj, accessURL)
+				scopedURL, err := om.ResolveCanonicalObjectUploadURL(c.Context(), obj, bucketName)
 				if err != nil {
 					return apiutil.HandleError(c, err)
 				}

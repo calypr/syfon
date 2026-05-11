@@ -154,8 +154,8 @@ func TestHandleInternalMultipartInit_ExistingScopedObjectUsesMappedLocation(t *t
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
 	}
-	if mockUM.bucket != "bforepc" || mockUM.key != "bforepc-prod/OHSU/slide.ome.tiff" {
-		t.Fatalf("expected mapped multipart target bforepc/bforepc-prod/OHSU/slide.ome.tiff, got %q/%q", mockUM.bucket, mockUM.key)
+	if mockUM.bucket != "bforepc" || mockUM.key != "bforepc-prod/"+checksum {
+		t.Fatalf("expected mapped multipart target bforepc/bforepc-prod/%s, got %q/%q", checksum, mockUM.bucket, mockUM.key)
 	}
 }
 
@@ -259,7 +259,7 @@ func TestHandleInternalUploadURL_RepairsMalformedScopedObjectURL(t *testing.T) {
 					AccessUrl: &struct {
 						Headers *[]string `json:"headers,omitempty"`
 						Url     string    `json:"url"`
-					}{Url: "s3://f781273b-52eb-5ac2-a484-775235eef303"},
+					}{Url: "s3://objects/f781273b-52eb-5ac2-a484-775235eef303"},
 				}},
 			},
 		},

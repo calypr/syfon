@@ -303,6 +303,9 @@ func InternalRecordToInternalObject(r internalapi.InternalRecord, now time.Time)
 	if r.AccessMethods != nil {
 		methods := append([]drs.AccessMethod(nil), (*r.AccessMethods)...)
 		obj.AccessMethods = &methods
+		if authzMap == nil {
+			authzMap = UniqueAuthz(methods)
+		}
 	}
 	return models.InternalObject{
 		DrsObject:      obj,
