@@ -1,164 +1,175 @@
 # Troubleshooting
 
-## Upload Failures
+This page is for operators running Syfon, not for development workflow issues.
 
-### `connection refused` on presigned PUT URL
+## Server Will Not Start
 
-**Symptom:**
+### `no database specified in config`
 
-```
-upload request failed: Put "http://rgw.example.com/bucket/...": dial tcp x.x.x.x:80: connect: connection refused
-```
+Syfon requires exactly one database backend.
 
-**Cause:** The `endpoint` in `config.yaml` is using `http://` but the server only accepts HTTPS.
+Use one of:
 
-**Fix:** Update the endpoint to use `https://`:
+- `database.sqlite.file` for local deployments
+- `database.postgres.*` for Gen3 and normal Kubernetes deployments
+
+### `multiple databases specified in config`
+
+You configured both `database.sqlite` and `database.postgres`.
+
+Remove one of them. Local deployments should normally keep SQLite. Gen3 and Helm-based deployments should normally keep PostgreSQL.
+
+### `auth.mode is required` or `invalid auth.mode`
+
+Set `auth.mode` to exactly one of:
+
+- `local`
+- `gen3`
+
+### `auth.mode "gen3" requires postgres database`
+
+`gen3` mode requires PostgreSQL in normal operation.
+
+Fix:
+
+- use PostgreSQL for Gen3 deployments
+- or switch the deployment to `auth.mode: local` if this is a local operator setup
+
+### `auth.mode "local" requires auth.basic.username/password`
+
+The documented local path requires Basic Auth unless you explicitly set:
 
 ```yaml
-s3_credentials:
-  - bucket: "my-bucket"
-    endpoint: "https://rgw.example.com"  # not http://
+auth:
+  allow_unauthenticated: true
 ```
 
-Restart the server after changing the config for it to take effect.
+That bypass is for development only.
 
----
-
-### Upload prints both `successful uploaded` and `requested DID`
-
-**Symptom:** The CLI upload output shows two IDs, for example:
-
-```text
-successfully uploaded 4c2f...
-requested DID: e3b0...
-```
-
-**Meaning:** These are intentionally different concepts:
-
-- `requested DID` is the ID the CLI asked the server to register.
-- `successfully uploaded <id>` is the canonical object ID that Syfon stored.
-
-When `--did` is omitted, the CLI deterministically mints the requested DID from
-the file SHA256 plus the canonical project scope path
-(`/organization/<org>/project/<project>`). The server uses the same rule when
-it needs to mint an ID from checksum+scope data.
-
-If no explicit `--did` is provided, `--project` must be provided. Organization-
-only scope is not enough to mint a deterministic object ID.
-
-**Rule of thumb:** Use the canonical ID from `successfully uploaded ...` for follow-up operations like `download`, `sha256sum`, and `rm`. Keep `requested DID` as the trace of what the client originally asked for.
-
----
+## Storage Configuration Problems
 
 ### `bucket credential not found`
 
-**Symptom:**
+Syfon could not find a configured bucket entry that matches the requested bucket.
 
-```
-bucket credential not found
-```
+Check:
 
-**Cause:** The bucket name in the upload request does not match any entry in `s3_credentials`.
+- the `bucket` name in `buckets`
+- whether you intended to use `buckets` or legacy `s3_credentials`
+- whether the client is targeting the same bucket name you configured
 
-**Fix:** Ensure the `bucket` field in your config exactly matches the bucket being targeted. If running integration tests, set `TEST_CREATE_BUCKET_BEFORE_TEST=true` along with the required bucket environment variables.
+### Upload URL is generated but upload fails
 
----
+This usually means Syfon was able to sign the request, but the client could not reach the storage endpoint.
 
-### Upload succeeds on server but client reports failure
+Check:
 
-**Symptom:** Server logs show `[201] POST /data/upload` but the client errors immediately after.
+- `endpoint` is correct
+- `http` vs `https` matches the object store
+- the object store is reachable from the client network
+- the bucket credentials are valid for that bucket
 
-**Cause:** The presigned URL was generated successfully, but the subsequent `PUT` to the storage backend failed. This is a client-to-storage failure, not a client-to-Syfon failure.
+### Presigned upload or download points at the wrong path
 
-**Check:**
-- Can you reach the storage endpoint directly? (`mc alias set` + `mc ls`)
-- Is the endpoint URL scheme correct (`http` vs `https`)?
-- Is the storage backend reachable from the client's network?
+Check your bucket routing rules:
 
----
+- `resources` if you want organization/project-derived mappings
+- `bucket_scopes` if you want exact explicit mappings
 
-## Server Startup Failures
+If you are using the Helm chart, prefer `config.buckets` and keep the routing rules inside that block.
 
-### Server does not start
+## Credential Encryption Problems
 
-- Verify Go and dependencies are installed: `go version`
-- Run tests to catch config or compilation issues: `make test-unit`
-- Check for port conflicts: `lsof -i :8080`
+### `encrypted credential found but master key is not configured`
 
----
+Syfon found encrypted bucket credentials, but it cannot load the KEK required to decrypt them.
 
-### `no bucket credentials configured for upload`
+Check:
 
-**Cause:** `s3_credentials` is empty or missing in your config file.
+- `DRS_CREDENTIAL_LOCAL_KEY_FILE` points at the expected KEK file
+- or `credential_encryption.local_key_file` points at the expected KEK file
+- or `DRS_CREDENTIAL_MASTER_KEY` is set to the expected key material
 
-**Fix:** Add at least one entry under `s3_credentials` in your config.
+### Bucket credentials worked before but fail after restart
 
----
+This usually means the KEK changed or the KEK file was not persisted.
 
-## Auth Issues
+For local deployments:
 
-### All requests return `403 Forbidden` in `gen3` mode
+- persist the KEK file alongside the SQLite DB
+- do not rotate or replace it unless you are also re-encrypting stored credentials
 
-- Confirm Fence and Arborist are reachable from the Syfon pod.
-- For local testing, use mock auth to bypass Fence/Arborist:
+## Authentication Problems
 
-```bash
-DRS_AUTH_MOCK_ENABLED=true \
-DRS_AUTH_MOCK_RESOURCES="/data_file" \
-DRS_AUTH_MOCK_METHODS="read,file_upload,create,update,delete" \
-go run . serve --config config.local.yaml
-```
+### `401 Unauthorized` in local mode
 
-### `401 Unauthorized` instead of `403`
+Check the Basic Auth credentials you configured in:
 
-In `gen3` mode, Syfon returns `401` when no `Authorization` header is present. Set `DRS_AUTH_MOCK_REQUIRE_AUTH_HEADER=false` (or omit the variable) to allow unauthenticated mock requests locally.
+- `auth.basic.username`
+- `auth.basic.password`
 
----
+If you are using a reverse proxy, also confirm it is forwarding the `Authorization` header.
 
-## Database Issues
+### `401` or `403` for every request in `gen3` mode
+
+Check:
+
+- `auth.fence_url` points at the correct public Fence endpoint
+- PostgreSQL is configured and reachable
+- the incoming token is actually being forwarded to Syfon
+
+For local integration testing only, you can use Gen3 mock auth. That is a test path, not the normal operator path.
+
+## Database Problems
 
 ### SQLite: `database is locked`
 
-**Cause:** Multiple server processes are writing to the same SQLite file simultaneously.
+SQLite is appropriate for a single local Syfon instance, not a multi-replica deployment.
 
-**Fix:** Ensure only one server instance is running:
+Fix:
 
-```bash
-ps aux | grep syfon
-```
+- run a single local server process
+- avoid sharing one SQLite file across multiple writers
+- use PostgreSQL for multi-instance deployments
 
-SQLite is not suitable for multi-instance deployments — use PostgreSQL instead.
+### PostgreSQL connection failures
 
----
+Check:
 
-### PostgreSQL: `connection refused` or `password authentication failed`
+- `DRS_DB_HOST`
+- `DRS_DB_PORT`
+- `DRS_DB_USER`
+- `DRS_DB_PASSWORD`
+- `DRS_DB_DATABASE`
+- `DRS_DB_SSLMODE`
 
-- Verify `DRS_DB_HOST`, `DRS_DB_PORT`, `DRS_DB_USER`, `DRS_DB_PASSWORD`, and `DRS_DB_DATABASE` are set correctly.
-- Check that the PostgreSQL schema has been initialized (via the Helm init Job or `db/scripts/`).
-- Confirm `sslmode` matches your PostgreSQL server config (`disable`, `require`, `verify-full`, etc.).
+If you are using the Helm chart, those are injected from the app DB secret. Verify the secret contents first.
 
----
+## Kubernetes Problems
 
-## `git stash -u` hangs
+### Pod starts but Syfon immediately exits
 
-**Cause:** `git stash -u` reads and compresses all untracked files, including any large test files (e.g. `test-file-10gb`).
+Check:
 
-**Fix:** Add large or generated files to `.gitignore` so they are excluded from stash operations:
+- the rendered config Secret mounted at `/etc/drs/config.yaml`
+- the app DB secret providing `DRS_DB_*`
+- whether `config.auth.mode` and the chosen database backend are compatible
 
-```bash
-echo "test-file-*" >> .gitignore
-echo "drs_*.db" >> .gitignore
-echo "cmd/**/__debug_bin*" >> .gitignore
-```
+### Init job fails
 
----
+The chart's PostgreSQL init job creates the app role, creates the app database, and applies the schema.
 
-## Documentation
+Check:
 
-### `make docs-serve` shows outdated content
+- admin DB credentials
+- app DB credentials
+- PostgreSQL network reachability
+- whether you intended to disable `postgres.initJob.enabled`
 
-MkDocs serves from source files directly in watch mode. If content appears stale, hard-refresh your browser (`Cmd+Shift+R` / `Ctrl+Shift+R`).
+## Docs Problems
 
-### Pages missing from the nav
+### A docs page does not match the real chart
 
-Ensure all pages referenced under `nav:` in `mkdocs.yml` exist under `docs/`. Paths in `mkdocs.yml` are relative to the `docs/` directory (e.g. `configuration.md`, not `docs/configuration.md`).
+For Kubernetes behavior, treat the chart as the source of truth:
+
+- [gen3-helm `helm/syfon`](https://github.com/calypr/gen3-helm/tree/ohsu-develop/helm/syfon)

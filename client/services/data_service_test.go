@@ -17,6 +17,25 @@ import (
 	"github.com/calypr/syfon/client/transfer"
 )
 
+type sizedMultipartBody struct {
+	*bytes.Reader
+	total int64
+}
+
+func newSizedMultipartBody(payload []byte) *sizedMultipartBody {
+	return &sizedMultipartBody{
+		Reader: bytes.NewReader(payload),
+		total:  int64(len(payload)),
+	}
+}
+
+func (b *sizedMultipartBody) Size() int64 {
+	if b == nil {
+		return 0
+	}
+	return b.total
+}
+
 func TestDataServiceOperationsAndTransferHelpers(t *testing.T) {
 	t.Parallel()
 
@@ -169,6 +188,18 @@ func TestDataServiceOperationsAndTransferHelpers(t *testing.T) {
 	}
 	if requester.method != http.MethodPut || string(requester.body) != "chunk-data" {
 		t.Fatalf("unexpected upload request captured: method=%s body=%q", requester.method, requester.body)
+	}
+
+	sizedBody := newSizedMultipartBody([]byte("chunk-two"))
+	etag, err = service.MultipartPart(ctx, "guid-a", "upload-id", 4, sizedBody)
+	if err != nil || etag != "etag-1" {
+		t.Fatalf("MultipartPart with sized body returned etag=%q err=%v", etag, err)
+	}
+	if requester.rawBody != sizedBody {
+		t.Fatalf("expected multipart upload to stream original body, got %T", requester.rawBody)
+	}
+	if requester.builder.PartSize != int64(len("chunk-two")) {
+		t.Fatalf("expected multipart upload content length %d, got %d", len("chunk-two"), requester.builder.PartSize)
 	}
 
 	parts := []transfer.MultipartPart{{PartNumber: 2, ETag: "etag-2"}, {PartNumber: 1, ETag: "etag-1"}}

@@ -56,6 +56,7 @@ func DoUpload(ctx context.Context, req request.Requester, urlStr string, body io
 	if size > 0 {
 		opts = append(opts, request.WithPartSize(size))
 	}
+	opts = append(opts, request.WithNoRetry(true))
 
 	var resp *http.Response
 	err = req.Do(ctx, method, urlStr, body, &resp, opts...)

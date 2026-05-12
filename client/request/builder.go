@@ -17,6 +17,7 @@ type RequestBuilder struct {
 	Token    string
 	PartSize int64
 	SkipAuth bool
+	NoRetry  bool
 	Timeout  time.Duration
 }
 
@@ -69,6 +70,11 @@ func (ar *RequestBuilder) WithQueryValues(v url.Values) *RequestBuilder {
 
 func (ar *RequestBuilder) WithSkipAuth(skip bool) *RequestBuilder {
 	ar.SkipAuth = skip
+	return ar
+}
+
+func (ar *RequestBuilder) WithNoRetry(noRetry bool) *RequestBuilder {
+	ar.NoRetry = noRetry
 	return ar
 }
 

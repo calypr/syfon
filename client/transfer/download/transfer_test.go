@@ -12,12 +12,19 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	internalapi "github.com/calypr/syfon/apigen/client/internalapi"
 	"github.com/calypr/syfon/client/common"
 	"github.com/calypr/syfon/client/logs"
 	"github.com/calypr/syfon/client/transfer"
 )
+
+type zeroBackoff struct{}
+
+func (zeroBackoff) WaitTime(int) time.Duration { return 0 }
+
+func transferTestZeroBackoff() transfer.RetryStrategy { return zeroBackoff{} }
 
 type fakeBackend struct {
 	logger                 *logs.Gen3Logger
@@ -249,8 +256,8 @@ func TestDownloadSingleWithProgressFinalizeOnError(t *testing.T) {
 		t.Fatal("expected progress events")
 	}
 	last := events[len(events)-1]
-	if last.BytesSoFar != 64 {
-		t.Fatalf("expected finalize bytesSoFar 64, got %d", last.BytesSoFar)
+	if last.BytesSoFar != int64(len(fake.data)) {
+		t.Fatalf("expected finalize bytesSoFar %d, got %d", len(fake.data), last.BytesSoFar)
 	}
 }
 
@@ -286,6 +293,7 @@ func TestDownloadToPathMultipart(t *testing.T) {
 			MultipartThreshold: 1 * 1024 * 1024,
 			ChunkSize:          256 * 1024,
 			Concurrency:        4,
+			RetryStrategy:      transferTestZeroBackoff(),
 		},
 	)
 	if err != nil {
@@ -323,6 +331,7 @@ func TestDownloadToPathMultipartUsesProtocolAccessID(t *testing.T) {
 			MultipartThreshold: 1 * 1024 * 1024,
 			ChunkSize:          256 * 1024,
 			Concurrency:        4,
+			RetryStrategy:      transferTestZeroBackoff(),
 		},
 	)
 	if err != nil {
@@ -359,6 +368,7 @@ func TestDownloadToPathMultipartErrorPropagation(t *testing.T) {
 			MultipartThreshold: 1 * 1024 * 1024,
 			ChunkSize:          256 * 1024,
 			Concurrency:        4,
+			RetryStrategy:      transferTestZeroBackoff(),
 		},
 	)
 	if err == nil {
@@ -401,6 +411,7 @@ func TestDownloadToPathMultipartProgressAccounting(t *testing.T) {
 			MultipartThreshold: 1 * 1024 * 1024,
 			ChunkSize:          256 * 1024,
 			Concurrency:        4,
+			RetryStrategy:      transferTestZeroBackoff(),
 		},
 	)
 	if err != nil {

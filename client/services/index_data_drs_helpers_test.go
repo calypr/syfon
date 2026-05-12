@@ -21,6 +21,7 @@ type recordingRequester struct {
 	method   string
 	path     string
 	body     []byte
+	rawBody  any
 	builder  request.RequestBuilder
 	response *http.Response
 	err      error
@@ -31,6 +32,7 @@ func (r *recordingRequester) Do(ctx context.Context, method, path string, body, 
 	defer r.mu.Unlock()
 	r.method = method
 	r.path = path
+	r.rawBody = body
 	r.builder = request.RequestBuilder{Method: method, Url: path, Headers: map[string]string{}}
 	for _, opt := range opts {
 		opt(&r.builder)

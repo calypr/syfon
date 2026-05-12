@@ -175,7 +175,7 @@ func (u *GenericUploader) uploadMultipart(ctx context.Context, req transfer.Tran
 				err := transfer.RetryAction(ctx, logger, strategy, common.MaxRetryCount, func() error {
 					tracker.ResetPart(partNum)
 					section := io.NewSectionReader(file, offset, partSize)
-					partReader := newMultipartPartProgressReader(section, tracker, partNum)
+					partReader := newMultipartPartProgressReader(section, tracker, partNum, partSize)
 					etag, retryErr := u.Backend.MultipartPart(ctx, objectKey, state.UploadID, partNum, partReader)
 					if retryErr != nil {
 						if isProgressCallbackError(retryErr) {
@@ -380,11 +380,12 @@ type multipartPartProgressReader struct {
 	reader           io.Reader
 	tracker          *multipartProgressTracker
 	partNum          int
+	totalBytes       int64
 	bytesSinceReport int64
 }
 
-func newMultipartPartProgressReader(reader io.Reader, tracker *multipartProgressTracker, partNum int) *multipartPartProgressReader {
-	return &multipartPartProgressReader{reader: reader, tracker: tracker, partNum: partNum}
+func newMultipartPartProgressReader(reader io.Reader, tracker *multipartProgressTracker, partNum int, totalBytes int64) *multipartPartProgressReader {
+	return &multipartPartProgressReader{reader: reader, tracker: tracker, partNum: partNum, totalBytes: totalBytes}
 }
 
 func (m *multipartPartProgressReader) Read(p []byte) (int, error) {
@@ -408,6 +409,13 @@ func (m *multipartPartProgressReader) FlushPendingProgress() error {
 	delta := m.bytesSinceReport
 	m.bytesSinceReport = 0
 	return m.tracker.AdvancePart(m.partNum, delta)
+}
+
+func (m *multipartPartProgressReader) Size() int64 {
+	if m == nil {
+		return 0
+	}
+	return m.totalBytes
 }
 
 func completedMultipartBytes(state *uploaderResumeState, fileSize, chunkSize int64) int64 {
