@@ -40,8 +40,10 @@ markdown_extensions:
 
 nav:
   - Home: index.md
+  - Quick Start: quickstart.md
+  - Local Deployment: local-deployment.md
+  - Kubernetes Deployment: kubernetes-deployment.md
   - Configuration: configuration.md
-  - Local Authz CSV: local-authz-csv.md
   - Encryption: encryption.md
   - Deployment: deployment.md
   - Indexd to Syfon Migration: operator-guide-migration-indexd.md

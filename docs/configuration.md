@@ -2,7 +2,7 @@
 
 This page documents the actual `syfon serve --config <file>` server config model.
 
-The current config schema lives in [`syfon/internal/config/config.go`](../internal/config/config.go). If the code and the docs ever disagree, the code wins.
+The current config schema lives in `syfon/internal/config/config.go`. If the code and the docs ever disagree, the code wins.
 
 This page documents raw Syfon server config only. If you are deploying with the Helm chart, see [Kubernetes Deployment](kubernetes-deployment.md) for the chart-specific values layout and how it maps into this server config.
 
