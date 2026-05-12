@@ -68,6 +68,9 @@ func (d *GenericDownloader) downloadSingle(ctx context.Context, guid string, dst
 	}
 	defer body.Close()
 
+	progressReader := newDownloadProgressReader(body, common.GetProgress(ctx), common.GetOid(ctx), startOffset, nil)
+	body = io.NopCloser(progressReader)
+
 	if dir := filepath.Dir(dstPath); dir != "." {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return err
@@ -86,36 +89,15 @@ func (d *GenericDownloader) downloadSingle(ctx context.Context, guid string, dst
 	defer file.Close()
 
 	written, err := io.Copy(file, body)
-	remaining := expectedSize - startOffset
 	if err != nil {
-		if progress := common.GetProgress(ctx); progress != nil && remaining > written {
-			_ = progress(common.ProgressEvent{
-				Event:          "progress",
-				Oid:            common.GetOid(ctx),
-				BytesSinceLast: remaining - written,
-				BytesSoFar:     expectedSize,
-			})
-		}
+		_ = progressReader.FlushPendingProgress()
 		return err
 	}
 
-	if progress := common.GetProgress(ctx); progress != nil && written > 0 {
-		_ = progress(common.ProgressEvent{
-			Event:          "progress",
-			Oid:            common.GetOid(ctx),
-			BytesSinceLast: written,
-			BytesSoFar:     startOffset + written,
-		})
+	if err := progressReader.Complete(); err != nil {
+		return err
 	}
 	if expectedSize > 0 && (startOffset+written) < expectedSize {
-		if progress := common.GetProgress(ctx); progress != nil {
-			_ = progress(common.ProgressEvent{
-				Event:          "progress",
-				Oid:            common.GetOid(ctx),
-				BytesSinceLast: expectedSize - (startOffset + written),
-				BytesSoFar:     expectedSize,
-			})
-		}
 		return fmt.Errorf("short download: got %d, expected %d", startOffset+written, expectedSize)
 	}
 	emitTransferCompletion(ctx, common.TransferCompletionEvent{
@@ -126,6 +108,75 @@ func (d *GenericDownloader) downloadSingle(ctx context.Context, guid string, dst
 		Bytes:      written,
 		Strategy:   "single",
 	})
+	return nil
+}
+
+type downloadProgressReader struct {
+	reader            io.Reader
+	onProgress        common.ProgressCallback
+	oid               string
+	bytesSoFar        int64
+	bytesSinceReport  int64
+	lastReportedSoFar int64
+	globalBytes       *atomic.Int64
+}
+
+func newDownloadProgressReader(reader io.Reader, onProgress common.ProgressCallback, oid string, initialBytes int64, globalBytes *atomic.Int64) *downloadProgressReader {
+	return &downloadProgressReader{
+		reader:            reader,
+		onProgress:        onProgress,
+		oid:               oid,
+		bytesSoFar:        initialBytes,
+		lastReportedSoFar: initialBytes,
+		globalBytes:       globalBytes,
+	}
+}
+
+func (r *downloadProgressReader) Read(p []byte) (int, error) {
+	n, err := r.reader.Read(p)
+	if n > 0 && r.onProgress != nil {
+		delta := int64(n)
+		if r.globalBytes != nil {
+			r.bytesSoFar = r.globalBytes.Add(delta)
+		} else {
+			r.bytesSoFar += delta
+		}
+		r.bytesSinceReport += delta
+		if r.bytesSinceReport >= common.OnProgressThreshold {
+			if progressErr := r.emit(); progressErr != nil {
+				return n, progressErr
+			}
+		}
+	}
+	return n, err
+}
+
+func (r *downloadProgressReader) FlushPendingProgress() error {
+	return r.emit()
+}
+
+func (r *downloadProgressReader) Complete() error {
+	return r.emit()
+}
+
+func (r *downloadProgressReader) emit() error {
+	if r.onProgress == nil {
+		return nil
+	}
+	delta := r.bytesSoFar - r.lastReportedSoFar
+	if delta <= 0 {
+		return nil
+	}
+	if err := r.onProgress(common.ProgressEvent{
+		Event:          "progress",
+		Oid:            r.oid,
+		BytesSoFar:     r.bytesSoFar,
+		BytesSinceLast: delta,
+	}); err != nil {
+		return err
+	}
+	r.lastReportedSoFar = r.bytesSoFar
+	r.bytesSinceReport = 0
 	return nil
 }
 
@@ -187,23 +238,18 @@ func (d *GenericDownloader) downloadParallel(ctx context.Context, guid string, d
 
 				w := io.NewOffsetWriter(file, partStart)
 				buf := bufPool.Get().([]byte)
-				written, err := io.CopyBuffer(w, partBody, buf)
+				progressReader := newDownloadProgressReader(partBody, progress, oid, soFar.Load(), &soFar)
+				written, err := io.CopyBuffer(w, progressReader, buf)
 				bufPool.Put(buf)
 				if err != nil {
+					_ = progressReader.FlushPendingProgress()
+					return err
+				}
+				if err := progressReader.Complete(); err != nil {
 					return err
 				}
 				if written != partLength {
 					return fmt.Errorf("short write: got %d, expected %d", written, partLength)
-				}
-
-				if progress != nil {
-					current := soFar.Add(written)
-					_ = progress(common.ProgressEvent{
-						Event:          "progress",
-						Oid:            oid,
-						BytesSinceLast: written,
-						BytesSoFar:     current,
-					})
 				}
 				emitTransferCompletion(gctx, common.TransferCompletionEvent{
 					Direction:  "download",

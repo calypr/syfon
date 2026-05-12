@@ -716,11 +716,15 @@ func TestGenericDownloaderDownloadAndParallel(t *testing.T) {
 	if len(backend.rangeCalls) != 3 {
 		t.Fatalf("expected 3 range calls, got %+v", backend.rangeCalls)
 	}
-	if len(events) != 3 {
-		t.Fatalf("expected progress per chunk, got %+v", events)
+	if len(events) < 3 {
+		t.Fatalf("expected incremental progress events, got %+v", events)
 	}
 	if len(completions) != 3 {
 		t.Fatalf("expected transfer completion per chunk, got %+v", completions)
+	}
+	lastEvent := events[len(events)-1]
+	if lastEvent.BytesSoFar != int64(len(content)) {
+		t.Fatalf("expected final progress to reach %d, got %+v", len(content), lastEvent)
 	}
 	var completedBytes int64
 	for _, ev := range completions {
@@ -777,4 +781,35 @@ func TestGenericDownloaderDownloadAndParallel(t *testing.T) {
 			t.Fatalf("expected failed parallel download to remove %q, stat err=%v", dst, statErr)
 		}
 	})
+}
+
+func TestGenericDownloaderSingleDownloadStreamsProgress(t *testing.T) {
+	t.Parallel()
+
+	content := bytes.Repeat([]byte("abcdef0123456789"), int((2*common.MB+123)/16)+1)
+	content = content[:2*common.MB+123]
+	backend := &fakeBackend{
+		data: content,
+		meta: &transfer.ObjectMetadata{Size: int64(len(content)), AcceptRanges: false, Provider: "http"},
+	}
+	d := &GenericDownloader{Source: backend}
+	dst := filepath.Join(t.TempDir(), "single-progress.bin")
+
+	var events []common.ProgressEvent
+	ctx := common.WithOid(context.Background(), "single-download-oid")
+	ctx = common.WithProgress(ctx, func(ev common.ProgressEvent) error {
+		events = append(events, ev)
+		return nil
+	})
+
+	if err := d.Download(ctx, "guid-single", dst, 2, 1*common.MB, 5*common.GB); err != nil {
+		t.Fatalf("Download returned error: %v", err)
+	}
+	if len(events) < 2 {
+		t.Fatalf("expected incremental progress events, got %+v", events)
+	}
+	last := events[len(events)-1]
+	if last.BytesSoFar != int64(len(content)) || last.Oid != "single-download-oid" {
+		t.Fatalf("unexpected final progress event: %+v", last)
+	}
 }
