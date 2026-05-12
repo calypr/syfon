@@ -25,60 +25,7 @@ graph LR
 - **Multipart upload and download** — explicit `init → part → complete` lifecycle with resumable semantics for very large files
 - **Flexible auth** — `local` mode for development (optional HTTP basic auth), `gen3` mode for production Gen3/Fence/Arborist integration
 - **Database flexibility** — SQLite for local/dev, PostgreSQL for production
-- **Credential encryption at rest** — envelope encryption (AES-GCM) with local KEK or AWS KMS
-
-## Quickstart
-
-### Prerequisites
-
-- Go 1.24+
-- SQLite3 (`sqlite3`)
-- Git
-
-### 1. Clone the repo
-
-```bash
-git clone <your-repo-url>
-cd syfon
-```
-
-### 2. Run tests
-
-```bash
-make test-unit
-```
-
-### 3. Create a local config
-
-```yaml title="config.local.yaml"
-port: 8080
-auth:
-  mode: local
-  basic:
-    username: "drs-user"
-    password: "drs-pass"
-database:
-  sqlite:
-    file: "drs_local.db"
-s3_credentials:
-  - bucket: "my-bucket"
-    region: "us-east-1"
-    access_key: "minio-user"
-    secret_key: "minio-pass"
-    endpoint: "http://localhost:9000"
-```
-
-### 4. Start the server
-
-```bash
-go run . serve --config config.local.yaml
-```
-
-### 5. Smoke test
-
-```bash
-curl -s http://localhost:8080/healthz
-```
+- **Credential encryption at rest** — envelope encryption (AES-GCM) with a local server-side KEK
 
 ## Useful Endpoints
 
@@ -111,8 +58,9 @@ syfon/
 
 ## Next Steps
 
-- [Configuration](configuration.md) — full config file reference and environment variable overrides
-- [Local Authz CSV](local-authz-csv.md) — multi-user local Basic Auth with Gen3-style method checks
-- [Deployment](deployment.md) — Docker, Kubernetes, and production guidance
+- [Quick Start](quickstart.md) — first local run and smoke test
+- [Local Deployment](local-deployment.md) — SQLite plus `auth.mode: local` for development
+- [Kubernetes Deployment](kubernetes-deployment.md) — Helm-chart deployment with Gen3 and PostgreSQL
+- [Server Configuration](configuration.md) — raw Syfon config schema and field reference
 - [Encryption](encryption.md) — credential encryption at rest
 - [Troubleshooting](troubleshooting.md) — common issues and fixes

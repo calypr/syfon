@@ -103,6 +103,9 @@ func TestDoUploadHTTPModesAndErrors(t *testing.T) {
 		if req.builder.PartSize != 7 {
 			t.Fatalf("expected part size 7, got %d", req.builder.PartSize)
 		}
+		if !req.builder.NoRetry {
+			t.Fatal("expected uploads to bypass retryablehttp retries")
+		}
 	})
 
 	t.Run("gcs media upload uses post", func(t *testing.T) {
@@ -113,6 +116,9 @@ func TestDoUploadHTTPModesAndErrors(t *testing.T) {
 		}
 		if req.method != http.MethodPost {
 			t.Fatalf("expected POST for gcs media upload, got %s", req.method)
+		}
+		if !req.builder.NoRetry {
+			t.Fatal("expected uploads to bypass retryablehttp retries")
 		}
 		if _, ok := req.builder.Headers["x-ms-blob-type"]; ok {
 			t.Fatalf("did not expect azure header in gcs mode, got %+v", req.builder.Headers)

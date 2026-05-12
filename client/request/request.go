@@ -78,6 +78,12 @@ func WithSkipAuth(skip bool) RequestOption {
 	}
 }
 
+func WithNoRetry(noRetry bool) RequestOption {
+	return func(rb *RequestBuilder) {
+		rb.WithNoRetry(noRetry)
+	}
+}
+
 func WithPartSize(size int64) RequestOption {
 	return func(rb *RequestBuilder) {
 		rb.PartSize = size
@@ -243,6 +249,17 @@ func (r *Request) Do(ctx context.Context, method, path string, body, out any, op
 		httpReq.ContentLength = rb.PartSize
 	}
 
+	if rb.NoRetry {
+		resp, err := r.RetryClient.HTTPClient.Do(httpReq)
+		if err != nil {
+			if resp != nil {
+				resp.Body.Close()
+			}
+			return errors.New("request failed: " + err.Error())
+		}
+		return r.handleResponse(method, resp, out)
+	}
+
 	retryReq, err := retryablehttp.FromRequest(httpReq)
 	if err != nil {
 		return err
@@ -256,6 +273,10 @@ func (r *Request) Do(ctx context.Context, method, path string, body, out any, op
 		return errors.New("request failed after retries: " + err.Error())
 	}
 
+	return r.handleResponse(method, resp, out)
+}
+
+func (r *Request) handleResponse(method string, resp *http.Response, out any) error {
 	// Polymorphic Response Handling
 	switch v := out.(type) {
 	case **http.Response:

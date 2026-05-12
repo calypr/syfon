@@ -1,6 +1,8 @@
 # Credential Encryption
 
-This document describes how Syfon currently encrypts bucket credentials (`access_key`, `secret_key`) at rest.
+This document describes the supported operator-facing credential encryption model for Syfon.
+
+Syfon encrypts persisted bucket credentials such as `access_key` and `secret_key` at rest.
 
 ## Design
 
@@ -19,20 +21,11 @@ Syfon uses envelope encryption (`enc:v2`):
 
 Legacy `enc:v1` values are still readable for backward compatibility.
 
-## Key Managers
+## Supported Mode
 
-Syfon supports:
+For operator docs, the supported mode is the local KEK flow. Syfon keeps a server-side key-encryption key and uses it to wrap the per-secret data keys used for stored bucket credentials.
 
-- `local` (default)
-- `aws-kms`
-
-Selection rules:
-
-- If `DRS_CREDENTIAL_KEY_MANAGER` is set, that manager is used.
-- Else if `DRS_CREDENTIAL_KMS_KEY_ID` is set, `aws-kms` is used.
-- Else `local` is used.
-
-## Local Mode (Default)
+## Local KEK Mode
 
 In local mode, Syfon uses a server-managed local KEK file.
 
@@ -40,7 +33,7 @@ Key file path resolution:
 
 - `DRS_CREDENTIAL_LOCAL_KEY_FILE` if set
 - else `dirname(DRS_DB_SQLITE_FILE)/.syfon-credential-kek` if `DRS_DB_SQLITE_FILE` is set
-- else `/tmp/.syfon-credential-kek`
+- else `/app/.syfon-credential-kek`
 
 Behavior:
 
@@ -50,19 +43,14 @@ Behavior:
 Optional override:
 
 - `DRS_CREDENTIAL_MASTER_KEY` can explicitly set the local KEK.
-
-## AWS KMS Mode
-
-Required:
-
-- `DRS_CREDENTIAL_KMS_KEY_ID`
-- IAM permissions for `kms:Encrypt` and `kms:Decrypt`
-- AWS credentials/role and region (`AWS_REGION` or `AWS_DEFAULT_REGION`)
-
-When enabled, DEKs are wrapped/unwrapped through AWS KMS.
+- Accepted formats:
+  - a 32-character raw string
+  - a 64-character hex string
+  - a base64-encoded 32-byte key
 
 ## Operational Notes
 
 - Clients do not need to provide encryption keys.
 - Changing HTTP basic-auth credentials does not change the local KEK when using the default local key-file behavior.
 - Keep the local KEK file persisted with your DB volume in local deployments.
+- If you lose the KEK that was used to encrypt stored bucket credentials, Syfon will no longer be able to decrypt those credentials.

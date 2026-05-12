@@ -3,6 +3,7 @@ package request
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -81,5 +82,63 @@ func TestRequestDo_BasicAuthAndPartSize(t *testing.T) {
 	payload := strings.NewReader("hello")
 	if err := req.Do(context.Background(), http.MethodPut, "/upload", payload, nil, WithPartSize(5)); err != nil {
 		t.Fatalf("Do returned error: %v", err)
+	}
+}
+
+type countingReader struct {
+	data  string
+	read  bool
+	calls int
+}
+
+func (r *countingReader) Read(p []byte) (int, error) {
+	r.calls++
+	if r.read {
+		return 0, io.EOF
+	}
+	r.read = true
+	return copy(p, r.data), io.EOF
+}
+
+func TestRequestDo_WithNoRetryDoesNotPrebufferBody(t *testing.T) {
+	t.Parallel()
+
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	baseClient := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Status:     "200 OK",
+			Body:       io.NopCloser(strings.NewReader("{}")),
+			Header:     make(http.Header),
+			Request:    r,
+		}, nil
+	})}
+	req := NewBasicAuthRequestor(logs.NewGen3Logger(logger, "", ""), nil, &mockConfigManager{}, "https://example.test", "ua", baseClient)
+
+	reader := &countingReader{data: "payload"}
+	if err := req.Do(context.Background(), http.MethodPut, "/upload", reader, nil, WithPartSize(7), WithNoRetry(true)); err != nil {
+		t.Fatalf("Do returned error: %v", err)
+	}
+	if reader.calls != 0 {
+		t.Fatalf("expected no prebuffer read before transport, got %d reads", reader.calls)
+	}
+}
+
+func TestRequestDo_DefaultRetryPathPrebuffersGenericReader(t *testing.T) {
+	t.Parallel()
+
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	baseClient := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return nil, errors.New("stop after request construction")
+	})}
+	req := NewBasicAuthRequestor(logs.NewGen3Logger(logger, "", ""), nil, &mockConfigManager{}, "https://example.test", "ua", baseClient)
+
+	reader := &countingReader{data: "payload"}
+	err := req.Do(context.Background(), http.MethodPut, "/upload", reader, nil, WithPartSize(7))
+	if err == nil {
+		t.Fatal("expected request failure")
+	}
+	if reader.calls == 0 {
+		t.Fatal("expected default retry path to prebuffer generic reader")
 	}
 }

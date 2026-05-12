@@ -370,6 +370,9 @@ func (d *DataService) MultipartPart(ctx context.Context, guid string, uploadID s
 	if err != nil {
 		return "", err
 	}
+	if sized, ok := body.(interface{ Size() int64 }); ok {
+		return d.UploadPart(ctx, url, body, sized.Size())
+	}
 	data, err := io.ReadAll(body)
 	if err != nil {
 		return "", err
