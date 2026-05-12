@@ -19,6 +19,11 @@ import (
 	"github.com/hashicorp/go-retryablehttp"
 )
 
+var (
+	defaultRetryWaitMin = 5 * time.Second
+	defaultRetryWaitMax = 15 * time.Second
+)
+
 type Request struct {
 	Logs        *logs.Gen3Logger
 	RetryClient *retryablehttp.Client
@@ -131,8 +136,8 @@ func newRequestor(
 	retryClient := retryablehttp.NewClient()
 	retryClient.RetryMax = 5
 	retryClient.Logger = logger
-	retryClient.RetryWaitMin = 5 * time.Second
-	retryClient.RetryWaitMax = 15 * time.Second
+	retryClient.RetryWaitMin = defaultRetryWaitMin
+	retryClient.RetryWaitMax = defaultRetryWaitMax
 
 	var baseTransport http.RoundTripper
 	if baseHTTPClient != nil && baseHTTPClient.Transport != nil {

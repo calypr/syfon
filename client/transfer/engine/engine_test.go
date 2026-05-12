@@ -19,6 +19,10 @@ import (
 	"github.com/calypr/syfon/client/transfer"
 )
 
+type zeroRetryStrategy struct{}
+
+func (zeroRetryStrategy) WaitTime(int) time.Duration { return 0 }
+
 type fakeBackend struct {
 	mu                 sync.Mutex
 	meta               *transfer.ObjectMetadata
@@ -586,7 +590,7 @@ func TestGenericDownloaderDownloadSingleVariants(t *testing.T) {
 
 	t.Run("resume range download", func(t *testing.T) {
 		backend := &fakeBackend{data: []byte("hello world"), meta: &transfer.ObjectMetadata{Size: 11}}
-		d := &GenericDownloader{Source: backend}
+		d := &GenericDownloader{Source: backend, RetryStrategy: zeroRetryStrategy{}}
 		dst := filepath.Join(t.TempDir(), "resume.bin")
 		if err := os.WriteFile(dst, []byte("hello "), 0o644); err != nil {
 			t.Fatalf("WriteFile returned error: %v", err)

@@ -15,6 +15,17 @@ import (
 	"github.com/calypr/syfon/client/logs"
 )
 
+func TestMain(m *testing.M) {
+	oldMin := defaultRetryWaitMin
+	oldMax := defaultRetryWaitMax
+	defaultRetryWaitMin = 0
+	defaultRetryWaitMax = 0
+	code := m.Run()
+	defaultRetryWaitMin = oldMin
+	defaultRetryWaitMax = oldMax
+	os.Exit(code)
+}
+
 func TestResponseErrorErrorString(t *testing.T) {
 	t.Parallel()
 

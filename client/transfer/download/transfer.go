@@ -13,6 +13,7 @@ type DownloadOptions struct {
 	MultipartThreshold int64
 	ChunkSize          int64
 	Concurrency        int
+	RetryStrategy      transfer.RetryStrategy
 }
 
 // DownloadToPath downloads a single object using the generic EngineDownloader.
@@ -37,7 +38,7 @@ func DownloadToPathWithOptions(
 	dstPath string,
 	opts DownloadOptions,
 ) error {
-	downloader := &engine.GenericDownloader{Source: bk}
+	downloader := &engine.GenericDownloader{Source: bk, RetryStrategy: opts.RetryStrategy}
 	return downloader.Download(ctx, guid, dstPath, opts.Concurrency, opts.ChunkSize, opts.MultipartThreshold)
 }
 

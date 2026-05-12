@@ -15,7 +15,8 @@ import (
 )
 
 type GenericDownloader struct {
-	Source transfer.ReadBackend
+	Source        transfer.ReadBackend
+	RetryStrategy transfer.RetryStrategy
 }
 
 func (d *GenericDownloader) Download(ctx context.Context, guid string, dstPath string, concurrency int, chunkSize, multipartThreshold int64) error {
@@ -118,6 +119,8 @@ type downloadProgressReader struct {
 	bytesSoFar        int64
 	bytesSinceReport  int64
 	lastReportedSoFar int64
+	localBytes        int64
+	localReported     int64
 	globalBytes       *atomic.Int64
 }
 
@@ -136,6 +139,7 @@ func (r *downloadProgressReader) Read(p []byte) (int, error) {
 	n, err := r.reader.Read(p)
 	if n > 0 && r.onProgress != nil {
 		delta := int64(n)
+		r.localBytes += delta
 		if r.globalBytes != nil {
 			r.bytesSoFar = r.globalBytes.Add(delta)
 		} else {
@@ -164,18 +168,24 @@ func (r *downloadProgressReader) emit() error {
 		return nil
 	}
 	delta := r.bytesSoFar - r.lastReportedSoFar
+	displaySoFar := r.bytesSoFar
+	if r.globalBytes != nil {
+		delta = r.localBytes - r.localReported
+		displaySoFar = r.globalBytes.Load()
+	}
 	if delta <= 0 {
 		return nil
 	}
 	if err := r.onProgress(common.ProgressEvent{
 		Event:          "progress",
 		Oid:            r.oid,
-		BytesSoFar:     r.bytesSoFar,
+		BytesSoFar:     displaySoFar,
 		BytesSinceLast: delta,
 	}); err != nil {
 		return err
 	}
 	r.lastReportedSoFar = r.bytesSoFar
+	r.localReported = r.localBytes
 	r.bytesSinceReport = 0
 	return nil
 }
@@ -228,7 +238,10 @@ func (d *GenericDownloader) downloadParallel(ctx context.Context, guid string, d
 		partLength := partSize
 
 		g.Go(func() error {
-			strategy := transfer.DefaultBackoff()
+			strategy := d.RetryStrategy
+			if strategy == nil {
+				strategy = transfer.DefaultBackoff()
+			}
 			return transfer.RetryAction(gctx, d.Source.Logger(), strategy, common.MaxRetryCount, func() error {
 				partBody, err := d.Source.GetRangeReader(gctx, guid, partStart, partLength)
 				if err != nil {
