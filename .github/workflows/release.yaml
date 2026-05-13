@@ -1,5 +1,6 @@
 # Cuts a GitHub release when the root binary or one of the sibling Go modules
-# materially changes on development, and also on manual semver/rc tag pushes.
+# materially changes after a branch is merged into development, and also on
+# manual semver/rc tag pushes. Direct commits to development do not auto-release.
 # For development-triggered releases, tags the merged commit first, then commits
 # go.mod cleanup back to development after the GitHub Release is created.
 
@@ -63,6 +64,7 @@ jobs:
           HEAD_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
           EVENT_NAME: ${{ github.event_name }}
           REF_NAME: ${{ github.ref_name }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
 
@@ -79,6 +81,23 @@ jobs:
             echo "Using existing root tag: $REF_NAME"
             exit 0
           fi
+
+          merged_pr_number="$(gh api \
+            -H 'Accept: application/vnd.github+json' \
+            "/repos/${GITHUB_REPOSITORY}/commits/${HEAD_SHA}/pulls" \
+            --jq '.[] | select(.base.ref == "development" and .merged_at != null) | .number' \
+            | head -n1 || true)"
+          if [[ -z "$merged_pr_number" ]]; then
+            {
+              echo "root_tag="
+              echo "apigen_tag="
+              echo "client_tag="
+              echo "sha=$HEAD_SHA"
+            } >> "$GITHUB_OUTPUT"
+            echo "Commit $HEAD_SHA is not associated with a merged PR into development; skipping auto release."
+            exit 0
+          fi
+          echo "Preparing auto release for merged PR #${merged_pr_number} at ${HEAD_SHA}"
 
           latest_tag_for() {
             local pattern="$1"

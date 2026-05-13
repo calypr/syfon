@@ -215,7 +215,7 @@ func handleInternalUploadURLFiber(om *core.ObjectManager) fiber.Handler {
 			if err != nil {
 				return apiutil.HandleError(c, err)
 			}
-			signedURL, err := signUploadURLForObject(c.Context(), om, obj, target.URL)
+			signedURL, err := om.SignURL(c.Context(), target.URL, urlmanager.SignOptions{Method: http.MethodPut})
 			if err != nil {
 				return apiutil.HandleError(c, err)
 			}
@@ -239,7 +239,7 @@ func handleInternalUploadURLFiber(om *core.ObjectManager) fiber.Handler {
 		}
 
 		urlStr := common.BucketToURL(bucket, key)
-		signedURL, err := signUploadURLForObject(c.Context(), om, obj, urlStr)
+		signedURL, err := om.SignURL(c.Context(), urlStr, urlmanager.SignOptions{Method: http.MethodPut})
 		if err != nil {
 			return apiutil.HandleError(c, err)
 		}
@@ -337,7 +337,7 @@ func handleInternalUploadBulkFiber(om *core.ObjectManager) fiber.Handler {
 			if key == "" {
 				key = obj.Id
 			}
-			signedURL, err := signUploadURLForObject(c.Context(), om, obj, target.URL)
+			signedURL, err := om.SignURL(c.Context(), target.URL, urlmanager.SignOptions{Method: http.MethodPut})
 			if err != nil {
 				errMsg := err.Error()
 				res.Error = &errMsg
@@ -367,14 +367,6 @@ func handleInternalUploadBulkFiber(om *core.ObjectManager) fiber.Handler {
 		}
 		return c.Status(status).JSON(internalapi.InternalUploadBulkOutput{Results: &results})
 	}
-}
-
-func signUploadURLForObject(ctx context.Context, om *core.ObjectManager, obj *models.InternalObject, urlStr string) (string, error) {
-	opts := urlmanager.SignOptions{Method: http.MethodPut}
-	if obj == nil {
-		return om.SignURL(ctx, urlStr, opts)
-	}
-	return om.SignObjectURL(ctx, obj, urlStr, opts)
 }
 
 func handleInternalMultipartInitFiber(om *core.ObjectManager) fiber.Handler {

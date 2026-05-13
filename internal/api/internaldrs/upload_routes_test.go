@@ -679,6 +679,55 @@ func TestHandleInternalUploadURL_ExplicitScopeOverridesMalformedExistingObjectUR
 	}
 }
 
+func TestHandleInternalUploadURL_ExplicitScopeIgnoresConflictingObjectMetadata(t *testing.T) {
+	const checksum = "45be10b3fe5163b6f11155fb46027878d23e3dc99d525d7079180b9dd9b832e9"
+	db := &testutils.MockDatabase{
+		Objects: map[string]*drs.DrsObject{
+			"4f74e0c2-3c80-5c19-b47c-061b300ae270": {
+				Id:               "4f74e0c2-3c80-5c19-b47c-061b300ae270",
+				ControlledAccess: &[]string{"/organization/other/project/wrong"},
+				Checksums: []drs.Checksum{{
+					Type:     "sha256",
+					Checksum: checksum,
+				}},
+				AccessMethods: &[]drs.AccessMethod{{
+					Type: drs.AccessMethodTypeS3,
+					AccessUrl: &struct {
+						Headers *[]string `json:"headers,omitempty"`
+						Url     string    `json:"url"`
+					}{Url: "s3://objects/4f74e0c2-3c80-5c19-b47c-061b300ae270"},
+				}},
+			},
+		},
+		Credentials: map[string]models.S3Credential{
+			"syfon-e2e-bucket": {Bucket: "syfon-e2e-bucket", Provider: "s3", Region: "us-west-2"},
+		},
+		BucketScopes: map[string]models.BucketScope{
+			"syfon|e2e": {
+				Organization: "syfon",
+				ProjectID:    "e2e",
+				Bucket:       "syfon-e2e-bucket",
+			},
+		},
+	}
+	mockUM := &capturingMultipartURLManager{}
+	req := routeutil.WithPathParams(
+		httptest.NewRequest(http.MethodGet, "/data/upload/4f74e0c2-3c80-5c19-b47c-061b300ae270?organization=syfon&project=e2e&file_name="+checksum, nil),
+		map[string]string{"file_id": "4f74e0c2-3c80-5c19-b47c-061b300ae270"},
+	)
+	rr := doInternalDRSTestRequest(req, core.NewObjectManager(db, mockUM))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	wantURL := "s3://syfon-e2e-bucket/" + checksum
+	if mockUM.signURL != wantURL {
+		t.Fatalf("expected explicit scoped upload URL %q, got %q", wantURL, mockUM.signURL)
+	}
+	if mockUM.signID != "syfon-e2e-bucket" {
+		t.Fatalf("expected signer credential bucket syfon-e2e-bucket, got %q", mockUM.signID)
+	}
+}
+
 func TestHandleInternalUploadURL_RejectsMalformedUnscopedObjectURL(t *testing.T) {
 	const checksum = "412f8568bfb0e62937ee40c6fcdeaa1cf55910c558c0152250340356c8829a47"
 	db := &testutils.MockDatabase{
