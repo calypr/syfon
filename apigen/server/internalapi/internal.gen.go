@@ -58,6 +58,12 @@ type DeleteByQueryResponse struct {
 // HashInfo Hash map, e.g. {"sha256":"..."}
 type HashInfo map[string]string
 
+// IndexDirectory defines model for IndexDirectory.
+type IndexDirectory struct {
+	Name string `json:"name"`
+	Path string `json:"path"`
+}
+
 // InternalMultipartCompleteRequest defines model for InternalMultipartCompleteRequest.
 type InternalMultipartCompleteRequest struct {
 	Bucket   *string                 `json:"bucket,omitempty"`
@@ -192,12 +198,6 @@ type InternalUploadBulkResult struct {
 type ListRecordsResponse struct {
 	Directories *[]IndexDirectory `json:"directories,omitempty"`
 	Records     *[]InternalRecord `json:"records,omitempty"`
-}
-
-// IndexDirectory defines model for IndexDirectory.
-type IndexDirectory struct {
-	Name string `json:"name"`
-	Path string `json:"path"`
 }
 
 // InternalDownloadParams defines parameters for InternalDownload.
@@ -712,7 +712,7 @@ func (siw *ServerInterfaceWrapper) InternalList(c fiber.Ctx) error {
 
 	}
 	// ------------- Optional query parameter "path" -------------
-	if paramValue := c.Query("path"); paramValue != "" || c.Request().URI().QueryArgs().Has("path") {
+	if paramValue := c.Query("path"); paramValue != "" {
 
 		var value string
 		err = runtime.BindStyledParameterWithOptions("form", "path", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})

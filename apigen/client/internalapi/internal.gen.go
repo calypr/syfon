@@ -60,6 +60,12 @@ type DeleteByQueryResponse struct {
 // HashInfo Hash map, e.g. {"sha256":"..."}
 type HashInfo map[string]string
 
+// IndexDirectory defines model for IndexDirectory.
+type IndexDirectory struct {
+	Name string `json:"name"`
+	Path string `json:"path"`
+}
+
 // InternalMultipartCompleteRequest defines model for InternalMultipartCompleteRequest.
 type InternalMultipartCompleteRequest struct {
 	Bucket   *string                 `json:"bucket,omitempty"`
@@ -194,12 +200,6 @@ type InternalUploadBulkResult struct {
 type ListRecordsResponse struct {
 	Directories *[]IndexDirectory `json:"directories,omitempty"`
 	Records     *[]InternalRecord `json:"records,omitempty"`
-}
-
-// IndexDirectory defines model for IndexDirectory.
-type IndexDirectory struct {
-	Name string `json:"name"`
-	Path string `json:"path"`
 }
 
 // InternalDownloadParams defines parameters for InternalDownload.
