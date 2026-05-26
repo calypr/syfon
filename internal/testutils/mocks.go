@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -148,6 +149,90 @@ func (m *MockDatabase) ListObjectIDsByScope(ctx context.Context, organization, p
 		}
 	}
 	return ids, nil
+}
+
+func (m *MockDatabase) ListObjectIDsPageByPath(ctx context.Context, organization, project, path, startAfter string, limit, offset int) ([]string, []models.BrowseDirectory, error) {
+	normalizedPath, pathSegments, err := common.NormalizeBrowsePath(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	ids := make([]string, 0)
+	directoriesByPath := make(map[string]models.BrowseDirectory)
+	for id, obj := range m.Objects {
+		authz := map[string][]string{}
+		if m.ObjectAuthz != nil {
+			if v, ok := m.ObjectAuthz[id]; ok {
+				authz = v
+			}
+		}
+		projects, ok := authz[organization]
+		if !ok {
+			continue
+		}
+		matchesProject := false
+		for _, candidateProject := range projects {
+			if candidateProject == project {
+				matchesProject = true
+				break
+			}
+		}
+		if !matchesProject {
+			continue
+		}
+		if obj.Name == nil {
+			continue
+		}
+		info, ok, err := common.BrowsePathInfoFromName(*obj.Name)
+		if err != nil || !ok {
+			continue
+		}
+		if !common.HasBrowsePathPrefix(info.Segments, pathSegments) {
+			continue
+		}
+		remaining := info.Segments[len(pathSegments):]
+		if len(remaining) == 0 {
+			continue
+		}
+		if len(remaining) == 1 {
+			if info.ParentPath == normalizedPath {
+				ids = append(ids, id)
+			}
+			continue
+		}
+		dirInfo, ok := common.ImmediateBrowseDirectory(normalizedPath, info.Normalized)
+		if !ok {
+			continue
+		}
+		directoriesByPath[dirInfo.Normalized] = models.BrowseDirectory{Name: dirInfo.EntryName, Path: dirInfo.Normalized}
+	}
+	sort.Strings(ids)
+	if startAfter != "" {
+		offset = sort.SearchStrings(ids, startAfter)
+		for offset < len(ids) && ids[offset] <= startAfter {
+			offset++
+		}
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	if offset > len(ids) {
+		offset = len(ids)
+	}
+	end := offset + limit
+	if end > len(ids) {
+		end = len(ids)
+	}
+	directories := make([]models.BrowseDirectory, 0, len(directoriesByPath))
+	for _, directory := range directoriesByPath {
+		directories = append(directories, directory)
+	}
+	sort.Slice(directories, func(i, j int) bool {
+		if directories[i].Name == directories[j].Name {
+			return directories[i].Path < directories[j].Path
+		}
+		return directories[i].Name < directories[j].Name
+	})
+	return ids[offset:end], directories, nil
 }
 
 func (m *MockDatabase) ListObjectIDsByResources(ctx context.Context, resources []string, includeUnscoped bool) ([]string, error) {

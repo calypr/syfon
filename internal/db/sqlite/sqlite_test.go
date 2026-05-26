@@ -1719,3 +1719,54 @@ func TestSqliteDB_GetPendingLFSMeta(t *testing.T) {
 		t.Fatalf("expected ErrNotFound for missing pending metadata, got: %v", err)
 	}
 }
+
+func TestSqliteDB_ListObjectIDsPageByPath(t *testing.T) {
+	ctx := context.Background()
+	db, err := NewSqliteDB(":memory:")
+	if err != nil {
+		t.Fatalf("failed to create db: %v", err)
+	}
+
+	now := time.Now().UTC()
+	for _, obj := range []models.InternalObject{
+		{
+			DrsObject: drs.DrsObject{
+				Id:          "obj-a",
+				Name:        common.Ptr("nested/a.txt"),
+				CreatedTime: now,
+			},
+			Authorizations: map[string][]string{"org": {"proj"}},
+		},
+		{
+			DrsObject: drs.DrsObject{
+				Id:          "obj-b",
+				Name:        common.Ptr("nested/deep/b.txt"),
+				CreatedTime: now,
+			},
+			Authorizations: map[string][]string{"org": {"proj"}},
+		},
+		{
+			DrsObject: drs.DrsObject{
+				Id:          "obj-c",
+				Name:        common.Ptr("nested/z.txt"),
+				CreatedTime: now,
+			},
+			Authorizations: map[string][]string{"org": {"proj"}},
+		},
+	} {
+		if err := db.CreateObject(ctx, &obj); err != nil {
+			t.Fatalf("CreateObject failed: %v", err)
+		}
+	}
+
+	ids, directories, err := db.ListObjectIDsPageByPath(ctx, "org", "proj", "nested", "obj-a", 10, 0)
+	if err != nil {
+		t.Fatalf("ListObjectIDsPageByPath failed: %v", err)
+	}
+	if !slices.Equal(ids, []string{"obj-c"}) {
+		t.Fatalf("unexpected IDs: %v", ids)
+	}
+	if len(directories) != 1 || directories[0].Path != "nested/deep" {
+		t.Fatalf("unexpected directories: %+v", directories)
+	}
+}

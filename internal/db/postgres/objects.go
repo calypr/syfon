@@ -232,6 +232,9 @@ func (db *PostgresDB) CreateObject(ctx context.Context, obj *models.InternalObje
 	if err := insertControlledAccessTx(ctx, tx, obj.Id, objectAccessResources(obj)); err != nil {
 		return err
 	}
+	if err := postgresRebuildBrowseRowsForObjectTx(ctx, tx, obj.Id, common.StringVal(obj.Name), objectAccessResources(obj)); err != nil {
+		return fmt.Errorf("failed to update browse index: %w", err)
+	}
 
 	// Insert storage access methods.
 	if obj.AccessMethods != nil {
@@ -288,6 +291,7 @@ func (db *PostgresDB) RegisterObjects(ctx context.Context, objects []models.Inte
 	accessTypes := make([]string, 0)
 	controlledObjectIDs := make([]string, 0)
 	controlledResources := make([]string, 0)
+	browseRows := make([]browseIndexRow, 0)
 
 	checksumObjectIDs := make([]string, 0)
 	checksumTypes := make([]string, 0)
@@ -307,6 +311,7 @@ func (db *PostgresDB) RegisterObjects(ctx context.Context, objects []models.Inte
 			controlledObjectIDs = append(controlledObjectIDs, obj.Id)
 			controlledResources = append(controlledResources, resource)
 		}
+		browseRows = append(browseRows, postgresBrowseRowsForObject(obj.Id, common.StringVal(obj.Name), objectAccessResources(&obj))...)
 		if obj.AccessMethods != nil {
 			for _, am := range *obj.AccessMethods {
 				if am.AccessUrl == nil || am.AccessUrl.Url == "" {
@@ -361,6 +366,9 @@ func (db *PostgresDB) RegisterObjects(ctx context.Context, objects []models.Inte
 	if _, err := tx.ExecContext(ctx, `DELETE FROM drs_object_checksum WHERE object_id = ANY($1)`, pq.Array(ids)); err != nil {
 		return fmt.Errorf("failed bulk clear checksums: %w", err)
 	}
+	if err := postgresDeleteBrowseRowsByIDsTx(ctx, tx, ids); err != nil {
+		return fmt.Errorf("failed bulk clear browse index: %w", err)
+	}
 
 	if len(accessObjectIDs) > 0 {
 		if _, err := tx.ExecContext(ctx, `
@@ -389,6 +397,9 @@ func (db *PostgresDB) RegisterObjects(ctx context.Context, objects []models.Inte
 		); err != nil {
 			return fmt.Errorf("failed bulk insert checksums: %w", err)
 		}
+	}
+	if err := postgresInsertBrowseRowsTx(ctx, tx, browseRows); err != nil {
+		return fmt.Errorf("failed bulk insert browse index: %w", err)
 	}
 
 	if err := db.flushObjectUsageEventsForIDsTx(ctx, tx, ids); err != nil {
@@ -1294,6 +1305,9 @@ func (db *PostgresDB) RemoveObjectControlledAccess(ctx context.Context, objectID
 	if _, err := tx.ExecContext(ctx, `DELETE FROM drs_object_controlled_access WHERE object_id = $1 AND resource = $2`, objectID, resource); err != nil {
 		return err
 	}
+	if err := postgresDeleteBrowseRowTx(ctx, tx, objectID, resource); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
@@ -1369,6 +1383,7 @@ func (db *PostgresDB) attachControlledAccess(ctx context.Context, objectsByID ma
 	for id := range objectsByID {
 		ids = append(ids, id)
 	}
+	sort.Strings(ids)
 	rows, err := db.db.QueryContext(ctx, `
 		SELECT object_id, resource
 		FROM drs_object_controlled_access

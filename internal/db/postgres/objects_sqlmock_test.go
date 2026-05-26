@@ -277,6 +277,36 @@ func TestGetBulkObjects_UsesSplitHydrationQueries(t *testing.T) {
 	}
 }
 
+func TestListObjectIDsPageByPath(t *testing.T) {
+	pg, mock, rawDB := newMockPostgresDB(t)
+	defer rawDB.Close()
+
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT object_id
+		FROM drs_object_browse_index
+		WHERE resource = $1 AND parent_path = $2 AND object_id > $3 ORDER BY object_id LIMIT $4 OFFSET $5`)).
+		WithArgs("/organization/org/project/proj", "nested", "obj-a", 10, 0).
+		WillReturnRows(sqlmock.NewRows([]string{"object_id"}).AddRow("obj-c"))
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT normalized_path FROM drs_object_browse_index WHERE resource = $1 AND normalized_path LIKE $2 AND parent_path <> $3 ORDER BY normalized_path`)).
+		WithArgs("/organization/org/project/proj", "nested/%", "nested").
+		WillReturnRows(sqlmock.NewRows([]string{"normalized_path"}).AddRow("nested/deep/b.txt"))
+
+	ids, directories, err := pg.ListObjectIDsPageByPath(context.Background(), "org", "proj", "nested", "obj-a", 10, 0)
+	if err != nil {
+		t.Fatalf("ListObjectIDsPageByPath returned error: %v", err)
+	}
+	if !slices.Equal(ids, []string{"obj-c"}) {
+		t.Fatalf("unexpected IDs: %v", ids)
+	}
+	if len(directories) != 1 || directories[0].Path != "nested/deep" {
+		t.Fatalf("unexpected directories: %+v", directories)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
 func TestListObjectIDsByScopeOrgIncludesProjectScopes(t *testing.T) {
 	pg, mock, rawDB := newMockPostgresDB(t)
 	defer rawDB.Close()

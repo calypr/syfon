@@ -60,6 +60,11 @@ type BucketVisibilityRow struct {
 	Resource   string
 }
 
+type BrowseDirectory struct {
+	Name string
+	Path string
+}
+
 const (
 	TransferEventAccessIssued = "access_issued"
 

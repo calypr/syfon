@@ -234,6 +234,9 @@ func (db *SqliteDB) CreateObject(ctx context.Context, obj *models.InternalObject
 	if err := insertControlledAccessTx(ctx, tx, obj.Id, objectAccessResources(obj)); err != nil {
 		return err
 	}
+	if err := sqliteRebuildBrowseRowsForObjectTx(ctx, tx, obj.Id, common.StringVal(obj.Name), objectAccessResources(obj)); err != nil {
+		return fmt.Errorf("failed to update browse index: %w", err)
+	}
 
 	// Insert storage access methods.
 	if obj.AccessMethods != nil {
@@ -287,6 +290,7 @@ func (db *SqliteDB) RegisterObjects(ctx context.Context, objects []models.Intern
 	accessArgs := make([]interface{}, 0)
 	controlledArgs := make([]interface{}, 0)
 	checksumArgs := make([]interface{}, 0)
+	browseRows := make([]browseIndexRow, 0)
 
 	for _, obj := range objects {
 		ids = append(ids, obj.Id)
@@ -296,6 +300,7 @@ func (db *SqliteDB) RegisterObjects(ctx context.Context, objects []models.Intern
 		for _, resource := range objectAccessResources(&obj) {
 			controlledArgs = append(controlledArgs, obj.Id, resource)
 		}
+		browseRows = append(browseRows, sqliteBrowseRowsForObject(obj.Id, common.StringVal(obj.Name), objectAccessResources(&obj))...)
 		if obj.AccessMethods != nil {
 			for _, am := range *obj.AccessMethods {
 				if am.AccessUrl == nil || am.AccessUrl.Url == "" {
@@ -342,6 +347,9 @@ func (db *SqliteDB) RegisterObjects(ctx context.Context, objects []models.Intern
 	if err := execSQLiteDeleteByIDs(tx, "drs_object_checksum", ids); err != nil {
 		return fmt.Errorf("failed bulk clear checksums: %w", err)
 	}
+	if err := sqliteDeleteBrowseRowsByIDsTx(tx, ids); err != nil {
+		return fmt.Errorf("failed bulk clear browse index: %w", err)
+	}
 
 	if len(accessArgs) > 0 {
 		if err := execSQLiteBulkInsert(
@@ -378,6 +386,9 @@ func (db *SqliteDB) RegisterObjects(ctx context.Context, objects []models.Intern
 		); err != nil {
 			return fmt.Errorf("failed bulk insert checksums: %w", err)
 		}
+	}
+	if err := sqliteInsertBrowseRowsTx(tx, browseRows); err != nil {
+		return fmt.Errorf("failed bulk insert browse index: %w", err)
 	}
 	if err := db.flushObjectUsageEventsForIDsTx(ctx, tx, ids); err != nil {
 		return fmt.Errorf("failed to apply object usage events: %w", err)
@@ -1404,6 +1415,9 @@ func (db *SqliteDB) RemoveObjectControlledAccess(ctx context.Context, objectID, 
 	}
 
 	if _, err := tx.ExecContext(ctx, `DELETE FROM drs_object_controlled_access WHERE object_id = ? AND resource = ?`, objectID, resource); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM drs_object_browse_index WHERE object_id = ? AND resource = ?`, objectID, resource); err != nil {
 		return err
 	}
 	return tx.Commit()
