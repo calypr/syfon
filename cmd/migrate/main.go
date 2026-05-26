@@ -4,9 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -45,6 +43,9 @@ var exportCmd = &cobra.Command{
 		sourceURL, err := indexdURLFromServer(cmd)
 		if err != nil {
 			return err
+		}
+		if strings.TrimSpace(sourceProfile) == "" {
+			sourceProfile = cliauth.ResolvedProfile()
 		}
 		dumpPath = normalizedDumpPath(dumpPath)
 
@@ -129,6 +130,9 @@ var importCmd = &cobra.Command{
 		}
 		if strings.TrimSpace(targetProfile) == "" {
 			targetProfile = sourceProfile
+		}
+		if strings.TrimSpace(targetProfile) == "" {
+			targetProfile = cliauth.ResolvedProfile()
 		}
 		targetAuth, err := targetAuthFromInputs(targetProfile, targetToken, targetBasicUser, targetBasicPassword)
 		if err != nil {
@@ -259,10 +263,16 @@ func authFromInputs(profile, token string) (migrate.AuthConfig, error) {
 		return migrate.AuthConfig{}, nil
 	}
 
-	manager := conf.NewConfigure(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})))
-	credential, err := manager.Load(profile)
+	credential, err := cliauth.LoadProfileCredential(context.Background(), profile)
 	if err != nil {
 		return migrate.AuthConfig{}, err
+	}
+	return authFromCredential(profile, credential)
+}
+
+func authFromCredential(profile string, credential *conf.Credential) (migrate.AuthConfig, error) {
+	if credential == nil {
+		return migrate.AuthConfig{}, fmt.Errorf("profile %q resolved to nil credential", profile)
 	}
 	if strings.TrimSpace(credential.AccessToken) != "" {
 		return migrate.AuthConfig{BearerToken: credential.AccessToken}, nil

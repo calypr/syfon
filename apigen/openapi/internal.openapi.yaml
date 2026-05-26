@@ -38,12 +38,20 @@ paths:
           schema:
             type: string
         - in: query
+          name: path
+          schema:
+            type: string
+        - in: query
           name: limit
           schema:
             type: integer
             minimum: 1
-            maximum: 1000
-            default: 50
+            maximum: 10000
+            default: 1000
+        - in: query
+          name: start
+          schema:
+            type: string
         - in: query
           name: page
           schema:
@@ -692,10 +700,24 @@ components:
     ListRecordsResponse:
       type: object
       properties:
+        directories:
+          type: array
+          items:
+            $ref: '#/components/schemas/IndexDirectory'
         records:
           type: array
           items:
             $ref: '#/components/schemas/InternalRecord'
+    IndexDirectory:
+      type: object
+      required:
+        - name
+        - path
+      properties:
+        name:
+          type: string
+        path:
+          type: string
     BulkCreateRequest:
       type: object
       required:

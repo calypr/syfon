@@ -3,6 +3,7 @@ package internaldrs
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -245,6 +246,107 @@ func TestPaginateInternalListIDsFiberDefaultLimit(t *testing.T) {
 	}
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+}
+
+func TestHandleInternalList_LimitIsCappedAtTenThousand(t *testing.T) {
+	now := time.Now().UTC()
+	total := maxInternalListLimit + 1
+	objects := make(map[string]*drs.DrsObject, total)
+	for i := 0; i < total; i++ {
+		id := fmt.Sprintf("obj-%05d", i)
+		objects[id] = &drs.DrsObject{
+			Id:          id,
+			CreatedTime: now,
+			UpdatedTime: &now,
+			Checksums:   []drs.Checksum{{Type: "sha256", Checksum: id}},
+		}
+	}
+
+	mockDB := &testutils.MockDatabase{Objects: objects}
+	app := fiber.New()
+	om := core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
+	RegisterInternalRoutes(app, om)
+
+	req := httptest.NewRequest(http.MethodGet, "/index?limit=999999", nil)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("test request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 200, got %d body=%s", resp.StatusCode, string(body))
+	}
+	var payload internalapi.ListRecordsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Records == nil || len(*payload.Records) != maxInternalListLimit {
+		got := 0
+		if payload.Records != nil {
+			got = len(*payload.Records)
+		}
+		t.Fatalf("expected capped limit %d, got %d", maxInternalListLimit, got)
+	}
+}
+
+func TestHandleInternalList_PathBrowseReturnsImmediateDirectoriesAndFiles(t *testing.T) {
+	now := time.Now().UTC()
+	mockDB := &testutils.MockDatabase{
+		Objects: map[string]*drs.DrsObject{
+			"obj-a": {Id: "obj-a", Name: common.Ptr("nested/a.txt"), CreatedTime: now, UpdatedTime: &now, Checksums: []drs.Checksum{{Type: "sha256", Checksum: "a"}}},
+			"obj-b": {Id: "obj-b", Name: common.Ptr("nested/deep/b.txt"), CreatedTime: now, UpdatedTime: &now, Checksums: []drs.Checksum{{Type: "sha256", Checksum: "b"}}},
+			"obj-c": {Id: "obj-c", Name: common.Ptr("root.txt"), CreatedTime: now, UpdatedTime: &now, Checksums: []drs.Checksum{{Type: "sha256", Checksum: "c"}}},
+			"obj-d": {Id: "obj-d", Name: common.Ptr("nested/z.txt"), CreatedTime: now, UpdatedTime: &now, Checksums: []drs.Checksum{{Type: "sha256", Checksum: "d"}}},
+		},
+		ObjectAuthz: map[string]map[string][]string{
+			"obj-a": {"org-a": {"proj-a"}},
+			"obj-b": {"org-a": {"proj-a"}},
+			"obj-c": {"org-a": {"proj-a"}},
+			"obj-d": {"org-a": {"proj-a"}},
+		},
+	}
+	app := fiber.New()
+	om := core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
+	RegisterInternalRoutes(app, om)
+
+	req := httptest.NewRequest(http.MethodGet, "/index?organization=org-a&project=proj-a&path=nested&limit=1", nil)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("test request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 200, got %d body=%s", resp.StatusCode, string(body))
+	}
+	var payload internalapi.ListRecordsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Directories == nil || len(*payload.Directories) != 1 || (*payload.Directories)[0].Name != "deep" || (*payload.Directories)[0].Path != "nested/deep" {
+		t.Fatalf("unexpected directories: %+v", payload.Directories)
+	}
+	if payload.Records == nil || len(*payload.Records) != 1 || (*payload.Records)[0].Did != "obj-a" {
+		t.Fatalf("unexpected paged records: %+v", payload.Records)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/index?organization=org-a&project=proj-a&path=nested&limit=1&start=obj-a", nil)
+	resp, err = app.Test(req)
+	if err != nil {
+		t.Fatalf("test request with start failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 200, got %d body=%s", resp.StatusCode, string(body))
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode start response: %v", err)
+	}
+	if payload.Directories == nil || len(*payload.Directories) != 1 {
+		t.Fatalf("expected directories on paged response, got %+v", payload.Directories)
+	}
+	if payload.Records == nil || len(*payload.Records) != 1 || (*payload.Records)[0].Did != "obj-d" {
+		t.Fatalf("expected obj-d after start cursor, got %+v", payload.Records)
 	}
 }
 

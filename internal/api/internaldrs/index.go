@@ -21,7 +21,7 @@ import (
 
 const (
 	defaultInternalListLimit = 1000
-	maxInternalListLimit     = 1024
+	maxInternalListLimit     = 10000
 )
 
 func RegisterInternalRoutes(router fiber.Router, om *core.ObjectManager) {
@@ -61,8 +61,13 @@ func handleInternalListFiber(om *core.ObjectManager) fiber.Handler {
 		hash := c.Query("hash")
 		hashType := c.Query("hash_type")
 		objectURL := strings.TrimSpace(c.Query("url"))
+		hasPathQuery := c.Request().URI().QueryArgs().Has("path")
+		pathQuery := c.Query("path")
 
 		if hash != "" {
+			if hasPathQuery {
+				return c.Status(fiber.StatusBadRequest).SendString("path is only supported for exact organization/project listings")
+			}
 			hashType, hash = common.ParseHashQuery(hash, hashType)
 			filterOrg := strings.TrimSpace(c.Query("organization"))
 			filterProject := strings.TrimSpace(c.Query("project"))
@@ -92,10 +97,35 @@ func handleInternalListFiber(om *core.ObjectManager) fiber.Handler {
 		if !hasScope {
 			filterOrg, filterProject = "", ""
 		}
+		if hasPathQuery && (filterOrg == "" || filterProject == "") {
+			return c.Status(fiber.StatusBadRequest).SendString("organization and project are required when path is set")
+		}
+		if hasPathQuery && objectURL != "" {
+			return c.Status(fiber.StatusBadRequest).SendString("path is only supported for exact organization/project listings")
+		}
 
 		limit, start, offset, err := parseInternalListPaginationFiber(c)
 		if err != nil {
 			return c.Status(fiber.StatusBadRequest).SendString(err.Error())
+		}
+		if hasPathQuery {
+			ids, err := om.ListObjectIDsByScope(c.Context(), filterOrg, filterProject, "read")
+			if err != nil {
+				return apiutil.HandleError(c, err)
+			}
+			objs, err := om.GetBulkObjects(c.Context(), ids, "read")
+			if err != nil {
+				return apiutil.HandleError(c, err)
+			}
+			records := make([]internalapi.InternalRecord, 0, len(objs))
+			for _, obj := range objs {
+				records = append(records, core.InternalObjectToInternalRecord(obj))
+			}
+			resp, err := buildPathBrowseResponse(records, pathQuery, limit, start, offset)
+			if err != nil {
+				return c.Status(fiber.StatusBadRequest).SendString(err.Error())
+			}
+			return c.JSON(resp)
 		}
 
 		var ids []string
@@ -118,6 +148,144 @@ func handleInternalListFiber(om *core.ObjectManager) fiber.Handler {
 		}
 		return c.JSON(internalapi.ListRecordsResponse{Records: &records})
 	}
+}
+
+func buildPathBrowseResponse(records []internalapi.InternalRecord, path string, limit int, start string, offset int) (internalapi.ListRecordsResponse, error) {
+	_, pathSegments, err := normalizeBrowsePath(path)
+	if err != nil {
+		return internalapi.ListRecordsResponse{}, err
+	}
+
+	type browseFile struct {
+		path   string
+		record internalapi.InternalRecord
+	}
+
+	files := make([]browseFile, 0, len(records))
+	directoriesByPath := make(map[string]internalapi.IndexDirectory)
+
+	for _, record := range records {
+		recordPath, recordSegments, ok := browsePathFromRecord(record)
+		if !ok || !hasPathSegmentPrefix(recordSegments, pathSegments) {
+			continue
+		}
+		remaining := recordSegments[len(pathSegments):]
+		if len(remaining) == 0 {
+			continue
+		}
+		if len(remaining) == 1 {
+			files = append(files, browseFile{path: recordPath, record: record})
+			continue
+		}
+
+		dirSegments := append(append([]string{}, pathSegments...), remaining[0])
+		dirPath := strings.Join(dirSegments, "/")
+		if _, exists := directoriesByPath[dirPath]; exists {
+			continue
+		}
+		directoriesByPath[dirPath] = internalapi.IndexDirectory{
+			Name: remaining[0],
+			Path: dirPath,
+		}
+	}
+
+	directories := make([]internalapi.IndexDirectory, 0, len(directoriesByPath))
+	for _, directory := range directoriesByPath {
+		directories = append(directories, directory)
+	}
+	sort.Slice(directories, func(i, j int) bool {
+		if directories[i].Name == directories[j].Name {
+			return directories[i].Path < directories[j].Path
+		}
+		return directories[i].Name < directories[j].Name
+	})
+
+	sort.Slice(files, func(i, j int) bool {
+		leftID := strings.TrimSpace(files[i].record.Did)
+		rightID := strings.TrimSpace(files[j].record.Did)
+		if leftID == rightID {
+			return files[i].path < files[j].path
+		}
+		return leftID < rightID
+	})
+
+	if limit <= 0 || len(files) == 0 {
+		return internalapi.ListRecordsResponse{
+			Directories: &directories,
+			Records:     &[]internalapi.InternalRecord{},
+		}, nil
+	}
+
+	if start != "" {
+		offset = sort.Search(len(files), func(i int) bool {
+			return strings.TrimSpace(files[i].record.Did) > start
+		})
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	if offset >= len(files) {
+		return internalapi.ListRecordsResponse{
+			Directories: &directories,
+			Records:     &[]internalapi.InternalRecord{},
+		}, nil
+	}
+
+	end := offset + limit
+	if end > len(files) {
+		end = len(files)
+	}
+	pageRecords := make([]internalapi.InternalRecord, 0, end-offset)
+	for _, file := range files[offset:end] {
+		pageRecords = append(pageRecords, file.record)
+	}
+
+	return internalapi.ListRecordsResponse{
+		Directories: &directories,
+		Records:     &pageRecords,
+	}, nil
+}
+
+func browsePathFromRecord(record internalapi.InternalRecord) (string, []string, bool) {
+	if record.FileName != nil {
+		if normalized, segments, err := normalizeBrowsePath(*record.FileName); err == nil && normalized != "" {
+			return normalized, segments, true
+		}
+	}
+	return "", nil, false
+}
+
+func normalizeBrowsePath(raw string) (string, []string, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return "", nil, nil
+	}
+	trimmed = strings.ReplaceAll(trimmed, "\\", "/")
+	parts := strings.Split(trimmed, "/")
+	segments := make([]string, 0, len(parts))
+	for _, part := range parts {
+		segment := strings.TrimSpace(part)
+		if segment == "" {
+			continue
+		}
+		if segment == "." || segment == ".." {
+			return "", nil, fmt.Errorf("path must not contain '.' or '..' segments")
+		}
+		segments = append(segments, segment)
+	}
+	return strings.Join(segments, "/"), segments, nil
+}
+
+func hasPathSegmentPrefix(candidate, prefix []string) bool {
+	if len(prefix) > len(candidate) {
+		return false
+	}
+	for i, segment := range prefix {
+		if candidate[i] != segment {
+			return false
+		}
+	}
+	return true
 }
 
 func handleInternalDeleteFiber(om *core.ObjectManager) fiber.Handler {

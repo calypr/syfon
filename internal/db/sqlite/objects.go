@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -1114,14 +1115,8 @@ func (db *SqliteDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []stri
 			o.updated_time,
 			o.name,
 			o.version,
-			o.description,
-			am.url,
-			am.type,
-			cs.type,
-			cs.checksum
+			o.description
 		FROM drs_object o
-		LEFT JOIN drs_object_access_method am ON am.object_id = o.id
-		LEFT JOIN drs_object_checksum cs ON cs.object_id = o.id
 		WHERE %s`, strings.Join(conditions, " OR "))
 
 	rows, err := db.db.QueryContext(ctx, query, args...)
@@ -1131,71 +1126,43 @@ func (db *SqliteDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []stri
 	defer rows.Close()
 
 	objectsByID := make(map[string]*models.InternalObject)
-	seenAccess := make(map[string]map[string]struct{})
-	seenChecksum := make(map[string]map[string]struct{})
 
 	for rows.Next() {
 		var (
 			id, name, version, description string
 			size                           int64
 			createdTime, updatedTime       time.Time
-			accessURL, accessType          sql.NullString
-			checksumType, sumVal           sql.NullString
 		)
 		if err := rows.Scan(
 			&id, &size, &createdTime, &updatedTime, &name, &version, &description,
-			&accessURL, &accessType, &checksumType, &sumVal,
 		); err != nil {
 			return nil, err
 		}
 
-		obj, ok := objectsByID[id]
-		if !ok {
-			obj = &models.InternalObject{
-				DrsObject: drs.DrsObject{
-					Id:          id,
-					Size:        size,
-					CreatedTime: createdTime,
-					UpdatedTime: common.Ptr(updatedTime),
-					Name:        common.Ptr(name),
-					Version:     common.Ptr(version),
-					Description: common.Ptr(description),
-					SelfUri:     "drs://" + id,
-				},
-			}
-			objectsByID[id] = obj
-			seenAccess[id] = make(map[string]struct{})
-			seenChecksum[id] = make(map[string]struct{})
-		}
-
-		if accessURL.Valid && accessType.Valid {
-			key := accessType.String + "|" + accessURL.String
-			if _, exists := seenAccess[id][key]; !exists {
-				seenAccess[id][key] = struct{}{}
-				if obj.DrsObject.AccessMethods == nil {
-					obj.DrsObject.AccessMethods = &[]drs.AccessMethod{}
-				}
-				t := accessType.String
-				*obj.DrsObject.AccessMethods = append(*obj.DrsObject.AccessMethods, drs.AccessMethod{
-					AccessUrl: &struct {
-						Headers *[]string `json:"headers,omitempty"`
-						Url     string    `json:"url"`
-					}{Url: accessURL.String},
-					Type:     drs.AccessMethodType(accessType.String),
-					AccessId: &t,
-				})
-			}
-		}
-		if checksumType.Valid && sumVal.Valid {
-			key := checksumType.String + "|" + sumVal.String
-			if _, exists := seenChecksum[id][key]; !exists {
-				seenChecksum[id][key] = struct{}{}
-				obj.DrsObject.Checksums = append(obj.DrsObject.Checksums, drs.Checksum{Type: checksumType.String, Checksum: sumVal.String})
-			}
+		objectsByID[id] = &models.InternalObject{
+			DrsObject: drs.DrsObject{
+				Id:          id,
+				Size:        size,
+				CreatedTime: createdTime,
+				UpdatedTime: common.Ptr(updatedTime),
+				Name:        common.Ptr(name),
+				Version:     common.Ptr(version),
+				Description: common.Ptr(description),
+				SelfUri:     "drs://" + id,
+			},
 		}
 	}
 
 	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(objectsByID) == 0 {
+		return objectsByID, nil
+	}
+	if err := db.attachBulkAccessMethods(ctx, objectsByID); err != nil {
+		return nil, err
+	}
+	if err := db.attachBulkChecksums(ctx, objectsByID); err != nil {
 		return nil, err
 	}
 	if err := db.attachControlledAccess(ctx, objectsByID); err != nil {
@@ -1203,6 +1170,97 @@ func (db *SqliteDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []stri
 	}
 
 	return objectsByID, nil
+}
+
+func (db *SqliteDB) attachBulkAccessMethods(ctx context.Context, objectsByID map[string]*models.InternalObject) error {
+	ids := sortedObjectIDs(objectsByID)
+	query := fmt.Sprintf(`
+		SELECT object_id, url, type
+		FROM drs_object_access_method
+		WHERE object_id IN (%s)
+		ORDER BY object_id`, makePlaceholders(len(ids)))
+	args := make([]any, 0, len(ids))
+	for _, id := range ids {
+		args = append(args, id)
+	}
+	rows, err := db.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("failed to fetch bulk object access methods: %w", err)
+	}
+	defer rows.Close()
+
+	seenAccess := make(map[string]map[string]struct{}, len(objectsByID))
+	for rows.Next() {
+		var objectID, accessURL, accessType string
+		if err := rows.Scan(&objectID, &accessURL, &accessType); err != nil {
+			return err
+		}
+		obj := objectsByID[objectID]
+		if obj == nil {
+			continue
+		}
+		if _, ok := seenAccess[objectID]; !ok {
+			seenAccess[objectID] = make(map[string]struct{})
+		}
+		key := accessType + "|" + accessURL
+		if _, exists := seenAccess[objectID][key]; exists {
+			continue
+		}
+		seenAccess[objectID][key] = struct{}{}
+		if obj.DrsObject.AccessMethods == nil {
+			obj.DrsObject.AccessMethods = &[]drs.AccessMethod{}
+		}
+		t := accessType
+		*obj.DrsObject.AccessMethods = append(*obj.DrsObject.AccessMethods, drs.AccessMethod{
+			AccessUrl: &struct {
+				Headers *[]string `json:"headers,omitempty"`
+				Url     string    `json:"url"`
+			}{Url: accessURL},
+			Type:     drs.AccessMethodType(accessType),
+			AccessId: &t,
+		})
+	}
+	return rows.Err()
+}
+
+func (db *SqliteDB) attachBulkChecksums(ctx context.Context, objectsByID map[string]*models.InternalObject) error {
+	ids := sortedObjectIDs(objectsByID)
+	query := fmt.Sprintf(`
+		SELECT object_id, type, checksum
+		FROM drs_object_checksum
+		WHERE object_id IN (%s)
+		ORDER BY object_id`, makePlaceholders(len(ids)))
+	args := make([]any, 0, len(ids))
+	for _, id := range ids {
+		args = append(args, id)
+	}
+	rows, err := db.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("failed to fetch bulk object checksums: %w", err)
+	}
+	defer rows.Close()
+
+	seenChecksums := make(map[string]map[string]struct{}, len(objectsByID))
+	for rows.Next() {
+		var objectID, checksumType, checksumValue string
+		if err := rows.Scan(&objectID, &checksumType, &checksumValue); err != nil {
+			return err
+		}
+		obj := objectsByID[objectID]
+		if obj == nil {
+			continue
+		}
+		if _, ok := seenChecksums[objectID]; !ok {
+			seenChecksums[objectID] = make(map[string]struct{})
+		}
+		key := checksumType + "|" + checksumValue
+		if _, exists := seenChecksums[objectID][key]; exists {
+			continue
+		}
+		seenChecksums[objectID][key] = struct{}{}
+		obj.DrsObject.Checksums = append(obj.DrsObject.Checksums, drs.Checksum{Type: checksumType, Checksum: checksumValue})
+	}
+	return rows.Err()
 }
 
 func objectAccessResources(obj *models.InternalObject) []string {
@@ -1213,6 +1271,15 @@ func objectAccessResources(obj *models.InternalObject) []string {
 		return sycommon.NormalizeAccessResources(*obj.ControlledAccess)
 	}
 	return sycommon.AuthzMapToList(obj.Authorizations)
+}
+
+func sortedObjectIDs(objectsByID map[string]*models.InternalObject) []string {
+	ids := make([]string, 0, len(objectsByID))
+	for id := range objectsByID {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
 }
 
 func insertControlledAccessTx(ctx context.Context, tx *sql.Tx, objectID string, resources []string) error {

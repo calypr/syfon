@@ -97,6 +97,27 @@ func (s *DRSService) ListObjects(ctx context.Context, limit, page int) (DRSPage,
 	return out, nil
 }
 
+func (s *DRSService) ListObjectsAfter(ctx context.Context, limit int, start string) (DRSPage, error) {
+	listResp, err := s.index.List(ctx, ListRecordsOptions{
+		Limit: limit,
+		Start: start,
+	})
+	if err != nil {
+		return DRSPage{}, err
+	}
+	records := make([]internalapi.InternalRecord, 0)
+	if listResp.Records != nil {
+		records = *listResp.Records
+	}
+	out := DRSPage{
+		DrsObjects: make([]drsapi.DrsObject, 0, len(records)),
+	}
+	for _, rec := range records {
+		out.DrsObjects = append(out.DrsObjects, internalRecordToDRSObject(&rec))
+	}
+	return out, nil
+}
+
 func (s *DRSService) GetAccessURL(ctx context.Context, objectID, accessID string) (drsapi.AccessURL, error) {
 	resp, err := s.gen.GetAccessURLWithResponse(ctx, drsapi.ObjectId(objectID), drsapi.AccessId(accessID))
 	if err != nil {
@@ -124,6 +145,28 @@ func (s *DRSService) ListObjectsByProject(ctx context.Context, projectID string,
 		ProjectID: projectID,
 		Limit:     limit,
 		Page:      page,
+	})
+	if err != nil {
+		return DRSPage{}, err
+	}
+	records := make([]internalapi.InternalRecord, 0)
+	if listResp.Records != nil {
+		records = *listResp.Records
+	}
+	out := DRSPage{
+		DrsObjects: make([]drsapi.DrsObject, 0, len(records)),
+	}
+	for _, rec := range records {
+		out.DrsObjects = append(out.DrsObjects, internalRecordToDRSObject(&rec))
+	}
+	return out, nil
+}
+
+func (s *DRSService) ListObjectsByProjectAfter(ctx context.Context, projectID string, limit int, start string) (DRSPage, error) {
+	listResp, err := s.index.List(ctx, ListRecordsOptions{
+		ProjectID: projectID,
+		Limit:     limit,
+		Start:     start,
 	})
 	if err != nil {
 		return DRSPage{}, err

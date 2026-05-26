@@ -532,6 +532,78 @@ func TestSqliteDB_BulkOperations(t *testing.T) {
 	}
 }
 
+func TestSqliteDB_GetBulkObjects_SplitHydrationPreservesOrderAndDedupes(t *testing.T) {
+	ctx := context.Background()
+	db, _ := NewSqliteDB(":memory:")
+
+	objects := []models.InternalObject{
+		{
+			DrsObject: drs.DrsObject{
+				Id:   "bulk-a",
+				Size: 10,
+				AccessMethods: &[]drs.AccessMethod{
+					{
+						Type: drs.AccessMethodTypeS3,
+						AccessUrl: &struct {
+							Headers *[]string `json:"headers,omitempty"`
+							Url     string    `json:"url"`
+						}{Url: "s3://bucket/a"},
+					},
+					{
+						Type: drs.AccessMethodTypeS3,
+						AccessUrl: &struct {
+							Headers *[]string `json:"headers,omitempty"`
+							Url     string    `json:"url"`
+						}{Url: "s3://bucket/a"},
+					},
+				},
+				Checksums: []drs.Checksum{
+					{Type: "sha256", Checksum: "aaa"},
+					{Type: "sha256", Checksum: "aaa"},
+				},
+			},
+			Authorizations: map[string][]string{"org": {"p1"}},
+		},
+		{
+			DrsObject: drs.DrsObject{
+				Id:   "bulk-b",
+				Size: 20,
+				AccessMethods: &[]drs.AccessMethod{
+					{
+						Type: drs.AccessMethodTypeGs,
+						AccessUrl: &struct {
+							Headers *[]string `json:"headers,omitempty"`
+							Url     string    `json:"url"`
+						}{Url: "gs://bucket/b"},
+					},
+				},
+				Checksums: []drs.Checksum{
+					{Type: "md5", Checksum: "bbb"},
+				},
+			},
+			Authorizations: map[string][]string{"org": {"p1"}},
+		},
+	}
+
+	if err := db.RegisterObjects(ctx, objects); err != nil {
+		t.Fatalf("RegisterObjects failed: %v", err)
+	}
+
+	fetched, err := db.GetBulkObjects(ctx, []string{"bulk-b", "bulk-a", "bulk-b"})
+	if err != nil {
+		t.Fatalf("GetBulkObjects failed: %v", err)
+	}
+	if len(fetched) != 2 || fetched[0].Id != "bulk-b" || fetched[1].Id != "bulk-a" {
+		t.Fatalf("expected input order with deduplicated ids, got %+v", fetched)
+	}
+	if fetched[1].AccessMethods == nil || len(*fetched[1].AccessMethods) != 1 {
+		t.Fatalf("expected deduplicated access methods, got %+v", fetched[1].AccessMethods)
+	}
+	if len(fetched[1].Checksums) != 1 || fetched[1].Checksums[0].Checksum != "aaa" {
+		t.Fatalf("expected deduplicated checksums, got %+v", fetched[1].Checksums)
+	}
+}
+
 func TestSqliteDB_UpdateAccessMethods(t *testing.T) {
 	ctx := context.Background()
 	db, _ := NewSqliteDB(":memory:")

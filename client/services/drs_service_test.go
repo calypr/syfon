@@ -112,6 +112,17 @@ func TestDRSServiceResolveAndList(t *testing.T) {
 	if query.Get("limit") != "5" || query.Get("page") != "2" {
 		t.Fatalf("unexpected list query values: %v", query)
 	}
+	page, err = service.ListObjectsAfter(ctx, 7, "did-record")
+	if err != nil || len(page.DrsObjects) != 1 || page.DrsObjects[0].Id != "did-record" {
+		t.Fatalf("ListObjectsAfter returned page=%+v err=%v", page, err)
+	}
+	query, err = url.ParseQuery(strings.TrimPrefix(requester.builder.Url, "/index?"))
+	if err != nil {
+		t.Fatalf("parse cursor list query: %v", err)
+	}
+	if query.Get("limit") != "7" || query.Get("start") != "did-record" || query.Get("page") != "" {
+		t.Fatalf("unexpected cursor list query values: %v", query)
+	}
 	if page.DrsObjects[0].AccessMethods == nil || len(*page.DrsObjects[0].AccessMethods) != 1 {
 		t.Fatalf("expected mapped access methods, got %+v", page.DrsObjects[0])
 	}
@@ -133,6 +144,17 @@ func TestDRSServiceResolveAndList(t *testing.T) {
 	}
 	if query.Get("project") != "proj-1" || query.Get("limit") != "10" || query.Get("page") != "3" {
 		t.Fatalf("unexpected project list query values: %v", query)
+	}
+	projectPage, err = service.ListObjectsByProjectAfter(ctx, "proj-1", 9, "did-record")
+	if err != nil || len(projectPage.DrsObjects) != 1 {
+		t.Fatalf("ListObjectsByProjectAfter returned page=%+v err=%v", projectPage, err)
+	}
+	query, err = url.ParseQuery(strings.TrimPrefix(requester.builder.Url, "/index?"))
+	if err != nil {
+		t.Fatalf("parse project cursor query: %v", err)
+	}
+	if query.Get("project") != "proj-1" || query.Get("limit") != "9" || query.Get("start") != "did-record" || query.Get("page") != "" {
+		t.Fatalf("unexpected project cursor query values: %v", query)
 	}
 
 	sample, err := service.GetProjectSample(ctx, "proj-2", 4)

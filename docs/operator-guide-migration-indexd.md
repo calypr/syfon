@@ -64,6 +64,20 @@ curl -s -X POST "https://target-gen3-with-syfon.example.org/index/bulk/hashes" \
   -d '{"hashes":["sha256:<SHA256>"]}' | jq .
 ```
 
-`GET /index` is paged. Use `limit` for the page size and `start=<last_did_from_previous_page>` for the next page; the server caps list pages at 1024 records.
+`GET /index` is paged. Use `limit` for the page size and `start=<last_did_from_previous_page>` for the next page; `page=` remains supported for compatibility but should not be used for large traversals. The server caps list pages at `10000` records, but interactive clients should usually stay near `1000-2000`.
+
+For exact project-scoped listings, the recommended query shape is a cursor walk over the controlled-access index:
+
+```sql
+SELECT DISTINCT ca.object_id
+FROM drs_object_controlled_access ca
+WHERE ca.resource = $1 AND ca.object_id > $2
+ORDER BY ca.object_id
+LIMIT $3
+```
+
+The `DISTINCT` remains intentional because Syfon does not currently enforce uniqueness on `(resource, object_id)`. Postgres should still plan this as an index-driven scan on `drs_object_controlled_access(resource, object_id)` rather than a deep-offset walk.
+
+When validating a deployment, run `EXPLAIN (ANALYZE, BUFFERS)` on the scoped ID query and confirm later-page requests remain index-driven and do not regress toward large offset costs or fanout-heavy row counts.
 
 The migration preserves DIDs, hashes, URLs, file names, descriptions, versions, timestamps, access methods, and authz-derived `controlled_access` claims for normal Indexd object records. Deprecated Indexd fields such as `baseid`, `rev`, `acl`, `metadata`, `urls_metadata`, `form`, and `uploader` are intentionally not loaded into Syfon.

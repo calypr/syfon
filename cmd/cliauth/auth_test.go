@@ -1,14 +1,59 @@
 package cliauth
 
 import (
+	"context"
+	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	conf "github.com/calypr/syfon/client/config"
 	syclient "github.com/calypr/syfon/client"
 	"github.com/spf13/cobra"
 )
+
+type stubManager struct {
+	validFn func(*conf.Credential) (bool, error)
+	saved   *conf.Credential
+}
+
+func (s *stubManager) Import(filePath, fenceToken string) (*conf.Credential, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+
+func (s *stubManager) Load(profile string) (*conf.Credential, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+
+func (s *stubManager) Save(cred *conf.Credential) error {
+	copy := *cred
+	s.saved = &copy
+	return nil
+}
+
+func (s *stubManager) EnsureExists() error {
+	return nil
+}
+
+func (s *stubManager) IsCredentialValid(cred *conf.Credential) (bool, error) {
+	if s.validFn == nil {
+		return true, nil
+	}
+	return s.validFn(cred)
+}
+
+func (s *stubManager) IsTokenValid(token string) (bool, error) {
+	return true, nil
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
 
 func TestServerClientOptionsBasicAuthValidation(t *testing.T) {
 	resetAuthState()
@@ -179,6 +224,57 @@ func TestResolveServerURLFallsBackToDefault(t *testing.T) {
 	}
 	if got != "http://127.0.0.1:8080" {
 		t.Fatalf("expected localhost default, got %q", got)
+	}
+}
+
+func TestEnsureUsableProfileCredentialRefreshesExpiredAccessToken(t *testing.T) {
+	t.Parallel()
+
+	manager := &stubManager{
+		validFn: func(cred *conf.Credential) (bool, error) {
+			if cred.AccessToken == "new-token" {
+				return true, nil
+			}
+			return false, fmt.Errorf("access_token is invalid but api_key is valid: token expired")
+		},
+	}
+	cred := &conf.Credential{
+		Profile:     "calypr",
+		AccessToken: "old-token",
+		APIKey:      "refresh-jwt",
+		APIEndpoint: "https://example.test",
+	}
+
+	err := EnsureUsableProfileCredential(context.Background(), manager, cred, roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.Method != http.MethodPost {
+			t.Fatalf("expected POST refresh request, got %s", req.Method)
+		}
+		if got := req.URL.String(); got != "https://example.test/user/credentials/api/access_token" {
+			t.Fatalf("unexpected refresh URL: %s", got)
+		}
+		body, readErr := io.ReadAll(req.Body)
+		if readErr != nil {
+			t.Fatalf("read refresh body: %v", readErr)
+		}
+		if !strings.Contains(string(body), `"api_key":"refresh-jwt"`) {
+			t.Fatalf("unexpected refresh body: %s", string(body))
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Status:     "200 OK",
+			Body:       io.NopCloser(strings.NewReader(`{"access_token":"new-token"}`)),
+			Header:     make(http.Header),
+			Request:    req,
+		}, nil
+	}))
+	if err != nil {
+		t.Fatalf("EnsureUsableProfileCredential returned error: %v", err)
+	}
+	if cred.AccessToken != "new-token" {
+		t.Fatalf("expected refreshed token, got %q", cred.AccessToken)
+	}
+	if manager.saved == nil || manager.saved.AccessToken != "new-token" {
+		t.Fatalf("expected refreshed credential to be saved, got %+v", manager.saved)
 	}
 }
 

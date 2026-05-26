@@ -16,6 +16,7 @@ import (
 var (
 	listLimit        int
 	listPage         int
+	listStart        string
 	listOrganization string
 	listProject      string
 )
@@ -32,6 +33,7 @@ var Cmd = &cobra.Command{
 		resp, err := c.Index().List(cmd.Context(), syfonclient.ListRecordsOptions{
 			Limit:        listLimit,
 			Page:         listPage,
+			Start:        strings.TrimSpace(listStart),
 			Organization: strings.TrimSpace(listOrganization),
 			ProjectID:    strings.TrimSpace(listProject),
 		})
@@ -80,6 +82,7 @@ var Cmd = &cobra.Command{
 func init() {
 	Cmd.Flags().IntVar(&listLimit, "limit", 100, "Maximum number of records to return")
 	Cmd.Flags().IntVar(&listPage, "page", 0, "Page number for pagination")
+	Cmd.Flags().StringVar(&listStart, "start", "", "List records after this object ID")
 	Cmd.Flags().StringVar(&listOrganization, "organization", "", "Optional organization/program filter")
 	Cmd.Flags().StringVar(&listProject, "project", "", "Optional project filter")
 }

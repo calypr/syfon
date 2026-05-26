@@ -190,7 +190,14 @@ type InternalUploadBulkResult struct {
 
 // ListRecordsResponse defines model for ListRecordsResponse.
 type ListRecordsResponse struct {
-	Records *[]InternalRecord `json:"records,omitempty"`
+	Directories *[]IndexDirectory `json:"directories,omitempty"`
+	Records     *[]InternalRecord `json:"records,omitempty"`
+}
+
+// IndexDirectory defines model for IndexDirectory.
+type IndexDirectory struct {
+	Name string `json:"name"`
+	Path string `json:"path"`
 }
 
 // InternalDownloadParams defines parameters for InternalDownload.
@@ -229,7 +236,9 @@ type InternalListParams struct {
 	Organization *string `form:"organization,omitempty" json:"organization,omitempty"`
 	Program      *string `form:"program,omitempty" json:"program,omitempty"`
 	Project      *string `form:"project,omitempty" json:"project,omitempty"`
+	Path         *string `form:"path,omitempty" json:"path,omitempty"`
 	Limit        *int    `form:"limit,omitempty" json:"limit,omitempty"`
+	Start        *string `form:"start,omitempty" json:"start,omitempty"`
 	Page         *int    `form:"page,omitempty" json:"page,omitempty"`
 }
 
@@ -702,6 +711,17 @@ func (siw *ServerInterfaceWrapper) InternalList(c fiber.Ctx) error {
 		params.Project = &value
 
 	}
+	// ------------- Optional query parameter "path" -------------
+	if paramValue := c.Query("path"); paramValue != "" || c.Request().URI().QueryArgs().Has("path") {
+
+		var value string
+		err = runtime.BindStyledParameterWithOptions("form", "path", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
+		if err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter path: %w", err).Error())
+		}
+		params.Path = &value
+
+	}
 	// ------------- Optional query parameter "limit" -------------
 	if paramValue := c.Query("limit"); paramValue != "" {
 
@@ -711,6 +731,17 @@ func (siw *ServerInterfaceWrapper) InternalList(c fiber.Ctx) error {
 			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter limit: %w", err).Error())
 		}
 		params.Limit = &value
+
+	}
+	// ------------- Optional query parameter "start" -------------
+	if paramValue := c.Query("start"); paramValue != "" {
+
+		var value string
+		err = runtime.BindStyledParameterWithOptions("form", "start", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
+		if err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter start: %w", err).Error())
+		}
+		params.Start = &value
 
 	}
 	// ------------- Optional query parameter "page" -------------
