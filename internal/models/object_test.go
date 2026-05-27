@@ -20,8 +20,8 @@ func TestInternalObjectUnmarshalLegacyAndMarshalCompatibility(t *testing.T) {
 	if obj.Id != "did-1" {
 		t.Fatalf("expected id from did, got %q", obj.Id)
 	}
-	if obj.Name == nil || *obj.Name != "legacy-name.txt" {
-		t.Fatalf("expected name from file_name, got %+v", obj.Name)
+	if obj.Name != nil {
+		t.Fatalf("expected name to remain unset when only file_name is provided, got %+v", obj.Name)
 	}
 	if len(obj.Checksums) != 1 || obj.Checksums[0].Type != "sha256" || obj.Checksums[0].Checksum != "abc" {
 		t.Fatalf("unexpected checksums: %+v", obj.Checksums)
@@ -41,6 +41,9 @@ func TestInternalObjectUnmarshalLegacyAndMarshalCompatibility(t *testing.T) {
 	if out["file_name"] != "legacy-name.txt" {
 		t.Fatalf("expected file_name in output, got %v", out["file_name"])
 	}
+	if _, ok := out["name"]; ok {
+		t.Fatalf("did not expect name in output when only file_name was provided")
+	}
 	if _, ok := out["unknown_field"]; !ok {
 		t.Fatalf("expected unknown field preservation in output")
 	}
@@ -57,4 +60,3 @@ func TestInternalObjectExternal(t *testing.T) {
 		t.Fatalf("expected external object id did-2, got %q", external.Id)
 	}
 }
-

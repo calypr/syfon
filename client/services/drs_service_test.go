@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -36,6 +37,8 @@ func TestDRSServiceResolveAndList(t *testing.T) {
 			writeJSON(t, w, http.StatusOK, drsapi.DrsObject{Id: "obj-1", Name: &name, Size: 99, Checksums: []drsapi.Checksum{{Type: "sha256", Checksum: "abc"}}, CreatedTime: time.Now(), AccessMethods: &accessMethods})
 		case r.Method == http.MethodGet && r.URL.Path == "/objects/no-access":
 			writeJSON(t, w, http.StatusOK, drsapi.DrsObject{Id: "no-access", Checksums: []drsapi.Checksum{{Type: "sha256", Checksum: "abc"}}, CreatedTime: time.Now()})
+		case r.Method == http.MethodGet && r.URL.Path == "/objects/missing":
+			http.Error(w, "missing", http.StatusNotFound)
 		case r.Method == http.MethodGet && r.URL.Path == "/objects/obj-1/access/acc-1":
 			writeJSON(t, w, http.StatusOK, drsapi.AccessURL{Url: "https://signed.example/access"})
 		case r.Method == http.MethodGet && r.URL.Path == "/objects/checksum/abc":
@@ -55,6 +58,13 @@ func TestDRSServiceResolveAndList(t *testing.T) {
 		case r.Method == http.MethodPost && r.URL.Path == "/objects/register":
 			name := "registered.bin"
 			writeJSON(t, w, http.StatusCreated, drsapi.N201ObjectsCreated{Objects: []drsapi.DrsObject{{Id: "obj-created", Name: &name, Checksums: []drsapi.Checksum{{Type: "sha256", Checksum: "abc"}}, CreatedTime: time.Now()}}})
+		case r.Method == http.MethodPost && r.URL.Path == "/objects/obj-1/access-methods":
+			var body drsapi.AccessMethodUpdateRequest
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode access method update body: %v", err)
+			}
+			name := "object.bin"
+			writeJSON(t, w, http.StatusOK, drsapi.DrsObject{Id: "obj-1", Name: &name, Size: 99, Checksums: []drsapi.Checksum{{Type: "sha256", Checksum: "abc"}}, CreatedTime: time.Now(), AccessMethods: &body.AccessMethods})
 		case r.Method == http.MethodPut && r.URL.Path == "/objects/obj-delete/delete":
 			if err := json.NewDecoder(r.Body).Decode(&deleteRequest); err != nil {
 				t.Fatalf("decode delete body: %v", err)
@@ -99,6 +109,9 @@ func TestDRSServiceResolveAndList(t *testing.T) {
 	obj, err := service.GetObject(ctx, "obj-1")
 	if err != nil || obj.Id != "obj-1" {
 		t.Fatalf("GetObject returned obj=%+v err=%v", obj, err)
+	}
+	if _, err := service.GetObject(ctx, "missing"); !errors.Is(err, ErrObjectNotFound) {
+		t.Fatalf("expected ErrObjectNotFound, got %v", err)
 	}
 
 	page, err := service.ListObjects(ctx, 5, 2)
@@ -185,6 +198,18 @@ func TestDRSServiceResolveAndList(t *testing.T) {
 	registered, err := service.RegisterObjects(ctx, drsapi.RegisterObjectsJSONRequestBody{Candidates: []drsapi.DrsObjectCandidate{{Checksums: []drsapi.Checksum{{Type: "sha256", Checksum: "abc"}}}}})
 	if err != nil || len(registered.Objects) != 1 || registered.Objects[0].Id != "obj-created" {
 		t.Fatalf("RegisterObjects returned registered=%+v err=%v", registered, err)
+	}
+	updatedAccessID := "acc-2"
+	updated, err := service.UpdateObjectAccessMethods(ctx, "obj-1", []drsapi.AccessMethod{{
+		AccessId: &updatedAccessID,
+		Type:     drsapi.AccessMethodType("https"),
+		AccessUrl: &struct {
+			Headers *[]string `json:"headers,omitempty"`
+			Url     string    `json:"url"`
+		}{Url: "https://signed.example/updated.bin"},
+	}})
+	if err != nil || updated.AccessMethods == nil || len(*updated.AccessMethods) != 1 || (*updated.AccessMethods)[0].AccessUrl == nil || (*updated.AccessMethods)[0].AccessUrl.Url != "https://signed.example/updated.bin" {
+		t.Fatalf("UpdateObjectAccessMethods returned updated=%+v err=%v", updated, err)
 	}
 
 	if err := service.DeleteObject(ctx, "obj-delete", true); err != nil {

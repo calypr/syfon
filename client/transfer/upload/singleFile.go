@@ -10,43 +10,42 @@ import (
 	"github.com/calypr/syfon/client/transfer"
 )
 
+type singleUploadBackendAdapter struct {
+	transfer.Uploader
+}
+
+func (a singleUploadBackendAdapter) MultipartInit(context.Context, string) (string, error) {
+	return "", fmt.Errorf("multipart upload not supported by UploadSingle compatibility adapter")
+}
+
+func (a singleUploadBackendAdapter) MultipartPart(context.Context, string, string, int, io.Reader) (string, error) {
+	return "", fmt.Errorf("multipart upload not supported by UploadSingle compatibility adapter")
+}
+
+func (a singleUploadBackendAdapter) MultipartComplete(context.Context, string, string, []transfer.MultipartPart) error {
+	return fmt.Errorf("multipart upload not supported by UploadSingle compatibility adapter")
+}
+
+// UploadSingle is a compatibility shim that preserves the old entrypoint while
+// routing the actual byte transfer through the shared engine uploader.
 func UploadSingle(ctx context.Context, bk transfer.Uploader, logger transfer.TransferLogger, sourcePath, objectKey, guid, bucket string, metadata common.FileMetadata, showProgress bool) error {
-	req := uploadRequest{
-		sourcePath: sourcePath,
-		objectKey:  objectKey,
-		guid:       guid,
-		bucket:     bucket,
-		metadata:   metadata,
-	}
-
-	file, err := os.Open(req.sourcePath)
+	info, err := os.Stat(sourcePath)
 	if err != nil {
-		logger.Failed(req.sourcePath, req.objectKey, common.FileMetadata{}, "", 0, false)
-		return fmt.Errorf("error opening file %s: %w", req.sourcePath, err)
+		logger.Failed(sourcePath, objectKey, common.FileMetadata{}, "", 0, false)
+		return fmt.Errorf("error opening file %s: %w", sourcePath, err)
 	}
-	defer file.Close()
-
-	fi, err := file.Stat()
-	if err != nil {
-		return fmt.Errorf("failed to stat file: %w", err)
-	}
-
-	fur, err := generateUploadRequest(ctx, bk, req, file, nil)
-	if err != nil {
-		logger.Failed(req.sourcePath, req.objectKey, common.FileMetadata{}, guid, 0, false)
+	if info.Size() > common.FileSizeLimit {
+		err := fmt.Errorf("file size exceeds limit")
+		logger.Failed(sourcePath, objectKey, metadata, guid, 0, false)
 		return err
 	}
 
-	reader := io.Reader(file)
-	if progress := common.GetProgress(ctx); progress != nil {
-		reader = newProgressReader(file, progress, resolveUploadOID(fur.objectKey, fur.guid), fi.Size())
-	}
-
-	err = bk.Upload(ctx, fur.presignedURL, reader, fi.Size())
+	err = UploadWithOptions(ctx, singleUploadBackendAdapter{Uploader: bk}, sourcePath, objectKey, guid, bucket, metadata, showProgress, false)
 	if err != nil {
+		logger.Failed(sourcePath, objectKey, metadata, guid, 0, false)
 		return err
 	}
 
-	logger.Succeeded(req.sourcePath, guid)
+	logger.Succeeded(sourcePath, guid)
 	return nil
 }

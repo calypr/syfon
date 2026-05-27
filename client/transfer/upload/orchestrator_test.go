@@ -3,14 +3,18 @@ package upload
 import (
 	"context"
 	"fmt"
+	"io"
+	"strings"
 	"testing"
 
 	drsapi "github.com/calypr/syfon/apigen/client/drs"
+	"github.com/calypr/syfon/client/common"
 )
 
 type metadataClientStub struct {
 	registeredID string
 	registers    int
+	updates      int
 	requests     []drsapi.RegisterObjectsJSONRequestBody
 	object       drsapi.DrsObject
 	getErr       error
@@ -34,6 +38,18 @@ func (m *metadataClientStub) RegisterObjects(_ context.Context, req drsapi.Regis
 			Id: m.registeredID,
 		}},
 	}, nil
+}
+
+func (m *metadataClientStub) UpdateObjectAccessMethods(_ context.Context, objectID string, accessMethods []drsapi.AccessMethod) (drsapi.DrsObject, error) {
+	m.updates++
+	updated := m.object
+	if strings.TrimSpace(updated.Id) == "" {
+		updated.Id = objectID
+	}
+	methods := append([]drsapi.AccessMethod(nil), accessMethods...)
+	updated.AccessMethods = &methods
+	m.object = updated
+	return updated, nil
 }
 
 func cloneRegisterRequest(req drsapi.RegisterObjectsJSONRequestBody) drsapi.RegisterObjectsJSONRequestBody {
@@ -74,8 +90,8 @@ func TestRegisterFileUploadsUsingRegisteredObjectID(t *testing.T) {
 	if _, err := RegisterFile(context.Background(), uploader, metadata, obj, file.Name(), "bucket-a"); err != nil {
 		t.Fatalf("RegisterFile returned error: %v", err)
 	}
-	if uploader.lastResolve.guid != "server-object-id" {
-		t.Fatalf("expected upload URL to use registered object id, got %q", uploader.lastResolve.guid)
+	if uploader.lastResolve.guid != "requested-object-id" {
+		t.Fatalf("expected upload URL to use requested object id, got %q", uploader.lastResolve.guid)
 	}
 	if uploader.lastResolve.fileName != "3d71f043937a09b77826109db4f2b47c46f19923ef823f6a777a15fde0b2c9c7" {
 		t.Fatalf("expected checksum upload key, got %q", uploader.lastResolve.fileName)
@@ -125,8 +141,11 @@ func TestRegisterFilePreservesScopedRoutingMetadata(t *testing.T) {
 	if _, err := RegisterFile(context.Background(), uploader, metadata, obj, file.Name(), "syfon-e2e-bucket"); err != nil {
 		t.Fatalf("RegisterFile returned error: %v", err)
 	}
-	if len(metadata.requests) != 2 {
-		t.Fatalf("expected initial and final register calls, got %d", len(metadata.requests))
+	if len(metadata.requests) != 1 {
+		t.Fatalf("expected single final register call, got %d", len(metadata.requests))
+	}
+	if metadata.updates != 1 {
+		t.Fatalf("expected finalized access-method update, got %d", metadata.updates)
 	}
 	for i, req := range metadata.requests {
 		if len(req.Candidates) != 1 {
@@ -142,5 +161,72 @@ func TestRegisterFilePreservesScopedRoutingMetadata(t *testing.T) {
 	}
 	if obj.ControlledAccess == nil || len(*obj.ControlledAccess) != 1 || (*obj.ControlledAccess)[0] != controlledAccess[0] {
 		t.Fatalf("returned object did not preserve controlled_access: %#v", obj.ControlledAccess)
+	}
+}
+
+func TestRegisterFileSinglePartStreamsProgress(t *testing.T) {
+	t.Parallel()
+
+	payload := make([]byte, common.OnProgressThreshold+257)
+	for i := range payload {
+		payload[i] = 'a'
+	}
+
+	file := createTempFileWithData(t, string(payload))
+	defer file.Close()
+
+	uploader := &uploaderStub{
+		uploadFunc: func(_ context.Context, _ string, body io.Reader, _ int64) error {
+			buf := make([]byte, 64*1024)
+			for {
+				_, err := body.Read(buf)
+				if err == io.EOF {
+					return nil
+				}
+				if err != nil {
+					return err
+				}
+			}
+		},
+	}
+	metadata := &metadataClientStub{registeredID: "server-object-id"}
+	name := "payload.bin"
+	obj := &drsapi.DrsObject{
+		Id:   "requested-object-id",
+		Name: &name,
+		Size: int64(len(payload)),
+		Checksums: []drsapi.Checksum{{
+			Type:     "sha256",
+			Checksum: "3d71f043937a09b77826109db4f2b47c46f19923ef823f6a777a15fde0b2c9c7",
+		}},
+	}
+
+	var events []common.ProgressEvent
+	ctx := common.WithOid(context.Background(), obj.Checksums[0].Checksum)
+	ctx = common.WithProgress(ctx, func(ev common.ProgressEvent) error {
+		events = append(events, ev)
+		return nil
+	})
+
+	if _, err := RegisterFile(ctx, uploader, metadata, obj, file.Name(), "bucket-a"); err != nil {
+		t.Fatalf("RegisterFile returned error: %v", err)
+	}
+	if len(events) < 2 {
+		t.Fatalf("expected streamed progress events, got %+v", events)
+	}
+
+	progressEventsSeen := 0
+	for _, ev := range events {
+		if ev.Event == "progress" {
+			progressEventsSeen++
+		}
+	}
+	if progressEventsSeen < 2 {
+		t.Fatalf("expected threshold and finalize progress events, got %+v", events)
+	}
+
+	last := events[len(events)-1]
+	if last.BytesSoFar != int64(len(payload)) {
+		t.Fatalf("final progress bytes = %d, want %d", last.BytesSoFar, len(payload))
 	}
 }

@@ -21,6 +21,13 @@ func TestRegisterBulk_RegistersCandidate(t *testing.T) {
 				Type:     "sha256",
 				Checksum: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 			}},
+			AccessMethods: &[]drs.AccessMethod{{
+				Type: "s3",
+				AccessUrl: &struct {
+					Headers *[]string `json:"headers,omitempty"`
+					Url     string    `json:"url"`
+				}{Url: "s3://bucket/test-register-bulk"},
+			}},
 			Size: 1,
 		},
 	}
@@ -70,6 +77,13 @@ func TestBulkDeleteObjects_DeletesAuthorizedObjects(t *testing.T) {
 			Type:     "sha256",
 			Checksum: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
 		}},
+		AccessMethods: &[]drs.AccessMethod{{
+			Type: "s3",
+			AccessUrl: &struct {
+				Headers *[]string `json:"headers,omitempty"`
+				Url     string    `json:"url"`
+			}{Url: "s3://bucket/test-delete-bulk"},
+		}},
 		Size: 1,
 	}})
 	if err != nil {
@@ -83,4 +97,3 @@ func TestBulkDeleteObjects_DeletesAuthorizedObjects(t *testing.T) {
 		t.Fatalf("expected object to be deleted")
 	}
 }
-

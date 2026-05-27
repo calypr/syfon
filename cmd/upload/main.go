@@ -1,8 +1,10 @@
 package upload
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,18 +13,21 @@ import (
 
 	"github.com/calypr/syfon/apigen/client/bucketapi"
 	drsapi "github.com/calypr/syfon/apigen/client/drs"
+	syfonclient "github.com/calypr/syfon/client/services"
 	"github.com/calypr/syfon/client/transfer/upload"
 	"github.com/calypr/syfon/cmd/cliauth"
+	"github.com/calypr/syfon/cmd/transferprogress"
 	syfoncommon "github.com/calypr/syfon/common"
 	intcommon "github.com/calypr/syfon/internal/common"
 	"github.com/spf13/cobra"
 )
 
 var (
-	uploadFile    string
-	uploadDID     string
-	uploadOrg     string
-	uploadProject string
+	uploadFile      string
+	uploadDID       string
+	uploadOrg       string
+	uploadProject   string
+	uploadOverwrite bool
 )
 
 var Cmd = &cobra.Command{
@@ -73,6 +78,10 @@ var Cmd = &cobra.Command{
 		hash := sha256.Sum256(fileBytes)
 		checksum := hex.EncodeToString(hash[:])
 
+		recordPath, err := uploadRecordPath(srcPath)
+		if err != nil {
+			return err
+		}
 		name := filepath.Base(srcPath)
 		authzMap := syfoncommon.AuthzMapFromScope(org, project)
 		did := strings.TrimSpace(uploadDID)
@@ -100,15 +109,27 @@ var Cmd = &cobra.Command{
 			controlled := syfoncommon.AuthzMapToControlledAccess(authzMap)
 			drsObj.ControlledAccess = &controlled
 		}
+		overwriteWarning, err := ensureWritableDID(ctx, c.DRS(), did, uploadOverwrite)
+		if err != nil {
+			return err
+		}
+		if overwriteWarning != "" {
+			fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\n", overwriteWarning)
+		}
 
 		// Register and upload using the SDK's orchestrator
-		fmt.Fprintf(cmd.OutOrStdout(), "Uploading %s (%s)...\n", srcPath, upload.FormatSize(info.Size()))
-		fmt.Fprintf(cmd.OutOrStdout(), "DID: %s\n", did)
+		fmt.Fprintf(cmd.OutOrStdout(), "Uploading %s -> DID: %s\n", srcPath, did)
 
-		registered, err := upload.RegisterFile(ctx, c.Data(), c.DRS(), drsObj, srcPath, bucketName)
+		progress := transferprogress.New(cmd.OutOrStdout(), filepath.Base(srcPath), info.Size())
+		progress.Start()
+		uploadCtx := transferprogress.WithProgress(ctx, did, progress)
+
+		registered, err := upload.RegisterFile(uploadCtx, c.Data(), c.DRS(), drsObj, srcPath, bucketName)
 		if err != nil {
+			progress.Abort()
 			return fmt.Errorf("upload failed: %w", err)
 		}
+		progress.Finish()
 
 		finalID := did
 		if registered != nil && strings.TrimSpace(registered.Id) != "" {
@@ -123,7 +144,7 @@ var Cmd = &cobra.Command{
 				}
 			}
 			if objectURL != "" {
-				if err := c.Index().Upsert(ctx, finalID, objectURL, name, info.Size(), checksum, authzMap); err != nil {
+				if err := c.Index().Upsert(ctx, finalID, objectURL, recordPath, info.Size(), checksum, authzMap); err != nil {
 					return fmt.Errorf("sync index record: %w", err)
 				}
 			}
@@ -139,6 +160,33 @@ func init() {
 	Cmd.Flags().StringVar(&uploadDID, "did", "", "Optional object DID (generated deterministically from sha256 + project scope when omitted)")
 	Cmd.Flags().StringVar(&uploadOrg, "org", "", "Required organization for the authz scope")
 	Cmd.Flags().StringVar(&uploadProject, "project", "", "Project for the authz scope (required when --did is omitted)")
+	Cmd.Flags().BoolVar(&uploadOverwrite, "overwrite", false, "Allow replacing an existing DID's record and storage mapping")
+}
+
+type didLookup interface {
+	GetObject(ctx context.Context, objectID string) (drsapi.DrsObject, error)
+}
+
+type didReplacer interface {
+	didLookup
+	DeleteObject(ctx context.Context, objectID string, deleteStorageData bool) error
+}
+
+func ensureWritableDID(ctx context.Context, drs didReplacer, did string, overwrite bool) (string, error) {
+	_, err := drs.GetObject(ctx, did)
+	if err == nil {
+		if overwrite {
+			if err := drs.DeleteObject(ctx, did, false); err != nil {
+				return "", fmt.Errorf("delete existing DID %s for overwrite: %w", did, err)
+			}
+			return fmt.Sprintf("DID %s already existed; removing the existing record metadata and rewriting it with the new upload. Storage bytes are not deleted as part of this overwrite.", did), nil
+		}
+		return "", fmt.Errorf("object DID %s already exists; pass --overwrite to replace it", did)
+	}
+	if errors.Is(err, syfonclient.ErrObjectNotFound) {
+		return "", nil
+	}
+	return "", fmt.Errorf("check existing DID %s: %w", did, err)
 }
 
 func resolveUploadBucketForScope(buckets bucketapi.BucketsResponse, org, project string) (string, error) {
@@ -220,4 +268,40 @@ func uniqueStrings(values []string) []string {
 		out = append(out, value)
 	}
 	return out
+}
+
+func uploadRecordPath(srcPath string) (string, error) {
+	cleaned := filepath.Clean(strings.TrimSpace(srcPath))
+	if cleaned == "" || cleaned == "." {
+		return "", fmt.Errorf("invalid upload file path %q", srcPath)
+	}
+	if !filepath.IsAbs(cleaned) {
+		return filepath.ToSlash(cleaned), nil
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("resolve working directory for upload path: %w", err)
+	}
+	normalizedCWD := normalizeComparablePath(cwd)
+	normalizedPath := normalizeComparablePath(cleaned)
+	rel, err := filepath.Rel(normalizedCWD, normalizedPath)
+	if err == nil {
+		rel = filepath.Clean(rel)
+		if rel != "." && rel != "" && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return filepath.ToSlash(rel), nil
+		}
+	}
+
+	return filepath.Base(cleaned), nil
+}
+
+func normalizeComparablePath(p string) string {
+	if abs, err := filepath.Abs(p); err == nil {
+		p = abs
+	}
+	if resolved, err := filepath.EvalSymlinks(p); err == nil {
+		return resolved
+	}
+	return filepath.Clean(p)
 }

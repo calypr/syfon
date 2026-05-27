@@ -414,6 +414,13 @@ func TestChecksumRouteRegression_WithRealCoreAndDB(t *testing.T) {
 			Type:     "sha256",
 			Checksum: checksum,
 		}},
+		AccessMethods: &[]drs.AccessMethod{{
+			Type: "s3",
+			AccessUrl: &struct {
+				Headers *[]string `json:"headers,omitempty"`
+				Url     string    `json:"url"`
+			}{Url: "s3://bucket/checksum-regression-obj"},
+		}},
 		Size: 123,
 	}})
 	if err != nil {

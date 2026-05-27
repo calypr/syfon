@@ -41,6 +41,9 @@ func HandleError(c fiber.Ctx, err error) error {
 	case errors.Is(err, common.ErrNoValidSHA256):
 		status = http.StatusBadRequest
 		msg = "A valid SHA256 checksum is required"
+	case errors.Is(err, common.ErrAccessMethodsRequired):
+		status = http.StatusBadRequest
+		msg = err.Error()
 	}
 
 	requestID := common.GetRequestID(c.Context())

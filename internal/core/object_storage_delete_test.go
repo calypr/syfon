@@ -152,6 +152,13 @@ func TestScopedStorageHelperUtilities(t *testing.T) {
 		t.Fatalf("unexpected empty-key normalization: %q", got)
 	}
 
+	if got := normalizeScopedStorageKey("Lab_Projects/Embedding_Rotation/object.txt", []models.BucketScope{
+		{PathPrefix: "Lab_Projects"},
+		{PathPrefix: "Lab_Projects/Embedding_Rotation"},
+	}); got != "Lab_Projects/Embedding_Rotation/object.txt" {
+		t.Fatalf("expected nested scoped prefix to remain stable, got %q", got)
+	}
+
 	if got := trimLeadingStoragePrefix("org/project/object.txt", "org"); got != "project/object.txt" {
 		t.Fatalf("unexpected trimmed key: %q", got)
 	}

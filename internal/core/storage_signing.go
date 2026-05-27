@@ -237,14 +237,7 @@ func parseS3Location(accessURL string) (bucket string, key string, ok bool) {
 
 func normalizeScopedStorageKey(key string, scopes []models.BucketScope) string {
 	key = strings.Trim(strings.TrimSpace(key), "/")
-	prefixes := make([]string, 0, len(scopes))
-	for _, scope := range scopes {
-		prefix := strings.Trim(strings.TrimSpace(scope.PathPrefix), "/")
-		if prefix == "" {
-			continue
-		}
-		prefixes = append(prefixes, prefix)
-	}
+	prefixes := normalizedScopePrefixes(scopes)
 	remainder := key
 	for _, prefix := range prefixes {
 		remainder = trimLeadingStoragePrefix(remainder, prefix)
@@ -258,6 +251,32 @@ func normalizeScopedStorageKey(key string, scopes []models.BucketScope) string {
 	default:
 		return path.Join(composedPrefix, remainder)
 	}
+}
+
+func normalizedScopePrefixes(scopes []models.BucketScope) []string {
+	prefixes := make([]string, 0, len(scopes))
+	for _, scope := range scopes {
+		prefix := strings.Trim(strings.TrimSpace(scope.PathPrefix), "/")
+		if prefix == "" {
+			continue
+		}
+		if len(prefixes) == 0 {
+			prefixes = append(prefixes, prefix)
+			continue
+		}
+		last := prefixes[len(prefixes)-1]
+		switch {
+		case prefix == last:
+			continue
+		case strings.HasPrefix(prefix, last+"/"):
+			prefixes[len(prefixes)-1] = prefix
+		case strings.HasPrefix(last, prefix+"/"):
+			continue
+		default:
+			prefixes = append(prefixes, prefix)
+		}
+	}
+	return prefixes
 }
 
 func trimLeadingStoragePrefix(key, prefix string) string {

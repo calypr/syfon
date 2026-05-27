@@ -175,7 +175,11 @@ func (d *DataService) Stat(ctx context.Context, guid string) (*transfer.ObjectMe
 }
 
 func (d *DataService) GetReader(ctx context.Context, guid string) (io.ReadCloser, error) {
-	resp, err := d.Download(ctx, guid, nil, nil)
+	signedURL, err := d.ResolveDownloadURL(ctx, guid, "")
+	if err != nil {
+		return nil, err
+	}
+	resp, err := d.Download(ctx, signedURL, nil, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -183,12 +187,16 @@ func (d *DataService) GetReader(ctx context.Context, guid string) (io.ReadCloser
 }
 
 func (d *DataService) GetRangeReader(ctx context.Context, guid string, offset, length int64) (io.ReadCloser, error) {
+	signedURL, err := d.ResolveDownloadURL(ctx, guid, "")
+	if err != nil {
+		return nil, err
+	}
 	var end *int64
 	if length > 0 {
 		e := offset + length - 1
 		end = &e
 	}
-	resp, err := d.Download(ctx, guid, &offset, end)
+	resp, err := d.Download(ctx, signedURL, &offset, end)
 	if err != nil {
 		return nil, err
 	}

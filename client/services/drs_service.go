@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 
 	drsapi "github.com/calypr/syfon/apigen/client/drs"
@@ -13,6 +14,7 @@ import (
 )
 
 var ErrNoRecordsForHash = errors.New("no records found for hash")
+var ErrObjectNotFound = errors.New("drs object not found")
 
 type DRSService struct {
 	gen   drsapi.ClientWithResponsesInterface
@@ -56,6 +58,9 @@ func (s *DRSService) GetObject(ctx context.Context, objectID string) (drsapi.Drs
 		return drsapi.DrsObject{}, err
 	}
 	if resp.JSON200 == nil {
+		if resp.StatusCode() == http.StatusNotFound {
+			return drsapi.DrsObject{}, fmt.Errorf("%w: %s", ErrObjectNotFound, objectID)
+		}
 		return drsapi.DrsObject{}, fmt.Errorf("unexpected response: %d", resp.StatusCode())
 	}
 	return *resp.JSON200, nil
@@ -138,6 +143,22 @@ func (s *DRSService) RegisterObjects(ctx context.Context, req drsapi.RegisterObj
 		return drsapi.N201ObjectsCreated{}, fmt.Errorf("unexpected response: %d", resp.StatusCode())
 	}
 	return *resp.JSON201, nil
+}
+
+func (s *DRSService) UpdateObjectAccessMethods(ctx context.Context, objectID string, accessMethods []drsapi.AccessMethod) (drsapi.DrsObject, error) {
+	resp, err := s.gen.UpdateObjectAccessMethodsWithResponse(ctx, objectID, drsapi.UpdateObjectAccessMethodsJSONRequestBody{
+		AccessMethods: accessMethods,
+	})
+	if err != nil {
+		return drsapi.DrsObject{}, err
+	}
+	if resp.JSON200 == nil {
+		if resp.StatusCode() == http.StatusNotFound {
+			return drsapi.DrsObject{}, fmt.Errorf("%w: %s", ErrObjectNotFound, objectID)
+		}
+		return drsapi.DrsObject{}, fmt.Errorf("unexpected response: %d", resp.StatusCode())
+	}
+	return *resp.JSON200, nil
 }
 
 func (s *DRSService) ListObjectsByProject(ctx context.Context, projectID string, limit, page int) (DRSPage, error) {

@@ -11,11 +11,13 @@ import (
 	drsapi "github.com/calypr/syfon/apigen/client/drs"
 	"github.com/calypr/syfon/client/common"
 	"github.com/calypr/syfon/client/transfer"
+	syfoncommon "github.com/calypr/syfon/common"
 )
 
 type MetadataClient interface {
 	GetObject(ctx context.Context, objectID string) (drsapi.DrsObject, error)
 	RegisterObjects(ctx context.Context, req drsapi.RegisterObjectsJSONRequestBody) (drsapi.N201ObjectsCreated, error)
+	UpdateObjectAccessMethods(ctx context.Context, objectID string, accessMethods []drsapi.AccessMethod) (drsapi.DrsObject, error)
 }
 
 // RegisterFile orchestrates the full registration and upload flow:
@@ -30,38 +32,19 @@ func RegisterFile(ctx context.Context, bk UploadBackend, dc MetadataClient, drsO
 		return nil, fmt.Errorf("drsObject must be provided (containing at least checksums/size)")
 	}
 	requestedID := strings.TrimSpace(drsObject.Id)
+	if requestedID == "" {
+		return nil, fmt.Errorf("drsObject must include an id")
+	}
 	storageID := requestedID
-
-	// 2. Register with DRS server
-	requestedAlias := "id:" + requestedID
-	finalAliases := []string{requestedAlias}
-	if drsObject.Aliases != nil {
-		finalAliases = append(finalAliases, *drsObject.Aliases...)
+	metadataControlledAccess := []string(nil)
+	if drsObject.ControlledAccess != nil {
+		metadataControlledAccess = append([]string(nil), (*drsObject.ControlledAccess)...)
+	}
+	metadata := common.FileMetadata{
+		Authorizations: syfoncommon.ControlledAccessToAuthzMap(syfoncommon.NormalizeAccessResources(metadataControlledAccess)),
 	}
 
-	candidates := []drsapi.DrsObjectCandidate{{
-		Name:             drsObject.Name,
-		Size:             drsObject.Size,
-		Checksums:        drsObject.Checksums,
-		Aliases:          &finalAliases,
-		AccessMethods:    drsObject.AccessMethods,
-		ControlledAccess: drsObject.ControlledAccess,
-		Description:      drsObject.Description,
-		MimeType:         drsObject.MimeType,
-		Version:          drsObject.Version,
-	}}
-	res, err := dc.RegisterObjects(ctx, drsapi.RegisterObjectsJSONRequestBody{
-		Candidates: candidates,
-	})
-	if err == nil && len(res.Objects) > 0 && strings.TrimSpace(res.Objects[0].Id) != "" {
-		drsObject.Id = res.Objects[0].Id
-	}
-	storageID = strings.TrimSpace(drsObject.Id)
-
-	// 3. Check if file is already downloadable (optional but good optimization)
-	// (Skipping for now to prioritize core functionality, but can be added back)
-
-	// 4. Determine upload filename/key
+	// 2. Determine upload filename/key
 	// Content-Addressable Storage (CAS): We prioritize the SHA256 hash as the storage key.
 	uploadFilename := filepath.Base(filePath)
 	for _, c := range drsObject.Checksums {
@@ -88,7 +71,7 @@ func RegisterFile(ctx context.Context, bk UploadBackend, dc MetadataClient, drsO
 		}
 	}
 
-	// 5. Perform Upload
+	// 3. Perform Upload
 	file, err := os.Open(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open file for upload: %w", err)
@@ -101,94 +84,114 @@ func RegisterFile(ctx context.Context, bk UploadBackend, dc MetadataClient, drsO
 	}
 
 	threshold := int64(4.5 * float64(common.GB)) // Default threshold with safety buffer
+	canonicalInput := ""
 	if stat.Size() < threshold {
-		uploadURL, err := bk.ResolveUploadURL(ctx, storageID, uploadFilename, common.FileMetadata{}, bucketName)
+		uploadURL, err := bk.ResolveUploadURL(ctx, storageID, uploadFilename, metadata, bucketName)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get upload URL: %w", err)
 		}
-		if err := bk.Upload(ctx, uploadURL, file, stat.Size()); err != nil {
+		if err := UploadSingle(ctx, bk, bk.Logger(), filePath, uploadFilename, storageID, bucketName, metadata, false); err != nil {
 			return nil, fmt.Errorf("upload failed: %w", err)
 		}
-
-		// 6. Finalize registration for single-part (Multipart handles its own completion)
-		canonical, err := bk.CanonicalObjectURL(uploadURL, bucketName, storageID)
-		if err != nil || canonical == "" {
-			if err == nil {
-				err = fmt.Errorf("empty canonical URL returned")
-			}
-			return nil, fmt.Errorf("failed to derive canonical object URL: %w", err)
-		}
-
-		// Fetch the latest record to preserve existing metadata (like Authz)
-		current, getErr := dc.GetObject(ctx, drsObject.Id)
-		if getErr != nil {
-			current = *drsObject
-		}
-		controlledAccess := current.ControlledAccess
-		if controlledAccess == nil {
-			controlledAccess = drsObject.ControlledAccess
-		}
-
-		u, parseErr := url.Parse(canonical)
-		if parseErr != nil || u.Scheme == "" {
-			return nil, fmt.Errorf("failed to determine provider type from canonical URL: %s", canonical)
-		}
-		pType := u.Scheme
-
-		am := drsapi.AccessMethod{
-			Type: drsapi.AccessMethodType(pType),
-			AccessUrl: &struct {
-				Headers *[]string `json:"headers,omitempty"`
-				Url     string    `json:"url"`
-			}{Url: canonical},
-		}
-
-		// Deep merge or update access methods
-		found := false
-		if current.AccessMethods != nil {
-			for i, existing := range *current.AccessMethods {
-				// Match by URL or by the specific pType we just uploaded to
-				if (existing.AccessUrl != nil && existing.AccessUrl.Url == canonical) || (string(existing.Type) == pType && (existing.AccessUrl == nil || existing.AccessUrl.Url == "")) {
-					(*current.AccessMethods)[i] = am
-					found = true
-					break
-				}
-			}
-		}
-		if !found {
-			if current.AccessMethods == nil {
-				current.AccessMethods = &[]drsapi.AccessMethod{}
-			}
-			*current.AccessMethods = append(*current.AccessMethods, am)
-		}
-
-		// Finalize registration by updating with the access method
-		candidates = []drsapi.DrsObjectCandidate{{
-			// We use Aliases to reference the existing ID if we can't use id field
-			Name:             drsObject.Name,
-			Size:             drsObject.Size,
-			Checksums:        drsObject.Checksums,
-			Aliases:          &finalAliases,
-			AccessMethods:    current.AccessMethods,
-			ControlledAccess: controlledAccess,
-			Description:      drsObject.Description,
-			MimeType:         drsObject.MimeType,
-			Version:          drsObject.Version,
-		}}
-		if _, updateErr := dc.RegisterObjects(ctx, drsapi.RegisterObjectsJSONRequestBody{
-			Candidates: candidates,
-		}); updateErr != nil {
-			// Keep the local object usable even if the server-side metadata refresh is unavailable.
-			// The caller can still persist the final access URL through the index API.
-		}
-		drsObject.AccessMethods = current.AccessMethods
-		drsObject.ControlledAccess = controlledAccess
+		canonicalInput = uploadURL
 	} else {
-		if err := Upload(ctx, bk, filePath, uploadFilename, storageID, bucketName, common.FileMetadata{}, false, true); err != nil {
+		if err := Upload(ctx, bk, filePath, uploadFilename, storageID, bucketName, metadata, false, true); err != nil {
 			return nil, fmt.Errorf("multipart upload failed: %w", err)
 		}
+		canonicalInput = "s3://" + strings.Trim(strings.TrimSpace(bucketName), "/") + "/" + strings.Trim(strings.TrimSpace(uploadFilename), "/")
 	}
 
+	// 4. Finalize registration with a concrete access location.
+	canonical, err := bk.CanonicalObjectURL(canonicalInput, bucketName, storageID)
+	if err != nil || canonical == "" {
+		if err == nil {
+			err = fmt.Errorf("empty canonical URL returned")
+		}
+		return nil, fmt.Errorf("failed to derive canonical object URL: %w", err)
+	}
+
+	current, getErr := dc.GetObject(ctx, drsObject.Id)
+	if getErr != nil {
+		current = *drsObject
+	}
+	controlledAccess := current.ControlledAccess
+	if controlledAccess == nil {
+		controlledAccess = drsObject.ControlledAccess
+	}
+
+	u, parseErr := url.Parse(canonical)
+	if parseErr != nil || u.Scheme == "" {
+		return nil, fmt.Errorf("failed to determine provider type from canonical URL: %s", canonical)
+	}
+	pType := u.Scheme
+
+	am := drsapi.AccessMethod{
+		Type: drsapi.AccessMethodType(pType),
+		AccessUrl: &struct {
+			Headers *[]string `json:"headers,omitempty"`
+			Url     string    `json:"url"`
+		}{Url: canonical},
+	}
+
+	found := false
+	if current.AccessMethods != nil {
+		for i, existing := range *current.AccessMethods {
+			if (existing.AccessUrl != nil && existing.AccessUrl.Url == canonical) || (string(existing.Type) == pType && (existing.AccessUrl == nil || existing.AccessUrl.Url == "")) {
+				(*current.AccessMethods)[i] = am
+				found = true
+				break
+			}
+		}
+	}
+	if !found {
+		if current.AccessMethods == nil {
+			current.AccessMethods = &[]drsapi.AccessMethod{}
+		}
+		*current.AccessMethods = append(*current.AccessMethods, am)
+	}
+
+	requestedAlias := "id:" + requestedID
+	finalAliases := []string{requestedAlias}
+	if drsObject.Aliases != nil {
+		finalAliases = append(finalAliases, *drsObject.Aliases...)
+	}
+
+	candidates := []drsapi.DrsObjectCandidate{{
+		Name:             drsObject.Name,
+		Size:             drsObject.Size,
+		Checksums:        drsObject.Checksums,
+		Aliases:          &finalAliases,
+		AccessMethods:    current.AccessMethods,
+		ControlledAccess: controlledAccess,
+		Description:      drsObject.Description,
+		MimeType:         drsObject.MimeType,
+		Version:          drsObject.Version,
+	}}
+
+	res, err := dc.RegisterObjects(ctx, drsapi.RegisterObjectsJSONRequestBody{Candidates: candidates})
+	if err != nil {
+		return nil, err
+	}
+
+	finalID := drsObject.Id
+	if len(res.Objects) > 0 && strings.TrimSpace(res.Objects[0].Id) != "" {
+		finalID = strings.TrimSpace(res.Objects[0].Id)
+	}
+
+	if current.AccessMethods != nil && len(*current.AccessMethods) > 0 {
+		updated, err := dc.UpdateObjectAccessMethods(ctx, finalID, *current.AccessMethods)
+		if err != nil {
+			return nil, fmt.Errorf("persist finalized access methods: %w", err)
+		}
+		return &updated, nil
+	}
+
+	if len(res.Objects) > 0 {
+		obj := res.Objects[0]
+		return &obj, nil
+	}
+	drsObject.AccessMethods = current.AccessMethods
+	drsObject.ControlledAccess = controlledAccess
 	return drsObject, nil
 }
 

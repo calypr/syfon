@@ -233,7 +233,7 @@ func TestDataServiceOperationsAndTransferHelpers(t *testing.T) {
 	}
 
 	transferRequester := &recordingRequester{response: &http.Response{StatusCode: http.StatusPartialContent, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("payload"))}}
-	transferService := NewDataService(nil, transferRequester, discardLogger(), nil)
+	transferService := NewDataService(mustInternalClient(t, server.URL), transferRequester, discardLogger(), nil)
 	resp, err := transferService.Download(ctx, "https://download.example/file-3", ptrInt64(3), ptrInt64(8))
 	if err != nil || resp.StatusCode != http.StatusPartialContent {
 		t.Fatalf("Download returned resp=%v err=%v", resp, err)
