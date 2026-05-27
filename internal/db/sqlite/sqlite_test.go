@@ -242,6 +242,41 @@ func TestSqliteDB_GetObjectsByChecksum_WhenIDDiffers(t *testing.T) {
 	}
 }
 
+func TestSqliteDB_GetObject_LegacyNameFallsBackToFileName(t *testing.T) {
+	ctx := context.Background()
+	db, err := NewSqliteDB(":memory:")
+	if err != nil {
+		t.Fatalf("failed to create db: %v", err)
+	}
+
+	now := time.Now().UTC()
+	if _, err := db.db.ExecContext(ctx, `
+		INSERT INTO drs_object (id, size, created_time, updated_time, name, file_name, version, description)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		"legacy-1", int64(42), now, now, "nested/dir/file.txt", nil, "v1", "desc",
+	); err != nil {
+		t.Fatalf("insert legacy object: %v", err)
+	}
+	if _, err := db.db.ExecContext(ctx, `
+		INSERT INTO drs_object_access_method (object_id, url, type)
+		VALUES (?, ?, ?)`,
+		"legacy-1", "s3://bucket/key", "s3",
+	); err != nil {
+		t.Fatalf("insert access method: %v", err)
+	}
+
+	obj, err := db.GetObject(ctx, "legacy-1")
+	if err != nil {
+		t.Fatalf("GetObject failed: %v", err)
+	}
+	if got := common.StringVal(obj.Name); got != "file.txt" {
+		t.Fatalf("expected basename name, got %q", got)
+	}
+	if got, _ := obj.Properties["file_name"].(string); got != "nested/dir/file.txt" {
+		t.Fatalf("expected legacy path to populate file_name, got %#v", obj.Properties["file_name"])
+	}
+}
+
 func TestSqliteDB_ObjectAliasLifecycle(t *testing.T) {
 	ctx := context.Background()
 	db, err := NewSqliteDB(":memory:")

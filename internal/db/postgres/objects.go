@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"path"
 	"sort"
 	"strings"
 	"time"
@@ -26,6 +27,22 @@ func postgresStoredFileName(obj *models.InternalObject) string {
 		return ""
 	}
 	return common.StringVal(obj.Name)
+}
+
+func postgresLoadedNames(name, fileName sql.NullString) (string, string) {
+	loadedName := strings.TrimSpace(name.String)
+	loadedFileName := strings.TrimSpace(fileName.String)
+	if loadedFileName == "" {
+		loadedFileName = loadedName
+		loadedName = ""
+	}
+	if loadedName == "" && loadedFileName != "" {
+		loadedName = path.Base(strings.Trim(loadedFileName, "/"))
+		if loadedName == "." || loadedName == "/" || loadedName == "" {
+			loadedName = loadedFileName
+		}
+	}
+	return loadedName, loadedFileName
 }
 
 func (db *PostgresDB) DeleteObject(ctx context.Context, id string) error {
@@ -122,10 +139,11 @@ func (db *PostgresDB) GetObject(ctx context.Context, id string) (*models.Interna
 retryLookup:
 	// 1. Fetch main record
 	var r models.DrsObjectRecord
+	var name, fileName, version, description sql.NullString
 	err := db.db.QueryRowContext(ctx, `
 		SELECT id, size, created_time, updated_time, name, file_name, version, description
 		FROM drs_object WHERE id = $1`, lookupID).Scan(
-		&r.ID, &r.Size, &r.CreatedTime, &r.UpdatedTime, &r.Name, &r.FileName, &r.Version, &r.Description,
+		&r.ID, &r.Size, &r.CreatedTime, &r.UpdatedTime, &name, &fileName, &version, &description,
 	)
 	if err == sql.ErrNoRows {
 		if !resolvedAlias {
@@ -144,6 +162,9 @@ retryLookup:
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch record: %w", err)
 	}
+	r.Name, r.FileName = postgresLoadedNames(name, fileName)
+	r.Version = version.String
+	r.Description = description.String
 	objectID := r.ID
 	if resolvedAlias && requestID != "" {
 		objectID = requestID
@@ -1146,7 +1167,9 @@ func (db *PostgresDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []st
 
 	for rows.Next() {
 		var (
-			id, name, fileName, version, description string
+			id                             string
+			name, fileName                 sql.NullString
+			version, description           sql.NullString
 			size                           int64
 			createdTime, updatedTime       time.Time
 		)
@@ -1156,21 +1179,22 @@ func (db *PostgresDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []st
 			return nil, err
 		}
 
+		loadedName, loadedFileName := postgresLoadedNames(name, fileName)
 		objectsByID[id] = &models.InternalObject{
 			DrsObject: drs.DrsObject{
 				Id:          id,
 				Size:        size,
 				CreatedTime: createdTime,
 				UpdatedTime: common.Ptr(updatedTime),
-				Name:        common.Ptr(name),
-				Version:     common.Ptr(version),
-				Description: common.Ptr(description),
+				Name:        common.Ptr(loadedName),
+				Version:     common.Ptr(version.String),
+				Description: common.Ptr(description.String),
 				SelfUri:     "drs://" + id,
 			},
 			Properties: map[string]interface{}{},
 		}
-		if strings.TrimSpace(fileName) != "" {
-			objectsByID[id].Properties["file_name"] = fileName
+		if strings.TrimSpace(loadedFileName) != "" {
+			objectsByID[id].Properties["file_name"] = loadedFileName
 		}
 	}
 

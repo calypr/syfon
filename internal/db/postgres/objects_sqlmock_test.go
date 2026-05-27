@@ -191,6 +191,41 @@ func TestGetObject_IgnoresAuthContext(t *testing.T) {
 	}
 }
 
+func TestGetObject_LegacyNameFallsBackToFileName(t *testing.T) {
+	pg, mock, rawDB := newMockPostgresDB(t)
+	defer rawDB.Close()
+
+	now := time.Date(2026, time.March, 1, 10, 0, 0, 0, time.UTC)
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT id, size, created_time, updated_time, name, file_name, version, description
+		FROM drs_object WHERE id = $1`)).
+		WithArgs("obj-legacy").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "size", "created_time", "updated_time", "name", "file_name", "version", "description",
+		}).AddRow("obj-legacy", int64(1), now, now, "nested/dir/file.txt", nil, "v", "d"))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT url, type FROM drs_object_access_method WHERE object_id = $1")).
+		WithArgs("obj-legacy").
+		WillReturnRows(sqlmock.NewRows([]string{"url", "type"}).
+			AddRow("s3://bucket/key", "s3"))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT resource FROM drs_object_controlled_access WHERE object_id = $1 ORDER BY resource")).
+		WithArgs("obj-legacy").
+		WillReturnRows(sqlmock.NewRows([]string{"resource"}))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT type, checksum FROM drs_object_checksum WHERE object_id = $1")).
+		WithArgs("obj-legacy").
+		WillReturnRows(sqlmock.NewRows([]string{"type", "checksum"}))
+
+	obj, err := pg.GetObject(context.Background(), "obj-legacy")
+	if err != nil {
+		t.Fatalf("GetObject returned error: %v", err)
+	}
+	if got := common.StringVal(obj.Name); got != "file.txt" {
+		t.Fatalf("expected basename name, got %q", got)
+	}
+	if got, _ := obj.Properties["file_name"].(string); got != "nested/dir/file.txt" {
+		t.Fatalf("expected legacy path to populate file_name, got %#v", obj.Properties["file_name"])
+	}
+}
+
 func TestGetBulkObjects_UsesSplitHydrationQueries(t *testing.T) {
 	pg, mock, rawDB := newMockPostgresDB(t)
 	defer rawDB.Close()
