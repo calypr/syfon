@@ -3,6 +3,7 @@ package services
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -107,7 +108,7 @@ func (s *DataService) multipartInitRequest(ctx context.Context, req internalapi.
 		return internalapi.InternalMultipartInitOutput{}, err
 	}
 	if resp.JSON200 == nil {
-		return internalapi.InternalMultipartInitOutput{}, fmt.Errorf("failed to init multipart: %d", resp.StatusCode())
+		return internalapi.InternalMultipartInitOutput{}, internalAPIResponseError("failed to init multipart", resp.StatusCode(), resp.Body)
 	}
 	return *resp.JSON200, nil
 }
@@ -118,7 +119,7 @@ func (d *DataService) multipartUploadRequest(ctx context.Context, req internalap
 		return internalapi.InternalMultipartUploadOutput{}, err
 	}
 	if resp.JSON200 == nil {
-		return internalapi.InternalMultipartUploadOutput{}, fmt.Errorf("failed to upload part: %d", resp.StatusCode())
+		return internalapi.InternalMultipartUploadOutput{}, internalAPIResponseError("failed to upload part", resp.StatusCode(), resp.Body)
 	}
 	return *resp.JSON200, nil
 }
@@ -129,9 +130,32 @@ func (d *DataService) multipartCompleteRequest(ctx context.Context, req internal
 		return err
 	}
 	if resp.StatusCode() != http.StatusOK && resp.StatusCode() != http.StatusCreated {
-		return fmt.Errorf("failed to complete multipart: %d", resp.StatusCode())
+		return internalAPIResponseError("failed to complete multipart", resp.StatusCode(), resp.Body)
 	}
 	return nil
+}
+
+func internalAPIResponseError(prefix string, status int, body []byte) error {
+	msg := strings.TrimSpace(string(body))
+	if msg != "" {
+		var payload struct {
+			Error *struct {
+				Message string `json:"message"`
+				Type    string `json:"type"`
+			} `json:"error"`
+			Message string `json:"message"`
+		}
+		if err := json.Unmarshal(body, &payload); err == nil {
+			switch {
+			case payload.Error != nil && strings.TrimSpace(payload.Error.Message) != "":
+				msg = strings.TrimSpace(payload.Error.Message)
+			case strings.TrimSpace(payload.Message) != "":
+				msg = strings.TrimSpace(payload.Message)
+			}
+		}
+		return fmt.Errorf("%s: %d: %s", prefix, status, msg)
+	}
+	return fmt.Errorf("%s: %d", prefix, status)
 }
 
 // --- transfer.WriteBackend interface support ---
@@ -243,22 +267,6 @@ func (d *DataService) ResolveUploadURL(ctx context.Context, guid, filename strin
 	return *resp.Url, nil
 }
 
-func (d *DataService) ResolveScopedUploadURL(ctx context.Context, guid, filename string, metadata common.FileMetadata, organization, project string) (string, error) {
-	resp, err := d.UploadURL(ctx, UploadURLRequest{
-		FileID:       guid,
-		FileName:     filename,
-		Organization: organization,
-		Project:      project,
-	})
-	if err != nil {
-		return "", err
-	}
-	if resp.Url == nil {
-		return "", fmt.Errorf("response missing URL")
-	}
-	return *resp.Url, nil
-}
-
 func uploadScopeFromMetadata(metadata common.FileMetadata) (string, string) {
 	if len(metadata.Authorizations) == 0 {
 		return "", ""
@@ -323,9 +331,22 @@ func (d *DataService) Validate(ctx context.Context, bucket string) error {
 // --- transfer.MultipartURLSigner interface support ---
 
 func (d *DataService) InitMultipartUpload(ctx context.Context, guid, filename, bucket string) (string, string, error) {
+	return d.InitMultipartUploadWithMetadata(ctx, guid, filename, bucket, common.FileMetadata{})
+}
+
+func (d *DataService) InitMultipartUploadWithMetadata(ctx context.Context, guid, filename, bucket string, metadata common.FileMetadata) (string, string, error) {
+	organization, project := uploadScopeFromMetadata(metadata)
 	req := internalapi.InternalMultipartInitRequest{
-		Guid:     &guid,
-		FileName: &filename,
+		Guid:         &guid,
+		FileName:     &filename,
+		Organization: nil,
+		Project:      nil,
+	}
+	if organization != "" {
+		req.Organization = &organization
+	}
+	if project != "" {
+		req.Project = &project
 	}
 	resp, err := d.multipartInitRequest(ctx, req)
 	if err != nil {
