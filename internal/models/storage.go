@@ -217,6 +217,7 @@ type DrsObjectRecord struct {
 	CreatedTime time.Time
 	UpdatedTime time.Time
 	Name        string
+	FileName    string
 	Version     string
 	Description string
 }

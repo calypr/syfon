@@ -4,9 +4,13 @@ CREATE TABLE IF NOT EXISTS drs_object (
   created_time TIMESTAMPTZ,
   updated_time TIMESTAMPTZ,
   name TEXT,
+  file_name TEXT,
   version TEXT,
   description TEXT
 );
+
+ALTER TABLE drs_object
+  ADD COLUMN IF NOT EXISTS file_name TEXT;
 
 CREATE TABLE IF NOT EXISTS drs_object_access_method (
   object_id TEXT NOT NULL,

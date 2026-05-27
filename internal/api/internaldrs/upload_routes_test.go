@@ -385,6 +385,13 @@ func TestHandleInternalUploadURL_ResolvesRegisteredScopedObjectID(t *testing.T) 
 		Size:             20,
 		Checksums:        []drs.Checksum{{Type: "sha256", Checksum: oid}},
 		ControlledAccess: &[]string{"/organization/syfon/project/e2e"},
+		AccessMethods: &[]drs.AccessMethod{{
+			Type: drs.AccessMethodTypeS3,
+			AccessUrl: &struct {
+				Headers *[]string `json:"headers,omitempty"`
+				Url     string    `json:"url"`
+			}{Url: "s3://syfon-e2e-bucket/program-root/" + oid},
+		}},
 	}, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("CandidateToInternalObject failed: %v", err)

@@ -87,7 +87,7 @@ func TestGetObject_NotFound(t *testing.T) {
 	defer rawDB.Close()
 
 	mock.ExpectQuery(regexp.QuoteMeta(`
-		SELECT id, size, created_time, updated_time, name, version, description
+		SELECT id, size, created_time, updated_time, name, file_name, version, description
 		FROM drs_object WHERE id = $1`)).
 		WithArgs("missing").
 		WillReturnError(sql.ErrNoRows)
@@ -108,12 +108,12 @@ func TestGetObject_DeduplicatesAndPropagatesAuthz(t *testing.T) {
 	created := time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC)
 	updated := created.Add(2 * time.Hour)
 	mock.ExpectQuery(regexp.QuoteMeta(`
-		SELECT id, size, created_time, updated_time, name, version, description
+		SELECT id, size, created_time, updated_time, name, file_name, version, description
 		FROM drs_object WHERE id = $1`)).
 		WithArgs("obj-1").
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "size", "created_time", "updated_time", "name", "version", "description",
-		}).AddRow("obj-1", int64(123), created, updated, "file.txt", "v1", "desc"))
+			"id", "size", "created_time", "updated_time", "name", "file_name", "version", "description",
+		}).AddRow("obj-1", int64(123), created, updated, "file.txt", "nested/file.txt", "v1", "desc"))
 
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT url, type FROM drs_object_access_method WHERE object_id = $1")).
 		WithArgs("obj-1").
@@ -162,12 +162,12 @@ func TestGetObject_IgnoresAuthContext(t *testing.T) {
 
 	now := time.Date(2026, time.March, 1, 10, 0, 0, 0, time.UTC)
 	mock.ExpectQuery(regexp.QuoteMeta(`
-		SELECT id, size, created_time, updated_time, name, version, description
+		SELECT id, size, created_time, updated_time, name, file_name, version, description
 		FROM drs_object WHERE id = $1`)).
 		WithArgs("obj-2").
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "size", "created_time", "updated_time", "name", "version", "description",
-		}).AddRow("obj-2", int64(1), now, now, "n", "v", "d"))
+			"id", "size", "created_time", "updated_time", "name", "file_name", "version", "description",
+		}).AddRow("obj-2", int64(1), now, now, "n", "nested/n", "v", "d"))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT url, type FROM drs_object_access_method WHERE object_id = $1")).
 		WithArgs("obj-2").
 		WillReturnRows(sqlmock.NewRows([]string{"url", "type"}).
@@ -205,6 +205,7 @@ func TestGetBulkObjects_UsesSplitHydrationQueries(t *testing.T) {
 			o.created_time,
 			o.updated_time,
 			o.name,
+			o.file_name,
 			o.version,
 			o.description
 		FROM drs_object o
@@ -222,10 +223,10 @@ func TestGetBulkObjects_UsesSplitHydrationQueries(t *testing.T) {
 		)`)).
 		WithArgs(pq.Array([]string{"obj-2", "obj-1", "obj-2"}), pq.Array([]string(nil))).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "size", "created_time", "updated_time", "name", "version", "description",
+			"id", "size", "created_time", "updated_time", "name", "file_name", "version", "description",
 		}).
-			AddRow("obj-1", int64(10), created, updated, "file-1", "v1", "desc-1").
-			AddRow("obj-2", int64(20), created, updated, "file-2", "v2", "desc-2"))
+			AddRow("obj-1", int64(10), created, updated, "file-1", "nested/file-1", "v1", "desc-1").
+			AddRow("obj-2", int64(20), created, updated, "file-2", "nested/file-2", "v2", "desc-2"))
 
 	mock.ExpectQuery(regexp.QuoteMeta(`
 		SELECT object_id, url, type

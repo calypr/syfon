@@ -16,6 +16,18 @@ import (
 	"github.com/lib/pq"
 )
 
+func postgresStoredFileName(obj *models.InternalObject) string {
+	if obj != nil && obj.Properties != nil {
+		if raw, ok := obj.Properties["file_name"].(string); ok && strings.TrimSpace(raw) != "" {
+			return strings.TrimSpace(raw)
+		}
+	}
+	if obj == nil {
+		return ""
+	}
+	return common.StringVal(obj.Name)
+}
+
 func (db *PostgresDB) DeleteObject(ctx context.Context, id string) error {
 	tx, err := db.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -111,9 +123,9 @@ retryLookup:
 	// 1. Fetch main record
 	var r models.DrsObjectRecord
 	err := db.db.QueryRowContext(ctx, `
-		SELECT id, size, created_time, updated_time, name, version, description
+		SELECT id, size, created_time, updated_time, name, file_name, version, description
 		FROM drs_object WHERE id = $1`, lookupID).Scan(
-		&r.ID, &r.Size, &r.CreatedTime, &r.UpdatedTime, &r.Name, &r.Version, &r.Description,
+		&r.ID, &r.Size, &r.CreatedTime, &r.UpdatedTime, &r.Name, &r.FileName, &r.Version, &r.Description,
 	)
 	if err == sql.ErrNoRows {
 		if !resolvedAlias {
@@ -148,6 +160,10 @@ retryLookup:
 			Name:        common.Ptr(r.Name),
 			SelfUri:     "drs://" + objectID,
 		},
+		Properties: map[string]interface{}{},
+	}
+	if strings.TrimSpace(r.FileName) != "" {
+		obj.Properties["file_name"] = r.FileName
 	}
 	// 2. Fetch storage access methods.
 	urlRows, err := db.db.QueryContext(ctx, "SELECT url, type FROM drs_object_access_method WHERE object_id = $1", lookupID)
@@ -221,9 +237,9 @@ func (db *PostgresDB) CreateObject(ctx context.Context, obj *models.InternalObje
 
 	// Insert main record
 	_, err = tx.ExecContext(ctx, `
-		INSERT INTO drs_object (id, size, created_time, updated_time, name, version, description)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-		obj.Id, obj.Size, obj.CreatedTime, common.TimeVal(obj.UpdatedTime), common.StringVal(obj.Name), common.StringVal(obj.Version), common.StringVal(obj.Description),
+		INSERT INTO drs_object (id, size, created_time, updated_time, name, file_name, version, description)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		obj.Id, obj.Size, obj.CreatedTime, common.TimeVal(obj.UpdatedTime), common.StringVal(obj.Name), postgresStoredFileName(obj), common.StringVal(obj.Version), common.StringVal(obj.Description),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to insert drs_object: %w", err)
@@ -232,7 +248,7 @@ func (db *PostgresDB) CreateObject(ctx context.Context, obj *models.InternalObje
 	if err := insertControlledAccessTx(ctx, tx, obj.Id, objectAccessResources(obj)); err != nil {
 		return err
 	}
-	if err := postgresRebuildBrowseRowsForObjectTx(ctx, tx, obj.Id, common.StringVal(obj.Name), objectAccessResources(obj)); err != nil {
+	if err := postgresRebuildBrowseRowsForObjectTx(ctx, tx, obj.Id, postgresStoredFileName(obj), objectAccessResources(obj)); err != nil {
 		return fmt.Errorf("failed to update browse index: %w", err)
 	}
 
@@ -285,6 +301,7 @@ func (db *PostgresDB) RegisterObjects(ctx context.Context, objects []models.Inte
 	names := make([]string, 0, len(objects))
 	versions := make([]string, 0, len(objects))
 	descriptions := make([]string, 0, len(objects))
+	fileNames := make([]string, 0, len(objects))
 
 	accessObjectIDs := make([]string, 0)
 	accessURLs := make([]string, 0)
@@ -303,6 +320,7 @@ func (db *PostgresDB) RegisterObjects(ctx context.Context, objects []models.Inte
 		createdTimes = append(createdTimes, obj.CreatedTime)
 		updatedTimes = append(updatedTimes, common.TimeVal(obj.UpdatedTime))
 		names = append(names, common.StringVal(obj.Name))
+		fileNames = append(fileNames, postgresStoredFileName(&obj))
 		versions = append(versions, common.StringVal(obj.Version))
 		descriptions = append(descriptions, common.StringVal(obj.Description))
 
@@ -311,7 +329,7 @@ func (db *PostgresDB) RegisterObjects(ctx context.Context, objects []models.Inte
 			controlledObjectIDs = append(controlledObjectIDs, obj.Id)
 			controlledResources = append(controlledResources, resource)
 		}
-		browseRows = append(browseRows, postgresBrowseRowsForObject(obj.Id, common.StringVal(obj.Name), objectAccessResources(&obj))...)
+		browseRows = append(browseRows, postgresBrowseRowsForObject(obj.Id, postgresStoredFileName(&obj), objectAccessResources(&obj))...)
 		if obj.AccessMethods != nil {
 			for _, am := range *obj.AccessMethods {
 				if am.AccessUrl == nil || am.AccessUrl.Url == "" {
@@ -342,17 +360,18 @@ func (db *PostgresDB) RegisterObjects(ctx context.Context, objects []models.Inte
 	}
 
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO drs_object (id, size, created_time, updated_time, name, version, description)
-		SELECT * FROM UNNEST($1::text[], $2::bigint[], $3::timestamp[], $4::timestamp[], $5::text[], $6::text[], $7::text[])
+		INSERT INTO drs_object (id, size, created_time, updated_time, name, file_name, version, description)
+		SELECT * FROM UNNEST($1::text[], $2::bigint[], $3::timestamp[], $4::timestamp[], $5::text[], $6::text[], $7::text[], $8::text[])
 		ON CONFLICT (id) DO UPDATE SET
 			size = EXCLUDED.size,
 			created_time = EXCLUDED.created_time,
 			updated_time = EXCLUDED.updated_time,
 			name = EXCLUDED.name,
+			file_name = EXCLUDED.file_name,
 			version = EXCLUDED.version,
 			description = EXCLUDED.description`,
 		pq.Array(ids), pq.Array(sizes), pq.Array(createdTimes), pq.Array(updatedTimes),
-		pq.Array(names), pq.Array(versions), pq.Array(descriptions),
+		pq.Array(names), pq.Array(fileNames), pq.Array(versions), pq.Array(descriptions),
 	); err != nil {
 		return fmt.Errorf("failed bulk upsert drs_object: %w", err)
 	}
@@ -1100,6 +1119,7 @@ func (db *PostgresDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []st
 			o.created_time,
 			o.updated_time,
 			o.name,
+			o.file_name,
 			o.version,
 			o.description
 		FROM drs_object o
@@ -1126,12 +1146,12 @@ func (db *PostgresDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []st
 
 	for rows.Next() {
 		var (
-			id, name, version, description string
+			id, name, fileName, version, description string
 			size                           int64
 			createdTime, updatedTime       time.Time
 		)
 		if err := rows.Scan(
-			&id, &size, &createdTime, &updatedTime, &name, &version, &description,
+			&id, &size, &createdTime, &updatedTime, &name, &fileName, &version, &description,
 		); err != nil {
 			return nil, err
 		}
@@ -1147,6 +1167,10 @@ func (db *PostgresDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []st
 				Description: common.Ptr(description),
 				SelfUri:     "drs://" + id,
 			},
+			Properties: map[string]interface{}{},
+		}
+		if strings.TrimSpace(fileName) != "" {
+			objectsByID[id].Properties["file_name"] = fileName
 		}
 	}
 

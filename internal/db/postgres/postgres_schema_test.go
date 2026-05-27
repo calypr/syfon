@@ -14,6 +14,7 @@ func TestSchemaEnsurers(t *testing.T) {
 		defer rawDB.Close()
 
 		mock.ExpectExec("CREATE TABLE IF NOT EXISTS drs_object").WillReturnResult(sqlmock.NewResult(0, 0))
+		mock.ExpectExec(regexp.QuoteMeta("ALTER TABLE drs_object ADD COLUMN IF NOT EXISTS file_name TEXT")).WillReturnResult(sqlmock.NewResult(0, 0))
 		mock.ExpectExec("CREATE TABLE IF NOT EXISTS drs_object_access_method").WillReturnResult(sqlmock.NewResult(0, 0))
 		mock.ExpectExec("CREATE TABLE IF NOT EXISTS drs_object_controlled_access").WillReturnResult(sqlmock.NewResult(0, 0))
 		mock.ExpectExec("CREATE TABLE IF NOT EXISTS drs_object_checksum").WillReturnResult(sqlmock.NewResult(0, 0))

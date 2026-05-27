@@ -60,6 +60,7 @@ func (db *SqliteDB) initSchema() error {
 			created_time TIMESTAMP,
 			updated_time TIMESTAMP,
 			name TEXT,
+			file_name TEXT,
 			version TEXT,
 			description TEXT
 		)`,
@@ -249,6 +250,11 @@ func (db *SqliteDB) initSchema() error {
 		}
 	}
 	if _, err := db.db.Exec(`ALTER TABLE s3_credential ADD COLUMN provider TEXT NOT NULL DEFAULT 's3'`); err != nil {
+		if !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
+			return err
+		}
+	}
+	if _, err := db.db.Exec(`ALTER TABLE drs_object ADD COLUMN file_name TEXT NOT NULL DEFAULT ''`); err != nil {
 		if !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
 			return err
 		}

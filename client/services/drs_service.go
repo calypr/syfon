@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"path"
 	"strings"
 
 	drsapi "github.com/calypr/syfon/apigen/client/drs"
@@ -281,7 +282,13 @@ func internalRecordToDRSObject(rec *internalapi.InternalRecord) drsapi.DrsObject
 		Id:      rec.Did,
 		SelfUri: "drs://" + rec.Did,
 		Size:    size,
-		Name:    rec.FileName,
+	}
+	if rec.FileName != nil {
+		base := path.Base(strings.TrimSpace(*rec.FileName))
+		if base == "." || base == "/" || base == "" {
+			base = strings.TrimSpace(*rec.FileName)
+		}
+		obj.Name = &base
 	}
 	if rec.Hashes != nil {
 		hInfo := *rec.Hashes
