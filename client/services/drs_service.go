@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -62,7 +63,7 @@ func (s *DRSService) GetObject(ctx context.Context, objectID string) (drsapi.Drs
 		if resp.StatusCode() == http.StatusNotFound {
 			return drsapi.DrsObject{}, fmt.Errorf("%w: %s", ErrObjectNotFound, objectID)
 		}
-		return drsapi.DrsObject{}, fmt.Errorf("unexpected response: %d", resp.StatusCode())
+		return drsapi.DrsObject{}, drsResponseError(resp.StatusCode(), resp.Body)
 	}
 	return *resp.JSON200, nil
 }
@@ -77,7 +78,7 @@ func (s *DRSService) DeleteObject(ctx context.Context, objectID string, deleteSt
 		return err
 	}
 	if resp.StatusCode() != 200 && resp.StatusCode() != 204 {
-		return fmt.Errorf("unexpected response: %d", resp.StatusCode())
+		return drsResponseError(resp.StatusCode(), resp.Body)
 	}
 	return nil
 }
@@ -130,7 +131,7 @@ func (s *DRSService) GetAccessURL(ctx context.Context, objectID, accessID string
 		return drsapi.AccessURL{}, err
 	}
 	if resp.JSON200 == nil {
-		return drsapi.AccessURL{}, fmt.Errorf("unexpected response: %d", resp.StatusCode())
+		return drsapi.AccessURL{}, drsResponseError(resp.StatusCode(), resp.Body)
 	}
 	return *resp.JSON200, nil
 }
@@ -141,7 +142,7 @@ func (s *DRSService) RegisterObjects(ctx context.Context, req drsapi.RegisterObj
 		return drsapi.N201ObjectsCreated{}, err
 	}
 	if resp.JSON201 == nil {
-		return drsapi.N201ObjectsCreated{}, fmt.Errorf("unexpected response: %d", resp.StatusCode())
+		return drsapi.N201ObjectsCreated{}, drsResponseError(resp.StatusCode(), resp.Body)
 	}
 	return *resp.JSON201, nil
 }
@@ -157,9 +158,32 @@ func (s *DRSService) UpdateObjectAccessMethods(ctx context.Context, objectID str
 		if resp.StatusCode() == http.StatusNotFound {
 			return drsapi.DrsObject{}, fmt.Errorf("%w: %s", ErrObjectNotFound, objectID)
 		}
-		return drsapi.DrsObject{}, fmt.Errorf("unexpected response: %d", resp.StatusCode())
+		return drsapi.DrsObject{}, drsResponseError(resp.StatusCode(), resp.Body)
 	}
 	return *resp.JSON200, nil
+}
+
+func drsResponseError(status int, body []byte) error {
+	msg := strings.TrimSpace(string(body))
+	if msg != "" {
+		var payload struct {
+			Error *struct {
+				Message string `json:"message"`
+				Type    string `json:"type"`
+			} `json:"error"`
+			Message string `json:"message"`
+		}
+		if err := json.Unmarshal(body, &payload); err == nil {
+			switch {
+			case payload.Error != nil && strings.TrimSpace(payload.Error.Message) != "":
+				msg = strings.TrimSpace(payload.Error.Message)
+			case strings.TrimSpace(payload.Message) != "":
+				msg = strings.TrimSpace(payload.Message)
+			}
+		}
+		return fmt.Errorf("unexpected response: %d: %s", status, msg)
+	}
+	return fmt.Errorf("unexpected response: %d", status)
 }
 
 func (s *DRSService) ListObjectsByProject(ctx context.Context, projectID string, limit, page int) (DRSPage, error) {

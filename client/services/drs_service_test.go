@@ -39,6 +39,10 @@ func TestDRSServiceResolveAndList(t *testing.T) {
 			writeJSON(t, w, http.StatusOK, drsapi.DrsObject{Id: "no-access", Checksums: []drsapi.Checksum{{Type: "sha256", Checksum: "abc"}}, CreatedTime: time.Now()})
 		case r.Method == http.MethodGet && r.URL.Path == "/objects/missing":
 			http.Error(w, "missing", http.StatusNotFound)
+		case r.Method == http.MethodGet && r.URL.Path == "/objects/broken":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = io.WriteString(w, `{"error":{"message":"column \"file_name\" does not exist"}}`)
 		case r.Method == http.MethodGet && r.URL.Path == "/objects/obj-1/access/acc-1":
 			writeJSON(t, w, http.StatusOK, drsapi.AccessURL{Url: "https://signed.example/access"})
 		case r.Method == http.MethodGet && r.URL.Path == "/objects/checksum/abc":
@@ -58,7 +62,7 @@ func TestDRSServiceResolveAndList(t *testing.T) {
 		case r.Method == http.MethodPost && r.URL.Path == "/objects/register":
 			name := "registered.bin"
 			writeJSON(t, w, http.StatusCreated, drsapi.N201ObjectsCreated{Objects: []drsapi.DrsObject{{Id: "obj-created", Name: &name, Checksums: []drsapi.Checksum{{Type: "sha256", Checksum: "abc"}}, CreatedTime: time.Now()}}})
-		case r.Method == http.MethodPost && r.URL.Path == "/objects/obj-1/access-methods":
+		case r.Method == http.MethodPut && r.URL.Path == "/objects/obj-1/access-methods":
 			var body drsapi.AccessMethodUpdateRequest
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 				t.Fatalf("decode access method update body: %v", err)
@@ -70,6 +74,10 @@ func TestDRSServiceResolveAndList(t *testing.T) {
 				t.Fatalf("decode delete body: %v", err)
 			}
 			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodPut && r.URL.Path == "/objects/obj-delete-fail/delete":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = io.WriteString(w, `{"error":{"message":"delete failed because schema is stale"}}`)
 		default:
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
 		}
@@ -112,6 +120,9 @@ func TestDRSServiceResolveAndList(t *testing.T) {
 	}
 	if _, err := service.GetObject(ctx, "missing"); !errors.Is(err, ErrObjectNotFound) {
 		t.Fatalf("expected ErrObjectNotFound, got %v", err)
+	}
+	if _, err := service.GetObject(ctx, "broken"); err == nil || !strings.Contains(err.Error(), `column "file_name" does not exist`) {
+		t.Fatalf("expected server error detail for broken object lookup, got %v", err)
 	}
 
 	page, err := service.ListObjects(ctx, 5, 2)
@@ -214,6 +225,9 @@ func TestDRSServiceResolveAndList(t *testing.T) {
 
 	if err := service.DeleteObject(ctx, "obj-delete", true); err != nil {
 		t.Fatalf("DeleteObject returned error: %v", err)
+	}
+	if err := service.DeleteObject(ctx, "obj-delete-fail", true); err == nil || !strings.Contains(err.Error(), "schema is stale") {
+		t.Fatalf("expected delete server error detail, got %v", err)
 	}
 	if deleteRequest.DeleteStorageData == nil || !*deleteRequest.DeleteStorageData {
 		t.Fatalf("expected delete_storage_data=true, got %+v", deleteRequest)
