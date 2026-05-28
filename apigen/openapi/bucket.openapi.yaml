@@ -155,6 +155,8 @@ components:
     BucketMetadata:
       type: object
       properties:
+        bucket:
+          type: string
         endpoint_url:
           type: string
         provider:

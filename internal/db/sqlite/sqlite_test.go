@@ -6,6 +6,7 @@ import (
 	"errors"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -500,6 +501,37 @@ func TestSqliteDB_S3Credentials(t *testing.T) {
 
 	if err := db.DeleteS3Credential(ctx, "test-bucket"); err != nil {
 		t.Fatalf("DeleteS3Credential failed: %v", err)
+	}
+}
+
+func TestSqliteDB_S3CredentialsCredentialIDAllowsSharedPhysicalBucket(t *testing.T) {
+	t.Setenv(crypto.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
+	ctx := context.Background()
+	db, err := NewSqliteDB(":memory:")
+	if err != nil {
+		t.Fatalf("failed to create db: %v", err)
+	}
+
+	for _, cred := range []models.S3Credential{
+		{CredentialID: "org-a/default", Bucket: "shared-bucket", Region: "us-east-1", AccessKey: "key-a", SecretKey: "secret-a"},
+		{CredentialID: "org-b/default", Bucket: "shared-bucket", Region: "us-east-1", AccessKey: "key-b", SecretKey: "secret-b"},
+	} {
+		cred := cred
+		if err := db.SaveS3Credential(ctx, &cred); err != nil {
+			t.Fatalf("SaveS3Credential(%s) failed: %v", cred.CredentialID, err)
+		}
+	}
+
+	got, err := db.GetS3Credential(ctx, "org-b/default")
+	if err != nil {
+		t.Fatalf("GetS3Credential by credential_id failed: %v", err)
+	}
+	if got.Bucket != "shared-bucket" || got.AccessKey != "key-b" {
+		t.Fatalf("unexpected credential: %+v", got)
+	}
+
+	if _, err := db.GetS3Credential(ctx, "shared-bucket"); err == nil || !strings.Contains(err.Error(), "multiple credentials") {
+		t.Fatalf("expected ambiguous physical bucket lookup error, got %v", err)
 	}
 }
 

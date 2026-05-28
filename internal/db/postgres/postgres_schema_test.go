@@ -85,10 +85,26 @@ func TestSchemaEnsurers(t *testing.T) {
 		pg, mock, rawDB := newMockPostgresDB(t)
 		defer rawDB.Close()
 
-		mock.ExpectExec(regexp.QuoteMeta(`
-		ALTER TABLE s3_credential
-		ADD COLUMN IF NOT EXISTS provider TEXT NOT NULL DEFAULT 's3'
-	`)).WillReturnResult(sqlmock.NewResult(0, 0))
+		for _, query := range []string{
+			`CREATE TABLE IF NOT EXISTS s3_credential (
+			credential_id TEXT PRIMARY KEY,
+			bucket TEXT NOT NULL,
+			provider TEXT NOT NULL DEFAULT 's3',
+			region TEXT,
+			access_key TEXT,
+			secret_key TEXT,
+			endpoint TEXT
+		)`,
+			`ALTER TABLE s3_credential ADD COLUMN IF NOT EXISTS credential_id TEXT`,
+			`ALTER TABLE s3_credential ADD COLUMN IF NOT EXISTS provider TEXT NOT NULL DEFAULT 's3'`,
+			`UPDATE s3_credential SET credential_id = bucket WHERE COALESCE(BTRIM(credential_id), '') = ''`,
+			`ALTER TABLE s3_credential ALTER COLUMN credential_id SET NOT NULL`,
+			`ALTER TABLE s3_credential DROP CONSTRAINT IF EXISTS s3_credential_pkey`,
+			`ALTER TABLE s3_credential ADD PRIMARY KEY (credential_id)`,
+			`CREATE INDEX IF NOT EXISTS idx_s3_credential_bucket ON s3_credential(bucket)`,
+		} {
+			mock.ExpectExec(regexp.QuoteMeta(query)).WillReturnResult(sqlmock.NewResult(0, 0))
+		}
 
 		if err := pg.ensureS3CredentialSchema(); err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -99,15 +115,26 @@ func TestSchemaEnsurers(t *testing.T) {
 		pg, mock, rawDB := newMockPostgresDB(t)
 		defer rawDB.Close()
 
-		mock.ExpectExec(regexp.QuoteMeta(`CREATE TABLE IF NOT EXISTS bucket_scope (
+		for _, query := range []string{
+			`CREATE TABLE IF NOT EXISTS bucket_scope (
 			organization TEXT NOT NULL,
 			project_id TEXT NOT NULL,
+			credential_id TEXT NOT NULL,
 			bucket TEXT NOT NULL,
 			path_prefix TEXT NULL,
 			PRIMARY KEY (organization, project_id)
-		)`)).WillReturnResult(sqlmock.NewResult(0, 0))
-		mock.ExpectExec(regexp.QuoteMeta(`CREATE INDEX IF NOT EXISTS idx_bucket_scope_bucket ON bucket_scope(bucket)`)).
-			WillReturnResult(sqlmock.NewResult(0, 0))
+		)`,
+			`ALTER TABLE bucket_scope ADD COLUMN IF NOT EXISTS credential_id TEXT`,
+			`UPDATE bucket_scope SET credential_id = bucket WHERE COALESCE(BTRIM(credential_id), '') = ''`,
+			`ALTER TABLE bucket_scope ALTER COLUMN credential_id SET NOT NULL`,
+			`ALTER TABLE bucket_scope ADD COLUMN IF NOT EXISTS bucket TEXT`,
+			`UPDATE bucket_scope SET bucket = credential_id WHERE COALESCE(BTRIM(bucket), '') = ''`,
+			`ALTER TABLE bucket_scope ALTER COLUMN bucket SET NOT NULL`,
+			`CREATE INDEX IF NOT EXISTS idx_bucket_scope_credential_id ON bucket_scope(credential_id)`,
+			`CREATE INDEX IF NOT EXISTS idx_bucket_scope_bucket ON bucket_scope(bucket)`,
+		} {
+			mock.ExpectExec(regexp.QuoteMeta(query)).WillReturnResult(sqlmock.NewResult(0, 0))
+		}
 
 		if err := pg.ensureBucketScopeSchema(); err != nil {
 			t.Fatalf("unexpected error: %v", err)

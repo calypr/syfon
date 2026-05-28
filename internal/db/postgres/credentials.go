@@ -12,37 +12,78 @@ import (
 	"github.com/calypr/syfon/internal/crypto"
 )
 
-func (db *PostgresDB) GetS3Credential(ctx context.Context, bucket string) (*models.S3Credential, error) {
+func (db *PostgresDB) GetS3Credential(ctx context.Context, credentialID string) (*models.S3Credential, error) {
 	var c models.S3Credential
 	err := db.db.QueryRowContext(ctx, `
-		SELECT bucket, provider, region, access_key, secret_key, endpoint
-		FROM s3_credential WHERE bucket = $1`, bucket).Scan(
-		&c.Bucket, &c.Provider, &c.Region, &c.AccessKey, &c.SecretKey, &c.Endpoint,
+		SELECT credential_id, bucket, provider, region, access_key, secret_key, endpoint
+		FROM s3_credential WHERE credential_id = $1`, credentialID).Scan(
+		&c.CredentialID, &c.Bucket, &c.Provider, &c.Region, &c.AccessKey, &c.SecretKey, &c.Endpoint,
 	)
 	if err == sql.ErrNoRows {
-		notFoundErr := fmt.Errorf("credential not found")
-		common.AuditS3CredentialAccess(ctx, "read", bucket, notFoundErr)
-		return nil, notFoundErr
+		fallback, fallbackErr := db.getS3CredentialByPhysicalBucket(ctx, credentialID)
+		if fallbackErr == nil {
+			common.AuditS3CredentialAccess(ctx, "read", credentialID, nil)
+			return fallback, nil
+		}
+		common.AuditS3CredentialAccess(ctx, "read", credentialID, fallbackErr)
+		return nil, fallbackErr
 	}
 	if err != nil {
 		wrapped := fmt.Errorf("failed to fetch credential: %w", err)
-		common.AuditS3CredentialAccess(ctx, "read", bucket, wrapped)
+		common.AuditS3CredentialAccess(ctx, "read", credentialID, wrapped)
 		return nil, wrapped
 	}
 	parsed, err := crypto.ParseS3CredentialFromStorage(&c)
 	if err != nil {
 		wrapped := fmt.Errorf("failed to decrypt credential: %w", err)
-		common.AuditS3CredentialAccess(ctx, "read", bucket, wrapped)
+		common.AuditS3CredentialAccess(ctx, "read", credentialID, wrapped)
 		return nil, wrapped
 	}
-	common.AuditS3CredentialAccess(ctx, "read", bucket, nil)
+	common.AuditS3CredentialAccess(ctx, "read", credentialID, nil)
 	return parsed, nil
+}
+
+func (db *PostgresDB) getS3CredentialByPhysicalBucket(ctx context.Context, bucket string) (*models.S3Credential, error) {
+	rows, err := db.db.QueryContext(ctx, `
+		SELECT credential_id, bucket, provider, region, access_key, secret_key, endpoint
+		FROM s3_credential WHERE bucket = $1`, bucket)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch credential by bucket: %w", err)
+	}
+	defer rows.Close()
+
+	matches := make([]models.S3Credential, 0, 2)
+	for rows.Next() {
+		var c models.S3Credential
+		if err := rows.Scan(&c.CredentialID, &c.Bucket, &c.Provider, &c.Region, &c.AccessKey, &c.SecretKey, &c.Endpoint); err != nil {
+			return nil, err
+		}
+		matches = append(matches, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	switch len(matches) {
+	case 0:
+		return nil, fmt.Errorf("credential not found")
+	case 1:
+		parsed, err := crypto.ParseS3CredentialFromStorage(&matches[0])
+		if err != nil {
+			return nil, fmt.Errorf("failed to decrypt credential: %w", err)
+		}
+		return parsed, nil
+	default:
+		return nil, fmt.Errorf("multiple credentials use physical bucket %q; define the scope inline with the intended bucket credential", bucket)
+	}
 }
 
 func (db *PostgresDB) SaveS3Credential(ctx context.Context, cred *models.S3Credential) error {
 	bucket := ""
 	if cred != nil {
 		bucket = cred.Bucket
+		if strings.TrimSpace(cred.CredentialID) == "" {
+			cred.CredentialID = common.DeriveCredentialID(cred.Bucket, cred.Provider, cred.Region, cred.Endpoint, cred.AccessKey)
+		}
 	}
 	stored, err := crypto.PrepareS3CredentialForStorage(cred)
 	if err != nil {
@@ -52,15 +93,16 @@ func (db *PostgresDB) SaveS3Credential(ctx context.Context, cred *models.S3Crede
 	}
 
 	_, err = db.db.ExecContext(ctx, `
-		INSERT INTO s3_credential (bucket, provider, region, access_key, secret_key, endpoint)
-		VALUES ($1, $2, $3, $4, $5, $6)
-		ON CONFLICT (bucket) DO UPDATE SET
+		INSERT INTO s3_credential (credential_id, bucket, provider, region, access_key, secret_key, endpoint)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		ON CONFLICT (credential_id) DO UPDATE SET
+			bucket = EXCLUDED.bucket,
 			provider = EXCLUDED.provider,
 			region = EXCLUDED.region,
 			access_key = EXCLUDED.access_key,
 			secret_key = EXCLUDED.secret_key,
 			endpoint = EXCLUDED.endpoint`,
-		stored.Bucket, strings.ToLower(strings.TrimSpace(defaultProvider(stored.Provider))), stored.Region, stored.AccessKey, stored.SecretKey, stored.Endpoint,
+		stored.CredentialID, stored.Bucket, strings.ToLower(strings.TrimSpace(defaultProvider(stored.Provider))), stored.Region, stored.AccessKey, stored.SecretKey, stored.Endpoint,
 	)
 	if err != nil {
 		wrapped := fmt.Errorf("failed to save credential: %w", err)
@@ -71,34 +113,59 @@ func (db *PostgresDB) SaveS3Credential(ctx context.Context, cred *models.S3Crede
 	return nil
 }
 
-func (db *PostgresDB) DeleteS3Credential(ctx context.Context, bucket string) error {
+func (db *PostgresDB) DeleteS3Credential(ctx context.Context, credentialID string) error {
+	resolvedID, err := db.resolveCredentialID(ctx, credentialID)
+	if err != nil {
+		common.AuditS3CredentialAccess(ctx, "delete", credentialID, err)
+		return err
+	}
 	// 1. Delete bucket scopes first (cascade delete is on object_id, but bucket_scope is manual link)
-	if _, err := db.db.ExecContext(ctx, "DELETE FROM bucket_scope WHERE bucket = $1", bucket); err != nil {
-		common.AuditS3CredentialAccess(ctx, "delete", bucket, err)
-		return fmt.Errorf("failed to delete bucket scopes for %s: %w", bucket, err)
+	if _, err := db.db.ExecContext(ctx, "DELETE FROM bucket_scope WHERE credential_id = $1", resolvedID); err != nil {
+		common.AuditS3CredentialAccess(ctx, "delete", credentialID, err)
+		return fmt.Errorf("failed to delete bucket scopes for %s: %w", credentialID, err)
 	}
 
-	result, err := db.db.ExecContext(ctx, "DELETE FROM s3_credential WHERE bucket = $1", bucket)
+	result, err := db.db.ExecContext(ctx, "DELETE FROM s3_credential WHERE credential_id = $1", resolvedID)
 	if err != nil {
-		common.AuditS3CredentialAccess(ctx, "delete", bucket, err)
+		common.AuditS3CredentialAccess(ctx, "delete", credentialID, err)
 		return err
 	}
 	rows, err := result.RowsAffected()
 	if err != nil {
-		common.AuditS3CredentialAccess(ctx, "delete", bucket, err)
+		common.AuditS3CredentialAccess(ctx, "delete", credentialID, err)
 		return err
 	}
 	if rows == 0 {
 		notFoundErr := fmt.Errorf("credential not found")
-		common.AuditS3CredentialAccess(ctx, "delete", bucket, notFoundErr)
+		common.AuditS3CredentialAccess(ctx, "delete", credentialID, notFoundErr)
 		return notFoundErr
 	}
-	common.AuditS3CredentialAccess(ctx, "delete", bucket, nil)
+	common.AuditS3CredentialAccess(ctx, "delete", credentialID, nil)
 	return nil
 }
 
+func (db *PostgresDB) resolveCredentialID(ctx context.Context, raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", fmt.Errorf("credential not found")
+	}
+	var exact string
+	err := db.db.QueryRowContext(ctx, "SELECT credential_id FROM s3_credential WHERE credential_id = $1", raw).Scan(&exact)
+	if err == nil {
+		return exact, nil
+	}
+	if err != sql.ErrNoRows {
+		return "", err
+	}
+	cred, err := db.getS3CredentialByPhysicalBucket(ctx, raw)
+	if err != nil {
+		return "", err
+	}
+	return cred.CredentialID, nil
+}
+
 func (db *PostgresDB) ListS3Credentials(ctx context.Context) ([]models.S3Credential, error) {
-	rows, err := db.db.QueryContext(ctx, "SELECT bucket, provider, region, access_key, secret_key, endpoint FROM s3_credential")
+	rows, err := db.db.QueryContext(ctx, "SELECT credential_id, bucket, provider, region, access_key, secret_key, endpoint FROM s3_credential")
 	if err != nil {
 		return nil, err
 	}
@@ -107,7 +174,7 @@ func (db *PostgresDB) ListS3Credentials(ctx context.Context) ([]models.S3Credent
 	var creds []models.S3Credential
 	for rows.Next() {
 		var c models.S3Credential
-		if err := rows.Scan(&c.Bucket, &c.Provider, &c.Region, &c.AccessKey, &c.SecretKey, &c.Endpoint); err != nil {
+		if err := rows.Scan(&c.CredentialID, &c.Bucket, &c.Provider, &c.Region, &c.AccessKey, &c.SecretKey, &c.Endpoint); err != nil {
 			common.AuditS3CredentialAccess(ctx, "list", "", err)
 			return nil, err
 		}
@@ -129,8 +196,12 @@ func (db *PostgresDB) CreateBucketScope(ctx context.Context, scope *models.Bucke
 	}
 	org := strings.TrimSpace(scope.Organization)
 	project := strings.TrimSpace(scope.ProjectID)
+	credentialID := strings.TrimSpace(scope.CredentialID)
 	bucket := strings.TrimSpace(scope.Bucket)
 	prefix := strings.Trim(strings.TrimSpace(scope.PathPrefix), "/")
+	if credentialID == "" {
+		credentialID = bucket
+	}
 
 	if org == "" || bucket == "" {
 		return fmt.Errorf("organization and bucket are required")
@@ -141,14 +212,14 @@ func (db *PostgresDB) CreateBucketScope(ctx context.Context, scope *models.Bucke
 		return err
 	}
 	if err == nil && existing != nil {
-		if strings.EqualFold(strings.TrimSpace(existing.Bucket), bucket) && strings.Trim(strings.TrimSpace(existing.PathPrefix), "/") == prefix {
+		if strings.EqualFold(strings.TrimSpace(existing.CredentialID), credentialID) && strings.EqualFold(strings.TrimSpace(existing.Bucket), bucket) && strings.Trim(strings.TrimSpace(existing.PathPrefix), "/") == prefix {
 			return nil
 		}
 		_, err = db.db.ExecContext(ctx, `
 			UPDATE bucket_scope
-			SET bucket = $1, path_prefix = $2
-			WHERE organization = $3 AND project_id = $4
-		`, bucket, prefix, org, project)
+			SET credential_id = $1, bucket = $2, path_prefix = $3
+			WHERE organization = $4 AND project_id = $5
+		`, credentialID, bucket, prefix, org, project)
 		if err != nil {
 			return fmt.Errorf("failed to update bucket scope: %w", err)
 		}
@@ -156,9 +227,9 @@ func (db *PostgresDB) CreateBucketScope(ctx context.Context, scope *models.Bucke
 	}
 
 	_, err = db.db.ExecContext(ctx, `
-		INSERT INTO bucket_scope (organization, project_id, bucket, path_prefix)
-		VALUES ($1, $2, $3, $4)
-	`, org, project, bucket, prefix)
+		INSERT INTO bucket_scope (organization, project_id, credential_id, bucket, path_prefix)
+		VALUES ($1, $2, $3, $4, $5)
+	`, org, project, credentialID, bucket, prefix)
 	if err != nil {
 		return fmt.Errorf("failed to create bucket scope: %w", err)
 	}
@@ -168,11 +239,11 @@ func (db *PostgresDB) CreateBucketScope(ctx context.Context, scope *models.Bucke
 func (db *PostgresDB) GetBucketScope(ctx context.Context, organization, projectID string) (*models.BucketScope, error) {
 	var s models.BucketScope
 	err := db.db.QueryRowContext(ctx, `
-		SELECT organization, project_id, bucket, COALESCE(path_prefix, '')
+		SELECT organization, project_id, credential_id, bucket, COALESCE(path_prefix, '')
 		FROM bucket_scope
 		WHERE organization = $1 AND project_id = $2
 	`, strings.TrimSpace(organization), strings.TrimSpace(projectID)).Scan(
-		&s.Organization, &s.ProjectID, &s.Bucket, &s.PathPrefix,
+		&s.Organization, &s.ProjectID, &s.CredentialID, &s.Bucket, &s.PathPrefix,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("%w: bucket scope not found", common.ErrNotFound)
@@ -185,7 +256,7 @@ func (db *PostgresDB) GetBucketScope(ctx context.Context, organization, projectI
 
 func (db *PostgresDB) ListBucketScopes(ctx context.Context) ([]models.BucketScope, error) {
 	rows, err := db.db.QueryContext(ctx, `
-		SELECT organization, project_id, bucket, COALESCE(path_prefix, '')
+		SELECT organization, project_id, credential_id, bucket, COALESCE(path_prefix, '')
 		FROM bucket_scope
 	`)
 	if err != nil {
@@ -196,7 +267,7 @@ func (db *PostgresDB) ListBucketScopes(ctx context.Context) ([]models.BucketScop
 	var out []models.BucketScope
 	for rows.Next() {
 		var s models.BucketScope
-		if err := rows.Scan(&s.Organization, &s.ProjectID, &s.Bucket, &s.PathPrefix); err != nil {
+		if err := rows.Scan(&s.Organization, &s.ProjectID, &s.CredentialID, &s.Bucket, &s.PathPrefix); err != nil {
 			return nil, err
 		}
 		out = append(out, s)

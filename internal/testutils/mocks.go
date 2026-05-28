@@ -414,16 +414,23 @@ func (m *MockDatabase) GetS3Credential(ctx context.Context, bucket string) (*mod
 			c := cred
 			return &c, nil
 		}
+		for _, cred := range m.Credentials {
+			if strings.TrimSpace(cred.Bucket) == strings.TrimSpace(bucket) {
+				c := cred
+				return &c, nil
+			}
+		}
 	}
 	if m.NoDefaultCreds {
 		return nil, nil
 	}
 	return &models.S3Credential{
-		Bucket:    bucket,
-		Provider:  "s3",
-		Region:    "us-east-1",
-		AccessKey: "test-key",
-		SecretKey: "test-secret",
+		CredentialID: bucket,
+		Bucket:       bucket,
+		Provider:     "s3",
+		Region:       "us-east-1",
+		AccessKey:    "test-key",
+		SecretKey:    "test-secret",
 	}, nil
 }
 
@@ -431,7 +438,11 @@ func (m *MockDatabase) SaveS3Credential(ctx context.Context, cred *models.S3Cred
 	if m.Credentials == nil {
 		m.Credentials = make(map[string]models.S3Credential)
 	}
-	m.Credentials[cred.Bucket] = *cred
+	key := strings.TrimSpace(cred.CredentialID)
+	if key == "" {
+		key = strings.TrimSpace(cred.Bucket)
+	}
+	m.Credentials[key] = *cred
 	return nil
 }
 
@@ -454,7 +465,7 @@ func (m *MockDatabase) ListS3Credentials(ctx context.Context) ([]models.S3Creden
 		return []models.S3Credential{}, nil
 	}
 	return []models.S3Credential{
-		{Bucket: "test-bucket-1", Provider: "s3", Region: "us-east-1"},
+		{CredentialID: "test-bucket-1", Bucket: "test-bucket-1", Provider: "s3", Region: "us-east-1"},
 	}, nil
 }
 

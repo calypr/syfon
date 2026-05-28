@@ -26,11 +26,11 @@ func TestGetS3Credential(t *testing.T) {
 	pg, mock, rawDB := newMockPostgresDB(t)
 	defer rawDB.Close()
 
-	rows := sqlmock.NewRows([]string{"bucket", "provider", "region", "access_key", "secret_key", "endpoint"}).
-		AddRow("b1", "s3", "us-east-1", "ak", "sk", "https://s3.example")
+	rows := sqlmock.NewRows([]string{"credential_id", "bucket", "provider", "region", "access_key", "secret_key", "endpoint"}).
+		AddRow("b1", "b1", "s3", "us-east-1", "ak", "sk", "https://s3.example")
 	mock.ExpectQuery(regexp.QuoteMeta(`
-		SELECT bucket, provider, region, access_key, secret_key, endpoint
-		FROM s3_credential WHERE bucket = $1`)).
+		SELECT credential_id, bucket, provider, region, access_key, secret_key, endpoint
+		FROM s3_credential WHERE credential_id = $1`)).
 		WithArgs("b1").
 		WillReturnRows(rows)
 
@@ -60,11 +60,11 @@ func TestGetS3Credential_DecryptsEncryptedSecrets(t *testing.T) {
 	pg, mock, rawDB := newMockPostgresDB(t)
 	defer rawDB.Close()
 
-	rows := sqlmock.NewRows([]string{"bucket", "provider", "region", "access_key", "secret_key", "endpoint"}).
-		AddRow("b1", "s3", "us-east-1", encAK, encSK, "https://s3.example")
+	rows := sqlmock.NewRows([]string{"credential_id", "bucket", "provider", "region", "access_key", "secret_key", "endpoint"}).
+		AddRow("b1", "b1", "s3", "us-east-1", encAK, encSK, "https://s3.example")
 	mock.ExpectQuery(regexp.QuoteMeta(`
-		SELECT bucket, provider, region, access_key, secret_key, endpoint
-		FROM s3_credential WHERE bucket = $1`)).
+		SELECT credential_id, bucket, provider, region, access_key, secret_key, endpoint
+		FROM s3_credential WHERE credential_id = $1`)).
 		WithArgs("b1").
 		WillReturnRows(rows)
 
@@ -82,10 +82,15 @@ func TestGetS3CredentialNotFound(t *testing.T) {
 	defer rawDB.Close()
 
 	mock.ExpectQuery(regexp.QuoteMeta(`
-		SELECT bucket, provider, region, access_key, secret_key, endpoint
-		FROM s3_credential WHERE bucket = $1`)).
+		SELECT credential_id, bucket, provider, region, access_key, secret_key, endpoint
+		FROM s3_credential WHERE credential_id = $1`)).
 		WithArgs("missing").
 		WillReturnError(sql.ErrNoRows)
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT credential_id, bucket, provider, region, access_key, secret_key, endpoint
+		FROM s3_credential WHERE bucket = $1`)).
+		WithArgs("missing").
+		WillReturnRows(sqlmock.NewRows([]string{"credential_id", "bucket", "provider", "region", "access_key", "secret_key", "endpoint"}))
 
 	_, err := pg.GetS3Credential(context.Background(), "missing")
 	if err == nil || err.Error() != "credential not found" {
@@ -97,17 +102,19 @@ func TestSaveS3Credential(t *testing.T) {
 	t.Setenv(crypto.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
 	pg, mock, rawDB := newMockPostgresDB(t)
 	defer rawDB.Close()
+	derivedID := common.DeriveCredentialID("b1", "", "us-east-1", "https://s3.example", "ak")
 
 	mock.ExpectExec(regexp.QuoteMeta(`
-		INSERT INTO s3_credential (bucket, provider, region, access_key, secret_key, endpoint)
-		VALUES ($1, $2, $3, $4, $5, $6)
-		ON CONFLICT (bucket) DO UPDATE SET
+		INSERT INTO s3_credential (credential_id, bucket, provider, region, access_key, secret_key, endpoint)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		ON CONFLICT (credential_id) DO UPDATE SET
+			bucket = EXCLUDED.bucket,
 			provider = EXCLUDED.provider,
 			region = EXCLUDED.region,
 			access_key = EXCLUDED.access_key,
 			secret_key = EXCLUDED.secret_key,
 			endpoint = EXCLUDED.endpoint`)).
-		WithArgs("b1", "s3", "us-east-1", sqlmock.AnyArg(), sqlmock.AnyArg(), "https://s3.example").
+		WithArgs(derivedID, "b1", "s3", "us-east-1", sqlmock.AnyArg(), sqlmock.AnyArg(), "https://s3.example").
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	err := pg.SaveS3Credential(context.Background(), &models.S3Credential{
@@ -128,10 +135,13 @@ func TestDeleteS3Credential(t *testing.T) {
 		pg, mock, rawDB := newMockPostgresDB(t)
 		defer rawDB.Close()
 
-		mock.ExpectExec(regexp.QuoteMeta("DELETE FROM bucket_scope WHERE bucket = $1")).
+		mock.ExpectQuery(regexp.QuoteMeta("SELECT credential_id FROM s3_credential WHERE credential_id = $1")).
+			WithArgs("b1").
+			WillReturnRows(sqlmock.NewRows([]string{"credential_id"}).AddRow("b1"))
+		mock.ExpectExec(regexp.QuoteMeta("DELETE FROM bucket_scope WHERE credential_id = $1")).
 			WithArgs("b1").
 			WillReturnResult(sqlmock.NewResult(0, 1))
-		mock.ExpectExec(regexp.QuoteMeta("DELETE FROM s3_credential WHERE bucket = $1")).
+		mock.ExpectExec(regexp.QuoteMeta("DELETE FROM s3_credential WHERE credential_id = $1")).
 			WithArgs("b1").
 			WillReturnResult(sqlmock.NewResult(0, 1))
 
@@ -144,12 +154,14 @@ func TestDeleteS3Credential(t *testing.T) {
 		pg, mock, rawDB := newMockPostgresDB(t)
 		defer rawDB.Close()
 
-		mock.ExpectExec(regexp.QuoteMeta("DELETE FROM bucket_scope WHERE bucket = $1")).
+		mock.ExpectQuery(regexp.QuoteMeta("SELECT credential_id FROM s3_credential WHERE credential_id = $1")).
 			WithArgs("missing").
-			WillReturnResult(sqlmock.NewResult(0, 0))
-		mock.ExpectExec(regexp.QuoteMeta("DELETE FROM s3_credential WHERE bucket = $1")).
+			WillReturnRows(sqlmock.NewRows([]string{"credential_id"}))
+		mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT credential_id, bucket, provider, region, access_key, secret_key, endpoint
+		FROM s3_credential WHERE bucket = $1`)).
 			WithArgs("missing").
-			WillReturnResult(sqlmock.NewResult(0, 0))
+			WillReturnRows(sqlmock.NewRows([]string{"credential_id", "bucket", "provider", "region", "access_key", "secret_key", "endpoint"}))
 
 		err := pg.DeleteS3Credential(context.Background(), "missing")
 		if err == nil || err.Error() != "credential not found" {
@@ -162,10 +174,10 @@ func TestListS3Credentials(t *testing.T) {
 	pg, mock, rawDB := newMockPostgresDB(t)
 	defer rawDB.Close()
 
-	rows := sqlmock.NewRows([]string{"bucket", "provider", "region", "access_key", "secret_key", "endpoint"}).
-		AddRow("b1", "s3", "us-east-1", "ak1", "sk1", "").
-		AddRow("b2", "gcs", "us-central1", "ak2", "sk2", "https://example")
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT bucket, provider, region, access_key, secret_key, endpoint FROM s3_credential")).
+	rows := sqlmock.NewRows([]string{"credential_id", "bucket", "provider", "region", "access_key", "secret_key", "endpoint"}).
+		AddRow("b1", "b1", "s3", "us-east-1", "ak1", "sk1", "").
+		AddRow("b2", "b2", "gcs", "us-central1", "ak2", "sk2", "https://example")
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT credential_id, bucket, provider, region, access_key, secret_key, endpoint FROM s3_credential")).
 		WillReturnRows(rows)
 
 	got, err := pg.ListS3Credentials(context.Background())
@@ -194,10 +206,10 @@ func TestCreateBucketScope(t *testing.T) {
 		pg, mock, rawDB := newMockPostgresDB(t)
 		defer rawDB.Close()
 
-		rows := sqlmock.NewRows([]string{"organization", "project_id", "bucket", "path_prefix"}).
-			AddRow("org", "proj", "bucket-a", "prefix")
+		rows := sqlmock.NewRows([]string{"organization", "project_id", "credential_id", "bucket", "path_prefix"}).
+			AddRow("org", "proj", "bucket-a", "bucket-a", "prefix")
 		mock.ExpectQuery(regexp.QuoteMeta(`
-		SELECT organization, project_id, bucket, COALESCE(path_prefix, '')
+		SELECT organization, project_id, credential_id, bucket, COALESCE(path_prefix, '')
 		FROM bucket_scope
 		WHERE organization = $1 AND project_id = $2
 	`)).
@@ -219,10 +231,10 @@ func TestCreateBucketScope(t *testing.T) {
 		pg, mock, rawDB := newMockPostgresDB(t)
 		defer rawDB.Close()
 
-		rows := sqlmock.NewRows([]string{"organization", "project_id", "bucket", "path_prefix"}).
-			AddRow("org", "proj", "bucket-a", "prefix-a")
+		rows := sqlmock.NewRows([]string{"organization", "project_id", "credential_id", "bucket", "path_prefix"}).
+			AddRow("org", "proj", "bucket-a", "bucket-a", "prefix-a")
 		mock.ExpectQuery(regexp.QuoteMeta(`
-		SELECT organization, project_id, bucket, COALESCE(path_prefix, '')
+		SELECT organization, project_id, credential_id, bucket, COALESCE(path_prefix, '')
 		FROM bucket_scope
 		WHERE organization = $1 AND project_id = $2
 	`)).
@@ -231,10 +243,10 @@ func TestCreateBucketScope(t *testing.T) {
 
 		mock.ExpectExec(regexp.QuoteMeta(`
 			UPDATE bucket_scope
-			SET bucket = $1, path_prefix = $2
-			WHERE organization = $3 AND project_id = $4
+			SET credential_id = $1, bucket = $2, path_prefix = $3
+			WHERE organization = $4 AND project_id = $5
 		`)).
-			WithArgs("bucket-b", "prefix-b", "org", "proj").
+			WithArgs("bucket-b", "bucket-b", "prefix-b", "org", "proj").
 			WillReturnResult(sqlmock.NewResult(0, 1))
 
 		err := pg.CreateBucketScope(context.Background(), &models.BucketScope{
@@ -253,7 +265,7 @@ func TestCreateBucketScope(t *testing.T) {
 		defer rawDB.Close()
 
 		mock.ExpectQuery(regexp.QuoteMeta(`
-		SELECT organization, project_id, bucket, COALESCE(path_prefix, '')
+		SELECT organization, project_id, credential_id, bucket, COALESCE(path_prefix, '')
 		FROM bucket_scope
 		WHERE organization = $1 AND project_id = $2
 	`)).
@@ -261,10 +273,10 @@ func TestCreateBucketScope(t *testing.T) {
 			WillReturnError(sql.ErrNoRows)
 
 		mock.ExpectExec(regexp.QuoteMeta(`
-		INSERT INTO bucket_scope (organization, project_id, bucket, path_prefix)
-		VALUES ($1, $2, $3, $4)
+		INSERT INTO bucket_scope (organization, project_id, credential_id, bucket, path_prefix)
+		VALUES ($1, $2, $3, $4, $5)
 	`)).
-			WithArgs("org", "proj", "bucket-a", "nested/path").
+			WithArgs("org", "proj", "bucket-a", "bucket-a", "nested/path").
 			WillReturnResult(sqlmock.NewResult(1, 1))
 
 		err := pg.CreateBucketScope(context.Background(), &models.BucketScope{
@@ -285,7 +297,7 @@ func TestGetAndListBucketScopes(t *testing.T) {
 		defer rawDB.Close()
 
 		mock.ExpectQuery(regexp.QuoteMeta(`
-		SELECT organization, project_id, bucket, COALESCE(path_prefix, '')
+		SELECT organization, project_id, credential_id, bucket, COALESCE(path_prefix, '')
 		FROM bucket_scope
 		WHERE organization = $1 AND project_id = $2
 	`)).
@@ -302,11 +314,11 @@ func TestGetAndListBucketScopes(t *testing.T) {
 		pg, mock, rawDB := newMockPostgresDB(t)
 		defer rawDB.Close()
 
-		rows := sqlmock.NewRows([]string{"organization", "project_id", "bucket", "path_prefix"}).
-			AddRow("org1", "proj1", "b1", "").
-			AddRow("org2", "proj2", "b2", "x")
+		rows := sqlmock.NewRows([]string{"organization", "project_id", "credential_id", "bucket", "path_prefix"}).
+			AddRow("org1", "proj1", "b1", "b1", "").
+			AddRow("org2", "proj2", "b2", "b2", "x")
 		mock.ExpectQuery(regexp.QuoteMeta(`
-		SELECT organization, project_id, bucket, COALESCE(path_prefix, '')
+		SELECT organization, project_id, credential_id, bucket, COALESCE(path_prefix, '')
 		FROM bucket_scope
 	`)).WillReturnRows(rows)
 

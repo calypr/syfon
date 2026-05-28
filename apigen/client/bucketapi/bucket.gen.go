@@ -27,6 +27,7 @@ type AddBucketScopeRequest struct {
 
 // BucketMetadata defines model for BucketMetadata.
 type BucketMetadata struct {
+	Bucket      *string   `json:"bucket,omitempty"`
 	EndpointUrl *string   `json:"endpoint_url,omitempty"`
 	Programs    *[]string `json:"programs,omitempty"`
 	Provider    *string   `json:"provider,omitempty"`

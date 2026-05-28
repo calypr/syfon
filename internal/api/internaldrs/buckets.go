@@ -33,6 +33,7 @@ func handleInternalBucketsFiber(c fiber.Ctx, om *core.ObjectManager) error {
 	for _, entry := range visible {
 		cred := entry.Credential
 		meta := bucketapi.BucketMetadata{
+			Bucket:      common.Ptr(cred.Bucket),
 			EndpointUrl: common.Ptr(cred.Endpoint),
 			Provider:    common.Ptr(cred.Provider),
 			Region:      common.Ptr(cred.Region),
@@ -62,6 +63,10 @@ func handleInternalPutBucketFiber(c fiber.Ctx, om *core.ObjectManager) error {
 	req.Bucket = strings.TrimSpace(req.Bucket)
 	req.Organization = strings.TrimSpace(req.Organization)
 	req.ProjectId = strings.TrimSpace(req.ProjectId)
+	region := strings.TrimSpace(common.StringVal(req.Region))
+	accessKey := strings.TrimSpace(common.StringVal(req.AccessKey))
+	secretKey := strings.TrimSpace(common.StringVal(req.SecretKey))
+	endpoint := strings.TrimSpace(common.StringVal(req.Endpoint))
 	if req.Bucket == "" {
 		return c.Status(fiber.StatusBadRequest).SendString("bucket is required")
 	}
@@ -77,18 +82,33 @@ func handleInternalPutBucketFiber(c fiber.Ctx, om *core.ObjectManager) error {
 		return c.Status(fiber.StatusBadRequest).SendString(err.Error())
 	}
 
-	existingCred, credErr := om.GetS3Credential(c.Context(), req.Bucket)
+	hasCredentialMaterial := accessKey != "" || secretKey != "" || endpoint != "" || region != "" || rawProvider != ""
+	credentialID := ""
+	var existingCred *models.S3Credential
+	var credErr error
+	if !hasCredentialMaterial {
+		existingCred, credErr = om.GetS3Credential(c.Context(), req.Bucket)
+		if credErr == nil && existingCred != nil {
+			credentialID = existingCred.CredentialID
+		}
+	}
+	if credentialID == "" {
+		credentialID = common.DeriveCredentialID(req.Bucket, bucketProvider, region, endpoint, accessKey)
+	}
+	if existingCred == nil {
+		existingCred, credErr = om.GetS3Credential(c.Context(), credentialID)
+	}
 	hasExistingCred := credErr == nil && existingCred != nil
 	scopeOnly := hasExistingCred &&
-		strings.TrimSpace(common.StringVal(req.AccessKey)) == "" &&
-		strings.TrimSpace(common.StringVal(req.SecretKey)) == "" &&
-		strings.TrimSpace(common.StringVal(req.Endpoint)) == "" &&
-		strings.TrimSpace(common.StringVal(req.Region)) == "" &&
+		accessKey == "" &&
+		secretKey == "" &&
+		endpoint == "" &&
+		region == "" &&
 		rawProvider == "" &&
 		req.Organization != ""
 
 	if !hasExistingCred && bucketProvider == common.S3Provider &&
-		(strings.TrimSpace(common.StringVal(req.AccessKey)) == "" || strings.TrimSpace(common.StringVal(req.SecretKey)) == "") {
+		(accessKey == "" || secretKey == "") {
 		return c.Status(fiber.StatusBadRequest).SendString("access_key and secret_key are required for new s3 credentials")
 	}
 
@@ -96,6 +116,7 @@ func handleInternalPutBucketFiber(c fiber.Ctx, om *core.ObjectManager) error {
 		if err := om.CreateBucketScope(c.Context(), &models.BucketScope{
 			Organization: req.Organization,
 			ProjectID:    req.ProjectId,
+			CredentialID: credentialID,
 			Bucket:       req.Bucket,
 			PathPrefix:   prefix,
 		}); err != nil {
@@ -106,10 +127,6 @@ func handleInternalPutBucketFiber(c fiber.Ctx, om *core.ObjectManager) error {
 		return c.SendStatus(fiber.StatusCreated)
 	}
 
-	region := strings.TrimSpace(common.StringVal(req.Region))
-	accessKey := strings.TrimSpace(common.StringVal(req.AccessKey))
-	secretKey := strings.TrimSpace(common.StringVal(req.SecretKey))
-	endpoint := strings.TrimSpace(common.StringVal(req.Endpoint))
 	if hasExistingCred {
 		if region == "" {
 			region = existingCred.Region
@@ -129,12 +146,13 @@ func handleInternalPutBucketFiber(c fiber.Ctx, om *core.ObjectManager) error {
 	}
 
 	cred := &models.S3Credential{
-		Bucket:    req.Bucket,
-		Provider:  bucketProvider,
-		Region:    region,
-		AccessKey: accessKey,
-		SecretKey: secretKey,
-		Endpoint:  endpoint,
+		CredentialID: credentialID,
+		Bucket:       req.Bucket,
+		Provider:     bucketProvider,
+		Region:       region,
+		AccessKey:    accessKey,
+		SecretKey:    secretKey,
+		Endpoint:     endpoint,
 	}
 	if bucketProvider == common.S3Provider && (strings.TrimSpace(cred.AccessKey) == "" || strings.TrimSpace(cred.SecretKey) == "") {
 		return c.Status(fiber.StatusBadRequest).SendString("access_key and secret_key are required for s3 credentials")
@@ -146,25 +164,26 @@ func handleInternalPutBucketFiber(c fiber.Ctx, om *core.ObjectManager) error {
 }
 
 func handleInternalDeleteBucketFiber(c fiber.Ctx, om *core.ObjectManager) error {
-	bucket := strings.TrimSpace(c.Params("bucket"))
-	if bucket == "" {
+	credentialID := strings.TrimSpace(c.Params("bucket"))
+	if credentialID == "" {
 		return c.Status(fiber.StatusBadRequest).SendString("bucket name is required")
 	}
-	if err := authorizeBucketDelete(c.Context(), om, bucket); err != nil {
+	if err := authorizeBucketDelete(c.Context(), om, credentialID); err != nil {
 		return apiutil.HandleError(c, err)
 	}
-	if err := om.DeleteS3Credential(c.Context(), bucket); err != nil {
+	if err := om.DeleteS3Credential(c.Context(), credentialID); err != nil {
 		return apiutil.HandleError(c, err)
 	}
 	return c.SendStatus(fiber.StatusNoContent)
 }
 
 func handleInternalCreateBucketScopeFiber(c fiber.Ctx, om *core.ObjectManager) error {
-	bucket := strings.TrimSpace(c.Params("bucket"))
-	if bucket == "" {
-		return c.Status(fiber.StatusBadRequest).SendString("bucket name is required")
+	routeCredentialID := strings.TrimSpace(c.Params("bucket"))
+	if routeCredentialID == "" {
+		return c.Status(fiber.StatusBadRequest).SendString("credential id is required")
 	}
-	if _, err := om.GetS3Credential(c.Context(), bucket); err != nil {
+	cred, err := om.GetS3Credential(c.Context(), routeCredentialID)
+	if err != nil {
 		return apiutil.HandleError(c, err)
 	}
 
@@ -181,14 +200,15 @@ func handleInternalCreateBucketScopeFiber(c fiber.Ctx, om *core.ObjectManager) e
 		return apiutil.HandleError(c, err)
 	}
 
-	prefix, err := common.NormalizeStoragePath(readOptionalPath(req.Path), bucket)
+	prefix, err := common.NormalizeStoragePath(readOptionalPath(req.Path), cred.Bucket)
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).SendString(err.Error())
 	}
 	if err := om.CreateBucketScope(c.Context(), &models.BucketScope{
 		Organization: req.Organization,
 		ProjectID:    req.ProjectId,
-		Bucket:       bucket,
+		CredentialID: cred.CredentialID,
+		Bucket:       cred.Bucket,
 		PathPrefix:   prefix,
 	}); err != nil {
 		return apiutil.HandleError(c, err)
