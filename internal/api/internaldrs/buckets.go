@@ -18,6 +18,7 @@ func registerInternalBucketRoutes(router fiber.Router, om *core.ObjectManager) {
 	router.Put(common.RouteInternalBuckets, func(c fiber.Ctx) error { return handleInternalPutBucketFiber(c, om) })
 	router.Delete(routeutil.FiberPath(common.RouteInternalBucketDetail), func(c fiber.Ctx) error { return handleInternalDeleteBucketFiber(c, om) })
 	router.Post(routeutil.FiberPath(common.RouteInternalBucketScopes), func(c fiber.Ctx) error { return handleInternalCreateBucketScopeFiber(c, om) })
+	router.Delete(routeutil.FiberPath(common.RouteInternalBucketScopes), func(c fiber.Ctx) error { return handleInternalDeleteBucketScopeFiber(c, om) })
 }
 
 func handleInternalBucketsFiber(c fiber.Ctx, om *core.ObjectManager) error {
@@ -214,4 +215,23 @@ func handleInternalCreateBucketScopeFiber(c fiber.Ctx, om *core.ObjectManager) e
 		return apiutil.HandleError(c, err)
 	}
 	return c.SendStatus(fiber.StatusCreated)
+}
+
+func handleInternalDeleteBucketScopeFiber(c fiber.Ctx, om *core.ObjectManager) error {
+	routeCredentialID := strings.TrimSpace(c.Params("bucket"))
+	if routeCredentialID == "" {
+		return c.Status(fiber.StatusBadRequest).SendString("credential id is required")
+	}
+	organization := strings.TrimSpace(c.Query("organization"))
+	projectID := strings.TrimSpace(c.Query("project_id"))
+	if organization == "" || projectID == "" {
+		return c.Status(fiber.StatusBadRequest).SendString("organization and project_id are required")
+	}
+	if err := authorizeBucketScopeWrite(c.Context(), organization, projectID, "delete", "update"); err != nil {
+		return apiutil.HandleError(c, err)
+	}
+	if err := om.DeleteBucketScope(c.Context(), organization, projectID, routeCredentialID); err != nil {
+		return apiutil.HandleError(c, err)
+	}
+	return c.SendStatus(fiber.StatusNoContent)
 }

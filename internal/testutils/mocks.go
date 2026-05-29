@@ -485,6 +485,23 @@ func (m *MockDatabase) CreateBucketScope(ctx context.Context, scope *models.Buck
 	return nil
 }
 
+func (m *MockDatabase) DeleteBucketScope(ctx context.Context, organization, projectID, credentialID string) error {
+	if m.BucketScopes == nil {
+		return fmt.Errorf("%w: bucket scope not found", common.ErrNotFound)
+	}
+	k := bucketScopeKey(organization, projectID)
+	scope, ok := m.BucketScopes[k]
+	if !ok {
+		return fmt.Errorf("%w: bucket scope not found", common.ErrNotFound)
+	}
+	if strings.TrimSpace(scope.CredentialID) != strings.TrimSpace(credentialID) &&
+		strings.TrimSpace(scope.Bucket) != strings.TrimSpace(credentialID) {
+		return fmt.Errorf("%w: bucket scope not found", common.ErrNotFound)
+	}
+	delete(m.BucketScopes, k)
+	return nil
+}
+
 func (m *MockDatabase) GetBucketScope(ctx context.Context, organization, projectID string) (*models.BucketScope, error) {
 	m.GetBucketScopeCalls++
 	if m.BucketScopes == nil {

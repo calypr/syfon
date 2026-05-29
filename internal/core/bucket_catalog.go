@@ -242,6 +242,14 @@ func (m *ObjectManager) CreateBucketScope(ctx context.Context, scope *models.Buc
 	return nil
 }
 
+func (m *ObjectManager) DeleteBucketScope(ctx context.Context, organization, projectID, credentialID string) error {
+	if err := m.db.DeleteBucketScope(ctx, organization, projectID, credentialID); err != nil {
+		return err
+	}
+	m.bucketScopeCache.clear()
+	return nil
+}
+
 func (m *ObjectManager) listBucketsVisibleObjects(ctx context.Context) ([]models.InternalObject, error) {
 	ids, err := m.db.ListObjectIDsByScope(ctx, "", "")
 	if err != nil {

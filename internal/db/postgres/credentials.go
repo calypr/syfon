@@ -254,6 +254,33 @@ func (db *PostgresDB) GetBucketScope(ctx context.Context, organization, projectI
 	return &s, nil
 }
 
+func (db *PostgresDB) DeleteBucketScope(ctx context.Context, organization, projectID, credentialID string) error {
+	org := strings.TrimSpace(organization)
+	project := strings.TrimSpace(projectID)
+	credentialID = strings.TrimSpace(credentialID)
+	if org == "" || project == "" || credentialID == "" {
+		return fmt.Errorf("organization, project_id, and credential_id are required")
+	}
+
+	result, err := db.db.ExecContext(ctx, `
+		DELETE FROM bucket_scope
+		WHERE organization = $1
+		AND project_id = $2
+		AND (credential_id = $3 OR bucket = $3)
+	`, org, project, credentialID)
+	if err != nil {
+		return fmt.Errorf("failed to delete bucket scope: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to inspect deleted bucket scope count: %w", err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("%w: bucket scope not found", common.ErrNotFound)
+	}
+	return nil
+}
+
 func (db *PostgresDB) ListBucketScopes(ctx context.Context) ([]models.BucketScope, error) {
 	rows, err := db.db.QueryContext(ctx, `
 		SELECT organization, project_id, credential_id, bucket, COALESCE(path_prefix, '')
