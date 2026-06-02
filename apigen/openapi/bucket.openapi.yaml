@@ -144,6 +144,38 @@ paths:
           description: Scope not found
         '500':
           description: Internal server error
+  /data/projects/{organization}/{project_id}:
+    delete:
+      tags:
+        - bucket
+      summary: Delete Syfon records and bucket scopes for a project
+      operationId: deleteProjectData
+      parameters:
+        - name: organization
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: project_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Project Syfon records and bucket scopes removed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteProjectDataResponse'
+        '400':
+          description: Validation error
+        '401':
+          description: Authentication required
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
 components:
   schemas:
     PutBucketRequest:
@@ -210,3 +242,19 @@ components:
           type: object
           additionalProperties:
             $ref: '#/components/schemas/BucketMetadata'
+    DeleteProjectDataResponse:
+      type: object
+      required:
+        - organization
+        - project_id
+        - deleted_objects
+        - deleted_bucket_scopes
+      properties:
+        organization:
+          type: string
+        project_id:
+          type: string
+        deleted_objects:
+          type: integer
+        deleted_bucket_scopes:
+          type: integer

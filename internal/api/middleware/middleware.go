@@ -7,8 +7,6 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"sync"
-	"time"
 
 	conf "github.com/calypr/syfon/client/config"
 	"github.com/calypr/syfon/client/request"
@@ -16,7 +14,6 @@ import (
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/plugin"
 	"github.com/gofiber/fiber/v3"
-	"golang.org/x/sync/singleflight"
 )
 
 type authenticationPluginManagerInterface interface {
@@ -31,8 +28,6 @@ type AuthzMiddleware struct {
 	basicUser          string
 	basicPass          string
 	mock               mockAuthConfig
-	cache              *authzCache
-	sf                 singleflight.Group
 	pluginManager      pluginManagerInterface               // interface for testability
 	authnPluginManager authenticationPluginManagerInterface // authentication plugin (interface)
 	localUsers         *localAuthzStore
@@ -46,41 +41,13 @@ type mockAuthConfig struct {
 	Methods           []string
 }
 
-type authCacheConfig struct {
-	Enabled      bool
-	TTL          time.Duration
-	NegativeTTL  time.Duration
-	MaxEntries   int
-	CleanupEvery time.Duration
-}
-
-type authzCache struct {
-	cfg authCacheConfig
-
-	mu      sync.RWMutex
-	entries map[string]authzCacheEntry
-}
-
-type authzCacheEntry struct {
-	resources  []string
-	privileges map[string]map[string]bool
-	negative   bool
-	expiresAt  time.Time
-}
-
 func NewAuthzMiddleware(logger *slog.Logger, mode, basicUser, basicPass string) *AuthzMiddleware {
-	cfg := loadAuthCacheConfigFromEnv()
-	var cache *authzCache
-	if cfg.Enabled {
-		cache = newAuthzCache(cfg)
-	}
 	m := &AuthzMiddleware{
 		logger:    logger,
 		mode:      strings.ToLower(strings.TrimSpace(mode)),
 		basicUser: basicUser,
 		basicPass: basicPass,
 		mock:      loadMockAuthConfigFromEnv(),
-		cache:     cache,
 	}
 	if m.mode == "local" {
 		localCSV := strings.TrimSpace(os.Getenv("DRS_LOCAL_AUTHZ_CSV"))
@@ -119,6 +86,25 @@ func NewAuthzMiddleware(logger *slog.Logger, mode, basicUser, basicPass string) 
 		}
 	}
 	return m
+}
+
+func clonePrivMap(in map[string]map[string]bool) map[string]map[string]bool {
+	if len(in) == 0 {
+		return map[string]map[string]bool{}
+	}
+	out := make(map[string]map[string]bool, len(in))
+	for k, methods := range in {
+		if methods == nil {
+			out[k] = map[string]bool{}
+			continue
+		}
+		mm := make(map[string]bool, len(methods))
+		for mk, mv := range methods {
+			mm[mk] = mv
+		}
+		out[k] = mm
+	}
+	return out
 }
 
 // FiberMiddleware returns a fiber middleware that extracts the token and fetches user info.

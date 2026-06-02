@@ -17,6 +17,61 @@ import (
 	"github.com/gofiber/fiber/v3"
 )
 
+func TestHandleInternalDeleteProject_RemovesObjectsAndBucketScopes(t *testing.T) {
+	mockDB := &testutils.MockDatabase{
+		Objects: map[string]*drs.DrsObject{
+			"delete-me": {Id: "delete-me", Name: common.Ptr("delete-me")},
+			"keep-me":   {Id: "keep-me", Name: common.Ptr("keep-me")},
+		},
+		ObjectAuthz: map[string]map[string][]string{
+			"delete-me": {"org-a": {"proj-a"}},
+			"keep-me":   {"org-a": {"proj-b"}},
+		},
+		BucketScopes: map[string]models.BucketScope{
+			"org-a|proj-a": {Organization: "org-a", ProjectID: "proj-a", CredentialID: "bucket-a", Bucket: "bucket-a"},
+			"org-a|proj-b": {Organization: "org-a", ProjectID: "proj-b", CredentialID: "bucket-b", Bucket: "bucket-b"},
+		},
+	}
+	req := httptest.NewRequest(http.MethodDelete, "/data/projects/org-a/proj-a", nil)
+	req = req.WithContext(dataTestAuthContext(req.Context(), "gen3", true, map[string]map[string]bool{
+		"/programs/org-a/projects/proj-a": {"delete": true, "update": true},
+	}))
+
+	rr := doInternalDRSTestRequest(req, core.NewObjectManager(mockDB, &testutils.MockUrlManager{}))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if _, ok := mockDB.Objects["delete-me"]; ok {
+		t.Fatalf("expected scoped object to be deleted")
+	}
+	if _, ok := mockDB.Objects["keep-me"]; !ok {
+		t.Fatalf("expected unrelated object to remain")
+	}
+	if _, ok := mockDB.BucketScopes["org-a|proj-a"]; ok {
+		t.Fatalf("expected scoped bucket mapping to be deleted")
+	}
+	if _, ok := mockDB.BucketScopes["org-a|proj-b"]; !ok {
+		t.Fatalf("expected unrelated bucket mapping to remain")
+	}
+
+	var resp projectCleanupResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if resp.DeletedObjects != 1 || resp.DeletedBucketScopes != 1 {
+		t.Fatalf("unexpected cleanup counts: %+v", resp)
+	}
+}
+
+func TestHandleInternalDeleteProject_RequiresGen3Auth(t *testing.T) {
+	req := httptest.NewRequest(http.MethodDelete, "/data/projects/org-a/proj-a", nil)
+	req = req.WithContext(dataTestAuthContext(req.Context(), "gen3", false, nil))
+	rr := doInternalDRSTestRequest(req, core.NewObjectManager(&testutils.MockDatabase{}, &testutils.MockUrlManager{}))
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
 func TestHandleInternalBuckets_Gen3Auth(t *testing.T) {
 	mockDB := &testutils.MockDatabase{
 		Credentials: map[string]models.S3Credential{"b1": {Bucket: "b1", Region: "us-east-1"}, "b2": {Bucket: "b2", Region: "us-east-1"}},

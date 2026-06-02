@@ -52,6 +52,10 @@ func resourceAllowed(ctx context.Context, resource string, methods ...string) bo
 	return authz.HasAnyMethodAccess(ctx, []string{resource}, methods...)
 }
 
+func serviceResourceAllowed(ctx context.Context, resource, service string, methods ...string) bool {
+	return authz.HasAnyServiceMethodAccess(ctx, []string{resource}, service, methods...)
+}
+
 func allowedBucketsForScopes(ctx context.Context, scopes []models.BucketScope, methods ...string) map[string]bool {
 	allowed := make(map[string]bool)
 	for _, scope := range scopes {
@@ -88,10 +92,18 @@ func authorizeBucketScopeWrite(ctx context.Context, organization, project string
 	if err != nil {
 		return err
 	}
-	if res == "" || !resourceAllowed(ctx, res, methods...) {
-		return common.ErrUnauthorized
+	if res != "" && resourceAllowed(ctx, res, methods...) {
+		return nil
 	}
-	return nil
+
+	orgResource, err := sycommon.ResourcePath(organization, "")
+	if err != nil {
+		return err
+	}
+	if orgResource != "" && serviceResourceAllowed(ctx, orgResource, "arborist", "create-descendant", "manage-owners") {
+		return nil
+	}
+	return common.ErrUnauthorized
 }
 
 func authorizeBucketDelete(ctx context.Context, om *core.ObjectManager, bucket string) error {

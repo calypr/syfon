@@ -205,7 +205,6 @@ type AuthConfig struct {
 	LocalAuthzCSV        string          `json:"local_authz_csv" yaml:"local_authz_csv"`
 	AllowUnauthenticated bool            `json:"allow_unauthenticated" yaml:"allow_unauthenticated"`
 	Mock                 MockAuthConfig  `json:"mock" yaml:"mock"`
-	Cache                AuthCacheConfig `json:"cache" yaml:"cache"`
 	PluginPaths          PluginPaths     `json:"plugin_paths" yaml:"plugin_paths"`
 	FenceURL             string          `json:"fence_url" yaml:"fence_url"`
 }
@@ -215,14 +214,6 @@ type MockAuthConfig struct {
 	RequireAuthHeader bool     `json:"require_auth_header" yaml:"require_auth_header"`
 	Resources         []string `json:"resources" yaml:"resources"`
 	Methods           []string `json:"methods" yaml:"methods"`
-}
-
-type AuthCacheConfig struct {
-	Enabled      bool `json:"enabled" yaml:"enabled"`
-	TTLSeconds   int  `json:"ttl_seconds" yaml:"ttl_seconds"`
-	NegativeTTL  int  `json:"negative_ttl_seconds" yaml:"negative_ttl_seconds"`
-	MaxEntries   int  `json:"max_entries" yaml:"max_entries"`
-	CleanupEvery int  `json:"cleanup_seconds" yaml:"cleanup_seconds"`
 }
 
 type PluginPaths struct {
@@ -645,22 +636,6 @@ func LoadConfig(configFile string) (*Config, error) {
 	}
 	if cfg.Auth.LocalAuthzCSV != "" {
 		os.Setenv("DRS_LOCAL_AUTHZ_CSV", cfg.Auth.LocalAuthzCSV)
-	}
-	// Auth cache config
-	if cfg.Auth.Cache.Enabled {
-		os.Setenv("DRS_AUTH_CACHE_ENABLED", "true")
-	}
-	if cfg.Auth.Cache.TTLSeconds > 0 {
-		os.Setenv("DRS_AUTH_CACHE_TTL_SECONDS", strconv.Itoa(cfg.Auth.Cache.TTLSeconds))
-	}
-	if cfg.Auth.Cache.NegativeTTL > 0 {
-		os.Setenv("DRS_AUTH_CACHE_NEGATIVE_TTL_SECONDS", strconv.Itoa(cfg.Auth.Cache.NegativeTTL))
-	}
-	if cfg.Auth.Cache.MaxEntries > 0 {
-		os.Setenv("DRS_AUTH_CACHE_MAX_ENTRIES", strconv.Itoa(cfg.Auth.Cache.MaxEntries))
-	}
-	if cfg.Auth.Cache.CleanupEvery > 0 {
-		os.Setenv("DRS_AUTH_CACHE_CLEANUP_SECONDS", strconv.Itoa(cfg.Auth.Cache.CleanupEvery))
 	}
 	// Plugin paths
 	if cfg.Auth.PluginPaths.Authz != "" {

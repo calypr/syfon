@@ -312,8 +312,8 @@ func TestExtractPrivileges(t *testing.T) {
 			map[string]any{"service": "drs", "method": "read"},
 			map[string]any{"service": "indexd", "method": "create"},
 			map[string]any{"service": "*", "method": "delete"},
-			map[string]any{"service": "fence", "method": "superuser"}, // ignored service
-			map[string]any{"service": "drs"},                          // missing method
+			map[string]any{"service": "arborist", "method": "create-descendant"},
+			map[string]any{"service": "drs"}, // missing method
 			"bad-entry",
 		},
 		"/programs/a": "not-a-list",
@@ -327,8 +327,11 @@ func TestExtractPrivileges(t *testing.T) {
 	if !methods["read"] || !methods["create"] || !methods["delete"] {
 		t.Fatalf("expected read/create/delete methods from accepted services, got %v", methods)
 	}
-	if methods["superuser"] {
-		t.Fatalf("did not expect superuser method from unsupported service")
+	if !methods["arborist:create-descendant"] {
+		t.Fatalf("expected arborist create-descendant to be preserved as a qualified privilege, got %v", methods)
+	}
+	if methods["create-descendant"] {
+		t.Fatalf("did not expect arborist create-descendant to be promoted to an unqualified method")
 	}
 	if len(out["/programs/a"]) != 0 {
 		t.Fatalf("expected empty method map for malformed privilege list")
@@ -522,95 +525,6 @@ func TestLocalAuthzCSVDeniesAuthenticatedSubjectMissingFromCSV(t *testing.T) {
 	}
 }
 
-func TestAuthzCacheSetGetPositive(t *testing.T) {
-	c := newAuthzCache(authCacheConfig{
-		Enabled:     true,
-		TTL:         2 * time.Second,
-		NegativeTTL: 1 * time.Second,
-		MaxEntries:  10,
-	})
-	resources := []string{"/data_file"}
-	privs := map[string]map[string]bool{
-		"/data_file": {"read": true, "create": true},
-	}
-
-	c.set("k1", resources, privs, false)
-	gotRes, gotPrivs, negative, ok := c.get("k1")
-	if !ok {
-		t.Fatalf("expected cache hit")
-	}
-	if negative {
-		t.Fatalf("expected positive entry")
-	}
-	if len(gotRes) != 1 || gotRes[0] != "/data_file" {
-		t.Fatalf("unexpected resources: %+v", gotRes)
-	}
-	if !gotPrivs["/data_file"]["read"] || !gotPrivs["/data_file"]["create"] {
-		t.Fatalf("unexpected privileges: %+v", gotPrivs)
-	}
-}
-
-func TestAuthzCacheSetGetNegative(t *testing.T) {
-	c := newAuthzCache(authCacheConfig{
-		Enabled:     true,
-		TTL:         2 * time.Second,
-		NegativeTTL: 2 * time.Second,
-		MaxEntries:  10,
-	})
-	c.set("k2", nil, nil, true)
-	_, _, negative, ok := c.get("k2")
-	if !ok {
-		t.Fatalf("expected cache hit")
-	}
-	if !negative {
-		t.Fatalf("expected negative entry")
-	}
-}
-
-func TestAuthzCacheExpires(t *testing.T) {
-	c := newAuthzCache(authCacheConfig{
-		Enabled:     true,
-		TTL:         20 * time.Millisecond,
-		NegativeTTL: 20 * time.Millisecond,
-		MaxEntries:  10,
-	})
-	c.set("k3", []string{"/x"}, map[string]map[string]bool{"/x": {"read": true}}, false)
-	time.Sleep(35 * time.Millisecond)
-	_, _, _, ok := c.get("k3")
-	if ok {
-		t.Fatalf("expected cache miss after expiry")
-	}
-}
-
-func TestAuthzCacheDeepCopy(t *testing.T) {
-	c := newAuthzCache(authCacheConfig{
-		Enabled:     true,
-		TTL:         2 * time.Second,
-		NegativeTTL: 1 * time.Second,
-		MaxEntries:  10,
-	})
-	resources := []string{"/a"}
-	privs := map[string]map[string]bool{
-		"/a": {"read": true},
-	}
-	c.set("k4", resources, privs, false)
-
-	// Mutate originals after set; cache should keep prior values.
-	resources[0] = "/mutated"
-	privs["/a"]["read"] = false
-
-	gotRes, gotPrivs, _, ok := c.get("k4")
-	if !ok {
-		t.Fatalf("expected cache hit")
-	}
-	if gotRes[0] != "/a" {
-		t.Fatalf("expected cached resource '/a', got %q", gotRes[0])
-	}
-	if !gotPrivs["/a"]["read"] {
-		t.Fatalf("expected cached read=true, got %+v", gotPrivs)
-	}
-}
-
 func TestAuthzMiddlewareScenarios(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -788,127 +702,6 @@ func TestAuthzMiddlewareScenarios(t *testing.T) {
 			}
 			if tc.wantStatus != http.StatusOK && handlerCalled {
 				t.Fatalf("did not expect handler to be called")
-			}
-		})
-	}
-}
-
-func TestAuthzCacheLifecycle(t *testing.T) {
-	cases := []struct {
-		name        string
-		cfg         authCacheConfig
-		key         string
-		resources   []string
-		privileges  map[string]map[string]bool
-		negative    bool
-		mutateAfter bool
-		wait        time.Duration
-		wantOK      bool
-		wantNeg     bool
-		wantRead    bool
-	}{
-		{
-			name: "positive hit",
-			cfg: authCacheConfig{
-				Enabled:     true,
-				TTL:         2 * time.Second,
-				NegativeTTL: 1 * time.Second,
-				MaxEntries:  10,
-			},
-			key:       "k1",
-			resources: []string{"/data_file"},
-			privileges: map[string]map[string]bool{
-				"/data_file": {"read": true, "create": true},
-			},
-			wantOK:   true,
-			wantRead: true,
-		},
-		{
-			name: "negative hit",
-			cfg: authCacheConfig{
-				Enabled:     true,
-				TTL:         2 * time.Second,
-				NegativeTTL: 2 * time.Second,
-				MaxEntries:  10,
-			},
-			key:      "k2",
-			negative: true,
-			wantOK:   true,
-			wantNeg:  true,
-		},
-		{
-			name: "expiry",
-			cfg: authCacheConfig{
-				Enabled:     true,
-				TTL:         20 * time.Millisecond,
-				NegativeTTL: 20 * time.Millisecond,
-				MaxEntries:  10,
-			},
-			key:       "k3",
-			resources: []string{"/x"},
-			privileges: map[string]map[string]bool{
-				"/x": {"read": true},
-			},
-			wait:   35 * time.Millisecond,
-			wantOK: false,
-		},
-		{
-			name: "deep copy",
-			cfg: authCacheConfig{
-				Enabled:     true,
-				TTL:         2 * time.Second,
-				NegativeTTL: 1 * time.Second,
-				MaxEntries:  10,
-			},
-			key:       "k4",
-			resources: []string{"/a"},
-			privileges: map[string]map[string]bool{
-				"/a": {"read": true},
-			},
-			mutateAfter: true,
-			wantOK:      true,
-			wantRead:    true,
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			c := newAuthzCache(tc.cfg)
-			c.set(tc.key, tc.resources, tc.privileges, tc.negative)
-
-			if tc.mutateAfter {
-				tc.resources[0] = "/mutated"
-				tc.privileges["/a"]["read"] = false
-			}
-			if tc.wait > 0 {
-				time.Sleep(tc.wait)
-			}
-
-			gotRes, gotPrivs, negative, ok := c.get(tc.key)
-			if ok != tc.wantOK {
-				t.Fatalf("expected ok=%v, got %v", tc.wantOK, ok)
-			}
-			if !ok {
-				return
-			}
-			if negative != tc.wantNeg {
-				t.Fatalf("expected negative=%v, got %v", tc.wantNeg, negative)
-			}
-			if tc.wantOK && tc.wantRead {
-				if len(gotRes) == 0 || gotRes[0] == "" {
-					t.Fatalf("expected cached resource")
-				}
-				if !gotPrivs[gotRes[0]]["read"] {
-					t.Fatalf("expected cached read privilege, got %+v", gotPrivs)
-				}
-			}
-			if tc.mutateAfter {
-				if gotRes[0] != "/a" {
-					t.Fatalf("expected cached resource '/a', got %q", gotRes[0])
-				}
-				if !gotPrivs["/a"]["read"] {
-					t.Fatalf("expected cached read=true, got %+v", gotPrivs)
-				}
 			}
 		})
 	}

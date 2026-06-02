@@ -12,6 +12,7 @@ const (
 	RouteInternalBuckets           = "/data/buckets"
 	RouteInternalBucketDetail      = "/data/buckets/{bucket}"
 	RouteInternalBucketScopes      = "/data/buckets/{bucket}/scopes"
+	RouteInternalProjectCleanup    = "/data/projects/{organization}/{project_id}"
 
 	RouteInternalIndex                       = "/index"
 	RouteInternalIndexDetail                 = "/index/{id}"
