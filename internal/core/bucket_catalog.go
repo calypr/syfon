@@ -247,6 +247,26 @@ func (m *ObjectManager) DeleteBucketScope(ctx context.Context, organization, pro
 		return err
 	}
 	m.bucketScopeCache.clear()
+
+	resolvedCredID := credentialID
+	if cred, err := m.db.GetS3Credential(ctx, credentialID); err == nil && cred != nil {
+		resolvedCredID = cred.CredentialID
+	}
+
+	scopes, err := m.db.ListBucketScopes(ctx)
+	if err == nil {
+		hasRemaining := false
+		for _, s := range scopes {
+			if strings.TrimSpace(s.CredentialID) == resolvedCredID || strings.TrimSpace(s.Bucket) == resolvedCredID {
+				hasRemaining = true
+				break
+			}
+		}
+		if !hasRemaining {
+			_ = m.DeleteS3Credential(ctx, resolvedCredID)
+		}
+	}
+
 	return nil
 }
 
