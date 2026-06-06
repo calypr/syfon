@@ -39,6 +39,14 @@ type BucketsResponse struct {
 	S3BUCKETS map[string]BucketMetadata `json:"S3_BUCKETS"`
 }
 
+// DeleteProjectDataResponse defines model for DeleteProjectDataResponse.
+type DeleteProjectDataResponse struct {
+	DeletedBucketScopes int    `json:"deleted_bucket_scopes"`
+	DeletedObjects      int    `json:"deleted_objects"`
+	Organization        string `json:"organization"`
+	ProjectId           string `json:"project_id"`
+}
+
 // PutBucketRequest defines model for PutBucketRequest.
 type PutBucketRequest struct {
 	AccessKey    *string `json:"access_key,omitempty"`
@@ -54,6 +62,12 @@ type PutBucketRequest struct {
 	Provider  *string `json:"provider,omitempty"`
 	Region    *string `json:"region,omitempty"`
 	SecretKey *string `json:"secret_key,omitempty"`
+}
+
+// DeleteBucketScopeParams defines parameters for DeleteBucketScope.
+type DeleteBucketScopeParams struct {
+	Organization string `form:"organization" json:"organization"`
+	ProjectId    string `form:"project_id" json:"project_id"`
 }
 
 // PutBucketJSONRequestBody defines body for PutBucket for application/json ContentType.
@@ -146,10 +160,16 @@ type ClientInterface interface {
 	// DeleteBucket request
 	DeleteBucket(ctx context.Context, bucket string, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// DeleteBucketScope request
+	DeleteBucketScope(ctx context.Context, bucket string, params *DeleteBucketScopeParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// AddBucketScopeWithBody request with any body
 	AddBucketScopeWithBody(ctx context.Context, bucket string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	AddBucketScope(ctx context.Context, bucket string, body AddBucketScopeJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// DeleteProjectData request
+	DeleteProjectData(ctx context.Context, organization string, projectId string, reqEditors ...RequestEditorFn) (*http.Response, error)
 }
 
 func (c *Client) ListBuckets(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -200,6 +220,18 @@ func (c *Client) DeleteBucket(ctx context.Context, bucket string, reqEditors ...
 	return c.Client.Do(req)
 }
 
+func (c *Client) DeleteBucketScope(ctx context.Context, bucket string, params *DeleteBucketScopeParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDeleteBucketScopeRequest(c.Server, bucket, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 func (c *Client) AddBucketScopeWithBody(ctx context.Context, bucket string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewAddBucketScopeRequestWithBody(c.Server, bucket, contentType, body)
 	if err != nil {
@@ -214,6 +246,18 @@ func (c *Client) AddBucketScopeWithBody(ctx context.Context, bucket string, cont
 
 func (c *Client) AddBucketScope(ctx context.Context, bucket string, body AddBucketScopeJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewAddBucketScopeRequest(c.Server, bucket, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) DeleteProjectData(ctx context.Context, organization string, projectId string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDeleteProjectDataRequest(c.Server, organization, projectId)
 	if err != nil {
 		return nil, err
 	}
@@ -325,6 +369,70 @@ func NewDeleteBucketRequest(server string, bucket string) (*http.Request, error)
 	return req, nil
 }
 
+// NewDeleteBucketScopeRequest generates requests for DeleteBucketScope
+func NewDeleteBucketScopeRequest(server string, bucket string, params *DeleteBucketScopeParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "bucket", runtime.ParamLocationPath, bucket)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/data/buckets/%s/scopes", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if queryFrag, err := runtime.StyleParamWithLocation("form", true, "organization", runtime.ParamLocationQuery, params.Organization); err != nil {
+			return nil, err
+		} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+			return nil, err
+		} else {
+			for k, v := range parsed {
+				for _, v2 := range v {
+					queryValues.Add(k, v2)
+				}
+			}
+		}
+
+		if queryFrag, err := runtime.StyleParamWithLocation("form", true, "project_id", runtime.ParamLocationQuery, params.ProjectId); err != nil {
+			return nil, err
+		} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+			return nil, err
+		} else {
+			for k, v := range parsed {
+				for _, v2 := range v {
+					queryValues.Add(k, v2)
+				}
+			}
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
+	}
+
+	req, err := http.NewRequest("DELETE", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewAddBucketScopeRequest calls the generic AddBucketScope builder with application/json body
 func NewAddBucketScopeRequest(server string, bucket string, body AddBucketScopeJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -368,6 +476,47 @@ func NewAddBucketScopeRequestWithBody(server string, bucket string, contentType 
 	}
 
 	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewDeleteProjectDataRequest generates requests for DeleteProjectData
+func NewDeleteProjectDataRequest(server string, organization string, projectId string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "organization", runtime.ParamLocationPath, organization)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "project_id", runtime.ParamLocationPath, projectId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/data/projects/%s/%s", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("DELETE", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
 
 	return req, nil
 }
@@ -416,30 +565,36 @@ func WithBaseURL(baseURL string) ClientOption {
 // ClientWithResponsesInterface is the interface specification for the client with responses above.
 type ClientWithResponsesInterface interface {
 	// ListBucketsWithResponse request
-	ListBucketsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListBucketsResponse, error)
+	ListBucketsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListBucketsResp, error)
 
 	// PutBucketWithBodyWithResponse request with any body
-	PutBucketWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PutBucketResponse, error)
+	PutBucketWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PutBucketResp, error)
 
-	PutBucketWithResponse(ctx context.Context, body PutBucketJSONRequestBody, reqEditors ...RequestEditorFn) (*PutBucketResponse, error)
+	PutBucketWithResponse(ctx context.Context, body PutBucketJSONRequestBody, reqEditors ...RequestEditorFn) (*PutBucketResp, error)
 
 	// DeleteBucketWithResponse request
-	DeleteBucketWithResponse(ctx context.Context, bucket string, reqEditors ...RequestEditorFn) (*DeleteBucketResponse, error)
+	DeleteBucketWithResponse(ctx context.Context, bucket string, reqEditors ...RequestEditorFn) (*DeleteBucketResp, error)
+
+	// DeleteBucketScopeWithResponse request
+	DeleteBucketScopeWithResponse(ctx context.Context, bucket string, params *DeleteBucketScopeParams, reqEditors ...RequestEditorFn) (*DeleteBucketScopeResp, error)
 
 	// AddBucketScopeWithBodyWithResponse request with any body
-	AddBucketScopeWithBodyWithResponse(ctx context.Context, bucket string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*AddBucketScopeResponse, error)
+	AddBucketScopeWithBodyWithResponse(ctx context.Context, bucket string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*AddBucketScopeResp, error)
 
-	AddBucketScopeWithResponse(ctx context.Context, bucket string, body AddBucketScopeJSONRequestBody, reqEditors ...RequestEditorFn) (*AddBucketScopeResponse, error)
+	AddBucketScopeWithResponse(ctx context.Context, bucket string, body AddBucketScopeJSONRequestBody, reqEditors ...RequestEditorFn) (*AddBucketScopeResp, error)
+
+	// DeleteProjectDataWithResponse request
+	DeleteProjectDataWithResponse(ctx context.Context, organization string, projectId string, reqEditors ...RequestEditorFn) (*DeleteProjectDataResp, error)
 }
 
-type ListBucketsResponse struct {
+type ListBucketsResp struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON200      *BucketsResponse
 }
 
 // Status returns HTTPResponse.Status
-func (r ListBucketsResponse) Status() string {
+func (r ListBucketsResp) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -447,20 +602,20 @@ func (r ListBucketsResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r ListBucketsResponse) StatusCode() int {
+func (r ListBucketsResp) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
 	return 0
 }
 
-type PutBucketResponse struct {
+type PutBucketResp struct {
 	Body         []byte
 	HTTPResponse *http.Response
 }
 
 // Status returns HTTPResponse.Status
-func (r PutBucketResponse) Status() string {
+func (r PutBucketResp) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -468,20 +623,20 @@ func (r PutBucketResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r PutBucketResponse) StatusCode() int {
+func (r PutBucketResp) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
 	return 0
 }
 
-type DeleteBucketResponse struct {
+type DeleteBucketResp struct {
 	Body         []byte
 	HTTPResponse *http.Response
 }
 
 // Status returns HTTPResponse.Status
-func (r DeleteBucketResponse) Status() string {
+func (r DeleteBucketResp) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -489,20 +644,20 @@ func (r DeleteBucketResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r DeleteBucketResponse) StatusCode() int {
+func (r DeleteBucketResp) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
 	return 0
 }
 
-type AddBucketScopeResponse struct {
+type DeleteBucketScopeResp struct {
 	Body         []byte
 	HTTPResponse *http.Response
 }
 
 // Status returns HTTPResponse.Status
-func (r AddBucketScopeResponse) Status() string {
+func (r DeleteBucketScopeResp) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -510,74 +665,135 @@ func (r AddBucketScopeResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r AddBucketScopeResponse) StatusCode() int {
+func (r DeleteBucketScopeResp) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
 	return 0
 }
 
-// ListBucketsWithResponse request returning *ListBucketsResponse
-func (c *ClientWithResponses) ListBucketsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListBucketsResponse, error) {
+type AddBucketScopeResp struct {
+	Body         []byte
+	HTTPResponse *http.Response
+}
+
+// Status returns HTTPResponse.Status
+func (r AddBucketScopeResp) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r AddBucketScopeResp) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type DeleteProjectDataResp struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *DeleteProjectDataResponse
+}
+
+// Status returns HTTPResponse.Status
+func (r DeleteProjectDataResp) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DeleteProjectDataResp) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ListBucketsWithResponse request returning *ListBucketsResp
+func (c *ClientWithResponses) ListBucketsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListBucketsResp, error) {
 	rsp, err := c.ListBuckets(ctx, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseListBucketsResponse(rsp)
+	return ParseListBucketsResp(rsp)
 }
 
-// PutBucketWithBodyWithResponse request with arbitrary body returning *PutBucketResponse
-func (c *ClientWithResponses) PutBucketWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PutBucketResponse, error) {
+// PutBucketWithBodyWithResponse request with arbitrary body returning *PutBucketResp
+func (c *ClientWithResponses) PutBucketWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PutBucketResp, error) {
 	rsp, err := c.PutBucketWithBody(ctx, contentType, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParsePutBucketResponse(rsp)
+	return ParsePutBucketResp(rsp)
 }
 
-func (c *ClientWithResponses) PutBucketWithResponse(ctx context.Context, body PutBucketJSONRequestBody, reqEditors ...RequestEditorFn) (*PutBucketResponse, error) {
+func (c *ClientWithResponses) PutBucketWithResponse(ctx context.Context, body PutBucketJSONRequestBody, reqEditors ...RequestEditorFn) (*PutBucketResp, error) {
 	rsp, err := c.PutBucket(ctx, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParsePutBucketResponse(rsp)
+	return ParsePutBucketResp(rsp)
 }
 
-// DeleteBucketWithResponse request returning *DeleteBucketResponse
-func (c *ClientWithResponses) DeleteBucketWithResponse(ctx context.Context, bucket string, reqEditors ...RequestEditorFn) (*DeleteBucketResponse, error) {
+// DeleteBucketWithResponse request returning *DeleteBucketResp
+func (c *ClientWithResponses) DeleteBucketWithResponse(ctx context.Context, bucket string, reqEditors ...RequestEditorFn) (*DeleteBucketResp, error) {
 	rsp, err := c.DeleteBucket(ctx, bucket, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseDeleteBucketResponse(rsp)
+	return ParseDeleteBucketResp(rsp)
 }
 
-// AddBucketScopeWithBodyWithResponse request with arbitrary body returning *AddBucketScopeResponse
-func (c *ClientWithResponses) AddBucketScopeWithBodyWithResponse(ctx context.Context, bucket string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*AddBucketScopeResponse, error) {
+// DeleteBucketScopeWithResponse request returning *DeleteBucketScopeResp
+func (c *ClientWithResponses) DeleteBucketScopeWithResponse(ctx context.Context, bucket string, params *DeleteBucketScopeParams, reqEditors ...RequestEditorFn) (*DeleteBucketScopeResp, error) {
+	rsp, err := c.DeleteBucketScope(ctx, bucket, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDeleteBucketScopeResp(rsp)
+}
+
+// AddBucketScopeWithBodyWithResponse request with arbitrary body returning *AddBucketScopeResp
+func (c *ClientWithResponses) AddBucketScopeWithBodyWithResponse(ctx context.Context, bucket string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*AddBucketScopeResp, error) {
 	rsp, err := c.AddBucketScopeWithBody(ctx, bucket, contentType, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseAddBucketScopeResponse(rsp)
+	return ParseAddBucketScopeResp(rsp)
 }
 
-func (c *ClientWithResponses) AddBucketScopeWithResponse(ctx context.Context, bucket string, body AddBucketScopeJSONRequestBody, reqEditors ...RequestEditorFn) (*AddBucketScopeResponse, error) {
+func (c *ClientWithResponses) AddBucketScopeWithResponse(ctx context.Context, bucket string, body AddBucketScopeJSONRequestBody, reqEditors ...RequestEditorFn) (*AddBucketScopeResp, error) {
 	rsp, err := c.AddBucketScope(ctx, bucket, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseAddBucketScopeResponse(rsp)
+	return ParseAddBucketScopeResp(rsp)
 }
 
-// ParseListBucketsResponse parses an HTTP response from a ListBucketsWithResponse call
-func ParseListBucketsResponse(rsp *http.Response) (*ListBucketsResponse, error) {
+// DeleteProjectDataWithResponse request returning *DeleteProjectDataResp
+func (c *ClientWithResponses) DeleteProjectDataWithResponse(ctx context.Context, organization string, projectId string, reqEditors ...RequestEditorFn) (*DeleteProjectDataResp, error) {
+	rsp, err := c.DeleteProjectData(ctx, organization, projectId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDeleteProjectDataResp(rsp)
+}
+
+// ParseListBucketsResp parses an HTTP response from a ListBucketsWithResponse call
+func ParseListBucketsResp(rsp *http.Response) (*ListBucketsResp, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &ListBucketsResponse{
+	response := &ListBucketsResp{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
@@ -595,15 +811,15 @@ func ParseListBucketsResponse(rsp *http.Response) (*ListBucketsResponse, error) 
 	return response, nil
 }
 
-// ParsePutBucketResponse parses an HTTP response from a PutBucketWithResponse call
-func ParsePutBucketResponse(rsp *http.Response) (*PutBucketResponse, error) {
+// ParsePutBucketResp parses an HTTP response from a PutBucketWithResponse call
+func ParsePutBucketResp(rsp *http.Response) (*PutBucketResp, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &PutBucketResponse{
+	response := &PutBucketResp{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
@@ -611,15 +827,15 @@ func ParsePutBucketResponse(rsp *http.Response) (*PutBucketResponse, error) {
 	return response, nil
 }
 
-// ParseDeleteBucketResponse parses an HTTP response from a DeleteBucketWithResponse call
-func ParseDeleteBucketResponse(rsp *http.Response) (*DeleteBucketResponse, error) {
+// ParseDeleteBucketResp parses an HTTP response from a DeleteBucketWithResponse call
+func ParseDeleteBucketResp(rsp *http.Response) (*DeleteBucketResp, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &DeleteBucketResponse{
+	response := &DeleteBucketResp{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
@@ -627,17 +843,59 @@ func ParseDeleteBucketResponse(rsp *http.Response) (*DeleteBucketResponse, error
 	return response, nil
 }
 
-// ParseAddBucketScopeResponse parses an HTTP response from a AddBucketScopeWithResponse call
-func ParseAddBucketScopeResponse(rsp *http.Response) (*AddBucketScopeResponse, error) {
+// ParseDeleteBucketScopeResp parses an HTTP response from a DeleteBucketScopeWithResponse call
+func ParseDeleteBucketScopeResp(rsp *http.Response) (*DeleteBucketScopeResp, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &AddBucketScopeResponse{
+	response := &DeleteBucketScopeResp{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
+	}
+
+	return response, nil
+}
+
+// ParseAddBucketScopeResp parses an HTTP response from a AddBucketScopeWithResponse call
+func ParseAddBucketScopeResp(rsp *http.Response) (*AddBucketScopeResp, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &AddBucketScopeResp{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	return response, nil
+}
+
+// ParseDeleteProjectDataResp parses an HTTP response from a DeleteProjectDataWithResponse call
+func ParseDeleteProjectDataResp(rsp *http.Response) (*DeleteProjectDataResp, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DeleteProjectDataResp{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest DeleteProjectDataResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
 	}
 
 	return response, nil
