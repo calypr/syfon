@@ -12,6 +12,7 @@ import (
 )
 
 var ErrNoValidSHA256 = errors.New("no valid sha256 values provided")
+var ErrAccessMethodsRequired = errors.New("candidate must include at least one access method with a non-empty url")
 
 var sha256Like = regexp.MustCompile(`^[A-Fa-f0-9]{64}$`)
 

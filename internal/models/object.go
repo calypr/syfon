@@ -65,9 +65,6 @@ func (o *InternalObject) UnmarshalJSON(data []byte) error {
 	o.UpdatedTime = wire.UpdatedTime
 	o.Size = wire.Size
 	o.Name = wire.Name
-	if o.Name == nil {
-		o.Name = wire.FileName
-	}
 	o.Description = wire.Description
 	o.MimeType = wire.MimeType
 	o.SelfUri = wire.SelfUri
@@ -120,7 +117,9 @@ func (o InternalObject) MarshalJSON() ([]byte, error) {
 	}
 	// Ensure Gen3 compatibility fields are also present.
 	out["did"] = o.Id
-	if o.Name != nil {
+	if fileName, ok := out["file_name"].(string); ok && fileName != "" {
+		out["file_name"] = fileName
+	} else if o.Name != nil {
 		out["file_name"] = *o.Name
 	}
 

@@ -74,6 +74,59 @@ func DoUpload(ctx context.Context, req request.Requester, urlStr string, body io
 
 // GenericDownload performs GET (optionally ranged) against a signed URL.
 func GenericDownload(ctx context.Context, req request.Requester, signedURL string, rangeStart, rangeEnd *int64) (*http.Response, error) {
+	parsed, parseErr := url.Parse(strings.TrimSpace(signedURL))
+	if parseErr == nil && (parsed.Scheme == "" || strings.ToLower(parsed.Scheme) == "file") {
+		srcPath := parsed.Path
+		if srcPath == "" {
+			srcPath = signedURL
+		}
+		if srcPath == "" {
+			return nil, fmt.Errorf("invalid file download url: %s", signedURL)
+		}
+		f, err := os.Open(srcPath)
+		if err != nil {
+			return nil, fmt.Errorf("open download source file: %w", err)
+		}
+		stat, err := f.Stat()
+		if err != nil {
+			_ = f.Close()
+			return nil, fmt.Errorf("stat download source file: %w", err)
+		}
+
+		reader := io.ReadCloser(f)
+		status := http.StatusOK
+		contentLength := stat.Size()
+		if rangeStart != nil {
+			start := *rangeStart
+			if start < 0 {
+				start = 0
+			}
+			end := stat.Size() - 1
+			if rangeEnd != nil && *rangeEnd >= 0 && *rangeEnd < end {
+				end = *rangeEnd
+			}
+			if start > stat.Size() {
+				start = stat.Size()
+			}
+			if end < start-1 {
+				end = start - 1
+			}
+			length := int64(0)
+			if end >= start {
+				length = end - start + 1
+			}
+			reader = io.NopCloser(io.NewSectionReader(f, start, length))
+			status = http.StatusPartialContent
+			contentLength = length
+		}
+
+		return &http.Response{
+			StatusCode:    status,
+			Body:          reader,
+			ContentLength: contentLength,
+		}, nil
+	}
+
 	skipAuth := common.IsCloudPresignedURL(signedURL)
 
 	opts := []request.RequestOption{}

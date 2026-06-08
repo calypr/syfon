@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -36,6 +37,12 @@ func TestDRSServiceResolveAndList(t *testing.T) {
 			writeJSON(t, w, http.StatusOK, drsapi.DrsObject{Id: "obj-1", Name: &name, Size: 99, Checksums: []drsapi.Checksum{{Type: "sha256", Checksum: "abc"}}, CreatedTime: time.Now(), AccessMethods: &accessMethods})
 		case r.Method == http.MethodGet && r.URL.Path == "/objects/no-access":
 			writeJSON(t, w, http.StatusOK, drsapi.DrsObject{Id: "no-access", Checksums: []drsapi.Checksum{{Type: "sha256", Checksum: "abc"}}, CreatedTime: time.Now()})
+		case r.Method == http.MethodGet && r.URL.Path == "/objects/missing":
+			http.Error(w, "missing", http.StatusNotFound)
+		case r.Method == http.MethodGet && r.URL.Path == "/objects/broken":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = io.WriteString(w, `{"error":{"message":"column \"file_name\" does not exist"}}`)
 		case r.Method == http.MethodGet && r.URL.Path == "/objects/obj-1/access/acc-1":
 			writeJSON(t, w, http.StatusOK, drsapi.AccessURL{Url: "https://signed.example/access"})
 		case r.Method == http.MethodGet && r.URL.Path == "/objects/checksum/abc":
@@ -55,11 +62,22 @@ func TestDRSServiceResolveAndList(t *testing.T) {
 		case r.Method == http.MethodPost && r.URL.Path == "/objects/register":
 			name := "registered.bin"
 			writeJSON(t, w, http.StatusCreated, drsapi.N201ObjectsCreated{Objects: []drsapi.DrsObject{{Id: "obj-created", Name: &name, Checksums: []drsapi.Checksum{{Type: "sha256", Checksum: "abc"}}, CreatedTime: time.Now()}}})
+		case r.Method == http.MethodPut && r.URL.Path == "/objects/obj-1/access-methods":
+			var body drsapi.AccessMethodUpdateRequest
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode access method update body: %v", err)
+			}
+			name := "object.bin"
+			writeJSON(t, w, http.StatusOK, drsapi.DrsObject{Id: "obj-1", Name: &name, Size: 99, Checksums: []drsapi.Checksum{{Type: "sha256", Checksum: "abc"}}, CreatedTime: time.Now(), AccessMethods: &body.AccessMethods})
 		case r.Method == http.MethodPut && r.URL.Path == "/objects/obj-delete/delete":
 			if err := json.NewDecoder(r.Body).Decode(&deleteRequest); err != nil {
 				t.Fatalf("decode delete body: %v", err)
 			}
 			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodPut && r.URL.Path == "/objects/obj-delete-fail/delete":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = io.WriteString(w, `{"error":{"message":"delete failed because schema is stale"}}`)
 		default:
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
 		}
@@ -100,6 +118,12 @@ func TestDRSServiceResolveAndList(t *testing.T) {
 	if err != nil || obj.Id != "obj-1" {
 		t.Fatalf("GetObject returned obj=%+v err=%v", obj, err)
 	}
+	if _, err := service.GetObject(ctx, "missing"); !errors.Is(err, ErrObjectNotFound) {
+		t.Fatalf("expected ErrObjectNotFound, got %v", err)
+	}
+	if _, err := service.GetObject(ctx, "broken"); err == nil || !strings.Contains(err.Error(), `column "file_name" does not exist`) {
+		t.Fatalf("expected server error detail for broken object lookup, got %v", err)
+	}
 
 	page, err := service.ListObjects(ctx, 5, 2)
 	if err != nil || len(page.DrsObjects) != 1 || page.DrsObjects[0].Id != "did-record" {
@@ -111,6 +135,17 @@ func TestDRSServiceResolveAndList(t *testing.T) {
 	}
 	if query.Get("limit") != "5" || query.Get("page") != "2" {
 		t.Fatalf("unexpected list query values: %v", query)
+	}
+	page, err = service.ListObjectsAfter(ctx, 7, "did-record")
+	if err != nil || len(page.DrsObjects) != 1 || page.DrsObjects[0].Id != "did-record" {
+		t.Fatalf("ListObjectsAfter returned page=%+v err=%v", page, err)
+	}
+	query, err = url.ParseQuery(strings.TrimPrefix(requester.builder.Url, "/index?"))
+	if err != nil {
+		t.Fatalf("parse cursor list query: %v", err)
+	}
+	if query.Get("limit") != "7" || query.Get("start") != "did-record" || query.Get("page") != "" {
+		t.Fatalf("unexpected cursor list query values: %v", query)
 	}
 	if page.DrsObjects[0].AccessMethods == nil || len(*page.DrsObjects[0].AccessMethods) != 1 {
 		t.Fatalf("expected mapped access methods, got %+v", page.DrsObjects[0])
@@ -133,6 +168,17 @@ func TestDRSServiceResolveAndList(t *testing.T) {
 	}
 	if query.Get("project") != "proj-1" || query.Get("limit") != "10" || query.Get("page") != "3" {
 		t.Fatalf("unexpected project list query values: %v", query)
+	}
+	projectPage, err = service.ListObjectsByProjectAfter(ctx, "proj-1", 9, "did-record")
+	if err != nil || len(projectPage.DrsObjects) != 1 {
+		t.Fatalf("ListObjectsByProjectAfter returned page=%+v err=%v", projectPage, err)
+	}
+	query, err = url.ParseQuery(strings.TrimPrefix(requester.builder.Url, "/index?"))
+	if err != nil {
+		t.Fatalf("parse project cursor query: %v", err)
+	}
+	if query.Get("project") != "proj-1" || query.Get("limit") != "9" || query.Get("start") != "did-record" || query.Get("page") != "" {
+		t.Fatalf("unexpected project cursor query values: %v", query)
 	}
 
 	sample, err := service.GetProjectSample(ctx, "proj-2", 4)
@@ -164,9 +210,24 @@ func TestDRSServiceResolveAndList(t *testing.T) {
 	if err != nil || len(registered.Objects) != 1 || registered.Objects[0].Id != "obj-created" {
 		t.Fatalf("RegisterObjects returned registered=%+v err=%v", registered, err)
 	}
+	updatedAccessID := "acc-2"
+	updated, err := service.UpdateObjectAccessMethods(ctx, "obj-1", []drsapi.AccessMethod{{
+		AccessId: &updatedAccessID,
+		Type:     drsapi.AccessMethodType("https"),
+		AccessUrl: &struct {
+			Headers *[]string `json:"headers,omitempty"`
+			Url     string    `json:"url"`
+		}{Url: "https://signed.example/updated.bin"},
+	}})
+	if err != nil || updated.AccessMethods == nil || len(*updated.AccessMethods) != 1 || (*updated.AccessMethods)[0].AccessUrl == nil || (*updated.AccessMethods)[0].AccessUrl.Url != "https://signed.example/updated.bin" {
+		t.Fatalf("UpdateObjectAccessMethods returned updated=%+v err=%v", updated, err)
+	}
 
 	if err := service.DeleteObject(ctx, "obj-delete", true); err != nil {
 		t.Fatalf("DeleteObject returned error: %v", err)
+	}
+	if err := service.DeleteObject(ctx, "obj-delete-fail", true); err == nil || !strings.Contains(err.Error(), "schema is stale") {
+		t.Fatalf("expected delete server error detail, got %v", err)
 	}
 	if deleteRequest.DeleteStorageData == nil || !*deleteRequest.DeleteStorageData {
 		t.Fatalf("expected delete_storage_data=true, got %+v", deleteRequest)

@@ -13,7 +13,10 @@ import (
 	syclient "github.com/calypr/syfon/client"
 	"github.com/calypr/syfon/client/request"
 	syfonclient "github.com/calypr/syfon/client/services"
+	transferdownload "github.com/calypr/syfon/client/transfer/download"
+	syupload "github.com/calypr/syfon/client/transfer/upload"
 	"github.com/calypr/syfon/cmd/cliauth"
+	"github.com/calypr/syfon/cmd/transferprogress"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/spf13/cobra"
 )
@@ -37,6 +40,7 @@ var Cmd = &cobra.Command{
 			return err
 		}
 		outPath := strings.TrimSpace(downloadOut)
+		var expectedSize int64
 		if outPath == "" {
 			rec, err := c.Index().Get(ctx, did)
 			if err != nil {
@@ -48,26 +52,35 @@ var Cmd = &cobra.Command{
 					name = pretty
 				}
 			}
+			if rec.Size != nil {
+				expectedSize = *rec.Size
+			}
 			outPath = name
+		} else {
+			rec, err := c.Index().Get(ctx, did)
+			if err == nil && rec.Size != nil {
+				expectedSize = *rec.Size
+			}
 		}
 		if err := os.MkdirAll(filepath.Dir(outPath), 0o755); err != nil {
 			return fmt.Errorf("create output directory: %w", err)
 		}
 
-		signed, err := c.Data().DownloadURL(ctx, did, 0, false)
-		if err != nil {
-			return fmt.Errorf("get download url: %w", err)
+		fmt.Fprintf(cmd.OutOrStdout(), "Downloading %s -> %s", did, outPath)
+		if expectedSize > 0 {
+			fmt.Fprintf(cmd.OutOrStdout(), " (%s)", syupload.FormatSize(expectedSize))
 		}
-		downloadURL := ""
-		if signed.Url != nil {
-			downloadURL = strings.TrimSpace(*signed.Url)
-		}
-		if downloadURL == "" {
-			return fmt.Errorf("empty download url for did %s", did)
-		}
-		if err := downloadURLToPath(ctx, downloadURL, outPath, c); err != nil {
+		fmt.Fprintln(cmd.OutOrStdout())
+
+		progress := transferprogress.New(cmd.OutOrStdout(), filepath.Base(outPath), expectedSize)
+		progress.Start()
+		downloadCtx := transferprogress.WithProgress(ctx, did, progress)
+
+		if err := transferdownload.DownloadFile(downloadCtx, c.Data(), did, outPath); err != nil {
+			progress.Abort()
 			return err
 		}
+		progress.Finish()
 		fmt.Fprintf(cmd.OutOrStdout(), "downloaded %s -> %s\n", did, outPath)
 		return nil
 	},

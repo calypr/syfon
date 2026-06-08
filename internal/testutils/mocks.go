@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -148,6 +149,90 @@ func (m *MockDatabase) ListObjectIDsByScope(ctx context.Context, organization, p
 		}
 	}
 	return ids, nil
+}
+
+func (m *MockDatabase) ListObjectIDsPageByPath(ctx context.Context, organization, project, path, startAfter string, limit, offset int) ([]string, []models.BrowseDirectory, error) {
+	normalizedPath, pathSegments, err := common.NormalizeBrowsePath(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	ids := make([]string, 0)
+	directoriesByPath := make(map[string]models.BrowseDirectory)
+	for id, obj := range m.Objects {
+		authz := map[string][]string{}
+		if m.ObjectAuthz != nil {
+			if v, ok := m.ObjectAuthz[id]; ok {
+				authz = v
+			}
+		}
+		projects, ok := authz[organization]
+		if !ok {
+			continue
+		}
+		matchesProject := false
+		for _, candidateProject := range projects {
+			if candidateProject == project {
+				matchesProject = true
+				break
+			}
+		}
+		if !matchesProject {
+			continue
+		}
+		if obj.Name == nil {
+			continue
+		}
+		info, ok, err := common.BrowsePathInfoFromName(*obj.Name)
+		if err != nil || !ok {
+			continue
+		}
+		if !common.HasBrowsePathPrefix(info.Segments, pathSegments) {
+			continue
+		}
+		remaining := info.Segments[len(pathSegments):]
+		if len(remaining) == 0 {
+			continue
+		}
+		if len(remaining) == 1 {
+			if info.ParentPath == normalizedPath {
+				ids = append(ids, id)
+			}
+			continue
+		}
+		dirInfo, ok := common.ImmediateBrowseDirectory(normalizedPath, info.Normalized)
+		if !ok {
+			continue
+		}
+		directoriesByPath[dirInfo.Normalized] = models.BrowseDirectory{Name: dirInfo.EntryName, Path: dirInfo.Normalized}
+	}
+	sort.Strings(ids)
+	if startAfter != "" {
+		offset = sort.SearchStrings(ids, startAfter)
+		for offset < len(ids) && ids[offset] <= startAfter {
+			offset++
+		}
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	if offset > len(ids) {
+		offset = len(ids)
+	}
+	end := offset + limit
+	if end > len(ids) {
+		end = len(ids)
+	}
+	directories := make([]models.BrowseDirectory, 0, len(directoriesByPath))
+	for _, directory := range directoriesByPath {
+		directories = append(directories, directory)
+	}
+	sort.Slice(directories, func(i, j int) bool {
+		if directories[i].Name == directories[j].Name {
+			return directories[i].Path < directories[j].Path
+		}
+		return directories[i].Name < directories[j].Name
+	})
+	return ids[offset:end], directories, nil
 }
 
 func (m *MockDatabase) ListObjectIDsByResources(ctx context.Context, resources []string, includeUnscoped bool) ([]string, error) {
@@ -329,16 +414,23 @@ func (m *MockDatabase) GetS3Credential(ctx context.Context, bucket string) (*mod
 			c := cred
 			return &c, nil
 		}
+		for _, cred := range m.Credentials {
+			if strings.TrimSpace(cred.Bucket) == strings.TrimSpace(bucket) {
+				c := cred
+				return &c, nil
+			}
+		}
 	}
 	if m.NoDefaultCreds {
 		return nil, nil
 	}
 	return &models.S3Credential{
-		Bucket:    bucket,
-		Provider:  "s3",
-		Region:    "us-east-1",
-		AccessKey: "test-key",
-		SecretKey: "test-secret",
+		CredentialID: bucket,
+		Bucket:       bucket,
+		Provider:     "s3",
+		Region:       "us-east-1",
+		AccessKey:    "test-key",
+		SecretKey:    "test-secret",
 	}, nil
 }
 
@@ -346,7 +438,11 @@ func (m *MockDatabase) SaveS3Credential(ctx context.Context, cred *models.S3Cred
 	if m.Credentials == nil {
 		m.Credentials = make(map[string]models.S3Credential)
 	}
-	m.Credentials[cred.Bucket] = *cred
+	key := strings.TrimSpace(cred.CredentialID)
+	if key == "" {
+		key = strings.TrimSpace(cred.Bucket)
+	}
+	m.Credentials[key] = *cred
 	return nil
 }
 
@@ -369,7 +465,7 @@ func (m *MockDatabase) ListS3Credentials(ctx context.Context) ([]models.S3Creden
 		return []models.S3Credential{}, nil
 	}
 	return []models.S3Credential{
-		{Bucket: "test-bucket-1", Provider: "s3", Region: "us-east-1"},
+		{CredentialID: "test-bucket-1", Bucket: "test-bucket-1", Provider: "s3", Region: "us-east-1"},
 	}, nil
 }
 
@@ -386,6 +482,23 @@ func (m *MockDatabase) CreateBucketScope(ctx context.Context, scope *models.Buck
 	}
 	k := bucketScopeKey(scope.Organization, scope.ProjectID)
 	m.BucketScopes[k] = *scope
+	return nil
+}
+
+func (m *MockDatabase) DeleteBucketScope(ctx context.Context, organization, projectID, credentialID string) error {
+	if m.BucketScopes == nil {
+		return fmt.Errorf("%w: bucket scope not found", common.ErrNotFound)
+	}
+	k := bucketScopeKey(organization, projectID)
+	scope, ok := m.BucketScopes[k]
+	if !ok {
+		return fmt.Errorf("%w: bucket scope not found", common.ErrNotFound)
+	}
+	if strings.TrimSpace(scope.CredentialID) != strings.TrimSpace(credentialID) &&
+		strings.TrimSpace(scope.Bucket) != strings.TrimSpace(credentialID) {
+		return fmt.Errorf("%w: bucket scope not found", common.ErrNotFound)
+	}
+	delete(m.BucketScopes, k)
 	return nil
 }
 

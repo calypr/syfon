@@ -42,7 +42,7 @@ func TestUploadSingleSuccessAndFailures(t *testing.T) {
 		return "", errors.New("no url")
 	}}
 	err = UploadSingle(ctx, resolveErrStub, logger, file.Name(), "object-key", "guid-3", "bucket-a", common.FileMetadata{}, false)
-	if err == nil || !strings.Contains(err.Error(), "upload error") {
+	if err == nil || !strings.Contains(err.Error(), "no url") {
 		t.Fatalf("expected resolve upload error, got %v", err)
 	}
 
@@ -52,5 +52,44 @@ func TestUploadSingleSuccessAndFailures(t *testing.T) {
 	err = UploadSingle(ctx, uploadErrStub, logger, file.Name(), "object-key", "guid-4", "bucket-a", common.FileMetadata{}, false)
 	if err == nil || !strings.Contains(err.Error(), "upload failed") {
 		t.Fatalf("expected upload error, got %v", err)
+	}
+}
+
+func TestUploadSingleStreamsProgress(t *testing.T) {
+	t.Parallel()
+
+	payload := strings.Repeat("a", int(common.OnProgressThreshold)+257)
+	file := createTempFileWithData(t, payload)
+
+	stub := &uploaderStub{uploadFunc: func(_ context.Context, _ string, body io.Reader, _ int64) error {
+		buf := make([]byte, 64*1024)
+		for {
+			_, err := body.Read(buf)
+			if err == io.EOF {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+		}
+	}}
+
+	var events []common.ProgressEvent
+	ctx := common.WithOid(context.Background(), "guid-progress")
+	ctx = common.WithProgress(ctx, func(ev common.ProgressEvent) error {
+		events = append(events, ev)
+		return nil
+	})
+
+	if err := UploadSingle(ctx, stub, &spyLogger{}, file.Name(), "object-key", "guid-progress", "bucket-a", common.FileMetadata{}, false); err != nil {
+		t.Fatalf("UploadSingle returned error: %v", err)
+	}
+
+	if len(events) < 2 {
+		t.Fatalf("expected streamed progress events, got %+v", events)
+	}
+	last := events[len(events)-1]
+	if last.BytesSoFar != int64(len(payload)) {
+		t.Fatalf("final progress bytes = %d, want %d", last.BytesSoFar, len(payload))
 	}
 }

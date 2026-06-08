@@ -62,6 +62,18 @@ func TestDecryptCredentialField_MissingKeyForEncryptedData(t *testing.T) {
 	}
 }
 
+func TestCredentialMasterKeyAcceptsHexBeforeBase64(t *testing.T) {
+	t.Setenv(CredentialMasterKeyEnv, "13a53e671b318db3d417f602baa90fac3cd59f96c4cdb5e31ad8bc5c857f3a96")
+
+	key, err := credentialMasterKey()
+	if err != nil {
+		t.Fatalf("credentialMasterKey returned error: %v", err)
+	}
+	if len(key) != 32 {
+		t.Fatalf("expected 32-byte key, got %d bytes", len(key))
+	}
+}
+
 func TestDecryptCredentialField_LegacyV1Ciphertext(t *testing.T) {
 	t.Setenv(CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
 

@@ -13,6 +13,7 @@ import (
 	"github.com/calypr/syfon/apigen/server/drs"
 	internalauth "github.com/calypr/syfon/internal/auth"
 	"github.com/calypr/syfon/internal/common"
+	"github.com/lib/pq"
 )
 
 func TestDeleteObject(t *testing.T) {
@@ -86,7 +87,7 @@ func TestGetObject_NotFound(t *testing.T) {
 	defer rawDB.Close()
 
 	mock.ExpectQuery(regexp.QuoteMeta(`
-		SELECT id, size, created_time, updated_time, name, version, description
+		SELECT id, size, created_time, updated_time, name, file_name, version, description
 		FROM drs_object WHERE id = $1`)).
 		WithArgs("missing").
 		WillReturnError(sql.ErrNoRows)
@@ -107,12 +108,12 @@ func TestGetObject_DeduplicatesAndPropagatesAuthz(t *testing.T) {
 	created := time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC)
 	updated := created.Add(2 * time.Hour)
 	mock.ExpectQuery(regexp.QuoteMeta(`
-		SELECT id, size, created_time, updated_time, name, version, description
+		SELECT id, size, created_time, updated_time, name, file_name, version, description
 		FROM drs_object WHERE id = $1`)).
 		WithArgs("obj-1").
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "size", "created_time", "updated_time", "name", "version", "description",
-		}).AddRow("obj-1", int64(123), created, updated, "file.txt", "v1", "desc"))
+			"id", "size", "created_time", "updated_time", "name", "file_name", "version", "description",
+		}).AddRow("obj-1", int64(123), created, updated, "file.txt", "nested/file.txt", "v1", "desc"))
 
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT url, type FROM drs_object_access_method WHERE object_id = $1")).
 		WithArgs("obj-1").
@@ -161,12 +162,12 @@ func TestGetObject_IgnoresAuthContext(t *testing.T) {
 
 	now := time.Date(2026, time.March, 1, 10, 0, 0, 0, time.UTC)
 	mock.ExpectQuery(regexp.QuoteMeta(`
-		SELECT id, size, created_time, updated_time, name, version, description
+		SELECT id, size, created_time, updated_time, name, file_name, version, description
 		FROM drs_object WHERE id = $1`)).
 		WithArgs("obj-2").
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "size", "created_time", "updated_time", "name", "version", "description",
-		}).AddRow("obj-2", int64(1), now, now, "n", "v", "d"))
+			"id", "size", "created_time", "updated_time", "name", "file_name", "version", "description",
+		}).AddRow("obj-2", int64(1), now, now, "n", "nested/n", "v", "d"))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT url, type FROM drs_object_access_method WHERE object_id = $1")).
 		WithArgs("obj-2").
 		WillReturnRows(sqlmock.NewRows([]string{"url", "type"}).
@@ -187,6 +188,158 @@ func TestGetObject_IgnoresAuthContext(t *testing.T) {
 	}
 	if obj.Id != "obj-2" {
 		t.Fatalf("expected obj-2, got %+v", obj)
+	}
+}
+
+func TestGetObject_LegacyNameFallsBackToFileName(t *testing.T) {
+	pg, mock, rawDB := newMockPostgresDB(t)
+	defer rawDB.Close()
+
+	now := time.Date(2026, time.March, 1, 10, 0, 0, 0, time.UTC)
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT id, size, created_time, updated_time, name, file_name, version, description
+		FROM drs_object WHERE id = $1`)).
+		WithArgs("obj-legacy").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "size", "created_time", "updated_time", "name", "file_name", "version", "description",
+		}).AddRow("obj-legacy", int64(1), now, now, "nested/dir/file.txt", nil, "v", "d"))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT url, type FROM drs_object_access_method WHERE object_id = $1")).
+		WithArgs("obj-legacy").
+		WillReturnRows(sqlmock.NewRows([]string{"url", "type"}).
+			AddRow("s3://bucket/key", "s3"))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT resource FROM drs_object_controlled_access WHERE object_id = $1 ORDER BY resource")).
+		WithArgs("obj-legacy").
+		WillReturnRows(sqlmock.NewRows([]string{"resource"}))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT type, checksum FROM drs_object_checksum WHERE object_id = $1")).
+		WithArgs("obj-legacy").
+		WillReturnRows(sqlmock.NewRows([]string{"type", "checksum"}))
+
+	obj, err := pg.GetObject(context.Background(), "obj-legacy")
+	if err != nil {
+		t.Fatalf("GetObject returned error: %v", err)
+	}
+	if got := common.StringVal(obj.Name); got != "file.txt" {
+		t.Fatalf("expected basename name, got %q", got)
+	}
+	if got, _ := obj.Properties["file_name"].(string); got != "nested/dir/file.txt" {
+		t.Fatalf("expected legacy path to populate file_name, got %#v", obj.Properties["file_name"])
+	}
+}
+
+func TestGetBulkObjects_UsesSplitHydrationQueries(t *testing.T) {
+	pg, mock, rawDB := newMockPostgresDB(t)
+	defer rawDB.Close()
+
+	created := time.Date(2026, time.April, 1, 10, 0, 0, 0, time.UTC)
+	updated := created.Add(time.Hour)
+
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT
+			o.id,
+			o.size,
+			o.created_time,
+			o.updated_time,
+			o.name,
+			o.file_name,
+			o.version,
+			o.description
+		FROM drs_object o
+		WHERE (
+			(COALESCE(array_length($1::text[], 1), 0) > 0 AND o.id = ANY($1))
+			OR
+			(COALESCE(array_length($2::text[], 1), 0) > 0 AND (
+				o.id = ANY($2)
+				OR EXISTS (
+					SELECT 1
+					FROM drs_object_checksum c2
+					WHERE c2.object_id = o.id AND c2.checksum = ANY($2)
+				)
+			))
+		)`)).
+		WithArgs(pq.Array([]string{"obj-2", "obj-1", "obj-2"}), pq.Array([]string(nil))).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "size", "created_time", "updated_time", "name", "file_name", "version", "description",
+		}).
+			AddRow("obj-1", int64(10), created, updated, "file-1", "nested/file-1", "v1", "desc-1").
+			AddRow("obj-2", int64(20), created, updated, "file-2", "nested/file-2", "v2", "desc-2"))
+
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT object_id, url, type
+		FROM drs_object_access_method
+		WHERE object_id = ANY($1)
+		ORDER BY object_id`)).
+		WithArgs(pq.Array([]string{"obj-1", "obj-2"})).
+		WillReturnRows(sqlmock.NewRows([]string{"object_id", "url", "type"}).
+			AddRow("obj-1", "s3://bucket/a", "s3").
+			AddRow("obj-1", "s3://bucket/a", "s3").
+			AddRow("obj-2", "gs://bucket/b", "gs"))
+
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT object_id, type, checksum
+		FROM drs_object_checksum
+		WHERE object_id = ANY($1)
+		ORDER BY object_id`)).
+		WithArgs(pq.Array([]string{"obj-1", "obj-2"})).
+		WillReturnRows(sqlmock.NewRows([]string{"object_id", "type", "checksum"}).
+			AddRow("obj-1", "sha256", "aaa").
+			AddRow("obj-1", "sha256", "aaa").
+			AddRow("obj-2", "md5", "bbb"))
+
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT object_id, resource
+		FROM drs_object_controlled_access
+		WHERE object_id = ANY($1)
+		ORDER BY object_id, resource`)).
+		WithArgs(pq.Array([]string{"obj-1", "obj-2"})).
+		WillReturnRows(sqlmock.NewRows([]string{"object_id", "resource"}).
+			AddRow("obj-1", "/organization/org/project/p1").
+			AddRow("obj-2", "/organization/org/project/p1"))
+
+	objects, err := pg.GetBulkObjects(context.Background(), []string{"obj-2", "obj-1", "obj-2"})
+	if err != nil {
+		t.Fatalf("GetBulkObjects returned error: %v", err)
+	}
+	if len(objects) != 2 || objects[0].Id != "obj-2" || objects[1].Id != "obj-1" {
+		t.Fatalf("expected input order with deduplicated ids, got %+v", objects)
+	}
+	if objects[0].AccessMethods == nil || len(*objects[0].AccessMethods) != 1 {
+		t.Fatalf("expected one access method on obj-2, got %+v", objects[0].AccessMethods)
+	}
+	if len(objects[1].Checksums) != 1 || objects[1].Checksums[0].Checksum != "aaa" {
+		t.Fatalf("expected deduplicated checksum on obj-1, got %+v", objects[1].Checksums)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestListObjectIDsPageByPath(t *testing.T) {
+	pg, mock, rawDB := newMockPostgresDB(t)
+	defer rawDB.Close()
+
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT object_id
+		FROM drs_object_browse_index
+		WHERE resource = $1 AND parent_path = $2 AND object_id > $3 ORDER BY object_id LIMIT $4 OFFSET $5`)).
+		WithArgs("/organization/org/project/proj", "nested", "obj-a", 10, 0).
+		WillReturnRows(sqlmock.NewRows([]string{"object_id"}).AddRow("obj-c"))
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT normalized_path FROM drs_object_browse_index WHERE resource = $1 AND normalized_path LIKE $2 AND parent_path <> $3 ORDER BY normalized_path`)).
+		WithArgs("/organization/org/project/proj", "nested/%", "nested").
+		WillReturnRows(sqlmock.NewRows([]string{"normalized_path"}).AddRow("nested/deep/b.txt"))
+
+	ids, directories, err := pg.ListObjectIDsPageByPath(context.Background(), "org", "proj", "nested", "obj-a", 10, 0)
+	if err != nil {
+		t.Fatalf("ListObjectIDsPageByPath returned error: %v", err)
+	}
+	if !slices.Equal(ids, []string{"obj-c"}) {
+		t.Fatalf("unexpected IDs: %v", ids)
+	}
+	if len(directories) != 1 || directories[0].Path != "nested/deep" {
+		t.Fatalf("unexpected directories: %+v", directories)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
 	}
 }
 

@@ -41,6 +41,9 @@ func HandleError(c fiber.Ctx, err error) error {
 	case errors.Is(err, common.ErrNoValidSHA256):
 		status = http.StatusBadRequest
 		msg = "A valid SHA256 checksum is required"
+	case errors.Is(err, common.ErrAccessMethodsRequired):
+		status = http.StatusBadRequest
+		msg = err.Error()
 	}
 
 	requestID := common.GetRequestID(c.Context())
@@ -50,5 +53,17 @@ func HandleError(c fiber.Ctx, err error) error {
 		slog.Warn("request rejected", "request_id", requestID, "method", c.Method(), "path", c.Path(), "status", status, "msg", msg, "err", err)
 	}
 
+	return c.Status(status).SendString(msg)
+}
+
+// Reject returns an explicit route-level rejection and logs the public reason.
+// Use this for validation failures that are not represented by a domain error.
+func Reject(c fiber.Ctx, status int, msg string) error {
+	requestID := common.GetRequestID(c.Context())
+	if status >= 500 {
+		slog.Error("request failed", "request_id", requestID, "method", c.Method(), "path", c.Path(), "status", status, "msg", msg)
+	} else {
+		slog.Warn("request rejected", "request_id", requestID, "method", c.Method(), "path", c.Path(), "status", status, "msg", msg)
+	}
 	return c.Status(status).SendString(msg)
 }

@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"path"
+	"sort"
 	"strings"
 	"time"
 
@@ -14,6 +16,34 @@ import (
 	"github.com/calypr/syfon/internal/models"
 	"github.com/lib/pq"
 )
+
+func postgresStoredFileName(obj *models.InternalObject) string {
+	if obj != nil && obj.Properties != nil {
+		if raw, ok := obj.Properties["file_name"].(string); ok && strings.TrimSpace(raw) != "" {
+			return strings.TrimSpace(raw)
+		}
+	}
+	if obj == nil {
+		return ""
+	}
+	return common.StringVal(obj.Name)
+}
+
+func postgresLoadedNames(name, fileName sql.NullString) (string, string) {
+	loadedName := strings.TrimSpace(name.String)
+	loadedFileName := strings.TrimSpace(fileName.String)
+	if loadedFileName == "" {
+		loadedFileName = loadedName
+		loadedName = ""
+	}
+	if loadedName == "" && loadedFileName != "" {
+		loadedName = path.Base(strings.Trim(loadedFileName, "/"))
+		if loadedName == "." || loadedName == "/" || loadedName == "" {
+			loadedName = loadedFileName
+		}
+	}
+	return loadedName, loadedFileName
+}
 
 func (db *PostgresDB) DeleteObject(ctx context.Context, id string) error {
 	tx, err := db.db.BeginTx(ctx, nil)
@@ -109,10 +139,11 @@ func (db *PostgresDB) GetObject(ctx context.Context, id string) (*models.Interna
 retryLookup:
 	// 1. Fetch main record
 	var r models.DrsObjectRecord
+	var name, fileName, version, description sql.NullString
 	err := db.db.QueryRowContext(ctx, `
-		SELECT id, size, created_time, updated_time, name, version, description
+		SELECT id, size, created_time, updated_time, name, file_name, version, description
 		FROM drs_object WHERE id = $1`, lookupID).Scan(
-		&r.ID, &r.Size, &r.CreatedTime, &r.UpdatedTime, &r.Name, &r.Version, &r.Description,
+		&r.ID, &r.Size, &r.CreatedTime, &r.UpdatedTime, &name, &fileName, &version, &description,
 	)
 	if err == sql.ErrNoRows {
 		if !resolvedAlias {
@@ -131,6 +162,9 @@ retryLookup:
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch record: %w", err)
 	}
+	r.Name, r.FileName = postgresLoadedNames(name, fileName)
+	r.Version = version.String
+	r.Description = description.String
 	objectID := r.ID
 	if resolvedAlias && requestID != "" {
 		objectID = requestID
@@ -147,6 +181,10 @@ retryLookup:
 			Name:        common.Ptr(r.Name),
 			SelfUri:     "drs://" + objectID,
 		},
+		Properties: map[string]interface{}{},
+	}
+	if strings.TrimSpace(r.FileName) != "" {
+		obj.Properties["file_name"] = r.FileName
 	}
 	// 2. Fetch storage access methods.
 	urlRows, err := db.db.QueryContext(ctx, "SELECT url, type FROM drs_object_access_method WHERE object_id = $1", lookupID)
@@ -220,9 +258,9 @@ func (db *PostgresDB) CreateObject(ctx context.Context, obj *models.InternalObje
 
 	// Insert main record
 	_, err = tx.ExecContext(ctx, `
-		INSERT INTO drs_object (id, size, created_time, updated_time, name, version, description)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-		obj.Id, obj.Size, obj.CreatedTime, common.TimeVal(obj.UpdatedTime), common.StringVal(obj.Name), common.StringVal(obj.Version), common.StringVal(obj.Description),
+		INSERT INTO drs_object (id, size, created_time, updated_time, name, file_name, version, description)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		obj.Id, obj.Size, obj.CreatedTime, common.TimeVal(obj.UpdatedTime), common.StringVal(obj.Name), postgresStoredFileName(obj), common.StringVal(obj.Version), common.StringVal(obj.Description),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to insert drs_object: %w", err)
@@ -230,6 +268,9 @@ func (db *PostgresDB) CreateObject(ctx context.Context, obj *models.InternalObje
 
 	if err := insertControlledAccessTx(ctx, tx, obj.Id, objectAccessResources(obj)); err != nil {
 		return err
+	}
+	if err := postgresRebuildBrowseRowsForObjectTx(ctx, tx, obj.Id, postgresStoredFileName(obj), objectAccessResources(obj)); err != nil {
+		return fmt.Errorf("failed to update browse index: %w", err)
 	}
 
 	// Insert storage access methods.
@@ -281,12 +322,14 @@ func (db *PostgresDB) RegisterObjects(ctx context.Context, objects []models.Inte
 	names := make([]string, 0, len(objects))
 	versions := make([]string, 0, len(objects))
 	descriptions := make([]string, 0, len(objects))
+	fileNames := make([]string, 0, len(objects))
 
 	accessObjectIDs := make([]string, 0)
 	accessURLs := make([]string, 0)
 	accessTypes := make([]string, 0)
 	controlledObjectIDs := make([]string, 0)
 	controlledResources := make([]string, 0)
+	browseRows := make([]browseIndexRow, 0)
 
 	checksumObjectIDs := make([]string, 0)
 	checksumTypes := make([]string, 0)
@@ -298,6 +341,7 @@ func (db *PostgresDB) RegisterObjects(ctx context.Context, objects []models.Inte
 		createdTimes = append(createdTimes, obj.CreatedTime)
 		updatedTimes = append(updatedTimes, common.TimeVal(obj.UpdatedTime))
 		names = append(names, common.StringVal(obj.Name))
+		fileNames = append(fileNames, postgresStoredFileName(&obj))
 		versions = append(versions, common.StringVal(obj.Version))
 		descriptions = append(descriptions, common.StringVal(obj.Description))
 
@@ -306,6 +350,7 @@ func (db *PostgresDB) RegisterObjects(ctx context.Context, objects []models.Inte
 			controlledObjectIDs = append(controlledObjectIDs, obj.Id)
 			controlledResources = append(controlledResources, resource)
 		}
+		browseRows = append(browseRows, postgresBrowseRowsForObject(obj.Id, postgresStoredFileName(&obj), objectAccessResources(&obj))...)
 		if obj.AccessMethods != nil {
 			for _, am := range *obj.AccessMethods {
 				if am.AccessUrl == nil || am.AccessUrl.Url == "" {
@@ -336,17 +381,18 @@ func (db *PostgresDB) RegisterObjects(ctx context.Context, objects []models.Inte
 	}
 
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO drs_object (id, size, created_time, updated_time, name, version, description)
-		SELECT * FROM UNNEST($1::text[], $2::bigint[], $3::timestamp[], $4::timestamp[], $5::text[], $6::text[], $7::text[])
+		INSERT INTO drs_object (id, size, created_time, updated_time, name, file_name, version, description)
+		SELECT * FROM UNNEST($1::text[], $2::bigint[], $3::timestamp[], $4::timestamp[], $5::text[], $6::text[], $7::text[], $8::text[])
 		ON CONFLICT (id) DO UPDATE SET
 			size = EXCLUDED.size,
 			created_time = EXCLUDED.created_time,
 			updated_time = EXCLUDED.updated_time,
 			name = EXCLUDED.name,
+			file_name = EXCLUDED.file_name,
 			version = EXCLUDED.version,
 			description = EXCLUDED.description`,
 		pq.Array(ids), pq.Array(sizes), pq.Array(createdTimes), pq.Array(updatedTimes),
-		pq.Array(names), pq.Array(versions), pq.Array(descriptions),
+		pq.Array(names), pq.Array(fileNames), pq.Array(versions), pq.Array(descriptions),
 	); err != nil {
 		return fmt.Errorf("failed bulk upsert drs_object: %w", err)
 	}
@@ -359,6 +405,9 @@ func (db *PostgresDB) RegisterObjects(ctx context.Context, objects []models.Inte
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM drs_object_checksum WHERE object_id = ANY($1)`, pq.Array(ids)); err != nil {
 		return fmt.Errorf("failed bulk clear checksums: %w", err)
+	}
+	if err := postgresDeleteBrowseRowsByIDsTx(ctx, tx, ids); err != nil {
+		return fmt.Errorf("failed bulk clear browse index: %w", err)
 	}
 
 	if len(accessObjectIDs) > 0 {
@@ -388,6 +437,9 @@ func (db *PostgresDB) RegisterObjects(ctx context.Context, objects []models.Inte
 		); err != nil {
 			return fmt.Errorf("failed bulk insert checksums: %w", err)
 		}
+	}
+	if err := postgresInsertBrowseRowsTx(ctx, tx, browseRows); err != nil {
+		return fmt.Errorf("failed bulk insert browse index: %w", err)
 	}
 
 	if err := db.flushObjectUsageEventsForIDsTx(ctx, tx, ids); err != nil {
@@ -1088,15 +1140,10 @@ func (db *PostgresDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []st
 			o.created_time,
 			o.updated_time,
 			o.name,
+			o.file_name,
 			o.version,
-			o.description,
-			am.url,
-			am.type,
-			cs.type,
-			cs.checksum
+			o.description
 		FROM drs_object o
-		LEFT JOIN drs_object_access_method am ON am.object_id = o.id
-		LEFT JOIN drs_object_checksum cs ON cs.object_id = o.id
 		WHERE (
 			(COALESCE(array_length($1::text[], 1), 0) > 0 AND o.id = ANY($1))
 			OR
@@ -1117,79 +1164,145 @@ func (db *PostgresDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []st
 	defer rows.Close()
 
 	objectsByID := make(map[string]*models.InternalObject)
-	seenAccess := make(map[string]map[string]struct{})
-	seenChecksum := make(map[string]map[string]struct{})
 
 	for rows.Next() {
 		var (
-			id, name, version, description string
+			id                             string
+			name, fileName                 sql.NullString
+			version, description           sql.NullString
 			size                           int64
 			createdTime, updatedTime       time.Time
-			accessURL, accessType          sql.NullString
-			checksumType, sumVal           sql.NullString
 		)
 		if err := rows.Scan(
-			&id, &size, &createdTime, &updatedTime, &name, &version, &description,
-			&accessURL, &accessType, &checksumType, &sumVal,
+			&id, &size, &createdTime, &updatedTime, &name, &fileName, &version, &description,
 		); err != nil {
 			return nil, err
 		}
 
-		obj, ok := objectsByID[id]
-		if !ok {
-			obj = &models.InternalObject{
-				DrsObject: drs.DrsObject{
-					Id:          id,
-					Size:        size,
-					CreatedTime: createdTime,
-					UpdatedTime: common.Ptr(updatedTime),
-					Name:        common.Ptr(name),
-					Version:     common.Ptr(version),
-					Description: common.Ptr(description),
-					SelfUri:     "drs://" + id,
-				},
-			}
-			objectsByID[id] = obj
-			seenAccess[id] = make(map[string]struct{})
-			seenChecksum[id] = make(map[string]struct{})
+		loadedName, loadedFileName := postgresLoadedNames(name, fileName)
+		objectsByID[id] = &models.InternalObject{
+			DrsObject: drs.DrsObject{
+				Id:          id,
+				Size:        size,
+				CreatedTime: createdTime,
+				UpdatedTime: common.Ptr(updatedTime),
+				Name:        common.Ptr(loadedName),
+				Version:     common.Ptr(version.String),
+				Description: common.Ptr(description.String),
+				SelfUri:     "drs://" + id,
+			},
+			Properties: map[string]interface{}{},
 		}
-
-		if accessURL.Valid && accessType.Valid {
-			key := accessType.String + "|" + accessURL.String
-			if _, exists := seenAccess[id][key]; !exists {
-				seenAccess[id][key] = struct{}{}
-				if obj.DrsObject.AccessMethods == nil {
-					obj.DrsObject.AccessMethods = &[]drs.AccessMethod{}
-				}
-				amID := accessType.String
-				am := drs.AccessMethod{
-					AccessUrl: &struct {
-						Headers *[]string `json:"headers,omitempty"`
-						Url     string    `json:"url"`
-					}{Url: accessURL.String},
-					Type:     drs.AccessMethodType(accessType.String),
-					AccessId: &amID,
-				}
-				*obj.DrsObject.AccessMethods = append(*obj.DrsObject.AccessMethods, am)
-			}
-		}
-
-		if checksumType.Valid && sumVal.Valid {
-			key := checksumType.String + "|" + sumVal.String
-			if _, exists := seenChecksum[id][key]; !exists {
-				seenChecksum[id][key] = struct{}{}
-				obj.DrsObject.Checksums = append(obj.DrsObject.Checksums, drs.Checksum{Type: checksumType.String, Checksum: sumVal.String})
-			}
+		if strings.TrimSpace(loadedFileName) != "" {
+			objectsByID[id].Properties["file_name"] = loadedFileName
 		}
 	}
 
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	if len(objectsByID) == 0 {
+		return objectsByID, nil
+	}
+	if err := db.attachBulkAccessMethods(ctx, objectsByID); err != nil {
+		return nil, err
+	}
+	if err := db.attachBulkChecksums(ctx, objectsByID); err != nil {
+		return nil, err
+	}
 	if err := db.attachControlledAccess(ctx, objectsByID); err != nil {
 		return nil, err
 	}
 	return objectsByID, nil
+}
+
+func (db *PostgresDB) attachBulkAccessMethods(ctx context.Context, objectsByID map[string]*models.InternalObject) error {
+	rows, err := db.db.QueryContext(ctx, `
+		SELECT object_id, url, type
+		FROM drs_object_access_method
+		WHERE object_id = ANY($1)
+		ORDER BY object_id`, pq.Array(sortedObjectIDs(objectsByID)))
+	if err != nil {
+		return fmt.Errorf("failed to fetch bulk object access methods: %w", err)
+	}
+	defer rows.Close()
+
+	seenAccess := make(map[string]map[string]struct{}, len(objectsByID))
+	for rows.Next() {
+		var objectID, accessURL, accessType string
+		if err := rows.Scan(&objectID, &accessURL, &accessType); err != nil {
+			return err
+		}
+		obj := objectsByID[objectID]
+		if obj == nil {
+			continue
+		}
+		if _, ok := seenAccess[objectID]; !ok {
+			seenAccess[objectID] = make(map[string]struct{})
+		}
+		key := accessType + "|" + accessURL
+		if _, exists := seenAccess[objectID][key]; exists {
+			continue
+		}
+		seenAccess[objectID][key] = struct{}{}
+		if obj.DrsObject.AccessMethods == nil {
+			obj.DrsObject.AccessMethods = &[]drs.AccessMethod{}
+		}
+		amID := accessType
+		am := drs.AccessMethod{
+			AccessUrl: &struct {
+				Headers *[]string `json:"headers,omitempty"`
+				Url     string    `json:"url"`
+			}{Url: accessURL},
+			Type:     drs.AccessMethodType(accessType),
+			AccessId: &amID,
+		}
+		*obj.DrsObject.AccessMethods = append(*obj.DrsObject.AccessMethods, am)
+	}
+	return rows.Err()
+}
+
+func (db *PostgresDB) attachBulkChecksums(ctx context.Context, objectsByID map[string]*models.InternalObject) error {
+	rows, err := db.db.QueryContext(ctx, `
+		SELECT object_id, type, checksum
+		FROM drs_object_checksum
+		WHERE object_id = ANY($1)
+		ORDER BY object_id`, pq.Array(sortedObjectIDs(objectsByID)))
+	if err != nil {
+		return fmt.Errorf("failed to fetch bulk object checksums: %w", err)
+	}
+	defer rows.Close()
+
+	seenChecksums := make(map[string]map[string]struct{}, len(objectsByID))
+	for rows.Next() {
+		var objectID, checksumType, checksumValue string
+		if err := rows.Scan(&objectID, &checksumType, &checksumValue); err != nil {
+			return err
+		}
+		obj := objectsByID[objectID]
+		if obj == nil {
+			continue
+		}
+		if _, ok := seenChecksums[objectID]; !ok {
+			seenChecksums[objectID] = make(map[string]struct{})
+		}
+		key := checksumType + "|" + checksumValue
+		if _, exists := seenChecksums[objectID][key]; exists {
+			continue
+		}
+		seenChecksums[objectID][key] = struct{}{}
+		obj.DrsObject.Checksums = append(obj.DrsObject.Checksums, drs.Checksum{Type: checksumType, Checksum: checksumValue})
+	}
+	return rows.Err()
+}
+
+func sortedObjectIDs(objectsByID map[string]*models.InternalObject) []string {
+	ids := make([]string, 0, len(objectsByID))
+	for id := range objectsByID {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
 }
 
 func (db *PostgresDB) UpdateObjectAccessMethods(ctx context.Context, objectID string, accessMethods []drs.AccessMethod) error {
@@ -1238,6 +1351,9 @@ func (db *PostgresDB) RemoveObjectControlledAccess(ctx context.Context, objectID
 	}
 
 	if _, err := tx.ExecContext(ctx, `DELETE FROM drs_object_controlled_access WHERE object_id = $1 AND resource = $2`, objectID, resource); err != nil {
+		return err
+	}
+	if err := postgresDeleteBrowseRowTx(ctx, tx, objectID, resource); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -1315,6 +1431,7 @@ func (db *PostgresDB) attachControlledAccess(ctx context.Context, objectsByID ma
 	for id := range objectsByID {
 		ids = append(ids, id)
 	}
+	sort.Strings(ids)
 	rows, err := db.db.QueryContext(ctx, `
 		SELECT object_id, resource
 		FROM drs_object_controlled_access

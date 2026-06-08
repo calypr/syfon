@@ -20,24 +20,28 @@ func (m *ObjectManager) ListS3Credentials(ctx context.Context) ([]models.S3Crede
 	return m.db.ListS3Credentials(ctx)
 }
 
-func (m *ObjectManager) GetS3Credential(ctx context.Context, bucket string) (*models.S3Credential, error) {
-	return m.db.GetS3Credential(ctx, bucket)
+func (m *ObjectManager) GetS3Credential(ctx context.Context, credentialID string) (*models.S3Credential, error) {
+	return m.db.GetS3Credential(ctx, credentialID)
 }
 
 func (m *ObjectManager) SaveS3Credential(ctx context.Context, cred *models.S3Credential) error {
+	credentialID := credentialIDForCredential(*cred)
 	if err := m.db.SaveS3Credential(ctx, cred); err != nil {
 		return err
 	}
-	m.invalidateBucketSignerCache(cred.Bucket)
+	m.invalidateBucketSignerCache(credentialID)
+	if strings.TrimSpace(cred.Bucket) != credentialID {
+		m.invalidateBucketSignerCache(cred.Bucket)
+	}
 	return nil
 }
 
-func (m *ObjectManager) DeleteS3Credential(ctx context.Context, bucket string) error {
-	if err := m.db.DeleteS3Credential(ctx, bucket); err != nil {
+func (m *ObjectManager) DeleteS3Credential(ctx context.Context, credentialID string) error {
+	if err := m.db.DeleteS3Credential(ctx, credentialID); err != nil {
 		return err
 	}
 	m.bucketScopeCache.clear()
-	m.invalidateBucketSignerCache(bucket)
+	m.invalidateBucketSignerCache(credentialID)
 	return nil
 }
 
@@ -71,11 +75,12 @@ func (m *ObjectManager) ListVisibleBuckets(ctx context.Context) (map[string]Visi
 		return nil, err
 	}
 
-	byBucket := make(map[string]VisibleBucket, len(creds))
+	byCredential := make(map[string]VisibleBucket, len(creds))
 	programsSeen := make(map[string]map[string]struct{}, len(creds))
 	for _, cred := range creds {
-		byBucket[cred.Bucket] = VisibleBucket{Credential: cred}
-		programsSeen[cred.Bucket] = map[string]struct{}{}
+		key := credentialIDForCredential(cred)
+		byCredential[key] = VisibleBucket{Credential: cred}
+		programsSeen[key] = map[string]struct{}{}
 	}
 
 	// Configured bucket scopes must be visible even before any objects are
@@ -86,7 +91,8 @@ func (m *ObjectManager) ListVisibleBuckets(ctx context.Context) (map[string]Visi
 		return nil, err
 	}
 	for _, scope := range scopes {
-		entry, exists := byBucket[scope.Bucket]
+		credentialID := credentialIDForScope(scope)
+		entry, exists := byCredential[credentialID]
 		if !exists {
 			continue
 		}
@@ -97,12 +103,12 @@ func (m *ObjectManager) ListVisibleBuckets(ctx context.Context) (map[string]Visi
 		if authz.IsAuthzEnforced(ctx) && !authz.HasMethodAccess(ctx, objectMethodRead, []string{resource}) {
 			continue
 		}
-		if _, seen := programsSeen[scope.Bucket][resource]; seen {
+		if _, seen := programsSeen[credentialID][resource]; seen {
 			continue
 		}
-		programsSeen[scope.Bucket][resource] = struct{}{}
+		programsSeen[credentialID][resource] = struct{}{}
 		entry.Programs = append(entry.Programs, resource)
-		byBucket[scope.Bucket] = entry
+		byCredential[credentialID] = entry
 	}
 
 	for _, obj := range objects {
@@ -111,11 +117,11 @@ func (m *ObjectManager) ListVisibleBuckets(ctx context.Context) (map[string]Visi
 			continue
 		}
 		for _, method := range *obj.AccessMethods {
-			bucket, ok := bucketForAccessMethod(method, creds)
+			credentialID, ok := credentialIDForAccessMethod(method, creds)
 			if !ok {
 				continue
 			}
-			entry, exists := byBucket[bucket]
+			entry, exists := byCredential[credentialID]
 			if !exists {
 				continue
 			}
@@ -123,23 +129,23 @@ func (m *ObjectManager) ListVisibleBuckets(ctx context.Context) (map[string]Visi
 				if program == "" {
 					continue
 				}
-				if _, seen := programsSeen[bucket][program]; seen {
+				if _, seen := programsSeen[credentialID][program]; seen {
 					continue
 				}
-				programsSeen[bucket][program] = struct{}{}
+				programsSeen[credentialID][program] = struct{}{}
 				entry.Programs = append(entry.Programs, program)
 			}
-			byBucket[bucket] = entry
+			byCredential[credentialID] = entry
 		}
 	}
 
 	filtered := make(map[string]VisibleBucket)
-	for bucket, entry := range byBucket {
-		if len(programsSeen[bucket]) == 0 && !bucketReferencedByPublicObject(objects, entry.Credential, creds) {
+	for credentialID, entry := range byCredential {
+		if len(programsSeen[credentialID]) == 0 && !bucketReferencedByPublicObject(objects, entry.Credential, creds) {
 			continue
 		}
 		sort.Strings(entry.Programs)
-		filtered[bucket] = entry
+		filtered[credentialID] = entry
 	}
 	return filtered, nil
 }
@@ -153,12 +159,13 @@ func (m *ObjectManager) listVisibleBucketsFromRows(ctx context.Context, lister d
 		return nil, err
 	}
 
-	byBucket := make(map[string]VisibleBucket, len(creds))
+	byCredential := make(map[string]VisibleBucket, len(creds))
 	programsSeen := make(map[string]map[string]struct{}, len(creds))
 	publicSeen := make(map[string]bool, len(creds))
 	for _, cred := range creds {
-		byBucket[cred.Bucket] = VisibleBucket{Credential: cred}
-		programsSeen[cred.Bucket] = map[string]struct{}{}
+		key := credentialIDForCredential(cred)
+		byCredential[key] = VisibleBucket{Credential: cred}
+		programsSeen[key] = map[string]struct{}{}
 	}
 
 	scopes, err := m.db.ListBucketScopes(ctx)
@@ -166,7 +173,8 @@ func (m *ObjectManager) listVisibleBucketsFromRows(ctx context.Context, lister d
 		return nil, err
 	}
 	for _, scope := range scopes {
-		entry, exists := byBucket[scope.Bucket]
+		credentialID := credentialIDForScope(scope)
+		entry, exists := byCredential[credentialID]
 		if !exists {
 			continue
 		}
@@ -177,12 +185,12 @@ func (m *ObjectManager) listVisibleBucketsFromRows(ctx context.Context, lister d
 		if restrictToResources && !authz.HasMethodAccess(ctx, objectMethodRead, []string{resource}) {
 			continue
 		}
-		if _, seen := programsSeen[scope.Bucket][resource]; seen {
+		if _, seen := programsSeen[credentialID][resource]; seen {
 			continue
 		}
-		programsSeen[scope.Bucket][resource] = struct{}{}
+		programsSeen[credentialID][resource] = struct{}{}
 		entry.Programs = append(entry.Programs, resource)
-		byBucket[scope.Bucket] = entry
+		byCredential[credentialID] = entry
 	}
 
 	for _, row := range rows {
@@ -194,34 +202,34 @@ func (m *ObjectManager) listVisibleBucketsFromRows(ctx context.Context, lister d
 				Url     string    `json:"url"`
 			}{Url: row.AccessURL},
 		}
-		bucket, ok := bucketForAccessMethod(method, creds)
+		credentialID, ok := credentialIDForAccessMethod(method, creds)
 		if !ok {
 			continue
 		}
-		entry, exists := byBucket[bucket]
+		entry, exists := byCredential[credentialID]
 		if !exists {
 			continue
 		}
 		resource := strings.TrimSpace(row.Resource)
 		if resource == "" {
-			publicSeen[bucket] = true
+			publicSeen[credentialID] = true
 			continue
 		}
-		if _, seen := programsSeen[bucket][resource]; seen {
+		if _, seen := programsSeen[credentialID][resource]; seen {
 			continue
 		}
-		programsSeen[bucket][resource] = struct{}{}
+		programsSeen[credentialID][resource] = struct{}{}
 		entry.Programs = append(entry.Programs, resource)
-		byBucket[bucket] = entry
+		byCredential[credentialID] = entry
 	}
 
 	filtered := make(map[string]VisibleBucket)
-	for bucket, entry := range byBucket {
-		if len(entry.Programs) == 0 && !publicSeen[bucket] {
+	for credentialID, entry := range byCredential {
+		if len(entry.Programs) == 0 && !publicSeen[credentialID] {
 			continue
 		}
 		sort.Strings(entry.Programs)
-		filtered[bucket] = entry
+		filtered[credentialID] = entry
 	}
 	return filtered, nil
 }
@@ -231,6 +239,34 @@ func (m *ObjectManager) CreateBucketScope(ctx context.Context, scope *models.Buc
 		return err
 	}
 	m.bucketScopeCache.set(normalizeBucketScope(scope), true)
+	return nil
+}
+
+func (m *ObjectManager) DeleteBucketScope(ctx context.Context, organization, projectID, credentialID string) error {
+	if err := m.db.DeleteBucketScope(ctx, organization, projectID, credentialID); err != nil {
+		return err
+	}
+	m.bucketScopeCache.clear()
+
+	resolvedCredID := credentialID
+	if cred, err := m.db.GetS3Credential(ctx, credentialID); err == nil && cred != nil {
+		resolvedCredID = cred.CredentialID
+	}
+
+	scopes, err := m.db.ListBucketScopes(ctx)
+	if err == nil {
+		hasRemaining := false
+		for _, s := range scopes {
+			if strings.TrimSpace(s.CredentialID) == resolvedCredID || strings.TrimSpace(s.Bucket) == resolvedCredID {
+				hasRemaining = true
+				break
+			}
+		}
+		if !hasRemaining {
+			_ = m.DeleteS3Credential(ctx, resolvedCredID)
+		}
+	}
+
 	return nil
 }
 
@@ -253,17 +289,45 @@ func (m *ObjectManager) listBucketsVisibleObjects(ctx context.Context) ([]models
 }
 
 func bucketReferencedByPublicObject(objects []models.InternalObject, cred models.S3Credential, creds []models.S3Credential) bool {
+	credentialID := credentialIDForCredential(cred)
 	for _, obj := range objects {
 		if len(ObjectAccessResources(&obj)) != 0 || obj.AccessMethods == nil {
 			continue
 		}
 		for _, method := range *obj.AccessMethods {
-			if bucket, ok := bucketForAccessMethod(method, creds); ok && bucket == cred.Bucket {
+			if id, ok := credentialIDForAccessMethod(method, creds); ok && id == credentialID {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+func credentialIDForCredential(cred models.S3Credential) string {
+	if credentialID := strings.TrimSpace(cred.CredentialID); credentialID != "" {
+		return credentialID
+	}
+	return strings.TrimSpace(cred.Bucket)
+}
+
+func credentialIDForScope(scope models.BucketScope) string {
+	if credentialID := strings.TrimSpace(scope.CredentialID); credentialID != "" {
+		return credentialID
+	}
+	return strings.TrimSpace(scope.Bucket)
+}
+
+func credentialIDForAccessMethod(method drs.AccessMethod, creds []models.S3Credential) (string, bool) {
+	bucket, ok := bucketForAccessMethod(method, creds)
+	if !ok {
+		return "", false
+	}
+	for _, cred := range creds {
+		if strings.TrimSpace(cred.Bucket) == bucket {
+			return credentialIDForCredential(cred), true
+		}
+	}
+	return bucket, true
 }
 
 func bucketForAccessMethod(method drs.AccessMethod, creds []models.S3Credential) (string, bool) {

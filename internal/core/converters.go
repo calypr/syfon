@@ -2,6 +2,7 @@ package core
 
 import (
 	"fmt"
+	"path"
 	"strings"
 	"time"
 
@@ -98,6 +99,9 @@ func CandidateToInternalObject(c drs.DrsObjectCandidate, now time.Time) (models.
 	if !ok {
 		return models.InternalObject{}, common.ErrNoValidSHA256
 	}
+	if c.AccessMethods == nil || len(*c.AccessMethods) == 0 {
+		return models.InternalObject{}, common.ErrAccessMethodsRequired
+	}
 	authzList := syfoncommon.ControlledAccessToAuthzMap(common.DerefStringSlice(c.ControlledAccess))
 
 	id := ""
@@ -153,6 +157,9 @@ func CandidateToInternalObject(c drs.DrsObjectCandidate, now time.Time) (models.
 		}
 		obj.AccessMethods = &newMethods
 	}
+	if obj.AccessMethods == nil || len(*obj.AccessMethods) == 0 {
+		return models.InternalObject{}, common.ErrAccessMethodsRequired
+	}
 
 	return models.InternalObject{
 		DrsObject:      obj,
@@ -165,6 +172,14 @@ func MergeInternalObjectUpdate(existing models.InternalObject, update models.Int
 	merged := existing
 	merged.DrsObject.Id = id
 	merged.DrsObject.UpdatedTime = &now
+	if update.Properties != nil {
+		if merged.Properties == nil {
+			merged.Properties = make(map[string]interface{}, len(update.Properties))
+		}
+		for k, v := range update.Properties {
+			merged.Properties[k] = v
+		}
+	}
 
 	if update.DrsObject.Name != nil {
 		merged.DrsObject.Name = update.DrsObject.Name
@@ -215,7 +230,14 @@ func InternalRecordToInternalObject(r internalapi.InternalRecord, now time.Time)
 	updatedTime := parseInternalRecordTime(r.UpdatedTime, obj.CreatedTime)
 	obj.UpdatedTime = &updatedTime
 	if r.FileName != nil {
-		obj.Name = r.FileName
+		fileName := strings.TrimSpace(*r.FileName)
+		if fileName != "" {
+			base := path.Base(strings.Trim(fileName, "/"))
+			if base == "." || base == "/" {
+				base = fileName
+			}
+			obj.Name = common.Ptr(base)
+		}
 	}
 	if v := r.Version; v != nil {
 		obj.Version = v
@@ -242,6 +264,9 @@ func InternalRecordToInternalObject(r internalapi.InternalRecord, now time.Time)
 	return models.InternalObject{
 		DrsObject:      obj,
 		Authorizations: authzMap,
+		Properties: map[string]interface{}{
+			"file_name": common.StringVal(r.FileName),
+		},
 	}, nil
 }
 
@@ -259,12 +284,16 @@ func parseInternalRecordTime(raw *string, fallback time.Time) time.Time {
 
 // InternalObjectToInternalRecord converts our internal domain model back to an API record.
 func InternalObjectToInternalRecord(obj models.InternalObject) internalapi.InternalRecord {
+	fileName := common.StringVal(obj.Name)
+	if raw, ok := obj.Properties["file_name"].(string); ok && strings.TrimSpace(raw) != "" {
+		fileName = strings.TrimSpace(raw)
+	}
 	res := internalapi.InternalRecord{
 		Did:           obj.Id,
 		Size:          &obj.Size,
 		CreatedTime:   common.Ptr(obj.CreatedTime.Format(time.RFC3339)),
 		Description:   obj.Description,
-		FileName:      obj.Name,
+		FileName:      common.Ptr(fileName),
 		Version:       obj.Version,
 		AccessMethods: obj.AccessMethods,
 	}

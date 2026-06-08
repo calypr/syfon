@@ -173,6 +173,19 @@ func TestDataServiceOperationsAndTransferHelpers(t *testing.T) {
 	if lastMultipartInit.Guid == nil || *lastMultipartInit.Guid != "guid-a" || lastMultipartInit.FileName == nil || *lastMultipartInit.FileName != "name.txt" {
 		t.Fatalf("unexpected multipart init request: %+v", lastMultipartInit)
 	}
+	if lastMultipartInit.Organization != nil || lastMultipartInit.Project != nil {
+		t.Fatalf("unexpected multipart init scope on unscoped init: %+v", lastMultipartInit)
+	}
+
+	uploadID, guid, err = service.InitMultipartUploadWithMetadata(ctx, "guid-scoped", "name.txt", "bucket-a", common.FileMetadata{
+		Authorizations: map[string][]string{"org-s": {"proj-s"}},
+	})
+	if err != nil || uploadID != "upload-id" || guid != "multipart-guid" {
+		t.Fatalf("InitMultipartUploadWithMetadata returned uploadID=%q guid=%q err=%v", uploadID, guid, err)
+	}
+	if lastMultipartInit.Organization == nil || *lastMultipartInit.Organization != "org-s" || lastMultipartInit.Project == nil || *lastMultipartInit.Project != "proj-s" {
+		t.Fatalf("expected scoped multipart init request, got %+v", lastMultipartInit)
+	}
 
 	partURL, err := service.GetMultipartUploadURL(ctx, "guid-a", "upload-id", 3, "bucket-a")
 	if err != nil || partURL != "https://parts.example/upload" {
@@ -233,7 +246,7 @@ func TestDataServiceOperationsAndTransferHelpers(t *testing.T) {
 	}
 
 	transferRequester := &recordingRequester{response: &http.Response{StatusCode: http.StatusPartialContent, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("payload"))}}
-	transferService := NewDataService(nil, transferRequester, discardLogger(), nil)
+	transferService := NewDataService(mustInternalClient(t, server.URL), transferRequester, discardLogger(), nil)
 	resp, err := transferService.Download(ctx, "https://download.example/file-3", ptrInt64(3), ptrInt64(8))
 	if err != nil || resp.StatusCode != http.StatusPartialContent {
 		t.Fatalf("Download returned resp=%v err=%v", resp, err)
@@ -276,5 +289,25 @@ func TestDataServiceOperationsAndTransferHelpers(t *testing.T) {
 	}
 	if err := service.Validate(ctx, "bucket-a"); err != nil {
 		t.Fatalf("Validate returned error: %v", err)
+	}
+}
+
+func TestDataServiceMultipartInitPreservesServerMessage(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/data/multipart/init" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = io.WriteString(w, `{"error":{"message":"checksum-only multipart init requires an explicit guid or a project-scoped object id"}}`)
+	}))
+	defer server.Close()
+
+	service := NewDataService(mustInternalClient(t, server.URL), &recordingRequester{}, discardLogger(), nil)
+	_, _, err := service.InitMultipartUpload(context.Background(), "", "", "")
+	if err == nil || !strings.Contains(err.Error(), "checksum-only multipart init requires an explicit guid or a project-scoped object id") {
+		t.Fatalf("expected preserved multipart init error message, got %v", err)
 	}
 }

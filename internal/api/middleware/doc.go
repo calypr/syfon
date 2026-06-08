@@ -7,6 +7,6 @@
 //   - authn_*.go: built-in authentication providers and local CSV loading
 //   - plugin_clients.go: external authn/authz plugin process wiring
 //   - token.go and jwks.go: JWT parsing and JWKS key discovery/cache
-//   - config.go and auth_cache.go: env-driven config and Fence authz cache
+//   - config.go: env-driven auth mode config
 //   - context_access.go: small helpers used by API packages when mapping auth failures
 package middleware

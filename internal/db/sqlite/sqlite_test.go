@@ -6,6 +6,7 @@ import (
 	"errors"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -242,6 +243,41 @@ func TestSqliteDB_GetObjectsByChecksum_WhenIDDiffers(t *testing.T) {
 	}
 }
 
+func TestSqliteDB_GetObject_LegacyNameFallsBackToFileName(t *testing.T) {
+	ctx := context.Background()
+	db, err := NewSqliteDB(":memory:")
+	if err != nil {
+		t.Fatalf("failed to create db: %v", err)
+	}
+
+	now := time.Now().UTC()
+	if _, err := db.db.ExecContext(ctx, `
+		INSERT INTO drs_object (id, size, created_time, updated_time, name, file_name, version, description)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		"legacy-1", int64(42), now, now, "nested/dir/file.txt", nil, "v1", "desc",
+	); err != nil {
+		t.Fatalf("insert legacy object: %v", err)
+	}
+	if _, err := db.db.ExecContext(ctx, `
+		INSERT INTO drs_object_access_method (object_id, url, type)
+		VALUES (?, ?, ?)`,
+		"legacy-1", "s3://bucket/key", "s3",
+	); err != nil {
+		t.Fatalf("insert access method: %v", err)
+	}
+
+	obj, err := db.GetObject(ctx, "legacy-1")
+	if err != nil {
+		t.Fatalf("GetObject failed: %v", err)
+	}
+	if got := common.StringVal(obj.Name); got != "file.txt" {
+		t.Fatalf("expected basename name, got %q", got)
+	}
+	if got, _ := obj.Properties["file_name"].(string); got != "nested/dir/file.txt" {
+		t.Fatalf("expected legacy path to populate file_name, got %#v", obj.Properties["file_name"])
+	}
+}
+
 func TestSqliteDB_ObjectAliasLifecycle(t *testing.T) {
 	ctx := context.Background()
 	db, err := NewSqliteDB(":memory:")
@@ -468,6 +504,37 @@ func TestSqliteDB_S3Credentials(t *testing.T) {
 	}
 }
 
+func TestSqliteDB_S3CredentialsCredentialIDAllowsSharedPhysicalBucket(t *testing.T) {
+	t.Setenv(crypto.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
+	ctx := context.Background()
+	db, err := NewSqliteDB(":memory:")
+	if err != nil {
+		t.Fatalf("failed to create db: %v", err)
+	}
+
+	for _, cred := range []models.S3Credential{
+		{CredentialID: "org-a/default", Bucket: "shared-bucket", Region: "us-east-1", AccessKey: "key-a", SecretKey: "secret-a"},
+		{CredentialID: "org-b/default", Bucket: "shared-bucket", Region: "us-east-1", AccessKey: "key-b", SecretKey: "secret-b"},
+	} {
+		cred := cred
+		if err := db.SaveS3Credential(ctx, &cred); err != nil {
+			t.Fatalf("SaveS3Credential(%s) failed: %v", cred.CredentialID, err)
+		}
+	}
+
+	got, err := db.GetS3Credential(ctx, "org-b/default")
+	if err != nil {
+		t.Fatalf("GetS3Credential by credential_id failed: %v", err)
+	}
+	if got.Bucket != "shared-bucket" || got.AccessKey != "key-b" {
+		t.Fatalf("unexpected credential: %+v", got)
+	}
+
+	if _, err := db.GetS3Credential(ctx, "shared-bucket"); err == nil || !strings.Contains(err.Error(), "multiple credentials") {
+		t.Fatalf("expected ambiguous physical bucket lookup error, got %v", err)
+	}
+}
+
 func TestSqliteDB_S3Credentials_EncryptedAtRest(t *testing.T) {
 	t.Setenv(crypto.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
 	ctx := context.Background()
@@ -529,6 +596,78 @@ func TestSqliteDB_BulkOperations(t *testing.T) {
 
 	if err := db.BulkDeleteObjects(ctx, []string{"bulk-1", "bulk-2"}); err != nil {
 		t.Fatalf("BulkDeleteObjects failed: %v", err)
+	}
+}
+
+func TestSqliteDB_GetBulkObjects_SplitHydrationPreservesOrderAndDedupes(t *testing.T) {
+	ctx := context.Background()
+	db, _ := NewSqliteDB(":memory:")
+
+	objects := []models.InternalObject{
+		{
+			DrsObject: drs.DrsObject{
+				Id:   "bulk-a",
+				Size: 10,
+				AccessMethods: &[]drs.AccessMethod{
+					{
+						Type: drs.AccessMethodTypeS3,
+						AccessUrl: &struct {
+							Headers *[]string `json:"headers,omitempty"`
+							Url     string    `json:"url"`
+						}{Url: "s3://bucket/a"},
+					},
+					{
+						Type: drs.AccessMethodTypeS3,
+						AccessUrl: &struct {
+							Headers *[]string `json:"headers,omitempty"`
+							Url     string    `json:"url"`
+						}{Url: "s3://bucket/a"},
+					},
+				},
+				Checksums: []drs.Checksum{
+					{Type: "sha256", Checksum: "aaa"},
+					{Type: "sha256", Checksum: "aaa"},
+				},
+			},
+			Authorizations: map[string][]string{"org": {"p1"}},
+		},
+		{
+			DrsObject: drs.DrsObject{
+				Id:   "bulk-b",
+				Size: 20,
+				AccessMethods: &[]drs.AccessMethod{
+					{
+						Type: drs.AccessMethodTypeGs,
+						AccessUrl: &struct {
+							Headers *[]string `json:"headers,omitempty"`
+							Url     string    `json:"url"`
+						}{Url: "gs://bucket/b"},
+					},
+				},
+				Checksums: []drs.Checksum{
+					{Type: "md5", Checksum: "bbb"},
+				},
+			},
+			Authorizations: map[string][]string{"org": {"p1"}},
+		},
+	}
+
+	if err := db.RegisterObjects(ctx, objects); err != nil {
+		t.Fatalf("RegisterObjects failed: %v", err)
+	}
+
+	fetched, err := db.GetBulkObjects(ctx, []string{"bulk-b", "bulk-a", "bulk-b"})
+	if err != nil {
+		t.Fatalf("GetBulkObjects failed: %v", err)
+	}
+	if len(fetched) != 2 || fetched[0].Id != "bulk-b" || fetched[1].Id != "bulk-a" {
+		t.Fatalf("expected input order with deduplicated ids, got %+v", fetched)
+	}
+	if fetched[1].AccessMethods == nil || len(*fetched[1].AccessMethods) != 1 {
+		t.Fatalf("expected deduplicated access methods, got %+v", fetched[1].AccessMethods)
+	}
+	if len(fetched[1].Checksums) != 1 || fetched[1].Checksums[0].Checksum != "aaa" {
+		t.Fatalf("expected deduplicated checksums, got %+v", fetched[1].Checksums)
 	}
 }
 
@@ -1645,5 +1784,56 @@ func TestSqliteDB_GetPendingLFSMeta(t *testing.T) {
 	_, err = db.GetPendingLFSMeta(ctx, "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
 	if !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound for missing pending metadata, got: %v", err)
+	}
+}
+
+func TestSqliteDB_ListObjectIDsPageByPath(t *testing.T) {
+	ctx := context.Background()
+	db, err := NewSqliteDB(":memory:")
+	if err != nil {
+		t.Fatalf("failed to create db: %v", err)
+	}
+
+	now := time.Now().UTC()
+	for _, obj := range []models.InternalObject{
+		{
+			DrsObject: drs.DrsObject{
+				Id:          "obj-a",
+				Name:        common.Ptr("nested/a.txt"),
+				CreatedTime: now,
+			},
+			Authorizations: map[string][]string{"org": {"proj"}},
+		},
+		{
+			DrsObject: drs.DrsObject{
+				Id:          "obj-b",
+				Name:        common.Ptr("nested/deep/b.txt"),
+				CreatedTime: now,
+			},
+			Authorizations: map[string][]string{"org": {"proj"}},
+		},
+		{
+			DrsObject: drs.DrsObject{
+				Id:          "obj-c",
+				Name:        common.Ptr("nested/z.txt"),
+				CreatedTime: now,
+			},
+			Authorizations: map[string][]string{"org": {"proj"}},
+		},
+	} {
+		if err := db.CreateObject(ctx, &obj); err != nil {
+			t.Fatalf("CreateObject failed: %v", err)
+		}
+	}
+
+	ids, directories, err := db.ListObjectIDsPageByPath(ctx, "org", "proj", "nested", "obj-a", 10, 0)
+	if err != nil {
+		t.Fatalf("ListObjectIDsPageByPath failed: %v", err)
+	}
+	if !slices.Equal(ids, []string{"obj-c"}) {
+		t.Fatalf("unexpected IDs: %v", ids)
+	}
+	if len(directories) != 1 || directories[0].Path != "nested/deep" {
+		t.Fatalf("unexpected directories: %+v", directories)
 	}
 }

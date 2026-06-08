@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"path"
+	"sort"
 	"strings"
 	"time"
 
@@ -13,6 +15,34 @@ import (
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/models"
 )
+
+func sqliteStoredFileName(obj *models.InternalObject) string {
+	if obj != nil && obj.Properties != nil {
+		if raw, ok := obj.Properties["file_name"].(string); ok && strings.TrimSpace(raw) != "" {
+			return strings.TrimSpace(raw)
+		}
+	}
+	if obj == nil {
+		return ""
+	}
+	return common.StringVal(obj.Name)
+}
+
+func sqliteLoadedNames(name, fileName sql.NullString) (string, string) {
+	loadedName := strings.TrimSpace(name.String)
+	loadedFileName := strings.TrimSpace(fileName.String)
+	if loadedFileName == "" {
+		loadedFileName = loadedName
+		loadedName = ""
+	}
+	if loadedName == "" && loadedFileName != "" {
+		loadedName = path.Base(strings.Trim(loadedFileName, "/"))
+		if loadedName == "." || loadedName == "/" || loadedName == "" {
+			loadedName = loadedFileName
+		}
+	}
+	return loadedName, loadedFileName
+}
 
 func (db *SqliteDB) DeleteObject(ctx context.Context, id string) error {
 	tx, err := db.db.BeginTx(ctx, nil)
@@ -110,10 +140,11 @@ func (db *SqliteDB) GetObject(ctx context.Context, id string) (*models.InternalO
 retryLookup:
 	// 1. Fetch main record
 	var r models.DrsObjectRecord
+	var name, fileName, version, description sql.NullString
 	err := db.db.QueryRowContext(ctx, `
-		SELECT id, size, created_time, updated_time, name, version, description
+		SELECT id, size, created_time, updated_time, name, file_name, version, description
 		FROM drs_object WHERE id = ?`, lookupID).Scan(
-		&r.ID, &r.Size, &r.CreatedTime, &r.UpdatedTime, &r.Name, &r.Version, &r.Description,
+		&r.ID, &r.Size, &r.CreatedTime, &r.UpdatedTime, &name, &fileName, &version, &description,
 	)
 	if err == sql.ErrNoRows {
 		if !resolvedAlias {
@@ -132,6 +163,9 @@ retryLookup:
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch record: %w", err)
 	}
+	r.Name, r.FileName = sqliteLoadedNames(name, fileName)
+	r.Version = version.String
+	r.Description = description.String
 	objectID := r.ID
 	if resolvedAlias && requestID != "" {
 		objectID = requestID
@@ -148,6 +182,10 @@ retryLookup:
 			Name:        common.Ptr(r.Name),
 			SelfUri:     "drs://" + objectID,
 		},
+		Properties: map[string]interface{}{},
+	}
+	if strings.TrimSpace(r.FileName) != "" {
+		obj.Properties["file_name"] = r.FileName
 	}
 
 	// 2. Fetch storage access methods.
@@ -222,9 +260,9 @@ func (db *SqliteDB) CreateObject(ctx context.Context, obj *models.InternalObject
 
 	// Insert main record
 	_, err = tx.ExecContext(ctx, `
-		INSERT INTO drs_object (id, size, created_time, updated_time, name, version, description)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		obj.Id, obj.Size, obj.CreatedTime, common.TimeVal(obj.UpdatedTime), common.StringVal(obj.Name), common.StringVal(obj.Version), common.StringVal(obj.Description),
+		INSERT INTO drs_object (id, size, created_time, updated_time, name, file_name, version, description)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		obj.Id, obj.Size, obj.CreatedTime, common.TimeVal(obj.UpdatedTime), common.StringVal(obj.Name), sqliteStoredFileName(obj), common.StringVal(obj.Version), common.StringVal(obj.Description),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to insert drs_object: %w", err)
@@ -232,6 +270,9 @@ func (db *SqliteDB) CreateObject(ctx context.Context, obj *models.InternalObject
 
 	if err := insertControlledAccessTx(ctx, tx, obj.Id, objectAccessResources(obj)); err != nil {
 		return err
+	}
+	if err := sqliteRebuildBrowseRowsForObjectTx(ctx, tx, obj.Id, sqliteStoredFileName(obj), objectAccessResources(obj)); err != nil {
+		return fmt.Errorf("failed to update browse index: %w", err)
 	}
 
 	// Insert storage access methods.
@@ -277,7 +318,7 @@ func (db *SqliteDB) RegisterObjects(ctx context.Context, objects []models.Intern
 	defer tx.Rollback()
 
 	ids := make([]string, 0, len(objects))
-	mainCap, err := safeSliceCapacity(len(objects), len(objects), len(objects), len(objects), len(objects), len(objects), len(objects))
+	mainCap, err := safeSliceCapacity(len(objects), len(objects), len(objects), len(objects), len(objects), len(objects), len(objects), len(objects))
 	if err != nil {
 		return err
 	}
@@ -286,15 +327,17 @@ func (db *SqliteDB) RegisterObjects(ctx context.Context, objects []models.Intern
 	accessArgs := make([]interface{}, 0)
 	controlledArgs := make([]interface{}, 0)
 	checksumArgs := make([]interface{}, 0)
+	browseRows := make([]browseIndexRow, 0)
 
 	for _, obj := range objects {
 		ids = append(ids, obj.Id)
-		mainArgs = append(mainArgs, obj.Id, obj.Size, obj.CreatedTime, common.TimeVal(obj.UpdatedTime), common.StringVal(obj.Name), common.StringVal(obj.Version), common.StringVal(obj.Description))
+		mainArgs = append(mainArgs, obj.Id, obj.Size, obj.CreatedTime, common.TimeVal(obj.UpdatedTime), common.StringVal(obj.Name), sqliteStoredFileName(&obj), common.StringVal(obj.Version), common.StringVal(obj.Description))
 
 		seenAccess := make(map[string]struct{})
 		for _, resource := range objectAccessResources(&obj) {
 			controlledArgs = append(controlledArgs, obj.Id, resource)
 		}
+		browseRows = append(browseRows, sqliteBrowseRowsForObject(obj.Id, sqliteStoredFileName(&obj), objectAccessResources(&obj))...)
 		if obj.AccessMethods != nil {
 			for _, am := range *obj.AccessMethods {
 				if am.AccessUrl == nil || am.AccessUrl.Url == "" {
@@ -320,15 +363,16 @@ func (db *SqliteDB) RegisterObjects(ctx context.Context, objects []models.Intern
 		}
 	}
 
-	mainPrefix := `INSERT INTO drs_object (id, size, created_time, updated_time, name, version, description) VALUES `
+	mainPrefix := `INSERT INTO drs_object (id, size, created_time, updated_time, name, file_name, version, description) VALUES `
 	mainSuffix := ` ON CONFLICT(id) DO UPDATE SET
 		size=excluded.size,
 		created_time=excluded.created_time,
 		updated_time=excluded.updated_time,
 		name=excluded.name,
+		file_name=excluded.file_name,
 		version=excluded.version,
 		description=excluded.description`
-	if err := execSQLiteBulkInsert(tx, mainPrefix, "(?, ?, ?, ?, ?, ?, ?)", 7, mainArgs, mainSuffix); err != nil {
+	if err := execSQLiteBulkInsert(tx, mainPrefix, "(?, ?, ?, ?, ?, ?, ?, ?)", 8, mainArgs, mainSuffix); err != nil {
 		return fmt.Errorf("failed bulk upsert drs_object: %w", err)
 	}
 
@@ -340,6 +384,9 @@ func (db *SqliteDB) RegisterObjects(ctx context.Context, objects []models.Intern
 	}
 	if err := execSQLiteDeleteByIDs(tx, "drs_object_checksum", ids); err != nil {
 		return fmt.Errorf("failed bulk clear checksums: %w", err)
+	}
+	if err := sqliteDeleteBrowseRowsByIDsTx(tx, ids); err != nil {
+		return fmt.Errorf("failed bulk clear browse index: %w", err)
 	}
 
 	if len(accessArgs) > 0 {
@@ -377,6 +424,9 @@ func (db *SqliteDB) RegisterObjects(ctx context.Context, objects []models.Intern
 		); err != nil {
 			return fmt.Errorf("failed bulk insert checksums: %w", err)
 		}
+	}
+	if err := sqliteInsertBrowseRowsTx(tx, browseRows); err != nil {
+		return fmt.Errorf("failed bulk insert browse index: %w", err)
 	}
 	if err := db.flushObjectUsageEventsForIDsTx(ctx, tx, ids); err != nil {
 		return fmt.Errorf("failed to apply object usage events: %w", err)
@@ -1113,15 +1163,10 @@ func (db *SqliteDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []stri
 			o.created_time,
 			o.updated_time,
 			o.name,
+			o.file_name,
 			o.version,
-			o.description,
-			am.url,
-			am.type,
-			cs.type,
-			cs.checksum
+			o.description
 		FROM drs_object o
-		LEFT JOIN drs_object_access_method am ON am.object_id = o.id
-		LEFT JOIN drs_object_checksum cs ON cs.object_id = o.id
 		WHERE %s`, strings.Join(conditions, " OR "))
 
 	rows, err := db.db.QueryContext(ctx, query, args...)
@@ -1131,71 +1176,50 @@ func (db *SqliteDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []stri
 	defer rows.Close()
 
 	objectsByID := make(map[string]*models.InternalObject)
-	seenAccess := make(map[string]map[string]struct{})
-	seenChecksum := make(map[string]map[string]struct{})
 
 	for rows.Next() {
 		var (
-			id, name, version, description string
+			id                             string
+			name, fileName                 sql.NullString
+			version, description           sql.NullString
 			size                           int64
 			createdTime, updatedTime       time.Time
-			accessURL, accessType          sql.NullString
-			checksumType, sumVal           sql.NullString
 		)
 		if err := rows.Scan(
-			&id, &size, &createdTime, &updatedTime, &name, &version, &description,
-			&accessURL, &accessType, &checksumType, &sumVal,
+			&id, &size, &createdTime, &updatedTime, &name, &fileName, &version, &description,
 		); err != nil {
 			return nil, err
 		}
 
-		obj, ok := objectsByID[id]
-		if !ok {
-			obj = &models.InternalObject{
-				DrsObject: drs.DrsObject{
-					Id:          id,
-					Size:        size,
-					CreatedTime: createdTime,
-					UpdatedTime: common.Ptr(updatedTime),
-					Name:        common.Ptr(name),
-					Version:     common.Ptr(version),
-					Description: common.Ptr(description),
-					SelfUri:     "drs://" + id,
-				},
-			}
-			objectsByID[id] = obj
-			seenAccess[id] = make(map[string]struct{})
-			seenChecksum[id] = make(map[string]struct{})
+		loadedName, loadedFileName := sqliteLoadedNames(name, fileName)
+		objectsByID[id] = &models.InternalObject{
+			DrsObject: drs.DrsObject{
+				Id:          id,
+				Size:        size,
+				CreatedTime: createdTime,
+				UpdatedTime: common.Ptr(updatedTime),
+				Name:        common.Ptr(loadedName),
+				Version:     common.Ptr(version.String),
+				Description: common.Ptr(description.String),
+				SelfUri:     "drs://" + id,
+			},
+			Properties: map[string]interface{}{},
 		}
-
-		if accessURL.Valid && accessType.Valid {
-			key := accessType.String + "|" + accessURL.String
-			if _, exists := seenAccess[id][key]; !exists {
-				seenAccess[id][key] = struct{}{}
-				if obj.DrsObject.AccessMethods == nil {
-					obj.DrsObject.AccessMethods = &[]drs.AccessMethod{}
-				}
-				t := accessType.String
-				*obj.DrsObject.AccessMethods = append(*obj.DrsObject.AccessMethods, drs.AccessMethod{
-					AccessUrl: &struct {
-						Headers *[]string `json:"headers,omitempty"`
-						Url     string    `json:"url"`
-					}{Url: accessURL.String},
-					Type:     drs.AccessMethodType(accessType.String),
-					AccessId: &t,
-				})
-			}
-		}
-		if checksumType.Valid && sumVal.Valid {
-			key := checksumType.String + "|" + sumVal.String
-			if _, exists := seenChecksum[id][key]; !exists {
-				seenChecksum[id][key] = struct{}{}
-				obj.DrsObject.Checksums = append(obj.DrsObject.Checksums, drs.Checksum{Type: checksumType.String, Checksum: sumVal.String})
-			}
+		if strings.TrimSpace(loadedFileName) != "" {
+			objectsByID[id].Properties["file_name"] = loadedFileName
 		}
 	}
 
 	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(objectsByID) == 0 {
+		return objectsByID, nil
+	}
+	if err := db.attachBulkAccessMethods(ctx, objectsByID); err != nil {
+		return nil, err
+	}
+	if err := db.attachBulkChecksums(ctx, objectsByID); err != nil {
 		return nil, err
 	}
 	if err := db.attachControlledAccess(ctx, objectsByID); err != nil {
@@ -1203,6 +1227,97 @@ func (db *SqliteDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []stri
 	}
 
 	return objectsByID, nil
+}
+
+func (db *SqliteDB) attachBulkAccessMethods(ctx context.Context, objectsByID map[string]*models.InternalObject) error {
+	ids := sortedObjectIDs(objectsByID)
+	query := fmt.Sprintf(`
+		SELECT object_id, url, type
+		FROM drs_object_access_method
+		WHERE object_id IN (%s)
+		ORDER BY object_id`, makePlaceholders(len(ids)))
+	args := make([]any, 0, len(ids))
+	for _, id := range ids {
+		args = append(args, id)
+	}
+	rows, err := db.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("failed to fetch bulk object access methods: %w", err)
+	}
+	defer rows.Close()
+
+	seenAccess := make(map[string]map[string]struct{}, len(objectsByID))
+	for rows.Next() {
+		var objectID, accessURL, accessType string
+		if err := rows.Scan(&objectID, &accessURL, &accessType); err != nil {
+			return err
+		}
+		obj := objectsByID[objectID]
+		if obj == nil {
+			continue
+		}
+		if _, ok := seenAccess[objectID]; !ok {
+			seenAccess[objectID] = make(map[string]struct{})
+		}
+		key := accessType + "|" + accessURL
+		if _, exists := seenAccess[objectID][key]; exists {
+			continue
+		}
+		seenAccess[objectID][key] = struct{}{}
+		if obj.DrsObject.AccessMethods == nil {
+			obj.DrsObject.AccessMethods = &[]drs.AccessMethod{}
+		}
+		t := accessType
+		*obj.DrsObject.AccessMethods = append(*obj.DrsObject.AccessMethods, drs.AccessMethod{
+			AccessUrl: &struct {
+				Headers *[]string `json:"headers,omitempty"`
+				Url     string    `json:"url"`
+			}{Url: accessURL},
+			Type:     drs.AccessMethodType(accessType),
+			AccessId: &t,
+		})
+	}
+	return rows.Err()
+}
+
+func (db *SqliteDB) attachBulkChecksums(ctx context.Context, objectsByID map[string]*models.InternalObject) error {
+	ids := sortedObjectIDs(objectsByID)
+	query := fmt.Sprintf(`
+		SELECT object_id, type, checksum
+		FROM drs_object_checksum
+		WHERE object_id IN (%s)
+		ORDER BY object_id`, makePlaceholders(len(ids)))
+	args := make([]any, 0, len(ids))
+	for _, id := range ids {
+		args = append(args, id)
+	}
+	rows, err := db.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("failed to fetch bulk object checksums: %w", err)
+	}
+	defer rows.Close()
+
+	seenChecksums := make(map[string]map[string]struct{}, len(objectsByID))
+	for rows.Next() {
+		var objectID, checksumType, checksumValue string
+		if err := rows.Scan(&objectID, &checksumType, &checksumValue); err != nil {
+			return err
+		}
+		obj := objectsByID[objectID]
+		if obj == nil {
+			continue
+		}
+		if _, ok := seenChecksums[objectID]; !ok {
+			seenChecksums[objectID] = make(map[string]struct{})
+		}
+		key := checksumType + "|" + checksumValue
+		if _, exists := seenChecksums[objectID][key]; exists {
+			continue
+		}
+		seenChecksums[objectID][key] = struct{}{}
+		obj.DrsObject.Checksums = append(obj.DrsObject.Checksums, drs.Checksum{Type: checksumType, Checksum: checksumValue})
+	}
+	return rows.Err()
 }
 
 func objectAccessResources(obj *models.InternalObject) []string {
@@ -1213,6 +1328,15 @@ func objectAccessResources(obj *models.InternalObject) []string {
 		return sycommon.NormalizeAccessResources(*obj.ControlledAccess)
 	}
 	return sycommon.AuthzMapToList(obj.Authorizations)
+}
+
+func sortedObjectIDs(objectsByID map[string]*models.InternalObject) []string {
+	ids := make([]string, 0, len(objectsByID))
+	for id := range objectsByID {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
 }
 
 func insertControlledAccessTx(ctx context.Context, tx *sql.Tx, objectID string, resources []string) error {
@@ -1337,6 +1461,9 @@ func (db *SqliteDB) RemoveObjectControlledAccess(ctx context.Context, objectID, 
 	}
 
 	if _, err := tx.ExecContext(ctx, `DELETE FROM drs_object_controlled_access WHERE object_id = ? AND resource = ?`, objectID, resource); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM drs_object_browse_index WHERE object_id = ? AND resource = ?`, objectID, resource); err != nil {
 		return err
 	}
 	return tx.Commit()

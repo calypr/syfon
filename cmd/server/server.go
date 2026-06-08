@@ -99,12 +99,13 @@ var Cmd = &cobra.Command{
 			// Bucket credentials are encrypted before persistence and audited on read/write/delete/list.
 			for _, c := range cfg.Buckets {
 				cred := &models.S3Credential{
-					Bucket:    c.Bucket,
-					Provider:  c.Provider,
-					Region:    c.Region,
-					AccessKey: c.AccessKey,
-					SecretKey: c.SecretKey,
-					Endpoint:  c.Endpoint,
+					CredentialID: c.CredentialID,
+					Bucket:       c.Bucket,
+					Provider:     c.Provider,
+					Region:       c.Region,
+					AccessKey:    c.AccessKey,
+					SecretKey:    c.SecretKey,
+					Endpoint:     c.Endpoint,
 				}
 				if err := database.SaveS3Credential(cmd.Context(), cred); err != nil {
 					logger.Error("failed to save s3 credential", "bucket", c.Bucket, "err", err)
@@ -204,7 +205,11 @@ func loadConfiguredBucketScopes(ctx context.Context, database db.DatabaseInterfa
 	}
 	logger.Info("loading configured bucket scopes", "count", len(scopes))
 	for i, scope := range scopes {
-		cred, err := database.GetS3Credential(ctx, scope.Bucket)
+		credentialID := strings.TrimSpace(scope.CredentialID)
+		if credentialID == "" {
+			credentialID = strings.TrimSpace(scope.Bucket)
+		}
+		cred, err := database.GetS3Credential(ctx, credentialID)
 		if err != nil {
 			return fmt.Errorf("bucket_scopes[%d] bucket=%s credential lookup failed: %w", i, scope.Bucket, err)
 		}
@@ -214,7 +219,8 @@ func loadConfiguredBucketScopes(ctx context.Context, database db.DatabaseInterfa
 		if err := database.CreateBucketScope(ctx, &models.BucketScope{
 			Organization: scope.Organization,
 			ProjectID:    scope.ProjectID,
-			Bucket:       scope.Bucket,
+			CredentialID: credentialID,
+			Bucket:       cred.Bucket,
 			PathPrefix:   scope.PathPrefix,
 		}); err != nil {
 			return fmt.Errorf("bucket_scopes[%d] org=%s project=%s bucket=%s: %w", i, scope.Organization, scope.ProjectID, scope.Bucket, err)

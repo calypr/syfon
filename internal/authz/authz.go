@@ -128,6 +128,53 @@ func HasAnyMethodAccess(ctx context.Context, resources []string, methods ...stri
 	return false
 }
 
+func HasServiceMethodAccess(ctx context.Context, service, method string, resources []string) bool {
+	if !IsAuthzEnforced(ctx) {
+		return true
+	}
+	if IsGen3Mode(ctx) && !HasAuthHeader(ctx) {
+		return false
+	}
+	service = strings.ToLower(strings.TrimSpace(service))
+	method = strings.ToLower(strings.TrimSpace(method))
+	if service == "" || method == "" {
+		return false
+	}
+	resources = sycommon.NormalizeAccessResources(resources)
+	if len(resources) == 0 {
+		return false
+	}
+	privs := normalizePrivileges(GetUserPrivileges(ctx))
+	qualifiedMethod := service + ":" + method
+	serviceWildcard := service + ":*"
+	for _, resource := range resources {
+		methods, ok := privs[resource]
+		if !ok {
+			return false
+		}
+		if methods[qualifiedMethod] || methods[serviceWildcard] || methods["*:*"] {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func HasAnyServiceMethodAccess(ctx context.Context, resources []string, service string, methods ...string) bool {
+	if !IsAuthzEnforced(ctx) {
+		return true
+	}
+	if len(resources) == 0 {
+		return true
+	}
+	for _, method := range methods {
+		if HasServiceMethodAccess(ctx, service, method, resources) {
+			return true
+		}
+	}
+	return false
+}
+
 func normalizePrivileges(in map[string]map[string]bool) map[string]map[string]bool {
 	out := make(map[string]map[string]bool, len(in))
 	for rawResource, methods := range in {

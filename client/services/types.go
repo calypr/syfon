@@ -22,7 +22,9 @@ type ListRecordsOptions struct {
 	URL          string
 	Organization string
 	ProjectID    string
+	Path         string
 	Limit        int
+	Start        string
 	Page         int
 }
 

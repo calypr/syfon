@@ -37,7 +37,8 @@ CREATE INDEX IF NOT EXISTS idx_drs_object_checksum_object_id ON drs_object_check
 CREATE INDEX IF NOT EXISTS idx_drs_object_checksum_checksum ON drs_object_checksum(checksum);
 
 CREATE TABLE IF NOT EXISTS s3_credential (
-  bucket TEXT PRIMARY KEY,
+  credential_id TEXT PRIMARY KEY,
+  bucket TEXT NOT NULL,
   provider TEXT NOT NULL DEFAULT 's3',
   region TEXT,
   access_key TEXT,
@@ -48,11 +49,13 @@ CREATE TABLE IF NOT EXISTS s3_credential (
 CREATE TABLE IF NOT EXISTS bucket_scope (
   organization TEXT NOT NULL,
   project_id TEXT NOT NULL,
+  credential_id TEXT NOT NULL,
   bucket TEXT NOT NULL,
   path_prefix TEXT,
   PRIMARY KEY (organization, project_id)
 );
 
+CREATE INDEX IF NOT EXISTS idx_bucket_scope_credential_id ON bucket_scope(credential_id);
 CREATE INDEX IF NOT EXISTS idx_bucket_scope_bucket ON bucket_scope(bucket);
 
 CREATE TABLE IF NOT EXISTS access_grant (

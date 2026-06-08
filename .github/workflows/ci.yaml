@@ -20,8 +20,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
-    name: Go Test and Vet
+  verify-generated:
+    name: Verify generated bindings
     runs-on: ubuntu-latest
     steps:
       - name: Check out code
@@ -33,13 +33,24 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Download dependencies
-        run: go mod download
-
       - name: Verify generated API bindings are up to date
         run: |
           make gen-server gen-client
           git diff --exit-code -- apigen/server apigen/client apigen/openapi/internal.openapi.yaml apigen/openapi/bucket.openapi.yaml
+
+  test:
+    name: Unit, router, and endpoint tests
+    runs-on: ubuntu-latest
+    needs: verify-generated
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
 
       - name: Run unit tests
         run: make test-unit
@@ -58,23 +69,6 @@ jobs:
             -run 'Test(AllRegisteredEndpoints_WithMocks|RegisterAPIRoutes_StaticBeforeParamAcrossControllers|RegisterControllerRoutes_StaticBeforeParam)' \
             -v
           go tool covdata textfmt -i "$GOCOVERDIR" -o coverage/binary-endpoint.out
-
-      - name: Run coverage
-        env:
-          SYFON_E2E_MOCK_SERVERS: 1
-        run: make coverage
-
-      - name: Run client coverage
-        run: |
-          COVERAGE_SCOPE=client ./scripts/run_coverage.sh
-
-      - name: Build plugin binaries (local_authn_plugin and gen3_authn_plugin)
-        run: make build-plugins
-        shell: bash
-
-      - name: Verify Security Tests
-        run: ./scripts/run-security-tests.sh
-        shell: bash
 
       - name: Upload binary endpoint coverage to Codecov (OIDC)
         if: github.actor != 'nektos/act'
@@ -104,6 +98,37 @@ jobs:
           disable_search: true
           verbose: true
           fail_ci_if_error: false
+
+      - name: Upload endpoint coverage artifact
+        if: github.actor != 'nektos/act'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-endpoint-${{ github.run_id }}
+          path: coverage/binary-endpoint.out
+          if-no-files-found: error
+
+  coverage:
+    name: Root and client coverage
+    runs-on: ubuntu-latest
+    needs: verify-generated
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run coverage
+        env:
+          SYFON_E2E_MOCK_SERVERS: 1
+        run: make coverage
+
+      - name: Run client coverage
+        run: |
+          COVERAGE_SCOPE=client ./scripts/run_coverage.sh
 
       - name: Upload root coverage to Codecov (OIDC)
         if: github.actor != 'nektos/act'
@@ -171,8 +196,29 @@ jobs:
             coverage/coverage.out
             coverage/coverage.txt
             coverage/coverage.html
-            coverage/binary-endpoint.out
             client/coverage/coverage.out
+
+  static-checks:
+    name: Vet, vuln, plugins, and security
+    runs-on: ubuntu-latest
+    needs: verify-generated
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build plugin binaries (local_authn_plugin and gen3_authn_plugin)
+        run: make build-plugins
+        shell: bash
+
+      - name: Verify Security Tests
+        run: ./scripts/run-security-tests.sh
+        shell: bash
 
       - name: Install govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@latest
@@ -255,7 +301,6 @@ jobs:
     strategy:
       matrix:
         arch: [amd64, arm64]
-    needs: [test, integration-test]
     steps:
       - name: Check out code
         uses: actions/checkout@v4
@@ -310,7 +355,13 @@ jobs:
   merge:
     name: Merge and Tag
     runs-on: ubuntu-latest
-    needs: [build-and-push]
+    needs:
+      - verify-generated
+      - test
+      - coverage
+      - static-checks
+      - integration-test
+      - build-and-push
     steps:
       - name: Download digests
         uses: actions/download-artifact@v4

@@ -147,13 +147,14 @@ func (p PostgresConfig) MarshalJSON() ([]byte, error) {
 }
 
 type BucketConfig struct {
-	Bucket    string                 `json:"bucket" yaml:"bucket"`
-	Provider  string                 `json:"provider,omitempty" yaml:"provider,omitempty"`
-	Region    string                 `json:"region" yaml:"region"`
-	AccessKey string                 `json:"access_key" yaml:"access_key"`
-	SecretKey string                 `json:"secret_key" yaml:"secret_key"`
-	Endpoint  string                 `json:"endpoint,omitempty" yaml:"endpoint,omitempty"`
-	Resources []BucketResourceConfig `json:"resources,omitempty" yaml:"resources,omitempty"`
+	CredentialID string                 `json:"-" yaml:"-"`
+	Bucket       string                 `json:"bucket" yaml:"bucket"`
+	Provider     string                 `json:"provider,omitempty" yaml:"provider,omitempty"`
+	Region       string                 `json:"region" yaml:"region"`
+	AccessKey    string                 `json:"access_key" yaml:"access_key"`
+	SecretKey    string                 `json:"secret_key" yaml:"secret_key"`
+	Endpoint     string                 `json:"endpoint,omitempty" yaml:"endpoint,omitempty"`
+	Resources    []BucketResourceConfig `json:"resources,omitempty" yaml:"resources,omitempty"`
 }
 
 type S3Config = BucketConfig
@@ -176,6 +177,7 @@ type BucketProjectConfig struct {
 type BucketScopeConfig struct {
 	Organization        string `json:"organization" yaml:"organization"`
 	ProjectID           string `json:"project_id" yaml:"project_id"`
+	CredentialID        string `json:"-" yaml:"-"`
 	Bucket              string `json:"bucket,omitempty" yaml:"bucket,omitempty"`
 	Path                string `json:"path,omitempty" yaml:"path,omitempty"`
 	PathPrefix          string `json:"path_prefix,omitempty" yaml:"path_prefix,omitempty"`
@@ -203,7 +205,6 @@ type AuthConfig struct {
 	LocalAuthzCSV        string          `json:"local_authz_csv" yaml:"local_authz_csv"`
 	AllowUnauthenticated bool            `json:"allow_unauthenticated" yaml:"allow_unauthenticated"`
 	Mock                 MockAuthConfig  `json:"mock" yaml:"mock"`
-	Cache                AuthCacheConfig `json:"cache" yaml:"cache"`
 	PluginPaths          PluginPaths     `json:"plugin_paths" yaml:"plugin_paths"`
 	FenceURL             string          `json:"fence_url" yaml:"fence_url"`
 }
@@ -213,14 +214,6 @@ type MockAuthConfig struct {
 	RequireAuthHeader bool     `json:"require_auth_header" yaml:"require_auth_header"`
 	Resources         []string `json:"resources" yaml:"resources"`
 	Methods           []string `json:"methods" yaml:"methods"`
-}
-
-type AuthCacheConfig struct {
-	Enabled      bool `json:"enabled" yaml:"enabled"`
-	TTLSeconds   int  `json:"ttl_seconds" yaml:"ttl_seconds"`
-	NegativeTTL  int  `json:"negative_ttl_seconds" yaml:"negative_ttl_seconds"`
-	MaxEntries   int  `json:"max_entries" yaml:"max_entries"`
-	CleanupEvery int  `json:"cleanup_seconds" yaml:"cleanup_seconds"`
 }
 
 type PluginPaths struct {
@@ -492,6 +485,13 @@ func LoadConfig(configFile string) (*Config, error) {
 			return nil, fmt.Errorf("buckets[%d]: %w", i, err)
 		}
 		cfg.Buckets[i].Provider = bucketProvider
+		cfg.Buckets[i].CredentialID = common.DeriveCredentialID(
+			cred.Bucket,
+			bucketProvider,
+			cred.Region,
+			cred.Endpoint,
+			cred.AccessKey,
+		)
 		if err := common.ValidateBucketNameWithEndpoint(bucketProvider, cred.Bucket, cred.Endpoint); err != nil {
 			return nil, fmt.Errorf("buckets[%d]: %w", i, err)
 		}
@@ -513,11 +513,13 @@ func LoadConfig(configFile string) (*Config, error) {
 		return nil, err
 	}
 	cfg.BucketScopes = append(append([]BucketScopeConfig(nil), cfg.BucketScopes...), derivedScopes...)
+	credentialIDsByBucket := credentialIDsByPhysicalBucket(cfg.Buckets)
 
 	for i := range cfg.BucketScopes {
 		scope := &cfg.BucketScopes[i]
 		scope.Organization = strings.TrimSpace(scope.Organization)
 		scope.ProjectID = strings.TrimSpace(scope.ProjectID)
+		scope.CredentialID = strings.TrimSpace(scope.CredentialID)
 		scope.Bucket = strings.TrimSpace(scope.Bucket)
 		scope.Path = strings.TrimSpace(scope.Path)
 		scope.PathPrefix = strings.Trim(strings.TrimSpace(scope.PathPrefix), "/")
@@ -565,13 +567,19 @@ func LoadConfig(configFile string) (*Config, error) {
 			scope.Bucket = pathBucket
 			scope.PathPrefix = prefix
 		}
+		if scope.CredentialID == "" {
+			scope.CredentialID, err = resolveScopeCredentialID(scope.Bucket, credentialIDsByBucket)
+			if err != nil {
+				return nil, fmt.Errorf("bucket_scopes[%d]: %w", i, err)
+			}
+		}
 		if hasComposedSubPaths {
-			if scope.Bucket == "" {
+			if scope.Bucket == "" && scope.CredentialID == "" {
 				return nil, fmt.Errorf("bucket_scopes[%d]: bucket is required when organization_sub_path or project_sub_path is set", i)
 			}
 			scope.PathPrefix = joinBucketScopeSubPaths(scope.OrganizationSubPath, scope.ProjectSubPath)
 		}
-		if scope.Bucket == "" {
+		if scope.Bucket == "" && scope.CredentialID == "" {
 			return nil, fmt.Errorf("bucket_scopes[%d]: bucket or path is required", i)
 		}
 	}
@@ -629,22 +637,6 @@ func LoadConfig(configFile string) (*Config, error) {
 	if cfg.Auth.LocalAuthzCSV != "" {
 		os.Setenv("DRS_LOCAL_AUTHZ_CSV", cfg.Auth.LocalAuthzCSV)
 	}
-	// Auth cache config
-	if cfg.Auth.Cache.Enabled {
-		os.Setenv("DRS_AUTH_CACHE_ENABLED", "true")
-	}
-	if cfg.Auth.Cache.TTLSeconds > 0 {
-		os.Setenv("DRS_AUTH_CACHE_TTL_SECONDS", strconv.Itoa(cfg.Auth.Cache.TTLSeconds))
-	}
-	if cfg.Auth.Cache.NegativeTTL > 0 {
-		os.Setenv("DRS_AUTH_CACHE_NEGATIVE_TTL_SECONDS", strconv.Itoa(cfg.Auth.Cache.NegativeTTL))
-	}
-	if cfg.Auth.Cache.MaxEntries > 0 {
-		os.Setenv("DRS_AUTH_CACHE_MAX_ENTRIES", strconv.Itoa(cfg.Auth.Cache.MaxEntries))
-	}
-	if cfg.Auth.Cache.CleanupEvery > 0 {
-		os.Setenv("DRS_AUTH_CACHE_CLEANUP_SECONDS", strconv.Itoa(cfg.Auth.Cache.CleanupEvery))
-	}
 	// Plugin paths
 	if cfg.Auth.PluginPaths.Authz != "" {
 		os.Setenv("SYFON_AUTHZ_PLUGIN_PATH", cfg.Auth.PluginPaths.Authz)
@@ -668,7 +660,7 @@ func deriveBucketScopesFromBuckets(buckets []BucketConfig) ([]BucketScopeConfig,
 	scopes := make([]BucketScopeConfig, 0)
 	for i, bucket := range buckets {
 		for j, resource := range bucket.Resources {
-			resourceScopes, err := bucketResourceScopes(bucket.Bucket, resource)
+			resourceScopes, err := bucketResourceScopes(bucket.CredentialID, bucket.Bucket, resource)
 			if err != nil {
 				return nil, fmt.Errorf("buckets[%d].resources[%d]: %w", i, j, err)
 			}
@@ -678,7 +670,44 @@ func deriveBucketScopesFromBuckets(buckets []BucketConfig) ([]BucketScopeConfig,
 	return scopes, nil
 }
 
-func bucketResourceScopes(bucketName string, resource BucketResourceConfig) ([]BucketScopeConfig, error) {
+func credentialIDsByPhysicalBucket(buckets []BucketConfig) map[string][]string {
+	idsByBucket := make(map[string][]string)
+	seen := make(map[string]map[string]bool)
+	for _, bucket := range buckets {
+		bucketName := strings.ToLower(strings.TrimSpace(bucket.Bucket))
+		credentialID := strings.TrimSpace(bucket.CredentialID)
+		if bucketName == "" || credentialID == "" {
+			continue
+		}
+		if seen[bucketName] == nil {
+			seen[bucketName] = make(map[string]bool)
+		}
+		if seen[bucketName][credentialID] {
+			continue
+		}
+		seen[bucketName][credentialID] = true
+		idsByBucket[bucketName] = append(idsByBucket[bucketName], credentialID)
+	}
+	return idsByBucket
+}
+
+func resolveScopeCredentialID(bucket string, idsByBucket map[string][]string) (string, error) {
+	bucket = strings.TrimSpace(bucket)
+	if bucket == "" {
+		return "", nil
+	}
+	ids := idsByBucket[strings.ToLower(bucket)]
+	switch len(ids) {
+	case 0:
+		return bucket, nil
+	case 1:
+		return ids[0], nil
+	default:
+		return "", fmt.Errorf("bucket %q maps to multiple credentials; define the scope under the intended buckets[].resources entry", bucket)
+	}
+}
+
+func bucketResourceScopes(credentialID, bucketName string, resource BucketResourceConfig) ([]BucketScopeConfig, error) {
 	org := strings.TrimSpace(resource.Organization)
 	if org == "" {
 		return nil, fmt.Errorf("organization is required")
@@ -688,6 +717,7 @@ func bucketResourceScopes(bucketName string, resource BucketResourceConfig) ([]B
 	if len(resource.Projects) == 0 {
 		return []BucketScopeConfig{{
 			Organization:        org,
+			CredentialID:        credentialID,
 			Bucket:              bucketName,
 			OrganizationSubPath: orgPath,
 		}}, nil
@@ -705,6 +735,7 @@ func bucketResourceScopes(bucketName string, resource BucketResourceConfig) ([]B
 		scopes = append(scopes, BucketScopeConfig{
 			Organization:        org,
 			ProjectID:           projectID,
+			CredentialID:        credentialID,
 			Bucket:              bucketName,
 			Path:                strings.TrimSpace(project.Path),
 			PathPrefix:          strings.Trim(strings.TrimSpace(project.PathPrefix), "/"),

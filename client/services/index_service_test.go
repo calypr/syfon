@@ -181,15 +181,26 @@ func TestIndexServiceOperationsAndUpsert(t *testing.T) {
 		t.Fatalf("unexpected remove controlled access payload: %+v", lastRemoveControlled)
 	}
 
-	if _, err := service.List(ctx, ListRecordsOptions{Hash: "sha", URL: "s3://bucket/path", Organization: "org", ProjectID: "proj", Limit: 3, Page: 2}); err != nil {
+	if _, err := service.List(ctx, ListRecordsOptions{Hash: "sha", URL: "s3://bucket/path", Organization: "org", ProjectID: "proj", Path: "nested", Limit: 3, Start: "did-100"}); err != nil {
 		t.Fatalf("List returned error: %v", err)
 	}
 	query, err := url.ParseQuery(strings.TrimPrefix(requester.builder.Url, "/index?"))
 	if err != nil {
 		t.Fatalf("parse list query: %v", err)
 	}
-	if query.Get("hash") != "sha" || query.Get("url") != "s3://bucket/path" || query.Get("organization") != "org" || query.Get("project") != "proj" || query.Get("limit") != "3" || query.Get("page") != "2" {
+	if query.Get("hash") != "sha" || query.Get("url") != "s3://bucket/path" || query.Get("organization") != "org" || query.Get("project") != "proj" || query.Get("path") != "nested" || query.Get("limit") != "3" || query.Get("start") != "did-100" || query.Get("page") != "" {
 		t.Fatalf("unexpected list query values: %v", query)
+	}
+
+	if _, err := service.List(ctx, ListRecordsOptions{Limit: 3, Start: "did-100", Page: 2}); err != nil {
+		t.Fatalf("List with start and page returned error: %v", err)
+	}
+	query, err = url.ParseQuery(strings.TrimPrefix(requester.builder.Url, "/index?"))
+	if err != nil {
+		t.Fatalf("parse start-priority query: %v", err)
+	}
+	if query.Get("start") != "did-100" || query.Get("page") != "" {
+		t.Fatalf("expected start to take priority over page, got %v", query)
 	}
 
 	if _, err := service.DeleteByQuery(ctx, DeleteByQueryOptions{Organization: "org", ProjectID: "proj", Hash: "abc", HashType: "sha256"}); err != nil {

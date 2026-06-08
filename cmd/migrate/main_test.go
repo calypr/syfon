@@ -3,6 +3,7 @@ package migratecmd
 import (
 	"testing"
 
+	conf "github.com/calypr/syfon/client/config"
 	"github.com/spf13/cobra"
 )
 
@@ -55,5 +56,24 @@ func TestTargetAuthFromInputsRejectsMixedAuth(t *testing.T) {
 	}
 	if _, err := targetAuthFromInputs("profile", "", "drs-user", "drs-pass"); err == nil {
 		t.Fatal("expected profile/basic conflict error")
+	}
+}
+
+func TestAuthFromCredentialPrefersBearerToken(t *testing.T) {
+	t.Parallel()
+
+	auth, err := authFromCredential("calypr", &conf.Credential{
+		Profile:     "calypr",
+		AccessToken: "new-token",
+		APIKey:      "refresh-jwt",
+	})
+	if err != nil {
+		t.Fatalf("authFromCredential returned error: %v", err)
+	}
+	if auth.BearerToken != "new-token" {
+		t.Fatalf("expected bearer token, got %+v", auth)
+	}
+	if auth.Basic != nil {
+		t.Fatalf("expected bearer auth only, got basic %+v", auth.Basic)
 	}
 }

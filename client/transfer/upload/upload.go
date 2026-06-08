@@ -26,7 +26,3 @@ func UploadWithOptions(ctx context.Context, bk transfer.MultipartBackend, source
 	uploader := &engine.GenericUploader{Backend: bk}
 	return uploader.Upload(ctx, req, showProgress)
 }
-
-func UploadObjectFile(ctx context.Context, bk transfer.MultipartBackend, sourcePath, objectKey, guid, bucket string, forceMultipart bool) error {
-	return UploadWithOptions(ctx, bk, sourcePath, objectKey, guid, bucket, common.FileMetadata{}, false, forceMultipart)
-}

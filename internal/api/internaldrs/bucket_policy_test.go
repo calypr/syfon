@@ -2,9 +2,11 @@ package internaldrs
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	sycommon "github.com/calypr/syfon/common"
+	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/models"
 )
 
@@ -60,6 +62,42 @@ func TestBucketPolicyHelpers(t *testing.T) {
 		}
 		if bucketsAllowedByNames(ctx, []models.BucketScope{scope}, "bucket-b", "read") {
 			t.Fatal("expected non-matching bucket to be denied")
+		}
+	})
+
+	t.Run("bucket scope write allows org descendant creators", func(t *testing.T) {
+		orgResource, _ := sycommon.ResourcePath("org", "")
+		ctx := policyTestContext("gen3", true, map[string]map[string]bool{
+			orgResource: {"arborist:create-descendant": true},
+		})
+
+		if err := authorizeBucketScopeWrite(ctx, "org", "new-project", "create", "update"); err != nil {
+			t.Fatalf("expected org descendant creator to be allowed, got %v", err)
+		}
+	})
+
+	t.Run("bucket scope write does not allow top-level program creator without org or project ownership", func(t *testing.T) {
+		ctx := policyTestContext("gen3", true, map[string]map[string]bool{
+			"/programs": {"arborist:create-descendant": true},
+		})
+
+		if err := authorizeBucketScopeWrite(ctx, "brand_new_org", "new-project", "create", "update"); err == nil {
+			t.Fatal("expected top-level program creator alone to be denied")
+		}
+	})
+
+	t.Run("bucket scope write does not treat requestor create as arborist create-descendant", func(t *testing.T) {
+		orgResource, _ := sycommon.ResourcePath("org", "")
+		ctx := policyTestContext("gen3", true, map[string]map[string]bool{
+			orgResource: {"requestor:create": true},
+		})
+
+		err := authorizeBucketScopeWrite(ctx, "org", "new-project", "create", "update")
+		if err == nil {
+			t.Fatal("expected requestor create alone to be denied")
+		}
+		if !errors.Is(err, common.ErrUnauthorized) {
+			t.Fatalf("expected unauthorized error, got %v", err)
 		}
 	})
 }

@@ -107,18 +107,7 @@ type authFetchResult struct {
 }
 
 func (m *AuthzMiddleware) resolveTokenAuth(ctx context.Context, tokenString string) authFetchResult {
-	cacheKey := tokenCacheKey(tokenString)
-	if resources, privileges, negative, ok := m.cachedAuthResult(cacheKey); ok {
-		return authFetchResult{
-			resources:  resources,
-			privileges: privileges,
-			negative:   negative,
-		}
-	}
-
-	v, err, _ := m.sf.Do(cacheKey, func() (interface{}, error) {
-		return m.fetchTokenAuth(ctx, tokenString)
-	})
+	v, err := m.fetchTokenAuth(ctx, tokenString)
 	if err != nil {
 		m.logger.Debug("failed to resolve token auth", "error", err)
 		return authFetchResult{negative: true}
@@ -128,17 +117,7 @@ func (m *AuthzMiddleware) resolveTokenAuth(ctx context.Context, tokenString stri
 		m.logger.Debug("unexpected token auth result type")
 		return authFetchResult{negative: true}
 	}
-	if m.cache != nil {
-		m.cache.set(cacheKey, res.resources, res.privileges, res.negative)
-	}
 	return res
-}
-
-func (m *AuthzMiddleware) cachedAuthResult(cacheKey string) ([]string, map[string]map[string]bool, bool, bool) {
-	if m.cache == nil {
-		return nil, nil, false, false
-	}
-	return m.cache.get(cacheKey)
 }
 
 func (m *AuthzMiddleware) fetchTokenAuth(ctx context.Context, tokenString string) (interface{}, error) {
@@ -192,14 +171,21 @@ func (m *AuthzMiddleware) extractPrivileges(privs map[string]any) ([]string, map
 				continue
 			}
 			service, _ := mm["service"].(string)
-			if service != "" && service != "indexd" && service != "drs" && service != "*" {
-				continue
-			}
 			method, _ := mm["method"].(string)
 			if method == "" {
 				continue
 			}
-			methods[method] = true
+			service = strings.ToLower(strings.TrimSpace(service))
+			method = strings.ToLower(strings.TrimSpace(method))
+			switch service {
+			case "", "*", "indexd", "drs":
+				methods[method] = true
+				if service != "" {
+					methods[service+":"+method] = true
+				}
+			default:
+				methods[service+":"+method] = true
+			}
 		}
 		out[path] = methods
 	}

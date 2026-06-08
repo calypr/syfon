@@ -1,46 +1,9 @@
 package middleware
 
 import (
-	"fmt"
 	"os"
 	"strings"
-	"time"
 )
-
-func loadAuthCacheConfigFromEnv() authCacheConfig {
-	cfg := authCacheConfig{
-		Enabled:      parseBoolEnv("DRS_AUTH_CACHE_ENABLED", true),
-		TTL:          parseDurationSecondsEnv("DRS_AUTH_CACHE_TTL_SECONDS", 45),
-		NegativeTTL:  parseDurationSecondsEnv("DRS_AUTH_CACHE_NEGATIVE_TTL_SECONDS", 8),
-		MaxEntries:   parseIntEnv("DRS_AUTH_CACHE_MAX_ENTRIES", 20000),
-		CleanupEvery: parseDurationSecondsEnv("DRS_AUTH_CACHE_CLEANUP_SECONDS", 60),
-	}
-	if cfg.MaxEntries < 1 {
-		cfg.MaxEntries = 1
-	}
-	return cfg
-}
-
-func parseDurationSecondsEnv(name string, defSeconds int) time.Duration {
-	v := parseIntEnv(name, defSeconds)
-	if v < 0 {
-		v = defSeconds
-	}
-	return time.Duration(v) * time.Second
-}
-
-func parseIntEnv(name string, def int) int {
-	raw := strings.TrimSpace(os.Getenv(name))
-	if raw == "" {
-		return def
-	}
-	var v int
-	_, err := fmt.Sscanf(raw, "%d", &v)
-	if err != nil {
-		return def
-	}
-	return v
-}
 
 func loadMockAuthConfigFromEnv() mockAuthConfig {
 	enabled := parseBoolEnv("DRS_AUTH_MOCK_ENABLED", false)

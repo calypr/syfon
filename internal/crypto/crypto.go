@@ -224,19 +224,19 @@ func credentialMasterKey() ([]byte, error) {
 }
 
 func parseUserProvidedKey(raw string, envName string) ([]byte, error) {
+	if len(raw) == 64 {
+		hexDecoded, hexErr := hex.DecodeString(raw)
+		if hexErr == nil && len(hexDecoded) == 32 {
+			return hexDecoded, nil
+		}
+	}
+
 	decoded, err := base64.StdEncoding.DecodeString(raw)
 	if err == nil {
 		if len(decoded) != 32 {
 			return nil, fmt.Errorf("%s must decode to 32 bytes for AES-256", envName)
 		}
 		return decoded, nil
-	}
-
-	if len(raw) == 64 {
-		hexDecoded, hexErr := hex.DecodeString(raw)
-		if hexErr == nil && len(hexDecoded) == 32 {
-			return hexDecoded, nil
-		}
 	}
 
 	if len(raw) == 32 {

@@ -38,6 +38,16 @@ func TestConverters(t *testing.T) {
 		}
 	})
 
+	t.Run("candidate without access methods fails", func(t *testing.T) {
+		candidate := drs.DrsObjectCandidate{
+			Size:      42,
+			Checksums: []drs.Checksum{{Type: "sha256", Checksum: strings.Repeat("b", 64)}},
+		}
+		if _, err := CandidateToInternalObject(candidate, time.Unix(123, 0)); err == nil || !strings.Contains(err.Error(), "access method") {
+			t.Fatalf("expected access-method validation error, got %v", err)
+		}
+	})
+
 	t.Run("lfs candidate to drs", func(t *testing.T) {
 		url := "https://storage.example/object.bin"
 		size := int64(42)

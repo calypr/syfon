@@ -19,6 +19,13 @@ func registerScopedCandidate(t *testing.T, om *ObjectManager, id, checksum, org,
 			Type:     "sha256",
 			Checksum: checksum,
 		}},
+		AccessMethods: &[]drs.AccessMethod{{
+			Type: "s3",
+			AccessUrl: &struct {
+				Headers *[]string `json:"headers,omitempty"`
+				Url     string    `json:"url"`
+			}{Url: "s3://bucket/" + id},
+		}},
 		Size: 1,
 	}})
 	if err != nil {
@@ -135,4 +142,3 @@ func TestReadableChecksumFilter(t *testing.T) {
 		t.Fatalf("expected restricted filter under enforced authz, got res=%+v includeUnscoped=%v restrict=%v ok=%v", res, includeUnscoped, restrict, ok)
 	}
 }
-

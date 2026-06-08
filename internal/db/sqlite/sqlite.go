@@ -60,6 +60,7 @@ func (db *SqliteDB) initSchema() error {
 			created_time TIMESTAMP,
 			updated_time TIMESTAMP,
 			name TEXT,
+			file_name TEXT,
 			version TEXT,
 			description TEXT
 		)`,
@@ -94,8 +95,21 @@ func (db *SqliteDB) initSchema() error {
 			FOREIGN KEY(object_id) REFERENCES drs_object(id) ON DELETE CASCADE
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_drs_object_alias_object_id ON drs_object_alias(object_id)`,
+		`CREATE TABLE IF NOT EXISTS drs_object_browse_index (
+			object_id TEXT NOT NULL,
+			resource TEXT NOT NULL,
+			normalized_path TEXT NOT NULL,
+			parent_path TEXT NOT NULL,
+			entry_name TEXT NOT NULL,
+			PRIMARY KEY (resource, object_id),
+			FOREIGN KEY(object_id) REFERENCES drs_object(id) ON DELETE CASCADE
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_drs_object_browse_index_resource_parent_object_id ON drs_object_browse_index(resource, parent_path, object_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_drs_object_browse_index_resource_parent_entry_name ON drs_object_browse_index(resource, parent_path, entry_name)`,
+		`CREATE INDEX IF NOT EXISTS idx_drs_object_browse_index_resource_normalized_path ON drs_object_browse_index(resource, normalized_path)`,
 		`CREATE TABLE IF NOT EXISTS s3_credential (
-			bucket TEXT PRIMARY KEY,
+			credential_id TEXT PRIMARY KEY,
+			bucket TEXT NOT NULL,
 			provider TEXT NOT NULL DEFAULT 's3',
 			region TEXT,
 			access_key TEXT,
@@ -105,10 +119,12 @@ func (db *SqliteDB) initSchema() error {
 		`CREATE TABLE IF NOT EXISTS bucket_scope (
 			organization TEXT NOT NULL,
 			project_id TEXT NOT NULL,
+			credential_id TEXT NOT NULL,
 			bucket TEXT NOT NULL,
 			path_prefix TEXT,
 			PRIMARY KEY (organization, project_id)
 		)`,
+		`CREATE INDEX IF NOT EXISTS idx_bucket_scope_credential_id ON bucket_scope(credential_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_bucket_scope_bucket ON bucket_scope(bucket)`,
 		`CREATE TABLE IF NOT EXISTS lfs_pending_metadata (
 			oid TEXT PRIMARY KEY,
@@ -241,6 +257,14 @@ func (db *SqliteDB) initSchema() error {
 			return err
 		}
 	}
+	if err := db.ensureCredentialIdentitySchema(); err != nil {
+		return err
+	}
+	if _, err := db.db.Exec(`ALTER TABLE drs_object ADD COLUMN file_name TEXT NOT NULL DEFAULT ''`); err != nil {
+		if !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
+			return err
+		}
+	}
 	if _, err := db.db.Exec(`ALTER TABLE transfer_attribution_event ADD COLUMN access_grant_id TEXT NOT NULL DEFAULT ''`); err != nil {
 		if !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
 			return err
@@ -255,6 +279,64 @@ func (db *SqliteDB) initSchema() error {
 		return err
 	}
 	if err := db.backfillAccessGrants(context.Background()); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (db *SqliteDB) ensureCredentialIdentitySchema() error {
+	rows, err := db.db.Query(`PRAGMA table_info(s3_credential)`)
+	if err != nil {
+		return err
+	}
+	hasCredentialID := false
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull, pk int
+		var dflt any
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &dflt, &pk); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		if name == "credential_id" {
+			hasCredentialID = true
+		}
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if !hasCredentialID {
+		if _, err := db.db.Exec(`
+			ALTER TABLE s3_credential RENAME TO s3_credential_legacy;
+			CREATE TABLE s3_credential (
+				credential_id TEXT PRIMARY KEY,
+				bucket TEXT NOT NULL,
+				provider TEXT NOT NULL DEFAULT 's3',
+				region TEXT,
+				access_key TEXT,
+				secret_key TEXT,
+				endpoint TEXT
+			);
+			INSERT INTO s3_credential (credential_id, bucket, provider, region, access_key, secret_key, endpoint)
+				SELECT bucket, bucket, provider, region, access_key, secret_key, endpoint FROM s3_credential_legacy;
+			DROP TABLE s3_credential_legacy;
+		`); err != nil {
+			return err
+		}
+	}
+	if _, err := db.db.Exec(`ALTER TABLE bucket_scope ADD COLUMN credential_id TEXT`); err != nil {
+		if !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
+			return err
+		}
+	}
+	if _, err := db.db.Exec(`UPDATE bucket_scope SET credential_id = bucket WHERE COALESCE(TRIM(credential_id), '') = ''`); err != nil {
+		return err
+	}
+	if _, err := db.db.Exec(`CREATE INDEX IF NOT EXISTS idx_bucket_scope_credential_id ON bucket_scope(credential_id)`); err != nil {
+		return err
+	}
+	if _, err := db.db.Exec(`CREATE INDEX IF NOT EXISTS idx_s3_credential_bucket ON s3_credential(bucket)`); err != nil {
 		return err
 	}
 	return nil

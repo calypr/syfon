@@ -121,12 +121,28 @@ func (db *PostgresDB) hasLegacyAccessMethodScopeColumns(ctx context.Context) (bo
 }
 
 func (db *PostgresDB) ensureS3CredentialSchema() error {
-	_, err := db.db.Exec(`
-		ALTER TABLE s3_credential
-		ADD COLUMN IF NOT EXISTS provider TEXT NOT NULL DEFAULT 's3'
-	`)
-	if err != nil {
-		return fmt.Errorf("failed to initialize s3_credential provider schema: %w", err)
+	queries := []string{
+		`CREATE TABLE IF NOT EXISTS s3_credential (
+			credential_id TEXT PRIMARY KEY,
+			bucket TEXT NOT NULL,
+			provider TEXT NOT NULL DEFAULT 's3',
+			region TEXT,
+			access_key TEXT,
+			secret_key TEXT,
+			endpoint TEXT
+		)`,
+		`ALTER TABLE s3_credential ADD COLUMN IF NOT EXISTS credential_id TEXT`,
+		`ALTER TABLE s3_credential ADD COLUMN IF NOT EXISTS provider TEXT NOT NULL DEFAULT 's3'`,
+		`UPDATE s3_credential SET credential_id = bucket WHERE COALESCE(BTRIM(credential_id), '') = ''`,
+		`ALTER TABLE s3_credential ALTER COLUMN credential_id SET NOT NULL`,
+		`ALTER TABLE s3_credential DROP CONSTRAINT IF EXISTS s3_credential_pkey`,
+		`ALTER TABLE s3_credential ADD PRIMARY KEY (credential_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_s3_credential_bucket ON s3_credential(bucket)`,
+	}
+	for _, q := range queries {
+		if _, err := db.db.Exec(q); err != nil {
+			return fmt.Errorf("failed to initialize s3_credential credential identity schema: %w", err)
+		}
 	}
 	return nil
 }
@@ -136,10 +152,18 @@ func (db *PostgresDB) ensureBucketScopeSchema() error {
 		`CREATE TABLE IF NOT EXISTS bucket_scope (
 			organization TEXT NOT NULL,
 			project_id TEXT NOT NULL,
+			credential_id TEXT NOT NULL,
 			bucket TEXT NOT NULL,
 			path_prefix TEXT NULL,
 			PRIMARY KEY (organization, project_id)
 		)`,
+		`ALTER TABLE bucket_scope ADD COLUMN IF NOT EXISTS credential_id TEXT`,
+		`UPDATE bucket_scope SET credential_id = bucket WHERE COALESCE(BTRIM(credential_id), '') = ''`,
+		`ALTER TABLE bucket_scope ALTER COLUMN credential_id SET NOT NULL`,
+		`ALTER TABLE bucket_scope ADD COLUMN IF NOT EXISTS bucket TEXT`,
+		`UPDATE bucket_scope SET bucket = credential_id WHERE COALESCE(BTRIM(bucket), '') = ''`,
+		`ALTER TABLE bucket_scope ALTER COLUMN bucket SET NOT NULL`,
+		`CREATE INDEX IF NOT EXISTS idx_bucket_scope_credential_id ON bucket_scope(credential_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_bucket_scope_bucket ON bucket_scope(bucket)`,
 	}
 	for _, q := range queries {

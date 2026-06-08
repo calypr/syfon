@@ -66,6 +66,7 @@ The generated surface is split deliberately:
 | Add or remove a DRS endpoint | `ga4gh/data-repository-service-schemas` submodule | `make gen` | Keeps the bundled DRS spec and generated DRS bindings aligned. |
 | Add or change a DRS field or model | Upstream spec or Syfon DRS overlay | `make gen` | Refreshes generated DRS client and server shapes. |
 | Change LFS, bucket, metrics, or internal request/response shapes | `apigen/openapi/*.openapi.yaml` | `make gen` | Refreshes the generated package that owns that contract. |
+| Add a local schema whose name collides with a `ClientWithResponses` wrapper | `apigen/codegen/client-oapi-*.yaml` plus the owning `apigen/openapi/*.openapi.yaml` | `make gen` | `oapi-codegen` uses `<OperationId>Response` wrapper names by default, so client configs may need `output-options.response-type-suffix` to avoid duplicate Go type names. |
 | Change route behavior, auth, middleware, or validation logic only | `cmd/server`, `internal/api/*`, `internal/api/middleware/*` | No regen needed | These are handwritten runtime concerns, not generated contracts. |
 | Update docs served at `/index/openapi.yaml` | `apigen/openapi/*.yaml` and embed/load code | `make gen` plus tests | The runtime docs endpoint reads the bundled spec files. |
 
@@ -74,6 +75,25 @@ The generated surface is split deliberately:
 If `oapi-codegen` emits `N200ServiceInfo...` or `N200ServiceInfoJSONResponse...` references in DRS output, the repository keeps small handwritten `compat.go` alias files in `apigen/client/drs` and `apigen/server/drs`.
 
 Those aliases exist because the `/service-info` response is a composed schema and `oapi-codegen` currently emits references to response-scoped enum names that it does not define.
+
+### Client response wrapper naming collisions
+
+`oapi-codegen` client generation has another failure mode that matters for local specs like `bucket.openapi.yaml`:
+
+- schema model names live in the same Go package as generated `ClientWithResponses` wrapper types
+- wrapper types default to `<OperationId>Response`
+- if a schema model also uses that same name, the generated client becomes invalid Go
+
+When that happens, prefer fixing the client config with:
+
+```yaml
+output-options:
+  response-type-suffix: Resp
+```
+
+instead of hand-editing generated output.
+
+The bucket client now uses that pattern so schema models like `DeleteProjectDataResponse` can coexist with response wrappers like `DeleteProjectDataResp`.
 
 ### What usually changes in git
 

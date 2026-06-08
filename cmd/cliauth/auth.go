@@ -1,13 +1,16 @@
 package cliauth
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"strings"
 
 	syclient "github.com/calypr/syfon/client"
 	conf "github.com/calypr/syfon/client/config"
+	syrequest "github.com/calypr/syfon/client/request"
 	syfonclient "github.com/calypr/syfon/client/services"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -25,6 +28,10 @@ func RegisterRootFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&token, "token", strings.TrimSpace(os.Getenv("SYFON_TOKEN")), "Bearer token for authenticated Syfon servers")
 	fs.StringVar(&username, "username", strings.TrimSpace(os.Getenv("SYFON_USERNAME")), "Basic auth username for authenticated Syfon servers")
 	fs.StringVar(&password, "password", strings.TrimSpace(os.Getenv("SYFON_PASSWORD")), "Basic auth password for authenticated Syfon servers")
+}
+
+func ResolvedProfile() string {
+	return strings.TrimSpace(profile)
 }
 
 func NewServerClient(cmd *cobra.Command) (syfonclient.SyfonClient, error) {
@@ -127,4 +134,43 @@ func ServerClientOptions() ([]syclient.Option, error) {
 func loadProfileCredential(profile string) (*conf.Credential, error) {
 	manager := conf.NewConfigure(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})))
 	return manager.Load(profile)
+}
+
+func LoadProfileCredential(ctx context.Context, profile string) (*conf.Credential, error) {
+	manager := conf.NewConfigure(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	cred, err := manager.Load(profile)
+	if err != nil {
+		return nil, err
+	}
+	if err := EnsureUsableProfileCredential(ctx, manager, cred, http.DefaultTransport); err != nil {
+		return nil, err
+	}
+	return cred, nil
+}
+
+func EnsureUsableProfileCredential(ctx context.Context, manager conf.ManagerInterface, cred *conf.Credential, base http.RoundTripper) error {
+	valid, err := manager.IsCredentialValid(cred)
+	if valid {
+		return nil
+	}
+	if err == nil {
+		return fmt.Errorf("invalid credential")
+	}
+	if !strings.Contains(err.Error(), "access_token is invalid but api_key is valid") {
+		return fmt.Errorf("invalid credential: %v", err)
+	}
+	return refreshProfileCredential(ctx, manager, cred, base, err)
+}
+
+func refreshProfileCredential(ctx context.Context, manager conf.ManagerInterface, cred *conf.Credential, base http.RoundTripper, originalErr error) error {
+	transport := &syrequest.AuthTransport{
+		Manager: manager,
+		Base:    base,
+		Cred:    cred,
+		Mode:    syrequest.AuthModeBearer,
+	}
+	if err := transport.NewAccessToken(ctx); err != nil {
+		return fmt.Errorf("failed to refresh access token: %v (original error: %v)", err, originalErr)
+	}
+	return nil
 }

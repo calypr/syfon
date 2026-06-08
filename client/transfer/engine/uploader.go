@@ -35,6 +35,10 @@ type uploadURLResolver interface {
 	ResolveUploadURL(ctx context.Context, guid string, filename string, metadata common.FileMetadata, bucket string) (string, error)
 }
 
+type multipartInitWithMetadataResolver interface {
+	InitMultipartUploadWithMetadata(ctx context.Context, guid, filename, bucket string, metadata common.FileMetadata) (uploadID string, key string, err error)
+}
+
 func effectiveObjectKey(req transfer.TransferRequest) string {
 	if key := strings.TrimSpace(req.ObjectKey); key != "" {
 		return key
@@ -123,7 +127,15 @@ func (u *GenericUploader) uploadMultipart(ctx context.Context, req transfer.Tran
 	objectKey := effectiveObjectKey(req)
 
 	if !loaded || !u.matches(state, req, stat, chunkSize) {
-		uploadID, err := u.Backend.MultipartInit(ctx, objectKey)
+		var (
+			uploadID string
+			err      error
+		)
+		if backend, ok := u.Backend.(multipartInitWithMetadataResolver); ok {
+			uploadID, _, err = backend.InitMultipartUploadWithMetadata(ctx, req.GUID, objectKey, req.Bucket, req.Metadata)
+		} else {
+			uploadID, err = u.Backend.MultipartInit(ctx, objectKey)
+		}
 		if err != nil {
 			return err
 		}

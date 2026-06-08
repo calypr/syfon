@@ -102,8 +102,14 @@ func TestRegisterObjects(t *testing.T) {
 			Candidates []drs.DrsObjectCandidate `json:"candidates"`
 		}{
 			Candidates: []drs.DrsObjectCandidate{
-				{Size: size, Checksums: []drs.Checksum{{Type: "sha256", Checksum: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}}, ControlledAccess: &authz1},
-				{Size: size, Checksums: []drs.Checksum{{Type: "sha256", Checksum: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}}, ControlledAccess: &authz2},
+				{Size: size, Checksums: []drs.Checksum{{Type: "sha256", Checksum: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}}, ControlledAccess: &authz1, AccessMethods: &[]drs.AccessMethod{{Type: "s3", AccessUrl: &struct {
+					Headers *[]string `json:"headers,omitempty"`
+					Url     string    `json:"url"`
+				}{Url: "s3://bucket/org1/proj1/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}}}},
+				{Size: size, Checksums: []drs.Checksum{{Type: "sha256", Checksum: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}}, ControlledAccess: &authz2, AccessMethods: &[]drs.AccessMethod{{Type: "s3", AccessUrl: &struct {
+					Headers *[]string `json:"headers,omitempty"`
+					Url     string    `json:"url"`
+				}{Url: "s3://bucket/org1/proj2/cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}}}},
 			},
 		}
 		body, _ := json.Marshal(bodyObj)
@@ -123,6 +129,24 @@ func TestRegisterObjects(t *testing.T) {
 				{Type: "sha256", Checksum: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"},
 			},
 			ControlledAccess: &[]string{"/organization/org1"},
+		}
+		body, _ := json.Marshal(cand)
+		req := httptest.NewRequest("POST", "/objects/register", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		resp, _ := app.Test(req)
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("Register_WithoutAccessMethods_Fails", func(t *testing.T) {
+		size := int64(100)
+		cand := drs.DrsObjectCandidate{
+			Size: size,
+			Checksums: []drs.Checksum{
+				{Type: "sha256", Checksum: "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"},
+			},
+			ControlledAccess: &[]string{"/organization/org1/project/proj1"},
 		}
 		body, _ := json.Marshal(cand)
 		req := httptest.NewRequest("POST", "/objects/register", bytes.NewBuffer(body))

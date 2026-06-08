@@ -107,10 +107,15 @@ func (s *IndexService) List(ctx context.Context, opts ListRecordsOptions) (inter
 	if opts.ProjectID != "" {
 		params.Set("project", opts.ProjectID)
 	}
+	if opts.Path != "" {
+		params.Set("path", opts.Path)
+	}
 	if opts.Limit != 0 {
 		params.Set("limit", fmt.Sprintf("%d", opts.Limit))
 	}
-	if opts.Page != 0 {
+	if opts.Start != "" {
+		params.Set("start", opts.Start)
+	} else if opts.Page != 0 {
 		params.Set("page", fmt.Sprintf("%d", opts.Page))
 	}
 	var out internalapi.ListRecordsResponse

@@ -128,3 +128,24 @@ func TestParseBucketProvider(t *testing.T) {
 		}
 	}
 }
+
+func TestDeriveCredentialID(t *testing.T) {
+	first := DeriveCredentialID("shared-bucket", "s3", "us-east-1", "https://s3.example.org/", "access-a")
+	second := DeriveCredentialID("shared-bucket", "s3", "us-east-1", "https://s3.example.org", "access-a")
+	if first == "" {
+		t.Fatalf("expected derived credential id")
+	}
+	if first != second {
+		t.Fatalf("expected endpoint normalization to keep derived id stable: %q != %q", first, second)
+	}
+
+	rotatedSecret := DeriveCredentialID("shared-bucket", "s3", "us-east-1", "https://s3.example.org", "access-a")
+	if first != rotatedSecret {
+		t.Fatalf("secret rotation must not affect derived id")
+	}
+
+	differentAccessKey := DeriveCredentialID("shared-bucket", "s3", "us-east-1", "https://s3.example.org", "access-b")
+	if first == differentAccessKey {
+		t.Fatalf("different access keys for the same bucket must produce distinct internal ids")
+	}
+}

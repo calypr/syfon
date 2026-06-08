@@ -60,6 +60,12 @@ type DeleteByQueryResponse struct {
 // HashInfo Hash map, e.g. {"sha256":"..."}
 type HashInfo map[string]string
 
+// IndexDirectory defines model for IndexDirectory.
+type IndexDirectory struct {
+	Name string `json:"name"`
+	Path string `json:"path"`
+}
+
 // InternalMultipartCompleteRequest defines model for InternalMultipartCompleteRequest.
 type InternalMultipartCompleteRequest struct {
 	Bucket   *string                 `json:"bucket,omitempty"`
@@ -192,7 +198,8 @@ type InternalUploadBulkResult struct {
 
 // ListRecordsResponse defines model for ListRecordsResponse.
 type ListRecordsResponse struct {
-	Records *[]InternalRecord `json:"records,omitempty"`
+	Directories *[]IndexDirectory `json:"directories,omitempty"`
+	Records     *[]InternalRecord `json:"records,omitempty"`
 }
 
 // InternalDownloadParams defines parameters for InternalDownload.
@@ -231,7 +238,9 @@ type InternalListParams struct {
 	Organization *string `form:"organization,omitempty" json:"organization,omitempty"`
 	Program      *string `form:"program,omitempty" json:"program,omitempty"`
 	Project      *string `form:"project,omitempty" json:"project,omitempty"`
+	Path         *string `form:"path,omitempty" json:"path,omitempty"`
 	Limit        *int    `form:"limit,omitempty" json:"limit,omitempty"`
+	Start        *string `form:"start,omitempty" json:"start,omitempty"`
 	Page         *int    `form:"page,omitempty" json:"page,omitempty"`
 }
 
@@ -1547,9 +1556,41 @@ func NewInternalListRequest(server string, params *InternalListParams) (*http.Re
 
 		}
 
+		if params.Path != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "path", runtime.ParamLocationQuery, *params.Path); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
 		if params.Limit != nil {
 
 			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "limit", runtime.ParamLocationQuery, *params.Limit); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Start != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "start", runtime.ParamLocationQuery, *params.Start); err != nil {
 				return nil, err
 			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
 				return nil, err

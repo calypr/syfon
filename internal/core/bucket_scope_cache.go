@@ -76,6 +76,7 @@ func normalizeBucketScope(scope *models.BucketScope) models.BucketScope {
 	return models.BucketScope{
 		Organization: strings.TrimSpace(scope.Organization),
 		ProjectID:    strings.TrimSpace(scope.ProjectID),
+		CredentialID: strings.TrimSpace(scope.CredentialID),
 		Bucket:       strings.TrimSpace(scope.Bucket),
 		PathPrefix:   strings.Trim(strings.TrimSpace(scope.PathPrefix), "/"),
 	}
