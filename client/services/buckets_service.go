@@ -59,3 +59,29 @@ func (s *BucketsService) AddScope(ctx context.Context, bucket string, req bucket
 	}
 	return nil
 }
+
+func (s *BucketsService) DeleteScope(ctx context.Context, bucket, organization, path, projectID string) error {
+	resp, err := s.gen.DeleteBucketScopeWithResponse(ctx, bucket, &bucketapi.DeleteBucketScopeParams{
+		Organization: organization,
+		Path:         path,
+		ProjectId:    projectID,
+	})
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode() != http.StatusOK && resp.StatusCode() != http.StatusNoContent {
+		return fmt.Errorf("failed to delete bucket scope: %d", resp.StatusCode())
+	}
+	return nil
+}
+
+func (s *BucketsService) ListScopes(ctx context.Context, bucket string) ([]bucketapi.BucketScopeResponse, error) {
+	resp, err := s.gen.ListBucketScopesWithResponse(ctx, bucket)
+	if err != nil {
+		return nil, err
+	}
+	if resp.JSON200 == nil {
+		return nil, fmt.Errorf("failed to list bucket scopes: %d", resp.StatusCode())
+	}
+	return *resp.JSON200, nil
+}

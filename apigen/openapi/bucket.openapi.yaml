@@ -78,6 +78,34 @@ paths:
         '500':
           description: Internal server error
   /data/buckets/{bucket}/scopes:
+    get:
+      tags:
+        - bucket
+      summary: List org/project scopes for a bucket
+      operationId: listBucketScopes
+      parameters:
+        - name: bucket
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Bucket scopes
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/BucketScopeResponse'
+        '401':
+          description: Authentication required
+        '403':
+          description: Forbidden
+        '404':
+          description: Bucket not found
+        '500':
+          description: Internal server error
     post:
       tags:
         - bucket
@@ -113,7 +141,7 @@ paths:
     delete:
       tags:
         - bucket
-      summary: Remove an org/project scope from an existing bucket
+      summary: Remove a specific scope from an existing bucket
       operationId: deleteBucketScope
       parameters:
         - name: bucket
@@ -126,9 +154,14 @@ paths:
           required: true
           schema:
             type: string
-        - name: project_id
+        - name: path
           in: query
           required: true
+          schema:
+            type: string
+        - name: project_id
+          in: query
+          required: false
           schema:
             type: string
       responses:
@@ -258,3 +291,16 @@ components:
           type: integer
         deleted_bucket_scopes:
           type: integer
+    BucketScopeResponse:
+      type: object
+      required:
+        - organization
+        - project_id
+      properties:
+        organization:
+          type: string
+        project_id:
+          type: string
+        path:
+          type: string
+          description: Scope path prefix

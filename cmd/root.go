@@ -7,6 +7,8 @@ import (
 	"github.com/calypr/syfon/cmd/addurl"
 	"github.com/calypr/syfon/cmd/bucket"
 	"github.com/calypr/syfon/cmd/cliauth"
+	"github.com/calypr/syfon/cmd/copyproject"
+	"github.com/calypr/syfon/cmd/copyprojectrefs"
 	"github.com/calypr/syfon/cmd/download"
 	listcmd "github.com/calypr/syfon/cmd/list"
 	metricscmd "github.com/calypr/syfon/cmd/metrics"
@@ -58,4 +60,6 @@ func init() {
 	RootCmd.AddCommand(rm.Cmd)
 	RootCmd.AddCommand(metricscmd.Cmd)
 	RootCmd.AddCommand(migratecmd.Cmd)
+	RootCmd.AddCommand(copyproject.Cmd)
+	RootCmd.AddCommand(copyprojectrefs.Cmd)
 }

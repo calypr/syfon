@@ -202,6 +202,51 @@ var listCmd = &cobra.Command{
 	},
 }
 
+var listScopesCmd = &cobra.Command{
+	Use:   "list-scopes <bucket>",
+	Short: "List org/project mappings configured on a bucket",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		bucket := strings.TrimSpace(args[0])
+		if bucket == "" {
+			return fmt.Errorf("bucket is required")
+		}
+		c, err := cliauth.NewServerClient(cmd)
+		if err != nil {
+			return err
+		}
+		scopes, err := c.Buckets().ListScopes(cmd.Context(), bucket)
+		if err != nil {
+			return err
+		}
+		if len(scopes) == 0 {
+			fmt.Fprintf(cmd.OutOrStdout(), "no mappings configured for bucket %s\n", bucket)
+			return nil
+		}
+		sort.Slice(scopes, func(i, j int) bool {
+			leftOrg := strings.TrimSpace(scopes[i].Organization)
+			rightOrg := strings.TrimSpace(scopes[j].Organization)
+			if leftOrg != rightOrg {
+				return leftOrg < rightOrg
+			}
+			return strings.TrimSpace(scopes[i].ProjectId) < strings.TrimSpace(scopes[j].ProjectId)
+		})
+		fmt.Fprintf(cmd.OutOrStdout(), "%-24s  %-24s  %s\n", "ORGANIZATION", "PROJECT", "PATH")
+		for _, scope := range scopes {
+			path := ""
+			if scope.Path != nil {
+				path = strings.TrimSpace(*scope.Path)
+			}
+			project := strings.TrimSpace(scope.ProjectId)
+			if project == "" {
+				project = "-"
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "%-24s  %-24s  %s\n", strings.TrimSpace(scope.Organization), project, path)
+		}
+		return nil
+	},
+}
+
 var removeCmd = &cobra.Command{
 	Use:     "remove <bucket>",
 	Aliases: []string{"rm", "delete"},
@@ -224,6 +269,38 @@ var removeCmd = &cobra.Command{
 	},
 }
 
+var removeScopeCmd = &cobra.Command{
+	Use:     "remove-scope <bucket> <organization> <path> [project-id]",
+	Aliases: []string{"rm-scope", "delete-scope"},
+	Short:   "Remove one org or project mapping from a bucket",
+	Args:    cobra.RangeArgs(3, 4),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		bucket := strings.TrimSpace(args[0])
+		organization := strings.TrimSpace(args[1])
+		scopePath := strings.TrimSpace(args[2])
+		projectID := ""
+		if len(args) == 4 {
+			projectID = strings.TrimSpace(args[3])
+		}
+		if bucket == "" || organization == "" || scopePath == "" {
+			return fmt.Errorf("bucket, organization, and path are required")
+		}
+		c, err := cliauth.NewServerClient(cmd)
+		if err != nil {
+			return err
+		}
+		if err := c.Buckets().DeleteScope(cmd.Context(), bucket, organization, scopePath, projectID); err != nil {
+			return err
+		}
+		if projectID == "" {
+			fmt.Fprintf(cmd.OutOrStdout(), "bucket scope removed: bucket=%s org=%s path=%s\n", bucket, organization, scopePath)
+			return nil
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "bucket scope removed: bucket=%s org=%s project=%s path=%s\n", bucket, organization, projectID, scopePath)
+		return nil
+	},
+}
+
 func init() {
 	addCmd.Flags().StringVar(&bucketProvider, "provider", "s3", "Bucket provider: s3|gcs|azure")
 	addCmd.Flags().StringVar(&bucketRegion, "region", "us-east-1", "Bucket region")
@@ -238,5 +315,7 @@ func init() {
 	Cmd.AddCommand(addOrganizationCmd)
 	Cmd.AddCommand(addProjectCmd)
 	Cmd.AddCommand(listCmd)
+	Cmd.AddCommand(listScopesCmd)
 	Cmd.AddCommand(removeCmd)
+	Cmd.AddCommand(removeScopeCmd)
 }

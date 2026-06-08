@@ -256,16 +256,28 @@ func (db *SqliteDB) DeleteBucketScope(ctx context.Context, organization, project
 	org := strings.TrimSpace(organization)
 	project := strings.TrimSpace(projectID)
 	credentialID = strings.TrimSpace(credentialID)
-	if org == "" || project == "" || credentialID == "" {
-		return fmt.Errorf("organization, project_id, and credential_id are required")
+	if org == "" || credentialID == "" {
+		return fmt.Errorf("organization and credential_id are required")
 	}
 
-	result, err := db.db.ExecContext(ctx, `
+	query := `
 		DELETE FROM bucket_scope
 		WHERE organization = ?
-		AND project_id = ?
 		AND (credential_id = ? OR bucket = ?)
-	`, org, project, credentialID, credentialID)
+	`
+	args := []any{org, credentialID, credentialID}
+	if project != "" {
+		query += `
+		AND project_id = ?
+		`
+		args = append(args, project)
+	} else {
+		query += `
+		AND project_id = ''
+		`
+	}
+
+	result, err := db.db.ExecContext(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("failed to delete bucket scope: %w", err)
 	}

@@ -258,16 +258,28 @@ func (db *PostgresDB) DeleteBucketScope(ctx context.Context, organization, proje
 	org := strings.TrimSpace(organization)
 	project := strings.TrimSpace(projectID)
 	credentialID = strings.TrimSpace(credentialID)
-	if org == "" || project == "" || credentialID == "" {
-		return fmt.Errorf("organization, project_id, and credential_id are required")
+	if org == "" || credentialID == "" {
+		return fmt.Errorf("organization and credential_id are required")
 	}
 
-	result, err := db.db.ExecContext(ctx, `
+	query := `
 		DELETE FROM bucket_scope
 		WHERE organization = $1
-		AND project_id = $2
-		AND (credential_id = $3 OR bucket = $3)
-	`, org, project, credentialID)
+		AND (credential_id = $2 OR bucket = $2)
+	`
+	args := []any{org, credentialID}
+	if project != "" {
+		query += `
+		AND project_id = $3
+		`
+		args = append(args, project)
+	} else {
+		query += `
+		AND project_id = ''
+		`
+	}
+
+	result, err := db.db.ExecContext(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("failed to delete bucket scope: %w", err)
 	}

@@ -55,6 +55,8 @@ func ProviderFromScheme(scheme string) string {
 		return GCSProvider
 	case "az", "azblob":
 		return AzureProvider
+	case "file":
+		return FileProvider
 	default:
 		return ""
 	}
