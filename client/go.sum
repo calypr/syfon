@@ -100,8 +100,8 @@ github.com/aws/smithy-go v1.24.3/go.mod h1:YE2RhdIuDbA5E5bTdciG9KrW3+TiEONeUWCqx
 github.com/bmatcuk/doublestar v1.1.1/go.mod h1:UD6OnuiIn0yFxxA2le/rnRU1G4RaI4UvFv1sNto9p6w=
 github.com/calypr/syfon v0.2.4 h1:Sh06/dyZ7igOBt4fQlDCSErV8ejTJ54e0388Vi6dhoc=
 github.com/calypr/syfon v0.2.4/go.mod h1:yRoMxOiDgTmdxDB4QyQrurf6QQq6Q9jyFeNJUpN4yxQ=
-github.com/calypr/syfon/apigen v0.2.7 h1:h5ZcxoLFPuLXt+8EUWICbKQgE/MMu2jym4oUshV3m8k=
-github.com/calypr/syfon/apigen v0.2.7/go.mod h1:VrRZ2A17YV91Zsm7CF/u1/Z+DfcZAk8Q4Pk1xklb5xU=
+github.com/calypr/syfon/apigen v0.2.8 h1:OfZeLlkDDy0Dx0/EMQaj5u2AY05p9kV9ffv7onsu3Ns=
+github.com/calypr/syfon/apigen v0.2.8/go.mod h1:/NCUo74xusygxyf9zpMFcE9TfGFxh6abFsplVyMArkw=
 github.com/cespare/xxhash/v2 v2.3.0 h1:UL815xU9SqsFlibzuggzjXhog7bL6oX9BbNZnL2UFvs=
 github.com/cespare/xxhash/v2 v2.3.0/go.mod h1:VGX0DQ3Q6kWi7AoAeZDth3/j3BFtOZR5XLFGgcrjCOs=
 github.com/clipperhouse/uax29/v2 v2.7.0 h1:+gs4oBZ2gPfVrKPthwbMzWZDaAFPGYK72F0NJv2v7Vk=
