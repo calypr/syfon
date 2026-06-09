@@ -483,7 +483,7 @@ func (d *DataService) CanonicalObjectURL(signedURL, bucketHint, fallbackDID stri
 			return parsed.String(), nil
 		}
 		key := strings.TrimSpace(fallbackDID)
-		if parsed.Path != "" {
+		if key == "" && parsed.Path != "" {
 			parts := strings.Split(parsed.Path, "/")
 			if last := parts[len(parts)-1]; last != "" {
 				key = last

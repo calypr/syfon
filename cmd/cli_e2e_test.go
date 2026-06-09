@@ -29,6 +29,7 @@ import (
 func executeRootCommand(t *testing.T, args ...string) (string, error) {
 	t.Helper()
 	resetCommandFlags(RootCmd)
+	clearRootAuthFlags(t, RootCmd)
 	var out bytes.Buffer
 	var errOut bytes.Buffer
 	RootCmd.SetOut(&out)
@@ -246,6 +247,21 @@ func resetFlagSet(fs *pflag.FlagSet) {
 		_ = f.Value.Set(f.DefValue)
 		f.Changed = false
 	})
+}
+
+func clearRootAuthFlags(t *testing.T, cmd *cobra.Command) {
+	t.Helper()
+
+	for _, name := range []string{"profile", "token", "username", "password"} {
+		flag := cmd.PersistentFlags().Lookup(name)
+		if flag == nil {
+			continue
+		}
+		if err := flag.Value.Set(""); err != nil {
+			t.Fatalf("reset %s flag: %v", name, err)
+		}
+		flag.Changed = false
+	}
 }
 
 type fiberTestServer struct {

@@ -69,10 +69,16 @@ func bucketsAllowedByNames(ctx context.Context, scopes []models.BucketScope, buc
 }
 
 func authorizeBucketScopeWrite(ctx context.Context, organization, project string, methods ...string) error {
-	if apimiddleware.MissingGen3AuthHeader(ctx) {
+	if strings.TrimSpace(organization) == "" {
+		if authz.IsGen3Mode(ctx) && apimiddleware.MissingGen3AuthHeader(ctx) {
+			return common.ErrUnauthorized
+		}
+		if !authz.IsAuthzEnforced(ctx) {
+			return nil
+		}
 		return common.ErrUnauthorized
 	}
-	if strings.TrimSpace(organization) == "" {
+	if apimiddleware.MissingGen3AuthHeader(ctx) {
 		return common.ErrUnauthorized
 	}
 	res, err := sycommon.ResourcePath(organization, project)

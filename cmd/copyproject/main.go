@@ -12,12 +12,10 @@ import (
 	"github.com/calypr/syfon/apigen/client/bucketapi"
 	drsapi "github.com/calypr/syfon/apigen/client/drs"
 	"github.com/calypr/syfon/apigen/client/internalapi"
-	syclient "github.com/calypr/syfon/client"
-	conf "github.com/calypr/syfon/client/config"
 	"github.com/calypr/syfon/client/services"
 	transferdownload "github.com/calypr/syfon/client/transfer/download"
 	"github.com/calypr/syfon/client/transfer/upload"
-	"github.com/calypr/syfon/cmd/cliauth"
+	"github.com/calypr/syfon/cmd/projectcopy"
 	"github.com/calypr/syfon/cmd/transferprogress"
 	syfoncommon "github.com/calypr/syfon/common"
 	internalcommon "github.com/calypr/syfon/internal/common"
@@ -56,20 +54,20 @@ The destination bucket is resolved on the destination Syfon instance when it alr
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 
-		srcScope, err := parseScopeArg(args[0], "source")
+		srcScope, err := projectcopy.ParseScopeArg(args[0], "source")
 		if err != nil {
 			return err
 		}
-		dstScope, err := parseScopeArg(args[1], "destination")
+		dstScope, err := projectcopy.ParseScopeArg(args[1], "destination")
 		if err != nil {
 			return err
 		}
 
-		sourceClient, sourceServer, err := newSourceClient(ctx, cmd)
+		sourceClient, sourceServer, err := copyFlags.NewSourceClient(ctx, cmd)
 		if err != nil {
 			return err
 		}
-		targetClient, targetServer, err := newTargetClient(ctx, cmd)
+		targetClient, targetServer, err := copyFlags.NewTargetClient(ctx, cmd, true, true)
 		if err != nil {
 			return err
 		}
@@ -89,7 +87,7 @@ The destination bucket is resolved on the destination Syfon instance when it alr
 		}
 
 		if resolved.sourceProject == nil {
-			return fmt.Errorf("source project scope %s/%s does not exist", srcScope.org, srcScope.project)
+			return fmt.Errorf("source project scope %s/%s does not exist", srcScope.Organization, srcScope.Project)
 		}
 
 		fmt.Fprintf(cmd.OutOrStdout(), "Source bucket resolved: %s\n", resolved.sourceBucket)
@@ -104,7 +102,7 @@ The destination bucket is resolved on the destination Syfon instance when it alr
 		}
 
 		fmt.Fprintf(cmd.OutOrStdout(), "Target bucket resolved: %s\n", resolved.targetBucket)
-		records, err := recordsToCopy(ctx, cmd, sourceClient.Index(), srcScope)
+		records, err := projectcopy.RecordsToCopy(ctx, cmd, sourceClient.Index(), srcScope, copyFlags.IndividualDID)
 		if err != nil {
 			return err
 		}
@@ -115,7 +113,7 @@ The destination bucket is resolved on the destination Syfon instance when it alr
 			return fmt.Errorf("failed to create temp directory: %w", err)
 		}
 
-		dstResource, err := syfoncommon.ResourcePath(dstScope.org, dstScope.project)
+		dstResource, err := syfoncommon.ResourcePath(dstScope.Organization, dstScope.Project)
 		if err != nil {
 			return fmt.Errorf("failed to resolve target resource path: %w", err)
 		}
@@ -124,7 +122,7 @@ The destination bucket is resolved on the destination Syfon instance when it alr
 		copiedCount := 0
 		skippedCount := 0
 		for i, rec := range records {
-			if err := copyRecord(ctx, cmd, sourceClient, targetClient, rec, resolved.targetBucket, targetProjectPath, dstScope, dstResource, i+1, len(records), tempDir); err != nil {
+			if err := copyRecord(ctx, cmd, sourceClient, targetClient, rec, resolved.targetBucket, targetProjectPath, dstResource, i+1, len(records), tempDir); err != nil {
 				skippedCount++
 				fmt.Fprintf(cmd.ErrOrStderr(), "warning: skipping %s: %v\n", rec.Did, err)
 				continue
@@ -132,32 +130,16 @@ The destination bucket is resolved on the destination Syfon instance when it alr
 			copiedCount++
 		}
 
-		fmt.Fprintf(cmd.OutOrStdout(), "Successfully copied project %s/%s to %s/%s (%d copied, %d skipped, %d total).\n", srcScope.org, srcScope.project, dstScope.org, dstScope.project, copiedCount, skippedCount, len(records))
+		fmt.Fprintf(cmd.OutOrStdout(), "Successfully copied project %s/%s to %s/%s (%d copied, %d skipped, %d total).\n", srcScope.Organization, srcScope.Project, dstScope.Organization, dstScope.Project, copiedCount, skippedCount, len(records))
 		return nil
 	},
 }
 
-var (
-	individualDID       string
-	sourceProfile       string
-	sourceToken         string
-	sourceBasicUser     string
-	sourceBasicPassword string
-	targetServerURL     string
-	targetProfile       string
-	targetToken         string
-	targetBasicUser     string
-	targetBasicPassword string
-)
-
-type projectScope struct {
-	org     string
-	project string
-}
+var copyFlags projectcopy.AuthFlags
 
 type resolvedCopyScopes struct {
-	source projectScope
-	target projectScope
+	source projectcopy.Scope
+	target projectcopy.Scope
 
 	sourceBucket string
 	targetBucket string
@@ -168,22 +150,7 @@ type resolvedCopyScopes struct {
 	targetOrg     *bucketapi.BucketScopeResponse
 }
 
-func parseScopeArg(raw, label string) (projectScope, error) {
-	parts := strings.Split(strings.TrimSpace(raw), "/")
-	if len(parts) != 2 {
-		return projectScope{}, fmt.Errorf("invalid %s path %q: must be in format <organization>/<project-id>", label, raw)
-	}
-	scope := projectScope{
-		org:     strings.TrimSpace(parts[0]),
-		project: strings.TrimSpace(parts[1]),
-	}
-	if scope.org == "" || scope.project == "" {
-		return projectScope{}, fmt.Errorf("%s scope must be non-empty and in <organization>/<project-id> format", label)
-	}
-	return scope, nil
-}
-
-func resolveCopyScopes(ctx context.Context, sourceBuckets, targetBuckets *services.BucketsService, sourceBucketMap, targetBucketMap map[string]bucketapi.BucketMetadata, srcScope, dstScope projectScope) (*resolvedCopyScopes, error) {
+func resolveCopyScopes(ctx context.Context, sourceBuckets, targetBuckets *services.BucketsService, sourceBucketMap, targetBucketMap map[string]bucketapi.BucketMetadata, srcScope, dstScope projectcopy.Scope) (*resolvedCopyScopes, error) {
 	resolved := &resolvedCopyScopes{
 		source: srcScope,
 		target: dstScope,
@@ -196,11 +163,11 @@ func resolveCopyScopes(ctx context.Context, sourceBuckets, targetBuckets *servic
 		}
 		for _, scope := range scopes {
 			switch {
-			case scope.Organization == srcScope.org && scope.ProjectId == srcScope.project:
+			case scope.Organization == srcScope.Organization && scope.ProjectId == srcScope.Project:
 				scopeCopy := scope
 				resolved.sourceProject = &scopeCopy
 				resolved.sourceBucket = bucketName
-			case scope.Organization == srcScope.org && scope.ProjectId == "":
+			case scope.Organization == srcScope.Organization && scope.ProjectId == "":
 				scopeCopy := scope
 				resolved.sourceOrg = &scopeCopy
 			}
@@ -214,11 +181,11 @@ func resolveCopyScopes(ctx context.Context, sourceBuckets, targetBuckets *servic
 		}
 		for _, scope := range scopes {
 			switch {
-			case scope.Organization == dstScope.org && scope.ProjectId == dstScope.project:
+			case scope.Organization == dstScope.Organization && scope.ProjectId == dstScope.Project:
 				scopeCopy := scope
 				resolved.targetProject = &scopeCopy
 				resolved.targetBucket = bucketName
-			case scope.Organization == dstScope.org && scope.ProjectId == "":
+			case scope.Organization == dstScope.Organization && scope.ProjectId == "":
 				scopeCopy := scope
 				resolved.targetOrg = &scopeCopy
 				if resolved.targetBucket == "" {
@@ -232,13 +199,13 @@ func resolveCopyScopes(ctx context.Context, sourceBuckets, targetBuckets *servic
 		return resolved, nil
 	}
 	if resolved.sourceBucket == "" {
-		return nil, fmt.Errorf("source project scope %s/%s exists but has no bucket mapping", srcScope.org, srcScope.project)
+		return nil, fmt.Errorf("source project scope %s/%s exists but has no bucket mapping", srcScope.Organization, srcScope.Project)
 	}
 	if resolved.targetBucket == "" {
 		if _, ok := targetBucketMap[resolved.sourceBucket]; ok {
 			resolved.targetBucket = resolved.sourceBucket
 		} else {
-			return nil, fmt.Errorf("destination scope %s/%s has no bucket mapping on the destination instance, and source bucket %q is not configured there", dstScope.org, dstScope.project, resolved.sourceBucket)
+			return nil, fmt.Errorf("destination scope %s/%s has no bucket mapping on the destination instance, and source bucket %q is not configured there", dstScope.Organization, dstScope.Project, resolved.sourceBucket)
 		}
 	}
 	return resolved, nil
@@ -246,25 +213,25 @@ func resolveCopyScopes(ctx context.Context, sourceBuckets, targetBuckets *servic
 
 func ensureDestinationScopes(ctx context.Context, cmd *cobra.Command, buckets *services.BucketsService, resolved *resolvedCopyScopes) error {
 	if resolved.targetBucket == "" {
-		return fmt.Errorf("failed to resolve a destination bucket for %s/%s", resolved.target.org, resolved.target.project)
+		return fmt.Errorf("failed to resolve a destination bucket for %s/%s", resolved.target.Organization, resolved.target.Project)
 	}
 
 	if resolved.targetOrg == nil {
-		orgPath := defaultOrgScopePath(resolved.targetBucket, resolved.target.org)
-		if remapped, ok := remapOrgScopePath(resolved.sourceOrg, resolved.source.org, resolved.targetBucket, resolved.target.org); ok {
+		orgPath := defaultOrgScopePath(resolved.targetBucket, resolved.target.Organization)
+		if remapped, ok := remapOrgScopePath(resolved.sourceOrg, resolved.source.Organization, resolved.targetBucket, resolved.target.Organization); ok {
 			orgPath = remapped
 		}
 
-		fmt.Fprintf(cmd.OutOrStdout(), "Creating organization scope mapping on bucket %s: %s -> %s\n", resolved.targetBucket, resolved.target.org, orgPath)
+		fmt.Fprintf(cmd.OutOrStdout(), "Creating organization scope mapping on bucket %s: %s -> %s\n", resolved.targetBucket, resolved.target.Organization, orgPath)
 		if err := buckets.AddScope(ctx, resolved.targetBucket, bucketapi.AddBucketScopeRequest{
-			Organization: resolved.target.org,
+			Organization: resolved.target.Organization,
 			Path:         &orgPath,
 		}); err != nil {
 			return fmt.Errorf("failed to map organization scope on target bucket: %w", err)
 		}
 
 		resolved.targetOrg = &bucketapi.BucketScopeResponse{
-			Organization: resolved.target.org,
+			Organization: resolved.target.Organization,
 			Path:         &orgPath,
 		}
 	}
@@ -273,26 +240,26 @@ func ensureDestinationScopes(ctx context.Context, cmd *cobra.Command, buckets *s
 		return nil
 	}
 
-	projectPath := defaultProjectScopePath(resolved.targetBucket, resolved.target.org, resolved.target.project)
+	projectPath := defaultProjectScopePath(resolved.targetBucket, resolved.target.Organization, resolved.target.Project)
 	if resolved.targetOrg != nil && resolved.targetOrg.Path != nil && strings.TrimSpace(*resolved.targetOrg.Path) != "" {
-		projectPath = strings.TrimRight(strings.TrimSpace(*resolved.targetOrg.Path), "/") + "/" + resolved.target.project
+		projectPath = strings.TrimRight(strings.TrimSpace(*resolved.targetOrg.Path), "/") + "/" + resolved.target.Project
 	}
 	if remapped, ok := remapProjectScopePath(resolved.sourceProject, resolved.sourceOrg, resolved.targetOrg, resolved.source, resolved.target, resolved.targetBucket); ok {
 		projectPath = remapped
 	}
 
-	fmt.Fprintf(cmd.OutOrStdout(), "Creating project scope mapping on bucket %s: %s/%s -> %s\n", resolved.targetBucket, resolved.target.org, resolved.target.project, projectPath)
+	fmt.Fprintf(cmd.OutOrStdout(), "Creating project scope mapping on bucket %s: %s/%s -> %s\n", resolved.targetBucket, resolved.target.Organization, resolved.target.Project, projectPath)
 	if err := buckets.AddScope(ctx, resolved.targetBucket, bucketapi.AddBucketScopeRequest{
-		Organization: resolved.target.org,
-		ProjectId:    resolved.target.project,
+		Organization: resolved.target.Organization,
+		ProjectId:    resolved.target.Project,
 		Path:         &projectPath,
 	}); err != nil {
 		return fmt.Errorf("failed to map project scope on target bucket: %w", err)
 	}
 
 	resolved.targetProject = &bucketapi.BucketScopeResponse{
-		Organization: resolved.target.org,
-		ProjectId:    resolved.target.project,
+		Organization: resolved.target.Organization,
+		ProjectId:    resolved.target.Project,
 		Path:         &projectPath,
 	}
 	return nil
@@ -324,7 +291,7 @@ func remapOrgScopePath(srcScope *bucketapi.BucketScopeResponse, srcOrg, targetBu
 	return u.String(), true
 }
 
-func remapProjectScopePath(srcProject, srcOrg, dstOrg *bucketapi.BucketScopeResponse, srcScope, dstScope projectScope, targetBucket string) (string, bool) {
+func remapProjectScopePath(srcProject, srcOrg, dstOrg *bucketapi.BucketScopeResponse, srcScope, dstScope projectcopy.Scope, targetBucket string) (string, bool) {
 	if dstOrg != nil && dstOrg.Path != nil && strings.TrimSpace(*dstOrg.Path) != "" && srcProject != nil && srcProject.Path != nil && strings.TrimSpace(*srcProject.Path) != "" {
 		dstOrgURL, dstOrgSegs, okDst := parseStorageURL(*dstOrg.Path)
 		srcProjURL, srcProjSegs, okProj := parseStorageURL(*srcProject.Path)
@@ -347,11 +314,11 @@ func remapProjectScopePath(srcProject, srcOrg, dstOrg *bucketapi.BucketScopeResp
 		return "", false
 	}
 	switch {
-	case len(segs) >= 2 && segs[len(segs)-2] == srcScope.org && segs[len(segs)-1] == srcScope.project:
-		segs[len(segs)-2] = dstScope.org
-		segs[len(segs)-1] = dstScope.project
-	case len(segs) > 0 && segs[len(segs)-1] == srcScope.project:
-		segs[len(segs)-1] = dstScope.project
+	case len(segs) >= 2 && segs[len(segs)-2] == srcScope.Organization && segs[len(segs)-1] == srcScope.Project:
+		segs[len(segs)-2] = dstScope.Organization
+		segs[len(segs)-1] = dstScope.Project
+	case len(segs) > 0 && segs[len(segs)-1] == srcScope.Project:
+		segs[len(segs)-1] = dstScope.Project
 	default:
 		return "", false
 	}
@@ -405,7 +372,7 @@ func hasPathPrefix(candidate, prefix []string) bool {
 	return true
 }
 
-func copyRecord(ctx context.Context, cmd *cobra.Command, sourceClient, targetClient services.SyfonClient, rec internalapi.InternalRecord, targetBucket, targetProjectPath string, dstScope projectScope, dstResource string, current, total int, tempDir string) error {
+func copyRecord(ctx context.Context, cmd *cobra.Command, sourceClient, targetClient services.SyfonClient, rec internalapi.InternalRecord, targetBucket, targetProjectPath string, dstResource string, current, total int, tempDir string) error {
 	did := rec.Did
 	fileName := ""
 	if rec.FileName != nil {
@@ -571,277 +538,10 @@ func pathScope(resource string) (string, string) {
 	return org, project
 }
 
-func recordsToCopy(ctx context.Context, cmd *cobra.Command, index *services.IndexService, srcScope projectScope) ([]internalapi.InternalRecord, error) {
-	if strings.TrimSpace(individualDID) == "" {
-		fmt.Fprintf(cmd.OutOrStdout(), "Retrieving records for project %s/%s...\n", srcScope.org, srcScope.project)
-		records, err := listAllProjectRecords(ctx, index, srcScope.org, srcScope.project)
-		if err != nil {
-			return nil, fmt.Errorf("failed to list project records: %w", err)
-		}
-		return records, nil
-	}
-
-	did := strings.TrimSpace(individualDID)
-	fmt.Fprintf(cmd.OutOrStdout(), "Retrieving individual record %s from project %s/%s...\n", did, srcScope.org, srcScope.project)
-
-	rec, err := index.Get(ctx, did)
-	if err != nil {
-		return nil, fmt.Errorf("failed to retrieve individual record %q: %w", did, err)
-	}
-	if !recordMatchesScope(rec.ControlledAccess, srcScope) {
-		return nil, fmt.Errorf("record %s does not belong to source scope %s/%s", did, srcScope.org, srcScope.project)
-	}
-
-	return []internalapi.InternalRecord{{
-		Did:              rec.Did,
-		AccessMethods:    rec.AccessMethods,
-		ControlledAccess: rec.ControlledAccess,
-		Description:      rec.Description,
-		FileName:         rec.FileName,
-		Hashes:           rec.Hashes,
-		Size:             rec.Size,
-		Version:          rec.Version,
-		Organization:     rec.Organization,
-		Project:          rec.Project,
-	}}, nil
-}
-
-func recordMatchesScope(controlledAccess *[]string, srcScope projectScope) bool {
-	resource, err := syfoncommon.ResourcePath(srcScope.org, srcScope.project)
-	if err != nil {
-		return false
-	}
-	for _, candidate := range syfoncommon.NormalizeAccessResources(derefStringSlice(controlledAccess)) {
-		if candidate == resource {
-			return true
-		}
-	}
-	return false
-}
-
-func derefStringSlice(values *[]string) []string {
-	if values == nil {
-		return nil
-	}
-	return *values
-}
-
-func listAllProjectRecords(ctx context.Context, index *services.IndexService, org, project string) ([]internalapi.InternalRecord, error) {
-	var records []internalapi.InternalRecord
-	queue := []string{""}
-	seenDirs := map[string]struct{}{}
-	seenDIDs := map[string]struct{}{}
-
-	for len(queue) > 0 {
-		currentPath := queue[0]
-		queue = queue[1:]
-		if _, ok := seenDirs[currentPath]; ok {
-			continue
-		}
-		seenDirs[currentPath] = struct{}{}
-
-		start := ""
-		for {
-			resp, err := index.List(ctx, services.ListRecordsOptions{
-				Limit:        1000,
-				Start:        start,
-				Path:         currentPath,
-				Organization: org,
-				ProjectID:    project,
-			})
-			if err != nil {
-				return nil, err
-			}
-
-			pageCount := 0
-			if resp.Records != nil {
-				for _, rec := range *resp.Records {
-					did := strings.TrimSpace(rec.Did)
-					if did == "" {
-						continue
-					}
-					if _, ok := seenDIDs[did]; ok {
-						continue
-					}
-					seenDIDs[did] = struct{}{}
-					records = append(records, rec)
-					pageCount++
-					start = did
-				}
-			}
-
-			if resp.Directories != nil {
-				for _, dir := range *resp.Directories {
-					nextPath := strings.TrimSpace(dir.Path)
-					if nextPath == "" {
-						continue
-					}
-					if _, ok := seenDirs[nextPath]; !ok {
-						queue = append(queue, nextPath)
-					}
-				}
-			}
-
-			if pageCount == 0 || pageCount < 1000 {
-				break
-			}
-		}
-	}
-	return records, nil
-}
-
 func init() {
-	Cmd.Flags().StringVarP(&individualDID, "individual", "I", "", "Copy only a single DID from the source scope")
-	Cmd.Flags().StringVar(&sourceProfile, "source-profile", "", "Gen3 profile for source reads; preferred over inherited --profile on this command")
-	Cmd.Flags().StringVar(&sourceToken, "source-token", "", "Bearer token for source reads; overrides --source-profile")
-	Cmd.Flags().StringVar(&sourceBasicUser, "source-basic-user", "", "Basic auth username for source Syfon reads")
-	Cmd.Flags().StringVar(&sourceBasicPassword, "source-basic-password", "", "Basic auth password for source Syfon reads")
-	Cmd.Flags().StringVar(&targetServerURL, "target-server", "", "Destination Syfon server base URL")
-	Cmd.Flags().StringVar(&targetProfile, "target-profile", "", "Gen3 profile for destination writes")
-	Cmd.Flags().StringVar(&targetToken, "target-token", "", "Bearer token for destination writes; overrides --target-profile")
-	Cmd.Flags().StringVar(&targetBasicUser, "target-basic-user", "", "Basic auth username for destination Syfon writes")
-	Cmd.Flags().StringVar(&targetBasicPassword, "target-basic-password", "", "Basic auth password for destination Syfon writes")
-}
-
-func newSourceClient(ctx context.Context, cmd *cobra.Command) (services.SyfonClient, string, error) {
-	serverURL, err := resolveSourceServerURL(ctx, cmd)
-	if err != nil {
-		return nil, "", err
-	}
-	opts, err := sourceClientOptions(ctx)
-	if err != nil {
-		return nil, "", err
-	}
-	client, err := syclient.New(serverURL, opts...)
-	if err != nil {
-		return nil, "", err
-	}
-	return client, serverURL, nil
-}
-
-func newTargetClient(ctx context.Context, cmd *cobra.Command) (services.SyfonClient, string, error) {
-	serverURL, err := resolveTargetServerURL(ctx, cmd)
-	if err != nil {
-		return nil, "", err
-	}
-	opts, err := targetClientOptions(ctx)
-	if err != nil {
-		return nil, "", err
-	}
-	client, err := syclient.New(serverURL, opts...)
-	if err != nil {
-		return nil, "", err
-	}
-	return client, serverURL, nil
-}
-
-func sourceClientOptions(ctx context.Context) ([]syclient.Option, error) {
-	if !hasExplicitSourceAuthInputs() {
-		return cliauth.ServerClientOptions()
-	}
-	return clientOptionsFromInputs(ctx, "source", sourceProfile, sourceToken, sourceBasicUser, sourceBasicPassword)
-}
-
-func targetClientOptions(ctx context.Context) ([]syclient.Option, error) {
-	if !hasExplicitTargetAuthInputs() {
-		return cliauth.ServerClientOptions()
-	}
-	return clientOptionsFromInputs(ctx, "target", targetProfile, targetToken, targetBasicUser, targetBasicPassword)
-}
-
-func hasExplicitSourceAuthInputs() bool {
-	return strings.TrimSpace(sourceProfile) != "" ||
-		strings.TrimSpace(sourceToken) != "" ||
-		strings.TrimSpace(sourceBasicUser) != "" ||
-		strings.TrimSpace(sourceBasicPassword) != ""
-}
-
-func hasExplicitTargetAuthInputs() bool {
-	return strings.TrimSpace(targetProfile) != "" ||
-		strings.TrimSpace(targetToken) != "" ||
-		strings.TrimSpace(targetBasicUser) != "" ||
-		strings.TrimSpace(targetBasicPassword) != ""
-}
-
-func resolveSourceServerURL(ctx context.Context, cmd *cobra.Command) (string, error) {
-	if strings.TrimSpace(sourceProfile) != "" {
-		credential, err := cliauth.LoadProfileCredential(ctx, sourceProfile)
-		if err != nil {
-			return "", err
-		}
-		serverURL := strings.TrimRight(strings.TrimSpace(credential.APIEndpoint), "/")
-		if serverURL == "" {
-			return "", fmt.Errorf("source profile %q has no api_endpoint", sourceProfile)
-		}
-		return serverURL, nil
-	}
-	return cliauth.ResolveServerURL(cmd)
-}
-
-func resolveTargetServerURL(ctx context.Context, cmd *cobra.Command) (string, error) {
-	if serverURL := strings.TrimRight(strings.TrimSpace(targetServerURL), "/"); serverURL != "" {
-		return serverURL, nil
-	}
-	if strings.TrimSpace(targetProfile) != "" {
-		credential, err := cliauth.LoadProfileCredential(ctx, targetProfile)
-		if err != nil {
-			return "", err
-		}
-		serverURL := strings.TrimRight(strings.TrimSpace(credential.APIEndpoint), "/")
-		if serverURL == "" {
-			return "", fmt.Errorf("target profile %q has no api_endpoint", targetProfile)
-		}
-		return serverURL, nil
-	}
-	return cliauth.ResolveServerURL(cmd)
-}
-
-func clientOptionsFromInputs(ctx context.Context, side, profile, token, basicUser, basicPassword string) ([]syclient.Option, error) {
-	basicUser = strings.TrimSpace(basicUser)
-	basicPassword = strings.TrimSpace(basicPassword)
-	token = strings.TrimSpace(token)
-	profile = strings.TrimSpace(profile)
-	if basicUser != "" || basicPassword != "" {
-		if basicUser == "" || basicPassword == "" {
-			return nil, fmt.Errorf("--%s-basic-user and --%s-basic-password must be set together", side, side)
-		}
-		if token != "" {
-			return nil, fmt.Errorf("--%s-token cannot be combined with --%s-basic-user/--%s-basic-password", side, side, side)
-		}
-		if profile != "" {
-			return nil, fmt.Errorf("--%s-profile cannot be combined with --%s-basic-user/--%s-basic-password", side, side, side)
-		}
-		return []syclient.Option{syclient.WithBasicAuth(basicUser, basicPassword)}, nil
-	}
-	if token != "" {
-		if profile != "" {
-			return nil, fmt.Errorf("--%s-token cannot be combined with --%s-profile", side, side)
-		}
-		return []syclient.Option{syclient.WithBearerToken(token)}, nil
-	}
-	if profile == "" {
-		return nil, nil
-	}
-	credential, err := cliauth.LoadProfileCredential(ctx, profile)
-	if err != nil {
-		return nil, err
-	}
-	return optionsFromCredential(profile, credential)
-}
-
-func optionsFromCredential(profile string, credential *conf.Credential) ([]syclient.Option, error) {
-	if credential == nil {
-		return nil, fmt.Errorf("profile %q resolved to nil credential", profile)
-	}
-	if accessToken := strings.TrimSpace(credential.AccessToken); accessToken != "" {
-		return []syclient.Option{syclient.WithBearerToken(accessToken)}, nil
-	}
-	keyID := strings.TrimSpace(credential.KeyID)
-	apiKey := strings.TrimSpace(credential.APIKey)
-	if keyID != "" && apiKey != "" {
-		return []syclient.Option{syclient.WithBasicAuth(keyID, apiKey)}, nil
-	}
-	return nil, fmt.Errorf("profile %q has no access_token or key_id/api_key", profile)
+	copyFlags.RegisterIndividualFlag(Cmd.Flags())
+	copyFlags.RegisterSourceFlags(Cmd.Flags())
+	copyFlags.RegisterTargetFlags(Cmd.Flags())
 }
 
 func sameServerURL(left, right string) bool {
