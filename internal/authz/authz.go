@@ -6,7 +6,6 @@ import (
 
 	sycommon "github.com/calypr/syfon/common"
 	internalauth "github.com/calypr/syfon/internal/auth"
-	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/models"
 )
 
@@ -199,11 +198,6 @@ func AuthStatusCode(ctx context.Context) int {
 		return 401
 	}
 	return 403
-}
-
-// HasGlobalBucketControlAccess checks if the user has overarching control over bucket registration.
-func HasGlobalBucketControlAccess(ctx context.Context, methods ...string) bool {
-	return HasAnyMethodAccess(ctx, []string{common.BucketControlResource}, methods...)
 }
 
 // HasScopedBucketAccess checks if a user has access to a specific bucket based on a project/org scope.

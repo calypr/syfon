@@ -252,10 +252,11 @@ func (db *SqliteDB) GetBucketScope(ctx context.Context, organization, projectID 
 	return &s, nil
 }
 
-func (db *SqliteDB) DeleteBucketScope(ctx context.Context, organization, projectID, credentialID string) error {
+func (db *SqliteDB) DeleteBucketScope(ctx context.Context, organization, projectID, credentialID, pathPrefix string) error {
 	org := strings.TrimSpace(organization)
 	project := strings.TrimSpace(projectID)
 	credentialID = strings.TrimSpace(credentialID)
+	pathPrefix = strings.Trim(strings.TrimSpace(pathPrefix), "/")
 	if org == "" || credentialID == "" {
 		return fmt.Errorf("organization and credential_id are required")
 	}
@@ -276,6 +277,10 @@ func (db *SqliteDB) DeleteBucketScope(ctx context.Context, organization, project
 		AND project_id = ''
 		`
 	}
+	query += `
+	AND COALESCE(path_prefix, '') = ?
+	`
+	args = append(args, pathPrefix)
 
 	result, err := db.db.ExecContext(ctx, query, args...)
 	if err != nil {

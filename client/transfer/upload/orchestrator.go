@@ -114,9 +114,9 @@ func RegisterFile(ctx context.Context, bk UploadBackend, dc MetadataClient, drsO
 	if getErr != nil {
 		current = *drsObject
 	}
-	controlledAccess := current.ControlledAccess
+	controlledAccess := drsObject.ControlledAccess
 	if controlledAccess == nil {
-		controlledAccess = drsObject.ControlledAccess
+		controlledAccess = current.ControlledAccess
 	}
 
 	u, parseErr := url.Parse(canonical)

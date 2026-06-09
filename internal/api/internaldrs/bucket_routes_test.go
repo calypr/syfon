@@ -141,7 +141,7 @@ func TestHandleInternalPutDeleteBucket_Gen3Auth(t *testing.T) {
 func TestHandleInternalPutBucket_RejectsInvalidGeneratedPayloads(t *testing.T) {
 	mockDB := &testutils.MockDatabase{Credentials: map[string]models.S3Credential{}}
 	req := httptest.NewRequest(http.MethodPut, "/data/buckets", bytes.NewBufferString(`{"bucket":"b2","organization":"cbds","unexpected":"boom"}`))
-	req = req.WithContext(dataTestAuthContext(req.Context(), "gen3", true, map[string]map[string]bool{bucketControlResource: {"create": true}}))
+	req = req.WithContext(dataTestAuthContext(req.Context(), "gen3", true, map[string]map[string]bool{"/programs/cbds": {"arborist:create-descendant": true}}))
 	rr := doInternalDRSTestRequest(req, core.NewObjectManager(mockDB, &testutils.MockUrlManager{}))
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", rr.Code)
@@ -205,7 +205,9 @@ func TestHandleInternalListBucketScopes_Success(t *testing.T) {
 		},
 	}
 	req := httptest.NewRequest(http.MethodGet, "/data/buckets/bucket-a/scopes", nil)
-	req = req.WithContext(dataTestAuthContext(req.Context(), "gen3", true, nil))
+	req = req.WithContext(dataTestAuthContext(req.Context(), "gen3", true, map[string]map[string]bool{
+		"/programs/org-a/projects/proj-a": {"read": true},
+	}))
 
 	rr := doInternalDRSTestRequest(req, core.NewObjectManager(mockDB, &testutils.MockUrlManager{}))
 	if rr.Code != http.StatusOK {
@@ -225,6 +227,41 @@ func TestHandleInternalListBucketScopes_Success(t *testing.T) {
 	}
 	if resp[0].Path == nil || *resp[0].Path != "s3://bucket-a/path/to/a" {
 		t.Fatalf("unexpected path: %+v", resp[0].Path)
+	}
+}
+
+func TestHandleInternalListBucketScopes_FiltersUnauthorizedScopesOnSharedBucket(t *testing.T) {
+	mockDB := &testutils.MockDatabase{
+		Credentials: map[string]models.S3Credential{
+			"bucket-a": {CredentialID: "bucket-a", Bucket: "bucket-a", Provider: "s3"},
+		},
+		BucketScopes: map[string]models.BucketScope{
+			"org-a|proj-a": {Organization: "org-a", ProjectID: "proj-a", CredentialID: "bucket-a", Bucket: "bucket-a", PathPrefix: "path/to/a"},
+			"org-b|proj-b": {Organization: "org-b", ProjectID: "proj-b", CredentialID: "bucket-a", Bucket: "bucket-a", PathPrefix: "secret/path"},
+		},
+	}
+	req := httptest.NewRequest(http.MethodGet, "/data/buckets/bucket-a/scopes", nil)
+	req = req.WithContext(dataTestAuthContext(req.Context(), "gen3", true, map[string]map[string]bool{
+		"/programs/org-a/projects/proj-a": {"read": true},
+	}))
+
+	rr := doInternalDRSTestRequest(req, core.NewObjectManager(mockDB, &testutils.MockUrlManager{}))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var resp []bucketapi.BucketScopeResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if len(resp) != 1 {
+		t.Fatalf("expected exactly 1 visible scope, got %d: %+v", len(resp), resp)
+	}
+	if resp[0].Organization != "org-a" || resp[0].ProjectId != "proj-a" {
+		t.Fatalf("unexpected visible scope: %+v", resp[0])
+	}
+	if resp[0].Path == nil || *resp[0].Path != "s3://bucket-a/path/to/a" {
+		t.Fatalf("unexpected visible scope path: %+v", resp[0].Path)
 	}
 }
 
@@ -261,5 +298,28 @@ func TestHandleInternalDeleteBucketScope_RequiresExactPathMatch(t *testing.T) {
 	}
 	if _, ok := mockDB.BucketScopes["org-a|proj-a"]; !ok {
 		t.Fatalf("expected project scope to remain")
+	}
+}
+
+func TestHandleInternalDeleteBucketScope_AllowsEmptyRootPath(t *testing.T) {
+	mockDB := &testutils.MockDatabase{
+		Credentials: map[string]models.S3Credential{
+			"bucket-a": {CredentialID: "bucket-a", Bucket: "bucket-a", Provider: "s3"},
+		},
+		BucketScopes: map[string]models.BucketScope{
+			"org-a|": {Organization: "org-a", ProjectID: "", CredentialID: "bucket-a", Bucket: "bucket-a", PathPrefix: ""},
+		},
+	}
+	req := httptest.NewRequest(http.MethodDelete, "/data/buckets/bucket-a/scopes?organization=org-a&path=", nil)
+	req = req.WithContext(dataTestAuthContext(req.Context(), "gen3", true, map[string]map[string]bool{
+		"/programs/org-a": {"delete": true, "update": true},
+	}))
+
+	rr := doInternalDRSTestRequest(req, core.NewObjectManager(mockDB, &testutils.MockUrlManager{}))
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if _, ok := mockDB.BucketScopes["org-a|"]; ok {
+		t.Fatalf("expected root scope to be deleted")
 	}
 }

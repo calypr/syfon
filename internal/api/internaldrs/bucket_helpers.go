@@ -14,8 +14,6 @@ import (
 	"github.com/calypr/syfon/internal/models"
 )
 
-const bucketControlResource = common.BucketControlResource
-
 func readOptionalPath(path *string) string {
 	if path == nil {
 		return ""
@@ -34,14 +32,6 @@ func decodeStrictJSON(body []byte, dst any) error {
 		return io.ErrUnexpectedEOF
 	}
 	return nil
-}
-
-func bucketControlAllowed(ctx context.Context, methods ...string) bool {
-	return authz.HasGlobalBucketControlAccess(ctx, methods...)
-}
-
-func bucketControlOpenAccess(ctx context.Context, methods ...string) bool {
-	return !authz.IsGen3Mode(ctx) || bucketControlAllowed(ctx, methods...)
 }
 
 func bucketScopeAllowed(ctx context.Context, scope models.BucketScope, methods ...string) bool {
@@ -79,9 +69,6 @@ func bucketsAllowedByNames(ctx context.Context, scopes []models.BucketScope, buc
 }
 
 func authorizeBucketScopeWrite(ctx context.Context, organization, project string, methods ...string) error {
-	if bucketControlAllowed(ctx, methods...) {
-		return nil
-	}
 	if apimiddleware.MissingGen3AuthHeader(ctx) {
 		return common.ErrUnauthorized
 	}
@@ -107,9 +94,6 @@ func authorizeBucketScopeWrite(ctx context.Context, organization, project string
 }
 
 func authorizeBucketDelete(ctx context.Context, om *core.ObjectManager, bucket string) error {
-	if bucketControlAllowed(ctx, "delete") {
-		return nil
-	}
 	if apimiddleware.MissingGen3AuthHeader(ctx) {
 		return common.ErrUnauthorized
 	}

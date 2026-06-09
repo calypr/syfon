@@ -8,11 +8,12 @@ import (
 	"time"
 
 	"github.com/calypr/syfon/apigen/server/metricsapi"
+	sycommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/api/attribution"
 	apimiddleware "github.com/calypr/syfon/internal/api/middleware"
 	internalauth "github.com/calypr/syfon/internal/auth"
 	"github.com/calypr/syfon/internal/authz"
-	"github.com/calypr/syfon/internal/common"
+	intcommon "github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/models"
 )
 
@@ -80,7 +81,7 @@ type providerTransferPayload struct {
 }
 
 func (s *MetricsServer) RecordProviderTransferEvents(ctx context.Context, request metricsapi.RecordProviderTransferEventsRequestObject) (metricsapi.RecordProviderTransferEventsResponseObject, error) {
-	statusCode, ok := checkProviderMetricsIngestAuth(ctx)
+	statusCode, ok := checkProviderMetricsIngestAuth(ctx, request.Body)
 	if !ok {
 		return recordProviderTransferEventsAuthResponse(statusCode), nil
 	}
@@ -102,18 +103,34 @@ func (s *MetricsServer) RecordProviderTransferEvents(ctx context.Context, reques
 	return metricsapi.RecordProviderTransferEvents201JSONResponse{Recorded: &recorded}, nil
 }
 
-func checkProviderMetricsIngestAuth(ctx context.Context) (int, bool) {
+func checkProviderMetricsIngestAuth(ctx context.Context, body *metricsapi.RecordProviderTransferEventsJSONRequestBody) (int, bool) {
 	if !authz.IsGen3Mode(ctx) {
 		return 0, true
 	}
 	if apimiddleware.MissingGen3AuthHeader(ctx) {
 		return http.StatusUnauthorized, false
 	}
-	if authz.HasMethodAccess(ctx, "create", []string{common.MetricsIngestResource}) ||
-		authz.HasMethodAccess(ctx, "*", []string{common.MetricsIngestResource}) {
-		return 0, true
+	if body == nil || len(body.Events) == 0 {
+		return http.StatusForbidden, false
 	}
-	return http.StatusForbidden, false
+	for _, item := range body.Events {
+		resource, ok := providerTransferResource(strings.TrimSpace(intcommon.StringVal(item.Organization)), strings.TrimSpace(intcommon.StringVal(item.Project)))
+		if !ok {
+			return http.StatusForbidden, false
+		}
+		if !authz.HasAnyMethodAccess(ctx, []string{resource}, "create", "update") {
+			return http.StatusForbidden, false
+		}
+	}
+	return 0, true
+}
+
+func providerTransferResource(organization, project string) (string, bool) {
+	resource, err := sycommon.ResourcePath(strings.TrimSpace(organization), strings.TrimSpace(project))
+	if err != nil || strings.TrimSpace(resource) == "" {
+		return "", false
+	}
+	return resource, true
 }
 
 func transferPayloadToModel(ctx context.Context, item transferEventPayload) (models.TransferAttributionEvent, error) {
@@ -164,7 +181,7 @@ func transferPayloadToModel(ctx context.Context, item transferEventPayload) (mod
 		TransferSessionID: strings.TrimSpace(item.TransferSessionID),
 	}
 	if ev.RequestID == "" {
-		ev.RequestID = common.GetRequestID(ctx)
+		ev.RequestID = intcommon.GetRequestID(ctx)
 	}
 	if ev.ActorEmail == "" {
 		ev.ActorEmail = attribution.ActorEmail(ctx)

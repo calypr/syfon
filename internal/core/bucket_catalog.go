@@ -234,8 +234,8 @@ func (m *ObjectManager) CreateBucketScope(ctx context.Context, scope *models.Buc
 	return nil
 }
 
-func (m *ObjectManager) DeleteBucketScope(ctx context.Context, organization, projectID, credentialID string) error {
-	if err := m.db.DeleteBucketScope(ctx, organization, projectID, credentialID); err != nil {
+func (m *ObjectManager) DeleteBucketScope(ctx context.Context, organization, projectID, credentialID, pathPrefix string) error {
+	if err := m.db.DeleteBucketScope(ctx, organization, projectID, credentialID, pathPrefix); err != nil {
 		return err
 	}
 	m.bucketScopeCache.clear()

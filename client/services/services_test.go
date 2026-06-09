@@ -295,7 +295,7 @@ func TestBucketsService(t *testing.T) {
 		if err := service.DeleteScope(context.Background(), "bucket-a", "org", "s3://bucket-a/path", "proj"); err != nil {
 			t.Fatalf("DeleteScope returned error: %v", err)
 		}
-		if fake.deleteScopeBucket != "bucket-a" || fake.deleteScopeParams == nil || fake.deleteScopeParams.Organization != "org" || fake.deleteScopeParams.Path != "s3://bucket-a/path" || fake.deleteScopeParams.ProjectId != "proj" {
+		if fake.deleteScopeBucket != "bucket-a" || fake.deleteScopeParams == nil || fake.deleteScopeParams.Organization != "org" || fake.deleteScopeParams.Path != "s3://bucket-a/path" || fake.deleteScopeParams.ProjectId == nil || *fake.deleteScopeParams.ProjectId != "proj" {
 			t.Fatalf("unexpected delete scope request: bucket=%q params=%+v", fake.deleteScopeBucket, fake.deleteScopeParams)
 		}
 		fake.deleteProjectResp = &bucketapi.DeleteProjectDataResp{
