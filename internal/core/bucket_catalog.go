@@ -139,15 +139,11 @@ func (m *ObjectManager) ListVisibleBuckets(ctx context.Context) (map[string]Visi
 		}
 	}
 
-	filtered := make(map[string]VisibleBucket)
 	for credentialID, entry := range byCredential {
-		if len(programsSeen[credentialID]) == 0 && !bucketReferencedByPublicObject(objects, entry.Credential, creds) {
-			continue
-		}
 		sort.Strings(entry.Programs)
-		filtered[credentialID] = entry
+		byCredential[credentialID] = entry
 	}
-	return filtered, nil
+	return byCredential, nil
 }
 
 func (m *ObjectManager) listVisibleBucketsFromRows(ctx context.Context, lister db.BucketVisibilityLister, creds []models.S3Credential) (map[string]VisibleBucket, error) {
@@ -223,15 +219,11 @@ func (m *ObjectManager) listVisibleBucketsFromRows(ctx context.Context, lister d
 		byCredential[credentialID] = entry
 	}
 
-	filtered := make(map[string]VisibleBucket)
 	for credentialID, entry := range byCredential {
-		if len(entry.Programs) == 0 && !publicSeen[credentialID] {
-			continue
-		}
 		sort.Strings(entry.Programs)
-		filtered[credentialID] = entry
+		byCredential[credentialID] = entry
 	}
-	return filtered, nil
+	return byCredential, nil
 }
 
 func (m *ObjectManager) CreateBucketScope(ctx context.Context, scope *models.BucketScope) error {

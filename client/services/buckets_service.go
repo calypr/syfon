@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/calypr/syfon/apigen/client/bucketapi"
 )
@@ -61,10 +62,14 @@ func (s *BucketsService) AddScope(ctx context.Context, bucket string, req bucket
 }
 
 func (s *BucketsService) DeleteScope(ctx context.Context, bucket, organization, path, projectID string) error {
+	var projectIDParam *string
+	if trimmed := strings.TrimSpace(projectID); trimmed != "" {
+		projectIDParam = &trimmed
+	}
 	resp, err := s.gen.DeleteBucketScopeWithResponse(ctx, bucket, &bucketapi.DeleteBucketScopeParams{
 		Organization: organization,
 		Path:         path,
-		ProjectId:    projectID,
+		ProjectId:    projectIDParam,
 	})
 	if err != nil {
 		return err
@@ -82,6 +87,17 @@ func (s *BucketsService) ListScopes(ctx context.Context, bucket string) ([]bucke
 	}
 	if resp.JSON200 == nil {
 		return nil, fmt.Errorf("failed to list bucket scopes: %d", resp.StatusCode())
+	}
+	return *resp.JSON200, nil
+}
+
+func (s *BucketsService) DeleteProjectData(ctx context.Context, organization, projectID string) (bucketapi.DeleteProjectDataResponse, error) {
+	resp, err := s.gen.DeleteProjectDataWithResponse(ctx, organization, projectID)
+	if err != nil {
+		return bucketapi.DeleteProjectDataResponse{}, err
+	}
+	if resp.JSON200 == nil {
+		return bucketapi.DeleteProjectDataResponse{}, fmt.Errorf("failed to delete project data: %d", resp.StatusCode())
 	}
 	return *resp.JSON200, nil
 }

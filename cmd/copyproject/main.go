@@ -12,6 +12,8 @@ import (
 	"github.com/calypr/syfon/apigen/client/bucketapi"
 	drsapi "github.com/calypr/syfon/apigen/client/drs"
 	"github.com/calypr/syfon/apigen/client/internalapi"
+	syclient "github.com/calypr/syfon/client"
+	conf "github.com/calypr/syfon/client/config"
 	"github.com/calypr/syfon/client/services"
 	transferdownload "github.com/calypr/syfon/client/transfer/download"
 	"github.com/calypr/syfon/client/transfer/upload"
@@ -30,13 +32,25 @@ var Cmd = &cobra.Command{
 The source scope is the org/project you are copying from, written as <organization>/<project-id>.
 The destination scope is the org/project you are copying to, also written as <organization>/<project-id>.
 
+Use source-prefixed auth flags for source reads when needed:
+  --source-profile
+  --source-token
+  --source-basic-user / --source-basic-password
+
+Use target-prefixed auth flags for destination writes when needed:
+  --target-server
+  --target-profile
+  --target-token
+  --target-basic-user / --target-basic-password
+
 For example, in:
   syfon copy-project Ellrott_Lab/embedding_rotation CBDS_COLLAB/embedding_rotation
 
 the source scope is Ellrott_Lab/embedding_rotation and the destination scope is CBDS_COLLAB/embedding_rotation.
 
-The destination bucket is resolved from the destination scope when it already exists; otherwise Syfon creates the missing destination mappings and copies into the source bucket. Use -I/--individual to copy only one DID within the source scope.`,
+The destination bucket is resolved on the destination Syfon instance when it already exists; otherwise Syfon creates the missing destination mappings and copies into a bucket with the same credential id as the source bucket, if that bucket is configured on the destination instance. Use -I/--individual to copy only one DID within the source scope.`,
 	Example: `  syfon copy-project Ellrott_Lab/embedding_rotation CBDS_COLLAB/embedding_rotation
+  syfon copy-project Ellrott_Lab/embedding_rotation CBDS_COLLAB/embedding_rotation --target-server https://other-calypr.example
   syfon copy-project Ellrott_Lab/embedding_rotation CBDS_COLLAB/embedding_rotation -I fb4284fe-2c39-5939-bae9-69c4bf4c608a`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -51,17 +65,25 @@ The destination bucket is resolved from the destination scope when it already ex
 			return err
 		}
 
-		c, err := cliauth.NewServerClient(cmd)
+		sourceClient, sourceServer, err := newSourceClient(ctx, cmd)
+		if err != nil {
+			return err
+		}
+		targetClient, targetServer, err := newTargetClient(ctx, cmd)
 		if err != nil {
 			return err
 		}
 
-		buckets, err := c.Buckets().List(ctx)
+		sourceBuckets, err := sourceClient.Buckets().List(ctx)
 		if err != nil {
-			return fmt.Errorf("failed to list buckets: %w", err)
+			return fmt.Errorf("failed to list source buckets: %w", err)
+		}
+		targetBuckets, err := targetClient.Buckets().List(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to list destination buckets: %w", err)
 		}
 
-		resolved, err := resolveCopyScopes(ctx, c.Buckets(), buckets.S3BUCKETS, srcScope, dstScope)
+		resolved, err := resolveCopyScopes(ctx, sourceClient.Buckets(), targetClient.Buckets(), sourceBuckets.S3BUCKETS, targetBuckets.S3BUCKETS, srcScope, dstScope)
 		if err != nil {
 			return err
 		}
@@ -72,17 +94,17 @@ The destination bucket is resolved from the destination scope when it already ex
 
 		fmt.Fprintf(cmd.OutOrStdout(), "Source bucket resolved: %s\n", resolved.sourceBucket)
 
-		if srcScope == dstScope && resolved.sourceBucket == resolved.targetBucket {
+		if sameServerURL(sourceServer, targetServer) && srcScope == dstScope && resolved.sourceBucket == resolved.targetBucket {
 			fmt.Fprintln(cmd.OutOrStdout(), "Source and destination scopes and buckets are identical. Nothing to copy.")
 			return nil
 		}
 
-		if err := ensureDestinationScopes(ctx, cmd, c.Buckets(), resolved); err != nil {
+		if err := ensureDestinationScopes(ctx, cmd, targetClient.Buckets(), resolved); err != nil {
 			return err
 		}
 
 		fmt.Fprintf(cmd.OutOrStdout(), "Target bucket resolved: %s\n", resolved.targetBucket)
-		records, err := recordsToCopy(ctx, cmd, c.Index(), srcScope)
+		records, err := recordsToCopy(ctx, cmd, sourceClient.Index(), srcScope)
 		if err != nil {
 			return err
 		}
@@ -102,7 +124,7 @@ The destination bucket is resolved from the destination scope when it already ex
 		copiedCount := 0
 		skippedCount := 0
 		for i, rec := range records {
-			if err := copyRecord(ctx, cmd, c, rec, resolved.targetBucket, targetProjectPath, dstScope, dstResource, i+1, len(records), tempDir); err != nil {
+			if err := copyRecord(ctx, cmd, sourceClient, targetClient, rec, resolved.targetBucket, targetProjectPath, dstScope, dstResource, i+1, len(records), tempDir); err != nil {
 				skippedCount++
 				fmt.Fprintf(cmd.ErrOrStderr(), "warning: skipping %s: %v\n", rec.Did, err)
 				continue
@@ -115,7 +137,18 @@ The destination bucket is resolved from the destination scope when it already ex
 	},
 }
 
-var individualDID string
+var (
+	individualDID       string
+	sourceProfile       string
+	sourceToken         string
+	sourceBasicUser     string
+	sourceBasicPassword string
+	targetServerURL     string
+	targetProfile       string
+	targetToken         string
+	targetBasicUser     string
+	targetBasicPassword string
+)
 
 type projectScope struct {
 	org     string
@@ -150,16 +183,16 @@ func parseScopeArg(raw, label string) (projectScope, error) {
 	return scope, nil
 }
 
-func resolveCopyScopes(ctx context.Context, buckets *services.BucketsService, bucketMap map[string]bucketapi.BucketMetadata, srcScope, dstScope projectScope) (*resolvedCopyScopes, error) {
+func resolveCopyScopes(ctx context.Context, sourceBuckets, targetBuckets *services.BucketsService, sourceBucketMap, targetBucketMap map[string]bucketapi.BucketMetadata, srcScope, dstScope projectScope) (*resolvedCopyScopes, error) {
 	resolved := &resolvedCopyScopes{
 		source: srcScope,
 		target: dstScope,
 	}
 
-	for bucketName := range bucketMap {
-		scopes, err := buckets.ListScopes(ctx, bucketName)
+	for bucketName := range sourceBucketMap {
+		scopes, err := sourceBuckets.ListScopes(ctx, bucketName)
 		if err != nil {
-			return nil, fmt.Errorf("failed to list scopes for bucket %q: %w", bucketName, err)
+			return nil, fmt.Errorf("failed to list source scopes for bucket %q: %w", bucketName, err)
 		}
 		for _, scope := range scopes {
 			switch {
@@ -171,7 +204,15 @@ func resolveCopyScopes(ctx context.Context, buckets *services.BucketsService, bu
 				scopeCopy := scope
 				resolved.sourceOrg = &scopeCopy
 			}
+		}
+	}
 
+	for bucketName := range targetBucketMap {
+		scopes, err := targetBuckets.ListScopes(ctx, bucketName)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list destination scopes for bucket %q: %w", bucketName, err)
+		}
+		for _, scope := range scopes {
 			switch {
 			case scope.Organization == dstScope.org && scope.ProjectId == dstScope.project:
 				scopeCopy := scope
@@ -194,7 +235,11 @@ func resolveCopyScopes(ctx context.Context, buckets *services.BucketsService, bu
 		return nil, fmt.Errorf("source project scope %s/%s exists but has no bucket mapping", srcScope.org, srcScope.project)
 	}
 	if resolved.targetBucket == "" {
-		resolved.targetBucket = resolved.sourceBucket
+		if _, ok := targetBucketMap[resolved.sourceBucket]; ok {
+			resolved.targetBucket = resolved.sourceBucket
+		} else {
+			return nil, fmt.Errorf("destination scope %s/%s has no bucket mapping on the destination instance, and source bucket %q is not configured there", dstScope.org, dstScope.project, resolved.sourceBucket)
+		}
 	}
 	return resolved, nil
 }
@@ -360,7 +405,7 @@ func hasPathPrefix(candidate, prefix []string) bool {
 	return true
 }
 
-func copyRecord(ctx context.Context, cmd *cobra.Command, c services.SyfonClient, rec internalapi.InternalRecord, targetBucket, targetProjectPath string, dstScope projectScope, dstResource string, current, total int, tempDir string) error {
+func copyRecord(ctx context.Context, cmd *cobra.Command, sourceClient, targetClient services.SyfonClient, rec internalapi.InternalRecord, targetBucket, targetProjectPath string, dstScope projectScope, dstResource string, current, total int, tempDir string) error {
 	did := rec.Did
 	fileName := ""
 	if rec.FileName != nil {
@@ -394,10 +439,16 @@ func copyRecord(ctx context.Context, cmd *cobra.Command, c services.SyfonClient,
 		progressName = filepath.Base(tempPath)
 	}
 
-	downloadProgress := transferprogress.New(cmd.OutOrStdout(), progressName+" (download)", size)
+	fmt.Fprintf(cmd.OutOrStdout(), "Downloading %s -> %s", did, tempPath)
+	if size > 0 {
+		fmt.Fprintf(cmd.OutOrStdout(), " (%s)", upload.FormatSize(size))
+	}
+	fmt.Fprintln(cmd.OutOrStdout())
+
+	downloadProgress := transferprogress.New(cmd.OutOrStdout(), filepath.Base(progressName), size)
 	downloadProgress.Start()
 	downloadCtx := transferprogress.WithProgress(ctx, did, downloadProgress)
-	if err := transferdownload.DownloadFile(downloadCtx, c.Data(), did, tempPath); err != nil {
+	if err := transferdownload.DownloadFile(downloadCtx, sourceClient.Data(), did, tempPath); err != nil {
 		downloadProgress.Abort()
 		return fmt.Errorf("failed to download file %s: %w", did, err)
 	}
@@ -410,17 +461,22 @@ func copyRecord(ctx context.Context, cmd *cobra.Command, c services.SyfonClient,
 		Checksums: []drsapi.Checksum{
 			{Type: "sha256", Checksum: checksum},
 		},
-		AccessMethods:    rec.AccessMethods,
 		ControlledAccess: &[]string{dstResource},
 	}
 
 	uploadKey := preferredUploadKey(rec.AccessMethods, checksum, fileName, tempPath)
 	targetObjectURL := scopedObjectURL(targetProjectPath, targetBucket, uploadKey)
 
-	uploadProgress := transferprogress.New(cmd.OutOrStdout(), progressName+" (upload)", size)
+	fmt.Fprintf(cmd.OutOrStdout(), "Uploading %s -> %s", did, targetObjectURL)
+	if size > 0 {
+		fmt.Fprintf(cmd.OutOrStdout(), " (%s)", upload.FormatSize(size))
+	}
+	fmt.Fprintln(cmd.OutOrStdout())
+
+	uploadProgress := transferprogress.New(cmd.OutOrStdout(), filepath.Base(progressName), size)
 	uploadProgress.Start()
 	uploadCtx := transferprogress.WithProgress(ctx, did, uploadProgress)
-	if _, err := upload.RegisterFile(uploadCtx, c.Data(), c.DRS(), drsObj, tempPath, targetBucket); err != nil {
+	if _, err := upload.RegisterFile(uploadCtx, targetClient.Data(), targetClient.DRS(), drsObj, tempPath, targetBucket); err != nil {
 		uploadProgress.Abort()
 		return fmt.Errorf("failed to upload file %s to target bucket %q: %w", did, targetBucket, err)
 	}
@@ -447,13 +503,13 @@ func copyRecord(ctx context.Context, cmd *cobra.Command, c services.SyfonClient,
 			Version:          drsObj.Version,
 		}},
 	}
-	if _, err := c.DRS().RegisterObjects(ctx, registerReq); err != nil {
+	if _, err := targetClient.DRS().RegisterObjects(ctx, registerReq); err != nil {
 		return fmt.Errorf("failed to update DRS metadata for DID %s: %w", did, err)
 	}
 
 	authzOrg, authzProject := pathScope(dstResource)
 	authzMap := syfoncommon.AuthzMapFromScope(authzOrg, authzProject)
-	if err := c.Index().Upsert(ctx, did, targetObjectURL, fileName, size, checksum, authzMap); err != nil {
+	if err := targetClient.Index().Upsert(ctx, did, targetObjectURL, fileName, size, checksum, authzMap); err != nil {
 		return fmt.Errorf("failed to sync index record for DID %s: %w", did, err)
 	}
 
@@ -636,4 +692,158 @@ func listAllProjectRecords(ctx context.Context, index *services.IndexService, or
 
 func init() {
 	Cmd.Flags().StringVarP(&individualDID, "individual", "I", "", "Copy only a single DID from the source scope")
+	Cmd.Flags().StringVar(&sourceProfile, "source-profile", "", "Gen3 profile for source reads; preferred over inherited --profile on this command")
+	Cmd.Flags().StringVar(&sourceToken, "source-token", "", "Bearer token for source reads; overrides --source-profile")
+	Cmd.Flags().StringVar(&sourceBasicUser, "source-basic-user", "", "Basic auth username for source Syfon reads")
+	Cmd.Flags().StringVar(&sourceBasicPassword, "source-basic-password", "", "Basic auth password for source Syfon reads")
+	Cmd.Flags().StringVar(&targetServerURL, "target-server", "", "Destination Syfon server base URL")
+	Cmd.Flags().StringVar(&targetProfile, "target-profile", "", "Gen3 profile for destination writes")
+	Cmd.Flags().StringVar(&targetToken, "target-token", "", "Bearer token for destination writes; overrides --target-profile")
+	Cmd.Flags().StringVar(&targetBasicUser, "target-basic-user", "", "Basic auth username for destination Syfon writes")
+	Cmd.Flags().StringVar(&targetBasicPassword, "target-basic-password", "", "Basic auth password for destination Syfon writes")
+}
+
+func newSourceClient(ctx context.Context, cmd *cobra.Command) (services.SyfonClient, string, error) {
+	serverURL, err := resolveSourceServerURL(ctx, cmd)
+	if err != nil {
+		return nil, "", err
+	}
+	opts, err := sourceClientOptions(ctx)
+	if err != nil {
+		return nil, "", err
+	}
+	client, err := syclient.New(serverURL, opts...)
+	if err != nil {
+		return nil, "", err
+	}
+	return client, serverURL, nil
+}
+
+func newTargetClient(ctx context.Context, cmd *cobra.Command) (services.SyfonClient, string, error) {
+	serverURL, err := resolveTargetServerURL(ctx, cmd)
+	if err != nil {
+		return nil, "", err
+	}
+	opts, err := targetClientOptions(ctx)
+	if err != nil {
+		return nil, "", err
+	}
+	client, err := syclient.New(serverURL, opts...)
+	if err != nil {
+		return nil, "", err
+	}
+	return client, serverURL, nil
+}
+
+func sourceClientOptions(ctx context.Context) ([]syclient.Option, error) {
+	if !hasExplicitSourceAuthInputs() {
+		return cliauth.ServerClientOptions()
+	}
+	return clientOptionsFromInputs(ctx, "source", sourceProfile, sourceToken, sourceBasicUser, sourceBasicPassword)
+}
+
+func targetClientOptions(ctx context.Context) ([]syclient.Option, error) {
+	if !hasExplicitTargetAuthInputs() {
+		return cliauth.ServerClientOptions()
+	}
+	return clientOptionsFromInputs(ctx, "target", targetProfile, targetToken, targetBasicUser, targetBasicPassword)
+}
+
+func hasExplicitSourceAuthInputs() bool {
+	return strings.TrimSpace(sourceProfile) != "" ||
+		strings.TrimSpace(sourceToken) != "" ||
+		strings.TrimSpace(sourceBasicUser) != "" ||
+		strings.TrimSpace(sourceBasicPassword) != ""
+}
+
+func hasExplicitTargetAuthInputs() bool {
+	return strings.TrimSpace(targetProfile) != "" ||
+		strings.TrimSpace(targetToken) != "" ||
+		strings.TrimSpace(targetBasicUser) != "" ||
+		strings.TrimSpace(targetBasicPassword) != ""
+}
+
+func resolveSourceServerURL(ctx context.Context, cmd *cobra.Command) (string, error) {
+	if strings.TrimSpace(sourceProfile) != "" {
+		credential, err := cliauth.LoadProfileCredential(ctx, sourceProfile)
+		if err != nil {
+			return "", err
+		}
+		serverURL := strings.TrimRight(strings.TrimSpace(credential.APIEndpoint), "/")
+		if serverURL == "" {
+			return "", fmt.Errorf("source profile %q has no api_endpoint", sourceProfile)
+		}
+		return serverURL, nil
+	}
+	return cliauth.ResolveServerURL(cmd)
+}
+
+func resolveTargetServerURL(ctx context.Context, cmd *cobra.Command) (string, error) {
+	if serverURL := strings.TrimRight(strings.TrimSpace(targetServerURL), "/"); serverURL != "" {
+		return serverURL, nil
+	}
+	if strings.TrimSpace(targetProfile) != "" {
+		credential, err := cliauth.LoadProfileCredential(ctx, targetProfile)
+		if err != nil {
+			return "", err
+		}
+		serverURL := strings.TrimRight(strings.TrimSpace(credential.APIEndpoint), "/")
+		if serverURL == "" {
+			return "", fmt.Errorf("target profile %q has no api_endpoint", targetProfile)
+		}
+		return serverURL, nil
+	}
+	return cliauth.ResolveServerURL(cmd)
+}
+
+func clientOptionsFromInputs(ctx context.Context, side, profile, token, basicUser, basicPassword string) ([]syclient.Option, error) {
+	basicUser = strings.TrimSpace(basicUser)
+	basicPassword = strings.TrimSpace(basicPassword)
+	token = strings.TrimSpace(token)
+	profile = strings.TrimSpace(profile)
+	if basicUser != "" || basicPassword != "" {
+		if basicUser == "" || basicPassword == "" {
+			return nil, fmt.Errorf("--%s-basic-user and --%s-basic-password must be set together", side, side)
+		}
+		if token != "" {
+			return nil, fmt.Errorf("--%s-token cannot be combined with --%s-basic-user/--%s-basic-password", side, side, side)
+		}
+		if profile != "" {
+			return nil, fmt.Errorf("--%s-profile cannot be combined with --%s-basic-user/--%s-basic-password", side, side, side)
+		}
+		return []syclient.Option{syclient.WithBasicAuth(basicUser, basicPassword)}, nil
+	}
+	if token != "" {
+		if profile != "" {
+			return nil, fmt.Errorf("--%s-token cannot be combined with --%s-profile", side, side)
+		}
+		return []syclient.Option{syclient.WithBearerToken(token)}, nil
+	}
+	if profile == "" {
+		return nil, nil
+	}
+	credential, err := cliauth.LoadProfileCredential(ctx, profile)
+	if err != nil {
+		return nil, err
+	}
+	return optionsFromCredential(profile, credential)
+}
+
+func optionsFromCredential(profile string, credential *conf.Credential) ([]syclient.Option, error) {
+	if credential == nil {
+		return nil, fmt.Errorf("profile %q resolved to nil credential", profile)
+	}
+	if accessToken := strings.TrimSpace(credential.AccessToken); accessToken != "" {
+		return []syclient.Option{syclient.WithBearerToken(accessToken)}, nil
+	}
+	keyID := strings.TrimSpace(credential.KeyID)
+	apiKey := strings.TrimSpace(credential.APIKey)
+	if keyID != "" && apiKey != "" {
+		return []syclient.Option{syclient.WithBasicAuth(keyID, apiKey)}, nil
+	}
+	return nil, fmt.Errorf("profile %q has no access_token or key_id/api_key", profile)
+}
+
+func sameServerURL(left, right string) bool {
+	return strings.EqualFold(strings.TrimRight(strings.TrimSpace(left), "/"), strings.TrimRight(strings.TrimSpace(right), "/"))
 }

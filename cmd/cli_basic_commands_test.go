@@ -214,6 +214,17 @@ func TestSyfonBucketAddCredentialAndScopesCommands(t *testing.T) {
 
 	out, err = executeRootCommand(t,
 		"--server", server.URL,
+		"bucket", "list",
+	)
+	if err != nil {
+		t.Fatalf("bucket list after add failed: %v output=%s", err, out)
+	}
+	if !strings.Contains(out, "test-bucket-cli") {
+		t.Fatalf("expected bucket to be visible before scopes are added: %s", out)
+	}
+
+	out, err = executeRootCommand(t,
+		"--server", server.URL,
 		"bucket", "add-organization", "cli-tests",
 		"--path", "gs://test-bucket-cli/program-root",
 	)
@@ -281,6 +292,63 @@ func TestSyfonBucketAddCredentialAndScopesCommands(t *testing.T) {
 	}
 }
 
+func TestSyfonDeleteProjectCommand(t *testing.T) {
+	server := newSyfonTestServer(t)
+	defer server.Close()
+
+	c, err := syclient.New(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Buckets().Put(context.Background(), bucketapi.PutBucketRequest{
+		Bucket:       "delete-project-bucket",
+		Provider:     stringPtr("file"),
+		Region:       stringPtr("us-east-1"),
+		AccessKey:    stringPtr("ak"),
+		SecretKey:    stringPtr("sk"),
+		Organization: "cli-tests",
+		ProjectId:    "cleanup-me",
+	}); err != nil {
+		t.Fatalf("seed bucket scope: %v", err)
+	}
+	if err := c.Index().Upsert(context.Background(), "delete-project-1", "s3://delete-project-bucket/one.txt", "one.txt", 1, "", map[string][]string{"cli-tests": {"cleanup-me"}}); err != nil {
+		t.Fatalf("seed record one: %v", err)
+	}
+	if err := c.Index().Upsert(context.Background(), "delete-project-2", "s3://delete-project-bucket/two.txt", "two.txt", 2, "", map[string][]string{"cli-tests": {"cleanup-me"}}); err != nil {
+		t.Fatalf("seed record two: %v", err)
+	}
+	if err := c.Index().Upsert(context.Background(), "delete-project-keep", "s3://delete-project-bucket/keep.txt", "keep.txt", 3, "", map[string][]string{"cli-tests": {"keep-me"}}); err != nil {
+		t.Fatalf("seed keep record: %v", err)
+	}
+
+	out, err := executeRootCommand(t, "--server", server.URL, "delete-project", "cli-tests/cleanup-me")
+	if err != nil {
+		t.Fatalf("delete-project failed: %v output=%s", err, out)
+	}
+	if !strings.Contains(out, "deleted project cli-tests/cleanup-me: 2 records removed, 1 project bucket mappings removed") {
+		t.Fatalf("unexpected delete-project output: %s", out)
+	}
+
+	listOut, err := executeRootCommand(t, "--server", server.URL, "ls")
+	if err != nil {
+		t.Fatalf("ls after delete-project failed: %v output=%s", err, listOut)
+	}
+	if strings.Contains(listOut, "delete-project-1") || strings.Contains(listOut, "delete-project-2") {
+		t.Fatalf("expected project records to be removed, output=%s", listOut)
+	}
+	if !strings.Contains(listOut, "delete-project-keep") {
+		t.Fatalf("expected unrelated record to remain, output=%s", listOut)
+	}
+
+	scopeOut, err := executeRootCommand(t, "--server", server.URL, "bucket", "list-scopes", "delete-project-bucket")
+	if err != nil {
+		t.Fatalf("bucket list-scopes after delete-project failed: %v output=%s", err, scopeOut)
+	}
+	if strings.Contains(scopeOut, "cleanup-me") {
+		t.Fatalf("expected cleanup-me mapping to be removed, output=%s", scopeOut)
+	}
+}
+
 func TestSyfonCopyProjectCommand(t *testing.T) {
 	server := newSyfonTestServer(t)
 	defer server.Close()
@@ -336,6 +404,12 @@ func TestSyfonCopyProjectCommand(t *testing.T) {
 	)
 	if err != nil {
 		t.Fatalf("copy-project command failed: %v output=%s", err, out)
+	}
+	if !strings.Contains(out, "Downloading "+did+" -> ") {
+		t.Fatalf("expected download stage output, got: %s", out)
+	}
+	if !strings.Contains(out, "Uploading "+did+" -> ") {
+		t.Fatalf("expected upload stage output, got: %s", out)
 	}
 	if !strings.Contains(out, "Successfully copied project syfon/e2e to syfon-copy/e2e") {
 		t.Fatalf("unexpected copy-project output: %s", out)
@@ -683,6 +757,91 @@ func TestSyfonCopyProjectCommand_SkipsBrokenRecords(t *testing.T) {
 	badTargetURL := (*badRec.AccessMethods)[0].AccessUrl.Url
 	if strings.Contains(badTargetURL, "://syfon-bucket/organizations/syfon-skip/e2e/") {
 		t.Fatalf("expected bad record to remain in source scope, got: %s", badTargetURL)
+	}
+}
+
+func TestSyfonCopyProjectCommand_AcrossInstances(t *testing.T) {
+	sourceServer := newSyfonTestServer(t)
+	defer sourceServer.Close()
+	targetServer := newSyfonTestServer(t)
+	defer targetServer.Close()
+
+	did := "99999999-9999-9999-9999-999999999999"
+	fileName := "cross-instance.txt"
+	content := []byte("copy project across syfon instances")
+	sourceFilePath := filepath.Join(sourceServer.StorageDir, fileName)
+	if err := os.WriteFile(sourceFilePath, content, 0o644); err != nil {
+		t.Fatalf("failed to write source file: %v", err)
+	}
+	hash := sha256.Sum256(content)
+	checksum := hex.EncodeToString(hash[:])
+
+	sourceClient, err := syclient.New(sourceServer.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sourceClient.Index().Upsert(context.Background(), did, "s3://syfon-bucket/"+fileName, fileName, int64(len(content)), checksum, map[string][]string{"syfon": {"e2e"}}); err != nil {
+		t.Fatalf("failed to seed source record: %v", err)
+	}
+
+	out, err := executeRootCommand(t,
+		"--server", targetServer.URL,
+		"bucket", "add-organization", "syfon-copy",
+		"--path", "s3://syfon-bucket/copied-root",
+	)
+	if err != nil {
+		t.Fatalf("failed to configure target destination org scope: %v output=%s", err, out)
+	}
+
+	out, err = executeRootCommand(t,
+		"--server", sourceServer.URL,
+		"copy-project", "syfon/e2e", "syfon-copy/e2e",
+		"--target-server", targetServer.URL,
+	)
+	if err != nil {
+		t.Fatalf("copy-project across instances failed: %v output=%s", err, out)
+	}
+	if !strings.Contains(out, "Successfully copied project syfon/e2e to syfon-copy/e2e (1 copied, 0 skipped, 1 total)") {
+		t.Fatalf("unexpected cross-instance copy output: %s", out)
+	}
+
+	targetClient, err := syclient.New(targetServer.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	targetRec, err := targetClient.Index().Get(context.Background(), did)
+	if err != nil {
+		t.Fatalf("failed to get copied target record: %v", err)
+	}
+	if targetRec.FileName == nil || *targetRec.FileName != fileName {
+		t.Fatalf("unexpected target filename: %+v", targetRec.FileName)
+	}
+	if targetRec.Hashes == nil || (*targetRec.Hashes)["sha256"] != checksum {
+		t.Fatalf("unexpected target hashes: %+v", targetRec.Hashes)
+	}
+	if targetRec.AccessMethods == nil || len(*targetRec.AccessMethods) != 1 || !strings.Contains((*targetRec.AccessMethods)[0].AccessUrl.Url, "://syfon-bucket/copied-root/e2e/") {
+		t.Fatalf("unexpected target access methods: %+v", targetRec.AccessMethods)
+	}
+
+	reader, err := targetClient.Data().GetReader(context.Background(), did)
+	if err != nil {
+		t.Fatalf("failed to read copied target file: %v", err)
+	}
+	defer reader.Close()
+	gotContent, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(gotContent) != string(content) {
+		t.Fatalf("target content mismatch: expected %q, got %q", content, gotContent)
+	}
+
+	sourceRec, err := sourceClient.Index().Get(context.Background(), did)
+	if err != nil {
+		t.Fatalf("failed to get original source record: %v", err)
+	}
+	if sourceRec.AccessMethods == nil || len(*sourceRec.AccessMethods) != 1 || (*sourceRec.AccessMethods)[0].AccessUrl.Url != "s3://syfon-bucket/"+fileName {
+		t.Fatalf("source record should remain unchanged, got: %+v", sourceRec.AccessMethods)
 	}
 }
 

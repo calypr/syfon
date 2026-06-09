@@ -1,17 +1,24 @@
+# syntax=docker/dockerfile:1.7
+
 FROM golang:1.26.4-alpine AS builder
 
 RUN apk add --no-cache build-base git
 WORKDIR /src
 
-COPY go.mod go.sum ./
+COPY go.mod go.sum go.work go.work.sum ./
 COPY apigen/go.mod apigen/go.sum ./apigen/
 COPY client/go.mod client/go.sum ./client/
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go mod download
 
 COPY . .
 ARG TARGETOS=linux
 ARG TARGETARCH
-RUN CGO_ENABLED=1 GOOS=${TARGETOS} GOARCH=${TARGETARCH:-$(go env GOARCH)} go build -o /out/syfon .
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=1 GOOS=${TARGETOS} GOARCH=${TARGETARCH:-$(go env GOARCH)} \
+    go build -trimpath -o /out/syfon .
 
 FROM alpine:3.21
 

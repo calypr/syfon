@@ -97,6 +97,35 @@ func TestHandleInternalBuckets_Gen3Auth(t *testing.T) {
 	}
 }
 
+func TestHandleInternalBuckets_IncludesBucketsWithoutScopes(t *testing.T) {
+	mockDB := &testutils.MockDatabase{
+		Credentials: map[string]models.S3Credential{
+			"b1": {CredentialID: "b1", Bucket: "b1", Region: "us-east-1", Provider: "s3"},
+			"b2": {CredentialID: "b2", Bucket: "b2", Region: "us-east-1", Provider: "s3"},
+		},
+	}
+	req := httptest.NewRequest(http.MethodGet, "/data/buckets", nil)
+	req = req.WithContext(dataTestAuthContext(req.Context(), "gen3", true, map[string]map[string]bool{
+		"/programs": {"read": true},
+	}))
+
+	rr := doInternalDRSTestRequest(req, core.NewObjectManager(mockDB, &testutils.MockUrlManager{}))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var resp bucketapi.BucketsResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if _, ok := resp.S3BUCKETS["b1"]; !ok {
+		t.Fatalf("expected b1 in response: %+v", resp.S3BUCKETS)
+	}
+	if _, ok := resp.S3BUCKETS["b2"]; !ok {
+		t.Fatalf("expected b2 in response: %+v", resp.S3BUCKETS)
+	}
+}
+
 func TestHandleInternalPutDeleteBucket_Gen3Auth(t *testing.T) {
 	mockDB := &testutils.MockDatabase{Credentials: map[string]models.S3Credential{}}
 	region, accessKey, secretKey, endpoint, provider, path := "us-east-1", "ak", "sk", t.TempDir(), "file", "s3://bucket2/cbds/proj1"

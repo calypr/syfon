@@ -70,9 +70,9 @@ type PutBucketRequest struct {
 
 // DeleteBucketScopeParams defines parameters for DeleteBucketScope.
 type DeleteBucketScopeParams struct {
-	Organization string `form:"organization" json:"organization"`
-	Path         string `form:"path" json:"path"`
-	ProjectId    string `form:"project_id,omitempty" json:"project_id,omitempty"`
+	Organization string  `form:"organization" json:"organization"`
+	Path         string  `form:"path" json:"path"`
+	ProjectId    *string `form:"project_id,omitempty" json:"project_id,omitempty"`
 }
 
 // PutBucketJSONRequestBody defines body for PutBucket for application/json ContentType.
@@ -92,7 +92,7 @@ type ServerInterface interface {
 	// Delete bucket credential
 	// (DELETE /data/buckets/{bucket})
 	DeleteBucket(c fiber.Ctx, bucket string) error
-	// Remove an org/project scope from an existing bucket
+	// Remove a specific scope from an existing bucket
 	// (DELETE /data/buckets/{bucket}/scopes)
 	DeleteBucketScope(c fiber.Ctx, bucket string, params DeleteBucketScopeParams) error
 	// List org/project scopes for a bucket
@@ -187,7 +187,8 @@ func (siw *ServerInterfaceWrapper) DeleteBucketScope(c fiber.Ctx) error {
 		if err != nil {
 			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter project_id: %w", err).Error())
 		}
-		params.ProjectId = value
+		params.ProjectId = &value
+
 	}
 
 	return siw.Handler.DeleteBucketScope(c, bucket, params)
@@ -667,7 +668,7 @@ type StrictServerInterface interface {
 	// Delete bucket credential
 	// (DELETE /data/buckets/{bucket})
 	DeleteBucket(ctx context.Context, request DeleteBucketRequestObject) (DeleteBucketResponseObject, error)
-	// Remove an org/project scope from an existing bucket
+	// Remove a specific scope from an existing bucket
 	// (DELETE /data/buckets/{bucket}/scopes)
 	DeleteBucketScope(ctx context.Context, request DeleteBucketScopeRequestObject) (DeleteBucketScopeResponseObject, error)
 	// List org/project scopes for a bucket

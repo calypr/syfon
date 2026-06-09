@@ -75,9 +75,9 @@ type PutBucketRequest struct {
 
 // DeleteBucketScopeParams defines parameters for DeleteBucketScope.
 type DeleteBucketScopeParams struct {
-	Organization string `form:"organization" json:"organization"`
-	Path         string `form:"path" json:"path"`
-	ProjectId    string `form:"project_id,omitempty" json:"project_id,omitempty"`
+	Organization string  `form:"organization" json:"organization"`
+	Path         string  `form:"path" json:"path"`
+	ProjectId    *string `form:"project_id,omitempty" json:"project_id,omitempty"`
 }
 
 // PutBucketJSONRequestBody defines body for PutBucket for application/json ContentType.
@@ -447,8 +447,9 @@ func NewDeleteBucketScopeRequest(server string, bucket string, params *DeleteBuc
 			}
 		}
 
-		if params.ProjectId != "" {
-			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "project_id", runtime.ParamLocationQuery, params.ProjectId); err != nil {
+		if params.ProjectId != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "project_id", runtime.ParamLocationQuery, *params.ProjectId); err != nil {
 				return nil, err
 			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
 				return nil, err
@@ -459,6 +460,7 @@ func NewDeleteBucketScopeRequest(server string, bucket string, params *DeleteBuc
 					}
 				}
 			}
+
 		}
 
 		queryURL.RawQuery = queryValues.Encode()
