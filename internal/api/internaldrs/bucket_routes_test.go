@@ -126,6 +126,57 @@ func TestHandleInternalBuckets_IncludesBucketsWithoutScopes(t *testing.T) {
 	}
 }
 
+func TestHandleInternalBuckets_PrefersExplicitScopeOverObjectDerivedDuplicate(t *testing.T) {
+	mockDB := &testutils.MockDatabase{
+		Credentials: map[string]models.S3Credential{
+			"EllrottLab": {CredentialID: "EllrottLab", Bucket: "EllrottLab", Region: "us-east-1", Provider: "s3"},
+			"cbds":       {CredentialID: "cbds", Bucket: "cbds", Region: "us-east-1", Provider: "s3"},
+		},
+		BucketScopes: map[string]models.BucketScope{
+			"Ellrott_Lab|hla2vec": {
+				Organization: "Ellrott_Lab",
+				ProjectID:    "hla2vec",
+				CredentialID: "EllrottLab",
+				Bucket:       "EllrottLab",
+			},
+		},
+		Objects: map[string]*drs.DrsObject{
+			"obj-1": {Id: "obj-1", Name: common.Ptr("obj-1"), AccessMethods: &[]drs.AccessMethod{{
+				Type: drs.AccessMethodTypeS3,
+				AccessUrl: &struct {
+					Headers *[]string `json:"headers,omitempty"`
+					Url     string    `json:"url"`
+				}{Url: "s3://cbds/path/obj-1"},
+			}}},
+		},
+		ObjectAuthz: map[string]map[string][]string{
+			"obj-1": {"Ellrott_Lab": {"hla2vec"}},
+		},
+	}
+	req := httptest.NewRequest(http.MethodGet, "/data/buckets", nil)
+	req = req.WithContext(dataTestAuthContext(req.Context(), "gen3", true, map[string]map[string]bool{
+		"/programs/Ellrott_Lab/projects/hla2vec": {"read": true},
+	}))
+
+	rr := doInternalDRSTestRequest(req, core.NewObjectManager(mockDB, &testutils.MockUrlManager{}))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var resp bucketapi.BucketsResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	want := "/organization/Ellrott_Lab/project/hla2vec"
+	if got := resp.S3BUCKETS["EllrottLab"].Programs; got == nil || len(*got) != 1 || (*got)[0] != want {
+		t.Fatalf("expected explicit bucket to advertise only %q, got %+v", want, got)
+	}
+	if got := resp.S3BUCKETS["cbds"].Programs; got != nil && len(*got) != 0 {
+		t.Fatalf("expected object-derived duplicate to be suppressed, got %+v", *got)
+	}
+}
+
 func TestHandleInternalPutDeleteBucket_Gen3Auth(t *testing.T) {
 	mockDB := &testutils.MockDatabase{Credentials: map[string]models.S3Credential{}}
 	region, accessKey, secretKey, endpoint, provider, path := "us-east-1", "ak", "sk", t.TempDir(), "file", "s3://bucket2/cbds/proj1"

@@ -90,6 +90,7 @@ func (m *ObjectManager) ListVisibleBuckets(ctx context.Context) (map[string]Visi
 	if err != nil {
 		return nil, err
 	}
+	explicitScopeOwners := make(map[string]string, len(scopes))
 	for _, scope := range scopes {
 		credentialID := credentialIDForScope(scope)
 		entry, exists := byCredential[credentialID]
@@ -106,6 +107,7 @@ func (m *ObjectManager) ListVisibleBuckets(ctx context.Context) (map[string]Visi
 		if _, seen := programsSeen[credentialID][resource]; seen {
 			continue
 		}
+		explicitScopeOwners[resource] = credentialID
 		programsSeen[credentialID][resource] = struct{}{}
 		entry.Programs = append(entry.Programs, resource)
 		byCredential[credentialID] = entry
@@ -127,6 +129,9 @@ func (m *ObjectManager) ListVisibleBuckets(ctx context.Context) (map[string]Visi
 			}
 			for _, program := range programs {
 				if program == "" {
+					continue
+				}
+				if owner, ok := explicitScopeOwners[program]; ok && owner != credentialID {
 					continue
 				}
 				if _, seen := programsSeen[credentialID][program]; seen {
@@ -168,6 +173,7 @@ func (m *ObjectManager) listVisibleBucketsFromRows(ctx context.Context, lister d
 	if err != nil {
 		return nil, err
 	}
+	explicitScopeOwners := make(map[string]string, len(scopes))
 	for _, scope := range scopes {
 		credentialID := credentialIDForScope(scope)
 		entry, exists := byCredential[credentialID]
@@ -184,6 +190,7 @@ func (m *ObjectManager) listVisibleBucketsFromRows(ctx context.Context, lister d
 		if _, seen := programsSeen[credentialID][resource]; seen {
 			continue
 		}
+		explicitScopeOwners[resource] = credentialID
 		programsSeen[credentialID][resource] = struct{}{}
 		entry.Programs = append(entry.Programs, resource)
 		byCredential[credentialID] = entry
@@ -209,6 +216,9 @@ func (m *ObjectManager) listVisibleBucketsFromRows(ctx context.Context, lister d
 		resource := strings.TrimSpace(row.Resource)
 		if resource == "" {
 			publicSeen[credentialID] = true
+			continue
+		}
+		if owner, ok := explicitScopeOwners[resource]; ok && owner != credentialID {
 			continue
 		}
 		if _, seen := programsSeen[credentialID][resource]; seen {
