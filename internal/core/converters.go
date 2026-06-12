@@ -229,7 +229,9 @@ func InternalRecordToInternalObject(r internalapi.InternalRecord, now time.Time)
 	}
 	updatedTime := parseInternalRecordTime(r.UpdatedTime, obj.CreatedTime)
 	obj.UpdatedTime = &updatedTime
-	if r.FileName != nil {
+	if r.Name != nil && strings.TrimSpace(*r.Name) != "" {
+		obj.Name = common.Ptr(strings.TrimSpace(*r.Name))
+	} else if r.FileName != nil {
 		fileName := strings.TrimSpace(*r.FileName)
 		if fileName != "" {
 			base := path.Base(strings.Trim(fileName, "/"))
@@ -294,6 +296,7 @@ func InternalObjectToInternalRecord(obj models.InternalObject) internalapi.Inter
 		CreatedTime:   common.Ptr(obj.CreatedTime.Format(time.RFC3339)),
 		Description:   obj.Description,
 		FileName:      common.Ptr(fileName),
+		Name:          obj.Name,
 		Version:       obj.Version,
 		AccessMethods: obj.AccessMethods,
 	}
@@ -324,6 +327,7 @@ func InternalObjectToInternalRecordResponse(obj models.InternalObject) internala
 		CreatedTime:      rec.CreatedTime,
 		Description:      rec.Description,
 		FileName:         rec.FileName,
+		Name:             rec.Name,
 		Version:          rec.Version,
 		UpdatedTime:      rec.UpdatedTime,
 		Hashes:           rec.Hashes,
