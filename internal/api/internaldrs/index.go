@@ -111,7 +111,7 @@ func handleInternalListFiber(om *core.ObjectManager) fiber.Handler {
 		if err != nil {
 			return c.Status(fiber.StatusBadRequest).SendString(err.Error())
 		}
-		if hasPathQuery || (filterOrg != "" && filterProject != "") {
+		if hasPathQuery {
 			ids, directories, err := om.ListObjectIDsPageByPath(c.Context(), filterOrg, filterProject, pathQuery, "read", start, limit, offset)
 			if err != nil {
 				return apiutil.HandleError(c, err)

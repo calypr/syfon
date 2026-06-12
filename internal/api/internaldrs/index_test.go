@@ -93,6 +93,49 @@ func TestHandleInternalList_ScopeFilteringByReadPrivilege(t *testing.T) {
 	}
 }
 
+func TestHandleInternalList_ExactScopeListingDoesNotDependOnBrowseRows(t *testing.T) {
+	now := time.Now().UTC()
+	mockDB := &testutils.MockDatabase{
+		Objects: map[string]*drs.DrsObject{
+			"obj-scoped": {
+				Id:          "obj-scoped",
+				CreatedTime: now,
+				UpdatedTime: &now,
+				Name:        stringPtr("file.bin"),
+				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: "h1"}},
+			},
+		},
+		ObjectAuthz: map[string]map[string][]string{
+			"obj-scoped": {"org": {"p1"}},
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/index?organization=org&project=p1", nil)
+	ctx := indexTestAuthContext(req.Context(), "gen3", true, map[string]map[string]bool{
+		"/programs/org/projects/p1": {"read": true},
+	})
+	req = req.WithContext(ctx)
+
+	om := core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
+	rr := doInternalDRSTestRequest(req, om)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var payload struct {
+		Records []internalapi.InternalRecord `json:"records"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Records) != 1 {
+		t.Fatalf("expected 1 visible scoped record, got %d", len(payload.Records))
+	}
+	if payload.Records[0].Did != "obj-scoped" {
+		t.Fatalf("expected obj-scoped, got %q", payload.Records[0].Did)
+	}
+}
+
 func TestHandleInternalList_PaginatesIDs(t *testing.T) {
 	now := time.Now().UTC()
 	mockDB := &testutils.MockDatabase{
