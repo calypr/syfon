@@ -482,7 +482,17 @@ func (d *DataService) CanonicalObjectURL(signedURL, bucketHint, fallbackDID stri
 		if parsed.Scheme != "" && parsed.Host != "" {
 			return parsed.String(), nil
 		}
-		return "s3://" + bucketHint + "/" + fallbackDID, nil
+		key := strings.TrimSpace(fallbackDID)
+		if key == "" && parsed.Path != "" {
+			parts := strings.Split(parsed.Path, "/")
+			if last := parts[len(parts)-1]; last != "" {
+				key = last
+			}
+		}
+		if key == "" {
+			return "", fmt.Errorf("unable to derive object key from upload URL")
+		}
+		return "s3://" + bucketHint + "/" + key, nil
 	}
 }
 

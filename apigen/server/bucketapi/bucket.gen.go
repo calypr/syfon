@@ -29,6 +29,15 @@ type BucketMetadata struct {
 	Region      *string   `json:"region,omitempty"`
 }
 
+// BucketScopeResponse defines model for BucketScopeResponse.
+type BucketScopeResponse struct {
+	Organization string `json:"organization"`
+
+	// Path Scope path prefix
+	Path      *string `json:"path,omitempty"`
+	ProjectId string  `json:"project_id"`
+}
+
 // BucketsResponse defines model for BucketsResponse.
 type BucketsResponse struct {
 	S3BUCKETS map[string]BucketMetadata `json:"S3_BUCKETS"`
@@ -61,8 +70,9 @@ type PutBucketRequest struct {
 
 // DeleteBucketScopeParams defines parameters for DeleteBucketScope.
 type DeleteBucketScopeParams struct {
-	Organization string `form:"organization" json:"organization"`
-	ProjectId    string `form:"project_id" json:"project_id"`
+	Organization string  `form:"organization" json:"organization"`
+	Path         string  `form:"path" json:"path"`
+	ProjectId    *string `form:"project_id,omitempty" json:"project_id,omitempty"`
 }
 
 // PutBucketJSONRequestBody defines body for PutBucket for application/json ContentType.
@@ -82,9 +92,12 @@ type ServerInterface interface {
 	// Delete bucket credential
 	// (DELETE /data/buckets/{bucket})
 	DeleteBucket(c fiber.Ctx, bucket string) error
-	// Remove an org/project scope from an existing bucket
+	// Remove a specific scope from an existing bucket
 	// (DELETE /data/buckets/{bucket}/scopes)
 	DeleteBucketScope(c fiber.Ctx, bucket string, params DeleteBucketScopeParams) error
+	// List org/project scopes for a bucket
+	// (GET /data/buckets/{bucket}/scopes)
+	ListBucketScopes(c fiber.Ctx, bucket string) error
 	// Add an org/project scope to an existing bucket
 	// (POST /data/buckets/{bucket}/scopes)
 	AddBucketScope(c fiber.Ctx, bucket string) error
@@ -153,21 +166,47 @@ func (siw *ServerInterfaceWrapper) DeleteBucketScope(c fiber.Ctx) error {
 	} else {
 		return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Query argument organization is required, but not found").Error())
 	}
-	// ------------- Required query parameter "project_id" -------------
+	// ------------- Required query parameter "path" -------------
+	if paramValue := c.Query("path"); paramValue != "" {
+
+		var value string
+		err = runtime.BindStyledParameterWithOptions("form", "path", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: true})
+		if err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter path: %w", err).Error())
+		}
+		params.Path = value
+
+	} else {
+		return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Query argument path is required, but not found").Error())
+	}
+	// ------------- Optional query parameter "project_id" -------------
 	if paramValue := c.Query("project_id"); paramValue != "" {
 
 		var value string
-		err = runtime.BindStyledParameterWithOptions("form", "project_id", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: true})
+		err = runtime.BindStyledParameterWithOptions("form", "project_id", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
 		if err != nil {
 			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter project_id: %w", err).Error())
 		}
-		params.ProjectId = value
+		params.ProjectId = &value
 
-	} else {
-		return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Query argument project_id is required, but not found").Error())
 	}
 
 	return siw.Handler.DeleteBucketScope(c, bucket, params)
+}
+
+// ListBucketScopes operation middleware
+func (siw *ServerInterfaceWrapper) ListBucketScopes(c fiber.Ctx) error {
+	var err error
+
+	// ------------- Path parameter "bucket" -------------
+	var bucket string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "bucket", c.Params("bucket"), &bucket, runtime.BindStyledParameterOptions{Explode: false, Required: true})
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter bucket: %w", err).Error())
+	}
+
+	return siw.Handler.ListBucketScopes(c, bucket)
 }
 
 // AddBucketScope operation middleware
@@ -236,6 +275,8 @@ func RegisterHandlersWithOptions(router fiber.Router, si ServerInterface, option
 	router.Delete(options.BaseURL+"/data/buckets/:bucket", wrapper.DeleteBucket)
 
 	router.Delete(options.BaseURL+"/data/buckets/:bucket/scopes", wrapper.DeleteBucketScope)
+
+	router.Get(options.BaseURL+"/data/buckets/:bucket/scopes", wrapper.ListBucketScopes)
 
 	router.Post(options.BaseURL+"/data/buckets/:bucket/scopes", wrapper.AddBucketScope)
 
@@ -452,6 +493,55 @@ func (response DeleteBucketScope500Response) VisitDeleteBucketScopeResponse(ctx 
 	return nil
 }
 
+type ListBucketScopesRequestObject struct {
+	Bucket string `json:"bucket"`
+}
+
+type ListBucketScopesResponseObject interface {
+	VisitListBucketScopesResponse(ctx fiber.Ctx) error
+}
+
+type ListBucketScopes200JSONResponse []BucketScopeResponse
+
+func (response ListBucketScopes200JSONResponse) VisitListBucketScopesResponse(ctx fiber.Ctx) error {
+	ctx.Response().Header.Set("Content-Type", "application/json")
+	ctx.Status(200)
+
+	return ctx.JSON(&response)
+}
+
+type ListBucketScopes401Response struct {
+}
+
+func (response ListBucketScopes401Response) VisitListBucketScopesResponse(ctx fiber.Ctx) error {
+	ctx.Status(401)
+	return nil
+}
+
+type ListBucketScopes403Response struct {
+}
+
+func (response ListBucketScopes403Response) VisitListBucketScopesResponse(ctx fiber.Ctx) error {
+	ctx.Status(403)
+	return nil
+}
+
+type ListBucketScopes404Response struct {
+}
+
+func (response ListBucketScopes404Response) VisitListBucketScopesResponse(ctx fiber.Ctx) error {
+	ctx.Status(404)
+	return nil
+}
+
+type ListBucketScopes500Response struct {
+}
+
+func (response ListBucketScopes500Response) VisitListBucketScopesResponse(ctx fiber.Ctx) error {
+	ctx.Status(500)
+	return nil
+}
+
 type AddBucketScopeRequestObject struct {
 	Bucket string `json:"bucket"`
 	Body   *AddBucketScopeJSONRequestBody
@@ -578,9 +668,12 @@ type StrictServerInterface interface {
 	// Delete bucket credential
 	// (DELETE /data/buckets/{bucket})
 	DeleteBucket(ctx context.Context, request DeleteBucketRequestObject) (DeleteBucketResponseObject, error)
-	// Remove an org/project scope from an existing bucket
+	// Remove a specific scope from an existing bucket
 	// (DELETE /data/buckets/{bucket}/scopes)
 	DeleteBucketScope(ctx context.Context, request DeleteBucketScopeRequestObject) (DeleteBucketScopeResponseObject, error)
+	// List org/project scopes for a bucket
+	// (GET /data/buckets/{bucket}/scopes)
+	ListBucketScopes(ctx context.Context, request ListBucketScopesRequestObject) (ListBucketScopesResponseObject, error)
 	// Add an org/project scope to an existing bucket
 	// (POST /data/buckets/{bucket}/scopes)
 	AddBucketScope(ctx context.Context, request AddBucketScopeRequestObject) (AddBucketScopeResponseObject, error)
@@ -705,6 +798,33 @@ func (sh *strictHandler) DeleteBucketScope(ctx fiber.Ctx, bucket string, params 
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	} else if validResponse, ok := response.(DeleteBucketScopeResponseObject); ok {
 		if err := validResponse.VisitDeleteBucketScopeResponse(ctx); err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, err.Error())
+		}
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// ListBucketScopes operation middleware
+func (sh *strictHandler) ListBucketScopes(ctx fiber.Ctx, bucket string) error {
+	var request ListBucketScopesRequestObject
+
+	request.Bucket = bucket
+
+	handler := func(ctx fiber.Ctx, request interface{}) (interface{}, error) {
+		return sh.ssi.ListBucketScopes(ctx.Context(), request.(ListBucketScopesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListBucketScopes")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	} else if validResponse, ok := response.(ListBucketScopesResponseObject); ok {
+		if err := validResponse.VisitListBucketScopesResponse(ctx); err != nil {
 			return fiber.NewError(fiber.StatusBadRequest, err.Error())
 		}
 	} else if response != nil {

@@ -19,19 +19,8 @@ func TestBucketPolicyHelpers(t *testing.T) {
 	resource, _ := sycommon.ResourcePath("org", "proj")
 
 	t.Run("global bucket control access", func(t *testing.T) {
-		ctx := policyTestContext("gen3", true, map[string]map[string]bool{
-			"/services/internal/buckets": {"read": true, "create": true},
-		})
-
-		if !bucketControlAllowed(ctx, "read") {
-			t.Fatal("expected global bucket control access")
-		}
-		if !bucketControlOpenAccess(context.Background(), "read") {
-			t.Fatal("expected open access outside gen3 mode")
-		}
-		emptyCtx := policyTestContext("gen3", true, nil)
-		if bucketControlAllowed(emptyCtx, "read") {
-			t.Fatal("expected no global bucket control access without privileges")
+		if !resourceAllowed(context.Background(), resource, "read") {
+			t.Fatal("expected open access outside enforced authz")
 		}
 	})
 

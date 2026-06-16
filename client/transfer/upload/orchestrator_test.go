@@ -164,6 +164,61 @@ func TestRegisterFilePreservesScopedRoutingMetadata(t *testing.T) {
 	}
 }
 
+func TestRegisterFilePrefersExplicitControlledAccessOverExistingObject(t *testing.T) {
+	t.Parallel()
+
+	file := createTempFileWithData(t, "payload")
+	defer file.Close()
+
+	name := "payload.bin"
+	targetControlledAccess := []string{"/organization/dst/project/copied"}
+	sourceControlledAccess := []string{"/organization/src/project/original"}
+	accessMethods := []drsapi.AccessMethod{{
+		Type: "s3",
+		AccessUrl: &struct {
+			Headers *[]string `json:"headers,omitempty"`
+			Url     string    `json:"url"`
+		}{Url: "s3://syfon-bucket/original/3d71f043937a09b77826109db4f2b47c46f19923ef823f6a777a15fde0b2c9c7"},
+	}}
+	obj := &drsapi.DrsObject{
+		Id:               "requested-object-id",
+		Name:             &name,
+		Size:             7,
+		ControlledAccess: &targetControlledAccess,
+		Checksums: []drsapi.Checksum{{
+			Type:     "sha256",
+			Checksum: "3d71f043937a09b77826109db4f2b47c46f19923ef823f6a777a15fde0b2c9c7",
+		}},
+	}
+
+	uploader := &uploaderStub{}
+	metadata := &metadataClientStub{
+		registeredID: "server-object-id",
+		object: drsapi.DrsObject{
+			Id:               "server-object-id",
+			Name:             &name,
+			Size:             7,
+			ControlledAccess: &sourceControlledAccess,
+			AccessMethods:    &accessMethods,
+			Checksums:        obj.Checksums,
+		},
+	}
+
+	if _, err := RegisterFile(context.Background(), uploader, metadata, obj, file.Name(), "syfon-bucket"); err != nil {
+		t.Fatalf("RegisterFile returned error: %v", err)
+	}
+	if len(metadata.requests) != 1 {
+		t.Fatalf("expected single final register call, got %d", len(metadata.requests))
+	}
+	candidate := metadata.requests[0].Candidates[0]
+	if candidate.ControlledAccess == nil || len(*candidate.ControlledAccess) != 1 || (*candidate.ControlledAccess)[0] != targetControlledAccess[0] {
+		t.Fatalf("expected explicit controlled_access to win, got %#v", candidate.ControlledAccess)
+	}
+	if candidate.AccessMethods == nil || len(*candidate.AccessMethods) == 0 {
+		t.Fatalf("expected existing access methods to still be preserved, got %#v", candidate.AccessMethods)
+	}
+}
+
 func TestRegisterFileSinglePartStreamsProgress(t *testing.T) {
 	t.Parallel()
 

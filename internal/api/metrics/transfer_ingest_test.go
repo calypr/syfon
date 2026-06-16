@@ -12,6 +12,8 @@ import (
 	"github.com/calypr/syfon/internal/models"
 )
 
+func ptr[T any](v T) *T { return &v }
+
 func TestNormalizeTransferDirection(t *testing.T) {
 	if got := normalizeTransferDirection("upload"); got != models.ProviderTransferDirectionUpload {
 		t.Fatalf("expected upload, got %q", got)
@@ -56,25 +58,43 @@ func TestTransferPayloadToModel(t *testing.T) {
 
 func TestCheckProviderMetricsIngestAuth(t *testing.T) {
 	ctxNonGen3 := metricsTestContext(context.Background(), "local", true, true, nil)
-	if status, ok := checkProviderMetricsIngestAuth(ctxNonGen3); !ok || status != 0 {
+	body := &metricsapi.RecordProviderTransferEventsJSONRequestBody{
+		Events: []metricsapi.ProviderTransferEvent{{
+			Organization: ptr("org-a"),
+			Project:      ptr("proj-a"),
+		}},
+	}
+	if status, ok := checkProviderMetricsIngestAuth(ctxNonGen3, body); !ok || status != 0 {
 		t.Fatalf("expected non-gen3 auth allowed, got status=%d ok=%v", status, ok)
 	}
 
 	ctxMissingHeader := metricsTestContext(context.Background(), "gen3", false, false, nil)
-	if status, ok := checkProviderMetricsIngestAuth(ctxMissingHeader); ok || status != http.StatusUnauthorized {
+	if status, ok := checkProviderMetricsIngestAuth(ctxMissingHeader, body); ok || status != http.StatusUnauthorized {
 		t.Fatalf("expected unauthorized for missing header, got status=%d ok=%v", status, ok)
 	}
 
 	ctxForbidden := metricsTestContext(context.Background(), "gen3", true, true, map[string]map[string]bool{})
-	if status, ok := checkProviderMetricsIngestAuth(ctxForbidden); ok || status != http.StatusForbidden {
+	if status, ok := checkProviderMetricsIngestAuth(ctxForbidden, body); ok || status != http.StatusForbidden {
 		t.Fatalf("expected forbidden without ingest privilege, got status=%d ok=%v", status, ok)
 	}
 
 	ctxAllowed := metricsTestContext(context.Background(), "gen3", true, true, map[string]map[string]bool{
-		common.MetricsIngestResource: {"create": true},
+		"/programs/org-a/projects/proj-a": {"create": true},
 	})
-	if status, ok := checkProviderMetricsIngestAuth(ctxAllowed); !ok || status != 0 {
-		t.Fatalf("expected allowed with ingest create privilege, got status=%d ok=%v", status, ok)
+	if status, ok := checkProviderMetricsIngestAuth(ctxAllowed, body); !ok || status != 0 {
+		t.Fatalf("expected allowed with scoped create privilege, got status=%d ok=%v", status, ok)
+	}
+
+	ctxOrgAllowed := metricsTestContext(context.Background(), "gen3", true, true, map[string]map[string]bool{
+		"/programs/org-a": {"update": true},
+	})
+	orgBody := &metricsapi.RecordProviderTransferEventsJSONRequestBody{
+		Events: []metricsapi.ProviderTransferEvent{{
+			Organization: ptr("org-a"),
+		}},
+	}
+	if status, ok := checkProviderMetricsIngestAuth(ctxOrgAllowed, orgBody); !ok || status != 0 {
+		t.Fatalf("expected allowed with org-scoped update privilege, got status=%d ok=%v", status, ok)
 	}
 }
 
@@ -89,4 +109,3 @@ func TestRecordProviderTransferEventsAuthResponse(t *testing.T) {
 		t.Fatalf("expected 400 response object")
 	}
 }
-

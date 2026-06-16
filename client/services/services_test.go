@@ -56,18 +56,28 @@ func (f *fakeRequester) decodeInto(out any) error {
 }
 
 type fakeBucketClient struct {
-	listResp     *bucketapi.ListBucketsResp
-	listErr      error
-	putResp      *bucketapi.PutBucketResp
-	putErr       error
-	putReq       *bucketapi.PutBucketRequest
-	deleteResp   *bucketapi.DeleteBucketResp
-	deleteErr    error
-	deleteBucket string
-	addScopeResp *bucketapi.AddBucketScopeResp
-	addScopeErr  error
-	addScopeReq  *bucketapi.AddBucketScopeRequest
-	addScopePath string
+	listResp          *bucketapi.ListBucketsResp
+	listErr           error
+	putResp           *bucketapi.PutBucketResp
+	putErr            error
+	putReq            *bucketapi.PutBucketRequest
+	deleteResp        *bucketapi.DeleteBucketResp
+	deleteErr         error
+	deleteBucket      string
+	deleteScopeResp   *bucketapi.DeleteBucketScopeResp
+	deleteScopeErr    error
+	deleteScopeBucket string
+	deleteScopeParams *bucketapi.DeleteBucketScopeParams
+	deleteProjectResp *bucketapi.DeleteProjectDataResp
+	deleteProjectErr  error
+	deleteProjectOrg  string
+	deleteProjectID   string
+	addScopeResp      *bucketapi.AddBucketScopeResp
+	addScopeErr       error
+	addScopeReq       *bucketapi.AddBucketScopeRequest
+	addScopePath      string
+	listScopesResp    *bucketapi.ListBucketScopesResp
+	listScopesErr     error
 }
 
 func (f *fakeBucketClient) ListBucketsWithResponse(ctx context.Context, reqEditors ...bucketapi.RequestEditorFn) (*bucketapi.ListBucketsResp, error) {
@@ -90,7 +100,12 @@ func (f *fakeBucketClient) DeleteBucketWithResponse(ctx context.Context, bucket 
 }
 
 func (f *fakeBucketClient) DeleteBucketScopeWithResponse(ctx context.Context, bucket string, params *bucketapi.DeleteBucketScopeParams, reqEditors ...bucketapi.RequestEditorFn) (*bucketapi.DeleteBucketScopeResp, error) {
-	return nil, errors.New("unused")
+	f.deleteScopeBucket = bucket
+	if params != nil {
+		copy := *params
+		f.deleteScopeParams = &copy
+	}
+	return f.deleteScopeResp, f.deleteScopeErr
 }
 
 func (f *fakeBucketClient) AddBucketScopeWithBodyWithResponse(ctx context.Context, bucket string, contentType string, body io.Reader, reqEditors ...bucketapi.RequestEditorFn) (*bucketapi.AddBucketScopeResp, error) {
@@ -104,8 +119,14 @@ func (f *fakeBucketClient) AddBucketScopeWithResponse(ctx context.Context, bucke
 	return f.addScopeResp, f.addScopeErr
 }
 
+func (f *fakeBucketClient) ListBucketScopesWithResponse(ctx context.Context, bucket string, reqEditors ...bucketapi.RequestEditorFn) (*bucketapi.ListBucketScopesResp, error) {
+	return f.listScopesResp, f.listScopesErr
+}
+
 func (f *fakeBucketClient) DeleteProjectDataWithResponse(ctx context.Context, organization string, projectId string, reqEditors ...bucketapi.RequestEditorFn) (*bucketapi.DeleteProjectDataResp, error) {
-	return nil, errors.New("unused")
+	f.deleteProjectOrg = organization
+	f.deleteProjectID = projectId
+	return f.deleteProjectResp, f.deleteProjectErr
 }
 
 type fakeMetricsClient struct {
@@ -245,9 +266,10 @@ func TestBucketsService(t *testing.T) {
 		provider := "s3"
 		region := "us-east-1"
 		fake := &fakeBucketClient{
-			putResp:      &bucketapi.PutBucketResp{HTTPResponse: &http.Response{StatusCode: http.StatusCreated}},
-			deleteResp:   &bucketapi.DeleteBucketResp{HTTPResponse: &http.Response{StatusCode: http.StatusNoContent}},
-			addScopeResp: &bucketapi.AddBucketScopeResp{HTTPResponse: &http.Response{StatusCode: http.StatusCreated}},
+			putResp:         &bucketapi.PutBucketResp{HTTPResponse: &http.Response{StatusCode: http.StatusCreated}},
+			deleteResp:      &bucketapi.DeleteBucketResp{HTTPResponse: &http.Response{StatusCode: http.StatusNoContent}},
+			deleteScopeResp: &bucketapi.DeleteBucketScopeResp{HTTPResponse: &http.Response{StatusCode: http.StatusNoContent}},
+			addScopeResp:    &bucketapi.AddBucketScopeResp{HTTPResponse: &http.Response{StatusCode: http.StatusCreated}},
 		}
 		service := NewBucketsService(fake)
 		putReq := bucketapi.PutBucketRequest{Bucket: "bucket-a", Organization: "org", ProjectId: "proj", Provider: &provider, Region: &region}
@@ -270,18 +292,51 @@ func TestBucketsService(t *testing.T) {
 		if fake.addScopeReq == nil || fake.addScopeReq.ProjectId != "proj" || fake.addScopePath != "bucket-a" {
 			t.Fatalf("unexpected add scope request: req=%+v bucket=%q", fake.addScopeReq, fake.addScopePath)
 		}
+		if err := service.DeleteScope(context.Background(), "bucket-a", "org", "s3://bucket-a/path", "proj"); err != nil {
+			t.Fatalf("DeleteScope returned error: %v", err)
+		}
+		if fake.deleteScopeBucket != "bucket-a" || fake.deleteScopeParams == nil || fake.deleteScopeParams.Organization != "org" || fake.deleteScopeParams.Path != "s3://bucket-a/path" || fake.deleteScopeParams.ProjectId == nil || *fake.deleteScopeParams.ProjectId != "proj" {
+			t.Fatalf("unexpected delete scope request: bucket=%q params=%+v", fake.deleteScopeBucket, fake.deleteScopeParams)
+		}
+		fake.deleteProjectResp = &bucketapi.DeleteProjectDataResp{
+			HTTPResponse: &http.Response{StatusCode: http.StatusOK},
+			JSON200: &bucketapi.DeleteProjectDataResponse{
+				Organization:        "org",
+				ProjectId:           "proj",
+				DeletedObjects:      5,
+				DeletedBucketScopes: 1,
+			},
+		}
+		resp, err := service.DeleteProjectData(context.Background(), "org", "proj")
+		if err != nil {
+			t.Fatalf("DeleteProjectData returned error: %v", err)
+		}
+		if fake.deleteProjectOrg != "org" || fake.deleteProjectID != "proj" {
+			t.Fatalf("unexpected delete project request: org=%q project=%q", fake.deleteProjectOrg, fake.deleteProjectID)
+		}
+		if resp.DeletedObjects != 5 || resp.DeletedBucketScopes != 1 {
+			t.Fatalf("unexpected delete project response: %+v", resp)
+		}
 	})
 
 	t.Run("put and delete failures", func(t *testing.T) {
 		service := NewBucketsService(&fakeBucketClient{
-			putResp:    &bucketapi.PutBucketResp{HTTPResponse: &http.Response{StatusCode: http.StatusBadRequest}},
-			deleteResp: &bucketapi.DeleteBucketResp{HTTPResponse: &http.Response{StatusCode: http.StatusBadGateway}},
+			putResp:           &bucketapi.PutBucketResp{HTTPResponse: &http.Response{StatusCode: http.StatusBadRequest}},
+			deleteResp:        &bucketapi.DeleteBucketResp{HTTPResponse: &http.Response{StatusCode: http.StatusBadGateway}},
+			deleteScopeResp:   &bucketapi.DeleteBucketScopeResp{HTTPResponse: &http.Response{StatusCode: http.StatusBadGateway}},
+			deleteProjectResp: &bucketapi.DeleteProjectDataResp{HTTPResponse: &http.Response{StatusCode: http.StatusBadGateway}},
 		})
 		if err := service.Put(context.Background(), bucketapi.PutBucketRequest{}); err == nil {
 			t.Fatal("expected put failure")
 		}
 		if err := service.Delete(context.Background(), "bucket-a"); err == nil {
 			t.Fatal("expected delete failure")
+		}
+		if err := service.DeleteScope(context.Background(), "bucket-a", "org", "s3://bucket-a/path", "proj"); err == nil {
+			t.Fatal("expected delete scope failure")
+		}
+		if _, err := service.DeleteProjectData(context.Background(), "org", "proj"); err == nil {
+			t.Fatal("expected delete project failure")
 		}
 	})
 }

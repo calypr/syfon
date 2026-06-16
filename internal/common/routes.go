@@ -9,6 +9,7 @@ const (
 	RouteInternalMultipartInit     = "/data/multipart/init"
 	RouteInternalMultipartUpload   = "/data/multipart/upload"
 	RouteInternalMultipartComplete = "/data/multipart/complete"
+	RouteInternalInspectObject    = "/data/inspect"
 	RouteInternalBuckets           = "/data/buckets"
 	RouteInternalBucketDetail      = "/data/buckets/{bucket}"
 	RouteInternalBucketScopes      = "/data/buckets/{bucket}/scopes"

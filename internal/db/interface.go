@@ -81,7 +81,7 @@ type CredentialStore interface {
 	SaveS3Credential(ctx context.Context, cred *models.S3Credential) error
 	DeleteS3Credential(ctx context.Context, bucket string) error
 	CreateBucketScope(ctx context.Context, scope *models.BucketScope) error
-	DeleteBucketScope(ctx context.Context, organization, projectID, credentialID string) error
+	DeleteBucketScope(ctx context.Context, organization, projectID, credentialID, pathPrefix string) error
 	GetBucketScope(ctx context.Context, organization, projectID string) (*models.BucketScope, error)
 	ListBucketScopes(ctx context.Context) ([]models.BucketScope, error)
 }

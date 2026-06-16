@@ -485,7 +485,7 @@ func (m *MockDatabase) CreateBucketScope(ctx context.Context, scope *models.Buck
 	return nil
 }
 
-func (m *MockDatabase) DeleteBucketScope(ctx context.Context, organization, projectID, credentialID string) error {
+func (m *MockDatabase) DeleteBucketScope(ctx context.Context, organization, projectID, credentialID, pathPrefix string) error {
 	if m.BucketScopes == nil {
 		return fmt.Errorf("%w: bucket scope not found", common.ErrNotFound)
 	}
@@ -496,6 +496,9 @@ func (m *MockDatabase) DeleteBucketScope(ctx context.Context, organization, proj
 	}
 	if strings.TrimSpace(scope.CredentialID) != strings.TrimSpace(credentialID) &&
 		strings.TrimSpace(scope.Bucket) != strings.TrimSpace(credentialID) {
+		return fmt.Errorf("%w: bucket scope not found", common.ErrNotFound)
+	}
+	if strings.Trim(strings.TrimSpace(scope.PathPrefix), "/") != strings.Trim(strings.TrimSpace(pathPrefix), "/") {
 		return fmt.Errorf("%w: bucket scope not found", common.ErrNotFound)
 	}
 	delete(m.BucketScopes, k)

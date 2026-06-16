@@ -1,6 +1,7 @@
 package internaldrs
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/calypr/syfon/apigen/server/bucketapi"
@@ -17,6 +18,7 @@ func registerInternalBucketRoutes(router fiber.Router, om *core.ObjectManager) {
 	router.Get(common.RouteInternalBuckets, func(c fiber.Ctx) error { return handleInternalBucketsFiber(c, om) })
 	router.Put(common.RouteInternalBuckets, func(c fiber.Ctx) error { return handleInternalPutBucketFiber(c, om) })
 	router.Delete(routeutil.FiberPath(common.RouteInternalBucketDetail), func(c fiber.Ctx) error { return handleInternalDeleteBucketFiber(c, om) })
+	router.Get(routeutil.FiberPath(common.RouteInternalBucketScopes), func(c fiber.Ctx) error { return handleInternalListBucketScopesFiber(c, om) })
 	router.Post(routeutil.FiberPath(common.RouteInternalBucketScopes), func(c fiber.Ctx) error { return handleInternalCreateBucketScopeFiber(c, om) })
 	router.Delete(routeutil.FiberPath(common.RouteInternalBucketScopes), func(c fiber.Ctx) error { return handleInternalDeleteBucketScopeFiber(c, om) })
 	router.Delete(routeutil.FiberPath(common.RouteInternalProjectCleanup), func(c fiber.Ctx) error { return handleInternalDeleteProjectFiber(c, om) })
@@ -230,15 +232,54 @@ func handleInternalDeleteBucketScopeFiber(c fiber.Ctx, om *core.ObjectManager) e
 	if routeCredentialID == "" {
 		return apiutil.Reject(c, fiber.StatusBadRequest, "credential id is required")
 	}
+	hasPathQuery := c.Request().URI().QueryArgs().Has("path")
 	organization := strings.TrimSpace(c.Query("organization"))
+	scopePath := strings.TrimSpace(c.Query("path"))
 	projectID := strings.TrimSpace(c.Query("project_id"))
-	if organization == "" || projectID == "" {
-		return apiutil.Reject(c, fiber.StatusBadRequest, "organization and project_id are required")
+	if organization == "" || !hasPathQuery {
+		return apiutil.Reject(c, fiber.StatusBadRequest, "organization and path are required")
 	}
 	if err := authorizeBucketScopeWrite(c.Context(), organization, projectID, "delete", "update"); err != nil {
 		return apiutil.HandleError(c, err)
 	}
-	if err := om.DeleteBucketScope(c.Context(), organization, projectID, routeCredentialID); err != nil {
+	pathPrefix := ""
+	if scopePath != "" {
+		cred, err := om.GetS3Credential(c.Context(), routeCredentialID)
+		if err != nil {
+			return apiutil.HandleError(c, err)
+		}
+		pathPrefix, err = common.NormalizeStoragePath(scopePath, cred.Bucket)
+		if err != nil {
+			return apiutil.Reject(c, fiber.StatusBadRequest, err.Error())
+		}
+	}
+	scopes, err := om.ListBucketScopes(c.Context())
+	if err != nil {
+		return apiutil.HandleError(c, err)
+	}
+	matchCount := 0
+	for _, scope := range scopes {
+		if !(strings.EqualFold(scope.Bucket, routeCredentialID) || strings.EqualFold(scope.CredentialID, routeCredentialID)) {
+			continue
+		}
+		if strings.TrimSpace(scope.Organization) != organization {
+			continue
+		}
+		if strings.TrimSpace(scope.ProjectID) != projectID {
+			continue
+		}
+		if strings.Trim(strings.TrimSpace(scope.PathPrefix), "/") != pathPrefix {
+			continue
+		}
+		matchCount++
+	}
+	if matchCount == 0 {
+		return apiutil.Reject(c, fiber.StatusNotFound, "bucket scope not found")
+	}
+	if matchCount > 1 {
+		return apiutil.Reject(c, fiber.StatusConflict, "bucket scope delete matched multiple rows")
+	}
+	if err := om.DeleteBucketScope(c.Context(), organization, projectID, routeCredentialID, pathPrefix); err != nil {
 		return apiutil.HandleError(c, err)
 	}
 	return c.SendStatus(fiber.StatusNoContent)
@@ -278,7 +319,7 @@ func handleInternalDeleteProjectFiber(c fiber.Ctx, om *core.ObjectManager) error
 		if credentialID == "" {
 			continue
 		}
-		if err := om.DeleteBucketScope(c.Context(), organization, projectID, credentialID); err != nil {
+		if err := om.DeleteBucketScope(c.Context(), organization, projectID, credentialID, scope.PathPrefix); err != nil {
 			return apiutil.HandleError(c, err)
 		}
 		deletedScopes++
@@ -290,4 +331,42 @@ func handleInternalDeleteProjectFiber(c fiber.Ctx, om *core.ObjectManager) error
 		DeletedObjects:      deletedObjects,
 		DeletedBucketScopes: deletedScopes,
 	})
+}
+
+func handleInternalListBucketScopesFiber(c fiber.Ctx, om *core.ObjectManager) error {
+	if apimiddleware.MissingGen3AuthHeader(c.Context()) {
+		return apiutil.HandleError(c, common.ErrUnauthorized)
+	}
+	routeCredentialID := strings.TrimSpace(c.Params("bucket"))
+	if routeCredentialID == "" {
+		return apiutil.Reject(c, fiber.StatusBadRequest, "credential id is required")
+	}
+
+	scopes, err := om.ListBucketScopes(c.Context())
+	if err != nil {
+		return apiutil.HandleError(c, err)
+	}
+
+	result := []bucketapi.BucketScopeResponse{}
+	for _, scope := range scopes {
+		if strings.EqualFold(scope.Bucket, routeCredentialID) || strings.EqualFold(scope.CredentialID, routeCredentialID) {
+			if !bucketScopeAllowed(c.Context(), scope, "read") {
+				continue
+			}
+			path := ""
+			if scope.PathPrefix != "" {
+				scheme := "s3"
+				if cred, err := om.GetS3Credential(c.Context(), scope.CredentialID); err == nil && cred != nil {
+					scheme = common.ProviderToScheme(cred.Provider)
+				}
+				path = fmt.Sprintf("%s://%s/%s", scheme, scope.Bucket, scope.PathPrefix)
+			}
+			result = append(result, bucketapi.BucketScopeResponse{
+				Organization: scope.Organization,
+				ProjectId:    scope.ProjectID,
+				Path:         &path,
+			})
+		}
+	}
+	return c.JSON(result)
 }
