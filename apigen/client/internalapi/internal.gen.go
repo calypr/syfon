@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	externalRef0 "github.com/calypr/syfon/apigen/client/drs"
 	"github.com/oapi-codegen/runtime"
@@ -32,8 +33,7 @@ type BulkDocumentsRequest0 = []string
 
 // BulkDocumentsRequest1 defines model for .
 type BulkDocumentsRequest1 struct {
-	Dids *[]string `json:"dids,omitempty"`
-	Ids  *[]string `json:"ids,omitempty"`
+	Ids *[]string `json:"ids,omitempty"`
 }
 
 // BulkHashesRequest defines model for BulkHashesRequest.
@@ -204,6 +204,89 @@ type ListRecordsResponse struct {
 	Records     *[]InternalRecord `json:"records,omitempty"`
 }
 
+// StorageCleanupApplyRequest defines model for StorageCleanupApplyRequest.
+type StorageCleanupApplyRequest struct {
+	CheckStorage          *bool     `json:"check_storage,omitempty"`
+	DeleteRepoOrphans     *bool     `json:"delete_repo_orphans,omitempty"`
+	DeleteStaleDuplicates *bool     `json:"delete_stale_duplicates,omitempty"`
+	DryRun                *bool     `json:"dry_run,omitempty"`
+	ExpectedPaths         *[]string `json:"expected_paths,omitempty"`
+	Organization          string    `json:"organization"`
+	PathPrefix            *string   `json:"path_prefix,omitempty"`
+	Project               string    `json:"project"`
+	SelectedFindingKinds  *[]string `json:"selected_finding_kinds,omitempty"`
+	SelectedObjectIds     *[]string `json:"selected_object_ids,omitempty"`
+	SelectedPaths         *[]string `json:"selected_paths,omitempty"`
+}
+
+// StorageCleanupApplyResult defines model for StorageCleanupApplyResult.
+type StorageCleanupApplyResult struct {
+	DeletedRecordIds    *[]string                           `json:"deleted_record_ids,omitempty"`
+	DryRun              *bool                               `json:"dry_run,omitempty"`
+	RepoDeletePaths     *[]string                           `json:"repo_delete_paths,omitempty"`
+	Report              *StorageCleanupReport               `json:"report,omitempty"`
+	Skipped             *[]StorageCleanupSkipped            `json:"skipped,omitempty"`
+	StoragePurgeResults *[]StorageCleanupStoragePurgeResult `json:"storage_purge_results,omitempty"`
+}
+
+// StorageCleanupAuditRequest defines model for StorageCleanupAuditRequest.
+type StorageCleanupAuditRequest struct {
+	CheckStorage  *bool     `json:"check_storage,omitempty"`
+	ExpectedPaths *[]string `json:"expected_paths,omitempty"`
+	Organization  string    `json:"organization"`
+	PathPrefix    *string   `json:"path_prefix,omitempty"`
+	Project       string    `json:"project"`
+}
+
+// StorageCleanupFinding defines model for StorageCleanupFinding.
+type StorageCleanupFinding struct {
+	Kind                *string                      `json:"kind,omitempty"`
+	Message             *string                      `json:"message,omitempty"`
+	NormalizedPath      *string                      `json:"normalized_path,omitempty"`
+	RecommendedAction   *string                      `json:"recommended_action,omitempty"`
+	Records             *[]StorageCleanupRecordAudit `json:"records,omitempty"`
+	RepoDeleteCandidate *bool                        `json:"repo_delete_candidate,omitempty"`
+	Severity            *string                      `json:"severity,omitempty"`
+}
+
+// StorageCleanupRecordAudit defines model for StorageCleanupRecordAudit.
+type StorageCleanupRecordAudit struct {
+	CurrentAccessUrls *[]string  `json:"current_access_urls,omitempty"`
+	DownloadCount     *int64     `json:"download_count,omitempty"`
+	LastDownloadTime  *time.Time `json:"last_download_time,omitempty"`
+	NormalizedPath    *string    `json:"normalized_path,omitempty"`
+	ObjectId          *string    `json:"object_id,omitempty"`
+	Size              *int64     `json:"size,omitempty"`
+	StorageMessage    *string    `json:"storage_message,omitempty"`
+	StorageStatus     *string    `json:"storage_status,omitempty"`
+	UpdatedTime       *time.Time `json:"updated_time,omitempty"`
+}
+
+// StorageCleanupReport defines model for StorageCleanupReport.
+type StorageCleanupReport struct {
+	Findings     *[]StorageCleanupFinding `json:"findings,omitempty"`
+	Organization *string                  `json:"organization,omitempty"`
+	PathPrefix   *string                  `json:"path_prefix,omitempty"`
+	Project      *string                  `json:"project,omitempty"`
+	Scanned      *int                     `json:"scanned,omitempty"`
+	Summary      *map[string]int          `json:"summary,omitempty"`
+}
+
+// StorageCleanupSkipped defines model for StorageCleanupSkipped.
+type StorageCleanupSkipped struct {
+	Kind           *string `json:"kind,omitempty"`
+	NormalizedPath *string `json:"normalized_path,omitempty"`
+	ObjectId       *string `json:"object_id,omitempty"`
+	Reason         *string `json:"reason,omitempty"`
+}
+
+// StorageCleanupStoragePurgeResult defines model for StorageCleanupStoragePurgeResult.
+type StorageCleanupStoragePurgeResult struct {
+	Message  *string `json:"message,omitempty"`
+	ObjectId *string `json:"object_id,omitempty"`
+	Purged   *bool   `json:"purged,omitempty"`
+}
+
 // InternalDownloadParams defines parameters for InternalDownload.
 type InternalDownloadParams struct {
 	Redirect  *bool `form:"redirect,omitempty" json:"redirect,omitempty"`
@@ -254,6 +337,12 @@ type InternalMultipartInitJSONRequestBody = InternalMultipartInitRequest
 
 // InternalMultipartUploadJSONRequestBody defines body for InternalMultipartUpload for application/json ContentType.
 type InternalMultipartUploadJSONRequestBody = InternalMultipartUploadRequest
+
+// InternalStorageCleanupApplyJSONRequestBody defines body for InternalStorageCleanupApply for application/json ContentType.
+type InternalStorageCleanupApplyJSONRequestBody = StorageCleanupApplyRequest
+
+// InternalStorageCleanupAuditJSONRequestBody defines body for InternalStorageCleanupAudit for application/json ContentType.
+type InternalStorageCleanupAuditJSONRequestBody = StorageCleanupAuditRequest
 
 // InternalUploadBlankJSONRequestBody defines body for InternalUploadBlank for application/json ContentType.
 type InternalUploadBlankJSONRequestBody = InternalUploadBlankRequest
@@ -441,6 +530,16 @@ type ClientInterface interface {
 
 	InternalMultipartUpload(ctx context.Context, body InternalMultipartUploadJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// InternalStorageCleanupApplyWithBody request with any body
+	InternalStorageCleanupApplyWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	InternalStorageCleanupApply(ctx context.Context, body InternalStorageCleanupApplyJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// InternalStorageCleanupAuditWithBody request with any body
+	InternalStorageCleanupAuditWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	InternalStorageCleanupAudit(ctx context.Context, body InternalStorageCleanupAuditJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// InternalUploadBlankWithBody request with any body
 	InternalUploadBlankWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -593,6 +692,54 @@ func (c *Client) InternalMultipartUploadWithBody(ctx context.Context, contentTyp
 
 func (c *Client) InternalMultipartUpload(ctx context.Context, body InternalMultipartUploadJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewInternalMultipartUploadRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) InternalStorageCleanupApplyWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewInternalStorageCleanupApplyRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) InternalStorageCleanupApply(ctx context.Context, body InternalStorageCleanupApplyJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewInternalStorageCleanupApplyRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) InternalStorageCleanupAuditWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewInternalStorageCleanupAuditRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) InternalStorageCleanupAudit(ctx context.Context, body InternalStorageCleanupAuditJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewInternalStorageCleanupAuditRequest(c.Server, body)
 	if err != nil {
 		return nil, err
 	}
@@ -1140,6 +1287,86 @@ func NewInternalMultipartUploadRequestWithBody(server string, contentType string
 	}
 
 	operationPath := fmt.Sprintf("/data/multipart/upload")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewInternalStorageCleanupApplyRequest calls the generic InternalStorageCleanupApply builder with application/json body
+func NewInternalStorageCleanupApplyRequest(server string, body InternalStorageCleanupApplyJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewInternalStorageCleanupApplyRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewInternalStorageCleanupApplyRequestWithBody generates requests for InternalStorageCleanupApply with any type of body
+func NewInternalStorageCleanupApplyRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/data/repair/storage-cleanup/apply")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewInternalStorageCleanupAuditRequest calls the generic InternalStorageCleanupAudit builder with application/json body
+func NewInternalStorageCleanupAuditRequest(server string, body InternalStorageCleanupAuditJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewInternalStorageCleanupAuditRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewInternalStorageCleanupAuditRequestWithBody generates requests for InternalStorageCleanupAudit with any type of body
+func NewInternalStorageCleanupAuditRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/data/repair/storage-cleanup/audit")
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -2099,6 +2326,16 @@ type ClientWithResponsesInterface interface {
 
 	InternalMultipartUploadWithResponse(ctx context.Context, body InternalMultipartUploadJSONRequestBody, reqEditors ...RequestEditorFn) (*InternalMultipartUploadResponse, error)
 
+	// InternalStorageCleanupApplyWithBodyWithResponse request with any body
+	InternalStorageCleanupApplyWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*InternalStorageCleanupApplyResponse, error)
+
+	InternalStorageCleanupApplyWithResponse(ctx context.Context, body InternalStorageCleanupApplyJSONRequestBody, reqEditors ...RequestEditorFn) (*InternalStorageCleanupApplyResponse, error)
+
+	// InternalStorageCleanupAuditWithBodyWithResponse request with any body
+	InternalStorageCleanupAuditWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*InternalStorageCleanupAuditResponse, error)
+
+	InternalStorageCleanupAuditWithResponse(ctx context.Context, body InternalStorageCleanupAuditJSONRequestBody, reqEditors ...RequestEditorFn) (*InternalStorageCleanupAuditResponse, error)
+
 	// InternalUploadBlankWithBodyWithResponse request with any body
 	InternalUploadBlankWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*InternalUploadBlankResponse, error)
 
@@ -2268,6 +2505,50 @@ func (r InternalMultipartUploadResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r InternalMultipartUploadResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type InternalStorageCleanupApplyResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *StorageCleanupApplyResult
+}
+
+// Status returns HTTPResponse.Status
+func (r InternalStorageCleanupApplyResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r InternalStorageCleanupApplyResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type InternalStorageCleanupAuditResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *StorageCleanupReport
+}
+
+// Status returns HTTPResponse.Status
+func (r InternalStorageCleanupAuditResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r InternalStorageCleanupAuditResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -2673,6 +2954,40 @@ func (c *ClientWithResponses) InternalMultipartUploadWithResponse(ctx context.Co
 	return ParseInternalMultipartUploadResponse(rsp)
 }
 
+// InternalStorageCleanupApplyWithBodyWithResponse request with arbitrary body returning *InternalStorageCleanupApplyResponse
+func (c *ClientWithResponses) InternalStorageCleanupApplyWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*InternalStorageCleanupApplyResponse, error) {
+	rsp, err := c.InternalStorageCleanupApplyWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseInternalStorageCleanupApplyResponse(rsp)
+}
+
+func (c *ClientWithResponses) InternalStorageCleanupApplyWithResponse(ctx context.Context, body InternalStorageCleanupApplyJSONRequestBody, reqEditors ...RequestEditorFn) (*InternalStorageCleanupApplyResponse, error) {
+	rsp, err := c.InternalStorageCleanupApply(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseInternalStorageCleanupApplyResponse(rsp)
+}
+
+// InternalStorageCleanupAuditWithBodyWithResponse request with arbitrary body returning *InternalStorageCleanupAuditResponse
+func (c *ClientWithResponses) InternalStorageCleanupAuditWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*InternalStorageCleanupAuditResponse, error) {
+	rsp, err := c.InternalStorageCleanupAuditWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseInternalStorageCleanupAuditResponse(rsp)
+}
+
+func (c *ClientWithResponses) InternalStorageCleanupAuditWithResponse(ctx context.Context, body InternalStorageCleanupAuditJSONRequestBody, reqEditors ...RequestEditorFn) (*InternalStorageCleanupAuditResponse, error) {
+	rsp, err := c.InternalStorageCleanupAudit(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseInternalStorageCleanupAuditResponse(rsp)
+}
+
 // InternalUploadBlankWithBodyWithResponse request with arbitrary body returning *InternalUploadBlankResponse
 func (c *ClientWithResponses) InternalUploadBlankWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*InternalUploadBlankResponse, error) {
 	rsp, err := c.InternalUploadBlankWithBody(ctx, contentType, body, reqEditors...)
@@ -2998,6 +3313,58 @@ func ParseInternalMultipartUploadResponse(rsp *http.Response) (*InternalMultipar
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest InternalMultipartUploadOutput
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseInternalStorageCleanupApplyResponse parses an HTTP response from a InternalStorageCleanupApplyWithResponse call
+func ParseInternalStorageCleanupApplyResponse(rsp *http.Response) (*InternalStorageCleanupApplyResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &InternalStorageCleanupApplyResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest StorageCleanupApplyResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseInternalStorageCleanupAuditResponse parses an HTTP response from a InternalStorageCleanupAuditWithResponse call
+func ParseInternalStorageCleanupAuditResponse(rsp *http.Response) (*InternalStorageCleanupAuditResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &InternalStorageCleanupAuditResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest StorageCleanupReport
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

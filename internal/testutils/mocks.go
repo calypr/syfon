@@ -12,6 +12,7 @@ import (
 	sycommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/models"
+	"github.com/calypr/syfon/internal/storagemetrics"
 	"github.com/calypr/syfon/internal/urlmanager"
 )
 
@@ -151,6 +152,60 @@ func (m *MockDatabase) ListObjectIDsByScope(ctx context.Context, organization, p
 	return ids, nil
 }
 
+func (m *MockDatabase) GetStoragePathSummary(ctx context.Context, organization, project, path string) (models.StoragePathSummary, error) {
+	return storagemetrics.AggregateStoragePathSummary(strings.TrimSpace(organization), strings.TrimSpace(project), path, m.storageMetricRowsForScope(strings.TrimSpace(organization), strings.TrimSpace(project)))
+}
+
+func (m *MockDatabase) ListStoragePathChildren(ctx context.Context, organization, project, path string, limit, offset int, sortBy, sortOrder string) ([]models.StoragePathChild, error) {
+	return storagemetrics.AggregateStoragePathChildren(path, m.storageMetricRowsForScope(strings.TrimSpace(organization), strings.TrimSpace(project)), limit, offset, sortBy, sortOrder)
+}
+
+func (m *MockDatabase) ListStorageCleanupRecords(ctx context.Context, organization, project, pathPrefix string) ([]models.StorageCleanupRecord, error) {
+	_, prefixSegments, err := common.NormalizeBrowsePath(pathPrefix)
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]models.StorageCleanupRecord, 0, len(m.Objects))
+	for id, obj := range m.Objects {
+		authz := map[string][]string{}
+		if m.ObjectAuthz != nil {
+			authz = m.ObjectAuthz[id]
+		}
+		projects, ok := authz[organization]
+		if !ok {
+			continue
+		}
+		matchesProject := strings.TrimSpace(project) == ""
+		for _, candidate := range projects {
+			if candidate == project {
+				matchesProject = true
+				break
+			}
+		}
+		if !matchesProject || obj.Name == nil {
+			continue
+		}
+		info, ok, err := common.BrowsePathInfoFromName(*obj.Name)
+		if err != nil || !ok || !common.HasBrowsePathPrefix(info.Segments, prefixSegments) {
+			continue
+		}
+		row := models.StorageCleanupRecord{
+			ObjectID:       id,
+			NormalizedPath: info.Normalized,
+			Size:           obj.Size,
+		}
+		if obj.UpdatedTime != nil {
+			row.UpdatedTime = obj.UpdatedTime.UTC()
+		}
+		if u, ok := m.Usage[id]; ok {
+			row.DownloadCount = u.DownloadCount
+			row.LastDownloadTime = u.LastDownloadTime
+		}
+		rows = append(rows, row)
+	}
+	return rows, nil
+}
+
 func (m *MockDatabase) ListObjectIDsPageByPath(ctx context.Context, organization, project, path, startAfter string, limit, offset int) ([]string, []models.BrowseDirectory, error) {
 	normalizedPath, pathSegments, err := common.NormalizeBrowsePath(path)
 	if err != nil {
@@ -233,6 +288,68 @@ func (m *MockDatabase) ListObjectIDsPageByPath(ctx context.Context, organization
 		return directories[i].Name < directories[j].Name
 	})
 	return ids[offset:end], directories, nil
+}
+
+func (m *MockDatabase) storageMetricRows() []models.DrsObjectRecord {
+	rows := make([]models.DrsObjectRecord, 0, len(m.Objects))
+	for id, obj := range m.Objects {
+		row := models.DrsObjectRecord{
+			ID:   id,
+			Size: obj.Size,
+		}
+		if obj.Name != nil {
+			row.Name = *obj.Name
+		}
+		if obj.UpdatedTime != nil {
+			row.UpdatedTime = obj.UpdatedTime.UTC()
+		}
+		if u, ok := m.Usage[id]; ok {
+			row.DownloadCount = u.DownloadCount
+			row.LastDownloadTime = u.LastDownloadTime
+		}
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+func (m *MockDatabase) storageMetricRowsForScope(organization, project string) []models.DrsObjectRecord {
+	rows := make([]models.DrsObjectRecord, 0, len(m.Objects))
+	for id, obj := range m.Objects {
+		authz := map[string][]string{}
+		if m.ObjectAuthz != nil {
+			authz = m.ObjectAuthz[id]
+		}
+		projects, ok := authz[organization]
+		if !ok {
+			continue
+		}
+		matchesProject := strings.TrimSpace(project) == ""
+		for _, candidate := range projects {
+			if candidate == project {
+				matchesProject = true
+				break
+			}
+		}
+		if !matchesProject {
+			continue
+		}
+		row := models.DrsObjectRecord{
+			ID:   id,
+			Size: obj.Size,
+		}
+		if obj.Name != nil {
+			row.Name = *obj.Name
+		}
+		if obj.UpdatedTime != nil {
+			row.UpdatedTime = obj.UpdatedTime.UTC()
+		}
+		if u, ok := m.Usage[id]; ok {
+			row.DownloadCount = u.DownloadCount
+			row.LastDownloadTime = u.LastDownloadTime
+		}
+		rows = append(rows, row)
+	}
+	return rows
 }
 
 func (m *MockDatabase) ListObjectIDsByResources(ctx context.Context, resources []string, includeUnscoped bool) ([]string, error) {

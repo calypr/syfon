@@ -130,15 +130,21 @@ func (f *fakeBucketClient) DeleteProjectDataWithResponse(ctx context.Context, or
 }
 
 type fakeMetricsClient struct {
-	summaryResp   *metricsapi.GetMetricsSummaryResponse
-	summaryErr    error
-	summaryParams *metricsapi.GetMetricsSummaryParams
-	filesResp     *metricsapi.ListMetricsFilesResponse
-	filesErr      error
-	filesParams   *metricsapi.ListMetricsFilesParams
-	fileResp      *metricsapi.GetMetricsFileResponse
-	fileErr       error
-	fileObjectID  string
+	summaryResp           *metricsapi.GetMetricsSummaryResponse
+	summaryErr            error
+	summaryParams         *metricsapi.GetMetricsSummaryParams
+	storageSummaryResp    *metricsapi.GetStorageSummaryResponse
+	storageSummaryErr     error
+	storageSummaryParams  *metricsapi.GetStorageSummaryParams
+	filesResp             *metricsapi.ListMetricsFilesResponse
+	filesErr              error
+	filesParams           *metricsapi.ListMetricsFilesParams
+	storageChildrenResp   *metricsapi.ListStorageChildrenResponse
+	storageChildrenErr    error
+	storageChildrenParams *metricsapi.ListStorageChildrenParams
+	fileResp              *metricsapi.GetMetricsFileResponse
+	fileErr               error
+	fileObjectID          string
 }
 
 func (f *fakeMetricsClient) ListMetricsFilesWithResponse(ctx context.Context, params *metricsapi.ListMetricsFilesParams, reqEditors ...metricsapi.RequestEditorFn) (*metricsapi.ListMetricsFilesResponse, error) {
@@ -154,6 +160,16 @@ func (f *fakeMetricsClient) GetMetricsFileWithResponse(ctx context.Context, obje
 func (f *fakeMetricsClient) GetMetricsSummaryWithResponse(ctx context.Context, params *metricsapi.GetMetricsSummaryParams, reqEditors ...metricsapi.RequestEditorFn) (*metricsapi.GetMetricsSummaryResponse, error) {
 	f.summaryParams = params
 	return f.summaryResp, f.summaryErr
+}
+
+func (f *fakeMetricsClient) GetStorageSummaryWithResponse(ctx context.Context, params *metricsapi.GetStorageSummaryParams, reqEditors ...metricsapi.RequestEditorFn) (*metricsapi.GetStorageSummaryResponse, error) {
+	f.storageSummaryParams = params
+	return f.storageSummaryResp, f.storageSummaryErr
+}
+
+func (f *fakeMetricsClient) ListStorageChildrenWithResponse(ctx context.Context, params *metricsapi.ListStorageChildrenParams, reqEditors ...metricsapi.RequestEditorFn) (*metricsapi.ListStorageChildrenResponse, error) {
+	f.storageChildrenParams = params
+	return f.storageChildrenResp, f.storageChildrenErr
 }
 
 func (f *fakeMetricsClient) RecordProviderTransferEventsWithBodyWithResponse(ctx context.Context, params *metricsapi.RecordProviderTransferEventsParams, contentType string, body io.Reader, reqEditors ...metricsapi.RequestEditorFn) (*metricsapi.RecordProviderTransferEventsResponse, error) {

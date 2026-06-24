@@ -50,6 +50,22 @@ type MetricsSummaryOptions struct {
 	ProjectID    string
 }
 
+type StorageSummaryOptions struct {
+	Organization string
+	ProjectID    string
+	Path         string
+}
+
+type StorageChildrenOptions struct {
+	Organization string
+	ProjectID    string
+	Path         string
+	Limit        int
+	Offset       int
+	SortBy       string
+	SortOrder    string
+}
+
 type TransferMetricsOptions struct {
 	Organization         string
 	ProjectID            string
@@ -63,4 +79,26 @@ type TransferMetricsOptions struct {
 	GroupBy              string
 	ReconciliationStatus string
 	AllowStale           bool
+}
+
+type StorageCleanupAuditOptions struct {
+	Organization  string
+	ProjectID     string
+	PathPrefix    string
+	ExpectedPaths []string
+	CheckStorage  *bool
+}
+
+type StorageCleanupApplyOptions struct {
+	Organization          string
+	ProjectID             string
+	PathPrefix            string
+	ExpectedPaths         []string
+	DeleteStaleDuplicates bool
+	DeleteRepoOrphans     bool
+	DryRun                bool
+	SelectedPaths         []string
+	SelectedObjectIDs     []string
+	SelectedFindingKinds  []string
+	CheckStorage          *bool
 }

@@ -18,7 +18,10 @@ func NewMetricsService(gen metricsapi.ClientWithResponsesInterface) *MetricsServ
 }
 
 func (s *MetricsService) Summary(ctx context.Context, opts MetricsSummaryOptions) (metricsapi.FileUsageSummary, error) {
-	params := &metricsapi.GetMetricsSummaryParams{}
+	params := &metricsapi.GetMetricsSummaryParams{
+		Organization: stringPtr[metricsapi.Organization](opts.Organization),
+		Project:      stringPtr[metricsapi.Project](opts.ProjectID),
+	}
 	if opts.InactiveDays > 0 {
 		params.InactiveDays = &opts.InactiveDays
 	}
@@ -33,7 +36,10 @@ func (s *MetricsService) Summary(ctx context.Context, opts MetricsSummaryOptions
 }
 
 func (s *MetricsService) Files(ctx context.Context, opts MetricsFilesOptions) ([]metricsapi.FileUsage, error) {
-	params := &metricsapi.ListMetricsFilesParams{}
+	params := &metricsapi.ListMetricsFilesParams{
+		Organization: stringPtr[metricsapi.Organization](opts.Organization),
+		Project:      stringPtr[metricsapi.Project](opts.ProjectID),
+	}
 	if opts.Limit > 0 {
 		params.Limit = &opts.Limit
 	}
@@ -64,6 +70,46 @@ func (s *MetricsService) File(ctx context.Context, objectID string) (metricsapi.
 	}
 	if resp.JSON200 == nil {
 		return metricsapi.FileUsage{}, fmt.Errorf("failed to get file metrics: %d", resp.StatusCode())
+	}
+	return *resp.JSON200, nil
+}
+
+func (s *MetricsService) StorageSummary(ctx context.Context, opts StorageSummaryOptions) (metricsapi.StoragePathSummary, error) {
+	params := &metricsapi.GetStorageSummaryParams{
+		Organization: metricsapi.StorageOrganization(opts.Organization),
+		Project:      metricsapi.StorageProject(opts.ProjectID),
+		Path:         stringPtr[metricsapi.Path](opts.Path),
+	}
+	resp, err := s.gen.GetStorageSummaryWithResponse(ctx, params)
+	if err != nil {
+		return metricsapi.StoragePathSummary{}, err
+	}
+	if resp.JSON200 == nil {
+		return metricsapi.StoragePathSummary{}, fmt.Errorf("failed to get storage metrics summary: %d", resp.StatusCode())
+	}
+	return *resp.JSON200, nil
+}
+
+func (s *MetricsService) StorageChildren(ctx context.Context, opts StorageChildrenOptions) (metricsapi.StoragePathChildrenResponse, error) {
+	params := &metricsapi.ListStorageChildrenParams{
+		Organization: metricsapi.StorageOrganization(opts.Organization),
+		Project:      metricsapi.StorageProject(opts.ProjectID),
+		Path:         stringPtr[metricsapi.Path](opts.Path),
+		SortBy:       stringPtr[metricsapi.ListStorageChildrenParamsSortBy](opts.SortBy),
+		SortOrder:    stringPtr[metricsapi.ListStorageChildrenParamsSortOrder](opts.SortOrder),
+	}
+	if opts.Limit > 0 {
+		params.Limit = &opts.Limit
+	}
+	if opts.Offset > 0 {
+		params.Offset = &opts.Offset
+	}
+	resp, err := s.gen.ListStorageChildrenWithResponse(ctx, params)
+	if err != nil {
+		return metricsapi.StoragePathChildrenResponse{}, err
+	}
+	if resp.JSON200 == nil {
+		return metricsapi.StoragePathChildrenResponse{}, fmt.Errorf("failed to list storage metrics children: %d", resp.StatusCode())
 	}
 	return *resp.JSON200, nil
 }

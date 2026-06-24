@@ -31,12 +31,32 @@ const (
 	Unmatched ProviderTransferReconciliationStatus = "unmatched"
 )
 
+// Defines values for StoragePathChildType.
+const (
+	Directory StoragePathChildType = "directory"
+	File      StoragePathChildType = "file"
+)
+
 // Defines values for TransferBreakdownResponseGroupBy.
 const (
 	TransferBreakdownResponseGroupByObject   TransferBreakdownResponseGroupBy = "object"
 	TransferBreakdownResponseGroupByProvider TransferBreakdownResponseGroupBy = "provider"
 	TransferBreakdownResponseGroupByScope    TransferBreakdownResponseGroupBy = "scope"
 	TransferBreakdownResponseGroupByUser     TransferBreakdownResponseGroupBy = "user"
+)
+
+// Defines values for ListStorageChildrenParamsSortBy.
+const (
+	Bytes       ListStorageChildrenParamsSortBy = "bytes"
+	Name        ListStorageChildrenParamsSortBy = "name"
+	Records     ListStorageChildrenParamsSortBy = "records"
+	UpdatedTime ListStorageChildrenParamsSortBy = "updated_time"
+)
+
+// Defines values for ListStorageChildrenParamsSortOrder.
+const (
+	Asc  ListStorageChildrenParamsSortOrder = "asc"
+	Desc ListStorageChildrenParamsSortOrder = "desc"
 )
 
 // Defines values for GetTransferBreakdownParamsGroupBy.
@@ -122,6 +142,45 @@ type ProviderTransferEventsRequest struct {
 // ProviderTransferReconciliationStatus defines model for ProviderTransferReconciliationStatus.
 type ProviderTransferReconciliationStatus string
 
+// StoragePathChild defines model for StoragePathChild.
+type StoragePathChild struct {
+	DownloadCount    *int64                `json:"download_count,omitempty"`
+	FileCount        *int64                `json:"file_count,omitempty"`
+	LastDownloadTime *time.Time            `json:"last_download_time"`
+	LatestUpdateTime *time.Time            `json:"latest_update_time"`
+	Name             *string               `json:"name,omitempty"`
+	Path             *string               `json:"path,omitempty"`
+	RecordCount      *int64                `json:"record_count,omitempty"`
+	TotalBytes       *int64                `json:"total_bytes,omitempty"`
+	Type             *StoragePathChildType `json:"type,omitempty"`
+}
+
+// StoragePathChildType defines model for StoragePathChild.Type.
+type StoragePathChildType string
+
+// StoragePathChildrenResponse defines model for StoragePathChildrenResponse.
+type StoragePathChildrenResponse struct {
+	Items        *[]StoragePathChild `json:"items,omitempty"`
+	Organization *string             `json:"organization,omitempty"`
+	Path         *string             `json:"path,omitempty"`
+	Project      *string             `json:"project,omitempty"`
+}
+
+// StoragePathSummary defines model for StoragePathSummary.
+type StoragePathSummary struct {
+	DirectChildCount   *int64     `json:"direct_child_count,omitempty"`
+	DownloadCount      *int64     `json:"download_count,omitempty"`
+	DuplicatePathCount *int64     `json:"duplicate_path_count,omitempty"`
+	FileCount          *int64     `json:"file_count,omitempty"`
+	LastDownloadTime   *time.Time `json:"last_download_time"`
+	LatestUpdateTime   *time.Time `json:"latest_update_time"`
+	Organization       *string    `json:"organization,omitempty"`
+	Path               *string    `json:"path,omitempty"`
+	Project            *string    `json:"project,omitempty"`
+	RecordCount        *int64     `json:"record_count,omitempty"`
+	TotalBytes         *int64     `json:"total_bytes,omitempty"`
+}
+
 // TransferAttributionBreakdown defines model for TransferAttributionBreakdown.
 type TransferAttributionBreakdown struct {
 	ActorEmail       *string    `json:"actor_email,omitempty"`
@@ -190,6 +249,9 @@ type From = time.Time
 // Organization defines model for Organization.
 type Organization = string
 
+// Path defines model for Path.
+type Path = string
+
 // Project defines model for Project.
 type Project = string
 
@@ -201,6 +263,12 @@ type ReconciliationStatus = ProviderTransferReconciliationStatus
 
 // SHA256 defines model for SHA256.
 type SHA256 = string
+
+// StorageOrganization defines model for StorageOrganization.
+type StorageOrganization = string
+
+// StorageProject defines model for StorageProject.
+type StorageProject = string
 
 // To defines model for To.
 type To = time.Time
@@ -237,6 +305,40 @@ type RecordProviderTransferEventsParams struct {
 
 	// Project Project scope filter. Requires organization when set.
 	Project *Project `form:"project,omitempty" json:"project,omitempty"`
+}
+
+// ListStorageChildrenParams defines parameters for ListStorageChildren.
+type ListStorageChildrenParams struct {
+	// Organization Organization scope for the storage subtree query.
+	Organization StorageOrganization `form:"organization" json:"organization"`
+
+	// Project Project scope for the storage subtree query.
+	Project StorageProject `form:"project" json:"project"`
+
+	// Path Optional storage subtree path. Omit for the project root.
+	Path      *Path                               `form:"path,omitempty" json:"path,omitempty"`
+	Limit     *int                                `form:"limit,omitempty" json:"limit,omitempty"`
+	Offset    *int                                `form:"offset,omitempty" json:"offset,omitempty"`
+	SortBy    *ListStorageChildrenParamsSortBy    `form:"sort_by,omitempty" json:"sort_by,omitempty"`
+	SortOrder *ListStorageChildrenParamsSortOrder `form:"sort_order,omitempty" json:"sort_order,omitempty"`
+}
+
+// ListStorageChildrenParamsSortBy defines parameters for ListStorageChildren.
+type ListStorageChildrenParamsSortBy string
+
+// ListStorageChildrenParamsSortOrder defines parameters for ListStorageChildren.
+type ListStorageChildrenParamsSortOrder string
+
+// GetStorageSummaryParams defines parameters for GetStorageSummary.
+type GetStorageSummaryParams struct {
+	// Organization Organization scope for the storage subtree query.
+	Organization StorageOrganization `form:"organization" json:"organization"`
+
+	// Project Project scope for the storage subtree query.
+	Project StorageProject `form:"project" json:"project"`
+
+	// Path Optional storage subtree path. Omit for the project root.
+	Path *Path `form:"path,omitempty" json:"path,omitempty"`
 }
 
 // GetMetricsSummaryParams defines parameters for GetMetricsSummary.
@@ -385,6 +487,12 @@ type ClientInterface interface {
 
 	RecordProviderTransferEvents(ctx context.Context, params *RecordProviderTransferEventsParams, body RecordProviderTransferEventsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// ListStorageChildren request
+	ListStorageChildren(ctx context.Context, params *ListStorageChildrenParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetStorageSummary request
+	GetStorageSummary(ctx context.Context, params *GetStorageSummaryParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// GetMetricsSummary request
 	GetMetricsSummary(ctx context.Context, params *GetMetricsSummaryParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -433,6 +541,30 @@ func (c *Client) RecordProviderTransferEventsWithBody(ctx context.Context, param
 
 func (c *Client) RecordProviderTransferEvents(ctx context.Context, params *RecordProviderTransferEventsParams, body RecordProviderTransferEventsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewRecordProviderTransferEventsRequest(c.Server, params, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListStorageChildren(ctx context.Context, params *ListStorageChildrenParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListStorageChildrenRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetStorageSummary(ctx context.Context, params *GetStorageSummaryParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetStorageSummaryRequest(c.Server, params)
 	if err != nil {
 		return nil, err
 	}
@@ -738,6 +870,216 @@ func NewRecordProviderTransferEventsRequestWithBody(server string, params *Recor
 	}
 
 	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewListStorageChildrenRequest generates requests for ListStorageChildren
+func NewListStorageChildrenRequest(server string, params *ListStorageChildrenParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/index/v1/metrics/storage/children")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if queryFrag, err := runtime.StyleParamWithLocation("form", true, "organization", runtime.ParamLocationQuery, params.Organization); err != nil {
+			return nil, err
+		} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+			return nil, err
+		} else {
+			for k, v := range parsed {
+				for _, v2 := range v {
+					queryValues.Add(k, v2)
+				}
+			}
+		}
+
+		if queryFrag, err := runtime.StyleParamWithLocation("form", true, "project", runtime.ParamLocationQuery, params.Project); err != nil {
+			return nil, err
+		} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+			return nil, err
+		} else {
+			for k, v := range parsed {
+				for _, v2 := range v {
+					queryValues.Add(k, v2)
+				}
+			}
+		}
+
+		if params.Path != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "path", runtime.ParamLocationQuery, *params.Path); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "limit", runtime.ParamLocationQuery, *params.Limit); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Offset != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "offset", runtime.ParamLocationQuery, *params.Offset); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.SortBy != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "sort_by", runtime.ParamLocationQuery, *params.SortBy); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.SortOrder != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "sort_order", runtime.ParamLocationQuery, *params.SortOrder); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetStorageSummaryRequest generates requests for GetStorageSummary
+func NewGetStorageSummaryRequest(server string, params *GetStorageSummaryParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/index/v1/metrics/storage/summary")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if queryFrag, err := runtime.StyleParamWithLocation("form", true, "organization", runtime.ParamLocationQuery, params.Organization); err != nil {
+			return nil, err
+		} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+			return nil, err
+		} else {
+			for k, v := range parsed {
+				for _, v2 := range v {
+					queryValues.Add(k, v2)
+				}
+			}
+		}
+
+		if queryFrag, err := runtime.StyleParamWithLocation("form", true, "project", runtime.ParamLocationQuery, params.Project); err != nil {
+			return nil, err
+		} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+			return nil, err
+		} else {
+			for k, v := range parsed {
+				for _, v2 := range v {
+					queryValues.Add(k, v2)
+				}
+			}
+		}
+
+		if params.Path != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "path", runtime.ParamLocationQuery, *params.Path); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
 
 	return req, nil
 }
@@ -1311,6 +1653,12 @@ type ClientWithResponsesInterface interface {
 
 	RecordProviderTransferEventsWithResponse(ctx context.Context, params *RecordProviderTransferEventsParams, body RecordProviderTransferEventsJSONRequestBody, reqEditors ...RequestEditorFn) (*RecordProviderTransferEventsResponse, error)
 
+	// ListStorageChildrenWithResponse request
+	ListStorageChildrenWithResponse(ctx context.Context, params *ListStorageChildrenParams, reqEditors ...RequestEditorFn) (*ListStorageChildrenResponse, error)
+
+	// GetStorageSummaryWithResponse request
+	GetStorageSummaryWithResponse(ctx context.Context, params *GetStorageSummaryParams, reqEditors ...RequestEditorFn) (*GetStorageSummaryResponse, error)
+
 	// GetMetricsSummaryWithResponse request
 	GetMetricsSummaryWithResponse(ctx context.Context, params *GetMetricsSummaryParams, reqEditors ...RequestEditorFn) (*GetMetricsSummaryResponse, error)
 
@@ -1381,6 +1729,50 @@ func (r RecordProviderTransferEventsResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r RecordProviderTransferEventsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type ListStorageChildrenResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *StoragePathChildrenResponse
+}
+
+// Status returns HTTPResponse.Status
+func (r ListStorageChildrenResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListStorageChildrenResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type GetStorageSummaryResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *StoragePathSummary
+}
+
+// Status returns HTTPResponse.Status
+func (r GetStorageSummaryResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetStorageSummaryResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -1488,6 +1880,24 @@ func (c *ClientWithResponses) RecordProviderTransferEventsWithResponse(ctx conte
 	return ParseRecordProviderTransferEventsResponse(rsp)
 }
 
+// ListStorageChildrenWithResponse request returning *ListStorageChildrenResponse
+func (c *ClientWithResponses) ListStorageChildrenWithResponse(ctx context.Context, params *ListStorageChildrenParams, reqEditors ...RequestEditorFn) (*ListStorageChildrenResponse, error) {
+	rsp, err := c.ListStorageChildren(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListStorageChildrenResponse(rsp)
+}
+
+// GetStorageSummaryWithResponse request returning *GetStorageSummaryResponse
+func (c *ClientWithResponses) GetStorageSummaryWithResponse(ctx context.Context, params *GetStorageSummaryParams, reqEditors ...RequestEditorFn) (*GetStorageSummaryResponse, error) {
+	rsp, err := c.GetStorageSummary(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetStorageSummaryResponse(rsp)
+}
+
 // GetMetricsSummaryWithResponse request returning *GetMetricsSummaryResponse
 func (c *ClientWithResponses) GetMetricsSummaryWithResponse(ctx context.Context, params *GetMetricsSummaryParams, reqEditors ...RequestEditorFn) (*GetMetricsSummaryResponse, error) {
 	rsp, err := c.GetMetricsSummary(ctx, params, reqEditors...)
@@ -1587,6 +1997,58 @@ func ParseRecordProviderTransferEventsResponse(rsp *http.Response) (*RecordProvi
 			return nil, err
 		}
 		response.JSON201 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListStorageChildrenResponse parses an HTTP response from a ListStorageChildrenWithResponse call
+func ParseListStorageChildrenResponse(rsp *http.Response) (*ListStorageChildrenResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListStorageChildrenResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest StoragePathChildrenResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetStorageSummaryResponse parses an HTTP response from a GetStorageSummaryWithResponse call
+func ParseGetStorageSummaryResponse(rsp *http.Response) (*GetStorageSummaryResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetStorageSummaryResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest StoragePathSummary
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
 
 	}
 

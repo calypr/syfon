@@ -109,5 +109,45 @@ func TestRecordProviderTransferEvents_EmptyInput(t *testing.T) {
 	}
 }
 
+func TestGetStoragePathSummary(t *testing.T) {
+	pg, mock, rawDB := newMockPostgresDB(t)
+	defer rawDB.Close()
 
+	now := time.Now().UTC()
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT DISTINCT e.object_id
+		FROM object_usage_event e
+		JOIN drs_object o ON o.id = e.object_id
+	`)).WillReturnRows(sqlmock.NewRows([]string{"object_id"}))
+	mock.ExpectCommit()
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT bi.object_id, o.size, o.updated_time,
+			COALESCE(u.download_count, 0), u.last_download_time,
+			bi.normalized_path, bi.normalized_path
+		FROM drs_object_browse_index bi
+		JOIN drs_object o ON o.id = bi.object_id
+		LEFT JOIN object_usage u ON u.object_id = bi.object_id
+		WHERE bi.resource = $1
+		ORDER BY bi.object_id
+	`)).
+		WithArgs("/organization/org/project/proj").
+		WillReturnRows(sqlmock.NewRows([]string{"object_id", "size", "updated_time", "download_count", "last_download_time", "normalized_path", "normalized_path"}).
+			AddRow("obj-1", int64(10), now.Add(-time.Hour), int64(2), now.Add(-3*time.Hour), "data/a.txt", "data/a.txt").
+			AddRow("obj-2", int64(20), now, int64(4), now.Add(-30*time.Minute), "data/a.txt", "data/a.txt").
+			AddRow("obj-3", int64(30), now.Add(-2*time.Hour), int64(1), now.Add(-90*time.Minute), "data/nested/b.txt", "data/nested/b.txt"))
 
+	summary, err := pg.GetStoragePathSummary(context.Background(), "org", "proj", "data")
+	if err != nil {
+		t.Fatalf("GetStoragePathSummary returned error: %v", err)
+	}
+	if summary.RecordCount != 3 || summary.FileCount != 2 || summary.TotalBytes != 60 || summary.DuplicatePathCount != 1 || summary.DownloadCount != 7 {
+		t.Fatalf("unexpected summary: %+v", summary)
+	}
+	if summary.LastDownloadTime == nil || !summary.LastDownloadTime.Equal(now.Add(-30*time.Minute)) {
+		t.Fatalf("unexpected last download time: %+v", summary.LastDownloadTime)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}

@@ -8,5 +8,6 @@ type SyfonClient interface {
 	DRS() *DRSService
 	Buckets() *BucketsService
 	Metrics() *MetricsService
+	Repair() *RepairService
 	LFS() *LFSService
 }

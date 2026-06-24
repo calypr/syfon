@@ -65,6 +65,12 @@ type FileUsageScopedLister interface {
 	GetFileUsageSummaryByResources(ctx context.Context, resources []string, includeUnscoped bool, inactiveSince *time.Time) (models.FileUsageSummary, error)
 }
 
+type StorageMetricsStore interface {
+	GetStoragePathSummary(ctx context.Context, organization, project, path string) (models.StoragePathSummary, error)
+	ListStoragePathChildren(ctx context.Context, organization, project, path string, limit, offset int, sortBy, sortOrder string) ([]models.StoragePathChild, error)
+	ListStorageCleanupRecords(ctx context.Context, organization, project, pathPrefix string) ([]models.StorageCleanupRecord, error)
+}
+
 type TransferAttributionScopedStore interface {
 	GetTransferAttributionSummaryByResources(ctx context.Context, filter models.TransferAttributionFilter, resources []string) (models.TransferAttributionSummary, error)
 	GetTransferAttributionBreakdownByResources(ctx context.Context, filter models.TransferAttributionFilter, groupBy string, resources []string) ([]models.TransferAttributionBreakdown, error)
@@ -134,6 +140,9 @@ type MetricsStore interface {
 	ListFileUsageByObjectIDs(ctx context.Context, ids []string) ([]models.FileUsage, error)
 	ListFileUsage(ctx context.Context, limit, offset int, inactiveSince *time.Time) ([]models.FileUsage, error)
 	GetFileUsageSummary(ctx context.Context, inactiveSince *time.Time) (models.FileUsageSummary, error)
+	GetStoragePathSummary(ctx context.Context, organization, project, path string) (models.StoragePathSummary, error)
+	ListStoragePathChildren(ctx context.Context, organization, project, path string, limit, offset int, sortBy, sortOrder string) ([]models.StoragePathChild, error)
+	ListStorageCleanupRecords(ctx context.Context, organization, project, pathPrefix string) ([]models.StorageCleanupRecord, error)
 }
 
 // LFSStore is the minimum storage surface needed by the LFS API.
@@ -151,4 +160,5 @@ type DatabaseInterface interface {
 	CredentialStore
 	PendingLFSMetaStore
 	UsageStore
+	StorageMetricsStore
 }

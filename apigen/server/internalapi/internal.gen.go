@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"time"
 
 	externalRef0 "github.com/calypr/syfon/apigen/server/drs"
 	"github.com/gofiber/fiber/v3"
@@ -30,8 +31,7 @@ type BulkDocumentsRequest0 = []string
 
 // BulkDocumentsRequest1 defines model for .
 type BulkDocumentsRequest1 struct {
-	Dids *[]string `json:"dids,omitempty"`
-	Ids  *[]string `json:"ids,omitempty"`
+	Ids *[]string `json:"ids,omitempty"`
 }
 
 // BulkHashesRequest defines model for BulkHashesRequest.
@@ -202,6 +202,89 @@ type ListRecordsResponse struct {
 	Records     *[]InternalRecord `json:"records,omitempty"`
 }
 
+// StorageCleanupApplyRequest defines model for StorageCleanupApplyRequest.
+type StorageCleanupApplyRequest struct {
+	CheckStorage          *bool     `json:"check_storage,omitempty"`
+	DeleteRepoOrphans     *bool     `json:"delete_repo_orphans,omitempty"`
+	DeleteStaleDuplicates *bool     `json:"delete_stale_duplicates,omitempty"`
+	DryRun                *bool     `json:"dry_run,omitempty"`
+	ExpectedPaths         *[]string `json:"expected_paths,omitempty"`
+	Organization          string    `json:"organization"`
+	PathPrefix            *string   `json:"path_prefix,omitempty"`
+	Project               string    `json:"project"`
+	SelectedFindingKinds  *[]string `json:"selected_finding_kinds,omitempty"`
+	SelectedObjectIds     *[]string `json:"selected_object_ids,omitempty"`
+	SelectedPaths         *[]string `json:"selected_paths,omitempty"`
+}
+
+// StorageCleanupApplyResult defines model for StorageCleanupApplyResult.
+type StorageCleanupApplyResult struct {
+	DeletedRecordIds    *[]string                           `json:"deleted_record_ids,omitempty"`
+	DryRun              *bool                               `json:"dry_run,omitempty"`
+	RepoDeletePaths     *[]string                           `json:"repo_delete_paths,omitempty"`
+	Report              *StorageCleanupReport               `json:"report,omitempty"`
+	Skipped             *[]StorageCleanupSkipped            `json:"skipped,omitempty"`
+	StoragePurgeResults *[]StorageCleanupStoragePurgeResult `json:"storage_purge_results,omitempty"`
+}
+
+// StorageCleanupAuditRequest defines model for StorageCleanupAuditRequest.
+type StorageCleanupAuditRequest struct {
+	CheckStorage  *bool     `json:"check_storage,omitempty"`
+	ExpectedPaths *[]string `json:"expected_paths,omitempty"`
+	Organization  string    `json:"organization"`
+	PathPrefix    *string   `json:"path_prefix,omitempty"`
+	Project       string    `json:"project"`
+}
+
+// StorageCleanupFinding defines model for StorageCleanupFinding.
+type StorageCleanupFinding struct {
+	Kind                *string                      `json:"kind,omitempty"`
+	Message             *string                      `json:"message,omitempty"`
+	NormalizedPath      *string                      `json:"normalized_path,omitempty"`
+	RecommendedAction   *string                      `json:"recommended_action,omitempty"`
+	Records             *[]StorageCleanupRecordAudit `json:"records,omitempty"`
+	RepoDeleteCandidate *bool                        `json:"repo_delete_candidate,omitempty"`
+	Severity            *string                      `json:"severity,omitempty"`
+}
+
+// StorageCleanupRecordAudit defines model for StorageCleanupRecordAudit.
+type StorageCleanupRecordAudit struct {
+	CurrentAccessUrls *[]string  `json:"current_access_urls,omitempty"`
+	DownloadCount     *int64     `json:"download_count,omitempty"`
+	LastDownloadTime  *time.Time `json:"last_download_time,omitempty"`
+	NormalizedPath    *string    `json:"normalized_path,omitempty"`
+	ObjectId          *string    `json:"object_id,omitempty"`
+	Size              *int64     `json:"size,omitempty"`
+	StorageMessage    *string    `json:"storage_message,omitempty"`
+	StorageStatus     *string    `json:"storage_status,omitempty"`
+	UpdatedTime       *time.Time `json:"updated_time,omitempty"`
+}
+
+// StorageCleanupReport defines model for StorageCleanupReport.
+type StorageCleanupReport struct {
+	Findings     *[]StorageCleanupFinding `json:"findings,omitempty"`
+	Organization *string                  `json:"organization,omitempty"`
+	PathPrefix   *string                  `json:"path_prefix,omitempty"`
+	Project      *string                  `json:"project,omitempty"`
+	Scanned      *int                     `json:"scanned,omitempty"`
+	Summary      *map[string]int          `json:"summary,omitempty"`
+}
+
+// StorageCleanupSkipped defines model for StorageCleanupSkipped.
+type StorageCleanupSkipped struct {
+	Kind           *string `json:"kind,omitempty"`
+	NormalizedPath *string `json:"normalized_path,omitempty"`
+	ObjectId       *string `json:"object_id,omitempty"`
+	Reason         *string `json:"reason,omitempty"`
+}
+
+// StorageCleanupStoragePurgeResult defines model for StorageCleanupStoragePurgeResult.
+type StorageCleanupStoragePurgeResult struct {
+	Message  *string `json:"message,omitempty"`
+	ObjectId *string `json:"object_id,omitempty"`
+	Purged   *bool   `json:"purged,omitempty"`
+}
+
 // InternalDownloadParams defines parameters for InternalDownload.
 type InternalDownloadParams struct {
 	Redirect  *bool `form:"redirect,omitempty" json:"redirect,omitempty"`
@@ -252,6 +335,12 @@ type InternalMultipartInitJSONRequestBody = InternalMultipartInitRequest
 
 // InternalMultipartUploadJSONRequestBody defines body for InternalMultipartUpload for application/json ContentType.
 type InternalMultipartUploadJSONRequestBody = InternalMultipartUploadRequest
+
+// InternalStorageCleanupApplyJSONRequestBody defines body for InternalStorageCleanupApply for application/json ContentType.
+type InternalStorageCleanupApplyJSONRequestBody = StorageCleanupApplyRequest
+
+// InternalStorageCleanupAuditJSONRequestBody defines body for InternalStorageCleanupAudit for application/json ContentType.
+type InternalStorageCleanupAuditJSONRequestBody = StorageCleanupAuditRequest
 
 // InternalUploadBlankJSONRequestBody defines body for InternalUploadBlank for application/json ContentType.
 type InternalUploadBlankJSONRequestBody = InternalUploadBlankRequest
@@ -362,6 +451,12 @@ type ServerInterface interface {
 
 	// (POST /data/multipart/upload)
 	InternalMultipartUpload(c fiber.Ctx) error
+
+	// (POST /data/repair/storage-cleanup/apply)
+	InternalStorageCleanupApply(c fiber.Ctx) error
+
+	// (POST /data/repair/storage-cleanup/audit)
+	InternalStorageCleanupAudit(c fiber.Ctx) error
 
 	// (POST /data/upload)
 	InternalUploadBlank(c fiber.Ctx) error
@@ -514,6 +609,18 @@ func (siw *ServerInterfaceWrapper) InternalMultipartInit(c fiber.Ctx) error {
 func (siw *ServerInterfaceWrapper) InternalMultipartUpload(c fiber.Ctx) error {
 
 	return siw.Handler.InternalMultipartUpload(c)
+}
+
+// InternalStorageCleanupApply operation middleware
+func (siw *ServerInterfaceWrapper) InternalStorageCleanupApply(c fiber.Ctx) error {
+
+	return siw.Handler.InternalStorageCleanupApply(c)
+}
+
+// InternalStorageCleanupAudit operation middleware
+func (siw *ServerInterfaceWrapper) InternalStorageCleanupAudit(c fiber.Ctx) error {
+
+	return siw.Handler.InternalStorageCleanupAudit(c)
 }
 
 // InternalUploadBlank operation middleware
@@ -888,6 +995,10 @@ func RegisterHandlersWithOptions(router fiber.Router, si ServerInterface, option
 
 	router.Post(options.BaseURL+"/data/multipart/upload", wrapper.InternalMultipartUpload)
 
+	router.Post(options.BaseURL+"/data/repair/storage-cleanup/apply", wrapper.InternalStorageCleanupApply)
+
+	router.Post(options.BaseURL+"/data/repair/storage-cleanup/audit", wrapper.InternalStorageCleanupAudit)
+
 	router.Post(options.BaseURL+"/data/upload", wrapper.InternalUploadBlank)
 
 	router.Post(options.BaseURL+"/data/upload/bulk", wrapper.InternalUploadBulk)
@@ -1186,6 +1297,104 @@ type InternalMultipartUpload500Response struct {
 }
 
 func (response InternalMultipartUpload500Response) VisitInternalMultipartUploadResponse(ctx fiber.Ctx) error {
+	ctx.Status(500)
+	return nil
+}
+
+type InternalStorageCleanupApplyRequestObject struct {
+	Body *InternalStorageCleanupApplyJSONRequestBody
+}
+
+type InternalStorageCleanupApplyResponseObject interface {
+	VisitInternalStorageCleanupApplyResponse(ctx fiber.Ctx) error
+}
+
+type InternalStorageCleanupApply200JSONResponse StorageCleanupApplyResult
+
+func (response InternalStorageCleanupApply200JSONResponse) VisitInternalStorageCleanupApplyResponse(ctx fiber.Ctx) error {
+	ctx.Response().Header.Set("Content-Type", "application/json")
+	ctx.Status(200)
+
+	return ctx.JSON(&response)
+}
+
+type InternalStorageCleanupApply400Response struct {
+}
+
+func (response InternalStorageCleanupApply400Response) VisitInternalStorageCleanupApplyResponse(ctx fiber.Ctx) error {
+	ctx.Status(400)
+	return nil
+}
+
+type InternalStorageCleanupApply401Response struct {
+}
+
+func (response InternalStorageCleanupApply401Response) VisitInternalStorageCleanupApplyResponse(ctx fiber.Ctx) error {
+	ctx.Status(401)
+	return nil
+}
+
+type InternalStorageCleanupApply403Response struct {
+}
+
+func (response InternalStorageCleanupApply403Response) VisitInternalStorageCleanupApplyResponse(ctx fiber.Ctx) error {
+	ctx.Status(403)
+	return nil
+}
+
+type InternalStorageCleanupApply500Response struct {
+}
+
+func (response InternalStorageCleanupApply500Response) VisitInternalStorageCleanupApplyResponse(ctx fiber.Ctx) error {
+	ctx.Status(500)
+	return nil
+}
+
+type InternalStorageCleanupAuditRequestObject struct {
+	Body *InternalStorageCleanupAuditJSONRequestBody
+}
+
+type InternalStorageCleanupAuditResponseObject interface {
+	VisitInternalStorageCleanupAuditResponse(ctx fiber.Ctx) error
+}
+
+type InternalStorageCleanupAudit200JSONResponse StorageCleanupReport
+
+func (response InternalStorageCleanupAudit200JSONResponse) VisitInternalStorageCleanupAuditResponse(ctx fiber.Ctx) error {
+	ctx.Response().Header.Set("Content-Type", "application/json")
+	ctx.Status(200)
+
+	return ctx.JSON(&response)
+}
+
+type InternalStorageCleanupAudit400Response struct {
+}
+
+func (response InternalStorageCleanupAudit400Response) VisitInternalStorageCleanupAuditResponse(ctx fiber.Ctx) error {
+	ctx.Status(400)
+	return nil
+}
+
+type InternalStorageCleanupAudit401Response struct {
+}
+
+func (response InternalStorageCleanupAudit401Response) VisitInternalStorageCleanupAuditResponse(ctx fiber.Ctx) error {
+	ctx.Status(401)
+	return nil
+}
+
+type InternalStorageCleanupAudit403Response struct {
+}
+
+func (response InternalStorageCleanupAudit403Response) VisitInternalStorageCleanupAuditResponse(ctx fiber.Ctx) error {
+	ctx.Status(403)
+	return nil
+}
+
+type InternalStorageCleanupAudit500Response struct {
+}
+
+func (response InternalStorageCleanupAudit500Response) VisitInternalStorageCleanupAuditResponse(ctx fiber.Ctx) error {
 	ctx.Status(500)
 	return nil
 }
@@ -1914,6 +2123,12 @@ type StrictServerInterface interface {
 	// (POST /data/multipart/upload)
 	InternalMultipartUpload(ctx context.Context, request InternalMultipartUploadRequestObject) (InternalMultipartUploadResponseObject, error)
 
+	// (POST /data/repair/storage-cleanup/apply)
+	InternalStorageCleanupApply(ctx context.Context, request InternalStorageCleanupApplyRequestObject) (InternalStorageCleanupApplyResponseObject, error)
+
+	// (POST /data/repair/storage-cleanup/audit)
+	InternalStorageCleanupAudit(ctx context.Context, request InternalStorageCleanupAuditRequestObject) (InternalStorageCleanupAuditResponseObject, error)
+
 	// (POST /data/upload)
 	InternalUploadBlank(ctx context.Context, request InternalUploadBlankRequestObject) (InternalUploadBlankResponseObject, error)
 
@@ -2114,6 +2329,68 @@ func (sh *strictHandler) InternalMultipartUpload(ctx fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	} else if validResponse, ok := response.(InternalMultipartUploadResponseObject); ok {
 		if err := validResponse.VisitInternalMultipartUploadResponse(ctx); err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, err.Error())
+		}
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// InternalStorageCleanupApply operation middleware
+func (sh *strictHandler) InternalStorageCleanupApply(ctx fiber.Ctx) error {
+	var request InternalStorageCleanupApplyRequestObject
+
+	var body InternalStorageCleanupApplyJSONRequestBody
+	if err := ctx.Bind().Body(&body); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	}
+	request.Body = &body
+
+	handler := func(ctx fiber.Ctx, request interface{}) (interface{}, error) {
+		return sh.ssi.InternalStorageCleanupApply(ctx.Context(), request.(InternalStorageCleanupApplyRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "InternalStorageCleanupApply")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	} else if validResponse, ok := response.(InternalStorageCleanupApplyResponseObject); ok {
+		if err := validResponse.VisitInternalStorageCleanupApplyResponse(ctx); err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, err.Error())
+		}
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// InternalStorageCleanupAudit operation middleware
+func (sh *strictHandler) InternalStorageCleanupAudit(ctx fiber.Ctx) error {
+	var request InternalStorageCleanupAuditRequestObject
+
+	var body InternalStorageCleanupAuditJSONRequestBody
+	if err := ctx.Bind().Body(&body); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	}
+	request.Body = &body
+
+	handler := func(ctx fiber.Ctx, request interface{}) (interface{}, error) {
+		return sh.ssi.InternalStorageCleanupAudit(ctx.Context(), request.(InternalStorageCleanupAuditRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "InternalStorageCleanupAudit")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	} else if validResponse, ok := response.(InternalStorageCleanupAuditResponseObject); ok {
+		if err := validResponse.VisitInternalStorageCleanupAuditResponse(ctx); err != nil {
 			return fiber.NewError(fiber.StatusBadRequest, err.Error())
 		}
 	} else if response != nil {

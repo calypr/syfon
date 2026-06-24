@@ -41,6 +41,8 @@ func RegisterInternalRoutes(router fiber.Router, om *core.ObjectManager) {
 	router.Post(common.RouteInternalBulkCreate, handleInternalBulkCreateFiber(om))
 	router.Post(common.RouteInternalBulkDocs, handleInternalBulkDocumentsFiber(om))
 	router.Post(common.RouteInternalBulkDeleteHashes, handleInternalBulkDeleteFiber(om))
+	router.Post(common.RouteInternalRepairCleanupAudit, handleInternalStorageCleanupAuditFiber(om))
+	router.Post(common.RouteInternalRepairCleanupApply, handleInternalStorageCleanupApplyFiber(om))
 
 	registerInternalTransferRoutes(router, om)
 }
@@ -321,7 +323,6 @@ func handleInternalBulkDocumentsFiber(om *core.ObjectManager) fiber.Handler {
 		}
 		if obj, err := req.AsBulkDocumentsRequest1(); err == nil {
 			ids = append(ids, common.DerefStringSlice(obj.Ids)...)
-			ids = append(ids, common.DerefStringSlice(obj.Dids)...)
 		}
 		if len(ids) == 0 {
 			return c.Status(fiber.StatusBadRequest).SendString("Invalid request body: ids are required")

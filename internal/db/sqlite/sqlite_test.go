@@ -1344,6 +1344,85 @@ func TestSqliteDB_TransferAttributionByResources(t *testing.T) {
 	}
 }
 
+func TestSqliteDB_StoragePathMetricsByScope(t *testing.T) {
+	ctx := context.Background()
+	db, err := NewSqliteDB(":memory:")
+	if err != nil {
+		t.Fatalf("failed to create db: %v", err)
+	}
+	now := time.Now().UTC()
+	for _, obj := range []models.InternalObject{
+		{
+			Authorizations: map[string][]string{"org": {"p1"}},
+			DrsObject: drs.DrsObject{
+				Id:          "obj-1",
+				Name:        common.Ptr("data/a.txt"),
+				Size:        10,
+				CreatedTime: now,
+				UpdatedTime: &now,
+			},
+		},
+		{
+			Authorizations: map[string][]string{"org": {"p1"}},
+			DrsObject: drs.DrsObject{
+				Id:          "obj-2",
+				Name:        common.Ptr("data/a.txt"),
+				Size:        20,
+				CreatedTime: now,
+				UpdatedTime: &now,
+			},
+		},
+		{
+			Authorizations: map[string][]string{"org": {"p1"}},
+			DrsObject: drs.DrsObject{
+				Id:          "obj-3",
+				Name:        common.Ptr("data/nested/b.txt"),
+				Size:        30,
+				CreatedTime: now,
+				UpdatedTime: &now,
+			},
+		},
+	} {
+		if err := db.CreateObject(ctx, &obj); err != nil {
+			t.Fatalf("CreateObject failed: %v", err)
+		}
+	}
+	if err := db.RecordFileDownload(ctx, "obj-1"); err != nil {
+		t.Fatalf("RecordFileDownload failed: %v", err)
+	}
+	if err := db.RecordFileDownload(ctx, "obj-2"); err != nil {
+		t.Fatalf("RecordFileDownload failed: %v", err)
+	}
+	if err := db.RecordFileDownload(ctx, "obj-2"); err != nil {
+		t.Fatalf("RecordFileDownload failed: %v", err)
+	}
+
+	summary, err := db.GetStoragePathSummary(ctx, "org", "p1", "data")
+	if err != nil {
+		t.Fatalf("GetStoragePathSummary failed: %v", err)
+	}
+	if summary.RecordCount != 3 || summary.FileCount != 2 || summary.TotalBytes != 60 || summary.DuplicatePathCount != 1 || summary.DownloadCount != 3 {
+		t.Fatalf("unexpected storage summary: %+v", summary)
+	}
+	if summary.LastDownloadTime == nil {
+		t.Fatalf("expected last download time in summary: %+v", summary)
+	}
+
+	items, err := db.ListStoragePathChildren(ctx, "org", "p1", "data", 10, 0, "bytes", "desc")
+	if err != nil {
+		t.Fatalf("ListStoragePathChildren failed: %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("expected 2 storage children, got %+v", items)
+	}
+	if items[0].Name != "nested" || items[0].Type != "directory" || items[0].TotalBytes != 30 || items[0].DownloadCount != 0 {
+		t.Fatalf("unexpected first child: %+v", items[0])
+	}
+	if items[1].Name != "a.txt" || items[1].DownloadCount != 3 || items[1].LastDownloadTime == nil {
+		t.Fatalf("unexpected second child: %+v", items[1])
+	}
+}
+
 func TestSqliteDB_ListBucketVisibilityRows(t *testing.T) {
 	ctx := context.Background()
 	db, err := NewSqliteDB(":memory:")
