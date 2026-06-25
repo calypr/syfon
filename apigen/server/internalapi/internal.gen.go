@@ -238,36 +238,55 @@ type StorageCleanupAuditRequest struct {
 
 // StorageCleanupFinding defines model for StorageCleanupFinding.
 type StorageCleanupFinding struct {
-	Kind                *string                      `json:"kind,omitempty"`
-	Message             *string                      `json:"message,omitempty"`
-	NormalizedPath      *string                      `json:"normalized_path,omitempty"`
-	RecommendedAction   *string                      `json:"recommended_action,omitempty"`
-	Records             *[]StorageCleanupRecordAudit `json:"records,omitempty"`
-	RepoDeleteCandidate *bool                        `json:"repo_delete_candidate,omitempty"`
-	Severity            *string                      `json:"severity,omitempty"`
+	CleanupScope              *string                      `json:"cleanup_scope,omitempty"`
+	ChecksumCount             *int                         `json:"checksum_count,omitempty"`
+	Kind                      *string                      `json:"kind,omitempty"`
+	LegacyUrlTemplateDetected *bool                        `json:"legacy_url_template_detected,omitempty"`
+	Message                   *string                      `json:"message,omitempty"`
+	NormalizedPath            *string                      `json:"normalized_path,omitempty"`
+	RecommendedAction         *string                      `json:"recommended_action,omitempty"`
+	Records                   *[]StorageCleanupRecordAudit `json:"records,omitempty"`
+	RepoDeleteCandidate       *bool                        `json:"repo_delete_candidate,omitempty"`
+	SizeCount                 *int                         `json:"size_count,omitempty"`
+	StructuralReason          *string                      `json:"structural_reason,omitempty"`
+	Severity                  *string                      `json:"severity,omitempty"`
+}
+
+// StorageCleanupAccessProbe defines model for StorageCleanupAccessProbe.
+type StorageCleanupAccessProbe struct {
+	Bucket         *string `json:"bucket,omitempty"`
+	ErrorKind      *string `json:"error_kind,omitempty"`
+	StorageMessage *string `json:"storage_message,omitempty"`
+	StorageStatus  *string `json:"storage_status,omitempty"`
+	Url            *string `json:"url,omitempty"`
 }
 
 // StorageCleanupRecordAudit defines model for StorageCleanupRecordAudit.
 type StorageCleanupRecordAudit struct {
-	CurrentAccessUrls *[]string  `json:"current_access_urls,omitempty"`
-	DownloadCount     *int64     `json:"download_count,omitempty"`
-	LastDownloadTime  *time.Time `json:"last_download_time,omitempty"`
-	NormalizedPath    *string    `json:"normalized_path,omitempty"`
-	ObjectId          *string    `json:"object_id,omitempty"`
-	Size              *int64     `json:"size,omitempty"`
-	StorageMessage    *string    `json:"storage_message,omitempty"`
-	StorageStatus     *string    `json:"storage_status,omitempty"`
-	UpdatedTime       *time.Time `json:"updated_time,omitempty"`
+	AccessProbes      *[]StorageCleanupAccessProbe `json:"access_probes,omitempty"`
+	CleanupScope      *string                      `json:"cleanup_scope,omitempty"`
+	CurrentAccessUrls *[]string                    `json:"current_access_urls,omitempty"`
+	DownloadCount     *int64                       `json:"download_count,omitempty"`
+	LastDownloadTime  *time.Time                   `json:"last_download_time,omitempty"`
+	NormalizedPath    *string                      `json:"normalized_path,omitempty"`
+	ObjectId          *string                      `json:"object_id,omitempty"`
+	Size              *int64                       `json:"size,omitempty"`
+	StorageMessage    *string                      `json:"storage_message,omitempty"`
+	StorageStatus     *string                      `json:"storage_status,omitempty"`
+	UpdatedTime       *time.Time                   `json:"updated_time,omitempty"`
 }
 
 // StorageCleanupReport defines model for StorageCleanupReport.
 type StorageCleanupReport struct {
-	Findings     *[]StorageCleanupFinding `json:"findings,omitempty"`
-	Organization *string                  `json:"organization,omitempty"`
-	PathPrefix   *string                  `json:"path_prefix,omitempty"`
-	Project      *string                  `json:"project,omitempty"`
-	Scanned      *int                     `json:"scanned,omitempty"`
-	Summary      *map[string]int          `json:"summary,omitempty"`
+	ClassifiedPaths   *int                     `json:"classified_paths,omitempty"`
+	Findings          *[]StorageCleanupFinding `json:"findings,omitempty"`
+	Organization      *string                  `json:"organization,omitempty"`
+	PathPrefix        *string                  `json:"path_prefix,omitempty"`
+	Project           *string                  `json:"project,omitempty"`
+	Scanned           *int                     `json:"scanned,omitempty"`
+	ScannedPaths      *int                     `json:"scanned_paths,omitempty"`
+	Summary           *map[string]int          `json:"summary,omitempty"`
+	UnclassifiedPaths *int                     `json:"unclassified_paths,omitempty"`
 }
 
 // StorageCleanupSkipped defines model for StorageCleanupSkipped.

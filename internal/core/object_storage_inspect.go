@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"path"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -28,15 +30,15 @@ type InspectStorageRequest struct {
 }
 
 type StorageObjectMetadata struct {
-	ObjectURL    string
-	Provider     string
-	Bucket       string
-	Key          string
-	Path         string
-	SizeBytes    int64
-	MetaSHA256   string
-	ETag         string
-	LastModTime  time.Time
+	ObjectURL   string
+	Provider    string
+	Bucket      string
+	Key         string
+	Path        string
+	SizeBytes   int64
+	MetaSHA256  string
+	ETag        string
+	LastModTime time.Time
 }
 
 type StorageInspectErrorKind string
@@ -55,6 +57,22 @@ type StorageInspectError struct {
 	Message string
 }
 
+var storageInspectCacheKey contextKey = "storageInspectCache"
+
+type storageInspectCredentialCacheEntry struct {
+	cred *models.S3Credential
+	err  error
+}
+
+type storageInspectRequestCache struct {
+	mu sync.Mutex
+
+	credentials   map[string]storageInspectCredentialCacheEntry
+	visible       map[string]VisibleBucket
+	visibleErr    error
+	visibleLoaded bool
+}
+
 func (e *StorageInspectError) Error() string {
 	if e == nil {
 		return "storage inspect failed"
@@ -63,6 +81,20 @@ func (e *StorageInspectError) Error() string {
 		return e.Message
 	}
 	return fmt.Sprintf("storage inspect failed: %s", e.Kind)
+}
+
+func WithStorageInspectCache(ctx context.Context) context.Context {
+	if cache, _ := ctx.Value(storageInspectCacheKey).(*storageInspectRequestCache); cache != nil {
+		return ctx
+	}
+	return context.WithValue(ctx, storageInspectCacheKey, &storageInspectRequestCache{
+		credentials: map[string]storageInspectCredentialCacheEntry{},
+	})
+}
+
+func storageInspectCacheFromContext(ctx context.Context) *storageInspectRequestCache {
+	cache, _ := ctx.Value(storageInspectCacheKey).(*storageInspectRequestCache)
+	return cache
 }
 
 func (m *ObjectManager) SetS3ObjectInspector(fn func(context.Context, models.S3Credential, string, string) (*StorageObjectMetadata, error)) {
@@ -173,20 +205,38 @@ func (m *ObjectManager) credentialForBucket(ctx context.Context, bucket string) 
 	if bucket == "" {
 		return nil, &StorageInspectError{Kind: StorageInspectInvalidInput, Message: "bucket is required"}
 	}
+	if cache := storageInspectCacheFromContext(ctx); cache != nil {
+		if cred, err, ok := cache.getCredential(bucket); ok {
+			return cred, err
+		}
+	}
 	if cred, err := m.db.GetS3Credential(ctx, bucket); err == nil && cred != nil {
+		if cache := storageInspectCacheFromContext(ctx); cache != nil {
+			cache.setCredential(bucket, cred, nil)
+		}
 		return cred, nil
 	}
 	creds, err := m.db.ListS3Credentials(ctx)
 	if err != nil {
+		if cache := storageInspectCacheFromContext(ctx); cache != nil {
+			cache.setCredential(bucket, nil, err)
+		}
 		return nil, err
 	}
 	for _, cred := range creds {
 		if strings.EqualFold(strings.TrimSpace(cred.Bucket), bucket) || strings.EqualFold(strings.TrimSpace(cred.CredentialID), bucket) {
 			copy := cred
+			if cache := storageInspectCacheFromContext(ctx); cache != nil {
+				cache.setCredential(bucket, &copy, nil)
+			}
 			return &copy, nil
 		}
 	}
-	return nil, &StorageInspectError{Kind: StorageInspectCredentialMissing, Message: fmt.Sprintf("no stored bucket credential found for bucket %q", bucket)}
+	err = &StorageInspectError{Kind: StorageInspectCredentialMissing, Message: fmt.Sprintf("no stored bucket credential found for bucket %q", bucket)}
+	if cache := storageInspectCacheFromContext(ctx); cache != nil {
+		cache.setCredential(bucket, nil, err)
+	}
+	return nil, err
 }
 
 func bucketVisibleToCaller(visible map[string]VisibleBucket, bucket string, credentialID string) bool {
@@ -196,6 +246,78 @@ func bucketVisibleToCaller(visible map[string]VisibleBucket, bucket string, cred
 		}
 	}
 	return false
+}
+
+func (m *ObjectManager) listVisibleBucketsCached(ctx context.Context) (map[string]VisibleBucket, error) {
+	if cache := storageInspectCacheFromContext(ctx); cache != nil {
+		if visible, err, ok := cache.getVisible(); ok {
+			return visible, err
+		}
+	}
+	visible, err := m.listVisibleBucketsUncached(ctx)
+	if cache := storageInspectCacheFromContext(ctx); cache != nil {
+		cache.setVisible(visible, err)
+	}
+	return visible, err
+}
+
+func (c *storageInspectRequestCache) getCredential(bucket string) (*models.S3Credential, error, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	entry, ok := c.credentials[strings.ToLower(strings.TrimSpace(bucket))]
+	if !ok {
+		return nil, nil, false
+	}
+	if entry.cred == nil {
+		return nil, entry.err, true
+	}
+	copy := *entry.cred
+	return &copy, entry.err, true
+}
+
+func (c *storageInspectRequestCache) setCredential(bucket string, cred *models.S3Credential, err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	key := strings.ToLower(strings.TrimSpace(bucket))
+	if cred == nil {
+		c.credentials[key] = storageInspectCredentialCacheEntry{err: err}
+		return
+	}
+	copy := *cred
+	c.credentials[key] = storageInspectCredentialCacheEntry{cred: &copy, err: err}
+}
+
+func (c *storageInspectRequestCache) getVisible() (map[string]VisibleBucket, error, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.visibleLoaded {
+		return nil, nil, false
+	}
+	return cloneVisibleBuckets(c.visible), c.visibleErr, true
+}
+
+func (c *storageInspectRequestCache) setVisible(visible map[string]VisibleBucket, err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.visible = cloneVisibleBuckets(visible)
+	c.visibleErr = err
+	c.visibleLoaded = true
+}
+
+func cloneVisibleBuckets(in map[string]VisibleBucket) map[string]VisibleBucket {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]VisibleBucket, len(in))
+	for key, bucket := range in {
+		programs := append([]string(nil), bucket.Programs...)
+		sort.Strings(programs)
+		out[key] = VisibleBucket{
+			Credential: bucket.Credential,
+			Programs:   programs,
+		}
+	}
+	return out
 }
 
 func defaultS3ObjectInspector(ctx context.Context, cred models.S3Credential, bucket string, key string) (*StorageObjectMetadata, error) {

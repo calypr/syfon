@@ -41,6 +41,33 @@ func handleInternalStorageCleanupAuditFiber(om *core.ObjectManager) fiber.Handle
 	}
 }
 
+func handleInternalProjectDiffAuditFiber(om *core.ObjectManager) fiber.Handler {
+	svc := repair.NewProjectDiffService(om)
+	return func(c fiber.Ctx) error {
+		if apimiddleware.MissingGen3AuthHeader(c.Context()) {
+			return c.SendStatus(fiber.StatusUnauthorized)
+		}
+		var req repair.ProjectDiffAuditRequest
+		if err := decodeStrictJSON(c.Body(), &req); err != nil {
+			return apiutil.Reject(c, fiber.StatusBadRequest, "Invalid request body: "+err.Error())
+		}
+		req.Organization = strings.TrimSpace(req.Organization)
+		req.Project = strings.TrimSpace(req.Project)
+		req.PathPrefix = strings.TrimSpace(req.PathPrefix)
+		if req.Organization == "" || req.Project == "" {
+			return apiutil.Reject(c, fiber.StatusBadRequest, "organization and project are required")
+		}
+		if err := authorizeStorageCleanupScope(c.Context(), req.Organization, req.Project, "read"); err != nil {
+			return apiutil.HandleError(c, err)
+		}
+		report, err := svc.Audit(c.Context(), req)
+		if err != nil {
+			return apiutil.HandleError(c, err)
+		}
+		return c.JSON(report)
+	}
+}
+
 func handleInternalStorageCleanupApplyFiber(om *core.ObjectManager) fiber.Handler {
 	svc := repair.NewStorageCleanupService(om)
 	return func(c fiber.Ctx) error {

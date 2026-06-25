@@ -17,12 +17,27 @@ func NewRepairService(r request.Requester) *RepairService {
 	return &RepairService{requestor: r}
 }
 
+func (s *RepairService) ProjectDiffAudit(ctx context.Context, opts ProjectDiffAuditOptions) (repair.ProjectDiffReport, error) {
+	req := repair.ProjectDiffAuditRequest{
+		Organization:  opts.Organization,
+		Project:       opts.ProjectID,
+		PathPrefix:    opts.PathPrefix,
+		ExpectedPaths: append([]string(nil), opts.ExpectedPaths...),
+	}
+	var out repair.ProjectDiffReport
+	if err := s.requestor.Do(ctx, http.MethodPost, common.RouteInternalRepairProjectDiff, req, &out); err != nil {
+		return repair.ProjectDiffReport{}, err
+	}
+	return out, nil
+}
+
 func (s *RepairService) StorageCleanupAudit(ctx context.Context, opts StorageCleanupAuditOptions) (repair.StorageCleanupReport, error) {
 	req := repair.StorageCleanupAuditRequest{
 		Organization:  opts.Organization,
 		Project:       opts.ProjectID,
 		PathPrefix:    opts.PathPrefix,
 		ExpectedPaths: append([]string(nil), opts.ExpectedPaths...),
+		SelectedPaths: append([]string(nil), opts.SelectedPaths...),
 		CheckStorage:  opts.CheckStorage,
 	}
 	var out repair.StorageCleanupReport

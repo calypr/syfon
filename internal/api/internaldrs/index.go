@@ -41,6 +41,7 @@ func RegisterInternalRoutes(router fiber.Router, om *core.ObjectManager) {
 	router.Post(common.RouteInternalBulkCreate, handleInternalBulkCreateFiber(om))
 	router.Post(common.RouteInternalBulkDocs, handleInternalBulkDocumentsFiber(om))
 	router.Post(common.RouteInternalBulkDeleteHashes, handleInternalBulkDeleteFiber(om))
+	router.Post(common.RouteInternalRepairProjectDiff, handleInternalProjectDiffAuditFiber(om))
 	router.Post(common.RouteInternalRepairCleanupAudit, handleInternalStorageCleanupAuditFiber(om))
 	router.Post(common.RouteInternalRepairCleanupApply, handleInternalStorageCleanupApplyFiber(om))
 

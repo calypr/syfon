@@ -58,6 +58,10 @@ func (m *ObjectManager) ListBucketScopes(ctx context.Context) ([]models.BucketSc
 }
 
 func (m *ObjectManager) ListVisibleBuckets(ctx context.Context) (map[string]VisibleBucket, error) {
+	return m.listVisibleBucketsCached(ctx)
+}
+
+func (m *ObjectManager) listVisibleBucketsUncached(ctx context.Context) (map[string]VisibleBucket, error) {
 	creds, err := m.db.ListS3Credentials(ctx)
 	if err != nil {
 		return nil, err

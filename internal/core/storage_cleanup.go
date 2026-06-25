@@ -13,6 +13,14 @@ import (
 )
 
 func (m *ObjectManager) ListStorageCleanupRecords(ctx context.Context, organization, project, pathPrefix string) ([]models.StorageCleanupRecord, error) {
+	return m.listStorageCleanupRecords(ctx, organization, project, pathPrefix, false)
+}
+
+func (m *ObjectManager) ListDuplicateStorageCleanupRecords(ctx context.Context, organization, project, pathPrefix string) ([]models.StorageCleanupRecord, error) {
+	return m.listStorageCleanupRecords(ctx, organization, project, pathPrefix, true)
+}
+
+func (m *ObjectManager) listStorageCleanupRecords(ctx context.Context, organization, project, pathPrefix string, duplicatesOnly bool) ([]models.StorageCleanupRecord, error) {
 	store, ok := m.db.(db.StorageMetricsStore)
 	if !ok {
 		return nil, fmt.Errorf("storage cleanup listing not supported by database")
@@ -33,6 +41,9 @@ func (m *ObjectManager) ListStorageCleanupRecords(ctx context.Context, organizat
 		if !authz.HasMethodAccess(ctx, objectMethodRead, []string{"/programs", "/data_file"}) && !authz.HasAnyMethodAccess(ctx, []string{resource}, objectMethodRead) {
 			return nil, common.ErrUnauthorized
 		}
+	}
+	if duplicatesOnly {
+		return store.ListDuplicateStorageCleanupRecords(ctx, organization, project, pathPrefix)
 	}
 	return store.ListStorageCleanupRecords(ctx, organization, project, pathPrefix)
 }

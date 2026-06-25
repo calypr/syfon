@@ -51,12 +51,17 @@ func WriteStorageCleanupAudit(w io.Writer, format string, report StorageCleanupR
 		return err
 	}
 	for _, finding := range report.Findings {
-		if _, err := fmt.Fprintf(w, "%s [%s] %s action=%s\n", finding.NormalizedPath, finding.Kind, finding.Message, finding.RecommendedAction); err != nil {
+		if _, err := fmt.Fprintf(w, "%s [%s] %s action=%s scope=%s\n", finding.NormalizedPath, finding.Kind, finding.Message, finding.RecommendedAction, finding.CleanupScope); err != nil {
 			return err
 		}
 		for _, record := range finding.Records {
-			if _, err := fmt.Fprintf(w, "  - %s storage=%s downloads=%d\n", record.ObjectID, record.StorageStatus, record.DownloadCount); err != nil {
+			if _, err := fmt.Fprintf(w, "  - %s storage=%s downloads=%d scope=%s\n", record.ObjectID, record.StorageStatus, record.DownloadCount, record.CleanupScope); err != nil {
 				return err
+			}
+			for _, probe := range record.AccessProbes {
+				if _, err := fmt.Fprintf(w, "    * %s storage=%s bucket=%s error=%s message=%s\n", probe.URL, probe.StorageStatus, probe.Bucket, probe.ErrorKind, probe.StorageMessage); err != nil {
+					return err
+				}
 			}
 		}
 	}

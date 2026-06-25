@@ -69,6 +69,7 @@ type StorageMetricsStore interface {
 	GetStoragePathSummary(ctx context.Context, organization, project, path string) (models.StoragePathSummary, error)
 	ListStoragePathChildren(ctx context.Context, organization, project, path string, limit, offset int, sortBy, sortOrder string) ([]models.StoragePathChild, error)
 	ListStorageCleanupRecords(ctx context.Context, organization, project, pathPrefix string) ([]models.StorageCleanupRecord, error)
+	ListDuplicateStorageCleanupRecords(ctx context.Context, organization, project, pathPrefix string) ([]models.StorageCleanupRecord, error)
 }
 
 type TransferAttributionScopedStore interface {
@@ -143,6 +144,7 @@ type MetricsStore interface {
 	GetStoragePathSummary(ctx context.Context, organization, project, path string) (models.StoragePathSummary, error)
 	ListStoragePathChildren(ctx context.Context, organization, project, path string, limit, offset int, sortBy, sortOrder string) ([]models.StoragePathChild, error)
 	ListStorageCleanupRecords(ctx context.Context, organization, project, pathPrefix string) ([]models.StorageCleanupRecord, error)
+	ListDuplicateStorageCleanupRecords(ctx context.Context, organization, project, pathPrefix string) ([]models.StorageCleanupRecord, error)
 }
 
 // LFSStore is the minimum storage surface needed by the LFS API.

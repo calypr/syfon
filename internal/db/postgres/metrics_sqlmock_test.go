@@ -151,3 +151,86 @@ func TestGetStoragePathSummary(t *testing.T) {
 		t.Fatalf("unmet expectations: %v", err)
 	}
 }
+
+func TestListStorageCleanupRecordsUsesSQLPrefixFilter(t *testing.T) {
+	pg, mock, rawDB := newMockPostgresDB(t)
+	defer rawDB.Close()
+
+	now := time.Now().UTC()
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT DISTINCT e.object_id
+		FROM object_usage_event e
+		JOIN drs_object o ON o.id = e.object_id
+	`)).WillReturnRows(sqlmock.NewRows([]string{"object_id"}))
+	mock.ExpectCommit()
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT bi.object_id, bi.normalized_path, o.size, o.updated_time,
+			COALESCE(u.download_count, 0), u.last_download_time
+		FROM drs_object_browse_index bi
+		JOIN drs_object o ON o.id = bi.object_id
+		LEFT JOIN object_usage u ON u.object_id = bi.object_id
+		WHERE resource = $1 AND (bi.normalized_path = $2 OR bi.normalized_path LIKE $3)
+		ORDER BY bi.normalized_path ASC, bi.object_id ASC
+	`)).
+		WithArgs("/organization/org/project/proj", "data", "data/%").
+		WillReturnRows(sqlmock.NewRows([]string{"object_id", "normalized_path", "size", "updated_time", "download_count", "last_download_time"}).
+			AddRow("obj-1", "data/a.txt", int64(10), now, int64(2), now))
+
+	rows, err := pg.ListStorageCleanupRecords(context.Background(), "org", "proj", "data")
+	if err != nil {
+		t.Fatalf("ListStorageCleanupRecords returned error: %v", err)
+	}
+	if len(rows) != 1 || rows[0].NormalizedPath != "data/a.txt" {
+		t.Fatalf("unexpected rows: %+v", rows)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestListDuplicateStorageCleanupRecordsFiltersToDuplicatePaths(t *testing.T) {
+	pg, mock, rawDB := newMockPostgresDB(t)
+	defer rawDB.Close()
+
+	now := time.Now().UTC()
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT DISTINCT e.object_id
+		FROM object_usage_event e
+		JOIN drs_object o ON o.id = e.object_id
+	`)).WillReturnRows(sqlmock.NewRows([]string{"object_id"}))
+	mock.ExpectCommit()
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		WITH duplicate_paths AS (
+			SELECT normalized_path
+			FROM drs_object_browse_index
+			WHERE resource = $1 AND (normalized_path = $2 OR normalized_path LIKE $3)
+			GROUP BY normalized_path
+			HAVING COUNT(*) > 1
+		)
+		SELECT bi.object_id, bi.normalized_path, o.size, o.updated_time,
+			COALESCE(u.download_count, 0), u.last_download_time
+		FROM drs_object_browse_index bi
+		JOIN duplicate_paths dp ON dp.normalized_path = bi.normalized_path
+		JOIN drs_object o ON o.id = bi.object_id
+		LEFT JOIN object_usage u ON u.object_id = bi.object_id
+		WHERE resource = $1 AND (bi.normalized_path = $2 OR bi.normalized_path LIKE $3)
+		ORDER BY bi.normalized_path ASC, bi.object_id ASC
+	`)).
+		WithArgs("/organization/org/project/proj", "data", "data/%").
+		WillReturnRows(sqlmock.NewRows([]string{"object_id", "normalized_path", "size", "updated_time", "download_count", "last_download_time"}).
+			AddRow("obj-1", "data/a.txt", int64(10), now, int64(2), now).
+			AddRow("obj-2", "data/a.txt", int64(11), now, int64(3), now))
+
+	rows, err := pg.ListDuplicateStorageCleanupRecords(context.Background(), "org", "proj", "data")
+	if err != nil {
+		t.Fatalf("ListDuplicateStorageCleanupRecords returned error: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("expected duplicate rows, got %+v", rows)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}

@@ -296,7 +296,7 @@ func (db *SqliteDB) ListStorageCleanupRecords(ctx context.Context, organization,
 	if err != nil {
 		return nil, err
 	}
-	_, prefixSegments, err := common.NormalizeBrowsePath(pathPrefix)
+	where, args, err := sqliteStorageCleanupScopeArgs(resource, pathPrefix, "bi.normalized_path")
 	if err != nil {
 		return nil, err
 	}
@@ -306,9 +306,9 @@ func (db *SqliteDB) ListStorageCleanupRecords(ctx context.Context, organization,
 		FROM drs_object_browse_index bi
 		JOIN drs_object o ON o.id = bi.object_id
 		LEFT JOIN object_usage u ON u.object_id = bi.object_id
-		WHERE bi.resource = ?
+		WHERE `+where+`
 		ORDER BY bi.normalized_path ASC, bi.object_id ASC
-	`, resource)
+	`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -321,14 +321,6 @@ func (db *SqliteDB) ListStorageCleanupRecords(ctx context.Context, organization,
 		if err := rows.Scan(&row.ObjectID, &row.NormalizedPath, &row.Size, &row.UpdatedTime, &row.DownloadCount, &lastDownload); err != nil {
 			return nil, err
 		}
-		info, ok, err := common.BrowsePathInfoFromName(row.NormalizedPath)
-		if err != nil {
-			return nil, err
-		}
-		if !ok || !common.HasBrowsePathPrefix(info.Segments, prefixSegments) {
-			continue
-		}
-		row.NormalizedPath = info.Normalized
 		if lastDownload.Valid {
 			t := lastDownload.Time.UTC()
 			row.LastDownloadTime = &t
@@ -339,6 +331,78 @@ func (db *SqliteDB) ListStorageCleanupRecords(ctx context.Context, organization,
 		return nil, err
 	}
 	return out, nil
+}
+
+func (db *SqliteDB) ListDuplicateStorageCleanupRecords(ctx context.Context, organization, project, pathPrefix string) ([]models.StorageCleanupRecord, error) {
+	if err := db.flushObjectUsageEvents(ctx); err != nil {
+		return nil, err
+	}
+	resource, err := sycommon.ResourcePath(strings.TrimSpace(organization), strings.TrimSpace(project))
+	if err != nil {
+		return nil, err
+	}
+	cteWhere, cteArgs, err := sqliteStorageCleanupScopeArgs(resource, pathPrefix, "normalized_path")
+	if err != nil {
+		return nil, err
+	}
+	mainWhere, _, err := sqliteStorageCleanupScopeArgs(resource, pathPrefix, "bi.normalized_path")
+	if err != nil {
+		return nil, err
+	}
+	rows, err := db.db.QueryContext(ctx, `
+		WITH duplicate_paths AS (
+			SELECT normalized_path
+			FROM drs_object_browse_index
+			WHERE `+cteWhere+`
+			GROUP BY normalized_path
+			HAVING COUNT(*) > 1
+		)
+		SELECT bi.object_id, bi.normalized_path, o.size, o.updated_time,
+			COALESCE(u.download_count, 0), u.last_download_time
+		FROM drs_object_browse_index bi
+		JOIN duplicate_paths dp ON dp.normalized_path = bi.normalized_path
+		JOIN drs_object o ON o.id = bi.object_id
+		LEFT JOIN object_usage u ON u.object_id = bi.object_id
+		WHERE `+mainWhere+`
+		ORDER BY bi.normalized_path ASC, bi.object_id ASC
+	`, cteArgs...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]models.StorageCleanupRecord, 0)
+	for rows.Next() {
+		var row models.StorageCleanupRecord
+		var lastDownload sql.NullTime
+		if err := rows.Scan(&row.ObjectID, &row.NormalizedPath, &row.Size, &row.UpdatedTime, &row.DownloadCount, &lastDownload); err != nil {
+			return nil, err
+		}
+		if lastDownload.Valid {
+			t := lastDownload.Time.UTC()
+			row.LastDownloadTime = &t
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func sqliteStorageCleanupScopeArgs(resource, pathPrefix string, normalizedPathColumn string) (string, []any, error) {
+	where := []string{"resource = ?"}
+	args := []any{resource}
+	normalizedPrefix, _, err := common.NormalizeBrowsePath(pathPrefix)
+	if err != nil {
+		return "", nil, err
+	}
+	if normalizedPrefix == "" {
+		return strings.Join(where, " AND "), args, nil
+	}
+	where = append(where, fmt.Sprintf("(%s = ? OR %s LIKE ?)", normalizedPathColumn, normalizedPathColumn))
+	args = append(args, normalizedPrefix, normalizedPrefix+"/%")
+	return strings.Join(where, " AND "), args, nil
 }
 
 func (db *SqliteDB) GetTransferAttributionSummaryByResources(ctx context.Context, filter models.TransferAttributionFilter, resources []string) (models.TransferAttributionSummary, error) {

@@ -206,6 +206,24 @@ func (m *MockDatabase) ListStorageCleanupRecords(ctx context.Context, organizati
 	return rows, nil
 }
 
+func (m *MockDatabase) ListDuplicateStorageCleanupRecords(ctx context.Context, organization, project, pathPrefix string) ([]models.StorageCleanupRecord, error) {
+	rows, err := m.ListStorageCleanupRecords(ctx, organization, project, pathPrefix)
+	if err != nil {
+		return nil, err
+	}
+	counts := make(map[string]int, len(rows))
+	for _, row := range rows {
+		counts[row.NormalizedPath]++
+	}
+	out := make([]models.StorageCleanupRecord, 0, len(rows))
+	for _, row := range rows {
+		if counts[row.NormalizedPath] > 1 {
+			out = append(out, row)
+		}
+	}
+	return out, nil
+}
+
 func (m *MockDatabase) ListObjectIDsPageByPath(ctx context.Context, organization, project, path, startAfter string, limit, offset int) ([]string, []models.BrowseDirectory, error) {
 	normalizedPath, pathSegments, err := common.NormalizeBrowsePath(path)
 	if err != nil {

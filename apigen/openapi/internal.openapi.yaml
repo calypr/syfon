@@ -877,6 +877,12 @@ components:
           type: string
         scanned:
           type: integer
+        scanned_paths:
+          type: integer
+        classified_paths:
+          type: integer
+        unclassified_paths:
+          type: integer
         summary:
           type: object
           additionalProperties:
@@ -900,10 +906,33 @@ components:
           type: string
         repo_delete_candidate:
           type: boolean
+        cleanup_scope:
+          type: string
+        structural_reason:
+          type: string
+        checksum_count:
+          type: integer
+        size_count:
+          type: integer
+        legacy_url_template_detected:
+          type: boolean
         records:
           type: array
           items:
             $ref: '#/components/schemas/StorageCleanupRecordAudit'
+    StorageCleanupAccessProbe:
+      type: object
+      properties:
+        url:
+          type: string
+        bucket:
+          type: string
+        storage_status:
+          type: string
+        storage_message:
+          type: string
+        error_kind:
+          type: string
     StorageCleanupRecordAudit:
       type: object
       properties:
@@ -927,6 +956,12 @@ components:
           type: array
           items:
             type: string
+        access_probes:
+          type: array
+          items:
+            $ref: '#/components/schemas/StorageCleanupAccessProbe'
+        cleanup_scope:
+          type: string
         storage_status:
           type: string
         storage_message:

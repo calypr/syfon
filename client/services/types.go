@@ -86,7 +86,15 @@ type StorageCleanupAuditOptions struct {
 	ProjectID     string
 	PathPrefix    string
 	ExpectedPaths []string
+	SelectedPaths []string
 	CheckStorage  *bool
+}
+
+type ProjectDiffAuditOptions struct {
+	Organization  string
+	ProjectID     string
+	PathPrefix    string
+	ExpectedPaths []string
 }
 
 type StorageCleanupApplyOptions struct {

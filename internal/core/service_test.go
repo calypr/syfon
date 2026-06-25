@@ -17,8 +17,10 @@ import (
 
 type coreTestDB struct {
 	*testutils.MockDatabase
-	aliases map[string]string
-	creds   []models.S3Credential
+	aliases                map[string]string
+	creds                  []models.S3Credential
+	getS3CredentialCalls   int
+	listS3CredentialsCalls int
 }
 
 func (d *coreTestDB) ResolveObjectAlias(ctx context.Context, aliasID string) (string, error) {
@@ -31,6 +33,7 @@ func (d *coreTestDB) ResolveObjectAlias(ctx context.Context, aliasID string) (st
 }
 
 func (d *coreTestDB) ListS3Credentials(ctx context.Context) ([]models.S3Credential, error) {
+	d.listS3CredentialsCalls++
 	if d.creds != nil {
 		out := make([]models.S3Credential, len(d.creds))
 		copy(out, d.creds)
@@ -40,6 +43,14 @@ func (d *coreTestDB) ListS3Credentials(ctx context.Context) ([]models.S3Credenti
 		return nil, nil
 	}
 	return d.MockDatabase.ListS3Credentials(ctx)
+}
+
+func (d *coreTestDB) GetS3Credential(ctx context.Context, bucket string) (*models.S3Credential, error) {
+	d.getS3CredentialCalls++
+	if d.MockDatabase == nil {
+		return nil, nil
+	}
+	return d.MockDatabase.GetS3Credential(ctx, bucket)
 }
 
 type capturingURLManager struct {
@@ -977,6 +988,62 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 		}
 		if want := "s3://calypr/org-root/project-root/relative-key"; um.signURLAccessURL != want {
 			t.Fatalf("expected scoped storage url %q, got %q", want, um.signURLAccessURL)
+		}
+	})
+
+	t.Run("storage inspect cache reuses bucket credential and visibility lookups", func(t *testing.T) {
+		db := &coreTestDB{
+			MockDatabase: &testutils.MockDatabase{
+				Credentials: map[string]models.S3Credential{
+					"gdcdata": {
+						CredentialID: "gdcdata",
+						Bucket:       "gdcdata",
+						Provider:     "s3",
+						Region:       "us-east-1",
+						AccessKey:    "test-key",
+						SecretKey:    "test-secret",
+					},
+				},
+				Objects: map[string]*drs.DrsObject{
+					"obj-1": {
+						Id: "obj-1",
+						AccessMethods: &[]drs.AccessMethod{
+							{
+								Type: drs.AccessMethodTypeS3,
+								AccessUrl: &struct {
+									Headers *[]string `json:"headers,omitempty"`
+									Url     string    `json:"url"`
+								}{
+									Url: "s3://gdcdata/existing/path-a",
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+		om := NewObjectManager(db, &capturingURLManager{})
+		om.SetS3ObjectInspector(func(ctx context.Context, cred models.S3Credential, bucket string, key string) (*StorageObjectMetadata, error) {
+			return &StorageObjectMetadata{
+				ObjectURL: "s3://" + bucket + "/" + key,
+				Bucket:    bucket,
+				Key:       key,
+			}, nil
+		})
+
+		ctx := WithStorageInspectCache(context.Background())
+		if _, err := om.InspectStorageObject(ctx, InspectStorageRequest{ObjectURL: "s3://gdcdata/probe/path-a"}); err != nil {
+			t.Fatalf("first InspectStorageObject failed: %v", err)
+		}
+		if _, err := om.InspectStorageObject(ctx, InspectStorageRequest{ObjectURL: "s3://gdcdata/probe/path-b"}); err != nil {
+			t.Fatalf("second InspectStorageObject failed: %v", err)
+		}
+
+		if db.getS3CredentialCalls != 1 {
+			t.Fatalf("expected one GetS3Credential call, got %d", db.getS3CredentialCalls)
+		}
+		if db.listS3CredentialsCalls != 1 {
+			t.Fatalf("expected one ListS3Credentials call, got %d", db.listS3CredentialsCalls)
 		}
 	})
 }
