@@ -30,7 +30,7 @@ docker run --name minio --rm -p 9000:9000 \
   quay.io/minio/minio server /tmp
 ```
 
-## 2. Start Syfon Server
+## 3. Start Syfon Server
 
 <details><summary><code>local.yaml</code></summary>
 
