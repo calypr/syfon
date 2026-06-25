@@ -21,6 +21,15 @@
 curl -sSL https://calypr.org/syfon/install.sh | bash
 ```
 
+## 2. Start S3 (e.g. MinIO)
+
+```sh
+docker run --name minio --rm -p 9000:9000 \
+  -e MINIO_ROOT_USER=example-user \
+  -e MINIO_ROOT_PASSWORD=example-pass \
+  quay.io/minio/minio server /tmp
+```
+
 ## 2. Start Syfon Server
 
 <details><summary><code>local.yaml</code></summary>
@@ -38,8 +47,8 @@ database:
 s3_credentials:
   - bucket: "local-bucket"
     region: "us-east-1"
-    access_key: "minio-user"
-    secret_key: "minio-pass"
+    access_key: "example-user"
+    secret_key: "example-pass"
     endpoint: "http://localhost:9000"
 ```
 
