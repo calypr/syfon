@@ -116,6 +116,28 @@ func (db *SqliteDB) initSchema() error {
 			secret_key TEXT,
 			endpoint TEXT
 		)`,
+		`CREATE TRIGGER IF NOT EXISTS s3_credential_unique_bucket_insert
+		BEFORE INSERT ON s3_credential
+		FOR EACH ROW
+		WHEN EXISTS (
+			SELECT 1
+			FROM s3_credential
+			WHERE bucket = NEW.bucket AND credential_id <> NEW.credential_id
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'physical bucket is already configured under another credential');
+		END`,
+		`CREATE TRIGGER IF NOT EXISTS s3_credential_unique_bucket_update
+		BEFORE UPDATE OF bucket, credential_id ON s3_credential
+		FOR EACH ROW
+		WHEN EXISTS (
+			SELECT 1
+			FROM s3_credential
+			WHERE bucket = NEW.bucket AND credential_id <> NEW.credential_id
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'physical bucket is already configured under another credential');
+		END`,
 		`CREATE TABLE IF NOT EXISTS bucket_scope (
 			organization TEXT NOT NULL,
 			project_id TEXT NOT NULL,

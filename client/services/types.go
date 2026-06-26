@@ -110,3 +110,11 @@ type StorageCleanupApplyOptions struct {
 	SelectedFindingKinds  []string
 	CheckStorage          *bool
 }
+
+type ScopeRepairOptions struct {
+	Organization string
+	ProjectID    string
+	CheckStorage bool
+	Limit        int
+	PageSize     int
+}

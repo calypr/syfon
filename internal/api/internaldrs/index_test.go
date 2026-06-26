@@ -623,6 +623,43 @@ func TestHandleInternalBulkCreate_PersistsControlledAccess(t *testing.T) {
 	}
 }
 
+func TestHandleInternalBulkCreate_OrganizationProjectAddsCanonicalControlledAccess(t *testing.T) {
+	mockDB := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}
+	reqBody := `{"records":[{"did":"obj-bulk-2","organization":"test","project":"p2","size":7,"access_methods":[{"type":"s3","access_url":{"url":"s3://bucket/path/obj-bulk-2"}}]}]}`
+	req := httptest.NewRequest(http.MethodPost, "/index/bulk", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	om := core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
+	rr := doInternalDRSTestRequest(req, om)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if got := mockDB.ObjectAuthz["obj-bulk-2"]; len(got["test"]) != 1 || got["test"][0] != "p2" {
+		t.Fatalf("expected canonical project authz, got %v", got)
+	}
+}
+
+func TestHandleInternalUpdate_OrganizationProjectAddsCanonicalControlledAccess(t *testing.T) {
+	now := time.Now().UTC()
+	mockDB := &testutils.MockDatabase{
+		Objects: map[string]*drs.DrsObject{
+			"obj-update": {Id: "obj-update", CreatedTime: now, UpdatedTime: &now},
+		},
+	}
+	reqBody := `{"did":"obj-update","organization":"test","project":"p3"}`
+	req := httptest.NewRequest(http.MethodPut, "/index/obj-update", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	om := core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
+	rr := doInternalDRSTestRequest(req, om)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if got := mockDB.ObjectAuthz["obj-update"]; len(got["test"]) != 1 || got["test"][0] != "p3" {
+		t.Fatalf("expected canonical project authz after update, got %v", got)
+	}
+}
+
 func TestHandleInternalBulkCreate_AllowsCreateAccessForAnyControlledAccessScope(t *testing.T) {
 	ctx := indexTestAuthContext(context.Background(), "gen3", true, map[string]map[string]bool{
 		"/programs/test/projects/p1": {"create": true},

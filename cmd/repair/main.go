@@ -18,6 +18,8 @@ import (
 
 type auditRunner func(cmd *cobra.Command, opts repairsvc.StorageCleanupAuditRequest) error
 type applyRunner func(cmd *cobra.Command, opts repairsvc.StorageCleanupApplyRequest) error
+type scopeAuditRunner func(cmd *cobra.Command, opts repairsvc.Options) error
+type scopeApplyRunner func(cmd *cobra.Command, opts repairsvc.Options) error
 
 type commandOptions struct {
 	Organization          string
@@ -35,9 +37,9 @@ type commandOptions struct {
 	SelectedFindingKinds  []string
 }
 
-var Cmd = newCommand(runAudit, runApply)
+var Cmd = newCommand(runAudit, runApply, runScopeAudit, runScopeApply)
 
-func newCommand(audit auditRunner, apply applyRunner) *cobra.Command {
+func newCommand(audit auditRunner, apply applyRunner, scopeAudit scopeAuditRunner, scopeApply scopeApplyRunner) *cobra.Command {
 	var opts commandOptions
 	cmd := &cobra.Command{
 		Use:   "repair",
@@ -77,6 +79,34 @@ func newCommand(audit auditRunner, apply applyRunner) *cobra.Command {
 				return err
 			}
 			return apply(cmd, req)
+		},
+	})
+	cmd.AddCommand(&cobra.Command{
+		Use:   "scope-audit",
+		Short: "Audit records missing canonical controlled_access for a project scope",
+		PreRunE: func(cmd *cobra.Command, args []string) error {
+			req := normalizedScopeOptions(opts)
+			if req.Organization == "" || req.Project == "" {
+				return fmt.Errorf("repair scope-audit requires --organization and --project")
+			}
+			return nil
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return scopeAudit(cmd, normalizedScopeOptions(opts))
+		},
+	})
+	cmd.AddCommand(&cobra.Command{
+		Use:   "scope-apply",
+		Short: "Backfill canonical controlled_access for a project scope",
+		PreRunE: func(cmd *cobra.Command, args []string) error {
+			req := normalizedScopeOptions(opts)
+			if req.Organization == "" || req.Project == "" {
+				return fmt.Errorf("repair scope-apply requires --organization and --project")
+			}
+			return nil
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return scopeApply(cmd, normalizedScopeOptions(opts))
 		},
 	})
 	return cmd
@@ -138,6 +168,14 @@ func normalizedApplyOptions(opts commandOptions) (repairsvc.StorageCleanupApplyR
 	}, nil
 }
 
+func normalizedScopeOptions(opts commandOptions) repairsvc.Options {
+	return repairsvc.Options{
+		Organization: strings.TrimSpace(opts.Organization),
+		Project:      strings.TrimSpace(opts.Project),
+		CheckStorage: opts.CheckStorage,
+	}
+}
+
 func runAudit(cmd *cobra.Command, req repairsvc.StorageCleanupAuditRequest) error {
 	client, err := buildClient(cmd)
 	if err != nil {
@@ -160,6 +198,42 @@ func runApply(cmd *cobra.Command, req repairsvc.StorageCleanupApplyRequest) erro
 		return err
 	}
 	return repairsvc.WriteStorageCleanupApply(cmd.OutOrStdout(), normalizedFormat(cmd), result)
+}
+
+func runScopeAudit(cmd *cobra.Command, req repairsvc.Options) error {
+	client, err := buildClient(cmd)
+	if err != nil {
+		return err
+	}
+	report, err := client.Repair().ScopeAudit(cmd.Context(), services.ScopeRepairOptions{
+		Organization: req.Organization,
+		ProjectID:    req.Project,
+		CheckStorage: req.CheckStorage,
+		Limit:        req.Limit,
+		PageSize:     req.PageSize,
+	})
+	if err != nil {
+		return err
+	}
+	return repairsvc.WriteAudit(cmd.OutOrStdout(), normalizedFormat(cmd), report)
+}
+
+func runScopeApply(cmd *cobra.Command, req repairsvc.Options) error {
+	client, err := buildClient(cmd)
+	if err != nil {
+		return err
+	}
+	result, err := client.Repair().ScopeApply(cmd.Context(), services.ScopeRepairOptions{
+		Organization: req.Organization,
+		ProjectID:    req.Project,
+		CheckStorage: req.CheckStorage,
+		Limit:        req.Limit,
+		PageSize:     req.PageSize,
+	})
+	if err != nil {
+		return err
+	}
+	return repairsvc.WriteApply(cmd.OutOrStdout(), normalizedFormat(cmd), result)
 }
 
 func buildClient(cmd *cobra.Command) (*syclient.Client, error) {

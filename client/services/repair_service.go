@@ -71,3 +71,33 @@ func (s *RepairService) StorageCleanupApply(ctx context.Context, opts StorageCle
 	}
 	return out, nil
 }
+
+func (s *RepairService) ScopeAudit(ctx context.Context, opts ScopeRepairOptions) (repair.Report, error) {
+	req := repair.Options{
+		Organization: opts.Organization,
+		Project:      opts.ProjectID,
+		CheckStorage: opts.CheckStorage,
+		Limit:        opts.Limit,
+		PageSize:     opts.PageSize,
+	}
+	var out repair.Report
+	if err := s.requestor.Do(ctx, http.MethodPost, common.RouteInternalRepairScopeAudit, req, &out); err != nil {
+		return repair.Report{}, err
+	}
+	return out, nil
+}
+
+func (s *RepairService) ScopeApply(ctx context.Context, opts ScopeRepairOptions) (repair.ApplyResult, error) {
+	req := repair.Options{
+		Organization: opts.Organization,
+		Project:      opts.ProjectID,
+		CheckStorage: opts.CheckStorage,
+		Limit:        opts.Limit,
+		PageSize:     opts.PageSize,
+	}
+	var out repair.ApplyResult
+	if err := s.requestor.Do(ctx, http.MethodPost, common.RouteInternalRepairScopeApply, req, &out); err != nil {
+		return repair.ApplyResult{}, err
+	}
+	return out, nil
+}

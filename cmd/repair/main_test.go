@@ -11,6 +11,8 @@ func TestApplyRequiresScope(t *testing.T) {
 	cmd := newCommand(
 		func(cmd *cobra.Command, opts repairsvc.StorageCleanupAuditRequest) error { return nil },
 		func(cmd *cobra.Command, opts repairsvc.StorageCleanupApplyRequest) error { return nil },
+		func(cmd *cobra.Command, opts repairsvc.Options) error { return nil },
+		func(cmd *cobra.Command, opts repairsvc.Options) error { return nil },
 	)
 	cmd.SetArgs([]string{"apply", "--delete-stale-duplicates"})
 	err := cmd.Execute()
@@ -30,6 +32,8 @@ func TestAuditCollectsCheckStorageFlag(t *testing.T) {
 			return nil
 		},
 		func(cmd *cobra.Command, opts repairsvc.StorageCleanupApplyRequest) error { return nil },
+		func(cmd *cobra.Command, opts repairsvc.Options) error { return nil },
+		func(cmd *cobra.Command, opts repairsvc.Options) error { return nil },
 	)
 	cmd.SetArgs([]string{"audit", "--check-storage"})
 	if err := cmd.Execute(); err != nil {
@@ -44,10 +48,26 @@ func TestApplyRequiresDeleteMode(t *testing.T) {
 	cmd := newCommand(
 		func(cmd *cobra.Command, opts repairsvc.StorageCleanupAuditRequest) error { return nil },
 		func(cmd *cobra.Command, opts repairsvc.StorageCleanupApplyRequest) error { return nil },
+		func(cmd *cobra.Command, opts repairsvc.Options) error { return nil },
+		func(cmd *cobra.Command, opts repairsvc.Options) error { return nil },
 	)
 	cmd.SetArgs([]string{"apply", "--organization", "org", "--project", "proj"})
 	err := cmd.Execute()
 	if err == nil || err.Error() != "repair apply requires --delete-stale-duplicates and/or --delete-repo-orphans" {
 		t.Fatalf("expected delete mode validation error, got %v", err)
+	}
+}
+
+func TestScopeApplyRequiresScope(t *testing.T) {
+	cmd := newCommand(
+		func(cmd *cobra.Command, opts repairsvc.StorageCleanupAuditRequest) error { return nil },
+		func(cmd *cobra.Command, opts repairsvc.StorageCleanupApplyRequest) error { return nil },
+		func(cmd *cobra.Command, opts repairsvc.Options) error { return nil },
+		func(cmd *cobra.Command, opts repairsvc.Options) error { return nil },
+	)
+	cmd.SetArgs([]string{"scope-apply"})
+	err := cmd.Execute()
+	if err == nil || err.Error() != "repair scope-apply requires --organization and --project" {
+		t.Fatalf("expected scope apply validation error, got %v", err)
 	}
 }

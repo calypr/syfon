@@ -91,6 +91,10 @@ func (db *SqliteDB) SaveS3Credential(ctx context.Context, cred *models.S3Credent
 		common.AuditS3CredentialAccess(ctx, "write", bucket, wrapped)
 		return wrapped
 	}
+	if err := db.ensureUniquePhysicalBucket(ctx, stored.CredentialID, stored.Bucket); err != nil {
+		common.AuditS3CredentialAccess(ctx, "write", stored.Bucket, err)
+		return err
+	}
 
 	// SQLite UPSERT syntax: INSERT INTO ... ON CONFLICT (...) DO UPDATE SET ...
 	_, err = db.db.ExecContext(ctx, `
@@ -112,6 +116,29 @@ func (db *SqliteDB) SaveS3Credential(ctx context.Context, cred *models.S3Credent
 	}
 	common.AuditS3CredentialAccess(ctx, "write", stored.Bucket, nil)
 	return nil
+}
+
+func (db *SqliteDB) ensureUniquePhysicalBucket(ctx context.Context, credentialID, bucket string) error {
+	credentialID = strings.TrimSpace(credentialID)
+	bucket = strings.TrimSpace(bucket)
+	if bucket == "" {
+		return nil
+	}
+
+	var existingCredentialID string
+	err := db.db.QueryRowContext(ctx, `
+		SELECT credential_id
+		FROM s3_credential
+		WHERE bucket = ? AND credential_id <> ?
+		LIMIT 1
+	`, bucket, credentialID).Scan(&existingCredentialID)
+	if err == nil {
+		return fmt.Errorf("physical bucket %q is already configured under credential %q; reuse that credential and add a bucket scope instead", bucket, existingCredentialID)
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	return fmt.Errorf("failed to validate physical bucket uniqueness: %w", err)
 }
 
 func (db *SqliteDB) DeleteS3Credential(ctx context.Context, credentialID string) error {

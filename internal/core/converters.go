@@ -14,6 +14,27 @@ import (
 	"github.com/calypr/syfon/internal/models"
 )
 
+func EnforceCanonicalProjectScope(obj models.InternalObject, organization, project string) (models.InternalObject, error) {
+	organization = strings.TrimSpace(organization)
+	project = strings.TrimSpace(project)
+	if project != "" && organization == "" {
+		return models.InternalObject{}, fmt.Errorf("organization is required when project is set")
+	}
+	if organization == "" || project == "" {
+		return obj, nil
+	}
+
+	resource, err := syfoncommon.ResourcePath(organization, project)
+	if err != nil {
+		return models.InternalObject{}, err
+	}
+	controlled := append(ObjectAccessResources(&obj), resource)
+	controlled = syfoncommon.NormalizeAccessResources(controlled)
+	obj.ControlledAccess = &controlled
+	obj.Authorizations = syfoncommon.ControlledAccessToAuthzMap(controlled)
+	return obj, nil
+}
+
 // LFSCandidateToDRS converts an LFS-specific candidate to a DRS-generic one.
 func LFSCandidateToDRS(in lfsapi.DrsObjectCandidate) drs.DrsObjectCandidate {
 	aliases := append([]string(nil), common.DerefStringSlice(in.Aliases)...)
@@ -263,13 +284,14 @@ func InternalRecordToInternalObject(r internalapi.InternalRecord, now time.Time)
 		methods := append([]drs.AccessMethod(nil), (*r.AccessMethods)...)
 		obj.AccessMethods = &methods
 	}
-	return models.InternalObject{
+	internalObj := models.InternalObject{
 		DrsObject:      obj,
 		Authorizations: authzMap,
 		Properties: map[string]interface{}{
 			"file_name": common.StringVal(r.FileName),
 		},
-	}, nil
+	}
+	return EnforceCanonicalProjectScope(internalObj, common.StringVal(r.Organization), common.StringVal(r.Project))
 }
 
 func parseInternalRecordTime(raw *string, fallback time.Time) time.Time {

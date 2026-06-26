@@ -44,6 +44,8 @@ func RegisterInternalRoutes(router fiber.Router, om *core.ObjectManager) {
 	router.Post(common.RouteInternalRepairProjectDiff, handleInternalProjectDiffAuditFiber(om))
 	router.Post(common.RouteInternalRepairCleanupAudit, handleInternalStorageCleanupAuditFiber(om))
 	router.Post(common.RouteInternalRepairCleanupApply, handleInternalStorageCleanupApplyFiber(om))
+	router.Post(common.RouteInternalRepairScopeAudit, handleInternalScopeRepairAuditFiber(om))
+	router.Post(common.RouteInternalRepairScopeApply, handleInternalScopeRepairApplyFiber(om))
 
 	registerInternalTransferRoutes(router, om)
 }
@@ -371,23 +373,30 @@ func handleInternalBulkDeleteFiber(om *core.ObjectManager) fiber.Handler {
 
 func handleInternalUpdateFiber(c fiber.Ctx, om *core.ObjectManager) error {
 	id := c.Params("id")
-	var req models.InternalObject
-	if err := c.Bind().JSON(&req); err != nil {
-		return c.Status(fiber.StatusBadRequest).SendString("Invalid request body")
+	var req internalapi.InternalRecord
+	if err := decodeStrictJSON(c.Body(), &req); err != nil {
+		return c.Status(fiber.StatusBadRequest).SendString("Invalid request body: " + err.Error())
+	}
+	if strings.TrimSpace(req.Did) == "" {
+		req.Did = id
+	}
+	update, err := core.InternalRecordToInternalObject(req, time.Now().UTC())
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).SendString("Invalid request body: " + err.Error())
 	}
 
 	existing, err := om.GetObject(c.Context(), id, "update")
 	if err != nil {
 		return apiutil.HandleError(c, err)
 	}
-	merged, err := core.MergeInternalObjectUpdate(*existing, req, id, time.Now().UTC())
+	merged, err := core.MergeInternalObjectUpdate(*existing, update, id, time.Now().UTC())
 	if err != nil {
 		return apiutil.HandleError(c, err)
 	}
 	if err := om.ReplaceObjects(c.Context(), []models.InternalObject{merged}); err != nil {
 		return apiutil.HandleError(c, err)
 	}
-	return c.JSON(merged)
+	return c.JSON(core.InternalObjectToInternalRecordResponse(merged))
 }
 
 func parseScopeQueryParts(organization, program, project string) (string, string, bool, error) {

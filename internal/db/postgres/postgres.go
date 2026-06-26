@@ -138,6 +138,23 @@ func (db *PostgresDB) ensureS3CredentialSchema() error {
 		`ALTER TABLE s3_credential DROP CONSTRAINT IF EXISTS s3_credential_pkey`,
 		`ALTER TABLE s3_credential ADD PRIMARY KEY (credential_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_s3_credential_bucket ON s3_credential(bucket)`,
+		`CREATE OR REPLACE FUNCTION enforce_s3_credential_unique_bucket() RETURNS trigger AS $$
+		BEGIN
+			IF EXISTS (
+				SELECT 1
+				FROM s3_credential
+				WHERE bucket = NEW.bucket AND credential_id <> NEW.credential_id
+			) THEN
+				RAISE EXCEPTION 'physical bucket "%" is already configured under another credential', NEW.bucket;
+			END IF;
+			RETURN NEW;
+		END;
+		$$ LANGUAGE plpgsql`,
+		`DROP TRIGGER IF EXISTS s3_credential_unique_bucket_trigger ON s3_credential`,
+		`CREATE TRIGGER s3_credential_unique_bucket_trigger
+		BEFORE INSERT OR UPDATE OF bucket, credential_id ON s3_credential
+		FOR EACH ROW
+		EXECUTE FUNCTION enforce_s3_credential_unique_bucket()`,
 	}
 	for _, q := range queries {
 		if _, err := db.db.Exec(q); err != nil {

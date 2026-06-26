@@ -17,6 +17,8 @@ const (
 	RouteInternalRepairCleanupAudit = "/data/repair/storage-cleanup/audit"
 	RouteInternalRepairCleanupApply = "/data/repair/storage-cleanup/apply"
 	RouteInternalRepairProjectDiff  = "/data/repair/project-diff/audit"
+	RouteInternalRepairScopeAudit   = "/data/repair/project-scope/audit"
+	RouteInternalRepairScopeApply   = "/data/repair/project-scope/apply"
 
 	RouteInternalIndex                       = "/index"
 	RouteInternalIndexDetail                 = "/index/{id}"

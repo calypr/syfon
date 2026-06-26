@@ -90,6 +90,10 @@ type ApplyResult struct {
 	AutoFixable int    `json:"auto_fixable"`
 }
 
+func (r Report) FindingCount() int {
+	return len(r.Objects)
+}
+
 type Service struct {
 	index     IndexAPI
 	buckets   BucketsAPI

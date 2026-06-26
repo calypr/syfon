@@ -504,7 +504,7 @@ func TestSqliteDB_S3Credentials(t *testing.T) {
 	}
 }
 
-func TestSqliteDB_S3CredentialsCredentialIDAllowsSharedPhysicalBucket(t *testing.T) {
+func TestSqliteDB_SaveS3CredentialRejectsDuplicatePhysicalBucket(t *testing.T) {
 	t.Setenv(crypto.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
 	ctx := context.Background()
 	db, err := NewSqliteDB(":memory:")
@@ -512,26 +512,108 @@ func TestSqliteDB_S3CredentialsCredentialIDAllowsSharedPhysicalBucket(t *testing
 		t.Fatalf("failed to create db: %v", err)
 	}
 
+	first := models.S3Credential{
+		CredentialID: "org-a/default",
+		Bucket:       "shared-bucket",
+		Region:       "us-east-1",
+		AccessKey:    "key-a",
+		SecretKey:    "secret-a",
+	}
+	if err := db.SaveS3Credential(ctx, &first); err != nil {
+		t.Fatalf("SaveS3Credential(first) failed: %v", err)
+	}
+
+	second := models.S3Credential{
+		CredentialID: "org-b/default",
+		Bucket:       "shared-bucket",
+		Region:       "us-east-1",
+		AccessKey:    "key-b",
+		SecretKey:    "secret-b",
+	}
+	err = db.SaveS3Credential(ctx, &second)
+	if err == nil || !strings.Contains(err.Error(), `physical bucket "shared-bucket" is already configured under credential "org-a/default"`) {
+		t.Fatalf("expected duplicate physical bucket error, got %v", err)
+	}
+}
+
+func TestSqliteDB_GetS3CredentialRejectsAmbiguousLegacyPhysicalBucket(t *testing.T) {
+	t.Setenv(crypto.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
+	ctx := context.Background()
+	db, err := NewSqliteDB(":memory:")
+	if err != nil {
+		t.Fatalf("failed to create db: %v", err)
+	}
+	if _, err := db.db.ExecContext(ctx, `DROP TRIGGER IF EXISTS s3_credential_unique_bucket_insert`); err != nil {
+		t.Fatalf("drop insert trigger: %v", err)
+	}
+	if _, err := db.db.ExecContext(ctx, `DROP TRIGGER IF EXISTS s3_credential_unique_bucket_update`); err != nil {
+		t.Fatalf("drop update trigger: %v", err)
+	}
+
 	for _, cred := range []models.S3Credential{
 		{CredentialID: "org-a/default", Bucket: "shared-bucket", Region: "us-east-1", AccessKey: "key-a", SecretKey: "secret-a"},
 		{CredentialID: "org-b/default", Bucket: "shared-bucket", Region: "us-east-1", AccessKey: "key-b", SecretKey: "secret-b"},
 	} {
-		cred := cred
-		if err := db.SaveS3Credential(ctx, &cred); err != nil {
-			t.Fatalf("SaveS3Credential(%s) failed: %v", cred.CredentialID, err)
+		stored, err := crypto.PrepareS3CredentialForStorage(&cred)
+		if err != nil {
+			t.Fatalf("PrepareS3CredentialForStorage(%s) failed: %v", cred.CredentialID, err)
 		}
-	}
-
-	got, err := db.GetS3Credential(ctx, "org-b/default")
-	if err != nil {
-		t.Fatalf("GetS3Credential by credential_id failed: %v", err)
-	}
-	if got.Bucket != "shared-bucket" || got.AccessKey != "key-b" {
-		t.Fatalf("unexpected credential: %+v", got)
+		if _, err := db.db.ExecContext(ctx, `
+			INSERT INTO s3_credential (credential_id, bucket, provider, region, access_key, secret_key, endpoint)
+			VALUES (?, ?, ?, ?, ?, ?, ?)
+		`, stored.CredentialID, stored.Bucket, "s3", stored.Region, stored.AccessKey, stored.SecretKey, stored.Endpoint); err != nil {
+			t.Fatalf("legacy insert(%s) failed: %v", cred.CredentialID, err)
+		}
 	}
 
 	if _, err := db.GetS3Credential(ctx, "shared-bucket"); err == nil || !strings.Contains(err.Error(), "multiple credentials") {
 		t.Fatalf("expected ambiguous physical bucket lookup error, got %v", err)
+	}
+}
+
+func TestSqliteDB_DirectInsertRejectsDuplicatePhysicalBucket(t *testing.T) {
+	t.Setenv(crypto.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
+	ctx := context.Background()
+	db, err := NewSqliteDB(":memory:")
+	if err != nil {
+		t.Fatalf("failed to create db: %v", err)
+	}
+
+	first, err := crypto.PrepareS3CredentialForStorage(&models.S3Credential{
+		CredentialID: "org-a/default",
+		Bucket:       "shared-bucket",
+		Provider:     "s3",
+		Region:       "us-east-1",
+		AccessKey:    "key-a",
+		SecretKey:    "secret-a",
+	})
+	if err != nil {
+		t.Fatalf("PrepareS3CredentialForStorage(first) failed: %v", err)
+	}
+	if _, err := db.db.ExecContext(ctx, `
+		INSERT INTO s3_credential (credential_id, bucket, provider, region, access_key, secret_key, endpoint)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+	`, first.CredentialID, first.Bucket, "s3", first.Region, first.AccessKey, first.SecretKey, first.Endpoint); err != nil {
+		t.Fatalf("raw first insert failed: %v", err)
+	}
+
+	second, err := crypto.PrepareS3CredentialForStorage(&models.S3Credential{
+		CredentialID: "org-b/default",
+		Bucket:       "shared-bucket",
+		Provider:     "s3",
+		Region:       "us-east-1",
+		AccessKey:    "key-b",
+		SecretKey:    "secret-b",
+	})
+	if err != nil {
+		t.Fatalf("PrepareS3CredentialForStorage(second) failed: %v", err)
+	}
+	_, err = db.db.ExecContext(ctx, `
+		INSERT INTO s3_credential (credential_id, bucket, provider, region, access_key, secret_key, endpoint)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+	`, second.CredentialID, second.Bucket, "s3", second.Region, second.AccessKey, second.SecretKey, second.Endpoint)
+	if err == nil || !strings.Contains(err.Error(), "physical bucket is already configured under another credential") {
+		t.Fatalf("expected trigger rejection, got %v", err)
 	}
 }
 
