@@ -204,6 +204,15 @@ type ListRecordsResponse struct {
 	Records     *[]InternalRecord `json:"records,omitempty"`
 }
 
+// StorageCleanupAccessProbe defines model for StorageCleanupAccessProbe.
+type StorageCleanupAccessProbe struct {
+	Bucket         *string `json:"bucket,omitempty"`
+	ErrorKind      *string `json:"error_kind,omitempty"`
+	StorageMessage *string `json:"storage_message,omitempty"`
+	StorageStatus  *string `json:"storage_status,omitempty"`
+	Url            *string `json:"url,omitempty"`
+}
+
 // StorageCleanupApplyRequest defines model for StorageCleanupApplyRequest.
 type StorageCleanupApplyRequest struct {
 	CheckStorage          *bool     `json:"check_storage,omitempty"`
@@ -240,8 +249,8 @@ type StorageCleanupAuditRequest struct {
 
 // StorageCleanupFinding defines model for StorageCleanupFinding.
 type StorageCleanupFinding struct {
-	CleanupScope              *string                      `json:"cleanup_scope,omitempty"`
 	ChecksumCount             *int                         `json:"checksum_count,omitempty"`
+	CleanupScope              *string                      `json:"cleanup_scope,omitempty"`
 	Kind                      *string                      `json:"kind,omitempty"`
 	LegacyUrlTemplateDetected *bool                        `json:"legacy_url_template_detected,omitempty"`
 	Message                   *string                      `json:"message,omitempty"`
@@ -249,18 +258,9 @@ type StorageCleanupFinding struct {
 	RecommendedAction         *string                      `json:"recommended_action,omitempty"`
 	Records                   *[]StorageCleanupRecordAudit `json:"records,omitempty"`
 	RepoDeleteCandidate       *bool                        `json:"repo_delete_candidate,omitempty"`
+	Severity                  *string                      `json:"severity,omitempty"`
 	SizeCount                 *int                         `json:"size_count,omitempty"`
 	StructuralReason          *string                      `json:"structural_reason,omitempty"`
-	Severity                  *string                      `json:"severity,omitempty"`
-}
-
-// StorageCleanupAccessProbe defines model for StorageCleanupAccessProbe.
-type StorageCleanupAccessProbe struct {
-	Bucket         *string `json:"bucket,omitempty"`
-	ErrorKind      *string `json:"error_kind,omitempty"`
-	StorageMessage *string `json:"storage_message,omitempty"`
-	StorageStatus  *string `json:"storage_status,omitempty"`
-	Url            *string `json:"url,omitempty"`
 }
 
 // StorageCleanupRecordAudit defines model for StorageCleanupRecordAudit.
