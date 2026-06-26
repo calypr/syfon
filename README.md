@@ -159,10 +159,21 @@ Start up a docker container with MinIO for testing:
 
 ```bash
 docker run -p 9000:9000 -p 9001:9001 \
-  -e "MINIO_ROOT_USER=admin" \
-  -e "MINIO_ROOT_PASSWORD=password123" \
+  -e "MINIO_ROOT_USER=minio-user" \
+  -e "MINIO_ROOT_PASSWORD=minio-pass" \
   -v ./data:/data \
   minio/minio server /data --console-address ":9001"
+```
+
+The `minio/minio server` command starts with no buckets, so create the
+bucket referenced in `local.yaml`. Run this once after the server is up
+(the `-p` flag makes it idempotent):
+
+```bash
+docker run --rm --network host --entrypoint sh minio/mc -c '
+  mc alias set local http://localhost:9000 minio-user minio-pass &&
+  mc mb -p local/local-bucket
+'
 ```
 
 Create a config file called `local.yaml`
@@ -171,33 +182,42 @@ Create a config file called `local.yaml`
 port: 8080
 
 auth:
-    mode: local
-    basic:
-      username: "drs-user"
-      password: "drs-pass"
+  mode: local
+  basic:
+    username: "drs-user"
+    password: "drs-pass"
 
 database:
   sqlite:
-    file: "drs.db"
-database:
-  sqlite:
-    file: "drs.db"
+    file: "drs_local.db"
+
 s3_credentials:
-  - bucket: "test-bucket"
+  - bucket: "local-bucket"
     region: "us-east-1"
-    access_key: "admin"
-    secret_key: "password123"
+    access_key: "minio-user"
+    secret_key: "minio-pass"
     endpoint: "http://localhost:9000"
+    # Map an org/project scope to this bucket so uploads can resolve a target.
+    # Omit `projects:` to match every project under the organization.
+    resources:
+      - organization: "example"
+        projects:
+          - project: "example"
 ```
 
 Start the syfon server
 ```
-syfon server --config local.yaml
+syfon serve --config local.yaml
 ```
 
-Upload a file
-```
-syfon upload --file README.md --org syfon --project e2e
+Upload a file. Because `local.yaml` enables basic auth, the CLI needs
+matching credentials — pass them via `--username/--password` or the
+`SYFON_USERNAME`/`SYFON_PASSWORD` environment variables:
+
+```bash
+export SYFON_USERNAME=drs-user
+export SYFON_PASSWORD=drs-pass
+syfon upload --file README.md --org example --project example
 ```
 
 When `--did` is omitted, Syfon deterministically mints the object ID from the
@@ -212,7 +232,10 @@ List records
 syfon ls
 ```
 
-This test starts MinIO in Docker, starts a real syfon server configured against it, then verifies `ping`, `upload`, `download`, and `sha256sum`. It skips automatically when the opt-in flag is not set, and it also skips when Docker is unavailable.
+Download a record by DID (use a DID from `syfon ls`):
+```
+syfon download --did <did> --out /tmp/README.md
+```
 
 # Architecture
 
