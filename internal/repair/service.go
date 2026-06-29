@@ -146,8 +146,13 @@ func (s *Service) auditRecord(ctx context.Context, rec internalapi.InternalRecor
 	obj.scopeAmbiguous = ambiguous
 	obj.inferredScope = resource
 	if known {
-		obj.scope = scopes[resource][0]
-		obj.canonicalURL = canonicalAccessURL(obj.scope, rec.Did, sha)
+		targets := scopes[resource]
+		if len(targets) == 0 {
+			obj.scopeKnown = false
+		} else {
+			obj.scope = targets[0]
+			obj.canonicalURL = canonicalAccessURL(obj.scope, rec.Did, sha)
+		}
 	}
 
 	targetResource := ""
@@ -315,7 +320,11 @@ func (s *Service) addDuplicateFindings(objects []*auditedObject) {
 func inferRecordResource(rec internalapi.InternalRecord, sha string, scopes map[string][]scopeTarget) (string, bool, bool) {
 	projectResources := recordProjectResources(rec, "")
 	if len(projectResources) == 1 {
-		return projectResources[0], true, false
+		resource := projectResources[0]
+		if len(scopes[resource]) == 0 {
+			return resource, false, false
+		}
+		return resource, true, false
 	}
 	if len(projectResources) > 1 {
 		return "", false, true

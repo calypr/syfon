@@ -172,6 +172,45 @@ func TestCheckStorageAddsMissingObjectFinding(t *testing.T) {
 	}
 }
 
+func TestSingleControlledAccessWithoutScopeTargetDoesNotPanicOrMutate(t *testing.T) {
+	resource, _ := syfoncommon.ResourcePath("HTAN_INT", "BForePC")
+	rec := recordWithMethods(t, "did-1", "abc", []string{resource}, []string{"s3://bforepc/legacy/file.ndjson"})
+	idx := &fakeIndex{records: []internalapi.InternalRecord{rec}}
+	svc := NewService(
+		idx,
+		&fakeBuckets{
+			list: bucketapi.BucketsResponse{
+				S3BUCKETS: map[string]bucketapi.BucketMetadata{
+					"other-bucket": {},
+				},
+			},
+			scopes: map[string][]bucketapi.BucketScopeResponse{
+				"other-bucket": nil,
+			},
+		},
+		&fakeRequester{},
+	)
+
+	report, err := svc.Audit(context.Background(), Options{Organization: "HTAN_INT", Project: "BForePC"})
+	if err != nil {
+		t.Fatalf("audit failed: %v", err)
+	}
+	if len(report.Objects) != 0 {
+		t.Fatalf("expected no findings without a canonical target, got %d", len(report.Objects))
+	}
+
+	result, err := svc.Apply(context.Background(), Options{Organization: "HTAN_INT", Project: "BForePC"})
+	if err != nil {
+		t.Fatalf("apply failed: %v", err)
+	}
+	if result.Mutated != 0 || result.AutoFixable != 0 {
+		t.Fatalf("expected no mutations without a canonical target, got mutated=%d autofixable=%d", result.Mutated, result.AutoFixable)
+	}
+	if len(idx.updated) != 0 {
+		t.Fatalf("expected no updates, got %d", len(idx.updated))
+	}
+}
+
 type fakeIndex struct {
 	records   []internalapi.InternalRecord
 	updated   []internalapi.InternalRecord

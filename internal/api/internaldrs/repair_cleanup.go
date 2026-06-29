@@ -79,7 +79,10 @@ func handleInternalScopeRepairApplyFiber(om *core.ObjectManager) fiber.Handler {
 		if req.Organization == "" || req.Project == "" {
 			return apiutil.Reject(c, fiber.StatusBadRequest, "organization and project are required")
 		}
-		if err := authorizeStorageCleanupScope(c.Context(), req.Organization, req.Project, "read", "update"); err != nil {
+		if err := authorizeStorageCleanupScope(c.Context(), req.Organization, req.Project, "read"); err != nil {
+			return apiutil.HandleError(c, err)
+		}
+		if err := authorizeStorageCleanupScope(c.Context(), req.Organization, req.Project, "update"); err != nil {
 			return apiutil.HandleError(c, err)
 		}
 		result, err := svc.Apply(c.Context(), req)
