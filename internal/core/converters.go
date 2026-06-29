@@ -2,7 +2,6 @@ package core
 
 import (
 	"fmt"
-	"path"
 	"strings"
 	"time"
 
@@ -252,15 +251,6 @@ func InternalRecordToInternalObject(r internalapi.InternalRecord, now time.Time)
 	obj.UpdatedTime = &updatedTime
 	if r.Name != nil && strings.TrimSpace(*r.Name) != "" {
 		obj.Name = common.Ptr(strings.TrimSpace(*r.Name))
-	} else if r.FileName != nil {
-		fileName := strings.TrimSpace(*r.FileName)
-		if fileName != "" {
-			base := path.Base(strings.Trim(fileName, "/"))
-			if base == "." || base == "/" {
-				base = fileName
-			}
-			obj.Name = common.Ptr(base)
-		}
 	}
 	if v := r.Version; v != nil {
 		obj.Version = v
@@ -287,9 +277,7 @@ func InternalRecordToInternalObject(r internalapi.InternalRecord, now time.Time)
 	internalObj := models.InternalObject{
 		DrsObject:      obj,
 		Authorizations: authzMap,
-		Properties: map[string]interface{}{
-			"file_name": common.StringVal(r.FileName),
-		},
+		Properties:     map[string]interface{}{},
 	}
 	return EnforceCanonicalProjectScope(internalObj, common.StringVal(r.Organization), common.StringVal(r.Project))
 }
@@ -308,16 +296,11 @@ func parseInternalRecordTime(raw *string, fallback time.Time) time.Time {
 
 // InternalObjectToInternalRecord converts our internal domain model back to an API record.
 func InternalObjectToInternalRecord(obj models.InternalObject) internalapi.InternalRecord {
-	fileName := common.StringVal(obj.Name)
-	if raw, ok := obj.Properties["file_name"].(string); ok && strings.TrimSpace(raw) != "" {
-		fileName = strings.TrimSpace(raw)
-	}
 	res := internalapi.InternalRecord{
 		Did:           obj.Id,
 		Size:          &obj.Size,
 		CreatedTime:   common.Ptr(obj.CreatedTime.Format(time.RFC3339)),
 		Description:   obj.Description,
-		FileName:      common.Ptr(fileName),
 		Name:          obj.Name,
 		Version:       obj.Version,
 		AccessMethods: obj.AccessMethods,
@@ -348,7 +331,6 @@ func InternalObjectToInternalRecordResponse(obj models.InternalObject) internala
 		Size:             rec.Size,
 		CreatedTime:      rec.CreatedTime,
 		Description:      rec.Description,
-		FileName:         rec.FileName,
 		Name:             rec.Name,
 		Version:          rec.Version,
 		UpdatedTime:      rec.UpdatedTime,

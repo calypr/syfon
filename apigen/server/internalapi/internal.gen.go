@@ -58,12 +58,6 @@ type DeleteByQueryResponse struct {
 // HashInfo Hash map, e.g. {"sha256":"..."}
 type HashInfo map[string]string
 
-// IndexDirectory defines model for IndexDirectory.
-type IndexDirectory struct {
-	Name string `json:"name"`
-	Path string `json:"path"`
-}
-
 // InternalMultipartCompleteRequest defines model for InternalMultipartCompleteRequest.
 type InternalMultipartCompleteRequest struct {
 	Bucket   *string                 `json:"bucket,omitempty"`
@@ -80,8 +74,8 @@ type InternalMultipartInitOutput struct {
 
 // InternalMultipartInitRequest defines model for InternalMultipartInitRequest.
 type InternalMultipartInitRequest struct {
-	FileName     *string `json:"file_name,omitempty"`
 	Guid         *string `json:"guid,omitempty"`
+	Key          *string `json:"key,omitempty"`
 	Organization *string `json:"organization,omitempty"`
 	Project      *string `json:"project,omitempty"`
 }
@@ -112,7 +106,6 @@ type InternalRecord struct {
 	CreatedTime      *string                      `json:"created_time,omitempty"`
 	Description      *string                      `json:"description,omitempty"`
 	Did              string                       `json:"did"`
-	FileName         *string                      `json:"file_name,omitempty"`
 
 	// Hashes Hash map, e.g. {"sha256":"..."}
 	Hashes       *HashInfo `json:"hashes,omitempty"`
@@ -133,7 +126,6 @@ type InternalRecordResponse struct {
 	CreatedTime      *string                      `json:"created_time,omitempty"`
 	Description      *string                      `json:"description,omitempty"`
 	Did              string                       `json:"did"`
-	FileName         *string                      `json:"file_name,omitempty"`
 
 	// Hashes Hash map, e.g. {"sha256":"..."}
 	Hashes       *HashInfo `json:"hashes,omitempty"`
@@ -171,7 +163,7 @@ type InternalUploadBlankRequest struct {
 type InternalUploadBulkItem struct {
 	ExpiresIn    *int32  `json:"expires_in,omitempty"`
 	FileId       string  `json:"file_id"`
-	FileName     *string `json:"file_name,omitempty"`
+	Key          *string `json:"key,omitempty"`
 	Organization *string `json:"organization,omitempty"`
 	Project      *string `json:"project,omitempty"`
 }
@@ -188,18 +180,17 @@ type InternalUploadBulkRequest struct {
 
 // InternalUploadBulkResult defines model for InternalUploadBulkResult.
 type InternalUploadBulkResult struct {
-	Bucket   *string `json:"bucket,omitempty"`
-	Error    *string `json:"error,omitempty"`
-	FileId   string  `json:"file_id"`
-	FileName *string `json:"file_name,omitempty"`
-	Status   int32   `json:"status"`
-	Url      *string `json:"url,omitempty"`
+	Bucket *string `json:"bucket,omitempty"`
+	Error  *string `json:"error,omitempty"`
+	FileId string  `json:"file_id"`
+	Key    *string `json:"key,omitempty"`
+	Status int32   `json:"status"`
+	Url    *string `json:"url,omitempty"`
 }
 
 // ListRecordsResponse defines model for ListRecordsResponse.
 type ListRecordsResponse struct {
-	Directories *[]IndexDirectory `json:"directories,omitempty"`
-	Records     *[]InternalRecord `json:"records,omitempty"`
+	Records *[]InternalRecord `json:"records,omitempty"`
 }
 
 // StorageCleanupAccessProbe defines model for StorageCleanupAccessProbe.
@@ -320,7 +311,7 @@ type InternalDownloadPartParams struct {
 type InternalUploadURLParams struct {
 	Organization *string `form:"organization,omitempty" json:"organization,omitempty"`
 	Project      *string `form:"project,omitempty" json:"project,omitempty"`
-	FileName     *string `form:"file_name,omitempty" json:"file_name,omitempty"`
+	Key          *string `form:"key,omitempty" json:"key,omitempty"`
 	ExpiresIn    *int32  `form:"expires_in,omitempty" json:"expires_in,omitempty"`
 }
 
@@ -689,15 +680,15 @@ func (siw *ServerInterfaceWrapper) InternalUploadURL(c fiber.Ctx) error {
 		params.Project = &value
 
 	}
-	// ------------- Optional query parameter "file_name" -------------
-	if paramValue := c.Query("file_name"); paramValue != "" {
+	// ------------- Optional query parameter "key" -------------
+	if paramValue := c.Query("key"); paramValue != "" {
 
 		var value string
-		err = runtime.BindStyledParameterWithOptions("form", "file_name", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
+		err = runtime.BindStyledParameterWithOptions("form", "key", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
 		if err != nil {
-			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter file_name: %w", err).Error())
+			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter key: %w", err).Error())
 		}
-		params.FileName = &value
+		params.Key = &value
 
 	}
 	// ------------- Optional query parameter "expires_in" -------------

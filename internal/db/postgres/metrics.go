@@ -560,7 +560,7 @@ func (db *PostgresDB) listStorageMetricRowsByScope(ctx context.Context, organiza
 	for rows.Next() {
 		var row models.DrsObjectRecord
 		var lastDownload sql.NullTime
-		if err := rows.Scan(&row.ID, &row.Size, &row.UpdatedTime, &row.DownloadCount, &lastDownload, &row.Name, &row.FileName); err != nil {
+		if err := rows.Scan(&row.ID, &row.Size, &row.UpdatedTime, &row.DownloadCount, &lastDownload, &row.Name, &row.Path); err != nil {
 			return nil, err
 		}
 		if lastDownload.Valid {

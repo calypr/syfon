@@ -11,7 +11,7 @@ func TestAggregateStoragePathSummary(t *testing.T) {
 	now := time.Now().UTC()
 	rows := []models.DrsObjectRecord{
 		{Name: "data/a.txt", Size: 10, UpdatedTime: now.Add(-time.Hour), DownloadCount: 2, LastDownloadTime: timePtr(now.Add(-3 * time.Hour))},
-		{FileName: "data/a.txt", Size: 20, UpdatedTime: now, DownloadCount: 4, LastDownloadTime: timePtr(now.Add(-30 * time.Minute))},
+		{Path: "data/a.txt", Size: 20, UpdatedTime: now, DownloadCount: 4, LastDownloadTime: timePtr(now.Add(-30 * time.Minute))},
 		{Name: "data/nested/b.txt", Size: 30, UpdatedTime: now.Add(-2 * time.Hour), DownloadCount: 1, LastDownloadTime: timePtr(now.Add(-90 * time.Minute))},
 		{Name: "other/c.txt", Size: 40, UpdatedTime: now.Add(-3 * time.Hour)},
 		{Name: "bad/../path", Size: 50, UpdatedTime: now},

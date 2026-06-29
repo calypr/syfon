@@ -17,8 +17,11 @@ import (
 	"github.com/lib/pq"
 )
 
-func postgresStoredFileName(obj *models.InternalObject) string {
+func postgresStoredPath(obj *models.InternalObject) string {
 	if obj != nil && obj.Properties != nil {
+		if raw, ok := obj.Properties["path"].(string); ok && strings.TrimSpace(raw) != "" {
+			return strings.TrimSpace(raw)
+		}
 		if raw, ok := obj.Properties["file_name"].(string); ok && strings.TrimSpace(raw) != "" {
 			return strings.TrimSpace(raw)
 		}
@@ -31,18 +34,18 @@ func postgresStoredFileName(obj *models.InternalObject) string {
 
 func postgresLoadedNames(name, fileName sql.NullString) (string, string) {
 	loadedName := strings.TrimSpace(name.String)
-	loadedFileName := strings.TrimSpace(fileName.String)
-	if loadedFileName == "" {
-		loadedFileName = loadedName
+	loadedPath := strings.TrimSpace(fileName.String)
+	if loadedPath == "" {
+		loadedPath = loadedName
 		loadedName = ""
 	}
-	if loadedName == "" && loadedFileName != "" {
-		loadedName = path.Base(strings.Trim(loadedFileName, "/"))
+	if loadedName == "" && loadedPath != "" {
+		loadedName = path.Base(strings.Trim(loadedPath, "/"))
 		if loadedName == "." || loadedName == "/" || loadedName == "" {
-			loadedName = loadedFileName
+			loadedName = loadedPath
 		}
 	}
-	return loadedName, loadedFileName
+	return loadedName, loadedPath
 }
 
 func (db *PostgresDB) DeleteObject(ctx context.Context, id string) error {
@@ -162,7 +165,7 @@ retryLookup:
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch record: %w", err)
 	}
-	r.Name, r.FileName = postgresLoadedNames(name, fileName)
+	r.Name, r.Path = postgresLoadedNames(name, fileName)
 	r.Version = version.String
 	r.Description = description.String
 	objectID := r.ID
@@ -183,8 +186,8 @@ retryLookup:
 		},
 		Properties: map[string]interface{}{},
 	}
-	if strings.TrimSpace(r.FileName) != "" {
-		obj.Properties["file_name"] = r.FileName
+	if strings.TrimSpace(r.Path) != "" {
+		obj.Properties["path"] = r.Path
 	}
 	// 2. Fetch storage access methods.
 	urlRows, err := db.db.QueryContext(ctx, "SELECT url, type FROM drs_object_access_method WHERE object_id = $1", lookupID)
@@ -260,7 +263,7 @@ func (db *PostgresDB) CreateObject(ctx context.Context, obj *models.InternalObje
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO drs_object (id, size, created_time, updated_time, name, file_name, version, description)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-		obj.Id, obj.Size, obj.CreatedTime, common.TimeVal(obj.UpdatedTime), common.StringVal(obj.Name), postgresStoredFileName(obj), common.StringVal(obj.Version), common.StringVal(obj.Description),
+		obj.Id, obj.Size, obj.CreatedTime, common.TimeVal(obj.UpdatedTime), common.StringVal(obj.Name), postgresStoredPath(obj), common.StringVal(obj.Version), common.StringVal(obj.Description),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to insert drs_object: %w", err)
@@ -269,7 +272,7 @@ func (db *PostgresDB) CreateObject(ctx context.Context, obj *models.InternalObje
 	if err := insertControlledAccessTx(ctx, tx, obj.Id, objectAccessResources(obj)); err != nil {
 		return err
 	}
-	if err := postgresRebuildBrowseRowsForObjectTx(ctx, tx, obj.Id, postgresStoredFileName(obj), objectAccessResources(obj)); err != nil {
+	if err := postgresRebuildBrowseRowsForObjectTx(ctx, tx, obj.Id, postgresStoredPath(obj), objectAccessResources(obj)); err != nil {
 		return fmt.Errorf("failed to update browse index: %w", err)
 	}
 
@@ -341,7 +344,7 @@ func (db *PostgresDB) RegisterObjects(ctx context.Context, objects []models.Inte
 		createdTimes = append(createdTimes, obj.CreatedTime)
 		updatedTimes = append(updatedTimes, common.TimeVal(obj.UpdatedTime))
 		names = append(names, common.StringVal(obj.Name))
-		fileNames = append(fileNames, postgresStoredFileName(&obj))
+		fileNames = append(fileNames, postgresStoredPath(&obj))
 		versions = append(versions, common.StringVal(obj.Version))
 		descriptions = append(descriptions, common.StringVal(obj.Description))
 
@@ -350,7 +353,7 @@ func (db *PostgresDB) RegisterObjects(ctx context.Context, objects []models.Inte
 			controlledObjectIDs = append(controlledObjectIDs, obj.Id)
 			controlledResources = append(controlledResources, resource)
 		}
-		browseRows = append(browseRows, postgresBrowseRowsForObject(obj.Id, postgresStoredFileName(&obj), objectAccessResources(&obj))...)
+		browseRows = append(browseRows, postgresBrowseRowsForObject(obj.Id, postgresStoredPath(&obj), objectAccessResources(&obj))...)
 		if obj.AccessMethods != nil {
 			for _, am := range *obj.AccessMethods {
 				if am.AccessUrl == nil || am.AccessUrl.Url == "" {
@@ -1179,7 +1182,7 @@ func (db *PostgresDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []st
 			return nil, err
 		}
 
-		loadedName, loadedFileName := postgresLoadedNames(name, fileName)
+		loadedName, loadedPath := postgresLoadedNames(name, fileName)
 		objectsByID[id] = &models.InternalObject{
 			DrsObject: drs.DrsObject{
 				Id:          id,
@@ -1193,8 +1196,8 @@ func (db *PostgresDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []st
 			},
 			Properties: map[string]interface{}{},
 		}
-		if strings.TrimSpace(loadedFileName) != "" {
-			objectsByID[id].Properties["file_name"] = loadedFileName
+		if strings.TrimSpace(loadedPath) != "" {
+			objectsByID[id].Properties["path"] = loadedPath
 		}
 	}
 

@@ -50,8 +50,8 @@ func (d *DataService) UploadBlank(ctx context.Context, req internalapi.InternalU
 
 func (d *DataService) UploadURL(ctx context.Context, req UploadURLRequest) (internalapi.InternalSignedURL, error) {
 	params := &internalapi.InternalUploadURLParams{}
-	if req.FileName != "" {
-		params.FileName = &req.FileName
+	if req.Key != "" {
+		params.Key = &req.Key
 	}
 	if req.ExpiresIn > 0 {
 		expires := int32(req.ExpiresIn)
@@ -254,7 +254,7 @@ func (d *DataService) ResolveUploadURL(ctx context.Context, guid, filename strin
 	organization, project := uploadScopeFromMetadata(metadata)
 	resp, err := d.UploadURL(ctx, UploadURLRequest{
 		FileID:       guid,
-		FileName:     filename,
+		Key:          filename,
 		Organization: organization,
 		Project:      project,
 	})
@@ -338,7 +338,7 @@ func (d *DataService) InitMultipartUploadWithMetadata(ctx context.Context, guid,
 	organization, project := uploadScopeFromMetadata(metadata)
 	req := internalapi.InternalMultipartInitRequest{
 		Guid:         &guid,
-		FileName:     &filename,
+		Key:          &filename,
 		Organization: nil,
 		Project:      nil,
 	}

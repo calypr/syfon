@@ -266,7 +266,7 @@ func internalRecordFromResponse(rec internalapi.InternalRecordResponse) internal
 		ControlledAccess: rec.ControlledAccess,
 		CreatedTime:      rec.CreatedTime,
 		Description:      rec.Description,
-		FileName:         rec.FileName,
+		Name:             rec.Name,
 		Hashes:           rec.Hashes,
 		Organization:     rec.Organization,
 		Project:          rec.Project,
@@ -278,63 +278,32 @@ func internalRecordFromResponse(rec internalapi.InternalRecordResponse) internal
 
 func listAllProjectRecords(ctx context.Context, index *services.IndexService, org, project string) ([]internalapi.InternalRecord, error) {
 	var records []internalapi.InternalRecord
-	queue := []string{""}
-	seenDirs := map[string]struct{}{}
-	seenDIDs := map[string]struct{}{}
-
-	for len(queue) > 0 {
-		currentPath := queue[0]
-		queue = queue[1:]
-		if _, ok := seenDirs[currentPath]; ok {
-			continue
+	start := ""
+	for {
+		resp, err := index.List(ctx, services.ListRecordsOptions{
+			Limit:        1000,
+			Start:        start,
+			Organization: org,
+			ProjectID:    project,
+		})
+		if err != nil {
+			return nil, err
 		}
-		seenDirs[currentPath] = struct{}{}
-
-		start := ""
-		for {
-			resp, err := index.List(ctx, services.ListRecordsOptions{
-				Limit:        1000,
-				Start:        start,
-				Path:         currentPath,
-				Organization: org,
-				ProjectID:    project,
-			})
-			if err != nil {
-				return nil, err
+		if resp.Records == nil || len(*resp.Records) == 0 {
+			break
+		}
+		pageCount := 0
+		for _, rec := range *resp.Records {
+			did := strings.TrimSpace(rec.Did)
+			if did == "" {
+				continue
 			}
-
-			pageCount := 0
-			if resp.Records != nil {
-				for _, rec := range *resp.Records {
-					did := strings.TrimSpace(rec.Did)
-					if did == "" {
-						continue
-					}
-					if _, ok := seenDIDs[did]; ok {
-						continue
-					}
-					seenDIDs[did] = struct{}{}
-					records = append(records, rec)
-					pageCount++
-					start = did
-				}
-			}
-
-			if resp.Directories != nil {
-				for _, dir := range *resp.Directories {
-					nextPath := strings.TrimSpace(dir.Path)
-					if nextPath == "" {
-						continue
-					}
-					if _, ok := seenDirs[nextPath]; !ok {
-						queue = append(queue, nextPath)
-					}
-				}
-			}
-
-			if pageCount == 0 || pageCount < 1000 {
-				break
-			}
+			records = append(records, rec)
+			start = did
+			pageCount++
+		}
+		if pageCount < 1000 {
+			break
 		}
 	}
 	return records, nil

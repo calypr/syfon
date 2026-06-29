@@ -89,7 +89,7 @@ func TestDRSServiceResolveAndList(t *testing.T) {
 	recordHashes := internalapi.HashInfo{"sha256": "abc123"}
 	recordAuthz := map[string][]string{"org1": {"p1"}}
 	record := testRecordForURL("did-record", "https://storage.example/record.bin", recordAuthz)
-	record.FileName = &recordName
+	record.Name = &recordName
 	record.Size = &recordSize
 	record.Hashes = &recordHashes
 	records := []internalapi.InternalRecord{record}
@@ -282,7 +282,7 @@ func TestDRSServiceDeleteRecordsByHash(t *testing.T) {
 		testRecordForURL("obj-2", recordURLs[0], map[string][]string{"org1": {}}),
 	}
 	for i := range records {
-		records[i].FileName = &recordName
+		records[i].Name = &recordName
 		records[i].Size = &recordSize
 		records[i].Hashes = &recordHashes
 	}

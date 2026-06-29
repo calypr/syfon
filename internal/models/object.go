@@ -2,6 +2,7 @@ package models
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/calypr/syfon/apigen/server/drs"
@@ -36,6 +37,7 @@ func (o *InternalObject) UnmarshalJSON(data []byte) error {
 		drs.DrsObject
 		Did      string            `json:"did,omitempty"`
 		Hashes   map[string]string `json:"hashes,omitempty"`
+		Path     *string           `json:"path,omitempty"`
 		FileName *string           `json:"file_name,omitempty"`
 	}
 
@@ -69,6 +71,11 @@ func (o *InternalObject) UnmarshalJSON(data []byte) error {
 	o.MimeType = wire.MimeType
 	o.SelfUri = wire.SelfUri
 	o.Version = wire.Version
+	if wire.Path != nil && strings.TrimSpace(*wire.Path) != "" {
+		o.Properties["path"] = strings.TrimSpace(*wire.Path)
+	} else if wire.FileName != nil && strings.TrimSpace(*wire.FileName) != "" {
+		o.Properties["path"] = strings.TrimSpace(*wire.FileName)
+	}
 
 	if wire.ControlledAccess != nil {
 		o.Authorizations = common.ControlledAccessToAuthzMap(*wire.ControlledAccess)
@@ -117,12 +124,6 @@ func (o InternalObject) MarshalJSON() ([]byte, error) {
 	}
 	// Ensure Gen3 compatibility fields are also present.
 	out["did"] = o.Id
-	if fileName, ok := out["file_name"].(string); ok && fileName != "" {
-		out["file_name"] = fileName
-	} else if o.Name != nil {
-		out["file_name"] = *o.Name
-	}
-
 	if len(o.Checksums) > 0 {
 		hashes := make(map[string]string, len(o.Checksums))
 		for _, c := range o.Checksums {
@@ -141,7 +142,7 @@ func (o InternalObject) MarshalJSON() ([]byte, error) {
 
 func isRetiredInternalAuthField(key string) bool {
 	switch key {
-	case "auth", "authz", "authorizations", "urls":
+	case "auth", "authz", "authorizations", "urls", "file_name", "path":
 		return true
 	default:
 		return false

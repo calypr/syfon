@@ -94,7 +94,7 @@ func toRecordResponse(rec internalapi.InternalRecord) internalapi.InternalRecord
 		AccessMethods:    rec.AccessMethods,
 		ControlledAccess: rec.ControlledAccess,
 		Description:      rec.Description,
-		FileName:         rec.FileName,
+		Name:             rec.Name,
 		Hashes:           rec.Hashes,
 		Size:             rec.Size,
 		Version:          rec.Version,

@@ -209,7 +209,7 @@ func handleInternalUploadURLFiber(om *core.ObjectManager) fiber.Handler {
 			} else {
 				target, err = om.ResolveCanonicalStorageTarget(c.Context(), core.CanonicalStorageTargetRequest{
 					Object:         obj,
-					Key:            strings.TrimSpace(common.StringVal(params.FileName)),
+					Key:            strings.TrimSpace(common.StringVal(params.Key)),
 					PreferChecksum: true,
 				})
 			}
@@ -228,7 +228,7 @@ func handleInternalUploadURLFiber(om *core.ObjectManager) fiber.Handler {
 			}
 			return c.JSON(internalapi.InternalSignedURL{Url: &signedURL})
 		} else {
-			if requestedKey := strings.Trim(strings.TrimSpace(firstNonEmpty(common.StringVal(params.FileName), c.Query("file_name"), c.Query("filename"))), "/"); requestedKey != "" {
+			if requestedKey := strings.Trim(strings.TrimSpace(firstNonEmpty(common.StringVal(params.Key), c.Query("key"))), "/"); requestedKey != "" {
 				key = requestedKey
 			}
 			target, err := resolveUploadTarget(c.Context(), om, common.StringVal(params.Organization), common.StringVal(params.Project), key)
@@ -258,7 +258,7 @@ func handleInternalUploadURLFiber(om *core.ObjectManager) fiber.Handler {
 }
 
 func uploadKeyForExistingObject(obj *models.InternalObject, params internalapi.InternalUploadURLParams) string {
-	if key := strings.Trim(strings.TrimSpace(common.StringVal(params.FileName)), "/"); key != "" {
+	if key := strings.Trim(strings.TrimSpace(common.StringVal(params.Key)), "/"); key != "" {
 		return key
 	}
 	if obj != nil {
@@ -296,7 +296,7 @@ func handleInternalUploadBulkFiber(om *core.ObjectManager) fiber.Handler {
 
 		results := make([]internalapi.InternalUploadBulkResult, 0, len(req.Requests))
 		for _, item := range req.Requests {
-			res := internalapi.InternalUploadBulkResult{FileId: item.FileId, FileName: item.FileName}
+			res := internalapi.InternalUploadBulkResult{FileId: item.FileId, Key: item.Key}
 			if item.FileId == "" {
 				errMsg := "FileId is required"
 				res.Error = &errMsg
@@ -323,7 +323,7 @@ func handleInternalUploadBulkFiber(om *core.ObjectManager) fiber.Handler {
 
 			target, err := om.ResolveCanonicalStorageTarget(c.Context(), core.CanonicalStorageTargetRequest{
 				Object:         obj,
-				Key:            strings.TrimSpace(common.StringVal(item.FileName)),
+				Key:            strings.TrimSpace(common.StringVal(item.Key)),
 				PreferChecksum: true,
 			})
 			if err != nil {
@@ -353,7 +353,7 @@ func handleInternalUploadBulkFiber(om *core.ObjectManager) fiber.Handler {
 			} else {
 				res.Url = &signedURL
 				res.Bucket = &bucket
-				res.FileName = &key
+				res.Key = &key
 				res.Status = http.StatusOK
 			}
 			results = append(results, res)
@@ -380,11 +380,11 @@ func handleInternalMultipartInitFiber(om *core.ObjectManager) fiber.Handler {
 		key := ""
 		if req.Guid != nil {
 			key = strings.TrimSpace(*req.Guid)
-		} else if req.FileName != nil {
-			key = strings.TrimSpace(*req.FileName)
+		} else if req.Key != nil {
+			key = strings.TrimSpace(*req.Key)
 		}
 		if key == "" {
-			return c.Status(fiber.StatusBadRequest).SendString("key/guid/file_name is required")
+			return c.Status(fiber.StatusBadRequest).SendString("key/guid is required")
 		}
 
 		if strings.Contains(key, "/") {

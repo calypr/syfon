@@ -66,13 +66,7 @@ func handleInternalListFiber(om *core.ObjectManager) fiber.Handler {
 		hash := c.Query("hash")
 		hashType := c.Query("hash_type")
 		objectURL := strings.TrimSpace(c.Query("url"))
-		hasPathQuery := c.Request().URI().QueryArgs().Has("path")
-		pathQuery := c.Query("path")
-
 		if hash != "" {
-			if hasPathQuery {
-				return c.Status(fiber.StatusBadRequest).SendString("path is only supported for exact organization/project listings")
-			}
 			hashType, hash = common.ParseHashQuery(hash, hashType)
 			filterOrg := strings.TrimSpace(c.Query("organization"))
 			filterProject := strings.TrimSpace(c.Query("project"))
@@ -102,44 +96,9 @@ func handleInternalListFiber(om *core.ObjectManager) fiber.Handler {
 		if !hasScope {
 			filterOrg, filterProject = "", ""
 		}
-		if hasPathQuery && (filterOrg == "" || filterProject == "") {
-			return c.Status(fiber.StatusBadRequest).SendString("organization and project are required when path is set")
-		}
-		if hasPathQuery && objectURL != "" {
-			return c.Status(fiber.StatusBadRequest).SendString("path is only supported for exact organization/project listings")
-		}
-		if _, _, err := common.NormalizeBrowsePath(pathQuery); err != nil {
-			return c.Status(fiber.StatusBadRequest).SendString(err.Error())
-		}
-
 		limit, start, offset, err := parseInternalListPaginationFiber(c)
 		if err != nil {
 			return c.Status(fiber.StatusBadRequest).SendString(err.Error())
-		}
-		if hasPathQuery {
-			ids, directories, err := om.ListObjectIDsPageByPath(c.Context(), filterOrg, filterProject, pathQuery, "read", start, limit, offset)
-			if err != nil {
-				return apiutil.HandleError(c, err)
-			}
-			objs, err := om.GetBulkObjects(c.Context(), ids, "read")
-			if err != nil {
-				return apiutil.HandleError(c, err)
-			}
-			records := make([]internalapi.InternalRecord, 0, len(objs))
-			for _, obj := range objs {
-				records = append(records, core.InternalObjectToInternalRecord(obj))
-			}
-			respDirectories := make([]internalapi.IndexDirectory, 0, len(directories))
-			for _, directory := range directories {
-				respDirectories = append(respDirectories, internalapi.IndexDirectory{
-					Name: directory.Name,
-					Path: directory.Path,
-				})
-			}
-			return c.JSON(internalapi.ListRecordsResponse{
-				Directories: &respDirectories,
-				Records:     &records,
-			})
 		}
 
 		var ids []string

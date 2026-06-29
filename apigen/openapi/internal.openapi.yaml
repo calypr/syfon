@@ -417,7 +417,7 @@ paths:
           schema:
             type: string
         - in: query
-          name: file_name
+          name: key
           required: false
           schema:
             type: string
@@ -722,8 +722,6 @@ components:
           type: array
           items:
             $ref: './openapi.yaml#/components/schemas/AccessMethod'
-        file_name:
-          type: string
         organization:
           type: string
         project:
@@ -754,24 +752,10 @@ components:
     ListRecordsResponse:
       type: object
       properties:
-        directories:
-          type: array
-          items:
-            $ref: '#/components/schemas/IndexDirectory'
         records:
           type: array
           items:
             $ref: '#/components/schemas/InternalRecord'
-    IndexDirectory:
-      type: object
-      required:
-        - name
-        - path
-      properties:
-        name:
-          type: string
-        path:
-          type: string
     BulkCreateRequest:
       type: object
       required:
@@ -1053,7 +1037,7 @@ components:
       properties:
         file_id:
           type: string
-        file_name:
+        key:
           type: string
         organization:
           type: string
@@ -1079,7 +1063,7 @@ components:
           type: string
         bucket:
           type: string
-        file_name:
+        key:
           type: string
         url:
           type: string
@@ -1093,7 +1077,7 @@ components:
       properties:
         guid:
           type: string
-        file_name:
+        key:
           type: string
         organization:
           type: string

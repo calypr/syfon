@@ -38,11 +38,11 @@ func TestInternalObjectUnmarshalLegacyAndMarshalCompatibility(t *testing.T) {
 	if out["did"] != "did-1" {
 		t.Fatalf("expected did in output, got %v", out["did"])
 	}
-	if out["file_name"] != "legacy-name.txt" {
-		t.Fatalf("expected file_name in output, got %v", out["file_name"])
-	}
 	if _, ok := out["name"]; ok {
 		t.Fatalf("did not expect name in output when only file_name was provided")
+	}
+	if _, ok := out["file_name"]; ok {
+		t.Fatalf("did not expect file_name in output")
 	}
 	if _, ok := out["unknown_field"]; !ok {
 		t.Fatalf("expected unknown field preservation in output")

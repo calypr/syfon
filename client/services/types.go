@@ -30,7 +30,7 @@ type ListRecordsOptions struct {
 
 type UploadURLRequest struct {
 	FileID       string
-	FileName     string
+	Key          string
 	ExpiresIn    int
 	Organization string
 	Project      string

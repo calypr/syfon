@@ -375,8 +375,8 @@ func hasPathPrefix(candidate, prefix []string) bool {
 func copyRecord(ctx context.Context, cmd *cobra.Command, sourceClient, targetClient services.SyfonClient, rec internalapi.InternalRecord, targetBucket, targetProjectPath string, dstResource string, current, total int, tempDir string) error {
 	did := rec.Did
 	fileName := ""
-	if rec.FileName != nil {
-		fileName = *rec.FileName
+	if rec.Name != nil {
+		fileName = *rec.Name
 	}
 	size := int64(0)
 	if rec.Size != nil {

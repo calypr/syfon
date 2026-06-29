@@ -81,18 +81,18 @@ func TestHandleInternalBulkDocuments_InvalidBodyAndMissingIDs(t *testing.T) {
 	}
 }
 
-func TestHandleInternalList_PathBrowseValidation(t *testing.T) {
+func TestHandleInternalList_IgnoresLegacyPathValidation(t *testing.T) {
 	om := core.NewObjectManager(&testutils.MockDatabase{}, &testutils.MockUrlManager{})
 
 	req := httptest.NewRequest(http.MethodGet, "/index?path=nested", nil)
 	rr := doInternalDRSTestRequest(req, om)
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 when path is set without exact scope, got %d body=%s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 when legacy path query is ignored, got %d body=%s", rr.Code, rr.Body.String())
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/index?organization=org&project=proj&path=../nested", nil)
 	rr = doInternalDRSTestRequest(req, om)
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for invalid path, got %d body=%s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 when invalid legacy path query is ignored, got %d body=%s", rr.Code, rr.Body.String())
 	}
 }

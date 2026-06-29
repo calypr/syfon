@@ -26,32 +26,12 @@ const (
 	Unmatched ProviderTransferReconciliationStatus = "unmatched"
 )
 
-// Defines values for StoragePathChildType.
-const (
-	Directory StoragePathChildType = "directory"
-	File      StoragePathChildType = "file"
-)
-
 // Defines values for TransferBreakdownResponseGroupBy.
 const (
 	TransferBreakdownResponseGroupByObject   TransferBreakdownResponseGroupBy = "object"
 	TransferBreakdownResponseGroupByProvider TransferBreakdownResponseGroupBy = "provider"
 	TransferBreakdownResponseGroupByScope    TransferBreakdownResponseGroupBy = "scope"
 	TransferBreakdownResponseGroupByUser     TransferBreakdownResponseGroupBy = "user"
-)
-
-// Defines values for ListStorageChildrenParamsSortBy.
-const (
-	Bytes       ListStorageChildrenParamsSortBy = "bytes"
-	Name        ListStorageChildrenParamsSortBy = "name"
-	Records     ListStorageChildrenParamsSortBy = "records"
-	UpdatedTime ListStorageChildrenParamsSortBy = "updated_time"
-)
-
-// Defines values for ListStorageChildrenParamsSortOrder.
-const (
-	Asc  ListStorageChildrenParamsSortOrder = "asc"
-	Desc ListStorageChildrenParamsSortOrder = "desc"
 )
 
 // Defines values for GetTransferBreakdownParamsGroupBy.
@@ -137,45 +117,6 @@ type ProviderTransferEventsRequest struct {
 // ProviderTransferReconciliationStatus defines model for ProviderTransferReconciliationStatus.
 type ProviderTransferReconciliationStatus string
 
-// StoragePathChild defines model for StoragePathChild.
-type StoragePathChild struct {
-	DownloadCount    *int64                `json:"download_count,omitempty"`
-	FileCount        *int64                `json:"file_count,omitempty"`
-	LastDownloadTime *time.Time            `json:"last_download_time"`
-	LatestUpdateTime *time.Time            `json:"latest_update_time"`
-	Name             *string               `json:"name,omitempty"`
-	Path             *string               `json:"path,omitempty"`
-	RecordCount      *int64                `json:"record_count,omitempty"`
-	TotalBytes       *int64                `json:"total_bytes,omitempty"`
-	Type             *StoragePathChildType `json:"type,omitempty"`
-}
-
-// StoragePathChildType defines model for StoragePathChild.Type.
-type StoragePathChildType string
-
-// StoragePathChildrenResponse defines model for StoragePathChildrenResponse.
-type StoragePathChildrenResponse struct {
-	Items        *[]StoragePathChild `json:"items,omitempty"`
-	Organization *string             `json:"organization,omitempty"`
-	Path         *string             `json:"path,omitempty"`
-	Project      *string             `json:"project,omitempty"`
-}
-
-// StoragePathSummary defines model for StoragePathSummary.
-type StoragePathSummary struct {
-	DirectChildCount   *int64     `json:"direct_child_count,omitempty"`
-	DownloadCount      *int64     `json:"download_count,omitempty"`
-	DuplicatePathCount *int64     `json:"duplicate_path_count,omitempty"`
-	FileCount          *int64     `json:"file_count,omitempty"`
-	LastDownloadTime   *time.Time `json:"last_download_time"`
-	LatestUpdateTime   *time.Time `json:"latest_update_time"`
-	Organization       *string    `json:"organization,omitempty"`
-	Path               *string    `json:"path,omitempty"`
-	Project            *string    `json:"project,omitempty"`
-	RecordCount        *int64     `json:"record_count,omitempty"`
-	TotalBytes         *int64     `json:"total_bytes,omitempty"`
-}
-
 // TransferAttributionBreakdown defines model for TransferAttributionBreakdown.
 type TransferAttributionBreakdown struct {
 	ActorEmail       *string    `json:"actor_email,omitempty"`
@@ -244,9 +185,6 @@ type From = time.Time
 // Organization defines model for Organization.
 type Organization = string
 
-// Path defines model for Path.
-type Path = string
-
 // Project defines model for Project.
 type Project = string
 
@@ -258,12 +196,6 @@ type ReconciliationStatus = ProviderTransferReconciliationStatus
 
 // SHA256 defines model for SHA256.
 type SHA256 = string
-
-// StorageOrganization defines model for StorageOrganization.
-type StorageOrganization = string
-
-// StorageProject defines model for StorageProject.
-type StorageProject = string
 
 // To defines model for To.
 type To = time.Time
@@ -300,40 +232,6 @@ type RecordProviderTransferEventsParams struct {
 
 	// Project Project scope filter. Requires organization when set.
 	Project *Project `form:"project,omitempty" json:"project,omitempty"`
-}
-
-// ListStorageChildrenParams defines parameters for ListStorageChildren.
-type ListStorageChildrenParams struct {
-	// Organization Organization scope for the storage subtree query.
-	Organization StorageOrganization `form:"organization" json:"organization"`
-
-	// Project Project scope for the storage subtree query.
-	Project StorageProject `form:"project" json:"project"`
-
-	// Path Optional storage subtree path. Omit for the project root.
-	Path      *Path                               `form:"path,omitempty" json:"path,omitempty"`
-	Limit     *int                                `form:"limit,omitempty" json:"limit,omitempty"`
-	Offset    *int                                `form:"offset,omitempty" json:"offset,omitempty"`
-	SortBy    *ListStorageChildrenParamsSortBy    `form:"sort_by,omitempty" json:"sort_by,omitempty"`
-	SortOrder *ListStorageChildrenParamsSortOrder `form:"sort_order,omitempty" json:"sort_order,omitempty"`
-}
-
-// ListStorageChildrenParamsSortBy defines parameters for ListStorageChildren.
-type ListStorageChildrenParamsSortBy string
-
-// ListStorageChildrenParamsSortOrder defines parameters for ListStorageChildren.
-type ListStorageChildrenParamsSortOrder string
-
-// GetStorageSummaryParams defines parameters for GetStorageSummary.
-type GetStorageSummaryParams struct {
-	// Organization Organization scope for the storage subtree query.
-	Organization StorageOrganization `form:"organization" json:"organization"`
-
-	// Project Project scope for the storage subtree query.
-	Project StorageProject `form:"project" json:"project"`
-
-	// Path Optional storage subtree path. Omit for the project root.
-	Path *Path `form:"path,omitempty" json:"path,omitempty"`
 }
 
 // GetMetricsSummaryParams defines parameters for GetMetricsSummary.
@@ -409,12 +307,6 @@ type ServerInterface interface {
 	// Record provider-observed transfer events
 	// (POST /index/v1/metrics/provider-transfer-events)
 	RecordProviderTransferEvents(c fiber.Ctx, params RecordProviderTransferEventsParams) error
-
-	// (GET /index/v1/metrics/storage/children)
-	ListStorageChildren(c fiber.Ctx, params ListStorageChildrenParams) error
-
-	// (GET /index/v1/metrics/storage/summary)
-	GetStorageSummary(c fiber.Ctx, params GetStorageSummaryParams) error
 
 	// (GET /index/v1/metrics/summary)
 	GetMetricsSummary(c fiber.Ctx, params GetMetricsSummaryParams) error
@@ -565,142 +457,6 @@ func (siw *ServerInterfaceWrapper) RecordProviderTransferEvents(c fiber.Ctx) err
 	}
 
 	return siw.Handler.RecordProviderTransferEvents(c, params)
-}
-
-// ListStorageChildren operation middleware
-func (siw *ServerInterfaceWrapper) ListStorageChildren(c fiber.Ctx) error {
-	var err error
-	var params ListStorageChildrenParams
-
-	// ------------- Required query parameter "organization" -------------
-	if paramValue := c.Query("organization"); paramValue != "" {
-
-		var value StorageOrganization
-		err = runtime.BindStyledParameterWithOptions("form", "organization", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: true})
-		if err != nil {
-			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter organization: %w", err).Error())
-		}
-		params.Organization = value
-
-	} else {
-		return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Query argument organization is required, but not found").Error())
-	}
-	// ------------- Required query parameter "project" -------------
-	if paramValue := c.Query("project"); paramValue != "" {
-
-		var value StorageProject
-		err = runtime.BindStyledParameterWithOptions("form", "project", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: true})
-		if err != nil {
-			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter project: %w", err).Error())
-		}
-		params.Project = value
-
-	} else {
-		return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Query argument project is required, but not found").Error())
-	}
-	// ------------- Optional query parameter "path" -------------
-	if paramValue := c.Query("path"); paramValue != "" {
-
-		var value Path
-		err = runtime.BindStyledParameterWithOptions("form", "path", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
-		if err != nil {
-			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter path: %w", err).Error())
-		}
-		params.Path = &value
-
-	}
-	// ------------- Optional query parameter "limit" -------------
-	if paramValue := c.Query("limit"); paramValue != "" {
-
-		var value int
-		err = runtime.BindStyledParameterWithOptions("form", "limit", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
-		if err != nil {
-			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter limit: %w", err).Error())
-		}
-		params.Limit = &value
-
-	}
-	// ------------- Optional query parameter "offset" -------------
-	if paramValue := c.Query("offset"); paramValue != "" {
-
-		var value int
-		err = runtime.BindStyledParameterWithOptions("form", "offset", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
-		if err != nil {
-			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter offset: %w", err).Error())
-		}
-		params.Offset = &value
-
-	}
-	// ------------- Optional query parameter "sort_by" -------------
-	if paramValue := c.Query("sort_by"); paramValue != "" {
-
-		var value ListStorageChildrenParamsSortBy
-		err = runtime.BindStyledParameterWithOptions("form", "sort_by", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
-		if err != nil {
-			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter sort_by: %w", err).Error())
-		}
-		params.SortBy = &value
-
-	}
-	// ------------- Optional query parameter "sort_order" -------------
-	if paramValue := c.Query("sort_order"); paramValue != "" {
-
-		var value ListStorageChildrenParamsSortOrder
-		err = runtime.BindStyledParameterWithOptions("form", "sort_order", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
-		if err != nil {
-			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter sort_order: %w", err).Error())
-		}
-		params.SortOrder = &value
-
-	}
-
-	return siw.Handler.ListStorageChildren(c, params)
-}
-
-// GetStorageSummary operation middleware
-func (siw *ServerInterfaceWrapper) GetStorageSummary(c fiber.Ctx) error {
-	var err error
-	var params GetStorageSummaryParams
-
-	// ------------- Required query parameter "organization" -------------
-	if paramValue := c.Query("organization"); paramValue != "" {
-
-		var value StorageOrganization
-		err = runtime.BindStyledParameterWithOptions("form", "organization", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: true})
-		if err != nil {
-			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter organization: %w", err).Error())
-		}
-		params.Organization = value
-
-	} else {
-		return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Query argument organization is required, but not found").Error())
-	}
-	// ------------- Required query parameter "project" -------------
-	if paramValue := c.Query("project"); paramValue != "" {
-
-		var value StorageProject
-		err = runtime.BindStyledParameterWithOptions("form", "project", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: true})
-		if err != nil {
-			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter project: %w", err).Error())
-		}
-		params.Project = value
-
-	} else {
-		return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Query argument project is required, but not found").Error())
-	}
-	// ------------- Optional query parameter "path" -------------
-	if paramValue := c.Query("path"); paramValue != "" {
-
-		var value Path
-		err = runtime.BindStyledParameterWithOptions("form", "path", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
-		if err != nil {
-			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter path: %w", err).Error())
-		}
-		params.Path = &value
-
-	}
-
-	return siw.Handler.GetStorageSummary(c, params)
 }
 
 // GetMetricsSummary operation middleware
@@ -1043,10 +799,6 @@ func RegisterHandlersWithOptions(router fiber.Router, si ServerInterface, option
 
 	router.Post(options.BaseURL+"/index/v1/metrics/provider-transfer-events", wrapper.RecordProviderTransferEvents)
 
-	router.Get(options.BaseURL+"/index/v1/metrics/storage/children", wrapper.ListStorageChildren)
-
-	router.Get(options.BaseURL+"/index/v1/metrics/storage/summary", wrapper.GetStorageSummary)
-
 	router.Get(options.BaseURL+"/index/v1/metrics/summary", wrapper.GetMetricsSummary)
 
 	router.Get(options.BaseURL+"/index/v1/metrics/transfers/breakdown", wrapper.GetTransferBreakdown)
@@ -1212,104 +964,6 @@ func (response RecordProviderTransferEvents500Response) VisitRecordProviderTrans
 	return nil
 }
 
-type ListStorageChildrenRequestObject struct {
-	Params ListStorageChildrenParams
-}
-
-type ListStorageChildrenResponseObject interface {
-	VisitListStorageChildrenResponse(ctx fiber.Ctx) error
-}
-
-type ListStorageChildren200JSONResponse StoragePathChildrenResponse
-
-func (response ListStorageChildren200JSONResponse) VisitListStorageChildrenResponse(ctx fiber.Ctx) error {
-	ctx.Response().Header.Set("Content-Type", "application/json")
-	ctx.Status(200)
-
-	return ctx.JSON(&response)
-}
-
-type ListStorageChildren400Response struct {
-}
-
-func (response ListStorageChildren400Response) VisitListStorageChildrenResponse(ctx fiber.Ctx) error {
-	ctx.Status(400)
-	return nil
-}
-
-type ListStorageChildren401Response struct {
-}
-
-func (response ListStorageChildren401Response) VisitListStorageChildrenResponse(ctx fiber.Ctx) error {
-	ctx.Status(401)
-	return nil
-}
-
-type ListStorageChildren403Response struct {
-}
-
-func (response ListStorageChildren403Response) VisitListStorageChildrenResponse(ctx fiber.Ctx) error {
-	ctx.Status(403)
-	return nil
-}
-
-type ListStorageChildren500Response struct {
-}
-
-func (response ListStorageChildren500Response) VisitListStorageChildrenResponse(ctx fiber.Ctx) error {
-	ctx.Status(500)
-	return nil
-}
-
-type GetStorageSummaryRequestObject struct {
-	Params GetStorageSummaryParams
-}
-
-type GetStorageSummaryResponseObject interface {
-	VisitGetStorageSummaryResponse(ctx fiber.Ctx) error
-}
-
-type GetStorageSummary200JSONResponse StoragePathSummary
-
-func (response GetStorageSummary200JSONResponse) VisitGetStorageSummaryResponse(ctx fiber.Ctx) error {
-	ctx.Response().Header.Set("Content-Type", "application/json")
-	ctx.Status(200)
-
-	return ctx.JSON(&response)
-}
-
-type GetStorageSummary400Response struct {
-}
-
-func (response GetStorageSummary400Response) VisitGetStorageSummaryResponse(ctx fiber.Ctx) error {
-	ctx.Status(400)
-	return nil
-}
-
-type GetStorageSummary401Response struct {
-}
-
-func (response GetStorageSummary401Response) VisitGetStorageSummaryResponse(ctx fiber.Ctx) error {
-	ctx.Status(401)
-	return nil
-}
-
-type GetStorageSummary403Response struct {
-}
-
-func (response GetStorageSummary403Response) VisitGetStorageSummaryResponse(ctx fiber.Ctx) error {
-	ctx.Status(403)
-	return nil
-}
-
-type GetStorageSummary500Response struct {
-}
-
-func (response GetStorageSummary500Response) VisitGetStorageSummaryResponse(ctx fiber.Ctx) error {
-	ctx.Status(500)
-	return nil
-}
-
 type GetMetricsSummaryRequestObject struct {
 	Params GetMetricsSummaryParams
 }
@@ -1469,12 +1123,6 @@ type StrictServerInterface interface {
 	// (POST /index/v1/metrics/provider-transfer-events)
 	RecordProviderTransferEvents(ctx context.Context, request RecordProviderTransferEventsRequestObject) (RecordProviderTransferEventsResponseObject, error)
 
-	// (GET /index/v1/metrics/storage/children)
-	ListStorageChildren(ctx context.Context, request ListStorageChildrenRequestObject) (ListStorageChildrenResponseObject, error)
-
-	// (GET /index/v1/metrics/storage/summary)
-	GetStorageSummary(ctx context.Context, request GetStorageSummaryRequestObject) (GetStorageSummaryResponseObject, error)
-
 	// (GET /index/v1/metrics/summary)
 	GetMetricsSummary(ctx context.Context, request GetMetricsSummaryRequestObject) (GetMetricsSummaryResponseObject, error)
 	// Group transfer attribution events
@@ -1578,60 +1226,6 @@ func (sh *strictHandler) RecordProviderTransferEvents(ctx fiber.Ctx, params Reco
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	} else if validResponse, ok := response.(RecordProviderTransferEventsResponseObject); ok {
 		if err := validResponse.VisitRecordProviderTransferEventsResponse(ctx); err != nil {
-			return fiber.NewError(fiber.StatusBadRequest, err.Error())
-		}
-	} else if response != nil {
-		return fmt.Errorf("unexpected response type: %T", response)
-	}
-	return nil
-}
-
-// ListStorageChildren operation middleware
-func (sh *strictHandler) ListStorageChildren(ctx fiber.Ctx, params ListStorageChildrenParams) error {
-	var request ListStorageChildrenRequestObject
-
-	request.Params = params
-
-	handler := func(ctx fiber.Ctx, request interface{}) (interface{}, error) {
-		return sh.ssi.ListStorageChildren(ctx.Context(), request.(ListStorageChildrenRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "ListStorageChildren")
-	}
-
-	response, err := handler(ctx, request)
-
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, err.Error())
-	} else if validResponse, ok := response.(ListStorageChildrenResponseObject); ok {
-		if err := validResponse.VisitListStorageChildrenResponse(ctx); err != nil {
-			return fiber.NewError(fiber.StatusBadRequest, err.Error())
-		}
-	} else if response != nil {
-		return fmt.Errorf("unexpected response type: %T", response)
-	}
-	return nil
-}
-
-// GetStorageSummary operation middleware
-func (sh *strictHandler) GetStorageSummary(ctx fiber.Ctx, params GetStorageSummaryParams) error {
-	var request GetStorageSummaryRequestObject
-
-	request.Params = params
-
-	handler := func(ctx fiber.Ctx, request interface{}) (interface{}, error) {
-		return sh.ssi.GetStorageSummary(ctx.Context(), request.(GetStorageSummaryRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "GetStorageSummary")
-	}
-
-	response, err := handler(ctx, request)
-
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, err.Error())
-	} else if validResponse, ok := response.(GetStorageSummaryResponseObject); ok {
-		if err := validResponse.VisitGetStorageSummaryResponse(ctx); err != nil {
 			return fiber.NewError(fiber.StatusBadRequest, err.Error())
 		}
 	} else if response != nil {

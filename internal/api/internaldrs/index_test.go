@@ -333,7 +333,7 @@ func TestHandleInternalList_LimitIsCappedAtTenThousand(t *testing.T) {
 	}
 }
 
-func TestHandleInternalList_PathBrowseReturnsImmediateDirectoriesAndFiles(t *testing.T) {
+func TestHandleInternalList_IgnoresLegacyPathQuery(t *testing.T) {
 	now := time.Now().UTC()
 	mockDB := &testutils.MockDatabase{
 		Objects: map[string]*drs.DrsObject{
@@ -366,11 +366,8 @@ func TestHandleInternalList_PathBrowseReturnsImmediateDirectoriesAndFiles(t *tes
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if payload.Directories == nil || len(*payload.Directories) != 1 || (*payload.Directories)[0].Name != "deep" || (*payload.Directories)[0].Path != "nested/deep" {
-		t.Fatalf("unexpected directories: %+v", payload.Directories)
-	}
-	if payload.Records == nil || len(*payload.Records) != 1 || (*payload.Records)[0].Did != "obj-a" {
-		t.Fatalf("unexpected paged records: %+v", payload.Records)
+	if payload.Records == nil || len(*payload.Records) != 1 {
+		t.Fatalf("expected one paged record, got %+v", payload.Records)
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/index?organization=org-a&project=proj-a&path=nested&limit=1&start=obj-a", nil)
@@ -382,14 +379,12 @@ func TestHandleInternalList_PathBrowseReturnsImmediateDirectoriesAndFiles(t *tes
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("expected 200, got %d body=%s", resp.StatusCode, string(body))
 	}
+	payload = internalapi.ListRecordsResponse{}
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		t.Fatalf("decode start response: %v", err)
+		t.Fatalf("decode paged response: %v", err)
 	}
-	if payload.Directories == nil || len(*payload.Directories) != 1 {
-		t.Fatalf("expected directories on paged response, got %+v", payload.Directories)
-	}
-	if payload.Records == nil || len(*payload.Records) != 1 || (*payload.Records)[0].Did != "obj-d" {
-		t.Fatalf("expected obj-d after start cursor, got %+v", payload.Records)
+	if payload.Records == nil || len(*payload.Records) != 1 {
+		t.Fatalf("expected one paged record with start cursor, got %+v", payload.Records)
 	}
 }
 

@@ -307,10 +307,10 @@ func internalRecordToDRSObject(rec *internalapi.InternalRecord) drsapi.DrsObject
 		SelfUri: "drs://" + rec.Did,
 		Size:    size,
 	}
-	if rec.FileName != nil {
-		base := path.Base(strings.TrimSpace(*rec.FileName))
+	if rec.Name != nil {
+		base := path.Base(strings.TrimSpace(*rec.Name))
 		if base == "." || base == "/" || base == "" {
-			base = strings.TrimSpace(*rec.FileName)
+			base = strings.TrimSpace(*rec.Name)
 		}
 		obj.Name = &base
 	}

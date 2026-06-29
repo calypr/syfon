@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"path"
 	"strings"
 
 	"github.com/calypr/syfon/apigen/client/drs"
@@ -216,7 +217,11 @@ func (s *IndexService) SHA256Validity(ctx context.Context, values []string) (map
 	return s.BulkSHA256Validity(ctx, internalapi.BulkSHA256ValidityRequest{Sha256: &values})
 }
 
-func (s *IndexService) Upsert(ctx context.Context, did, objectURL, fileName string, size int64, sha256sum string, authorizations map[string][]string) error {
+func (s *IndexService) Upsert(ctx context.Context, did, objectURL, recordPath string, size int64, sha256sum string, authorizations map[string][]string) error {
+	recordName := strings.TrimSpace(recordPath)
+	if recordName != "" {
+		recordName = path.Base(strings.Trim(recordName, "/"))
+	}
 	existing, err := s.Get(ctx, did)
 	if err == nil {
 		req := internalapi.InternalRecord{
@@ -224,7 +229,7 @@ func (s *IndexService) Upsert(ctx context.Context, did, objectURL, fileName stri
 			AccessMethods:    existing.AccessMethods,
 			ControlledAccess: existing.ControlledAccess,
 			Description:      existing.Description,
-			FileName:         existing.FileName,
+			Name:             existing.Name,
 			Hashes:           existing.Hashes,
 			Size:             existing.Size,
 			Version:          existing.Version,
@@ -242,8 +247,8 @@ func (s *IndexService) Upsert(ctx context.Context, did, objectURL, fileName stri
 			controlled := syfoncommon.AuthzMapToControlledAccess(authorizations)
 			req.ControlledAccess = &controlled
 		}
-		if fileName != "" {
-			req.FileName = &fileName
+		if recordName != "" {
+			req.Name = &recordName
 		}
 		if size > 0 {
 			req.Size = &size
@@ -274,8 +279,8 @@ func (s *IndexService) Upsert(ctx context.Context, did, objectURL, fileName stri
 	if size > 0 {
 		payload.Size = &size
 	}
-	if fileName != "" {
-		payload.FileName = &fileName
+	if recordName != "" {
+		payload.Name = &recordName
 	}
 	if sha256sum != "" {
 		h := internalapi.HashInfo{"sha256": sha256sum}

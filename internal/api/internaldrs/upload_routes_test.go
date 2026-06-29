@@ -89,7 +89,7 @@ func TestHandleInternalUploadBlank_RequiresScope(t *testing.T) {
 func TestHandleInternalUploadURL_MissingObjectResolvesOrganizationProjectScope(t *testing.T) {
 	mockUM := &capturingMultipartURLManager{}
 	req := routeutil.WithPathParams(
-		httptest.NewRequest(http.MethodGet, "/data/upload/new-guid?organization=syfon&project=e2e&file_name=payload.bin", nil),
+		httptest.NewRequest(http.MethodGet, "/data/upload/new-guid?organization=syfon&project=e2e&key=payload.bin", nil),
 		map[string]string{"file_id": "new-guid"},
 	)
 	rr := doInternalDRSTestRequest(req, core.NewObjectManager(&testutils.MockDatabase{
@@ -123,7 +123,7 @@ func TestHandleInternalMultipartInit(t *testing.T) {
 	guid := "multipart-guid"
 	org := "syfon"
 	project := "e2e"
-	body, _ := json.Marshal(internalapi.InternalMultipartInitRequest{Guid: &guid, FileName: &fileName, Organization: &org, Project: &project})
+	body, _ := json.Marshal(internalapi.InternalMultipartInitRequest{Guid: &guid, Key: &fileName, Organization: &org, Project: &project})
 	rr := doInternalDRSTestRequest(httptest.NewRequest(http.MethodPost, "/data/multipart/init", bytes.NewBuffer(body)), core.NewObjectManager(&testutils.MockDatabase{
 		Objects:     map[string]*drs.DrsObject{},
 		Credentials: map[string]models.S3Credential{"b1": {Bucket: "b1"}},
@@ -139,7 +139,7 @@ func TestHandleInternalMultipartInit(t *testing.T) {
 func TestHandleInternalMultipartInit_RequiresScopeForNewUpload(t *testing.T) {
 	fileName := "test.bam"
 	guid := "multipart-guid"
-	body, _ := json.Marshal(internalapi.InternalMultipartInitRequest{Guid: &guid, FileName: &fileName})
+	body, _ := json.Marshal(internalapi.InternalMultipartInitRequest{Guid: &guid, Key: &fileName})
 	rr := doInternalDRSTestRequest(httptest.NewRequest(http.MethodPost, "/data/multipart/init", bytes.NewBuffer(body)), core.NewObjectManager(&testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}, &testutils.MockUrlManager{}))
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", rr.Code)
@@ -197,7 +197,7 @@ func TestHandleInternalMultipartInit_PreservesRequestedKey(t *testing.T) {
 
 func TestHandleInternalMultipartInit_MintsUUIDForChecksumInput(t *testing.T) {
 	checksum := strings.Repeat("a", 64)
-	body, _ := json.Marshal(internalapi.InternalMultipartInitRequest{FileName: &checksum})
+	body, _ := json.Marshal(internalapi.InternalMultipartInitRequest{Key: &checksum})
 	mockDB := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}
 	rr := doInternalDRSTestRequest(httptest.NewRequest(http.MethodPost, "/data/multipart/init", bytes.NewBuffer(body)), core.NewObjectManager(mockDB, &testutils.MockUrlManager{}))
 	if rr.Code != http.StatusBadRequest {
@@ -407,7 +407,7 @@ func TestHandleInternalUploadURL_ResolvesRegisteredScopedObjectID(t *testing.T) 
 	mockUM := &capturingMultipartURLManager{}
 	om = core.NewObjectManager(database, mockUM)
 	req := routeutil.WithPathParams(
-		httptest.NewRequest(http.MethodGet, "/data/upload/"+registered.Id+"?file_name=program-root/"+oid, nil),
+		httptest.NewRequest(http.MethodGet, "/data/upload/"+registered.Id+"?key=program-root/"+oid, nil),
 		map[string]string{"file_id": registered.Id},
 	)
 	rr := doInternalDRSTestRequest(req, om)
@@ -616,7 +616,7 @@ func TestHandleInternalUploadURL_UsesExplicitObjectKeyForExistingObject(t *testi
 	}
 	mockUM := &capturingMultipartURLManager{}
 	req := routeutil.WithPathParams(
-		httptest.NewRequest(http.MethodGet, "/data/upload/7b9de5b9-19b2-536f-abcc-fe2a146c4eb5?file_name=program-root/"+checksum, nil),
+		httptest.NewRequest(http.MethodGet, "/data/upload/7b9de5b9-19b2-536f-abcc-fe2a146c4eb5?key=program-root/"+checksum, nil),
 		map[string]string{"file_id": "7b9de5b9-19b2-536f-abcc-fe2a146c4eb5"},
 	)
 	rr := doInternalDRSTestRequest(req, core.NewObjectManager(db, mockUM))
@@ -670,7 +670,7 @@ func TestHandleInternalUploadURL_ExplicitScopeOverridesMalformedExistingObjectUR
 	}
 	mockUM := &capturingMultipartURLManager{}
 	req := routeutil.WithPathParams(
-		httptest.NewRequest(http.MethodGet, "/data/upload/f781273b-52eb-5ac2-a484-775235eef303?organization=syfon&project=e2e&file_name=project-subpath/"+checksum, nil),
+		httptest.NewRequest(http.MethodGet, "/data/upload/f781273b-52eb-5ac2-a484-775235eef303?organization=syfon&project=e2e&key=project-subpath/"+checksum, nil),
 		map[string]string{"file_id": "f781273b-52eb-5ac2-a484-775235eef303"},
 	)
 	rr := doInternalDRSTestRequest(req, core.NewObjectManager(db, mockUM))
@@ -719,7 +719,7 @@ func TestHandleInternalUploadURL_ExplicitScopeIgnoresConflictingObjectMetadata(t
 	}
 	mockUM := &capturingMultipartURLManager{}
 	req := routeutil.WithPathParams(
-		httptest.NewRequest(http.MethodGet, "/data/upload/4f74e0c2-3c80-5c19-b47c-061b300ae270?organization=syfon&project=e2e&file_name="+checksum, nil),
+		httptest.NewRequest(http.MethodGet, "/data/upload/4f74e0c2-3c80-5c19-b47c-061b300ae270?organization=syfon&project=e2e&key="+checksum, nil),
 		map[string]string{"file_id": "4f74e0c2-3c80-5c19-b47c-061b300ae270"},
 	)
 	rr := doInternalDRSTestRequest(req, core.NewObjectManager(db, mockUM))

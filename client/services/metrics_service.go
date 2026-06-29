@@ -74,46 +74,6 @@ func (s *MetricsService) File(ctx context.Context, objectID string) (metricsapi.
 	return *resp.JSON200, nil
 }
 
-func (s *MetricsService) StorageSummary(ctx context.Context, opts StorageSummaryOptions) (metricsapi.StoragePathSummary, error) {
-	params := &metricsapi.GetStorageSummaryParams{
-		Organization: metricsapi.StorageOrganization(opts.Organization),
-		Project:      metricsapi.StorageProject(opts.ProjectID),
-		Path:         stringPtr[metricsapi.Path](opts.Path),
-	}
-	resp, err := s.gen.GetStorageSummaryWithResponse(ctx, params)
-	if err != nil {
-		return metricsapi.StoragePathSummary{}, err
-	}
-	if resp.JSON200 == nil {
-		return metricsapi.StoragePathSummary{}, fmt.Errorf("failed to get storage metrics summary: %d", resp.StatusCode())
-	}
-	return *resp.JSON200, nil
-}
-
-func (s *MetricsService) StorageChildren(ctx context.Context, opts StorageChildrenOptions) (metricsapi.StoragePathChildrenResponse, error) {
-	params := &metricsapi.ListStorageChildrenParams{
-		Organization: metricsapi.StorageOrganization(opts.Organization),
-		Project:      metricsapi.StorageProject(opts.ProjectID),
-		Path:         stringPtr[metricsapi.Path](opts.Path),
-		SortBy:       stringPtr[metricsapi.ListStorageChildrenParamsSortBy](opts.SortBy),
-		SortOrder:    stringPtr[metricsapi.ListStorageChildrenParamsSortOrder](opts.SortOrder),
-	}
-	if opts.Limit > 0 {
-		params.Limit = &opts.Limit
-	}
-	if opts.Offset > 0 {
-		params.Offset = &opts.Offset
-	}
-	resp, err := s.gen.ListStorageChildrenWithResponse(ctx, params)
-	if err != nil {
-		return metricsapi.StoragePathChildrenResponse{}, err
-	}
-	if resp.JSON200 == nil {
-		return metricsapi.StoragePathChildrenResponse{}, fmt.Errorf("failed to list storage metrics children: %d", resp.StatusCode())
-	}
-	return *resp.JSON200, nil
-}
-
 func (s *MetricsService) TransferSummary(ctx context.Context, opts TransferMetricsOptions) (models.TransferAttributionSummary, error) {
 	params, err := transferSummaryParams(opts)
 	if err != nil {

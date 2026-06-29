@@ -265,7 +265,7 @@ type DrsObjectRecord struct {
 	DownloadCount    int64
 	LastDownloadTime *time.Time
 	Name             string
-	FileName         string
+	Path             string
 	Version          string
 	Description      string
 }

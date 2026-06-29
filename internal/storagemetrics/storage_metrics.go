@@ -140,7 +140,7 @@ func AggregateStoragePathChildren(path string, rows []models.DrsObjectRecord, li
 }
 
 func storageMetricPathInfo(row models.DrsObjectRecord) (common.BrowsePathInfo, bool) {
-	raw := strings.TrimSpace(row.FileName)
+	raw := strings.TrimSpace(row.Path)
 	if raw == "" {
 		raw = strings.TrimSpace(row.Name)
 	}

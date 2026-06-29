@@ -16,8 +16,11 @@ import (
 	"github.com/calypr/syfon/internal/models"
 )
 
-func sqliteStoredFileName(obj *models.InternalObject) string {
+func sqliteStoredPath(obj *models.InternalObject) string {
 	if obj != nil && obj.Properties != nil {
+		if raw, ok := obj.Properties["path"].(string); ok && strings.TrimSpace(raw) != "" {
+			return strings.TrimSpace(raw)
+		}
 		if raw, ok := obj.Properties["file_name"].(string); ok && strings.TrimSpace(raw) != "" {
 			return strings.TrimSpace(raw)
 		}
@@ -30,18 +33,18 @@ func sqliteStoredFileName(obj *models.InternalObject) string {
 
 func sqliteLoadedNames(name, fileName sql.NullString) (string, string) {
 	loadedName := strings.TrimSpace(name.String)
-	loadedFileName := strings.TrimSpace(fileName.String)
-	if loadedFileName == "" {
-		loadedFileName = loadedName
+	loadedPath := strings.TrimSpace(fileName.String)
+	if loadedPath == "" {
+		loadedPath = loadedName
 		loadedName = ""
 	}
-	if loadedName == "" && loadedFileName != "" {
-		loadedName = path.Base(strings.Trim(loadedFileName, "/"))
+	if loadedName == "" && loadedPath != "" {
+		loadedName = path.Base(strings.Trim(loadedPath, "/"))
 		if loadedName == "." || loadedName == "/" || loadedName == "" {
-			loadedName = loadedFileName
+			loadedName = loadedPath
 		}
 	}
-	return loadedName, loadedFileName
+	return loadedName, loadedPath
 }
 
 func (db *SqliteDB) DeleteObject(ctx context.Context, id string) error {
@@ -163,7 +166,7 @@ retryLookup:
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch record: %w", err)
 	}
-	r.Name, r.FileName = sqliteLoadedNames(name, fileName)
+	r.Name, r.Path = sqliteLoadedNames(name, fileName)
 	r.Version = version.String
 	r.Description = description.String
 	objectID := r.ID
@@ -184,8 +187,8 @@ retryLookup:
 		},
 		Properties: map[string]interface{}{},
 	}
-	if strings.TrimSpace(r.FileName) != "" {
-		obj.Properties["file_name"] = r.FileName
+	if strings.TrimSpace(r.Path) != "" {
+		obj.Properties["path"] = r.Path
 	}
 
 	// 2. Fetch storage access methods.
@@ -262,7 +265,7 @@ func (db *SqliteDB) CreateObject(ctx context.Context, obj *models.InternalObject
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO drs_object (id, size, created_time, updated_time, name, file_name, version, description)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		obj.Id, obj.Size, obj.CreatedTime, common.TimeVal(obj.UpdatedTime), common.StringVal(obj.Name), sqliteStoredFileName(obj), common.StringVal(obj.Version), common.StringVal(obj.Description),
+		obj.Id, obj.Size, obj.CreatedTime, common.TimeVal(obj.UpdatedTime), common.StringVal(obj.Name), sqliteStoredPath(obj), common.StringVal(obj.Version), common.StringVal(obj.Description),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to insert drs_object: %w", err)
@@ -271,7 +274,7 @@ func (db *SqliteDB) CreateObject(ctx context.Context, obj *models.InternalObject
 	if err := insertControlledAccessTx(ctx, tx, obj.Id, objectAccessResources(obj)); err != nil {
 		return err
 	}
-	if err := sqliteRebuildBrowseRowsForObjectTx(ctx, tx, obj.Id, sqliteStoredFileName(obj), objectAccessResources(obj)); err != nil {
+	if err := sqliteRebuildBrowseRowsForObjectTx(ctx, tx, obj.Id, sqliteStoredPath(obj), objectAccessResources(obj)); err != nil {
 		return fmt.Errorf("failed to update browse index: %w", err)
 	}
 
@@ -331,13 +334,13 @@ func (db *SqliteDB) RegisterObjects(ctx context.Context, objects []models.Intern
 
 	for _, obj := range objects {
 		ids = append(ids, obj.Id)
-		mainArgs = append(mainArgs, obj.Id, obj.Size, obj.CreatedTime, common.TimeVal(obj.UpdatedTime), common.StringVal(obj.Name), sqliteStoredFileName(&obj), common.StringVal(obj.Version), common.StringVal(obj.Description))
+		mainArgs = append(mainArgs, obj.Id, obj.Size, obj.CreatedTime, common.TimeVal(obj.UpdatedTime), common.StringVal(obj.Name), sqliteStoredPath(&obj), common.StringVal(obj.Version), common.StringVal(obj.Description))
 
 		seenAccess := make(map[string]struct{})
 		for _, resource := range objectAccessResources(&obj) {
 			controlledArgs = append(controlledArgs, obj.Id, resource)
 		}
-		browseRows = append(browseRows, sqliteBrowseRowsForObject(obj.Id, sqliteStoredFileName(&obj), objectAccessResources(&obj))...)
+		browseRows = append(browseRows, sqliteBrowseRowsForObject(obj.Id, sqliteStoredPath(&obj), objectAccessResources(&obj))...)
 		if obj.AccessMethods != nil {
 			for _, am := range *obj.AccessMethods {
 				if am.AccessUrl == nil || am.AccessUrl.Url == "" {
@@ -1191,7 +1194,7 @@ func (db *SqliteDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []stri
 			return nil, err
 		}
 
-		loadedName, loadedFileName := sqliteLoadedNames(name, fileName)
+		loadedName, loadedPath := sqliteLoadedNames(name, fileName)
 		objectsByID[id] = &models.InternalObject{
 			DrsObject: drs.DrsObject{
 				Id:          id,
@@ -1205,8 +1208,8 @@ func (db *SqliteDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []stri
 			},
 			Properties: map[string]interface{}{},
 		}
-		if strings.TrimSpace(loadedFileName) != "" {
-			objectsByID[id].Properties["file_name"] = loadedFileName
+		if strings.TrimSpace(loadedPath) != "" {
+			objectsByID[id].Properties["path"] = loadedPath
 		}
 	}
 

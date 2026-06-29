@@ -17,7 +17,6 @@ import (
 	syupload "github.com/calypr/syfon/client/transfer/upload"
 	"github.com/calypr/syfon/cmd/cliauth"
 	"github.com/calypr/syfon/cmd/transferprogress"
-	"github.com/calypr/syfon/internal/common"
 	"github.com/spf13/cobra"
 )
 
@@ -47,10 +46,8 @@ var Cmd = &cobra.Command{
 				return fmt.Errorf("resolve output filename from record: %w", err)
 			}
 			name := did
-			if rec.FileName != nil {
-				if pretty := common.DownloadFilename(*rec.FileName); pretty != "" {
-					name = pretty
-				}
+			if rec.Name != nil && strings.TrimSpace(*rec.Name) != "" {
+				name = strings.TrimSpace(*rec.Name)
 			}
 			if rec.Size != nil {
 				expectedSize = *rec.Size
