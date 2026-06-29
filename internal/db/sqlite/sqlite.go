@@ -60,7 +60,6 @@ func (db *SqliteDB) initSchema() error {
 			created_time TIMESTAMP,
 			updated_time TIMESTAMP,
 			name TEXT,
-			file_name TEXT,
 			version TEXT,
 			description TEXT
 		)`,
@@ -95,18 +94,6 @@ func (db *SqliteDB) initSchema() error {
 			FOREIGN KEY(object_id) REFERENCES drs_object(id) ON DELETE CASCADE
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_drs_object_alias_object_id ON drs_object_alias(object_id)`,
-		`CREATE TABLE IF NOT EXISTS drs_object_browse_index (
-			object_id TEXT NOT NULL,
-			resource TEXT NOT NULL,
-			normalized_path TEXT NOT NULL,
-			parent_path TEXT NOT NULL,
-			entry_name TEXT NOT NULL,
-			PRIMARY KEY (resource, object_id),
-			FOREIGN KEY(object_id) REFERENCES drs_object(id) ON DELETE CASCADE
-		)`,
-		`CREATE INDEX IF NOT EXISTS idx_drs_object_browse_index_resource_parent_object_id ON drs_object_browse_index(resource, parent_path, object_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_drs_object_browse_index_resource_parent_entry_name ON drs_object_browse_index(resource, parent_path, entry_name)`,
-		`CREATE INDEX IF NOT EXISTS idx_drs_object_browse_index_resource_normalized_path ON drs_object_browse_index(resource, normalized_path)`,
 		`CREATE TABLE IF NOT EXISTS s3_credential (
 			credential_id TEXT PRIMARY KEY,
 			bucket TEXT NOT NULL,
@@ -282,10 +269,11 @@ func (db *SqliteDB) initSchema() error {
 	if err := db.ensureCredentialIdentitySchema(); err != nil {
 		return err
 	}
-	if _, err := db.db.Exec(`ALTER TABLE drs_object ADD COLUMN file_name TEXT NOT NULL DEFAULT ''`); err != nil {
-		if !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
-			return err
-		}
+	if err := db.ensureObjectTableShape(); err != nil {
+		return err
+	}
+	if _, err := db.db.Exec(`DROP TABLE IF EXISTS drs_object_browse_index`); err != nil {
+		return err
 	}
 	if _, err := db.db.Exec(`ALTER TABLE transfer_attribution_event ADD COLUMN access_grant_id TEXT NOT NULL DEFAULT ''`); err != nil {
 		if !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
@@ -304,6 +292,62 @@ func (db *SqliteDB) initSchema() error {
 		return err
 	}
 	return nil
+}
+
+func (db *SqliteDB) ensureObjectTableShape() error {
+	rows, err := db.db.Query(`PRAGMA table_info(drs_object)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	hasFileName := false
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull, pk int
+		var dflt any
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &dflt, &pk); err != nil {
+			return err
+		}
+		if strings.EqualFold(strings.TrimSpace(name), "file_name") {
+			hasFileName = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if !hasFileName {
+		return nil
+	}
+
+	tx, err := db.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	for _, stmt := range []string{
+		`CREATE TABLE drs_object_new (
+			id TEXT PRIMARY KEY,
+			size INTEGER,
+			created_time TIMESTAMP,
+			updated_time TIMESTAMP,
+			name TEXT,
+			version TEXT,
+			description TEXT
+		)`,
+		`INSERT INTO drs_object_new (id, size, created_time, updated_time, name, version, description)
+		 SELECT id, size, created_time, updated_time, name, version, description FROM drs_object`,
+		`DROP TABLE drs_object`,
+		`ALTER TABLE drs_object_new RENAME TO drs_object`,
+	} {
+		if _, err := tx.Exec(stmt); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
 }
 
 func (db *SqliteDB) ensureCredentialIdentitySchema() error {

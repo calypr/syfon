@@ -87,7 +87,6 @@ Several supporting docs in this branch explain the intended behavior around:
 
 - project hierarchy browsing
 - configurable `/index` page sizing
-- org/project storage metrics
 
 ### 6) Client and CLI restructuring
 

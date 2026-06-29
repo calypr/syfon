@@ -2,7 +2,7 @@ package models
 
 import (
 	"encoding/json"
-	"strings"
+	"fmt"
 	"time"
 
 	"github.com/calypr/syfon/apigen/server/drs"
@@ -31,14 +31,18 @@ func (o *InternalObject) UnmarshalJSON(data []byte) error {
 	if raw == nil {
 		raw = map[string]interface{}{}
 	}
+	if _, ok := raw["file_name"]; ok {
+		return fmt.Errorf("file_name is no longer supported")
+	}
+	if _, ok := raw["path"]; ok {
+		return fmt.Errorf("path is no longer supported")
+	}
 	o.Properties = raw
 
 	type wireObject struct {
 		drs.DrsObject
-		Did      string            `json:"did,omitempty"`
-		Hashes   map[string]string `json:"hashes,omitempty"`
-		Path     *string           `json:"path,omitempty"`
-		FileName *string           `json:"file_name,omitempty"`
+		Did    string            `json:"did,omitempty"`
+		Hashes map[string]string `json:"hashes,omitempty"`
 	}
 
 	var wire wireObject
@@ -71,11 +75,6 @@ func (o *InternalObject) UnmarshalJSON(data []byte) error {
 	o.MimeType = wire.MimeType
 	o.SelfUri = wire.SelfUri
 	o.Version = wire.Version
-	if wire.Path != nil && strings.TrimSpace(*wire.Path) != "" {
-		o.Properties["path"] = strings.TrimSpace(*wire.Path)
-	} else if wire.FileName != nil && strings.TrimSpace(*wire.FileName) != "" {
-		o.Properties["path"] = strings.TrimSpace(*wire.FileName)
-	}
 
 	if wire.ControlledAccess != nil {
 		o.Authorizations = common.ControlledAccessToAuthzMap(*wire.ControlledAccess)
@@ -142,7 +141,7 @@ func (o InternalObject) MarshalJSON() ([]byte, error) {
 
 func isRetiredInternalAuthField(key string) bool {
 	switch key {
-	case "auth", "authz", "authorizations", "urls", "file_name", "path":
+	case "auth", "authz", "authorizations", "urls":
 		return true
 	default:
 		return false

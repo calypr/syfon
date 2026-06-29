@@ -243,7 +243,7 @@ func TestSqliteDB_GetObjectsByChecksum_WhenIDDiffers(t *testing.T) {
 	}
 }
 
-func TestSqliteDB_GetObject_LegacyNameFallsBackToFileName(t *testing.T) {
+func TestSqliteDB_GetObjectPreservesStoredName(t *testing.T) {
 	ctx := context.Background()
 	db, err := NewSqliteDB(":memory:")
 	if err != nil {
@@ -252,11 +252,11 @@ func TestSqliteDB_GetObject_LegacyNameFallsBackToFileName(t *testing.T) {
 
 	now := time.Now().UTC()
 	if _, err := db.db.ExecContext(ctx, `
-		INSERT INTO drs_object (id, size, created_time, updated_time, name, file_name, version, description)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		"legacy-1", int64(42), now, now, "nested/dir/file.txt", nil, "v1", "desc",
+		INSERT INTO drs_object (id, size, created_time, updated_time, name, version, description)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		"legacy-1", int64(42), now, now, "file.txt", "v1", "desc",
 	); err != nil {
-		t.Fatalf("insert legacy object: %v", err)
+		t.Fatalf("insert object: %v", err)
 	}
 	if _, err := db.db.ExecContext(ctx, `
 		INSERT INTO drs_object_access_method (object_id, url, type)
@@ -271,10 +271,7 @@ func TestSqliteDB_GetObject_LegacyNameFallsBackToFileName(t *testing.T) {
 		t.Fatalf("GetObject failed: %v", err)
 	}
 	if got := common.StringVal(obj.Name); got != "file.txt" {
-		t.Fatalf("expected basename name, got %q", got)
-	}
-	if got, _ := obj.Properties["file_name"].(string); got != "nested/dir/file.txt" {
-		t.Fatalf("expected legacy path to populate file_name, got %#v", obj.Properties["file_name"])
+		t.Fatalf("expected stored name, got %q", got)
 	}
 }
 
@@ -1426,85 +1423,6 @@ func TestSqliteDB_TransferAttributionByResources(t *testing.T) {
 	}
 }
 
-func TestSqliteDB_StoragePathMetricsByScope(t *testing.T) {
-	ctx := context.Background()
-	db, err := NewSqliteDB(":memory:")
-	if err != nil {
-		t.Fatalf("failed to create db: %v", err)
-	}
-	now := time.Now().UTC()
-	for _, obj := range []models.InternalObject{
-		{
-			Authorizations: map[string][]string{"org": {"p1"}},
-			DrsObject: drs.DrsObject{
-				Id:          "obj-1",
-				Name:        common.Ptr("data/a.txt"),
-				Size:        10,
-				CreatedTime: now,
-				UpdatedTime: &now,
-			},
-		},
-		{
-			Authorizations: map[string][]string{"org": {"p1"}},
-			DrsObject: drs.DrsObject{
-				Id:          "obj-2",
-				Name:        common.Ptr("data/a.txt"),
-				Size:        20,
-				CreatedTime: now,
-				UpdatedTime: &now,
-			},
-		},
-		{
-			Authorizations: map[string][]string{"org": {"p1"}},
-			DrsObject: drs.DrsObject{
-				Id:          "obj-3",
-				Name:        common.Ptr("data/nested/b.txt"),
-				Size:        30,
-				CreatedTime: now,
-				UpdatedTime: &now,
-			},
-		},
-	} {
-		if err := db.CreateObject(ctx, &obj); err != nil {
-			t.Fatalf("CreateObject failed: %v", err)
-		}
-	}
-	if err := db.RecordFileDownload(ctx, "obj-1"); err != nil {
-		t.Fatalf("RecordFileDownload failed: %v", err)
-	}
-	if err := db.RecordFileDownload(ctx, "obj-2"); err != nil {
-		t.Fatalf("RecordFileDownload failed: %v", err)
-	}
-	if err := db.RecordFileDownload(ctx, "obj-2"); err != nil {
-		t.Fatalf("RecordFileDownload failed: %v", err)
-	}
-
-	summary, err := db.GetStoragePathSummary(ctx, "org", "p1", "data")
-	if err != nil {
-		t.Fatalf("GetStoragePathSummary failed: %v", err)
-	}
-	if summary.RecordCount != 3 || summary.FileCount != 2 || summary.TotalBytes != 60 || summary.DuplicatePathCount != 1 || summary.DownloadCount != 3 {
-		t.Fatalf("unexpected storage summary: %+v", summary)
-	}
-	if summary.LastDownloadTime == nil {
-		t.Fatalf("expected last download time in summary: %+v", summary)
-	}
-
-	items, err := db.ListStoragePathChildren(ctx, "org", "p1", "data", 10, 0, "bytes", "desc")
-	if err != nil {
-		t.Fatalf("ListStoragePathChildren failed: %v", err)
-	}
-	if len(items) != 2 {
-		t.Fatalf("expected 2 storage children, got %+v", items)
-	}
-	if items[0].Name != "nested" || items[0].Type != "directory" || items[0].TotalBytes != 30 || items[0].DownloadCount != 0 {
-		t.Fatalf("unexpected first child: %+v", items[0])
-	}
-	if items[1].Name != "a.txt" || items[1].DownloadCount != 3 || items[1].LastDownloadTime == nil {
-		t.Fatalf("unexpected second child: %+v", items[1])
-	}
-}
-
 func TestSqliteDB_ListBucketVisibilityRows(t *testing.T) {
 	ctx := context.Background()
 	db, err := NewSqliteDB(":memory:")
@@ -1945,56 +1863,5 @@ func TestSqliteDB_GetPendingLFSMeta(t *testing.T) {
 	_, err = db.GetPendingLFSMeta(ctx, "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
 	if !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound for missing pending metadata, got: %v", err)
-	}
-}
-
-func TestSqliteDB_ListObjectIDsPageByPath(t *testing.T) {
-	ctx := context.Background()
-	db, err := NewSqliteDB(":memory:")
-	if err != nil {
-		t.Fatalf("failed to create db: %v", err)
-	}
-
-	now := time.Now().UTC()
-	for _, obj := range []models.InternalObject{
-		{
-			DrsObject: drs.DrsObject{
-				Id:          "obj-a",
-				Name:        common.Ptr("nested/a.txt"),
-				CreatedTime: now,
-			},
-			Authorizations: map[string][]string{"org": {"proj"}},
-		},
-		{
-			DrsObject: drs.DrsObject{
-				Id:          "obj-b",
-				Name:        common.Ptr("nested/deep/b.txt"),
-				CreatedTime: now,
-			},
-			Authorizations: map[string][]string{"org": {"proj"}},
-		},
-		{
-			DrsObject: drs.DrsObject{
-				Id:          "obj-c",
-				Name:        common.Ptr("nested/z.txt"),
-				CreatedTime: now,
-			},
-			Authorizations: map[string][]string{"org": {"proj"}},
-		},
-	} {
-		if err := db.CreateObject(ctx, &obj); err != nil {
-			t.Fatalf("CreateObject failed: %v", err)
-		}
-	}
-
-	ids, directories, err := db.ListObjectIDsPageByPath(ctx, "org", "proj", "nested", "obj-a", 10, 0)
-	if err != nil {
-		t.Fatalf("ListObjectIDsPageByPath failed: %v", err)
-	}
-	if !slices.Equal(ids, []string{"obj-c"}) {
-		t.Fatalf("unexpected IDs: %v", ids)
-	}
-	if len(directories) != 1 || directories[0].Path != "nested/deep" {
-		t.Fatalf("unexpected directories: %+v", directories)
 	}
 }

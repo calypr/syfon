@@ -22,7 +22,6 @@ type ListRecordsOptions struct {
 	URL          string
 	Organization string
 	ProjectID    string
-	Path         string
 	Limit        int
 	Start        string
 	Page         int
@@ -79,42 +78,4 @@ type TransferMetricsOptions struct {
 	GroupBy              string
 	ReconciliationStatus string
 	AllowStale           bool
-}
-
-type StorageCleanupAuditOptions struct {
-	Organization  string
-	ProjectID     string
-	PathPrefix    string
-	ExpectedPaths []string
-	SelectedPaths []string
-	CheckStorage  *bool
-}
-
-type ProjectDiffAuditOptions struct {
-	Organization  string
-	ProjectID     string
-	PathPrefix    string
-	ExpectedPaths []string
-}
-
-type StorageCleanupApplyOptions struct {
-	Organization          string
-	ProjectID             string
-	PathPrefix            string
-	ExpectedPaths         []string
-	DeleteStaleDuplicates bool
-	DeleteRepoOrphans     bool
-	DryRun                bool
-	SelectedPaths         []string
-	SelectedObjectIDs     []string
-	SelectedFindingKinds  []string
-	CheckStorage          *bool
-}
-
-type ScopeRepairOptions struct {
-	Organization string
-	ProjectID    string
-	CheckStorage bool
-	Limit        int
-	PageSize     int
 }

@@ -13,7 +13,6 @@ import (
 	sycommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/models"
-	"github.com/calypr/syfon/internal/storagemetrics"
 )
 
 func (db *SqliteDB) flushObjectUsageEventsForIDsTx(ctx context.Context, tx *sql.Tx, ids []string) error {
@@ -266,145 +265,6 @@ func (db *SqliteDB) GetTransferAttributionBreakdown(ctx context.Context, filter 
 	return scanTransferAttributionBreakdown(rows)
 }
 
-func (db *SqliteDB) GetStoragePathSummary(ctx context.Context, organization, project, path string) (models.StoragePathSummary, error) {
-	if err := db.flushObjectUsageEvents(ctx); err != nil {
-		return models.StoragePathSummary{}, err
-	}
-	rows, err := db.listStorageMetricRowsByScope(ctx, organization, project)
-	if err != nil {
-		return models.StoragePathSummary{}, err
-	}
-	return storagemetrics.AggregateStoragePathSummary(strings.TrimSpace(organization), strings.TrimSpace(project), path, rows)
-}
-
-func (db *SqliteDB) ListStoragePathChildren(ctx context.Context, organization, project, path string, limit, offset int, sortBy, sortOrder string) ([]models.StoragePathChild, error) {
-	if err := db.flushObjectUsageEvents(ctx); err != nil {
-		return nil, err
-	}
-	rows, err := db.listStorageMetricRowsByScope(ctx, organization, project)
-	if err != nil {
-		return nil, err
-	}
-	return storagemetrics.AggregateStoragePathChildren(path, rows, limit, offset, sortBy, sortOrder)
-}
-
-func (db *SqliteDB) ListStorageCleanupRecords(ctx context.Context, organization, project, pathPrefix string) ([]models.StorageCleanupRecord, error) {
-	if err := db.flushObjectUsageEvents(ctx); err != nil {
-		return nil, err
-	}
-	resource, err := sycommon.ResourcePath(strings.TrimSpace(organization), strings.TrimSpace(project))
-	if err != nil {
-		return nil, err
-	}
-	where, args, err := sqliteStorageCleanupScopeArgs(resource, pathPrefix, "bi.normalized_path")
-	if err != nil {
-		return nil, err
-	}
-	rows, err := db.db.QueryContext(ctx, `
-		SELECT bi.object_id, bi.normalized_path, o.size, o.updated_time,
-			COALESCE(u.download_count, 0), u.last_download_time
-		FROM drs_object_browse_index bi
-		JOIN drs_object o ON o.id = bi.object_id
-		LEFT JOIN object_usage u ON u.object_id = bi.object_id
-		WHERE `+where+`
-		ORDER BY bi.normalized_path ASC, bi.object_id ASC
-	`, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	out := make([]models.StorageCleanupRecord, 0)
-	for rows.Next() {
-		var row models.StorageCleanupRecord
-		var lastDownload sql.NullTime
-		if err := rows.Scan(&row.ObjectID, &row.NormalizedPath, &row.Size, &row.UpdatedTime, &row.DownloadCount, &lastDownload); err != nil {
-			return nil, err
-		}
-		if lastDownload.Valid {
-			t := lastDownload.Time.UTC()
-			row.LastDownloadTime = &t
-		}
-		out = append(out, row)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (db *SqliteDB) ListDuplicateStorageCleanupRecords(ctx context.Context, organization, project, pathPrefix string) ([]models.StorageCleanupRecord, error) {
-	if err := db.flushObjectUsageEvents(ctx); err != nil {
-		return nil, err
-	}
-	resource, err := sycommon.ResourcePath(strings.TrimSpace(organization), strings.TrimSpace(project))
-	if err != nil {
-		return nil, err
-	}
-	cteWhere, cteArgs, err := sqliteStorageCleanupScopeArgs(resource, pathPrefix, "normalized_path")
-	if err != nil {
-		return nil, err
-	}
-	mainWhere, _, err := sqliteStorageCleanupScopeArgs(resource, pathPrefix, "bi.normalized_path")
-	if err != nil {
-		return nil, err
-	}
-	rows, err := db.db.QueryContext(ctx, `
-		WITH duplicate_paths AS (
-			SELECT normalized_path
-			FROM drs_object_browse_index
-			WHERE `+cteWhere+`
-			GROUP BY normalized_path
-			HAVING COUNT(*) > 1
-		)
-		SELECT bi.object_id, bi.normalized_path, o.size, o.updated_time,
-			COALESCE(u.download_count, 0), u.last_download_time
-		FROM drs_object_browse_index bi
-		JOIN duplicate_paths dp ON dp.normalized_path = bi.normalized_path
-		JOIN drs_object o ON o.id = bi.object_id
-		LEFT JOIN object_usage u ON u.object_id = bi.object_id
-		WHERE `+mainWhere+`
-		ORDER BY bi.normalized_path ASC, bi.object_id ASC
-	`, cteArgs...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	out := make([]models.StorageCleanupRecord, 0)
-	for rows.Next() {
-		var row models.StorageCleanupRecord
-		var lastDownload sql.NullTime
-		if err := rows.Scan(&row.ObjectID, &row.NormalizedPath, &row.Size, &row.UpdatedTime, &row.DownloadCount, &lastDownload); err != nil {
-			return nil, err
-		}
-		if lastDownload.Valid {
-			t := lastDownload.Time.UTC()
-			row.LastDownloadTime = &t
-		}
-		out = append(out, row)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func sqliteStorageCleanupScopeArgs(resource, pathPrefix string, normalizedPathColumn string) (string, []any, error) {
-	where := []string{"resource = ?"}
-	args := []any{resource}
-	normalizedPrefix, _, err := common.NormalizeBrowsePath(pathPrefix)
-	if err != nil {
-		return "", nil, err
-	}
-	if normalizedPrefix == "" {
-		return strings.Join(where, " AND "), args, nil
-	}
-	where = append(where, fmt.Sprintf("(%s = ? OR %s LIKE ?)", normalizedPathColumn, normalizedPathColumn))
-	args = append(args, normalizedPrefix, normalizedPrefix+"/%")
-	return strings.Join(where, " AND "), args, nil
-}
-
 func (db *SqliteDB) GetTransferAttributionSummaryByResources(ctx context.Context, filter models.TransferAttributionFilter, resources []string) (models.TransferAttributionSummary, error) {
 	where, args := transferAttributionWhereByResources(filter, resources)
 	var out models.TransferAttributionSummary
@@ -629,44 +489,6 @@ func scanFileUsageRows(rows *sql.Rows, capacity int) ([]models.FileUsage, error)
 		}
 		usage.LastAccessTime = latestTime(usage.LastUploadTime, usage.LastDownloadTime)
 		out = append(out, usage)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (db *SqliteDB) listStorageMetricRowsByScope(ctx context.Context, organization, project string) ([]models.DrsObjectRecord, error) {
-	resource, err := sycommon.ResourcePath(strings.TrimSpace(organization), strings.TrimSpace(project))
-	if err != nil {
-		return nil, err
-	}
-	rows, err := db.db.QueryContext(ctx, `
-		SELECT bi.object_id, o.size, o.updated_time,
-			COALESCE(u.download_count, 0), u.last_download_time,
-			bi.normalized_path, bi.normalized_path
-		FROM drs_object_browse_index bi
-		JOIN drs_object o ON o.id = bi.object_id
-		LEFT JOIN object_usage u ON u.object_id = bi.object_id
-		WHERE bi.resource = ?
-		ORDER BY bi.object_id
-	`, resource)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := make([]models.DrsObjectRecord, 0)
-	for rows.Next() {
-		var row models.DrsObjectRecord
-		var lastDownload sql.NullTime
-		if err := rows.Scan(&row.ID, &row.Size, &row.UpdatedTime, &row.DownloadCount, &lastDownload, &row.Name, &row.Path); err != nil {
-			return nil, err
-		}
-		if lastDownload.Valid {
-			t := lastDownload.Time.UTC()
-			row.LastDownloadTime = &t
-		}
-		out = append(out, row)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

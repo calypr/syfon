@@ -238,30 +238,6 @@ func (m *ObjectManager) ListObjectIDsPageByScope(ctx context.Context, organizati
 	return ids[offset:end], nil
 }
 
-func (m *ObjectManager) ListObjectIDsPageByPath(ctx context.Context, organization, project, path, requiredMethod, startAfter string, limit, offset int) ([]string, []models.BrowseDirectory, error) {
-	if limit <= 0 {
-		return []string{}, []models.BrowseDirectory{}, nil
-	}
-	if strings.TrimSpace(requiredMethod) == objectMethodRead {
-		if authz.IsGen3Mode(ctx) && authz.IsAuthzEnforced(ctx) && !authz.HasAuthHeader(ctx) {
-			return []string{}, []models.BrowseDirectory{}, nil
-		}
-		if authz.IsAuthzEnforced(ctx) && !m.canPageScopeRead(ctx, organization, project) {
-			return []string{}, []models.BrowseDirectory{}, nil
-		}
-	}
-
-	if pager, ok := m.db.(db.ObjectPathPageLister); ok {
-		return pager.ListObjectIDsPageByPath(ctx, organization, project, path, startAfter, limit, offset)
-	}
-
-	ids, err := m.ListObjectIDsPageByScope(ctx, organization, project, requiredMethod, startAfter, limit, offset)
-	if err != nil {
-		return nil, nil, err
-	}
-	return ids, []models.BrowseDirectory{}, nil
-}
-
 func (m *ObjectManager) ListObjectIDsPageByURL(ctx context.Context, objectURL, organization, project, requiredMethod, startAfter string, limit, offset int) ([]string, error) {
 	if limit <= 0 {
 		return []string{}, nil

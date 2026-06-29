@@ -2,6 +2,7 @@ package core
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -158,7 +159,7 @@ func CandidateToInternalObject(c drs.DrsObjectCandidate, now time.Time) (models.
 		obj.ControlledAccess = &controlled
 	}
 	if c.Name != nil {
-		obj.Name = c.Name
+		obj.Name = normalizedObjectNamePtr(c.Name)
 	}
 	if obj.Name == nil || strings.TrimSpace(*obj.Name) == "" {
 		obj.Name = &oid
@@ -202,7 +203,7 @@ func MergeInternalObjectUpdate(existing models.InternalObject, update models.Int
 	}
 
 	if update.DrsObject.Name != nil {
-		merged.DrsObject.Name = update.DrsObject.Name
+		merged.DrsObject.Name = normalizedObjectNamePtr(update.DrsObject.Name)
 	}
 	if update.DrsObject.Description != nil {
 		merged.DrsObject.Description = update.DrsObject.Description
@@ -250,7 +251,7 @@ func InternalRecordToInternalObject(r internalapi.InternalRecord, now time.Time)
 	updatedTime := parseInternalRecordTime(r.UpdatedTime, obj.CreatedTime)
 	obj.UpdatedTime = &updatedTime
 	if r.Name != nil && strings.TrimSpace(*r.Name) != "" {
-		obj.Name = common.Ptr(strings.TrimSpace(*r.Name))
+		obj.Name = normalizedObjectNamePtr(r.Name)
 	}
 	if v := r.Version; v != nil {
 		obj.Version = v
@@ -280,6 +281,22 @@ func InternalRecordToInternalObject(r internalapi.InternalRecord, now time.Time)
 		Properties:     map[string]interface{}{},
 	}
 	return EnforceCanonicalProjectScope(internalObj, common.StringVal(r.Organization), common.StringVal(r.Project))
+}
+
+func normalizedObjectNamePtr(name *string) *string {
+	if name == nil {
+		return nil
+	}
+	trimmed := strings.TrimSpace(*name)
+	if trimmed == "" {
+		return nil
+	}
+	trimmed = strings.ReplaceAll(trimmed, "\\", "/")
+	base := filepath.Base(trimmed)
+	if base == "." || base == "/" || base == "" {
+		base = trimmed
+	}
+	return common.Ptr(base)
 }
 
 func parseInternalRecordTime(raw *string, fallback time.Time) time.Time {

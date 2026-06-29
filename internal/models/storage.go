@@ -54,61 +54,12 @@ type FileUsageSummary struct {
 	InactiveFileCount int64
 }
 
-type StoragePathSummary struct {
-	Organization       string
-	Project            string
-	Path               string
-	FileCount          int64
-	RecordCount        int64
-	TotalBytes         int64
-	DownloadCount      int64
-	DirectChildCount   int64
-	DuplicatePathCount int64
-	LatestUpdateTime   *time.Time
-	LastDownloadTime   *time.Time
-}
-
-type StoragePathChild struct {
-	Name             string
-	Path             string
-	Type             string
-	FileCount        int64
-	RecordCount      int64
-	TotalBytes       int64
-	LatestUpdateTime *time.Time
-	DownloadCount    int64
-	LastDownloadTime *time.Time
-}
-
-type StoragePathChildrenResponse struct {
-	Organization string
-	Project      string
-	Path         string
-	Items        []StoragePathChild
-}
-
-// StorageCleanupRecord is the browse-index-backed projection used by storage
-// cleanup audit/apply flows.
-type StorageCleanupRecord struct {
-	ObjectID         string
-	NormalizedPath   string
-	Size             int64
-	UpdatedTime      time.Time
-	DownloadCount    int64
-	LastDownloadTime *time.Time
-}
-
 // BucketVisibilityRow is the minimum storage projection needed to build bucket
 // visibility responses without hydrating full objects.
 type BucketVisibilityRow struct {
 	AccessURL  string
 	AccessType string
 	Resource   string
-}
-
-type BrowseDirectory struct {
-	Name string
-	Path string
 }
 
 const (
@@ -265,7 +216,6 @@ type DrsObjectRecord struct {
 	DownloadCount    int64
 	LastDownloadTime *time.Time
 	Name             string
-	Path             string
 	Version          string
 	Description      string
 }

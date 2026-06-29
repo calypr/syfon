@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestInternalObjectUnmarshalLegacyAndMarshalCompatibility(t *testing.T) {
+func TestInternalObjectRejectsLegacyPathAliases(t *testing.T) {
 	raw := []byte(`{
 		"did":"did-1",
 		"file_name":"legacy-name.txt",
@@ -14,41 +14,8 @@ func TestInternalObjectUnmarshalLegacyAndMarshalCompatibility(t *testing.T) {
 		"unknown_field":"keep-me"
 	}`)
 	var obj InternalObject
-	if err := json.Unmarshal(raw, &obj); err != nil {
-		t.Fatalf("unmarshal failed: %v", err)
-	}
-	if obj.Id != "did-1" {
-		t.Fatalf("expected id from did, got %q", obj.Id)
-	}
-	if obj.Name != nil {
-		t.Fatalf("expected name to remain unset when only file_name is provided, got %+v", obj.Name)
-	}
-	if len(obj.Checksums) != 1 || obj.Checksums[0].Type != "sha256" || obj.Checksums[0].Checksum != "abc" {
-		t.Fatalf("unexpected checksums: %+v", obj.Checksums)
-	}
-
-	encoded, err := json.Marshal(obj)
-	if err != nil {
-		t.Fatalf("marshal failed: %v", err)
-	}
-	var out map[string]interface{}
-	if err := json.Unmarshal(encoded, &out); err != nil {
-		t.Fatalf("decode marshaled payload: %v", err)
-	}
-	if out["did"] != "did-1" {
-		t.Fatalf("expected did in output, got %v", out["did"])
-	}
-	if _, ok := out["name"]; ok {
-		t.Fatalf("did not expect name in output when only file_name was provided")
-	}
-	if _, ok := out["file_name"]; ok {
-		t.Fatalf("did not expect file_name in output")
-	}
-	if _, ok := out["unknown_field"]; !ok {
-		t.Fatalf("expected unknown field preservation in output")
-	}
-	if _, retired := out["urls"]; retired {
-		t.Fatalf("expected retired auth fields removed from output")
+	if err := json.Unmarshal(raw, &obj); err == nil {
+		t.Fatal("expected file_name payload to be rejected")
 	}
 }
 

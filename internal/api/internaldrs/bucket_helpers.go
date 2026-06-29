@@ -46,16 +46,6 @@ func serviceResourceAllowed(ctx context.Context, resource, service string, metho
 	return authz.HasAnyServiceMethodAccess(ctx, []string{resource}, service, methods...)
 }
 
-func allowedBucketsForScopes(ctx context.Context, scopes []models.BucketScope, methods ...string) map[string]bool {
-	allowed := make(map[string]bool)
-	for _, scope := range scopes {
-		if bucketScopeAllowed(ctx, scope, methods...) {
-			allowed[scope.Bucket] = true
-		}
-	}
-	return allowed
-}
-
 func bucketsAllowedByNames(ctx context.Context, scopes []models.BucketScope, bucket string, methods ...string) bool {
 	for _, scope := range scopes {
 		if scope.Bucket != bucket {

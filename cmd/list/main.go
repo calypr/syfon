@@ -43,7 +43,7 @@ var Cmd = &cobra.Command{
 			Start:        strings.TrimSpace(listStart),
 			Organization: strings.TrimSpace(listOrganization),
 			ProjectID:    strings.TrimSpace(listProject),
-		}, listRecursive)
+		}, listRecursive, strings.TrimSpace(listPath))
 		if err != nil {
 			return err
 		}
@@ -91,8 +91,8 @@ func init() {
 	Cmd.Flags().StringVar(&listProject, "project", "", "Optional project filter")
 }
 
-func listRecords(ctx context.Context, lister indexLister, opts syfonclient.ListRecordsOptions, recursive bool) ([]internalapi.InternalRecord, error) {
-	if strings.TrimSpace(opts.Path) != "" {
+func listRecords(ctx context.Context, lister indexLister, opts syfonclient.ListRecordsOptions, recursive bool, listPath string) ([]internalapi.InternalRecord, error) {
+	if strings.TrimSpace(listPath) != "" {
 		return nil, fmt.Errorf("path-based listing is no longer supported")
 	}
 	if strings.TrimSpace(opts.Organization) == "" || strings.TrimSpace(opts.ProjectID) == "" {

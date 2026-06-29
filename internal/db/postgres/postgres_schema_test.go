@@ -14,12 +14,12 @@ func TestSchemaEnsurers(t *testing.T) {
 		defer rawDB.Close()
 
 		mock.ExpectExec("CREATE TABLE IF NOT EXISTS drs_object").WillReturnResult(sqlmock.NewResult(0, 0))
-		mock.ExpectExec(regexp.QuoteMeta("ALTER TABLE drs_object ADD COLUMN IF NOT EXISTS file_name TEXT")).WillReturnResult(sqlmock.NewResult(0, 0))
+		mock.ExpectExec(regexp.QuoteMeta("ALTER TABLE drs_object DROP COLUMN IF EXISTS file_name")).WillReturnResult(sqlmock.NewResult(0, 0))
 		mock.ExpectExec("CREATE TABLE IF NOT EXISTS drs_object_access_method").WillReturnResult(sqlmock.NewResult(0, 0))
 		mock.ExpectExec("CREATE TABLE IF NOT EXISTS drs_object_controlled_access").WillReturnResult(sqlmock.NewResult(0, 0))
 		mock.ExpectExec("CREATE TABLE IF NOT EXISTS drs_object_checksum").WillReturnResult(sqlmock.NewResult(0, 0))
 		mock.ExpectExec("CREATE TABLE IF NOT EXISTS drs_object_alias").WillReturnResult(sqlmock.NewResult(0, 0))
-		mock.ExpectExec("CREATE TABLE IF NOT EXISTS drs_object_browse_index").WillReturnResult(sqlmock.NewResult(0, 0))
+		mock.ExpectExec("DROP TABLE IF EXISTS drs_object_browse_index").WillReturnResult(sqlmock.NewResult(0, 0))
 		mock.ExpectExec(regexp.QuoteMeta("CREATE INDEX IF NOT EXISTS drs_object_access_method_object_id_idx ON drs_object_access_method(object_id)")).
 			WillReturnResult(sqlmock.NewResult(0, 0))
 		mock.ExpectExec(regexp.QuoteMeta("CREATE INDEX IF NOT EXISTS drs_object_checksum_object_id_idx ON drs_object_checksum(object_id)")).
@@ -37,12 +37,6 @@ func TestSchemaEnsurers(t *testing.T) {
 		mock.ExpectExec(regexp.QuoteMeta("CREATE INDEX IF NOT EXISTS drs_object_controlled_access_object_id_resource_idx ON drs_object_controlled_access(object_id, resource)")).
 			WillReturnResult(sqlmock.NewResult(0, 0))
 		mock.ExpectExec(regexp.QuoteMeta("CREATE INDEX IF NOT EXISTS drs_object_alias_object_id_idx ON drs_object_alias(object_id)")).
-			WillReturnResult(sqlmock.NewResult(0, 0))
-		mock.ExpectExec(regexp.QuoteMeta("CREATE INDEX IF NOT EXISTS drs_object_browse_index_resource_parent_object_id_idx ON drs_object_browse_index(resource, parent_path, object_id)")).
-			WillReturnResult(sqlmock.NewResult(0, 0))
-		mock.ExpectExec(regexp.QuoteMeta("CREATE INDEX IF NOT EXISTS drs_object_browse_index_resource_parent_entry_name_idx ON drs_object_browse_index(resource, parent_path, entry_name)")).
-			WillReturnResult(sqlmock.NewResult(0, 0))
-		mock.ExpectExec(regexp.QuoteMeta("CREATE INDEX IF NOT EXISTS drs_object_browse_index_resource_normalized_path_idx ON drs_object_browse_index(resource, normalized_path)")).
 			WillReturnResult(sqlmock.NewResult(0, 0))
 		mock.ExpectQuery("information_schema\\.columns").
 			WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))

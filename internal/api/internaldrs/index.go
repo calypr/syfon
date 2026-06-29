@@ -2,14 +2,11 @@ package internaldrs
 
 import (
 	"fmt"
-	"net/http"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/calypr/syfon/apigen/server/internalapi"
-	sycommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/api/apiutil"
 	apimiddleware "github.com/calypr/syfon/internal/api/middleware"
 	"github.com/calypr/syfon/internal/api/routeutil"
@@ -41,9 +38,6 @@ func RegisterInternalRoutes(router fiber.Router, om *core.ObjectManager) {
 	router.Post(common.RouteInternalBulkCreate, handleInternalBulkCreateFiber(om))
 	router.Post(common.RouteInternalBulkDocs, handleInternalBulkDocumentsFiber(om))
 	router.Post(common.RouteInternalBulkDeleteHashes, handleInternalBulkDeleteFiber(om))
-	router.Post(common.RouteInternalRepairProjectDiff, handleInternalProjectDiffAuditFiber(om))
-	router.Post(common.RouteInternalRepairCleanupAudit, handleInternalStorageCleanupAuditFiber(om))
-	router.Post(common.RouteInternalRepairCleanupApply, handleInternalStorageCleanupApplyFiber(om))
 	router.Post(common.RouteInternalRepairScopeAudit, handleInternalScopeRepairAuditFiber(om))
 	router.Post(common.RouteInternalRepairScopeApply, handleInternalScopeRepairApplyFiber(om))
 
@@ -373,38 +367,6 @@ func parseScopeQueryParts(organization, program, project string) (string, string
 	return "", "", false, nil
 }
 
-func parseScopeQuery(r *http.Request) (string, string, bool, error) {
-	return parseScopeQueryParts(
-		r.URL.Query().Get("organization"),
-		r.URL.Query().Get("program"),
-		r.URL.Query().Get("project"),
-	)
-}
-
-func paginateInternalListIDsFiber(c fiber.Ctx, ids []string) ([]string, error) {
-	limit, start, offset, err := parseInternalListPaginationFiber(c)
-	if err != nil {
-		return nil, err
-	}
-	if limit == 0 || len(ids) == 0 {
-		return []string{}, nil
-	}
-	if start != "" {
-		offset = sort.SearchStrings(ids, start)
-		for offset < len(ids) && ids[offset] <= start {
-			offset++
-		}
-	}
-	if offset >= len(ids) {
-		return []string{}, nil
-	}
-	end := offset + limit
-	if end > len(ids) {
-		end = len(ids)
-	}
-	return ids[offset:end], nil
-}
-
 func parseInternalListPaginationFiber(c fiber.Ctx) (int, string, int, error) {
 	limit := defaultInternalListLimit
 	rawLimit := strings.TrimSpace(c.Query("limit"))
@@ -487,9 +449,4 @@ func normalizeNonEmptyBulkHashes(hashes []string) []string {
 		normalized = append(normalized, val)
 	}
 	return normalized
-}
-
-func objectAuthzMatchesScope(obj models.InternalObject, org, project string) bool {
-	authzMap := sycommon.ControlledAccessToAuthzMap(core.ObjectAccessResources(&obj))
-	return sycommon.AuthzMapMatchesScope(authzMap, org, project)
 }

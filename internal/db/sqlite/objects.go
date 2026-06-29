@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"path"
 	"sort"
 	"strings"
 	"time"
@@ -15,37 +14,6 @@ import (
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/models"
 )
-
-func sqliteStoredPath(obj *models.InternalObject) string {
-	if obj != nil && obj.Properties != nil {
-		if raw, ok := obj.Properties["path"].(string); ok && strings.TrimSpace(raw) != "" {
-			return strings.TrimSpace(raw)
-		}
-		if raw, ok := obj.Properties["file_name"].(string); ok && strings.TrimSpace(raw) != "" {
-			return strings.TrimSpace(raw)
-		}
-	}
-	if obj == nil {
-		return ""
-	}
-	return common.StringVal(obj.Name)
-}
-
-func sqliteLoadedNames(name, fileName sql.NullString) (string, string) {
-	loadedName := strings.TrimSpace(name.String)
-	loadedPath := strings.TrimSpace(fileName.String)
-	if loadedPath == "" {
-		loadedPath = loadedName
-		loadedName = ""
-	}
-	if loadedName == "" && loadedPath != "" {
-		loadedName = path.Base(strings.Trim(loadedPath, "/"))
-		if loadedName == "." || loadedName == "/" || loadedName == "" {
-			loadedName = loadedPath
-		}
-	}
-	return loadedName, loadedPath
-}
 
 func (db *SqliteDB) DeleteObject(ctx context.Context, id string) error {
 	tx, err := db.db.BeginTx(ctx, nil)
@@ -143,11 +111,11 @@ func (db *SqliteDB) GetObject(ctx context.Context, id string) (*models.InternalO
 retryLookup:
 	// 1. Fetch main record
 	var r models.DrsObjectRecord
-	var name, fileName, version, description sql.NullString
+	var name, version, description sql.NullString
 	err := db.db.QueryRowContext(ctx, `
-		SELECT id, size, created_time, updated_time, name, file_name, version, description
+		SELECT id, size, created_time, updated_time, name, version, description
 		FROM drs_object WHERE id = ?`, lookupID).Scan(
-		&r.ID, &r.Size, &r.CreatedTime, &r.UpdatedTime, &name, &fileName, &version, &description,
+		&r.ID, &r.Size, &r.CreatedTime, &r.UpdatedTime, &name, &version, &description,
 	)
 	if err == sql.ErrNoRows {
 		if !resolvedAlias {
@@ -166,7 +134,7 @@ retryLookup:
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch record: %w", err)
 	}
-	r.Name, r.Path = sqliteLoadedNames(name, fileName)
+	r.Name = strings.TrimSpace(name.String)
 	r.Version = version.String
 	r.Description = description.String
 	objectID := r.ID
@@ -186,9 +154,6 @@ retryLookup:
 			SelfUri:     "drs://" + objectID,
 		},
 		Properties: map[string]interface{}{},
-	}
-	if strings.TrimSpace(r.Path) != "" {
-		obj.Properties["path"] = r.Path
 	}
 
 	// 2. Fetch storage access methods.
@@ -263,9 +228,9 @@ func (db *SqliteDB) CreateObject(ctx context.Context, obj *models.InternalObject
 
 	// Insert main record
 	_, err = tx.ExecContext(ctx, `
-		INSERT INTO drs_object (id, size, created_time, updated_time, name, file_name, version, description)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		obj.Id, obj.Size, obj.CreatedTime, common.TimeVal(obj.UpdatedTime), common.StringVal(obj.Name), sqliteStoredPath(obj), common.StringVal(obj.Version), common.StringVal(obj.Description),
+		INSERT INTO drs_object (id, size, created_time, updated_time, name, version, description)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		obj.Id, obj.Size, obj.CreatedTime, common.TimeVal(obj.UpdatedTime), common.StringVal(obj.Name), common.StringVal(obj.Version), common.StringVal(obj.Description),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to insert drs_object: %w", err)
@@ -273,9 +238,6 @@ func (db *SqliteDB) CreateObject(ctx context.Context, obj *models.InternalObject
 
 	if err := insertControlledAccessTx(ctx, tx, obj.Id, objectAccessResources(obj)); err != nil {
 		return err
-	}
-	if err := sqliteRebuildBrowseRowsForObjectTx(ctx, tx, obj.Id, sqliteStoredPath(obj), objectAccessResources(obj)); err != nil {
-		return fmt.Errorf("failed to update browse index: %w", err)
 	}
 
 	// Insert storage access methods.
@@ -330,17 +292,15 @@ func (db *SqliteDB) RegisterObjects(ctx context.Context, objects []models.Intern
 	accessArgs := make([]interface{}, 0)
 	controlledArgs := make([]interface{}, 0)
 	checksumArgs := make([]interface{}, 0)
-	browseRows := make([]browseIndexRow, 0)
 
 	for _, obj := range objects {
 		ids = append(ids, obj.Id)
-		mainArgs = append(mainArgs, obj.Id, obj.Size, obj.CreatedTime, common.TimeVal(obj.UpdatedTime), common.StringVal(obj.Name), sqliteStoredPath(&obj), common.StringVal(obj.Version), common.StringVal(obj.Description))
+		mainArgs = append(mainArgs, obj.Id, obj.Size, obj.CreatedTime, common.TimeVal(obj.UpdatedTime), common.StringVal(obj.Name), common.StringVal(obj.Version), common.StringVal(obj.Description))
 
 		seenAccess := make(map[string]struct{})
 		for _, resource := range objectAccessResources(&obj) {
 			controlledArgs = append(controlledArgs, obj.Id, resource)
 		}
-		browseRows = append(browseRows, sqliteBrowseRowsForObject(obj.Id, sqliteStoredPath(&obj), objectAccessResources(&obj))...)
 		if obj.AccessMethods != nil {
 			for _, am := range *obj.AccessMethods {
 				if am.AccessUrl == nil || am.AccessUrl.Url == "" {
@@ -366,16 +326,15 @@ func (db *SqliteDB) RegisterObjects(ctx context.Context, objects []models.Intern
 		}
 	}
 
-	mainPrefix := `INSERT INTO drs_object (id, size, created_time, updated_time, name, file_name, version, description) VALUES `
+	mainPrefix := `INSERT INTO drs_object (id, size, created_time, updated_time, name, version, description) VALUES `
 	mainSuffix := ` ON CONFLICT(id) DO UPDATE SET
 		size=excluded.size,
 		created_time=excluded.created_time,
 		updated_time=excluded.updated_time,
 		name=excluded.name,
-		file_name=excluded.file_name,
 		version=excluded.version,
 		description=excluded.description`
-	if err := execSQLiteBulkInsert(tx, mainPrefix, "(?, ?, ?, ?, ?, ?, ?, ?)", 8, mainArgs, mainSuffix); err != nil {
+	if err := execSQLiteBulkInsert(tx, mainPrefix, "(?, ?, ?, ?, ?, ?, ?)", 7, mainArgs, mainSuffix); err != nil {
 		return fmt.Errorf("failed bulk upsert drs_object: %w", err)
 	}
 
@@ -387,9 +346,6 @@ func (db *SqliteDB) RegisterObjects(ctx context.Context, objects []models.Intern
 	}
 	if err := execSQLiteDeleteByIDs(tx, "drs_object_checksum", ids); err != nil {
 		return fmt.Errorf("failed bulk clear checksums: %w", err)
-	}
-	if err := sqliteDeleteBrowseRowsByIDsTx(tx, ids); err != nil {
-		return fmt.Errorf("failed bulk clear browse index: %w", err)
 	}
 
 	if len(accessArgs) > 0 {
@@ -427,9 +383,6 @@ func (db *SqliteDB) RegisterObjects(ctx context.Context, objects []models.Intern
 		); err != nil {
 			return fmt.Errorf("failed bulk insert checksums: %w", err)
 		}
-	}
-	if err := sqliteInsertBrowseRowsTx(tx, browseRows); err != nil {
-		return fmt.Errorf("failed bulk insert browse index: %w", err)
 	}
 	if err := db.flushObjectUsageEventsForIDsTx(ctx, tx, ids); err != nil {
 		return fmt.Errorf("failed to apply object usage events: %w", err)
@@ -1166,7 +1119,6 @@ func (db *SqliteDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []stri
 			o.created_time,
 			o.updated_time,
 			o.name,
-			o.file_name,
 			o.version,
 			o.description
 		FROM drs_object o
@@ -1182,34 +1134,29 @@ func (db *SqliteDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []stri
 
 	for rows.Next() {
 		var (
-			id                             string
-			name, fileName                 sql.NullString
-			version, description           sql.NullString
-			size                           int64
-			createdTime, updatedTime       time.Time
+			id                       string
+			name                     sql.NullString
+			version, description     sql.NullString
+			size                     int64
+			createdTime, updatedTime time.Time
 		)
 		if err := rows.Scan(
-			&id, &size, &createdTime, &updatedTime, &name, &fileName, &version, &description,
+			&id, &size, &createdTime, &updatedTime, &name, &version, &description,
 		); err != nil {
 			return nil, err
 		}
-
-		loadedName, loadedPath := sqliteLoadedNames(name, fileName)
 		objectsByID[id] = &models.InternalObject{
 			DrsObject: drs.DrsObject{
 				Id:          id,
 				Size:        size,
 				CreatedTime: createdTime,
 				UpdatedTime: common.Ptr(updatedTime),
-				Name:        common.Ptr(loadedName),
+				Name:        common.Ptr(strings.TrimSpace(name.String)),
 				Version:     common.Ptr(version.String),
 				Description: common.Ptr(description.String),
 				SelfUri:     "drs://" + id,
 			},
 			Properties: map[string]interface{}{},
-		}
-		if strings.TrimSpace(loadedPath) != "" {
-			objectsByID[id].Properties["path"] = loadedPath
 		}
 	}
 

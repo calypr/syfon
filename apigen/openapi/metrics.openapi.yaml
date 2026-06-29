@@ -226,26 +226,6 @@ components:
       schema:
         type: string
       description: Project scope filter. Requires organization when set.
-    StorageOrganization:
-      in: query
-      name: organization
-      required: true
-      schema:
-        type: string
-      description: Organization scope for the storage subtree query.
-    StorageProject:
-      in: query
-      name: project
-      required: true
-      schema:
-        type: string
-      description: Project scope for the storage subtree query.
-    Path:
-      in: query
-      name: path
-      schema:
-        type: string
-      description: Optional storage subtree path. Omit for the project root.
     Direction:
       in: query
       name: direction
@@ -352,84 +332,6 @@ components:
           type: integer
         offset:
           type: integer
-    StoragePathSummary:
-      type: object
-      properties:
-        organization:
-          type: string
-        project:
-          type: string
-        path:
-          type: string
-        file_count:
-          type: integer
-          format: int64
-        record_count:
-          type: integer
-          format: int64
-        total_bytes:
-          type: integer
-          format: int64
-        download_count:
-          type: integer
-          format: int64
-        direct_child_count:
-          type: integer
-          format: int64
-        duplicate_path_count:
-          type: integer
-          format: int64
-        latest_update_time:
-          type: string
-          format: date-time
-          nullable: true
-        last_download_time:
-          type: string
-          format: date-time
-          nullable: true
-    StoragePathChild:
-      type: object
-      properties:
-        name:
-          type: string
-        path:
-          type: string
-        type:
-          type: string
-          enum: [file, directory]
-        file_count:
-          type: integer
-          format: int64
-        record_count:
-          type: integer
-          format: int64
-        total_bytes:
-          type: integer
-          format: int64
-        download_count:
-          type: integer
-          format: int64
-        latest_update_time:
-          type: string
-          format: date-time
-          nullable: true
-        last_download_time:
-          type: string
-          format: date-time
-          nullable: true
-    StoragePathChildrenResponse:
-      type: object
-      properties:
-        organization:
-          type: string
-        project:
-          type: string
-        path:
-          type: string
-        items:
-          type: array
-          items:
-            $ref: '#/components/schemas/StoragePathChild'
     ProviderTransferDirection:
       type: string
       enum:

@@ -22,14 +22,3 @@ version:      %s
 func String() string {
 	return fmt.Sprintf("Syfon — a Modern DRS Server ⚡️\n"+tpl, GitCommit, GitBranch, GitUpstream, BuildDate, Version)
 }
-
-// LogFields logs build and version information to the given logger.
-func LogFields() []interface{} {
-	return []interface{}{
-		"GitCommit", GitCommit,
-		"GitBranch", GitBranch,
-		"GitUpstream", GitUpstream,
-		"BuildDate", BuildDate,
-		"Version", Version,
-	}
-}

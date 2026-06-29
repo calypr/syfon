@@ -42,10 +42,6 @@ func TestBucketPolicyHelpers(t *testing.T) {
 			resource: {"read": true},
 		})
 
-		allowed := allowedBucketsForScopes(ctx, []models.BucketScope{scope}, "read")
-		if !allowed["bucket-a"] {
-			t.Fatal("expected bucket to be allowed")
-		}
 		if !bucketsAllowedByNames(ctx, []models.BucketScope{scope}, "bucket-a", "read") {
 			t.Fatal("expected bucket name match to be allowed")
 		}

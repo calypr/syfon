@@ -4,13 +4,12 @@ CREATE TABLE IF NOT EXISTS drs_object (
   created_time TIMESTAMPTZ,
   updated_time TIMESTAMPTZ,
   name TEXT,
-  file_name TEXT,
   version TEXT,
   description TEXT
 );
 
 ALTER TABLE drs_object
-  ADD COLUMN IF NOT EXISTS file_name TEXT;
+  DROP COLUMN IF EXISTS file_name;
 
 CREATE TABLE IF NOT EXISTS drs_object_access_method (
   object_id TEXT NOT NULL,
@@ -38,15 +37,7 @@ CREATE TABLE IF NOT EXISTS drs_object_alias (
   FOREIGN KEY(object_id) REFERENCES drs_object(id) ON DELETE CASCADE
 );
 
-CREATE TABLE IF NOT EXISTS drs_object_browse_index (
-  object_id TEXT NOT NULL,
-  resource TEXT NOT NULL,
-  normalized_path TEXT NOT NULL,
-  parent_path TEXT NOT NULL,
-  entry_name TEXT NOT NULL,
-  PRIMARY KEY (resource, object_id),
-  FOREIGN KEY(object_id) REFERENCES drs_object(id) ON DELETE CASCADE
-);
+DROP TABLE IF EXISTS drs_object_browse_index;
 
 CREATE INDEX IF NOT EXISTS drs_object_access_method_object_id_idx
   ON drs_object_access_method(object_id);
@@ -74,12 +65,3 @@ CREATE INDEX IF NOT EXISTS drs_object_controlled_access_object_id_resource_idx
 
 CREATE INDEX IF NOT EXISTS drs_object_alias_object_id_idx
   ON drs_object_alias(object_id);
-
-CREATE INDEX IF NOT EXISTS drs_object_browse_index_resource_parent_object_id_idx
-  ON drs_object_browse_index(resource, parent_path, object_id);
-
-CREATE INDEX IF NOT EXISTS drs_object_browse_index_resource_parent_entry_name_idx
-  ON drs_object_browse_index(resource, parent_path, entry_name);
-
-CREATE INDEX IF NOT EXISTS drs_object_browse_index_resource_normalized_path_idx
-  ON drs_object_browse_index(resource, normalized_path);

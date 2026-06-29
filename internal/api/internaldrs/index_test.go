@@ -30,30 +30,6 @@ func indexTestAuthContext(base context.Context, mode string, authHeader bool, pr
 	return internalauth.WithSession(base, session)
 }
 
-func TestParseScopeQuery(t *testing.T) {
-	t.Run("organization and project", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/?organization=prog&project=study", nil)
-		org, project, ok, err := parseScopeQuery(req)
-		if err != nil {
-			t.Fatalf("parseScopeQuery returned error: %v", err)
-		}
-		if !ok || org != "prog" || project != "study" {
-			t.Fatalf("unexpected scope parse result: ok=%v org=%q project=%q", ok, org, project)
-		}
-	})
-
-	t.Run("project without organization fails", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/?project=study", nil)
-		_, _, ok, err := parseScopeQuery(req)
-		if err == nil {
-			t.Fatal("expected validation error")
-		}
-		if ok {
-			t.Fatal("expected hasScope=false on validation error")
-		}
-	})
-}
-
 func TestHandleInternalList_ScopeFilteringByReadPrivilege(t *testing.T) {
 	now := time.Now().UTC()
 	mockDB := &testutils.MockDatabase{
@@ -264,31 +240,6 @@ func TestHandleInternalList_PagePaginatesIDs(t *testing.T) {
 	}
 	if (*payload.Records)[0].Did != "obj-2" {
 		t.Fatalf("expected obj-2 on page 1 with zero-based offset, got %+v", (*payload.Records)[0])
-	}
-}
-
-func TestPaginateInternalListIDsFiberDefaultLimit(t *testing.T) {
-	ids := make([]string, defaultInternalListLimit+5)
-	for i := range ids {
-		ids[i] = "obj"
-	}
-	app := fiber.New()
-	app.Get("/", func(c fiber.Ctx) error {
-		paged, err := paginateInternalListIDsFiber(c, ids)
-		if err != nil {
-			return err
-		}
-		if len(paged) != defaultInternalListLimit {
-			t.Fatalf("expected default limit %d, got %d", defaultInternalListLimit, len(paged))
-		}
-		return c.SendStatus(fiber.StatusOK)
-	})
-	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/", nil))
-	if err != nil {
-		t.Fatalf("test request failed: %v", err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
 }
 

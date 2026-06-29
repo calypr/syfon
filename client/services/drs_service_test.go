@@ -42,7 +42,7 @@ func TestDRSServiceResolveAndList(t *testing.T) {
 		case r.Method == http.MethodGet && r.URL.Path == "/objects/broken":
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusInternalServerError)
-			_, _ = io.WriteString(w, `{"error":{"message":"column \"file_name\" does not exist"}}`)
+			_, _ = io.WriteString(w, `{"error":{"message":"schema is stale"}}`)
 		case r.Method == http.MethodGet && r.URL.Path == "/objects/obj-1/access/acc-1":
 			writeJSON(t, w, http.StatusOK, drsapi.AccessURL{Url: "https://signed.example/access"})
 		case r.Method == http.MethodGet && r.URL.Path == "/objects/checksum/abc":
@@ -121,7 +121,7 @@ func TestDRSServiceResolveAndList(t *testing.T) {
 	if _, err := service.GetObject(ctx, "missing"); !errors.Is(err, ErrObjectNotFound) {
 		t.Fatalf("expected ErrObjectNotFound, got %v", err)
 	}
-	if _, err := service.GetObject(ctx, "broken"); err == nil || !strings.Contains(err.Error(), `column "file_name" does not exist`) {
+	if _, err := service.GetObject(ctx, "broken"); err == nil || !strings.Contains(err.Error(), "schema is stale") {
 		t.Fatalf("expected server error detail for broken object lookup, got %v", err)
 	}
 

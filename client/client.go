@@ -47,7 +47,6 @@ type Client struct {
 	drs     *syfonclient.DRSService
 	buckets *syfonclient.BucketsService
 	metrics *syfonclient.MetricsService
-	repair  *syfonclient.RepairService
 	lfs     *syfonclient.LFSService
 
 	// Generated schema-specific clients
@@ -209,7 +208,6 @@ func (c *Client) initServices() error {
 	c.data = syfonclient.NewDataService(c.internalGen, c.requestor, l, c.drs)
 	c.buckets = syfonclient.NewBucketsService(c.bucketGen)
 	c.metrics = syfonclient.NewMetricsService(c.metricsGen)
-	c.repair = syfonclient.NewRepairService(c.requestor)
 	return nil
 }
 
@@ -228,7 +226,6 @@ func (c *Client) Index() *syfonclient.IndexService     { return c.index }
 func (c *Client) DRS() *syfonclient.DRSService         { return c.drs }
 func (c *Client) Buckets() *syfonclient.BucketsService { return c.buckets }
 func (c *Client) Metrics() *syfonclient.MetricsService { return c.metrics }
-func (c *Client) Repair() *syfonclient.RepairService   { return c.repair }
 func (c *Client) LFS() *syfonclient.LFSService         { return c.lfs }
 
 // Schema-specific generated clients

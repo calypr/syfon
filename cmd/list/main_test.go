@@ -40,7 +40,7 @@ func TestListRecordsNonRecursive(t *testing.T) {
 		Organization: "Ellrott_Lab",
 		ProjectID:    "hla2vec",
 		Limit:        10,
-	}, false)
+	}, false, "")
 	if err != nil {
 		t.Fatalf("listRecords returned error: %v", err)
 	}
@@ -60,17 +60,14 @@ func TestListRecordsRejectsRecursive(t *testing.T) {
 		Organization: "Ellrott_Lab",
 		ProjectID:    "hla2vec",
 		Limit:        10,
-	}, true)
+	}, true, "")
 	if err == nil || !strings.Contains(err.Error(), "path-based recursive listing is no longer supported") {
 		t.Fatalf("expected recursive unsupported error, got %v", err)
 	}
 }
 
 func TestListRecordsRejectsPathFilter(t *testing.T) {
-	_, err := listRecords(context.Background(), &fakeIndexLister{}, syfonclient.ListRecordsOptions{
-		Path:  "nested",
-		Limit: 10,
-	}, false)
+	_, err := listRecords(context.Background(), &fakeIndexLister{}, syfonclient.ListRecordsOptions{Limit: 10}, false, "nested")
 	if err == nil || !strings.Contains(err.Error(), "path-based listing is no longer supported") {
 		t.Fatalf("expected path unsupported error, got %v", err)
 	}

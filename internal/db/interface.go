@@ -41,10 +41,6 @@ type ObjectIDPageLister interface {
 	ListObjectIDsPageByResources(ctx context.Context, resources []string, includeUnscoped bool, startAfter string, limit, offset int) ([]string, error)
 }
 
-type ObjectPathPageLister interface {
-	ListObjectIDsPageByPath(ctx context.Context, organization, project, path, startAfter string, limit, offset int) ([]string, []models.BrowseDirectory, error)
-}
-
 type ObjectChecksumPageLister interface {
 	ListObjectIDsPageByChecksum(ctx context.Context, checksum, checksumType, organization, project, startAfter string, limit, offset int, resources []string, includeUnscoped, restrictToResources bool) ([]string, error)
 }
@@ -63,13 +59,6 @@ type FileUsageScopedLister interface {
 	ListFileUsagePageByResources(ctx context.Context, resources []string, includeUnscoped bool, limit, offset int, inactiveSince *time.Time) ([]models.FileUsage, error)
 	GetFileUsageSummaryByScope(ctx context.Context, organization, project string, inactiveSince *time.Time) (models.FileUsageSummary, error)
 	GetFileUsageSummaryByResources(ctx context.Context, resources []string, includeUnscoped bool, inactiveSince *time.Time) (models.FileUsageSummary, error)
-}
-
-type StorageMetricsStore interface {
-	GetStoragePathSummary(ctx context.Context, organization, project, path string) (models.StoragePathSummary, error)
-	ListStoragePathChildren(ctx context.Context, organization, project, path string, limit, offset int, sortBy, sortOrder string) ([]models.StoragePathChild, error)
-	ListStorageCleanupRecords(ctx context.Context, organization, project, pathPrefix string) ([]models.StorageCleanupRecord, error)
-	ListDuplicateStorageCleanupRecords(ctx context.Context, organization, project, pathPrefix string) ([]models.StorageCleanupRecord, error)
 }
 
 type TransferAttributionScopedStore interface {
@@ -141,10 +130,6 @@ type MetricsStore interface {
 	ListFileUsageByObjectIDs(ctx context.Context, ids []string) ([]models.FileUsage, error)
 	ListFileUsage(ctx context.Context, limit, offset int, inactiveSince *time.Time) ([]models.FileUsage, error)
 	GetFileUsageSummary(ctx context.Context, inactiveSince *time.Time) (models.FileUsageSummary, error)
-	GetStoragePathSummary(ctx context.Context, organization, project, path string) (models.StoragePathSummary, error)
-	ListStoragePathChildren(ctx context.Context, organization, project, path string, limit, offset int, sortBy, sortOrder string) ([]models.StoragePathChild, error)
-	ListStorageCleanupRecords(ctx context.Context, organization, project, pathPrefix string) ([]models.StorageCleanupRecord, error)
-	ListDuplicateStorageCleanupRecords(ctx context.Context, organization, project, pathPrefix string) ([]models.StorageCleanupRecord, error)
 }
 
 // LFSStore is the minimum storage surface needed by the LFS API.
@@ -162,5 +147,4 @@ type DatabaseInterface interface {
 	CredentialStore
 	PendingLFSMetaStore
 	UsageStore
-	StorageMetricsStore
 }

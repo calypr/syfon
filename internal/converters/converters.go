@@ -2,6 +2,7 @@ package converters
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -41,7 +42,7 @@ func CandidateToInternalObject(c drs.DrsObjectCandidate, now time.Time) (models.
 		obj.ControlledAccess = &controlled
 	}
 	if c.Name != nil {
-		obj.Name = c.Name
+		obj.Name = normalizedObjectNamePtr(c.Name)
 	}
 	obj.SelfUri = "drs://" + obj.Id
 	if obj.Name == nil || strings.TrimSpace(*obj.Name) == "" {
@@ -89,6 +90,22 @@ func CandidateToInternalObject(c drs.DrsObjectCandidate, now time.Time) (models.
 		DrsObject:      obj,
 		Authorizations: authzMap,
 	}, nil
+}
+
+func normalizedObjectNamePtr(name *string) *string {
+	if name == nil {
+		return nil
+	}
+	trimmed := strings.TrimSpace(*name)
+	if trimmed == "" {
+		return nil
+	}
+	trimmed = strings.ReplaceAll(trimmed, "\\", "/")
+	base := filepath.Base(trimmed)
+	if base == "." || base == "/" || base == "" {
+		base = trimmed
+	}
+	return common.Ptr(base)
 }
 
 func LFSCandidateToDRS(in lfsapi.DrsObjectCandidate) drs.DrsObjectCandidate {
