@@ -30,9 +30,7 @@ func RegisterRootFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&password, "password", strings.TrimSpace(os.Getenv("SYFON_PASSWORD")), "Basic auth password for authenticated Syfon servers")
 }
 
-func ResolvedProfile() string {
-	return strings.TrimSpace(profile)
-}
+
 
 func NewServerClient(cmd *cobra.Command) (syfonclient.SyfonClient, error) {
 	serverURL, err := ResolveServerURL(cmd)

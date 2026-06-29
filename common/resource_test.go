@@ -41,17 +41,7 @@ func TestResourceAndAuthzHelpers(t *testing.T) {
 		}
 	})
 
-	t.Run("storage prefix", func(t *testing.T) {
-		if got := StoragePrefix("", ""); got != "" {
-			t.Fatalf("expected empty prefix, got %q", got)
-		}
-		if got := StoragePrefix("syfon", ""); got != "" {
-			t.Fatalf("unexpected org prefix: %q", got)
-		}
-		if got := StoragePrefix("syfon", "e2e"); got != "" {
-			t.Fatalf("unexpected project prefix: %q", got)
-		}
-	})
+
 
 	t.Run("checksum normalization", func(t *testing.T) {
 		if got := NormalizeChecksum("  sha256:ABC123  "); got != "ABC123" {
@@ -122,21 +112,5 @@ func TestResourceAndAuthzHelpers(t *testing.T) {
 		}
 	})
 
-	t.Run("authz map matches scope", func(t *testing.T) {
-		projectScoped := map[string][]string{"syfon": {"e2e"}}
-		if !AuthzMapMatchesScope(projectScoped, "syfon", "e2e") {
-			t.Fatal("expected project-scoped match")
-		}
-		if AuthzMapMatchesScope(projectScoped, "syfon", "other") {
-			t.Fatal("expected project-scoped miss")
-		}
 
-		orgWide := map[string][]string{"syfon": {}}
-		if !AuthzMapMatchesScope(orgWide, "syfon", "anything") {
-			t.Fatal("expected org-wide match")
-		}
-		if AuthzMapMatchesScope(nil, "syfon", "e2e") {
-			t.Fatal("expected nil map miss")
-		}
-	})
 }

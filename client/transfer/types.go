@@ -10,7 +10,6 @@ import (
 	internalapi "github.com/calypr/syfon/apigen/client/internalapi"
 	"github.com/calypr/syfon/client/common"
 	"github.com/calypr/syfon/client/hash"
-	"github.com/calypr/syfon/client/logs"
 )
 
 var (
@@ -38,7 +37,6 @@ type TransferLogger interface {
 	GetSucceededLogMap() map[string]string
 	GetFailedLogMap() map[string]common.RetryObject
 	DeleteFromFailedLog(path string)
-	Scoreboard() *logs.Scoreboard
 }
 
 // Service provides high-level identity and logging access.

@@ -294,20 +294,7 @@ func (m *ObjectManager) listBucketsVisibleObjects(ctx context.Context) ([]models
 	return m.filterObjectsByMethod(ctx, objects, objectMethodRead), nil
 }
 
-func bucketReferencedByPublicObject(objects []models.InternalObject, cred models.S3Credential, creds []models.S3Credential) bool {
-	credentialID := credentialIDForCredential(cred)
-	for _, obj := range objects {
-		if len(ObjectAccessResources(&obj)) != 0 || obj.AccessMethods == nil {
-			continue
-		}
-		for _, method := range *obj.AccessMethods {
-			if id, ok := credentialIDForAccessMethod(method, creds); ok && id == credentialID {
-				return true
-			}
-		}
-	}
-	return false
-}
+
 
 func credentialIDForCredential(cred models.S3Credential) string {
 	if credentialID := strings.TrimSpace(cred.CredentialID); credentialID != "" {

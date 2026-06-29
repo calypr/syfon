@@ -496,19 +496,6 @@ func (d *DataService) CanonicalObjectURL(signedURL, bucketHint, fallbackDID stri
 	}
 }
 
-func (d *DataService) rememberUploadBucket(guid, bucket string) {
-	guid = strings.TrimSpace(guid)
-	bucket = strings.TrimSpace(bucket)
-	if guid == "" || bucket == "" {
-		return
-	}
-	d.uploadMu.Lock()
-	defer d.uploadMu.Unlock()
-	if d.uploads == nil {
-		d.uploads = map[string]string{}
-	}
-	d.uploads[guid] = bucket
-}
 
 func (d *DataService) uploadBucket(guid string) string {
 	guid = strings.TrimSpace(guid)

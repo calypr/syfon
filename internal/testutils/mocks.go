@@ -764,64 +764,6 @@ func (m *MockDatabase) GetTransferAttributionBreakdown(ctx context.Context, filt
 	return out, nil
 }
 
-func providerTransferEventMatchesFilter(ev models.ProviderTransferEvent, filter models.TransferAttributionFilter) bool {
-	status := filter.ReconciliationStatus
-	if status == "" {
-		status = models.ProviderTransferMatched
-	}
-	if status != "all" && ev.ReconciliationStatus != status {
-		return false
-	}
-	if filter.Organization != "" && ev.Organization != filter.Organization {
-		return false
-	}
-	if filter.Project != "" && ev.Project != filter.Project {
-		return false
-	}
-	direction := filter.Direction
-	if direction == "" {
-		direction = filter.EventType
-	}
-	if direction != "" && direction != "all" && ev.Direction != direction {
-		return false
-	}
-	if filter.From != nil && ev.EventTime.Before(*filter.From) {
-		return false
-	}
-	if filter.To != nil && ev.EventTime.After(*filter.To) {
-		return false
-	}
-	if filter.Provider != "" && ev.Provider != filter.Provider {
-		return false
-	}
-	if filter.Bucket != "" && ev.Bucket != filter.Bucket {
-		return false
-	}
-	if filter.SHA256 != "" && ev.SHA256 != filter.SHA256 {
-		return false
-	}
-	if filter.User != "" && ev.ActorEmail != filter.User && ev.ActorSubject != filter.User {
-		return false
-	}
-	return true
-}
-
-func providerTransferBreakdownKey(ev models.ProviderTransferEvent, groupBy string) string {
-	switch groupBy {
-	case "user":
-		if ev.ActorEmail != "" {
-			return ev.ActorEmail
-		}
-		return ev.ActorSubject
-	case "provider":
-		return ev.Provider + ":" + ev.Bucket
-	case "object":
-		return ev.SHA256
-	default:
-		return ev.Organization + "/" + ev.Project
-	}
-}
-
 func transferEventMatchesFilter(ev models.TransferAttributionEvent, filter models.TransferAttributionFilter) bool {
 	if filter.Organization != "" && ev.Organization != filter.Organization {
 		return false
@@ -880,6 +822,8 @@ func transferBreakdownKey(ev models.TransferAttributionEvent, groupBy string) st
 		return ev.Organization + "/" + ev.Project
 	}
 }
+
+
 
 func cloneAuthzMap(in map[string][]string) map[string][]string {
 	if len(in) == 0 {

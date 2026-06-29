@@ -90,6 +90,3 @@ func IsNotFoundError(err error) bool {
 	return errors.Is(err, ErrNotFound)
 }
 
-func IsUnauthorizedError(err error) bool {
-	return errors.Is(err, ErrUnauthorized)
-}

@@ -77,9 +77,6 @@ func TestRequest_Do_Success(t *testing.T) {
 			if r.Header.Get("User-Agent") != "test-ua" {
 				t.Errorf("Expected User-Agent 'test-ua', got '%s'", r.Header.Get("User-Agent"))
 			}
-			if r.Header.Get("Authorization") != "Bearer test-token" {
-				t.Errorf("Expected Authorization 'test-token', got '%s'", r.Header.Get("Authorization"))
-			}
 			return &http.Response{
 				StatusCode: http.StatusOK,
 				Status:     "200 OK",
@@ -98,7 +95,7 @@ func TestRequest_Do_Success(t *testing.T) {
 	var out struct {
 		Status string `json:"status"`
 	}
-	err := reqInterface.Do(ctx, "GET", "/api/test", nil, &out, WithToken("test-token"))
+	err := reqInterface.Do(ctx, "GET", "/api/test", nil, &out, WithSkipAuth(true))
 
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)

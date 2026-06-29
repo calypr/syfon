@@ -4,11 +4,8 @@ import (
 	"fmt"
 	"net"
 	"net/url"
-	"path/filepath"
 	"regexp"
 	"strings"
-
-	"github.com/calypr/syfon/internal/models"
 )
 
 const (
@@ -77,33 +74,7 @@ func ProviderToScheme(p string) string {
 	}
 }
 
-func ObjectURLForCredential(cred *models.S3Credential, key string) (string, error) {
-	if cred == nil {
-		return "", fmt.Errorf("credential is required")
-	}
-	cleanKey := strings.TrimPrefix(strings.TrimSpace(key), "/")
-	provider := NormalizeProvider(cred.Provider, S3Provider)
 
-	switch provider {
-	case S3Provider:
-		return fmt.Sprintf("%s%s/%s", S3Prefix, cred.Bucket, cleanKey), nil
-	case GCSProvider:
-		return fmt.Sprintf("%s%s/%s", GCSPrefix, cred.Bucket, cleanKey), nil
-	case AzureProvider:
-		return fmt.Sprintf("%s%s/%s", AzurePrefix, cred.Bucket, cleanKey), nil
-	case FileProvider:
-		root := filepath.Clean(strings.TrimSpace(cred.Endpoint))
-		if root == "." || root == "" {
-			root = strings.TrimPrefix(strings.TrimSpace(cred.Bucket), "/")
-		}
-		if root == "" {
-			return "", fmt.Errorf("file provider requires an endpoint or bucket root")
-		}
-		return filepath.ToSlash(filepath.Join(root, cleanKey)), nil
-	default:
-		return "", fmt.Errorf("unsupported provider: %s", provider)
-	}
-}
 
 func NormalizeStoragePath(rawPath, bucket string) (string, error) {
 	p := strings.TrimSpace(rawPath)
@@ -149,9 +120,7 @@ func ParseBucketProvider(raw string) (string, error) {
 // The rules are intentionally provider-specific:
 // - s3 and azure share the stricter DNS-style naming rules.
 // - gcs permits dots and underscores but still requires a DNS-safe shape.
-func ValidateBucketName(providerName, bucketName string) error {
-	return ValidateBucketNameWithEndpoint(providerName, bucketName, "")
-}
+
 
 // ValidateBucketNameWithEndpoint validates a bucket/container name for the
 // given provider and endpoint. S3-compatible backends with a custom endpoint

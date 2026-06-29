@@ -169,19 +169,7 @@ func newAWSKMSKeyManagerFromEnv() (CredentialKeyManager, error) {
 	}, nil
 }
 
-func RegisterCredentialKeyManager(name string, factory func() (CredentialKeyManager, error)) error {
-	name = strings.ToLower(strings.TrimSpace(name))
-	if name == "" {
-		return errors.New("credential key manager name is required")
-	}
-	if factory == nil {
-		return errors.New("credential key manager factory is required")
-	}
-	credentialKeyManagerRegistryMu.Lock()
-	defer credentialKeyManagerRegistryMu.Unlock()
-	credentialKeyManagerRegistry[name] = factory
-	return nil
-}
+
 
 func resolveCredentialKeyManager(name string) (CredentialKeyManager, error) {
 	managerName := strings.ToLower(strings.TrimSpace(name))

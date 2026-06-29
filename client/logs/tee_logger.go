@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"maps"
 	"os"
 	"runtime"
@@ -20,7 +19,6 @@ import (
 type Gen3Logger struct {
 	*slog.Logger
 	mu         sync.RWMutex
-	scoreboard *Scoreboard
 
 	failedMu   sync.Mutex
 	FailedMap  map[string]common.RetryObject // Maps filePath to FileMetadata
@@ -43,21 +41,7 @@ func NewGen3Logger(logger *slog.Logger, logDir, profile string) *Gen3Logger {
 	}
 }
 
-// loadJSON is an internal helper to load JSON from a file path.
-func loadJSON(path string, v any) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if !os.IsNotExist(err) {
-			fmt.Fprintf(os.Stderr, "read log state %s: %v\n", path, err)
-		}
-		return
-	}
-	if len(data) > 0 {
-		if err := json.Unmarshal(data, v); err != nil {
-			fmt.Fprintf(os.Stderr, "decode log state %s: %v\n", path, err)
-		}
-	}
-}
+
 
 // --- Core logging helper ---
 
@@ -127,20 +111,11 @@ func (t *Gen3Logger) Fatal(v ...any) {
 	t.logWithSkip(context.Background(), slog.LevelError, 3, fmt.Sprint(v...))
 }
 
-// Writer returns os.Stderr for legacy compatibility (used by Scoreboard's tabwriter).
-func (t *Gen3Logger) Writer() io.Writer {
-	return os.Stderr
-}
-
 // Slog exposes the underlying slog.Logger for code that needs direct slog access.
 func (t *Gen3Logger) Slog() *slog.Logger {
 	return t.Logger
 }
 
-// Scoreboard returns the embedded Scoreboard.
-func (t *Gen3Logger) Scoreboard() *Scoreboard {
-	return t.scoreboard
-}
 
 // --- Succeeded/Failed log map methods ---
 

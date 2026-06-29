@@ -1413,9 +1413,6 @@ func (db *SqliteDB) RemoveObjectControlledAccess(ctx context.Context, objectID, 
 	if _, err := tx.ExecContext(ctx, `DELETE FROM drs_object_controlled_access WHERE object_id = ? AND resource = ?`, objectID, resource); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM drs_object_browse_index WHERE object_id = ? AND resource = ?`, objectID, resource); err != nil {
-		return err
-	}
 	return tx.Commit()
 }
 

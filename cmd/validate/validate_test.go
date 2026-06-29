@@ -118,8 +118,8 @@ paths:
 	}
 }
 
-func TestDefaultSpecValidatorAndBadSpec(t *testing.T) {
-	_, err := newDefaultSpecValidator("/definitely/missing/openapi.yaml")
+func TestSpecValidatorBadSpec(t *testing.T) {
+	_, err := newSpecValidator("/definitely/missing/openapi.yaml", false)
 	if err == nil {
 		t.Fatal("expected missing spec error")
 	}

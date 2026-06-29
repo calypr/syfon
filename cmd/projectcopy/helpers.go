@@ -20,9 +20,7 @@ type Scope struct {
 	Project      string
 }
 
-func (s Scope) String() string {
-	return s.Organization + "/" + s.Project
-}
+
 
 func ParseScopeArg(raw, label string) (Scope, error) {
 	parts := strings.Split(strings.TrimSpace(raw), "/")

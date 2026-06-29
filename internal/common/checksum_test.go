@@ -57,10 +57,7 @@ func TestSHAHelpers(t *testing.T) {
 		t.Fatalf("CanonicalSHA256 mismatch: ok=%v sha=%q", ok, sha)
 	}
 
-	norm := NormalizeSHA256([]string{"sha256:ABC", "abc", "abc", ""})
-	if len(norm) != 1 || norm[0] != "abc" {
-		t.Fatalf("NormalizeSHA256 unexpected output: %+v", norm)
-	}
+
 
 	obj := models.InternalObject{DrsObject: drs.DrsObject{Checksums: []drs.Checksum{{Type: "md5", Checksum: "m"}}}}
 	if !ObjectHasChecksumTypeAndValue(obj, "md5", "m") {

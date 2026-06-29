@@ -47,11 +47,7 @@ func (e *ResponseError) Error() string {
 
 type RequestOption func(*RequestBuilder)
 
-func WithQuery(key, value string) RequestOption {
-	return func(rb *RequestBuilder) {
-		rb.WithQuery(key, value)
-	}
-}
+
 
 func WithQueryValues(v url.Values) RequestOption {
 	return func(rb *RequestBuilder) {
@@ -71,11 +67,7 @@ func WithTimeout(d time.Duration) RequestOption {
 	}
 }
 
-func WithToken(token string) RequestOption {
-	return func(rb *RequestBuilder) {
-		rb.WithToken(token)
-	}
-}
+
 
 func WithSkipAuth(skip bool) RequestOption {
 	return func(rb *RequestBuilder) {

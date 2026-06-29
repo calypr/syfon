@@ -110,6 +110,7 @@ const (
 	QueryParamURL          = "url"
 	QueryParamHashType     = "hash_type"
 	QueryParamBucket       = "bucket"
+	QueryParamFileName     = "filename"
 	QueryParamExpiresIn    = "expires_in"
 	QueryParamRedirect     = "redirect"
 	QueryParamInactiveDays = "inactive_days"

@@ -12,9 +12,7 @@ import (
 	"github.com/gofiber/fiber/v3/middleware/adaptor"
 )
 
-func newDefaultSpecValidator(specPath string) (fiber.Handler, error) {
-	return newSpecValidator(specPath, true)
-}
+
 
 func newSpecValidator(specPath string, lenientRoutes bool) (fiber.Handler, error) {
 	loader := openapi3.NewLoader()

@@ -615,12 +615,7 @@ func nullableInt64(v *int64) any {
 	return *v
 }
 
-func nullableTime(v *time.Time) any {
-	if v == nil {
-		return nil
-	}
-	return v.UTC()
-}
+
 
 func (db *PostgresDB) backfillAccessGrants(ctx context.Context) error {
 	tx, err := db.db.BeginTx(ctx, nil)
@@ -1033,78 +1028,7 @@ func postgresTransferResourceClause(resources []string, startIndex int) (string,
 	return strings.Join(clauses, " OR "), args
 }
 
-func providerTransferWhere(filter models.TransferAttributionFilter) (string, []any) {
-	parts := make([]string, 0)
-	args := make([]any, 0)
-	add := func(column string, value any) {
-		args = append(args, value)
-		parts = append(parts, fmt.Sprintf("%s = $%d", column, len(args)))
-	}
-	status := strings.TrimSpace(filter.ReconciliationStatus)
-	if status == "" {
-		status = models.ProviderTransferMatched
-	}
-	if status != "all" {
-		add("reconciliation_status", status)
-	}
-	if strings.TrimSpace(filter.Organization) != "" {
-		add("organization", strings.TrimSpace(filter.Organization))
-	}
-	if strings.TrimSpace(filter.Project) != "" {
-		add("project", strings.TrimSpace(filter.Project))
-	}
-	direction := strings.TrimSpace(filter.Direction)
-	if direction == "" {
-		switch strings.TrimSpace(filter.EventType) {
-		case models.ProviderTransferDirectionDownload:
-			direction = models.ProviderTransferDirectionDownload
-		case models.ProviderTransferDirectionUpload:
-			direction = models.ProviderTransferDirectionUpload
-		}
-	}
-	if direction != "" && direction != "all" {
-		add("direction", direction)
-	}
-	if filter.From != nil {
-		args = append(args, filter.From.UTC())
-		parts = append(parts, fmt.Sprintf("event_time >= $%d", len(args)))
-	}
-	if filter.To != nil {
-		args = append(args, filter.To.UTC())
-		parts = append(parts, fmt.Sprintf("event_time <= $%d", len(args)))
-	}
-	if strings.TrimSpace(filter.Provider) != "" {
-		add("provider", strings.TrimSpace(filter.Provider))
-	}
-	if strings.TrimSpace(filter.Bucket) != "" {
-		add("bucket", strings.TrimSpace(filter.Bucket))
-	}
-	if strings.TrimSpace(filter.SHA256) != "" {
-		add("sha256", strings.TrimSpace(filter.SHA256))
-	}
-	if strings.TrimSpace(filter.User) != "" {
-		user := strings.TrimSpace(filter.User)
-		args = append(args, user, user)
-		parts = append(parts, fmt.Sprintf("(actor_email = $%d OR actor_subject = $%d)", len(args)-1, len(args)))
-	}
-	if len(parts) == 0 {
-		return "", args
-	}
-	return " WHERE " + strings.Join(parts, " AND "), args
-}
 
-func providerTransferGroupExpr(groupBy string) (string, string) {
-	switch strings.ToLower(strings.TrimSpace(groupBy)) {
-	case "user":
-		return "COALESCE(NULLIF(actor_email, ''), actor_subject), actor_email, actor_subject", "COALESCE(NULLIF(actor_email, ''), actor_subject) AS key, '' AS organization, '' AS project, '' AS provider, '' AS bucket, '' AS sha256, actor_email, actor_subject"
-	case "provider":
-		return "provider, bucket", "provider || ':' || bucket AS key, '' AS organization, '' AS project, provider, bucket, '' AS sha256, '' AS actor_email, '' AS actor_subject"
-	case "object":
-		return "sha256", "sha256 AS key, '' AS organization, '' AS project, '' AS provider, '' AS bucket, sha256, '' AS actor_email, '' AS actor_subject"
-	default:
-		return "organization, project", "organization || '/' || project AS key, organization, project, '' AS provider, '' AS bucket, '' AS sha256, '' AS actor_email, '' AS actor_subject"
-	}
-}
 
 func transferAttributionGroupExpr(groupBy string) (string, string) {
 	switch strings.ToLower(strings.TrimSpace(groupBy)) {

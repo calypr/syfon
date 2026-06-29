@@ -73,9 +73,6 @@ func RetryAction(ctx context.Context, logger TransferLogger, strategy RetryStrat
 
 		lastErr = action()
 		if lastErr == nil {
-			if sb := logger.Scoreboard(); sb != nil {
-				sb.IncrementSB(i)
-			}
 			return nil
 		}
 		var nonRetryable nonRetryableError
@@ -86,8 +83,5 @@ func RetryAction(ctx context.Context, logger TransferLogger, strategy RetryStrat
 		logger.Error("Action failed", "retry", i, "error", lastErr)
 	}
 
-	if sb := logger.Scoreboard(); sb != nil {
-		sb.IncrementSB(maxRetries + 1)
-	}
 	return lastErr
 }

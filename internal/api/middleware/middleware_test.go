@@ -276,7 +276,7 @@ func TestGen3ModePopulatesUserPrivilegesFromFence(t *testing.T) {
 		t.Fatalf("sign token: %v", err)
 	}
 
-	m := NewAuthzMiddleware(newTestLogger(), "gen3", "", "")
+	m := NewAuthzMiddleware(slog.Default(), "gen3", "", "")
 	injectDummyAuthenticationPluginManager(m, true)
 	app := fiber.New()
 	app.Use(m.FiberMiddleware())

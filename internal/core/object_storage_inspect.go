@@ -83,14 +83,7 @@ func (e *StorageInspectError) Error() string {
 	return fmt.Sprintf("storage inspect failed: %s", e.Kind)
 }
 
-func WithStorageInspectCache(ctx context.Context) context.Context {
-	if cache, _ := ctx.Value(storageInspectCacheKey).(*storageInspectRequestCache); cache != nil {
-		return ctx
-	}
-	return context.WithValue(ctx, storageInspectCacheKey, &storageInspectRequestCache{
-		credentials: map[string]storageInspectCredentialCacheEntry{},
-	})
-}
+
 
 func storageInspectCacheFromContext(ctx context.Context) *storageInspectRequestCache {
 	cache, _ := ctx.Value(storageInspectCacheKey).(*storageInspectRequestCache)

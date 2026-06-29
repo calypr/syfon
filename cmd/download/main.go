@@ -1,18 +1,11 @@
 package download
 
 import (
-	"context"
 	"fmt"
-	"io"
-	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 
-	syclient "github.com/calypr/syfon/client"
-	"github.com/calypr/syfon/client/request"
-	syfonclient "github.com/calypr/syfon/client/services"
 	transferdownload "github.com/calypr/syfon/client/transfer/download"
 	syupload "github.com/calypr/syfon/client/transfer/upload"
 	"github.com/calypr/syfon/cmd/cliauth"
@@ -83,55 +76,7 @@ var Cmd = &cobra.Command{
 	},
 }
 
-func downloadURLToPath(ctx context.Context, rawURL, outPath string, c syfonclient.SyfonClient) error {
-	parsed, err := url.Parse(strings.TrimSpace(rawURL))
-	if err != nil {
-		return fmt.Errorf("parse download url: %w", err)
-	}
-	switch strings.ToLower(parsed.Scheme) {
-	case "":
-		srcPath := parsed.Path
-		if srcPath == "" {
-			srcPath = rawURL
-		}
-		data, err := os.ReadFile(srcPath)
-		if err != nil {
-			return fmt.Errorf("read file source: %w", err)
-		}
-		if err := os.WriteFile(outPath, data, 0o644); err != nil {
-			return fmt.Errorf("write output file: %w", err)
-		}
-		return nil
-	case "http", "https":
-		var resp *http.Response
-		concrete, ok := c.(*syclient.Client)
-		if !ok {
-			return fmt.Errorf("client implementation does not support raw requests")
-		}
-		err := concrete.Requestor().Do(ctx, http.MethodGet, rawURL, nil, &resp, request.WithSkipAuth(true))
-		if err != nil {
-			return fmt.Errorf("download request failed: %w", err)
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode >= 400 {
-			body, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
-			if err != nil {
-				return fmt.Errorf("read error response body: %w", err)
-			}
-			return fmt.Errorf("download failed status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(body)))
-		}
-		data, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return fmt.Errorf("read download response: %w", err)
-		}
-		if err := os.WriteFile(outPath, data, 0o644); err != nil {
-			return fmt.Errorf("write output file: %w", err)
-		}
-		return nil
-	default:
-		return fmt.Errorf("unsupported download url scheme %q", parsed.Scheme)
-	}
-}
+
 
 func init() {
 	Cmd.Flags().StringVar(&downloadDID, "did", "", "DRS object DID")
