@@ -61,6 +61,69 @@ func TestLegacyAccessURLWithoutCanonicalSiblingIsRewritable(t *testing.T) {
 	}
 }
 
+func TestPathStyleAccessURLWithCanonicalSiblingIsRemovable(t *testing.T) {
+	resource, _ := syfoncommon.ResourcePath("HTAN_INT", "BForePC")
+	// did is a real UUID
+	did := "01208c9f-e188-5aec-a026-51cc31fabd23"
+	// sha is a 64-char hex string
+	sha := "52aa452e5a90a2c641f20fffbac0e899d79d9cc40a560fe76e931b7f37566bb2"
+	svc := NewService(
+		&fakeIndex{records: []internalapi.InternalRecord{
+			recordWithMethods(t, did, sha, []string{resource}, []string{
+				"s3://bforepc-prod/JHU/ashley_kiemen/hematoxylin_eosin_stain/Level_2/HTA201_3/HTA201_3_ndpis/HTA201_3_1_0145.ndpi",
+				"s3://bforepc-prod/" + did + "/" + sha,
+			}),
+		}},
+		fakeBucketsForScope(t, "HTAN_INT", "BForePC", "s3://bforepc-prod"),
+		&fakeRequester{},
+	)
+
+	report, err := svc.Audit(context.Background(), Options{Organization: "HTAN_INT", Project: "BForePC"})
+	if err != nil {
+		t.Fatalf("audit failed: %v", err)
+	}
+	if len(report.Objects) != 1 {
+		t.Fatalf("expected one object report, got %d", len(report.Objects))
+	}
+	obj := report.Objects[0]
+	if !obj.AutoFixable {
+		t.Fatal("expected autofixable object")
+	}
+	if obj.Findings[0].Kind != FindingLegacyAccessURLRemovable {
+		t.Fatalf("expected removable finding, got %s", obj.Findings[0].Kind)
+	}
+}
+
+func TestPathStyleAccessURLWithoutCanonicalSiblingIsRewritable(t *testing.T) {
+	resource, _ := syfoncommon.ResourcePath("HTAN_INT", "BForePC")
+	did := "01208c9f-e188-5aec-a026-51cc31fabd23"
+	sha := "52aa452e5a90a2c641f20fffbac0e899d79d9cc40a560fe76e931b7f37566bb2"
+	svc := NewService(
+		&fakeIndex{records: []internalapi.InternalRecord{
+			recordWithMethods(t, did, sha, []string{resource}, []string{
+				"s3://bforepc-prod/JHU/ashley_kiemen/hematoxylin_eosin_stain/Level_2/HTA201_3/HTA201_3_ndpis/HTA201_3_1_0145.ndpi",
+			}),
+		}},
+		fakeBucketsForScope(t, "HTAN_INT", "BForePC", "s3://bforepc-prod"),
+		&fakeRequester{},
+	)
+
+	report, err := svc.Audit(context.Background(), Options{Organization: "HTAN_INT", Project: "BForePC"})
+	if err != nil {
+		t.Fatalf("audit failed: %v", err)
+	}
+	if len(report.Objects) != 1 {
+		t.Fatalf("expected one object report, got %d", len(report.Objects))
+	}
+	obj := report.Objects[0]
+	if !obj.AutoFixable {
+		t.Fatal("expected autofixable object")
+	}
+	if obj.Findings[0].Kind != FindingLegacyAccessURLRewritable {
+		t.Fatalf("expected rewritable finding, got %s", obj.Findings[0].Kind)
+	}
+}
+
 func TestMissingControlledAccessRecoverableFromDeterministicScope(t *testing.T) {
 	resource, _ := syfoncommon.ResourcePath("HTAN_INT", "BForePC")
 	did, err := intcommon.MintObjectIDFromChecksum("abc", []string{resource})

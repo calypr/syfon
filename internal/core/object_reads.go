@@ -304,6 +304,30 @@ func (m *ObjectManager) ListObjectIDsByScope(ctx context.Context, organization, 
 	return out, nil
 }
 
+func (m *ObjectManager) ListObjectsByScope(ctx context.Context, organization, project, requiredMethod string) ([]models.InternalObject, error) {
+	if strings.TrimSpace(organization) == "" && strings.EqualFold(strings.TrimSpace(requiredMethod), objectMethodRead) {
+		if ids, ok, err := m.listReadableObjectIDs(ctx); ok {
+			if err != nil {
+				return nil, err
+			}
+			objects, err := m.db.GetBulkObjects(ctx, ids)
+			if err != nil {
+				return nil, err
+			}
+			return m.filterObjectsByMethod(ctx, objects, requiredMethod), nil
+		}
+	}
+	ids, err := m.db.ListObjectIDsByScope(ctx, organization, project)
+	if err != nil {
+		return nil, err
+	}
+	objects, err := m.db.GetBulkObjects(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	return m.filterObjectsByMethod(ctx, objects, requiredMethod), nil
+}
+
 func objectHasAccessURL(obj *models.InternalObject, objectURL string) bool {
 	if obj == nil || obj.AccessMethods == nil {
 		return false

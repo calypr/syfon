@@ -92,12 +92,27 @@ func (m *ObjectManager) DeleteObjectWithOptions(ctx context.Context, id string, 
 }
 
 func (m *ObjectManager) BulkDeleteObjects(ctx context.Context, ids []string) error {
+	return m.BulkDeleteObjectsWithOptions(ctx, ids, DeleteOptions{})
+}
+
+func (m *ObjectManager) BulkDeleteObjectsWithOptions(ctx context.Context, ids []string, opts DeleteOptions) error {
 	toDelete, err := m.deletableObjectIDs(ctx, ids)
 	if err != nil {
 		return err
 	}
 	if len(toDelete) == 0 {
 		return nil
+	}
+	if opts.DeleteStorageData {
+		objects, err := m.db.GetBulkObjects(ctx, toDelete)
+		if err != nil {
+			return err
+		}
+		for i := range objects {
+			if err := m.deleteObjectStorage(ctx, &objects[i]); err != nil {
+				return err
+			}
+		}
 	}
 	return m.db.BulkDeleteObjects(ctx, toDelete)
 }

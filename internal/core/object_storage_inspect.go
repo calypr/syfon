@@ -22,11 +22,14 @@ import (
 )
 
 type InspectStorageRequest struct {
-	Organization string
-	Project      string
-	Key          string
-	Scheme       string
-	ObjectURL    string
+	ID                string
+	Organization      string
+	Project           string
+	Key               string
+	Scheme            string
+	ObjectURL         string
+	ExpectedSizeBytes *int64
+	ExpectedSHA256    string
 }
 
 type StorageObjectMetadata struct {
@@ -41,6 +44,47 @@ type StorageObjectMetadata struct {
 	LastModTime time.Time
 }
 
+type StorageProbeStatus string
+
+const (
+	StorageProbeStatusPresent     StorageProbeStatus = "present"
+	StorageProbeStatusNotFound    StorageProbeStatus = "not_found"
+	StorageProbeStatusForbidden   StorageProbeStatus = "forbidden"
+	StorageProbeStatusInvalid     StorageProbeStatus = "invalid"
+	StorageProbeStatusUnsupported StorageProbeStatus = "unsupported"
+	StorageProbeStatusError       StorageProbeStatus = "error"
+)
+
+type StorageValidationStatus string
+
+const (
+	StorageValidationNotRequested StorageValidationStatus = "not_requested"
+	StorageValidationMatched      StorageValidationStatus = "matched"
+	StorageValidationMismatched   StorageValidationStatus = "mismatched"
+	StorageValidationUnverifiable StorageValidationStatus = "unverifiable"
+)
+
+type StorageProbeResult struct {
+	ID                   string
+	ObjectURL            string
+	Provider             string
+	Bucket               string
+	Key                  string
+	Path                 string
+	Exists               bool
+	Status               StorageProbeStatus
+	Error                string
+	ErrorKind            string
+	SizeBytes            *int64
+	MetaSHA256           string
+	ETag                 string
+	LastModTime          time.Time
+	ValidationStatus     StorageValidationStatus
+	SizeMatch            *bool
+	SHA256Match          *bool
+	ValidationMismatches []string
+}
+
 type StorageInspectErrorKind string
 
 const (
@@ -49,8 +93,11 @@ const (
 	StorageInspectCredentialMissing StorageInspectErrorKind = "credential_missing"
 	StorageInspectPermissionDenied  StorageInspectErrorKind = "permission_denied"
 	StorageInspectObjectNotFound    StorageInspectErrorKind = "object_not_found"
+	StorageInspectBucketUnavailable StorageInspectErrorKind = "bucket_unavailable"
 	StorageInspectUnsupported       StorageInspectErrorKind = "unsupported"
 )
+
+const maxStorageInspectWorkers = 16
 
 type StorageInspectError struct {
 	Kind    StorageInspectErrorKind
@@ -68,6 +115,7 @@ type storageInspectRequestCache struct {
 	mu sync.Mutex
 
 	credentials   map[string]storageInspectCredentialCacheEntry
+	s3Clients     map[string]*awss3.Client
 	visible       map[string]VisibleBucket
 	visibleErr    error
 	visibleLoaded bool
@@ -83,7 +131,15 @@ func (e *StorageInspectError) Error() string {
 	return fmt.Sprintf("storage inspect failed: %s", e.Kind)
 }
 
-
+func WithStorageInspectCache(ctx context.Context) context.Context {
+	if storageInspectCacheFromContext(ctx) != nil {
+		return ctx
+	}
+	return context.WithValue(ctx, storageInspectCacheKey, &storageInspectRequestCache{
+		credentials: map[string]storageInspectCredentialCacheEntry{},
+		s3Clients:   map[string]*awss3.Client{},
+	})
+}
 
 func storageInspectCacheFromContext(ctx context.Context) *storageInspectRequestCache {
 	cache, _ := ctx.Value(storageInspectCacheKey).(*storageInspectRequestCache)
@@ -103,6 +159,188 @@ func (m *ObjectManager) InspectStorageObject(ctx context.Context, req InspectSto
 		return m.inspectRawStorageObject(ctx, req)
 	}
 	return m.inspectScopedStorageObject(ctx, req)
+}
+
+func (m *ObjectManager) InspectStorageObjects(ctx context.Context, items []InspectStorageRequest) []StorageProbeResult {
+	ctx = WithStorageInspectCache(ctx)
+	if len(items) == 0 {
+		return []StorageProbeResult{}
+	}
+	results := make([]StorageProbeResult, len(items))
+	workers := len(items)
+	if workers > maxStorageInspectWorkers {
+		workers = maxStorageInspectWorkers
+	}
+	type probeWork struct {
+		index int
+		req   InspectStorageRequest
+	}
+	workCh := make(chan probeWork)
+	cache := newStorageProbeResultCache()
+	var wg sync.WaitGroup
+	for worker := 0; worker < workers; worker++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for work := range workCh {
+				results[work.index] = cache.probe(ctx, m, work.req)
+			}
+		}()
+	}
+	for i, item := range items {
+		workCh <- probeWork{index: i, req: item}
+	}
+	close(workCh)
+	wg.Wait()
+	return results
+}
+
+type storageProbeResultCache struct {
+	mu      sync.Mutex
+	results map[string]StorageProbeResult
+}
+
+func newStorageProbeResultCache() *storageProbeResultCache {
+	return &storageProbeResultCache{results: map[string]StorageProbeResult{}}
+}
+
+func (c *storageProbeResultCache) probe(ctx context.Context, m *ObjectManager, req InspectStorageRequest) StorageProbeResult {
+	key := storageProbeCacheKey(req)
+	c.mu.Lock()
+	if result, ok := c.results[key]; ok {
+		c.mu.Unlock()
+		return cloneStorageProbeResultForRequest(result, req)
+	}
+	c.mu.Unlock()
+
+	result := m.inspectStorageProbe(ctx, req)
+
+	c.mu.Lock()
+	c.results[key] = result
+	c.mu.Unlock()
+	return result
+}
+
+func storageProbeCacheKey(req InspectStorageRequest) string {
+	return strings.TrimSpace(req.ObjectURL) + "|" +
+		strings.TrimSpace(req.Organization) + "|" +
+		strings.TrimSpace(req.Project) + "|" +
+		strings.TrimSpace(req.Key) + "|" +
+		strings.TrimSpace(req.Scheme) + "|" +
+		normalizeExpectedSize(req.ExpectedSizeBytes) + "|" +
+		strings.ToLower(strings.TrimSpace(strings.TrimPrefix(req.ExpectedSHA256, "sha256:")))
+}
+
+func normalizeExpectedSize(v *int64) string {
+	if v == nil {
+		return ""
+	}
+	return fmt.Sprintf("%d", *v)
+}
+
+func cloneStorageProbeResultForRequest(result StorageProbeResult, req InspectStorageRequest) StorageProbeResult {
+	clone := result
+	clone.ID = strings.TrimSpace(req.ID)
+	if clone.ID == "" {
+		clone.ID = strings.TrimSpace(result.ID)
+	}
+	if clone.ObjectURL == "" {
+		clone.ObjectURL = strings.TrimSpace(req.ObjectURL)
+	}
+	clone.ValidationMismatches = append([]string(nil), result.ValidationMismatches...)
+	return clone
+}
+
+func (m *ObjectManager) inspectStorageProbe(ctx context.Context, req InspectStorageRequest) StorageProbeResult {
+	result := StorageProbeResult{
+		ID:               strings.TrimSpace(req.ID),
+		ObjectURL:        strings.TrimSpace(req.ObjectURL),
+		Status:           StorageProbeStatusError,
+		ValidationStatus: StorageValidationNotRequested,
+	}
+	meta, err := m.InspectStorageObject(ctx, req)
+	if err != nil {
+		result.Status, result.ErrorKind = classifyStorageProbeError(err)
+		result.Error = strings.TrimSpace(err.Error())
+		result.Exists = false
+		result.ValidationStatus = storageValidationStatusForError(req)
+		return result
+	}
+	result.ObjectURL = strings.TrimSpace(meta.ObjectURL)
+	result.Provider = strings.TrimSpace(meta.Provider)
+	result.Bucket = strings.TrimSpace(meta.Bucket)
+	result.Key = strings.TrimSpace(meta.Key)
+	result.Path = strings.TrimSpace(meta.Path)
+	result.Exists = true
+	result.Status = StorageProbeStatusPresent
+	result.SizeBytes = ptrInt64(meta.SizeBytes)
+	result.MetaSHA256 = strings.TrimSpace(meta.MetaSHA256)
+	result.ETag = strings.TrimSpace(meta.ETag)
+	result.LastModTime = meta.LastModTime
+	result.ValidationStatus, result.SizeMatch, result.SHA256Match, result.ValidationMismatches = validateStorageProbe(req, meta)
+	return result
+}
+
+func classifyStorageProbeError(err error) (StorageProbeStatus, string) {
+	var inspectErr *StorageInspectError
+	if errors.As(err, &inspectErr) {
+		switch inspectErr.Kind {
+		case StorageInspectObjectNotFound:
+			return StorageProbeStatusNotFound, string(inspectErr.Kind)
+		case StorageInspectPermissionDenied, StorageInspectBucketUnavailable:
+			return StorageProbeStatusForbidden, string(inspectErr.Kind)
+		case StorageInspectInvalidInput, StorageInspectScopeNotFound, StorageInspectCredentialMissing:
+			return StorageProbeStatusInvalid, string(inspectErr.Kind)
+		case StorageInspectUnsupported:
+			return StorageProbeStatusUnsupported, string(inspectErr.Kind)
+		default:
+			return StorageProbeStatusError, string(inspectErr.Kind)
+		}
+	}
+	return StorageProbeStatusError, "error"
+}
+
+func storageValidationStatusForError(req InspectStorageRequest) StorageValidationStatus {
+	if req.ExpectedSizeBytes == nil && strings.TrimSpace(req.ExpectedSHA256) == "" {
+		return StorageValidationNotRequested
+	}
+	return StorageValidationUnverifiable
+}
+
+func validateStorageProbe(req InspectStorageRequest, meta *StorageObjectMetadata) (StorageValidationStatus, *bool, *bool, []string) {
+	if req.ExpectedSizeBytes == nil && strings.TrimSpace(req.ExpectedSHA256) == "" {
+		return StorageValidationNotRequested, nil, nil, nil
+	}
+	mismatches := make([]string, 0, 2)
+	var sizeMatch *bool
+	if req.ExpectedSizeBytes != nil {
+		matched := meta.SizeBytes == *req.ExpectedSizeBytes
+		sizeMatch = &matched
+		if !matched {
+			mismatches = append(mismatches, "size_mismatch")
+		}
+	}
+	var shaMatch *bool
+	expectedSHA := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(req.ExpectedSHA256, "sha256:")))
+	if expectedSHA != "" {
+		if strings.TrimSpace(meta.MetaSHA256) == "" {
+			return StorageValidationUnverifiable, sizeMatch, nil, append(mismatches, "missing_remote_sha256")
+		}
+		matched := strings.EqualFold(strings.TrimSpace(meta.MetaSHA256), expectedSHA)
+		shaMatch = &matched
+		if !matched {
+			mismatches = append(mismatches, "sha256_mismatch")
+		}
+	}
+	if len(mismatches) > 0 {
+		return StorageValidationMismatched, sizeMatch, shaMatch, mismatches
+	}
+	return StorageValidationMatched, sizeMatch, shaMatch, nil
+}
+
+func ptrInt64(v int64) *int64 {
+	copy := v
+	return &copy
 }
 
 func (m *ObjectManager) inspectScopedStorageObject(ctx context.Context, req InspectStorageRequest) (*StorageObjectMetadata, error) {
@@ -297,6 +535,22 @@ func (c *storageInspectRequestCache) setVisible(visible map[string]VisibleBucket
 	c.visibleLoaded = true
 }
 
+func (c *storageInspectRequestCache) getS3Client(key string) (*awss3.Client, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	client, ok := c.s3Clients[key]
+	return client, ok
+}
+
+func (c *storageInspectRequestCache) setS3Client(key string, client *awss3.Client) {
+	if client == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.s3Clients[key] = client
+}
+
 func cloneVisibleBuckets(in map[string]VisibleBucket) map[string]VisibleBucket {
 	if in == nil {
 		return nil
@@ -313,7 +567,13 @@ func cloneVisibleBuckets(in map[string]VisibleBucket) map[string]VisibleBucket {
 	return out
 }
 
-func defaultS3ObjectInspector(ctx context.Context, cred models.S3Credential, bucket string, key string) (*StorageObjectMetadata, error) {
+func s3ClientFromContext(ctx context.Context, cred models.S3Credential) (*awss3.Client, error) {
+	cacheKey := s3ClientCacheKey(cred)
+	if cache := storageInspectCacheFromContext(ctx); cache != nil {
+		if client, ok := cache.getS3Client(cacheKey); ok {
+			return client, nil
+		}
+	}
 	loadOpts := []func(*awsconfig.LoadOptions) error{
 		awsconfig.WithRegion(cred.Region),
 		awsconfig.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(cred.AccessKey, cred.SecretKey, "")),
@@ -337,6 +597,26 @@ func defaultS3ObjectInspector(ctx context.Context, cred models.S3Credential, buc
 			o.UsePathStyle = true
 		}
 	})
+	if cache := storageInspectCacheFromContext(ctx); cache != nil {
+		cache.setS3Client(cacheKey, client)
+	}
+	return client, nil
+}
+
+func s3ClientCacheKey(cred models.S3Credential) string {
+	return strings.ToLower(strings.TrimSpace(cred.Provider)) + "|" +
+		strings.TrimSpace(cred.Endpoint) + "|" +
+		strings.TrimSpace(cred.Region) + "|" +
+		strings.TrimSpace(cred.AccessKey) + "|" +
+		strings.TrimSpace(cred.Bucket) + "|" +
+		strings.TrimSpace(cred.CredentialID)
+}
+
+func defaultS3ObjectInspector(ctx context.Context, cred models.S3Credential, bucket string, key string) (*StorageObjectMetadata, error) {
+	client, err := s3ClientFromContext(ctx, cred)
+	if err != nil {
+		return nil, err
+	}
 	out, err := client.HeadObject(ctx, &awss3.HeadObjectInput{
 		Bucket: aws.String(bucket),
 		Key:    aws.String(key),
@@ -346,7 +626,7 @@ func defaultS3ObjectInspector(ctx context.Context, cred models.S3Credential, buc
 		if errors.As(err, &apiErr) {
 			switch strings.ToLower(strings.TrimSpace(apiErr.ErrorCode())) {
 			case "forbidden", "accessdenied", "permissiondenied":
-				return nil, &StorageInspectError{Kind: StorageInspectPermissionDenied, Message: fmt.Sprintf("provider denied access to s3://%s/%s", bucket, key)}
+				return nil, &StorageInspectError{Kind: StorageInspectBucketUnavailable, Message: fmt.Sprintf("provider rejected object probe for s3://%s/%s; mapped bucket target may be missing or inaccessible", bucket, key)}
 			case "notfound", "nosuchkey", "nosuchbucket":
 				return nil, &StorageInspectError{Kind: StorageInspectObjectNotFound, Message: fmt.Sprintf("provider could not find s3://%s/%s", bucket, key)}
 			}

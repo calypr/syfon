@@ -275,6 +275,96 @@ func TestSqliteDB_GetObjectPreservesStoredName(t *testing.T) {
 	}
 }
 
+func TestSqliteDB_NormalizeNameToBasenameOnInsert(t *testing.T) {
+	ctx := context.Background()
+	db, err := NewSqliteDB(":memory:")
+	if err != nil {
+		t.Fatalf("failed to create db: %v", err)
+	}
+
+	// 1. Test CreateObject with Unix and Windows paths
+	now := time.Now().UTC()
+	objUnix := &models.InternalObject{
+		DrsObject: drs.DrsObject{
+			Id:          "unix-1",
+			Size:        100,
+			CreatedTime: now,
+			Name:        common.Ptr("/path/to/some/unix_file.txt"),
+		},
+	}
+	if err := db.CreateObject(ctx, objUnix); err != nil {
+		t.Fatalf("CreateObject failed: %v", err)
+	}
+
+	gotUnix, err := db.GetObject(ctx, "unix-1")
+	if err != nil {
+		t.Fatalf("GetObject failed: %v", err)
+	}
+	if got := common.StringVal(gotUnix.Name); got != "unix_file.txt" {
+		t.Fatalf("expected name to be normalized to unix_file.txt, got %q", got)
+	}
+
+	objWin := &models.InternalObject{
+		DrsObject: drs.DrsObject{
+			Id:          "win-1",
+			Size:        200,
+			CreatedTime: now,
+			Name:        common.Ptr(`C:\Windows\System32\win_file.txt`),
+		},
+	}
+	if err := db.CreateObject(ctx, objWin); err != nil {
+		t.Fatalf("CreateObject failed: %v", err)
+	}
+
+	gotWin, err := db.GetObject(ctx, "win-1")
+	if err != nil {
+		t.Fatalf("GetObject failed: %v", err)
+	}
+	if got := common.StringVal(gotWin.Name); got != "win_file.txt" {
+		t.Fatalf("expected name to be normalized to win_file.txt, got %q", got)
+	}
+
+	// 2. Test RegisterObjects with paths
+	bulkObjs := []models.InternalObject{
+		{
+			DrsObject: drs.DrsObject{
+				Id:          "bulk-unix",
+				Size:        300,
+				CreatedTime: now,
+				Name:        common.Ptr("/var/log/syslog.log"),
+			},
+		},
+		{
+			DrsObject: drs.DrsObject{
+				Id:          "bulk-win",
+				Size:        400,
+				CreatedTime: now,
+				Name:        common.Ptr(`D:\Data\config.json`),
+			},
+		},
+	}
+
+	if err := db.RegisterObjects(ctx, bulkObjs); err != nil {
+		t.Fatalf("RegisterObjects failed: %v", err)
+	}
+
+	gotBulkUnix, err := db.GetObject(ctx, "bulk-unix")
+	if err != nil {
+		t.Fatalf("GetObject failed: %v", err)
+	}
+	if got := common.StringVal(gotBulkUnix.Name); got != "syslog.log" {
+		t.Fatalf("expected name syslog.log, got %q", got)
+	}
+
+	gotBulkWin, err := db.GetObject(ctx, "bulk-win")
+	if err != nil {
+		t.Fatalf("GetObject failed: %v", err)
+	}
+	if got := common.StringVal(gotBulkWin.Name); got != "config.json" {
+		t.Fatalf("expected name config.json, got %q", got)
+	}
+}
+
 func TestSqliteDB_ObjectAliasLifecycle(t *testing.T) {
 	ctx := context.Background()
 	db, err := NewSqliteDB(":memory:")

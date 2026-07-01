@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/testutils"
@@ -111,5 +112,94 @@ func TestHandleInternalInspectObjectMalformedURL(t *testing.T) {
 	rr := doInternalDRSTestRequest(req, om)
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleInternalInspectProjectRecords(t *testing.T) {
+	body, _ := json.Marshal(internalInspectProjectRecordsRequest{Organization: "syfon", Project: "e2e"})
+	name := "example.bin"
+	created := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
+	updated := time.Date(2026, 7, 1, 12, 30, 0, 0, time.UTC)
+	db := &testutils.MockDatabase{
+		Objects: map[string]*drs.DrsObject{
+			"obj-1": {
+				Id:   "obj-1",
+				Name: &name,
+				Checksums: []drs.Checksum{
+					{Type: "sha256", Checksum: "abc123"},
+				},
+				CreatedTime: created,
+				UpdatedTime: &updated,
+				Size:        17,
+				AccessMethods: &[]drs.AccessMethod{
+					{
+						Type:     "s3",
+						AccessId: ptr("acc-1"),
+						AccessUrl: &struct {
+							Headers *[]string `json:"headers,omitempty"`
+							Url     string    `json:"url"`
+						}{Url: "s3://bucket-a/prefix/example.bin"},
+					},
+				},
+			},
+		},
+		ObjectAuthz: map[string]map[string][]string{
+			"obj-1": {"syfon": {"e2e"}},
+		},
+	}
+	om := core.NewObjectManager(db, &testutils.MockUrlManager{})
+	req := withTestAuthzContext(httptest.NewRequest(http.MethodPost, "/data/inspect/project-records", bytes.NewBuffer(body)), "gen3", map[string]map[string]bool{"/organization/syfon/project/e2e": {"read": true}})
+	rr := doInternalDRSTestRequest(req, om)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp internalInspectProjectRecordsResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp.Items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(resp.Items))
+	}
+	item := resp.Items[0]
+	if item.ObjectID != "obj-1" || item.Checksum != "abc123" {
+		t.Fatalf("unexpected item identity: %+v", item)
+	}
+	if item.Organization != "syfon" || item.Project != "e2e" {
+		t.Fatalf("unexpected scope: %+v", item)
+	}
+	if len(item.AccessURLs) != 1 || item.AccessURLs[0] != "s3://bucket-a/prefix/example.bin" {
+		t.Fatalf("unexpected access urls: %+v", item.AccessURLs)
+	}
+}
+
+func TestHandleInternalInspectProjectScopes(t *testing.T) {
+	body, _ := json.Marshal(internalInspectProjectScopesRequest{Organization: "syfon", Project: "e2e"})
+	db := &testutils.MockDatabase{
+		Credentials: map[string]models.S3Credential{
+			"cred-1": {CredentialID: "cred-1", Bucket: "bucket-a", Provider: "s3"},
+		},
+		BucketScopes: map[string]models.BucketScope{
+			"syfon|":    {Organization: "syfon", Bucket: "bucket-a", CredentialID: "cred-1", PathPrefix: "program-root"},
+			"syfon|e2e": {Organization: "syfon", ProjectID: "e2e", Bucket: "bucket-a", CredentialID: "cred-1", PathPrefix: "project-root"},
+		},
+	}
+	om := core.NewObjectManager(db, &testutils.MockUrlManager{})
+	req := withTestAuthzContext(httptest.NewRequest(http.MethodPost, "/data/inspect/project-scopes", bytes.NewBuffer(body)), "gen3", map[string]map[string]bool{
+		"/organization/syfon":             {"read": true},
+		"/organization/syfon/project/e2e": {"read": true},
+	})
+	rr := doInternalDRSTestRequest(req, om)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp internalInspectProjectScopesResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp.Items) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(resp.Items))
+	}
+	if resp.Items[0].Bucket != "bucket-a" || !strings.HasPrefix(resp.Items[0].Path, "s3://bucket-a/") {
+		t.Fatalf("unexpected first scope: %+v", resp.Items[0])
 	}
 }

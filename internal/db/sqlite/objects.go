@@ -230,7 +230,7 @@ func (db *SqliteDB) CreateObject(ctx context.Context, obj *models.InternalObject
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO drs_object (id, size, created_time, updated_time, name, version, description)
 		VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		obj.Id, obj.Size, obj.CreatedTime, common.TimeVal(obj.UpdatedTime), common.StringVal(obj.Name), common.StringVal(obj.Version), common.StringVal(obj.Description),
+		obj.Id, obj.Size, obj.CreatedTime, common.TimeVal(obj.UpdatedTime), common.CleanToBasename(common.StringVal(obj.Name)), common.StringVal(obj.Version), common.StringVal(obj.Description),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to insert drs_object: %w", err)
@@ -295,7 +295,7 @@ func (db *SqliteDB) RegisterObjects(ctx context.Context, objects []models.Intern
 
 	for _, obj := range objects {
 		ids = append(ids, obj.Id)
-		mainArgs = append(mainArgs, obj.Id, obj.Size, obj.CreatedTime, common.TimeVal(obj.UpdatedTime), common.StringVal(obj.Name), common.StringVal(obj.Version), common.StringVal(obj.Description))
+		mainArgs = append(mainArgs, obj.Id, obj.Size, obj.CreatedTime, common.TimeVal(obj.UpdatedTime), common.CleanToBasename(common.StringVal(obj.Name)), common.StringVal(obj.Version), common.StringVal(obj.Description))
 
 		seenAccess := make(map[string]struct{})
 		for _, resource := range objectAccessResources(&obj) {

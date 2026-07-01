@@ -14,8 +14,10 @@ type IndexAPI interface {
 }
 
 type ListRecordsOptions struct {
-	Limit int
-	Start string
+	Limit        int
+	Start        string
+	Organization string
+	Project      string
 }
 
 type BucketsAPI interface {

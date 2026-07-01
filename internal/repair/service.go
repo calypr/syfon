@@ -112,7 +112,12 @@ func (s *Service) listRecords(ctx context.Context, opts Options) ([]internalapi.
 		if limit <= 0 && opts.Limit > 0 {
 			break
 		}
-		resp, err := s.index.List(ctx, ListRecordsOptions{Limit: limit, Start: start})
+		resp, err := s.index.List(ctx, ListRecordsOptions{
+			Limit:        limit,
+			Start:        start,
+			Organization: opts.Organization,
+			Project:      opts.Project,
+		})
 		if err != nil {
 			return nil, scanned, err
 		}
@@ -170,7 +175,7 @@ func (s *Service) auditRecord(ctx context.Context, rec internalapi.InternalRecor
 		obj.updated = &updated
 	}
 	if obj.scopeKnown && obj.canonicalURL != "" {
-		s.classifyAccessMethods(obj)
+		s.classifyAccessMethods(ctx, obj, opts.CheckStorage)
 	}
 	if opts.CheckStorage {
 		s.addStorageFindings(ctx, obj)
@@ -178,15 +183,30 @@ func (s *Service) auditRecord(ctx context.Context, rec internalapi.InternalRecor
 	return obj, true
 }
 
-func (s *Service) classifyAccessMethods(obj *auditedObject) {
+func (s *Service) classifyAccessMethods(ctx context.Context, obj *auditedObject, checkStorage bool) {
 	if obj.record.AccessMethods == nil {
 		return
 	}
 	methods := cloneAccessMethods(*obj.record.AccessMethods)
-	hasCanonical := false
+
+	// Construct path-style URL
+	pathStyleURL := pathStyleAccessURL(obj.scope, intcommon.StringVal(obj.record.Name))
+
+	// Determine correct target URL based on storage checks (if checkStorage is enabled)
+	targetURL := obj.canonicalURL
+	if checkStorage {
+		canonicalExists := s.checkURLExists(ctx, obj, obj.canonicalURL)
+		pathStyleExists := s.checkURLExists(ctx, obj, pathStyleURL)
+		if !canonicalExists && pathStyleExists {
+			targetURL = pathStyleURL
+		}
+	}
+
+	// Check if the record already has the target URL
+	hasTarget := false
 	for _, raw := range obj.currentURLs {
-		if raw == obj.canonicalURL {
-			hasCanonical = true
+		if raw == targetURL {
+			hasTarget = true
 			break
 		}
 	}
@@ -194,22 +214,21 @@ func (s *Service) classifyAccessMethods(obj *auditedObject) {
 	changed := false
 	for i := range methods {
 		raw := accessMethodURL(methods[i])
-		if raw == "" || raw == obj.canonicalURL {
+		if raw == "" || raw == targetURL {
 			continue
 		}
-		if isLegacyPathStyleURL(raw) {
-			if hasCanonical {
-				obj.findings = append(obj.findings, newFinding(FindingLegacyAccessURLRemovable, SeverityWarn, obj.record, obj.sha256, obj.currentURLs, obj.canonicalURL, true, "legacy META/CONFIG URL has canonical sibling"))
-				methods[i].AccessUrl = nil
-				changed = true
-				continue
-			}
-			obj.findings = append(obj.findings, newFinding(FindingLegacyAccessURLRewritable, SeverityWarn, obj.record, obj.sha256, obj.currentURLs, obj.canonicalURL, true, "legacy META/CONFIG URL can be rewritten to canonical scoped URL"))
-			setAccessMethodURL(&methods[i], obj.canonicalURL)
+
+		// Any URL that does not match the target URL is considered legacy/incorrect.
+		if hasTarget {
+			obj.findings = append(obj.findings, newFinding(FindingLegacyAccessURLRemovable, SeverityWarn, obj.record, obj.sha256, obj.currentURLs, targetURL, true, fmt.Sprintf("redundant URL %q has target sibling %q", raw, targetURL)))
+			methods[i].AccessUrl = nil
 			changed = true
-			continue
+		} else {
+			obj.findings = append(obj.findings, newFinding(FindingLegacyAccessURLRewritable, SeverityWarn, obj.record, obj.sha256, obj.currentURLs, targetURL, true, fmt.Sprintf("URL %q can be rewritten to target URL %q", raw, targetURL)))
+			setAccessMethodURL(&methods[i], targetURL)
+			changed = true
+			hasTarget = true
 		}
-		obj.findings = append(obj.findings, newFinding(FindingNonCanonicalAccessURL, SeverityInfo, obj.record, obj.sha256, obj.currentURLs, obj.canonicalURL, false, "access URL does not match canonical scoped target"))
 	}
 
 	if !changed {
@@ -473,17 +492,30 @@ func canonicalAccessURL(target scopeTarget, did, sha string) string {
 	return "s3://" + strings.TrimSpace(target.Bucket) + "/" + strings.Join(parts, "/")
 }
 
-func isLegacyPathStyleURL(raw string) bool {
-	parsed, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil || !strings.EqualFold(parsed.Scheme, "s3") {
+func pathStyleAccessURL(target scopeTarget, name string) string {
+	if strings.TrimSpace(target.Bucket) == "" || strings.TrimSpace(name) == "" {
+		return ""
+	}
+	parts := []string{}
+	if prefix := strings.Trim(target.Prefix, "/"); prefix != "" {
+		parts = append(parts, prefix)
+	}
+	parts = append(parts, strings.Trim(name, "/"))
+	return "s3://" + strings.TrimSpace(target.Bucket) + "/" + strings.Join(parts, "/")
+}
+
+func (s *Service) checkURLExists(ctx context.Context, obj *auditedObject, url string) bool {
+	if s.requestor == nil {
 		return false
 	}
-	path := strings.Trim(strings.TrimSpace(parsed.Path), "/")
-	if path == "" {
-		return false
+	req := storageInspectRequest{
+		Organization: obj.scope.Organization,
+		Project:      obj.scope.Project,
+		ObjectURL:    url,
 	}
-	head := strings.ToUpper(strings.Split(path, "/")[0])
-	return head == "META" || head == "CONFIG"
+	var resp storageInspectResponse
+	err := s.requestor.Do(ctx, http.MethodPost, "/data/inspect", req, &resp)
+	return err == nil
 }
 
 func newFinding(kind FindingKind, severity Severity, rec internalapi.InternalRecord, sha string, currentURLs []string, canonical string, autoFixable bool, msg string) Finding {

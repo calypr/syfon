@@ -134,7 +134,10 @@ func handleBulkDeleteObjectsFiber(om *core.ObjectManager) fiber.Handler {
 			ids = append(ids, id)
 		}
 
-		if err := om.BulkDeleteObjects(c.Context(), ids); err != nil {
+		opts := core.DeleteOptions{
+			DeleteStorageData: body.DeleteStorageData != nil && *body.DeleteStorageData,
+		}
+		if err := om.BulkDeleteObjectsWithOptions(c.Context(), ids, opts); err != nil {
 			return apiutil.HandleError(c, err)
 		}
 		return c.SendStatus(fiber.StatusNoContent)

@@ -37,6 +37,7 @@ type ObjectManager struct {
 	uM               urlmanager.UrlManager
 	bucketScopeCache *bucketScopeCache
 	inspectS3Object  func(context.Context, models.S3Credential, string, string) (*StorageObjectMetadata, error)
+	listS3Prefix     func(context.Context, models.S3Credential, string, string, bool) ([]StorageBucketObject, error)
 }
 
 type VisibleBucket struct {
@@ -50,5 +51,6 @@ func NewObjectManager(db db.DatabaseInterface, uM urlmanager.UrlManager) *Object
 		uM:               uM,
 		bucketScopeCache: newBucketScopeCache(30 * time.Second),
 		inspectS3Object:  defaultS3ObjectInspector,
+		listS3Prefix:     defaultS3PrefixLister,
 	}
 }

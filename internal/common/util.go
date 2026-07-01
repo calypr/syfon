@@ -2,8 +2,23 @@ package common
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 )
+
+// CleanToBasename extracts the basename from a path (handling both windows and unix separators).
+func CleanToBasename(name string) string {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" {
+		return ""
+	}
+	trimmed = strings.ReplaceAll(trimmed, "\\", "/")
+	base := filepath.Base(trimmed)
+	if base == "." || base == "/" || base == "" {
+		base = trimmed
+	}
+	return base
+}
 
 
 

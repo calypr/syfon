@@ -228,7 +228,7 @@ func (db *PostgresDB) CreateObject(ctx context.Context, obj *models.InternalObje
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO drs_object (id, size, created_time, updated_time, name, version, description)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-		obj.Id, obj.Size, obj.CreatedTime, common.TimeVal(obj.UpdatedTime), common.StringVal(obj.Name), common.StringVal(obj.Version), common.StringVal(obj.Description),
+		obj.Id, obj.Size, obj.CreatedTime, common.TimeVal(obj.UpdatedTime), common.CleanToBasename(common.StringVal(obj.Name)), common.StringVal(obj.Version), common.StringVal(obj.Description),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to insert drs_object: %w", err)
@@ -303,7 +303,7 @@ func (db *PostgresDB) RegisterObjects(ctx context.Context, objects []models.Inte
 		sizes = append(sizes, obj.Size)
 		createdTimes = append(createdTimes, obj.CreatedTime)
 		updatedTimes = append(updatedTimes, common.TimeVal(obj.UpdatedTime))
-		names = append(names, common.StringVal(obj.Name))
+		names = append(names, common.CleanToBasename(common.StringVal(obj.Name)))
 		versions = append(versions, common.StringVal(obj.Version))
 		descriptions = append(descriptions, common.StringVal(obj.Description))
 
