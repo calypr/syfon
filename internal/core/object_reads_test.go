@@ -42,8 +42,8 @@ func TestListObjectIDsPageByChecksum_StartAfterAndLimit(t *testing.T) {
 	checksum := "1111111111111111111111111111111111111111111111111111111111111111"
 
 	registerScopedCandidate(t, om, "chk-a", checksum, "org1", "proj1")
-	registerScopedCandidate(t, om, "chk-b", checksum, "org1", "proj1")
-	registerScopedCandidate(t, om, "chk-c", checksum, "org1", "proj1")
+	registerScopedCandidate(t, om, "chk-b", checksum, "org1", "proj2")
+	registerScopedCandidate(t, om, "chk-c", checksum, "org2", "proj1")
 
 	ids, err := om.ListObjectIDsPageByChecksum(context.Background(), checksum, "sha256", "", "", "read", "chk-a", 2, 0)
 	if err != nil {

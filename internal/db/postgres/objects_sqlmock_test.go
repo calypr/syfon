@@ -114,6 +114,10 @@ func TestGetObject_DeduplicatesAndPropagatesAuthz(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "size", "created_time", "updated_time", "name", "version", "description",
 		}).AddRow("obj-1", int64(123), created, updated, "file.txt", "v1", "desc"))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT name_alias FROM drs_object_name_alias WHERE object_id = $1 ORDER BY name_alias")).
+		WithArgs("obj-1").
+		WillReturnRows(sqlmock.NewRows([]string{"name_alias"}).
+			AddRow("file-old.txt"))
 
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT url, type FROM drs_object_access_method WHERE object_id = $1")).
 		WithArgs("obj-1").
@@ -145,6 +149,9 @@ func TestGetObject_DeduplicatesAndPropagatesAuthz(t *testing.T) {
 	if obj.AccessMethods == nil || len(*obj.AccessMethods) != 2 {
 		t.Fatalf("expected 2 deduplicated access methods, got %+v", obj.AccessMethods)
 	}
+	if len(obj.NameAliases) != 1 || obj.NameAliases[0] != "file-old.txt" {
+		t.Fatalf("expected propagated name aliases, got %+v", obj.NameAliases)
+	}
 	if len(obj.Checksums) != 2 {
 		t.Fatalf("expected 2 deduplicated checksums, got %d", len(obj.Checksums))
 	}
@@ -168,6 +175,9 @@ func TestGetObject_IgnoresAuthContext(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "size", "created_time", "updated_time", "name", "version", "description",
 		}).AddRow("obj-2", int64(1), now, now, "n", "v", "d"))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT name_alias FROM drs_object_name_alias WHERE object_id = $1 ORDER BY name_alias")).
+		WithArgs("obj-2").
+		WillReturnRows(sqlmock.NewRows([]string{"name_alias"}))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT url, type FROM drs_object_access_method WHERE object_id = $1")).
 		WithArgs("obj-2").
 		WillReturnRows(sqlmock.NewRows([]string{"url", "type"}).
@@ -259,6 +269,16 @@ func TestGetBulkObjects_UsesSplitHydrationQueries(t *testing.T) {
 			AddRow("obj-1", "/organization/org/project/p1").
 			AddRow("obj-2", "/organization/org/project/p1"))
 
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT object_id, name_alias
+		FROM drs_object_name_alias
+		WHERE object_id = ANY($1)
+		ORDER BY object_id, name_alias`)).
+		WithArgs(pq.Array([]string{"obj-1", "obj-2"})).
+		WillReturnRows(sqlmock.NewRows([]string{"object_id", "name_alias"}).
+			AddRow("obj-1", "file-1-old").
+			AddRow("obj-2", "file-2-old"))
+
 	objects, err := pg.GetBulkObjects(context.Background(), []string{"obj-2", "obj-1", "obj-2"})
 	if err != nil {
 		t.Fatalf("GetBulkObjects returned error: %v", err)
@@ -268,6 +288,9 @@ func TestGetBulkObjects_UsesSplitHydrationQueries(t *testing.T) {
 	}
 	if objects[0].AccessMethods == nil || len(*objects[0].AccessMethods) != 1 {
 		t.Fatalf("expected one access method on obj-2, got %+v", objects[0].AccessMethods)
+	}
+	if len(objects[0].NameAliases) != 1 || objects[0].NameAliases[0] != "file-2-old" {
+		t.Fatalf("expected propagated aliases on obj-2, got %+v", objects[0].NameAliases)
 	}
 	if len(objects[1].Checksums) != 1 || objects[1].Checksums[0].Checksum != "aaa" {
 		t.Fatalf("expected deduplicated checksum on obj-1, got %+v", objects[1].Checksums)

@@ -479,6 +479,9 @@ func copyRecord(ctx context.Context, cmd *cobra.Command, sourceClient, targetCli
 	if err := targetClient.Index().Upsert(ctx, did, targetObjectURL, fileName, size, checksum, authzMap); err != nil {
 		return fmt.Errorf("failed to sync index record for DID %s: %w", did, err)
 	}
+	if _, err := targetClient.DRS().UpdateObjectAccessMethods(ctx, did, []drsapi.AccessMethod{targetAccessMethod}); err != nil {
+		return fmt.Errorf("failed to replace access methods for DID %s: %w", did, err)
+	}
 
 	return nil
 }
