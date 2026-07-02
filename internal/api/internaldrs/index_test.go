@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +18,7 @@ import (
 	internalauth "github.com/calypr/syfon/internal/auth"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/core"
+	"github.com/calypr/syfon/internal/db"
 	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/testutils"
 	"github.com/gofiber/fiber/v3"
@@ -109,6 +111,177 @@ func TestHandleInternalList_ExactScopeListingDoesNotDependOnBrowseRows(t *testin
 	}
 	if payload.Records[0].Did != "obj-scoped" {
 		t.Fatalf("expected obj-scoped, got %q", payload.Records[0].Did)
+	}
+}
+
+func TestHandleInternalList_CanonicalizesProjectChecksumDuplicates(t *testing.T) {
+	database := db.NewInMemoryDB()
+	om := core.NewObjectManager(database, &testutils.MockUrlManager{})
+	now := time.Now().UTC()
+	later := now.Add(time.Minute)
+	sha := "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+	oldURL := "s3://ellrottlab/old/" + sha
+	newURL := "s3://EllrottLab/new/" + sha
+
+	for _, obj := range []models.InternalObject{
+		{
+			Authorizations: map[string][]string{"org": {"p1"}},
+			DrsObject: drs.DrsObject{
+				Id:          "did-1",
+				Name:        stringPtr("older.tsv"),
+				CreatedTime: now,
+				UpdatedTime: &now,
+				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: sha}},
+				AccessMethods: &[]drs.AccessMethod{{
+					Type: "s3",
+					AccessUrl: &struct {
+						Headers *[]string `json:"headers,omitempty"`
+						Url     string    `json:"url"`
+					}{Url: oldURL},
+				}},
+			},
+		},
+		{
+			Authorizations: map[string][]string{"org": {"p1"}},
+			DrsObject: drs.DrsObject{
+				Id:          "did-2",
+				Name:        stringPtr("newer.tsv"),
+				CreatedTime: later,
+				UpdatedTime: &later,
+				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: sha}},
+				AccessMethods: &[]drs.AccessMethod{{
+					Type: "s3",
+					AccessUrl: &struct {
+						Headers *[]string `json:"headers,omitempty"`
+						Url     string    `json:"url"`
+					}{Url: newURL},
+				}},
+			},
+		},
+	} {
+		if err := om.RegisterObjects(context.Background(), []models.InternalObject{obj}); err != nil {
+			t.Fatalf("RegisterObjects failed: %v", err)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/index?organization=org&project=p1", nil)
+	rr := doInternalDRSTestRequest(req, om)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var payload struct {
+		Records []internalapi.InternalRecord `json:"records"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Records) != 1 {
+		t.Fatalf("expected 1 canonical record, got %d", len(payload.Records))
+	}
+	if payload.Records[0].Did != "did-1" {
+		t.Fatalf("expected canonical did-1, got %q", payload.Records[0].Did)
+	}
+	if payload.Records[0].Name == nil || *payload.Records[0].Name != "newer.tsv" {
+		t.Fatalf("expected latest name newer.tsv, got %+v", payload.Records[0].Name)
+	}
+	if payload.Records[0].NameAliases == nil || !slices.Equal(*payload.Records[0].NameAliases, []string{"older.tsv"}) {
+		t.Fatalf("unexpected name aliases: %#v", payload.Records[0].NameAliases)
+	}
+	if payload.Records[0].AccessMethods == nil || len(*payload.Records[0].AccessMethods) != 2 {
+		t.Fatalf("expected 2 merged access methods, got %#v", payload.Records[0].AccessMethods)
+	}
+	gotURLs := make([]string, 0, len(*payload.Records[0].AccessMethods))
+	for _, method := range *payload.Records[0].AccessMethods {
+		if method.AccessUrl != nil {
+			gotURLs = append(gotURLs, method.AccessUrl.Url)
+		}
+	}
+	slices.Sort(gotURLs)
+	if !slices.Equal(gotURLs, []string{newURL, oldURL}) {
+		t.Fatalf("unexpected merged access method urls: %#v", gotURLs)
+	}
+}
+
+func TestHandleInternalList_MergesSiblingAccessMethodsFromLegacyDuplicateRows(t *testing.T) {
+	database := db.NewInMemoryDB()
+	om := core.NewObjectManager(database, &testutils.MockUrlManager{})
+	now := time.Now().UTC()
+	later := now.Add(time.Minute)
+	sha := "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+	oldURL := "s3://ellrottlab/fa4ee697-f689-5291-a7cc-8ebe2f3ea8b9/" + sha
+	newURL := "s3://EllrottLab/" + sha
+	controlled := []string{"/organization/org/project/p1"}
+
+	for _, obj := range []models.InternalObject{
+		{
+			DrsObject: drs.DrsObject{
+				Id:               "did-legacy-1",
+				Name:             stringPtr("legacy.tsv"),
+				CreatedTime:      now,
+				UpdatedTime:      &now,
+				Checksums:        []drs.Checksum{{Type: "sha256", Checksum: sha}},
+				ControlledAccess: &controlled,
+				AccessMethods: &[]drs.AccessMethod{{
+					Type: "s3",
+					AccessUrl: &struct {
+						Headers *[]string `json:"headers,omitempty"`
+						Url     string    `json:"url"`
+					}{Url: oldURL},
+				}},
+			},
+			Authorizations: map[string][]string{"org": {"p1"}},
+		},
+		{
+			DrsObject: drs.DrsObject{
+				Id:               "did-legacy-2",
+				Name:             stringPtr("canonical.tsv"),
+				CreatedTime:      later,
+				UpdatedTime:      &later,
+				Checksums:        []drs.Checksum{{Type: "sha256", Checksum: sha}},
+				ControlledAccess: &controlled,
+				AccessMethods: &[]drs.AccessMethod{{
+					Type: "s3",
+					AccessUrl: &struct {
+						Headers *[]string `json:"headers,omitempty"`
+						Url     string    `json:"url"`
+					}{Url: newURL},
+				}},
+			},
+			Authorizations: map[string][]string{"org": {"p1"}},
+		},
+	} {
+		candidate := obj
+		if err := database.CreateObject(context.Background(), &candidate); err != nil {
+			t.Fatalf("CreateObject failed: %v", err)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/index?organization=org&project=p1", nil)
+	rr := doInternalDRSTestRequest(req, om)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var payload struct {
+		Records []internalapi.InternalRecord `json:"records"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Records) != 1 {
+		t.Fatalf("expected 1 canonical record, got %d", len(payload.Records))
+	}
+	if payload.Records[0].AccessMethods == nil || len(*payload.Records[0].AccessMethods) != 2 {
+		t.Fatalf("expected 2 merged access methods, got %#v", payload.Records[0].AccessMethods)
+	}
+	gotURLs := make([]string, 0, len(*payload.Records[0].AccessMethods))
+	for _, method := range *payload.Records[0].AccessMethods {
+		if method.AccessUrl != nil {
+			gotURLs = append(gotURLs, method.AccessUrl.Url)
+		}
+	}
+	slices.Sort(gotURLs)
+	if !slices.Equal(gotURLs, []string{newURL, oldURL}) {
+		t.Fatalf("unexpected merged access method urls: %#v", gotURLs)
 	}
 }
 

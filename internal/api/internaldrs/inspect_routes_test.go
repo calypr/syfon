@@ -164,6 +164,9 @@ func TestHandleInternalInspectProjectRecords(t *testing.T) {
 	if item.ObjectID != "obj-1" || item.Checksum != "abc123" {
 		t.Fatalf("unexpected item identity: %+v", item)
 	}
+	if item.Name != "example.bin" {
+		t.Fatalf("expected project record name, got %q", item.Name)
+	}
 	if item.Organization != "syfon" || item.Project != "e2e" {
 		t.Fatalf("unexpected scope: %+v", item)
 	}
@@ -201,5 +204,177 @@ func TestHandleInternalInspectProjectScopes(t *testing.T) {
 	}
 	if resp.Items[0].Bucket != "bucket-a" || !strings.HasPrefix(resp.Items[0].Path, "s3://bucket-a/") {
 		t.Fatalf("unexpected first scope: %+v", resp.Items[0])
+	}
+}
+
+func TestHandleInternalInspectProjectBucketModesUsePrefixList(t *testing.T) {
+	db := &testutils.MockDatabase{
+		Credentials: map[string]models.S3Credential{
+			"cred-1": {CredentialID: "cred-1", Bucket: "bucket-a", Provider: "s3"},
+		},
+		BucketScopes: map[string]models.BucketScope{
+			"syfon|":    {Organization: "syfon", Bucket: "bucket-a", CredentialID: "cred-1", PathPrefix: "program-root"},
+			"syfon|e2e": {Organization: "syfon", ProjectID: "e2e", Bucket: "bucket-a", CredentialID: "cred-1", PathPrefix: "project-root"},
+		},
+	}
+	om := core.NewObjectManager(db, &testutils.MockUrlManager{})
+	inspectCalls := 0
+	om.SetS3ObjectInspector(func(ctx context.Context, cred models.S3Credential, bucket string, key string) (*core.StorageObjectMetadata, error) {
+		inspectCalls++
+		return nil, nil
+	})
+	var listCalls []core.StoragePrefixListOptions
+	var listedPrefixes []string
+	om.SetS3PrefixListerWithOptions(func(ctx context.Context, cred models.S3Credential, bucket string, prefix string, options core.StoragePrefixListOptions) ([]core.StorageBucketObject, error) {
+		if bucket != "bucket-a" {
+			t.Fatalf("unexpected list target bucket=%q prefix=%q", bucket, prefix)
+		}
+		listedPrefixes = append(listedPrefixes, prefix)
+		listCalls = append(listCalls, options)
+		if prefix == "program-root/project-root/CONFIG" {
+			return []core.StorageBucketObject{
+				{Provider: "s3", Bucket: bucket, Key: prefix + "/a.bin", Path: "CONFIG/a.bin", SizeBytes: 10},
+				{Provider: "s3", Bucket: bucket, Key: prefix + "/nested/b.bin", Path: "CONFIG/nested/b.bin", SizeBytes: 15},
+			}, nil
+		}
+		if prefix != "program-root/project-root" {
+			t.Fatalf("unexpected list prefix=%q", prefix)
+		}
+		return []core.StorageBucketObject{
+			{Provider: "s3", Bucket: bucket, Key: prefix + "/a.bin", Path: "a.bin", SizeBytes: 10},
+			{Provider: "s3", Bucket: bucket, Key: prefix + "/b.bin", Path: "b.bin", SizeBytes: 15},
+		}, nil
+	})
+
+	existsBody, _ := json.Marshal(internalInspectProjectBucketRequest{Organization: "syfon", Project: "e2e", Mode: "exists"})
+	req := withTestAuthzContext(httptest.NewRequest(http.MethodPost, "/data/inspect/project-bucket", bytes.NewBuffer(existsBody)), "gen3", map[string]map[string]bool{
+		"/organization/syfon/project/e2e": {"read": true},
+	})
+	rr := doInternalDRSTestRequest(req, om)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var existsResp internalInspectProjectBucketResponse
+	if err := json.NewDecoder(rr.Body).Decode(&existsResp); err != nil {
+		t.Fatalf("decode exists response: %v", err)
+	}
+	if existsResp.Summary == nil || !existsResp.Summary.Exists || existsResp.Summary.Mode != "exists" {
+		t.Fatalf("unexpected exists summary: %+v", existsResp.Summary)
+	}
+	if len(existsResp.Items) != 0 {
+		t.Fatalf("exists mode should not return item rows, got %+v", existsResp.Items)
+	}
+	if len(listCalls) != 1 || listCalls[0].MaxKeys != 1 || listCalls[0].IncludeHead {
+		t.Fatalf("exists mode should use MaxKeys=1 without HEAD, got %+v", listCalls)
+	}
+
+	summaryBody, _ := json.Marshal(internalInspectProjectBucketRequest{Organization: "syfon", Project: "e2e", Mode: "summary"})
+	req = withTestAuthzContext(httptest.NewRequest(http.MethodPost, "/data/inspect/project-bucket", bytes.NewBuffer(summaryBody)), "gen3", map[string]map[string]bool{
+		"/organization/syfon/project/e2e": {"read": true},
+	})
+	rr = doInternalDRSTestRequest(req, om)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var summaryResp internalInspectProjectBucketResponse
+	if err := json.NewDecoder(rr.Body).Decode(&summaryResp); err != nil {
+		t.Fatalf("decode summary response: %v", err)
+	}
+	if summaryResp.Summary == nil || summaryResp.Summary.Mode != "summary" || summaryResp.Summary.ObjectCount != 2 || summaryResp.Summary.TotalBytes != 25 {
+		t.Fatalf("unexpected summary response: %+v", summaryResp.Summary)
+	}
+	if len(summaryResp.Items) != 0 {
+		t.Fatalf("summary mode should not return item rows, got %+v", summaryResp.Items)
+	}
+	if len(listCalls) != 2 || listCalls[1].MaxKeys != 0 || listCalls[1].IncludeHead {
+		t.Fatalf("summary mode should list recursively without HEAD, got %+v", listCalls)
+	}
+
+	itemsBody, _ := json.Marshal(internalInspectProjectBucketRequest{Organization: "syfon", Project: "e2e", Mode: "items", PathPrefix: "CONFIG"})
+	req = withTestAuthzContext(httptest.NewRequest(http.MethodPost, "/data/inspect/project-bucket", bytes.NewBuffer(itemsBody)), "gen3", map[string]map[string]bool{
+		"/organization/syfon/project/e2e": {"read": true},
+	})
+	rr = doInternalDRSTestRequest(req, om)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var itemsResp internalInspectProjectBucketResponse
+	if err := json.NewDecoder(rr.Body).Decode(&itemsResp); err != nil {
+		t.Fatalf("decode items response: %v", err)
+	}
+	if itemsResp.Summary == nil || itemsResp.Summary.Mode != "items" || itemsResp.Summary.Prefix != "program-root/project-root/CONFIG" {
+		t.Fatalf("unexpected items summary: %+v", itemsResp.Summary)
+	}
+	if len(itemsResp.Items) != 2 {
+		t.Fatalf("items mode should return recursive rows, got %+v", itemsResp.Items)
+	}
+	if len(listedPrefixes) != 3 || listedPrefixes[2] != "program-root/project-root/CONFIG" {
+		t.Fatalf("expected path_prefix to scope recursive LIST, got %+v", listedPrefixes)
+	}
+	if inspectCalls != 0 {
+		t.Fatalf("expected project-bucket modes not to HEAD objects, got %d inspector calls", inspectCalls)
+	}
+}
+
+func TestHandleInternalInspectObjectBulkListValidatesExactKeyWithoutHead(t *testing.T) {
+	db := &testutils.MockDatabase{
+		Credentials: map[string]models.S3Credential{
+			"cred-1": {CredentialID: "cred-1", Bucket: "bucket-a", Provider: "s3"},
+		},
+		BucketScopes: map[string]models.BucketScope{
+			"syfon|e2e": {Organization: "syfon", ProjectID: "e2e", Bucket: "bucket-a", CredentialID: "cred-1", PathPrefix: "project-root"},
+		},
+	}
+	om := core.NewObjectManager(db, &testutils.MockUrlManager{})
+	inspectCalls := 0
+	om.SetS3ObjectInspector(func(ctx context.Context, cred models.S3Credential, bucket string, key string) (*core.StorageObjectMetadata, error) {
+		inspectCalls++
+		return nil, nil
+	})
+	var listedPrefixes []string
+	om.SetS3PrefixListerWithOptions(func(ctx context.Context, cred models.S3Credential, bucket string, prefix string, options core.StoragePrefixListOptions) ([]core.StorageBucketObject, error) {
+		if bucket != "bucket-a" || !options.ExactPrefix || options.MaxKeys != 1 || options.IncludeHead {
+			t.Fatalf("unexpected bulk-list options bucket=%q options=%+v", bucket, options)
+		}
+		listedPrefixes = append(listedPrefixes, prefix)
+		switch prefix {
+		case "project-root/file.bin":
+			return []core.StorageBucketObject{{Provider: "s3", Bucket: bucket, Key: "project-root/file.bin", Path: "file.bin", SizeBytes: 17, ETag: "etag-1", LastModTime: time.Date(2026, 7, 1, 1, 2, 3, 0, time.UTC)}}, nil
+		case "project-root/dir":
+			return []core.StorageBucketObject{{Provider: "s3", Bucket: bucket, Key: "project-root/dir/child.bin", Path: "dir/child.bin", SizeBytes: 19}}, nil
+		default:
+			return nil, nil
+		}
+	})
+	expectedSize := int64(17)
+	body, _ := json.Marshal(internalInspectObjectsBulkRequest{Items: []internalInspectObjectRequest{
+		{ID: "present", ObjectURL: "s3://bucket-a/project-root/file.bin", ExpectedSizeBytes: &expectedSize, ExpectedName: "file.bin"},
+		{ID: "prefix-child", ObjectURL: "s3://bucket-a/project-root/dir", ExpectedSizeBytes: &expectedSize, ExpectedName: "dir"},
+	}})
+	req := withTestAuthzContext(httptest.NewRequest(http.MethodPost, "/data/inspect/bulk-list", bytes.NewBuffer(body)), "gen3", map[string]map[string]bool{
+		"/organization/syfon/project/e2e": {"read": true},
+	})
+	rr := doInternalDRSTestRequest(req, om)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp internalInspectObjectBulkResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp.Items) != 2 {
+		t.Fatalf("expected 2 items, got %+v", resp.Items)
+	}
+	if !resp.Items[0].Exists || resp.Items[0].Status != "present" || resp.Items[0].ValidationStatus != "matched" {
+		t.Fatalf("unexpected present item: %+v", resp.Items[0])
+	}
+	if resp.Items[1].Exists || resp.Items[1].Status != "not_found" {
+		t.Fatalf("expected prefix child not to count as exact key, got %+v", resp.Items[1])
+	}
+	if len(listedPrefixes) != 2 {
+		t.Fatalf("expected two LIST calls, got %+v", listedPrefixes)
+	}
+	if inspectCalls != 0 {
+		t.Fatalf("expected bulk-list not to HEAD objects, got %d inspector calls", inspectCalls)
 	}
 }

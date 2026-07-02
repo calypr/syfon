@@ -2,10 +2,13 @@ package core
 
 import (
 	"context"
+	"slices"
 	"testing"
+	"time"
 
 	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/db"
+	"github.com/calypr/syfon/internal/db/sqlite"
 	"github.com/calypr/syfon/internal/models"
 )
 
@@ -124,6 +127,105 @@ func TestObjectMatchesScope(t *testing.T) {
 	if !objectMatchesScope(obj, "org1", "") {
 		t.Fatalf("expected org-wide org1 to match")
 	}
+}
+
+type trackingDB struct {
+	db.DatabaseInterface
+	bulkCalls [][]string
+}
+
+func (t *trackingDB) GetBulkObjects(ctx context.Context, ids []string) ([]models.InternalObject, error) {
+	copyIDs := append([]string(nil), ids...)
+	t.bulkCalls = append(t.bulkCalls, copyIDs)
+	return t.DatabaseInterface.GetBulkObjects(ctx, ids)
+}
+
+func TestPrepareScopedObjects_HydratesOnlyMissingSiblingIDs(t *testing.T) {
+	base, err := sqlite.NewSqliteDB(":memory:")
+	if err != nil {
+		t.Fatalf("NewSqliteDB failed: %v", err)
+	}
+	tracked := &trackingDB{DatabaseInterface: base}
+	om := NewObjectManager(tracked, nil)
+	checksum := "6666666666666666666666666666666666666666666666666666666666666666"
+	controlled := []string{"/organization/org/project/proj"}
+
+	for _, obj := range []models.InternalObject{
+		{
+			Authorizations: map[string][]string{"org": {"proj"}},
+			DrsObject: drs.DrsObject{
+				Id:               "dup-a",
+				CreatedTime:      drsISOTime("2026-01-01T00:00:00Z"),
+				UpdatedTime:      ptrTime("2026-01-01T00:00:00Z"),
+				Checksums:        []drs.Checksum{{Type: "sha256", Checksum: checksum}},
+				ControlledAccess: &controlled,
+				AccessMethods: &[]drs.AccessMethod{{
+					Type: drs.AccessMethodTypeS3,
+					AccessUrl: &struct {
+						Headers *[]string `json:"headers,omitempty"`
+						Url     string    `json:"url"`
+					}{Url: "s3://bucket/dup-a"},
+				}},
+			},
+		},
+		{
+			Authorizations: map[string][]string{"org": {"proj"}},
+			DrsObject: drs.DrsObject{
+				Id:               "dup-b",
+				CreatedTime:      drsISOTime("2026-01-02T00:00:00Z"),
+				UpdatedTime:      ptrTime("2026-01-02T00:00:00Z"),
+				Checksums:        []drs.Checksum{{Type: "sha256", Checksum: checksum}},
+				ControlledAccess: &controlled,
+				AccessMethods: &[]drs.AccessMethod{{
+					Type: drs.AccessMethodTypeS3,
+					AccessUrl: &struct {
+						Headers *[]string `json:"headers,omitempty"`
+						Url     string    `json:"url"`
+					}{Url: "s3://bucket/dup-b"},
+				}},
+			},
+		},
+	} {
+		if err := tracked.CreateObject(context.Background(), &obj); err != nil {
+			t.Fatalf("CreateObject failed: %v", err)
+		}
+	}
+
+	initial, err := tracked.GetBulkObjects(context.Background(), []string{"dup-a"})
+	if err != nil {
+		t.Fatalf("GetBulkObjects failed: %v", err)
+	}
+	tracked.bulkCalls = nil
+
+	prepared, err := om.PrepareScopedObjects(context.Background(), initial, "org", "proj", "")
+	if err != nil {
+		t.Fatalf("PrepareScopedObjects failed: %v", err)
+	}
+	if len(prepared) != 1 {
+		t.Fatalf("expected 1 canonical record, got %d", len(prepared))
+	}
+	if prepared[0].AccessMethods == nil || len(*prepared[0].AccessMethods) != 2 {
+		t.Fatalf("expected merged access methods, got %+v", prepared[0].AccessMethods)
+	}
+	if len(tracked.bulkCalls) != 1 {
+		t.Fatalf("expected 1 sibling hydration call, got %d", len(tracked.bulkCalls))
+	}
+	if !slices.Equal(tracked.bulkCalls[0], []string{"dup-b"}) {
+		t.Fatalf("expected only missing sibling id to be hydrated, got %+v", tracked.bulkCalls[0])
+	}
+}
+
+func drsISOTime(raw string) time.Time {
+	tm, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		panic(err)
+	}
+	return tm
+}
+
+func ptrTime(raw string) *time.Time {
+	tm := drsISOTime(raw)
+	return &tm
 }
 
 func TestReadableChecksumFilter(t *testing.T) {

@@ -137,6 +137,10 @@ retryLookup:
 	r.Name = strings.TrimSpace(name.String)
 	r.Version = version.String
 	r.Description = description.String
+	nameAliases, err := db.nameAliasesForObject(ctx, lookupID)
+	if err != nil {
+		return nil, err
+	}
 	objectID := r.ID
 	if resolvedAlias && requestID != "" {
 		objectID = requestID
@@ -153,7 +157,8 @@ retryLookup:
 			Name:        common.Ptr(r.Name),
 			SelfUri:     "drs://" + objectID,
 		},
-		Properties: map[string]interface{}{},
+		NameAliases: nameAliases,
+		Properties:  map[string]interface{}{},
 	}
 
 	// 2. Fetch storage access methods.
@@ -239,6 +244,12 @@ func (db *SqliteDB) CreateObject(ctx context.Context, obj *models.InternalObject
 	if err := insertControlledAccessTx(ctx, tx, obj.Id, objectAccessResources(obj)); err != nil {
 		return err
 	}
+	for _, alias := range normalizeObjectNameAliases(obj) {
+		_, err = tx.ExecContext(ctx, `INSERT INTO drs_object_name_alias (object_id, name_alias) VALUES (?, ?)`, obj.Id, alias)
+		if err != nil {
+			return fmt.Errorf("failed to insert name alias: %w", err)
+		}
+	}
 
 	// Insert storage access methods.
 	if obj.AccessMethods != nil {
@@ -292,6 +303,7 @@ func (db *SqliteDB) RegisterObjects(ctx context.Context, objects []models.Intern
 	accessArgs := make([]interface{}, 0)
 	controlledArgs := make([]interface{}, 0)
 	checksumArgs := make([]interface{}, 0)
+	nameAliasArgs := make([]interface{}, 0)
 
 	for _, obj := range objects {
 		ids = append(ids, obj.Id)
@@ -300,6 +312,9 @@ func (db *SqliteDB) RegisterObjects(ctx context.Context, objects []models.Intern
 		seenAccess := make(map[string]struct{})
 		for _, resource := range objectAccessResources(&obj) {
 			controlledArgs = append(controlledArgs, obj.Id, resource)
+		}
+		for _, alias := range normalizeObjectNameAliases(&obj) {
+			nameAliasArgs = append(nameAliasArgs, obj.Id, alias)
 		}
 		if obj.AccessMethods != nil {
 			for _, am := range *obj.AccessMethods {
@@ -347,6 +362,9 @@ func (db *SqliteDB) RegisterObjects(ctx context.Context, objects []models.Intern
 	if err := execSQLiteDeleteByIDs(tx, "drs_object_checksum", ids); err != nil {
 		return fmt.Errorf("failed bulk clear checksums: %w", err)
 	}
+	if err := execSQLiteDeleteByIDs(tx, "drs_object_name_alias", ids); err != nil {
+		return fmt.Errorf("failed bulk clear name aliases: %w", err)
+	}
 
 	if len(accessArgs) > 0 {
 		if err := execSQLiteBulkInsert(
@@ -370,6 +388,18 @@ func (db *SqliteDB) RegisterObjects(ctx context.Context, objects []models.Intern
 			"",
 		); err != nil {
 			return fmt.Errorf("failed bulk insert controlled access: %w", err)
+		}
+	}
+	if len(nameAliasArgs) > 0 {
+		if err := execSQLiteBulkInsert(
+			tx,
+			"INSERT INTO drs_object_name_alias (object_id, name_alias) VALUES ",
+			"(?, ?)",
+			2,
+			nameAliasArgs,
+			"",
+		); err != nil {
+			return fmt.Errorf("failed bulk insert name aliases: %w", err)
 		}
 	}
 	if len(checksumArgs) > 0 {
@@ -443,6 +473,67 @@ func (db *SqliteDB) GetObjectsByChecksums(ctx context.Context, checksums []strin
 		}
 	}
 	return result, nil
+}
+
+func (db *SqliteDB) ListScopedObjectIDsByChecksums(ctx context.Context, organization, project string, checksums []string) (map[string][]string, error) {
+	organization = strings.TrimSpace(organization)
+	project = strings.TrimSpace(project)
+	if organization == "" || project == "" || len(checksums) == 0 {
+		return map[string][]string{}, nil
+	}
+	resource, err := sycommon.ResourcePath(organization, project)
+	if err != nil {
+		return nil, err
+	}
+	normalized := uniqueNonEmptyStrings(checksums)
+	if len(normalized) == 0 {
+		return map[string][]string{}, nil
+	}
+	args := make([]any, 0, len(normalized)+2)
+	args = append(args, resource, "sha256")
+	placeholders := makePlaceholders(len(normalized))
+	for _, checksum := range normalized {
+		args = append(args, checksum)
+	}
+	rows, err := db.db.QueryContext(ctx, fmt.Sprintf(`
+		SELECT DISTINCT c.checksum, c.object_id
+		FROM drs_object_checksum c
+		INNER JOIN drs_object_controlled_access ca ON ca.object_id = c.object_id
+		WHERE ca.resource = ? AND c.type = ? AND c.checksum IN (%s)
+		ORDER BY c.checksum, c.object_id`, placeholders), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[string][]string, len(normalized))
+	for _, checksum := range normalized {
+		out[checksum] = []string{}
+	}
+	seen := make(map[string]map[string]struct{}, len(normalized))
+	for rows.Next() {
+		var checksum string
+		var objectID string
+		if err := rows.Scan(&checksum, &objectID); err != nil {
+			return nil, err
+		}
+		checksum = strings.TrimSpace(checksum)
+		objectID = strings.TrimSpace(objectID)
+		if checksum == "" || objectID == "" {
+			continue
+		}
+		if seen[checksum] == nil {
+			seen[checksum] = make(map[string]struct{})
+		}
+		if _, ok := seen[checksum][objectID]; ok {
+			continue
+		}
+		seen[checksum][objectID] = struct{}{}
+		out[checksum] = append(out[checksum], objectID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (db *SqliteDB) ListObjectIDsByScope(ctx context.Context, organization, project string) ([]string, error) {
@@ -1175,6 +1266,9 @@ func (db *SqliteDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []stri
 	if err := db.attachControlledAccess(ctx, objectsByID); err != nil {
 		return nil, err
 	}
+	if err := db.attachNameAliases(ctx, objectsByID); err != nil {
+		return nil, err
+	}
 
 	return objectsByID, nil
 }
@@ -1280,6 +1374,13 @@ func objectAccessResources(obj *models.InternalObject) []string {
 	return sycommon.AuthzMapToList(obj.Authorizations)
 }
 
+func normalizeObjectNameAliases(obj *models.InternalObject) []string {
+	if obj == nil {
+		return nil
+	}
+	return common.NormalizeNameAliases(common.StringVal(obj.Name), obj.NameAliases)
+}
+
 func sortedObjectIDs(objectsByID map[string]*models.InternalObject) []string {
 	ids := make([]string, 0, len(objectsByID))
 	for id := range objectsByID {
@@ -1287,6 +1388,23 @@ func sortedObjectIDs(objectsByID map[string]*models.InternalObject) []string {
 	}
 	sort.Strings(ids)
 	return ids
+}
+
+func uniqueNonEmptyStrings(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		normalized := strings.TrimSpace(value)
+		if normalized == "" {
+			continue
+		}
+		if _, ok := seen[normalized]; ok {
+			continue
+		}
+		seen[normalized] = struct{}{}
+		out = append(out, normalized)
+	}
+	return out
 }
 
 func insertControlledAccessTx(ctx context.Context, tx *sql.Tx, objectID string, resources []string) error {
@@ -1316,6 +1434,27 @@ func (db *SqliteDB) controlledAccessForObject(ctx context.Context, objectID stri
 		return nil, err
 	}
 	return sycommon.NormalizeAccessResources(resources), nil
+}
+
+func (db *SqliteDB) nameAliasesForObject(ctx context.Context, objectID string) ([]string, error) {
+	rows, err := db.db.QueryContext(ctx, `SELECT name_alias FROM drs_object_name_alias WHERE object_id = ? ORDER BY name_alias`, objectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	aliases := make([]string, 0)
+	for rows.Next() {
+		var alias string
+		if err := rows.Scan(&alias); err != nil {
+			return nil, err
+		}
+		aliases = append(aliases, alias)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return common.NormalizeNameAliases("", aliases), nil
 }
 
 func (db *SqliteDB) attachControlledAccess(ctx context.Context, objectsByID map[string]*models.InternalObject) error {
@@ -1361,6 +1500,48 @@ func (db *SqliteDB) attachControlledAccess(ctx context.Context, objectsByID map[
 		}
 		obj.ControlledAccess = &controlled
 		obj.Authorizations = sycommon.ControlledAccessToAuthzMap(controlled)
+	}
+	return nil
+}
+
+func (db *SqliteDB) attachNameAliases(ctx context.Context, objectsByID map[string]*models.InternalObject) error {
+	if len(objectsByID) == 0 {
+		return nil
+	}
+	ids := sortedObjectIDs(objectsByID)
+	query := fmt.Sprintf(`
+		SELECT object_id, name_alias
+		FROM drs_object_name_alias
+		WHERE object_id IN (%s)
+		ORDER BY object_id, name_alias`, makePlaceholders(len(ids)))
+	args := make([]any, 0, len(ids))
+	for _, id := range ids {
+		args = append(args, id)
+	}
+	rows, err := db.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("failed to fetch bulk object name aliases: %w", err)
+	}
+	defer rows.Close()
+
+	byObject := make(map[string][]string, len(objectsByID))
+	for rows.Next() {
+		var objectID, alias string
+		if err := rows.Scan(&objectID, &alias); err != nil {
+			return err
+		}
+		byObject[objectID] = append(byObject[objectID], alias)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	for objectID, aliases := range byObject {
+		obj := objectsByID[objectID]
+		if obj == nil {
+			continue
+		}
+		obj.NameAliases = common.NormalizeNameAliases(common.StringVal(obj.Name), aliases)
 	}
 	return nil
 }

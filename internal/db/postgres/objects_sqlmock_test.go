@@ -277,6 +277,40 @@ func TestGetBulkObjects_UsesSplitHydrationQueries(t *testing.T) {
 	}
 }
 
+func TestListScopedObjectIDsByChecksums(t *testing.T) {
+	pg, mock, rawDB := newMockPostgresDB(t)
+	defer rawDB.Close()
+
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT DISTINCT c.checksum, c.object_id
+		FROM drs_object_checksum c
+		INNER JOIN drs_object_controlled_access ca ON ca.object_id = c.object_id
+		WHERE ca.resource = $1 AND c.type = $2 AND c.checksum = ANY($3)
+		ORDER BY c.checksum, c.object_id`)).
+		WithArgs("/organization/org/project/p1", "sha256", pq.Array([]string{"sha-a", "sha-b", "missing"})).
+		WillReturnRows(sqlmock.NewRows([]string{"checksum", "object_id"}).
+			AddRow("sha-a", "obj-1").
+			AddRow("sha-a", "obj-2").
+			AddRow("sha-b", "obj-3"))
+
+	res, err := pg.ListScopedObjectIDsByChecksums(context.Background(), "org", "p1", []string{"sha-a", "sha-a", "sha-b", "missing", ""})
+	if err != nil {
+		t.Fatalf("ListScopedObjectIDsByChecksums returned error: %v", err)
+	}
+	if got := res["sha-a"]; len(got) != 2 || got[0] != "obj-1" || got[1] != "obj-2" {
+		t.Fatalf("unexpected ids for sha-a: %+v", got)
+	}
+	if got := res["sha-b"]; len(got) != 1 || got[0] != "obj-3" {
+		t.Fatalf("unexpected ids for sha-b: %+v", got)
+	}
+	if got := res["missing"]; len(got) != 0 {
+		t.Fatalf("expected empty ids for missing, got %+v", got)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
 func TestListObjectIDsByScopeOrgIncludesProjectScopes(t *testing.T) {
 	pg, mock, rawDB := newMockPostgresDB(t)
 	defer rawDB.Close()

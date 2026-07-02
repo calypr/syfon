@@ -93,15 +93,15 @@ func handleInternalPutBucketFiber(c fiber.Ctx, om *core.ObjectManager) error {
 		return apiutil.Reject(c, fiber.StatusBadRequest, err.Error())
 	}
 
-	hasCredentialMaterial := accessKey != "" || secretKey != "" || endpoint != "" || region != "" || rawProvider != ""
 	credentialID := ""
 	var existingCred *models.S3Credential
 	var credErr error
-	if !hasCredentialMaterial {
-		existingCred, credErr = om.GetS3Credential(c.Context(), req.Bucket)
-		if credErr == nil && existingCred != nil {
-			credentialID = existingCred.CredentialID
-		}
+	existingCred, credErr = om.GetS3Credential(c.Context(), req.Bucket)
+	if credErr != nil && !isCredentialNotFoundError(credErr) {
+		return apiutil.HandleError(c, credErr)
+	}
+	if credErr == nil && existingCred != nil {
+		credentialID = existingCred.CredentialID
 	}
 	if credentialID == "" {
 		credentialID = common.DeriveCredentialID(req.Bucket, bucketProvider, region, endpoint, accessKey)
@@ -110,6 +110,10 @@ func handleInternalPutBucketFiber(c fiber.Ctx, om *core.ObjectManager) error {
 		existingCred, credErr = om.GetS3Credential(c.Context(), credentialID)
 	}
 	hasExistingCred := credErr == nil && existingCred != nil
+	if hasExistingCred && rawProvider == "" {
+		bucketProvider = existingCred.Provider
+		req.Provider = common.Ptr(bucketProvider)
+	}
 	scopeOnly := hasExistingCred &&
 		accessKey == "" &&
 		secretKey == "" &&
@@ -172,6 +176,10 @@ func handleInternalPutBucketFiber(c fiber.Ctx, om *core.ObjectManager) error {
 		return apiutil.HandleError(c, err)
 	}
 	return c.SendStatus(fiber.StatusCreated)
+}
+
+func isCredentialNotFoundError(err error) bool {
+	return err != nil && strings.EqualFold(strings.TrimSpace(err.Error()), "credential not found")
 }
 
 func handleInternalDeleteBucketFiber(c fiber.Ctx, om *core.ObjectManager) error {

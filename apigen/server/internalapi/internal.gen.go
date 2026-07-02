@@ -109,6 +109,7 @@ type InternalRecord struct {
 	// Hashes Hash map, e.g. {"sha256":"..."}
 	Hashes       *HashInfo `json:"hashes,omitempty"`
 	Name         *string   `json:"name,omitempty"`
+	NameAliases  *[]string `json:"name_aliases,omitempty"`
 	Organization *string   `json:"organization,omitempty"`
 	Project      *string   `json:"project,omitempty"`
 	Size         *int64    `json:"size,omitempty"`
@@ -129,6 +130,7 @@ type InternalRecordResponse struct {
 	// Hashes Hash map, e.g. {"sha256":"..."}
 	Hashes       *HashInfo `json:"hashes,omitempty"`
 	Name         *string   `json:"name,omitempty"`
+	NameAliases  *[]string `json:"name_aliases,omitempty"`
 	Organization *string   `json:"organization,omitempty"`
 	Project      *string   `json:"project,omitempty"`
 	Rev          *string   `json:"rev,omitempty"`

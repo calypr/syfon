@@ -2,8 +2,10 @@ package core
 
 import (
 	"context"
+	"log"
 	"sort"
 	"strings"
+	"time"
 
 	syfoncommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/authz"
@@ -40,45 +42,23 @@ func (m *ObjectManager) GetObject(ctx context.Context, ident string, requiredMet
 }
 
 func (m *ObjectManager) lookupObjectByChecksum(ctx context.Context, ident string, requiredMethod string) (*models.InternalObject, bool, error) {
-	if ids, optimized, err := m.authorizedChecksumIDs(ctx, ident, requiredMethod); err != nil {
-		return nil, false, err
-	} else if optimized {
-		if len(ids) == 0 {
-			if strings.TrimSpace(requiredMethod) != "" {
-				if allMatches, ok, err := m.authorizedChecksumIDs(ctx, ident, ""); err != nil {
-					return nil, false, err
-				} else if ok && len(allMatches) > 0 {
-					return nil, true, common.ErrUnauthorized
-				}
-			}
-			return nil, false, nil
-		}
-		objects, err := m.db.GetBulkObjects(ctx, ids[:1])
-		if err != nil {
-			return nil, false, err
-		}
-		if len(objects) > 0 {
-			return &objects[0], true, nil
-		}
-		return nil, false, nil
-	}
-
-	byChecksum, err := m.db.GetObjectsByChecksum(ctx, ident)
+	byChecksum, err := m.GetObjectsByChecksum(ctx, ident, requiredMethod)
 	if err != nil {
 		return nil, false, err
 	}
 	if len(byChecksum) == 0 {
+		if strings.TrimSpace(requiredMethod) != "" {
+			allMatches, err := m.GetObjectsByChecksum(ctx, ident, "")
+			if err != nil {
+				return nil, false, err
+			}
+			if len(allMatches) > 0 {
+				return nil, true, common.ErrUnauthorized
+			}
+		}
 		return nil, false, nil
 	}
-	for i := range byChecksum {
-		if m.hasObjectMethod(ctx, &byChecksum[i], requiredMethod) {
-			return &byChecksum[i], true, nil
-		}
-	}
-	if requiredMethod != "" {
-		return nil, true, common.ErrUnauthorized
-	}
-	return nil, false, nil
+	return &byChecksum[0], true, nil
 }
 
 func (m *ObjectManager) lookupObjectByID(ctx context.Context, ident string) (*models.InternalObject, bool, error) {
@@ -132,26 +112,17 @@ func (m *ObjectManager) GetObjectsByChecksums(ctx context.Context, hashes []stri
 	}
 	filtered := make(map[string][]models.InternalObject, len(objectsByChecksum))
 	for checksum, objects := range objectsByChecksum {
-		filtered[checksum] = m.filterObjectsByMethod(ctx, objects, requiredMethod)
+		filtered[checksum] = canonicalizeProjectScopedObjects(m.filterObjectsByMethod(ctx, objects, requiredMethod), "", "")
 	}
 	return filtered, nil
 }
 
 func (m *ObjectManager) GetObjectsByChecksum(ctx context.Context, checksum string, requiredMethod string) ([]models.InternalObject, error) {
-	if ids, optimized, err := m.authorizedChecksumIDs(ctx, checksum, requiredMethod); err != nil {
-		return nil, err
-	} else if optimized {
-		if len(ids) == 0 {
-			return []models.InternalObject{}, nil
-		}
-		return m.db.GetBulkObjects(ctx, ids)
-	}
-
 	objects, err := m.db.GetObjectsByChecksum(ctx, checksum)
 	if err != nil {
 		return nil, err
 	}
-	return m.filterObjectsByMethod(ctx, objects, requiredMethod), nil
+	return canonicalizeProjectScopedObjects(m.filterObjectsByMethod(ctx, objects, requiredMethod), "", ""), nil
 }
 
 func (m *ObjectManager) GetBulkObjects(ctx context.Context, ids []string, requiredMethod string) ([]models.InternalObject, error) {
@@ -162,15 +133,22 @@ func (m *ObjectManager) GetBulkObjects(ctx context.Context, ids []string, requir
 	return m.filterObjectsByMethod(ctx, objects, requiredMethod), nil
 }
 
+func (m *ObjectManager) PrepareScopedObjects(ctx context.Context, objects []models.InternalObject, organization, project, requiredMethod string) ([]models.InternalObject, error) {
+	started := time.Now()
+	expanded, err := m.expandProjectChecksumSiblingObjects(ctx, objects, organization, project)
+	if err != nil {
+		return nil, err
+	}
+	filtered := m.filterObjectsByMethod(ctx, expanded, requiredMethod)
+	canonicalStart := time.Now()
+	canonical := canonicalizeProjectScopedObjects(filtered, organization, project)
+	log.Printf("INFO: syfon_prepare_scoped_objects organization=%s project=%s input_count=%d expanded_count=%d filtered_count=%d output_count=%d canonicalize_scoped_objects_ms=%d duration_ms=%d", strings.TrimSpace(organization), strings.TrimSpace(project), len(objects), len(expanded), len(filtered), len(canonical), time.Since(canonicalStart).Milliseconds(), time.Since(started).Milliseconds())
+	return canonical, nil
+}
+
 func (m *ObjectManager) ListObjectIDsPageByChecksum(ctx context.Context, checksum, checksumType, organization, project, requiredMethod, startAfter string, limit, offset int) ([]string, error) {
 	if limit <= 0 {
 		return []string{}, nil
-	}
-	if pager, ok := m.db.(db.ObjectChecksumPageLister); ok && strings.EqualFold(strings.TrimSpace(requiredMethod), objectMethodRead) {
-		resources, includeUnscoped, restrictToResources, ok := m.readableChecksumFilter(ctx, organization, project)
-		if ok {
-			return pager.ListObjectIDsPageByChecksum(ctx, checksum, checksumType, organization, project, startAfter, limit, offset, resources, includeUnscoped, restrictToResources)
-		}
 	}
 
 	objects, err := m.GetObjectsByChecksum(ctx, checksum, requiredMethod)
@@ -204,17 +182,6 @@ func (m *ObjectManager) ListObjectIDsPageByChecksum(ctx context.Context, checksu
 func (m *ObjectManager) ListObjectIDsPageByScope(ctx context.Context, organization, project, requiredMethod, startAfter string, limit, offset int) ([]string, error) {
 	if limit <= 0 {
 		return []string{}, nil
-	}
-	if pager, ok := m.db.(db.ObjectIDPageLister); ok {
-		if strings.TrimSpace(organization) == "" && strings.EqualFold(strings.TrimSpace(requiredMethod), objectMethodRead) {
-			if ids, ok, err := m.listReadableObjectIDsPage(ctx, startAfter, limit, offset); ok || err != nil {
-				return ids, err
-			}
-			return pager.ListObjectIDsPageByScope(ctx, organization, project, startAfter, limit, offset)
-		}
-		if strings.EqualFold(strings.TrimSpace(requiredMethod), objectMethodRead) && m.canPageScopeRead(ctx, organization, project) {
-			return pager.ListObjectIDsPageByScope(ctx, organization, project, startAfter, limit, offset)
-		}
 	}
 
 	ids, err := m.ListObjectIDsByScope(ctx, organization, project, requiredMethod)
@@ -288,15 +255,20 @@ func (m *ObjectManager) ListObjectIDsByScope(ctx context.Context, organization, 
 			return ids, err
 		}
 	}
+	listStart := time.Now()
 	ids, err := m.db.ListObjectIDsByScope(ctx, organization, project)
 	if err != nil {
 		return nil, err
 	}
+	log.Printf("INFO: syfon_list_object_ids_by_scope organization=%s project=%s ids=%d list_scope_ids_ms=%d", strings.TrimSpace(organization), strings.TrimSpace(project), len(ids), time.Since(listStart).Milliseconds())
 	objects, err := m.db.GetBulkObjects(ctx, ids)
 	if err != nil {
 		return nil, err
 	}
-	filtered := m.filterObjectsByMethod(ctx, objects, requiredMethod)
+	filtered, err := m.PrepareScopedObjects(ctx, objects, organization, project, requiredMethod)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]string, 0, len(filtered))
 	for _, obj := range filtered {
 		out = append(out, obj.Id)
@@ -325,7 +297,89 @@ func (m *ObjectManager) ListObjectsByScope(ctx context.Context, organization, pr
 	if err != nil {
 		return nil, err
 	}
-	return m.filterObjectsByMethod(ctx, objects, requiredMethod), nil
+	return m.PrepareScopedObjects(ctx, objects, organization, project, requiredMethod)
+}
+
+func (m *ObjectManager) expandProjectChecksumSiblingObjects(ctx context.Context, objects []models.InternalObject, organization, project string) ([]models.InternalObject, error) {
+	if len(objects) == 0 {
+		return []models.InternalObject{}, nil
+	}
+
+	wantedKeys := make(map[string]struct{}, len(objects))
+	checksums := make([]string, 0, len(objects))
+	seenChecksums := make(map[string]struct{}, len(objects))
+	for _, obj := range objects {
+		key, ok := canonicalProjectChecksumKey(&obj, "")
+		if !ok {
+			continue
+		}
+		wantedKeys[key] = struct{}{}
+		sha, _ := common.CanonicalSHA256(obj.Checksums)
+		if _, seen := seenChecksums[sha]; seen {
+			continue
+		}
+		seenChecksums[sha] = struct{}{}
+		checksums = append(checksums, sha)
+	}
+	if len(wantedKeys) == 0 || len(checksums) == 0 || strings.TrimSpace(organization) == "" || strings.TrimSpace(project) == "" {
+		return objects, nil
+	}
+
+	listStart := time.Now()
+	idsByChecksum, err := m.db.ListScopedObjectIDsByChecksums(ctx, organization, project, checksums)
+	if err != nil {
+		return nil, err
+	}
+	listDuration := time.Since(listStart)
+
+	expanded := make([]models.InternalObject, 0, len(objects))
+	seenIDs := make(map[string]struct{}, len(objects))
+	missingIDs := make([]string, 0)
+	missingSeen := make(map[string]struct{})
+	for _, obj := range objects {
+		if _, seen := seenIDs[obj.Id]; seen {
+			continue
+		}
+		seenIDs[obj.Id] = struct{}{}
+		expanded = append(expanded, obj)
+	}
+	for _, sha := range checksums {
+		for _, id := range idsByChecksum[sha] {
+			if _, seen := seenIDs[id]; seen {
+				continue
+			}
+			if _, queued := missingSeen[id]; queued {
+				continue
+			}
+			missingSeen[id] = struct{}{}
+			missingIDs = append(missingIDs, id)
+		}
+	}
+
+	hydrateStart := time.Now()
+	if len(missingIDs) > 0 {
+		siblings, err := m.db.GetBulkObjects(ctx, missingIDs)
+		if err != nil {
+			return nil, err
+		}
+		for _, obj := range siblings {
+			key, ok := canonicalProjectChecksumKey(&obj, "")
+			if !ok {
+				continue
+			}
+			if _, wanted := wantedKeys[key]; !wanted {
+				continue
+			}
+			if _, seen := seenIDs[obj.Id]; seen {
+				continue
+			}
+			seenIDs[obj.Id] = struct{}{}
+			expanded = append(expanded, obj)
+		}
+	}
+	hydrateDuration := time.Since(hydrateStart)
+	log.Printf("INFO: syfon_expand_scoped_checksum_siblings organization=%s project=%s checksums=%d input_count=%d missing_ids=%d output_count=%d list_scoped_sibling_ids_ms=%d hydrate_missing_siblings_ms=%d", strings.TrimSpace(organization), strings.TrimSpace(project), len(checksums), len(objects), len(missingIDs), len(expanded), listDuration.Milliseconds(), hydrateDuration.Milliseconds())
+	return expanded, nil
 }
 
 func objectHasAccessURL(obj *models.InternalObject, objectURL string) bool {

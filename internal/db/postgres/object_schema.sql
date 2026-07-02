@@ -37,6 +37,13 @@ CREATE TABLE IF NOT EXISTS drs_object_alias (
   FOREIGN KEY(object_id) REFERENCES drs_object(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS drs_object_name_alias (
+  object_id TEXT NOT NULL,
+  name_alias TEXT NOT NULL,
+  PRIMARY KEY (object_id, name_alias),
+  FOREIGN KEY(object_id) REFERENCES drs_object(id) ON DELETE CASCADE
+);
+
 DROP TABLE IF EXISTS drs_object_browse_index;
 
 CREATE INDEX IF NOT EXISTS drs_object_access_method_object_id_idx
@@ -65,3 +72,6 @@ CREATE INDEX IF NOT EXISTS drs_object_controlled_access_object_id_resource_idx
 
 CREATE INDEX IF NOT EXISTS drs_object_alias_object_id_idx
   ON drs_object_alias(object_id);
+
+CREATE INDEX IF NOT EXISTS drs_object_name_alias_object_id_idx
+  ON drs_object_name_alias(object_id);

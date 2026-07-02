@@ -76,6 +76,10 @@ func handleInternalListFiber(om *core.ObjectManager) fiber.Handler {
 			if err != nil {
 				return apiutil.HandleError(c, err)
 			}
+			objs, err = om.PrepareScopedObjects(c.Context(), objs, filterOrg, filterProject, "read")
+			if err != nil {
+				return apiutil.HandleError(c, err)
+			}
 			records := make([]internalapi.InternalRecord, 0, len(objs))
 			for _, o := range objs {
 				records = append(records, core.InternalObjectToInternalRecord(o))
@@ -106,6 +110,10 @@ func handleInternalListFiber(om *core.ObjectManager) fiber.Handler {
 		}
 
 		objs, err := om.GetBulkObjects(c.Context(), ids, "read")
+		if err != nil {
+			return apiutil.HandleError(c, err)
+		}
+		objs, err = om.PrepareScopedObjects(c.Context(), objs, filterOrg, filterProject, "read")
 		if err != nil {
 			return apiutil.HandleError(c, err)
 		}

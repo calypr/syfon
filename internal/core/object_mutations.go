@@ -198,7 +198,192 @@ func (m *ObjectManager) RegisterObjects(ctx context.Context, objs []models.Inter
 	if err := m.bulkObjectMethodError(ctx, objs, objectMethodCreate); err != nil {
 		return err
 	}
-	return m.db.RegisterObjects(ctx, objs)
+	canonical, aliases, err := m.canonicalizeRegistrationObjects(ctx, objs)
+	if err != nil {
+		return err
+	}
+	if err := m.db.RegisterObjects(ctx, canonical); err != nil {
+		return err
+	}
+	for aliasID, canonicalID := range aliases {
+		if err := m.db.CreateObjectAlias(ctx, aliasID, canonicalID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (m *ObjectManager) CollapseProjectChecksumDuplicates(ctx context.Context, organization, project string) (int, error) {
+	ids, err := m.db.ListObjectIDsByScope(ctx, organization, project)
+	if err != nil {
+		return 0, err
+	}
+	objects, err := m.db.GetBulkObjects(ctx, ids)
+	if err != nil {
+		return 0, err
+	}
+	if err := m.bulkObjectMethodError(ctx, objects, objectMethodUpdate); err != nil {
+		return 0, err
+	}
+
+	grouped := make(map[string][]models.InternalObject)
+	for _, obj := range objects {
+		key, ok := canonicalProjectChecksumKey(&obj, "")
+		if !ok {
+			continue
+		}
+		grouped[key] = append(grouped[key], cloneObject(obj))
+	}
+
+	merged := make([]models.InternalObject, 0, len(grouped))
+	aliasMap := make(map[string]string)
+	toDelete := make([]string, 0)
+	keys := make([]string, 0, len(grouped))
+	for key, group := range grouped {
+		if len(group) < 2 {
+			continue
+		}
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		group := grouped[key]
+		canonical := collapseCanonicalGroup(group)
+		merged = append(merged, canonical)
+		for _, obj := range group {
+			if obj.Id == canonical.Id {
+				continue
+			}
+			aliasMap[obj.Id] = canonical.Id
+			toDelete = append(toDelete, obj.Id)
+		}
+	}
+
+	if len(merged) == 0 {
+		return 0, nil
+	}
+	if err := m.db.RegisterObjects(ctx, merged); err != nil {
+		return 0, err
+	}
+	for aliasID, canonicalID := range aliasMap {
+		if err := m.db.CreateObjectAlias(ctx, aliasID, canonicalID); err != nil {
+			return 0, err
+		}
+	}
+	if err := m.db.BulkDeleteObjects(ctx, uniqueStrings(toDelete)); err != nil {
+		return 0, err
+	}
+	return len(aliasMap), nil
+}
+
+func (m *ObjectManager) canonicalizeRegistrationObjects(ctx context.Context, objs []models.InternalObject) ([]models.InternalObject, map[string]string, error) {
+	if len(objs) == 0 {
+		return nil, nil, nil
+	}
+
+	checksums := make([]string, 0, len(objs))
+	seenChecksums := make(map[string]struct{}, len(objs))
+	for _, obj := range objs {
+		if sha, ok := common.CanonicalSHA256(obj.Checksums); ok {
+			if _, seen := seenChecksums[sha]; seen {
+				continue
+			}
+			seenChecksums[sha] = struct{}{}
+			checksums = append(checksums, sha)
+		}
+	}
+
+	existingByChecksum, err := m.db.GetObjectsByChecksums(ctx, checksums)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	type registrationGroup struct {
+		existingCount int
+		objects       []models.InternalObject
+	}
+	groups := make(map[string]*registrationGroup)
+	passthrough := make([]models.InternalObject, 0)
+
+	for _, obj := range objs {
+		sha, ok := common.CanonicalSHA256(obj.Checksums)
+		if !ok {
+			passthrough = append(passthrough, cloneObject(obj))
+			continue
+		}
+		resources := projectScopeResources(&obj)
+		if len(resources) != 1 {
+			passthrough = append(passthrough, cloneObject(obj))
+			continue
+		}
+		key := resources[0] + "|" + sha
+		group, ok := groups[key]
+		if !ok {
+			group = &registrationGroup{}
+			for _, existing := range existingByChecksum[sha] {
+				existingKey, ok := canonicalProjectChecksumKey(&existing, "")
+				if ok && existingKey == key {
+					group.objects = append(group.objects, cloneObject(existing))
+				}
+			}
+			group.existingCount = len(group.objects)
+			groups[key] = group
+		}
+		group.objects = append(group.objects, cloneObject(obj))
+	}
+
+	keys := make([]string, 0, len(groups))
+	for key := range groups {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	merged := make([]models.InternalObject, 0, len(keys)+len(passthrough))
+	aliasMap := make(map[string]string)
+
+	for _, key := range keys {
+		state := groups[key]
+		group := state.objects
+		if len(group) == 0 {
+			continue
+		}
+
+		hasExisting := state.existingCount > 0
+		canonical := cloneObject(group[0])
+		latest := canonical
+		if hasExisting {
+			canonical = cloneObject(group[0])
+		}
+		for i, obj := range group {
+			if hasExisting && i < state.existingCount && canonicalObjectNewer(obj, canonical) {
+				canonical = cloneObject(obj)
+			}
+			if canonicalObjectNewer(obj, latest) {
+				latest = cloneObject(obj)
+			}
+		}
+		if !hasExisting {
+			canonical = cloneObject(latest)
+		}
+
+		collapsed := collapseCanonicalGroup(group)
+		collapsed.Id = canonical.Id
+		collapsed.SelfUri = "drs://" + canonical.Id
+		collapsed.CreatedTime = canonical.CreatedTime
+		collapsed.Name = latest.Name
+		collapsed.NameAliases = common.NormalizeNameAliases(common.StringVal(collapsed.Name), append(collapsed.NameAliases, common.StringVal(canonical.Name)))
+		merged = append(merged, collapsed)
+
+		for _, obj := range group {
+			if obj.Id == collapsed.Id || strings.TrimSpace(obj.Id) == "" {
+				continue
+			}
+			aliasMap[obj.Id] = collapsed.Id
+		}
+	}
+
+	merged = append(merged, passthrough...)
+	return merged, aliasMap, nil
 }
 
 func (m *ObjectManager) ReplaceObjects(ctx context.Context, objs []models.InternalObject) error {

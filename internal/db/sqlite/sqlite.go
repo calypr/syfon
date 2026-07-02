@@ -94,6 +94,13 @@ func (db *SqliteDB) initSchema() error {
 			FOREIGN KEY(object_id) REFERENCES drs_object(id) ON DELETE CASCADE
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_drs_object_alias_object_id ON drs_object_alias(object_id)`,
+		`CREATE TABLE IF NOT EXISTS drs_object_name_alias (
+			object_id TEXT NOT NULL,
+			name_alias TEXT NOT NULL,
+			PRIMARY KEY (object_id, name_alias),
+			FOREIGN KEY(object_id) REFERENCES drs_object(id) ON DELETE CASCADE
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_drs_object_name_alias_object_id ON drs_object_name_alias(object_id)`,
 		`CREATE TABLE IF NOT EXISTS s3_credential (
 			credential_id TEXT PRIMARY KEY,
 			bucket TEXT NOT NULL,

@@ -89,6 +89,9 @@ func handleInternalScopeRepairApplyFiber(om *core.ObjectManager) fiber.Handler {
 		if err := authorizeStorageCleanupScope(c.Context(), req.Organization, req.Project, "update"); err != nil {
 			return apiutil.HandleError(c, err)
 		}
+		if _, err := om.CollapseProjectChecksumDuplicates(c.Context(), req.Organization, req.Project); err != nil {
+			return apiutil.HandleError(c, err)
+		}
 		result, err := svc.Apply(c.Context(), req)
 		if err != nil {
 			return apiutil.HandleError(c, err)
@@ -186,6 +189,7 @@ func clientRecordFromServer(rec serverinternalapi.InternalRecord) clientinternal
 		CreatedTime:      rec.CreatedTime,
 		Description:      rec.Description,
 		Name:             rec.Name,
+		NameAliases:      rec.NameAliases,
 		Version:          rec.Version,
 		UpdatedTime:      rec.UpdatedTime,
 		Hashes:           (*clientinternalapi.HashInfo)(rec.Hashes),
@@ -204,6 +208,7 @@ func serverRecordFromClient(rec clientinternalapi.InternalRecord) serverinternal
 		CreatedTime:      rec.CreatedTime,
 		Description:      rec.Description,
 		Name:             rec.Name,
+		NameAliases:      rec.NameAliases,
 		Version:          rec.Version,
 		UpdatedTime:      rec.UpdatedTime,
 		Hashes:           (*serverinternalapi.HashInfo)(rec.Hashes),
@@ -222,6 +227,7 @@ func clientRecordResponseFromServer(rec serverinternalapi.InternalRecordResponse
 		CreatedTime:      rec.CreatedTime,
 		Description:      rec.Description,
 		Name:             rec.Name,
+		NameAliases:      rec.NameAliases,
 		Version:          rec.Version,
 		UpdatedTime:      rec.UpdatedTime,
 		Hashes:           (*clientinternalapi.HashInfo)(rec.Hashes),

@@ -11,6 +11,7 @@ const (
 	RouteInternalMultipartComplete          = "/data/multipart/complete"
 	RouteInternalInspectObject              = "/data/inspect"
 	RouteInternalInspectObjectBulk          = "/data/inspect/bulk"
+	RouteInternalInspectObjectBulkList      = "/data/inspect/bulk-list"
 	RouteInternalInspectProjectBucket       = "/data/inspect/project-bucket"
 	RouteInternalInspectProjectRecords      = "/data/inspect/project-records"
 	RouteInternalInspectProjectScopes       = "/data/inspect/project-scopes"

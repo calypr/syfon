@@ -924,6 +924,83 @@ func TestSqliteDB_GetObjectsByChecksumsAndListByPrefix(t *testing.T) {
 	}
 }
 
+func TestSqliteDB_ListScopedObjectIDsByChecksums(t *testing.T) {
+	ctx := context.Background()
+	db, _ := NewSqliteDB(":memory:")
+	now := time.Now()
+	objects := []models.InternalObject{
+		{
+			DrsObject: drs.DrsObject{
+				Id:          "proj-a-1",
+				CreatedTime: now,
+				UpdatedTime: &now,
+				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: "sha-a"}},
+			},
+			Authorizations: map[string][]string{"org": {"p1"}},
+		},
+		{
+			DrsObject: drs.DrsObject{
+				Id:          "proj-a-2",
+				CreatedTime: now,
+				UpdatedTime: &now,
+				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: "sha-a"}},
+			},
+			Authorizations: map[string][]string{"org": {"p1"}},
+		},
+		{
+			DrsObject: drs.DrsObject{
+				Id:          "other-project",
+				CreatedTime: now,
+				UpdatedTime: &now,
+				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: "sha-a"}},
+			},
+			Authorizations: map[string][]string{"org": {"p2"}},
+		},
+		{
+			DrsObject: drs.DrsObject{
+				Id:          "other-org",
+				CreatedTime: now,
+				UpdatedTime: &now,
+				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: "sha-a"}},
+			},
+			Authorizations: map[string][]string{"other": {"p1"}},
+		},
+		{
+			DrsObject: drs.DrsObject{
+				Id:          "proj-b",
+				CreatedTime: now,
+				UpdatedTime: &now,
+				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: "sha-b"}},
+			},
+			Authorizations: map[string][]string{"org": {"p1"}},
+		},
+	}
+	if err := db.RegisterObjects(ctx, objects); err != nil {
+		t.Fatalf("RegisterObjects failed: %v", err)
+	}
+
+	res, err := db.ListScopedObjectIDsByChecksums(ctx, "org", "p1", []string{"sha-a", "sha-a", "sha-b", "missing", ""})
+	if err != nil {
+		t.Fatalf("ListScopedObjectIDsByChecksums failed: %v", err)
+	}
+	if got := res["sha-a"]; len(got) != 2 || got[0] != "proj-a-1" || got[1] != "proj-a-2" {
+		t.Fatalf("unexpected scoped ids for sha-a: %+v", got)
+	}
+	if got := res["sha-b"]; len(got) != 1 || got[0] != "proj-b" {
+		t.Fatalf("unexpected scoped ids for sha-b: %+v", got)
+	}
+	if got := res["missing"]; len(got) != 0 {
+		t.Fatalf("expected empty ids for missing checksum, got %+v", got)
+	}
+	emptyRes, err := db.ListScopedObjectIDsByChecksums(ctx, "org", "p1", nil)
+	if err != nil {
+		t.Fatalf("ListScopedObjectIDsByChecksums empty failed: %v", err)
+	}
+	if len(emptyRes) != 0 {
+		t.Fatalf("expected empty map for empty checksum input, got %+v", emptyRes)
+	}
+}
+
 func TestSqliteDB_ListObjectIDsByScopeRootIncludesUnscoped(t *testing.T) {
 	ctx := context.Background()
 	db, _ := NewSqliteDB(":memory:")

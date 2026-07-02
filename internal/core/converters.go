@@ -253,6 +253,7 @@ func InternalRecordToInternalObject(r internalapi.InternalRecord, now time.Time)
 	if r.Name != nil && strings.TrimSpace(*r.Name) != "" {
 		obj.Name = normalizedObjectNamePtr(r.Name)
 	}
+	objectName := common.StringVal(obj.Name)
 	if v := r.Version; v != nil {
 		obj.Version = v
 	}
@@ -277,6 +278,7 @@ func InternalRecordToInternalObject(r internalapi.InternalRecord, now time.Time)
 	}
 	internalObj := models.InternalObject{
 		DrsObject:      obj,
+		NameAliases:    common.NormalizeNameAliases(objectName, common.DerefStringSlice(r.NameAliases)),
 		Authorizations: authzMap,
 		Properties:     map[string]interface{}{},
 	}
@@ -319,6 +321,7 @@ func InternalObjectToInternalRecord(obj models.InternalObject) internalapi.Inter
 		CreatedTime:   common.Ptr(obj.CreatedTime.Format(time.RFC3339)),
 		Description:   obj.Description,
 		Name:          obj.Name,
+		NameAliases:   common.Ptr(common.NormalizeNameAliases(common.StringVal(obj.Name), obj.NameAliases)),
 		Version:       obj.Version,
 		AccessMethods: obj.AccessMethods,
 	}
@@ -349,6 +352,7 @@ func InternalObjectToInternalRecordResponse(obj models.InternalObject) internala
 		CreatedTime:      rec.CreatedTime,
 		Description:      rec.Description,
 		Name:             rec.Name,
+		NameAliases:      rec.NameAliases,
 		Version:          rec.Version,
 		UpdatedTime:      rec.UpdatedTime,
 		Hashes:           rec.Hashes,

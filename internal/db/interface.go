@@ -21,6 +21,7 @@ type ObjectStore interface {
 	CreateObject(ctx context.Context, obj *models.InternalObject) error
 	GetObjectsByChecksum(ctx context.Context, checksum string) ([]models.InternalObject, error)
 	GetObjectsByChecksums(ctx context.Context, checksums []string) (map[string][]models.InternalObject, error)
+	ListScopedObjectIDsByChecksums(ctx context.Context, organization, project string, checksums []string) (map[string][]string, error)
 	ListObjectIDsByScope(ctx context.Context, organization, project string) ([]string, error)
 	CreateObjectAlias(ctx context.Context, aliasID, canonicalObjectID string) error
 	ResolveObjectAlias(ctx context.Context, aliasID string) (string, error)

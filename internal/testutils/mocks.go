@@ -119,6 +119,54 @@ func (m *MockDatabase) GetObjectsByChecksums(ctx context.Context, checksums []st
 	return out, nil
 }
 
+func (m *MockDatabase) ListScopedObjectIDsByChecksums(ctx context.Context, organization, project string, checksums []string) (map[string][]string, error) {
+	out := make(map[string][]string, len(checksums))
+	for _, checksum := range checksums {
+		checksum = strings.TrimSpace(checksum)
+		if checksum == "" {
+			continue
+		}
+		out[checksum] = []string{}
+		matches, err := m.GetObjectsByChecksum(ctx, checksum)
+		if err != nil {
+			return nil, err
+		}
+		seen := map[string]struct{}{}
+		for _, match := range matches {
+			if !objectMatchesMockScope(m.ObjectAuthz[match.Id], organization, project) {
+				continue
+			}
+			if _, ok := seen[match.Id]; ok {
+				continue
+			}
+			seen[match.Id] = struct{}{}
+			out[checksum] = append(out[checksum], match.Id)
+		}
+	}
+	return out, nil
+}
+
+func objectMatchesMockScope(authz map[string][]string, organization, project string) bool {
+	organization = strings.TrimSpace(organization)
+	project = strings.TrimSpace(project)
+	if organization == "" {
+		return true
+	}
+	projects, ok := authz[organization]
+	if !ok {
+		return false
+	}
+	if project == "" || len(projects) == 0 {
+		return true
+	}
+	for _, candidate := range projects {
+		if candidate == project {
+			return true
+		}
+	}
+	return false
+}
+
 func (m *MockDatabase) ListObjectIDsByScope(ctx context.Context, organization, project string) ([]string, error) {
 	ids := make([]string, 0)
 	for id := range m.Objects {
@@ -822,8 +870,6 @@ func transferBreakdownKey(ev models.TransferAttributionEvent, groupBy string) st
 		return ev.Organization + "/" + ev.Project
 	}
 }
-
-
 
 func cloneAuthzMap(in map[string][]string) map[string][]string {
 	if len(in) == 0 {
