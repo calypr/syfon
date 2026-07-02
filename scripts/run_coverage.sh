@@ -42,7 +42,18 @@ if [[ -z "${PKGS}" ]]; then
 fi
 
 cd "${WORK_DIR}"
-CGO_ENABLED=1 go test -count=1 -covermode=atomic -coverprofile "${OUT_FILE}" ${PKGS}
+echo "coverage scope:   ${SCOPE}"
+echo "coverage workdir: ${WORK_DIR}"
+echo "coverage output:  ${OUT_FILE}"
+echo "packages:"
+printf '  %s\n' ${PKGS}
+
+GO_TEST_FLAGS=(-count=1 -covermode=atomic -coverprofile "${OUT_FILE}")
+if [[ "${SCOPE}" == "client" ]]; then
+  GO_TEST_FLAGS=(-v "${GO_TEST_FLAGS[@]}")
+fi
+
+CGO_ENABLED=1 go test "${GO_TEST_FLAGS[@]}" ${PKGS}
 go tool cover -func="${OUT_FILE}" | tee "${OUT_DIR}/coverage.txt"
 go tool cover -html="${OUT_FILE}" -o "${HTML_FILE}"
 

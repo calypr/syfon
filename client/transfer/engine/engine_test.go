@@ -494,12 +494,36 @@ func TestGenericUploaderMultipartStreamsProgressAndCompletesAfterFinalize(t *tes
 	uploader := &GenericUploader{Backend: backend}
 
 	var finalized atomic.Bool
+	var closeGate sync.Once
+	releaseComplete := func() {
+		closeGate.Do(func() {
+			close(completeGate)
+		})
+	}
+
+	var eventsMu sync.Mutex
 	var events []common.ProgressEvent
+	progressReady := make(chan struct{}, 1)
+	progressErr := make(chan error, 1)
 	ctx := common.WithOid(context.Background(), "oid-slow-multipart")
 	ctx = common.WithProgress(ctx, func(ev common.ProgressEvent) error {
+		eventsMu.Lock()
 		events = append(events, ev)
+		eventCount := len(events)
+		eventsMu.Unlock()
 		if ev.BytesSoFar == 21*common.MB && !finalized.Load() {
-			t.Fatalf("terminal multipart progress emitted before completion: %+v", ev)
+			err := fmt.Errorf("terminal multipart progress emitted before completion: %+v", ev)
+			select {
+			case progressErr <- err:
+			default:
+			}
+			return err
+		}
+		if eventCount >= 2 {
+			select {
+			case progressReady <- struct{}{}:
+			default:
+			}
 		}
 		return nil
 	})
@@ -514,21 +538,46 @@ func TestGenericUploaderMultipartStreamsProgressAndCompletesAfterFinalize(t *tes
 		}, true)
 	}()
 
-	time.Sleep(20 * time.Millisecond)
-	if len(events) < 2 {
-		close(completeGate)
-		if err := <-done; err != nil {
-			t.Fatalf("Upload returned error: %v", err)
+	select {
+	case <-progressReady:
+	case err := <-progressErr:
+		releaseComplete()
+		if uploadErr := <-done; uploadErr != nil && uploadErr.Error() != err.Error() {
+			t.Fatalf("Upload returned error %v after progress error %v", uploadErr, err)
 		}
-		t.Fatalf("expected streaming multipart progress before completion, got %+v", events)
+		t.Fatal(err)
+	case <-time.After(2 * time.Second):
+		releaseComplete()
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatalf("Upload returned error: %v", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("multipart upload did not emit streaming progress before completion gate release")
+		}
+		eventsMu.Lock()
+		gotEvents := append([]common.ProgressEvent(nil), events...)
+		eventsMu.Unlock()
+		t.Fatalf("expected streaming multipart progress before completion, got %+v", gotEvents)
 	}
 
 	finalized.Store(true)
-	close(completeGate)
-	if err := <-done; err != nil {
-		t.Fatalf("Upload returned error: %v", err)
+	releaseComplete()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Upload returned error: %v", err)
+		}
+	case err := <-progressErr:
+		t.Fatal(err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("multipart upload did not complete after completion gate release")
 	}
+
+	eventsMu.Lock()
 	last := events[len(events)-1]
+	eventsMu.Unlock()
 	if last.BytesSoFar != 21*common.MB {
 		t.Fatalf("expected final multipart BytesSoFar=%d, got %+v", 21*common.MB, last)
 	}
