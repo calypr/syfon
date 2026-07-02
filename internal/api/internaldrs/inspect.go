@@ -41,6 +41,7 @@ type internalInspectProjectBucketRequest struct {
 type internalInspectProjectRecordsRequest struct {
 	Organization string `json:"organization,omitempty"`
 	Project      string `json:"project,omitempty"`
+	PathPrefix   string `json:"path_prefix,omitempty"`
 }
 
 type internalInspectProjectScopesRequest struct {
@@ -343,10 +344,21 @@ func handleInternalInspectProjectRecordsFiber(om *core.ObjectManager) fiber.Hand
 		if err != nil {
 			return apiutil.HandleError(c, err)
 		}
+		pathPrefix := strings.Trim(strings.TrimSpace(req.PathPrefix), "/")
+		pathPrefixes := []string{}
+		if pathPrefix != "" {
+			pathPrefixes = append(pathPrefixes, pathPrefix)
+			if resolvedPrefix, err := om.ResolveProjectStoragePathPrefix(c.Context(), organization, project, pathPrefix); err == nil && strings.TrimSpace(resolvedPrefix) != "" && !strings.EqualFold(strings.TrimSpace(resolvedPrefix), pathPrefix) {
+				pathPrefixes = append(pathPrefixes, strings.TrimSpace(resolvedPrefix))
+			}
+		}
 		out := internalInspectProjectRecordsResponse{Items: make([]internalInspectProjectRecordItem, 0, len(objects))}
 		for _, obj := range objects {
 			record, ok := projectRecordAuditItemFromObject(obj, organization, project)
 			if !ok {
+				continue
+			}
+			if len(pathPrefixes) > 0 && !projectRecordMatchesAnyPathPrefix(record, pathPrefixes...) {
 				continue
 			}
 			out.Items = append(out.Items, record)
@@ -562,6 +574,44 @@ func projectRecordAuditItemFromObject(obj models.InternalObject, organization, p
 		item.UpdatedTime = obj.UpdatedTime.Format(time.RFC3339Nano)
 	}
 	return item, true
+}
+
+func projectRecordMatchesAnyPathPrefix(record internalInspectProjectRecordItem, pathPrefixes ...string) bool {
+	for _, prefix := range pathPrefixes {
+		if projectRecordMatchesPathPrefix(record, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func projectRecordMatchesPathPrefix(record internalInspectProjectRecordItem, pathPrefix string) bool {
+	normalizedPrefix := strings.Trim(strings.TrimSpace(pathPrefix), "/")
+	if normalizedPrefix == "" {
+		return true
+	}
+	prefixWithSlash := normalizedPrefix + "/"
+	for _, raw := range record.AccessURLs {
+		parsedBucket, parsedKey, ok := common.ParseS3URL(strings.TrimSpace(raw))
+		if !ok || strings.TrimSpace(parsedBucket) == "" {
+			continue
+		}
+		key := strings.Trim(strings.TrimSpace(parsedKey), "/")
+		if key == normalizedPrefix || strings.HasPrefix(key, prefixWithSlash) {
+			return true
+		}
+	}
+	for _, method := range record.AccessMethods {
+		parsedBucket, parsedKey, ok := common.ParseS3URL(strings.TrimSpace(method.URL))
+		if !ok || strings.TrimSpace(parsedBucket) == "" {
+			continue
+		}
+		key := strings.Trim(strings.TrimSpace(parsedKey), "/")
+		if key == normalizedPrefix || strings.HasPrefix(key, prefixWithSlash) {
+			return true
+		}
+	}
+	return false
 }
 
 func primarySHA256Checksum(checksums []drs.Checksum) string {

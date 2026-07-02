@@ -106,7 +106,7 @@ func (m *ObjectManager) storageTargetFromURL(ctx context.Context, raw string) (s
 		if bucket == "" || key == "" {
 			return storageTarget{}, false, nil
 		}
-		cred, err := m.db.GetS3Credential(ctx, bucket)
+		cred, err := m.credentialForBucket(ctx, bucket)
 		if err != nil {
 			return storageTarget{}, false, fmt.Errorf("lookup credential for bucket %s: %w", bucket, err)
 		}

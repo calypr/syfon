@@ -46,6 +46,14 @@ const (
 	ProjectStorageInspectSummary ProjectStorageInspectMode = "summary"
 )
 
+const (
+	storageListCoalesceThreshold     = 25
+	storageListFallbackObjectLimit   = 5000
+	storageListSlowExactThreshold    = time.Second
+	storageListSlowPrefixThreshold   = 3 * time.Second
+	storagePrefixListLoggingDisabled = "disabled"
+)
+
 type ProjectStorageSummary struct {
 	Provider    string
 	Bucket      string
@@ -67,6 +75,25 @@ type ProjectStorageInspectOptions struct {
 	Mode        ProjectStorageInspectMode
 	IncludeHead bool
 	PathPrefix  string
+}
+
+type storageListTargetWork struct {
+	bucket         string
+	key            string
+	cred           models.S3Credential
+	baseResult     StorageListValidationResult
+	requestIndexes []int
+}
+
+type storageListRunStats struct {
+	inputItemCount       int
+	distinctTargetCount  int
+	duplicateCount       int
+	bucketCount          int
+	coalescedPrefixCount int
+	exactListCallCount   int
+	prefixListPageCount  int
+	fallbackCount        int
 }
 
 type StorageListValidationRequest struct {
@@ -163,6 +190,18 @@ func (m *ObjectManager) InspectProjectStorage(ctx context.Context, organization,
 	return &ProjectStorageInspectResult{Summary: summary, Items: out}, nil
 }
 
+func (m *ObjectManager) ResolveProjectStoragePathPrefix(ctx context.Context, organization, project, pathPrefix string) (string, error) {
+	target, err := m.resolveProjectStorageScopeTarget(ctx, organization, project)
+	if err != nil {
+		return "", err
+	}
+	target = target.withPathPrefix(pathPrefix)
+	if target == nil {
+		return "", nil
+	}
+	return strings.Trim(strings.TrimSpace(target.prefix), "/"), nil
+}
+
 func (target *resolvedStorageScopeTarget) withPathPrefix(pathPrefix string) *resolvedStorageScopeTarget {
 	trimmed := strings.Trim(strings.TrimSpace(pathPrefix), "/")
 	if target == nil || trimmed == "" {
@@ -175,6 +214,15 @@ func (target *resolvedStorageScopeTarget) withPathPrefix(pathPrefix string) *res
 		copyTarget.prefix = strings.Trim(strings.TrimSpace(copyTarget.prefix), "/") + "/" + trimmed
 	}
 	return &copyTarget
+}
+
+func withStoragePrefixListLogging(ctx context.Context, mode string) context.Context {
+	return context.WithValue(ctx, contextKey("storagePrefixListLogging"), strings.TrimSpace(mode))
+}
+
+func storagePrefixListLoggingEnabled(ctx context.Context) bool {
+	mode, _ := ctx.Value(contextKey("storagePrefixListLogging")).(string)
+	return strings.TrimSpace(mode) != storagePrefixListLoggingDisabled
 }
 
 func normalizeProjectStorageInspectMode(mode ProjectStorageInspectMode) ProjectStorageInspectMode {
@@ -373,35 +421,86 @@ func uniqueStorageObjectURLs(values []string) []string {
 func (m *ObjectManager) ListValidateStorageObjects(ctx context.Context, items []StorageListValidationRequest) []StorageListValidationResult {
 	started := time.Now()
 	ctx = WithStorageInspectCache(ctx)
+	ctx = withStoragePrefixListLogging(ctx, storagePrefixListLoggingDisabled)
 	if len(items) == 0 {
 		log.Printf("INFO: syfon_bulk_list_validate_done items=0 duration_ms=0")
 		return []StorageListValidationResult{}
 	}
+	visible, visibleErr := m.ListVisibleBuckets(ctx)
 	results := make([]StorageListValidationResult, len(items))
-	workers := len(items)
-	if workers > maxStorageInspectWorkers {
-		workers = maxStorageInspectWorkers
-	}
-	type workItem struct {
-		index int
-		req   StorageListValidationRequest
-	}
-	workCh := make(chan workItem)
-	var wg sync.WaitGroup
-	for worker := 0; worker < workers; worker++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for work := range workCh {
-				results[work.index] = m.listValidateStorageObject(ctx, work.req)
-			}
-		}()
-	}
+	workByTarget := make(map[string]*storageListTargetWork)
+	buckets := map[string]struct{}{}
+	stats := storageListRunStats{inputItemCount: len(items)}
 	for index, item := range items {
-		workCh <- workItem{index: index, req: item}
+		result, targetWork, ok := m.resolveListValidationTarget(ctx, item, index, visible, visibleErr)
+		if !ok {
+			results[index] = result
+			continue
+		}
+		targetKey := storageListTargetKey(targetWork.bucket, targetWork.key)
+		if existing, found := workByTarget[targetKey]; found {
+			existing.requestIndexes = append(existing.requestIndexes, index)
+			stats.duplicateCount++
+			continue
+		}
+		workByTarget[targetKey] = targetWork
+		buckets[targetWork.bucket] = struct{}{}
 	}
-	close(workCh)
-	wg.Wait()
+	stats.distinctTargetCount = len(workByTarget)
+	stats.bucketCount = len(buckets)
+
+	prefixGroups := groupStorageListTargetsByDirectory(workByTarget)
+	coalescedPrefixGroups := make([][]*storageListTargetWork, 0, len(prefixGroups))
+	for _, group := range prefixGroups {
+		if len(group) < storageListCoalesceThreshold {
+			continue
+		}
+		stats.coalescedPrefixCount++
+		coalescedPrefixGroups = append(coalescedPrefixGroups, group)
+	}
+	log.Printf(
+		"INFO: syfon_bulk_list_validate_start items=%d distinct_targets=%d duplicates=%d buckets=%d coalesced_prefixes=%d",
+		stats.inputItemCount,
+		stats.distinctTargetCount,
+		stats.duplicateCount,
+		stats.bucketCount,
+		stats.coalescedPrefixCount,
+	)
+
+	outcomes := make(map[string]StorageListValidationResult, len(workByTarget))
+	matchedItems := make(map[string]StorageBucketObject, len(workByTarget))
+	unresolved := cloneStorageListWorkMap(workByTarget)
+
+	for _, group := range coalescedPrefixGroups {
+		m.runCoalescedStorageListGroup(ctx, group, outcomes, matchedItems, unresolved, &stats)
+	}
+	m.runExactStorageListTargets(ctx, unresolved, outcomes, matchedItems, &stats)
+
+	for targetKey, work := range workByTarget {
+		outcome, ok := outcomes[targetKey]
+		if !ok {
+			outcome = work.baseResult
+			outcome.Status = StorageProbeStatusNotFound
+			outcome.ErrorKind = string(StorageInspectObjectNotFound)
+			outcome.Error = fmt.Sprintf("object %q was not found", work.baseResult.ObjectURL)
+		}
+		for _, index := range work.requestIndexes {
+			req := items[index]
+			if item, found := matchedItems[targetKey]; found {
+				result := storageListValidationPresentResult(req, work.baseResult, item)
+				result.ID = strings.TrimSpace(req.ID)
+				result.ObjectURL = strings.TrimSpace(req.ObjectURL)
+				results[index] = result
+				continue
+			}
+			result := outcome
+			result.ID = strings.TrimSpace(req.ID)
+			result.ObjectURL = strings.TrimSpace(req.ObjectURL)
+			result.ValidationStatus = storageListValidationStatusForError(req)
+			results[index] = result
+		}
+	}
+
 	statusCounts := map[StorageProbeStatus]int{}
 	validationCounts := map[StorageValidationStatus]int{}
 	for _, result := range results {
@@ -409,8 +508,16 @@ func (m *ObjectManager) ListValidateStorageObjects(ctx context.Context, items []
 		validationCounts[result.ValidationStatus]++
 	}
 	log.Printf(
-		"INFO: syfon_bulk_list_validate_done items=%d present=%d not_found=%d invalid=%d error=%d matched=%d mismatched=%d unverifiable=%d duration_ms=%d",
-		len(items),
+		"INFO: syfon_bulk_list_validate_done items=%d distinct_targets=%d duplicates=%d buckets=%d coalesced_prefixes=%d exact_list_calls=%d prefix_list_pages=%d fallbacks=%d visible_error=%t present=%d not_found=%d invalid=%d error=%d matched=%d mismatched=%d unverifiable=%d duration_ms=%d",
+		stats.inputItemCount,
+		stats.distinctTargetCount,
+		stats.duplicateCount,
+		stats.bucketCount,
+		stats.coalescedPrefixCount,
+		stats.exactListCallCount,
+		stats.prefixListPageCount,
+		stats.fallbackCount,
+		visibleErr != nil,
 		statusCounts[StorageProbeStatusPresent],
 		statusCounts[StorageProbeStatusNotFound],
 		statusCounts[StorageProbeStatusInvalid],
@@ -423,7 +530,7 @@ func (m *ObjectManager) ListValidateStorageObjects(ctx context.Context, items []
 	return results
 }
 
-func (m *ObjectManager) listValidateStorageObject(ctx context.Context, req StorageListValidationRequest) StorageListValidationResult {
+func (m *ObjectManager) resolveListValidationTarget(ctx context.Context, req StorageListValidationRequest, index int, visible map[string]VisibleBucket, visibleErr error) (StorageListValidationResult, *storageListTargetWork, bool) {
 	result := StorageListValidationResult{
 		ID:               strings.TrimSpace(req.ID),
 		ObjectURL:        strings.TrimSpace(req.ObjectURL),
@@ -435,21 +542,19 @@ func (m *ObjectManager) listValidateStorageObject(ctx context.Context, req Stora
 		result.Status, result.ErrorKind = classifyStorageProbeError(err)
 		result.Error = strings.TrimSpace(err.Error())
 		result.ValidationStatus = storageListValidationStatusForError(req)
-		return result
+		return result, nil, false
 	}
 	if !ok || target.provider != common.S3Provider {
-		log.Printf("INFO: syfon_bulk_list_validate_resolve id=%s object_url=%q status=invalid provider=%s bucket=%s key=%q", result.ID, result.ObjectURL, target.provider, target.bucket, target.key)
 		result.Status = StorageProbeStatusInvalid
 		result.ErrorKind = string(StorageInspectInvalidInput)
 		result.Error = "object_url must be a valid s3://bucket/key URL"
 		result.ValidationStatus = storageListValidationStatusForError(req)
-		return result
+		return result, nil, false
 	}
 	result.Provider = common.S3Provider
 	result.Bucket = target.bucket
 	result.Key = target.key
 	result.Path = path.Base(target.key)
-	log.Printf("INFO: syfon_bulk_list_validate_resolve id=%s object_url=%q bucket=%s key=%q expected_size_set=%t expected_name=%q", result.ID, result.ObjectURL, target.bucket, target.key, req.ExpectedSizeBytes != nil, strings.TrimSpace(req.ExpectedName))
 
 	cred, err := m.credentialForBucket(ctx, target.bucket)
 	if err != nil {
@@ -457,16 +562,14 @@ func (m *ObjectManager) listValidateStorageObject(ctx context.Context, req Stora
 		result.Status, result.ErrorKind = classifyStorageProbeError(err)
 		result.Error = strings.TrimSpace(err.Error())
 		result.ValidationStatus = storageListValidationStatusForError(req)
-		return result
+		return result, nil, false
 	}
-	log.Printf("INFO: syfon_bulk_list_validate_credential id=%s request_bucket=%s request_key=%q credential_id=%s credential_bucket=%s provider=%s", result.ID, target.bucket, target.key, credentialIDForCredential(*cred), strings.TrimSpace(cred.Bucket), strings.TrimSpace(cred.Provider))
-	visible, err := m.ListVisibleBuckets(ctx)
-	if err != nil {
-		log.Printf("INFO: syfon_bulk_list_validate_visible id=%s bucket=%s key=%q error=%q", result.ID, target.bucket, target.key, err.Error())
-		result.Status, result.ErrorKind = classifyStorageProbeError(err)
-		result.Error = strings.TrimSpace(err.Error())
+	if visibleErr != nil {
+		log.Printf("INFO: syfon_bulk_list_validate_visible id=%s bucket=%s key=%q error=%q", result.ID, target.bucket, target.key, visibleErr.Error())
+		result.Status, result.ErrorKind = classifyStorageProbeError(visibleErr)
+		result.Error = strings.TrimSpace(visibleErr.Error())
 		result.ValidationStatus = storageListValidationStatusForError(req)
-		return result
+		return result, nil, false
 	}
 	if !bucketVisibleToCaller(visible, target.bucket, credentialIDForCredential(*cred)) {
 		err := &StorageInspectError{Kind: StorageInspectPermissionDenied, Message: fmt.Sprintf("bucket %q is not visible to the caller", target.bucket)}
@@ -474,41 +577,179 @@ func (m *ObjectManager) listValidateStorageObject(ctx context.Context, req Stora
 		result.Status, result.ErrorKind = classifyStorageProbeError(err)
 		result.Error = err.Error()
 		result.ValidationStatus = storageListValidationStatusForError(req)
-		return result
+		return result, nil, false
 	}
+	return result, &storageListTargetWork{
+		bucket:         target.bucket,
+		key:            target.key,
+		cred:           *cred,
+		baseResult:     result,
+		requestIndexes: []int{index},
+	}, true
+}
 
-	listStart := time.Now()
-	log.Printf("INFO: syfon_bulk_list_validate_list_start id=%s bucket=%s prefix=%q exact_prefix=true max_keys=1", result.ID, target.bucket, target.key)
-	matches, err := m.listS3Prefix(ctx, *cred, target.bucket, target.key, StoragePrefixListOptions{ExactPrefix: true, MaxKeys: 1})
+func groupStorageListTargetsByDirectory(workByTarget map[string]*storageListTargetWork) map[string][]*storageListTargetWork {
+	groups := make(map[string][]*storageListTargetWork)
+	for _, work := range workByTarget {
+		dirPrefix := storageListDirectoryPrefix(work.key)
+		groupKey := strings.TrimSpace(work.bucket) + "\x00" + dirPrefix
+		groups[groupKey] = append(groups[groupKey], work)
+	}
+	return groups
+}
+
+func cloneStorageListWorkMap(input map[string]*storageListTargetWork) map[string]*storageListTargetWork {
+	out := make(map[string]*storageListTargetWork, len(input))
+	for key, work := range input {
+		out[key] = work
+	}
+	return out
+}
+
+func storageListTargetKey(bucket string, key string) string {
+	return strings.TrimSpace(bucket) + "\x00" + strings.Trim(strings.TrimSpace(key), "/")
+}
+
+func storageListDirectoryPrefix(key string) string {
+	trimmed := strings.Trim(strings.TrimSpace(key), "/")
+	if trimmed == "" {
+		return ""
+	}
+	dir := strings.Trim(strings.TrimSpace(path.Dir(trimmed)), "/")
+	if dir == "." || dir == "" {
+		return ""
+	}
+	return dir + "/"
+}
+
+func (m *ObjectManager) runCoalescedStorageListGroup(ctx context.Context, group []*storageListTargetWork, outcomes map[string]StorageListValidationResult, matchedItems map[string]StorageBucketObject, unresolved map[string]*storageListTargetWork, stats *storageListRunStats) {
+	if len(group) == 0 {
+		return
+	}
+	requestedKeys := make(map[string]*storageListTargetWork, len(group))
+	for _, work := range group {
+		requestedKeys[storageListTargetKey(work.bucket, work.key)] = work
+	}
+	dirPrefix := storageListDirectoryPrefix(group[0].key)
+	started := time.Now()
+	listed, err := m.listS3Prefix(ctx, group[0].cred, group[0].bucket, dirPrefix, StoragePrefixListOptions{ExactPrefix: true})
 	if err != nil {
-		log.Printf("INFO: syfon_bulk_list_validate_list_done id=%s bucket=%s prefix=%q duration_ms=%d error=%q", result.ID, target.bucket, target.key, time.Since(listStart).Milliseconds(), err.Error())
-		result.Status, result.ErrorKind = classifyStorageProbeError(err)
-		result.Error = strings.TrimSpace(err.Error())
-		result.ValidationStatus = storageListValidationStatusForError(req)
-		return result
+		log.Printf("INFO: syfon_bulk_list_validate_prefix bucket=%s prefix=%q targets=%d duration_ms=%d error=%q", group[0].bucket, dirPrefix, len(group), time.Since(started).Milliseconds(), err.Error())
+		stats.fallbackCount += len(group)
+		return
 	}
-	firstKey := ""
-	if len(matches) > 0 {
-		firstKey = strings.Trim(strings.TrimSpace(matches[0].Key), "/")
+	pageEstimate := 1
+	if len(listed) > 1000 {
+		pageEstimate = (len(listed) + 999) / 1000
 	}
-	log.Printf("INFO: syfon_bulk_list_validate_list_done id=%s bucket=%s prefix=%q duration_ms=%d matches=%d first_key=%q", result.ID, target.bucket, target.key, time.Since(listStart).Milliseconds(), len(matches), firstKey)
-	for _, item := range matches {
-		key := strings.Trim(strings.TrimSpace(item.Key), "/")
-		if key != target.key {
-			log.Printf("INFO: syfon_bulk_list_validate_exact_miss id=%s requested_key=%q listed_key=%q", result.ID, target.key, key)
+	stats.prefixListPageCount += pageEstimate
+	found := 0
+	for _, item := range listed {
+		key := storageListTargetKey(group[0].bucket, item.Key)
+		work, ok := requestedKeys[key]
+		if !ok {
 			continue
 		}
-		normalized := normalizeStorageBucketObjects([]StorageBucketObject{item}, &resolvedStorageScopeTarget{provider: common.S3Provider, bucket: target.bucket, prefix: target.key})
+		normalized := normalizeStorageBucketObjects([]StorageBucketObject{item}, &resolvedStorageScopeTarget{provider: common.S3Provider, bucket: work.bucket, prefix: work.key})
+		if len(normalized) == 0 {
+			continue
+		}
+		matchedItems[key] = normalized[0]
+		result := work.baseResult
+		result.Exists = true
+		result.Status = StorageProbeStatusPresent
+		result.Error = ""
+		result.ErrorKind = ""
+		outcomes[key] = result
+		delete(unresolved, key)
+		found++
+	}
+	if len(listed) > storageListFallbackObjectLimit && found < len(group) {
+		stats.fallbackCount += len(group) - found
+	}
+	if duration := time.Since(started); duration > storageListSlowPrefixThreshold {
+		log.Printf("INFO: syfon_bulk_list_validate_prefix bucket=%s prefix=%q targets=%d listed_objects=%d matched_targets=%d duration_ms=%d", group[0].bucket, dirPrefix, len(group), len(listed), found, duration.Milliseconds())
+	}
+}
+
+func (m *ObjectManager) runExactStorageListTargets(ctx context.Context, unresolved map[string]*storageListTargetWork, outcomes map[string]StorageListValidationResult, matchedItems map[string]StorageBucketObject, stats *storageListRunStats) {
+	workers := len(unresolved)
+	if workers > maxStorageInspectWorkers {
+		workers = maxStorageInspectWorkers
+	}
+	if workers == 0 {
+		return
+	}
+	keys := make([]string, 0, len(unresolved))
+	for key := range unresolved {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	workCh := make(chan string)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	for worker := 0; worker < workers; worker++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for targetKey := range workCh {
+				work := unresolved[targetKey]
+				outcome, item, matched := m.runExactStorageListTarget(ctx, work, stats)
+				mu.Lock()
+				outcomes[targetKey] = outcome
+				if matched {
+					matchedItems[targetKey] = item
+				}
+				mu.Unlock()
+			}
+		}()
+	}
+	for _, key := range keys {
+		workCh <- key
+	}
+	close(workCh)
+	wg.Wait()
+}
+
+func (m *ObjectManager) runExactStorageListTarget(ctx context.Context, work *storageListTargetWork, stats *storageListRunStats) (StorageListValidationResult, StorageBucketObject, bool) {
+	started := time.Now()
+	matches, err := m.listS3Prefix(ctx, work.cred, work.bucket, work.key, StoragePrefixListOptions{ExactPrefix: true, MaxKeys: 1})
+	if err != nil {
+		log.Printf("INFO: syfon_bulk_list_validate_exact bucket=%s key=%q duration_ms=%d error=%q", work.bucket, work.key, time.Since(started).Milliseconds(), err.Error())
+		result := work.baseResult
+		result.Status, result.ErrorKind = classifyStorageProbeError(err)
+		result.Error = strings.TrimSpace(err.Error())
+		stats.exactListCallCount++
+		return result, StorageBucketObject{}, false
+	}
+	stats.exactListCallCount++
+	for _, item := range matches {
+		key := strings.Trim(strings.TrimSpace(item.Key), "/")
+		if key != work.key {
+			continue
+		}
+		normalized := normalizeStorageBucketObjects([]StorageBucketObject{item}, &resolvedStorageScopeTarget{provider: common.S3Provider, bucket: work.bucket, prefix: work.key})
 		if len(normalized) == 0 {
 			break
 		}
-		return storageListValidationPresentResult(req, result, normalized[0])
+		if duration := time.Since(started); duration > storageListSlowExactThreshold {
+			log.Printf("INFO: syfon_bulk_list_validate_exact bucket=%s key=%q duration_ms=%d status=present", work.bucket, work.key, duration.Milliseconds())
+		}
+		result := work.baseResult
+		result.Exists = true
+		result.Status = StorageProbeStatusPresent
+		result.Error = ""
+		result.ErrorKind = ""
+		return result, normalized[0], true
 	}
+	if duration := time.Since(started); duration > storageListSlowExactThreshold {
+		log.Printf("INFO: syfon_bulk_list_validate_exact bucket=%s key=%q duration_ms=%d status=not_found", work.bucket, work.key, duration.Milliseconds())
+	}
+	result := work.baseResult
 	result.Status = StorageProbeStatusNotFound
 	result.ErrorKind = string(StorageInspectObjectNotFound)
-	result.Error = fmt.Sprintf("object %q was not found", req.ObjectURL)
-	result.ValidationStatus = storageListValidationStatusForError(req)
-	return result
+	result.Error = fmt.Sprintf("object %q was not found", work.baseResult.ObjectURL)
+	return result, StorageBucketObject{}, false
 }
 
 func storageListValidationPresentResult(req StorageListValidationRequest, result StorageListValidationResult, item StorageBucketObject) StorageListValidationResult {
@@ -580,7 +821,10 @@ func defaultS3PrefixLister(ctx context.Context, cred models.S3Credential, bucket
 		input.MaxKeys = aws.Int32(options.MaxKeys)
 	}
 	requestPrefix := aws.ToString(input.Prefix)
-	log.Printf("INFO: syfon_s3_prefix_list_start bucket=%s requested_prefix=%q input_prefix=%q exact_prefix=%t max_keys=%d include_head=%t", bucket, prefix, requestPrefix, options.ExactPrefix, options.MaxKeys, options.IncludeHead)
+	logEnabled := storagePrefixListLoggingEnabled(ctx)
+	if logEnabled {
+		log.Printf("INFO: syfon_s3_prefix_list_start bucket=%s requested_prefix=%q input_prefix=%q exact_prefix=%t max_keys=%d include_head=%t", bucket, prefix, requestPrefix, options.ExactPrefix, options.MaxKeys, options.IncludeHead)
+	}
 	paginator := awss3.NewListObjectsV2Paginator(client, input)
 	out := make([]StorageBucketObject, 0)
 	pageCount := 0
@@ -588,7 +832,9 @@ func defaultS3PrefixLister(ctx context.Context, cred models.S3Credential, bucket
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(ctx)
 		if err != nil {
-			log.Printf("INFO: syfon_s3_prefix_list_done bucket=%s requested_prefix=%q input_prefix=%q exact_prefix=%t max_keys=%d include_head=%t pages=%d objects=%d duration_ms=%d error=%q", bucket, prefix, requestPrefix, options.ExactPrefix, options.MaxKeys, options.IncludeHead, pageCount, len(out), time.Since(started).Milliseconds(), err.Error())
+			if logEnabled {
+				log.Printf("INFO: syfon_s3_prefix_list_done bucket=%s requested_prefix=%q input_prefix=%q exact_prefix=%t max_keys=%d include_head=%t pages=%d objects=%d duration_ms=%d error=%q", bucket, prefix, requestPrefix, options.ExactPrefix, options.MaxKeys, options.IncludeHead, pageCount, len(out), time.Since(started).Milliseconds(), err.Error())
+			}
 			return nil, classifyS3ListError(bucket, prefix, err)
 		}
 		pageCount++
@@ -620,7 +866,9 @@ func defaultS3PrefixLister(ctx context.Context, cred models.S3Credential, bucket
 			})
 		}
 	}
-	log.Printf("INFO: syfon_s3_prefix_list_done bucket=%s requested_prefix=%q input_prefix=%q exact_prefix=%t max_keys=%d include_head=%t pages=%d objects=%d first_keys=%q duration_ms=%d", bucket, prefix, requestPrefix, options.ExactPrefix, options.MaxKeys, options.IncludeHead, pageCount, len(out), strings.Join(firstKeys, ","), time.Since(started).Milliseconds())
+	if logEnabled {
+		log.Printf("INFO: syfon_s3_prefix_list_done bucket=%s requested_prefix=%q input_prefix=%q exact_prefix=%t max_keys=%d include_head=%t pages=%d objects=%d first_keys=%q duration_ms=%d", bucket, prefix, requestPrefix, options.ExactPrefix, options.MaxKeys, options.IncludeHead, pageCount, len(out), strings.Join(firstKeys, ","), time.Since(started).Milliseconds())
+	}
 	if !options.IncludeHead || len(out) == 0 {
 		return out, nil
 	}

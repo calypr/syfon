@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -121,6 +122,12 @@ func TestHandleInternalInspectProjectRecords(t *testing.T) {
 	created := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
 	updated := time.Date(2026, 7, 1, 12, 30, 0, 0, time.UTC)
 	db := &testutils.MockDatabase{
+		Credentials: map[string]models.S3Credential{
+			"cred-1": {CredentialID: "cred-1", Bucket: "bucket-a", Provider: "s3"},
+		},
+		BucketScopes: map[string]models.BucketScope{
+			"syfon|e2e": {Organization: "syfon", ProjectID: "e2e", Bucket: "bucket-a", CredentialID: "cred-1", PathPrefix: "project-root"},
+		},
 		Objects: map[string]*drs.DrsObject{
 			"obj-1": {
 				Id:   "obj-1",
@@ -172,6 +179,21 @@ func TestHandleInternalInspectProjectRecords(t *testing.T) {
 	}
 	if len(item.AccessURLs) != 1 || item.AccessURLs[0] != "s3://bucket-a/prefix/example.bin" {
 		t.Fatalf("unexpected access urls: %+v", item.AccessURLs)
+	}
+}
+
+func TestProjectRecordMatchesAnyPathPrefixAvoidsFalsePrefixMatches(t *testing.T) {
+	record := internalInspectProjectRecordItem{
+		AccessURLs: []string{"s3://bucket-a/project-root/CONFIG/a.json"},
+		AccessMethods: []internalProjectAccessMethod{
+			{URL: "s3://bucket-a/project-root/CONFIG/a.json"},
+		},
+	}
+	if !projectRecordMatchesAnyPathPrefix(record, "CONFIG", "project-root/CONFIG") {
+		t.Fatalf("expected CONFIG path prefix to match CONFIG/a.json")
+	}
+	if projectRecordMatchesAnyPathPrefix(record, "CONFIGURATION", "project-root/CONFIGURATION") {
+		t.Fatalf("expected CONFIGURATION path prefix not to match CONFIG/a.json")
 	}
 }
 
@@ -376,5 +398,140 @@ func TestHandleInternalInspectObjectBulkListValidatesExactKeyWithoutHead(t *test
 	}
 	if inspectCalls != 0 {
 		t.Fatalf("expected bulk-list not to HEAD objects, got %d inspector calls", inspectCalls)
+	}
+}
+
+func TestHandleInternalInspectObjectBulkListDeduplicatesExactTargets(t *testing.T) {
+	db := &testutils.MockDatabase{
+		Credentials: map[string]models.S3Credential{
+			"cred-1": {CredentialID: "cred-1", Bucket: "bucket-a", Provider: "s3"},
+		},
+		BucketScopes: map[string]models.BucketScope{
+			"syfon|e2e": {Organization: "syfon", ProjectID: "e2e", Bucket: "bucket-a", CredentialID: "cred-1", PathPrefix: "project-root"},
+		},
+	}
+	om := core.NewObjectManager(db, &testutils.MockUrlManager{})
+	listCalls := 0
+	om.SetS3PrefixListerWithOptions(func(ctx context.Context, cred models.S3Credential, bucket string, prefix string, options core.StoragePrefixListOptions) ([]core.StorageBucketObject, error) {
+		listCalls++
+		if bucket != "bucket-a" || prefix != "project-root/file.bin" || !options.ExactPrefix || options.MaxKeys != 1 {
+			t.Fatalf("unexpected bulk-list request bucket=%q prefix=%q options=%+v", bucket, prefix, options)
+		}
+		return []core.StorageBucketObject{{Provider: "s3", Bucket: bucket, Key: "project-root/file.bin", Path: "file.bin", SizeBytes: 17}}, nil
+	})
+	expectedSize := int64(17)
+	body, _ := json.Marshal(internalInspectObjectsBulkRequest{Items: []internalInspectObjectRequest{
+		{ID: "one", ObjectURL: "s3://bucket-a/project-root/file.bin", ExpectedSizeBytes: &expectedSize, ExpectedName: "file.bin"},
+		{ID: "two", ObjectURL: "s3://bucket-a/project-root/file.bin", ExpectedSizeBytes: &expectedSize, ExpectedName: "file.bin"},
+	}})
+	req := withTestAuthzContext(httptest.NewRequest(http.MethodPost, "/data/inspect/bulk-list", bytes.NewBuffer(body)), "gen3", map[string]map[string]bool{
+		"/organization/syfon/project/e2e": {"read": true},
+	})
+	rr := doInternalDRSTestRequest(req, om)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp internalInspectObjectBulkResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if listCalls != 1 {
+		t.Fatalf("expected duplicate exact keys to share one LIST call, got %d", listCalls)
+	}
+	if len(resp.Items) != 2 || resp.Items[0].ID != "one" || resp.Items[1].ID != "two" {
+		t.Fatalf("expected one response per original request, got %+v", resp.Items)
+	}
+}
+
+func TestHandleInternalInspectObjectBulkListSharesRemoteEvidenceAcrossValidationExpectations(t *testing.T) {
+	db := &testutils.MockDatabase{
+		Credentials: map[string]models.S3Credential{
+			"cred-1": {CredentialID: "cred-1", Bucket: "bucket-a", Provider: "s3"},
+		},
+		BucketScopes: map[string]models.BucketScope{
+			"syfon|e2e": {Organization: "syfon", ProjectID: "e2e", Bucket: "bucket-a", CredentialID: "cred-1", PathPrefix: "project-root"},
+		},
+	}
+	om := core.NewObjectManager(db, &testutils.MockUrlManager{})
+	listCalls := 0
+	om.SetS3PrefixListerWithOptions(func(ctx context.Context, cred models.S3Credential, bucket string, prefix string, options core.StoragePrefixListOptions) ([]core.StorageBucketObject, error) {
+		listCalls++
+		return []core.StorageBucketObject{{Provider: "s3", Bucket: bucket, Key: "project-root/file.bin", Path: "file.bin", SizeBytes: 17}}, nil
+	})
+	size17 := int64(17)
+	size99 := int64(99)
+	body, _ := json.Marshal(internalInspectObjectsBulkRequest{Items: []internalInspectObjectRequest{
+		{ID: "matched", ObjectURL: "s3://bucket-a/project-root/file.bin", ExpectedSizeBytes: &size17, ExpectedName: "file.bin"},
+		{ID: "mismatched", ObjectURL: "s3://bucket-a/project-root/file.bin", ExpectedSizeBytes: &size99, ExpectedName: "file.bin"},
+	}})
+	req := withTestAuthzContext(httptest.NewRequest(http.MethodPost, "/data/inspect/bulk-list", bytes.NewBuffer(body)), "gen3", map[string]map[string]bool{
+		"/organization/syfon/project/e2e": {"read": true},
+	})
+	rr := doInternalDRSTestRequest(req, om)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp internalInspectObjectBulkResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if listCalls != 1 {
+		t.Fatalf("expected one shared LIST call, got %d", listCalls)
+	}
+	if len(resp.Items) != 2 || resp.Items[0].ValidationStatus != "matched" || resp.Items[1].ValidationStatus != "mismatched" {
+		t.Fatalf("expected per-request validation after shared evidence, got %+v", resp.Items)
+	}
+}
+
+func TestHandleInternalInspectObjectBulkListCoalescesDensePrefixes(t *testing.T) {
+	db := &testutils.MockDatabase{
+		Credentials: map[string]models.S3Credential{
+			"cred-1": {CredentialID: "cred-1", Bucket: "bucket-a", Provider: "s3"},
+		},
+		BucketScopes: map[string]models.BucketScope{
+			"syfon|e2e": {Organization: "syfon", ProjectID: "e2e", Bucket: "bucket-a", CredentialID: "cred-1", PathPrefix: "project-root"},
+		},
+	}
+	om := core.NewObjectManager(db, &testutils.MockUrlManager{})
+	listCalls := 0
+	om.SetS3PrefixListerWithOptions(func(ctx context.Context, cred models.S3Credential, bucket string, prefix string, options core.StoragePrefixListOptions) ([]core.StorageBucketObject, error) {
+		listCalls++
+		if bucket != "bucket-a" || prefix != "project-root/dense/" || !options.ExactPrefix || options.MaxKeys != 0 || options.IncludeHead {
+			t.Fatalf("unexpected coalesced LIST request bucket=%q prefix=%q options=%+v", bucket, prefix, options)
+		}
+		out := make([]core.StorageBucketObject, 0, 25)
+		for i := 0; i < 25; i++ {
+			key := fmt.Sprintf("project-root/dense/file-%02d.bin", i)
+			out = append(out, core.StorageBucketObject{Provider: "s3", Bucket: bucket, Key: key, Path: fmt.Sprintf("file-%02d.bin", i), SizeBytes: int64(i + 1)})
+		}
+		return out, nil
+	})
+	items := make([]internalInspectObjectRequest, 0, 25)
+	for i := 0; i < 25; i++ {
+		size := int64(i + 1)
+		items = append(items, internalInspectObjectRequest{
+			ID:                fmt.Sprintf("item-%02d", i),
+			ObjectURL:         fmt.Sprintf("s3://bucket-a/project-root/dense/file-%02d.bin", i),
+			ExpectedSizeBytes: &size,
+			ExpectedName:      fmt.Sprintf("file-%02d.bin", i),
+		})
+	}
+	body, _ := json.Marshal(internalInspectObjectsBulkRequest{Items: items})
+	req := withTestAuthzContext(httptest.NewRequest(http.MethodPost, "/data/inspect/bulk-list", bytes.NewBuffer(body)), "gen3", map[string]map[string]bool{
+		"/organization/syfon/project/e2e": {"read": true},
+	})
+	rr := doInternalDRSTestRequest(req, om)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp internalInspectObjectBulkResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if listCalls != 1 {
+		t.Fatalf("expected dense prefix to coalesce into one LIST call, got %d", listCalls)
+	}
+	if len(resp.Items) != 25 {
+		t.Fatalf("expected 25 items, got %d", len(resp.Items))
 	}
 }
