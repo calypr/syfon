@@ -2,11 +2,15 @@ package core
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/models"
@@ -81,6 +85,87 @@ func TestDeleteStorageTargetFileProvider(t *testing.T) {
 	}
 }
 
+func TestBulkDeleteObjectsWithOptionsUsesS3BatchDelete(t *testing.T) {
+	deleter := &fakeS3ObjectDeleter{}
+	restore := replaceS3ObjectDeleterForTest(deleter)
+	defer restore()
+
+	accessMethods := func(rawURL string) *[]drs.AccessMethod {
+		return &[]drs.AccessMethod{{
+			Type: drs.AccessMethodTypeS3,
+			AccessUrl: &struct {
+				Headers *[]string `json:"headers,omitempty"`
+				Url     string    `json:"url"`
+			}{Url: rawURL},
+		}}
+	}
+	db := &testutils.MockDatabase{
+		Objects: map[string]*drs.DrsObject{
+			"obj-1": {Id: "obj-1", AccessMethods: accessMethods("s3://bucket/path/a.txt")},
+			"obj-2": {Id: "obj-2", AccessMethods: accessMethods("s3://bucket/path/b.txt")},
+			"obj-3": {Id: "obj-3", AccessMethods: accessMethods("s3://bucket/path/a.txt")},
+		},
+		Credentials: map[string]models.S3Credential{
+			"bucket": {
+				Bucket:    "bucket",
+				Provider:  common.S3Provider,
+				Region:    "us-east-1",
+				AccessKey: "test-key",
+				SecretKey: "test-secret",
+			},
+		},
+	}
+	om := NewObjectManager(db, &capturingURLManager{})
+
+	if err := om.BulkDeleteObjectsWithOptions(context.Background(), []string{"obj-1", "obj-2", "obj-3"}, DeleteOptions{DeleteStorageData: true}); err != nil {
+		t.Fatalf("BulkDeleteObjectsWithOptions failed: %v", err)
+	}
+	if deleter.deleteObjectCalls != 0 {
+		t.Fatalf("expected no single DeleteObject calls, got %d", deleter.deleteObjectCalls)
+	}
+	if len(deleter.deleteObjectsKeys) != 1 {
+		t.Fatalf("expected one DeleteObjects call, got %d", len(deleter.deleteObjectsKeys))
+	}
+	if got, want := deleter.deleteObjectsKeys[0], []string{"path/a.txt", "path/b.txt"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected batch keys: got %+v want %+v", got, want)
+	}
+	for _, id := range []string{"obj-1", "obj-2", "obj-3"} {
+		if _, exists := db.Objects[id]; exists {
+			t.Fatalf("expected %s to be removed from db", id)
+		}
+	}
+}
+
+func TestDeleteS3ObjectsChunksLargeBatches(t *testing.T) {
+	deleter := &fakeS3ObjectDeleter{}
+	restore := replaceS3ObjectDeleterForTest(deleter)
+	defer restore()
+
+	keys := make([]string, 0, 1002)
+	for i := 0; i < 1002; i++ {
+		keys = append(keys, fmt.Sprintf("key-%04d", i))
+	}
+	keys = append(keys, keys[0])
+	om := NewObjectManager(&testutils.MockDatabase{
+		Credentials: map[string]models.S3Credential{
+			"bucket": {Bucket: "bucket", Provider: common.S3Provider, Region: "us-east-1"},
+		},
+	}, &capturingURLManager{})
+
+	if err := om.deleteS3Objects(context.Background(), "bucket", keys); err != nil {
+		t.Fatalf("deleteS3Objects failed: %v", err)
+	}
+	if len(deleter.deleteObjectsKeys) != 2 {
+		t.Fatalf("expected two DeleteObjects chunks, got %d", len(deleter.deleteObjectsKeys))
+	}
+	if got := len(deleter.deleteObjectsKeys[0]); got != 1000 {
+		t.Fatalf("expected first chunk to contain 1000 keys, got %d", got)
+	}
+	if got := len(deleter.deleteObjectsKeys[1]); got != 2 {
+		t.Fatalf("expected second chunk to contain 2 keys, got %d", got)
+	}
+}
+
 func TestStorageTargetsForScopedObjectUseCanonicalChecksumPath(t *testing.T) {
 	checksum := strings.Repeat("a", 64)
 	om := NewObjectManager(&testutils.MockDatabase{
@@ -129,6 +214,35 @@ func TestStorageTargetsForScopedObjectUseCanonicalChecksumPath(t *testing.T) {
 	}
 	if want := "program-root/project-subpath/" + checksum; targets[0].key != want {
 		t.Fatalf("expected canonical delete key %q, got %q", want, targets[0].key)
+	}
+}
+
+type fakeS3ObjectDeleter struct {
+	deleteObjectCalls int
+	deleteObjectsKeys [][]string
+}
+
+func (f *fakeS3ObjectDeleter) DeleteObject(context.Context, *awss3.DeleteObjectInput, ...func(*awss3.Options)) (*awss3.DeleteObjectOutput, error) {
+	f.deleteObjectCalls++
+	return &awss3.DeleteObjectOutput{}, nil
+}
+
+func (f *fakeS3ObjectDeleter) DeleteObjects(_ context.Context, input *awss3.DeleteObjectsInput, _ ...func(*awss3.Options)) (*awss3.DeleteObjectsOutput, error) {
+	keys := make([]string, 0, len(input.Delete.Objects))
+	for _, obj := range input.Delete.Objects {
+		keys = append(keys, aws.ToString(obj.Key))
+	}
+	f.deleteObjectsKeys = append(f.deleteObjectsKeys, keys)
+	return &awss3.DeleteObjectsOutput{}, nil
+}
+
+func replaceS3ObjectDeleterForTest(deleter s3ObjectDeleter) func() {
+	previous := newS3ObjectDeleter
+	newS3ObjectDeleter = func(context.Context, *models.S3Credential) (s3ObjectDeleter, error) {
+		return deleter, nil
+	}
+	return func() {
+		newS3ObjectDeleter = previous
 	}
 }
 

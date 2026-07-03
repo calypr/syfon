@@ -108,10 +108,8 @@ func (m *ObjectManager) BulkDeleteObjectsWithOptions(ctx context.Context, ids []
 		if err != nil {
 			return err
 		}
-		for i := range objects {
-			if err := m.deleteObjectStorage(ctx, &objects[i]); err != nil {
-				return err
-			}
+		if err := m.deleteObjectsStorage(ctx, objects); err != nil {
+			return err
 		}
 	}
 	return m.db.BulkDeleteObjects(ctx, toDelete)
