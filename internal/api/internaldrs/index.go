@@ -2,6 +2,7 @@ package internaldrs
 
 import (
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 	"time"
@@ -99,6 +100,8 @@ func handleInternalListFiber(om *core.ObjectManager) fiber.Handler {
 			return c.Status(fiber.StatusBadRequest).SendString(err.Error())
 		}
 
+		requestStart := time.Now()
+		listStart := time.Now()
 		var ids []string
 		if objectURL != "" {
 			ids, err = om.ListObjectIDsPageByURL(c.Context(), objectURL, filterOrg, filterProject, "read", start, limit, offset)
@@ -108,19 +111,25 @@ func handleInternalListFiber(om *core.ObjectManager) fiber.Handler {
 		if err != nil {
 			return apiutil.HandleError(c, err)
 		}
+		listDuration := time.Since(listStart)
 
+		bulkStart := time.Now()
 		objs, err := om.GetBulkObjects(c.Context(), ids, "read")
 		if err != nil {
 			return apiutil.HandleError(c, err)
 		}
+		bulkDuration := time.Since(bulkStart)
+		prepareStart := time.Now()
 		objs, err = om.PrepareScopedObjects(c.Context(), objs, filterOrg, filterProject, "read")
 		if err != nil {
 			return apiutil.HandleError(c, err)
 		}
+		prepareDuration := time.Since(prepareStart)
 		records := make([]internalapi.InternalRecord, 0, len(objs))
 		for _, obj := range objs {
 			records = append(records, core.InternalObjectToInternalRecord(obj))
 		}
+		log.Printf("INFO: syfon_internal_index_list organization=%s project=%s url_filter=%t start_after=%t limit=%d offset=%d ids=%d records=%d list_ids_ms=%d bulk_objects_ms=%d prepare_scoped_ms=%d duration_ms=%d", filterOrg, filterProject, objectURL != "", strings.TrimSpace(start) != "", limit, offset, len(ids), len(records), listDuration.Milliseconds(), bulkDuration.Milliseconds(), prepareDuration.Milliseconds(), time.Since(requestStart).Milliseconds())
 		return c.JSON(internalapi.ListRecordsResponse{Records: &records})
 	}
 }

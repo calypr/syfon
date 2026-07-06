@@ -184,6 +184,13 @@ func (m *ObjectManager) ListObjectIDsPageByScope(ctx context.Context, organizati
 		return []string{}, nil
 	}
 
+	if lister, ok := m.db.(db.ObjectIDPageLister); ok && canUseUnrestrictedScopePage(ctx, requiredMethod) {
+		pageStart := time.Now()
+		ids, err := lister.ListObjectIDsPageByScope(ctx, organization, project, startAfter, limit, offset)
+		log.Printf("INFO: syfon_list_object_ids_page_by_scope organization=%s project=%s start_after=%t limit=%d offset=%d ids=%d db_page_ms=%d optimized=%t", strings.TrimSpace(organization), strings.TrimSpace(project), strings.TrimSpace(startAfter) != "", limit, offset, len(ids), time.Since(pageStart).Milliseconds(), true)
+		return ids, err
+	}
+
 	ids, err := m.ListObjectIDsByScope(ctx, organization, project, requiredMethod)
 	if err != nil {
 		return nil, err
@@ -203,6 +210,11 @@ func (m *ObjectManager) ListObjectIDsPageByScope(ctx context.Context, organizati
 		end = len(ids)
 	}
 	return ids[offset:end], nil
+}
+
+func canUseUnrestrictedScopePage(ctx context.Context, requiredMethod string) bool {
+	resources, includeUnscoped, restrictToResources := objectMethodResourceFilter(ctx, requiredMethod)
+	return !restrictToResources && len(resources) == 0 && includeUnscoped
 }
 
 func (m *ObjectManager) ListObjectIDsPageByURL(ctx context.Context, objectURL, organization, project, requiredMethod, startAfter string, limit, offset int) ([]string, error) {

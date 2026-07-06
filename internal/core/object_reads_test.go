@@ -12,6 +12,26 @@ import (
 	"github.com/calypr/syfon/internal/models"
 )
 
+type pageSpyDB struct {
+	db.DatabaseInterface
+	pageCalls int
+	listCalls int
+}
+
+func (s *pageSpyDB) ListObjectIDsPageByScope(ctx context.Context, organization, project, startAfter string, limit, offset int) ([]string, error) {
+	s.pageCalls++
+	return s.DatabaseInterface.(db.ObjectIDPageLister).ListObjectIDsPageByScope(ctx, organization, project, startAfter, limit, offset)
+}
+
+func (s *pageSpyDB) ListObjectIDsPageByResources(ctx context.Context, resources []string, includeUnscoped bool, startAfter string, limit, offset int) ([]string, error) {
+	return s.DatabaseInterface.(db.ObjectIDPageLister).ListObjectIDsPageByResources(ctx, resources, includeUnscoped, startAfter, limit, offset)
+}
+
+func (s *pageSpyDB) ListObjectIDsByScope(ctx context.Context, organization, project string) ([]string, error) {
+	s.listCalls++
+	return s.DatabaseInterface.ListObjectIDsByScope(ctx, organization, project)
+}
+
 func registerScopedCandidate(t *testing.T, om *ObjectManager, id, checksum, org, project string) {
 	t.Helper()
 	controlled := []string{"/organization/" + org + "/project/" + project}
@@ -70,6 +90,53 @@ func TestListObjectIDsPageByScope_StartAfterAndScopeFilter(t *testing.T) {
 	}
 	if len(ids) != 1 || ids[0] != "scope-b" {
 		t.Fatalf("unexpected scoped page ids: %+v", ids)
+	}
+}
+
+func TestListObjectIDsPageByScope_UsesDatabasePaginationForUnrestrictedScope(t *testing.T) {
+	database := &pageSpyDB{DatabaseInterface: db.NewInMemoryDB()}
+	om := NewObjectManager(database, nil)
+
+	registerScopedCandidate(t, om, "scope-a", "2222222222222222222222222222222222222222222222222222222222222222", "org1", "proj1")
+	registerScopedCandidate(t, om, "scope-b", "3333333333333333333333333333333333333333333333333333333333333333", "org1", "proj1")
+	registerScopedCandidate(t, om, "scope-c", "4444444444444444444444444444444444444444444444444444444444444444", "org1", "proj1")
+
+	ids, err := om.ListObjectIDsPageByScope(context.Background(), "org1", "proj1", "read", "scope-a", 1, 0)
+	if err != nil {
+		t.Fatalf("ListObjectIDsPageByScope error: %v", err)
+	}
+	if len(ids) != 1 || ids[0] != "scope-b" {
+		t.Fatalf("unexpected scoped page ids: %+v", ids)
+	}
+	if database.pageCalls != 1 {
+		t.Fatalf("expected one database page call, got %d", database.pageCalls)
+	}
+	if database.listCalls != 0 {
+		t.Fatalf("expected no full scope list calls, got %d", database.listCalls)
+	}
+}
+
+func TestListObjectIDsPageByScope_FallsBackWhenAuthzRestrictsResources(t *testing.T) {
+	database := &pageSpyDB{DatabaseInterface: db.NewInMemoryDB()}
+	om := NewObjectManager(database, nil)
+
+	registerScopedCandidate(t, om, "secure-obj", "5555555555555555555555555555555555555555555555555555555555555555", "secure", "p1")
+	restrictedCtx := buildLocalAuthzContext(map[string]map[string]bool{
+		"/organization/other/project/p2": {"read": true},
+	})
+
+	ids, err := om.ListObjectIDsPageByScope(restrictedCtx, "secure", "p1", "read", "", 10, 0)
+	if err != nil {
+		t.Fatalf("ListObjectIDsPageByScope error: %v", err)
+	}
+	if len(ids) != 0 {
+		t.Fatalf("expected authz fallback to filter ids, got %+v", ids)
+	}
+	if database.pageCalls != 0 {
+		t.Fatalf("expected no unrestricted page calls, got %d", database.pageCalls)
+	}
+	if database.listCalls == 0 {
+		t.Fatalf("expected fallback to full scope list")
 	}
 }
 

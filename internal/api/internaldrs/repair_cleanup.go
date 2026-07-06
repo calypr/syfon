@@ -113,6 +113,10 @@ func (a scopeRepairIndexAdapter) List(ctx context.Context, opts repair.ListRecor
 	if err != nil {
 		return clientinternalapi.ListRecordsResponse{}, err
 	}
+	objects, err = a.om.PrepareScopedObjects(ctx, objects, strings.TrimSpace(opts.Organization), strings.TrimSpace(opts.Project), "read")
+	if err != nil {
+		return clientinternalapi.ListRecordsResponse{}, err
+	}
 	records := make([]clientinternalapi.InternalRecord, 0, len(objects))
 	for _, obj := range objects {
 		records = append(records, clientRecordFromServer(core.InternalObjectToInternalRecord(obj)))
