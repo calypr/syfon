@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -198,7 +199,6 @@ func TestProjectRecordMatchesAnyPathPrefixAvoidsFalsePrefixMatches(t *testing.T)
 }
 
 func TestHandleInternalInspectProjectScopes(t *testing.T) {
-	body, _ := json.Marshal(internalInspectProjectScopesRequest{Organization: "syfon", Project: "e2e"})
 	db := &testutils.MockDatabase{
 		Credentials: map[string]models.S3Credential{
 			"cred-1": {CredentialID: "cred-1", Bucket: "bucket-a", Provider: "s3"},
@@ -209,23 +209,46 @@ func TestHandleInternalInspectProjectScopes(t *testing.T) {
 		},
 	}
 	om := core.NewObjectManager(db, &testutils.MockUrlManager{})
-	req := withTestAuthzContext(httptest.NewRequest(http.MethodPost, "/data/inspect/project-scopes", bytes.NewBuffer(body)), "gen3", map[string]map[string]bool{
+	authz := map[string]map[string]bool{
 		"/organization/syfon":             {"read": true},
 		"/organization/syfon/project/e2e": {"read": true},
-	})
-	rr := doInternalDRSTestRequest(req, om)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
 	}
-	var resp internalInspectProjectScopesResponse
-	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode response: %v", err)
+	cases := []struct {
+		name   string
+		method string
+		path   string
+		body   io.Reader
+	}{
+		{
+			name:   "get query",
+			method: http.MethodGet,
+			path:   "/data/inspect/project-scopes?organization=syfon&project=e2e",
+		},
+		{
+			name:   "post body",
+			method: http.MethodPost,
+			path:   "/data/inspect/project-scopes",
+			body:   bytes.NewBufferString(`{"organization":"syfon","project":"e2e"}`),
+		},
 	}
-	if len(resp.Items) != 2 {
-		t.Fatalf("expected 2 items, got %d", len(resp.Items))
-	}
-	if resp.Items[0].Bucket != "bucket-a" || !strings.HasPrefix(resp.Items[0].Path, "s3://bucket-a/") {
-		t.Fatalf("unexpected first scope: %+v", resp.Items[0])
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := withTestAuthzContext(httptest.NewRequest(tc.method, tc.path, tc.body), "gen3", authz)
+			rr := doInternalDRSTestRequest(req, om)
+			if rr.Code != http.StatusOK {
+				t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+			}
+			var resp internalInspectProjectScopesResponse
+			if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			if len(resp.Items) != 2 {
+				t.Fatalf("expected 2 items, got %d", len(resp.Items))
+			}
+			if resp.Items[0].Bucket != "bucket-a" || !strings.HasPrefix(resp.Items[0].Path, "s3://bucket-a/") {
+				t.Fatalf("unexpected first scope: %+v", resp.Items[0])
+			}
+		})
 	}
 }
 

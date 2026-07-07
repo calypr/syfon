@@ -139,6 +139,25 @@ type InternalProjectBucketInventorySummary struct {
 	TotalBytes  *int64  `json:"total_bytes,omitempty"`
 }
 
+// InternalProjectScopeItem defines model for InternalProjectScopeItem.
+type InternalProjectScopeItem struct {
+	Bucket       *string `json:"bucket,omitempty"`
+	Organization *string `json:"organization,omitempty"`
+	Path         *string `json:"path,omitempty"`
+	ProjectId    *string `json:"project_id,omitempty"`
+}
+
+// InternalProjectScopesRequest defines model for InternalProjectScopesRequest.
+type InternalProjectScopesRequest struct {
+	Organization string `json:"organization"`
+	Project      string `json:"project"`
+}
+
+// InternalProjectScopesResponse defines model for InternalProjectScopesResponse.
+type InternalProjectScopesResponse struct {
+	Items *[]InternalProjectScopeItem `json:"items,omitempty"`
+}
+
 // InternalRecord defines model for InternalRecord.
 type InternalRecord struct {
 	AccessMethods    *[]externalRef0.AccessMethod `json:"access_methods,omitempty"`
@@ -247,6 +266,12 @@ type InternalDownloadPartParams struct {
 	End   int64 `form:"end" json:"end"`
 }
 
+// InternalInspectProjectScopesParams defines parameters for InternalInspectProjectScopes.
+type InternalInspectProjectScopesParams struct {
+	Organization string `form:"organization" json:"organization"`
+	Project      string `form:"project" json:"project"`
+}
+
 // InternalUploadURLParams defines parameters for InternalUploadURL.
 type InternalUploadURLParams struct {
 	Organization *string `form:"organization,omitempty" json:"organization,omitempty"`
@@ -279,6 +304,9 @@ type InternalListParams struct {
 
 // InternalInspectProjectBucketInventoryJSONRequestBody defines body for InternalInspectProjectBucketInventory for application/json ContentType.
 type InternalInspectProjectBucketInventoryJSONRequestBody = InternalProjectBucketInventoryRequest
+
+// InternalInspectProjectScopesPostJSONRequestBody defines body for InternalInspectProjectScopesPost for application/json ContentType.
+type InternalInspectProjectScopesPostJSONRequestBody = InternalProjectScopesRequest
 
 // InternalMultipartCompleteJSONRequestBody defines body for InternalMultipartComplete for application/json ContentType.
 type InternalMultipartCompleteJSONRequestBody = InternalMultipartCompleteRequest
@@ -465,6 +493,14 @@ type ClientInterface interface {
 
 	InternalInspectProjectBucketInventory(ctx context.Context, body InternalInspectProjectBucketInventoryJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// InternalInspectProjectScopes request
+	InternalInspectProjectScopes(ctx context.Context, params *InternalInspectProjectScopesParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// InternalInspectProjectScopesPostWithBody request with any body
+	InternalInspectProjectScopesPostWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	InternalInspectProjectScopesPost(ctx context.Context, body InternalInspectProjectScopesPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// InternalMultipartCompleteWithBody request with any body
 	InternalMultipartCompleteWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -584,6 +620,42 @@ func (c *Client) InternalInspectProjectBucketInventoryWithBody(ctx context.Conte
 
 func (c *Client) InternalInspectProjectBucketInventory(ctx context.Context, body InternalInspectProjectBucketInventoryJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewInternalInspectProjectBucketInventoryRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) InternalInspectProjectScopes(ctx context.Context, params *InternalInspectProjectScopesParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewInternalInspectProjectScopesRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) InternalInspectProjectScopesPostWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewInternalInspectProjectScopesPostRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) InternalInspectProjectScopesPost(ctx context.Context, body InternalInspectProjectScopesPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewInternalInspectProjectScopesPostRequest(c.Server, body)
 	if err != nil {
 		return nil, err
 	}
@@ -1123,6 +1195,103 @@ func NewInternalInspectProjectBucketInventoryRequestWithBody(server string, cont
 	}
 
 	operationPath := fmt.Sprintf("/data/inspect/project-bucket/inventory")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewInternalInspectProjectScopesRequest generates requests for InternalInspectProjectScopes
+func NewInternalInspectProjectScopesRequest(server string, params *InternalInspectProjectScopesParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/data/inspect/project-scopes")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if queryFrag, err := runtime.StyleParamWithLocation("form", true, "organization", runtime.ParamLocationQuery, params.Organization); err != nil {
+			return nil, err
+		} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+			return nil, err
+		} else {
+			for k, v := range parsed {
+				for _, v2 := range v {
+					queryValues.Add(k, v2)
+				}
+			}
+		}
+
+		if queryFrag, err := runtime.StyleParamWithLocation("form", true, "project", runtime.ParamLocationQuery, params.Project); err != nil {
+			return nil, err
+		} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+			return nil, err
+		} else {
+			for k, v := range parsed {
+				for _, v2 := range v {
+					queryValues.Add(k, v2)
+				}
+			}
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewInternalInspectProjectScopesPostRequest calls the generic InternalInspectProjectScopesPost builder with application/json body
+func NewInternalInspectProjectScopesPostRequest(server string, body InternalInspectProjectScopesPostJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewInternalInspectProjectScopesPostRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewInternalInspectProjectScopesPostRequestWithBody generates requests for InternalInspectProjectScopesPost with any type of body
+func NewInternalInspectProjectScopesPostRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/data/inspect/project-scopes")
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -2192,6 +2361,14 @@ type ClientWithResponsesInterface interface {
 
 	InternalInspectProjectBucketInventoryWithResponse(ctx context.Context, body InternalInspectProjectBucketInventoryJSONRequestBody, reqEditors ...RequestEditorFn) (*InternalInspectProjectBucketInventoryResponse, error)
 
+	// InternalInspectProjectScopesWithResponse request
+	InternalInspectProjectScopesWithResponse(ctx context.Context, params *InternalInspectProjectScopesParams, reqEditors ...RequestEditorFn) (*InternalInspectProjectScopesResponse, error)
+
+	// InternalInspectProjectScopesPostWithBodyWithResponse request with any body
+	InternalInspectProjectScopesPostWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*InternalInspectProjectScopesPostResponse, error)
+
+	InternalInspectProjectScopesPostWithResponse(ctx context.Context, body InternalInspectProjectScopesPostJSONRequestBody, reqEditors ...RequestEditorFn) (*InternalInspectProjectScopesPostResponse, error)
+
 	// InternalMultipartCompleteWithBodyWithResponse request with any body
 	InternalMultipartCompleteWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*InternalMultipartCompleteResponse, error)
 
@@ -2333,6 +2510,50 @@ func (r InternalInspectProjectBucketInventoryResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r InternalInspectProjectBucketInventoryResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type InternalInspectProjectScopesResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *InternalProjectScopesResponse
+}
+
+// Status returns HTTPResponse.Status
+func (r InternalInspectProjectScopesResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r InternalInspectProjectScopesResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type InternalInspectProjectScopesPostResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *InternalProjectScopesResponse
+}
+
+// Status returns HTTPResponse.Status
+func (r InternalInspectProjectScopesPostResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r InternalInspectProjectScopesPostResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -2769,6 +2990,32 @@ func (c *ClientWithResponses) InternalInspectProjectBucketInventoryWithResponse(
 	return ParseInternalInspectProjectBucketInventoryResponse(rsp)
 }
 
+// InternalInspectProjectScopesWithResponse request returning *InternalInspectProjectScopesResponse
+func (c *ClientWithResponses) InternalInspectProjectScopesWithResponse(ctx context.Context, params *InternalInspectProjectScopesParams, reqEditors ...RequestEditorFn) (*InternalInspectProjectScopesResponse, error) {
+	rsp, err := c.InternalInspectProjectScopes(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseInternalInspectProjectScopesResponse(rsp)
+}
+
+// InternalInspectProjectScopesPostWithBodyWithResponse request with arbitrary body returning *InternalInspectProjectScopesPostResponse
+func (c *ClientWithResponses) InternalInspectProjectScopesPostWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*InternalInspectProjectScopesPostResponse, error) {
+	rsp, err := c.InternalInspectProjectScopesPostWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseInternalInspectProjectScopesPostResponse(rsp)
+}
+
+func (c *ClientWithResponses) InternalInspectProjectScopesPostWithResponse(ctx context.Context, body InternalInspectProjectScopesPostJSONRequestBody, reqEditors ...RequestEditorFn) (*InternalInspectProjectScopesPostResponse, error) {
+	rsp, err := c.InternalInspectProjectScopesPost(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseInternalInspectProjectScopesPostResponse(rsp)
+}
+
 // InternalMultipartCompleteWithBodyWithResponse request with arbitrary body returning *InternalMultipartCompleteResponse
 func (c *ClientWithResponses) InternalMultipartCompleteWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*InternalMultipartCompleteResponse, error) {
 	rsp, err := c.InternalMultipartCompleteWithBody(ctx, contentType, body, reqEditors...)
@@ -3103,6 +3350,58 @@ func ParseInternalInspectProjectBucketInventoryResponse(rsp *http.Response) (*In
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest InternalProjectBucketInventoryResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseInternalInspectProjectScopesResponse parses an HTTP response from a InternalInspectProjectScopesWithResponse call
+func ParseInternalInspectProjectScopesResponse(rsp *http.Response) (*InternalInspectProjectScopesResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &InternalInspectProjectScopesResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest InternalProjectScopesResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseInternalInspectProjectScopesPostResponse parses an HTTP response from a InternalInspectProjectScopesPostWithResponse call
+func ParseInternalInspectProjectScopesPostResponse(rsp *http.Response) (*InternalInspectProjectScopesPostResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &InternalInspectProjectScopesPostResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest InternalProjectScopesResponse
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

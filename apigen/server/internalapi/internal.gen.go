@@ -137,6 +137,25 @@ type InternalProjectBucketInventorySummary struct {
 	TotalBytes  *int64  `json:"total_bytes,omitempty"`
 }
 
+// InternalProjectScopeItem defines model for InternalProjectScopeItem.
+type InternalProjectScopeItem struct {
+	Bucket       *string `json:"bucket,omitempty"`
+	Organization *string `json:"organization,omitempty"`
+	Path         *string `json:"path,omitempty"`
+	ProjectId    *string `json:"project_id,omitempty"`
+}
+
+// InternalProjectScopesRequest defines model for InternalProjectScopesRequest.
+type InternalProjectScopesRequest struct {
+	Organization string `json:"organization"`
+	Project      string `json:"project"`
+}
+
+// InternalProjectScopesResponse defines model for InternalProjectScopesResponse.
+type InternalProjectScopesResponse struct {
+	Items *[]InternalProjectScopeItem `json:"items,omitempty"`
+}
+
 // InternalRecord defines model for InternalRecord.
 type InternalRecord struct {
 	AccessMethods    *[]externalRef0.AccessMethod `json:"access_methods,omitempty"`
@@ -245,6 +264,12 @@ type InternalDownloadPartParams struct {
 	End   int64 `form:"end" json:"end"`
 }
 
+// InternalInspectProjectScopesParams defines parameters for InternalInspectProjectScopes.
+type InternalInspectProjectScopesParams struct {
+	Organization string `form:"organization" json:"organization"`
+	Project      string `form:"project" json:"project"`
+}
+
 // InternalUploadURLParams defines parameters for InternalUploadURL.
 type InternalUploadURLParams struct {
 	Organization *string `form:"organization,omitempty" json:"organization,omitempty"`
@@ -277,6 +302,9 @@ type InternalListParams struct {
 
 // InternalInspectProjectBucketInventoryJSONRequestBody defines body for InternalInspectProjectBucketInventory for application/json ContentType.
 type InternalInspectProjectBucketInventoryJSONRequestBody = InternalProjectBucketInventoryRequest
+
+// InternalInspectProjectScopesPostJSONRequestBody defines body for InternalInspectProjectScopesPost for application/json ContentType.
+type InternalInspectProjectScopesPostJSONRequestBody = InternalProjectScopesRequest
 
 // InternalMultipartCompleteJSONRequestBody defines body for InternalMultipartComplete for application/json ContentType.
 type InternalMultipartCompleteJSONRequestBody = InternalMultipartCompleteRequest
@@ -390,6 +418,12 @@ type ServerInterface interface {
 
 	// (POST /data/inspect/project-bucket/inventory)
 	InternalInspectProjectBucketInventory(c fiber.Ctx) error
+
+	// (GET /data/inspect/project-scopes)
+	InternalInspectProjectScopes(c fiber.Ctx, params InternalInspectProjectScopesParams) error
+
+	// (POST /data/inspect/project-scopes)
+	InternalInspectProjectScopesPost(c fiber.Ctx) error
 
 	// (POST /data/multipart/complete)
 	InternalMultipartComplete(c fiber.Ctx) error
@@ -539,6 +573,47 @@ func (siw *ServerInterfaceWrapper) InternalDownloadPart(c fiber.Ctx) error {
 func (siw *ServerInterfaceWrapper) InternalInspectProjectBucketInventory(c fiber.Ctx) error {
 
 	return siw.Handler.InternalInspectProjectBucketInventory(c)
+}
+
+// InternalInspectProjectScopes operation middleware
+func (siw *ServerInterfaceWrapper) InternalInspectProjectScopes(c fiber.Ctx) error {
+	var err error
+	var params InternalInspectProjectScopesParams
+
+	// ------------- Required query parameter "organization" -------------
+	if paramValue := c.Query("organization"); paramValue != "" {
+
+		var value string
+		err = runtime.BindStyledParameterWithOptions("form", "organization", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: true})
+		if err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter organization: %w", err).Error())
+		}
+		params.Organization = value
+
+	} else {
+		return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Query argument organization is required, but not found").Error())
+	}
+	// ------------- Required query parameter "project" -------------
+	if paramValue := c.Query("project"); paramValue != "" {
+
+		var value string
+		err = runtime.BindStyledParameterWithOptions("form", "project", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: true})
+		if err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter project: %w", err).Error())
+		}
+		params.Project = value
+
+	} else {
+		return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Query argument project is required, but not found").Error())
+	}
+
+	return siw.Handler.InternalInspectProjectScopes(c, params)
+}
+
+// InternalInspectProjectScopesPost operation middleware
+func (siw *ServerInterfaceWrapper) InternalInspectProjectScopesPost(c fiber.Ctx) error {
+
+	return siw.Handler.InternalInspectProjectScopesPost(c)
 }
 
 // InternalMultipartComplete operation middleware
@@ -927,6 +1002,10 @@ func RegisterHandlersWithOptions(router fiber.Router, si ServerInterface, option
 
 	router.Post(options.BaseURL+"/data/inspect/project-bucket/inventory", wrapper.InternalInspectProjectBucketInventory)
 
+	router.Get(options.BaseURL+"/data/inspect/project-scopes", wrapper.InternalInspectProjectScopes)
+
+	router.Post(options.BaseURL+"/data/inspect/project-scopes", wrapper.InternalInspectProjectScopesPost)
+
 	router.Post(options.BaseURL+"/data/multipart/complete", wrapper.InternalMultipartComplete)
 
 	router.Post(options.BaseURL+"/data/multipart/init", wrapper.InternalMultipartInit)
@@ -1150,6 +1229,104 @@ type InternalInspectProjectBucketInventory500Response struct {
 }
 
 func (response InternalInspectProjectBucketInventory500Response) VisitInternalInspectProjectBucketInventoryResponse(ctx fiber.Ctx) error {
+	ctx.Status(500)
+	return nil
+}
+
+type InternalInspectProjectScopesRequestObject struct {
+	Params InternalInspectProjectScopesParams
+}
+
+type InternalInspectProjectScopesResponseObject interface {
+	VisitInternalInspectProjectScopesResponse(ctx fiber.Ctx) error
+}
+
+type InternalInspectProjectScopes200JSONResponse InternalProjectScopesResponse
+
+func (response InternalInspectProjectScopes200JSONResponse) VisitInternalInspectProjectScopesResponse(ctx fiber.Ctx) error {
+	ctx.Response().Header.Set("Content-Type", "application/json")
+	ctx.Status(200)
+
+	return ctx.JSON(&response)
+}
+
+type InternalInspectProjectScopes400Response struct {
+}
+
+func (response InternalInspectProjectScopes400Response) VisitInternalInspectProjectScopesResponse(ctx fiber.Ctx) error {
+	ctx.Status(400)
+	return nil
+}
+
+type InternalInspectProjectScopes401Response struct {
+}
+
+func (response InternalInspectProjectScopes401Response) VisitInternalInspectProjectScopesResponse(ctx fiber.Ctx) error {
+	ctx.Status(401)
+	return nil
+}
+
+type InternalInspectProjectScopes403Response struct {
+}
+
+func (response InternalInspectProjectScopes403Response) VisitInternalInspectProjectScopesResponse(ctx fiber.Ctx) error {
+	ctx.Status(403)
+	return nil
+}
+
+type InternalInspectProjectScopes500Response struct {
+}
+
+func (response InternalInspectProjectScopes500Response) VisitInternalInspectProjectScopesResponse(ctx fiber.Ctx) error {
+	ctx.Status(500)
+	return nil
+}
+
+type InternalInspectProjectScopesPostRequestObject struct {
+	Body *InternalInspectProjectScopesPostJSONRequestBody
+}
+
+type InternalInspectProjectScopesPostResponseObject interface {
+	VisitInternalInspectProjectScopesPostResponse(ctx fiber.Ctx) error
+}
+
+type InternalInspectProjectScopesPost200JSONResponse InternalProjectScopesResponse
+
+func (response InternalInspectProjectScopesPost200JSONResponse) VisitInternalInspectProjectScopesPostResponse(ctx fiber.Ctx) error {
+	ctx.Response().Header.Set("Content-Type", "application/json")
+	ctx.Status(200)
+
+	return ctx.JSON(&response)
+}
+
+type InternalInspectProjectScopesPost400Response struct {
+}
+
+func (response InternalInspectProjectScopesPost400Response) VisitInternalInspectProjectScopesPostResponse(ctx fiber.Ctx) error {
+	ctx.Status(400)
+	return nil
+}
+
+type InternalInspectProjectScopesPost401Response struct {
+}
+
+func (response InternalInspectProjectScopesPost401Response) VisitInternalInspectProjectScopesPostResponse(ctx fiber.Ctx) error {
+	ctx.Status(401)
+	return nil
+}
+
+type InternalInspectProjectScopesPost403Response struct {
+}
+
+func (response InternalInspectProjectScopesPost403Response) VisitInternalInspectProjectScopesPostResponse(ctx fiber.Ctx) error {
+	ctx.Status(403)
+	return nil
+}
+
+type InternalInspectProjectScopesPost500Response struct {
+}
+
+func (response InternalInspectProjectScopesPost500Response) VisitInternalInspectProjectScopesPostResponse(ctx fiber.Ctx) error {
 	ctx.Status(500)
 	return nil
 }
@@ -2018,6 +2195,12 @@ type StrictServerInterface interface {
 	// (POST /data/inspect/project-bucket/inventory)
 	InternalInspectProjectBucketInventory(ctx context.Context, request InternalInspectProjectBucketInventoryRequestObject) (InternalInspectProjectBucketInventoryResponseObject, error)
 
+	// (GET /data/inspect/project-scopes)
+	InternalInspectProjectScopes(ctx context.Context, request InternalInspectProjectScopesRequestObject) (InternalInspectProjectScopesResponseObject, error)
+
+	// (POST /data/inspect/project-scopes)
+	InternalInspectProjectScopesPost(ctx context.Context, request InternalInspectProjectScopesPostRequestObject) (InternalInspectProjectScopesPostResponseObject, error)
+
 	// (POST /data/multipart/complete)
 	InternalMultipartComplete(ctx context.Context, request InternalMultipartCompleteRequestObject) (InternalMultipartCompleteResponseObject, error)
 
@@ -2165,6 +2348,64 @@ func (sh *strictHandler) InternalInspectProjectBucketInventory(ctx fiber.Ctx) er
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	} else if validResponse, ok := response.(InternalInspectProjectBucketInventoryResponseObject); ok {
 		if err := validResponse.VisitInternalInspectProjectBucketInventoryResponse(ctx); err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, err.Error())
+		}
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// InternalInspectProjectScopes operation middleware
+func (sh *strictHandler) InternalInspectProjectScopes(ctx fiber.Ctx, params InternalInspectProjectScopesParams) error {
+	var request InternalInspectProjectScopesRequestObject
+
+	request.Params = params
+
+	handler := func(ctx fiber.Ctx, request interface{}) (interface{}, error) {
+		return sh.ssi.InternalInspectProjectScopes(ctx.Context(), request.(InternalInspectProjectScopesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "InternalInspectProjectScopes")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	} else if validResponse, ok := response.(InternalInspectProjectScopesResponseObject); ok {
+		if err := validResponse.VisitInternalInspectProjectScopesResponse(ctx); err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, err.Error())
+		}
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// InternalInspectProjectScopesPost operation middleware
+func (sh *strictHandler) InternalInspectProjectScopesPost(ctx fiber.Ctx) error {
+	var request InternalInspectProjectScopesPostRequestObject
+
+	var body InternalInspectProjectScopesPostJSONRequestBody
+	if err := ctx.Bind().Body(&body); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	}
+	request.Body = &body
+
+	handler := func(ctx fiber.Ctx, request interface{}) (interface{}, error) {
+		return sh.ssi.InternalInspectProjectScopesPost(ctx.Context(), request.(InternalInspectProjectScopesPostRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "InternalInspectProjectScopesPost")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	} else if validResponse, ok := response.(InternalInspectProjectScopesPostResponseObject); ok {
+		if err := validResponse.VisitInternalInspectProjectScopesPostResponse(ctx); err != nil {
 			return fiber.NewError(fiber.StatusBadRequest, err.Error())
 		}
 	} else if response != nil {

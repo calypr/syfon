@@ -388,8 +388,14 @@ func handleInternalInspectProjectScopesFiber(om *core.ObjectManager) fiber.Handl
 			return c.SendStatus(fiber.StatusUnauthorized)
 		}
 		var req internalInspectProjectScopesRequest
-		if err := decodeStrictJSON(c.Body(), &req); err != nil {
-			return apiutil.Reject(c, fiber.StatusBadRequest, "Invalid request body: "+err.Error())
+		switch c.Method() {
+		case fiber.MethodGet:
+			req.Organization = c.Query("organization")
+			req.Project = c.Query("project")
+		default:
+			if err := decodeStrictJSON(c.Body(), &req); err != nil {
+				return apiutil.Reject(c, fiber.StatusBadRequest, "Invalid request body: "+err.Error())
+			}
 		}
 		organization := strings.TrimSpace(req.Organization)
 		project := strings.TrimSpace(req.Project)

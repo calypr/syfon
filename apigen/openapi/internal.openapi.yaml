@@ -368,6 +368,64 @@ paths:
           description: Content too large
         '500':
           description: Internal server error
+  /data/inspect/project-scopes:
+    get:
+      tags:
+        - internal-data
+      operationId: internalInspectProjectScopes
+      description: List bucket scopes visible for a project.
+      parameters:
+        - in: query
+          name: organization
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: project
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Project bucket scopes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalProjectScopesResponse'
+        '400':
+          description: Validation error
+        '401':
+          description: Authentication required
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
+    post:
+      tags:
+        - internal-data
+      operationId: internalInspectProjectScopesPost
+      description: Compatibility request-body form of project scope listing.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InternalProjectScopesRequest'
+      responses:
+        '200':
+          description: Project bucket scopes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalProjectScopesResponse'
+        '400':
+          description: Validation error
+        '401':
+          description: Authentication required
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
   /data/inspect/project-bucket/inventory:
     post:
       tags:
@@ -850,6 +908,34 @@ components:
         etag:
           type: string
         last_modified:
+          type: string
+    InternalProjectScopesRequest:
+      type: object
+      required:
+        - organization
+        - project
+      properties:
+        organization:
+          type: string
+        project:
+          type: string
+    InternalProjectScopesResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/InternalProjectScopeItem'
+    InternalProjectScopeItem:
+      type: object
+      properties:
+        bucket:
+          type: string
+        organization:
+          type: string
+        project_id:
+          type: string
+        path:
           type: string
     InternalUploadBlankRequest:
       type: object
