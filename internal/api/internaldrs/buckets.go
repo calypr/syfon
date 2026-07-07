@@ -361,13 +361,13 @@ func handleInternalListBucketScopesFiber(c fiber.Ctx, om *core.ObjectManager) er
 			if !bucketScopeAllowed(c.Context(), scope, "read") {
 				continue
 			}
-			path := ""
-			if scope.PathPrefix != "" {
-				scheme := "s3"
-				if cred, err := om.GetS3Credential(c.Context(), scope.CredentialID); err == nil && cred != nil {
-					scheme = common.ProviderToScheme(cred.Provider)
-				}
-				path = fmt.Sprintf("%s://%s/%s", scheme, scope.Bucket, scope.PathPrefix)
+			scheme := "s3"
+			if cred, err := om.GetS3Credential(c.Context(), scope.CredentialID); err == nil && cred != nil {
+				scheme = common.ProviderToScheme(cred.Provider)
+			}
+			path := fmt.Sprintf("%s://%s", scheme, scope.Bucket)
+			if strings.TrimSpace(scope.PathPrefix) != "" {
+				path = fmt.Sprintf("%s/%s", path, strings.Trim(strings.TrimSpace(scope.PathPrefix), "/"))
 			}
 			result = append(result, bucketapi.BucketScopeResponse{
 				Organization: scope.Organization,

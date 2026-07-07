@@ -376,6 +376,37 @@ func TestHandleInternalListBucketScopes_FiltersUnauthorizedScopesOnSharedBucket(
 	}
 }
 
+func TestHandleInternalListBucketScopes_RendersRootScopeAsBucketURL(t *testing.T) {
+	mockDB := &testutils.MockDatabase{
+		Credentials: map[string]models.S3Credential{
+			"gdcdata": {CredentialID: "gdcdata", Bucket: "gdcdata", Provider: "s3"},
+		},
+		BucketScopes: map[string]models.BucketScope{
+			"gdc|": {Organization: "gdc", ProjectID: "", CredentialID: "gdcdata", Bucket: "gdcdata", PathPrefix: ""},
+		},
+	}
+	req := httptest.NewRequest(http.MethodGet, "/data/buckets/gdcdata/scopes", nil)
+	req = req.WithContext(dataTestAuthContext(req.Context(), "gen3", true, map[string]map[string]bool{
+		"/programs/gdc": {"read": true},
+	}))
+
+	rr := doInternalDRSTestRequest(req, core.NewObjectManager(mockDB, &testutils.MockUrlManager{}))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var resp []bucketapi.BucketScopeResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if len(resp) != 1 {
+		t.Fatalf("expected 1 scope, got %d: %+v", len(resp), resp)
+	}
+	if resp[0].Path == nil || *resp[0].Path != "s3://gdcdata" {
+		t.Fatalf("expected root scope path s3://gdcdata, got %+v", resp[0].Path)
+	}
+}
+
 func TestHandleInternalListBucketScopes_RequiresGen3Auth(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/data/buckets/bucket-a/scopes", nil)
 	req = req.WithContext(dataTestAuthContext(req.Context(), "gen3", false, nil))

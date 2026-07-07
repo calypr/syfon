@@ -69,6 +69,9 @@ func (m *ObjectManager) ResolveCanonicalStorageTarget(ctx context.Context, req C
 			return CanonicalStorageTarget{}, fmt.Errorf("unable to resolve scoped storage bucket for object %s", obj.Id)
 		}
 		targetKey := m.canonicalObjectKey(obj, req.Key, existingKey, req.PreferChecksum)
+		if existingOK && strings.EqualFold(strings.TrimSpace(existingBucket), targetBucket) && len(normalizedScopePrefixes(scopes)) == 0 && strings.TrimSpace(existingKey) != "" {
+			targetKey = existingKey
+		}
 		targetKey = normalizeScopedStorageKey(targetKey, scopes)
 		if strings.TrimSpace(targetKey) == "" {
 			return CanonicalStorageTarget{}, fmt.Errorf("unable to resolve scoped storage key for object %s", obj.Id)

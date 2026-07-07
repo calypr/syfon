@@ -964,6 +964,51 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 		})
 	})
 
+	t.Run("root bucket scope preserves existing physical storage key", func(t *testing.T) {
+		db := &coreTestDB{
+			MockDatabase: &testutils.MockDatabase{
+				BucketScopes: map[string]models.BucketScope{
+					"gdc_mirror|gdc_mirror": {
+						Organization: "gdc_mirror",
+						ProjectID:    "gdc_mirror",
+						Bucket:       "gdcdata",
+						PathPrefix:   "",
+					},
+				},
+			},
+		}
+		om := NewObjectManager(db, &capturingURLManager{})
+		obj := &models.InternalObject{
+			DrsObject: drs.DrsObject{
+				Id: "00664eeb-830c-5fe4-b48c-054cd9c8e02f",
+				Checksums: []drs.Checksum{{
+					Type:     "sha256",
+					Checksum: "239f8402efd37b62bfb892aa4becb0692b3ca5f58015083d8567e8d7fbdd1843",
+				}},
+				ControlledAccess: &[]string{"/organization/gdc_mirror/project/gdc_mirror"},
+			},
+		}
+		sourceURL := "s3://gdcdata/00664eeb-830c-5fe4-b48c-054cd9c8e02f/239f8402efd37b62bfb892aa4becb0692b3ca5f58015083d8567e8d7fbdd1843"
+
+		target, err := om.ResolveCanonicalStorageTarget(context.Background(), CanonicalStorageTargetRequest{
+			Object:         obj,
+			AccessURL:      sourceURL,
+			PreferChecksum: true,
+		})
+		if err != nil {
+			t.Fatalf("ResolveCanonicalStorageTarget failed: %v", err)
+		}
+		if target.URL != sourceURL {
+			t.Fatalf("expected root scoped physical URL to remain %q, got %q", sourceURL, target.URL)
+		}
+		if target.Bucket != "gdcdata" {
+			t.Fatalf("expected bucket gdcdata, got %q", target.Bucket)
+		}
+		if target.Key != "00664eeb-830c-5fe4-b48c-054cd9c8e02f/239f8402efd37b62bfb892aa4becb0692b3ca5f58015083d8567e8d7fbdd1843" {
+			t.Fatalf("unexpected target key: %q", target.Key)
+		}
+	})
+
 	t.Run("create bucket scope updates signing cache", func(t *testing.T) {
 		mockDB := &testutils.MockDatabase{}
 		db := &coreTestDB{MockDatabase: mockDB}
@@ -990,6 +1035,5 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 			t.Fatalf("expected scoped storage url %q, got %q", want, um.signURLAccessURL)
 		}
 	})
-
 
 }
