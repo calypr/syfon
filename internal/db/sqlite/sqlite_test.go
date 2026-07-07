@@ -1528,6 +1528,17 @@ func TestSqliteDB_ScopedFileUsageQueries(t *testing.T) {
 	if summary.TotalFiles != 2 || summary.TotalUploads != 1 || summary.TotalDownloads != 1 || summary.InactiveFileCount != 0 {
 		t.Fatalf("unexpected scoped summary: %+v", summary)
 	}
+
+	recordSummary, err := db.GetProjectRecordSummaryByScope(ctx, "org", "p1")
+	if err != nil {
+		t.Fatalf("GetProjectRecordSummaryByScope failed: %v", err)
+	}
+	if recordSummary.RecordCount != 2 {
+		t.Fatalf("unexpected scoped record count: %+v", recordSummary)
+	}
+	if recordSummary.RecordLatestUpdatedTime == nil || !recordSummary.RecordLatestUpdatedTime.Equal(now) {
+		t.Fatalf("unexpected scoped record latest updated time: %+v", recordSummary.RecordLatestUpdatedTime)
+	}
 }
 
 func TestSqliteDB_TransferAttributionByResources(t *testing.T) {

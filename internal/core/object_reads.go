@@ -146,6 +146,83 @@ func (m *ObjectManager) PrepareScopedObjects(ctx context.Context, objects []mode
 	return canonical, nil
 }
 
+func (m *ObjectManager) ListPreparedObjectsPageByScope(ctx context.Context, organization, project, requiredMethod, startAfter string, limit, offset int) ([]models.InternalObject, error) {
+	if limit <= 0 {
+		return []models.InternalObject{}, nil
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	startAfter = strings.TrimSpace(startAfter)
+	skip := offset
+	if startAfter != "" {
+		skip = 0
+	}
+	target := limit + skip
+	batchSize := target
+	if batchSize < 100 {
+		batchSize = 100
+	}
+
+	rawStart := startAfter
+	collected := make([]models.InternalObject, 0, target)
+	seen := make(map[string]struct{}, target)
+	started := time.Now()
+	rawPages := 0
+	rawIDs := 0
+
+	for len(collected) < target {
+		ids, err := m.ListObjectIDsPageByScope(ctx, organization, project, requiredMethod, rawStart, batchSize, 0)
+		if err != nil {
+			return nil, err
+		}
+		if len(ids) == 0 {
+			break
+		}
+		rawPages++
+		rawIDs += len(ids)
+		rawStart = ids[len(ids)-1]
+
+		objects, err := m.GetBulkObjects(ctx, ids, requiredMethod)
+		if err != nil {
+			return nil, err
+		}
+		prepared, err := m.PrepareScopedObjects(ctx, objects, organization, project, requiredMethod)
+		if err != nil {
+			return nil, err
+		}
+		for _, obj := range prepared {
+			if startAfter != "" && obj.Id <= startAfter {
+				continue
+			}
+			if _, ok := seen[obj.Id]; ok {
+				continue
+			}
+			seen[obj.Id] = struct{}{}
+			collected = append(collected, obj)
+			if len(collected) >= target {
+				break
+			}
+		}
+		if len(ids) < batchSize {
+			break
+		}
+	}
+
+	if skip >= len(collected) {
+		log.Printf("INFO: syfon_list_prepared_objects_page_by_scope organization=%s project=%s start_after=%t limit=%d offset=%d raw_pages=%d raw_ids=%d records=0 duration_ms=%d", strings.TrimSpace(organization), strings.TrimSpace(project), startAfter != "", limit, offset, rawPages, rawIDs, time.Since(started).Milliseconds())
+		return []models.InternalObject{}, nil
+	}
+	end := skip + limit
+	if end > len(collected) {
+		end = len(collected)
+	}
+	out := collected[skip:end]
+	log.Printf("INFO: syfon_list_prepared_objects_page_by_scope organization=%s project=%s start_after=%t limit=%d offset=%d raw_pages=%d raw_ids=%d records=%d duration_ms=%d", strings.TrimSpace(organization), strings.TrimSpace(project), startAfter != "", limit, offset, rawPages, rawIDs, len(out), time.Since(started).Milliseconds())
+	return out, nil
+}
+
 func (m *ObjectManager) ListObjectIDsPageByChecksum(ctx context.Context, checksum, checksumType, organization, project, requiredMethod, startAfter string, limit, offset int) ([]string, error) {
 	if limit <= 0 {
 		return []string{}, nil

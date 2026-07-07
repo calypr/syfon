@@ -100,6 +100,45 @@ type InternalMultipartUploadRequest struct {
 	UploadId   string  `json:"uploadId"`
 }
 
+// InternalProjectBucketInventoryItem defines model for InternalProjectBucketInventoryItem.
+type InternalProjectBucketInventoryItem struct {
+	Bucket       *string `json:"bucket,omitempty"`
+	Etag         *string `json:"etag,omitempty"`
+	Key          *string `json:"key,omitempty"`
+	LastModified *string `json:"last_modified,omitempty"`
+	MetaSha256   *string `json:"meta_sha256,omitempty"`
+	ObjectUrl    *string `json:"object_url,omitempty"`
+	Path         *string `json:"path,omitempty"`
+	Provider     *string `json:"provider,omitempty"`
+	SizeBytes    *int64  `json:"size_bytes,omitempty"`
+}
+
+// InternalProjectBucketInventoryRequest defines model for InternalProjectBucketInventoryRequest.
+type InternalProjectBucketInventoryRequest struct {
+	Organization *string `json:"organization,omitempty"`
+	PathPrefix   *string `json:"path_prefix,omitempty"`
+	Project      *string `json:"project,omitempty"`
+}
+
+// InternalProjectBucketInventoryResponse defines model for InternalProjectBucketInventoryResponse.
+type InternalProjectBucketInventoryResponse struct {
+	Items   *[]InternalProjectBucketInventoryItem  `json:"items,omitempty"`
+	Summary *InternalProjectBucketInventorySummary `json:"summary,omitempty"`
+}
+
+// InternalProjectBucketInventorySummary defines model for InternalProjectBucketInventorySummary.
+type InternalProjectBucketInventorySummary struct {
+	Bucket      *string `json:"bucket,omitempty"`
+	ComputedAt  *string `json:"computed_at,omitempty"`
+	Exists      *bool   `json:"exists,omitempty"`
+	Mode        *string `json:"mode,omitempty"`
+	ObjectCount *int    `json:"object_count,omitempty"`
+	ObjectUrl   *string `json:"object_url,omitempty"`
+	Prefix      *string `json:"prefix,omitempty"`
+	Provider    *string `json:"provider,omitempty"`
+	TotalBytes  *int64  `json:"total_bytes,omitempty"`
+}
+
 // InternalRecord defines model for InternalRecord.
 type InternalRecord struct {
 	AccessMethods    *[]externalRef0.AccessMethod `json:"access_methods,omitempty"`
@@ -237,6 +276,9 @@ type InternalListParams struct {
 	Start        *string `form:"start,omitempty" json:"start,omitempty"`
 	Page         *int    `form:"page,omitempty" json:"page,omitempty"`
 }
+
+// InternalInspectProjectBucketInventoryJSONRequestBody defines body for InternalInspectProjectBucketInventory for application/json ContentType.
+type InternalInspectProjectBucketInventoryJSONRequestBody = InternalProjectBucketInventoryRequest
 
 // InternalMultipartCompleteJSONRequestBody defines body for InternalMultipartComplete for application/json ContentType.
 type InternalMultipartCompleteJSONRequestBody = InternalMultipartCompleteRequest
@@ -418,6 +460,11 @@ type ClientInterface interface {
 	// InternalDownloadPart request
 	InternalDownloadPart(ctx context.Context, fileId string, params *InternalDownloadPartParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// InternalInspectProjectBucketInventoryWithBody request with any body
+	InternalInspectProjectBucketInventoryWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	InternalInspectProjectBucketInventory(ctx context.Context, body InternalInspectProjectBucketInventoryJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// InternalMultipartCompleteWithBody request with any body
 	InternalMultipartCompleteWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -513,6 +560,30 @@ func (c *Client) InternalDownload(ctx context.Context, fileId string, params *In
 
 func (c *Client) InternalDownloadPart(ctx context.Context, fileId string, params *InternalDownloadPartParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewInternalDownloadPartRequest(c.Server, fileId, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) InternalInspectProjectBucketInventoryWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewInternalInspectProjectBucketInventoryRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) InternalInspectProjectBucketInventory(ctx context.Context, body InternalInspectProjectBucketInventoryJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewInternalInspectProjectBucketInventoryRequest(c.Server, body)
 	if err != nil {
 		return nil, err
 	}
@@ -1027,6 +1098,46 @@ func NewInternalDownloadPartRequest(server string, fileId string, params *Intern
 	if err != nil {
 		return nil, err
 	}
+
+	return req, nil
+}
+
+// NewInternalInspectProjectBucketInventoryRequest calls the generic InternalInspectProjectBucketInventory builder with application/json body
+func NewInternalInspectProjectBucketInventoryRequest(server string, body InternalInspectProjectBucketInventoryJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewInternalInspectProjectBucketInventoryRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewInternalInspectProjectBucketInventoryRequestWithBody generates requests for InternalInspectProjectBucketInventory with any type of body
+func NewInternalInspectProjectBucketInventoryRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/data/inspect/project-bucket/inventory")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
 
 	return req, nil
 }
@@ -2076,6 +2187,11 @@ type ClientWithResponsesInterface interface {
 	// InternalDownloadPartWithResponse request
 	InternalDownloadPartWithResponse(ctx context.Context, fileId string, params *InternalDownloadPartParams, reqEditors ...RequestEditorFn) (*InternalDownloadPartResponse, error)
 
+	// InternalInspectProjectBucketInventoryWithBodyWithResponse request with any body
+	InternalInspectProjectBucketInventoryWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*InternalInspectProjectBucketInventoryResponse, error)
+
+	InternalInspectProjectBucketInventoryWithResponse(ctx context.Context, body InternalInspectProjectBucketInventoryJSONRequestBody, reqEditors ...RequestEditorFn) (*InternalInspectProjectBucketInventoryResponse, error)
+
 	// InternalMultipartCompleteWithBodyWithResponse request with any body
 	InternalMultipartCompleteWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*InternalMultipartCompleteResponse, error)
 
@@ -2195,6 +2311,28 @@ func (r InternalDownloadPartResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r InternalDownloadPartResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type InternalInspectProjectBucketInventoryResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *InternalProjectBucketInventoryResponse
+}
+
+// Status returns HTTPResponse.Status
+func (r InternalInspectProjectBucketInventoryResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r InternalInspectProjectBucketInventoryResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -2614,6 +2752,23 @@ func (c *ClientWithResponses) InternalDownloadPartWithResponse(ctx context.Conte
 	return ParseInternalDownloadPartResponse(rsp)
 }
 
+// InternalInspectProjectBucketInventoryWithBodyWithResponse request with arbitrary body returning *InternalInspectProjectBucketInventoryResponse
+func (c *ClientWithResponses) InternalInspectProjectBucketInventoryWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*InternalInspectProjectBucketInventoryResponse, error) {
+	rsp, err := c.InternalInspectProjectBucketInventoryWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseInternalInspectProjectBucketInventoryResponse(rsp)
+}
+
+func (c *ClientWithResponses) InternalInspectProjectBucketInventoryWithResponse(ctx context.Context, body InternalInspectProjectBucketInventoryJSONRequestBody, reqEditors ...RequestEditorFn) (*InternalInspectProjectBucketInventoryResponse, error) {
+	rsp, err := c.InternalInspectProjectBucketInventory(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseInternalInspectProjectBucketInventoryResponse(rsp)
+}
+
 // InternalMultipartCompleteWithBodyWithResponse request with arbitrary body returning *InternalMultipartCompleteResponse
 func (c *ClientWithResponses) InternalMultipartCompleteWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*InternalMultipartCompleteResponse, error) {
 	rsp, err := c.InternalMultipartCompleteWithBody(ctx, contentType, body, reqEditors...)
@@ -2922,6 +3077,32 @@ func ParseInternalDownloadPartResponse(rsp *http.Response) (*InternalDownloadPar
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest InternalSignedURL
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseInternalInspectProjectBucketInventoryResponse parses an HTTP response from a InternalInspectProjectBucketInventoryWithResponse call
+func ParseInternalInspectProjectBucketInventoryResponse(rsp *http.Response) (*InternalInspectProjectBucketInventoryResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &InternalInspectProjectBucketInventoryResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest InternalProjectBucketInventoryResponse
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

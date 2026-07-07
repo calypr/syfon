@@ -105,15 +105,7 @@ type scopeRepairIndexAdapter struct {
 }
 
 func (a scopeRepairIndexAdapter) List(ctx context.Context, opts repair.ListRecordsOptions) (clientinternalapi.ListRecordsResponse, error) {
-	ids, err := a.om.ListObjectIDsPageByScope(ctx, strings.TrimSpace(opts.Organization), strings.TrimSpace(opts.Project), "read", strings.TrimSpace(opts.Start), opts.Limit, 0)
-	if err != nil {
-		return clientinternalapi.ListRecordsResponse{}, err
-	}
-	objects, err := a.om.GetBulkObjects(ctx, ids, "read")
-	if err != nil {
-		return clientinternalapi.ListRecordsResponse{}, err
-	}
-	objects, err = a.om.PrepareScopedObjects(ctx, objects, strings.TrimSpace(opts.Organization), strings.TrimSpace(opts.Project), "read")
+	objects, err := a.om.ListPreparedObjectsPageByScope(ctx, strings.TrimSpace(opts.Organization), strings.TrimSpace(opts.Project), "read", strings.TrimSpace(opts.Start), opts.Limit, 0)
 	if err != nil {
 		return clientinternalapi.ListRecordsResponse{}, err
 	}

@@ -338,6 +338,65 @@ func TestHandleInternalInspectProjectBucketModesUsePrefixList(t *testing.T) {
 	}
 }
 
+func TestHandleInternalInspectProjectBucketInventoryListsProjectScope(t *testing.T) {
+	db := &testutils.MockDatabase{
+		Credentials: map[string]models.S3Credential{
+			"cred-1": {CredentialID: "cred-1", Bucket: "bucket-a", Provider: "s3"},
+		},
+		BucketScopes: map[string]models.BucketScope{
+			"syfon|":    {Organization: "syfon", Bucket: "bucket-a", CredentialID: "cred-1", PathPrefix: "program-root"},
+			"syfon|e2e": {Organization: "syfon", ProjectID: "e2e", Bucket: "bucket-a", CredentialID: "cred-1", PathPrefix: "project-root"},
+		},
+	}
+	om := core.NewObjectManager(db, &testutils.MockUrlManager{})
+	inspectCalls := 0
+	om.SetS3ObjectInspector(func(ctx context.Context, cred models.S3Credential, bucket string, key string) (*core.StorageObjectMetadata, error) {
+		inspectCalls++
+		return nil, nil
+	})
+	var listCalls []core.StoragePrefixListOptions
+	var listedPrefixes []string
+	om.SetS3PrefixListerWithOptions(func(ctx context.Context, cred models.S3Credential, bucket string, prefix string, options core.StoragePrefixListOptions) ([]core.StorageBucketObject, error) {
+		if bucket != "bucket-a" {
+			t.Fatalf("unexpected list target bucket=%q prefix=%q", bucket, prefix)
+		}
+		listedPrefixes = append(listedPrefixes, prefix)
+		listCalls = append(listCalls, options)
+		return []core.StorageBucketObject{
+			{Provider: "s3", Bucket: bucket, Key: prefix + "/a.bin", Path: "CONFIG/a.bin", SizeBytes: 10},
+			{Provider: "s3", Bucket: bucket, Key: prefix + "/nested/b.bin", Path: "CONFIG/nested/b.bin", SizeBytes: 15},
+		}, nil
+	})
+
+	body, _ := json.Marshal(internalInspectProjectBucketRequest{Organization: "syfon", Project: "e2e", PathPrefix: "CONFIG"})
+	req := withTestAuthzContext(httptest.NewRequest(http.MethodPost, "/data/inspect/project-bucket/inventory", bytes.NewBuffer(body)), "gen3", map[string]map[string]bool{
+		"/organization/syfon/project/e2e": {"read": true},
+	})
+	rr := doInternalDRSTestRequest(req, om)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp internalInspectProjectBucketResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Summary == nil || resp.Summary.Mode != "items" || resp.Summary.Prefix != "program-root/project-root/CONFIG" {
+		t.Fatalf("unexpected inventory summary: %+v", resp.Summary)
+	}
+	if resp.Summary.ObjectCount != 2 || resp.Summary.TotalBytes != 25 || len(resp.Items) != 2 {
+		t.Fatalf("unexpected inventory response summary=%+v items=%+v", resp.Summary, resp.Items)
+	}
+	if len(listCalls) != 1 || listCalls[0].IncludeHead || listCalls[0].MaxKeys != 0 || listCalls[0].ExactPrefix {
+		t.Fatalf("expected one recursive LIST without HEAD, got %+v", listCalls)
+	}
+	if len(listedPrefixes) != 1 || listedPrefixes[0] != "program-root/project-root/CONFIG" {
+		t.Fatalf("expected path_prefix to scope recursive inventory, got %+v", listedPrefixes)
+	}
+	if inspectCalls != 0 {
+		t.Fatalf("expected inventory route not to HEAD objects, got %d inspector calls", inspectCalls)
+	}
+}
+
 func TestHandleInternalInspectObjectBulkListValidatesExactKeyWithoutHead(t *testing.T) {
 	db := &testutils.MockDatabase{
 		Credentials: map[string]models.S3Credential{

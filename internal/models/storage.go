@@ -48,10 +48,12 @@ type FileUsage struct {
 
 // FileUsageSummary aggregates transfer activity for a set of objects.
 type FileUsageSummary struct {
-	TotalFiles        int64
-	TotalUploads      int64
-	TotalDownloads    int64
-	InactiveFileCount int64
+	TotalFiles              int64
+	TotalUploads            int64
+	TotalDownloads          int64
+	InactiveFileCount       int64
+	RecordCount             int64
+	RecordLatestUpdatedTime *time.Time
 }
 
 // BucketVisibilityRow is the minimum storage projection needed to build bucket

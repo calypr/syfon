@@ -462,6 +462,27 @@ func (db *SqliteDB) GetFileUsageSummaryByResources(ctx context.Context, resource
 	return db.getScopedFileUsageSummary(ctx, resources, includeUnscoped, inactiveSince)
 }
 
+func (db *SqliteDB) GetProjectRecordSummaryByScope(ctx context.Context, organization, project string) (models.FileUsageSummary, error) {
+	resource, err := sycommon.ResourcePath(strings.TrimSpace(organization), strings.TrimSpace(project))
+	if err != nil {
+		return models.FileUsageSummary{}, err
+	}
+	var summary models.FileUsageSummary
+	var latest any
+	if err := db.db.QueryRowContext(ctx, `
+		SELECT COUNT(DISTINCT o.id), MAX(o.updated_time)
+		FROM drs_object o
+		INNER JOIN drs_object_controlled_access ca ON ca.object_id = o.id
+		WHERE ca.resource = ?`, resource).Scan(&summary.RecordCount, &latest); err != nil {
+		return models.FileUsageSummary{}, err
+	}
+	if parsed, ok := parseSQLiteTransferTime(latest); ok {
+		t := parsed.UTC()
+		summary.RecordLatestUpdatedTime = &t
+	}
+	return summary, nil
+}
+
 func scanFileUsageRows(rows *sql.Rows, capacity int) ([]models.FileUsage, error) {
 	out := make([]models.FileUsage, 0, capacity)
 	for rows.Next() {
@@ -676,8 +697,6 @@ func nullableInt64(v *int64) any {
 	}
 	return *v
 }
-
-
 
 func (db *SqliteDB) backfillAccessGrants(ctx context.Context) error {
 	tx, err := db.db.BeginTx(ctx, nil)
@@ -1067,8 +1086,6 @@ func sqliteTransferResourceClause(resources []string) (string, []any) {
 	}
 	return strings.Join(clauses, " OR "), args
 }
-
-
 
 func transferAttributionGroupExpr(groupBy string) (string, string) {
 	switch strings.ToLower(strings.TrimSpace(groupBy)) {

@@ -98,6 +98,45 @@ type InternalMultipartUploadRequest struct {
 	UploadId   string  `json:"uploadId"`
 }
 
+// InternalProjectBucketInventoryItem defines model for InternalProjectBucketInventoryItem.
+type InternalProjectBucketInventoryItem struct {
+	Bucket       *string `json:"bucket,omitempty"`
+	Etag         *string `json:"etag,omitempty"`
+	Key          *string `json:"key,omitempty"`
+	LastModified *string `json:"last_modified,omitempty"`
+	MetaSha256   *string `json:"meta_sha256,omitempty"`
+	ObjectUrl    *string `json:"object_url,omitempty"`
+	Path         *string `json:"path,omitempty"`
+	Provider     *string `json:"provider,omitempty"`
+	SizeBytes    *int64  `json:"size_bytes,omitempty"`
+}
+
+// InternalProjectBucketInventoryRequest defines model for InternalProjectBucketInventoryRequest.
+type InternalProjectBucketInventoryRequest struct {
+	Organization *string `json:"organization,omitempty"`
+	PathPrefix   *string `json:"path_prefix,omitempty"`
+	Project      *string `json:"project,omitempty"`
+}
+
+// InternalProjectBucketInventoryResponse defines model for InternalProjectBucketInventoryResponse.
+type InternalProjectBucketInventoryResponse struct {
+	Items   *[]InternalProjectBucketInventoryItem  `json:"items,omitempty"`
+	Summary *InternalProjectBucketInventorySummary `json:"summary,omitempty"`
+}
+
+// InternalProjectBucketInventorySummary defines model for InternalProjectBucketInventorySummary.
+type InternalProjectBucketInventorySummary struct {
+	Bucket      *string `json:"bucket,omitempty"`
+	ComputedAt  *string `json:"computed_at,omitempty"`
+	Exists      *bool   `json:"exists,omitempty"`
+	Mode        *string `json:"mode,omitempty"`
+	ObjectCount *int    `json:"object_count,omitempty"`
+	ObjectUrl   *string `json:"object_url,omitempty"`
+	Prefix      *string `json:"prefix,omitempty"`
+	Provider    *string `json:"provider,omitempty"`
+	TotalBytes  *int64  `json:"total_bytes,omitempty"`
+}
+
 // InternalRecord defines model for InternalRecord.
 type InternalRecord struct {
 	AccessMethods    *[]externalRef0.AccessMethod `json:"access_methods,omitempty"`
@@ -236,6 +275,9 @@ type InternalListParams struct {
 	Page         *int    `form:"page,omitempty" json:"page,omitempty"`
 }
 
+// InternalInspectProjectBucketInventoryJSONRequestBody defines body for InternalInspectProjectBucketInventory for application/json ContentType.
+type InternalInspectProjectBucketInventoryJSONRequestBody = InternalProjectBucketInventoryRequest
+
 // InternalMultipartCompleteJSONRequestBody defines body for InternalMultipartComplete for application/json ContentType.
 type InternalMultipartCompleteJSONRequestBody = InternalMultipartCompleteRequest
 
@@ -345,6 +387,9 @@ type ServerInterface interface {
 
 	// (GET /data/download/{file_id}/part)
 	InternalDownloadPart(c fiber.Ctx, fileId string, params InternalDownloadPartParams) error
+
+	// (POST /data/inspect/project-bucket/inventory)
+	InternalInspectProjectBucketInventory(c fiber.Ctx) error
 
 	// (POST /data/multipart/complete)
 	InternalMultipartComplete(c fiber.Ctx) error
@@ -488,6 +533,12 @@ func (siw *ServerInterfaceWrapper) InternalDownloadPart(c fiber.Ctx) error {
 	}
 
 	return siw.Handler.InternalDownloadPart(c, fileId, params)
+}
+
+// InternalInspectProjectBucketInventory operation middleware
+func (siw *ServerInterfaceWrapper) InternalInspectProjectBucketInventory(c fiber.Ctx) error {
+
+	return siw.Handler.InternalInspectProjectBucketInventory(c)
 }
 
 // InternalMultipartComplete operation middleware
@@ -874,6 +925,8 @@ func RegisterHandlersWithOptions(router fiber.Router, si ServerInterface, option
 
 	router.Get(options.BaseURL+"/data/download/:file_id/part", wrapper.InternalDownloadPart)
 
+	router.Post(options.BaseURL+"/data/inspect/project-bucket/inventory", wrapper.InternalInspectProjectBucketInventory)
+
 	router.Post(options.BaseURL+"/data/multipart/complete", wrapper.InternalMultipartComplete)
 
 	router.Post(options.BaseURL+"/data/multipart/init", wrapper.InternalMultipartInit)
@@ -1032,6 +1085,71 @@ type InternalDownloadPart500Response struct {
 }
 
 func (response InternalDownloadPart500Response) VisitInternalDownloadPartResponse(ctx fiber.Ctx) error {
+	ctx.Status(500)
+	return nil
+}
+
+type InternalInspectProjectBucketInventoryRequestObject struct {
+	Body *InternalInspectProjectBucketInventoryJSONRequestBody
+}
+
+type InternalInspectProjectBucketInventoryResponseObject interface {
+	VisitInternalInspectProjectBucketInventoryResponse(ctx fiber.Ctx) error
+}
+
+type InternalInspectProjectBucketInventory200JSONResponse InternalProjectBucketInventoryResponse
+
+func (response InternalInspectProjectBucketInventory200JSONResponse) VisitInternalInspectProjectBucketInventoryResponse(ctx fiber.Ctx) error {
+	ctx.Response().Header.Set("Content-Type", "application/json")
+	ctx.Status(200)
+
+	return ctx.JSON(&response)
+}
+
+type InternalInspectProjectBucketInventory400Response struct {
+}
+
+func (response InternalInspectProjectBucketInventory400Response) VisitInternalInspectProjectBucketInventoryResponse(ctx fiber.Ctx) error {
+	ctx.Status(400)
+	return nil
+}
+
+type InternalInspectProjectBucketInventory401Response struct {
+}
+
+func (response InternalInspectProjectBucketInventory401Response) VisitInternalInspectProjectBucketInventoryResponse(ctx fiber.Ctx) error {
+	ctx.Status(401)
+	return nil
+}
+
+type InternalInspectProjectBucketInventory403Response struct {
+}
+
+func (response InternalInspectProjectBucketInventory403Response) VisitInternalInspectProjectBucketInventoryResponse(ctx fiber.Ctx) error {
+	ctx.Status(403)
+	return nil
+}
+
+type InternalInspectProjectBucketInventory404Response struct {
+}
+
+func (response InternalInspectProjectBucketInventory404Response) VisitInternalInspectProjectBucketInventoryResponse(ctx fiber.Ctx) error {
+	ctx.Status(404)
+	return nil
+}
+
+type InternalInspectProjectBucketInventory409Response struct {
+}
+
+func (response InternalInspectProjectBucketInventory409Response) VisitInternalInspectProjectBucketInventoryResponse(ctx fiber.Ctx) error {
+	ctx.Status(409)
+	return nil
+}
+
+type InternalInspectProjectBucketInventory500Response struct {
+}
+
+func (response InternalInspectProjectBucketInventory500Response) VisitInternalInspectProjectBucketInventoryResponse(ctx fiber.Ctx) error {
 	ctx.Status(500)
 	return nil
 }
@@ -1897,6 +2015,9 @@ type StrictServerInterface interface {
 	// (GET /data/download/{file_id}/part)
 	InternalDownloadPart(ctx context.Context, request InternalDownloadPartRequestObject) (InternalDownloadPartResponseObject, error)
 
+	// (POST /data/inspect/project-bucket/inventory)
+	InternalInspectProjectBucketInventory(ctx context.Context, request InternalInspectProjectBucketInventoryRequestObject) (InternalInspectProjectBucketInventoryResponseObject, error)
+
 	// (POST /data/multipart/complete)
 	InternalMultipartComplete(ctx context.Context, request InternalMultipartCompleteRequestObject) (InternalMultipartCompleteResponseObject, error)
 
@@ -2013,6 +2134,37 @@ func (sh *strictHandler) InternalDownloadPart(ctx fiber.Ctx, fileId string, para
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	} else if validResponse, ok := response.(InternalDownloadPartResponseObject); ok {
 		if err := validResponse.VisitInternalDownloadPartResponse(ctx); err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, err.Error())
+		}
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// InternalInspectProjectBucketInventory operation middleware
+func (sh *strictHandler) InternalInspectProjectBucketInventory(ctx fiber.Ctx) error {
+	var request InternalInspectProjectBucketInventoryRequestObject
+
+	var body InternalInspectProjectBucketInventoryJSONRequestBody
+	if err := ctx.Bind().Body(&body); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	}
+	request.Body = &body
+
+	handler := func(ctx fiber.Ctx, request interface{}) (interface{}, error) {
+		return sh.ssi.InternalInspectProjectBucketInventory(ctx.Context(), request.(InternalInspectProjectBucketInventoryRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "InternalInspectProjectBucketInventory")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	} else if validResponse, ok := response.(InternalInspectProjectBucketInventoryResponseObject); ok {
+		if err := validResponse.VisitInternalInspectProjectBucketInventoryResponse(ctx); err != nil {
 			return fiber.NewError(fiber.StatusBadRequest, err.Error())
 		}
 	} else if response != nil {

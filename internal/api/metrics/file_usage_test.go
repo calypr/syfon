@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -125,6 +126,86 @@ func TestMetricsRoutes_GetNotFoundAndValidation(t *testing.T) {
 	}
 }
 
+func TestMetricsRoutes_BulkFiles(t *testing.T) {
+	oldDownload := time.Now().UTC().AddDate(0, 0, -40)
+	recentDownload := time.Now().UTC().AddDate(0, 0, -2)
+	db := &testutils.MockDatabase{
+		Objects: map[string]*drs.DrsObject{
+			"obj-a": {Id: "obj-a", Name: common.Ptr("a.txt"), Size: 10},
+			"obj-b": {Id: "obj-b", Name: common.Ptr("b.txt"), Size: 20},
+			"obj-c": {Id: "obj-c", Name: common.Ptr("c.txt"), Size: 30},
+		},
+		ObjectAuthz: map[string]map[string][]string{
+			"obj-a": {"cbds": {"end_to_end_test"}},
+			"obj-b": {"cbds": {"end_to_end_test"}},
+			"obj-c": {"other": {"project"}},
+		},
+		Usage: map[string]models.FileUsage{
+			"obj-a": {
+				ObjectID:         "obj-a",
+				Name:             "a.txt",
+				Size:             10,
+				DownloadCount:    3,
+				LastDownloadTime: &oldDownload,
+			},
+			"obj-b": {
+				ObjectID:         "obj-b",
+				Name:             "b.txt",
+				Size:             20,
+				DownloadCount:    7,
+				LastDownloadTime: &recentDownload,
+			},
+			"obj-c": {
+				ObjectID:      "obj-c",
+				Name:          "c.txt",
+				Size:          30,
+				DownloadCount: 11,
+			},
+		},
+	}
+	app := fiber.New()
+	app.Use(func(c fiber.Ctx) error {
+		if mode := c.Get("X-Test-Auth-Mode"); mode != "" {
+			var privs map[string]map[string]bool
+			if privsJSON := c.Get("X-Test-Privileges"); privsJSON != "" {
+				_ = json.Unmarshal([]byte(privsJSON), &privs)
+			}
+			headerRaw := c.Get("X-Test-Auth-Header")
+			ctx := metricsTestContext(c.Context(), mode, headerRaw != "", headerRaw == "true", privs)
+			c.SetContext(ctx)
+		}
+		return c.Next()
+	})
+	RegisterMetricsRoutes(app, db)
+
+	req := httptest.NewRequest(http.MethodPost, "/index/v1/metrics/files/bulk?organization=cbds&project=end_to_end_test", strings.NewReader(`{"object_ids":["obj-a","obj-b","obj-c","missing","obj-a"],"inactive_days":30}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Test-Auth-Mode", "gen3")
+	req.Header.Set("X-Test-Auth-Header", "true")
+	privs, _ := json.Marshal(map[string]map[string]bool{
+		"/programs/cbds/projects/end_to_end_test": {"read": true},
+	})
+	req.Header.Set("X-Test-Privileges", string(privs))
+	httpResp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("test request failed: %v", err)
+	}
+	body, _ := io.ReadAll(httpResp.Body)
+	if httpResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", httpResp.StatusCode, string(body))
+	}
+	var resp metricsapi.MetricsListResponse
+	if err := json.Unmarshal(body, &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Data == nil || len(*resp.Data) != 1 {
+		t.Fatalf("expected only inactive scoped object, got %s", string(body))
+	}
+	if got := *(*resp.Data)[0].ObjectId; got != "obj-a" {
+		t.Fatalf("expected obj-a, got %q", got)
+	}
+}
+
 func TestMetricsSummaryAuthzAndScope(t *testing.T) {
 	db := &testutils.MockDatabase{
 		Objects: map[string]*drs.DrsObject{
@@ -186,6 +267,9 @@ func TestMetricsSummaryAuthzAndScope(t *testing.T) {
 		}
 		if resp.TotalFiles == nil || resp.TotalUploads == nil || resp.TotalDownloads == nil || *resp.TotalFiles != 1 || *resp.TotalUploads != 2 || *resp.TotalDownloads != 3 {
 			t.Fatalf("unexpected scoped summary: %+v", resp)
+		}
+		if resp.RecordCount == nil || *resp.RecordCount != 1 {
+			t.Fatalf("expected exact scoped record count, got %+v", resp.RecordCount)
 		}
 	})
 
@@ -395,4 +479,3 @@ func TestListMultiScopedFileUsage_DeduplicatesAcrossScopes(t *testing.T) {
 		t.Fatalf("expected summary total files > 0, got %+v", summary)
 	}
 }
-

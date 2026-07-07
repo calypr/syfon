@@ -291,26 +291,7 @@ func handleInternalInspectProjectBucketFiber(om *core.ObjectManager) fiber.Handl
 			log.Printf("INFO: syfon_project_bucket_handler organization=%s project=%s mode=%s path_prefix=%q include_head=%t duration_ms=%d error=%q", req.Organization, req.Project, req.Mode, req.PathPrefix, req.IncludeHead, time.Since(started).Milliseconds(), err.Error())
 			return handleInspectStorageError(c, err)
 		}
-		out := internalInspectProjectBucketResponse{
-			Summary: projectBucketSummaryFromCore(result.Summary),
-			Items:   make([]internalInspectProjectBucketItem, 0, len(result.Items)),
-		}
-		for _, item := range result.Items {
-			row := internalInspectProjectBucketItem{
-				ObjectURL:  item.ObjectURL,
-				Provider:   item.Provider,
-				Bucket:     item.Bucket,
-				Key:        item.Key,
-				Path:       item.Path,
-				SizeBytes:  item.SizeBytes,
-				MetaSHA256: item.MetaSHA256,
-				ETag:       item.ETag,
-			}
-			if !item.LastModTime.IsZero() {
-				row.LastModTime = item.LastModTime.Format(time.RFC3339)
-			}
-			out.Items = append(out.Items, row)
-		}
+		out := projectBucketInventoryResponseFromCore(result)
 		exists := false
 		objectCount := 0
 		totalBytes := int64(0)
@@ -322,6 +303,40 @@ func handleInternalInspectProjectBucketFiber(om *core.ObjectManager) fiber.Handl
 			mode = out.Summary.Mode
 		}
 		log.Printf("INFO: syfon_project_bucket_handler organization=%s project=%s mode=%s path_prefix=%q include_head=%t exists=%t object_count=%d returned_items=%d total_bytes=%d duration_ms=%d", req.Organization, req.Project, mode, req.PathPrefix, req.IncludeHead, exists, objectCount, len(out.Items), totalBytes, time.Since(started).Milliseconds())
+		return c.JSON(out)
+	}
+}
+
+func handleInternalInspectProjectBucketInventoryFiber(om *core.ObjectManager) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		started := time.Now()
+		if apimiddleware.MissingGen3AuthHeader(c.Context()) {
+			return c.SendStatus(fiber.StatusUnauthorized)
+		}
+		var req internalInspectProjectBucketRequest
+		if err := decodeStrictJSON(c.Body(), &req); err != nil {
+			return apiutil.Reject(c, fiber.StatusBadRequest, "Invalid request body: "+err.Error())
+		}
+		result, err := om.InspectProjectStorage(c.Context(), strings.TrimSpace(req.Organization), strings.TrimSpace(req.Project), core.ProjectStorageInspectOptions{
+			Mode:       core.ProjectStorageInspectItems,
+			PathPrefix: strings.TrimSpace(req.PathPrefix),
+		})
+		if err != nil {
+			log.Printf("INFO: syfon_project_bucket_inventory_handler organization=%s project=%s path_prefix=%q duration_ms=%d error=%q", req.Organization, req.Project, req.PathPrefix, time.Since(started).Milliseconds(), err.Error())
+			return handleInspectStorageError(c, err)
+		}
+		out := projectBucketInventoryResponseFromCore(result)
+		objectCount := 0
+		totalBytes := int64(0)
+		bucket := ""
+		prefix := ""
+		if out.Summary != nil {
+			objectCount = out.Summary.ObjectCount
+			totalBytes = out.Summary.TotalBytes
+			bucket = out.Summary.Bucket
+			prefix = out.Summary.Prefix
+		}
+		log.Printf("INFO: syfon_project_bucket_inventory_handler organization=%s project=%s path_prefix=%q bucket=%s prefix=%q object_count=%d returned_items=%d total_bytes=%d duration_ms=%d", req.Organization, req.Project, req.PathPrefix, bucket, prefix, objectCount, len(out.Items), totalBytes, time.Since(started).Milliseconds())
 		return c.JSON(out)
 	}
 }
@@ -523,6 +538,33 @@ func projectBucketSummaryFromCore(summary core.ProjectStorageSummary) *internalI
 	}
 	if !summary.ComputedAt.IsZero() {
 		out.ComputedAt = summary.ComputedAt.Format(time.RFC3339)
+	}
+	return out
+}
+
+func projectBucketInventoryResponseFromCore(result *core.ProjectStorageInspectResult) internalInspectProjectBucketResponse {
+	if result == nil {
+		return internalInspectProjectBucketResponse{Items: []internalInspectProjectBucketItem{}}
+	}
+	out := internalInspectProjectBucketResponse{
+		Summary: projectBucketSummaryFromCore(result.Summary),
+		Items:   make([]internalInspectProjectBucketItem, 0, len(result.Items)),
+	}
+	for _, item := range result.Items {
+		row := internalInspectProjectBucketItem{
+			ObjectURL:  item.ObjectURL,
+			Provider:   item.Provider,
+			Bucket:     item.Bucket,
+			Key:        item.Key,
+			Path:       item.Path,
+			SizeBytes:  item.SizeBytes,
+			MetaSHA256: item.MetaSHA256,
+			ETag:       item.ETag,
+		}
+		if !item.LastModTime.IsZero() {
+			row.LastModTime = item.LastModTime.Format(time.RFC3339)
+		}
+		out.Items = append(out.Items, row)
 	}
 	return out
 }

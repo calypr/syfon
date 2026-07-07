@@ -368,6 +368,37 @@ paths:
           description: Content too large
         '500':
           description: Internal server error
+  /data/inspect/project-bucket/inventory:
+    post:
+      tags:
+        - internal-data
+      operationId: internalInspectProjectBucketInventory
+      description: Recursively list objects under the configured project bucket scope for audit validation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InternalProjectBucketInventoryRequest'
+      responses:
+        '200':
+          description: Project bucket inventory
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalProjectBucketInventoryResponse'
+        '400':
+          description: Validation error
+        '401':
+          description: Authentication required
+        '403':
+          description: Forbidden
+        '404':
+          description: Bucket scope not found
+        '409':
+          description: Bucket inventory unavailable
+        '500':
+          description: Internal server error
   /data/upload:
     post:
       tags:
@@ -757,6 +788,68 @@ components:
       type: object
       properties:
         url:
+          type: string
+    InternalProjectBucketInventoryRequest:
+      type: object
+      properties:
+        organization:
+          type: string
+        project:
+          type: string
+        path_prefix:
+          type: string
+    InternalProjectBucketInventoryResponse:
+      type: object
+      properties:
+        summary:
+          $ref: '#/components/schemas/InternalProjectBucketInventorySummary'
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/InternalProjectBucketInventoryItem'
+    InternalProjectBucketInventorySummary:
+      type: object
+      properties:
+        provider:
+          type: string
+        bucket:
+          type: string
+        prefix:
+          type: string
+        object_url:
+          type: string
+        exists:
+          type: boolean
+        object_count:
+          type: integer
+        total_bytes:
+          type: integer
+          format: int64
+        computed_at:
+          type: string
+        mode:
+          type: string
+    InternalProjectBucketInventoryItem:
+      type: object
+      properties:
+        object_url:
+          type: string
+        provider:
+          type: string
+        bucket:
+          type: string
+        key:
+          type: string
+        path:
+          type: string
+        size_bytes:
+          type: integer
+          format: int64
+        meta_sha256:
+          type: string
+        etag:
+          type: string
+        last_modified:
           type: string
     InternalUploadBlankRequest:
       type: object

@@ -60,6 +60,7 @@ type FileUsageScopedLister interface {
 	ListFileUsagePageByResources(ctx context.Context, resources []string, includeUnscoped bool, limit, offset int, inactiveSince *time.Time) ([]models.FileUsage, error)
 	GetFileUsageSummaryByScope(ctx context.Context, organization, project string, inactiveSince *time.Time) (models.FileUsageSummary, error)
 	GetFileUsageSummaryByResources(ctx context.Context, resources []string, includeUnscoped bool, inactiveSince *time.Time) (models.FileUsageSummary, error)
+	GetProjectRecordSummaryByScope(ctx context.Context, organization, project string) (models.FileUsageSummary, error)
 }
 
 type TransferAttributionScopedStore interface {

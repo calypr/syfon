@@ -102,34 +102,39 @@ func handleInternalListFiber(om *core.ObjectManager) fiber.Handler {
 
 		requestStart := time.Now()
 		listStart := time.Now()
-		var ids []string
+		var objs []models.InternalObject
 		if objectURL != "" {
+			var ids []string
 			ids, err = om.ListObjectIDsPageByURL(c.Context(), objectURL, filterOrg, filterProject, "read", start, limit, offset)
+			if err != nil {
+				return apiutil.HandleError(c, err)
+			}
+			bulkStart := time.Now()
+			objs, err = om.GetBulkObjects(c.Context(), ids, "read")
+			if err != nil {
+				return apiutil.HandleError(c, err)
+			}
+			bulkDuration := time.Since(bulkStart)
+			prepareStart := time.Now()
+			objs, err = om.PrepareScopedObjects(c.Context(), objs, filterOrg, filterProject, "read")
+			if err != nil {
+				return apiutil.HandleError(c, err)
+			}
+			listDuration := time.Since(listStart)
+			prepareDuration := time.Since(prepareStart)
+			log.Printf("INFO: syfon_internal_index_list organization=%s project=%s url_filter=%t start_after=%t limit=%d offset=%d ids=%d records=%d list_ids_ms=%d bulk_objects_ms=%d prepare_scoped_ms=%d duration_ms=%d", filterOrg, filterProject, true, strings.TrimSpace(start) != "", limit, offset, len(ids), len(objs), listDuration.Milliseconds(), bulkDuration.Milliseconds(), prepareDuration.Milliseconds(), time.Since(requestStart).Milliseconds())
 		} else {
-			ids, err = om.ListObjectIDsPageByScope(c.Context(), filterOrg, filterProject, "read", start, limit, offset)
+			objs, err = om.ListPreparedObjectsPageByScope(c.Context(), filterOrg, filterProject, "read", start, limit, offset)
+			if err != nil {
+				return apiutil.HandleError(c, err)
+			}
+			listDuration := time.Since(listStart)
+			log.Printf("INFO: syfon_internal_index_list organization=%s project=%s url_filter=%t start_after=%t limit=%d offset=%d records=%d list_prepared_ms=%d duration_ms=%d", filterOrg, filterProject, false, strings.TrimSpace(start) != "", limit, offset, len(objs), listDuration.Milliseconds(), time.Since(requestStart).Milliseconds())
 		}
-		if err != nil {
-			return apiutil.HandleError(c, err)
-		}
-		listDuration := time.Since(listStart)
-
-		bulkStart := time.Now()
-		objs, err := om.GetBulkObjects(c.Context(), ids, "read")
-		if err != nil {
-			return apiutil.HandleError(c, err)
-		}
-		bulkDuration := time.Since(bulkStart)
-		prepareStart := time.Now()
-		objs, err = om.PrepareScopedObjects(c.Context(), objs, filterOrg, filterProject, "read")
-		if err != nil {
-			return apiutil.HandleError(c, err)
-		}
-		prepareDuration := time.Since(prepareStart)
 		records := make([]internalapi.InternalRecord, 0, len(objs))
 		for _, obj := range objs {
 			records = append(records, core.InternalObjectToInternalRecord(obj))
 		}
-		log.Printf("INFO: syfon_internal_index_list organization=%s project=%s url_filter=%t start_after=%t limit=%d offset=%d ids=%d records=%d list_ids_ms=%d bulk_objects_ms=%d prepare_scoped_ms=%d duration_ms=%d", filterOrg, filterProject, objectURL != "", strings.TrimSpace(start) != "", limit, offset, len(ids), len(records), listDuration.Milliseconds(), bulkDuration.Milliseconds(), prepareDuration.Milliseconds(), time.Since(requestStart).Milliseconds())
 		return c.JSON(internalapi.ListRecordsResponse{Records: &records})
 	}
 }

@@ -202,6 +202,104 @@ func TestHandleInternalList_CanonicalizesProjectChecksumDuplicates(t *testing.T)
 	}
 }
 
+func TestHandleInternalList_FillsLimitAfterCanonicalizingDuplicates(t *testing.T) {
+	database := db.NewInMemoryDB()
+	om := core.NewObjectManager(database, &testutils.MockUrlManager{})
+	now := time.Now().UTC()
+	later := now.Add(time.Minute)
+	duplicateSHA := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	uniqueSHA := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+
+	for _, obj := range []models.InternalObject{
+		{
+			Authorizations: map[string][]string{"org": {"p1"}},
+			DrsObject: drs.DrsObject{
+				Id:          "did-1",
+				Name:        stringPtr("older.tsv"),
+				CreatedTime: now,
+				UpdatedTime: &now,
+				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: duplicateSHA}},
+				AccessMethods: &[]drs.AccessMethod{{
+					Type: "s3",
+					AccessUrl: &struct {
+						Headers *[]string `json:"headers,omitempty"`
+						Url     string    `json:"url"`
+					}{Url: "s3://bucket/old/" + duplicateSHA},
+				}},
+			},
+		},
+		{
+			Authorizations: map[string][]string{"org": {"p1"}},
+			DrsObject: drs.DrsObject{
+				Id:          "did-2",
+				Name:        stringPtr("newer.tsv"),
+				CreatedTime: later,
+				UpdatedTime: &later,
+				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: duplicateSHA}},
+				AccessMethods: &[]drs.AccessMethod{{
+					Type: "s3",
+					AccessUrl: &struct {
+						Headers *[]string `json:"headers,omitempty"`
+						Url     string    `json:"url"`
+					}{Url: "s3://bucket/new/" + duplicateSHA},
+				}},
+			},
+		},
+		{
+			Authorizations: map[string][]string{"org": {"p1"}},
+			DrsObject: drs.DrsObject{
+				Id:          "did-3",
+				Name:        stringPtr("unique.tsv"),
+				CreatedTime: later,
+				UpdatedTime: &later,
+				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: uniqueSHA}},
+				AccessMethods: &[]drs.AccessMethod{{
+					Type: "s3",
+					AccessUrl: &struct {
+						Headers *[]string `json:"headers,omitempty"`
+						Url     string    `json:"url"`
+					}{Url: "s3://bucket/unique/" + uniqueSHA},
+				}},
+			},
+		},
+	} {
+		if err := om.RegisterObjects(context.Background(), []models.InternalObject{obj}); err != nil {
+			t.Fatalf("RegisterObjects failed: %v", err)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/index?organization=org&project=p1&limit=2", nil)
+	rr := doInternalDRSTestRequest(req, om)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var payload struct {
+		Records []internalapi.InternalRecord `json:"records"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Records) != 2 {
+		t.Fatalf("expected filled canonical page of 2 records, got %d: %+v", len(payload.Records), payload.Records)
+	}
+	if payload.Records[0].Did != "did-1" || payload.Records[1].Did != "did-3" {
+		t.Fatalf("unexpected canonical page ids: %+v", []string{payload.Records[0].Did, payload.Records[1].Did})
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/index?organization=org&project=p1&limit=1&start=did-1", nil)
+	rr = doInternalDRSTestRequest(req, om)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	payload.Records = nil
+	if err := json.NewDecoder(rr.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Records) != 1 || payload.Records[0].Did != "did-3" {
+		t.Fatalf("expected pagination to skip duplicate sibling and return did-3, got %+v", payload.Records)
+	}
+}
+
 func TestHandleInternalList_MergesSiblingAccessMethodsFromLegacyDuplicateRows(t *testing.T) {
 	database := db.NewInMemoryDB()
 	om := core.NewObjectManager(database, &testutils.MockUrlManager{})
