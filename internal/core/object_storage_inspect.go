@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"path"
 	"sort"
 	"strings"
@@ -94,14 +95,24 @@ const (
 	StorageInspectPermissionDenied  StorageInspectErrorKind = "permission_denied"
 	StorageInspectObjectNotFound    StorageInspectErrorKind = "object_not_found"
 	StorageInspectBucketUnavailable StorageInspectErrorKind = "bucket_unavailable"
+	StorageInspectListingIncomplete StorageInspectErrorKind = "listing_incomplete"
 	StorageInspectUnsupported       StorageInspectErrorKind = "unsupported"
 )
 
-const maxStorageInspectWorkers = 16
+const maxStorageInspectWorkers = 8
+
+const (
+	defaultS3HeadMaxAttempts = 3
+	envS3HeadMaxAttempts     = "SYFON_S3_HEAD_MAX_ATTEMPTS"
+)
 
 type StorageInspectError struct {
 	Kind    StorageInspectErrorKind
 	Message string
+}
+
+type s3HeadObjectClient interface {
+	HeadObject(context.Context, *awss3.HeadObjectInput, ...func(*awss3.Options)) (*awss3.HeadObjectOutput, error)
 }
 
 var storageInspectCacheKey contextKey = "storageInspectCache"
@@ -155,6 +166,7 @@ func (m *ObjectManager) SetS3ObjectInspector(fn func(context.Context, models.S3C
 }
 
 func (m *ObjectManager) InspectStorageObject(ctx context.Context, req InspectStorageRequest) (*StorageObjectMetadata, error) {
+	ctx = withS3ProbeLimiter(ctx, m.s3ProbeLimiter)
 	if strings.TrimSpace(req.ObjectURL) != "" {
 		return m.inspectRawStorageObject(ctx, req)
 	}
@@ -162,6 +174,7 @@ func (m *ObjectManager) InspectStorageObject(ctx context.Context, req InspectSto
 }
 
 func (m *ObjectManager) InspectStorageObjects(ctx context.Context, items []InspectStorageRequest) []StorageProbeResult {
+	ctx = withS3ProbeLimiter(ctx, m.s3ProbeLimiter)
 	ctx = WithStorageInspectCache(ctx)
 	if len(items) == 0 {
 		return []StorageProbeResult{}
@@ -617,18 +630,17 @@ func defaultS3ObjectInspector(ctx context.Context, cred models.S3Credential, buc
 	if err != nil {
 		return nil, err
 	}
-	out, err := client.HeadObject(ctx, &awss3.HeadObjectInput{
-		Bucket: aws.String(bucket),
-		Key:    aws.String(key),
-	})
+	out, err := headS3ObjectWithRetry(ctx, client, bucket, key)
 	if err != nil {
 		var apiErr smithy.APIError
 		if errors.As(err, &apiErr) {
 			switch strings.ToLower(strings.TrimSpace(apiErr.ErrorCode())) {
 			case "forbidden", "accessdenied", "permissiondenied":
 				return nil, &StorageInspectError{Kind: StorageInspectBucketUnavailable, Message: fmt.Sprintf("provider rejected object probe for s3://%s/%s; mapped bucket target may be missing or inaccessible", bucket, key)}
-			case "notfound", "nosuchkey", "nosuchbucket":
+			case "notfound", "nosuchkey":
 				return nil, &StorageInspectError{Kind: StorageInspectObjectNotFound, Message: fmt.Sprintf("provider could not find s3://%s/%s", bucket, key)}
+			case "nosuchbucket":
+				return nil, &StorageInspectError{Kind: StorageInspectBucketUnavailable, Message: fmt.Sprintf("provider could not find bucket %q", bucket)}
 			}
 		}
 		return nil, fmt.Errorf("inspect s3 object %s/%s: %w", bucket, key, err)
@@ -651,4 +663,26 @@ func defaultS3ObjectInspector(ctx context.Context, cred models.S3Credential, buc
 		ETag:        strings.Trim(strings.TrimSpace(aws.ToString(out.ETag)), "\""),
 		LastModTime: lastMod,
 	}, nil
+}
+
+func headS3ObjectWithRetry(ctx context.Context, client s3HeadObjectClient, bucket, key string) (*awss3.HeadObjectOutput, error) {
+	policy := s3ListPageRetryPolicyFromEnv()
+	maxAttempts := intEnvOrDefault(envS3HeadMaxAttempts, defaultS3HeadMaxAttempts, 1)
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		release, acquireErr := acquireS3Probe(ctx, "head", bucket, key)
+		if acquireErr != nil {
+			return nil, acquireErr
+		}
+		out, err := client.HeadObject(ctx, &awss3.HeadObjectInput{Bucket: aws.String(bucket), Key: aws.String(key)})
+		release()
+		if err == nil || !isRetryableS3ListPageError(err) || attempt == maxAttempts {
+			return out, err
+		}
+		backoff := policy.backoff(attempt)
+		log.Printf("INFO: syfon_s3_head_retry request_id=%s bucket=%s key=%q attempt=%d max_attempts=%d backoff_ms=%d error=%q", common.GetRequestID(ctx), bucket, key, attempt+1, maxAttempts, backoff.Milliseconds(), err.Error())
+		if err := sleepS3ListPageRetry(ctx, backoff); err != nil {
+			return nil, err
+		}
+	}
+	return nil, nil
 }

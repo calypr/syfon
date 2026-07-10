@@ -123,15 +123,16 @@ type internalInspectProjectBucketSummary struct {
 }
 
 type internalInspectProjectBucketItem struct {
-	ObjectURL   string `json:"object_url"`
-	Provider    string `json:"provider"`
-	Bucket      string `json:"bucket"`
-	Key         string `json:"key"`
-	Path        string `json:"path"`
-	SizeBytes   int64  `json:"size_bytes"`
-	MetaSHA256  string `json:"meta_sha256,omitempty"`
-	ETag        string `json:"etag,omitempty"`
-	LastModTime string `json:"last_modified,omitempty"`
+	ObjectURL         string `json:"object_url"`
+	Provider          string `json:"provider"`
+	Bucket            string `json:"bucket"`
+	Key               string `json:"key"`
+	Path              string `json:"path"`
+	SizeBytes         int64  `json:"size_bytes"`
+	MetaSHA256        string `json:"meta_sha256,omitempty"`
+	ETag              string `json:"etag,omitempty"`
+	LastModTime       string `json:"last_modified,omitempty"`
+	InventoryComplete bool   `json:"inventory_complete,omitempty"`
 }
 
 type internalInspectProjectRecordItem struct {
@@ -558,14 +559,15 @@ func projectBucketInventoryResponseFromCore(result *core.ProjectStorageInspectRe
 	}
 	for _, item := range result.Items {
 		row := internalInspectProjectBucketItem{
-			ObjectURL:  item.ObjectURL,
-			Provider:   item.Provider,
-			Bucket:     item.Bucket,
-			Key:        item.Key,
-			Path:       item.Path,
-			SizeBytes:  item.SizeBytes,
-			MetaSHA256: item.MetaSHA256,
-			ETag:       item.ETag,
+			ObjectURL:         item.ObjectURL,
+			Provider:          item.Provider,
+			Bucket:            item.Bucket,
+			Key:               item.Key,
+			Path:              item.Path,
+			SizeBytes:         item.SizeBytes,
+			MetaSHA256:        item.MetaSHA256,
+			ETag:              item.ETag,
+			InventoryComplete: true,
 		}
 		if !item.LastModTime.IsZero() {
 			row.LastModTime = item.LastModTime.Format(time.RFC3339)

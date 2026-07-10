@@ -409,6 +409,11 @@ func TestHandleInternalInspectProjectBucketInventoryListsProjectScope(t *testing
 	if resp.Summary.ObjectCount != 2 || resp.Summary.TotalBytes != 25 || len(resp.Items) != 2 {
 		t.Fatalf("unexpected inventory response summary=%+v items=%+v", resp.Summary, resp.Items)
 	}
+	for _, item := range resp.Items {
+		if !item.InventoryComplete {
+			t.Fatalf("expected successful inventory item to be marked complete, got %+v", item)
+		}
+	}
 	if len(listCalls) != 1 || listCalls[0].IncludeHead || listCalls[0].MaxKeys != 0 || listCalls[0].ExactPrefix {
 		t.Fatalf("expected one recursive LIST without HEAD, got %+v", listCalls)
 	}
