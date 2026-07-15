@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -998,6 +999,19 @@ func TestSqliteDB_ListScopedObjectIDsByChecksums(t *testing.T) {
 	}
 	if len(emptyRes) != 0 {
 		t.Fatalf("expected empty map for empty checksum input, got %+v", emptyRes)
+	}
+
+	large := make([]string, sqliteMaxParams)
+	for i := range large {
+		large[i] = fmt.Sprintf("large-%d", i)
+	}
+	large[len(large)-1] = "sha-b"
+	largeRes, err := db.ListScopedObjectIDsByChecksums(ctx, "org", "p1", large)
+	if err != nil {
+		t.Fatalf("ListScopedObjectIDsByChecksums large input failed: %v", err)
+	}
+	if got := largeRes["sha-b"]; len(got) != 1 || got[0] != "proj-b" {
+		t.Fatalf("unexpected large-input result for sha-b: %+v", got)
 	}
 }
 

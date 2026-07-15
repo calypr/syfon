@@ -289,6 +289,40 @@ func TestIndexServiceOperationsAndUpsert(t *testing.T) {
 	}
 }
 
+func TestIndexServiceMissingSHA256(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/index/bulk/sha256/missing" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		var req internalapi.BulkMissingSHA256Request
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req.Organization != "org" || req.Project != "project" || len(req.Sha256) != 2 {
+			t.Fatalf("unexpected request body: %+v", req)
+		}
+		writeJSON(t, w, http.StatusOK, internalapi.BulkMissingSHA256Response{
+			Checked:       2,
+			MissingSha256: []string{"missing"},
+		})
+	}))
+	defer server.Close()
+
+	service := NewIndexService(mustInternalClient(t, server.URL), &fakeRequester{})
+	got, err := service.MissingSHA256(context.Background(), internalapi.BulkMissingSHA256Request{
+		Organization: "org",
+		Project:      "project",
+		Sha256:       []string{"present", "missing"},
+	})
+	if err != nil {
+		t.Fatalf("MissingSHA256 returned error: %v", err)
+	}
+	if got.Checked != 2 || len(got.MissingSha256) != 1 || got.MissingSha256[0] != "missing" {
+		t.Fatalf("unexpected response: %+v", got)
+	}
+}
+
 func TestIndexServiceRemoveControlledAccessRequiresJSON200(t *testing.T) {
 	t.Parallel()
 

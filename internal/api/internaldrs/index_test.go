@@ -791,6 +791,59 @@ func TestHandleInternalBulkSHA256Validity(t *testing.T) {
 	}
 }
 
+func TestHandleInternalBulkMissingSHA256(t *testing.T) {
+	present := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	missing := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	now := time.Now().UTC()
+	mockDB := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{
+		"obj-sha": {
+			Id:          "obj-sha",
+			CreatedTime: now,
+			UpdatedTime: &now,
+			Checksums:   []drs.Checksum{{Type: "sha256", Checksum: present}},
+		},
+	}, ObjectAuthz: map[string]map[string][]string{
+		"obj-sha": {"org": {"project"}},
+	}}
+	om := core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
+	app := fiber.New()
+	app.Post("/index/bulk/sha256/missing", handleInternalBulkMissingSHA256Fiber(om))
+	req := httptest.NewRequest(http.MethodPost, "/index/bulk/sha256/missing", strings.NewReader(`{"organization":"org","project":"project","sha256":["SHA256:`+present+`","`+missing+`","`+missing+`"]}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 200, got %d body=%s", resp.StatusCode, string(body))
+	}
+	var payload internalapi.BulkMissingSHA256Response
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Checked != 2 || !slices.Equal(payload.MissingSha256, []string{missing}) {
+		t.Fatalf("unexpected response: %+v", payload)
+	}
+}
+
+func TestHandleInternalBulkMissingSHA256RejectsInvalidChecksum(t *testing.T) {
+	om := core.NewObjectManager(&testutils.MockDatabase{}, &testutils.MockUrlManager{})
+	app := fiber.New()
+	app.Post("/index/bulk/sha256/missing", handleInternalBulkMissingSHA256Fiber(om))
+	req := httptest.NewRequest(http.MethodPost, "/index/bulk/sha256/missing", strings.NewReader(`{"organization":"org","project":"project","sha256":["not-a-sha256"]}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", resp.StatusCode)
+	}
+}
+
 func TestHandleInternalCreate_PersistsControlledAccess(t *testing.T) {
 	mockDB := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}
 	reqBody := `{"records":[{"did":"obj-1","size":42,"controlled_access":["https://calypr.org/program/test/project/p1"],"access_methods":[{"type":"s3","access_url":{"url":"s3://bucket/path/obj-1"}}]}]}`

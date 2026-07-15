@@ -40,6 +40,19 @@ type BulkHashesRequest struct {
 	Hashes []string `json:"hashes"`
 }
 
+// BulkMissingSHA256Request defines model for BulkMissingSHA256Request.
+type BulkMissingSHA256Request struct {
+	Organization string   `json:"organization"`
+	Project      string   `json:"project"`
+	Sha256       []string `json:"sha256"`
+}
+
+// BulkMissingSHA256Response defines model for BulkMissingSHA256Response.
+type BulkMissingSHA256Response struct {
+	Checked       int32    `json:"checked"`
+	MissingSha256 []string `json:"missing_sha256"`
+}
+
 // BulkSHA256ValidityRequest defines model for BulkSHA256ValidityRequest.
 type BulkSHA256ValidityRequest struct {
 	Hashes *[]string `json:"hashes,omitempty"`
@@ -338,6 +351,9 @@ type InternalBulkDocumentsJSONRequestBody = BulkDocumentsRequest
 // InternalBulkHashesJSONRequestBody defines body for InternalBulkHashes for application/json ContentType.
 type InternalBulkHashesJSONRequestBody = BulkHashesRequest
 
+// InternalBulkMissingSHA256JSONRequestBody defines body for InternalBulkMissingSHA256 for application/json ContentType.
+type InternalBulkMissingSHA256JSONRequestBody = BulkMissingSHA256Request
+
 // InternalBulkSHA256ValidityJSONRequestBody defines body for InternalBulkSHA256Validity for application/json ContentType.
 type InternalBulkSHA256ValidityJSONRequestBody = BulkSHA256ValidityRequest
 
@@ -559,6 +575,11 @@ type ClientInterface interface {
 	InternalBulkHashesWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	InternalBulkHashes(ctx context.Context, body InternalBulkHashesJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// InternalBulkMissingSHA256WithBody request with any body
+	InternalBulkMissingSHA256WithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	InternalBulkMissingSHA256(ctx context.Context, body InternalBulkMissingSHA256JSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// InternalBulkSHA256ValidityWithBody request with any body
 	InternalBulkSHA256ValidityWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -932,6 +953,30 @@ func (c *Client) InternalBulkHashesWithBody(ctx context.Context, contentType str
 
 func (c *Client) InternalBulkHashes(ctx context.Context, body InternalBulkHashesJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewInternalBulkHashesRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) InternalBulkMissingSHA256WithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewInternalBulkMissingSHA256RequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) InternalBulkMissingSHA256(ctx context.Context, body InternalBulkMissingSHA256JSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewInternalBulkMissingSHA256Request(c.Server, body)
 	if err != nil {
 		return nil, err
 	}
@@ -2105,6 +2150,46 @@ func NewInternalBulkHashesRequestWithBody(server string, contentType string, bod
 	return req, nil
 }
 
+// NewInternalBulkMissingSHA256Request calls the generic InternalBulkMissingSHA256 builder with application/json body
+func NewInternalBulkMissingSHA256Request(server string, body InternalBulkMissingSHA256JSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewInternalBulkMissingSHA256RequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewInternalBulkMissingSHA256RequestWithBody generates requests for InternalBulkMissingSHA256 with any type of body
+func NewInternalBulkMissingSHA256RequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/index/bulk/sha256/missing")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewInternalBulkSHA256ValidityRequest calls the generic InternalBulkSHA256Validity builder with application/json body
 func NewInternalBulkSHA256ValidityRequest(server string, body InternalBulkSHA256ValidityJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -2427,6 +2512,11 @@ type ClientWithResponsesInterface interface {
 	InternalBulkHashesWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*InternalBulkHashesResponse, error)
 
 	InternalBulkHashesWithResponse(ctx context.Context, body InternalBulkHashesJSONRequestBody, reqEditors ...RequestEditorFn) (*InternalBulkHashesResponse, error)
+
+	// InternalBulkMissingSHA256WithBodyWithResponse request with any body
+	InternalBulkMissingSHA256WithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*InternalBulkMissingSHA256Response, error)
+
+	InternalBulkMissingSHA256WithResponse(ctx context.Context, body InternalBulkMissingSHA256JSONRequestBody, reqEditors ...RequestEditorFn) (*InternalBulkMissingSHA256Response, error)
 
 	// InternalBulkSHA256ValidityWithBodyWithResponse request with any body
 	InternalBulkSHA256ValidityWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*InternalBulkSHA256ValidityResponse, error)
@@ -2846,6 +2936,28 @@ func (r InternalBulkHashesResponse) StatusCode() int {
 	return 0
 }
 
+type InternalBulkMissingSHA256Response struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *BulkMissingSHA256Response
+}
+
+// Status returns HTTPResponse.Status
+func (r InternalBulkMissingSHA256Response) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r InternalBulkMissingSHA256Response) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type InternalBulkSHA256ValidityResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -3211,6 +3323,23 @@ func (c *ClientWithResponses) InternalBulkHashesWithResponse(ctx context.Context
 		return nil, err
 	}
 	return ParseInternalBulkHashesResponse(rsp)
+}
+
+// InternalBulkMissingSHA256WithBodyWithResponse request with arbitrary body returning *InternalBulkMissingSHA256Response
+func (c *ClientWithResponses) InternalBulkMissingSHA256WithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*InternalBulkMissingSHA256Response, error) {
+	rsp, err := c.InternalBulkMissingSHA256WithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseInternalBulkMissingSHA256Response(rsp)
+}
+
+func (c *ClientWithResponses) InternalBulkMissingSHA256WithResponse(ctx context.Context, body InternalBulkMissingSHA256JSONRequestBody, reqEditors ...RequestEditorFn) (*InternalBulkMissingSHA256Response, error) {
+	rsp, err := c.InternalBulkMissingSHA256(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseInternalBulkMissingSHA256Response(rsp)
 }
 
 // InternalBulkSHA256ValidityWithBodyWithResponse request with arbitrary body returning *InternalBulkSHA256ValidityResponse
@@ -3737,6 +3866,32 @@ func ParseInternalBulkHashesResponse(rsp *http.Response) (*InternalBulkHashesRes
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest ListRecordsResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseInternalBulkMissingSHA256Response parses an HTTP response from a InternalBulkMissingSHA256WithResponse call
+func ParseInternalBulkMissingSHA256Response(rsp *http.Response) (*InternalBulkMissingSHA256Response, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &InternalBulkMissingSHA256Response{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest BulkMissingSHA256Response
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

@@ -342,6 +342,34 @@ paths:
           description: Content too large
         '500':
           description: Internal server error
+  /index/bulk/sha256/missing:
+    post:
+      tags:
+        - internal-index
+      operationId: internalBulkMissingSHA256
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkMissingSHA256Request'
+      responses:
+        '200':
+          description: SHA-256 values that are not registered in the requested project
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkMissingSHA256Response'
+        '400':
+          description: Validation error
+        '401':
+          description: Authentication required
+        '403':
+          description: Forbidden
+        '413':
+          description: Content too large
+        '500':
+          description: Internal server error
   /index/bulk/documents:
     post:
       tags:
@@ -823,6 +851,34 @@ components:
           items:
             type: string
         hashes:
+          type: array
+          items:
+            type: string
+    BulkMissingSHA256Request:
+      type: object
+      required:
+        - organization
+        - project
+        - sha256
+      properties:
+        organization:
+          type: string
+        project:
+          type: string
+        sha256:
+          type: array
+          items:
+            type: string
+    BulkMissingSHA256Response:
+      type: object
+      required:
+        - checked
+        - missing_sha256
+      properties:
+        checked:
+          type: integer
+          format: int32
+        missing_sha256:
           type: array
           items:
             type: string

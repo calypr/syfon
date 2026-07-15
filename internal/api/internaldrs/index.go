@@ -1,6 +1,7 @@
 package internaldrs
 
 import (
+	"encoding/hex"
 	"fmt"
 	"log"
 	"strconv"
@@ -18,8 +19,9 @@ import (
 )
 
 const (
-	defaultInternalListLimit = 1000
-	maxInternalListLimit     = 10000
+	defaultInternalListLimit     = 1000
+	maxInternalListLimit         = 10000
+	maxInternalBulkMissingSHA256 = 10000
 )
 
 func RegisterInternalRoutes(router fiber.Router, om *core.ObjectManager) {
@@ -36,6 +38,7 @@ func RegisterInternalRoutes(router fiber.Router, om *core.ObjectManager) {
 
 	router.Post(common.RouteInternalBulkHashes, handleInternalBulkHashesFiber(om))
 	router.Post(common.RouteInternalBulkSHA256, handleInternalBulkSHA256ValidityFiber(om))
+	router.Post(common.RouteInternalBulkSHA256Missing, handleInternalBulkMissingSHA256Fiber(om))
 	router.Post(common.RouteInternalBulkCreate, handleInternalBulkCreateFiber(om))
 	router.Post(common.RouteInternalBulkDocs, handleInternalBulkDocumentsFiber(om))
 	router.Post(common.RouteInternalBulkDeleteHashes, handleInternalBulkDeleteFiber(om))
@@ -43,6 +46,59 @@ func RegisterInternalRoutes(router fiber.Router, om *core.ObjectManager) {
 	router.Post(common.RouteInternalRepairScopeApply, handleInternalScopeRepairApplyFiber(om))
 
 	registerInternalTransferRoutes(router, om)
+}
+
+func handleInternalBulkMissingSHA256Fiber(om *core.ObjectManager) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		var req internalapi.BulkMissingSHA256Request
+		if err := c.Bind().JSON(&req); err != nil {
+			return c.Status(fiber.StatusBadRequest).SendString("Invalid request body")
+		}
+		if strings.TrimSpace(req.Organization) == "" || strings.TrimSpace(req.Project) == "" || len(req.Sha256) == 0 {
+			return c.Status(fiber.StatusBadRequest).SendString("Invalid request body: organization, project, and sha256 values are required")
+		}
+
+		normalized, err := normalizeMissingSHA256(req.Sha256)
+		if err != nil {
+			return c.Status(fiber.StatusBadRequest).SendString(err.Error())
+		}
+		if len(normalized) > maxInternalBulkMissingSHA256 {
+			return c.Status(fiber.StatusRequestEntityTooLarge).SendString(fmt.Sprintf("too many sha256 values: maximum is %d", maxInternalBulkMissingSHA256))
+		}
+
+		missing, err := om.ListMissingScopedSHA256(c.Context(), req.Organization, req.Project, normalized)
+		if err != nil {
+			return apiutil.HandleError(c, err)
+		}
+		return c.JSON(internalapi.BulkMissingSHA256Response{Checked: int32(len(normalized)), MissingSha256: missing})
+	}
+}
+
+func normalizeMissingSHA256(values []string) ([]string, error) {
+	out := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, raw := range values {
+		value := strings.TrimSpace(raw)
+		value = strings.TrimPrefix(strings.ToLower(value), "sha256:")
+		if value == "" {
+			continue
+		}
+		if len(value) != 64 {
+			return nil, fmt.Errorf("invalid sha256 checksum %q", raw)
+		}
+		if _, err := hex.DecodeString(value); err != nil {
+			return nil, fmt.Errorf("invalid sha256 checksum %q", raw)
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("Invalid request body: sha256 values are required")
+	}
+	return out, nil
 }
 
 func handleInternalGetFiber(om *core.ObjectManager) fiber.Handler {

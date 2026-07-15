@@ -389,6 +389,33 @@ func (m *ObjectManager) ListObjectsByScope(ctx context.Context, organization, pr
 	return m.PrepareScopedObjects(ctx, objects, organization, project, requiredMethod)
 }
 
+// ListMissingScopedSHA256 returns the requested SHA-256 checksums that are not
+// registered for the given project. It deliberately uses the indexed checksum
+// lookup and does not hydrate complete DRS records or access methods.
+func (m *ObjectManager) ListMissingScopedSHA256(ctx context.Context, organization, project string, checksums []string) ([]string, error) {
+	organization = strings.TrimSpace(organization)
+	project = strings.TrimSpace(project)
+	if organization == "" || project == "" || len(checksums) == 0 {
+		return nil, common.ErrUnauthorized
+	}
+	if err := m.requireScopeMethod(ctx, organization, project, objectMethodRead); err != nil {
+		return nil, err
+	}
+
+	existingByChecksum, err := m.db.ListScopedObjectIDsByChecksums(ctx, organization, project, checksums)
+	if err != nil {
+		return nil, err
+	}
+
+	missing := make([]string, 0, len(checksums))
+	for _, checksum := range checksums {
+		if objectIDs := existingByChecksum[checksum]; len(objectIDs) == 0 {
+			missing = append(missing, checksum)
+		}
+	}
+	return missing, nil
+}
+
 func (m *ObjectManager) expandProjectChecksumSiblingObjects(ctx context.Context, objects []models.InternalObject, organization, project string) ([]models.InternalObject, error) {
 	if len(objects) == 0 {
 		return []models.InternalObject{}, nil

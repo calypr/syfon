@@ -30,6 +30,7 @@ const (
 	RouteInternalBulkHashes                  = "/index/bulk/hashes"
 	RouteInternalBulkDeleteHashes            = "/index/bulk/delete"
 	RouteInternalBulkSHA256                  = "/index/bulk/sha256/validity"
+	RouteInternalBulkSHA256Missing           = "/index/bulk/sha256/missing"
 	RouteInternalBulkCreate                  = "/index/bulk"
 	RouteInternalBulkDocs                    = "/index/bulk/documents"
 )

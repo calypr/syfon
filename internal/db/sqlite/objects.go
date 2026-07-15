@@ -489,6 +489,26 @@ func (db *SqliteDB) ListScopedObjectIDsByChecksums(ctx context.Context, organiza
 	if len(normalized) == 0 {
 		return map[string][]string{}, nil
 	}
+	// Keep the checksum predicate below within SQLite's bound-parameter limit.
+	// The two fixed parameters are the project resource and checksum type.
+	maxChecksums := sqliteMaxParams - 2
+	if len(normalized) > maxChecksums {
+		out := make(map[string][]string, len(normalized))
+		for start := 0; start < len(normalized); start += maxChecksums {
+			end := start + maxChecksums
+			if end > len(normalized) {
+				end = len(normalized)
+			}
+			part, err := db.ListScopedObjectIDsByChecksums(ctx, organization, project, normalized[start:end])
+			if err != nil {
+				return nil, err
+			}
+			for checksum, ids := range part {
+				out[checksum] = append(out[checksum], ids...)
+			}
+		}
+		return out, nil
+	}
 	args := make([]any, 0, len(normalized)+2)
 	args = append(args, resource, "sha256")
 	placeholders := makePlaceholders(len(normalized))

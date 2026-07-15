@@ -38,6 +38,19 @@ type BulkHashesRequest struct {
 	Hashes []string `json:"hashes"`
 }
 
+// BulkMissingSHA256Request defines model for BulkMissingSHA256Request.
+type BulkMissingSHA256Request struct {
+	Organization string   `json:"organization"`
+	Project      string   `json:"project"`
+	Sha256       []string `json:"sha256"`
+}
+
+// BulkMissingSHA256Response defines model for BulkMissingSHA256Response.
+type BulkMissingSHA256Response struct {
+	Checked       int32    `json:"checked"`
+	MissingSha256 []string `json:"missing_sha256"`
+}
+
 // BulkSHA256ValidityRequest defines model for BulkSHA256ValidityRequest.
 type BulkSHA256ValidityRequest struct {
 	Hashes *[]string `json:"hashes,omitempty"`
@@ -336,6 +349,9 @@ type InternalBulkDocumentsJSONRequestBody = BulkDocumentsRequest
 // InternalBulkHashesJSONRequestBody defines body for InternalBulkHashes for application/json ContentType.
 type InternalBulkHashesJSONRequestBody = BulkHashesRequest
 
+// InternalBulkMissingSHA256JSONRequestBody defines body for InternalBulkMissingSHA256 for application/json ContentType.
+type InternalBulkMissingSHA256JSONRequestBody = BulkMissingSHA256Request
+
 // InternalBulkSHA256ValidityJSONRequestBody defines body for InternalBulkSHA256Validity for application/json ContentType.
 type InternalBulkSHA256ValidityJSONRequestBody = BulkSHA256ValidityRequest
 
@@ -463,6 +479,9 @@ type ServerInterface interface {
 
 	// (POST /index/bulk/hashes)
 	InternalBulkHashes(c fiber.Ctx) error
+
+	// (POST /index/bulk/sha256/missing)
+	InternalBulkMissingSHA256(c fiber.Ctx) error
 
 	// (POST /index/bulk/sha256/validity)
 	InternalBulkSHA256Validity(c fiber.Ctx) error
@@ -909,6 +928,12 @@ func (siw *ServerInterfaceWrapper) InternalBulkHashes(c fiber.Ctx) error {
 	return siw.Handler.InternalBulkHashes(c)
 }
 
+// InternalBulkMissingSHA256 operation middleware
+func (siw *ServerInterfaceWrapper) InternalBulkMissingSHA256(c fiber.Ctx) error {
+
+	return siw.Handler.InternalBulkMissingSHA256(c)
+}
+
 // InternalBulkSHA256Validity operation middleware
 func (siw *ServerInterfaceWrapper) InternalBulkSHA256Validity(c fiber.Ctx) error {
 
@@ -1031,6 +1056,8 @@ func RegisterHandlersWithOptions(router fiber.Router, si ServerInterface, option
 	router.Post(options.BaseURL+"/index/bulk/documents", wrapper.InternalBulkDocuments)
 
 	router.Post(options.BaseURL+"/index/bulk/hashes", wrapper.InternalBulkHashes)
+
+	router.Post(options.BaseURL+"/index/bulk/sha256/missing", wrapper.InternalBulkMissingSHA256)
 
 	router.Post(options.BaseURL+"/index/bulk/sha256/validity", wrapper.InternalBulkSHA256Validity)
 
@@ -1993,6 +2020,63 @@ func (response InternalBulkHashes500Response) VisitInternalBulkHashesResponse(ct
 	return nil
 }
 
+type InternalBulkMissingSHA256RequestObject struct {
+	Body *InternalBulkMissingSHA256JSONRequestBody
+}
+
+type InternalBulkMissingSHA256ResponseObject interface {
+	VisitInternalBulkMissingSHA256Response(ctx fiber.Ctx) error
+}
+
+type InternalBulkMissingSHA256200JSONResponse BulkMissingSHA256Response
+
+func (response InternalBulkMissingSHA256200JSONResponse) VisitInternalBulkMissingSHA256Response(ctx fiber.Ctx) error {
+	ctx.Response().Header.Set("Content-Type", "application/json")
+	ctx.Status(200)
+
+	return ctx.JSON(&response)
+}
+
+type InternalBulkMissingSHA256400Response struct {
+}
+
+func (response InternalBulkMissingSHA256400Response) VisitInternalBulkMissingSHA256Response(ctx fiber.Ctx) error {
+	ctx.Status(400)
+	return nil
+}
+
+type InternalBulkMissingSHA256401Response struct {
+}
+
+func (response InternalBulkMissingSHA256401Response) VisitInternalBulkMissingSHA256Response(ctx fiber.Ctx) error {
+	ctx.Status(401)
+	return nil
+}
+
+type InternalBulkMissingSHA256403Response struct {
+}
+
+func (response InternalBulkMissingSHA256403Response) VisitInternalBulkMissingSHA256Response(ctx fiber.Ctx) error {
+	ctx.Status(403)
+	return nil
+}
+
+type InternalBulkMissingSHA256413Response struct {
+}
+
+func (response InternalBulkMissingSHA256413Response) VisitInternalBulkMissingSHA256Response(ctx fiber.Ctx) error {
+	ctx.Status(413)
+	return nil
+}
+
+type InternalBulkMissingSHA256500Response struct {
+}
+
+func (response InternalBulkMissingSHA256500Response) VisitInternalBulkMissingSHA256Response(ctx fiber.Ctx) error {
+	ctx.Status(500)
+	return nil
+}
+
 type InternalBulkSHA256ValidityRequestObject struct {
 	Body *InternalBulkSHA256ValidityJSONRequestBody
 }
@@ -2239,6 +2323,9 @@ type StrictServerInterface interface {
 
 	// (POST /index/bulk/hashes)
 	InternalBulkHashes(ctx context.Context, request InternalBulkHashesRequestObject) (InternalBulkHashesResponseObject, error)
+
+	// (POST /index/bulk/sha256/missing)
+	InternalBulkMissingSHA256(ctx context.Context, request InternalBulkMissingSHA256RequestObject) (InternalBulkMissingSHA256ResponseObject, error)
 
 	// (POST /index/bulk/sha256/validity)
 	InternalBulkSHA256Validity(ctx context.Context, request InternalBulkSHA256ValidityRequestObject) (InternalBulkSHA256ValidityResponseObject, error)
@@ -2801,6 +2888,37 @@ func (sh *strictHandler) InternalBulkHashes(ctx fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	} else if validResponse, ok := response.(InternalBulkHashesResponseObject); ok {
 		if err := validResponse.VisitInternalBulkHashesResponse(ctx); err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, err.Error())
+		}
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// InternalBulkMissingSHA256 operation middleware
+func (sh *strictHandler) InternalBulkMissingSHA256(ctx fiber.Ctx) error {
+	var request InternalBulkMissingSHA256RequestObject
+
+	var body InternalBulkMissingSHA256JSONRequestBody
+	if err := ctx.Bind().Body(&body); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	}
+	request.Body = &body
+
+	handler := func(ctx fiber.Ctx, request interface{}) (interface{}, error) {
+		return sh.ssi.InternalBulkMissingSHA256(ctx.Context(), request.(InternalBulkMissingSHA256RequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "InternalBulkMissingSHA256")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	} else if validResponse, ok := response.(InternalBulkMissingSHA256ResponseObject); ok {
+		if err := validResponse.VisitInternalBulkMissingSHA256Response(ctx); err != nil {
 			return fiber.NewError(fiber.StatusBadRequest, err.Error())
 		}
 	} else if response != nil {

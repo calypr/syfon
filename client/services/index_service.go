@@ -195,6 +195,20 @@ func (s *IndexService) BulkSHA256Validity(ctx context.Context, req internalapi.B
 	return *resp.JSON200, nil
 }
 
+// MissingSHA256 returns the SHA-256 values that are not registered in a
+// project. Syfon performs this as an indexed existence check and does not
+// return complete DRS records.
+func (s *IndexService) MissingSHA256(ctx context.Context, req internalapi.BulkMissingSHA256Request) (internalapi.BulkMissingSHA256Response, error) {
+	resp, err := s.gen.InternalBulkMissingSHA256WithResponse(ctx, internalapi.InternalBulkMissingSHA256JSONRequestBody(req))
+	if err != nil {
+		return internalapi.BulkMissingSHA256Response{}, err
+	}
+	if resp.JSON200 == nil {
+		return internalapi.BulkMissingSHA256Response{}, fmt.Errorf("failed to find missing sha256 values: %d", resp.StatusCode())
+	}
+	return *resp.JSON200, nil
+}
+
 func (s *IndexService) BulkDocuments(ctx context.Context, dids []string) ([]internalapi.InternalRecordResponse, error) {
 	var body internalapi.BulkDocumentsRequest
 	if err := body.FromBulkDocumentsRequest0(internalapi.BulkDocumentsRequest0(dids)); err != nil {
