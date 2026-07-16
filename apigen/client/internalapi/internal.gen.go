@@ -32,13 +32,25 @@ type BulkDocumentsRequest0 = []string
 
 // BulkDocumentsRequest1 defines model for .
 type BulkDocumentsRequest1 struct {
-	Dids *[]string `json:"dids,omitempty"`
-	Ids  *[]string `json:"ids,omitempty"`
+	Ids *[]string `json:"ids,omitempty"`
 }
 
 // BulkHashesRequest defines model for BulkHashesRequest.
 type BulkHashesRequest struct {
 	Hashes []string `json:"hashes"`
+}
+
+// BulkMissingSHA256Request defines model for BulkMissingSHA256Request.
+type BulkMissingSHA256Request struct {
+	Organization string   `json:"organization"`
+	Project      string   `json:"project"`
+	Sha256       []string `json:"sha256"`
+}
+
+// BulkMissingSHA256Response defines model for BulkMissingSHA256Response.
+type BulkMissingSHA256Response struct {
+	Checked       int32    `json:"checked"`
+	MissingSha256 []string `json:"missing_sha256"`
 }
 
 // BulkSHA256ValidityRequest defines model for BulkSHA256ValidityRequest.
@@ -60,12 +72,6 @@ type DeleteByQueryResponse struct {
 // HashInfo Hash map, e.g. {"sha256":"..."}
 type HashInfo map[string]string
 
-// IndexDirectory defines model for IndexDirectory.
-type IndexDirectory struct {
-	Name string `json:"name"`
-	Path string `json:"path"`
-}
-
 // InternalMultipartCompleteRequest defines model for InternalMultipartCompleteRequest.
 type InternalMultipartCompleteRequest struct {
 	Bucket   *string                 `json:"bucket,omitempty"`
@@ -82,8 +88,8 @@ type InternalMultipartInitOutput struct {
 
 // InternalMultipartInitRequest defines model for InternalMultipartInitRequest.
 type InternalMultipartInitRequest struct {
-	FileName     *string `json:"file_name,omitempty"`
 	Guid         *string `json:"guid,omitempty"`
+	Key          *string `json:"key,omitempty"`
 	Organization *string `json:"organization,omitempty"`
 	Project      *string `json:"project,omitempty"`
 }
@@ -107,6 +113,64 @@ type InternalMultipartUploadRequest struct {
 	UploadId   string  `json:"uploadId"`
 }
 
+// InternalProjectBucketInventoryItem defines model for InternalProjectBucketInventoryItem.
+type InternalProjectBucketInventoryItem struct {
+	Bucket       *string `json:"bucket,omitempty"`
+	Etag         *string `json:"etag,omitempty"`
+	Key          *string `json:"key,omitempty"`
+	LastModified *string `json:"last_modified,omitempty"`
+	MetaSha256   *string `json:"meta_sha256,omitempty"`
+	ObjectUrl    *string `json:"object_url,omitempty"`
+	Path         *string `json:"path,omitempty"`
+	Provider     *string `json:"provider,omitempty"`
+	SizeBytes    *int64  `json:"size_bytes,omitempty"`
+}
+
+// InternalProjectBucketInventoryRequest defines model for InternalProjectBucketInventoryRequest.
+type InternalProjectBucketInventoryRequest struct {
+	Organization *string `json:"organization,omitempty"`
+	PathPrefix   *string `json:"path_prefix,omitempty"`
+	Project      *string `json:"project,omitempty"`
+}
+
+// InternalProjectBucketInventoryResponse defines model for InternalProjectBucketInventoryResponse.
+type InternalProjectBucketInventoryResponse struct {
+	Items   *[]InternalProjectBucketInventoryItem  `json:"items,omitempty"`
+	Summary *InternalProjectBucketInventorySummary `json:"summary,omitempty"`
+}
+
+// InternalProjectBucketInventorySummary defines model for InternalProjectBucketInventorySummary.
+type InternalProjectBucketInventorySummary struct {
+	Bucket      *string `json:"bucket,omitempty"`
+	ComputedAt  *string `json:"computed_at,omitempty"`
+	Exists      *bool   `json:"exists,omitempty"`
+	Mode        *string `json:"mode,omitempty"`
+	ObjectCount *int    `json:"object_count,omitempty"`
+	ObjectUrl   *string `json:"object_url,omitempty"`
+	Prefix      *string `json:"prefix,omitempty"`
+	Provider    *string `json:"provider,omitempty"`
+	TotalBytes  *int64  `json:"total_bytes,omitempty"`
+}
+
+// InternalProjectScopeItem defines model for InternalProjectScopeItem.
+type InternalProjectScopeItem struct {
+	Bucket       *string `json:"bucket,omitempty"`
+	Organization *string `json:"organization,omitempty"`
+	Path         *string `json:"path,omitempty"`
+	ProjectId    *string `json:"project_id,omitempty"`
+}
+
+// InternalProjectScopesRequest defines model for InternalProjectScopesRequest.
+type InternalProjectScopesRequest struct {
+	Organization string `json:"organization"`
+	Project      string `json:"project"`
+}
+
+// InternalProjectScopesResponse defines model for InternalProjectScopesResponse.
+type InternalProjectScopesResponse struct {
+	Items *[]InternalProjectScopeItem `json:"items,omitempty"`
+}
+
 // InternalRecord defines model for InternalRecord.
 type InternalRecord struct {
 	AccessMethods    *[]externalRef0.AccessMethod `json:"access_methods,omitempty"`
@@ -114,11 +178,11 @@ type InternalRecord struct {
 	CreatedTime      *string                      `json:"created_time,omitempty"`
 	Description      *string                      `json:"description,omitempty"`
 	Did              string                       `json:"did"`
-	FileName         *string                      `json:"file_name,omitempty"`
 
 	// Hashes Hash map, e.g. {"sha256":"..."}
 	Hashes       *HashInfo `json:"hashes,omitempty"`
 	Name         *string   `json:"name,omitempty"`
+	NameAliases  *[]string `json:"name_aliases,omitempty"`
 	Organization *string   `json:"organization,omitempty"`
 	Project      *string   `json:"project,omitempty"`
 	Size         *int64    `json:"size,omitempty"`
@@ -135,11 +199,11 @@ type InternalRecordResponse struct {
 	CreatedTime      *string                      `json:"created_time,omitempty"`
 	Description      *string                      `json:"description,omitempty"`
 	Did              string                       `json:"did"`
-	FileName         *string                      `json:"file_name,omitempty"`
 
 	// Hashes Hash map, e.g. {"sha256":"..."}
 	Hashes       *HashInfo `json:"hashes,omitempty"`
 	Name         *string   `json:"name,omitempty"`
+	NameAliases  *[]string `json:"name_aliases,omitempty"`
 	Organization *string   `json:"organization,omitempty"`
 	Project      *string   `json:"project,omitempty"`
 	Rev          *string   `json:"rev,omitempty"`
@@ -173,7 +237,7 @@ type InternalUploadBlankRequest struct {
 type InternalUploadBulkItem struct {
 	ExpiresIn    *int32  `json:"expires_in,omitempty"`
 	FileId       string  `json:"file_id"`
-	FileName     *string `json:"file_name,omitempty"`
+	Key          *string `json:"key,omitempty"`
 	Organization *string `json:"organization,omitempty"`
 	Project      *string `json:"project,omitempty"`
 }
@@ -190,18 +254,17 @@ type InternalUploadBulkRequest struct {
 
 // InternalUploadBulkResult defines model for InternalUploadBulkResult.
 type InternalUploadBulkResult struct {
-	Bucket   *string `json:"bucket,omitempty"`
-	Error    *string `json:"error,omitempty"`
-	FileId   string  `json:"file_id"`
-	FileName *string `json:"file_name,omitempty"`
-	Status   int32   `json:"status"`
-	Url      *string `json:"url,omitempty"`
+	Bucket *string `json:"bucket,omitempty"`
+	Error  *string `json:"error,omitempty"`
+	FileId string  `json:"file_id"`
+	Key    *string `json:"key,omitempty"`
+	Status int32   `json:"status"`
+	Url    *string `json:"url,omitempty"`
 }
 
 // ListRecordsResponse defines model for ListRecordsResponse.
 type ListRecordsResponse struct {
-	Directories *[]IndexDirectory `json:"directories,omitempty"`
-	Records     *[]InternalRecord `json:"records,omitempty"`
+	Records *[]InternalRecord `json:"records,omitempty"`
 }
 
 // InternalDownloadParams defines parameters for InternalDownload.
@@ -216,11 +279,17 @@ type InternalDownloadPartParams struct {
 	End   int64 `form:"end" json:"end"`
 }
 
+// InternalInspectProjectScopesParams defines parameters for InternalInspectProjectScopes.
+type InternalInspectProjectScopesParams struct {
+	Organization string `form:"organization" json:"organization"`
+	Project      string `form:"project" json:"project"`
+}
+
 // InternalUploadURLParams defines parameters for InternalUploadURL.
 type InternalUploadURLParams struct {
 	Organization *string `form:"organization,omitempty" json:"organization,omitempty"`
 	Project      *string `form:"project,omitempty" json:"project,omitempty"`
-	FileName     *string `form:"file_name,omitempty" json:"file_name,omitempty"`
+	Key          *string `form:"key,omitempty" json:"key,omitempty"`
 	ExpiresIn    *int32  `form:"expires_in,omitempty" json:"expires_in,omitempty"`
 }
 
@@ -245,6 +314,12 @@ type InternalListParams struct {
 	Start        *string `form:"start,omitempty" json:"start,omitempty"`
 	Page         *int    `form:"page,omitempty" json:"page,omitempty"`
 }
+
+// InternalInspectProjectBucketInventoryJSONRequestBody defines body for InternalInspectProjectBucketInventory for application/json ContentType.
+type InternalInspectProjectBucketInventoryJSONRequestBody = InternalProjectBucketInventoryRequest
+
+// InternalInspectProjectScopesPostJSONRequestBody defines body for InternalInspectProjectScopesPost for application/json ContentType.
+type InternalInspectProjectScopesPostJSONRequestBody = InternalProjectScopesRequest
 
 // InternalMultipartCompleteJSONRequestBody defines body for InternalMultipartComplete for application/json ContentType.
 type InternalMultipartCompleteJSONRequestBody = InternalMultipartCompleteRequest
@@ -275,6 +350,9 @@ type InternalBulkDocumentsJSONRequestBody = BulkDocumentsRequest
 
 // InternalBulkHashesJSONRequestBody defines body for InternalBulkHashes for application/json ContentType.
 type InternalBulkHashesJSONRequestBody = BulkHashesRequest
+
+// InternalBulkMissingSHA256JSONRequestBody defines body for InternalBulkMissingSHA256 for application/json ContentType.
+type InternalBulkMissingSHA256JSONRequestBody = BulkMissingSHA256Request
 
 // InternalBulkSHA256ValidityJSONRequestBody defines body for InternalBulkSHA256Validity for application/json ContentType.
 type InternalBulkSHA256ValidityJSONRequestBody = BulkSHA256ValidityRequest
@@ -426,6 +504,19 @@ type ClientInterface interface {
 	// InternalDownloadPart request
 	InternalDownloadPart(ctx context.Context, fileId string, params *InternalDownloadPartParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// InternalInspectProjectBucketInventoryWithBody request with any body
+	InternalInspectProjectBucketInventoryWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	InternalInspectProjectBucketInventory(ctx context.Context, body InternalInspectProjectBucketInventoryJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// InternalInspectProjectScopes request
+	InternalInspectProjectScopes(ctx context.Context, params *InternalInspectProjectScopesParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// InternalInspectProjectScopesPostWithBody request with any body
+	InternalInspectProjectScopesPostWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	InternalInspectProjectScopesPost(ctx context.Context, body InternalInspectProjectScopesPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// InternalMultipartCompleteWithBody request with any body
 	InternalMultipartCompleteWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -485,6 +576,11 @@ type ClientInterface interface {
 
 	InternalBulkHashes(ctx context.Context, body InternalBulkHashesJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// InternalBulkMissingSHA256WithBody request with any body
+	InternalBulkMissingSHA256WithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	InternalBulkMissingSHA256(ctx context.Context, body InternalBulkMissingSHA256JSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// InternalBulkSHA256ValidityWithBody request with any body
 	InternalBulkSHA256ValidityWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -521,6 +617,66 @@ func (c *Client) InternalDownload(ctx context.Context, fileId string, params *In
 
 func (c *Client) InternalDownloadPart(ctx context.Context, fileId string, params *InternalDownloadPartParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewInternalDownloadPartRequest(c.Server, fileId, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) InternalInspectProjectBucketInventoryWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewInternalInspectProjectBucketInventoryRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) InternalInspectProjectBucketInventory(ctx context.Context, body InternalInspectProjectBucketInventoryJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewInternalInspectProjectBucketInventoryRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) InternalInspectProjectScopes(ctx context.Context, params *InternalInspectProjectScopesParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewInternalInspectProjectScopesRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) InternalInspectProjectScopesPostWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewInternalInspectProjectScopesPostRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) InternalInspectProjectScopesPost(ctx context.Context, body InternalInspectProjectScopesPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewInternalInspectProjectScopesPostRequest(c.Server, body)
 	if err != nil {
 		return nil, err
 	}
@@ -807,6 +963,30 @@ func (c *Client) InternalBulkHashes(ctx context.Context, body InternalBulkHashes
 	return c.Client.Do(req)
 }
 
+func (c *Client) InternalBulkMissingSHA256WithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewInternalBulkMissingSHA256RequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) InternalBulkMissingSHA256(ctx context.Context, body InternalBulkMissingSHA256JSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewInternalBulkMissingSHA256Request(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 func (c *Client) InternalBulkSHA256ValidityWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewInternalBulkSHA256ValidityRequestWithBody(c.Server, contentType, body)
 	if err != nil {
@@ -1035,6 +1215,143 @@ func NewInternalDownloadPartRequest(server string, fileId string, params *Intern
 	if err != nil {
 		return nil, err
 	}
+
+	return req, nil
+}
+
+// NewInternalInspectProjectBucketInventoryRequest calls the generic InternalInspectProjectBucketInventory builder with application/json body
+func NewInternalInspectProjectBucketInventoryRequest(server string, body InternalInspectProjectBucketInventoryJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewInternalInspectProjectBucketInventoryRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewInternalInspectProjectBucketInventoryRequestWithBody generates requests for InternalInspectProjectBucketInventory with any type of body
+func NewInternalInspectProjectBucketInventoryRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/data/inspect/project-bucket/inventory")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewInternalInspectProjectScopesRequest generates requests for InternalInspectProjectScopes
+func NewInternalInspectProjectScopesRequest(server string, params *InternalInspectProjectScopesParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/data/inspect/project-scopes")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if queryFrag, err := runtime.StyleParamWithLocation("form", true, "organization", runtime.ParamLocationQuery, params.Organization); err != nil {
+			return nil, err
+		} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+			return nil, err
+		} else {
+			for k, v := range parsed {
+				for _, v2 := range v {
+					queryValues.Add(k, v2)
+				}
+			}
+		}
+
+		if queryFrag, err := runtime.StyleParamWithLocation("form", true, "project", runtime.ParamLocationQuery, params.Project); err != nil {
+			return nil, err
+		} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+			return nil, err
+		} else {
+			for k, v := range parsed {
+				for _, v2 := range v {
+					queryValues.Add(k, v2)
+				}
+			}
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewInternalInspectProjectScopesPostRequest calls the generic InternalInspectProjectScopesPost builder with application/json body
+func NewInternalInspectProjectScopesPostRequest(server string, body InternalInspectProjectScopesPostJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewInternalInspectProjectScopesPostRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewInternalInspectProjectScopesPostRequestWithBody generates requests for InternalInspectProjectScopesPost with any type of body
+func NewInternalInspectProjectScopesPostRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/data/inspect/project-scopes")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
 
 	return req, nil
 }
@@ -1300,9 +1617,9 @@ func NewInternalUploadURLRequest(server string, fileId string, params *InternalU
 
 		}
 
-		if params.FileName != nil {
+		if params.Key != nil {
 
-			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "file_name", runtime.ParamLocationQuery, *params.FileName); err != nil {
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "key", runtime.ParamLocationQuery, *params.Key); err != nil {
 				return nil, err
 			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
 				return nil, err
@@ -1833,6 +2150,46 @@ func NewInternalBulkHashesRequestWithBody(server string, contentType string, bod
 	return req, nil
 }
 
+// NewInternalBulkMissingSHA256Request calls the generic InternalBulkMissingSHA256 builder with application/json body
+func NewInternalBulkMissingSHA256Request(server string, body InternalBulkMissingSHA256JSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewInternalBulkMissingSHA256RequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewInternalBulkMissingSHA256RequestWithBody generates requests for InternalBulkMissingSHA256 with any type of body
+func NewInternalBulkMissingSHA256RequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/index/bulk/sha256/missing")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewInternalBulkSHA256ValidityRequest calls the generic InternalBulkSHA256Validity builder with application/json body
 func NewInternalBulkSHA256ValidityRequest(server string, body InternalBulkSHA256ValidityJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -2084,6 +2441,19 @@ type ClientWithResponsesInterface interface {
 	// InternalDownloadPartWithResponse request
 	InternalDownloadPartWithResponse(ctx context.Context, fileId string, params *InternalDownloadPartParams, reqEditors ...RequestEditorFn) (*InternalDownloadPartResponse, error)
 
+	// InternalInspectProjectBucketInventoryWithBodyWithResponse request with any body
+	InternalInspectProjectBucketInventoryWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*InternalInspectProjectBucketInventoryResponse, error)
+
+	InternalInspectProjectBucketInventoryWithResponse(ctx context.Context, body InternalInspectProjectBucketInventoryJSONRequestBody, reqEditors ...RequestEditorFn) (*InternalInspectProjectBucketInventoryResponse, error)
+
+	// InternalInspectProjectScopesWithResponse request
+	InternalInspectProjectScopesWithResponse(ctx context.Context, params *InternalInspectProjectScopesParams, reqEditors ...RequestEditorFn) (*InternalInspectProjectScopesResponse, error)
+
+	// InternalInspectProjectScopesPostWithBodyWithResponse request with any body
+	InternalInspectProjectScopesPostWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*InternalInspectProjectScopesPostResponse, error)
+
+	InternalInspectProjectScopesPostWithResponse(ctx context.Context, body InternalInspectProjectScopesPostJSONRequestBody, reqEditors ...RequestEditorFn) (*InternalInspectProjectScopesPostResponse, error)
+
 	// InternalMultipartCompleteWithBodyWithResponse request with any body
 	InternalMultipartCompleteWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*InternalMultipartCompleteResponse, error)
 
@@ -2142,6 +2512,11 @@ type ClientWithResponsesInterface interface {
 	InternalBulkHashesWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*InternalBulkHashesResponse, error)
 
 	InternalBulkHashesWithResponse(ctx context.Context, body InternalBulkHashesJSONRequestBody, reqEditors ...RequestEditorFn) (*InternalBulkHashesResponse, error)
+
+	// InternalBulkMissingSHA256WithBodyWithResponse request with any body
+	InternalBulkMissingSHA256WithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*InternalBulkMissingSHA256Response, error)
+
+	InternalBulkMissingSHA256WithResponse(ctx context.Context, body InternalBulkMissingSHA256JSONRequestBody, reqEditors ...RequestEditorFn) (*InternalBulkMissingSHA256Response, error)
 
 	// InternalBulkSHA256ValidityWithBodyWithResponse request with any body
 	InternalBulkSHA256ValidityWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*InternalBulkSHA256ValidityResponse, error)
@@ -2203,6 +2578,72 @@ func (r InternalDownloadPartResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r InternalDownloadPartResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type InternalInspectProjectBucketInventoryResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *InternalProjectBucketInventoryResponse
+}
+
+// Status returns HTTPResponse.Status
+func (r InternalInspectProjectBucketInventoryResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r InternalInspectProjectBucketInventoryResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type InternalInspectProjectScopesResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *InternalProjectScopesResponse
+}
+
+// Status returns HTTPResponse.Status
+func (r InternalInspectProjectScopesResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r InternalInspectProjectScopesResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type InternalInspectProjectScopesPostResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *InternalProjectScopesResponse
+}
+
+// Status returns HTTPResponse.Status
+func (r InternalInspectProjectScopesPostResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r InternalInspectProjectScopesPostResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -2495,6 +2936,28 @@ func (r InternalBulkHashesResponse) StatusCode() int {
 	return 0
 }
 
+type InternalBulkMissingSHA256Response struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *BulkMissingSHA256Response
+}
+
+// Status returns HTTPResponse.Status
+func (r InternalBulkMissingSHA256Response) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r InternalBulkMissingSHA256Response) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type InternalBulkSHA256ValidityResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -2620,6 +3083,49 @@ func (c *ClientWithResponses) InternalDownloadPartWithResponse(ctx context.Conte
 		return nil, err
 	}
 	return ParseInternalDownloadPartResponse(rsp)
+}
+
+// InternalInspectProjectBucketInventoryWithBodyWithResponse request with arbitrary body returning *InternalInspectProjectBucketInventoryResponse
+func (c *ClientWithResponses) InternalInspectProjectBucketInventoryWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*InternalInspectProjectBucketInventoryResponse, error) {
+	rsp, err := c.InternalInspectProjectBucketInventoryWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseInternalInspectProjectBucketInventoryResponse(rsp)
+}
+
+func (c *ClientWithResponses) InternalInspectProjectBucketInventoryWithResponse(ctx context.Context, body InternalInspectProjectBucketInventoryJSONRequestBody, reqEditors ...RequestEditorFn) (*InternalInspectProjectBucketInventoryResponse, error) {
+	rsp, err := c.InternalInspectProjectBucketInventory(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseInternalInspectProjectBucketInventoryResponse(rsp)
+}
+
+// InternalInspectProjectScopesWithResponse request returning *InternalInspectProjectScopesResponse
+func (c *ClientWithResponses) InternalInspectProjectScopesWithResponse(ctx context.Context, params *InternalInspectProjectScopesParams, reqEditors ...RequestEditorFn) (*InternalInspectProjectScopesResponse, error) {
+	rsp, err := c.InternalInspectProjectScopes(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseInternalInspectProjectScopesResponse(rsp)
+}
+
+// InternalInspectProjectScopesPostWithBodyWithResponse request with arbitrary body returning *InternalInspectProjectScopesPostResponse
+func (c *ClientWithResponses) InternalInspectProjectScopesPostWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*InternalInspectProjectScopesPostResponse, error) {
+	rsp, err := c.InternalInspectProjectScopesPostWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseInternalInspectProjectScopesPostResponse(rsp)
+}
+
+func (c *ClientWithResponses) InternalInspectProjectScopesPostWithResponse(ctx context.Context, body InternalInspectProjectScopesPostJSONRequestBody, reqEditors ...RequestEditorFn) (*InternalInspectProjectScopesPostResponse, error) {
+	rsp, err := c.InternalInspectProjectScopesPost(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseInternalInspectProjectScopesPostResponse(rsp)
 }
 
 // InternalMultipartCompleteWithBodyWithResponse request with arbitrary body returning *InternalMultipartCompleteResponse
@@ -2819,6 +3325,23 @@ func (c *ClientWithResponses) InternalBulkHashesWithResponse(ctx context.Context
 	return ParseInternalBulkHashesResponse(rsp)
 }
 
+// InternalBulkMissingSHA256WithBodyWithResponse request with arbitrary body returning *InternalBulkMissingSHA256Response
+func (c *ClientWithResponses) InternalBulkMissingSHA256WithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*InternalBulkMissingSHA256Response, error) {
+	rsp, err := c.InternalBulkMissingSHA256WithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseInternalBulkMissingSHA256Response(rsp)
+}
+
+func (c *ClientWithResponses) InternalBulkMissingSHA256WithResponse(ctx context.Context, body InternalBulkMissingSHA256JSONRequestBody, reqEditors ...RequestEditorFn) (*InternalBulkMissingSHA256Response, error) {
+	rsp, err := c.InternalBulkMissingSHA256(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseInternalBulkMissingSHA256Response(rsp)
+}
+
 // InternalBulkSHA256ValidityWithBodyWithResponse request with arbitrary body returning *InternalBulkSHA256ValidityResponse
 func (c *ClientWithResponses) InternalBulkSHA256ValidityWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*InternalBulkSHA256ValidityResponse, error) {
 	rsp, err := c.InternalBulkSHA256ValidityWithBody(ctx, contentType, body, reqEditors...)
@@ -2930,6 +3453,84 @@ func ParseInternalDownloadPartResponse(rsp *http.Response) (*InternalDownloadPar
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest InternalSignedURL
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseInternalInspectProjectBucketInventoryResponse parses an HTTP response from a InternalInspectProjectBucketInventoryWithResponse call
+func ParseInternalInspectProjectBucketInventoryResponse(rsp *http.Response) (*InternalInspectProjectBucketInventoryResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &InternalInspectProjectBucketInventoryResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest InternalProjectBucketInventoryResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseInternalInspectProjectScopesResponse parses an HTTP response from a InternalInspectProjectScopesWithResponse call
+func ParseInternalInspectProjectScopesResponse(rsp *http.Response) (*InternalInspectProjectScopesResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &InternalInspectProjectScopesResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest InternalProjectScopesResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseInternalInspectProjectScopesPostResponse parses an HTTP response from a InternalInspectProjectScopesPostWithResponse call
+func ParseInternalInspectProjectScopesPostResponse(rsp *http.Response) (*InternalInspectProjectScopesPostResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &InternalInspectProjectScopesPostResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest InternalProjectScopesResponse
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -3265,6 +3866,32 @@ func ParseInternalBulkHashesResponse(rsp *http.Response) (*InternalBulkHashesRes
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest ListRecordsResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseInternalBulkMissingSHA256Response parses an HTTP response from a InternalBulkMissingSHA256WithResponse call
+func ParseInternalBulkMissingSHA256Response(rsp *http.Response) (*InternalBulkMissingSHA256Response, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &InternalBulkMissingSHA256Response{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest BulkMissingSHA256Response
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

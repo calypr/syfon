@@ -199,7 +199,7 @@ s3_credentials:
 	// 4. Internal multipart init still works after credential preload.
 	internalMultipartReq := map[string]interface{}{
 		"guid":         guid,
-		"file_name":    "test-multipart",
+		"name":         "test-multipart",
 		"organization": organization,
 		"project":      project,
 	}

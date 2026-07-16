@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +18,7 @@ import (
 	internalauth "github.com/calypr/syfon/internal/auth"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/core"
+	"github.com/calypr/syfon/internal/db"
 	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/testutils"
 	"github.com/gofiber/fiber/v3"
@@ -28,30 +30,6 @@ func indexTestAuthContext(base context.Context, mode string, authHeader bool, pr
 	session.AuthzEnforced = mode == "gen3" || mode == "local"
 	session.SetAuthorizations(nil, privileges, session.AuthzEnforced)
 	return internalauth.WithSession(base, session)
-}
-
-func TestParseScopeQuery(t *testing.T) {
-	t.Run("organization and project", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/?organization=prog&project=study", nil)
-		org, project, ok, err := parseScopeQuery(req)
-		if err != nil {
-			t.Fatalf("parseScopeQuery returned error: %v", err)
-		}
-		if !ok || org != "prog" || project != "study" {
-			t.Fatalf("unexpected scope parse result: ok=%v org=%q project=%q", ok, org, project)
-		}
-	})
-
-	t.Run("project without organization fails", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/?project=study", nil)
-		_, _, ok, err := parseScopeQuery(req)
-		if err == nil {
-			t.Fatal("expected validation error")
-		}
-		if ok {
-			t.Fatal("expected hasScope=false on validation error")
-		}
-	})
 }
 
 func TestHandleInternalList_ScopeFilteringByReadPrivilege(t *testing.T) {
@@ -133,6 +111,275 @@ func TestHandleInternalList_ExactScopeListingDoesNotDependOnBrowseRows(t *testin
 	}
 	if payload.Records[0].Did != "obj-scoped" {
 		t.Fatalf("expected obj-scoped, got %q", payload.Records[0].Did)
+	}
+}
+
+func TestHandleInternalList_CanonicalizesProjectChecksumDuplicates(t *testing.T) {
+	database := db.NewInMemoryDB()
+	om := core.NewObjectManager(database, &testutils.MockUrlManager{})
+	now := time.Now().UTC()
+	later := now.Add(time.Minute)
+	sha := "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+	oldURL := "s3://ellrottlab/old/" + sha
+	newURL := "s3://EllrottLab/new/" + sha
+
+	for _, obj := range []models.InternalObject{
+		{
+			Authorizations: map[string][]string{"org": {"p1"}},
+			DrsObject: drs.DrsObject{
+				Id:          "did-1",
+				Name:        stringPtr("older.tsv"),
+				CreatedTime: now,
+				UpdatedTime: &now,
+				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: sha}},
+				AccessMethods: &[]drs.AccessMethod{{
+					Type: "s3",
+					AccessUrl: &struct {
+						Headers *[]string `json:"headers,omitempty"`
+						Url     string    `json:"url"`
+					}{Url: oldURL},
+				}},
+			},
+		},
+		{
+			Authorizations: map[string][]string{"org": {"p1"}},
+			DrsObject: drs.DrsObject{
+				Id:          "did-2",
+				Name:        stringPtr("newer.tsv"),
+				CreatedTime: later,
+				UpdatedTime: &later,
+				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: sha}},
+				AccessMethods: &[]drs.AccessMethod{{
+					Type: "s3",
+					AccessUrl: &struct {
+						Headers *[]string `json:"headers,omitempty"`
+						Url     string    `json:"url"`
+					}{Url: newURL},
+				}},
+			},
+		},
+	} {
+		if err := om.RegisterObjects(context.Background(), []models.InternalObject{obj}); err != nil {
+			t.Fatalf("RegisterObjects failed: %v", err)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/index?organization=org&project=p1", nil)
+	rr := doInternalDRSTestRequest(req, om)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var payload struct {
+		Records []internalapi.InternalRecord `json:"records"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Records) != 1 {
+		t.Fatalf("expected 1 canonical record, got %d", len(payload.Records))
+	}
+	if payload.Records[0].Did != "did-1" {
+		t.Fatalf("expected canonical did-1, got %q", payload.Records[0].Did)
+	}
+	if payload.Records[0].Name == nil || *payload.Records[0].Name != "newer.tsv" {
+		t.Fatalf("expected latest name newer.tsv, got %+v", payload.Records[0].Name)
+	}
+	if payload.Records[0].NameAliases == nil || !slices.Equal(*payload.Records[0].NameAliases, []string{"older.tsv"}) {
+		t.Fatalf("unexpected name aliases: %#v", payload.Records[0].NameAliases)
+	}
+	if payload.Records[0].AccessMethods == nil || len(*payload.Records[0].AccessMethods) != 2 {
+		t.Fatalf("expected 2 merged access methods, got %#v", payload.Records[0].AccessMethods)
+	}
+	gotURLs := make([]string, 0, len(*payload.Records[0].AccessMethods))
+	for _, method := range *payload.Records[0].AccessMethods {
+		if method.AccessUrl != nil {
+			gotURLs = append(gotURLs, method.AccessUrl.Url)
+		}
+	}
+	slices.Sort(gotURLs)
+	if !slices.Equal(gotURLs, []string{newURL, oldURL}) {
+		t.Fatalf("unexpected merged access method urls: %#v", gotURLs)
+	}
+}
+
+func TestHandleInternalList_FillsLimitAfterCanonicalizingDuplicates(t *testing.T) {
+	database := db.NewInMemoryDB()
+	om := core.NewObjectManager(database, &testutils.MockUrlManager{})
+	now := time.Now().UTC()
+	later := now.Add(time.Minute)
+	duplicateSHA := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	uniqueSHA := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+
+	for _, obj := range []models.InternalObject{
+		{
+			Authorizations: map[string][]string{"org": {"p1"}},
+			DrsObject: drs.DrsObject{
+				Id:          "did-1",
+				Name:        stringPtr("older.tsv"),
+				CreatedTime: now,
+				UpdatedTime: &now,
+				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: duplicateSHA}},
+				AccessMethods: &[]drs.AccessMethod{{
+					Type: "s3",
+					AccessUrl: &struct {
+						Headers *[]string `json:"headers,omitempty"`
+						Url     string    `json:"url"`
+					}{Url: "s3://bucket/old/" + duplicateSHA},
+				}},
+			},
+		},
+		{
+			Authorizations: map[string][]string{"org": {"p1"}},
+			DrsObject: drs.DrsObject{
+				Id:          "did-2",
+				Name:        stringPtr("newer.tsv"),
+				CreatedTime: later,
+				UpdatedTime: &later,
+				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: duplicateSHA}},
+				AccessMethods: &[]drs.AccessMethod{{
+					Type: "s3",
+					AccessUrl: &struct {
+						Headers *[]string `json:"headers,omitempty"`
+						Url     string    `json:"url"`
+					}{Url: "s3://bucket/new/" + duplicateSHA},
+				}},
+			},
+		},
+		{
+			Authorizations: map[string][]string{"org": {"p1"}},
+			DrsObject: drs.DrsObject{
+				Id:          "did-3",
+				Name:        stringPtr("unique.tsv"),
+				CreatedTime: later,
+				UpdatedTime: &later,
+				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: uniqueSHA}},
+				AccessMethods: &[]drs.AccessMethod{{
+					Type: "s3",
+					AccessUrl: &struct {
+						Headers *[]string `json:"headers,omitempty"`
+						Url     string    `json:"url"`
+					}{Url: "s3://bucket/unique/" + uniqueSHA},
+				}},
+			},
+		},
+	} {
+		if err := om.RegisterObjects(context.Background(), []models.InternalObject{obj}); err != nil {
+			t.Fatalf("RegisterObjects failed: %v", err)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/index?organization=org&project=p1&limit=2", nil)
+	rr := doInternalDRSTestRequest(req, om)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var payload struct {
+		Records []internalapi.InternalRecord `json:"records"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Records) != 2 {
+		t.Fatalf("expected filled canonical page of 2 records, got %d: %+v", len(payload.Records), payload.Records)
+	}
+	if payload.Records[0].Did != "did-1" || payload.Records[1].Did != "did-3" {
+		t.Fatalf("unexpected canonical page ids: %+v", []string{payload.Records[0].Did, payload.Records[1].Did})
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/index?organization=org&project=p1&limit=1&start=did-1", nil)
+	rr = doInternalDRSTestRequest(req, om)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	payload.Records = nil
+	if err := json.NewDecoder(rr.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Records) != 1 || payload.Records[0].Did != "did-3" {
+		t.Fatalf("expected pagination to skip duplicate sibling and return did-3, got %+v", payload.Records)
+	}
+}
+
+func TestHandleInternalList_MergesSiblingAccessMethodsFromLegacyDuplicateRows(t *testing.T) {
+	database := db.NewInMemoryDB()
+	om := core.NewObjectManager(database, &testutils.MockUrlManager{})
+	now := time.Now().UTC()
+	later := now.Add(time.Minute)
+	sha := "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+	oldURL := "s3://ellrottlab/fa4ee697-f689-5291-a7cc-8ebe2f3ea8b9/" + sha
+	newURL := "s3://EllrottLab/" + sha
+	controlled := []string{"/organization/org/project/p1"}
+
+	for _, obj := range []models.InternalObject{
+		{
+			DrsObject: drs.DrsObject{
+				Id:               "did-legacy-1",
+				Name:             stringPtr("legacy.tsv"),
+				CreatedTime:      now,
+				UpdatedTime:      &now,
+				Checksums:        []drs.Checksum{{Type: "sha256", Checksum: sha}},
+				ControlledAccess: &controlled,
+				AccessMethods: &[]drs.AccessMethod{{
+					Type: "s3",
+					AccessUrl: &struct {
+						Headers *[]string `json:"headers,omitempty"`
+						Url     string    `json:"url"`
+					}{Url: oldURL},
+				}},
+			},
+			Authorizations: map[string][]string{"org": {"p1"}},
+		},
+		{
+			DrsObject: drs.DrsObject{
+				Id:               "did-legacy-2",
+				Name:             stringPtr("canonical.tsv"),
+				CreatedTime:      later,
+				UpdatedTime:      &later,
+				Checksums:        []drs.Checksum{{Type: "sha256", Checksum: sha}},
+				ControlledAccess: &controlled,
+				AccessMethods: &[]drs.AccessMethod{{
+					Type: "s3",
+					AccessUrl: &struct {
+						Headers *[]string `json:"headers,omitempty"`
+						Url     string    `json:"url"`
+					}{Url: newURL},
+				}},
+			},
+			Authorizations: map[string][]string{"org": {"p1"}},
+		},
+	} {
+		candidate := obj
+		if err := database.CreateObject(context.Background(), &candidate); err != nil {
+			t.Fatalf("CreateObject failed: %v", err)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/index?organization=org&project=p1", nil)
+	rr := doInternalDRSTestRequest(req, om)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var payload struct {
+		Records []internalapi.InternalRecord `json:"records"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Records) != 1 {
+		t.Fatalf("expected 1 canonical record, got %d", len(payload.Records))
+	}
+	if payload.Records[0].AccessMethods == nil || len(*payload.Records[0].AccessMethods) != 2 {
+		t.Fatalf("expected 2 merged access methods, got %#v", payload.Records[0].AccessMethods)
+	}
+	gotURLs := make([]string, 0, len(*payload.Records[0].AccessMethods))
+	for _, method := range *payload.Records[0].AccessMethods {
+		if method.AccessUrl != nil {
+			gotURLs = append(gotURLs, method.AccessUrl.Url)
+		}
+	}
+	slices.Sort(gotURLs)
+	if !slices.Equal(gotURLs, []string{newURL, oldURL}) {
+		t.Fatalf("unexpected merged access method urls: %#v", gotURLs)
 	}
 }
 
@@ -267,31 +514,6 @@ func TestHandleInternalList_PagePaginatesIDs(t *testing.T) {
 	}
 }
 
-func TestPaginateInternalListIDsFiberDefaultLimit(t *testing.T) {
-	ids := make([]string, defaultInternalListLimit+5)
-	for i := range ids {
-		ids[i] = "obj"
-	}
-	app := fiber.New()
-	app.Get("/", func(c fiber.Ctx) error {
-		paged, err := paginateInternalListIDsFiber(c, ids)
-		if err != nil {
-			return err
-		}
-		if len(paged) != defaultInternalListLimit {
-			t.Fatalf("expected default limit %d, got %d", defaultInternalListLimit, len(paged))
-		}
-		return c.SendStatus(fiber.StatusOK)
-	})
-	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/", nil))
-	if err != nil {
-		t.Fatalf("test request failed: %v", err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("expected 200, got %d", resp.StatusCode)
-	}
-}
-
 func TestHandleInternalList_LimitIsCappedAtTenThousand(t *testing.T) {
 	now := time.Now().UTC()
 	total := maxInternalListLimit + 1
@@ -333,7 +555,7 @@ func TestHandleInternalList_LimitIsCappedAtTenThousand(t *testing.T) {
 	}
 }
 
-func TestHandleInternalList_PathBrowseReturnsImmediateDirectoriesAndFiles(t *testing.T) {
+func TestHandleInternalList_IgnoresLegacyPathQuery(t *testing.T) {
 	now := time.Now().UTC()
 	mockDB := &testutils.MockDatabase{
 		Objects: map[string]*drs.DrsObject{
@@ -366,11 +588,8 @@ func TestHandleInternalList_PathBrowseReturnsImmediateDirectoriesAndFiles(t *tes
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if payload.Directories == nil || len(*payload.Directories) != 1 || (*payload.Directories)[0].Name != "deep" || (*payload.Directories)[0].Path != "nested/deep" {
-		t.Fatalf("unexpected directories: %+v", payload.Directories)
-	}
-	if payload.Records == nil || len(*payload.Records) != 1 || (*payload.Records)[0].Did != "obj-a" {
-		t.Fatalf("unexpected paged records: %+v", payload.Records)
+	if payload.Records == nil || len(*payload.Records) != 1 {
+		t.Fatalf("expected one paged record, got %+v", payload.Records)
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/index?organization=org-a&project=proj-a&path=nested&limit=1&start=obj-a", nil)
@@ -382,14 +601,12 @@ func TestHandleInternalList_PathBrowseReturnsImmediateDirectoriesAndFiles(t *tes
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("expected 200, got %d body=%s", resp.StatusCode, string(body))
 	}
+	payload = internalapi.ListRecordsResponse{}
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		t.Fatalf("decode start response: %v", err)
+		t.Fatalf("decode paged response: %v", err)
 	}
-	if payload.Directories == nil || len(*payload.Directories) != 1 {
-		t.Fatalf("expected directories on paged response, got %+v", payload.Directories)
-	}
-	if payload.Records == nil || len(*payload.Records) != 1 || (*payload.Records)[0].Did != "obj-d" {
-		t.Fatalf("expected obj-d after start cursor, got %+v", payload.Records)
+	if payload.Records == nil || len(*payload.Records) != 1 {
+		t.Fatalf("expected one paged record with start cursor, got %+v", payload.Records)
 	}
 }
 
@@ -574,6 +791,59 @@ func TestHandleInternalBulkSHA256Validity(t *testing.T) {
 	}
 }
 
+func TestHandleInternalBulkMissingSHA256(t *testing.T) {
+	present := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	missing := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	now := time.Now().UTC()
+	mockDB := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{
+		"obj-sha": {
+			Id:          "obj-sha",
+			CreatedTime: now,
+			UpdatedTime: &now,
+			Checksums:   []drs.Checksum{{Type: "sha256", Checksum: present}},
+		},
+	}, ObjectAuthz: map[string]map[string][]string{
+		"obj-sha": {"org": {"project"}},
+	}}
+	om := core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
+	app := fiber.New()
+	app.Post("/index/bulk/sha256/missing", handleInternalBulkMissingSHA256Fiber(om))
+	req := httptest.NewRequest(http.MethodPost, "/index/bulk/sha256/missing", strings.NewReader(`{"organization":"org","project":"project","sha256":["SHA256:`+present+`","`+missing+`","`+missing+`"]}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 200, got %d body=%s", resp.StatusCode, string(body))
+	}
+	var payload internalapi.BulkMissingSHA256Response
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Checked != 2 || !slices.Equal(payload.MissingSha256, []string{missing}) {
+		t.Fatalf("unexpected response: %+v", payload)
+	}
+}
+
+func TestHandleInternalBulkMissingSHA256RejectsInvalidChecksum(t *testing.T) {
+	om := core.NewObjectManager(&testutils.MockDatabase{}, &testutils.MockUrlManager{})
+	app := fiber.New()
+	app.Post("/index/bulk/sha256/missing", handleInternalBulkMissingSHA256Fiber(om))
+	req := httptest.NewRequest(http.MethodPost, "/index/bulk/sha256/missing", strings.NewReader(`{"organization":"org","project":"project","sha256":["not-a-sha256"]}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", resp.StatusCode)
+	}
+}
+
 func TestHandleInternalCreate_PersistsControlledAccess(t *testing.T) {
 	mockDB := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}
 	reqBody := `{"records":[{"did":"obj-1","size":42,"controlled_access":["https://calypr.org/program/test/project/p1"],"access_methods":[{"type":"s3","access_url":{"url":"s3://bucket/path/obj-1"}}]}]}`
@@ -620,6 +890,43 @@ func TestHandleInternalBulkCreate_PersistsControlledAccess(t *testing.T) {
 
 	if got := mockDB.ObjectAuthz["obj-bulk-1"]; len(got["test"]) != 1 || got["test"][0] != "p1" {
 		t.Fatalf("expected persisted authz, got %v", got)
+	}
+}
+
+func TestHandleInternalBulkCreate_OrganizationProjectAddsCanonicalControlledAccess(t *testing.T) {
+	mockDB := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}
+	reqBody := `{"records":[{"did":"obj-bulk-2","organization":"test","project":"p2","size":7,"access_methods":[{"type":"s3","access_url":{"url":"s3://bucket/path/obj-bulk-2"}}]}]}`
+	req := httptest.NewRequest(http.MethodPost, "/index/bulk", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	om := core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
+	rr := doInternalDRSTestRequest(req, om)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if got := mockDB.ObjectAuthz["obj-bulk-2"]; len(got["test"]) != 1 || got["test"][0] != "p2" {
+		t.Fatalf("expected canonical project authz, got %v", got)
+	}
+}
+
+func TestHandleInternalUpdate_OrganizationProjectAddsCanonicalControlledAccess(t *testing.T) {
+	now := time.Now().UTC()
+	mockDB := &testutils.MockDatabase{
+		Objects: map[string]*drs.DrsObject{
+			"obj-update": {Id: "obj-update", CreatedTime: now, UpdatedTime: &now},
+		},
+	}
+	reqBody := `{"did":"obj-update","organization":"test","project":"p3"}`
+	req := httptest.NewRequest(http.MethodPut, "/index/obj-update", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	om := core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
+	rr := doInternalDRSTestRequest(req, om)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if got := mockDB.ObjectAuthz["obj-update"]; len(got["test"]) != 1 || got["test"][0] != "p3" {
+		t.Fatalf("expected canonical project authz after update, got %v", got)
 	}
 }
 

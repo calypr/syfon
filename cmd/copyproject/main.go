@@ -375,8 +375,8 @@ func hasPathPrefix(candidate, prefix []string) bool {
 func copyRecord(ctx context.Context, cmd *cobra.Command, sourceClient, targetClient services.SyfonClient, rec internalapi.InternalRecord, targetBucket, targetProjectPath string, dstResource string, current, total int, tempDir string) error {
 	did := rec.Did
 	fileName := ""
-	if rec.FileName != nil {
-		fileName = *rec.FileName
+	if rec.Name != nil {
+		fileName = *rec.Name
 	}
 	size := int64(0)
 	if rec.Size != nil {
@@ -478,6 +478,9 @@ func copyRecord(ctx context.Context, cmd *cobra.Command, sourceClient, targetCli
 	authzMap := syfoncommon.AuthzMapFromScope(authzOrg, authzProject)
 	if err := targetClient.Index().Upsert(ctx, did, targetObjectURL, fileName, size, checksum, authzMap); err != nil {
 		return fmt.Errorf("failed to sync index record for DID %s: %w", did, err)
+	}
+	if _, err := targetClient.DRS().UpdateObjectAccessMethods(ctx, did, []drsapi.AccessMethod{targetAccessMethod}); err != nil {
+		return fmt.Errorf("failed to replace access methods for DID %s: %w", did, err)
 	}
 
 	return nil

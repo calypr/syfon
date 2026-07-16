@@ -2,12 +2,35 @@ package core
 
 import (
 	"context"
+	"slices"
 	"testing"
+	"time"
 
 	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/db"
+	"github.com/calypr/syfon/internal/db/sqlite"
 	"github.com/calypr/syfon/internal/models"
 )
+
+type pageSpyDB struct {
+	db.DatabaseInterface
+	pageCalls int
+	listCalls int
+}
+
+func (s *pageSpyDB) ListObjectIDsPageByScope(ctx context.Context, organization, project, startAfter string, limit, offset int) ([]string, error) {
+	s.pageCalls++
+	return s.DatabaseInterface.(db.ObjectIDPageLister).ListObjectIDsPageByScope(ctx, organization, project, startAfter, limit, offset)
+}
+
+func (s *pageSpyDB) ListObjectIDsPageByResources(ctx context.Context, resources []string, includeUnscoped bool, startAfter string, limit, offset int) ([]string, error) {
+	return s.DatabaseInterface.(db.ObjectIDPageLister).ListObjectIDsPageByResources(ctx, resources, includeUnscoped, startAfter, limit, offset)
+}
+
+func (s *pageSpyDB) ListObjectIDsByScope(ctx context.Context, organization, project string) ([]string, error) {
+	s.listCalls++
+	return s.DatabaseInterface.ListObjectIDsByScope(ctx, organization, project)
+}
 
 func registerScopedCandidate(t *testing.T, om *ObjectManager, id, checksum, org, project string) {
 	t.Helper()
@@ -39,8 +62,8 @@ func TestListObjectIDsPageByChecksum_StartAfterAndLimit(t *testing.T) {
 	checksum := "1111111111111111111111111111111111111111111111111111111111111111"
 
 	registerScopedCandidate(t, om, "chk-a", checksum, "org1", "proj1")
-	registerScopedCandidate(t, om, "chk-b", checksum, "org1", "proj1")
-	registerScopedCandidate(t, om, "chk-c", checksum, "org1", "proj1")
+	registerScopedCandidate(t, om, "chk-b", checksum, "org1", "proj2")
+	registerScopedCandidate(t, om, "chk-c", checksum, "org2", "proj1")
 
 	ids, err := om.ListObjectIDsPageByChecksum(context.Background(), checksum, "sha256", "", "", "read", "chk-a", 2, 0)
 	if err != nil {
@@ -67,6 +90,53 @@ func TestListObjectIDsPageByScope_StartAfterAndScopeFilter(t *testing.T) {
 	}
 	if len(ids) != 1 || ids[0] != "scope-b" {
 		t.Fatalf("unexpected scoped page ids: %+v", ids)
+	}
+}
+
+func TestListObjectIDsPageByScope_UsesDatabasePaginationForUnrestrictedScope(t *testing.T) {
+	database := &pageSpyDB{DatabaseInterface: db.NewInMemoryDB()}
+	om := NewObjectManager(database, nil)
+
+	registerScopedCandidate(t, om, "scope-a", "2222222222222222222222222222222222222222222222222222222222222222", "org1", "proj1")
+	registerScopedCandidate(t, om, "scope-b", "3333333333333333333333333333333333333333333333333333333333333333", "org1", "proj1")
+	registerScopedCandidate(t, om, "scope-c", "4444444444444444444444444444444444444444444444444444444444444444", "org1", "proj1")
+
+	ids, err := om.ListObjectIDsPageByScope(context.Background(), "org1", "proj1", "read", "scope-a", 1, 0)
+	if err != nil {
+		t.Fatalf("ListObjectIDsPageByScope error: %v", err)
+	}
+	if len(ids) != 1 || ids[0] != "scope-b" {
+		t.Fatalf("unexpected scoped page ids: %+v", ids)
+	}
+	if database.pageCalls != 1 {
+		t.Fatalf("expected one database page call, got %d", database.pageCalls)
+	}
+	if database.listCalls != 0 {
+		t.Fatalf("expected no full scope list calls, got %d", database.listCalls)
+	}
+}
+
+func TestListObjectIDsPageByScope_FallsBackWhenAuthzRestrictsResources(t *testing.T) {
+	database := &pageSpyDB{DatabaseInterface: db.NewInMemoryDB()}
+	om := NewObjectManager(database, nil)
+
+	registerScopedCandidate(t, om, "secure-obj", "5555555555555555555555555555555555555555555555555555555555555555", "secure", "p1")
+	restrictedCtx := buildLocalAuthzContext(map[string]map[string]bool{
+		"/organization/other/project/p2": {"read": true},
+	})
+
+	ids, err := om.ListObjectIDsPageByScope(restrictedCtx, "secure", "p1", "read", "", 10, 0)
+	if err != nil {
+		t.Fatalf("ListObjectIDsPageByScope error: %v", err)
+	}
+	if len(ids) != 0 {
+		t.Fatalf("expected authz fallback to filter ids, got %+v", ids)
+	}
+	if database.pageCalls != 0 {
+		t.Fatalf("expected no unrestricted page calls, got %d", database.pageCalls)
+	}
+	if database.listCalls == 0 {
+		t.Fatalf("expected fallback to full scope list")
 	}
 }
 
@@ -124,6 +194,105 @@ func TestObjectMatchesScope(t *testing.T) {
 	if !objectMatchesScope(obj, "org1", "") {
 		t.Fatalf("expected org-wide org1 to match")
 	}
+}
+
+type trackingDB struct {
+	db.DatabaseInterface
+	bulkCalls [][]string
+}
+
+func (t *trackingDB) GetBulkObjects(ctx context.Context, ids []string) ([]models.InternalObject, error) {
+	copyIDs := append([]string(nil), ids...)
+	t.bulkCalls = append(t.bulkCalls, copyIDs)
+	return t.DatabaseInterface.GetBulkObjects(ctx, ids)
+}
+
+func TestPrepareScopedObjects_HydratesOnlyMissingSiblingIDs(t *testing.T) {
+	base, err := sqlite.NewSqliteDB(":memory:")
+	if err != nil {
+		t.Fatalf("NewSqliteDB failed: %v", err)
+	}
+	tracked := &trackingDB{DatabaseInterface: base}
+	om := NewObjectManager(tracked, nil)
+	checksum := "6666666666666666666666666666666666666666666666666666666666666666"
+	controlled := []string{"/organization/org/project/proj"}
+
+	for _, obj := range []models.InternalObject{
+		{
+			Authorizations: map[string][]string{"org": {"proj"}},
+			DrsObject: drs.DrsObject{
+				Id:               "dup-a",
+				CreatedTime:      drsISOTime("2026-01-01T00:00:00Z"),
+				UpdatedTime:      ptrTime("2026-01-01T00:00:00Z"),
+				Checksums:        []drs.Checksum{{Type: "sha256", Checksum: checksum}},
+				ControlledAccess: &controlled,
+				AccessMethods: &[]drs.AccessMethod{{
+					Type: drs.AccessMethodTypeS3,
+					AccessUrl: &struct {
+						Headers *[]string `json:"headers,omitempty"`
+						Url     string    `json:"url"`
+					}{Url: "s3://bucket/dup-a"},
+				}},
+			},
+		},
+		{
+			Authorizations: map[string][]string{"org": {"proj"}},
+			DrsObject: drs.DrsObject{
+				Id:               "dup-b",
+				CreatedTime:      drsISOTime("2026-01-02T00:00:00Z"),
+				UpdatedTime:      ptrTime("2026-01-02T00:00:00Z"),
+				Checksums:        []drs.Checksum{{Type: "sha256", Checksum: checksum}},
+				ControlledAccess: &controlled,
+				AccessMethods: &[]drs.AccessMethod{{
+					Type: drs.AccessMethodTypeS3,
+					AccessUrl: &struct {
+						Headers *[]string `json:"headers,omitempty"`
+						Url     string    `json:"url"`
+					}{Url: "s3://bucket/dup-b"},
+				}},
+			},
+		},
+	} {
+		if err := tracked.CreateObject(context.Background(), &obj); err != nil {
+			t.Fatalf("CreateObject failed: %v", err)
+		}
+	}
+
+	initial, err := tracked.GetBulkObjects(context.Background(), []string{"dup-a"})
+	if err != nil {
+		t.Fatalf("GetBulkObjects failed: %v", err)
+	}
+	tracked.bulkCalls = nil
+
+	prepared, err := om.PrepareScopedObjects(context.Background(), initial, "org", "proj", "")
+	if err != nil {
+		t.Fatalf("PrepareScopedObjects failed: %v", err)
+	}
+	if len(prepared) != 1 {
+		t.Fatalf("expected 1 canonical record, got %d", len(prepared))
+	}
+	if prepared[0].AccessMethods == nil || len(*prepared[0].AccessMethods) != 2 {
+		t.Fatalf("expected merged access methods, got %+v", prepared[0].AccessMethods)
+	}
+	if len(tracked.bulkCalls) != 1 {
+		t.Fatalf("expected 1 sibling hydration call, got %d", len(tracked.bulkCalls))
+	}
+	if !slices.Equal(tracked.bulkCalls[0], []string{"dup-b"}) {
+		t.Fatalf("expected only missing sibling id to be hydrated, got %+v", tracked.bulkCalls[0])
+	}
+}
+
+func drsISOTime(raw string) time.Time {
+	tm, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		panic(err)
+	}
+	return tm
+}
+
+func ptrTime(raw string) *time.Time {
+	tm := drsISOTime(raw)
+	return &tm
 }
 
 func TestReadableChecksumFilter(t *testing.T) {

@@ -11,9 +11,6 @@ func TestAuthorizationError_UnwrapAndClassifiers(t *testing.T) {
 	if !errors.Is(err, ErrUnauthorized) {
 		t.Fatalf("expected AuthorizationError to unwrap to ErrUnauthorized")
 	}
-	if !IsUnauthorizedError(err) {
-		t.Fatalf("expected IsUnauthorizedError=true")
-	}
 }
 
 func TestAuthorizationError_PublicMessage(t *testing.T) {

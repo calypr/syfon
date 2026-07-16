@@ -342,6 +342,34 @@ paths:
           description: Content too large
         '500':
           description: Internal server error
+  /index/bulk/sha256/missing:
+    post:
+      tags:
+        - internal-index
+      operationId: internalBulkMissingSHA256
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkMissingSHA256Request'
+      responses:
+        '200':
+          description: SHA-256 values that are not registered in the requested project
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkMissingSHA256Response'
+        '400':
+          description: Validation error
+        '401':
+          description: Authentication required
+        '403':
+          description: Forbidden
+        '413':
+          description: Content too large
+        '500':
+          description: Internal server error
   /index/bulk/documents:
     post:
       tags:
@@ -366,6 +394,95 @@ paths:
           description: Validation error
         '413':
           description: Content too large
+        '500':
+          description: Internal server error
+  /data/inspect/project-scopes:
+    get:
+      tags:
+        - internal-data
+      operationId: internalInspectProjectScopes
+      description: List bucket scopes visible for a project.
+      parameters:
+        - in: query
+          name: organization
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: project
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Project bucket scopes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalProjectScopesResponse'
+        '400':
+          description: Validation error
+        '401':
+          description: Authentication required
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
+    post:
+      tags:
+        - internal-data
+      operationId: internalInspectProjectScopesPost
+      description: Compatibility request-body form of project scope listing.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InternalProjectScopesRequest'
+      responses:
+        '200':
+          description: Project bucket scopes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalProjectScopesResponse'
+        '400':
+          description: Validation error
+        '401':
+          description: Authentication required
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal server error
+  /data/inspect/project-bucket/inventory:
+    post:
+      tags:
+        - internal-data
+      operationId: internalInspectProjectBucketInventory
+      description: Recursively list objects under the configured project bucket scope for audit validation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InternalProjectBucketInventoryRequest'
+      responses:
+        '200':
+          description: Project bucket inventory
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalProjectBucketInventoryResponse'
+        '400':
+          description: Validation error
+        '401':
+          description: Authentication required
+        '403':
+          description: Forbidden
+        '404':
+          description: Bucket scope not found
+        '409':
+          description: Bucket inventory unavailable
         '500':
           description: Internal server error
   /data/upload:
@@ -417,7 +534,7 @@ paths:
           schema:
             type: string
         - in: query
-          name: file_name
+          name: key
           required: false
           schema:
             type: string
@@ -657,6 +774,10 @@ components:
           minLength: 1
         name:
           type: string
+        name_aliases:
+          type: array
+          items:
+            type: string
         hashes:
           $ref: '#/components/schemas/HashInfo'
         size:
@@ -670,8 +791,6 @@ components:
           type: array
           items:
             $ref: './openapi.yaml#/components/schemas/AccessMethod'
-        file_name:
-          type: string
         organization:
           type: string
         project:
@@ -702,24 +821,10 @@ components:
     ListRecordsResponse:
       type: object
       properties:
-        directories:
-          type: array
-          items:
-            $ref: '#/components/schemas/IndexDirectory'
         records:
           type: array
           items:
             $ref: '#/components/schemas/InternalRecord'
-    IndexDirectory:
-      type: object
-      required:
-        - name
-        - path
-      properties:
-        name:
-          type: string
-        path:
-          type: string
     BulkCreateRequest:
       type: object
       required:
@@ -749,6 +854,34 @@ components:
           type: array
           items:
             type: string
+    BulkMissingSHA256Request:
+      type: object
+      required:
+        - organization
+        - project
+        - sha256
+      properties:
+        organization:
+          type: string
+        project:
+          type: string
+        sha256:
+          type: array
+          items:
+            type: string
+    BulkMissingSHA256Response:
+      type: object
+      required:
+        - checked
+        - missing_sha256
+      properties:
+        checked:
+          type: integer
+          format: int32
+        missing_sha256:
+          type: array
+          items:
+            type: string
     BulkDocumentsRequest:
       oneOf:
         - type: array
@@ -757,10 +890,6 @@ components:
         - type: object
           properties:
             ids:
-              type: array
-              items:
-                type: string
-            dids:
               type: array
               items:
                 type: string
@@ -773,6 +902,96 @@ components:
       type: object
       properties:
         url:
+          type: string
+    InternalProjectBucketInventoryRequest:
+      type: object
+      properties:
+        organization:
+          type: string
+        project:
+          type: string
+        path_prefix:
+          type: string
+    InternalProjectBucketInventoryResponse:
+      type: object
+      properties:
+        summary:
+          $ref: '#/components/schemas/InternalProjectBucketInventorySummary'
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/InternalProjectBucketInventoryItem'
+    InternalProjectBucketInventorySummary:
+      type: object
+      properties:
+        provider:
+          type: string
+        bucket:
+          type: string
+        prefix:
+          type: string
+        object_url:
+          type: string
+        exists:
+          type: boolean
+        object_count:
+          type: integer
+        total_bytes:
+          type: integer
+          format: int64
+        computed_at:
+          type: string
+        mode:
+          type: string
+    InternalProjectBucketInventoryItem:
+      type: object
+      properties:
+        object_url:
+          type: string
+        provider:
+          type: string
+        bucket:
+          type: string
+        key:
+          type: string
+        path:
+          type: string
+        size_bytes:
+          type: integer
+          format: int64
+        meta_sha256:
+          type: string
+        etag:
+          type: string
+        last_modified:
+          type: string
+    InternalProjectScopesRequest:
+      type: object
+      required:
+        - organization
+        - project
+      properties:
+        organization:
+          type: string
+        project:
+          type: string
+    InternalProjectScopesResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/InternalProjectScopeItem'
+    InternalProjectScopeItem:
+      type: object
+      properties:
+        bucket:
+          type: string
+        organization:
+          type: string
+        project_id:
+          type: string
+        path:
           type: string
     InternalUploadBlankRequest:
       type: object
@@ -808,7 +1027,7 @@ components:
       properties:
         file_id:
           type: string
-        file_name:
+        key:
           type: string
         organization:
           type: string
@@ -834,7 +1053,7 @@ components:
           type: string
         bucket:
           type: string
-        file_name:
+        key:
           type: string
         url:
           type: string
@@ -848,7 +1067,7 @@ components:
       properties:
         guid:
           type: string
-        file_name:
+        key:
           type: string
         organization:
           type: string

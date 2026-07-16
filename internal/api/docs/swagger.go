@@ -104,82 +104,6 @@ func handleInternalOpenAPISpec(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func findOpenAPISpecPath() (string, bool) {
-	candidates := []string{
-		"apigen/openapi/openapi.yaml",
-		filepath.Join(filepath.Dir(os.Args[0]), "apigen", "openapi", "openapi.yaml"),
-	}
-
-	if _, thisFile, _, ok := runtime.Caller(0); ok {
-		repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", "..", ".."))
-		candidates = append(candidates, filepath.Join(repoRoot, "apigen", "openapi", "openapi.yaml"))
-	}
-
-	for _, path := range candidates {
-		if _, err := os.Stat(path); err == nil {
-			return path, true
-		}
-	}
-	return "", false
-}
-
-func findLFSOpenAPISpecPath() (string, bool) {
-	candidates := []string{
-		"apigen/openapi/lfs.openapi.yaml",
-		filepath.Join(filepath.Dir(os.Args[0]), "apigen", "openapi", "lfs.openapi.yaml"),
-	}
-
-	if _, thisFile, _, ok := runtime.Caller(0); ok {
-		repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", "..", ".."))
-		candidates = append(candidates, filepath.Join(repoRoot, "apigen", "openapi", "lfs.openapi.yaml"))
-	}
-
-	for _, path := range candidates {
-		if _, err := os.Stat(path); err == nil {
-			return path, true
-		}
-	}
-	return "", false
-}
-
-func findCompatOpenAPISpecPath() (string, bool) {
-	candidates := []string{
-		"apigen/openapi/compat.openapi.yaml",
-		filepath.Join(filepath.Dir(os.Args[0]), "apigen", "openapi", "compat.openapi.yaml"),
-	}
-
-	if _, thisFile, _, ok := runtime.Caller(0); ok {
-		repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", "..", ".."))
-		candidates = append(candidates, filepath.Join(repoRoot, "apigen", "openapi", "compat.openapi.yaml"))
-	}
-
-	for _, path := range candidates {
-		if _, err := os.Stat(path); err == nil {
-			return path, true
-		}
-	}
-	return "", false
-}
-
-func findBucketOpenAPISpecPath() (string, bool) {
-	candidates := []string{
-		"apigen/openapi/bucket.openapi.yaml",
-		filepath.Join(filepath.Dir(os.Args[0]), "apigen", "openapi", "bucket.openapi.yaml"),
-	}
-
-	if _, thisFile, _, ok := runtime.Caller(0); ok {
-		repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", "..", ".."))
-		candidates = append(candidates, filepath.Join(repoRoot, "apigen", "openapi", "bucket.openapi.yaml"))
-	}
-
-	for _, path := range candidates {
-		if _, err := os.Stat(path); err == nil {
-			return path, true
-		}
-	}
-	return "", false
-}
-
 func findNamedOpenAPISpecPath(fileName string) (string, bool) {
 	candidates := []string{
 		filepath.Join("apigen", "openapi", fileName),
@@ -235,18 +159,6 @@ func buildMergedOpenAPISpec() ([]byte, error) {
 		return nil, err
 	}
 	return out, nil
-}
-
-func loadSpecYAML(path string) (map[string]interface{}, error) {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	var doc map[string]interface{}
-	if err := yaml.Unmarshal(raw, &doc); err != nil {
-		return nil, err
-	}
-	return doc, nil
 }
 
 func loadSpecYAMLByName(fileName string) (map[string]interface{}, error) {

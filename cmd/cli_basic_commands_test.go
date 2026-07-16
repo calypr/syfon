@@ -813,8 +813,8 @@ func TestSyfonCopyProjectCommand_AcrossInstances(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to get copied target record: %v", err)
 	}
-	if targetRec.FileName == nil || *targetRec.FileName != fileName {
-		t.Fatalf("unexpected target filename: %+v", targetRec.FileName)
+	if targetRec.Name == nil || *targetRec.Name != fileName {
+		t.Fatalf("unexpected target name: %+v", targetRec.Name)
 	}
 	if targetRec.Hashes == nil || (*targetRec.Hashes)["sha256"] != checksum {
 		t.Fatalf("unexpected target hashes: %+v", targetRec.Hashes)
@@ -879,7 +879,7 @@ func TestSyfonCopyProjectRefsCommand(t *testing.T) {
 		AccessMethods:    sourceRec.AccessMethods,
 		ControlledAccess: sourceRec.ControlledAccess,
 		Description:      &description,
-		FileName:         sourceRec.FileName,
+		Name:             sourceRec.Name,
 		Hashes:           sourceRec.Hashes,
 		Organization:     sourceRec.Organization,
 		Project:          sourceRec.Project,
@@ -909,8 +909,8 @@ func TestSyfonCopyProjectRefsCommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to get copied target record: %v", err)
 	}
-	if targetRec.FileName == nil || *targetRec.FileName != fileName {
-		t.Fatalf("unexpected target filename: %+v", targetRec.FileName)
+	if targetRec.Name == nil || *targetRec.Name != fileName {
+		t.Fatalf("unexpected target name: %+v", targetRec.Name)
 	}
 	if targetRec.Description == nil || *targetRec.Description != description {
 		t.Fatalf("unexpected target description: %+v", targetRec.Description)

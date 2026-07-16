@@ -67,16 +67,7 @@ func TestDataServiceCanonicalObjectURL_GCSAndAzure(t *testing.T) {
 			fallback:   "did:8",
 			want:       "s3://az-container/path/to/object.bin",
 		},
-		{
-			name:       "scheme-less local upload path uses remembered bucket hint",
-			signedURL:  "/tmp/syfon/object.bin",
-			bucketHint: "",
-			fallback:   "did:9",
-			want:       "s3://remembered-bucket/did:9",
-		},
 	}
-
-	d.rememberUploadBucket("did:9", "remembered-bucket")
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

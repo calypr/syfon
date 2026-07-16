@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"sort"
 	"strings"
 	"time"
 
@@ -120,6 +119,54 @@ func (m *MockDatabase) GetObjectsByChecksums(ctx context.Context, checksums []st
 	return out, nil
 }
 
+func (m *MockDatabase) ListScopedObjectIDsByChecksums(ctx context.Context, organization, project string, checksums []string) (map[string][]string, error) {
+	out := make(map[string][]string, len(checksums))
+	for _, checksum := range checksums {
+		checksum = strings.TrimSpace(checksum)
+		if checksum == "" {
+			continue
+		}
+		out[checksum] = []string{}
+		matches, err := m.GetObjectsByChecksum(ctx, checksum)
+		if err != nil {
+			return nil, err
+		}
+		seen := map[string]struct{}{}
+		for _, match := range matches {
+			if !objectMatchesMockScope(m.ObjectAuthz[match.Id], organization, project) {
+				continue
+			}
+			if _, ok := seen[match.Id]; ok {
+				continue
+			}
+			seen[match.Id] = struct{}{}
+			out[checksum] = append(out[checksum], match.Id)
+		}
+	}
+	return out, nil
+}
+
+func objectMatchesMockScope(authz map[string][]string, organization, project string) bool {
+	organization = strings.TrimSpace(organization)
+	project = strings.TrimSpace(project)
+	if organization == "" {
+		return true
+	}
+	projects, ok := authz[organization]
+	if !ok {
+		return false
+	}
+	if project == "" || len(projects) == 0 {
+		return true
+	}
+	for _, candidate := range projects {
+		if candidate == project {
+			return true
+		}
+	}
+	return false
+}
+
 func (m *MockDatabase) ListObjectIDsByScope(ctx context.Context, organization, project string) ([]string, error) {
 	ids := make([]string, 0)
 	for id := range m.Objects {
@@ -149,90 +196,6 @@ func (m *MockDatabase) ListObjectIDsByScope(ctx context.Context, organization, p
 		}
 	}
 	return ids, nil
-}
-
-func (m *MockDatabase) ListObjectIDsPageByPath(ctx context.Context, organization, project, path, startAfter string, limit, offset int) ([]string, []models.BrowseDirectory, error) {
-	normalizedPath, pathSegments, err := common.NormalizeBrowsePath(path)
-	if err != nil {
-		return nil, nil, err
-	}
-	ids := make([]string, 0)
-	directoriesByPath := make(map[string]models.BrowseDirectory)
-	for id, obj := range m.Objects {
-		authz := map[string][]string{}
-		if m.ObjectAuthz != nil {
-			if v, ok := m.ObjectAuthz[id]; ok {
-				authz = v
-			}
-		}
-		projects, ok := authz[organization]
-		if !ok {
-			continue
-		}
-		matchesProject := false
-		for _, candidateProject := range projects {
-			if candidateProject == project {
-				matchesProject = true
-				break
-			}
-		}
-		if !matchesProject {
-			continue
-		}
-		if obj.Name == nil {
-			continue
-		}
-		info, ok, err := common.BrowsePathInfoFromName(*obj.Name)
-		if err != nil || !ok {
-			continue
-		}
-		if !common.HasBrowsePathPrefix(info.Segments, pathSegments) {
-			continue
-		}
-		remaining := info.Segments[len(pathSegments):]
-		if len(remaining) == 0 {
-			continue
-		}
-		if len(remaining) == 1 {
-			if info.ParentPath == normalizedPath {
-				ids = append(ids, id)
-			}
-			continue
-		}
-		dirInfo, ok := common.ImmediateBrowseDirectory(normalizedPath, info.Normalized)
-		if !ok {
-			continue
-		}
-		directoriesByPath[dirInfo.Normalized] = models.BrowseDirectory{Name: dirInfo.EntryName, Path: dirInfo.Normalized}
-	}
-	sort.Strings(ids)
-	if startAfter != "" {
-		offset = sort.SearchStrings(ids, startAfter)
-		for offset < len(ids) && ids[offset] <= startAfter {
-			offset++
-		}
-	}
-	if offset < 0 {
-		offset = 0
-	}
-	if offset > len(ids) {
-		offset = len(ids)
-	}
-	end := offset + limit
-	if end > len(ids) {
-		end = len(ids)
-	}
-	directories := make([]models.BrowseDirectory, 0, len(directoriesByPath))
-	for _, directory := range directoriesByPath {
-		directories = append(directories, directory)
-	}
-	sort.Slice(directories, func(i, j int) bool {
-		if directories[i].Name == directories[j].Name {
-			return directories[i].Path < directories[j].Path
-		}
-		return directories[i].Name < directories[j].Name
-	})
-	return ids[offset:end], directories, nil
 }
 
 func (m *MockDatabase) ListObjectIDsByResources(ctx context.Context, resources []string, includeUnscoped bool) ([]string, error) {
@@ -847,64 +810,6 @@ func (m *MockDatabase) GetTransferAttributionBreakdown(ctx context.Context, filt
 		out = append(out, *item)
 	}
 	return out, nil
-}
-
-func providerTransferEventMatchesFilter(ev models.ProviderTransferEvent, filter models.TransferAttributionFilter) bool {
-	status := filter.ReconciliationStatus
-	if status == "" {
-		status = models.ProviderTransferMatched
-	}
-	if status != "all" && ev.ReconciliationStatus != status {
-		return false
-	}
-	if filter.Organization != "" && ev.Organization != filter.Organization {
-		return false
-	}
-	if filter.Project != "" && ev.Project != filter.Project {
-		return false
-	}
-	direction := filter.Direction
-	if direction == "" {
-		direction = filter.EventType
-	}
-	if direction != "" && direction != "all" && ev.Direction != direction {
-		return false
-	}
-	if filter.From != nil && ev.EventTime.Before(*filter.From) {
-		return false
-	}
-	if filter.To != nil && ev.EventTime.After(*filter.To) {
-		return false
-	}
-	if filter.Provider != "" && ev.Provider != filter.Provider {
-		return false
-	}
-	if filter.Bucket != "" && ev.Bucket != filter.Bucket {
-		return false
-	}
-	if filter.SHA256 != "" && ev.SHA256 != filter.SHA256 {
-		return false
-	}
-	if filter.User != "" && ev.ActorEmail != filter.User && ev.ActorSubject != filter.User {
-		return false
-	}
-	return true
-}
-
-func providerTransferBreakdownKey(ev models.ProviderTransferEvent, groupBy string) string {
-	switch groupBy {
-	case "user":
-		if ev.ActorEmail != "" {
-			return ev.ActorEmail
-		}
-		return ev.ActorSubject
-	case "provider":
-		return ev.Provider + ":" + ev.Bucket
-	case "object":
-		return ev.SHA256
-	default:
-		return ev.Organization + "/" + ev.Project
-	}
 }
 
 func transferEventMatchesFilter(ev models.TransferAttributionEvent, filter models.TransferAttributionFilter) bool {

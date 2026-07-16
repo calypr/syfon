@@ -30,13 +30,25 @@ type BulkDocumentsRequest0 = []string
 
 // BulkDocumentsRequest1 defines model for .
 type BulkDocumentsRequest1 struct {
-	Dids *[]string `json:"dids,omitempty"`
-	Ids  *[]string `json:"ids,omitempty"`
+	Ids *[]string `json:"ids,omitempty"`
 }
 
 // BulkHashesRequest defines model for BulkHashesRequest.
 type BulkHashesRequest struct {
 	Hashes []string `json:"hashes"`
+}
+
+// BulkMissingSHA256Request defines model for BulkMissingSHA256Request.
+type BulkMissingSHA256Request struct {
+	Organization string   `json:"organization"`
+	Project      string   `json:"project"`
+	Sha256       []string `json:"sha256"`
+}
+
+// BulkMissingSHA256Response defines model for BulkMissingSHA256Response.
+type BulkMissingSHA256Response struct {
+	Checked       int32    `json:"checked"`
+	MissingSha256 []string `json:"missing_sha256"`
 }
 
 // BulkSHA256ValidityRequest defines model for BulkSHA256ValidityRequest.
@@ -58,12 +70,6 @@ type DeleteByQueryResponse struct {
 // HashInfo Hash map, e.g. {"sha256":"..."}
 type HashInfo map[string]string
 
-// IndexDirectory defines model for IndexDirectory.
-type IndexDirectory struct {
-	Name string `json:"name"`
-	Path string `json:"path"`
-}
-
 // InternalMultipartCompleteRequest defines model for InternalMultipartCompleteRequest.
 type InternalMultipartCompleteRequest struct {
 	Bucket   *string                 `json:"bucket,omitempty"`
@@ -80,8 +86,8 @@ type InternalMultipartInitOutput struct {
 
 // InternalMultipartInitRequest defines model for InternalMultipartInitRequest.
 type InternalMultipartInitRequest struct {
-	FileName     *string `json:"file_name,omitempty"`
 	Guid         *string `json:"guid,omitempty"`
+	Key          *string `json:"key,omitempty"`
 	Organization *string `json:"organization,omitempty"`
 	Project      *string `json:"project,omitempty"`
 }
@@ -105,6 +111,64 @@ type InternalMultipartUploadRequest struct {
 	UploadId   string  `json:"uploadId"`
 }
 
+// InternalProjectBucketInventoryItem defines model for InternalProjectBucketInventoryItem.
+type InternalProjectBucketInventoryItem struct {
+	Bucket       *string `json:"bucket,omitempty"`
+	Etag         *string `json:"etag,omitempty"`
+	Key          *string `json:"key,omitempty"`
+	LastModified *string `json:"last_modified,omitempty"`
+	MetaSha256   *string `json:"meta_sha256,omitempty"`
+	ObjectUrl    *string `json:"object_url,omitempty"`
+	Path         *string `json:"path,omitempty"`
+	Provider     *string `json:"provider,omitempty"`
+	SizeBytes    *int64  `json:"size_bytes,omitempty"`
+}
+
+// InternalProjectBucketInventoryRequest defines model for InternalProjectBucketInventoryRequest.
+type InternalProjectBucketInventoryRequest struct {
+	Organization *string `json:"organization,omitempty"`
+	PathPrefix   *string `json:"path_prefix,omitempty"`
+	Project      *string `json:"project,omitempty"`
+}
+
+// InternalProjectBucketInventoryResponse defines model for InternalProjectBucketInventoryResponse.
+type InternalProjectBucketInventoryResponse struct {
+	Items   *[]InternalProjectBucketInventoryItem  `json:"items,omitempty"`
+	Summary *InternalProjectBucketInventorySummary `json:"summary,omitempty"`
+}
+
+// InternalProjectBucketInventorySummary defines model for InternalProjectBucketInventorySummary.
+type InternalProjectBucketInventorySummary struct {
+	Bucket      *string `json:"bucket,omitempty"`
+	ComputedAt  *string `json:"computed_at,omitempty"`
+	Exists      *bool   `json:"exists,omitempty"`
+	Mode        *string `json:"mode,omitempty"`
+	ObjectCount *int    `json:"object_count,omitempty"`
+	ObjectUrl   *string `json:"object_url,omitempty"`
+	Prefix      *string `json:"prefix,omitempty"`
+	Provider    *string `json:"provider,omitempty"`
+	TotalBytes  *int64  `json:"total_bytes,omitempty"`
+}
+
+// InternalProjectScopeItem defines model for InternalProjectScopeItem.
+type InternalProjectScopeItem struct {
+	Bucket       *string `json:"bucket,omitempty"`
+	Organization *string `json:"organization,omitempty"`
+	Path         *string `json:"path,omitempty"`
+	ProjectId    *string `json:"project_id,omitempty"`
+}
+
+// InternalProjectScopesRequest defines model for InternalProjectScopesRequest.
+type InternalProjectScopesRequest struct {
+	Organization string `json:"organization"`
+	Project      string `json:"project"`
+}
+
+// InternalProjectScopesResponse defines model for InternalProjectScopesResponse.
+type InternalProjectScopesResponse struct {
+	Items *[]InternalProjectScopeItem `json:"items,omitempty"`
+}
+
 // InternalRecord defines model for InternalRecord.
 type InternalRecord struct {
 	AccessMethods    *[]externalRef0.AccessMethod `json:"access_methods,omitempty"`
@@ -112,11 +176,11 @@ type InternalRecord struct {
 	CreatedTime      *string                      `json:"created_time,omitempty"`
 	Description      *string                      `json:"description,omitempty"`
 	Did              string                       `json:"did"`
-	FileName         *string                      `json:"file_name,omitempty"`
 
 	// Hashes Hash map, e.g. {"sha256":"..."}
 	Hashes       *HashInfo `json:"hashes,omitempty"`
 	Name         *string   `json:"name,omitempty"`
+	NameAliases  *[]string `json:"name_aliases,omitempty"`
 	Organization *string   `json:"organization,omitempty"`
 	Project      *string   `json:"project,omitempty"`
 	Size         *int64    `json:"size,omitempty"`
@@ -133,11 +197,11 @@ type InternalRecordResponse struct {
 	CreatedTime      *string                      `json:"created_time,omitempty"`
 	Description      *string                      `json:"description,omitempty"`
 	Did              string                       `json:"did"`
-	FileName         *string                      `json:"file_name,omitempty"`
 
 	// Hashes Hash map, e.g. {"sha256":"..."}
 	Hashes       *HashInfo `json:"hashes,omitempty"`
 	Name         *string   `json:"name,omitempty"`
+	NameAliases  *[]string `json:"name_aliases,omitempty"`
 	Organization *string   `json:"organization,omitempty"`
 	Project      *string   `json:"project,omitempty"`
 	Rev          *string   `json:"rev,omitempty"`
@@ -171,7 +235,7 @@ type InternalUploadBlankRequest struct {
 type InternalUploadBulkItem struct {
 	ExpiresIn    *int32  `json:"expires_in,omitempty"`
 	FileId       string  `json:"file_id"`
-	FileName     *string `json:"file_name,omitempty"`
+	Key          *string `json:"key,omitempty"`
 	Organization *string `json:"organization,omitempty"`
 	Project      *string `json:"project,omitempty"`
 }
@@ -188,18 +252,17 @@ type InternalUploadBulkRequest struct {
 
 // InternalUploadBulkResult defines model for InternalUploadBulkResult.
 type InternalUploadBulkResult struct {
-	Bucket   *string `json:"bucket,omitempty"`
-	Error    *string `json:"error,omitempty"`
-	FileId   string  `json:"file_id"`
-	FileName *string `json:"file_name,omitempty"`
-	Status   int32   `json:"status"`
-	Url      *string `json:"url,omitempty"`
+	Bucket *string `json:"bucket,omitempty"`
+	Error  *string `json:"error,omitempty"`
+	FileId string  `json:"file_id"`
+	Key    *string `json:"key,omitempty"`
+	Status int32   `json:"status"`
+	Url    *string `json:"url,omitempty"`
 }
 
 // ListRecordsResponse defines model for ListRecordsResponse.
 type ListRecordsResponse struct {
-	Directories *[]IndexDirectory `json:"directories,omitempty"`
-	Records     *[]InternalRecord `json:"records,omitempty"`
+	Records *[]InternalRecord `json:"records,omitempty"`
 }
 
 // InternalDownloadParams defines parameters for InternalDownload.
@@ -214,11 +277,17 @@ type InternalDownloadPartParams struct {
 	End   int64 `form:"end" json:"end"`
 }
 
+// InternalInspectProjectScopesParams defines parameters for InternalInspectProjectScopes.
+type InternalInspectProjectScopesParams struct {
+	Organization string `form:"organization" json:"organization"`
+	Project      string `form:"project" json:"project"`
+}
+
 // InternalUploadURLParams defines parameters for InternalUploadURL.
 type InternalUploadURLParams struct {
 	Organization *string `form:"organization,omitempty" json:"organization,omitempty"`
 	Project      *string `form:"project,omitempty" json:"project,omitempty"`
-	FileName     *string `form:"file_name,omitempty" json:"file_name,omitempty"`
+	Key          *string `form:"key,omitempty" json:"key,omitempty"`
 	ExpiresIn    *int32  `form:"expires_in,omitempty" json:"expires_in,omitempty"`
 }
 
@@ -243,6 +312,12 @@ type InternalListParams struct {
 	Start        *string `form:"start,omitempty" json:"start,omitempty"`
 	Page         *int    `form:"page,omitempty" json:"page,omitempty"`
 }
+
+// InternalInspectProjectBucketInventoryJSONRequestBody defines body for InternalInspectProjectBucketInventory for application/json ContentType.
+type InternalInspectProjectBucketInventoryJSONRequestBody = InternalProjectBucketInventoryRequest
+
+// InternalInspectProjectScopesPostJSONRequestBody defines body for InternalInspectProjectScopesPost for application/json ContentType.
+type InternalInspectProjectScopesPostJSONRequestBody = InternalProjectScopesRequest
 
 // InternalMultipartCompleteJSONRequestBody defines body for InternalMultipartComplete for application/json ContentType.
 type InternalMultipartCompleteJSONRequestBody = InternalMultipartCompleteRequest
@@ -273,6 +348,9 @@ type InternalBulkDocumentsJSONRequestBody = BulkDocumentsRequest
 
 // InternalBulkHashesJSONRequestBody defines body for InternalBulkHashes for application/json ContentType.
 type InternalBulkHashesJSONRequestBody = BulkHashesRequest
+
+// InternalBulkMissingSHA256JSONRequestBody defines body for InternalBulkMissingSHA256 for application/json ContentType.
+type InternalBulkMissingSHA256JSONRequestBody = BulkMissingSHA256Request
 
 // InternalBulkSHA256ValidityJSONRequestBody defines body for InternalBulkSHA256Validity for application/json ContentType.
 type InternalBulkSHA256ValidityJSONRequestBody = BulkSHA256ValidityRequest
@@ -354,6 +432,15 @@ type ServerInterface interface {
 	// (GET /data/download/{file_id}/part)
 	InternalDownloadPart(c fiber.Ctx, fileId string, params InternalDownloadPartParams) error
 
+	// (POST /data/inspect/project-bucket/inventory)
+	InternalInspectProjectBucketInventory(c fiber.Ctx) error
+
+	// (GET /data/inspect/project-scopes)
+	InternalInspectProjectScopes(c fiber.Ctx, params InternalInspectProjectScopesParams) error
+
+	// (POST /data/inspect/project-scopes)
+	InternalInspectProjectScopesPost(c fiber.Ctx) error
+
 	// (POST /data/multipart/complete)
 	InternalMultipartComplete(c fiber.Ctx) error
 
@@ -392,6 +479,9 @@ type ServerInterface interface {
 
 	// (POST /index/bulk/hashes)
 	InternalBulkHashes(c fiber.Ctx) error
+
+	// (POST /index/bulk/sha256/missing)
+	InternalBulkMissingSHA256(c fiber.Ctx) error
 
 	// (POST /index/bulk/sha256/validity)
 	InternalBulkSHA256Validity(c fiber.Ctx) error
@@ -498,6 +588,53 @@ func (siw *ServerInterfaceWrapper) InternalDownloadPart(c fiber.Ctx) error {
 	return siw.Handler.InternalDownloadPart(c, fileId, params)
 }
 
+// InternalInspectProjectBucketInventory operation middleware
+func (siw *ServerInterfaceWrapper) InternalInspectProjectBucketInventory(c fiber.Ctx) error {
+
+	return siw.Handler.InternalInspectProjectBucketInventory(c)
+}
+
+// InternalInspectProjectScopes operation middleware
+func (siw *ServerInterfaceWrapper) InternalInspectProjectScopes(c fiber.Ctx) error {
+	var err error
+	var params InternalInspectProjectScopesParams
+
+	// ------------- Required query parameter "organization" -------------
+	if paramValue := c.Query("organization"); paramValue != "" {
+
+		var value string
+		err = runtime.BindStyledParameterWithOptions("form", "organization", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: true})
+		if err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter organization: %w", err).Error())
+		}
+		params.Organization = value
+
+	} else {
+		return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Query argument organization is required, but not found").Error())
+	}
+	// ------------- Required query parameter "project" -------------
+	if paramValue := c.Query("project"); paramValue != "" {
+
+		var value string
+		err = runtime.BindStyledParameterWithOptions("form", "project", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: true})
+		if err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter project: %w", err).Error())
+		}
+		params.Project = value
+
+	} else {
+		return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Query argument project is required, but not found").Error())
+	}
+
+	return siw.Handler.InternalInspectProjectScopes(c, params)
+}
+
+// InternalInspectProjectScopesPost operation middleware
+func (siw *ServerInterfaceWrapper) InternalInspectProjectScopesPost(c fiber.Ctx) error {
+
+	return siw.Handler.InternalInspectProjectScopesPost(c)
+}
+
 // InternalMultipartComplete operation middleware
 func (siw *ServerInterfaceWrapper) InternalMultipartComplete(c fiber.Ctx) error {
 
@@ -563,15 +700,15 @@ func (siw *ServerInterfaceWrapper) InternalUploadURL(c fiber.Ctx) error {
 		params.Project = &value
 
 	}
-	// ------------- Optional query parameter "file_name" -------------
-	if paramValue := c.Query("file_name"); paramValue != "" {
+	// ------------- Optional query parameter "key" -------------
+	if paramValue := c.Query("key"); paramValue != "" {
 
 		var value string
-		err = runtime.BindStyledParameterWithOptions("form", "file_name", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
+		err = runtime.BindStyledParameterWithOptions("form", "key", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
 		if err != nil {
-			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter file_name: %w", err).Error())
+			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter key: %w", err).Error())
 		}
-		params.FileName = &value
+		params.Key = &value
 
 	}
 	// ------------- Optional query parameter "expires_in" -------------
@@ -791,6 +928,12 @@ func (siw *ServerInterfaceWrapper) InternalBulkHashes(c fiber.Ctx) error {
 	return siw.Handler.InternalBulkHashes(c)
 }
 
+// InternalBulkMissingSHA256 operation middleware
+func (siw *ServerInterfaceWrapper) InternalBulkMissingSHA256(c fiber.Ctx) error {
+
+	return siw.Handler.InternalBulkMissingSHA256(c)
+}
+
 // InternalBulkSHA256Validity operation middleware
 func (siw *ServerInterfaceWrapper) InternalBulkSHA256Validity(c fiber.Ctx) error {
 
@@ -882,6 +1025,12 @@ func RegisterHandlersWithOptions(router fiber.Router, si ServerInterface, option
 
 	router.Get(options.BaseURL+"/data/download/:file_id/part", wrapper.InternalDownloadPart)
 
+	router.Post(options.BaseURL+"/data/inspect/project-bucket/inventory", wrapper.InternalInspectProjectBucketInventory)
+
+	router.Get(options.BaseURL+"/data/inspect/project-scopes", wrapper.InternalInspectProjectScopes)
+
+	router.Post(options.BaseURL+"/data/inspect/project-scopes", wrapper.InternalInspectProjectScopesPost)
+
 	router.Post(options.BaseURL+"/data/multipart/complete", wrapper.InternalMultipartComplete)
 
 	router.Post(options.BaseURL+"/data/multipart/init", wrapper.InternalMultipartInit)
@@ -907,6 +1056,8 @@ func RegisterHandlersWithOptions(router fiber.Router, si ServerInterface, option
 	router.Post(options.BaseURL+"/index/bulk/documents", wrapper.InternalBulkDocuments)
 
 	router.Post(options.BaseURL+"/index/bulk/hashes", wrapper.InternalBulkHashes)
+
+	router.Post(options.BaseURL+"/index/bulk/sha256/missing", wrapper.InternalBulkMissingSHA256)
 
 	router.Post(options.BaseURL+"/index/bulk/sha256/validity", wrapper.InternalBulkSHA256Validity)
 
@@ -1040,6 +1191,169 @@ type InternalDownloadPart500Response struct {
 }
 
 func (response InternalDownloadPart500Response) VisitInternalDownloadPartResponse(ctx fiber.Ctx) error {
+	ctx.Status(500)
+	return nil
+}
+
+type InternalInspectProjectBucketInventoryRequestObject struct {
+	Body *InternalInspectProjectBucketInventoryJSONRequestBody
+}
+
+type InternalInspectProjectBucketInventoryResponseObject interface {
+	VisitInternalInspectProjectBucketInventoryResponse(ctx fiber.Ctx) error
+}
+
+type InternalInspectProjectBucketInventory200JSONResponse InternalProjectBucketInventoryResponse
+
+func (response InternalInspectProjectBucketInventory200JSONResponse) VisitInternalInspectProjectBucketInventoryResponse(ctx fiber.Ctx) error {
+	ctx.Response().Header.Set("Content-Type", "application/json")
+	ctx.Status(200)
+
+	return ctx.JSON(&response)
+}
+
+type InternalInspectProjectBucketInventory400Response struct {
+}
+
+func (response InternalInspectProjectBucketInventory400Response) VisitInternalInspectProjectBucketInventoryResponse(ctx fiber.Ctx) error {
+	ctx.Status(400)
+	return nil
+}
+
+type InternalInspectProjectBucketInventory401Response struct {
+}
+
+func (response InternalInspectProjectBucketInventory401Response) VisitInternalInspectProjectBucketInventoryResponse(ctx fiber.Ctx) error {
+	ctx.Status(401)
+	return nil
+}
+
+type InternalInspectProjectBucketInventory403Response struct {
+}
+
+func (response InternalInspectProjectBucketInventory403Response) VisitInternalInspectProjectBucketInventoryResponse(ctx fiber.Ctx) error {
+	ctx.Status(403)
+	return nil
+}
+
+type InternalInspectProjectBucketInventory404Response struct {
+}
+
+func (response InternalInspectProjectBucketInventory404Response) VisitInternalInspectProjectBucketInventoryResponse(ctx fiber.Ctx) error {
+	ctx.Status(404)
+	return nil
+}
+
+type InternalInspectProjectBucketInventory409Response struct {
+}
+
+func (response InternalInspectProjectBucketInventory409Response) VisitInternalInspectProjectBucketInventoryResponse(ctx fiber.Ctx) error {
+	ctx.Status(409)
+	return nil
+}
+
+type InternalInspectProjectBucketInventory500Response struct {
+}
+
+func (response InternalInspectProjectBucketInventory500Response) VisitInternalInspectProjectBucketInventoryResponse(ctx fiber.Ctx) error {
+	ctx.Status(500)
+	return nil
+}
+
+type InternalInspectProjectScopesRequestObject struct {
+	Params InternalInspectProjectScopesParams
+}
+
+type InternalInspectProjectScopesResponseObject interface {
+	VisitInternalInspectProjectScopesResponse(ctx fiber.Ctx) error
+}
+
+type InternalInspectProjectScopes200JSONResponse InternalProjectScopesResponse
+
+func (response InternalInspectProjectScopes200JSONResponse) VisitInternalInspectProjectScopesResponse(ctx fiber.Ctx) error {
+	ctx.Response().Header.Set("Content-Type", "application/json")
+	ctx.Status(200)
+
+	return ctx.JSON(&response)
+}
+
+type InternalInspectProjectScopes400Response struct {
+}
+
+func (response InternalInspectProjectScopes400Response) VisitInternalInspectProjectScopesResponse(ctx fiber.Ctx) error {
+	ctx.Status(400)
+	return nil
+}
+
+type InternalInspectProjectScopes401Response struct {
+}
+
+func (response InternalInspectProjectScopes401Response) VisitInternalInspectProjectScopesResponse(ctx fiber.Ctx) error {
+	ctx.Status(401)
+	return nil
+}
+
+type InternalInspectProjectScopes403Response struct {
+}
+
+func (response InternalInspectProjectScopes403Response) VisitInternalInspectProjectScopesResponse(ctx fiber.Ctx) error {
+	ctx.Status(403)
+	return nil
+}
+
+type InternalInspectProjectScopes500Response struct {
+}
+
+func (response InternalInspectProjectScopes500Response) VisitInternalInspectProjectScopesResponse(ctx fiber.Ctx) error {
+	ctx.Status(500)
+	return nil
+}
+
+type InternalInspectProjectScopesPostRequestObject struct {
+	Body *InternalInspectProjectScopesPostJSONRequestBody
+}
+
+type InternalInspectProjectScopesPostResponseObject interface {
+	VisitInternalInspectProjectScopesPostResponse(ctx fiber.Ctx) error
+}
+
+type InternalInspectProjectScopesPost200JSONResponse InternalProjectScopesResponse
+
+func (response InternalInspectProjectScopesPost200JSONResponse) VisitInternalInspectProjectScopesPostResponse(ctx fiber.Ctx) error {
+	ctx.Response().Header.Set("Content-Type", "application/json")
+	ctx.Status(200)
+
+	return ctx.JSON(&response)
+}
+
+type InternalInspectProjectScopesPost400Response struct {
+}
+
+func (response InternalInspectProjectScopesPost400Response) VisitInternalInspectProjectScopesPostResponse(ctx fiber.Ctx) error {
+	ctx.Status(400)
+	return nil
+}
+
+type InternalInspectProjectScopesPost401Response struct {
+}
+
+func (response InternalInspectProjectScopesPost401Response) VisitInternalInspectProjectScopesPostResponse(ctx fiber.Ctx) error {
+	ctx.Status(401)
+	return nil
+}
+
+type InternalInspectProjectScopesPost403Response struct {
+}
+
+func (response InternalInspectProjectScopesPost403Response) VisitInternalInspectProjectScopesPostResponse(ctx fiber.Ctx) error {
+	ctx.Status(403)
+	return nil
+}
+
+type InternalInspectProjectScopesPost500Response struct {
+}
+
+func (response InternalInspectProjectScopesPost500Response) VisitInternalInspectProjectScopesPostResponse(ctx fiber.Ctx) error {
 	ctx.Status(500)
 	return nil
 }
@@ -1706,6 +2020,63 @@ func (response InternalBulkHashes500Response) VisitInternalBulkHashesResponse(ct
 	return nil
 }
 
+type InternalBulkMissingSHA256RequestObject struct {
+	Body *InternalBulkMissingSHA256JSONRequestBody
+}
+
+type InternalBulkMissingSHA256ResponseObject interface {
+	VisitInternalBulkMissingSHA256Response(ctx fiber.Ctx) error
+}
+
+type InternalBulkMissingSHA256200JSONResponse BulkMissingSHA256Response
+
+func (response InternalBulkMissingSHA256200JSONResponse) VisitInternalBulkMissingSHA256Response(ctx fiber.Ctx) error {
+	ctx.Response().Header.Set("Content-Type", "application/json")
+	ctx.Status(200)
+
+	return ctx.JSON(&response)
+}
+
+type InternalBulkMissingSHA256400Response struct {
+}
+
+func (response InternalBulkMissingSHA256400Response) VisitInternalBulkMissingSHA256Response(ctx fiber.Ctx) error {
+	ctx.Status(400)
+	return nil
+}
+
+type InternalBulkMissingSHA256401Response struct {
+}
+
+func (response InternalBulkMissingSHA256401Response) VisitInternalBulkMissingSHA256Response(ctx fiber.Ctx) error {
+	ctx.Status(401)
+	return nil
+}
+
+type InternalBulkMissingSHA256403Response struct {
+}
+
+func (response InternalBulkMissingSHA256403Response) VisitInternalBulkMissingSHA256Response(ctx fiber.Ctx) error {
+	ctx.Status(403)
+	return nil
+}
+
+type InternalBulkMissingSHA256413Response struct {
+}
+
+func (response InternalBulkMissingSHA256413Response) VisitInternalBulkMissingSHA256Response(ctx fiber.Ctx) error {
+	ctx.Status(413)
+	return nil
+}
+
+type InternalBulkMissingSHA256500Response struct {
+}
+
+func (response InternalBulkMissingSHA256500Response) VisitInternalBulkMissingSHA256Response(ctx fiber.Ctx) error {
+	ctx.Status(500)
+	return nil
+}
+
 type InternalBulkSHA256ValidityRequestObject struct {
 	Body *InternalBulkSHA256ValidityJSONRequestBody
 }
@@ -1905,6 +2276,15 @@ type StrictServerInterface interface {
 	// (GET /data/download/{file_id}/part)
 	InternalDownloadPart(ctx context.Context, request InternalDownloadPartRequestObject) (InternalDownloadPartResponseObject, error)
 
+	// (POST /data/inspect/project-bucket/inventory)
+	InternalInspectProjectBucketInventory(ctx context.Context, request InternalInspectProjectBucketInventoryRequestObject) (InternalInspectProjectBucketInventoryResponseObject, error)
+
+	// (GET /data/inspect/project-scopes)
+	InternalInspectProjectScopes(ctx context.Context, request InternalInspectProjectScopesRequestObject) (InternalInspectProjectScopesResponseObject, error)
+
+	// (POST /data/inspect/project-scopes)
+	InternalInspectProjectScopesPost(ctx context.Context, request InternalInspectProjectScopesPostRequestObject) (InternalInspectProjectScopesPostResponseObject, error)
+
 	// (POST /data/multipart/complete)
 	InternalMultipartComplete(ctx context.Context, request InternalMultipartCompleteRequestObject) (InternalMultipartCompleteResponseObject, error)
 
@@ -1943,6 +2323,9 @@ type StrictServerInterface interface {
 
 	// (POST /index/bulk/hashes)
 	InternalBulkHashes(ctx context.Context, request InternalBulkHashesRequestObject) (InternalBulkHashesResponseObject, error)
+
+	// (POST /index/bulk/sha256/missing)
+	InternalBulkMissingSHA256(ctx context.Context, request InternalBulkMissingSHA256RequestObject) (InternalBulkMissingSHA256ResponseObject, error)
 
 	// (POST /index/bulk/sha256/validity)
 	InternalBulkSHA256Validity(ctx context.Context, request InternalBulkSHA256ValidityRequestObject) (InternalBulkSHA256ValidityResponseObject, error)
@@ -2021,6 +2404,95 @@ func (sh *strictHandler) InternalDownloadPart(ctx fiber.Ctx, fileId string, para
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	} else if validResponse, ok := response.(InternalDownloadPartResponseObject); ok {
 		if err := validResponse.VisitInternalDownloadPartResponse(ctx); err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, err.Error())
+		}
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// InternalInspectProjectBucketInventory operation middleware
+func (sh *strictHandler) InternalInspectProjectBucketInventory(ctx fiber.Ctx) error {
+	var request InternalInspectProjectBucketInventoryRequestObject
+
+	var body InternalInspectProjectBucketInventoryJSONRequestBody
+	if err := ctx.Bind().Body(&body); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	}
+	request.Body = &body
+
+	handler := func(ctx fiber.Ctx, request interface{}) (interface{}, error) {
+		return sh.ssi.InternalInspectProjectBucketInventory(ctx.Context(), request.(InternalInspectProjectBucketInventoryRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "InternalInspectProjectBucketInventory")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	} else if validResponse, ok := response.(InternalInspectProjectBucketInventoryResponseObject); ok {
+		if err := validResponse.VisitInternalInspectProjectBucketInventoryResponse(ctx); err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, err.Error())
+		}
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// InternalInspectProjectScopes operation middleware
+func (sh *strictHandler) InternalInspectProjectScopes(ctx fiber.Ctx, params InternalInspectProjectScopesParams) error {
+	var request InternalInspectProjectScopesRequestObject
+
+	request.Params = params
+
+	handler := func(ctx fiber.Ctx, request interface{}) (interface{}, error) {
+		return sh.ssi.InternalInspectProjectScopes(ctx.Context(), request.(InternalInspectProjectScopesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "InternalInspectProjectScopes")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	} else if validResponse, ok := response.(InternalInspectProjectScopesResponseObject); ok {
+		if err := validResponse.VisitInternalInspectProjectScopesResponse(ctx); err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, err.Error())
+		}
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// InternalInspectProjectScopesPost operation middleware
+func (sh *strictHandler) InternalInspectProjectScopesPost(ctx fiber.Ctx) error {
+	var request InternalInspectProjectScopesPostRequestObject
+
+	var body InternalInspectProjectScopesPostJSONRequestBody
+	if err := ctx.Bind().Body(&body); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	}
+	request.Body = &body
+
+	handler := func(ctx fiber.Ctx, request interface{}) (interface{}, error) {
+		return sh.ssi.InternalInspectProjectScopesPost(ctx.Context(), request.(InternalInspectProjectScopesPostRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "InternalInspectProjectScopesPost")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	} else if validResponse, ok := response.(InternalInspectProjectScopesPostResponseObject); ok {
+		if err := validResponse.VisitInternalInspectProjectScopesPostResponse(ctx); err != nil {
 			return fiber.NewError(fiber.StatusBadRequest, err.Error())
 		}
 	} else if response != nil {
@@ -2416,6 +2888,37 @@ func (sh *strictHandler) InternalBulkHashes(ctx fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	} else if validResponse, ok := response.(InternalBulkHashesResponseObject); ok {
 		if err := validResponse.VisitInternalBulkHashesResponse(ctx); err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, err.Error())
+		}
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// InternalBulkMissingSHA256 operation middleware
+func (sh *strictHandler) InternalBulkMissingSHA256(ctx fiber.Ctx) error {
+	var request InternalBulkMissingSHA256RequestObject
+
+	var body InternalBulkMissingSHA256JSONRequestBody
+	if err := ctx.Bind().Body(&body); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	}
+	request.Body = &body
+
+	handler := func(ctx fiber.Ctx, request interface{}) (interface{}, error) {
+		return sh.ssi.InternalBulkMissingSHA256(ctx.Context(), request.(InternalBulkMissingSHA256RequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "InternalBulkMissingSHA256")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	} else if validResponse, ok := response.(InternalBulkMissingSHA256ResponseObject); ok {
+		if err := validResponse.VisitInternalBulkMissingSHA256Response(ctx); err != nil {
 			return fiber.NewError(fiber.StatusBadRequest, err.Error())
 		}
 	} else if response != nil {

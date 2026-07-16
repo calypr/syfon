@@ -13,7 +13,6 @@ import (
 	"github.com/calypr/syfon/cmd/download"
 	listcmd "github.com/calypr/syfon/cmd/list"
 	metricscmd "github.com/calypr/syfon/cmd/metrics"
-	migratecmd "github.com/calypr/syfon/cmd/migrate"
 	"github.com/calypr/syfon/cmd/ping"
 	"github.com/calypr/syfon/cmd/rm"
 	"github.com/calypr/syfon/cmd/server"
@@ -60,7 +59,6 @@ func init() {
 	RootCmd.AddCommand(listcmd.Cmd)
 	RootCmd.AddCommand(rm.Cmd)
 	RootCmd.AddCommand(metricscmd.Cmd)
-	RootCmd.AddCommand(migratecmd.Cmd)
 	RootCmd.AddCommand(copyproject.Cmd)
 	RootCmd.AddCommand(copyprojectrefs.Cmd)
 	RootCmd.AddCommand(deleteproject.Cmd)

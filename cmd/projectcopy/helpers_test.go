@@ -187,20 +187,13 @@ func writeProfileConfig(t *testing.T, home, content string) {
 }
 
 func testIndexService() *services.IndexService {
-	listByPath := map[string]internalapi.ListRecordsResponse{
+	listPages := map[string]internalapi.ListRecordsResponse{
 		"": {
 			Records: &[]internalapi.InternalRecord{
 				{
 					Did:              "did-1",
 					ControlledAccess: &[]string{"/organization/syfon/project/e2e"},
 				},
-			},
-			Directories: &[]internalapi.IndexDirectory{
-				{Name: "nested", Path: "nested"},
-			},
-		},
-		"nested": {
-			Records: &[]internalapi.InternalRecord{
 				{
 					Did:              "did-2",
 					ControlledAccess: &[]string{"/organization/syfon/project/e2e"},
@@ -233,8 +226,8 @@ func testIndexService() *services.IndexService {
 			},
 		},
 		stubRequester{
-			listResponse: func(path string) (internalapi.ListRecordsResponse, error) {
-				if resp, ok := listByPath[path]; ok {
+			listResponse: func(start string) (internalapi.ListRecordsResponse, error) {
+				if resp, ok := listPages[start]; ok {
 					return resp, nil
 				}
 				return internalapi.ListRecordsResponse{}, nil
@@ -256,7 +249,7 @@ func (s stubInternalClient) InternalGetWithResponse(ctx context.Context, id stri
 }
 
 type stubRequester struct {
-	listResponse func(path string) (internalapi.ListRecordsResponse, error)
+	listResponse func(start string) (internalapi.ListRecordsResponse, error)
 }
 
 func (s stubRequester) Do(ctx context.Context, method, path string, body, out any, opts ...request.RequestOption) error {
@@ -267,15 +260,15 @@ func (s stubRequester) Do(ctx context.Context, method, path string, body, out an
 	for _, opt := range opts {
 		opt(builder)
 	}
-	listPath := ""
+	start := ""
 	if strings.Contains(builder.Url, "?") {
 		values, err := url.ParseQuery(strings.TrimPrefix(strings.SplitN(builder.Url, "?", 2)[1], "?"))
 		if err != nil {
 			return err
 		}
-		listPath = values.Get("path")
+		start = values.Get("start")
 	}
-	resp, err := s.listResponse(listPath)
+	resp, err := s.listResponse(start)
 	if err != nil {
 		return err
 	}

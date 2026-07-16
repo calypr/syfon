@@ -106,23 +106,7 @@ func CanonicalSHA256(checksums []drs.Checksum) (string, bool) {
 	return "", false
 }
 
-// NormalizeSHA256 cleans and dedups a list of potential SHA256 hashes.
-func NormalizeSHA256(values []string) []string {
-	targets := make([]string, 0, len(values))
-	seen := make(map[string]struct{}, len(values))
-	for _, raw := range values {
-		sha := strings.ToLower(strings.TrimSpace(NormalizeChecksum(strings.TrimSpace(raw))))
-		if sha == "" {
-			continue
-		}
-		if _, ok := seen[sha]; ok {
-			continue
-		}
-		seen[sha] = struct{}{}
-		targets = append(targets, sha)
-	}
-	return targets
-}
+
 
 // ParseS3URL extracts bucket/key pairs from an s3:// URL.
 func ParseS3URL(raw string) (bucket string, key string, ok bool) {

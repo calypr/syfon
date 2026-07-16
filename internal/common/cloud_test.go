@@ -61,7 +61,7 @@ func TestValidateBucketName(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateBucketName(tt.provider, tt.bucket)
+			err := ValidateBucketNameWithEndpoint(tt.provider, tt.bucket, "")
 			if tt.wantErr && err == nil {
 				t.Fatalf("expected error for provider=%q bucket=%q", tt.provider, tt.bucket)
 			}

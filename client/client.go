@@ -59,21 +59,7 @@ type Client struct {
 
 type Option func(*Config)
 
-func WithHTTPClient(h *http.Client) Option {
-	return func(c *Config) {
-		if h != nil {
-			c.HTTPClient = h
-		}
-	}
-}
 
-func WithUserAgent(v string) Option {
-	return func(c *Config) {
-		if strings.TrimSpace(v) != "" {
-			c.UserAgent = strings.TrimSpace(v)
-		}
-	}
-}
 
 func WithBasicAuth(user, pass string) Option {
 	return func(c *Config) {

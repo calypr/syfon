@@ -146,6 +146,14 @@ func (f *fakeMetricsClient) ListMetricsFilesWithResponse(ctx context.Context, pa
 	return f.filesResp, f.filesErr
 }
 
+func (f *fakeMetricsClient) BulkMetricsFilesWithBodyWithResponse(ctx context.Context, params *metricsapi.BulkMetricsFilesParams, contentType string, body io.Reader, reqEditors ...metricsapi.RequestEditorFn) (*metricsapi.BulkMetricsFilesResponse, error) {
+	return &metricsapi.BulkMetricsFilesResponse{HTTPResponse: &http.Response{StatusCode: http.StatusNotImplemented}}, nil
+}
+
+func (f *fakeMetricsClient) BulkMetricsFilesWithResponse(ctx context.Context, params *metricsapi.BulkMetricsFilesParams, body metricsapi.BulkMetricsFilesJSONRequestBody, reqEditors ...metricsapi.RequestEditorFn) (*metricsapi.BulkMetricsFilesResponse, error) {
+	return &metricsapi.BulkMetricsFilesResponse{HTTPResponse: &http.Response{StatusCode: http.StatusNotImplemented}}, nil
+}
+
 func (f *fakeMetricsClient) GetMetricsFileWithResponse(ctx context.Context, objectId string, params *metricsapi.GetMetricsFileParams, reqEditors ...metricsapi.RequestEditorFn) (*metricsapi.GetMetricsFileResponse, error) {
 	f.fileObjectID = objectId
 	return f.fileResp, f.fileErr

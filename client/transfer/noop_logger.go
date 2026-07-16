@@ -6,7 +6,6 @@ import (
 	"log/slog"
 
 	"github.com/calypr/syfon/client/common"
-	"github.com/calypr/syfon/client/logs"
 )
 
 // NoOpLogger satisfies TransferLogger without emitting output.
@@ -36,4 +35,3 @@ func (NoOpLogger) GetFailedLogMap() map[string]common.RetryObject {
 	return map[string]common.RetryObject{}
 }
 func (NoOpLogger) DeleteFromFailedLog(string)   {}
-func (NoOpLogger) Scoreboard() *logs.Scoreboard { return nil }

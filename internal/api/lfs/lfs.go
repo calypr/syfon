@@ -55,10 +55,3 @@ func RegisterLFSRoutes(router fiber.Router, om *core.ObjectManager, opts ...Opti
 	})
 	lfsapi.RegisterHandlers(router, strict)
 }
-
-func ResetLFSLimitersForTest() {
-	limitMu.Lock()
-	defer limitMu.Unlock()
-	requestWindowMap = map[string]windowCounter{}
-	bandwidthWindowMap = map[string]windowBytes{}
-}

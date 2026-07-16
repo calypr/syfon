@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/calypr/syfon/client/common"
-	"github.com/calypr/syfon/client/logs"
 )
 
 type fixedStrategy time.Duration
@@ -20,7 +19,6 @@ type captureLogger struct {
 	NoOpLogger
 	printfs    []string
 	errorsSeen []error
-	sb         *logs.Scoreboard
 }
 
 func (l *captureLogger) Printf(format string, v ...any) {
@@ -35,9 +33,7 @@ func (l *captureLogger) Error(msg string, args ...any) {
 	}
 }
 
-func (l *captureLogger) Scoreboard() *logs.Scoreboard {
-	return l.sb
-}
+
 
 func TestExponentialBackoffAndDefaultBackoff(t *testing.T) {
 	t.Parallel()
@@ -65,8 +61,8 @@ func TestExponentialBackoffAndDefaultBackoff(t *testing.T) {
 func TestRetryAction(t *testing.T) {
 	t.Parallel()
 
-	t.Run("eventual success increments scoreboard", func(t *testing.T) {
-		logger := &captureLogger{sb: logs.NewSB(3, NoOpLogger{}.Slog())}
+	t.Run("eventual success", func(t *testing.T) {
+		logger := &captureLogger{}
 		attempts := 0
 		err := RetryAction(context.Background(), logger, fixedStrategy(0), 3, func() error {
 			attempts++
@@ -80,9 +76,6 @@ func TestRetryAction(t *testing.T) {
 		}
 		if attempts != 3 {
 			t.Fatalf("expected 3 attempts, got %d", attempts)
-		}
-		if logger.sb.Counts[2] != 1 {
-			t.Fatalf("expected scoreboard success bucket for 2 retries, got %+v", logger.sb.Counts)
 		}
 		if len(logger.printfs) != 2 || len(logger.errorsSeen) != 2 {
 			t.Fatalf("expected retry logging, got printfs=%d errors=%d", len(logger.printfs), len(logger.errorsSeen))
@@ -106,17 +99,14 @@ func TestRetryAction(t *testing.T) {
 		}
 	})
 
-	t.Run("final failure increments terminal bucket", func(t *testing.T) {
-		logger := &captureLogger{sb: logs.NewSB(1, NoOpLogger{}.Slog())}
+	t.Run("final failure", func(t *testing.T) {
+		logger := &captureLogger{}
 		wantErr := errors.New("still failing")
 		err := RetryAction(context.Background(), logger, fixedStrategy(0), 1, func() error {
 			return wantErr
 		})
 		if !errors.Is(err, wantErr) {
 			t.Fatalf("expected %v, got %v", wantErr, err)
-		}
-		if logger.sb.Counts[len(logger.sb.Counts)-1] != 1 {
-			t.Fatalf("expected terminal failure bucket increment, got %+v", logger.sb.Counts)
 		}
 	})
 }
@@ -152,8 +142,5 @@ func TestNoOpLogger(t *testing.T) {
 	}
 	if got := logger.GetFailedLogMap(); len(got) != 0 {
 		t.Fatalf("expected empty failed log map, got %+v", got)
-	}
-	if logger.Scoreboard() != nil {
-		t.Fatal("expected nil scoreboard")
 	}
 }

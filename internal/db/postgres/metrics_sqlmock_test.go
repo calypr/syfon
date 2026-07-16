@@ -70,17 +70,6 @@ func TestTransferAttributionWhereHelpers(t *testing.T) {
 }
 
 func TestProviderTransferHelpers(t *testing.T) {
-	where, args := providerTransferWhere(models.TransferAttributionFilter{User: "alice", ReconciliationStatus: "all"})
-	if !strings.Contains(where, "actor_email") {
-		t.Fatalf("expected user filter in provider where clause: %q", where)
-	}
-	if len(args) < 2 {
-		t.Fatalf("expected user args in provider where clause")
-	}
-
-	if key, _ := providerTransferGroupExpr("user"); !strings.Contains(key, "actor_email") {
-		t.Fatalf("unexpected provider group expression for user: %q", key)
-	}
 	if key, _ := transferAttributionGroupExpr("provider"); !strings.Contains(key, "provider") {
 		t.Fatalf("unexpected attribution group expression for provider: %q", key)
 	}
@@ -108,6 +97,3 @@ func TestRecordProviderTransferEvents_EmptyInput(t *testing.T) {
 		t.Fatalf("expected nil for empty provider transfer events, got %v", err)
 	}
 }
-
-
-

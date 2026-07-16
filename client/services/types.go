@@ -22,7 +22,6 @@ type ListRecordsOptions struct {
 	URL          string
 	Organization string
 	ProjectID    string
-	Path         string
 	Limit        int
 	Start        string
 	Page         int
@@ -30,7 +29,7 @@ type ListRecordsOptions struct {
 
 type UploadURLRequest struct {
 	FileID       string
-	FileName     string
+	Key          string
 	ExpiresIn    int
 	Organization string
 	Project      string
@@ -48,6 +47,22 @@ type MetricsSummaryOptions struct {
 	InactiveDays int
 	Organization string
 	ProjectID    string
+}
+
+type StorageSummaryOptions struct {
+	Organization string
+	ProjectID    string
+	Path         string
+}
+
+type StorageChildrenOptions struct {
+	Organization string
+	ProjectID    string
+	Path         string
+	Limit        int
+	Offset       int
+	SortBy       string
+	SortOrder    string
 }
 
 type TransferMetricsOptions struct {

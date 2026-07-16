@@ -2,16 +2,20 @@ package models
 
 import (
 	"encoding/json"
+	"fmt"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/calypr/syfon/apigen/server/drs"
-	"github.com/calypr/syfon/common"
+	syfoncommon "github.com/calypr/syfon/common"
 )
 
 // InternalObject is the primary DRS domain model. It wraps the GA4GH DrsObject
 // and adds Syfon-specific authorization metadata.
 type InternalObject struct {
 	drs.DrsObject
+	NameAliases    []string               `json:"name_aliases,omitempty"`
 	Authorizations map[string][]string    `json:"-"`
 	Properties     map[string]interface{} `json:"-"`
 }
@@ -30,13 +34,19 @@ func (o *InternalObject) UnmarshalJSON(data []byte) error {
 	if raw == nil {
 		raw = map[string]interface{}{}
 	}
+	if _, ok := raw["file_name"]; ok {
+		return fmt.Errorf("file_name is no longer supported")
+	}
+	if _, ok := raw["path"]; ok {
+		return fmt.Errorf("path is no longer supported")
+	}
 	o.Properties = raw
 
 	type wireObject struct {
 		drs.DrsObject
-		Did      string            `json:"did,omitempty"`
-		Hashes   map[string]string `json:"hashes,omitempty"`
-		FileName *string           `json:"file_name,omitempty"`
+		Did         string            `json:"did,omitempty"`
+		Hashes      map[string]string `json:"hashes,omitempty"`
+		NameAliases []string          `json:"name_aliases,omitempty"`
 	}
 
 	var wire wireObject
@@ -65,13 +75,14 @@ func (o *InternalObject) UnmarshalJSON(data []byte) error {
 	o.UpdatedTime = wire.UpdatedTime
 	o.Size = wire.Size
 	o.Name = wire.Name
+	o.NameAliases = normalizeNameAliases(stringValue(wire.Name), wire.NameAliases)
 	o.Description = wire.Description
 	o.MimeType = wire.MimeType
 	o.SelfUri = wire.SelfUri
 	o.Version = wire.Version
 
 	if wire.ControlledAccess != nil {
-		o.Authorizations = common.ControlledAccessToAuthzMap(*wire.ControlledAccess)
+		o.Authorizations = syfoncommon.ControlledAccessToAuthzMap(*wire.ControlledAccess)
 	}
 
 	return nil
@@ -109,6 +120,9 @@ func (o InternalObject) MarshalJSON() ([]byte, error) {
 	if o.Name != nil {
 		out["name"] = *o.Name
 	}
+	if len(o.NameAliases) > 0 {
+		out["name_aliases"] = normalizeNameAliases(stringValue(o.Name), o.NameAliases)
+	}
 	if o.Description != nil {
 		out["description"] = *o.Description
 	}
@@ -117,12 +131,6 @@ func (o InternalObject) MarshalJSON() ([]byte, error) {
 	}
 	// Ensure Gen3 compatibility fields are also present.
 	out["did"] = o.Id
-	if fileName, ok := out["file_name"].(string); ok && fileName != "" {
-		out["file_name"] = fileName
-	} else if o.Name != nil {
-		out["file_name"] = *o.Name
-	}
-
 	if len(o.Checksums) > 0 {
 		hashes := make(map[string]string, len(o.Checksums))
 		for _, c := range o.Checksums {
@@ -146,6 +154,46 @@ func isRetiredInternalAuthField(key string) bool {
 	default:
 		return false
 	}
+}
+
+func stringValue(v *string) string {
+	if v == nil {
+		return ""
+	}
+	return *v
+}
+
+func normalizeNameAliases(primary string, aliases []string) []string {
+	primary = cleanToBasename(primary)
+	seen := make(map[string]struct{}, len(aliases)+1)
+	out := make([]string, 0, len(aliases))
+	for _, alias := range aliases {
+		name := cleanToBasename(alias)
+		if name == "" || name == primary {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func cleanToBasename(name string) string {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" {
+		return ""
+	}
+	trimmed = strings.ReplaceAll(trimmed, "\\", "/")
+	parts := strings.Split(trimmed, "/")
+	base := parts[len(parts)-1]
+	if base == "" {
+		return trimmed
+	}
+	return base
 }
 
 func (o InternalObject) External() drs.DrsObject {

@@ -124,10 +124,10 @@ func TestDataServiceOperationsAndTransferHelpers(t *testing.T) {
 		t.Fatalf("unexpected upload blank request: %+v", lastUploadBlank)
 	}
 
-	if _, err := service.UploadURL(ctx, UploadURLRequest{FileID: "file-1", FileName: "name.txt", ExpiresIn: 60, Organization: "org-a", Project: "proj-a"}); err != nil {
+	if _, err := service.UploadURL(ctx, UploadURLRequest{FileID: "file-1", Key: "name.txt", ExpiresIn: 60, Organization: "org-a", Project: "proj-a"}); err != nil {
 		t.Fatalf("UploadURL returned error: %v", err)
 	}
-	if uploadURLQuery.Get("organization") != "org-a" || uploadURLQuery.Get("project") != "proj-a" || uploadURLQuery.Get("file_name") != "name.txt" || uploadURLQuery.Get("expires_in") != "60" {
+	if uploadURLQuery.Get("organization") != "org-a" || uploadURLQuery.Get("project") != "proj-a" || uploadURLQuery.Get("key") != "name.txt" || uploadURLQuery.Get("expires_in") != "60" {
 		t.Fatalf("unexpected upload URL query values: %v", uploadURLQuery)
 	}
 
@@ -170,7 +170,7 @@ func TestDataServiceOperationsAndTransferHelpers(t *testing.T) {
 	if err != nil || uploadID != "upload-id" || guid != "multipart-guid" {
 		t.Fatalf("InitMultipartUpload returned uploadID=%q guid=%q err=%v", uploadID, guid, err)
 	}
-	if lastMultipartInit.Guid == nil || *lastMultipartInit.Guid != "guid-a" || lastMultipartInit.FileName == nil || *lastMultipartInit.FileName != "name.txt" {
+	if lastMultipartInit.Guid == nil || *lastMultipartInit.Guid != "guid-a" || lastMultipartInit.Key == nil || *lastMultipartInit.Key != "name.txt" {
 		t.Fatalf("unexpected multipart init request: %+v", lastMultipartInit)
 	}
 	if lastMultipartInit.Organization != nil || lastMultipartInit.Project != nil {

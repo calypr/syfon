@@ -59,12 +59,20 @@ type FileUsage struct {
 	UploadCount      *int64     `json:"upload_count,omitempty"`
 }
 
+// FileUsageBulkRequest defines model for FileUsageBulkRequest.
+type FileUsageBulkRequest struct {
+	InactiveDays *int     `json:"inactive_days,omitempty"`
+	ObjectIds    []string `json:"object_ids"`
+}
+
 // FileUsageSummary defines model for FileUsageSummary.
 type FileUsageSummary struct {
-	InactiveFileCount *int64 `json:"inactive_file_count,omitempty"`
-	TotalDownloads    *int64 `json:"total_downloads,omitempty"`
-	TotalFiles        *int64 `json:"total_files,omitempty"`
-	TotalUploads      *int64 `json:"total_uploads,omitempty"`
+	InactiveFileCount       *int64     `json:"inactive_file_count,omitempty"`
+	RecordCount             *int64     `json:"record_count,omitempty"`
+	RecordLatestUpdatedTime *time.Time `json:"record_latest_updated_time"`
+	TotalDownloads          *int64     `json:"total_downloads,omitempty"`
+	TotalFiles              *int64     `json:"total_files,omitempty"`
+	TotalUploads            *int64     `json:"total_uploads,omitempty"`
 }
 
 // MetricsListResponse defines model for MetricsListResponse.
@@ -221,6 +229,15 @@ type ListMetricsFilesParams struct {
 	Project *Project `form:"project,omitempty" json:"project,omitempty"`
 }
 
+// BulkMetricsFilesParams defines parameters for BulkMetricsFiles.
+type BulkMetricsFilesParams struct {
+	// Organization Organization/program scope filter.
+	Organization *Organization `form:"organization,omitempty" json:"organization,omitempty"`
+
+	// Project Project scope filter. Requires organization when set.
+	Project *Project `form:"project,omitempty" json:"project,omitempty"`
+}
+
 // GetMetricsFileParams defines parameters for GetMetricsFile.
 type GetMetricsFileParams struct {
 	// Organization Organization/program scope filter.
@@ -297,6 +314,9 @@ type GetTransferSummaryParams struct {
 	// AllowStale Deprecated. Transfer metrics always return persisted provider events with freshness metadata, including missing sync windows and latest completed sync time.
 	AllowStale *AllowStale `form:"allow_stale,omitempty" json:"allow_stale,omitempty"`
 }
+
+// BulkMetricsFilesJSONRequestBody defines body for BulkMetricsFiles for application/json ContentType.
+type BulkMetricsFilesJSONRequestBody = FileUsageBulkRequest
 
 // RecordProviderTransferEventsJSONRequestBody defines body for RecordProviderTransferEvents for application/json ContentType.
 type RecordProviderTransferEventsJSONRequestBody = ProviderTransferEventsRequest
@@ -377,6 +397,11 @@ type ClientInterface interface {
 	// ListMetricsFiles request
 	ListMetricsFiles(ctx context.Context, params *ListMetricsFilesParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// BulkMetricsFilesWithBody request with any body
+	BulkMetricsFilesWithBody(ctx context.Context, params *BulkMetricsFilesParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	BulkMetricsFiles(ctx context.Context, params *BulkMetricsFilesParams, body BulkMetricsFilesJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// GetMetricsFile request
 	GetMetricsFile(ctx context.Context, objectId string, params *GetMetricsFileParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -397,6 +422,30 @@ type ClientInterface interface {
 
 func (c *Client) ListMetricsFiles(ctx context.Context, params *ListMetricsFilesParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewListMetricsFilesRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) BulkMetricsFilesWithBody(ctx context.Context, params *BulkMetricsFilesParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewBulkMetricsFilesRequestWithBody(c.Server, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) BulkMetricsFiles(ctx context.Context, params *BulkMetricsFilesParams, body BulkMetricsFilesJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewBulkMetricsFilesRequest(c.Server, params, body)
 	if err != nil {
 		return nil, err
 	}
@@ -588,6 +637,84 @@ func NewListMetricsFilesRequest(server string, params *ListMetricsFilesParams) (
 	if err != nil {
 		return nil, err
 	}
+
+	return req, nil
+}
+
+// NewBulkMetricsFilesRequest calls the generic BulkMetricsFiles builder with application/json body
+func NewBulkMetricsFilesRequest(server string, params *BulkMetricsFilesParams, body BulkMetricsFilesJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewBulkMetricsFilesRequestWithBody(server, params, "application/json", bodyReader)
+}
+
+// NewBulkMetricsFilesRequestWithBody generates requests for BulkMetricsFiles with any type of body
+func NewBulkMetricsFilesRequestWithBody(server string, params *BulkMetricsFilesParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/index/v1/metrics/files/bulk")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if params.Organization != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "organization", runtime.ParamLocationQuery, *params.Organization); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Project != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "project", runtime.ParamLocationQuery, *params.Project); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
 
 	return req, nil
 }
@@ -1303,6 +1430,11 @@ type ClientWithResponsesInterface interface {
 	// ListMetricsFilesWithResponse request
 	ListMetricsFilesWithResponse(ctx context.Context, params *ListMetricsFilesParams, reqEditors ...RequestEditorFn) (*ListMetricsFilesResponse, error)
 
+	// BulkMetricsFilesWithBodyWithResponse request with any body
+	BulkMetricsFilesWithBodyWithResponse(ctx context.Context, params *BulkMetricsFilesParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*BulkMetricsFilesResponse, error)
+
+	BulkMetricsFilesWithResponse(ctx context.Context, params *BulkMetricsFilesParams, body BulkMetricsFilesJSONRequestBody, reqEditors ...RequestEditorFn) (*BulkMetricsFilesResponse, error)
+
 	// GetMetricsFileWithResponse request
 	GetMetricsFileWithResponse(ctx context.Context, objectId string, params *GetMetricsFileParams, reqEditors ...RequestEditorFn) (*GetMetricsFileResponse, error)
 
@@ -1337,6 +1469,28 @@ func (r ListMetricsFilesResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r ListMetricsFilesResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type BulkMetricsFilesResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *MetricsListResponse
+}
+
+// Status returns HTTPResponse.Status
+func (r BulkMetricsFilesResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r BulkMetricsFilesResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -1462,6 +1616,23 @@ func (c *ClientWithResponses) ListMetricsFilesWithResponse(ctx context.Context, 
 	return ParseListMetricsFilesResponse(rsp)
 }
 
+// BulkMetricsFilesWithBodyWithResponse request with arbitrary body returning *BulkMetricsFilesResponse
+func (c *ClientWithResponses) BulkMetricsFilesWithBodyWithResponse(ctx context.Context, params *BulkMetricsFilesParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*BulkMetricsFilesResponse, error) {
+	rsp, err := c.BulkMetricsFilesWithBody(ctx, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseBulkMetricsFilesResponse(rsp)
+}
+
+func (c *ClientWithResponses) BulkMetricsFilesWithResponse(ctx context.Context, params *BulkMetricsFilesParams, body BulkMetricsFilesJSONRequestBody, reqEditors ...RequestEditorFn) (*BulkMetricsFilesResponse, error) {
+	rsp, err := c.BulkMetricsFiles(ctx, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseBulkMetricsFilesResponse(rsp)
+}
+
 // GetMetricsFileWithResponse request returning *GetMetricsFileResponse
 func (c *ClientWithResponses) GetMetricsFileWithResponse(ctx context.Context, objectId string, params *GetMetricsFileParams, reqEditors ...RequestEditorFn) (*GetMetricsFileResponse, error) {
 	rsp, err := c.GetMetricsFile(ctx, objectId, params, reqEditors...)
@@ -1524,6 +1695,32 @@ func ParseListMetricsFilesResponse(rsp *http.Response) (*ListMetricsFilesRespons
 	}
 
 	response := &ListMetricsFilesResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest MetricsListResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseBulkMetricsFilesResponse parses an HTTP response from a BulkMetricsFilesWithResponse call
+func ParseBulkMetricsFilesResponse(rsp *http.Response) (*BulkMetricsFilesResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &BulkMetricsFilesResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}

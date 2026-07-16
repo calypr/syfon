@@ -42,7 +42,7 @@ func TestDRSServiceResolveAndList(t *testing.T) {
 		case r.Method == http.MethodGet && r.URL.Path == "/objects/broken":
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusInternalServerError)
-			_, _ = io.WriteString(w, `{"error":{"message":"column \"file_name\" does not exist"}}`)
+			_, _ = io.WriteString(w, `{"error":{"message":"schema is stale"}}`)
 		case r.Method == http.MethodGet && r.URL.Path == "/objects/obj-1/access/acc-1":
 			writeJSON(t, w, http.StatusOK, drsapi.AccessURL{Url: "https://signed.example/access"})
 		case r.Method == http.MethodGet && r.URL.Path == "/objects/checksum/abc":
@@ -89,7 +89,7 @@ func TestDRSServiceResolveAndList(t *testing.T) {
 	recordHashes := internalapi.HashInfo{"sha256": "abc123"}
 	recordAuthz := map[string][]string{"org1": {"p1"}}
 	record := testRecordForURL("did-record", "https://storage.example/record.bin", recordAuthz)
-	record.FileName = &recordName
+	record.Name = &recordName
 	record.Size = &recordSize
 	record.Hashes = &recordHashes
 	records := []internalapi.InternalRecord{record}
@@ -121,7 +121,7 @@ func TestDRSServiceResolveAndList(t *testing.T) {
 	if _, err := service.GetObject(ctx, "missing"); !errors.Is(err, ErrObjectNotFound) {
 		t.Fatalf("expected ErrObjectNotFound, got %v", err)
 	}
-	if _, err := service.GetObject(ctx, "broken"); err == nil || !strings.Contains(err.Error(), `column "file_name" does not exist`) {
+	if _, err := service.GetObject(ctx, "broken"); err == nil || !strings.Contains(err.Error(), "schema is stale") {
 		t.Fatalf("expected server error detail for broken object lookup, got %v", err)
 	}
 
@@ -282,7 +282,7 @@ func TestDRSServiceDeleteRecordsByHash(t *testing.T) {
 		testRecordForURL("obj-2", recordURLs[0], map[string][]string{"org1": {}}),
 	}
 	for i := range records {
-		records[i].FileName = &recordName
+		records[i].Name = &recordName
 		records[i].Size = &recordSize
 		records[i].Hashes = &recordHashes
 	}

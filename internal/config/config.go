@@ -59,13 +59,14 @@ const (
 	RouteInternalBucketScopes      = "/data/buckets/{bucket}/scopes"
 
 	// Internal DRS Index
-	RouteInternalIndex            = "/index"
-	RouteInternalIndexDetail      = "/index/{id}"
-	RouteInternalBulkHashes       = "/index/bulk/hashes"
-	RouteInternalBulkDeleteHashes = "/index/bulk/delete"
-	RouteInternalBulkSHA256       = "/index/bulk/sha256/validity"
-	RouteInternalBulkCreate       = "/index/bulk"
-	RouteInternalBulkDocs         = "/index/bulk/documents"
+	RouteInternalIndex             = "/index"
+	RouteInternalIndexDetail       = "/index/{id}"
+	RouteInternalBulkHashes        = "/index/bulk/hashes"
+	RouteInternalBulkDeleteHashes  = "/index/bulk/delete"
+	RouteInternalBulkSHA256        = "/index/bulk/sha256/validity"
+	RouteInternalBulkSHA256Missing = "/index/bulk/sha256/missing"
+	RouteInternalBulkCreate        = "/index/bulk"
+	RouteInternalBulkDocs          = "/index/bulk/documents"
 
 	// Core API
 	RouteCoreSHA256 = "/index/v1/sha256/validity"

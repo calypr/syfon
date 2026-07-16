@@ -2,41 +2,41 @@ package common
 
 import (
 	"fmt"
+	"path/filepath"
+	"sort"
 	"strings"
 )
 
-// UniqueStrings returns a deduped slice of strings, preserving order.
-func UniqueStrings(values []string) []string {
-	seen := make(map[string]struct{}, len(values))
-	out := make([]string, 0, len(values))
-	for _, v := range values {
-		if v == "" {
-			continue
-		}
-		if _, exists := seen[v]; exists {
-			continue
-		}
-		seen[v] = struct{}{}
-		out = append(out, v)
+// CleanToBasename extracts the basename from a path (handling both windows and unix separators).
+func CleanToBasename(name string) string {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" {
+		return ""
 	}
-	return out
+	trimmed = strings.ReplaceAll(trimmed, "\\", "/")
+	base := filepath.Base(trimmed)
+	if base == "." || base == "/" || base == "" {
+		base = trimmed
+	}
+	return base
 }
 
-// UniqueStringsCaseInsensitive returns a deduped slice of strings based on lowercase comparison, preserving the first-seen original string.
-func UniqueStringsCaseInsensitive(values []string) []string {
-	seen := make(map[string]struct{}, len(values))
-	out := make([]string, 0, len(values))
-	for _, v := range values {
-		normalized := strings.ToLower(strings.TrimSpace(v))
-		if normalized == "" {
+func NormalizeNameAliases(primary string, aliases []string) []string {
+	primary = CleanToBasename(primary)
+	seen := make(map[string]struct{}, len(aliases)+1)
+	out := make([]string, 0, len(aliases))
+	for _, alias := range aliases {
+		name := CleanToBasename(alias)
+		if name == "" || name == primary {
 			continue
 		}
-		if _, exists := seen[normalized]; exists {
+		if _, ok := seen[name]; ok {
 			continue
 		}
-		seen[normalized] = struct{}{}
-		out = append(out, v)
+		seen[name] = struct{}{}
+		out = append(out, name)
 	}
+	sort.Strings(out)
 	return out
 }
 
@@ -46,15 +46,6 @@ func SchemeFromURL(raw string) string {
 		return strings.ToLower(raw[:i])
 	}
 	return ""
-}
-
-// NormalizeUploadKey ensures a key is valid for upload and defaults to ID if empty.
-func NormalizeUploadKey(inputKey, id string) string {
-	k := strings.TrimSpace(inputKey)
-	if k == "" {
-		return id
-	}
-	return k
 }
 
 // BucketToURL converts a bucket and key to an s3:// URL.

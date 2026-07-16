@@ -23,13 +23,7 @@ func ResourcePath(org, project string) (string, error) {
 	return "/organization/" + org + "/project/" + project, nil
 }
 
-// StoragePrefix returns the storage path prefix for an org/project scope
-// (no leading slash), e.g. "programs/myorg/projects/myproject".
-func StoragePrefix(org, project string) string {
-	_ = org
-	_ = project
-	return ""
-}
+
 
 // NormalizeChecksum trims whitespace and an optional sha256: prefix.
 func NormalizeChecksum(raw string) string {
@@ -161,28 +155,7 @@ func AuthzMapToControlledAccess(authzMap map[string][]string) []string {
 	return NormalizeAccessResources(AuthzMapToList(authzMap))
 }
 
-// AuthzMapMatchesScope reports whether the authz map grants access for the given
-// org and project. An empty project list in the map means org-wide access.
-func AuthzMapMatchesScope(authzMap map[string][]string, org, project string) bool {
-	org = strings.TrimSpace(org)
-	project = strings.TrimSpace(project)
-	if len(authzMap) == 0 || org == "" {
-		return false
-	}
-	projects, ok := authzMap[org]
-	if !ok {
-		return false
-	}
-	if len(projects) == 0 {
-		return true
-	}
-	for _, candidate := range projects {
-		if strings.TrimSpace(candidate) == project {
-			return true
-		}
-	}
-	return false
-}
+
 
 // ResourceScope parses a canonical or raw access resource into
 // (organization, project). It accepts "/organization/org",

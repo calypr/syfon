@@ -18,7 +18,10 @@ func NewMetricsService(gen metricsapi.ClientWithResponsesInterface) *MetricsServ
 }
 
 func (s *MetricsService) Summary(ctx context.Context, opts MetricsSummaryOptions) (metricsapi.FileUsageSummary, error) {
-	params := &metricsapi.GetMetricsSummaryParams{}
+	params := &metricsapi.GetMetricsSummaryParams{
+		Organization: stringPtr[metricsapi.Organization](opts.Organization),
+		Project:      stringPtr[metricsapi.Project](opts.ProjectID),
+	}
 	if opts.InactiveDays > 0 {
 		params.InactiveDays = &opts.InactiveDays
 	}
@@ -33,7 +36,10 @@ func (s *MetricsService) Summary(ctx context.Context, opts MetricsSummaryOptions
 }
 
 func (s *MetricsService) Files(ctx context.Context, opts MetricsFilesOptions) ([]metricsapi.FileUsage, error) {
-	params := &metricsapi.ListMetricsFilesParams{}
+	params := &metricsapi.ListMetricsFilesParams{
+		Organization: stringPtr[metricsapi.Organization](opts.Organization),
+		Project:      stringPtr[metricsapi.Project](opts.ProjectID),
+	}
 	if opts.Limit > 0 {
 		params.Limit = &opts.Limit
 	}

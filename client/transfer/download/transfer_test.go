@@ -188,78 +188,7 @@ func (f *fakeResolver) Logger() transfer.TransferLogger {
 	return f.backend.Logger()
 }
 
-func TestDownloadSingleWithProgressEmitsEvents(t *testing.T) {
-	payload := bytes.Repeat([]byte("d"), 64)
-	downloadDir := t.TempDir()
-	downloadPath := downloadDir + string(os.PathSeparator)
 
-	var events []common.ProgressEvent
-	progress := func(event common.ProgressEvent) error {
-		events = append(events, event)
-		return nil
-	}
-
-	fake := &fakeBackend{
-		logger: logs.NewGen3Logger(nil, "", ""),
-		data:   payload,
-	}
-	dc := &fakeResolver{backend: fake}
-
-	ctx := common.WithProgress(context.Background(), progress)
-	err := DownloadSingleWithProgress(ctx, dc, fake, "guid-123", downloadPath, "")
-	if err != nil {
-		t.Fatalf("download failed: %v", err)
-	}
-
-	if len(events) == 0 {
-		t.Fatal("expected progress events")
-	}
-	for i := 1; i < len(events); i++ {
-		if events[i].BytesSoFar < events[i-1].BytesSoFar {
-			t.Fatalf("bytesSoFar not monotonic: %d then %d", events[i-1].BytesSoFar, events[i].BytesSoFar)
-		}
-	}
-	last := events[len(events)-1]
-	if last.BytesSoFar != int64(len(payload)) {
-		t.Fatalf("expected final bytesSoFar %d, got %d", len(payload), last.BytesSoFar)
-	}
-	fullPath := filepath.Join(downloadPath, "payload.bin")
-	if _, err := os.Stat(fullPath); err != nil {
-		t.Fatalf("expected file to exist: %v", err)
-	}
-}
-
-func TestDownloadSingleWithProgressFinalizeOnError(t *testing.T) {
-	downloadDir := t.TempDir()
-	downloadPath := downloadDir + string(os.PathSeparator)
-
-	var events []common.ProgressEvent
-	progress := func(event common.ProgressEvent) error {
-		events = append(events, event)
-		return nil
-	}
-
-	fake := &fakeBackend{
-		logger: logs.NewGen3Logger(nil, "", ""),
-		data:   []byte("short"),
-		size:   64,
-	}
-	dc := &fakeResolver{backend: fake}
-
-	ctx := common.WithProgress(context.Background(), progress)
-	err := DownloadSingleWithProgress(ctx, dc, fake, "guid-123", downloadPath, "")
-	if err == nil {
-		t.Fatal("expected download error")
-	}
-
-	if len(events) == 0 {
-		t.Fatal("expected progress events")
-	}
-	last := events[len(events)-1]
-	if last.BytesSoFar != int64(len(fake.data)) {
-		t.Fatalf("expected finalize bytesSoFar %d, got %d", len(fake.data), last.BytesSoFar)
-	}
-}
 
 func newDownloadJSONResponse(rawURL, body string) *http.Response {
 	parsedURL, err := url.Parse(rawURL)

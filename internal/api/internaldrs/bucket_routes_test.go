@@ -199,6 +199,66 @@ func TestHandleInternalPutBucket_RejectsInvalidGeneratedPayloads(t *testing.T) {
 	}
 }
 
+func TestHandleInternalPutBucket_ReusesExistingPhysicalBucketCredential(t *testing.T) {
+	mockDB := &testutils.MockDatabase{
+		Credentials: map[string]models.S3Credential{
+			"cbdscollab_1c102e76761b": {
+				CredentialID: "cbdscollab_1c102e76761b",
+				Bucket:       "cbdscollab",
+				Provider:     "s3",
+				Region:       "us-east-1",
+				AccessKey:    "old-ak",
+				SecretKey:    "old-sk",
+				Endpoint:     "https://old-endpoint.example.org",
+			},
+		},
+	}
+	provider := "s3"
+	region := "us-east-1"
+	accessKey := "new-ak"
+	secretKey := "new-sk"
+	endpoint := "https://fortera-object.ohsu.edu"
+	path := "s3://cbdscollab/Lab_Projects/Embedding_Rotation"
+	putBody, _ := json.Marshal(bucketapi.PutBucketRequest{
+		Bucket:       "cbdscollab",
+		Provider:     &provider,
+		Region:       &region,
+		AccessKey:    &accessKey,
+		SecretKey:    &secretKey,
+		Endpoint:     &endpoint,
+		Organization: "Ellrott_Lab",
+		ProjectId:    "embedding_rotation",
+		Path:         &path,
+	})
+	req := httptest.NewRequest(http.MethodPut, "/data/buckets", bytes.NewBuffer(putBody))
+	req = req.WithContext(dataTestAuthContext(req.Context(), "gen3", true, map[string]map[string]bool{
+		"/programs/Ellrott_Lab/projects/embedding_rotation": {"create": true, "update": true},
+	}))
+
+	rr := doInternalDRSTestRequest(req, core.NewObjectManager(mockDB, &testutils.MockUrlManager{}))
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	updated, ok := mockDB.Credentials["cbdscollab_1c102e76761b"]
+	if !ok {
+		t.Fatalf("expected existing credential id to be preserved, got %+v", mockDB.Credentials)
+	}
+	if updated.AccessKey != accessKey || updated.SecretKey != secretKey || updated.Endpoint != endpoint {
+		t.Fatalf("expected existing credential to be updated, got %+v", updated)
+	}
+	if _, exists := mockDB.Credentials[common.DeriveCredentialID("cbdscollab", provider, region, endpoint, accessKey)]; exists {
+		t.Fatalf("expected no replacement credential to be created, got %+v", mockDB.Credentials)
+	}
+	scope, ok := mockDB.BucketScopes["Ellrott_Lab|embedding_rotation"]
+	if !ok {
+		t.Fatalf("expected bucket scope to be created")
+	}
+	if scope.CredentialID != "cbdscollab_1c102e76761b" || scope.Bucket != "cbdscollab" || scope.PathPrefix != "Lab_Projects/Embedding_Rotation" {
+		t.Fatalf("unexpected scope saved: %+v", scope)
+	}
+}
+
 func TestRegisterInternalRoutes_Smoke(t *testing.T) {
 	app := fiber.New()
 	om := core.NewObjectManager(&testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}, Credentials: map[string]models.S3Credential{"b1": {Bucket: "b1"}}}, &testutils.MockUrlManager{})
@@ -313,6 +373,37 @@ func TestHandleInternalListBucketScopes_FiltersUnauthorizedScopesOnSharedBucket(
 	}
 	if resp[0].Path == nil || *resp[0].Path != "s3://bucket-a/path/to/a" {
 		t.Fatalf("unexpected visible scope path: %+v", resp[0].Path)
+	}
+}
+
+func TestHandleInternalListBucketScopes_RendersRootScopeAsBucketURL(t *testing.T) {
+	mockDB := &testutils.MockDatabase{
+		Credentials: map[string]models.S3Credential{
+			"gdcdata": {CredentialID: "gdcdata", Bucket: "gdcdata", Provider: "s3"},
+		},
+		BucketScopes: map[string]models.BucketScope{
+			"gdc|": {Organization: "gdc", ProjectID: "", CredentialID: "gdcdata", Bucket: "gdcdata", PathPrefix: ""},
+		},
+	}
+	req := httptest.NewRequest(http.MethodGet, "/data/buckets/gdcdata/scopes", nil)
+	req = req.WithContext(dataTestAuthContext(req.Context(), "gen3", true, map[string]map[string]bool{
+		"/programs/gdc": {"read": true},
+	}))
+
+	rr := doInternalDRSTestRequest(req, core.NewObjectManager(mockDB, &testutils.MockUrlManager{}))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var resp []bucketapi.BucketScopeResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if len(resp) != 1 {
+		t.Fatalf("expected 1 scope, got %d: %+v", len(resp), resp)
+	}
+	if resp[0].Path == nil || *resp[0].Path != "s3://gdcdata" {
+		t.Fatalf("expected root scope path s3://gdcdata, got %+v", resp[0].Path)
 	}
 }
 

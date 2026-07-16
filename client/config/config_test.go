@@ -243,19 +243,7 @@ func TestManagerImport(t *testing.T) {
 	})
 }
 
-func TestValidateURL(t *testing.T) {
-	t.Parallel()
 
-	if _, err := ValidateUrl("https://example.org"); err != nil {
-		t.Fatalf("ValidateUrl returned error for valid URL: %v", err)
-	}
-	if _, err := ValidateUrl("://bad"); err == nil {
-		t.Fatal("expected parse error for invalid URL")
-	}
-	if _, err := ValidateUrl("not-a-url"); err == nil {
-		t.Fatal("expected host validation error")
-	}
-}
 
 func TestManagerTokenAndCredentialValidation(t *testing.T) {
 

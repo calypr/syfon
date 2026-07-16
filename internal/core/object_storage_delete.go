@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"cloud.google.com/go/storage"
@@ -17,6 +18,7 @@ import (
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
+	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/smithy-go"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/models"
@@ -31,13 +33,75 @@ type storageTarget struct {
 	path     string
 }
 
+type s3ObjectDeleter interface {
+	DeleteObject(context.Context, *awss3.DeleteObjectInput, ...func(*awss3.Options)) (*awss3.DeleteObjectOutput, error)
+	DeleteObjects(context.Context, *awss3.DeleteObjectsInput, ...func(*awss3.Options)) (*awss3.DeleteObjectsOutput, error)
+}
+
+var newS3ObjectDeleter = func(ctx context.Context, cred *models.S3Credential) (s3ObjectDeleter, error) {
+	cfg, err := awsConfigForStorageCredential(ctx, cred)
+	if err != nil {
+		return nil, err
+	}
+	return awss3.NewFromConfig(cfg, func(o *awss3.Options) {
+		if strings.TrimSpace(cred.Endpoint) != "" {
+			o.UsePathStyle = true
+		}
+	}), nil
+}
+
 func (m *ObjectManager) deleteObjectStorage(ctx context.Context, obj *models.InternalObject) error {
 	targets, err := m.storageTargetsForObject(ctx, obj)
 	if err != nil {
 		return err
 	}
+	return m.deleteStorageTargets(ctx, targets)
+}
+
+func (m *ObjectManager) deleteObjectsStorage(ctx context.Context, objects []models.InternalObject) error {
+	targets := make([]storageTarget, 0, len(objects))
+	seen := make(map[string]struct{})
+	for i := range objects {
+		objectTargets, err := m.storageTargetsForObject(ctx, &objects[i])
+		if err != nil {
+			return err
+		}
+		for _, target := range objectTargets {
+			key := storageTargetKey(target)
+			if _, exists := seen[key]; exists {
+				continue
+			}
+			seen[key] = struct{}{}
+			targets = append(targets, target)
+		}
+	}
+	return m.deleteStorageTargets(ctx, targets)
+}
+
+func (m *ObjectManager) deleteStorageTargets(ctx context.Context, targets []storageTarget) error {
+	s3ByBucket := make(map[string][]string)
 	for _, target := range targets {
+		if target.provider == common.S3Provider {
+			bucket := strings.TrimSpace(target.bucket)
+			key := strings.Trim(strings.TrimSpace(target.key), "/")
+			if bucket == "" || key == "" {
+				continue
+			}
+			s3ByBucket[bucket] = append(s3ByBucket[bucket], key)
+			continue
+		}
 		if err := m.deleteStorageTarget(ctx, target); err != nil {
+			return err
+		}
+	}
+	buckets := make([]string, 0, len(s3ByBucket))
+	for bucket := range s3ByBucket {
+		buckets = append(buckets, bucket)
+	}
+	sort.Strings(buckets)
+	for _, bucket := range buckets {
+		keys := dedupeSortedStrings(s3ByBucket[bucket])
+		if err := m.deleteS3Objects(ctx, bucket, keys); err != nil {
 			return err
 		}
 	}
@@ -85,7 +149,7 @@ func (m *ObjectManager) storageTargetsForObject(ctx context.Context, obj *models
 			continue
 		}
 
-		key := target.provider + "\x00" + target.bucket + "\x00" + target.key + "\x00" + target.path
+		key := storageTargetKey(target)
 		if _, exists := seen[key]; exists {
 			continue
 		}
@@ -106,7 +170,7 @@ func (m *ObjectManager) storageTargetFromURL(ctx context.Context, raw string) (s
 		if bucket == "" || key == "" {
 			return storageTarget{}, false, nil
 		}
-		cred, err := m.db.GetS3Credential(ctx, bucket)
+		cred, err := m.credentialForBucket(ctx, bucket)
 		if err != nil {
 			return storageTarget{}, false, fmt.Errorf("lookup credential for bucket %s: %w", bucket, err)
 		}
@@ -163,21 +227,70 @@ func (m *ObjectManager) deleteStorageTarget(ctx context.Context, target storageT
 }
 
 func (m *ObjectManager) deleteS3Object(ctx context.Context, bucket, key string) error {
-	cred, err := m.db.GetS3Credential(ctx, bucket)
+	return m.deleteS3Objects(ctx, bucket, []string{key})
+}
+
+func (m *ObjectManager) deleteS3Objects(ctx context.Context, bucket string, keys []string) error {
+	keys = dedupeSortedStrings(keys)
+	if len(keys) == 0 {
+		return nil
+	}
+	cred, err := m.credentialForBucket(ctx, bucket)
 	if err != nil {
 		return fmt.Errorf("lookup s3 credential for bucket %s: %w", bucket, err)
 	}
 	if cred == nil {
 		return fmt.Errorf("credentials not found for bucket %s", bucket)
 	}
+	client, err := newS3ObjectDeleter(ctx, cred)
+	if err != nil {
+		return err
+	}
 
+	if len(keys) == 1 {
+		_, err = client.DeleteObject(ctx, &awss3.DeleteObjectInput{
+			Bucket: aws.String(bucket),
+			Key:    aws.String(keys[0]),
+		})
+		return err
+	}
+
+	const maxS3DeleteObjects = 1000
+	quiet := true
+	for start := 0; start < len(keys); start += maxS3DeleteObjects {
+		end := start + maxS3DeleteObjects
+		if end > len(keys) {
+			end = len(keys)
+		}
+		objects := make([]s3types.ObjectIdentifier, 0, end-start)
+		for _, key := range keys[start:end] {
+			objects = append(objects, s3types.ObjectIdentifier{Key: aws.String(key)})
+		}
+		out, err := client.DeleteObjects(ctx, &awss3.DeleteObjectsInput{
+			Bucket: aws.String(bucket),
+			Delete: &s3types.Delete{
+				Objects: objects,
+				Quiet:   aws.Bool(quiet),
+			},
+		})
+		if err != nil {
+			return err
+		}
+		if out != nil && len(out.Errors) > 0 {
+			return fmt.Errorf("s3 bulk delete failed for bucket %s: %s", bucket, formatS3DeleteErrors(out.Errors))
+		}
+	}
+	return nil
+}
+
+func awsConfigForStorageCredential(ctx context.Context, cred *models.S3Credential) (aws.Config, error) {
 	loadOpts := []func(*awsconfig.LoadOptions) error{
 		awsconfig.WithRegion(cred.Region),
 		awsconfig.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(cred.AccessKey, cred.SecretKey, "")),
 	}
 	cfg, err := awsconfig.LoadDefaultConfig(ctx, loadOpts...)
 	if err != nil {
-		return fmt.Errorf("load aws config: %w", err)
+		return aws.Config{}, fmt.Errorf("load aws config: %w", err)
 	}
 	if endpoint := strings.TrimSpace(cred.Endpoint); endpoint != "" {
 		if !strings.HasPrefix(endpoint, "http://") && !strings.HasPrefix(endpoint, "https://") {
@@ -189,17 +302,57 @@ func (m *ObjectManager) deleteS3Object(ctx context.Context, bucket, key string) 
 		}
 		cfg.BaseEndpoint = aws.String(endpoint)
 	}
+	return cfg, nil
+}
 
-	client := awss3.NewFromConfig(cfg, func(o *awss3.Options) {
-		if strings.TrimSpace(cred.Endpoint) != "" {
-			o.UsePathStyle = true
+func storageTargetKey(target storageTarget) string {
+	return target.provider + "\x00" + target.bucket + "\x00" + target.key + "\x00" + target.path
+}
+
+func dedupeSortedStrings(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
 		}
-	})
-	_, err = client.DeleteObject(ctx, &awss3.DeleteObjectInput{
-		Bucket: aws.String(bucket),
-		Key:    aws.String(key),
-	})
-	return err
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func formatS3DeleteErrors(errors []s3types.Error) string {
+	const maxErrors = 5
+	parts := make([]string, 0, len(errors))
+	for i, item := range errors {
+		if i >= maxErrors {
+			parts = append(parts, fmt.Sprintf("and %d more", len(errors)-maxErrors))
+			break
+		}
+		key := strings.TrimSpace(aws.ToString(item.Key))
+		code := strings.TrimSpace(aws.ToString(item.Code))
+		message := strings.TrimSpace(aws.ToString(item.Message))
+		switch {
+		case key != "" && code != "" && message != "":
+			parts = append(parts, fmt.Sprintf("%s: %s: %s", key, code, message))
+		case key != "" && code != "":
+			parts = append(parts, fmt.Sprintf("%s: %s", key, code))
+		case code != "":
+			parts = append(parts, code)
+		default:
+			parts = append(parts, "unknown delete error")
+		}
+	}
+	return strings.Join(parts, "; ")
 }
 
 func (m *ObjectManager) deleteGCSObject(ctx context.Context, bucket, key string) error {

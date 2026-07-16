@@ -21,11 +21,11 @@ func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
 func newTestClient(t *testing.T, fn roundTripFunc) *Client {
 	t.Helper()
 	httpClient := &http.Client{Transport: fn}
-	c, err := New("http://example.test", WithHTTPClient(httpClient))
+	c, err := NewClient(&Config{Address: "http://example.test", HTTPClient: httpClient})
 	if err != nil {
 		t.Fatalf("failed to create client: %v", err)
 	}
-	return c.(*Client)
+	return c
 }
 
 func TestClientBasicAuthAndUserAgent(t *testing.T) {
@@ -48,10 +48,12 @@ func TestClientBasicAuthAndUserAgent(t *testing.T) {
 		}, nil
 	})}
 
-	c, err := New("http://example.test",
-		WithBasicAuth("u", "p"),
-		WithUserAgent("syfon-test-client"),
-		WithHTTPClient(httpClient))
+	c, err := NewClient(&Config{
+		Address:    "http://example.test",
+		BasicAuth:  &BasicAuth{Username: "u", Password: "p"},
+		UserAgent:  "syfon-test-client",
+		HTTPClient: httpClient,
+	})
 	if err != nil {
 		t.Fatalf("failed to create client: %v", err)
 	}
@@ -81,13 +83,14 @@ func TestGeneratedClientUsesBasicAuthTransport(t *testing.T) {
 		}, nil
 	})}
 
-	raw, err := New("http://example.test",
-		WithBasicAuth("u", "p"),
-		WithHTTPClient(httpClient))
+	c, err := NewClient(&Config{
+		Address:    "http://example.test",
+		BasicAuth:  &BasicAuth{Username: "u", Password: "p"},
+		HTTPClient: httpClient,
+	})
 	if err != nil {
 		t.Fatalf("failed to create client: %v", err)
 	}
-	c := raw.(*Client)
 	if _, err := c.InternalAPI().InternalListWithResponse(context.Background(), &internalapi.InternalListParams{}); err != nil {
 		t.Fatalf("generated client list failed: %v", err)
 	}
@@ -233,12 +236,17 @@ func TestNewClientDefaultWiring(t *testing.T) {
 		}, nil
 	})}
 
-	raw, err := New("example.test:8080/", WithHTTPClient(httpClient), WithUserAgent("   "), WithBasicAuth("   ", "ignored"))
+	raw, err := NewClient(&Config{
+		Address:    "example.test:8080/",
+		HTTPClient: httpClient,
+		UserAgent:  "   ",
+		BasicAuth:  &BasicAuth{Username: "   ", Password: "ignored"},
+	})
 	if err != nil {
-		t.Fatalf("New returned error: %v", err)
+		t.Fatalf("NewClient returned error: %v", err)
 	}
 
-	c := raw.(*Client)
+	c := raw
 	if c.Address() != "http://example.test:8080" {
 		t.Fatalf("unexpected address: %q", c.Address())
 	}

@@ -38,7 +38,7 @@ func TestIndexServiceOperationsAndUpsert(t *testing.T) {
 			size := int64(12)
 			authz := map[string][]string{"p1": {}}
 			rec := testRecordForURL("did-list", "s3://bucket/object", authz)
-			rec.FileName = &name
+			rec.Name = &name
 			rec.Size = &size
 			records := []internalapi.InternalRecord{rec}
 			writeJSON(t, w, http.StatusOK, internalapi.ListRecordsResponse{Records: &records})
@@ -85,14 +85,14 @@ func TestIndexServiceOperationsAndUpsert(t *testing.T) {
 			hashes := internalapi.HashInfo{"md5": "md5sum"}
 			authz := map[string][]string{"existing": {}}
 			rec := toRecordResponse(testRecordForURL("did-update", "s3://bucket/existing", authz))
-			rec.FileName = &fileName
+			rec.Name = &fileName
 			rec.Size = &size
 			rec.Hashes = &hashes
 			writeJSON(t, w, http.StatusOK, internalapi.InternalRecordResponse{
 				Did:              rec.Did,
 				AccessMethods:    rec.AccessMethods,
 				ControlledAccess: rec.ControlledAccess,
-				FileName:         rec.FileName,
+				Name:             rec.Name,
 				Size:             rec.Size,
 				Hashes:           rec.Hashes,
 			})
@@ -125,7 +125,7 @@ func TestIndexServiceOperationsAndUpsert(t *testing.T) {
 	listSize := int64(12)
 	listAuthz := map[string][]string{"p1": {}}
 	listRec := testRecordForURL("did-list", "s3://bucket/object", listAuthz)
-	listRec.FileName = &listName
+	listRec.Name = &listName
 	listRec.Size = &listSize
 	listRecords := []internalapi.InternalRecord{listRec}
 	listResp, err := json.Marshal(internalapi.ListRecordsResponse{Records: &listRecords})
@@ -150,12 +150,12 @@ func TestIndexServiceOperationsAndUpsert(t *testing.T) {
 	createSize := int64(55)
 	createAuthz := map[string][]string{"p1": {}}
 	createRec := testRecordForURL("did-new", "s3://bucket/created", createAuthz)
-	createRec.FileName = &createFile
+	createRec.Name = &createFile
 	createRec.Size = &createSize
 	if _, err := service.Create(ctx, createRec); err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
-	if lastCreated.Did != "did-new" || lastCreated.FileName == nil || *lastCreated.FileName != "created.txt" {
+	if lastCreated.Did != "did-new" || lastCreated.Name == nil || *lastCreated.Name != "created.txt" {
 		t.Fatalf("unexpected create payload: %+v", lastCreated)
 	}
 
@@ -181,14 +181,14 @@ func TestIndexServiceOperationsAndUpsert(t *testing.T) {
 		t.Fatalf("unexpected remove controlled access payload: %+v", lastRemoveControlled)
 	}
 
-	if _, err := service.List(ctx, ListRecordsOptions{Hash: "sha", URL: "s3://bucket/path", Organization: "org", ProjectID: "proj", Path: "nested", Limit: 3, Start: "did-100"}); err != nil {
+	if _, err := service.List(ctx, ListRecordsOptions{Hash: "sha", URL: "s3://bucket/path", Organization: "org", ProjectID: "proj", Limit: 3, Start: "did-100"}); err != nil {
 		t.Fatalf("List returned error: %v", err)
 	}
 	query, err := url.ParseQuery(strings.TrimPrefix(requester.builder.Url, "/index?"))
 	if err != nil {
 		t.Fatalf("parse list query: %v", err)
 	}
-	if query.Get("hash") != "sha" || query.Get("url") != "s3://bucket/path" || query.Get("organization") != "org" || query.Get("project") != "proj" || query.Get("path") != "nested" || query.Get("limit") != "3" || query.Get("start") != "did-100" || query.Get("page") != "" {
+	if query.Get("hash") != "sha" || query.Get("url") != "s3://bucket/path" || query.Get("organization") != "org" || query.Get("project") != "proj" || query.Get("limit") != "3" || query.Get("start") != "did-100" || query.Get("page") != "" {
 		t.Fatalf("unexpected list query values: %v", query)
 	}
 
@@ -253,7 +253,7 @@ func TestIndexServiceOperationsAndUpsert(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Upsert existing returned error: %v", err)
 	}
-	if lastUpdated.FileName == nil || *lastUpdated.FileName != "new.txt" {
+	if lastUpdated.Name == nil || *lastUpdated.Name != "new.txt" {
 		t.Fatalf("expected updated file name, got %+v", lastUpdated)
 	}
 	if lastUpdated.Size == nil || *lastUpdated.Size != 123 {
@@ -279,13 +279,47 @@ func TestIndexServiceOperationsAndUpsert(t *testing.T) {
 	if lastCreated.Did != "did-create" || lastCreated.ControlledAccess == nil || len(*lastCreated.ControlledAccess) != 1 || lastCreated.AccessMethods == nil || len(*lastCreated.AccessMethods) != 1 {
 		t.Fatalf("unexpected create-on-upsert payload: %+v", lastCreated)
 	}
-	if lastCreated.FileName == nil || *lastCreated.FileName != "created.txt" || lastCreated.Size == nil || *lastCreated.Size != 99 {
+	if lastCreated.Name == nil || *lastCreated.Name != "created.txt" || lastCreated.Size == nil || *lastCreated.Size != 99 {
 		t.Fatalf("unexpected create-on-upsert sizing: %+v", lastCreated)
 	}
 
 	err = service.Upsert(ctx, "did-create", "s3://bucket/create", "created.txt", 99, "sha256create", nil)
 	if err == nil || !strings.Contains(err.Error(), "authorizations are required to create") {
 		t.Fatalf("expected missing authz create error, got %v", err)
+	}
+}
+
+func TestIndexServiceMissingSHA256(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/index/bulk/sha256/missing" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		var req internalapi.BulkMissingSHA256Request
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req.Organization != "org" || req.Project != "project" || len(req.Sha256) != 2 {
+			t.Fatalf("unexpected request body: %+v", req)
+		}
+		writeJSON(t, w, http.StatusOK, internalapi.BulkMissingSHA256Response{
+			Checked:       2,
+			MissingSha256: []string{"missing"},
+		})
+	}))
+	defer server.Close()
+
+	service := NewIndexService(mustInternalClient(t, server.URL), &fakeRequester{})
+	got, err := service.MissingSHA256(context.Background(), internalapi.BulkMissingSHA256Request{
+		Organization: "org",
+		Project:      "project",
+		Sha256:       []string{"present", "missing"},
+	})
+	if err != nil {
+		t.Fatalf("MissingSHA256 returned error: %v", err)
+	}
+	if got.Checked != 2 || len(got.MissingSha256) != 1 || got.MissingSha256[0] != "missing" {
+		t.Fatalf("unexpected response: %+v", got)
 	}
 }
 

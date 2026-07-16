@@ -53,7 +53,7 @@ The hierarchy should be derived from authoritative object/bucket path informatio
 
 Open questions:
 
-- Which field should be canonical for hierarchy derivation: bucket path, object key, `file_name`, or another normalized source?
+- Which field should be canonical for hierarchy derivation: bucket path, object key, or another normalized source?
 - How should conflicts be handled when metadata names differ from object paths?
 - Should directories be materialized eagerly or derived lazily and cached?
 - How should renames or path changes be represented historically?

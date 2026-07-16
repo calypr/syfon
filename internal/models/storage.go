@@ -48,10 +48,12 @@ type FileUsage struct {
 
 // FileUsageSummary aggregates transfer activity for a set of objects.
 type FileUsageSummary struct {
-	TotalFiles        int64
-	TotalUploads      int64
-	TotalDownloads    int64
-	InactiveFileCount int64
+	TotalFiles              int64
+	TotalUploads            int64
+	TotalDownloads          int64
+	InactiveFileCount       int64
+	RecordCount             int64
+	RecordLatestUpdatedTime *time.Time
 }
 
 // BucketVisibilityRow is the minimum storage projection needed to build bucket
@@ -60,11 +62,6 @@ type BucketVisibilityRow struct {
 	AccessURL  string
 	AccessType string
 	Resource   string
-}
-
-type BrowseDirectory struct {
-	Name string
-	Path string
 }
 
 const (
@@ -214,12 +211,13 @@ type TransferAttributionBreakdown struct {
 
 // DrsObjectRecord mirrors the subset of drs_object columns returned by storage queries.
 type DrsObjectRecord struct {
-	ID          string
-	Size        int64
-	CreatedTime time.Time
-	UpdatedTime time.Time
-	Name        string
-	FileName    string
-	Version     string
-	Description string
+	ID               string
+	Size             int64
+	CreatedTime      time.Time
+	UpdatedTime      time.Time
+	DownloadCount    int64
+	LastDownloadTime *time.Time
+	Name             string
+	Version          string
+	Description      string
 }

@@ -2,7 +2,7 @@ package core
 
 import (
 	"fmt"
-	"path"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -13,6 +13,27 @@ import (
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/models"
 )
+
+func EnforceCanonicalProjectScope(obj models.InternalObject, organization, project string) (models.InternalObject, error) {
+	organization = strings.TrimSpace(organization)
+	project = strings.TrimSpace(project)
+	if project != "" && organization == "" {
+		return models.InternalObject{}, fmt.Errorf("organization is required when project is set")
+	}
+	if organization == "" || project == "" {
+		return obj, nil
+	}
+
+	resource, err := syfoncommon.ResourcePath(organization, project)
+	if err != nil {
+		return models.InternalObject{}, err
+	}
+	controlled := append(ObjectAccessResources(&obj), resource)
+	controlled = syfoncommon.NormalizeAccessResources(controlled)
+	obj.ControlledAccess = &controlled
+	obj.Authorizations = syfoncommon.ControlledAccessToAuthzMap(controlled)
+	return obj, nil
+}
 
 // LFSCandidateToDRS converts an LFS-specific candidate to a DRS-generic one.
 func LFSCandidateToDRS(in lfsapi.DrsObjectCandidate) drs.DrsObjectCandidate {
@@ -138,7 +159,7 @@ func CandidateToInternalObject(c drs.DrsObjectCandidate, now time.Time) (models.
 		obj.ControlledAccess = &controlled
 	}
 	if c.Name != nil {
-		obj.Name = c.Name
+		obj.Name = normalizedObjectNamePtr(c.Name)
 	}
 	if obj.Name == nil || strings.TrimSpace(*obj.Name) == "" {
 		obj.Name = &oid
@@ -182,7 +203,7 @@ func MergeInternalObjectUpdate(existing models.InternalObject, update models.Int
 	}
 
 	if update.DrsObject.Name != nil {
-		merged.DrsObject.Name = update.DrsObject.Name
+		merged.DrsObject.Name = normalizedObjectNamePtr(update.DrsObject.Name)
 	}
 	if update.DrsObject.Description != nil {
 		merged.DrsObject.Description = update.DrsObject.Description
@@ -230,17 +251,9 @@ func InternalRecordToInternalObject(r internalapi.InternalRecord, now time.Time)
 	updatedTime := parseInternalRecordTime(r.UpdatedTime, obj.CreatedTime)
 	obj.UpdatedTime = &updatedTime
 	if r.Name != nil && strings.TrimSpace(*r.Name) != "" {
-		obj.Name = common.Ptr(strings.TrimSpace(*r.Name))
-	} else if r.FileName != nil {
-		fileName := strings.TrimSpace(*r.FileName)
-		if fileName != "" {
-			base := path.Base(strings.Trim(fileName, "/"))
-			if base == "." || base == "/" {
-				base = fileName
-			}
-			obj.Name = common.Ptr(base)
-		}
+		obj.Name = normalizedObjectNamePtr(r.Name)
 	}
+	objectName := common.StringVal(obj.Name)
 	if v := r.Version; v != nil {
 		obj.Version = v
 	}
@@ -263,13 +276,29 @@ func InternalRecordToInternalObject(r internalapi.InternalRecord, now time.Time)
 		methods := append([]drs.AccessMethod(nil), (*r.AccessMethods)...)
 		obj.AccessMethods = &methods
 	}
-	return models.InternalObject{
+	internalObj := models.InternalObject{
 		DrsObject:      obj,
+		NameAliases:    common.NormalizeNameAliases(objectName, common.DerefStringSlice(r.NameAliases)),
 		Authorizations: authzMap,
-		Properties: map[string]interface{}{
-			"file_name": common.StringVal(r.FileName),
-		},
-	}, nil
+		Properties:     map[string]interface{}{},
+	}
+	return EnforceCanonicalProjectScope(internalObj, common.StringVal(r.Organization), common.StringVal(r.Project))
+}
+
+func normalizedObjectNamePtr(name *string) *string {
+	if name == nil {
+		return nil
+	}
+	trimmed := strings.TrimSpace(*name)
+	if trimmed == "" {
+		return nil
+	}
+	trimmed = strings.ReplaceAll(trimmed, "\\", "/")
+	base := filepath.Base(trimmed)
+	if base == "." || base == "/" || base == "" {
+		base = trimmed
+	}
+	return common.Ptr(base)
 }
 
 func parseInternalRecordTime(raw *string, fallback time.Time) time.Time {
@@ -286,17 +315,13 @@ func parseInternalRecordTime(raw *string, fallback time.Time) time.Time {
 
 // InternalObjectToInternalRecord converts our internal domain model back to an API record.
 func InternalObjectToInternalRecord(obj models.InternalObject) internalapi.InternalRecord {
-	fileName := common.StringVal(obj.Name)
-	if raw, ok := obj.Properties["file_name"].(string); ok && strings.TrimSpace(raw) != "" {
-		fileName = strings.TrimSpace(raw)
-	}
 	res := internalapi.InternalRecord{
 		Did:           obj.Id,
 		Size:          &obj.Size,
 		CreatedTime:   common.Ptr(obj.CreatedTime.Format(time.RFC3339)),
 		Description:   obj.Description,
-		FileName:      common.Ptr(fileName),
 		Name:          obj.Name,
+		NameAliases:   common.Ptr(common.NormalizeNameAliases(common.StringVal(obj.Name), obj.NameAliases)),
 		Version:       obj.Version,
 		AccessMethods: obj.AccessMethods,
 	}
@@ -326,8 +351,8 @@ func InternalObjectToInternalRecordResponse(obj models.InternalObject) internala
 		Size:             rec.Size,
 		CreatedTime:      rec.CreatedTime,
 		Description:      rec.Description,
-		FileName:         rec.FileName,
 		Name:             rec.Name,
+		NameAliases:      rec.NameAliases,
 		Version:          rec.Version,
 		UpdatedTime:      rec.UpdatedTime,
 		Hashes:           rec.Hashes,

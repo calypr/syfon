@@ -148,12 +148,5 @@ func (a *AuthzRPC) Authorize(ctx context.Context, in *plugin.AuthorizationInput)
 	return &out, err
 }
 
-// DummyPluginManager implements the same interface as PluginManager for testing.
-type DummyPluginManager struct{}
-
-func (d *DummyPluginManager) Authorize(ctx context.Context, in *plugin.AuthorizationInput) (*plugin.AuthorizationOutput, error) {
-	return &plugin.AuthorizationOutput{Allow: true}, nil
-}
-
 // Ensure PluginManager implements pluginManagerInterface
 var _ pluginManagerInterface = (*PluginManager)(nil)

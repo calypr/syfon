@@ -1,24 +1,11 @@
 package config
 
 import (
-	"errors"
 	"fmt"
-	"net/url"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 )
-
-func ValidateUrl(apiEndpoint string) (*url.URL, error) {
-	parsedURL, err := url.Parse(apiEndpoint)
-	if err != nil {
-		return parsedURL, errors.New("Error occurred when parsing apiendpoint URL: " + err.Error())
-	}
-	if parsedURL.Host == "" {
-		return parsedURL, errors.New("Invalid endpoint. A valid endpoint looks like: https://www.tests.com")
-	}
-	return parsedURL, nil
-}
 
 func (man *Manager) IsTokenValid(tokenStr string) (bool, error) {
 	if tokenStr == "" {

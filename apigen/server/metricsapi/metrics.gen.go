@@ -54,12 +54,20 @@ type FileUsage struct {
 	UploadCount      *int64     `json:"upload_count,omitempty"`
 }
 
+// FileUsageBulkRequest defines model for FileUsageBulkRequest.
+type FileUsageBulkRequest struct {
+	InactiveDays *int     `json:"inactive_days,omitempty"`
+	ObjectIds    []string `json:"object_ids"`
+}
+
 // FileUsageSummary defines model for FileUsageSummary.
 type FileUsageSummary struct {
-	InactiveFileCount *int64 `json:"inactive_file_count,omitempty"`
-	TotalDownloads    *int64 `json:"total_downloads,omitempty"`
-	TotalFiles        *int64 `json:"total_files,omitempty"`
-	TotalUploads      *int64 `json:"total_uploads,omitempty"`
+	InactiveFileCount       *int64     `json:"inactive_file_count,omitempty"`
+	RecordCount             *int64     `json:"record_count,omitempty"`
+	RecordLatestUpdatedTime *time.Time `json:"record_latest_updated_time"`
+	TotalDownloads          *int64     `json:"total_downloads,omitempty"`
+	TotalFiles              *int64     `json:"total_files,omitempty"`
+	TotalUploads            *int64     `json:"total_uploads,omitempty"`
 }
 
 // MetricsListResponse defines model for MetricsListResponse.
@@ -216,6 +224,15 @@ type ListMetricsFilesParams struct {
 	Project *Project `form:"project,omitempty" json:"project,omitempty"`
 }
 
+// BulkMetricsFilesParams defines parameters for BulkMetricsFiles.
+type BulkMetricsFilesParams struct {
+	// Organization Organization/program scope filter.
+	Organization *Organization `form:"organization,omitempty" json:"organization,omitempty"`
+
+	// Project Project scope filter. Requires organization when set.
+	Project *Project `form:"project,omitempty" json:"project,omitempty"`
+}
+
 // GetMetricsFileParams defines parameters for GetMetricsFile.
 type GetMetricsFileParams struct {
 	// Organization Organization/program scope filter.
@@ -293,6 +310,9 @@ type GetTransferSummaryParams struct {
 	AllowStale *AllowStale `form:"allow_stale,omitempty" json:"allow_stale,omitempty"`
 }
 
+// BulkMetricsFilesJSONRequestBody defines body for BulkMetricsFiles for application/json ContentType.
+type BulkMetricsFilesJSONRequestBody = FileUsageBulkRequest
+
 // RecordProviderTransferEventsJSONRequestBody defines body for RecordProviderTransferEvents for application/json ContentType.
 type RecordProviderTransferEventsJSONRequestBody = ProviderTransferEventsRequest
 
@@ -301,6 +321,9 @@ type ServerInterface interface {
 
 	// (GET /index/v1/metrics/files)
 	ListMetricsFiles(c fiber.Ctx, params ListMetricsFilesParams) error
+
+	// (POST /index/v1/metrics/files/bulk)
+	BulkMetricsFiles(c fiber.Ctx, params BulkMetricsFilesParams) error
 
 	// (GET /index/v1/metrics/files/{object_id})
 	GetMetricsFile(c fiber.Ctx, objectId string, params GetMetricsFileParams) error
@@ -387,6 +410,37 @@ func (siw *ServerInterfaceWrapper) ListMetricsFiles(c fiber.Ctx) error {
 	}
 
 	return siw.Handler.ListMetricsFiles(c, params)
+}
+
+// BulkMetricsFiles operation middleware
+func (siw *ServerInterfaceWrapper) BulkMetricsFiles(c fiber.Ctx) error {
+	var err error
+	var params BulkMetricsFilesParams
+
+	// ------------- Optional query parameter "organization" -------------
+	if paramValue := c.Query("organization"); paramValue != "" {
+
+		var value Organization
+		err = runtime.BindStyledParameterWithOptions("form", "organization", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
+		if err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter organization: %w", err).Error())
+		}
+		params.Organization = &value
+
+	}
+	// ------------- Optional query parameter "project" -------------
+	if paramValue := c.Query("project"); paramValue != "" {
+
+		var value Project
+		err = runtime.BindStyledParameterWithOptions("form", "project", paramValue, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
+		if err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter project: %w", err).Error())
+		}
+		params.Project = &value
+
+	}
+
+	return siw.Handler.BulkMetricsFiles(c, params)
 }
 
 // GetMetricsFile operation middleware
@@ -795,6 +849,8 @@ func RegisterHandlersWithOptions(router fiber.Router, si ServerInterface, option
 
 	router.Get(options.BaseURL+"/index/v1/metrics/files", wrapper.ListMetricsFiles)
 
+	router.Post(options.BaseURL+"/index/v1/metrics/files/bulk", wrapper.BulkMetricsFiles)
+
 	router.Get(options.BaseURL+"/index/v1/metrics/files/:object_id", wrapper.GetMetricsFile)
 
 	router.Post(options.BaseURL+"/index/v1/metrics/provider-transfer-events", wrapper.RecordProviderTransferEvents)
@@ -852,6 +908,56 @@ type ListMetricsFiles500Response struct {
 }
 
 func (response ListMetricsFiles500Response) VisitListMetricsFilesResponse(ctx fiber.Ctx) error {
+	ctx.Status(500)
+	return nil
+}
+
+type BulkMetricsFilesRequestObject struct {
+	Params BulkMetricsFilesParams
+	Body   *BulkMetricsFilesJSONRequestBody
+}
+
+type BulkMetricsFilesResponseObject interface {
+	VisitBulkMetricsFilesResponse(ctx fiber.Ctx) error
+}
+
+type BulkMetricsFiles200JSONResponse MetricsListResponse
+
+func (response BulkMetricsFiles200JSONResponse) VisitBulkMetricsFilesResponse(ctx fiber.Ctx) error {
+	ctx.Response().Header.Set("Content-Type", "application/json")
+	ctx.Status(200)
+
+	return ctx.JSON(&response)
+}
+
+type BulkMetricsFiles400Response struct {
+}
+
+func (response BulkMetricsFiles400Response) VisitBulkMetricsFilesResponse(ctx fiber.Ctx) error {
+	ctx.Status(400)
+	return nil
+}
+
+type BulkMetricsFiles401Response struct {
+}
+
+func (response BulkMetricsFiles401Response) VisitBulkMetricsFilesResponse(ctx fiber.Ctx) error {
+	ctx.Status(401)
+	return nil
+}
+
+type BulkMetricsFiles403Response struct {
+}
+
+func (response BulkMetricsFiles403Response) VisitBulkMetricsFilesResponse(ctx fiber.Ctx) error {
+	ctx.Status(403)
+	return nil
+}
+
+type BulkMetricsFiles500Response struct {
+}
+
+func (response BulkMetricsFiles500Response) VisitBulkMetricsFilesResponse(ctx fiber.Ctx) error {
 	ctx.Status(500)
 	return nil
 }
@@ -1117,6 +1223,9 @@ type StrictServerInterface interface {
 	// (GET /index/v1/metrics/files)
 	ListMetricsFiles(ctx context.Context, request ListMetricsFilesRequestObject) (ListMetricsFilesResponseObject, error)
 
+	// (POST /index/v1/metrics/files/bulk)
+	BulkMetricsFiles(ctx context.Context, request BulkMetricsFilesRequestObject) (BulkMetricsFilesResponseObject, error)
+
 	// (GET /index/v1/metrics/files/{object_id})
 	GetMetricsFile(ctx context.Context, request GetMetricsFileRequestObject) (GetMetricsFileResponseObject, error)
 	// Record provider-observed transfer events
@@ -1165,6 +1274,39 @@ func (sh *strictHandler) ListMetricsFiles(ctx fiber.Ctx, params ListMetricsFiles
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	} else if validResponse, ok := response.(ListMetricsFilesResponseObject); ok {
 		if err := validResponse.VisitListMetricsFilesResponse(ctx); err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, err.Error())
+		}
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// BulkMetricsFiles operation middleware
+func (sh *strictHandler) BulkMetricsFiles(ctx fiber.Ctx, params BulkMetricsFilesParams) error {
+	var request BulkMetricsFilesRequestObject
+
+	request.Params = params
+
+	var body BulkMetricsFilesJSONRequestBody
+	if err := ctx.Bind().Body(&body); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	}
+	request.Body = &body
+
+	handler := func(ctx fiber.Ctx, request interface{}) (interface{}, error) {
+		return sh.ssi.BulkMetricsFiles(ctx.Context(), request.(BulkMetricsFilesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "BulkMetricsFiles")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	} else if validResponse, ok := response.(BulkMetricsFilesResponseObject); ok {
+		if err := validResponse.VisitBulkMetricsFilesResponse(ctx); err != nil {
 			return fiber.NewError(fiber.StatusBadRequest, err.Error())
 		}
 	} else if response != nil {

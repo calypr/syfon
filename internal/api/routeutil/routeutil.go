@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"regexp"
-	"strings"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/adaptor"
@@ -29,18 +28,6 @@ func WithPathParams(r *http.Request, params map[string]string) *http.Request {
 		copyParams[k] = v
 	}
 	return r.WithContext(context.WithValue(r.Context(), pathParamsKey{}, copyParams))
-}
-
-// PathParam reads a path parameter that was attached with WithPathParams.
-func PathParam(r *http.Request, key string) string {
-	if r == nil {
-		return ""
-	}
-	params, ok := r.Context().Value(pathParamsKey{}).(map[string]string)
-	if !ok {
-		return ""
-	}
-	return strings.TrimSpace(params[key])
 }
 
 // Handler adapts a standard net/http handler to fiber while preserving path params.

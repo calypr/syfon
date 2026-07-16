@@ -21,6 +21,7 @@ type ObjectStore interface {
 	CreateObject(ctx context.Context, obj *models.InternalObject) error
 	GetObjectsByChecksum(ctx context.Context, checksum string) ([]models.InternalObject, error)
 	GetObjectsByChecksums(ctx context.Context, checksums []string) (map[string][]models.InternalObject, error)
+	ListScopedObjectIDsByChecksums(ctx context.Context, organization, project string, checksums []string) (map[string][]string, error)
 	ListObjectIDsByScope(ctx context.Context, organization, project string) ([]string, error)
 	CreateObjectAlias(ctx context.Context, aliasID, canonicalObjectID string) error
 	ResolveObjectAlias(ctx context.Context, aliasID string) (string, error)
@@ -41,10 +42,6 @@ type ObjectIDPageLister interface {
 	ListObjectIDsPageByResources(ctx context.Context, resources []string, includeUnscoped bool, startAfter string, limit, offset int) ([]string, error)
 }
 
-type ObjectPathPageLister interface {
-	ListObjectIDsPageByPath(ctx context.Context, organization, project, path, startAfter string, limit, offset int) ([]string, []models.BrowseDirectory, error)
-}
-
 type ObjectChecksumPageLister interface {
 	ListObjectIDsPageByChecksum(ctx context.Context, checksum, checksumType, organization, project, startAfter string, limit, offset int, resources []string, includeUnscoped, restrictToResources bool) ([]string, error)
 }
@@ -63,6 +60,7 @@ type FileUsageScopedLister interface {
 	ListFileUsagePageByResources(ctx context.Context, resources []string, includeUnscoped bool, limit, offset int, inactiveSince *time.Time) ([]models.FileUsage, error)
 	GetFileUsageSummaryByScope(ctx context.Context, organization, project string, inactiveSince *time.Time) (models.FileUsageSummary, error)
 	GetFileUsageSummaryByResources(ctx context.Context, resources []string, includeUnscoped bool, inactiveSince *time.Time) (models.FileUsageSummary, error)
+	GetProjectRecordSummaryByScope(ctx context.Context, organization, project string) (models.FileUsageSummary, error)
 }
 
 type TransferAttributionScopedStore interface {

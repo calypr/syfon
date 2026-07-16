@@ -104,6 +104,14 @@ func TestSaveS3Credential(t *testing.T) {
 	defer rawDB.Close()
 	derivedID := common.DeriveCredentialID("b1", "", "us-east-1", "https://s3.example", "ak")
 
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT credential_id
+		FROM s3_credential
+		WHERE bucket = $1 AND credential_id <> $2
+		LIMIT 1
+	`)).
+		WithArgs("b1", derivedID).
+		WillReturnError(sql.ErrNoRows)
 	mock.ExpectExec(regexp.QuoteMeta(`
 		INSERT INTO s3_credential (credential_id, bucket, provider, region, access_key, secret_key, endpoint)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -127,6 +135,33 @@ func TestSaveS3Credential(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("SaveS3Credential returned error: %v", err)
+	}
+}
+
+func TestSaveS3CredentialRejectsDuplicatePhysicalBucket(t *testing.T) {
+	t.Setenv(crypto.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
+	pg, mock, rawDB := newMockPostgresDB(t)
+	defer rawDB.Close()
+
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT credential_id
+		FROM s3_credential
+		WHERE bucket = $1 AND credential_id <> $2
+		LIMIT 1
+	`)).
+		WithArgs("shared-bucket", "org-b/default").
+		WillReturnRows(sqlmock.NewRows([]string{"credential_id"}).AddRow("org-a/default"))
+
+	err := pg.SaveS3Credential(context.Background(), &models.S3Credential{
+		CredentialID: "org-b/default",
+		Bucket:       "shared-bucket",
+		Provider:     "s3",
+		Region:       "us-east-1",
+		AccessKey:    "ak",
+		SecretKey:    "sk",
+	})
+	if err == nil || err.Error() != `physical bucket "shared-bucket" is already configured under credential "org-a/default"; reuse that credential and add a bucket scope instead` {
+		t.Fatalf("expected duplicate physical bucket error, got %v", err)
 	}
 }
 
