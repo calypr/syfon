@@ -15,7 +15,7 @@ require (
 	github.com/calypr/syfon/apigen v0.2.9
 	github.com/calypr/syfon/client v0.3.1
 	github.com/getkin/kin-openapi v0.142.0
-	github.com/gofiber/fiber/v3 v3.4.0
+	github.com/gofiber/fiber/v3 v3.3.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/go-plugin v1.8.0
