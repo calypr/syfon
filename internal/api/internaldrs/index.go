@@ -81,6 +81,8 @@ func handleInternalBulkOverwriteFiber(om *core.ObjectManager) fiber.Handler {
 		candidates := make([]models.InternalObject, 0, len(req.Records))
 		now := time.Now().UTC()
 		for i, record := range req.Records {
+			record.Organization = &req.Organization
+			record.Project = &req.Project
 			obj, err := core.InternalRecordToInternalObject(record, now)
 			if err != nil {
 				return c.Status(fiber.StatusBadRequest).SendString(fmt.Sprintf("Invalid request body: record[%d] invalid: %v", i, err))

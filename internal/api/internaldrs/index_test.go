@@ -1009,6 +1009,68 @@ func TestHandleInternalBulkOverwrite_ReplacesProjectChecksumSibling(t *testing.T
 	}
 }
 
+func TestHandleInternalBulkOverwrite_AppliesTopLevelScope(t *testing.T) {
+	body := `{"organization":"test","project":"p1","records":[{"did":"source-did","name":"new"}]}`
+	req := httptest.NewRequest(http.MethodPut, "/index/bulk/overwrite", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(indexTestAuthContext(req.Context(), "gen3", true, map[string]map[string]bool{
+		"/programs/test/projects/p1": {"create": true},
+	}))
+	mockDB := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}
+	om := core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
+	rr := doInternalDRSTestRequest(req, om)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if got := mockDB.ObjectAuthz["source-did"]; !slices.Equal(got["test"], []string{"p1"}) {
+		t.Fatalf("expected top-level scope on stored record, got %+v", got)
+	}
+	var response bulkOverwriteResponse
+	if err := json.NewDecoder(rr.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.Processed != 1 || response.Created != 1 {
+		t.Fatalf("unexpected response: %+v", response)
+	}
+}
+
+func TestHandleInternalBulkOverwrite_ValidatesRequest(t *testing.T) {
+	tests := []struct {
+		name   string
+		body   string
+		status int
+	}{
+		{name: "malformed json", body: `{`, status: http.StatusBadRequest},
+		{name: "missing scope", body: `{"records":[{"did":"did-1"}]}`, status: http.StatusBadRequest},
+		{name: "invalid record", body: `{"organization":"test","project":"p1","records":[{"did":""}]}`, status: http.StatusBadRequest},
+	}
+	tooMany := make([]internalapi.InternalRecord, maxInternalBulkOverwrite+1)
+	for i := range tooMany {
+		tooMany[i].Did = fmt.Sprintf("did-%d", i)
+	}
+	payload, err := json.Marshal(bulkOverwriteRequest{Organization: "test", Project: "p1", Records: tooMany})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests = append(tests, struct {
+		name   string
+		body   string
+		status int
+	}{name: "too many records", body: string(payload), status: http.StatusRequestEntityTooLarge})
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPut, "/index/bulk/overwrite", strings.NewReader(tc.body))
+			req.Header.Set("Content-Type", "application/json")
+			rr := doInternalDRSTestRequest(req, core.NewObjectManager(&testutils.MockDatabase{}, &testutils.MockUrlManager{}))
+			if rr.Code != tc.status {
+				t.Fatalf("expected %d, got %d body=%s", tc.status, rr.Code, rr.Body.String())
+			}
+		})
+	}
+}
+
 func TestHandleInternalDeleteByQuery(t *testing.T) {
 	t.Run("requires scope query", func(t *testing.T) {
 		mockDB := &testutils.MockDatabase{}

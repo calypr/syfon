@@ -2,6 +2,8 @@ package core
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/calypr/syfon/apigen/server/drs"
@@ -47,6 +49,72 @@ func TestBulkOverwriteObjects_ReplacesProjectChecksumSibling(t *testing.T) {
 	got := db.Objects["target-did"]
 	if got == nil || got.Name == nil || *got.Name != newName {
 		t.Fatalf("source metadata did not replace target: %+v", got)
+	}
+}
+
+func TestBulkOverwriteObjects_ValidationAndConflicts(t *testing.T) {
+	resource, err := sycommon.ResourcePath("org", "project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sha := "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+	candidate := func(id string) models.InternalObject {
+		return models.InternalObject{
+			DrsObject:      drs.DrsObject{Id: id, Checksums: []drs.Checksum{{Type: "sha256", Checksum: sha}}, ControlledAccess: &[]string{resource}},
+			Authorizations: map[string][]string{"org": {"project"}},
+		}
+	}
+
+	tests := []struct {
+		name       string
+		db         *testutils.MockDatabase
+		candidates []models.InternalObject
+		want       string
+		conflict   bool
+	}{
+		{name: "missing did", db: &testutils.MockDatabase{}, candidates: []models.InternalObject{candidate(" ")}, want: "did is required"},
+		{name: "duplicate source did", db: &testutils.MockDatabase{}, candidates: []models.InternalObject{candidate("same"), candidate("same")}, want: "duplicate source did", conflict: true},
+		{name: "missing target scope", db: &testutils.MockDatabase{}, candidates: []models.InternalObject{{DrsObject: drs.DrsObject{Id: "did"}}}, want: "must include target project"},
+		{
+			name: "did exists outside project",
+			db: &testutils.MockDatabase{
+				Objects:     map[string]*drs.DrsObject{"did": {Id: "did"}},
+				ObjectAuthz: map[string]map[string][]string{"did": {"org": {"other"}}},
+			},
+			candidates: []models.InternalObject{candidate("did")}, want: "outside project", conflict: true,
+		},
+		{
+			name: "ambiguous checksum",
+			db: &testutils.MockDatabase{
+				Objects: map[string]*drs.DrsObject{
+					"one": {Id: "one", Checksums: []drs.Checksum{{Type: "sha256", Checksum: sha}}},
+					"two": {Id: "two", Checksums: []drs.Checksum{{Type: "sha256", Checksum: sha}}},
+				},
+				ObjectAuthz: map[string]map[string][]string{"one": {"org": {"project"}}, "two": {"org": {"project"}}},
+			},
+			candidates: []models.InternalObject{candidate("source")}, want: "multiple records", conflict: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			om := NewObjectManager(&coreTestDB{MockDatabase: tc.db}, &capturingURLManager{})
+			_, err := om.BulkOverwriteObjects(context.Background(), "org", "project", tc.candidates)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("expected error containing %q, got %v", tc.want, err)
+			}
+			if tc.conflict != errors.Is(err, ErrBulkOverwriteConflict) {
+				t.Fatalf("conflict classification = %v, want %v", errors.Is(err, ErrBulkOverwriteConflict), tc.conflict)
+			}
+		})
+	}
+}
+
+func TestBulkOverwriteObjects_EmptyInput(t *testing.T) {
+	om := NewObjectManager(&coreTestDB{MockDatabase: &testutils.MockDatabase{}}, &capturingURLManager{})
+	result, err := om.BulkOverwriteObjects(context.Background(), "", "", nil)
+	if err != nil || result != (BulkOverwriteResult{}) {
+		t.Fatalf("expected empty result, got %+v err=%v", result, err)
 	}
 }
 

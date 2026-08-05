@@ -769,6 +769,28 @@ func TestSqliteDB_BulkOperations(t *testing.T) {
 	}
 }
 
+func TestSqliteDB_RegisterObjectsChunksUsageFlushParameters(t *testing.T) {
+	ctx := context.Background()
+	database, err := NewSqliteDB(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	objects := make([]models.InternalObject, sqliteMaxParams+1)
+	for i := range objects {
+		objects[i] = models.InternalObject{DrsObject: drs.DrsObject{Id: fmt.Sprintf("chunk-%d", i)}}
+	}
+	if err := database.RegisterObjects(ctx, objects); err != nil {
+		t.Fatalf("RegisterObjects should chunk usage flush parameters: %v", err)
+	}
+	got, err := database.GetBulkObjects(ctx, []string{"chunk-0", fmt.Sprintf("chunk-%d", len(objects)-1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected first and last records, got %d", len(got))
+	}
+}
+
 func TestSqliteDB_GetBulkObjects_SplitHydrationPreservesOrderAndDedupes(t *testing.T) {
 	ctx := context.Background()
 	db, _ := NewSqliteDB(":memory:")
