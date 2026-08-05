@@ -981,6 +981,34 @@ func TestHandleInternalBulkCreate_ReportsDeniedCreateResources(t *testing.T) {
 	}
 }
 
+func TestHandleInternalBulkOverwrite_ReplacesProjectChecksumSibling(t *testing.T) {
+	sha := "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+	oldName := "old"
+	mockDB := &testutils.MockDatabase{
+		Objects: map[string]*drs.DrsObject{
+			"target-did": {Id: "target-did", Name: &oldName, Checksums: []drs.Checksum{{Type: "sha256", Checksum: sha}}},
+		},
+		ObjectAuthz: map[string]map[string][]string{"target-did": {"test": {"p1"}}},
+	}
+	body := `{"organization":"test","project":"p1","records":[{"did":"source-did","name":"new","hashes":{"sha256":"` + sha + `"},"controlled_access":["/programs/test/projects/p1"]}]}`
+	req := httptest.NewRequest(http.MethodPut, "/index/bulk/overwrite", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(indexTestAuthContext(req.Context(), "gen3", true, map[string]map[string]bool{
+		"/programs/test/projects/p1": {"update": true},
+	}))
+	om := core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
+	rr := doInternalDRSTestRequest(req, om)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if _, ok := mockDB.Objects["source-did"]; ok {
+		t.Fatal("expected checksum sibling to preserve target DID")
+	}
+	if got := mockDB.Objects["target-did"]; got == nil || got.Name == nil || *got.Name != "new" {
+		t.Fatalf("expected target metadata replacement, got %+v", got)
+	}
+}
+
 func TestHandleInternalDeleteByQuery(t *testing.T) {
 	t.Run("requires scope query", func(t *testing.T) {
 		mockDB := &testutils.MockDatabase{}

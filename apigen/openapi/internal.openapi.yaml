@@ -264,6 +264,36 @@ paths:
           description: Content too large
         '500':
           description: Internal server error
+  /index/bulk/overwrite:
+    put:
+      tags:
+        - internal-index
+      operationId: internalBulkOverwrite
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkOverwriteRequest'
+      responses:
+        '200':
+          description: Source-wins project metadata copy summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkOverwriteResponse'
+        '400':
+          description: Validation error
+        '401':
+          description: Authentication required
+        '403':
+          description: Forbidden
+        '409':
+          description: Ambiguous or conflicting target identity
+        '413':
+          description: Content too large
+        '500':
+          description: Internal server error
   /index/bulk/hashes:
     post:
       tags:
@@ -834,6 +864,41 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/InternalRecord'
+    BulkOverwriteRequest:
+      type: object
+      required:
+        - organization
+        - project
+        - records
+      properties:
+        organization:
+          type: string
+        project:
+          type: string
+        records:
+          type: array
+          maxItems: 1000
+          items:
+            $ref: '#/components/schemas/InternalRecord'
+    BulkOverwriteResponse:
+      type: object
+      required:
+        - processed
+        - created
+        - replaced
+        - did_matched
+        - checksum_matched
+      properties:
+        processed:
+          type: integer
+        created:
+          type: integer
+        replaced:
+          type: integer
+        did_matched:
+          type: integer
+        checksum_matched:
+          type: integer
     BulkHashesRequest:
       type: object
       required:

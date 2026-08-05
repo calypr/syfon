@@ -2,6 +2,7 @@ package internaldrs
 
 import (
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log"
 	"strconv"
@@ -22,6 +23,7 @@ const (
 	defaultInternalListLimit     = 1000
 	maxInternalListLimit         = 10000
 	maxInternalBulkMissingSHA256 = 10000
+	maxInternalBulkOverwrite     = 1000
 )
 
 func RegisterInternalRoutes(router fiber.Router, om *core.ObjectManager) {
@@ -40,12 +42,67 @@ func RegisterInternalRoutes(router fiber.Router, om *core.ObjectManager) {
 	router.Post(common.RouteInternalBulkSHA256, handleInternalBulkSHA256ValidityFiber(om))
 	router.Post(common.RouteInternalBulkSHA256Missing, handleInternalBulkMissingSHA256Fiber(om))
 	router.Post(common.RouteInternalBulkCreate, handleInternalBulkCreateFiber(om))
+	router.Put("/index/bulk/overwrite", handleInternalBulkOverwriteFiber(om))
 	router.Post(common.RouteInternalBulkDocs, handleInternalBulkDocumentsFiber(om))
 	router.Post(common.RouteInternalBulkDeleteHashes, handleInternalBulkDeleteFiber(om))
 	router.Post(common.RouteInternalRepairScopeAudit, handleInternalScopeRepairAuditFiber(om))
 	router.Post(common.RouteInternalRepairScopeApply, handleInternalScopeRepairApplyFiber(om))
 
 	registerInternalTransferRoutes(router, om)
+}
+
+type bulkOverwriteRequest struct {
+	Organization string                       `json:"organization"`
+	Project      string                       `json:"project"`
+	Records      []internalapi.InternalRecord `json:"records"`
+}
+
+type bulkOverwriteResponse struct {
+	Processed       int `json:"processed"`
+	Created         int `json:"created"`
+	Replaced        int `json:"replaced"`
+	DIDMatched      int `json:"did_matched"`
+	ChecksumMatched int `json:"checksum_matched"`
+}
+
+func handleInternalBulkOverwriteFiber(om *core.ObjectManager) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		var req bulkOverwriteRequest
+		if err := c.Bind().JSON(&req); err != nil {
+			return c.Status(fiber.StatusBadRequest).SendString("Invalid request body")
+		}
+		if strings.TrimSpace(req.Organization) == "" || strings.TrimSpace(req.Project) == "" || len(req.Records) == 0 {
+			return c.Status(fiber.StatusBadRequest).SendString("Invalid request body: organization, project, and records are required")
+		}
+		if len(req.Records) > maxInternalBulkOverwrite {
+			return c.Status(fiber.StatusRequestEntityTooLarge).SendString(fmt.Sprintf("too many records: maximum is %d", maxInternalBulkOverwrite))
+		}
+
+		candidates := make([]models.InternalObject, 0, len(req.Records))
+		now := time.Now().UTC()
+		for i, record := range req.Records {
+			obj, err := core.InternalRecordToInternalObject(record, now)
+			if err != nil {
+				return c.Status(fiber.StatusBadRequest).SendString(fmt.Sprintf("Invalid request body: record[%d] invalid: %v", i, err))
+			}
+			candidates = append(candidates, obj)
+		}
+
+		result, err := om.BulkOverwriteObjects(c.Context(), req.Organization, req.Project, candidates)
+		if err != nil {
+			if errors.Is(err, core.ErrBulkOverwriteConflict) {
+				return c.Status(fiber.StatusConflict).SendString(err.Error())
+			}
+			return apiutil.HandleError(c, err)
+		}
+		return c.JSON(bulkOverwriteResponse{
+			Processed:       len(candidates),
+			Created:         result.Created,
+			Replaced:        result.Replaced,
+			DIDMatched:      result.DIDMatched,
+			ChecksumMatched: result.ChecksumMatched,
+		})
+	}
 }
 
 func handleInternalBulkMissingSHA256Fiber(om *core.ObjectManager) fiber.Handler {

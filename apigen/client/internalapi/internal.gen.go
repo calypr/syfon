@@ -53,6 +53,22 @@ type BulkMissingSHA256Response struct {
 	MissingSha256 []string `json:"missing_sha256"`
 }
 
+// BulkOverwriteRequest defines model for BulkOverwriteRequest.
+type BulkOverwriteRequest struct {
+	Organization string           `json:"organization"`
+	Project      string           `json:"project"`
+	Records      []InternalRecord `json:"records"`
+}
+
+// BulkOverwriteResponse defines model for BulkOverwriteResponse.
+type BulkOverwriteResponse struct {
+	ChecksumMatched int `json:"checksum_matched"`
+	Created         int `json:"created"`
+	DidMatched      int `json:"did_matched"`
+	Processed       int `json:"processed"`
+	Replaced        int `json:"replaced"`
+}
+
 // BulkSHA256ValidityRequest defines model for BulkSHA256ValidityRequest.
 type BulkSHA256ValidityRequest struct {
 	Hashes *[]string `json:"hashes,omitempty"`
@@ -351,6 +367,9 @@ type InternalBulkDocumentsJSONRequestBody = BulkDocumentsRequest
 // InternalBulkHashesJSONRequestBody defines body for InternalBulkHashes for application/json ContentType.
 type InternalBulkHashesJSONRequestBody = BulkHashesRequest
 
+// InternalBulkOverwriteJSONRequestBody defines body for InternalBulkOverwrite for application/json ContentType.
+type InternalBulkOverwriteJSONRequestBody = BulkOverwriteRequest
+
 // InternalBulkMissingSHA256JSONRequestBody defines body for InternalBulkMissingSHA256 for application/json ContentType.
 type InternalBulkMissingSHA256JSONRequestBody = BulkMissingSHA256Request
 
@@ -575,6 +594,11 @@ type ClientInterface interface {
 	InternalBulkHashesWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	InternalBulkHashes(ctx context.Context, body InternalBulkHashesJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// InternalBulkOverwriteWithBody request with any body
+	InternalBulkOverwriteWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	InternalBulkOverwrite(ctx context.Context, body InternalBulkOverwriteJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// InternalBulkMissingSHA256WithBody request with any body
 	InternalBulkMissingSHA256WithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -953,6 +977,30 @@ func (c *Client) InternalBulkHashesWithBody(ctx context.Context, contentType str
 
 func (c *Client) InternalBulkHashes(ctx context.Context, body InternalBulkHashesJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewInternalBulkHashesRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) InternalBulkOverwriteWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewInternalBulkOverwriteRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) InternalBulkOverwrite(ctx context.Context, body InternalBulkOverwriteJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewInternalBulkOverwriteRequest(c.Server, body)
 	if err != nil {
 		return nil, err
 	}
@@ -2150,6 +2198,46 @@ func NewInternalBulkHashesRequestWithBody(server string, contentType string, bod
 	return req, nil
 }
 
+// NewInternalBulkOverwriteRequest calls the generic InternalBulkOverwrite builder with application/json body
+func NewInternalBulkOverwriteRequest(server string, body InternalBulkOverwriteJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewInternalBulkOverwriteRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewInternalBulkOverwriteRequestWithBody generates requests for InternalBulkOverwrite with any type of body
+func NewInternalBulkOverwriteRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/index/bulk/overwrite")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("PUT", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewInternalBulkMissingSHA256Request calls the generic InternalBulkMissingSHA256 builder with application/json body
 func NewInternalBulkMissingSHA256Request(server string, body InternalBulkMissingSHA256JSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -2512,6 +2600,11 @@ type ClientWithResponsesInterface interface {
 	InternalBulkHashesWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*InternalBulkHashesResponse, error)
 
 	InternalBulkHashesWithResponse(ctx context.Context, body InternalBulkHashesJSONRequestBody, reqEditors ...RequestEditorFn) (*InternalBulkHashesResponse, error)
+
+	// InternalBulkOverwriteWithBodyWithResponse request with any body
+	InternalBulkOverwriteWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*InternalBulkOverwriteResponse, error)
+
+	InternalBulkOverwriteWithResponse(ctx context.Context, body InternalBulkOverwriteJSONRequestBody, reqEditors ...RequestEditorFn) (*InternalBulkOverwriteResponse, error)
 
 	// InternalBulkMissingSHA256WithBodyWithResponse request with any body
 	InternalBulkMissingSHA256WithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*InternalBulkMissingSHA256Response, error)
@@ -2936,6 +3029,28 @@ func (r InternalBulkHashesResponse) StatusCode() int {
 	return 0
 }
 
+type InternalBulkOverwriteResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *BulkOverwriteResponse
+}
+
+// Status returns HTTPResponse.Status
+func (r InternalBulkOverwriteResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r InternalBulkOverwriteResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type InternalBulkMissingSHA256Response struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -3323,6 +3438,23 @@ func (c *ClientWithResponses) InternalBulkHashesWithResponse(ctx context.Context
 		return nil, err
 	}
 	return ParseInternalBulkHashesResponse(rsp)
+}
+
+// InternalBulkOverwriteWithBodyWithResponse request with arbitrary body returning *InternalBulkOverwriteResponse
+func (c *ClientWithResponses) InternalBulkOverwriteWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*InternalBulkOverwriteResponse, error) {
+	rsp, err := c.InternalBulkOverwriteWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseInternalBulkOverwriteResponse(rsp)
+}
+
+func (c *ClientWithResponses) InternalBulkOverwriteWithResponse(ctx context.Context, body InternalBulkOverwriteJSONRequestBody, reqEditors ...RequestEditorFn) (*InternalBulkOverwriteResponse, error) {
+	rsp, err := c.InternalBulkOverwrite(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseInternalBulkOverwriteResponse(rsp)
 }
 
 // InternalBulkMissingSHA256WithBodyWithResponse request with arbitrary body returning *InternalBulkMissingSHA256Response
@@ -3866,6 +3998,32 @@ func ParseInternalBulkHashesResponse(rsp *http.Response) (*InternalBulkHashesRes
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest ListRecordsResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseInternalBulkOverwriteResponse parses an HTTP response from a InternalBulkOverwriteWithResponse call
+func ParseInternalBulkOverwriteResponse(rsp *http.Response) (*InternalBulkOverwriteResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &InternalBulkOverwriteResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest BulkOverwriteResponse
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

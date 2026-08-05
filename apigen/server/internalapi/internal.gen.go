@@ -51,6 +51,22 @@ type BulkMissingSHA256Response struct {
 	MissingSha256 []string `json:"missing_sha256"`
 }
 
+// BulkOverwriteRequest defines model for BulkOverwriteRequest.
+type BulkOverwriteRequest struct {
+	Organization string           `json:"organization"`
+	Project      string           `json:"project"`
+	Records      []InternalRecord `json:"records"`
+}
+
+// BulkOverwriteResponse defines model for BulkOverwriteResponse.
+type BulkOverwriteResponse struct {
+	ChecksumMatched int `json:"checksum_matched"`
+	Created         int `json:"created"`
+	DidMatched      int `json:"did_matched"`
+	Processed       int `json:"processed"`
+	Replaced        int `json:"replaced"`
+}
+
 // BulkSHA256ValidityRequest defines model for BulkSHA256ValidityRequest.
 type BulkSHA256ValidityRequest struct {
 	Hashes *[]string `json:"hashes,omitempty"`
@@ -349,6 +365,9 @@ type InternalBulkDocumentsJSONRequestBody = BulkDocumentsRequest
 // InternalBulkHashesJSONRequestBody defines body for InternalBulkHashes for application/json ContentType.
 type InternalBulkHashesJSONRequestBody = BulkHashesRequest
 
+// InternalBulkOverwriteJSONRequestBody defines body for InternalBulkOverwrite for application/json ContentType.
+type InternalBulkOverwriteJSONRequestBody = BulkOverwriteRequest
+
 // InternalBulkMissingSHA256JSONRequestBody defines body for InternalBulkMissingSHA256 for application/json ContentType.
 type InternalBulkMissingSHA256JSONRequestBody = BulkMissingSHA256Request
 
@@ -479,6 +498,9 @@ type ServerInterface interface {
 
 	// (POST /index/bulk/hashes)
 	InternalBulkHashes(c fiber.Ctx) error
+
+	// (PUT /index/bulk/overwrite)
+	InternalBulkOverwrite(c fiber.Ctx) error
 
 	// (POST /index/bulk/sha256/missing)
 	InternalBulkMissingSHA256(c fiber.Ctx) error
@@ -928,6 +950,12 @@ func (siw *ServerInterfaceWrapper) InternalBulkHashes(c fiber.Ctx) error {
 	return siw.Handler.InternalBulkHashes(c)
 }
 
+// InternalBulkOverwrite operation middleware
+func (siw *ServerInterfaceWrapper) InternalBulkOverwrite(c fiber.Ctx) error {
+
+	return siw.Handler.InternalBulkOverwrite(c)
+}
+
 // InternalBulkMissingSHA256 operation middleware
 func (siw *ServerInterfaceWrapper) InternalBulkMissingSHA256(c fiber.Ctx) error {
 
@@ -1056,6 +1084,8 @@ func RegisterHandlersWithOptions(router fiber.Router, si ServerInterface, option
 	router.Post(options.BaseURL+"/index/bulk/documents", wrapper.InternalBulkDocuments)
 
 	router.Post(options.BaseURL+"/index/bulk/hashes", wrapper.InternalBulkHashes)
+
+	router.Put(options.BaseURL+"/index/bulk/overwrite", wrapper.InternalBulkOverwrite)
 
 	router.Post(options.BaseURL+"/index/bulk/sha256/missing", wrapper.InternalBulkMissingSHA256)
 
@@ -2020,6 +2050,71 @@ func (response InternalBulkHashes500Response) VisitInternalBulkHashesResponse(ct
 	return nil
 }
 
+type InternalBulkOverwriteRequestObject struct {
+	Body *InternalBulkOverwriteJSONRequestBody
+}
+
+type InternalBulkOverwriteResponseObject interface {
+	VisitInternalBulkOverwriteResponse(ctx fiber.Ctx) error
+}
+
+type InternalBulkOverwrite200JSONResponse BulkOverwriteResponse
+
+func (response InternalBulkOverwrite200JSONResponse) VisitInternalBulkOverwriteResponse(ctx fiber.Ctx) error {
+	ctx.Response().Header.Set("Content-Type", "application/json")
+	ctx.Status(200)
+
+	return ctx.JSON(&response)
+}
+
+type InternalBulkOverwrite400Response struct {
+}
+
+func (response InternalBulkOverwrite400Response) VisitInternalBulkOverwriteResponse(ctx fiber.Ctx) error {
+	ctx.Status(400)
+	return nil
+}
+
+type InternalBulkOverwrite401Response struct {
+}
+
+func (response InternalBulkOverwrite401Response) VisitInternalBulkOverwriteResponse(ctx fiber.Ctx) error {
+	ctx.Status(401)
+	return nil
+}
+
+type InternalBulkOverwrite403Response struct {
+}
+
+func (response InternalBulkOverwrite403Response) VisitInternalBulkOverwriteResponse(ctx fiber.Ctx) error {
+	ctx.Status(403)
+	return nil
+}
+
+type InternalBulkOverwrite409Response struct {
+}
+
+func (response InternalBulkOverwrite409Response) VisitInternalBulkOverwriteResponse(ctx fiber.Ctx) error {
+	ctx.Status(409)
+	return nil
+}
+
+type InternalBulkOverwrite413Response struct {
+}
+
+func (response InternalBulkOverwrite413Response) VisitInternalBulkOverwriteResponse(ctx fiber.Ctx) error {
+	ctx.Status(413)
+	return nil
+}
+
+type InternalBulkOverwrite500Response struct {
+}
+
+func (response InternalBulkOverwrite500Response) VisitInternalBulkOverwriteResponse(ctx fiber.Ctx) error {
+	ctx.Status(500)
+	return nil
+}
+
 type InternalBulkMissingSHA256RequestObject struct {
 	Body *InternalBulkMissingSHA256JSONRequestBody
 }
@@ -2323,6 +2418,9 @@ type StrictServerInterface interface {
 
 	// (POST /index/bulk/hashes)
 	InternalBulkHashes(ctx context.Context, request InternalBulkHashesRequestObject) (InternalBulkHashesResponseObject, error)
+
+	// (PUT /index/bulk/overwrite)
+	InternalBulkOverwrite(ctx context.Context, request InternalBulkOverwriteRequestObject) (InternalBulkOverwriteResponseObject, error)
 
 	// (POST /index/bulk/sha256/missing)
 	InternalBulkMissingSHA256(ctx context.Context, request InternalBulkMissingSHA256RequestObject) (InternalBulkMissingSHA256ResponseObject, error)
@@ -2888,6 +2986,37 @@ func (sh *strictHandler) InternalBulkHashes(ctx fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	} else if validResponse, ok := response.(InternalBulkHashesResponseObject); ok {
 		if err := validResponse.VisitInternalBulkHashesResponse(ctx); err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, err.Error())
+		}
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// InternalBulkOverwrite operation middleware
+func (sh *strictHandler) InternalBulkOverwrite(ctx fiber.Ctx) error {
+	var request InternalBulkOverwriteRequestObject
+
+	var body InternalBulkOverwriteJSONRequestBody
+	if err := ctx.Bind().Body(&body); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	}
+	request.Body = &body
+
+	handler := func(ctx fiber.Ctx, request interface{}) (interface{}, error) {
+		return sh.ssi.InternalBulkOverwrite(ctx.Context(), request.(InternalBulkOverwriteRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "InternalBulkOverwrite")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	} else if validResponse, ok := response.(InternalBulkOverwriteResponseObject); ok {
+		if err := validResponse.VisitInternalBulkOverwriteResponse(ctx); err != nil {
 			return fiber.NewError(fiber.StatusBadRequest, err.Error())
 		}
 	} else if response != nil {
