@@ -111,15 +111,17 @@ type internalInspectObjectBulkItem struct {
 }
 
 type internalInspectProjectBucketSummary struct {
-	Provider    string `json:"provider"`
-	Bucket      string `json:"bucket"`
-	Prefix      string `json:"prefix,omitempty"`
-	ObjectURL   string `json:"object_url,omitempty"`
-	Exists      bool   `json:"exists"`
-	ObjectCount int    `json:"object_count"`
-	TotalBytes  int64  `json:"total_bytes"`
-	ComputedAt  string `json:"computed_at"`
-	Mode        string `json:"mode"`
+	Provider          string `json:"provider"`
+	Bucket            string `json:"bucket"`
+	Prefix            string `json:"prefix,omitempty"`
+	ObjectURL         string `json:"object_url,omitempty"`
+	Exists            bool   `json:"exists"`
+	ObjectCount       int    `json:"object_count"`
+	TotalBytes        int64  `json:"total_bytes"`
+	ComputedAt        string `json:"computed_at"`
+	Mode              string `json:"mode"`
+	InventoryComplete bool   `json:"inventory_complete"`
+	InventoryWarning  string `json:"inventory_warning,omitempty"`
 }
 
 type internalInspectProjectBucketItem struct {
@@ -534,14 +536,16 @@ func bulkListInspectItemFromCore(result core.StorageListValidationResult) intern
 
 func projectBucketSummaryFromCore(summary core.ProjectStorageSummary) *internalInspectProjectBucketSummary {
 	out := &internalInspectProjectBucketSummary{
-		Provider:    summary.Provider,
-		Bucket:      summary.Bucket,
-		Prefix:      summary.Prefix,
-		ObjectURL:   summary.ObjectURL,
-		Exists:      summary.Exists,
-		ObjectCount: summary.ObjectCount,
-		TotalBytes:  summary.TotalBytes,
-		Mode:        string(summary.Mode),
+		Provider:          summary.Provider,
+		Bucket:            summary.Bucket,
+		Prefix:            summary.Prefix,
+		ObjectURL:         summary.ObjectURL,
+		Exists:            summary.Exists,
+		ObjectCount:       summary.ObjectCount,
+		TotalBytes:        summary.TotalBytes,
+		Mode:              string(summary.Mode),
+		InventoryComplete: summary.InventoryComplete,
+		InventoryWarning:  summary.InventoryWarning,
 	}
 	if !summary.ComputedAt.IsZero() {
 		out.ComputedAt = summary.ComputedAt.Format(time.RFC3339)
@@ -567,7 +571,7 @@ func projectBucketInventoryResponseFromCore(result *core.ProjectStorageInspectRe
 			SizeBytes:         item.SizeBytes,
 			MetaSHA256:        item.MetaSHA256,
 			ETag:              item.ETag,
-			InventoryComplete: true,
+			InventoryComplete: result.Summary.InventoryComplete,
 		}
 		if !item.LastModTime.IsZero() {
 			row.LastModTime = item.LastModTime.Format(time.RFC3339)

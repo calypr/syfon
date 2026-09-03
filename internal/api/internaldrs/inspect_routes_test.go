@@ -425,6 +425,53 @@ func TestHandleInternalInspectProjectBucketInventoryListsProjectScope(t *testing
 	}
 }
 
+func TestHandleInternalInspectProjectBucketInventoryReturnsPartialListing(t *testing.T) {
+	db := &testutils.MockDatabase{
+		Credentials: map[string]models.S3Credential{
+			"cred-1": {CredentialID: "cred-1", Bucket: "bucket-a", Provider: "s3"},
+		},
+		BucketScopes: map[string]models.BucketScope{
+			"syfon|":    {Organization: "syfon", Bucket: "bucket-a", CredentialID: "cred-1", PathPrefix: "program-root"},
+			"syfon|e2e": {Organization: "syfon", ProjectID: "e2e", Bucket: "bucket-a", CredentialID: "cred-1", PathPrefix: "project-root"},
+		},
+	}
+	om := core.NewObjectManager(db, &testutils.MockUrlManager{})
+	om.SetS3PrefixListerWithOptions(func(context.Context, models.S3Credential, string, string, core.StoragePrefixListOptions) ([]core.StorageBucketObject, error) {
+		return []core.StorageBucketObject{{
+				Provider:  "s3",
+				Bucket:    "bucket-a",
+				Key:       "program-root/project-root/observed.bin",
+				Path:      "observed.bin",
+				SizeBytes: 17,
+			}}, &core.StorageInspectError{
+				Kind:    core.StorageInspectListingIncomplete,
+				Message: "terminal replay returned different page content",
+			}
+	})
+
+	body, _ := json.Marshal(internalInspectProjectBucketRequest{Organization: "syfon", Project: "e2e"})
+	req := withTestAuthzContext(httptest.NewRequest(http.MethodPost, "/data/inspect/project-bucket/inventory", bytes.NewBuffer(body)), "gen3", map[string]map[string]bool{
+		"/organization/syfon/project/e2e": {"read": true},
+	})
+	rr := doInternalDRSTestRequest(req, om)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected partial inventory to return 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp internalInspectProjectBucketResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Summary == nil || resp.Summary.InventoryComplete {
+		t.Fatalf("expected incomplete inventory summary, got %+v", resp.Summary)
+	}
+	if !strings.Contains(resp.Summary.InventoryWarning, "terminal replay") {
+		t.Fatalf("expected listing warning to be preserved, got %+v", resp.Summary)
+	}
+	if len(resp.Items) != 1 || resp.Items[0].InventoryComplete {
+		t.Fatalf("expected observed partial item, got %+v", resp.Items)
+	}
+}
+
 func TestHandleInternalInspectObjectBulkListValidatesExactKeyWithoutHead(t *testing.T) {
 	db := &testutils.MockDatabase{
 		Credentials: map[string]models.S3Credential{
