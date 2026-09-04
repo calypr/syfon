@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -487,12 +488,15 @@ func TestHandleInternalInspectObjectBulkListValidatesExactKeyWithoutHead(t *test
 		inspectCalls++
 		return nil, nil
 	})
+	var listedPrefixesMu sync.Mutex
 	var listedPrefixes []string
 	om.SetS3PrefixListerWithOptions(func(ctx context.Context, cred models.S3Credential, bucket string, prefix string, options core.StoragePrefixListOptions) ([]core.StorageBucketObject, error) {
 		if bucket != "bucket-a" || !options.ExactPrefix || options.MaxKeys != 1 || options.IncludeHead {
 			t.Fatalf("unexpected bulk-list options bucket=%q options=%+v", bucket, options)
 		}
+		listedPrefixesMu.Lock()
 		listedPrefixes = append(listedPrefixes, prefix)
+		listedPrefixesMu.Unlock()
 		switch prefix {
 		case "project-root/file.bin":
 			return []core.StorageBucketObject{{Provider: "s3", Bucket: bucket, Key: "project-root/file.bin", Path: "file.bin", SizeBytes: 17, ETag: "etag-1", LastModTime: time.Date(2026, 7, 1, 1, 2, 3, 0, time.UTC)}}, nil
@@ -527,7 +531,10 @@ func TestHandleInternalInspectObjectBulkListValidatesExactKeyWithoutHead(t *test
 	if resp.Items[1].Exists || resp.Items[1].Status != "not_found" {
 		t.Fatalf("expected prefix child not to count as exact key, got %+v", resp.Items[1])
 	}
-	if len(listedPrefixes) != 2 {
+	listedPrefixesMu.Lock()
+	listedPrefixCount := len(listedPrefixes)
+	listedPrefixesMu.Unlock()
+	if listedPrefixCount != 2 {
 		t.Fatalf("expected two LIST calls, got %+v", listedPrefixes)
 	}
 	if inspectCalls != 0 {
