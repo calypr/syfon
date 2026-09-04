@@ -357,27 +357,40 @@ func exerciseAllClientCommands(t *testing.T, serverURL string, bucketCfg bucketC
 	}
 
 	rmOut, err := executeRootCommand(t, "--server", serverURL, "rm", "--did", uploadedID)
-	if err != nil {
-		t.Fatalf("rm(uploaded) failed: %v output=%s", err, rmOut)
+	if err == nil || !strings.Contains(err.Error(), "409") {
+		t.Fatalf("rm(uploaded) should reject non-atomic storage deletion: err=%v output=%s", err, rmOut)
 	}
-	if !strings.Contains(rmOut, "removed "+uploadedID) {
-		t.Fatalf("unexpected rm output for uploaded did: %s", rmOut)
+	if !strings.Contains(err.Error(), "physical storage deletion is not atomic") {
+		t.Fatalf("rm(uploaded) returned the wrong conflict: %v", err)
 	}
 
 	rmOut2, err := executeRootCommand(t, "--server", serverURL, "rm", "--did", addURLDID)
-	if err != nil {
-		t.Fatalf("rm(add-url) failed: %v output=%s", err, rmOut2)
+	if err == nil || !strings.Contains(err.Error(), "409") {
+		t.Fatalf("rm(add-url) should reject non-atomic storage deletion: err=%v output=%s", err, rmOut2)
 	}
-	if !strings.Contains(rmOut2, "removed "+addURLDID) {
-		t.Fatalf("unexpected rm output for add-url did: %s", rmOut2)
+	if !strings.Contains(err.Error(), "physical storage deletion is not atomic") {
+		t.Fatalf("rm(add-url) returned the wrong conflict: %v", err)
 	}
 
 	lsAfterRm, err := executeRootCommand(t, "--server", serverURL, "ls")
 	if err != nil {
 		t.Fatalf("ls after rm failed: %v output=%s", err, lsAfterRm)
 	}
-	if strings.Contains(lsAfterRm, fileName) || strings.Contains(lsAfterRm, addURLDID) {
-		t.Fatalf("ls output still includes removed records: %s", lsAfterRm)
+	if !strings.Contains(lsAfterRm, fileName) || !strings.Contains(lsAfterRm, addURLDID) {
+		t.Fatalf("rejected rm removed catalog records: %s", lsAfterRm)
+	}
+
+	afterRmPath := filepath.Join(t.TempDir(), "provider-after-rejected-rm.txt")
+	afterRmOut, err := executeRootCommand(t, "--server", serverURL, "download", "--did", uploadedID, "--out", afterRmPath)
+	if err != nil {
+		t.Fatalf("download after rejected rm failed: %v output=%s", err, afterRmOut)
+	}
+	afterRmData, err := os.ReadFile(afterRmPath)
+	if err != nil {
+		t.Fatalf("read download after rejected rm: %v", err)
+	}
+	if !bytes.Equal(afterRmData, srcData) {
+		t.Fatalf("rejected rm modified provider bytes")
 	}
 
 	bucketRemoveOut, err := executeRootCommand(t, "--server", serverURL, "bucket", "remove", bucketName)
