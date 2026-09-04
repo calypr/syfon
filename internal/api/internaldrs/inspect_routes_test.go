@@ -184,6 +184,69 @@ func TestHandleInternalInspectProjectRecords(t *testing.T) {
 	}
 }
 
+func TestHandleInternalInspectProjectRecordsPreservesLegacyDuplicatePhysicalRows(t *testing.T) {
+	body, _ := json.Marshal(internalInspectProjectRecordsRequest{Organization: "syfon", Project: "e2e"})
+	checksum := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	created := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
+	newer := created.Add(time.Minute)
+	urlFor := func(url string) *struct {
+		Headers *[]string `json:"headers,omitempty"`
+		Url     string    `json:"url"`
+	} {
+		return &struct {
+			Headers *[]string `json:"headers,omitempty"`
+			Url     string    `json:"url"`
+		}{Url: url}
+	}
+	db := &testutils.MockDatabase{
+		Objects: map[string]*drs.DrsObject{
+			"physical-a": {
+				Id: "physical-a", Checksums: []drs.Checksum{{Type: "sha256", Checksum: checksum}},
+				CreatedTime: created, UpdatedTime: &created,
+				AccessMethods: &[]drs.AccessMethod{{Type: drs.AccessMethodTypeS3, AccessUrl: urlFor("s3://bucket/physical-a")}},
+			},
+			"physical-b": {
+				Id: "physical-b", Checksums: []drs.Checksum{{Type: "sha256", Checksum: checksum}},
+				CreatedTime: newer, UpdatedTime: &newer,
+				AccessMethods: &[]drs.AccessMethod{{Type: drs.AccessMethodTypeS3, AccessUrl: urlFor("s3://bucket/physical-b")}},
+			},
+		},
+		ObjectAuthz: map[string]map[string][]string{
+			"physical-a": {"syfon": {"e2e"}},
+			"physical-b": {"syfon": {"e2e"}},
+		},
+	}
+	om := core.NewObjectManager(db, &testutils.MockUrlManager{})
+	req := withTestAuthzContext(httptest.NewRequest(http.MethodPost, "/data/inspect/project-records", bytes.NewBuffer(body)), "gen3", map[string]map[string]bool{"/organization/syfon/project/e2e": {"read": true}})
+	rr := doInternalDRSTestRequest(req, om)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp internalInspectProjectRecordsResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp.Items) != 2 {
+		t.Fatalf("expected both physical rows, got %d: %+v", len(resp.Items), resp.Items)
+	}
+	byID := make(map[string]internalInspectProjectRecordItem, len(resp.Items))
+	for _, item := range resp.Items {
+		byID[item.ObjectID] = item
+	}
+	for id, wantURL := range map[string]string{
+		"physical-a": "s3://bucket/physical-a",
+		"physical-b": "s3://bucket/physical-b",
+	} {
+		item, ok := byID[id]
+		if !ok {
+			t.Fatalf("missing physical row %q: %+v", id, resp.Items)
+		}
+		if len(item.AccessURLs) != 1 || item.AccessURLs[0] != wantURL {
+			t.Fatalf("physical row %q returned access URLs %v, want %q", id, item.AccessURLs, wantURL)
+		}
+	}
+}
+
 func TestProjectRecordMatchesAnyPathPrefixAvoidsFalsePrefixMatches(t *testing.T) {
 	record := internalInspectProjectRecordItem{
 		AccessURLs: []string{"s3://bucket-a/project-root/CONFIG/a.json"},

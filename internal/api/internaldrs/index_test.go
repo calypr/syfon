@@ -1356,6 +1356,9 @@ func TestRegisterInternalIndexRoutes_LegacyAliases(t *testing.T) {
 			body, _ := io.ReadAll(resp.Body)
 			t.Fatalf("expected 200, got %d body=%s", resp.StatusCode, string(body))
 		}
+		if got := resp.Header.Get("Cache-Control"); got != "no-store" {
+			t.Fatalf("expected object detail response to disable caching, got %q", got)
+		}
 	})
 
 	t.Run("bulk alias /index/bulk/hashes", func(t *testing.T) {

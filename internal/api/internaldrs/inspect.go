@@ -358,7 +358,7 @@ func handleInternalInspectProjectRecordsFiber(om *core.ObjectManager) fiber.Hand
 		if organization == "" || project == "" {
 			return apiutil.Reject(c, fiber.StatusBadRequest, "organization and project are required")
 		}
-		objects, err := om.ListObjectsByScope(c.Context(), organization, project, "read")
+		objects, err := om.ListPhysicalObjectsByScope(c.Context(), organization, project, "read")
 		if err != nil {
 			return apiutil.HandleError(c, err)
 		}

@@ -162,6 +162,7 @@ func normalizeMissingSHA256(values []string) ([]string, error) {
 
 func handleInternalGetFiber(om *core.ObjectManager) fiber.Handler {
 	return func(c fiber.Ctx) error {
+		c.Set(fiber.HeaderCacheControl, "no-store")
 		id := c.Params("id")
 		obj, err := om.GetObject(c.Context(), id, "read")
 		if err != nil {

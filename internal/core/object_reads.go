@@ -469,6 +469,21 @@ func (m *ObjectManager) ListObjectsByScope(ctx context.Context, organization, pr
 	return m.PrepareScopedObjects(ctx, objects, organization, project, requiredMethod)
 }
 
+// ListPhysicalObjectsByScope returns each stored object row in a project scope.
+// Callers that repair physical access methods need the row identity and methods
+// without the same-checksum canonical merge used by normal reads.
+func (m *ObjectManager) ListPhysicalObjectsByScope(ctx context.Context, organization, project, requiredMethod string) ([]models.InternalObject, error) {
+	ids, err := m.db.ListObjectIDsByScope(ctx, organization, project)
+	if err != nil {
+		return nil, err
+	}
+	objects, err := m.db.GetBulkObjects(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	return m.filterObjectsByMethod(ctx, objects, requiredMethod), nil
+}
+
 // ListMissingScopedSHA256 returns the requested SHA-256 checksums that are not
 // registered for the given project. It deliberately uses the indexed checksum
 // lookup and does not hydrate complete DRS records or access methods.
