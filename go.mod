@@ -1,6 +1,6 @@
 module github.com/calypr/syfon
 
-go 1.26.5
+go 1.26.6
 
 require (
 	cloud.google.com/go/storage v1.63.1
@@ -14,7 +14,7 @@ require (
 	github.com/aws/smithy-go v1.27.3
 	github.com/calypr/syfon/apigen v0.2.8
 	github.com/calypr/syfon/client v0.3.0
-	github.com/getkin/kin-openapi v0.142.0
+	github.com/getkin/kin-openapi v0.144.0
 	github.com/gofiber/fiber/v3 v3.4.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
