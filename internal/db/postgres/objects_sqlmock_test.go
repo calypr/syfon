@@ -431,8 +431,6 @@ func TestUpdateObjectAccessMethods(t *testing.T) {
 	mock.ExpectExec(regexp.QuoteMeta("SELECT pg_advisory_xact_lock(hashtextextended('syfon-content-write', 0))")).WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT id FROM drs_object WHERE id = $1")).
 		WithArgs("obj-1").WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("obj-1"))
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT DISTINCT replace(lower(trim(checksum)), 'sha256:', '')")).
-		WithArgs("obj-1").WillReturnRows(sqlmock.NewRows([]string{"checksum"}))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT resource FROM drs_object_controlled_access WHERE object_id = $1")).
 		WithArgs("obj-1").WillReturnRows(sqlmock.NewRows([]string{"resource"}))
 	mock.ExpectExec(regexp.QuoteMeta("DELETE FROM drs_object_access_method WHERE object_id = $1")).
@@ -468,8 +466,6 @@ func TestBulkUpdateAccessMethods(t *testing.T) {
 	for _, id := range []string{"obj-1", "obj-2"} {
 		mock.ExpectQuery(regexp.QuoteMeta("SELECT id FROM drs_object WHERE id = $1")).
 			WithArgs(id).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(id))
-		mock.ExpectQuery(regexp.QuoteMeta("SELECT DISTINCT replace(lower(trim(checksum)), 'sha256:', '')")).
-			WithArgs(id).WillReturnRows(sqlmock.NewRows([]string{"checksum"}))
 		mock.ExpectQuery(regexp.QuoteMeta("SELECT resource FROM drs_object_controlled_access WHERE object_id = $1")).
 			WithArgs(id).WillReturnRows(sqlmock.NewRows([]string{"resource"}))
 	}

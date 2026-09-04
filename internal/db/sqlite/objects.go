@@ -1754,9 +1754,6 @@ func (db *SqliteDB) UpdateObjectAccessMethods(ctx context.Context, objectID stri
 	if !found {
 		return fmt.Errorf("%w: object not found", common.ErrNotFound)
 	}
-	if err := sqliteEnsureNoLegacyDuplicateTx(ctx, tx, canonicalID); err != nil {
-		return err
-	}
 	if err := sqliteRequireContentMethodTx(ctx, tx, canonicalID, "update"); err != nil {
 		return err
 	}
@@ -1916,9 +1913,6 @@ func (db *SqliteDB) BulkUpdateAccessMethods(ctx context.Context, updates map[str
 		}
 		if !found {
 			return common.ErrNotFound
-		}
-		if err := sqliteEnsureNoLegacyDuplicateTx(ctx, tx, canonicalID); err != nil {
-			return err
 		}
 		if err := sqliteRequireContentMethodTx(ctx, tx, canonicalID, "update"); err != nil {
 			return err

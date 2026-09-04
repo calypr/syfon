@@ -1506,9 +1506,6 @@ func (db *PostgresDB) UpdateObjectAccessMethods(ctx context.Context, objectID st
 	if !found {
 		return fmt.Errorf("%w: object not found", common.ErrNotFound)
 	}
-	if err := postgresEnsureNoLegacyDuplicateTx(ctx, tx, canonicalID); err != nil {
-		return err
-	}
 	if err := postgresRequireContentMethodTx(ctx, tx, canonicalID, "update"); err != nil {
 		return err
 	}
@@ -1677,9 +1674,6 @@ func (db *PostgresDB) BulkUpdateAccessMethods(ctx context.Context, updates map[s
 		}
 		if !found {
 			return common.ErrNotFound
-		}
-		if err := postgresEnsureNoLegacyDuplicateTx(ctx, tx, canonicalID); err != nil {
-			return err
 		}
 		if err := postgresRequireContentMethodTx(ctx, tx, canonicalID, "update"); err != nil {
 			return err

@@ -1090,6 +1090,72 @@ func testAccessMethod(url string) drs.AccessMethod {
 	}
 }
 
+func newLegacyDuplicateSHAFixture(t *testing.T) (*SqliteDB, string, string) {
+	t.Helper()
+	ctx := context.Background()
+	db, err := NewSqliteDB(":memory:")
+	if err != nil {
+		t.Fatalf("failed to create db: %v", err)
+	}
+
+	now := time.Now()
+	objectA := "3f5b5dac-f07d-5fdb-998d-532a95dd42d1"
+	objectB := "f9be6500-ea29-5427-843f-eb44dcdc6fb5"
+	if err := db.RegisterObjects(ctx, []models.InternalObject{
+		{
+			DrsObject: drs.DrsObject{
+				Id:            objectA,
+				CreatedTime:   now,
+				UpdatedTime:   &now,
+				AccessMethods: &[]drs.AccessMethod{testAccessMethod("s3://bucket/original-a")},
+			},
+		},
+		{
+			DrsObject: drs.DrsObject{
+				Id:            objectB,
+				CreatedTime:   now,
+				UpdatedTime:   &now,
+				AccessMethods: &[]drs.AccessMethod{testAccessMethod("s3://bucket/original-b")},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("RegisterObjects failed: %v", err)
+	}
+
+	const sha = "faec17cafc7af76bbdbe96a499545ff00ce2ef0ff4c65e05571dbbe0f17435ce"
+	if _, err := db.db.ExecContext(ctx, `
+		INSERT INTO drs_object_checksum (object_id, type, checksum)
+		VALUES (?, ?, ?), (?, ?, ?)
+	`, objectA, "sha256", sha, objectB, "sha256", sha); err != nil {
+		t.Fatalf("insert duplicate SHA fixture: %v", err)
+	}
+	return db, objectA, objectB
+}
+
+func assertAccessMethodURL(t *testing.T, db *SqliteDB, objectID, wantURL string) {
+	t.Helper()
+	obj, err := db.GetObject(context.Background(), objectID)
+	if err != nil {
+		t.Fatalf("GetObject(%q) failed: %v", objectID, err)
+	}
+	if obj.AccessMethods == nil || len(*obj.AccessMethods) != 1 || (*obj.AccessMethods)[0].AccessUrl.Url != wantURL {
+		t.Fatalf("expected access method %q for %q, got %+v", wantURL, objectID, obj.AccessMethods)
+	}
+}
+
+func TestSqliteDB_UpdateObjectAccessMethodsTargetsPhysicalRowWithLegacyDuplicateSHA(t *testing.T) {
+	db, objectA, objectB := newLegacyDuplicateSHAFixture(t)
+
+	if err := db.UpdateObjectAccessMethods(context.Background(), objectA, []drs.AccessMethod{
+		testAccessMethod("s3://bucket/repaired-a"),
+	}); err != nil {
+		t.Fatalf("UpdateObjectAccessMethods failed: %v", err)
+	}
+
+	assertAccessMethodURL(t, db, objectA, "s3://bucket/repaired-a")
+	assertAccessMethodURL(t, db, objectB, "s3://bucket/original-b")
+}
+
 func TestSqliteDB_BulkUpdateAccessMethods(t *testing.T) {
 	ctx := context.Background()
 	db, _ := NewSqliteDB(":memory:")
@@ -1136,6 +1202,20 @@ func TestSqliteDB_BulkUpdateAccessMethods(t *testing.T) {
 	if a.AccessMethods == nil || len(*a.AccessMethods) != 1 || (*a.AccessMethods)[0].AccessUrl.Url != "s3://bucket/a" {
 		t.Fatalf("unexpected access methods for obj-a: %+v", a.AccessMethods)
 	}
+}
+
+func TestSqliteDB_BulkUpdateAccessMethodsTargetsPhysicalRowWithLegacyDuplicateSHA(t *testing.T) {
+	ctx := context.Background()
+	db, objectA, objectB := newLegacyDuplicateSHAFixture(t)
+
+	if err := db.BulkUpdateAccessMethods(ctx, map[string][]drs.AccessMethod{
+		objectA: {testAccessMethod("s3://bucket/repaired-a")},
+	}); err != nil {
+		t.Fatalf("BulkUpdateAccessMethods failed: %v", err)
+	}
+
+	assertAccessMethodURL(t, db, objectA, "s3://bucket/repaired-a")
+	assertAccessMethodURL(t, db, objectB, "s3://bucket/original-b")
 }
 
 func TestSqliteDB_GetServiceInfo(t *testing.T) {
