@@ -78,6 +78,13 @@ func (m *ObjectManager) BulkOverwriteObjects(ctx context.Context, organization, 
 	usedTargets := make(map[string]string, len(candidates))
 	for i, candidate := range candidates {
 		sourceDID := candidate.Id
+		canonicalID, aliasErr := m.db.ResolveObjectAlias(ctx, sourceDID)
+		if aliasErr == nil && canonicalID != sourceDID {
+			return result, fmt.Errorf("%w: target DID %q is an alias for %q", ErrBulkOverwriteConflict, sourceDID, canonicalID)
+		}
+		if aliasErr != nil && !common.IsNotFoundError(aliasErr) {
+			return result, aliasErr
+		}
 		targetDID := sourceDID
 		matched := false
 		if current, ok := existing[sourceDID]; ok {
@@ -106,12 +113,21 @@ func (m *ObjectManager) BulkOverwriteObjects(ctx context.Context, organization, 
 		candidate.SelfUri = "drs://" + targetDID
 		resolved[i] = candidate
 		if matched {
+			if err := m.RequireObjectResources(ctx, objectMethodUpdate, []string{resource}); err != nil {
+				return result, err
+			}
 			current := existing[targetDID]
-			if !m.hasObjectMethod(ctx, &current, objectMethodUpdate) || !m.hasObjectMethod(ctx, &candidate, objectMethodUpdate) {
+			if err := m.requireAllObjectMethod(ctx, &current, objectMethodUpdate); err != nil {
+				return result, err
+			}
+			if !m.hasObjectMethod(ctx, &candidate, objectMethodUpdate) {
 				return result, common.ErrUnauthorized
 			}
 			result.Replaced++
 		} else {
+			if err := m.RequireObjectResources(ctx, objectMethodCreate, []string{resource}); err != nil {
+				return result, err
+			}
 			if !m.hasObjectMethod(ctx, &candidate, objectMethodCreate) {
 				return result, common.ErrUnauthorized
 			}

@@ -188,11 +188,7 @@ func handleInternalListFiber(om *core.ObjectManager) fiber.Handler {
 			if err != nil {
 				return apiutil.HandleError(c, err)
 			}
-			objs, err := om.GetBulkObjects(c.Context(), ids, "read")
-			if err != nil {
-				return apiutil.HandleError(c, err)
-			}
-			objs, err = om.PrepareScopedObjects(c.Context(), objs, filterOrg, filterProject, "read")
+			objs, err := om.GetPreparedScopedObjects(c.Context(), ids, filterOrg, filterProject, "read")
 			if err != nil {
 				return apiutil.HandleError(c, err)
 			}
@@ -224,20 +220,14 @@ func handleInternalListFiber(om *core.ObjectManager) fiber.Handler {
 			if err != nil {
 				return apiutil.HandleError(c, err)
 			}
-			bulkStart := time.Now()
-			objs, err = om.GetBulkObjects(c.Context(), ids, "read")
-			if err != nil {
-				return apiutil.HandleError(c, err)
-			}
-			bulkDuration := time.Since(bulkStart)
 			prepareStart := time.Now()
-			objs, err = om.PrepareScopedObjects(c.Context(), objs, filterOrg, filterProject, "read")
+			objs, err = om.GetPreparedScopedObjects(c.Context(), ids, filterOrg, filterProject, "read")
 			if err != nil {
 				return apiutil.HandleError(c, err)
 			}
 			listDuration := time.Since(listStart)
 			prepareDuration := time.Since(prepareStart)
-			log.Printf("INFO: syfon_internal_index_list organization=%s project=%s url_filter=%t start_after=%t limit=%d offset=%d ids=%d records=%d list_ids_ms=%d bulk_objects_ms=%d prepare_scoped_ms=%d duration_ms=%d", filterOrg, filterProject, true, strings.TrimSpace(start) != "", limit, offset, len(ids), len(objs), listDuration.Milliseconds(), bulkDuration.Milliseconds(), prepareDuration.Milliseconds(), time.Since(requestStart).Milliseconds())
+			log.Printf("INFO: syfon_internal_index_list organization=%s project=%s url_filter=%t start_after=%t limit=%d offset=%d ids=%d records=%d list_ids_ms=%d prepare_scoped_ms=%d duration_ms=%d", filterOrg, filterProject, true, strings.TrimSpace(start) != "", limit, offset, len(ids), len(objs), listDuration.Milliseconds(), prepareDuration.Milliseconds(), time.Since(requestStart).Milliseconds())
 		} else {
 			objs, err = om.ListPreparedObjectsPageByScope(c.Context(), filterOrg, filterProject, "read", start, limit, offset)
 			if err != nil {
@@ -478,6 +468,15 @@ func handleInternalUpdateFiber(c fiber.Ctx, om *core.ObjectManager) error {
 	existing, err := om.GetObject(c.Context(), id, "update")
 	if err != nil {
 		return apiutil.HandleError(c, err)
+	}
+	if req.Size != nil && *req.Size != existing.Size {
+		return apiutil.HandleError(c, fmt.Errorf("%w: object size is immutable", common.ErrConflict))
+	}
+	if incomingSHA, ok := common.CanonicalSHA256(update.Checksums); ok {
+		storedSHA, stored := common.CanonicalSHA256(existing.Checksums)
+		if stored && incomingSHA != storedSHA {
+			return apiutil.HandleError(c, fmt.Errorf("%w: object checksum identity is immutable", common.ErrConflict))
+		}
 	}
 	merged, err := core.MergeInternalObjectUpdate(*existing, update, id, time.Now().UTC())
 	if err != nil {

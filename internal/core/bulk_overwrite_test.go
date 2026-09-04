@@ -8,6 +8,8 @@ import (
 
 	"github.com/calypr/syfon/apigen/server/drs"
 	sycommon "github.com/calypr/syfon/common"
+	"github.com/calypr/syfon/internal/common"
+	"github.com/calypr/syfon/internal/db/sqlite"
 	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/testutils"
 )
@@ -140,4 +142,106 @@ func TestBulkOverwriteObjects_DoesNotMatchChecksumOutsideProject(t *testing.T) {
 	if result.Created != 1 || result.ChecksumMatched != 0 || db.Objects["source-did"] == nil {
 		t.Fatalf("checksum from another project must not be matched: %+v", result)
 	}
+}
+
+func TestBulkOverwriteObjects_RejectsAliasTarget(t *testing.T) {
+	resource, err := sycommon.ResourcePath("org", "project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	database, err := sqlite.NewSqliteDB(":memory:")
+	if err != nil {
+		t.Fatalf("NewSqliteDB failed: %v", err)
+	}
+	sha := "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+	originalName := "original"
+	canonical := models.InternalObject{
+		Authorizations: map[string][]string{"org": {"project"}},
+		DrsObject: drs.DrsObject{
+			Id:               "canonical-did",
+			Name:             &originalName,
+			Checksums:        []drs.Checksum{{Type: "sha256", Checksum: sha}},
+			ControlledAccess: &[]string{resource},
+		},
+	}
+	if err := database.CreateObject(context.Background(), &canonical); err != nil {
+		t.Fatalf("CreateObject failed: %v", err)
+	}
+	if err := database.CreateObjectAlias(context.Background(), "alias-did", canonical.Id); err != nil {
+		t.Fatalf("CreateObjectAlias failed: %v", err)
+	}
+
+	replacementName := "replacement"
+	candidate := models.InternalObject{
+		Authorizations: map[string][]string{"org": {"project"}},
+		DrsObject: drs.DrsObject{
+			Id:               "alias-did",
+			Name:             &replacementName,
+			Checksums:        []drs.Checksum{{Type: "sha256", Checksum: sha}},
+			ControlledAccess: &[]string{resource},
+		},
+	}
+	om := NewObjectManager(database, nil)
+	_, err = om.BulkOverwriteObjects(context.Background(), "org", "project", []models.InternalObject{candidate})
+	if !errors.Is(err, ErrBulkOverwriteConflict) || !strings.Contains(err.Error(), "alias") {
+		t.Fatalf("expected alias conflict, got %v", err)
+	}
+
+	got, err := database.GetObject(context.Background(), canonical.Id)
+	if err != nil {
+		t.Fatalf("GetObject failed: %v", err)
+	}
+	if got.Name == nil || *got.Name != originalName {
+		t.Fatalf("alias overwrite changed canonical record: %+v", got)
+	}
+}
+
+func TestBulkOverwriteObjects_RequiresTargetProjectPermission(t *testing.T) {
+	targetResource, err := sycommon.ResourcePath("org", "target")
+	if err != nil {
+		t.Fatal(err)
+	}
+	allowedResource, err := sycommon.ResourcePath("org", "allowed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resources := []string{targetResource, allowedResource}
+	candidate := models.InternalObject{
+		Authorizations: map[string][]string{"org": {"target", "allowed"}},
+		DrsObject: drs.DrsObject{
+			Id:               "new-did",
+			ControlledAccess: &resources,
+		},
+	}
+	t.Run("create", func(t *testing.T) {
+		om := NewObjectManager(&coreTestDB{MockDatabase: &testutils.MockDatabase{}}, nil)
+		ctx := buildLocalAuthzContext(map[string]map[string]bool{
+			allowedResource: {"create": true},
+		})
+
+		_, err := om.BulkOverwriteObjects(ctx, "org", "target", []models.InternalObject{candidate})
+		if !errors.Is(err, common.ErrUnauthorized) {
+			t.Fatalf("expected target-project authorization failure, got %v", err)
+		}
+	})
+
+	t.Run("update", func(t *testing.T) {
+		database := &coreTestDB{MockDatabase: &testutils.MockDatabase{
+			Objects: map[string]*drs.DrsObject{
+				candidate.Id: {Id: candidate.Id},
+			},
+			ObjectAuthz: map[string]map[string][]string{
+				candidate.Id: {"org": {"target", "allowed"}},
+			},
+		}}
+		om := NewObjectManager(database, nil)
+		ctx := buildLocalAuthzContext(map[string]map[string]bool{
+			allowedResource: {"update": true},
+		})
+
+		_, err := om.BulkOverwriteObjects(ctx, "org", "target", []models.InternalObject{candidate})
+		if !errors.Is(err, common.ErrUnauthorized) {
+			t.Fatalf("expected target-project authorization failure, got %v", err)
+		}
+	})
 }

@@ -20,11 +20,18 @@ func (m *ObjectManager) SignURL(ctx context.Context, accessURL string, options u
 }
 
 func (m *ObjectManager) SignObjectURL(ctx context.Context, obj *models.InternalObject, accessURL string, options urlmanager.SignOptions) (string, error) {
-	scopedURL, err := m.resolveScopedStorageURL(ctx, obj, accessURL)
-	if err != nil {
-		return "", err
+	targetURL := strings.TrimSpace(accessURL)
+	if strings.EqualFold(strings.TrimSpace(options.Method), "PUT") {
+		target, err := m.ResolveCanonicalStorageTarget(ctx, CanonicalStorageTargetRequest{
+			Object:    obj,
+			AccessURL: targetURL,
+		})
+		if err != nil {
+			return "", err
+		}
+		targetURL = target.URL
 	}
-	return m.SignURL(ctx, scopedURL, options)
+	return m.SignURL(ctx, targetURL, options)
 }
 
 type CanonicalStorageTargetRequest struct {
@@ -190,14 +197,11 @@ func (m *ObjectManager) SignDownloadPart(ctx context.Context, bucket, accessURL 
 }
 
 func (m *ObjectManager) SignObjectDownloadPart(ctx context.Context, obj *models.InternalObject, bucket, accessURL string, start, end int64, options urlmanager.SignOptions) (string, error) {
-	scopedURL, err := m.resolveScopedStorageURL(ctx, obj, accessURL)
-	if err != nil {
-		return "", err
-	}
-	if b, _, ok := common.ParseS3URL(scopedURL); ok {
+	accessURL = strings.TrimSpace(accessURL)
+	if b, _, ok := common.ParseS3URL(accessURL); ok {
 		bucket = b
 	}
-	return m.SignDownloadPart(ctx, bucket, scopedURL, start, end, options)
+	return m.SignDownloadPart(ctx, bucket, accessURL, start, end, options)
 }
 
 func (m *ObjectManager) resolveSigningBucket(ctx context.Context, accessURL string) string {
@@ -205,23 +209,6 @@ func (m *ObjectManager) resolveSigningBucket(ctx context.Context, accessURL stri
 		return bucket
 	}
 	return ""
-}
-
-func (m *ObjectManager) resolveScopedStorageURL(ctx context.Context, obj *models.InternalObject, accessURL string) (string, error) {
-	if obj == nil || len(ObjectAccessResources(obj)) == 0 {
-		return accessURL, nil
-	}
-	target, err := m.ResolveCanonicalStorageTarget(ctx, CanonicalStorageTargetRequest{
-		Object:    obj,
-		AccessURL: accessURL,
-	})
-	if err != nil {
-		return "", err
-	}
-	if target.URL == "" {
-		return accessURL, nil
-	}
-	return target.URL, nil
 }
 
 func parseS3Location(accessURL string) (bucket string, key string, ok bool) {

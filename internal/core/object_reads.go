@@ -20,22 +20,33 @@ func (m *ObjectManager) GetObject(ctx context.Context, ident string, requiredMet
 		return nil, common.ErrNotFound
 	}
 
+	checksumIdent := common.LooksLikeSHA256(ident)
+	if checksumIdent {
+		if obj, found, err := m.lookupObjectByChecksum(ctx, ident, requiredMethod); err != nil {
+			return nil, err
+		} else if found {
+			return obj, nil
+		}
+	}
+
 	if obj, found, err := m.lookupObjectByID(ctx, ident); err != nil {
 		return nil, err
 	} else if found {
-		return m.checkAccessAndReturn(obj, requiredMethod, ctx)
+		return m.canonicalContentAndCheckAccess(ctx, obj, requiredMethod)
 	}
 
 	if obj, found, err := m.lookupObjectByAlias(ctx, ident); err != nil {
 		return nil, err
 	} else if found {
-		return m.checkAccessAndReturn(obj, requiredMethod, ctx)
+		return m.canonicalContentAndCheckAccess(ctx, obj, requiredMethod)
 	}
 
-	if obj, found, err := m.lookupObjectByChecksum(ctx, ident, requiredMethod); err != nil {
-		return nil, err
-	} else if found {
-		return obj, nil
+	if !checksumIdent {
+		if obj, found, err := m.lookupObjectByChecksum(ctx, ident, requiredMethod); err != nil {
+			return nil, err
+		} else if found {
+			return obj, nil
+		}
 	}
 
 	return nil, common.ErrNotFound
@@ -92,17 +103,35 @@ func (m *ObjectManager) lookupObjectByAlias(ctx context.Context, ident string) (
 		return nil, false, err
 	}
 
-	objCopy := *obj
-	objCopy.DrsObject.Id = ident
-	objCopy.DrsObject.SelfUri = "drs://" + ident
-	return &objCopy, true, nil
+	return obj, true, nil
 }
 
-func (m *ObjectManager) checkAccessAndReturn(obj *models.InternalObject, method string, ctx context.Context) (*models.InternalObject, error) {
-	if err := m.requireObjectMethod(ctx, obj, method); err != nil {
+func (m *ObjectManager) canonicalContentAndCheckAccess(ctx context.Context, obj *models.InternalObject, method string) (*models.InternalObject, error) {
+	canonical, err := m.canonicalContentForObject(ctx, obj)
+	if err != nil {
 		return nil, err
 	}
-	return obj, nil
+	if err := m.requireObjectMethod(ctx, canonical, method); err != nil {
+		return nil, err
+	}
+	return canonical, nil
+}
+
+func (m *ObjectManager) canonicalContentForObject(ctx context.Context, obj *models.InternalObject) (*models.InternalObject, error) {
+	sha, ok := common.CanonicalSHA256(obj.Checksums)
+	if !ok {
+		cloned := cloneObject(*obj)
+		return &cloned, nil
+	}
+	siblings, err := m.db.GetObjectsByChecksum(ctx, sha)
+	if err != nil {
+		return nil, err
+	}
+	canonical := canonicalizeContentObjects(objectsWithSHA256(siblings, sha))
+	if len(canonical) == 0 {
+		return nil, common.ErrNotFound
+	}
+	return &canonical[0], nil
 }
 
 func (m *ObjectManager) GetObjectsByChecksums(ctx context.Context, hashes []string, requiredMethod string) (map[string][]models.InternalObject, error) {
@@ -112,7 +141,8 @@ func (m *ObjectManager) GetObjectsByChecksums(ctx context.Context, hashes []stri
 	}
 	filtered := make(map[string][]models.InternalObject, len(objectsByChecksum))
 	for checksum, objects := range objectsByChecksum {
-		filtered[checksum] = canonicalizeProjectScopedObjects(m.filterObjectsByMethod(ctx, objects, requiredMethod), "", "")
+		matching := objectsWithSHA256(objects, checksum)
+		filtered[checksum] = m.filterObjectsByMethod(ctx, canonicalizeContentObjects(matching), requiredMethod)
 	}
 	return filtered, nil
 }
@@ -122,7 +152,8 @@ func (m *ObjectManager) GetObjectsByChecksum(ctx context.Context, checksum strin
 	if err != nil {
 		return nil, err
 	}
-	return canonicalizeProjectScopedObjects(m.filterObjectsByMethod(ctx, objects, requiredMethod), "", ""), nil
+	matching := objectsWithSHA256(objects, checksum)
+	return m.filterObjectsByMethod(ctx, canonicalizeContentObjects(matching), requiredMethod), nil
 }
 
 func (m *ObjectManager) GetBulkObjects(ctx context.Context, ids []string, requiredMethod string) ([]models.InternalObject, error) {
@@ -130,7 +161,43 @@ func (m *ObjectManager) GetBulkObjects(ctx context.Context, ids []string, requir
 	if err != nil {
 		return nil, err
 	}
-	return m.filterObjectsByMethod(ctx, objects, requiredMethod), nil
+	hashes := make([]string, 0, len(objects))
+	for _, obj := range objects {
+		if sha, ok := common.CanonicalSHA256(obj.Checksums); ok {
+			hashes = append(hashes, sha)
+		}
+	}
+	siblingsByChecksum, err := m.db.GetObjectsByChecksums(ctx, hashes)
+	if err != nil {
+		return nil, err
+	}
+	canonical := make([]models.InternalObject, 0, len(objects))
+	seen := make(map[string]struct{}, len(objects))
+	for _, obj := range objects {
+		resolved := cloneObject(obj)
+		if sha, ok := common.CanonicalSHA256(obj.Checksums); ok {
+			matching := objectsWithSHA256(siblingsByChecksum[sha], sha)
+			family := canonicalizeContentObjects(matching)
+			if len(family) == 0 {
+				return nil, common.ErrNotFound
+			}
+			resolved = family[0]
+		}
+		if _, ok := seen[resolved.Id]; ok {
+			continue
+		}
+		seen[resolved.Id] = struct{}{}
+		canonical = append(canonical, resolved)
+	}
+	return m.filterObjectsByMethod(ctx, canonical, requiredMethod), nil
+}
+
+func (m *ObjectManager) GetPreparedScopedObjects(ctx context.Context, ids []string, organization, project, requiredMethod string) ([]models.InternalObject, error) {
+	objects, err := m.db.GetBulkObjects(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	return m.PrepareScopedObjects(ctx, objects, organization, project, requiredMethod)
 }
 
 func (m *ObjectManager) PrepareScopedObjects(ctx context.Context, objects []models.InternalObject, organization, project, requiredMethod string) ([]models.InternalObject, error) {
@@ -184,11 +251,7 @@ func (m *ObjectManager) ListPreparedObjectsPageByScope(ctx context.Context, orga
 		rawIDs += len(ids)
 		rawStart = ids[len(ids)-1]
 
-		objects, err := m.GetBulkObjects(ctx, ids, requiredMethod)
-		if err != nil {
-			return nil, err
-		}
-		prepared, err := m.PrepareScopedObjects(ctx, objects, organization, project, requiredMethod)
+		prepared, err := m.GetPreparedScopedObjects(ctx, ids, organization, project, requiredMethod)
 		if err != nil {
 			return nil, err
 		}
@@ -228,9 +291,26 @@ func (m *ObjectManager) ListObjectIDsPageByChecksum(ctx context.Context, checksu
 		return []string{}, nil
 	}
 
-	objects, err := m.GetObjectsByChecksum(ctx, checksum, requiredMethod)
-	if err != nil {
-		return nil, err
+	var objects []models.InternalObject
+	if strings.TrimSpace(organization) != "" || strings.TrimSpace(project) != "" {
+		raw, err := m.db.GetObjectsByChecksum(ctx, checksum)
+		if err != nil {
+			return nil, err
+		}
+		scoped := make([]models.InternalObject, 0, len(raw))
+		for _, obj := range raw {
+			if objectMatchesScope(&obj, organization, project) {
+				scoped = append(scoped, obj)
+			}
+		}
+		filtered := m.filterObjectsByMethod(ctx, scoped, requiredMethod)
+		objects = canonicalizeProjectScopedObjects(filtered, organization, project)
+	} else {
+		var err error
+		objects, err = m.GetObjectsByChecksum(ctx, checksum, requiredMethod)
+		if err != nil {
+			return nil, err
+		}
 	}
 	ids := make([]string, 0, len(objects))
 	for _, obj := range objects {

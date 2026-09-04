@@ -14,7 +14,7 @@ import (
 func handleGetObjectFiber(om *core.ObjectManager) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		id := c.Params("object_id")
-		obj, err := om.GetObject(c.Context(), id, "read")
+		obj, err := om.GetObject(c.Context(), id, "")
 		if err != nil {
 			return apiutil.HandleError(c, err)
 		}
@@ -31,7 +31,7 @@ func handleGetBulkObjectsFiber(om *core.ObjectManager) fiber.Handler {
 			return c.Status(fiber.StatusBadRequest).JSON(drs.Error{Msg: common.Ptr("Invalid request body")})
 		}
 
-		objects, err := om.GetBulkObjects(c.Context(), body.BulkObjectIds, "read")
+		objects, err := om.GetBulkObjects(c.Context(), body.BulkObjectIds, "")
 		if err != nil {
 			return apiutil.HandleError(c, err)
 		}
@@ -54,7 +54,7 @@ func handleGetBulkObjectsFiber(om *core.ObjectManager) fiber.Handler {
 func handleGetObjectsByChecksumFiber(om *core.ObjectManager) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		checksum := c.Params("checksum")
-		fetched, err := om.GetObjectsByChecksum(c.Context(), checksum, "read")
+		fetched, err := om.GetObjectsByChecksum(c.Context(), checksum, "")
 		if err != nil {
 			return apiutil.HandleError(c, err)
 		}

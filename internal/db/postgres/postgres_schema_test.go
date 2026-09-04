@@ -20,6 +20,7 @@ func TestSchemaEnsurers(t *testing.T) {
 		mock.ExpectExec("CREATE TABLE IF NOT EXISTS drs_object_checksum").WillReturnResult(sqlmock.NewResult(0, 0))
 		mock.ExpectExec("CREATE TABLE IF NOT EXISTS drs_object_alias").WillReturnResult(sqlmock.NewResult(0, 0))
 		mock.ExpectExec("CREATE TABLE IF NOT EXISTS drs_object_name_alias").WillReturnResult(sqlmock.NewResult(0, 0))
+		mock.ExpectExec("CREATE TABLE IF NOT EXISTS drs_object_read_policy").WillReturnResult(sqlmock.NewResult(0, 0))
 		mock.ExpectExec("DROP TABLE IF EXISTS drs_object_browse_index").WillReturnResult(sqlmock.NewResult(0, 0))
 		mock.ExpectExec(regexp.QuoteMeta("CREATE INDEX IF NOT EXISTS drs_object_access_method_object_id_idx ON drs_object_access_method(object_id)")).
 			WillReturnResult(sqlmock.NewResult(0, 0))
@@ -28,6 +29,13 @@ func TestSchemaEnsurers(t *testing.T) {
 		mock.ExpectExec(regexp.QuoteMeta("CREATE INDEX IF NOT EXISTS drs_object_checksum_checksum_idx ON drs_object_checksum(checksum)")).
 			WillReturnResult(sqlmock.NewResult(0, 0))
 		mock.ExpectExec(regexp.QuoteMeta("CREATE INDEX IF NOT EXISTS drs_object_checksum_checksum_type_object_id_idx ON drs_object_checksum(checksum, type, object_id)")).
+			WillReturnResult(sqlmock.NewResult(0, 0))
+		mock.ExpectExec(regexp.QuoteMeta(`CREATE INDEX IF NOT EXISTS drs_object_checksum_sha256_identity_idx
+		  ON drs_object_checksum(
+		    (replace(lower(trim(type)), '-', '')),
+		    (replace(lower(trim(checksum)), 'sha256:', '')),
+		    object_id
+		  )`)).
 			WillReturnResult(sqlmock.NewResult(0, 0))
 		mock.ExpectExec(regexp.QuoteMeta("CREATE INDEX IF NOT EXISTS drs_object_controlled_access_object_id_idx ON drs_object_controlled_access(object_id)")).
 			WillReturnResult(sqlmock.NewResult(0, 0))

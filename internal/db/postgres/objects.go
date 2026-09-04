@@ -11,6 +11,7 @@ import (
 
 	"github.com/calypr/syfon/apigen/server/drs"
 	sycommon "github.com/calypr/syfon/common"
+	"github.com/calypr/syfon/internal/authz"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/models"
 	"github.com/lib/pq"
@@ -22,13 +23,25 @@ func (db *PostgresDB) DeleteObject(ctx context.Context, id string) error {
 		return err
 	}
 	defer tx.Rollback()
-
-	canonicalID := strings.TrimSpace(id)
-	if canonicalID == "" {
-		return fmt.Errorf("%w: object not found", common.ErrNotFound)
+	if err := lockContentWriteTx(ctx, tx); err != nil {
+		return err
 	}
 
-	if err := tx.QueryRowContext(ctx, "SELECT object_id FROM drs_object_alias WHERE alias_id = $1", canonicalID).Scan(&canonicalID); err != nil && !errors.Is(err, sql.ErrNoRows) {
+	requestedID := strings.TrimSpace(id)
+	if requestedID == "" {
+		return fmt.Errorf("%w: object not found", common.ErrNotFound)
+	}
+	canonicalID, found, err := postgresObjectIDTx(ctx, tx, requestedID)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return fmt.Errorf("%w: object not found", common.ErrNotFound)
+	}
+	if err := postgresEnsureNoLegacyDuplicateTx(ctx, tx, canonicalID); err != nil {
+		return err
+	}
+	if err := postgresRequireContentMethodTx(ctx, tx, canonicalID, "delete"); err != nil {
 		return err
 	}
 
@@ -47,7 +60,15 @@ func (db *PostgresDB) DeleteObject(ctx context.Context, id string) error {
 }
 
 func (db *PostgresDB) DeleteObjectAlias(ctx context.Context, aliasID string) error {
-	result, err := db.db.ExecContext(ctx, "DELETE FROM drs_object_alias WHERE alias_id = $1", aliasID)
+	tx, err := db.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := lockContentWriteTx(ctx, tx); err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, "DELETE FROM drs_object_alias WHERE alias_id = $1", aliasID)
 	if err != nil {
 		return err
 	}
@@ -58,7 +79,7 @@ func (db *PostgresDB) DeleteObjectAlias(ctx context.Context, aliasID string) err
 	if rows == 0 {
 		return fmt.Errorf("%w: object not found", common.ErrNotFound)
 	}
-	return nil
+	return tx.Commit()
 }
 
 func (db *PostgresDB) CreateObjectAlias(ctx context.Context, aliasID, canonicalObjectID string) error {
@@ -70,20 +91,53 @@ func (db *PostgresDB) CreateObjectAlias(ctx context.Context, aliasID, canonicalO
 	if aliasID == canonicalObjectID {
 		return nil
 	}
+	tx, err := db.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := lockContentWriteTx(ctx, tx); err != nil {
+		return err
+	}
 	var exists string
-	err := db.db.QueryRowContext(ctx, "SELECT id FROM drs_object WHERE id = $1", canonicalObjectID).Scan(&exists)
+	err = tx.QueryRowContext(ctx, "SELECT id FROM drs_object WHERE id = $1", canonicalObjectID).Scan(&exists)
 	if err == sql.ErrNoRows {
 		return fmt.Errorf("%w: object not found", common.ErrNotFound)
 	}
 	if err != nil {
 		return err
 	}
-	_, err = db.db.ExecContext(ctx, `
+	if err := postgresEnsureNoLegacyDuplicateTx(ctx, tx, canonicalObjectID); err != nil {
+		return err
+	}
+	if err := postgresRequireContentMethodTx(ctx, tx, canonicalObjectID, "update"); err != nil {
+		return err
+	}
+	var physicalAlias string
+	physicalErr := tx.QueryRowContext(ctx, "SELECT id FROM drs_object WHERE id = $1", aliasID).Scan(&physicalAlias)
+	if physicalErr == nil {
+		return fmt.Errorf("%w: alias %q is already a physical object", common.ErrConflict, aliasID)
+	}
+	if physicalErr != sql.ErrNoRows {
+		return physicalErr
+	}
+	var aliasTarget string
+	aliasErr := tx.QueryRowContext(ctx, "SELECT object_id FROM drs_object_alias WHERE alias_id = $1", aliasID).Scan(&aliasTarget)
+	if aliasErr == nil && aliasTarget != canonicalObjectID {
+		return fmt.Errorf("%w: alias %q already points to %q", common.ErrConflict, aliasID, aliasTarget)
+	}
+	if aliasErr != nil && aliasErr != sql.ErrNoRows {
+		return aliasErr
+	}
+	_, err = tx.ExecContext(ctx, `
 		INSERT INTO drs_object_alias(alias_id, object_id)
 		VALUES ($1, $2)
-		ON CONFLICT(alias_id) DO UPDATE SET object_id=EXCLUDED.object_id
+		ON CONFLICT(alias_id) DO NOTHING
 	`, aliasID, canonicalObjectID)
-	return err
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (db *PostgresDB) ResolveObjectAlias(ctx context.Context, aliasID string) (string, error) {
@@ -141,9 +195,6 @@ retryLookup:
 		return nil, err
 	}
 	objectID := r.ID
-	if resolvedAlias && requestID != "" {
-		objectID = requestID
-	}
 
 	obj := &models.InternalObject{
 		DrsObject: drs.DrsObject{
@@ -179,14 +230,13 @@ retryLookup:
 		if obj.AccessMethods == nil {
 			obj.AccessMethods = &[]drs.AccessMethod{}
 		}
-		amID := t
 		am := drs.AccessMethod{
 			AccessUrl: &struct {
 				Headers *[]string `json:"headers,omitempty"`
 				Url     string    `json:"url"`
 			}{Url: u},
 			Type:     drs.AccessMethodType(t),
-			AccessId: &amID,
+			AccessId: common.Ptr(common.AccessMethodID(t, u)),
 		}
 		*obj.AccessMethods = append(*obj.AccessMethods, am)
 	}
@@ -197,6 +247,10 @@ retryLookup:
 	if len(controlled) > 0 {
 		obj.ControlledAccess = &controlled
 		obj.Authorizations = sycommon.ControlledAccessToAuthzMap(controlled)
+	}
+	obj.PublicRead, obj.PublicReadPolicyKnown, err = db.publicReadForObject(ctx, lookupID, len(controlled) == 0)
+	if err != nil {
+		return nil, err
 	}
 
 	// 3. Fetch Checksums
@@ -222,7 +276,7 @@ retryLookup:
 	return obj, nil
 }
 
-func (db *PostgresDB) CreateObject(ctx context.Context, obj *models.InternalObject) error {
+func (db *PostgresDB) createObjectLegacy(ctx context.Context, obj *models.InternalObject) error {
 	tx, err := db.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -280,7 +334,7 @@ func (db *PostgresDB) CreateObject(ctx context.Context, obj *models.InternalObje
 	return tx.Commit()
 }
 
-func (db *PostgresDB) RegisterObjects(ctx context.Context, objects []models.InternalObject) error {
+func (db *PostgresDB) registerObjectsLegacy(ctx context.Context, objects []models.InternalObject) error {
 	if len(objects) == 0 {
 		return nil
 	}
@@ -443,13 +497,30 @@ func (db *PostgresDB) GetBulkObjects(ctx context.Context, ids []string) ([]model
 	objects := make([]models.InternalObject, 0, len(ids))
 	seen := make(map[string]struct{}, len(ids))
 	for _, id := range ids {
-		if _, ok := seen[id]; ok {
+		obj, ok := objectsByID[id]
+		if !ok {
+			resolved, resolveErr := db.ResolveObjectAlias(ctx, id)
+			if resolveErr == nil {
+				obj, ok = objectsByID[resolved]
+				if !ok {
+					obj, resolveErr = db.GetObject(ctx, resolved)
+					ok = resolveErr == nil
+				}
+			} else if !errors.Is(resolveErr, common.ErrNotFound) {
+				return nil, resolveErr
+			}
+			if resolveErr != nil && !errors.Is(resolveErr, common.ErrNotFound) {
+				return nil, resolveErr
+			}
+		}
+		if !ok || obj == nil {
 			continue
 		}
-		seen[id] = struct{}{}
-		if obj, ok := objectsByID[id]; ok {
-			objects = append(objects, *obj)
+		if _, already := seen[obj.Id]; already {
+			continue
 		}
+		seen[obj.Id] = struct{}{}
+		objects = append(objects, *obj)
 	}
 	return objects, nil
 }
@@ -490,16 +561,25 @@ func (db *PostgresDB) GetObjectsByChecksums(ctx context.Context, checksums []str
 				continue
 			}
 			index[value] = append(index[value], *obj)
+			if common.NormalizeChecksumType(cs.Type) == "sha256" {
+				if normalized, ok := common.NormalizeSHA256Query(value); ok {
+					index[normalized] = append(index[normalized], *obj)
+				}
+			}
 		}
 	}
 	result := make(map[string][]models.InternalObject, len(checksums))
 	for _, cs := range checksums {
-		normalized := strings.TrimSpace(cs)
-		if normalized == "" {
+		requested := strings.TrimSpace(cs)
+		if requested == "" {
 			continue
 		}
-		if objs := index[normalized]; len(objs) > 0 {
-			result[normalized] = uniqueObjectsByID(objs)
+		lookup := requested
+		if normalized, ok := common.NormalizeSHA256Query(requested); ok {
+			lookup = normalized
+		}
+		if objs := index[lookup]; len(objs) > 0 {
+			result[requested] = uniqueObjectsByID(objs)
 		}
 	}
 	return result, nil
@@ -515,16 +595,29 @@ func (db *PostgresDB) ListScopedObjectIDsByChecksums(ctx context.Context, organi
 	if err != nil {
 		return nil, err
 	}
-	normalized := uniqueNonEmptyStrings(checksums)
+	normalized := make([]string, 0, len(checksums))
+	seenChecksums := make(map[string]struct{}, len(checksums))
+	for _, checksum := range checksums {
+		value := normalizeChecksumLookup(checksum)
+		if value == "" {
+			continue
+		}
+		if _, exists := seenChecksums[value]; exists {
+			continue
+		}
+		seenChecksums[value] = struct{}{}
+		normalized = append(normalized, value)
+	}
 	if len(normalized) == 0 {
 		return map[string][]string{}, nil
 	}
 	rows, err := db.db.QueryContext(ctx, `
-		SELECT DISTINCT c.checksum, c.object_id
+		SELECT DISTINCT replace(lower(trim(c.checksum)), 'sha256:', ''), c.object_id
 		FROM drs_object_checksum c
 		INNER JOIN drs_object_controlled_access ca ON ca.object_id = c.object_id
-		WHERE ca.resource = $1 AND c.type = $2 AND c.checksum = ANY($3)
-		ORDER BY c.checksum, c.object_id`, resource, "sha256", pq.Array(normalized))
+		WHERE ca.resource = $1 AND replace(lower(trim(c.type)), '-', '') = $2
+		  AND replace(lower(trim(c.checksum)), 'sha256:', '') = ANY($3)
+		ORDER BY 1, 2`, resource, "sha256", pq.Array(normalized))
 	if err != nil {
 		return nil, err
 	}
@@ -1095,8 +1188,36 @@ func (db *PostgresDB) BulkDeleteObjects(ctx context.Context, ids []string) error
 		return err
 	}
 	defer tx.Rollback()
+	if err := lockContentWriteTx(ctx, tx); err != nil {
+		return err
+	}
+	canonicalIDs := make([]string, 0, len(ids))
+	seen := make(map[string]struct{}, len(ids))
+	for _, rawID := range ids {
+		canonicalID, found, resolveErr := postgresObjectIDTx(ctx, tx, strings.TrimSpace(rawID))
+		if resolveErr != nil {
+			return resolveErr
+		}
+		if !found {
+			continue
+		}
+		if err := postgresEnsureNoLegacyDuplicateTx(ctx, tx, canonicalID); err != nil {
+			return err
+		}
+		if err := postgresRequireContentMethodTx(ctx, tx, canonicalID, "delete"); err != nil {
+			return err
+		}
+		if _, ok := seen[canonicalID]; ok {
+			continue
+		}
+		seen[canonicalID] = struct{}{}
+		canonicalIDs = append(canonicalIDs, canonicalID)
+	}
+	if len(canonicalIDs) == 0 {
+		return tx.Commit()
+	}
 
-	if _, err := tx.ExecContext(ctx, "DELETE FROM drs_object WHERE id = ANY($1)", pq.Array(ids)); err != nil {
+	if _, err := tx.ExecContext(ctx, "DELETE FROM drs_object WHERE id = ANY($1)", pq.Array(canonicalIDs)); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -1171,6 +1292,15 @@ func (db *PostgresDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []st
 		return map[string]*models.InternalObject{}, nil
 	}
 
+	shaQueries := make([]string, 0, len(checksums))
+	genericQueries := make([]string, 0, len(checksums))
+	for _, checksum := range checksums {
+		if normalized, ok := common.NormalizeSHA256Query(checksum); ok {
+			shaQueries = append(shaQueries, normalized)
+		} else {
+			genericQueries = append(genericQueries, strings.TrimSpace(checksum))
+		}
+	}
 	rows, err := db.db.QueryContext(ctx, `
 		SELECT
 			o.id,
@@ -1186,14 +1316,15 @@ func (db *PostgresDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []st
 			OR
 			(COALESCE(array_length($2::text[], 1), 0) > 0 AND (
 				o.id = ANY($2)
-				OR EXISTS (
-					SELECT 1
-					FROM drs_object_checksum c2
-					WHERE c2.object_id = o.id AND c2.checksum = ANY($2)
-				)
+				OR EXISTS (SELECT 1 FROM drs_object_checksum c2
+					WHERE c2.object_id = o.id
+					  AND replace(lower(trim(c2.type)), '-', '') = 'sha256'
+					  AND replace(lower(trim(c2.checksum)), 'sha256:', '') = ANY($3))
+				OR EXISTS (SELECT 1 FROM drs_object_checksum c2
+					WHERE c2.object_id = o.id AND c2.checksum = ANY($4))
 			))
 		)`,
-		pq.Array(ids), pq.Array(checksums),
+		pq.Array(ids), pq.Array(checksums), pq.Array(shaQueries), pq.Array(genericQueries),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch bulk objects: %w", err)
@@ -1245,6 +1376,9 @@ func (db *PostgresDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []st
 	if err := db.attachControlledAccess(ctx, objectsByID); err != nil {
 		return nil, err
 	}
+	if err := db.attachPublicRead(ctx, objectsByID); err != nil {
+		return nil, err
+	}
 	if err := db.attachNameAliases(ctx, objectsByID); err != nil {
 		return nil, err
 	}
@@ -1283,14 +1417,13 @@ func (db *PostgresDB) attachBulkAccessMethods(ctx context.Context, objectsByID m
 		if obj.DrsObject.AccessMethods == nil {
 			obj.DrsObject.AccessMethods = &[]drs.AccessMethod{}
 		}
-		amID := accessType
 		am := drs.AccessMethod{
 			AccessUrl: &struct {
 				Headers *[]string `json:"headers,omitempty"`
 				Url     string    `json:"url"`
 			}{Url: accessURL},
 			Type:     drs.AccessMethodType(accessType),
-			AccessId: &amID,
+			AccessId: common.Ptr(common.AccessMethodID(accessType, accessURL)),
 		}
 		*obj.DrsObject.AccessMethods = append(*obj.DrsObject.AccessMethods, am)
 	}
@@ -1363,8 +1496,24 @@ func (db *PostgresDB) UpdateObjectAccessMethods(ctx context.Context, objectID st
 		return err
 	}
 	defer tx.Rollback()
+	if err := lockContentWriteTx(ctx, tx); err != nil {
+		return err
+	}
+	canonicalID, found, err := postgresObjectIDTx(ctx, tx, strings.TrimSpace(objectID))
+	if err != nil {
+		return err
+	}
+	if !found {
+		return fmt.Errorf("%w: object not found", common.ErrNotFound)
+	}
+	if err := postgresEnsureNoLegacyDuplicateTx(ctx, tx, canonicalID); err != nil {
+		return err
+	}
+	if err := postgresRequireContentMethodTx(ctx, tx, canonicalID, "update"); err != nil {
+		return err
+	}
 
-	_, err = tx.ExecContext(ctx, "DELETE FROM drs_object_access_method WHERE object_id = $1", objectID)
+	_, err = tx.ExecContext(ctx, "DELETE FROM drs_object_access_method WHERE object_id = $1", canonicalID)
 	if err != nil {
 		return err
 	}
@@ -1373,7 +1522,7 @@ func (db *PostgresDB) UpdateObjectAccessMethods(ctx context.Context, objectID st
 		if am.AccessUrl == nil || am.AccessUrl.Url == "" {
 			continue
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO drs_object_access_method (object_id, url, type) VALUES ($1, $2, $3)`, objectID, am.AccessUrl.Url, am.Type)
+		_, err = tx.ExecContext(ctx, `INSERT INTO drs_object_access_method (object_id, url, type) VALUES ($1, $2, $3)`, canonicalID, am.AccessUrl.Url, am.Type)
 		if err != nil {
 			return err
 		}
@@ -1387,25 +1536,128 @@ func (db *PostgresDB) RemoveObjectControlledAccess(ctx context.Context, objectID
 		return fmt.Errorf("resource is required")
 	}
 	resource = normalized[0]
-
 	tx, err := db.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+	if err := lockContentWriteTx(ctx, tx); err != nil {
+		return err
+	}
+	canonicalID, found, err := postgresObjectIDTx(ctx, tx, strings.TrimSpace(objectID))
+	if err != nil {
+		return err
+	}
+	if !found {
+		return common.ErrNotFound
+	}
+	if err := postgresEnsureNoLegacyDuplicateTx(ctx, tx, canonicalID); err != nil {
+		return err
+	}
+	if !authz.HasMethodAccess(ctx, "update", []string{resource}) {
+		return common.ErrUnauthorized
+	}
 
 	var exists int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(1) FROM drs_object_controlled_access WHERE object_id = $1 AND resource = $2`, objectID, resource).Scan(&exists); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(1) FROM drs_object_controlled_access WHERE object_id = $1 AND resource = $2`, canonicalID, resource).Scan(&exists); err != nil {
 		return err
 	}
 	if exists == 0 {
 		return common.ErrNotFound
 	}
+	currentResources, err := postgresResourcesTx(ctx, tx, canonicalID)
+	if err != nil {
+		return err
+	}
+	publicRead, err := postgresPublicReadTx(ctx, tx, canonicalID, len(currentResources) == 0)
+	if err != nil {
+		return err
+	}
+	if err := postgresSetPublicReadTx(ctx, tx, canonicalID, publicRead); err != nil {
+		return err
+	}
 
-	if _, err := tx.ExecContext(ctx, `DELETE FROM drs_object_controlled_access WHERE object_id = $1 AND resource = $2`, objectID, resource); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM drs_object_controlled_access WHERE object_id = $1 AND resource = $2`, canonicalID, resource); err != nil {
 		return err
 	}
 	return tx.Commit()
+}
+
+func (db *PostgresDB) RemoveObjectControlledAccessBulk(ctx context.Context, objectIDs []string, resource string) (int, error) {
+	if len(objectIDs) == 0 {
+		return 0, nil
+	}
+	normalized := sycommon.NormalizeAccessResources([]string{resource})
+	if len(normalized) == 0 {
+		return 0, fmt.Errorf("resource is required")
+	}
+	resource = normalized[0]
+	tx, err := db.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	if err := lockContentWriteTx(ctx, tx); err != nil {
+		return 0, err
+	}
+	orgWide := !strings.Contains(resource, "/project/")
+	if !orgWide && !authz.HasMethodAccess(ctx, "delete", []string{resource}) {
+		return 0, common.ErrUnauthorized
+	}
+	seen := make(map[string]struct{}, len(objectIDs))
+	removed := 0
+	for _, rawID := range objectIDs {
+		canonicalID, found, resolveErr := postgresObjectIDTx(ctx, tx, strings.TrimSpace(rawID))
+		if resolveErr != nil {
+			return 0, resolveErr
+		}
+		if !found {
+			continue
+		}
+		if _, ok := seen[canonicalID]; ok {
+			continue
+		}
+		seen[canonicalID] = struct{}{}
+		if err := postgresEnsureNoLegacyDuplicateTx(ctx, tx, canonicalID); err != nil {
+			return 0, err
+		}
+		currentResources, err := postgresResourcesTx(ctx, tx, canonicalID)
+		if err != nil {
+			return 0, err
+		}
+		objectRemoved := 0
+		for _, currentResource := range currentResources {
+			if currentResource != resource && (!orgWide || !strings.HasPrefix(currentResource, resource+"/project/")) {
+				continue
+			}
+			if !authz.HasMethodAccess(ctx, "delete", []string{currentResource}) {
+				continue
+			}
+			if _, err := tx.ExecContext(ctx, `DELETE FROM drs_object_controlled_access WHERE object_id = $1 AND resource = $2`, canonicalID, currentResource); err != nil {
+				return 0, err
+			}
+			removed++
+			objectRemoved++
+		}
+		if objectRemoved == 0 {
+			continue
+		}
+		currentResources, err = postgresResourcesTx(ctx, tx, canonicalID)
+		if err != nil {
+			return 0, err
+		}
+		publicRead, err := postgresPublicReadTx(ctx, tx, canonicalID, len(currentResources) == 0)
+		if err != nil {
+			return 0, err
+		}
+		if err := postgresSetPublicReadTx(ctx, tx, canonicalID, publicRead); err != nil {
+			return 0, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return removed, nil
 }
 
 func (db *PostgresDB) BulkUpdateAccessMethods(ctx context.Context, updates map[string][]drs.AccessMethod) error {
@@ -1414,9 +1666,25 @@ func (db *PostgresDB) BulkUpdateAccessMethods(ctx context.Context, updates map[s
 		return err
 	}
 	defer tx.Rollback()
+	if err := lockContentWriteTx(ctx, tx); err != nil {
+		return err
+	}
 
 	for objectID, methods := range updates {
-		_, err = tx.ExecContext(ctx, "DELETE FROM drs_object_access_method WHERE object_id = $1", objectID)
+		canonicalID, found, resolveErr := postgresObjectIDTx(ctx, tx, strings.TrimSpace(objectID))
+		if resolveErr != nil {
+			return resolveErr
+		}
+		if !found {
+			return common.ErrNotFound
+		}
+		if err := postgresEnsureNoLegacyDuplicateTx(ctx, tx, canonicalID); err != nil {
+			return err
+		}
+		if err := postgresRequireContentMethodTx(ctx, tx, canonicalID, "update"); err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, "DELETE FROM drs_object_access_method WHERE object_id = $1", canonicalID)
 		if err != nil {
 			return err
 		}
@@ -1424,7 +1692,7 @@ func (db *PostgresDB) BulkUpdateAccessMethods(ctx context.Context, updates map[s
 			if am.AccessUrl == nil || am.AccessUrl.Url == "" {
 				continue
 			}
-			_, err = tx.ExecContext(ctx, `INSERT INTO drs_object_access_method (object_id, url, type) VALUES ($1, $2, $3)`, objectID, am.AccessUrl.Url, am.Type)
+			_, err = tx.ExecContext(ctx, `INSERT INTO drs_object_access_method (object_id, url, type) VALUES ($1, $2, $3)`, canonicalID, am.AccessUrl.Url, am.Type)
 			if err != nil {
 				return err
 			}
@@ -1542,6 +1810,41 @@ func (db *PostgresDB) attachControlledAccess(ctx context.Context, objectsByID ma
 		}
 		obj.ControlledAccess = &controlled
 		obj.Authorizations = sycommon.ControlledAccessToAuthzMap(controlled)
+	}
+	return nil
+}
+
+func (db *PostgresDB) attachPublicRead(ctx context.Context, objectsByID map[string]*models.InternalObject) error {
+	if len(objectsByID) == 0 {
+		return nil
+	}
+	rows, err := db.db.QueryContext(ctx, `
+		SELECT object_id, public_read
+		FROM drs_object_read_policy
+		WHERE object_id = ANY($1)`, pq.Array(sortedObjectIDs(objectsByID)))
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	known := make(map[string]bool, len(objectsByID))
+	for rows.Next() {
+		var id string
+		var public bool
+		if err := rows.Scan(&id, &public); err != nil {
+			return err
+		}
+		known[id] = public
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for id, obj := range objectsByID {
+		public, ok := known[id]
+		if !ok {
+			public = len(objectAccessResources(obj)) == 0
+		}
+		obj.PublicRead = public
+		obj.PublicReadPolicyKnown = ok
 	}
 	return nil
 }

@@ -52,7 +52,7 @@ func (m *ObjectManager) DeleteBulkByScope(ctx context.Context, organization, pro
 		}
 	}
 
-	toDelete, err := m.deletableObjectIDs(ctx, ids)
+	toDelete, err := m.deletableObjectIDsForMethod(ctx, ids, false)
 	if err != nil {
 		return 0, err
 	}
@@ -61,10 +61,11 @@ func (m *ObjectManager) DeleteBulkByScope(ctx context.Context, organization, pro
 		return 0, nil
 	}
 
-	if err := m.db.BulkDeleteObjects(ctx, toDelete); err != nil {
+	resource, err := syfoncommon.ResourcePath(organization, project)
+	if err != nil {
 		return 0, err
 	}
-	return len(toDelete), nil
+	return m.db.RemoveObjectControlledAccessBulk(ctx, toDelete, resource)
 }
 
 func (m *ObjectManager) DeleteObject(ctx context.Context, id string) error {
@@ -76,17 +77,18 @@ type DeleteOptions struct {
 }
 
 func (m *ObjectManager) DeleteObjectWithOptions(ctx context.Context, id string, opts DeleteOptions) error {
+	if opts.DeleteStorageData {
+		return fmt.Errorf("%w: physical storage deletion is not atomic with catalog mutation", common.ErrConflict)
+	}
 	obj, err := m.db.GetObject(ctx, id)
 	if err != nil {
 		return err
 	}
-	if err := m.requireObjectMethod(ctx, obj, objectMethodDelete); err != nil {
+	if err := m.requireAllObjectMethod(ctx, obj, objectMethodDelete); err != nil {
 		return err
 	}
-	if opts.DeleteStorageData {
-		if err := m.deleteObjectStorage(ctx, obj); err != nil {
-			return err
-		}
+	if opts.DeleteStorageData && (obj.PublicRead || len(ObjectAccessResources(obj)) > 0) {
+		return fmt.Errorf("%w: cannot delete shared content storage without exclusive ownership", common.ErrConflict)
 	}
 	return m.db.DeleteObject(ctx, id)
 }
@@ -96,21 +98,15 @@ func (m *ObjectManager) BulkDeleteObjects(ctx context.Context, ids []string) err
 }
 
 func (m *ObjectManager) BulkDeleteObjectsWithOptions(ctx context.Context, ids []string, opts DeleteOptions) error {
-	toDelete, err := m.deletableObjectIDs(ctx, ids)
+	if opts.DeleteStorageData {
+		return fmt.Errorf("%w: physical storage deletion is not atomic with catalog mutation", common.ErrConflict)
+	}
+	toDelete, err := m.deletableObjectIDsForMethod(ctx, ids, true)
 	if err != nil {
 		return err
 	}
 	if len(toDelete) == 0 {
 		return nil
-	}
-	if opts.DeleteStorageData {
-		objects, err := m.db.GetBulkObjects(ctx, toDelete)
-		if err != nil {
-			return err
-		}
-		if err := m.deleteObjectsStorage(ctx, objects); err != nil {
-			return err
-		}
 	}
 	return m.db.BulkDeleteObjects(ctx, toDelete)
 }
@@ -120,7 +116,7 @@ func (m *ObjectManager) UpdateObjectAccessMethods(ctx context.Context, objectID 
 	if err != nil {
 		return err
 	}
-	if err := m.requireObjectMethod(ctx, obj, objectMethodUpdate); err != nil {
+	if err := m.requireAllObjectMethod(ctx, obj, objectMethodUpdate); err != nil {
 		return err
 	}
 	return m.db.UpdateObjectAccessMethods(ctx, objectID, accessMethods)
@@ -148,7 +144,7 @@ func (m *ObjectManager) BulkUpdateAccessMethods(ctx context.Context, updates map
 		if !ok {
 			return common.ErrNotFound
 		}
-		if err := m.requireObjectMethod(ctx, obj, objectMethodUpdate); err != nil {
+		if err := m.requireAllObjectMethod(ctx, obj, objectMethodUpdate); err != nil {
 			return err
 		}
 	}
@@ -193,19 +189,35 @@ func (m *ObjectManager) RemoveObjectControlledAccess(ctx context.Context, object
 }
 
 func (m *ObjectManager) RegisterObjects(ctx context.Context, objs []models.InternalObject) error {
+	if err := m.validateExistingContentRead(ctx, objs); err != nil {
+		return err
+	}
 	if err := m.bulkObjectMethodError(ctx, objs, objectMethodCreate); err != nil {
 		return err
 	}
-	canonical, aliases, err := m.canonicalizeRegistrationObjects(ctx, objs)
-	if err != nil {
-		return err
-	}
-	if err := m.db.RegisterObjects(ctx, canonical); err != nil {
-		return err
-	}
-	for aliasID, canonicalID := range aliases {
-		if err := m.db.CreateObjectAlias(ctx, aliasID, canonicalID); err != nil {
+	return m.db.RegisterObjects(ctx, objs)
+}
+
+func (m *ObjectManager) validateExistingContentRead(ctx context.Context, objs []models.InternalObject) error {
+	seen := make(map[string]struct{})
+	for i := range objs {
+		sha, ok := common.CanonicalSHA256(objs[i].Checksums)
+		if !ok || sha == "" {
+			continue
+		}
+		if _, done := seen[sha]; done {
+			continue
+		}
+		seen[sha] = struct{}{}
+		existing, err := m.db.GetObjectsByChecksum(ctx, sha)
+		if err != nil {
 			return err
+		}
+		for j := range existing {
+			if existing[j].PublicRead || m.hasObjectMethod(ctx, &existing[j], objectMethodRead) {
+				continue
+			}
+			return common.ErrUnauthorized
 		}
 	}
 	return nil
@@ -385,19 +397,7 @@ func (m *ObjectManager) canonicalizeRegistrationObjects(ctx context.Context, obj
 }
 
 func (m *ObjectManager) ReplaceObjects(ctx context.Context, objs []models.InternalObject) error {
-	for i := range objs {
-		existing, err := m.db.GetObject(ctx, objs[i].Id)
-		if err != nil {
-			return err
-		}
-		if err := m.requireObjectMethod(ctx, existing, objectMethodUpdate); err != nil {
-			return err
-		}
-		if err := m.requireObjectMethod(ctx, &objs[i], objectMethodUpdate); err != nil {
-			return err
-		}
-	}
-	return m.db.RegisterObjects(ctx, objs)
+	return m.db.ReplaceObjects(ctx, objs)
 }
 
 func (m *ObjectManager) DeleteObjectsByChecksums(ctx context.Context, hashes []string) (int, error) {
@@ -418,10 +418,24 @@ func (m *ObjectManager) DeleteObjectsByChecksums(ctx context.Context, hashes []s
 			if len(toDelete) == 0 {
 				return 0, nil
 			}
-			if err := m.db.BulkDeleteObjects(ctx, toDelete); err != nil {
+			objects, err := m.db.GetBulkObjects(ctx, toDelete)
+			if err != nil {
 				return 0, err
 			}
-			return len(toDelete), nil
+			authorized := make([]string, 0, len(objects))
+			for i := range objects {
+				if err := m.requireAllObjectMethod(ctx, &objects[i], objectMethodDelete); err != nil {
+					continue
+				}
+				authorized = append(authorized, objects[i].Id)
+			}
+			if len(authorized) == 0 {
+				return 0, nil
+			}
+			if err := m.db.BulkDeleteObjects(ctx, authorized); err != nil {
+				return 0, err
+			}
+			return len(authorized), nil
 		}
 	}
 
@@ -437,6 +451,9 @@ func (m *ObjectManager) DeleteObjectsByChecksums(ctx context.Context, hashes []s
 				continue
 			}
 			if !m.hasObjectMethod(ctx, &obj, objectMethodDelete) {
+				continue
+			}
+			if err := m.requireAllObjectMethod(ctx, &obj, objectMethodDelete); err != nil {
 				continue
 			}
 			seen[obj.Id] = struct{}{}
@@ -464,6 +481,10 @@ func (m *ObjectManager) CreateObjectAlias(ctx context.Context, aliasID, canonica
 }
 
 func (m *ObjectManager) deletableObjectIDs(ctx context.Context, ids []string) ([]string, error) {
+	return m.deletableObjectIDsForMethod(ctx, ids, true)
+}
+
+func (m *ObjectManager) deletableObjectIDsForMethod(ctx context.Context, ids []string, requireAll bool) ([]string, error) {
 	objects, err := m.db.GetBulkObjects(ctx, ids)
 	if err != nil {
 		return nil, err
@@ -471,6 +492,11 @@ func (m *ObjectManager) deletableObjectIDs(ctx context.Context, ids []string) ([
 	filtered := m.filterObjectsByMethod(ctx, objects, objectMethodDelete)
 	toDelete := make([]string, 0, len(filtered))
 	for _, obj := range filtered {
+		if requireAll {
+			if err := m.requireAllObjectMethod(ctx, &obj, objectMethodDelete); err != nil {
+				continue
+			}
+		}
 		toDelete = append(toDelete, obj.Id)
 	}
 	return toDelete, nil
@@ -504,10 +530,27 @@ func (m *ObjectManager) requireObjectMethod(ctx context.Context, obj *models.Int
 	return common.ErrUnauthorized
 }
 
+func (m *ObjectManager) requireAllObjectMethod(ctx context.Context, obj *models.InternalObject, method string) error {
+	resources := ObjectAccessResources(obj)
+	if len(resources) == 0 {
+		return m.RequireObjectResources(ctx, method, resources)
+	}
+	if authz.HasMethodAccess(ctx, method, resources) {
+		return nil
+	}
+	return common.ErrUnauthorized
+}
+
 func (m *ObjectManager) hasObjectMethod(ctx context.Context, obj *models.InternalObject, method string) bool {
 	method = strings.TrimSpace(method)
 	if method == "" {
 		return true
+	}
+	if strings.EqualFold(method, objectMethodRead) && obj != nil && obj.PublicRead {
+		return true
+	}
+	if strings.EqualFold(method, objectMethodRead) && obj != nil && obj.PublicReadPolicyKnown && len(ObjectAccessResources(obj)) == 0 {
+		return false
 	}
 	return authz.HasObjectMethodAccess(ctx, method, ObjectAccessResources(obj))
 }

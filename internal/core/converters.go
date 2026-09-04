@@ -261,6 +261,12 @@ func InternalRecordToInternalObject(r internalapi.InternalRecord, now time.Time)
 	if r.Hashes != nil {
 		checksums := make([]drs.Checksum, 0, len(*r.Hashes))
 		for k, v := range *r.Hashes {
+			if common.NormalizeChecksumType(k) == "sha256" {
+				if normalized := syfoncommon.NormalizeOid(v); normalized != "" {
+					k = "sha256"
+					v = normalized
+				}
+			}
 			checksums = append(checksums, drs.Checksum{Type: k, Checksum: v})
 		}
 		obj.Checksums = checksums

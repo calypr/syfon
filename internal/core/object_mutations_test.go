@@ -8,6 +8,7 @@ import (
 
 	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/db"
+	"github.com/calypr/syfon/internal/db/sqlite"
 	"github.com/calypr/syfon/internal/models"
 )
 
@@ -174,8 +175,8 @@ func TestRegisterObjects_CanonicalizesProjectChecksumDuplicates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetObject(alias) error: %v", err)
 	}
-	if aliasObj.Id != "did-2" {
-		t.Fatalf("expected alias lookup to preserve requested did, got %q", aliasObj.Id)
+	if aliasObj.Id != "did-1" {
+		t.Fatalf("expected alias lookup to return canonical did-1, got %q", aliasObj.Id)
 	}
 	scopeIDs, err := om.ListObjectIDsByScope(context.Background(), "org", "proj", "")
 	if err != nil {
@@ -183,5 +184,103 @@ func TestRegisterObjects_CanonicalizesProjectChecksumDuplicates(t *testing.T) {
 	}
 	if !slices.Equal(scopeIDs, []string{"did-1"}) {
 		t.Fatalf("unexpected scoped ids: %#v", scopeIDs)
+	}
+}
+
+func TestRegisterObjects_ReusesContentAcrossProjects(t *testing.T) {
+	database, err := sqlite.NewSqliteDB(":memory:")
+	if err != nil {
+		t.Fatalf("NewSqliteDB failed: %v", err)
+	}
+	om := NewObjectManager(database, nil)
+	sha := "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+	now := time.Date(2026, 9, 4, 16, 0, 0, 0, time.UTC)
+	later := now.Add(time.Minute)
+	firstResource := "/organization/org/project/first"
+	secondResource := "/organization/org/project/second"
+
+	first := models.InternalObject{
+		Authorizations: map[string][]string{"org": {"first"}},
+		DrsObject: drs.DrsObject{
+			Id:               "canonical-did",
+			Name:             ptr("first.tsv"),
+			Size:             42,
+			CreatedTime:      now,
+			UpdatedTime:      &now,
+			Checksums:        []drs.Checksum{{Type: "sha256", Checksum: sha}},
+			ControlledAccess: &[]string{firstResource},
+			AccessMethods: &[]drs.AccessMethod{{
+				Type: "s3",
+				AccessUrl: &struct {
+					Headers *[]string `json:"headers,omitempty"`
+					Url     string    `json:"url"`
+				}{Url: "s3://bucket/first"},
+			}},
+		},
+	}
+	second := models.InternalObject{
+		Authorizations: map[string][]string{"org": {"second"}},
+		DrsObject: drs.DrsObject{
+			Id:               "second-did",
+			Name:             ptr("second.tsv"),
+			Size:             42,
+			CreatedTime:      later,
+			UpdatedTime:      &later,
+			Checksums:        []drs.Checksum{{Type: "sha256", Checksum: sha}},
+			ControlledAccess: &[]string{secondResource},
+			AccessMethods: &[]drs.AccessMethod{{
+				Type: "s3",
+				AccessUrl: &struct {
+					Headers *[]string `json:"headers,omitempty"`
+					Url     string    `json:"url"`
+				}{Url: "s3://bucket/second"},
+			}},
+		},
+	}
+
+	if err := om.RegisterObjects(context.Background(), []models.InternalObject{first}); err != nil {
+		t.Fatalf("RegisterObjects(first) error: %v", err)
+	}
+	if err := om.RegisterObjects(context.Background(), []models.InternalObject{second}); err != nil {
+		t.Fatalf("RegisterObjects(second) error: %v", err)
+	}
+
+	physicalRecords, err := database.GetObjectsByChecksum(context.Background(), sha)
+	if err != nil {
+		t.Fatalf("database.GetObjectsByChecksum error: %v", err)
+	}
+	if len(physicalRecords) != 1 {
+		t.Fatalf("expected one physical content record, got %d", len(physicalRecords))
+	}
+
+	byChecksum, err := om.GetObjectsByChecksum(context.Background(), sha, "")
+	if err != nil {
+		t.Fatalf("GetObjectsByChecksum error: %v", err)
+	}
+	if len(byChecksum) != 1 {
+		t.Fatalf("expected one canonical checksum record, got %d", len(byChecksum))
+	}
+	canonical := byChecksum[0]
+	if canonical.Id != first.Id {
+		t.Fatalf("expected deterministic read representative %q, got %q", first.Id, canonical.Id)
+	}
+	if canonical.AccessMethods == nil || len(*canonical.AccessMethods) != 2 {
+		t.Fatalf("expected both access methods, got %+v", canonical.AccessMethods)
+	}
+	if canonical.ControlledAccess == nil || len(*canonical.ControlledAccess) != 2 || !slices.Contains(*canonical.ControlledAccess, firstResource) || !slices.Contains(*canonical.ControlledAccess, secondResource) {
+		t.Fatalf("expected both controlled-access resources, got %+v", canonical.ControlledAccess)
+	}
+
+	for _, ident := range []string{first.Id, second.Id} {
+		got, err := om.GetObject(context.Background(), ident, "")
+		if err != nil {
+			t.Fatalf("GetObject(%q) error: %v", ident, err)
+		}
+		if got.Id != canonical.Id {
+			t.Fatalf("GetObject(%q) returned id %q, want canonical %q", ident, got.Id, canonical.Id)
+		}
+		if got.AccessMethods == nil || len(*got.AccessMethods) != 2 {
+			t.Fatalf("GetObject(%q) lost merged access methods: %+v", ident, got.AccessMethods)
+		}
 	}
 }

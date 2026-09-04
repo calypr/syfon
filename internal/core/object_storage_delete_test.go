@@ -2,10 +2,10 @@ package core
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 
@@ -85,7 +85,7 @@ func TestDeleteStorageTargetFileProvider(t *testing.T) {
 	}
 }
 
-func TestBulkDeleteObjectsWithOptionsUsesS3BatchDelete(t *testing.T) {
+func TestBulkDeleteObjectsWithStorageRejectsWithoutSideEffects(t *testing.T) {
 	deleter := &fakeS3ObjectDeleter{}
 	restore := replaceS3ObjectDeleterForTest(deleter)
 	defer restore()
@@ -117,21 +117,21 @@ func TestBulkDeleteObjectsWithOptionsUsesS3BatchDelete(t *testing.T) {
 	}
 	om := NewObjectManager(db, &capturingURLManager{})
 
-	if err := om.BulkDeleteObjectsWithOptions(context.Background(), []string{"obj-1", "obj-2", "obj-3"}, DeleteOptions{DeleteStorageData: true}); err != nil {
-		t.Fatalf("BulkDeleteObjectsWithOptions failed: %v", err)
+	if err := om.DeleteObjectWithOptions(context.Background(), "obj-1", DeleteOptions{DeleteStorageData: true}); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("expected explicit single-object storage deletion conflict, got %v", err)
+	}
+	if err := om.BulkDeleteObjectsWithOptions(context.Background(), []string{"obj-1", "obj-2", "obj-3"}, DeleteOptions{DeleteStorageData: true}); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("expected explicit storage deletion conflict, got %v", err)
 	}
 	if deleter.deleteObjectCalls != 0 {
 		t.Fatalf("expected no single DeleteObject calls, got %d", deleter.deleteObjectCalls)
 	}
-	if len(deleter.deleteObjectsKeys) != 1 {
-		t.Fatalf("expected one DeleteObjects call, got %d", len(deleter.deleteObjectsKeys))
-	}
-	if got, want := deleter.deleteObjectsKeys[0], []string{"path/a.txt", "path/b.txt"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("unexpected batch keys: got %+v want %+v", got, want)
+	if len(deleter.deleteObjectsKeys) != 0 {
+		t.Fatalf("storage was modified before rejecting deletion: %+v", deleter.deleteObjectsKeys)
 	}
 	for _, id := range []string{"obj-1", "obj-2", "obj-3"} {
-		if _, exists := db.Objects[id]; exists {
-			t.Fatalf("expected %s to be removed from db", id)
+		if _, exists := db.Objects[id]; !exists {
+			t.Fatalf("rejected deletion removed %s from db", id)
 		}
 	}
 }
@@ -166,7 +166,7 @@ func TestDeleteS3ObjectsChunksLargeBatches(t *testing.T) {
 	}
 }
 
-func TestStorageTargetsForScopedObjectUseCanonicalChecksumPath(t *testing.T) {
+func TestStorageTargetsForScopedObjectPreserveStoredLocation(t *testing.T) {
 	checksum := strings.Repeat("a", 64)
 	om := NewObjectManager(&testutils.MockDatabase{
 		Credentials: map[string]models.S3Credential{
@@ -209,11 +209,11 @@ func TestStorageTargetsForScopedObjectUseCanonicalChecksumPath(t *testing.T) {
 	if len(targets) != 1 {
 		t.Fatalf("expected one canonical target, got %+v", targets)
 	}
-	if targets[0].bucket != "syfon-e2e-bucket" {
-		t.Fatalf("expected scoped bucket syfon-e2e-bucket, got %q", targets[0].bucket)
+	if targets[0].bucket != "objects" {
+		t.Fatalf("expected stored bucket objects, got %q", targets[0].bucket)
 	}
-	if want := "program-root/project-subpath/" + checksum; targets[0].key != want {
-		t.Fatalf("expected canonical delete key %q, got %q", want, targets[0].key)
+	if want := "f781273b-52eb-5ac2-a484-775235eef303"; targets[0].key != want {
+		t.Fatalf("expected stored key %q, got %q", want, targets[0].key)
 	}
 }
 

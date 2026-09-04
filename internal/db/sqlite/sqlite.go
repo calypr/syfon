@@ -39,17 +39,31 @@ func NewSqliteDB(dsn string) (*SqliteDB, error) {
 }
 
 func sqliteDSN(dsn string) string {
-	if strings.Contains(dsn, "_foreign_keys=") {
-		return dsn
+	if marker := strings.Index(dsn, "_txlock="); marker >= 0 {
+		end := strings.IndexAny(dsn[marker:], "&")
+		if end < 0 {
+			end = len(dsn) - marker
+		}
+		return dsn[:marker] + "_txlock=immediate" + dsn[marker+end:]
+	}
+	params := make([]string, 0, 2)
+	if !strings.Contains(dsn, "_foreign_keys=") {
+		params = append(params, "_foreign_keys=on")
+	}
+	if !strings.Contains(dsn, "_txlock=") {
+		params = append(params, "_txlock=immediate")
 	}
 	if dsn == ":memory:" {
-		return "file::memory:?_foreign_keys=on"
+		return "file::memory:?" + strings.Join(params, "&")
+	}
+	if len(params) == 0 {
+		return dsn
 	}
 	separator := "?"
 	if strings.Contains(dsn, "?") {
 		separator = "&"
 	}
-	return dsn + separator + "_foreign_keys=on"
+	return dsn + separator + strings.Join(params, "&")
 }
 
 func (db *SqliteDB) initSchema() error {
@@ -80,6 +94,11 @@ func (db *SqliteDB) initSchema() error {
 			checksum TEXT,
 			FOREIGN KEY(object_id) REFERENCES drs_object(id) ON DELETE CASCADE
 		)`,
+		`CREATE TABLE IF NOT EXISTS drs_object_read_policy (
+			object_id TEXT PRIMARY KEY,
+			public_read BOOLEAN NOT NULL DEFAULT 0,
+			FOREIGN KEY(object_id) REFERENCES drs_object(id) ON DELETE CASCADE
+		)`,
 		`CREATE INDEX IF NOT EXISTS idx_drs_object_access_method_object_id ON drs_object_access_method(object_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_drs_object_controlled_access_object_id ON drs_object_controlled_access(object_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_drs_object_controlled_access_resource ON drs_object_controlled_access(resource)`,
@@ -88,6 +107,7 @@ func (db *SqliteDB) initSchema() error {
 		`CREATE INDEX IF NOT EXISTS idx_drs_object_checksum_object_id ON drs_object_checksum(object_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_drs_object_checksum_checksum ON drs_object_checksum(checksum)`,
 		`CREATE INDEX IF NOT EXISTS idx_drs_object_checksum_checksum_type_object_id ON drs_object_checksum(checksum, type, object_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_drs_object_checksum_sha256_identity ON drs_object_checksum(replace(lower(trim(type)), '-', ''), replace(lower(trim(checksum)), 'sha256:', ''), object_id)`,
 		`CREATE TABLE IF NOT EXISTS drs_object_alias (
 			alias_id TEXT PRIMARY KEY,
 			object_id TEXT NOT NULL,

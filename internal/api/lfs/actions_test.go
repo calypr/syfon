@@ -74,7 +74,7 @@ func TestResolveObjectForOIDFallsBackToChecksum(t *testing.T) {
 	}
 }
 
-func TestPrepareDownloadActions_RewritesScopedObjectURL(t *testing.T) {
+func TestPrepareDownloadActions_PreservesReplicaURL(t *testing.T) {
 	oid := "download-scoped"
 	db := &testutils.MockDatabase{
 		Objects: map[string]*drs.DrsObject{
@@ -109,12 +109,12 @@ func TestPrepareDownloadActions_RewritesScopedObjectURL(t *testing.T) {
 	if actions == nil || actions.Download == nil || actions.Download.Href == "" {
 		t.Fatalf("expected signed download action, got %+v", actions)
 	}
-	wantURL := "s3://bforepc/bforepc-prod/OHSU/slide.ome.tiff"
+	wantURL := "s3://bforepc-prod/OHSU/slide.ome.tiff"
 	if um.signURL != wantURL {
-		t.Fatalf("expected scoped LFS download URL %q, got %q", wantURL, um.signURL)
+		t.Fatalf("expected stored LFS replica URL %q, got %q", wantURL, um.signURL)
 	}
-	if um.signID != "bforepc" {
-		t.Fatalf("expected signer credential bucket bforepc, got %q", um.signID)
+	if um.signID != "bforepc-prod" {
+		t.Fatalf("expected signer credential bucket bforepc-prod, got %q", um.signID)
 	}
 }
 

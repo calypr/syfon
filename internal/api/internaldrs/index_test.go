@@ -2,12 +2,14 @@ package internaldrs
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -19,6 +21,7 @@ import (
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/db"
+	"github.com/calypr/syfon/internal/db/sqlite"
 	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/testutils"
 	"github.com/gofiber/fiber/v3"
@@ -664,6 +667,116 @@ func TestHandleInternalList_HashTypeFiltering(t *testing.T) {
 	}
 }
 
+func TestHandleInternalList_ScopedFiltersKeepProjectPhysicalRecord(t *testing.T) {
+	fixturePath := filepath.Join(t.TempDir(), "legacy.sqlite")
+	database, err := sqlite.NewSqliteDB(fixturePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := sql.Open("sqlite3", fixturePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer raw.Close()
+	om := core.NewObjectManager(database, &testutils.MockUrlManager{})
+	sha := strings.Repeat("a", 64)
+	projectAResource := "/organization/org/project/p1"
+	projectBResource := "/organization/org/project/p2"
+	projectAURL := "s3://bucket/project-a"
+	projectBURL := "s3://bucket/project-b"
+	now := time.Date(2026, 9, 4, 12, 0, 0, 0, time.UTC)
+	later := now.Add(time.Minute)
+	for _, obj := range []models.InternalObject{
+		{
+			Authorizations: map[string][]string{"org": {"p1"}},
+			DrsObject: drs.DrsObject{
+				Id:               "project-a-did",
+				CreatedTime:      now,
+				UpdatedTime:      &now,
+				Checksums:        []drs.Checksum{{Type: "sha256", Checksum: sha}},
+				ControlledAccess: &[]string{projectAResource},
+				AccessMethods: &[]drs.AccessMethod{{
+					Type: drs.AccessMethodTypeS3,
+					AccessUrl: &struct {
+						Headers *[]string `json:"headers,omitempty"`
+						Url     string    `json:"url"`
+					}{Url: projectAURL},
+				}},
+			},
+		},
+		{
+			Authorizations: map[string][]string{"org": {"p2"}},
+			DrsObject: drs.DrsObject{
+				Id:               "project-b-did",
+				CreatedTime:      later,
+				UpdatedTime:      &later,
+				Checksums:        []drs.Checksum{{Type: "sha256", Checksum: sha}},
+				ControlledAccess: &[]string{projectBResource},
+				AccessMethods: &[]drs.AccessMethod{{
+					Type: drs.AccessMethodTypeS3,
+					AccessUrl: &struct {
+						Headers *[]string `json:"headers,omitempty"`
+						Url     string    `json:"url"`
+					}{Url: projectBURL},
+				}},
+			},
+		},
+	} {
+		if _, err := raw.Exec(`INSERT INTO drs_object (id,size,created_time,updated_time,name,version,description) VALUES (?,0,?,?, '', '', '')`, obj.Id, obj.CreatedTime, *obj.UpdatedTime); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := raw.Exec(`INSERT INTO drs_object_checksum (object_id,type,checksum) VALUES (?, 'sha256', ?)`, obj.Id, sha); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := raw.Exec(`INSERT INTO drs_object_controlled_access (object_id,resource) VALUES (?, ?)`, obj.Id, (*obj.ControlledAccess)[0]); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := raw.Exec(`INSERT INTO drs_object_access_method (object_id,type,url) VALUES (?, 's3', ?)`, obj.Id, (*obj.AccessMethods)[0].AccessUrl.Url); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	queries := []string{
+		"/index?hash=sha256:" + sha + "&organization=org&project=p1",
+		"/index?url=" + url.QueryEscape(projectAURL) + "&organization=org&project=p1",
+	}
+	for _, query := range queries {
+		t.Run(query, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, query, nil)
+			rr := doInternalDRSTestRequest(req, om)
+			if rr.Code != http.StatusOK {
+				t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+			}
+			var payload internalapi.ListRecordsResponse
+			if err := json.NewDecoder(rr.Body).Decode(&payload); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			if payload.Records == nil || len(*payload.Records) != 1 {
+				t.Fatalf("expected one project record, got %+v", payload.Records)
+			}
+			got := (*payload.Records)[0]
+			if got.Did != "project-a-did" || got.AccessMethods == nil || len(*got.AccessMethods) != 1 || (*got.AccessMethods)[0].AccessUrl == nil || (*got.AccessMethods)[0].AccessUrl.Url != projectAURL {
+				t.Fatalf("scoped response included another project's canonical data: %+v", got)
+			}
+		})
+	}
+}
+
+func TestInternalRecordToInternalObject_NormalizesSHA256(t *testing.T) {
+	upper := strings.ToUpper(strings.Repeat("ab", 32))
+	hashes := internalapi.HashInfo{"SHA-256": "sha256:" + upper}
+	obj, err := core.InternalRecordToInternalObject(internalapi.InternalRecord{
+		Did:    "normalized-checksum",
+		Hashes: &hashes,
+	}, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("InternalRecordToInternalObject failed: %v", err)
+	}
+	if len(obj.Checksums) != 1 || obj.Checksums[0].Type != "sha256" || obj.Checksums[0].Checksum != strings.ToLower(upper) {
+		t.Fatalf("checksum was not canonicalized: %+v", obj.Checksums)
+	}
+}
+
 func TestHandleInternalList_HashPagination(t *testing.T) {
 	now := time.Now().UTC()
 	mockDB := &testutils.MockDatabase{
@@ -1120,11 +1233,14 @@ func TestHandleInternalDeleteByQuery(t *testing.T) {
 		if rr.Code != http.StatusOK {
 			t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
 		}
-		if _, ok := mockDB.Objects["obj-1"]; ok {
-			t.Fatal("expected obj-1 to be deleted")
+		if _, ok := mockDB.Objects["obj-1"]; !ok {
+			t.Fatal("grant removal must retain obj-1 content")
 		}
-		if _, ok := mockDB.Objects["obj-2"]; ok {
-			t.Fatal("expected obj-2 to be deleted")
+		if _, ok := mockDB.Objects["obj-2"]; !ok {
+			t.Fatal("grant removal must retain obj-2 content")
+		}
+		if len(mockDB.ObjectAuthz) != 0 {
+			t.Fatalf("project grants remain: %+v", mockDB.ObjectAuthz)
 		}
 		if !strings.Contains(rr.Body.String(), `"deleted":2`) {
 			t.Fatalf("expected deleted count in response, got %s", rr.Body.String())
@@ -1157,11 +1273,14 @@ func TestHandleInternalDeleteByQuery_AuthzParity(t *testing.T) {
 			if rr.Code != http.StatusOK {
 				t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
 			}
-			if _, ok := mockDB.Objects["obj-1"]; ok {
-				t.Fatal("expected obj-1 to be deleted")
+			if _, ok := mockDB.Objects["obj-1"]; !ok {
+				t.Fatal("grant removal must retain obj-1 content")
 			}
-			if _, ok := mockDB.Objects["obj-2"]; ok {
-				t.Fatal("expected obj-2 to be deleted")
+			if _, ok := mockDB.Objects["obj-2"]; !ok {
+				t.Fatal("grant removal must retain obj-2 content")
+			}
+			if len(mockDB.ObjectAuthz) != 0 {
+				t.Fatalf("project grants remain: %+v", mockDB.ObjectAuthz)
 			}
 			if !strings.Contains(rr.Body.String(), `"deleted":2`) {
 				t.Fatalf("expected deleted count in response, got %s", rr.Body.String())

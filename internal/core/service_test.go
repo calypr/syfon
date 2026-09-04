@@ -10,6 +10,7 @@ import (
 	"github.com/calypr/syfon/apigen/server/drs"
 	internalauth "github.com/calypr/syfon/internal/auth"
 	"github.com/calypr/syfon/internal/common"
+	"github.com/calypr/syfon/internal/db"
 	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/testutils"
 	"github.com/calypr/syfon/internal/urlmanager"
@@ -202,8 +203,8 @@ func TestObjectManagerGetObjectLookupPaths(t *testing.T) {
 			ident:   "alias-1",
 			method:  "read",
 			ctx:     buildGen3Context(map[string]map[string]bool{"/programs/data_file": {"read": true}}),
-			wantID:  "alias-1",
-			wantURI: "drs://alias-1",
+			wantID:  "canonical-1",
+			wantURI: "drs://canonical-1",
 		},
 		{
 			name: "access denied",
@@ -399,37 +400,38 @@ func TestObjectManagerLifecycleAuthorization(t *testing.T) {
 		}
 	})
 
-	t.Run("replace enforces update on existing and replacement resources", func(t *testing.T) {
-		db := &coreTestDB{MockDatabase: &testutils.MockDatabase{
-			Objects: map[string]*drs.DrsObject{
-				"obj": {Id: "obj"},
-			},
-			ObjectAuthz: map[string]map[string][]string{
-				"obj": {"old": {"scope"}},
-			},
-		}}
-		om := NewObjectManager(db, &capturingURLManager{})
+	t.Run("replace requires current update and new grant create with read", func(t *testing.T) {
+		database := db.NewInMemoryDB()
+		om := NewObjectManager(database, &capturingURLManager{})
+		if err := om.RegisterObjects(context.Background(), []models.InternalObject{{
+			DrsObject:      drs.DrsObject{Id: "obj"},
+			Authorizations: map[string][]string{"old": {"scope"}},
+		}}); err != nil {
+			t.Fatal(err)
+		}
 		replacement := models.InternalObject{
 			DrsObject:      drs.DrsObject{Id: "obj", Name: common.Ptr("updated")},
 			Authorizations: map[string][]string{"new": {"scope"}},
 		}
-
 		err := om.ReplaceObjects(buildGen3Context(map[string]map[string]bool{
 			"/programs/old/projects/scope": {"update": true},
 		}), []models.InternalObject{replacement})
 		if !errors.Is(err, common.ErrUnauthorized) {
-			t.Fatalf("expected missing replacement update privilege to be unauthorized, got %v", err)
+			t.Fatalf("expected unauthorized grant replacement, got %v", err)
 		}
-
 		err = om.ReplaceObjects(buildGen3Context(map[string]map[string]bool{
-			"/programs/old/projects/scope": {"update": true},
-			"/programs/new/projects/scope": {"update": true},
+			"/programs/old/projects/scope": {"update": true, "read": true},
+			"/programs/new/projects/scope": {"create": true},
 		}), []models.InternalObject{replacement})
 		if err != nil {
-			t.Fatalf("expected replacement update to succeed: %v", err)
+			t.Fatalf("authorized replacement: %v", err)
 		}
-		if got := common.StringVal(db.Objects["obj"].Name); got != "updated" {
-			t.Fatalf("expected replacement write, got name %q", got)
+		object, err := database.GetObject(context.Background(), "obj")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := common.StringVal(object.Name); got != "updated" {
+			t.Fatalf("replacement name = %q", got)
 		}
 	})
 
@@ -570,8 +572,8 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 		if count != 1 {
 			t.Fatalf("expected 1 deletion, got %d", count)
 		}
-		if _, ok := db.Objects["obj-a"]; ok {
-			t.Fatalf("expected obj-a to be deleted")
+		if _, ok := db.Objects["obj-a"]; !ok {
+			t.Fatalf("grant removal must retain obj-a content")
 		}
 		if _, ok := db.Objects["obj-b"]; !ok {
 			t.Fatalf("expected obj-b to remain")
@@ -699,7 +701,7 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 		}
 	})
 
-	t.Run("object signing prepends configured bucket scope prefix to imported relative key", func(t *testing.T) {
+	t.Run("object download preserves imported physical key", func(t *testing.T) {
 		mockDB := &testutils.MockDatabase{
 			BucketScopes: map[string]models.BucketScope{
 				"calypr|training": {
@@ -723,7 +725,7 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 		if err != nil {
 			t.Fatalf("SignObjectURL failed: %v", err)
 		}
-		wantURL := "s3://calypr/org-root/project-root/008b435e-c1da-58b8-80f1-3ad2882c43cd/542504"
+		wantURL := "s3://calypr/008b435e-c1da-58b8-80f1-3ad2882c43cd/542504"
 		if signed != "signed:"+wantURL {
 			t.Fatalf("unexpected signed url: %s", signed)
 		}
@@ -733,12 +735,12 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 		if _, err := om.SignObjectURL(context.Background(), obj, "s3://calypr/another-object", urlmanager.SignOptions{}); err != nil {
 			t.Fatalf("second SignObjectURL failed: %v", err)
 		}
-		if mockDB.GetBucketScopeCalls != 2 {
-			t.Fatalf("expected bucket scope to be cached after first lookup, got %d db lookups", mockDB.GetBucketScopeCalls)
+		if mockDB.GetBucketScopeCalls != 0 {
+			t.Fatalf("download must not consult project scopes, got %d db lookups", mockDB.GetBucketScopeCalls)
 		}
 	})
 
-	t.Run("object signing rewrites alias bucket to scoped canonical bucket", func(t *testing.T) {
+	t.Run("object download preserves stored bucket despite project scope", func(t *testing.T) {
 		mockDB := &testutils.MockDatabase{
 			BucketScopes: map[string]models.BucketScope{
 				"gdc_mirror|gdc_mirror": {
@@ -762,7 +764,7 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 		if err != nil {
 			t.Fatalf("SignObjectURL failed: %v", err)
 		}
-		wantURL := "s3://bforepc-prod/bforepc/223bebff-debb-555c-bd59-5372f106c76c/4413832f86f331fc270de6d2263e13ac865d4524eef701ec8f4a342feb2f4300"
+		wantURL := "s3://calypr/223bebff-debb-555c-bd59-5372f106c76c/4413832f86f331fc270de6d2263e13ac865d4524eef701ec8f4a342feb2f4300"
 		if um.signURLAccessURL != wantURL {
 			t.Fatalf("expected scoped storage url %q, got %q", wantURL, um.signURLAccessURL)
 		}
@@ -839,7 +841,7 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 		}
 	})
 
-	t.Run("object storage delete resolves scoped bucket path before deriving delete target", func(t *testing.T) {
+	t.Run("object storage target preserves stored key", func(t *testing.T) {
 		mockDB := &testutils.MockDatabase{
 			Objects: map[string]*drs.DrsObject{
 				"obj-delete": {
@@ -883,12 +885,12 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 		if got, want := targets[0].bucket, "cbds-minio"; got != want {
 			t.Fatalf("unexpected target bucket: got %q want %q", got, want)
 		}
-		if got, want := targets[0].key, "cbds/6d1bf6c2-917d-545e-b44d-8e28f96ec170"; got != want {
+		if got, want := targets[0].key, "6d1bf6c2-917d-545e-b44d-8e28f96ec170"; got != want {
 			t.Fatalf("unexpected target key: got %q want %q", got, want)
 		}
 	})
 
-	t.Run("object signing routes upload and download paths through bucket scope mapping", func(t *testing.T) {
+	t.Run("object signing scopes uploads and preserves download replicas", func(t *testing.T) {
 		db := &coreTestDB{
 			MockDatabase: &testutils.MockDatabase{
 				BucketScopes: map[string]models.BucketScope{
@@ -916,14 +918,14 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 			if err != nil {
 				t.Fatalf("SignObjectURL download failed: %v", err)
 			}
-			if signed != "signed:"+wantURL {
-				t.Fatalf("unexpected signed download URL: got %q want %q", signed, "signed:"+wantURL)
+			if signed != "signed:"+sourceURL {
+				t.Fatalf("unexpected signed download URL: got %q want %q", signed, "signed:"+sourceURL)
 			}
-			if um.signURLBucket != "bforepc" {
-				t.Fatalf("expected download signer bucket bforepc, got %q", um.signURLBucket)
+			if um.signURLBucket != "bforepc-prod" {
+				t.Fatalf("expected download signer bucket bforepc-prod, got %q", um.signURLBucket)
 			}
-			if um.signURLAccessURL != wantURL {
-				t.Fatalf("expected download storage URL %q, got %q", wantURL, um.signURLAccessURL)
+			if um.signURLAccessURL != sourceURL {
+				t.Fatalf("expected download storage URL %q, got %q", sourceURL, um.signURLAccessURL)
 			}
 		})
 
@@ -952,14 +954,14 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 			if err != nil {
 				t.Fatalf("SignObjectDownloadPart failed: %v", err)
 			}
-			if partURL != "download:"+wantURL {
-				t.Fatalf("unexpected signed part URL: got %q want %q", partURL, "download:"+wantURL)
+			if partURL != "download:"+sourceURL {
+				t.Fatalf("unexpected signed part URL: got %q want %q", partURL, "download:"+sourceURL)
 			}
-			if um.signDownloadBucket != "bforepc" {
-				t.Fatalf("expected part signer bucket bforepc, got %q", um.signDownloadBucket)
+			if um.signDownloadBucket != "bforepc-prod" {
+				t.Fatalf("expected part signer bucket bforepc-prod, got %q", um.signDownloadBucket)
 			}
-			if um.signDownloadURL != wantURL {
-				t.Fatalf("expected part storage URL %q, got %q", wantURL, um.signDownloadURL)
+			if um.signDownloadURL != sourceURL {
+				t.Fatalf("expected part storage URL %q, got %q", sourceURL, um.signDownloadURL)
 			}
 		})
 	})
@@ -1025,7 +1027,7 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 		obj := &models.InternalObject{
 			Authorizations: map[string][]string{"calypr": {"training"}},
 		}
-		if _, err := om.SignObjectURL(context.Background(), obj, "s3://calypr/relative-key", urlmanager.SignOptions{}); err != nil {
+		if _, err := om.SignObjectURL(context.Background(), obj, "s3://calypr/relative-key", urlmanager.SignOptions{Method: "PUT"}); err != nil {
 			t.Fatalf("SignObjectURL failed: %v", err)
 		}
 		if mockDB.GetBucketScopeCalls != 1 {

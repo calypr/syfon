@@ -412,8 +412,8 @@ func TestSqliteDB_ObjectAliasLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetObject(alias) failed: %v", err)
 	}
-	if aliased.Id != aliasID {
-		t.Fatalf("expected alias id %s, got %s", aliasID, aliased.Id)
+	if aliased.Id != canonicalID {
+		t.Fatalf("expected canonical id %s, got %s", canonicalID, aliased.Id)
 	}
 	if len(aliased.Checksums) != 1 || aliased.Checksums[0].Checksum != checksum {
 		t.Fatalf("expected checksum to resolve through alias, got %+v", aliased.Checksums)

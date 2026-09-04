@@ -42,22 +42,19 @@ func TestSyfonListAndRemoveCommands(t *testing.T) {
 	}
 
 	out, err = executeRootCommand(t, "--server", server.URL, "rm", "--did", did)
-	if err != nil {
-		t.Fatalf("rm failed: %v output=%s", err, out)
-	}
-	if !strings.Contains(out, "removed "+did+" and attempted storage purge") {
-		t.Fatalf("unexpected rm output: %s", out)
+	if err == nil || !strings.Contains(err.Error(), "409") {
+		t.Fatalf("expected explicit storage purge conflict, got err=%v output=%s", err, out)
 	}
 
 	out, err = executeRootCommand(t, "--server", server.URL, "ls")
 	if err != nil {
 		t.Fatalf("ls after rm failed: %v output=%s", err, out)
 	}
-	if strings.Contains(out, did) {
-		t.Fatalf("expected did to be removed, got output: %s", out)
+	if !strings.Contains(out, did) {
+		t.Fatalf("rejected deletion removed metadata: %s", out)
 	}
-	if _, err := os.Stat(storagePath); !os.IsNotExist(err) {
-		t.Fatalf("expected backing storage to be removed, stat err=%v", err)
+	if _, err := os.Stat(storagePath); err != nil {
+		t.Fatalf("rejected deletion modified backing storage: %v", err)
 	}
 }
 

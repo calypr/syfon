@@ -122,24 +122,9 @@ func (m *ObjectManager) storageTargetsForObject(ctx context.Context, obj *models
 
 		rawURL := strings.TrimSpace(am.AccessUrl.Url)
 		scopedURL := rawURL
-		var err error
-		if len(ObjectAccessResources(obj)) > 0 {
-			target, resolveErr := m.ResolveCanonicalStorageTarget(ctx, CanonicalStorageTargetRequest{
-				Object:         obj,
-				AccessURL:      rawURL,
-				PreferChecksum: true,
-			})
-			if resolveErr != nil {
-				err = resolveErr
-			} else {
-				scopedURL = target.URL
-			}
-		} else {
-			scopedURL, err = m.resolveScopedStorageURL(ctx, obj, rawURL)
-		}
-		if err != nil {
-			return nil, err
-		}
+		// Stored locations are physical replicas. Their bucket/key must remain
+		// exact through deletion; project scopes are upload-time concerns.
+		scopedURL = rawURL
 
 		target, ok, err := m.storageTargetFromURL(ctx, scopedURL)
 		if err != nil {
