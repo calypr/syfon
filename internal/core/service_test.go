@@ -735,8 +735,8 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 		if _, err := om.SignObjectURL(context.Background(), obj, "s3://calypr/another-object", urlmanager.SignOptions{}); err != nil {
 			t.Fatalf("second SignObjectURL failed: %v", err)
 		}
-		if mockDB.GetBucketScopeCalls != 0 {
-			t.Fatalf("download must not consult project scopes, got %d db lookups", mockDB.GetBucketScopeCalls)
+		if mockDB.GetBucketScopeCalls != 2 {
+			t.Fatalf("download compatibility lookup should consult the organization and project scopes once, got %d db lookups", mockDB.GetBucketScopeCalls)
 		}
 	})
 
@@ -890,7 +890,7 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 		}
 	})
 
-	t.Run("object signing scopes uploads and preserves download replicas", func(t *testing.T) {
+	t.Run("object signing scopes uploads and repairs legacy download replicas", func(t *testing.T) {
 		db := &coreTestDB{
 			MockDatabase: &testutils.MockDatabase{
 				BucketScopes: map[string]models.BucketScope{
@@ -918,14 +918,14 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 			if err != nil {
 				t.Fatalf("SignObjectURL download failed: %v", err)
 			}
-			if signed != "signed:"+sourceURL {
-				t.Fatalf("unexpected signed download URL: got %q want %q", signed, "signed:"+sourceURL)
+			if signed != "signed:"+wantURL {
+				t.Fatalf("unexpected signed download URL: got %q want %q", signed, "signed:"+wantURL)
 			}
-			if um.signURLBucket != "bforepc-prod" {
-				t.Fatalf("expected download signer bucket bforepc-prod, got %q", um.signURLBucket)
+			if um.signURLBucket != "bforepc" {
+				t.Fatalf("expected download signer bucket bforepc, got %q", um.signURLBucket)
 			}
-			if um.signURLAccessURL != sourceURL {
-				t.Fatalf("expected download storage URL %q, got %q", sourceURL, um.signURLAccessURL)
+			if um.signURLAccessURL != wantURL {
+				t.Fatalf("expected download storage URL %q, got %q", wantURL, um.signURLAccessURL)
 			}
 		})
 
@@ -954,14 +954,14 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 			if err != nil {
 				t.Fatalf("SignObjectDownloadPart failed: %v", err)
 			}
-			if partURL != "download:"+sourceURL {
-				t.Fatalf("unexpected signed part URL: got %q want %q", partURL, "download:"+sourceURL)
+			if partURL != "download:"+wantURL {
+				t.Fatalf("unexpected signed part URL: got %q want %q", partURL, "download:"+wantURL)
 			}
-			if um.signDownloadBucket != "bforepc-prod" {
-				t.Fatalf("expected part signer bucket bforepc-prod, got %q", um.signDownloadBucket)
+			if um.signDownloadBucket != "bforepc" {
+				t.Fatalf("expected part signer bucket bforepc, got %q", um.signDownloadBucket)
 			}
-			if um.signDownloadURL != sourceURL {
-				t.Fatalf("expected part storage URL %q, got %q", sourceURL, um.signDownloadURL)
+			if um.signDownloadURL != wantURL {
+				t.Fatalf("expected part storage URL %q, got %q", wantURL, um.signDownloadURL)
 			}
 		})
 	})

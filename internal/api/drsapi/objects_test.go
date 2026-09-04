@@ -117,7 +117,7 @@ func TestDRSHandlers(t *testing.T) {
 		}
 	})
 
-	t.Run("GetAccessURL_PreservesPhysicalReplica", func(t *testing.T) {
+	t.Run("GetAccessURL_MapsLegacyReplica", func(t *testing.T) {
 		db := &testutils.MockDatabase{
 			Objects: map[string]*drs.DrsObject{
 				"scoped-obj": {
@@ -155,12 +155,12 @@ func TestDRSHandlers(t *testing.T) {
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("expected 200, got %d", resp.StatusCode)
 		}
-		wantURL := "s3://bforepc-prod/OHSU/slide.ome.tiff"
+		wantURL := "s3://bforepc/bforepc-prod/OHSU/slide.ome.tiff"
 		if got := um.lastURL; got != wantURL {
 			t.Fatalf("expected stored replica URL %q, got %q", wantURL, got)
 		}
-		if got := um.lastAccess; got != "bforepc-prod" {
-			t.Fatalf("expected signer credential bucket %q, got %q", "bforepc-prod", got)
+		if got := um.lastAccess; got != "bforepc" {
+			t.Fatalf("expected signer credential bucket %q, got %q", "bforepc", got)
 		}
 		var access drs.AccessURL
 		if err := json.NewDecoder(resp.Body).Decode(&access); err != nil {
