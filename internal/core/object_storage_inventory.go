@@ -351,13 +351,13 @@ func (m *ObjectManager) resolveProjectStorageScopeTargetForMethod(ctx context.Co
 	}
 
 	scopes := make([]models.BucketScope, 0, 2)
-	if scope, found, err := m.lookupBucketScope(ctx, organization, ""); err != nil {
+	if scope, found, err := m.bucketCatalog.lookupBucketScope(ctx, organization, ""); err != nil {
 		return nil, err
 	} else if found {
 		scopes = append(scopes, scope)
 	}
 	if project != "" {
-		if scope, found, err := m.lookupBucketScope(ctx, organization, project); err != nil {
+		if scope, found, err := m.bucketCatalog.lookupBucketScope(ctx, organization, project); err != nil {
 			return nil, err
 		} else if found {
 			scopes = append(scopes, scope)
@@ -634,7 +634,7 @@ func (m *ObjectManager) resolveListValidationTarget(ctx context.Context, req Sto
 		result.ValidationStatus = storageListValidationStatusForError(req)
 		return result, nil, false
 	}
-	if !bucketVisibleToCaller(visible, target.bucket, credentialIDForCredential(*cred)) {
+	if !bucketVisibleToCaller(visible, target.bucket, m.bucketCatalog.credentialIDForCredential(*cred)) {
 		err := &StorageInspectError{Kind: StorageInspectPermissionDenied, Message: fmt.Sprintf("bucket %q is not visible to the caller", target.bucket)}
 		log.Printf("INFO: syfon_bulk_list_validate_visible id=%s bucket=%s key=%q visible_count=%d error=%q", result.ID, target.bucket, target.key, len(visible), err.Error())
 		result.Status, result.ErrorKind = classifyStorageProbeError(err)
