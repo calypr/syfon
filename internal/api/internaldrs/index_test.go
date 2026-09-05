@@ -20,7 +20,6 @@ import (
 	internalauth "github.com/calypr/syfon/internal/auth"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/core"
-	"github.com/calypr/syfon/internal/db"
 	"github.com/calypr/syfon/internal/db/sqlite"
 	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/testutils"
@@ -118,7 +117,7 @@ func TestHandleInternalList_ExactScopeListingDoesNotDependOnBrowseRows(t *testin
 }
 
 func TestHandleInternalList_CanonicalizesProjectChecksumDuplicates(t *testing.T) {
-	database := db.NewInMemoryDB()
+	database := testutils.NewInMemoryDB()
 	om := core.NewObjectManager(database, &testutils.MockUrlManager{})
 	now := time.Now().UTC()
 	later := now.Add(time.Minute)
@@ -206,7 +205,7 @@ func TestHandleInternalList_CanonicalizesProjectChecksumDuplicates(t *testing.T)
 }
 
 func TestHandleInternalList_FillsLimitAfterCanonicalizingDuplicates(t *testing.T) {
-	database := db.NewInMemoryDB()
+	database := testutils.NewInMemoryDB()
 	om := core.NewObjectManager(database, &testutils.MockUrlManager{})
 	now := time.Now().UTC()
 	later := now.Add(time.Minute)
@@ -304,7 +303,7 @@ func TestHandleInternalList_FillsLimitAfterCanonicalizingDuplicates(t *testing.T
 }
 
 func TestHandleInternalList_MergesSiblingAccessMethodsFromLegacyDuplicateRows(t *testing.T) {
-	database := db.NewInMemoryDB()
+	database := testutils.NewInMemoryDB()
 	om := core.NewObjectManager(database, &testutils.MockUrlManager{})
 	now := time.Now().UTC()
 	later := now.Add(time.Minute)

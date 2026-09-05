@@ -14,7 +14,6 @@ import (
 	"github.com/calypr/syfon/internal/api/routeutil"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/core"
-	"github.com/calypr/syfon/internal/db"
 	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/testutils"
 	"github.com/google/uuid"
@@ -364,7 +363,7 @@ func TestHandleInternalUploadURL_RewritesScopedObjectURL(t *testing.T) {
 
 func TestHandleInternalUploadURL_ResolvesRegisteredScopedObjectID(t *testing.T) {
 	ctx := t.Context()
-	database := db.NewInMemoryDB()
+	database := testutils.NewInMemoryDB()
 	om := core.NewObjectManager(database, &capturingMultipartURLManager{})
 	if err := om.SaveS3Credential(ctx, &models.S3Credential{Bucket: "syfon-e2e-bucket", Provider: "s3", Region: "us-east-1"}); err != nil {
 		t.Fatalf("SaveS3Credential failed: %v", err)
@@ -421,7 +420,7 @@ func TestHandleInternalUploadURL_ResolvesRegisteredScopedObjectID(t *testing.T) 
 
 func TestHandleInternalUploadURL_ResolvesRegisteredProjectScopedObjectWithoutQueryHints(t *testing.T) {
 	ctx := t.Context()
-	database := db.NewInMemoryDB()
+	database := testutils.NewInMemoryDB()
 	om := core.NewObjectManager(database, &capturingMultipartURLManager{})
 	if err := om.SaveS3Credential(ctx, &models.S3Credential{Bucket: "syfon-e2e-bucket", Provider: "s3", Region: "us-east-1"}); err != nil {
 		t.Fatalf("SaveS3Credential failed: %v", err)

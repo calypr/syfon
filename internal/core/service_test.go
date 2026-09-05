@@ -10,7 +10,6 @@ import (
 	"github.com/calypr/syfon/apigen/server/drs"
 	internalauth "github.com/calypr/syfon/internal/auth"
 	"github.com/calypr/syfon/internal/common"
-	"github.com/calypr/syfon/internal/db"
 	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/testutils"
 	"github.com/calypr/syfon/internal/urlmanager"
@@ -401,7 +400,7 @@ func TestObjectManagerLifecycleAuthorization(t *testing.T) {
 	})
 
 	t.Run("replace requires current update and new grant create with read", func(t *testing.T) {
-		database := db.NewInMemoryDB()
+		database := testutils.NewInMemoryDB()
 		om := NewObjectManager(database, &capturingURLManager{})
 		if err := om.RegisterObjects(context.Background(), []models.InternalObject{{
 			DrsObject:      drs.DrsObject{Id: "obj"},
