@@ -2,13 +2,11 @@ package repair
 
 import (
 	"context"
-	"net/http"
 	"testing"
 
 	"github.com/calypr/syfon/apigen/client/bucketapi"
 	drsapi "github.com/calypr/syfon/apigen/client/drs"
 	"github.com/calypr/syfon/apigen/client/internalapi"
-	"github.com/calypr/syfon/client/request"
 	syfoncommon "github.com/calypr/syfon/common"
 	intcommon "github.com/calypr/syfon/internal/common"
 )
@@ -22,7 +20,7 @@ func TestLegacyAccessURLWithCanonicalSiblingIsRemovable(t *testing.T) {
 			}),
 		}},
 		fakeBucketsForScope(t, "HTAN_INT", "BForePC", "s3://bforepc/bforepc-prod"),
-		&fakeRequester{},
+		&fakeStorageInspector{},
 	)
 
 	report, err := svc.Audit(context.Background(), Options{Organization: "HTAN_INT", Project: "BForePC"})
@@ -49,7 +47,7 @@ func TestLegacyAccessURLWithoutCanonicalSiblingIsRewritable(t *testing.T) {
 			}),
 		}},
 		fakeBucketsForScope(t, "HTAN_INT", "BForePC", "s3://bforepc/bforepc-prod"),
-		&fakeRequester{},
+		&fakeStorageInspector{},
 	)
 
 	report, err := svc.Audit(context.Background(), Options{Organization: "HTAN_INT", Project: "BForePC"})
@@ -75,7 +73,7 @@ func TestPathStyleAccessURLWithCanonicalSiblingIsRemovable(t *testing.T) {
 			}),
 		}},
 		fakeBucketsForScope(t, "HTAN_INT", "BForePC", "s3://bforepc-prod"),
-		&fakeRequester{},
+		&fakeStorageInspector{},
 	)
 
 	report, err := svc.Audit(context.Background(), Options{Organization: "HTAN_INT", Project: "BForePC"})
@@ -105,7 +103,7 @@ func TestPathStyleAccessURLWithoutCanonicalSiblingIsRewritable(t *testing.T) {
 			}),
 		}},
 		fakeBucketsForScope(t, "HTAN_INT", "BForePC", "s3://bforepc-prod"),
-		&fakeRequester{},
+		&fakeStorageInspector{},
 	)
 
 	report, err := svc.Audit(context.Background(), Options{Organization: "HTAN_INT", Project: "BForePC"})
@@ -134,7 +132,7 @@ func TestMissingControlledAccessRecoverableFromDeterministicScope(t *testing.T) 
 	svc := NewService(
 		&fakeIndex{records: []internalapi.InternalRecord{rec}},
 		fakeBucketsForScope(t, "HTAN_INT", "BForePC", "s3://bforepc/bforepc-prod"),
-		&fakeRequester{},
+		&fakeStorageInspector{},
 	)
 
 	report, err := svc.Audit(context.Background(), Options{Organization: "HTAN_INT", Project: "BForePC"})
@@ -155,7 +153,7 @@ func TestDuplicateSHAReportedWithoutAutofix(t *testing.T) {
 	svc := NewService(
 		&fakeIndex{records: []internalapi.InternalRecord{rec1, rec2}},
 		fakeBucketsForScope(t, "HTAN_INT", "BForePC", "s3://bforepc/bforepc-prod"),
-		&fakeRequester{},
+		&fakeStorageInspector{},
 	)
 
 	report, err := svc.Audit(context.Background(), Options{Organization: "HTAN_INT", Project: "BForePC"})
@@ -189,7 +187,7 @@ func TestApplyUpdatesAccessMethodsAndControlledAccess(t *testing.T) {
 	}
 	rec := recordWithMethods(t, did, "abc", nil, []string{"s3://bforepc/META/file.ndjson"})
 	idx := &fakeIndex{records: []internalapi.InternalRecord{rec}}
-	svc := NewService(idx, fakeBucketsForScope(t, "HTAN_INT", "BForePC", "s3://bforepc/bforepc-prod"), &fakeRequester{})
+	svc := NewService(idx, fakeBucketsForScope(t, "HTAN_INT", "BForePC", "s3://bforepc/bforepc-prod"), &fakeStorageInspector{})
 
 	result, err := svc.Apply(context.Background(), Options{Organization: "HTAN_INT", Project: "BForePC"})
 	if err != nil {
@@ -212,8 +210,8 @@ func TestApplyUpdatesAccessMethodsAndControlledAccess(t *testing.T) {
 
 func TestCheckStorageAddsMissingObjectFinding(t *testing.T) {
 	rec := recordWithMethods(t, "did-1", "abc", []string{"/organization/HTAN_INT/project/BForePC"}, []string{"s3://bforepc/bforepc-prod/did-1/abc"})
-	req := &fakeRequester{
-		err: &request.ResponseError{Method: http.MethodPost, URL: "/data/inspect", Status: http.StatusNotFound},
+	req := &fakeStorageInspector{
+		err: ErrStorageObjectNotFound,
 	}
 	svc := NewService(&fakeIndex{records: []internalapi.InternalRecord{rec}}, fakeBucketsForScope(t, "HTAN_INT", "BForePC", "s3://bforepc/bforepc-prod"), req)
 
@@ -235,6 +233,23 @@ func TestCheckStorageAddsMissingObjectFinding(t *testing.T) {
 	}
 }
 
+func TestCheckStorageWithNilInspectorSkipsProbes(t *testing.T) {
+	rec := recordWithMethods(t, "did-1", "abc", []string{"/organization/HTAN_INT/project/BForePC"}, []string{"s3://bforepc/bforepc-prod/did-1/abc"})
+	svc := NewService(
+		&fakeIndex{records: []internalapi.InternalRecord{rec}},
+		fakeBucketsForScope(t, "HTAN_INT", "BForePC", "s3://bforepc/bforepc-prod"),
+		nil,
+	)
+
+	report, err := svc.Audit(context.Background(), Options{Organization: "HTAN_INT", Project: "BForePC", CheckStorage: true})
+	if err != nil {
+		t.Fatalf("audit failed with nil storage inspector: %v", err)
+	}
+	if len(report.Objects) != 0 {
+		t.Fatalf("expected no findings when storage inspection is unavailable, got %d", len(report.Objects))
+	}
+}
+
 func TestSingleControlledAccessWithoutScopeTargetDoesNotPanicOrMutate(t *testing.T) {
 	resource, _ := syfoncommon.ResourcePath("HTAN_INT", "BForePC")
 	rec := recordWithMethods(t, "did-1", "abc", []string{resource}, []string{"s3://bforepc/legacy/file.ndjson"})
@@ -251,7 +266,7 @@ func TestSingleControlledAccessWithoutScopeTargetDoesNotPanicOrMutate(t *testing
 				"other-bucket": nil,
 			},
 		},
-		&fakeRequester{},
+		&fakeStorageInspector{},
 	)
 
 	report, err := svc.Audit(context.Background(), Options{Organization: "HTAN_INT", Project: "BForePC"})
@@ -310,17 +325,17 @@ func (f *fakeBuckets) ListScopes(ctx context.Context, bucket string) ([]bucketap
 	return f.scopes[bucket], nil
 }
 
-type fakeRequester struct {
+type fakeStorageInspector struct {
 	err   error
 	calls int
 }
 
-func (f *fakeRequester) Do(ctx context.Context, method, path string, body, out any, opts ...request.RequestOption) error {
+func (f *fakeStorageInspector) Inspect(ctx context.Context, req StorageInspectRequest) (StorageInspectResult, error) {
 	f.calls++
 	if f.err != nil {
-		return f.err
+		return StorageInspectResult{}, f.err
 	}
-	return nil
+	return StorageInspectResult{ObjectURL: req.ObjectURL}, nil
 }
 
 func recordWithMethods(t *testing.T, did, sha string, controlled []string, urls []string) internalapi.InternalRecord {
@@ -367,4 +382,4 @@ func fakeBucketsForScope(t *testing.T, org, project, rawPath string) *fakeBucket
 	}
 }
 
-var _ request.Requester = (*fakeRequester)(nil)
+var _ StorageInspector = (*fakeStorageInspector)(nil)

@@ -2,10 +2,8 @@ package internaldrs
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"strings"
 	"time"
 
@@ -14,7 +12,6 @@ import (
 	clientinternalapi "github.com/calypr/syfon/apigen/client/internalapi"
 	serverdrs "github.com/calypr/syfon/apigen/server/drs"
 	serverinternalapi "github.com/calypr/syfon/apigen/server/internalapi"
-	"github.com/calypr/syfon/client/request"
 	sycommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/api/apiutil"
 	apimiddleware "github.com/calypr/syfon/internal/api/middleware"
@@ -41,7 +38,7 @@ func authorizeStorageCleanupScope(ctx context.Context, organization, project str
 }
 
 func handleInternalScopeRepairAuditFiber(om *core.ObjectManager) fiber.Handler {
-	svc := repair.NewService(scopeRepairIndexAdapter{om: om}, scopeRepairBucketsAdapter{om: om}, &srvRequester{om: om})
+	svc := repair.NewService(scopeRepairIndexAdapter{om: om}, scopeRepairBucketsAdapter{om: om}, storageRepairInspector{om: om})
 	return func(c fiber.Ctx) error {
 		if apimiddleware.MissingGen3AuthHeader(c.Context()) {
 			return c.SendStatus(fiber.StatusUnauthorized)
@@ -68,7 +65,7 @@ func handleInternalScopeRepairAuditFiber(om *core.ObjectManager) fiber.Handler {
 }
 
 func handleInternalScopeRepairApplyFiber(om *core.ObjectManager) fiber.Handler {
-	svc := repair.NewService(scopeRepairIndexAdapter{om: om}, scopeRepairBucketsAdapter{om: om}, &srvRequester{om: om})
+	svc := repair.NewService(scopeRepairIndexAdapter{om: om}, scopeRepairBucketsAdapter{om: om}, storageRepairInspector{om: om})
 	return func(c fiber.Ctx) error {
 		if apimiddleware.MissingGen3AuthHeader(c.Context()) {
 			return c.SendStatus(fiber.StatusUnauthorized)
@@ -291,40 +288,24 @@ func serverAccessMethodsFromClient(in *[]clientdrs.AccessMethod) *[]serverdrs.Ac
 	return &out
 }
 
-type srvRequester struct {
+type storageRepairInspector struct {
 	om *core.ObjectManager
 }
 
-func (r *srvRequester) Do(ctx context.Context, method, path string, body, out any, opts ...request.RequestOption) error {
-	if path == "/data/inspect" {
-		data, err := json.Marshal(body)
-		if err != nil {
-			return err
+var _ repair.StorageInspector = storageRepairInspector{}
+
+func (r storageRepairInspector) Inspect(ctx context.Context, req repair.StorageInspectRequest) (repair.StorageInspectResult, error) {
+	meta, err := r.om.InspectStorageObject(ctx, core.InspectStorageRequest{
+		Organization: req.Organization,
+		Project:      req.Project,
+		ObjectURL:    req.ObjectURL,
+	})
+	if err != nil {
+		var inspectErr *core.StorageInspectError
+		if errors.As(err, &inspectErr) && inspectErr.Kind == core.StorageInspectObjectNotFound {
+			return repair.StorageInspectResult{}, repair.ErrStorageObjectNotFound
 		}
-		var inspectReq core.InspectStorageRequest
-		if err := json.Unmarshal(data, &inspectReq); err != nil {
-			return err
-		}
-		meta, err := r.om.InspectStorageObject(ctx, inspectReq)
-		if err != nil {
-			var inspectErr *core.StorageInspectError
-			if errors.As(err, &inspectErr) {
-				if inspectErr.Kind == core.StorageInspectObjectNotFound {
-					return &request.ResponseError{
-						Method: method,
-						URL:    path,
-						Status: http.StatusNotFound,
-						Body:   "storage object not found",
-					}
-				}
-			}
-			return err
-		}
-		if out != nil {
-			respData, _ := json.Marshal(map[string]string{"object_url": meta.ObjectURL})
-			_ = json.Unmarshal(respData, out)
-		}
-		return nil
+		return repair.StorageInspectResult{}, err
 	}
-	return fmt.Errorf("unsupported service call: %s", path)
+	return repair.StorageInspectResult{ObjectURL: meta.ObjectURL}, nil
 }
