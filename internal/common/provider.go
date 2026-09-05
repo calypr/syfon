@@ -3,7 +3,6 @@ package common
 import (
 	"fmt"
 	"net"
-	"net/url"
 	"regexp"
 	"strings"
 )
@@ -74,30 +73,6 @@ func ProviderToScheme(p string) string {
 	}
 }
 
-
-
-func NormalizeStoragePath(rawPath, bucket string) (string, error) {
-	p := strings.TrimSpace(rawPath)
-	if p == "" {
-		return "", nil
-	}
-	u, err := url.Parse(p)
-	if err != nil {
-		return "", fmt.Errorf("invalid storage path: %w", err)
-	}
-
-	targetBucket := strings.TrimSpace(bucket)
-	if targetBucket != "" && !strings.EqualFold(strings.TrimSpace(u.Host), targetBucket) {
-		return "", fmt.Errorf("path bucket %q does not match expected bucket %q", u.Host, targetBucket)
-	}
-
-	if ProviderFromScheme(u.Scheme) == "" {
-		return "", fmt.Errorf("unsupported storage scheme: %s", u.Scheme)
-	}
-
-	return strings.Trim(strings.TrimSpace(u.Path), "/"), nil
-}
-
 // ParseBucketProvider returns a canonical bucket provider name or an error for
 // unsupported values.
 func ParseBucketProvider(raw string) (string, error) {
@@ -120,7 +95,6 @@ func ParseBucketProvider(raw string) (string, error) {
 // The rules are intentionally provider-specific:
 // - s3 and azure share the stricter DNS-style naming rules.
 // - gcs permits dots and underscores but still requires a DNS-safe shape.
-
 
 // ValidateBucketNameWithEndpoint validates a bucket/container name for the
 // given provider and endpoint. S3-compatible backends with a custom endpoint
