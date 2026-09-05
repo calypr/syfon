@@ -57,7 +57,10 @@ func discardLogger() *logs.Gen3Logger {
 
 func mustInternalClient(t *testing.T, serverURL string) *internalapi.ClientWithResponses {
 	t.Helper()
-	client, err := internalapi.NewClientWithResponses(serverURL)
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	httpClient := &http.Client{Transport: transport}
+	t.Cleanup(transport.CloseIdleConnections)
+	client, err := internalapi.NewClientWithResponses(serverURL, internalapi.WithHTTPClient(httpClient))
 	if err != nil {
 		t.Fatalf("NewClientWithResponses returned error: %v", err)
 	}

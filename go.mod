@@ -1,6 +1,6 @@
 module github.com/calypr/syfon
 
-go 1.26.5
+go 1.26.6
 
 require (
 	cloud.google.com/go/storage v1.63.1
@@ -14,7 +14,7 @@ require (
 	github.com/aws/smithy-go v1.27.3
 	github.com/calypr/syfon/apigen v0.2.9
 	github.com/calypr/syfon/client v0.3.1
-	github.com/getkin/kin-openapi v0.142.0
+	github.com/getkin/kin-openapi v0.144.0
 	github.com/gofiber/fiber/v3 v3.4.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
@@ -148,7 +148,7 @@ require (
 	google.golang.org/genproto v0.0.0-20260713224248-f5fc221cf8c4 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260713224248-f5fc221cf8c4 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260713224248-f5fc221cf8c4 // indirect
-	google.golang.org/grpc v1.82.0 // indirect
+	google.golang.org/grpc v1.82.1 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/ini.v1 v1.67.3 // indirect
 )

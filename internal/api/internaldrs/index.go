@@ -2,6 +2,7 @@ package internaldrs
 
 import (
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log"
 	"strconv"
@@ -22,6 +23,7 @@ const (
 	defaultInternalListLimit     = 1000
 	maxInternalListLimit         = 10000
 	maxInternalBulkMissingSHA256 = 10000
+	maxInternalBulkOverwrite     = 1000
 )
 
 func RegisterInternalRoutes(router fiber.Router, om *core.ObjectManager) {
@@ -40,12 +42,69 @@ func RegisterInternalRoutes(router fiber.Router, om *core.ObjectManager) {
 	router.Post(common.RouteInternalBulkSHA256, handleInternalBulkSHA256ValidityFiber(om))
 	router.Post(common.RouteInternalBulkSHA256Missing, handleInternalBulkMissingSHA256Fiber(om))
 	router.Post(common.RouteInternalBulkCreate, handleInternalBulkCreateFiber(om))
+	router.Put("/index/bulk/overwrite", handleInternalBulkOverwriteFiber(om))
 	router.Post(common.RouteInternalBulkDocs, handleInternalBulkDocumentsFiber(om))
 	router.Post(common.RouteInternalBulkDeleteHashes, handleInternalBulkDeleteFiber(om))
 	router.Post(common.RouteInternalRepairScopeAudit, handleInternalScopeRepairAuditFiber(om))
 	router.Post(common.RouteInternalRepairScopeApply, handleInternalScopeRepairApplyFiber(om))
 
 	registerInternalTransferRoutes(router, om)
+}
+
+type bulkOverwriteRequest struct {
+	Organization string                       `json:"organization"`
+	Project      string                       `json:"project"`
+	Records      []internalapi.InternalRecord `json:"records"`
+}
+
+type bulkOverwriteResponse struct {
+	Processed       int `json:"processed"`
+	Created         int `json:"created"`
+	Replaced        int `json:"replaced"`
+	DIDMatched      int `json:"did_matched"`
+	ChecksumMatched int `json:"checksum_matched"`
+}
+
+func handleInternalBulkOverwriteFiber(om *core.ObjectManager) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		var req bulkOverwriteRequest
+		if err := c.Bind().JSON(&req); err != nil {
+			return c.Status(fiber.StatusBadRequest).SendString("Invalid request body")
+		}
+		if strings.TrimSpace(req.Organization) == "" || strings.TrimSpace(req.Project) == "" || len(req.Records) == 0 {
+			return c.Status(fiber.StatusBadRequest).SendString("Invalid request body: organization, project, and records are required")
+		}
+		if len(req.Records) > maxInternalBulkOverwrite {
+			return c.Status(fiber.StatusRequestEntityTooLarge).SendString(fmt.Sprintf("too many records: maximum is %d", maxInternalBulkOverwrite))
+		}
+
+		candidates := make([]models.InternalObject, 0, len(req.Records))
+		now := time.Now().UTC()
+		for i, record := range req.Records {
+			record.Organization = &req.Organization
+			record.Project = &req.Project
+			obj, err := core.InternalRecordToInternalObject(record, now)
+			if err != nil {
+				return c.Status(fiber.StatusBadRequest).SendString(fmt.Sprintf("Invalid request body: record[%d] invalid: %v", i, err))
+			}
+			candidates = append(candidates, obj)
+		}
+
+		result, err := om.BulkOverwriteObjects(c.Context(), req.Organization, req.Project, candidates)
+		if err != nil {
+			if errors.Is(err, core.ErrBulkOverwriteConflict) {
+				return c.Status(fiber.StatusConflict).SendString(err.Error())
+			}
+			return apiutil.HandleError(c, err)
+		}
+		return c.JSON(bulkOverwriteResponse{
+			Processed:       len(candidates),
+			Created:         result.Created,
+			Replaced:        result.Replaced,
+			DIDMatched:      result.DIDMatched,
+			ChecksumMatched: result.ChecksumMatched,
+		})
+	}
 }
 
 func handleInternalBulkMissingSHA256Fiber(om *core.ObjectManager) fiber.Handler {
@@ -103,6 +162,7 @@ func normalizeMissingSHA256(values []string) ([]string, error) {
 
 func handleInternalGetFiber(om *core.ObjectManager) fiber.Handler {
 	return func(c fiber.Ctx) error {
+		c.Set(fiber.HeaderCacheControl, "no-store")
 		id := c.Params("id")
 		obj, err := om.GetObject(c.Context(), id, "read")
 		if err != nil {
@@ -129,11 +189,7 @@ func handleInternalListFiber(om *core.ObjectManager) fiber.Handler {
 			if err != nil {
 				return apiutil.HandleError(c, err)
 			}
-			objs, err := om.GetBulkObjects(c.Context(), ids, "read")
-			if err != nil {
-				return apiutil.HandleError(c, err)
-			}
-			objs, err = om.PrepareScopedObjects(c.Context(), objs, filterOrg, filterProject, "read")
+			objs, err := om.GetPreparedScopedObjects(c.Context(), ids, filterOrg, filterProject, "read")
 			if err != nil {
 				return apiutil.HandleError(c, err)
 			}
@@ -165,20 +221,14 @@ func handleInternalListFiber(om *core.ObjectManager) fiber.Handler {
 			if err != nil {
 				return apiutil.HandleError(c, err)
 			}
-			bulkStart := time.Now()
-			objs, err = om.GetBulkObjects(c.Context(), ids, "read")
-			if err != nil {
-				return apiutil.HandleError(c, err)
-			}
-			bulkDuration := time.Since(bulkStart)
 			prepareStart := time.Now()
-			objs, err = om.PrepareScopedObjects(c.Context(), objs, filterOrg, filterProject, "read")
+			objs, err = om.GetPreparedScopedObjects(c.Context(), ids, filterOrg, filterProject, "read")
 			if err != nil {
 				return apiutil.HandleError(c, err)
 			}
 			listDuration := time.Since(listStart)
 			prepareDuration := time.Since(prepareStart)
-			log.Printf("INFO: syfon_internal_index_list organization=%s project=%s url_filter=%t start_after=%t limit=%d offset=%d ids=%d records=%d list_ids_ms=%d bulk_objects_ms=%d prepare_scoped_ms=%d duration_ms=%d", filterOrg, filterProject, true, strings.TrimSpace(start) != "", limit, offset, len(ids), len(objs), listDuration.Milliseconds(), bulkDuration.Milliseconds(), prepareDuration.Milliseconds(), time.Since(requestStart).Milliseconds())
+			log.Printf("INFO: syfon_internal_index_list organization=%s project=%s url_filter=%t start_after=%t limit=%d offset=%d ids=%d records=%d list_ids_ms=%d prepare_scoped_ms=%d duration_ms=%d", filterOrg, filterProject, true, strings.TrimSpace(start) != "", limit, offset, len(ids), len(objs), listDuration.Milliseconds(), prepareDuration.Milliseconds(), time.Since(requestStart).Milliseconds())
 		} else {
 			objs, err = om.ListPreparedObjectsPageByScope(c.Context(), filterOrg, filterProject, "read", start, limit, offset)
 			if err != nil {
@@ -419,6 +469,15 @@ func handleInternalUpdateFiber(c fiber.Ctx, om *core.ObjectManager) error {
 	existing, err := om.GetObject(c.Context(), id, "update")
 	if err != nil {
 		return apiutil.HandleError(c, err)
+	}
+	if req.Size != nil && *req.Size != existing.Size {
+		return apiutil.HandleError(c, fmt.Errorf("%w: object size is immutable", common.ErrConflict))
+	}
+	if incomingSHA, ok := common.CanonicalSHA256(update.Checksums); ok {
+		storedSHA, stored := common.CanonicalSHA256(existing.Checksums)
+		if stored && incomingSHA != storedSHA {
+			return apiutil.HandleError(c, fmt.Errorf("%w: object checksum identity is immutable", common.ErrConflict))
+		}
 	}
 	merged, err := core.MergeInternalObjectUpdate(*existing, update, id, time.Now().UTC())
 	if err != nil {

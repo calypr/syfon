@@ -44,6 +44,12 @@ CREATE TABLE IF NOT EXISTS drs_object_name_alias (
   FOREIGN KEY(object_id) REFERENCES drs_object(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS drs_object_read_policy (
+  object_id TEXT PRIMARY KEY,
+  public_read BOOLEAN NOT NULL DEFAULT FALSE,
+  FOREIGN KEY(object_id) REFERENCES drs_object(id) ON DELETE CASCADE
+);
+
 DROP TABLE IF EXISTS drs_object_browse_index;
 
 CREATE INDEX IF NOT EXISTS drs_object_access_method_object_id_idx
@@ -57,6 +63,13 @@ CREATE INDEX IF NOT EXISTS drs_object_checksum_checksum_idx
 
 CREATE INDEX IF NOT EXISTS drs_object_checksum_checksum_type_object_id_idx
   ON drs_object_checksum(checksum, type, object_id);
+
+CREATE INDEX IF NOT EXISTS drs_object_checksum_sha256_identity_idx
+  ON drs_object_checksum(
+    (replace(lower(trim(type)), '-', '')),
+    (replace(lower(trim(checksum)), 'sha256:', '')),
+    object_id
+  );
 
 CREATE INDEX IF NOT EXISTS drs_object_controlled_access_object_id_idx
   ON drs_object_controlled_access(object_id);

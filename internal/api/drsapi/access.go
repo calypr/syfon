@@ -53,10 +53,24 @@ func accessURLForID(obj *models.InternalObject, accessID string) string {
 	if obj == nil || obj.AccessMethods == nil {
 		return ""
 	}
+	accessID = strings.TrimSpace(accessID)
+	if accessID == "" {
+		return ""
+	}
+	legacyMatches := make([]string, 0, 1)
 	for _, am := range *obj.AccessMethods {
-		if strings.EqualFold(common.StringVal(am.AccessId), accessID) && am.AccessUrl != nil {
+		if am.AccessUrl == nil || strings.TrimSpace(am.AccessUrl.Url) == "" {
+			continue
+		}
+		if strings.EqualFold(common.StringVal(am.AccessId), accessID) {
 			return am.AccessUrl.Url
 		}
+		if strings.EqualFold(strings.TrimSpace(string(am.Type)), accessID) {
+			legacyMatches = append(legacyMatches, am.AccessUrl.Url)
+		}
+	}
+	if len(legacyMatches) == 1 {
+		return legacyMatches[0]
 	}
 	return ""
 }

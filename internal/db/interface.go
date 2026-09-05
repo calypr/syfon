@@ -28,9 +28,11 @@ type ObjectStore interface {
 	GetBulkObjects(ctx context.Context, ids []string) ([]models.InternalObject, error)
 	BulkDeleteObjects(ctx context.Context, ids []string) error
 	RegisterObjects(ctx context.Context, objects []models.InternalObject) error
+	ReplaceObjects(ctx context.Context, objects []models.InternalObject) error
 	UpdateObjectAccessMethods(ctx context.Context, objectID string, accessMethods []drs.AccessMethod) error
 	BulkUpdateAccessMethods(ctx context.Context, updates map[string][]drs.AccessMethod) error
 	RemoveObjectControlledAccess(ctx context.Context, objectID, resource string) error
+	RemoveObjectControlledAccessBulk(ctx context.Context, objectIDs []string, resource string) (int, error)
 }
 
 type ObjectIDResourceLister interface {

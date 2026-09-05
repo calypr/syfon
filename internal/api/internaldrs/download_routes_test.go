@@ -52,6 +52,9 @@ func TestHandleInternalDownload(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rr.Code)
 	}
+	if got := rr.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("expected download response to disable caching, got %q", got)
+	}
 	var resp internalapi.InternalSignedURL
 	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
 		t.Fatal(err)
@@ -89,6 +92,9 @@ func TestHandleInternalDownloadPart(t *testing.T) {
 		rr := doInternalDRSTestRequest(req, om)
 		if rr.Code != http.StatusOK {
 			t.Fatalf("expected 200, got %d", rr.Code)
+		}
+		if got := rr.Header().Get("Cache-Control"); got != "no-store" {
+			t.Fatalf("expected ranged download response to disable caching, got %q", got)
 		}
 	})
 	t.Run("missing parameters", func(t *testing.T) {

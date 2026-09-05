@@ -20,11 +20,24 @@ func (m *ObjectManager) SignURL(ctx context.Context, accessURL string, options u
 }
 
 func (m *ObjectManager) SignObjectURL(ctx context.Context, obj *models.InternalObject, accessURL string, options urlmanager.SignOptions) (string, error) {
-	scopedURL, err := m.resolveScopedStorageURL(ctx, obj, accessURL)
-	if err != nil {
-		return "", err
+	targetURL := strings.TrimSpace(accessURL)
+	if strings.EqualFold(strings.TrimSpace(options.Method), "PUT") {
+		target, err := m.ResolveCanonicalStorageTarget(ctx, CanonicalStorageTargetRequest{
+			Object:    obj,
+			AccessURL: targetURL,
+		})
+		if err != nil {
+			return "", err
+		}
+		targetURL = target.URL
+	} else {
+		var err error
+		targetURL, err = m.resolveLegacyS3DownloadURL(ctx, obj, targetURL)
+		if err != nil {
+			return "", err
+		}
 	}
-	return m.SignURL(ctx, scopedURL, options)
+	return m.SignURL(ctx, targetURL, options)
 }
 
 type CanonicalStorageTargetRequest struct {
@@ -190,14 +203,62 @@ func (m *ObjectManager) SignDownloadPart(ctx context.Context, bucket, accessURL 
 }
 
 func (m *ObjectManager) SignObjectDownloadPart(ctx context.Context, obj *models.InternalObject, bucket, accessURL string, start, end int64, options urlmanager.SignOptions) (string, error) {
-	scopedURL, err := m.resolveScopedStorageURL(ctx, obj, accessURL)
+	var err error
+	accessURL, err = m.resolveLegacyS3DownloadURL(ctx, obj, accessURL)
 	if err != nil {
 		return "", err
 	}
-	if b, _, ok := common.ParseS3URL(scopedURL); ok {
+	if b, _, ok := common.ParseS3URL(accessURL); ok {
 		bucket = b
 	}
-	return m.SignDownloadPart(ctx, bucket, scopedURL, start, end, options)
+	return m.SignDownloadPart(ctx, bucket, accessURL, start, end, options)
+}
+
+func (m *ObjectManager) resolveLegacyS3DownloadURL(ctx context.Context, obj *models.InternalObject, accessURL string) (string, error) {
+	accessURL = strings.TrimSpace(accessURL)
+	bucket, key, ok := parseS3Location(accessURL)
+	if !ok || strings.TrimSpace(bucket) == "" || strings.TrimSpace(key) == "" {
+		return accessURL, nil
+	}
+
+	scopes, err := m.bucketScopesForObject(ctx, obj)
+	if err != nil {
+		return "", err
+	}
+
+	mappedURLs := make([]string, 0, 1)
+	for _, scope := range scopes {
+		prefix := strings.Trim(strings.TrimSpace(scope.PathPrefix), "/")
+		if prefix == "" || bucket != prefix {
+			continue
+		}
+		targetBucket := strings.TrimSpace(scope.Bucket)
+		if targetBucket == "" {
+			continue
+		}
+		mappedKey := prefix + "/" + strings.TrimLeft(key, "/")
+		candidate := common.BucketToURL(targetBucket, mappedKey)
+		if len(mappedURLs) == 0 || mappedURLs[len(mappedURLs)-1] != candidate {
+			mappedURLs = append(mappedURLs, candidate)
+		}
+	}
+	if len(mappedURLs) == 0 {
+		return accessURL, nil
+	}
+
+	credentials, err := m.ListS3Credentials(ctx)
+	if err != nil {
+		return "", err
+	}
+	for _, credential := range credentials {
+		if strings.TrimSpace(credential.Bucket) == bucket {
+			return accessURL, nil
+		}
+	}
+	if len(mappedURLs) > 1 {
+		return "", fmt.Errorf("%w: legacy S3 URL %q maps to conflicting physical locations %q and %q", common.ErrConflict, accessURL, mappedURLs[0], mappedURLs[1])
+	}
+	return mappedURLs[0], nil
 }
 
 func (m *ObjectManager) resolveSigningBucket(ctx context.Context, accessURL string) string {
@@ -205,23 +266,6 @@ func (m *ObjectManager) resolveSigningBucket(ctx context.Context, accessURL stri
 		return bucket
 	}
 	return ""
-}
-
-func (m *ObjectManager) resolveScopedStorageURL(ctx context.Context, obj *models.InternalObject, accessURL string) (string, error) {
-	if obj == nil || len(ObjectAccessResources(obj)) == 0 {
-		return accessURL, nil
-	}
-	target, err := m.ResolveCanonicalStorageTarget(ctx, CanonicalStorageTargetRequest{
-		Object:    obj,
-		AccessURL: accessURL,
-	})
-	if err != nil {
-		return "", err
-	}
-	if target.URL == "" {
-		return accessURL, nil
-	}
-	return target.URL, nil
 }
 
 func parseS3Location(accessURL string) (bucket string, key string, ok bool) {

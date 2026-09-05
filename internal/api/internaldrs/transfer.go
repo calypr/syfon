@@ -49,6 +49,7 @@ func registerInternalTransferRoutes(router fiber.Router, om *core.ObjectManager)
 }
 
 func handleInternalDownloadFiber(c fiber.Ctx, om *core.ObjectManager) error {
+	c.Set(fiber.HeaderCacheControl, "no-store")
 	fileID := c.Params("file_id")
 
 	obj, err := om.GetObject(c.Context(), fileID, "read")
@@ -97,6 +98,7 @@ func handleInternalDownloadFiber(c fiber.Ctx, om *core.ObjectManager) error {
 }
 
 func handleInternalDownloadPartFiber(c fiber.Ctx, om *core.ObjectManager) error {
+	c.Set(fiber.HeaderCacheControl, "no-store")
 	fileID := c.Params("file_id")
 	startStr := c.Query("start")
 	endStr := c.Query("end")

@@ -11,6 +11,7 @@ import (
 
 	"github.com/calypr/syfon/apigen/server/drs"
 	sycommon "github.com/calypr/syfon/common"
+	"github.com/calypr/syfon/internal/authz"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/models"
 )
@@ -22,12 +23,21 @@ func (db *SqliteDB) DeleteObject(ctx context.Context, id string) error {
 	}
 	defer tx.Rollback()
 
-	canonicalID := strings.TrimSpace(id)
-	if canonicalID == "" {
+	requestedID := strings.TrimSpace(id)
+	if requestedID == "" {
 		return fmt.Errorf("%w: object not found", common.ErrNotFound)
 	}
-
-	if err := tx.QueryRowContext(ctx, "SELECT object_id FROM drs_object_alias WHERE alias_id = ?", canonicalID).Scan(&canonicalID); err != nil && !errors.Is(err, sql.ErrNoRows) {
+	canonicalID, found, err := sqliteObjectIDTx(ctx, tx, requestedID)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return fmt.Errorf("%w: object not found", common.ErrNotFound)
+	}
+	if err := sqliteEnsureNoLegacyDuplicateTx(ctx, tx, canonicalID); err != nil {
+		return err
+	}
+	if err := sqliteRequireContentMethodTx(ctx, tx, canonicalID, "delete"); err != nil {
 		return err
 	}
 
@@ -46,7 +56,12 @@ func (db *SqliteDB) DeleteObject(ctx context.Context, id string) error {
 }
 
 func (db *SqliteDB) DeleteObjectAlias(ctx context.Context, aliasID string) error {
-	result, err := db.db.ExecContext(ctx, "DELETE FROM drs_object_alias WHERE alias_id = ?", aliasID)
+	tx, err := db.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, "DELETE FROM drs_object_alias WHERE alias_id = ?", aliasID)
 	if err != nil {
 		return err
 	}
@@ -57,7 +72,7 @@ func (db *SqliteDB) DeleteObjectAlias(ctx context.Context, aliasID string) error
 	if rows == 0 {
 		return fmt.Errorf("%w: object not found", common.ErrNotFound)
 	}
-	return nil
+	return tx.Commit()
 }
 
 func (db *SqliteDB) CreateObjectAlias(ctx context.Context, aliasID, canonicalObjectID string) error {
@@ -70,21 +85,51 @@ func (db *SqliteDB) CreateObjectAlias(ctx context.Context, aliasID, canonicalObj
 		return nil
 	}
 
+	tx, err := db.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
 	var exists string
-	err := db.db.QueryRowContext(ctx, "SELECT id FROM drs_object WHERE id = ?", canonicalObjectID).Scan(&exists)
+	err = tx.QueryRowContext(ctx, "SELECT id FROM drs_object WHERE id = ?", canonicalObjectID).Scan(&exists)
 	if err == sql.ErrNoRows {
 		return fmt.Errorf("%w: object not found", common.ErrNotFound)
 	}
 	if err != nil {
 		return err
 	}
+	if err := sqliteEnsureNoLegacyDuplicateTx(ctx, tx, canonicalObjectID); err != nil {
+		return err
+	}
+	if err := sqliteRequireContentMethodTx(ctx, tx, canonicalObjectID, "update"); err != nil {
+		return err
+	}
+	var physicalAlias string
+	physicalErr := tx.QueryRowContext(ctx, "SELECT id FROM drs_object WHERE id = ?", aliasID).Scan(&physicalAlias)
+	if physicalErr == nil {
+		return fmt.Errorf("%w: alias %q is already a physical object", common.ErrConflict, aliasID)
+	}
+	if physicalErr != sql.ErrNoRows {
+		return physicalErr
+	}
 
-	_, err = db.db.ExecContext(ctx, `
+	var aliasTarget string
+	aliasErr := tx.QueryRowContext(ctx, "SELECT object_id FROM drs_object_alias WHERE alias_id = ?", aliasID).Scan(&aliasTarget)
+	if aliasErr == nil && aliasTarget != canonicalObjectID {
+		return fmt.Errorf("%w: alias %q already points to %q", common.ErrConflict, aliasID, aliasTarget)
+	}
+	if aliasErr != nil && aliasErr != sql.ErrNoRows {
+		return aliasErr
+	}
+	_, err = tx.ExecContext(ctx, `
 		INSERT INTO drs_object_alias(alias_id, object_id)
 		VALUES (?, ?)
-		ON CONFLICT(alias_id) DO UPDATE SET object_id=excluded.object_id
+		ON CONFLICT(alias_id) DO NOTHING
 	`, aliasID, canonicalObjectID)
-	return err
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (db *SqliteDB) ResolveObjectAlias(ctx context.Context, aliasID string) (string, error) {
@@ -142,9 +187,6 @@ retryLookup:
 		return nil, err
 	}
 	objectID := r.ID
-	if resolvedAlias && requestID != "" {
-		objectID = requestID
-	}
 
 	obj := &models.InternalObject{
 		DrsObject: drs.DrsObject{
@@ -188,7 +230,7 @@ retryLookup:
 				Url     string    `json:"url"`
 			}{Url: u},
 			Type:     drs.AccessMethodType(t),
-			AccessId: &t,
+			AccessId: common.Ptr(common.AccessMethodID(t, u)),
 		}
 		*obj.AccessMethods = append(*obj.AccessMethods, am)
 	}
@@ -199,6 +241,10 @@ retryLookup:
 	if len(controlled) > 0 {
 		obj.ControlledAccess = &controlled
 		obj.Authorizations = sycommon.ControlledAccessToAuthzMap(controlled)
+	}
+	obj.PublicRead, obj.PublicReadPolicyKnown, err = db.publicReadForObject(ctx, lookupID, len(controlled) == 0)
+	if err != nil {
+		return nil, err
 	}
 
 	// 3. Fetch Checksums
@@ -224,7 +270,7 @@ retryLookup:
 	return obj, nil
 }
 
-func (db *SqliteDB) CreateObject(ctx context.Context, obj *models.InternalObject) error {
+func (db *SqliteDB) createObjectLegacy(ctx context.Context, obj *models.InternalObject) error {
 	tx, err := db.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -282,7 +328,7 @@ func (db *SqliteDB) CreateObject(ctx context.Context, obj *models.InternalObject
 	return tx.Commit()
 }
 
-func (db *SqliteDB) RegisterObjects(ctx context.Context, objects []models.InternalObject) error {
+func (db *SqliteDB) registerObjectsLegacy(ctx context.Context, objects []models.InternalObject) error {
 	if len(objects) == 0 {
 		return nil
 	}
@@ -432,13 +478,30 @@ func (db *SqliteDB) GetBulkObjects(ctx context.Context, ids []string) ([]models.
 	objects := make([]models.InternalObject, 0, len(ids))
 	seen := make(map[string]struct{}, len(ids))
 	for _, id := range ids {
-		if _, ok := seen[id]; ok {
+		obj, ok := objectsByID[id]
+		if !ok {
+			resolved, resolveErr := db.ResolveObjectAlias(ctx, id)
+			if resolveErr == nil {
+				obj, ok = objectsByID[resolved]
+				if !ok {
+					obj, resolveErr = db.GetObject(ctx, resolved)
+					ok = resolveErr == nil
+				}
+			} else if !errors.Is(resolveErr, common.ErrNotFound) {
+				return nil, resolveErr
+			}
+			if resolveErr != nil && !errors.Is(resolveErr, common.ErrNotFound) {
+				return nil, resolveErr
+			}
+		}
+		if !ok || obj == nil {
 			continue
 		}
-		seen[id] = struct{}{}
-		if obj, ok := objectsByID[id]; ok {
-			objects = append(objects, *obj)
+		if _, already := seen[obj.Id]; already {
+			continue
 		}
+		seen[obj.Id] = struct{}{}
+		objects = append(objects, *obj)
 	}
 	return objects, nil
 }
@@ -460,16 +523,25 @@ func (db *SqliteDB) GetObjectsByChecksums(ctx context.Context, checksums []strin
 				continue
 			}
 			index[value] = append(index[value], *obj)
+			if common.NormalizeChecksumType(cs.Type) == "sha256" {
+				if normalized, ok := common.NormalizeSHA256Query(value); ok {
+					index[normalized] = append(index[normalized], *obj)
+				}
+			}
 		}
 	}
 	result := make(map[string][]models.InternalObject, len(checksums))
 	for _, cs := range checksums {
-		normalized := strings.TrimSpace(cs)
-		if normalized == "" {
+		requested := strings.TrimSpace(cs)
+		if requested == "" {
 			continue
 		}
-		if objs := index[normalized]; len(objs) > 0 {
-			result[normalized] = uniqueObjectsByID(objs)
+		lookup := requested
+		if normalized, ok := common.NormalizeSHA256Query(requested); ok {
+			lookup = normalized
+		}
+		if objs := index[lookup]; len(objs) > 0 {
+			result[requested] = uniqueObjectsByID(objs)
 		}
 	}
 	return result, nil
@@ -485,7 +557,19 @@ func (db *SqliteDB) ListScopedObjectIDsByChecksums(ctx context.Context, organiza
 	if err != nil {
 		return nil, err
 	}
-	normalized := uniqueNonEmptyStrings(checksums)
+	normalized := make([]string, 0, len(checksums))
+	seenChecksums := make(map[string]struct{}, len(checksums))
+	for _, checksum := range checksums {
+		value := normalizeChecksumLookup(checksum)
+		if value == "" {
+			continue
+		}
+		if _, exists := seenChecksums[value]; exists {
+			continue
+		}
+		seenChecksums[value] = struct{}{}
+		normalized = append(normalized, value)
+	}
 	if len(normalized) == 0 {
 		return map[string][]string{}, nil
 	}
@@ -516,11 +600,12 @@ func (db *SqliteDB) ListScopedObjectIDsByChecksums(ctx context.Context, organiza
 		args = append(args, checksum)
 	}
 	rows, err := db.db.QueryContext(ctx, fmt.Sprintf(`
-		SELECT DISTINCT c.checksum, c.object_id
+		SELECT DISTINCT replace(lower(trim(c.checksum)), 'sha256:', ''), c.object_id
 		FROM drs_object_checksum c
 		INNER JOIN drs_object_controlled_access ca ON ca.object_id = c.object_id
-		WHERE ca.resource = ? AND c.type = ? AND c.checksum IN (%s)
-		ORDER BY c.checksum, c.object_id`, placeholders), args...)
+		WHERE ca.resource = ? AND replace(lower(trim(c.type)), '-', '') = ?
+		  AND replace(lower(trim(c.checksum)), 'sha256:', '') IN (%s)
+		ORDER BY 1, 2`, placeholders), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -952,7 +1037,7 @@ func (db *SqliteDB) ListObjectIDsByChecksumsAndResources(ctx context.Context, ch
 			UNION
 			SELECT c.object_id, c.checksum AS match_key
 			FROM drs_object_checksum c
-			WHERE c.checksum IN (` + strings.Join(checksumPlaceholders, ",") + `)
+			WHERE replace(lower(trim(c.checksum)), 'sha256:', '') IN (` + strings.Join(checksumPlaceholders, ",") + `)
 		)
 		SELECT m.match_key, m.object_id
 		FROM matched m
@@ -1149,10 +1234,37 @@ func (db *SqliteDB) BulkDeleteObjects(ctx context.Context, ids []string) error {
 		return err
 	}
 	defer tx.Rollback()
+	canonicalIDs := make([]string, 0, len(ids))
+	seen := make(map[string]struct{}, len(ids))
+	for _, rawID := range ids {
+		canonicalID, found, resolveErr := sqliteObjectIDTx(ctx, tx, strings.TrimSpace(rawID))
+		if resolveErr != nil {
+			return resolveErr
+		}
+		if !found {
+			continue
+		}
+		if strings.TrimSpace(rawID) != canonicalID {
+			if err := sqliteEnsureNoLegacyDuplicateTx(ctx, tx, canonicalID); err != nil {
+				return err
+			}
+		}
+		if err := sqliteRequireContentMethodTx(ctx, tx, canonicalID, "delete"); err != nil {
+			return err
+		}
+		if _, ok := seen[canonicalID]; ok {
+			continue
+		}
+		seen[canonicalID] = struct{}{}
+		canonicalIDs = append(canonicalIDs, canonicalID)
+	}
+	if len(canonicalIDs) == 0 {
+		return tx.Commit()
+	}
 
-	placeholders := makePlaceholders(len(ids))
-	args := make([]interface{}, 0, len(ids))
-	for _, id := range ids {
+	placeholders := makePlaceholders(len(canonicalIDs))
+	args := make([]interface{}, 0, len(canonicalIDs))
+	for _, id := range canonicalIDs {
 		args = append(args, id)
 	}
 	query := fmt.Sprintf("DELETE FROM drs_object WHERE id IN (%s)", placeholders)
@@ -1202,7 +1314,16 @@ func (db *SqliteDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []stri
 	}
 
 	conditions := make([]string, 0, 2)
-	capArgs, err := safeSliceCapacity(len(ids), len(checksums), len(checksums))
+	shaQueries := make([]string, 0, len(checksums))
+	genericQueries := make([]string, 0, len(checksums))
+	for _, checksum := range checksums {
+		if normalized, ok := common.NormalizeSHA256Query(checksum); ok {
+			shaQueries = append(shaQueries, normalized)
+		} else {
+			genericQueries = append(genericQueries, strings.TrimSpace(checksum))
+		}
+	}
+	capArgs, err := safeSliceCapacity(len(ids), len(checksums), len(shaQueries)+len(genericQueries))
 	if err != nil {
 		return nil, err
 	}
@@ -1214,13 +1335,27 @@ func (db *SqliteDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []stri
 		}
 	}
 	if len(checksums) > 0 {
-		conditions = append(conditions, fmt.Sprintf("(o.id IN (%s) OR EXISTS (SELECT 1 FROM drs_object_checksum c2 WHERE c2.object_id = o.id AND c2.checksum IN (%s)))", makePlaceholders(len(checksums)), makePlaceholders(len(checksums))))
+		parts := make([]string, 0, 3)
+		parts = append(parts, fmt.Sprintf("o.id IN (%s)", makePlaceholders(len(checksums))))
 		for _, cs := range checksums {
-			args = append(args, cs)
+			args = append(args, strings.TrimSpace(cs))
 		}
-		for _, cs := range checksums {
-			args = append(args, cs)
+		if len(shaQueries) > 0 {
+			parts = append(parts, fmt.Sprintf(`EXISTS (SELECT 1 FROM drs_object_checksum c2
+				WHERE c2.object_id = o.id AND replace(lower(trim(c2.type)), '-', '') = 'sha256'
+				AND replace(lower(trim(c2.checksum)), 'sha256:', '') IN (%s))`, makePlaceholders(len(shaQueries))))
+			for _, checksum := range shaQueries {
+				args = append(args, checksum)
+			}
 		}
+		if len(genericQueries) > 0 {
+			parts = append(parts, fmt.Sprintf(`EXISTS (SELECT 1 FROM drs_object_checksum c2
+				WHERE c2.object_id = o.id AND c2.checksum IN (%s))`, makePlaceholders(len(genericQueries))))
+			for _, checksum := range genericQueries {
+				args = append(args, checksum)
+			}
+		}
+		conditions = append(conditions, "("+strings.Join(parts, " OR ")+")")
 	}
 
 	query := fmt.Sprintf(`
@@ -1286,6 +1421,9 @@ func (db *SqliteDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []stri
 	if err := db.attachControlledAccess(ctx, objectsByID); err != nil {
 		return nil, err
 	}
+	if err := db.attachPublicRead(ctx, objectsByID); err != nil {
+		return nil, err
+	}
 	if err := db.attachNameAliases(ctx, objectsByID); err != nil {
 		return nil, err
 	}
@@ -1331,14 +1469,13 @@ func (db *SqliteDB) attachBulkAccessMethods(ctx context.Context, objectsByID map
 		if obj.DrsObject.AccessMethods == nil {
 			obj.DrsObject.AccessMethods = &[]drs.AccessMethod{}
 		}
-		t := accessType
 		*obj.DrsObject.AccessMethods = append(*obj.DrsObject.AccessMethods, drs.AccessMethod{
 			AccessUrl: &struct {
 				Headers *[]string `json:"headers,omitempty"`
 				Url     string    `json:"url"`
 			}{Url: accessURL},
 			Type:     drs.AccessMethodType(accessType),
-			AccessId: &t,
+			AccessId: common.Ptr(common.AccessMethodID(accessType, accessURL)),
 		})
 	}
 	return rows.Err()
@@ -1524,6 +1661,46 @@ func (db *SqliteDB) attachControlledAccess(ctx context.Context, objectsByID map[
 	return nil
 }
 
+func (db *SqliteDB) attachPublicRead(ctx context.Context, objectsByID map[string]*models.InternalObject) error {
+	if len(objectsByID) == 0 {
+		return nil
+	}
+	ids := sortedObjectIDs(objectsByID)
+	args := make([]any, 0, len(ids))
+	for _, id := range ids {
+		args = append(args, id)
+	}
+	rows, err := db.db.QueryContext(ctx, fmt.Sprintf(`
+		SELECT object_id, public_read
+		FROM drs_object_read_policy
+		WHERE object_id IN (%s)`, makePlaceholders(len(ids))), args...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	known := make(map[string]bool, len(ids))
+	for rows.Next() {
+		var id string
+		var public bool
+		if err := rows.Scan(&id, &public); err != nil {
+			return err
+		}
+		known[id] = public
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for id, obj := range objectsByID {
+		public, ok := known[id]
+		if !ok {
+			public = len(objectAccessResources(obj)) == 0
+		}
+		obj.PublicRead = public
+		obj.PublicReadPolicyKnown = ok
+	}
+	return nil
+}
+
 func (db *SqliteDB) attachNameAliases(ctx context.Context, objectsByID map[string]*models.InternalObject) error {
 	if len(objectsByID) == 0 {
 		return nil
@@ -1572,8 +1749,18 @@ func (db *SqliteDB) UpdateObjectAccessMethods(ctx context.Context, objectID stri
 		return err
 	}
 	defer tx.Rollback()
+	canonicalID, found, err := sqliteObjectIDTx(ctx, tx, strings.TrimSpace(objectID))
+	if err != nil {
+		return err
+	}
+	if !found {
+		return fmt.Errorf("%w: object not found", common.ErrNotFound)
+	}
+	if err := sqliteRequireContentMethodTx(ctx, tx, canonicalID, "update"); err != nil {
+		return err
+	}
 
-	_, err = tx.ExecContext(ctx, "DELETE FROM drs_object_access_method WHERE object_id = ?", objectID)
+	_, err = tx.ExecContext(ctx, "DELETE FROM drs_object_access_method WHERE object_id = ?", canonicalID)
 	if err != nil {
 		return err
 	}
@@ -1582,7 +1769,7 @@ func (db *SqliteDB) UpdateObjectAccessMethods(ctx context.Context, objectID stri
 		if am.AccessUrl == nil || am.AccessUrl.Url == "" {
 			continue
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO drs_object_access_method (object_id, url, type) VALUES (?, ?, ?)`, objectID, am.AccessUrl.Url, am.Type)
+		_, err = tx.ExecContext(ctx, `INSERT INTO drs_object_access_method (object_id, url, type) VALUES (?, ?, ?)`, canonicalID, am.AccessUrl.Url, am.Type)
 		if err != nil {
 			return err
 		}
@@ -1596,25 +1783,122 @@ func (db *SqliteDB) RemoveObjectControlledAccess(ctx context.Context, objectID, 
 		return fmt.Errorf("resource is required")
 	}
 	resource = normalized[0]
-
 	tx, err := db.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+	canonicalID, found, err := sqliteObjectIDTx(ctx, tx, strings.TrimSpace(objectID))
+	if err != nil {
+		return err
+	}
+	if !found {
+		return common.ErrNotFound
+	}
+	if err := sqliteEnsureNoLegacyDuplicateTx(ctx, tx, canonicalID); err != nil {
+		return err
+	}
+	if !authz.HasMethodAccess(ctx, "update", []string{resource}) {
+		return common.ErrUnauthorized
+	}
 
 	var exists int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(1) FROM drs_object_controlled_access WHERE object_id = ? AND resource = ?`, objectID, resource).Scan(&exists); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(1) FROM drs_object_controlled_access WHERE object_id = ? AND resource = ?`, canonicalID, resource).Scan(&exists); err != nil {
 		return err
 	}
 	if exists == 0 {
 		return common.ErrNotFound
 	}
+	currentResources, err := sqliteResourcesTx(ctx, tx, canonicalID)
+	if err != nil {
+		return err
+	}
+	publicRead, err := sqlitePublicReadTx(ctx, tx, canonicalID, len(currentResources) == 0)
+	if err != nil {
+		return err
+	}
+	if err := setPublicReadTx(ctx, tx, canonicalID, publicRead); err != nil {
+		return err
+	}
 
-	if _, err := tx.ExecContext(ctx, `DELETE FROM drs_object_controlled_access WHERE object_id = ? AND resource = ?`, objectID, resource); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM drs_object_controlled_access WHERE object_id = ? AND resource = ?`, canonicalID, resource); err != nil {
 		return err
 	}
 	return tx.Commit()
+}
+
+func (db *SqliteDB) RemoveObjectControlledAccessBulk(ctx context.Context, objectIDs []string, resource string) (int, error) {
+	if len(objectIDs) == 0 {
+		return 0, nil
+	}
+	normalized := sycommon.NormalizeAccessResources([]string{resource})
+	if len(normalized) == 0 {
+		return 0, fmt.Errorf("resource is required")
+	}
+	resource = normalized[0]
+	tx, err := db.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	orgWide := !strings.Contains(resource, "/project/")
+	if !orgWide && !authz.HasMethodAccess(ctx, "delete", []string{resource}) {
+		return 0, common.ErrUnauthorized
+	}
+	seen := make(map[string]struct{}, len(objectIDs))
+	removed := 0
+	for _, rawID := range objectIDs {
+		canonicalID, found, resolveErr := sqliteObjectIDTx(ctx, tx, strings.TrimSpace(rawID))
+		if resolveErr != nil {
+			return 0, resolveErr
+		}
+		if !found {
+			continue
+		}
+		if _, ok := seen[canonicalID]; ok {
+			continue
+		}
+		seen[canonicalID] = struct{}{}
+		if err := sqliteEnsureNoLegacyDuplicateTx(ctx, tx, canonicalID); err != nil {
+			return 0, err
+		}
+		currentResources, err := sqliteResourcesTx(ctx, tx, canonicalID)
+		if err != nil {
+			return 0, err
+		}
+		objectRemoved := 0
+		for _, currentResource := range currentResources {
+			if currentResource != resource && (!orgWide || !strings.HasPrefix(currentResource, resource+"/project/")) {
+				continue
+			}
+			if !authz.HasMethodAccess(ctx, "delete", []string{currentResource}) {
+				continue
+			}
+			if _, err := tx.ExecContext(ctx, `DELETE FROM drs_object_controlled_access WHERE object_id = ? AND resource = ?`, canonicalID, currentResource); err != nil {
+				return 0, err
+			}
+			removed++
+			objectRemoved++
+		}
+		if objectRemoved == 0 {
+			continue
+		}
+		currentResources, err = sqliteResourcesTx(ctx, tx, canonicalID)
+		if err != nil {
+			return 0, err
+		}
+		publicRead, err := sqlitePublicReadTx(ctx, tx, canonicalID, len(currentResources) == 0)
+		if err != nil {
+			return 0, err
+		}
+		if err := setPublicReadTx(ctx, tx, canonicalID, publicRead); err != nil {
+			return 0, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return removed, nil
 }
 
 func (db *SqliteDB) BulkUpdateAccessMethods(ctx context.Context, updates map[string][]drs.AccessMethod) error {
@@ -1625,7 +1909,17 @@ func (db *SqliteDB) BulkUpdateAccessMethods(ctx context.Context, updates map[str
 	defer tx.Rollback()
 
 	for objectID, methods := range updates {
-		_, err = tx.ExecContext(ctx, "DELETE FROM drs_object_access_method WHERE object_id = ?", objectID)
+		canonicalID, found, resolveErr := sqliteObjectIDTx(ctx, tx, strings.TrimSpace(objectID))
+		if resolveErr != nil {
+			return resolveErr
+		}
+		if !found {
+			return common.ErrNotFound
+		}
+		if err := sqliteRequireContentMethodTx(ctx, tx, canonicalID, "update"); err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, "DELETE FROM drs_object_access_method WHERE object_id = ?", canonicalID)
 		if err != nil {
 			return err
 		}
@@ -1633,7 +1927,7 @@ func (db *SqliteDB) BulkUpdateAccessMethods(ctx context.Context, updates map[str
 			if am.AccessUrl == nil || am.AccessUrl.Url == "" {
 				continue
 			}
-			_, err = tx.ExecContext(ctx, `INSERT INTO drs_object_access_method (object_id, url, type) VALUES (?, ?, ?)`, objectID, am.AccessUrl.Url, am.Type)
+			_, err = tx.ExecContext(ctx, `INSERT INTO drs_object_access_method (object_id, url, type) VALUES (?, ?, ?)`, canonicalID, am.AccessUrl.Url, am.Type)
 			if err != nil {
 				return err
 			}

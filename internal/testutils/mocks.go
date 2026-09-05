@@ -283,6 +283,21 @@ func (m *MockDatabase) RegisterObjects(ctx context.Context, objects []models.Int
 	return nil
 }
 
+func (m *MockDatabase) ReplaceObjects(ctx context.Context, objects []models.InternalObject) error {
+	if err := m.RegisterObjects(ctx, objects); err != nil {
+		return err
+	}
+	for _, obj := range objects {
+		if obj.AccessMethods == nil {
+			continue
+		}
+		if err := m.UpdateObjectAccessMethods(ctx, obj.Id, *obj.AccessMethods); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (m *MockDatabase) GetBulkObjects(ctx context.Context, ids []string) ([]models.InternalObject, error) {
 	out := make([]models.InternalObject, 0, len(ids))
 	for _, id := range ids {
@@ -360,6 +375,39 @@ func (m *MockDatabase) RemoveObjectControlledAccess(ctx context.Context, objectI
 	}
 	m.ObjectAuthz[objectID] = sycommon.ControlledAccessToAuthzMap(filtered)
 	return nil
+}
+
+func (m *MockDatabase) RemoveObjectControlledAccessBulk(ctx context.Context, objectIDs []string, resource string) (int, error) {
+	target := sycommon.NormalizeAccessResources([]string{resource})
+	if len(target) == 0 {
+		return 0, common.ErrNotFound
+	}
+	orgWide := !strings.Contains(target[0], "/project/")
+	count := 0
+	for _, objectID := range objectIDs {
+		obj, ok := m.Objects[objectID]
+		if !ok {
+			return count, common.ErrNotFound
+		}
+		wrapped := models.InternalObject{DrsObject: *obj}
+		if objectAuthz, ok := m.ObjectAuthz[objectID]; ok {
+			wrapped.Authorizations = cloneAuthzMap(objectAuthz)
+		}
+		resources := sycommon.AuthzMapToControlledAccess(wrapped.Authorizations)
+		if wrapped.ControlledAccess != nil {
+			resources = sycommon.NormalizeAccessResources(*wrapped.ControlledAccess)
+		}
+		for _, existing := range resources {
+			if existing != target[0] && (!orgWide || !strings.HasPrefix(existing, target[0]+"/project/")) {
+				continue
+			}
+			if err := m.RemoveObjectControlledAccess(ctx, objectID, existing); err != nil {
+				return count, err
+			}
+			count++
+		}
+	}
+	return count, nil
 }
 
 func (m *MockDatabase) BulkUpdateAccessMethods(ctx context.Context, updates map[string][]drs.AccessMethod) error {

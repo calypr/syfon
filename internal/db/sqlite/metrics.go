@@ -20,6 +20,21 @@ func (db *SqliteDB) flushObjectUsageEventsForIDsTx(ctx context.Context, tx *sql.
 		return nil
 	}
 	now := time.Now().UTC()
+	// Account for the timestamp bind variable so a normal 1,000-record
+	// RegisterObjects batch stays below SQLite's 900-parameter ceiling.
+	for start := 0; start < len(ids); start += sqliteMaxParams - 1 {
+		end := start + sqliteMaxParams - 1
+		if end > len(ids) {
+			end = len(ids)
+		}
+		if err := db.flushObjectUsageEventsForIDChunkTx(ctx, tx, ids[start:end], now); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (db *SqliteDB) flushObjectUsageEventsForIDChunkTx(ctx context.Context, tx *sql.Tx, ids []string, now time.Time) error {
 	placeholders := make([]string, len(ids))
 	capArgs, err := safeSliceCapacity(len(ids), 1)
 	if err != nil {

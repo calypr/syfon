@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -180,6 +181,69 @@ func TestHandleInternalInspectProjectRecords(t *testing.T) {
 	}
 	if len(item.AccessURLs) != 1 || item.AccessURLs[0] != "s3://bucket-a/prefix/example.bin" {
 		t.Fatalf("unexpected access urls: %+v", item.AccessURLs)
+	}
+}
+
+func TestHandleInternalInspectProjectRecordsPreservesLegacyDuplicatePhysicalRows(t *testing.T) {
+	body, _ := json.Marshal(internalInspectProjectRecordsRequest{Organization: "syfon", Project: "e2e"})
+	checksum := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	created := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
+	newer := created.Add(time.Minute)
+	urlFor := func(url string) *struct {
+		Headers *[]string `json:"headers,omitempty"`
+		Url     string    `json:"url"`
+	} {
+		return &struct {
+			Headers *[]string `json:"headers,omitempty"`
+			Url     string    `json:"url"`
+		}{Url: url}
+	}
+	db := &testutils.MockDatabase{
+		Objects: map[string]*drs.DrsObject{
+			"physical-a": {
+				Id: "physical-a", Checksums: []drs.Checksum{{Type: "sha256", Checksum: checksum}},
+				CreatedTime: created, UpdatedTime: &created,
+				AccessMethods: &[]drs.AccessMethod{{Type: drs.AccessMethodTypeS3, AccessUrl: urlFor("s3://bucket/physical-a")}},
+			},
+			"physical-b": {
+				Id: "physical-b", Checksums: []drs.Checksum{{Type: "sha256", Checksum: checksum}},
+				CreatedTime: newer, UpdatedTime: &newer,
+				AccessMethods: &[]drs.AccessMethod{{Type: drs.AccessMethodTypeS3, AccessUrl: urlFor("s3://bucket/physical-b")}},
+			},
+		},
+		ObjectAuthz: map[string]map[string][]string{
+			"physical-a": {"syfon": {"e2e"}},
+			"physical-b": {"syfon": {"e2e"}},
+		},
+	}
+	om := core.NewObjectManager(db, &testutils.MockUrlManager{})
+	req := withTestAuthzContext(httptest.NewRequest(http.MethodPost, "/data/inspect/project-records", bytes.NewBuffer(body)), "gen3", map[string]map[string]bool{"/organization/syfon/project/e2e": {"read": true}})
+	rr := doInternalDRSTestRequest(req, om)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp internalInspectProjectRecordsResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp.Items) != 2 {
+		t.Fatalf("expected both physical rows, got %d: %+v", len(resp.Items), resp.Items)
+	}
+	byID := make(map[string]internalInspectProjectRecordItem, len(resp.Items))
+	for _, item := range resp.Items {
+		byID[item.ObjectID] = item
+	}
+	for id, wantURL := range map[string]string{
+		"physical-a": "s3://bucket/physical-a",
+		"physical-b": "s3://bucket/physical-b",
+	} {
+		item, ok := byID[id]
+		if !ok {
+			t.Fatalf("missing physical row %q: %+v", id, resp.Items)
+		}
+		if len(item.AccessURLs) != 1 || item.AccessURLs[0] != wantURL {
+			t.Fatalf("physical row %q returned access URLs %v, want %q", id, item.AccessURLs, wantURL)
+		}
 	}
 }
 
@@ -425,6 +489,53 @@ func TestHandleInternalInspectProjectBucketInventoryListsProjectScope(t *testing
 	}
 }
 
+func TestHandleInternalInspectProjectBucketInventoryReturnsPartialListing(t *testing.T) {
+	db := &testutils.MockDatabase{
+		Credentials: map[string]models.S3Credential{
+			"cred-1": {CredentialID: "cred-1", Bucket: "bucket-a", Provider: "s3"},
+		},
+		BucketScopes: map[string]models.BucketScope{
+			"syfon|":    {Organization: "syfon", Bucket: "bucket-a", CredentialID: "cred-1", PathPrefix: "program-root"},
+			"syfon|e2e": {Organization: "syfon", ProjectID: "e2e", Bucket: "bucket-a", CredentialID: "cred-1", PathPrefix: "project-root"},
+		},
+	}
+	om := core.NewObjectManager(db, &testutils.MockUrlManager{})
+	om.SetS3PrefixListerWithOptions(func(context.Context, models.S3Credential, string, string, core.StoragePrefixListOptions) ([]core.StorageBucketObject, error) {
+		return []core.StorageBucketObject{{
+				Provider:  "s3",
+				Bucket:    "bucket-a",
+				Key:       "program-root/project-root/observed.bin",
+				Path:      "observed.bin",
+				SizeBytes: 17,
+			}}, &core.StorageInspectError{
+				Kind:    core.StorageInspectListingIncomplete,
+				Message: "terminal replay returned different page content",
+			}
+	})
+
+	body, _ := json.Marshal(internalInspectProjectBucketRequest{Organization: "syfon", Project: "e2e"})
+	req := withTestAuthzContext(httptest.NewRequest(http.MethodPost, "/data/inspect/project-bucket/inventory", bytes.NewBuffer(body)), "gen3", map[string]map[string]bool{
+		"/organization/syfon/project/e2e": {"read": true},
+	})
+	rr := doInternalDRSTestRequest(req, om)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected partial inventory to return 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp internalInspectProjectBucketResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Summary == nil || resp.Summary.InventoryComplete {
+		t.Fatalf("expected incomplete inventory summary, got %+v", resp.Summary)
+	}
+	if !strings.Contains(resp.Summary.InventoryWarning, "terminal replay") {
+		t.Fatalf("expected listing warning to be preserved, got %+v", resp.Summary)
+	}
+	if len(resp.Items) != 1 || resp.Items[0].InventoryComplete {
+		t.Fatalf("expected observed partial item, got %+v", resp.Items)
+	}
+}
+
 func TestHandleInternalInspectObjectBulkListValidatesExactKeyWithoutHead(t *testing.T) {
 	db := &testutils.MockDatabase{
 		Credentials: map[string]models.S3Credential{
@@ -440,12 +551,15 @@ func TestHandleInternalInspectObjectBulkListValidatesExactKeyWithoutHead(t *test
 		inspectCalls++
 		return nil, nil
 	})
+	var listedPrefixesMu sync.Mutex
 	var listedPrefixes []string
 	om.SetS3PrefixListerWithOptions(func(ctx context.Context, cred models.S3Credential, bucket string, prefix string, options core.StoragePrefixListOptions) ([]core.StorageBucketObject, error) {
 		if bucket != "bucket-a" || !options.ExactPrefix || options.MaxKeys != 1 || options.IncludeHead {
 			t.Fatalf("unexpected bulk-list options bucket=%q options=%+v", bucket, options)
 		}
+		listedPrefixesMu.Lock()
 		listedPrefixes = append(listedPrefixes, prefix)
+		listedPrefixesMu.Unlock()
 		switch prefix {
 		case "project-root/file.bin":
 			return []core.StorageBucketObject{{Provider: "s3", Bucket: bucket, Key: "project-root/file.bin", Path: "file.bin", SizeBytes: 17, ETag: "etag-1", LastModTime: time.Date(2026, 7, 1, 1, 2, 3, 0, time.UTC)}}, nil
@@ -480,7 +594,10 @@ func TestHandleInternalInspectObjectBulkListValidatesExactKeyWithoutHead(t *test
 	if resp.Items[1].Exists || resp.Items[1].Status != "not_found" {
 		t.Fatalf("expected prefix child not to count as exact key, got %+v", resp.Items[1])
 	}
-	if len(listedPrefixes) != 2 {
+	listedPrefixesMu.Lock()
+	listedPrefixCount := len(listedPrefixes)
+	listedPrefixesMu.Unlock()
+	if listedPrefixCount != 2 {
 		t.Fatalf("expected two LIST calls, got %+v", listedPrefixes)
 	}
 	if inspectCalls != 0 {

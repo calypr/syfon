@@ -17,7 +17,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 )
 
-func TestHandleInternalDeleteProject_RemovesObjectsAndBucketScopes(t *testing.T) {
+func TestHandleInternalDeleteProject_RemovesGrantsAndBucketScopes(t *testing.T) {
 	mockDB := &testutils.MockDatabase{
 		Objects: map[string]*drs.DrsObject{
 			"delete-me": {Id: "delete-me", Name: common.Ptr("delete-me")},
@@ -41,8 +41,11 @@ func TestHandleInternalDeleteProject_RemovesObjectsAndBucketScopes(t *testing.T)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
 	}
-	if _, ok := mockDB.Objects["delete-me"]; ok {
-		t.Fatalf("expected scoped object to be deleted")
+	if _, ok := mockDB.Objects["delete-me"]; !ok {
+		t.Fatalf("project removal must retain content")
+	}
+	if _, ok := mockDB.ObjectAuthz["delete-me"]; ok {
+		t.Fatalf("project grant remains after removal")
 	}
 	if _, ok := mockDB.Objects["keep-me"]; !ok {
 		t.Fatalf("expected unrelated object to remain")

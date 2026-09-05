@@ -78,15 +78,17 @@ const (
 )
 
 type ProjectStorageSummary struct {
-	Provider    string
-	Bucket      string
-	Prefix      string
-	ObjectURL   string
-	Exists      bool
-	ObjectCount int
-	TotalBytes  int64
-	ComputedAt  time.Time
-	Mode        ProjectStorageInspectMode
+	Provider          string
+	Bucket            string
+	Prefix            string
+	ObjectURL         string
+	Exists            bool
+	ObjectCount       int
+	TotalBytes        int64
+	ComputedAt        time.Time
+	Mode              ProjectStorageInspectMode
+	InventoryComplete bool
+	InventoryWarning  string
 }
 
 type ProjectStorageInspectResult struct {
@@ -227,17 +229,25 @@ func (m *ObjectManager) InspectProjectStorage(ctx context.Context, organization,
 	if normalizedMode == ProjectStorageInspectExists {
 		options.MaxKeys = 1
 	}
-	items, err := m.listS3Prefix(ctx, target.cred, target.bucket, target.prefix, options)
-	if err != nil {
-		log.Printf("INFO: syfon_project_storage_inspect_done organization=%s project=%s mode=%s path_prefix=%q bucket=%s prefix=%q max_keys=%d include_head=%t duration_ms=%d error=%q", organization, project, normalizedMode, inspectOptions.PathPrefix, target.bucket, target.prefix, options.MaxKeys, options.IncludeHead, time.Since(started).Milliseconds(), err.Error())
-		return nil, err
+	items, listErr := m.listS3Prefix(ctx, target.cred, target.bucket, target.prefix, options)
+	inventoryComplete := listErr == nil
+	inventoryWarning := ""
+	if listErr != nil {
+		var inspectErr *StorageInspectError
+		if len(items) == 0 || !errors.As(listErr, &inspectErr) || inspectErr.Kind != StorageInspectListingIncomplete {
+			log.Printf("INFO: syfon_project_storage_inspect_done organization=%s project=%s mode=%s path_prefix=%q bucket=%s prefix=%q max_keys=%d include_head=%t duration_ms=%d error=%q", organization, project, normalizedMode, inspectOptions.PathPrefix, target.bucket, target.prefix, options.MaxKeys, options.IncludeHead, time.Since(started).Milliseconds(), listErr.Error())
+			return nil, listErr
+		}
+		inventoryWarning = strings.TrimSpace(listErr.Error())
 	}
 	out := normalizeStorageBucketObjects(items, target)
 	summary := summarizeProjectStorageObjects(out, target, normalizedMode)
+	summary.InventoryComplete = inventoryComplete
+	summary.InventoryWarning = inventoryWarning
 	if normalizedMode != ProjectStorageInspectItems {
 		out = []StorageBucketObject{}
 	}
-	log.Printf("INFO: syfon_project_storage_inspect_done organization=%s project=%s mode=%s path_prefix=%q bucket=%s prefix=%q max_keys=%d include_head=%t exists=%t object_count=%d returned_items=%d total_bytes=%d duration_ms=%d", organization, project, normalizedMode, inspectOptions.PathPrefix, target.bucket, target.prefix, options.MaxKeys, options.IncludeHead, summary.Exists, summary.ObjectCount, len(out), summary.TotalBytes, time.Since(started).Milliseconds())
+	log.Printf("INFO: syfon_project_storage_inspect_done organization=%s project=%s mode=%s path_prefix=%q bucket=%s prefix=%q max_keys=%d include_head=%t exists=%t object_count=%d returned_items=%d total_bytes=%d inventory_complete=%t inventory_warning=%q duration_ms=%d", organization, project, normalizedMode, inspectOptions.PathPrefix, target.bucket, target.prefix, options.MaxKeys, options.IncludeHead, summary.Exists, summary.ObjectCount, len(out), summary.TotalBytes, summary.InventoryComplete, summary.InventoryWarning, time.Since(started).Milliseconds())
 	return &ProjectStorageInspectResult{Summary: summary, Items: out}, nil
 }
 
@@ -306,14 +316,15 @@ func normalizeStorageBucketObjects(items []StorageBucketObject, target *resolved
 
 func summarizeProjectStorageObjects(items []StorageBucketObject, target *resolvedStorageScopeTarget, mode ProjectStorageInspectMode) ProjectStorageSummary {
 	summary := ProjectStorageSummary{
-		Provider:    target.provider,
-		Bucket:      target.bucket,
-		Prefix:      strings.Trim(strings.TrimSpace(target.prefix), "/"),
-		ObjectURL:   common.BucketToURL(target.bucket, strings.Trim(strings.TrimSpace(target.prefix), "/")),
-		Exists:      len(items) > 0,
-		ObjectCount: len(items),
-		ComputedAt:  time.Now().UTC(),
-		Mode:        mode,
+		Provider:          target.provider,
+		Bucket:            target.bucket,
+		Prefix:            strings.Trim(strings.TrimSpace(target.prefix), "/"),
+		ObjectURL:         common.BucketToURL(target.bucket, strings.Trim(strings.TrimSpace(target.prefix), "/")),
+		Exists:            len(items) > 0,
+		ObjectCount:       len(items),
+		ComputedAt:        time.Now().UTC(),
+		Mode:              mode,
+		InventoryComplete: true,
 	}
 	for _, item := range items {
 		summary.TotalBytes += item.SizeBytes
@@ -885,6 +896,9 @@ func defaultS3PrefixLister(ctx context.Context, cred models.S3Credential, bucket
 		}
 		var inspectErr *StorageInspectError
 		if errors.As(err, &inspectErr) {
+			if inspectErr.Kind == StorageInspectListingIncomplete && len(out) > 0 {
+				return out, inspectErr
+			}
 			return nil, inspectErr
 		}
 		return nil, classifyS3ListError(bucket, prefix, err)

@@ -1,13 +1,13 @@
 package sqlite
 
 import (
-	"github.com/calypr/syfon/internal/models"
-	"github.com/calypr/syfon/internal/common"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/calypr/syfon/internal/common"
+	"github.com/calypr/syfon/internal/models"
 	"time"
 
 	"github.com/calypr/syfon/apigen/server/drs"

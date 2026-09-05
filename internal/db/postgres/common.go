@@ -4,7 +4,6 @@ import (
 	"github.com/calypr/syfon/internal/models"
 	"strings"
 	"time"
-
 )
 
 func defaultProvider(provider string) string {

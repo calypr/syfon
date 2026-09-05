@@ -2,6 +2,7 @@ package common
 
 import (
 	"errors"
+	"fmt"
 	"net/url"
 	"regexp"
 	"strings"
@@ -12,6 +13,7 @@ import (
 )
 
 var ErrNoValidSHA256 = errors.New("no valid sha256 values provided")
+var ErrConflictingSHA256 = errors.New("conflicting sha256 values provided")
 var ErrAccessMethodsRequired = errors.New("candidate must include at least one access method with a non-empty url")
 
 var sha256Like = regexp.MustCompile(`^[A-Fa-f0-9]{64}$`)
@@ -94,19 +96,59 @@ func MergeAdditionalChecksums(existing []drs.Checksum, additions []drs.Checksum)
 
 // CanonicalSHA256 pulls the sha256 value from a list of checksums if it exists.
 func CanonicalSHA256(checksums []drs.Checksum) (string, bool) {
-	for _, cs := range checksums {
-		checksumType := strings.ToLower(strings.TrimSpace(cs.Type))
-		if checksumType == "sha256" || checksumType == "sha-256" {
-			normalized := sycommon.NormalizeOid(cs.Checksum)
-			if normalized != "" {
-				return normalized, true
-			}
-		}
+	values := SHA256Values(checksums)
+	if len(values) == 0 {
+		return "", false
 	}
-	return "", false
+	return values[0], true
 }
 
+// SHA256Values returns distinct valid SHA-256 values in their input order.
+// Invalid values remain ignored for compatibility with existing bundle data.
+func SHA256Values(checksums []drs.Checksum) []string {
+	seen := make(map[string]struct{})
+	values := make([]string, 0, 1)
+	for _, cs := range checksums {
+		checksumType := NormalizeChecksumType(cs.Type)
+		if checksumType != "sha256" {
+			continue
+		}
+		normalized := sycommon.NormalizeOid(cs.Checksum)
+		if normalized == "" {
+			continue
+		}
+		if _, ok := seen[normalized]; ok {
+			continue
+		}
+		seen[normalized] = struct{}{}
+		values = append(values, normalized)
+	}
+	return values
+}
 
+// ValidateCanonicalSHA256 returns the sole valid SHA-256 value, if present.
+// Multiple distinct valid values identify an invalid registration.
+func ValidateCanonicalSHA256(checksums []drs.Checksum) (string, bool, error) {
+	values := SHA256Values(checksums)
+	if len(values) > 1 {
+		return "", false, fmt.Errorf("%w: %s", ErrConflictingSHA256, strings.Join(values, ", "))
+	}
+	if len(values) == 0 {
+		return "", false, nil
+	}
+	return values[0], true, nil
+}
+
+// NormalizeSHA256Query recognizes a bare or prefixed SHA-256 query. Other
+// checksum values are returned unchanged by callers so their exact matching
+// semantics remain intact.
+func NormalizeSHA256Query(value string) (string, bool) {
+	normalized := sycommon.NormalizeOid(value)
+	if normalized == "" {
+		return "", false
+	}
+	return normalized, true
+}
 
 // ParseS3URL extracts bucket/key pairs from an s3:// URL.
 func ParseS3URL(raw string) (bucket string, key string, ok bool) {

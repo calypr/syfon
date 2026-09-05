@@ -117,7 +117,7 @@ func TestDRSHandlers(t *testing.T) {
 		}
 	})
 
-	t.Run("GetAccessURL_RewritesScopedBucketURL", func(t *testing.T) {
+	t.Run("GetAccessURL_MapsLegacyReplica", func(t *testing.T) {
 		db := &testutils.MockDatabase{
 			Objects: map[string]*drs.DrsObject{
 				"scoped-obj": {
@@ -157,7 +157,7 @@ func TestDRSHandlers(t *testing.T) {
 		}
 		wantURL := "s3://bforepc/bforepc-prod/OHSU/slide.ome.tiff"
 		if got := um.lastURL; got != wantURL {
-			t.Fatalf("expected scoped storage URL %q, got %q", wantURL, got)
+			t.Fatalf("expected stored replica URL %q, got %q", wantURL, got)
 		}
 		if got := um.lastAccess; got != "bforepc" {
 			t.Fatalf("expected signer credential bucket %q, got %q", "bforepc", got)
