@@ -33,12 +33,12 @@ func GetBaseURL(ctx context.Context) string {
 
 // ObjectManager standardizes object lifecycle operations across all API surfaces.
 type ObjectManager struct {
-	db               db.DatabaseInterface
-	uM               urlmanager.UrlManager
-	bucketScopeCache *bucketScopeCache
-	inspectS3Object  func(context.Context, models.S3Credential, string, string) (*StorageObjectMetadata, error)
-	listS3Prefix     func(context.Context, models.S3Credential, string, string, StoragePrefixListOptions) ([]StorageBucketObject, error)
-	s3ProbeLimiter   *s3ProbeLimiter
+	db              db.DatabaseInterface
+	uM              urlmanager.UrlManager
+	bucketCatalog   *bucketCatalog
+	inspectS3Object func(context.Context, models.S3Credential, string, string) (*StorageObjectMetadata, error)
+	listS3Prefix    func(context.Context, models.S3Credential, string, string, StoragePrefixListOptions) ([]StorageBucketObject, error)
+	s3ProbeLimiter  *s3ProbeLimiter
 }
 
 type VisibleBucket struct {
@@ -48,11 +48,11 @@ type VisibleBucket struct {
 
 func NewObjectManager(db db.DatabaseInterface, uM urlmanager.UrlManager) *ObjectManager {
 	return &ObjectManager{
-		db:               db,
-		uM:               uM,
-		bucketScopeCache: newBucketScopeCache(30 * time.Second),
-		inspectS3Object:  defaultS3ObjectInspector,
-		listS3Prefix:     defaultS3PrefixLister,
-		s3ProbeLimiter:   newS3ProbeLimiterFromEnv(),
+		db:              db,
+		uM:              uM,
+		bucketCatalog:   newBucketCatalog(db, uM, 30*time.Second),
+		inspectS3Object: defaultS3ObjectInspector,
+		listS3Prefix:    defaultS3PrefixLister,
+		s3ProbeLimiter:  newS3ProbeLimiterFromEnv(),
 	}
 }
