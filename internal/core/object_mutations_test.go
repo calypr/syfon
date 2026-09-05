@@ -11,15 +11,15 @@ import (
 
 	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/common"
-	"github.com/calypr/syfon/internal/db"
 	"github.com/calypr/syfon/internal/db/sqlite"
 	"github.com/calypr/syfon/internal/models"
+	"github.com/calypr/syfon/internal/testutils"
 )
 
 func ptr[T any](v T) *T { return &v }
 
 func TestRegisterBulk_RegistersCandidate(t *testing.T) {
-	database := db.NewInMemoryDB()
+	database := testutils.NewInMemoryDB()
 	om := NewObjectManager(database, nil)
 
 	candidates := []drs.DrsObjectCandidate{
@@ -58,7 +58,7 @@ func TestRegisterBulk_RegistersCandidate(t *testing.T) {
 }
 
 func TestRegisterBulk_InvalidChecksum(t *testing.T) {
-	database := db.NewInMemoryDB()
+	database := testutils.NewInMemoryDB()
 	om := NewObjectManager(database, nil)
 
 	candidates := []drs.DrsObjectCandidate{{
@@ -76,7 +76,7 @@ func TestRegisterBulk_InvalidChecksum(t *testing.T) {
 }
 
 func TestBulkDeleteObjects_DeletesAuthorizedObjects(t *testing.T) {
-	database := db.NewInMemoryDB()
+	database := testutils.NewInMemoryDB()
 	om := NewObjectManager(database, nil)
 
 	_, err := om.RegisterBulk(context.Background(), []drs.DrsObjectCandidate{{
@@ -224,7 +224,7 @@ func TestObjectManagerBulkMutationsTargetLegacyDuplicatePhysicalUUID(t *testing.
 }
 
 func TestRegisterObjects_CanonicalizesProjectChecksumDuplicates(t *testing.T) {
-	database := db.NewInMemoryDB()
+	database := testutils.NewInMemoryDB()
 	om := NewObjectManager(database, nil)
 	now := time.Now().UTC()
 	later := now.Add(time.Minute)

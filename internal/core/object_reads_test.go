@@ -14,6 +14,7 @@ import (
 	"github.com/calypr/syfon/internal/db"
 	"github.com/calypr/syfon/internal/db/sqlite"
 	"github.com/calypr/syfon/internal/models"
+	"github.com/calypr/syfon/internal/testutils"
 )
 
 type pageSpyDB struct {
@@ -274,7 +275,7 @@ func TestCanonicalContentMetadataIsDeterministicOnTimestampTie(t *testing.T) {
 }
 
 func TestListObjectIDsPageByChecksum_ReturnsCanonicalContentID(t *testing.T) {
-	database := db.NewInMemoryDB()
+	database := testutils.NewInMemoryDB()
 	om := NewObjectManager(database, nil)
 	checksum := "1111111111111111111111111111111111111111111111111111111111111111"
 
@@ -296,7 +297,7 @@ func TestListObjectIDsPageByChecksum_ReturnsCanonicalContentID(t *testing.T) {
 }
 
 func TestListObjectIDsPageByScope_StartAfterAndScopeFilter(t *testing.T) {
-	database := db.NewInMemoryDB()
+	database := testutils.NewInMemoryDB()
 	om := NewObjectManager(database, nil)
 	checksumA := "2222222222222222222222222222222222222222222222222222222222222222"
 	checksumB := "3333333333333333333333333333333333333333333333333333333333333333"
@@ -315,7 +316,7 @@ func TestListObjectIDsPageByScope_StartAfterAndScopeFilter(t *testing.T) {
 }
 
 func TestListObjectIDsPageByScope_UsesDatabasePaginationForUnrestrictedScope(t *testing.T) {
-	database := &pageSpyDB{DatabaseInterface: db.NewInMemoryDB()}
+	database := &pageSpyDB{DatabaseInterface: testutils.NewInMemoryDB()}
 	om := NewObjectManager(database, nil)
 
 	registerScopedCandidate(t, om, "scope-a", "2222222222222222222222222222222222222222222222222222222222222222", "org1", "proj1")
@@ -338,7 +339,7 @@ func TestListObjectIDsPageByScope_UsesDatabasePaginationForUnrestrictedScope(t *
 }
 
 func TestListObjectIDsPageByScope_FallsBackWhenAuthzRestrictsResources(t *testing.T) {
-	database := &pageSpyDB{DatabaseInterface: db.NewInMemoryDB()}
+	database := &pageSpyDB{DatabaseInterface: testutils.NewInMemoryDB()}
 	om := NewObjectManager(database, nil)
 
 	registerScopedCandidate(t, om, "secure-obj", "5555555555555555555555555555555555555555555555555555555555555555", "secure", "p1")
@@ -362,7 +363,7 @@ func TestListObjectIDsPageByScope_FallsBackWhenAuthzRestrictsResources(t *testin
 }
 
 func TestListObjectIDsByScope_AuthzFiltering(t *testing.T) {
-	database := db.NewInMemoryDB()
+	database := testutils.NewInMemoryDB()
 	om := NewObjectManager(database, nil)
 	checksum := "5555555555555555555555555555555555555555555555555555555555555555"
 
@@ -532,7 +533,7 @@ func ptrTime(raw string) *time.Time {
 }
 
 func TestReadableChecksumFilter(t *testing.T) {
-	database := db.NewInMemoryDB()
+	database := testutils.NewInMemoryDB()
 	om := NewObjectManager(database, nil)
 
 	unenforcedCtx := context.Background()

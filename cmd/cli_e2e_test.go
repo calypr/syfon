@@ -20,6 +20,7 @@ import (
 	"github.com/calypr/syfon/internal/db"
 	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/signer/file"
+	"github.com/calypr/syfon/internal/testutils"
 	"github.com/calypr/syfon/internal/urlmanager"
 	"github.com/gofiber/fiber/v3"
 	"github.com/spf13/cobra"
@@ -289,7 +290,7 @@ func newSyfonTestServer(t *testing.T) *fiberTestServer {
 
 	storageDir := t.TempDir()
 
-	database := db.NewInMemoryDB()
+	database := testutils.NewInMemoryDB()
 	if err := database.SaveS3Credential(context.Background(), &models.S3Credential{
 		Bucket:   "syfon-bucket",
 		Provider: "file",

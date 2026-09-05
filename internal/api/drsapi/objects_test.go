@@ -11,7 +11,6 @@ import (
 	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/core"
-	"github.com/calypr/syfon/internal/db"
 	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/testutils"
 	"github.com/calypr/syfon/internal/urlmanager"
@@ -402,7 +401,7 @@ func TestAdditionalDRSHandlers(t *testing.T) {
 }
 
 func TestChecksumRouteRegression_WithRealCoreAndDB(t *testing.T) {
-	database := db.NewInMemoryDB()
+	database := testutils.NewInMemoryDB()
 	om := core.NewObjectManager(database, &testutils.MockUrlManager{})
 	checksum := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
