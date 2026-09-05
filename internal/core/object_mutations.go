@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -101,7 +102,7 @@ func (m *ObjectManager) BulkDeleteObjectsWithOptions(ctx context.Context, ids []
 	if opts.DeleteStorageData {
 		return fmt.Errorf("%w: physical storage deletion is not atomic with catalog mutation", common.ErrConflict)
 	}
-	toDelete, err := m.deletableObjectIDsForMethod(ctx, ids, true)
+	toDelete, err := m.deletablePhysicalObjectIDsForBulk(ctx, ids)
 	if err != nil {
 		return err
 	}
@@ -109,6 +110,49 @@ func (m *ObjectManager) BulkDeleteObjectsWithOptions(ctx context.Context, ids []
 		return nil
 	}
 	return m.db.BulkDeleteObjects(ctx, toDelete)
+}
+
+func (m *ObjectManager) deletablePhysicalObjectIDsForBulk(ctx context.Context, ids []string) ([]string, error) {
+	objects, err := m.db.GetBulkObjects(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	byID := make(map[string]*models.InternalObject, len(objects))
+	for i := range objects {
+		byID[objects[i].Id] = &objects[i]
+	}
+
+	toDelete := make([]string, 0, len(ids))
+	seen := make(map[string]struct{}, len(ids))
+	for _, rawID := range ids {
+		objectID := strings.TrimSpace(rawID)
+		if objectID == "" {
+			continue
+		}
+		obj, ok := byID[objectID]
+		if !ok {
+			canonicalID, resolveErr := m.db.ResolveObjectAlias(ctx, objectID)
+			if resolveErr == nil && strings.TrimSpace(canonicalID) != "" {
+				return nil, fmt.Errorf("%w: bulk delete requires a physical object UUID; %q is an alias for %q", common.ErrConflict, objectID, strings.TrimSpace(canonicalID))
+			}
+			if resolveErr != nil && !errors.Is(resolveErr, common.ErrNotFound) {
+				return nil, resolveErr
+			}
+			continue
+		}
+		if !m.hasObjectMethod(ctx, obj, objectMethodDelete) {
+			continue
+		}
+		if err := m.requireAllObjectMethod(ctx, obj, objectMethodDelete); err != nil {
+			continue
+		}
+		if _, alreadySeen := seen[objectID]; alreadySeen {
+			continue
+		}
+		seen[objectID] = struct{}{}
+		toDelete = append(toDelete, objectID)
+	}
+	return toDelete, nil
 }
 
 func (m *ObjectManager) UpdateObjectAccessMethods(ctx context.Context, objectID string, accessMethods []drs.AccessMethod) error {

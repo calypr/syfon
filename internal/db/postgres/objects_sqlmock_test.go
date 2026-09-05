@@ -404,8 +404,6 @@ func TestBulkDeleteObjects(t *testing.T) {
 		for _, id := range []string{"a", "b"} {
 			mock.ExpectQuery(regexp.QuoteMeta("SELECT id FROM drs_object WHERE id = $1")).WithArgs(id).
 				WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(id))
-			mock.ExpectQuery(regexp.QuoteMeta("SELECT DISTINCT replace(lower(trim(checksum)), 'sha256:', '')")).WithArgs(id).
-				WillReturnRows(sqlmock.NewRows([]string{"checksum"}))
 			mock.ExpectQuery(regexp.QuoteMeta("SELECT resource FROM drs_object_controlled_access WHERE object_id = $1")).WithArgs(id).
 				WillReturnRows(sqlmock.NewRows([]string{"resource"}))
 		}

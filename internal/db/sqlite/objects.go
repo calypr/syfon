@@ -1244,8 +1244,10 @@ func (db *SqliteDB) BulkDeleteObjects(ctx context.Context, ids []string) error {
 		if !found {
 			continue
 		}
-		if err := sqliteEnsureNoLegacyDuplicateTx(ctx, tx, canonicalID); err != nil {
-			return err
+		if strings.TrimSpace(rawID) != canonicalID {
+			if err := sqliteEnsureNoLegacyDuplicateTx(ctx, tx, canonicalID); err != nil {
+				return err
+			}
 		}
 		if err := sqliteRequireContentMethodTx(ctx, tx, canonicalID, "delete"); err != nil {
 			return err

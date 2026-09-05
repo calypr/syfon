@@ -3,12 +3,14 @@ package core
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"path/filepath"
 	"slices"
 	"testing"
 	"time"
 
 	"github.com/calypr/syfon/apigen/server/drs"
+	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/db"
 	"github.com/calypr/syfon/internal/db/sqlite"
 	"github.com/calypr/syfon/internal/models"
@@ -104,7 +106,7 @@ func TestBulkDeleteObjects_DeletesAuthorizedObjects(t *testing.T) {
 	}
 }
 
-func TestObjectManagerBulkUpdateAccessMethodsTargetsLegacyDuplicatePhysicalUUID(t *testing.T) {
+func TestObjectManagerBulkMutationsTargetLegacyDuplicatePhysicalUUID(t *testing.T) {
 	ctx := context.Background()
 	fixturePath := filepath.Join(t.TempDir(), "legacy.sqlite")
 	database, err := sqlite.NewSqliteDB(fixturePath)
@@ -119,6 +121,7 @@ func TestObjectManagerBulkUpdateAccessMethodsTargetsLegacyDuplicatePhysicalUUID(
 	const (
 		objectA = "3f5b5dac-f07d-5fdb-998d-532a95dd42d1"
 		objectB = "f9be6500-ea29-5427-843f-eb44dcdc6fb5"
+		aliasID = "legacy-alias"
 		sha     = "faec17cafc7af76bbdbe96a499545ff00ce2ef0ff4c65e05571dbbe0f17435ce"
 	)
 	resource := "/organization/org/project/repair"
@@ -152,13 +155,19 @@ func TestObjectManagerBulkUpdateAccessMethodsTargetsLegacyDuplicatePhysicalUUID(
 	}
 	insertObject(objectA, "s3://bucket/original-a")
 	insertObject(objectB, "s3://bucket/original-b")
+	if _, err := raw.ExecContext(ctx, `
+		INSERT INTO drs_object_alias (alias_id, object_id)
+		VALUES (?, ?)
+	`, aliasID, objectA); err != nil {
+		t.Fatalf("insert alias %q: %v", aliasID, err)
+	}
 	if err := raw.Close(); err != nil {
 		t.Fatalf("close fixture database: %v", err)
 	}
 
 	om := NewObjectManager(database, nil)
 	authenticatedTargetProject := buildGen3Context(map[string]map[string]bool{
-		resource: {"update": true},
+		resource: {"update": true, "delete": true},
 	})
 	if err := om.BulkUpdateAccessMethods(authenticatedTargetProject, map[string][]drs.AccessMethod{
 		objectA: {{
@@ -188,6 +197,29 @@ func TestObjectManagerBulkUpdateAccessMethodsTargetsLegacyDuplicatePhysicalUUID(
 	}
 	if got := readAccessURL(objectB); got != "s3://bucket/original-b" {
 		t.Fatalf("expected sibling physical UUID %q to remain unchanged, got %q", objectB, got)
+	}
+
+	if err := om.BulkDeleteObjects(authenticatedTargetProject, []string{aliasID}); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("expected alias bulk deletion to be rejected with conflict, got %v", err)
+	}
+	if _, err := database.GetObject(ctx, objectA); err != nil {
+		t.Fatalf("alias rejection must preserve target physical UUID %q: %v", objectA, err)
+	}
+	if got := readAccessURL(objectB); got != "s3://bucket/original-b" {
+		t.Fatalf("alias rejection must preserve sibling physical UUID %q, got %q", objectB, got)
+	}
+	if err := database.BulkDeleteObjects(authenticatedTargetProject, []string{aliasID}); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("expected direct database alias bulk deletion to preserve ambiguity guard, got %v", err)
+	}
+
+	if err := om.BulkDeleteObjects(authenticatedTargetProject, []string{objectA}); err != nil {
+		t.Fatalf("BulkDeleteObjects through ObjectManager failed: %v", err)
+	}
+	if _, err := database.GetObject(ctx, objectA); err == nil {
+		t.Fatalf("expected target physical UUID %q to be deleted", objectA)
+	}
+	if got := readAccessURL(objectB); got != "s3://bucket/original-b" {
+		t.Fatalf("expected sibling physical UUID %q to remain readable after deletion, got %q", objectB, got)
 	}
 }
 
