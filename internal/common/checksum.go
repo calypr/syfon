@@ -3,7 +3,6 @@ package common
 import (
 	"errors"
 	"fmt"
-	"net/url"
 	"regexp"
 	"strings"
 
@@ -148,21 +147,4 @@ func NormalizeSHA256Query(value string) (string, bool) {
 		return "", false
 	}
 	return normalized, true
-}
-
-// ParseS3URL extracts bucket/key pairs from an s3:// URL.
-func ParseS3URL(raw string) (bucket string, key string, ok bool) {
-	u, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil {
-		return "", "", false
-	}
-	if !strings.EqualFold(u.Scheme, "s3") {
-		return "", "", false
-	}
-	bucket = strings.TrimSpace(u.Host)
-	key = strings.TrimSpace(strings.TrimPrefix(u.Path, "/"))
-	if bucket == "" || key == "" {
-		return "", "", false
-	}
-	return bucket, key, true
 }
