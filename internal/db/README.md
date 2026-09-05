@@ -1,98 +1,117 @@
-# Database Architecture
+# Database package
 
-This directory contains all persistence code for `syfon`.
+`internal/db` defines the persistence contracts used by Syfon. The backend implementations remain separate because SQLite and PostgreSQL use different SQL, connection, locking, and parameter-limit behavior.
 
-## Layout
+## Package layout
 
-- `core/`
-  - shared interfaces, models, authz/resource helpers, typed DB errors
-- `sqlite/`
-  - SQLite implementation of `core.DatabaseInterface`
-- `postgres/`
-  - PostgreSQL implementation of `core.DatabaseInterface`
-- `testing.go`
-  - in-memory DB helper for tests
+- `interface.go` defines capability interfaces, including `ObjectStore`, `CredentialStore`, `UsageStore`, and the aggregate `DatabaseInterface`.
+- `sqlite/` implements the contracts with SQLite. `sqlite.NewSqliteDB` initializes and upgrades the runtime schema before it returns.
+- `postgres/` implements the contracts with PostgreSQL. `postgres.NewPostgresDB` initializes and upgrades the runtime schema before it returns.
+- `postgres/object_schema.sql` contains the object tables and indexes embedded by the PostgreSQL implementation.
+- `scripts/init_sqlite.sql` and `scripts/init_sqlite_db.sh` provide a manual SQLite bootstrap helper.
+- At the 2026-09-04 audit baseline, `testing.go` provides `db.NewInMemoryDB` for tests by calling the SQLite implementation. The accepted architecture worklist moves this helper to `internal/testutils` so the contract package does not import a backend.
 
-## Primary Tables
+Production dependency direction is `cmd/server` and the API and core packages -> `internal/db` contracts -> `sqlite` or `postgres`. The server selects a backend from `internal/config` in `cmd/server/server.go`. The current test helper is the exception described above.
 
-The server stores object metadata in a normalized schema:
+## Object and access tables
+
+Both runtime backends store the following object data. SQLite creates these tables in `internal/db/sqlite/sqlite.go:initSchema`. PostgreSQL creates the object tables from `internal/db/postgres/object_schema.sql`.
 
 ### `drs_object`
 
-Core record row (one row per object).
+One row stores the metadata for a canonical object record.
 
-- `id` (PK, text): canonical object id (current implementation uses sha256 in many flows)
-- `size` (bigint/int)
-- `created_time` (timestamp)
-- `updated_time` (timestamp)
-- `name` (text)
-- `version` (text)
-- `description` (text)
+- `id` is the text primary key.
+- `size`, `created_time`, `updated_time`, `name`, `version`, and `description` store object metadata.
 
-### `drs_object_access_method`
-
-One-to-many scoped access locations for each object.
-
-- `object_id` (FK -> `drs_object.id`)
-- `url` (text), e.g. `s3://bucket/key`
-- `type` (text), e.g. `s3`
-- `org` (text), e.g. `my-program`
-- `project` (text), e.g. `my-project`
+Core uses the canonical SHA-256 checksum to group and resolve content. The record ID remains the persisted primary key. `drs_object_alias` maps an alias ID, such as an older UUID, to that canonical record.
 
 ### `drs_object_checksum`
 
-One-to-many checksum values for each object.
+This table stores one row for each typed checksum value.
 
-- `object_id` (FK -> `drs_object.id`)
-- `type` (text), e.g. `sha256`, `md5`
-- `checksum` (text)
+- `object_id` references `drs_object.id`.
+- `type` stores values such as `sha256` or `md5`.
+- `checksum` stores the corresponding value.
+
+`internal/common.CanonicalSHA256` normalizes SHA-256 values for identity and lookup. The runtime schema includes indexes for ordinary checksum lookup and the normalized SHA-256 identity expression.
+
+### `drs_object_access_method`
+
+This table stores the provider locations for an object.
+
+- `object_id` references `drs_object.id`.
+- `url` stores a location such as `s3://bucket/key`.
+- `type` stores the provider type, such as `s3`.
+
+Organization and project columns do not belong to this table. Scoped authorization uses `drs_object_controlled_access`.
+
+### `drs_object_controlled_access`
+
+Each row associates an object with an Arborist-compatible resource path in `resource`. Core builds a path from an organization and project with `common.ResourcePath`. API and authz code use the stored resource values when they evaluate access.
+
+### `drs_object_read_policy`
+
+This table stores the per-object `public_read` flag. The policy row is internal state and is not part of the DRS response.
+
+### `drs_object_alias`
+
+Each `alias_id` points to one canonical `object_id`. Object lookup resolves this mapping before loading the canonical row. Deletes and updates apply the current alias rules in each backend.
+
+### `drs_object_name_alias`
+
+This table stores prior or alternate object names. The `(object_id, name_alias)` pair is unique, and reads return normalized aliases with the object.
+
+## Credentials, scopes, and transfer records
 
 ### `s3_credential`
 
-Bucket-level signing credentials.
+The `credential_id` text column is the primary key. The row also stores `bucket`, `provider`, `region`, `access_key`, `secret_key`, and an optional `endpoint`.
 
-- `bucket` (PK, text)
-- `region` (text)
-- `access_key` (text)
-- `secret_key` (text)
-- `endpoint` (text, optional)
+Runtime initialization enforces one credential identity per physical bucket. SQLite uses triggers. PostgreSQL uses a trigger function. A bucket may still have multiple logical project scopes through `bucket_scope`.
 
-## RBAC Model
+### `bucket_scope`
 
-- Local mode:
-  - no gen3 RBAC enforcement
-  - optional basic auth at middleware level
-  - recommended local development database: SQLite
-- Gen3 mode:
-  - request middleware fetches privileges from Fence/Arborist context
-  - DB/API/service checks evaluate object `authorizations` against user privileges
-  - method-aware checks use `read/create/update/delete/file_upload`
+The `(organization, project_id)` pair is the primary key. Each row maps a project to a `credential_id`, physical `bucket`, and optional `path_prefix`.
 
-## Developer Notes
+### `lfs_pending_metadata`
 
-### Add a new query or operation
+This table stores pending LFS metadata by `oid`, with creation and expiry timestamps. The LFS implementation consumes entries atomically when it verifies an upload.
 
-1. Add method to `core.DatabaseInterface` in `core/interface.go`.
-2. Implement method in both:
-   - `sqlite/sqlite.go`
-   - `postgres/postgres.go`
-3. Update `testutils/mocks.go` if unit tests rely on the new method.
-4. Add tests in service or API package.
+### `object_usage` and `object_usage_event`
 
-### Local schema behavior
+`object_usage` stores upload and download counters and their last-event timestamps. `object_usage_event` stores the event history used by usage reporting.
 
-- SQLite schema is initialized in `sqlite.initSchema()`.
-- PostgreSQL object schema is initialized in `postgres.NewPostgresDB()`.
-- Helm init jobs remain optional for deployments that want to pre-create schema outside the app.
-- SQLite helper scripts are provided in `db/scripts/`:
-  - `init_sqlite.sql`
-  - `init_sqlite_db.sh`
+### `transfer_attribution_event`, `access_grant`, and `provider_transfer_event`
 
-### Resource path abstraction
+These tables store issued-access records, access grant aggregates, and provider transfer records. They include object, checksum, scope, actor, request, range, and reconciliation fields used by the metrics API.
 
-Use helpers in `core/resource_scope.go`:
+## Runtime schema initialization
 
-- `ResourcePathForScope(org, project)`
-- `ParseResourcePath(path)`
+The application initializes its schema when it creates a database:
 
-This lets API/business layers work with `organization/project` while still storing Arborist-compatible paths.
+- `sqlite.NewSqliteDB` opens the configured SQLite file, enables its connection settings, calls `initSchema`, and runs compatibility upgrades before returning.
+- `postgres.NewPostgresDB` opens and pings PostgreSQL, loads `object_schema.sql`, then runs the credential, bucket-scope, LFS, usage, and transfer schema initializers.
+
+The SQLite runtime schema includes `drs_object`, the access and policy tables, aliases, credentials and scopes, LFS pending metadata, usage tables, transfer attribution tables, access grants, provider transfer events, indexes, and credential uniqueness triggers. Runtime initialization also handles older databases. It adds missing columns, migrates old credential identity shape, removes retired object columns, removes the retired browse index, and backfills access grants.
+
+The PostgreSQL runtime schema has the same logical table groups. Its object DDL lives in `postgres/object_schema.sql`. The remaining DDL and compatibility statements live in `postgres/postgres.go`.
+
+## Standalone SQLite script
+
+`internal/db/scripts/init_sqlite.sql` is a manual bootstrap helper used by `init_sqlite_db.sh`. The application does not read this file during normal startup. The script creates a basic object, access, checksum, credential, bucket-scope, and access-grant schema.
+
+The script is intentionally smaller than the runtime schema. It omits `drs_object_read_policy`, `drs_object_alias`, `drs_object_name_alias`, `lfs_pending_metadata`, `object_usage`, `object_usage_event`, `transfer_attribution_event`, and `provider_transfer_event`, along with their runtime indexes and the SQLite credential uniqueness triggers. It also does not run the runtime compatibility upgrades or the access-grant backfill.
+
+Starting Syfon against a database created by the script still runs `sqlite.NewSqliteDB`, which creates the missing runtime tables and applies its upgrades. The difference between the script and runtime DDL does not show that normal server startup fails. Do not treat the standalone script as the complete runtime schema or as a migration engine. Keep its behavior unchanged when reorganizing files.
+
+## Add a database operation
+
+1. Add the smallest suitable capability method to `internal/db/interface.go`.
+2. Implement the method in both backend packages.
+3. Add backend-specific tests for SQL, transactions, missing rows, and error mapping.
+4. Update a test stub only when the test needs the new capability.
+
+Keep SQLite and PostgreSQL SQL separate. Use the existing backend tests and the in-memory SQLite constructor for behavior that must match. Run a live PostgreSQL test when a change affects PostgreSQL persistence.
+
+For resource paths, use `common.ResourcePath` for an organization and project and `internal/common.ParseResourcePath` when parsing stored paths. Do not add organization or project columns to `drs_object_access_method`.
