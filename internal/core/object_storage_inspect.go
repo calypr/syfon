@@ -102,7 +102,9 @@ type StorageInspectError struct {
 	Message string
 }
 
-var storageInspectCacheKey contextKey = "storageInspectCache"
+type storageInspectContextKey string
+
+var storageInspectCacheKey storageInspectContextKey = "storageInspectCache"
 
 type storageInspectCredentialCacheEntry struct {
 	cred *buckets.Credential
