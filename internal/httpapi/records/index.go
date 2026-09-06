@@ -322,7 +322,7 @@ func handleInternalBulkHashesFiber(objectService *objects.Service) fiber.Handler
 			}
 			compatibilityMatches := make([]internalapi.InternalRecord, 0, len(matches))
 			for _, match := range matches {
-				compatibilityMatches = append(compatibilityMatches, httprecords.ToInternalRecord(match))
+				compatibilityMatches = append(compatibilityMatches, ToInternalRecord(match))
 			}
 			finalRes[h] = compatibilityMatches
 		}
