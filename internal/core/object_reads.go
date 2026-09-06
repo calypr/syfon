@@ -9,7 +9,6 @@ import (
 
 	syfoncommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/access"
-	"github.com/calypr/syfon/internal/db"
 	"github.com/calypr/syfon/internal/faults"
 
 	objectdomain "github.com/calypr/syfon/internal/objects"
@@ -382,7 +381,7 @@ func (m *ObjectManager) ListObjectIDsPageByScope(ctx context.Context, organizati
 		return []string{}, nil
 	}
 
-	if lister, ok := m.db.(db.ObjectIDPageLister); ok && canUseUnrestrictedScopePage(ctx, requiredMethod) {
+	if lister, ok := m.db.(objectdomain.OptionalPageQuery); ok && canUseUnrestrictedScopePage(ctx, requiredMethod) {
 		pageStart := time.Now()
 		ids, err := lister.ListObjectIDsPageByScope(ctx, organization, project, startAfter, limit, offset)
 		log.Printf("INFO: syfon_list_object_ids_page_by_scope organization=%s project=%s start_after=%t limit=%d offset=%d ids=%d db_page_ms=%d optimized=%t", strings.TrimSpace(organization), strings.TrimSpace(project), strings.TrimSpace(startAfter) != "", limit, offset, len(ids), time.Since(pageStart).Milliseconds(), true)
@@ -423,7 +422,7 @@ func (m *ObjectManager) ListObjectIDsPageByURL(ctx context.Context, objectURL, o
 	if objectURL == "" {
 		return []string{}, nil
 	}
-	if lister, ok := m.db.(db.ObjectURLPageLister); ok {
+	if lister, ok := m.db.(objectdomain.OptionalURLQuery); ok {
 		resources, includeUnscoped, restrictToResources := objectMethodResourceFilter(ctx, requiredMethod)
 		if access.IsGen3Mode(ctx) && access.IsAuthzEnforced(ctx) && !access.HasAuthHeader(ctx) {
 			return []string{}, nil
@@ -647,7 +646,7 @@ func objectHasAccessURL(obj *objectdomain.Record, objectURL string) bool {
 }
 
 func (m *ObjectManager) listReadableObjectIDs(ctx context.Context) ([]string, bool, error) {
-	lister, ok := m.db.(db.ObjectIDResourceLister)
+	lister, ok := m.db.(objectdomain.OptionalResourceQuery)
 	if !ok || !access.IsAuthzEnforced(ctx) {
 		return nil, false, nil
 	}
@@ -661,7 +660,7 @@ func (m *ObjectManager) listReadableObjectIDs(ctx context.Context) ([]string, bo
 }
 
 func (m *ObjectManager) listReadableObjectIDsPage(ctx context.Context, startAfter string, limit, offset int) ([]string, bool, error) {
-	pager, ok := m.db.(db.ObjectIDPageLister)
+	pager, ok := m.db.(objectdomain.OptionalPageQuery)
 	if !ok || !access.IsAuthzEnforced(ctx) {
 		return nil, false, nil
 	}
@@ -734,7 +733,7 @@ func authorizedResources(ctx context.Context, method string) []string {
 }
 
 func (m *ObjectManager) authorizedChecksumIDs(ctx context.Context, checksum, requiredMethod string) ([]string, bool, error) {
-	lister, ok := m.db.(db.ObjectAuthorizedLister)
+	lister, ok := m.db.(objectdomain.OptionalAuthorizedQuery)
 	if !ok {
 		return nil, false, nil
 	}

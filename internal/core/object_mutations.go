@@ -11,7 +11,6 @@ import (
 	syfoncommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/common"
-	"github.com/calypr/syfon/internal/db"
 	"github.com/calypr/syfon/internal/faults"
 
 	objectdomain "github.com/calypr/syfon/internal/objects"
@@ -47,7 +46,7 @@ func (m *ObjectManager) DeleteBulkByScope(ctx context.Context, organization, pro
 	if err != nil {
 		return 0, err
 	}
-	if lister, ok := m.db.(db.ObjectAuthorizedLister); ok {
+	if lister, ok := m.db.(objectdomain.OptionalAuthorizedQuery); ok {
 		resources, _, restrictToResources := objectMethodResourceFilter(ctx, objectMethodDelete)
 		if optimized, err := lister.ListObjectIDsByScopeAndResources(ctx, organization, project, resources, restrictToResources); err == nil {
 			ids = optimized
@@ -446,7 +445,7 @@ func (m *ObjectManager) ReplaceObjects(ctx context.Context, objs []objectdomain.
 }
 
 func (m *ObjectManager) DeleteObjectsByChecksums(ctx context.Context, hashes []string) (int, error) {
-	if lister, ok := m.db.(db.ObjectAuthorizedLister); ok {
+	if lister, ok := m.db.(objectdomain.OptionalAuthorizedQuery); ok {
 		resources, includeUnscoped, restrictToResources := objectMethodResourceFilter(ctx, objectMethodDelete)
 		if byChecksum, err := lister.ListObjectIDsByChecksumsAndResources(ctx, hashes, resources, includeUnscoped, restrictToResources); err == nil {
 			seen := make(map[string]struct{})

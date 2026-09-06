@@ -9,11 +9,11 @@ import (
 	"time"
 
 	"github.com/calypr/syfon/internal/faults"
-	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/objects"
+	"github.com/calypr/syfon/internal/transfers"
 )
 
-func (db *SqliteDB) SavePendingLFSMeta(ctx context.Context, entries []models.PendingLFSMeta) error {
+func (db *SqliteDB) SavePendingLFSMeta(ctx context.Context, entries []transfers.PendingMetadata) error {
 	if len(entries) == 0 {
 		return nil
 	}
@@ -46,7 +46,7 @@ func (db *SqliteDB) SavePendingLFSMeta(ctx context.Context, entries []models.Pen
 	return tx.Commit()
 }
 
-func (db *SqliteDB) GetPendingLFSMeta(ctx context.Context, oid string) (*models.PendingLFSMeta, error) {
+func (db *SqliteDB) GetPendingLFSMeta(ctx context.Context, oid string) (*transfers.PendingMetadata, error) {
 	if _, err := db.db.ExecContext(ctx, `DELETE FROM lfs_pending_metadata WHERE expires_time <= ?`, time.Now().UTC()); err != nil {
 		return nil, fmt.Errorf("failed to prune expired pending metadata: %w", err)
 	}
@@ -72,7 +72,7 @@ func (db *SqliteDB) GetPendingLFSMeta(ctx context.Context, oid string) (*models.
 		return nil, fmt.Errorf("failed to parse pending metadata candidate for oid %s: %w", oid, err)
 	}
 
-	return &models.PendingLFSMeta{
+	return &transfers.PendingMetadata{
 		OID:       oid,
 		Candidate: c,
 		CreatedAt: createdAt,
@@ -80,7 +80,7 @@ func (db *SqliteDB) GetPendingLFSMeta(ctx context.Context, oid string) (*models.
 	}, nil
 }
 
-func (db *SqliteDB) PopPendingLFSMeta(ctx context.Context, oid string) (*models.PendingLFSMeta, error) {
+func (db *SqliteDB) PopPendingLFSMeta(ctx context.Context, oid string) (*transfers.PendingMetadata, error) {
 	tx, err := db.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -119,7 +119,7 @@ func (db *SqliteDB) PopPendingLFSMeta(ctx context.Context, oid string) (*models.
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	return &models.PendingLFSMeta{
+	return &transfers.PendingMetadata{
 		OID:       oid,
 		Candidate: c,
 		CreatedAt: createdAt,

@@ -12,9 +12,9 @@ import (
 
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/core"
-	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/testutils"
+	"github.com/calypr/syfon/internal/transfers"
 )
 
 func TestLFSUploadProxyNoBucket507(t *testing.T) {
@@ -100,7 +100,7 @@ func TestLFSUploadProxyUsesPendingScopedCanonicalLocation(t *testing.T) {
 				PathPrefix:   "project-subpath",
 			},
 		},
-		PendingMeta: map[string]models.PendingLFSMeta{
+		PendingMeta: map[string]transfers.PendingMetadata{
 			oid: {
 				OID: oid,
 				Candidate: objects.Candidate{

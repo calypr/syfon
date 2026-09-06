@@ -4,19 +4,19 @@ import (
 	"context"
 
 	"github.com/calypr/syfon/apigen/server/drs"
-	"github.com/calypr/syfon/internal/models"
+	"github.com/calypr/syfon/internal/transfers"
 	"github.com/calypr/syfon/internal/urlmanager"
 )
 
-func (m *ObjectManager) SavePendingLFSMeta(ctx context.Context, entries []models.PendingLFSMeta) error {
+func (m *ObjectManager) SavePendingLFSMeta(ctx context.Context, entries []transfers.PendingMetadata) error {
 	return m.db.SavePendingLFSMeta(ctx, entries)
 }
 
-func (m *ObjectManager) GetPendingLFSMeta(ctx context.Context, oid string) (*models.PendingLFSMeta, error) {
+func (m *ObjectManager) GetPendingLFSMeta(ctx context.Context, oid string) (*transfers.PendingMetadata, error) {
 	return m.db.GetPendingLFSMeta(ctx, oid)
 }
 
-func (m *ObjectManager) PopPendingLFSMeta(ctx context.Context, oid string) (*models.PendingLFSMeta, error) {
+func (m *ObjectManager) PopPendingLFSMeta(ctx context.Context, oid string) (*transfers.PendingMetadata, error) {
 	return m.db.PopPendingLFSMeta(ctx, oid)
 }
 

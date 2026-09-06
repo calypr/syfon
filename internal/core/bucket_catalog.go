@@ -172,7 +172,7 @@ func (m *ObjectManager) listVisibleBucketsUncached(ctx context.Context) (map[str
 		return map[string]VisibleBucket{}, nil
 	}
 
-	if lister, ok := m.db.(db.BucketVisibilityLister); ok {
+	if lister, ok := m.db.(buckets.OptionalVisibilityQuery); ok {
 		return m.listVisibleBucketsFromRows(ctx, lister, creds)
 	}
 
@@ -257,7 +257,7 @@ func (m *ObjectManager) listVisibleBucketsUncached(ctx context.Context) (map[str
 	return byCredential, nil
 }
 
-func (m *ObjectManager) listVisibleBucketsFromRows(ctx context.Context, lister db.BucketVisibilityLister, creds []buckets.Credential) (map[string]VisibleBucket, error) {
+func (m *ObjectManager) listVisibleBucketsFromRows(ctx context.Context, lister buckets.OptionalVisibilityQuery, creds []buckets.Credential) (map[string]VisibleBucket, error) {
 	restrictToResources := access.IsAuthzEnforced(ctx) &&
 		!access.HasMethodAccess(ctx, objectMethodRead, []string{"/programs"}) &&
 		!access.HasMethodAccess(ctx, objectMethodRead, []string{"/data_file"})

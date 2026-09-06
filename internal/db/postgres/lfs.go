@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/objects"
+	"github.com/calypr/syfon/internal/transfers"
 )
 
-func (db *PostgresDB) SavePendingLFSMeta(ctx context.Context, entries []models.PendingLFSMeta) error {
+func (db *PostgresDB) SavePendingLFSMeta(ctx context.Context, entries []transfers.PendingMetadata) error {
 	if len(entries) == 0 {
 		return nil
 	}
@@ -46,7 +46,7 @@ func (db *PostgresDB) SavePendingLFSMeta(ctx context.Context, entries []models.P
 	return tx.Commit()
 }
 
-func (db *PostgresDB) GetPendingLFSMeta(ctx context.Context, oid string) (*models.PendingLFSMeta, error) {
+func (db *PostgresDB) GetPendingLFSMeta(ctx context.Context, oid string) (*transfers.PendingMetadata, error) {
 	// Housekeeping (optional here but good for safety)
 	if _, err := db.db.ExecContext(ctx, "DELETE FROM lfs_pending_metadata WHERE expires_time <= $1", time.Now().UTC()); err != nil {
 		return nil, fmt.Errorf("failed to prune expired pending metadata: %w", err)
@@ -72,7 +72,7 @@ func (db *PostgresDB) GetPendingLFSMeta(ctx context.Context, oid string) (*model
 		return nil, fmt.Errorf("failed to unmarshal candidate: %w", err)
 	}
 
-	return &models.PendingLFSMeta{
+	return &transfers.PendingMetadata{
 		OID:       oid,
 		Candidate: candidate,
 		CreatedAt: createdAt,
@@ -80,7 +80,7 @@ func (db *PostgresDB) GetPendingLFSMeta(ctx context.Context, oid string) (*model
 	}, nil
 }
 
-func (db *PostgresDB) PopPendingLFSMeta(ctx context.Context, oid string) (*models.PendingLFSMeta, error) {
+func (db *PostgresDB) PopPendingLFSMeta(ctx context.Context, oid string) (*transfers.PendingMetadata, error) {
 	tx, err := db.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -122,7 +122,7 @@ func (db *PostgresDB) PopPendingLFSMeta(ctx context.Context, oid string) (*model
 		return nil, fmt.Errorf("failed to unmarshal candidate: %w", err)
 	}
 
-	return &models.PendingLFSMeta{
+	return &transfers.PendingMetadata{
 		OID:       oid,
 		Candidate: candidate,
 		CreatedAt: createdAt,

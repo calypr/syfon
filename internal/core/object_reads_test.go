@@ -25,11 +25,11 @@ type pageSpyDB struct {
 
 func (s *pageSpyDB) ListObjectIDsPageByScope(ctx context.Context, organization, project, startAfter string, limit, offset int) ([]string, error) {
 	s.pageCalls++
-	return s.DatabaseInterface.(db.ObjectIDPageLister).ListObjectIDsPageByScope(ctx, organization, project, startAfter, limit, offset)
+	return s.DatabaseInterface.(objects.OptionalPageQuery).ListObjectIDsPageByScope(ctx, organization, project, startAfter, limit, offset)
 }
 
 func (s *pageSpyDB) ListObjectIDsPageByResources(ctx context.Context, resources []string, includeUnscoped bool, startAfter string, limit, offset int) ([]string, error) {
-	return s.DatabaseInterface.(db.ObjectIDPageLister).ListObjectIDsPageByResources(ctx, resources, includeUnscoped, startAfter, limit, offset)
+	return s.DatabaseInterface.(objects.OptionalPageQuery).ListObjectIDsPageByResources(ctx, resources, includeUnscoped, startAfter, limit, offset)
 }
 
 func (s *pageSpyDB) ListObjectIDsByScope(ctx context.Context, organization, project string) ([]string, error) {

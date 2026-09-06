@@ -16,7 +16,7 @@ import (
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/credentialcipher"
 	"github.com/calypr/syfon/internal/faults"
-	"github.com/calypr/syfon/internal/models"
+	"github.com/calypr/syfon/internal/transfers"
 	"github.com/calypr/syfon/internal/usage"
 
 	"github.com/calypr/syfon/internal/objects"
@@ -1189,7 +1189,7 @@ func TestSqliteDB_PendingLFSMetaLifecycle(t *testing.T) {
 		},
 	}
 
-	if err := db.SavePendingLFSMeta(ctx, []models.PendingLFSMeta{
+	if err := db.SavePendingLFSMeta(ctx, []transfers.PendingMetadata{
 		{
 			OID:       "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 			Candidate: candidate,
@@ -1228,7 +1228,7 @@ func TestSqliteDB_PendingLFSMetaPrunesExpired(t *testing.T) {
 		},
 	}
 
-	if err := db.SavePendingLFSMeta(ctx, []models.PendingLFSMeta{
+	if err := db.SavePendingLFSMeta(ctx, []transfers.PendingMetadata{
 		{
 			OID:       oid,
 			Candidate: candidate,
@@ -1335,52 +1335,6 @@ func TestSqliteDB_FileUsageMetrics_MissingObjectQueuedAndFlushedOnCreate(t *test
 	}
 	if usage.UploadCount != 1 || usage.DownloadCount != 1 {
 		t.Fatalf("expected queued usage to flush on create, got: %+v", usage)
-	}
-}
-
-func TestSqliteDB_ListObjectIDsPageByChecksum(t *testing.T) {
-	ctx := context.Background()
-	db, err := NewSqliteDB(":memory:")
-	if err != nil {
-		t.Fatalf("failed to create db: %v", err)
-	}
-	now := time.Now().UTC()
-	for _, obj := range []objects.Record{
-		{
-			Authorizations: map[string][]string{"org": {"p1"}},
-			Id:             "obj-a",
-			CreatedTime:    now,
-			UpdatedTime:    &now,
-			Checksums:      []objects.Checksum{{Type: "sha256", Checksum: "same"}},
-		},
-
-		{
-			Authorizations: map[string][]string{"org": {"p1"}},
-			Id:             "obj-b",
-			CreatedTime:    now,
-			UpdatedTime:    &now,
-			Checksums:      []objects.Checksum{{Type: "sha256", Checksum: "same"}},
-		},
-
-		{
-			Authorizations: map[string][]string{"org": {"p2"}},
-			Id:             "obj-c",
-			CreatedTime:    now,
-			UpdatedTime:    &now,
-			Checksums:      []objects.Checksum{{Type: "md5", Checksum: "same"}},
-		},
-	} {
-		if err := db.CreateObject(ctx, &obj); err != nil {
-			t.Fatalf("CreateObject failed: %v", err)
-		}
-	}
-
-	ids, err := db.ListObjectIDsPageByChecksum(ctx, "same", "sha256", "org", "p1", "obj-a", 10, 0, nil, false, false)
-	if err != nil {
-		t.Fatalf("ListObjectIDsPageByChecksum failed: %v", err)
-	}
-	if !slices.Equal(ids, []string{"obj-b"}) {
-		t.Fatalf("unexpected checksum page: %v", ids)
 	}
 }
 
@@ -2045,7 +1999,7 @@ func TestSqliteDB_GetPendingLFSMeta(t *testing.T) {
 		},
 	}
 
-	if err := db.SavePendingLFSMeta(ctx, []models.PendingLFSMeta{
+	if err := db.SavePendingLFSMeta(ctx, []transfers.PendingMetadata{
 		{
 			OID:       oid,
 			Candidate: candidate,

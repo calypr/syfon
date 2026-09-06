@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/calypr/syfon/apigen/server/metricsapi"
-	"github.com/calypr/syfon/internal/db"
 	"github.com/calypr/syfon/internal/usage"
 )
 
@@ -185,7 +184,7 @@ func (s *MetricsServer) transferFreshness(ctx context.Context, filter usage.Filt
 }
 
 func (s *MetricsServer) getScopedTransferAttributionSummary(ctx context.Context, filter usage.Filter, scopes []metricsScope) (usage.Summary, error) {
-	if scopedStore, ok := s.database.(db.TransferAttributionScopedStore); ok {
+	if scopedStore, ok := s.database.(usage.OptionalScopedTransferQuery); ok {
 		return scopedStore.GetTransferAttributionSummaryByResources(ctx, filter, metricsResources(scopes))
 	}
 
@@ -210,7 +209,7 @@ func (s *MetricsServer) getScopedTransferAttributionSummary(ctx context.Context,
 }
 
 func (s *MetricsServer) getScopedTransferAttributionBreakdown(ctx context.Context, filter usage.Filter, groupBy string, scopes []metricsScope) ([]usage.Breakdown, error) {
-	if scopedStore, ok := s.database.(db.TransferAttributionScopedStore); ok {
+	if scopedStore, ok := s.database.(usage.OptionalScopedTransferQuery); ok {
 		return scopedStore.GetTransferAttributionBreakdownByResources(ctx, filter, groupBy, metricsResources(scopes))
 	}
 

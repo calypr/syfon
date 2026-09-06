@@ -6,8 +6,8 @@ import (
 
 	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/buckets"
-	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/objects"
+	"github.com/calypr/syfon/internal/transfers"
 	"github.com/calypr/syfon/internal/usage"
 )
 
@@ -38,45 +38,6 @@ type ObjectStore interface {
 	RemoveObjectControlledAccessBulk(ctx context.Context, objectIDs []string, resource string) (int, error)
 }
 
-type ObjectIDResourceLister interface {
-	ListObjectIDsByResources(ctx context.Context, resources []string, includeUnscoped bool) ([]string, error)
-}
-
-type ObjectIDPageLister interface {
-	ListObjectIDsPageByScope(ctx context.Context, organization, project, startAfter string, limit, offset int) ([]string, error)
-	ListObjectIDsPageByResources(ctx context.Context, resources []string, includeUnscoped bool, startAfter string, limit, offset int) ([]string, error)
-}
-
-type ObjectChecksumPageLister interface {
-	ListObjectIDsPageByChecksum(ctx context.Context, checksum, checksumType, organization, project, startAfter string, limit, offset int, resources []string, includeUnscoped, restrictToResources bool) ([]string, error)
-}
-
-type ObjectURLPageLister interface {
-	ListObjectIDsPageByURL(ctx context.Context, objectURL, organization, project, startAfter string, limit, offset int, resources []string, includeUnscoped, restrictToResources bool) ([]string, error)
-}
-
-type ObjectAuthorizedLister interface {
-	ListObjectIDsByScopeAndResources(ctx context.Context, organization, project string, resources []string, restrictToResources bool) ([]string, error)
-	ListObjectIDsByChecksumsAndResources(ctx context.Context, checksums []string, resources []string, includeUnscoped, restrictToResources bool) (map[string][]string, error)
-}
-
-type FileUsageScopedLister interface {
-	ListFileUsagePageByScope(ctx context.Context, organization, project string, limit, offset int, inactiveSince *time.Time) ([]usage.FileUsage, error)
-	ListFileUsagePageByResources(ctx context.Context, resources []string, includeUnscoped bool, limit, offset int, inactiveSince *time.Time) ([]usage.FileUsage, error)
-	GetFileUsageSummaryByScope(ctx context.Context, organization, project string, inactiveSince *time.Time) (usage.FileUsageSummary, error)
-	GetFileUsageSummaryByResources(ctx context.Context, resources []string, includeUnscoped bool, inactiveSince *time.Time) (usage.FileUsageSummary, error)
-	GetProjectRecordSummaryByScope(ctx context.Context, organization, project string) (usage.FileUsageSummary, error)
-}
-
-type TransferAttributionScopedStore interface {
-	GetTransferAttributionSummaryByResources(ctx context.Context, filter usage.Filter, resources []string) (usage.Summary, error)
-	GetTransferAttributionBreakdownByResources(ctx context.Context, filter usage.Filter, groupBy string, resources []string) ([]usage.Breakdown, error)
-}
-
-type BucketVisibilityLister interface {
-	ListBucketVisibilityRows(ctx context.Context, resources []string, includeUnscoped, restrictToResources bool) ([]buckets.VisibilityRow, error)
-}
-
 // CredentialStore groups bucket credential and scope management.
 type CredentialStore interface {
 	GetS3Credential(ctx context.Context, bucket string) (*buckets.Credential, error)
@@ -95,13 +56,6 @@ type ObjectsAPIServiceDatabase interface {
 	ObjectStore
 	CredentialStore
 	UsageStore
-}
-
-// PendingLFSMetaStore manages pending LFS metadata.
-type PendingLFSMetaStore interface {
-	SavePendingLFSMeta(ctx context.Context, entries []models.PendingLFSMeta) error
-	GetPendingLFSMeta(ctx context.Context, oid string) (*models.PendingLFSMeta, error)
-	PopPendingLFSMeta(ctx context.Context, oid string) (*models.PendingLFSMeta, error)
 }
 
 // UsageStore manages file usage counters and summaries.
@@ -143,7 +97,7 @@ type MetricsStore interface {
 type LFSStore interface {
 	ObjectStore
 	CredentialStore
-	PendingLFSMetaStore
+	transfers.PendingStore
 	UsageStore
 }
 
@@ -152,6 +106,6 @@ type DatabaseInterface interface {
 	ServiceInfoStore
 	ObjectStore
 	CredentialStore
-	PendingLFSMetaStore
+	transfers.PendingStore
 	UsageStore
 }

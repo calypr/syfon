@@ -49,13 +49,13 @@ func (s *MetricsServer) ListMetricsFiles(ctx context.Context, request metricsapi
 
 	var data []usage.FileUsage
 	if access.isScoped() {
-		if scopedStore, ok := s.database.(db.FileUsageScopedLister); ok {
+		if scopedStore, ok := s.database.(usage.OptionalScopedFileUsageQuery); ok {
 			data, err = scopedStore.ListFileUsagePageByScope(ctx, access.organization, access.project, limit, offset, inactiveSince)
 		} else {
 			data, _, err = listScopedFileUsage(ctx, s.database, s.objects, access.organization, access.project, limit, offset, inactiveSince)
 		}
 	} else if access.hasScopeAggregate() {
-		if scopedStore, ok := s.database.(db.FileUsageScopedLister); ok {
+		if scopedStore, ok := s.database.(usage.OptionalScopedFileUsageQuery); ok {
 			data, err = scopedStore.ListFileUsagePageByResources(ctx, metricsResources(access.scopes), false, limit, offset, inactiveSince)
 		} else {
 			data, _, err = listMultiScopedFileUsage(ctx, s.database, s.objects, access.scopes, limit, offset, inactiveSince)
@@ -202,7 +202,7 @@ func (s *MetricsServer) GetMetricsSummary(ctx context.Context, request metricsap
 
 	var summary usage.FileUsageSummary
 	if access.isScoped() {
-		if scopedStore, ok := s.database.(db.FileUsageScopedLister); ok {
+		if scopedStore, ok := s.database.(usage.OptionalScopedFileUsageQuery); ok {
 			summary, err = scopedStore.GetFileUsageSummaryByScope(ctx, access.organization, access.project, inactiveSince)
 			if err == nil {
 				recordSummary, recordErr := scopedStore.GetProjectRecordSummaryByScope(ctx, access.organization, access.project)
@@ -218,7 +218,7 @@ func (s *MetricsServer) GetMetricsSummary(ctx context.Context, request metricsap
 			summary.RecordCount = summary.TotalFiles
 		}
 	} else if access.hasScopeAggregate() {
-		if scopedStore, ok := s.database.(db.FileUsageScopedLister); ok {
+		if scopedStore, ok := s.database.(usage.OptionalScopedFileUsageQuery); ok {
 			summary, err = scopedStore.GetFileUsageSummaryByResources(ctx, metricsResources(access.scopes), false, inactiveSince)
 		} else {
 			_, summary, err = listMultiScopedFileUsage(ctx, s.database, s.objects, access.scopes, 0, 0, inactiveSince)
