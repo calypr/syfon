@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/calypr/syfon/apigen/server/internalapi"
-	"github.com/calypr/syfon/internal/faults"
 	apimiddleware "github.com/calypr/syfon/internal/httpapi/middleware"
 	"github.com/calypr/syfon/internal/httpapi/response"
 	"github.com/calypr/syfon/internal/objects"
@@ -449,24 +448,8 @@ func handleInternalUpdateFiber(objectService *objects.Service) fiber.Handler {
 			return c.Status(fiber.StatusBadRequest).SendString("Invalid request body: " + err.Error())
 		}
 
-		existing, err := objectService.GetObject(c.Context(), id, "update")
+		merged, err := objectService.UpdateRecord(c.Context(), id, update, req.Size, time.Now().UTC())
 		if err != nil {
-			return response.HandleError(c, err)
-		}
-		if req.Size != nil && *req.Size != existing.Size {
-			return response.HandleError(c, fmt.Errorf("%w: object size is immutable", faults.ErrConflict))
-		}
-		if incomingSHA, ok := objects.CanonicalSHA256(update.Checksums); ok {
-			storedSHA, stored := objects.CanonicalSHA256(existing.Checksums)
-			if stored && incomingSHA != storedSHA {
-				return response.HandleError(c, fmt.Errorf("%w: object checksum identity is immutable", faults.ErrConflict))
-			}
-		}
-		merged, err := objects.MergeRecordUpdate(*existing, update, id, time.Now().UTC())
-		if err != nil {
-			return response.HandleError(c, err)
-		}
-		if err := objectService.ReplaceObjects(c.Context(), []objects.Record{merged}); err != nil {
 			return response.HandleError(c, err)
 		}
 		return c.JSON(ToInternalRecordResponse(merged))
