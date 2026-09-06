@@ -8,7 +8,6 @@ import (
 
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/persistence/sqlite"
-	sqlitetest "github.com/calypr/syfon/internal/testsupport/sqlite"
 )
 
 type pageSpyDB struct {
@@ -53,7 +52,7 @@ func registerScopedCandidate(t *testing.T, om *objects.Service, id, checksum, or
 }
 
 func TestGetObjectUsesGlobalSHAIdentityAcrossUUIDs(t *testing.T) {
-	database := sqlitetest.New(t)
+	database := newSQLiteDatabase(t)
 	checksum := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	firstResource := "/organization/org1/project/project1"
 	secondResource := "/organization/org2/project/project2"
@@ -135,7 +134,7 @@ func TestGetObjectUsesGlobalSHAIdentityAcrossUUIDs(t *testing.T) {
 }
 
 func TestGetObjectKeepsCanonicalContentPublicWhenAnySiblingIsPublic(t *testing.T) {
-	database := sqlitetest.New(t)
+	database := newSQLiteDatabase(t)
 	checksum := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	controlledResource := "/organization/org/project/controlled"
 	created := drsISOTime("2026-01-01T00:00:00Z")
@@ -179,7 +178,7 @@ func TestGetObjectKeepsCanonicalContentPublicWhenAnySiblingIsPublic(t *testing.T
 }
 
 func TestGetObjectPrefersSHAIdentityOverCollidingPhysicalID(t *testing.T) {
-	database := sqlitetest.New(t)
+	database := newSQLiteDatabase(t)
 	requestedSHA := "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
 	otherSHA := "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
 	for _, obj := range []objects.Record{

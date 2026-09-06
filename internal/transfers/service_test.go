@@ -11,7 +11,7 @@ import (
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/faults"
 	"github.com/calypr/syfon/internal/objects"
-	"github.com/calypr/syfon/internal/requestmeta"
+	"github.com/calypr/syfon/internal/requestid"
 	"github.com/calypr/syfon/internal/storage"
 	"github.com/calypr/syfon/internal/usage"
 )
@@ -196,7 +196,7 @@ func TestStagePendingMetadataDefaultsCanonicalOIDAndTwentyMinuteTTL(t *testing.T
 
 func TestEventFromObjectPreservesContextAndRangeProjection(t *testing.T) {
 	service := NewService(Dependencies{Events: &eventFake{}})
-	ctx := requestmeta.WithRequestID(context.Background(), "request-1")
+	ctx := requestid.WithRequestID(context.Background(), "request-1")
 	session := access.NewSession("jwt")
 	session.SetSubject("subject@example.org")
 	session.SetClaims(map[string]interface{}{"preferred_username": "preferred@example.org"})

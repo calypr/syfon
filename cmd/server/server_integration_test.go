@@ -21,7 +21,7 @@ import (
 	"github.com/calypr/syfon/internal/httpapi"
 	"github.com/calypr/syfon/internal/maintenance/projectstorage"
 	"github.com/calypr/syfon/internal/objects"
-	sqlitetest "github.com/calypr/syfon/internal/testsupport/sqlite"
+	"github.com/calypr/syfon/internal/persistence/sqlite"
 	"github.com/calypr/syfon/internal/transfers"
 	"github.com/calypr/syfon/internal/usage"
 )
@@ -29,6 +29,15 @@ import (
 var (
 	testConfigPath = flag.String("testConfig", "", "Path to config file for integration test")
 )
+
+func newSQLiteDatabase(t testing.TB) *sqlite.SqliteDB {
+	t.Helper()
+	database, err := sqlite.NewSqliteDB(":memory:")
+	if err != nil {
+		t.Fatalf("create in-memory SQLite database: %v", err)
+	}
+	return database
+}
 
 func TestMain(m *testing.M) {
 	flag.Parse()
@@ -90,7 +99,7 @@ s3_credentials:
 	project := "test-project"
 
 	// Setup Server
-	database := sqlitetest.New(t)
+	database := newSQLiteDatabase(t)
 
 	// Pre-load credentials from config (mimic server startup logic)
 	for _, c := range cfg.S3Credentials {

@@ -22,8 +22,8 @@ import (
 	"github.com/calypr/syfon/internal/httpapi"
 	"github.com/calypr/syfon/internal/maintenance/projectstorage"
 	"github.com/calypr/syfon/internal/objects"
+	"github.com/calypr/syfon/internal/persistence/sqlite"
 	"github.com/calypr/syfon/internal/storage"
-	sqlitetest "github.com/calypr/syfon/internal/testsupport/sqlite"
 	"github.com/calypr/syfon/internal/transfers"
 	"github.com/calypr/syfon/internal/usage"
 )
@@ -39,6 +39,15 @@ func executeRootCommand(t *testing.T, args ...string) (string, error) {
 	RootCmd.SetArgs(args)
 	err := RootCmd.Execute()
 	return strings.TrimSpace(out.String() + errOut.String()), err
+}
+
+func newSQLiteDatabase(t testing.TB) *sqlite.SqliteDB {
+	t.Helper()
+	database, err := sqlite.NewSqliteDB(":memory:")
+	if err != nil {
+		t.Fatalf("create in-memory SQLite database: %v", err)
+	}
+	return database
 }
 
 func TestSyfonMetricsTransfersCLI(t *testing.T) {
@@ -315,7 +324,7 @@ func newSyfonTestServer(t *testing.T) *fiberTestServer {
 
 	storageDir := t.TempDir()
 
-	database := sqlitetest.New(t)
+	database := newSQLiteDatabase(t)
 	if err := database.SaveS3Credential(context.Background(), &buckets.Credential{
 		Bucket:   "syfon-bucket",
 		Provider: "file",

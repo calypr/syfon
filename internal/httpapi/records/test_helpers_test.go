@@ -15,7 +15,6 @@ import (
 	"github.com/calypr/syfon/internal/faults"
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/persistence/sqlite"
-	sqlitetest "github.com/calypr/syfon/internal/testsupport/sqlite"
 	"github.com/gofiber/fiber/v3"
 )
 
@@ -373,7 +372,12 @@ func cloneAuthzMap(in map[string][]string) map[string][]string {
 }
 
 func newInternalDRSInMemoryDB(t testing.TB) *sqlite.SqliteDB {
-	return sqlitetest.New(t)
+	t.Helper()
+	database, err := sqlite.NewSqliteDB(":memory:")
+	if err != nil {
+		t.Fatalf("create in-memory SQLite database: %v", err)
+	}
+	return database
 }
 
 func withTestAuthzContext(req *http.Request, mode string, privileges map[string]map[string]bool) *http.Request {
