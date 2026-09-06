@@ -68,7 +68,7 @@ func (m *ObjectManager) GetCanonicalContent(ctx context.Context, ident string, r
 }
 
 func (m *ObjectManager) canonicalContentForChecksum(ctx context.Context, checksum, method string) (*objectdomain.CanonicalContent, bool, error) {
-	physical, err := m.db.GetObjectsByChecksum(ctx, checksum)
+	physical, err := m.objectContent.GetObjectsByChecksum(ctx, checksum)
 	if err != nil {
 		return nil, false, err
 	}
@@ -112,7 +112,7 @@ func (m *ObjectManager) lookupObjectByChecksum(ctx context.Context, ident string
 }
 
 func (m *ObjectManager) lookupObjectByID(ctx context.Context, ident string) (*objectdomain.Record, bool, error) {
-	obj, err := m.db.GetObject(ctx, ident)
+	obj, err := m.objectReader.GetObject(ctx, ident)
 	if err == nil {
 		return obj, true, nil
 	}
@@ -123,7 +123,7 @@ func (m *ObjectManager) lookupObjectByID(ctx context.Context, ident string) (*ob
 }
 
 func (m *ObjectManager) lookupObjectByAlias(ctx context.Context, ident string) (*objectdomain.Record, bool, error) {
-	canonicalID, aliasErr := m.db.ResolveObjectAlias(ctx, ident)
+	canonicalID, aliasErr := m.objectAliases.ResolveObjectAlias(ctx, ident)
 	if aliasErr != nil {
 		if faults.IsNotFoundError(aliasErr) {
 			return nil, false, nil
@@ -134,7 +134,7 @@ func (m *ObjectManager) lookupObjectByAlias(ctx context.Context, ident string) (
 		return nil, false, nil
 	}
 
-	obj, err := m.db.GetObject(ctx, canonicalID)
+	obj, err := m.objectReader.GetObject(ctx, canonicalID)
 	if err != nil {
 		if faults.IsNotFoundError(err) {
 			return nil, false, nil
@@ -162,7 +162,7 @@ func (m *ObjectManager) canonicalContentForObject(ctx context.Context, obj *obje
 		cloned := cloneObject(*obj)
 		return &objectdomain.CanonicalContent{Record: cloned, Records: []objectdomain.Record{cloned}}, nil
 	}
-	siblings, err := m.db.GetObjectsByChecksum(ctx, sha)
+	siblings, err := m.objectContent.GetObjectsByChecksum(ctx, sha)
 	if err != nil {
 		return nil, err
 	}
@@ -175,7 +175,7 @@ func (m *ObjectManager) canonicalContentForObject(ctx context.Context, obj *obje
 }
 
 func (m *ObjectManager) GetObjectsByChecksums(ctx context.Context, hashes []string, requiredMethod string) (map[string][]objectdomain.Record, error) {
-	objectsByChecksum, err := m.db.GetObjectsByChecksums(ctx, hashes)
+	objectsByChecksum, err := m.objectContent.GetObjectsByChecksums(ctx, hashes)
 	if err != nil {
 		return nil, err
 	}
@@ -188,7 +188,7 @@ func (m *ObjectManager) GetObjectsByChecksums(ctx context.Context, hashes []stri
 }
 
 func (m *ObjectManager) GetObjectsByChecksum(ctx context.Context, checksum string, requiredMethod string) ([]objectdomain.Record, error) {
-	objects, err := m.db.GetObjectsByChecksum(ctx, checksum)
+	objects, err := m.objectContent.GetObjectsByChecksum(ctx, checksum)
 	if err != nil {
 		return nil, err
 	}
@@ -197,7 +197,7 @@ func (m *ObjectManager) GetObjectsByChecksum(ctx context.Context, checksum strin
 }
 
 func (m *ObjectManager) GetBulkObjects(ctx context.Context, ids []string, requiredMethod string) ([]objectdomain.Record, error) {
-	objects, err := m.db.GetBulkObjects(ctx, ids)
+	objects, err := m.objectReader.GetBulkObjects(ctx, ids)
 	if err != nil {
 		return nil, err
 	}
@@ -207,7 +207,7 @@ func (m *ObjectManager) GetBulkObjects(ctx context.Context, ids []string, requir
 			hashes = append(hashes, sha)
 		}
 	}
-	siblingsByChecksum, err := m.db.GetObjectsByChecksums(ctx, hashes)
+	siblingsByChecksum, err := m.objectContent.GetObjectsByChecksums(ctx, hashes)
 	if err != nil {
 		return nil, err
 	}
@@ -233,7 +233,7 @@ func (m *ObjectManager) GetBulkObjects(ctx context.Context, ids []string, requir
 }
 
 func (m *ObjectManager) GetPreparedScopedObjects(ctx context.Context, ids []string, organization, project, requiredMethod string) ([]objectdomain.Record, error) {
-	objects, err := m.db.GetBulkObjects(ctx, ids)
+	objects, err := m.objectReader.GetBulkObjects(ctx, ids)
 	if err != nil {
 		return nil, err
 	}
@@ -333,7 +333,7 @@ func (m *ObjectManager) ListObjectIDsPageByChecksum(ctx context.Context, checksu
 
 	var objects []objectdomain.Record
 	if strings.TrimSpace(organization) != "" || strings.TrimSpace(project) != "" {
-		raw, err := m.db.GetObjectsByChecksum(ctx, checksum)
+		raw, err := m.objectContent.GetObjectsByChecksum(ctx, checksum)
 		if err != nil {
 			return nil, err
 		}
@@ -381,9 +381,9 @@ func (m *ObjectManager) ListObjectIDsPageByScope(ctx context.Context, organizati
 		return []string{}, nil
 	}
 
-	if lister, ok := m.db.(objectdomain.OptionalPageQuery); ok && canUseUnrestrictedScopePage(ctx, requiredMethod) {
+	if m.objectPages != nil && canUseUnrestrictedScopePage(ctx, requiredMethod) {
 		pageStart := time.Now()
-		ids, err := lister.ListObjectIDsPageByScope(ctx, organization, project, startAfter, limit, offset)
+		ids, err := m.objectPages.ListObjectIDsPageByScope(ctx, organization, project, startAfter, limit, offset)
 		log.Printf("INFO: syfon_list_object_ids_page_by_scope organization=%s project=%s start_after=%t limit=%d offset=%d ids=%d db_page_ms=%d optimized=%t", strings.TrimSpace(organization), strings.TrimSpace(project), strings.TrimSpace(startAfter) != "", limit, offset, len(ids), time.Since(pageStart).Milliseconds(), true)
 		return ids, err
 	}
@@ -422,19 +422,19 @@ func (m *ObjectManager) ListObjectIDsPageByURL(ctx context.Context, objectURL, o
 	if objectURL == "" {
 		return []string{}, nil
 	}
-	if lister, ok := m.db.(objectdomain.OptionalURLQuery); ok {
+	if m.objectURLPages != nil {
 		resources, includeUnscoped, restrictToResources := objectMethodResourceFilter(ctx, requiredMethod)
 		if access.IsGen3Mode(ctx) && access.IsAuthzEnforced(ctx) && !access.HasAuthHeader(ctx) {
 			return []string{}, nil
 		}
-		return lister.ListObjectIDsPageByURL(ctx, objectURL, organization, project, startAfter, limit, offset, resources, includeUnscoped, restrictToResources)
+		return m.objectURLPages.ListObjectIDsPageByURL(ctx, objectURL, organization, project, startAfter, limit, offset, resources, includeUnscoped, restrictToResources)
 	}
 
 	ids, err := m.ListObjectIDsByScope(ctx, organization, project, requiredMethod)
 	if err != nil {
 		return nil, err
 	}
-	objects, err := m.db.GetBulkObjects(ctx, ids)
+	objects, err := m.objectReader.GetBulkObjects(ctx, ids)
 	if err != nil {
 		return nil, err
 	}
@@ -465,12 +465,12 @@ func (m *ObjectManager) ListObjectIDsByScope(ctx context.Context, organization, 
 		}
 	}
 	listStart := time.Now()
-	ids, err := m.db.ListObjectIDsByScope(ctx, organization, project)
+	ids, err := m.objectScope.ListObjectIDsByScope(ctx, organization, project)
 	if err != nil {
 		return nil, err
 	}
 	log.Printf("INFO: syfon_list_object_ids_by_scope organization=%s project=%s ids=%d list_scope_ids_ms=%d", strings.TrimSpace(organization), strings.TrimSpace(project), len(ids), time.Since(listStart).Milliseconds())
-	objects, err := m.db.GetBulkObjects(ctx, ids)
+	objects, err := m.objectReader.GetBulkObjects(ctx, ids)
 	if err != nil {
 		return nil, err
 	}
@@ -491,18 +491,18 @@ func (m *ObjectManager) ListObjectsByScope(ctx context.Context, organization, pr
 			if err != nil {
 				return nil, err
 			}
-			objects, err := m.db.GetBulkObjects(ctx, ids)
+			objects, err := m.objectReader.GetBulkObjects(ctx, ids)
 			if err != nil {
 				return nil, err
 			}
 			return m.filterObjectsByMethod(ctx, objects, requiredMethod), nil
 		}
 	}
-	ids, err := m.db.ListObjectIDsByScope(ctx, organization, project)
+	ids, err := m.objectScope.ListObjectIDsByScope(ctx, organization, project)
 	if err != nil {
 		return nil, err
 	}
-	objects, err := m.db.GetBulkObjects(ctx, ids)
+	objects, err := m.objectReader.GetBulkObjects(ctx, ids)
 	if err != nil {
 		return nil, err
 	}
@@ -513,11 +513,11 @@ func (m *ObjectManager) ListObjectsByScope(ctx context.Context, organization, pr
 // Callers that repair physical access methods need the row identity and methods
 // without the same-checksum canonical merge used by normal reads.
 func (m *ObjectManager) ListPhysicalObjectsByScope(ctx context.Context, organization, project, requiredMethod string) ([]objectdomain.Record, error) {
-	ids, err := m.db.ListObjectIDsByScope(ctx, organization, project)
+	ids, err := m.objectScope.ListObjectIDsByScope(ctx, organization, project)
 	if err != nil {
 		return nil, err
 	}
-	objects, err := m.db.GetBulkObjects(ctx, ids)
+	objects, err := m.objectReader.GetBulkObjects(ctx, ids)
 	if err != nil {
 		return nil, err
 	}
@@ -537,7 +537,7 @@ func (m *ObjectManager) ListMissingScopedSHA256(ctx context.Context, organizatio
 		return nil, err
 	}
 
-	existingByChecksum, err := m.db.ListScopedObjectIDsByChecksums(ctx, organization, project, checksums)
+	existingByChecksum, err := m.objectChecksum.ListScopedObjectIDsByChecksums(ctx, organization, project, checksums)
 	if err != nil {
 		return nil, err
 	}
@@ -577,7 +577,7 @@ func (m *ObjectManager) expandProjectChecksumSiblingObjects(ctx context.Context,
 	}
 
 	listStart := time.Now()
-	idsByChecksum, err := m.db.ListScopedObjectIDsByChecksums(ctx, organization, project, checksums)
+	idsByChecksum, err := m.objectChecksum.ListScopedObjectIDsByChecksums(ctx, organization, project, checksums)
 	if err != nil {
 		return nil, err
 	}
@@ -609,7 +609,7 @@ func (m *ObjectManager) expandProjectChecksumSiblingObjects(ctx context.Context,
 
 	hydrateStart := time.Now()
 	if len(missingIDs) > 0 {
-		siblings, err := m.db.GetBulkObjects(ctx, missingIDs)
+		siblings, err := m.objectReader.GetBulkObjects(ctx, missingIDs)
 		if err != nil {
 			return nil, err
 		}
@@ -646,8 +646,8 @@ func objectHasAccessURL(obj *objectdomain.Record, objectURL string) bool {
 }
 
 func (m *ObjectManager) listReadableObjectIDs(ctx context.Context) ([]string, bool, error) {
-	lister, ok := m.db.(objectdomain.OptionalResourceQuery)
-	if !ok || !access.IsAuthzEnforced(ctx) {
+	lister := m.objectResources
+	if lister == nil || !access.IsAuthzEnforced(ctx) {
 		return nil, false, nil
 	}
 	if access.IsGen3Mode(ctx) && !access.HasAuthHeader(ctx) {
@@ -660,8 +660,8 @@ func (m *ObjectManager) listReadableObjectIDs(ctx context.Context) ([]string, bo
 }
 
 func (m *ObjectManager) listReadableObjectIDsPage(ctx context.Context, startAfter string, limit, offset int) ([]string, bool, error) {
-	pager, ok := m.db.(objectdomain.OptionalPageQuery)
-	if !ok || !access.IsAuthzEnforced(ctx) {
+	pager := m.objectPages
+	if pager == nil || !access.IsAuthzEnforced(ctx) {
 		return nil, false, nil
 	}
 	if access.IsGen3Mode(ctx) && !access.HasAuthHeader(ctx) {
@@ -733,8 +733,8 @@ func authorizedResources(ctx context.Context, method string) []string {
 }
 
 func (m *ObjectManager) authorizedChecksumIDs(ctx context.Context, checksum, requiredMethod string) ([]string, bool, error) {
-	lister, ok := m.db.(objectdomain.OptionalAuthorizedQuery)
-	if !ok {
+	lister := m.objectAuthorized
+	if lister == nil {
 		return nil, false, nil
 	}
 	resources, includeUnscoped, restrictToResources := objectMethodResourceFilter(ctx, requiredMethod)

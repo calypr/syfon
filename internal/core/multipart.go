@@ -8,15 +8,15 @@ import (
 )
 
 func (m *ObjectManager) SavePendingLFSMeta(ctx context.Context, entries []transfers.PendingMetadata) error {
-	return m.db.SavePendingLFSMeta(ctx, entries)
+	return m.pendingStore.SavePendingLFSMeta(ctx, entries)
 }
 
 func (m *ObjectManager) GetPendingLFSMeta(ctx context.Context, oid string) (*transfers.PendingMetadata, error) {
-	return m.db.GetPendingLFSMeta(ctx, oid)
+	return m.pendingStore.GetPendingLFSMeta(ctx, oid)
 }
 
 func (m *ObjectManager) PopPendingLFSMeta(ctx context.Context, oid string) (*transfers.PendingMetadata, error) {
-	return m.db.PopPendingLFSMeta(ctx, oid)
+	return m.pendingStore.PopPendingLFSMeta(ctx, oid)
 }
 
 func (m *ObjectManager) InitMultipartUpload(ctx context.Context, bucket, key string) (string, error) {

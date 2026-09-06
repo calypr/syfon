@@ -14,7 +14,6 @@ import (
 	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/common"
-	"github.com/calypr/syfon/internal/core"
 	httpdrs "github.com/calypr/syfon/internal/httpapi/drs"
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/testutils"
@@ -80,7 +79,7 @@ func TestDRSHandlers(t *testing.T) {
 		},
 	}
 	um := &captureURLManager{}
-	om := core.NewObjectManager(db, um)
+	om := testObjectManager(db, um)
 	app := fiber.New()
 	RegisterDRSRoutes(app, om, testServiceInfo())
 
@@ -167,7 +166,7 @@ func TestDRSHandlers(t *testing.T) {
 			},
 		}
 		um := &captureURLManager{}
-		om := core.NewObjectManager(db, um)
+		om := testObjectManager(db, um)
 		app := fiber.New()
 		RegisterDRSRoutes(app, om, testServiceInfo())
 
@@ -322,7 +321,7 @@ func TestAdditionalDRSHandlers(t *testing.T) {
 		},
 	}
 	um := &testutils.MockUrlManager{}
-	om := core.NewObjectManager(db, um)
+	om := testObjectManager(db, um)
 	app := fiber.New()
 	RegisterDRSRoutes(app, om, testServiceInfo())
 
@@ -461,7 +460,7 @@ func TestAdditionalDRSHandlers(t *testing.T) {
 
 func TestChecksumRouteRegression_WithRealCoreAndDB(t *testing.T) {
 	database := testutils.NewInMemoryDB()
-	om := core.NewObjectManager(database, &testutils.MockUrlManager{})
+	om := testObjectManager(database, &testutils.MockUrlManager{})
 	checksum := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 	controlled := []string{"/organization/testorg/project/testproj"}

@@ -55,7 +55,7 @@ func (m *ObjectManager) BulkOverwriteObjects(ctx context.Context, organization, 
 		}
 	}
 
-	checksumMatches, err := m.db.ListScopedObjectIDsByChecksums(ctx, organization, project, uniqueOverwriteStrings(hashes))
+	checksumMatches, err := m.objectChecksum.ListScopedObjectIDsByChecksums(ctx, organization, project, uniqueOverwriteStrings(hashes))
 	if err != nil {
 		return result, err
 	}
@@ -66,7 +66,7 @@ func (m *ObjectManager) BulkOverwriteObjects(ctx context.Context, organization, 
 	for _, matches := range checksumMatches {
 		ids = append(ids, matches...)
 	}
-	existingList, err := m.db.GetBulkObjects(ctx, uniqueOverwriteStrings(ids))
+	existingList, err := m.objectReader.GetBulkObjects(ctx, uniqueOverwriteStrings(ids))
 	if err != nil {
 		return result, err
 	}
@@ -79,7 +79,7 @@ func (m *ObjectManager) BulkOverwriteObjects(ctx context.Context, organization, 
 	usedTargets := make(map[string]string, len(candidates))
 	for i, candidate := range candidates {
 		sourceDID := string(candidate.Id)
-		canonicalID, aliasErr := m.db.ResolveObjectAlias(ctx, sourceDID)
+		canonicalID, aliasErr := m.objectAliases.ResolveObjectAlias(ctx, sourceDID)
 		if aliasErr == nil && canonicalID != sourceDID {
 			return result, fmt.Errorf("%w: target DID %q is an alias for %q", ErrBulkOverwriteConflict, sourceDID, canonicalID)
 		}
@@ -136,7 +136,7 @@ func (m *ObjectManager) BulkOverwriteObjects(ctx context.Context, organization, 
 		}
 	}
 
-	if err := m.db.RegisterObjects(ctx, resolved); err != nil {
+	if err := m.objectWriter.RegisterObjects(ctx, resolved); err != nil {
 		return BulkOverwriteResult{}, err
 	}
 	return result, nil

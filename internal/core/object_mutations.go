@@ -42,11 +42,11 @@ func (m *ObjectManager) DeleteBulkByScope(ctx context.Context, organization, pro
 		return 0, err
 	}
 
-	ids, err := m.db.ListObjectIDsByScope(ctx, organization, project)
+	ids, err := m.objectScope.ListObjectIDsByScope(ctx, organization, project)
 	if err != nil {
 		return 0, err
 	}
-	if lister, ok := m.db.(objectdomain.OptionalAuthorizedQuery); ok {
+	if lister := m.objectAuthorized; lister != nil {
 		resources, _, restrictToResources := objectMethodResourceFilter(ctx, objectMethodDelete)
 		if optimized, err := lister.ListObjectIDsByScopeAndResources(ctx, organization, project, resources, restrictToResources); err == nil {
 			ids = optimized
@@ -66,7 +66,7 @@ func (m *ObjectManager) DeleteBulkByScope(ctx context.Context, organization, pro
 	if err != nil {
 		return 0, err
 	}
-	return m.db.RemoveObjectControlledAccessBulk(ctx, toDelete, resource)
+	return m.objectPolicy.RemoveObjectControlledAccessBulk(ctx, toDelete, resource)
 }
 
 func (m *ObjectManager) DeleteObject(ctx context.Context, id string) error {
@@ -81,7 +81,7 @@ func (m *ObjectManager) DeleteObjectWithOptions(ctx context.Context, id string, 
 	if opts.DeleteStorageData {
 		return fmt.Errorf("%w: physical storage deletion is not atomic with catalog mutation", faults.ErrConflict)
 	}
-	obj, err := m.db.GetObject(ctx, id)
+	obj, err := m.objectReader.GetObject(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -91,7 +91,7 @@ func (m *ObjectManager) DeleteObjectWithOptions(ctx context.Context, id string, 
 	if opts.DeleteStorageData && (obj.PublicRead || len(ObjectAccessResources(obj)) > 0) {
 		return fmt.Errorf("%w: cannot delete shared content storage without exclusive ownership", faults.ErrConflict)
 	}
-	return m.db.DeleteObject(ctx, id)
+	return m.objectWriter.DeleteObject(ctx, id)
 }
 
 func (m *ObjectManager) BulkDeleteObjects(ctx context.Context, ids []string) error {
@@ -109,11 +109,11 @@ func (m *ObjectManager) BulkDeleteObjectsWithOptions(ctx context.Context, ids []
 	if len(toDelete) == 0 {
 		return nil
 	}
-	return m.db.BulkDeleteObjects(ctx, toDelete)
+	return m.objectWriter.BulkDeleteObjects(ctx, toDelete)
 }
 
 func (m *ObjectManager) deletablePhysicalObjectIDsForBulk(ctx context.Context, ids []string) ([]string, error) {
-	objects, err := m.db.GetBulkObjects(ctx, ids)
+	objects, err := m.objectReader.GetBulkObjects(ctx, ids)
 	if err != nil {
 		return nil, err
 	}
@@ -131,7 +131,7 @@ func (m *ObjectManager) deletablePhysicalObjectIDsForBulk(ctx context.Context, i
 		}
 		obj, ok := byID[objectID]
 		if !ok {
-			canonicalID, resolveErr := m.db.ResolveObjectAlias(ctx, objectID)
+			canonicalID, resolveErr := m.objectAliases.ResolveObjectAlias(ctx, objectID)
 			if resolveErr == nil && strings.TrimSpace(canonicalID) != "" {
 				return nil, fmt.Errorf("%w: bulk delete requires a physical object UUID; %q is an alias for %q", faults.ErrConflict, objectID, strings.TrimSpace(canonicalID))
 			}
@@ -156,14 +156,14 @@ func (m *ObjectManager) deletablePhysicalObjectIDsForBulk(ctx context.Context, i
 }
 
 func (m *ObjectManager) UpdateObjectAccessMethods(ctx context.Context, objectID string, accessMethods []objectdomain.AccessMethod) error {
-	obj, err := m.db.GetObject(ctx, objectID)
+	obj, err := m.objectReader.GetObject(ctx, objectID)
 	if err != nil {
 		return err
 	}
 	if err := m.requireAllObjectMethod(ctx, obj, objectMethodUpdate); err != nil {
 		return err
 	}
-	return m.db.UpdateObjectAccessMethods(ctx, objectID, accessMethods)
+	return m.objectAccess.UpdateObjectAccessMethods(ctx, objectID, accessMethods)
 }
 
 func (m *ObjectManager) BulkUpdateAccessMethods(ctx context.Context, updates map[string][]objectdomain.AccessMethod) error {
@@ -175,7 +175,7 @@ func (m *ObjectManager) BulkUpdateAccessMethods(ctx context.Context, updates map
 	for objectID := range updates {
 		ids = append(ids, objectID)
 	}
-	objects, err := m.db.GetBulkObjects(ctx, ids)
+	objects, err := m.objectReader.GetBulkObjects(ctx, ids)
 	if err != nil {
 		return err
 	}
@@ -192,11 +192,11 @@ func (m *ObjectManager) BulkUpdateAccessMethods(ctx context.Context, updates map
 			return err
 		}
 	}
-	return m.db.BulkUpdateAccessMethods(ctx, updates)
+	return m.objectAccess.BulkUpdateAccessMethods(ctx, updates)
 }
 
 func (m *ObjectManager) RemoveObjectControlledAccess(ctx context.Context, objectID, resource string) (*objectdomain.Record, error) {
-	obj, err := m.db.GetObject(ctx, objectID)
+	obj, err := m.objectReader.GetObject(ctx, objectID)
 	if err != nil {
 		return nil, err
 	}
@@ -221,11 +221,11 @@ func (m *ObjectManager) RemoveObjectControlledAccess(ctx context.Context, object
 		return nil, faults.ErrNotFound
 	}
 
-	if err := m.db.RemoveObjectControlledAccess(ctx, objectID, resource); err != nil {
+	if err := m.objectPolicy.RemoveObjectControlledAccess(ctx, objectID, resource); err != nil {
 		return nil, err
 	}
 
-	updated, err := m.db.GetObject(ctx, objectID)
+	updated, err := m.objectReader.GetObject(ctx, objectID)
 	if err != nil {
 		return nil, err
 	}
@@ -239,7 +239,7 @@ func (m *ObjectManager) RegisterObjects(ctx context.Context, objs []objectdomain
 	if err := m.bulkObjectMethodError(ctx, objs, objectMethodCreate); err != nil {
 		return err
 	}
-	return m.db.RegisterObjects(ctx, objs)
+	return m.objectWriter.RegisterObjects(ctx, objs)
 }
 
 func (m *ObjectManager) validateExistingContentRead(ctx context.Context, objs []objectdomain.Record) error {
@@ -253,7 +253,7 @@ func (m *ObjectManager) validateExistingContentRead(ctx context.Context, objs []
 			continue
 		}
 		seen[sha] = struct{}{}
-		existing, err := m.db.GetObjectsByChecksum(ctx, sha)
+		existing, err := m.objectContent.GetObjectsByChecksum(ctx, sha)
 		if err != nil {
 			return err
 		}
@@ -268,11 +268,11 @@ func (m *ObjectManager) validateExistingContentRead(ctx context.Context, objs []
 }
 
 func (m *ObjectManager) CollapseProjectChecksumDuplicates(ctx context.Context, organization, project string) (int, error) {
-	ids, err := m.db.ListObjectIDsByScope(ctx, organization, project)
+	ids, err := m.objectScope.ListObjectIDsByScope(ctx, organization, project)
 	if err != nil {
 		return 0, err
 	}
-	objects, err := m.db.GetBulkObjects(ctx, ids)
+	objects, err := m.objectReader.GetBulkObjects(ctx, ids)
 	if err != nil {
 		return 0, err
 	}
@@ -316,15 +316,15 @@ func (m *ObjectManager) CollapseProjectChecksumDuplicates(ctx context.Context, o
 	if len(merged) == 0 {
 		return 0, nil
 	}
-	if err := m.db.RegisterObjects(ctx, merged); err != nil {
+	if err := m.objectWriter.RegisterObjects(ctx, merged); err != nil {
 		return 0, err
 	}
 	for aliasID, canonicalID := range aliasMap {
-		if err := m.db.CreateObjectAlias(ctx, aliasID, canonicalID); err != nil {
+		if err := m.objectAliases.CreateObjectAlias(ctx, aliasID, canonicalID); err != nil {
 			return 0, err
 		}
 	}
-	if err := m.db.BulkDeleteObjects(ctx, uniqueStrings(toDelete)); err != nil {
+	if err := m.objectWriter.BulkDeleteObjects(ctx, uniqueStrings(toDelete)); err != nil {
 		return 0, err
 	}
 	return len(aliasMap), nil
@@ -347,7 +347,7 @@ func (m *ObjectManager) canonicalizeRegistrationObjects(ctx context.Context, obj
 		}
 	}
 
-	existingByChecksum, err := m.db.GetObjectsByChecksums(ctx, checksums)
+	existingByChecksum, err := m.objectContent.GetObjectsByChecksums(ctx, checksums)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -441,11 +441,11 @@ func (m *ObjectManager) canonicalizeRegistrationObjects(ctx context.Context, obj
 }
 
 func (m *ObjectManager) ReplaceObjects(ctx context.Context, objs []objectdomain.Record) error {
-	return m.db.ReplaceObjects(ctx, objs)
+	return m.objectWriter.ReplaceObjects(ctx, objs)
 }
 
 func (m *ObjectManager) DeleteObjectsByChecksums(ctx context.Context, hashes []string) (int, error) {
-	if lister, ok := m.db.(objectdomain.OptionalAuthorizedQuery); ok {
+	if lister := m.objectAuthorized; lister != nil {
 		resources, includeUnscoped, restrictToResources := objectMethodResourceFilter(ctx, objectMethodDelete)
 		if byChecksum, err := lister.ListObjectIDsByChecksumsAndResources(ctx, hashes, resources, includeUnscoped, restrictToResources); err == nil {
 			seen := make(map[string]struct{})
@@ -462,7 +462,7 @@ func (m *ObjectManager) DeleteObjectsByChecksums(ctx context.Context, hashes []s
 			if len(toDelete) == 0 {
 				return 0, nil
 			}
-			objects, err := m.db.GetBulkObjects(ctx, toDelete)
+			objects, err := m.objectReader.GetBulkObjects(ctx, toDelete)
 			if err != nil {
 				return 0, err
 			}
@@ -476,14 +476,14 @@ func (m *ObjectManager) DeleteObjectsByChecksums(ctx context.Context, hashes []s
 			if len(authorized) == 0 {
 				return 0, nil
 			}
-			if err := m.db.BulkDeleteObjects(ctx, authorized); err != nil {
+			if err := m.objectWriter.BulkDeleteObjects(ctx, authorized); err != nil {
 				return 0, err
 			}
 			return len(authorized), nil
 		}
 	}
 
-	objectsByChecksum, err := m.db.GetObjectsByChecksums(ctx, hashes)
+	objectsByChecksum, err := m.objectContent.GetObjectsByChecksums(ctx, hashes)
 	if err != nil {
 		return 0, err
 	}
@@ -507,21 +507,21 @@ func (m *ObjectManager) DeleteObjectsByChecksums(ctx context.Context, hashes []s
 	if len(toDelete) == 0 {
 		return 0, nil
 	}
-	if err := m.db.BulkDeleteObjects(ctx, toDelete); err != nil {
+	if err := m.objectWriter.BulkDeleteObjects(ctx, toDelete); err != nil {
 		return 0, err
 	}
 	return len(toDelete), nil
 }
 
 func (m *ObjectManager) CreateObjectAlias(ctx context.Context, aliasID, canonicalID string) error {
-	obj, err := m.db.GetObject(ctx, canonicalID)
+	obj, err := m.objectReader.GetObject(ctx, canonicalID)
 	if err != nil {
 		return err
 	}
 	if err := m.requireObjectMethod(ctx, obj, objectMethodUpdate); err != nil {
 		return err
 	}
-	return m.db.CreateObjectAlias(ctx, aliasID, canonicalID)
+	return m.objectAliases.CreateObjectAlias(ctx, aliasID, canonicalID)
 }
 
 func (m *ObjectManager) deletableObjectIDs(ctx context.Context, ids []string) ([]string, error) {
@@ -529,7 +529,7 @@ func (m *ObjectManager) deletableObjectIDs(ctx context.Context, ids []string) ([
 }
 
 func (m *ObjectManager) deletableObjectIDsForMethod(ctx context.Context, ids []string, requireAll bool) ([]string, error) {
-	objects, err := m.db.GetBulkObjects(ctx, ids)
+	objects, err := m.objectReader.GetBulkObjects(ctx, ids)
 	if err != nil {
 		return nil, err
 	}
