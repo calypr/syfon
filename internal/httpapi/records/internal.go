@@ -8,7 +8,6 @@ import (
 
 	generated "github.com/calypr/syfon/apigen/server/internalapi"
 	syfoncommon "github.com/calypr/syfon/common"
-	httpdrs "github.com/calypr/syfon/internal/httpapi/drs"
 	"github.com/calypr/syfon/internal/objects"
 )
 
@@ -50,7 +49,7 @@ func FromInternalRecord(value generated.InternalRecord, now time.Time) (objects.
 		record.Authorizations = syfoncommon.ControlledAccessToAuthzMap(controlled)
 	}
 	if value.AccessMethods != nil {
-		methods := httpdrs.FromGeneratedAccessMethods(*value.AccessMethods)
+		methods := fromGeneratedAccessMethods(*value.AccessMethods)
 		record.AccessMethods = &methods
 	}
 	record.NameAliases = objects.NormalizeNameAliases(recordStringValue(record.Name), dereferenceStrings(value.NameAliases))
@@ -68,7 +67,7 @@ func ToInternalRecord(record objects.Record) generated.InternalRecord {
 		Name:          record.Name,
 		NameAliases:   stringSlicePtr(objects.NormalizeNameAliases(recordStringValue(record.Name), record.NameAliases)),
 		Version:       record.Version,
-		AccessMethods: httpdrs.ToGeneratedAccessMethods(record.AccessMethods),
+		AccessMethods: toGeneratedAccessMethods(record.AccessMethods),
 	}
 	if controlled := record.ControlledAccess; controlled != nil {
 		values := append([]string(nil), (*controlled)...)

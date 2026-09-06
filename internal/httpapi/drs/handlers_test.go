@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 
 	generated "github.com/calypr/syfon/apigen/server/drs"
@@ -80,6 +81,53 @@ func TestGetObjectAndAccessURLAliases(t *testing.T) {
 	}
 	if got, want := storageAccess.lastURL, "s3://bucket/object-1"; got != want {
 		t.Fatalf("storage URL = %q, want %q", got, want)
+	}
+}
+
+func TestBulkAccessResponsePreservesResolutionContract(t *testing.T) {
+	db := newDRSObjectStore(map[string]*objects.Record{
+		"object-1": {
+			Id: "object-1",
+			AccessMethods: &[]objects.AccessMethod{
+				{AccessId: drsPtr("a"), Type: "s3", AccessUrl: &objects.AccessURL{Url: "s3://bucket/a"}},
+			},
+		},
+	})
+	om := testDRSServices(db, &captureStorageAccess{})
+	app := fiber.New()
+	RegisterDRSRoutes(app, om.objectService, om.transferService, generated.Service{})
+
+	request := []byte(`{"bulk_object_access_ids":[{"bulk_object_id":"object-1","bulk_access_ids":["a","missing"," a "]},{"bulk_object_id":"missing","bulk_access_ids":["a","b"]},{"bulk_object_id":"empty"}]}`)
+	resp, err := app.Test(httptest.NewRequest(http.MethodPost, "/objects/access", bytes.NewReader(request)))
+	if err != nil {
+		t.Fatalf("bulk access request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("bulk access status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	var payload struct {
+		Resolved []generated.BulkAccessURL `json:"resolved_drs_object_access_urls"`
+		Summary  struct {
+			Requested  int `json:"requested"`
+			Resolved   int `json:"resolved"`
+			Unresolved int `json:"unresolved"`
+		} `json:"summary"`
+		Unresolved []struct {
+			ErrorCode int      `json:"error_code"`
+			ObjectIDs []string `json:"object_ids"`
+		} `json:"unresolved_drs_objects"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode bulk response: %v", err)
+	}
+	if payload.Summary.Requested != 6 || payload.Summary.Resolved != 2 || payload.Summary.Unresolved != 4 {
+		t.Fatalf("summary = %+v", payload.Summary)
+	}
+	if len(payload.Resolved) != 2 || *payload.Resolved[0].DrsAccessId != "a" || *payload.Resolved[1].DrsAccessId != "a" {
+		t.Fatalf("resolved = %+v", payload.Resolved)
+	}
+	if len(payload.Unresolved) != 1 || payload.Unresolved[0].ErrorCode != http.StatusNotFound || !reflect.DeepEqual(payload.Unresolved[0].ObjectIDs, []string{"object-1", "missing", "empty"}) {
+		t.Fatalf("unresolved = %+v", payload.Unresolved)
 	}
 }
 
