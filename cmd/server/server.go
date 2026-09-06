@@ -14,6 +14,7 @@ import (
 	"github.com/gofiber/fiber/v3/middleware/recover"
 	"github.com/spf13/cobra"
 
+	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/access/authentication"
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/config"
@@ -32,6 +33,26 @@ import (
 )
 
 var configFile string
+
+func serviceInfoForBackend(sqlite bool) drs.Service {
+	description := "Calypr-backed DRS server"
+	if sqlite {
+		description += " (SQLite)"
+	}
+	createdAt := time.Now()
+	updatedAt := time.Now()
+	environment := "prod"
+	return drs.Service{
+		Id:          "drs-service-calypr",
+		Name:        "Calypr DRS Server",
+		Type:        drs.ServiceType{Group: "org.ga4gh", Artifact: "drs", Version: "1.2.0"},
+		Description: &description,
+		CreatedAt:   &createdAt,
+		UpdatedAt:   &updatedAt,
+		Environment: &environment,
+		Version:     "1.0.0",
+	}
+}
 
 var Cmd = &cobra.Command{
 	Use:     "serve",
@@ -166,6 +187,7 @@ var Cmd = &cobra.Command{
 			app:                 app,
 			cfg:                 cfg,
 			database:            database,
+			serviceInfo:         serviceInfoForBackend(cfg.Database.Sqlite != nil),
 			om:                  om,
 			uM:                  uM,
 			authzMiddleware:     authzMiddleware,

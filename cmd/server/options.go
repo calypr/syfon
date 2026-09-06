@@ -1,6 +1,7 @@
 package server
 
 import (
+	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/api/docs"
 	"github.com/calypr/syfon/internal/api/drsapi"
 	"github.com/calypr/syfon/internal/api/internaldrs"
@@ -18,6 +19,7 @@ type serverRuntime struct {
 	app                 *fiber.App
 	cfg                 *config.Config
 	database            db.DatabaseInterface
+	serviceInfo         drs.Service
 	om                  *core.ObjectManager
 	uM                  urlmanager.UrlManager
 	authzMiddleware     *middleware.AuthzMiddleware
@@ -44,7 +46,7 @@ func WithDocsRoutes() ServerOption {
 func WithGa4ghRoutes() ServerOption {
 	return func(rt *serverRuntime) {
 		api := rt.ensureAPIGroup().Group("/ga4gh/drs/v1")
-		drsapi.RegisterDRSRoutes(api, rt.om)
+		drsapi.RegisterDRSRoutes(api, rt.om, rt.serviceInfo)
 	}
 }
 
