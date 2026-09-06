@@ -1,4 +1,4 @@
-package core
+package objects_test
 
 import (
 	"context"
@@ -8,37 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/faults"
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/persistence/sqlite"
 )
-
-func newDirectObjectService(backend any) *objects.Service {
-	deps := objects.Dependencies{
-		Reader:        backend.(objects.RecordReader),
-		Writer:        backend.(objects.RecordWriter),
-		AccessMethods: backend.(objects.AccessMethodWriter),
-		AccessPolicy:  backend.(objects.AccessPolicyWriter),
-		Aliases:       backend.(objects.AliasStore),
-		Content:       backend.(objects.ContentReader),
-		ChecksumScope: backend.(objects.ChecksumScopeQuery),
-		Scope:         backend.(objects.ScopeQuery),
-	}
-	if optional, ok := backend.(objects.OptionalResourceQuery); ok {
-		deps.Resources = optional
-	}
-	if optional, ok := backend.(objects.OptionalPageQuery); ok {
-		deps.Pages = optional
-	}
-	if optional, ok := backend.(objects.OptionalURLQuery); ok {
-		deps.URLPages = optional
-	}
-	if optional, ok := backend.(objects.OptionalAuthorizedQuery); ok {
-		deps.Authorized = optional
-	}
-	return objects.NewService(deps)
-}
 
 func TestObjectServiceBulkMutationsTargetLegacyDuplicatePhysicalUUID(t *testing.T) {
 	ctx := context.Background()
@@ -99,15 +72,10 @@ func TestObjectServiceBulkMutationsTargetLegacyDuplicatePhysicalUUID(t *testing.
 		t.Fatalf("close fixture database: %v", err)
 	}
 
-	service := newDirectObjectService(database)
-	authenticatedTargetProject := access.WithSession(ctx, func() *access.Session {
-		session := access.NewSession("gen3")
-		session.AuthHeaderPresent = true
-		session.SetAuthorizations(nil, map[string]map[string]bool{
-			resource: {"update": true, "delete": true},
-		}, true)
-		return session
-	}())
+	service := newTestService(database)
+	authenticatedTargetProject := buildGen3Context(map[string]map[string]bool{
+		resource: {"update": true, "delete": true},
+	})
 	if err := service.BulkUpdateAccessMethods(authenticatedTargetProject, map[string][]objects.AccessMethod{
 		objectA: {{
 			Type:      "s3",

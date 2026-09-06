@@ -3,14 +3,9 @@ package core
 import (
 	"time"
 
-	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/storage/address"
 )
-
-func EnforceCanonicalProjectScope(obj objects.Record, organization, project string) (objects.Record, error) {
-	return objects.EnforceCanonicalProjectScope(obj, organization, project)
-}
 
 // FirstSupportedAccessURL returns the first URL from an object that Syfon can sign.
 func FirstSupportedAccessURL(obj *objects.Record) string {
@@ -33,15 +28,4 @@ func FirstSupportedAccessURL(obj *objects.Record) string {
 // MergeRecordUpdate merges an update into an existing object.
 func MergeRecordUpdate(existing objects.Record, update objects.Record, id string, now time.Time) (objects.Record, error) {
 	return objects.MergeRecordUpdate(existing, update, id, now)
-}
-
-func normalizedObjectNamePtr(name *string) *string {
-	if name == nil {
-		return nil
-	}
-	base := objects.CleanToBasename(*name)
-	if base == "" {
-		return nil
-	}
-	return common.Ptr(base)
 }

@@ -7,8 +7,6 @@ import (
 	"time"
 
 	sycommon "github.com/calypr/syfon/common"
-	"github.com/calypr/syfon/internal/buckets"
-	"github.com/calypr/syfon/internal/core"
 	postgresdb "github.com/calypr/syfon/internal/persistence/postgres"
 
 	"github.com/calypr/syfon/internal/objects"
@@ -44,7 +42,7 @@ func TestPostgresBulkOverwriteObjects(t *testing.T) {
 	}
 
 	newName := "new"
-	objectPorts := core.ObjectPorts{
+	service := objects.NewService(objects.Dependencies{
 		Reader:        db,
 		Writer:        db,
 		AccessMethods: db,
@@ -57,27 +55,8 @@ func TestPostgresBulkOverwriteObjects(t *testing.T) {
 		Pages:         db,
 		URLPages:      db,
 		Authorized:    db,
-	}
-	bucketService, err := buckets.NewService(buckets.Dependencies{
-		Credentials: db, CredentialAdmin: db, Scopes: db, Visibility: db,
-		Fallback: core.NewBucketVisibilityFallback(objectPorts.Scope, objectPorts.Reader),
-	}, nil)
-	if err != nil {
-		t.Fatalf("construct bucket service: %v", err)
-	}
-	om := core.NewObjectManager(core.Dependencies{
-		Objects:       objectPorts,
-		BucketService: bucketService,
-		Transfers: core.TransferPorts{
-			Pending: db,
-			Events:  db,
-		},
-		Usage: core.UsagePorts{
-			Counters:       db,
-			ProviderEvents: db,
-		},
 	})
-	result, err := om.BulkOverwriteObjects(context.Background(), "ci-overwrite", "project", []objects.Record{{
+	result, err := service.BulkOverwriteObjects(context.Background(), "ci-overwrite", "project", []objects.Record{{
 		Id:               "ci-overwrite-source",
 		Name:             &newName,
 		CreatedTime:      now,
