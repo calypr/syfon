@@ -158,7 +158,7 @@ func dereferenceStrings(value *[]string) []string {
 	if value == nil {
 		return nil
 	}
-	return *value
+	return append([]string(nil), (*value)...)
 }
 
 func stringPtr(value string) *string { return &value }

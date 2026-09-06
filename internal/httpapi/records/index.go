@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/calypr/syfon/apigen/server/internalapi"
-	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/faults"
 	apimiddleware "github.com/calypr/syfon/internal/httpapi/middleware"
 	"github.com/calypr/syfon/internal/httpapi/response"
@@ -389,7 +388,7 @@ func handleInternalBulkDocumentsFiber(objectService *objects.Service) fiber.Hand
 			ids = append(ids, arr...)
 		}
 		if obj, err := req.AsBulkDocumentsRequest1(); err == nil {
-			ids = append(ids, common.DerefStringSlice(obj.Ids)...)
+			ids = append(ids, dereferenceStrings(obj.Ids)...)
 		}
 		if len(ids) == 0 {
 			return c.Status(fiber.StatusBadRequest).SendString("Invalid request body: ids are required")
@@ -557,7 +556,7 @@ func internalRecordToObject(value internalapi.InternalRecord, now time.Time) (ob
 	if err != nil {
 		return objects.Record{}, err
 	}
-	return objects.EnforceCanonicalProjectScope(obj, common.StringVal(value.Organization), common.StringVal(value.Project))
+	return objects.EnforceCanonicalProjectScope(obj, recordStringValue(value.Organization), recordStringValue(value.Project))
 }
 
 func normalizeBulkHashes(hashes []string) []string {
