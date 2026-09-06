@@ -94,12 +94,12 @@ func TestLFSUploadProxyPreservesOpaqueMultipartAndPartOrder(t *testing.T) {
 	ports := newLFSTestPorts(map[string]*objects.Record{}, map[string]buckets.Credential{"bucket": {Bucket: "bucket"}})
 	storageFake := &lfsTestStorage{}
 	server := NewLFSServer(newLFSTestDependencies(ports, storageFake), DefaultOptions())
-	server.partUploader = func(_ context.Context, _ string, content []byte) (string, error) {
+	server.uploadWorkflow = transfers.NewLFSUploadWorkflow(server.transferService, func(_ context.Context, _ string, content []byte) (string, error) {
 		if string(content) != "payload" {
 			t.Fatalf("multipart content = %q", content)
 		}
 		return "etag", nil
-	}
+	}, ports.fileCounters)
 	response, err := server.LfsUploadProxy(context.Background(), lfsapi.LfsUploadProxyRequestObject{
 		Oid:  oid,
 		Body: bytes.NewReader([]byte("payload")),
@@ -185,7 +185,7 @@ func TestLFSUploadProxyUsesCanonicalOIDForScopedTargets(t *testing.T) {
 			deps := newLFSTestDependencies(ports, storageFake)
 			deps.TransferService = newTransferService(ports, storageFake)
 			server := NewLFSServer(deps, DefaultOptions())
-			server.partUploader = func(context.Context, string, []byte) (string, error) { return "etag", nil }
+			server.uploadWorkflow = transfers.NewLFSUploadWorkflow(server.transferService, func(context.Context, string, []byte) (string, error) { return "etag", nil }, ports.fileCounters)
 
 			response, err := server.LfsUploadProxy(context.Background(), lfsapi.LfsUploadProxyRequestObject{
 				Oid:  oid,
