@@ -22,7 +22,7 @@ import (
 func TestStorageTargetFromURLVariants(t *testing.T) {
 	t.Run("file backed bucket resolves to local filesystem path", func(t *testing.T) {
 		root := t.TempDir()
-		om := NewObjectManager(&testutils.MockDatabase{
+		om := newTestObjectManager(&testutils.MockDatabase{
 			Credentials: map[string]buckets.Credential{
 				"bucket": {Bucket: "bucket", Provider: address.FileProvider, Endpoint: root},
 			},
@@ -44,7 +44,7 @@ func TestStorageTargetFromURLVariants(t *testing.T) {
 	})
 
 	t.Run("absolute local path is treated as file target", func(t *testing.T) {
-		om := NewObjectManager(&testutils.MockDatabase{}, &capturingURLManager{})
+		om := newTestObjectManager(&testutils.MockDatabase{}, &capturingURLManager{})
 		target, ok, err := om.storageTargetFromURL(context.Background(), "/tmp/example.txt")
 		if err != nil {
 			t.Fatalf("storageTargetFromURL failed: %v", err)
@@ -55,7 +55,7 @@ func TestStorageTargetFromURLVariants(t *testing.T) {
 	})
 
 	t.Run("unsupported and incomplete urls are ignored", func(t *testing.T) {
-		om := NewObjectManager(&testutils.MockDatabase{}, &capturingURLManager{})
+		om := newTestObjectManager(&testutils.MockDatabase{}, &capturingURLManager{})
 		if _, ok, err := om.storageTargetFromURL(context.Background(), "https://example.org/object"); err != nil || ok {
 			t.Fatalf("expected https url to be ignored, got ok=%v err=%v", ok, err)
 		}
@@ -75,7 +75,7 @@ func TestDeleteStorageTargetFileProvider(t *testing.T) {
 		t.Fatalf("write file: %v", err)
 	}
 
-	om := NewObjectManager(&testutils.MockDatabase{}, &capturingURLManager{})
+	om := newTestObjectManager(&testutils.MockDatabase{}, &capturingURLManager{})
 	if err := om.deleteStorageTarget(context.Background(), storageTarget{provider: address.FileProvider, path: targetPath}); err != nil {
 		t.Fatalf("deleteStorageTarget(existing) failed: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestBulkDeleteObjectsWithStorageRejectsWithoutSideEffects(t *testing.T) {
 			},
 		},
 	}
-	om := NewObjectManager(db, &capturingURLManager{})
+	om := newTestObjectManager(db, &capturingURLManager{})
 
 	if err := om.DeleteObjectWithOptions(context.Background(), "obj-1", DeleteOptions{DeleteStorageData: true}); !errors.Is(err, faults.ErrConflict) {
 		t.Fatalf("expected explicit single-object storage deletion conflict, got %v", err)
@@ -145,7 +145,7 @@ func TestDeleteS3ObjectsChunksLargeBatches(t *testing.T) {
 		keys = append(keys, fmt.Sprintf("key-%04d", i))
 	}
 	keys = append(keys, keys[0])
-	om := NewObjectManager(&testutils.MockDatabase{
+	om := newTestObjectManager(&testutils.MockDatabase{
 		Credentials: map[string]buckets.Credential{
 			"bucket": {Bucket: "bucket", Provider: address.S3Provider, Region: "us-east-1"},
 		},
@@ -167,7 +167,7 @@ func TestDeleteS3ObjectsChunksLargeBatches(t *testing.T) {
 
 func TestStorageTargetsForScopedObjectPreserveStoredLocation(t *testing.T) {
 	checksum := strings.Repeat("a", 64)
-	om := NewObjectManager(&testutils.MockDatabase{
+	om := newTestObjectManager(&testutils.MockDatabase{
 		Credentials: map[string]buckets.Credential{
 			"syfon-e2e-bucket": {Bucket: "syfon-e2e-bucket", Provider: "s3", Region: "us-west-2"},
 		},

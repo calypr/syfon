@@ -28,7 +28,7 @@ func TestBulkOverwriteObjects_ReplacesProjectChecksumSibling(t *testing.T) {
 		},
 		ObjectAuthz: map[string]map[string][]string{"target-did": {"org": {"project"}}},
 	}}
-	om := NewObjectManager(db, &capturingURLManager{})
+	om := newTestObjectManager(db, &capturingURLManager{})
 	candidate := objects.Record{
 
 		Id:               "source-did",
@@ -99,7 +99,7 @@ func TestBulkOverwriteObjects_ValidationAndConflicts(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			om := NewObjectManager(&coreTestDB{MockDatabase: tc.db}, &capturingURLManager{})
+			om := newTestObjectManager(&coreTestDB{MockDatabase: tc.db}, &capturingURLManager{})
 			_, err := om.BulkOverwriteObjects(context.Background(), "org", "project", tc.candidates)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("expected error containing %q, got %v", tc.want, err)
@@ -112,7 +112,7 @@ func TestBulkOverwriteObjects_ValidationAndConflicts(t *testing.T) {
 }
 
 func TestBulkOverwriteObjects_EmptyInput(t *testing.T) {
-	om := NewObjectManager(&coreTestDB{MockDatabase: &testutils.MockDatabase{}}, &capturingURLManager{})
+	om := newTestObjectManager(&coreTestDB{MockDatabase: &testutils.MockDatabase{}}, &capturingURLManager{})
 	result, err := om.BulkOverwriteObjects(context.Background(), "", "", nil)
 	if err != nil || result != (BulkOverwriteResult{}) {
 		t.Fatalf("expected empty result, got %+v err=%v", result, err)
@@ -129,7 +129,7 @@ func TestBulkOverwriteObjects_DoesNotMatchChecksumOutsideProject(t *testing.T) {
 		Objects:     map[string]*objects.Record{"other-project": {Id: "other-project", Checksums: []objects.Checksum{{Type: "sha256", Checksum: sha}}}},
 		ObjectAuthz: map[string]map[string][]string{"other-project": {"org": {"other"}}},
 	}}
-	om := NewObjectManager(db, &capturingURLManager{})
+	om := newTestObjectManager(db, &capturingURLManager{})
 	candidate := objects.Record{
 		Id: "source-did", Checksums: []objects.Checksum{{Type: "sha256", Checksum: sha}}, ControlledAccess: &[]string{resource},
 		Authorizations: map[string][]string{"org": {"project"}},
@@ -178,7 +178,7 @@ func TestBulkOverwriteObjects_RejectsAliasTarget(t *testing.T) {
 		Checksums:        []objects.Checksum{{Type: "sha256", Checksum: sha}},
 		ControlledAccess: &[]string{resource},
 	}
-	om := NewObjectManager(database, nil)
+	om := newTestObjectManager(database, nil)
 	_, err = om.BulkOverwriteObjects(context.Background(), "org", "project", []objects.Record{candidate})
 	if !errors.Is(err, ErrBulkOverwriteConflict) || !strings.Contains(err.Error(), "alias") {
 		t.Fatalf("expected alias conflict, got %v", err)
@@ -210,7 +210,7 @@ func TestBulkOverwriteObjects_RequiresTargetProjectPermission(t *testing.T) {
 		ControlledAccess: &resources,
 	}
 	t.Run("create", func(t *testing.T) {
-		om := NewObjectManager(&coreTestDB{MockDatabase: &testutils.MockDatabase{}}, nil)
+		om := newTestObjectManager(&coreTestDB{MockDatabase: &testutils.MockDatabase{}}, nil)
 		ctx := buildLocalAuthzContext(map[string]map[string]bool{
 			allowedResource: {"create": true},
 		})
@@ -230,7 +230,7 @@ func TestBulkOverwriteObjects_RequiresTargetProjectPermission(t *testing.T) {
 				string(candidate.Id): {"org": {"target", "allowed"}},
 			},
 		}}
-		om := NewObjectManager(database, nil)
+		om := newTestObjectManager(database, nil)
 		ctx := buildLocalAuthzContext(map[string]map[string]bool{
 			allowedResource: {"update": true},
 		})

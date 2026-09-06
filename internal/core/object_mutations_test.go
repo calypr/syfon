@@ -20,7 +20,7 @@ func ptr[T any](v T) *T { return &v }
 
 func TestRegisterBulk_RegistersCandidate(t *testing.T) {
 	database := testutils.NewInMemoryDB()
-	om := NewObjectManager(database, nil)
+	om := newTestObjectManager(database, nil)
 
 	candidates := []objects.Candidate{
 		{
@@ -56,7 +56,7 @@ func TestRegisterBulk_RegistersCandidate(t *testing.T) {
 
 func TestRegisterBulk_InvalidChecksum(t *testing.T) {
 	database := testutils.NewInMemoryDB()
-	om := NewObjectManager(database, nil)
+	om := newTestObjectManager(database, nil)
 
 	candidates := []objects.Candidate{{
 		Aliases: ptr([]string{"id:test-invalid-checksum"}),
@@ -74,7 +74,7 @@ func TestRegisterBulk_InvalidChecksum(t *testing.T) {
 
 func TestBulkDeleteObjects_DeletesAuthorizedObjects(t *testing.T) {
 	database := testutils.NewInMemoryDB()
-	om := NewObjectManager(database, nil)
+	om := newTestObjectManager(database, nil)
 
 	_, err := om.RegisterBulk(context.Background(), []objects.Candidate{{
 		Aliases: ptr([]string{"id:test-delete-bulk"}),
@@ -159,7 +159,7 @@ func TestObjectManagerBulkMutationsTargetLegacyDuplicatePhysicalUUID(t *testing.
 		t.Fatalf("close fixture database: %v", err)
 	}
 
-	om := NewObjectManager(database, nil)
+	om := newTestObjectManager(database, nil)
 	authenticatedTargetProject := buildGen3Context(map[string]map[string]bool{
 		resource: {"update": true, "delete": true},
 	})
@@ -216,7 +216,7 @@ func TestObjectManagerBulkMutationsTargetLegacyDuplicatePhysicalUUID(t *testing.
 
 func TestRegisterObjects_CanonicalizesProjectChecksumDuplicates(t *testing.T) {
 	database := testutils.NewInMemoryDB()
-	om := NewObjectManager(database, nil)
+	om := newTestObjectManager(database, nil)
 	now := time.Now().UTC()
 	later := now.Add(time.Minute)
 	accessURL1 := "s3://bucket/original"
@@ -296,7 +296,7 @@ func TestRegisterObjects_ReusesContentAcrossProjects(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSqliteDB failed: %v", err)
 	}
-	om := NewObjectManager(database, nil)
+	om := newTestObjectManager(database, nil)
 	sha := "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
 	now := time.Date(2026, 9, 4, 16, 0, 0, 0, time.UTC)
 	later := now.Add(time.Minute)

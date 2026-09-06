@@ -15,7 +15,7 @@ func TestMergedContentPreservesReplicaLocation(t *testing.T) {
 		"org|a": {Organization: "org", ProjectID: "a", Bucket: "bucket-a", PathPrefix: "a"},
 		"org|b": {Organization: "org", ProjectID: "b", Bucket: "bucket-b", PathPrefix: "b"},
 	}}}
-	om := NewObjectManager(db, &capturingURLManager{})
+	om := newTestObjectManager(db, &capturingURLManager{})
 	objs := []objects.Record{
 		{Id: "uuid-a", Checksums: []objects.Checksum{{Type: "sha256", Checksum: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}, ControlledAccess: &[]string{"/organization/org/project/a"}},
 		{Id: "uuid-b", Checksums: []objects.Checksum{{Type: "sha256", Checksum: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}, ControlledAccess: &[]string{"/organization/org/project/b"}},

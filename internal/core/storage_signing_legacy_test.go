@@ -30,7 +30,7 @@ func TestObjectManagerLegacyS3DownloadCompatibility(t *testing.T) {
 	newManager := func(scopes map[string]buckets.Scope, credentials map[string]buckets.Credential) (*ObjectManager, *capturingURLManager) {
 		db := &coreTestDB{MockDatabase: &testutils.MockDatabase{BucketScopes: scopes, Credentials: credentials}}
 		um := &capturingURLManager{}
-		return NewObjectManager(db, um), um
+		return newTestObjectManager(db, um), um
 	}
 
 	t.Run("maps full and ranged downloads", func(t *testing.T) {
@@ -165,7 +165,7 @@ func TestObjectManagerLegacyS3DownloadCredentialErrorsPropagate(t *testing.T) {
 			PathPrefix:   "legacy",
 		},
 	}}, err: wantErr}
-	om := NewObjectManager(db, &capturingURLManager{})
+	om := newTestObjectManager(db, &capturingURLManager{})
 	resources := []string{"/organization/HTAN_INT/project/BForePC"}
 	obj := &objects.Record{ControlledAccess: &resources}
 
@@ -196,7 +196,7 @@ func TestObjectManagerScopedLogicalDownloadSigning(t *testing.T) {
 
 	t.Run("full download", func(t *testing.T) {
 		um := &capturingURLManager{}
-		om := NewObjectManager(db, um)
+		om := newTestObjectManager(db, um)
 		if _, err := om.SignObjectURL(context.Background(), obj, logical, urlmanager.SignOptions{}); err != nil {
 			t.Fatalf("SignObjectURL failed: %v", err)
 		}
@@ -207,7 +207,7 @@ func TestObjectManagerScopedLogicalDownloadSigning(t *testing.T) {
 
 	t.Run("ranged download", func(t *testing.T) {
 		um := &capturingURLManager{}
-		om := NewObjectManager(db, um)
+		om := newTestObjectManager(db, um)
 		if _, err := om.SignObjectDownloadPart(context.Background(), obj, "syfon-ci", logical, 0, 1023, urlmanager.SignOptions{}); err != nil {
 			t.Fatalf("SignObjectDownloadPart failed: %v", err)
 		}
@@ -225,7 +225,7 @@ func TestObjectManagerScopedLogicalDownloadSigning(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			um := &capturingURLManager{}
-			om := NewObjectManager(db, um)
+			om := newTestObjectManager(db, um)
 			if _, err := om.SignObjectURL(context.Background(), obj, tc.url, urlmanager.SignOptions{}); err != nil {
 				t.Fatalf("SignObjectURL failed: %v", err)
 			}
