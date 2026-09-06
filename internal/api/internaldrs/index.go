@@ -487,7 +487,7 @@ func handleInternalUpdateFiber(c fiber.Ctx, objectService *objects.Service) erro
 			return apiutil.HandleError(c, fmt.Errorf("%w: object checksum identity is immutable", faults.ErrConflict))
 		}
 	}
-	merged, err := core.MergeRecordUpdate(*existing, update, id, time.Now().UTC())
+	merged, err := objects.MergeRecordUpdate(*existing, update, id, time.Now().UTC())
 	if err != nil {
 		return apiutil.HandleError(c, err)
 	}
@@ -580,7 +580,7 @@ func internalRecordToObject(value internalapi.InternalRecord, now time.Time) (ob
 	if err != nil {
 		return objects.Record{}, err
 	}
-	return core.EnforceCanonicalProjectScope(obj, common.StringVal(value.Organization), common.StringVal(value.Project))
+	return objects.EnforceCanonicalProjectScope(obj, common.StringVal(value.Organization), common.StringVal(value.Project))
 }
 
 func normalizeBulkHashes(hashes []string) []string {

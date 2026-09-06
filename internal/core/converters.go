@@ -1,8 +1,6 @@
 package core
 
 import (
-	"encoding/json"
-	"fmt"
 	"strings"
 	"time"
 
@@ -13,24 +11,7 @@ import (
 )
 
 func EnforceCanonicalProjectScope(obj objects.Record, organization, project string) (objects.Record, error) {
-	organization = strings.TrimSpace(organization)
-	project = strings.TrimSpace(project)
-	if project != "" && organization == "" {
-		return objects.Record{}, fmt.Errorf("organization is required when project is set")
-	}
-	if organization == "" || project == "" {
-		return obj, nil
-	}
-
-	resource, err := syfoncommon.ResourcePath(organization, project)
-	if err != nil {
-		return objects.Record{}, err
-	}
-	controlled := append(ObjectAccessResources(&obj), resource)
-	controlled = syfoncommon.NormalizeAccessResources(controlled)
-	obj.ControlledAccess = &controlled
-	obj.Authorizations = syfoncommon.ControlledAccessToAuthzMap(controlled)
-	return obj, nil
+	return objects.EnforceCanonicalProjectScope(obj, organization, project)
 }
 
 // FirstSupportedAccessURL returns the first URL from an object that Syfon can sign.
@@ -132,48 +113,7 @@ func candidateChecksums(value *[]objects.Checksum) []objects.Checksum {
 
 // MergeRecordUpdate merges an update into an existing object.
 func MergeRecordUpdate(existing objects.Record, update objects.Record, id string, now time.Time) (objects.Record, error) {
-	merged := existing
-	merged.Id = objects.RecordID(id)
-	merged.UpdatedTime = &now
-	if update.Properties != nil {
-		if merged.Properties == nil {
-			merged.Properties = make(map[string]json.RawMessage, len(update.Properties))
-		}
-		for k, v := range update.Properties {
-			merged.Properties[k] = v
-		}
-	}
-
-	if update.Name != nil {
-		merged.Name = normalizedObjectNamePtr(update.Name)
-	}
-	if update.Description != nil {
-		merged.Description = update.Description
-	}
-	if update.MimeType != nil {
-		merged.MimeType = update.MimeType
-	}
-	if update.Version != nil {
-		merged.Version = update.Version
-	}
-	if update.Aliases != nil {
-		merged.Aliases = update.Aliases
-	}
-	if update.Authorizations != nil {
-		merged.Authorizations = update.Authorizations
-	}
-	if update.ControlledAccess != nil {
-		merged.ControlledAccess = update.ControlledAccess
-		merged.Authorizations = syfoncommon.ControlledAccessToAuthzMap(*update.ControlledAccess)
-	}
-	if update.AccessMethods != nil {
-		merged.AccessMethods = update.AccessMethods
-	}
-	if update.Checksums != nil {
-		merged.Checksums = objects.MergeAdditionalChecksums(existing.Checksums, update.Checksums)
-	}
-
-	return merged, nil
+	return objects.MergeRecordUpdate(existing, update, id, now)
 }
 
 func normalizedObjectNamePtr(name *string) *string {
