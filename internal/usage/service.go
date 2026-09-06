@@ -89,10 +89,6 @@ type TransferBreakdownQuery struct {
 	Scope   ScopeQuery
 }
 
-// Reporter is the narrow read/use-case view passed to metrics adapters. The
-// persistence-facing FileUsageReader and TransferQuery ports remain separate;
-// callers that need scoped behavior use these methods so the decision stays
-// in usage.
 type Reporter interface {
 	GetFileUsage(ctx context.Context, objectID string) (*FileUsage, error)
 	ListFileUsageByObjectIDs(ctx context.Context, ids []string) ([]FileUsage, error)
@@ -103,34 +99,24 @@ type Reporter interface {
 	GetTransferFreshness(ctx context.Context, filter Filter) (Freshness, error)
 }
 
-// Dependencies are the independent capabilities needed to compose Service.
-// Neither Ingest nor Reports is a database aggregate: both are consumer-owned
-// port sets implemented structurally by persistence adapters.
 type Dependencies struct {
 	Ingest  IngestStore
 	Reports ReportStore
 	Objects ObjectReader
 }
 
-// Service owns usage ingestion and report orchestration. It has no knowledge
-// of transfer workflows, HTTP representations, SQL, or provider SDKs.
 type Service struct {
 	ingest  IngestStore
 	reports ReportStore
 	objects ObjectReader
 }
 
-// NewService composes the usage use cases from named consumer capabilities.
-// Required-port validation remains at call time so focused tests can compose
-// only the capability under test.
 func NewService(deps Dependencies) *Service {
 	return &Service{ingest: deps.Ingest, reports: deps.Reports, objects: deps.Objects}
 }
 
-// Ingest returns the narrow write view for workflows and generated adapters.
 func (s *Service) Ingest() Ingestor { return s }
 
-// Reports returns the narrow report view for HTTP adapters.
 func (s *Service) Reports() Reporter { return s }
 
 func (s *Service) requireIngest() error {
@@ -294,9 +280,6 @@ func (s *Service) GetTransferAttributionBreakdown(ctx context.Context, query Tra
 	return s.reports.GetTransferAttributionBreakdown(ctx, query.Filter, query.GroupBy)
 }
 
-// GetTransferFreshness retains the current placeholder contract: no provider
-// watermark store exists yet, so reports are fresh and the requested range is
-// echoed into the domain value.
 func (s *Service) GetTransferFreshness(_ context.Context, filter Filter) (Freshness, error) {
 	return Freshness{
 		IsStale:             false,

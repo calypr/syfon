@@ -13,19 +13,10 @@ type FileCounterRecorder interface {
 	RecordFileDownload(ctx context.Context, objectID string) error
 }
 
-// FileCounterStore is the persistence capability used by the usage ingest
-// service for completed object uploads and downloads.
-//
-// It is intentionally separate from the report stores: a backend may expose
-// all of these methods, but callers should receive only the capability they
-// need.
 type FileCounterStore interface {
 	FileCounterRecorder
 }
 
-// TransferEventWriter records access-issued events assembled by the transfers
-// workflow. The usage package owns Event and its identity; the workflow owns
-// the projection from an access request to that value.
 type TransferEventWriter interface {
 	RecordTransferAttributionEvents(ctx context.Context, events []Event) error
 }
@@ -35,22 +26,16 @@ type TransferEventStore interface {
 	TransferEventWriter
 }
 
-// ProviderEventStore is the persistence capability for provider-reported
-// events. Matching and reconciliation remain in the persistence adapter.
 type ProviderEventStore interface {
 	ProviderEventRecorder
 }
 
-// IngestStore contains the independent write capabilities used by Service.
-// Keeping the method sets named here lets composition pass a concrete backend
-// without making the usage service depend on that backend's wider API.
 type IngestStore interface {
 	FileCounterStore
 	TransferEventStore
 	ProviderEventStore
 }
 
-// Ingestor is the narrow write view exposed to workflows and HTTP adapters.
 type Ingestor interface {
 	FileCounterRecorder
 	TransferEventWriter
@@ -65,8 +50,6 @@ type FileUsageReader interface {
 	GetFileUsageSummary(ctx context.Context, inactiveSince *time.Time) (FileUsageSummary, error)
 }
 
-// FileUsageStore is the persistence capability for file accounting reads.
-// Scoped query methods remain optional optimizations below.
 type FileUsageStore interface {
 	FileUsageReader
 }
@@ -90,15 +73,10 @@ type TransferQuery interface {
 	GetTransferAttributionBreakdown(ctx context.Context, filter Filter, groupBy string) ([]Breakdown, error)
 }
 
-// TransferReportStore is the persistence capability for transfer reports.
-// Scoped query methods remain optional optimizations below.
 type TransferReportStore interface {
 	TransferQuery
 }
 
-// ReportStore is the complete persistence report capability consumed by
-// Service. File and transfer stores are named separately so future
-// composition can split them without changing the use-case boundary.
 type ReportStore interface {
 	FileUsageStore
 	TransferReportStore

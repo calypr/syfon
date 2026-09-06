@@ -11,8 +11,6 @@ import (
 	"github.com/gofiber/fiber/v3"
 )
 
-// Options controls protocol limits.  The request and bandwidth limit maps
-// remain process-global for compatibility with the legacy adapter.
 type Options struct {
 	MaxBatchObjects              int
 	MaxBatchBodyBytes            int64
@@ -25,9 +23,6 @@ type Options struct {
 // composition and focused tests may inject a transport-specific function.
 type PartUploader func(context.Context, string, []byte) (string, error)
 
-// Dependencies are the narrow domain capabilities required by the protocol
-// adapter.  Transfers owns target selection, signing, pending state,
-// multipart delegation, and attribution; usage owns the file counters.
 type Dependencies struct {
 	ObjectService   *objects.Service
 	TransferService *transfers.Service
@@ -46,9 +41,6 @@ func DefaultOptions() Options {
 	}
 }
 
-// RegisterLFSRoutes mounts the four generated strict LFS operations.  The
-// server composition supplies concrete object, transfer, bucket, and usage
-// services; this package owns only Fiber/generated protocol behavior.
 func RegisterLFSRoutes(router fiber.Router, deps Dependencies, opts ...Options) {
 	effective := DefaultOptions()
 	if len(opts) > 0 {

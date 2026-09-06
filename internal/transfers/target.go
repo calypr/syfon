@@ -35,9 +35,6 @@ type CanonicalStorageTarget struct {
 	URL    string
 }
 
-// Service owns transfer target selection and delegates provider operations to
-// the narrow ports in Dependencies. It does not own HTTP, persistence, or
-// generated API representations.
 type Service struct {
 	access      AccessPort
 	multipart   MultipartPort
@@ -48,9 +45,6 @@ type Service struct {
 	now         func() time.Time
 }
 
-// NewService constructs a transfer service. Capabilities may be nil when the
-// caller only needs another workflow; invoking an unconfigured capability
-// returns the same configuration error used by the former facade.
 func NewService(deps Dependencies) *Service {
 	return &Service{
 		access:      deps.Access,

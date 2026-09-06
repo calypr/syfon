@@ -55,8 +55,6 @@ func (s *Service) CompleteMultipartUpload(ctx context.Context, bucket, key, uplo
 	})
 }
 
-// SavePendingLFSMeta persists staged metadata through the narrow pending
-// store. Persistence owns pruning, codec shape, and transaction boundaries.
 func (s *Service) SavePendingLFSMeta(ctx context.Context, entries []PendingMetadata) error {
 	if s == nil || s.pending == nil {
 		return fmt.Errorf("pending LFS metadata store is not configured")
@@ -64,8 +62,6 @@ func (s *Service) SavePendingLFSMeta(ctx context.Context, entries []PendingMetad
 	return s.pending.SavePendingLFSMeta(ctx, entries)
 }
 
-// GetPendingLFSMeta reads staged metadata without changing persistence
-// pruning or not-found semantics.
 func (s *Service) GetPendingLFSMeta(ctx context.Context, oid string) (*PendingMetadata, error) {
 	if s == nil || s.pending == nil {
 		return nil, fmt.Errorf("pending LFS metadata store is not configured")
@@ -73,9 +69,6 @@ func (s *Service) GetPendingLFSMeta(ctx context.Context, oid string) (*PendingMe
 	return s.pending.GetPendingLFSMeta(ctx, oid)
 }
 
-// PopPendingLFSMeta atomically consumes staged metadata. The store performs
-// delete-before-registration behavior; this service intentionally does not
-// add a compatibility cache or retry layer.
 func (s *Service) PopPendingLFSMeta(ctx context.Context, oid string) (*PendingMetadata, error) {
 	if s == nil || s.pending == nil {
 		return nil, fmt.Errorf("pending LFS metadata store is not configured")

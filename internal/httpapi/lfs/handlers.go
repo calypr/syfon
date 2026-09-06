@@ -21,10 +21,6 @@ import (
 
 var errNoBucketConfigured = errors.New("no bucket configured")
 
-// LFSServer is the generated strict handler backed by narrow domain services.
-// It contains protocol mapping and request orchestration only; storage target
-// selection, signing, pending state, multipart provider operations, and
-// attribution are delegated to transfers.Service.
 type LFSServer struct {
 	objectService   *objects.Service
 	transferService *transfers.Service
@@ -34,10 +30,6 @@ type LFSServer struct {
 	partUploader    PartUploader
 }
 
-// NewLFSServer constructs the protocol adapter.  The credentials argument is
-// intentionally a narrow list reader because the batch upload contract only
-// needs the first configured bucket; transfers still owns scoped target
-// selection for existing and pending objects.
 func NewLFSServer(deps Dependencies, opts Options) *LFSServer {
 	partUploader := deps.PartUploader
 	if partUploader == nil {

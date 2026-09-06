@@ -14,8 +14,6 @@ import (
 	"github.com/calypr/syfon/internal/usage"
 )
 
-// AccessDetails contains plain facts selected by an HTTP adapter for one
-// access issuance. It deliberately has no generated request or Fiber type.
 type AccessDetails struct {
 	AccessID       string
 	Direction      string
@@ -67,9 +65,6 @@ func (s *Service) RecordAccessIssued(ctx context.Context, request AccessRequest)
 	return s.events.RecordTransferAttributionEvents(ctx, []usage.Event{event})
 }
 
-// RecordAccessIssued projects a request through an explicitly supplied
-// recorder. It is useful for callers that have a recorder but do not need the
-// rest of Service's target and multipart capabilities.
 func RecordAccessIssued(ctx context.Context, recorder EventRecorder, request AccessRequest) error {
 	if request.Object == nil {
 		return nil
@@ -93,9 +88,6 @@ func RecordAccessIssued(ctx context.Context, recorder EventRecorder, request Acc
 	return recorder.RecordTransferAttributionEvents(ctx, []usage.Event{event})
 }
 
-// EventFromObject projects object and request context into a usage event.
-// Scope and access-method selection intentionally preserve the historical
-// first-map-entry and first-usable-method behavior.
 func EventFromObject(ctx context.Context, obj *objects.Record, eventType string, details AccessDetails) usage.Event {
 	if obj == nil {
 		return usage.Event{}
@@ -200,9 +192,6 @@ func accessMethodID(method objects.AccessMethod) string {
 }
 
 func scopeForAccess(obj *objects.Record, accessID string) (string, string) {
-	// Keep the historical no-op access-method loop. In particular, the scope
-	// returned below is the first map entry rather than a sorted or access-ID
-	// matched scope; changing it belongs to the behavior backlog.
 	for _, method := range accessMethods(obj) {
 		if accessID != "" && !strings.EqualFold(accessMethodID(method), accessID) {
 			continue
