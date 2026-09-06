@@ -7,9 +7,6 @@ const (
 	objectMethodDelete = "delete"
 )
 
-// Service composes the object query and mutation components. Persistence
-// adapters provide the narrow ports in Dependencies; the service does not
-// know about storage, buckets, transfers, HTTP, or SQL.
 type Service struct {
 	*queryService
 	*mutationService

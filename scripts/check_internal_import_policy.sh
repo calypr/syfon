@@ -70,6 +70,7 @@ check_edge() {
 		github.com/calypr/syfon/internal/db|github.com/calypr/syfon/internal/db/*|\
 		github.com/calypr/syfon/internal/models|github.com/calypr/syfon/internal/models/*|\
 		github.com/calypr/syfon/internal/repair|github.com/calypr/syfon/internal/repair/*|\
+		github.com/calypr/syfon/internal/requestmeta|github.com/calypr/syfon/internal/requestmeta/*|\
 		github.com/calypr/syfon/internal/signer|github.com/calypr/syfon/internal/signer/*|\
 		github.com/calypr/syfon/internal/testutils|github.com/calypr/syfon/internal/testutils/*|\
 		github.com/calypr/syfon/internal/urlmanager|github.com/calypr/syfon/internal/urlmanager/*)
@@ -79,6 +80,14 @@ check_edge() {
 	esac
 
 	case "$pkg" in
+		github.com/calypr/syfon/internal/requestid|github.com/calypr/syfon/internal/faults)
+			if ! is_standard_library_dependency "$dep"; then forbidden=1; fi
+		;;
+		github.com/calypr/syfon/internal/httpapi/records)
+			case "$dep" in
+				github.com/calypr/syfon/internal/httpapi/drs) forbidden=1 ;;
+			esac
+		;;
 		github.com/calypr/syfon/internal/objects)
 			if is_generated_or_http "$dep" || is_sql_dependency "$dep" || is_cloud_dependency "$dep"; then forbidden=1; fi
 			case "$dep" in
@@ -181,10 +190,15 @@ run_self_tests() {
 	expect_forbidden github.com/calypr/syfon/internal/storage/address github.com/google/uuid
 	expect_forbidden github.com/calypr/syfon/internal/buckets github.com/calypr/syfon/internal/storage
 	expect_forbidden github.com/calypr/syfon/internal/usage github.com/calypr/syfon/internal/transfers
+	expect_allowed github.com/calypr/syfon/internal/requestid context
+	expect_allowed github.com/calypr/syfon/internal/faults errors
+	expect_forbidden github.com/calypr/syfon/internal/requestid github.com/calypr/syfon/internal/httpapi/middleware
+	expect_forbidden github.com/calypr/syfon/internal/faults github.com/calypr/syfon/internal/objects
+	expect_forbidden github.com/calypr/syfon/internal/httpapi/records github.com/calypr/syfon/internal/httpapi/drs
 	expect_forbidden github.com/calypr/syfon/internal/objects github.com/calypr/syfon/internal/testsupport/sqlite
 	expect_forbidden github.com/calypr/syfon/internal/arbitrary github.com/calypr/syfon/internal/testsupport/sqlite
 	expect_forbidden github.com/calypr/syfon/cmd/server github.com/calypr/syfon/internal/testsupport/sqlite
-	for retired in api auth authz common core crypto db models repair signer testutils urlmanager; do
+	for retired in api auth authz common core crypto db models repair requestmeta signer testutils urlmanager; do
 		expect_forbidden github.com/calypr/syfon/cmd/server "github.com/calypr/syfon/internal/${retired}"
 		expect_forbidden github.com/calypr/syfon/cmd/server "github.com/calypr/syfon/internal/${retired}/child"
 	done

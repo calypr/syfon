@@ -241,12 +241,13 @@ syfon download --did <did> --out /tmp/README.md
 
 The server composes focused domain and adapter packages:
 
-- `internal/objects` owns object identity, metadata, and lifecycle operations.
+- `internal/objects` owns catalog records, checksum identity, and canonical content. Query and mutation components keep their persistence dependencies separate.
 - `internal/buckets` owns credentials, scopes, visibility, and cache policy.
 - `internal/storage` owns provider-neutral storage operations and the S3, GCS, Azure, and file adapters.
-- `internal/transfers` owns upload, download, multipart, and pending-transfer operations.
-- `internal/usage` owns transfer events, accounting, and reports.
-- `internal/maintenance` owns project cleanup and scope repair workflows.
+- `internal/transfers` owns access issuance, upload workflows, multipart sessions, and pending metadata. HTTP adapters translate protocol requests and results.
+- `internal/usage` defines the event writer contract and owns scoped accounting reports.
+- `internal/maintenance/projectstorage` separates storage inspection from project cleanup. `internal/maintenance/scoperepair` audits and repairs catalog references.
+- `internal/requestid` carries a request ID through context for logs and audit events. `internal/faults` defines shared error classifications.
 - `internal/httpapi` owns route registration, handlers, middleware, and protocol adapters.
 - `internal/persistence` owns the SQLite and PostgreSQL adapters.
 - `internal/access` owns authorization policy and authentication integrations.
