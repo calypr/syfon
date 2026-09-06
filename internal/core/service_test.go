@@ -12,8 +12,8 @@ import (
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/faults"
 	"github.com/calypr/syfon/internal/objects"
+	"github.com/calypr/syfon/internal/storage"
 	"github.com/calypr/syfon/internal/testutils"
-	"github.com/calypr/syfon/internal/urlmanager"
 )
 
 type coreTestDB struct {
@@ -70,47 +70,57 @@ type capturingURLManager struct {
 	completeBucket      string
 	completeKey         string
 	completeUploadID    string
-	completeParts       []urlmanager.MultipartPart
+	completeParts       []storage.CompletedPart
 	invalidatedBuckets  []string
 }
 
-func (m *capturingURLManager) SignURL(ctx context.Context, accessId string, url string, opts urlmanager.SignOptions) (string, error) {
-	m.signURLBucket = accessId
-	m.signURLAccessURL = url
-	return "signed:" + url, nil
+func (m *capturingURLManager) Access(_ context.Context, request storage.AccessRequest) (storage.Access, error) {
+	if request.Range != nil {
+		m.signDownloadBucket = request.Target.AccessID
+		m.signDownloadURL = request.Target.Location
+		return storage.Access{Location: "download:" + request.Target.Location}, nil
+	}
+	m.signURLBucket = request.Target.AccessID
+	m.signURLAccessURL = request.Target.Location
+	return storage.Access{Location: "signed:" + request.Target.Location}, nil
 }
 
-func (m *capturingURLManager) SignUploadURL(ctx context.Context, accessId string, url string, opts urlmanager.SignOptions) (string, error) {
-	m.signUploadBucket = accessId
-	m.signUploadAccessURL = url
-	return "upload:" + url, nil
+func (m *capturingURLManager) BeginMultipart(_ context.Context, target storage.ObjectTarget) (storage.UploadID, error) {
+	m.initBucket = target.Bucket
+	m.initKey = target.Key
+	return storage.UploadID("upload-id"), nil
 }
 
-func (m *capturingURLManager) SignDownloadPart(ctx context.Context, bucket string, url string, start int64, end int64, opts urlmanager.SignOptions) (string, error) {
-	m.signDownloadBucket = bucket
-	m.signDownloadURL = url
-	return "download:" + url, nil
+func (m *capturingURLManager) AccessMultipartPart(_ context.Context, request storage.MultipartPartRequest) (storage.Access, error) {
+	m.partBucket = request.Target.Bucket
+	m.partKey = request.Target.Key
+	m.partUploadID = string(request.UploadID)
+	m.partNumber = request.PartNumber
+	return storage.Access{Location: "part:" + request.Target.Key}, nil
 }
 
-func (m *capturingURLManager) InitMultipartUpload(ctx context.Context, bucket string, key string) (string, error) {
-	m.initBucket = bucket
-	m.initKey = key
-	return "upload-id", nil
+func (m *capturingURLManager) CompleteMultipart(_ context.Context, request storage.CompleteMultipartRequest) error {
+	m.completeBucket = request.Target.Bucket
+	m.completeKey = request.Target.Key
+	m.completeUploadID = string(request.UploadID)
+	m.completeParts = append([]storage.CompletedPart(nil), request.Parts...)
+	return nil
 }
 
-func (m *capturingURLManager) SignMultipartPart(ctx context.Context, bucket string, key string, uploadId string, partNumber int32) (string, error) {
-	m.partBucket = bucket
-	m.partKey = key
-	m.partUploadID = uploadId
-	m.partNumber = partNumber
-	return "part:" + key, nil
+func (m *capturingURLManager) Probe(_ context.Context, targets []storage.ProbeTarget) []storage.ProbeResult {
+	results := make([]storage.ProbeResult, len(targets))
+	for i, target := range targets {
+		results[i] = storage.ProbeResult{ID: target.ID, Target: target.Target, Metadata: storage.ObjectMetadata{Provider: "s3", Bucket: target.Target.Bucket, Key: target.Target.Key}}
+	}
+	return results
 }
 
-func (m *capturingURLManager) CompleteMultipartUpload(ctx context.Context, bucket string, key string, uploadId string, parts []urlmanager.MultipartPart) error {
-	m.completeBucket = bucket
-	m.completeKey = key
-	m.completeUploadID = uploadId
-	m.completeParts = append([]urlmanager.MultipartPart(nil), parts...)
+func (m *capturingURLManager) Inventory(_ context.Context, request storage.InventoryRequest) (storage.InventoryResult, error) {
+	return storage.InventoryResult{Complete: true}, nil
+}
+
+func (m *capturingURLManager) DeleteExact(_ context.Context, targets []storage.DeleteTarget) error {
+	m.invalidatedBuckets = append(m.invalidatedBuckets, strings.TrimSpace(fmt.Sprint(len(targets))))
 	return nil
 }
 
@@ -710,7 +720,7 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 		um := &capturingURLManager{}
 		om := newTestObjectManager(db, um)
 
-		signed, err := om.SignURL(context.Background(), "s3://bucket-a/path/to/object", urlmanager.SignOptions{})
+		signed, err := om.SignURL(context.Background(), "s3://bucket-a/path/to/object", storage.AccessOptions{})
 		if err != nil {
 			t.Fatalf("SignURL failed: %v", err)
 		}
@@ -721,7 +731,7 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 			t.Fatalf("expected bucket-a, got %q", um.signURLBucket)
 		}
 
-		partURL, err := om.SignDownloadPart(context.Background(), "bucket-b", "s3://bucket-b/path/to/object", 10, 20, urlmanager.SignOptions{})
+		partURL, err := om.SignDownloadPart(context.Background(), "bucket-b", "s3://bucket-b/path/to/object", 10, 20, storage.AccessOptions{})
 		if err != nil {
 			t.Fatalf("SignDownloadPart failed: %v", err)
 		}
@@ -746,7 +756,7 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 		if part != "part:path/to/object" {
 			t.Fatalf("unexpected part url: %s", part)
 		}
-		if err := om.CompleteMultipartUpload(context.Background(), "bucket-c", "path/to/object", uploadID, []urlmanager.MultipartPart{{PartNumber: 3, ETag: "etag"}}); err != nil {
+		if err := om.CompleteMultipartUpload(context.Background(), "bucket-c", "path/to/object", uploadID, []storage.CompletedPart{{PartNumber: 3, ETag: "etag"}}); err != nil {
 			t.Fatalf("CompleteMultipartUpload failed: %v", err)
 		}
 		if um.partBucket != "bucket-c" || um.completeBucket != "bucket-c" {
@@ -774,7 +784,7 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 			Authorizations: map[string][]string{"calypr": {"training"}},
 		}
 
-		signed, err := om.SignObjectURL(context.Background(), obj, "s3://calypr/008b435e-c1da-58b8-80f1-3ad2882c43cd/542504", urlmanager.SignOptions{})
+		signed, err := om.SignObjectURL(context.Background(), obj, "s3://calypr/008b435e-c1da-58b8-80f1-3ad2882c43cd/542504", storage.AccessOptions{})
 		if err != nil {
 			t.Fatalf("SignObjectURL failed: %v", err)
 		}
@@ -785,7 +795,7 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 		if um.signURLAccessURL != wantURL {
 			t.Fatalf("expected scoped storage url %q, got %q", wantURL, um.signURLAccessURL)
 		}
-		if _, err := om.SignObjectURL(context.Background(), obj, "s3://calypr/another-object", urlmanager.SignOptions{}); err != nil {
+		if _, err := om.SignObjectURL(context.Background(), obj, "s3://calypr/another-object", storage.AccessOptions{}); err != nil {
 			t.Fatalf("second SignObjectURL failed: %v", err)
 		}
 		if mockDB.GetBucketScopeCalls != 2 {
@@ -812,7 +822,7 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 			ControlledAccess: &[]string{"/programs/gdc_mirror/projects/gdc_mirror"},
 		}
 
-		_, err := om.SignObjectURL(context.Background(), obj, "s3://calypr/223bebff-debb-555c-bd59-5372f106c76c/4413832f86f331fc270de6d2263e13ac865d4524eef701ec8f4a342feb2f4300", urlmanager.SignOptions{})
+		_, err := om.SignObjectURL(context.Background(), obj, "s3://calypr/223bebff-debb-555c-bd59-5372f106c76c/4413832f86f331fc270de6d2263e13ac865d4524eef701ec8f4a342feb2f4300", storage.AccessOptions{})
 		if err != nil {
 			t.Fatalf("SignObjectURL failed: %v", err)
 		}
@@ -842,7 +852,7 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 		}
 
 		input := "s3://calypr/org-root/project-root/008b435e-c1da-58b8-80f1-3ad2882c43cd/542504"
-		if _, err := om.SignObjectURL(context.Background(), obj, input, urlmanager.SignOptions{}); err != nil {
+		if _, err := om.SignObjectURL(context.Background(), obj, input, storage.AccessOptions{}); err != nil {
 			t.Fatalf("SignObjectURL failed: %v", err)
 		}
 		if um.signURLAccessURL != input {
@@ -880,7 +890,7 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 		}
 
 		input := "s3://f781273b-52eb-5ac2-a484-775235eef303"
-		if _, err := om.SignObjectURL(context.Background(), obj, input, urlmanager.SignOptions{Method: "PUT"}); err != nil {
+		if _, err := om.SignObjectURL(context.Background(), obj, input, storage.AccessOptions{Method: "PUT"}); err != nil {
 			t.Fatalf("SignObjectURL failed: %v", err)
 		}
 		wantURL := "s3://syfon-e2e-bucket/program-root/project-subpath/412f8568bfb0e62937ee40c6fcdeaa1cf55910c558c0152250340356c8829a47"
@@ -961,7 +971,7 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 		t.Run("download", func(t *testing.T) {
 			um := &capturingURLManager{}
 			om := newTestObjectManager(db, um)
-			signed, err := om.SignObjectURL(context.Background(), obj, sourceURL, urlmanager.SignOptions{})
+			signed, err := om.SignObjectURL(context.Background(), obj, sourceURL, storage.AccessOptions{})
 			if err != nil {
 				t.Fatalf("SignObjectURL download failed: %v", err)
 			}
@@ -979,7 +989,7 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 		t.Run("upload", func(t *testing.T) {
 			um := &capturingURLManager{}
 			om := newTestObjectManager(db, um)
-			signed, err := om.SignObjectURL(context.Background(), obj, sourceURL, urlmanager.SignOptions{Method: "PUT"})
+			signed, err := om.SignObjectURL(context.Background(), obj, sourceURL, storage.AccessOptions{Method: "PUT"})
 			if err != nil {
 				t.Fatalf("SignObjectURL upload failed: %v", err)
 			}
@@ -997,7 +1007,7 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 		t.Run("download part", func(t *testing.T) {
 			um := &capturingURLManager{}
 			om := newTestObjectManager(db, um)
-			partURL, err := om.SignObjectDownloadPart(context.Background(), obj, "bforepc-prod", sourceURL, 0, 1023, urlmanager.SignOptions{})
+			partURL, err := om.SignObjectDownloadPart(context.Background(), obj, "bforepc-prod", sourceURL, 0, 1023, storage.AccessOptions{})
 			if err != nil {
 				t.Fatalf("SignObjectDownloadPart failed: %v", err)
 			}
@@ -1073,7 +1083,7 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 		obj := &objects.Record{
 			Authorizations: map[string][]string{"calypr": {"training"}},
 		}
-		if _, err := om.SignObjectURL(context.Background(), obj, "s3://calypr/relative-key", urlmanager.SignOptions{Method: "PUT"}); err != nil {
+		if _, err := om.SignObjectURL(context.Background(), obj, "s3://calypr/relative-key", storage.AccessOptions{Method: "PUT"}); err != nil {
 			t.Fatalf("SignObjectURL failed: %v", err)
 		}
 		if mockDB.GetBucketScopeCalls != 1 {

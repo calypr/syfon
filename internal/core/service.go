@@ -6,7 +6,6 @@ import (
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/transfers"
-	"github.com/calypr/syfon/internal/urlmanager"
 	"github.com/calypr/syfon/internal/usage"
 )
 
@@ -50,11 +49,12 @@ type ObjectManager struct {
 	transferEvents   transfers.EventRecorder
 	fileCounters     usage.FileCounterRecorder
 	providerEvents   usage.ProviderEventRecorder
-	uM               urlmanager.UrlManager
+	storageAccess    StorageAccess
+	storageMultipart StorageMultipart
+	storageProbe     StorageProbe
+	storageInventory StorageInventory
+	storageDelete    StorageDelete
 	bucketService    *buckets.Service
-	inspectS3Object  func(context.Context, buckets.Credential, string, string) (*StorageObjectMetadata, error)
-	listS3Prefix     func(context.Context, buckets.Credential, string, string, StoragePrefixListOptions) ([]StorageBucketObject, error)
-	s3ProbeLimiter   *s3ProbeLimiter
 }
 
 // ObjectPorts contains the object capabilities used by the transitional
@@ -93,9 +93,10 @@ type Dependencies struct {
 	BucketService *buckets.Service
 	Transfers     TransferPorts
 	Usage         UsagePorts
+	Storage       StoragePorts
 }
 
-func NewObjectManager(deps Dependencies, uM urlmanager.UrlManager) *ObjectManager {
+func NewObjectManager(deps Dependencies) *ObjectManager {
 	return &ObjectManager{
 		objectReader:     deps.Objects.Reader,
 		objectWriter:     deps.Objects.Writer,
@@ -113,10 +114,11 @@ func NewObjectManager(deps Dependencies, uM urlmanager.UrlManager) *ObjectManage
 		transferEvents:   deps.Transfers.Events,
 		fileCounters:     deps.Usage.Counters,
 		providerEvents:   deps.Usage.ProviderEvents,
-		uM:               uM,
+		storageAccess:    deps.Storage.Access,
+		storageMultipart: deps.Storage.Multipart,
+		storageProbe:     deps.Storage.Probe,
+		storageInventory: deps.Storage.Inventory,
+		storageDelete:    deps.Storage.Delete,
 		bucketService:    deps.BucketService,
-		inspectS3Object:  defaultS3ObjectInspector,
-		listS3Prefix:     defaultS3PrefixLister,
-		s3ProbeLimiter:   newS3ProbeLimiterFromEnv(),
 	}
 }
