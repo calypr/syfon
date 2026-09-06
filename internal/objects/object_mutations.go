@@ -15,8 +15,8 @@ import (
 const maxDeniedAccessResources = 25
 
 // DeleteBulkByScope removes all objects matching an organization/project scope after verifying permissions.
-func (m *Service) DeleteBulkByScope(ctx context.Context, organization, project string) (int, error) {
-	if err := m.requireScopeMethod(ctx, organization, project, objectMethodDelete); err != nil {
+func (m *mutationService) DeleteBulkByScope(ctx context.Context, organization, project string) (int, error) {
+	if err := requireScopeMethod(ctx, organization, project, objectMethodDelete); err != nil {
 		return 0, err
 	}
 
@@ -47,7 +47,7 @@ func (m *Service) DeleteBulkByScope(ctx context.Context, organization, project s
 	return m.accessPolicy.RemoveObjectControlledAccessBulk(ctx, toDelete, resource)
 }
 
-func (m *Service) DeleteObject(ctx context.Context, id string) error {
+func (m *mutationService) DeleteObject(ctx context.Context, id string) error {
 	return m.DeleteObjectWithOptions(ctx, id, DeleteOptions{})
 }
 
@@ -55,7 +55,7 @@ type DeleteOptions struct {
 	DeleteStorageData bool
 }
 
-func (m *Service) DeleteObjectWithOptions(ctx context.Context, id string, opts DeleteOptions) error {
+func (m *mutationService) DeleteObjectWithOptions(ctx context.Context, id string, opts DeleteOptions) error {
 	if opts.DeleteStorageData {
 		return fmt.Errorf("%w: physical storage deletion is not atomic with catalog mutation", faults.ErrConflict)
 	}
@@ -63,7 +63,7 @@ func (m *Service) DeleteObjectWithOptions(ctx context.Context, id string, opts D
 	if err != nil {
 		return err
 	}
-	if err := m.requireAllObjectMethod(ctx, obj, objectMethodDelete); err != nil {
+	if err := requireAllObjectMethod(ctx, obj, objectMethodDelete); err != nil {
 		return err
 	}
 	if opts.DeleteStorageData && (obj.PublicRead || len(AccessResources(obj)) > 0) {
@@ -72,11 +72,11 @@ func (m *Service) DeleteObjectWithOptions(ctx context.Context, id string, opts D
 	return m.recordWriter.DeleteObject(ctx, id)
 }
 
-func (m *Service) BulkDeleteObjects(ctx context.Context, ids []string) error {
+func (m *mutationService) BulkDeleteObjects(ctx context.Context, ids []string) error {
 	return m.BulkDeleteObjectsWithOptions(ctx, ids, DeleteOptions{})
 }
 
-func (m *Service) BulkDeleteObjectsWithOptions(ctx context.Context, ids []string, opts DeleteOptions) error {
+func (m *mutationService) BulkDeleteObjectsWithOptions(ctx context.Context, ids []string, opts DeleteOptions) error {
 	if opts.DeleteStorageData {
 		return fmt.Errorf("%w: physical storage deletion is not atomic with catalog mutation", faults.ErrConflict)
 	}
@@ -90,7 +90,7 @@ func (m *Service) BulkDeleteObjectsWithOptions(ctx context.Context, ids []string
 	return m.recordWriter.BulkDeleteObjects(ctx, toDelete)
 }
 
-func (m *Service) deletablePhysicalObjectIDsForBulk(ctx context.Context, ids []string) ([]string, error) {
+func (m *mutationService) deletablePhysicalObjectIDsForBulk(ctx context.Context, ids []string) ([]string, error) {
 	objects, err := m.recordReader.GetBulkObjects(ctx, ids)
 	if err != nil {
 		return nil, err
@@ -118,10 +118,10 @@ func (m *Service) deletablePhysicalObjectIDsForBulk(ctx context.Context, ids []s
 			}
 			continue
 		}
-		if !m.hasObjectMethod(ctx, obj, objectMethodDelete) {
+		if !hasObjectMethod(ctx, obj, objectMethodDelete) {
 			continue
 		}
-		if err := m.requireAllObjectMethod(ctx, obj, objectMethodDelete); err != nil {
+		if err := requireAllObjectMethod(ctx, obj, objectMethodDelete); err != nil {
 			continue
 		}
 		if _, alreadySeen := seen[objectID]; alreadySeen {
@@ -133,18 +133,18 @@ func (m *Service) deletablePhysicalObjectIDsForBulk(ctx context.Context, ids []s
 	return toDelete, nil
 }
 
-func (m *Service) UpdateObjectAccessMethods(ctx context.Context, objectID string, accessMethods []AccessMethod) error {
+func (m *mutationService) UpdateObjectAccessMethods(ctx context.Context, objectID string, accessMethods []AccessMethod) error {
 	obj, err := m.recordReader.GetObject(ctx, objectID)
 	if err != nil {
 		return err
 	}
-	if err := m.requireAllObjectMethod(ctx, obj, objectMethodUpdate); err != nil {
+	if err := requireAllObjectMethod(ctx, obj, objectMethodUpdate); err != nil {
 		return err
 	}
 	return m.accessMethods.UpdateObjectAccessMethods(ctx, objectID, accessMethods)
 }
 
-func (m *Service) BulkUpdateAccessMethods(ctx context.Context, updates map[string][]AccessMethod) error {
+func (m *mutationService) BulkUpdateAccessMethods(ctx context.Context, updates map[string][]AccessMethod) error {
 	if len(updates) == 0 {
 		return nil
 	}
@@ -166,19 +166,19 @@ func (m *Service) BulkUpdateAccessMethods(ctx context.Context, updates map[strin
 		if !ok {
 			return faults.ErrNotFound
 		}
-		if err := m.requireAllObjectMethod(ctx, obj, objectMethodUpdate); err != nil {
+		if err := requireAllObjectMethod(ctx, obj, objectMethodUpdate); err != nil {
 			return err
 		}
 	}
 	return m.accessMethods.BulkUpdateAccessMethods(ctx, updates)
 }
 
-func (m *Service) RemoveObjectControlledAccess(ctx context.Context, objectID, resource string) (*Record, error) {
+func (m *mutationService) RemoveObjectControlledAccess(ctx context.Context, objectID, resource string) (*Record, error) {
 	obj, err := m.recordReader.GetObject(ctx, objectID)
 	if err != nil {
 		return nil, err
 	}
-	if err := m.requireObjectMethod(ctx, obj, objectMethodUpdate); err != nil {
+	if err := requireObjectMethod(ctx, obj, objectMethodUpdate); err != nil {
 		return nil, err
 	}
 
@@ -210,17 +210,17 @@ func (m *Service) RemoveObjectControlledAccess(ctx context.Context, objectID, re
 	return updated, nil
 }
 
-func (m *Service) RegisterObjects(ctx context.Context, objs []Record) error {
+func (m *mutationService) RegisterObjects(ctx context.Context, objs []Record) error {
 	if err := m.validateExistingContentRead(ctx, objs); err != nil {
 		return err
 	}
-	if err := m.bulkObjectMethodError(ctx, objs, objectMethodCreate); err != nil {
+	if err := bulkObjectMethodError(ctx, objs, objectMethodCreate); err != nil {
 		return err
 	}
 	return m.recordWriter.RegisterObjects(ctx, objs)
 }
 
-func (m *Service) validateExistingContentRead(ctx context.Context, objs []Record) error {
+func (m *mutationService) validateExistingContentRead(ctx context.Context, objs []Record) error {
 	seen := make(map[string]struct{})
 	for i := range objs {
 		sha, ok := CanonicalSHA256(objs[i].Checksums)
@@ -236,7 +236,7 @@ func (m *Service) validateExistingContentRead(ctx context.Context, objs []Record
 			return err
 		}
 		for j := range existing {
-			if existing[j].PublicRead || m.hasObjectMethod(ctx, &existing[j], objectMethodRead) {
+			if existing[j].PublicRead || hasObjectMethod(ctx, &existing[j], objectMethodRead) {
 				continue
 			}
 			return faults.ErrUnauthorized
@@ -245,7 +245,7 @@ func (m *Service) validateExistingContentRead(ctx context.Context, objs []Record
 	return nil
 }
 
-func (m *Service) CollapseProjectChecksumDuplicates(ctx context.Context, organization, project string) (int, error) {
+func (m *mutationService) CollapseProjectChecksumDuplicates(ctx context.Context, organization, project string) (int, error) {
 	ids, err := m.scope.ListObjectIDsByScope(ctx, organization, project)
 	if err != nil {
 		return 0, err
@@ -254,7 +254,7 @@ func (m *Service) CollapseProjectChecksumDuplicates(ctx context.Context, organiz
 	if err != nil {
 		return 0, err
 	}
-	if err := m.bulkObjectMethodError(ctx, objects, objectMethodUpdate); err != nil {
+	if err := bulkObjectMethodError(ctx, objects, objectMethodUpdate); err != nil {
 		return 0, err
 	}
 
@@ -308,7 +308,7 @@ func (m *Service) CollapseProjectChecksumDuplicates(ctx context.Context, organiz
 	return len(aliasMap), nil
 }
 
-func (m *Service) canonicalizeRegistrationObjects(ctx context.Context, objs []Record) ([]Record, map[string]string, error) {
+func (m *mutationService) canonicalizeRegistrationObjects(ctx context.Context, objs []Record) ([]Record, map[string]string, error) {
 	if len(objs) == 0 {
 		return nil, nil, nil
 	}
@@ -418,11 +418,11 @@ func (m *Service) canonicalizeRegistrationObjects(ctx context.Context, objs []Re
 	return merged, aliasMap, nil
 }
 
-func (m *Service) ReplaceObjects(ctx context.Context, objs []Record) error {
+func (m *mutationService) ReplaceObjects(ctx context.Context, objs []Record) error {
 	return m.recordWriter.ReplaceObjects(ctx, objs)
 }
 
-func (m *Service) DeleteObjectsByChecksums(ctx context.Context, hashes []string) (int, error) {
+func (m *mutationService) DeleteObjectsByChecksums(ctx context.Context, hashes []string) (int, error) {
 	if lister := m.authorizedQuery; lister != nil {
 		resources, includeUnscoped, restrictToResources := objectMethodResourceFilter(ctx, objectMethodDelete)
 		if byChecksum, err := lister.ListObjectIDsByChecksumsAndResources(ctx, hashes, resources, includeUnscoped, restrictToResources); err == nil {
@@ -446,7 +446,7 @@ func (m *Service) DeleteObjectsByChecksums(ctx context.Context, hashes []string)
 			}
 			authorized := make([]string, 0, len(objects))
 			for i := range objects {
-				if err := m.requireAllObjectMethod(ctx, &objects[i], objectMethodDelete); err != nil {
+				if err := requireAllObjectMethod(ctx, &objects[i], objectMethodDelete); err != nil {
 					continue
 				}
 				authorized = append(authorized, string(objects[i].Id))
@@ -472,10 +472,10 @@ func (m *Service) DeleteObjectsByChecksums(ctx context.Context, hashes []string)
 			if _, ok := seen[string(obj.Id)]; ok {
 				continue
 			}
-			if !m.hasObjectMethod(ctx, &obj, objectMethodDelete) {
+			if !hasObjectMethod(ctx, &obj, objectMethodDelete) {
 				continue
 			}
-			if err := m.requireAllObjectMethod(ctx, &obj, objectMethodDelete); err != nil {
+			if err := requireAllObjectMethod(ctx, &obj, objectMethodDelete); err != nil {
 				continue
 			}
 			seen[string(obj.Id)] = struct{}{}
@@ -491,31 +491,31 @@ func (m *Service) DeleteObjectsByChecksums(ctx context.Context, hashes []string)
 	return len(toDelete), nil
 }
 
-func (m *Service) CreateObjectAlias(ctx context.Context, aliasID, canonicalID string) error {
+func (m *mutationService) CreateObjectAlias(ctx context.Context, aliasID, canonicalID string) error {
 	obj, err := m.recordReader.GetObject(ctx, canonicalID)
 	if err != nil {
 		return err
 	}
-	if err := m.requireObjectMethod(ctx, obj, objectMethodUpdate); err != nil {
+	if err := requireObjectMethod(ctx, obj, objectMethodUpdate); err != nil {
 		return err
 	}
 	return m.aliases.CreateObjectAlias(ctx, aliasID, canonicalID)
 }
 
-func (m *Service) deletableObjectIDs(ctx context.Context, ids []string) ([]string, error) {
+func (m *mutationService) deletableObjectIDs(ctx context.Context, ids []string) ([]string, error) {
 	return m.deletableObjectIDsForMethod(ctx, ids, true)
 }
 
-func (m *Service) deletableObjectIDsForMethod(ctx context.Context, ids []string, requireAll bool) ([]string, error) {
+func (m *mutationService) deletableObjectIDsForMethod(ctx context.Context, ids []string, requireAll bool) ([]string, error) {
 	objects, err := m.recordReader.GetBulkObjects(ctx, ids)
 	if err != nil {
 		return nil, err
 	}
-	filtered := m.filterObjectsByMethod(ctx, objects, objectMethodDelete)
+	filtered := filterObjectsByMethod(ctx, objects, objectMethodDelete)
 	toDelete := make([]string, 0, len(filtered))
 	for _, obj := range filtered {
 		if requireAll {
-			if err := m.requireAllObjectMethod(ctx, &obj, objectMethodDelete); err != nil {
+			if err := requireAllObjectMethod(ctx, &obj, objectMethodDelete); err != nil {
 				continue
 			}
 		}
@@ -524,7 +524,7 @@ func (m *Service) deletableObjectIDsForMethod(ctx context.Context, ids []string,
 	return toDelete, nil
 }
 
-func (m *Service) RequireObjectResources(ctx context.Context, method string, resources []string) error {
+func (m *mutationService) RequireObjectResources(ctx context.Context, method string, resources []string) error {
 	if strings.TrimSpace(method) == "" {
 		return nil
 	}
@@ -534,7 +534,7 @@ func (m *Service) RequireObjectResources(ctx context.Context, method string, res
 	return faults.ErrUnauthorized
 }
 
-func (m *Service) requireScopeMethod(ctx context.Context, organization, project, method string) error {
+func requireScopeMethod(ctx context.Context, organization, project, method string) error {
 	resource, err := syfoncommon.ResourcePath(organization, project)
 	if err != nil {
 		return err
@@ -542,20 +542,26 @@ func (m *Service) requireScopeMethod(ctx context.Context, organization, project,
 	if strings.TrimSpace(resource) == "" {
 		return faults.ErrUnauthorized
 	}
-	return m.RequireObjectResources(ctx, method, []string{resource})
-}
-
-func (m *Service) requireObjectMethod(ctx context.Context, obj *Record, method string) error {
-	if m.hasObjectMethod(ctx, obj, method) {
+	if access.HasObjectMethodAccess(ctx, method, []string{resource}) {
 		return nil
 	}
 	return faults.ErrUnauthorized
 }
 
-func (m *Service) requireAllObjectMethod(ctx context.Context, obj *Record, method string) error {
+func requireObjectMethod(ctx context.Context, obj *Record, method string) error {
+	if hasObjectMethod(ctx, obj, method) {
+		return nil
+	}
+	return faults.ErrUnauthorized
+}
+
+func requireAllObjectMethod(ctx context.Context, obj *Record, method string) error {
 	resources := AccessResources(obj)
 	if len(resources) == 0 {
-		return m.RequireObjectResources(ctx, method, resources)
+		if access.HasObjectMethodAccess(ctx, method, resources) {
+			return nil
+		}
+		return faults.ErrUnauthorized
 	}
 	if access.HasMethodAccess(ctx, method, resources) {
 		return nil
@@ -563,7 +569,7 @@ func (m *Service) requireAllObjectMethod(ctx context.Context, obj *Record, metho
 	return faults.ErrUnauthorized
 }
 
-func (m *Service) hasObjectMethod(ctx context.Context, obj *Record, method string) bool {
+func hasObjectMethod(ctx context.Context, obj *Record, method string) bool {
 	method = strings.TrimSpace(method)
 	if method == "" {
 		return true
@@ -577,12 +583,12 @@ func (m *Service) hasObjectMethod(ctx context.Context, obj *Record, method strin
 	return access.HasObjectMethodAccess(ctx, method, AccessResources(obj))
 }
 
-func (m *Service) bulkObjectMethodError(ctx context.Context, objs []Record, method string) error {
+func bulkObjectMethodError(ctx context.Context, objs []Record, method string) error {
 	resources := make(map[string]struct{})
 	var firstDeniedID string
 	deniedRecords := 0
 	for i := range objs {
-		if m.hasObjectMethod(ctx, &objs[i], method) {
+		if hasObjectMethod(ctx, &objs[i], method) {
 			continue
 		}
 		deniedRecords++
