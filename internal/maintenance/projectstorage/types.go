@@ -1,6 +1,3 @@
-// Package projectstorage owns project-scoped storage inspection, inventory
-// comparison, and cleanup policy. Provider retries and SDK details stay in
-// internal/storage; this package only coordinates the cross-domain workflow.
 package projectstorage
 
 import (

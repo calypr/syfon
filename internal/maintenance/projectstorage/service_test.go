@@ -118,15 +118,13 @@ func projectService(inventory *fakeInventory, deletePort DeletePort) (*Service, 
 	visibility := &fakeVisibility{values: map[string]buckets.VisibleBucket{
 		"cred": {Credential: credential},
 	}}
-	service := NewService(
-		fakeScopes{values: map[string]buckets.Scope{"org/": {Organization: "org", Bucket: "bucket", PathPrefix: "prefix"}, "org/project": {Organization: "org", ProjectID: "project", Bucket: "bucket", PathPrefix: "prefix/project"}}},
-		fakeCredentials{values: map[string]buckets.Credential{"cred": credential}},
-		visibility,
-		inventory,
-		nil,
-		deletePort,
-		nil,
-	)
+	service := NewService(Dependencies{
+		Scopes:      fakeScopes{values: map[string]buckets.Scope{"org/": {Organization: "org", Bucket: "bucket", PathPrefix: "prefix"}, "org/project": {Organization: "org", ProjectID: "project", Bucket: "bucket", PathPrefix: "prefix/project"}}},
+		Credentials: fakeCredentials{values: map[string]buckets.Credential{"cred": credential}},
+		Visibility:  visibility,
+		Inventory:   inventory,
+		Delete:      deletePort,
+	})
 	return service, visibility
 }
 
@@ -217,7 +215,7 @@ func TestDeleteProjectDataDeletesObjectsBeforeMatchingScopes(t *testing.T) {
 		{Organization: "other", ProjectID: "project", CredentialID: "cred-b"},
 		{Organization: "org", ProjectID: "project", Bucket: "bucket-c"},
 	}}
-	service := NewService(nil, nil, nil, nil, nil, nil, nil, CleanupDependencies{Objects: objects, Scopes: scopes})
+	service := NewService(Dependencies{CleanupObjects: objects, CleanupScopes: scopes})
 	result, err := service.DeleteProjectData(context.Background(), " org ", " project ")
 	if err != nil {
 		t.Fatalf("DeleteProjectData() error = %v", err)

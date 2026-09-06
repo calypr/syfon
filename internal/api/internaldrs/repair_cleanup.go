@@ -20,9 +20,6 @@ import (
 	"github.com/gofiber/fiber/v3"
 )
 
-// authorizeStorageCleanupScope remains at the HTTP boundary. The repair
-// service receives only the already-authorized plain request and domain
-// values; it does not know about Fiber or access middleware.
 func authorizeStorageCleanupScope(ctx context.Context, organization, project string, methods ...string) error {
 	if !access.IsAuthzEnforced(ctx) {
 		return nil
@@ -92,8 +89,6 @@ func handleInternalScopeRepairApplyFiber(svc *scoperepair.Service) fiber.Handler
 	}
 }
 
-// NewScopeRepairService adapts the composed object, bucket, and storage
-// services to the maintenance service's narrow ports.
 func NewScopeRepairService(objectService *objects.Service, bucketService *buckets.Service, storageManager storageProbe) *scoperepair.Service {
 	adapter := scopeRepairIndexAdapter{service: objectService}
 	return scoperepair.NewService(
@@ -105,8 +100,6 @@ func NewScopeRepairService(objectService *objects.Service, bucketService *bucket
 	)
 }
 
-// scopeRepairIndexAdapter bridges the object service to the prepared-record,
-// reference-update, and duplicate-collapse ports used by scope repair.
 type scopeRepairIndexAdapter struct {
 	service scopeRepairObjectService
 }
@@ -150,9 +143,6 @@ func (a scopeRepairIndexAdapter) Collapse(ctx context.Context, organization, pro
 	return a.service.CollapseProjectChecksumDuplicates(ctx, organization, project)
 }
 
-// scopeRepairBucketsAdapter exposes bucket-owned plain values. Scope
-// filtering by credential or bucket alias remains in this adapter/service
-// boundary rather than materializing generated bucket responses.
 type scopeRepairBucketsAdapter struct {
 	service scopeRepairBucketService
 }
@@ -186,9 +176,6 @@ func (a scopeRepairBucketsAdapter) ListScopes(ctx context.Context, bucket string
 	return filtered, nil
 }
 
-// storageRepairInspector is the storage capability adapter. It accepts only
-// S3 URLs, checks the bucket service's existing visibility contract, invokes a
-// single-object probe, and returns the canonical parsed URL to the service.
 type storageRepairInspector struct {
 	probe   storageProbe
 	buckets storageRepairBucketAccess

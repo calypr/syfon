@@ -395,7 +395,7 @@ func newSyfonTestServer(t *testing.T) *fiberTestServer {
 	})
 	docs.RegisterSwaggerRoutes(app)
 	metrics.RegisterMetricsRoutes(api, usageService.Reports(), usageService.Ingest())
-	projectStorageService := projectstorage.NewService(bucketService, bucketService, bucketService, nil, nil, nil, objectService, projectstorage.CleanupDependencies{Objects: objectService, Scopes: bucketService})
+	projectStorageService := projectstorage.NewService(projectstorage.Dependencies{Scopes: bucketService, Credentials: bucketService, Visibility: bucketService, Physical: objectService, CleanupObjects: objectService, CleanupScopes: bucketService})
 	scopeRepairService := internaldrs.NewScopeRepairService(objectService, bucketService, nil)
 	internaldrs.RegisterInternalRoutes(api, objectService, om, transferService, usageService.Ingest(), bucketService, projectStorageService, scopeRepairService)
 

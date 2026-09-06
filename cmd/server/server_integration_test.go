@@ -139,7 +139,7 @@ s3_credentials:
 		Pending: backend.pending, Events: usageService.Ingest(),
 	})
 	om := core.NewObjectManager(backend.dependencies)
-	projectStorageService := projectstorage.NewService(bucketService, bucketService, bucketService, storageManager, storageManager, storageManager, objectService, projectstorage.CleanupDependencies{Objects: objectService, Scopes: bucketService})
+	projectStorageService := projectstorage.NewService(projectstorage.Dependencies{Scopes: bucketService, Credentials: bucketService, Visibility: bucketService, Inventory: storageManager, Probe: storageManager, Delete: storageManager, Physical: objectService, CleanupObjects: objectService, CleanupScopes: bucketService})
 	scopeRepairService := internaldrs.NewScopeRepairService(objectService, bucketService, storageManager)
 	internaldrs.RegisterInternalRoutes(app, objectService, om, transferService, usageService.Ingest(), bucketService, projectStorageService, scopeRepairService)
 

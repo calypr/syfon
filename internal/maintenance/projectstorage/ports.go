@@ -7,9 +7,6 @@ import (
 	"github.com/calypr/syfon/internal/storage"
 )
 
-// ScopeReader is deliberately smaller than buckets.Service. It supplies the
-// two scope lookups needed by project maintenance and leaves catalog policy in
-// the buckets domain.
 type ScopeReader interface {
 	LookupBucketScope(context.Context, string, string) (buckets.Scope, bool, error)
 }
@@ -35,9 +32,6 @@ type DeletePort interface {
 	DeleteExact(context.Context, []storage.DeleteTarget) error
 }
 
-// ObjectScopeDeleter and ScopeCatalog are the two narrow capabilities needed
-// by project cleanup. They deliberately avoid handing a database aggregate or
-// a generated HTTP service to this maintenance package.
 type ObjectScopeDeleter interface {
 	DeleteBulkByScope(context.Context, string, string) (int, error)
 }
@@ -47,11 +41,14 @@ type ScopeCatalog interface {
 	DeleteBucketScope(context.Context, string, string, string, string) error
 }
 
-type CleanupDependencies struct {
-	Objects ObjectScopeDeleter
-	Scopes  ScopeCatalog
+type Dependencies struct {
+	Scopes         ScopeReader
+	Credentials    CredentialReader
+	Visibility     VisibilityReader
+	Inventory      InventoryPort
+	Probe          ProbePort
+	Delete         DeletePort
+	Physical       PhysicalScopeReader
+	CleanupObjects ObjectScopeDeleter
+	CleanupScopes  ScopeCatalog
 }
-
-// ServiceDependencies makes composition explicit while keeping each port
-// consumer-owned. A single buckets.Service or storage.Manager may satisfy
-// several ports through structural typing at the composition boundary.

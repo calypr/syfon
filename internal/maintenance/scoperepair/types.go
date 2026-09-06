@@ -1,6 +1,3 @@
-// Package scoperepair audits and repairs project-scope references on object
-// records. It owns the use-case policy while HTTP and provider adapters stay
-// at the boundary.
 package scoperepair
 
 import (

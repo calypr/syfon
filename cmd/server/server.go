@@ -249,14 +249,17 @@ var Cmd = &cobra.Command{
 			Events:      usageService.Ingest(),
 		})
 		projectStorageService := projectstorage.NewService(
-			bucketService,
-			bucketService,
-			bucketService,
-			storageManager,
-			storageManager,
-			storageManager,
-			objectService,
-			projectstorage.CleanupDependencies{Objects: objectService, Scopes: bucketService},
+			projectstorage.Dependencies{
+				Scopes:         bucketService,
+				Credentials:    bucketService,
+				Visibility:     bucketService,
+				Inventory:      storageManager,
+				Probe:          storageManager,
+				Delete:         storageManager,
+				Physical:       objectService,
+				CleanupObjects: objectService,
+				CleanupScopes:  bucketService,
+			},
 		)
 		scopeRepairService := internaldrs.NewScopeRepairService(objectService, bucketService, storageManager)
 		om := core.NewObjectManager(backend.dependencies)
