@@ -67,20 +67,3 @@ func (m *ObjectManager) ListPhysicalObjectsByScope(ctx context.Context, organiza
 func (m *ObjectManager) ListMissingScopedSHA256(ctx context.Context, organization, project string, checksums []string) ([]string, error) {
 	return m.objectService.ListMissingScopedSHA256(ctx, organization, project, checksums)
 }
-
-// These names are retained only for the existing core package contract tests.
-func canonicalizeContentObjects(records []objectdomain.Record) []objectdomain.Record {
-	return objectdomain.CanonicalizeContentObjects(records)
-}
-
-func searchAfterID(ids []string, startAfter string) int {
-	return objectdomain.SearchAfterID(ids, startAfter)
-}
-
-func objectMatchesScope(record *objectdomain.Record, organization, project string) bool {
-	return objectdomain.ObjectMatchesScope(record, organization, project)
-}
-
-func (m *ObjectManager) readableChecksumFilter(ctx context.Context, organization, project string) ([]string, bool, bool, bool) {
-	return m.objectService.ReadableChecksumFilter(ctx, organization, project)
-}

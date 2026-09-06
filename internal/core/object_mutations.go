@@ -14,7 +14,7 @@ func (m *ObjectManager) RegisterBulk(ctx context.Context, candidates []objectdom
 	now := time.Now().UTC()
 	toRegister := make([]objectdomain.Record, 0, len(candidates))
 	for _, candidate := range candidates {
-		record, err := CandidateToRecord(candidate, now)
+		record, err := objectdomain.CandidateToRecord(candidate, now)
 		if err != nil {
 			return 0, err
 		}

@@ -1,10 +1,8 @@
 package core
 
 import (
-	"strings"
 	"time"
 
-	syfoncommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/storage/address"
@@ -30,85 +28,6 @@ func FirstSupportedAccessURL(obj *objects.Record) string {
 		return am.AccessUrl.Url
 	}
 	return ""
-}
-
-// CandidateToRecord converts a domain registration candidate to a persisted record.
-func CandidateToRecord(c objects.Candidate, now time.Time) (objects.Record, error) {
-	checksums := append([]objects.Checksum(nil), candidateChecksums(c.Checksums)...)
-	oid, ok := objects.CanonicalSHA256(checksums)
-	if !ok {
-		return objects.Record{}, objects.ErrNoValidSHA256
-	}
-	if c.AccessMethods == nil || len(*c.AccessMethods) == 0 {
-		return objects.Record{}, objects.ErrAccessMethodsRequired
-	}
-	authzList := syfoncommon.ControlledAccessToAuthzMap(common.DerefStringSlice(c.ControlledAccess))
-
-	id := ""
-	if c.Aliases != nil {
-		for _, a := range *c.Aliases {
-			if strings.HasPrefix(a, "id:") {
-				id = strings.TrimPrefix(a, "id:")
-				break
-			}
-		}
-	}
-
-	if id == "" {
-		mintedID, mintErr := objects.MintRecordIDFromChecksum(oid, syfoncommon.AuthzMapToList(authzList))
-		if mintErr != nil {
-			return objects.Record{}, mintErr
-		}
-		id = string(mintedID)
-	}
-
-	obj := objects.Record{
-		Id:          objects.RecordID(id),
-		Size:        common.Int64Val(c.Size),
-		CreatedTime: now,
-		UpdatedTime: &now,
-		Version:     common.Ptr("1"),
-		MimeType:    c.MimeType,
-		Description: c.Description,
-		Aliases:     c.Aliases,
-		Checksums:   []objects.Checksum{{Type: "sha256", Checksum: oid}},
-	}
-	if c.ControlledAccess != nil {
-		controlled := syfoncommon.NormalizeAccessResources(*c.ControlledAccess)
-		obj.ControlledAccess = &controlled
-	}
-	if c.Name != nil {
-		obj.Name = normalizedObjectNamePtr(c.Name)
-	}
-	if obj.Name == nil || strings.TrimSpace(*obj.Name) == "" {
-		obj.Name = &oid
-	}
-	obj.SelfUri = "drs://" + string(obj.Id)
-
-	// Re-construct access methods with clean IDs
-	if c.AccessMethods != nil {
-		newMethods := make([]objects.AccessMethod, 0, len(*c.AccessMethods))
-		for _, method := range *c.AccessMethods {
-			if method.AccessId == nil || *method.AccessId == "" {
-				method.AccessId = common.Ptr(method.Type)
-			}
-			newMethods = append(newMethods, method)
-		}
-		obj.AccessMethods = &newMethods
-	}
-	if obj.AccessMethods == nil || len(*obj.AccessMethods) == 0 {
-		return objects.Record{}, objects.ErrAccessMethodsRequired
-	}
-
-	obj.Authorizations = authzList
-	return obj, nil
-}
-
-func candidateChecksums(value *[]objects.Checksum) []objects.Checksum {
-	if value == nil {
-		return nil
-	}
-	return *value
 }
 
 // MergeRecordUpdate merges an update into an existing object.

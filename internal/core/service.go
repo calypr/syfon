@@ -34,18 +34,6 @@ func GetBaseURL(ctx context.Context) string {
 // ObjectManager standardizes object lifecycle operations across all API surfaces.
 type ObjectManager struct {
 	objectService    *objects.Service
-	objectReader     objects.RecordReader
-	objectWriter     objects.RecordWriter
-	objectAccess     objects.AccessMethodWriter
-	objectPolicy     objects.AccessPolicyWriter
-	objectAliases    objects.AliasStore
-	objectContent    objects.ContentReader
-	objectChecksum   objects.ChecksumScopeQuery
-	objectScope      objects.ScopeQuery
-	objectResources  objects.OptionalResourceQuery
-	objectPages      objects.OptionalPageQuery
-	objectURLPages   objects.OptionalURLQuery
-	objectAuthorized objects.OptionalAuthorizedQuery
 	pendingStore     transfers.PendingStore
 	transferEvents   transfers.EventRecorder
 	fileCounters     usage.FileCounterRecorder
@@ -113,18 +101,6 @@ func NewObjectManager(deps Dependencies) *ObjectManager {
 			URLPages:      deps.Objects.URLPages,
 			Authorized:    deps.Objects.Authorized,
 		}),
-		objectReader:     deps.Objects.Reader,
-		objectWriter:     deps.Objects.Writer,
-		objectAccess:     deps.Objects.AccessMethods,
-		objectPolicy:     deps.Objects.AccessPolicy,
-		objectAliases:    deps.Objects.Aliases,
-		objectContent:    deps.Objects.Content,
-		objectChecksum:   deps.Objects.ChecksumScope,
-		objectScope:      deps.Objects.Scope,
-		objectResources:  deps.Objects.Resources,
-		objectPages:      deps.Objects.Pages,
-		objectURLPages:   deps.Objects.URLPages,
-		objectAuthorized: deps.Objects.Authorized,
 		pendingStore:     deps.Transfers.Pending,
 		transferEvents:   deps.Transfers.Events,
 		fileCounters:     deps.Usage.Counters,

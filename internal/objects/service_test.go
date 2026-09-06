@@ -38,7 +38,7 @@ func TestCanonicalizeContentObjectsKeepsStableCanonicalIdentity(t *testing.T) {
 	checksum := Checksum{Type: "sha256", Checksum: strings.Repeat("a", 64)}
 	records := []Record{{Id: "older", Checksums: []Checksum{checksum}}, {Id: "newer", Checksums: []Checksum{checksum}}}
 
-	got := CanonicalizeContentObjects(records)
+	got := canonicalizeContentObjects(records)
 	if len(got) != 1 || got[0].Id != "newer" {
 		t.Fatalf("CanonicalizeContentObjects() = %#v, want deterministic canonical record", got)
 	}

@@ -10,6 +10,22 @@ import (
 	"github.com/calypr/syfon/internal/testutils"
 )
 
+type staticContentReader struct {
+	objects []objects.Record
+}
+
+func (r staticContentReader) GetObjectsByChecksum(context.Context, string) ([]objects.Record, error) {
+	return r.objects, nil
+}
+
+func (r staticContentReader) GetObjectsByChecksums(_ context.Context, checksums []string) (map[string][]objects.Record, error) {
+	out := make(map[string][]objects.Record, len(checksums))
+	for _, checksum := range checksums {
+		out[checksum] = r.objects
+	}
+	return out, nil
+}
+
 func TestMergedContentPreservesReplicaLocation(t *testing.T) {
 	db := &coreTestDB{MockDatabase: &testutils.MockDatabase{BucketScopes: map[string]buckets.Scope{
 		"org|a": {Organization: "org", ProjectID: "a", Bucket: "bucket-a", PathPrefix: "a"},
@@ -28,7 +44,12 @@ func TestMergedContentPreservesReplicaLocation(t *testing.T) {
 	if single != "signed:"+original {
 		t.Fatalf("single project changed replica: %s", single)
 	}
-	merged := canonicalizeContentObjects(objs)[0]
+	service := objects.NewService(objects.Dependencies{Content: staticContentReader{objects: objs}})
+	view, err := service.GetCanonicalContent(context.Background(), objs[0].Checksums[0].Checksum, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	merged := view.Record
 	signed, err := om.SignObjectURL(context.Background(), &merged, original, storage.AccessOptions{})
 	if err != nil {
 		t.Fatal(err)
