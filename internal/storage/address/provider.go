@@ -1,7 +1,3 @@
-// Package address owns provider and storage-address values shared by buckets
-// and provider-neutral storage code. It intentionally depends only on the
-// standard library so the bucket domain can consume address syntax without
-// importing storage implementations.
 package address
 
 import (

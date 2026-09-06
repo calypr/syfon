@@ -1,5 +1,3 @@
-// Package buckets owns bucket credentials, scopes, and visibility projections.
-// It intentionally has no dependency on storage services or object values.
 package buckets
 
 // Credential represents the s3_credential table and the provider credentials
