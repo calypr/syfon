@@ -16,18 +16,25 @@ jobs:
     name: Test on ${{ matrix.os }} (${{ matrix.arch }})
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { os: linux, arch: amd64, runner: ubuntu-latest }
-          - { os: linux, arch: arm64, runner: ubuntu-24.04-arm }
-          - { os: darwin, arch: amd64, runner: macos-latest }
-          - { os: darwin, arch: arm64, runner: macos-latest }
+          - { os: linux, arch: amd64, native_arch: x86_64, runner: ubuntu-latest }
+          - { os: linux, arch: arm64, native_arch: aarch64, runner: ubuntu-24.04-arm }
+          - { os: darwin, arch: amd64, native_arch: x86_64, runner: macos-15-intel }
+          - { os: darwin, arch: arm64, native_arch: arm64, runner: macos-latest }
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Verify native runner architecture
+        shell: bash
+        env:
+          EXPECTED_ARCH: ${{ matrix.native_arch }}
+        run: test "$(uname -m)" = "$EXPECTED_ARCH"
 
       - name: Install Default Version (Latest Release)
         shell: bash

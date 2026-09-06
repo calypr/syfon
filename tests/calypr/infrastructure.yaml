@@ -1,0 +1,257 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgres-ci
+type: Opaque
+stringData:
+  password: postgres-ci
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16.4-alpine
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-ci
+                  key: password
+          ports:
+            - name: postgres
+              containerPort: 5432
+          readinessProbe:
+            exec:
+              command: [pg_isready, -U, postgres]
+            periodSeconds: 2
+            timeoutSeconds: 2
+            failureThreshold: 60
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+spec:
+  selector:
+    app: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: minio-ci
+type: Opaque
+stringData:
+  access-key: minio-ci
+  secret-key: minio-ci-secret
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minio
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: minio
+  template:
+    metadata:
+      labels:
+        app: minio
+    spec:
+      containers:
+        - name: minio
+          image: quay.io/minio/minio:RELEASE.2024-09-22T00-33-43Z
+          args: [server, /data]
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: minio-ci
+                  key: access-key
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: minio-ci
+                  key: secret-key
+          ports:
+            - name: s3
+              containerPort: 9000
+          readinessProbe:
+            httpGet:
+              path: /minio/health/ready
+              port: s3
+            periodSeconds: 2
+            timeoutSeconds: 2
+            failureThreshold: 60
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+spec:
+  selector:
+    app: minio
+  ports:
+    - name: s3
+      port: 9000
+      targetPort: s3
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: minio-bootstrap
+spec:
+  backoffLimit: 10
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: mc
+          image: quay.io/minio/mc:RELEASE.2024-09-16T17-43-14Z
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: minio-ci
+                  key: access-key
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: minio-ci
+                  key: secret-key
+          command: [/bin/sh, -c]
+          args:
+            - |
+              set -eu
+              until mc alias set ci http://minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"; do sleep 2; done
+              mc mb --ignore-existing ci/syfon-ci
+              mc anonymous set none ci/syfon-ci
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gogs-config
+data:
+  app.ini: |
+    APP_NAME = Syfon Calypr CI Git
+    RUN_MODE = prod
+    RUN_USER = git
+    [database]
+    TYPE = sqlite3
+    PATH = /data/gogs/gogs.db
+    [repository]
+    ROOT = /data/git/gogs-repositories
+    [server]
+    DOMAIN = gogs.test
+    HTTP_ADDR = 0.0.0.0
+    HTTP_PORT = 3000
+    ROOT_URL = http://gogs.test:3000/
+    [security]
+    INSTALL_LOCK = true
+    SECRET_KEY = syfon-calypr-ci-gogs
+    [service]
+    DISABLE_REGISTRATION = true
+    ENABLE_CAPTCHA = false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gogs
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gogs
+  template:
+    metadata:
+      labels:
+        app: gogs
+    spec:
+      containers:
+        - name: gogs
+          image: gogs/gogs:0.13
+          ports:
+            - name: http
+              containerPort: 3000
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 2
+            timeoutSeconds: 2
+            failureThreshold: 60
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: config
+              mountPath: /data/gogs/conf/app.ini
+              subPath: app.ini
+              readOnly: true
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+      volumes:
+        - name: data
+          emptyDir: {}
+        - name: config
+          configMap:
+            name: gogs-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gogs
+spec:
+  selector:
+    app: gogs
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: calypr
+spec:
+  selector:
+    app: revproxy
+  ports:
+    - name: https
+      port: 443
+      targetPort: 443

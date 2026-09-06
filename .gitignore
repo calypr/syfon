@@ -38,7 +38,7 @@ coverage.*
 .gomodcache/*
 site/
 
-syfon
+/syfon
 
 # Local runtime/test databases
 /drs.db

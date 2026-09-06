@@ -18,9 +18,9 @@ import (
 	"github.com/calypr/syfon/internal/config"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/crypto"
-	"github.com/calypr/syfon/internal/db"
 	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/signer/s3"
+	"github.com/calypr/syfon/internal/testutils"
 	"github.com/calypr/syfon/internal/urlmanager"
 	"github.com/gofiber/fiber/v3"
 )
@@ -89,7 +89,7 @@ s3_credentials:
 	project := "test-project"
 
 	// Setup Server
-	database := db.NewInMemoryDB()
+	database := testutils.NewInMemoryDB()
 
 	// Pre-load credentials from config (mimic server startup logic)
 	for _, c := range cfg.S3Credentials {

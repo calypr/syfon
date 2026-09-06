@@ -6,16 +6,21 @@ import (
 )
 
 func TestInternalObjectRejectsLegacyPathAliases(t *testing.T) {
-	raw := []byte(`{
-		"did":"did-1",
-		"file_name":"legacy-name.txt",
-		"hashes":{"sha256":"abc"},
-		"urls":["legacy"],
-		"unknown_field":"keep-me"
-	}`)
-	var obj InternalObject
-	if err := json.Unmarshal(raw, &obj); err == nil {
-		t.Fatal("expected file_name payload to be rejected")
+	tests := []struct {
+		name  string
+		field string
+	}{
+		{name: "file_name", field: "file_name"},
+		{name: "path", field: "path"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			raw := []byte(`{"` + tt.field + `":"legacy-value"}`)
+			var obj InternalObject
+			if err := json.Unmarshal(raw, &obj); err == nil {
+				t.Fatalf("expected %s payload to be rejected", tt.field)
+			}
+		})
 	}
 }
 

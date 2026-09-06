@@ -32,7 +32,7 @@ func (m *ObjectManager) SignObjectURL(ctx context.Context, obj *models.InternalO
 		targetURL = target.URL
 	} else {
 		var err error
-		targetURL, err = m.resolveLegacyS3DownloadURL(ctx, obj, targetURL)
+		targetURL, err = m.resolveObjectDownloadURL(ctx, obj, targetURL)
 		if err != nil {
 			return "", err
 		}
@@ -116,13 +116,13 @@ func (m *ObjectManager) ResolveScopedUploadTarget(ctx context.Context, organizat
 	}
 
 	scopes := make([]models.BucketScope, 0, 2)
-	if scope, found, err := m.lookupBucketScope(ctx, organization, ""); err != nil {
+	if scope, found, err := m.bucketCatalog.lookupBucketScope(ctx, organization, ""); err != nil {
 		return CanonicalStorageTarget{}, err
 	} else if found {
 		scopes = append(scopes, scope)
 	}
 	if project != "" {
-		if scope, found, err := m.lookupBucketScope(ctx, organization, project); err != nil {
+		if scope, found, err := m.bucketCatalog.lookupBucketScope(ctx, organization, project); err != nil {
 			return CanonicalStorageTarget{}, err
 		} else if found {
 			scopes = append(scopes, scope)
@@ -191,11 +191,11 @@ func newCanonicalStorageTarget(bucket string, key string) CanonicalStorageTarget
 
 // ResolveBucket validates a bucket name or returns the default one.
 func (m *ObjectManager) ResolveBucket(ctx context.Context, bucketName string) (string, error) {
-	creds, err := m.ListS3Credentials(ctx)
+	creds, err := m.bucketCatalog.listS3Credentials(ctx)
 	if err != nil {
 		return "", err
 	}
-	return resolveBucketName(creds, bucketName)
+	return m.bucketCatalog.resolveBucketName(creds, bucketName)
 }
 
 func (m *ObjectManager) SignDownloadPart(ctx context.Context, bucket, accessURL string, start, end int64, options urlmanager.SignOptions) (string, error) {
@@ -204,7 +204,7 @@ func (m *ObjectManager) SignDownloadPart(ctx context.Context, bucket, accessURL 
 
 func (m *ObjectManager) SignObjectDownloadPart(ctx context.Context, obj *models.InternalObject, bucket, accessURL string, start, end int64, options urlmanager.SignOptions) (string, error) {
 	var err error
-	accessURL, err = m.resolveLegacyS3DownloadURL(ctx, obj, accessURL)
+	accessURL, err = m.resolveObjectDownloadURL(ctx, obj, accessURL)
 	if err != nil {
 		return "", err
 	}
@@ -212,6 +212,38 @@ func (m *ObjectManager) SignObjectDownloadPart(ctx context.Context, obj *models.
 		bucket = b
 	}
 	return m.SignDownloadPart(ctx, bucket, accessURL, start, end, options)
+}
+
+func (m *ObjectManager) resolveObjectDownloadURL(ctx context.Context, obj *models.InternalObject, accessURL string) (string, error) {
+	accessURL = strings.TrimSpace(accessURL)
+	legacyURL, err := m.resolveLegacyS3DownloadURL(ctx, obj, accessURL)
+	if err != nil {
+		return "", err
+	}
+	if legacyURL != accessURL || !isUnscopedCanonicalSHA256(obj, accessURL) {
+		return legacyURL, nil
+	}
+
+	target, err := m.ResolveCanonicalStorageTarget(ctx, CanonicalStorageTargetRequest{
+		Object:    obj,
+		AccessURL: accessURL,
+	})
+	if err != nil {
+		return "", err
+	}
+	return target.URL, nil
+}
+
+func isUnscopedCanonicalSHA256(obj *models.InternalObject, accessURL string) bool {
+	if obj == nil {
+		return false
+	}
+	_, key, ok := parseS3Location(accessURL)
+	if !ok || strings.Contains(strings.Trim(key, "/"), "/") {
+		return false
+	}
+	sha, ok := common.CanonicalSHA256(obj.Checksums)
+	return ok && strings.EqualFold(strings.Trim(key, "/"), strings.TrimSpace(sha))
 }
 
 func (m *ObjectManager) resolveLegacyS3DownloadURL(ctx context.Context, obj *models.InternalObject, accessURL string) (string, error) {
@@ -246,7 +278,7 @@ func (m *ObjectManager) resolveLegacyS3DownloadURL(ctx context.Context, obj *mod
 		return accessURL, nil
 	}
 
-	credentials, err := m.ListS3Credentials(ctx)
+	credentials, err := m.bucketCatalog.listS3Credentials(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -356,7 +388,7 @@ func (m *ObjectManager) bucketScopesForObject(ctx context.Context, obj *models.I
 	sort.Strings(orgs)
 	scopes := make([]models.BucketScope, 0, len(orgs)*2)
 	for _, org := range orgs {
-		if scope, found, err := m.lookupBucketScope(ctx, org, ""); err != nil {
+		if scope, found, err := m.bucketCatalog.lookupBucketScope(ctx, org, ""); err != nil {
 			return nil, err
 		} else if found {
 			scopes = append(scopes, scope)
@@ -364,7 +396,7 @@ func (m *ObjectManager) bucketScopesForObject(ctx context.Context, obj *models.I
 		projects := append([]string(nil), authz[org]...)
 		sort.Strings(projects)
 		for _, project := range projects {
-			scope, found, err := m.lookupBucketScope(ctx, org, project)
+			scope, found, err := m.bucketCatalog.lookupBucketScope(ctx, org, project)
 			if err != nil {
 				return nil, err
 			}
@@ -374,19 +406,4 @@ func (m *ObjectManager) bucketScopesForObject(ctx context.Context, obj *models.I
 		}
 	}
 	return scopes, nil
-}
-
-func resolveBucketName(creds []models.S3Credential, bucketName string) (string, error) {
-	if len(creds) == 0 {
-		return "", fmt.Errorf("no buckets configured")
-	}
-	if bucketName == "" {
-		return creds[0].Bucket, nil
-	}
-	for _, c := range creds {
-		if c.Bucket == bucketName {
-			return c.Bucket, nil
-		}
-	}
-	return "", fmt.Errorf("bucket %q not configured", bucketName)
 }

@@ -1,0 +1,288 @@
+global:
+  dev: false
+  hostname: calypr.test
+  environment: syfon-ci
+  netPolicy: false
+  ddEnabled: false
+  publicDataSets: false
+  tierAccessLevel: private
+  frontendRoot: portal
+  postgres:
+    dbCreate: false
+    master:
+      host: postgres
+      port: "5432"
+      username: postgres
+      password: postgres-ci
+
+ambassador:
+  enabled: false
+arborist:
+  enabled: true
+  image:
+    repository: quay.io/ohsu-comp-bio/arborist
+    tag: master
+    pullPolicy: IfNotPresent
+  postgres:
+    host: postgres
+    port: "5432"
+    database: arborist
+    username: arborist
+    password: arborist-ci
+    dbCreate: false
+    separate: false
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+argo-wrapper:
+  enabled: false
+audit:
+  enabled: false
+aws-es-proxy:
+  enabled: false
+etl:
+  enabled: false
+etl-pod:
+  enabled: false
+frontend-framework:
+  enabled: false
+fence:
+  enabled: true
+  image:
+    repository: quay.io/ohsu-comp-bio/fence
+    tag: ci_native-multiarch-images
+    pullPolicy: IfNotPresent
+  postgres:
+    host: postgres
+    port: "5432"
+    database: fence
+    username: fence
+    password: fence-ci
+    dbCreate: false
+    separate: false
+  usersync:
+    usersync: false
+  resources:
+    requests:
+      cpu: 100m
+      memory: 192Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+  FENCE_CONFIG:
+    APP_NAME: Syfon Calypr CI
+    ENCRYPTION_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+    DEBUG: false
+    MOCK_AUTH: false
+    MOCK_GOOGLE_AUTH: false
+    MOCK_STORAGE: true
+    AUTHLIB_INSECURE_TRANSPORT: false
+    ENABLE_CSRF_PROTECTION: false
+    ENABLE_DB_MIGRATION: true
+    ARBORIST: http://arborist-service
+    AUTHZ_SNAPSHOT_CACHE_REDIS_URL: redis://authz-cache-service:6379/0
+    OPENID_CONNECT: {}
+    LOGIN_OPTIONS: []
+    OAUTH2_JWT_ENABLED: true
+    OAUTH2_JWT_ALG: RS256
+    OAUTH2_JWT_ISS: https://calypr.test/user
+  USER_YAML: |
+    cloud_providers: {}
+    groups: {}
+    authz:
+      anonymous_policies: []
+      all_users_policies: []
+      resources:
+        - name: programs
+          subresources:
+            - name: ci
+              subresources:
+                - name: projects
+                  subresources:
+                    - name: a
+                    - name: b
+      roles:
+        - id: creator
+          permissions:
+            - id: creator
+              action: {service: "*", method: create}
+        - id: reader
+          permissions:
+            - id: reader
+              action: {service: "*", method: read}
+        - id: updater
+          permissions:
+            - id: updater
+              action: {service: "*", method: update}
+        - id: storage_reader
+          permissions:
+            - id: storage_reader
+              action: {service: "*", method: read-storage}
+        - id: storage_writer
+          permissions:
+            - id: storage_writer
+              action: {service: "*", method: write-storage}
+      policies:
+        - id: project-a-writer
+          role_ids: [creator, reader, updater, storage_reader, storage_writer]
+          resource_paths: [/programs/ci/projects/a]
+        - id: project-a-reader
+          role_ids: [reader, storage_reader]
+          resource_paths: [/programs/ci/projects/a]
+        - id: project-b-writer
+          role_ids: [creator, reader, updater, storage_reader, storage_writer]
+          resource_paths: [/programs/ci/projects/b]
+    users:
+      ci-writer:
+        policies: [project-a-writer]
+      ci-reader:
+        policies: [project-a-reader]
+      ci-outsider:
+        policies: [project-b-writer]
+    clients: {}
+fhir-server:
+  enabled: false
+funnel:
+  enabled: false
+gecko:
+  enabled: false
+grip:
+  enabled: false
+guppy:
+  enabled: false
+hatchery:
+  enabled: false
+image-viewer:
+  enabled: false
+indexd:
+  enabled: false
+kafka:
+  enabled: false
+manifestservice:
+  enabled: false
+metadata:
+  enabled: false
+peregrine:
+  enabled: false
+pidgin:
+  enabled: false
+portal:
+  enabled: false
+redis:
+  enabled: true
+  auth:
+    enabled: true
+    password: redis-ci
+  networkPolicy:
+    enabled: false
+  resources:
+    requests:
+      cpu: 25m
+      memory: 32Mi
+    limits:
+      cpu: 250m
+      memory: 128Mi
+requestor:
+  enabled: false
+revproxy:
+  enabled: true
+  selectorLabels:
+    app: revproxy
+  image:
+    repository: quay.io/cdis/nginx
+    tag: master
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port:
+      - name: http
+        protocol: TCP
+        port: 80
+        targetPort: 80
+      - name: https
+        protocol: TCP
+        port: 443
+        targetPort: 443
+  ingress:
+    enabled: false
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+sheepdog:
+  enabled: false
+sower:
+  enabled: false
+ssjdispatcher:
+  enabled: false
+syfon:
+  enabled: true
+  image:
+    repository: syfon-calypr
+    tag: ci
+    pullPolicy: Never
+  credentialEncryption:
+    requireStableKey: true
+  config:
+    port: 8080
+    auth:
+      mode: gen3
+      fence_url: https://calypr.test/user
+    routes:
+      docs: false
+      ga4gh: true
+      internal: true
+      lfs: true
+      metrics: false
+    signing:
+      default_expiry_seconds: 120
+    credential_encryption:
+      master_key: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+    buckets:
+      - bucket: syfon-ci
+        provider: s3
+        region: us-east-1
+        endpoint: http://minio.test:9000
+        access_key: minio-ci
+        secret_key: minio-ci-secret
+    bucket_scopes:
+      - organization: ci
+        project_id: a
+        bucket: syfon-ci
+        path_prefix: project-a
+      - organization: ci
+        project_id: b
+        bucket: syfon-ci
+        path_prefix: project-b
+  postgres:
+    app:
+      db_host: postgres
+      db_port: "5432"
+      db_username: syfon
+      db_password: syfon-ci
+      db_database: syfon
+      db_sslmode: disable
+    admin:
+      host: postgres
+      port: "5432"
+      username: postgres
+      password: postgres-ci
+      database: postgres
+    initJob:
+      enabled: true
+      image: postgres:16.4-alpine
+      waitTimeoutSeconds: 180
+  extraEnv:
+    - name: SSL_CERT_FILE
+      value: /etc/calypr-ca/ca.crt
+viv:
+  enabled: false
+wts:
+  enabled: false

@@ -2,15 +2,14 @@ package repair
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"net/http"
 	"net/url"
 	"sort"
 	"strings"
 
 	drsapi "github.com/calypr/syfon/apigen/client/drs"
 	"github.com/calypr/syfon/apigen/client/internalapi"
-	"github.com/calypr/syfon/client/request"
 	syfoncommon "github.com/calypr/syfon/common"
 	intcommon "github.com/calypr/syfon/internal/common"
 )
@@ -250,21 +249,23 @@ func (s *Service) classifyAccessMethods(ctx context.Context, obj *auditedObject,
 }
 
 func (s *Service) addStorageFindings(ctx context.Context, obj *auditedObject) {
+	if s.inspector == nil {
+		return
+	}
 	for _, raw := range obj.currentURLs {
-		req := storageInspectRequest{
+		req := StorageInspectRequest{
 			Organization: obj.scope.Organization,
 			Project:      obj.scope.Project,
 			ObjectURL:    raw,
 		}
-		var resp storageInspectResponse
-		err := s.requestor.Do(ctx, http.MethodPost, "/data/inspect", req, &resp)
+		_, err := s.inspector.Inspect(ctx, req)
 		if err == nil {
 			continue
 		}
 		kind := FindingStorageProbeError
 		severity := SeverityWarn
 		message := err.Error()
-		if respErr, ok := err.(*request.ResponseError); ok && respErr.Status == http.StatusNotFound {
+		if errors.Is(err, ErrStorageObjectNotFound) {
 			kind = FindingStorageObjectMissing
 			severity = SeverityError
 			message = "storage object not found"
@@ -505,16 +506,15 @@ func pathStyleAccessURL(target scopeTarget, name string) string {
 }
 
 func (s *Service) checkURLExists(ctx context.Context, obj *auditedObject, url string) bool {
-	if s.requestor == nil {
+	if s.inspector == nil {
 		return false
 	}
-	req := storageInspectRequest{
+	req := StorageInspectRequest{
 		Organization: obj.scope.Organization,
 		Project:      obj.scope.Project,
 		ObjectURL:    url,
 	}
-	var resp storageInspectResponse
-	err := s.requestor.Do(ctx, http.MethodPost, "/data/inspect", req, &resp)
+	_, err := s.inspector.Inspect(ctx, req)
 	return err == nil
 }
 

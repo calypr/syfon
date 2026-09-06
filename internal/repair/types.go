@@ -2,10 +2,10 @@ package repair
 
 import (
 	"context"
+	"errors"
 
 	"github.com/calypr/syfon/apigen/client/bucketapi"
 	"github.com/calypr/syfon/apigen/client/internalapi"
-	"github.com/calypr/syfon/client/request"
 )
 
 type IndexAPI interface {
@@ -24,6 +24,29 @@ type BucketsAPI interface {
 	List(ctx context.Context) (bucketapi.BucketsResponse, error)
 	ListScopes(ctx context.Context, bucket string) ([]bucketapi.BucketScopeResponse, error)
 }
+
+// StorageInspector probes one storage object for the repair workflow.
+//
+// The repair package owns this narrow contract so it can be implemented
+// directly by an in-process server adapter without carrying the internal API
+// transport contract into the repair service.
+type StorageInspector interface {
+	Inspect(ctx context.Context, req StorageInspectRequest) (StorageInspectResult, error)
+}
+
+type StorageInspectRequest struct {
+	Organization string
+	Project      string
+	ObjectURL    string
+}
+
+type StorageInspectResult struct {
+	ObjectURL string
+}
+
+// ErrStorageObjectNotFound marks the one storage inspection failure that
+// repair reports separately from other probe failures.
+var ErrStorageObjectNotFound = errors.New("storage object not found")
 
 type Options struct {
 	Organization string
@@ -99,11 +122,11 @@ func (r Report) FindingCount() int {
 type Service struct {
 	index     IndexAPI
 	buckets   BucketsAPI
-	requestor request.Requester
+	inspector StorageInspector
 }
 
-func NewService(index IndexAPI, buckets BucketsAPI, requestor request.Requester) *Service {
-	return &Service{index: index, buckets: buckets, requestor: requestor}
+func NewService(index IndexAPI, buckets BucketsAPI, inspector StorageInspector) *Service {
+	return &Service{index: index, buckets: buckets, inspector: inspector}
 }
 
 type scopeTarget struct {
@@ -112,16 +135,6 @@ type scopeTarget struct {
 	Project      string
 	Bucket       string
 	Prefix       string
-}
-
-type storageInspectRequest struct {
-	Organization string `json:"organization,omitempty"`
-	Project      string `json:"project,omitempty"`
-	ObjectURL    string `json:"object_url,omitempty"`
-}
-
-type storageInspectResponse struct {
-	ObjectURL string `json:"object_url"`
 }
 
 type auditState struct {

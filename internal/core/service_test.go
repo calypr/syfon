@@ -10,7 +10,6 @@ import (
 	"github.com/calypr/syfon/apigen/server/drs"
 	internalauth "github.com/calypr/syfon/internal/auth"
 	"github.com/calypr/syfon/internal/common"
-	"github.com/calypr/syfon/internal/db"
 	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/testutils"
 	"github.com/calypr/syfon/internal/urlmanager"
@@ -318,6 +317,65 @@ func TestObjectManagerCredentialWritesInvalidateSignerCache(t *testing.T) {
 	}
 }
 
+func TestBucketCatalogCachesMissingScopeLookup(t *testing.T) {
+	ctx := context.Background()
+	mockDB := &testutils.MockDatabase{}
+	om := NewObjectManager(&coreTestDB{MockDatabase: mockDB}, nil)
+
+	if scope, found, err := om.bucketCatalog.lookupBucketScope(ctx, "missing-org", "missing-project"); err != nil {
+		t.Fatalf("first scope lookup failed: %v", err)
+	} else if found || scope != (models.BucketScope{}) {
+		t.Fatalf("expected missing scope, got scope=%+v found=%t", scope, found)
+	}
+	if scope, found, err := om.bucketCatalog.lookupBucketScope(ctx, "missing-org", "missing-project"); err != nil {
+		t.Fatalf("cached scope lookup failed: %v", err)
+	} else if found || scope.Organization != "missing-org" || scope.ProjectID != "missing-project" {
+		t.Fatalf("expected cached missing scope key, got scope=%+v found=%t", scope, found)
+	}
+	if mockDB.GetBucketScopeCalls != 1 {
+		t.Fatalf("expected one database lookup for a cached miss, got %d", mockDB.GetBucketScopeCalls)
+	}
+}
+
+func TestBucketCatalogDeleteScopeInvalidatesLookupCache(t *testing.T) {
+	ctx := context.Background()
+	mockDB := &testutils.MockDatabase{
+		BucketScopes: map[string]models.BucketScope{
+			"org|project": {
+				Organization: "org",
+				ProjectID:    "project",
+				Bucket:       "old-bucket",
+				PathPrefix:   "old-prefix",
+			},
+		},
+	}
+	om := NewObjectManager(&coreTestDB{MockDatabase: mockDB}, nil)
+
+	if _, found, err := om.bucketCatalog.lookupBucketScope(ctx, "org", "project"); err != nil || !found {
+		t.Fatalf("expected initial scope lookup to succeed, found=%t err=%v", found, err)
+	}
+	if err := om.DeleteBucketScope(ctx, "org", "project", "old-bucket", "old-prefix"); err != nil {
+		t.Fatalf("delete bucket scope failed: %v", err)
+	}
+	mockDB.BucketScopes["org|project"] = models.BucketScope{
+		Organization: "org",
+		ProjectID:    "project",
+		Bucket:       "new-bucket",
+		PathPrefix:   "new-prefix",
+	}
+
+	scope, found, err := om.bucketCatalog.lookupBucketScope(ctx, "org", "project")
+	if err != nil {
+		t.Fatalf("lookup after invalidation failed: %v", err)
+	}
+	if !found || scope.Bucket != "new-bucket" || scope.PathPrefix != "new-prefix" {
+		t.Fatalf("expected lookup to observe replacement scope, got scope=%+v found=%t", scope, found)
+	}
+	if mockDB.GetBucketScopeCalls != 2 {
+		t.Fatalf("expected cache invalidation to force a second database lookup, got %d", mockDB.GetBucketScopeCalls)
+	}
+}
+
 func TestObjectManagerBulkReadFiltering(t *testing.T) {
 	db := &coreTestDB{
 		MockDatabase: &testutils.MockDatabase{
@@ -401,7 +459,7 @@ func TestObjectManagerLifecycleAuthorization(t *testing.T) {
 	})
 
 	t.Run("replace requires current update and new grant create with read", func(t *testing.T) {
-		database := db.NewInMemoryDB()
+		database := testutils.NewInMemoryDB()
 		om := NewObjectManager(database, &capturingURLManager{})
 		if err := om.RegisterObjects(context.Background(), []models.InternalObject{{
 			DrsObject:      drs.DrsObject{Id: "obj"},
