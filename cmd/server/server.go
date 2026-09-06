@@ -24,6 +24,8 @@ import (
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/persistence/postgres"
 	"github.com/calypr/syfon/internal/persistence/sqlite"
+	"github.com/calypr/syfon/internal/storage"
+	"github.com/calypr/syfon/internal/transfers"
 	"github.com/calypr/syfon/internal/usage"
 )
 
@@ -52,8 +54,9 @@ func serviceInfoForBackend(sqlite bool) drs.Service {
 type serverBackend struct {
 	dependencies       core.Dependencies
 	bucketDependencies buckets.Dependencies
-	fileUsage          usage.FileUsageReader
-	transferQuery      usage.TransferQuery
+	pending            transfers.PendingStore
+	usageIngest        usage.IngestStore
+	usageReports       usage.ReportStore
 }
 
 func newServerObjectService(ports core.ObjectPorts) *objects.Service {
@@ -81,14 +84,13 @@ func sqliteServerBackend(database *sqlite.SqliteDB) serverBackend {
 				Aliases: database, Content: database, ChecksumScope: database, Scope: database,
 				Resources: database, Pages: database, URLPages: database, Authorized: database,
 			},
-			Transfers: core.TransferPorts{Pending: database, Events: database},
-			Usage:     core.UsagePorts{Counters: database, ProviderEvents: database},
 		},
 		bucketDependencies: buckets.Dependencies{
 			Credentials: database, CredentialAdmin: database, Scopes: database, Visibility: database,
 		},
-		fileUsage:     database,
-		transferQuery: database,
+		pending:      database,
+		usageIngest:  database,
+		usageReports: database,
 	}
 }
 
@@ -100,14 +102,13 @@ func postgresServerBackend(database *postgres.PostgresDB) serverBackend {
 				Aliases: database, Content: database, ChecksumScope: database, Scope: database,
 				Resources: database, Pages: database, URLPages: database, Authorized: database,
 			},
-			Transfers: core.TransferPorts{Pending: database, Events: database},
-			Usage:     core.UsagePorts{Counters: database, ProviderEvents: database},
 		},
 		bucketDependencies: buckets.Dependencies{
 			Credentials: database, CredentialAdmin: database, Scopes: database, Visibility: database,
 		},
-		fileUsage:     database,
-		transferQuery: database,
+		pending:      database,
+		usageIngest:  database,
+		usageReports: database,
 	}
 }
 
@@ -175,6 +176,7 @@ var Cmd = &cobra.Command{
 
 		needsStorage := cfg.Routes.Ga4gh || cfg.Routes.Internal || cfg.Routes.LFS
 		var invalidator *storageInvalidator
+		var storageManager *storage.Manager
 		if needsStorage {
 			invalidator = &storageInvalidator{}
 		}
@@ -190,7 +192,8 @@ var Cmd = &cobra.Command{
 		backend.dependencies.BucketService = bucketService
 
 		if needsStorage {
-			storageManager, storageErr := newStorageManager(bucketService, "/", logger)
+			var storageErr error
+			storageManager, storageErr = newStorageManager(bucketService, "/", logger)
 			if storageErr != nil {
 				fatal("failed to initialize storage manager", "err", storageErr)
 			}
@@ -231,6 +234,19 @@ var Cmd = &cobra.Command{
 
 		// Init unified Object Manager.
 		objectService := newServerObjectService(backend.dependencies.Objects)
+		usageService := usage.NewService(usage.Dependencies{
+			Ingest:  backend.usageIngest,
+			Reports: backend.usageReports,
+			Objects: objectService,
+		})
+		transferService := transfers.NewService(transfers.Dependencies{
+			Access:      storageManager,
+			Multipart:   storageManager,
+			Scopes:      bucketService,
+			Credentials: bucketService,
+			Pending:     backend.pending,
+			Events:      usageService.Ingest(),
+		})
 		om := core.NewObjectManager(backend.dependencies)
 
 		// Build Fiber runtime and middleware pipeline.
@@ -261,11 +277,10 @@ var Cmd = &cobra.Command{
 		rt := &serverRuntime{
 			app:                 app,
 			cfg:                 cfg,
-			fileUsage:           backend.fileUsage,
-			transferQuery:       backend.transferQuery,
-			providerEvents:      backend.dependencies.Usage.ProviderEvents,
 			serviceInfo:         serviceInfoForBackend(cfg.Database.Sqlite != nil),
 			objectService:       objectService,
+			transferService:     transferService,
+			usageService:        usageService,
 			om:                  om,
 			bucketService:       bucketService,
 			authzMiddleware:     authzMiddleware,

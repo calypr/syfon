@@ -43,8 +43,6 @@ func storagePorts(manager *storage.Manager) core.StoragePorts {
 		return core.StoragePorts{}
 	}
 	return core.StoragePorts{
-		Access:    manager,
-		Multipart: manager,
 		Probe:     manager,
 		Inventory: manager,
 		Delete:    manager,

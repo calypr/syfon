@@ -21,11 +21,11 @@ func TestStorageCompositionSharesOneManagerAcrossCorePorts(t *testing.T) {
 		t.Fatalf("newStorageManager: %v", err)
 	}
 	ports := storagePorts(manager)
-	if ports.Access != manager || ports.Multipart != manager || ports.Probe != manager || ports.Inventory != manager || ports.Delete != manager {
+	if ports.Probe != manager || ports.Inventory != manager || ports.Delete != manager {
 		t.Fatalf("storage ports do not share one manager: %+v", ports)
 	}
 
-	access, err := ports.Access.Access(context.Background(), storage.AccessRequest{
+	access, err := manager.Access(context.Background(), storage.AccessRequest{
 		Target: storage.AccessTarget{Location: "s3://bucket/object"},
 	})
 	if err != nil {

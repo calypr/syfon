@@ -7,7 +7,6 @@ import (
 	"github.com/calypr/syfon/internal/persistence/sqlite"
 	"github.com/calypr/syfon/internal/testutils"
 	"github.com/calypr/syfon/internal/transfers"
-	"github.com/calypr/syfon/internal/usage"
 )
 
 type testObjectManagerFixture struct {
@@ -16,18 +15,16 @@ type testObjectManagerFixture struct {
 	transferService *transfers.Service
 }
 
-func testObjectManager(backend any, storagePorts core.StoragePorts) *testObjectManagerFixture {
+func testObjectManager(backend any, storageAccess transfers.AccessPort) *testObjectManagerFixture {
 	deps := testDependencies(backend)
-	deps.Storage = storagePorts
 	return &testObjectManagerFixture{
 		ObjectManager: core.NewObjectManager(deps),
 		objectService: newObjectService(deps.Objects),
 		transferService: transfers.NewService(transfers.Dependencies{
-			Access:      storagePorts.Access,
-			Multipart:   storagePorts.Multipart,
+			Access:      storageAccess,
 			Scopes:      deps.BucketService,
 			Credentials: deps.BucketService,
-			Events:      deps.Transfers.Events,
+			Events:      backend.(transfers.EventRecorder),
 		}),
 	}
 }
@@ -67,10 +64,6 @@ func testDependencies(backend any) core.Dependencies {
 		credentialAdmin buckets.CredentialAdmin
 		scopes          buckets.ScopeStore
 		visibility      buckets.VisibilityQuery
-		pending         transfers.PendingStore
-		events          transfers.EventRecorder
-		counters        usage.FileCounterRecorder
-		providerEvents  usage.ProviderEventRecorder
 	)
 
 	switch db := backend.(type) {
@@ -79,13 +72,11 @@ func testDependencies(backend any) core.Dependencies {
 		aliases, content, checksumScope, scope = db, db, db, db
 		resources = db
 		credentials, credentialAdmin, scopes = db, db, db
-		pending, events, counters, providerEvents = db, db, db, db
 	case *sqlite.SqliteDB:
 		reader, writer, accessMethods, accessPolicy = db, db, db, db
 		aliases, content, checksumScope, scope = db, db, db, db
 		resources, pages, urlPages, authorized = db, db, db, db
 		credentials, credentialAdmin, scopes, visibility = db, db, db, db
-		pending, events, counters, providerEvents = db, db, db, db
 	default:
 		panic("unsupported DRS test backend")
 	}
@@ -117,7 +108,5 @@ func testDependencies(backend any) core.Dependencies {
 	return core.Dependencies{
 		Objects:       objectPorts,
 		BucketService: bucketService,
-		Transfers:     core.TransferPorts{Pending: pending, Events: events},
-		Usage:         core.UsagePorts{Counters: counters, ProviderEvents: providerEvents},
 	}
 }

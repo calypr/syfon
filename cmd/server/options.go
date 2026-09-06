@@ -5,13 +5,14 @@ import (
 	"github.com/calypr/syfon/internal/api/docs"
 	"github.com/calypr/syfon/internal/api/drsapi"
 	"github.com/calypr/syfon/internal/api/internaldrs"
-	"github.com/calypr/syfon/internal/api/lfs"
-	"github.com/calypr/syfon/internal/api/metrics"
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/config"
 	"github.com/calypr/syfon/internal/core"
+	"github.com/calypr/syfon/internal/httpapi/lfs"
+	"github.com/calypr/syfon/internal/httpapi/metrics"
 	"github.com/calypr/syfon/internal/httpapi/middleware"
 	"github.com/calypr/syfon/internal/objects"
+	"github.com/calypr/syfon/internal/transfers"
 	"github.com/calypr/syfon/internal/usage"
 	"github.com/gofiber/fiber/v3"
 )
@@ -19,11 +20,10 @@ import (
 type serverRuntime struct {
 	app                 *fiber.App
 	cfg                 *config.Config
-	fileUsage           usage.FileUsageReader
-	transferQuery       usage.TransferQuery
-	providerEvents      usage.ProviderEventRecorder
 	serviceInfo         drs.Service
 	objectService       *objects.Service
+	transferService     *transfers.Service
+	usageService        *usage.Service
 	om                  *core.ObjectManager
 	bucketService       *buckets.Service
 	authzMiddleware     *middleware.AuthzMiddleware
@@ -50,26 +50,31 @@ func WithDocsRoutes() ServerOption {
 func WithGa4ghRoutes() ServerOption {
 	return func(rt *serverRuntime) {
 		api := rt.ensureAPIGroup().Group("/ga4gh/drs/v1")
-		drsapi.RegisterDRSRoutes(api, rt.objectService, rt.om, rt.serviceInfo)
+		drsapi.RegisterDRSRoutes(api, rt.objectService, rt.transferService, rt.serviceInfo)
 	}
 }
 
 func WithMetricsRoutes() ServerOption {
 	return func(rt *serverRuntime) {
-		metrics.RegisterMetricsRoutes(rt.ensureAPIGroup(), rt.fileUsage, rt.transferQuery, rt.providerEvents, rt.objectService)
+		metrics.RegisterMetricsRoutes(rt.ensureAPIGroup(), rt.usageService.Reports(), rt.usageService.Ingest())
 	}
 }
 
 func WithInternalRoutes() ServerOption {
 	return func(rt *serverRuntime) {
 		api := rt.ensureAPIGroup()
-		internaldrs.RegisterInternalRoutes(api, rt.objectService, rt.om, rt.bucketService)
+		internaldrs.RegisterInternalRoutes(api, rt.objectService, rt.om, rt.transferService, rt.usageService.Ingest(), rt.bucketService)
 	}
 }
 
 func WithLFSRoutes() ServerOption {
 	return func(rt *serverRuntime) {
-		lfs.RegisterLFSRoutes(rt.ensureAPIGroup(), rt.objectService, rt.om, lfs.Options{
+		lfs.RegisterLFSRoutes(rt.ensureAPIGroup(), lfs.Dependencies{
+			ObjectService:   rt.objectService,
+			TransferService: rt.transferService,
+			FileCounters:    rt.usageService.Ingest(),
+			Credentials:     rt.bucketService,
+		}, lfs.Options{
 			MaxBatchObjects:              rt.cfg.LFS.MaxBatchObjects,
 			MaxBatchBodyBytes:            rt.cfg.LFS.MaxBatchBodyBytes,
 			RequestLimitPerMinute:        rt.cfg.LFS.RequestLimitPerMinute,

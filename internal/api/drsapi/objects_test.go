@@ -14,7 +14,6 @@ import (
 	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/common"
-	"github.com/calypr/syfon/internal/core"
 	httpdrs "github.com/calypr/syfon/internal/httpapi/drs"
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/storage"
@@ -83,7 +82,7 @@ func TestDRSHandlers(t *testing.T) {
 		},
 	}
 	storageAccess := &captureStorageAccess{}
-	om := testObjectManager(db, core.StoragePorts{Access: storageAccess})
+	om := testObjectManager(db, storageAccess)
 	app := fiber.New()
 	RegisterDRSRoutes(app, om.objectService, om.transferService, testServiceInfo())
 
@@ -170,7 +169,7 @@ func TestDRSHandlers(t *testing.T) {
 			},
 		}
 		storageAccess := &captureStorageAccess{}
-		om := testObjectManager(db, core.StoragePorts{Access: storageAccess})
+		om := testObjectManager(db, storageAccess)
 		app := fiber.New()
 		RegisterDRSRoutes(app, om.objectService, om.transferService, testServiceInfo())
 
@@ -324,7 +323,7 @@ func TestAdditionalDRSHandlers(t *testing.T) {
 			},
 		},
 	}
-	om := testObjectManager(db, core.StoragePorts{})
+	om := testObjectManager(db, nil)
 	app := fiber.New()
 	RegisterDRSRoutes(app, om.objectService, om.transferService, testServiceInfo())
 
@@ -463,7 +462,7 @@ func TestAdditionalDRSHandlers(t *testing.T) {
 
 func TestChecksumRouteRegression_WithRealCoreAndDB(t *testing.T) {
 	database := testutils.NewInMemoryDB()
-	om := testObjectManager(database, core.StoragePorts{})
+	om := testObjectManager(database, nil)
 	checksum := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 	controlled := []string{"/organization/testorg/project/testproj"}
