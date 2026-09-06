@@ -46,11 +46,10 @@ const (
 )
 
 const (
-	storageListCoalesceThreshold     = 25
-	storageListFallbackObjectLimit   = 5000
-	storageListSlowExactThreshold    = time.Second
-	storageListSlowPrefixThreshold   = 3 * time.Second
-	storagePrefixListLoggingDisabled = "disabled"
+	storageListCoalesceThreshold   = 25
+	storageListFallbackObjectLimit = 5000
+	storageListSlowExactThreshold  = time.Second
+	storageListSlowPrefixThreshold = 3 * time.Second
 )
 
 type ProjectStorageSummary struct {
@@ -261,15 +260,6 @@ func (target *resolvedStorageScopeTarget) withPathPrefix(pathPrefix string) *res
 	return &copyTarget
 }
 
-func withStoragePrefixListLogging(ctx context.Context, mode string) context.Context {
-	return context.WithValue(ctx, contextKey("storagePrefixListLogging"), strings.TrimSpace(mode))
-}
-
-func storagePrefixListLoggingEnabled(ctx context.Context) bool {
-	mode, _ := ctx.Value(contextKey("storagePrefixListLogging")).(string)
-	return strings.TrimSpace(mode) != storagePrefixListLoggingDisabled
-}
-
 func normalizeProjectStorageInspectMode(mode ProjectStorageInspectMode) ProjectStorageInspectMode {
 	switch mode {
 	case ProjectStorageInspectExists, ProjectStorageInspectSummary:
@@ -467,7 +457,6 @@ func uniqueStorageObjectURLs(values []string) []string {
 func (m *ObjectManager) ListValidateStorageObjects(ctx context.Context, items []StorageListValidationRequest) []StorageListValidationResult {
 	started := time.Now()
 	ctx = WithStorageInspectCache(ctx)
-	ctx = withStoragePrefixListLogging(ctx, storagePrefixListLoggingDisabled)
 	if len(items) == 0 {
 		log.Printf("INFO: syfon_bulk_list_validate_done items=0 duration_ms=0")
 		return []StorageListValidationResult{}
