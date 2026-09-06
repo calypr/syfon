@@ -9,10 +9,9 @@ import (
 	"testing"
 
 	"github.com/calypr/syfon/apigen/server/internalapi"
-	"github.com/calypr/syfon/internal/common"
+	"github.com/calypr/syfon/internal/httpapi/transfers/testutils"
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/storage"
-	"github.com/calypr/syfon/internal/testutils"
 )
 
 type captureURLManager struct {
@@ -56,8 +55,8 @@ func TestHandleInternalDownload(t *testing.T) {
 	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(common.StringVal(resp.Url), "signed=true") {
-		t.Fatalf("expected signed url, got %v", common.StringVal(resp.Url))
+	if !strings.Contains(stringValue(resp.Url), "signed=true") {
+		t.Fatalf("expected signed url, got %v", stringValue(resp.Url))
 	}
 	if got, want := um.lastOptions.DownloadFilename, "LP6008050-DNA_B01__pv.2.0o__rg.grch38__alleleFrequencies_chr17.txt"; got != want {
 		t.Fatalf("unexpected download filename override: got %q want %q", got, want)

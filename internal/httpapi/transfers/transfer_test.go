@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/calypr/syfon/apigen/server/internalapi"
-	"github.com/calypr/syfon/internal/testutils"
+	"github.com/calypr/syfon/internal/httpapi/transfers/testutils"
 	"github.com/gofiber/fiber/v3"
 )
 

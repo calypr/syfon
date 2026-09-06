@@ -14,10 +14,9 @@ import (
 	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/apigen/server/internalapi"
 	"github.com/calypr/syfon/internal/buckets"
-	"github.com/calypr/syfon/internal/common"
 	httpdrs "github.com/calypr/syfon/internal/httpapi/drs"
+	"github.com/calypr/syfon/internal/httpapi/transfers/testutils"
 	"github.com/calypr/syfon/internal/objects"
-	"github.com/calypr/syfon/internal/testutils"
 )
 
 func TestHandleInternalUploadBlank(t *testing.T) {
@@ -37,8 +36,8 @@ func TestHandleInternalUploadBlank(t *testing.T) {
 	}
 	var resp internalapi.InternalUploadBlankOutput
 	_ = json.NewDecoder(rr.Body).Decode(&resp)
-	if _, err := uuid.Parse(common.StringVal(resp.Guid)); err != nil {
-		t.Fatalf("expected minted UUID, got %q", common.StringVal(resp.Guid))
+	if _, err := uuid.Parse(stringValue(resp.Guid)); err != nil {
+		t.Fatalf("expected minted UUID, got %q", stringValue(resp.Guid))
 	}
 }
 

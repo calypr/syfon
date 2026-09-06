@@ -14,7 +14,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/calypr/syfon/apigen/server/internalapi"
-	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/config"
 	"github.com/calypr/syfon/internal/faults"
 	apimiddleware "github.com/calypr/syfon/internal/httpapi/middleware"
@@ -25,6 +24,13 @@ import (
 	domaintransfers "github.com/calypr/syfon/internal/transfers"
 	"github.com/calypr/syfon/internal/usage"
 )
+
+func stringValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
 
 var multipartUploadSessions sync.Map
 
@@ -175,7 +181,7 @@ func handleInternalUploadBlankFiber(transferService *domaintransfers.Service) fi
 			guid = uuid.New().String()
 		}
 
-		target, err := resolveUploadTarget(c.Context(), transferService, common.StringVal(req.Organization), common.StringVal(req.Project), guid)
+		target, err := resolveUploadTarget(c.Context(), transferService, stringValue(req.Organization), stringValue(req.Project), guid)
 		if err != nil {
 			return response.HandleError(c, err)
 		}
@@ -216,12 +222,12 @@ func handleInternalUploadURLFiber(objectService *objects.Service, transferServic
 		)
 		if obj != nil {
 			var target domaintransfers.CanonicalStorageTarget
-			if strings.TrimSpace(common.StringVal(params.Organization)) != "" {
-				target, err = resolveUploadTarget(c.Context(), transferService, common.StringVal(params.Organization), common.StringVal(params.Project), uploadKeyForExistingObject(obj, params))
+			if strings.TrimSpace(stringValue(params.Organization)) != "" {
+				target, err = resolveUploadTarget(c.Context(), transferService, stringValue(params.Organization), stringValue(params.Project), uploadKeyForExistingObject(obj, params))
 			} else {
 				target, err = transferService.ResolveCanonicalStorageTarget(c.Context(), domaintransfers.CanonicalStorageTargetRequest{
 					Object:         obj,
-					Key:            strings.TrimSpace(common.StringVal(params.Key)),
+					Key:            strings.TrimSpace(stringValue(params.Key)),
 					PreferChecksum: true,
 				})
 			}
@@ -241,10 +247,10 @@ func handleInternalUploadURLFiber(objectService *objects.Service, transferServic
 			}
 			return c.JSON(internalapi.InternalSignedURL{Url: &signedURL})
 		} else {
-			if requestedKey := strings.Trim(strings.TrimSpace(firstNonEmpty(common.StringVal(params.Key), c.Query("key"))), "/"); requestedKey != "" {
+			if requestedKey := strings.Trim(strings.TrimSpace(firstNonEmpty(stringValue(params.Key), c.Query("key"))), "/"); requestedKey != "" {
 				key = requestedKey
 			}
-			target, err := resolveUploadTarget(c.Context(), transferService, common.StringVal(params.Organization), common.StringVal(params.Project), key)
+			target, err := resolveUploadTarget(c.Context(), transferService, stringValue(params.Organization), stringValue(params.Project), key)
 			if err != nil {
 				return response.HandleError(c, err)
 			}
@@ -272,7 +278,7 @@ func handleInternalUploadURLFiber(objectService *objects.Service, transferServic
 }
 
 func uploadKeyForExistingObject(obj *objects.Record, params internalapi.InternalUploadURLParams) string {
-	if key := strings.Trim(strings.TrimSpace(common.StringVal(params.Key)), "/"); key != "" {
+	if key := strings.Trim(strings.TrimSpace(stringValue(params.Key)), "/"); key != "" {
 		return key
 	}
 	if obj != nil {
@@ -337,7 +343,7 @@ func handleInternalUploadBulkFiber(objectService *objects.Service, transferServi
 
 			target, err := transferService.ResolveCanonicalStorageTarget(c.Context(), domaintransfers.CanonicalStorageTargetRequest{
 				Object:         obj,
-				Key:            strings.TrimSpace(common.StringVal(item.Key)),
+				Key:            strings.TrimSpace(stringValue(item.Key)),
 				PreferChecksum: true,
 			})
 			if err != nil {
@@ -403,7 +409,7 @@ func handleInternalMultipartInitFiber(objectService *objects.Service, transferSe
 		}
 
 		if strings.Contains(key, "/") {
-			target, err := resolveUploadTarget(c.Context(), transferService, common.StringVal(req.Organization), common.StringVal(req.Project), key)
+			target, err := resolveUploadTarget(c.Context(), transferService, stringValue(req.Organization), stringValue(req.Project), key)
 			if err != nil {
 				return response.HandleError(c, err)
 			}
@@ -447,7 +453,7 @@ func handleInternalMultipartInitFiber(objectService *objects.Service, transferSe
 		}
 
 		if bucket == "" {
-			target, err := resolveUploadTarget(c.Context(), transferService, common.StringVal(req.Organization), common.StringVal(req.Project), internalID)
+			target, err := resolveUploadTarget(c.Context(), transferService, stringValue(req.Organization), stringValue(req.Project), internalID)
 			if err != nil {
 				return response.HandleError(c, err)
 			}
