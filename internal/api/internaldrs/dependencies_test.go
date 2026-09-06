@@ -4,6 +4,7 @@ import (
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/maintenance/projectstorage"
+	"github.com/calypr/syfon/internal/maintenance/scoperepair"
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/transfers"
 	"github.com/calypr/syfon/internal/usage"
@@ -11,11 +12,12 @@ import (
 
 type internalDRSTestFixture struct {
 	*core.ObjectManager
-	ObjectService   *objects.Service
-	TransferService *transfers.Service
-	FileCounters    usage.FileCounterRecorder
-	bucketService   *buckets.Service
-	projectService *projectstorage.Service
+	ObjectService      *objects.Service
+	TransferService    *transfers.Service
+	FileCounters       usage.FileCounterRecorder
+	bucketService      *buckets.Service
+	projectService     *projectstorage.Service
+	scopeRepairService *scoperepair.Service
 }
 
 func newInternalDRSObjectManager(store any, storageDependency any) internalDRSTestFixture {
@@ -63,7 +65,7 @@ func newInternalDRSObjectManager(store any, storageDependency any) internalDRSTe
 		ObjectManager: core.NewObjectManager(core.Dependencies{
 			Objects:       objectPorts,
 			BucketService: bucketService,
-		Storage:       storagePorts,
+			Storage:       storagePorts,
 		}),
 		ObjectService:   objectService,
 		TransferService: transferService,
@@ -79,6 +81,7 @@ func newInternalDRSObjectManager(store any, storageDependency any) internalDRSTe
 			objectService,
 			projectstorage.CleanupDependencies{Objects: objectService, Scopes: bucketService},
 		),
+		scopeRepairService: NewScopeRepairService(objectService, bucketService, storagePorts.Probe),
 	}
 }
 

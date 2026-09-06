@@ -364,7 +364,7 @@ func TestHandleInternalPutBucket_ReusesExistingPhysicalBucketCredential(t *testi
 func TestRegisterInternalRoutes_Smoke(t *testing.T) {
 	app := fiber.New()
 	om := newInternalDRSObjectManager(&testutils.MockDatabase{Objects: map[string]*objects.Record{}, Credentials: map[string]buckets.Credential{"b1": {Bucket: "b1"}}}, &internalDRSStorageFake{})
-	RegisterInternalRoutes(app, om.ObjectService, om.ObjectManager, om.TransferService, om.FileCounters, om.bucketService)
+	RegisterInternalRoutes(app, om.ObjectService, om.ObjectManager, om.TransferService, om.FileCounters, om.bucketService, om.projectService, om.scopeRepairService)
 	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/data/upload/abc?bucket=b1", nil))
 	if err != nil {
 		t.Fatalf("request failed: %v", err)

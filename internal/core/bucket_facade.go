@@ -35,9 +35,5 @@ func (m *ObjectManager) DeleteBucketScope(ctx context.Context, organization, pro
 }
 
 func (m *ObjectManager) ListVisibleBuckets(ctx context.Context) (map[string]buckets.VisibleBucket, error) {
-	return m.listVisibleBucketsCached(ctx)
-}
-
-func (m *ObjectManager) listVisibleBucketsUncached(ctx context.Context) (map[string]buckets.VisibleBucket, error) {
 	return m.bucketService.ListVisibleBuckets(ctx)
 }

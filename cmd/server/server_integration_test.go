@@ -20,6 +20,7 @@ import (
 	"github.com/calypr/syfon/internal/config"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/credentialcipher"
+	"github.com/calypr/syfon/internal/maintenance/projectstorage"
 	"github.com/calypr/syfon/internal/testutils"
 	"github.com/calypr/syfon/internal/transfers"
 	"github.com/calypr/syfon/internal/usage"
@@ -139,7 +140,9 @@ s3_credentials:
 		Pending: backend.pending, Events: usageService.Ingest(),
 	})
 	om := core.NewObjectManager(backend.dependencies)
-	internaldrs.RegisterInternalRoutes(app, objectService, om, transferService, usageService.Ingest(), bucketService)
+	projectStorageService := projectstorage.NewService(bucketService, bucketService, bucketService, backend.dependencies.Storage.Inventory, backend.dependencies.Storage.Probe, backend.dependencies.Storage.Delete, objectService, projectstorage.CleanupDependencies{Objects: objectService, Scopes: bucketService})
+	scopeRepairService := internaldrs.NewScopeRepairService(objectService, bucketService, storageManager)
+	internaldrs.RegisterInternalRoutes(app, objectService, om, transferService, usageService.Ingest(), bucketService, projectStorageService, scopeRepairService)
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

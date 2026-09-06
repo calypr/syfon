@@ -18,6 +18,8 @@ import (
 	"github.com/calypr/syfon/internal/faults"
 	apimiddleware "github.com/calypr/syfon/internal/httpapi/middleware"
 	httprecords "github.com/calypr/syfon/internal/httpapi/records"
+	"github.com/calypr/syfon/internal/maintenance/projectstorage"
+	"github.com/calypr/syfon/internal/maintenance/scoperepair"
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/transfers"
 	"github.com/calypr/syfon/internal/usage"
@@ -31,7 +33,7 @@ const (
 	maxInternalBulkOverwrite     = 1000
 )
 
-func RegisterInternalRoutes(router fiber.Router, objectService *objects.Service, om *core.ObjectManager, transferService *transfers.Service, fileCounters usage.FileCounterRecorder, bucketService *buckets.Service) {
+func RegisterInternalRoutes(router fiber.Router, objectService *objects.Service, om *core.ObjectManager, transferService *transfers.Service, fileCounters usage.FileCounterRecorder, bucketService *buckets.Service, projectStorageService *projectstorage.Service, scopeRepairService *scoperepair.Service) {
 	router.Get("/", handleInternalListFiber(objectService))
 	router.Get(common.RouteInternalIndex, handleInternalListFiber(objectService))
 	router.Get(routeutil.FiberPath(common.RouteInternalIndexDetail), handleInternalGetFiber(objectService))
@@ -50,10 +52,10 @@ func RegisterInternalRoutes(router fiber.Router, objectService *objects.Service,
 	router.Put("/index/bulk/overwrite", handleInternalBulkOverwriteFiber(objectService))
 	router.Post(common.RouteInternalBulkDocs, handleInternalBulkDocumentsFiber(objectService))
 	router.Post(common.RouteInternalBulkDeleteHashes, handleInternalBulkDeleteFiber(objectService))
-	router.Post(common.RouteInternalRepairScopeAudit, handleInternalScopeRepairAuditFiber(om))
-	router.Post(common.RouteInternalRepairScopeApply, handleInternalScopeRepairApplyFiber(om))
+	router.Post(common.RouteInternalRepairScopeAudit, handleInternalScopeRepairAuditFiber(scopeRepairService))
+	router.Post(common.RouteInternalRepairScopeApply, handleInternalScopeRepairApplyFiber(scopeRepairService))
 
-	registerInternalTransferRoutes(router, om, objectService, transferService, fileCounters, bucketService)
+	registerInternalTransferRoutes(router, om, objectService, transferService, fileCounters, bucketService, projectStorageService)
 }
 
 type bulkOverwriteRequest struct {

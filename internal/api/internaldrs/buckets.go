@@ -18,15 +18,15 @@ import (
 	"github.com/calypr/syfon/internal/storage/address"
 )
 
-func registerInternalBucketRoutes(router fiber.Router, om *core.ObjectManager, bucketService *buckets.Service, projectServices ...*projectstorage.Service) {
+func registerInternalBucketRoutes(router fiber.Router, om *core.ObjectManager, bucketService *buckets.Service, projectService *projectstorage.Service) {
 	router.Get(common.RouteInternalBuckets, func(c fiber.Ctx) error { return handleInternalBucketsFiber(c, bucketService) })
 	router.Put(common.RouteInternalBuckets, func(c fiber.Ctx) error { return handleInternalPutBucketFiber(c, bucketService) })
 	router.Delete(routeutil.FiberPath(common.RouteInternalBucketDetail), func(c fiber.Ctx) error { return handleInternalDeleteBucketFiber(c, bucketService) })
 	router.Get(routeutil.FiberPath(common.RouteInternalBucketScopes), func(c fiber.Ctx) error { return handleInternalListBucketScopesFiber(c, bucketService) })
 	router.Post(routeutil.FiberPath(common.RouteInternalBucketScopes), func(c fiber.Ctx) error { return handleInternalCreateBucketScopeFiber(c, bucketService) })
 	router.Delete(routeutil.FiberPath(common.RouteInternalBucketScopes), func(c fiber.Ctx) error { return handleInternalDeleteBucketScopeFiber(c, bucketService) })
-	if len(projectServices) > 0 && projectServices[0] != nil {
-		router.Delete(routeutil.FiberPath(common.RouteInternalProjectCleanup), func(c fiber.Ctx) error { return handleInternalDeleteProjectFiber(c, projectServices[0]) })
+	if projectService != nil {
+		router.Delete(routeutil.FiberPath(common.RouteInternalProjectCleanup), func(c fiber.Ctx) error { return handleInternalDeleteProjectFiber(c, projectService) })
 	}
 }
 

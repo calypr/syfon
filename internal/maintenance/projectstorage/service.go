@@ -150,8 +150,8 @@ func (s *Service) AuditProjectRecords(ctx context.Context, organization, project
 }
 
 func projectRecordFromRecord(record objects.Record, organization, project string) (ProjectRecordAudit, bool) {
-	checksum, ok := objects.CanonicalSHA256(record.Checksums)
-	if !ok || strings.TrimSpace(checksum) == "" {
+	checksum := primarySHA256Checksum(record.Checksums)
+	if checksum == "" {
 		return ProjectRecordAudit{}, false
 	}
 	item := ProjectRecordAudit{ObjectID: string(record.Id), Checksum: checksum, Organization: organization, Project: project, Size: record.Size, CreatedTime: record.CreatedTime}
@@ -182,6 +182,18 @@ func projectRecordFromRecord(record objects.Record, organization, project string
 		}
 	}
 	return item, true
+}
+
+func primarySHA256Checksum(checksums []objects.Checksum) string {
+	for _, checksum := range checksums {
+		if strings.EqualFold(strings.TrimSpace(checksum.Type), "sha256") {
+			value := strings.TrimSpace(strings.TrimPrefix(checksum.Checksum, "sha256:"))
+			if value != "" {
+				return value
+			}
+		}
+	}
+	return ""
 }
 
 func projectRecordMatchesPrefix(record ProjectRecordAudit, prefixes ...string) bool {

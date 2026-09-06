@@ -25,6 +25,7 @@ import (
 	"github.com/calypr/syfon/internal/config"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/httpapi/metrics"
+	"github.com/calypr/syfon/internal/maintenance/projectstorage"
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/storage"
 	"github.com/calypr/syfon/internal/testutils"
@@ -394,7 +395,9 @@ func newSyfonTestServer(t *testing.T) *fiberTestServer {
 	})
 	docs.RegisterSwaggerRoutes(app)
 	metrics.RegisterMetricsRoutes(api, usageService.Reports(), usageService.Ingest())
-	internaldrs.RegisterInternalRoutes(api, objectService, om, transferService, usageService.Ingest(), bucketService)
+	projectStorageService := projectstorage.NewService(bucketService, bucketService, bucketService, nil, nil, nil, objectService, projectstorage.CleanupDependencies{Objects: objectService, Scopes: bucketService})
+	scopeRepairService := internaldrs.NewScopeRepairService(objectService, bucketService, nil)
+	internaldrs.RegisterInternalRoutes(api, objectService, om, transferService, usageService.Ingest(), bucketService, projectStorageService, scopeRepairService)
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

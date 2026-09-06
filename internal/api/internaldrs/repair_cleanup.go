@@ -92,10 +92,9 @@ func handleInternalScopeRepairApplyFiber(svc *scoperepair.Service) fiber.Handler
 	}
 }
 
-// newScopeRepairService is the temporary internaldrs composition point. The
-// route owner supplies the already-composed object, bucket, and storage
-// services; the repair use case sees only its five narrow ports.
-func newScopeRepairService(objectService *objects.Service, bucketService *buckets.Service, storageManager *storage.Manager) *scoperepair.Service {
+// NewScopeRepairService adapts the composed object, bucket, and storage
+// services to the maintenance service's narrow ports.
+func NewScopeRepairService(objectService *objects.Service, bucketService *buckets.Service, storageManager storageProbe) *scoperepair.Service {
 	adapter := scopeRepairIndexAdapter{service: objectService}
 	return scoperepair.NewService(
 		adapter,

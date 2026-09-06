@@ -16,11 +16,13 @@ import (
 
 	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/access/authentication"
+	"github.com/calypr/syfon/internal/api/internaldrs"
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/config"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/credentialcipher"
 	"github.com/calypr/syfon/internal/httpapi/middleware"
+	"github.com/calypr/syfon/internal/maintenance/projectstorage"
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/persistence/postgres"
 	"github.com/calypr/syfon/internal/persistence/sqlite"
@@ -247,6 +249,17 @@ var Cmd = &cobra.Command{
 			Pending:     backend.pending,
 			Events:      usageService.Ingest(),
 		})
+		projectStorageService := projectstorage.NewService(
+			bucketService,
+			bucketService,
+			bucketService,
+			backend.dependencies.Storage.Inventory,
+			backend.dependencies.Storage.Probe,
+			backend.dependencies.Storage.Delete,
+			objectService,
+			projectstorage.CleanupDependencies{Objects: objectService, Scopes: bucketService},
+		)
+		scopeRepairService := internaldrs.NewScopeRepairService(objectService, bucketService, storageManager)
 		om := core.NewObjectManager(backend.dependencies)
 
 		// Build Fiber runtime and middleware pipeline.
@@ -275,16 +288,18 @@ var Cmd = &cobra.Command{
 		requestIDMiddleware := middleware.NewRequestIDMiddleware(slogLogger)
 
 		rt := &serverRuntime{
-			app:                 app,
-			cfg:                 cfg,
-			serviceInfo:         serviceInfoForBackend(cfg.Database.Sqlite != nil),
-			objectService:       objectService,
-			transferService:     transferService,
-			usageService:        usageService,
-			om:                  om,
-			bucketService:       bucketService,
-			authzMiddleware:     authzMiddleware,
-			requestIDMiddleware: requestIDMiddleware,
+			app:                   app,
+			cfg:                   cfg,
+			serviceInfo:           serviceInfoForBackend(cfg.Database.Sqlite != nil),
+			objectService:         objectService,
+			transferService:       transferService,
+			usageService:          usageService,
+			projectStorageService: projectStorageService,
+			scopeRepairService:    scopeRepairService,
+			om:                    om,
+			bucketService:         bucketService,
+			authzMiddleware:       authzMiddleware,
+			requestIDMiddleware:   requestIDMiddleware,
 		}
 		applyServerOptions(rt, buildServerOptions(cfg)...)
 

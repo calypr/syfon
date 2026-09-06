@@ -11,6 +11,8 @@ import (
 	"github.com/calypr/syfon/internal/httpapi/lfs"
 	"github.com/calypr/syfon/internal/httpapi/metrics"
 	"github.com/calypr/syfon/internal/httpapi/middleware"
+	"github.com/calypr/syfon/internal/maintenance/projectstorage"
+	"github.com/calypr/syfon/internal/maintenance/scoperepair"
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/transfers"
 	"github.com/calypr/syfon/internal/usage"
@@ -18,17 +20,19 @@ import (
 )
 
 type serverRuntime struct {
-	app                 *fiber.App
-	cfg                 *config.Config
-	serviceInfo         drs.Service
-	objectService       *objects.Service
-	transferService     *transfers.Service
-	usageService        *usage.Service
-	om                  *core.ObjectManager
-	bucketService       *buckets.Service
-	authzMiddleware     *middleware.AuthzMiddleware
-	requestIDMiddleware *middleware.RequestIDMiddleware
-	apiGroup            fiber.Router
+	app                   *fiber.App
+	cfg                   *config.Config
+	serviceInfo           drs.Service
+	objectService         *objects.Service
+	transferService       *transfers.Service
+	usageService          *usage.Service
+	projectStorageService *projectstorage.Service
+	scopeRepairService    *scoperepair.Service
+	om                    *core.ObjectManager
+	bucketService         *buckets.Service
+	authzMiddleware       *middleware.AuthzMiddleware
+	requestIDMiddleware   *middleware.RequestIDMiddleware
+	apiGroup              fiber.Router
 }
 
 type ServerOption func(*serverRuntime)
@@ -63,7 +67,7 @@ func WithMetricsRoutes() ServerOption {
 func WithInternalRoutes() ServerOption {
 	return func(rt *serverRuntime) {
 		api := rt.ensureAPIGroup()
-		internaldrs.RegisterInternalRoutes(api, rt.objectService, rt.om, rt.transferService, rt.usageService.Ingest(), rt.bucketService)
+		internaldrs.RegisterInternalRoutes(api, rt.objectService, rt.om, rt.transferService, rt.usageService.Ingest(), rt.bucketService, rt.projectStorageService, rt.scopeRepairService)
 	}
 }
 
