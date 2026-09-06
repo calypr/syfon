@@ -153,7 +153,7 @@ func TestLFSBatchGen3MissingAuthReturns401(t *testing.T) {
 		c.SetContext(ctx)
 		return c.Next()
 	})
-	om := core.NewObjectManager(db, uM)
+	om := core.NewObjectManager(newLFSDependencies(db), uM)
 	RegisterLFSRoutes(app, om, DefaultOptions())
 	router := &fiberTestRouter{app: app}
 	body := map[string]any{

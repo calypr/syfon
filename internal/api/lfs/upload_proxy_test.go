@@ -48,7 +48,7 @@ func TestLFSUploadProxySuccess(t *testing.T) {
 	}
 	uM := &customMockUrlManager{uploadURL: uploadServer.URL}
 	app := fiber.New()
-	om := core.NewObjectManager(db, uM)
+	om := core.NewObjectManager(newLFSDependencies(db), uM)
 	RegisterLFSRoutes(app, om, DefaultOptions())
 	router := &fiberTestRouter{app: app}
 
@@ -120,7 +120,7 @@ func TestLFSUploadProxyUsesPendingScopedCanonicalLocation(t *testing.T) {
 	}
 	uM := &customMockUrlManager{uploadURL: uploadServer.URL}
 	app := fiber.New()
-	om := core.NewObjectManager(db, uM)
+	om := core.NewObjectManager(newLFSDependencies(db), uM)
 	RegisterLFSRoutes(app, om, DefaultOptions())
 	router := &fiberTestRouter{app: app}
 
