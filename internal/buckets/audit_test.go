@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/calypr/syfon/internal/access"
-	"github.com/calypr/syfon/internal/requestmeta"
+	"github.com/calypr/syfon/internal/requestid"
 )
 
 func TestAuditCredentialAccessPreservesFields(t *testing.T) {
@@ -18,9 +18,9 @@ func TestAuditCredentialAccessPreservesFields(t *testing.T) {
 	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
 	t.Cleanup(func() { slog.SetDefault(orig) })
 
-	ctx := requestmeta.WithRequestID(context.Background(), "req-abc")
-	AuditCredentialAccess(ctx, requestmeta.GetRequestID(ctx), "read", "bucket-a", nil)
-	AuditCredentialAccess(access.WithSession(ctx, access.NewSession("gen3")), requestmeta.GetRequestID(ctx), "write", "bucket-b", errors.New("boom"))
+	ctx := requestid.WithRequestID(context.Background(), "req-abc")
+	AuditCredentialAccess(ctx, requestid.GetRequestID(ctx), "read", "bucket-a", nil)
+	AuditCredentialAccess(access.WithSession(ctx, access.NewSession("gen3")), requestid.GetRequestID(ctx), "write", "bucket-b", errors.New("boom"))
 
 	out := buf.String()
 	for _, want := range []string{"s3 credential audit", "request_id=req-abc", "result=success", "result=error", "mode=gen3"} {

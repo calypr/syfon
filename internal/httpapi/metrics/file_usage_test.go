@@ -443,11 +443,10 @@ func TestFileUsageScopeHelpers(t *testing.T) {
 	reports := newMetricsReport(objectReader, nil, state)
 
 	service := usage.NewService(usage.Dependencies{
-		Ingest:  ingest,
 		Reports: reports,
 		Objects: objectReader,
 	})
-	server := NewMetricsServer(service.Reports(), service.Ingest())
+	server := NewMetricsServer(service.Reports(), ingest)
 	access := metricsAccess{organization: "org1", project: "p1"}
 
 	inside, err := server.objectInScope(context.Background(), "obj-a", access)
@@ -480,7 +479,7 @@ func TestFileUsageScopeHelpersUseUnpagedObjectMembership(t *testing.T) {
 		Reports: reports,
 		Objects: objectReader,
 	})
-	server := NewMetricsServer(service.Reports(), service.Ingest())
+	server := NewMetricsServer(service.Reports(), nil)
 	readable, err := server.readableBulkObjectIDs(context.Background(), metricsAccess{organization: "org", project: "project"}, []string{"object-1000"})
 	if err != nil {
 		t.Fatalf("readableBulkObjectIDs error: %v", err)
@@ -500,7 +499,7 @@ func TestFileUsageScopeHelpersUseUnpagedObjectMembership(t *testing.T) {
 		Reports: metricsOptimizedReportStore{metricsReportFake: orgReports},
 		Objects: orgReader,
 	})
-	orgServer := NewMetricsServer(optimized.Reports(), optimized.Ingest())
+	orgServer := NewMetricsServer(optimized.Reports(), nil)
 	inside, err := orgServer.objectInScope(context.Background(), "project-object", metricsAccess{organization: "org"})
 	if err != nil {
 		t.Fatalf("organization-wide objectInScope error: %v", err)
@@ -518,13 +517,11 @@ func TestListMultiScopedFileUsage_DeduplicatesAcrossScopes(t *testing.T) {
 		"obj-a": {"org1": {"p1"}},
 	})
 	state := &metricsTransferState{}
-	ingest := &metricsIngestFake{state: state}
 	reports := newMetricsReport(objectReader, map[string]usage.FileUsage{
 		"obj-a": {ObjectID: "obj-a", UploadCount: 1, DownloadCount: 2},
 	}, state)
 
 	service := usage.NewService(usage.Dependencies{
-		Ingest:  ingest,
 		Reports: reports,
 		Objects: objectReader,
 	})

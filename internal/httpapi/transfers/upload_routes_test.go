@@ -2,6 +2,7 @@ package transfers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -16,6 +17,8 @@ import (
 	"github.com/calypr/syfon/internal/buckets"
 	httpdrs "github.com/calypr/syfon/internal/httpapi/drs"
 	"github.com/calypr/syfon/internal/objects"
+	domaintransfers "github.com/calypr/syfon/internal/transfers"
+	"github.com/gofiber/fiber/v3"
 )
 
 func TestHandleInternalUploadBlank(t *testing.T) {
@@ -261,18 +264,40 @@ func TestHandleInternalMultipartInit_ExistingScopedObjectUsesMappedLocation(t *t
 }
 
 func TestHandleInternalMultipartUpload(t *testing.T) {
+	fake := &internalDRSStorageFake{}
+	om := newInternalDRSObjectManager(&transferHTTPFixture{Objects: map[string]*objects.Record{}}, fake)
+	lifecycle := domaintransfers.NewMultipartLifecycle(om.TransferService)
+	if _, err := lifecycle.Begin(context.Background(), "bucket", "key"); err != nil {
+		t.Fatalf("begin multipart upload: %v", err)
+	}
+	app := fiber.New()
+	app.Post("/data/multipart/upload", handleInternalMultipartUploadFiber(lifecycle))
 	body, _ := json.Marshal(internalapi.InternalMultipartUploadRequest{Key: "hash-key", UploadId: "mock-upload-id", PartNumber: 1})
-	rr := doInternalDRSTestRequest(httptest.NewRequest(http.MethodPost, "/data/multipart/upload", bytes.NewBuffer(body)), newInternalDRSObjectManager(&transferHTTPFixture{Objects: map[string]*objects.Record{}}, &internalDRSStorageFake{}))
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rr.Code)
+	resp, err := app.Test(httptest.NewRequest(http.MethodPost, "/data/multipart/upload", bytes.NewBuffer(body)))
+	if err != nil {
+		t.Fatalf("multipart upload request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
 }
 
 func TestHandleInternalMultipartComplete(t *testing.T) {
+	fake := &internalDRSStorageFake{}
+	om := newInternalDRSObjectManager(&transferHTTPFixture{Objects: map[string]*objects.Record{}}, fake)
+	lifecycle := domaintransfers.NewMultipartLifecycle(om.TransferService)
+	if _, err := lifecycle.Begin(context.Background(), "bucket", "key"); err != nil {
+		t.Fatalf("begin multipart upload: %v", err)
+	}
+	app := fiber.New()
+	app.Post("/data/multipart/complete", handleInternalMultipartCompleteFiber(lifecycle))
 	body, _ := json.Marshal(internalapi.InternalMultipartCompleteRequest{Key: "hash-key", UploadId: "mock-upload-id", Parts: []internalapi.InternalMultipartPart{{PartNumber: 1, ETag: "etag1"}}})
-	rr := doInternalDRSTestRequest(httptest.NewRequest(http.MethodPost, "/data/multipart/complete", bytes.NewBuffer(body)), newInternalDRSObjectManager(&transferHTTPFixture{Objects: map[string]*objects.Record{}}, &internalDRSStorageFake{}))
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rr.Code)
+	resp, err := app.Test(httptest.NewRequest(http.MethodPost, "/data/multipart/complete", bytes.NewBuffer(body)))
+	if err != nil {
+		t.Fatalf("multipart complete request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
 }
 

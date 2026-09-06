@@ -49,12 +49,15 @@ syfon/
 ├── client/         # Go client SDK (separate Go module)
 ├── cmd/            # CLI commands (serve, upload, download, version, ...)
 ├── internal/httpapi/ # HTTP routes, handlers, middleware, and protocol adapters
-├── internal/objects/ # Object identity, metadata, and lifecycle operations
+├── internal/objects/ # Catalog queries, mutations, and canonical content
 ├── internal/buckets/ # Bucket credentials, scopes, visibility, and cache policy
 ├── internal/storage/ # Provider-neutral storage and provider adapters
-├── internal/transfers/ # Upload, download, multipart, and pending-transfer operations
-├── internal/usage/ # Transfer events, accounting, and reports
-├── internal/maintenance/ # Project cleanup and scope repair workflows
+├── internal/transfers/ # Access issuance, upload workflows, and multipart sessions
+├── internal/usage/ # Event writer contracts and scoped accounting reports
+├── internal/maintenance/projectstorage/ # Storage inspection and project cleanup
+├── internal/maintenance/scoperepair/ # Catalog reference audit and repair
+├── internal/requestid/ # Request correlation through context
+├── internal/faults/ # Shared error classifications
 ├── internal/persistence/ # SQLite and PostgreSQL adapters
 ├── internal/access/ # Authorization policy and authentication integrations
 ├── internal/credentialcipher/ # Credential encryption

@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/calypr/syfon/internal/buckets"
-	"github.com/calypr/syfon/internal/faults"
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/storage"
 )
@@ -154,9 +153,9 @@ func TestInspectProjectPreservesPartialInventoryAndCanonicalItems(t *testing.T) 
 		Complete: false,
 	}}
 	service, _ := projectService(inventory, nil)
-	result, err := service.InspectProject(context.Background(), " org ", " project ", InspectionOptions{Mode: ModeItems, IncludeHead: true})
+	result, err := service.InspectProjectStorage(context.Background(), " org ", " project ", InspectionOptions{Mode: ModeItems, IncludeHead: true})
 	if err != nil {
-		t.Fatalf("InspectProject() error = %v", err)
+		t.Fatalf("InspectProjectStorage() error = %v", err)
 	}
 	if result.Summary.InventoryComplete || result.Summary.InventoryWarning == "" {
 		t.Fatalf("partial summary = %+v", result.Summary)
@@ -254,9 +253,6 @@ func TestDeleteProjectObjectsPreservesPolicyOrderAndConflictSafety(t *testing.T)
 	}
 	if len(deletePort.locations) != 1 || deletePort.locations[0] != "s3://bucket/prefix/project/a" {
 		t.Fatalf("delete locations = %+v", deletePort.locations)
-	}
-	if err := service.DeleteObjectStorage(context.Background(), &objects.Record{Id: "physical"}); !errors.Is(err, faults.ErrConflict) {
-		t.Fatalf("DeleteObjectStorage() error = %v, want conflict", err)
 	}
 }
 

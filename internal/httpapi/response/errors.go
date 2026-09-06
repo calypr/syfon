@@ -8,7 +8,7 @@ import (
 	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/faults"
 	"github.com/calypr/syfon/internal/objects"
-	"github.com/calypr/syfon/internal/requestmeta"
+	"github.com/calypr/syfon/internal/requestid"
 	"github.com/gofiber/fiber/v3"
 )
 
@@ -50,7 +50,7 @@ func HandleError(c fiber.Ctx, err error) error {
 		msg = err.Error()
 	}
 
-	requestID := requestmeta.GetRequestID(c.Context())
+	requestID := requestid.GetRequestID(c.Context())
 	if status >= 500 {
 		slog.Error("request failed", "request_id", requestID, "method", c.Method(), "path", c.Path(), "status", status, "err", err)
 	} else {
@@ -61,7 +61,7 @@ func HandleError(c fiber.Ctx, err error) error {
 }
 
 func Reject(c fiber.Ctx, status int, msg string) error {
-	requestID := requestmeta.GetRequestID(c.Context())
+	requestID := requestid.GetRequestID(c.Context())
 	if status >= 500 {
 		slog.Error("request failed", "request_id", requestID, "method", c.Method(), "path", c.Path(), "status", status, "msg", msg)
 	} else {

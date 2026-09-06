@@ -9,7 +9,7 @@ import (
 
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/faults"
-	"github.com/calypr/syfon/internal/requestmeta"
+	"github.com/calypr/syfon/internal/requestid"
 
 	"github.com/calypr/syfon/internal/credentialcipher"
 )
@@ -24,24 +24,24 @@ func (db *PostgresDB) GetS3Credential(ctx context.Context, credentialID string) 
 	if err == sql.ErrNoRows {
 		fallback, fallbackErr := db.getS3CredentialByPhysicalBucket(ctx, credentialID)
 		if fallbackErr == nil {
-			buckets.AuditCredentialAccess(ctx, requestmeta.GetRequestID(ctx), "read", credentialID, nil)
+			buckets.AuditCredentialAccess(ctx, requestid.GetRequestID(ctx), "read", credentialID, nil)
 			return fallback, nil
 		}
-		buckets.AuditCredentialAccess(ctx, requestmeta.GetRequestID(ctx), "read", credentialID, fallbackErr)
+		buckets.AuditCredentialAccess(ctx, requestid.GetRequestID(ctx), "read", credentialID, fallbackErr)
 		return nil, fallbackErr
 	}
 	if err != nil {
 		wrapped := fmt.Errorf("failed to fetch credential: %w", err)
-		buckets.AuditCredentialAccess(ctx, requestmeta.GetRequestID(ctx), "read", credentialID, wrapped)
+		buckets.AuditCredentialAccess(ctx, requestid.GetRequestID(ctx), "read", credentialID, wrapped)
 		return nil, wrapped
 	}
 	parsed, err := credentialcipher.ParseS3CredentialFromStorage(&c)
 	if err != nil {
 		wrapped := fmt.Errorf("failed to decrypt credential: %w", err)
-		buckets.AuditCredentialAccess(ctx, requestmeta.GetRequestID(ctx), "read", credentialID, wrapped)
+		buckets.AuditCredentialAccess(ctx, requestid.GetRequestID(ctx), "read", credentialID, wrapped)
 		return nil, wrapped
 	}
-	buckets.AuditCredentialAccess(ctx, requestmeta.GetRequestID(ctx), "read", credentialID, nil)
+	buckets.AuditCredentialAccess(ctx, requestid.GetRequestID(ctx), "read", credentialID, nil)
 	return parsed, nil
 }
 
@@ -90,11 +90,11 @@ func (db *PostgresDB) SaveS3Credential(ctx context.Context, cred *buckets.Creden
 	stored, err := credentialcipher.PrepareS3CredentialForStorage(cred)
 	if err != nil {
 		wrapped := fmt.Errorf("failed to prepare credential for storage: %w", err)
-		buckets.AuditCredentialAccess(ctx, requestmeta.GetRequestID(ctx), "write", bucket, wrapped)
+		buckets.AuditCredentialAccess(ctx, requestid.GetRequestID(ctx), "write", bucket, wrapped)
 		return wrapped
 	}
 	if err := db.ensureUniquePhysicalBucket(ctx, stored.CredentialID, stored.Bucket); err != nil {
-		buckets.AuditCredentialAccess(ctx, requestmeta.GetRequestID(ctx), "write", stored.Bucket, err)
+		buckets.AuditCredentialAccess(ctx, requestid.GetRequestID(ctx), "write", stored.Bucket, err)
 		return err
 	}
 
@@ -112,10 +112,10 @@ func (db *PostgresDB) SaveS3Credential(ctx context.Context, cred *buckets.Creden
 	)
 	if err != nil {
 		wrapped := fmt.Errorf("failed to save credential: %w", err)
-		buckets.AuditCredentialAccess(ctx, requestmeta.GetRequestID(ctx), "write", stored.Bucket, wrapped)
+		buckets.AuditCredentialAccess(ctx, requestid.GetRequestID(ctx), "write", stored.Bucket, wrapped)
 		return wrapped
 	}
-	buckets.AuditCredentialAccess(ctx, requestmeta.GetRequestID(ctx), "write", stored.Bucket, nil)
+	buckets.AuditCredentialAccess(ctx, requestid.GetRequestID(ctx), "write", stored.Bucket, nil)
 	return nil
 }
 
@@ -145,31 +145,31 @@ func (db *PostgresDB) ensureUniquePhysicalBucket(ctx context.Context, credential
 func (db *PostgresDB) DeleteS3Credential(ctx context.Context, credentialID string) error {
 	resolvedID, err := db.resolveCredentialID(ctx, credentialID)
 	if err != nil {
-		buckets.AuditCredentialAccess(ctx, requestmeta.GetRequestID(ctx), "delete", credentialID, err)
+		buckets.AuditCredentialAccess(ctx, requestid.GetRequestID(ctx), "delete", credentialID, err)
 		return err
 	}
 	// 1. Delete bucket scopes first (cascade delete is on object_id, but bucket_scope is manual link)
 	if _, err := db.db.ExecContext(ctx, "DELETE FROM bucket_scope WHERE credential_id = $1", resolvedID); err != nil {
-		buckets.AuditCredentialAccess(ctx, requestmeta.GetRequestID(ctx), "delete", credentialID, err)
+		buckets.AuditCredentialAccess(ctx, requestid.GetRequestID(ctx), "delete", credentialID, err)
 		return fmt.Errorf("failed to delete bucket scopes for %s: %w", credentialID, err)
 	}
 
 	result, err := db.db.ExecContext(ctx, "DELETE FROM s3_credential WHERE credential_id = $1", resolvedID)
 	if err != nil {
-		buckets.AuditCredentialAccess(ctx, requestmeta.GetRequestID(ctx), "delete", credentialID, err)
+		buckets.AuditCredentialAccess(ctx, requestid.GetRequestID(ctx), "delete", credentialID, err)
 		return err
 	}
 	rows, err := result.RowsAffected()
 	if err != nil {
-		buckets.AuditCredentialAccess(ctx, requestmeta.GetRequestID(ctx), "delete", credentialID, err)
+		buckets.AuditCredentialAccess(ctx, requestid.GetRequestID(ctx), "delete", credentialID, err)
 		return err
 	}
 	if rows == 0 {
 		notFoundErr := fmt.Errorf("credential not found")
-		buckets.AuditCredentialAccess(ctx, requestmeta.GetRequestID(ctx), "delete", credentialID, notFoundErr)
+		buckets.AuditCredentialAccess(ctx, requestid.GetRequestID(ctx), "delete", credentialID, notFoundErr)
 		return notFoundErr
 	}
-	buckets.AuditCredentialAccess(ctx, requestmeta.GetRequestID(ctx), "delete", credentialID, nil)
+	buckets.AuditCredentialAccess(ctx, requestid.GetRequestID(ctx), "delete", credentialID, nil)
 	return nil
 }
 
@@ -204,18 +204,18 @@ func (db *PostgresDB) ListS3Credentials(ctx context.Context) ([]buckets.Credenti
 	for rows.Next() {
 		var c buckets.Credential
 		if err := rows.Scan(&c.CredentialID, &c.Bucket, &c.Provider, &c.Region, &c.AccessKey, &c.SecretKey, &c.Endpoint); err != nil {
-			buckets.AuditCredentialAccess(ctx, requestmeta.GetRequestID(ctx), "list", "", err)
+			buckets.AuditCredentialAccess(ctx, requestid.GetRequestID(ctx), "list", "", err)
 			return nil, err
 		}
 		parsed, err := credentialcipher.ParseS3CredentialFromStorage(&c)
 		if err != nil {
 			wrapped := fmt.Errorf("failed to decrypt credential for bucket %s: %w", c.Bucket, err)
-			buckets.AuditCredentialAccess(ctx, requestmeta.GetRequestID(ctx), "list", c.Bucket, wrapped)
+			buckets.AuditCredentialAccess(ctx, requestid.GetRequestID(ctx), "list", c.Bucket, wrapped)
 			return nil, wrapped
 		}
 		creds = append(creds, *parsed)
 	}
-	buckets.AuditCredentialAccess(ctx, requestmeta.GetRequestID(ctx), "list", "", nil)
+	buckets.AuditCredentialAccess(ctx, requestid.GetRequestID(ctx), "list", "", nil)
 	return creds, nil
 }
 

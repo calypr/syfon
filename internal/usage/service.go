@@ -11,7 +11,6 @@ import (
 )
 
 var (
-	ErrIngestUnavailable  = errors.New("usage ingest store is unavailable")
 	ErrReportsUnavailable = errors.New("usage report store is unavailable")
 	ErrObjectsUnavailable = errors.New("usage object reader is unavailable")
 	ErrInvalidGroupBy     = errors.New("invalid transfer breakdown group_by")
@@ -101,69 +100,26 @@ type Reporter interface {
 }
 
 type Dependencies struct {
-	Ingest  IngestStore
 	Reports ReportStore
 	Objects ObjectReader
 }
 
 type Service struct {
-	ingest  IngestStore
 	reports ReportStore
 	objects ObjectReader
 }
 
 func NewService(deps Dependencies) *Service {
-	return &Service{ingest: deps.Ingest, reports: deps.Reports, objects: deps.Objects}
+	return &Service{reports: deps.Reports, objects: deps.Objects}
 }
-
-func (s *Service) Ingest() Ingestor { return s }
 
 func (s *Service) Reports() Reporter { return s }
-
-func (s *Service) requireIngest() error {
-	if s == nil || s.ingest == nil {
-		return ErrIngestUnavailable
-	}
-	return nil
-}
 
 func (s *Service) requireReports() error {
 	if s == nil || s.reports == nil {
 		return ErrReportsUnavailable
 	}
 	return nil
-}
-
-func (s *Service) RecordFileUpload(ctx context.Context, objectID string) error {
-	if err := s.requireIngest(); err != nil {
-		return err
-	}
-	return s.ingest.RecordFileUpload(ctx, objectID)
-}
-
-func (s *Service) RecordFileDownload(ctx context.Context, objectID string) error {
-	if err := s.requireIngest(); err != nil {
-		return err
-	}
-	return s.ingest.RecordFileDownload(ctx, objectID)
-}
-
-// RecordTransferAttributionEvents records access-issued events. Event
-// idempotence and grant upserts stay in the persistence adapter.
-func (s *Service) RecordTransferAttributionEvents(ctx context.Context, events []Event) error {
-	if err := s.requireIngest(); err != nil {
-		return err
-	}
-	return s.ingest.RecordTransferAttributionEvents(ctx, events)
-}
-
-// RecordProviderTransferEvents records provider events. Reconciliation stays
-// in persistence, where transaction and dialect policy live.
-func (s *Service) RecordProviderTransferEvents(ctx context.Context, events []ProviderEvent) error {
-	if err := s.requireIngest(); err != nil {
-		return err
-	}
-	return s.ingest.RecordProviderTransferEvents(ctx, events)
 }
 
 func (s *Service) GetFileUsage(ctx context.Context, objectID string) (*FileUsage, error) {

@@ -22,8 +22,8 @@ import (
 	"github.com/calypr/syfon/internal/httpapi"
 	"github.com/calypr/syfon/internal/maintenance/projectstorage"
 	"github.com/calypr/syfon/internal/objects"
+	"github.com/calypr/syfon/internal/persistence/sqlite"
 	"github.com/calypr/syfon/internal/storage"
-	sqlitetest "github.com/calypr/syfon/internal/testsupport/sqlite"
 	"github.com/calypr/syfon/internal/transfers"
 	"github.com/calypr/syfon/internal/usage"
 )
@@ -39,6 +39,15 @@ func executeRootCommand(t *testing.T, args ...string) (string, error) {
 	RootCmd.SetArgs(args)
 	err := RootCmd.Execute()
 	return strings.TrimSpace(out.String() + errOut.String()), err
+}
+
+func newSQLiteDatabase(t testing.TB) *sqlite.SqliteDB {
+	t.Helper()
+	database, err := sqlite.NewSqliteDB(":memory:")
+	if err != nil {
+		t.Fatalf("create in-memory SQLite database: %v", err)
+	}
+	return database
 }
 
 func TestSyfonMetricsTransfersCLI(t *testing.T) {
@@ -315,7 +324,7 @@ func newSyfonTestServer(t *testing.T) *fiberTestServer {
 
 	storageDir := t.TempDir()
 
-	database := sqlitetest.New(t)
+	database := newSQLiteDatabase(t)
 	if err := database.SaveS3Credential(context.Background(), &buckets.Credential{
 		Bucket:   "syfon-bucket",
 		Provider: "file",
@@ -353,10 +362,10 @@ func newSyfonTestServer(t *testing.T) *fiberTestServer {
 		t.Fatalf("construct bucket service: %v", err)
 	}
 	objectService := objects.NewService(objectDependencies)
-	usageService := usage.NewService(usage.Dependencies{Ingest: database, Reports: database, Objects: objectService})
+	usageService := usage.NewService(usage.Dependencies{Reports: database, Objects: objectService})
 	transferService := transfers.NewService(transfers.Dependencies{
 		Access: cliFileStorageAccess{root: storageDir}, Scopes: bucketService, Credentials: bucketService,
-		Pending: database, Events: usageService.Ingest(),
+		Pending: database, Events: database,
 	})
 	description := "Calypr test DRS server"
 	environment := "test"
@@ -374,13 +383,14 @@ func newSyfonTestServer(t *testing.T) *fiberTestServer {
 	}
 	projectStorageService := projectstorage.NewService(projectstorage.Dependencies{Scopes: bucketService, Credentials: bucketService, Visibility: bucketService, Physical: objectService, CleanupObjects: objectService, CleanupScopes: bucketService})
 	httpapi.RegisterRoutes(app, httpapi.Dependencies{
-		ServiceInfo:    serviceInfo,
-		Objects:        objectService,
-		Transfers:      transferService,
-		UsageIngest:    usageService.Ingest(),
-		UsageReports:   usageService.Reports(),
-		Buckets:        bucketService,
-		ProjectStorage: projectStorageService,
+		ServiceInfo:      serviceInfo,
+		Objects:          objectService,
+		Transfers:        transferService,
+		UsageIngest:      database,
+		UsageReports:     usageService.Reports(),
+		Buckets:          bucketService,
+		ProjectInspector: projectStorageService.Inspector,
+		ProjectCleanup:   projectStorageService.ProjectCleanup,
 	}, httpapi.Options{Docs: true, GA4GH: true, Metrics: true, Internal: true})
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")

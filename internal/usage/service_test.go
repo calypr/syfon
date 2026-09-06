@@ -11,37 +11,8 @@ import (
 )
 
 var (
-	_ Ingestor = (*Service)(nil)
 	_ Reporter = (*Service)(nil)
 )
-
-type ingestStoreSpy struct {
-	uploadID       string
-	downloadID     string
-	transferEvents []Event
-	providerEvents []ProviderEvent
-	err            error
-}
-
-func (s *ingestStoreSpy) RecordFileUpload(_ context.Context, objectID string) error {
-	s.uploadID = objectID
-	return s.err
-}
-
-func (s *ingestStoreSpy) RecordFileDownload(_ context.Context, objectID string) error {
-	s.downloadID = objectID
-	return s.err
-}
-
-func (s *ingestStoreSpy) RecordTransferAttributionEvents(_ context.Context, events []Event) error {
-	s.transferEvents = append([]Event(nil), events...)
-	return s.err
-}
-
-func (s *ingestStoreSpy) RecordProviderTransferEvents(_ context.Context, events []ProviderEvent) error {
-	s.providerEvents = append([]ProviderEvent(nil), events...)
-	return s.err
-}
 
 type reportStoreSpy struct {
 	files          []FileUsage
@@ -168,27 +139,6 @@ func (s *objectReaderSpy) GetObject(_ context.Context, ident, _ string) (*object
 
 func (s *objectReaderSpy) ListObjectIDsByScope(_ context.Context, organization, project, _ string) ([]string, error) {
 	return append([]string(nil), s.ids[organization+"/"+project]...), nil
-}
-
-func TestServiceDelegatesIngestAndPreservesErrors(t *testing.T) {
-	storeErr := errors.New("write failed")
-	store := &ingestStoreSpy{err: storeErr}
-	service := NewService(Dependencies{Ingest: store})
-
-	if err := service.RecordFileUpload(context.Background(), "upload"); !errors.Is(err, storeErr) || store.uploadID != "upload" {
-		t.Fatalf("upload delegation: err=%v id=%q", err, store.uploadID)
-	}
-	if err := service.RecordFileDownload(context.Background(), "download"); !errors.Is(err, storeErr) || store.downloadID != "download" {
-		t.Fatalf("download delegation: err=%v id=%q", err, store.downloadID)
-	}
-	events := []Event{{EventID: "event"}}
-	if err := service.RecordTransferAttributionEvents(context.Background(), events); !errors.Is(err, storeErr) || !reflect.DeepEqual(store.transferEvents, events) {
-		t.Fatalf("transfer delegation: err=%v events=%+v", err, store.transferEvents)
-	}
-	providerEvents := []ProviderEvent{{ProviderEventID: "provider-event"}}
-	if err := service.RecordProviderTransferEvents(context.Background(), providerEvents); !errors.Is(err, storeErr) || !reflect.DeepEqual(store.providerEvents, providerEvents) {
-		t.Fatalf("provider delegation: err=%v events=%+v", err, store.providerEvents)
-	}
 }
 
 func TestServiceUsesScopedReportOptimizations(t *testing.T) {

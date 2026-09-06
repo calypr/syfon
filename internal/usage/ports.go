@@ -17,12 +17,6 @@ type TransferEventWriter interface {
 	RecordTransferAttributionEvents(ctx context.Context, events []Event) error
 }
 
-type IngestStore interface {
-	FileCounterRecorder
-	TransferEventWriter
-	ProviderEventRecorder
-}
-
 type Ingestor interface {
 	FileCounterRecorder
 	TransferEventWriter

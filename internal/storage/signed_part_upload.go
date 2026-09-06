@@ -1,4 +1,4 @@
-package lfs
+package storage
 
 import (
 	"bytes"
@@ -9,9 +9,7 @@ import (
 	"strings"
 )
 
-// uploadPartToSignedURL is the provider PUT adapter.  Multipart workflow
-// passes it signed URLs and receives only an opaque ETag/error in return.
-func uploadPartToSignedURL(ctx context.Context, signedURL string, content []byte) (string, error) {
+func UploadSignedMultipartPart(ctx context.Context, signedURL string, content []byte) (string, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodPut, signedURL, bytes.NewReader(content))
 	if err != nil {
 		return "", err

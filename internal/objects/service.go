@@ -7,15 +7,13 @@ const (
 	objectMethodDelete = "delete"
 )
 
-// Service owns object registration, reads, canonicalization, authorization,
-// aliases, and object-level mutations. Persistence adapters provide the
-// narrow ports in Dependencies; the service does not know about storage,
-// buckets, transfers, HTTP, or SQL.
 type Service struct {
+	*queryService
+	*mutationService
+}
+
+type queryService struct {
 	recordReader    RecordReader
-	recordWriter    RecordWriter
-	accessMethods   AccessMethodWriter
-	accessPolicy    AccessPolicyWriter
 	aliases         AliasStore
 	content         ContentReader
 	checksumScope   ChecksumScopeQuery
@@ -24,6 +22,13 @@ type Service struct {
 	pages           OptionalPageQuery
 	urlPages        OptionalURLQuery
 	authorizedQuery OptionalAuthorizedQuery
+}
+
+type mutationService struct {
+	*queryService
+	recordWriter  RecordWriter
+	accessMethods AccessMethodWriter
+	accessPolicy  AccessPolicyWriter
 }
 
 // Dependencies contains the object-owned ports used by Service. The query
@@ -48,11 +53,8 @@ type Dependencies struct {
 // Required-port validation remains at the composition boundary so lightweight
 // tests and transitional callers can still construct partial services.
 func NewService(deps Dependencies) *Service {
-	return &Service{
+	query := &queryService{
 		recordReader:    deps.Reader,
-		recordWriter:    deps.Writer,
-		accessMethods:   deps.AccessMethods,
-		accessPolicy:    deps.AccessPolicy,
 		aliases:         deps.Aliases,
 		content:         deps.Content,
 		checksumScope:   deps.ChecksumScope,
@@ -61,5 +63,14 @@ func NewService(deps Dependencies) *Service {
 		pages:           deps.Pages,
 		urlPages:        deps.URLPages,
 		authorizedQuery: deps.Authorized,
+	}
+	return &Service{
+		queryService: query,
+		mutationService: &mutationService{
+			queryService:  query,
+			recordWriter:  deps.Writer,
+			accessMethods: deps.AccessMethods,
+			accessPolicy:  deps.AccessPolicy,
+		},
 	}
 }

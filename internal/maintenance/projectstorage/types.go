@@ -7,7 +7,7 @@ import (
 	"github.com/calypr/syfon/internal/objects"
 )
 
-// InspectionMode controls the amount of inventory returned by InspectProject.
+// InspectionMode controls the amount of inventory returned by InspectProjectStorage.
 type InspectionMode string
 
 const (

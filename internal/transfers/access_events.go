@@ -9,7 +9,7 @@ import (
 
 	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/objects"
-	"github.com/calypr/syfon/internal/requestmeta"
+	"github.com/calypr/syfon/internal/requestid"
 	"github.com/calypr/syfon/internal/storage/address"
 	"github.com/calypr/syfon/internal/usage"
 )
@@ -86,7 +86,7 @@ func eventFromObject(ctx context.Context, request AccessRequest) usage.Event {
 		EventType:      usage.TransferEventAccessIssued,
 		Direction:      direction,
 		EventTime:      time.Now().UTC(),
-		RequestID:      requestmeta.GetRequestID(ctx),
+		RequestID:      requestid.GetRequestID(ctx),
 		ObjectID:       string(obj.Id),
 		SHA256:         sha,
 		ObjectSize:     obj.Size,

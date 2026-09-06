@@ -22,43 +22,50 @@ const (
 	listFallbackObjectLimit = 5000
 )
 
-type Service struct {
-	scopes         ScopeReader
-	credentials    CredentialReader
-	visibility     VisibilityReader
-	inventory      InventoryPort
-	probe          ProbePort
+type Inspector struct {
+	scopes      ScopeReader
+	credentials CredentialReader
+	visibility  VisibilityReader
+	inventory   InventoryPort
+	probe       ProbePort
+	physical    PhysicalScopeReader
+}
+
+type ProjectCleanup struct {
+	inspector      *Inspector
 	delete         DeletePort
-	physical       PhysicalScopeReader
 	cleanupObjects ObjectScopeDeleter
 	cleanupScopes  ScopeCatalog
 }
 
-func NewService(deps Dependencies) *Service {
-	return &Service{
-		scopes:         deps.Scopes,
-		credentials:    deps.Credentials,
-		visibility:     deps.Visibility,
-		inventory:      deps.Inventory,
-		probe:          deps.Probe,
-		delete:         deps.Delete,
-		physical:       deps.Physical,
-		cleanupObjects: deps.CleanupObjects,
-		cleanupScopes:  deps.CleanupScopes,
-	}
+type Service struct {
+	*Inspector
+	*ProjectCleanup
 }
 
-// InspectProject resolves a project scope, inventories it, and computes the
-// summary. An incomplete listing remains usable when the provider returned
-// partial items; the warning is retained in the result instead of being
-// mistaken for a complete inventory.
-func (s *Service) InspectProject(ctx context.Context, organization, project string, options InspectionOptions) (*InspectionResult, error) {
-	return s.InspectProjectStorage(ctx, organization, project, options)
+func NewService(deps Dependencies) *Service {
+	inspector := &Inspector{
+		scopes:      deps.Scopes,
+		credentials: deps.Credentials,
+		visibility:  deps.Visibility,
+		inventory:   deps.Inventory,
+		probe:       deps.Probe,
+		physical:    deps.Physical,
+	}
+	return &Service{
+		Inspector: inspector,
+		ProjectCleanup: &ProjectCleanup{
+			inspector:      inspector,
+			delete:         deps.Delete,
+			cleanupObjects: deps.CleanupObjects,
+			cleanupScopes:  deps.CleanupScopes,
+		},
+	}
 }
 
 // InspectProjectStorage inventories the S3 target selected by the project's
 // configured scope.
-func (s *Service) InspectProjectStorage(ctx context.Context, organization, project string, options InspectionOptions) (*InspectionResult, error) {
+func (s *Inspector) InspectProjectStorage(ctx context.Context, organization, project string, options InspectionOptions) (*InspectionResult, error) {
 	ctx = withRequestCache(ctx)
 	target, err := s.resolveScope(ctx, organization, project, readMethod)
 	if err != nil {
@@ -90,15 +97,15 @@ func (s *Service) InspectProjectStorage(ctx context.Context, organization, proje
 	return &InspectionResult{Summary: summary, Items: normalized}, nil
 }
 
-func (s *Service) ListObjects(ctx context.Context, organization, project string, includeHead bool) ([]StorageObject, error) {
-	result, err := s.InspectProject(ctx, organization, project, InspectionOptions{Mode: ModeItems, IncludeHead: includeHead})
+func (s *Inspector) ListObjects(ctx context.Context, organization, project string, includeHead bool) ([]StorageObject, error) {
+	result, err := s.InspectProjectStorage(ctx, organization, project, InspectionOptions{Mode: ModeItems, IncludeHead: includeHead})
 	if err != nil {
 		return nil, err
 	}
 	return result.Items, nil
 }
 
-func (s *Service) ResolvePathPrefix(ctx context.Context, organization, project, requestPrefix string) (string, error) {
+func (s *Inspector) ResolvePathPrefix(ctx context.Context, organization, project, requestPrefix string) (string, error) {
 	target, err := s.resolveScope(withRequestCache(ctx), organization, project, readMethod)
 	if err != nil {
 		return "", err
@@ -106,7 +113,7 @@ func (s *Service) ResolvePathPrefix(ctx context.Context, organization, project, 
 	return strings.Trim(strings.TrimSpace(target.withPathPrefix(requestPrefix).Prefix), "/"), nil
 }
 
-func (s *Service) inventoryObjects(ctx context.Context, bucket, prefix string, options InventoryOptions) ([]StorageObject, error) {
+func (s *Inspector) inventoryObjects(ctx context.Context, bucket, prefix string, options InventoryOptions) ([]StorageObject, error) {
 	if s.inventory == nil {
 		return nil, &Error{Kind: ErrorUnsupported, Message: "storage inventory is not configured"}
 	}
@@ -183,7 +190,7 @@ func (target scopeTarget) withPathPrefix(requestPrefix string) scopeTarget {
 	return target
 }
 
-func (s *Service) resolveScope(ctx context.Context, organization, project, method string) (scopeTarget, error) {
+func (s *Inspector) resolveScope(ctx context.Context, organization, project, method string) (scopeTarget, error) {
 	organization = strings.TrimSpace(organization)
 	project = strings.TrimSpace(project)
 	if organization == "" {
@@ -338,7 +345,7 @@ func mapStorageError(err error, capability, bucket, key string) error {
 	return &Error{Kind: kind, Message: message}
 }
 
-func (s *Service) credentialForBucket(ctx context.Context, bucket string) (*buckets.Credential, error) {
+func (s *Inspector) credentialForBucket(ctx context.Context, bucket string) (*buckets.Credential, error) {
 	bucket = strings.TrimSpace(bucket)
 	if bucket == "" {
 		return nil, &Error{Kind: ErrorInvalidInput, Message: "bucket is required"}
@@ -375,7 +382,7 @@ func (s *Service) credentialForBucket(ctx context.Context, bucket string) (*buck
 	return nil, err
 }
 
-func (s *Service) visibleBuckets(ctx context.Context) (map[string]buckets.VisibleBucket, error) {
+func (s *Inspector) visibleBuckets(ctx context.Context) (map[string]buckets.VisibleBucket, error) {
 	if cache := cacheFromContext(ctx); cache != nil {
 		if visible, err, ok := cache.visible(); ok {
 			return visible, err

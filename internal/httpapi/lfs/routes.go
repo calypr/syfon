@@ -19,8 +19,8 @@ type Options struct {
 }
 
 // PartUploader performs one provider PUT for a signed multipart part and
-// returns the provider's opaque ETag. The default is uploadPartToSignedURL;
-// composition and focused tests may inject a transport-specific function.
+// returns the provider's opaque ETag. The default is
+// storage.UploadSignedMultipartPart. Focused tests may inject another function.
 type PartUploader func(context.Context, string, []byte) (string, error)
 
 type Dependencies struct {

@@ -16,31 +16,34 @@ import (
 )
 
 type serverRuntime struct {
-	app                   *fiber.App
-	cfg                   *config.Config
-	serviceInfo           drs.Service
-	objectService         *objects.Service
-	transferService       *transfers.Service
-	usageService          *usage.Service
-	projectStorageService *projectstorage.Service
-	scopeRepairService    *scoperepair.Service
-	bucketService         *buckets.Service
-	authzMiddleware       *middleware.AuthzMiddleware
-	requestIDMiddleware   *middleware.RequestIDMiddleware
+	app                 *fiber.App
+	cfg                 *config.Config
+	serviceInfo         drs.Service
+	objectService       *objects.Service
+	transferService     *transfers.Service
+	usageService        *usage.Service
+	usageIngest         usage.Ingestor
+	projectInspector    *projectstorage.Inspector
+	projectCleanup      *projectstorage.ProjectCleanup
+	scopeRepairService  *scoperepair.Service
+	bucketService       *buckets.Service
+	authzMiddleware     *middleware.AuthzMiddleware
+	requestIDMiddleware *middleware.RequestIDMiddleware
 }
 
 func registerServerRoutes(rt *serverRuntime) {
 	httpapi.RegisterRoutes(rt.app, httpapi.Dependencies{
-		ServiceInfo:    rt.serviceInfo,
-		Objects:        rt.objectService,
-		Transfers:      rt.transferService,
-		UsageIngest:    rt.usageService.Ingest(),
-		UsageReports:   rt.usageService.Reports(),
-		Buckets:        rt.bucketService,
-		ProjectStorage: rt.projectStorageService,
-		ScopeRepair:    rt.scopeRepairService,
-		Authorization:  rt.authzMiddleware,
-		RequestIDs:     rt.requestIDMiddleware,
+		ServiceInfo:      rt.serviceInfo,
+		Objects:          rt.objectService,
+		Transfers:        rt.transferService,
+		UsageIngest:      rt.usageIngest,
+		UsageReports:     rt.usageService.Reports(),
+		Buckets:          rt.bucketService,
+		ProjectInspector: rt.projectInspector,
+		ProjectCleanup:   rt.projectCleanup,
+		ScopeRepair:      rt.scopeRepairService,
+		Authorization:    rt.authzMiddleware,
+		RequestIDs:       rt.requestIDMiddleware,
 	}, httpapi.Options{
 		Docs:     rt.cfg.Routes.Docs,
 		GA4GH:    rt.cfg.Routes.Ga4gh,

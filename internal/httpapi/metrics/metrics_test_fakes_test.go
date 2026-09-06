@@ -94,7 +94,7 @@ type metricsIngestFake struct {
 	state *metricsTransferState
 }
 
-var _ usage.IngestStore = (*metricsIngestFake)(nil)
+var _ usage.Ingestor = (*metricsIngestFake)(nil)
 
 func (f *metricsIngestFake) RecordFileUpload(context.Context, string) error {
 	return nil

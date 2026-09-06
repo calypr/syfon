@@ -4,44 +4,35 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/calypr/syfon/apigen/server/lfsapi"
 	syfoncommon "github.com/calypr/syfon/common"
-	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/faults"
+	apimiddleware "github.com/calypr/syfon/internal/httpapi/middleware"
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/storage"
 	"github.com/calypr/syfon/internal/transfers"
-	"github.com/calypr/syfon/internal/usage"
 )
 
-var errNoBucketConfigured = errors.New("no bucket configured")
-
 type LFSServer struct {
-	objectService   *objects.Service
-	transferService *transfers.Service
-	fileCounters    usage.FileCounterRecorder
-	credentials     buckets.CredentialReader
-	opts            Options
-	partUploader    PartUploader
+	opts                Options
+	uploadWorkflow      *transfers.LFSUploadWorkflow
+	metadataWorkflow    *transfers.LFSMetadataWorkflow
+	preparationWorkflow *transfers.LFSPreparationWorkflow
 }
 
 func NewLFSServer(deps Dependencies, opts Options) *LFSServer {
 	partUploader := deps.PartUploader
 	if partUploader == nil {
-		partUploader = uploadPartToSignedURL
+		partUploader = storage.UploadSignedMultipartPart
 	}
 	return &LFSServer{
-		objectService:   deps.ObjectService,
-		transferService: deps.TransferService,
-		fileCounters:    deps.FileCounters,
-		credentials:     deps.Credentials,
-		opts:            opts,
-		partUploader:    partUploader,
+		opts:                opts,
+		uploadWorkflow:      transfers.NewLFSUploadWorkflow(deps.TransferService, transfers.LFSUploadPartUploader(partUploader), deps.FileCounters),
+		metadataWorkflow:    transfers.NewLFSMetadataWorkflow(deps.TransferService, deps.ObjectService, deps.FileCounters),
+		preparationWorkflow: transfers.NewLFSPreparationWorkflow(deps.TransferService, deps.ObjectService, deps.Credentials, deps.FileCounters),
 	}
 }
 
@@ -74,19 +65,22 @@ func (s *LFSServer) LfsBatch(ctx context.Context, request lfsapi.LfsBatchRequest
 		}
 		objectResponse.Oid = oid
 		if req.Operation == "download" {
-			actions, objectError := prepareDownloadActions(ctx, s.objectService, s.transferService, s.fileCounters, oid)
-			if objectError != nil {
-				objectResponse.Error = objectError
+			preparation, err := s.preparationWorkflow.PrepareDownload(ctx, oid)
+			if err != nil {
+				objectResponse.Error = downloadErrToBatchError(ctx, err)
 			} else {
-				objectResponse.Actions = actions
+				objectResponse.Actions = &lfsapi.BatchActions{Download: &lfsapi.Action{Href: preparation.SignedURL}}
 			}
 		} else {
-			actions, size, objectError := prepareUploadActions(ctx, s.objectService, s.credentials, input.Size, oid, GetBaseURL(ctx))
-			objectResponse.Size = size
-			if objectError != nil {
-				objectResponse.Error = objectError
-			} else {
-				objectResponse.Actions = actions
+			preparation, err := s.preparationWorkflow.PrepareUpload(ctx, oid, input.Size)
+			objectResponse.Size = preparation.Size
+			if err != nil {
+				objectResponse.Error = dbErrToBatchError(ctx, err)
+			} else if !preparation.Existing {
+				objectResponse.Actions = &lfsapi.BatchActions{
+					Upload: &lfsapi.Action{Href: GetBaseURL(ctx) + "/info/lfs/objects/" + oid},
+					Verify: &lfsapi.Action{Href: GetBaseURL(ctx) + "/info/lfs/verify"},
+				}
 			}
 		}
 		responseObjects = append(responseObjects, objectResponse)
@@ -108,32 +102,14 @@ func (s *LFSServer) LfsVerify(ctx context.Context, request lfsapi.LfsVerifyReque
 		return lfsapi.LfsVerify400ApplicationVndGitLfsPlusJSONResponse{Message: "invalid oid"}, nil
 	}
 
-	object, err := s.objectService.GetObject(ctx, oid, "read")
-	if err == nil {
-		if err := s.recordUpload(ctx, string(object.Id)); err != nil {
-			return lfsapi.LfsVerify500ApplicationVndGitLfsPlusJSONResponse{Message: err.Error()}, nil
+	if err := s.metadataWorkflow.Verify(ctx, oid); err != nil {
+		var candidateErr *transfers.LFSMetadataCandidateError
+		if errors.As(err, &candidateErr) {
+			return lfsapi.LfsVerify400ApplicationVndGitLfsPlusJSONResponse{Message: err.Error()}, nil
 		}
-		return lfsapi.LfsVerify200Response{}, nil
-	}
-	if !faults.IsNotFoundError(err) {
-		return lfsapi.LfsVerify500ApplicationVndGitLfsPlusJSONResponse{Message: err.Error()}, nil
-	}
-
-	pending, err := s.transferService.PopPendingLFSMeta(ctx, oid)
-	if err != nil {
 		if faults.IsNotFoundError(err) {
 			return lfsapi.LfsVerify404ApplicationVndGitLfsPlusJSONResponse{Message: "Object not found"}, nil
 		}
-		return lfsapi.LfsVerify500ApplicationVndGitLfsPlusJSONResponse{Message: err.Error()}, nil
-	}
-	internalObject, err := objects.CandidateToRecord(pending.Candidate, time.Now().UTC())
-	if err != nil {
-		return lfsapi.LfsVerify400ApplicationVndGitLfsPlusJSONResponse{Message: err.Error()}, nil
-	}
-	if err := s.objectService.RegisterObjects(ctx, []objects.Record{internalObject}); err != nil {
-		return lfsapi.LfsVerify500ApplicationVndGitLfsPlusJSONResponse{Message: err.Error()}, nil
-	}
-	if err := s.recordUpload(ctx, string(internalObject.Id)); err != nil {
 		return lfsapi.LfsVerify500ApplicationVndGitLfsPlusJSONResponse{Message: err.Error()}, nil
 	}
 	return lfsapi.LfsVerify200Response{}, nil
@@ -150,29 +126,21 @@ func (s *LFSServer) LfsStageMetadata(ctx context.Context, request lfsapi.LfsStag
 		return lfsapi.LfsStageMetadata400JSONResponse{Message: "candidates cannot be empty"}, nil
 	}
 
-	now := time.Now().UTC()
-	entries := make([]transfers.PendingMetadata, 0, len(input.Candidates))
-	for index, candidate := range input.Candidates {
-		domainCandidate := FromGeneratedCandidate(candidate)
-		internalObject, err := objects.CandidateToRecord(domainCandidate, now)
-		if err != nil {
-			return lfsapi.LfsStageMetadata400JSONResponse{Message: fmt.Sprintf("candidate[%d] invalid: %v", index, err)}, nil
-		}
-		oid, ok := objects.CanonicalSHA256(internalObject.Checksums)
-		if !ok {
-			return lfsapi.LfsStageMetadata400JSONResponse{Message: fmt.Sprintf("candidate[%d] missing canonical sha256", index)}, nil
-		}
-		entries = append(entries, transfers.PendingMetadata{
-			OID:       oid,
-			Candidate: domainCandidate,
-			CreatedAt: now,
-			ExpiresAt: now.Add(transfers.PendingMetadataTTL),
-		})
+	candidates := make([]objects.Candidate, 0, len(input.Candidates))
+	for _, candidate := range input.Candidates {
+		candidates = append(candidates, FromGeneratedCandidate(candidate))
 	}
-	if err := s.transferService.SavePendingLFSMeta(ctx, entries); err != nil {
+	if err := s.metadataWorkflow.Stage(ctx, candidates); err != nil {
+		var stageErr *transfers.LFSMetadataStageError
+		if errors.As(err, &stageErr) {
+			if stageErr.MissingSHA {
+				return lfsapi.LfsStageMetadata400JSONResponse{Message: fmt.Sprintf("candidate[%d] missing canonical sha256", stageErr.Index)}, nil
+			}
+			return lfsapi.LfsStageMetadata400JSONResponse{Message: fmt.Sprintf("candidate[%d] invalid: %v", stageErr.Index, stageErr)}, nil
+		}
 		return lfsapi.LfsStageMetadata500JSONResponse{Message: err.Error()}, nil
 	}
-	return lfsapi.LfsStageMetadata200JSONResponse{Staged: int32(len(entries))}, nil
+	return lfsapi.LfsStageMetadata200JSONResponse{Staged: int32(len(candidates))}, nil
 }
 
 func (s *LFSServer) LfsUploadProxy(ctx context.Context, request lfsapi.LfsUploadProxyRequestObject) (lfsapi.LfsUploadProxyResponseObject, error) {
@@ -180,119 +148,42 @@ func (s *LFSServer) LfsUploadProxy(ctx context.Context, request lfsapi.LfsUpload
 	if oid == "" {
 		return lfsapi.LfsUploadProxy400TextResponse("invalid oid"), nil
 	}
-	bucket, key, objectID, err := s.resolveUploadProxyTarget(ctx, oid)
+	target, err := s.preparationWorkflow.ResolveUploadTarget(ctx, oid)
 	if err != nil {
-		if errors.Is(err, errNoBucketConfigured) {
+		if errors.Is(err, transfers.ErrLFSNoBucketConfigured) {
 			return lfsapi.LfsUploadProxy507TextResponse(err.Error()), nil
 		}
 		return lfsapi.LfsUploadProxy500TextResponse(err.Error()), nil
 	}
-	if err := s.handleUploadInternal(ctx, request.Body, bucket, key, objectID); err != nil {
+	if err := s.uploadWorkflow.Upload(ctx, request.Body, target.Bucket, target.Key, target.ObjectID); err != nil {
 		return lfsapi.LfsUploadProxy500TextResponse(err.Error()), nil
 	}
 	return lfsapi.LfsUploadProxy200Response{}, nil
 }
 
-func (s *LFSServer) resolveUploadProxyTarget(ctx context.Context, oid string) (string, string, string, error) {
-	if s.credentials == nil {
-		return "", "", "", errNoBucketConfigured
+func dbErrToBatchError(ctx context.Context, err error) *lfsapi.ObjectError {
+	if errors.Is(err, transfers.ErrLFSNoObjectLocation) {
+		return &lfsapi.ObjectError{Code: 404, Message: "no object location available"}
 	}
-	credentials, err := s.credentials.ListS3Credentials(ctx)
-	if err != nil {
-		return "", "", "", err
+	if errors.Is(err, transfers.ErrLFSNoBucketConfigured) {
+		return &lfsapi.ObjectError{Code: 507, Message: "no bucket configured"}
 	}
-	if len(credentials) == 0 || strings.TrimSpace(credentials[0].Bucket) == "" {
-		return "", "", "", errNoBucketConfigured
+	if faults.IsNotFoundError(err) {
+		return &lfsapi.ObjectError{Code: 404, Message: "object not found"}
 	}
-	defaultBucket := strings.TrimSpace(credentials[0].Bucket)
-	if object, getErr := s.objectService.GetObject(ctx, oid, "read"); getErr == nil {
-		target, targetErr := s.transferService.ResolveCanonicalStorageTarget(ctx, transfers.CanonicalStorageTargetRequest{
-			Object:         object,
-			PreferChecksum: true,
-		})
-		if targetErr != nil {
-			return "", "", "", targetErr
-		}
-		if target.Bucket == "" || target.Key == "" {
-			return "", "", "", fmt.Errorf("canonical LFS upload location is not an s3 url")
-		}
-		return target.Bucket, target.Key, string(object.Id), nil
-	} else if !faults.IsNotFoundError(getErr) {
-		return "", "", "", getErr
+	if err == faults.ErrUnauthorized {
+		return &lfsapi.ObjectError{Code: int32(apimiddleware.AuthFailureStatus(ctx)), Message: "unauthorized"}
 	}
-
-	if pending, getErr := s.transferService.GetPendingLFSMeta(ctx, oid); getErr == nil {
-		object, conversionErr := objects.CandidateToRecord(pending.Candidate, time.Now().UTC())
-		if conversionErr != nil {
-			return "", "", "", conversionErr
-		}
-		target, targetErr := s.transferService.ResolveCanonicalStorageTarget(ctx, transfers.CanonicalStorageTargetRequest{
-			Object:         &object,
-			PreferChecksum: true,
-		})
-		if targetErr != nil {
-			return "", "", "", targetErr
-		}
-		if target.Bucket == "" || target.Key == "" {
-			return "", "", "", fmt.Errorf("canonical LFS upload location is not an s3 url")
-		}
-		return target.Bucket, target.Key, string(object.Id), nil
-	} else if !faults.IsNotFoundError(getErr) {
-		return "", "", "", getErr
-	}
-	return defaultBucket, oid, oid, nil
+	return &lfsapi.ObjectError{Code: 500, Message: err.Error()}
 }
 
-func (s *LFSServer) handleUploadInternal(ctx context.Context, body io.Reader, bucket, key, objectID string) error {
-	const multipartPartSize = 64 * 1024 * 1024
-	uploadID, err := s.transferService.InitMultipartUpload(ctx, bucket, key)
-	if err != nil {
-		return fmt.Errorf("failed to initialize multipart upload: %w", err)
+func downloadErrToBatchError(ctx context.Context, err error) *lfsapi.ObjectError {
+	var lookupErr *transfers.LFSDownloadLookupError
+	if errors.As(err, &lookupErr) {
+		return dbErrToBatchError(ctx, lookupErr.Err)
 	}
-
-	parts := make([]storage.CompletedPart, 0, 16)
-	partNumber := int32(1)
-	buffer := make([]byte, multipartPartSize)
-	for {
-		readCount, readErr := io.ReadFull(body, buffer)
-		if readErr == io.EOF {
-			break
-		}
-		if readErr == io.ErrUnexpectedEOF {
-			if readCount == 0 {
-				break
-			}
-		} else if readErr != nil {
-			return fmt.Errorf("failed reading upload stream: %w", readErr)
-		}
-
-		partURL, err := s.transferService.SignMultipartPart(ctx, bucket, key, uploadID, partNumber)
-		if err != nil {
-			return fmt.Errorf("failed to sign multipart part: %w", err)
-		}
-		etag, err := s.partUploader(ctx, partURL, buffer[:readCount])
-		if err != nil {
-			return fmt.Errorf("failed uploading multipart part: %w", err)
-		}
-		parts = append(parts, storage.CompletedPart{PartNumber: partNumber, ETag: etag})
-		partNumber++
-		if readErr == io.ErrUnexpectedEOF {
-			break
-		}
+	if errors.Is(err, transfers.ErrLFSNoObjectLocation) {
+		return dbErrToBatchError(ctx, err)
 	}
-
-	if err := s.transferService.CompleteMultipartUpload(ctx, bucket, key, uploadID, parts); err != nil {
-		return fmt.Errorf("failed to complete multipart upload: %w", err)
-	}
-	if err := s.recordUpload(ctx, objectID); err != nil {
-		return fmt.Errorf("failed to record upload usage: %w", err)
-	}
-	return nil
-}
-
-func (s *LFSServer) recordUpload(ctx context.Context, objectID string) error {
-	if s.fileCounters == nil {
-		return fmt.Errorf("file counters are not configured")
-	}
-	return s.fileCounters.RecordFileUpload(ctx, objectID)
+	return &lfsapi.ObjectError{Code: 500, Message: err.Error()}
 }

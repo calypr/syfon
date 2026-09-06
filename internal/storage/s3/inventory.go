@@ -13,7 +13,7 @@ import (
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/smithy-go"
 
-	"github.com/calypr/syfon/internal/requestmeta"
+	"github.com/calypr/syfon/internal/requestid"
 	"github.com/calypr/syfon/internal/storage"
 	"github.com/calypr/syfon/internal/storage/address"
 )
@@ -166,7 +166,7 @@ func (s *backend) listPages(ctx context.Context, client s3ListClient, input *aws
 			stats.LastKey = items[len(items)-1].Key
 		}
 		if logging {
-			log.Printf("INFO: syfon_s3_prefix_list_page_done request_id=%s bucket=%s requested_prefix=%q input_prefix=%q page=%d token=%s objects_total=%d last_key=%q truncated=%t", requestmeta.GetRequestID(ctx), bucket, prefix, requestPrefix, pageNumber, tokenID, len(items), stats.LastKey, aws.ToBool(page.IsTruncated))
+			log.Printf("INFO: syfon_s3_prefix_list_page_done request_id=%s bucket=%s requested_prefix=%q input_prefix=%q page=%d token=%s objects_total=%d last_key=%q truncated=%t", requestid.GetRequestID(ctx), bucket, prefix, requestPrefix, pageNumber, tokenID, len(items), stats.LastKey, aws.ToBool(page.IsTruncated))
 		}
 		if !aws.ToBool(page.IsTruncated) {
 			if request.MaxKeys != 1 {
@@ -233,7 +233,7 @@ func (s *backend) listPageWithRetry(ctx context.Context, client s3ListClient, ba
 		}
 		if !isRetryableListPageError(err) || attempt >= policy.MaxAttempts {
 			if logging {
-				log.Printf("INFO: syfon_s3_prefix_list_page_failed request_id=%s bucket=%s requested_prefix=%q input_prefix=%q page=%d token=%s objects=%d attempt=%d max_attempts=%d last_key=%q retryable=%t error=%q", requestmeta.GetRequestID(ctx), bucket, prefix, requestPrefix, pageNumber, tokenID, objectCount, attempt, policy.MaxAttempts, lastKey, isRetryableListPageError(err), err.Error())
+				log.Printf("INFO: syfon_s3_prefix_list_page_failed request_id=%s bucket=%s requested_prefix=%q input_prefix=%q page=%d token=%s objects=%d attempt=%d max_attempts=%d last_key=%q retryable=%t error=%q", requestid.GetRequestID(ctx), bucket, prefix, requestPrefix, pageNumber, tokenID, objectCount, attempt, policy.MaxAttempts, lastKey, isRetryableListPageError(err), err.Error())
 			}
 			return nil, tokenID, retries, fmt.Errorf("list s3 objects for %s/%s failed at page %d after %d objects and %d attempts: %w", bucket, strings.Trim(strings.TrimSpace(prefix), "/"), pageNumber, objectCount, attempt, err)
 		}

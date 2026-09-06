@@ -24,7 +24,7 @@ type BulkOverwriteResult struct {
 // BulkOverwriteObjects replaces records from one project snapshot without
 // canonicalizing checksum siblings. A checksum can therefore exist in more
 // than one project, while still identifying an existing record in this scope.
-func (m *Service) BulkOverwriteObjects(ctx context.Context, organization, project string, candidates []Record) (BulkOverwriteResult, error) {
+func (m *mutationService) BulkOverwriteObjects(ctx context.Context, organization, project string, candidates []Record) (BulkOverwriteResult, error) {
 	var result BulkOverwriteResult
 	if len(candidates) == 0 {
 		return result, nil
@@ -116,10 +116,10 @@ func (m *Service) BulkOverwriteObjects(ctx context.Context, organization, projec
 				return result, err
 			}
 			current := existing[targetDID]
-			if err := m.requireAllObjectMethod(ctx, &current, objectMethodUpdate); err != nil {
+			if err := requireAllObjectMethod(ctx, &current, objectMethodUpdate); err != nil {
 				return result, err
 			}
-			if !m.hasObjectMethod(ctx, &candidate, objectMethodUpdate) {
+			if !hasObjectMethod(ctx, &candidate, objectMethodUpdate) {
 				return result, faults.ErrUnauthorized
 			}
 			result.Replaced++
@@ -127,7 +127,7 @@ func (m *Service) BulkOverwriteObjects(ctx context.Context, organization, projec
 			if err := m.RequireObjectResources(ctx, objectMethodCreate, []string{resource}); err != nil {
 				return result, err
 			}
-			if !m.hasObjectMethod(ctx, &candidate, objectMethodCreate) {
+			if !hasObjectMethod(ctx, &candidate, objectMethodCreate) {
 				return result, faults.ErrUnauthorized
 			}
 			result.Created++

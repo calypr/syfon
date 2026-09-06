@@ -312,7 +312,7 @@ var (
 type serverTestDependencies struct {
 	objects       objects.Dependencies
 	bucketService *buckets.Service
-	usageIngest   usage.IngestStore
+	usageIngest   usage.Ingestor
 	usageReports  usage.ReportStore
 	pending       transfers.PendingStore
 }
@@ -457,7 +457,7 @@ func (serverUsageStore) GetTransferAttributionBreakdown(context.Context, usage.F
 }
 
 var (
-	_ usage.IngestStore = serverUsageStore{}
+	_ usage.Ingestor    = serverUsageStore{}
 	_ usage.ReportStore = serverUsageStore{}
 )
 

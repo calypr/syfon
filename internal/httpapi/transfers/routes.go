@@ -30,8 +30,9 @@ func RegisterObjectRoutes(router fiber.Router, objectService *objects.Service, t
 }
 
 func RegisterBulkAndMultipartRoutes(router fiber.Router, objectService *objects.Service, transferService *domaintransfers.Service) {
+	multipartLifecycle := domaintransfers.NewMultipartLifecycle(transferService)
 	router.Post(RouteUploadBulk, handleInternalUploadBulkFiber(objectService, transferService))
-	router.Post(RouteMultipartInit, handleInternalMultipartInitFiber(objectService, transferService))
-	router.Post(RouteMultipartUpload, handleInternalMultipartUploadFiber(transferService))
-	router.Post(RouteMultipartComplete, handleInternalMultipartCompleteFiber(transferService))
+	router.Post(RouteMultipartInit, handleInternalMultipartInitFiber(objectService, transferService, multipartLifecycle))
+	router.Post(RouteMultipartUpload, handleInternalMultipartUploadFiber(multipartLifecycle))
+	router.Post(RouteMultipartComplete, handleInternalMultipartCompleteFiber(multipartLifecycle))
 }
