@@ -200,7 +200,6 @@ var Cmd = &cobra.Command{
 				fatal("failed to initialize storage manager", "err", storageErr)
 			}
 			invalidator.manager = storageManager
-			backend.dependencies.Storage = storagePorts(storageManager)
 		}
 
 		// Load configured bucket credentials if present.
@@ -253,9 +252,9 @@ var Cmd = &cobra.Command{
 			bucketService,
 			bucketService,
 			bucketService,
-			backend.dependencies.Storage.Inventory,
-			backend.dependencies.Storage.Probe,
-			backend.dependencies.Storage.Delete,
+			storageManager,
+			storageManager,
+			storageManager,
 			objectService,
 			projectstorage.CleanupDependencies{Objects: objectService, Scopes: bucketService},
 		)

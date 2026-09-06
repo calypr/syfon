@@ -198,7 +198,7 @@ func buildMockServerRouterWithRoutes(routes config.RoutesConfig) *fiber.App {
 	authzMiddleware := middleware.NewAuthzMiddleware(logger, middleware.Options{Mode: "local", Evaluator: authRuntime})
 	requestIDMiddleware := middleware.NewRequestIDMiddleware(logger)
 	cfg := &config.Config{Routes: routes}
-	dependencies := mockServerDependencies(database, core.StoragePorts{})
+	dependencies := mockServerDependencies(database)
 	objectService := newServerObjectService(dependencies.Objects)
 	usageService := usage.NewService(usage.Dependencies{Ingest: database, Reports: database, Objects: objectService})
 	transferService := transfers.NewService(transfers.Dependencies{

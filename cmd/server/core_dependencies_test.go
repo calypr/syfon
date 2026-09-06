@@ -6,7 +6,7 @@ import (
 	"github.com/calypr/syfon/internal/testutils"
 )
 
-func mockServerDependencies(database *testutils.MockDatabase, storagePorts core.StoragePorts) core.Dependencies {
+func mockServerDependencies(database *testutils.MockDatabase) core.Dependencies {
 	objectPorts := core.ObjectPorts{
 		Reader: database, Writer: database, AccessMethods: database, AccessPolicy: database,
 		Aliases: database, Content: database, ChecksumScope: database, Scope: database,
@@ -22,6 +22,5 @@ func mockServerDependencies(database *testutils.MockDatabase, storagePorts core.
 	return core.Dependencies{
 		Objects:       objectPorts,
 		BucketService: bucketService,
-		Storage:       storagePorts,
 	}
 }

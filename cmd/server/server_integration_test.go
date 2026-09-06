@@ -131,7 +131,6 @@ s3_credentials:
 	}
 	invalidator.manager = storageManager
 	backend.dependencies.BucketService = bucketService
-	backend.dependencies.Storage = storagePorts(storageManager)
 	app := fiber.New()
 	objectService := newServerObjectService(backend.dependencies.Objects)
 	usageService := usage.NewService(usage.Dependencies{Ingest: backend.usageIngest, Reports: backend.usageReports, Objects: objectService})
@@ -140,7 +139,7 @@ s3_credentials:
 		Pending: backend.pending, Events: usageService.Ingest(),
 	})
 	om := core.NewObjectManager(backend.dependencies)
-	projectStorageService := projectstorage.NewService(bucketService, bucketService, bucketService, backend.dependencies.Storage.Inventory, backend.dependencies.Storage.Probe, backend.dependencies.Storage.Delete, objectService, projectstorage.CleanupDependencies{Objects: objectService, Scopes: bucketService})
+	projectStorageService := projectstorage.NewService(bucketService, bucketService, bucketService, storageManager, storageManager, storageManager, objectService, projectstorage.CleanupDependencies{Objects: objectService, Scopes: bucketService})
 	scopeRepairService := internaldrs.NewScopeRepairService(objectService, bucketService, storageManager)
 	internaldrs.RegisterInternalRoutes(app, objectService, om, transferService, usageService.Ingest(), bucketService, projectStorageService, scopeRepairService)
 

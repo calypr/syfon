@@ -14,11 +14,8 @@ const (
 
 // ObjectManager standardizes object lifecycle operations across all API surfaces.
 type ObjectManager struct {
-	objectService    *objects.Service
-	storageProbe     StorageProbe
-	storageInventory StorageInventory
-	storageDelete    StorageDelete
-	bucketService    *buckets.Service
+	objectService *objects.Service
+	bucketService *buckets.Service
 }
 
 // ObjectPorts contains the object capabilities used by the transitional
@@ -43,7 +40,6 @@ type ObjectPorts struct {
 type Dependencies struct {
 	Objects       ObjectPorts
 	BucketService *buckets.Service
-	Storage       StoragePorts
 }
 
 func NewObjectManager(deps Dependencies) *ObjectManager {
@@ -62,9 +58,6 @@ func NewObjectManager(deps Dependencies) *ObjectManager {
 			URLPages:      deps.Objects.URLPages,
 			Authorized:    deps.Objects.Authorized,
 		}),
-		storageProbe:     deps.Storage.Probe,
-		storageInventory: deps.Storage.Inventory,
-		storageDelete:    deps.Storage.Delete,
-		bucketService:    deps.BucketService,
+		bucketService: deps.BucketService,
 	}
 }
