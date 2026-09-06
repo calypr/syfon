@@ -10,48 +10,46 @@ import (
 	"time"
 
 	"github.com/calypr/syfon/internal/objects"
-	"github.com/calypr/syfon/internal/testutils"
 	"github.com/calypr/syfon/internal/usage"
 	"github.com/gofiber/fiber/v3"
 )
 
 func TestMetricsRoutes_TransferAttribution(t *testing.T) {
-	db := &testutils.MockDatabase{
-		Objects: map[string]*objects.Record{
-			"did-1": {
-				Id:   "did-1",
-				Size: 42,
-			},
+	objectReader := newMetricsObjectReader(map[string]*objects.Record{
+		"did-1": {
+			Id:   "did-1",
+			Size: 42,
 		},
-		ObjectAuthz: map[string]map[string][]string{
-			"did-1": {"calypr": {"proj-a"}},
+	}, map[string]map[string][]string{
+		"did-1": {"calypr": {"proj-a"}},
+	})
+	state := &metricsTransferState{events: []usage.Event{
+		{
+			EventID:        "grant-1",
+			AccessGrantID:  "grant-1",
+			EventType:      usage.TransferEventAccessIssued,
+			Direction:      usage.ProviderTransferDirectionDownload,
+			EventTime:      time.Date(2026, 4, 26, 19, 59, 0, 0, time.UTC),
+			RequestID:      "request-1",
+			ObjectID:       "did-1",
+			SHA256:         "sha-1",
+			ObjectSize:     42,
+			Organization:   "calypr",
+			Project:        "proj-a",
+			AccessID:       "s3",
+			Provider:       "s3",
+			Bucket:         "bucket-a",
+			StorageURL:     "s3://bucket-a/root/sha-1",
+			BytesRequested: 42,
+			ActorEmail:     "user@example.com",
+			ActorSubject:   "user-sub",
+			AuthMode:       "gen3",
 		},
-		TransferEvents: []usage.Event{
-			{
-				EventID:        "grant-1",
-				AccessGrantID:  "grant-1",
-				EventType:      usage.TransferEventAccessIssued,
-				Direction:      usage.ProviderTransferDirectionDownload,
-				EventTime:      time.Date(2026, 4, 26, 19, 59, 0, 0, time.UTC),
-				RequestID:      "request-1",
-				ObjectID:       "did-1",
-				SHA256:         "sha-1",
-				ObjectSize:     42,
-				Organization:   "calypr",
-				Project:        "proj-a",
-				AccessID:       "s3",
-				Provider:       "s3",
-				Bucket:         "bucket-a",
-				StorageURL:     "s3://bucket-a/root/sha-1",
-				BytesRequested: 42,
-				ActorEmail:     "user@example.com",
-				ActorSubject:   "user-sub",
-				AuthMode:       "gen3",
-			},
-		},
-	}
+	}}
+	ingest := &metricsIngestFake{state: state}
+	reports := newMetricsReport(objectReader, nil, state)
 	app := fiber.New()
-	registerMetricsRoutesForTest(app, db)
+	registerMetricsRoutesForTest(app, ingest, reports, objectReader)
 
 	body := `{"events":[{
 		"provider_event_id":"event-download-1",
@@ -85,8 +83,8 @@ func TestMetricsRoutes_TransferAttribution(t *testing.T) {
 	if httpResp.StatusCode != http.StatusCreated {
 		t.Fatalf("expected 201, got %d body=%s", httpResp.StatusCode, string(respBody))
 	}
-	if len(db.ProviderTransferEvents) != 1 {
-		t.Fatalf("expected one provider transfer event, got %+v", db.ProviderTransferEvents)
+	if len(state.providerEvents) != 1 {
+		t.Fatalf("expected one provider transfer event, got %+v", state.providerEvents)
 	}
 
 	dupReq := httptest.NewRequest(http.MethodPost, "/index/v1/metrics/provider-transfer-events", strings.NewReader(body))
@@ -99,8 +97,8 @@ func TestMetricsRoutes_TransferAttribution(t *testing.T) {
 		dupBody, _ := io.ReadAll(dupResp.Body)
 		t.Fatalf("expected duplicate insert to stay idempotent, got %d body=%s", dupResp.StatusCode, string(dupBody))
 	}
-	if len(db.ProviderTransferEvents) != 1 {
-		t.Fatalf("duplicate event should not double insert, got %+v", db.ProviderTransferEvents)
+	if len(state.providerEvents) != 1 {
+		t.Fatalf("duplicate event should not double insert, got %+v", state.providerEvents)
 	}
 
 	summaryReq := httptest.NewRequest(http.MethodGet, "/index/v1/metrics/transfers/summary?organization=calypr&project=proj-a&direction=download&allow_stale=true", nil)
@@ -142,40 +140,41 @@ func TestMetricsRoutes_TransferAttribution(t *testing.T) {
 }
 
 func TestMetricsRoutes_TransferAttributionAuthz(t *testing.T) {
-	db := &testutils.MockDatabase{
-		TransferEvents: []usage.Event{
-			{
-				EventID:        "event-download-1",
-				EventType:      usage.TransferEventAccessIssued,
-				Direction:      usage.ProviderTransferDirectionDownload,
-				EventTime:      time.Now().UTC(),
-				ObjectID:       "did-1",
-				SHA256:         "sha-1",
-				Organization:   "calypr",
-				Project:        "proj-a",
-				Provider:       "s3",
-				Bucket:         "bucket-a",
-				BytesRequested: 42,
-				ActorEmail:     "user@example.com",
-				ActorSubject:   "user-sub",
-			},
-			{
-				EventID:        "event-download-2",
-				EventType:      usage.TransferEventAccessIssued,
-				Direction:      usage.ProviderTransferDirectionDownload,
-				EventTime:      time.Now().UTC(),
-				ObjectID:       "did-2",
-				SHA256:         "sha-2",
-				Organization:   "calypr",
-				Project:        "proj-b",
-				Provider:       "s3",
-				Bucket:         "bucket-a",
-				BytesRequested: 99,
-				ActorEmail:     "user@example.com",
-				ActorSubject:   "user-sub",
-			},
+	objectReader := newMetricsObjectReader(nil, nil)
+	state := &metricsTransferState{events: []usage.Event{
+		{
+			EventID:        "event-download-1",
+			EventType:      usage.TransferEventAccessIssued,
+			Direction:      usage.ProviderTransferDirectionDownload,
+			EventTime:      time.Now().UTC(),
+			ObjectID:       "did-1",
+			SHA256:         "sha-1",
+			Organization:   "calypr",
+			Project:        "proj-a",
+			Provider:       "s3",
+			Bucket:         "bucket-a",
+			BytesRequested: 42,
+			ActorEmail:     "user@example.com",
+			ActorSubject:   "user-sub",
 		},
-	}
+		{
+			EventID:        "event-download-2",
+			EventType:      usage.TransferEventAccessIssued,
+			Direction:      usage.ProviderTransferDirectionDownload,
+			EventTime:      time.Now().UTC(),
+			ObjectID:       "did-2",
+			SHA256:         "sha-2",
+			Organization:   "calypr",
+			Project:        "proj-b",
+			Provider:       "s3",
+			Bucket:         "bucket-a",
+			BytesRequested: 99,
+			ActorEmail:     "user@example.com",
+			ActorSubject:   "user-sub",
+		},
+	}}
+	ingest := &metricsIngestFake{state: state}
+	reports := newMetricsReport(objectReader, nil, state)
 	app := fiber.New()
 	app.Use(func(c fiber.Ctx) error {
 		if mode := c.Get("X-Test-Auth-Mode"); mode != "" {
@@ -188,7 +187,7 @@ func TestMetricsRoutes_TransferAttributionAuthz(t *testing.T) {
 		}
 		return c.Next()
 	})
-	registerMetricsRoutesForTest(app, db)
+	registerMetricsRoutesForTest(app, ingest, reports, objectReader)
 
 	projectPrivs, _ := json.Marshal(map[string]map[string]bool{
 		"/programs/calypr/projects/proj-a": {"read": true},
@@ -285,7 +284,9 @@ func TestMetricsRoutes_TransferAttributionAuthz(t *testing.T) {
 
 func TestMetricsRoutes_NoLegacyDownloadAttributionRoutes(t *testing.T) {
 	app := fiber.New()
-	registerMetricsRoutesForTest(app, &testutils.MockDatabase{})
+	objectReader := newMetricsObjectReader(nil, nil)
+	state := &metricsTransferState{}
+	registerMetricsRoutesForTest(app, &metricsIngestFake{state: state}, newMetricsReport(objectReader, nil, state), objectReader)
 
 	for _, tc := range []struct {
 		method string

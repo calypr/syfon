@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/calypr/syfon/internal/access"
-	"github.com/calypr/syfon/internal/testutils"
 	"github.com/calypr/syfon/internal/usage"
 	"github.com/gofiber/fiber/v3"
 )
@@ -19,11 +18,11 @@ func metricsTestContext(base context.Context, mode string, headerSet bool, heade
 	return access.WithSession(base, session)
 }
 
-func registerMetricsRoutesForTest(app *fiber.App, database *testutils.MockDatabase) {
+func registerMetricsRoutesForTest(app *fiber.App, ingest usage.IngestStore, reports usage.ReportStore, objects usage.ObjectReader) {
 	service := usage.NewService(usage.Dependencies{
-		Ingest:  database,
-		Reports: database,
-		Objects: metricsObjectReaderAdapter{db: database},
+		Ingest:  ingest,
+		Reports: reports,
+		Objects: objects,
 	})
 	RegisterMetricsRoutes(app, service.Reports(), service.Ingest())
 }
