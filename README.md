@@ -243,8 +243,8 @@ The project follows a modular structure to ensure maintainability:
 - `internal/objects`, `internal/buckets`, `internal/transfers`, `internal/usage`: Domain values and consumer-owned ports.
 - `internal/persistence/sqlite`, `internal/persistence/postgres`: SQL persistence adapters.
 - `internal/api`: Subpackages for different API contexts (Core, internal compatibility, LFS, metrics, docs, middleware).
-- `service`: High-level business logic implementing the DRS service.
-- `urlmanager`: Logic for interacting with cloud storage providers.
+- `internal/core`: High-level object and storage workflows.
+- `internal/urlmanager`: Provider-neutral storage URL dispatch.
 
 See persistence table details and relationships in [internal/persistence/README.md](internal/persistence/README.md).
 
