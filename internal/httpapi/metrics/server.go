@@ -18,22 +18,18 @@ type metricsQueryParams struct {
 }
 
 type MetricsServer struct {
-	fileUsage      usage.FileUsageReader
-	objects        usage.ObjectReader
-	providerEvents usage.ProviderEventRecorder
-	transferQuery  usage.TransferQuery
+	reporter usage.Reporter
+	ingestor usage.Ingestor
 }
 
-func NewMetricsServer(fileUsage usage.FileUsageReader, transferQuery usage.TransferQuery, providerEvents usage.ProviderEventRecorder, objects usage.ObjectReader) *MetricsServer {
+func NewMetricsServer(reporter usage.Reporter, ingestor usage.Ingestor) *MetricsServer {
 	return &MetricsServer{
-		fileUsage:      fileUsage,
-		objects:        objects,
-		providerEvents: providerEvents,
-		transferQuery:  transferQuery,
+		reporter: reporter,
+		ingestor: ingestor,
 	}
 }
 
-func RegisterMetricsRoutes(router fiber.Router, fileUsage usage.FileUsageReader, transferQuery usage.TransferQuery, providerEvents usage.ProviderEventRecorder, objects usage.ObjectReader) {
+func RegisterMetricsRoutes(router fiber.Router, reporter usage.Reporter, ingestor usage.Ingestor) {
 	router.Use(func(c fiber.Ctx) error {
 		params := metricsQueryParams{
 			organization: strings.TrimSpace(c.Query("organization")),
@@ -44,7 +40,7 @@ func RegisterMetricsRoutes(router fiber.Router, fileUsage usage.FileUsageReader,
 		return c.Next()
 	})
 
-	server := NewMetricsServer(fileUsage, transferQuery, providerEvents, objects)
+	server := NewMetricsServer(reporter, ingestor)
 	strict := metricsapi.NewStrictHandler(server, nil)
 	metricsapi.RegisterHandlers(router, strict)
 }

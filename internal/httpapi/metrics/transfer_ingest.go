@@ -63,7 +63,7 @@ func (s *MetricsServer) RecordProviderTransferEvents(ctx context.Context, reques
 		}
 		events = append(events, ev)
 	}
-	if err := s.providerEvents.RecordProviderTransferEvents(ctx, events); err != nil {
+	if err := s.ingestor.RecordProviderTransferEvents(ctx, events); err != nil {
 		return metricsapi.RecordProviderTransferEvents500Response{}, nil
 	}
 	recorded := len(events)

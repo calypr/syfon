@@ -435,23 +435,24 @@ func TestFileUsageScopeHelpers(t *testing.T) {
 		},
 	}
 
-	adapter := metricsObjectReaderAdapter{db: objects}
+	service := usage.NewService(usage.Dependencies{
+		Ingest:  objects,
+		Reports: objects,
+		Objects: metricsObjectReaderAdapter{db: objects},
+	})
+	server := NewMetricsServer(service.Reports(), service.Ingest())
+	access := metricsAccess{organization: "org1", project: "p1"}
 
-	inside, err := objectInScope(context.Background(), adapter, "obj-a", "org1", "p1")
+	inside, err := server.objectInScope(context.Background(), "obj-a", access)
 	if err != nil || !inside {
 		t.Fatalf("expected obj-a in scope org1/p1, inside=%v err=%v", inside, err)
 	}
-	inside, err = objectInScope(context.Background(), adapter, "obj-b", "org1", "p1")
+	inside, err = server.objectInScope(context.Background(), "obj-b", access)
 	if err != nil {
 		t.Fatalf("objectInScope error: %v", err)
 	}
 	if inside {
 		t.Fatalf("expected obj-b outside org1/p1")
-	}
-
-	inside, err = objectInAnyScope(context.Background(), adapter, "obj-b", []metricsScope{{organization: "org1", project: "p1"}, {organization: "org2", project: "p2"}})
-	if err != nil || !inside {
-		t.Fatalf("expected obj-b in one of scopes, inside=%v err=%v", inside, err)
 	}
 }
 
@@ -469,15 +470,20 @@ func TestListMultiScopedFileUsage_DeduplicatesAcrossScopes(t *testing.T) {
 		},
 	}
 
-	adapter := metricsObjectReaderAdapter{db: objects}
-	usages, summary, err := listMultiScopedFileUsage(context.Background(), objects, adapter, []metricsScope{{organization: "org1", project: "p1"}, {organization: "org1", project: "p1"}}, 0, 0, nil)
+	service := usage.NewService(usage.Dependencies{
+		Ingest:  objects,
+		Reports: objects,
+		Objects: metricsObjectReaderAdapter{db: objects},
+	})
+	usages, err := service.ListFileUsage(context.Background(), usage.FileUsageQuery{
+		Scope: usage.ScopeQuery{
+			Scopes: []usage.Scope{{Organization: "org1", Project: "p1"}, {Organization: "org1", Project: "p1"}},
+		},
+	})
 	if err != nil {
-		t.Fatalf("listMultiScopedFileUsage error: %v", err)
+		t.Fatalf("ListFileUsage error: %v", err)
 	}
 	if len(usages) != 1 || usages[0].ObjectID != "obj-a" {
 		t.Fatalf("expected one deduplicated usage record, got %+v", usages)
-	}
-	if summary.TotalFiles < 1 {
-		t.Fatalf("expected summary total files > 0, got %+v", summary)
 	}
 }
