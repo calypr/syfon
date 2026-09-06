@@ -1,0 +1,14 @@
+spec:
+  template:
+    spec:
+      containers:
+        - name: syfon
+          volumeMounts:
+            - name: calypr-test-ca
+              mountPath: /etc/calypr-ca/ca.crt
+              subPath: ca.crt
+              readOnly: true
+      volumes:
+        - name: calypr-test-ca
+          secret:
+            secretName: calypr-test-ca

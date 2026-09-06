@@ -32,7 +32,7 @@ func (m *ObjectManager) SignObjectURL(ctx context.Context, obj *models.InternalO
 		targetURL = target.URL
 	} else {
 		var err error
-		targetURL, err = m.resolveLegacyS3DownloadURL(ctx, obj, targetURL)
+		targetURL, err = m.resolveObjectDownloadURL(ctx, obj, targetURL)
 		if err != nil {
 			return "", err
 		}
@@ -204,7 +204,7 @@ func (m *ObjectManager) SignDownloadPart(ctx context.Context, bucket, accessURL 
 
 func (m *ObjectManager) SignObjectDownloadPart(ctx context.Context, obj *models.InternalObject, bucket, accessURL string, start, end int64, options urlmanager.SignOptions) (string, error) {
 	var err error
-	accessURL, err = m.resolveLegacyS3DownloadURL(ctx, obj, accessURL)
+	accessURL, err = m.resolveObjectDownloadURL(ctx, obj, accessURL)
 	if err != nil {
 		return "", err
 	}
@@ -212,6 +212,38 @@ func (m *ObjectManager) SignObjectDownloadPart(ctx context.Context, obj *models.
 		bucket = b
 	}
 	return m.SignDownloadPart(ctx, bucket, accessURL, start, end, options)
+}
+
+func (m *ObjectManager) resolveObjectDownloadURL(ctx context.Context, obj *models.InternalObject, accessURL string) (string, error) {
+	accessURL = strings.TrimSpace(accessURL)
+	legacyURL, err := m.resolveLegacyS3DownloadURL(ctx, obj, accessURL)
+	if err != nil {
+		return "", err
+	}
+	if legacyURL != accessURL || !isUnscopedCanonicalSHA256(obj, accessURL) {
+		return legacyURL, nil
+	}
+
+	target, err := m.ResolveCanonicalStorageTarget(ctx, CanonicalStorageTargetRequest{
+		Object:    obj,
+		AccessURL: accessURL,
+	})
+	if err != nil {
+		return "", err
+	}
+	return target.URL, nil
+}
+
+func isUnscopedCanonicalSHA256(obj *models.InternalObject, accessURL string) bool {
+	if obj == nil {
+		return false
+	}
+	_, key, ok := parseS3Location(accessURL)
+	if !ok || strings.Contains(strings.Trim(key, "/"), "/") {
+		return false
+	}
+	sha, ok := common.CanonicalSHA256(obj.Checksums)
+	return ok && strings.EqualFold(strings.Trim(key, "/"), strings.TrimSpace(sha))
 }
 
 func (m *ObjectManager) resolveLegacyS3DownloadURL(ctx context.Context, obj *models.InternalObject, accessURL string) (string, error) {

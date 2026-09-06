@@ -1,0 +1,32 @@
+diff --git a/tests/e2e-gen3-remote-full.sh b/tests/e2e-gen3-remote-full.sh
+index 78d1ca1..1247efe 100755
+--- a/tests/e2e-gen3-remote-full.sh
++++ b/tests/e2e-gen3-remote-full.sh
+@@ -1665,11 +1665,13 @@ run_test() {
+   multi_obj="$(api_json GET "$API_BASE/objects/$multi_drs_id" "" "200")"
+   echo "$single_obj" | jq -e --arg did "$single_drs_id" '.id == $did' >/dev/null
+   echo "$multi_obj" | jq -e --arg did "$multi_drs_id" '.id == $did' >/dev/null
+-  echo "$single_obj" | jq -e --arg bucket "$active_bucket" --arg org "$ORGANIZATION" --arg proj "$PROJECT_ID" '
+-    any(.auth[$org][$proj][]?; startswith("s3://" + $bucket + "/"))
++  echo "$single_obj" | jq -e --arg bucket "$active_bucket" --arg resource "/organization/$ORGANIZATION/project/$PROJECT_ID" '
++    any(.controlled_access[]?; . == $resource) and
++    any(.access_methods[]?.access_url.url; startswith("s3://" + $bucket + "/"))
+   ' >/dev/null
+-  echo "$multi_obj" | jq -e --arg bucket "$active_bucket" --arg org "$ORGANIZATION" --arg proj "$PROJECT_ID" '
+-    any(.auth[$org][$proj][]?; startswith("s3://" + $bucket + "/"))
++  echo "$multi_obj" | jq -e --arg bucket "$active_bucket" --arg resource "/organization/$ORGANIZATION/project/$PROJECT_ID" '
++    any(.controlled_access[]?; . == $resource) and
++    any(.access_methods[]?.access_url.url; startswith("s3://" + $bucket + "/"))
+   ' >/dev/null
+ 
+   api_json OPTIONS "$API_BASE/objects/$single_drs_id" "" "200,204" >/dev/null
+@@ -1721,7 +1723,8 @@ run_test() {
+       checksums: [{type: "sha256", checksum: $oid}]
+     }]
+   }')"
+-  api_json POST "$API_BASE/upload-request" "$upload_req" "200" >/dev/null
++  api_json POST "$API_BASE/upload-request" "$upload_req" "400" |
++    jq -e '.msg | contains("explicit upload routing")' >/dev/null
+ 
+   log "Running LFS API checks"
+   local lfs_batch_download lfs_batch_upload

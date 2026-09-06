@@ -1,0 +1,288 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: calypr-bootstrap-check
+  labels:
+    calypr.syfon/scenario: bootstrap
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 180
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: check
+          image: syfon-calypr-client:ci
+          imagePullPolicy: Never
+          command: [/bin/bash, /scenarios/bootstrap.sh]
+          envFrom:
+            - secretRef:
+                name: calypr-user-tokens
+          volumeMounts:
+            - name: scenarios
+              mountPath: /scenarios
+              readOnly: true
+            - name: ca
+              mountPath: /usr/local/share/ca-certificates/calypr-ca.crt
+              subPath: ca.crt
+              readOnly: true
+      volumes:
+        - name: scenarios
+          configMap:
+            name: calypr-scenarios
+        - name: ca
+          secret:
+            secretName: calypr-test-ca
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: calypr-git-drs
+  labels:
+    calypr.syfon/scenario: writer
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 600
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: git-drs
+          image: syfon-calypr-client:ci
+          imagePullPolicy: Never
+          command:
+            - /bin/bash
+            - -c
+            - |
+              source /scenarios/common.sh
+              /usr/local/share/git-drs/tests/e2e-gen3-remote-full.sh
+              echo 'SCENARIO managed-upload PASS'
+              echo 'SCENARIO single-part-upload PASS'
+              echo 'SCENARIO multipart-upload PASS'
+              echo 'SCENARIO fresh-clone-download PASS'
+          env:
+            - name: TEST_SERVER_MODE
+              value: remote
+            - name: TEST_DRS_URL
+              value: https://calypr.test
+            - name: TEST_GEN3_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: calypr-user-tokens
+                  key: CI_WRITER_TOKEN
+            - name: TEST_REMOTE_URL
+              value: http://ci-git:gogs-ci@gogs.test:3000/ci-git/syfon-fixture.git
+            # BusyBox mktemp rejects the upstream script's BSD-style -t
+            # fallback. The mounted emptyDir is already the intended workspace.
+            - name: TEST_WORK_ROOT
+              value: /work/git-drs-e2e
+            - name: TEST_ORGANIZATION
+              value: ci
+            - name: TEST_PROJECT_ID
+              value: a
+            - name: TEST_BUCKET
+              value: syfon-ci
+            - name: TEST_LARGE_FILE_MB
+              value: "6"
+            - name: TEST_MULTIPART_THRESHOLD_MB
+              value: "5"
+            - name: TEST_EXTRA_SMALL_FILES
+              value: "0"
+            - name: TEST_EXTRA_LARGE_FILES
+              value: "0"
+            - name: TEST_RUN_RESUME_E2E
+              value: "false"
+            - name: TEST_LFS_PULL_COMPAT
+              value: "false"
+            - name: TEST_FULL_SERVER_SWEEP
+              value: "false"
+            - name: TEST_RUN_INTERNAL_API_CHECKS
+              value: "false"
+            - name: TEST_CLEANUP_RECORDS
+              value: "false"
+            - name: TEST_DELETE_BUCKET_AFTER
+              value: "false"
+            - name: TEST_DEBUG_AUTH
+              value: "false"
+            - name: TEST_PRINT_TOKEN
+              value: "false"
+            - name: TEST_ALLOW_BUCKET_PREFLIGHT_FORBIDDEN
+              value: "true"
+          volumeMounts:
+            - name: work
+              mountPath: /work
+            - name: scenarios
+              mountPath: /scenarios
+              readOnly: true
+            - name: ca
+              mountPath: /usr/local/share/ca-certificates/calypr-ca.crt
+              subPath: ca.crt
+              readOnly: true
+      volumes:
+        - name: work
+          emptyDir: {}
+        - name: scenarios
+          configMap:
+            name: calypr-scenarios
+        - name: ca
+          secret:
+            secretName: calypr-test-ca
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: calypr-reader
+  labels:
+    calypr.syfon/scenario: reader
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 600
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: reader
+          image: syfon-calypr-client:ci
+          imagePullPolicy: Never
+          command: [/bin/bash, /scenarios/reader.sh]
+          envFrom:
+            - secretRef:
+                name: calypr-user-tokens
+          volumeMounts:
+            - name: work
+              mountPath: /work
+            - name: scenarios
+              mountPath: /scenarios
+              readOnly: true
+            - name: ca
+              mountPath: /usr/local/share/ca-certificates/calypr-ca.crt
+              subPath: ca.crt
+              readOnly: true
+      volumes:
+        - name: work
+          emptyDir: {}
+        - name: scenarios
+          configMap:
+            name: calypr-scenarios
+        - name: ca
+          secret:
+            secretName: calypr-test-ca
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: calypr-denial
+  labels:
+    calypr.syfon/scenario: denial
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 600
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: denial
+          image: syfon-calypr-client:ci
+          imagePullPolicy: Never
+          command: [/bin/bash, /scenarios/denial.sh]
+          envFrom:
+            - secretRef:
+                name: calypr-user-tokens
+          volumeMounts:
+            - name: work
+              mountPath: /work
+            - name: scenarios
+              mountPath: /scenarios
+              readOnly: true
+            - name: ca
+              mountPath: /usr/local/share/ca-certificates/calypr-ca.crt
+              subPath: ca.crt
+              readOnly: true
+      volumes:
+        - name: work
+          emptyDir: {}
+        - name: scenarios
+          configMap:
+            name: calypr-scenarios
+        - name: ca
+          secret:
+            secretName: calypr-test-ca
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: calypr-storage-check
+  labels:
+    calypr.syfon/scenario: storage
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 180
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: check
+          image: quay.io/minio/mc:RELEASE.2024-09-16T17-43-14Z
+          command: [/bin/sh, /scenarios/storage-check.sh]
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: minio-ci
+                  key: access-key
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: minio-ci
+                  key: secret-key
+          volumeMounts:
+            - name: scenarios
+              mountPath: /scenarios
+              readOnly: true
+      volumes:
+        - name: scenarios
+          configMap:
+            name: calypr-scenarios
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: calypr-restart-reader
+  labels:
+    calypr.syfon/scenario: restart
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 600
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: reader
+          image: syfon-calypr-client:ci
+          imagePullPolicy: Never
+          command:
+            - /bin/bash
+            - -c
+            - /bin/bash /scenarios/reader.sh && echo 'SCENARIO restart-persistence PASS'
+          envFrom:
+            - secretRef:
+                name: calypr-user-tokens
+          volumeMounts:
+            - name: work
+              mountPath: /work
+            - name: scenarios
+              mountPath: /scenarios
+              readOnly: true
+            - name: ca
+              mountPath: /usr/local/share/ca-certificates/calypr-ca.crt
+              subPath: ca.crt
+              readOnly: true
+      volumes:
+        - name: work
+          emptyDir: {}
+        - name: scenarios
+          configMap:
+            name: calypr-scenarios
+        - name: ca
+          secret:
+            secretName: calypr-test-ca

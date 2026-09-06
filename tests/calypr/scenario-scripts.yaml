@@ -1,0 +1,178 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: calypr-scenarios
+data:
+  common.sh: |
+    set -euo pipefail
+    export GIT_TERMINAL_PROMPT=0
+    export GIT_CONFIG_NOSYSTEM=1
+    export GIT_LFS_SKIP_SMUDGE=1
+    export GIT_SSL_CAINFO=/usr/local/share/ca-certificates/calypr-ca.crt
+    export SSL_CERT_FILE=/usr/local/share/ca-certificates/calypr-ca.crt
+    endpoint=https://calypr.test
+    git_url=http://ci-git:gogs-ci@gogs.test:3000/ci-git/syfon-fixture.git
+
+    configure_repo() {
+      repo=$1
+      token_name=$2
+      cd "$repo"
+      git config user.name "Syfon CI"
+      git config user.email "syfon-ci@invalid"
+      git drs install
+      git drs remote add origin "$endpoint" \
+        --provider gen3 \
+        --scope ci/a \
+        --auth bearer \
+        --credential "env:$token_name"
+      git config --local drs.multipart-threshold 5
+    }
+
+    pointer_oid() {
+      git show "HEAD:$1" | sed -n 's/^oid sha256://p'
+    }
+
+  bootstrap.sh: |
+    source /scenarios/common.sh
+    writer_json=$(curl --fail --silent --show-error \
+      -H "Authorization: Bearer $CI_WRITER_TOKEN" \
+      "$endpoint/user/user")
+    reader_json=$(curl --fail --silent --show-error \
+      -H "Authorization: Bearer $CI_READER_TOKEN" \
+      "$endpoint/user/user")
+    outsider_json=$(curl --fail --silent --show-error \
+      -H "Authorization: Bearer $CI_OUTSIDER_TOKEN" \
+      "$endpoint/user/user")
+    echo "$writer_json" | jq -e '.authz["/programs/ci/projects/a"] | any(.method == "write-storage")'
+    echo "$writer_json" | jq -e '.authz["/programs/ci/projects/b"] == null'
+    echo "$reader_json" | jq -e '.authz["/programs/ci/projects/a"] | any(.method == "read-storage")'
+    echo "$reader_json" | jq -e '.authz["/programs/ci/projects/a"] | all(.method != "write-storage")'
+    echo "$outsider_json" | jq -e '.authz["/programs/ci/projects/b"] | any(.method == "write-storage")'
+    echo "$outsider_json" | jq -e '.authz["/programs/ci/projects/a"] == null'
+    curl --fail --silent --show-error "$endpoint/.well-known/openid-configuration" >/dev/null
+    curl --fail --silent --show-error "$endpoint/.well-known/jwks" | jq -e '.keys | length > 0'
+    curl --fail --silent --show-error "$endpoint/healthz" >/dev/null
+    echo 'SCENARIO bootstrap PASS'
+
+  reader.sh: |
+    source /scenarios/common.sh
+    git clone --branch main "$git_url" /work/clone
+    configure_repo /work/clone CI_READER_TOKEN
+    cd /work/clone
+    small_oid=$(pointer_oid data/single.bin)
+    large_oid=$(pointer_oid data/multipart.bin)
+    grep -q '^version https://git-lfs.github.com/spec/v1$' data/single.bin
+    grep -q '^version https://git-lfs.github.com/spec/v1$' data/multipart.bin
+    git drs pull origin
+    test "$small_oid" = "$(sha256sum data/single.bin | cut -d' ' -f1)"
+    test "$large_oid" = "$(sha256sum data/multipart.bin | cut -d' ' -f1)"
+    echo 'SCENARIO single-part-download PASS'
+    echo 'SCENARIO multipart-download PASS'
+
+    objects=$(curl --fail --silent --show-error \
+      -H "Authorization: Bearer $CI_READER_TOKEN" \
+      "$endpoint/ga4gh/drs/v1/objects/checksum/$small_oid")
+    object=$(echo "$objects" | jq -ec '.resolved_drs_object[] | select(any(.checksums[]; .type == "sha256" and .checksum == $oid))' --arg oid "$small_oid")
+    object_id=$(echo "$object" | jq -er '.id')
+    access_id=$(echo "$object" | jq -r '.access_methods[] | select(.type == "s3") | .access_id' | head -1)
+    test -n "$object_id"
+    test -n "$access_id"
+    signed_url=$(curl --fail --silent --show-error \
+      -H "Authorization: Bearer $CI_READER_TOKEN" \
+      "$endpoint/ga4gh/drs/v1/objects/$object_id/access/$access_id" | jq -er '.url')
+    curl --fail --silent --show-error "$signed_url" -o /tmp/signed-single.bin
+    test "$small_oid" = "$(sha256sum /tmp/signed-single.bin | cut -d' ' -f1)"
+    tampered_url="${signed_url}x"
+    if curl --fail --silent --show-error "$tampered_url" -o /dev/null; then
+      echo 'tampered signed URL unexpectedly succeeded' >&2
+      exit 1
+    fi
+    unsigned_url=${signed_url%%\?*}
+    test "$unsigned_url" != "$signed_url"
+    if curl --fail --silent --show-error "$unsigned_url" -o /dev/null; then
+      echo 'unsigned storage request unexpectedly succeeded' >&2
+      exit 1
+    fi
+    echo 'SCENARIO fresh-clone-download PASS'
+    echo 'SCENARIO signed-download PASS'
+    echo 'SCENARIO signature-rejection PASS'
+    echo 'SCENARIO unsigned-storage-denial PASS'
+
+  denial.sh: |
+    source /scenarios/common.sh
+    git clone --branch main "$git_url" /work/outsider
+    configure_repo /work/outsider CI_OUTSIDER_TOKEN
+    cd /work/outsider
+    small_oid=$(pointer_oid data/single.bin)
+    objects=$(curl --fail --silent --show-error \
+      -H "Authorization: Bearer $CI_READER_TOKEN" \
+      "$endpoint/ga4gh/drs/v1/objects/checksum/$small_oid")
+    object=$(echo "$objects" | jq -ec '.resolved_drs_object[] | select(any(.checksums[]; .type == "sha256" and .checksum == $oid))' --arg oid "$small_oid")
+    object_id=$(echo "$object" | jq -er '.id')
+    access_id=$(echo "$object" | jq -r '.access_methods[] | select(.type == "s3") | .access_id' | head -1)
+    test -n "$object_id"
+    test -n "$access_id"
+    outsider_status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+      -H "Authorization: Bearer $CI_OUTSIDER_TOKEN" \
+      "$endpoint/ga4gh/drs/v1/objects/$object_id/access/$access_id")
+    test "$outsider_status" = 403
+    if git drs pull origin; then
+      echo 'project B user hydrated project A content' >&2
+      exit 1
+    fi
+
+    git clone --branch main "$git_url" /work/reader-write
+    configure_repo /work/reader-write CI_READER_TOKEN
+    cd /work/reader-write
+    printf 'read-only user must not upload\n' >data/forbidden.bin
+    git add data/forbidden.bin
+    git commit -m 'forbidden reader upload'
+    if git drs push origin; then
+      echo 'read-only user uploaded content' >&2
+      exit 1
+    fi
+
+    expired_status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+      -H "Authorization: Bearer $CI_EXPIRED_TOKEN" \
+      "$endpoint/ga4gh/drs/v1/objects/$object_id/access/$access_id")
+    test "$expired_status" = 401 -o "$expired_status" = 403
+    echo 'SCENARIO cross-project-denial PASS'
+    echo 'SCENARIO read-only-upload-denial PASS'
+    echo 'SCENARIO expired-token-denial PASS'
+
+  storage-check.sh: |
+    set -eu
+    mc alias set ci http://minio.test:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"
+    objects=$(mc find ci/syfon-ci/project-a)
+    object_count=0
+    while IFS= read -r object; do
+      test -n "$object" || continue
+      object_count=$((object_count + 1))
+      case "$object" in
+        *forbidden*)
+          echo 'forbidden reader object exists' >&2
+          exit 1
+          ;;
+      esac
+    done <<EOF
+    $objects
+    EOF
+    if test "$object_count" -ne 2; then
+      echo "expected 2 project-a objects, found $object_count: $objects" >&2
+      exit 1
+    fi
+    if mc stat ci/syfon-ci/project-b >/dev/null 2>&1; then
+      project_b_objects=$(mc find ci/syfon-ci/project-b)
+      project_b_count=0
+      while IFS= read -r object; do
+        test -n "$object" || continue
+        project_b_count=$((project_b_count + 1))
+      done <<EOF
+    $project_b_objects
+    EOF
+      if test "$project_b_count" -ne 0; then
+        echo "expected no project-b objects, found $project_b_count: $project_b_objects" >&2
+        exit 1
+      fi
+    fi
+    echo 'SCENARIO storage-side-effects PASS'

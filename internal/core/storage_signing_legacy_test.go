@@ -173,3 +173,71 @@ func TestObjectManagerLegacyS3DownloadCredentialErrorsPropagate(t *testing.T) {
 		t.Fatalf("expected credential lookup error to propagate, got %v", err)
 	}
 }
+
+func TestObjectManagerScopedLogicalDownloadSigning(t *testing.T) {
+	const (
+		sha      = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+		logical  = "s3://syfon-ci/" + sha
+		physical = "s3://syfon-ci/project-a/" + sha
+	)
+
+	db := &coreTestDB{MockDatabase: &testutils.MockDatabase{BucketScopes: map[string]models.BucketScope{
+		"ci|a": {
+			Organization: "ci",
+			ProjectID:    "a",
+			Bucket:       "syfon-ci",
+			PathPrefix:   "project-a",
+		},
+	}}}
+	obj := &models.InternalObject{DrsObject: drs.DrsObject{
+		Checksums:        []drs.Checksum{{Type: "sha256", Checksum: sha}},
+		ControlledAccess: &[]string{"/organization/ci/project/a"},
+	}}
+
+	t.Run("full download", func(t *testing.T) {
+		um := &capturingURLManager{}
+		om := NewObjectManager(db, um)
+		if _, err := om.SignObjectURL(context.Background(), obj, logical, urlmanager.SignOptions{}); err != nil {
+			t.Fatalf("SignObjectURL failed: %v", err)
+		}
+		if um.signURLAccessURL != physical || um.signURLBucket != "syfon-ci" {
+			t.Fatalf("expected logical URL to resolve to %q in syfon-ci, got %q in %q", physical, um.signURLAccessURL, um.signURLBucket)
+		}
+	})
+
+	t.Run("ranged download", func(t *testing.T) {
+		um := &capturingURLManager{}
+		om := NewObjectManager(db, um)
+		if _, err := om.SignObjectDownloadPart(context.Background(), obj, "syfon-ci", logical, 0, 1023, urlmanager.SignOptions{}); err != nil {
+			t.Fatalf("SignObjectDownloadPart failed: %v", err)
+		}
+		if um.signDownloadURL != physical || um.signDownloadBucket != "syfon-ci" {
+			t.Fatalf("expected logical URL to resolve to %q in syfon-ci, got %q in %q", physical, um.signDownloadURL, um.signDownloadBucket)
+		}
+	})
+
+	for _, tc := range []struct {
+		name string
+		url  string
+	}{
+		{name: "imported path", url: "s3://syfon-ci/imported/legacy-object"},
+		{name: "already scoped", url: physical},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			um := &capturingURLManager{}
+			om := NewObjectManager(db, um)
+			if _, err := om.SignObjectURL(context.Background(), obj, tc.url, urlmanager.SignOptions{}); err != nil {
+				t.Fatalf("SignObjectURL failed: %v", err)
+			}
+			if um.signURLAccessURL != tc.url {
+				t.Fatalf("expected imported/scoped URL to remain %q, got %q", tc.url, um.signURLAccessURL)
+			}
+			if _, err := om.SignObjectDownloadPart(context.Background(), obj, "syfon-ci", tc.url, 0, 1023, urlmanager.SignOptions{}); err != nil {
+				t.Fatalf("SignObjectDownloadPart failed: %v", err)
+			}
+			if um.signDownloadURL != tc.url || um.signDownloadBucket != "syfon-ci" {
+				t.Fatalf("expected imported/scoped ranged URL to remain %q in syfon-ci, got %q in %q", tc.url, um.signDownloadURL, um.signDownloadBucket)
+			}
+		})
+	}
+}
