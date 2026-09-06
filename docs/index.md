@@ -49,7 +49,7 @@ syfon/
 ├── client/         # Go client SDK (separate Go module)
 ├── cmd/            # CLI commands (serve, upload, download, version, ...)
 ├── config/         # Config loading and validation
-├── db/             # Database interfaces, SQLite and PostgreSQL drivers
+├── internal/persistence/ # SQLite and PostgreSQL adapters
 ├── internal/api/   # HTTP route handlers (DRS, internal, LFS, metrics)
 ├── service/        # High-level DRS business logic
 ├── urlmanager/     # Cloud storage signing and multipart logic

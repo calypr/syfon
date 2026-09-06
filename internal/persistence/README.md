@@ -1,21 +1,20 @@
-# Database package
+# Persistence adapters
 
-`internal/db` defines the persistence contracts used by Syfon. The backend implementations remain separate because SQLite and PostgreSQL use different SQL, connection, locking, and parameter-limit behavior.
+`internal/persistence` contains Syfon's SQL adapters. SQLite and PostgreSQL remain separate because their SQL, connection, locking, schema-upgrade, and parameter-limit behavior differs.
 
 ## Package layout
 
-- `interface.go` defines capability interfaces, including `ObjectStore`, `CredentialStore`, `UsageStore`, and the aggregate `DatabaseInterface`.
 - `sqlite/` implements the contracts with SQLite. `sqlite.NewSqliteDB` initializes and upgrades the runtime schema before it returns.
 - `postgres/` implements the contracts with PostgreSQL. `postgres.NewPostgresDB` initializes and upgrades the runtime schema before it returns.
 - `postgres/object_schema.sql` contains the object tables and indexes embedded by the PostgreSQL implementation.
-- `scripts/init_sqlite.sql` and `scripts/init_sqlite_db.sh` provide a manual SQLite bootstrap helper.
-- At the 2026-09-04 audit baseline, `testing.go` provides `db.NewInMemoryDB` for tests by calling the SQLite implementation. The accepted architecture worklist moves this helper to `internal/testutils` so the contract package does not import a backend.
+- `sqlite/scripts/` contains the manual SQLite bootstrap helper.
+- `postgres/scripts/` contains PostgreSQL maintenance SQL.
 
-Production dependency direction is `cmd/server` and the API and core packages -> `internal/db` contracts -> `sqlite` or `postgres`. The server selects a backend from `internal/config` in `cmd/server/server.go`. The current test helper is the exception described above.
+Consumer packages own their narrow ports in `objects`, `buckets`, `transfers`, and `usage`. Both adapters implement those ports, and `cmd/server` explicitly composes the selected concrete backend. There is no shared database aggregate interface.
 
 ## Object and access tables
 
-Both runtime backends store the following object data. SQLite creates these tables in `internal/db/sqlite/sqlite.go:initSchema`. PostgreSQL creates the object tables from `internal/db/postgres/object_schema.sql`.
+Both runtime backends store the following object data. SQLite creates these tables in `internal/persistence/sqlite/sqlite.go:initSchema`. PostgreSQL creates the object tables from `internal/persistence/postgres/object_schema.sql`.
 
 ### `drs_object`
 
@@ -34,7 +33,7 @@ This table stores one row for each typed checksum value.
 - `type` stores values such as `sha256` or `md5`.
 - `checksum` stores the corresponding value.
 
-`internal/common.CanonicalSHA256` normalizes SHA-256 values for identity and lookup. The runtime schema includes indexes for ordinary checksum lookup and the normalized SHA-256 identity expression.
+`objects.CanonicalSHA256` normalizes SHA-256 values for identity and lookup. The runtime schema includes indexes for ordinary checksum lookup and the normalized SHA-256 identity expression.
 
 ### `drs_object_access_method`
 
@@ -99,19 +98,20 @@ The PostgreSQL runtime schema has the same logical table groups. Its object DDL 
 
 ## Standalone SQLite script
 
-`internal/db/scripts/init_sqlite.sql` is a manual bootstrap helper used by `init_sqlite_db.sh`. The application does not read this file during normal startup. The script creates a basic object, access, checksum, credential, bucket-scope, and access-grant schema.
+`internal/persistence/sqlite/scripts/init_sqlite.sql` is a manual bootstrap helper used by `init_sqlite_db.sh`. The application does not read this file during normal startup. The script creates a basic object, access, checksum, credential, bucket-scope, and access-grant schema.
 
 The script is intentionally smaller than the runtime schema. It omits `drs_object_read_policy`, `drs_object_alias`, `drs_object_name_alias`, `lfs_pending_metadata`, `object_usage`, `object_usage_event`, `transfer_attribution_event`, and `provider_transfer_event`, along with their runtime indexes and the SQLite credential uniqueness triggers. It also does not run the runtime compatibility upgrades or the access-grant backfill.
 
 Starting Syfon against a database created by the script still runs `sqlite.NewSqliteDB`, which creates the missing runtime tables and applies its upgrades. The difference between the script and runtime DDL does not show that normal server startup fails. Do not treat the standalone script as the complete runtime schema or as a migration engine. Keep its behavior unchanged when reorganizing files.
 
-## Add a database operation
+## Add a persistence operation
 
-1. Add the smallest suitable capability method to `internal/db/interface.go`.
-2. Implement the method in both backend packages.
-3. Add backend-specific tests for SQL, transactions, missing rows, and error mapping.
-4. Update a test stub only when the test needs the new capability.
+1. Add the smallest suitable interface to the consuming domain package, or extend an existing consumer-owned port when the methods are cohesive.
+2. Implement the port in each backend that supports it.
+3. Wire the port explicitly at the server or test composition boundary.
+4. Add backend-specific tests for SQL, transactions, missing rows, and error mapping.
+5. Update a test double only when the test exercises the capability.
 
 Keep SQLite and PostgreSQL SQL separate. Use the existing backend tests and the in-memory SQLite constructor for behavior that must match. Run a live PostgreSQL test when a change affects PostgreSQL persistence.
 
-For resource paths, use `common.ResourcePath` for an organization and project and `internal/common.ParseResourcePath` when parsing stored paths. Do not add organization or project columns to `drs_object_access_method`.
+Do not add organization or project columns to `drs_object_access_method`; scoped access remains represented by controlled-access resources.

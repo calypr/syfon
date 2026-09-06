@@ -1,7 +1,7 @@
 -- Normalize legacy drs_object.name values from full paths to basenames.
 --
 -- Usage:
---   psql "$DATABASE_URL" -f internal/db/scripts/normalize_object_names_to_basename_postgres.sql
+--   psql "$DATABASE_URL" -f internal/persistence/postgres/scripts/normalize_object_names_to_basename_postgres.sql
 --
 -- The update only touches non-empty names whose slash/backslash-normalized
 -- basename differs from the stored value. Access URLs, aliases, checksums, and
