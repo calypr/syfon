@@ -3,6 +3,7 @@ package projectstorage
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -80,6 +81,32 @@ func (f *fakeDelete) DeleteExact(_ context.Context, targets []storage.DeleteTarg
 
 type fakePhysical struct {
 	records []objects.Record
+}
+
+type fakeCleanupObjects struct {
+	deleted []string
+	count   int
+	err     error
+}
+
+func (f *fakeCleanupObjects) DeleteBulkByScope(_ context.Context, organization, project string) (int, error) {
+	f.deleted = append(f.deleted, strings.TrimSpace(organization)+"/"+strings.TrimSpace(project))
+	return f.count, f.err
+}
+
+type fakeCleanupScopes struct {
+	scopes  []buckets.Scope
+	deleted []string
+	err     error
+}
+
+func (f *fakeCleanupScopes) ListBucketScopes(context.Context) ([]buckets.Scope, error) {
+	return f.scopes, f.err
+}
+
+func (f *fakeCleanupScopes) DeleteBucketScope(_ context.Context, organization, project, credential, prefix string) error {
+	f.deleted = append(f.deleted, strings.Join([]string{organization, project, credential, prefix}, "/"))
+	return f.err
 }
 
 func (f fakePhysical) ListPhysicalObjectsByScope(context.Context, string, string, string) ([]objects.Record, error) {
@@ -180,6 +207,29 @@ func TestAuditProjectRecordsPreservesPhysicalDuplicatesAndSegmentPrefixes(t *tes
 	}
 	if len(result) != 2 || result[0].ObjectID != "one" || result[1].ObjectID != "two" {
 		t.Fatalf("audit records = %+v", result)
+	}
+}
+
+func TestDeleteProjectDataDeletesObjectsBeforeMatchingScopes(t *testing.T) {
+	objects := &fakeCleanupObjects{count: 3}
+	scopes := &fakeCleanupScopes{scopes: []buckets.Scope{
+		{Organization: "org", ProjectID: "project", CredentialID: "cred-a", PathPrefix: "prefix/a"},
+		{Organization: "other", ProjectID: "project", CredentialID: "cred-b"},
+		{Organization: "org", ProjectID: "project", Bucket: "bucket-c"},
+	}}
+	service := NewService(nil, nil, nil, nil, nil, nil, nil, CleanupDependencies{Objects: objects, Scopes: scopes})
+	result, err := service.DeleteProjectData(context.Background(), " org ", " project ")
+	if err != nil {
+		t.Fatalf("DeleteProjectData() error = %v", err)
+	}
+	if result.DeletedObjects != 3 || result.DeletedBucketScopes != 2 {
+		t.Fatalf("cleanup result = %+v", result)
+	}
+	if !reflect.DeepEqual(objects.deleted, []string{"org/project"}) {
+		t.Fatalf("object deletions = %v", objects.deleted)
+	}
+	if !reflect.DeepEqual(scopes.deleted, []string{"org/project/cred-a/prefix/a", "org/project/bucket-c/"}) {
+		t.Fatalf("scope deletions = %v", scopes.deleted)
 	}
 }
 

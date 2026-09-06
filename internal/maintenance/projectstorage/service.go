@@ -36,10 +36,11 @@ type Service struct {
 	probe       ProbePort
 	delete      DeletePort
 	physical    PhysicalScopeReader
+	cleanup     CleanupDependencies
 }
 
-func NewService(scopes ScopeReader, credentials CredentialReader, visibility VisibilityReader, inventory InventoryPort, probe ProbePort, deletePort DeletePort, physical PhysicalScopeReader) *Service {
-	return &Service{
+func NewService(scopes ScopeReader, credentials CredentialReader, visibility VisibilityReader, inventory InventoryPort, probe ProbePort, deletePort DeletePort, physical PhysicalScopeReader, cleanup ...CleanupDependencies) *Service {
+	service := &Service{
 		scopes:      scopes,
 		credentials: credentials,
 		visibility:  visibility,
@@ -48,6 +49,10 @@ func NewService(scopes ScopeReader, credentials CredentialReader, visibility Vis
 		delete:      deletePort,
 		physical:    physical,
 	}
+	if len(cleanup) > 0 {
+		service.cleanup = cleanup[0]
+	}
+	return service
 }
 
 // InspectProject resolves a project scope, inventories it, and computes the
@@ -777,6 +782,42 @@ func (s *Service) DeleteProjectObjects(ctx context.Context, organization, projec
 		results = append(results, result)
 	}
 	return results
+}
+
+// DeleteProjectData performs the project cleanup sequence: catalog objects
+// are removed first, then matching bucket scopes are listed and deleted in
+// repository order. A scope count includes only successful deletions.
+func (s *Service) DeleteProjectData(ctx context.Context, organization, project string) (ProjectCleanupResult, error) {
+	result := ProjectCleanupResult{Organization: strings.TrimSpace(organization), ProjectID: strings.TrimSpace(project)}
+	if s.cleanup.Objects == nil || s.cleanup.Scopes == nil {
+		return result, &Error{Kind: ErrorUnsupported, Message: "project cleanup dependencies are not configured"}
+	}
+	deletedObjects, err := s.cleanup.Objects.DeleteBulkByScope(ctx, result.Organization, result.ProjectID)
+	if err != nil {
+		return result, err
+	}
+	result.DeletedObjects = deletedObjects
+	scopes, err := s.cleanup.Scopes.ListBucketScopes(ctx)
+	if err != nil {
+		return result, err
+	}
+	for _, scope := range scopes {
+		if strings.TrimSpace(scope.Organization) != result.Organization || strings.TrimSpace(scope.ProjectID) != result.ProjectID {
+			continue
+		}
+		credentialID := strings.TrimSpace(scope.CredentialID)
+		if credentialID == "" {
+			credentialID = strings.TrimSpace(scope.Bucket)
+		}
+		if credentialID == "" {
+			continue
+		}
+		if err := s.cleanup.Scopes.DeleteBucketScope(ctx, result.Organization, result.ProjectID, credentialID, scope.PathPrefix); err != nil {
+			return result, err
+		}
+		result.DeletedBucketScopes++
+	}
+	return result, nil
 }
 
 type deleteCandidate struct {

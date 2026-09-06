@@ -3,6 +3,7 @@ package internaldrs
 import (
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/core"
+	"github.com/calypr/syfon/internal/maintenance/projectstorage"
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/transfers"
 	"github.com/calypr/syfon/internal/usage"
@@ -14,6 +15,7 @@ type internalDRSTestFixture struct {
 	TransferService *transfers.Service
 	FileCounters    usage.FileCounterRecorder
 	bucketService   *buckets.Service
+	projectService *projectstorage.Service
 }
 
 func newInternalDRSObjectManager(store any, storageDependency any) internalDRSTestFixture {
@@ -61,12 +63,22 @@ func newInternalDRSObjectManager(store any, storageDependency any) internalDRSTe
 		ObjectManager: core.NewObjectManager(core.Dependencies{
 			Objects:       objectPorts,
 			BucketService: bucketService,
-			Storage:       storagePorts,
+		Storage:       storagePorts,
 		}),
 		ObjectService:   objectService,
 		TransferService: transferService,
 		FileCounters:    store.(usage.FileCounterRecorder),
 		bucketService:   bucketService,
+		projectService: projectstorage.NewService(
+			bucketService,
+			bucketService,
+			bucketService,
+			storagePorts.Inventory,
+			storagePorts.Probe,
+			storagePorts.Delete,
+			objectService,
+			projectstorage.CleanupDependencies{Objects: objectService, Scopes: bucketService},
+		),
 	}
 }
 

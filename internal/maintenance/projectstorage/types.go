@@ -189,6 +189,16 @@ type DeleteResult struct {
 	Error     string
 }
 
+// ProjectCleanupResult is the plain result of deleting a project's catalog
+// rows followed by its configured bucket scopes. HTTP adapters choose the
+// wire representation.
+type ProjectCleanupResult struct {
+	Organization        string
+	ProjectID           string
+	DeletedObjects      int
+	DeletedBucketScopes int
+}
+
 type ErrorKind string
 
 const (
