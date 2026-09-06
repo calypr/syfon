@@ -26,10 +26,12 @@ func (s *Service) ListVisibleBuckets(ctx context.Context) (map[string]VisibleBuc
 	}
 
 	var rows []VisibilityRow
+	filterExplicitScopes := access.IsAuthzEnforced(ctx)
 	if s.visibility != nil {
 		restrictToResources := access.IsAuthzEnforced(ctx) &&
 			!access.HasMethodAccess(ctx, readMethod, []string{"/programs"}) &&
 			!access.HasMethodAccess(ctx, readMethod, []string{"/data_file"})
+		filterExplicitScopes = restrictToResources
 		rows, err = s.visibility.ListBucketVisibilityRows(ctx, access.AuthorizedResources(ctx, readMethod), true, restrictToResources)
 	} else {
 		if s.fallback == nil {
@@ -41,10 +43,10 @@ func (s *Service) ListVisibleBuckets(ctx context.Context) (map[string]VisibleBuc
 		return nil, err
 	}
 
-	return s.mergeVisibleRows(ctx, creds, rows)
+	return s.mergeVisibleRows(ctx, creds, rows, filterExplicitScopes)
 }
 
-func (s *Service) mergeVisibleRows(ctx context.Context, creds []Credential, rows []VisibilityRow) (map[string]VisibleBucket, error) {
+func (s *Service) mergeVisibleRows(ctx context.Context, creds []Credential, rows []VisibilityRow, filterExplicitScopes bool) (map[string]VisibleBucket, error) {
 	byCredential := make(map[string]VisibleBucket, len(creds))
 	programsSeen := make(map[string]map[string]struct{}, len(creds))
 	for _, cred := range creds {
@@ -68,7 +70,7 @@ func (s *Service) mergeVisibleRows(ctx context.Context, creds []Credential, rows
 		if resourceErr != nil || strings.TrimSpace(resource) == "" {
 			continue
 		}
-		if access.IsAuthzEnforced(ctx) && !access.HasMethodAccess(ctx, readMethod, []string{resource}) {
+		if filterExplicitScopes && !access.HasMethodAccess(ctx, readMethod, []string{resource}) {
 			continue
 		}
 		if _, seen := programsSeen[credentialID][resource]; seen {

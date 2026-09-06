@@ -194,6 +194,45 @@ func TestListVisibleBucketsFiltersUnauthorizedExplicitScopes(t *testing.T) {
 	}
 }
 
+func TestListVisibleBucketsPreservesBranchSpecificScopeAuthorization(t *testing.T) {
+	explicit := mustResource(t, "org", "explicit")
+	credentials := []Credential{{CredentialID: "id-a", Bucket: "bucket-a", Provider: "s3"}}
+	scopes := []Scope{{CredentialID: "id-a", Organization: "org", ProjectID: "explicit"}}
+
+	for _, broadResource := range []string{"/programs", "/data_file"} {
+		t.Run(broadResource, func(t *testing.T) {
+			session := access.NewSession("gen3")
+			session.AuthHeaderPresent = true
+			session.SetAuthorizations(nil, map[string]map[string]bool{broadResource: {"read": true}}, true)
+			ctx := access.WithSession(context.Background(), session)
+
+			query := &fakeVisibilityQuery{}
+			optimized, _, _ := newFakeService(credentials, scopes, query, nil, nil)
+			optimizedGot, err := optimized.ListVisibleBuckets(ctx)
+			if err != nil {
+				t.Fatalf("optimized visibility: %v", err)
+			}
+			if got := optimizedGot["id-a"].Programs; !reflect.DeepEqual(got, []string{explicit}) {
+				t.Fatalf("optimized programs=%v, want [%s]", got, explicit)
+			}
+			if query.restrictToResources {
+				t.Fatal("broad authorization unexpectedly restricted optimized visibility")
+			}
+
+			fallback, _, _ := newFakeService(credentials, scopes, nil, func(context.Context) ([]VisibilityRow, error) {
+				return nil, nil
+			}, nil)
+			fallbackGot, err := fallback.ListVisibleBuckets(ctx)
+			if err != nil {
+				t.Fatalf("fallback visibility: %v", err)
+			}
+			if got := fallbackGot["id-a"].Programs; got != nil {
+				t.Fatalf("fallback programs=%v, want no programs", got)
+			}
+		})
+	}
+}
+
 func TestListVisibleBucketsMapsProviderURLsAndFilePaths(t *testing.T) {
 	s3Resource := mustResource(t, "org", "s3")
 	gcsResource := mustResource(t, "org", "gcs")
