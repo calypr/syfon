@@ -5,7 +5,6 @@ import (
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/transfers"
-	"github.com/calypr/syfon/internal/urlmanager"
 	"github.com/calypr/syfon/internal/usage"
 )
 
@@ -14,7 +13,7 @@ type internalDRSTestFixture struct {
 	bucketService *buckets.Service
 }
 
-func newInternalDRSObjectManager(store any, manager urlmanager.UrlManager) internalDRSTestFixture {
+func newInternalDRSObjectManager(store any, storageDependency any) internalDRSTestFixture {
 	objectPorts := core.ObjectPorts{
 		Reader:        store.(objects.RecordReader),
 		Writer:        store.(objects.RecordWriter),
@@ -29,7 +28,8 @@ func newInternalDRSObjectManager(store any, manager urlmanager.UrlManager) inter
 		URLPages:      optionalInternalDRSPort[objects.OptionalURLQuery](store),
 		Authorized:    optionalInternalDRSPort[objects.OptionalAuthorizedQuery](store),
 	}
-	bucketService := newInternalDRSBucketService(store, manager, objectPorts)
+	bucketService := newInternalDRSBucketService(store, storageDependency, objectPorts)
+	storagePorts := internalDRSStoragePorts(storageDependency)
 	return internalDRSTestFixture{
 		ObjectManager: core.NewObjectManager(core.Dependencies{
 			Objects:       objectPorts,
@@ -42,14 +42,46 @@ func newInternalDRSObjectManager(store any, manager urlmanager.UrlManager) inter
 				Counters:       store.(usage.FileCounterRecorder),
 				ProviderEvents: store.(usage.ProviderEventRecorder),
 			},
-		}, manager),
+			Storage: storagePorts,
+		}),
 		bucketService: bucketService,
 	}
 }
 
-func newInternalDRSBucketService(store any, manager urlmanager.UrlManager, objectPorts core.ObjectPorts) *buckets.Service {
+func internalDRSStoragePorts(dependency any) core.StoragePorts {
+	switch candidate := dependency.(type) {
+	case core.StoragePorts:
+		return candidate
+	case *internalDRSStorageFake:
+		return core.StoragePorts{
+			Access:    candidate,
+			Multipart: candidate,
+			Probe:     candidate,
+			Inventory: candidate,
+			Delete:    candidate,
+		}
+	case interface {
+		core.StorageAccess
+		core.StorageMultipart
+		core.StorageProbe
+		core.StorageInventory
+		core.StorageDelete
+	}:
+		return core.StoragePorts{
+			Access:    candidate,
+			Multipart: candidate,
+			Probe:     candidate,
+			Inventory: candidate,
+			Delete:    candidate,
+		}
+	default:
+		panic("internal DRS tests require a core.StoragePorts or internalDRSStorageFake dependency")
+	}
+}
+
+func newInternalDRSBucketService(store any, storageDependency any, objectPorts core.ObjectPorts) *buckets.Service {
 	var invalidator interface{ InvalidateBucket(string) }
-	if candidate, ok := manager.(interface{ InvalidateBucket(string) }); ok {
+	if candidate, ok := storageDependency.(interface{ InvalidateBucket(string) }); ok {
 		invalidator = candidate
 	}
 	service, err := buckets.NewService(buckets.Dependencies{
@@ -69,3 +101,12 @@ func optionalInternalDRSPort[T any](store any) T {
 	value, _ := store.(T)
 	return value
 }
+
+var _ core.StorageAccess = (*internalDRSStorageFake)(nil)
+var _ core.StorageMultipart = (*internalDRSStorageFake)(nil)
+var _ core.StorageProbe = (*internalDRSStorageFake)(nil)
+var _ core.StorageInventory = (*internalDRSStorageFake)(nil)
+var _ core.StorageDelete = (*internalDRSStorageFake)(nil)
+var _ core.StorageProbe = (*internalDRSProbeFake)(nil)
+var _ core.StorageInventory = (*internalDRSInventoryFake)(nil)
+var _ core.StorageDelete = (*internalDRSDeleteFake)(nil)

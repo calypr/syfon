@@ -16,6 +16,7 @@ import (
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/objects"
+	"github.com/calypr/syfon/internal/storage"
 	"github.com/calypr/syfon/internal/testutils"
 )
 
@@ -30,10 +31,10 @@ func TestHandleInternalInspectObjectScopedSuccess(t *testing.T) {
 			"syfon|e2e": {Organization: "syfon", ProjectID: "e2e", Bucket: "b1", PathPrefix: "project-root"},
 		},
 	}
-	om := newInternalDRSObjectManager(db, &testutils.MockUrlManager{})
-	om.SetS3ObjectInspector(func(ctx context.Context, cred buckets.Credential, bucket string, key string) (*core.StorageObjectMetadata, error) {
-		return &core.StorageObjectMetadata{Bucket: bucket, Key: key, Path: "file.bin", SizeBytes: 17, ETag: "etag-1", LastModTime: time.Date(2026, 6, 11, 1, 2, 3, 0, time.UTC)}, nil
-	})
+	storageFake := &internalDRSProbeFake{probeFn: func(_ context.Context, targets []storage.ProbeTarget) []storage.ProbeResult {
+		return []storage.ProbeResult{{Target: targets[0].Target, Metadata: storage.ObjectMetadata{Bucket: targets[0].Target.Bucket, Key: targets[0].Target.Key, Path: "file.bin", SizeBytes: 17, ETag: "etag-1", LastModified: time.Date(2026, 6, 11, 1, 2, 3, 0, time.UTC)}}}
+	}}
+	om := newInternalDRSObjectManager(db, core.StoragePorts{Probe: storageFake})
 	req := withTestAuthzContext(httptest.NewRequest(http.MethodPost, "/data/inspect", bytes.NewBuffer(body)), "gen3", map[string]map[string]bool{"/organization/syfon/project/e2e": {"read": true}})
 	rr := doInternalDRSTestRequest(req, om)
 	if rr.Code != http.StatusOK {
@@ -65,10 +66,10 @@ func TestHandleInternalInspectObjectRawSuccess(t *testing.T) {
 			"syfon|": {Organization: "syfon", Bucket: "b1", PathPrefix: "program-root"},
 		},
 	}
-	om := newInternalDRSObjectManager(db, &testutils.MockUrlManager{})
-	om.SetS3ObjectInspector(func(ctx context.Context, cred buckets.Credential, bucket string, key string) (*core.StorageObjectMetadata, error) {
-		return &core.StorageObjectMetadata{Bucket: bucket, Key: key, Path: "file.bin", SizeBytes: 99, ETag: "etag-raw"}, nil
-	})
+	storageFake := &internalDRSProbeFake{probeFn: func(_ context.Context, targets []storage.ProbeTarget) []storage.ProbeResult {
+		return []storage.ProbeResult{{Target: targets[0].Target, Metadata: storage.ObjectMetadata{Bucket: targets[0].Target.Bucket, Key: targets[0].Target.Key, Path: "file.bin", SizeBytes: 99, ETag: "etag-raw"}}}
+	}}
+	om := newInternalDRSObjectManager(db, core.StoragePorts{Probe: storageFake})
 	req := withTestAuthzContext(httptest.NewRequest(http.MethodPost, "/data/inspect", bytes.NewBuffer(body)), "gen3", map[string]map[string]bool{"/organization/syfon": {"read": true}})
 	rr := doInternalDRSTestRequest(req, om)
 	if rr.Code != http.StatusOK {
@@ -81,7 +82,7 @@ func TestHandleInternalInspectObjectRawSuccess(t *testing.T) {
 
 func TestHandleInternalInspectObjectMissingScope(t *testing.T) {
 	body, _ := json.Marshal(internalInspectObjectRequest{Organization: "syfon", Project: "missing", Key: "nested/file.bin", Scheme: "s3"})
-	om := newInternalDRSObjectManager(&testutils.MockDatabase{}, &testutils.MockUrlManager{})
+	om := newInternalDRSObjectManager(&testutils.MockDatabase{}, &internalDRSStorageFake{})
 	req := withTestAuthzContext(httptest.NewRequest(http.MethodPost, "/data/inspect", bytes.NewBuffer(body)), "gen3", map[string]map[string]bool{"/organization/syfon/project/missing": {"read": true}})
 	rr := doInternalDRSTestRequest(req, om)
 	if rr.Code != http.StatusNotFound {
@@ -97,10 +98,10 @@ func TestHandleInternalInspectObjectPermissionDenied(t *testing.T) {
 			"syfon|": {Organization: "syfon", Bucket: "b1", PathPrefix: "program-root"},
 		},
 	}
-	om := newInternalDRSObjectManager(db, &testutils.MockUrlManager{})
-	om.SetS3ObjectInspector(func(ctx context.Context, cred buckets.Credential, bucket string, key string) (*core.StorageObjectMetadata, error) {
-		return nil, &core.StorageInspectError{Kind: core.StorageInspectPermissionDenied, Message: "provider denied access to s3://b1/program-root/raw/file.bin"}
-	})
+	storageFake := &internalDRSProbeFake{probeFn: func(_ context.Context, targets []storage.ProbeTarget) []storage.ProbeResult {
+		return []storage.ProbeResult{{Target: targets[0].Target, Err: &storage.OperationError{Kind: storage.ErrorForbidden, Provider: "s3", Capability: "probe"}}}
+	}}
+	om := newInternalDRSObjectManager(db, core.StoragePorts{Probe: storageFake})
 	req := withTestAuthzContext(httptest.NewRequest(http.MethodPost, "/data/inspect", bytes.NewBuffer(body)), "gen3", map[string]map[string]bool{"/organization/syfon": {"read": true}})
 	rr := doInternalDRSTestRequest(req, om)
 	if rr.Code != http.StatusForbidden {
@@ -110,7 +111,7 @@ func TestHandleInternalInspectObjectPermissionDenied(t *testing.T) {
 
 func TestHandleInternalInspectObjectMalformedURL(t *testing.T) {
 	body, _ := json.Marshal(internalInspectObjectRequest{ObjectURL: "https://example.com/file.bin"})
-	om := newInternalDRSObjectManager(&testutils.MockDatabase{}, &testutils.MockUrlManager{})
+	om := newInternalDRSObjectManager(&testutils.MockDatabase{}, &internalDRSStorageFake{})
 	req := withTestAuthzContext(httptest.NewRequest(http.MethodPost, "/data/inspect", bytes.NewBuffer(body)), "gen3", map[string]map[string]bool{"/organization/syfon": {"read": true}})
 	rr := doInternalDRSTestRequest(req, om)
 	if rr.Code != http.StatusBadRequest {
@@ -153,7 +154,7 @@ func TestHandleInternalInspectProjectRecords(t *testing.T) {
 			"obj-1": {"syfon": {"e2e"}},
 		},
 	}
-	om := newInternalDRSObjectManager(db, &testutils.MockUrlManager{})
+	om := newInternalDRSObjectManager(db, &internalDRSStorageFake{})
 	req := withTestAuthzContext(httptest.NewRequest(http.MethodPost, "/data/inspect/project-records", bytes.NewBuffer(body)), "gen3", map[string]map[string]bool{"/organization/syfon/project/e2e": {"read": true}})
 	rr := doInternalDRSTestRequest(req, om)
 	if rr.Code != http.StatusOK {
@@ -205,7 +206,7 @@ func TestHandleInternalInspectProjectRecordsPreservesLegacyDuplicatePhysicalRows
 			"physical-b": {"syfon": {"e2e"}},
 		},
 	}
-	om := newInternalDRSObjectManager(db, &testutils.MockUrlManager{})
+	om := newInternalDRSObjectManager(db, &internalDRSStorageFake{})
 	req := withTestAuthzContext(httptest.NewRequest(http.MethodPost, "/data/inspect/project-records", bytes.NewBuffer(body)), "gen3", map[string]map[string]bool{"/organization/syfon/project/e2e": {"read": true}})
 	rr := doInternalDRSTestRequest(req, om)
 	if rr.Code != http.StatusOK {
@@ -261,7 +262,7 @@ func TestHandleInternalInspectProjectScopes(t *testing.T) {
 			"syfon|e2e": {Organization: "syfon", ProjectID: "e2e", Bucket: "bucket-a", CredentialID: "cred-1", PathPrefix: "project-root"},
 		},
 	}
-	om := newInternalDRSObjectManager(db, &testutils.MockUrlManager{})
+	om := newInternalDRSObjectManager(db, &internalDRSStorageFake{})
 	authz := map[string]map[string]bool{
 		"/organization/syfon":             {"read": true},
 		"/organization/syfon/project/e2e": {"read": true},
@@ -315,34 +316,32 @@ func TestHandleInternalInspectProjectBucketModesUsePrefixList(t *testing.T) {
 			"syfon|e2e": {Organization: "syfon", ProjectID: "e2e", Bucket: "bucket-a", CredentialID: "cred-1", PathPrefix: "project-root"},
 		},
 	}
-	om := newInternalDRSObjectManager(db, &testutils.MockUrlManager{})
-	inspectCalls := 0
-	om.SetS3ObjectInspector(func(ctx context.Context, cred buckets.Credential, bucket string, key string) (*core.StorageObjectMetadata, error) {
-		inspectCalls++
-		return nil, nil
-	})
-	var listCalls []core.StoragePrefixListOptions
+	storageFake := &internalDRSInventoryFake{}
+	var listCalls []storage.InventoryRequest
 	var listedPrefixes []string
-	om.SetS3PrefixListerWithOptions(func(ctx context.Context, cred buckets.Credential, bucket string, prefix string, options core.StoragePrefixListOptions) ([]core.StorageBucketObject, error) {
+	storageFake.inventoryFn = func(_ context.Context, request storage.InventoryRequest) (storage.InventoryResult, error) {
+		bucket := request.Target.Bucket
+		prefix := request.Target.Prefix
 		if bucket != "bucket-a" {
 			t.Fatalf("unexpected list target bucket=%q prefix=%q", bucket, prefix)
 		}
 		listedPrefixes = append(listedPrefixes, prefix)
-		listCalls = append(listCalls, options)
+		listCalls = append(listCalls, request)
 		if prefix == "program-root/project-root/CONFIG" {
-			return []core.StorageBucketObject{
+			return storage.InventoryResult{Items: []storage.ObjectMetadata{
 				{Provider: "s3", Bucket: bucket, Key: prefix + "/a.bin", Path: "CONFIG/a.bin", SizeBytes: 10},
 				{Provider: "s3", Bucket: bucket, Key: prefix + "/nested/b.bin", Path: "CONFIG/nested/b.bin", SizeBytes: 15},
-			}, nil
+			}, Complete: true}, nil
 		}
 		if prefix != "program-root/project-root" {
 			t.Fatalf("unexpected list prefix=%q", prefix)
 		}
-		return []core.StorageBucketObject{
+		return storage.InventoryResult{Items: []storage.ObjectMetadata{
 			{Provider: "s3", Bucket: bucket, Key: prefix + "/a.bin", Path: "a.bin", SizeBytes: 10},
 			{Provider: "s3", Bucket: bucket, Key: prefix + "/b.bin", Path: "b.bin", SizeBytes: 15},
-		}, nil
-	})
+		}, Complete: true}, nil
+	}
+	om := newInternalDRSObjectManager(db, core.StoragePorts{Inventory: storageFake})
 
 	existsBody, _ := json.Marshal(internalInspectProjectBucketRequest{Organization: "syfon", Project: "e2e", Mode: "exists"})
 	req := withTestAuthzContext(httptest.NewRequest(http.MethodPost, "/data/inspect/project-bucket", bytes.NewBuffer(existsBody)), "gen3", map[string]map[string]bool{
@@ -409,9 +408,6 @@ func TestHandleInternalInspectProjectBucketModesUsePrefixList(t *testing.T) {
 	if len(listedPrefixes) != 3 || listedPrefixes[2] != "program-root/project-root/CONFIG" {
 		t.Fatalf("expected path_prefix to scope recursive LIST, got %+v", listedPrefixes)
 	}
-	if inspectCalls != 0 {
-		t.Fatalf("expected project-bucket modes not to HEAD objects, got %d inspector calls", inspectCalls)
-	}
 }
 
 func TestHandleInternalInspectProjectBucketInventoryListsProjectScope(t *testing.T) {
@@ -424,25 +420,23 @@ func TestHandleInternalInspectProjectBucketInventoryListsProjectScope(t *testing
 			"syfon|e2e": {Organization: "syfon", ProjectID: "e2e", Bucket: "bucket-a", CredentialID: "cred-1", PathPrefix: "project-root"},
 		},
 	}
-	om := newInternalDRSObjectManager(db, &testutils.MockUrlManager{})
-	inspectCalls := 0
-	om.SetS3ObjectInspector(func(ctx context.Context, cred buckets.Credential, bucket string, key string) (*core.StorageObjectMetadata, error) {
-		inspectCalls++
-		return nil, nil
-	})
-	var listCalls []core.StoragePrefixListOptions
+	storageFake := &internalDRSInventoryFake{}
+	var listCalls []storage.InventoryRequest
 	var listedPrefixes []string
-	om.SetS3PrefixListerWithOptions(func(ctx context.Context, cred buckets.Credential, bucket string, prefix string, options core.StoragePrefixListOptions) ([]core.StorageBucketObject, error) {
+	storageFake.inventoryFn = func(_ context.Context, request storage.InventoryRequest) (storage.InventoryResult, error) {
+		bucket := request.Target.Bucket
+		prefix := request.Target.Prefix
 		if bucket != "bucket-a" {
 			t.Fatalf("unexpected list target bucket=%q prefix=%q", bucket, prefix)
 		}
 		listedPrefixes = append(listedPrefixes, prefix)
-		listCalls = append(listCalls, options)
-		return []core.StorageBucketObject{
+		listCalls = append(listCalls, request)
+		return storage.InventoryResult{Items: []storage.ObjectMetadata{
 			{Provider: "s3", Bucket: bucket, Key: prefix + "/a.bin", Path: "CONFIG/a.bin", SizeBytes: 10},
 			{Provider: "s3", Bucket: bucket, Key: prefix + "/nested/b.bin", Path: "CONFIG/nested/b.bin", SizeBytes: 15},
-		}, nil
-	})
+		}, Complete: true}, nil
+	}
+	om := newInternalDRSObjectManager(db, core.StoragePorts{Inventory: storageFake})
 
 	body, _ := json.Marshal(internalInspectProjectBucketRequest{Organization: "syfon", Project: "e2e", PathPrefix: "CONFIG"})
 	req := withTestAuthzContext(httptest.NewRequest(http.MethodPost, "/data/inspect/project-bucket/inventory", bytes.NewBuffer(body)), "gen3", map[string]map[string]bool{
@@ -473,9 +467,6 @@ func TestHandleInternalInspectProjectBucketInventoryListsProjectScope(t *testing
 	if len(listedPrefixes) != 1 || listedPrefixes[0] != "program-root/project-root/CONFIG" {
 		t.Fatalf("expected path_prefix to scope recursive inventory, got %+v", listedPrefixes)
 	}
-	if inspectCalls != 0 {
-		t.Fatalf("expected inventory route not to HEAD objects, got %d inspector calls", inspectCalls)
-	}
 }
 
 func TestHandleInternalInspectProjectBucketInventoryReturnsPartialListing(t *testing.T) {
@@ -488,19 +479,21 @@ func TestHandleInternalInspectProjectBucketInventoryReturnsPartialListing(t *tes
 			"syfon|e2e": {Organization: "syfon", ProjectID: "e2e", Bucket: "bucket-a", CredentialID: "cred-1", PathPrefix: "project-root"},
 		},
 	}
-	om := newInternalDRSObjectManager(db, &testutils.MockUrlManager{})
-	om.SetS3PrefixListerWithOptions(func(context.Context, buckets.Credential, string, string, core.StoragePrefixListOptions) ([]core.StorageBucketObject, error) {
-		return []core.StorageBucketObject{{
+	storageFake := &internalDRSInventoryFake{inventoryFn: func(_ context.Context, request storage.InventoryRequest) (storage.InventoryResult, error) {
+		return storage.InventoryResult{Items: []storage.ObjectMetadata{{
 				Provider:  "s3",
-				Bucket:    "bucket-a",
+				Bucket:    request.Target.Bucket,
 				Key:       "program-root/project-root/observed.bin",
 				Path:      "observed.bin",
 				SizeBytes: 17,
-			}}, &core.StorageInspectError{
-				Kind:    core.StorageInspectListingIncomplete,
-				Message: "terminal replay returned different page content",
+			}}, Complete: false}, &storage.OperationError{
+				Kind:       storage.ErrorIncomplete,
+				Provider:   "s3",
+				Capability: "inventory",
+				Cause:      fmt.Errorf("terminal replay returned different page content"),
 			}
-	})
+	}}
+	om := newInternalDRSObjectManager(db, core.StoragePorts{Inventory: storageFake})
 
 	body, _ := json.Marshal(internalInspectProjectBucketRequest{Organization: "syfon", Project: "e2e"})
 	req := withTestAuthzContext(httptest.NewRequest(http.MethodPost, "/data/inspect/project-bucket/inventory", bytes.NewBuffer(body)), "gen3", map[string]map[string]bool{
@@ -525,6 +518,65 @@ func TestHandleInternalInspectProjectBucketInventoryReturnsPartialListing(t *tes
 	}
 }
 
+func TestHandleInternalDeleteProjectBucketObjectsPreservesPolicyOrderAndStatuses(t *testing.T) {
+	db := &testutils.MockDatabase{
+		Credentials: map[string]buckets.Credential{
+			"bucket-a": {Bucket: "bucket-a", Provider: "s3"},
+		},
+		BucketScopes: map[string]buckets.Scope{
+			"syfon|e2e": {Organization: "syfon", ProjectID: "e2e", Bucket: "bucket-a", PathPrefix: "project-root"},
+		},
+	}
+	storageFake := &internalDRSDeleteFake{}
+	storageFake.deleteFn = func(_ context.Context, targets []storage.DeleteTarget) error {
+		if len(targets) != 1 {
+			t.Fatalf("expected one exact delete target per policy result, got %+v", targets)
+		}
+		if targets[0].Location == "s3://bucket-a/project-root/one.bin" {
+			return fmt.Errorf("provider delete failed")
+		}
+		return nil
+	}
+	om := newInternalDRSObjectManager(db, core.StoragePorts{Delete: storageFake})
+	body, _ := json.Marshal(internalDeleteProjectBucketObjectsRequest{
+		Organization: "syfon",
+		Project:      "e2e",
+		ObjectURLs: []string{
+			" s3://bucket-a/project-root/one.bin ",
+			"s3://bucket-a/project-root/one.bin",
+			"s3://bucket-a/project-root/two.bin",
+			"s3://bucket-a/other/outside.bin",
+			"https://example.com/not-storage",
+		},
+	})
+	req := withTestAuthzContext(httptest.NewRequest(http.MethodPost, "/data/inspect/project-bucket/delete", bytes.NewBuffer(body)), "gen3", map[string]map[string]bool{
+		"/organization/syfon/project/e2e": {"delete": true},
+	})
+	rr := doInternalDRSTestRequest(req, om)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp internalDeleteProjectBucketObjectsResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp.Items) != 4 {
+		t.Fatalf("expected duplicate URL to be removed while preserving first-seen order, got %+v", resp.Items)
+	}
+	if resp.Items[0].ObjectURL != "s3://bucket-a/project-root/one.bin" || resp.Items[0].Status != "error" || !strings.Contains(resp.Items[0].Error, "provider delete failed") {
+		t.Fatalf("unexpected first delete result: %+v", resp.Items[0])
+	}
+	if resp.Items[1].ObjectURL != "s3://bucket-a/project-root/two.bin" || resp.Items[1].Status != "deleted" {
+		t.Fatalf("unexpected second delete result: %+v", resp.Items[1])
+	}
+	if resp.Items[2].Status != "forbidden" || resp.Items[3].Status != "invalid" {
+		t.Fatalf("expected forbidden and invalid deferred results, got %+v", resp.Items)
+	}
+	if len(storageFake.deleteCalls) != 2 || storageFake.deleteCalls[0][0].Location != "s3://bucket-a/project-root/one.bin" || storageFake.deleteCalls[1][0].Location != "s3://bucket-a/project-root/two.bin" {
+		t.Fatalf("unexpected physical delete calls: %+v", storageFake.deleteCalls)
+	}
+}
+
 func TestHandleInternalInspectObjectBulkListValidatesExactKeyWithoutHead(t *testing.T) {
 	db := &testutils.MockDatabase{
 		Credentials: map[string]buckets.Credential{
@@ -534,30 +586,28 @@ func TestHandleInternalInspectObjectBulkListValidatesExactKeyWithoutHead(t *test
 			"syfon|e2e": {Organization: "syfon", ProjectID: "e2e", Bucket: "bucket-a", CredentialID: "cred-1", PathPrefix: "project-root"},
 		},
 	}
-	om := newInternalDRSObjectManager(db, &testutils.MockUrlManager{})
-	inspectCalls := 0
-	om.SetS3ObjectInspector(func(ctx context.Context, cred buckets.Credential, bucket string, key string) (*core.StorageObjectMetadata, error) {
-		inspectCalls++
-		return nil, nil
-	})
+	storageFake := &internalDRSInventoryFake{}
 	var listedPrefixesMu sync.Mutex
 	var listedPrefixes []string
-	om.SetS3PrefixListerWithOptions(func(ctx context.Context, cred buckets.Credential, bucket string, prefix string, options core.StoragePrefixListOptions) ([]core.StorageBucketObject, error) {
-		if bucket != "bucket-a" || !options.ExactPrefix || options.MaxKeys != 1 || options.IncludeHead {
-			t.Fatalf("unexpected bulk-list options bucket=%q options=%+v", bucket, options)
+	storageFake.inventoryFn = func(_ context.Context, request storage.InventoryRequest) (storage.InventoryResult, error) {
+		bucket := request.Target.Bucket
+		prefix := request.Target.Prefix
+		if bucket != "bucket-a" || !request.ExactPrefix || request.MaxKeys != 1 || request.IncludeHead {
+			t.Fatalf("unexpected bulk-list options bucket=%q request=%+v", bucket, request)
 		}
 		listedPrefixesMu.Lock()
 		listedPrefixes = append(listedPrefixes, prefix)
 		listedPrefixesMu.Unlock()
 		switch prefix {
 		case "project-root/file.bin":
-			return []core.StorageBucketObject{{Provider: "s3", Bucket: bucket, Key: "project-root/file.bin", Path: "file.bin", SizeBytes: 17, ETag: "etag-1", LastModTime: time.Date(2026, 7, 1, 1, 2, 3, 0, time.UTC)}}, nil
+			return storage.InventoryResult{Items: []storage.ObjectMetadata{{Provider: "s3", Bucket: bucket, Key: "project-root/file.bin", Path: "file.bin", SizeBytes: 17, ETag: "etag-1", LastModified: time.Date(2026, 7, 1, 1, 2, 3, 0, time.UTC)}}, Complete: true}, nil
 		case "project-root/dir":
-			return []core.StorageBucketObject{{Provider: "s3", Bucket: bucket, Key: "project-root/dir/child.bin", Path: "dir/child.bin", SizeBytes: 19}}, nil
+			return storage.InventoryResult{Items: []storage.ObjectMetadata{{Provider: "s3", Bucket: bucket, Key: "project-root/dir/child.bin", Path: "dir/child.bin", SizeBytes: 19}}, Complete: true}, nil
 		default:
-			return nil, nil
+			return storage.InventoryResult{Complete: true}, nil
 		}
-	})
+	}
+	om := newInternalDRSObjectManager(db, core.StoragePorts{Inventory: storageFake})
 	expectedSize := int64(17)
 	body, _ := json.Marshal(internalInspectObjectsBulkRequest{Items: []internalInspectObjectRequest{
 		{ID: "present", ObjectURL: "s3://bucket-a/project-root/file.bin", ExpectedSizeBytes: &expectedSize, ExpectedName: "file.bin"},
@@ -589,9 +639,6 @@ func TestHandleInternalInspectObjectBulkListValidatesExactKeyWithoutHead(t *test
 	if listedPrefixCount != 2 {
 		t.Fatalf("expected two LIST calls, got %+v", listedPrefixes)
 	}
-	if inspectCalls != 0 {
-		t.Fatalf("expected bulk-list not to HEAD objects, got %d inspector calls", inspectCalls)
-	}
 }
 
 func TestHandleInternalInspectObjectBulkListDeduplicatesExactTargets(t *testing.T) {
@@ -603,15 +650,18 @@ func TestHandleInternalInspectObjectBulkListDeduplicatesExactTargets(t *testing.
 			"syfon|e2e": {Organization: "syfon", ProjectID: "e2e", Bucket: "bucket-a", CredentialID: "cred-1", PathPrefix: "project-root"},
 		},
 	}
-	om := newInternalDRSObjectManager(db, &testutils.MockUrlManager{})
 	listCalls := 0
-	om.SetS3PrefixListerWithOptions(func(ctx context.Context, cred buckets.Credential, bucket string, prefix string, options core.StoragePrefixListOptions) ([]core.StorageBucketObject, error) {
+	storageFake := &internalDRSInventoryFake{}
+	storageFake.inventoryFn = func(_ context.Context, request storage.InventoryRequest) (storage.InventoryResult, error) {
 		listCalls++
-		if bucket != "bucket-a" || prefix != "project-root/file.bin" || !options.ExactPrefix || options.MaxKeys != 1 {
-			t.Fatalf("unexpected bulk-list request bucket=%q prefix=%q options=%+v", bucket, prefix, options)
+		bucket := request.Target.Bucket
+		prefix := request.Target.Prefix
+		if bucket != "bucket-a" || prefix != "project-root/file.bin" || !request.ExactPrefix || request.MaxKeys != 1 {
+			t.Fatalf("unexpected bulk-list request bucket=%q prefix=%q request=%+v", bucket, prefix, request)
 		}
-		return []core.StorageBucketObject{{Provider: "s3", Bucket: bucket, Key: "project-root/file.bin", Path: "file.bin", SizeBytes: 17}}, nil
-	})
+		return storage.InventoryResult{Items: []storage.ObjectMetadata{{Provider: "s3", Bucket: bucket, Key: "project-root/file.bin", Path: "file.bin", SizeBytes: 17}}, Complete: true}, nil
+	}
+	om := newInternalDRSObjectManager(db, core.StoragePorts{Inventory: storageFake})
 	expectedSize := int64(17)
 	body, _ := json.Marshal(internalInspectObjectsBulkRequest{Items: []internalInspectObjectRequest{
 		{ID: "one", ObjectURL: "s3://bucket-a/project-root/file.bin", ExpectedSizeBytes: &expectedSize, ExpectedName: "file.bin"},
@@ -645,12 +695,13 @@ func TestHandleInternalInspectObjectBulkListSharesRemoteEvidenceAcrossValidation
 			"syfon|e2e": {Organization: "syfon", ProjectID: "e2e", Bucket: "bucket-a", CredentialID: "cred-1", PathPrefix: "project-root"},
 		},
 	}
-	om := newInternalDRSObjectManager(db, &testutils.MockUrlManager{})
 	listCalls := 0
-	om.SetS3PrefixListerWithOptions(func(ctx context.Context, cred buckets.Credential, bucket string, prefix string, options core.StoragePrefixListOptions) ([]core.StorageBucketObject, error) {
+	storageFake := &internalDRSInventoryFake{}
+	storageFake.inventoryFn = func(_ context.Context, request storage.InventoryRequest) (storage.InventoryResult, error) {
 		listCalls++
-		return []core.StorageBucketObject{{Provider: "s3", Bucket: bucket, Key: "project-root/file.bin", Path: "file.bin", SizeBytes: 17}}, nil
-	})
+		return storage.InventoryResult{Items: []storage.ObjectMetadata{{Provider: "s3", Bucket: request.Target.Bucket, Key: "project-root/file.bin", Path: "file.bin", SizeBytes: 17}}, Complete: true}, nil
+	}
+	om := newInternalDRSObjectManager(db, core.StoragePorts{Inventory: storageFake})
 	size17 := int64(17)
 	size99 := int64(99)
 	body, _ := json.Marshal(internalInspectObjectsBulkRequest{Items: []internalInspectObjectRequest{
@@ -685,20 +736,23 @@ func TestHandleInternalInspectObjectBulkListCoalescesDensePrefixes(t *testing.T)
 			"syfon|e2e": {Organization: "syfon", ProjectID: "e2e", Bucket: "bucket-a", CredentialID: "cred-1", PathPrefix: "project-root"},
 		},
 	}
-	om := newInternalDRSObjectManager(db, &testutils.MockUrlManager{})
 	listCalls := 0
-	om.SetS3PrefixListerWithOptions(func(ctx context.Context, cred buckets.Credential, bucket string, prefix string, options core.StoragePrefixListOptions) ([]core.StorageBucketObject, error) {
+	storageFake := &internalDRSInventoryFake{}
+	storageFake.inventoryFn = func(_ context.Context, request storage.InventoryRequest) (storage.InventoryResult, error) {
 		listCalls++
-		if bucket != "bucket-a" || prefix != "project-root/dense/" || !options.ExactPrefix || options.MaxKeys != 0 || options.IncludeHead {
-			t.Fatalf("unexpected coalesced LIST request bucket=%q prefix=%q options=%+v", bucket, prefix, options)
+		bucket := request.Target.Bucket
+		prefix := request.Target.Prefix
+		if bucket != "bucket-a" || prefix != "project-root/dense/" || !request.ExactPrefix || request.MaxKeys != 0 || request.IncludeHead {
+			t.Fatalf("unexpected coalesced LIST request bucket=%q prefix=%q request=%+v", bucket, prefix, request)
 		}
-		out := make([]core.StorageBucketObject, 0, 25)
+		out := make([]storage.ObjectMetadata, 0, 25)
 		for i := 0; i < 25; i++ {
 			key := fmt.Sprintf("project-root/dense/file-%02d.bin", i)
-			out = append(out, core.StorageBucketObject{Provider: "s3", Bucket: bucket, Key: key, Path: fmt.Sprintf("file-%02d.bin", i), SizeBytes: int64(i + 1)})
+			out = append(out, storage.ObjectMetadata{Provider: "s3", Bucket: bucket, Key: key, Path: fmt.Sprintf("file-%02d.bin", i), SizeBytes: int64(i + 1)})
 		}
-		return out, nil
-	})
+		return storage.InventoryResult{Items: out, Complete: true}, nil
+	}
+	om := newInternalDRSObjectManager(db, core.StoragePorts{Inventory: storageFake})
 	items := make([]internalInspectObjectRequest, 0, 25)
 	for i := 0; i < 25; i++ {
 		size := int64(i + 1)

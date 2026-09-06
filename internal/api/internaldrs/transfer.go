@@ -24,8 +24,8 @@ import (
 	"github.com/calypr/syfon/internal/faults"
 	apimiddleware "github.com/calypr/syfon/internal/httpapi/middleware"
 	"github.com/calypr/syfon/internal/objects"
+	"github.com/calypr/syfon/internal/storage"
 	"github.com/calypr/syfon/internal/storage/address"
-	"github.com/calypr/syfon/internal/urlmanager"
 	"github.com/calypr/syfon/internal/usage"
 )
 
@@ -67,7 +67,7 @@ func handleInternalDownloadFiber(c fiber.Ctx, om *core.ObjectManager) error {
 		return c.Status(fiber.StatusNotFound).SendString("No supported cloud location found for this file")
 	}
 
-	opts := urlmanager.SignOptions{}
+	opts := storage.AccessOptions{}
 	if expStr := c.Query("expires_in"); expStr != "" {
 		if exp, err := strconv.Atoi(expStr); err == nil {
 			opts.ExpiresIn = time.Duration(exp) * time.Second
@@ -136,7 +136,7 @@ func handleInternalDownloadPartFiber(c fiber.Ctx, om *core.ObjectManager) error 
 		bucketID = b
 	}
 
-	opts := urlmanager.SignOptions{ExpiresIn: time.Duration(config.DefaultSigningExpirySeconds) * time.Second}
+	opts := storage.AccessOptions{ExpiresIn: time.Duration(config.DefaultSigningExpirySeconds) * time.Second}
 	if obj.Name != nil {
 		opts.DownloadFilename = common.DownloadFilename(*obj.Name)
 	}
@@ -183,7 +183,7 @@ func handleInternalUploadBlankFiber(om *core.ObjectManager) fiber.Handler {
 			return apiutil.HandleError(c, err)
 		}
 
-		signedURL, err := om.SignURL(c.Context(), target.URL, urlmanager.SignOptions{Method: http.MethodPut})
+		signedURL, err := om.SignURL(c.Context(), target.URL, storage.AccessOptions{Method: http.MethodPut})
 		if err != nil {
 			return apiutil.HandleError(c, err)
 		}
@@ -231,7 +231,7 @@ func handleInternalUploadURLFiber(om *core.ObjectManager) fiber.Handler {
 			if err != nil {
 				return apiutil.HandleError(c, err)
 			}
-			signedURL, err := om.SignURL(c.Context(), target.URL, urlmanager.SignOptions{Method: http.MethodPut})
+			signedURL, err := om.SignURL(c.Context(), target.URL, storage.AccessOptions{Method: http.MethodPut})
 			if err != nil {
 				return apiutil.HandleError(c, err)
 			}
@@ -255,7 +255,7 @@ func handleInternalUploadURLFiber(om *core.ObjectManager) fiber.Handler {
 		}
 
 		urlStr := address.BucketToURL(bucket, key)
-		signedURL, err := om.SignURL(c.Context(), urlStr, urlmanager.SignOptions{Method: http.MethodPut})
+		signedURL, err := om.SignURL(c.Context(), urlStr, storage.AccessOptions{Method: http.MethodPut})
 		if err != nil {
 			return apiutil.HandleError(c, err)
 		}
@@ -353,7 +353,7 @@ func handleInternalUploadBulkFiber(om *core.ObjectManager) fiber.Handler {
 			if key == "" {
 				key = string(obj.Id)
 			}
-			signedURL, err := om.SignURL(c.Context(), target.URL, urlmanager.SignOptions{Method: http.MethodPut})
+			signedURL, err := om.SignURL(c.Context(), target.URL, storage.AccessOptions{Method: http.MethodPut})
 			if err != nil {
 				errMsg := err.Error()
 				res.Error = &errMsg
@@ -508,9 +508,9 @@ func handleInternalMultipartCompleteFiber(om *core.ObjectManager) fiber.Handler 
 		}
 		s := sess.(multipartSession)
 
-		parts := make([]urlmanager.MultipartPart, len(req.Parts))
+		parts := make([]storage.CompletedPart, len(req.Parts))
 		for i, p := range req.Parts {
-			parts[i] = urlmanager.MultipartPart{ETag: p.ETag, PartNumber: p.PartNumber}
+			parts[i] = storage.CompletedPart{ETag: p.ETag, PartNumber: p.PartNumber}
 		}
 		if err := om.CompleteMultipartUpload(c.Context(), s.Bucket, s.Key, req.UploadId, parts); err != nil {
 			return apiutil.HandleError(c, err)
