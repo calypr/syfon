@@ -6,8 +6,7 @@ import (
 	"testing"
 	"time"
 
-	generated "github.com/calypr/syfon/apigen/server/lfsapi"
-	httplfs "github.com/calypr/syfon/internal/httpapi/lfs"
+	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/transfers"
 )
 
@@ -54,23 +53,20 @@ func TestPendingMetaCandidateJSONPreservesLegacyLFSShape(t *testing.T) {
 	typ := "s3"
 	region := "legacy-cloud"
 	url := "s3://bucket/legacy-lfs.bin"
-	candidate := httplfs.FromGeneratedCandidate(generated.DrsObjectCandidate{
-		Id:   &id,
-		Name: stringPtr("legacy-lfs.bin"),
-		Size: &size,
-		Checksums: &[]generated.Checksum{{
+	candidate := objects.Candidate{
+		Aliases: &[]string{"id:" + id},
+		Name:    stringPtr("legacy-lfs.bin"),
+		Size:    &size,
+		Checksums: &[]objects.Checksum{{
 			Type: "sha256", Checksum: oid,
 		}},
-		AccessMethods: &[]generated.AccessMethod{{
+		AccessMethods: &[]objects.AccessMethod{{
 			AccessId:  stringPtr("s3"),
-			Type:      &typ,
-			Region:    &region,
-			AccessUrl: &generated.AccessMethodAccessUrl{Url: &url},
-			Authorizations: &generated.AccessMethodAuthorizations{
-				BearerAuthIssuers: stringSlicePtr([]string{"issuer"}),
-			},
+			Type:      typ,
+			Cloud:     &region,
+			AccessUrl: &objects.AccessURL{Url: url},
 		}},
-	})
+	}
 	now := time.Now().UTC().Truncate(time.Second)
 	if err := db.SavePendingLFSMeta(context.Background(), []transfers.PendingMetadata{{OID: oid, Candidate: candidate, CreatedAt: now, ExpiresAt: now.Add(time.Hour)}}); err != nil {
 		t.Fatalf("SavePendingLFSMeta failed: %v", err)
@@ -113,7 +109,7 @@ func TestPendingMetaCandidateJSONPreservesExplicitZeroSize(t *testing.T) {
 
 	const oid = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
 	size := int64(0)
-	candidate := httplfs.FromGeneratedCandidate(generated.DrsObjectCandidate{Size: &size})
+	candidate := objects.Candidate{Size: &size}
 	now := time.Now().UTC().Truncate(time.Second)
 	if err := db.SavePendingLFSMeta(context.Background(), []transfers.PendingMetadata{{OID: oid, Candidate: candidate, CreatedAt: now, ExpiresAt: now.Add(time.Hour)}}); err != nil {
 		t.Fatalf("SavePendingLFSMeta failed: %v", err)
@@ -133,5 +129,3 @@ func TestPendingMetaCandidateJSONPreservesExplicitZeroSize(t *testing.T) {
 }
 
 func stringPtr(value string) *string { return &value }
-
-func stringSlicePtr(value []string) *[]string { return &value }

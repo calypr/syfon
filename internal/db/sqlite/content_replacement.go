@@ -8,7 +8,6 @@ import (
 
 	sycommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/access"
-	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/faults"
 
 	"github.com/calypr/syfon/internal/objects"
@@ -145,7 +144,7 @@ func replaceObjectTx(ctx context.Context, tx *sql.Tx, obj *objects.Record) (stri
 }
 
 func replaceMetadataTx(ctx context.Context, tx *sql.Tx, row sqliteContentRow, obj *objects.Record) error {
-	name := objects.CleanToBasename(common.StringVal(obj.Name))
+	name := objects.CleanToBasename(sqliteStringVal(obj.Name))
 	if name == "" {
 		name = row.name
 	}
@@ -155,11 +154,11 @@ func replaceMetadataTx(ctx context.Context, tx *sql.Tx, row sqliteContentRow, ob
 			return fmt.Errorf("preserve replaced object name: %w", err)
 		}
 	}
-	version := strings.TrimSpace(common.StringVal(obj.Version))
+	version := strings.TrimSpace(sqliteStringVal(obj.Version))
 	if version == "" {
 		version = row.version
 	}
-	description := strings.TrimSpace(common.StringVal(obj.Description))
+	description := strings.TrimSpace(sqliteStringVal(obj.Description))
 	if description == "" {
 		description = row.description
 	}

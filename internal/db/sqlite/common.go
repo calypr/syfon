@@ -19,6 +19,24 @@ func defaultProvider(provider string) string {
 	return provider
 }
 
+func sqlitePtr[T any](value T) *T {
+	return &value
+}
+
+func sqliteTimeVal(value *time.Time) time.Time {
+	if value == nil {
+		return time.Time{}
+	}
+	return *value
+}
+
+func sqliteStringVal(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
+
 func makePlaceholders(n int) string {
 	if n <= 0 {
 		return ""

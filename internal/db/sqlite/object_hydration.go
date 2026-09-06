@@ -11,7 +11,6 @@ import (
 	"time"
 
 	sycommon "github.com/calypr/syfon/common"
-	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/faults"
 	"github.com/calypr/syfon/internal/objects"
 )
@@ -70,10 +69,10 @@ retryLookup:
 		Id:          objects.RecordID(objectID),
 		Size:        r.Size,
 		CreatedTime: r.CreatedTime,
-		UpdatedTime: common.Ptr(r.UpdatedTime),
-		Version:     common.Ptr(r.Version),
-		Description: common.Ptr(r.Description),
-		Name:        common.Ptr(r.Name),
+		UpdatedTime: sqlitePtr(r.UpdatedTime),
+		Version:     sqlitePtr(r.Version),
+		Description: sqlitePtr(r.Description),
+		Name:        sqlitePtr(r.Name),
 		SelfUri:     "drs://" + objectID,
 		NameAliases: nameAliases,
 		Properties:  map[string]json.RawMessage{},
@@ -103,7 +102,7 @@ retryLookup:
 		am := objects.AccessMethod{
 			AccessUrl: &objects.AccessURL{Url: u},
 			Type:      t,
-			AccessId:  common.Ptr(objects.AccessMethodID(t, u)),
+			AccessId:  sqlitePtr(objects.AccessMethodID(t, u)),
 		}
 		*obj.AccessMethods = append(*obj.AccessMethods, am)
 	}
@@ -230,10 +229,10 @@ func (db *SqliteDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []stri
 			Id:          objects.RecordID(id),
 			Size:        size,
 			CreatedTime: createdTime,
-			UpdatedTime: common.Ptr(updatedTime),
-			Name:        common.Ptr(strings.TrimSpace(name.String)),
-			Version:     common.Ptr(version.String),
-			Description: common.Ptr(description.String),
+			UpdatedTime: sqlitePtr(updatedTime),
+			Name:        sqlitePtr(strings.TrimSpace(name.String)),
+			Version:     sqlitePtr(version.String),
+			Description: sqlitePtr(description.String),
 			SelfUri:     "drs://" + id,
 			Properties:  map[string]json.RawMessage{},
 		}
@@ -305,7 +304,7 @@ func (db *SqliteDB) attachBulkAccessMethods(ctx context.Context, objectsByID map
 		*obj.AccessMethods = append(*obj.AccessMethods, objects.AccessMethod{
 			AccessUrl: &objects.AccessURL{Url: accessURL},
 			Type:      accessType,
-			AccessId:  common.Ptr(objects.AccessMethodID(accessType, accessURL)),
+			AccessId:  sqlitePtr(objects.AccessMethodID(accessType, accessURL)),
 		})
 	}
 	return rows.Err()
@@ -535,7 +534,7 @@ func (db *SqliteDB) attachNameAliases(ctx context.Context, objectsByID map[strin
 		if obj == nil {
 			continue
 		}
-		obj.NameAliases = objects.NormalizeNameAliases(common.StringVal(obj.Name), aliases)
+		obj.NameAliases = objects.NormalizeNameAliases(sqliteStringVal(obj.Name), aliases)
 	}
 	return nil
 }

@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/calypr/syfon/internal/access"
-	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/faults"
 
 	"github.com/calypr/syfon/internal/objects"
@@ -213,7 +212,7 @@ func identityTestObject(id, sha, resource, url string) objects.Record {
 	now := time.Now().UTC()
 	controlled := []string{resource}
 	return objects.Record{Id: objects.RecordID(id), Size: 7, CreatedTime: now, UpdatedTime: &now,
-		Name: common.Ptr(id), Checksums: []objects.Checksum{{Type: "sha256", Checksum: sha}},
+		Name: sqliteTestPtr(id), Checksums: []objects.Checksum{{Type: "sha256", Checksum: sha}},
 		AccessMethods: accessMethods(url), ControlledAccess: &controlled}
 }
 

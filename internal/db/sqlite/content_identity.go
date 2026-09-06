@@ -10,7 +10,6 @@ import (
 
 	sycommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/access"
-	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/faults"
 
 	"github.com/calypr/syfon/internal/objects"
@@ -232,8 +231,8 @@ func sqliteLoadContentRowTx(ctx context.Context, tx *sql.Tx, id string) (sqliteC
 func insertContentRowTx(ctx context.Context, tx *sql.Tx, id string, obj *objects.Record) error {
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO drs_object (id, size, created_time, updated_time, name, version, description)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`, id, obj.Size, obj.CreatedTime, common.TimeVal(obj.UpdatedTime),
-		objects.CleanToBasename(common.StringVal(obj.Name)), common.StringVal(obj.Version), common.StringVal(obj.Description))
+		VALUES (?, ?, ?, ?, ?, ?, ?)`, id, obj.Size, obj.CreatedTime, sqliteTimeVal(obj.UpdatedTime),
+		objects.CleanToBasename(sqliteStringVal(obj.Name)), sqliteStringVal(obj.Version), sqliteStringVal(obj.Description))
 	if err != nil {
 		return fmt.Errorf("insert canonical object: %w", err)
 	}
@@ -242,7 +241,7 @@ func insertContentRowTx(ctx context.Context, tx *sql.Tx, id string, obj *objects
 
 func mergeContentRowTx(ctx context.Context, tx *sql.Tx, row sqliteContentRow, obj *objects.Record, hasSHA bool, resources, currentResources []string) error {
 	allowReplacement := len(currentResources) == 1 && hasResourceOverlap(resources, currentResources)
-	incomingName := objects.CleanToBasename(common.StringVal(obj.Name))
+	incomingName := objects.CleanToBasename(sqliteStringVal(obj.Name))
 	if row.name != "" && incomingName != "" && row.name != incomingName {
 		alias := incomingName
 		if allowReplacement {
@@ -257,17 +256,17 @@ func mergeContentRowTx(ctx context.Context, tx *sql.Tx, row sqliteContentRow, ob
 	version := row.version
 	description := row.description
 	if allowReplacement || strings.TrimSpace(name) == "" {
-		if incoming := objects.CleanToBasename(common.StringVal(obj.Name)); incoming != "" {
+		if incoming := objects.CleanToBasename(sqliteStringVal(obj.Name)); incoming != "" {
 			name = incoming
 		}
 	}
 	if allowReplacement || strings.TrimSpace(version) == "" {
-		if incoming := strings.TrimSpace(common.StringVal(obj.Version)); incoming != "" {
+		if incoming := strings.TrimSpace(sqliteStringVal(obj.Version)); incoming != "" {
 			version = incoming
 		}
 	}
 	if allowReplacement || strings.TrimSpace(description) == "" {
-		if incoming := strings.TrimSpace(common.StringVal(obj.Description)); incoming != "" {
+		if incoming := strings.TrimSpace(sqliteStringVal(obj.Description)); incoming != "" {
 			description = incoming
 		}
 	}

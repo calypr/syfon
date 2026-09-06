@@ -13,7 +13,6 @@ import (
 
 	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/buckets"
-	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/credentialcipher"
 	"github.com/calypr/syfon/internal/faults"
 	"github.com/calypr/syfon/internal/transfers"
@@ -34,8 +33,8 @@ func TestSqliteDB_CRUD(t *testing.T) {
 		Size:        123,
 		CreatedTime: time.Now(),
 		UpdatedTime: func() *time.Time { t := time.Now(); return &t }(),
-		Version:     common.Ptr("1.0"),
-		Name:        common.Ptr("testing"),
+		Version:     sqliteTestPtr("1.0"),
+		Name:        sqliteTestPtr("testing"),
 		AccessMethods: &[]objects.AccessMethod{
 			{
 				Type:      "s3",
@@ -214,8 +213,8 @@ func TestSqliteDB_GetObjectsByChecksum_WhenIDDiffers(t *testing.T) {
 		Size:        10,
 		CreatedTime: time.Now(),
 		UpdatedTime: func() *time.Time { t := time.Now(); return &t }(),
-		Version:     common.Ptr("1.0"),
-		Name:        common.Ptr("oid-object"),
+		Version:     sqliteTestPtr("1.0"),
+		Name:        sqliteTestPtr("oid-object"),
 		AccessMethods: &[]objects.AccessMethod{
 			{
 				Type:      "s3",
@@ -269,7 +268,7 @@ func TestSqliteDB_GetObjectPreservesStoredName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetObject failed: %v", err)
 	}
-	if got := common.StringVal(obj.Name); got != "file.txt" {
+	if got := sqliteTestStringVal(obj.Name); got != "file.txt" {
 		t.Fatalf("expected stored name, got %q", got)
 	}
 }
@@ -287,7 +286,7 @@ func TestSqliteDB_NormalizeNameToBasenameOnInsert(t *testing.T) {
 		Id:          "unix-1",
 		Size:        100,
 		CreatedTime: now,
-		Name:        common.Ptr("/path/to/some/unix_file.txt"),
+		Name:        sqliteTestPtr("/path/to/some/unix_file.txt"),
 	}
 	if err := db.CreateObject(ctx, objUnix); err != nil {
 		t.Fatalf("CreateObject failed: %v", err)
@@ -297,7 +296,7 @@ func TestSqliteDB_NormalizeNameToBasenameOnInsert(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetObject failed: %v", err)
 	}
-	if got := common.StringVal(gotUnix.Name); got != "unix_file.txt" {
+	if got := sqliteTestStringVal(gotUnix.Name); got != "unix_file.txt" {
 		t.Fatalf("expected name to be normalized to unix_file.txt, got %q", got)
 	}
 
@@ -305,7 +304,7 @@ func TestSqliteDB_NormalizeNameToBasenameOnInsert(t *testing.T) {
 		Id:          "win-1",
 		Size:        200,
 		CreatedTime: now,
-		Name:        common.Ptr(`C:\Windows\System32\win_file.txt`),
+		Name:        sqliteTestPtr(`C:\Windows\System32\win_file.txt`),
 	}
 	if err := db.CreateObject(ctx, objWin); err != nil {
 		t.Fatalf("CreateObject failed: %v", err)
@@ -315,7 +314,7 @@ func TestSqliteDB_NormalizeNameToBasenameOnInsert(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetObject failed: %v", err)
 	}
-	if got := common.StringVal(gotWin.Name); got != "win_file.txt" {
+	if got := sqliteTestStringVal(gotWin.Name); got != "win_file.txt" {
 		t.Fatalf("expected name to be normalized to win_file.txt, got %q", got)
 	}
 
@@ -325,14 +324,14 @@ func TestSqliteDB_NormalizeNameToBasenameOnInsert(t *testing.T) {
 			Id:          "bulk-unix",
 			Size:        300,
 			CreatedTime: now,
-			Name:        common.Ptr("/var/log/syslog.log"),
+			Name:        sqliteTestPtr("/var/log/syslog.log"),
 		},
 
 		{
 			Id:          "bulk-win",
 			Size:        400,
 			CreatedTime: now,
-			Name:        common.Ptr(`D:\Data\config.json`),
+			Name:        sqliteTestPtr(`D:\Data\config.json`),
 		},
 	}
 
@@ -344,7 +343,7 @@ func TestSqliteDB_NormalizeNameToBasenameOnInsert(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetObject failed: %v", err)
 	}
-	if got := common.StringVal(gotBulkUnix.Name); got != "syslog.log" {
+	if got := sqliteTestStringVal(gotBulkUnix.Name); got != "syslog.log" {
 		t.Fatalf("expected name syslog.log, got %q", got)
 	}
 
@@ -352,7 +351,7 @@ func TestSqliteDB_NormalizeNameToBasenameOnInsert(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetObject failed: %v", err)
 	}
-	if got := common.StringVal(gotBulkWin.Name); got != "config.json" {
+	if got := sqliteTestStringVal(gotBulkWin.Name); got != "config.json" {
 		t.Fatalf("expected name config.json, got %q", got)
 	}
 }
@@ -505,7 +504,7 @@ func TestSqliteDB_DeleteObjectByAliasRemovesCanonicalObject(t *testing.T) {
 		Id:          objects.RecordID(canonicalID),
 		CreatedTime: now,
 		UpdatedTime: &now,
-		Name:        common.Ptr("object.txt"),
+		Name:        sqliteTestPtr("object.txt"),
 
 		Authorizations: map[string][]string{"a": {"b"}},
 	}); err != nil {
@@ -1167,8 +1166,8 @@ func TestSqliteDB_PendingLFSMetaLifecycle(t *testing.T) {
 	}
 	now := time.Now().UTC()
 	candidate := objects.Candidate{
-		Name: common.Ptr("candidate"),
-		Size: common.Ptr(int64(123)),
+		Name: sqliteTestPtr("candidate"),
+		Size: sqliteTestPtr(int64(123)),
 		Checksums: &[]objects.Checksum{
 			{Type: "sha256", Checksum: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
 		},
@@ -1189,7 +1188,7 @@ func TestSqliteDB_PendingLFSMetaLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PopPendingLFSMeta failed: %v", err)
 	}
-	if common.StringVal(entry.Candidate.Name) != "candidate" {
+	if sqliteTestStringVal(entry.Candidate.Name) != "candidate" {
 		t.Fatalf("unexpected candidate payload: %+v", entry.Candidate)
 	}
 
@@ -1207,7 +1206,7 @@ func TestSqliteDB_PendingLFSMetaPrunesExpired(t *testing.T) {
 	now := time.Now().UTC()
 	oid := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	candidate := objects.Candidate{
-		Name: common.Ptr("expired"),
+		Name: sqliteTestPtr("expired"),
 		Checksums: &[]objects.Checksum{
 			{Type: "sha256", Checksum: oid},
 		},
@@ -1239,11 +1238,11 @@ func TestSqliteDB_FileUsageMetrics(t *testing.T) {
 	oid := "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
 	if err := db.CreateObject(ctx, &objects.Record{
 		Id:          objects.RecordID(oid),
-		Name:        common.Ptr("metrics-object"),
+		Name:        sqliteTestPtr("metrics-object"),
 		Size:        42,
 		CreatedTime: now,
 		UpdatedTime: &now,
-		Version:     common.Ptr("1"),
+		Version:     sqliteTestPtr("1"),
 	}); err != nil {
 		t.Fatalf("CreateObject failed: %v", err)
 	}
@@ -1306,11 +1305,11 @@ func TestSqliteDB_FileUsageMetrics_MissingObjectQueuedAndFlushedOnCreate(t *test
 	now := time.Now().UTC()
 	if err := db.CreateObject(ctx, &objects.Record{
 		Id:          objects.RecordID(oid),
-		Name:        common.Ptr("later-created"),
+		Name:        sqliteTestPtr("later-created"),
 		Size:        11,
 		CreatedTime: now,
 		UpdatedTime: &now,
-		Version:     common.Ptr("1"),
+		Version:     sqliteTestPtr("1"),
 	}); err != nil {
 		t.Fatalf("CreateObject failed: %v", err)
 	}
@@ -1454,7 +1453,7 @@ func TestSqliteDB_ScopedFileUsageQueries(t *testing.T) {
 		{
 			Authorizations: map[string][]string{"org": {"p1"}},
 			Id:             "obj-1",
-			Name:           common.Ptr("one"),
+			Name:           sqliteTestPtr("one"),
 			Size:           1,
 			CreatedTime:    now,
 			UpdatedTime:    &now,
@@ -1463,7 +1462,7 @@ func TestSqliteDB_ScopedFileUsageQueries(t *testing.T) {
 		{
 			Authorizations: map[string][]string{"org": {"p1"}},
 			Id:             "obj-2",
-			Name:           common.Ptr("two"),
+			Name:           sqliteTestPtr("two"),
 			Size:           2,
 			CreatedTime:    now,
 			UpdatedTime:    &now,
@@ -1472,7 +1471,7 @@ func TestSqliteDB_ScopedFileUsageQueries(t *testing.T) {
 		{
 			Authorizations: map[string][]string{"org": {"p2"}},
 			Id:             "obj-3",
-			Name:           common.Ptr("three"),
+			Name:           sqliteTestPtr("three"),
 			Size:           3,
 			CreatedTime:    now,
 			UpdatedTime:    &now,
@@ -1631,11 +1630,11 @@ func TestSqliteDB_TransferAttributionMetrics(t *testing.T) {
 	if err := db.CreateObject(ctx, &objects.Record{
 		Authorizations: map[string][]string{"calypr": {"proj-a"}},
 		Id:             "did-1",
-		Name:           common.Ptr("transfer-object"),
+		Name:           sqliteTestPtr("transfer-object"),
 		Size:           42,
 		CreatedTime:    now,
 		UpdatedTime:    &now,
-		Version:        common.Ptr("1"),
+		Version:        sqliteTestPtr("1"),
 		Checksums: []objects.Checksum{
 			{Type: "sha256", Checksum: oid},
 		},
@@ -1978,7 +1977,7 @@ func TestSqliteDB_GetPendingLFSMeta(t *testing.T) {
 	now := time.Now().UTC()
 	oid := "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
 	candidate := objects.Candidate{
-		Name: common.Ptr("candidate-get"),
+		Name: sqliteTestPtr("candidate-get"),
 		Checksums: &[]objects.Checksum{
 			{Type: "sha256", Checksum: oid},
 		},
@@ -1999,7 +1998,7 @@ func TestSqliteDB_GetPendingLFSMeta(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetPendingLFSMeta failed: %v", err)
 	}
-	if common.StringVal(got.Candidate.Name) != "candidate-get" {
+	if sqliteTestStringVal(got.Candidate.Name) != "candidate-get" {
 		t.Fatalf("unexpected pending metadata: %+v", got)
 	}
 
@@ -2007,4 +2006,15 @@ func TestSqliteDB_GetPendingLFSMeta(t *testing.T) {
 	if !errors.Is(err, faults.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound for missing pending metadata, got: %v", err)
 	}
+}
+
+func sqliteTestPtr[T any](value T) *T {
+	return &value
+}
+
+func sqliteTestStringVal(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }

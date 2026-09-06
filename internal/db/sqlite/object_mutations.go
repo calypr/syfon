@@ -8,7 +8,6 @@ import (
 
 	sycommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/access"
-	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/faults"
 
 	"github.com/calypr/syfon/internal/objects"
@@ -141,7 +140,7 @@ func (db *SqliteDB) createObjectLegacy(ctx context.Context, obj *objects.Record)
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO drs_object (id, size, created_time, updated_time, name, version, description)
 		VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		string(obj.Id), obj.Size, obj.CreatedTime, common.TimeVal(obj.UpdatedTime), objects.CleanToBasename(common.StringVal(obj.Name)), common.StringVal(obj.Version), common.StringVal(obj.Description),
+		string(obj.Id), obj.Size, obj.CreatedTime, sqliteTimeVal(obj.UpdatedTime), objects.CleanToBasename(sqliteStringVal(obj.Name)), sqliteStringVal(obj.Version), sqliteStringVal(obj.Description),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to insert drs_object: %w", err)
@@ -213,7 +212,7 @@ func (db *SqliteDB) registerObjectsLegacy(ctx context.Context, records []objects
 
 	for _, obj := range records {
 		ids = append(ids, string(obj.Id))
-		mainArgs = append(mainArgs, string(obj.Id), obj.Size, obj.CreatedTime, common.TimeVal(obj.UpdatedTime), objects.CleanToBasename(common.StringVal(obj.Name)), common.StringVal(obj.Version), common.StringVal(obj.Description))
+		mainArgs = append(mainArgs, string(obj.Id), obj.Size, obj.CreatedTime, sqliteTimeVal(obj.UpdatedTime), objects.CleanToBasename(sqliteStringVal(obj.Name)), sqliteStringVal(obj.Version), sqliteStringVal(obj.Description))
 
 		seenAccess := make(map[string]struct{})
 		for _, resource := range objectAccessResources(&obj) {
@@ -380,7 +379,7 @@ func normalizeObjectNameAliases(obj *objects.Record) []string {
 	if obj == nil {
 		return nil
 	}
-	return objects.NormalizeNameAliases(common.StringVal(obj.Name), obj.NameAliases)
+	return objects.NormalizeNameAliases(sqliteStringVal(obj.Name), obj.NameAliases)
 }
 
 func insertControlledAccessTx(ctx context.Context, tx *sql.Tx, objectID string, resources []string) error {

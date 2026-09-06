@@ -5,17 +5,12 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/calypr/syfon/internal/db"
 	_ "github.com/mattn/go-sqlite3"
 )
-
-// SqliteDB implements db.DatabaseInterface.
 
 type SqliteDB struct {
 	db *sql.DB
 }
-
-var _ db.DatabaseInterface = (*SqliteDB)(nil)
 
 func NewSqliteDB(dsn string) (*SqliteDB, error) {
 	db, err := sql.Open("sqlite3", sqliteDSN(dsn))
