@@ -16,7 +16,7 @@ import (
 
 func TestRegisterRoutesUsesDirectFiberCleanupParams(t *testing.T) {
 	app := fiber.New()
-	RegisterProjectCleanupRoutes(app, nil)
+	RegisterProjectCleanupRoute(app, nil)
 
 	request := httptest.NewRequest(http.MethodDelete, "/data/projects/org/project", nil)
 	response, err := app.Test(request)
@@ -140,9 +140,9 @@ func TestRegisterInspectionRoutesPreservesOrder(t *testing.T) {
 	assertRegisteredGETPaths(t, app, []string{RouteInspectProjectScopes})
 }
 
-func TestRegisterProjectCleanupRoutesPreservesOrder(t *testing.T) {
+func TestRegisterProjectCleanupRoutePreservesOrder(t *testing.T) {
 	app := fiber.New()
-	RegisterProjectCleanupRoutes(app, nil)
+	RegisterProjectCleanupRoute(app, nil)
 
 	want := []string{RouteProjectCleanup}
 	var got []string

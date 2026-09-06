@@ -38,7 +38,7 @@ func RegisterInspectionRoutes(router fiber.Router, projectStorageService *projec
 	router.Post(RouteDeleteProjectBucketObjects, handleInternalDeleteProjectBucketObjectsFiber(projectStorageService))
 }
 
-func RegisterProjectCleanupRoutes(router fiber.Router, service *projectstorage.Service) {
+func RegisterProjectCleanupRoute(router fiber.Router, service *projectstorage.Service) {
 	router.Delete(RouteProjectCleanup, func(c fiber.Ctx) error {
 		return handleInternalDeleteProjectFiber(c, service)
 	})
