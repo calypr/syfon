@@ -57,7 +57,7 @@ type serverBackend struct {
 	objectDependencies objects.Dependencies
 	bucketDependencies buckets.Dependencies
 	pending            transfers.PendingStore
-	usageIngest        usage.IngestStore
+	usageIngest        usage.Ingestor
 	usageReports       usage.ReportStore
 }
 
@@ -289,7 +289,6 @@ var Cmd = &cobra.Command{
 
 		objectService := objects.NewService(backend.objectDependencies)
 		usageService := usage.NewService(usage.Dependencies{
-			Ingest:  backend.usageIngest,
 			Reports: backend.usageReports,
 			Objects: objectService,
 		})
@@ -299,7 +298,7 @@ var Cmd = &cobra.Command{
 			Scopes:      bucketService,
 			Credentials: bucketService,
 			Pending:     backend.pending,
-			Events:      usageService.Ingest(),
+			Events:      backend.usageIngest,
 		})
 		projectStorageService := projectstorage.NewService(
 			projectstorage.Dependencies{
@@ -348,6 +347,7 @@ var Cmd = &cobra.Command{
 			objectService:         objectService,
 			transferService:       transferService,
 			usageService:          usageService,
+			usageIngest:           backend.usageIngest,
 			projectStorageService: projectStorageService,
 			scopeRepairService:    scopeRepairService,
 			bucketService:         bucketService,

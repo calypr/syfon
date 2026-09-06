@@ -362,10 +362,10 @@ func newSyfonTestServer(t *testing.T) *fiberTestServer {
 		t.Fatalf("construct bucket service: %v", err)
 	}
 	objectService := objects.NewService(objectDependencies)
-	usageService := usage.NewService(usage.Dependencies{Ingest: database, Reports: database, Objects: objectService})
+	usageService := usage.NewService(usage.Dependencies{Reports: database, Objects: objectService})
 	transferService := transfers.NewService(transfers.Dependencies{
 		Access: cliFileStorageAccess{root: storageDir}, Scopes: bucketService, Credentials: bucketService,
-		Pending: database, Events: usageService.Ingest(),
+		Pending: database, Events: database,
 	})
 	description := "Calypr test DRS server"
 	environment := "test"
@@ -386,7 +386,7 @@ func newSyfonTestServer(t *testing.T) *fiberTestServer {
 		ServiceInfo:    serviceInfo,
 		Objects:        objectService,
 		Transfers:      transferService,
-		UsageIngest:    usageService.Ingest(),
+		UsageIngest:    database,
 		UsageReports:   usageService.Reports(),
 		Buckets:        bucketService,
 		ProjectStorage: projectStorageService,

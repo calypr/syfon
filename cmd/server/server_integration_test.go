@@ -141,17 +141,17 @@ s3_credentials:
 	invalidator.manager = storageManager
 	app := fiber.New()
 	objectService := objects.NewService(backend.objectDependencies)
-	usageService := usage.NewService(usage.Dependencies{Ingest: backend.usageIngest, Reports: backend.usageReports, Objects: objectService})
+	usageService := usage.NewService(usage.Dependencies{Reports: backend.usageReports, Objects: objectService})
 	transferService := transfers.NewService(transfers.Dependencies{
 		Access: storageManager, Multipart: storageManager, Scopes: bucketService, Credentials: bucketService,
-		Pending: backend.pending, Events: usageService.Ingest(),
+		Pending: backend.pending, Events: backend.usageIngest,
 	})
 	projectStorageService := projectstorage.NewService(projectstorage.Dependencies{Scopes: bucketService, Credentials: bucketService, Visibility: bucketService, Inventory: storageManager, Probe: storageManager, Delete: storageManager, Physical: objectService, CleanupObjects: objectService, CleanupScopes: bucketService})
 	scopeRepairService := newScopeRepairService(objectService, bucketService, storageManager)
 	httpapi.RegisterRoutes(app, httpapi.Dependencies{
 		Objects:        objectService,
 		Transfers:      transferService,
-		UsageIngest:    usageService.Ingest(),
+		UsageIngest:    backend.usageIngest,
 		UsageReports:   usageService.Reports(),
 		Buckets:        bucketService,
 		ProjectStorage: projectStorageService,

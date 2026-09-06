@@ -22,6 +22,7 @@ type serverRuntime struct {
 	objectService         *objects.Service
 	transferService       *transfers.Service
 	usageService          *usage.Service
+	usageIngest           usage.Ingestor
 	projectStorageService *projectstorage.Service
 	scopeRepairService    *scoperepair.Service
 	bucketService         *buckets.Service
@@ -34,7 +35,7 @@ func registerServerRoutes(rt *serverRuntime) {
 		ServiceInfo:    rt.serviceInfo,
 		Objects:        rt.objectService,
 		Transfers:      rt.transferService,
-		UsageIngest:    rt.usageService.Ingest(),
+		UsageIngest:    rt.usageIngest,
 		UsageReports:   rt.usageService.Reports(),
 		Buckets:        rt.bucketService,
 		ProjectStorage: rt.projectStorageService,

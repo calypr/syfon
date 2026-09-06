@@ -18,11 +18,10 @@ func metricsTestContext(base context.Context, mode string, headerSet bool, heade
 	return access.WithSession(base, session)
 }
 
-func registerMetricsRoutesForTest(app *fiber.App, ingest usage.IngestStore, reports usage.ReportStore, objects usage.ObjectReader) {
+func registerMetricsRoutesForTest(app *fiber.App, ingest usage.Ingestor, reports usage.ReportStore, objects usage.ObjectReader) {
 	service := usage.NewService(usage.Dependencies{
-		Ingest:  ingest,
 		Reports: reports,
 		Objects: objects,
 	})
-	RegisterMetricsRoutes(app, service.Reports(), service.Ingest())
+	RegisterMetricsRoutes(app, service.Reports(), ingest)
 }
