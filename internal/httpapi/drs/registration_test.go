@@ -9,13 +9,12 @@ import (
 
 	generated "github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/objects"
-	"github.com/calypr/syfon/internal/testutils"
 	"github.com/gofiber/fiber/v3"
 )
 
 func TestRegisterObjects(t *testing.T) {
-	db := &testutils.MockDatabase{Objects: map[string]*objects.Record{}}
-	om := testObjectManager(db, nil)
+	db := newDRSObjectStore(map[string]*objects.Record{})
+	om := testDRSServices(db, nil)
 	app := fiber.New()
 	RegisterDRSRoutes(app, om.objectService, om.transferService, generated.Service{})
 
@@ -59,8 +58,8 @@ func TestRegisterObjects(t *testing.T) {
 }
 
 func TestRegisterObjectsRejectsMissingAccessMethods(t *testing.T) {
-	db := &testutils.MockDatabase{Objects: map[string]*objects.Record{}}
-	om := testObjectManager(db, nil)
+	db := newDRSObjectStore(map[string]*objects.Record{})
+	om := testDRSServices(db, nil)
 	app := fiber.New()
 	RegisterDRSRoutes(app, om.objectService, om.transferService, generated.Service{})
 
