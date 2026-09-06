@@ -491,13 +491,14 @@ func (m *ObjectManager) ListValidateStorageObjects(ctx context.Context, items []
 		log.Printf("INFO: syfon_bulk_list_validate_done items=0 duration_ms=0")
 		return []StorageListValidationResult{}
 	}
-	visible, visibleErr := m.bucketService.ListVisibleBuckets(ctx)
+	visible, visibleErr := m.listVisibleBucketsCached(ctx)
+	serviceVisible := bucketVisibleBuckets(visible)
 	results := make([]StorageListValidationResult, len(items))
 	workByTarget := make(map[string]*storageListTargetWork)
 	buckets := map[string]struct{}{}
 	stats := storageListRunStats{inputItemCount: len(items)}
 	for index, item := range items {
-		result, targetWork, ok := m.resolveListValidationTarget(ctx, item, index, visible, visibleErr)
+		result, targetWork, ok := m.resolveListValidationTarget(ctx, item, index, serviceVisible, visibleErr)
 		if !ok {
 			results[index] = result
 			continue

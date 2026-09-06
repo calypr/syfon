@@ -423,11 +423,11 @@ func (m *ObjectManager) inspectRawStorageObject(ctx context.Context, req Inspect
 	if err != nil {
 		return nil, err
 	}
-	visible, err := m.bucketService.ListVisibleBuckets(ctx)
+	visible, err := m.listVisibleBucketsCached(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if !buckets.VisibleToCaller(visible, bucket, cred.CredentialID) {
+	if !buckets.VisibleToCaller(bucketVisibleBuckets(visible), bucket, cred.CredentialID) {
 		return nil, &StorageInspectError{Kind: StorageInspectPermissionDenied, Message: fmt.Sprintf("bucket %q is not visible to the caller", bucket)}
 	}
 	if address.NormalizeProvider(cred.Provider, address.S3Provider) != address.S3Provider {
@@ -569,6 +569,20 @@ func cloneVisibleBuckets(in map[string]VisibleBucket) map[string]VisibleBucket {
 		out[key] = VisibleBucket{
 			Credential: bucket.Credential,
 			Programs:   programs,
+		}
+	}
+	return out
+}
+
+func bucketVisibleBuckets(in map[string]VisibleBucket) map[string]buckets.VisibleBucket {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]buckets.VisibleBucket, len(in))
+	for key, bucket := range in {
+		out[key] = buckets.VisibleBucket{
+			Credential: bucket.Credential,
+			Programs:   append([]string(nil), bucket.Programs...),
 		}
 	}
 	return out
