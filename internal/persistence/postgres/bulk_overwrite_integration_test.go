@@ -8,7 +8,7 @@ import (
 
 	sycommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/core"
-	postgresdb "github.com/calypr/syfon/internal/db/postgres"
+	postgresdb "github.com/calypr/syfon/internal/persistence/postgres"
 
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/testutils"
