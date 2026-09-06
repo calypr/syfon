@@ -12,7 +12,8 @@ import (
 
 type testObjectManagerFixture struct {
 	*core.ObjectManager
-	objectService *objects.Service
+	objectService   *objects.Service
+	transferService *transfers.Service
 }
 
 func testObjectManager(backend any, storagePorts core.StoragePorts) *testObjectManagerFixture {
@@ -21,6 +22,13 @@ func testObjectManager(backend any, storagePorts core.StoragePorts) *testObjectM
 	return &testObjectManagerFixture{
 		ObjectManager: core.NewObjectManager(deps),
 		objectService: newObjectService(deps.Objects),
+		transferService: transfers.NewService(transfers.Dependencies{
+			Access:      storagePorts.Access,
+			Multipart:   storagePorts.Multipart,
+			Scopes:      deps.BucketService,
+			Credentials: deps.BucketService,
+			Events:      deps.Transfers.Events,
+		}),
 	}
 }
 

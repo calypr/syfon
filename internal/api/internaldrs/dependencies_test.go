@@ -10,8 +10,10 @@ import (
 
 type internalDRSTestFixture struct {
 	*core.ObjectManager
-	ObjectService *objects.Service
-	bucketService *buckets.Service
+	ObjectService   *objects.Service
+	TransferService *transfers.Service
+	FileCounters    usage.FileCounterRecorder
+	bucketService   *buckets.Service
 }
 
 func newInternalDRSObjectManager(store any, storageDependency any) internalDRSTestFixture {
@@ -45,6 +47,13 @@ func newInternalDRSObjectManager(store any, storageDependency any) internalDRSTe
 		URLPages:      objectPorts.URLPages,
 		Authorized:    objectPorts.Authorized,
 	})
+	transferService := transfers.NewService(transfers.Dependencies{
+		Access:      storagePorts.Access,
+		Multipart:   storagePorts.Multipart,
+		Scopes:      bucketService,
+		Credentials: bucketService,
+		Events:      store.(transfers.EventRecorder),
+	})
 	return internalDRSTestFixture{
 		ObjectManager: core.NewObjectManager(core.Dependencies{
 			Objects:       objectPorts,
@@ -59,8 +68,10 @@ func newInternalDRSObjectManager(store any, storageDependency any) internalDRSTe
 			},
 			Storage: storagePorts,
 		}),
-		ObjectService: objectService,
-		bucketService: bucketService,
+		ObjectService:   objectService,
+		TransferService: transferService,
+		FileCounters:    store.(usage.FileCounterRecorder),
+		bucketService:   bucketService,
 	}
 }
 

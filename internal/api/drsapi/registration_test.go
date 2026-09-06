@@ -18,7 +18,7 @@ func TestRegisterObjects(t *testing.T) {
 	db := &testutils.MockDatabase{Objects: map[string]*objects.Record{}}
 	om := testObjectManager(db, core.StoragePorts{})
 	app := fiber.New()
-	RegisterDRSRoutes(app, om.objectService, om.ObjectManager, testServiceInfo())
+	RegisterDRSRoutes(app, om.objectService, om.transferService, testServiceInfo())
 
 	t.Run("Register_Single", func(t *testing.T) {
 		size := int64(50)

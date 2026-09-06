@@ -18,7 +18,7 @@ func TestHandleInternalMultipartUpload_NotFound(t *testing.T) {
 	mockUM := &internalDRSStorageFake{}
 	om := newInternalDRSObjectManager(mockDB, mockUM)
 	app := fiber.New()
-	app.Post("/multipart/upload", handleInternalMultipartUploadFiber(om.ObjectManager))
+	app.Post("/multipart/upload", handleInternalMultipartUploadFiber(om.TransferService))
 
 	reqBody := internalapi.InternalMultipartUploadRequest{
 		UploadId:   "non-existent",
@@ -39,7 +39,7 @@ func TestHandleInternalMultipartComplete_NotFound(t *testing.T) {
 	mockUM := &internalDRSStorageFake{}
 	om := newInternalDRSObjectManager(mockDB, mockUM)
 	app := fiber.New()
-	app.Post("/multipart/complete", handleInternalMultipartCompleteFiber(om.ObjectManager))
+	app.Post("/multipart/complete", handleInternalMultipartCompleteFiber(om.TransferService))
 
 	reqBody := internalapi.InternalMultipartCompleteRequest{
 		UploadId: "non-existent",
@@ -70,7 +70,7 @@ func TestHandleInternalMultipartCompletePreservesPartOrderAndOpaqueETags(t *test
 		},
 	})
 	app := fiber.New()
-	app.Post("/multipart/complete", handleInternalMultipartCompleteFiber(om.ObjectManager))
+	app.Post("/multipart/complete", handleInternalMultipartCompleteFiber(om.TransferService))
 	resp, err := app.Test(httptest.NewRequest(http.MethodPost, "/multipart/complete", bytes.NewBuffer(body)))
 	if err != nil {
 		t.Fatalf("complete request failed: %v", err)
@@ -95,7 +95,7 @@ func TestHandleInternalMultipartCompleteDeletesSessionBeforeProviderError(t *tes
 
 	body, _ := json.Marshal(internalapi.InternalMultipartCompleteRequest{UploadId: uploadID})
 	app := fiber.New()
-	app.Post("/multipart/complete", handleInternalMultipartCompleteFiber(om.ObjectManager))
+	app.Post("/multipart/complete", handleInternalMultipartCompleteFiber(om.TransferService))
 	resp, err := app.Test(httptest.NewRequest(http.MethodPost, "/multipart/complete", bytes.NewBuffer(body)))
 	if err != nil {
 		t.Fatalf("complete request failed: %v", err)
