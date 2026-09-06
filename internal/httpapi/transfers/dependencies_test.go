@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/calypr/syfon/internal/buckets"
-	"github.com/calypr/syfon/internal/httpapi/transfers/testutils"
 	"github.com/calypr/syfon/internal/objects"
 	domaintransfers "github.com/calypr/syfon/internal/transfers"
 	"github.com/calypr/syfon/internal/usage"
@@ -15,49 +14,52 @@ type internalDRSTestFixture struct {
 	TransferService *domaintransfers.Service
 	FileCounters    usage.FileCounterRecorder
 	bucketService   *buckets.Service
+	objectStore     *transferObjectStoreFake
 }
 
-func newInternalDRSObjectManager(store any, storageDependency any) internalDRSTestFixture {
-	objectStore := testutils.ObjectPortsFor(store)
-	bucketService := newInternalDRSBucketService(store)
-	storageAccess, _ := storageDependency.(domaintransfers.AccessPort)
-	storageMultipart, _ := storageDependency.(domaintransfers.MultipartPort)
+type transferStorageDependency interface {
+	domaintransfers.AccessPort
+	domaintransfers.MultipartPort
+}
+
+func newInternalDRSObjectManager(store *transferHTTPFixture, storageDependency transferStorageDependency) internalDRSTestFixture {
+	objectStore := &transferObjectStoreFake{fixture: store}
+	aliasStore := &transferAliasStoreFake{fixture: store}
+	bucketStore := &transferBucketStoreFake{fixture: store}
+	pendingStore := &transferPendingStoreFake{fixture: store}
+	eventStore := &transferEventStoreFake{fixture: store}
+	fileCounters := &transferFileCounterFake{fixture: store}
+	bucketService := newInternalDRSBucketService(bucketStore)
 
 	objectService := objects.NewService(objects.Dependencies{
-		Reader:        objectStore.Reader,
-		Writer:        objectStore.Writer,
-		AccessMethods: objectStore.AccessMethods,
-		AccessPolicy:  objectStore.AccessPolicy,
-		Aliases:       objectStore.Aliases,
-		Content:       objectStore.Content,
-		ChecksumScope: objectStore.ChecksumScope,
-		Scope:         objectStore.Scope,
-		Resources:     objectStore.Resources,
-		Pages:         objectStore.Pages,
-		URLPages:      objectStore.URLPages,
-		Authorized:    objectStore.Authorized,
+		Reader:        objectStore,
+		Aliases:       aliasStore,
+		Content:       objectStore,
+		ChecksumScope: objectStore,
+		Scope:         objectStore,
 	})
 	transferService := domaintransfers.NewService(domaintransfers.Dependencies{
-		Access:      storageAccess,
-		Multipart:   storageMultipart,
+		Access:      storageDependency,
+		Multipart:   storageDependency,
 		Scopes:      bucketService,
 		Credentials: bucketService,
-		Pending:     store.(domaintransfers.PendingStore),
-		Events:      store.(domaintransfers.EventRecorder),
+		Pending:     pendingStore,
+		Events:      eventStore,
 	})
 	return internalDRSTestFixture{
 		ObjectService:   objectService,
 		TransferService: transferService,
-		FileCounters:    store.(usage.FileCounterRecorder),
+		FileCounters:    fileCounters,
 		bucketService:   bucketService,
+		objectStore:     objectStore,
 	}
 }
 
-func newInternalDRSBucketService(store any) *buckets.Service {
+func newInternalDRSBucketService(store *transferBucketStoreFake) *buckets.Service {
 	service, err := buckets.NewService(buckets.Dependencies{
-		Credentials:     store.(buckets.CredentialReader),
-		CredentialAdmin: store.(buckets.CredentialAdmin),
-		Scopes:          store.(buckets.ScopeStore),
+		Credentials:     store,
+		CredentialAdmin: store,
+		Scopes:          store,
 		Fallback: func(context.Context) ([]buckets.VisibilityRow, error) {
 			return nil, nil
 		},
@@ -73,7 +75,9 @@ func (f internalDRSTestFixture) GetObject(ctx context.Context, id, requiredMetho
 }
 
 func (f internalDRSTestFixture) RegisterObjects(ctx context.Context, records []objects.Record) error {
-	return f.ObjectService.RegisterObjects(ctx, records)
+	_ = ctx
+	f.objectStore.registerObjects(records)
+	return nil
 }
 
 func (f internalDRSTestFixture) SaveS3Credential(ctx context.Context, credential *buckets.Credential) error {
