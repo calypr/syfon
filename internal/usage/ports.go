@@ -5,6 +5,31 @@ import (
 	"time"
 )
 
+// FileCounterRecorder records object upload and download counters.
+type FileCounterRecorder interface {
+	RecordFileUpload(ctx context.Context, objectID string) error
+	RecordFileDownload(ctx context.Context, objectID string) error
+}
+
+// FileUsageReader reads per-object usage and unscoped reports.
+type FileUsageReader interface {
+	GetFileUsage(ctx context.Context, objectID string) (*FileUsage, error)
+	ListFileUsageByObjectIDs(ctx context.Context, ids []string) ([]FileUsage, error)
+	ListFileUsage(ctx context.Context, limit, offset int, inactiveSince *time.Time) ([]FileUsage, error)
+	GetFileUsageSummary(ctx context.Context, inactiveSince *time.Time) (FileUsageSummary, error)
+}
+
+// ProviderEventRecorder records provider-reported transfer events.
+type ProviderEventRecorder interface {
+	RecordProviderTransferEvents(ctx context.Context, events []ProviderEvent) error
+}
+
+// TransferQuery reads transfer attribution reports.
+type TransferQuery interface {
+	GetTransferAttributionSummary(ctx context.Context, filter Filter) (Summary, error)
+	GetTransferAttributionBreakdown(ctx context.Context, filter Filter, groupBy string) ([]Breakdown, error)
+}
+
 // OptionalScopedFileUsageQuery is an optional optimization for authorized
 // metrics queries. Callers retain a per-object fallback when it is unavailable.
 type OptionalScopedFileUsageQuery interface {

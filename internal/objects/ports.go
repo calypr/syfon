@@ -2,6 +2,56 @@ package objects
 
 import "context"
 
+// RecordReader reads physical object records.
+type RecordReader interface {
+	GetObject(ctx context.Context, id string) (*Record, error)
+	GetBulkObjects(ctx context.Context, ids []string) ([]Record, error)
+}
+
+// RecordWriter mutates physical object records.
+type RecordWriter interface {
+	DeleteObject(ctx context.Context, id string) error
+	CreateObject(ctx context.Context, obj *Record) error
+	BulkDeleteObjects(ctx context.Context, ids []string) error
+	RegisterObjects(ctx context.Context, objects []Record) error
+	ReplaceObjects(ctx context.Context, objects []Record) error
+}
+
+// AccessMethodWriter updates the provider access methods attached to records.
+type AccessMethodWriter interface {
+	UpdateObjectAccessMethods(ctx context.Context, objectID string, accessMethods []AccessMethod) error
+	BulkUpdateAccessMethods(ctx context.Context, updates map[string][]AccessMethod) error
+}
+
+// AccessPolicyWriter updates controlled-access policy on records.
+type AccessPolicyWriter interface {
+	RemoveObjectControlledAccess(ctx context.Context, objectID, resource string) error
+	RemoveObjectControlledAccessBulk(ctx context.Context, objectIDs []string, resource string) (int, error)
+}
+
+// AliasStore owns physical-to-canonical object alias operations.
+type AliasStore interface {
+	DeleteObjectAlias(ctx context.Context, aliasID string) error
+	CreateObjectAlias(ctx context.Context, aliasID, canonicalObjectID string) error
+	ResolveObjectAlias(ctx context.Context, aliasID string) (string, error)
+}
+
+// ContentReader reads physical records that share a checksum.
+type ContentReader interface {
+	GetObjectsByChecksum(ctx context.Context, checksum string) ([]Record, error)
+	GetObjectsByChecksums(ctx context.Context, checksums []string) (map[string][]Record, error)
+}
+
+// ChecksumScopeQuery expands checksums within a specific object scope.
+type ChecksumScopeQuery interface {
+	ListScopedObjectIDsByChecksums(ctx context.Context, organization, project string, checksums []string) (map[string][]string, error)
+}
+
+// ScopeQuery lists object IDs in a specific object scope.
+type ScopeQuery interface {
+	ListObjectIDsByScope(ctx context.Context, organization, project string) ([]string, error)
+}
+
 // OptionalResourceQuery is an optional authorization-aware object ID query.
 type OptionalResourceQuery interface {
 	ListObjectIDsByResources(ctx context.Context, resources []string, includeUnscoped bool) ([]string, error)
