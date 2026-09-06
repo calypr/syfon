@@ -15,11 +15,11 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 
-	"github.com/calypr/syfon/internal/api/internaldrs"
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/config"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/credentialcipher"
+	"github.com/calypr/syfon/internal/httpapi"
 	"github.com/calypr/syfon/internal/maintenance/projectstorage"
 	"github.com/calypr/syfon/internal/testutils"
 	"github.com/calypr/syfon/internal/transfers"
@@ -138,10 +138,17 @@ s3_credentials:
 		Access: storageManager, Multipart: storageManager, Scopes: bucketService, Credentials: bucketService,
 		Pending: backend.pending, Events: usageService.Ingest(),
 	})
-	om := core.NewObjectManager(backend.dependencies)
 	projectStorageService := projectstorage.NewService(projectstorage.Dependencies{Scopes: bucketService, Credentials: bucketService, Visibility: bucketService, Inventory: storageManager, Probe: storageManager, Delete: storageManager, Physical: objectService, CleanupObjects: objectService, CleanupScopes: bucketService})
-	scopeRepairService := internaldrs.NewScopeRepairService(objectService, bucketService, storageManager)
-	internaldrs.RegisterInternalRoutes(app, objectService, om, transferService, usageService.Ingest(), bucketService, projectStorageService, scopeRepairService)
+	scopeRepairService := newScopeRepairService(objectService, bucketService, storageManager)
+	httpapi.RegisterRoutes(app, httpapi.Dependencies{
+		Objects:        objectService,
+		Transfers:      transferService,
+		UsageIngest:    usageService.Ingest(),
+		UsageReports:   usageService.Reports(),
+		Buckets:        bucketService,
+		ProjectStorage: projectStorageService,
+		ScopeRepair:    scopeRepairService,
+	}, httpapi.Options{Internal: true})
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

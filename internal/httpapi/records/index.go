@@ -10,10 +10,10 @@ import (
 	"time"
 
 	"github.com/calypr/syfon/apigen/server/internalapi"
-	"github.com/calypr/syfon/internal/api/apiutil"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/faults"
 	apimiddleware "github.com/calypr/syfon/internal/httpapi/middleware"
+	"github.com/calypr/syfon/internal/httpapi/response"
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/gofiber/fiber/v3"
 )
@@ -69,7 +69,7 @@ func handleInternalBulkOverwriteFiber(objectService *objects.Service) fiber.Hand
 			if errors.Is(err, objects.ErrBulkOverwriteConflict) {
 				return c.Status(fiber.StatusConflict).SendString(err.Error())
 			}
-			return apiutil.HandleError(c, err)
+			return response.HandleError(c, err)
 		}
 		return c.JSON(bulkOverwriteResponse{
 			Processed:       len(candidates),
@@ -101,7 +101,7 @@ func handleInternalBulkMissingSHA256Fiber(objectService *objects.Service) fiber.
 
 		missing, err := objectService.ListMissingScopedSHA256(c.Context(), req.Organization, req.Project, normalized)
 		if err != nil {
-			return apiutil.HandleError(c, err)
+			return response.HandleError(c, err)
 		}
 		return c.JSON(internalapi.BulkMissingSHA256Response{Checked: int32(len(normalized)), MissingSha256: missing})
 	}
@@ -140,11 +140,11 @@ func handleInternalGetFiber(objectService *objects.Service) fiber.Handler {
 		id := c.Params("id")
 		obj, err := objectService.GetObject(c.Context(), id, "read")
 		if err != nil {
-			return apiutil.HandleError(c, err)
+			return response.HandleError(c, err)
 		}
 		encoded, err := Encode(*obj)
 		if err != nil {
-			return apiutil.HandleError(c, err)
+			return response.HandleError(c, err)
 		}
 		c.Set(fiber.HeaderContentType, fiber.MIMEApplicationJSON)
 		return c.Send(encoded)
@@ -166,11 +166,11 @@ func handleInternalListFiber(objectService *objects.Service) fiber.Handler {
 			}
 			ids, err := objectService.ListObjectIDsPageByChecksum(c.Context(), hash, hashType, filterOrg, filterProject, "read", start, limit, offset)
 			if err != nil {
-				return apiutil.HandleError(c, err)
+				return response.HandleError(c, err)
 			}
 			objs, err := objectService.GetPreparedScopedObjects(c.Context(), ids, filterOrg, filterProject, "read")
 			if err != nil {
-				return apiutil.HandleError(c, err)
+				return response.HandleError(c, err)
 			}
 			records := make([]internalapi.InternalRecord, 0, len(objs))
 			for _, o := range objs {
@@ -198,12 +198,12 @@ func handleInternalListFiber(objectService *objects.Service) fiber.Handler {
 			var ids []string
 			ids, err = objectService.ListObjectIDsPageByURL(c.Context(), objectURL, filterOrg, filterProject, "read", start, limit, offset)
 			if err != nil {
-				return apiutil.HandleError(c, err)
+				return response.HandleError(c, err)
 			}
 			prepareStart := time.Now()
 			objs, err = objectService.GetPreparedScopedObjects(c.Context(), ids, filterOrg, filterProject, "read")
 			if err != nil {
-				return apiutil.HandleError(c, err)
+				return response.HandleError(c, err)
 			}
 			listDuration := time.Since(listStart)
 			prepareDuration := time.Since(prepareStart)
@@ -211,7 +211,7 @@ func handleInternalListFiber(objectService *objects.Service) fiber.Handler {
 		} else {
 			objs, err = objectService.ListPreparedObjectsPageByScope(c.Context(), filterOrg, filterProject, "read", start, limit, offset)
 			if err != nil {
-				return apiutil.HandleError(c, err)
+				return response.HandleError(c, err)
 			}
 			listDuration := time.Since(listStart)
 			log.Printf("INFO: syfon_internal_index_list organization=%s project=%s url_filter=%t start_after=%t limit=%d offset=%d records=%d list_prepared_ms=%d duration_ms=%d", filterOrg, filterProject, false, strings.TrimSpace(start) != "", limit, offset, len(objs), listDuration.Milliseconds(), time.Since(requestStart).Milliseconds())
@@ -228,7 +228,7 @@ func handleInternalDeleteFiber(objectService *objects.Service) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		id := c.Params("id")
 		if err := objectService.DeleteObject(c.Context(), id); err != nil {
-			return apiutil.HandleError(c, err)
+			return response.HandleError(c, err)
 		}
 		return c.SendStatus(fiber.StatusNoContent)
 	}
@@ -243,7 +243,7 @@ func handleInternalRemoveControlledAccessFiber(objectService *objects.Service) f
 		}
 		obj, err := objectService.RemoveObjectControlledAccess(c.Context(), id, req.Resource)
 		if err != nil {
-			return apiutil.HandleError(c, err)
+			return response.HandleError(c, err)
 		}
 		return c.JSON(ToInternalRecordResponse(*obj))
 	}
@@ -256,7 +256,7 @@ func handleInternalCreateFiber(objectService *objects.Service) fiber.Handler {
 			return c.Status(fiber.StatusBadRequest).SendString("Invalid request body: " + err.Error())
 		}
 		if err := objectService.RegisterObjects(c.Context(), candidates); err != nil {
-			return apiutil.HandleError(c, err)
+			return response.HandleError(c, err)
 		}
 
 		if strings.HasSuffix(c.Path(), "/bulk") {
@@ -285,7 +285,7 @@ func handleInternalDeleteByQueryFiber(objectService *objects.Service) fiber.Hand
 
 		count, err := objectService.DeleteBulkByScope(c.Context(), org, project)
 		if err != nil {
-			return apiutil.HandleError(c, err)
+			return response.HandleError(c, err)
 		}
 		return c.JSON(internalapi.DeleteByQueryResponse{Deleted: &count})
 	}
@@ -301,7 +301,7 @@ func handleInternalBulkHashesFiber(objectService *objects.Service) fiber.Handler
 		normalized := normalizeBulkHashes(req.Hashes)
 		res, err := objectService.GetObjectsByChecksums(c.Context(), normalized, "read")
 		if err != nil {
-			return apiutil.HandleError(c, err)
+			return response.HandleError(c, err)
 		}
 
 		finalRes := make(map[string][]objects.Record, len(req.Hashes))
@@ -355,7 +355,7 @@ func handleInternalBulkSHA256ValidityFiber(objectService *objects.Service) fiber
 
 		records, err := objectService.GetObjectsByChecksums(c.Context(), hashes, "read")
 		if err != nil {
-			return apiutil.HandleError(c, err)
+			return response.HandleError(c, err)
 		}
 		for _, hash := range hashes {
 			for _, obj := range records[hash] {
@@ -393,7 +393,7 @@ func handleInternalBulkDocumentsFiber(objectService *objects.Service) fiber.Hand
 
 		records, err := objectService.GetBulkObjects(c.Context(), ids, "read")
 		if err != nil {
-			return apiutil.HandleError(c, err)
+			return response.HandleError(c, err)
 		}
 
 		out := make([]internalapi.InternalRecordResponse, 0, len(records))
@@ -425,7 +425,7 @@ func handleInternalBulkDeleteFiber(objectService *objects.Service) fiber.Handler
 
 		deleted, err := objectService.DeleteObjectsByChecksums(c.Context(), normalized)
 		if err != nil {
-			return apiutil.HandleError(c, err)
+			return response.HandleError(c, err)
 		}
 		return c.JSON(internalapi.DeleteByQueryResponse{Deleted: &deleted})
 	}
@@ -448,23 +448,23 @@ func handleInternalUpdateFiber(objectService *objects.Service) fiber.Handler {
 
 		existing, err := objectService.GetObject(c.Context(), id, "update")
 		if err != nil {
-			return apiutil.HandleError(c, err)
+			return response.HandleError(c, err)
 		}
 		if req.Size != nil && *req.Size != existing.Size {
-			return apiutil.HandleError(c, fmt.Errorf("%w: object size is immutable", faults.ErrConflict))
+			return response.HandleError(c, fmt.Errorf("%w: object size is immutable", faults.ErrConflict))
 		}
 		if incomingSHA, ok := objects.CanonicalSHA256(update.Checksums); ok {
 			storedSHA, stored := objects.CanonicalSHA256(existing.Checksums)
 			if stored && incomingSHA != storedSHA {
-				return apiutil.HandleError(c, fmt.Errorf("%w: object checksum identity is immutable", faults.ErrConflict))
+				return response.HandleError(c, fmt.Errorf("%w: object checksum identity is immutable", faults.ErrConflict))
 			}
 		}
 		merged, err := objects.MergeRecordUpdate(*existing, update, id, time.Now().UTC())
 		if err != nil {
-			return apiutil.HandleError(c, err)
+			return response.HandleError(c, err)
 		}
 		if err := objectService.ReplaceObjects(c.Context(), []objects.Record{merged}); err != nil {
-			return apiutil.HandleError(c, err)
+			return response.HandleError(c, err)
 		}
 		return c.JSON(ToInternalRecordResponse(merged))
 	}

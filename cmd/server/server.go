@@ -16,7 +16,6 @@ import (
 
 	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/access/authentication"
-	"github.com/calypr/syfon/internal/api/internaldrs"
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/config"
 	"github.com/calypr/syfon/internal/core"
@@ -261,8 +260,7 @@ var Cmd = &cobra.Command{
 				CleanupScopes:  bucketService,
 			},
 		)
-		scopeRepairService := internaldrs.NewScopeRepairService(objectService, bucketService, storageManager)
-		om := core.NewObjectManager(backend.dependencies)
+		scopeRepairService := newScopeRepairService(objectService, bucketService, storageManager)
 
 		// Build Fiber runtime and middleware pipeline.
 		app := fiber.New(fiber.Config{
@@ -298,12 +296,11 @@ var Cmd = &cobra.Command{
 			usageService:          usageService,
 			projectStorageService: projectStorageService,
 			scopeRepairService:    scopeRepairService,
-			om:                    om,
 			bucketService:         bucketService,
 			authzMiddleware:       authzMiddleware,
 			requestIDMiddleware:   requestIDMiddleware,
 		}
-		applyServerOptions(rt, buildServerOptions(cfg)...)
+		registerServerRoutes(rt)
 
 		addr := fmt.Sprintf(":%d", cfg.Port)
 		logger.Info("server starting", "addr", addr)
