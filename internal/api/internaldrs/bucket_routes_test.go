@@ -13,7 +13,6 @@ import (
 	"github.com/calypr/syfon/apigen/server/bucketapi"
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/common"
-	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/testutils"
 )
@@ -38,7 +37,7 @@ func TestHandleInternalDeleteProject_RemovesGrantsAndBucketScopes(t *testing.T) 
 		"/programs/org-a/projects/proj-a": {"delete": true, "update": true},
 	}))
 
-	rr := doInternalDRSTestRequest(req, core.NewObjectManager(mockDB, &testutils.MockUrlManager{}))
+	rr := doInternalDRSTestRequest(req, newInternalDRSObjectManager(mockDB, &testutils.MockUrlManager{}))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
 	}
@@ -70,7 +69,7 @@ func TestHandleInternalDeleteProject_RemovesGrantsAndBucketScopes(t *testing.T) 
 func TestHandleInternalDeleteProject_RequiresGen3Auth(t *testing.T) {
 	req := httptest.NewRequest(http.MethodDelete, "/data/projects/org-a/proj-a", nil)
 	req = req.WithContext(dataTestAuthContext(req.Context(), "gen3", false, nil))
-	rr := doInternalDRSTestRequest(req, core.NewObjectManager(&testutils.MockDatabase{}, &testutils.MockUrlManager{}))
+	rr := doInternalDRSTestRequest(req, newInternalDRSObjectManager(&testutils.MockDatabase{}, &testutils.MockUrlManager{}))
 	if rr.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d body=%s", rr.Code, rr.Body.String())
 	}
@@ -91,7 +90,7 @@ func TestHandleInternalBuckets_Gen3Auth(t *testing.T) {
 	}
 	req401 := httptest.NewRequest(http.MethodGet, "/data/buckets", nil)
 	req401 = req401.WithContext(dataTestAuthContext(req401.Context(), "gen3", false, nil))
-	rr401 := doInternalDRSTestRequest(req401, core.NewObjectManager(mockDB, &testutils.MockUrlManager{}))
+	rr401 := doInternalDRSTestRequest(req401, newInternalDRSObjectManager(mockDB, &testutils.MockUrlManager{}))
 	if rr401.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d", rr401.Code)
 	}
@@ -109,7 +108,7 @@ func TestHandleInternalBuckets_IncludesBucketsWithoutScopes(t *testing.T) {
 		"/programs": {"read": true},
 	}))
 
-	rr := doInternalDRSTestRequest(req, core.NewObjectManager(mockDB, &testutils.MockUrlManager{}))
+	rr := doInternalDRSTestRequest(req, newInternalDRSObjectManager(mockDB, &testutils.MockUrlManager{}))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
 	}
@@ -157,7 +156,7 @@ func TestHandleInternalBuckets_PrefersExplicitScopeOverObjectDerivedDuplicate(t 
 		"/programs/Ellrott_Lab/projects/hla2vec": {"read": true},
 	}))
 
-	rr := doInternalDRSTestRequest(req, core.NewObjectManager(mockDB, &testutils.MockUrlManager{}))
+	rr := doInternalDRSTestRequest(req, newInternalDRSObjectManager(mockDB, &testutils.MockUrlManager{}))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
 	}
@@ -182,7 +181,7 @@ func TestHandleInternalPutDeleteBucket_Gen3Auth(t *testing.T) {
 	putBody, _ := json.Marshal(bucketapi.PutBucketRequest{Bucket: "bucket2", Provider: &provider, Region: &region, AccessKey: &accessKey, SecretKey: &secretKey, Endpoint: &endpoint, Organization: "cbds", ProjectId: "proj1", Path: &path})
 	putReq401 := httptest.NewRequest(http.MethodPut, "/data/buckets", bytes.NewBuffer(putBody))
 	putReq401 = putReq401.WithContext(dataTestAuthContext(putReq401.Context(), "gen3", false, nil))
-	putRR401 := doInternalDRSTestRequest(putReq401, core.NewObjectManager(mockDB, &testutils.MockUrlManager{}))
+	putRR401 := doInternalDRSTestRequest(putReq401, newInternalDRSObjectManager(mockDB, &testutils.MockUrlManager{}))
 	if putRR401.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d", putRR401.Code)
 	}
@@ -192,7 +191,7 @@ func TestHandleInternalPutBucket_RejectsInvalidGeneratedPayloads(t *testing.T) {
 	mockDB := &testutils.MockDatabase{Credentials: map[string]buckets.Credential{}}
 	req := httptest.NewRequest(http.MethodPut, "/data/buckets", bytes.NewBufferString(`{"bucket":"b2","organization":"cbds","unexpected":"boom"}`))
 	req = req.WithContext(dataTestAuthContext(req.Context(), "gen3", true, map[string]map[string]bool{"/programs/cbds": {"arborist:create-descendant": true}}))
-	rr := doInternalDRSTestRequest(req, core.NewObjectManager(mockDB, &testutils.MockUrlManager{}))
+	rr := doInternalDRSTestRequest(req, newInternalDRSObjectManager(mockDB, &testutils.MockUrlManager{}))
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", rr.Code)
 	}
@@ -234,7 +233,7 @@ func TestHandleInternalPutBucket_ReusesExistingPhysicalBucketCredential(t *testi
 		"/programs/Ellrott_Lab/projects/embedding_rotation": {"create": true, "update": true},
 	}))
 
-	rr := doInternalDRSTestRequest(req, core.NewObjectManager(mockDB, &testutils.MockUrlManager{}))
+	rr := doInternalDRSTestRequest(req, newInternalDRSObjectManager(mockDB, &testutils.MockUrlManager{}))
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d body=%s", rr.Code, rr.Body.String())
 	}
@@ -260,7 +259,7 @@ func TestHandleInternalPutBucket_ReusesExistingPhysicalBucketCredential(t *testi
 
 func TestRegisterInternalRoutes_Smoke(t *testing.T) {
 	app := fiber.New()
-	om := core.NewObjectManager(&testutils.MockDatabase{Objects: map[string]*objects.Record{}, Credentials: map[string]buckets.Credential{"b1": {Bucket: "b1"}}}, &testutils.MockUrlManager{})
+	om := newInternalDRSObjectManager(&testutils.MockDatabase{Objects: map[string]*objects.Record{}, Credentials: map[string]buckets.Credential{"b1": {Bucket: "b1"}}}, &testutils.MockUrlManager{})
 	RegisterInternalRoutes(app, om)
 	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/data/upload/abc?bucket=b1", nil))
 	if err != nil {
@@ -285,7 +284,7 @@ func TestRegisteredRoutesByWorkflow(t *testing.T) {
 		},
 		Credentials: map[string]buckets.Credential{"bucket-a": {Bucket: "bucket-a", Provider: "s3"}},
 	}
-	om := core.NewObjectManager(db, &testutils.MockUrlManager{})
+	om := newInternalDRSObjectManager(db, &testutils.MockUrlManager{})
 	for _, tc := range []struct {
 		name string
 		req  *http.Request
@@ -318,7 +317,7 @@ func TestHandleInternalListBucketScopes_Success(t *testing.T) {
 		"/programs/org-a/projects/proj-a": {"read": true},
 	}))
 
-	rr := doInternalDRSTestRequest(req, core.NewObjectManager(mockDB, &testutils.MockUrlManager{}))
+	rr := doInternalDRSTestRequest(req, newInternalDRSObjectManager(mockDB, &testutils.MockUrlManager{}))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
 	}
@@ -354,7 +353,7 @@ func TestHandleInternalListBucketScopes_FiltersUnauthorizedScopesOnSharedBucket(
 		"/programs/org-a/projects/proj-a": {"read": true},
 	}))
 
-	rr := doInternalDRSTestRequest(req, core.NewObjectManager(mockDB, &testutils.MockUrlManager{}))
+	rr := doInternalDRSTestRequest(req, newInternalDRSObjectManager(mockDB, &testutils.MockUrlManager{}))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
 	}
@@ -388,7 +387,7 @@ func TestHandleInternalListBucketScopes_RendersRootScopeAsBucketURL(t *testing.T
 		"/programs/gdc": {"read": true},
 	}))
 
-	rr := doInternalDRSTestRequest(req, core.NewObjectManager(mockDB, &testutils.MockUrlManager{}))
+	rr := doInternalDRSTestRequest(req, newInternalDRSObjectManager(mockDB, &testutils.MockUrlManager{}))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
 	}
@@ -408,7 +407,7 @@ func TestHandleInternalListBucketScopes_RendersRootScopeAsBucketURL(t *testing.T
 func TestHandleInternalListBucketScopes_RequiresGen3Auth(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/data/buckets/bucket-a/scopes", nil)
 	req = req.WithContext(dataTestAuthContext(req.Context(), "gen3", false, nil))
-	rr := doInternalDRSTestRequest(req, core.NewObjectManager(&testutils.MockDatabase{}, &testutils.MockUrlManager{}))
+	rr := doInternalDRSTestRequest(req, newInternalDRSObjectManager(&testutils.MockDatabase{}, &testutils.MockUrlManager{}))
 	if rr.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d body=%s", rr.Code, rr.Body.String())
 	}
@@ -429,7 +428,7 @@ func TestHandleInternalDeleteBucketScope_RequiresExactPathMatch(t *testing.T) {
 		"/programs/org-a": {"delete": true, "update": true},
 	}))
 
-	rr := doInternalDRSTestRequest(req, core.NewObjectManager(mockDB, &testutils.MockUrlManager{}))
+	rr := doInternalDRSTestRequest(req, newInternalDRSObjectManager(mockDB, &testutils.MockUrlManager{}))
 	if rr.Code != http.StatusNoContent {
 		t.Fatalf("expected 204, got %d body=%s", rr.Code, rr.Body.String())
 	}
@@ -455,7 +454,7 @@ func TestHandleInternalDeleteBucketScope_AllowsEmptyRootPath(t *testing.T) {
 		"/programs/org-a": {"delete": true, "update": true},
 	}))
 
-	rr := doInternalDRSTestRequest(req, core.NewObjectManager(mockDB, &testutils.MockUrlManager{}))
+	rr := doInternalDRSTestRequest(req, newInternalDRSObjectManager(mockDB, &testutils.MockUrlManager{}))
 	if rr.Code != http.StatusNoContent {
 		t.Fatalf("expected 204, got %d body=%s", rr.Code, rr.Body.String())
 	}

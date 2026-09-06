@@ -11,7 +11,6 @@ import (
 	"github.com/calypr/syfon/apigen/server/internalapi"
 	"github.com/calypr/syfon/internal/api/routeutil"
 	"github.com/calypr/syfon/internal/common"
-	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/testutils"
 	"github.com/calypr/syfon/internal/urlmanager"
@@ -46,7 +45,7 @@ func TestHandleInternalDownload(t *testing.T) {
 	}
 	req := routeutil.WithPathParams(httptest.NewRequest(http.MethodGet, "/data/download/test-file-id", nil), map[string]string{"file_id": "test-file-id"})
 	um := &captureURLManager{}
-	om := core.NewObjectManager(mockDB, um)
+	om := newInternalDRSObjectManager(mockDB, um)
 	rr := doInternalDRSTestRequest(req, om)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rr.Code)
@@ -83,7 +82,7 @@ func TestHandleInternalDownloadPart(t *testing.T) {
 			},
 		},
 	}
-	om := core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
+	om := newInternalDRSObjectManager(mockDB, &testutils.MockUrlManager{})
 
 	t.Run("success", func(t *testing.T) {
 		req := routeutil.WithPathParams(httptest.NewRequest(http.MethodGet, "/data/download/test-file-id/part?start=0&end=1024", nil), map[string]string{"file_id": "test-file-id"})
@@ -129,7 +128,7 @@ func TestHandleInternalDownload_ResolvesByChecksum(t *testing.T) {
 		},
 	}
 	req := routeutil.WithPathParams(httptest.NewRequest(http.MethodGet, "/data/download/"+oid, nil), map[string]string{"file_id": oid})
-	rr := doInternalDRSTestRequest(req, core.NewObjectManager(mockDB, &testutils.MockUrlManager{}))
+	rr := doInternalDRSTestRequest(req, newInternalDRSObjectManager(mockDB, &testutils.MockUrlManager{}))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
 	}
@@ -151,7 +150,7 @@ func TestHandleInternalDownload_ResolvesByUUID(t *testing.T) {
 		},
 	}
 	req := routeutil.WithPathParams(httptest.NewRequest(http.MethodGet, "/data/download/"+did, nil), map[string]string{"file_id": did})
-	rr := doInternalDRSTestRequest(req, core.NewObjectManager(mockDB, &testutils.MockUrlManager{}))
+	rr := doInternalDRSTestRequest(req, newInternalDRSObjectManager(mockDB, &testutils.MockUrlManager{}))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
 	}
@@ -170,7 +169,7 @@ func TestHandleInternalDownload_MultiCloud(t *testing.T) {
 	}
 	for _, id := range []string{"gcs-file", "azure-file"} {
 		req := routeutil.WithPathParams(httptest.NewRequest(http.MethodGet, "/data/download/"+id, nil), map[string]string{"file_id": id})
-		rr := doInternalDRSTestRequest(req, core.NewObjectManager(mockDB, &testutils.MockUrlManager{}))
+		rr := doInternalDRSTestRequest(req, newInternalDRSObjectManager(mockDB, &testutils.MockUrlManager{}))
 		if rr.Code != http.StatusOK {
 			t.Fatalf("expected 200 for %s, got %d", id, rr.Code)
 		}
@@ -186,7 +185,7 @@ func TestHandleInternalDownload_Gen3Auth(t *testing.T) {
 		},
 		ObjectAuthz: map[string]map[string][]string{"secure-id": {"p": {"q"}}},
 	}
-	om := core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
+	om := newInternalDRSObjectManager(mockDB, &testutils.MockUrlManager{})
 	req401 := routeutil.WithPathParams(httptest.NewRequest(http.MethodGet, "/data/download/secure-id", nil), map[string]string{"file_id": "secure-id"})
 	req401 = req401.WithContext(dataTestAuthContext(req401.Context(), "gen3", false, nil))
 	rr401 := doInternalDRSTestRequest(req401, om)
@@ -206,7 +205,7 @@ func TestHandleInternalDownload_AuthzParity(t *testing.T) {
 				},
 				ObjectAuthz: map[string]map[string][]string{"secure-id": {"p": {"q"}}},
 			}
-			om := core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
+			om := newInternalDRSObjectManager(mockDB, &testutils.MockUrlManager{})
 			req200 := routeutil.WithPathParams(httptest.NewRequest(http.MethodGet, "/data/download/secure-id", nil), map[string]string{"file_id": "secure-id"})
 			req200 = withTestAuthzContext(req200, mode, map[string]map[string]bool{"/programs/p/projects/q": {"read": true}})
 			rr200 := doInternalDRSTestRequest(req200, om)
