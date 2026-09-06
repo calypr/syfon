@@ -67,14 +67,14 @@ func TestHandleInternalBulkDocuments_InvalidBodyAndMissingIDs(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/bulk/documents", strings.NewReader("not-json"))
 	req.Header.Set("Content-Type", "application/json")
-	rr := doInternalDRSTestRequestWithAlias(req, om, http.MethodPost, "/bulk/documents", handleInternalBulkDocumentsFiber(om.ObjectManager))
+	rr := doInternalDRSTestRequestWithAlias(req, om, http.MethodPost, "/bulk/documents", handleInternalBulkDocumentsFiber(om.ObjectService))
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for invalid json, got %d body=%s", rr.Code, rr.Body.String())
 	}
 
 	req = httptest.NewRequest(http.MethodPost, "/bulk/documents", strings.NewReader(`{"ids":[]}`))
 	req.Header.Set("Content-Type", "application/json")
-	rr = doInternalDRSTestRequestWithAlias(req, om, http.MethodPost, "/bulk/documents", handleInternalBulkDocumentsFiber(om.ObjectManager))
+	rr = doInternalDRSTestRequestWithAlias(req, om, http.MethodPost, "/bulk/documents", handleInternalBulkDocumentsFiber(om.ObjectService))
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for empty ids, got %d body=%s", rr.Code, rr.Body.String())
 	}
