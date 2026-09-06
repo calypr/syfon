@@ -6,12 +6,22 @@ Run the direct production-import check from the repository root:
 scripts/check_internal_import_policy.sh
 ```
 
+Run the deterministic policy fixtures before changing the rules:
+
+```sh
+scripts/check_internal_import_policy.sh --self-test
+```
+
 The script uses `go list` and checks only direct imports in the target domain,
 HTTP, storage-provider, persistence, maintenance, and usage packages. It exits
 with status 0 and prints a pass line when no forbidden edge exists. It exits
 with status 1 and prints each `package -> import` edge when a forbidden import
-is found. A `go list` or environment failure prints a diagnostic and exits
-nonzero before evaluating policy edges.
+is found. Provider children may import their cloud SDKs, and persistence
+dialect children may import their SQL drivers; their other forbidden edges are
+still checked. The testsupport prohibition applies to every production package
+inspected, including packages not yet named by the architecture rules. A
+`go list` or environment failure prints a diagnostic and exits nonzero before
+evaluating policy edges.
 
 WP01 intentionally leaves existing `internal/core`, `internal/common`,
 `internal/models`, `internal/db`, and other legacy imports in place. The script
