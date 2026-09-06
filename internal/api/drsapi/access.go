@@ -32,7 +32,7 @@ func handleGetAccessURLFiber(om *core.ObjectManager) fiber.Handler {
 
 		opts := storage.AccessOptions{Method: http.MethodGet}
 		if obj.Name != nil {
-			opts.DownloadFilename = common.DownloadFilename(*obj.Name)
+			opts.DownloadFilename = storage.DownloadFilename(*obj.Name)
 		}
 		signed, err := om.SignObjectURL(c.Context(), obj, targetURL, opts)
 		if err != nil {
@@ -115,7 +115,7 @@ func handleGetBulkAccessURLFiber(om *core.ObjectManager) fiber.Handler {
 
 				opts := storage.AccessOptions{Method: http.MethodGet}
 				if obj.Name != nil {
-					opts.DownloadFilename = common.DownloadFilename(*obj.Name)
+					opts.DownloadFilename = storage.DownloadFilename(*obj.Name)
 				}
 				signed, err := om.SignObjectURL(c.Context(), obj, targetURL, opts)
 				if err != nil {

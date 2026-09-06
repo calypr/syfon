@@ -3,7 +3,6 @@ package testutils
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"strings"
 	"time"
 
@@ -13,7 +12,6 @@ import (
 	"github.com/calypr/syfon/internal/faults"
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/transfers"
-	"github.com/calypr/syfon/internal/urlmanager"
 	"github.com/calypr/syfon/internal/usage"
 )
 
@@ -929,35 +927,4 @@ func cloneAuthzMap(in map[string][]string) map[string][]string {
 }
 
 func attachAuthorizationsToAccessMethods(obj *objects.Record) {
-}
-
-// MockUrlManager implements urlmanager.UrlManager for testing
-type MockUrlManager struct{}
-
-func (m *MockUrlManager) SignURL(ctx context.Context, accessId string, url string, opts urlmanager.SignOptions) (string, error) {
-	suffix := "?signed=true"
-	if opts.Method == http.MethodPut || opts.Method == http.MethodPost {
-		suffix += "&upload=true"
-	}
-	return url + suffix, nil
-}
-
-func (m *MockUrlManager) SignUploadURL(ctx context.Context, accessId string, url string, opts urlmanager.SignOptions) (string, error) {
-	return url + "?signed=true&upload=true", nil
-}
-
-func (m *MockUrlManager) InitMultipartUpload(ctx context.Context, bucket string, key string) (string, error) {
-	return "mock-upload-id", nil
-}
-
-func (m *MockUrlManager) SignMultipartPart(ctx context.Context, bucket string, key string, uploadId string, partNumber int32) (string, error) {
-	return fmt.Sprintf("s3://%s/%s?uploadId=%s&partNumber=%d", bucket, key, uploadId, partNumber), nil
-}
-
-func (m *MockUrlManager) SignDownloadPart(ctx context.Context, accessId string, url string, start int64, end int64, opts urlmanager.SignOptions) (string, error) {
-	return fmt.Sprintf("%s?signed=true&range=%d-%d", url, start, end), nil
-}
-
-func (m *MockUrlManager) CompleteMultipartUpload(ctx context.Context, bucket string, key string, uploadId string, parts []urlmanager.MultipartPart) error {
-	return nil
 }

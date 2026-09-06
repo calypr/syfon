@@ -74,7 +74,7 @@ func handleInternalDownloadFiber(c fiber.Ctx, om *core.ObjectManager) error {
 		}
 	}
 	if obj.Name != nil {
-		opts.DownloadFilename = common.DownloadFilename(*obj.Name)
+		opts.DownloadFilename = storage.DownloadFilename(*obj.Name)
 	}
 	if opts.ExpiresIn <= 0 {
 		opts.ExpiresIn = time.Duration(config.DefaultSigningExpirySeconds) * time.Second
@@ -138,7 +138,7 @@ func handleInternalDownloadPartFiber(c fiber.Ctx, om *core.ObjectManager) error 
 
 	opts := storage.AccessOptions{ExpiresIn: time.Duration(config.DefaultSigningExpirySeconds) * time.Second}
 	if obj.Name != nil {
-		opts.DownloadFilename = common.DownloadFilename(*obj.Name)
+		opts.DownloadFilename = storage.DownloadFilename(*obj.Name)
 	}
 	signedURL, err := om.SignObjectDownloadPart(c.Context(), obj, bucketID, objectURL, start, end, opts)
 	if err != nil {
