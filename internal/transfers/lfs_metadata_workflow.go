@@ -32,6 +32,29 @@ func (e *LFSMetadataCandidateError) Unwrap() error {
 	return e.Err
 }
 
+type LFSMetadataStageError struct {
+	Index      int
+	Err        error
+	MissingSHA bool
+}
+
+func (e *LFSMetadataStageError) Error() string {
+	if e.MissingSHA {
+		return "candidate missing canonical sha256"
+	}
+	if e.Err == nil {
+		return "candidate is invalid"
+	}
+	return e.Err.Error()
+}
+
+func (e *LFSMetadataStageError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
 type LFSMetadataWorkflow struct {
 	transfer   *Service
 	objects    LFSMetadataObjectPort
@@ -46,6 +69,28 @@ func NewLFSMetadataWorkflow(transfer *Service, objectPort LFSMetadataObjectPort,
 		accounting: accounting,
 		now:        time.Now,
 	}
+}
+
+func (w *LFSMetadataWorkflow) Stage(ctx context.Context, candidates []objects.Candidate) error {
+	now := w.now().UTC()
+	entries := make([]PendingMetadata, 0, len(candidates))
+	for index, candidate := range candidates {
+		internalObject, err := objects.CandidateToRecord(candidate, now)
+		if err != nil {
+			return &LFSMetadataStageError{Index: index, Err: err}
+		}
+		oid, ok := objects.CanonicalSHA256(internalObject.Checksums)
+		if !ok {
+			return &LFSMetadataStageError{Index: index, MissingSHA: true}
+		}
+		entries = append(entries, PendingMetadata{
+			OID:       oid,
+			Candidate: candidate,
+			CreatedAt: now,
+			ExpiresAt: now.Add(PendingMetadataTTL),
+		})
+	}
+	return w.transfer.SavePendingLFSMeta(ctx, entries)
 }
 
 func (w *LFSMetadataWorkflow) Verify(ctx context.Context, oid string) error {

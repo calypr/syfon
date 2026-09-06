@@ -54,6 +54,9 @@ func TestLFSBatchDownloadUsesTransferAndUsagePorts(t *testing.T) {
 	if len(payload.Objects) != 1 || payload.Objects[0].Actions == nil || payload.Objects[0].Actions.Download == nil {
 		t.Fatalf("download actions = %+v", payload.Objects)
 	}
+	if len(ports.fileCounters.downloads) != 1 || ports.fileCounters.downloads[0] != oid {
+		t.Fatalf("download counters = %v", ports.fileCounters.downloads)
+	}
 	if len(ports.events.events) != 1 || ports.events.events[0].EventType != usage.TransferEventAccessIssued {
 		t.Fatalf("transfer events = %+v", ports.events.events)
 	}
@@ -75,6 +78,10 @@ func TestLFSMetadataVerifyPreservesPendingPopBeforeRegister(t *testing.T) {
 	if response.Code != http.StatusOK {
 		t.Fatalf("metadata status = %d body=%s", response.Code, response.Body.String())
 	}
+	entry, ok := ports.pending.entries[oid]
+	if !ok || entry.CreatedAt.IsZero() || entry.ExpiresAt.Sub(entry.CreatedAt) != transfers.PendingMetadataTTL {
+		t.Fatalf("pending metadata timestamps = %+v", entry)
+	}
 	verify, _ := json.Marshal(map[string]any{"oid": oid, "size": 12})
 	request = httptest.NewRequest(http.MethodPost, "/info/lfs/verify", bytes.NewReader(verify))
 	request.Header.Set("Accept", "application/vnd.git-lfs+json")
@@ -93,13 +100,14 @@ func TestLFSUploadProxyPreservesOpaqueMultipartAndPartOrder(t *testing.T) {
 	oid := strings.Repeat("c", 64)
 	ports := newLFSTestPorts(map[string]*objects.Record{}, map[string]buckets.Credential{"bucket": {Bucket: "bucket"}})
 	storageFake := &lfsTestStorage{}
-	server := NewLFSServer(newLFSTestDependencies(ports, storageFake), DefaultOptions())
-	server.uploadWorkflow = transfers.NewLFSUploadWorkflow(server.transferService, func(_ context.Context, _ string, content []byte) (string, error) {
+	deps := newLFSTestDependencies(ports, storageFake)
+	deps.PartUploader = func(_ context.Context, _ string, content []byte) (string, error) {
 		if string(content) != "payload" {
 			t.Fatalf("multipart content = %q", content)
 		}
 		return "etag", nil
-	}, ports.fileCounters)
+	}
+	server := NewLFSServer(deps, DefaultOptions())
 	response, err := server.LfsUploadProxy(context.Background(), lfsapi.LfsUploadProxyRequestObject{
 		Oid:  oid,
 		Body: bytes.NewReader([]byte("payload")),
@@ -184,8 +192,8 @@ func TestLFSUploadProxyUsesCanonicalOIDForScopedTargets(t *testing.T) {
 			storageFake := &lfsTestStorage{}
 			deps := newLFSTestDependencies(ports, storageFake)
 			deps.TransferService = newTransferService(ports, storageFake)
+			deps.PartUploader = func(context.Context, string, []byte) (string, error) { return "etag", nil }
 			server := NewLFSServer(deps, DefaultOptions())
-			server.uploadWorkflow = transfers.NewLFSUploadWorkflow(server.transferService, func(context.Context, string, []byte) (string, error) { return "etag", nil }, ports.fileCounters)
 
 			response, err := server.LfsUploadProxy(context.Background(), lfsapi.LfsUploadProxyRequestObject{
 				Oid:  oid,
