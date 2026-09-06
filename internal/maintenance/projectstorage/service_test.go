@@ -1,0 +1,186 @@
+package projectstorage
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"testing"
+
+	"github.com/calypr/syfon/internal/buckets"
+	"github.com/calypr/syfon/internal/faults"
+	"github.com/calypr/syfon/internal/objects"
+	"github.com/calypr/syfon/internal/storage"
+)
+
+type fakeScopes struct {
+	values map[string]buckets.Scope
+}
+
+func (f fakeScopes) LookupBucketScope(_ context.Context, organization, project string) (buckets.Scope, bool, error) {
+	scope, ok := f.values[strings.TrimSpace(organization)+"/"+strings.TrimSpace(project)]
+	return scope, ok, nil
+}
+
+type fakeCredentials struct {
+	values map[string]buckets.Credential
+}
+
+func (f fakeCredentials) GetS3Credential(_ context.Context, bucket string) (*buckets.Credential, error) {
+	for key, value := range f.values {
+		if strings.EqualFold(key, bucket) || strings.EqualFold(value.Bucket, bucket) || strings.EqualFold(value.CredentialID, bucket) {
+			copy := value
+			return &copy, nil
+		}
+	}
+	return nil, errors.New("not found")
+}
+
+func (f fakeCredentials) ListS3Credentials(context.Context) ([]buckets.Credential, error) {
+	result := make([]buckets.Credential, 0, len(f.values))
+	for _, value := range f.values {
+		result = append(result, value)
+	}
+	return result, nil
+}
+
+type fakeVisibility struct {
+	values map[string]buckets.VisibleBucket
+	called int
+}
+
+func (f *fakeVisibility) ListVisibleBuckets(context.Context) (map[string]buckets.VisibleBucket, error) {
+	f.called++
+	return f.values, nil
+}
+
+type fakeInventory struct {
+	items    []storage.ObjectMetadata
+	result   storage.InventoryResult
+	requests []storage.InventoryRequest
+}
+
+func (f *fakeInventory) Inventory(_ context.Context, request storage.InventoryRequest) (storage.InventoryResult, error) {
+	f.requests = append(f.requests, request)
+	if f.result.Items != nil || !f.result.Complete {
+		return f.result, nil
+	}
+	return storage.InventoryResult{Items: f.items, Complete: true}, nil
+}
+
+type fakeDelete struct {
+	locations []string
+}
+
+func (f *fakeDelete) DeleteExact(_ context.Context, targets []storage.DeleteTarget) error {
+	for _, target := range targets {
+		f.locations = append(f.locations, target.Location)
+	}
+	return nil
+}
+
+type fakePhysical struct {
+	records []objects.Record
+}
+
+func (f fakePhysical) ListPhysicalObjectsByScope(context.Context, string, string, string) ([]objects.Record, error) {
+	return f.records, nil
+}
+
+func projectService(inventory *fakeInventory, deletePort DeletePort) (*Service, *fakeVisibility) {
+	credential := buckets.Credential{CredentialID: "cred", Bucket: "bucket", Provider: "s3"}
+	visibility := &fakeVisibility{values: map[string]buckets.VisibleBucket{
+		"cred": {Credential: credential},
+	}}
+	service := NewService(
+		fakeScopes{values: map[string]buckets.Scope{"org/": {Organization: "org", Bucket: "bucket", PathPrefix: "prefix"}, "org/project": {Organization: "org", ProjectID: "project", Bucket: "bucket", PathPrefix: "prefix/project"}}},
+		fakeCredentials{values: map[string]buckets.Credential{"cred": credential}},
+		visibility,
+		inventory,
+		nil,
+		deletePort,
+		nil,
+	)
+	return service, visibility
+}
+
+func TestInspectProjectPreservesPartialInventoryAndCanonicalItems(t *testing.T) {
+	inventory := &fakeInventory{result: storage.InventoryResult{
+		Items:    []storage.ObjectMetadata{{Key: "/prefix/project/z", SizeBytes: 2}, {Key: "prefix/project/a", SizeBytes: 3}},
+		Complete: false,
+	}}
+	service, _ := projectService(inventory, nil)
+	result, err := service.InspectProject(context.Background(), " org ", " project ", InspectionOptions{Mode: ModeItems, IncludeHead: true})
+	if err != nil {
+		t.Fatalf("InspectProject() error = %v", err)
+	}
+	if result.Summary.InventoryComplete || result.Summary.InventoryWarning == "" {
+		t.Fatalf("partial summary = %+v", result.Summary)
+	}
+	if len(result.Items) != 2 || result.Items[0].Key != "prefix/project/a" || result.Items[1].ObjectURL != "s3://bucket/prefix/project/z" {
+		t.Fatalf("normalized items = %+v", result.Items)
+	}
+	if len(inventory.requests) != 1 || inventory.requests[0].Target.Prefix != "prefix/project" || !inventory.requests[0].IncludeHead {
+		t.Fatalf("inventory requests = %+v", inventory.requests)
+	}
+}
+
+func TestValidateInventoryDeduplicatesAndRestoresRequestOrder(t *testing.T) {
+	inventory := &fakeInventory{result: storage.InventoryResult{Items: []storage.ObjectMetadata{{Key: "prefix/a.txt", SizeBytes: 10}}, Complete: true}}
+	service, visibility := projectService(inventory, nil)
+	requests := []ListValidationRequest{
+		{ID: "first", ObjectURL: "s3://bucket/prefix/a.txt", ExpectedSizeBytes: int64Ptr(10)},
+		{ID: "duplicate", ObjectURL: "s3://bucket/prefix/a.txt", ExpectedName: "wrong.txt"},
+		{ID: "invalid", ObjectURL: "https://bucket/prefix/a.txt"},
+	}
+	results := service.ValidateInventoryObjects(context.Background(), requests)
+	if visibility.called != 1 {
+		t.Fatalf("visibility calls = %d, want one request-local lookup", visibility.called)
+	}
+	if len(inventory.requests) != 1 || inventory.requests[0].MaxKeys != 1 || !inventory.requests[0].ExactPrefix {
+		t.Fatalf("inventory requests = %+v", inventory.requests)
+	}
+	if results[0].Status != ProbePresent || results[0].ValidationStatus != ValidationMatched || results[1].ValidationStatus != ValidationMismatched {
+		t.Fatalf("validation results = %+v", results)
+	}
+	if results[2].Status != ProbeInvalid || results[2].ID != "invalid" {
+		t.Fatalf("invalid result = %+v", results[2])
+	}
+}
+
+func TestDeleteProjectObjectsPreservesPolicyOrderAndConflictSafety(t *testing.T) {
+	deletePort := &fakeDelete{}
+	service, _ := projectService(&fakeInventory{}, deletePort)
+	results := service.DeleteProjectObjects(context.Background(), "org", "project", []string{
+		" s3://bucket/prefix/project/a ",
+		"s3://bucket/prefix/project/a",
+		"s3://bucket/other/b",
+		"not-a-storage-url",
+	})
+	if len(results) != 3 || results[0].Status != "deleted" || results[1].Status != "forbidden" || results[2].Status != "invalid" {
+		t.Fatalf("delete results = %+v", results)
+	}
+	if len(deletePort.locations) != 1 || deletePort.locations[0] != "s3://bucket/prefix/project/a" {
+		t.Fatalf("delete locations = %+v", deletePort.locations)
+	}
+	if err := service.DeleteObjectStorage(context.Background(), &objects.Record{Id: "physical"}); !errors.Is(err, faults.ErrConflict) {
+		t.Fatalf("DeleteObjectStorage() error = %v, want conflict", err)
+	}
+}
+
+func TestAuditProjectRecordsPreservesPhysicalDuplicatesAndSegmentPrefixes(t *testing.T) {
+	first := objects.Record{Id: "one", Checksums: []objects.Checksum{{Type: "sha256", Checksum: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}, AccessMethods: &[]objects.AccessMethod{{Type: "s3", AccessUrl: &objects.AccessURL{Url: "s3://bucket/prefix/project/CONFIG/file"}}}}
+	duplicate := first
+	duplicate.Id = "two"
+	falsePrefix := objects.Record{Id: "three", Checksums: []objects.Checksum{{Type: "sha256", Checksum: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}}, AccessMethods: &[]objects.AccessMethod{{Type: "s3", AccessUrl: &objects.AccessURL{Url: "s3://bucket/prefix/project/CONFIGURATION/file"}}}}
+	service, _ := projectService(&fakeInventory{}, nil)
+	service.physical = fakePhysical{records: []objects.Record{first, duplicate, falsePrefix}}
+	result, err := service.AuditProjectRecords(context.Background(), "org", "project", "CONFIG")
+	if err != nil {
+		t.Fatalf("AuditProjectRecords() error = %v", err)
+	}
+	if len(result) != 2 || result[0].ObjectID != "one" || result[1].ObjectID != "two" {
+		t.Fatalf("audit records = %+v", result)
+	}
+}
+
+func int64Ptr(value int64) *int64 { return &value }
