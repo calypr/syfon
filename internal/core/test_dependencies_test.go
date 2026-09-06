@@ -53,7 +53,7 @@ func testDependencies(backend any) Dependencies {
 	if optional, ok := backend.(objects.OptionalAuthorizedQuery); ok {
 		deps.Objects.Authorized = optional
 	}
-	if optional, ok := backend.(buckets.OptionalVisibilityQuery); ok {
+	if optional, ok := backend.(buckets.VisibilityQuery); ok {
 		deps.Buckets.Visibility = optional
 	}
 	return deps

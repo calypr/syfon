@@ -47,7 +47,7 @@ type ObjectManager struct {
 	objectPages      objects.OptionalPageQuery
 	objectURLPages   objects.OptionalURLQuery
 	objectAuthorized objects.OptionalAuthorizedQuery
-	bucketVisibility buckets.OptionalVisibilityQuery
+	bucketVisibility buckets.VisibilityQuery
 	pendingStore     transfers.PendingStore
 	transferEvents   transfers.EventRecorder
 	fileCounters     usage.FileCounterRecorder
@@ -82,7 +82,7 @@ type BucketPorts struct {
 	Credentials     buckets.CredentialReader
 	CredentialAdmin buckets.CredentialAdmin
 	Scopes          buckets.ScopeStore
-	Visibility      buckets.OptionalVisibilityQuery
+	Visibility      buckets.VisibilityQuery
 }
 
 // TransferPorts contains pending metadata and transfer-event capabilities.

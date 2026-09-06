@@ -32,7 +32,7 @@ func testDependencies(backend any) core.Dependencies {
 		credentials     buckets.CredentialReader
 		credentialAdmin buckets.CredentialAdmin
 		scopes          buckets.ScopeStore
-		visibility      buckets.OptionalVisibilityQuery
+		visibility      buckets.VisibilityQuery
 		pending         transfers.PendingStore
 		events          transfers.EventRecorder
 		counters        usage.FileCounterRecorder
@@ -64,7 +64,7 @@ func testDependencies(backend any) core.Dependencies {
 	if optional, ok := backend.(objects.OptionalAuthorizedQuery); ok {
 		authorized = optional
 	}
-	if optional, ok := backend.(buckets.OptionalVisibilityQuery); ok {
+	if optional, ok := backend.(buckets.VisibilityQuery); ok {
 		visibility = optional
 	}
 

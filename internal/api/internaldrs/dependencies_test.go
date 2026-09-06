@@ -29,7 +29,7 @@ func newInternalDRSObjectManager(store any, manager urlmanager.UrlManager) *core
 			Credentials:     store.(buckets.CredentialReader),
 			CredentialAdmin: store.(buckets.CredentialAdmin),
 			Scopes:          store.(buckets.ScopeStore),
-			Visibility:      optionalInternalDRSPort[buckets.OptionalVisibilityQuery](store),
+			Visibility:      optionalInternalDRSPort[buckets.VisibilityQuery](store),
 		},
 		Transfers: core.TransferPorts{
 			Pending: store.(transfers.PendingStore),

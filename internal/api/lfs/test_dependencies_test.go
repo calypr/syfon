@@ -48,7 +48,7 @@ func newLFSDependencies(db *testutils.MockDatabase) core.Dependencies {
 	if port, ok := interface{}(db).(objects.OptionalAuthorizedQuery); ok {
 		deps.Objects.Authorized = port
 	}
-	if port, ok := interface{}(db).(buckets.OptionalVisibilityQuery); ok {
+	if port, ok := interface{}(db).(buckets.VisibilityQuery); ok {
 		deps.Buckets.Visibility = port
 	}
 
