@@ -143,7 +143,6 @@ func TestLFSBatchGen3MissingAuthReturns401(t *testing.T) {
 			oid: {"syfon": {"e2e"}},
 		},
 	}
-	uM := &testutils.MockUrlManager{}
 	app := fiber.New()
 	app.Use(func(c fiber.Ctx) error {
 		session := access.NewSession("gen3")
@@ -153,7 +152,7 @@ func TestLFSBatchGen3MissingAuthReturns401(t *testing.T) {
 		c.SetContext(ctx)
 		return c.Next()
 	})
-	om := core.NewObjectManager(newLFSDependencies(db), uM)
+	om := core.NewObjectManager(newLFSDependencies(db))
 	RegisterLFSRoutes(app, om, DefaultOptions())
 	router := &fiberTestRouter{app: app}
 	body := map[string]any{

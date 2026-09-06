@@ -13,7 +13,7 @@ import (
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/faults"
 	apimiddleware "github.com/calypr/syfon/internal/httpapi/middleware"
-	"github.com/calypr/syfon/internal/urlmanager"
+	"github.com/calypr/syfon/internal/storage"
 	"github.com/calypr/syfon/internal/usage"
 )
 
@@ -42,7 +42,7 @@ func prepareDownloadActions(ctx context.Context, om *core.ObjectManager, oid str
 		return nil, &lfsapi.ObjectError{Code: int32(http.StatusNotFound), Message: "no object location available"}
 	}
 
-	signed, err := om.SignObjectURL(ctx, obj, src, urlmanager.SignOptions{})
+	signed, err := om.SignObjectURL(ctx, obj, src, storage.AccessOptions{})
 	if err != nil {
 		return nil, &lfsapi.ObjectError{Code: int32(http.StatusInternalServerError), Message: err.Error()}
 	}

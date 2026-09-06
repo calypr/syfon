@@ -2,14 +2,15 @@ package lfs
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 
 	"github.com/calypr/syfon/internal/core"
 
 	"github.com/calypr/syfon/internal/objects"
+	"github.com/calypr/syfon/internal/storage"
 	"github.com/calypr/syfon/internal/testutils"
-	"github.com/calypr/syfon/internal/urlmanager"
 	"github.com/gofiber/fiber/v3"
 )
 
@@ -40,9 +41,11 @@ func newLFSRouterWithOptions(opts Options) (*fiberTestRouter, *testutils.MockDat
 	db := &testutils.MockDatabase{
 		Objects: map[string]*objects.Record{},
 	}
-	uM := &testutils.MockUrlManager{}
+	storageFake := &lfsStorageFake{}
 	app := fiber.New()
-	om := core.NewObjectManager(newLFSDependencies(db), uM)
+	deps := newLFSDependencies(db)
+	deps.Storage = core.StoragePorts{Access: storageFake}
+	om := core.NewObjectManager(deps)
 	RegisterLFSRoutes(app, om, opts)
 	return &fiberTestRouter{app: app}, db
 }
@@ -58,31 +61,62 @@ func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 }
 
 func resolveObjectForOID(ctx context.Context, database *testutils.MockDatabase, oid string) (*objects.Record, error) {
-	om := core.NewObjectManager(newLFSDependencies(database), nil)
+	om := core.NewObjectManager(newLFSDependencies(database))
 	return om.GetObject(ctx, oid, "")
 }
 
-type customMockUrlManager struct {
-	testutils.MockUrlManager
+type lfsStorageFake struct {
 	uploadURL      string
+	accessRequests []storage.AccessRequest
 	initCalled     int
 	initBucket     string
 	initKey        string
+	partBucket     string
+	partKey        string
+	partUploadID   string
+	partNumber     int32
 	completeCalled int
+	completeBucket string
+	completeKey    string
+	completeID     string
+	completeParts  []storage.CompletedPart
 }
 
-func (m *customMockUrlManager) InitMultipartUpload(ctx context.Context, bucket string, key string) (string, error) {
+func (m *lfsStorageFake) Access(_ context.Context, request storage.AccessRequest) (storage.Access, error) {
+	m.accessRequests = append(m.accessRequests, request)
+	suffix := "?signed=true"
+	if request.Options.Method == http.MethodPut || request.Options.Method == http.MethodPost {
+		suffix += "&upload=true"
+	}
+	return storage.Access{Location: request.Target.Location + suffix}, nil
+}
+
+func (m *lfsStorageFake) BeginMultipart(_ context.Context, target storage.ObjectTarget) (storage.UploadID, error) {
 	m.initCalled++
-	m.initBucket = bucket
-	m.initKey = key
-	return "mock-upload-id", nil
+	m.initBucket = target.Bucket
+	m.initKey = target.Key
+	return storage.UploadID("mock-upload-id"), nil
 }
 
-func (m *customMockUrlManager) SignMultipartPart(ctx context.Context, bucket string, key string, uploadId string, partNumber int32) (string, error) {
-	return m.uploadURL, nil
+func (m *lfsStorageFake) AccessMultipartPart(_ context.Context, request storage.MultipartPartRequest) (storage.Access, error) {
+	m.partBucket = request.Target.Bucket
+	m.partKey = request.Target.Key
+	m.partUploadID = string(request.UploadID)
+	m.partNumber = request.PartNumber
+	if m.uploadURL != "" {
+		return storage.Access{Location: m.uploadURL}, nil
+	}
+	return storage.Access{Location: fmt.Sprintf("s3://%s/%s?uploadId=%s&partNumber=%d", request.Target.Bucket, request.Target.Key, request.UploadID, request.PartNumber)}, nil
 }
 
-func (m *customMockUrlManager) CompleteMultipartUpload(ctx context.Context, bucket string, key string, uploadId string, parts []urlmanager.MultipartPart) error {
+func (m *lfsStorageFake) CompleteMultipart(_ context.Context, request storage.CompleteMultipartRequest) error {
 	m.completeCalled++
+	m.completeBucket = request.Target.Bucket
+	m.completeKey = request.Target.Key
+	m.completeID = string(request.UploadID)
+	m.completeParts = append([]storage.CompletedPart(nil), request.Parts...)
 	return nil
 }
+
+var _ core.StorageAccess = (*lfsStorageFake)(nil)
+var _ core.StorageMultipart = (*lfsStorageFake)(nil)

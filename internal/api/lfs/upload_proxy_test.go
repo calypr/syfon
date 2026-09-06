@@ -46,9 +46,11 @@ func TestLFSUploadProxySuccess(t *testing.T) {
 	db := &testutils.MockDatabase{
 		Objects: map[string]*objects.Record{},
 	}
-	uM := &customMockUrlManager{uploadURL: uploadServer.URL}
+	storageFake := &lfsStorageFake{uploadURL: uploadServer.URL}
 	app := fiber.New()
-	om := core.NewObjectManager(newLFSDependencies(db), uM)
+	deps := newLFSDependencies(db)
+	deps.Storage = core.StoragePorts{Access: storageFake, Multipart: storageFake}
+	om := core.NewObjectManager(deps)
 	RegisterLFSRoutes(app, om, DefaultOptions())
 	router := &fiberTestRouter{app: app}
 
@@ -62,11 +64,17 @@ func TestLFSUploadProxySuccess(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
 	}
-	if uM.initCalled != 1 {
-		t.Errorf("expected 1 InitMultipartUpload call, got %d", uM.initCalled)
+	if storageFake.initCalled != 1 {
+		t.Errorf("expected 1 InitMultipartUpload call, got %d", storageFake.initCalled)
 	}
-	if uM.completeCalled != 1 {
-		t.Errorf("expected 1 CompleteMultipartUpload call, got %d", uM.completeCalled)
+	if storageFake.completeCalled != 1 {
+		t.Errorf("expected 1 CompleteMultipartUpload call, got %d", storageFake.completeCalled)
+	}
+	if storageFake.partUploadID != "mock-upload-id" || storageFake.completeID != "mock-upload-id" {
+		t.Fatalf("expected opaque upload ID to flow through multipart calls, got part=%q complete=%q", storageFake.partUploadID, storageFake.completeID)
+	}
+	if len(storageFake.completeParts) != 1 || storageFake.completeParts[0].PartNumber != 1 || storageFake.completeParts[0].ETag != "mock-etag" {
+		t.Fatalf("unexpected completed parts: %+v", storageFake.completeParts)
 	}
 }
 
@@ -118,9 +126,11 @@ func TestLFSUploadProxyUsesPendingScopedCanonicalLocation(t *testing.T) {
 			},
 		},
 	}
-	uM := &customMockUrlManager{uploadURL: uploadServer.URL}
+	storageFake := &lfsStorageFake{uploadURL: uploadServer.URL}
 	app := fiber.New()
-	om := core.NewObjectManager(newLFSDependencies(db), uM)
+	deps := newLFSDependencies(db)
+	deps.Storage = core.StoragePorts{Access: storageFake, Multipart: storageFake}
+	om := core.NewObjectManager(deps)
 	RegisterLFSRoutes(app, om, DefaultOptions())
 	router := &fiberTestRouter{app: app}
 
@@ -130,10 +140,10 @@ func TestLFSUploadProxyUsesPendingScopedCanonicalLocation(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
 	}
-	if uM.initBucket != "syfon-e2e-bucket" {
-		t.Fatalf("expected scoped bucket syfon-e2e-bucket, got %q", uM.initBucket)
+	if storageFake.initBucket != "syfon-e2e-bucket" {
+		t.Fatalf("expected scoped bucket syfon-e2e-bucket, got %q", storageFake.initBucket)
 	}
-	if want := "program-root/project-subpath/" + oid; uM.initKey != want {
-		t.Fatalf("expected scoped key %q, got %q", want, uM.initKey)
+	if want := "program-root/project-subpath/" + oid; storageFake.initKey != want {
+		t.Fatalf("expected scoped key %q, got %q", want, storageFake.initKey)
 	}
 }
