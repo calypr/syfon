@@ -800,7 +800,7 @@ func TestHandleInternalBulkHashes_HashTypeFiltering(t *testing.T) {
 		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
 	}
 	var payload struct {
-		Results map[string][]objects.Record `json:"results"`
+		Results map[string][]internalapi.InternalRecord `json:"results"`
 	}
 	if err := json.NewDecoder(rr.Body).Decode(&payload); err != nil {
 		t.Fatalf("decode response: %v", err)
@@ -812,8 +812,15 @@ func TestHandleInternalBulkHashes_HashTypeFiltering(t *testing.T) {
 	if len(objs) != 1 {
 		t.Fatalf("expected 1 record for hash, got %d", len(objs))
 	}
-	if objs[0].Id != "obj-sha" {
-		t.Fatalf("expected obj-sha, got %q", objs[0].Id)
+	if objs[0].Did != "obj-sha" {
+		t.Fatalf("expected obj-sha, got %q", objs[0].Did)
+	}
+	if objs[0].Hashes == nil || (*objs[0].Hashes)["sha256"] != "samehash" {
+		t.Fatalf("expected sha256 hash, got %+v", objs[0].Hashes)
+	}
+	raw := rr.Body.String()
+	if strings.Contains(raw, `"id"`) || strings.Contains(raw, `"checksums"`) {
+		t.Fatalf("expected legacy compatibility fields only, got %s", raw)
 	}
 }
 

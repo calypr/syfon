@@ -207,7 +207,8 @@ func (s *LFSServer) resolveUploadProxyTarget(ctx context.Context, oid string) (s
 	defaultBucket := strings.TrimSpace(credentials[0].Bucket)
 	if object, getErr := s.objectService.GetObject(ctx, oid, "read"); getErr == nil {
 		target, targetErr := s.transferService.ResolveCanonicalStorageTarget(ctx, transfers.CanonicalStorageTargetRequest{
-			Object: object,
+			Object:         object,
+			PreferChecksum: true,
 		})
 		if targetErr != nil {
 			return "", "", "", targetErr
@@ -226,7 +227,8 @@ func (s *LFSServer) resolveUploadProxyTarget(ctx context.Context, oid string) (s
 			return "", "", "", conversionErr
 		}
 		target, targetErr := s.transferService.ResolveCanonicalStorageTarget(ctx, transfers.CanonicalStorageTargetRequest{
-			Object: &object,
+			Object:         &object,
+			PreferChecksum: true,
 		})
 		if targetErr != nil {
 			return "", "", "", targetErr
