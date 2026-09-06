@@ -248,6 +248,32 @@ func TestServiceFallbackAggregatesScopedFileUsage(t *testing.T) {
 	}
 }
 
+func TestServiceListsReadableObjectIDsByScopeInRequestOrder(t *testing.T) {
+	objects := &objectReaderSpy{ids: map[string][]string{
+		"org-1/p-1": {"a", "b"},
+		"org-2/p-2": {"b", "c"},
+	}}
+	service := NewService(Dependencies{Objects: objects})
+	requested := []string{"c", "missing", "a", "b"}
+	got, err := service.ListReadableObjectIDs(context.Background(), ScopeQuery{
+		Scopes: []Scope{{Organization: "org-1", Project: "p-1"}, {Organization: "org-2", Project: "p-2"}},
+	}, requested)
+	if err != nil {
+		t.Fatalf("ListReadableObjectIDs error: %v", err)
+	}
+	if want := []string{"c", "a", "b"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("readable IDs = %v, want %v", got, want)
+	}
+
+	unscoped, err := service.ListReadableObjectIDs(context.Background(), ScopeQuery{}, requested)
+	if err != nil {
+		t.Fatalf("unscoped ListReadableObjectIDs error: %v", err)
+	}
+	if !reflect.DeepEqual(unscoped, requested) {
+		t.Fatalf("unscoped readable IDs = %v, want %v", unscoped, requested)
+	}
+}
+
 func TestServiceFallbackMergesTransferBreakdownAndFreshness(t *testing.T) {
 	first := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	second := first.Add(time.Hour)

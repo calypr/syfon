@@ -3,6 +3,7 @@ package metrics
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -30,6 +31,30 @@ func (a metricsObjectReaderAdapter) ListObjectIDsByScope(ctx context.Context, or
 
 func (a metricsObjectReaderAdapter) GetObject(ctx context.Context, id, requiredMethod string) (*objects.Record, error) {
 	return a.db.GetObject(ctx, id)
+}
+
+type metricsOptimizedReportStore struct {
+	*testutils.MockDatabase
+}
+
+func (s metricsOptimizedReportStore) ListFileUsagePageByScope(context.Context, string, string, int, int, *time.Time) ([]usage.FileUsage, error) {
+	return []usage.FileUsage{{ObjectID: "org/"}}, nil
+}
+
+func (s metricsOptimizedReportStore) ListFileUsagePageByResources(context.Context, []string, bool, int, int, *time.Time) ([]usage.FileUsage, error) {
+	return nil, nil
+}
+
+func (s metricsOptimizedReportStore) GetFileUsageSummaryByScope(context.Context, string, string, *time.Time) (usage.FileUsageSummary, error) {
+	return usage.FileUsageSummary{}, nil
+}
+
+func (s metricsOptimizedReportStore) GetFileUsageSummaryByResources(context.Context, []string, bool, *time.Time) (usage.FileUsageSummary, error) {
+	return usage.FileUsageSummary{}, nil
+}
+
+func (s metricsOptimizedReportStore) GetProjectRecordSummaryByScope(context.Context, string, string) (usage.FileUsageSummary, error) {
+	return usage.FileUsageSummary{}, nil
 }
 
 func TestMetricsRoutes_ListAndSummary(t *testing.T) {
@@ -453,6 +478,52 @@ func TestFileUsageScopeHelpers(t *testing.T) {
 	}
 	if inside {
 		t.Fatalf("expected obj-b outside org1/p1")
+	}
+}
+
+func TestFileUsageScopeHelpersUseUnpagedObjectMembership(t *testing.T) {
+	ids := make([]string, 1001)
+	db := &testutils.MockDatabase{
+		Objects:     make(map[string]*objects.Record, len(ids)),
+		ObjectAuthz: make(map[string]map[string][]string, len(ids)),
+		Usage:       make(map[string]usage.FileUsage, len(ids)),
+	}
+	for i := range ids {
+		ids[i] = fmt.Sprintf("object-%04d", i)
+		db.Objects[ids[i]] = &objects.Record{Id: objects.RecordID(ids[i])}
+		db.ObjectAuthz[ids[i]] = map[string][]string{"org": {"project"}}
+		db.Usage[ids[i]] = usage.FileUsage{ObjectID: ids[i]}
+	}
+	service := usage.NewService(usage.Dependencies{
+		Reports: db,
+		Objects: metricsObjectReaderAdapter{db: db},
+	})
+	server := NewMetricsServer(service.Reports(), service.Ingest())
+	readable, err := server.readableBulkObjectIDs(context.Background(), metricsAccess{organization: "org", project: "project"}, []string{"object-1000"})
+	if err != nil {
+		t.Fatalf("readableBulkObjectIDs error: %v", err)
+	}
+	if len(readable) != 1 || readable[0] != "object-1000" {
+		t.Fatalf("readable IDs = %v, want [object-1000]", readable)
+	}
+
+	orgDB := &testutils.MockDatabase{
+		Objects: map[string]*objects.Record{"project-object": {Id: "project-object"}},
+		ObjectAuthz: map[string]map[string][]string{
+			"project-object": {"org": {"project"}},
+		},
+	}
+	optimized := usage.NewService(usage.Dependencies{
+		Reports: metricsOptimizedReportStore{MockDatabase: orgDB},
+		Objects: metricsObjectReaderAdapter{db: orgDB},
+	})
+	orgServer := NewMetricsServer(optimized.Reports(), optimized.Ingest())
+	inside, err := orgServer.objectInScope(context.Background(), "project-object", metricsAccess{organization: "org"})
+	if err != nil {
+		t.Fatalf("organization-wide objectInScope error: %v", err)
+	}
+	if !inside {
+		t.Fatal("organization-wide access did not match project object")
 	}
 }
 

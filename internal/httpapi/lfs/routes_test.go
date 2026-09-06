@@ -14,6 +14,7 @@ import (
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/storage"
 	"github.com/calypr/syfon/internal/testutils"
+	"github.com/calypr/syfon/internal/transfers"
 	"github.com/calypr/syfon/internal/usage"
 )
 
@@ -121,5 +122,93 @@ func TestLFSUploadProxyPreservesOpaqueMultipartAndPartOrder(t *testing.T) {
 	}
 	if storageFake.complete.UploadID != "opaque-upload-id" || len(storageFake.complete.Parts) != 1 || storageFake.complete.Parts[0].ETag != "etag" {
 		t.Fatalf("multipart completion = %+v", storageFake.complete)
+	}
+}
+
+type lfsTestScopeReader struct {
+	scopes map[string]buckets.Scope
+}
+
+func (r lfsTestScopeReader) LookupBucketScope(_ context.Context, organization, project string) (buckets.Scope, bool, error) {
+	scope, ok := r.scopes[organization+"|"+project]
+	return scope, ok, nil
+}
+
+func TestLFSUploadProxyUsesCanonicalOIDForScopedTargets(t *testing.T) {
+	oid := strings.Repeat("d", 64)
+	newTransferService := func(db *testutils.MockDatabase, storageFake *lfsTestStorage) *transfers.Service {
+		return transfers.NewService(transfers.Dependencies{
+			Access:      storageFake,
+			Multipart:   storageFake,
+			Scopes:      lfsTestScopeReader{scopes: map[string]buckets.Scope{"org|project": {Organization: "org", ProjectID: "project", Bucket: "physical", PathPrefix: "project-prefix"}}},
+			Credentials: db,
+			Pending:     db,
+			Events:      db,
+		})
+	}
+
+	tests := []struct {
+		name     string
+		populate func(*testutils.MockDatabase)
+	}{
+		{
+			name: "existing object",
+			populate: func(db *testutils.MockDatabase) {
+				resources := []string{"/programs/org/projects/project"}
+				methods := []objects.AccessMethod{{Type: "s3", AccessUrl: &objects.AccessURL{Url: "s3://legacy/stale-key"}}}
+				db.Objects = map[string]*objects.Record{
+					"record-existing": {
+						Id:               "record-existing",
+						Checksums:        []objects.Checksum{{Type: "sha256", Checksum: oid}},
+						AccessMethods:    &methods,
+						ControlledAccess: &resources,
+					},
+				}
+			},
+		},
+		{
+			name: "pending metadata",
+			populate: func(db *testutils.MockDatabase) {
+				resources := []string{"/programs/org/projects/project"}
+				methods := []objects.AccessMethod{{Type: "s3", AccessUrl: &objects.AccessURL{Url: "s3://legacy/stale-key"}}}
+				db.PendingMeta = map[string]transfers.PendingMetadata{
+					oid: {
+						OID: oid,
+						Candidate: objects.Candidate{
+							Checksums:        &[]objects.Checksum{{Type: "sha256", Checksum: oid}},
+							AccessMethods:    &methods,
+							ControlledAccess: &resources,
+						},
+					},
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := &testutils.MockDatabase{Credentials: map[string]buckets.Credential{"physical": {Bucket: "physical"}}}
+			tt.populate(db)
+			storageFake := &lfsTestStorage{}
+			deps := newLFSTestDependencies(db, storageFake)
+			deps.TransferService = newTransferService(db, storageFake)
+			server := NewLFSServer(deps, DefaultOptions())
+			server.partUploader = func(context.Context, string, []byte) (string, error) { return "etag", nil }
+
+			response, err := server.LfsUploadProxy(context.Background(), lfsapi.LfsUploadProxyRequestObject{
+				Oid:  oid,
+				Body: strings.NewReader("payload"),
+			})
+			if err != nil {
+				t.Fatalf("upload proxy error: %v", err)
+			}
+			if _, ok := response.(lfsapi.LfsUploadProxy200Response); !ok {
+				t.Fatalf("upload proxy response = %T (%+v)", response, response)
+			}
+			want := storage.ObjectTarget{Bucket: "physical", Key: "project-prefix/" + oid}
+			if storageFake.initTarget != want {
+				t.Fatalf("multipart init target = %+v, want %+v", storageFake.initTarget, want)
+			}
+		})
 	}
 }
