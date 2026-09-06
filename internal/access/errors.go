@@ -8,7 +8,6 @@ import (
 	"github.com/calypr/syfon/internal/faults"
 )
 
-// AuthorizationError describes one or more records rejected by access policy.
 type AuthorizationError struct {
 	Method             string
 	RecordID           string

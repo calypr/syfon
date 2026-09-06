@@ -8,7 +8,7 @@ import (
 	"time"
 
 	syfoncommon "github.com/calypr/syfon/common"
-	authz "github.com/calypr/syfon/internal/access"
+	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/db"
 	"github.com/calypr/syfon/internal/faults"
@@ -385,7 +385,7 @@ func (m *ObjectManager) ListObjectIDsPageByURL(ctx context.Context, objectURL, o
 	}
 	if lister, ok := m.db.(db.ObjectURLPageLister); ok {
 		resources, includeUnscoped, restrictToResources := objectMethodResourceFilter(ctx, requiredMethod)
-		if authz.IsGen3Mode(ctx) && authz.IsAuthzEnforced(ctx) && !authz.HasAuthHeader(ctx) {
+		if access.IsGen3Mode(ctx) && access.IsAuthzEnforced(ctx) && !access.HasAuthHeader(ctx) {
 			return []string{}, nil
 		}
 		return lister.ListObjectIDsPageByURL(ctx, objectURL, organization, project, startAfter, limit, offset, resources, includeUnscoped, restrictToResources)
@@ -608,10 +608,10 @@ func objectHasAccessURL(obj *models.InternalObject, objectURL string) bool {
 
 func (m *ObjectManager) listReadableObjectIDs(ctx context.Context) ([]string, bool, error) {
 	lister, ok := m.db.(db.ObjectIDResourceLister)
-	if !ok || !authz.IsAuthzEnforced(ctx) {
+	if !ok || !access.IsAuthzEnforced(ctx) {
 		return nil, false, nil
 	}
-	if authz.IsGen3Mode(ctx) && !authz.HasAuthHeader(ctx) {
+	if access.IsGen3Mode(ctx) && !access.HasAuthHeader(ctx) {
 		return []string{}, true, nil
 	}
 
@@ -622,10 +622,10 @@ func (m *ObjectManager) listReadableObjectIDs(ctx context.Context) ([]string, bo
 
 func (m *ObjectManager) listReadableObjectIDsPage(ctx context.Context, startAfter string, limit, offset int) ([]string, bool, error) {
 	pager, ok := m.db.(db.ObjectIDPageLister)
-	if !ok || !authz.IsAuthzEnforced(ctx) {
+	if !ok || !access.IsAuthzEnforced(ctx) {
 		return nil, false, nil
 	}
-	if authz.IsGen3Mode(ctx) && !authz.HasAuthHeader(ctx) {
+	if access.IsGen3Mode(ctx) && !access.HasAuthHeader(ctx) {
 		return []string{}, true, nil
 	}
 
@@ -635,14 +635,14 @@ func (m *ObjectManager) listReadableObjectIDsPage(ctx context.Context, startAfte
 }
 
 func (m *ObjectManager) canPageScopeRead(ctx context.Context, organization, project string) bool {
-	if !authz.IsAuthzEnforced(ctx) {
+	if !access.IsAuthzEnforced(ctx) {
 		return true
 	}
 	resource, err := syfoncommon.ResourcePath(organization, project)
 	if err != nil {
 		return false
 	}
-	return authz.HasMethodAccess(ctx, objectMethodRead, []string{resource})
+	return access.HasMethodAccess(ctx, objectMethodRead, []string{resource})
 }
 
 func readableResources(ctx context.Context) []string {
@@ -650,13 +650,13 @@ func readableResources(ctx context.Context) []string {
 }
 
 func (m *ObjectManager) readableChecksumFilter(ctx context.Context, organization, project string) ([]string, bool, bool, bool) {
-	if !authz.IsAuthzEnforced(ctx) {
+	if !access.IsAuthzEnforced(ctx) {
 		return nil, false, false, true
 	}
-	if authz.IsGen3Mode(ctx) && !authz.HasAuthHeader(ctx) {
+	if access.IsGen3Mode(ctx) && !access.HasAuthHeader(ctx) {
 		return nil, false, true, true
 	}
-	if authz.HasMethodAccess(ctx, objectMethodRead, []string{"/programs"}) || authz.HasMethodAccess(ctx, objectMethodRead, []string{"/data_file"}) {
+	if access.HasMethodAccess(ctx, objectMethodRead, []string{"/programs"}) || access.HasMethodAccess(ctx, objectMethodRead, []string{"/data_file"}) {
 		return nil, false, false, true
 	}
 	if strings.TrimSpace(organization) != "" && m.canPageScopeRead(ctx, organization, project) {
@@ -667,22 +667,22 @@ func (m *ObjectManager) readableChecksumFilter(ctx context.Context, organization
 
 func objectMethodResourceFilter(ctx context.Context, method string) ([]string, bool, bool) {
 	method = strings.TrimSpace(method)
-	if method == "" || !authz.IsAuthzEnforced(ctx) {
+	if method == "" || !access.IsAuthzEnforced(ctx) {
 		return nil, true, false
 	}
-	if authz.IsGen3Mode(ctx) && !authz.HasAuthHeader(ctx) {
+	if access.IsGen3Mode(ctx) && !access.HasAuthHeader(ctx) {
 		return nil, false, true
 	}
-	if authz.HasMethodAccess(ctx, method, []string{"/programs"}) || authz.HasMethodAccess(ctx, method, []string{"/data_file"}) {
+	if access.HasMethodAccess(ctx, method, []string{"/programs"}) || access.HasMethodAccess(ctx, method, []string{"/data_file"}) {
 		return nil, strings.EqualFold(method, objectMethodRead), false
 	}
 	return authorizedResources(ctx, method), strings.EqualFold(method, objectMethodRead), true
 }
 
 func authorizedResources(ctx context.Context, method string) []string {
-	privileges := authz.GetUserPrivileges(ctx)
+	privileges := access.GetUserPrivileges(ctx)
 	if len(privileges) == 0 {
-		return syfoncommon.NormalizeAccessResources(authz.GetUserAuthz(ctx))
+		return syfoncommon.NormalizeAccessResources(access.GetUserAuthz(ctx))
 	}
 	resources := make([]string, 0, len(privileges))
 	for resource, methods := range privileges {

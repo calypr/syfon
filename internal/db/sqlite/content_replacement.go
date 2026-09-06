@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	sycommon "github.com/calypr/syfon/common"
-	authz "github.com/calypr/syfon/internal/access"
+	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/faults"
 	"github.com/calypr/syfon/internal/models"
@@ -65,7 +65,7 @@ func replaceObjectTx(ctx context.Context, tx *sql.Tx, obj *models.InternalObject
 	if err != nil {
 		return "", err
 	}
-	if !authz.HasMethodAccess(ctx, "update", currentResources) {
+	if !access.HasMethodAccess(ctx, "update", currentResources) {
 		return "", faults.ErrUnauthorized
 	}
 	sha, hasSHA, err := common.ValidateCanonicalSHA256(obj.Checksums)

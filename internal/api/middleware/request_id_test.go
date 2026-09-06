@@ -29,8 +29,8 @@ func TestRequestIDMiddleware_GeneratesAndPropagates(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
-	if resp.Header.Get(RequestIDHeader) == "" {
-		t.Fatalf("expected %s response header", RequestIDHeader)
+	if resp.Header.Get(requestIDHeader) == "" {
+		t.Fatalf("expected %s response header", requestIDHeader)
 	}
 }
 
@@ -47,13 +47,13 @@ func TestRequestIDMiddleware_UsesIncomingHeader(t *testing.T) {
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.Header.Set(RequestIDHeader, incoming)
+	req.Header.Set(requestIDHeader, incoming)
 	resp, err := app.Test(req)
 	if err != nil {
 		t.Fatalf("test request failed: %v", err)
 	}
 
-	if got := resp.Header.Get(RequestIDHeader); got != incoming {
+	if got := resp.Header.Get(requestIDHeader); got != incoming {
 		t.Fatalf("expected response header %q, got %q", incoming, got)
 	}
 }

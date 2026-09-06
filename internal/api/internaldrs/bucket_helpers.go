@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	sycommon "github.com/calypr/syfon/common"
-	authz "github.com/calypr/syfon/internal/access"
+	"github.com/calypr/syfon/internal/access"
 	apimiddleware "github.com/calypr/syfon/internal/api/middleware"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/faults"
@@ -39,15 +39,15 @@ func bucketScopeAllowed(ctx context.Context, scope models.BucketScope, methods .
 	if err != nil || resource == "" {
 		return false
 	}
-	return authz.HasAnyMethodAccess(ctx, []string{resource}, methods...)
+	return access.HasAnyMethodAccess(ctx, []string{resource}, methods...)
 }
 
 func resourceAllowed(ctx context.Context, resource string, methods ...string) bool {
-	return authz.HasAnyMethodAccess(ctx, []string{resource}, methods...)
+	return access.HasAnyMethodAccess(ctx, []string{resource}, methods...)
 }
 
 func serviceResourceAllowed(ctx context.Context, resource, service string, methods ...string) bool {
-	return authz.HasAnyServiceMethodAccess(ctx, []string{resource}, service, methods...)
+	return access.HasAnyServiceMethodAccess(ctx, []string{resource}, service, methods...)
 }
 
 func bucketsAllowedByNames(ctx context.Context, scopes []models.BucketScope, bucket string, methods ...string) bool {
@@ -64,10 +64,10 @@ func bucketsAllowedByNames(ctx context.Context, scopes []models.BucketScope, buc
 
 func authorizeBucketScopeWrite(ctx context.Context, organization, project string, methods ...string) error {
 	if strings.TrimSpace(organization) == "" {
-		if authz.IsGen3Mode(ctx) && apimiddleware.MissingGen3AuthHeader(ctx) {
+		if access.IsGen3Mode(ctx) && apimiddleware.MissingGen3AuthHeader(ctx) {
 			return faults.ErrUnauthorized
 		}
-		if !authz.IsAuthzEnforced(ctx) {
+		if !access.IsAuthzEnforced(ctx) {
 			return nil
 		}
 		return faults.ErrUnauthorized

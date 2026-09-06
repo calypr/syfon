@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/calypr/syfon/apigen/server/drs"
-	auth "github.com/calypr/syfon/internal/access"
+	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/faults"
 	"github.com/calypr/syfon/internal/models"
@@ -231,7 +231,7 @@ func testIdentityAuth(resource string, methods ...string) context.Context {
 }
 
 func withIdentityPrivileges(ctx context.Context, resource string, methods ...string) context.Context {
-	session := auth.FromContext(ctx)
+	session := access.FromContext(ctx)
 	privileges := make(map[string]map[string]bool, len(session.Privileges)+1)
 	for existing, existingMethods := range session.Privileges {
 		privileges[existing] = make(map[string]bool, len(existingMethods))
@@ -248,5 +248,5 @@ func withIdentityPrivileges(ctx context.Context, resource string, methods ...str
 	resources := append([]string(nil), session.Resources...)
 	resources = append(resources, resource)
 	session.SetAuthorizations(resources, privileges, true)
-	return auth.WithSession(ctx, session)
+	return access.WithSession(ctx, session)
 }

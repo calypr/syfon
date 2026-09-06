@@ -17,7 +17,7 @@ import (
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/smithy-go"
 	syfoncommon "github.com/calypr/syfon/common"
-	authz "github.com/calypr/syfon/internal/access"
+	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/faults"
 	"github.com/calypr/syfon/internal/models"
@@ -380,8 +380,8 @@ func (m *ObjectManager) inspectScopedStorageObject(ctx context.Context, req Insp
 	if err != nil {
 		return nil, &StorageInspectError{Kind: StorageInspectInvalidInput, Message: err.Error()}
 	}
-	if authz.IsAuthzEnforced(ctx) && !authz.HasMethodAccess(ctx, objectMethodRead, []string{resource}) {
-		return nil, &authz.AuthorizationError{Method: objectMethodRead, Resources: []string{resource}}
+	if access.IsAuthzEnforced(ctx) && !access.HasMethodAccess(ctx, objectMethodRead, []string{resource}) {
+		return nil, &access.AuthorizationError{Method: objectMethodRead, Resources: []string{resource}}
 	}
 
 	target, err := m.ResolveScopedUploadTarget(ctx, organization, project, key)

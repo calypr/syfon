@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/calypr/syfon/apigen/server/drs"
-	internalauth "github.com/calypr/syfon/internal/access"
+	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/models"
@@ -153,11 +153,11 @@ func EventID(ev models.TransferAttributionEvent) string {
 }
 
 func ActorSubject(ctx context.Context) string {
-	return strings.TrimSpace(internalauth.FromContext(ctx).Subject)
+	return strings.TrimSpace(access.FromContext(ctx).Subject)
 }
 
 func ActorEmail(ctx context.Context) string {
-	claims := internalauth.FromContext(ctx).Claims
+	claims := access.FromContext(ctx).Claims
 	for _, key := range []string{"email", "preferred_username", "username"} {
 		if v, ok := claims[key].(string); ok && strings.Contains(v, "@") {
 			return strings.TrimSpace(v)
@@ -171,7 +171,7 @@ func ActorEmail(ctx context.Context) string {
 }
 
 func authMode(ctx context.Context) string {
-	return strings.TrimSpace(internalauth.FromContext(ctx).Mode)
+	return strings.TrimSpace(access.FromContext(ctx).Mode)
 }
 
 func accessMethods(obj *models.InternalObject) []drs.AccessMethod {

@@ -10,7 +10,7 @@ import (
 
 	"github.com/calypr/syfon/apigen/server/drs"
 	syfoncommon "github.com/calypr/syfon/common"
-	authz "github.com/calypr/syfon/internal/access"
+	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/db"
 	"github.com/calypr/syfon/internal/faults"
@@ -551,7 +551,7 @@ func (m *ObjectManager) RequireObjectResources(ctx context.Context, method strin
 	if strings.TrimSpace(method) == "" {
 		return nil
 	}
-	if authz.HasObjectMethodAccess(ctx, method, resources) {
+	if access.HasObjectMethodAccess(ctx, method, resources) {
 		return nil
 	}
 	return faults.ErrUnauthorized
@@ -580,7 +580,7 @@ func (m *ObjectManager) requireAllObjectMethod(ctx context.Context, obj *models.
 	if len(resources) == 0 {
 		return m.RequireObjectResources(ctx, method, resources)
 	}
-	if authz.HasMethodAccess(ctx, method, resources) {
+	if access.HasMethodAccess(ctx, method, resources) {
 		return nil
 	}
 	return faults.ErrUnauthorized
@@ -597,7 +597,7 @@ func (m *ObjectManager) hasObjectMethod(ctx context.Context, obj *models.Interna
 	if strings.EqualFold(method, objectMethodRead) && obj != nil && obj.PublicReadPolicyKnown && len(ObjectAccessResources(obj)) == 0 {
 		return false
 	}
-	return authz.HasObjectMethodAccess(ctx, method, ObjectAccessResources(obj))
+	return access.HasObjectMethodAccess(ctx, method, ObjectAccessResources(obj))
 }
 
 func (m *ObjectManager) bulkObjectMethodError(ctx context.Context, objs []models.InternalObject, method string) error {
@@ -635,7 +635,7 @@ func (m *ObjectManager) bulkObjectMethodError(ctx context.Context, objs []models
 		resourceList = resourceList[:maxDeniedAccessResources]
 	}
 
-	return &authz.AuthorizationError{
+	return &access.AuthorizationError{
 		Method:             method,
 		RecordID:           firstDeniedID,
 		Resources:          resourceList,

@@ -12,7 +12,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 )
 
-const RequestIDHeader = "X-Request-Id"
+const requestIDHeader = "X-Request-Id"
 
 type RequestIDMiddleware struct {
 	logger *slog.Logger
@@ -27,7 +27,7 @@ func NewRequestIDMiddleware(logger *slog.Logger) *RequestIDMiddleware {
 
 func (m *RequestIDMiddleware) FiberMiddleware() fiber.Handler {
 	return func(c fiber.Ctx) error {
-		requestID := strings.TrimSpace(c.Get(RequestIDHeader))
+		requestID := strings.TrimSpace(c.Get(requestIDHeader))
 		if requestID == "" {
 			requestID = newRequestID()
 		}
@@ -36,7 +36,7 @@ func (m *RequestIDMiddleware) FiberMiddleware() fiber.Handler {
 		ctx := requestmeta.WithRequestID(c.Context(), requestID)
 		c.SetContext(ctx)
 
-		c.Set(RequestIDHeader, requestID)
+		c.Set(requestIDHeader, requestID)
 
 		start := time.Now()
 		m.logger.Debug("request start", "request_id", requestID, "method", c.Method(), "path", c.Path())

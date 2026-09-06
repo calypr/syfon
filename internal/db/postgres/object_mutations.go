@@ -9,7 +9,7 @@ import (
 
 	"github.com/calypr/syfon/apigen/server/drs"
 	sycommon "github.com/calypr/syfon/common"
-	authz "github.com/calypr/syfon/internal/access"
+	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/faults"
 	"github.com/calypr/syfon/internal/models"
@@ -456,7 +456,7 @@ func (db *PostgresDB) RemoveObjectControlledAccess(ctx context.Context, objectID
 	if err := postgresEnsureNoLegacyDuplicateTx(ctx, tx, canonicalID); err != nil {
 		return err
 	}
-	if !authz.HasMethodAccess(ctx, "update", []string{resource}) {
+	if !access.HasMethodAccess(ctx, "update", []string{resource}) {
 		return faults.ErrUnauthorized
 	}
 
@@ -503,7 +503,7 @@ func (db *PostgresDB) RemoveObjectControlledAccessBulk(ctx context.Context, obje
 		return 0, err
 	}
 	orgWide := !strings.Contains(resource, "/project/")
-	if !orgWide && !authz.HasMethodAccess(ctx, "delete", []string{resource}) {
+	if !orgWide && !access.HasMethodAccess(ctx, "delete", []string{resource}) {
 		return 0, faults.ErrUnauthorized
 	}
 	seen := make(map[string]struct{}, len(objectIDs))
@@ -532,7 +532,7 @@ func (db *PostgresDB) RemoveObjectControlledAccessBulk(ctx context.Context, obje
 			if currentResource != resource && (!orgWide || !strings.HasPrefix(currentResource, resource+"/project/")) {
 				continue
 			}
-			if !authz.HasMethodAccess(ctx, "delete", []string{currentResource}) {
+			if !access.HasMethodAccess(ctx, "delete", []string{currentResource}) {
 				continue
 			}
 			if _, err := tx.ExecContext(ctx, `DELETE FROM drs_object_controlled_access WHERE object_id = $1 AND resource = $2`, canonicalID, currentResource); err != nil {

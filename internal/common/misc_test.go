@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/calypr/syfon/apigen/server/drs"
-	internalauth "github.com/calypr/syfon/internal/access"
+	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/requestmeta"
 )
@@ -25,8 +25,8 @@ func TestAuditS3CredentialAccess_LogsSuccessAndError(t *testing.T) {
 	ctx := requestmeta.WithRequestID(context.Background(), "req-abc")
 	AuditS3CredentialAccess(ctx, "read", "bucket-a", nil)
 
-	session := internalauth.NewSession("gen3")
-	errCtx := internalauth.WithSession(ctx, session)
+	session := access.NewSession("gen3")
+	errCtx := access.WithSession(ctx, session)
 	AuditS3CredentialAccess(errCtx, "write", "bucket-b", errors.New("boom"))
 
 	out := buf.String()

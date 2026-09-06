@@ -9,7 +9,7 @@ import (
 	"time"
 
 	sycommon "github.com/calypr/syfon/common"
-	authz "github.com/calypr/syfon/internal/access"
+	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/faults"
 	"github.com/calypr/syfon/internal/models"
@@ -500,13 +500,13 @@ func postgresHasResourceOverlap(left, right []string) bool {
 }
 
 func postgresCanReadContent(ctx context.Context, resources []string) bool {
-	if !authz.IsAuthzEnforced(ctx) {
+	if !access.IsAuthzEnforced(ctx) {
 		return true
 	}
 	if len(resources) == 0 {
 		return false
 	}
-	return authz.HasObjectMethodAccess(ctx, "read", resources)
+	return access.HasObjectMethodAccess(ctx, "read", resources)
 }
 
 func postgresCanCreateResources(ctx context.Context, resources, current []string) bool {
@@ -518,7 +518,7 @@ func postgresCanCreateResources(ctx context.Context, resources, current []string
 		if _, exists := currentSet[resource]; exists {
 			continue
 		}
-		if !authz.HasMethodAccess(ctx, "create", []string{resource}) {
+		if !access.HasMethodAccess(ctx, "create", []string{resource}) {
 			return false
 		}
 	}
@@ -530,7 +530,7 @@ func postgresRequireContentMethodTx(ctx context.Context, tx *sql.Tx, id, method 
 	if err != nil {
 		return err
 	}
-	if !authz.HasMethodAccess(ctx, method, resources) {
+	if !access.HasMethodAccess(ctx, method, resources) {
 		return faults.ErrUnauthorized
 	}
 	return nil

@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/calypr/syfon/apigen/server/drs"
-	internalauth "github.com/calypr/syfon/internal/access"
+	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/faults"
 	"github.com/calypr/syfon/internal/models"
@@ -119,17 +119,17 @@ func (m *capturingURLManager) InvalidateBucket(bucket string) {
 }
 
 func buildGen3Context(privileges map[string]map[string]bool) context.Context {
-	session := internalauth.NewSession("gen3")
+	session := access.NewSession("gen3")
 	session.AuthHeaderPresent = true
 	session.SetAuthorizations(nil, privileges, true)
-	return internalauth.WithSession(context.Background(), session)
+	return access.WithSession(context.Background(), session)
 }
 
 func buildLocalAuthzContext(privileges map[string]map[string]bool) context.Context {
-	session := internalauth.NewSession("local")
+	session := access.NewSession("local")
 	session.AuthzEnforced = true
 	session.SetAuthorizations(nil, privileges, true)
-	return internalauth.WithSession(context.Background(), session)
+	return access.WithSession(context.Background(), session)
 }
 
 func TestObjectManagerGetObjectLookupPaths(t *testing.T) {

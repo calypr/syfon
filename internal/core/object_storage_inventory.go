@@ -24,7 +24,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/smithy-go"
 	syfoncommon "github.com/calypr/syfon/common"
-	authz "github.com/calypr/syfon/internal/access"
+	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/requestmeta"
@@ -347,8 +347,8 @@ func (m *ObjectManager) resolveProjectStorageScopeTargetForMethod(ctx context.Co
 	if err != nil {
 		return nil, &StorageInspectError{Kind: StorageInspectInvalidInput, Message: err.Error()}
 	}
-	if authz.IsAuthzEnforced(ctx) && !authz.HasMethodAccess(ctx, method, []string{resource}) {
-		return nil, &authz.AuthorizationError{Method: method, Resources: []string{resource}}
+	if access.IsAuthzEnforced(ctx) && !access.HasMethodAccess(ctx, method, []string{resource}) {
+		return nil, &access.AuthorizationError{Method: method, Resources: []string{resource}}
 	}
 
 	scopes := make([]models.BucketScope, 0, 2)

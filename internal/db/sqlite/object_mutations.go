@@ -8,7 +8,7 @@ import (
 
 	"github.com/calypr/syfon/apigen/server/drs"
 	sycommon "github.com/calypr/syfon/common"
-	authz "github.com/calypr/syfon/internal/access"
+	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/faults"
 	"github.com/calypr/syfon/internal/models"
@@ -447,7 +447,7 @@ func (db *SqliteDB) RemoveObjectControlledAccess(ctx context.Context, objectID, 
 	if err := sqliteEnsureNoLegacyDuplicateTx(ctx, tx, canonicalID); err != nil {
 		return err
 	}
-	if !authz.HasMethodAccess(ctx, "update", []string{resource}) {
+	if !access.HasMethodAccess(ctx, "update", []string{resource}) {
 		return faults.ErrUnauthorized
 	}
 
@@ -491,7 +491,7 @@ func (db *SqliteDB) RemoveObjectControlledAccessBulk(ctx context.Context, object
 	}
 	defer tx.Rollback()
 	orgWide := !strings.Contains(resource, "/project/")
-	if !orgWide && !authz.HasMethodAccess(ctx, "delete", []string{resource}) {
+	if !orgWide && !access.HasMethodAccess(ctx, "delete", []string{resource}) {
 		return 0, faults.ErrUnauthorized
 	}
 	seen := make(map[string]struct{}, len(objectIDs))
@@ -520,7 +520,7 @@ func (db *SqliteDB) RemoveObjectControlledAccessBulk(ctx context.Context, object
 			if currentResource != resource && (!orgWide || !strings.HasPrefix(currentResource, resource+"/project/")) {
 				continue
 			}
-			if !authz.HasMethodAccess(ctx, "delete", []string{currentResource}) {
+			if !access.HasMethodAccess(ctx, "delete", []string{currentResource}) {
 				continue
 			}
 			if _, err := tx.ExecContext(ctx, `DELETE FROM drs_object_controlled_access WHERE object_id = ? AND resource = ?`, canonicalID, currentResource); err != nil {

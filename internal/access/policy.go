@@ -20,9 +20,8 @@ func GetUserAuthz(ctx context.Context) []string {
 func CheckAccess(recordResources []string, userResources []string) bool {
 	recordResources = sycommon.NormalizeAccessResources(recordResources)
 	if len(recordResources) == 0 {
-		return true // Public
+		return true
 	}
-	// Create map for O(1) check
 	userMap := make(map[string]bool)
 	for _, r := range userResources {
 		if normalized := sycommon.NormalizeAccessResource(r); normalized != "" {

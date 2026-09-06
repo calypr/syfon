@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	authz "github.com/calypr/syfon/internal/access"
+	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/faults"
 	"github.com/calypr/syfon/internal/requestmeta"
@@ -32,7 +32,7 @@ func HandleError(c fiber.Ctx, err error) error {
 		msg = "Resource not found"
 	case errors.Is(err, faults.ErrUnauthorized):
 		status = http.StatusForbidden
-		if authz.IsGen3Mode(c.Context()) && !authz.HasAuthHeader(c.Context()) {
+		if access.IsGen3Mode(c.Context()) && !access.HasAuthHeader(c.Context()) {
 			status = http.StatusUnauthorized
 		}
 		msg = "Unauthorized"
