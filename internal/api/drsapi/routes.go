@@ -4,38 +4,39 @@ import (
 	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/core"
+	"github.com/calypr/syfon/internal/objects"
 	"github.com/gofiber/fiber/v3"
 )
 
-func RegisterDRSRoutes(router fiber.Router, om *core.ObjectManager, serviceInfo drs.Service) {
+func RegisterDRSRoutes(router fiber.Router, objectService *objects.Service, accessManager *core.ObjectManager, serviceInfo drs.Service) {
 	// Static routes first
-	router.Post("/objects/register", handleRegisterObjectsFiber(om))
-	router.Post("/objects/access", handleGetBulkAccessURLFiber(om))
-	router.Post("/objects/delete", handleBulkDeleteObjectsFiber(om))
-	router.Put("/objects/delete", handleBulkDeleteObjectsFiber(om))
+	router.Post("/objects/register", handleRegisterObjectsFiber(objectService))
+	router.Post("/objects/access", handleGetBulkAccessURLFiber(accessManager))
+	router.Post("/objects/delete", handleBulkDeleteObjectsFiber(objectService))
+	router.Put("/objects/delete", handleBulkDeleteObjectsFiber(objectService))
 	router.Put("/objects/checksums", handleUnsupportedChecksumAdditionFiber())
-	router.Post("/objects/access-methods", handleUpdateAccessMethodsFiber(om))
-	router.Put("/objects/access-methods", handleUpdateAccessMethodsFiber(om))
-	router.Get("/objects/checksum/:checksum", handleGetObjectsByChecksumFiber(om))
-	router.Post("/objects", handleGetBulkObjectsFiber(om))
+	router.Post("/objects/access-methods", handleUpdateAccessMethodsFiber(objectService))
+	router.Put("/objects/access-methods", handleUpdateAccessMethodsFiber(objectService))
+	router.Get("/objects/checksum/:checksum", handleGetObjectsByChecksumFiber(objectService))
+	router.Post("/objects", handleGetBulkObjectsFiber(objectService))
 	router.Get("/service-info", handleGetServiceInfoFiber(serviceInfo))
-	router.Post("/upload-request", handleUploadRequestFiber(om))
+	router.Post("/upload-request", handleUploadRequestFiber())
 
 	// Dynamic routes with parameters last
-	router.Get("/objects/:object_id", handleGetObjectFiber(om))
-	router.Post("/objects/:object_id", handleGetObjectFiber(om))
-	router.Delete("/objects/:object_id", handleDeleteObjectFiber(om))
-	router.Post("/objects/:object_id/delete", handleDeleteObjectFiber(om))
-	router.Put("/objects/:object_id/delete", handleDeleteObjectFiber(om))
+	router.Get("/objects/:object_id", handleGetObjectFiber(objectService))
+	router.Post("/objects/:object_id", handleGetObjectFiber(objectService))
+	router.Delete("/objects/:object_id", handleDeleteObjectFiber(objectService))
+	router.Post("/objects/:object_id/delete", handleDeleteObjectFiber(objectService))
+	router.Put("/objects/:object_id/delete", handleDeleteObjectFiber(objectService))
 	router.Put("/objects/:object_id/checksums", handleUnsupportedChecksumAdditionFiber())
-	router.Get("/objects/:object_id/access/:access_id", handleGetAccessURLFiber(om))
-	router.Post("/objects/:object_id/access/:access_id", handleGetAccessURLFiber(om))
-	router.Post("/objects/:object_id/access-methods", handleUpdateAccessMethodsFiber(om))
-	router.Put("/objects/:object_id/access-methods", handleUpdateAccessMethodsFiber(om))
+	router.Get("/objects/:object_id/access/:access_id", handleGetAccessURLFiber(accessManager))
+	router.Post("/objects/:object_id/access/:access_id", handleGetAccessURLFiber(accessManager))
+	router.Post("/objects/:object_id/access-methods", handleUpdateAccessMethodsFiber(objectService))
+	router.Put("/objects/:object_id/access-methods", handleUpdateAccessMethodsFiber(objectService))
 
 	// Options
-	router.Options("/objects", handleOptionsBulkObjectFiber(om))
-	router.Options("/objects/:object_id", handleOptionsBulkObjectFiber(om))
+	router.Options("/objects", handleOptionsBulkObjectFiber())
+	router.Options("/objects/:object_id", handleOptionsBulkObjectFiber())
 }
 
 func handleUnsupportedChecksumAdditionFiber() fiber.Handler {
@@ -50,7 +51,7 @@ func handleGetServiceInfoFiber(serviceInfo drs.Service) fiber.Handler {
 	}
 }
 
-func handleOptionsBulkObjectFiber(om *core.ObjectManager) fiber.Handler {
+func handleOptionsBulkObjectFiber() fiber.Handler {
 	return func(c fiber.Ctx) error {
 		return c.SendStatus(fiber.StatusNoContent)
 	}

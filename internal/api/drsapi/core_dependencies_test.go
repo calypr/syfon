@@ -10,10 +10,35 @@ import (
 	"github.com/calypr/syfon/internal/usage"
 )
 
-func testObjectManager(backend any, storagePorts core.StoragePorts) *core.ObjectManager {
+type testObjectManagerFixture struct {
+	*core.ObjectManager
+	objectService *objects.Service
+}
+
+func testObjectManager(backend any, storagePorts core.StoragePorts) *testObjectManagerFixture {
 	deps := testDependencies(backend)
 	deps.Storage = storagePorts
-	return core.NewObjectManager(deps)
+	return &testObjectManagerFixture{
+		ObjectManager: core.NewObjectManager(deps),
+		objectService: newObjectService(deps.Objects),
+	}
+}
+
+func newObjectService(ports core.ObjectPorts) *objects.Service {
+	return objects.NewService(objects.Dependencies{
+		Reader:        ports.Reader,
+		Writer:        ports.Writer,
+		AccessMethods: ports.AccessMethods,
+		AccessPolicy:  ports.AccessPolicy,
+		Aliases:       ports.Aliases,
+		Content:       ports.Content,
+		ChecksumScope: ports.ChecksumScope,
+		Scope:         ports.Scope,
+		Resources:     ports.Resources,
+		Pages:         ports.Pages,
+		URLPages:      ports.URLPages,
+		Authorized:    ports.Authorized,
+	})
 }
 
 func testDependencies(backend any) core.Dependencies {

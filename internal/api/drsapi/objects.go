@@ -4,15 +4,15 @@ import (
 	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/api/apiutil"
 	"github.com/calypr/syfon/internal/common"
-	"github.com/calypr/syfon/internal/core"
 	httpdrs "github.com/calypr/syfon/internal/httpapi/drs"
+	"github.com/calypr/syfon/internal/objects"
 	"github.com/gofiber/fiber/v3"
 )
 
-func handleGetObjectFiber(om *core.ObjectManager) fiber.Handler {
+func handleGetObjectFiber(service *objects.Service) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		id := c.Params("object_id")
-		obj, err := om.GetObject(c.Context(), id, "")
+		obj, err := service.GetObject(c.Context(), id, "")
 		if err != nil {
 			return apiutil.HandleError(c, err)
 		}
@@ -20,7 +20,7 @@ func handleGetObjectFiber(om *core.ObjectManager) fiber.Handler {
 	}
 }
 
-func handleGetBulkObjectsFiber(om *core.ObjectManager) fiber.Handler {
+func handleGetBulkObjectsFiber(service *objects.Service) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		var body struct {
 			BulkObjectIds []string `json:"bulk_object_ids"`
@@ -29,7 +29,7 @@ func handleGetBulkObjectsFiber(om *core.ObjectManager) fiber.Handler {
 			return c.Status(fiber.StatusBadRequest).JSON(drs.Error{Msg: common.Ptr("Invalid request body")})
 		}
 
-		objects, err := om.GetBulkObjects(c.Context(), body.BulkObjectIds, "")
+		objects, err := service.GetBulkObjects(c.Context(), body.BulkObjectIds, "")
 		if err != nil {
 			return apiutil.HandleError(c, err)
 		}
@@ -49,10 +49,10 @@ func handleGetBulkObjectsFiber(om *core.ObjectManager) fiber.Handler {
 	}
 }
 
-func handleGetObjectsByChecksumFiber(om *core.ObjectManager) fiber.Handler {
+func handleGetObjectsByChecksumFiber(service *objects.Service) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		checksum := c.Params("checksum")
-		fetched, err := om.GetObjectsByChecksum(c.Context(), checksum, "")
+		fetched, err := service.GetObjectsByChecksum(c.Context(), checksum, "")
 		if err != nil {
 			return apiutil.HandleError(c, err)
 		}
