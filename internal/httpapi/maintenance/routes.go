@@ -21,25 +21,25 @@ const (
 	RouteRepairScopeApply              = "/data/repair/project-scope/apply"
 )
 
-type Dependencies struct {
-	ProjectStorageService *projectstorage.Service
-	BucketService         *buckets.Service
-	ScopeRepairService    *scoperepair.Service
+func RegisterRepairRoutes(router fiber.Router, service *scoperepair.Service) {
+	router.Post(RouteRepairScopeAudit, handleInternalScopeRepairAuditFiber(service))
+	router.Post(RouteRepairScopeApply, handleInternalScopeRepairApplyFiber(service))
 }
 
-func RegisterRoutes(router fiber.Router, deps Dependencies) {
-	router.Post(RouteInspectObject, handleInternalInspectObjectFiber(deps.ProjectStorageService))
-	router.Post(RouteInspectObjectBulk, handleInternalInspectObjectBulkFiber(deps.ProjectStorageService))
-	router.Post(RouteInspectObjectBulkList, handleInternalInspectObjectBulkListFiber(deps.ProjectStorageService))
-	router.Post(RouteInspectProjectBucket, handleInternalInspectProjectBucketFiber(deps.ProjectStorageService))
-	router.Post(RouteInspectProjectBucketInventory, handleInternalInspectProjectBucketInventoryFiber(deps.ProjectStorageService))
-	router.Post(RouteInspectProjectRecords, handleInternalInspectProjectRecordsFiber(deps.ProjectStorageService))
-	router.Get(RouteInspectProjectScopes, handleInternalInspectProjectScopesFiber(deps.BucketService))
-	router.Post(RouteInspectProjectScopes, handleInternalInspectProjectScopesFiber(deps.BucketService))
-	router.Post(RouteDeleteProjectBucketObjects, handleInternalDeleteProjectBucketObjectsFiber(deps.ProjectStorageService))
+func RegisterInspectionRoutes(router fiber.Router, projectStorageService *projectstorage.Service, bucketService *buckets.Service) {
+	router.Post(RouteInspectObject, handleInternalInspectObjectFiber(projectStorageService))
+	router.Post(RouteInspectObjectBulk, handleInternalInspectObjectBulkFiber(projectStorageService))
+	router.Post(RouteInspectObjectBulkList, handleInternalInspectObjectBulkListFiber(projectStorageService))
+	router.Post(RouteInspectProjectBucket, handleInternalInspectProjectBucketFiber(projectStorageService))
+	router.Post(RouteInspectProjectBucketInventory, handleInternalInspectProjectBucketInventoryFiber(projectStorageService))
+	router.Post(RouteInspectProjectRecords, handleInternalInspectProjectRecordsFiber(projectStorageService))
+	router.Get(RouteInspectProjectScopes, handleInternalInspectProjectScopesFiber(bucketService))
+	router.Post(RouteInspectProjectScopes, handleInternalInspectProjectScopesFiber(bucketService))
+	router.Post(RouteDeleteProjectBucketObjects, handleInternalDeleteProjectBucketObjectsFiber(projectStorageService))
+}
+
+func RegisterProjectCleanupRoutes(router fiber.Router, service *projectstorage.Service) {
 	router.Delete(RouteProjectCleanup, func(c fiber.Ctx) error {
-		return handleInternalDeleteProjectFiber(c, deps.ProjectStorageService)
+		return handleInternalDeleteProjectFiber(c, service)
 	})
-	router.Post(RouteRepairScopeAudit, handleInternalScopeRepairAuditFiber(deps.ScopeRepairService))
-	router.Post(RouteRepairScopeApply, handleInternalScopeRepairApplyFiber(deps.ScopeRepairService))
 }
