@@ -1,7 +1,7 @@
 package testutils
 
 import (
-	"github.com/calypr/syfon/internal/db/sqlite"
+	"github.com/calypr/syfon/internal/persistence/sqlite"
 )
 
 // NewInMemoryDB returns a new SQLite backend backed by an in-memory database.

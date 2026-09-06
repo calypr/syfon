@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	sycommon "github.com/calypr/syfon/common"
-	"github.com/calypr/syfon/internal/db/sqlite"
 	"github.com/calypr/syfon/internal/faults"
+	"github.com/calypr/syfon/internal/persistence/sqlite"
 
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/testutils"

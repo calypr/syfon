@@ -18,8 +18,8 @@ import (
 	"github.com/calypr/syfon/apigen/server/internalapi"
 	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/common"
-	"github.com/calypr/syfon/internal/db/sqlite"
 	httprecords "github.com/calypr/syfon/internal/httpapi/records"
+	"github.com/calypr/syfon/internal/persistence/sqlite"
 
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/testutils"
