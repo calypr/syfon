@@ -8,10 +8,10 @@ import (
 
 	sycommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/access"
-	apimiddleware "github.com/calypr/syfon/internal/api/middleware"
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/faults"
+	apimiddleware "github.com/calypr/syfon/internal/httpapi/middleware"
 )
 
 func readOptionalPath(path *string) string {

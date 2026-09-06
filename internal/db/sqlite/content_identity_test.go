@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/faults"
-	"github.com/calypr/syfon/internal/models"
+
+	"github.com/calypr/syfon/internal/objects"
 )
 
 func TestContentIdentityRegistrationMergesAliasesGrantsAndLocations(t *testing.T) {
@@ -27,16 +27,16 @@ func TestContentIdentityRegistrationMergesAliasesGrantsAndLocations(t *testing.T
 	resourceB := "/organization/org/project/b"
 	first := identityTestObject("uuid-a", sha, resourceA, "s3://bucket/a")
 	second := identityTestObject("uuid-b", "sha256:"+strings.ToUpper(sha), resourceB, "s3://bucket/b")
-	if err := db.RegisterObjects(testIdentityAuth(resourceA, "create", "read"), []models.InternalObject{first}); err != nil {
+	if err := db.RegisterObjects(testIdentityAuth(resourceA, "create", "read"), []objects.Record{first}); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.RegisterObjects(testIdentityAuth(resourceA, "read", "create", "update"), []models.InternalObject{second}); !errors.Is(err, faults.ErrUnauthorized) {
+	if err := db.RegisterObjects(testIdentityAuth(resourceA, "read", "create", "update"), []objects.Record{second}); !errors.Is(err, faults.ErrUnauthorized) {
 		t.Fatalf("expected missing target B create to deny merge, got %v", err)
 	}
 
 	admin := testIdentityAuth(resourceA, "read", "create", "update", "delete")
 	admin = withIdentityPrivileges(admin, resourceB, "read", "create", "update", "delete")
-	if err := db.RegisterObjects(admin, []models.InternalObject{second}); err != nil {
+	if err := db.RegisterObjects(admin, []objects.Record{second}); err != nil {
 		t.Fatal(err)
 	}
 	var rows int
@@ -63,14 +63,14 @@ func TestContentIdentityRejectsConflictingSHAAtomically(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	checksums := []drs.Checksum{
+	checksums := []objects.Checksum{
 		{Type: "sha256", Checksum: strings.Repeat("a", 64)},
 		{Type: "SHA-256", Checksum: strings.Repeat("b", 64)},
 	}
 	obj := identityTestObject("conflict", checksums[0].Checksum, "/organization/org/project/p", "s3://bucket/conflict")
 	obj.Checksums = checksums
-	err = db.RegisterObjects(context.Background(), []models.InternalObject{obj})
-	if !errors.Is(err, common.ErrConflictingSHA256) {
+	err = db.RegisterObjects(context.Background(), []objects.Record{obj})
+	if !errors.Is(err, objects.ErrConflictingSHA256) {
 		t.Fatalf("expected conflicting SHA error, got %v", err)
 	}
 	var rows int
@@ -91,14 +91,14 @@ func TestContentIdentityReplaceIsAtomicAndPreservesSHA(t *testing.T) {
 	sha := strings.Repeat("c", 64)
 	obj := identityTestObject("replace", sha, resource, "s3://bucket/old")
 	ctx := testIdentityAuth(resource, "create", "read", "update", "delete")
-	if err := db.RegisterObjects(ctx, []models.InternalObject{obj}); err != nil {
+	if err := db.RegisterObjects(ctx, []objects.Record{obj}); err != nil {
 		t.Fatal(err)
 	}
 	name := "new-name"
 	replacement := obj
 	replacement.Name = &name
 	replacement.AccessMethods = accessMethods("s3://bucket/new")
-	if err := db.ReplaceObjects(ctx, []models.InternalObject{replacement}); err != nil {
+	if err := db.ReplaceObjects(ctx, []objects.Record{replacement}); err != nil {
 		t.Fatal(err)
 	}
 	got, err := db.GetObject(context.Background(), "replace")
@@ -107,7 +107,7 @@ func TestContentIdentityReplaceIsAtomicAndPreservesSHA(t *testing.T) {
 	}
 	bad := replacement
 	bad.Size++
-	if err := db.ReplaceObjects(ctx, []models.InternalObject{bad}); !errors.Is(err, faults.ErrConflict) {
+	if err := db.ReplaceObjects(ctx, []objects.Record{bad}); !errors.Is(err, faults.ErrConflict) {
 		t.Fatalf("expected immutable-size conflict, got %v", err)
 	}
 	got, err = db.GetObject(context.Background(), "replace")
@@ -132,20 +132,20 @@ func TestContentIdentityConcurrentRegistrationsShareOnePhysicalRow(t *testing.T)
 	sha := strings.Repeat("d", 64)
 	resource := "/organization/org/project/p"
 	ctx := testIdentityAuth(resource, "create", "read", "update", "delete")
-	objects := make([]models.InternalObject, 8)
-	for i := range objects {
-		objects[i] = identityTestObject(fmt.Sprintf("concurrent-%c", 'a'+i), sha, resource, fmt.Sprintf("s3://bucket/replica-%c", 'a'+i))
+	records := make([]objects.Record, 8)
+	for i := range records {
+		records[i] = identityTestObject(fmt.Sprintf("concurrent-%c", 'a'+i), sha, resource, fmt.Sprintf("s3://bucket/replica-%c", 'a'+i))
 	}
 	dbs := []*SqliteDB{first, second}
 	start := make(chan struct{})
 	var wg sync.WaitGroup
-	errs := make(chan error, len(objects))
-	for i := range objects {
+	errs := make(chan error, len(records))
+	for i := range records {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
 			<-start
-			errs <- dbs[i%len(dbs)].RegisterObjects(ctx, []models.InternalObject{objects[i]})
+			errs <- dbs[i%len(dbs)].RegisterObjects(ctx, []objects.Record{records[i]})
 		}(i)
 	}
 	close(start)
@@ -164,19 +164,19 @@ func TestContentIdentityConcurrentRegistrationsShareOnePhysicalRow(t *testing.T)
 	if err := first.db.QueryRow(`SELECT COUNT(*) FROM drs_object_alias`).Scan(&aliases); err != nil {
 		t.Fatal(err)
 	}
-	if rows != 1 || aliases != len(objects)-1 {
+	if rows != 1 || aliases != len(records)-1 {
 		t.Fatalf("expected one canonical row and %d aliases, got rows=%d aliases=%d", 1, rows, aliases)
 	}
 	var canonicalID string
 	if err := first.db.QueryRow(`SELECT id FROM drs_object`).Scan(&canonicalID); err != nil {
 		t.Fatal(err)
 	}
-	for _, object := range objects {
-		got, err := first.GetObject(context.Background(), object.Id)
+	for _, object := range records {
+		got, err := first.GetObject(context.Background(), string(object.Id))
 		if err != nil {
 			t.Fatalf("get %s: %v", object.Id, err)
 		}
-		if got.Id != canonicalID {
+		if got.Id != objects.RecordID(canonicalID) {
 			t.Fatalf("lookup %s returned %s, want canonical %s", object.Id, got.Id, canonicalID)
 		}
 	}
@@ -189,8 +189,8 @@ func TestContentIdentityChecksumQueriesNormalizeOnlySHA256(t *testing.T) {
 	}
 	sha := strings.Repeat("e", 64)
 	obj := identityTestObject("lookup", sha, "/organization/org/project/p", "s3://bucket/lookup")
-	obj.Checksums = append(obj.Checksums, drs.Checksum{Type: "md5", Checksum: "ABC"})
-	if err := db.RegisterObjects(testIdentityAuth("/organization/org/project/p", "create", "read"), []models.InternalObject{obj}); err != nil {
+	obj.Checksums = append(obj.Checksums, objects.Checksum{Type: "md5", Checksum: "ABC"})
+	if err := db.RegisterObjects(testIdentityAuth("/organization/org/project/p", "create", "read"), []objects.Record{obj}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -209,21 +209,16 @@ func TestContentIdentityChecksumQueriesNormalizeOnlySHA256(t *testing.T) {
 	}
 }
 
-func identityTestObject(id, sha, resource, url string) models.InternalObject {
+func identityTestObject(id, sha, resource, url string) objects.Record {
 	now := time.Now().UTC()
 	controlled := []string{resource}
-	return models.InternalObject{DrsObject: drs.DrsObject{
-		Id: id, Size: 7, CreatedTime: now, UpdatedTime: &now,
-		Name: common.Ptr(id), Checksums: []drs.Checksum{{Type: "sha256", Checksum: sha}},
-		AccessMethods: accessMethods(url), ControlledAccess: &controlled,
-	}}
+	return objects.Record{Id: objects.RecordID(id), Size: 7, CreatedTime: now, UpdatedTime: &now,
+		Name: common.Ptr(id), Checksums: []objects.Checksum{{Type: "sha256", Checksum: sha}},
+		AccessMethods: accessMethods(url), ControlledAccess: &controlled}
 }
 
-func accessMethods(url string) *[]drs.AccessMethod {
-	return &[]drs.AccessMethod{{Type: drs.AccessMethodTypeS3, AccessUrl: &struct {
-		Headers *[]string `json:"headers,omitempty"`
-		Url     string    `json:"url"`
-	}{Url: url}}}
+func accessMethods(url string) *[]objects.AccessMethod {
+	return &[]objects.AccessMethod{{Type: "s3", AccessUrl: &objects.AccessURL{Url: url}}}
 }
 
 func testIdentityAuth(resource string, methods ...string) context.Context {

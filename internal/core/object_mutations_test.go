@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/db/sqlite"
 	"github.com/calypr/syfon/internal/faults"
-	"github.com/calypr/syfon/internal/models"
+
+	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/testutils"
 )
 
@@ -22,21 +22,18 @@ func TestRegisterBulk_RegistersCandidate(t *testing.T) {
 	database := testutils.NewInMemoryDB()
 	om := NewObjectManager(database, nil)
 
-	candidates := []drs.DrsObjectCandidate{
+	candidates := []objects.Candidate{
 		{
 			Aliases: ptr([]string{"id:test-register-bulk"}),
-			Checksums: []drs.Checksum{{
+			Checksums: &[]objects.Checksum{{
 				Type:     "sha256",
 				Checksum: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 			}},
-			AccessMethods: &[]drs.AccessMethod{{
-				Type: "s3",
-				AccessUrl: &struct {
-					Headers *[]string `json:"headers,omitempty"`
-					Url     string    `json:"url"`
-				}{Url: "s3://bucket/test-register-bulk"},
+			AccessMethods: &[]objects.AccessMethod{{
+				Type:      "s3",
+				AccessUrl: &objects.AccessURL{Url: "s3://bucket/test-register-bulk"},
 			}},
-			Size: 1,
+			Size: ptr(int64(1)),
 		},
 	}
 
@@ -61,13 +58,13 @@ func TestRegisterBulk_InvalidChecksum(t *testing.T) {
 	database := testutils.NewInMemoryDB()
 	om := NewObjectManager(database, nil)
 
-	candidates := []drs.DrsObjectCandidate{{
+	candidates := []objects.Candidate{{
 		Aliases: ptr([]string{"id:test-invalid-checksum"}),
-		Checksums: []drs.Checksum{{
+		Checksums: &[]objects.Checksum{{
 			Type:     "md5",
 			Checksum: "abc",
 		}},
-		Size: 1,
+		Size: ptr(int64(1)),
 	}}
 
 	if _, err := om.RegisterBulk(context.Background(), candidates); err == nil {
@@ -79,20 +76,17 @@ func TestBulkDeleteObjects_DeletesAuthorizedObjects(t *testing.T) {
 	database := testutils.NewInMemoryDB()
 	om := NewObjectManager(database, nil)
 
-	_, err := om.RegisterBulk(context.Background(), []drs.DrsObjectCandidate{{
+	_, err := om.RegisterBulk(context.Background(), []objects.Candidate{{
 		Aliases: ptr([]string{"id:test-delete-bulk"}),
-		Checksums: []drs.Checksum{{
+		Checksums: &[]objects.Checksum{{
 			Type:     "sha256",
 			Checksum: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
 		}},
-		AccessMethods: &[]drs.AccessMethod{{
-			Type: "s3",
-			AccessUrl: &struct {
-				Headers *[]string `json:"headers,omitempty"`
-				Url     string    `json:"url"`
-			}{Url: "s3://bucket/test-delete-bulk"},
+		AccessMethods: &[]objects.AccessMethod{{
+			Type:      "s3",
+			AccessUrl: &objects.AccessURL{Url: "s3://bucket/test-delete-bulk"},
 		}},
-		Size: 1,
+		Size: ptr(int64(1)),
 	}})
 	if err != nil {
 		t.Fatalf("seed RegisterBulk error: %v", err)
@@ -149,7 +143,7 @@ func TestObjectManagerBulkMutationsTargetLegacyDuplicatePhysicalUUID(t *testing.
 		if _, err := raw.ExecContext(ctx, `
 			INSERT INTO drs_object_access_method (object_id, url, type)
 			VALUES (?, ?, ?)
-		`, id, accessURL, drs.AccessMethodTypeS3); err != nil {
+		`, id, accessURL, "s3"); err != nil {
 			t.Fatalf("insert access method for %q: %v", id, err)
 		}
 	}
@@ -169,13 +163,10 @@ func TestObjectManagerBulkMutationsTargetLegacyDuplicatePhysicalUUID(t *testing.
 	authenticatedTargetProject := buildGen3Context(map[string]map[string]bool{
 		resource: {"update": true, "delete": true},
 	})
-	if err := om.BulkUpdateAccessMethods(authenticatedTargetProject, map[string][]drs.AccessMethod{
+	if err := om.BulkUpdateAccessMethods(authenticatedTargetProject, map[string][]objects.AccessMethod{
 		objectA: {{
-			Type: drs.AccessMethodTypeS3,
-			AccessUrl: &struct {
-				Headers *[]string `json:"headers,omitempty"`
-				Url     string    `json:"url"`
-			}{Url: "s3://bucket/repaired-a"},
+			Type:      "s3",
+			AccessUrl: &objects.AccessURL{Url: "s3://bucket/repaired-a"},
 		}},
 	}); err != nil {
 		t.Fatalf("BulkUpdateAccessMethods through ObjectManager failed: %v", err)
@@ -231,47 +222,39 @@ func TestRegisterObjects_CanonicalizesProjectChecksumDuplicates(t *testing.T) {
 	accessURL1 := "s3://bucket/original"
 	accessURL2 := "s3://bucket/renamed"
 
-	first := models.InternalObject{
+	first := objects.Record{
 		Authorizations: map[string][]string{"org": {"proj"}},
-		DrsObject: drs.DrsObject{
-			Id:          "did-1",
-			Name:        ptr("original.tsv"),
-			Size:        42,
-			CreatedTime: now,
-			UpdatedTime: &now,
-			Checksums:   []drs.Checksum{{Type: "sha256", Checksum: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}},
-			AccessMethods: &[]drs.AccessMethod{{
-				Type: "s3",
-				AccessUrl: &struct {
-					Headers *[]string `json:"headers,omitempty"`
-					Url     string    `json:"url"`
-				}{Url: accessURL1},
-			}},
-		},
+
+		Id:          "did-1",
+		Name:        ptr("original.tsv"),
+		Size:        42,
+		CreatedTime: now,
+		UpdatedTime: &now,
+		Checksums:   []objects.Checksum{{Type: "sha256", Checksum: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}},
+		AccessMethods: &[]objects.AccessMethod{{
+			Type:      "s3",
+			AccessUrl: &objects.AccessURL{Url: accessURL1},
+		}},
 	}
-	second := models.InternalObject{
+	second := objects.Record{
 		Authorizations: map[string][]string{"org": {"proj"}},
-		DrsObject: drs.DrsObject{
-			Id:          "did-2",
-			Name:        ptr("renamed.tsv"),
-			Size:        42,
-			CreatedTime: later,
-			UpdatedTime: &later,
-			Checksums:   first.Checksums,
-			AccessMethods: &[]drs.AccessMethod{{
-				Type: "s3",
-				AccessUrl: &struct {
-					Headers *[]string `json:"headers,omitempty"`
-					Url     string    `json:"url"`
-				}{Url: accessURL2},
-			}},
-		},
+
+		Id:          "did-2",
+		Name:        ptr("renamed.tsv"),
+		Size:        42,
+		CreatedTime: later,
+		UpdatedTime: &later,
+		Checksums:   first.Checksums,
+		AccessMethods: &[]objects.AccessMethod{{
+			Type:      "s3",
+			AccessUrl: &objects.AccessURL{Url: accessURL2},
+		}},
 	}
 
-	if err := om.RegisterObjects(context.Background(), []models.InternalObject{first}); err != nil {
+	if err := om.RegisterObjects(context.Background(), []objects.Record{first}); err != nil {
 		t.Fatalf("RegisterObjects(first) error: %v", err)
 	}
-	if err := om.RegisterObjects(context.Background(), []models.InternalObject{second}); err != nil {
+	if err := om.RegisterObjects(context.Background(), []objects.Record{second}); err != nil {
 		t.Fatalf("RegisterObjects(second) error: %v", err)
 	}
 
@@ -320,49 +303,41 @@ func TestRegisterObjects_ReusesContentAcrossProjects(t *testing.T) {
 	firstResource := "/organization/org/project/first"
 	secondResource := "/organization/org/project/second"
 
-	first := models.InternalObject{
+	first := objects.Record{
 		Authorizations: map[string][]string{"org": {"first"}},
-		DrsObject: drs.DrsObject{
-			Id:               "canonical-did",
-			Name:             ptr("first.tsv"),
-			Size:             42,
-			CreatedTime:      now,
-			UpdatedTime:      &now,
-			Checksums:        []drs.Checksum{{Type: "sha256", Checksum: sha}},
-			ControlledAccess: &[]string{firstResource},
-			AccessMethods: &[]drs.AccessMethod{{
-				Type: "s3",
-				AccessUrl: &struct {
-					Headers *[]string `json:"headers,omitempty"`
-					Url     string    `json:"url"`
-				}{Url: "s3://bucket/first"},
-			}},
-		},
+
+		Id:               "canonical-did",
+		Name:             ptr("first.tsv"),
+		Size:             42,
+		CreatedTime:      now,
+		UpdatedTime:      &now,
+		Checksums:        []objects.Checksum{{Type: "sha256", Checksum: sha}},
+		ControlledAccess: &[]string{firstResource},
+		AccessMethods: &[]objects.AccessMethod{{
+			Type:      "s3",
+			AccessUrl: &objects.AccessURL{Url: "s3://bucket/first"},
+		}},
 	}
-	second := models.InternalObject{
+	second := objects.Record{
 		Authorizations: map[string][]string{"org": {"second"}},
-		DrsObject: drs.DrsObject{
-			Id:               "second-did",
-			Name:             ptr("second.tsv"),
-			Size:             42,
-			CreatedTime:      later,
-			UpdatedTime:      &later,
-			Checksums:        []drs.Checksum{{Type: "sha256", Checksum: sha}},
-			ControlledAccess: &[]string{secondResource},
-			AccessMethods: &[]drs.AccessMethod{{
-				Type: "s3",
-				AccessUrl: &struct {
-					Headers *[]string `json:"headers,omitempty"`
-					Url     string    `json:"url"`
-				}{Url: "s3://bucket/second"},
-			}},
-		},
+
+		Id:               "second-did",
+		Name:             ptr("second.tsv"),
+		Size:             42,
+		CreatedTime:      later,
+		UpdatedTime:      &later,
+		Checksums:        []objects.Checksum{{Type: "sha256", Checksum: sha}},
+		ControlledAccess: &[]string{secondResource},
+		AccessMethods: &[]objects.AccessMethod{{
+			Type:      "s3",
+			AccessUrl: &objects.AccessURL{Url: "s3://bucket/second"},
+		}},
 	}
 
-	if err := om.RegisterObjects(context.Background(), []models.InternalObject{first}); err != nil {
+	if err := om.RegisterObjects(context.Background(), []objects.Record{first}); err != nil {
 		t.Fatalf("RegisterObjects(first) error: %v", err)
 	}
-	if err := om.RegisterObjects(context.Background(), []models.InternalObject{second}); err != nil {
+	if err := om.RegisterObjects(context.Background(), []objects.Record{second}); err != nil {
 		t.Fatalf("RegisterObjects(second) error: %v", err)
 	}
 
@@ -382,8 +357,8 @@ func TestRegisterObjects_ReusesContentAcrossProjects(t *testing.T) {
 		t.Fatalf("expected one canonical checksum record, got %d", len(byChecksum))
 	}
 	canonical := byChecksum[0]
-	if canonical.Id != first.Id {
-		t.Fatalf("expected deterministic read representative %q, got %q", first.Id, canonical.Id)
+	if string(canonical.Id) != string(first.Id) {
+		t.Fatalf("expected deterministic read representative %q, got %q", string(first.Id), string(canonical.Id))
 	}
 	if canonical.AccessMethods == nil || len(*canonical.AccessMethods) != 2 {
 		t.Fatalf("expected both access methods, got %+v", canonical.AccessMethods)
@@ -392,13 +367,13 @@ func TestRegisterObjects_ReusesContentAcrossProjects(t *testing.T) {
 		t.Fatalf("expected both controlled-access resources, got %+v", canonical.ControlledAccess)
 	}
 
-	for _, ident := range []string{first.Id, second.Id} {
+	for _, ident := range []string{string(first.Id), string(second.Id)} {
 		got, err := om.GetObject(context.Background(), ident, "")
 		if err != nil {
 			t.Fatalf("GetObject(%q) error: %v", ident, err)
 		}
 		if got.Id != canonical.Id {
-			t.Fatalf("GetObject(%q) returned id %q, want canonical %q", ident, got.Id, canonical.Id)
+			t.Fatalf("GetObject(%q) returned id %q, want canonical %q", ident, got.Id, string(canonical.Id))
 		}
 		if got.AccessMethods == nil || len(*got.AccessMethods) != 2 {
 			t.Fatalf("GetObject(%q) lost merged access methods: %+v", ident, got.AccessMethods)

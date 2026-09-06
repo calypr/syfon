@@ -7,7 +7,8 @@ import (
 	"github.com/calypr/syfon/apigen/server/metricsapi"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/db"
-	"github.com/calypr/syfon/internal/models"
+
+	"github.com/calypr/syfon/internal/objects"
 	"github.com/gofiber/fiber/v3"
 )
 
@@ -25,7 +26,7 @@ type MetricsServer struct {
 }
 
 type metricsObjectReader interface {
-	GetObject(ctx context.Context, ident string, requiredMethod string) (*models.InternalObject, error)
+	GetObject(ctx context.Context, ident string, requiredMethod string) (*objects.Record, error)
 	ListObjectIDsByScope(ctx context.Context, organization, project string, requiredMethod string) ([]string, error)
 }
 

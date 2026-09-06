@@ -4,9 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/buckets"
-	"github.com/calypr/syfon/internal/models"
+	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/testutils"
 	"github.com/calypr/syfon/internal/urlmanager"
 )
@@ -17,9 +16,9 @@ func TestMergedContentPreservesReplicaLocation(t *testing.T) {
 		"org|b": {Organization: "org", ProjectID: "b", Bucket: "bucket-b", PathPrefix: "b"},
 	}}}
 	om := NewObjectManager(db, &capturingURLManager{})
-	objs := []models.InternalObject{
-		{DrsObject: drs.DrsObject{Id: "uuid-a", Checksums: []drs.Checksum{{Type: "sha256", Checksum: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}, ControlledAccess: &[]string{"/organization/org/project/a"}}},
-		{DrsObject: drs.DrsObject{Id: "uuid-b", Checksums: []drs.Checksum{{Type: "sha256", Checksum: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}, ControlledAccess: &[]string{"/organization/org/project/b"}}},
+	objs := []objects.Record{
+		{Id: "uuid-a", Checksums: []objects.Checksum{{Type: "sha256", Checksum: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}, ControlledAccess: &[]string{"/organization/org/project/a"}},
+		{Id: "uuid-b", Checksums: []objects.Checksum{{Type: "sha256", Checksum: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}, ControlledAccess: &[]string{"/organization/org/project/b"}},
 	}
 	original := "s3://bucket-a/a/file"
 	single, err := om.SignObjectURL(context.Background(), &objs[0], original, urlmanager.SignOptions{})

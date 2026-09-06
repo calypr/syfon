@@ -9,13 +9,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/calypr/syfon/apigen/server/drs"
 	syfoncommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/db"
 	"github.com/calypr/syfon/internal/faults"
-	"github.com/calypr/syfon/internal/models"
+	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/storage/address"
 	"github.com/calypr/syfon/internal/urlmanager"
 )
@@ -304,13 +303,9 @@ func (m *ObjectManager) listVisibleBucketsFromRows(ctx context.Context, lister d
 	}
 
 	for _, row := range rows {
-		methodType := drs.AccessMethodType(strings.TrimSpace(row.AccessType))
-		method := drs.AccessMethod{
-			Type: methodType,
-			AccessUrl: &struct {
-				Headers *[]string `json:"headers,omitempty"`
-				Url     string    `json:"url"`
-			}{Url: row.AccessURL},
+		method := objects.AccessMethod{
+			Type:      strings.TrimSpace(row.AccessType),
+			AccessUrl: &objects.AccessURL{Url: row.AccessURL},
 		}
 		credentialID, ok := m.bucketCatalog.credentialIDForAccessMethod(method, creds)
 		if !ok {
@@ -351,13 +346,13 @@ func (m *ObjectManager) DeleteBucketScope(ctx context.Context, organization, pro
 	return m.bucketCatalog.deleteBucketScope(ctx, organization, projectID, credentialID, pathPrefix)
 }
 
-func (m *ObjectManager) listBucketsVisibleObjects(ctx context.Context) ([]models.InternalObject, error) {
+func (m *ObjectManager) listBucketsVisibleObjects(ctx context.Context) ([]objects.Record, error) {
 	ids, err := m.db.ListObjectIDsByScope(ctx, "", "")
 	if err != nil {
 		return nil, err
 	}
 	if len(ids) == 0 {
-		return []models.InternalObject{}, nil
+		return []objects.Record{}, nil
 	}
 	objects, err := m.db.GetBulkObjects(ctx, ids)
 	if err != nil {
@@ -383,7 +378,7 @@ func (c *bucketCatalog) credentialIDForScope(scope buckets.Scope) string {
 	return strings.TrimSpace(scope.Bucket)
 }
 
-func (c *bucketCatalog) credentialIDForAccessMethod(method drs.AccessMethod, creds []buckets.Credential) (string, bool) {
+func (c *bucketCatalog) credentialIDForAccessMethod(method objects.AccessMethod, creds []buckets.Credential) (string, bool) {
 	bucket, ok := c.bucketForAccessMethod(method, creds)
 	if !ok {
 		return "", false
@@ -396,7 +391,7 @@ func (c *bucketCatalog) credentialIDForAccessMethod(method drs.AccessMethod, cre
 	return bucket, true
 }
 
-func (c *bucketCatalog) bucketForAccessMethod(method drs.AccessMethod, creds []buckets.Credential) (string, bool) {
+func (c *bucketCatalog) bucketForAccessMethod(method objects.AccessMethod, creds []buckets.Credential) (string, bool) {
 	if method.AccessUrl == nil {
 		return "", false
 	}
@@ -448,7 +443,7 @@ func (c *bucketCatalog) resolveBucketName(creds []buckets.Credential, bucketName
 	return "", fmt.Errorf("bucket %q not configured", bucketName)
 }
 
-func ObjectAccessResources(obj *models.InternalObject) []string {
+func ObjectAccessResources(obj *objects.Record) []string {
 	if obj == nil {
 		return nil
 	}

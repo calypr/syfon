@@ -11,13 +11,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/crypto"
 	"github.com/calypr/syfon/internal/faults"
 	"github.com/calypr/syfon/internal/models"
+
+	"github.com/calypr/syfon/internal/objects"
 )
 
 func TestSqliteDB_CRUD(t *testing.T) {
@@ -27,29 +28,26 @@ func TestSqliteDB_CRUD(t *testing.T) {
 		t.Fatalf("failed to create db: %v", err)
 	}
 
-	obj := &drs.DrsObject{
+	obj := &objects.Record{
 		Id:          "abc",
 		Size:        123,
 		CreatedTime: time.Now(),
 		UpdatedTime: func() *time.Time { t := time.Now(); return &t }(),
 		Version:     common.Ptr("1.0"),
 		Name:        common.Ptr("testing"),
-		AccessMethods: &[]drs.AccessMethod{
+		AccessMethods: &[]objects.AccessMethod{
 			{
-				Type: drs.AccessMethodTypeS3,
-				AccessUrl: &struct {
-					Headers *[]string `json:"headers,omitempty"`
-					Url     string    `json:"url"`
-				}{Url: "s3://bucket/key"},
+				Type:      "s3",
+				AccessUrl: &objects.AccessURL{Url: "s3://bucket/key"},
 			},
 		},
-		Checksums: []drs.Checksum{
+		Checksums: []objects.Checksum{
 			{Type: "sha256", Checksum: "abc"},
 		},
 	}
 
 	// Create
-	if err := db.CreateObject(ctx, &models.InternalObject{DrsObject: *obj}); err != nil {
+	if err := db.CreateObject(ctx, obj); err != nil {
 		t.Fatalf("CreateObject failed: %v", err)
 	}
 
@@ -210,27 +208,24 @@ func TestSqliteDB_GetObjectsByChecksum_WhenIDDiffers(t *testing.T) {
 	}
 	checksum := "47454ac45ec9e9d88d76ba2dc8dff527ba6899a0f4189eb67dfcb2da0aa7d125"
 
-	obj := &drs.DrsObject{
+	obj := &objects.Record{
 		Id:          "did-123",
 		Size:        10,
 		CreatedTime: time.Now(),
 		UpdatedTime: func() *time.Time { t := time.Now(); return &t }(),
 		Version:     common.Ptr("1.0"),
 		Name:        common.Ptr("oid-object"),
-		AccessMethods: &[]drs.AccessMethod{
+		AccessMethods: &[]objects.AccessMethod{
 			{
-				Type: drs.AccessMethodTypeS3,
-				AccessUrl: &struct {
-					Headers *[]string `json:"headers,omitempty"`
-					Url     string    `json:"url"`
-				}{Url: "s3://bucket/cbds/end_to_end_test/" + checksum},
+				Type:      "s3",
+				AccessUrl: &objects.AccessURL{Url: "s3://bucket/cbds/end_to_end_test/" + checksum},
 			},
 		},
-		Checksums: []drs.Checksum{
+		Checksums: []objects.Checksum{
 			{Type: "sha256", Checksum: checksum},
 		},
 	}
-	if err := db.CreateObject(ctx, &models.InternalObject{DrsObject: *obj}); err != nil {
+	if err := db.CreateObject(ctx, obj); err != nil {
 		t.Fatalf("CreateObject failed: %v", err)
 	}
 
@@ -287,13 +282,11 @@ func TestSqliteDB_NormalizeNameToBasenameOnInsert(t *testing.T) {
 
 	// 1. Test CreateObject with Unix and Windows paths
 	now := time.Now().UTC()
-	objUnix := &models.InternalObject{
-		DrsObject: drs.DrsObject{
-			Id:          "unix-1",
-			Size:        100,
-			CreatedTime: now,
-			Name:        common.Ptr("/path/to/some/unix_file.txt"),
-		},
+	objUnix := &objects.Record{
+		Id:          "unix-1",
+		Size:        100,
+		CreatedTime: now,
+		Name:        common.Ptr("/path/to/some/unix_file.txt"),
 	}
 	if err := db.CreateObject(ctx, objUnix); err != nil {
 		t.Fatalf("CreateObject failed: %v", err)
@@ -307,13 +300,11 @@ func TestSqliteDB_NormalizeNameToBasenameOnInsert(t *testing.T) {
 		t.Fatalf("expected name to be normalized to unix_file.txt, got %q", got)
 	}
 
-	objWin := &models.InternalObject{
-		DrsObject: drs.DrsObject{
-			Id:          "win-1",
-			Size:        200,
-			CreatedTime: now,
-			Name:        common.Ptr(`C:\Windows\System32\win_file.txt`),
-		},
+	objWin := &objects.Record{
+		Id:          "win-1",
+		Size:        200,
+		CreatedTime: now,
+		Name:        common.Ptr(`C:\Windows\System32\win_file.txt`),
 	}
 	if err := db.CreateObject(ctx, objWin); err != nil {
 		t.Fatalf("CreateObject failed: %v", err)
@@ -328,22 +319,19 @@ func TestSqliteDB_NormalizeNameToBasenameOnInsert(t *testing.T) {
 	}
 
 	// 2. Test RegisterObjects with paths
-	bulkObjs := []models.InternalObject{
+	bulkObjs := []objects.Record{
 		{
-			DrsObject: drs.DrsObject{
-				Id:          "bulk-unix",
-				Size:        300,
-				CreatedTime: now,
-				Name:        common.Ptr("/var/log/syslog.log"),
-			},
+			Id:          "bulk-unix",
+			Size:        300,
+			CreatedTime: now,
+			Name:        common.Ptr("/var/log/syslog.log"),
 		},
+
 		{
-			DrsObject: drs.DrsObject{
-				Id:          "bulk-win",
-				Size:        400,
-				CreatedTime: now,
-				Name:        common.Ptr(`D:\Data\config.json`),
-			},
+			Id:          "bulk-win",
+			Size:        400,
+			CreatedTime: now,
+			Name:        common.Ptr(`D:\Data\config.json`),
 		},
 	}
 
@@ -380,19 +368,15 @@ func TestSqliteDB_ObjectAliasLifecycle(t *testing.T) {
 	checksum := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	now := time.Now().UTC()
 
-	if err := db.CreateObject(ctx, &models.InternalObject{
-		DrsObject: drs.DrsObject{
-			Id:          canonicalID,
-			CreatedTime: now,
-			UpdatedTime: &now,
-			Checksums:   []drs.Checksum{{Type: "sha256", Checksum: checksum}},
-			AccessMethods: &[]drs.AccessMethod{
-				{Type: drs.AccessMethodTypeS3, AccessUrl: &struct {
-					Headers *[]string `json:"headers,omitempty"`
-					Url     string    `json:"url"`
-				}{Url: "s3://bucket/path/object"}},
-			},
+	if err := db.CreateObject(ctx, &objects.Record{
+		Id:          objects.RecordID(canonicalID),
+		CreatedTime: now,
+		UpdatedTime: &now,
+		Checksums:   []objects.Checksum{{Type: "sha256", Checksum: checksum}},
+		AccessMethods: &[]objects.AccessMethod{
+			{Type: "s3", AccessUrl: &objects.AccessURL{Url: "s3://bucket/path/object"}},
 		},
+
 		Authorizations: map[string][]string{"a": {"b"}},
 	}); err != nil {
 		t.Fatalf("CreateObject failed: %v", err)
@@ -414,7 +398,7 @@ func TestSqliteDB_ObjectAliasLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetObject(alias) failed: %v", err)
 	}
-	if aliased.Id != canonicalID {
+	if aliased.Id != objects.RecordID(canonicalID) {
 		t.Fatalf("expected canonical id %s, got %s", canonicalID, aliased.Id)
 	}
 	if len(aliased.Checksums) != 1 || aliased.Checksums[0].Checksum != checksum {
@@ -425,7 +409,7 @@ func TestSqliteDB_ObjectAliasLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetObjectsByChecksum failed: %v", err)
 	}
-	if len(byChecksum) != 1 || byChecksum[0].Id != canonicalID {
+	if len(byChecksum) != 1 || byChecksum[0].Id != objects.RecordID(canonicalID) {
 		t.Fatalf("expected exactly one canonical record for checksum, got %+v", byChecksum)
 	}
 
@@ -464,18 +448,14 @@ func TestSqliteDB_ObjectReadsIgnoreAuthContext(t *testing.T) {
 			}
 			now := time.Now().UTC()
 			checksum := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-			if err := db.CreateObject(context.Background(), &models.InternalObject{
-				DrsObject: drs.DrsObject{
-					Id:          "obj-authz",
-					CreatedTime: now,
-					UpdatedTime: &now,
-					Checksums:   []drs.Checksum{{Type: "sha256", Checksum: checksum}},
-					AccessMethods: &[]drs.AccessMethod{
-						{Type: drs.AccessMethodTypeS3, AccessUrl: &struct {
-							Headers *[]string `json:"headers,omitempty"`
-							Url     string    `json:"url"`
-						}{Url: "s3://bucket/path/object"}},
-					},
+			if err := db.CreateObject(context.Background(), &objects.Record{
+
+				Id:          "obj-authz",
+				CreatedTime: now,
+				UpdatedTime: &now,
+				Checksums:   []objects.Checksum{{Type: "sha256", Checksum: checksum}},
+				AccessMethods: &[]objects.AccessMethod{
+					{Type: "s3", AccessUrl: &objects.AccessURL{Url: "s3://bucket/path/object"}},
 				},
 				Authorizations: map[string][]string{"org": {"project"}},
 			}); err != nil {
@@ -520,13 +500,12 @@ func TestSqliteDB_DeleteObjectByAliasRemovesCanonicalObject(t *testing.T) {
 	aliasID := "22222222-2222-4222-8222-222222222222"
 	now := time.Now().UTC()
 
-	if err := db.CreateObject(ctx, &models.InternalObject{
-		DrsObject: drs.DrsObject{
-			Id:          canonicalID,
-			CreatedTime: now,
-			UpdatedTime: &now,
-			Name:        common.Ptr("object.txt"),
-		},
+	if err := db.CreateObject(ctx, &objects.Record{
+		Id:          objects.RecordID(canonicalID),
+		CreatedTime: now,
+		UpdatedTime: &now,
+		Name:        common.Ptr("object.txt"),
+
 		Authorizations: map[string][]string{"a": {"b"}},
 	}); err != nil {
 		t.Fatalf("CreateObject failed: %v", err)
@@ -747,12 +726,12 @@ func TestSqliteDB_BulkOperations(t *testing.T) {
 	ctx := context.Background()
 	db, _ := NewSqliteDB(":memory:")
 
-	objects := []models.InternalObject{
-		{DrsObject: drs.DrsObject{Id: "bulk-1", Size: 10}, Authorizations: map[string][]string{"org": {"p1"}}},
-		{DrsObject: drs.DrsObject{Id: "bulk-2", Size: 20}, Authorizations: map[string][]string{"org": {"p2"}}},
+	records := []objects.Record{
+		{Id: "bulk-1", Size: 10, Authorizations: map[string][]string{"org": {"p1"}}},
+		{Id: "bulk-2", Size: 20, Authorizations: map[string][]string{"org": {"p2"}}},
 	}
 
-	if err := db.RegisterObjects(ctx, objects); err != nil {
+	if err := db.RegisterObjects(ctx, records); err != nil {
 		t.Fatalf("RegisterObjects failed: %v", err)
 	}
 
@@ -777,14 +756,14 @@ func TestSqliteDB_RegisterObjectsChunksUsageFlushParameters(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	objects := make([]models.InternalObject, sqliteMaxParams+1)
-	for i := range objects {
-		objects[i] = models.InternalObject{DrsObject: drs.DrsObject{Id: fmt.Sprintf("chunk-%d", i)}}
+	records := make([]objects.Record, sqliteMaxParams+1)
+	for i := range records {
+		records[i] = objects.Record{Id: objects.RecordID(fmt.Sprintf("chunk-%d", i))}
 	}
-	if err := database.RegisterObjects(ctx, objects); err != nil {
+	if err := database.RegisterObjects(ctx, records); err != nil {
 		t.Fatalf("RegisterObjects should chunk usage flush parameters: %v", err)
 	}
-	got, err := database.GetBulkObjects(ctx, []string{"chunk-0", fmt.Sprintf("chunk-%d", len(objects)-1)})
+	got, err := database.GetBulkObjects(ctx, []string{"chunk-0", fmt.Sprintf("chunk-%d", len(records)-1)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -797,56 +776,44 @@ func TestSqliteDB_GetBulkObjects_SplitHydrationPreservesOrderAndDedupes(t *testi
 	ctx := context.Background()
 	db, _ := NewSqliteDB(":memory:")
 
-	objects := []models.InternalObject{
+	records := []objects.Record{
 		{
-			DrsObject: drs.DrsObject{
-				Id:   "bulk-a",
-				Size: 10,
-				AccessMethods: &[]drs.AccessMethod{
-					{
-						Type: drs.AccessMethodTypeS3,
-						AccessUrl: &struct {
-							Headers *[]string `json:"headers,omitempty"`
-							Url     string    `json:"url"`
-						}{Url: "s3://bucket/a"},
-					},
-					{
-						Type: drs.AccessMethodTypeS3,
-						AccessUrl: &struct {
-							Headers *[]string `json:"headers,omitempty"`
-							Url     string    `json:"url"`
-						}{Url: "s3://bucket/a"},
-					},
+			Id:   "bulk-a",
+			Size: 10,
+			AccessMethods: &[]objects.AccessMethod{
+				{
+					Type:      "s3",
+					AccessUrl: &objects.AccessURL{Url: "s3://bucket/a"},
 				},
-				Checksums: []drs.Checksum{
-					{Type: "sha256", Checksum: "aaa"},
-					{Type: "sha256", Checksum: "aaa"},
+				{
+					Type:      "s3",
+					AccessUrl: &objects.AccessURL{Url: "s3://bucket/a"},
 				},
+			},
+			Checksums: []objects.Checksum{
+				{Type: "sha256", Checksum: "aaa"},
+				{Type: "sha256", Checksum: "aaa"},
 			},
 			Authorizations: map[string][]string{"org": {"p1"}},
 		},
+
 		{
-			DrsObject: drs.DrsObject{
-				Id:   "bulk-b",
-				Size: 20,
-				AccessMethods: &[]drs.AccessMethod{
-					{
-						Type: drs.AccessMethodTypeGs,
-						AccessUrl: &struct {
-							Headers *[]string `json:"headers,omitempty"`
-							Url     string    `json:"url"`
-						}{Url: "gs://bucket/b"},
-					},
+			Id:   "bulk-b",
+			Size: 20,
+			AccessMethods: &[]objects.AccessMethod{
+				{
+					Type:      "gs",
+					AccessUrl: &objects.AccessURL{Url: "gs://bucket/b"},
 				},
-				Checksums: []drs.Checksum{
-					{Type: "md5", Checksum: "bbb"},
-				},
+			},
+			Checksums: []objects.Checksum{
+				{Type: "md5", Checksum: "bbb"},
 			},
 			Authorizations: map[string][]string{"org": {"p1"}},
 		},
 	}
 
-	if err := db.RegisterObjects(ctx, objects); err != nil {
+	if err := db.RegisterObjects(ctx, records); err != nil {
 		t.Fatalf("RegisterObjects failed: %v", err)
 	}
 
@@ -869,16 +836,13 @@ func TestSqliteDB_UpdateAccessMethods(t *testing.T) {
 	ctx := context.Background()
 	db, _ := NewSqliteDB(":memory:")
 
-	obj := &drs.DrsObject{Id: "update-me"}
-	if err := db.CreateObject(ctx, &models.InternalObject{DrsObject: *obj}); err != nil {
+	obj := &objects.Record{Id: "update-me"}
+	if err := db.CreateObject(ctx, obj); err != nil {
 		t.Fatalf("CreateObject failed: %v", err)
 	}
 
-	newMethods := []drs.AccessMethod{
-		{Type: drs.AccessMethodTypeS3, AccessUrl: &struct {
-			Headers *[]string `json:"headers,omitempty"`
-			Url     string    `json:"url"`
-		}{Url: "s3://new/path"}},
+	newMethods := []objects.AccessMethod{
+		{Type: "s3", AccessUrl: &objects.AccessURL{Url: "s3://new/path"}},
 	}
 
 	if err := db.UpdateObjectAccessMethods(ctx, "update-me", newMethods); err != nil {
@@ -899,33 +863,30 @@ func TestSqliteDB_GetObjectsByChecksumsAndListByPrefix(t *testing.T) {
 	db, _ := NewSqliteDB(":memory:")
 
 	now := time.Now()
-	objects := []models.InternalObject{
+	records := []objects.Record{
 		{
-			DrsObject: drs.DrsObject{
-				Id:          "sha-x",
-				CreatedTime: now,
-				UpdatedTime: &now,
-				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: "sha-x"}},
-				AccessMethods: &[]drs.AccessMethod{
-					testAccessMethod("s3://bucket/programs/a/projects/b/sha-x"),
-				},
+			Id:          "sha-x",
+			CreatedTime: now,
+			UpdatedTime: &now,
+			Checksums:   []objects.Checksum{{Type: "sha256", Checksum: "sha-x"}},
+			AccessMethods: &[]objects.AccessMethod{
+				testAccessMethod("s3://bucket/programs/a/projects/b/sha-x"),
 			},
 			Authorizations: map[string][]string{"a": {"b"}},
 		},
+
 		{
-			DrsObject: drs.DrsObject{
-				Id:          "sha-y",
-				CreatedTime: now,
-				UpdatedTime: &now,
-				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: "sha-y"}},
-				AccessMethods: &[]drs.AccessMethod{
-					testAccessMethod("s3://bucket/programs/a/projects/c/sha-y"),
-				},
+			Id:          "sha-y",
+			CreatedTime: now,
+			UpdatedTime: &now,
+			Checksums:   []objects.Checksum{{Type: "sha256", Checksum: "sha-y"}},
+			AccessMethods: &[]objects.AccessMethod{
+				testAccessMethod("s3://bucket/programs/a/projects/c/sha-y"),
 			},
 			Authorizations: map[string][]string{"a": {"c"}},
 		},
 	}
-	if err := db.RegisterObjects(ctx, objects); err != nil {
+	if err := db.RegisterObjects(ctx, records); err != nil {
 		t.Fatalf("RegisterObjects failed: %v", err)
 	}
 
@@ -953,54 +914,48 @@ func TestSqliteDB_ListScopedObjectIDsByChecksums(t *testing.T) {
 	ctx := context.Background()
 	db, _ := NewSqliteDB(":memory:")
 	now := time.Now()
-	objects := []models.InternalObject{
+	records := []objects.Record{
 		{
-			DrsObject: drs.DrsObject{
-				Id:          "proj-a-1",
-				CreatedTime: now,
-				UpdatedTime: &now,
-				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: "sha-a"}},
-			},
+			Id:             "proj-a-1",
+			CreatedTime:    now,
+			UpdatedTime:    &now,
+			Checksums:      []objects.Checksum{{Type: "sha256", Checksum: "sha-a"}},
 			Authorizations: map[string][]string{"org": {"p1"}},
 		},
+
 		{
-			DrsObject: drs.DrsObject{
-				Id:          "proj-a-2",
-				CreatedTime: now,
-				UpdatedTime: &now,
-				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: "sha-a"}},
-			},
+			Id:             "proj-a-2",
+			CreatedTime:    now,
+			UpdatedTime:    &now,
+			Checksums:      []objects.Checksum{{Type: "sha256", Checksum: "sha-a"}},
 			Authorizations: map[string][]string{"org": {"p1"}},
 		},
+
 		{
-			DrsObject: drs.DrsObject{
-				Id:          "other-project",
-				CreatedTime: now,
-				UpdatedTime: &now,
-				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: "sha-a"}},
-			},
+			Id:             "other-project",
+			CreatedTime:    now,
+			UpdatedTime:    &now,
+			Checksums:      []objects.Checksum{{Type: "sha256", Checksum: "sha-a"}},
 			Authorizations: map[string][]string{"org": {"p2"}},
 		},
+
 		{
-			DrsObject: drs.DrsObject{
-				Id:          "other-org",
-				CreatedTime: now,
-				UpdatedTime: &now,
-				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: "sha-a"}},
-			},
+			Id:             "other-org",
+			CreatedTime:    now,
+			UpdatedTime:    &now,
+			Checksums:      []objects.Checksum{{Type: "sha256", Checksum: "sha-a"}},
 			Authorizations: map[string][]string{"other": {"p1"}},
 		},
+
 		{
-			DrsObject: drs.DrsObject{
-				Id:          "proj-b",
-				CreatedTime: now,
-				UpdatedTime: &now,
-				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: "sha-b"}},
-			},
+			Id:             "proj-b",
+			CreatedTime:    now,
+			UpdatedTime:    &now,
+			Checksums:      []objects.Checksum{{Type: "sha256", Checksum: "sha-b"}},
 			Authorizations: map[string][]string{"org": {"p1"}},
 		},
 	}
-	if err := db.RegisterObjects(ctx, objects); err != nil {
+	if err := db.RegisterObjects(ctx, records); err != nil {
 		t.Fatalf("RegisterObjects failed: %v", err)
 	}
 
@@ -1044,26 +999,24 @@ func TestSqliteDB_ListObjectIDsByScopeRootIncludesUnscoped(t *testing.T) {
 	db, _ := NewSqliteDB(":memory:")
 	now := time.Now()
 
-	if err := db.RegisterObjects(ctx, []models.InternalObject{
+	if err := db.RegisterObjects(ctx, []objects.Record{
 		{
-			DrsObject: drs.DrsObject{
-				Id:          "scoped",
-				CreatedTime: now,
-				UpdatedTime: &now,
-				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: "scoped"}},
-				AccessMethods: &[]drs.AccessMethod{
-					testAccessMethod("s3://bucket/programs/a/projects/b/scoped"),
-				},
+			Id:          "scoped",
+			CreatedTime: now,
+			UpdatedTime: &now,
+			Checksums:   []objects.Checksum{{Type: "sha256", Checksum: "scoped"}},
+			AccessMethods: &[]objects.AccessMethod{
+				testAccessMethod("s3://bucket/programs/a/projects/b/scoped"),
 			},
 			Authorizations: map[string][]string{"a": {"b"}},
 		},
+
 		{
-			DrsObject: drs.DrsObject{
-				Id:          "unscoped",
-				CreatedTime: now,
-				UpdatedTime: &now,
-				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: "unscoped"}},
-			},
+			Id:             "unscoped",
+			CreatedTime:    now,
+			UpdatedTime:    &now,
+			Checksums:      []objects.Checksum{{Type: "sha256", Checksum: "unscoped"}},
+			Authorizations: map[string][]string{"a": {"b"}},
 		},
 	}); err != nil {
 		t.Fatalf("RegisterObjects failed: %v", err)
@@ -1082,13 +1035,10 @@ func TestSqliteDB_ListObjectIDsByScopeRootIncludesUnscoped(t *testing.T) {
 	}
 }
 
-func testAccessMethod(url string) drs.AccessMethod {
-	return drs.AccessMethod{
-		Type: drs.AccessMethodTypeS3,
-		AccessUrl: &struct {
-			Headers *[]string `json:"headers,omitempty"`
-			Url     string    `json:"url"`
-		}{Url: url},
+func testAccessMethod(url string) objects.AccessMethod {
+	return objects.AccessMethod{
+		Type:      "s3",
+		AccessUrl: &objects.AccessURL{Url: url},
 	}
 }
 
@@ -1103,22 +1053,19 @@ func newLegacyDuplicateSHAFixture(t *testing.T) (*SqliteDB, string, string) {
 	now := time.Now()
 	objectA := "3f5b5dac-f07d-5fdb-998d-532a95dd42d1"
 	objectB := "f9be6500-ea29-5427-843f-eb44dcdc6fb5"
-	if err := db.RegisterObjects(ctx, []models.InternalObject{
+	if err := db.RegisterObjects(ctx, []objects.Record{
 		{
-			DrsObject: drs.DrsObject{
-				Id:            objectA,
-				CreatedTime:   now,
-				UpdatedTime:   &now,
-				AccessMethods: &[]drs.AccessMethod{testAccessMethod("s3://bucket/original-a")},
-			},
+			Id:            objects.RecordID(objectA),
+			CreatedTime:   now,
+			UpdatedTime:   &now,
+			AccessMethods: &[]objects.AccessMethod{testAccessMethod("s3://bucket/original-a")},
 		},
+
 		{
-			DrsObject: drs.DrsObject{
-				Id:            objectB,
-				CreatedTime:   now,
-				UpdatedTime:   &now,
-				AccessMethods: &[]drs.AccessMethod{testAccessMethod("s3://bucket/original-b")},
-			},
+			Id:            objects.RecordID(objectB),
+			CreatedTime:   now,
+			UpdatedTime:   &now,
+			AccessMethods: &[]objects.AccessMethod{testAccessMethod("s3://bucket/original-b")},
 		},
 	}); err != nil {
 		t.Fatalf("RegisterObjects failed: %v", err)
@@ -1148,7 +1095,7 @@ func assertAccessMethodURL(t *testing.T, db *SqliteDB, objectID, wantURL string)
 func TestSqliteDB_UpdateObjectAccessMethodsTargetsPhysicalRowWithLegacyDuplicateSHA(t *testing.T) {
 	db, objectA, objectB := newLegacyDuplicateSHAFixture(t)
 
-	if err := db.UpdateObjectAccessMethods(context.Background(), objectA, []drs.AccessMethod{
+	if err := db.UpdateObjectAccessMethods(context.Background(), objectA, []objects.AccessMethod{
 		testAccessMethod("s3://bucket/repaired-a"),
 	}); err != nil {
 		t.Fatalf("UpdateObjectAccessMethods failed: %v", err)
@@ -1163,37 +1110,28 @@ func TestSqliteDB_BulkUpdateAccessMethods(t *testing.T) {
 	db, _ := NewSqliteDB(":memory:")
 
 	now := time.Now()
-	if err := db.RegisterObjects(ctx, []models.InternalObject{
+	if err := db.RegisterObjects(ctx, []objects.Record{
 		{
-			DrsObject: drs.DrsObject{
-				Id:          "obj-a",
-				CreatedTime: now,
-				UpdatedTime: &now,
-			},
+			Id:          "obj-a",
+			CreatedTime: now,
+			UpdatedTime: &now,
 		},
+
 		{
-			DrsObject: drs.DrsObject{
-				Id:          "obj-b",
-				CreatedTime: now,
-				UpdatedTime: &now,
-			},
+			Id:          "obj-b",
+			CreatedTime: now,
+			UpdatedTime: &now,
 		},
 	}); err != nil {
 		t.Fatalf("RegisterObjects failed: %v", err)
 	}
 
-	err := db.BulkUpdateAccessMethods(ctx, map[string][]drs.AccessMethod{
+	err := db.BulkUpdateAccessMethods(ctx, map[string][]objects.AccessMethod{
 		"obj-a": {
-			{Type: drs.AccessMethodTypeS3, AccessUrl: &struct {
-				Headers *[]string `json:"headers,omitempty"`
-				Url     string    `json:"url"`
-			}{Url: "s3://bucket/a"}},
+			{Type: "s3", AccessUrl: &objects.AccessURL{Url: "s3://bucket/a"}},
 		},
 		"obj-b": {
-			{Type: drs.AccessMethodTypeS3, AccessUrl: &struct {
-				Headers *[]string `json:"headers,omitempty"`
-				Url     string    `json:"url"`
-			}{Url: "s3://bucket/b"}},
+			{Type: "s3", AccessUrl: &objects.AccessURL{Url: "s3://bucket/b"}},
 		},
 	})
 	if err != nil {
@@ -1210,7 +1148,7 @@ func TestSqliteDB_BulkUpdateAccessMethodsTargetsPhysicalRowWithLegacyDuplicateSH
 	ctx := context.Background()
 	db, objectA, objectB := newLegacyDuplicateSHAFixture(t)
 
-	if err := db.BulkUpdateAccessMethods(ctx, map[string][]drs.AccessMethod{
+	if err := db.BulkUpdateAccessMethods(ctx, map[string][]objects.AccessMethod{
 		objectA: {testAccessMethod("s3://bucket/repaired-a")},
 	}); err != nil {
 		t.Fatalf("BulkUpdateAccessMethods failed: %v", err)
@@ -1242,10 +1180,10 @@ func TestSqliteDB_PendingLFSMetaLifecycle(t *testing.T) {
 		t.Fatalf("failed to create db: %v", err)
 	}
 	now := time.Now().UTC()
-	candidate := drs.DrsObjectCandidate{
+	candidate := objects.Candidate{
 		Name: common.Ptr("candidate"),
-		Size: 123,
-		Checksums: []drs.Checksum{
+		Size: common.Ptr(int64(123)),
+		Checksums: &[]objects.Checksum{
 			{Type: "sha256", Checksum: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
 		},
 	}
@@ -1282,9 +1220,9 @@ func TestSqliteDB_PendingLFSMetaPrunesExpired(t *testing.T) {
 	}
 	now := time.Now().UTC()
 	oid := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-	candidate := drs.DrsObjectCandidate{
+	candidate := objects.Candidate{
 		Name: common.Ptr("expired"),
-		Checksums: []drs.Checksum{
+		Checksums: &[]objects.Checksum{
 			{Type: "sha256", Checksum: oid},
 		},
 	}
@@ -1313,15 +1251,13 @@ func TestSqliteDB_FileUsageMetrics(t *testing.T) {
 	}
 	now := time.Now().UTC()
 	oid := "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
-	if err := db.CreateObject(ctx, &models.InternalObject{
-		DrsObject: drs.DrsObject{
-			Id:          oid,
-			Name:        common.Ptr("metrics-object"),
-			Size:        42,
-			CreatedTime: now,
-			UpdatedTime: &now,
-			Version:     common.Ptr("1"),
-		},
+	if err := db.CreateObject(ctx, &objects.Record{
+		Id:          objects.RecordID(oid),
+		Name:        common.Ptr("metrics-object"),
+		Size:        42,
+		CreatedTime: now,
+		UpdatedTime: &now,
+		Version:     common.Ptr("1"),
 	}); err != nil {
 		t.Fatalf("CreateObject failed: %v", err)
 	}
@@ -1382,15 +1318,13 @@ func TestSqliteDB_FileUsageMetrics_MissingObjectQueuedAndFlushedOnCreate(t *test
 	}
 
 	now := time.Now().UTC()
-	if err := db.CreateObject(ctx, &models.InternalObject{
-		DrsObject: drs.DrsObject{
-			Id:          oid,
-			Name:        common.Ptr("later-created"),
-			Size:        11,
-			CreatedTime: now,
-			UpdatedTime: &now,
-			Version:     common.Ptr("1"),
-		},
+	if err := db.CreateObject(ctx, &objects.Record{
+		Id:          objects.RecordID(oid),
+		Name:        common.Ptr("later-created"),
+		Size:        11,
+		CreatedTime: now,
+		UpdatedTime: &now,
+		Version:     common.Ptr("1"),
 	}); err != nil {
 		t.Fatalf("CreateObject failed: %v", err)
 	}
@@ -1410,33 +1344,29 @@ func TestSqliteDB_ListObjectIDsPageByChecksum(t *testing.T) {
 		t.Fatalf("failed to create db: %v", err)
 	}
 	now := time.Now().UTC()
-	for _, obj := range []models.InternalObject{
+	for _, obj := range []objects.Record{
 		{
 			Authorizations: map[string][]string{"org": {"p1"}},
-			DrsObject: drs.DrsObject{
-				Id:          "obj-a",
-				CreatedTime: now,
-				UpdatedTime: &now,
-				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: "same"}},
-			},
+			Id:             "obj-a",
+			CreatedTime:    now,
+			UpdatedTime:    &now,
+			Checksums:      []objects.Checksum{{Type: "sha256", Checksum: "same"}},
 		},
+
 		{
 			Authorizations: map[string][]string{"org": {"p1"}},
-			DrsObject: drs.DrsObject{
-				Id:          "obj-b",
-				CreatedTime: now,
-				UpdatedTime: &now,
-				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: "same"}},
-			},
+			Id:             "obj-b",
+			CreatedTime:    now,
+			UpdatedTime:    &now,
+			Checksums:      []objects.Checksum{{Type: "sha256", Checksum: "same"}},
 		},
+
 		{
 			Authorizations: map[string][]string{"org": {"p2"}},
-			DrsObject: drs.DrsObject{
-				Id:          "obj-c",
-				CreatedTime: now,
-				UpdatedTime: &now,
-				Checksums:   []drs.Checksum{{Type: "md5", Checksum: "same"}},
-			},
+			Id:             "obj-c",
+			CreatedTime:    now,
+			UpdatedTime:    &now,
+			Checksums:      []objects.Checksum{{Type: "md5", Checksum: "same"}},
 		},
 	} {
 		if err := db.CreateObject(ctx, &obj); err != nil {
@@ -1460,26 +1390,22 @@ func TestSqliteDB_ListObjectIDsPageByURL(t *testing.T) {
 		t.Fatalf("failed to create db: %v", err)
 	}
 	now := time.Now().UTC()
-	objectWithURL := func(id, rawURL string, authz map[string][]string) models.InternalObject {
-		return models.InternalObject{
+	objectWithURL := func(id, rawURL string, authz map[string][]string) objects.Record {
+		return objects.Record{
 			Authorizations: authz,
-			DrsObject: drs.DrsObject{
-				Id:          id,
-				CreatedTime: now,
-				UpdatedTime: &now,
-				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: id + "-hash"}},
-				AccessMethods: &[]drs.AccessMethod{{
-					Type: drs.AccessMethodTypeS3,
-					AccessUrl: &struct {
-						Headers *[]string `json:"headers,omitempty"`
-						Url     string    `json:"url"`
-					}{Url: rawURL},
-				}},
-			},
+
+			Id:          objects.RecordID(id),
+			CreatedTime: now,
+			UpdatedTime: &now,
+			Checksums:   []objects.Checksum{{Type: "sha256", Checksum: id + "-hash"}},
+			AccessMethods: &[]objects.AccessMethod{{
+				Type:      "s3",
+				AccessUrl: &objects.AccessURL{Url: rawURL},
+			}},
 		}
 	}
 	targetURL := "s3://bucket/path/image.offsets.json"
-	for _, obj := range []models.InternalObject{
+	for _, obj := range []objects.Record{
 		objectWithURL("obj-a", targetURL, map[string][]string{"org": {"p1"}}),
 		objectWithURL("obj-b", targetURL, map[string][]string{"org": {"p2"}}),
 		objectWithURL("obj-c", targetURL, nil),
@@ -1531,32 +1457,28 @@ func TestSqliteDB_AuthorizedObjectLookupQueries(t *testing.T) {
 		t.Fatalf("failed to create db: %v", err)
 	}
 	now := time.Now().UTC()
-	for _, obj := range []models.InternalObject{
+	for _, obj := range []objects.Record{
 		{
 			Authorizations: map[string][]string{"org": {"p1"}},
-			DrsObject: drs.DrsObject{
-				Id:          "obj-a",
-				CreatedTime: now,
-				UpdatedTime: &now,
-				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: "same"}},
-			},
+			Id:             "obj-a",
+			CreatedTime:    now,
+			UpdatedTime:    &now,
+			Checksums:      []objects.Checksum{{Type: "sha256", Checksum: "same"}},
 		},
+
 		{
 			Authorizations: map[string][]string{"org": {"p2"}},
-			DrsObject: drs.DrsObject{
-				Id:          "obj-b",
-				CreatedTime: now,
-				UpdatedTime: &now,
-				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: "same"}},
-			},
+			Id:             "obj-b",
+			CreatedTime:    now,
+			UpdatedTime:    &now,
+			Checksums:      []objects.Checksum{{Type: "sha256", Checksum: "same"}},
 		},
+
 		{
-			DrsObject: drs.DrsObject{
-				Id:          "obj-public",
-				CreatedTime: now,
-				UpdatedTime: &now,
-				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: "same"}},
-			},
+			Id:          "obj-public",
+			CreatedTime: now,
+			UpdatedTime: &now,
+			Checksums:   []objects.Checksum{{Type: "sha256", Checksum: "same"}},
 		},
 	} {
 		if err := db.CreateObject(ctx, &obj); err != nil {
@@ -1588,36 +1510,32 @@ func TestSqliteDB_ScopedFileUsageQueries(t *testing.T) {
 		t.Fatalf("failed to create db: %v", err)
 	}
 	now := time.Now().UTC()
-	for _, obj := range []models.InternalObject{
+	for _, obj := range []objects.Record{
 		{
 			Authorizations: map[string][]string{"org": {"p1"}},
-			DrsObject: drs.DrsObject{
-				Id:          "obj-1",
-				Name:        common.Ptr("one"),
-				Size:        1,
-				CreatedTime: now,
-				UpdatedTime: &now,
-			},
+			Id:             "obj-1",
+			Name:           common.Ptr("one"),
+			Size:           1,
+			CreatedTime:    now,
+			UpdatedTime:    &now,
 		},
+
 		{
 			Authorizations: map[string][]string{"org": {"p1"}},
-			DrsObject: drs.DrsObject{
-				Id:          "obj-2",
-				Name:        common.Ptr("two"),
-				Size:        2,
-				CreatedTime: now,
-				UpdatedTime: &now,
-			},
+			Id:             "obj-2",
+			Name:           common.Ptr("two"),
+			Size:           2,
+			CreatedTime:    now,
+			UpdatedTime:    &now,
 		},
+
 		{
 			Authorizations: map[string][]string{"org": {"p2"}},
-			DrsObject: drs.DrsObject{
-				Id:          "obj-3",
-				Name:        common.Ptr("three"),
-				Size:        3,
-				CreatedTime: now,
-				UpdatedTime: &now,
-			},
+			Id:             "obj-3",
+			Name:           common.Ptr("three"),
+			Size:           3,
+			CreatedTime:    now,
+			UpdatedTime:    &now,
 		},
 	} {
 		if err := db.CreateObject(ctx, &obj); err != nil {
@@ -1726,35 +1644,26 @@ func TestSqliteDB_ListBucketVisibilityRows(t *testing.T) {
 		t.Fatalf("failed to create db: %v", err)
 	}
 	now := time.Now().UTC()
-	for _, obj := range []models.InternalObject{
+	for _, obj := range []objects.Record{
 		{
 			Authorizations: map[string][]string{"org": {"p1"}},
-			DrsObject: drs.DrsObject{
-				Id:          "obj-scoped",
-				CreatedTime: now,
-				UpdatedTime: &now,
-				AccessMethods: &[]drs.AccessMethod{{
-					Type: drs.AccessMethodTypeS3,
-					AccessUrl: &struct {
-						Headers *[]string `json:"headers,omitempty"`
-						Url     string    `json:"url"`
-					}{Url: "s3://bucket-a/scoped"},
-				}},
-			},
+			Id:             "obj-scoped",
+			CreatedTime:    now,
+			UpdatedTime:    &now,
+			AccessMethods: &[]objects.AccessMethod{{
+				Type:      "s3",
+				AccessUrl: &objects.AccessURL{Url: "s3://bucket-a/scoped"},
+			}},
 		},
+
 		{
-			DrsObject: drs.DrsObject{
-				Id:          "obj-public",
-				CreatedTime: now,
-				UpdatedTime: &now,
-				AccessMethods: &[]drs.AccessMethod{{
-					Type: drs.AccessMethodTypeS3,
-					AccessUrl: &struct {
-						Headers *[]string `json:"headers,omitempty"`
-						Url     string    `json:"url"`
-					}{Url: "s3://bucket-b/public"},
-				}},
-			},
+			Id:          "obj-public",
+			CreatedTime: now,
+			UpdatedTime: &now,
+			AccessMethods: &[]objects.AccessMethod{{
+				Type:      "s3",
+				AccessUrl: &objects.AccessURL{Url: "s3://bucket-b/public"},
+			}},
 		},
 	} {
 		if err := db.CreateObject(ctx, &obj); err != nil {
@@ -1779,18 +1688,16 @@ func TestSqliteDB_TransferAttributionMetrics(t *testing.T) {
 	}
 	now := time.Now().UTC()
 	oid := "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
-	if err := db.CreateObject(ctx, &models.InternalObject{
+	if err := db.CreateObject(ctx, &objects.Record{
 		Authorizations: map[string][]string{"calypr": {"proj-a"}},
-		DrsObject: drs.DrsObject{
-			Id:          "did-1",
-			Name:        common.Ptr("transfer-object"),
-			Size:        42,
-			CreatedTime: now,
-			UpdatedTime: &now,
-			Version:     common.Ptr("1"),
-			Checksums: []drs.Checksum{
-				{Type: "sha256", Checksum: oid},
-			},
+		Id:             "did-1",
+		Name:           common.Ptr("transfer-object"),
+		Size:           42,
+		CreatedTime:    now,
+		UpdatedTime:    &now,
+		Version:        common.Ptr("1"),
+		Checksums: []objects.Checksum{
+			{Type: "sha256", Checksum: oid},
 		},
 	}); err != nil {
 		t.Fatalf("CreateObject failed: %v", err)
@@ -2130,9 +2037,9 @@ func TestSqliteDB_GetPendingLFSMeta(t *testing.T) {
 
 	now := time.Now().UTC()
 	oid := "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
-	candidate := drs.DrsObjectCandidate{
+	candidate := objects.Candidate{
 		Name: common.Ptr("candidate-get"),
-		Checksums: []drs.Checksum{
+		Checksums: &[]objects.Checksum{
 			{Type: "sha256", Checksum: oid},
 		},
 	}

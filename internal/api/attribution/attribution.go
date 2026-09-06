@@ -9,10 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/models"
+
+	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/requestmeta"
 	"github.com/calypr/syfon/internal/storage/address"
 )
@@ -28,7 +29,7 @@ type AccessDetails struct {
 	ClientVersion  string
 }
 
-func RecordAccessIssued(ctx context.Context, om *core.ObjectManager, obj *models.InternalObject, details AccessDetails) error {
+func RecordAccessIssued(ctx context.Context, om *core.ObjectManager, obj *objects.Record, details AccessDetails) error {
 	if om == nil || obj == nil {
 		return nil
 	}
@@ -39,7 +40,7 @@ func RecordAccessIssued(ctx context.Context, om *core.ObjectManager, obj *models
 	return om.RecordTransferAttributionEvents(ctx, []models.TransferAttributionEvent{ev})
 }
 
-func EventFromObject(ctx context.Context, obj *models.InternalObject, eventType string, details AccessDetails) models.TransferAttributionEvent {
+func EventFromObject(ctx context.Context, obj *objects.Record, eventType string, details AccessDetails) models.TransferAttributionEvent {
 	if obj == nil {
 		return models.TransferAttributionEvent{}
 	}
@@ -83,7 +84,7 @@ func EventFromObject(ctx context.Context, obj *models.InternalObject, eventType 
 		Direction:      direction,
 		EventTime:      when,
 		RequestID:      requestmeta.GetRequestID(ctx),
-		ObjectID:       obj.Id,
+		ObjectID:       string(obj.Id),
 		SHA256:         sha,
 		ObjectSize:     obj.Size,
 		Organization:   org,
@@ -174,21 +175,21 @@ func authMode(ctx context.Context) string {
 	return strings.TrimSpace(access.FromContext(ctx).Mode)
 }
 
-func accessMethods(obj *models.InternalObject) []drs.AccessMethod {
+func accessMethods(obj *objects.Record) []objects.AccessMethod {
 	if obj == nil || obj.AccessMethods == nil {
 		return nil
 	}
 	return *obj.AccessMethods
 }
 
-func accessMethodID(am drs.AccessMethod) string {
+func accessMethodID(am objects.AccessMethod) string {
 	if am.AccessId != nil && strings.TrimSpace(*am.AccessId) != "" {
 		return strings.TrimSpace(*am.AccessId)
 	}
-	return strings.TrimSpace(string(am.Type))
+	return strings.TrimSpace(am.Type)
 }
 
-func scopeForAccess(obj *models.InternalObject, accessID string) (string, string) {
+func scopeForAccess(obj *objects.Record, accessID string) (string, string) {
 	for _, am := range accessMethods(obj) {
 		if accessID != "" && !strings.EqualFold(accessMethodID(am), accessID) {
 			continue
@@ -213,7 +214,7 @@ func providerBucket(raw string) (string, string) {
 	return address.ProviderFromScheme(u.Scheme), strings.TrimSpace(u.Host)
 }
 
-func sha256ForObject(obj *models.InternalObject) string {
+func sha256ForObject(obj *objects.Record) string {
 	for _, c := range obj.Checksums {
 		if strings.EqualFold(c.Type, "sha256") {
 			return strings.TrimSpace(c.Checksum)

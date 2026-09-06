@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/core"
+	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/testutils"
 )
 
@@ -130,24 +130,21 @@ func TestHandleInternalInspectProjectRecords(t *testing.T) {
 		BucketScopes: map[string]buckets.Scope{
 			"syfon|e2e": {Organization: "syfon", ProjectID: "e2e", Bucket: "bucket-a", CredentialID: "cred-1", PathPrefix: "project-root"},
 		},
-		Objects: map[string]*drs.DrsObject{
+		Objects: map[string]*objects.Record{
 			"obj-1": {
 				Id:   "obj-1",
 				Name: &name,
-				Checksums: []drs.Checksum{
+				Checksums: []objects.Checksum{
 					{Type: "sha256", Checksum: "abc123"},
 				},
 				CreatedTime: created,
 				UpdatedTime: &updated,
 				Size:        17,
-				AccessMethods: &[]drs.AccessMethod{
+				AccessMethods: &[]objects.AccessMethod{
 					{
-						Type:     "s3",
-						AccessId: ptr("acc-1"),
-						AccessUrl: &struct {
-							Headers *[]string `json:"headers,omitempty"`
-							Url     string    `json:"url"`
-						}{Url: "s3://bucket-a/prefix/example.bin"},
+						Type:      "s3",
+						AccessId:  ptr("acc-1"),
+						AccessUrl: &objects.AccessURL{Url: "s3://bucket-a/prefix/example.bin"},
 					},
 				},
 			},
@@ -189,26 +186,18 @@ func TestHandleInternalInspectProjectRecordsPreservesLegacyDuplicatePhysicalRows
 	checksum := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	created := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
 	newer := created.Add(time.Minute)
-	urlFor := func(url string) *struct {
-		Headers *[]string `json:"headers,omitempty"`
-		Url     string    `json:"url"`
-	} {
-		return &struct {
-			Headers *[]string `json:"headers,omitempty"`
-			Url     string    `json:"url"`
-		}{Url: url}
-	}
+	urlFor := func(url string) *objects.AccessURL { return &objects.AccessURL{Url: url} }
 	db := &testutils.MockDatabase{
-		Objects: map[string]*drs.DrsObject{
+		Objects: map[string]*objects.Record{
 			"physical-a": {
-				Id: "physical-a", Checksums: []drs.Checksum{{Type: "sha256", Checksum: checksum}},
+				Id: "physical-a", Checksums: []objects.Checksum{{Type: "sha256", Checksum: checksum}},
 				CreatedTime: created, UpdatedTime: &created,
-				AccessMethods: &[]drs.AccessMethod{{Type: drs.AccessMethodTypeS3, AccessUrl: urlFor("s3://bucket/physical-a")}},
+				AccessMethods: &[]objects.AccessMethod{{Type: "s3", AccessUrl: urlFor("s3://bucket/physical-a")}},
 			},
 			"physical-b": {
-				Id: "physical-b", Checksums: []drs.Checksum{{Type: "sha256", Checksum: checksum}},
+				Id: "physical-b", Checksums: []objects.Checksum{{Type: "sha256", Checksum: checksum}},
 				CreatedTime: newer, UpdatedTime: &newer,
-				AccessMethods: &[]drs.AccessMethod{{Type: drs.AccessMethodTypeS3, AccessUrl: urlFor("s3://bucket/physical-b")}},
+				AccessMethods: &[]objects.AccessMethod{{Type: "s3", AccessUrl: urlFor("s3://bucket/physical-b")}},
 			},
 		},
 		ObjectAuthz: map[string]map[string][]string{

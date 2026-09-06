@@ -16,13 +16,14 @@ import (
 	"github.com/calypr/syfon/apigen/server/internalapi"
 	"github.com/calypr/syfon/internal/api/apiutil"
 	"github.com/calypr/syfon/internal/api/attribution"
-	apimiddleware "github.com/calypr/syfon/internal/api/middleware"
 	"github.com/calypr/syfon/internal/api/routeutil"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/config"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/faults"
+	apimiddleware "github.com/calypr/syfon/internal/httpapi/middleware"
 	"github.com/calypr/syfon/internal/models"
+	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/storage/address"
 	"github.com/calypr/syfon/internal/urlmanager"
 )
@@ -83,7 +84,7 @@ func handleInternalDownloadFiber(c fiber.Ctx, om *core.ObjectManager) error {
 		return apiutil.HandleError(c, err)
 	}
 
-	if err := om.RecordDownload(c.Context(), obj.Id); err != nil {
+	if err := om.RecordDownload(c.Context(), string(obj.Id)); err != nil {
 		return apiutil.HandleError(c, err)
 	}
 	if err := attribution.RecordAccessIssued(c.Context(), om, obj, attribution.AccessDetails{
@@ -270,12 +271,12 @@ func handleInternalUploadURLFiber(om *core.ObjectManager) fiber.Handler {
 	}
 }
 
-func uploadKeyForExistingObject(obj *models.InternalObject, params internalapi.InternalUploadURLParams) string {
+func uploadKeyForExistingObject(obj *objects.Record, params internalapi.InternalUploadURLParams) string {
 	if key := strings.Trim(strings.TrimSpace(common.StringVal(params.Key)), "/"); key != "" {
 		return key
 	}
 	if obj != nil {
-		if sha, ok := common.CanonicalSHA256(obj.Checksums); ok {
+		if sha, ok := objects.CanonicalSHA256(obj.Checksums); ok {
 			return sha
 		}
 	}
@@ -349,7 +350,7 @@ func handleInternalUploadBulkFiber(om *core.ObjectManager) fiber.Handler {
 			bucket := target.Bucket
 			key := target.Key
 			if key == "" {
-				key = obj.Id
+				key = string(obj.Id)
 			}
 			signedURL, err := om.SignURL(c.Context(), target.URL, urlmanager.SignOptions{Method: http.MethodPut})
 			if err != nil {
@@ -422,10 +423,10 @@ func handleInternalMultipartInitFiber(om *core.ObjectManager) fiber.Handler {
 			bucket       string
 			multipartKey string
 		)
-		if common.LooksLikeSHA256(key) {
+		if objects.LooksLikeSHA256(key) {
 			if existing, err := om.GetObjectsByChecksum(c.Context(), key, "read"); err == nil && len(existing) > 0 {
 				obj := &existing[0]
-				internalID = obj.Id
+				internalID = string(obj.Id)
 				target, err := om.ResolveCanonicalStorageTarget(c.Context(), core.CanonicalStorageTargetRequest{
 					Object:         obj,
 					PreferChecksum: true,

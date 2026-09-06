@@ -11,12 +11,13 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 
-	"github.com/calypr/syfon/apigen/server/drs"
-	"github.com/calypr/syfon/internal/api/middleware"
+	"github.com/calypr/syfon/internal/access/authentication"
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/config"
 	"github.com/calypr/syfon/internal/core"
+	"github.com/calypr/syfon/internal/httpapi/middleware"
+	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/testutils"
 )
 
@@ -158,22 +159,19 @@ func TestHealthOnlyServerExposesNoOptionalRoutes(t *testing.T) {
 
 func buildMockServerRouterWithRoutes(routes config.RoutesConfig) *fiber.App {
 	database := &testutils.MockDatabase{
-		Objects: map[string]*drs.DrsObject{
+		Objects: map[string]*objects.Record{
 			"sha-1": {
 				Id:          "sha-1",
 				Name:        common.Ptr("mock-object"),
 				Size:        1,
 				Version:     common.Ptr("1"),
 				Description: common.Ptr("mock"),
-				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: "sha-1"}},
-				AccessMethods: &[]drs.AccessMethod{
+				Checksums:   []objects.Checksum{{Type: "sha256", Checksum: "sha-1"}},
+				AccessMethods: &[]objects.AccessMethod{
 					{
-						Type:     drs.AccessMethodTypeS3,
-						AccessId: common.Ptr("s3"),
-						AccessUrl: &struct {
-							Headers *[]string `json:"headers,omitempty"`
-							Url     string    `json:"url"`
-						}{Url: "s3://test-bucket-1/sha-1"},
+						Type:      "s3",
+						AccessId:  common.Ptr("s3"),
+						AccessUrl: &objects.AccessURL{Url: "s3://test-bucket-1/sha-1"},
 					},
 				},
 				ControlledAccess: &[]string{"/programs/data_file"},
@@ -195,7 +193,8 @@ func buildMockServerRouterWithRoutes(routes config.RoutesConfig) *fiber.App {
 	app := fiber.New()
 
 	logger := slog.New(slog.NewTextHandler(bytes.NewBuffer(nil), nil))
-	authzMiddleware := middleware.NewAuthzMiddleware(logger, "local", "", "")
+	authRuntime := authentication.NewRuntime(logger, "local", "", "")
+	authzMiddleware := middleware.NewAuthzMiddleware(logger, middleware.Options{Mode: "local", Evaluator: authRuntime})
 	requestIDMiddleware := middleware.NewRequestIDMiddleware(logger)
 	cfg := &config.Config{Routes: routes}
 	rt := &serverRuntime{

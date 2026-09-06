@@ -273,18 +273,18 @@ func listPage(nextToken string, keys ...string) *awss3.ListObjectsV2Output {
 	return &awss3.ListObjectsV2Output{
 		IsTruncated:           aws.Bool(true),
 		NextContinuationToken: aws.String(nextToken),
-		Contents:              objects(keys...),
+		Contents:              inventoryObjects(keys...),
 	}
 }
 
 func finalListPage(keys ...string) *awss3.ListObjectsV2Output {
 	return &awss3.ListObjectsV2Output{
 		IsTruncated: aws.Bool(false),
-		Contents:    objects(keys...),
+		Contents:    inventoryObjects(keys...),
 	}
 }
 
-func objects(keys ...string) []types.Object {
+func inventoryObjects(keys ...string) []types.Object {
 	out := make([]types.Object, 0, len(keys))
 	for _, key := range keys {
 		out = append(out, types.Object{Key: aws.String(key), Size: aws.Int64(12)})

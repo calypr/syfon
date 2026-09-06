@@ -7,12 +7,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/calypr/syfon/apigen/server/drs"
 	sycommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/faults"
-	"github.com/calypr/syfon/internal/models"
+
+	"github.com/calypr/syfon/internal/objects"
 	"github.com/lib/pq"
 )
 
@@ -139,7 +139,7 @@ func (db *PostgresDB) CreateObjectAlias(ctx context.Context, aliasID, canonicalO
 	return tx.Commit()
 }
 
-func (db *PostgresDB) createObjectLegacy(ctx context.Context, obj *models.InternalObject) error {
+func (db *PostgresDB) createObjectLegacy(ctx context.Context, obj *objects.Record) error {
 	tx, err := db.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -150,17 +150,17 @@ func (db *PostgresDB) createObjectLegacy(ctx context.Context, obj *models.Intern
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO drs_object (id, size, created_time, updated_time, name, version, description)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-		obj.Id, obj.Size, obj.CreatedTime, common.TimeVal(obj.UpdatedTime), common.CleanToBasename(common.StringVal(obj.Name)), common.StringVal(obj.Version), common.StringVal(obj.Description),
+		string(obj.Id), obj.Size, obj.CreatedTime, common.TimeVal(obj.UpdatedTime), objects.CleanToBasename(common.StringVal(obj.Name)), common.StringVal(obj.Version), common.StringVal(obj.Description),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to insert drs_object: %w", err)
 	}
 
-	if err := insertControlledAccessTx(ctx, tx, obj.Id, objectAccessResources(obj)); err != nil {
+	if err := insertControlledAccessTx(ctx, tx, string(obj.Id), objectAccessResources(obj)); err != nil {
 		return err
 	}
 	for _, alias := range normalizeObjectNameAliases(obj) {
-		_, err = tx.ExecContext(ctx, `INSERT INTO drs_object_name_alias (object_id, name_alias) VALUES ($1, $2)`, obj.Id, alias)
+		_, err = tx.ExecContext(ctx, `INSERT INTO drs_object_name_alias (object_id, name_alias) VALUES ($1, $2)`, string(obj.Id), alias)
 		if err != nil {
 			return fmt.Errorf("failed to insert name alias: %w", err)
 		}
@@ -172,7 +172,7 @@ func (db *PostgresDB) createObjectLegacy(ctx context.Context, obj *models.Intern
 			if am.AccessUrl == nil || am.AccessUrl.Url == "" {
 				continue
 			}
-			_, err = tx.ExecContext(ctx, `INSERT INTO drs_object_access_method (object_id, url, type) VALUES ($1, $2, $3)`, obj.Id, am.AccessUrl.Url, am.Type)
+			_, err = tx.ExecContext(ctx, `INSERT INTO drs_object_access_method (object_id, url, type) VALUES ($1, $2, $3)`, string(obj.Id), am.AccessUrl.Url, am.Type)
 			if err != nil {
 				return fmt.Errorf("failed to insert access method: %w", err)
 			}
@@ -184,21 +184,21 @@ func (db *PostgresDB) createObjectLegacy(ctx context.Context, obj *models.Intern
 		if strings.TrimSpace(cs.Type) == "" || strings.TrimSpace(cs.Checksum) == "" {
 			continue
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO drs_object_checksum (object_id, type, checksum) VALUES ($1, $2, $3)`, obj.Id, cs.Type, cs.Checksum)
+		_, err = tx.ExecContext(ctx, `INSERT INTO drs_object_checksum (object_id, type, checksum) VALUES ($1, $2, $3)`, string(obj.Id), cs.Type, cs.Checksum)
 		if err != nil {
 			return fmt.Errorf("failed to insert checksum: %w", err)
 		}
 	}
 
-	if err := db.flushObjectUsageEventsForIDsTx(ctx, tx, []string{obj.Id}); err != nil {
+	if err := db.flushObjectUsageEventsForIDsTx(ctx, tx, []string{string(obj.Id)}); err != nil {
 		return fmt.Errorf("failed to apply object usage events: %w", err)
 	}
 
 	return tx.Commit()
 }
 
-func (db *PostgresDB) registerObjectsLegacy(ctx context.Context, objects []models.InternalObject) error {
-	if len(objects) == 0 {
+func (db *PostgresDB) registerObjectsLegacy(ctx context.Context, records []objects.Record) error {
+	if len(records) == 0 {
 		return nil
 	}
 
@@ -208,13 +208,13 @@ func (db *PostgresDB) registerObjectsLegacy(ctx context.Context, objects []model
 	}
 	defer tx.Rollback()
 
-	ids := make([]string, 0, len(objects))
-	sizes := make([]int64, 0, len(objects))
-	createdTimes := make([]time.Time, 0, len(objects))
-	updatedTimes := make([]time.Time, 0, len(objects))
-	names := make([]string, 0, len(objects))
-	versions := make([]string, 0, len(objects))
-	descriptions := make([]string, 0, len(objects))
+	ids := make([]string, 0, len(records))
+	sizes := make([]int64, 0, len(records))
+	createdTimes := make([]time.Time, 0, len(records))
+	updatedTimes := make([]time.Time, 0, len(records))
+	names := make([]string, 0, len(records))
+	versions := make([]string, 0, len(records))
+	descriptions := make([]string, 0, len(records))
 
 	accessObjectIDs := make([]string, 0)
 	accessURLs := make([]string, 0)
@@ -228,22 +228,22 @@ func (db *PostgresDB) registerObjectsLegacy(ctx context.Context, objects []model
 	nameAliasObjectIDs := make([]string, 0)
 	nameAliasValues := make([]string, 0)
 
-	for _, obj := range objects {
-		ids = append(ids, obj.Id)
+	for _, obj := range records {
+		ids = append(ids, string(obj.Id))
 		sizes = append(sizes, obj.Size)
 		createdTimes = append(createdTimes, obj.CreatedTime)
 		updatedTimes = append(updatedTimes, common.TimeVal(obj.UpdatedTime))
-		names = append(names, common.CleanToBasename(common.StringVal(obj.Name)))
+		names = append(names, objects.CleanToBasename(common.StringVal(obj.Name)))
 		versions = append(versions, common.StringVal(obj.Version))
 		descriptions = append(descriptions, common.StringVal(obj.Description))
 
 		seenAccess := make(map[string]struct{})
 		for _, resource := range objectAccessResources(&obj) {
-			controlledObjectIDs = append(controlledObjectIDs, obj.Id)
+			controlledObjectIDs = append(controlledObjectIDs, string(obj.Id))
 			controlledResources = append(controlledResources, resource)
 		}
 		for _, alias := range normalizeObjectNameAliases(&obj) {
-			nameAliasObjectIDs = append(nameAliasObjectIDs, obj.Id)
+			nameAliasObjectIDs = append(nameAliasObjectIDs, string(obj.Id))
 			nameAliasValues = append(nameAliasValues, alias)
 		}
 		if obj.AccessMethods != nil {
@@ -256,7 +256,7 @@ func (db *PostgresDB) registerObjectsLegacy(ctx context.Context, objects []model
 					continue
 				}
 				seenAccess[key] = struct{}{}
-				accessObjectIDs = append(accessObjectIDs, obj.Id)
+				accessObjectIDs = append(accessObjectIDs, string(obj.Id))
 				accessURLs = append(accessURLs, am.AccessUrl.Url)
 				accessTypes = append(accessTypes, string(am.Type))
 			}
@@ -269,7 +269,7 @@ func (db *PostgresDB) registerObjectsLegacy(ctx context.Context, objects []model
 				continue
 			}
 			seenChecksum[key] = struct{}{}
-			checksumObjectIDs = append(checksumObjectIDs, obj.Id)
+			checksumObjectIDs = append(checksumObjectIDs, string(obj.Id))
 			checksumTypes = append(checksumTypes, cs.Type)
 			checksumValues = append(checksumValues, cs.Checksum)
 		}
@@ -395,7 +395,7 @@ func (db *PostgresDB) BulkDeleteObjects(ctx context.Context, ids []string) error
 	return tx.Commit()
 }
 
-func (db *PostgresDB) UpdateObjectAccessMethods(ctx context.Context, objectID string, accessMethods []drs.AccessMethod) error {
+func (db *PostgresDB) UpdateObjectAccessMethods(ctx context.Context, objectID string, accessMethods []objects.AccessMethod) error {
 	tx, err := db.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -562,7 +562,7 @@ func (db *PostgresDB) RemoveObjectControlledAccessBulk(ctx context.Context, obje
 	return removed, nil
 }
 
-func (db *PostgresDB) BulkUpdateAccessMethods(ctx context.Context, updates map[string][]drs.AccessMethod) error {
+func (db *PostgresDB) BulkUpdateAccessMethods(ctx context.Context, updates map[string][]objects.AccessMethod) error {
 	tx, err := db.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err

@@ -5,10 +5,9 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/faults"
-	"github.com/calypr/syfon/internal/models"
+	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/testutils"
 	"github.com/calypr/syfon/internal/urlmanager"
 )
@@ -25,8 +24,8 @@ func TestObjectManagerLegacyS3DownloadCompatibility(t *testing.T) {
 		Bucket:       "bforepc",
 		PathPrefix:   "bforepc-prod",
 	}
-	newObject := func(resources ...string) *models.InternalObject {
-		return &models.InternalObject{DrsObject: drs.DrsObject{ControlledAccess: &resources}}
+	newObject := func(resources ...string) *objects.Record {
+		return &objects.Record{ControlledAccess: &resources}
 	}
 	newManager := func(scopes map[string]buckets.Scope, credentials map[string]buckets.Credential) (*ObjectManager, *capturingURLManager) {
 		db := &coreTestDB{MockDatabase: &testutils.MockDatabase{BucketScopes: scopes, Credentials: credentials}}
@@ -168,7 +167,7 @@ func TestObjectManagerLegacyS3DownloadCredentialErrorsPropagate(t *testing.T) {
 	}}, err: wantErr}
 	om := NewObjectManager(db, &capturingURLManager{})
 	resources := []string{"/organization/HTAN_INT/project/BForePC"}
-	obj := &models.InternalObject{DrsObject: drs.DrsObject{ControlledAccess: &resources}}
+	obj := &objects.Record{ControlledAccess: &resources}
 
 	if _, err := om.SignObjectURL(context.Background(), obj, "s3://legacy/key", urlmanager.SignOptions{}); !errors.Is(err, wantErr) {
 		t.Fatalf("expected credential lookup error to propagate, got %v", err)
@@ -190,10 +189,10 @@ func TestObjectManagerScopedLogicalDownloadSigning(t *testing.T) {
 			PathPrefix:   "project-a",
 		},
 	}}}
-	obj := &models.InternalObject{DrsObject: drs.DrsObject{
-		Checksums:        []drs.Checksum{{Type: "sha256", Checksum: sha}},
+	obj := &objects.Record{
+		Checksums:        []objects.Checksum{{Type: "sha256", Checksum: sha}},
 		ControlledAccess: &[]string{"/organization/ci/project/a"},
-	}}
+	}
 
 	t.Run("full download", func(t *testing.T) {
 		um := &capturingURLManager{}

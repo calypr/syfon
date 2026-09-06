@@ -4,10 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/calypr/syfon/internal/models"
 	"time"
 
-	"github.com/calypr/syfon/apigen/server/drs"
+	"github.com/calypr/syfon/internal/models"
+	"github.com/calypr/syfon/internal/objects"
 )
 
 func (db *PostgresDB) SavePendingLFSMeta(ctx context.Context, entries []models.PendingLFSMeta) error {
@@ -67,7 +67,7 @@ func (db *PostgresDB) GetPendingLFSMeta(ctx context.Context, oid string) (*model
 		return nil, fmt.Errorf("pending metadata not found: %w", err)
 	}
 
-	var candidate drs.DrsObjectCandidate
+	var candidate objects.Candidate
 	if err := json.Unmarshal(raw, &candidate); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal candidate: %w", err)
 	}
@@ -117,7 +117,7 @@ func (db *PostgresDB) PopPendingLFSMeta(ctx context.Context, oid string) (*model
 		return nil, err
 	}
 
-	var candidate drs.DrsObjectCandidate
+	var candidate objects.Candidate
 	if err := json.Unmarshal(raw, &candidate); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal candidate: %w", err)
 	}

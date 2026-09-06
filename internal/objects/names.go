@@ -1,4 +1,4 @@
-package common
+package objects
 
 import (
 	"path/filepath"
@@ -6,7 +6,8 @@ import (
 	"strings"
 )
 
-// CleanToBasename extracts the basename from a path (handling both windows and unix separators).
+// CleanToBasename extracts a portable basename from either Windows or Unix
+// path syntax.
 func CleanToBasename(name string) string {
 	trimmed := strings.TrimSpace(name)
 	if trimmed == "" {

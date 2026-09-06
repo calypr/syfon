@@ -8,9 +8,9 @@ import (
 	"strings"
 
 	sycommon "github.com/calypr/syfon/common"
-	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/faults"
-	"github.com/calypr/syfon/internal/models"
+
+	"github.com/calypr/syfon/internal/objects"
 )
 
 func (db *SqliteDB) ResolveObjectAlias(ctx context.Context, aliasID string) (string, error) {
@@ -29,7 +29,7 @@ func (db *SqliteDB) ResolveObjectAlias(ctx context.Context, aliasID string) (str
 	return canonicalID, nil
 }
 
-func (db *SqliteDB) GetBulkObjects(ctx context.Context, ids []string) ([]models.InternalObject, error) {
+func (db *SqliteDB) GetBulkObjects(ctx context.Context, ids []string) ([]objects.Record, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
@@ -37,7 +37,7 @@ func (db *SqliteDB) GetBulkObjects(ctx context.Context, ids []string) ([]models.
 	if err != nil {
 		return nil, err
 	}
-	objects := make([]models.InternalObject, 0, len(ids))
+	objects := make([]objects.Record, 0, len(ids))
 	seen := make(map[string]struct{}, len(ids))
 	for _, id := range ids {
 		obj, ok := objectsByID[id]
@@ -59,16 +59,16 @@ func (db *SqliteDB) GetBulkObjects(ctx context.Context, ids []string) ([]models.
 		if !ok || obj == nil {
 			continue
 		}
-		if _, already := seen[obj.Id]; already {
+		if _, already := seen[string(obj.Id)]; already {
 			continue
 		}
-		seen[obj.Id] = struct{}{}
+		seen[string(obj.Id)] = struct{}{}
 		objects = append(objects, *obj)
 	}
 	return objects, nil
 }
 
-func (db *SqliteDB) GetObjectsByChecksums(ctx context.Context, checksums []string) (map[string][]models.InternalObject, error) {
+func (db *SqliteDB) GetObjectsByChecksums(ctx context.Context, checksums []string) (map[string][]objects.Record, error) {
 	if len(checksums) == 0 {
 		return nil, nil
 	}
@@ -76,30 +76,30 @@ func (db *SqliteDB) GetObjectsByChecksums(ctx context.Context, checksums []strin
 	if err != nil {
 		return nil, err
 	}
-	index := make(map[string][]models.InternalObject, len(objectsByID)*2)
+	index := make(map[string][]objects.Record, len(objectsByID)*2)
 	for _, obj := range objectsByID {
-		index[obj.Id] = append(index[obj.Id], *obj)
+		index[string(obj.Id)] = append(index[string(obj.Id)], *obj)
 		for _, cs := range obj.Checksums {
 			value := strings.TrimSpace(cs.Checksum)
 			if value == "" {
 				continue
 			}
 			index[value] = append(index[value], *obj)
-			if common.NormalizeChecksumType(cs.Type) == "sha256" {
-				if normalized, ok := common.NormalizeSHA256Query(value); ok {
+			if objects.NormalizeChecksumType(cs.Type) == "sha256" {
+				if normalized, ok := objects.NormalizeSHA256Query(value); ok {
 					index[normalized] = append(index[normalized], *obj)
 				}
 			}
 		}
 	}
-	result := make(map[string][]models.InternalObject, len(checksums))
+	result := make(map[string][]objects.Record, len(checksums))
 	for _, cs := range checksums {
 		requested := strings.TrimSpace(cs)
 		if requested == "" {
 			continue
 		}
 		lookup := requested
-		if normalized, ok := common.NormalizeSHA256Query(requested); ok {
+		if normalized, ok := objects.NormalizeSHA256Query(requested); ok {
 			lookup = normalized
 		}
 		if objs := index[lookup]; len(objs) > 0 {
@@ -714,19 +714,19 @@ func (db *SqliteDB) ListObjectIDsPageByURL(ctx context.Context, objectURL, organ
 	return scanObjectIDs(rows)
 }
 
-func (db *SqliteDB) GetObjectsByChecksum(ctx context.Context, checksum string) ([]models.InternalObject, error) {
+func (db *SqliteDB) GetObjectsByChecksum(ctx context.Context, checksum string) ([]objects.Record, error) {
 	checksum = strings.TrimSpace(checksum)
 	if checksum == "" {
-		return []models.InternalObject{}, nil
+		return []objects.Record{}, nil
 	}
 	objectsByID, err := db.fetchObjectsByIDsOrChecksums(ctx, nil, []string{checksum})
 	if err != nil {
 		return nil, err
 	}
 	if len(objectsByID) == 0 {
-		return []models.InternalObject{}, nil
+		return []objects.Record{}, nil
 	}
-	out := make([]models.InternalObject, 0, len(objectsByID))
+	out := make([]objects.Record, 0, len(objectsByID))
 	for _, obj := range objectsByID {
 		out = append(out, *obj)
 	}

@@ -1,13 +1,11 @@
 package drsapi
 
 import (
-	"encoding/json"
-
 	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/api/apiutil"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/core"
-	"github.com/calypr/syfon/internal/models"
+	httpdrs "github.com/calypr/syfon/internal/httpapi/drs"
 	"github.com/gofiber/fiber/v3"
 )
 
@@ -18,7 +16,7 @@ func handleGetObjectFiber(om *core.ObjectManager) fiber.Handler {
 		if err != nil {
 			return apiutil.HandleError(c, err)
 		}
-		return c.JSON(drsObjectPayload(*obj))
+		return c.JSON(httpdrs.ObjectPayload(*obj))
 	}
 }
 
@@ -38,7 +36,7 @@ func handleGetBulkObjectsFiber(om *core.ObjectManager) fiber.Handler {
 
 		resolved := make([]any, 0, len(objects))
 		for _, obj := range objects {
-			resolved = append(resolved, drsObjectPayload(obj))
+			resolved = append(resolved, httpdrs.ObjectPayload(obj))
 		}
 
 		return c.JSON(fiber.Map{
@@ -61,7 +59,7 @@ func handleGetObjectsByChecksumFiber(om *core.ObjectManager) fiber.Handler {
 
 		resolved := make([]any, 0)
 		for _, obj := range fetched {
-			resolved = append(resolved, drsObjectPayload(obj))
+			resolved = append(resolved, httpdrs.ObjectPayload(obj))
 		}
 
 		return c.JSON(fiber.Map{
@@ -72,20 +70,4 @@ func handleGetObjectsByChecksumFiber(om *core.ObjectManager) fiber.Handler {
 			},
 		})
 	}
-}
-
-func drsObjectPayload(obj models.InternalObject) map[string]any {
-	var payload map[string]any
-	data, err := json.Marshal(obj.DrsObject)
-	if err == nil {
-		if err := json.Unmarshal(data, &payload); err == nil {
-			return payload
-		}
-	}
-	payload = map[string]any{}
-	if obj.Id != "" {
-		payload["id"] = obj.Id
-	}
-	payload["self_uri"] = obj.SelfUri
-	return payload
 }

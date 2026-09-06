@@ -7,6 +7,7 @@ import (
 	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/models"
+	"github.com/calypr/syfon/internal/objects"
 )
 
 // ServiceInfoStore exposes service metadata reads.
@@ -16,22 +17,22 @@ type ServiceInfoStore interface {
 
 // ObjectStore groups the object lifecycle and lookup capabilities used by the API layers.
 type ObjectStore interface {
-	GetObject(ctx context.Context, id string) (*models.InternalObject, error)
+	GetObject(ctx context.Context, id string) (*objects.Record, error)
 	DeleteObject(ctx context.Context, id string) error
 	DeleteObjectAlias(ctx context.Context, aliasID string) error
-	CreateObject(ctx context.Context, obj *models.InternalObject) error
-	GetObjectsByChecksum(ctx context.Context, checksum string) ([]models.InternalObject, error)
-	GetObjectsByChecksums(ctx context.Context, checksums []string) (map[string][]models.InternalObject, error)
+	CreateObject(ctx context.Context, obj *objects.Record) error
+	GetObjectsByChecksum(ctx context.Context, checksum string) ([]objects.Record, error)
+	GetObjectsByChecksums(ctx context.Context, checksums []string) (map[string][]objects.Record, error)
 	ListScopedObjectIDsByChecksums(ctx context.Context, organization, project string, checksums []string) (map[string][]string, error)
 	ListObjectIDsByScope(ctx context.Context, organization, project string) ([]string, error)
 	CreateObjectAlias(ctx context.Context, aliasID, canonicalObjectID string) error
 	ResolveObjectAlias(ctx context.Context, aliasID string) (string, error)
-	GetBulkObjects(ctx context.Context, ids []string) ([]models.InternalObject, error)
+	GetBulkObjects(ctx context.Context, ids []string) ([]objects.Record, error)
 	BulkDeleteObjects(ctx context.Context, ids []string) error
-	RegisterObjects(ctx context.Context, objects []models.InternalObject) error
-	ReplaceObjects(ctx context.Context, objects []models.InternalObject) error
-	UpdateObjectAccessMethods(ctx context.Context, objectID string, accessMethods []drs.AccessMethod) error
-	BulkUpdateAccessMethods(ctx context.Context, updates map[string][]drs.AccessMethod) error
+	RegisterObjects(ctx context.Context, objects []objects.Record) error
+	ReplaceObjects(ctx context.Context, objects []objects.Record) error
+	UpdateObjectAccessMethods(ctx context.Context, objectID string, accessMethods []objects.AccessMethod) error
+	BulkUpdateAccessMethods(ctx context.Context, updates map[string][]objects.AccessMethod) error
 	RemoveObjectControlledAccess(ctx context.Context, objectID, resource string) error
 	RemoveObjectControlledAccessBulk(ctx context.Context, objectIDs []string, resource string) (int, error)
 }
@@ -118,14 +119,14 @@ type UsageStore interface {
 
 // SHA256ValidityStore is the minimum storage surface needed by the SHA256 validity endpoint.
 type SHA256ValidityStore interface {
-	GetObjectsByChecksums(ctx context.Context, checksums []string) (map[string][]models.InternalObject, error)
+	GetObjectsByChecksums(ctx context.Context, checksums []string) (map[string][]objects.Record, error)
 	ListS3Credentials(ctx context.Context) ([]buckets.Credential, error)
 }
 
 // MetricsStore is the minimum storage surface needed by the metrics API.
 type MetricsStore interface {
 	ListObjectIDsByScope(ctx context.Context, organization, project string) ([]string, error)
-	GetObject(ctx context.Context, id string) (*models.InternalObject, error)
+	GetObject(ctx context.Context, id string) (*objects.Record, error)
 	RecordTransferAttributionEvents(ctx context.Context, events []models.TransferAttributionEvent) error
 	RecordProviderTransferEvents(ctx context.Context, events []models.ProviderTransferEvent) error
 	ListS3Credentials(ctx context.Context) ([]buckets.Credential, error)
