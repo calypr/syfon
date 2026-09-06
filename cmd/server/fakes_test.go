@@ -13,9 +13,6 @@ import (
 	"github.com/calypr/syfon/internal/usage"
 )
 
-// serverObjectStore is the object-port fixture used by endpoint tests. It is
-// intentionally separate from the bucket, usage, and transfer fixtures so
-// each service is composed from the ports it actually consumes.
 type serverObjectStore struct {
 	records map[string]*objects.Record
 	aliases map[string]string

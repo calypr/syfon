@@ -114,7 +114,7 @@ func TestHandleInternalList_ExactScopeListingDoesNotDependOnBrowseRows(t *testin
 }
 
 func TestHandleInternalList_CanonicalizesProjectChecksumDuplicates(t *testing.T) {
-	database := newInternalDRSInMemoryDB()
+	database := newInternalDRSInMemoryDB(t)
 	om := newInternalDRSObjectManager(database)
 	now := time.Now().UTC()
 	later := now.Add(time.Minute)
@@ -194,7 +194,7 @@ func TestHandleInternalList_CanonicalizesProjectChecksumDuplicates(t *testing.T)
 }
 
 func TestHandleInternalList_FillsLimitAfterCanonicalizingDuplicates(t *testing.T) {
-	database := newInternalDRSInMemoryDB()
+	database := newInternalDRSInMemoryDB(t)
 	om := newInternalDRSObjectManager(database)
 	now := time.Now().UTC()
 	later := now.Add(time.Minute)
@@ -280,7 +280,7 @@ func TestHandleInternalList_FillsLimitAfterCanonicalizingDuplicates(t *testing.T
 }
 
 func TestHandleInternalList_MergesSiblingAccessMethodsFromLegacyDuplicateRows(t *testing.T) {
-	database := newInternalDRSInMemoryDB()
+	database := newInternalDRSInMemoryDB(t)
 	om := newInternalDRSObjectManager(database)
 	now := time.Now().UTC()
 	later := now.Add(time.Minute)

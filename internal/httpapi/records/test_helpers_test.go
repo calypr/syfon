@@ -8,20 +8,19 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"testing"
 
 	syfoncommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/faults"
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/persistence/sqlite"
+	sqlitetest "github.com/calypr/syfon/internal/testsupport/sqlite"
 	"github.com/gofiber/fiber/v3"
 )
 
 func ptr[T any](v T) *T { return &v }
 
-// internalRecordStore is deliberately limited to the object service ports
-// consumed by this adapter. It replaces the repository-wide test database
-// mock while retaining the authorization and checksum behavior needed here.
 type internalRecordStore struct {
 	Objects     map[string]*objects.Record
 	ObjectAuthz map[string]map[string][]string
@@ -373,12 +372,8 @@ func cloneAuthzMap(in map[string][]string) map[string][]string {
 	return out
 }
 
-func newInternalDRSInMemoryDB() *sqlite.SqliteDB {
-	database, err := sqlite.NewSqliteDB(":memory:")
-	if err != nil {
-		panic("failed to create in-memory sqlite db: " + err.Error())
-	}
-	return database
+func newInternalDRSInMemoryDB(t testing.TB) *sqlite.SqliteDB {
+	return sqlitetest.New(t)
 }
 
 func withTestAuthzContext(req *http.Request, mode string, privileges map[string]map[string]bool) *http.Request {

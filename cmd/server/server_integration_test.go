@@ -20,7 +20,8 @@ import (
 	"github.com/calypr/syfon/internal/credentialcipher"
 	"github.com/calypr/syfon/internal/httpapi"
 	"github.com/calypr/syfon/internal/maintenance/projectstorage"
-	"github.com/calypr/syfon/internal/persistence/sqlite"
+	"github.com/calypr/syfon/internal/objects"
+	sqlitetest "github.com/calypr/syfon/internal/testsupport/sqlite"
 	"github.com/calypr/syfon/internal/transfers"
 	"github.com/calypr/syfon/internal/usage"
 )
@@ -89,10 +90,7 @@ s3_credentials:
 	project := "test-project"
 
 	// Setup Server
-	database, err := sqlite.NewSqliteDB(":memory:")
-	if err != nil {
-		t.Fatalf("failed to create in-memory database: %v", err)
-	}
+	database := sqlitetest.New(t)
 
 	// Pre-load credentials from config (mimic server startup logic)
 	for _, c := range cfg.S3Credentials {
@@ -133,7 +131,7 @@ s3_credentials:
 	}
 	invalidator.manager = storageManager
 	app := fiber.New()
-	objectService := newServerObjectService(backend.objectDependencies)
+	objectService := objects.NewService(backend.objectDependencies)
 	usageService := usage.NewService(usage.Dependencies{Ingest: backend.usageIngest, Reports: backend.usageReports, Objects: objectService})
 	transferService := transfers.NewService(transfers.Dependencies{
 		Access: storageManager, Multipart: storageManager, Scopes: bucketService, Credentials: bucketService,

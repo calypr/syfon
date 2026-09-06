@@ -8,6 +8,7 @@ import (
 	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/persistence/sqlite"
+	sqlitetest "github.com/calypr/syfon/internal/testsupport/sqlite"
 )
 
 func newTestService(backend any, _ ...any) *objects.Service {
@@ -68,10 +69,5 @@ func registerCandidates(ctx context.Context, service *objects.Service, candidate
 }
 
 func newSQLiteDatabase(t *testing.T) *sqlite.SqliteDB {
-	t.Helper()
-	database, err := sqlite.NewSqliteDB(":memory:")
-	if err != nil {
-		t.Fatalf("NewSqliteDB failed: %v", err)
-	}
-	return database
+	return sqlitetest.New(t)
 }

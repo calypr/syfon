@@ -13,7 +13,6 @@ import (
 
 	"github.com/calypr/syfon/internal/access/authentication"
 	"github.com/calypr/syfon/internal/buckets"
-	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/config"
 	"github.com/calypr/syfon/internal/httpapi/middleware"
 	"github.com/calypr/syfon/internal/objects"
@@ -27,6 +26,8 @@ type endpointCase struct {
 }
 
 var pathVarPattern = regexp.MustCompile(`:([A-Za-z0-9_]+)`)
+
+func endpointPtr[T any](value T) *T { return &value }
 
 func TestAllRegisteredEndpoints_WithMocks(t *testing.T) {
 	app := buildMockServerRouterWithRoutes(config.RoutesConfig{
@@ -161,15 +162,15 @@ func buildMockServerRouterWithRoutes(routes config.RoutesConfig) *fiber.App {
 	objectStore := newServerObjectStore(map[string]*objects.Record{
 		"sha-1": {
 			Id:          "sha-1",
-			Name:        common.Ptr("mock-object"),
+			Name:        endpointPtr("mock-object"),
 			Size:        1,
-			Version:     common.Ptr("1"),
-			Description: common.Ptr("mock"),
+			Version:     endpointPtr("1"),
+			Description: endpointPtr("mock"),
 			Checksums:   []objects.Checksum{{Type: "sha256", Checksum: "sha-1"}},
 			AccessMethods: &[]objects.AccessMethod{
 				{
 					Type:      "s3",
-					AccessId:  common.Ptr("s3"),
+					AccessId:  endpointPtr("s3"),
 					AccessUrl: &objects.AccessURL{Url: "s3://test-bucket-1/sha-1"},
 				},
 			},
@@ -192,7 +193,7 @@ func buildMockServerRouterWithRoutes(routes config.RoutesConfig) *fiber.App {
 	requestIDMiddleware := middleware.NewRequestIDMiddleware(logger)
 	cfg := &config.Config{Routes: routes}
 	dependencies := mockServerDependencies(objectStore, bucketStore)
-	objectService := newServerObjectService(dependencies.objects)
+	objectService := objects.NewService(dependencies.objects)
 	usageService := usage.NewService(usage.Dependencies{Ingest: dependencies.usageIngest, Reports: dependencies.usageReports, Objects: objectService})
 	transferService := transfers.NewService(transfers.Dependencies{
 		Scopes: dependencies.bucketService, Credentials: dependencies.bucketService,

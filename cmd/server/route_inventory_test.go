@@ -17,8 +17,6 @@ const routeOrderFixture = "testdata/route_order.tsv"
 type inventoryRoute struct {
 	Method string
 	Path   string
-	Name   string
-	Owner  string
 }
 
 func TestMountedRouteParity(t *testing.T) {
@@ -33,8 +31,8 @@ func TestMountedRouteParity(t *testing.T) {
 	}
 	for i, want := range expected[:min(len(actual), len(expected))] {
 		got := actual[i]
-		if got.Method != want.Method || got.Path != want.Path || got.Name != want.Name {
-			t.Errorf("route %d = %s %s name %q, want %s %s name %q", i, got.Method, got.Path, got.Name, want.Method, want.Path, want.Name)
+		if got.Method != want.Method || got.Path != want.Path || got.Name != "" {
+			t.Errorf("route %d = %s %s name %q, want %s %s with no name", i, got.Method, got.Path, got.Name, want.Method, want.Path)
 		}
 	}
 	for i := len(expected); i < len(actual); i++ {
@@ -57,12 +55,12 @@ func readRouteOrder(t *testing.T) []inventoryRoute {
 
 	reader := csv.NewReader(file)
 	reader.Comma = '\t'
-	reader.FieldsPerRecord = 4
+	reader.FieldsPerRecord = 2
 	header, err := reader.Read()
 	if err != nil {
 		t.Fatalf("read route inventory header: %v", err)
 	}
-	if fmt.Sprint(header) != "[method path name owner]" {
+	if fmt.Sprint(header) != "[method path]" {
 		t.Fatalf("unexpected route inventory header: %v", header)
 	}
 
@@ -75,10 +73,10 @@ func readRouteOrder(t *testing.T) []inventoryRoute {
 			}
 			t.Fatalf("read route inventory: %v", err)
 		}
-		if row[0] == "" || row[1] == "" || row[3] == "" {
+		if row[0] == "" || row[1] == "" {
 			t.Fatalf("invalid route inventory row: %v", row)
 		}
-		routes = append(routes, inventoryRoute{Method: row[0], Path: row[1], Name: row[2], Owner: row[3]})
+		routes = append(routes, inventoryRoute{Method: row[0], Path: row[1]})
 	}
 	return routes
 }

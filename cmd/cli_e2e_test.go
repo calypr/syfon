@@ -22,8 +22,8 @@ import (
 	"github.com/calypr/syfon/internal/httpapi"
 	"github.com/calypr/syfon/internal/maintenance/projectstorage"
 	"github.com/calypr/syfon/internal/objects"
-	"github.com/calypr/syfon/internal/persistence/sqlite"
 	"github.com/calypr/syfon/internal/storage"
+	sqlitetest "github.com/calypr/syfon/internal/testsupport/sqlite"
 	"github.com/calypr/syfon/internal/transfers"
 	"github.com/calypr/syfon/internal/usage"
 )
@@ -315,10 +315,7 @@ func newSyfonTestServer(t *testing.T) *fiberTestServer {
 
 	storageDir := t.TempDir()
 
-	database, err := sqlite.NewSqliteDB(":memory:")
-	if err != nil {
-		t.Fatalf("create in-memory database: %v", err)
-	}
+	database := sqlitetest.New(t)
 	if err := database.SaveS3Credential(context.Background(), &buckets.Credential{
 		Bucket:   "syfon-bucket",
 		Provider: "file",

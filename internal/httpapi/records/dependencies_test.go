@@ -6,9 +6,6 @@ import (
 	"github.com/calypr/syfon/internal/objects"
 )
 
-// internalDRSTestFixture composes only the object service capabilities used by
-// this HTTP adapter. Keeping the fixture at the service boundary makes these
-// tests independent of the application-wide core manager and storage graph.
 type internalDRSTestFixture struct {
 	ObjectService *objects.Service
 }

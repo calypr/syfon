@@ -1,4 +1,4 @@
-package core
+package server
 
 import (
 	"context"
@@ -42,13 +42,11 @@ func (r *bucketFallbackRecordReader) GetBulkObjects(_ context.Context, ids []str
 	return r.records, r.err
 }
 
-func TestNewBucketVisibilityFallbackScansAndProjectsRows(t *testing.T) {
+func TestBucketVisibilityFallbackScansAndProjectsRows(t *testing.T) {
 	scope := &bucketFallbackScopeQuery{ids: []string{"obj-a", "obj-b"}}
 	reader := &bucketFallbackRecordReader{records: []objects.Record{
 		{
-			Id: "obj-a",
-			// ControlledAccess takes precedence over this legacy map. The first
-			// two aliases normalize to one resource; the third remains distinct.
+			Id:               "obj-a",
 			Authorizations:   map[string][]string{"legacy": {"wrong"}},
 			ControlledAccess: &[]string{"/programs/org/projects/project", "/organization/org/project/project", "/organization/org/project/other"},
 			AccessMethods: &[]objects.AccessMethod{
@@ -66,7 +64,7 @@ func TestNewBucketVisibilityFallbackScansAndProjectsRows(t *testing.T) {
 		},
 	}}
 
-	rows, err := NewBucketVisibilityFallback(scope, reader)(context.Background())
+	rows, err := newBucketVisibilityFallback(scope, reader)(context.Background())
 	if err != nil {
 		t.Fatalf("fallback returned error: %v", err)
 	}
@@ -90,32 +88,16 @@ func TestNewBucketVisibilityFallbackScansAndProjectsRows(t *testing.T) {
 	}
 }
 
-func TestNewBucketVisibilityFallbackFiltersRestrictedObjectsAndHonorsBroadAccess(t *testing.T) {
+func TestBucketVisibilityFallbackFiltersRestrictedObjectsAndHonorsBroadAccess(t *testing.T) {
 	resource := "/organization/org/project/allowed"
 	scope := &bucketFallbackScopeQuery{ids: []string{"public", "allowed", "denied", "policy-denied"}}
 	reader := &bucketFallbackRecordReader{records: []objects.Record{
-		{
-			Id: "public", PublicRead: true,
-			ControlledAccess: &[]string{resource},
-			AccessMethods:    &[]objects.AccessMethod{{Type: "s3", AccessUrl: &objects.AccessURL{Url: "s3://bucket/public"}}},
-		},
-		{
-			Id:               "allowed",
-			ControlledAccess: &[]string{resource},
-			AccessMethods:    &[]objects.AccessMethod{{Type: "s3", AccessUrl: &objects.AccessURL{Url: "s3://bucket/allowed"}}},
-		},
-		{
-			Id:               "denied",
-			ControlledAccess: &[]string{"/organization/org/project/denied"},
-			AccessMethods:    &[]objects.AccessMethod{{Type: "s3", AccessUrl: &objects.AccessURL{Url: "s3://bucket/denied"}}},
-		},
-		{
-			Id:                    "policy-denied",
-			PublicReadPolicyKnown: true,
-			AccessMethods:         &[]objects.AccessMethod{{Type: "s3", AccessUrl: &objects.AccessURL{Url: "s3://bucket/policy-denied"}}},
-		},
+		{Id: "public", PublicRead: true, ControlledAccess: &[]string{resource}, AccessMethods: &[]objects.AccessMethod{{Type: "s3", AccessUrl: &objects.AccessURL{Url: "s3://bucket/public"}}}},
+		{Id: "allowed", ControlledAccess: &[]string{resource}, AccessMethods: &[]objects.AccessMethod{{Type: "s3", AccessUrl: &objects.AccessURL{Url: "s3://bucket/allowed"}}}},
+		{Id: "denied", ControlledAccess: &[]string{"/organization/org/project/denied"}, AccessMethods: &[]objects.AccessMethod{{Type: "s3", AccessUrl: &objects.AccessURL{Url: "s3://bucket/denied"}}}},
+		{Id: "policy-denied", PublicReadPolicyKnown: true, AccessMethods: &[]objects.AccessMethod{{Type: "s3", AccessUrl: &objects.AccessURL{Url: "s3://bucket/policy-denied"}}}},
 	}}
-	fallback := NewBucketVisibilityFallback(scope, reader)
+	fallback := newBucketVisibilityFallback(scope, reader)
 
 	restricted := access.NewSession("local")
 	restricted.SetAuthorizations(nil, map[string]map[string]bool{resource: {"read": true}}, true)
@@ -138,10 +120,10 @@ func TestNewBucketVisibilityFallbackFiltersRestrictedObjectsAndHonorsBroadAccess
 	}
 }
 
-func TestNewBucketVisibilityFallbackPropagatesScanAndHydrationErrors(t *testing.T) {
+func TestBucketVisibilityFallbackPropagatesScanAndHydrationErrors(t *testing.T) {
 	scanErr := errors.New("scan failed")
 	reader := &bucketFallbackRecordReader{}
-	fallback := NewBucketVisibilityFallback(&bucketFallbackScopeQuery{err: scanErr}, reader)
+	fallback := newBucketVisibilityFallback(&bucketFallbackScopeQuery{err: scanErr}, reader)
 	if _, err := fallback(context.Background()); !errors.Is(err, scanErr) {
 		t.Fatalf("scan error = %v, want %v", err, scanErr)
 	}
@@ -150,22 +132,19 @@ func TestNewBucketVisibilityFallbackPropagatesScanAndHydrationErrors(t *testing.
 	}
 
 	hydrateErr := errors.New("hydration failed")
-	fallback = NewBucketVisibilityFallback(
-		&bucketFallbackScopeQuery{ids: []string{"obj"}},
-		&bucketFallbackRecordReader{err: hydrateErr},
-	)
+	fallback = newBucketVisibilityFallback(&bucketFallbackScopeQuery{ids: []string{"obj"}}, &bucketFallbackRecordReader{err: hydrateErr})
 	if _, err := fallback(context.Background()); !errors.Is(err, hydrateErr) {
 		t.Fatalf("hydration error = %v, want %v", err, hydrateErr)
 	}
 }
 
-func TestNewBucketVisibilityFallbackRejectsMissingObjectCapabilities(t *testing.T) {
-	fallback := NewBucketVisibilityFallback(nil, nil)
+func TestBucketVisibilityFallbackRejectsMissingObjectCapabilities(t *testing.T) {
+	fallback := newBucketVisibilityFallback(nil, nil)
 	if _, err := fallback(context.Background()); !errors.Is(err, errBucketVisibilityScopeQuery) {
 		t.Fatalf("missing scope error = %v, want %v", err, errBucketVisibilityScopeQuery)
 	}
 
-	fallback = NewBucketVisibilityFallback(&bucketFallbackScopeQuery{ids: []string{"obj"}}, nil)
+	fallback = newBucketVisibilityFallback(&bucketFallbackScopeQuery{ids: []string{"obj"}}, nil)
 	if _, err := fallback(context.Background()); !errors.Is(err, errBucketVisibilityRecordReader) {
 		t.Fatalf("missing reader error = %v, want %v", err, errBucketVisibilityRecordReader)
 	}

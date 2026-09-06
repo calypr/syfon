@@ -239,12 +239,19 @@ syfon download --did <did> --out /tmp/README.md
 
 # Architecture
 
-The project follows a modular structure to ensure maintainability:
-- `internal/objects`, `internal/buckets`, `internal/transfers`, `internal/usage`: Domain values and consumer-owned ports.
-- `internal/persistence/sqlite`, `internal/persistence/postgres`: SQL persistence adapters.
-- `internal/api`: Subpackages for different API contexts (Core, internal compatibility, LFS, metrics, docs, middleware).
-- `internal/core`: High-level object and storage workflows.
-- `internal/urlmanager`: Provider-neutral storage URL dispatch.
+The server composes focused domain and adapter packages:
+
+- `internal/objects` owns object identity, metadata, and lifecycle operations.
+- `internal/buckets` owns credentials, scopes, visibility, and cache policy.
+- `internal/storage` owns provider-neutral storage operations and the S3, GCS, Azure, and file adapters.
+- `internal/transfers` owns upload, download, multipart, and pending-transfer operations.
+- `internal/usage` owns transfer events, accounting, and reports.
+- `internal/maintenance` owns project cleanup and scope repair workflows.
+- `internal/httpapi` owns route registration, handlers, middleware, and protocol adapters.
+- `internal/persistence` owns the SQLite and PostgreSQL adapters.
+- `internal/access` owns authorization policy and authentication integrations.
+- `internal/credentialcipher` owns credential encryption.
+- `cmd/server` composes these packages into the server runtime.
 
 See persistence table details and relationships in [internal/persistence/README.md](internal/persistence/README.md).
 
@@ -282,7 +289,7 @@ The project uses a Makefile for common tasks:
 Syfon currently uses `oapi-codegen` for both server-side and client-facing API artifacts:
 
 - `make gen` bundles the GA4GH DRS spec into `apigen/openapi/openapi.yaml` and refreshes all generated packages under `apigen/client/*` and `apigen/server/*`.
-- The runtime HTTP wiring, middleware, and compatibility behavior still live in handwritten code under `cmd/server` and `internal/api/*`.
+- The runtime HTTP wiring, middleware, and compatibility behavior live in handwritten code under `cmd/server` and `internal/httpapi/*`.
 - The client module itself is handwritten, but its request and response shapes come from the same generated OpenAPI contracts, so client and server stay aligned.
 
 This split is intentional: generated code keeps the schema surface in sync, while handwritten runtime code preserves control over routing, auth, and compatibility behavior.

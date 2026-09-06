@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/calypr/syfon/internal/objects"
-	"github.com/calypr/syfon/internal/persistence/sqlite"
+	sqlitetest "github.com/calypr/syfon/internal/testsupport/sqlite"
 )
 
 func TestRegisterBulk_RegistersCandidate(t *testing.T) {
@@ -170,10 +170,7 @@ func TestRegisterObjects_CanonicalizesProjectChecksumDuplicates(t *testing.T) {
 }
 
 func TestRegisterObjects_ReusesContentAcrossProjects(t *testing.T) {
-	database, err := sqlite.NewSqliteDB(":memory:")
-	if err != nil {
-		t.Fatalf("NewSqliteDB failed: %v", err)
-	}
+	database := sqlitetest.New(t)
 	om := newTestService(database, nil)
 	sha := "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
 	now := time.Date(2026, 9, 4, 16, 0, 0, 0, time.UTC)

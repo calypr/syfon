@@ -66,9 +66,6 @@ var (
 	errBucketVisibilityRecordReader = errors.New("bucket visibility fallback requires an object record reader")
 )
 
-// newBucketVisibilityFallback keeps the object scan at the server composition
-// boundary. The bucket service consumes only the visibility rows it needs and
-// does not depend on the object service or a shared facade.
 func newBucketVisibilityFallback(scope objects.ScopeQuery, reader objects.RecordReader) buckets.VisibilityFallback {
 	return func(ctx context.Context) ([]buckets.VisibilityRow, error) {
 		if scope == nil {
@@ -139,10 +136,6 @@ func serverBucketVisibilityObjectReadable(ctx context.Context, obj *objects.Reco
 		return false
 	}
 	return access.HasObjectMethodAccess(ctx, "read", resources)
-}
-
-func newServerObjectService(deps objects.Dependencies) *objects.Service {
-	return objects.NewService(deps)
 }
 
 func sqliteServerBackend(database *sqlite.SqliteDB) serverBackend {
@@ -294,8 +287,7 @@ var Cmd = &cobra.Command{
 			fatal("failed to load configured bucket scopes", "err", err)
 		}
 
-		// Init unified Object Manager.
-		objectService := newServerObjectService(backend.objectDependencies)
+		objectService := objects.NewService(backend.objectDependencies)
 		usageService := usage.NewService(usage.Dependencies{
 			Ingest:  backend.usageIngest,
 			Reports: backend.usageReports,
