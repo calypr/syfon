@@ -52,7 +52,7 @@ func WithGa4ghRoutes() ServerOption {
 
 func WithMetricsRoutes() ServerOption {
 	return func(rt *serverRuntime) {
-		metrics.RegisterMetricsRoutes(rt.ensureAPIGroup(), rt.database)
+		metrics.RegisterMetricsRoutes(rt.ensureAPIGroup(), rt.database, rt.database, rt.database, rt.om)
 	}
 }
 
