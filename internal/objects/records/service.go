@@ -1,4 +1,4 @@
-package objects
+package records
 
 const (
 	objectMethodRead   = "read"
@@ -7,6 +7,9 @@ const (
 	objectMethodDelete = "delete"
 )
 
+// Service owns stateful record lookup and mutation operations. The value types
+// remain in the parent objects package so this package depends on the domain
+// model without creating a reverse dependency.
 type Service struct {
 	*queryService
 	*mutationService
@@ -31,9 +34,9 @@ type mutationService struct {
 	accessPolicy  AccessPolicyWriter
 }
 
-// Dependencies contains the object-owned ports used by Service. The query
-// ports are optional optimizations; the service retains scan-based behavior
-// when they are unavailable.
+// Dependencies contains the consumer-owned repository ports used by Service.
+// Optional query ports are optimization hooks; scan-based behavior remains
+// available when they are absent.
 type Dependencies struct {
 	Reader        RecordReader
 	Writer        RecordWriter
@@ -49,9 +52,7 @@ type Dependencies struct {
 	Authorized    OptionalAuthorizedQuery
 }
 
-// NewService composes the object service from its independent object ports.
-// Required-port validation remains at the composition boundary so lightweight
-// tests and transitional callers can still construct partial services.
+// NewService composes the record service from repository ports.
 func NewService(deps Dependencies) *Service {
 	query := &queryService{
 		recordReader:    deps.Reader,

@@ -1,4 +1,4 @@
-package objects_test
+package records_test
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 	sycommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/faults"
 	"github.com/calypr/syfon/internal/objects"
+	objectrecords "github.com/calypr/syfon/internal/objects/records"
 )
 
 func TestBulkOverwriteObjects_ReplacesProjectChecksumSibling(t *testing.T) {
@@ -25,7 +26,7 @@ func TestBulkOverwriteObjects_ReplacesProjectChecksumSibling(t *testing.T) {
 			Authorizations: map[string][]string{"org": {"project"}},
 		},
 	}}
-	om := objects.NewService(objects.Dependencies{Reader: db, Writer: db, Aliases: db, ChecksumScope: db})
+	om := objectrecords.NewService(objectrecords.Dependencies{Reader: db, Writer: db, Aliases: db, ChecksumScope: db})
 	candidate := objects.Record{
 
 		Id:               "source-did",
@@ -92,13 +93,13 @@ func TestBulkOverwriteObjects_ValidationAndConflicts(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			om := objects.NewService(objects.Dependencies{Reader: tc.db, Writer: tc.db, Aliases: tc.db, ChecksumScope: tc.db})
+			om := objectrecords.NewService(objectrecords.Dependencies{Reader: tc.db, Writer: tc.db, Aliases: tc.db, ChecksumScope: tc.db})
 			_, err := om.BulkOverwriteObjects(context.Background(), "org", "project", tc.candidates)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("expected error containing %q, got %v", tc.want, err)
 			}
-			if tc.conflict != errors.Is(err, objects.ErrBulkOverwriteConflict) {
-				t.Fatalf("conflict classification = %v, want %v", errors.Is(err, objects.ErrBulkOverwriteConflict), tc.conflict)
+			if tc.conflict != errors.Is(err, objectrecords.ErrBulkOverwriteConflict) {
+				t.Fatalf("conflict classification = %v, want %v", errors.Is(err, objectrecords.ErrBulkOverwriteConflict), tc.conflict)
 			}
 		})
 	}
@@ -106,9 +107,9 @@ func TestBulkOverwriteObjects_ValidationAndConflicts(t *testing.T) {
 
 func TestBulkOverwriteObjects_EmptyInput(t *testing.T) {
 	db := &bulkOverwriteStore{}
-	om := objects.NewService(objects.Dependencies{Reader: db, Writer: db, Aliases: db, ChecksumScope: db})
+	om := objectrecords.NewService(objectrecords.Dependencies{Reader: db, Writer: db, Aliases: db, ChecksumScope: db})
 	result, err := om.BulkOverwriteObjects(context.Background(), "", "", nil)
-	if err != nil || result != (objects.BulkOverwriteResult{}) {
+	if err != nil || result != (objectrecords.BulkOverwriteResult{}) {
 		t.Fatalf("expected empty result, got %+v err=%v", result, err)
 	}
 }
@@ -125,7 +126,7 @@ func TestBulkOverwriteObjects_DoesNotMatchChecksumOutsideProject(t *testing.T) {
 			Authorizations: map[string][]string{"org": {"other"}},
 		},
 	}}
-	om := objects.NewService(objects.Dependencies{Reader: db, Writer: db, Aliases: db, ChecksumScope: db})
+	om := objectrecords.NewService(objectrecords.Dependencies{Reader: db, Writer: db, Aliases: db, ChecksumScope: db})
 	candidate := objects.Record{
 		Id: "source-did", Checksums: []objects.Checksum{{Type: "sha256", Checksum: sha}}, ControlledAccess: &[]string{resource},
 		Authorizations: map[string][]string{"org": {"project"}},
@@ -173,7 +174,7 @@ func TestBulkOverwriteObjects_RejectsAliasTarget(t *testing.T) {
 	}
 	om := newTestService(database)
 	_, err = om.BulkOverwriteObjects(context.Background(), "org", "project", []objects.Record{candidate})
-	if !errors.Is(err, objects.ErrBulkOverwriteConflict) || !strings.Contains(err.Error(), "alias") {
+	if !errors.Is(err, objectrecords.ErrBulkOverwriteConflict) || !strings.Contains(err.Error(), "alias") {
 		t.Fatalf("expected alias conflict, got %v", err)
 	}
 
@@ -204,7 +205,7 @@ func TestBulkOverwriteObjects_RequiresTargetProjectPermission(t *testing.T) {
 	}
 	t.Run("create", func(t *testing.T) {
 		db := &bulkOverwriteStore{}
-		om := objects.NewService(objects.Dependencies{Reader: db, Writer: db, Aliases: db, ChecksumScope: db})
+		om := objectrecords.NewService(objectrecords.Dependencies{Reader: db, Writer: db, Aliases: db, ChecksumScope: db})
 		ctx := buildLocalAuthzContext(map[string]map[string]bool{
 			allowedResource: {"create": true},
 		})
@@ -219,7 +220,7 @@ func TestBulkOverwriteObjects_RequiresTargetProjectPermission(t *testing.T) {
 		database := &bulkOverwriteStore{Objects: map[string]*objects.Record{
 			string(candidate.Id): {Id: candidate.Id, Authorizations: map[string][]string{"org": {"target", "allowed"}}},
 		}}
-		om := objects.NewService(objects.Dependencies{Reader: database, Writer: database, Aliases: database, ChecksumScope: database})
+		om := objectrecords.NewService(objectrecords.Dependencies{Reader: database, Writer: database, Aliases: database, ChecksumScope: database})
 		ctx := buildLocalAuthzContext(map[string]map[string]bool{
 			allowedResource: {"update": true},
 		})

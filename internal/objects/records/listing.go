@@ -1,7 +1,8 @@
-package objects
+package records
 
 import (
 	"context"
+	objectmodel "github.com/calypr/syfon/internal/objects"
 	"log"
 	"sort"
 	"strings"
@@ -12,172 +13,12 @@ import (
 	"github.com/calypr/syfon/internal/faults"
 )
 
-// GetObject retrieves the prepared canonical record identified by ID, alias,
-// or checksum and validates access.  Callers that need the identity and
-// physical-record distinction should use GetCanonicalContent.
-func (m *queryService) GetObject(ctx context.Context, ident string, requiredMethod string) (*Record, error) {
-	view, err := m.GetCanonicalContent(ctx, ident, requiredMethod)
-	if err != nil {
-		return nil, err
-	}
-	return &view.Record, nil
-}
-
-// GetCanonicalContent resolves a physical lookup to the prepared same-content
-// view.  The returned ContentID is checksum-derived and Records retains the
-// physical rows used to build the merged Record.
-func (m *queryService) GetCanonicalContent(ctx context.Context, ident string, requiredMethod string) (*CanonicalContent, error) {
-	if strings.TrimSpace(ident) == "" {
-		return nil, faults.ErrNotFound
-	}
-
-	checksum, checksumIdent := NormalizeSHA256Query(ident)
-	if checksumIdent {
-		view, found, err := m.canonicalContentForChecksum(ctx, checksum, requiredMethod)
-		if err != nil {
-			return nil, err
-		}
-		if found {
-			return view, nil
-		}
-	}
-
-	if obj, found, err := m.lookupObjectByID(ctx, ident); err != nil {
-		return nil, err
-	} else if found {
-		return m.canonicalContentAndCheckAccess(ctx, obj, requiredMethod)
-	}
-
-	if obj, found, err := m.lookupObjectByAlias(ctx, ident); err != nil {
-		return nil, err
-	} else if found {
-		return m.canonicalContentAndCheckAccess(ctx, obj, requiredMethod)
-	}
-
-	if !checksumIdent {
-		if obj, found, err := m.lookupObjectByChecksum(ctx, ident, requiredMethod); err != nil {
-			return nil, err
-		} else if found {
-			return m.canonicalContentAndCheckAccess(ctx, obj, requiredMethod)
-		}
-	}
-
-	return nil, faults.ErrNotFound
-}
-
-func (m *queryService) canonicalContentForChecksum(ctx context.Context, checksum, method string) (*CanonicalContent, bool, error) {
-	physical, err := m.content.GetObjectsByChecksum(ctx, checksum)
-	if err != nil {
-		return nil, false, err
-	}
-	physical = objectsWithSHA256(physical, checksum)
-	if len(physical) == 0 {
-		return nil, false, nil
-	}
-	family := canonicalizeContentObjects(physical)
-	if len(family) == 0 {
-		return nil, false, nil
-	}
-	view := &CanonicalContent{
-		ContentID: ContentID(checksum),
-		Record:    family[0],
-		Records:   physical,
-	}
-	if err := requireObjectMethod(ctx, &view.Record, method); err != nil {
-		return nil, true, err
-	}
-	return view, true, nil
-}
-
-func (m *queryService) lookupObjectByChecksum(ctx context.Context, ident string, requiredMethod string) (*Record, bool, error) {
-	byChecksum, err := m.GetObjectsByChecksum(ctx, ident, requiredMethod)
-	if err != nil {
-		return nil, false, err
-	}
-	if len(byChecksum) == 0 {
-		if strings.TrimSpace(requiredMethod) != "" {
-			allMatches, err := m.GetObjectsByChecksum(ctx, ident, "")
-			if err != nil {
-				return nil, false, err
-			}
-			if len(allMatches) > 0 {
-				return nil, true, faults.ErrUnauthorized
-			}
-		}
-		return nil, false, nil
-	}
-	return &byChecksum[0], true, nil
-}
-
-func (m *queryService) lookupObjectByID(ctx context.Context, ident string) (*Record, bool, error) {
-	obj, err := m.recordReader.GetObject(ctx, ident)
-	if err == nil {
-		return obj, true, nil
-	}
-	if faults.IsNotFoundError(err) {
-		return nil, false, nil
-	}
-	return nil, false, err
-}
-
-func (m *queryService) lookupObjectByAlias(ctx context.Context, ident string) (*Record, bool, error) {
-	canonicalID, aliasErr := m.aliases.ResolveObjectAlias(ctx, ident)
-	if aliasErr != nil {
-		if faults.IsNotFoundError(aliasErr) {
-			return nil, false, nil
-		}
-		return nil, false, aliasErr
-	}
-	if strings.TrimSpace(canonicalID) == "" {
-		return nil, false, nil
-	}
-
-	obj, err := m.recordReader.GetObject(ctx, canonicalID)
-	if err != nil {
-		if faults.IsNotFoundError(err) {
-			return nil, false, nil
-		}
-		return nil, false, err
-	}
-
-	return obj, true, nil
-}
-
-func (m *queryService) canonicalContentAndCheckAccess(ctx context.Context, obj *Record, method string) (*CanonicalContent, error) {
-	view, err := m.canonicalContentForObject(ctx, obj)
-	if err != nil {
-		return nil, err
-	}
-	if err := requireObjectMethod(ctx, &view.Record, method); err != nil {
-		return nil, err
-	}
-	return view, nil
-}
-
-func (m *queryService) canonicalContentForObject(ctx context.Context, obj *Record) (*CanonicalContent, error) {
-	sha, ok := CanonicalSHA256(obj.Checksums)
-	if !ok {
-		cloned := cloneObject(*obj)
-		return &CanonicalContent{Record: cloned, Records: []Record{cloned}}, nil
-	}
-	siblings, err := m.content.GetObjectsByChecksum(ctx, sha)
-	if err != nil {
-		return nil, err
-	}
-	physical := objectsWithSHA256(siblings, sha)
-	canonical := canonicalizeContentObjects(physical)
-	if len(canonical) == 0 {
-		return nil, faults.ErrNotFound
-	}
-	return &CanonicalContent{ContentID: ContentID(sha), Record: canonical[0], Records: physical}, nil
-}
-
-func (m *queryService) GetObjectsByChecksums(ctx context.Context, hashes []string, requiredMethod string) (map[string][]Record, error) {
+func (m *queryService) GetObjectsByChecksums(ctx context.Context, hashes []string, requiredMethod string) (map[string][]objectmodel.Record, error) {
 	objectsByChecksum, err := m.content.GetObjectsByChecksums(ctx, hashes)
 	if err != nil {
 		return nil, err
 	}
-	filtered := make(map[string][]Record, len(objectsByChecksum))
+	filtered := make(map[string][]objectmodel.Record, len(objectsByChecksum))
 	for checksum, objects := range objectsByChecksum {
 		matching := objectsWithSHA256(objects, checksum)
 		filtered[checksum] = filterObjectsByMethod(ctx, canonicalizeContentObjects(matching), requiredMethod)
@@ -185,7 +26,7 @@ func (m *queryService) GetObjectsByChecksums(ctx context.Context, hashes []strin
 	return filtered, nil
 }
 
-func (m *queryService) GetObjectsByChecksum(ctx context.Context, checksum string, requiredMethod string) ([]Record, error) {
+func (m *queryService) GetObjectsByChecksum(ctx context.Context, checksum string, requiredMethod string) ([]objectmodel.Record, error) {
 	objects, err := m.content.GetObjectsByChecksum(ctx, checksum)
 	if err != nil {
 		return nil, err
@@ -194,14 +35,14 @@ func (m *queryService) GetObjectsByChecksum(ctx context.Context, checksum string
 	return filterObjectsByMethod(ctx, canonicalizeContentObjects(matching), requiredMethod), nil
 }
 
-func (m *queryService) GetBulkObjects(ctx context.Context, ids []string, requiredMethod string) ([]Record, error) {
+func (m *queryService) GetBulkObjects(ctx context.Context, ids []string, requiredMethod string) ([]objectmodel.Record, error) {
 	objects, err := m.recordReader.GetBulkObjects(ctx, ids)
 	if err != nil {
 		return nil, err
 	}
 	hashes := make([]string, 0, len(objects))
 	for _, obj := range objects {
-		if sha, ok := CanonicalSHA256(obj.Checksums); ok {
+		if sha, ok := objectmodel.CanonicalSHA256(obj.Checksums); ok {
 			hashes = append(hashes, sha)
 		}
 	}
@@ -209,11 +50,11 @@ func (m *queryService) GetBulkObjects(ctx context.Context, ids []string, require
 	if err != nil {
 		return nil, err
 	}
-	canonical := make([]Record, 0, len(objects))
+	canonical := make([]objectmodel.Record, 0, len(objects))
 	seen := make(map[string]struct{}, len(objects))
 	for _, obj := range objects {
 		resolved := cloneObject(obj)
-		if sha, ok := CanonicalSHA256(obj.Checksums); ok {
+		if sha, ok := objectmodel.CanonicalSHA256(obj.Checksums); ok {
 			matching := objectsWithSHA256(siblingsByChecksum[sha], sha)
 			family := canonicalizeContentObjects(matching)
 			if len(family) == 0 {
@@ -230,7 +71,7 @@ func (m *queryService) GetBulkObjects(ctx context.Context, ids []string, require
 	return filterObjectsByMethod(ctx, canonical, requiredMethod), nil
 }
 
-func (m *queryService) GetPreparedScopedObjects(ctx context.Context, ids []string, organization, project, requiredMethod string) ([]Record, error) {
+func (m *queryService) GetPreparedScopedObjects(ctx context.Context, ids []string, organization, project, requiredMethod string) ([]objectmodel.Record, error) {
 	objects, err := m.recordReader.GetBulkObjects(ctx, ids)
 	if err != nil {
 		return nil, err
@@ -238,7 +79,7 @@ func (m *queryService) GetPreparedScopedObjects(ctx context.Context, ids []strin
 	return m.PrepareScopedObjects(ctx, objects, organization, project, requiredMethod)
 }
 
-func (m *queryService) PrepareScopedObjects(ctx context.Context, objects []Record, organization, project, requiredMethod string) ([]Record, error) {
+func (m *queryService) PrepareScopedObjects(ctx context.Context, objects []objectmodel.Record, organization, project, requiredMethod string) ([]objectmodel.Record, error) {
 	started := time.Now()
 	expanded, err := m.expandProjectChecksumSiblingObjects(ctx, objects, organization, project)
 	if err != nil {
@@ -251,9 +92,9 @@ func (m *queryService) PrepareScopedObjects(ctx context.Context, objects []Recor
 	return canonical, nil
 }
 
-func (m *queryService) ListPreparedObjectsPageByScope(ctx context.Context, organization, project, requiredMethod, startAfter string, limit, offset int) ([]Record, error) {
+func (m *queryService) ListPreparedObjectsPageByScope(ctx context.Context, organization, project, requiredMethod, startAfter string, limit, offset int) ([]objectmodel.Record, error) {
 	if limit <= 0 {
-		return []Record{}, nil
+		return []objectmodel.Record{}, nil
 	}
 	if offset < 0 {
 		offset = 0
@@ -271,7 +112,7 @@ func (m *queryService) ListPreparedObjectsPageByScope(ctx context.Context, organ
 	}
 
 	rawStart := startAfter
-	collected := make([]Record, 0, target)
+	collected := make([]objectmodel.Record, 0, target)
 	seen := make(map[string]struct{}, target)
 	started := time.Now()
 	rawPages := 0
@@ -313,7 +154,7 @@ func (m *queryService) ListPreparedObjectsPageByScope(ctx context.Context, organ
 
 	if skip >= len(collected) {
 		log.Printf("INFO: syfon_list_prepared_objects_page_by_scope organization=%s project=%s start_after=%t limit=%d offset=%d raw_pages=%d raw_ids=%d records=0 duration_ms=%d", strings.TrimSpace(organization), strings.TrimSpace(project), startAfter != "", limit, offset, rawPages, rawIDs, time.Since(started).Milliseconds())
-		return []Record{}, nil
+		return []objectmodel.Record{}, nil
 	}
 	end := skip + limit
 	if end > len(collected) {
@@ -329,13 +170,13 @@ func (m *queryService) ListObjectIDsPageByChecksum(ctx context.Context, checksum
 		return []string{}, nil
 	}
 
-	var objects []Record
+	var objects []objectmodel.Record
 	if strings.TrimSpace(organization) != "" || strings.TrimSpace(project) != "" {
 		raw, err := m.content.GetObjectsByChecksum(ctx, checksum)
 		if err != nil {
 			return nil, err
 		}
-		scoped := make([]Record, 0, len(raw))
+		scoped := make([]objectmodel.Record, 0, len(raw))
 		for _, obj := range raw {
 			if objectMatchesScope(&obj, organization, project) {
 				scoped = append(scoped, obj)
@@ -352,7 +193,7 @@ func (m *queryService) ListObjectIDsPageByChecksum(ctx context.Context, checksum
 	}
 	ids := make([]string, 0, len(objects))
 	for _, obj := range objects {
-		if checksumType != "" && !RecordHasChecksumTypeAndValue(obj, checksumType, checksum) {
+		if checksumType != "" && !objectmodel.RecordHasChecksumTypeAndValue(obj, checksumType, checksum) {
 			continue
 		}
 		if strings.TrimSpace(organization) != "" && !objectMatchesScope(&obj, organization, project) {
@@ -483,7 +324,7 @@ func (m *queryService) ListObjectIDsByScope(ctx context.Context, organization, p
 	return out, nil
 }
 
-func (m *queryService) ListObjectsByScope(ctx context.Context, organization, project, requiredMethod string) ([]Record, error) {
+func (m *queryService) ListObjectsByScope(ctx context.Context, organization, project, requiredMethod string) ([]objectmodel.Record, error) {
 	if strings.TrimSpace(organization) == "" && strings.EqualFold(strings.TrimSpace(requiredMethod), objectMethodRead) {
 		if ids, ok, err := m.listReadableObjectIDs(ctx); ok {
 			if err != nil {
@@ -510,7 +351,7 @@ func (m *queryService) ListObjectsByScope(ctx context.Context, organization, pro
 // ListPhysicalObjectsByScope returns each stored object row in a project scope.
 // Callers that repair physical access methods need the row identity and methods
 // without the same-checksum canonical merge used by normal reads.
-func (m *queryService) ListPhysicalObjectsByScope(ctx context.Context, organization, project, requiredMethod string) ([]Record, error) {
+func (m *queryService) ListPhysicalObjectsByScope(ctx context.Context, organization, project, requiredMethod string) ([]objectmodel.Record, error) {
 	ids, err := m.scope.ListObjectIDsByScope(ctx, organization, project)
 	if err != nil {
 		return nil, err
@@ -549,9 +390,9 @@ func (m *queryService) ListMissingScopedSHA256(ctx context.Context, organization
 	return missing, nil
 }
 
-func (m *queryService) expandProjectChecksumSiblingObjects(ctx context.Context, objects []Record, organization, project string) ([]Record, error) {
+func (m *queryService) expandProjectChecksumSiblingObjects(ctx context.Context, objects []objectmodel.Record, organization, project string) ([]objectmodel.Record, error) {
 	if len(objects) == 0 {
-		return []Record{}, nil
+		return []objectmodel.Record{}, nil
 	}
 
 	wantedKeys := make(map[string]struct{}, len(objects))
@@ -563,7 +404,7 @@ func (m *queryService) expandProjectChecksumSiblingObjects(ctx context.Context, 
 			continue
 		}
 		wantedKeys[key] = struct{}{}
-		sha, _ := CanonicalSHA256(obj.Checksums)
+		sha, _ := objectmodel.CanonicalSHA256(obj.Checksums)
 		if _, seen := seenChecksums[sha]; seen {
 			continue
 		}
@@ -581,7 +422,7 @@ func (m *queryService) expandProjectChecksumSiblingObjects(ctx context.Context, 
 	}
 	listDuration := time.Since(listStart)
 
-	expanded := make([]Record, 0, len(objects))
+	expanded := make([]objectmodel.Record, 0, len(objects))
 	seenIDs := make(map[string]struct{}, len(objects))
 	missingIDs := make([]string, 0)
 	missingSeen := make(map[string]struct{})
@@ -631,7 +472,7 @@ func (m *queryService) expandProjectChecksumSiblingObjects(ctx context.Context, 
 	return expanded, nil
 }
 
-func objectHasAccessURL(obj *Record, objectURL string) bool {
+func objectHasAccessURL(obj *objectmodel.Record, objectURL string) bool {
 	if obj == nil || obj.AccessMethods == nil {
 		return false
 	}
@@ -751,7 +592,7 @@ func searchAfterID(ids []string, startAfter string) int {
 	return idx
 }
 
-func objectMatchesScope(obj *Record, organization, project string) bool {
+func objectMatchesScope(obj *objectmodel.Record, organization, project string) bool {
 	if obj == nil || strings.TrimSpace(organization) == "" {
 		return obj != nil
 	}
@@ -770,11 +611,11 @@ func objectMatchesScope(obj *Record, organization, project string) bool {
 	return false
 }
 
-func filterObjectsByMethod(ctx context.Context, objects []Record, method string) []Record {
+func filterObjectsByMethod(ctx context.Context, objects []objectmodel.Record, method string) []objectmodel.Record {
 	if strings.TrimSpace(method) == "" {
 		return objects
 	}
-	filtered := make([]Record, 0, len(objects))
+	filtered := make([]objectmodel.Record, 0, len(objects))
 	for _, obj := range objects {
 		if hasObjectMethod(ctx, &obj, method) {
 			filtered = append(filtered, obj)

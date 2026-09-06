@@ -1,30 +1,34 @@
-package objects
+package records
 
 import (
 	"context"
 	"strings"
 	"testing"
+
+	objectmodel "github.com/calypr/syfon/internal/objects"
 )
 
 type serviceCaptureWriter struct {
-	registered []Record
+	registered []objectmodel.Record
 }
 
-func (w *serviceCaptureWriter) DeleteObject(context.Context, string) error  { return nil }
-func (w *serviceCaptureWriter) CreateObject(context.Context, *Record) error { return nil }
+func (w *serviceCaptureWriter) DeleteObject(context.Context, string) error              { return nil }
+func (w *serviceCaptureWriter) CreateObject(context.Context, *objectmodel.Record) error { return nil }
 func (w *serviceCaptureWriter) BulkDeleteObjects(context.Context, []string) error {
 	return nil
 }
-func (w *serviceCaptureWriter) RegisterObjects(_ context.Context, records []Record) error {
-	w.registered = append([]Record(nil), records...)
+func (w *serviceCaptureWriter) RegisterObjects(_ context.Context, records []objectmodel.Record) error {
+	w.registered = append([]objectmodel.Record(nil), records...)
 	return nil
 }
-func (w *serviceCaptureWriter) ReplaceObjects(context.Context, []Record) error { return nil }
+func (w *serviceCaptureWriter) ReplaceObjects(context.Context, []objectmodel.Record) error {
+	return nil
+}
 
 func TestServiceOwnsRegistrationPort(t *testing.T) {
 	writer := &serviceCaptureWriter{}
 	service := NewService(Dependencies{Writer: writer})
-	input := []Record{{Id: "record-1"}}
+	input := []objectmodel.Record{{Id: "record-1"}}
 
 	if err := service.RegisterObjects(context.Background(), input); err != nil {
 		t.Fatalf("RegisterObjects() error = %v", err)
@@ -35,8 +39,8 @@ func TestServiceOwnsRegistrationPort(t *testing.T) {
 }
 
 func TestCanonicalizeContentObjectsKeepsStableCanonicalIdentity(t *testing.T) {
-	checksum := Checksum{Type: "sha256", Checksum: strings.Repeat("a", 64)}
-	records := []Record{{Id: "older", Checksums: []Checksum{checksum}}, {Id: "newer", Checksums: []Checksum{checksum}}}
+	checksum := objectmodel.Checksum{Type: "sha256", Checksum: strings.Repeat("a", 64)}
+	records := []objectmodel.Record{{Id: "older", Checksums: []objectmodel.Checksum{checksum}}, {Id: "newer", Checksums: []objectmodel.Checksum{checksum}}}
 
 	got := canonicalizeContentObjects(records)
 	if len(got) != 1 || got[0].Id != "newer" {

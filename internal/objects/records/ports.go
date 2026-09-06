@@ -1,26 +1,30 @@
-package objects
+package records
 
-import "context"
+import (
+	"context"
+
+	objectmodel "github.com/calypr/syfon/internal/objects"
+)
 
 // RecordReader reads physical object records.
 type RecordReader interface {
-	GetObject(ctx context.Context, id string) (*Record, error)
-	GetBulkObjects(ctx context.Context, ids []string) ([]Record, error)
+	GetObject(ctx context.Context, id string) (*objectmodel.Record, error)
+	GetBulkObjects(ctx context.Context, ids []string) ([]objectmodel.Record, error)
 }
 
 // RecordWriter mutates physical object records.
 type RecordWriter interface {
 	DeleteObject(ctx context.Context, id string) error
-	CreateObject(ctx context.Context, obj *Record) error
+	CreateObject(ctx context.Context, obj *objectmodel.Record) error
 	BulkDeleteObjects(ctx context.Context, ids []string) error
-	RegisterObjects(ctx context.Context, objects []Record) error
-	ReplaceObjects(ctx context.Context, objects []Record) error
+	RegisterObjects(ctx context.Context, objects []objectmodel.Record) error
+	ReplaceObjects(ctx context.Context, objects []objectmodel.Record) error
 }
 
-// AccessMethodWriter updates the provider access methods attached to records.
+// AccessMethodWriter updates provider access methods attached to records.
 type AccessMethodWriter interface {
-	UpdateObjectAccessMethods(ctx context.Context, objectID string, accessMethods []AccessMethod) error
-	BulkUpdateAccessMethods(ctx context.Context, updates map[string][]AccessMethod) error
+	UpdateObjectAccessMethods(ctx context.Context, objectID string, accessMethods []objectmodel.AccessMethod) error
+	BulkUpdateAccessMethods(ctx context.Context, updates map[string][]objectmodel.AccessMethod) error
 }
 
 // AccessPolicyWriter updates controlled-access policy on records.
@@ -38,8 +42,8 @@ type AliasStore interface {
 
 // ContentReader reads physical records that share a checksum.
 type ContentReader interface {
-	GetObjectsByChecksum(ctx context.Context, checksum string) ([]Record, error)
-	GetObjectsByChecksums(ctx context.Context, checksums []string) (map[string][]Record, error)
+	GetObjectsByChecksum(ctx context.Context, checksum string) ([]objectmodel.Record, error)
+	GetObjectsByChecksums(ctx context.Context, checksums []string) (map[string][]objectmodel.Record, error)
 }
 
 // ChecksumScopeQuery expands checksums within a specific object scope.

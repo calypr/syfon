@@ -1,4 +1,4 @@
-package objects_test
+package records_test
 
 import (
 	"context"
@@ -7,33 +7,34 @@ import (
 
 	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/objects"
+	objectrecords "github.com/calypr/syfon/internal/objects/records"
 	"github.com/calypr/syfon/internal/persistence/sqlite"
 )
 
-func newTestService(backend any, _ ...any) *objects.Service {
-	deps := objects.Dependencies{
-		Reader:        backend.(objects.RecordReader),
-		Writer:        backend.(objects.RecordWriter),
-		AccessMethods: backend.(objects.AccessMethodWriter),
-		AccessPolicy:  backend.(objects.AccessPolicyWriter),
-		Aliases:       backend.(objects.AliasStore),
-		Content:       backend.(objects.ContentReader),
-		ChecksumScope: backend.(objects.ChecksumScopeQuery),
-		Scope:         backend.(objects.ScopeQuery),
+func newTestService(backend any, _ ...any) *objectrecords.Service {
+	deps := objectrecords.Dependencies{
+		Reader:        backend.(objectrecords.RecordReader),
+		Writer:        backend.(objectrecords.RecordWriter),
+		AccessMethods: backend.(objectrecords.AccessMethodWriter),
+		AccessPolicy:  backend.(objectrecords.AccessPolicyWriter),
+		Aliases:       backend.(objectrecords.AliasStore),
+		Content:       backend.(objectrecords.ContentReader),
+		ChecksumScope: backend.(objectrecords.ChecksumScopeQuery),
+		Scope:         backend.(objectrecords.ScopeQuery),
 	}
-	if optional, ok := backend.(objects.OptionalResourceQuery); ok {
+	if optional, ok := backend.(objectrecords.OptionalResourceQuery); ok {
 		deps.Resources = optional
 	}
-	if optional, ok := backend.(objects.OptionalPageQuery); ok {
+	if optional, ok := backend.(objectrecords.OptionalPageQuery); ok {
 		deps.Pages = optional
 	}
-	if optional, ok := backend.(objects.OptionalURLQuery); ok {
+	if optional, ok := backend.(objectrecords.OptionalURLQuery); ok {
 		deps.URLPages = optional
 	}
-	if optional, ok := backend.(objects.OptionalAuthorizedQuery); ok {
+	if optional, ok := backend.(objectrecords.OptionalAuthorizedQuery); ok {
 		deps.Authorized = optional
 	}
-	return objects.NewService(deps)
+	return objectrecords.NewService(deps)
 }
 
 func buildGen3Context(privileges map[string]map[string]bool) context.Context {
@@ -52,7 +53,7 @@ func buildLocalAuthzContext(privileges map[string]map[string]bool) context.Conte
 
 func ptr[T any](value T) *T { return &value }
 
-func registerCandidates(ctx context.Context, service *objects.Service, candidates []objects.Candidate) (int, error) {
+func registerCandidates(ctx context.Context, service *objectrecords.Service, candidates []objects.Candidate) (int, error) {
 	records := make([]objects.Record, 0, len(candidates))
 	for _, candidate := range candidates {
 		record, err := objects.CandidateToRecord(candidate, time.Now().UTC())

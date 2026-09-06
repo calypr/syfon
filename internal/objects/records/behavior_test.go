@@ -1,4 +1,4 @@
-package objects
+package records
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/calypr/syfon/internal/access"
+	objectmodel "github.com/calypr/syfon/internal/objects"
 )
 
 func TestCanonicalContentMetadataIsDeterministicOnTimestampTie(t *testing.T) {
@@ -16,11 +17,11 @@ func TestCanonicalContentMetadataIsDeterministicOnTimestampTie(t *testing.T) {
 	highName := "high"
 	lowDescription := "low description"
 	highDescription := "high description"
-	low := Record{Id: "uuid-a", Name: &lowName, Description: &lowDescription, Size: 1, CreatedTime: created, Checksums: []Checksum{{Type: "sha256", Checksum: strings.Repeat("f", 64)}}}
-	high := Record{Id: "uuid-b", Name: &highName, Description: &highDescription, Size: 2, CreatedTime: created, Checksums: low.Checksums}
+	low := objectmodel.Record{Id: "uuid-a", Name: &lowName, Description: &lowDescription, Size: 1, CreatedTime: created, Checksums: []objectmodel.Checksum{{Type: "sha256", Checksum: strings.Repeat("f", 64)}}}
+	high := objectmodel.Record{Id: "uuid-b", Name: &highName, Description: &highDescription, Size: 2, CreatedTime: created, Checksums: low.Checksums}
 
-	forward := canonicalizeContentObjects([]Record{low, high})
-	reverse := canonicalizeContentObjects([]Record{high, low})
+	forward := canonicalizeContentObjects([]objectmodel.Record{low, high})
+	reverse := canonicalizeContentObjects([]objectmodel.Record{high, low})
 	if !reflect.DeepEqual(forward, reverse) {
 		t.Fatalf("canonical metadata depends on input order: forward=%+v reverse=%+v", forward, reverse)
 	}
@@ -43,7 +44,7 @@ func TestSearchAfterID(t *testing.T) {
 }
 
 func TestObjectMatchesScope(t *testing.T) {
-	obj := &Record{Authorizations: map[string][]string{"org1": {"p1", "p2"}}}
+	obj := &objectmodel.Record{Authorizations: map[string][]string{"org1": {"p1", "p2"}}}
 	if !objectMatchesScope(obj, "org1", "p1") {
 		t.Fatalf("expected org1/p1 to match")
 	}

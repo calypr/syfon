@@ -1,4 +1,4 @@
-package objects_test
+package records_test
 
 import (
 	"context"
@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/calypr/syfon/internal/objects"
+	objectrecords "github.com/calypr/syfon/internal/objects/records"
 	"github.com/calypr/syfon/internal/persistence/sqlite"
 )
 
@@ -30,7 +31,7 @@ func (s *pageSpyDB) ListObjectIDsByScope(ctx context.Context, organization, proj
 	return s.SqliteDB.ListObjectIDsByScope(ctx, organization, project)
 }
 
-func registerScopedCandidate(t *testing.T, om *objects.Service, id, checksum, org, project string) {
+func registerScopedCandidate(t *testing.T, om *objectrecords.Service, id, checksum, org, project string) {
 	t.Helper()
 	controlled := []string{"/organization/" + org + "/project/" + project}
 	_, err := registerCandidates(context.Background(), om, []objects.Candidate{{
@@ -215,7 +216,7 @@ func TestGetBulkObjectsUsesGlobalSHAIdentity(t *testing.T) {
 	}
 
 	ctx := buildLocalAuthzContext(map[string]map[string]bool{firstResource: {"read": true}})
-	service := objects.NewService(objects.Dependencies{Reader: database, Content: database})
+	service := objectrecords.NewService(objectrecords.Dependencies{Reader: database, Content: database})
 	got, err := service.GetBulkObjects(ctx, []string{"bulk-b"}, "read")
 	if err != nil {
 		t.Fatalf("GetBulkObjects failed: %v", err)
@@ -384,7 +385,7 @@ func TestPrepareScopedObjects_HydratesOnlyMissingSiblingIDs(t *testing.T) {
 			t.Fatalf("CreateObject(%s) failed: %v", obj.Id, err)
 		}
 	}
-	om := objects.NewService(objects.Dependencies{Reader: tracked, Content: tracked, ChecksumScope: tracked})
+	om := objectrecords.NewService(objectrecords.Dependencies{Reader: tracked, Content: tracked, ChecksumScope: tracked})
 
 	initial, err := tracked.GetBulkObjects(context.Background(), []string{"dup-a"})
 	if err != nil {

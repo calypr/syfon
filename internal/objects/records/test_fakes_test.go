@@ -1,4 +1,4 @@
-package objects_test
+package records_test
 
 import (
 	"context"

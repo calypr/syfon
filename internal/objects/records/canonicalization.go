@@ -1,7 +1,9 @@
-package objects
+package records
 
 import (
+	"context"
 	"encoding/json"
+	objectmodel "github.com/calypr/syfon/internal/objects"
 	"sort"
 	"strings"
 	"time"
@@ -9,7 +11,23 @@ import (
 	syfoncommon "github.com/calypr/syfon/common"
 )
 
-func canonicalizeProjectScopedObjects(objects []Record, organization, project string) []Record {
+func recordStringPtr(value string) *string { return &value }
+
+func recordStringValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
+
+func recordStringSliceValue(value *[]string) []string {
+	if value == nil {
+		return nil
+	}
+	return *value
+}
+
+func canonicalizeProjectScopedObjects(objects []objectmodel.Record, organization, project string) []objectmodel.Record {
 	if len(objects) <= 1 {
 		return cloneObjects(objects)
 	}
@@ -23,8 +41,8 @@ func canonicalizeProjectScopedObjects(objects []Record, organization, project st
 		}
 	}
 
-	grouped := make(map[string][]Record)
-	passthrough := make([]Record, 0)
+	grouped := make(map[string][]objectmodel.Record)
+	passthrough := make([]objectmodel.Record, 0)
 	for _, obj := range objects {
 		key, ok := canonicalProjectChecksumKey(&obj, forcedResource)
 		if !ok {
@@ -40,7 +58,7 @@ func canonicalizeProjectScopedObjects(objects []Record, organization, project st
 	}
 	sort.Strings(keys)
 
-	out := make([]Record, 0, len(keys)+len(passthrough))
+	out := make([]objectmodel.Record, 0, len(keys)+len(passthrough))
 	for _, key := range keys {
 		out = append(out, collapseCanonicalGroup(grouped[key]))
 	}
@@ -54,11 +72,11 @@ func canonicalizeProjectScopedObjects(objects []Record, organization, project st
 	return out
 }
 
-func canonicalProjectChecksumKey(obj *Record, forcedResource string) (string, bool) {
+func canonicalProjectChecksumKey(obj *objectmodel.Record, forcedResource string) (string, bool) {
 	if obj == nil {
 		return "", false
 	}
-	sha, ok := CanonicalSHA256(obj.Checksums)
+	sha, ok := objectmodel.CanonicalSHA256(obj.Checksums)
 	if !ok || strings.TrimSpace(sha) == "" {
 		return "", false
 	}
@@ -73,8 +91,8 @@ func canonicalProjectChecksumKey(obj *Record, forcedResource string) (string, bo
 	return resource + "|" + sha, true
 }
 
-func projectScopeResources(obj *Record) []string {
-	resources := AccessResources(obj)
+func projectScopeResources(obj *objectmodel.Record) []string {
+	resources := objectmodel.AccessResources(obj)
 	out := make([]string, 0, len(resources))
 	for _, resource := range resources {
 		org, project, ok := syfoncommon.ResourceScope(resource)
@@ -86,21 +104,21 @@ func projectScopeResources(obj *Record) []string {
 	return syfoncommon.NormalizeAccessResources(out)
 }
 
-func canonicalizeContentObjects(objects []Record) []Record {
+func canonicalizeContentObjects(objects []objectmodel.Record) []objectmodel.Record {
 	if len(objects) <= 1 {
 		return cloneObjects(objects)
 	}
-	grouped := make(map[string][]Record)
-	passthrough := make([]Record, 0)
+	grouped := make(map[string][]objectmodel.Record)
+	passthrough := make([]objectmodel.Record, 0)
 	for _, obj := range objects {
-		sha, ok := CanonicalSHA256(obj.Checksums)
+		sha, ok := objectmodel.CanonicalSHA256(obj.Checksums)
 		if !ok {
 			passthrough = append(passthrough, cloneObject(obj))
 			continue
 		}
 		grouped[sha] = append(grouped[sha], cloneObject(obj))
 	}
-	out := make([]Record, 0, len(grouped)+len(passthrough))
+	out := make([]objectmodel.Record, 0, len(grouped)+len(passthrough))
 	for _, group := range grouped {
 		out = append(out, collapseCanonicalGroup(group))
 	}
@@ -109,14 +127,14 @@ func canonicalizeContentObjects(objects []Record) []Record {
 	return out
 }
 
-func objectsWithSHA256(objects []Record, checksum string) []Record {
+func objectsWithSHA256(objects []objectmodel.Record, checksum string) []objectmodel.Record {
 	target := syfoncommon.NormalizeOid(checksum)
 	if target == "" {
 		return objects
 	}
-	matched := make([]Record, 0, len(objects))
+	matched := make([]objectmodel.Record, 0, len(objects))
 	for _, obj := range objects {
-		sha, ok := CanonicalSHA256(obj.Checksums)
+		sha, ok := objectmodel.CanonicalSHA256(obj.Checksums)
 		if ok && sha == target {
 			matched = append(matched, obj)
 		}
@@ -124,9 +142,9 @@ func objectsWithSHA256(objects []Record, checksum string) []Record {
 	return matched
 }
 
-func collapseCanonicalGroup(group []Record) Record {
+func collapseCanonicalGroup(group []objectmodel.Record) objectmodel.Record {
 	if len(group) == 0 {
-		return Record{}
+		return objectmodel.Record{}
 	}
 	canonical := cloneObject(group[0])
 	latest := cloneObject(group[0])
@@ -143,9 +161,9 @@ func collapseCanonicalGroup(group []Record) Record {
 	merged := cloneObject(canonical)
 	merged.Name = latest.Name
 	merged.Size = pickLatestNonZeroSize(group, canonical.Size)
-	merged.Description = pickLatestStringPtr(group, func(obj Record) *string { return obj.Description }, canonical.Description)
-	merged.MimeType = pickLatestStringPtr(group, func(obj Record) *string { return obj.MimeType }, canonical.MimeType)
-	merged.Version = pickLatestStringPtr(group, func(obj Record) *string { return obj.Version }, canonical.Version)
+	merged.Description = pickLatestStringPtr(group, func(obj objectmodel.Record) *string { return obj.Description }, canonical.Description)
+	merged.MimeType = pickLatestStringPtr(group, func(obj objectmodel.Record) *string { return obj.MimeType }, canonical.MimeType)
+	merged.Version = pickLatestStringPtr(group, func(obj objectmodel.Record) *string { return obj.Version }, canonical.Version)
 	updated := canonicalObjectSortTime(latest)
 	merged.UpdatedTime = &updated
 	merged.Checksums = mergeChecksums(group)
@@ -166,12 +184,12 @@ func collapseCanonicalGroup(group []Record) Record {
 		merged.Authorizations = nil
 	}
 	merged.NameAliases = mergeNameAliases(merged.Name, group)
-	merged.Aliases = mergeStringPointerValues(func(obj Record) []string { return objectStringSliceValue(obj.Aliases) }, group)
+	merged.Aliases = mergeStringPointerValues(func(obj objectmodel.Record) []string { return recordStringSliceValue(obj.Aliases) }, group)
 	merged.SelfUri = "drs://" + string(merged.Id)
 	return merged
 }
 
-func canonicalObjectOlder(a, b Record) bool {
+func canonicalObjectOlder(a, b objectmodel.Record) bool {
 	at := a.CreatedTime.UTC()
 	bt := b.CreatedTime.UTC()
 	if !at.Equal(bt) {
@@ -180,7 +198,7 @@ func canonicalObjectOlder(a, b Record) bool {
 	return a.Id < b.Id
 }
 
-func canonicalObjectNewer(a, b Record) bool {
+func canonicalObjectNewer(a, b objectmodel.Record) bool {
 	at := canonicalObjectSortTime(a)
 	bt := canonicalObjectSortTime(b)
 	if !at.Equal(bt) {
@@ -189,27 +207,27 @@ func canonicalObjectNewer(a, b Record) bool {
 	return a.Id > b.Id
 }
 
-func canonicalObjectSortTime(obj Record) time.Time {
+func canonicalObjectSortTime(obj objectmodel.Record) time.Time {
 	if obj.UpdatedTime != nil && !obj.UpdatedTime.IsZero() {
 		return obj.UpdatedTime.UTC()
 	}
 	return obj.CreatedTime.UTC()
 }
 
-func cloneObjects(objects []Record) []Record {
-	out := make([]Record, 0, len(objects))
+func cloneObjects(objects []objectmodel.Record) []objectmodel.Record {
+	out := make([]objectmodel.Record, 0, len(objects))
 	for _, obj := range objects {
 		out = append(out, cloneObject(obj))
 	}
 	return out
 }
 
-func cloneObject(obj Record) Record {
+func cloneObject(obj objectmodel.Record) objectmodel.Record {
 	cloned := obj
-	cloned.Checksums = append([]Checksum(nil), obj.Checksums...)
+	cloned.Checksums = append([]objectmodel.Checksum(nil), obj.Checksums...)
 	cloned.NameAliases = append([]string(nil), obj.NameAliases...)
 	if obj.AccessMethods != nil {
-		methods := append([]AccessMethod(nil), (*obj.AccessMethods)...)
+		methods := append([]objectmodel.AccessMethod(nil), (*obj.AccessMethods)...)
 		cloned.AccessMethods = &methods
 	}
 	if obj.ControlledAccess != nil {
@@ -237,9 +255,9 @@ func cloneObject(obj Record) Record {
 	return cloned
 }
 
-func mergeChecksums(group []Record) []Checksum {
+func mergeChecksums(group []objectmodel.Record) []objectmodel.Checksum {
 	seen := make(map[string]struct{})
-	merged := make([]Checksum, 0)
+	merged := make([]objectmodel.Checksum, 0)
 	for _, obj := range group {
 		for _, checksum := range obj.Checksums {
 			key := checksum.Type + "|" + checksum.Checksum
@@ -259,9 +277,9 @@ func mergeChecksums(group []Record) []Checksum {
 	return merged
 }
 
-func mergeAccessMethods(group []Record) *[]AccessMethod {
+func mergeAccessMethods(group []objectmodel.Record) *[]objectmodel.AccessMethod {
 	seen := make(map[string]struct{})
-	methods := make([]AccessMethod, 0)
+	methods := make([]objectmodel.AccessMethod, 0)
 	for _, obj := range group {
 		if obj.AccessMethods == nil {
 			continue
@@ -276,7 +294,7 @@ func mergeAccessMethods(group []Record) *[]AccessMethod {
 				continue
 			}
 			seen[key] = struct{}{}
-			method.AccessId = objectStringPtr(AccessMethodID(method.Type, url))
+			method.AccessId = recordStringPtr(objectmodel.AccessMethodID(method.Type, url))
 			methods = append(methods, method)
 		}
 	}
@@ -300,11 +318,11 @@ func mergeAccessMethods(group []Record) *[]AccessMethod {
 	return &methods
 }
 
-func mergeControlledAccess(group []Record) ([]string, bool) {
+func mergeControlledAccess(group []objectmodel.Record) ([]string, bool) {
 	resources := make([]string, 0)
 	public := false
 	for _, obj := range group {
-		objectResources := AccessResources(&obj)
+		objectResources := objectmodel.AccessResources(&obj)
 		if len(objectResources) == 0 {
 			public = public || obj.PublicRead || !obj.PublicReadPolicyKnown
 			continue
@@ -317,7 +335,7 @@ func mergeControlledAccess(group []Record) ([]string, bool) {
 	return syfoncommon.NormalizeAccessResources(resources), public
 }
 
-func mergeNameAliases(primary *string, group []Record) []string {
+func mergeNameAliases(primary *string, group []objectmodel.Record) []string {
 	candidates := make([]string, 0)
 	for _, obj := range group {
 		if obj.Name != nil {
@@ -325,10 +343,10 @@ func mergeNameAliases(primary *string, group []Record) []string {
 		}
 		candidates = append(candidates, obj.NameAliases...)
 	}
-	return NormalizeNameAliases(objectStringValue(primary), candidates)
+	return objectmodel.NormalizeNameAliases(recordStringValue(primary), candidates)
 }
 
-func pickLatestNonZeroSize(group []Record, fallback int64) int64 {
+func pickLatestNonZeroSize(group []objectmodel.Record, fallback int64) int64 {
 	best := fallback
 	var bestTime time.Time
 	bestID := ""
@@ -346,7 +364,7 @@ func pickLatestNonZeroSize(group []Record, fallback int64) int64 {
 	return best
 }
 
-func pickLatestStringPtr(group []Record, getter func(Record) *string, fallback *string) *string {
+func pickLatestStringPtr(group []objectmodel.Record, getter func(objectmodel.Record) *string, fallback *string) *string {
 	best := fallback
 	var bestTime time.Time
 	bestID := ""
@@ -366,7 +384,7 @@ func pickLatestStringPtr(group []Record, getter func(Record) *string, fallback *
 	return best
 }
 
-func mergeStringPointerValues(getter func(Record) []string, group []Record) *[]string {
+func mergeStringPointerValues(getter func(objectmodel.Record) []string, group []objectmodel.Record) *[]string {
 	seen := make(map[string]struct{})
 	values := make([]string, 0)
 	for _, obj := range group {
@@ -405,4 +423,176 @@ func uniqueStrings(values []string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+func (m *mutationService) CollapseProjectChecksumDuplicates(ctx context.Context, organization, project string) (int, error) {
+	ids, err := m.scope.ListObjectIDsByScope(ctx, organization, project)
+	if err != nil {
+		return 0, err
+	}
+	objects, err := m.recordReader.GetBulkObjects(ctx, ids)
+	if err != nil {
+		return 0, err
+	}
+	if err := bulkObjectMethodError(ctx, objects, objectMethodUpdate); err != nil {
+		return 0, err
+	}
+
+	grouped := make(map[string][]objectmodel.Record)
+	for _, obj := range objects {
+		key, ok := canonicalProjectChecksumKey(&obj, "")
+		if !ok {
+			continue
+		}
+		grouped[key] = append(grouped[key], cloneObject(obj))
+	}
+
+	merged := make([]objectmodel.Record, 0, len(grouped))
+	aliasMap := make(map[string]string)
+	toDelete := make([]string, 0)
+	keys := make([]string, 0, len(grouped))
+	for key, group := range grouped {
+		if len(group) < 2 {
+			continue
+		}
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		group := grouped[key]
+		canonical := collapseCanonicalGroup(group)
+		merged = append(merged, canonical)
+		for _, obj := range group {
+			if obj.Id == canonical.Id {
+				continue
+			}
+			aliasMap[string(obj.Id)] = string(canonical.Id)
+			toDelete = append(toDelete, string(obj.Id))
+		}
+	}
+
+	if len(merged) == 0 {
+		return 0, nil
+	}
+	if err := m.recordWriter.RegisterObjects(ctx, merged); err != nil {
+		return 0, err
+	}
+	for aliasID, canonicalID := range aliasMap {
+		if err := m.aliases.CreateObjectAlias(ctx, aliasID, canonicalID); err != nil {
+			return 0, err
+		}
+	}
+	if err := m.recordWriter.BulkDeleteObjects(ctx, uniqueStrings(toDelete)); err != nil {
+		return 0, err
+	}
+	return len(aliasMap), nil
+}
+
+func (m *mutationService) canonicalizeRegistrationObjects(ctx context.Context, objs []objectmodel.Record) ([]objectmodel.Record, map[string]string, error) {
+	if len(objs) == 0 {
+		return nil, nil, nil
+	}
+
+	checksums := make([]string, 0, len(objs))
+	seenChecksums := make(map[string]struct{}, len(objs))
+	for _, obj := range objs {
+		if sha, ok := objectmodel.CanonicalSHA256(obj.Checksums); ok {
+			if _, seen := seenChecksums[sha]; seen {
+				continue
+			}
+			seenChecksums[sha] = struct{}{}
+			checksums = append(checksums, sha)
+		}
+	}
+
+	existingByChecksum, err := m.content.GetObjectsByChecksums(ctx, checksums)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	type registrationGroup struct {
+		existingCount int
+		objects       []objectmodel.Record
+	}
+	groups := make(map[string]*registrationGroup)
+	passthrough := make([]objectmodel.Record, 0)
+
+	for _, obj := range objs {
+		sha, ok := objectmodel.CanonicalSHA256(obj.Checksums)
+		if !ok {
+			passthrough = append(passthrough, cloneObject(obj))
+			continue
+		}
+		resources := projectScopeResources(&obj)
+		if len(resources) != 1 {
+			passthrough = append(passthrough, cloneObject(obj))
+			continue
+		}
+		key := resources[0] + "|" + sha
+		group, ok := groups[key]
+		if !ok {
+			group = &registrationGroup{}
+			for _, existing := range existingByChecksum[sha] {
+				existingKey, ok := canonicalProjectChecksumKey(&existing, "")
+				if ok && existingKey == key {
+					group.objects = append(group.objects, cloneObject(existing))
+				}
+			}
+			group.existingCount = len(group.objects)
+			groups[key] = group
+		}
+		group.objects = append(group.objects, cloneObject(obj))
+	}
+
+	keys := make([]string, 0, len(groups))
+	for key := range groups {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	merged := make([]objectmodel.Record, 0, len(keys)+len(passthrough))
+	aliasMap := make(map[string]string)
+
+	for _, key := range keys {
+		state := groups[key]
+		group := state.objects
+		if len(group) == 0 {
+			continue
+		}
+
+		hasExisting := state.existingCount > 0
+		canonical := cloneObject(group[0])
+		latest := canonical
+		if hasExisting {
+			canonical = cloneObject(group[0])
+		}
+		for i, obj := range group {
+			if hasExisting && i < state.existingCount && canonicalObjectNewer(obj, canonical) {
+				canonical = cloneObject(obj)
+			}
+			if canonicalObjectNewer(obj, latest) {
+				latest = cloneObject(obj)
+			}
+		}
+		if !hasExisting {
+			canonical = cloneObject(latest)
+		}
+
+		collapsed := collapseCanonicalGroup(group)
+		collapsed.Id = canonical.Id
+		collapsed.SelfUri = "drs://" + string(canonical.Id)
+		collapsed.CreatedTime = canonical.CreatedTime
+		collapsed.Name = latest.Name
+		collapsed.NameAliases = objectmodel.NormalizeNameAliases(recordStringValue(collapsed.Name), append(collapsed.NameAliases, recordStringValue(canonical.Name)))
+		merged = append(merged, collapsed)
+
+		for _, obj := range group {
+			if obj.Id == collapsed.Id || strings.TrimSpace(string(obj.Id)) == "" {
+				continue
+			}
+			aliasMap[string(obj.Id)] = string(collapsed.Id)
+		}
+	}
+
+	merged = append(merged, passthrough...)
+	return merged, aliasMap, nil
 }

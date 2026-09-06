@@ -1,9 +1,10 @@
-package objects
+package records
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	objectmodel "github.com/calypr/syfon/internal/objects"
 	"sort"
 	"strings"
 
@@ -24,7 +25,7 @@ type BulkOverwriteResult struct {
 // BulkOverwriteObjects replaces records from one project snapshot without
 // canonicalizing checksum siblings. A checksum can therefore exist in more
 // than one project, while still identifying an existing record in this scope.
-func (m *mutationService) BulkOverwriteObjects(ctx context.Context, organization, project string, candidates []Record) (BulkOverwriteResult, error) {
+func (m *mutationService) BulkOverwriteObjects(ctx context.Context, organization, project string, candidates []objectmodel.Record) (BulkOverwriteResult, error) {
 	var result BulkOverwriteResult
 	if len(candidates) == 0 {
 		return result, nil
@@ -45,10 +46,10 @@ func (m *mutationService) BulkOverwriteObjects(ctx context.Context, organization
 			return result, fmt.Errorf("%w: duplicate source did %q", ErrBulkOverwriteConflict, did)
 		}
 		byDID[did] = i
-		if !containsResource(AccessResources(&candidates[i]), resource) {
+		if !containsResource(objectmodel.AccessResources(&candidates[i]), resource) {
 			return result, fmt.Errorf("record %q must include target project %s", did, resource)
 		}
-		if sha, ok := CanonicalSHA256(candidates[i].Checksums); ok {
+		if sha, ok := objectmodel.CanonicalSHA256(candidates[i].Checksums); ok {
 			hashes = append(hashes, sha)
 		}
 	}
@@ -68,12 +69,12 @@ func (m *mutationService) BulkOverwriteObjects(ctx context.Context, organization
 	if err != nil {
 		return result, err
 	}
-	existing := make(map[string]Record, len(existingList))
+	existing := make(map[string]objectmodel.Record, len(existingList))
 	for _, obj := range existingList {
 		existing[string(obj.Id)] = obj
 	}
 
-	resolved := make([]Record, len(candidates))
+	resolved := make([]objectmodel.Record, len(candidates))
 	usedTargets := make(map[string]string, len(candidates))
 	for i, candidate := range candidates {
 		sourceDID := string(candidate.Id)
@@ -87,12 +88,12 @@ func (m *mutationService) BulkOverwriteObjects(ctx context.Context, organization
 		targetDID := sourceDID
 		matched := false
 		if current, ok := existing[sourceDID]; ok {
-			if !containsResource(AccessResources(&current), resource) {
+			if !containsResource(objectmodel.AccessResources(&current), resource) {
 				return result, fmt.Errorf("%w: target DID %q is outside project %s", ErrBulkOverwriteConflict, sourceDID, resource)
 			}
 			matched = true
 			result.DIDMatched++
-		} else if sha, ok := CanonicalSHA256(candidate.Checksums); ok {
+		} else if sha, ok := objectmodel.CanonicalSHA256(candidate.Checksums); ok {
 			matches := uniqueOverwriteStrings(checksumMatches[sha])
 			switch len(matches) {
 			case 0:
@@ -108,7 +109,7 @@ func (m *mutationService) BulkOverwriteObjects(ctx context.Context, organization
 			return result, fmt.Errorf("%w: source records %q and %q resolve to target DID %q", ErrBulkOverwriteConflict, prior, sourceDID, targetDID)
 		}
 		usedTargets[targetDID] = sourceDID
-		candidate.Id = RecordID(targetDID)
+		candidate.Id = objectmodel.RecordID(targetDID)
 		candidate.SelfUri = "drs://" + targetDID
 		resolved[i] = candidate
 		if matched {
