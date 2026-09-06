@@ -99,8 +99,15 @@ func TestLookupBucketScopeCacheExpiresDeterministically(t *testing.T) {
 	if _, _, err := service.LookupBucketScope(context.Background(), "org", "project"); err != nil {
 		t.Fatalf("lookup at expiry: %v", err)
 	}
+	if scopes.getCalls != 1 {
+		t.Fatalf("lookup at expiry made %d backend calls, want 1", scopes.getCalls)
+	}
+	clock.Advance(time.Nanosecond)
+	if _, _, err := service.LookupBucketScope(context.Background(), "org", "project"); err != nil {
+		t.Fatalf("lookup after expiry: %v", err)
+	}
 	if scopes.getCalls != 2 {
-		t.Fatalf("lookup at expiry made %d backend calls, want 2", scopes.getCalls)
+		t.Fatalf("lookup after expiry made %d backend calls, want 2", scopes.getCalls)
 	}
 }
 

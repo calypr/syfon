@@ -50,8 +50,12 @@ func TestScopeCacheExpiresAtTTLBoundary(t *testing.T) {
 		t.Fatal("entry expired before its TTL")
 	}
 	clock.Advance(time.Second)
+	if _, _, cached := cache.get("org", "project"); !cached {
+		t.Fatal("entry expired at its TTL boundary")
+	}
+	clock.Advance(time.Nanosecond)
 	if _, _, cached := cache.get("org", "project"); cached {
-		t.Fatal("entry remained cached at its TTL boundary")
+		t.Fatal("entry remained cached after its TTL")
 	}
 }
 
