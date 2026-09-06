@@ -7,7 +7,8 @@ import (
 
 	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/apigen/server/lfsapi"
-	"github.com/calypr/syfon/internal/models"
+
+	"github.com/calypr/syfon/internal/objects"
 )
 
 func TestConverters(t *testing.T) {
@@ -30,9 +31,9 @@ func TestConverters(t *testing.T) {
 			ControlledAccess: &authz,
 		}
 
-		obj, err := CandidateToInternalObject(candidate, time.Unix(123, 0))
+		obj, err := CandidateToRecord(candidate, time.Unix(123, 0))
 		if err != nil {
-			t.Fatalf("CandidateToInternalObject returned error: %v", err)
+			t.Fatalf("CandidateToRecord returned error: %v", err)
 		}
 		if projects := obj.Authorizations["syfon"]; len(projects) != 1 || projects[0] != "e2e" {
 			t.Fatalf("unexpected internal authz list: %+v", obj.Authorizations)
@@ -44,7 +45,7 @@ func TestConverters(t *testing.T) {
 			Size:      42,
 			Checksums: []drs.Checksum{{Type: "sha256", Checksum: strings.Repeat("b", 64)}},
 		}
-		if _, err := CandidateToInternalObject(candidate, time.Unix(123, 0)); err == nil || !strings.Contains(err.Error(), "access method") {
+		if _, err := CandidateToRecord(candidate, time.Unix(123, 0)); err == nil || !strings.Contains(err.Error(), "access method") {
 			t.Fatalf("expected access-method validation error, got %v", err)
 		}
 	})
@@ -98,10 +99,9 @@ func TestConverters(t *testing.T) {
 	})
 
 	t.Run("enforce canonical project scope appends exact controlled access", func(t *testing.T) {
-		obj, err := EnforceCanonicalProjectScope(models.InternalObject{
-			DrsObject: drs.DrsObject{
-				Id: "obj-1",
-			},
+		obj, err := EnforceCanonicalProjectScope(objects.Record{
+
+			Id:             "obj-1",
 			Authorizations: map[string][]string{"other": {"proj"}},
 		}, "org", "proj")
 		if err != nil {

@@ -1,4 +1,4 @@
-package common
+package objects
 
 import (
 	"errors"
@@ -6,9 +6,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/calypr/syfon/apigen/server/drs"
-	sycommon "github.com/calypr/syfon/common"
-	"github.com/calypr/syfon/internal/models"
+	syfoncommon "github.com/calypr/syfon/common"
 )
 
 var ErrNoValidSHA256 = errors.New("no valid sha256 values provided")
@@ -17,12 +15,8 @@ var ErrAccessMethodsRequired = errors.New("candidate must include at least one a
 
 var sha256Like = regexp.MustCompile(`^[A-Fa-f0-9]{64}$`)
 
-// LooksLikeSHA256 checks if a string matches the format of a SHA256 hash.
-func LooksLikeSHA256(v string) bool {
-	return sha256Like.MatchString(strings.TrimSpace(v))
-}
+func LooksLikeSHA256(v string) bool { return sha256Like.MatchString(strings.TrimSpace(v)) }
 
-// NormalizeChecksum removes any "sha256:" prefixes if present.
 func NormalizeChecksum(cs string) string {
 	if parts := strings.SplitN(cs, ":", 2); len(parts) == 2 {
 		return parts[1]
@@ -30,14 +24,11 @@ func NormalizeChecksum(cs string) string {
 	return cs
 }
 
-// NormalizeChecksumType cleans up a checksum type string (lowercase, remove hyphens).
 func NormalizeChecksumType(checksumType string) string {
 	normalized := strings.ToLower(strings.TrimSpace(checksumType))
-	normalized = strings.ReplaceAll(normalized, "-", "")
-	return normalized
+	return strings.ReplaceAll(normalized, "-", "")
 }
 
-// ParseHashQuery parses a checksum string that might be in "type:value" format.
 func ParseHashQuery(rawHash string, rawType string) (string, string) {
 	hashType := NormalizeChecksumType(rawType)
 	hashValue := strings.Trim(strings.TrimSpace(NormalizeChecksum(rawHash)), `"'`)
@@ -49,7 +40,7 @@ func ParseHashQuery(rawHash string, rawType string) (string, string) {
 	return hashType, hashValue
 }
 
-func ObjectHasChecksumTypeAndValue(obj models.InternalObject, hashType string, hashValue string) bool {
+func RecordHasChecksumTypeAndValue(obj Record, hashType, hashValue string) bool {
 	if hashType == "" {
 		return true
 	}
@@ -66,18 +57,15 @@ func ObjectHasChecksumTypeAndValue(obj models.InternalObject, hashType string, h
 	return false
 }
 
-// MergeAdditionalChecksums merges new checksums into an existing set, avoiding duplicate types.
-func MergeAdditionalChecksums(existing []drs.Checksum, additions []drs.Checksum) []drs.Checksum {
-	out := make([]drs.Checksum, 0, len(existing)+len(additions))
+func MergeAdditionalChecksums(existing, additions []Checksum) []Checksum {
+	out := make([]Checksum, 0, len(existing)+len(additions))
 	seenTypes := make(map[string]struct{}, len(existing)+len(additions))
-
 	for _, cs := range existing {
 		if t := NormalizeChecksumType(cs.Type); t != "" {
 			seenTypes[t] = struct{}{}
 		}
 		out = append(out, cs)
 	}
-
 	for _, cs := range additions {
 		t := NormalizeChecksumType(cs.Type)
 		v := strings.TrimSpace(NormalizeChecksum(cs.Checksum))
@@ -87,14 +75,13 @@ func MergeAdditionalChecksums(existing []drs.Checksum, additions []drs.Checksum)
 		if _, exists := seenTypes[t]; exists {
 			continue
 		}
-		out = append(out, drs.Checksum{Type: strings.TrimSpace(cs.Type), Checksum: v})
+		out = append(out, Checksum{Type: strings.TrimSpace(cs.Type), Checksum: v})
 		seenTypes[t] = struct{}{}
 	}
 	return out
 }
 
-// CanonicalSHA256 pulls the sha256 value from a list of checksums if it exists.
-func CanonicalSHA256(checksums []drs.Checksum) (string, bool) {
+func CanonicalSHA256(checksums []Checksum) (string, bool) {
 	values := SHA256Values(checksums)
 	if len(values) == 0 {
 		return "", false
@@ -102,17 +89,14 @@ func CanonicalSHA256(checksums []drs.Checksum) (string, bool) {
 	return values[0], true
 }
 
-// SHA256Values returns distinct valid SHA-256 values in their input order.
-// Invalid values remain ignored for compatibility with existing bundle data.
-func SHA256Values(checksums []drs.Checksum) []string {
+func SHA256Values(checksums []Checksum) []string {
 	seen := make(map[string]struct{})
 	values := make([]string, 0, 1)
 	for _, cs := range checksums {
-		checksumType := NormalizeChecksumType(cs.Type)
-		if checksumType != "sha256" {
+		if NormalizeChecksumType(cs.Type) != "sha256" {
 			continue
 		}
-		normalized := sycommon.NormalizeOid(cs.Checksum)
+		normalized := syfoncommon.NormalizeOid(cs.Checksum)
 		if normalized == "" {
 			continue
 		}
@@ -125,9 +109,7 @@ func SHA256Values(checksums []drs.Checksum) []string {
 	return values
 }
 
-// ValidateCanonicalSHA256 returns the sole valid SHA-256 value, if present.
-// Multiple distinct valid values identify an invalid registration.
-func ValidateCanonicalSHA256(checksums []drs.Checksum) (string, bool, error) {
+func ValidateCanonicalSHA256(checksums []Checksum) (string, bool, error) {
 	values := SHA256Values(checksums)
 	if len(values) > 1 {
 		return "", false, fmt.Errorf("%w: %s", ErrConflictingSHA256, strings.Join(values, ", "))
@@ -138,11 +120,8 @@ func ValidateCanonicalSHA256(checksums []drs.Checksum) (string, bool, error) {
 	return values[0], true, nil
 }
 
-// NormalizeSHA256Query recognizes a bare or prefixed SHA-256 query. Other
-// checksum values are returned unchanged by callers so their exact matching
-// semantics remain intact.
 func NormalizeSHA256Query(value string) (string, bool) {
-	normalized := sycommon.NormalizeOid(value)
+	normalized := syfoncommon.NormalizeOid(value)
 	if normalized == "" {
 		return "", false
 	}

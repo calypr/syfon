@@ -3,20 +3,22 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
 	"strings"
 	"time"
 
-	"github.com/calypr/syfon/apigen/server/drs"
 	sycommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/faults"
 	"github.com/calypr/syfon/internal/models"
+
+	"github.com/calypr/syfon/internal/objects"
 )
 
-func (db *SqliteDB) GetObject(ctx context.Context, id string) (*models.InternalObject, error) {
+func (db *SqliteDB) GetObject(ctx context.Context, id string) (*objects.Record, error) {
 	requestID := strings.TrimSpace(id)
 	lookupID := requestID
 	resolvedAlias := false
@@ -56,19 +58,17 @@ retryLookup:
 	}
 	objectID := r.ID
 
-	obj := &models.InternalObject{
-		DrsObject: drs.DrsObject{
-			Id:          objectID,
-			Size:        r.Size,
-			CreatedTime: r.CreatedTime,
-			UpdatedTime: common.Ptr(r.UpdatedTime),
-			Version:     common.Ptr(r.Version),
-			Description: common.Ptr(r.Description),
-			Name:        common.Ptr(r.Name),
-			SelfUri:     "drs://" + objectID,
-		},
+	obj := &objects.Record{
+		Id:          objects.RecordID(objectID),
+		Size:        r.Size,
+		CreatedTime: r.CreatedTime,
+		UpdatedTime: common.Ptr(r.UpdatedTime),
+		Version:     common.Ptr(r.Version),
+		Description: common.Ptr(r.Description),
+		Name:        common.Ptr(r.Name),
+		SelfUri:     "drs://" + objectID,
 		NameAliases: nameAliases,
-		Properties:  map[string]interface{}{},
+		Properties:  map[string]json.RawMessage{},
 	}
 
 	// 2. Fetch storage access methods.
@@ -90,15 +90,12 @@ retryLookup:
 		}
 		seenAccess[k] = struct{}{}
 		if obj.AccessMethods == nil {
-			obj.AccessMethods = &[]drs.AccessMethod{}
+			obj.AccessMethods = &[]objects.AccessMethod{}
 		}
-		am := drs.AccessMethod{
-			AccessUrl: &struct {
-				Headers *[]string `json:"headers,omitempty"`
-				Url     string    `json:"url"`
-			}{Url: u},
-			Type:     drs.AccessMethodType(t),
-			AccessId: common.Ptr(common.AccessMethodID(t, u)),
+		am := objects.AccessMethod{
+			AccessUrl: &objects.AccessURL{Url: u},
+			Type:      t,
+			AccessId:  common.Ptr(objects.AccessMethodID(t, u)),
 		}
 		*obj.AccessMethods = append(*obj.AccessMethods, am)
 	}
@@ -132,22 +129,22 @@ retryLookup:
 			continue
 		}
 		seenChecksum[key] = struct{}{}
-		obj.Checksums = append(obj.Checksums, drs.Checksum{Type: t, Checksum: v})
+		obj.Checksums = append(obj.Checksums, objects.Checksum{Type: t, Checksum: v})
 	}
 
 	return obj, nil
 }
 
-func (db *SqliteDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []string, checksums []string) (map[string]*models.InternalObject, error) {
+func (db *SqliteDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []string, checksums []string) (map[string]*objects.Record, error) {
 	if len(ids) == 0 && len(checksums) == 0 {
-		return map[string]*models.InternalObject{}, nil
+		return map[string]*objects.Record{}, nil
 	}
 
 	conditions := make([]string, 0, 2)
 	shaQueries := make([]string, 0, len(checksums))
 	genericQueries := make([]string, 0, len(checksums))
 	for _, checksum := range checksums {
-		if normalized, ok := common.NormalizeSHA256Query(checksum); ok {
+		if normalized, ok := objects.NormalizeSHA256Query(checksum); ok {
 			shaQueries = append(shaQueries, normalized)
 		} else {
 			genericQueries = append(genericQueries, strings.TrimSpace(checksum))
@@ -206,7 +203,7 @@ func (db *SqliteDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []stri
 	}
 	defer rows.Close()
 
-	objectsByID := make(map[string]*models.InternalObject)
+	objectsByID := make(map[string]*objects.Record)
 
 	for rows.Next() {
 		var (
@@ -221,18 +218,16 @@ func (db *SqliteDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []stri
 		); err != nil {
 			return nil, err
 		}
-		objectsByID[id] = &models.InternalObject{
-			DrsObject: drs.DrsObject{
-				Id:          id,
-				Size:        size,
-				CreatedTime: createdTime,
-				UpdatedTime: common.Ptr(updatedTime),
-				Name:        common.Ptr(strings.TrimSpace(name.String)),
-				Version:     common.Ptr(version.String),
-				Description: common.Ptr(description.String),
-				SelfUri:     "drs://" + id,
-			},
-			Properties: map[string]interface{}{},
+		objectsByID[id] = &objects.Record{
+			Id:          objects.RecordID(id),
+			Size:        size,
+			CreatedTime: createdTime,
+			UpdatedTime: common.Ptr(updatedTime),
+			Name:        common.Ptr(strings.TrimSpace(name.String)),
+			Version:     common.Ptr(version.String),
+			Description: common.Ptr(description.String),
+			SelfUri:     "drs://" + id,
+			Properties:  map[string]json.RawMessage{},
 		}
 	}
 
@@ -261,7 +256,7 @@ func (db *SqliteDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []stri
 	return objectsByID, nil
 }
 
-func (db *SqliteDB) attachBulkAccessMethods(ctx context.Context, objectsByID map[string]*models.InternalObject) error {
+func (db *SqliteDB) attachBulkAccessMethods(ctx context.Context, objectsByID map[string]*objects.Record) error {
 	ids := sortedObjectIDs(objectsByID)
 	query := fmt.Sprintf(`
 		SELECT object_id, url, type
@@ -296,22 +291,19 @@ func (db *SqliteDB) attachBulkAccessMethods(ctx context.Context, objectsByID map
 			continue
 		}
 		seenAccess[objectID][key] = struct{}{}
-		if obj.DrsObject.AccessMethods == nil {
-			obj.DrsObject.AccessMethods = &[]drs.AccessMethod{}
+		if obj.AccessMethods == nil {
+			obj.AccessMethods = &[]objects.AccessMethod{}
 		}
-		*obj.DrsObject.AccessMethods = append(*obj.DrsObject.AccessMethods, drs.AccessMethod{
-			AccessUrl: &struct {
-				Headers *[]string `json:"headers,omitempty"`
-				Url     string    `json:"url"`
-			}{Url: accessURL},
-			Type:     drs.AccessMethodType(accessType),
-			AccessId: common.Ptr(common.AccessMethodID(accessType, accessURL)),
+		*obj.AccessMethods = append(*obj.AccessMethods, objects.AccessMethod{
+			AccessUrl: &objects.AccessURL{Url: accessURL},
+			Type:      accessType,
+			AccessId:  common.Ptr(objects.AccessMethodID(accessType, accessURL)),
 		})
 	}
 	return rows.Err()
 }
 
-func (db *SqliteDB) attachBulkChecksums(ctx context.Context, objectsByID map[string]*models.InternalObject) error {
+func (db *SqliteDB) attachBulkChecksums(ctx context.Context, objectsByID map[string]*objects.Record) error {
 	ids := sortedObjectIDs(objectsByID)
 	query := fmt.Sprintf(`
 		SELECT object_id, type, checksum
@@ -346,12 +338,12 @@ func (db *SqliteDB) attachBulkChecksums(ctx context.Context, objectsByID map[str
 			continue
 		}
 		seenChecksums[objectID][key] = struct{}{}
-		obj.DrsObject.Checksums = append(obj.DrsObject.Checksums, drs.Checksum{Type: checksumType, Checksum: checksumValue})
+		obj.Checksums = append(obj.Checksums, objects.Checksum{Type: checksumType, Checksum: checksumValue})
 	}
 	return rows.Err()
 }
 
-func objectAccessResources(obj *models.InternalObject) []string {
+func objectAccessResources(obj *objects.Record) []string {
 	if obj == nil {
 		return nil
 	}
@@ -361,7 +353,7 @@ func objectAccessResources(obj *models.InternalObject) []string {
 	return sycommon.AuthzMapToList(obj.Authorizations)
 }
 
-func sortedObjectIDs(objectsByID map[string]*models.InternalObject) []string {
+func sortedObjectIDs(objectsByID map[string]*objects.Record) []string {
 	ids := make([]string, 0, len(objectsByID))
 	for id := range objectsByID {
 		ids = append(ids, id)
@@ -408,10 +400,10 @@ func (db *SqliteDB) nameAliasesForObject(ctx context.Context, objectID string) (
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	return common.NormalizeNameAliases("", aliases), nil
+	return objects.NormalizeNameAliases("", aliases), nil
 }
 
-func (db *SqliteDB) attachControlledAccess(ctx context.Context, objectsByID map[string]*models.InternalObject) error {
+func (db *SqliteDB) attachControlledAccess(ctx context.Context, objectsByID map[string]*objects.Record) error {
 	if len(objectsByID) == 0 {
 		return nil
 	}
@@ -458,7 +450,7 @@ func (db *SqliteDB) attachControlledAccess(ctx context.Context, objectsByID map[
 	return nil
 }
 
-func (db *SqliteDB) attachPublicRead(ctx context.Context, objectsByID map[string]*models.InternalObject) error {
+func (db *SqliteDB) attachPublicRead(ctx context.Context, objectsByID map[string]*objects.Record) error {
 	if len(objectsByID) == 0 {
 		return nil
 	}
@@ -498,7 +490,7 @@ func (db *SqliteDB) attachPublicRead(ctx context.Context, objectsByID map[string
 	return nil
 }
 
-func (db *SqliteDB) attachNameAliases(ctx context.Context, objectsByID map[string]*models.InternalObject) error {
+func (db *SqliteDB) attachNameAliases(ctx context.Context, objectsByID map[string]*objects.Record) error {
 	if len(objectsByID) == 0 {
 		return nil
 	}
@@ -535,7 +527,7 @@ func (db *SqliteDB) attachNameAliases(ctx context.Context, objectsByID map[strin
 		if obj == nil {
 			continue
 		}
-		obj.NameAliases = common.NormalizeNameAliases(common.StringVal(obj.Name), aliases)
+		obj.NameAliases = objects.NormalizeNameAliases(common.StringVal(obj.Name), aliases)
 	}
 	return nil
 }

@@ -15,6 +15,8 @@ import (
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/models"
+
+	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/testutils"
 	"github.com/google/uuid"
 )
@@ -379,7 +381,7 @@ func TestHandleInternalUploadURL_ResolvesRegisteredScopedObjectID(t *testing.T) 
 
 	oid := "3d71f043937a09b77826109db4f2b47c46f19923ef823f6a777a15fde0b2c9c7"
 	name := "program-root.bin"
-	obj, err := core.CandidateToInternalObject(drs.DrsObjectCandidate{
+	obj, err := core.CandidateToRecord(drs.DrsObjectCandidate{
 		Name:             &name,
 		Size:             20,
 		Checksums:        []drs.Checksum{{Type: "sha256", Checksum: oid}},
@@ -393,12 +395,12 @@ func TestHandleInternalUploadURL_ResolvesRegisteredScopedObjectID(t *testing.T) 
 		}},
 	}, time.Now().UTC())
 	if err != nil {
-		t.Fatalf("CandidateToInternalObject failed: %v", err)
+		t.Fatalf("CandidateToRecord failed: %v", err)
 	}
-	if err := om.RegisterObjects(ctx, []models.InternalObject{obj}); err != nil {
+	if err := om.RegisterObjects(ctx, []objects.Record{obj}); err != nil {
 		t.Fatalf("RegisterObjects failed: %v", err)
 	}
-	registered, err := om.GetObject(ctx, obj.Id, "read")
+	registered, err := om.GetObject(ctx, string(obj.Id), "read")
 	if err != nil {
 		t.Fatalf("GetObject failed: %v", err)
 	}
@@ -406,8 +408,8 @@ func TestHandleInternalUploadURL_ResolvesRegisteredScopedObjectID(t *testing.T) 
 	mockUM := &capturingMultipartURLManager{}
 	om = core.NewObjectManager(database, mockUM)
 	req := routeutil.WithPathParams(
-		httptest.NewRequest(http.MethodGet, "/data/upload/"+registered.Id+"?key=program-root/"+oid, nil),
-		map[string]string{"file_id": registered.Id},
+		httptest.NewRequest(http.MethodGet, "/data/upload/"+string(registered.Id)+"?key=program-root/"+oid, nil),
+		map[string]string{"file_id": string(registered.Id)},
 	)
 	rr := doInternalDRSTestRequest(req, om)
 	if rr.Code != http.StatusOK {
@@ -445,7 +447,7 @@ func TestHandleInternalUploadURL_ResolvesRegisteredProjectScopedObjectWithoutQue
 	did := "f781273b-52eb-5ac2-a484-775235eef303"
 	name := "project-subpath.bin"
 	aliases := []string{"id:" + did}
-	obj, err := core.CandidateToInternalObject(drs.DrsObjectCandidate{
+	obj, err := core.CandidateToRecord(drs.DrsObjectCandidate{
 		Name:             &name,
 		Size:             23,
 		Checksums:        []drs.Checksum{{Type: "sha256", Checksum: oid}},
@@ -460,9 +462,9 @@ func TestHandleInternalUploadURL_ResolvesRegisteredProjectScopedObjectWithoutQue
 		}},
 	}, time.Now().UTC())
 	if err != nil {
-		t.Fatalf("CandidateToInternalObject failed: %v", err)
+		t.Fatalf("CandidateToRecord failed: %v", err)
 	}
-	if err := om.RegisterObjects(ctx, []models.InternalObject{obj}); err != nil {
+	if err := om.RegisterObjects(ctx, []objects.Record{obj}); err != nil {
 		t.Fatalf("RegisterObjects failed: %v", err)
 	}
 

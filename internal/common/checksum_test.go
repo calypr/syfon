@@ -3,8 +3,7 @@ package common
 import (
 	"testing"
 
-	"github.com/calypr/syfon/apigen/server/drs"
-	"github.com/calypr/syfon/internal/models"
+	"github.com/calypr/syfon/internal/objects"
 )
 
 func TestParseHashQuery(t *testing.T) {
@@ -20,7 +19,7 @@ func TestParseHashQuery(t *testing.T) {
 		{rawHash: "value", rawType: "md5", wantT: "md5", wantV: "value"},
 	}
 	for _, c := range cases {
-		gotT, gotV := ParseHashQuery(c.rawHash, c.rawType)
+		gotT, gotV := objects.ParseHashQuery(c.rawHash, c.rawType)
 		if gotT != c.wantT || gotV != c.wantV {
 			t.Fatalf("ParseHashQuery(%q,%q) got (%q,%q) want (%q,%q)", c.rawHash, c.rawType, gotT, gotV, c.wantT, c.wantV)
 		}
@@ -28,13 +27,13 @@ func TestParseHashQuery(t *testing.T) {
 }
 
 func TestMergeAdditionalChecksums(t *testing.T) {
-	existing := []drs.Checksum{{Type: "sha256", Checksum: "a"}}
-	additions := []drs.Checksum{
+	existing := []objects.Checksum{{Type: "sha256", Checksum: "a"}}
+	additions := []objects.Checksum{
 		{Type: "sha-256", Checksum: "b"}, // duplicate type, ignored
 		{Type: "md5", Checksum: "m"},
 		{Type: "", Checksum: "x"},
 	}
-	out := MergeAdditionalChecksums(existing, additions)
+	out := objects.MergeAdditionalChecksums(existing, additions)
 	if len(out) != 2 {
 		t.Fatalf("expected 2 checksums, got %+v", out)
 	}
@@ -44,23 +43,21 @@ func TestMergeAdditionalChecksums(t *testing.T) {
 }
 
 func TestSHAHelpers(t *testing.T) {
-	if !LooksLikeSHA256("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa") {
+	if !objects.LooksLikeSHA256("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa") {
 		t.Fatalf("expected valid sha256 format")
 	}
-	if LooksLikeSHA256("abc") {
+	if objects.LooksLikeSHA256("abc") {
 		t.Fatalf("expected invalid sha256 format")
 	}
 
-	checksums := []drs.Checksum{{Type: "sha-256", Checksum: " AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA "}}
-	sha, ok := CanonicalSHA256(checksums)
+	checksums := []objects.Checksum{{Type: "sha-256", Checksum: " AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA "}}
+	sha, ok := objects.CanonicalSHA256(checksums)
 	if !ok || sha != "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
 		t.Fatalf("CanonicalSHA256 mismatch: ok=%v sha=%q", ok, sha)
 	}
 
-
-
-	obj := models.InternalObject{DrsObject: drs.DrsObject{Checksums: []drs.Checksum{{Type: "md5", Checksum: "m"}}}}
-	if !ObjectHasChecksumTypeAndValue(obj, "md5", "m") {
+	obj := objects.Record{Checksums: []objects.Checksum{{Type: "md5", Checksum: "m"}}}
+	if !objects.RecordHasChecksumTypeAndValue(obj, "md5", "m") {
 		t.Fatalf("expected checksum match")
 	}
 }
@@ -74,4 +71,3 @@ func TestParseS3URL(t *testing.T) {
 		t.Fatalf("expected non-s3 URL to fail")
 	}
 }
-

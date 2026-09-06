@@ -14,6 +14,8 @@ import (
 	"github.com/calypr/syfon/apigen/server/metricsapi"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/models"
+
+	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/testutils"
 	"github.com/gofiber/fiber/v3"
 )
@@ -26,7 +28,7 @@ func (a metricsObjectReaderAdapter) ListObjectIDsByScope(ctx context.Context, or
 	return a.db.ListObjectIDsByScope(ctx, organization, project)
 }
 
-func (a metricsObjectReaderAdapter) GetObject(ctx context.Context, id, requiredMethod string) (*models.InternalObject, error) {
+func (a metricsObjectReaderAdapter) GetObject(ctx context.Context, id, requiredMethod string) (*objects.Record, error) {
 	return a.db.GetObject(ctx, id)
 }
 

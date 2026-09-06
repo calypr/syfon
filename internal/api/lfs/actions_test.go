@@ -69,7 +69,7 @@ func TestResolveObjectForOIDFallsBackToChecksum(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected checksum fallback object, got error: %v", err)
 	}
-	if obj == nil || obj.Id != did {
+	if obj == nil || string(obj.Id) != did {
 		t.Fatalf("expected object id %s, got %+v", did, obj)
 	}
 }

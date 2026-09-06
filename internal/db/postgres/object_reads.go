@@ -3,15 +3,17 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 
-	"github.com/calypr/syfon/apigen/server/drs"
 	sycommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/faults"
 	"github.com/calypr/syfon/internal/models"
+
+	"github.com/calypr/syfon/internal/objects"
 	"github.com/lib/pq"
 )
 
@@ -31,7 +33,7 @@ func (db *PostgresDB) ResolveObjectAlias(ctx context.Context, aliasID string) (s
 	return canonicalID, nil
 }
 
-func (db *PostgresDB) GetObject(ctx context.Context, id string) (*models.InternalObject, error) {
+func (db *PostgresDB) GetObject(ctx context.Context, id string) (*objects.Record, error) {
 	requestID := strings.TrimSpace(id)
 	lookupID := requestID
 	resolvedAlias := false
@@ -71,19 +73,17 @@ retryLookup:
 	}
 	objectID := r.ID
 
-	obj := &models.InternalObject{
-		DrsObject: drs.DrsObject{
-			Id:          objectID,
-			Size:        r.Size,
-			CreatedTime: r.CreatedTime,
-			UpdatedTime: common.Ptr(r.UpdatedTime),
-			Version:     common.Ptr(r.Version),
-			Description: common.Ptr(r.Description),
-			Name:        common.Ptr(r.Name),
-			SelfUri:     "drs://" + objectID,
-		},
+	obj := &objects.Record{
+		Id:          objects.RecordID(objectID),
+		Size:        r.Size,
+		CreatedTime: r.CreatedTime,
+		UpdatedTime: common.Ptr(r.UpdatedTime),
+		Version:     common.Ptr(r.Version),
+		Description: common.Ptr(r.Description),
+		Name:        common.Ptr(r.Name),
+		SelfUri:     "drs://" + objectID,
 		NameAliases: nameAliases,
-		Properties:  map[string]interface{}{},
+		Properties:  map[string]json.RawMessage{},
 	}
 	// 2. Fetch storage access methods.
 	urlRows, err := db.db.QueryContext(ctx, "SELECT url, type FROM drs_object_access_method WHERE object_id = $1", lookupID)
@@ -103,15 +103,12 @@ retryLookup:
 		}
 		seenAccess[key] = struct{}{}
 		if obj.AccessMethods == nil {
-			obj.AccessMethods = &[]drs.AccessMethod{}
+			obj.AccessMethods = &[]objects.AccessMethod{}
 		}
-		am := drs.AccessMethod{
-			AccessUrl: &struct {
-				Headers *[]string `json:"headers,omitempty"`
-				Url     string    `json:"url"`
-			}{Url: u},
-			Type:     drs.AccessMethodType(t),
-			AccessId: common.Ptr(common.AccessMethodID(t, u)),
+		am := objects.AccessMethod{
+			AccessUrl: &objects.AccessURL{Url: u},
+			Type:      t,
+			AccessId:  common.Ptr(objects.AccessMethodID(t, u)),
 		}
 		*obj.AccessMethods = append(*obj.AccessMethods, am)
 	}
@@ -145,21 +142,21 @@ retryLookup:
 			continue
 		}
 		seenChecksum[key] = struct{}{}
-		obj.Checksums = append(obj.Checksums, drs.Checksum{Type: t, Checksum: v})
+		obj.Checksums = append(obj.Checksums, objects.Checksum{Type: t, Checksum: v})
 	}
 
 	return obj, nil
 }
 
-func (db *PostgresDB) GetBulkObjects(ctx context.Context, ids []string) ([]models.InternalObject, error) {
+func (db *PostgresDB) GetBulkObjects(ctx context.Context, ids []string) ([]objects.Record, error) {
 	if len(ids) == 0 {
-		return []models.InternalObject{}, nil
+		return []objects.Record{}, nil
 	}
 	objectsByID, err := db.fetchObjectsByIDsOrChecksums(ctx, ids, nil)
 	if err != nil {
 		return nil, err
 	}
-	objects := make([]models.InternalObject, 0, len(ids))
+	objects := make([]objects.Record, 0, len(ids))
 	seen := make(map[string]struct{}, len(ids))
 	for _, id := range ids {
 		obj, ok := objectsByID[id]
@@ -181,35 +178,35 @@ func (db *PostgresDB) GetBulkObjects(ctx context.Context, ids []string) ([]model
 		if !ok || obj == nil {
 			continue
 		}
-		if _, already := seen[obj.Id]; already {
+		if _, already := seen[string(obj.Id)]; already {
 			continue
 		}
-		seen[obj.Id] = struct{}{}
+		seen[string(obj.Id)] = struct{}{}
 		objects = append(objects, *obj)
 	}
 	return objects, nil
 }
 
-func (db *PostgresDB) GetObjectsByChecksum(ctx context.Context, checksum string) ([]models.InternalObject, error) {
+func (db *PostgresDB) GetObjectsByChecksum(ctx context.Context, checksum string) ([]objects.Record, error) {
 	checksum = strings.TrimSpace(checksum)
 	if checksum == "" {
-		return []models.InternalObject{}, nil
+		return []objects.Record{}, nil
 	}
 	objectsByID, err := db.fetchObjectsByIDsOrChecksums(ctx, nil, []string{checksum})
 	if err != nil {
 		return nil, err
 	}
 	if len(objectsByID) == 0 {
-		return []models.InternalObject{}, nil
+		return []objects.Record{}, nil
 	}
-	out := make([]models.InternalObject, 0, len(objectsByID))
+	out := make([]objects.Record, 0, len(objectsByID))
 	for _, obj := range objectsByID {
 		out = append(out, *obj)
 	}
 	return uniqueObjectsByID(out), nil
 }
 
-func (db *PostgresDB) GetObjectsByChecksums(ctx context.Context, checksums []string) (map[string][]models.InternalObject, error) {
+func (db *PostgresDB) GetObjectsByChecksums(ctx context.Context, checksums []string) (map[string][]objects.Record, error) {
 	if len(checksums) == 0 {
 		return nil, nil
 	}
@@ -217,30 +214,30 @@ func (db *PostgresDB) GetObjectsByChecksums(ctx context.Context, checksums []str
 	if err != nil {
 		return nil, err
 	}
-	index := make(map[string][]models.InternalObject, len(objectsByID)*2)
+	index := make(map[string][]objects.Record, len(objectsByID)*2)
 	for _, obj := range objectsByID {
-		index[obj.Id] = append(index[obj.Id], *obj)
+		index[string(obj.Id)] = append(index[string(obj.Id)], *obj)
 		for _, cs := range obj.Checksums {
 			value := strings.TrimSpace(cs.Checksum)
 			if value == "" {
 				continue
 			}
 			index[value] = append(index[value], *obj)
-			if common.NormalizeChecksumType(cs.Type) == "sha256" {
-				if normalized, ok := common.NormalizeSHA256Query(value); ok {
+			if objects.NormalizeChecksumType(cs.Type) == "sha256" {
+				if normalized, ok := objects.NormalizeSHA256Query(value); ok {
 					index[normalized] = append(index[normalized], *obj)
 				}
 			}
 		}
 	}
-	result := make(map[string][]models.InternalObject, len(checksums))
+	result := make(map[string][]objects.Record, len(checksums))
 	for _, cs := range checksums {
 		requested := strings.TrimSpace(cs)
 		if requested == "" {
 			continue
 		}
 		lookup := requested
-		if normalized, ok := common.NormalizeSHA256Query(requested); ok {
+		if normalized, ok := objects.NormalizeSHA256Query(requested); ok {
 			lookup = normalized
 		}
 		if objs := index[lookup]; len(objs) > 0 {

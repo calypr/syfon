@@ -6,8 +6,8 @@ import (
 	"net/http"
 
 	"github.com/calypr/syfon/internal/access"
-	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/faults"
+	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/requestmeta"
 	"github.com/gofiber/fiber/v3"
 )
@@ -44,10 +44,10 @@ func HandleError(c fiber.Ctx, err error) error {
 		status = http.StatusConflict
 	case errors.Is(err, faults.ErrInvalidInput):
 		status = http.StatusBadRequest
-	case errors.Is(err, common.ErrNoValidSHA256):
+	case errors.Is(err, objects.ErrNoValidSHA256):
 		status = http.StatusBadRequest
 		msg = "A valid SHA256 checksum is required"
-	case errors.Is(err, common.ErrAccessMethodsRequired):
+	case errors.Is(err, objects.ErrAccessMethodsRequired):
 		status = http.StatusBadRequest
 		msg = err.Error()
 	}

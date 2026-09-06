@@ -9,24 +9,37 @@ import (
 
 	syfoncommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/access"
-	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/db"
 	"github.com/calypr/syfon/internal/faults"
-	"github.com/calypr/syfon/internal/models"
+
+	objectdomain "github.com/calypr/syfon/internal/objects"
 )
 
-// GetObject retrieves an internal object by ID, Alias, or Checksum and validates access.
-func (m *ObjectManager) GetObject(ctx context.Context, ident string, requiredMethod string) (*models.InternalObject, error) {
+// GetObject retrieves the prepared canonical record identified by ID, alias,
+// or checksum and validates access.  Callers that need the identity and
+// physical-record distinction should use GetCanonicalContent.
+func (m *ObjectManager) GetObject(ctx context.Context, ident string, requiredMethod string) (*objectdomain.Record, error) {
+	view, err := m.GetCanonicalContent(ctx, ident, requiredMethod)
+	if err != nil {
+		return nil, err
+	}
+	return &view.Record, nil
+}
+
+// GetCanonicalContent resolves a physical lookup to the prepared same-content
+// view.  The returned ContentID is checksum-derived and Records retains the
+// physical rows used to build the merged Record.
+func (m *ObjectManager) GetCanonicalContent(ctx context.Context, ident string, requiredMethod string) (*objectdomain.CanonicalContent, error) {
 	if strings.TrimSpace(ident) == "" {
 		return nil, faults.ErrNotFound
 	}
 
-	checksumIdent := common.LooksLikeSHA256(ident)
+	_, checksumIdent := objectdomain.NormalizeSHA256Query(ident)
 	if checksumIdent {
 		if obj, found, err := m.lookupObjectByChecksum(ctx, ident, requiredMethod); err != nil {
 			return nil, err
 		} else if found {
-			return obj, nil
+			return canonicalContentFromRecord(*obj), nil
 		}
 	}
 
@@ -46,14 +59,14 @@ func (m *ObjectManager) GetObject(ctx context.Context, ident string, requiredMet
 		if obj, found, err := m.lookupObjectByChecksum(ctx, ident, requiredMethod); err != nil {
 			return nil, err
 		} else if found {
-			return obj, nil
+			return canonicalContentFromRecord(*obj), nil
 		}
 	}
 
 	return nil, faults.ErrNotFound
 }
 
-func (m *ObjectManager) lookupObjectByChecksum(ctx context.Context, ident string, requiredMethod string) (*models.InternalObject, bool, error) {
+func (m *ObjectManager) lookupObjectByChecksum(ctx context.Context, ident string, requiredMethod string) (*objectdomain.Record, bool, error) {
 	byChecksum, err := m.GetObjectsByChecksum(ctx, ident, requiredMethod)
 	if err != nil {
 		return nil, false, err
@@ -73,7 +86,7 @@ func (m *ObjectManager) lookupObjectByChecksum(ctx context.Context, ident string
 	return &byChecksum[0], true, nil
 }
 
-func (m *ObjectManager) lookupObjectByID(ctx context.Context, ident string) (*models.InternalObject, bool, error) {
+func (m *ObjectManager) lookupObjectByID(ctx context.Context, ident string) (*objectdomain.Record, bool, error) {
 	obj, err := m.db.GetObject(ctx, ident)
 	if err == nil {
 		return obj, true, nil
@@ -84,7 +97,7 @@ func (m *ObjectManager) lookupObjectByID(ctx context.Context, ident string) (*mo
 	return nil, false, err
 }
 
-func (m *ObjectManager) lookupObjectByAlias(ctx context.Context, ident string) (*models.InternalObject, bool, error) {
+func (m *ObjectManager) lookupObjectByAlias(ctx context.Context, ident string) (*objectdomain.Record, bool, error) {
 	canonicalID, aliasErr := m.db.ResolveObjectAlias(ctx, ident)
 	if aliasErr != nil {
 		if faults.IsNotFoundError(aliasErr) {
@@ -107,40 +120,49 @@ func (m *ObjectManager) lookupObjectByAlias(ctx context.Context, ident string) (
 	return obj, true, nil
 }
 
-func (m *ObjectManager) canonicalContentAndCheckAccess(ctx context.Context, obj *models.InternalObject, method string) (*models.InternalObject, error) {
-	canonical, err := m.canonicalContentForObject(ctx, obj)
+func (m *ObjectManager) canonicalContentAndCheckAccess(ctx context.Context, obj *objectdomain.Record, method string) (*objectdomain.CanonicalContent, error) {
+	view, err := m.canonicalContentForObject(ctx, obj)
 	if err != nil {
 		return nil, err
 	}
-	if err := m.requireObjectMethod(ctx, canonical, method); err != nil {
+	if err := m.requireObjectMethod(ctx, &view.Record, method); err != nil {
 		return nil, err
 	}
-	return canonical, nil
+	return view, nil
 }
 
-func (m *ObjectManager) canonicalContentForObject(ctx context.Context, obj *models.InternalObject) (*models.InternalObject, error) {
-	sha, ok := common.CanonicalSHA256(obj.Checksums)
+func canonicalContentFromRecord(record objectdomain.Record) *objectdomain.CanonicalContent {
+	contentID := objectdomain.ContentID("")
+	if sha, ok := objectdomain.CanonicalSHA256(record.Checksums); ok {
+		contentID = objectdomain.ContentID(sha)
+	}
+	return &objectdomain.CanonicalContent{ContentID: contentID, Record: record, Records: []objectdomain.Record{record}}
+}
+
+func (m *ObjectManager) canonicalContentForObject(ctx context.Context, obj *objectdomain.Record) (*objectdomain.CanonicalContent, error) {
+	sha, ok := objectdomain.CanonicalSHA256(obj.Checksums)
 	if !ok {
 		cloned := cloneObject(*obj)
-		return &cloned, nil
+		return &objectdomain.CanonicalContent{Record: cloned, Records: []objectdomain.Record{cloned}}, nil
 	}
 	siblings, err := m.db.GetObjectsByChecksum(ctx, sha)
 	if err != nil {
 		return nil, err
 	}
-	canonical := canonicalizeContentObjects(objectsWithSHA256(siblings, sha))
+	physical := objectsWithSHA256(siblings, sha)
+	canonical := canonicalizeContentObjects(physical)
 	if len(canonical) == 0 {
 		return nil, faults.ErrNotFound
 	}
-	return &canonical[0], nil
+	return &objectdomain.CanonicalContent{ContentID: objectdomain.ContentID(sha), Record: canonical[0], Records: physical}, nil
 }
 
-func (m *ObjectManager) GetObjectsByChecksums(ctx context.Context, hashes []string, requiredMethod string) (map[string][]models.InternalObject, error) {
+func (m *ObjectManager) GetObjectsByChecksums(ctx context.Context, hashes []string, requiredMethod string) (map[string][]objectdomain.Record, error) {
 	objectsByChecksum, err := m.db.GetObjectsByChecksums(ctx, hashes)
 	if err != nil {
 		return nil, err
 	}
-	filtered := make(map[string][]models.InternalObject, len(objectsByChecksum))
+	filtered := make(map[string][]objectdomain.Record, len(objectsByChecksum))
 	for checksum, objects := range objectsByChecksum {
 		matching := objectsWithSHA256(objects, checksum)
 		filtered[checksum] = m.filterObjectsByMethod(ctx, canonicalizeContentObjects(matching), requiredMethod)
@@ -148,7 +170,7 @@ func (m *ObjectManager) GetObjectsByChecksums(ctx context.Context, hashes []stri
 	return filtered, nil
 }
 
-func (m *ObjectManager) GetObjectsByChecksum(ctx context.Context, checksum string, requiredMethod string) ([]models.InternalObject, error) {
+func (m *ObjectManager) GetObjectsByChecksum(ctx context.Context, checksum string, requiredMethod string) ([]objectdomain.Record, error) {
 	objects, err := m.db.GetObjectsByChecksum(ctx, checksum)
 	if err != nil {
 		return nil, err
@@ -157,14 +179,14 @@ func (m *ObjectManager) GetObjectsByChecksum(ctx context.Context, checksum strin
 	return m.filterObjectsByMethod(ctx, canonicalizeContentObjects(matching), requiredMethod), nil
 }
 
-func (m *ObjectManager) GetBulkObjects(ctx context.Context, ids []string, requiredMethod string) ([]models.InternalObject, error) {
+func (m *ObjectManager) GetBulkObjects(ctx context.Context, ids []string, requiredMethod string) ([]objectdomain.Record, error) {
 	objects, err := m.db.GetBulkObjects(ctx, ids)
 	if err != nil {
 		return nil, err
 	}
 	hashes := make([]string, 0, len(objects))
 	for _, obj := range objects {
-		if sha, ok := common.CanonicalSHA256(obj.Checksums); ok {
+		if sha, ok := objectdomain.CanonicalSHA256(obj.Checksums); ok {
 			hashes = append(hashes, sha)
 		}
 	}
@@ -172,11 +194,11 @@ func (m *ObjectManager) GetBulkObjects(ctx context.Context, ids []string, requir
 	if err != nil {
 		return nil, err
 	}
-	canonical := make([]models.InternalObject, 0, len(objects))
+	canonical := make([]objectdomain.Record, 0, len(objects))
 	seen := make(map[string]struct{}, len(objects))
 	for _, obj := range objects {
 		resolved := cloneObject(obj)
-		if sha, ok := common.CanonicalSHA256(obj.Checksums); ok {
+		if sha, ok := objectdomain.CanonicalSHA256(obj.Checksums); ok {
 			matching := objectsWithSHA256(siblingsByChecksum[sha], sha)
 			family := canonicalizeContentObjects(matching)
 			if len(family) == 0 {
@@ -184,16 +206,16 @@ func (m *ObjectManager) GetBulkObjects(ctx context.Context, ids []string, requir
 			}
 			resolved = family[0]
 		}
-		if _, ok := seen[resolved.Id]; ok {
+		if _, ok := seen[string(string(resolved.Id))]; ok {
 			continue
 		}
-		seen[resolved.Id] = struct{}{}
+		seen[string(string(resolved.Id))] = struct{}{}
 		canonical = append(canonical, resolved)
 	}
 	return m.filterObjectsByMethod(ctx, canonical, requiredMethod), nil
 }
 
-func (m *ObjectManager) GetPreparedScopedObjects(ctx context.Context, ids []string, organization, project, requiredMethod string) ([]models.InternalObject, error) {
+func (m *ObjectManager) GetPreparedScopedObjects(ctx context.Context, ids []string, organization, project, requiredMethod string) ([]objectdomain.Record, error) {
 	objects, err := m.db.GetBulkObjects(ctx, ids)
 	if err != nil {
 		return nil, err
@@ -201,7 +223,7 @@ func (m *ObjectManager) GetPreparedScopedObjects(ctx context.Context, ids []stri
 	return m.PrepareScopedObjects(ctx, objects, organization, project, requiredMethod)
 }
 
-func (m *ObjectManager) PrepareScopedObjects(ctx context.Context, objects []models.InternalObject, organization, project, requiredMethod string) ([]models.InternalObject, error) {
+func (m *ObjectManager) PrepareScopedObjects(ctx context.Context, objects []objectdomain.Record, organization, project, requiredMethod string) ([]objectdomain.Record, error) {
 	started := time.Now()
 	expanded, err := m.expandProjectChecksumSiblingObjects(ctx, objects, organization, project)
 	if err != nil {
@@ -214,9 +236,9 @@ func (m *ObjectManager) PrepareScopedObjects(ctx context.Context, objects []mode
 	return canonical, nil
 }
 
-func (m *ObjectManager) ListPreparedObjectsPageByScope(ctx context.Context, organization, project, requiredMethod, startAfter string, limit, offset int) ([]models.InternalObject, error) {
+func (m *ObjectManager) ListPreparedObjectsPageByScope(ctx context.Context, organization, project, requiredMethod, startAfter string, limit, offset int) ([]objectdomain.Record, error) {
 	if limit <= 0 {
-		return []models.InternalObject{}, nil
+		return []objectdomain.Record{}, nil
 	}
 	if offset < 0 {
 		offset = 0
@@ -234,7 +256,7 @@ func (m *ObjectManager) ListPreparedObjectsPageByScope(ctx context.Context, orga
 	}
 
 	rawStart := startAfter
-	collected := make([]models.InternalObject, 0, target)
+	collected := make([]objectdomain.Record, 0, target)
 	seen := make(map[string]struct{}, target)
 	started := time.Now()
 	rawPages := 0
@@ -257,13 +279,13 @@ func (m *ObjectManager) ListPreparedObjectsPageByScope(ctx context.Context, orga
 			return nil, err
 		}
 		for _, obj := range prepared {
-			if startAfter != "" && obj.Id <= startAfter {
+			if startAfter != "" && string(obj.Id) <= startAfter {
 				continue
 			}
-			if _, ok := seen[obj.Id]; ok {
+			if _, ok := seen[string(obj.Id)]; ok {
 				continue
 			}
-			seen[obj.Id] = struct{}{}
+			seen[string(obj.Id)] = struct{}{}
 			collected = append(collected, obj)
 			if len(collected) >= target {
 				break
@@ -276,7 +298,7 @@ func (m *ObjectManager) ListPreparedObjectsPageByScope(ctx context.Context, orga
 
 	if skip >= len(collected) {
 		log.Printf("INFO: syfon_list_prepared_objects_page_by_scope organization=%s project=%s start_after=%t limit=%d offset=%d raw_pages=%d raw_ids=%d records=0 duration_ms=%d", strings.TrimSpace(organization), strings.TrimSpace(project), startAfter != "", limit, offset, rawPages, rawIDs, time.Since(started).Milliseconds())
-		return []models.InternalObject{}, nil
+		return []objectdomain.Record{}, nil
 	}
 	end := skip + limit
 	if end > len(collected) {
@@ -292,13 +314,13 @@ func (m *ObjectManager) ListObjectIDsPageByChecksum(ctx context.Context, checksu
 		return []string{}, nil
 	}
 
-	var objects []models.InternalObject
+	var objects []objectdomain.Record
 	if strings.TrimSpace(organization) != "" || strings.TrimSpace(project) != "" {
 		raw, err := m.db.GetObjectsByChecksum(ctx, checksum)
 		if err != nil {
 			return nil, err
 		}
-		scoped := make([]models.InternalObject, 0, len(raw))
+		scoped := make([]objectdomain.Record, 0, len(raw))
 		for _, obj := range raw {
 			if objectMatchesScope(&obj, organization, project) {
 				scoped = append(scoped, obj)
@@ -315,13 +337,13 @@ func (m *ObjectManager) ListObjectIDsPageByChecksum(ctx context.Context, checksu
 	}
 	ids := make([]string, 0, len(objects))
 	for _, obj := range objects {
-		if checksumType != "" && !common.ObjectHasChecksumTypeAndValue(obj, checksumType, checksum) {
+		if checksumType != "" && !objectdomain.RecordHasChecksumTypeAndValue(obj, checksumType, checksum) {
 			continue
 		}
 		if strings.TrimSpace(organization) != "" && !objectMatchesScope(&obj, organization, project) {
 			continue
 		}
-		ids = append(ids, obj.Id)
+		ids = append(ids, string(obj.Id))
 	}
 	sort.Strings(ids)
 	if startAfter != "" {
@@ -402,7 +424,7 @@ func (m *ObjectManager) ListObjectIDsPageByURL(ctx context.Context, objectURL, o
 	out := make([]string, 0, len(objects))
 	for _, obj := range objects {
 		if objectHasAccessURL(&obj, objectURL) {
-			out = append(out, obj.Id)
+			out = append(out, string(obj.Id))
 		}
 	}
 	sort.Strings(out)
@@ -441,12 +463,12 @@ func (m *ObjectManager) ListObjectIDsByScope(ctx context.Context, organization, 
 	}
 	out := make([]string, 0, len(filtered))
 	for _, obj := range filtered {
-		out = append(out, obj.Id)
+		out = append(out, string(obj.Id))
 	}
 	return out, nil
 }
 
-func (m *ObjectManager) ListObjectsByScope(ctx context.Context, organization, project, requiredMethod string) ([]models.InternalObject, error) {
+func (m *ObjectManager) ListObjectsByScope(ctx context.Context, organization, project, requiredMethod string) ([]objectdomain.Record, error) {
 	if strings.TrimSpace(organization) == "" && strings.EqualFold(strings.TrimSpace(requiredMethod), objectMethodRead) {
 		if ids, ok, err := m.listReadableObjectIDs(ctx); ok {
 			if err != nil {
@@ -473,7 +495,7 @@ func (m *ObjectManager) ListObjectsByScope(ctx context.Context, organization, pr
 // ListPhysicalObjectsByScope returns each stored object row in a project scope.
 // Callers that repair physical access methods need the row identity and methods
 // without the same-checksum canonical merge used by normal reads.
-func (m *ObjectManager) ListPhysicalObjectsByScope(ctx context.Context, organization, project, requiredMethod string) ([]models.InternalObject, error) {
+func (m *ObjectManager) ListPhysicalObjectsByScope(ctx context.Context, organization, project, requiredMethod string) ([]objectdomain.Record, error) {
 	ids, err := m.db.ListObjectIDsByScope(ctx, organization, project)
 	if err != nil {
 		return nil, err
@@ -512,9 +534,9 @@ func (m *ObjectManager) ListMissingScopedSHA256(ctx context.Context, organizatio
 	return missing, nil
 }
 
-func (m *ObjectManager) expandProjectChecksumSiblingObjects(ctx context.Context, objects []models.InternalObject, organization, project string) ([]models.InternalObject, error) {
+func (m *ObjectManager) expandProjectChecksumSiblingObjects(ctx context.Context, objects []objectdomain.Record, organization, project string) ([]objectdomain.Record, error) {
 	if len(objects) == 0 {
-		return []models.InternalObject{}, nil
+		return []objectdomain.Record{}, nil
 	}
 
 	wantedKeys := make(map[string]struct{}, len(objects))
@@ -526,7 +548,7 @@ func (m *ObjectManager) expandProjectChecksumSiblingObjects(ctx context.Context,
 			continue
 		}
 		wantedKeys[key] = struct{}{}
-		sha, _ := common.CanonicalSHA256(obj.Checksums)
+		sha, _ := objectdomain.CanonicalSHA256(obj.Checksums)
 		if _, seen := seenChecksums[sha]; seen {
 			continue
 		}
@@ -544,15 +566,15 @@ func (m *ObjectManager) expandProjectChecksumSiblingObjects(ctx context.Context,
 	}
 	listDuration := time.Since(listStart)
 
-	expanded := make([]models.InternalObject, 0, len(objects))
+	expanded := make([]objectdomain.Record, 0, len(objects))
 	seenIDs := make(map[string]struct{}, len(objects))
 	missingIDs := make([]string, 0)
 	missingSeen := make(map[string]struct{})
 	for _, obj := range objects {
-		if _, seen := seenIDs[obj.Id]; seen {
+		if _, seen := seenIDs[string(obj.Id)]; seen {
 			continue
 		}
-		seenIDs[obj.Id] = struct{}{}
+		seenIDs[string(obj.Id)] = struct{}{}
 		expanded = append(expanded, obj)
 	}
 	for _, sha := range checksums {
@@ -582,10 +604,10 @@ func (m *ObjectManager) expandProjectChecksumSiblingObjects(ctx context.Context,
 			if _, wanted := wantedKeys[key]; !wanted {
 				continue
 			}
-			if _, seen := seenIDs[obj.Id]; seen {
+			if _, seen := seenIDs[string(obj.Id)]; seen {
 				continue
 			}
-			seenIDs[obj.Id] = struct{}{}
+			seenIDs[string(obj.Id)] = struct{}{}
 			expanded = append(expanded, obj)
 		}
 	}
@@ -594,7 +616,7 @@ func (m *ObjectManager) expandProjectChecksumSiblingObjects(ctx context.Context,
 	return expanded, nil
 }
 
-func objectHasAccessURL(obj *models.InternalObject, objectURL string) bool {
+func objectHasAccessURL(obj *objectdomain.Record, objectURL string) bool {
 	if obj == nil || obj.AccessMethods == nil {
 		return false
 	}
@@ -714,7 +736,7 @@ func searchAfterID(ids []string, startAfter string) int {
 	return idx
 }
 
-func objectMatchesScope(obj *models.InternalObject, organization, project string) bool {
+func objectMatchesScope(obj *objectdomain.Record, organization, project string) bool {
 	if obj == nil || strings.TrimSpace(organization) == "" {
 		return obj != nil
 	}
@@ -733,11 +755,11 @@ func objectMatchesScope(obj *models.InternalObject, organization, project string
 	return false
 }
 
-func (m *ObjectManager) filterObjectsByMethod(ctx context.Context, objects []models.InternalObject, method string) []models.InternalObject {
+func (m *ObjectManager) filterObjectsByMethod(ctx context.Context, objects []objectdomain.Record, method string) []objectdomain.Record {
 	if strings.TrimSpace(method) == "" {
 		return objects
 	}
-	filtered := make([]models.InternalObject, 0, len(objects))
+	filtered := make([]objectdomain.Record, 0, len(objects))
 	for _, obj := range objects {
 		if m.hasObjectMethod(ctx, &obj, method) {
 			filtered = append(filtered, obj)

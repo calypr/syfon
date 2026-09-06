@@ -21,7 +21,8 @@ import (
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/db/sqlite"
-	"github.com/calypr/syfon/internal/models"
+
+	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/testutils"
 	"github.com/gofiber/fiber/v3"
 )
@@ -125,43 +126,35 @@ func TestHandleInternalList_CanonicalizesProjectChecksumDuplicates(t *testing.T)
 	oldURL := "s3://ellrottlab/old/" + sha
 	newURL := "s3://EllrottLab/new/" + sha
 
-	for _, obj := range []models.InternalObject{
+	for _, obj := range []objects.Record{
 		{
 			Authorizations: map[string][]string{"org": {"p1"}},
-			DrsObject: drs.DrsObject{
-				Id:          "did-1",
-				Name:        stringPtr("older.tsv"),
-				CreatedTime: now,
-				UpdatedTime: &now,
-				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: sha}},
-				AccessMethods: &[]drs.AccessMethod{{
-					Type: "s3",
-					AccessUrl: &struct {
-						Headers *[]string `json:"headers,omitempty"`
-						Url     string    `json:"url"`
-					}{Url: oldURL},
-				}},
-			},
+
+			Id:          "did-1",
+			Name:        stringPtr("older.tsv"),
+			CreatedTime: now,
+			UpdatedTime: &now,
+			Checksums:   []objects.Checksum{{Type: "sha256", Checksum: sha}},
+			AccessMethods: &[]objects.AccessMethod{{
+				Type:      "s3",
+				AccessUrl: &objects.AccessURL{Url: oldURL},
+			}},
 		},
 		{
 			Authorizations: map[string][]string{"org": {"p1"}},
-			DrsObject: drs.DrsObject{
-				Id:          "did-2",
-				Name:        stringPtr("newer.tsv"),
-				CreatedTime: later,
-				UpdatedTime: &later,
-				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: sha}},
-				AccessMethods: &[]drs.AccessMethod{{
-					Type: "s3",
-					AccessUrl: &struct {
-						Headers *[]string `json:"headers,omitempty"`
-						Url     string    `json:"url"`
-					}{Url: newURL},
-				}},
-			},
+
+			Id:          "did-2",
+			Name:        stringPtr("newer.tsv"),
+			CreatedTime: later,
+			UpdatedTime: &later,
+			Checksums:   []objects.Checksum{{Type: "sha256", Checksum: sha}},
+			AccessMethods: &[]objects.AccessMethod{{
+				Type:      "s3",
+				AccessUrl: &objects.AccessURL{Url: newURL},
+			}},
 		},
 	} {
-		if err := om.RegisterObjects(context.Background(), []models.InternalObject{obj}); err != nil {
+		if err := om.RegisterObjects(context.Background(), []objects.Record{obj}); err != nil {
 			t.Fatalf("RegisterObjects failed: %v", err)
 		}
 	}
@@ -212,60 +205,48 @@ func TestHandleInternalList_FillsLimitAfterCanonicalizingDuplicates(t *testing.T
 	duplicateSHA := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	uniqueSHA := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 
-	for _, obj := range []models.InternalObject{
+	for _, obj := range []objects.Record{
 		{
 			Authorizations: map[string][]string{"org": {"p1"}},
-			DrsObject: drs.DrsObject{
-				Id:          "did-1",
-				Name:        stringPtr("older.tsv"),
-				CreatedTime: now,
-				UpdatedTime: &now,
-				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: duplicateSHA}},
-				AccessMethods: &[]drs.AccessMethod{{
-					Type: "s3",
-					AccessUrl: &struct {
-						Headers *[]string `json:"headers,omitempty"`
-						Url     string    `json:"url"`
-					}{Url: "s3://bucket/old/" + duplicateSHA},
-				}},
-			},
+
+			Id:          "did-1",
+			Name:        stringPtr("older.tsv"),
+			CreatedTime: now,
+			UpdatedTime: &now,
+			Checksums:   []objects.Checksum{{Type: "sha256", Checksum: duplicateSHA}},
+			AccessMethods: &[]objects.AccessMethod{{
+				Type:      "s3",
+				AccessUrl: &objects.AccessURL{Url: "s3://bucket/old/" + duplicateSHA},
+			}},
 		},
 		{
 			Authorizations: map[string][]string{"org": {"p1"}},
-			DrsObject: drs.DrsObject{
-				Id:          "did-2",
-				Name:        stringPtr("newer.tsv"),
-				CreatedTime: later,
-				UpdatedTime: &later,
-				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: duplicateSHA}},
-				AccessMethods: &[]drs.AccessMethod{{
-					Type: "s3",
-					AccessUrl: &struct {
-						Headers *[]string `json:"headers,omitempty"`
-						Url     string    `json:"url"`
-					}{Url: "s3://bucket/new/" + duplicateSHA},
-				}},
-			},
+
+			Id:          "did-2",
+			Name:        stringPtr("newer.tsv"),
+			CreatedTime: later,
+			UpdatedTime: &later,
+			Checksums:   []objects.Checksum{{Type: "sha256", Checksum: duplicateSHA}},
+			AccessMethods: &[]objects.AccessMethod{{
+				Type:      "s3",
+				AccessUrl: &objects.AccessURL{Url: "s3://bucket/new/" + duplicateSHA},
+			}},
 		},
 		{
 			Authorizations: map[string][]string{"org": {"p1"}},
-			DrsObject: drs.DrsObject{
-				Id:          "did-3",
-				Name:        stringPtr("unique.tsv"),
-				CreatedTime: later,
-				UpdatedTime: &later,
-				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: uniqueSHA}},
-				AccessMethods: &[]drs.AccessMethod{{
-					Type: "s3",
-					AccessUrl: &struct {
-						Headers *[]string `json:"headers,omitempty"`
-						Url     string    `json:"url"`
-					}{Url: "s3://bucket/unique/" + uniqueSHA},
-				}},
-			},
+
+			Id:          "did-3",
+			Name:        stringPtr("unique.tsv"),
+			CreatedTime: later,
+			UpdatedTime: &later,
+			Checksums:   []objects.Checksum{{Type: "sha256", Checksum: uniqueSHA}},
+			AccessMethods: &[]objects.AccessMethod{{
+				Type:      "s3",
+				AccessUrl: &objects.AccessURL{Url: "s3://bucket/unique/" + uniqueSHA},
+			}},
 		},
 	} {
-		if err := om.RegisterObjects(context.Background(), []models.InternalObject{obj}); err != nil {
+		if err := om.RegisterObjects(context.Background(), []objects.Record{obj}); err != nil {
 			t.Fatalf("RegisterObjects failed: %v", err)
 		}
 	}
@@ -312,41 +293,33 @@ func TestHandleInternalList_MergesSiblingAccessMethodsFromLegacyDuplicateRows(t 
 	newURL := "s3://EllrottLab/" + sha
 	controlled := []string{"/organization/org/project/p1"}
 
-	for _, obj := range []models.InternalObject{
+	for _, obj := range []objects.Record{
 		{
-			DrsObject: drs.DrsObject{
-				Id:               "did-legacy-1",
-				Name:             stringPtr("legacy.tsv"),
-				CreatedTime:      now,
-				UpdatedTime:      &now,
-				Checksums:        []drs.Checksum{{Type: "sha256", Checksum: sha}},
-				ControlledAccess: &controlled,
-				AccessMethods: &[]drs.AccessMethod{{
-					Type: "s3",
-					AccessUrl: &struct {
-						Headers *[]string `json:"headers,omitempty"`
-						Url     string    `json:"url"`
-					}{Url: oldURL},
-				}},
-			},
+
+			Id:               "did-legacy-1",
+			Name:             stringPtr("legacy.tsv"),
+			CreatedTime:      now,
+			UpdatedTime:      &now,
+			Checksums:        []objects.Checksum{{Type: "sha256", Checksum: sha}},
+			ControlledAccess: &controlled,
+			AccessMethods: &[]objects.AccessMethod{{
+				Type:      "s3",
+				AccessUrl: &objects.AccessURL{Url: oldURL},
+			}},
 			Authorizations: map[string][]string{"org": {"p1"}},
 		},
 		{
-			DrsObject: drs.DrsObject{
-				Id:               "did-legacy-2",
-				Name:             stringPtr("canonical.tsv"),
-				CreatedTime:      later,
-				UpdatedTime:      &later,
-				Checksums:        []drs.Checksum{{Type: "sha256", Checksum: sha}},
-				ControlledAccess: &controlled,
-				AccessMethods: &[]drs.AccessMethod{{
-					Type: "s3",
-					AccessUrl: &struct {
-						Headers *[]string `json:"headers,omitempty"`
-						Url     string    `json:"url"`
-					}{Url: newURL},
-				}},
-			},
+
+			Id:               "did-legacy-2",
+			Name:             stringPtr("canonical.tsv"),
+			CreatedTime:      later,
+			UpdatedTime:      &later,
+			Checksums:        []objects.Checksum{{Type: "sha256", Checksum: sha}},
+			ControlledAccess: &controlled,
+			AccessMethods: &[]objects.AccessMethod{{
+				Type:      "s3",
+				AccessUrl: &objects.AccessURL{Url: newURL},
+			}},
 			Authorizations: map[string][]string{"org": {"p1"}},
 		},
 	} {
@@ -685,40 +658,32 @@ func TestHandleInternalList_ScopedFiltersKeepProjectPhysicalRecord(t *testing.T)
 	projectBURL := "s3://bucket/project-b"
 	now := time.Date(2026, 9, 4, 12, 0, 0, 0, time.UTC)
 	later := now.Add(time.Minute)
-	for _, obj := range []models.InternalObject{
+	for _, obj := range []objects.Record{
 		{
 			Authorizations: map[string][]string{"org": {"p1"}},
-			DrsObject: drs.DrsObject{
-				Id:               "project-a-did",
-				CreatedTime:      now,
-				UpdatedTime:      &now,
-				Checksums:        []drs.Checksum{{Type: "sha256", Checksum: sha}},
-				ControlledAccess: &[]string{projectAResource},
-				AccessMethods: &[]drs.AccessMethod{{
-					Type: drs.AccessMethodTypeS3,
-					AccessUrl: &struct {
-						Headers *[]string `json:"headers,omitempty"`
-						Url     string    `json:"url"`
-					}{Url: projectAURL},
-				}},
-			},
+
+			Id:               "project-a-did",
+			CreatedTime:      now,
+			UpdatedTime:      &now,
+			Checksums:        []objects.Checksum{{Type: "sha256", Checksum: sha}},
+			ControlledAccess: &[]string{projectAResource},
+			AccessMethods: &[]objects.AccessMethod{{
+				Type:      "s3",
+				AccessUrl: &objects.AccessURL{Url: projectAURL},
+			}},
 		},
 		{
 			Authorizations: map[string][]string{"org": {"p2"}},
-			DrsObject: drs.DrsObject{
-				Id:               "project-b-did",
-				CreatedTime:      later,
-				UpdatedTime:      &later,
-				Checksums:        []drs.Checksum{{Type: "sha256", Checksum: sha}},
-				ControlledAccess: &[]string{projectBResource},
-				AccessMethods: &[]drs.AccessMethod{{
-					Type: drs.AccessMethodTypeS3,
-					AccessUrl: &struct {
-						Headers *[]string `json:"headers,omitempty"`
-						Url     string    `json:"url"`
-					}{Url: projectBURL},
-				}},
-			},
+
+			Id:               "project-b-did",
+			CreatedTime:      later,
+			UpdatedTime:      &later,
+			Checksums:        []objects.Checksum{{Type: "sha256", Checksum: sha}},
+			ControlledAccess: &[]string{projectBResource},
+			AccessMethods: &[]objects.AccessMethod{{
+				Type:      "s3",
+				AccessUrl: &objects.AccessURL{Url: projectBURL},
+			}},
 		},
 	} {
 		if _, err := raw.Exec(`INSERT INTO drs_object (id,size,created_time,updated_time,name,version,description) VALUES (?,0,?,?, '', '', '')`, obj.Id, obj.CreatedTime, *obj.UpdatedTime); err != nil {
@@ -761,15 +726,15 @@ func TestHandleInternalList_ScopedFiltersKeepProjectPhysicalRecord(t *testing.T)
 	}
 }
 
-func TestInternalRecordToInternalObject_NormalizesSHA256(t *testing.T) {
+func TestInternalRecordToRecord_NormalizesSHA256(t *testing.T) {
 	upper := strings.ToUpper(strings.Repeat("ab", 32))
 	hashes := internalapi.HashInfo{"SHA-256": "sha256:" + upper}
-	obj, err := core.InternalRecordToInternalObject(internalapi.InternalRecord{
+	obj, err := core.InternalRecordToRecord(internalapi.InternalRecord{
 		Did:    "normalized-checksum",
 		Hashes: &hashes,
 	}, time.Now().UTC())
 	if err != nil {
-		t.Fatalf("InternalRecordToInternalObject failed: %v", err)
+		t.Fatalf("InternalRecordToRecord failed: %v", err)
 	}
 	if len(obj.Checksums) != 1 || obj.Checksums[0].Type != "sha256" || obj.Checksums[0].Checksum != strings.ToLower(upper) {
 		t.Fatalf("checksum was not canonicalized: %+v", obj.Checksums)
@@ -839,7 +804,7 @@ func TestHandleInternalBulkHashes_HashTypeFiltering(t *testing.T) {
 		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
 	}
 	var payload struct {
-		Results map[string][]models.InternalObject `json:"results"`
+		Results map[string][]objects.Record `json:"results"`
 	}
 	if err := json.NewDecoder(rr.Body).Decode(&payload); err != nil {
 		t.Fatalf("decode response: %v", err)
@@ -1046,21 +1011,21 @@ func TestHandleInternalBulkCreate_AllowsCreateAccessForAnyControlledAccessScope(
 	ctx := indexTestAuthContext(context.Background(), "gen3", true, map[string]map[string]bool{
 		"/programs/test/projects/p1": {"create": true},
 	})
-	obj, err := core.InternalRecordToInternalObject(internalapi.InternalRecord{
+	obj, err := core.InternalRecordToRecord(internalapi.InternalRecord{
 		Did:              "obj-bulk-denied",
 		Size:             common.Ptr(int64(7)),
 		ControlledAccess: &[]string{"/programs/test/projects/p1", "/programs/test/projects/p2"},
 	}, time.Now().UTC())
 	if err != nil {
-		t.Fatalf("InternalRecordToInternalObject failed: %v", err)
+		t.Fatalf("InternalRecordToRecord failed: %v", err)
 	}
 
 	mockDB := &testutils.MockDatabase{}
 	om := core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
-	if err := om.RegisterObjects(ctx, []models.InternalObject{obj}); err != nil {
+	if err := om.RegisterObjects(ctx, []objects.Record{obj}); err != nil {
 		t.Fatalf("expected object manager create policy to allow when one controlled_access scope matches: %v", err)
 	}
-	if _, ok := mockDB.Objects[obj.Id]; !ok {
+	if _, ok := mockDB.Objects[string(obj.Id)]; !ok {
 		t.Fatal("expected object to be registered")
 	}
 }

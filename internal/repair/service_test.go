@@ -8,7 +8,7 @@ import (
 	drsapi "github.com/calypr/syfon/apigen/client/drs"
 	"github.com/calypr/syfon/apigen/client/internalapi"
 	syfoncommon "github.com/calypr/syfon/common"
-	intcommon "github.com/calypr/syfon/internal/common"
+	intobjects "github.com/calypr/syfon/internal/objects"
 )
 
 func TestLegacyAccessURLWithCanonicalSiblingIsRemovable(t *testing.T) {
@@ -124,11 +124,11 @@ func TestPathStyleAccessURLWithoutCanonicalSiblingIsRewritable(t *testing.T) {
 
 func TestMissingControlledAccessRecoverableFromDeterministicScope(t *testing.T) {
 	resource, _ := syfoncommon.ResourcePath("HTAN_INT", "BForePC")
-	did, err := intcommon.MintObjectIDFromChecksum("abc", []string{resource})
+	did, err := intobjects.MintRecordIDFromChecksum("abc", []string{resource})
 	if err != nil {
 		t.Fatalf("mint did: %v", err)
 	}
-	rec := recordWithMethods(t, did, "abc", nil, []string{"s3://bforepc/bforepc-prod/" + did + "/abc"})
+	rec := recordWithMethods(t, string(did), "abc", nil, []string{"s3://bforepc/bforepc-prod/" + string(did) + "/abc"})
 	svc := NewService(
 		&fakeIndex{records: []internalapi.InternalRecord{rec}},
 		fakeBucketsForScope(t, "HTAN_INT", "BForePC", "s3://bforepc/bforepc-prod"),
@@ -181,11 +181,11 @@ func TestDuplicateSHAReportedWithoutAutofix(t *testing.T) {
 
 func TestApplyUpdatesAccessMethodsAndControlledAccess(t *testing.T) {
 	resource, _ := syfoncommon.ResourcePath("HTAN_INT", "BForePC")
-	did, err := intcommon.MintObjectIDFromChecksum("abc", []string{resource})
+	did, err := intobjects.MintRecordIDFromChecksum("abc", []string{resource})
 	if err != nil {
 		t.Fatalf("mint did: %v", err)
 	}
-	rec := recordWithMethods(t, did, "abc", nil, []string{"s3://bforepc/META/file.ndjson"})
+	rec := recordWithMethods(t, string(did), "abc", nil, []string{"s3://bforepc/META/file.ndjson"})
 	idx := &fakeIndex{records: []internalapi.InternalRecord{rec}}
 	svc := NewService(idx, fakeBucketsForScope(t, "HTAN_INT", "BForePC", "s3://bforepc/bforepc-prod"), &fakeStorageInspector{})
 
@@ -203,7 +203,7 @@ func TestApplyUpdatesAccessMethodsAndControlledAccess(t *testing.T) {
 	if updated.ControlledAccess == nil || len(*updated.ControlledAccess) != 1 || (*updated.ControlledAccess)[0] != resource {
 		t.Fatalf("expected controlled access backfill, got %#v", updated.ControlledAccess)
 	}
-	if got := accessMethodURLs(updated.AccessMethods); len(got) != 1 || got[0] != "s3://bforepc/bforepc-prod/"+did+"/abc" {
+	if got := accessMethodURLs(updated.AccessMethods); len(got) != 1 || got[0] != "s3://bforepc/bforepc-prod/"+string(did)+"/abc" {
 		t.Fatalf("unexpected access methods: %#v", got)
 	}
 }

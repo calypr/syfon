@@ -8,6 +8,8 @@ import (
 	apimiddleware "github.com/calypr/syfon/internal/api/middleware"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/core"
+	httpdrs "github.com/calypr/syfon/internal/httpapi/drs"
+	"github.com/calypr/syfon/internal/objects"
 	"github.com/gofiber/fiber/v3"
 )
 
@@ -27,7 +29,11 @@ func handleUploadRequestFiber(om *core.ObjectManager) fiber.Handler {
 		}
 		for _, item := range req.Requests {
 			key := strings.TrimSpace(item.Name)
-			if oid, ok := common.CanonicalSHA256(item.Checksums); ok && oid != "" {
+			checksums := make([]objects.Checksum, len(item.Checksums))
+			for i, checksum := range item.Checksums {
+				checksums[i] = objects.Checksum{Type: checksum.Type, Checksum: checksum.Checksum}
+			}
+			if oid, ok := objects.CanonicalSHA256(checksums); ok && oid != "" {
 				key = oid
 			}
 			if key == "" {
@@ -66,7 +72,7 @@ func handleUpdateAccessMethodsFiber(om *core.ObjectManager) fiber.Handler {
 			if err := c.Bind().JSON(&body); err != nil || len(body.AccessMethods) == 0 {
 				return c.Status(fiber.StatusBadRequest).JSON(drs.Error{Msg: common.Ptr("Invalid request body")})
 			}
-			if err := om.UpdateObjectAccessMethods(c.Context(), objectID, body.AccessMethods); err != nil {
+			if err := om.UpdateObjectAccessMethods(c.Context(), objectID, httpdrs.FromGeneratedAccessMethods(body.AccessMethods)); err != nil {
 				return apiutil.HandleError(c, err)
 			}
 			obj, err := om.GetObject(c.Context(), objectID, "read")
@@ -94,7 +100,7 @@ func handleUpdateAccessMethodsFiber(om *core.ObjectManager) fiber.Handler {
 			updates[id] = update.AccessMethods
 		}
 
-		if err := om.BulkUpdateAccessMethods(c.Context(), updates); err != nil {
+		if err := om.BulkUpdateAccessMethods(c.Context(), httpdrs.FromGeneratedAccessMethodMap(updates)); err != nil {
 			return apiutil.HandleError(c, err)
 		}
 

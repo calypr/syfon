@@ -14,7 +14,8 @@ import (
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/db"
 	"github.com/calypr/syfon/internal/faults"
-	"github.com/calypr/syfon/internal/models"
+
+	objectdomain "github.com/calypr/syfon/internal/objects"
 )
 
 const maxDeniedAccessResources = 25
@@ -22,9 +23,9 @@ const maxDeniedAccessResources = 25
 // RegisterBulk saves multiple internal objects as a single logical operation.
 func (m *ObjectManager) RegisterBulk(ctx context.Context, candidates []drs.DrsObjectCandidate) (int, error) {
 	now := time.Now().UTC()
-	toRegister := make([]models.InternalObject, 0, len(candidates))
+	toRegister := make([]objectdomain.Record, 0, len(candidates))
 	for _, c := range candidates {
-		obj, err := CandidateToInternalObject(c, now)
+		obj, err := CandidateToRecord(c, now)
 		if err != nil {
 			return 0, err
 		}
@@ -118,9 +119,9 @@ func (m *ObjectManager) deletablePhysicalObjectIDsForBulk(ctx context.Context, i
 	if err != nil {
 		return nil, err
 	}
-	byID := make(map[string]*models.InternalObject, len(objects))
+	byID := make(map[string]*objectdomain.Record, len(objects))
 	for i := range objects {
-		byID[objects[i].Id] = &objects[i]
+		byID[string(objects[i].Id)] = &objects[i]
 	}
 
 	toDelete := make([]string, 0, len(ids))
@@ -156,7 +157,7 @@ func (m *ObjectManager) deletablePhysicalObjectIDsForBulk(ctx context.Context, i
 	return toDelete, nil
 }
 
-func (m *ObjectManager) UpdateObjectAccessMethods(ctx context.Context, objectID string, accessMethods []drs.AccessMethod) error {
+func (m *ObjectManager) UpdateObjectAccessMethods(ctx context.Context, objectID string, accessMethods []objectdomain.AccessMethod) error {
 	obj, err := m.db.GetObject(ctx, objectID)
 	if err != nil {
 		return err
@@ -167,7 +168,7 @@ func (m *ObjectManager) UpdateObjectAccessMethods(ctx context.Context, objectID 
 	return m.db.UpdateObjectAccessMethods(ctx, objectID, accessMethods)
 }
 
-func (m *ObjectManager) BulkUpdateAccessMethods(ctx context.Context, updates map[string][]drs.AccessMethod) error {
+func (m *ObjectManager) BulkUpdateAccessMethods(ctx context.Context, updates map[string][]objectdomain.AccessMethod) error {
 	if len(updates) == 0 {
 		return nil
 	}
@@ -180,9 +181,9 @@ func (m *ObjectManager) BulkUpdateAccessMethods(ctx context.Context, updates map
 	if err != nil {
 		return err
 	}
-	byID := make(map[string]*models.InternalObject, len(objects))
+	byID := make(map[string]*objectdomain.Record, len(objects))
 	for i := range objects {
-		byID[objects[i].Id] = &objects[i]
+		byID[string(objects[i].Id)] = &objects[i]
 	}
 	for _, objectID := range ids {
 		obj, ok := byID[objectID]
@@ -196,7 +197,7 @@ func (m *ObjectManager) BulkUpdateAccessMethods(ctx context.Context, updates map
 	return m.db.BulkUpdateAccessMethods(ctx, updates)
 }
 
-func (m *ObjectManager) RemoveObjectControlledAccess(ctx context.Context, objectID, resource string) (*models.InternalObject, error) {
+func (m *ObjectManager) RemoveObjectControlledAccess(ctx context.Context, objectID, resource string) (*objectdomain.Record, error) {
 	obj, err := m.db.GetObject(ctx, objectID)
 	if err != nil {
 		return nil, err
@@ -233,7 +234,7 @@ func (m *ObjectManager) RemoveObjectControlledAccess(ctx context.Context, object
 	return updated, nil
 }
 
-func (m *ObjectManager) RegisterObjects(ctx context.Context, objs []models.InternalObject) error {
+func (m *ObjectManager) RegisterObjects(ctx context.Context, objs []objectdomain.Record) error {
 	if err := m.validateExistingContentRead(ctx, objs); err != nil {
 		return err
 	}
@@ -243,10 +244,10 @@ func (m *ObjectManager) RegisterObjects(ctx context.Context, objs []models.Inter
 	return m.db.RegisterObjects(ctx, objs)
 }
 
-func (m *ObjectManager) validateExistingContentRead(ctx context.Context, objs []models.InternalObject) error {
+func (m *ObjectManager) validateExistingContentRead(ctx context.Context, objs []objectdomain.Record) error {
 	seen := make(map[string]struct{})
 	for i := range objs {
-		sha, ok := common.CanonicalSHA256(objs[i].Checksums)
+		sha, ok := objectdomain.CanonicalSHA256(objs[i].Checksums)
 		if !ok || sha == "" {
 			continue
 		}
@@ -281,7 +282,7 @@ func (m *ObjectManager) CollapseProjectChecksumDuplicates(ctx context.Context, o
 		return 0, err
 	}
 
-	grouped := make(map[string][]models.InternalObject)
+	grouped := make(map[string][]objectdomain.Record)
 	for _, obj := range objects {
 		key, ok := canonicalProjectChecksumKey(&obj, "")
 		if !ok {
@@ -290,7 +291,7 @@ func (m *ObjectManager) CollapseProjectChecksumDuplicates(ctx context.Context, o
 		grouped[key] = append(grouped[key], cloneObject(obj))
 	}
 
-	merged := make([]models.InternalObject, 0, len(grouped))
+	merged := make([]objectdomain.Record, 0, len(grouped))
 	aliasMap := make(map[string]string)
 	toDelete := make([]string, 0)
 	keys := make([]string, 0, len(grouped))
@@ -309,8 +310,8 @@ func (m *ObjectManager) CollapseProjectChecksumDuplicates(ctx context.Context, o
 			if obj.Id == canonical.Id {
 				continue
 			}
-			aliasMap[obj.Id] = canonical.Id
-			toDelete = append(toDelete, obj.Id)
+			aliasMap[string(obj.Id)] = string(canonical.Id)
+			toDelete = append(toDelete, string(obj.Id))
 		}
 	}
 
@@ -331,7 +332,7 @@ func (m *ObjectManager) CollapseProjectChecksumDuplicates(ctx context.Context, o
 	return len(aliasMap), nil
 }
 
-func (m *ObjectManager) canonicalizeRegistrationObjects(ctx context.Context, objs []models.InternalObject) ([]models.InternalObject, map[string]string, error) {
+func (m *ObjectManager) canonicalizeRegistrationObjects(ctx context.Context, objs []objectdomain.Record) ([]objectdomain.Record, map[string]string, error) {
 	if len(objs) == 0 {
 		return nil, nil, nil
 	}
@@ -339,7 +340,7 @@ func (m *ObjectManager) canonicalizeRegistrationObjects(ctx context.Context, obj
 	checksums := make([]string, 0, len(objs))
 	seenChecksums := make(map[string]struct{}, len(objs))
 	for _, obj := range objs {
-		if sha, ok := common.CanonicalSHA256(obj.Checksums); ok {
+		if sha, ok := objectdomain.CanonicalSHA256(obj.Checksums); ok {
 			if _, seen := seenChecksums[sha]; seen {
 				continue
 			}
@@ -355,13 +356,13 @@ func (m *ObjectManager) canonicalizeRegistrationObjects(ctx context.Context, obj
 
 	type registrationGroup struct {
 		existingCount int
-		objects       []models.InternalObject
+		objects       []objectdomain.Record
 	}
 	groups := make(map[string]*registrationGroup)
-	passthrough := make([]models.InternalObject, 0)
+	passthrough := make([]objectdomain.Record, 0)
 
 	for _, obj := range objs {
-		sha, ok := common.CanonicalSHA256(obj.Checksums)
+		sha, ok := objectdomain.CanonicalSHA256(obj.Checksums)
 		if !ok {
 			passthrough = append(passthrough, cloneObject(obj))
 			continue
@@ -393,7 +394,7 @@ func (m *ObjectManager) canonicalizeRegistrationObjects(ctx context.Context, obj
 	}
 	sort.Strings(keys)
 
-	merged := make([]models.InternalObject, 0, len(keys)+len(passthrough))
+	merged := make([]objectdomain.Record, 0, len(keys)+len(passthrough))
 	aliasMap := make(map[string]string)
 
 	for _, key := range keys {
@@ -423,17 +424,17 @@ func (m *ObjectManager) canonicalizeRegistrationObjects(ctx context.Context, obj
 
 		collapsed := collapseCanonicalGroup(group)
 		collapsed.Id = canonical.Id
-		collapsed.SelfUri = "drs://" + canonical.Id
+		collapsed.SelfUri = "drs://" + string(canonical.Id)
 		collapsed.CreatedTime = canonical.CreatedTime
 		collapsed.Name = latest.Name
-		collapsed.NameAliases = common.NormalizeNameAliases(common.StringVal(collapsed.Name), append(collapsed.NameAliases, common.StringVal(canonical.Name)))
+		collapsed.NameAliases = objectdomain.NormalizeNameAliases(common.StringVal(collapsed.Name), append(collapsed.NameAliases, common.StringVal(canonical.Name)))
 		merged = append(merged, collapsed)
 
 		for _, obj := range group {
-			if obj.Id == collapsed.Id || strings.TrimSpace(obj.Id) == "" {
+			if obj.Id == collapsed.Id || strings.TrimSpace(string(obj.Id)) == "" {
 				continue
 			}
-			aliasMap[obj.Id] = collapsed.Id
+			aliasMap[string(obj.Id)] = string(collapsed.Id)
 		}
 	}
 
@@ -441,7 +442,7 @@ func (m *ObjectManager) canonicalizeRegistrationObjects(ctx context.Context, obj
 	return merged, aliasMap, nil
 }
 
-func (m *ObjectManager) ReplaceObjects(ctx context.Context, objs []models.InternalObject) error {
+func (m *ObjectManager) ReplaceObjects(ctx context.Context, objs []objectdomain.Record) error {
 	return m.db.ReplaceObjects(ctx, objs)
 }
 
@@ -472,7 +473,7 @@ func (m *ObjectManager) DeleteObjectsByChecksums(ctx context.Context, hashes []s
 				if err := m.requireAllObjectMethod(ctx, &objects[i], objectMethodDelete); err != nil {
 					continue
 				}
-				authorized = append(authorized, objects[i].Id)
+				authorized = append(authorized, string(objects[i].Id))
 			}
 			if len(authorized) == 0 {
 				return 0, nil
@@ -492,7 +493,7 @@ func (m *ObjectManager) DeleteObjectsByChecksums(ctx context.Context, hashes []s
 	toDelete := make([]string, 0)
 	for _, hash := range hashes {
 		for _, obj := range objectsByChecksum[hash] {
-			if _, ok := seen[obj.Id]; ok {
+			if _, ok := seen[string(obj.Id)]; ok {
 				continue
 			}
 			if !m.hasObjectMethod(ctx, &obj, objectMethodDelete) {
@@ -501,8 +502,8 @@ func (m *ObjectManager) DeleteObjectsByChecksums(ctx context.Context, hashes []s
 			if err := m.requireAllObjectMethod(ctx, &obj, objectMethodDelete); err != nil {
 				continue
 			}
-			seen[obj.Id] = struct{}{}
-			toDelete = append(toDelete, obj.Id)
+			seen[string(obj.Id)] = struct{}{}
+			toDelete = append(toDelete, string(obj.Id))
 		}
 	}
 	if len(toDelete) == 0 {
@@ -542,7 +543,7 @@ func (m *ObjectManager) deletableObjectIDsForMethod(ctx context.Context, ids []s
 				continue
 			}
 		}
-		toDelete = append(toDelete, obj.Id)
+		toDelete = append(toDelete, string(obj.Id))
 	}
 	return toDelete, nil
 }
@@ -568,14 +569,14 @@ func (m *ObjectManager) requireScopeMethod(ctx context.Context, organization, pr
 	return m.RequireObjectResources(ctx, method, []string{resource})
 }
 
-func (m *ObjectManager) requireObjectMethod(ctx context.Context, obj *models.InternalObject, method string) error {
+func (m *ObjectManager) requireObjectMethod(ctx context.Context, obj *objectdomain.Record, method string) error {
 	if m.hasObjectMethod(ctx, obj, method) {
 		return nil
 	}
 	return faults.ErrUnauthorized
 }
 
-func (m *ObjectManager) requireAllObjectMethod(ctx context.Context, obj *models.InternalObject, method string) error {
+func (m *ObjectManager) requireAllObjectMethod(ctx context.Context, obj *objectdomain.Record, method string) error {
 	resources := ObjectAccessResources(obj)
 	if len(resources) == 0 {
 		return m.RequireObjectResources(ctx, method, resources)
@@ -586,7 +587,7 @@ func (m *ObjectManager) requireAllObjectMethod(ctx context.Context, obj *models.
 	return faults.ErrUnauthorized
 }
 
-func (m *ObjectManager) hasObjectMethod(ctx context.Context, obj *models.InternalObject, method string) bool {
+func (m *ObjectManager) hasObjectMethod(ctx context.Context, obj *objectdomain.Record, method string) bool {
 	method = strings.TrimSpace(method)
 	if method == "" {
 		return true
@@ -600,7 +601,7 @@ func (m *ObjectManager) hasObjectMethod(ctx context.Context, obj *models.Interna
 	return access.HasObjectMethodAccess(ctx, method, ObjectAccessResources(obj))
 }
 
-func (m *ObjectManager) bulkObjectMethodError(ctx context.Context, objs []models.InternalObject, method string) error {
+func (m *ObjectManager) bulkObjectMethodError(ctx context.Context, objs []objectdomain.Record, method string) error {
 	resources := make(map[string]struct{})
 	var firstDeniedID string
 	deniedRecords := 0
@@ -610,7 +611,7 @@ func (m *ObjectManager) bulkObjectMethodError(ctx context.Context, objs []models
 		}
 		deniedRecords++
 		if firstDeniedID == "" {
-			firstDeniedID = objs[i].Id
+			firstDeniedID = string(objs[i].Id)
 		}
 		for _, resource := range ObjectAccessResources(&objs[i]) {
 			if strings.TrimSpace(resource) == "" {

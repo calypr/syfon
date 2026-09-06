@@ -9,9 +9,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/access"
-	"github.com/calypr/syfon/internal/models"
+
+	httpdrs "github.com/calypr/syfon/internal/httpapi/drs"
+	"github.com/calypr/syfon/internal/httpapi/records"
+	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/requestmeta"
 )
 
@@ -41,19 +43,19 @@ func TestAuditS3CredentialAccess_LogsSuccessAndError(t *testing.T) {
 	}
 }
 
-func TestInternalObjectExternal(t *testing.T) {
-	obj := models.InternalObject{DrsObject: drs.DrsObject{Id: "obj-1", Name: Ptr("n")}}
-	ext := obj.External()
+func TestRecordGeneratedProjection(t *testing.T) {
+	obj := objects.Record{Id: "obj-1", Name: Ptr("n")}
+	ext := httpdrs.ToGenerated(obj)
 	if ext.Id != "obj-1" || StringVal(ext.Name) != "n" {
 		t.Fatalf("unexpected external object: %+v", ext)
 	}
 }
 
-func TestInternalObjectJSONAliases(t *testing.T) {
+func TestRecordJSONAliases(t *testing.T) {
 	raw := []byte(`{"did":"obj-1","size":7,"controlled_access":["https://calypr.org/program/test/project/proj"],"authorizations":{"legacy":[]},"hashes":{"sha256":"abc"},"extra":"keep-me"}`)
 
-	var obj models.InternalObject
-	if err := json.Unmarshal(raw, &obj); err != nil {
+	obj, err := records.Decode(raw)
+	if err != nil {
 		t.Fatalf("unmarshal failed: %v", err)
 	}
 
@@ -69,7 +71,7 @@ func TestInternalObjectJSONAliases(t *testing.T) {
 	if len(obj.Checksums) != 1 || obj.Checksums[0].Type != "sha256" || obj.Checksums[0].Checksum != "abc" {
 		t.Fatalf("expected hashes to map to checksums, got %+v", obj.Checksums)
 	}
-	out, err := json.Marshal(obj)
+	out, err := records.Encode(obj)
 	if err != nil {
 		t.Fatalf("marshal failed: %v", err)
 	}

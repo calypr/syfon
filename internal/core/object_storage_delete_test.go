@@ -15,6 +15,8 @@ import (
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/faults"
 	"github.com/calypr/syfon/internal/models"
+
+	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/testutils"
 )
 
@@ -91,7 +93,7 @@ func TestBulkDeleteObjectsWithStorageRejectsWithoutSideEffects(t *testing.T) {
 	restore := replaceS3ObjectDeleterForTest(deleter)
 	defer restore()
 
-	accessMethods := func(rawURL string) *[]drs.AccessMethod {
+	accessMethodsDRS := func(rawURL string) *[]drs.AccessMethod {
 		return &[]drs.AccessMethod{{
 			Type: drs.AccessMethodTypeS3,
 			AccessUrl: &struct {
@@ -102,9 +104,9 @@ func TestBulkDeleteObjectsWithStorageRejectsWithoutSideEffects(t *testing.T) {
 	}
 	db := &testutils.MockDatabase{
 		Objects: map[string]*drs.DrsObject{
-			"obj-1": {Id: "obj-1", AccessMethods: accessMethods("s3://bucket/path/a.txt")},
-			"obj-2": {Id: "obj-2", AccessMethods: accessMethods("s3://bucket/path/b.txt")},
-			"obj-3": {Id: "obj-3", AccessMethods: accessMethods("s3://bucket/path/a.txt")},
+			"obj-1": {Id: "obj-1", AccessMethods: accessMethodsDRS("s3://bucket/path/a.txt")},
+			"obj-2": {Id: "obj-2", AccessMethods: accessMethodsDRS("s3://bucket/path/b.txt")},
+			"obj-3": {Id: "obj-3", AccessMethods: accessMethodsDRS("s3://bucket/path/a.txt")},
 		},
 		Credentials: map[string]models.S3Credential{
 			"bucket": {
@@ -188,19 +190,15 @@ func TestStorageTargetsForScopedObjectPreserveStoredLocation(t *testing.T) {
 		},
 	}, &capturingURLManager{})
 
-	obj := &models.InternalObject{
-		DrsObject: drs.DrsObject{
-			Id:               "f781273b-52eb-5ac2-a484-775235eef303",
-			ControlledAccess: &[]string{"/organization/syfon/project/e2e"},
-			Checksums:        []drs.Checksum{{Type: "sha256", Checksum: checksum}},
-			AccessMethods: &[]drs.AccessMethod{{
-				Type: drs.AccessMethodTypeS3,
-				AccessUrl: &struct {
-					Headers *[]string `json:"headers,omitempty"`
-					Url     string    `json:"url"`
-				}{Url: "s3://objects/f781273b-52eb-5ac2-a484-775235eef303"},
-			}},
-		},
+	obj := &objects.Record{
+
+		Id:               "f781273b-52eb-5ac2-a484-775235eef303",
+		ControlledAccess: &[]string{"/organization/syfon/project/e2e"},
+		Checksums:        []objects.Checksum{{Type: "sha256", Checksum: checksum}},
+		AccessMethods: &[]objects.AccessMethod{{
+			Type:      "s3",
+			AccessUrl: &objects.AccessURL{Url: "s3://objects/f781273b-52eb-5ac2-a484-775235eef303"},
+		}},
 	}
 
 	targets, err := om.storageTargetsForObject(context.Background(), obj)

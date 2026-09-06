@@ -18,7 +18,8 @@ import (
 	apimiddleware "github.com/calypr/syfon/internal/api/middleware"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/faults"
-	"github.com/calypr/syfon/internal/models"
+
+	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/repair"
 	"github.com/gofiber/fiber/v3"
 )
@@ -108,13 +109,13 @@ func (a scopeRepairIndexAdapter) List(ctx context.Context, opts repair.ListRecor
 	}
 	records := make([]clientinternalapi.InternalRecord, 0, len(objects))
 	for _, obj := range objects {
-		records = append(records, clientRecordFromServer(core.InternalObjectToInternalRecord(obj)))
+		records = append(records, clientRecordFromServer(core.RecordToInternalRecord(obj)))
 	}
 	return clientinternalapi.ListRecordsResponse{Records: &records}, nil
 }
 
 func (a scopeRepairIndexAdapter) Update(ctx context.Context, did string, rec clientinternalapi.InternalRecord) (clientinternalapi.InternalRecordResponse, error) {
-	update, err := core.InternalRecordToInternalObject(serverRecordFromClient(rec), time.Now().UTC())
+	update, err := core.InternalRecordToRecord(serverRecordFromClient(rec), time.Now().UTC())
 	if err != nil {
 		return clientinternalapi.InternalRecordResponse{}, err
 	}
@@ -122,14 +123,14 @@ func (a scopeRepairIndexAdapter) Update(ctx context.Context, did string, rec cli
 	if err != nil {
 		return clientinternalapi.InternalRecordResponse{}, err
 	}
-	merged, err := core.MergeInternalObjectUpdate(*existing, update, did, time.Now().UTC())
+	merged, err := core.MergeRecordUpdate(*existing, update, did, time.Now().UTC())
 	if err != nil {
 		return clientinternalapi.InternalRecordResponse{}, err
 	}
-	if err := a.om.ReplaceObjects(ctx, []models.InternalObject{merged}); err != nil {
+	if err := a.om.ReplaceObjects(ctx, []objects.Record{merged}); err != nil {
 		return clientinternalapi.InternalRecordResponse{}, err
 	}
-	return clientRecordResponseFromServer(core.InternalObjectToInternalRecordResponse(merged)), nil
+	return clientRecordResponseFromServer(core.RecordToInternalRecordResponse(merged)), nil
 }
 
 type scopeRepairBucketsAdapter struct {

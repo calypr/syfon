@@ -10,7 +10,8 @@ import (
 	sycommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/db/sqlite"
 	"github.com/calypr/syfon/internal/faults"
-	"github.com/calypr/syfon/internal/models"
+
+	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/testutils"
 )
 
@@ -29,16 +30,15 @@ func TestBulkOverwriteObjects_ReplacesProjectChecksumSibling(t *testing.T) {
 		ObjectAuthz: map[string]map[string][]string{"target-did": {"org": {"project"}}},
 	}}
 	om := NewObjectManager(db, &capturingURLManager{})
-	candidate := models.InternalObject{
-		DrsObject: drs.DrsObject{
-			Id:               "source-did",
-			Name:             &newName,
-			Checksums:        []drs.Checksum{{Type: "sha256", Checksum: sha}},
-			ControlledAccess: &[]string{resource},
-		},
-		Authorizations: map[string][]string{"org": {"project"}},
+	candidate := objects.Record{
+
+		Id:               "source-did",
+		Name:             &newName,
+		Checksums:        []objects.Checksum{{Type: "sha256", Checksum: sha}},
+		ControlledAccess: &[]string{resource},
+		Authorizations:   map[string][]string{"org": {"project"}},
 	}
-	result, err := om.BulkOverwriteObjects(buildGen3Context(map[string]map[string]bool{resource: {"update": true}}), "org", "project", []models.InternalObject{candidate})
+	result, err := om.BulkOverwriteObjects(buildGen3Context(map[string]map[string]bool{resource: {"update": true}}), "org", "project", []objects.Record{candidate})
 	if err != nil {
 		t.Fatalf("BulkOverwriteObjects returned error: %v", err)
 	}
@@ -60,9 +60,9 @@ func TestBulkOverwriteObjects_ValidationAndConflicts(t *testing.T) {
 		t.Fatal(err)
 	}
 	sha := "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
-	candidate := func(id string) models.InternalObject {
-		return models.InternalObject{
-			DrsObject:      drs.DrsObject{Id: id, Checksums: []drs.Checksum{{Type: "sha256", Checksum: sha}}, ControlledAccess: &[]string{resource}},
+	candidate := func(id string) objects.Record {
+		return objects.Record{
+			Id: objects.RecordID(id), Checksums: []objects.Checksum{{Type: "sha256", Checksum: sha}}, ControlledAccess: &[]string{resource},
 			Authorizations: map[string][]string{"org": {"project"}},
 		}
 	}
@@ -70,20 +70,20 @@ func TestBulkOverwriteObjects_ValidationAndConflicts(t *testing.T) {
 	tests := []struct {
 		name       string
 		db         *testutils.MockDatabase
-		candidates []models.InternalObject
+		candidates []objects.Record
 		want       string
 		conflict   bool
 	}{
-		{name: "missing did", db: &testutils.MockDatabase{}, candidates: []models.InternalObject{candidate(" ")}, want: "did is required"},
-		{name: "duplicate source did", db: &testutils.MockDatabase{}, candidates: []models.InternalObject{candidate("same"), candidate("same")}, want: "duplicate source did", conflict: true},
-		{name: "missing target scope", db: &testutils.MockDatabase{}, candidates: []models.InternalObject{{DrsObject: drs.DrsObject{Id: "did"}}}, want: "must include target project"},
+		{name: "missing did", db: &testutils.MockDatabase{}, candidates: []objects.Record{candidate(" ")}, want: "did is required"},
+		{name: "duplicate source did", db: &testutils.MockDatabase{}, candidates: []objects.Record{candidate("same"), candidate("same")}, want: "duplicate source did", conflict: true},
+		{name: "missing target scope", db: &testutils.MockDatabase{}, candidates: []objects.Record{{Id: "did"}}, want: "must include target project"},
 		{
 			name: "did exists outside project",
 			db: &testutils.MockDatabase{
 				Objects:     map[string]*drs.DrsObject{"did": {Id: "did"}},
 				ObjectAuthz: map[string]map[string][]string{"did": {"org": {"other"}}},
 			},
-			candidates: []models.InternalObject{candidate("did")}, want: "outside project", conflict: true,
+			candidates: []objects.Record{candidate("did")}, want: "outside project", conflict: true,
 		},
 		{
 			name: "ambiguous checksum",
@@ -94,7 +94,7 @@ func TestBulkOverwriteObjects_ValidationAndConflicts(t *testing.T) {
 				},
 				ObjectAuthz: map[string]map[string][]string{"one": {"org": {"project"}}, "two": {"org": {"project"}}},
 			},
-			candidates: []models.InternalObject{candidate("source")}, want: "multiple records", conflict: true,
+			candidates: []objects.Record{candidate("source")}, want: "multiple records", conflict: true,
 		},
 	}
 
@@ -131,11 +131,11 @@ func TestBulkOverwriteObjects_DoesNotMatchChecksumOutsideProject(t *testing.T) {
 		ObjectAuthz: map[string]map[string][]string{"other-project": {"org": {"other"}}},
 	}}
 	om := NewObjectManager(db, &capturingURLManager{})
-	candidate := models.InternalObject{
-		DrsObject:      drs.DrsObject{Id: "source-did", Checksums: []drs.Checksum{{Type: "sha256", Checksum: sha}}, ControlledAccess: &[]string{resource}},
+	candidate := objects.Record{
+		Id: "source-did", Checksums: []objects.Checksum{{Type: "sha256", Checksum: sha}}, ControlledAccess: &[]string{resource},
 		Authorizations: map[string][]string{"org": {"project"}},
 	}
-	result, err := om.BulkOverwriteObjects(context.Background(), "org", "project", []models.InternalObject{candidate})
+	result, err := om.BulkOverwriteObjects(context.Background(), "org", "project", []objects.Record{candidate})
 	if err != nil {
 		t.Fatalf("BulkOverwriteObjects returned error: %v", err)
 	}
@@ -155,39 +155,37 @@ func TestBulkOverwriteObjects_RejectsAliasTarget(t *testing.T) {
 	}
 	sha := "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 	originalName := "original"
-	canonical := models.InternalObject{
+	canonical := objects.Record{
 		Authorizations: map[string][]string{"org": {"project"}},
-		DrsObject: drs.DrsObject{
-			Id:               "canonical-did",
-			Name:             &originalName,
-			Checksums:        []drs.Checksum{{Type: "sha256", Checksum: sha}},
-			ControlledAccess: &[]string{resource},
-		},
+
+		Id:               "canonical-did",
+		Name:             &originalName,
+		Checksums:        []objects.Checksum{{Type: "sha256", Checksum: sha}},
+		ControlledAccess: &[]string{resource},
 	}
 	if err := database.CreateObject(context.Background(), &canonical); err != nil {
 		t.Fatalf("CreateObject failed: %v", err)
 	}
-	if err := database.CreateObjectAlias(context.Background(), "alias-did", canonical.Id); err != nil {
+	if err := database.CreateObjectAlias(context.Background(), "alias-did", string(canonical.Id)); err != nil {
 		t.Fatalf("CreateObjectAlias failed: %v", err)
 	}
 
 	replacementName := "replacement"
-	candidate := models.InternalObject{
+	candidate := objects.Record{
 		Authorizations: map[string][]string{"org": {"project"}},
-		DrsObject: drs.DrsObject{
-			Id:               "alias-did",
-			Name:             &replacementName,
-			Checksums:        []drs.Checksum{{Type: "sha256", Checksum: sha}},
-			ControlledAccess: &[]string{resource},
-		},
+
+		Id:               "alias-did",
+		Name:             &replacementName,
+		Checksums:        []objects.Checksum{{Type: "sha256", Checksum: sha}},
+		ControlledAccess: &[]string{resource},
 	}
 	om := NewObjectManager(database, nil)
-	_, err = om.BulkOverwriteObjects(context.Background(), "org", "project", []models.InternalObject{candidate})
+	_, err = om.BulkOverwriteObjects(context.Background(), "org", "project", []objects.Record{candidate})
 	if !errors.Is(err, ErrBulkOverwriteConflict) || !strings.Contains(err.Error(), "alias") {
 		t.Fatalf("expected alias conflict, got %v", err)
 	}
 
-	got, err := database.GetObject(context.Background(), canonical.Id)
+	got, err := database.GetObject(context.Background(), string(canonical.Id))
 	if err != nil {
 		t.Fatalf("GetObject failed: %v", err)
 	}
@@ -206,12 +204,11 @@ func TestBulkOverwriteObjects_RequiresTargetProjectPermission(t *testing.T) {
 		t.Fatal(err)
 	}
 	resources := []string{targetResource, allowedResource}
-	candidate := models.InternalObject{
+	candidate := objects.Record{
 		Authorizations: map[string][]string{"org": {"target", "allowed"}},
-		DrsObject: drs.DrsObject{
-			Id:               "new-did",
-			ControlledAccess: &resources,
-		},
+
+		Id:               "new-did",
+		ControlledAccess: &resources,
 	}
 	t.Run("create", func(t *testing.T) {
 		om := NewObjectManager(&coreTestDB{MockDatabase: &testutils.MockDatabase{}}, nil)
@@ -219,7 +216,7 @@ func TestBulkOverwriteObjects_RequiresTargetProjectPermission(t *testing.T) {
 			allowedResource: {"create": true},
 		})
 
-		_, err := om.BulkOverwriteObjects(ctx, "org", "target", []models.InternalObject{candidate})
+		_, err := om.BulkOverwriteObjects(ctx, "org", "target", []objects.Record{candidate})
 		if !errors.Is(err, faults.ErrUnauthorized) {
 			t.Fatalf("expected target-project authorization failure, got %v", err)
 		}
@@ -228,10 +225,10 @@ func TestBulkOverwriteObjects_RequiresTargetProjectPermission(t *testing.T) {
 	t.Run("update", func(t *testing.T) {
 		database := &coreTestDB{MockDatabase: &testutils.MockDatabase{
 			Objects: map[string]*drs.DrsObject{
-				candidate.Id: {Id: candidate.Id},
+				string(candidate.Id): {Id: string(candidate.Id)},
 			},
 			ObjectAuthz: map[string]map[string][]string{
-				candidate.Id: {"org": {"target", "allowed"}},
+				string(candidate.Id): {"org": {"target", "allowed"}},
 			},
 		}}
 		om := NewObjectManager(database, nil)
@@ -239,7 +236,7 @@ func TestBulkOverwriteObjects_RequiresTargetProjectPermission(t *testing.T) {
 			allowedResource: {"update": true},
 		})
 
-		_, err := om.BulkOverwriteObjects(ctx, "org", "target", []models.InternalObject{candidate})
+		_, err := om.BulkOverwriteObjects(ctx, "org", "target", []objects.Record{candidate})
 		if !errors.Is(err, faults.ErrUnauthorized) {
 			t.Fatalf("expected target-project authorization failure, got %v", err)
 		}
