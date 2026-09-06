@@ -12,7 +12,6 @@ import (
 	syfoncommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/buckets"
-	"github.com/calypr/syfon/internal/db"
 	"github.com/calypr/syfon/internal/faults"
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/storage/address"
@@ -22,14 +21,18 @@ import (
 // bucketCatalog owns bucket credentials, scopes, and the cache/invalidation
 // rules that keep those records in sync with storage signers.
 type bucketCatalog struct {
-	db                     db.CredentialStore
+	credentialReader       buckets.CredentialReader
+	credentialAdmin        buckets.CredentialAdmin
+	scopeStore             buckets.ScopeStore
 	bucketScopeCache       *bucketScopeCache
 	signerCacheInvalidator urlmanager.BucketCacheInvalidator
 }
 
-func newBucketCatalog(store db.CredentialStore, uM urlmanager.UrlManager, ttl time.Duration) *bucketCatalog {
+func newBucketCatalog(credentialReader buckets.CredentialReader, credentialAdmin buckets.CredentialAdmin, scopeStore buckets.ScopeStore, uM urlmanager.UrlManager, ttl time.Duration) *bucketCatalog {
 	catalog := &bucketCatalog{
-		db:               store,
+		credentialReader: credentialReader,
+		credentialAdmin:  credentialAdmin,
+		scopeStore:       scopeStore,
 		bucketScopeCache: newBucketScopeCache(ttl),
 	}
 	if invalidator, ok := uM.(urlmanager.BucketCacheInvalidator); ok {
@@ -39,16 +42,16 @@ func newBucketCatalog(store db.CredentialStore, uM urlmanager.UrlManager, ttl ti
 }
 
 func (c *bucketCatalog) listS3Credentials(ctx context.Context) ([]buckets.Credential, error) {
-	return c.db.ListS3Credentials(ctx)
+	return c.credentialReader.ListS3Credentials(ctx)
 }
 
 func (c *bucketCatalog) getS3Credential(ctx context.Context, credentialID string) (*buckets.Credential, error) {
-	return c.db.GetS3Credential(ctx, credentialID)
+	return c.credentialReader.GetS3Credential(ctx, credentialID)
 }
 
 func (c *bucketCatalog) saveS3Credential(ctx context.Context, cred *buckets.Credential) error {
 	credentialID := c.credentialIDForCredential(*cred)
-	if err := c.db.SaveS3Credential(ctx, cred); err != nil {
+	if err := c.credentialAdmin.SaveS3Credential(ctx, cred); err != nil {
 		return err
 	}
 	c.invalidateBucketSignerCache(credentialID)
@@ -59,7 +62,7 @@ func (c *bucketCatalog) saveS3Credential(ctx context.Context, cred *buckets.Cred
 }
 
 func (c *bucketCatalog) deleteS3Credential(ctx context.Context, credentialID string) error {
-	if err := c.db.DeleteS3Credential(ctx, credentialID); err != nil {
+	if err := c.credentialAdmin.DeleteS3Credential(ctx, credentialID); err != nil {
 		return err
 	}
 	c.bucketScopeCache.clear()
@@ -75,11 +78,11 @@ func (c *bucketCatalog) invalidateBucketSignerCache(bucket string) {
 }
 
 func (c *bucketCatalog) listBucketScopes(ctx context.Context) ([]buckets.Scope, error) {
-	return c.db.ListBucketScopes(ctx)
+	return c.scopeStore.ListBucketScopes(ctx)
 }
 
 func (c *bucketCatalog) createBucketScope(ctx context.Context, scope *buckets.Scope) error {
-	if err := c.db.CreateBucketScope(ctx, scope); err != nil {
+	if err := c.scopeStore.CreateBucketScope(ctx, scope); err != nil {
 		return err
 	}
 	c.bucketScopeCache.set(normalizeBucketScope(scope), true)
@@ -87,7 +90,7 @@ func (c *bucketCatalog) createBucketScope(ctx context.Context, scope *buckets.Sc
 }
 
 func (c *bucketCatalog) deleteBucketScope(ctx context.Context, organization, projectID, credentialID, pathPrefix string) error {
-	if err := c.db.DeleteBucketScope(ctx, organization, projectID, credentialID, pathPrefix); err != nil {
+	if err := c.scopeStore.DeleteBucketScope(ctx, organization, projectID, credentialID, pathPrefix); err != nil {
 		return err
 	}
 	c.bucketScopeCache.clear()
@@ -119,7 +122,7 @@ func (c *bucketCatalog) lookupBucketScope(ctx context.Context, organization, pro
 		return scope, found, nil
 	}
 
-	scope, err := c.db.GetBucketScope(ctx, organization, project)
+	scope, err := c.scopeStore.GetBucketScope(ctx, organization, project)
 	if err != nil {
 		if faults.IsNotFoundError(err) {
 			c.bucketScopeCache.set(buckets.Scope{Organization: organization, ProjectID: project}, false)
@@ -172,8 +175,8 @@ func (m *ObjectManager) listVisibleBucketsUncached(ctx context.Context) (map[str
 		return map[string]VisibleBucket{}, nil
 	}
 
-	if lister, ok := m.db.(db.BucketVisibilityLister); ok {
-		return m.listVisibleBucketsFromRows(ctx, lister, creds)
+	if m.bucketVisibility != nil {
+		return m.listVisibleBucketsFromRows(ctx, m.bucketVisibility, creds)
 	}
 
 	objects, err := m.listBucketsVisibleObjects(ctx)
@@ -257,7 +260,7 @@ func (m *ObjectManager) listVisibleBucketsUncached(ctx context.Context) (map[str
 	return byCredential, nil
 }
 
-func (m *ObjectManager) listVisibleBucketsFromRows(ctx context.Context, lister db.BucketVisibilityLister, creds []buckets.Credential) (map[string]VisibleBucket, error) {
+func (m *ObjectManager) listVisibleBucketsFromRows(ctx context.Context, lister buckets.OptionalVisibilityQuery, creds []buckets.Credential) (map[string]VisibleBucket, error) {
 	restrictToResources := access.IsAuthzEnforced(ctx) &&
 		!access.HasMethodAccess(ctx, objectMethodRead, []string{"/programs"}) &&
 		!access.HasMethodAccess(ctx, objectMethodRead, []string{"/data_file"})
@@ -347,14 +350,14 @@ func (m *ObjectManager) DeleteBucketScope(ctx context.Context, organization, pro
 }
 
 func (m *ObjectManager) listBucketsVisibleObjects(ctx context.Context) ([]objects.Record, error) {
-	ids, err := m.db.ListObjectIDsByScope(ctx, "", "")
+	ids, err := m.objectScope.ListObjectIDsByScope(ctx, "", "")
 	if err != nil {
 		return nil, err
 	}
 	if len(ids) == 0 {
 		return []objects.Record{}, nil
 	}
-	objects, err := m.db.GetBulkObjects(ctx, ids)
+	objects, err := m.objectReader.GetBulkObjects(ctx, ids)
 	if err != nil {
 		return nil, err
 	}

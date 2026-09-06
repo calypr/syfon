@@ -149,7 +149,7 @@ The Helm chart still ships an init job for deployments that want pre-provisioned
 
 ```bash
 go test ./... -count=1
-./db/scripts/init_sqlite_db.sh drs_local.db
+./internal/persistence/sqlite/scripts/init_sqlite_db.sh drs_local.db
 go run . serve --config local.yaml
 ```
 
@@ -240,13 +240,13 @@ syfon download --did <did> --out /tmp/README.md
 # Architecture
 
 The project follows a modular structure to ensure maintainability:
-- `db/core`: Core interfaces and models.
-- `db/sqlite`, `db/postgres`: Database implementation drivers.
+- `internal/objects`, `internal/buckets`, `internal/transfers`, `internal/usage`: Domain values and consumer-owned ports.
+- `internal/persistence/sqlite`, `internal/persistence/postgres`: SQL persistence adapters.
 - `internal/api`: Subpackages for different API contexts (Core, internal compatibility, LFS, metrics, docs, middleware).
-- `service`: High-level business logic implementing the DRS service.
-- `urlmanager`: Logic for interacting with cloud storage providers.
+- `internal/core`: High-level object and storage workflows.
+- `internal/urlmanager`: Provider-neutral storage URL dispatch.
 
-See DB table details and relationships in [db/README.md](db/README.md).
+See persistence table details and relationships in [internal/persistence/README.md](internal/persistence/README.md).
 
 ## Go Client SDK (Multi-Module)
 
@@ -273,7 +273,7 @@ The project uses a Makefile for common tasks:
 - `make gen`: Generates the DRS server stubs from the official GA4GH OpenAPI spec (Git submodule) and refreshes the shared `apigen/*` OpenAPI outputs.
 - `make test`: Runs all unit and integration tests.
 - `make test-unit`: Runs unit tests only (excludes integration packages).
-- `make coverage`: Runs coverage for core production packages (db/service/middleware/url signing) and writes `coverage/coverage.out`, `coverage/coverage.txt`, and `coverage/coverage.html`.
+- `make coverage`: Runs coverage for core production packages (persistence/service/middleware/url signing) and writes `coverage/coverage.out`, `coverage/coverage.txt`, and `coverage/coverage.html`.
 - `make coverage-full`: Runs broader compatibility-layer coverage (includes internal compatibility and LFS packages).
 - `make serve ARGS="--config /path/to/config.yaml"`: Starts the DRS server.
 

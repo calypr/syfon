@@ -7,35 +7,28 @@ import (
 	"strings"
 	"time"
 
-	"github.com/calypr/syfon/apigen/server/drs"
 	sycommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/faults"
-	"github.com/calypr/syfon/internal/models"
-	"github.com/calypr/syfon/internal/usage"
-
 	"github.com/calypr/syfon/internal/objects"
+	"github.com/calypr/syfon/internal/transfers"
 	"github.com/calypr/syfon/internal/urlmanager"
+	"github.com/calypr/syfon/internal/usage"
 )
 
-// MockDatabase implements db.DatabaseInterface for testing
 type MockDatabase struct {
 	Objects                map[string]*objects.Record
 	ObjectAuthz            map[string]map[string][]string
 	Credentials            map[string]buckets.Credential
 	BucketScopes           map[string]buckets.Scope
-	PendingMeta            map[string]models.PendingLFSMeta
+	PendingMeta            map[string]transfers.PendingMetadata
 	Usage                  map[string]usage.FileUsage
 	TransferEvents         []usage.Event
 	ProviderTransferEvents []usage.ProviderEvent
 	NoDefaultCreds         bool
 	GetObjectErr           error
 	GetBucketScopeCalls    int
-}
-
-func (m *MockDatabase) GetServiceInfo(ctx context.Context) (*drs.Service, error) {
-	return nil, nil
 }
 
 func (m *MockDatabase) GetObject(ctx context.Context, id string) (*objects.Record, error) {
@@ -543,9 +536,9 @@ func (m *MockDatabase) ListBucketScopes(ctx context.Context) ([]buckets.Scope, e
 	return out, nil
 }
 
-func (m *MockDatabase) SavePendingLFSMeta(ctx context.Context, entries []models.PendingLFSMeta) error {
+func (m *MockDatabase) SavePendingLFSMeta(ctx context.Context, entries []transfers.PendingMetadata) error {
 	if m.PendingMeta == nil {
-		m.PendingMeta = make(map[string]models.PendingLFSMeta)
+		m.PendingMeta = make(map[string]transfers.PendingMetadata)
 	}
 	for _, e := range entries {
 		m.PendingMeta[e.OID] = e
@@ -553,7 +546,7 @@ func (m *MockDatabase) SavePendingLFSMeta(ctx context.Context, entries []models.
 	return nil
 }
 
-func (m *MockDatabase) GetPendingLFSMeta(ctx context.Context, oid string) (*models.PendingLFSMeta, error) {
+func (m *MockDatabase) GetPendingLFSMeta(ctx context.Context, oid string) (*transfers.PendingMetadata, error) {
 	if m.PendingMeta == nil {
 		return nil, fmt.Errorf("%w: pending metadata not found", faults.ErrNotFound)
 	}
@@ -564,7 +557,7 @@ func (m *MockDatabase) GetPendingLFSMeta(ctx context.Context, oid string) (*mode
 	return &e, nil
 }
 
-func (m *MockDatabase) PopPendingLFSMeta(ctx context.Context, oid string) (*models.PendingLFSMeta, error) {
+func (m *MockDatabase) PopPendingLFSMeta(ctx context.Context, oid string) (*transfers.PendingMetadata, error) {
 	if m.PendingMeta == nil {
 		return nil, fmt.Errorf("%w: pending metadata not found", faults.ErrNotFound)
 	}

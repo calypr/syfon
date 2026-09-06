@@ -1,13 +1,12 @@
 package testutils
 
 import (
-	"github.com/calypr/syfon/internal/db"
-	"github.com/calypr/syfon/internal/db/sqlite"
+	"github.com/calypr/syfon/internal/persistence/sqlite"
 )
 
-// NewInMemoryDB returns a new database interface backed by an in-memory SQLite database.
+// NewInMemoryDB returns a new SQLite backend backed by an in-memory database.
 // This is used primarily for testing.
-func NewInMemoryDB() db.DatabaseInterface {
+func NewInMemoryDB() *sqlite.SqliteDB {
 	// Use SQLite in-memory mode.
 	database, err := sqlite.NewSqliteDB(":memory:")
 	if err != nil {

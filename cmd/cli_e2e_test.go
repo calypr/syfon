@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
+	"github.com/calypr/syfon/apigen/server/drs"
 	clientservices "github.com/calypr/syfon/client/services"
 	"github.com/calypr/syfon/internal/api/docs"
 	"github.com/calypr/syfon/internal/api/drsapi"
@@ -22,10 +23,10 @@ import (
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/config"
 	"github.com/calypr/syfon/internal/core"
-	"github.com/calypr/syfon/internal/db"
 	"github.com/calypr/syfon/internal/signer/file"
 	"github.com/calypr/syfon/internal/storage/address"
 	"github.com/calypr/syfon/internal/testutils"
+	"github.com/calypr/syfon/internal/transfers"
 	"github.com/calypr/syfon/internal/urlmanager"
 	"github.com/calypr/syfon/internal/usage"
 )
@@ -48,7 +49,7 @@ func TestSyfonMetricsTransfersCLI(t *testing.T) {
 	defer server.Close()
 
 	now := time.Now().UTC()
-	if err := server.DB.RecordTransferAttributionEvents(context.Background(), []usage.Event{
+	if err := server.transferEvents.RecordTransferAttributionEvents(context.Background(), []usage.Event{
 		{
 			EventID:        "cli-grant-1",
 			AccessGrantID:  "cli-grant-1",
@@ -109,7 +110,7 @@ func TestSyfonMetricsTransfersCLI(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("record access grant: %v", err)
 	}
-	if err := server.DB.RecordProviderTransferEvents(context.Background(), []usage.ProviderEvent{
+	if err := server.providerEvents.RecordProviderTransferEvents(context.Background(), []usage.ProviderEvent{
 		{
 			ProviderEventID:      "cli-transfer-1",
 			AccessGrantID:        "cli-grant-1",
@@ -269,11 +270,12 @@ func clearRootAuthFlags(t *testing.T, cmd *cobra.Command) {
 }
 
 type fiberTestServer struct {
-	URL        string
-	StorageDir string
-	DB         db.DatabaseInterface
-	app        *fiber.App
-	ln         net.Listener
+	URL            string
+	StorageDir     string
+	transferEvents transfers.EventRecorder
+	providerEvents usage.ProviderEventRecorder
+	app            *fiber.App
+	ln             net.Listener
 }
 
 func (s *fiberTestServer) Close() {
@@ -318,12 +320,54 @@ func newSyfonTestServer(t *testing.T) *fiberTestServer {
 		return c.SendString("OK")
 	})
 	api := app.Group("/")
-	om := core.NewObjectManager(database, uM)
+	om := core.NewObjectManager(core.Dependencies{
+		Objects: core.ObjectPorts{
+			Reader:        database,
+			Writer:        database,
+			AccessMethods: database,
+			AccessPolicy:  database,
+			Aliases:       database,
+			Content:       database,
+			ChecksumScope: database,
+			Scope:         database,
+			Resources:     database,
+			Pages:         database,
+			URLPages:      database,
+			Authorized:    database,
+		},
+		Buckets: core.BucketPorts{
+			Credentials:     database,
+			CredentialAdmin: database,
+			Scopes:          database,
+			Visibility:      database,
+		},
+		Transfers: core.TransferPorts{
+			Pending: database,
+			Events:  database,
+		},
+		Usage: core.UsagePorts{
+			Counters:       database,
+			ProviderEvents: database,
+		},
+	}, uM)
 
 	drsAPI := api.Group("/ga4gh/drs/v1")
-	drsapi.RegisterDRSRoutes(drsAPI, om)
+	description := "Calypr test DRS server"
+	environment := "test"
+	createdAt := time.Date(2024, time.January, 2, 3, 4, 5, 0, time.UTC)
+	updatedAt := time.Date(2024, time.January, 3, 4, 5, 6, 0, time.UTC)
+	drsapi.RegisterDRSRoutes(drsAPI, om, drs.Service{
+		Id:          "drs-service-test",
+		Name:        "Calypr Test DRS Server",
+		Type:        drs.ServiceType{Group: "org.ga4gh", Artifact: "drs", Version: "1.2.0"},
+		Description: &description,
+		CreatedAt:   &createdAt,
+		UpdatedAt:   &updatedAt,
+		Environment: &environment,
+		Version:     "1.0.0",
+	})
 	docs.RegisterSwaggerRoutes(app)
-	metrics.RegisterMetricsRoutes(api, database)
+	metrics.RegisterMetricsRoutes(api, database, database, database, om)
 	internaldrs.RegisterInternalRoutes(api, om)
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -335,11 +379,12 @@ func newSyfonTestServer(t *testing.T) *fiberTestServer {
 	}()
 
 	return &fiberTestServer{
-		URL:        "http://" + ln.Addr().String(),
-		StorageDir: storageDir,
-		DB:         database,
-		app:        app,
-		ln:         ln,
+		URL:            "http://" + ln.Addr().String(),
+		StorageDir:     storageDir,
+		transferEvents: database,
+		providerEvents: database,
+		app:            app,
+		ln:             ln,
 	}
 }
 

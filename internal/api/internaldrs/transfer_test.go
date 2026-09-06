@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/calypr/syfon/apigen/server/internalapi"
-	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/testutils"
 	"github.com/gofiber/fiber/v3"
 )
@@ -16,7 +15,7 @@ import (
 func TestHandleInternalMultipartUpload_NotFound(t *testing.T) {
 	mockDB := &testutils.MockDatabase{}
 	mockUM := &testutils.MockUrlManager{}
-	om := core.NewObjectManager(mockDB, mockUM)
+	om := newInternalDRSObjectManager(mockDB, mockUM)
 	app := fiber.New()
 	app.Post("/multipart/upload", handleInternalMultipartUploadFiber(om))
 
@@ -37,7 +36,7 @@ func TestHandleInternalMultipartUpload_NotFound(t *testing.T) {
 func TestHandleInternalMultipartComplete_NotFound(t *testing.T) {
 	mockDB := &testutils.MockDatabase{}
 	mockUM := &testutils.MockUrlManager{}
-	om := core.NewObjectManager(mockDB, mockUM)
+	om := newInternalDRSObjectManager(mockDB, mockUM)
 	app := fiber.New()
 	app.Post("/multipart/complete", handleInternalMultipartCompleteFiber(om))
 

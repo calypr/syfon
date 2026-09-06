@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/calypr/syfon/apigen/server/metricsapi"
-	"github.com/calypr/syfon/internal/db"
 	"github.com/calypr/syfon/internal/usage"
 )
 
@@ -25,7 +24,7 @@ func (s *MetricsServer) GetTransferSummary(ctx context.Context, request metricsa
 	if access.hasScopeAggregate() && filter.Organization == "" {
 		summary, err = s.getScopedTransferAttributionSummary(ctx, filter, access.scopes)
 	} else {
-		summary, err = s.database.GetTransferAttributionSummary(ctx, filter)
+		summary, err = s.transferQuery.GetTransferAttributionSummary(ctx, filter)
 	}
 	if err != nil {
 		return metricsapi.GetTransferSummary500Response{}, nil
@@ -58,7 +57,7 @@ func (s *MetricsServer) GetTransferBreakdown(ctx context.Context, request metric
 	if access.hasScopeAggregate() && filter.Organization == "" {
 		items, err = s.getScopedTransferAttributionBreakdown(ctx, filter, groupBy, access.scopes)
 	} else {
-		items, err = s.database.GetTransferAttributionBreakdown(ctx, filter, groupBy)
+		items, err = s.transferQuery.GetTransferAttributionBreakdown(ctx, filter, groupBy)
 	}
 	if err != nil {
 		return metricsapi.GetTransferBreakdown500Response{}, nil
@@ -185,7 +184,7 @@ func (s *MetricsServer) transferFreshness(ctx context.Context, filter usage.Filt
 }
 
 func (s *MetricsServer) getScopedTransferAttributionSummary(ctx context.Context, filter usage.Filter, scopes []metricsScope) (usage.Summary, error) {
-	if scopedStore, ok := s.database.(db.TransferAttributionScopedStore); ok {
+	if scopedStore, ok := s.transferQuery.(usage.OptionalScopedTransferQuery); ok {
 		return scopedStore.GetTransferAttributionSummaryByResources(ctx, filter, metricsResources(scopes))
 	}
 
@@ -194,7 +193,7 @@ func (s *MetricsServer) getScopedTransferAttributionSummary(ctx context.Context,
 		scoped := filter
 		scoped.Organization = scope.organization
 		scoped.Project = scope.project
-		summary, err := s.database.GetTransferAttributionSummary(ctx, scoped)
+		summary, err := s.transferQuery.GetTransferAttributionSummary(ctx, scoped)
 		if err != nil {
 			return usage.Summary{}, err
 		}
@@ -210,7 +209,7 @@ func (s *MetricsServer) getScopedTransferAttributionSummary(ctx context.Context,
 }
 
 func (s *MetricsServer) getScopedTransferAttributionBreakdown(ctx context.Context, filter usage.Filter, groupBy string, scopes []metricsScope) ([]usage.Breakdown, error) {
-	if scopedStore, ok := s.database.(db.TransferAttributionScopedStore); ok {
+	if scopedStore, ok := s.transferQuery.(usage.OptionalScopedTransferQuery); ok {
 		return scopedStore.GetTransferAttributionBreakdownByResources(ctx, filter, groupBy, metricsResources(scopes))
 	}
 
@@ -219,7 +218,7 @@ func (s *MetricsServer) getScopedTransferAttributionBreakdown(ctx context.Contex
 		scoped := filter
 		scoped.Organization = scope.organization
 		scoped.Project = scope.project
-		items, err := s.database.GetTransferAttributionBreakdown(ctx, scoped, groupBy)
+		items, err := s.transferQuery.GetTransferAttributionBreakdown(ctx, scoped, groupBy)
 		if err != nil {
 			return nil, err
 		}

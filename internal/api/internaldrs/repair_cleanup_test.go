@@ -17,7 +17,7 @@ import (
 
 func TestStorageRepairInspectorReturnsCanonicalURL(t *testing.T) {
 	db := storageRepairTestDatabase()
-	om := core.NewObjectManager(db, &testutils.MockUrlManager{})
+	om := newInternalDRSObjectManager(db, &testutils.MockUrlManager{})
 	om.SetS3ObjectInspector(func(ctx context.Context, cred buckets.Credential, bucket, key string) (*core.StorageObjectMetadata, error) {
 		return &core.StorageObjectMetadata{Bucket: bucket, Key: key}, nil
 	})
@@ -36,7 +36,7 @@ func TestStorageRepairInspectorReturnsCanonicalURL(t *testing.T) {
 }
 
 func TestStorageRepairInspectorClassifiesMissingObject(t *testing.T) {
-	om := core.NewObjectManager(storageRepairTestDatabase(), &testutils.MockUrlManager{})
+	om := newInternalDRSObjectManager(storageRepairTestDatabase(), &testutils.MockUrlManager{})
 	om.SetS3ObjectInspector(func(ctx context.Context, cred buckets.Credential, bucket, key string) (*core.StorageObjectMetadata, error) {
 		return nil, &core.StorageInspectError{Kind: core.StorageInspectObjectNotFound, Message: "provider could not find object"}
 	})
@@ -49,7 +49,7 @@ func TestStorageRepairInspectorClassifiesMissingObject(t *testing.T) {
 
 func TestStorageRepairInspectorPreservesAuthorizationAndCredentialFailures(t *testing.T) {
 	t.Run("authorization", func(t *testing.T) {
-		om := core.NewObjectManager(storageRepairTestDatabase(), &testutils.MockUrlManager{})
+		om := newInternalDRSObjectManager(storageRepairTestDatabase(), &testutils.MockUrlManager{})
 		om.SetS3ObjectInspector(func(ctx context.Context, cred buckets.Credential, bucket, key string) (*core.StorageObjectMetadata, error) {
 			return nil, &core.StorageInspectError{Kind: core.StorageInspectPermissionDenied, Message: "provider denied access"}
 		})
@@ -62,7 +62,7 @@ func TestStorageRepairInspectorPreservesAuthorizationAndCredentialFailures(t *te
 
 	t.Run("credential", func(t *testing.T) {
 		db := &testutils.MockDatabase{NoDefaultCreds: true}
-		om := core.NewObjectManager(db, &testutils.MockUrlManager{})
+		om := newInternalDRSObjectManager(db, &testutils.MockUrlManager{})
 		_, err := (storageRepairInspector{om: om}).Inspect(context.Background(), repair.StorageInspectRequest{ObjectURL: "s3://missing/prefix/object.bin"})
 		var inspectErr *core.StorageInspectError
 		if !errors.As(err, &inspectErr) || inspectErr.Kind != core.StorageInspectCredentialMissing {
@@ -72,7 +72,7 @@ func TestStorageRepairInspectorPreservesAuthorizationAndCredentialFailures(t *te
 }
 
 func TestStorageRepairInspectorRejectsMalformedTarget(t *testing.T) {
-	om := core.NewObjectManager(storageRepairTestDatabase(), &testutils.MockUrlManager{})
+	om := newInternalDRSObjectManager(storageRepairTestDatabase(), &testutils.MockUrlManager{})
 	_, err := (storageRepairInspector{om: om}).Inspect(context.Background(), repair.StorageInspectRequest{ObjectURL: "https://example.com/object.bin"})
 	var inspectErr *core.StorageInspectError
 	if !errors.As(err, &inspectErr) || inspectErr.Kind != core.StorageInspectInvalidInput {
@@ -103,7 +103,7 @@ func TestScopeRepairApplyRejectsReadOnlyProjectUser(t *testing.T) {
 		resource: {"read": true},
 	}))
 
-	rr := doInternalDRSTestRequest(req, core.NewObjectManager(&testutils.MockDatabase{}, &testutils.MockUrlManager{}))
+	rr := doInternalDRSTestRequest(req, newInternalDRSObjectManager(&testutils.MockDatabase{}, &testutils.MockUrlManager{}))
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("expected 403 for read-only caller, got %d body=%s", rr.Code, rr.Body.String())
 	}

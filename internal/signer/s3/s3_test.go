@@ -52,8 +52,8 @@ func TestS3Signer_getClients(t *testing.T) {
 	})
 
 	t.Run("NotFound", func(t *testing.T) {
-		signer.db.(*testutils.MockDatabase).NoDefaultCreds = true
-		signer.db.(*testutils.MockDatabase).Credentials = nil
+		signer.credentials.(*testutils.MockDatabase).NoDefaultCreds = true
+		signer.credentials.(*testutils.MockDatabase).Credentials = nil
 		_, err := signer.getClients(ctx, "unknown-bucket")
 		if err == nil {
 			t.Error("expected error for unknown bucket, got nil")
@@ -71,7 +71,7 @@ func TestS3Signer_getClients(t *testing.T) {
 		}
 		for _, tc := range cases {
 			signer.cache.Delete("bucket-" + tc.raw)
-			signer.db.(*testutils.MockDatabase).Credentials = map[string]buckets.Credential{
+			signer.credentials.(*testutils.MockDatabase).Credentials = map[string]buckets.Credential{
 				"bucket-" + tc.raw: {
 					Bucket:   "bucket-" + tc.raw,
 					Endpoint: tc.raw,

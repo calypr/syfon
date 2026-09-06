@@ -11,7 +11,6 @@ import (
 
 	"github.com/calypr/syfon/apigen/server/metricsapi"
 	"github.com/calypr/syfon/internal/common"
-	"github.com/calypr/syfon/internal/db"
 	"github.com/calypr/syfon/internal/faults"
 	"github.com/calypr/syfon/internal/usage"
 )
@@ -49,19 +48,19 @@ func (s *MetricsServer) ListMetricsFiles(ctx context.Context, request metricsapi
 
 	var data []usage.FileUsage
 	if access.isScoped() {
-		if scopedStore, ok := s.database.(db.FileUsageScopedLister); ok {
+		if scopedStore, ok := s.fileUsage.(usage.OptionalScopedFileUsageQuery); ok {
 			data, err = scopedStore.ListFileUsagePageByScope(ctx, access.organization, access.project, limit, offset, inactiveSince)
 		} else {
-			data, _, err = listScopedFileUsage(ctx, s.database, s.objects, access.organization, access.project, limit, offset, inactiveSince)
+			data, _, err = listScopedFileUsage(ctx, s.fileUsage, s.objects, access.organization, access.project, limit, offset, inactiveSince)
 		}
 	} else if access.hasScopeAggregate() {
-		if scopedStore, ok := s.database.(db.FileUsageScopedLister); ok {
+		if scopedStore, ok := s.fileUsage.(usage.OptionalScopedFileUsageQuery); ok {
 			data, err = scopedStore.ListFileUsagePageByResources(ctx, metricsResources(access.scopes), false, limit, offset, inactiveSince)
 		} else {
-			data, _, err = listMultiScopedFileUsage(ctx, s.database, s.objects, access.scopes, limit, offset, inactiveSince)
+			data, _, err = listMultiScopedFileUsage(ctx, s.fileUsage, s.objects, access.scopes, limit, offset, inactiveSince)
 		}
 	} else {
-		data, err = s.database.ListFileUsage(ctx, limit, offset, inactiveSince)
+		data, err = s.fileUsage.ListFileUsage(ctx, limit, offset, inactiveSince)
 	}
 	if err != nil {
 		return metricsapi.ListMetricsFiles500Response{}, nil
@@ -109,7 +108,7 @@ func (s *MetricsServer) BulkMetricsFiles(ctx context.Context, request metricsapi
 	if err != nil {
 		return metricsapi.BulkMetricsFiles500Response{}, nil
 	}
-	data, err := s.database.ListFileUsageByObjectIDs(ctx, readableObjectIDs)
+	data, err := s.fileUsage.ListFileUsageByObjectIDs(ctx, readableObjectIDs)
 	if err != nil {
 		return metricsapi.BulkMetricsFiles500Response{}, nil
 	}
@@ -171,7 +170,7 @@ func (s *MetricsServer) GetMetricsFile(ctx context.Context, request metricsapi.G
 		}
 	}
 
-	usage, err := s.database.GetFileUsage(ctx, objectID)
+	usage, err := s.fileUsage.GetFileUsage(ctx, objectID)
 	if err != nil {
 		if errors.Is(err, faults.ErrNotFound) {
 			return metricsapi.GetMetricsFile404Response{}, nil
@@ -202,7 +201,7 @@ func (s *MetricsServer) GetMetricsSummary(ctx context.Context, request metricsap
 
 	var summary usage.FileUsageSummary
 	if access.isScoped() {
-		if scopedStore, ok := s.database.(db.FileUsageScopedLister); ok {
+		if scopedStore, ok := s.fileUsage.(usage.OptionalScopedFileUsageQuery); ok {
 			summary, err = scopedStore.GetFileUsageSummaryByScope(ctx, access.organization, access.project, inactiveSince)
 			if err == nil {
 				recordSummary, recordErr := scopedStore.GetProjectRecordSummaryByScope(ctx, access.organization, access.project)
@@ -214,17 +213,17 @@ func (s *MetricsServer) GetMetricsSummary(ctx context.Context, request metricsap
 				}
 			}
 		} else {
-			_, summary, err = listScopedFileUsage(ctx, s.database, s.objects, access.organization, access.project, 0, 0, inactiveSince)
+			_, summary, err = listScopedFileUsage(ctx, s.fileUsage, s.objects, access.organization, access.project, 0, 0, inactiveSince)
 			summary.RecordCount = summary.TotalFiles
 		}
 	} else if access.hasScopeAggregate() {
-		if scopedStore, ok := s.database.(db.FileUsageScopedLister); ok {
+		if scopedStore, ok := s.fileUsage.(usage.OptionalScopedFileUsageQuery); ok {
 			summary, err = scopedStore.GetFileUsageSummaryByResources(ctx, metricsResources(access.scopes), false, inactiveSince)
 		} else {
-			_, summary, err = listMultiScopedFileUsage(ctx, s.database, s.objects, access.scopes, 0, 0, inactiveSince)
+			_, summary, err = listMultiScopedFileUsage(ctx, s.fileUsage, s.objects, access.scopes, 0, 0, inactiveSince)
 		}
 	} else {
-		summary, err = s.database.GetFileUsageSummary(ctx, inactiveSince)
+		summary, err = s.fileUsage.GetFileUsageSummary(ctx, inactiveSince)
 	}
 	if err != nil {
 		return metricsapi.GetMetricsSummary500Response{}, nil
@@ -336,7 +335,7 @@ func toMetricsFileUsage(v usage.FileUsage) metricsapi.FileUsage {
 	}
 }
 
-func collectScopedUsage(ctx context.Context, database db.MetricsStore, objects metricsObjectReader, organization, project string, inactiveSince *time.Time) ([]usage.FileUsage, usage.FileUsageSummary, error) {
+func collectScopedUsage(ctx context.Context, database usage.FileUsageReader, objects usage.ObjectReader, organization, project string, inactiveSince *time.Time) ([]usage.FileUsage, usage.FileUsageSummary, error) {
 	ids, err := objects.ListObjectIDsByScope(ctx, organization, project, "read")
 	if err != nil {
 		return nil, usage.FileUsageSummary{}, err
@@ -386,7 +385,7 @@ func collectScopedUsage(ctx context.Context, database db.MetricsStore, objects m
 	return usages, summary, nil
 }
 
-func listScopedFileUsage(ctx context.Context, database db.MetricsStore, objects metricsObjectReader, organization, project string, limit, offset int, inactiveSince *time.Time) ([]usage.FileUsage, usage.FileUsageSummary, error) {
+func listScopedFileUsage(ctx context.Context, database usage.FileUsageReader, objects usage.ObjectReader, organization, project string, limit, offset int, inactiveSince *time.Time) ([]usage.FileUsage, usage.FileUsageSummary, error) {
 	usages, summary, err := collectScopedUsage(ctx, database, objects, organization, project, inactiveSince)
 	if err != nil {
 		return nil, usage.FileUsageSummary{}, err
@@ -404,7 +403,7 @@ func listScopedFileUsage(ctx context.Context, database db.MetricsStore, objects 
 	return usages[offset:end], summary, nil
 }
 
-func listMultiScopedFileUsage(ctx context.Context, database db.MetricsStore, objects metricsObjectReader, scopes []metricsScope, limit, offset int, inactiveSince *time.Time) ([]usage.FileUsage, usage.FileUsageSummary, error) {
+func listMultiScopedFileUsage(ctx context.Context, database usage.FileUsageReader, objects usage.ObjectReader, scopes []metricsScope, limit, offset int, inactiveSince *time.Time) ([]usage.FileUsage, usage.FileUsageSummary, error) {
 	byID := map[string]usage.FileUsage{}
 	var summary usage.FileUsageSummary
 	for _, scope := range scopes {
@@ -440,7 +439,7 @@ func listMultiScopedFileUsage(ctx context.Context, database db.MetricsStore, obj
 	return usages[offset:end], summary, nil
 }
 
-func objectInScope(ctx context.Context, objects metricsObjectReader, objectID, organization, project string) (bool, error) {
+func objectInScope(ctx context.Context, objects usage.ObjectReader, objectID, organization, project string) (bool, error) {
 	obj, err := objects.GetObject(ctx, objectID, "read")
 	if err != nil {
 		if errors.Is(err, faults.ErrNotFound) || errors.Is(err, faults.ErrUnauthorized) {
@@ -466,7 +465,7 @@ func objectInScope(ctx context.Context, objects metricsObjectReader, objectID, o
 	return false, nil
 }
 
-func objectInAnyScope(ctx context.Context, objects metricsObjectReader, objectID string, scopes []metricsScope) (bool, error) {
+func objectInAnyScope(ctx context.Context, objects usage.ObjectReader, objectID string, scopes []metricsScope) (bool, error) {
 	for _, scope := range scopes {
 		inside, err := objectInScope(ctx, objects, objectID, scope.organization, scope.project)
 		if err != nil || inside {

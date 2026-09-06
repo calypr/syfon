@@ -30,7 +30,7 @@ func TestHandleInternalInspectObjectScopedSuccess(t *testing.T) {
 			"syfon|e2e": {Organization: "syfon", ProjectID: "e2e", Bucket: "b1", PathPrefix: "project-root"},
 		},
 	}
-	om := core.NewObjectManager(db, &testutils.MockUrlManager{})
+	om := newInternalDRSObjectManager(db, &testutils.MockUrlManager{})
 	om.SetS3ObjectInspector(func(ctx context.Context, cred buckets.Credential, bucket string, key string) (*core.StorageObjectMetadata, error) {
 		return &core.StorageObjectMetadata{Bucket: bucket, Key: key, Path: "file.bin", SizeBytes: 17, ETag: "etag-1", LastModTime: time.Date(2026, 6, 11, 1, 2, 3, 0, time.UTC)}, nil
 	})
@@ -65,7 +65,7 @@ func TestHandleInternalInspectObjectRawSuccess(t *testing.T) {
 			"syfon|": {Organization: "syfon", Bucket: "b1", PathPrefix: "program-root"},
 		},
 	}
-	om := core.NewObjectManager(db, &testutils.MockUrlManager{})
+	om := newInternalDRSObjectManager(db, &testutils.MockUrlManager{})
 	om.SetS3ObjectInspector(func(ctx context.Context, cred buckets.Credential, bucket string, key string) (*core.StorageObjectMetadata, error) {
 		return &core.StorageObjectMetadata{Bucket: bucket, Key: key, Path: "file.bin", SizeBytes: 99, ETag: "etag-raw"}, nil
 	})
@@ -81,7 +81,7 @@ func TestHandleInternalInspectObjectRawSuccess(t *testing.T) {
 
 func TestHandleInternalInspectObjectMissingScope(t *testing.T) {
 	body, _ := json.Marshal(internalInspectObjectRequest{Organization: "syfon", Project: "missing", Key: "nested/file.bin", Scheme: "s3"})
-	om := core.NewObjectManager(&testutils.MockDatabase{}, &testutils.MockUrlManager{})
+	om := newInternalDRSObjectManager(&testutils.MockDatabase{}, &testutils.MockUrlManager{})
 	req := withTestAuthzContext(httptest.NewRequest(http.MethodPost, "/data/inspect", bytes.NewBuffer(body)), "gen3", map[string]map[string]bool{"/organization/syfon/project/missing": {"read": true}})
 	rr := doInternalDRSTestRequest(req, om)
 	if rr.Code != http.StatusNotFound {
@@ -97,7 +97,7 @@ func TestHandleInternalInspectObjectPermissionDenied(t *testing.T) {
 			"syfon|": {Organization: "syfon", Bucket: "b1", PathPrefix: "program-root"},
 		},
 	}
-	om := core.NewObjectManager(db, &testutils.MockUrlManager{})
+	om := newInternalDRSObjectManager(db, &testutils.MockUrlManager{})
 	om.SetS3ObjectInspector(func(ctx context.Context, cred buckets.Credential, bucket string, key string) (*core.StorageObjectMetadata, error) {
 		return nil, &core.StorageInspectError{Kind: core.StorageInspectPermissionDenied, Message: "provider denied access to s3://b1/program-root/raw/file.bin"}
 	})
@@ -110,7 +110,7 @@ func TestHandleInternalInspectObjectPermissionDenied(t *testing.T) {
 
 func TestHandleInternalInspectObjectMalformedURL(t *testing.T) {
 	body, _ := json.Marshal(internalInspectObjectRequest{ObjectURL: "https://example.com/file.bin"})
-	om := core.NewObjectManager(&testutils.MockDatabase{}, &testutils.MockUrlManager{})
+	om := newInternalDRSObjectManager(&testutils.MockDatabase{}, &testutils.MockUrlManager{})
 	req := withTestAuthzContext(httptest.NewRequest(http.MethodPost, "/data/inspect", bytes.NewBuffer(body)), "gen3", map[string]map[string]bool{"/organization/syfon": {"read": true}})
 	rr := doInternalDRSTestRequest(req, om)
 	if rr.Code != http.StatusBadRequest {
@@ -153,7 +153,7 @@ func TestHandleInternalInspectProjectRecords(t *testing.T) {
 			"obj-1": {"syfon": {"e2e"}},
 		},
 	}
-	om := core.NewObjectManager(db, &testutils.MockUrlManager{})
+	om := newInternalDRSObjectManager(db, &testutils.MockUrlManager{})
 	req := withTestAuthzContext(httptest.NewRequest(http.MethodPost, "/data/inspect/project-records", bytes.NewBuffer(body)), "gen3", map[string]map[string]bool{"/organization/syfon/project/e2e": {"read": true}})
 	rr := doInternalDRSTestRequest(req, om)
 	if rr.Code != http.StatusOK {
@@ -205,7 +205,7 @@ func TestHandleInternalInspectProjectRecordsPreservesLegacyDuplicatePhysicalRows
 			"physical-b": {"syfon": {"e2e"}},
 		},
 	}
-	om := core.NewObjectManager(db, &testutils.MockUrlManager{})
+	om := newInternalDRSObjectManager(db, &testutils.MockUrlManager{})
 	req := withTestAuthzContext(httptest.NewRequest(http.MethodPost, "/data/inspect/project-records", bytes.NewBuffer(body)), "gen3", map[string]map[string]bool{"/organization/syfon/project/e2e": {"read": true}})
 	rr := doInternalDRSTestRequest(req, om)
 	if rr.Code != http.StatusOK {
@@ -261,7 +261,7 @@ func TestHandleInternalInspectProjectScopes(t *testing.T) {
 			"syfon|e2e": {Organization: "syfon", ProjectID: "e2e", Bucket: "bucket-a", CredentialID: "cred-1", PathPrefix: "project-root"},
 		},
 	}
-	om := core.NewObjectManager(db, &testutils.MockUrlManager{})
+	om := newInternalDRSObjectManager(db, &testutils.MockUrlManager{})
 	authz := map[string]map[string]bool{
 		"/organization/syfon":             {"read": true},
 		"/organization/syfon/project/e2e": {"read": true},
@@ -315,7 +315,7 @@ func TestHandleInternalInspectProjectBucketModesUsePrefixList(t *testing.T) {
 			"syfon|e2e": {Organization: "syfon", ProjectID: "e2e", Bucket: "bucket-a", CredentialID: "cred-1", PathPrefix: "project-root"},
 		},
 	}
-	om := core.NewObjectManager(db, &testutils.MockUrlManager{})
+	om := newInternalDRSObjectManager(db, &testutils.MockUrlManager{})
 	inspectCalls := 0
 	om.SetS3ObjectInspector(func(ctx context.Context, cred buckets.Credential, bucket string, key string) (*core.StorageObjectMetadata, error) {
 		inspectCalls++
@@ -424,7 +424,7 @@ func TestHandleInternalInspectProjectBucketInventoryListsProjectScope(t *testing
 			"syfon|e2e": {Organization: "syfon", ProjectID: "e2e", Bucket: "bucket-a", CredentialID: "cred-1", PathPrefix: "project-root"},
 		},
 	}
-	om := core.NewObjectManager(db, &testutils.MockUrlManager{})
+	om := newInternalDRSObjectManager(db, &testutils.MockUrlManager{})
 	inspectCalls := 0
 	om.SetS3ObjectInspector(func(ctx context.Context, cred buckets.Credential, bucket string, key string) (*core.StorageObjectMetadata, error) {
 		inspectCalls++
@@ -488,7 +488,7 @@ func TestHandleInternalInspectProjectBucketInventoryReturnsPartialListing(t *tes
 			"syfon|e2e": {Organization: "syfon", ProjectID: "e2e", Bucket: "bucket-a", CredentialID: "cred-1", PathPrefix: "project-root"},
 		},
 	}
-	om := core.NewObjectManager(db, &testutils.MockUrlManager{})
+	om := newInternalDRSObjectManager(db, &testutils.MockUrlManager{})
 	om.SetS3PrefixListerWithOptions(func(context.Context, buckets.Credential, string, string, core.StoragePrefixListOptions) ([]core.StorageBucketObject, error) {
 		return []core.StorageBucketObject{{
 				Provider:  "s3",
@@ -534,7 +534,7 @@ func TestHandleInternalInspectObjectBulkListValidatesExactKeyWithoutHead(t *test
 			"syfon|e2e": {Organization: "syfon", ProjectID: "e2e", Bucket: "bucket-a", CredentialID: "cred-1", PathPrefix: "project-root"},
 		},
 	}
-	om := core.NewObjectManager(db, &testutils.MockUrlManager{})
+	om := newInternalDRSObjectManager(db, &testutils.MockUrlManager{})
 	inspectCalls := 0
 	om.SetS3ObjectInspector(func(ctx context.Context, cred buckets.Credential, bucket string, key string) (*core.StorageObjectMetadata, error) {
 		inspectCalls++
@@ -603,7 +603,7 @@ func TestHandleInternalInspectObjectBulkListDeduplicatesExactTargets(t *testing.
 			"syfon|e2e": {Organization: "syfon", ProjectID: "e2e", Bucket: "bucket-a", CredentialID: "cred-1", PathPrefix: "project-root"},
 		},
 	}
-	om := core.NewObjectManager(db, &testutils.MockUrlManager{})
+	om := newInternalDRSObjectManager(db, &testutils.MockUrlManager{})
 	listCalls := 0
 	om.SetS3PrefixListerWithOptions(func(ctx context.Context, cred buckets.Credential, bucket string, prefix string, options core.StoragePrefixListOptions) ([]core.StorageBucketObject, error) {
 		listCalls++
@@ -645,7 +645,7 @@ func TestHandleInternalInspectObjectBulkListSharesRemoteEvidenceAcrossValidation
 			"syfon|e2e": {Organization: "syfon", ProjectID: "e2e", Bucket: "bucket-a", CredentialID: "cred-1", PathPrefix: "project-root"},
 		},
 	}
-	om := core.NewObjectManager(db, &testutils.MockUrlManager{})
+	om := newInternalDRSObjectManager(db, &testutils.MockUrlManager{})
 	listCalls := 0
 	om.SetS3PrefixListerWithOptions(func(ctx context.Context, cred buckets.Credential, bucket string, prefix string, options core.StoragePrefixListOptions) ([]core.StorageBucketObject, error) {
 		listCalls++
@@ -685,7 +685,7 @@ func TestHandleInternalInspectObjectBulkListCoalescesDensePrefixes(t *testing.T)
 			"syfon|e2e": {Organization: "syfon", ProjectID: "e2e", Bucket: "bucket-a", CredentialID: "cred-1", PathPrefix: "project-root"},
 		},
 	}
-	om := core.NewObjectManager(db, &testutils.MockUrlManager{})
+	om := newInternalDRSObjectManager(db, &testutils.MockUrlManager{})
 	listCalls := 0
 	om.SetS3PrefixListerWithOptions(func(ctx context.Context, cred buckets.Credential, bucket string, prefix string, options core.StoragePrefixListOptions) ([]core.StorageBucketObject, error) {
 		listCalls++

@@ -6,13 +6,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/testutils"
 	"github.com/gofiber/fiber/v3"
 )
 
 func TestParseInternalListPaginationFiber_InvalidInputs(t *testing.T) {
-	om := core.NewObjectManager(&testutils.MockDatabase{}, &testutils.MockUrlManager{})
+	om := newInternalDRSObjectManager(&testutils.MockDatabase{}, &testutils.MockUrlManager{})
 
 	cases := []struct {
 		name string
@@ -64,7 +63,7 @@ func TestParseInternalListPaginationFiber_StartSuppressesPage(t *testing.T) {
 }
 
 func TestHandleInternalBulkDocuments_InvalidBodyAndMissingIDs(t *testing.T) {
-	om := core.NewObjectManager(&testutils.MockDatabase{}, &testutils.MockUrlManager{})
+	om := newInternalDRSObjectManager(&testutils.MockDatabase{}, &testutils.MockUrlManager{})
 
 	req := httptest.NewRequest(http.MethodPost, "/bulk/documents", strings.NewReader("not-json"))
 	req.Header.Set("Content-Type", "application/json")
@@ -82,7 +81,7 @@ func TestHandleInternalBulkDocuments_InvalidBodyAndMissingIDs(t *testing.T) {
 }
 
 func TestHandleInternalList_IgnoresLegacyPathValidation(t *testing.T) {
-	om := core.NewObjectManager(&testutils.MockDatabase{}, &testutils.MockUrlManager{})
+	om := newInternalDRSObjectManager(&testutils.MockDatabase{}, &testutils.MockUrlManager{})
 
 	req := httptest.NewRequest(http.MethodGet, "/index?path=nested", nil)
 	rr := doInternalDRSTestRequest(req, om)

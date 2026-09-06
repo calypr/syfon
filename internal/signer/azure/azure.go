@@ -14,14 +14,14 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blockblob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/sas"
 	"github.com/calypr/syfon/internal/common"
-	"github.com/calypr/syfon/internal/db"
 	"github.com/calypr/syfon/internal/signer"
+	"github.com/calypr/syfon/internal/storage"
 	"github.com/google/uuid"
 )
 
 type AzureSigner struct {
-	db    db.CredentialStore
-	cache sync.Map // keyed by bucket name, stores *azureCreds
+	credentials storage.CredentialLookup
+	cache       sync.Map // keyed by bucket name, stores *azureCreds
 }
 
 type azureCreds struct {
@@ -29,8 +29,8 @@ type azureCreds struct {
 	ServiceURL string
 }
 
-func NewAzureSigner(db db.CredentialStore) *AzureSigner {
-	return &AzureSigner{db: db}
+func NewAzureSigner(credentials storage.CredentialLookup) *AzureSigner {
+	return &AzureSigner{credentials: credentials}
 }
 
 func (s *AzureSigner) InvalidateBucket(bucket string) {
@@ -130,7 +130,7 @@ func (s *AzureSigner) getCreds(ctx context.Context, bucket string) (*azureCreds,
 		return val.(*azureCreds), nil
 	}
 
-	cred, err := s.db.GetS3Credential(ctx, bucket)
+	cred, err := s.credentials.GetS3Credential(ctx, bucket)
 	if err != nil {
 		return nil, err
 	}

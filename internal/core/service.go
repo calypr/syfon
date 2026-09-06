@@ -5,8 +5,10 @@ import (
 	"time"
 
 	"github.com/calypr/syfon/internal/buckets"
-	"github.com/calypr/syfon/internal/db"
+	"github.com/calypr/syfon/internal/objects"
+	"github.com/calypr/syfon/internal/transfers"
 	"github.com/calypr/syfon/internal/urlmanager"
+	"github.com/calypr/syfon/internal/usage"
 )
 
 type contextKey string
@@ -33,12 +35,75 @@ func GetBaseURL(ctx context.Context) string {
 
 // ObjectManager standardizes object lifecycle operations across all API surfaces.
 type ObjectManager struct {
-	db              db.DatabaseInterface
-	uM              urlmanager.UrlManager
-	bucketCatalog   *bucketCatalog
-	inspectS3Object func(context.Context, buckets.Credential, string, string) (*StorageObjectMetadata, error)
-	listS3Prefix    func(context.Context, buckets.Credential, string, string, StoragePrefixListOptions) ([]StorageBucketObject, error)
-	s3ProbeLimiter  *s3ProbeLimiter
+	objectReader     objects.RecordReader
+	objectWriter     objects.RecordWriter
+	objectAccess     objects.AccessMethodWriter
+	objectPolicy     objects.AccessPolicyWriter
+	objectAliases    objects.AliasStore
+	objectContent    objects.ContentReader
+	objectChecksum   objects.ChecksumScopeQuery
+	objectScope      objects.ScopeQuery
+	objectResources  objects.OptionalResourceQuery
+	objectPages      objects.OptionalPageQuery
+	objectURLPages   objects.OptionalURLQuery
+	objectAuthorized objects.OptionalAuthorizedQuery
+	bucketVisibility buckets.OptionalVisibilityQuery
+	pendingStore     transfers.PendingStore
+	transferEvents   transfers.EventRecorder
+	fileCounters     usage.FileCounterRecorder
+	providerEvents   usage.ProviderEventRecorder
+	uM               urlmanager.UrlManager
+	bucketCatalog    *bucketCatalog
+	inspectS3Object  func(context.Context, buckets.Credential, string, string) (*StorageObjectMetadata, error)
+	listS3Prefix     func(context.Context, buckets.Credential, string, string, StoragePrefixListOptions) ([]StorageBucketObject, error)
+	s3ProbeLimiter   *s3ProbeLimiter
+}
+
+// ObjectPorts contains the object capabilities used by the transitional
+// ObjectManager facade. Optional query ports may be nil.
+type ObjectPorts struct {
+	Reader        objects.RecordReader
+	Writer        objects.RecordWriter
+	AccessMethods objects.AccessMethodWriter
+	AccessPolicy  objects.AccessPolicyWriter
+	Aliases       objects.AliasStore
+	Content       objects.ContentReader
+	ChecksumScope objects.ChecksumScopeQuery
+	Scope         objects.ScopeQuery
+	Resources     objects.OptionalResourceQuery
+	Pages         objects.OptionalPageQuery
+	URLPages      objects.OptionalURLQuery
+	Authorized    objects.OptionalAuthorizedQuery
+}
+
+// BucketPorts contains the bucket capabilities used by the transitional
+// ObjectManager facade. Visibility is an optional optimization.
+type BucketPorts struct {
+	Credentials     buckets.CredentialReader
+	CredentialAdmin buckets.CredentialAdmin
+	Scopes          buckets.ScopeStore
+	Visibility      buckets.OptionalVisibilityQuery
+}
+
+// TransferPorts contains pending metadata and transfer-event capabilities.
+type TransferPorts struct {
+	Pending transfers.PendingStore
+	Events  transfers.EventRecorder
+}
+
+// UsagePorts contains the accounting capabilities used by the facade.
+type UsagePorts struct {
+	Counters       usage.FileCounterRecorder
+	ProviderEvents usage.ProviderEventRecorder
+}
+
+// Dependencies is a concrete composition record, not a replacement database
+// interface. Each field is owned by the package that defines its port.
+type Dependencies struct {
+	Objects   ObjectPorts
+	Buckets   BucketPorts
+	Transfers TransferPorts
+	Usage     UsagePorts
 }
 
 type VisibleBucket struct {
@@ -46,13 +111,29 @@ type VisibleBucket struct {
 	Programs   []string
 }
 
-func NewObjectManager(db db.DatabaseInterface, uM urlmanager.UrlManager) *ObjectManager {
+func NewObjectManager(deps Dependencies, uM urlmanager.UrlManager) *ObjectManager {
 	return &ObjectManager{
-		db:              db,
-		uM:              uM,
-		bucketCatalog:   newBucketCatalog(db, uM, 30*time.Second),
-		inspectS3Object: defaultS3ObjectInspector,
-		listS3Prefix:    defaultS3PrefixLister,
-		s3ProbeLimiter:  newS3ProbeLimiterFromEnv(),
+		objectReader:     deps.Objects.Reader,
+		objectWriter:     deps.Objects.Writer,
+		objectAccess:     deps.Objects.AccessMethods,
+		objectPolicy:     deps.Objects.AccessPolicy,
+		objectAliases:    deps.Objects.Aliases,
+		objectContent:    deps.Objects.Content,
+		objectChecksum:   deps.Objects.ChecksumScope,
+		objectScope:      deps.Objects.Scope,
+		objectResources:  deps.Objects.Resources,
+		objectPages:      deps.Objects.Pages,
+		objectURLPages:   deps.Objects.URLPages,
+		objectAuthorized: deps.Objects.Authorized,
+		bucketVisibility: deps.Buckets.Visibility,
+		pendingStore:     deps.Transfers.Pending,
+		transferEvents:   deps.Transfers.Events,
+		fileCounters:     deps.Usage.Counters,
+		providerEvents:   deps.Usage.ProviderEvents,
+		uM:               uM,
+		bucketCatalog:    newBucketCatalog(deps.Buckets.Credentials, deps.Buckets.CredentialAdmin, deps.Buckets.Scopes, uM, 30*time.Second),
+		inspectS3Object:  defaultS3ObjectInspector,
+		listS3Prefix:     defaultS3PrefixLister,
+		s3ProbeLimiter:   newS3ProbeLimiterFromEnv(),
 	}
 }

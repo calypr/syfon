@@ -1,6 +1,7 @@
 package server
 
 import (
+	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/api/docs"
 	"github.com/calypr/syfon/internal/api/drsapi"
 	"github.com/calypr/syfon/internal/api/internaldrs"
@@ -8,16 +9,19 @@ import (
 	"github.com/calypr/syfon/internal/api/metrics"
 	"github.com/calypr/syfon/internal/config"
 	"github.com/calypr/syfon/internal/core"
-	"github.com/calypr/syfon/internal/db"
 	"github.com/calypr/syfon/internal/httpapi/middleware"
 	"github.com/calypr/syfon/internal/urlmanager"
+	"github.com/calypr/syfon/internal/usage"
 	"github.com/gofiber/fiber/v3"
 )
 
 type serverRuntime struct {
 	app                 *fiber.App
 	cfg                 *config.Config
-	database            db.DatabaseInterface
+	fileUsage           usage.FileUsageReader
+	transferQuery       usage.TransferQuery
+	providerEvents      usage.ProviderEventRecorder
+	serviceInfo         drs.Service
 	om                  *core.ObjectManager
 	uM                  urlmanager.UrlManager
 	authzMiddleware     *middleware.AuthzMiddleware
@@ -44,13 +48,13 @@ func WithDocsRoutes() ServerOption {
 func WithGa4ghRoutes() ServerOption {
 	return func(rt *serverRuntime) {
 		api := rt.ensureAPIGroup().Group("/ga4gh/drs/v1")
-		drsapi.RegisterDRSRoutes(api, rt.om)
+		drsapi.RegisterDRSRoutes(api, rt.om, rt.serviceInfo)
 	}
 }
 
 func WithMetricsRoutes() ServerOption {
 	return func(rt *serverRuntime) {
-		metrics.RegisterMetricsRoutes(rt.ensureAPIGroup(), rt.database)
+		metrics.RegisterMetricsRoutes(rt.ensureAPIGroup(), rt.fileUsage, rt.transferQuery, rt.providerEvents, rt.om)
 	}
 }
 

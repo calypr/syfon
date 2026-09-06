@@ -15,13 +15,13 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 
 	"github.com/calypr/syfon/internal/common"
-	"github.com/calypr/syfon/internal/db"
 	"github.com/calypr/syfon/internal/signer"
+	"github.com/calypr/syfon/internal/storage"
 )
 
 type S3Signer struct {
-	db    db.CredentialStore
-	cache sync.Map // keyed by bucket name, stores *s3Clients
+	credentials storage.CredentialLookup
+	cache       sync.Map // keyed by bucket name, stores *s3Clients
 }
 
 type s3Clients struct {
@@ -29,8 +29,8 @@ type s3Clients struct {
 	presigner *s3.PresignClient
 }
 
-func NewS3Signer(db db.CredentialStore) *S3Signer {
-	return &S3Signer{db: db}
+func NewS3Signer(credentials storage.CredentialLookup) *S3Signer {
+	return &S3Signer{credentials: credentials}
 }
 
 func (s *S3Signer) InvalidateBucket(bucket string) {
@@ -183,7 +183,7 @@ func (s *S3Signer) getClients(ctx context.Context, bucket string) (*s3Clients, e
 		return val.(*s3Clients), nil
 	}
 
-	cred, err := s.db.GetS3Credential(ctx, bucket)
+	cred, err := s.credentials.GetS3Credential(ctx, bucket)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get credentials for bucket %s: %w", bucket, err)
 	}

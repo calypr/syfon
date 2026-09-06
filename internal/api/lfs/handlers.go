@@ -14,9 +14,8 @@ import (
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/faults"
 	httplfs "github.com/calypr/syfon/internal/httpapi/lfs"
-	"github.com/calypr/syfon/internal/models"
-
 	"github.com/calypr/syfon/internal/objects"
+	"github.com/calypr/syfon/internal/transfers"
 	"github.com/calypr/syfon/internal/urlmanager"
 )
 
@@ -151,7 +150,7 @@ func (s *LFSServer) LfsStageMetadata(ctx context.Context, request lfsapi.LfsStag
 	}
 
 	now := time.Now().UTC()
-	entries := make([]models.PendingLFSMeta, 0, len(req.Candidates))
+	entries := make([]transfers.PendingMetadata, 0, len(req.Candidates))
 	for i, c := range req.Candidates {
 		domainCandidate := httplfs.FromGeneratedCandidate(c)
 		internalObj, err := core.CandidateToRecord(domainCandidate, now)
@@ -163,7 +162,7 @@ func (s *LFSServer) LfsStageMetadata(ctx context.Context, request lfsapi.LfsStag
 		if !ok {
 			return lfsapi.LfsStageMetadata400JSONResponse{Message: fmt.Sprintf("candidate[%d] missing canonical sha256", i)}, nil
 		}
-		entries = append(entries, models.PendingLFSMeta{
+		entries = append(entries, transfers.PendingMetadata{
 			OID:       oid,
 			Candidate: domainCandidate,
 			CreatedAt: now,

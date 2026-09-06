@@ -10,31 +10,30 @@ import (
 	"testing"
 	"time"
 
-	"github.com/calypr/syfon/internal/db"
-	"github.com/calypr/syfon/internal/db/sqlite"
+	"github.com/calypr/syfon/internal/persistence/sqlite"
 
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/testutils"
 )
 
 type pageSpyDB struct {
-	db.DatabaseInterface
+	*sqlite.SqliteDB
 	pageCalls int
 	listCalls int
 }
 
 func (s *pageSpyDB) ListObjectIDsPageByScope(ctx context.Context, organization, project, startAfter string, limit, offset int) ([]string, error) {
 	s.pageCalls++
-	return s.DatabaseInterface.(db.ObjectIDPageLister).ListObjectIDsPageByScope(ctx, organization, project, startAfter, limit, offset)
+	return s.SqliteDB.ListObjectIDsPageByScope(ctx, organization, project, startAfter, limit, offset)
 }
 
 func (s *pageSpyDB) ListObjectIDsPageByResources(ctx context.Context, resources []string, includeUnscoped bool, startAfter string, limit, offset int) ([]string, error) {
-	return s.DatabaseInterface.(db.ObjectIDPageLister).ListObjectIDsPageByResources(ctx, resources, includeUnscoped, startAfter, limit, offset)
+	return s.SqliteDB.ListObjectIDsPageByResources(ctx, resources, includeUnscoped, startAfter, limit, offset)
 }
 
 func (s *pageSpyDB) ListObjectIDsByScope(ctx context.Context, organization, project string) ([]string, error) {
 	s.listCalls++
-	return s.DatabaseInterface.ListObjectIDsByScope(ctx, organization, project)
+	return s.SqliteDB.ListObjectIDsByScope(ctx, organization, project)
 }
 
 func registerScopedCandidate(t *testing.T, om *ObjectManager, id, checksum, org, project string) {
@@ -102,7 +101,7 @@ func TestGetObjectUsesGlobalSHAIdentityAcrossUUIDs(t *testing.T) {
 		}
 	}
 
-	om := NewObjectManager(database, nil)
+	om := newTestObjectManager(database, nil)
 	ctx := buildLocalAuthzContext(map[string]map[string]bool{
 		firstResource: {"read": true},
 	})
@@ -180,7 +179,7 @@ func TestGetObjectKeepsCanonicalContentPublicWhenAnySiblingIsPublic(t *testing.T
 		}
 	}
 
-	om := NewObjectManager(database, nil)
+	om := newTestObjectManager(database, nil)
 	got, err := om.GetObject(buildLocalAuthzContext(nil), "controlled-uuid", "read")
 	if err != nil {
 		t.Fatalf("public checksum family should be readable: %v", err)
@@ -206,7 +205,7 @@ func TestGetObjectPrefersSHAIdentityOverCollidingPhysicalID(t *testing.T) {
 		}
 	}
 
-	got, err := NewObjectManager(database, nil).GetObject(context.Background(), requestedSHA, "")
+	got, err := newTestObjectManager(database, nil).GetObject(context.Background(), requestedSHA, "")
 	if err != nil {
 		t.Fatalf("GetObject failed: %v", err)
 	}
@@ -231,14 +230,14 @@ func TestGetBulkObjectsUsesGlobalSHAIdentity(t *testing.T) {
 	}
 
 	ctx := buildLocalAuthzContext(map[string]map[string]bool{firstResource: {"read": true}})
-	got, err := NewObjectManager(database, nil).GetBulkObjects(ctx, []string{"bulk-b"}, "read")
+	got, err := newTestObjectManager(database, nil).GetBulkObjects(ctx, []string{"bulk-b"}, "read")
 	if err != nil {
 		t.Fatalf("GetBulkObjects failed: %v", err)
 	}
 	if len(got) != 1 || got[0].Id != "bulk-a" || got[0].ControlledAccess == nil || len(*got[0].ControlledAccess) != 2 {
 		t.Fatalf("bulk read did not return the merged checksum identity: %+v", got)
 	}
-	view, err := NewObjectManager(database, nil).GetCanonicalContent(ctx, checksum, "read")
+	view, err := newTestObjectManager(database, nil).GetCanonicalContent(ctx, checksum, "read")
 	if err != nil {
 		t.Fatalf("GetCanonicalContent(checksum) failed: %v", err)
 	}
@@ -268,7 +267,7 @@ func TestCanonicalContentMetadataIsDeterministicOnTimestampTie(t *testing.T) {
 
 func TestListObjectIDsPageByChecksum_ReturnsCanonicalContentID(t *testing.T) {
 	database := testutils.NewInMemoryDB()
-	om := NewObjectManager(database, nil)
+	om := newTestObjectManager(database, nil)
 	checksum := "1111111111111111111111111111111111111111111111111111111111111111"
 
 	registerScopedCandidate(t, om, "chk-a", checksum, "org1", "proj1")
@@ -290,7 +289,7 @@ func TestListObjectIDsPageByChecksum_ReturnsCanonicalContentID(t *testing.T) {
 
 func TestListObjectIDsPageByScope_StartAfterAndScopeFilter(t *testing.T) {
 	database := testutils.NewInMemoryDB()
-	om := NewObjectManager(database, nil)
+	om := newTestObjectManager(database, nil)
 	checksumA := "2222222222222222222222222222222222222222222222222222222222222222"
 	checksumB := "3333333333333333333333333333333333333333333333333333333333333333"
 
@@ -308,8 +307,8 @@ func TestListObjectIDsPageByScope_StartAfterAndScopeFilter(t *testing.T) {
 }
 
 func TestListObjectIDsPageByScope_UsesDatabasePaginationForUnrestrictedScope(t *testing.T) {
-	database := &pageSpyDB{DatabaseInterface: testutils.NewInMemoryDB()}
-	om := NewObjectManager(database, nil)
+	database := &pageSpyDB{SqliteDB: testutils.NewInMemoryDB()}
+	om := newTestObjectManager(database, nil)
 
 	registerScopedCandidate(t, om, "scope-a", "2222222222222222222222222222222222222222222222222222222222222222", "org1", "proj1")
 	registerScopedCandidate(t, om, "scope-b", "3333333333333333333333333333333333333333333333333333333333333333", "org1", "proj1")
@@ -331,8 +330,8 @@ func TestListObjectIDsPageByScope_UsesDatabasePaginationForUnrestrictedScope(t *
 }
 
 func TestListObjectIDsPageByScope_FallsBackWhenAuthzRestrictsResources(t *testing.T) {
-	database := &pageSpyDB{DatabaseInterface: testutils.NewInMemoryDB()}
-	om := NewObjectManager(database, nil)
+	database := &pageSpyDB{SqliteDB: testutils.NewInMemoryDB()}
+	om := newTestObjectManager(database, nil)
 
 	registerScopedCandidate(t, om, "secure-obj", "5555555555555555555555555555555555555555555555555555555555555555", "secure", "p1")
 	restrictedCtx := buildLocalAuthzContext(map[string]map[string]bool{
@@ -356,7 +355,7 @@ func TestListObjectIDsPageByScope_FallsBackWhenAuthzRestrictsResources(t *testin
 
 func TestListObjectIDsByScope_AuthzFiltering(t *testing.T) {
 	database := testutils.NewInMemoryDB()
-	om := NewObjectManager(database, nil)
+	om := newTestObjectManager(database, nil)
 	checksum := "5555555555555555555555555555555555555555555555555555555555555555"
 
 	registerScopedCandidate(t, om, "secure-obj", checksum, "secure", "p1")
@@ -411,14 +410,14 @@ func TestObjectMatchesScope(t *testing.T) {
 }
 
 type trackingDB struct {
-	db.DatabaseInterface
+	*sqlite.SqliteDB
 	bulkCalls [][]string
 }
 
 func (t *trackingDB) GetBulkObjects(ctx context.Context, ids []string) ([]objects.Record, error) {
 	copyIDs := append([]string(nil), ids...)
 	t.bulkCalls = append(t.bulkCalls, copyIDs)
-	return t.DatabaseInterface.GetBulkObjects(ctx, ids)
+	return t.SqliteDB.GetBulkObjects(ctx, ids)
 }
 
 func TestPrepareScopedObjects_HydratesOnlyMissingSiblingIDs(t *testing.T) {
@@ -432,8 +431,8 @@ func TestPrepareScopedObjects_HydratesOnlyMissingSiblingIDs(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer raw.Close()
-	tracked := &trackingDB{DatabaseInterface: base}
-	om := NewObjectManager(tracked, nil)
+	tracked := &trackingDB{SqliteDB: base}
+	om := newTestObjectManager(tracked, nil)
 	checksum := "6666666666666666666666666666666666666666666666666666666666666666"
 	controlled := []string{"/organization/org/project/proj"}
 
@@ -518,7 +517,7 @@ func ptrTime(raw string) *time.Time {
 
 func TestReadableChecksumFilter(t *testing.T) {
 	database := testutils.NewInMemoryDB()
-	om := NewObjectManager(database, nil)
+	om := newTestObjectManager(database, nil)
 
 	unenforcedCtx := context.Background()
 	res, includeUnscoped, restrict, ok := om.readableChecksumFilter(unenforcedCtx, "", "")

@@ -94,7 +94,7 @@ func TestPrepareDownloadActions_MapsLegacyReplicaURL(t *testing.T) {
 		},
 	}
 	um := &captureSigningURLManager{}
-	om := core.NewObjectManager(db, um)
+	om := core.NewObjectManager(newLFSDependencies(db), um)
 
 	actions, objErr := prepareDownloadActions(context.Background(), om, oid)
 	if objErr != nil {
@@ -142,7 +142,7 @@ func TestPrepareUploadActionsRequiresGlobalDataFileCreate(t *testing.T) {
 			ctx := access.WithSession(context.Background(), session)
 
 			db := &testutils.MockDatabase{Objects: map[string]*objects.Record{}}
-			om := core.NewObjectManager(db, &testutils.MockUrlManager{})
+			om := core.NewObjectManager(newLFSDependencies(db), &testutils.MockUrlManager{})
 			actions, size, objErr := prepareUploadActions(ctx, om, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", 123, "https://example.test")
 
 			if tc.wantCode != 0 {

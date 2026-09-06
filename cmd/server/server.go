@@ -14,24 +14,89 @@ import (
 	"github.com/gofiber/fiber/v3/middleware/recover"
 	"github.com/spf13/cobra"
 
+	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/access/authentication"
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/config"
 	"github.com/calypr/syfon/internal/core"
-	"github.com/calypr/syfon/internal/crypto"
-	"github.com/calypr/syfon/internal/db"
-	"github.com/calypr/syfon/internal/db/postgres"
-	"github.com/calypr/syfon/internal/db/sqlite"
+	"github.com/calypr/syfon/internal/credentialcipher"
 	"github.com/calypr/syfon/internal/httpapi/middleware"
+	"github.com/calypr/syfon/internal/persistence/postgres"
+	"github.com/calypr/syfon/internal/persistence/sqlite"
 	"github.com/calypr/syfon/internal/signer/azure"
 	"github.com/calypr/syfon/internal/signer/file"
 	"github.com/calypr/syfon/internal/signer/gcs"
 	"github.com/calypr/syfon/internal/signer/s3"
 	"github.com/calypr/syfon/internal/storage/address"
 	"github.com/calypr/syfon/internal/urlmanager"
+	"github.com/calypr/syfon/internal/usage"
 )
 
 var configFile string
+
+func serviceInfoForBackend(sqlite bool) drs.Service {
+	description := "Calypr-backed DRS server"
+	if sqlite {
+		description += " (SQLite)"
+	}
+	createdAt := time.Now()
+	updatedAt := time.Now()
+	environment := "prod"
+	return drs.Service{
+		Id:          "drs-service-calypr",
+		Name:        "Calypr DRS Server",
+		Type:        drs.ServiceType{Group: "org.ga4gh", Artifact: "drs", Version: "1.2.0"},
+		Description: &description,
+		CreatedAt:   &createdAt,
+		UpdatedAt:   &updatedAt,
+		Environment: &environment,
+		Version:     "1.0.0",
+	}
+}
+
+type serverBackend struct {
+	dependencies  core.Dependencies
+	fileUsage     usage.FileUsageReader
+	transferQuery usage.TransferQuery
+}
+
+func sqliteServerBackend(database *sqlite.SqliteDB) serverBackend {
+	return serverBackend{
+		dependencies: core.Dependencies{
+			Objects: core.ObjectPorts{
+				Reader: database, Writer: database, AccessMethods: database, AccessPolicy: database,
+				Aliases: database, Content: database, ChecksumScope: database, Scope: database,
+				Resources: database, Pages: database, URLPages: database, Authorized: database,
+			},
+			Buckets: core.BucketPorts{
+				Credentials: database, CredentialAdmin: database, Scopes: database, Visibility: database,
+			},
+			Transfers: core.TransferPorts{Pending: database, Events: database},
+			Usage:     core.UsagePorts{Counters: database, ProviderEvents: database},
+		},
+		fileUsage:     database,
+		transferQuery: database,
+	}
+}
+
+func postgresServerBackend(database *postgres.PostgresDB) serverBackend {
+	return serverBackend{
+		dependencies: core.Dependencies{
+			Objects: core.ObjectPorts{
+				Reader: database, Writer: database, AccessMethods: database, AccessPolicy: database,
+				Aliases: database, Content: database, ChecksumScope: database, Scope: database,
+				Resources: database, Pages: database, URLPages: database, Authorized: database,
+			},
+			Buckets: core.BucketPorts{
+				Credentials: database, CredentialAdmin: database, Scopes: database, Visibility: database,
+			},
+			Transfers: core.TransferPorts{Pending: database, Events: database},
+			Usage:     core.UsagePorts{Counters: database, ProviderEvents: database},
+		},
+		fileUsage:     database,
+		transferQuery: database,
+	}
+}
 
 var Cmd = &cobra.Command{
 	Use:     "serve",
@@ -55,7 +120,7 @@ var Cmd = &cobra.Command{
 		}
 
 		// Init DB
-		var database db.DatabaseInterface
+		var backend serverBackend
 		var errDb error
 
 		if cfg.Database.Sqlite != nil {
@@ -65,7 +130,11 @@ var Cmd = &cobra.Command{
 				cfg.Database.Sqlite.File = dbPath
 			}
 			logger.Info("initializing sqlite database", "file", dbPath)
+			var database *sqlite.SqliteDB
 			database, errDb = sqlite.NewSqliteDB(dbPath)
+			if errDb == nil {
+				backend = sqliteServerBackend(database)
+			}
 		} else if cfg.Database.Postgres != nil {
 			dsn := fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=%s",
 				cfg.Database.Postgres.User,
@@ -76,7 +145,11 @@ var Cmd = &cobra.Command{
 				cfg.Database.Postgres.SSLMode,
 			)
 			logger.Info("initializing postgres database", "host", cfg.Database.Postgres.Host, "database", cfg.Database.Postgres.Database)
+			var database *postgres.PostgresDB
 			database, errDb = postgres.NewPostgresDB(dsn)
+			if errDb == nil {
+				backend = postgresServerBackend(database)
+			}
 		} else {
 			fatal("no database configuration provided")
 		}
@@ -89,12 +162,12 @@ var Cmd = &cobra.Command{
 
 		// Load configured bucket credentials if present.
 		if len(cfg.Buckets) > 0 {
-			encryptionEnabled, encErr := crypto.CredentialEncryptionEnabled()
+			encryptionEnabled, encErr := credentialcipher.CredentialEncryptionEnabled()
 			if encErr != nil {
-				fatal("invalid credential encryption configuration", "env", crypto.CredentialMasterKeyEnv, "err", encErr)
+				fatal("invalid credential encryption configuration", "env", credentialcipher.CredentialMasterKeyEnv, "err", encErr)
 			}
 			if !encryptionEnabled {
-				fatal("s3 credential encryption key is required", "env", crypto.CredentialMasterKeyEnv)
+				fatal("s3 credential encryption key is required", "env", credentialcipher.CredentialMasterKeyEnv)
 			}
 
 			logger.Info("loading configured bucket credentials", "count", len(cfg.Buckets))
@@ -109,12 +182,12 @@ var Cmd = &cobra.Command{
 					SecretKey:    c.SecretKey,
 					Endpoint:     c.Endpoint,
 				}
-				if err := database.SaveS3Credential(cmd.Context(), cred); err != nil {
+				if err := backend.dependencies.Buckets.CredentialAdmin.SaveS3Credential(cmd.Context(), cred); err != nil {
 					logger.Error("failed to save s3 credential", "bucket", c.Bucket, "err", err)
 				}
 			}
 		}
-		if err := loadConfiguredBucketScopes(cmd.Context(), database, cfg.BucketScopes, logger); err != nil {
+		if err := loadConfiguredBucketScopes(cmd.Context(), backend.dependencies.Buckets.Credentials, backend.dependencies.Buckets.Scopes, cfg.BucketScopes, logger); err != nil {
 			fatal("failed to load configured bucket scopes", "err", err)
 		}
 
@@ -122,10 +195,11 @@ var Cmd = &cobra.Command{
 		needsUrlManager := cfg.Routes.Ga4gh || cfg.Routes.Internal || cfg.Routes.LFS
 		var uM *urlmanager.Manager
 		if needsUrlManager {
-			uM = urlmanager.NewManager(database, cfg.Signing)
-			uM.RegisterSigner(address.S3Provider, s3.NewS3Signer(database))
-			uM.RegisterSigner(address.GCSProvider, gcs.NewGCSSigner(database))
-			uM.RegisterSigner(address.AzureProvider, azure.NewAzureSigner(database))
+			credentials := backend.dependencies.Buckets.Credentials
+			uM = urlmanager.NewManager(credentials, cfg.Signing)
+			uM.RegisterSigner(address.S3Provider, s3.NewS3Signer(credentials))
+			uM.RegisterSigner(address.GCSProvider, gcs.NewGCSSigner(credentials))
+			uM.RegisterSigner(address.AzureProvider, azure.NewAzureSigner(credentials))
 			fSigner, fErr := file.NewFileSigner("/")
 			if fErr == nil {
 				uM.RegisterSigner(address.FileProvider, fSigner)
@@ -135,7 +209,7 @@ var Cmd = &cobra.Command{
 		}
 
 		// Init unified Object Manager.
-		om := core.NewObjectManager(database, uM)
+		om := core.NewObjectManager(backend.dependencies, uM)
 
 		// Build Fiber runtime and middleware pipeline.
 		app := fiber.New(fiber.Config{
@@ -165,7 +239,10 @@ var Cmd = &cobra.Command{
 		rt := &serverRuntime{
 			app:                 app,
 			cfg:                 cfg,
-			database:            database,
+			fileUsage:           backend.fileUsage,
+			transferQuery:       backend.transferQuery,
+			providerEvents:      backend.dependencies.Usage.ProviderEvents,
+			serviceInfo:         serviceInfoForBackend(cfg.Database.Sqlite != nil),
 			om:                  om,
 			uM:                  uM,
 			authzMiddleware:     authzMiddleware,
@@ -205,7 +282,7 @@ var Cmd = &cobra.Command{
 	},
 }
 
-func loadConfiguredBucketScopes(ctx context.Context, database db.DatabaseInterface, scopes []config.BucketScopeConfig, logger *slog.Logger) error {
+func loadConfiguredBucketScopes(ctx context.Context, credentials buckets.CredentialReader, scopeStore buckets.ScopeStore, scopes []config.BucketScopeConfig, logger *slog.Logger) error {
 	if len(scopes) == 0 {
 		return nil
 	}
@@ -215,14 +292,14 @@ func loadConfiguredBucketScopes(ctx context.Context, database db.DatabaseInterfa
 		if credentialID == "" {
 			credentialID = strings.TrimSpace(scope.Bucket)
 		}
-		cred, err := database.GetS3Credential(ctx, credentialID)
+		cred, err := credentials.GetS3Credential(ctx, credentialID)
 		if err != nil {
 			return fmt.Errorf("bucket_scopes[%d] bucket=%s credential lookup failed: %w", i, scope.Bucket, err)
 		}
 		if cred == nil {
 			return fmt.Errorf("bucket_scopes[%d] bucket=%s credential not found", i, scope.Bucket)
 		}
-		if err := database.CreateBucketScope(ctx, &buckets.Scope{
+		if err := scopeStore.CreateBucketScope(ctx, &buckets.Scope{
 			Organization: scope.Organization,
 			ProjectID:    scope.ProjectID,
 			CredentialID: credentialID,
@@ -239,19 +316,19 @@ func applyCredentialEncryptionConfig(cfg *config.Config) {
 	if cfg == nil {
 		return
 	}
-	if strings.TrimSpace(os.Getenv(crypto.CredentialMasterKeyEnv)) == "" {
+	if strings.TrimSpace(os.Getenv(credentialcipher.CredentialMasterKeyEnv)) == "" {
 		if masterKey := strings.TrimSpace(cfg.CredentialEncryption.MasterKey); masterKey != "" {
-			os.Setenv(crypto.CredentialMasterKeyEnv, masterKey)
+			os.Setenv(credentialcipher.CredentialMasterKeyEnv, masterKey)
 		}
 	}
-	if strings.TrimSpace(os.Getenv(crypto.CredentialLocalKeyFileEnv)) == "" {
+	if strings.TrimSpace(os.Getenv(credentialcipher.CredentialLocalKeyFileEnv)) == "" {
 		if localKeyFile := strings.TrimSpace(cfg.CredentialEncryption.LocalKeyFile); localKeyFile != "" {
-			os.Setenv(crypto.CredentialLocalKeyFileEnv, localKeyFile)
+			os.Setenv(credentialcipher.CredentialLocalKeyFileEnv, localKeyFile)
 		}
 	}
-	if strings.TrimSpace(os.Getenv(crypto.DatabaseSQLiteFileEnv)) == "" && cfg.Database.Sqlite != nil {
+	if strings.TrimSpace(os.Getenv(credentialcipher.DatabaseSQLiteFileEnv)) == "" && cfg.Database.Sqlite != nil {
 		if sqliteFile := strings.TrimSpace(cfg.Database.Sqlite.File); sqliteFile != "" {
-			os.Setenv(crypto.DatabaseSQLiteFileEnv, sqliteFile)
+			os.Setenv(credentialcipher.DatabaseSQLiteFileEnv, sqliteFile)
 		}
 	}
 }

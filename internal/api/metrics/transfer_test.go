@@ -51,7 +51,7 @@ func TestMetricsRoutes_TransferAttribution(t *testing.T) {
 		},
 	}
 	app := fiber.New()
-	RegisterMetricsRoutes(app, db)
+	registerMetricsRoutesForTest(app, db)
 
 	body := `{"events":[{
 		"provider_event_id":"event-download-1",
@@ -188,7 +188,7 @@ func TestMetricsRoutes_TransferAttributionAuthz(t *testing.T) {
 		}
 		return c.Next()
 	})
-	RegisterMetricsRoutes(app, db)
+	registerMetricsRoutesForTest(app, db)
 
 	projectPrivs, _ := json.Marshal(map[string]map[string]bool{
 		"/programs/calypr/projects/proj-a": {"read": true},
@@ -285,7 +285,7 @@ func TestMetricsRoutes_TransferAttributionAuthz(t *testing.T) {
 
 func TestMetricsRoutes_NoLegacyDownloadAttributionRoutes(t *testing.T) {
 	app := fiber.New()
-	RegisterMetricsRoutes(app, &testutils.MockDatabase{})
+	registerMetricsRoutesForTest(app, &testutils.MockDatabase{})
 
 	for _, tc := range []struct {
 		method string

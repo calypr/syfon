@@ -42,7 +42,7 @@ func newLFSRouterWithOptions(opts Options) (*fiberTestRouter, *testutils.MockDat
 	}
 	uM := &testutils.MockUrlManager{}
 	app := fiber.New()
-	om := core.NewObjectManager(db, uM)
+	om := core.NewObjectManager(newLFSDependencies(db), uM)
 	RegisterLFSRoutes(app, om, opts)
 	return &fiberTestRouter{app: app}, db
 }
@@ -58,7 +58,7 @@ func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 }
 
 func resolveObjectForOID(ctx context.Context, database *testutils.MockDatabase, oid string) (*objects.Record, error) {
-	om := core.NewObjectManager(database, nil)
+	om := core.NewObjectManager(newLFSDependencies(database), nil)
 	return om.GetObject(ctx, oid, "")
 }
 

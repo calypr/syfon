@@ -1,6 +1,6 @@
 # Syfon architecture and reorganization
 
-This page describes the current Syfon layout at the 2026-09-04 audit baseline. It replaces the old directory-move proposal that this file used to contain. The dependency map and accepted worklist below are self-contained.
+This page is a historical snapshot of the Syfon layout at the 2026-09-04 audit baseline. It replaces the older directory-move proposal that this file used to contain, but it does not describe the post-audit architecture. Use `docs/internal-architecture-plan/` and the current source tree for active package ownership.
 
 ## Current dependency map
 

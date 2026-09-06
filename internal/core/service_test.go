@@ -239,7 +239,7 @@ func TestObjectManagerGetObjectLookupPaths(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			om := NewObjectManager(tc.db, &capturingURLManager{})
+			om := newTestObjectManager(tc.db, &capturingURLManager{})
 			obj, err := om.GetObject(tc.ctx, tc.ident, tc.method)
 			if tc.wantErr != nil {
 				if !errors.Is(err, tc.wantErr) {
@@ -277,7 +277,7 @@ func TestObjectManagerGetObjectAuthzParity(t *testing.T) {
 					},
 				},
 			}
-			om := NewObjectManager(db, &capturingURLManager{})
+			om := newTestObjectManager(db, &capturingURLManager{})
 			resource := "/programs/org/projects/project"
 
 			if _, err := om.GetObject(buildCtx(map[string]map[string]bool{
@@ -300,7 +300,7 @@ func TestObjectManagerCredentialWritesInvalidateSignerCache(t *testing.T) {
 	ctx := context.Background()
 	db := &coreTestDB{MockDatabase: &testutils.MockDatabase{}}
 	um := &capturingURLManager{}
-	om := NewObjectManager(db, um)
+	om := newTestObjectManager(db, um)
 
 	cred := &buckets.Credential{Bucket: "b1", Provider: "s3", Region: "us-east-1", AccessKey: "a", SecretKey: "s"}
 	if err := om.SaveS3Credential(ctx, cred); err != nil {
@@ -321,7 +321,7 @@ func TestObjectManagerCredentialWritesInvalidateSignerCache(t *testing.T) {
 func TestBucketCatalogCachesMissingScopeLookup(t *testing.T) {
 	ctx := context.Background()
 	mockDB := &testutils.MockDatabase{}
-	om := NewObjectManager(&coreTestDB{MockDatabase: mockDB}, nil)
+	om := newTestObjectManager(&coreTestDB{MockDatabase: mockDB}, nil)
 
 	if scope, found, err := om.bucketCatalog.lookupBucketScope(ctx, "missing-org", "missing-project"); err != nil {
 		t.Fatalf("first scope lookup failed: %v", err)
@@ -350,7 +350,7 @@ func TestBucketCatalogDeleteScopeInvalidatesLookupCache(t *testing.T) {
 			},
 		},
 	}
-	om := NewObjectManager(&coreTestDB{MockDatabase: mockDB}, nil)
+	om := newTestObjectManager(&coreTestDB{MockDatabase: mockDB}, nil)
 
 	if _, found, err := om.bucketCatalog.lookupBucketScope(ctx, "org", "project"); err != nil || !found {
 		t.Fatalf("expected initial scope lookup to succeed, found=%t err=%v", found, err)
@@ -400,7 +400,7 @@ func TestObjectManagerBulkReadFiltering(t *testing.T) {
 			},
 		},
 	}
-	om := NewObjectManager(db, &capturingURLManager{})
+	om := newTestObjectManager(db, &capturingURLManager{})
 	ctx := buildGen3Context(map[string]map[string]bool{
 		"/programs/org/projects/one": {"read": true},
 	})
@@ -428,7 +428,7 @@ func TestObjectManagerBulkReadFiltering(t *testing.T) {
 func TestObjectManagerLifecycleAuthorization(t *testing.T) {
 	t.Run("register enforces create on candidate resources", func(t *testing.T) {
 		db := &coreTestDB{MockDatabase: &testutils.MockDatabase{}}
-		om := NewObjectManager(db, &capturingURLManager{})
+		om := newTestObjectManager(db, &capturingURLManager{})
 		obj := objects.Record{
 			Id:             "new-object",
 			Authorizations: map[string][]string{"org": {"project"}},
@@ -461,7 +461,7 @@ func TestObjectManagerLifecycleAuthorization(t *testing.T) {
 
 	t.Run("replace requires current update and new grant create with read", func(t *testing.T) {
 		database := testutils.NewInMemoryDB()
-		om := NewObjectManager(database, &capturingURLManager{})
+		om := newTestObjectManager(database, &capturingURLManager{})
 		if err := om.RegisterObjects(context.Background(), []objects.Record{{
 			Id:             "obj",
 			Authorizations: map[string][]string{"old": {"scope"}},
@@ -511,7 +511,7 @@ func TestObjectManagerLifecycleAuthorization(t *testing.T) {
 				"keep-me":   {"org": {"read"}},
 			},
 		}}
-		om := NewObjectManager(db, &capturingURLManager{})
+		om := newTestObjectManager(db, &capturingURLManager{})
 		ctx := buildGen3Context(map[string]map[string]bool{
 			"/programs/org/projects/delete": {"delete": true},
 		})
@@ -541,7 +541,7 @@ func TestObjectManagerLifecycleAuthorization(t *testing.T) {
 				"obj": {"org": {"project"}},
 			},
 		}}
-		om := NewObjectManager(db, &capturingURLManager{})
+		om := newTestObjectManager(db, &capturingURLManager{})
 		deniedCtx := buildGen3Context(map[string]map[string]bool{
 			"/programs/org/projects/project": {"read": true},
 		})
@@ -581,7 +581,7 @@ func TestObjectManagerLifecycleAuthorization(t *testing.T) {
 				"obj-2": {"org": {"two"}},
 			},
 		}}
-		om := NewObjectManager(db, &capturingURLManager{})
+		om := newTestObjectManager(db, &capturingURLManager{})
 		ctx := buildGen3Context(map[string]map[string]bool{
 			"/programs/org/projects/one": {"read": true},
 		})
@@ -618,7 +618,7 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 				},
 			},
 		}
-		om := NewObjectManager(db, &capturingURLManager{})
+		om := newTestObjectManager(db, &capturingURLManager{})
 		ctx := buildGen3Context(map[string]map[string]bool{
 			"/programs/a":              {"delete": true},
 			"/programs/a/projects/one": {"delete": true},
@@ -652,7 +652,7 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 				},
 			},
 		}
-		om := NewObjectManager(db, &capturingURLManager{})
+		om := newTestObjectManager(db, &capturingURLManager{})
 		ctx := buildGen3Context(map[string]map[string]bool{
 			"/programs/a/projects/one": {"update": true},
 		})
@@ -680,7 +680,7 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 				{Bucket: "secondary", Provider: "s3"},
 			},
 		}
-		om := NewObjectManager(db, &capturingURLManager{})
+		om := newTestObjectManager(db, &capturingURLManager{})
 
 		got, err := om.ResolveBucket(context.Background(), "")
 		if err != nil {
@@ -708,7 +708,7 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 			MockDatabase: &testutils.MockDatabase{},
 		}
 		um := &capturingURLManager{}
-		om := NewObjectManager(db, um)
+		om := newTestObjectManager(db, um)
 
 		signed, err := om.SignURL(context.Background(), "s3://bucket-a/path/to/object", urlmanager.SignOptions{})
 		if err != nil {
@@ -769,7 +769,7 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 			MockDatabase: mockDB,
 		}
 		um := &capturingURLManager{}
-		om := NewObjectManager(db, um)
+		om := newTestObjectManager(db, um)
 		obj := &objects.Record{
 			Authorizations: map[string][]string{"calypr": {"training"}},
 		}
@@ -806,7 +806,7 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 		}
 		db := &coreTestDB{MockDatabase: mockDB}
 		um := &capturingURLManager{}
-		om := NewObjectManager(db, um)
+		om := newTestObjectManager(db, um)
 		obj := &objects.Record{
 
 			ControlledAccess: &[]string{"/programs/gdc_mirror/projects/gdc_mirror"},
@@ -836,7 +836,7 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 			},
 		}
 		um := &capturingURLManager{}
-		om := NewObjectManager(db, um)
+		om := newTestObjectManager(db, um)
 		obj := &objects.Record{
 			Authorizations: map[string][]string{"calypr": {"training"}},
 		}
@@ -869,7 +869,7 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 			},
 		}
 		um := &capturingURLManager{}
-		om := NewObjectManager(db, um)
+		om := newTestObjectManager(db, um)
 		obj := &objects.Record{
 
 			Checksums: []objects.Checksum{{
@@ -917,7 +917,7 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 				},
 			},
 		}
-		om := NewObjectManager(mockDB, &capturingURLManager{})
+		om := newTestObjectManager(mockDB, &capturingURLManager{})
 		obj, err := mockDB.GetObject(context.Background(), "obj-delete")
 		if err != nil {
 			t.Fatalf("GetObject failed: %v", err)
@@ -960,7 +960,7 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 
 		t.Run("download", func(t *testing.T) {
 			um := &capturingURLManager{}
-			om := NewObjectManager(db, um)
+			om := newTestObjectManager(db, um)
 			signed, err := om.SignObjectURL(context.Background(), obj, sourceURL, urlmanager.SignOptions{})
 			if err != nil {
 				t.Fatalf("SignObjectURL download failed: %v", err)
@@ -978,7 +978,7 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 
 		t.Run("upload", func(t *testing.T) {
 			um := &capturingURLManager{}
-			om := NewObjectManager(db, um)
+			om := newTestObjectManager(db, um)
 			signed, err := om.SignObjectURL(context.Background(), obj, sourceURL, urlmanager.SignOptions{Method: "PUT"})
 			if err != nil {
 				t.Fatalf("SignObjectURL upload failed: %v", err)
@@ -996,7 +996,7 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 
 		t.Run("download part", func(t *testing.T) {
 			um := &capturingURLManager{}
-			om := NewObjectManager(db, um)
+			om := newTestObjectManager(db, um)
 			partURL, err := om.SignObjectDownloadPart(context.Background(), obj, "bforepc-prod", sourceURL, 0, 1023, urlmanager.SignOptions{})
 			if err != nil {
 				t.Fatalf("SignObjectDownloadPart failed: %v", err)
@@ -1026,7 +1026,7 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 				},
 			},
 		}
-		om := NewObjectManager(db, &capturingURLManager{})
+		om := newTestObjectManager(db, &capturingURLManager{})
 		obj := &objects.Record{
 
 			Id: "00664eeb-830c-5fe4-b48c-054cd9c8e02f",
@@ -1061,7 +1061,7 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 		mockDB := &testutils.MockDatabase{}
 		db := &coreTestDB{MockDatabase: mockDB}
 		um := &capturingURLManager{}
-		om := NewObjectManager(db, um)
+		om := newTestObjectManager(db, um)
 		if err := om.CreateBucketScope(context.Background(), &buckets.Scope{
 			Organization: "calypr",
 			ProjectID:    "training",
