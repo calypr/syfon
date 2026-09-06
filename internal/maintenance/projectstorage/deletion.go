@@ -7,8 +7,6 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/calypr/syfon/internal/faults"
-	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/storage"
 	"github.com/calypr/syfon/internal/storage/address"
 )
@@ -18,13 +16,13 @@ const deleteMethod = "delete"
 // DeleteProjectObjects authorizes each URL against the resolved S3 scope,
 // deduplicates in first-seen order, and dispatches exact physical URLs one at
 // a time. This preserves per-item provider failures and retry ordering.
-func (s *Service) DeleteProjectObjects(ctx context.Context, organization, project string, objectURLs []string) []DeleteResult {
+func (s *ProjectCleanup) DeleteProjectObjects(ctx context.Context, organization, project string, objectURLs []string) []DeleteResult {
 	ctx = withRequestCache(ctx)
 	unique := uniqueURLs(objectURLs)
 	if len(unique) == 0 {
 		return []DeleteResult{}
 	}
-	target, err := s.resolveScope(ctx, organization, project, deleteMethod)
+	target, err := s.inspector.resolveScope(ctx, organization, project, deleteMethod)
 	if err != nil {
 		results := make([]DeleteResult, 0, len(unique))
 		for _, objectURL := range unique {
@@ -35,7 +33,7 @@ func (s *Service) DeleteProjectObjects(ctx context.Context, organization, projec
 	results := make([]DeleteResult, 0, len(unique))
 	for _, objectURL := range unique {
 		result := DeleteResult{ObjectURL: objectURL, Status: "deleted"}
-		candidate, parseStatus, parseErr := parseDeleteURL(ctx, s, objectURL)
+		candidate, parseStatus, parseErr := parseDeleteURL(ctx, s.inspector, objectURL)
 		switch {
 		case parseErr != nil:
 			result.Status = "error"
@@ -63,7 +61,7 @@ func (s *Service) DeleteProjectObjects(ctx context.Context, organization, projec
 // DeleteProjectData performs the project cleanup sequence: catalog objects
 // are removed first, then matching bucket scopes are listed and deleted in
 // repository order. A scope count includes only successful deletions.
-func (s *Service) DeleteProjectData(ctx context.Context, organization, project string) (ProjectCleanupResult, error) {
+func (s *ProjectCleanup) DeleteProjectData(ctx context.Context, organization, project string) (ProjectCleanupResult, error) {
 	result := ProjectCleanupResult{Organization: strings.TrimSpace(organization), ProjectID: strings.TrimSpace(project)}
 	if s.cleanupObjects == nil || s.cleanupScopes == nil {
 		return result, &Error{Kind: ErrorUnsupported, Message: "project cleanup dependencies are not configured"}
@@ -102,7 +100,7 @@ type deleteCandidate struct {
 	key      string
 }
 
-func parseDeleteURL(ctx context.Context, service *Service, raw string) (deleteCandidate, string, error) {
+func parseDeleteURL(ctx context.Context, service *Inspector, raw string) (deleteCandidate, string, error) {
 	parsed, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil {
 		return deleteCandidate{}, "", fmt.Errorf("parse access url %q: %w", raw, err)
@@ -161,14 +159,4 @@ func mapStorageDeleteError(err error) error {
 		return operation.Cause
 	}
 	return err
-}
-
-// DeleteObjectStorage deliberately retains the safety contract of the old
-// facade. Physical replica deletion is not activated by maintenance moves.
-func (s *Service) DeleteObjectStorage(context.Context, *objects.Record) error {
-	return faults.ErrConflict
-}
-
-func (s *Service) DeleteObjectsStorage(context.Context, []objects.Record) error {
-	return faults.ErrConflict
 }

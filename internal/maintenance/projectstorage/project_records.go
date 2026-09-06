@@ -12,7 +12,7 @@ import (
 // inspection route. Unlike prepared inventory reads, it intentionally keeps
 // same-checksum physical duplicates visible and only emits records carrying a
 // primary SHA-256 checksum.
-func (s *Service) AuditProjectRecords(ctx context.Context, organization, project, requestPrefix string) ([]ProjectRecordAudit, error) {
+func (s *Inspector) AuditProjectRecords(ctx context.Context, organization, project, requestPrefix string) ([]ProjectRecordAudit, error) {
 	organization = strings.TrimSpace(organization)
 	project = strings.TrimSpace(project)
 	if organization == "" || project == "" {

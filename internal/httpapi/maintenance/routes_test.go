@@ -44,7 +44,8 @@ func TestInspectObjectRejectsMalformedURLWithExistingStatusAndBody(t *testing.T)
 		c.SetContext(request.Context())
 		return c.Next()
 	})
-	RegisterInspectionRoutes(app, projectstorage.NewService(projectstorage.Dependencies{}), nil)
+	service := projectstorage.NewService(projectstorage.Dependencies{})
+	RegisterInspectionRoutes(app, service.Inspector, service.ProjectCleanup, nil)
 
 	response, err := app.Test(request)
 	if err != nil {
@@ -71,7 +72,8 @@ func TestInspectObjectUsesStrictJSONDecoding(t *testing.T) {
 		c.SetContext(request.Context())
 		return c.Next()
 	})
-	RegisterInspectionRoutes(app, projectstorage.NewService(projectstorage.Dependencies{}), nil)
+	service := projectstorage.NewService(projectstorage.Dependencies{})
+	RegisterInspectionRoutes(app, service.Inspector, service.ProjectCleanup, nil)
 
 	response, err := app.Test(request)
 	if err != nil {
@@ -124,7 +126,7 @@ func TestRegisterRepairRoutesPreservesOrder(t *testing.T) {
 
 func TestRegisterInspectionRoutesPreservesOrder(t *testing.T) {
 	app := fiber.New()
-	RegisterInspectionRoutes(app, nil, nil)
+	RegisterInspectionRoutes(app, nil, nil, nil)
 
 	want := []string{
 		RouteInspectObject,

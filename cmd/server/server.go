@@ -341,18 +341,19 @@ var Cmd = &cobra.Command{
 		requestIDMiddleware := middleware.NewRequestIDMiddleware(slogLogger)
 
 		rt := &serverRuntime{
-			app:                   app,
-			cfg:                   cfg,
-			serviceInfo:           serviceInfoForBackend(cfg.Database.Sqlite != nil),
-			objectService:         objectService,
-			transferService:       transferService,
-			usageService:          usageService,
-			usageIngest:           backend.usageIngest,
-			projectStorageService: projectStorageService,
-			scopeRepairService:    scopeRepairService,
-			bucketService:         bucketService,
-			authzMiddleware:       authzMiddleware,
-			requestIDMiddleware:   requestIDMiddleware,
+			app:                 app,
+			cfg:                 cfg,
+			serviceInfo:         serviceInfoForBackend(cfg.Database.Sqlite != nil),
+			objectService:       objectService,
+			transferService:     transferService,
+			usageService:        usageService,
+			usageIngest:         backend.usageIngest,
+			projectInspector:    projectStorageService.Inspector,
+			projectCleanup:      projectStorageService.ProjectCleanup,
+			scopeRepairService:  scopeRepairService,
+			bucketService:       bucketService,
+			authzMiddleware:     authzMiddleware,
+			requestIDMiddleware: requestIDMiddleware,
 		}
 		registerServerRoutes(rt)
 

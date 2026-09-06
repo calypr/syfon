@@ -18,7 +18,7 @@ type projectCleanupResponse struct {
 	DeletedBucketScopes int    `json:"deleted_bucket_scopes"`
 }
 
-func handleInternalDeleteProjectFiber(c fiber.Ctx, service *projectstorage.Service) error {
+func handleInternalDeleteProjectFiber(c fiber.Ctx, service *projectstorage.ProjectCleanup) error {
 	if service == nil {
 		return response.HandleError(c, &projectstorage.Error{Kind: projectstorage.ErrorUnsupported, Message: "project storage service is not configured"})
 	}

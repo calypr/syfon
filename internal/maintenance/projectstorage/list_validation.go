@@ -23,7 +23,7 @@ type validationWork struct {
 // inventory evidence. Exact targets are deduplicated, dense sibling keys are
 // coalesced at the historical threshold, and output is always restored to
 // input order including duplicate requests.
-func (s *Service) ValidateInventoryObjects(ctx context.Context, requests []ListValidationRequest) []ListValidationResult {
+func (s *Inspector) ValidateInventoryObjects(ctx context.Context, requests []ListValidationRequest) []ListValidationResult {
 	ctx = withRequestCache(ctx)
 	if len(requests) == 0 {
 		return []ListValidationResult{}
@@ -84,7 +84,7 @@ func (s *Service) ValidateInventoryObjects(ctx context.Context, requests []ListV
 	return results
 }
 
-func (s *Service) validationTarget(ctx context.Context, request ListValidationRequest, index int, visible map[string]buckets.VisibleBucket, visibleErr error) (ListValidationResult, *validationWork, bool) {
+func (s *Inspector) validationTarget(ctx context.Context, request ListValidationRequest, index int, visible map[string]buckets.VisibleBucket, visibleErr error) (ListValidationResult, *validationWork, bool) {
 	base := ListValidationResult{
 		ID:               strings.TrimSpace(request.ID),
 		ObjectURL:        strings.TrimSpace(request.ObjectURL),
@@ -158,7 +158,7 @@ func cloneValidationWork(input map[string]*validationWork) map[string]*validatio
 	return output
 }
 
-func (s *Service) runCoalescedValidation(ctx context.Context, group []*validationWork, outcomes map[string]ListValidationResult, matched map[string]StorageObject, unresolved map[string]*validationWork) {
+func (s *Inspector) runCoalescedValidation(ctx context.Context, group []*validationWork, outcomes map[string]ListValidationResult, matched map[string]StorageObject, unresolved map[string]*validationWork) {
 	if len(group) == 0 {
 		return
 	}
@@ -194,7 +194,7 @@ func (s *Service) runCoalescedValidation(ctx context.Context, group []*validatio
 	}
 }
 
-func (s *Service) runExactValidation(ctx context.Context, unresolved map[string]*validationWork, outcomes map[string]ListValidationResult, matched map[string]StorageObject) {
+func (s *Inspector) runExactValidation(ctx context.Context, unresolved map[string]*validationWork, outcomes map[string]ListValidationResult, matched map[string]StorageObject) {
 	keys := make([]string, 0, len(unresolved))
 	for key := range unresolved {
 		keys = append(keys, key)

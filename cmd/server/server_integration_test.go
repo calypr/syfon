@@ -149,13 +149,14 @@ s3_credentials:
 	projectStorageService := projectstorage.NewService(projectstorage.Dependencies{Scopes: bucketService, Credentials: bucketService, Visibility: bucketService, Inventory: storageManager, Probe: storageManager, Delete: storageManager, Physical: objectService, CleanupObjects: objectService, CleanupScopes: bucketService})
 	scopeRepairService := newScopeRepairService(objectService, bucketService, storageManager)
 	httpapi.RegisterRoutes(app, httpapi.Dependencies{
-		Objects:        objectService,
-		Transfers:      transferService,
-		UsageIngest:    backend.usageIngest,
-		UsageReports:   usageService.Reports(),
-		Buckets:        bucketService,
-		ProjectStorage: projectStorageService,
-		ScopeRepair:    scopeRepairService,
+		Objects:          objectService,
+		Transfers:        transferService,
+		UsageIngest:      backend.usageIngest,
+		UsageReports:     usageService.Reports(),
+		Buckets:          bucketService,
+		ProjectInspector: projectStorageService.Inspector,
+		ProjectCleanup:   projectStorageService.ProjectCleanup,
+		ScopeRepair:      scopeRepairService,
 	}, httpapi.Options{Internal: true})
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")

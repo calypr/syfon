@@ -23,16 +23,17 @@ import (
 const RouteHealthz = "/healthz"
 
 type Dependencies struct {
-	ServiceInfo    generated.Service
-	Objects        *objects.Service
-	Transfers      *transfers.Service
-	UsageIngest    usage.Ingestor
-	UsageReports   usage.Reporter
-	Buckets        *buckets.Service
-	ProjectStorage *projectstorage.Service
-	ScopeRepair    *scoperepair.Service
-	Authorization  *middleware.AuthzMiddleware
-	RequestIDs     *middleware.RequestIDMiddleware
+	ServiceInfo      generated.Service
+	Objects          *objects.Service
+	Transfers        *transfers.Service
+	UsageIngest      usage.Ingestor
+	UsageReports     usage.Reporter
+	Buckets          *buckets.Service
+	ProjectInspector *projectstorage.Inspector
+	ProjectCleanup   *projectstorage.ProjectCleanup
+	ScopeRepair      *scoperepair.Service
+	Authorization    *middleware.AuthzMiddleware
+	RequestIDs       *middleware.RequestIDMiddleware
 }
 
 type Options struct {
@@ -78,10 +79,10 @@ func RegisterRoutes(app fiber.Router, deps Dependencies, options Options) {
 		records.RegisterRoutes(api, deps.Objects)
 		maintenance.RegisterRepairRoutes(api, deps.ScopeRepair)
 		httptransfers.RegisterObjectRoutes(api, deps.Objects, deps.Transfers, deps.UsageIngest)
-		maintenance.RegisterInspectionRoutes(api, deps.ProjectStorage, deps.Buckets)
+		maintenance.RegisterInspectionRoutes(api, deps.ProjectInspector, deps.ProjectCleanup, deps.Buckets)
 		httptransfers.RegisterBulkAndMultipartRoutes(api, deps.Objects, deps.Transfers)
 		httpbuckets.RegisterRoutes(api, deps.Buckets)
-		maintenance.RegisterProjectCleanupRoute(api, deps.ProjectStorage)
+		maintenance.RegisterProjectCleanupRoute(api, deps.ProjectCleanup)
 	}
 	if options.LFS {
 		lfs.RegisterLFSRoutes(api, lfs.Dependencies{

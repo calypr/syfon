@@ -171,7 +171,7 @@ type internalDeleteProjectBucketObjectsItem struct {
 	Error     string `json:"error,omitempty"`
 }
 
-func handleInternalInspectObjectFiber(service *projectstorage.Service) fiber.Handler {
+func handleInternalInspectObjectFiber(service *projectstorage.Inspector) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		if apimiddleware.MissingGen3AuthHeader(c.Context()) {
 			return c.SendStatus(fiber.StatusUnauthorized)
@@ -210,7 +210,7 @@ func handleInternalInspectObjectFiber(service *projectstorage.Service) fiber.Han
 	}
 }
 
-func handleInternalInspectObjectBulkFiber(service *projectstorage.Service) fiber.Handler {
+func handleInternalInspectObjectBulkFiber(service *projectstorage.Inspector) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		if apimiddleware.MissingGen3AuthHeader(c.Context()) {
 			return c.SendStatus(fiber.StatusUnauthorized)
@@ -244,7 +244,7 @@ func handleInternalInspectObjectBulkFiber(service *projectstorage.Service) fiber
 	}
 }
 
-func handleInternalInspectObjectBulkListFiber(service *projectstorage.Service) fiber.Handler {
+func handleInternalInspectObjectBulkListFiber(service *projectstorage.Inspector) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		started := time.Now()
 		if apimiddleware.MissingGen3AuthHeader(c.Context()) {
@@ -276,7 +276,7 @@ func handleInternalInspectObjectBulkListFiber(service *projectstorage.Service) f
 	}
 }
 
-func handleInternalInspectProjectBucketFiber(service *projectstorage.Service) fiber.Handler {
+func handleInternalInspectProjectBucketFiber(service *projectstorage.Inspector) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		started := time.Now()
 		if apimiddleware.MissingGen3AuthHeader(c.Context()) {
@@ -311,7 +311,7 @@ func handleInternalInspectProjectBucketFiber(service *projectstorage.Service) fi
 	}
 }
 
-func handleInternalInspectProjectBucketInventoryFiber(service *projectstorage.Service) fiber.Handler {
+func handleInternalInspectProjectBucketInventoryFiber(service *projectstorage.Inspector) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		started := time.Now()
 		if apimiddleware.MissingGen3AuthHeader(c.Context()) {
@@ -345,7 +345,7 @@ func handleInternalInspectProjectBucketInventoryFiber(service *projectstorage.Se
 	}
 }
 
-func handleInternalInspectProjectRecordsFiber(service *projectstorage.Service) fiber.Handler {
+func handleInternalInspectProjectRecordsFiber(service *projectstorage.Inspector) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		if apimiddleware.MissingGen3AuthHeader(c.Context()) {
 			return c.SendStatus(fiber.StatusUnauthorized)
@@ -426,7 +426,7 @@ func handleInternalInspectProjectScopesFiber(bucketService *buckets.Service) fib
 	}
 }
 
-func handleInternalDeleteProjectBucketObjectsFiber(service *projectstorage.Service) fiber.Handler {
+func handleInternalDeleteProjectBucketObjectsFiber(service *projectstorage.ProjectCleanup) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		if apimiddleware.MissingGen3AuthHeader(c.Context()) {
 			return c.SendStatus(fiber.StatusUnauthorized)

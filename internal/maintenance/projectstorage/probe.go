@@ -15,7 +15,7 @@ import (
 
 const maxProbeWorkers = 8
 
-func (s *Service) ProbeObject(ctx context.Context, request InspectRequest) (*ObjectMetadata, error) {
+func (s *Inspector) ProbeObject(ctx context.Context, request InspectRequest) (*ObjectMetadata, error) {
 	ctx = withRequestCache(ctx)
 	if strings.TrimSpace(request.ObjectURL) != "" {
 		return s.inspectRaw(ctx, request)
@@ -23,7 +23,7 @@ func (s *Service) ProbeObject(ctx context.Context, request InspectRequest) (*Obj
 	return s.inspectScoped(ctx, request)
 }
 
-func (s *Service) ProbeObjects(ctx context.Context, requests []InspectRequest) []ProbeResult {
+func (s *Inspector) ProbeObjects(ctx context.Context, requests []InspectRequest) []ProbeResult {
 	ctx = withRequestCache(ctx)
 	if len(requests) == 0 {
 		return []ProbeResult{}
@@ -52,7 +52,7 @@ func (s *Service) ProbeObjects(ctx context.Context, requests []InspectRequest) [
 	return results
 }
 
-func (s *Service) probeOne(ctx context.Context, request InspectRequest) ProbeResult {
+func (s *Inspector) probeOne(ctx context.Context, request InspectRequest) ProbeResult {
 	key := probeCacheKey(request)
 	if cache := cacheFromContext(ctx); cache != nil {
 		if result, ok := cache.probe(key); ok {
@@ -112,7 +112,7 @@ func valueInt64(value *int64) int64 {
 	return *value
 }
 
-func (s *Service) inspectRaw(ctx context.Context, request InspectRequest) (*ObjectMetadata, error) {
+func (s *Inspector) inspectRaw(ctx context.Context, request InspectRequest) (*ObjectMetadata, error) {
 	bucket, key, ok := address.ParseS3URL(strings.TrimSpace(request.ObjectURL))
 	if !ok {
 		return nil, &Error{Kind: ErrorInvalidInput, Message: "object_url must be a valid s3://bucket/key URL"}
@@ -145,7 +145,7 @@ func (s *Service) inspectRaw(ctx context.Context, request InspectRequest) (*Obje
 	return metadata, nil
 }
 
-func (s *Service) inspectScoped(ctx context.Context, request InspectRequest) (*ObjectMetadata, error) {
+func (s *Inspector) inspectScoped(ctx context.Context, request InspectRequest) (*ObjectMetadata, error) {
 	organization := strings.TrimSpace(request.Organization)
 	project := strings.TrimSpace(request.Project)
 	key := strings.Trim(strings.TrimSpace(request.Key), "/")
@@ -211,7 +211,7 @@ func trimLeadingStoragePrefix(key, prefix string) string {
 	return strings.TrimPrefix(key, prefix+"/")
 }
 
-func (s *Service) probeStorage(ctx context.Context, bucket, key string) (*ObjectMetadata, error) {
+func (s *Inspector) probeStorage(ctx context.Context, bucket, key string) (*ObjectMetadata, error) {
 	if s.probe == nil {
 		return nil, &Error{Kind: ErrorUnsupported, Message: "storage probe is not configured"}
 	}
