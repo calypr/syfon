@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"sort"
 	"strings"
 
 	"github.com/calypr/syfon/internal/storage/address"
@@ -136,7 +137,8 @@ func (m *Manager) Probe(ctx context.Context, targets []ProbeTarget) []ProbeResul
 				results[item.index].Err = operationError(ErrorProvider, provider, "probe", fmt.Errorf("backend returned %d results for %d targets", len(provided), len(batch)))
 				continue
 			}
-			results[item.index] = provided[index]
+			results[item.index].Metadata = provided[index].Metadata
+			results[item.index].Err = provided[index].Err
 		}
 	}
 	return results
@@ -157,8 +159,8 @@ func (m *Manager) DeleteExact(ctx context.Context, targets []DeleteTarget) error
 	if len(targets) == 0 {
 		return nil
 	}
-	groups := make(map[string][]PhysicalTarget)
-	providerOrder := make([]string, 0)
+	resolved := make([]PhysicalTarget, 0, len(targets))
+	seen := make(map[string]struct{}, len(targets))
 	for _, target := range targets {
 		physical, ok, err := m.physicalTarget(ctx, target.Location)
 		if err != nil {
@@ -167,28 +169,62 @@ func (m *Manager) DeleteExact(ctx context.Context, targets []DeleteTarget) error
 		if !ok {
 			continue
 		}
-		if _, exists := groups[physical.Provider]; !exists {
-			providerOrder = append(providerOrder, physical.Provider)
+		key := physicalTargetKey(physical)
+		if _, exists := seen[key]; exists {
+			continue
 		}
-		groups[physical.Provider] = append(groups[physical.Provider], physical)
+		seen[key] = struct{}{}
+		resolved = append(resolved, physical)
 	}
-	for _, provider := range providerOrder {
-		registration, err := m.registration(provider, "delete")
-		if err != nil {
+
+	var s3TargetsByBucket map[string][]PhysicalTarget
+	for _, physical := range resolved {
+		if physical.Provider == address.S3Provider {
+			if s3TargetsByBucket == nil {
+				s3TargetsByBucket = make(map[string][]PhysicalTarget)
+			}
+			s3TargetsByBucket[physical.Bucket] = append(s3TargetsByBucket[physical.Bucket], physical)
+			continue
+		}
+		if err := m.deleteTargets(ctx, physical.Provider, []PhysicalTarget{physical}); err != nil {
 			return err
 		}
-		if registration.deleter == nil {
-			return operationError(ErrorUnsupported, provider, "delete", nil)
-		}
-		if err := registration.deleter.Delete(ctx, groups[provider]); err != nil {
+	}
+
+	buckets := make([]string, 0, len(s3TargetsByBucket))
+	for bucket := range s3TargetsByBucket {
+		buckets = append(buckets, bucket)
+	}
+	sort.Strings(buckets)
+	for _, bucket := range buckets {
+		targets := s3TargetsByBucket[bucket]
+		sort.Slice(targets, func(i, j int) bool {
+			return targets[i].Key < targets[j].Key
+		})
+		if err := m.deleteTargets(ctx, address.S3Provider, targets); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
+func (m *Manager) deleteTargets(ctx context.Context, provider string, targets []PhysicalTarget) error {
+	registration, err := m.registration(provider, "delete")
+	if err != nil {
+		return err
+	}
+	if registration.deleter == nil {
+		return operationError(ErrorUnsupported, provider, "delete", nil)
+	}
+	if err := registration.deleter.Delete(ctx, targets); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (m *Manager) InvalidateBucket(bucket string) {
-	if strings.TrimSpace(bucket) == "" {
+	bucket = strings.TrimSpace(bucket)
+	if bucket == "" {
 		return
 	}
 	for _, registration := range m.order {

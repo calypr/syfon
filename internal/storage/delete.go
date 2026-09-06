@@ -30,7 +30,10 @@ func (m *Manager) physicalTarget(ctx context.Context, raw string) (PhysicalTarge
 			return PhysicalTarget{}, false, operationError(ErrorProvider, provider, "delete", lookupErr)
 		}
 		if credential == nil {
-			return PhysicalTarget{}, false, operationError(ErrorNotFound, provider, "delete", fmt.Errorf("credential not found for %q", bucket))
+			if provider == address.FileProvider {
+				return PhysicalTarget{}, false, operationError(ErrorNotFound, provider, "delete", fmt.Errorf("credential not found for %q", bucket))
+			}
+			return PhysicalTarget{Provider: provider, Bucket: bucket, Key: key}, true, nil
 		}
 		provider = address.NormalizeProvider(credential.Provider, provider)
 		if provider == address.FileProvider {
@@ -49,4 +52,8 @@ func (m *Manager) physicalTarget(ctx context.Context, raw string) (PhysicalTarge
 		return PhysicalTarget{Provider: address.FileProvider, Path: filepath.Clean(trimmed)}, true, nil
 	}
 	return PhysicalTarget{}, false, nil
+}
+
+func physicalTargetKey(target PhysicalTarget) string {
+	return target.Provider + "\x00" + target.Bucket + "\x00" + target.Key + "\x00" + target.Path
 }

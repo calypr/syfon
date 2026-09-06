@@ -261,7 +261,12 @@ func TestProbeGroupsByProviderAndRestoresInputOrder(t *testing.T) {
 	s3 := &fakeBackend{provider: "s3", probeResult: func(targets []ProbeTarget) []ProbeResult {
 		results := make([]ProbeResult, len(targets))
 		for i, target := range targets {
-			results[i] = ProbeResult{ID: target.ID, Target: target.Target, Metadata: ObjectMetadata{Bucket: target.Target.Bucket}}
+			results[i] = ProbeResult{
+				ID:       "spoofed-" + target.ID,
+				Target:   ObjectTarget{Bucket: "spoofed-bucket", Key: "spoofed-key"},
+				Metadata: ObjectMetadata{Bucket: target.Target.Bucket, Key: target.Target.Key},
+				Err:      errors.New("provider probe result"),
+			}
 		}
 		return results
 	}}
@@ -275,6 +280,15 @@ func TestProbeGroupsByProviderAndRestoresInputOrder(t *testing.T) {
 	results := manager.Probe(context.Background(), targets)
 	if got := []string{results[0].ID, results[1].ID, results[2].ID}; !reflect.DeepEqual(got, []string{"g1", "s1", "g2"}) {
 		t.Fatalf("result IDs = %#v", got)
+	}
+	if got := []ObjectTarget{results[0].Target, results[1].Target, results[2].Target}; !reflect.DeepEqual(got, []ObjectTarget{targets[0].Target, targets[1].Target, targets[2].Target}) {
+		t.Fatalf("result targets = %#v, want %#v", got, []ObjectTarget{targets[0].Target, targets[1].Target, targets[2].Target})
+	}
+	if results[1].Metadata.Key != "b" {
+		t.Fatalf("result metadata = %#v, want provider metadata", results[1].Metadata)
+	}
+	if results[1].Err == nil || results[1].Err.Error() != "provider probe result" {
+		t.Fatalf("result error = %v, want provider error", results[1].Err)
 	}
 	if len(gcs.probes) != 1 || len(gcs.probes[0]) != 2 || len(s3.probes) != 1 || len(s3.probes[0]) != 1 {
 		t.Fatalf("probe groups = gcs %#v, s3 %#v", gcs.probes, s3.probes)
@@ -294,36 +308,109 @@ func TestInventoryReturnsRawBackendResultAndError(t *testing.T) {
 
 func TestDeleteExactPreservesPhysicalTargetsAndGroupsByProvider(t *testing.T) {
 	lookup := &fakeLookup{credentials: map[string]*buckets.Credential{
-		"stored-bucket": credential("gcs", "canonical-bucket"),
+		"s3-a":            credential("s3", "s3-a"),
+		"s3-b":            credential("s3", "s3-b"),
+		"gcs-bucket":      credential("gcs", "gcs-bucket"),
+		"override-bucket": credential("gcs", "canonical-bucket"),
+		"azure-bucket":    credential("azure", "azure-bucket"),
 	}}
+	s3 := &fakeBackend{provider: "s3"}
 	gcs := &fakeBackend{provider: "gcs"}
+	azure := &fakeBackend{provider: "azure"}
 	file := &fakeBackend{provider: "file"}
-	manager := managerWithBackends(t, lookup, gcs, file)
+	manager := managerWithBackends(t, lookup, gcs, azure, file, s3)
 	filePath := "/tmp/syfon-storage-object"
 	if err := manager.DeleteExact(context.Background(), []DeleteTarget{
-		{Location: "s3://stored-bucket/physical/key"},
+		{Location: "s3://s3-b/key-2"},
+		{Location: "gs://gcs-bucket/gcs-key"},
+		{Location: "s3://override-bucket//physical/key/"},
+		{Location: "s3://s3-a/key-2"},
 		{Location: filePath},
+		{Location: "azblob://azure-bucket/azure-key"},
+		{Location: "s3://s3-a/key-1"},
+		{Location: "gs://gcs-bucket/gcs-key"},
+		{Location: filePath},
+		{Location: "s3://s3-b/key-1"},
 		{Location: "https://ignored.example/object"},
 	}); err != nil {
 		t.Fatalf("DeleteExact returned error: %v", err)
 	}
-	if got, want := gcs.deletions[0], []PhysicalTarget{{Provider: "gcs", Bucket: "stored-bucket", Key: "physical/key"}}; !reflect.DeepEqual(got, want) {
+	if got, want := gcs.deletions, [][]PhysicalTarget{
+		{{Provider: "gcs", Bucket: "gcs-bucket", Key: "gcs-key"}},
+		{{Provider: "gcs", Bucket: "override-bucket", Key: "physical/key"}},
+	}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("gcs targets = %#v, want %#v", got, want)
 	}
-	if got, want := file.deletions[0], []PhysicalTarget{{Provider: "file", Path: filePath}}; !reflect.DeepEqual(got, want) {
+	if got, want := file.deletions, [][]PhysicalTarget{{{Provider: "file", Path: filePath}}}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("file targets = %#v, want %#v", got, want)
+	}
+	if got, want := azure.deletions, [][]PhysicalTarget{{{Provider: "azure", Bucket: "azure-bucket", Key: "azure-key"}}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("azure targets = %#v, want %#v", got, want)
+	}
+	if got, want := s3.deletions, [][]PhysicalTarget{
+		{{Provider: "s3", Bucket: "s3-a", Key: "key-1"}, {Provider: "s3", Bucket: "s3-a", Key: "key-2"}},
+		{{Provider: "s3", Bucket: "s3-b", Key: "key-1"}, {Provider: "s3", Bucket: "s3-b", Key: "key-2"}},
+	}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("s3 targets = %#v, want %#v", got, want)
 	}
 }
 
-func TestInvalidateBucketUsesRegistrationOrderAndExactToken(t *testing.T) {
+func TestDeleteExactAllowsNilCloudCredentialUntilProviderDispatch(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		scheme   string
+		provider string
+	}{
+		{name: "s3", scheme: "s3", provider: "s3"},
+		{name: "gcs", scheme: "gs", provider: "gcs"},
+		{name: "azure", scheme: "azblob", provider: "azure"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			backend := &fakeBackend{provider: tc.provider}
+			manager := managerWithBackends(t, &fakeLookup{}, backend)
+			if err := manager.DeleteExact(context.Background(), []DeleteTarget{{Location: tc.scheme + "://bucket/key"}}); err != nil {
+				t.Fatalf("DeleteExact returned error: %v", err)
+			}
+			if len(backend.deletions) != 1 || len(backend.deletions[0]) != 1 {
+				t.Fatalf("deletion calls = %#v, want one target", backend.deletions)
+			}
+		})
+	}
+
+	file := &fakeBackend{provider: "file"}
+	manager := managerWithBackends(t, &fakeLookup{}, file)
+	err := manager.DeleteExact(context.Background(), []DeleteTarget{{Location: "file://bucket/key"}})
+	var operationErr *OperationError
+	if !errors.As(err, &operationErr) || operationErr.Kind != ErrorNotFound {
+		t.Fatalf("file nil credential error = %v, want typed not-found error", err)
+	}
+}
+
+func TestDeleteExactParsesAllTargetsBeforeDispatch(t *testing.T) {
+	backend := &fakeBackend{provider: "gcs"}
+	lookup := &fakeLookup{credentials: map[string]*buckets.Credential{"bucket": credential("gcs", "bucket")}}
+	manager := managerWithBackends(t, lookup, backend)
+	err := manager.DeleteExact(context.Background(), []DeleteTarget{
+		{Location: "gs://bucket/key"},
+		{Location: "gs://%gh&%ij/key"},
+	})
+	if err == nil {
+		t.Fatal("expected malformed target error")
+	}
+	if len(backend.deletions) != 0 {
+		t.Fatalf("dispatches after parse failure = %#v, want none", backend.deletions)
+	}
+}
+
+func TestInvalidateBucketUsesRegistrationOrderAndTrimmedToken(t *testing.T) {
 	first := &fakeBackend{provider: "s3"}
 	second := &fakeBackend{provider: "gcs"}
 	manager := managerWithBackends(t, &fakeLookup{}, first, second)
 	manager.InvalidateBucket("  physical-bucket  ")
-	if got, want := first.invalidations, []string{"  physical-bucket  "}; !reflect.DeepEqual(got, want) {
+	if got, want := first.invalidations, []string{"physical-bucket"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("first invalidations = %#v, want %#v", got, want)
 	}
-	if got, want := second.invalidations, []string{"  physical-bucket  "}; !reflect.DeepEqual(got, want) {
+	if got, want := second.invalidations, []string{"physical-bucket"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("second invalidations = %#v, want %#v", got, want)
 	}
 	manager.InvalidateBucket(" \t")
