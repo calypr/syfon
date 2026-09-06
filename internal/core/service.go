@@ -33,6 +33,7 @@ func GetBaseURL(ctx context.Context) string {
 
 // ObjectManager standardizes object lifecycle operations across all API surfaces.
 type ObjectManager struct {
+	objectService    *objects.Service
 	objectReader     objects.RecordReader
 	objectWriter     objects.RecordWriter
 	objectAccess     objects.AccessMethodWriter
@@ -98,6 +99,20 @@ type Dependencies struct {
 
 func NewObjectManager(deps Dependencies) *ObjectManager {
 	return &ObjectManager{
+		objectService: objects.NewService(objects.Dependencies{
+			Reader:        deps.Objects.Reader,
+			Writer:        deps.Objects.Writer,
+			AccessMethods: deps.Objects.AccessMethods,
+			AccessPolicy:  deps.Objects.AccessPolicy,
+			Aliases:       deps.Objects.Aliases,
+			Content:       deps.Objects.Content,
+			ChecksumScope: deps.Objects.ChecksumScope,
+			Scope:         deps.Objects.Scope,
+			Resources:     deps.Objects.Resources,
+			Pages:         deps.Objects.Pages,
+			URLPages:      deps.Objects.URLPages,
+			Authorized:    deps.Objects.Authorized,
+		}),
 		objectReader:     deps.Objects.Reader,
 		objectWriter:     deps.Objects.Writer,
 		objectAccess:     deps.Objects.AccessMethods,

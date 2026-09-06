@@ -1,16 +1,9 @@
 package core
 
-import (
-	syfoncommon "github.com/calypr/syfon/common"
-	"github.com/calypr/syfon/internal/objects"
-)
+import "github.com/calypr/syfon/internal/objects"
 
+// ObjectAccessResources is retained as a compatibility helper for core
+// adapters. Resource normalization belongs to the objects package.
 func ObjectAccessResources(obj *objects.Record) []string {
-	if obj == nil {
-		return nil
-	}
-	if obj.ControlledAccess != nil {
-		return syfoncommon.NormalizeAccessResources(*obj.ControlledAccess)
-	}
-	return syfoncommon.AuthzMapToList(obj.Authorizations)
+	return objects.AccessResources(obj)
 }
