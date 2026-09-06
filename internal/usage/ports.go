@@ -13,27 +13,14 @@ type FileCounterRecorder interface {
 	RecordFileDownload(ctx context.Context, objectID string) error
 }
 
-type FileCounterStore interface {
-	FileCounterRecorder
-}
-
 type TransferEventWriter interface {
 	RecordTransferAttributionEvents(ctx context.Context, events []Event) error
 }
 
-// TransferEventStore is the persistence capability for access-issued events.
-type TransferEventStore interface {
-	TransferEventWriter
-}
-
-type ProviderEventStore interface {
-	ProviderEventRecorder
-}
-
 type IngestStore interface {
-	FileCounterStore
-	TransferEventStore
-	ProviderEventStore
+	FileCounterRecorder
+	TransferEventWriter
+	ProviderEventRecorder
 }
 
 type Ingestor interface {
@@ -48,10 +35,6 @@ type FileUsageReader interface {
 	ListFileUsageByObjectIDs(ctx context.Context, ids []string) ([]FileUsage, error)
 	ListFileUsage(ctx context.Context, limit, offset int, inactiveSince *time.Time) ([]FileUsage, error)
 	GetFileUsageSummary(ctx context.Context, inactiveSince *time.Time) (FileUsageSummary, error)
-}
-
-type FileUsageStore interface {
-	FileUsageReader
 }
 
 // ObjectReader reads objects for metrics authorization and fallback reports.
@@ -73,13 +56,9 @@ type TransferQuery interface {
 	GetTransferAttributionBreakdown(ctx context.Context, filter Filter, groupBy string) ([]Breakdown, error)
 }
 
-type TransferReportStore interface {
-	TransferQuery
-}
-
 type ReportStore interface {
-	FileUsageStore
-	TransferReportStore
+	FileUsageReader
+	TransferQuery
 }
 
 // OptionalScopedFileUsageQuery is an optional optimization for authorized
