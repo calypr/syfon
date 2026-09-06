@@ -55,9 +55,10 @@ func serviceInfoForBackend(sqlite bool) drs.Service {
 }
 
 type serverBackend struct {
-	dependencies  core.Dependencies
-	fileUsage     usage.FileUsageReader
-	transferQuery usage.TransferQuery
+	dependencies       core.Dependencies
+	bucketDependencies buckets.Dependencies
+	fileUsage          usage.FileUsageReader
+	transferQuery      usage.TransferQuery
 }
 
 func sqliteServerBackend(database *sqlite.SqliteDB) serverBackend {
@@ -68,11 +69,11 @@ func sqliteServerBackend(database *sqlite.SqliteDB) serverBackend {
 				Aliases: database, Content: database, ChecksumScope: database, Scope: database,
 				Resources: database, Pages: database, URLPages: database, Authorized: database,
 			},
-			Buckets: core.BucketPorts{
-				Credentials: database, CredentialAdmin: database, Scopes: database, Visibility: database,
-			},
 			Transfers: core.TransferPorts{Pending: database, Events: database},
 			Usage:     core.UsagePorts{Counters: database, ProviderEvents: database},
+		},
+		bucketDependencies: buckets.Dependencies{
+			Credentials: database, CredentialAdmin: database, Scopes: database, Visibility: database,
 		},
 		fileUsage:     database,
 		transferQuery: database,
@@ -87,11 +88,11 @@ func postgresServerBackend(database *postgres.PostgresDB) serverBackend {
 				Aliases: database, Content: database, ChecksumScope: database, Scope: database,
 				Resources: database, Pages: database, URLPages: database, Authorized: database,
 			},
-			Buckets: core.BucketPorts{
-				Credentials: database, CredentialAdmin: database, Scopes: database, Visibility: database,
-			},
 			Transfers: core.TransferPorts{Pending: database, Events: database},
 			Usage:     core.UsagePorts{Counters: database, ProviderEvents: database},
+		},
+		bucketDependencies: buckets.Dependencies{
+			Credentials: database, CredentialAdmin: database, Scopes: database, Visibility: database,
 		},
 		fileUsage:     database,
 		transferQuery: database,
@@ -165,7 +166,7 @@ var Cmd = &cobra.Command{
 		needsUrlManager := cfg.Routes.Ga4gh || cfg.Routes.Internal || cfg.Routes.LFS
 		var uM *urlmanager.Manager
 		if needsUrlManager {
-			credentials := backend.dependencies.Buckets.Credentials
+			credentials := backend.bucketDependencies.Credentials
 			uM = urlmanager.NewManager(credentials, cfg.Signing)
 			uM.RegisterSigner(address.S3Provider, s3.NewS3Signer(credentials))
 			uM.RegisterSigner(address.GCSProvider, gcs.NewGCSSigner(credentials))
@@ -182,16 +183,12 @@ var Cmd = &cobra.Command{
 		if uM != nil {
 			invalidator = uM
 		}
-		bucketService, err := buckets.NewService(buckets.Dependencies{
-			Credentials:     backend.dependencies.Buckets.Credentials,
-			CredentialAdmin: backend.dependencies.Buckets.CredentialAdmin,
-			Scopes:          backend.dependencies.Buckets.Scopes,
-			Visibility:      backend.dependencies.Buckets.Visibility,
-			Fallback: core.NewBucketVisibilityFallback(
-				backend.dependencies.Objects.Scope,
-				backend.dependencies.Objects.Reader,
-			),
-		}, invalidator)
+		bucketDependencies := backend.bucketDependencies
+		bucketDependencies.Fallback = core.NewBucketVisibilityFallback(
+			backend.dependencies.Objects.Scope,
+			backend.dependencies.Objects.Reader,
+		)
+		bucketService, err := buckets.NewService(bucketDependencies, invalidator)
 		if err != nil {
 			fatal("failed to initialize bucket service", "err", err)
 		}

@@ -204,7 +204,7 @@ func buildMockServerRouterWithRoutes(routes config.RoutesConfig) *fiber.App {
 		transferQuery:       database,
 		providerEvents:      database,
 		serviceInfo:         serviceInfoForBackend(true),
-		om:                  core.NewObjectManager(mockServerDependencies(database), uM),
+		om:                  core.NewObjectManager(mockServerDependencies(database, uM), uM),
 		uM:                  uM,
 		authzMiddleware:     authzMiddleware,
 		requestIDMiddleware: requestIDMiddleware,

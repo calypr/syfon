@@ -11,11 +11,13 @@ import (
 func newTestObjectManager(backend any, uM urlmanager.UrlManager) *ObjectManager {
 	deps := testDependencies(backend)
 	bucketDeps := buckets.Dependencies{
-		Credentials:     deps.Buckets.Credentials,
-		CredentialAdmin: deps.Buckets.CredentialAdmin,
-		Scopes:          deps.Buckets.Scopes,
-		Visibility:      deps.Buckets.Visibility,
+		Credentials:     backend.(buckets.CredentialReader),
+		CredentialAdmin: backend.(buckets.CredentialAdmin),
+		Scopes:          backend.(buckets.ScopeStore),
 		Fallback:        NewBucketVisibilityFallback(deps.Objects.Scope, deps.Objects.Reader),
+	}
+	if optional, ok := backend.(buckets.VisibilityQuery); ok {
+		bucketDeps.Visibility = optional
 	}
 	var invalidator interface{ InvalidateBucket(string) }
 	if candidate, ok := uM.(interface{ InvalidateBucket(string) }); ok {
@@ -44,11 +46,6 @@ func testDependencies(backend any) Dependencies {
 			ChecksumScope: backend.(objects.ChecksumScopeQuery),
 			Scope:         backend.(objects.ScopeQuery),
 		},
-		Buckets: BucketPorts{
-			Credentials:     backend.(buckets.CredentialReader),
-			CredentialAdmin: backend.(buckets.CredentialAdmin),
-			Scopes:          backend.(buckets.ScopeStore),
-		},
 		Transfers: TransferPorts{
 			Pending: backend.(transfers.PendingStore),
 			Events:  backend.(transfers.EventRecorder),
@@ -69,9 +66,6 @@ func testDependencies(backend any) Dependencies {
 	}
 	if optional, ok := backend.(objects.OptionalAuthorizedQuery); ok {
 		deps.Objects.Authorized = optional
-	}
-	if optional, ok := backend.(buckets.VisibilityQuery); ok {
-		deps.Buckets.Visibility = optional
 	}
 	return deps
 }

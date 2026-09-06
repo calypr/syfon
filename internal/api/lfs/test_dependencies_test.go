@@ -21,11 +21,6 @@ func newLFSDependencies(db *testutils.MockDatabase) core.Dependencies {
 			ChecksumScope: db,
 			Scope:         db,
 		},
-		Buckets: core.BucketPorts{
-			Credentials:     db,
-			CredentialAdmin: db,
-			Scopes:          db,
-		},
 		Transfers: core.TransferPorts{
 			Pending: db,
 			Events:  db,
@@ -48,9 +43,18 @@ func newLFSDependencies(db *testutils.MockDatabase) core.Dependencies {
 	if port, ok := interface{}(db).(objects.OptionalAuthorizedQuery); ok {
 		deps.Objects.Authorized = port
 	}
+	var visibility buckets.VisibilityQuery
 	if port, ok := interface{}(db).(buckets.VisibilityQuery); ok {
-		deps.Buckets.Visibility = port
+		visibility = port
 	}
+	service, err := buckets.NewService(buckets.Dependencies{
+		Credentials: db, CredentialAdmin: db, Scopes: db, Visibility: visibility,
+		Fallback: core.NewBucketVisibilityFallback(deps.Objects.Scope, deps.Objects.Reader),
+	}, nil)
+	if err != nil {
+		panic(err)
+	}
+	deps.BucketService = service
 
 	return deps
 }

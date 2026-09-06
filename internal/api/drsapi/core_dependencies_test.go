@@ -12,10 +12,10 @@ import (
 )
 
 func testObjectManager(backend any, uM urlmanager.UrlManager) *core.ObjectManager {
-	return core.NewObjectManager(testDependencies(backend), uM)
+	return core.NewObjectManager(testDependencies(backend, uM), uM)
 }
 
-func testDependencies(backend any) core.Dependencies {
+func testDependencies(backend any, uM urlmanager.UrlManager) core.Dependencies {
 	var (
 		reader          objects.RecordReader
 		writer          objects.RecordWriter
@@ -68,16 +68,26 @@ func testDependencies(backend any) core.Dependencies {
 		visibility = optional
 	}
 
+	objectPorts := core.ObjectPorts{
+		Reader: reader, Writer: writer, AccessMethods: accessMethods, AccessPolicy: accessPolicy,
+		Aliases: aliases, Content: content, ChecksumScope: checksumScope, Scope: scope,
+		Resources: resources, Pages: pages, URLPages: urlPages, Authorized: authorized,
+	}
+	var invalidator interface{ InvalidateBucket(string) }
+	if candidate, ok := uM.(interface{ InvalidateBucket(string) }); ok {
+		invalidator = candidate
+	}
+	bucketService, err := buckets.NewService(buckets.Dependencies{
+		Credentials: credentials, CredentialAdmin: credentialAdmin, Scopes: scopes, Visibility: visibility,
+		Fallback: core.NewBucketVisibilityFallback(scope, reader),
+	}, invalidator)
+	if err != nil {
+		panic(err)
+	}
 	return core.Dependencies{
-		Objects: core.ObjectPorts{
-			Reader: reader, Writer: writer, AccessMethods: accessMethods, AccessPolicy: accessPolicy,
-			Aliases: aliases, Content: content, ChecksumScope: checksumScope, Scope: scope,
-			Resources: resources, Pages: pages, URLPages: urlPages, Authorized: authorized,
-		},
-		Buckets: core.BucketPorts{
-			Credentials: credentials, CredentialAdmin: credentialAdmin, Scopes: scopes, Visibility: visibility,
-		},
-		Transfers: core.TransferPorts{Pending: pending, Events: events},
-		Usage:     core.UsagePorts{Counters: counters, ProviderEvents: providerEvents},
+		Objects:       objectPorts,
+		BucketService: bucketService,
+		Transfers:     core.TransferPorts{Pending: pending, Events: events},
+		Usage:         core.UsagePorts{Counters: counters, ProviderEvents: providerEvents},
 	}
 }

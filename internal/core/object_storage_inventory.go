@@ -492,13 +492,12 @@ func (m *ObjectManager) ListValidateStorageObjects(ctx context.Context, items []
 		return []StorageListValidationResult{}
 	}
 	visible, visibleErr := m.listVisibleBucketsCached(ctx)
-	serviceVisible := bucketVisibleBuckets(visible)
 	results := make([]StorageListValidationResult, len(items))
 	workByTarget := make(map[string]*storageListTargetWork)
 	buckets := map[string]struct{}{}
 	stats := storageListRunStats{inputItemCount: len(items)}
 	for index, item := range items {
-		result, targetWork, ok := m.resolveListValidationTarget(ctx, item, index, serviceVisible, visibleErr)
+		result, targetWork, ok := m.resolveListValidationTarget(ctx, item, index, visible, visibleErr)
 		if !ok {
 			results[index] = result
 			continue

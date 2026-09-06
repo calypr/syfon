@@ -2,7 +2,6 @@ package core
 
 import (
 	"context"
-	"time"
 
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/objects"
@@ -47,14 +46,12 @@ type ObjectManager struct {
 	objectPages      objects.OptionalPageQuery
 	objectURLPages   objects.OptionalURLQuery
 	objectAuthorized objects.OptionalAuthorizedQuery
-	bucketVisibility buckets.VisibilityQuery
 	pendingStore     transfers.PendingStore
 	transferEvents   transfers.EventRecorder
 	fileCounters     usage.FileCounterRecorder
 	providerEvents   usage.ProviderEventRecorder
 	uM               urlmanager.UrlManager
 	bucketService    *buckets.Service
-	bucketCatalog    *bucketCatalog
 	inspectS3Object  func(context.Context, buckets.Credential, string, string) (*StorageObjectMetadata, error)
 	listS3Prefix     func(context.Context, buckets.Credential, string, string, StoragePrefixListOptions) ([]StorageBucketObject, error)
 	s3ProbeLimiter   *s3ProbeLimiter
@@ -77,15 +74,6 @@ type ObjectPorts struct {
 	Authorized    objects.OptionalAuthorizedQuery
 }
 
-// BucketPorts contains the bucket capabilities used by the transitional
-// ObjectManager facade. Visibility is an optional optimization.
-type BucketPorts struct {
-	Credentials     buckets.CredentialReader
-	CredentialAdmin buckets.CredentialAdmin
-	Scopes          buckets.ScopeStore
-	Visibility      buckets.VisibilityQuery
-}
-
 // TransferPorts contains pending metadata and transfer-event capabilities.
 type TransferPorts struct {
 	Pending transfers.PendingStore
@@ -102,15 +90,9 @@ type UsagePorts struct {
 // interface. Each field is owned by the package that defines its port.
 type Dependencies struct {
 	Objects       ObjectPorts
-	Buckets       BucketPorts
 	BucketService *buckets.Service
 	Transfers     TransferPorts
 	Usage         UsagePorts
-}
-
-type VisibleBucket struct {
-	Credential buckets.Credential
-	Programs   []string
 }
 
 func NewObjectManager(deps Dependencies, uM urlmanager.UrlManager) *ObjectManager {
@@ -127,14 +109,12 @@ func NewObjectManager(deps Dependencies, uM urlmanager.UrlManager) *ObjectManage
 		objectPages:      deps.Objects.Pages,
 		objectURLPages:   deps.Objects.URLPages,
 		objectAuthorized: deps.Objects.Authorized,
-		bucketVisibility: deps.Buckets.Visibility,
 		pendingStore:     deps.Transfers.Pending,
 		transferEvents:   deps.Transfers.Events,
 		fileCounters:     deps.Usage.Counters,
 		providerEvents:   deps.Usage.ProviderEvents,
 		uM:               uM,
 		bucketService:    deps.BucketService,
-		bucketCatalog:    newBucketCatalog(deps.Buckets.Credentials, deps.Buckets.CredentialAdmin, deps.Buckets.Scopes, uM, 30*time.Second),
 		inspectS3Object:  defaultS3ObjectInspector,
 		listS3Prefix:     defaultS3PrefixLister,
 		s3ProbeLimiter:   newS3ProbeLimiterFromEnv(),

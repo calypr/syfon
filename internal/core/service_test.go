@@ -323,12 +323,12 @@ func TestBucketCatalogCachesMissingScopeLookup(t *testing.T) {
 	mockDB := &testutils.MockDatabase{}
 	om := newTestObjectManager(&coreTestDB{MockDatabase: mockDB}, nil)
 
-	if scope, found, err := om.bucketCatalog.lookupBucketScope(ctx, "missing-org", "missing-project"); err != nil {
+	if scope, found, err := om.bucketService.LookupBucketScope(ctx, "missing-org", "missing-project"); err != nil {
 		t.Fatalf("first scope lookup failed: %v", err)
 	} else if found || scope != (buckets.Scope{}) {
 		t.Fatalf("expected missing scope, got scope=%+v found=%t", scope, found)
 	}
-	if scope, found, err := om.bucketCatalog.lookupBucketScope(ctx, "missing-org", "missing-project"); err != nil {
+	if scope, found, err := om.bucketService.LookupBucketScope(ctx, "missing-org", "missing-project"); err != nil {
 		t.Fatalf("cached scope lookup failed: %v", err)
 	} else if found || scope.Organization != "missing-org" || scope.ProjectID != "missing-project" {
 		t.Fatalf("expected cached missing scope key, got scope=%+v found=%t", scope, found)
@@ -352,7 +352,7 @@ func TestBucketCatalogDeleteScopeInvalidatesLookupCache(t *testing.T) {
 	}
 	om := newTestObjectManager(&coreTestDB{MockDatabase: mockDB}, nil)
 
-	if _, found, err := om.bucketCatalog.lookupBucketScope(ctx, "org", "project"); err != nil || !found {
+	if _, found, err := om.bucketService.LookupBucketScope(ctx, "org", "project"); err != nil || !found {
 		t.Fatalf("expected initial scope lookup to succeed, found=%t err=%v", found, err)
 	}
 	if err := om.DeleteBucketScope(ctx, "org", "project", "old-bucket", "old-prefix"); err != nil {
@@ -365,7 +365,7 @@ func TestBucketCatalogDeleteScopeInvalidatesLookupCache(t *testing.T) {
 		PathPrefix:   "new-prefix",
 	}
 
-	scope, found, err := om.bucketCatalog.lookupBucketScope(ctx, "org", "project")
+	scope, found, err := om.bucketService.LookupBucketScope(ctx, "org", "project")
 	if err != nil {
 		t.Fatalf("lookup after invalidation failed: %v", err)
 	}
