@@ -12,7 +12,6 @@ import (
 	postgresdb "github.com/calypr/syfon/internal/persistence/postgres"
 
 	"github.com/calypr/syfon/internal/objects"
-	"github.com/calypr/syfon/internal/testutils"
 )
 
 func TestPostgresBulkOverwriteObjects(t *testing.T) {
@@ -77,7 +76,7 @@ func TestPostgresBulkOverwriteObjects(t *testing.T) {
 			Counters:       db,
 			ProviderEvents: db,
 		},
-	}, &testutils.MockUrlManager{})
+	})
 	result, err := om.BulkOverwriteObjects(context.Background(), "ci-overwrite", "project", []objects.Record{{
 		Id:               "ci-overwrite-source",
 		Name:             &newName,

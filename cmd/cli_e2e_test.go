@@ -23,11 +23,8 @@ import (
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/config"
 	"github.com/calypr/syfon/internal/core"
-	"github.com/calypr/syfon/internal/signer/file"
-	"github.com/calypr/syfon/internal/storage/address"
 	"github.com/calypr/syfon/internal/testutils"
 	"github.com/calypr/syfon/internal/transfers"
-	"github.com/calypr/syfon/internal/urlmanager"
 	"github.com/calypr/syfon/internal/usage"
 )
 
@@ -311,10 +308,6 @@ func newSyfonTestServer(t *testing.T) *fiberTestServer {
 		t.Fatalf("save test bucket scope: %v", err)
 	}
 
-	uM := urlmanager.NewManager(database, config.SigningConfig{DefaultExpirySeconds: 900})
-	fSigner, _ := file.NewFileSigner(storageDir)
-	uM.RegisterSigner(address.FileProvider, fSigner)
-
 	app := fiber.New()
 	app.Get(config.RouteHealthz, func(c fiber.Ctx) error {
 		return c.SendString("OK")
@@ -337,7 +330,7 @@ func newSyfonTestServer(t *testing.T) *fiberTestServer {
 	bucketService, err := buckets.NewService(buckets.Dependencies{
 		Credentials: database, CredentialAdmin: database, Scopes: database, Visibility: database,
 		Fallback: core.NewBucketVisibilityFallback(objectPorts.Scope, objectPorts.Reader),
-	}, uM)
+	}, nil)
 	if err != nil {
 		t.Fatalf("construct bucket service: %v", err)
 	}
@@ -352,7 +345,7 @@ func newSyfonTestServer(t *testing.T) *fiberTestServer {
 			Counters:       database,
 			ProviderEvents: database,
 		},
-	}, uM)
+	})
 
 	drsAPI := api.Group("/ga4gh/drs/v1")
 	description := "Calypr test DRS server"
