@@ -21,6 +21,13 @@ import (
 	"github.com/calypr/syfon/internal/objects"
 )
 
+var (
+	_ buckets.CredentialReader = (*SqliteDB)(nil)
+	_ buckets.CredentialAdmin  = (*SqliteDB)(nil)
+	_ buckets.ScopeStore       = (*SqliteDB)(nil)
+	_ buckets.VisibilityQuery  = (*SqliteDB)(nil)
+)
+
 func TestSqliteDB_CRUD(t *testing.T) {
 	ctx := context.Background()
 	db, err := NewSqliteDB(":memory:")
