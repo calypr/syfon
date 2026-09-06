@@ -25,6 +25,7 @@ import (
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/config"
 	"github.com/calypr/syfon/internal/core"
+	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/storage"
 	"github.com/calypr/syfon/internal/testutils"
 	"github.com/calypr/syfon/internal/transfers"
@@ -373,13 +374,27 @@ func newSyfonTestServer(t *testing.T) *fiberTestServer {
 			ProviderEvents: database,
 		},
 	})
+	objectService := objects.NewService(objects.Dependencies{
+		Reader:        objectPorts.Reader,
+		Writer:        objectPorts.Writer,
+		AccessMethods: objectPorts.AccessMethods,
+		AccessPolicy:  objectPorts.AccessPolicy,
+		Aliases:       objectPorts.Aliases,
+		Content:       objectPorts.Content,
+		ChecksumScope: objectPorts.ChecksumScope,
+		Scope:         objectPorts.Scope,
+		Resources:     objectPorts.Resources,
+		Pages:         objectPorts.Pages,
+		URLPages:      objectPorts.URLPages,
+		Authorized:    objectPorts.Authorized,
+	})
 
 	drsAPI := api.Group("/ga4gh/drs/v1")
 	description := "Calypr test DRS server"
 	environment := "test"
 	createdAt := time.Date(2024, time.January, 2, 3, 4, 5, 0, time.UTC)
 	updatedAt := time.Date(2024, time.January, 3, 4, 5, 6, 0, time.UTC)
-	drsapi.RegisterDRSRoutes(drsAPI, om, drs.Service{
+	drsapi.RegisterDRSRoutes(drsAPI, objectService, om, drs.Service{
 		Id:          "drs-service-test",
 		Name:        "Calypr Test DRS Server",
 		Type:        drs.ServiceType{Group: "org.ga4gh", Artifact: "drs", Version: "1.2.0"},
@@ -391,7 +406,7 @@ func newSyfonTestServer(t *testing.T) *fiberTestServer {
 	})
 	docs.RegisterSwaggerRoutes(app)
 	metrics.RegisterMetricsRoutes(api, database, database, database, om)
-	internaldrs.RegisterInternalRoutes(api, om, bucketService)
+	internaldrs.RegisterInternalRoutes(api, objectService, om, bucketService)
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
