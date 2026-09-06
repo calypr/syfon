@@ -92,11 +92,8 @@ func (s *backend) getClients(ctx context.Context, bucket string) (*clients, erro
 		return nil, fmt.Errorf("failed to load aws config: %w", err)
 	}
 
-	// Keep the former S3 signer normalization exactly: endpoint whitespace is
-	// not trimmed, localhost detection is substring-based, and any non-empty
-	// endpoint selects path-style addressing.
-	if cred.Endpoint != "" {
-		endpoint := cred.Endpoint
+	endpoint := strings.TrimSpace(cred.Endpoint)
+	if endpoint != "" {
 		if !strings.HasPrefix(endpoint, "http://") && !strings.HasPrefix(endpoint, "https://") {
 			if strings.Contains(endpoint, "localhost") || strings.Contains(endpoint, "127.0.0.1") {
 				endpoint = "http://" + endpoint
@@ -108,7 +105,7 @@ func (s *backend) getClients(ctx context.Context, bucket string) (*clients, erro
 	}
 
 	client := awss3.NewFromConfig(cfg, func(options *awss3.Options) {
-		if cred.Endpoint != "" {
+		if endpoint != "" {
 			options.UsePathStyle = true
 		}
 	})

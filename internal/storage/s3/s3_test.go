@@ -232,6 +232,36 @@ func TestNewExposesStorageRegistration(t *testing.T) {
 	}
 }
 
+func TestGetClientsNormalizesEndpointWhitespace(t *testing.T) {
+	provider := newBackend(credentialLookupFunc(func(context.Context, string) (*buckets.Credential, error) {
+		return &buckets.Credential{
+			Region:    "us-east-1",
+			AccessKey: "access",
+			SecretKey: "secret",
+			Endpoint:  "  localhost:9000  ",
+		}, nil
+	}))
+
+	result, err := provider.getClients(context.Background(), "bucket")
+	if err != nil {
+		t.Fatalf("get clients: %v", err)
+	}
+	client, ok := result.client.(*awss3.Client)
+	if !ok {
+		t.Fatalf("client type = %T, want *s3.Client", result.client)
+	}
+	options := client.Options()
+	if options.BaseEndpoint == nil || *options.BaseEndpoint != "http://localhost:9000" {
+		if options.BaseEndpoint == nil {
+			t.Fatal("BaseEndpoint = nil, want http://localhost:9000")
+		}
+		t.Fatalf("BaseEndpoint = %q, want http://localhost:9000", *options.BaseEndpoint)
+	}
+	if !options.UsePathStyle {
+		t.Fatal("UsePathStyle = false, want true for custom endpoint")
+	}
+}
+
 type credentialLookupFunc func(context.Context, string) (*buckets.Credential, error)
 
 func (f credentialLookupFunc) GetS3Credential(ctx context.Context, bucket string) (*buckets.Credential, error) {
