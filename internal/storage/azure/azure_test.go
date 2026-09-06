@@ -15,6 +15,7 @@ import (
 
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/storage"
+	"github.com/google/uuid"
 )
 
 type credentialLookupFunc func(context.Context, string) (*buckets.Credential, error)
@@ -23,12 +24,14 @@ type recordingTransport struct {
 	status      int
 	header      http.Header
 	requests    int
+	requestHost string
 	requestPath string
 	body        []byte
 }
 
 func (r *recordingTransport) Do(request *http.Request) (*http.Response, error) {
 	r.requests++
+	r.requestHost = request.URL.Host
 	r.requestPath = request.URL.Path
 	if request.Body != nil {
 		body, err := io.ReadAll(request.Body)
@@ -104,6 +107,69 @@ func TestAzureAccessSASPermissionsAndExpiry(t *testing.T) {
 		t.Fatalf("PUT SAS permissions = %q, want acw", got)
 	}
 	assertSASWindow(t, putURL.Query(), before, 7*time.Minute)
+}
+
+func TestAzureCredentialLookupPort(t *testing.T) {
+	var _ storage.CredentialLookup = credentialLookupFunc(nil)
+
+	t.Run("accepts one-method lookup", func(t *testing.T) {
+		b := &backend{credentials: credentialLookupFunc(func(context.Context, string) (*buckets.Credential, error) {
+			return azureCredential("https://acct.blob.db.windows.net"), nil
+		})}
+		if _, err := b.SignURL(context.Background(), storage.ObjectTarget{Bucket: "bucket", Key: "object"}, storage.AccessOptions{}); err != nil {
+			t.Fatalf("SignURL with one-method lookup failed: %v", err)
+		}
+	})
+
+	t.Run("preserves lookup error", func(t *testing.T) {
+		wantErr := errors.New("lookup failed")
+		b := &backend{credentials: credentialLookupFunc(func(context.Context, string) (*buckets.Credential, error) {
+			return nil, wantErr
+		})}
+		_, err := b.SignURL(context.Background(), storage.ObjectTarget{Bucket: "bucket", Key: "object"}, storage.AccessOptions{})
+		if !errors.Is(err, wantErr) {
+			t.Fatalf("SignURL error = %v, want %v", err, wantErr)
+		}
+	})
+
+	t.Run("preserves nil credential error", func(t *testing.T) {
+		b := &backend{credentials: credentialLookupFunc(func(context.Context, string) (*buckets.Credential, error) {
+			return nil, nil
+		})}
+		_, err := b.SignURL(context.Background(), storage.ObjectTarget{Bucket: "bucket", Key: "object"}, storage.AccessOptions{})
+		if err == nil || !strings.Contains(err.Error(), "credentials not found for bucket bucket") {
+			t.Fatalf("SignURL error = %v, want missing-credential error", err)
+		}
+	})
+}
+
+func TestAzureSASProtocolAndCredentialDerivation(t *testing.T) {
+	if got := azureSASProtocol("http://localhost:10000/devstoreaccount1"); string(got) != "https,http" {
+		t.Fatalf("HTTP endpoint SAS protocol = %q, want https,http", got)
+	}
+	if got := azureSASProtocol("https://acct.blob.db.windows.net"); string(got) != "https" {
+		t.Fatalf("HTTPS endpoint SAS protocol = %q, want https", got)
+	}
+	if got := azureSASProtocol("://bad-url"); string(got) != "https" {
+		t.Fatalf("invalid endpoint SAS protocol = %q, want https", got)
+	}
+
+	b := &backend{}
+	if got, want := b.azureServiceURL("acct", ""), "https://acct.blob.db.windows.net"; got != want {
+		t.Fatalf("default service URL = %q, want %q", got, want)
+	}
+	if got, want := b.azureServiceURL("", "localhost:10000/devstoreaccount1"), "https://localhost:10000/devstoreaccount1"; got != want {
+		t.Fatalf("endpoint-normalized service URL = %q, want %q", got, want)
+	}
+	if got, want := b.azureAccountFromEndpoint("http://localhost:10000/devstoreaccount1"), "localhost"; got != want {
+		t.Fatalf("localhost account = %q, want %q", got, want)
+	}
+	if got, want := b.azureAccountFromEndpoint("https://myacct.blob.db.windows.net"), "myacct"; got != want {
+		t.Fatalf("Azure account = %q, want %q", got, want)
+	}
+	if got := b.azureAccountFromEndpoint("not a url"); got != "" {
+		t.Fatalf("invalid endpoint account = %q, want empty", got)
+	}
 }
 
 func assertSASWindow(t *testing.T, query url.Values, before time.Time, expiry time.Duration) {
@@ -239,6 +305,44 @@ func TestAzureMultipartBlockIDAndCompletionOrder(t *testing.T) {
 	}
 }
 
+func TestAzureInitMultipartUploadReturnsUUID(t *testing.T) {
+	b := &backend{}
+	uploadID, err := b.InitMultipartUpload(context.Background(), storage.ObjectTarget{Bucket: "test-bucket", Key: "object.bin"})
+	if err != nil {
+		t.Fatalf("InitMultipartUpload returned error: %v", err)
+	}
+	if _, err := uuid.Parse(string(uploadID)); err != nil {
+		t.Fatalf("upload ID = %q, want UUID: %v", uploadID, err)
+	}
+}
+
+func TestAzureEmptyMultipartCompletionCallsProvider(t *testing.T) {
+	transport := &recordingTransport{status: http.StatusCreated, header: http.Header{"Content-Type": []string{"application/xml"}}}
+	b := &backend{credentials: credentialLookupFunc(func(context.Context, string) (*buckets.Credential, error) {
+		return azureCredential("http://azure.test"), nil
+	}), transport: transport}
+
+	err := b.CompleteMultipartUpload(context.Background(), storage.CompleteMultipartRequest{
+		Target:   storage.ObjectTarget{Bucket: "test-bucket", Key: "object.bin"},
+		UploadID: "upload-empty",
+	})
+	if err != nil {
+		t.Fatalf("empty CompleteMultipartUpload returned error: %v", err)
+	}
+	if transport.requests != 1 {
+		t.Fatalf("empty completion requests = %d, want 1", transport.requests)
+	}
+	var blockList struct {
+		Latest []string `xml:"Latest"`
+	}
+	if err := xml.Unmarshal(transport.body, &blockList); err != nil {
+		t.Fatalf("decode empty block list: %v; body=%q", err, transport.body)
+	}
+	if len(blockList.Latest) != 0 {
+		t.Fatalf("empty completion sent %d block IDs, want 0", len(blockList.Latest))
+	}
+}
+
 func TestAzureDeleteUsesHistoricalEndpointAndNotFoundIsIdempotent(t *testing.T) {
 	if got, want := (&backend{}).azureServiceURL("acct", ""), "https://acct.blob.db.windows.net"; got != want {
 		t.Fatalf("signing default endpoint = %q, want %q", got, want)
@@ -250,7 +354,7 @@ func TestAzureDeleteUsesHistoricalEndpointAndNotFoundIsIdempotent(t *testing.T) 
 	transport := &recordingTransport{status: http.StatusNotFound, header: http.Header{"X-Ms-Error-Code": []string{"BlobNotFound"}}}
 
 	b := &backend{credentials: credentialLookupFunc(func(context.Context, string) (*buckets.Credential, error) {
-		return azureCredential("http://azure.test"), nil
+		return azureCredential(""), nil
 	}), transport: transport}
 	err := b.Delete(context.Background(), []storage.PhysicalTarget{{Provider: "azure", Bucket: "test-bucket", Key: "path/object.txt"}})
 	if err != nil {
@@ -259,8 +363,38 @@ func TestAzureDeleteUsesHistoricalEndpointAndNotFoundIsIdempotent(t *testing.T) 
 	if transport.requests != 1 {
 		t.Fatalf("delete requests = %d, want 1", transport.requests)
 	}
+	if got, want := transport.requestHost, "acct.blob.core.windows.net"; got != want {
+		t.Fatalf("delete host = %q, want %q", got, want)
+	}
 	if got, want := transport.requestPath, "/test-bucket/path/object.txt"; got != want {
 		t.Fatalf("delete path = %q, want %q", got, want)
+	}
+}
+
+func TestAzureDeleteNotFoundMapping(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		errorCode string
+		wantError bool
+	}{
+		{name: "blob not found", errorCode: "BlobNotFound"},
+		{name: "container not found", errorCode: "ContainerNotFound"},
+		{name: "unknown not found", wantError: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			header := http.Header{}
+			if test.errorCode != "" {
+				header.Set("X-Ms-Error-Code", test.errorCode)
+			}
+			transport := &recordingTransport{status: http.StatusNotFound, header: header}
+			b := &backend{credentials: credentialLookupFunc(func(context.Context, string) (*buckets.Credential, error) {
+				return azureCredential("http://azure.test"), nil
+			}), transport: transport}
+			err := b.Delete(context.Background(), []storage.PhysicalTarget{{Provider: "azure", Bucket: "test-bucket", Key: "object.txt"}})
+			if (err != nil) != test.wantError {
+				t.Fatalf("Delete error = %v, want error=%t", err, test.wantError)
+			}
+		})
 	}
 }
 
