@@ -23,10 +23,10 @@ import (
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/config"
 	"github.com/calypr/syfon/internal/core"
-	"github.com/calypr/syfon/internal/db"
 	"github.com/calypr/syfon/internal/signer/file"
 	"github.com/calypr/syfon/internal/storage/address"
 	"github.com/calypr/syfon/internal/testutils"
+	"github.com/calypr/syfon/internal/transfers"
 	"github.com/calypr/syfon/internal/urlmanager"
 	"github.com/calypr/syfon/internal/usage"
 )
@@ -49,7 +49,7 @@ func TestSyfonMetricsTransfersCLI(t *testing.T) {
 	defer server.Close()
 
 	now := time.Now().UTC()
-	if err := server.DB.RecordTransferAttributionEvents(context.Background(), []usage.Event{
+	if err := server.transferEvents.RecordTransferAttributionEvents(context.Background(), []usage.Event{
 		{
 			EventID:        "cli-grant-1",
 			AccessGrantID:  "cli-grant-1",
@@ -110,7 +110,7 @@ func TestSyfonMetricsTransfersCLI(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("record access grant: %v", err)
 	}
-	if err := server.DB.RecordProviderTransferEvents(context.Background(), []usage.ProviderEvent{
+	if err := server.providerEvents.RecordProviderTransferEvents(context.Background(), []usage.ProviderEvent{
 		{
 			ProviderEventID:      "cli-transfer-1",
 			AccessGrantID:        "cli-grant-1",
@@ -270,11 +270,12 @@ func clearRootAuthFlags(t *testing.T, cmd *cobra.Command) {
 }
 
 type fiberTestServer struct {
-	URL        string
-	StorageDir string
-	DB         db.DatabaseInterface
-	app        *fiber.App
-	ln         net.Listener
+	URL            string
+	StorageDir     string
+	transferEvents transfers.EventRecorder
+	providerEvents usage.ProviderEventRecorder
+	app            *fiber.App
+	ln             net.Listener
 }
 
 func (s *fiberTestServer) Close() {
@@ -378,11 +379,12 @@ func newSyfonTestServer(t *testing.T) *fiberTestServer {
 	}()
 
 	return &fiberTestServer{
-		URL:        "http://" + ln.Addr().String(),
-		StorageDir: storageDir,
-		DB:         database,
-		app:        app,
-		ln:         ln,
+		URL:            "http://" + ln.Addr().String(),
+		StorageDir:     storageDir,
+		transferEvents: database,
+		providerEvents: database,
+		app:            app,
+		ln:             ln,
 	}
 }
 
