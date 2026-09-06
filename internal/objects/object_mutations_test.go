@@ -8,12 +8,10 @@ import (
 
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/persistence/sqlite"
-
-	"github.com/calypr/syfon/internal/testutils"
 )
 
 func TestRegisterBulk_RegistersCandidate(t *testing.T) {
-	database := testutils.NewInMemoryDB()
+	database := newSQLiteDatabase(t)
 	om := newTestService(database, nil)
 
 	candidates := []objects.Candidate{
@@ -49,7 +47,7 @@ func TestRegisterBulk_RegistersCandidate(t *testing.T) {
 }
 
 func TestRegisterBulk_InvalidChecksum(t *testing.T) {
-	database := testutils.NewInMemoryDB()
+	database := newSQLiteDatabase(t)
 	om := newTestService(database, nil)
 
 	candidates := []objects.Candidate{{
@@ -67,7 +65,7 @@ func TestRegisterBulk_InvalidChecksum(t *testing.T) {
 }
 
 func TestBulkDeleteObjects_DeletesAuthorizedObjects(t *testing.T) {
-	database := testutils.NewInMemoryDB()
+	database := newSQLiteDatabase(t)
 	om := newTestService(database, nil)
 
 	_, err := registerCandidates(context.Background(), om, []objects.Candidate{{
@@ -95,7 +93,7 @@ func TestBulkDeleteObjects_DeletesAuthorizedObjects(t *testing.T) {
 }
 
 func TestRegisterObjects_CanonicalizesProjectChecksumDuplicates(t *testing.T) {
-	database := testutils.NewInMemoryDB()
+	database := newSQLiteDatabase(t)
 	om := newTestService(database, nil)
 	now := time.Now().UTC()
 	later := now.Add(time.Minute)

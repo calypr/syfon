@@ -8,8 +8,6 @@ import (
 
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/persistence/sqlite"
-
-	"github.com/calypr/syfon/internal/testutils"
 )
 
 type pageSpyDB struct {
@@ -211,7 +209,7 @@ func TestGetObjectPrefersSHAIdentityOverCollidingPhysicalID(t *testing.T) {
 }
 
 func TestGetBulkObjectsUsesGlobalSHAIdentity(t *testing.T) {
-	database := &testutils.MockDatabase{}
+	database := &readObjectStore{}
 	checksum := "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 	firstResource := "/organization/org/project/first"
 	secondResource := "/organization/org/project/second"
@@ -226,14 +224,15 @@ func TestGetBulkObjectsUsesGlobalSHAIdentity(t *testing.T) {
 	}
 
 	ctx := buildLocalAuthzContext(map[string]map[string]bool{firstResource: {"read": true}})
-	got, err := newTestService(database, nil).GetBulkObjects(ctx, []string{"bulk-b"}, "read")
+	service := objects.NewService(objects.Dependencies{Reader: database, Content: database})
+	got, err := service.GetBulkObjects(ctx, []string{"bulk-b"}, "read")
 	if err != nil {
 		t.Fatalf("GetBulkObjects failed: %v", err)
 	}
 	if len(got) != 1 || got[0].Id != "bulk-a" || got[0].ControlledAccess == nil || len(*got[0].ControlledAccess) != 2 {
 		t.Fatalf("bulk read did not return the merged checksum identity: %+v", got)
 	}
-	view, err := newTestService(database, nil).GetCanonicalContent(ctx, checksum, "read")
+	view, err := service.GetCanonicalContent(ctx, checksum, "read")
 	if err != nil {
 		t.Fatalf("GetCanonicalContent(checksum) failed: %v", err)
 	}
@@ -243,7 +242,7 @@ func TestGetBulkObjectsUsesGlobalSHAIdentity(t *testing.T) {
 }
 
 func TestListObjectIDsPageByChecksum_ReturnsCanonicalContentID(t *testing.T) {
-	database := testutils.NewInMemoryDB()
+	database := newSQLiteDatabase(t)
 	om := newTestService(database, nil)
 	checksum := "1111111111111111111111111111111111111111111111111111111111111111"
 
@@ -265,7 +264,7 @@ func TestListObjectIDsPageByChecksum_ReturnsCanonicalContentID(t *testing.T) {
 }
 
 func TestListObjectIDsPageByScope_StartAfterAndScopeFilter(t *testing.T) {
-	database := testutils.NewInMemoryDB()
+	database := newSQLiteDatabase(t)
 	om := newTestService(database, nil)
 	checksumA := "2222222222222222222222222222222222222222222222222222222222222222"
 	checksumB := "3333333333333333333333333333333333333333333333333333333333333333"
@@ -284,7 +283,7 @@ func TestListObjectIDsPageByScope_StartAfterAndScopeFilter(t *testing.T) {
 }
 
 func TestListObjectIDsPageByScope_UsesDatabasePaginationForUnrestrictedScope(t *testing.T) {
-	database := &pageSpyDB{SqliteDB: testutils.NewInMemoryDB()}
+	database := &pageSpyDB{SqliteDB: newSQLiteDatabase(t)}
 	om := newTestService(database, nil)
 
 	registerScopedCandidate(t, om, "scope-a", "2222222222222222222222222222222222222222222222222222222222222222", "org1", "proj1")
@@ -307,7 +306,7 @@ func TestListObjectIDsPageByScope_UsesDatabasePaginationForUnrestrictedScope(t *
 }
 
 func TestListObjectIDsPageByScope_FallsBackWhenAuthzRestrictsResources(t *testing.T) {
-	database := &pageSpyDB{SqliteDB: testutils.NewInMemoryDB()}
+	database := &pageSpyDB{SqliteDB: newSQLiteDatabase(t)}
 	om := newTestService(database, nil)
 
 	registerScopedCandidate(t, om, "secure-obj", "5555555555555555555555555555555555555555555555555555555555555555", "secure", "p1")
@@ -331,7 +330,7 @@ func TestListObjectIDsPageByScope_FallsBackWhenAuthzRestrictsResources(t *testin
 }
 
 func TestListObjectIDsByScope_AuthzFiltering(t *testing.T) {
-	database := testutils.NewInMemoryDB()
+	database := newSQLiteDatabase(t)
 	om := newTestService(database, nil)
 	checksum := "5555555555555555555555555555555555555555555555555555555555555555"
 
@@ -360,57 +359,47 @@ func TestListObjectIDsByScope_AuthzFiltering(t *testing.T) {
 	}
 }
 
-type trackingMockDB struct {
-	*testutils.MockDatabase
-	bulkCalls [][]string
-}
-
-func (t *trackingMockDB) GetBulkObjects(ctx context.Context, ids []string) ([]objects.Record, error) {
-	copyIDs := append([]string(nil), ids...)
-	t.bulkCalls = append(t.bulkCalls, copyIDs)
-	return t.MockDatabase.GetBulkObjects(ctx, ids)
-}
-
 func TestPrepareScopedObjects_HydratesOnlyMissingSiblingIDs(t *testing.T) {
 	checksum := "6666666666666666666666666666666666666666666666666666666666666666"
 	controlled := []string{"/organization/org/project/proj"}
-	tracked := &trackingMockDB{MockDatabase: &testutils.MockDatabase{
-		Objects: map[string]*objects.Record{
-			"dup-a": {
-				Id:               "dup-a",
-				CreatedTime:      drsISOTime("2026-01-01T00:00:00Z"),
-				UpdatedTime:      ptrTime("2026-01-01T00:00:00Z"),
-				Checksums:        []objects.Checksum{{Type: "sha256", Checksum: checksum}},
-				ControlledAccess: &controlled,
-				AccessMethods: &[]objects.AccessMethod{{
-					Type:      "s3",
-					AccessUrl: &objects.AccessURL{Url: "s3://bucket/dup-a"},
-				}},
-			},
-			"dup-b": {
-				Id:               "dup-b",
-				CreatedTime:      drsISOTime("2026-01-02T00:00:00Z"),
-				UpdatedTime:      ptrTime("2026-01-02T00:00:00Z"),
-				Checksums:        []objects.Checksum{{Type: "sha256", Checksum: checksum}},
-				ControlledAccess: &controlled,
-				AccessMethods: &[]objects.AccessMethod{{
-					Type:      "s3",
-					AccessUrl: &objects.AccessURL{Url: "s3://bucket/dup-b"},
-				}},
-			},
+	tracked := &readObjectStore{}
+	for _, obj := range []objects.Record{
+		{
+			Id:               "dup-a",
+			CreatedTime:      drsISOTime("2026-01-01T00:00:00Z"),
+			UpdatedTime:      ptrTime("2026-01-01T00:00:00Z"),
+			Checksums:        []objects.Checksum{{Type: "sha256", Checksum: checksum}},
+			ControlledAccess: &controlled,
+			Authorizations:   map[string][]string{"org": {"proj"}},
+			AccessMethods: &[]objects.AccessMethod{{
+				Type:      "s3",
+				AccessUrl: &objects.AccessURL{Url: "s3://bucket/dup-a"},
+			}},
 		},
-		ObjectAuthz: map[string]map[string][]string{
-			"dup-a": {"org": {"proj"}},
-			"dup-b": {"org": {"proj"}},
+		{
+			Id:               "dup-b",
+			CreatedTime:      drsISOTime("2026-01-02T00:00:00Z"),
+			UpdatedTime:      ptrTime("2026-01-02T00:00:00Z"),
+			Checksums:        []objects.Checksum{{Type: "sha256", Checksum: checksum}},
+			ControlledAccess: &controlled,
+			Authorizations:   map[string][]string{"org": {"proj"}},
+			AccessMethods: &[]objects.AccessMethod{{
+				Type:      "s3",
+				AccessUrl: &objects.AccessURL{Url: "s3://bucket/dup-b"},
+			}},
 		},
-	}}
-	om := newTestService(tracked, nil)
+	} {
+		if err := tracked.CreateObject(context.Background(), &obj); err != nil {
+			t.Fatalf("CreateObject(%s) failed: %v", obj.Id, err)
+		}
+	}
+	om := objects.NewService(objects.Dependencies{Reader: tracked, Content: tracked, ChecksumScope: tracked})
 
 	initial, err := tracked.GetBulkObjects(context.Background(), []string{"dup-a"})
 	if err != nil {
 		t.Fatalf("GetBulkObjects failed: %v", err)
 	}
-	tracked.bulkCalls = nil
+	tracked.BulkCalls = nil
 
 	prepared, err := om.PrepareScopedObjects(context.Background(), initial, "org", "proj", "")
 	if err != nil {
@@ -422,11 +411,11 @@ func TestPrepareScopedObjects_HydratesOnlyMissingSiblingIDs(t *testing.T) {
 	if prepared[0].AccessMethods == nil || len(*prepared[0].AccessMethods) != 2 {
 		t.Fatalf("expected merged access methods, got %+v", prepared[0].AccessMethods)
 	}
-	if len(tracked.bulkCalls) != 1 {
-		t.Fatalf("expected 1 sibling hydration call, got %d", len(tracked.bulkCalls))
+	if len(tracked.BulkCalls) != 1 {
+		t.Fatalf("expected 1 sibling hydration call, got %d", len(tracked.BulkCalls))
 	}
-	if !slices.Equal(tracked.bulkCalls[0], []string{"dup-b"}) {
-		t.Fatalf("expected only missing sibling id to be hydrated, got %+v", tracked.bulkCalls[0])
+	if !slices.Equal(tracked.BulkCalls[0], []string{"dup-b"}) {
+		t.Fatalf("expected only missing sibling id to be hydrated, got %+v", tracked.BulkCalls[0])
 	}
 }
 

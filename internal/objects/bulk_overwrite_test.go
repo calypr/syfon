@@ -9,9 +9,6 @@ import (
 	sycommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/faults"
 	"github.com/calypr/syfon/internal/objects"
-	"github.com/calypr/syfon/internal/persistence/sqlite"
-
-	"github.com/calypr/syfon/internal/testutils"
 )
 
 func TestBulkOverwriteObjects_ReplacesProjectChecksumSibling(t *testing.T) {
@@ -22,13 +19,13 @@ func TestBulkOverwriteObjects_ReplacesProjectChecksumSibling(t *testing.T) {
 	sha := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	oldName := "old"
 	newName := "new"
-	db := &testutils.MockDatabase{
-		Objects: map[string]*objects.Record{
-			"target-did": {Id: "target-did", Name: &oldName, Checksums: []objects.Checksum{{Type: "sha256", Checksum: sha}}},
+	db := &bulkOverwriteStore{Objects: map[string]*objects.Record{
+		"target-did": {
+			Id: "target-did", Name: &oldName, Checksums: []objects.Checksum{{Type: "sha256", Checksum: sha}},
+			Authorizations: map[string][]string{"org": {"project"}},
 		},
-		ObjectAuthz: map[string]map[string][]string{"target-did": {"org": {"project"}}},
-	}
-	om := newTestService(db)
+	}}
+	om := objects.NewService(objects.Dependencies{Reader: db, Writer: db, Aliases: db, ChecksumScope: db})
 	candidate := objects.Record{
 
 		Id:               "source-did",
@@ -68,38 +65,34 @@ func TestBulkOverwriteObjects_ValidationAndConflicts(t *testing.T) {
 
 	tests := []struct {
 		name       string
-		db         *testutils.MockDatabase
 		candidates []objects.Record
+		db         *bulkOverwriteStore
 		want       string
 		conflict   bool
 	}{
-		{name: "missing did", db: &testutils.MockDatabase{}, candidates: []objects.Record{candidate(" ")}, want: "did is required"},
-		{name: "duplicate source did", db: &testutils.MockDatabase{}, candidates: []objects.Record{candidate("same"), candidate("same")}, want: "duplicate source did", conflict: true},
-		{name: "missing target scope", db: &testutils.MockDatabase{}, candidates: []objects.Record{{Id: "did"}}, want: "must include target project"},
+		{name: "missing did", db: &bulkOverwriteStore{}, candidates: []objects.Record{candidate(" ")}, want: "did is required"},
+		{name: "duplicate source did", db: &bulkOverwriteStore{}, candidates: []objects.Record{candidate("same"), candidate("same")}, want: "duplicate source did", conflict: true},
+		{name: "missing target scope", db: &bulkOverwriteStore{}, candidates: []objects.Record{{Id: "did"}}, want: "must include target project"},
 		{
 			name: "did exists outside project",
-			db: &testutils.MockDatabase{
-				Objects:     map[string]*objects.Record{"did": {Id: "did"}},
-				ObjectAuthz: map[string]map[string][]string{"did": {"org": {"other"}}},
-			},
+			db: &bulkOverwriteStore{Objects: map[string]*objects.Record{
+				"did": {Id: "did", Authorizations: map[string][]string{"org": {"other"}}},
+			}},
 			candidates: []objects.Record{candidate("did")}, want: "outside project", conflict: true,
 		},
 		{
 			name: "ambiguous checksum",
-			db: &testutils.MockDatabase{
-				Objects: map[string]*objects.Record{
-					"one": {Id: "one", Checksums: []objects.Checksum{{Type: "sha256", Checksum: sha}}},
-					"two": {Id: "two", Checksums: []objects.Checksum{{Type: "sha256", Checksum: sha}}},
-				},
-				ObjectAuthz: map[string]map[string][]string{"one": {"org": {"project"}}, "two": {"org": {"project"}}},
-			},
+			db: &bulkOverwriteStore{Objects: map[string]*objects.Record{
+				"one": {Id: "one", Checksums: []objects.Checksum{{Type: "sha256", Checksum: sha}}, Authorizations: map[string][]string{"org": {"project"}}},
+				"two": {Id: "two", Checksums: []objects.Checksum{{Type: "sha256", Checksum: sha}}, Authorizations: map[string][]string{"org": {"project"}}},
+			}},
 			candidates: []objects.Record{candidate("source")}, want: "multiple records", conflict: true,
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			om := newTestService(tc.db)
+			om := objects.NewService(objects.Dependencies{Reader: tc.db, Writer: tc.db, Aliases: tc.db, ChecksumScope: tc.db})
 			_, err := om.BulkOverwriteObjects(context.Background(), "org", "project", tc.candidates)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("expected error containing %q, got %v", tc.want, err)
@@ -112,7 +105,8 @@ func TestBulkOverwriteObjects_ValidationAndConflicts(t *testing.T) {
 }
 
 func TestBulkOverwriteObjects_EmptyInput(t *testing.T) {
-	om := newTestService(&testutils.MockDatabase{})
+	db := &bulkOverwriteStore{}
+	om := objects.NewService(objects.Dependencies{Reader: db, Writer: db, Aliases: db, ChecksumScope: db})
 	result, err := om.BulkOverwriteObjects(context.Background(), "", "", nil)
 	if err != nil || result != (objects.BulkOverwriteResult{}) {
 		t.Fatalf("expected empty result, got %+v err=%v", result, err)
@@ -125,11 +119,13 @@ func TestBulkOverwriteObjects_DoesNotMatchChecksumOutsideProject(t *testing.T) {
 		t.Fatal(err)
 	}
 	sha := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-	db := &testutils.MockDatabase{
-		Objects:     map[string]*objects.Record{"other-project": {Id: "other-project", Checksums: []objects.Checksum{{Type: "sha256", Checksum: sha}}}},
-		ObjectAuthz: map[string]map[string][]string{"other-project": {"org": {"other"}}},
-	}
-	om := newTestService(db)
+	db := &bulkOverwriteStore{Objects: map[string]*objects.Record{
+		"other-project": {
+			Id: "other-project", Checksums: []objects.Checksum{{Type: "sha256", Checksum: sha}},
+			Authorizations: map[string][]string{"org": {"other"}},
+		},
+	}}
+	om := objects.NewService(objects.Dependencies{Reader: db, Writer: db, Aliases: db, ChecksumScope: db})
 	candidate := objects.Record{
 		Id: "source-did", Checksums: []objects.Checksum{{Type: "sha256", Checksum: sha}}, ControlledAccess: &[]string{resource},
 		Authorizations: map[string][]string{"org": {"project"}},
@@ -148,10 +144,7 @@ func TestBulkOverwriteObjects_RejectsAliasTarget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	database, err := sqlite.NewSqliteDB(":memory:")
-	if err != nil {
-		t.Fatalf("NewSqliteDB failed: %v", err)
-	}
+	database := newSQLiteDatabase(t)
 	sha := "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 	originalName := "original"
 	canonical := objects.Record{
@@ -210,7 +203,8 @@ func TestBulkOverwriteObjects_RequiresTargetProjectPermission(t *testing.T) {
 		ControlledAccess: &resources,
 	}
 	t.Run("create", func(t *testing.T) {
-		om := newTestService(&testutils.MockDatabase{})
+		db := &bulkOverwriteStore{}
+		om := objects.NewService(objects.Dependencies{Reader: db, Writer: db, Aliases: db, ChecksumScope: db})
 		ctx := buildLocalAuthzContext(map[string]map[string]bool{
 			allowedResource: {"create": true},
 		})
@@ -222,15 +216,10 @@ func TestBulkOverwriteObjects_RequiresTargetProjectPermission(t *testing.T) {
 	})
 
 	t.Run("update", func(t *testing.T) {
-		database := &testutils.MockDatabase{
-			Objects: map[string]*objects.Record{
-				string(candidate.Id): {Id: candidate.Id},
-			},
-			ObjectAuthz: map[string]map[string][]string{
-				string(candidate.Id): {"org": {"target", "allowed"}},
-			},
-		}
-		om := newTestService(database)
+		database := &bulkOverwriteStore{Objects: map[string]*objects.Record{
+			string(candidate.Id): {Id: candidate.Id, Authorizations: map[string][]string{"org": {"target", "allowed"}}},
+		}}
+		om := objects.NewService(objects.Dependencies{Reader: database, Writer: database, Aliases: database, ChecksumScope: database})
 		ctx := buildLocalAuthzContext(map[string]map[string]bool{
 			allowedResource: {"update": true},
 		})
