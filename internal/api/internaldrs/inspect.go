@@ -5,12 +5,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/api/apiutil"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/core"
 	apimiddleware "github.com/calypr/syfon/internal/httpapi/middleware"
-	"github.com/calypr/syfon/internal/models"
+	"github.com/calypr/syfon/internal/objects"
 	"github.com/gofiber/fiber/v3"
 )
 
@@ -581,7 +580,7 @@ func projectBucketInventoryResponseFromCore(result *core.ProjectStorageInspectRe
 	return out
 }
 
-func projectRecordAuditItemFromObject(obj models.InternalObject, organization, project string) (internalInspectProjectRecordItem, bool) {
+func projectRecordAuditItemFromObject(obj objects.Record, organization, project string) (internalInspectProjectRecordItem, bool) {
 	checksum := primarySHA256Checksum(obj.Checksums)
 	if checksum == "" {
 		return internalInspectProjectRecordItem{}, false
@@ -610,7 +609,7 @@ func projectRecordAuditItemFromObject(obj models.InternalObject, organization, p
 		}
 	}
 	item := internalInspectProjectRecordItem{
-		ObjectID:      strings.TrimSpace(obj.Id),
+		ObjectID:      strings.TrimSpace(string(obj.Id)),
 		Checksum:      checksum,
 		Organization:  organization,
 		Project:       project,
@@ -668,7 +667,7 @@ func projectRecordMatchesPathPrefix(record internalInspectProjectRecordItem, pat
 	return false
 }
 
-func primarySHA256Checksum(checksums []drs.Checksum) string {
+func primarySHA256Checksum(checksums []objects.Checksum) string {
 	for _, checksum := range checksums {
 		if strings.EqualFold(strings.TrimSpace(checksum.Type), "sha256") {
 			value := strings.TrimSpace(strings.TrimPrefix(checksum.Checksum, "sha256:"))

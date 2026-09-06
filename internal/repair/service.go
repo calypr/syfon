@@ -12,6 +12,7 @@ import (
 	"github.com/calypr/syfon/apigen/client/internalapi"
 	syfoncommon "github.com/calypr/syfon/common"
 	intcommon "github.com/calypr/syfon/internal/common"
+	intobjects "github.com/calypr/syfon/internal/objects"
 )
 
 const defaultPageSize = 500
@@ -137,7 +138,7 @@ func (s *Service) listRecords(ctx context.Context, opts Options) ([]internalapi.
 func (s *Service) auditRecord(ctx context.Context, rec internalapi.InternalRecord, scopes map[string][]scopeTarget, opts Options) (*auditedObject, bool) {
 	sha := ""
 	if rec.Hashes != nil {
-		sha = syfoncommon.NormalizeChecksum((*rec.Hashes)["sha256"])
+		sha = intobjects.NormalizeChecksum((*rec.Hashes)["sha256"])
 	}
 	obj := &auditedObject{
 		record:      rec,
@@ -357,11 +358,11 @@ func inferRecordResource(rec internalapi.InternalRecord, sha string, scopes map[
 		if len(targets) == 0 || strings.TrimSpace(targets[0].Project) == "" {
 			continue
 		}
-		minted, err := intcommon.MintObjectIDFromChecksum(sha, []string{resource})
+		minted, err := intobjects.MintRecordIDFromChecksum(sha, []string{resource})
 		if err != nil {
 			continue
 		}
-		if minted == strings.TrimSpace(rec.Did) {
+		if string(minted) == strings.TrimSpace(rec.Did) {
 			matches = append(matches, resource)
 		}
 	}

@@ -1,17 +1,18 @@
 package core
 
 import (
+	"encoding/json"
 	"sort"
 	"strings"
 	"time"
 
-	"github.com/calypr/syfon/apigen/server/drs"
 	syfoncommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/common"
-	"github.com/calypr/syfon/internal/models"
+
+	objectdomain "github.com/calypr/syfon/internal/objects"
 )
 
-func canonicalizeProjectScopedObjects(objects []models.InternalObject, organization, project string) []models.InternalObject {
+func canonicalizeProjectScopedObjects(objects []objectdomain.Record, organization, project string) []objectdomain.Record {
 	if len(objects) <= 1 {
 		return cloneObjects(objects)
 	}
@@ -25,8 +26,8 @@ func canonicalizeProjectScopedObjects(objects []models.InternalObject, organizat
 		}
 	}
 
-	grouped := make(map[string][]models.InternalObject)
-	passthrough := make([]models.InternalObject, 0)
+	grouped := make(map[string][]objectdomain.Record)
+	passthrough := make([]objectdomain.Record, 0)
 	for _, obj := range objects {
 		key, ok := canonicalProjectChecksumKey(&obj, forcedResource)
 		if !ok {
@@ -42,7 +43,7 @@ func canonicalizeProjectScopedObjects(objects []models.InternalObject, organizat
 	}
 	sort.Strings(keys)
 
-	out := make([]models.InternalObject, 0, len(keys)+len(passthrough))
+	out := make([]objectdomain.Record, 0, len(keys)+len(passthrough))
 	for _, key := range keys {
 		out = append(out, collapseCanonicalGroup(grouped[key]))
 	}
@@ -56,11 +57,11 @@ func canonicalizeProjectScopedObjects(objects []models.InternalObject, organizat
 	return out
 }
 
-func canonicalProjectChecksumKey(obj *models.InternalObject, forcedResource string) (string, bool) {
+func canonicalProjectChecksumKey(obj *objectdomain.Record, forcedResource string) (string, bool) {
 	if obj == nil {
 		return "", false
 	}
-	sha, ok := common.CanonicalSHA256(obj.Checksums)
+	sha, ok := objectdomain.CanonicalSHA256(obj.Checksums)
 	if !ok || strings.TrimSpace(sha) == "" {
 		return "", false
 	}
@@ -75,7 +76,7 @@ func canonicalProjectChecksumKey(obj *models.InternalObject, forcedResource stri
 	return resource + "|" + sha, true
 }
 
-func projectScopeResources(obj *models.InternalObject) []string {
+func projectScopeResources(obj *objectdomain.Record) []string {
 	resources := ObjectAccessResources(obj)
 	out := make([]string, 0, len(resources))
 	for _, resource := range resources {
@@ -88,21 +89,21 @@ func projectScopeResources(obj *models.InternalObject) []string {
 	return syfoncommon.NormalizeAccessResources(out)
 }
 
-func canonicalizeContentObjects(objects []models.InternalObject) []models.InternalObject {
+func canonicalizeContentObjects(objects []objectdomain.Record) []objectdomain.Record {
 	if len(objects) <= 1 {
 		return cloneObjects(objects)
 	}
-	grouped := make(map[string][]models.InternalObject)
-	passthrough := make([]models.InternalObject, 0)
+	grouped := make(map[string][]objectdomain.Record)
+	passthrough := make([]objectdomain.Record, 0)
 	for _, obj := range objects {
-		sha, ok := common.CanonicalSHA256(obj.Checksums)
+		sha, ok := objectdomain.CanonicalSHA256(obj.Checksums)
 		if !ok {
 			passthrough = append(passthrough, cloneObject(obj))
 			continue
 		}
 		grouped[sha] = append(grouped[sha], cloneObject(obj))
 	}
-	out := make([]models.InternalObject, 0, len(grouped)+len(passthrough))
+	out := make([]objectdomain.Record, 0, len(grouped)+len(passthrough))
 	for _, group := range grouped {
 		out = append(out, collapseCanonicalGroup(group))
 	}
@@ -111,14 +112,14 @@ func canonicalizeContentObjects(objects []models.InternalObject) []models.Intern
 	return out
 }
 
-func objectsWithSHA256(objects []models.InternalObject, checksum string) []models.InternalObject {
+func objectsWithSHA256(objects []objectdomain.Record, checksum string) []objectdomain.Record {
 	target := syfoncommon.NormalizeOid(checksum)
 	if target == "" {
 		return objects
 	}
-	matched := make([]models.InternalObject, 0, len(objects))
+	matched := make([]objectdomain.Record, 0, len(objects))
 	for _, obj := range objects {
-		sha, ok := common.CanonicalSHA256(obj.Checksums)
+		sha, ok := objectdomain.CanonicalSHA256(obj.Checksums)
 		if ok && sha == target {
 			matched = append(matched, obj)
 		}
@@ -126,9 +127,9 @@ func objectsWithSHA256(objects []models.InternalObject, checksum string) []model
 	return matched
 }
 
-func collapseCanonicalGroup(group []models.InternalObject) models.InternalObject {
+func collapseCanonicalGroup(group []objectdomain.Record) objectdomain.Record {
 	if len(group) == 0 {
-		return models.InternalObject{}
+		return objectdomain.Record{}
 	}
 	canonical := cloneObject(group[0])
 	latest := cloneObject(group[0])
@@ -145,9 +146,9 @@ func collapseCanonicalGroup(group []models.InternalObject) models.InternalObject
 	merged := cloneObject(canonical)
 	merged.Name = latest.Name
 	merged.Size = pickLatestNonZeroSize(group, canonical.Size)
-	merged.Description = pickLatestStringPtr(group, func(obj models.InternalObject) *string { return obj.Description }, canonical.Description)
-	merged.MimeType = pickLatestStringPtr(group, func(obj models.InternalObject) *string { return obj.MimeType }, canonical.MimeType)
-	merged.Version = pickLatestStringPtr(group, func(obj models.InternalObject) *string { return obj.Version }, canonical.Version)
+	merged.Description = pickLatestStringPtr(group, func(obj objectdomain.Record) *string { return obj.Description }, canonical.Description)
+	merged.MimeType = pickLatestStringPtr(group, func(obj objectdomain.Record) *string { return obj.MimeType }, canonical.MimeType)
+	merged.Version = pickLatestStringPtr(group, func(obj objectdomain.Record) *string { return obj.Version }, canonical.Version)
 	updated := canonicalObjectSortTime(latest)
 	merged.UpdatedTime = &updated
 	merged.Checksums = mergeChecksums(group)
@@ -168,12 +169,12 @@ func collapseCanonicalGroup(group []models.InternalObject) models.InternalObject
 		merged.Authorizations = nil
 	}
 	merged.NameAliases = mergeNameAliases(merged.Name, group)
-	merged.Aliases = mergeStringPointerValues(func(obj models.InternalObject) []string { return common.DerefStringSlice(obj.Aliases) }, group)
-	merged.SelfUri = "drs://" + merged.Id
+	merged.Aliases = mergeStringPointerValues(func(obj objectdomain.Record) []string { return common.DerefStringSlice(obj.Aliases) }, group)
+	merged.SelfUri = "drs://" + string(merged.Id)
 	return merged
 }
 
-func canonicalObjectOlder(a, b models.InternalObject) bool {
+func canonicalObjectOlder(a, b objectdomain.Record) bool {
 	at := a.CreatedTime.UTC()
 	bt := b.CreatedTime.UTC()
 	if !at.Equal(bt) {
@@ -182,7 +183,7 @@ func canonicalObjectOlder(a, b models.InternalObject) bool {
 	return a.Id < b.Id
 }
 
-func canonicalObjectNewer(a, b models.InternalObject) bool {
+func canonicalObjectNewer(a, b objectdomain.Record) bool {
 	at := canonicalObjectSortTime(a)
 	bt := canonicalObjectSortTime(b)
 	if !at.Equal(bt) {
@@ -191,27 +192,27 @@ func canonicalObjectNewer(a, b models.InternalObject) bool {
 	return a.Id > b.Id
 }
 
-func canonicalObjectSortTime(obj models.InternalObject) time.Time {
+func canonicalObjectSortTime(obj objectdomain.Record) time.Time {
 	if obj.UpdatedTime != nil && !obj.UpdatedTime.IsZero() {
 		return obj.UpdatedTime.UTC()
 	}
 	return obj.CreatedTime.UTC()
 }
 
-func cloneObjects(objects []models.InternalObject) []models.InternalObject {
-	out := make([]models.InternalObject, 0, len(objects))
+func cloneObjects(objects []objectdomain.Record) []objectdomain.Record {
+	out := make([]objectdomain.Record, 0, len(objects))
 	for _, obj := range objects {
 		out = append(out, cloneObject(obj))
 	}
 	return out
 }
 
-func cloneObject(obj models.InternalObject) models.InternalObject {
+func cloneObject(obj objectdomain.Record) objectdomain.Record {
 	cloned := obj
-	cloned.Checksums = append([]drs.Checksum(nil), obj.Checksums...)
+	cloned.Checksums = append([]objectdomain.Checksum(nil), obj.Checksums...)
 	cloned.NameAliases = append([]string(nil), obj.NameAliases...)
 	if obj.AccessMethods != nil {
-		methods := append([]drs.AccessMethod(nil), (*obj.AccessMethods)...)
+		methods := append([]objectdomain.AccessMethod(nil), (*obj.AccessMethods)...)
 		cloned.AccessMethods = &methods
 	}
 	if obj.ControlledAccess != nil {
@@ -230,7 +231,7 @@ func cloneObject(obj models.InternalObject) models.InternalObject {
 		cloned.Authorizations = authz
 	}
 	if obj.Properties != nil {
-		props := make(map[string]interface{}, len(obj.Properties))
+		props := make(map[string]json.RawMessage, len(obj.Properties))
 		for key, value := range obj.Properties {
 			props[key] = value
 		}
@@ -239,9 +240,9 @@ func cloneObject(obj models.InternalObject) models.InternalObject {
 	return cloned
 }
 
-func mergeChecksums(group []models.InternalObject) []drs.Checksum {
+func mergeChecksums(group []objectdomain.Record) []objectdomain.Checksum {
 	seen := make(map[string]struct{})
-	merged := make([]drs.Checksum, 0)
+	merged := make([]objectdomain.Checksum, 0)
 	for _, obj := range group {
 		for _, checksum := range obj.Checksums {
 			key := checksum.Type + "|" + checksum.Checksum
@@ -261,9 +262,9 @@ func mergeChecksums(group []models.InternalObject) []drs.Checksum {
 	return merged
 }
 
-func mergeAccessMethods(group []models.InternalObject) *[]drs.AccessMethod {
+func mergeAccessMethods(group []objectdomain.Record) *[]objectdomain.AccessMethod {
 	seen := make(map[string]struct{})
-	methods := make([]drs.AccessMethod, 0)
+	methods := make([]objectdomain.AccessMethod, 0)
 	for _, obj := range group {
 		if obj.AccessMethods == nil {
 			continue
@@ -273,12 +274,12 @@ func mergeAccessMethods(group []models.InternalObject) *[]drs.AccessMethod {
 			if method.AccessUrl != nil {
 				url = method.AccessUrl.Url
 			}
-			key := string(method.Type) + "|" + url
+			key := method.Type + "|" + url
 			if _, ok := seen[key]; ok {
 				continue
 			}
 			seen[key] = struct{}{}
-			method.AccessId = common.Ptr(common.AccessMethodID(string(method.Type), url))
+			method.AccessId = common.Ptr(objectdomain.AccessMethodID(method.Type, url))
 			methods = append(methods, method)
 		}
 	}
@@ -302,7 +303,7 @@ func mergeAccessMethods(group []models.InternalObject) *[]drs.AccessMethod {
 	return &methods
 }
 
-func mergeControlledAccess(group []models.InternalObject) ([]string, bool) {
+func mergeControlledAccess(group []objectdomain.Record) ([]string, bool) {
 	resources := make([]string, 0)
 	public := false
 	for _, obj := range group {
@@ -319,7 +320,7 @@ func mergeControlledAccess(group []models.InternalObject) ([]string, bool) {
 	return syfoncommon.NormalizeAccessResources(resources), public
 }
 
-func mergeNameAliases(primary *string, group []models.InternalObject) []string {
+func mergeNameAliases(primary *string, group []objectdomain.Record) []string {
 	candidates := make([]string, 0)
 	for _, obj := range group {
 		if obj.Name != nil {
@@ -327,10 +328,10 @@ func mergeNameAliases(primary *string, group []models.InternalObject) []string {
 		}
 		candidates = append(candidates, obj.NameAliases...)
 	}
-	return common.NormalizeNameAliases(common.StringVal(primary), candidates)
+	return objectdomain.NormalizeNameAliases(common.StringVal(primary), candidates)
 }
 
-func pickLatestNonZeroSize(group []models.InternalObject, fallback int64) int64 {
+func pickLatestNonZeroSize(group []objectdomain.Record, fallback int64) int64 {
 	best := fallback
 	var bestTime time.Time
 	bestID := ""
@@ -339,16 +340,16 @@ func pickLatestNonZeroSize(group []models.InternalObject, fallback int64) int64 
 			continue
 		}
 		when := canonicalObjectSortTime(obj)
-		if best <= 0 || when.After(bestTime) || when.Equal(bestTime) && obj.Id > bestID {
+		if best <= 0 || when.After(bestTime) || when.Equal(bestTime) && string(obj.Id) > bestID {
 			best = obj.Size
 			bestTime = when
-			bestID = obj.Id
+			bestID = string(obj.Id)
 		}
 	}
 	return best
 }
 
-func pickLatestStringPtr(group []models.InternalObject, getter func(models.InternalObject) *string, fallback *string) *string {
+func pickLatestStringPtr(group []objectdomain.Record, getter func(objectdomain.Record) *string, fallback *string) *string {
 	best := fallback
 	var bestTime time.Time
 	bestID := ""
@@ -358,17 +359,17 @@ func pickLatestStringPtr(group []models.InternalObject, getter func(models.Inter
 			continue
 		}
 		when := canonicalObjectSortTime(obj)
-		if best == nil || when.After(bestTime) || when.Equal(bestTime) && obj.Id > bestID {
+		if best == nil || when.After(bestTime) || when.Equal(bestTime) && string(obj.Id) > bestID {
 			trimmed := strings.TrimSpace(*value)
 			best = &trimmed
 			bestTime = when
-			bestID = obj.Id
+			bestID = string(obj.Id)
 		}
 	}
 	return best
 }
 
-func mergeStringPointerValues(getter func(models.InternalObject) []string, group []models.InternalObject) *[]string {
+func mergeStringPointerValues(getter func(objectdomain.Record) []string, group []objectdomain.Record) *[]string {
 	seen := make(map[string]struct{})
 	values := make([]string, 0)
 	for _, obj := range group {

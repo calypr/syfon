@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/calypr/syfon/apigen/server/drs"
 	sycommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/faults"
-	"github.com/calypr/syfon/internal/models"
+
+	"github.com/calypr/syfon/internal/objects"
 )
 
 func (db *SqliteDB) DeleteObject(ctx context.Context, id string) error {
@@ -130,7 +130,7 @@ func (db *SqliteDB) CreateObjectAlias(ctx context.Context, aliasID, canonicalObj
 	return tx.Commit()
 }
 
-func (db *SqliteDB) createObjectLegacy(ctx context.Context, obj *models.InternalObject) error {
+func (db *SqliteDB) createObjectLegacy(ctx context.Context, obj *objects.Record) error {
 	tx, err := db.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -141,17 +141,17 @@ func (db *SqliteDB) createObjectLegacy(ctx context.Context, obj *models.Internal
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO drs_object (id, size, created_time, updated_time, name, version, description)
 		VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		obj.Id, obj.Size, obj.CreatedTime, common.TimeVal(obj.UpdatedTime), common.CleanToBasename(common.StringVal(obj.Name)), common.StringVal(obj.Version), common.StringVal(obj.Description),
+		string(obj.Id), obj.Size, obj.CreatedTime, common.TimeVal(obj.UpdatedTime), objects.CleanToBasename(common.StringVal(obj.Name)), common.StringVal(obj.Version), common.StringVal(obj.Description),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to insert drs_object: %w", err)
 	}
 
-	if err := insertControlledAccessTx(ctx, tx, obj.Id, objectAccessResources(obj)); err != nil {
+	if err := insertControlledAccessTx(ctx, tx, string(obj.Id), objectAccessResources(obj)); err != nil {
 		return err
 	}
 	for _, alias := range normalizeObjectNameAliases(obj) {
-		_, err = tx.ExecContext(ctx, `INSERT INTO drs_object_name_alias (object_id, name_alias) VALUES (?, ?)`, obj.Id, alias)
+		_, err = tx.ExecContext(ctx, `INSERT INTO drs_object_name_alias (object_id, name_alias) VALUES (?, ?)`, string(obj.Id), alias)
 		if err != nil {
 			return fmt.Errorf("failed to insert name alias: %w", err)
 		}
@@ -163,7 +163,7 @@ func (db *SqliteDB) createObjectLegacy(ctx context.Context, obj *models.Internal
 			if am.AccessUrl == nil || am.AccessUrl.Url == "" {
 				continue
 			}
-			_, err = tx.ExecContext(ctx, `INSERT INTO drs_object_access_method (object_id, url, type) VALUES (?, ?, ?)`, obj.Id, am.AccessUrl.Url, am.Type)
+			_, err = tx.ExecContext(ctx, `INSERT INTO drs_object_access_method (object_id, url, type) VALUES (?, ?, ?)`, string(obj.Id), am.AccessUrl.Url, am.Type)
 			if err != nil {
 				return fmt.Errorf("failed to insert access method: %w", err)
 			}
@@ -175,21 +175,21 @@ func (db *SqliteDB) createObjectLegacy(ctx context.Context, obj *models.Internal
 		if strings.TrimSpace(cs.Type) == "" || strings.TrimSpace(cs.Checksum) == "" {
 			continue
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO drs_object_checksum (object_id, type, checksum) VALUES (?, ?, ?)`, obj.Id, cs.Type, cs.Checksum)
+		_, err = tx.ExecContext(ctx, `INSERT INTO drs_object_checksum (object_id, type, checksum) VALUES (?, ?, ?)`, string(obj.Id), cs.Type, cs.Checksum)
 		if err != nil {
 			return fmt.Errorf("failed to insert checksum: %w", err)
 		}
 	}
 
-	if err := db.flushObjectUsageEventsForIDsTx(ctx, tx, []string{obj.Id}); err != nil {
+	if err := db.flushObjectUsageEventsForIDsTx(ctx, tx, []string{string(obj.Id)}); err != nil {
 		return fmt.Errorf("failed to apply object usage events: %w", err)
 	}
 
 	return tx.Commit()
 }
 
-func (db *SqliteDB) registerObjectsLegacy(ctx context.Context, objects []models.InternalObject) error {
-	if len(objects) == 0 {
+func (db *SqliteDB) registerObjectsLegacy(ctx context.Context, records []objects.Record) error {
+	if len(records) == 0 {
 		return nil
 	}
 
@@ -199,8 +199,8 @@ func (db *SqliteDB) registerObjectsLegacy(ctx context.Context, objects []models.
 	}
 	defer tx.Rollback()
 
-	ids := make([]string, 0, len(objects))
-	mainCap, err := safeSliceCapacity(len(objects), len(objects), len(objects), len(objects), len(objects), len(objects), len(objects), len(objects))
+	ids := make([]string, 0, len(records))
+	mainCap, err := safeSliceCapacity(len(records), len(records), len(records), len(records), len(records), len(records), len(records), len(records))
 	if err != nil {
 		return err
 	}
@@ -211,16 +211,16 @@ func (db *SqliteDB) registerObjectsLegacy(ctx context.Context, objects []models.
 	checksumArgs := make([]interface{}, 0)
 	nameAliasArgs := make([]interface{}, 0)
 
-	for _, obj := range objects {
-		ids = append(ids, obj.Id)
-		mainArgs = append(mainArgs, obj.Id, obj.Size, obj.CreatedTime, common.TimeVal(obj.UpdatedTime), common.CleanToBasename(common.StringVal(obj.Name)), common.StringVal(obj.Version), common.StringVal(obj.Description))
+	for _, obj := range records {
+		ids = append(ids, string(obj.Id))
+		mainArgs = append(mainArgs, string(obj.Id), obj.Size, obj.CreatedTime, common.TimeVal(obj.UpdatedTime), objects.CleanToBasename(common.StringVal(obj.Name)), common.StringVal(obj.Version), common.StringVal(obj.Description))
 
 		seenAccess := make(map[string]struct{})
 		for _, resource := range objectAccessResources(&obj) {
-			controlledArgs = append(controlledArgs, obj.Id, resource)
+			controlledArgs = append(controlledArgs, string(obj.Id), resource)
 		}
 		for _, alias := range normalizeObjectNameAliases(&obj) {
-			nameAliasArgs = append(nameAliasArgs, obj.Id, alias)
+			nameAliasArgs = append(nameAliasArgs, string(obj.Id), alias)
 		}
 		if obj.AccessMethods != nil {
 			for _, am := range *obj.AccessMethods {
@@ -232,7 +232,7 @@ func (db *SqliteDB) registerObjectsLegacy(ctx context.Context, objects []models.
 					continue
 				}
 				seenAccess[key] = struct{}{}
-				accessArgs = append(accessArgs, obj.Id, am.AccessUrl.Url, am.Type)
+				accessArgs = append(accessArgs, string(obj.Id), am.AccessUrl.Url, am.Type)
 			}
 		}
 
@@ -243,7 +243,7 @@ func (db *SqliteDB) registerObjectsLegacy(ctx context.Context, objects []models.
 				continue
 			}
 			seenChecksum[key] = struct{}{}
-			checksumArgs = append(checksumArgs, obj.Id, cs.Type, cs.Checksum)
+			checksumArgs = append(checksumArgs, string(obj.Id), cs.Type, cs.Checksum)
 		}
 	}
 
@@ -376,11 +376,11 @@ func (db *SqliteDB) BulkDeleteObjects(ctx context.Context, ids []string) error {
 	return tx.Commit()
 }
 
-func normalizeObjectNameAliases(obj *models.InternalObject) []string {
+func normalizeObjectNameAliases(obj *objects.Record) []string {
 	if obj == nil {
 		return nil
 	}
-	return common.NormalizeNameAliases(common.StringVal(obj.Name), obj.NameAliases)
+	return objects.NormalizeNameAliases(common.StringVal(obj.Name), obj.NameAliases)
 }
 
 func insertControlledAccessTx(ctx context.Context, tx *sql.Tx, objectID string, resources []string) error {
@@ -392,7 +392,7 @@ func insertControlledAccessTx(ctx context.Context, tx *sql.Tx, objectID string, 
 	return nil
 }
 
-func (db *SqliteDB) UpdateObjectAccessMethods(ctx context.Context, objectID string, accessMethods []drs.AccessMethod) error {
+func (db *SqliteDB) UpdateObjectAccessMethods(ctx context.Context, objectID string, accessMethods []objects.AccessMethod) error {
 	tx, err := db.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -550,7 +550,7 @@ func (db *SqliteDB) RemoveObjectControlledAccessBulk(ctx context.Context, object
 	return removed, nil
 }
 
-func (db *SqliteDB) BulkUpdateAccessMethods(ctx context.Context, updates map[string][]drs.AccessMethod) error {
+func (db *SqliteDB) BulkUpdateAccessMethods(ctx context.Context, updates map[string][]objects.AccessMethod) error {
 	tx, err := db.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err

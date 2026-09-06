@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/calypr/syfon/internal/models"
+	"github.com/calypr/syfon/internal/objects"
 )
 
 const sqliteMaxParams = 900
@@ -30,14 +30,14 @@ func makePlaceholders(n int) string {
 	return strings.Join(parts, ",")
 }
 
-func uniqueObjectsByID(objs []models.InternalObject) []models.InternalObject {
+func uniqueObjectsByID(objs []objects.Record) []objects.Record {
 	seen := make(map[string]struct{}, len(objs))
-	out := make([]models.InternalObject, 0, len(objs))
+	out := make([]objects.Record, 0, len(objs))
 	for _, o := range objs {
-		if _, ok := seen[o.Id]; ok {
+		if _, ok := seen[string(o.Id)]; ok {
 			continue
 		}
-		seen[o.Id] = struct{}{}
+		seen[string(o.Id)] = struct{}{}
 		out = append(out, o)
 	}
 	return out

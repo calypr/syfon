@@ -5,9 +5,9 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/core"
-	"github.com/calypr/syfon/internal/models"
+
+	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/testutils"
 	"github.com/calypr/syfon/internal/urlmanager"
 	"github.com/gofiber/fiber/v3"
@@ -38,7 +38,7 @@ func (r *fiberTestRouter) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 func newLFSRouterWithOptions(opts Options) (*fiberTestRouter, *testutils.MockDatabase) {
 	db := &testutils.MockDatabase{
-		Objects: map[string]*drs.DrsObject{},
+		Objects: map[string]*objects.Record{},
 	}
 	uM := &testutils.MockUrlManager{}
 	app := fiber.New()
@@ -57,7 +57,7 @@ func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return f(req)
 }
 
-func resolveObjectForOID(ctx context.Context, database *testutils.MockDatabase, oid string) (*models.InternalObject, error) {
+func resolveObjectForOID(ctx context.Context, database *testutils.MockDatabase, oid string) (*objects.Record, error) {
 	om := core.NewObjectManager(database, nil)
 	return om.GetObject(ctx, oid, "")
 }

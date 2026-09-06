@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/db"
 	"github.com/calypr/syfon/internal/db/sqlite"
-	"github.com/calypr/syfon/internal/models"
+
+	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/testutils"
 )
 
@@ -40,21 +40,18 @@ func (s *pageSpyDB) ListObjectIDsByScope(ctx context.Context, organization, proj
 func registerScopedCandidate(t *testing.T, om *ObjectManager, id, checksum, org, project string) {
 	t.Helper()
 	controlled := []string{"/organization/" + org + "/project/" + project}
-	_, err := om.RegisterBulk(context.Background(), []drs.DrsObjectCandidate{{
+	_, err := om.RegisterBulk(context.Background(), []objects.Candidate{{
 		Aliases:          ptr([]string{"id:" + id}),
 		ControlledAccess: &controlled,
-		Checksums: []drs.Checksum{{
+		Checksums: &[]objects.Checksum{{
 			Type:     "sha256",
 			Checksum: checksum,
 		}},
-		AccessMethods: &[]drs.AccessMethod{{
-			Type: "s3",
-			AccessUrl: &struct {
-				Headers *[]string `json:"headers,omitempty"`
-				Url     string    `json:"url"`
-			}{Url: "s3://bucket/" + id},
+		AccessMethods: &[]objects.AccessMethod{{
+			Type:      "s3",
+			AccessUrl: &objects.AccessURL{Url: "s3://bucket/" + id},
 		}},
-		Size: 1,
+		Size: ptr(int64(1)),
 	}})
 	if err != nil {
 		t.Fatalf("RegisterBulk(%s): %v", id, err)
@@ -72,40 +69,32 @@ func TestGetObjectUsesGlobalSHAIdentityAcrossUUIDs(t *testing.T) {
 	created := drsISOTime("2026-01-01T00:00:00Z")
 	updated := ptrTime("2026-01-01T00:00:00Z")
 
-	for _, obj := range []models.InternalObject{
+	for _, obj := range []objects.Record{
 		{
 			Authorizations: map[string][]string{"org1": {"project1"}},
-			DrsObject: drs.DrsObject{
-				Id:               "uuid-a",
-				CreatedTime:      created,
-				UpdatedTime:      updated,
-				Checksums:        []drs.Checksum{{Type: "sha256", Checksum: checksum}},
-				ControlledAccess: &[]string{firstResource},
-				AccessMethods: &[]drs.AccessMethod{{
-					Type: drs.AccessMethodTypeS3,
-					AccessUrl: &struct {
-						Headers *[]string `json:"headers,omitempty"`
-						Url     string    `json:"url"`
-					}{Url: "s3://bucket/uuid-a"},
-				}},
-			},
+
+			Id:               "uuid-a",
+			CreatedTime:      created,
+			UpdatedTime:      updated,
+			Checksums:        []objects.Checksum{{Type: "sha256", Checksum: checksum}},
+			ControlledAccess: &[]string{firstResource},
+			AccessMethods: &[]objects.AccessMethod{{
+				Type:      "s3",
+				AccessUrl: &objects.AccessURL{Url: "s3://bucket/uuid-a"},
+			}},
 		},
 		{
 			Authorizations: map[string][]string{"org2": {"project2"}},
-			DrsObject: drs.DrsObject{
-				Id:               "uuid-b",
-				CreatedTime:      created,
-				UpdatedTime:      updated,
-				Checksums:        []drs.Checksum{{Type: "sha256", Checksum: checksum}},
-				ControlledAccess: &[]string{secondResource},
-				AccessMethods: &[]drs.AccessMethod{{
-					Type: drs.AccessMethodTypeS3,
-					AccessUrl: &struct {
-						Headers *[]string `json:"headers,omitempty"`
-						Url     string    `json:"url"`
-					}{Url: "s3://bucket/uuid-b"},
-				}},
-			},
+
+			Id:               "uuid-b",
+			CreatedTime:      created,
+			UpdatedTime:      updated,
+			Checksums:        []objects.Checksum{{Type: "sha256", Checksum: checksum}},
+			ControlledAccess: &[]string{secondResource},
+			AccessMethods: &[]objects.AccessMethod{{
+				Type:      "s3",
+				AccessUrl: &objects.AccessURL{Url: "s3://bucket/uuid-b"},
+			}},
 		},
 	} {
 		if err := database.CreateObject(context.Background(), &obj); err != nil {
@@ -129,8 +118,15 @@ func TestGetObjectUsesGlobalSHAIdentityAcrossUUIDs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetObject(checksum) failed: %v", err)
 	}
+	canonical, err := om.GetCanonicalContent(ctx, "uuid-a", "read")
+	if err != nil {
+		t.Fatalf("GetCanonicalContent(uuid-a) failed: %v", err)
+	}
+	if canonical.ContentID != objects.ContentID(checksum) || canonical.Record.Id != "uuid-a" || len(canonical.Records) != 1 {
+		t.Fatalf("canonical content view lost identity distinction: %+v", canonical)
+	}
 
-	for lookup, got := range map[string]*models.InternalObject{
+	for lookup, got := range map[string]*objects.Record{
 		"uuid-a":   byFirstUUID,
 		"uuid-b":   bySecondUUID,
 		"checksum": byChecksum,
@@ -155,36 +151,28 @@ func TestGetObjectKeepsCanonicalContentPublicWhenAnySiblingIsPublic(t *testing.T
 	checksum := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	controlledResource := "/organization/org/project/controlled"
 	created := drsISOTime("2026-01-01T00:00:00Z")
-	for _, obj := range []models.InternalObject{
+	for _, obj := range []objects.Record{
 		{
-			DrsObject: drs.DrsObject{
-				Id:          "public-uuid",
-				CreatedTime: created,
-				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: checksum}},
-				AccessMethods: &[]drs.AccessMethod{{
-					Type: drs.AccessMethodTypeS3,
-					AccessUrl: &struct {
-						Headers *[]string `json:"headers,omitempty"`
-						Url     string    `json:"url"`
-					}{Url: "s3://bucket/public"},
-				}},
-			},
+
+			Id:          "public-uuid",
+			CreatedTime: created,
+			Checksums:   []objects.Checksum{{Type: "sha256", Checksum: checksum}},
+			AccessMethods: &[]objects.AccessMethod{{
+				Type:      "s3",
+				AccessUrl: &objects.AccessURL{Url: "s3://bucket/public"},
+			}},
 		},
 		{
 			Authorizations: map[string][]string{"org": {"controlled"}},
-			DrsObject: drs.DrsObject{
-				Id:               "controlled-uuid",
-				CreatedTime:      created,
-				Checksums:        []drs.Checksum{{Type: "sha256", Checksum: checksum}},
-				ControlledAccess: &[]string{controlledResource},
-				AccessMethods: &[]drs.AccessMethod{{
-					Type: drs.AccessMethodTypeS3,
-					AccessUrl: &struct {
-						Headers *[]string `json:"headers,omitempty"`
-						Url     string    `json:"url"`
-					}{Url: "s3://bucket/controlled"},
-				}},
-			},
+
+			Id:               "controlled-uuid",
+			CreatedTime:      created,
+			Checksums:        []objects.Checksum{{Type: "sha256", Checksum: checksum}},
+			ControlledAccess: &[]string{controlledResource},
+			AccessMethods: &[]objects.AccessMethod{{
+				Type:      "s3",
+				AccessUrl: &objects.AccessURL{Url: "s3://bucket/controlled"},
+			}},
 		},
 	} {
 		if err := database.CreateObject(context.Background(), &obj); err != nil {
@@ -209,9 +197,9 @@ func TestGetObjectPrefersSHAIdentityOverCollidingPhysicalID(t *testing.T) {
 	}
 	requestedSHA := "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
 	otherSHA := "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
-	for _, obj := range []models.InternalObject{
-		{DrsObject: drs.DrsObject{Id: requestedSHA, Checksums: []drs.Checksum{{Type: "sha256", Checksum: otherSHA}}}},
-		{DrsObject: drs.DrsObject{Id: "checksum-record", Checksums: []drs.Checksum{{Type: "sha256", Checksum: requestedSHA}}}},
+	for _, obj := range []objects.Record{
+		{Id: objects.RecordID(requestedSHA), Checksums: []objects.Checksum{{Type: "sha256", Checksum: otherSHA}}},
+		{Id: "checksum-record", Checksums: []objects.Checksum{{Type: "sha256", Checksum: requestedSHA}}},
 	} {
 		if err := database.CreateObject(context.Background(), &obj); err != nil {
 			t.Fatalf("CreateObject(%s) failed: %v", obj.Id, err)
@@ -228,17 +216,14 @@ func TestGetObjectPrefersSHAIdentityOverCollidingPhysicalID(t *testing.T) {
 }
 
 func TestGetBulkObjectsUsesGlobalSHAIdentity(t *testing.T) {
-	database, err := sqlite.NewSqliteDB(":memory:")
-	if err != nil {
-		t.Fatalf("NewSqliteDB failed: %v", err)
-	}
+	database := &testutils.MockDatabase{}
 	checksum := "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 	firstResource := "/organization/org/project/first"
 	secondResource := "/organization/org/project/second"
 	created := drsISOTime("2026-01-01T00:00:00Z")
-	for _, obj := range []models.InternalObject{
-		{Authorizations: map[string][]string{"org": {"first"}}, DrsObject: drs.DrsObject{Id: "bulk-a", CreatedTime: created, Checksums: []drs.Checksum{{Type: "sha256", Checksum: checksum}}, ControlledAccess: &[]string{firstResource}}},
-		{Authorizations: map[string][]string{"org": {"second"}}, DrsObject: drs.DrsObject{Id: "bulk-b", CreatedTime: created, Checksums: []drs.Checksum{{Type: "sha256", Checksum: checksum}}, ControlledAccess: &[]string{secondResource}}},
+	for _, obj := range []objects.Record{
+		{Authorizations: map[string][]string{"org": {"first"}}, Id: "bulk-a", CreatedTime: created, Checksums: []objects.Checksum{{Type: "sha256", Checksum: checksum}}, ControlledAccess: &[]string{firstResource}},
+		{Authorizations: map[string][]string{"org": {"second"}}, Id: "bulk-b", CreatedTime: created, Checksums: []objects.Checksum{{Type: "sha256", Checksum: checksum}}, ControlledAccess: &[]string{secondResource}},
 	} {
 		if err := database.CreateObject(context.Background(), &obj); err != nil {
 			t.Fatalf("CreateObject(%s) failed: %v", obj.Id, err)
@@ -253,6 +238,13 @@ func TestGetBulkObjectsUsesGlobalSHAIdentity(t *testing.T) {
 	if len(got) != 1 || got[0].Id != "bulk-a" || got[0].ControlledAccess == nil || len(*got[0].ControlledAccess) != 2 {
 		t.Fatalf("bulk read did not return the merged checksum identity: %+v", got)
 	}
+	view, err := NewObjectManager(database, nil).GetCanonicalContent(ctx, checksum, "read")
+	if err != nil {
+		t.Fatalf("GetCanonicalContent(checksum) failed: %v", err)
+	}
+	if len(view.Records) != 2 {
+		t.Fatalf("checksum lookup lost physical siblings: got %d records", len(view.Records))
+	}
 }
 
 func TestCanonicalContentMetadataIsDeterministicOnTimestampTie(t *testing.T) {
@@ -261,11 +253,11 @@ func TestCanonicalContentMetadataIsDeterministicOnTimestampTie(t *testing.T) {
 	highName := "high"
 	lowDescription := "low description"
 	highDescription := "high description"
-	low := models.InternalObject{DrsObject: drs.DrsObject{Id: "uuid-a", Name: &lowName, Description: &lowDescription, Size: 1, CreatedTime: created, Checksums: []drs.Checksum{{Type: "sha256", Checksum: strings.Repeat("f", 64)}}}}
-	high := models.InternalObject{DrsObject: drs.DrsObject{Id: "uuid-b", Name: &highName, Description: &highDescription, Size: 2, CreatedTime: created, Checksums: low.Checksums}}
+	low := objects.Record{Id: "uuid-a", Name: &lowName, Description: &lowDescription, Size: 1, CreatedTime: created, Checksums: []objects.Checksum{{Type: "sha256", Checksum: strings.Repeat("f", 64)}}}
+	high := objects.Record{Id: "uuid-b", Name: &highName, Description: &highDescription, Size: 2, CreatedTime: created, Checksums: low.Checksums}
 
-	forward := canonicalizeContentObjects([]models.InternalObject{low, high})
-	reverse := canonicalizeContentObjects([]models.InternalObject{high, low})
+	forward := canonicalizeContentObjects([]objects.Record{low, high})
+	reverse := canonicalizeContentObjects([]objects.Record{high, low})
 	if !reflect.DeepEqual(forward, reverse) {
 		t.Fatalf("canonical metadata depends on input order: forward=%+v reverse=%+v", forward, reverse)
 	}
@@ -406,7 +398,7 @@ func TestSearchAfterID(t *testing.T) {
 }
 
 func TestObjectMatchesScope(t *testing.T) {
-	obj := &models.InternalObject{Authorizations: map[string][]string{"org1": {"p1", "p2"}}}
+	obj := &objects.Record{Authorizations: map[string][]string{"org1": {"p1", "p2"}}}
 	if !objectMatchesScope(obj, "org1", "p1") {
 		t.Fatalf("expected org1/p1 to match")
 	}
@@ -423,7 +415,7 @@ type trackingDB struct {
 	bulkCalls [][]string
 }
 
-func (t *trackingDB) GetBulkObjects(ctx context.Context, ids []string) ([]models.InternalObject, error) {
+func (t *trackingDB) GetBulkObjects(ctx context.Context, ids []string) ([]objects.Record, error) {
 	copyIDs := append([]string(nil), ids...)
 	t.bulkCalls = append(t.bulkCalls, copyIDs)
 	return t.DatabaseInterface.GetBulkObjects(ctx, ids)
@@ -445,40 +437,32 @@ func TestPrepareScopedObjects_HydratesOnlyMissingSiblingIDs(t *testing.T) {
 	checksum := "6666666666666666666666666666666666666666666666666666666666666666"
 	controlled := []string{"/organization/org/project/proj"}
 
-	for _, obj := range []models.InternalObject{
+	for _, obj := range []objects.Record{
 		{
 			Authorizations: map[string][]string{"org": {"proj"}},
-			DrsObject: drs.DrsObject{
-				Id:               "dup-a",
-				CreatedTime:      drsISOTime("2026-01-01T00:00:00Z"),
-				UpdatedTime:      ptrTime("2026-01-01T00:00:00Z"),
-				Checksums:        []drs.Checksum{{Type: "sha256", Checksum: checksum}},
-				ControlledAccess: &controlled,
-				AccessMethods: &[]drs.AccessMethod{{
-					Type: drs.AccessMethodTypeS3,
-					AccessUrl: &struct {
-						Headers *[]string `json:"headers,omitempty"`
-						Url     string    `json:"url"`
-					}{Url: "s3://bucket/dup-a"},
-				}},
-			},
+
+			Id:               "dup-a",
+			CreatedTime:      drsISOTime("2026-01-01T00:00:00Z"),
+			UpdatedTime:      ptrTime("2026-01-01T00:00:00Z"),
+			Checksums:        []objects.Checksum{{Type: "sha256", Checksum: checksum}},
+			ControlledAccess: &controlled,
+			AccessMethods: &[]objects.AccessMethod{{
+				Type:      "s3",
+				AccessUrl: &objects.AccessURL{Url: "s3://bucket/dup-a"},
+			}},
 		},
 		{
 			Authorizations: map[string][]string{"org": {"proj"}},
-			DrsObject: drs.DrsObject{
-				Id:               "dup-b",
-				CreatedTime:      drsISOTime("2026-01-02T00:00:00Z"),
-				UpdatedTime:      ptrTime("2026-01-02T00:00:00Z"),
-				Checksums:        []drs.Checksum{{Type: "sha256", Checksum: checksum}},
-				ControlledAccess: &controlled,
-				AccessMethods: &[]drs.AccessMethod{{
-					Type: drs.AccessMethodTypeS3,
-					AccessUrl: &struct {
-						Headers *[]string `json:"headers,omitempty"`
-						Url     string    `json:"url"`
-					}{Url: "s3://bucket/dup-b"},
-				}},
-			},
+
+			Id:               "dup-b",
+			CreatedTime:      drsISOTime("2026-01-02T00:00:00Z"),
+			UpdatedTime:      ptrTime("2026-01-02T00:00:00Z"),
+			Checksums:        []objects.Checksum{{Type: "sha256", Checksum: checksum}},
+			ControlledAccess: &controlled,
+			AccessMethods: &[]objects.AccessMethod{{
+				Type:      "s3",
+				AccessUrl: &objects.AccessURL{Url: "s3://bucket/dup-b"},
+			}},
 		},
 	} {
 		if _, err := raw.Exec(`INSERT INTO drs_object (id,size,created_time,updated_time,name,version,description) VALUES (?,0,?,?, '', '', '')`, obj.Id, obj.CreatedTime, *obj.UpdatedTime); err != nil {

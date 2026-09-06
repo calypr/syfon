@@ -12,7 +12,8 @@ import (
 	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/faults"
-	"github.com/calypr/syfon/internal/models"
+
+	"github.com/calypr/syfon/internal/objects"
 )
 
 type sqliteContentRow struct {
@@ -24,7 +25,7 @@ type sqliteContentRow struct {
 // RegisterObjects is the content identity write boundary. Every SHA-bearing
 // registration is merged while the SQLite writer lock is held, so the parent
 // row, children, aliases, and public policy commit together.
-func (db *SqliteDB) RegisterObjects(ctx context.Context, objects []models.InternalObject) error {
+func (db *SqliteDB) RegisterObjects(ctx context.Context, objects []objects.Record) error {
 	if len(objects) == 0 {
 		return nil
 	}
@@ -55,19 +56,19 @@ func (db *SqliteDB) RegisterObjects(ctx context.Context, objects []models.Intern
 	return nil
 }
 
-func (db *SqliteDB) CreateObject(ctx context.Context, obj *models.InternalObject) error {
+func (db *SqliteDB) CreateObject(ctx context.Context, obj *objects.Record) error {
 	if obj == nil {
 		return fmt.Errorf("object is required")
 	}
-	return db.RegisterObjects(ctx, []models.InternalObject{*obj})
+	return db.RegisterObjects(ctx, []objects.Record{*obj})
 }
 
-func (db *SqliteDB) registerContentTx(ctx context.Context, tx *sql.Tx, obj *models.InternalObject) (string, error) {
-	id := strings.TrimSpace(obj.Id)
+func (db *SqliteDB) registerContentTx(ctx context.Context, tx *sql.Tx, obj *objects.Record) (string, error) {
+	id := strings.TrimSpace(string(obj.Id))
 	if id == "" {
 		return "", fmt.Errorf("object id is required")
 	}
-	sha, hasSHA, err := common.ValidateCanonicalSHA256(obj.Checksums)
+	sha, hasSHA, err := objects.ValidateCanonicalSHA256(obj.Checksums)
 	if err != nil {
 		return "", err
 	}
@@ -228,20 +229,20 @@ func sqliteLoadContentRowTx(ctx context.Context, tx *sql.Tx, id string) (sqliteC
 	return row, true, nil
 }
 
-func insertContentRowTx(ctx context.Context, tx *sql.Tx, id string, obj *models.InternalObject) error {
+func insertContentRowTx(ctx context.Context, tx *sql.Tx, id string, obj *objects.Record) error {
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO drs_object (id, size, created_time, updated_time, name, version, description)
 		VALUES (?, ?, ?, ?, ?, ?, ?)`, id, obj.Size, obj.CreatedTime, common.TimeVal(obj.UpdatedTime),
-		common.CleanToBasename(common.StringVal(obj.Name)), common.StringVal(obj.Version), common.StringVal(obj.Description))
+		objects.CleanToBasename(common.StringVal(obj.Name)), common.StringVal(obj.Version), common.StringVal(obj.Description))
 	if err != nil {
 		return fmt.Errorf("insert canonical object: %w", err)
 	}
 	return nil
 }
 
-func mergeContentRowTx(ctx context.Context, tx *sql.Tx, row sqliteContentRow, obj *models.InternalObject, hasSHA bool, resources, currentResources []string) error {
+func mergeContentRowTx(ctx context.Context, tx *sql.Tx, row sqliteContentRow, obj *objects.Record, hasSHA bool, resources, currentResources []string) error {
 	allowReplacement := len(currentResources) == 1 && hasResourceOverlap(resources, currentResources)
-	incomingName := common.CleanToBasename(common.StringVal(obj.Name))
+	incomingName := objects.CleanToBasename(common.StringVal(obj.Name))
 	if row.name != "" && incomingName != "" && row.name != incomingName {
 		alias := incomingName
 		if allowReplacement {
@@ -256,7 +257,7 @@ func mergeContentRowTx(ctx context.Context, tx *sql.Tx, row sqliteContentRow, ob
 	version := row.version
 	description := row.description
 	if allowReplacement || strings.TrimSpace(name) == "" {
-		if incoming := common.CleanToBasename(common.StringVal(obj.Name)); incoming != "" {
+		if incoming := objects.CleanToBasename(common.StringVal(obj.Name)); incoming != "" {
 			name = incoming
 		}
 	}
@@ -288,7 +289,7 @@ func mergeContentRowTx(ctx context.Context, tx *sql.Tx, row sqliteContentRow, ob
 	return nil
 }
 
-func mergeContentChildrenTx(ctx context.Context, tx *sql.Tx, id, sha string, hasSHA bool, resources []string, obj *models.InternalObject) error {
+func mergeContentChildrenTx(ctx context.Context, tx *sql.Tx, id, sha string, hasSHA bool, resources []string, obj *objects.Record) error {
 	for _, resource := range resources {
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO drs_object_controlled_access (object_id, resource)
@@ -333,7 +334,7 @@ func mergeContentChildrenTx(ctx context.Context, tx *sql.Tx, id, sha string, has
 	}
 	for _, checksum := range obj.Checksums {
 		typ, value := strings.TrimSpace(checksum.Type), strings.TrimSpace(checksum.Checksum)
-		if typ == "" || value == "" || (common.NormalizeChecksumType(typ) == "sha256" && sycommon.NormalizeOid(value) != "") {
+		if typ == "" || value == "" || (objects.NormalizeChecksumType(typ) == "sha256" && sycommon.NormalizeOid(value) != "") {
 			continue
 		}
 		if _, err := tx.ExecContext(ctx, `
@@ -456,7 +457,7 @@ func sqliteObjectSHAsTx(ctx context.Context, tx *sql.Tx, id string) ([]string, e
 	return values, rows.Err()
 }
 
-func sqliteObjectResources(obj *models.InternalObject) []string {
+func sqliteObjectResources(obj *objects.Record) []string {
 	if obj == nil {
 		return nil
 	}
@@ -466,7 +467,7 @@ func sqliteObjectResources(obj *models.InternalObject) []string {
 	return sycommon.NormalizeAccessResources(sycommon.AuthzMapToList(obj.Authorizations))
 }
 
-func identityAliases(obj *models.InternalObject) []string {
+func identityAliases(obj *objects.Record) []string {
 	if obj == nil || obj.Aliases == nil {
 		return nil
 	}

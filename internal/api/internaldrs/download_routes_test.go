@@ -8,11 +8,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/apigen/server/internalapi"
 	"github.com/calypr/syfon/internal/api/routeutil"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/core"
+	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/testutils"
 	"github.com/calypr/syfon/internal/urlmanager"
 )
@@ -31,16 +31,15 @@ func (m *captureURLManager) SignURL(ctx context.Context, accessId string, url st
 
 func TestHandleInternalDownload(t *testing.T) {
 	mockDB := &testutils.MockDatabase{
-		Objects: map[string]*drs.DrsObject{
+		Objects: map[string]*objects.Record{
 			"test-file-id": {
 				Id:   "test-file-id",
 				Name: stringPtr("sha/LP6008050-DNA_B01__pv.2.0o__rg.grch38__alleleFrequencies_chr17.txt"),
-				AccessMethods: &[]drs.AccessMethod{{
-					Type: drs.AccessMethodTypeS3,
-					AccessUrl: &struct {
-						Headers *[]string `json:"headers,omitempty"`
-						Url     string    `json:"url"`
-					}{Url: "s3://bucket/key"},
+				AccessMethods: &[]objects.AccessMethod{{
+					Type: "s3",
+					AccessUrl: &objects.AccessURL{
+
+						Url: "s3://bucket/key"},
 				}},
 			},
 		},
@@ -72,15 +71,14 @@ func TestHandleInternalDownload(t *testing.T) {
 
 func TestHandleInternalDownloadPart(t *testing.T) {
 	mockDB := &testutils.MockDatabase{
-		Objects: map[string]*drs.DrsObject{
+		Objects: map[string]*objects.Record{
 			"test-file-id": {
 				Id: "test-file-id",
-				AccessMethods: &[]drs.AccessMethod{{
-					Type: drs.AccessMethodTypeS3,
-					AccessUrl: &struct {
-						Headers *[]string `json:"headers,omitempty"`
-						Url     string    `json:"url"`
-					}{Url: "s3://bucket/key"},
+				AccessMethods: &[]objects.AccessMethod{{
+					Type: "s3",
+					AccessUrl: &objects.AccessURL{
+
+						Url: "s3://bucket/key"},
 				}},
 			},
 		},
@@ -117,16 +115,15 @@ func TestHandleInternalDownload_ResolvesByChecksum(t *testing.T) {
 	const did = "did-123"
 	const oid = "sha256-abc"
 	mockDB := &testutils.MockDatabase{
-		Objects: map[string]*drs.DrsObject{
+		Objects: map[string]*objects.Record{
 			did: {
 				Id:        did,
-				Checksums: []drs.Checksum{{Type: "sha256", Checksum: oid}},
-				AccessMethods: &[]drs.AccessMethod{{
-					Type: drs.AccessMethodTypeS3,
-					AccessUrl: &struct {
-						Headers *[]string `json:"headers,omitempty"`
-						Url     string    `json:"url"`
-					}{Url: "s3://bucket/cbds/end_to_end_test/" + did + "/" + oid},
+				Checksums: []objects.Checksum{{Type: "sha256", Checksum: oid}},
+				AccessMethods: &[]objects.AccessMethod{{
+					Type: "s3",
+					AccessUrl: &objects.AccessURL{
+
+						Url: "s3://bucket/cbds/end_to_end_test/" + did + "/" + oid},
 				}},
 			},
 		},
@@ -141,15 +138,14 @@ func TestHandleInternalDownload_ResolvesByChecksum(t *testing.T) {
 func TestHandleInternalDownload_ResolvesByUUID(t *testing.T) {
 	const did = "2eb7a53c-1309-4be6-b6aa-8ed9249e23a9"
 	mockDB := &testutils.MockDatabase{
-		Objects: map[string]*drs.DrsObject{
+		Objects: map[string]*objects.Record{
 			did: {
 				Id: did,
-				AccessMethods: &[]drs.AccessMethod{{
-					Type: drs.AccessMethodTypeS3,
-					AccessUrl: &struct {
-						Headers *[]string `json:"headers,omitempty"`
-						Url     string    `json:"url"`
-					}{Url: "s3://bucket/cbds/end_to_end_test/" + did},
+				AccessMethods: &[]objects.AccessMethod{{
+					Type: "s3",
+					AccessUrl: &objects.AccessURL{
+
+						Url: "s3://bucket/cbds/end_to_end_test/" + did},
 				}},
 			},
 		},
@@ -163,15 +159,13 @@ func TestHandleInternalDownload_ResolvesByUUID(t *testing.T) {
 
 func TestHandleInternalDownload_MultiCloud(t *testing.T) {
 	mockDB := &testutils.MockDatabase{
-		Objects: map[string]*drs.DrsObject{
-			"gcs-file": {Id: "gcs-file", AccessMethods: &[]drs.AccessMethod{{Type: drs.AccessMethodTypeGs, AccessUrl: &struct {
-				Headers *[]string `json:"headers,omitempty"`
-				Url     string    `json:"url"`
-			}{Url: "gs://gcs-bucket/obj"}}}},
-			"azure-file": {Id: "azure-file", AccessMethods: &[]drs.AccessMethod{{Type: drs.AccessMethodType("azblob"), AccessUrl: &struct {
-				Headers *[]string `json:"headers,omitempty"`
-				Url     string    `json:"url"`
-			}{Url: "azblob://azure-bucket/obj"}}}},
+		Objects: map[string]*objects.Record{
+			"gcs-file": {Id: "gcs-file", AccessMethods: &[]objects.AccessMethod{{Type: "gs", AccessUrl: &objects.AccessURL{
+
+				Url: "gs://gcs-bucket/obj"}}}},
+			"azure-file": {Id: "azure-file", AccessMethods: &[]objects.AccessMethod{{Type: "azblob", AccessUrl: &objects.AccessURL{
+
+				Url: "azblob://azure-bucket/obj"}}}},
 		},
 	}
 	for _, id := range []string{"gcs-file", "azure-file"} {
@@ -185,11 +179,10 @@ func TestHandleInternalDownload_MultiCloud(t *testing.T) {
 
 func TestHandleInternalDownload_Gen3Auth(t *testing.T) {
 	mockDB := &testutils.MockDatabase{
-		Objects: map[string]*drs.DrsObject{
-			"secure-id": {Id: "secure-id", AccessMethods: &[]drs.AccessMethod{{Type: drs.AccessMethodTypeS3, AccessUrl: &struct {
-				Headers *[]string `json:"headers,omitempty"`
-				Url     string    `json:"url"`
-			}{Url: "s3://bucket/key"}}}},
+		Objects: map[string]*objects.Record{
+			"secure-id": {Id: "secure-id", AccessMethods: &[]objects.AccessMethod{{Type: "s3", AccessUrl: &objects.AccessURL{
+
+				Url: "s3://bucket/key"}}}},
 		},
 		ObjectAuthz: map[string]map[string][]string{"secure-id": {"p": {"q"}}},
 	}
@@ -206,11 +199,10 @@ func TestHandleInternalDownload_AuthzParity(t *testing.T) {
 	for _, mode := range []string{"gen3", "local-authz"} {
 		t.Run(mode, func(t *testing.T) {
 			mockDB := &testutils.MockDatabase{
-				Objects: map[string]*drs.DrsObject{
-					"secure-id": {Id: "secure-id", AccessMethods: &[]drs.AccessMethod{{Type: drs.AccessMethodTypeS3, AccessUrl: &struct {
-						Headers *[]string `json:"headers,omitempty"`
-						Url     string    `json:"url"`
-					}{Url: "s3://bucket/key"}}}},
+				Objects: map[string]*objects.Record{
+					"secure-id": {Id: "secure-id", AccessMethods: &[]objects.AccessMethod{{Type: "s3", AccessUrl: &objects.AccessURL{
+
+						Url: "s3://bucket/key"}}}},
 				},
 				ObjectAuthz: map[string]map[string][]string{"secure-id": {"p": {"q"}}},
 			}

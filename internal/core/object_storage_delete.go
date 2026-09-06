@@ -22,6 +22,8 @@ import (
 	"github.com/aws/smithy-go"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/models"
+
+	"github.com/calypr/syfon/internal/objects"
 	"google.golang.org/api/googleapi"
 	"google.golang.org/api/option"
 )
@@ -50,7 +52,7 @@ var newS3ObjectDeleter = func(ctx context.Context, cred *models.S3Credential) (s
 	}), nil
 }
 
-func (m *ObjectManager) deleteObjectStorage(ctx context.Context, obj *models.InternalObject) error {
+func (m *ObjectManager) deleteObjectStorage(ctx context.Context, obj *objects.Record) error {
 	targets, err := m.storageTargetsForObject(ctx, obj)
 	if err != nil {
 		return err
@@ -58,7 +60,7 @@ func (m *ObjectManager) deleteObjectStorage(ctx context.Context, obj *models.Int
 	return m.deleteStorageTargets(ctx, targets)
 }
 
-func (m *ObjectManager) deleteObjectsStorage(ctx context.Context, objects []models.InternalObject) error {
+func (m *ObjectManager) deleteObjectsStorage(ctx context.Context, objects []objects.Record) error {
 	targets := make([]storageTarget, 0, len(objects))
 	seen := make(map[string]struct{})
 	for i := range objects {
@@ -108,7 +110,7 @@ func (m *ObjectManager) deleteStorageTargets(ctx context.Context, targets []stor
 	return nil
 }
 
-func (m *ObjectManager) storageTargetsForObject(ctx context.Context, obj *models.InternalObject) ([]storageTarget, error) {
+func (m *ObjectManager) storageTargetsForObject(ctx context.Context, obj *objects.Record) ([]storageTarget, error) {
 	if obj == nil || obj.AccessMethods == nil {
 		return nil, nil
 	}

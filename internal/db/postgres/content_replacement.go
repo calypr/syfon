@@ -10,13 +10,14 @@ import (
 	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/faults"
-	"github.com/calypr/syfon/internal/models"
+
+	"github.com/calypr/syfon/internal/objects"
 )
 
 // ReplaceObjects is the checked, atomic boundary for whole-object updates.
 // Registration remains additive; replacement is reserved for callers that
 // have update authority over every current grant.
-func (db *PostgresDB) ReplaceObjects(ctx context.Context, objects []models.InternalObject) error {
+func (db *PostgresDB) ReplaceObjects(ctx context.Context, objects []objects.Record) error {
 	if len(objects) == 0 {
 		return nil
 	}
@@ -49,8 +50,8 @@ func (db *PostgresDB) ReplaceObjects(ctx context.Context, objects []models.Inter
 	return nil
 }
 
-func replaceObjectTx(ctx context.Context, tx *sql.Tx, obj *models.InternalObject) (string, error) {
-	id := strings.TrimSpace(obj.Id)
+func replaceObjectTx(ctx context.Context, tx *sql.Tx, obj *objects.Record) (string, error) {
+	id := strings.TrimSpace(string(obj.Id))
 	if id == "" {
 		return "", fmt.Errorf("object id is required")
 	}
@@ -71,7 +72,7 @@ func replaceObjectTx(ctx context.Context, tx *sql.Tx, obj *models.InternalObject
 	if !access.HasMethodAccess(ctx, "update", currentResources) {
 		return "", faults.ErrUnauthorized
 	}
-	sha, hasSHA, err := common.ValidateCanonicalSHA256(obj.Checksums)
+	sha, hasSHA, err := objects.ValidateCanonicalSHA256(obj.Checksums)
 	if err != nil {
 		return "", err
 	}
@@ -146,8 +147,8 @@ func replaceObjectTx(ctx context.Context, tx *sql.Tx, obj *models.InternalObject
 	return canonicalID, nil
 }
 
-func postgresReplaceMetadataTx(ctx context.Context, tx *sql.Tx, row postgresContentRow, obj *models.InternalObject) error {
-	name := common.CleanToBasename(common.StringVal(obj.Name))
+func postgresReplaceMetadataTx(ctx context.Context, tx *sql.Tx, row postgresContentRow, obj *objects.Record) error {
+	name := objects.CleanToBasename(common.StringVal(obj.Name))
 	if name == "" {
 		name = row.name
 	}
@@ -183,7 +184,7 @@ func postgresReplaceMetadataTx(ctx context.Context, tx *sql.Tx, row postgresCont
 	return nil
 }
 
-func postgresReplaceChildrenTx(ctx context.Context, tx *sql.Tx, id string, obj *models.InternalObject, sha string, hasSHA bool) error {
+func postgresReplaceChildrenTx(ctx context.Context, tx *sql.Tx, id string, obj *objects.Record, sha string, hasSHA bool) error {
 	if obj.AccessMethods != nil {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM drs_object_access_method WHERE object_id = $1`, id); err != nil {
 			return fmt.Errorf("replace access methods: %w", err)
@@ -238,7 +239,7 @@ func postgresReplaceChildrenTx(ctx context.Context, tx *sql.Tx, id string, obj *
 		}
 		for _, checksum := range obj.Checksums {
 			typ, value := strings.TrimSpace(checksum.Type), strings.TrimSpace(checksum.Checksum)
-			if typ == "" || value == "" || (common.NormalizeChecksumType(typ) == "sha256" && sycommon.NormalizeOid(value) != "") {
+			if typ == "" || value == "" || (objects.NormalizeChecksumType(typ) == "sha256" && sycommon.NormalizeOid(value) != "") {
 				continue
 			}
 			if _, err := tx.ExecContext(ctx, `INSERT INTO drs_object_checksum (object_id, type, checksum) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`, id, typ, value); err != nil {
@@ -256,7 +257,7 @@ func postgresReplaceChildrenTx(ctx context.Context, tx *sql.Tx, id string, obj *
 	return nil
 }
 
-func postgresReplacePolicyTx(ctx context.Context, tx *sql.Tx, id string, currentResources []string, obj *models.InternalObject) error {
+func postgresReplacePolicyTx(ctx context.Context, tx *sql.Tx, id string, currentResources []string, obj *objects.Record) error {
 	public, err := postgresPublicReadTx(ctx, tx, id, len(currentResources) == 0)
 	if err != nil {
 		return err

@@ -12,6 +12,8 @@ import (
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/faults"
 	"github.com/calypr/syfon/internal/models"
+
+	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/urlmanager"
 )
 
@@ -20,7 +22,7 @@ func (m *ObjectManager) SignURL(ctx context.Context, accessURL string, options u
 	return m.uM.SignURL(ctx, m.resolveSigningBucket(ctx, accessURL), accessURL, options)
 }
 
-func (m *ObjectManager) SignObjectURL(ctx context.Context, obj *models.InternalObject, accessURL string, options urlmanager.SignOptions) (string, error) {
+func (m *ObjectManager) SignObjectURL(ctx context.Context, obj *objects.Record, accessURL string, options urlmanager.SignOptions) (string, error) {
 	targetURL := strings.TrimSpace(accessURL)
 	if strings.EqualFold(strings.TrimSpace(options.Method), "PUT") {
 		target, err := m.ResolveCanonicalStorageTarget(ctx, CanonicalStorageTargetRequest{
@@ -42,7 +44,7 @@ func (m *ObjectManager) SignObjectURL(ctx context.Context, obj *models.InternalO
 }
 
 type CanonicalStorageTargetRequest struct {
-	Object         *models.InternalObject
+	Object         *objects.Record
 	AccessURL      string
 	Bucket         string
 	Key            string
@@ -80,7 +82,7 @@ func (m *ObjectManager) ResolveCanonicalStorageTarget(ctx context.Context, req C
 			}
 		}
 		if targetBucket == "" {
-			return CanonicalStorageTarget{}, fmt.Errorf("unable to resolve scoped storage bucket for object %s", obj.Id)
+			return CanonicalStorageTarget{}, fmt.Errorf("unable to resolve scoped storage bucket for object %s", string(obj.Id))
 		}
 		targetKey := m.canonicalObjectKey(obj, req.Key, existingKey, req.PreferChecksum)
 		if existingOK && strings.EqualFold(strings.TrimSpace(existingBucket), targetBucket) && len(normalizedScopePrefixes(scopes)) == 0 && strings.TrimSpace(existingKey) != "" {
@@ -88,7 +90,7 @@ func (m *ObjectManager) ResolveCanonicalStorageTarget(ctx context.Context, req C
 		}
 		targetKey = normalizeScopedStorageKey(targetKey, scopes)
 		if strings.TrimSpace(targetKey) == "" {
-			return CanonicalStorageTarget{}, fmt.Errorf("unable to resolve scoped storage key for object %s", obj.Id)
+			return CanonicalStorageTarget{}, fmt.Errorf("unable to resolve scoped storage key for object %s", string(obj.Id))
 		}
 		return newCanonicalStorageTarget(targetBucket, targetKey), nil
 	}
@@ -152,13 +154,13 @@ func (m *ObjectManager) ResolveScopedUploadTarget(ctx context.Context, organizat
 	return newCanonicalStorageTarget(bucket, key), nil
 }
 
-func (m *ObjectManager) canonicalObjectKey(obj *models.InternalObject, explicitKey string, existingKey string, preferChecksum bool) string {
+func (m *ObjectManager) canonicalObjectKey(obj *objects.Record, explicitKey string, existingKey string, preferChecksum bool) string {
 	explicitKey = strings.Trim(strings.TrimSpace(explicitKey), "/")
 	if explicitKey != "" {
 		return explicitKey
 	}
 	checksum := ""
-	if sha, ok := common.CanonicalSHA256(obj.Checksums); ok {
+	if sha, ok := objects.CanonicalSHA256(obj.Checksums); ok {
 		checksum = strings.Trim(strings.TrimSpace(sha), "/")
 	}
 	existingKey = strings.Trim(strings.TrimSpace(existingKey), "/")
@@ -177,7 +179,7 @@ func (m *ObjectManager) canonicalObjectKey(obj *models.InternalObject, explicitK
 			return checksum
 		}
 	}
-	return strings.Trim(strings.TrimSpace(obj.Id), "/")
+	return strings.Trim(strings.TrimSpace(string(obj.Id)), "/")
 }
 
 func newCanonicalStorageTarget(bucket string, key string) CanonicalStorageTarget {
@@ -203,7 +205,7 @@ func (m *ObjectManager) SignDownloadPart(ctx context.Context, bucket, accessURL 
 	return m.uM.SignDownloadPart(ctx, bucket, accessURL, start, end, options)
 }
 
-func (m *ObjectManager) SignObjectDownloadPart(ctx context.Context, obj *models.InternalObject, bucket, accessURL string, start, end int64, options urlmanager.SignOptions) (string, error) {
+func (m *ObjectManager) SignObjectDownloadPart(ctx context.Context, obj *objects.Record, bucket, accessURL string, start, end int64, options urlmanager.SignOptions) (string, error) {
 	var err error
 	accessURL, err = m.resolveObjectDownloadURL(ctx, obj, accessURL)
 	if err != nil {
@@ -215,7 +217,7 @@ func (m *ObjectManager) SignObjectDownloadPart(ctx context.Context, obj *models.
 	return m.SignDownloadPart(ctx, bucket, accessURL, start, end, options)
 }
 
-func (m *ObjectManager) resolveObjectDownloadURL(ctx context.Context, obj *models.InternalObject, accessURL string) (string, error) {
+func (m *ObjectManager) resolveObjectDownloadURL(ctx context.Context, obj *objects.Record, accessURL string) (string, error) {
 	accessURL = strings.TrimSpace(accessURL)
 	legacyURL, err := m.resolveLegacyS3DownloadURL(ctx, obj, accessURL)
 	if err != nil {
@@ -235,7 +237,7 @@ func (m *ObjectManager) resolveObjectDownloadURL(ctx context.Context, obj *model
 	return target.URL, nil
 }
 
-func isUnscopedCanonicalSHA256(obj *models.InternalObject, accessURL string) bool {
+func isUnscopedCanonicalSHA256(obj *objects.Record, accessURL string) bool {
 	if obj == nil {
 		return false
 	}
@@ -243,11 +245,11 @@ func isUnscopedCanonicalSHA256(obj *models.InternalObject, accessURL string) boo
 	if !ok || strings.Contains(strings.Trim(key, "/"), "/") {
 		return false
 	}
-	sha, ok := common.CanonicalSHA256(obj.Checksums)
+	sha, ok := objects.CanonicalSHA256(obj.Checksums)
 	return ok && strings.EqualFold(strings.Trim(key, "/"), strings.TrimSpace(sha))
 }
 
-func (m *ObjectManager) resolveLegacyS3DownloadURL(ctx context.Context, obj *models.InternalObject, accessURL string) (string, error) {
+func (m *ObjectManager) resolveLegacyS3DownloadURL(ctx context.Context, obj *objects.Record, accessURL string) (string, error) {
 	accessURL = strings.TrimSpace(accessURL)
 	bucket, key, ok := parseS3Location(accessURL)
 	if !ok || strings.TrimSpace(bucket) == "" || strings.TrimSpace(key) == "" {
@@ -374,7 +376,7 @@ func trimLeadingStoragePrefix(key, prefix string) string {
 	return key
 }
 
-func (m *ObjectManager) bucketScopesForObject(ctx context.Context, obj *models.InternalObject) ([]models.BucketScope, error) {
+func (m *ObjectManager) bucketScopesForObject(ctx context.Context, obj *objects.Record) ([]models.BucketScope, error) {
 	if obj == nil {
 		return nil, nil
 	}

@@ -3,21 +3,23 @@ package common
 import (
 	"strings"
 	"testing"
+
+	"github.com/calypr/syfon/internal/objects"
 )
 
-func TestMintObjectIDFromChecksum(t *testing.T) {
+func TestMintRecordIDFromChecksum(t *testing.T) {
 	valid := strings.Repeat("a", 64)
-	id1, err := MintObjectIDFromChecksum(valid, []string{"/organization/syfon/project/e2e"})
+	id1, err := objects.MintRecordIDFromChecksum(valid, []string{"/organization/syfon/project/e2e"})
 	if err != nil {
-		t.Fatalf("MintObjectIDFromChecksum returned error: %v", err)
+		t.Fatalf("MintRecordIDFromChecksum returned error: %v", err)
 	}
-	id2, err := MintObjectIDFromChecksum(valid, []string{"/programs/syfon/projects/e2e"})
+	id2, err := objects.MintRecordIDFromChecksum(valid, []string{"/programs/syfon/projects/e2e"})
 	if err != nil {
-		t.Fatalf("MintObjectIDFromChecksum returned error: %v", err)
+		t.Fatalf("MintRecordIDFromChecksum returned error: %v", err)
 	}
-	id3, err := MintObjectIDFromChecksum(valid, []string{"/organization/syfon/project/other"})
+	id3, err := objects.MintRecordIDFromChecksum(valid, []string{"/organization/syfon/project/other"})
 	if err != nil {
-		t.Fatalf("MintObjectIDFromChecksum returned error: %v", err)
+		t.Fatalf("MintRecordIDFromChecksum returned error: %v", err)
 	}
 	if id1 == "" || id2 == "" || id3 == "" {
 		t.Fatalf("expected non-empty object ids: %q %q %q", id1, id2, id3)
@@ -28,10 +30,10 @@ func TestMintObjectIDFromChecksum(t *testing.T) {
 	if id1 == id3 {
 		t.Fatalf("expected scope-sensitive object ids, got %q and %q", id1, id3)
 	}
-	if _, err := MintObjectIDFromChecksum(valid, nil); err == nil {
+	if _, err := objects.MintRecordIDFromChecksum(valid, nil); err == nil {
 		t.Fatal("expected missing-scope error")
 	}
-	if _, err := MintObjectIDFromChecksum(valid, []string{"/organization/syfon"}); err == nil {
+	if _, err := objects.MintRecordIDFromChecksum(valid, []string{"/organization/syfon"}); err == nil {
 		t.Fatal("expected org-only scope error")
 	}
 }

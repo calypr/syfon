@@ -16,7 +16,8 @@ import (
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/faults"
 	apimiddleware "github.com/calypr/syfon/internal/httpapi/middleware"
-	"github.com/calypr/syfon/internal/models"
+	httprecords "github.com/calypr/syfon/internal/httpapi/records"
+	"github.com/calypr/syfon/internal/objects"
 	"github.com/gofiber/fiber/v3"
 )
 
@@ -79,12 +80,12 @@ func handleInternalBulkOverwriteFiber(om *core.ObjectManager) fiber.Handler {
 			return c.Status(fiber.StatusRequestEntityTooLarge).SendString(fmt.Sprintf("too many records: maximum is %d", maxInternalBulkOverwrite))
 		}
 
-		candidates := make([]models.InternalObject, 0, len(req.Records))
+		candidates := make([]objects.Record, 0, len(req.Records))
 		now := time.Now().UTC()
 		for i, record := range req.Records {
 			record.Organization = &req.Organization
 			record.Project = &req.Project
-			obj, err := core.InternalRecordToInternalObject(record, now)
+			obj, err := internalRecordToObject(record, now)
 			if err != nil {
 				return c.Status(fiber.StatusBadRequest).SendString(fmt.Sprintf("Invalid request body: record[%d] invalid: %v", i, err))
 			}
@@ -169,7 +170,12 @@ func handleInternalGetFiber(om *core.ObjectManager) fiber.Handler {
 		if err != nil {
 			return apiutil.HandleError(c, err)
 		}
-		return c.JSON(obj)
+		encoded, err := httprecords.Encode(*obj)
+		if err != nil {
+			return apiutil.HandleError(c, err)
+		}
+		c.Set(fiber.HeaderContentType, fiber.MIMEApplicationJSON)
+		return c.Send(encoded)
 	}
 }
 
@@ -179,7 +185,7 @@ func handleInternalListFiber(om *core.ObjectManager) fiber.Handler {
 		hashType := c.Query("hash_type")
 		objectURL := strings.TrimSpace(c.Query("url"))
 		if hash != "" {
-			hashType, hash = common.ParseHashQuery(hash, hashType)
+			hashType, hash = objects.ParseHashQuery(hash, hashType)
 			filterOrg := strings.TrimSpace(c.Query("organization"))
 			filterProject := strings.TrimSpace(c.Query("project"))
 			limit, start, offset, err := parseInternalListPaginationFiber(c)
@@ -196,7 +202,7 @@ func handleInternalListFiber(om *core.ObjectManager) fiber.Handler {
 			}
 			records := make([]internalapi.InternalRecord, 0, len(objs))
 			for _, o := range objs {
-				records = append(records, core.InternalObjectToInternalRecord(o))
+				records = append(records, httprecords.ToInternalRecord(o))
 			}
 			return c.JSON(internalapi.ListRecordsResponse{Records: &records})
 		}
@@ -215,7 +221,7 @@ func handleInternalListFiber(om *core.ObjectManager) fiber.Handler {
 
 		requestStart := time.Now()
 		listStart := time.Now()
-		var objs []models.InternalObject
+		var objs []objects.Record
 		if objectURL != "" {
 			var ids []string
 			ids, err = om.ListObjectIDsPageByURL(c.Context(), objectURL, filterOrg, filterProject, "read", start, limit, offset)
@@ -240,7 +246,7 @@ func handleInternalListFiber(om *core.ObjectManager) fiber.Handler {
 		}
 		records := make([]internalapi.InternalRecord, 0, len(objs))
 		for _, obj := range objs {
-			records = append(records, core.InternalObjectToInternalRecord(obj))
+			records = append(records, httprecords.ToInternalRecord(obj))
 		}
 		return c.JSON(internalapi.ListRecordsResponse{Records: &records})
 	}
@@ -267,7 +273,7 @@ func handleInternalRemoveControlledAccessFiber(om *core.ObjectManager) fiber.Han
 		if err != nil {
 			return apiutil.HandleError(c, err)
 		}
-		return c.JSON(core.InternalObjectToInternalRecordResponse(*obj))
+		return c.JSON(httprecords.ToInternalRecordResponse(*obj))
 	}
 }
 
@@ -284,11 +290,11 @@ func handleInternalCreateFiber(om *core.ObjectManager) fiber.Handler {
 		if strings.HasSuffix(c.Path(), "/bulk") {
 			records := make([]internalapi.InternalRecord, len(candidates))
 			for i, cand := range candidates {
-				records[i] = core.InternalObjectToInternalRecord(cand)
+				records[i] = httprecords.ToInternalRecord(cand)
 			}
 			return c.Status(fiber.StatusCreated).JSON(internalapi.ListRecordsResponse{Records: &records})
 		}
-		return c.Status(fiber.StatusCreated).JSON(core.InternalObjectToInternalRecordResponse(candidates[0]))
+		return c.Status(fiber.StatusCreated).JSON(httprecords.ToInternalRecordResponse(candidates[0]))
 	}
 }
 
@@ -326,27 +332,31 @@ func handleInternalBulkHashesFiber(om *core.ObjectManager) fiber.Handler {
 			return apiutil.HandleError(c, err)
 		}
 
-		finalRes := make(map[string][]models.InternalObject, len(req.Hashes))
+		finalRes := make(map[string][]internalapi.InternalRecord, len(req.Hashes))
 		for i, h := range req.Hashes {
-			typ, val := common.ParseHashQuery(h, "")
-			matches := []models.InternalObject{}
+			typ, val := objects.ParseHashQuery(h, "")
+			matches := []objects.Record{}
 			if i < len(normalized) {
 				matches = res[normalized[i]]
 			}
 			if typ != "" {
-				filtered := make([]models.InternalObject, 0, len(matches))
+				filtered := make([]objects.Record, 0, len(matches))
 				for _, m := range matches {
-					if common.ObjectHasChecksumTypeAndValue(m, typ, val) {
+					if objects.RecordHasChecksumTypeAndValue(m, typ, val) {
 						filtered = append(filtered, m)
 					}
 				}
 				matches = filtered
 			}
-			finalRes[h] = matches
+			compatibilityMatches := make([]internalapi.InternalRecord, 0, len(matches))
+			for _, match := range matches {
+				compatibilityMatches = append(compatibilityMatches, httprecords.ToInternalRecord(match))
+			}
+			finalRes[h] = compatibilityMatches
 		}
 
 		return c.JSON(struct {
-			Results map[string][]models.InternalObject
+			Results map[string][]internalapi.InternalRecord
 		}{Results: finalRes})
 	}
 }
@@ -381,7 +391,7 @@ func handleInternalBulkSHA256ValidityFiber(om *core.ObjectManager) fiber.Handler
 		}
 		for _, hash := range hashes {
 			for _, obj := range records[hash] {
-				if common.ObjectHasChecksumTypeAndValue(obj, "sha256", hash) {
+				if objects.RecordHasChecksumTypeAndValue(obj, "sha256", hash) {
 					out[hash] = true
 					break
 				}
@@ -420,7 +430,7 @@ func handleInternalBulkDocumentsFiber(om *core.ObjectManager) fiber.Handler {
 
 		out := make([]internalapi.InternalRecordResponse, 0, len(records))
 		for _, obj := range records {
-			out = append(out, core.InternalObjectToInternalRecordResponse(obj))
+			out = append(out, httprecords.ToInternalRecordResponse(obj))
 		}
 		return c.JSON(out)
 	}
@@ -462,7 +472,7 @@ func handleInternalUpdateFiber(c fiber.Ctx, om *core.ObjectManager) error {
 	if strings.TrimSpace(req.Did) == "" {
 		req.Did = id
 	}
-	update, err := core.InternalRecordToInternalObject(req, time.Now().UTC())
+	update, err := internalRecordToObject(req, time.Now().UTC())
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).SendString("Invalid request body: " + err.Error())
 	}
@@ -474,20 +484,20 @@ func handleInternalUpdateFiber(c fiber.Ctx, om *core.ObjectManager) error {
 	if req.Size != nil && *req.Size != existing.Size {
 		return apiutil.HandleError(c, fmt.Errorf("%w: object size is immutable", faults.ErrConflict))
 	}
-	if incomingSHA, ok := common.CanonicalSHA256(update.Checksums); ok {
-		storedSHA, stored := common.CanonicalSHA256(existing.Checksums)
+	if incomingSHA, ok := objects.CanonicalSHA256(update.Checksums); ok {
+		storedSHA, stored := objects.CanonicalSHA256(existing.Checksums)
 		if stored && incomingSHA != storedSHA {
 			return apiutil.HandleError(c, fmt.Errorf("%w: object checksum identity is immutable", faults.ErrConflict))
 		}
 	}
-	merged, err := core.MergeInternalObjectUpdate(*existing, update, id, time.Now().UTC())
+	merged, err := core.MergeRecordUpdate(*existing, update, id, time.Now().UTC())
 	if err != nil {
 		return apiutil.HandleError(c, err)
 	}
-	if err := om.ReplaceObjects(c.Context(), []models.InternalObject{merged}); err != nil {
+	if err := om.ReplaceObjects(c.Context(), []objects.Record{merged}); err != nil {
 		return apiutil.HandleError(c, err)
 	}
-	return c.JSON(core.InternalObjectToInternalRecordResponse(merged))
+	return c.JSON(httprecords.ToInternalRecordResponse(merged))
 }
 
 func parseScopeQueryParts(organization, program, project string) (string, string, bool, error) {
@@ -540,12 +550,12 @@ func parseInternalListPaginationFiber(c fiber.Ctx) (int, string, int, error) {
 	return limit, start, offset, nil
 }
 
-func decodeInternalCreateCandidates(c fiber.Ctx, now time.Time) ([]models.InternalObject, error) {
+func decodeInternalCreateCandidates(c fiber.Ctx, now time.Time) ([]objects.Record, error) {
 	var bulkReq internalapi.BulkCreateRequest
-	candidates := make([]models.InternalObject, 0)
+	candidates := make([]objects.Record, 0)
 	if err := c.Bind().JSON(&bulkReq); err == nil && len(bulkReq.Records) > 0 {
 		for i, r := range bulkReq.Records {
-			obj, err := core.InternalRecordToInternalObject(r, now)
+			obj, err := internalRecordToObject(r, now)
 			if err != nil {
 				return nil, fmt.Errorf("record[%d] invalid: %w", i, err)
 			}
@@ -556,7 +566,7 @@ func decodeInternalCreateCandidates(c fiber.Ctx, now time.Time) ([]models.Intern
 
 	var singleReq internalapi.InternalRecord
 	if err := c.Bind().JSON(&singleReq); err == nil && singleReq.Did != "" {
-		obj, err := core.InternalRecordToInternalObject(singleReq, now)
+		obj, err := internalRecordToObject(singleReq, now)
 		if err != nil {
 			return nil, fmt.Errorf("record invalid: %w", err)
 		}
@@ -568,10 +578,18 @@ func decodeInternalCreateCandidates(c fiber.Ctx, now time.Time) ([]models.Intern
 	return candidates, nil
 }
 
+func internalRecordToObject(value internalapi.InternalRecord, now time.Time) (objects.Record, error) {
+	obj, err := httprecords.FromInternalRecord(value, now)
+	if err != nil {
+		return objects.Record{}, err
+	}
+	return core.EnforceCanonicalProjectScope(obj, common.StringVal(value.Organization), common.StringVal(value.Project))
+}
+
 func normalizeBulkHashes(hashes []string) []string {
 	normalized := make([]string, 0, len(hashes))
 	for _, h := range hashes {
-		_, val := common.ParseHashQuery(h, "")
+		_, val := objects.ParseHashQuery(h, "")
 		normalized = append(normalized, val)
 	}
 	return normalized
@@ -580,7 +598,7 @@ func normalizeBulkHashes(hashes []string) []string {
 func normalizeNonEmptyBulkHashes(hashes []string) []string {
 	normalized := make([]string, 0, len(hashes))
 	for _, h := range hashes {
-		_, val := common.ParseHashQuery(h, "")
+		_, val := objects.ParseHashQuery(h, "")
 		if strings.TrimSpace(val) == "" {
 			continue
 		}

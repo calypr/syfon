@@ -3,27 +3,28 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
 	"time"
 
-	"github.com/calypr/syfon/apigen/server/drs"
 	sycommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/common"
-	"github.com/calypr/syfon/internal/models"
+
+	"github.com/calypr/syfon/internal/objects"
 	"github.com/lib/pq"
 )
 
-func (db *PostgresDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []string, checksums []string) (map[string]*models.InternalObject, error) {
+func (db *PostgresDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []string, checksums []string) (map[string]*objects.Record, error) {
 	if len(ids) == 0 && len(checksums) == 0 {
-		return map[string]*models.InternalObject{}, nil
+		return map[string]*objects.Record{}, nil
 	}
 
 	shaQueries := make([]string, 0, len(checksums))
 	genericQueries := make([]string, 0, len(checksums))
 	for _, checksum := range checksums {
-		if normalized, ok := common.NormalizeSHA256Query(checksum); ok {
+		if normalized, ok := objects.NormalizeSHA256Query(checksum); ok {
 			shaQueries = append(shaQueries, normalized)
 		} else {
 			genericQueries = append(genericQueries, strings.TrimSpace(checksum))
@@ -59,7 +60,7 @@ func (db *PostgresDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []st
 	}
 	defer rows.Close()
 
-	objectsByID := make(map[string]*models.InternalObject)
+	objectsByID := make(map[string]*objects.Record)
 
 	for rows.Next() {
 		var (
@@ -74,18 +75,16 @@ func (db *PostgresDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []st
 		); err != nil {
 			return nil, err
 		}
-		objectsByID[id] = &models.InternalObject{
-			DrsObject: drs.DrsObject{
-				Id:          id,
-				Size:        size,
-				CreatedTime: createdTime,
-				UpdatedTime: common.Ptr(updatedTime),
-				Name:        common.Ptr(strings.TrimSpace(name.String)),
-				Version:     common.Ptr(version.String),
-				Description: common.Ptr(description.String),
-				SelfUri:     "drs://" + id,
-			},
-			Properties: map[string]interface{}{},
+		objectsByID[id] = &objects.Record{
+			Id:          objects.RecordID(id),
+			Size:        size,
+			CreatedTime: createdTime,
+			UpdatedTime: common.Ptr(updatedTime),
+			Name:        common.Ptr(strings.TrimSpace(name.String)),
+			Version:     common.Ptr(version.String),
+			Description: common.Ptr(description.String),
+			SelfUri:     "drs://" + id,
+			Properties:  map[string]json.RawMessage{},
 		}
 	}
 
@@ -113,7 +112,7 @@ func (db *PostgresDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []st
 	return objectsByID, nil
 }
 
-func (db *PostgresDB) attachBulkAccessMethods(ctx context.Context, objectsByID map[string]*models.InternalObject) error {
+func (db *PostgresDB) attachBulkAccessMethods(ctx context.Context, objectsByID map[string]*objects.Record) error {
 	rows, err := db.db.QueryContext(ctx, `
 		SELECT object_id, url, type
 		FROM drs_object_access_method
@@ -142,23 +141,20 @@ func (db *PostgresDB) attachBulkAccessMethods(ctx context.Context, objectsByID m
 			continue
 		}
 		seenAccess[objectID][key] = struct{}{}
-		if obj.DrsObject.AccessMethods == nil {
-			obj.DrsObject.AccessMethods = &[]drs.AccessMethod{}
+		if obj.AccessMethods == nil {
+			obj.AccessMethods = &[]objects.AccessMethod{}
 		}
-		am := drs.AccessMethod{
-			AccessUrl: &struct {
-				Headers *[]string `json:"headers,omitempty"`
-				Url     string    `json:"url"`
-			}{Url: accessURL},
-			Type:     drs.AccessMethodType(accessType),
-			AccessId: common.Ptr(common.AccessMethodID(accessType, accessURL)),
+		am := objects.AccessMethod{
+			AccessUrl: &objects.AccessURL{Url: accessURL},
+			Type:      accessType,
+			AccessId:  common.Ptr(objects.AccessMethodID(accessType, accessURL)),
 		}
-		*obj.DrsObject.AccessMethods = append(*obj.DrsObject.AccessMethods, am)
+		*obj.AccessMethods = append(*obj.AccessMethods, am)
 	}
 	return rows.Err()
 }
 
-func (db *PostgresDB) attachBulkChecksums(ctx context.Context, objectsByID map[string]*models.InternalObject) error {
+func (db *PostgresDB) attachBulkChecksums(ctx context.Context, objectsByID map[string]*objects.Record) error {
 	rows, err := db.db.QueryContext(ctx, `
 		SELECT object_id, type, checksum
 		FROM drs_object_checksum
@@ -187,12 +183,12 @@ func (db *PostgresDB) attachBulkChecksums(ctx context.Context, objectsByID map[s
 			continue
 		}
 		seenChecksums[objectID][key] = struct{}{}
-		obj.DrsObject.Checksums = append(obj.DrsObject.Checksums, drs.Checksum{Type: checksumType, Checksum: checksumValue})
+		obj.Checksums = append(obj.Checksums, objects.Checksum{Type: checksumType, Checksum: checksumValue})
 	}
 	return rows.Err()
 }
 
-func sortedObjectIDs(objectsByID map[string]*models.InternalObject) []string {
+func sortedObjectIDs(objectsByID map[string]*objects.Record) []string {
 	ids := make([]string, 0, len(objectsByID))
 	for id := range objectsByID {
 		ids = append(ids, id)
@@ -218,7 +214,7 @@ func uniqueNonEmptyStrings(values []string) []string {
 	return out
 }
 
-func objectAccessResources(obj *models.InternalObject) []string {
+func objectAccessResources(obj *objects.Record) []string {
 	if obj == nil {
 		return nil
 	}
@@ -228,11 +224,11 @@ func objectAccessResources(obj *models.InternalObject) []string {
 	return sycommon.AuthzMapToList(obj.Authorizations)
 }
 
-func normalizeObjectNameAliases(obj *models.InternalObject) []string {
+func normalizeObjectNameAliases(obj *objects.Record) []string {
 	if obj == nil {
 		return nil
 	}
-	return common.NormalizeNameAliases(common.StringVal(obj.Name), obj.NameAliases)
+	return objects.NormalizeNameAliases(common.StringVal(obj.Name), obj.NameAliases)
 }
 
 func (db *PostgresDB) controlledAccessForObject(ctx context.Context, objectID string) ([]string, error) {
@@ -273,10 +269,10 @@ func (db *PostgresDB) nameAliasesForObject(ctx context.Context, objectID string)
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	return common.NormalizeNameAliases("", aliases), nil
+	return objects.NormalizeNameAliases("", aliases), nil
 }
 
-func (db *PostgresDB) attachControlledAccess(ctx context.Context, objectsByID map[string]*models.InternalObject) error {
+func (db *PostgresDB) attachControlledAccess(ctx context.Context, objectsByID map[string]*objects.Record) error {
 	if len(objectsByID) == 0 {
 		return nil
 	}
@@ -322,7 +318,7 @@ func (db *PostgresDB) attachControlledAccess(ctx context.Context, objectsByID ma
 	return nil
 }
 
-func (db *PostgresDB) attachPublicRead(ctx context.Context, objectsByID map[string]*models.InternalObject) error {
+func (db *PostgresDB) attachPublicRead(ctx context.Context, objectsByID map[string]*objects.Record) error {
 	if len(objectsByID) == 0 {
 		return nil
 	}
@@ -357,7 +353,7 @@ func (db *PostgresDB) attachPublicRead(ctx context.Context, objectsByID map[stri
 	return nil
 }
 
-func (db *PostgresDB) attachNameAliases(ctx context.Context, objectsByID map[string]*models.InternalObject) error {
+func (db *PostgresDB) attachNameAliases(ctx context.Context, objectsByID map[string]*objects.Record) error {
 	if len(objectsByID) == 0 {
 		return nil
 	}
@@ -388,7 +384,7 @@ func (db *PostgresDB) attachNameAliases(ctx context.Context, objectsByID map[str
 		if obj == nil {
 			continue
 		}
-		obj.NameAliases = common.NormalizeNameAliases(common.StringVal(obj.Name), aliases)
+		obj.NameAliases = objects.NormalizeNameAliases(common.StringVal(obj.Name), aliases)
 	}
 	return nil
 }

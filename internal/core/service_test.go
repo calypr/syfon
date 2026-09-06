@@ -7,11 +7,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/faults"
 	"github.com/calypr/syfon/internal/models"
+
+	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/testutils"
 	"github.com/calypr/syfon/internal/urlmanager"
 )
@@ -147,11 +148,11 @@ func TestObjectManagerGetObjectLookupPaths(t *testing.T) {
 			name: "checksum lookup",
 			db: &coreTestDB{
 				MockDatabase: &testutils.MockDatabase{
-					Objects: map[string]*drs.DrsObject{
+					Objects: map[string]*objects.Record{
 						"obj-1": {
 							Id:      "obj-1",
 							SelfUri: "drs://obj-1",
-							Checksums: []drs.Checksum{
+							Checksums: []objects.Checksum{
 								{Type: "sha256", Checksum: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
 							},
 						},
@@ -171,7 +172,7 @@ func TestObjectManagerGetObjectLookupPaths(t *testing.T) {
 			name: "direct id lookup",
 			db: &coreTestDB{
 				MockDatabase: &testutils.MockDatabase{
-					Objects: map[string]*drs.DrsObject{
+					Objects: map[string]*objects.Record{
 						"obj-2": {Id: "obj-2", SelfUri: "drs://obj-2"},
 					},
 					ObjectAuthz: map[string]map[string][]string{
@@ -189,7 +190,7 @@ func TestObjectManagerGetObjectLookupPaths(t *testing.T) {
 			name: "alias fallback",
 			db: &coreTestDB{
 				MockDatabase: &testutils.MockDatabase{
-					Objects: map[string]*drs.DrsObject{
+					Objects: map[string]*objects.Record{
 						"canonical-1": {Id: "canonical-1", SelfUri: "drs://canonical-1"},
 					},
 					ObjectAuthz: map[string]map[string][]string{
@@ -210,7 +211,7 @@ func TestObjectManagerGetObjectLookupPaths(t *testing.T) {
 			name: "access denied",
 			db: &coreTestDB{
 				MockDatabase: &testutils.MockDatabase{
-					Objects: map[string]*drs.DrsObject{
+					Objects: map[string]*objects.Record{
 						"obj-3": {Id: "obj-3"},
 					},
 					ObjectAuthz: map[string]map[string][]string{
@@ -227,7 +228,7 @@ func TestObjectManagerGetObjectLookupPaths(t *testing.T) {
 			name: "not found",
 			db: &coreTestDB{
 				MockDatabase: &testutils.MockDatabase{
-					Objects: map[string]*drs.DrsObject{},
+					Objects: map[string]*objects.Record{},
 				},
 			},
 			ident:   "missing",
@@ -250,7 +251,7 @@ func TestObjectManagerGetObjectLookupPaths(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if obj.Id != tc.wantID {
+			if string(obj.Id) != tc.wantID {
 				t.Fatalf("expected id %q, got %q", tc.wantID, obj.Id)
 			}
 			if obj.SelfUri != tc.wantURI {
@@ -269,7 +270,7 @@ func TestObjectManagerGetObjectAuthzParity(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			db := &coreTestDB{
 				MockDatabase: &testutils.MockDatabase{
-					Objects: map[string]*drs.DrsObject{
+					Objects: map[string]*objects.Record{
 						"obj-1": {Id: "obj-1", SelfUri: "drs://obj-1"},
 					},
 					ObjectAuthz: map[string]map[string][]string{
@@ -380,16 +381,16 @@ func TestBucketCatalogDeleteScopeInvalidatesLookupCache(t *testing.T) {
 func TestObjectManagerBulkReadFiltering(t *testing.T) {
 	db := &coreTestDB{
 		MockDatabase: &testutils.MockDatabase{
-			Objects: map[string]*drs.DrsObject{
+			Objects: map[string]*objects.Record{
 				"obj-1": {
 					Id: "obj-1",
-					Checksums: []drs.Checksum{
+					Checksums: []objects.Checksum{
 						{Type: "sha256", Checksum: "sha-1"},
 					},
 				},
 				"obj-2": {
 					Id: "obj-2",
-					Checksums: []drs.Checksum{
+					Checksums: []objects.Checksum{
 						{Type: "sha256", Checksum: "sha-2"},
 					},
 				},
@@ -429,15 +430,15 @@ func TestObjectManagerLifecycleAuthorization(t *testing.T) {
 	t.Run("register enforces create on candidate resources", func(t *testing.T) {
 		db := &coreTestDB{MockDatabase: &testutils.MockDatabase{}}
 		om := NewObjectManager(db, &capturingURLManager{})
-		obj := models.InternalObject{
-			DrsObject:      drs.DrsObject{Id: "new-object"},
+		obj := objects.Record{
+			Id:             "new-object",
 			Authorizations: map[string][]string{"org": {"project"}},
 		}
 
 		deniedCtx := buildGen3Context(map[string]map[string]bool{
 			"/programs/org/projects/project": {"read": true},
 		})
-		err := om.RegisterObjects(deniedCtx, []models.InternalObject{obj})
+		err := om.RegisterObjects(deniedCtx, []objects.Record{obj})
 		if !errors.Is(err, faults.ErrUnauthorized) {
 			t.Fatalf("expected register without create privilege to be unauthorized, got %v", err)
 		}
@@ -451,7 +452,7 @@ func TestObjectManagerLifecycleAuthorization(t *testing.T) {
 		allowedCtx := buildGen3Context(map[string]map[string]bool{
 			"/programs/org/projects/project": {"create": true},
 		})
-		if err := om.RegisterObjects(allowedCtx, []models.InternalObject{obj}); err != nil {
+		if err := om.RegisterObjects(allowedCtx, []objects.Record{obj}); err != nil {
 			t.Fatalf("expected register with create privilege to succeed: %v", err)
 		}
 		if _, ok := db.Objects["new-object"]; !ok {
@@ -462,26 +463,26 @@ func TestObjectManagerLifecycleAuthorization(t *testing.T) {
 	t.Run("replace requires current update and new grant create with read", func(t *testing.T) {
 		database := testutils.NewInMemoryDB()
 		om := NewObjectManager(database, &capturingURLManager{})
-		if err := om.RegisterObjects(context.Background(), []models.InternalObject{{
-			DrsObject:      drs.DrsObject{Id: "obj"},
+		if err := om.RegisterObjects(context.Background(), []objects.Record{{
+			Id:             "obj",
 			Authorizations: map[string][]string{"old": {"scope"}},
 		}}); err != nil {
 			t.Fatal(err)
 		}
-		replacement := models.InternalObject{
-			DrsObject:      drs.DrsObject{Id: "obj", Name: common.Ptr("updated")},
+		replacement := objects.Record{
+			Id: "obj", Name: common.Ptr("updated"),
 			Authorizations: map[string][]string{"new": {"scope"}},
 		}
 		err := om.ReplaceObjects(buildGen3Context(map[string]map[string]bool{
 			"/programs/old/projects/scope": {"update": true},
-		}), []models.InternalObject{replacement})
+		}), []objects.Record{replacement})
 		if !errors.Is(err, faults.ErrUnauthorized) {
 			t.Fatalf("expected unauthorized grant replacement, got %v", err)
 		}
 		err = om.ReplaceObjects(buildGen3Context(map[string]map[string]bool{
 			"/programs/old/projects/scope": {"update": true, "read": true},
 			"/programs/new/projects/scope": {"create": true},
-		}), []models.InternalObject{replacement})
+		}), []objects.Record{replacement})
 		if err != nil {
 			t.Fatalf("authorized replacement: %v", err)
 		}
@@ -496,14 +497,14 @@ func TestObjectManagerLifecycleAuthorization(t *testing.T) {
 
 	t.Run("delete by checksum uses delete privilege without requiring read", func(t *testing.T) {
 		db := &coreTestDB{MockDatabase: &testutils.MockDatabase{
-			Objects: map[string]*drs.DrsObject{
+			Objects: map[string]*objects.Record{
 				"delete-me": {
 					Id:        "delete-me",
-					Checksums: []drs.Checksum{{Type: "sha256", Checksum: "sha-delete"}},
+					Checksums: []objects.Checksum{{Type: "sha256", Checksum: "sha-delete"}},
 				},
 				"keep-me": {
 					Id:        "keep-me",
-					Checksums: []drs.Checksum{{Type: "sha256", Checksum: "sha-keep"}},
+					Checksums: []objects.Checksum{{Type: "sha256", Checksum: "sha-keep"}},
 				},
 			},
 			ObjectAuthz: map[string]map[string][]string{
@@ -532,9 +533,9 @@ func TestObjectManagerLifecycleAuthorization(t *testing.T) {
 	})
 
 	t.Run("single mutations reject unauthorized access", func(t *testing.T) {
-		accessMethods := []drs.AccessMethod{{Type: drs.AccessMethodTypeHttps}}
+		accessMethods := []objects.AccessMethod{{Type: "https"}}
 		db := &coreTestDB{MockDatabase: &testutils.MockDatabase{
-			Objects: map[string]*drs.DrsObject{
+			Objects: map[string]*objects.Record{
 				"obj": {Id: "obj"},
 			},
 			ObjectAuthz: map[string]map[string][]string{
@@ -572,9 +573,9 @@ func TestObjectManagerLifecycleAuthorization(t *testing.T) {
 
 	t.Run("scope list and single checksum lookup filter reads", func(t *testing.T) {
 		db := &coreTestDB{MockDatabase: &testutils.MockDatabase{
-			Objects: map[string]*drs.DrsObject{
-				"obj-1": {Id: "obj-1", Checksums: []drs.Checksum{{Type: "sha256", Checksum: "shared"}}},
-				"obj-2": {Id: "obj-2", Checksums: []drs.Checksum{{Type: "sha256", Checksum: "shared"}}},
+			Objects: map[string]*objects.Record{
+				"obj-1": {Id: "obj-1", Checksums: []objects.Checksum{{Type: "sha256", Checksum: "shared"}}},
+				"obj-2": {Id: "obj-2", Checksums: []objects.Checksum{{Type: "sha256", Checksum: "shared"}}},
 			},
 			ObjectAuthz: map[string]map[string][]string{
 				"obj-1": {"org": {"one"}},
@@ -608,7 +609,7 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 	t.Run("delete by scope filters unauthorized objects", func(t *testing.T) {
 		db := &coreTestDB{
 			MockDatabase: &testutils.MockDatabase{
-				Objects: map[string]*drs.DrsObject{
+				Objects: map[string]*objects.Record{
 					"obj-a": {Id: "obj-a"},
 					"obj-b": {Id: "obj-b"},
 				},
@@ -642,7 +643,7 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 	t.Run("bulk update access methods checks authorization in one bulk read", func(t *testing.T) {
 		db := &coreTestDB{
 			MockDatabase: &testutils.MockDatabase{
-				Objects: map[string]*drs.DrsObject{
+				Objects: map[string]*objects.Record{
 					"obj-a": {Id: "obj-a"},
 					"obj-b": {Id: "obj-b"},
 				},
@@ -657,20 +658,14 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 			"/programs/a/projects/one": {"update": true},
 		})
 
-		err := om.BulkUpdateAccessMethods(ctx, map[string][]drs.AccessMethod{
+		err := om.BulkUpdateAccessMethods(ctx, map[string][]objects.AccessMethod{
 			"obj-a": {{
-				Type: drs.AccessMethodTypeS3,
-				AccessUrl: &struct {
-					Headers *[]string `json:"headers,omitempty"`
-					Url     string    `json:"url"`
-				}{Url: "s3://bucket/a"},
+				Type:      "s3",
+				AccessUrl: &objects.AccessURL{Url: "s3://bucket/a"},
 			}},
 			"obj-b": {{
-				Type: drs.AccessMethodTypeS3,
-				AccessUrl: &struct {
-					Headers *[]string `json:"headers,omitempty"`
-					Url     string    `json:"url"`
-				}{Url: "s3://bucket/b"},
+				Type:      "s3",
+				AccessUrl: &objects.AccessURL{Url: "s3://bucket/b"},
 			}},
 		})
 		if !errors.Is(err, faults.ErrUnauthorized) {
@@ -776,7 +771,7 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 		}
 		um := &capturingURLManager{}
 		om := NewObjectManager(db, um)
-		obj := &models.InternalObject{
+		obj := &objects.Record{
 			Authorizations: map[string][]string{"calypr": {"training"}},
 		}
 
@@ -813,10 +808,9 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 		db := &coreTestDB{MockDatabase: mockDB}
 		um := &capturingURLManager{}
 		om := NewObjectManager(db, um)
-		obj := &models.InternalObject{
-			DrsObject: drs.DrsObject{
-				ControlledAccess: &[]string{"/programs/gdc_mirror/projects/gdc_mirror"},
-			},
+		obj := &objects.Record{
+
+			ControlledAccess: &[]string{"/programs/gdc_mirror/projects/gdc_mirror"},
 		}
 
 		_, err := om.SignObjectURL(context.Background(), obj, "s3://calypr/223bebff-debb-555c-bd59-5372f106c76c/4413832f86f331fc270de6d2263e13ac865d4524eef701ec8f4a342feb2f4300", urlmanager.SignOptions{})
@@ -844,7 +838,7 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 		}
 		um := &capturingURLManager{}
 		om := NewObjectManager(db, um)
-		obj := &models.InternalObject{
+		obj := &objects.Record{
 			Authorizations: map[string][]string{"calypr": {"training"}},
 		}
 
@@ -877,14 +871,13 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 		}
 		um := &capturingURLManager{}
 		om := NewObjectManager(db, um)
-		obj := &models.InternalObject{
-			DrsObject: drs.DrsObject{
-				Checksums: []drs.Checksum{{
-					Type:     "sha256",
-					Checksum: "412f8568bfb0e62937ee40c6fcdeaa1cf55910c558c0152250340356c8829a47",
-				}},
-				ControlledAccess: &[]string{"/organization/syfon/project/e2e"},
-			},
+		obj := &objects.Record{
+
+			Checksums: []objects.Checksum{{
+				Type:     "sha256",
+				Checksum: "412f8568bfb0e62937ee40c6fcdeaa1cf55910c558c0152250340356c8829a47",
+			}},
+			ControlledAccess: &[]string{"/organization/syfon/project/e2e"},
 		}
 
 		input := "s3://f781273b-52eb-5ac2-a484-775235eef303"
@@ -902,20 +895,17 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 
 	t.Run("object storage target preserves stored key", func(t *testing.T) {
 		mockDB := &testutils.MockDatabase{
-			Objects: map[string]*drs.DrsObject{
+			Objects: map[string]*objects.Record{
 				"obj-delete": {
 					Id:               "obj-delete",
 					ControlledAccess: &[]string{"/organization/cbds/project/git_drs_test"},
-					Checksums: []drs.Checksum{{
+					Checksums: []objects.Checksum{{
 						Type:     "sha256",
 						Checksum: "6d1bf6c2-917d-545e-b44d-8e28f96ec170",
 					}},
-					AccessMethods: &[]drs.AccessMethod{{
-						Type: drs.AccessMethodTypeS3,
-						AccessUrl: &struct {
-							Headers *[]string `json:"headers,omitempty"`
-							Url     string    `json:"url"`
-						}{Url: "s3://cbds-minio/6d1bf6c2-917d-545e-b44d-8e28f96ec170"},
+					AccessMethods: &[]objects.AccessMethod{{
+						Type:      "s3",
+						AccessUrl: &objects.AccessURL{Url: "s3://cbds-minio/6d1bf6c2-917d-545e-b44d-8e28f96ec170"},
 					}},
 				},
 			},
@@ -962,10 +952,9 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 				},
 			},
 		}
-		obj := &models.InternalObject{
-			DrsObject: drs.DrsObject{
-				ControlledAccess: &[]string{"/organization/HTAN_INT/project/BForePC"},
-			},
+		obj := &objects.Record{
+
+			ControlledAccess: &[]string{"/organization/HTAN_INT/project/BForePC"},
 		}
 		sourceURL := "s3://bforepc-prod/OHSU/koei_chin/slide.ome.tiff"
 		wantURL := "s3://bforepc/bforepc-prod/OHSU/koei_chin/slide.ome.tiff"
@@ -1039,15 +1028,14 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 			},
 		}
 		om := NewObjectManager(db, &capturingURLManager{})
-		obj := &models.InternalObject{
-			DrsObject: drs.DrsObject{
-				Id: "00664eeb-830c-5fe4-b48c-054cd9c8e02f",
-				Checksums: []drs.Checksum{{
-					Type:     "sha256",
-					Checksum: "239f8402efd37b62bfb892aa4becb0692b3ca5f58015083d8567e8d7fbdd1843",
-				}},
-				ControlledAccess: &[]string{"/organization/gdc_mirror/project/gdc_mirror"},
-			},
+		obj := &objects.Record{
+
+			Id: "00664eeb-830c-5fe4-b48c-054cd9c8e02f",
+			Checksums: []objects.Checksum{{
+				Type:     "sha256",
+				Checksum: "239f8402efd37b62bfb892aa4becb0692b3ca5f58015083d8567e8d7fbdd1843",
+			}},
+			ControlledAccess: &[]string{"/organization/gdc_mirror/project/gdc_mirror"},
 		}
 		sourceURL := "s3://gdcdata/00664eeb-830c-5fe4-b48c-054cd9c8e02f/239f8402efd37b62bfb892aa4becb0692b3ca5f58015083d8567e8d7fbdd1843"
 
@@ -1083,7 +1071,7 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 		}); err != nil {
 			t.Fatalf("CreateBucketScope failed: %v", err)
 		}
-		obj := &models.InternalObject{
+		obj := &objects.Record{
 			Authorizations: map[string][]string{"calypr": {"training"}},
 		}
 		if _, err := om.SignObjectURL(context.Background(), obj, "s3://calypr/relative-key", urlmanager.SignOptions{Method: "PUT"}); err != nil {

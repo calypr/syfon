@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/faults"
+	"github.com/calypr/syfon/internal/objects"
 	"github.com/lib/pq"
 )
 
@@ -435,16 +435,13 @@ func TestUpdateObjectAccessMethods(t *testing.T) {
 		WithArgs("obj-1").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO drs_object_access_method (object_id, url, type) VALUES ($1, $2, $3)")).
-		WithArgs("obj-1", "s3://bucket/key", drs.AccessMethodTypeS3).
+		WithArgs("obj-1", "s3://bucket/key", "s3").
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 
-	err := pg.UpdateObjectAccessMethods(context.Background(), "obj-1", []drs.AccessMethod{{
-		Type: drs.AccessMethodTypeS3,
-		AccessUrl: &struct {
-			Headers *[]string `json:"headers,omitempty"`
-			Url     string    `json:"url"`
-		}{Url: "s3://bucket/key"},
+	err := pg.UpdateObjectAccessMethods(context.Background(), "obj-1", []objects.AccessMethod{{
+		Type:      "s3",
+		AccessUrl: &objects.AccessURL{Url: "s3://bucket/key"},
 	}})
 	if err != nil {
 		t.Fatalf("UpdateObjectAccessMethods returned error: %v", err)
@@ -471,25 +468,22 @@ func TestBulkUpdateAccessMethods(t *testing.T) {
 		WithArgs("obj-1").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO drs_object_access_method (object_id, url, type) VALUES ($1, $2, $3)")).
-		WithArgs("obj-1", "s3://bucket/key", drs.AccessMethodTypeS3).
+		WithArgs("obj-1", "s3://bucket/key", "s3").
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec(regexp.QuoteMeta("DELETE FROM drs_object_access_method WHERE object_id = $1")).
 		WithArgs("obj-2").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 
-	err := pg.BulkUpdateAccessMethods(context.Background(), map[string][]drs.AccessMethod{
+	err := pg.BulkUpdateAccessMethods(context.Background(), map[string][]objects.AccessMethod{
 		"obj-1": {
 			{
-				Type: drs.AccessMethodTypeS3,
-				AccessUrl: &struct {
-					Headers *[]string `json:"headers,omitempty"`
-					Url     string    `json:"url"`
-				}{Url: "s3://bucket/key"},
+				Type:      "s3",
+				AccessUrl: &objects.AccessURL{Url: "s3://bucket/key"},
 			},
 		},
 		"obj-2": {
-			{Type: drs.AccessMethodTypeS3}, // no URL, should be skipped after delete
+			{Type: "s3"}, // no URL, should be skipped after delete
 		},
 	})
 	if err != nil {

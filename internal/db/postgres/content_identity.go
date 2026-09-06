@@ -12,7 +12,8 @@ import (
 	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/faults"
-	"github.com/calypr/syfon/internal/models"
+
+	"github.com/calypr/syfon/internal/objects"
 )
 
 type postgresContentRow struct {
@@ -30,7 +31,7 @@ func lockContentWriteTx(ctx context.Context, tx *sql.Tx) error {
 
 // RegisterObjects is the content identity write boundary. A transaction
 // advisory lock serializes both SHA lookup and UUID claims across processes.
-func (db *PostgresDB) RegisterObjects(ctx context.Context, objects []models.InternalObject) error {
+func (db *PostgresDB) RegisterObjects(ctx context.Context, objects []objects.Record) error {
 	if len(objects) == 0 {
 		return nil
 	}
@@ -64,19 +65,19 @@ func (db *PostgresDB) RegisterObjects(ctx context.Context, objects []models.Inte
 	return nil
 }
 
-func (db *PostgresDB) CreateObject(ctx context.Context, obj *models.InternalObject) error {
+func (db *PostgresDB) CreateObject(ctx context.Context, obj *objects.Record) error {
 	if obj == nil {
 		return fmt.Errorf("object is required")
 	}
-	return db.RegisterObjects(ctx, []models.InternalObject{*obj})
+	return db.RegisterObjects(ctx, []objects.Record{*obj})
 }
 
-func (db *PostgresDB) registerContentTx(ctx context.Context, tx *sql.Tx, obj *models.InternalObject) (string, error) {
-	id := strings.TrimSpace(obj.Id)
+func (db *PostgresDB) registerContentTx(ctx context.Context, tx *sql.Tx, obj *objects.Record) (string, error) {
+	id := strings.TrimSpace(string(obj.Id))
 	if id == "" {
 		return "", fmt.Errorf("object id is required")
 	}
-	sha, hasSHA, err := common.ValidateCanonicalSHA256(obj.Checksums)
+	sha, hasSHA, err := objects.ValidateCanonicalSHA256(obj.Checksums)
 	if err != nil {
 		return "", err
 	}
@@ -236,20 +237,20 @@ func postgresLoadContentRowTx(ctx context.Context, tx *sql.Tx, id string) (postg
 	return row, true, nil
 }
 
-func postgresInsertContentRowTx(ctx context.Context, tx *sql.Tx, id string, obj *models.InternalObject) error {
+func postgresInsertContentRowTx(ctx context.Context, tx *sql.Tx, id string, obj *objects.Record) error {
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO drs_object (id, size, created_time, updated_time, name, version, description)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)`, id, obj.Size, obj.CreatedTime, common.TimeVal(obj.UpdatedTime),
-		common.CleanToBasename(common.StringVal(obj.Name)), common.StringVal(obj.Version), common.StringVal(obj.Description))
+		objects.CleanToBasename(common.StringVal(obj.Name)), common.StringVal(obj.Version), common.StringVal(obj.Description))
 	if err != nil {
 		return fmt.Errorf("insert canonical object: %w", err)
 	}
 	return nil
 }
 
-func postgresMergeContentRowTx(ctx context.Context, tx *sql.Tx, row postgresContentRow, obj *models.InternalObject, resources, currentResources []string) error {
+func postgresMergeContentRowTx(ctx context.Context, tx *sql.Tx, row postgresContentRow, obj *objects.Record, resources, currentResources []string) error {
 	allowReplacement := len(currentResources) == 1 && postgresHasResourceOverlap(resources, currentResources)
-	incomingName := common.CleanToBasename(common.StringVal(obj.Name))
+	incomingName := objects.CleanToBasename(common.StringVal(obj.Name))
 	if row.name != "" && incomingName != "" && row.name != incomingName {
 		alias := incomingName
 		if allowReplacement {
@@ -263,7 +264,7 @@ func postgresMergeContentRowTx(ctx context.Context, tx *sql.Tx, row postgresCont
 	}
 	name, version, description := row.name, row.version, row.description
 	if allowReplacement || strings.TrimSpace(name) == "" {
-		if incoming := common.CleanToBasename(common.StringVal(obj.Name)); incoming != "" {
+		if incoming := objects.CleanToBasename(common.StringVal(obj.Name)); incoming != "" {
 			name = incoming
 		}
 	}
@@ -294,7 +295,7 @@ func postgresMergeContentRowTx(ctx context.Context, tx *sql.Tx, row postgresCont
 	return nil
 }
 
-func postgresMergeContentChildrenTx(ctx context.Context, tx *sql.Tx, id string, obj *models.InternalObject, sha string, hasSHA bool, resources []string) error {
+func postgresMergeContentChildrenTx(ctx context.Context, tx *sql.Tx, id string, obj *objects.Record, sha string, hasSHA bool, resources []string) error {
 	for _, resource := range resources {
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO drs_object_controlled_access (object_id, resource)
@@ -340,7 +341,7 @@ func postgresMergeContentChildrenTx(ctx context.Context, tx *sql.Tx, id string, 
 	}
 	for _, checksum := range obj.Checksums {
 		typ, value := strings.TrimSpace(checksum.Type), strings.TrimSpace(checksum.Checksum)
-		if typ == "" || value == "" || (common.NormalizeChecksumType(typ) == "sha256" && sycommon.NormalizeOid(value) != "") {
+		if typ == "" || value == "" || (objects.NormalizeChecksumType(typ) == "sha256" && sycommon.NormalizeOid(value) != "") {
 			continue
 		}
 		if _, err := tx.ExecContext(ctx, `
@@ -452,7 +453,7 @@ func postgresObjectSHAsTx(ctx context.Context, tx *sql.Tx, id string) ([]string,
 	return values, rows.Err()
 }
 
-func postgresObjectResources(obj *models.InternalObject) []string {
+func postgresObjectResources(obj *objects.Record) []string {
 	if obj == nil {
 		return nil
 	}
@@ -462,7 +463,7 @@ func postgresObjectResources(obj *models.InternalObject) []string {
 	return sycommon.NormalizeAccessResources(sycommon.AuthzMapToList(obj.Authorizations))
 }
 
-func postgresIdentityAliases(obj *models.InternalObject) []string {
+func postgresIdentityAliases(obj *objects.Record) []string {
 	if obj == nil || obj.Aliases == nil {
 		return nil
 	}

@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/models"
+	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/testutils"
 	"github.com/gofiber/fiber/v3"
 )
@@ -42,7 +42,7 @@ func TestLFSUploadProxySuccess(t *testing.T) {
 
 	// 2. Setup Syfon router with mocked dependencies
 	db := &testutils.MockDatabase{
-		Objects: map[string]*drs.DrsObject{},
+		Objects: map[string]*objects.Record{},
 	}
 	uM := &customMockUrlManager{uploadURL: uploadServer.URL}
 	app := fiber.New()
@@ -81,7 +81,7 @@ func TestLFSUploadProxyUsesPendingScopedCanonicalLocation(t *testing.T) {
 
 	oid := strings.Repeat("b", 64)
 	db := &testutils.MockDatabase{
-		Objects: map[string]*drs.DrsObject{},
+		Objects: map[string]*objects.Record{},
 		Credentials: map[string]models.S3Credential{
 			"syfon-e2e-bucket": {Bucket: "syfon-e2e-bucket", Provider: "s3", Region: "us-west-2"},
 		},
@@ -101,17 +101,14 @@ func TestLFSUploadProxyUsesPendingScopedCanonicalLocation(t *testing.T) {
 		PendingMeta: map[string]models.PendingLFSMeta{
 			oid: {
 				OID: oid,
-				Candidate: drs.DrsObjectCandidate{
+				Candidate: objects.Candidate{
 					Name:             ptr("scoped-lfs.bin"),
-					Size:             13,
-					Checksums:        []drs.Checksum{{Type: "sha256", Checksum: oid}},
+					Size:             ptr(int64(13)),
+					Checksums:        &[]objects.Checksum{{Type: "sha256", Checksum: oid}},
 					ControlledAccess: &[]string{"/organization/syfon/project/e2e"},
-					AccessMethods: &[]drs.AccessMethod{{
-						Type: drs.AccessMethodTypeS3,
-						AccessUrl: &struct {
-							Headers *[]string `json:"headers,omitempty"`
-							Url     string    `json:"url"`
-						}{Url: "s3://objects/stale-object-id"},
+					AccessMethods: &[]objects.AccessMethod{{
+						Type:      "s3",
+						AccessUrl: &objects.AccessURL{Url: "s3://objects/stale-object-id"},
 					}},
 				},
 				CreatedAt: time.Now().UTC(),

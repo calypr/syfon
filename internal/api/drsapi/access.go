@@ -10,6 +10,7 @@ import (
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/models"
+	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/urlmanager"
 	"github.com/gofiber/fiber/v3"
 )
@@ -49,7 +50,7 @@ func handleGetAccessURLFiber(om *core.ObjectManager) fiber.Handler {
 	}
 }
 
-func accessURLForID(obj *models.InternalObject, accessID string) string {
+func accessURLForID(obj *objects.Record, accessID string) string {
 	if obj == nil || obj.AccessMethods == nil {
 		return ""
 	}

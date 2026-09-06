@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/apigen/server/metricsapi"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/models"
+	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/testutils"
 	"github.com/gofiber/fiber/v3"
 )
@@ -26,14 +26,14 @@ func (a metricsObjectReaderAdapter) ListObjectIDsByScope(ctx context.Context, or
 	return a.db.ListObjectIDsByScope(ctx, organization, project)
 }
 
-func (a metricsObjectReaderAdapter) GetObject(ctx context.Context, id, requiredMethod string) (*models.InternalObject, error) {
+func (a metricsObjectReaderAdapter) GetObject(ctx context.Context, id, requiredMethod string) (*objects.Record, error) {
 	return a.db.GetObject(ctx, id)
 }
 
 func TestMetricsRoutes_ListAndSummary(t *testing.T) {
 	now := time.Now().UTC()
 	db := &testutils.MockDatabase{
-		Objects: map[string]*drs.DrsObject{
+		Objects: map[string]*objects.Record{
 			"sha-1": {Id: "sha-1", Name: common.Ptr("f1"), Size: 1},
 			"sha-2": {Id: "sha-2", Name: common.Ptr("f2"), Size: 2},
 		},
@@ -130,7 +130,7 @@ func TestMetricsRoutes_BulkFiles(t *testing.T) {
 	oldDownload := time.Now().UTC().AddDate(0, 0, -40)
 	recentDownload := time.Now().UTC().AddDate(0, 0, -2)
 	db := &testutils.MockDatabase{
-		Objects: map[string]*drs.DrsObject{
+		Objects: map[string]*objects.Record{
 			"obj-a": {Id: "obj-a", Name: common.Ptr("a.txt"), Size: 10},
 			"obj-b": {Id: "obj-b", Name: common.Ptr("b.txt"), Size: 20},
 			"obj-c": {Id: "obj-c", Name: common.Ptr("c.txt"), Size: 30},
@@ -208,7 +208,7 @@ func TestMetricsRoutes_BulkFiles(t *testing.T) {
 
 func TestMetricsSummaryAuthzAndScope(t *testing.T) {
 	db := &testutils.MockDatabase{
-		Objects: map[string]*drs.DrsObject{
+		Objects: map[string]*objects.Record{
 			"scoped-1": {Id: "scoped-1", Name: common.Ptr("f1"), Size: 1},
 			"other-1":  {Id: "other-1", Name: common.Ptr("f2"), Size: 2},
 		},
@@ -308,7 +308,7 @@ func TestMetricsSummaryAuthzAndScope(t *testing.T) {
 
 func TestMetricsFilesAuthzAndScope(t *testing.T) {
 	db := &testutils.MockDatabase{
-		Objects: map[string]*drs.DrsObject{
+		Objects: map[string]*objects.Record{
 			"scoped-1": {Id: "scoped-1", Name: common.Ptr("f1"), Size: 1},
 			"other-1":  {Id: "other-1", Name: common.Ptr("f2"), Size: 2},
 		},
@@ -423,7 +423,7 @@ func TestMetricsFilesAuthzAndScope(t *testing.T) {
 func TestFileUsageScopeHelpers(t *testing.T) {
 	now := time.Now().UTC()
 	objects := &testutils.MockDatabase{
-		Objects: map[string]*drs.DrsObject{
+		Objects: map[string]*objects.Record{
 			"obj-a": {Id: "obj-a", CreatedTime: now, UpdatedTime: &now},
 			"obj-b": {Id: "obj-b", CreatedTime: now, UpdatedTime: &now},
 		},
@@ -456,7 +456,7 @@ func TestFileUsageScopeHelpers(t *testing.T) {
 func TestListMultiScopedFileUsage_DeduplicatesAcrossScopes(t *testing.T) {
 	now := time.Now().UTC()
 	objects := &testutils.MockDatabase{
-		Objects: map[string]*drs.DrsObject{
+		Objects: map[string]*objects.Record{
 			"obj-a": {Id: "obj-a", CreatedTime: now, UpdatedTime: &now},
 		},
 		ObjectAuthz: map[string]map[string][]string{

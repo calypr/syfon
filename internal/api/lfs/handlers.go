@@ -11,10 +11,12 @@ import (
 
 	"github.com/calypr/syfon/apigen/server/lfsapi"
 	sycommon "github.com/calypr/syfon/common"
-	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/faults"
+	httplfs "github.com/calypr/syfon/internal/httpapi/lfs"
 	"github.com/calypr/syfon/internal/models"
+
+	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/urlmanager"
 )
 
@@ -103,7 +105,7 @@ func (s *LFSServer) LfsVerify(ctx context.Context, request lfsapi.LfsVerifyReque
 
 	obj, err := s.om.GetObject(ctx, oid, "read")
 	if err == nil {
-		if err := s.om.RecordUpload(ctx, obj.Id); err != nil {
+		if err := s.om.RecordUpload(ctx, string(obj.Id)); err != nil {
 			return lfsapi.LfsVerify500ApplicationVndGitLfsPlusJSONResponse{Message: err.Error()}, nil
 		}
 		return lfsapi.LfsVerify200Response{}, nil
@@ -121,16 +123,16 @@ func (s *LFSServer) LfsVerify(ctx context.Context, request lfsapi.LfsVerifyReque
 		return lfsapi.LfsVerify500ApplicationVndGitLfsPlusJSONResponse{Message: err.Error()}, nil
 	}
 
-	internalObj, err := core.CandidateToInternalObject(pending.Candidate, time.Now().UTC())
+	internalObj, err := core.CandidateToRecord(pending.Candidate, time.Now().UTC())
 	if err != nil {
 		return lfsapi.LfsVerify400ApplicationVndGitLfsPlusJSONResponse{Message: err.Error()}, nil
 	}
 
-	if err := s.om.RegisterObjects(ctx, []models.InternalObject{internalObj}); err != nil {
+	if err := s.om.RegisterObjects(ctx, []objects.Record{internalObj}); err != nil {
 		return lfsapi.LfsVerify500ApplicationVndGitLfsPlusJSONResponse{Message: err.Error()}, nil
 	}
 
-	if err := s.om.RecordUpload(ctx, internalObj.Id); err != nil {
+	if err := s.om.RecordUpload(ctx, string(internalObj.Id)); err != nil {
 		return lfsapi.LfsVerify500ApplicationVndGitLfsPlusJSONResponse{Message: err.Error()}, nil
 	}
 	return lfsapi.LfsVerify200Response{}, nil
@@ -151,19 +153,19 @@ func (s *LFSServer) LfsStageMetadata(ctx context.Context, request lfsapi.LfsStag
 	now := time.Now().UTC()
 	entries := make([]models.PendingLFSMeta, 0, len(req.Candidates))
 	for i, c := range req.Candidates {
-		drsCandidate := core.LFSCandidateToDRS(c)
-		internalObj, err := core.CandidateToInternalObject(drsCandidate, now)
+		domainCandidate := httplfs.FromGeneratedCandidate(c)
+		internalObj, err := core.CandidateToRecord(domainCandidate, now)
 		if err != nil {
 			return lfsapi.LfsStageMetadata400JSONResponse{Message: fmt.Sprintf("candidate[%d] invalid: %v", i, err)}, nil
 		}
 
-		oid, ok := common.CanonicalSHA256(internalObj.Checksums)
+		oid, ok := objects.CanonicalSHA256(internalObj.Checksums)
 		if !ok {
 			return lfsapi.LfsStageMetadata400JSONResponse{Message: fmt.Sprintf("candidate[%d] missing canonical sha256", i)}, nil
 		}
 		entries = append(entries, models.PendingLFSMeta{
 			OID:       oid,
-			Candidate: drsCandidate,
+			Candidate: domainCandidate,
 			CreatedAt: now,
 			ExpiresAt: now.Add(20 * time.Minute),
 		})
@@ -211,18 +213,18 @@ func (s *LFSServer) resolveUploadProxyTarget(ctx context.Context, oid string) (b
 
 	if obj, getErr := s.om.GetObject(ctx, oid, "read"); getErr == nil {
 		bucket, key, err := canonicalLFSUploadBucketKey(ctx, s.om, obj, defaultBucket)
-		return bucket, key, obj.Id, err
+		return bucket, key, string(obj.Id), err
 	} else if !faults.IsNotFoundError(getErr) {
 		return "", "", "", getErr
 	}
 
 	if pending, getErr := s.om.GetPendingLFSMeta(ctx, oid); getErr == nil {
-		obj, convErr := core.CandidateToInternalObject(pending.Candidate, time.Now().UTC())
+		obj, convErr := core.CandidateToRecord(pending.Candidate, time.Now().UTC())
 		if convErr != nil {
 			return "", "", "", convErr
 		}
 		bucket, key, err := canonicalLFSUploadBucketKey(ctx, s.om, &obj, defaultBucket)
-		return bucket, key, obj.Id, err
+		return bucket, key, string(obj.Id), err
 	} else if !faults.IsNotFoundError(getErr) {
 		return "", "", "", getErr
 	}
@@ -230,7 +232,7 @@ func (s *LFSServer) resolveUploadProxyTarget(ctx context.Context, oid string) (b
 	return defaultBucket, oid, oid, nil
 }
 
-func canonicalLFSUploadBucketKey(ctx context.Context, om *core.ObjectManager, obj *models.InternalObject, defaultBucket string) (string, string, error) {
+func canonicalLFSUploadBucketKey(ctx context.Context, om *core.ObjectManager, obj *objects.Record, defaultBucket string) (string, string, error) {
 	target, err := om.ResolveCanonicalStorageTarget(ctx, core.CanonicalStorageTargetRequest{
 		Object:         obj,
 		Bucket:         defaultBucket,

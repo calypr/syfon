@@ -2,9 +2,9 @@ package common
 
 import (
 	"testing"
+
+	"github.com/calypr/syfon/internal/objects"
 )
-
-
 
 func TestSchemeFromURL(t *testing.T) {
 	tests := []struct {
@@ -27,8 +27,6 @@ func TestSchemeFromURL(t *testing.T) {
 		})
 	}
 }
-
-
 
 func TestBucketToURL(t *testing.T) {
 	tests := []struct {
@@ -69,7 +67,7 @@ func TestCleanToBasename(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := CleanToBasename(tt.input); got != tt.expected {
+			if got := objects.CleanToBasename(tt.input); got != tt.expected {
 				t.Errorf("CleanToBasename(%q) = %v, want %v", tt.input, got, tt.expected)
 			}
 		})
