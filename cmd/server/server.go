@@ -21,6 +21,7 @@ import (
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/credentialcipher"
 	"github.com/calypr/syfon/internal/httpapi/middleware"
+	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/persistence/postgres"
 	"github.com/calypr/syfon/internal/persistence/sqlite"
 	"github.com/calypr/syfon/internal/usage"
@@ -53,6 +54,23 @@ type serverBackend struct {
 	bucketDependencies buckets.Dependencies
 	fileUsage          usage.FileUsageReader
 	transferQuery      usage.TransferQuery
+}
+
+func newServerObjectService(ports core.ObjectPorts) *objects.Service {
+	return objects.NewService(objects.Dependencies{
+		Reader:        ports.Reader,
+		Writer:        ports.Writer,
+		AccessMethods: ports.AccessMethods,
+		AccessPolicy:  ports.AccessPolicy,
+		Aliases:       ports.Aliases,
+		Content:       ports.Content,
+		ChecksumScope: ports.ChecksumScope,
+		Scope:         ports.Scope,
+		Resources:     ports.Resources,
+		Pages:         ports.Pages,
+		URLPages:      ports.URLPages,
+		Authorized:    ports.Authorized,
+	})
 }
 
 func sqliteServerBackend(database *sqlite.SqliteDB) serverBackend {
@@ -212,6 +230,7 @@ var Cmd = &cobra.Command{
 		}
 
 		// Init unified Object Manager.
+		objectService := newServerObjectService(backend.dependencies.Objects)
 		om := core.NewObjectManager(backend.dependencies)
 
 		// Build Fiber runtime and middleware pipeline.
@@ -246,6 +265,7 @@ var Cmd = &cobra.Command{
 			transferQuery:       backend.transferQuery,
 			providerEvents:      backend.dependencies.Usage.ProviderEvents,
 			serviceInfo:         serviceInfoForBackend(cfg.Database.Sqlite != nil),
+			objectService:       objectService,
 			om:                  om,
 			bucketService:       bucketService,
 			authzMiddleware:     authzMiddleware,

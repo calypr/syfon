@@ -50,8 +50,9 @@ func TestLFSUploadProxySuccess(t *testing.T) {
 	app := fiber.New()
 	deps := newLFSDependencies(db)
 	deps.Storage = core.StoragePorts{Access: storageFake, Multipart: storageFake}
+	objectService := newLFSObjectService(deps)
 	om := core.NewObjectManager(deps)
-	RegisterLFSRoutes(app, om, DefaultOptions())
+	RegisterLFSRoutes(app, objectService, om, DefaultOptions())
 	router := &fiberTestRouter{app: app}
 
 	// 3. Perform upload proxy request
@@ -130,8 +131,9 @@ func TestLFSUploadProxyUsesPendingScopedCanonicalLocation(t *testing.T) {
 	app := fiber.New()
 	deps := newLFSDependencies(db)
 	deps.Storage = core.StoragePorts{Access: storageFake, Multipart: storageFake}
+	objectService := newLFSObjectService(deps)
 	om := core.NewObjectManager(deps)
-	RegisterLFSRoutes(app, om, DefaultOptions())
+	RegisterLFSRoutes(app, objectService, om, DefaultOptions())
 	router := &fiberTestRouter{app: app}
 
 	req := httptest.NewRequest(http.MethodPut, "/info/lfs/objects/"+oid, bytes.NewReader([]byte("small content")))

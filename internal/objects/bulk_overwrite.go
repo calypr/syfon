@@ -1,4 +1,4 @@
-package core
+package objects
 
 import (
 	"context"
@@ -9,8 +9,6 @@ import (
 
 	sycommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/faults"
-
-	"github.com/calypr/syfon/internal/objects"
 )
 
 var ErrBulkOverwriteConflict = errors.New("bulk overwrite conflict")
@@ -26,7 +24,7 @@ type BulkOverwriteResult struct {
 // BulkOverwriteObjects replaces records from one project snapshot without
 // canonicalizing checksum siblings. A checksum can therefore exist in more
 // than one project, while still identifying an existing record in this scope.
-func (m *ObjectManager) BulkOverwriteObjects(ctx context.Context, organization, project string, candidates []objects.Record) (BulkOverwriteResult, error) {
+func (m *Service) BulkOverwriteObjects(ctx context.Context, organization, project string, candidates []Record) (BulkOverwriteResult, error) {
 	var result BulkOverwriteResult
 	if len(candidates) == 0 {
 		return result, nil
@@ -47,15 +45,15 @@ func (m *ObjectManager) BulkOverwriteObjects(ctx context.Context, organization, 
 			return result, fmt.Errorf("%w: duplicate source did %q", ErrBulkOverwriteConflict, did)
 		}
 		byDID[did] = i
-		if !containsResource(ObjectAccessResources(&candidates[i]), resource) {
+		if !containsResource(AccessResources(&candidates[i]), resource) {
 			return result, fmt.Errorf("record %q must include target project %s", did, resource)
 		}
-		if sha, ok := objects.CanonicalSHA256(candidates[i].Checksums); ok {
+		if sha, ok := CanonicalSHA256(candidates[i].Checksums); ok {
 			hashes = append(hashes, sha)
 		}
 	}
 
-	checksumMatches, err := m.objectChecksum.ListScopedObjectIDsByChecksums(ctx, organization, project, uniqueOverwriteStrings(hashes))
+	checksumMatches, err := m.checksumScope.ListScopedObjectIDsByChecksums(ctx, organization, project, uniqueOverwriteStrings(hashes))
 	if err != nil {
 		return result, err
 	}
@@ -66,20 +64,20 @@ func (m *ObjectManager) BulkOverwriteObjects(ctx context.Context, organization, 
 	for _, matches := range checksumMatches {
 		ids = append(ids, matches...)
 	}
-	existingList, err := m.objectReader.GetBulkObjects(ctx, uniqueOverwriteStrings(ids))
+	existingList, err := m.recordReader.GetBulkObjects(ctx, uniqueOverwriteStrings(ids))
 	if err != nil {
 		return result, err
 	}
-	existing := make(map[string]objects.Record, len(existingList))
+	existing := make(map[string]Record, len(existingList))
 	for _, obj := range existingList {
 		existing[string(obj.Id)] = obj
 	}
 
-	resolved := make([]objects.Record, len(candidates))
+	resolved := make([]Record, len(candidates))
 	usedTargets := make(map[string]string, len(candidates))
 	for i, candidate := range candidates {
 		sourceDID := string(candidate.Id)
-		canonicalID, aliasErr := m.objectAliases.ResolveObjectAlias(ctx, sourceDID)
+		canonicalID, aliasErr := m.aliases.ResolveObjectAlias(ctx, sourceDID)
 		if aliasErr == nil && canonicalID != sourceDID {
 			return result, fmt.Errorf("%w: target DID %q is an alias for %q", ErrBulkOverwriteConflict, sourceDID, canonicalID)
 		}
@@ -89,12 +87,12 @@ func (m *ObjectManager) BulkOverwriteObjects(ctx context.Context, organization, 
 		targetDID := sourceDID
 		matched := false
 		if current, ok := existing[sourceDID]; ok {
-			if !containsResource(ObjectAccessResources(&current), resource) {
+			if !containsResource(AccessResources(&current), resource) {
 				return result, fmt.Errorf("%w: target DID %q is outside project %s", ErrBulkOverwriteConflict, sourceDID, resource)
 			}
 			matched = true
 			result.DIDMatched++
-		} else if sha, ok := objects.CanonicalSHA256(candidate.Checksums); ok {
+		} else if sha, ok := CanonicalSHA256(candidate.Checksums); ok {
 			matches := uniqueOverwriteStrings(checksumMatches[sha])
 			switch len(matches) {
 			case 0:
@@ -110,7 +108,7 @@ func (m *ObjectManager) BulkOverwriteObjects(ctx context.Context, organization, 
 			return result, fmt.Errorf("%w: source records %q and %q resolve to target DID %q", ErrBulkOverwriteConflict, prior, sourceDID, targetDID)
 		}
 		usedTargets[targetDID] = sourceDID
-		candidate.Id = objects.RecordID(targetDID)
+		candidate.Id = RecordID(targetDID)
 		candidate.SelfUri = "drs://" + targetDID
 		resolved[i] = candidate
 		if matched {
@@ -136,7 +134,7 @@ func (m *ObjectManager) BulkOverwriteObjects(ctx context.Context, organization, 
 		}
 	}
 
-	if err := m.objectWriter.RegisterObjects(ctx, resolved); err != nil {
+	if err := m.recordWriter.RegisterObjects(ctx, resolved); err != nil {
 		return BulkOverwriteResult{}, err
 	}
 	return result, nil

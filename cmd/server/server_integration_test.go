@@ -130,8 +130,9 @@ s3_credentials:
 	backend.dependencies.BucketService = bucketService
 	backend.dependencies.Storage = storagePorts(storageManager)
 	app := fiber.New()
+	objectService := newServerObjectService(backend.dependencies.Objects)
 	om := core.NewObjectManager(backend.dependencies)
-	internaldrs.RegisterInternalRoutes(app, om, bucketService)
+	internaldrs.RegisterInternalRoutes(app, objectService, om, bucketService)
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

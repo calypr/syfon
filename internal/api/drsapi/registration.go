@@ -7,13 +7,12 @@ import (
 	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/api/apiutil"
 	"github.com/calypr/syfon/internal/common"
-	"github.com/calypr/syfon/internal/core"
 	httpdrs "github.com/calypr/syfon/internal/httpapi/drs"
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/gofiber/fiber/v3"
 )
 
-func handleRegisterObjectsFiber(om *core.ObjectManager) fiber.Handler {
+func handleRegisterObjectsFiber(service *objects.Service) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		var body registerObjectsRequest
 		if err := json.Unmarshal(c.Body(), &body); err != nil || len(body.Candidates) == 0 {
@@ -23,11 +22,11 @@ func handleRegisterObjectsFiber(om *core.ObjectManager) fiber.Handler {
 				if err != nil {
 					return apiutil.HandleError(c, err)
 				}
-				if err := om.RegisterObjects(c.Context(), []objects.Record{internalObj}); err != nil {
+				if err := service.RegisterObjects(c.Context(), []objects.Record{internalObj}); err != nil {
 					return apiutil.HandleError(c, err)
 				}
 				// Fetch back for full population (SelfUri, and access methods)
-				finalObj, err := om.GetObject(c.Context(), string(internalObj.Id), "read")
+				finalObj, err := service.GetObject(c.Context(), string(internalObj.Id), "read")
 				if err != nil {
 					return apiutil.HandleError(c, err)
 				}
@@ -48,7 +47,7 @@ func handleRegisterObjectsFiber(om *core.ObjectManager) fiber.Handler {
 			toRegister = append(toRegister, internalObj)
 		}
 
-		if err := om.RegisterObjects(c.Context(), toRegister); err != nil {
+		if err := service.RegisterObjects(c.Context(), toRegister); err != nil {
 			return apiutil.HandleError(c, err)
 		}
 
@@ -56,7 +55,7 @@ func handleRegisterObjectsFiber(om *core.ObjectManager) fiber.Handler {
 		registered := make([]any, len(toRegister))
 		for i, internal := range toRegister {
 			// Fetch back to ensure full population
-			obj, err := om.GetObject(c.Context(), string(internal.Id), "read")
+			obj, err := service.GetObject(c.Context(), string(internal.Id), "read")
 			if err != nil {
 				return apiutil.HandleError(c, err)
 			}
@@ -76,5 +75,5 @@ type registerObjectCandidate struct {
 }
 
 func registerCandidateToRecord(c registerObjectCandidate, now time.Time) (objects.Record, error) {
-	return core.CandidateToRecord(httpdrs.FromGeneratedCandidate(c.DrsObjectCandidate), now)
+	return objects.CandidateToRecord(httpdrs.FromGeneratedCandidate(c.DrsObjectCandidate), now)
 }

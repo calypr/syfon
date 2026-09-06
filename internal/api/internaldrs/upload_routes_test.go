@@ -16,7 +16,6 @@ import (
 	"github.com/calypr/syfon/internal/api/routeutil"
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/common"
-	"github.com/calypr/syfon/internal/core"
 	httpdrs "github.com/calypr/syfon/internal/httpapi/drs"
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/testutils"
@@ -373,7 +372,7 @@ func TestHandleInternalUploadURL_ResolvesRegisteredScopedObjectID(t *testing.T) 
 
 	oid := "3d71f043937a09b77826109db4f2b47c46f19923ef823f6a777a15fde0b2c9c7"
 	name := "program-root.bin"
-	obj, err := core.CandidateToRecord(httpdrs.FromGeneratedCandidate(drs.DrsObjectCandidate{
+	obj, err := objects.CandidateToRecord(httpdrs.FromGeneratedCandidate(drs.DrsObjectCandidate{
 		Name:             &name,
 		Size:             20,
 		Checksums:        []drs.Checksum{{Type: "sha256", Checksum: oid}},
@@ -439,7 +438,7 @@ func TestHandleInternalUploadURL_ResolvesRegisteredProjectScopedObjectWithoutQue
 	did := "f781273b-52eb-5ac2-a484-775235eef303"
 	name := "project-subpath.bin"
 	aliases := []string{"id:" + did}
-	obj, err := core.CandidateToRecord(httpdrs.FromGeneratedCandidate(drs.DrsObjectCandidate{
+	obj, err := objects.CandidateToRecord(httpdrs.FromGeneratedCandidate(drs.DrsObjectCandidate{
 		Name:             &name,
 		Size:             23,
 		Checksums:        []drs.Checksum{{Type: "sha256", Checksum: oid}},

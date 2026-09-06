@@ -191,7 +191,7 @@ func doInternalDRSTestRequest(req *http.Request, fixture internalDRSTestFixture)
 		c.SetContext(req.Context())
 		return c.Next()
 	})
-	RegisterInternalRoutes(app, fixture.ObjectManager, fixture.bucketService)
+	RegisterInternalRoutes(app, fixture.ObjectService, fixture.ObjectManager, fixture.bucketService)
 
 	rr := httptest.NewRecorder()
 	resp, err := app.Test(req)
@@ -217,7 +217,7 @@ func doInternalDRSTestRequestWithAlias(req *http.Request, fixture internalDRSTes
 		c.SetContext(req.Context())
 		return c.Next()
 	})
-	RegisterInternalRoutes(app, fixture.ObjectManager, fixture.bucketService)
+	RegisterInternalRoutes(app, fixture.ObjectService, fixture.ObjectManager, fixture.bucketService)
 	app.Add([]string{method}, pattern, handler)
 
 	rr := httptest.NewRecorder()

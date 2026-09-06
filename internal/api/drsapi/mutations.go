@@ -6,14 +6,13 @@ import (
 	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/api/apiutil"
 	"github.com/calypr/syfon/internal/common"
-	"github.com/calypr/syfon/internal/core"
 	httpdrs "github.com/calypr/syfon/internal/httpapi/drs"
 	apimiddleware "github.com/calypr/syfon/internal/httpapi/middleware"
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/gofiber/fiber/v3"
 )
 
-func handleUploadRequestFiber(om *core.ObjectManager) fiber.Handler {
+func handleUploadRequestFiber() fiber.Handler {
 	const uploadRequestRoutingError = "upload-request requires explicit upload routing; default bucket selection is disabled"
 	return func(c fiber.Ctx) error {
 		if apimiddleware.MissingGen3AuthHeader(c.Context()) {
@@ -45,7 +44,7 @@ func handleUploadRequestFiber(om *core.ObjectManager) fiber.Handler {
 	}
 }
 
-func handleDeleteObjectFiber(om *core.ObjectManager) fiber.Handler {
+func handleDeleteObjectFiber(service *objects.Service) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		id := c.Params("object_id")
 		var body drs.DeleteRequest
@@ -54,17 +53,17 @@ func handleDeleteObjectFiber(om *core.ObjectManager) fiber.Handler {
 				return c.Status(fiber.StatusBadRequest).JSON(drs.Error{Msg: common.Ptr("Invalid request body")})
 			}
 		}
-		opts := core.DeleteOptions{
+		opts := objects.DeleteOptions{
 			DeleteStorageData: body.DeleteStorageData != nil && *body.DeleteStorageData,
 		}
-		if err := om.DeleteObjectWithOptions(c.Context(), id, opts); err != nil {
+		if err := service.DeleteObjectWithOptions(c.Context(), id, opts); err != nil {
 			return apiutil.HandleError(c, err)
 		}
 		return c.SendStatus(fiber.StatusNoContent)
 	}
 }
 
-func handleUpdateAccessMethodsFiber(om *core.ObjectManager) fiber.Handler {
+func handleUpdateAccessMethodsFiber(service *objects.Service) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		objectID := strings.TrimSpace(c.Params("object_id"))
 		if objectID != "" {
@@ -72,10 +71,10 @@ func handleUpdateAccessMethodsFiber(om *core.ObjectManager) fiber.Handler {
 			if err := c.Bind().JSON(&body); err != nil || len(body.AccessMethods) == 0 {
 				return c.Status(fiber.StatusBadRequest).JSON(drs.Error{Msg: common.Ptr("Invalid request body")})
 			}
-			if err := om.UpdateObjectAccessMethods(c.Context(), objectID, httpdrs.FromGeneratedAccessMethods(body.AccessMethods)); err != nil {
+			if err := service.UpdateObjectAccessMethods(c.Context(), objectID, httpdrs.FromGeneratedAccessMethods(body.AccessMethods)); err != nil {
 				return apiutil.HandleError(c, err)
 			}
-			obj, err := om.GetObject(c.Context(), objectID, "read")
+			obj, err := service.GetObject(c.Context(), objectID, "read")
 			if err != nil {
 				return apiutil.HandleError(c, err)
 			}
@@ -100,13 +99,13 @@ func handleUpdateAccessMethodsFiber(om *core.ObjectManager) fiber.Handler {
 			updates[id] = update.AccessMethods
 		}
 
-		if err := om.BulkUpdateAccessMethods(c.Context(), httpdrs.FromGeneratedAccessMethodMap(updates)); err != nil {
+		if err := service.BulkUpdateAccessMethods(c.Context(), httpdrs.FromGeneratedAccessMethodMap(updates)); err != nil {
 			return apiutil.HandleError(c, err)
 		}
 
 		objects := make([]any, 0, len(orderedIDs))
 		for _, id := range orderedIDs {
-			obj, err := om.GetObject(c.Context(), id, "read")
+			obj, err := service.GetObject(c.Context(), id, "read")
 			if err != nil {
 				return apiutil.HandleError(c, err)
 			}
@@ -116,7 +115,7 @@ func handleUpdateAccessMethodsFiber(om *core.ObjectManager) fiber.Handler {
 	}
 }
 
-func handleBulkDeleteObjectsFiber(om *core.ObjectManager) fiber.Handler {
+func handleBulkDeleteObjectsFiber(service *objects.Service) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		var body drs.BulkDeleteRequest
 		if err := c.Bind().JSON(&body); err != nil {
@@ -140,10 +139,10 @@ func handleBulkDeleteObjectsFiber(om *core.ObjectManager) fiber.Handler {
 			ids = append(ids, id)
 		}
 
-		opts := core.DeleteOptions{
+		opts := objects.DeleteOptions{
 			DeleteStorageData: body.DeleteStorageData != nil && *body.DeleteStorageData,
 		}
-		if err := om.BulkDeleteObjectsWithOptions(c.Context(), ids, opts); err != nil {
+		if err := service.BulkDeleteObjectsWithOptions(c.Context(), ids, opts); err != nil {
 			return apiutil.HandleError(c, err)
 		}
 		return c.SendStatus(fiber.StatusNoContent)

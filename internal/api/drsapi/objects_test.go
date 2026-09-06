@@ -85,7 +85,7 @@ func TestDRSHandlers(t *testing.T) {
 	storageAccess := &captureStorageAccess{}
 	om := testObjectManager(db, core.StoragePorts{Access: storageAccess})
 	app := fiber.New()
-	RegisterDRSRoutes(app, om, testServiceInfo())
+	RegisterDRSRoutes(app, om.objectService, om.ObjectManager, testServiceInfo())
 
 	t.Run("GetObject_Success", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/objects/test-obj", nil)
@@ -172,7 +172,7 @@ func TestDRSHandlers(t *testing.T) {
 		storageAccess := &captureStorageAccess{}
 		om := testObjectManager(db, core.StoragePorts{Access: storageAccess})
 		app := fiber.New()
-		RegisterDRSRoutes(app, om, testServiceInfo())
+		RegisterDRSRoutes(app, om.objectService, om.ObjectManager, testServiceInfo())
 
 		req := httptest.NewRequest("GET", "/objects/scoped-obj/access/s3", nil)
 		resp, _ := app.Test(req)
@@ -326,7 +326,7 @@ func TestAdditionalDRSHandlers(t *testing.T) {
 	}
 	om := testObjectManager(db, core.StoragePorts{})
 	app := fiber.New()
-	RegisterDRSRoutes(app, om, testServiceInfo())
+	RegisterDRSRoutes(app, om.objectService, om.ObjectManager, testServiceInfo())
 
 	t.Run("GetObjectsByChecksum", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/objects/checksum/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", nil)
@@ -488,7 +488,7 @@ func TestChecksumRouteRegression_WithRealCoreAndDB(t *testing.T) {
 	}
 
 	app := fiber.New()
-	RegisterDRSRoutes(app, om, testServiceInfo())
+	RegisterDRSRoutes(app, om.objectService, om.ObjectManager, testServiceInfo())
 
 	req := httptest.NewRequest("GET", "/objects/checksum/"+checksum, nil)
 	resp, err := app.Test(req)

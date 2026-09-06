@@ -13,12 +13,13 @@ import (
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/faults"
 	apimiddleware "github.com/calypr/syfon/internal/httpapi/middleware"
+	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/storage"
 	"github.com/calypr/syfon/internal/usage"
 )
 
-func prepareDownloadActions(ctx context.Context, om *core.ObjectManager, oid string) (*lfsapi.BatchActions, *lfsapi.ObjectError) {
-	obj, err := om.GetObject(ctx, oid, "read")
+func prepareDownloadActions(ctx context.Context, objectService *objects.Service, om *core.ObjectManager, oid string) (*lfsapi.BatchActions, *lfsapi.ObjectError) {
+	obj, err := objectService.GetObject(ctx, oid, "read")
 	if err != nil {
 		return nil, dbErrToBatchError(ctx, err)
 	}
@@ -61,8 +62,8 @@ func prepareDownloadActions(ctx context.Context, om *core.ObjectManager, oid str
 	return &lfsapi.BatchActions{Download: &action}, nil
 }
 
-func prepareUploadActions(ctx context.Context, om *core.ObjectManager, oid string, reqSize int64, baseURL string) (*lfsapi.BatchActions, int64, *lfsapi.ObjectError) {
-	existing, err := om.GetObject(ctx, oid, "read")
+func prepareUploadActions(ctx context.Context, objectService *objects.Service, om *core.ObjectManager, oid string, reqSize int64, baseURL string) (*lfsapi.BatchActions, int64, *lfsapi.ObjectError) {
+	existing, err := objectService.GetObject(ctx, oid, "read")
 	if err == nil {
 		return nil, existing.Size, nil
 	}
@@ -70,7 +71,7 @@ func prepareUploadActions(ctx context.Context, om *core.ObjectManager, oid strin
 		return nil, reqSize, dbErrToBatchError(ctx, err)
 	}
 
-	if err := om.RequireObjectResources(ctx, "create", []string{"/data_file"}); err != nil {
+	if err := objectService.RequireObjectResources(ctx, "create", []string{"/data_file"}); err != nil {
 		return nil, reqSize, dbErrToBatchError(ctx, err)
 	}
 
