@@ -198,43 +198,18 @@ func (s *MetricsServer) GetMetricsSummary(ctx context.Context, request metricsap
 }
 
 func (s *MetricsServer) readableBulkObjectIDs(ctx context.Context, access metricsAccess, objectIDs []string) ([]string, error) {
-	if !access.isScoped() && !access.hasScopeAggregate() {
-		return objectIDs, nil
-	}
-	data, err := s.reporter.ListFileUsage(ctx, usage.FileUsageQuery{Scope: access.scopeQuery(), Limit: 1000})
-	if err != nil {
-		return nil, err
-	}
-	readable := make(map[string]struct{}, len(data))
-	for _, item := range data {
-		readable[strings.TrimSpace(item.ObjectID)] = struct{}{}
-	}
-	out := make([]string, 0, len(objectIDs))
-	for _, objectID := range objectIDs {
-		if _, ok := readable[objectID]; ok {
-			out = append(out, objectID)
-		}
-	}
-	return out, nil
+	return s.reporter.ListReadableObjectIDs(ctx, access.scopeQuery(), objectIDs)
 }
 
 func (s *MetricsServer) objectInScope(ctx context.Context, objectID string, access metricsAccess) (bool, error) {
-	items, err := s.reporter.ListFileUsage(ctx, usage.FileUsageQuery{
-		Scope: access.scopeQuery(),
-		Limit: 1000,
-	})
+	items, err := s.reporter.ListReadableObjectIDs(ctx, access.scopeQuery(), []string{objectID})
 	if err != nil {
 		if errors.Is(err, faults.ErrNotFound) || errors.Is(err, faults.ErrUnauthorized) {
 			return false, nil
 		}
 		return false, err
 	}
-	for _, item := range items {
-		if item.ObjectID == objectID {
-			return true, nil
-		}
-	}
-	return false, nil
+	return len(items) > 0, nil
 }
 
 func usageMatchesInactiveFilter(usage usage.FileUsage, inactiveSince *time.Time) bool {

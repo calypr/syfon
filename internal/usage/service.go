@@ -92,6 +92,7 @@ type TransferBreakdownQuery struct {
 type Reporter interface {
 	GetFileUsage(ctx context.Context, objectID string) (*FileUsage, error)
 	ListFileUsageByObjectIDs(ctx context.Context, ids []string) ([]FileUsage, error)
+	ListReadableObjectIDs(ctx context.Context, scope ScopeQuery, requested []string) ([]string, error)
 	ListFileUsage(ctx context.Context, query FileUsageQuery) ([]FileUsage, error)
 	GetFileUsageSummary(ctx context.Context, query FileUsageSummaryQuery) (FileUsageSummary, error)
 	GetTransferAttributionSummary(ctx context.Context, query TransferSummaryQuery) (Summary, error)
@@ -177,6 +178,52 @@ func (s *Service) ListFileUsageByObjectIDs(ctx context.Context, ids []string) ([
 		return nil, err
 	}
 	return s.reports.ListFileUsageByObjectIDs(ctx, ids)
+}
+
+// ListReadableObjectIDs resolves scope membership from the object reader and
+// returns only requested IDs in their original order. Unscoped callers retain
+// the existing behavior of passing requests through unchanged.
+func (s *Service) ListReadableObjectIDs(ctx context.Context, scope ScopeQuery, requested []string) ([]string, error) {
+	if !scope.isSingle() && !scope.isAggregate() {
+		return append([]string(nil), requested...), nil
+	}
+	if s == nil || s.objects == nil {
+		return nil, ErrObjectsUnavailable
+	}
+
+	readable := make(map[string]struct{})
+	addScope := func(organization, project string) error {
+		ids, err := s.objects.ListObjectIDsByScope(ctx, organization, project, "read")
+		if err != nil {
+			return err
+		}
+		for _, id := range ids {
+			id = strings.TrimSpace(id)
+			if id != "" {
+				readable[id] = struct{}{}
+			}
+		}
+		return nil
+	}
+	if scope.isSingle() {
+		if err := addScope(scope.Organization, scope.Project); err != nil {
+			return nil, err
+		}
+	} else {
+		for _, selected := range scope.aggregateScopes() {
+			if err := addScope(selected.Organization, selected.Project); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	out := make([]string, 0, len(requested))
+	for _, id := range requested {
+		if _, ok := readable[strings.TrimSpace(id)]; ok {
+			out = append(out, id)
+		}
+	}
+	return out, nil
 }
 
 // ListFileUsage chooses a scoped persistence optimization when available and
