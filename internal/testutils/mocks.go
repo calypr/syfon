@@ -17,7 +17,6 @@ import (
 	"github.com/calypr/syfon/internal/usage"
 )
 
-// MockDatabase implements db.DatabaseInterface for testing
 type MockDatabase struct {
 	Objects                map[string]*objects.Record
 	ObjectAuthz            map[string]map[string][]string
