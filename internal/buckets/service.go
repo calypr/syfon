@@ -3,7 +3,10 @@ package buckets
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
+
+	"github.com/calypr/syfon/internal/faults"
 )
 
 const defaultScopeCacheTTL = 30 * time.Second
@@ -77,5 +80,29 @@ func (s *Service) ListS3Credentials(ctx context.Context) ([]Credential, error) {
 // GetS3Credential resolves a credential by its canonical ID or legacy physical
 // bucket alias according to the repository compatibility contract.
 func (s *Service) GetS3Credential(ctx context.Context, bucket string) (*Credential, error) {
-	return s.credentialReader.GetS3Credential(ctx, bucket)
+	credential, exactErr := s.credentialReader.GetS3Credential(ctx, bucket)
+	if exactErr == nil && credential != nil {
+		return credential, nil
+	}
+	if exactErr != nil && !isCredentialNotFoundError(exactErr) {
+		return nil, exactErr
+	}
+
+	credentials, listErr := s.credentialReader.ListS3Credentials(ctx)
+	if listErr != nil {
+		return nil, listErr
+	}
+	requested := strings.TrimSpace(bucket)
+	for _, candidate := range credentials {
+		if strings.EqualFold(strings.TrimSpace(candidate.Bucket), requested) ||
+			strings.EqualFold(strings.TrimSpace(candidate.CredentialID), requested) {
+			copy := candidate
+			return &copy, nil
+		}
+	}
+	return nil, exactErr
+}
+
+func isCredentialNotFoundError(err error) bool {
+	return faults.IsNotFoundError(err) || strings.EqualFold(strings.TrimSpace(err.Error()), "credential not found")
 }
