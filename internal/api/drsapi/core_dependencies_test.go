@@ -7,15 +7,16 @@ import (
 	"github.com/calypr/syfon/internal/persistence/sqlite"
 	"github.com/calypr/syfon/internal/testutils"
 	"github.com/calypr/syfon/internal/transfers"
-	"github.com/calypr/syfon/internal/urlmanager"
 	"github.com/calypr/syfon/internal/usage"
 )
 
-func testObjectManager(backend any, uM urlmanager.UrlManager) *core.ObjectManager {
-	return core.NewObjectManager(testDependencies(backend, uM), uM)
+func testObjectManager(backend any, storagePorts core.StoragePorts) *core.ObjectManager {
+	deps := testDependencies(backend)
+	deps.Storage = storagePorts
+	return core.NewObjectManager(deps)
 }
 
-func testDependencies(backend any, uM urlmanager.UrlManager) core.Dependencies {
+func testDependencies(backend any) core.Dependencies {
 	var (
 		reader          objects.RecordReader
 		writer          objects.RecordWriter
@@ -73,14 +74,10 @@ func testDependencies(backend any, uM urlmanager.UrlManager) core.Dependencies {
 		Aliases: aliases, Content: content, ChecksumScope: checksumScope, Scope: scope,
 		Resources: resources, Pages: pages, URLPages: urlPages, Authorized: authorized,
 	}
-	var invalidator interface{ InvalidateBucket(string) }
-	if candidate, ok := uM.(interface{ InvalidateBucket(string) }); ok {
-		invalidator = candidate
-	}
 	bucketService, err := buckets.NewService(buckets.Dependencies{
 		Credentials: credentials, CredentialAdmin: credentialAdmin, Scopes: scopes, Visibility: visibility,
 		Fallback: core.NewBucketVisibilityFallback(scope, reader),
-	}, invalidator)
+	}, nil)
 	if err != nil {
 		panic(err)
 	}

@@ -11,20 +11,22 @@ import (
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/objects"
+	"github.com/calypr/syfon/internal/storage"
 	"github.com/calypr/syfon/internal/testutils"
-	"github.com/calypr/syfon/internal/urlmanager"
 )
 
-type captureSigningURLManager struct {
-	testutils.MockUrlManager
+type captureSigningStorage struct {
+	lfsStorageFake
 	signID  string
 	signURL string
+	options storage.AccessOptions
 }
 
-func (m *captureSigningURLManager) SignURL(ctx context.Context, accessID string, url string, opts urlmanager.SignOptions) (string, error) {
-	m.signID = accessID
-	m.signURL = url
-	return m.MockUrlManager.SignURL(ctx, accessID, url, opts)
+func (m *captureSigningStorage) Access(_ context.Context, request storage.AccessRequest) (storage.Access, error) {
+	m.signID = request.Target.AccessID
+	m.signURL = request.Target.Location
+	m.options = request.Options
+	return storage.Access{Location: request.Target.Location + "?signed=true"}, nil
 }
 
 func TestUploadPartToSignedURLFaultInjection(t *testing.T) {
@@ -93,8 +95,10 @@ func TestPrepareDownloadActions_MapsLegacyReplicaURL(t *testing.T) {
 			},
 		},
 	}
-	um := &captureSigningURLManager{}
-	om := core.NewObjectManager(newLFSDependencies(db), um)
+	storageFake := &captureSigningStorage{}
+	deps := newLFSDependencies(db)
+	deps.Storage = core.StoragePorts{Access: storageFake}
+	om := core.NewObjectManager(deps)
 
 	actions, objErr := prepareDownloadActions(context.Background(), om, oid)
 	if objErr != nil {
@@ -104,11 +108,14 @@ func TestPrepareDownloadActions_MapsLegacyReplicaURL(t *testing.T) {
 		t.Fatalf("expected signed download action, got %+v", actions)
 	}
 	wantURL := "s3://bforepc/bforepc-prod/OHSU/slide.ome.tiff"
-	if um.signURL != wantURL {
-		t.Fatalf("expected physical LFS replica URL %q, got %q", wantURL, um.signURL)
+	if storageFake.signURL != wantURL {
+		t.Fatalf("expected physical LFS replica URL %q, got %q", wantURL, storageFake.signURL)
 	}
-	if um.signID != "bforepc" {
-		t.Fatalf("expected signer credential bucket bforepc, got %q", um.signID)
+	if storageFake.signID != "bforepc" {
+		t.Fatalf("expected signer credential bucket bforepc, got %q", storageFake.signID)
+	}
+	if storageFake.options != (storage.AccessOptions{}) {
+		t.Fatalf("expected empty download access options, got %+v", storageFake.options)
 	}
 }
 
@@ -142,7 +149,7 @@ func TestPrepareUploadActionsRequiresGlobalDataFileCreate(t *testing.T) {
 			ctx := access.WithSession(context.Background(), session)
 
 			db := &testutils.MockDatabase{Objects: map[string]*objects.Record{}}
-			om := core.NewObjectManager(newLFSDependencies(db), &testutils.MockUrlManager{})
+			om := core.NewObjectManager(newLFSDependencies(db))
 			actions, size, objErr := prepareUploadActions(ctx, om, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", 123, "https://example.test")
 
 			if tc.wantCode != 0 {

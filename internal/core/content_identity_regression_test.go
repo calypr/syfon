@@ -6,8 +6,8 @@ import (
 
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/objects"
+	"github.com/calypr/syfon/internal/storage"
 	"github.com/calypr/syfon/internal/testutils"
-	"github.com/calypr/syfon/internal/urlmanager"
 )
 
 func TestMergedContentPreservesReplicaLocation(t *testing.T) {
@@ -21,7 +21,7 @@ func TestMergedContentPreservesReplicaLocation(t *testing.T) {
 		{Id: "uuid-b", Checksums: []objects.Checksum{{Type: "sha256", Checksum: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}, ControlledAccess: &[]string{"/organization/org/project/b"}},
 	}
 	original := "s3://bucket-a/a/file"
-	single, err := om.SignObjectURL(context.Background(), &objs[0], original, urlmanager.SignOptions{})
+	single, err := om.SignObjectURL(context.Background(), &objs[0], original, storage.AccessOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,7 +29,7 @@ func TestMergedContentPreservesReplicaLocation(t *testing.T) {
 		t.Fatalf("single project changed replica: %s", single)
 	}
 	merged := canonicalizeContentObjects(objs)[0]
-	signed, err := om.SignObjectURL(context.Background(), &merged, original, urlmanager.SignOptions{})
+	signed, err := om.SignObjectURL(context.Background(), &merged, original, storage.AccessOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

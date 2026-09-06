@@ -4,24 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"path"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
-	awsconfig "github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/credentials"
-	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
-	"github.com/aws/smithy-go"
-
 	syfoncommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/faults"
-	"github.com/calypr/syfon/internal/requestmeta"
+	"github.com/calypr/syfon/internal/storage"
 	"github.com/calypr/syfon/internal/storage/address"
 )
 
@@ -104,18 +97,9 @@ const (
 
 const maxStorageInspectWorkers = 8
 
-const (
-	defaultS3HeadMaxAttempts = 3
-	envS3HeadMaxAttempts     = "SYFON_S3_HEAD_MAX_ATTEMPTS"
-)
-
 type StorageInspectError struct {
 	Kind    StorageInspectErrorKind
 	Message string
-}
-
-type s3HeadObjectClient interface {
-	HeadObject(context.Context, *awss3.HeadObjectInput, ...func(*awss3.Options)) (*awss3.HeadObjectOutput, error)
 }
 
 var storageInspectCacheKey contextKey = "storageInspectCache"
@@ -129,7 +113,6 @@ type storageInspectRequestCache struct {
 	mu sync.Mutex
 
 	credentials   map[string]storageInspectCredentialCacheEntry
-	s3Clients     map[string]*awss3.Client
 	visible       map[string]buckets.VisibleBucket
 	visibleErr    error
 	visibleLoaded bool
@@ -151,7 +134,6 @@ func WithStorageInspectCache(ctx context.Context) context.Context {
 	}
 	return context.WithValue(ctx, storageInspectCacheKey, &storageInspectRequestCache{
 		credentials: map[string]storageInspectCredentialCacheEntry{},
-		s3Clients:   map[string]*awss3.Client{},
 	})
 }
 
@@ -160,16 +142,7 @@ func storageInspectCacheFromContext(ctx context.Context) *storageInspectRequestC
 	return cache
 }
 
-func (m *ObjectManager) SetS3ObjectInspector(fn func(context.Context, buckets.Credential, string, string) (*StorageObjectMetadata, error)) {
-	if fn == nil {
-		m.inspectS3Object = defaultS3ObjectInspector
-		return
-	}
-	m.inspectS3Object = fn
-}
-
 func (m *ObjectManager) InspectStorageObject(ctx context.Context, req InspectStorageRequest) (*StorageObjectMetadata, error) {
-	ctx = withS3ProbeLimiter(ctx, m.s3ProbeLimiter)
 	if strings.TrimSpace(req.ObjectURL) != "" {
 		return m.inspectRawStorageObject(ctx, req)
 	}
@@ -177,7 +150,6 @@ func (m *ObjectManager) InspectStorageObject(ctx context.Context, req InspectSto
 }
 
 func (m *ObjectManager) InspectStorageObjects(ctx context.Context, items []InspectStorageRequest) []StorageProbeResult {
-	ctx = withS3ProbeLimiter(ctx, m.s3ProbeLimiter)
 	ctx = WithStorageInspectCache(ctx)
 	if len(items) == 0 {
 		return []StorageProbeResult{}
@@ -399,7 +371,7 @@ func (m *ObjectManager) inspectScopedStorageObject(ctx context.Context, req Insp
 	if address.NormalizeProvider(cred.Provider, address.S3Provider) != address.S3Provider {
 		return nil, &StorageInspectError{Kind: StorageInspectUnsupported, Message: fmt.Sprintf("provider %q is not supported for server-backed add-url inspection", cred.Provider)}
 	}
-	meta, err := m.inspectS3Object(ctx, *cred, target.Bucket, target.Key)
+	meta, err := m.probeStorageObject(ctx, target.Bucket, target.Key)
 	if err != nil {
 		return nil, err
 	}
@@ -433,7 +405,7 @@ func (m *ObjectManager) inspectRawStorageObject(ctx context.Context, req Inspect
 	if address.NormalizeProvider(cred.Provider, address.S3Provider) != address.S3Provider {
 		return nil, &StorageInspectError{Kind: StorageInspectUnsupported, Message: fmt.Sprintf("provider %q is not supported for server-backed add-url inspection", cred.Provider)}
 	}
-	meta, err := m.inspectS3Object(ctx, *cred, bucket, key)
+	meta, err := m.probeStorageObject(ctx, bucket, key)
 	if err != nil {
 		return nil, err
 	}
@@ -445,6 +417,34 @@ func (m *ObjectManager) inspectRawStorageObject(ctx context.Context, req Inspect
 		meta.Path = path.Base(key)
 	}
 	return meta, nil
+}
+
+func (m *ObjectManager) probeStorageObject(ctx context.Context, bucket, key string) (*StorageObjectMetadata, error) {
+	if m.storageProbe == nil {
+		return nil, &StorageInspectError{Kind: StorageInspectUnsupported, Message: "storage probe is not configured"}
+	}
+	results := m.storageProbe.Probe(ctx, []storage.ProbeTarget{{
+		ID:     "object",
+		Target: storage.ObjectTarget{Bucket: bucket, Key: key},
+	}})
+	if len(results) == 0 {
+		return nil, &StorageInspectError{Kind: StorageInspectBucketUnavailable, Message: "storage probe returned no result"}
+	}
+	result := results[0]
+	if result.Err != nil {
+		return nil, mapStorageOperationError(result.Err, "probe", bucket, key)
+	}
+	meta := result.Metadata
+	return &StorageObjectMetadata{
+		Provider:    strings.TrimSpace(meta.Provider),
+		Bucket:      strings.TrimSpace(meta.Bucket),
+		Key:         strings.TrimSpace(meta.Key),
+		Path:        strings.TrimSpace(meta.Path),
+		SizeBytes:   meta.SizeBytes,
+		MetaSHA256:  strings.TrimSpace(meta.MetaSHA256),
+		ETag:        strings.TrimSpace(meta.ETag),
+		LastModTime: meta.LastModified,
+	}, nil
 }
 
 func (m *ObjectManager) credentialForBucket(ctx context.Context, bucket string) (*buckets.Credential, error) {
@@ -542,20 +542,40 @@ func (c *storageInspectRequestCache) setVisible(visible map[string]buckets.Visib
 	c.visibleLoaded = true
 }
 
-func (c *storageInspectRequestCache) getS3Client(key string) (*awss3.Client, bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	client, ok := c.s3Clients[key]
-	return client, ok
-}
-
-func (c *storageInspectRequestCache) setS3Client(key string, client *awss3.Client) {
-	if client == nil {
-		return
+func mapStorageOperationError(err error, capability, bucket, key string) error {
+	var operation *storage.OperationError
+	if !errors.As(err, &operation) {
+		return err
 	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.s3Clients[key] = client
+	location := strings.TrimSpace(bucket)
+	if strings.TrimSpace(key) != "" {
+		location += "/" + strings.Trim(strings.TrimSpace(key), "/")
+	}
+	message := strings.TrimSpace(operation.Error())
+	if message == "" {
+		message = fmt.Sprintf("storage %s failed for %s", capability, location)
+	}
+	switch operation.Kind {
+	case storage.ErrorInvalid:
+		return &StorageInspectError{Kind: StorageInspectInvalidInput, Message: message}
+	case storage.ErrorNotFound:
+		if strings.TrimSpace(operation.Provider) == "" {
+			return &StorageInspectError{Kind: StorageInspectCredentialMissing, Message: fmt.Sprintf("no stored bucket credential found for bucket %q", bucket)}
+		}
+		return &StorageInspectError{Kind: StorageInspectObjectNotFound, Message: message}
+	case storage.ErrorForbidden:
+		return &StorageInspectError{Kind: StorageInspectPermissionDenied, Message: message}
+	case storage.ErrorUnavailable:
+		return &StorageInspectError{Kind: StorageInspectBucketUnavailable, Message: message}
+	case storage.ErrorIncomplete:
+		return &StorageInspectError{Kind: StorageInspectListingIncomplete, Message: message}
+	case storage.ErrorUnsupported:
+		return &StorageInspectError{Kind: StorageInspectUnsupported, Message: message}
+	case storage.ErrorProvider:
+		return err
+	default:
+		return err
+	}
 }
 
 func cloneVisibleBuckets(in map[string]buckets.VisibleBucket) map[string]buckets.VisibleBucket {
@@ -572,111 +592,4 @@ func cloneVisibleBuckets(in map[string]buckets.VisibleBucket) map[string]buckets
 		}
 	}
 	return out
-}
-
-func s3ClientFromContext(ctx context.Context, cred buckets.Credential) (*awss3.Client, error) {
-	cacheKey := s3ClientCacheKey(cred)
-	if cache := storageInspectCacheFromContext(ctx); cache != nil {
-		if client, ok := cache.getS3Client(cacheKey); ok {
-			return client, nil
-		}
-	}
-	loadOpts := []func(*awsconfig.LoadOptions) error{
-		awsconfig.WithRegion(cred.Region),
-		awsconfig.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(cred.AccessKey, cred.SecretKey, "")),
-	}
-	cfg, err := awsconfig.LoadDefaultConfig(ctx, loadOpts...)
-	if err != nil {
-		return nil, fmt.Errorf("load aws config: %w", err)
-	}
-	if endpoint := strings.TrimSpace(cred.Endpoint); endpoint != "" {
-		if !strings.HasPrefix(endpoint, "http://") && !strings.HasPrefix(endpoint, "https://") {
-			if strings.Contains(endpoint, "localhost") || strings.Contains(endpoint, "127.0.0.1") {
-				endpoint = "http://" + endpoint
-			} else {
-				endpoint = "https://" + endpoint
-			}
-		}
-		cfg.BaseEndpoint = aws.String(endpoint)
-	}
-	client := awss3.NewFromConfig(cfg, func(o *awss3.Options) {
-		if strings.TrimSpace(cred.Endpoint) != "" {
-			o.UsePathStyle = true
-		}
-	})
-	if cache := storageInspectCacheFromContext(ctx); cache != nil {
-		cache.setS3Client(cacheKey, client)
-	}
-	return client, nil
-}
-
-func s3ClientCacheKey(cred buckets.Credential) string {
-	return strings.ToLower(strings.TrimSpace(cred.Provider)) + "|" +
-		strings.TrimSpace(cred.Endpoint) + "|" +
-		strings.TrimSpace(cred.Region) + "|" +
-		strings.TrimSpace(cred.AccessKey) + "|" +
-		strings.TrimSpace(cred.Bucket) + "|" +
-		strings.TrimSpace(cred.CredentialID)
-}
-
-func defaultS3ObjectInspector(ctx context.Context, cred buckets.Credential, bucket string, key string) (*StorageObjectMetadata, error) {
-	client, err := s3ClientFromContext(ctx, cred)
-	if err != nil {
-		return nil, err
-	}
-	out, err := headS3ObjectWithRetry(ctx, client, bucket, key)
-	if err != nil {
-		var apiErr smithy.APIError
-		if errors.As(err, &apiErr) {
-			switch strings.ToLower(strings.TrimSpace(apiErr.ErrorCode())) {
-			case "forbidden", "accessdenied", "permissiondenied":
-				return nil, &StorageInspectError{Kind: StorageInspectBucketUnavailable, Message: fmt.Sprintf("provider rejected object probe for s3://%s/%s; mapped bucket target may be missing or inaccessible", bucket, key)}
-			case "notfound", "nosuchkey":
-				return nil, &StorageInspectError{Kind: StorageInspectObjectNotFound, Message: fmt.Sprintf("provider could not find s3://%s/%s", bucket, key)}
-			case "nosuchbucket":
-				return nil, &StorageInspectError{Kind: StorageInspectBucketUnavailable, Message: fmt.Sprintf("provider could not find bucket %q", bucket)}
-			}
-		}
-		return nil, fmt.Errorf("inspect s3 object %s/%s: %w", bucket, key, err)
-	}
-	var size int64
-	if out.ContentLength != nil {
-		size = *out.ContentLength
-	}
-	lastMod := time.Time{}
-	if out.LastModified != nil {
-		lastMod = *out.LastModified
-	}
-	return &StorageObjectMetadata{
-		Provider:    address.S3Provider,
-		Bucket:      bucket,
-		Key:         key,
-		ObjectURL:   address.BucketToURL(bucket, key),
-		Path:        path.Base(key),
-		SizeBytes:   size,
-		ETag:        strings.Trim(strings.TrimSpace(aws.ToString(out.ETag)), "\""),
-		LastModTime: lastMod,
-	}, nil
-}
-
-func headS3ObjectWithRetry(ctx context.Context, client s3HeadObjectClient, bucket, key string) (*awss3.HeadObjectOutput, error) {
-	policy := s3ListPageRetryPolicyFromEnv()
-	maxAttempts := intEnvOrDefault(envS3HeadMaxAttempts, defaultS3HeadMaxAttempts, 1)
-	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		release, acquireErr := acquireS3Probe(ctx, "head", bucket, key)
-		if acquireErr != nil {
-			return nil, acquireErr
-		}
-		out, err := client.HeadObject(ctx, &awss3.HeadObjectInput{Bucket: aws.String(bucket), Key: aws.String(key)})
-		release()
-		if err == nil || !isRetryableS3ListPageError(err) || attempt == maxAttempts {
-			return out, err
-		}
-		backoff := policy.backoff(attempt)
-		log.Printf("INFO: syfon_s3_head_retry request_id=%s bucket=%s key=%q attempt=%d max_attempts=%d backoff_ms=%d error=%q", requestmeta.GetRequestID(ctx), bucket, key, attempt+1, maxAttempts, backoff.Milliseconds(), err.Error())
-		if err := sleepS3ListPageRetry(ctx, backoff); err != nil {
-			return nil, err
-		}
-	}
-	return nil, nil
 }

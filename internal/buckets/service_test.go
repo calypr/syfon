@@ -83,6 +83,71 @@ func TestServiceDelegatesCredentialAndScopeReads(t *testing.T) {
 	}
 }
 
+func TestGetS3CredentialFallsBackToCaseInsensitiveAliases(t *testing.T) {
+	cases := []struct {
+		name       string
+		requested  string
+		credential Credential
+	}{
+		{name: "physical bucket", requested: "PHYSICAL-BUCKET", credential: Credential{CredentialID: "credential-id", Bucket: "physical-bucket"}},
+		{name: "credential ID", requested: "CREDENTIAL-ID", credential: Credential{CredentialID: "credential-id", Bucket: "physical-bucket"}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			service, credentials, _ := newFakeService([]Credential{tc.credential}, nil, &fakeVisibilityQuery{}, nil, nil)
+
+			got, err := service.GetS3Credential(context.Background(), tc.requested)
+			if err != nil || got == nil || *got != tc.credential {
+				t.Fatalf("GetS3Credential(%q)=(%+v,%v), want %+v", tc.requested, got, err, tc.credential)
+			}
+			if credentials.getCalls != 1 || credentials.listCalls != 1 {
+				t.Fatalf("lookup calls get=%d list=%d, want get=1 list=1", credentials.getCalls, credentials.listCalls)
+			}
+		})
+	}
+}
+
+func TestGetS3CredentialPreservesExactSuccessAndAbsentError(t *testing.T) {
+	credential := Credential{CredentialID: "id-a", Bucket: "bucket-a"}
+	service, credentials, _ := newFakeService([]Credential{credential}, nil, &fakeVisibilityQuery{}, nil, nil)
+
+	got, err := service.GetS3Credential(context.Background(), "id-a")
+	if err != nil || got == nil || *got != credential {
+		t.Fatalf("exact GetS3Credential()=(%+v,%v), want %+v", got, err, credential)
+	}
+	if credentials.listCalls != 0 {
+		t.Fatalf("exact lookup should not list credentials, list calls=%d", credentials.listCalls)
+	}
+
+	got, err = service.GetS3Credential(context.Background(), "missing")
+	if got != nil || err == nil || err.Error() != "credential not found" {
+		t.Fatalf("absent GetS3Credential()=(%+v,%v), want credential not found", got, err)
+	}
+}
+
+func TestGetS3CredentialReturnsMeaningfulListErrorAfterExactMiss(t *testing.T) {
+	listErr := errors.New("database unavailable")
+	credentials := &fakeCredentialStore{listErr: listErr}
+	service, err := NewService(Dependencies{
+		Credentials:     credentials,
+		CredentialAdmin: credentials,
+		Scopes:          &fakeScopeStore{},
+		Fallback:        func(context.Context) ([]VisibilityRow, error) { return nil, nil },
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+
+	got, err := service.GetS3Credential(context.Background(), "missing")
+	if got != nil || !errors.Is(err, listErr) {
+		t.Fatalf("GetS3Credential()=(%+v,%v), want list error %v", got, err, listErr)
+	}
+	if credentials.getCalls != 1 || credentials.listCalls != 1 {
+		t.Fatalf("lookup calls get=%d list=%d, want get=1 list=1", credentials.getCalls, credentials.listCalls)
+	}
+}
+
 func TestResolveBucketPreservesRepositoryOrderAndPhysicalMatching(t *testing.T) {
 	first := Credential{CredentialID: "id-first", Bucket: "first-bucket"}
 	second := Credential{CredentialID: "id-second", Bucket: "second-bucket"}

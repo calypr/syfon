@@ -11,7 +11,7 @@ import (
 )
 
 func TestParseInternalListPaginationFiber_InvalidInputs(t *testing.T) {
-	om := newInternalDRSObjectManager(&testutils.MockDatabase{}, &testutils.MockUrlManager{})
+	om := newInternalDRSObjectManager(&testutils.MockDatabase{}, &internalDRSStorageFake{})
 
 	cases := []struct {
 		name string
@@ -63,7 +63,7 @@ func TestParseInternalListPaginationFiber_StartSuppressesPage(t *testing.T) {
 }
 
 func TestHandleInternalBulkDocuments_InvalidBodyAndMissingIDs(t *testing.T) {
-	om := newInternalDRSObjectManager(&testutils.MockDatabase{}, &testutils.MockUrlManager{})
+	om := newInternalDRSObjectManager(&testutils.MockDatabase{}, &internalDRSStorageFake{})
 
 	req := httptest.NewRequest(http.MethodPost, "/bulk/documents", strings.NewReader("not-json"))
 	req.Header.Set("Content-Type", "application/json")
@@ -81,7 +81,7 @@ func TestHandleInternalBulkDocuments_InvalidBodyAndMissingIDs(t *testing.T) {
 }
 
 func TestHandleInternalList_IgnoresLegacyPathValidation(t *testing.T) {
-	om := newInternalDRSObjectManager(&testutils.MockDatabase{}, &testutils.MockUrlManager{})
+	om := newInternalDRSObjectManager(&testutils.MockDatabase{}, &internalDRSStorageFake{})
 
 	req := httptest.NewRequest(http.MethodGet, "/index?path=nested", nil)
 	rr := doInternalDRSTestRequest(req, om)

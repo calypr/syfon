@@ -23,12 +23,6 @@ import (
 	"github.com/calypr/syfon/internal/httpapi/middleware"
 	"github.com/calypr/syfon/internal/persistence/postgres"
 	"github.com/calypr/syfon/internal/persistence/sqlite"
-	"github.com/calypr/syfon/internal/signer/azure"
-	"github.com/calypr/syfon/internal/signer/file"
-	"github.com/calypr/syfon/internal/signer/gcs"
-	"github.com/calypr/syfon/internal/signer/s3"
-	"github.com/calypr/syfon/internal/storage/address"
-	"github.com/calypr/syfon/internal/urlmanager"
 	"github.com/calypr/syfon/internal/usage"
 )
 
@@ -161,27 +155,10 @@ var Cmd = &cobra.Command{
 
 		applyCredentialEncryptionConfig(cfg)
 
-		// Initialize storage signing before the bucket service so credential
-		// mutations can invalidate every registered provider cache.
-		needsUrlManager := cfg.Routes.Ga4gh || cfg.Routes.Internal || cfg.Routes.LFS
-		var uM *urlmanager.Manager
-		if needsUrlManager {
-			credentials := backend.bucketDependencies.Credentials
-			uM = urlmanager.NewManager(credentials, cfg.Signing)
-			uM.RegisterSigner(address.S3Provider, s3.NewS3Signer(credentials))
-			uM.RegisterSigner(address.GCSProvider, gcs.NewGCSSigner(credentials))
-			uM.RegisterSigner(address.AzureProvider, azure.NewAzureSigner(credentials))
-			fSigner, fErr := file.NewFileSigner("/")
-			if fErr == nil {
-				uM.RegisterSigner(address.FileProvider, fSigner)
-			} else {
-				logger.Warn("failed to initialize file signer", "err", fErr)
-			}
-		}
-
-		var invalidator interface{ InvalidateBucket(string) }
-		if uM != nil {
-			invalidator = uM
+		needsStorage := cfg.Routes.Ga4gh || cfg.Routes.Internal || cfg.Routes.LFS
+		var invalidator *storageInvalidator
+		if needsStorage {
+			invalidator = &storageInvalidator{}
 		}
 		bucketDependencies := backend.bucketDependencies
 		bucketDependencies.Fallback = core.NewBucketVisibilityFallback(
@@ -193,6 +170,15 @@ var Cmd = &cobra.Command{
 			fatal("failed to initialize bucket service", "err", err)
 		}
 		backend.dependencies.BucketService = bucketService
+
+		if needsStorage {
+			storageManager, storageErr := newStorageManager(bucketService, "/", logger)
+			if storageErr != nil {
+				fatal("failed to initialize storage manager", "err", storageErr)
+			}
+			invalidator.manager = storageManager
+			backend.dependencies.Storage = storagePorts(storageManager)
+		}
 
 		// Load configured bucket credentials if present.
 		if len(cfg.Buckets) > 0 {
@@ -226,7 +212,7 @@ var Cmd = &cobra.Command{
 		}
 
 		// Init unified Object Manager.
-		om := core.NewObjectManager(backend.dependencies, uM)
+		om := core.NewObjectManager(backend.dependencies)
 
 		// Build Fiber runtime and middleware pipeline.
 		app := fiber.New(fiber.Config{
@@ -262,7 +248,6 @@ var Cmd = &cobra.Command{
 			serviceInfo:         serviceInfoForBackend(cfg.Database.Sqlite != nil),
 			om:                  om,
 			bucketService:       bucketService,
-			uM:                  uM,
 			authzMiddleware:     authzMiddleware,
 			requestIDMiddleware: requestIDMiddleware,
 		}

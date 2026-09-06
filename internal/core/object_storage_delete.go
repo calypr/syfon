@@ -2,29 +2,14 @@ package core
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
-	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
-	"cloud.google.com/go/storage"
-	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
-	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/bloberror"
-	"github.com/aws/aws-sdk-go-v2/aws"
-	awsconfig "github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/credentials"
-	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
-	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
-	"github.com/aws/smithy-go"
-	"google.golang.org/api/googleapi"
-	"google.golang.org/api/option"
-
-	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/objects"
+	"github.com/calypr/syfon/internal/storage"
 	"github.com/calypr/syfon/internal/storage/address"
 )
 
@@ -33,23 +18,7 @@ type storageTarget struct {
 	bucket   string
 	key      string
 	path     string
-}
-
-type s3ObjectDeleter interface {
-	DeleteObject(context.Context, *awss3.DeleteObjectInput, ...func(*awss3.Options)) (*awss3.DeleteObjectOutput, error)
-	DeleteObjects(context.Context, *awss3.DeleteObjectsInput, ...func(*awss3.Options)) (*awss3.DeleteObjectsOutput, error)
-}
-
-var newS3ObjectDeleter = func(ctx context.Context, cred *buckets.Credential) (s3ObjectDeleter, error) {
-	cfg, err := awsConfigForStorageCredential(ctx, cred)
-	if err != nil {
-		return nil, err
-	}
-	return awss3.NewFromConfig(cfg, func(o *awss3.Options) {
-		if strings.TrimSpace(cred.Endpoint) != "" {
-			o.UsePathStyle = true
-		}
-	}), nil
+	location string
 }
 
 func (m *ObjectManager) deleteObjectStorage(ctx context.Context, obj *objects.Record) error {
@@ -81,31 +50,27 @@ func (m *ObjectManager) deleteObjectsStorage(ctx context.Context, objects []obje
 }
 
 func (m *ObjectManager) deleteStorageTargets(ctx context.Context, targets []storageTarget) error {
-	s3ByBucket := make(map[string][]string)
+	if len(targets) == 0 {
+		return nil
+	}
+	if m.storageDelete == nil {
+		return fmt.Errorf("storage deletion is not configured")
+	}
+	locations := make([]storage.DeleteTarget, 0, len(targets))
+	seen := make(map[string]struct{}, len(targets))
 	for _, target := range targets {
-		if target.provider == address.S3Provider {
-			bucket := strings.TrimSpace(target.bucket)
-			key := strings.Trim(strings.TrimSpace(target.key), "/")
-			if bucket == "" || key == "" {
-				continue
-			}
-			s3ByBucket[bucket] = append(s3ByBucket[bucket], key)
+		location := storageTargetLocation(target)
+		if strings.TrimSpace(location) == "" {
 			continue
 		}
-		if err := m.deleteStorageTarget(ctx, target); err != nil {
-			return err
+		if _, exists := seen[location]; exists {
+			continue
 		}
+		seen[location] = struct{}{}
+		locations = append(locations, storage.DeleteTarget{Location: location})
 	}
-	buckets := make([]string, 0, len(s3ByBucket))
-	for bucket := range s3ByBucket {
-		buckets = append(buckets, bucket)
-	}
-	sort.Strings(buckets)
-	for _, bucket := range buckets {
-		keys := dedupeSortedStrings(s3ByBucket[bucket])
-		if err := m.deleteS3Objects(ctx, bucket, keys); err != nil {
-			return err
-		}
+	if err := m.storageDelete.DeleteExact(ctx, locations); err != nil {
+		return mapStorageDeleteError(err)
 	}
 	return nil
 }
@@ -123,12 +88,9 @@ func (m *ObjectManager) storageTargetsForObject(ctx context.Context, obj *object
 		}
 
 		rawURL := strings.TrimSpace(am.AccessUrl.Url)
-		scopedURL := rawURL
 		// Stored locations are physical replicas. Their bucket/key must remain
 		// exact through deletion; project scopes are upload-time concerns.
-		scopedURL = rawURL
-
-		target, ok, err := m.storageTargetFromURL(ctx, scopedURL)
+		target, ok, err := m.storageTargetFromURL(ctx, rawURL)
 		if err != nil {
 			return nil, err
 		}
@@ -177,40 +139,34 @@ func (m *ObjectManager) storageTargetFromURL(ctx context.Context, raw string) (s
 				return storageTarget{}, false, fmt.Errorf("file-backed bucket %s missing storage root", bucket)
 			}
 			return storageTarget{
-				provider: address.FileProvider,
+				provider: normalizedProvider,
 				bucket:   bucket,
 				key:      key,
 				path:     filepath.Clean(filepath.Join(root, filepath.FromSlash(key))),
+				location: raw,
 			}, true, nil
 		}
-		return storageTarget{provider: normalizedProvider, bucket: bucket, key: key}, true, nil
+		return storageTarget{provider: normalizedProvider, bucket: bucket, key: key, location: raw}, true, nil
 	}
 
 	if filepath.IsAbs(raw) {
-		return storageTarget{provider: address.FileProvider, path: filepath.Clean(raw)}, true, nil
+		return storageTarget{provider: address.FileProvider, path: filepath.Clean(raw), location: filepath.Clean(raw)}, true, nil
 	}
 	return storageTarget{}, false, nil
 }
 
 func (m *ObjectManager) deleteStorageTarget(ctx context.Context, target storageTarget) error {
-	switch target.provider {
-	case address.FileProvider:
-		if strings.TrimSpace(target.path) == "" {
-			return nil
-		}
-		if err := os.Remove(target.path); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("delete file %s: %w", target.path, err)
-		}
-		return nil
-	case address.S3Provider:
-		return m.deleteS3Object(ctx, target.bucket, target.key)
-	case address.GCSProvider:
-		return m.deleteGCSObject(ctx, target.bucket, target.key)
-	case address.AzureProvider:
-		return m.deleteAzureObject(ctx, target.bucket, target.key)
-	default:
-		return fmt.Errorf("unsupported storage provider %q", target.provider)
+	if m.storageDelete == nil {
+		return fmt.Errorf("storage deletion is not configured")
 	}
+	location := storageTargetLocation(target)
+	if strings.TrimSpace(location) == "" {
+		return nil
+	}
+	if err := m.storageDelete.DeleteExact(ctx, []storage.DeleteTarget{{Location: location}}); err != nil {
+		return mapStorageDeleteError(err)
+	}
+	return nil
 }
 
 func (m *ObjectManager) deleteS3Object(ctx context.Context, bucket, key string) error {
@@ -218,235 +174,45 @@ func (m *ObjectManager) deleteS3Object(ctx context.Context, bucket, key string) 
 }
 
 func (m *ObjectManager) deleteS3Objects(ctx context.Context, bucket string, keys []string) error {
-	keys = dedupeSortedStrings(keys)
 	if len(keys) == 0 {
 		return nil
 	}
-	cred, err := m.credentialForBucket(ctx, bucket)
-	if err != nil {
-		return fmt.Errorf("lookup s3 credential for bucket %s: %w", bucket, err)
-	}
-	if cred == nil {
-		return fmt.Errorf("credentials not found for bucket %s", bucket)
-	}
-	client, err := newS3ObjectDeleter(ctx, cred)
-	if err != nil {
-		return err
-	}
-
-	if len(keys) == 1 {
-		_, err = client.DeleteObject(ctx, &awss3.DeleteObjectInput{
-			Bucket: aws.String(bucket),
-			Key:    aws.String(keys[0]),
+	targets := make([]storageTarget, 0, len(keys))
+	for _, key := range keys {
+		if strings.TrimSpace(key) == "" {
+			continue
+		}
+		targets = append(targets, storageTarget{
+			provider: address.S3Provider,
+			bucket:   bucket,
+			key:      strings.Trim(strings.TrimSpace(key), "/"),
+			location: address.BucketToURL(bucket, key),
 		})
-		return err
 	}
-
-	const maxS3DeleteObjects = 1000
-	quiet := true
-	for start := 0; start < len(keys); start += maxS3DeleteObjects {
-		end := start + maxS3DeleteObjects
-		if end > len(keys) {
-			end = len(keys)
-		}
-		objects := make([]s3types.ObjectIdentifier, 0, end-start)
-		for _, key := range keys[start:end] {
-			objects = append(objects, s3types.ObjectIdentifier{Key: aws.String(key)})
-		}
-		out, err := client.DeleteObjects(ctx, &awss3.DeleteObjectsInput{
-			Bucket: aws.String(bucket),
-			Delete: &s3types.Delete{
-				Objects: objects,
-				Quiet:   aws.Bool(quiet),
-			},
-		})
-		if err != nil {
-			return err
-		}
-		if out != nil && len(out.Errors) > 0 {
-			return fmt.Errorf("s3 bulk delete failed for bucket %s: %s", bucket, formatS3DeleteErrors(out.Errors))
-		}
-	}
-	return nil
+	return m.deleteStorageTargets(ctx, targets)
 }
 
-func awsConfigForStorageCredential(ctx context.Context, cred *buckets.Credential) (aws.Config, error) {
-	loadOpts := []func(*awsconfig.LoadOptions) error{
-		awsconfig.WithRegion(cred.Region),
-		awsconfig.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(cred.AccessKey, cred.SecretKey, "")),
+func storageTargetLocation(target storageTarget) string {
+	if strings.TrimSpace(target.location) != "" {
+		return strings.TrimSpace(target.location)
 	}
-	cfg, err := awsconfig.LoadDefaultConfig(ctx, loadOpts...)
-	if err != nil {
-		return aws.Config{}, fmt.Errorf("load aws config: %w", err)
+	if target.provider == address.FileProvider {
+		return strings.TrimSpace(target.path)
 	}
-	if endpoint := strings.TrimSpace(cred.Endpoint); endpoint != "" {
-		if !strings.HasPrefix(endpoint, "http://") && !strings.HasPrefix(endpoint, "https://") {
-			if strings.Contains(endpoint, "localhost") || strings.Contains(endpoint, "127.0.0.1") {
-				endpoint = "http://" + endpoint
-			} else {
-				endpoint = "https://" + endpoint
-			}
-		}
-		cfg.BaseEndpoint = aws.String(endpoint)
+	if strings.TrimSpace(target.bucket) == "" || strings.TrimSpace(target.key) == "" {
+		return ""
 	}
-	return cfg, nil
+	return address.BucketToURL(target.bucket, target.key)
 }
 
 func storageTargetKey(target storageTarget) string {
 	return target.provider + "\x00" + target.bucket + "\x00" + target.key + "\x00" + target.path
 }
 
-func dedupeSortedStrings(values []string) []string {
-	if len(values) == 0 {
-		return nil
+func mapStorageDeleteError(err error) error {
+	var operation *storage.OperationError
+	if !errors.As(err, &operation) || operation.Cause == nil {
+		return err
 	}
-	out := make([]string, 0, len(values))
-	seen := make(map[string]struct{}, len(values))
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			continue
-		}
-		if _, exists := seen[value]; exists {
-			continue
-		}
-		seen[value] = struct{}{}
-		out = append(out, value)
-	}
-	sort.Strings(out)
-	return out
-}
-
-func formatS3DeleteErrors(errors []s3types.Error) string {
-	const maxErrors = 5
-	parts := make([]string, 0, len(errors))
-	for i, item := range errors {
-		if i >= maxErrors {
-			parts = append(parts, fmt.Sprintf("and %d more", len(errors)-maxErrors))
-			break
-		}
-		key := strings.TrimSpace(aws.ToString(item.Key))
-		code := strings.TrimSpace(aws.ToString(item.Code))
-		message := strings.TrimSpace(aws.ToString(item.Message))
-		switch {
-		case key != "" && code != "" && message != "":
-			parts = append(parts, fmt.Sprintf("%s: %s: %s", key, code, message))
-		case key != "" && code != "":
-			parts = append(parts, fmt.Sprintf("%s: %s", key, code))
-		case code != "":
-			parts = append(parts, code)
-		default:
-			parts = append(parts, "unknown delete error")
-		}
-	}
-	return strings.Join(parts, "; ")
-}
-
-func (m *ObjectManager) deleteGCSObject(ctx context.Context, bucket, key string) error {
-	cred, err := m.bucketService.GetS3Credential(ctx, bucket)
-	if err != nil {
-		return fmt.Errorf("lookup gcs credential for bucket %s: %w", bucket, err)
-	}
-	if cred == nil {
-		return fmt.Errorf("credentials not found for bucket %s", bucket)
-	}
-
-	secret := strings.TrimSpace(cred.SecretKey)
-	var client *storage.Client
-	if secret != "" && json.Valid([]byte(secret)) {
-		client, err = storage.NewClient(ctx, option.WithCredentialsJSON([]byte(secret)))
-	} else {
-		client, err = storage.NewClient(ctx)
-	}
-	if err != nil {
-		return fmt.Errorf("create gcs client: %w", err)
-	}
-	defer client.Close()
-
-	err = client.Bucket(bucket).Object(key).Delete(ctx)
-	if err == nil {
-		return nil
-	}
-	if errors.Is(err, storage.ErrObjectNotExist) {
-		return nil
-	}
-	if gerr, ok := err.(*googleapi.Error); ok && gerr.Code == 404 {
-		return nil
-	}
-	return err
-}
-
-func (m *ObjectManager) deleteAzureObject(ctx context.Context, bucket, key string) error {
-	cred, err := m.bucketService.GetS3Credential(ctx, bucket)
-	if err != nil {
-		return fmt.Errorf("lookup azure credential for bucket %s: %w", bucket, err)
-	}
-	if cred == nil {
-		return fmt.Errorf("credentials not found for bucket %s", bucket)
-	}
-
-	accountName := strings.TrimSpace(cred.AccessKey)
-	if accountName == "" {
-		accountName = azureAccountFromEndpoint(strings.TrimSpace(cred.Endpoint))
-	}
-	accountKey := strings.TrimSpace(cred.SecretKey)
-	if accountName == "" || accountKey == "" {
-		return fmt.Errorf("azure deletion requires shared key credentials for bucket %s", bucket)
-	}
-
-	shared, err := azblob.NewSharedKeyCredential(accountName, accountKey)
-	if err != nil {
-		return fmt.Errorf("parse azure shared key: %w", err)
-	}
-	client, err := azblob.NewClientWithSharedKeyCredential(azureServiceURL(accountName, cred.Endpoint), shared, nil)
-	if err != nil {
-		return fmt.Errorf("create azure client: %w", err)
-	}
-
-	_, err = client.DeleteBlob(ctx, bucket, key, nil)
-	if err == nil {
-		return nil
-	}
-	if bloberror.HasCode(err, bloberror.BlobNotFound, bloberror.ContainerNotFound) {
-		return nil
-	}
-	var apiErr smithy.APIError
-	if errors.As(err, &apiErr) && strings.EqualFold(apiErr.ErrorCode(), "BlobNotFound") {
-		return nil
-	}
-	return err
-}
-
-func azureServiceURL(accountName string, endpoint string) string {
-	ep := strings.TrimSpace(endpoint)
-	if ep != "" {
-		if !strings.HasPrefix(ep, "http://") && !strings.HasPrefix(ep, "https://") {
-			ep = "https://" + ep
-		}
-		return strings.TrimRight(ep, "/")
-	}
-	return "https://" + strings.TrimSpace(accountName) + ".blob.core.windows.net"
-}
-
-func azureAccountFromEndpoint(endpoint string) string {
-	ep := strings.TrimSpace(endpoint)
-	if ep == "" {
-		return ""
-	}
-	if !strings.HasPrefix(ep, "http://") && !strings.HasPrefix(ep, "https://") {
-		ep = "https://" + ep
-	}
-	u, err := url.Parse(ep)
-	if err != nil {
-		return ""
-	}
-	host := strings.TrimSpace(u.Hostname())
-	if host == "" {
-		return ""
-	}
-	parts := strings.Split(host, ".")
-	if len(parts) == 0 {
-		return ""
-	}
-	return strings.TrimSpace(parts[0])
+	return operation.Cause
 }

@@ -12,16 +12,26 @@ import (
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/faults"
 	"github.com/calypr/syfon/internal/objects"
+	"github.com/calypr/syfon/internal/storage"
 	"github.com/calypr/syfon/internal/storage/address"
-	"github.com/calypr/syfon/internal/urlmanager"
 )
 
 // SignURL generates a signed URL for an object's access method.
-func (m *ObjectManager) SignURL(ctx context.Context, accessURL string, options urlmanager.SignOptions) (string, error) {
-	return m.uM.SignURL(ctx, m.resolveSigningBucket(ctx, accessURL), accessURL, options)
+func (m *ObjectManager) SignURL(ctx context.Context, accessURL string, options storage.AccessOptions) (string, error) {
+	if m.storageAccess == nil {
+		return "", fmt.Errorf("storage access is not configured")
+	}
+	access, err := m.storageAccess.Access(ctx, storage.AccessRequest{
+		Target:  storage.AccessTarget{AccessID: m.resolveSigningBucket(ctx, accessURL), Location: accessURL},
+		Options: options,
+	})
+	if err != nil {
+		return "", err
+	}
+	return access.Location, nil
 }
 
-func (m *ObjectManager) SignObjectURL(ctx context.Context, obj *objects.Record, accessURL string, options urlmanager.SignOptions) (string, error) {
+func (m *ObjectManager) SignObjectURL(ctx context.Context, obj *objects.Record, accessURL string, options storage.AccessOptions) (string, error) {
 	targetURL := strings.TrimSpace(accessURL)
 	if strings.EqualFold(strings.TrimSpace(options.Method), "PUT") {
 		target, err := m.ResolveCanonicalStorageTarget(ctx, CanonicalStorageTargetRequest{
@@ -196,11 +206,22 @@ func (m *ObjectManager) ResolveBucket(ctx context.Context, bucketName string) (s
 	return m.bucketService.ResolveBucket(ctx, bucketName)
 }
 
-func (m *ObjectManager) SignDownloadPart(ctx context.Context, bucket, accessURL string, start, end int64, options urlmanager.SignOptions) (string, error) {
-	return m.uM.SignDownloadPart(ctx, bucket, accessURL, start, end, options)
+func (m *ObjectManager) SignDownloadPart(ctx context.Context, bucket, accessURL string, start, end int64, options storage.AccessOptions) (string, error) {
+	if m.storageAccess == nil {
+		return "", fmt.Errorf("storage access is not configured")
+	}
+	access, err := m.storageAccess.Access(ctx, storage.AccessRequest{
+		Target:  storage.AccessTarget{AccessID: bucket, Location: accessURL},
+		Options: options,
+		Range:   &storage.ByteRange{Start: start, End: end},
+	})
+	if err != nil {
+		return "", err
+	}
+	return access.Location, nil
 }
 
-func (m *ObjectManager) SignObjectDownloadPart(ctx context.Context, obj *objects.Record, bucket, accessURL string, start, end int64, options urlmanager.SignOptions) (string, error) {
+func (m *ObjectManager) SignObjectDownloadPart(ctx context.Context, obj *objects.Record, bucket, accessURL string, start, end int64, options storage.AccessOptions) (string, error) {
 	var err error
 	accessURL, err = m.resolveObjectDownloadURL(ctx, obj, accessURL)
 	if err != nil {

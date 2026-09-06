@@ -2,9 +2,10 @@ package core
 
 import (
 	"context"
+	"fmt"
 
+	"github.com/calypr/syfon/internal/storage"
 	"github.com/calypr/syfon/internal/transfers"
-	"github.com/calypr/syfon/internal/urlmanager"
 )
 
 func (m *ObjectManager) SavePendingLFSMeta(ctx context.Context, entries []transfers.PendingMetadata) error {
@@ -20,13 +21,35 @@ func (m *ObjectManager) PopPendingLFSMeta(ctx context.Context, oid string) (*tra
 }
 
 func (m *ObjectManager) InitMultipartUpload(ctx context.Context, bucket, key string) (string, error) {
-	return m.uM.InitMultipartUpload(ctx, bucket, key)
+	if m.storageMultipart == nil {
+		return "", fmt.Errorf("storage multipart is not configured")
+	}
+	uploadID, err := m.storageMultipart.BeginMultipart(ctx, storage.ObjectTarget{Bucket: bucket, Key: key})
+	return string(uploadID), err
 }
 
 func (m *ObjectManager) SignMultipartPart(ctx context.Context, bucket, key, uploadID string, partNum int32) (string, error) {
-	return m.uM.SignMultipartPart(ctx, bucket, key, uploadID, partNum)
+	if m.storageMultipart == nil {
+		return "", fmt.Errorf("storage multipart is not configured")
+	}
+	access, err := m.storageMultipart.AccessMultipartPart(ctx, storage.MultipartPartRequest{
+		Target:     storage.ObjectTarget{Bucket: bucket, Key: key},
+		UploadID:   storage.UploadID(uploadID),
+		PartNumber: partNum,
+	})
+	if err != nil {
+		return "", err
+	}
+	return access.Location, nil
 }
 
-func (m *ObjectManager) CompleteMultipartUpload(ctx context.Context, bucket, key, uploadID string, parts []urlmanager.MultipartPart) error {
-	return m.uM.CompleteMultipartUpload(ctx, bucket, key, uploadID, parts)
+func (m *ObjectManager) CompleteMultipartUpload(ctx context.Context, bucket, key, uploadID string, parts []storage.CompletedPart) error {
+	if m.storageMultipart == nil {
+		return fmt.Errorf("storage multipart is not configured")
+	}
+	return m.storageMultipart.CompleteMultipart(ctx, storage.CompleteMultipartRequest{
+		Target:   storage.ObjectTarget{Bucket: bucket, Key: key},
+		UploadID: storage.UploadID(uploadID),
+		Parts:    parts,
+	})
 }

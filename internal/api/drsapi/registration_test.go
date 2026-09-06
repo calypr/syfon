@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/calypr/syfon/apigen/server/drs"
+	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/testutils"
 	"github.com/gofiber/fiber/v3"
@@ -15,8 +16,7 @@ import (
 
 func TestRegisterObjects(t *testing.T) {
 	db := &testutils.MockDatabase{Objects: map[string]*objects.Record{}}
-	um := &testutils.MockUrlManager{}
-	om := testObjectManager(db, um)
+	om := testObjectManager(db, core.StoragePorts{})
 	app := fiber.New()
 	RegisterDRSRoutes(app, om, testServiceInfo())
 

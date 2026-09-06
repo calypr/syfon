@@ -4,11 +4,10 @@ import (
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/transfers"
-	"github.com/calypr/syfon/internal/urlmanager"
 	"github.com/calypr/syfon/internal/usage"
 )
 
-func newTestObjectManager(backend any, uM urlmanager.UrlManager) *ObjectManager {
+func newTestObjectManager(backend any, storageDependency any) *ObjectManager {
 	deps := testDependencies(backend)
 	bucketDeps := buckets.Dependencies{
 		Credentials:     backend.(buckets.CredentialReader),
@@ -20,7 +19,7 @@ func newTestObjectManager(backend any, uM urlmanager.UrlManager) *ObjectManager 
 		bucketDeps.Visibility = optional
 	}
 	var invalidator interface{ InvalidateBucket(string) }
-	if candidate, ok := uM.(interface{ InvalidateBucket(string) }); ok {
+	if candidate, ok := storageDependency.(interface{ InvalidateBucket(string) }); ok {
 		invalidator = candidate
 	}
 	service, err := buckets.NewService(bucketDeps, invalidator)
@@ -28,8 +27,26 @@ func newTestObjectManager(backend any, uM urlmanager.UrlManager) *ObjectManager 
 		panic(err)
 	}
 	deps.BucketService = service
-	return NewObjectManager(deps, uM)
+	if candidate, ok := storageDependency.(*capturingURLManager); ok && candidate != nil {
+		deps.Storage = StoragePorts{
+			Access:    candidate,
+			Multipart: candidate,
+			Probe:     candidate,
+			Inventory: candidate,
+			Delete:    candidate,
+		}
+	}
+	if candidate, ok := storageDependency.(StoragePorts); ok {
+		deps.Storage = candidate
+	}
+	return NewObjectManager(deps)
 }
+
+var _ StorageAccess = (*capturingURLManager)(nil)
+var _ StorageMultipart = (*capturingURLManager)(nil)
+var _ StorageProbe = (*capturingURLManager)(nil)
+var _ StorageInventory = (*capturingURLManager)(nil)
+var _ StorageDelete = (*capturingURLManager)(nil)
 
 // testDependencies composes the capabilities needed by ObjectManager from the
 // concrete test backend. Optional interfaces stay nil when a test double does

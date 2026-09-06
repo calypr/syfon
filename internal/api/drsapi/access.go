@@ -10,7 +10,7 @@ import (
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/objects"
-	"github.com/calypr/syfon/internal/urlmanager"
+	"github.com/calypr/syfon/internal/storage"
 	"github.com/calypr/syfon/internal/usage"
 	"github.com/gofiber/fiber/v3"
 )
@@ -30,9 +30,9 @@ func handleGetAccessURLFiber(om *core.ObjectManager) fiber.Handler {
 			return c.Status(fiber.StatusNotFound).JSON(drs.Error{Msg: common.Ptr("Access ID not found or has no URL")})
 		}
 
-		opts := urlmanager.SignOptions{Method: http.MethodGet}
+		opts := storage.AccessOptions{Method: http.MethodGet}
 		if obj.Name != nil {
-			opts.DownloadFilename = common.DownloadFilename(*obj.Name)
+			opts.DownloadFilename = storage.DownloadFilename(*obj.Name)
 		}
 		signed, err := om.SignObjectURL(c.Context(), obj, targetURL, opts)
 		if err != nil {
@@ -113,9 +113,9 @@ func handleGetBulkAccessURLFiber(om *core.ObjectManager) fiber.Handler {
 					continue
 				}
 
-				opts := urlmanager.SignOptions{Method: http.MethodGet}
+				opts := storage.AccessOptions{Method: http.MethodGet}
 				if obj.Name != nil {
-					opts.DownloadFilename = common.DownloadFilename(*obj.Name)
+					opts.DownloadFilename = storage.DownloadFilename(*obj.Name)
 				}
 				signed, err := om.SignObjectURL(c.Context(), obj, targetURL, opts)
 				if err != nil {

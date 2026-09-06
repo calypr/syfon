@@ -8,8 +8,8 @@ import (
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/faults"
 	"github.com/calypr/syfon/internal/objects"
+	"github.com/calypr/syfon/internal/storage"
 	"github.com/calypr/syfon/internal/testutils"
-	"github.com/calypr/syfon/internal/urlmanager"
 )
 
 func TestObjectManagerLegacyS3DownloadCompatibility(t *testing.T) {
@@ -37,7 +37,7 @@ func TestObjectManagerLegacyS3DownloadCompatibility(t *testing.T) {
 		om, um := newManager(map[string]buckets.Scope{"HTAN_INT|BForePC": scope}, nil)
 		obj := newObject(resource)
 
-		signed, err := om.SignObjectURL(context.Background(), obj, legacy, urlmanager.SignOptions{})
+		signed, err := om.SignObjectURL(context.Background(), obj, legacy, storage.AccessOptions{})
 		if err != nil {
 			t.Fatalf("SignObjectURL failed: %v", err)
 		}
@@ -45,7 +45,7 @@ func TestObjectManagerLegacyS3DownloadCompatibility(t *testing.T) {
 			t.Fatalf("unexpected mapped full download: signed=%q bucket=%q url=%q", signed, um.signURLBucket, um.signURLAccessURL)
 		}
 
-		part, err := om.SignObjectDownloadPart(context.Background(), obj, "bforepc-prod", legacy, 0, 1023, urlmanager.SignOptions{})
+		part, err := om.SignObjectDownloadPart(context.Background(), obj, "bforepc-prod", legacy, 0, 1023, storage.AccessOptions{})
 		if err != nil {
 			t.Fatalf("SignObjectDownloadPart failed: %v", err)
 		}
@@ -58,7 +58,7 @@ func TestObjectManagerLegacyS3DownloadCompatibility(t *testing.T) {
 		om, um := newManager(map[string]buckets.Scope{"HTAN_INT|BForePC": scope}, map[string]buckets.Credential{
 			"bforepc-prod": {CredentialID: "bforepc-prod", Bucket: "bforepc-prod", Provider: "s3"},
 		})
-		signed, err := om.SignObjectURL(context.Background(), newObject(resource), legacy, urlmanager.SignOptions{})
+		signed, err := om.SignObjectURL(context.Background(), newObject(resource), legacy, storage.AccessOptions{})
 		if err != nil {
 			t.Fatalf("SignObjectURL failed: %v", err)
 		}
@@ -71,7 +71,7 @@ func TestObjectManagerLegacyS3DownloadCompatibility(t *testing.T) {
 		om, um := newManager(map[string]buckets.Scope{"HTAN_INT|BForePC": scope}, map[string]buckets.Credential{
 			"bforepc-prod": {CredentialID: "bforepc-prod", Bucket: "bforepc", Provider: "s3"},
 		})
-		signed, err := om.SignObjectURL(context.Background(), newObject(resource), legacy, urlmanager.SignOptions{})
+		signed, err := om.SignObjectURL(context.Background(), newObject(resource), legacy, storage.AccessOptions{})
 		if err != nil {
 			t.Fatalf("SignObjectURL failed: %v", err)
 		}
@@ -91,7 +91,7 @@ func TestObjectManagerLegacyS3DownloadCompatibility(t *testing.T) {
 		om, um := newManager(map[string]buckets.Scope{"HTAN_INT|BForePC": physicalScope}, map[string]buckets.Credential{
 			"physical": {CredentialID: "physical", Bucket: "bforepc", Provider: "s3"},
 		})
-		signed, err := om.SignObjectURL(context.Background(), newObject(resource), physicalURL, urlmanager.SignOptions{})
+		signed, err := om.SignObjectURL(context.Background(), newObject(resource), physicalURL, storage.AccessOptions{})
 		if err != nil {
 			t.Fatalf("SignObjectURL failed: %v", err)
 		}
@@ -113,7 +113,7 @@ func TestObjectManagerLegacyS3DownloadCompatibility(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			om, um := newManager(map[string]buckets.Scope{"HTAN_INT|BForePC": tc.scope}, nil)
-			signed, err := om.SignObjectURL(context.Background(), newObject(resource), tc.url, urlmanager.SignOptions{})
+			signed, err := om.SignObjectURL(context.Background(), newObject(resource), tc.url, storage.AccessOptions{})
 			if err != nil {
 				t.Fatalf("SignObjectURL failed: %v", err)
 			}
@@ -129,14 +129,14 @@ func TestObjectManagerLegacyS3DownloadCompatibility(t *testing.T) {
 			"HTAN_INT|one": {Organization: "HTAN_INT", ProjectID: "one", Bucket: "bforepc-a", PathPrefix: "bforepc-prod"},
 			"HTAN_INT|two": {Organization: "HTAN_INT", ProjectID: "two", Bucket: "bforepc-b", PathPrefix: "bforepc-prod"},
 		}, nil)
-		if _, err := om.SignObjectURL(context.Background(), obj, legacy, urlmanager.SignOptions{}); !errors.Is(err, faults.ErrConflict) {
+		if _, err := om.SignObjectURL(context.Background(), obj, legacy, storage.AccessOptions{}); !errors.Is(err, faults.ErrConflict) {
 			t.Fatalf("expected conflicting legacy mapping error, got %v", err)
 		}
 	})
 
 	t.Run("leaves PUT behavior on canonical target path", func(t *testing.T) {
 		om, um := newManager(map[string]buckets.Scope{"HTAN_INT|BForePC": scope}, nil)
-		signed, err := om.SignObjectURL(context.Background(), newObject(resource), legacy, urlmanager.SignOptions{Method: "PUT"})
+		signed, err := om.SignObjectURL(context.Background(), newObject(resource), legacy, storage.AccessOptions{Method: "PUT"})
 		if err != nil {
 			t.Fatalf("SignObjectURL PUT failed: %v", err)
 		}
@@ -169,7 +169,7 @@ func TestObjectManagerLegacyS3DownloadCredentialErrorsPropagate(t *testing.T) {
 	resources := []string{"/organization/HTAN_INT/project/BForePC"}
 	obj := &objects.Record{ControlledAccess: &resources}
 
-	if _, err := om.SignObjectURL(context.Background(), obj, "s3://legacy/key", urlmanager.SignOptions{}); !errors.Is(err, wantErr) {
+	if _, err := om.SignObjectURL(context.Background(), obj, "s3://legacy/key", storage.AccessOptions{}); !errors.Is(err, wantErr) {
 		t.Fatalf("expected credential lookup error to propagate, got %v", err)
 	}
 }
@@ -197,7 +197,7 @@ func TestObjectManagerScopedLogicalDownloadSigning(t *testing.T) {
 	t.Run("full download", func(t *testing.T) {
 		um := &capturingURLManager{}
 		om := newTestObjectManager(db, um)
-		if _, err := om.SignObjectURL(context.Background(), obj, logical, urlmanager.SignOptions{}); err != nil {
+		if _, err := om.SignObjectURL(context.Background(), obj, logical, storage.AccessOptions{}); err != nil {
 			t.Fatalf("SignObjectURL failed: %v", err)
 		}
 		if um.signURLAccessURL != physical || um.signURLBucket != "syfon-ci" {
@@ -208,7 +208,7 @@ func TestObjectManagerScopedLogicalDownloadSigning(t *testing.T) {
 	t.Run("ranged download", func(t *testing.T) {
 		um := &capturingURLManager{}
 		om := newTestObjectManager(db, um)
-		if _, err := om.SignObjectDownloadPart(context.Background(), obj, "syfon-ci", logical, 0, 1023, urlmanager.SignOptions{}); err != nil {
+		if _, err := om.SignObjectDownloadPart(context.Background(), obj, "syfon-ci", logical, 0, 1023, storage.AccessOptions{}); err != nil {
 			t.Fatalf("SignObjectDownloadPart failed: %v", err)
 		}
 		if um.signDownloadURL != physical || um.signDownloadBucket != "syfon-ci" {
@@ -226,13 +226,13 @@ func TestObjectManagerScopedLogicalDownloadSigning(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			um := &capturingURLManager{}
 			om := newTestObjectManager(db, um)
-			if _, err := om.SignObjectURL(context.Background(), obj, tc.url, urlmanager.SignOptions{}); err != nil {
+			if _, err := om.SignObjectURL(context.Background(), obj, tc.url, storage.AccessOptions{}); err != nil {
 				t.Fatalf("SignObjectURL failed: %v", err)
 			}
 			if um.signURLAccessURL != tc.url {
 				t.Fatalf("expected imported/scoped URL to remain %q, got %q", tc.url, um.signURLAccessURL)
 			}
-			if _, err := om.SignObjectDownloadPart(context.Background(), obj, "syfon-ci", tc.url, 0, 1023, urlmanager.SignOptions{}); err != nil {
+			if _, err := om.SignObjectDownloadPart(context.Background(), obj, "syfon-ci", tc.url, 0, 1023, storage.AccessOptions{}); err != nil {
 				t.Fatalf("SignObjectDownloadPart failed: %v", err)
 			}
 			if um.signDownloadURL != tc.url || um.signDownloadBucket != "syfon-ci" {

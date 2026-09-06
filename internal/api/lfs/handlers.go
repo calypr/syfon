@@ -15,8 +15,8 @@ import (
 	"github.com/calypr/syfon/internal/faults"
 	httplfs "github.com/calypr/syfon/internal/httpapi/lfs"
 	"github.com/calypr/syfon/internal/objects"
+	"github.com/calypr/syfon/internal/storage"
 	"github.com/calypr/syfon/internal/transfers"
-	"github.com/calypr/syfon/internal/urlmanager"
 )
 
 type LFSServer struct {
@@ -254,7 +254,7 @@ func (s *LFSServer) handleUploadInternal(ctx context.Context, body io.Reader, bu
 		return fmt.Errorf("failed to initialize multipart upload: %w", err)
 	}
 
-	parts := make([]urlmanager.MultipartPart, 0, 16)
+	parts := make([]storage.CompletedPart, 0, 16)
 	partNum := int32(1)
 	buf := make([]byte, multipartPartSize)
 	for {
@@ -278,7 +278,7 @@ func (s *LFSServer) handleUploadInternal(ctx context.Context, body io.Reader, bu
 		if err != nil {
 			return fmt.Errorf("failed uploading multipart part: %w", err)
 		}
-		parts = append(parts, urlmanager.MultipartPart{PartNumber: partNum, ETag: etag})
+		parts = append(parts, storage.CompletedPart{PartNumber: partNum, ETag: etag})
 		partNum++
 
 		if readErr == io.ErrUnexpectedEOF {

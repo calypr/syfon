@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -23,11 +25,9 @@ import (
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/config"
 	"github.com/calypr/syfon/internal/core"
-	"github.com/calypr/syfon/internal/signer/file"
-	"github.com/calypr/syfon/internal/storage/address"
+	"github.com/calypr/syfon/internal/storage"
 	"github.com/calypr/syfon/internal/testutils"
 	"github.com/calypr/syfon/internal/transfers"
-	"github.com/calypr/syfon/internal/urlmanager"
 	"github.com/calypr/syfon/internal/usage"
 )
 
@@ -278,6 +278,29 @@ type fiberTestServer struct {
 	ln             net.Listener
 }
 
+// cliFileStorageAccess mirrors the pre-WP09 file signer without bringing the
+// production provider composition into this test fixture. The CLI tests use
+// small file-backed objects for both download and upload, so a direct local
+// path is the complete storage capability they need.
+type cliFileStorageAccess struct {
+	root string
+}
+
+func (a cliFileStorageAccess) Access(_ context.Context, request storage.AccessRequest) (storage.Access, error) {
+	parsed, err := url.Parse(strings.TrimSpace(request.Target.Location))
+	if err != nil {
+		return storage.Access{}, err
+	}
+	key := strings.TrimPrefix(parsed.Path, "/")
+	if key == "" {
+		key = parsed.Path
+	}
+	if key == "" {
+		return storage.Access{}, fmt.Errorf("storage access target has no object key: %q", request.Target.Location)
+	}
+	return storage.Access{Location: filepath.ToSlash(filepath.Join(a.root, key))}, nil
+}
+
 func (s *fiberTestServer) Close() {
 	_ = s.app.Shutdown()
 	if s.ln != nil {
@@ -311,10 +334,6 @@ func newSyfonTestServer(t *testing.T) *fiberTestServer {
 		t.Fatalf("save test bucket scope: %v", err)
 	}
 
-	uM := urlmanager.NewManager(database, config.SigningConfig{DefaultExpirySeconds: 900})
-	fSigner, _ := file.NewFileSigner(storageDir)
-	uM.RegisterSigner(address.FileProvider, fSigner)
-
 	app := fiber.New()
 	app.Get(config.RouteHealthz, func(c fiber.Ctx) error {
 		return c.SendString("OK")
@@ -337,13 +356,14 @@ func newSyfonTestServer(t *testing.T) *fiberTestServer {
 	bucketService, err := buckets.NewService(buckets.Dependencies{
 		Credentials: database, CredentialAdmin: database, Scopes: database, Visibility: database,
 		Fallback: core.NewBucketVisibilityFallback(objectPorts.Scope, objectPorts.Reader),
-	}, uM)
+	}, nil)
 	if err != nil {
 		t.Fatalf("construct bucket service: %v", err)
 	}
 	om := core.NewObjectManager(core.Dependencies{
 		Objects:       objectPorts,
 		BucketService: bucketService,
+		Storage:       core.StoragePorts{Access: cliFileStorageAccess{root: storageDir}},
 		Transfers: core.TransferPorts{
 			Pending: database,
 			Events:  database,
@@ -352,7 +372,7 @@ func newSyfonTestServer(t *testing.T) *fiberTestServer {
 			Counters:       database,
 			ProviderEvents: database,
 		},
-	}, uM)
+	})
 
 	drsAPI := api.Group("/ga4gh/drs/v1")
 	description := "Calypr test DRS server"
