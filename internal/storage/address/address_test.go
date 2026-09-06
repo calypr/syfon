@@ -17,10 +17,10 @@ func TestProviderAliasesAndSchemes(t *testing.T) {
 			t.Fatalf("NormalizeProvider(%q,%q)=%q want %q", tc.input, tc.fallback, got, tc.want)
 		}
 	}
-	if ProviderFromScheme("az") != AzureProvider || ProviderFromScheme("gcs") != GCSProvider {
+	if ProviderFromScheme("s3://") != S3Provider || ProviderFromScheme("az") != AzureProvider || ProviderFromScheme("gcs") != GCSProvider || ProviderFromScheme("file") != FileProvider {
 		t.Fatal("provider scheme aliases did not normalize")
 	}
-	if ProviderToScheme(GCSProvider) != "gs" || ProviderToScheme(AzureProvider) != "azblob" {
+	if ProviderToScheme(GCSProvider) != "gs" || ProviderToScheme(AzureProvider) != "azblob" || ProviderToScheme(FileProvider) != "file" || ProviderToScheme("unsupported") != "s3" {
 		t.Fatal("provider scheme output did not normalize")
 	}
 }
@@ -35,9 +35,12 @@ func TestProviderValidation(t *testing.T) {
 		{S3Provider, "EllrottLab", "https://rgw.example", false},
 		{S3Provider, "bad/name", "https://rgw.example", true},
 		{GCSProvider, "my.bucket.example", "", false},
+		{GCSProvider, "my_bucket", "", false},
+		{GCSProvider, "goog-bucket", "", true},
 		{GCSProvider, "192.168.1.1", "", true},
 		{AzureProvider, "my-azure-bucket", "", false},
 		{AzureProvider, "my.azure.bucket", "", true},
+		{FileProvider, "/tmp/storage-root", "", false},
 	}
 	for _, tc := range cases {
 		err := ValidateBucketNameWithEndpoint(tc.provider, tc.bucket, tc.endpoint)
@@ -60,6 +63,9 @@ func TestParseBucketProvider(t *testing.T) {
 	if _, err := ParseBucketProvider("unsupported"); err == nil {
 		t.Fatal("unsupported provider should fail")
 	}
+	if _, err := ParseBucketProvider("az"); err == nil {
+		t.Fatal("az should remain a URL-scheme alias, not a provider/config value")
+	}
 }
 
 func TestStorageAddressParsing(t *testing.T) {
@@ -75,6 +81,14 @@ func TestStorageAddressParsing(t *testing.T) {
 	}
 	if _, _, ok := ParseS3URL("https://example.com"); ok {
 		t.Fatal("non-s3 URL should not parse")
+	}
+	for _, raw := range []string{"s3://bucket", "s3://bucket/"} {
+		if _, _, ok := ParseS3URL(raw); ok {
+			t.Fatalf("legacy URL without a key should not parse: %q", raw)
+		}
+	}
+	if got, err := NormalizeStoragePath("", "bucket"); err != nil || got != "" {
+		t.Fatalf("NormalizeStoragePath(empty)=(%q,%v)", got, err)
 	}
 	if got, err := NormalizeStoragePath("gs://bucket/a/b", "bucket"); err != nil || got != "a/b" {
 		t.Fatalf("NormalizeStoragePath=(%q,%v)", got, err)
