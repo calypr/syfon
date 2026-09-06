@@ -7,10 +7,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/config"
 	"github.com/calypr/syfon/internal/crypto"
 	"github.com/calypr/syfon/internal/db/sqlite"
-	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/signer/azure"
 	"github.com/calypr/syfon/internal/signer/file"
 	"github.com/calypr/syfon/internal/signer/s3"
@@ -24,7 +24,7 @@ func TestManager_SignURL(t *testing.T) {
 		t.Fatalf("failed to init db: %v", err)
 	}
 
-	cred := &models.S3Credential{
+	cred := &buckets.Credential{
 		Bucket:    "my-bucket",
 		Provider:  "s3",
 		Region:    "us-east-1",
@@ -68,7 +68,7 @@ func TestManager_FileScheme(t *testing.T) {
 		t.Fatalf("failed to init db: %v", err)
 	}
 	root := t.TempDir()
-	if err := database.SaveS3Credential(ctx, &models.S3Credential{
+	if err := database.SaveS3Credential(ctx, &buckets.Credential{
 		Bucket:   "local-bucket",
 		Provider: "file",
 		Endpoint: root,
@@ -96,7 +96,7 @@ func TestManager_MultipartMethods(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to init db: %v", err)
 	}
-	if err := database.SaveS3Credential(ctx, &models.S3Credential{
+	if err := database.SaveS3Credential(ctx, &buckets.Credential{
 		Bucket:    "mp-bucket",
 		Provider:  "s3",
 		Region:    "us-east-1",
@@ -132,7 +132,7 @@ func TestManager_ResolveFallbackFromAccessIDToURLBucket(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to init db: %v", err)
 	}
-	if err := database.SaveS3Credential(ctx, &models.S3Credential{
+	if err := database.SaveS3Credential(ctx, &buckets.Credential{
 		Bucket:    "cbds",
 		Provider:  "s3",
 		Region:    "us-east-1",
@@ -161,7 +161,7 @@ func TestManager_AzureSignURLAndUploadURL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to init db: %v", err)
 	}
-	if err := database.SaveS3Credential(ctx, &models.S3Credential{
+	if err := database.SaveS3Credential(ctx, &buckets.Credential{
 		Bucket:    "az-container",
 		Provider:  "azure",
 		AccessKey: "devstoreaccount1",
@@ -212,7 +212,7 @@ func TestManager_SignDownloadPart_S3(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to init db: %v", err)
 	}
-	if err := database.SaveS3Credential(ctx, &models.S3Credential{
+	if err := database.SaveS3Credential(ctx, &buckets.Credential{
 		Bucket:    "download-bucket",
 		Provider:  "s3",
 		Region:    "us-east-1",
@@ -240,7 +240,7 @@ func TestManager_CompleteMultipartUpload_FailsOnUnreachableS3(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to init db: %v", err)
 	}
-	if err := database.SaveS3Credential(ctx, &models.S3Credential{
+	if err := database.SaveS3Credential(ctx, &buckets.Credential{
 		Bucket:    "mp-complete-bucket",
 		Provider:  "s3",
 		Region:    "us-east-1",
@@ -267,7 +267,7 @@ func TestManager_InvalidateBucketRefreshesSignerCache(t *testing.T) {
 		t.Fatalf("failed to init db: %v", err)
 	}
 
-	cred := &models.S3Credential{
+	cred := &buckets.Credential{
 		Bucket:    "ceph-bucket",
 		Provider:  "s3",
 		Region:    "us-east-1",

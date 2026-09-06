@@ -3,12 +3,13 @@ package postgres
 import (
 	"context"
 
-	sycommon "github.com/calypr/syfon/common"
-	"github.com/calypr/syfon/internal/models"
 	"github.com/lib/pq"
+
+	sycommon "github.com/calypr/syfon/common"
+	"github.com/calypr/syfon/internal/buckets"
 )
 
-func (db *PostgresDB) ListBucketVisibilityRows(ctx context.Context, resources []string, includeUnscoped, restrictToResources bool) ([]models.BucketVisibilityRow, error) {
+func (db *PostgresDB) ListBucketVisibilityRows(ctx context.Context, resources []string, includeUnscoped, restrictToResources bool) ([]buckets.VisibilityRow, error) {
 	args := make([]any, 0, 2)
 	query := `
 		SELECT DISTINCT am.url, am.type, COALESCE(ca.resource, '')
@@ -18,7 +19,7 @@ func (db *PostgresDB) ListBucketVisibilityRows(ctx context.Context, resources []
 	if restrictToResources {
 		resources = sycommon.NormalizeAccessResources(resources)
 		if len(resources) == 0 && !includeUnscoped {
-			return []models.BucketVisibilityRow{}, nil
+			return []buckets.VisibilityRow{}, nil
 		}
 		args = append(args, pq.Array(resources), includeUnscoped)
 		query += `
@@ -44,9 +45,9 @@ func (db *PostgresDB) ListBucketVisibilityRows(ctx context.Context, resources []
 	}
 	defer rows.Close()
 
-	out := make([]models.BucketVisibilityRow, 0)
+	out := make([]buckets.VisibilityRow, 0)
 	for rows.Next() {
-		var row models.BucketVisibilityRow
+		var row buckets.VisibilityRow
 		if err := rows.Scan(&row.AccessURL, &row.AccessType, &row.Resource); err != nil {
 			return nil, err
 		}

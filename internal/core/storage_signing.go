@@ -9,11 +9,10 @@ import (
 	"strings"
 
 	syfoncommon "github.com/calypr/syfon/common"
-	"github.com/calypr/syfon/internal/common"
+	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/faults"
-	"github.com/calypr/syfon/internal/models"
-
 	"github.com/calypr/syfon/internal/objects"
+	"github.com/calypr/syfon/internal/storage/address"
 	"github.com/calypr/syfon/internal/urlmanager"
 )
 
@@ -118,7 +117,7 @@ func (m *ObjectManager) ResolveScopedUploadTarget(ctx context.Context, organizat
 		return CanonicalStorageTarget{}, fmt.Errorf("%w: %v", faults.ErrInvalidInput, err)
 	}
 
-	scopes := make([]models.BucketScope, 0, 2)
+	scopes := make([]buckets.Scope, 0, 2)
 	if scope, found, err := m.bucketCatalog.lookupBucketScope(ctx, organization, ""); err != nil {
 		return CanonicalStorageTarget{}, err
 	} else if found {
@@ -188,7 +187,7 @@ func newCanonicalStorageTarget(bucket string, key string) CanonicalStorageTarget
 	return CanonicalStorageTarget{
 		Bucket: bucket,
 		Key:    key,
-		URL:    common.BucketToURL(bucket, key),
+		URL:    address.BucketToURL(bucket, key),
 	}
 }
 
@@ -211,7 +210,7 @@ func (m *ObjectManager) SignObjectDownloadPart(ctx context.Context, obj *objects
 	if err != nil {
 		return "", err
 	}
-	if b, _, ok := common.ParseS3URL(accessURL); ok {
+	if b, _, ok := address.ParseS3URL(accessURL); ok {
 		bucket = b
 	}
 	return m.SignDownloadPart(ctx, bucket, accessURL, start, end, options)
@@ -272,7 +271,7 @@ func (m *ObjectManager) resolveLegacyS3DownloadURL(ctx context.Context, obj *obj
 			continue
 		}
 		mappedKey := prefix + "/" + strings.TrimLeft(key, "/")
-		candidate := common.BucketToURL(targetBucket, mappedKey)
+		candidate := address.BucketToURL(targetBucket, mappedKey)
 		if len(mappedURLs) == 0 || mappedURLs[len(mappedURLs)-1] != candidate {
 			mappedURLs = append(mappedURLs, candidate)
 		}
@@ -297,14 +296,14 @@ func (m *ObjectManager) resolveLegacyS3DownloadURL(ctx context.Context, obj *obj
 }
 
 func (m *ObjectManager) resolveSigningBucket(ctx context.Context, accessURL string) string {
-	if bucket, _, ok := common.ParseS3URL(accessURL); ok {
+	if bucket, _, ok := address.ParseS3URL(accessURL); ok {
 		return bucket
 	}
 	return ""
 }
 
 func parseS3Location(accessURL string) (bucket string, key string, ok bool) {
-	if bucket, key, ok := common.ParseS3URL(accessURL); ok {
+	if bucket, key, ok := address.ParseS3URL(accessURL); ok {
 		return bucket, key, true
 	}
 	parsed, err := url.Parse(strings.TrimSpace(accessURL))
@@ -317,7 +316,7 @@ func parseS3Location(accessURL string) (bucket string, key string, ok bool) {
 	return strings.TrimSpace(parsed.Host), strings.Trim(strings.TrimSpace(parsed.Path), "/"), true
 }
 
-func normalizeScopedStorageKey(key string, scopes []models.BucketScope) string {
+func normalizeScopedStorageKey(key string, scopes []buckets.Scope) string {
 	key = strings.Trim(strings.TrimSpace(key), "/")
 	prefixes := normalizedScopePrefixes(scopes)
 	remainder := key
@@ -335,7 +334,7 @@ func normalizeScopedStorageKey(key string, scopes []models.BucketScope) string {
 	}
 }
 
-func normalizedScopePrefixes(scopes []models.BucketScope) []string {
+func normalizedScopePrefixes(scopes []buckets.Scope) []string {
 	prefixes := make([]string, 0, len(scopes))
 	for _, scope := range scopes {
 		prefix := strings.Trim(strings.TrimSpace(scope.PathPrefix), "/")
@@ -376,7 +375,7 @@ func trimLeadingStoragePrefix(key, prefix string) string {
 	return key
 }
 
-func (m *ObjectManager) bucketScopesForObject(ctx context.Context, obj *objects.Record) ([]models.BucketScope, error) {
+func (m *ObjectManager) bucketScopesForObject(ctx context.Context, obj *objects.Record) ([]buckets.Scope, error) {
 	if obj == nil {
 		return nil, nil
 	}
@@ -389,7 +388,7 @@ func (m *ObjectManager) bucketScopesForObject(ctx context.Context, obj *objects.
 		orgs = append(orgs, org)
 	}
 	sort.Strings(orgs)
-	scopes := make([]models.BucketScope, 0, len(orgs)*2)
+	scopes := make([]buckets.Scope, 0, len(orgs)*2)
 	for _, org := range orgs {
 		if scope, found, err := m.bucketCatalog.lookupBucketScope(ctx, org, ""); err != nil {
 			return nil, err

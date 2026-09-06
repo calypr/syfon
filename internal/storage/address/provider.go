@@ -1,4 +1,4 @@
-package common
+package address
 
 import (
 	"fmt"
@@ -90,15 +90,9 @@ func ParseBucketProvider(raw string) (string, error) {
 	}
 }
 
-// ValidateBucketName validates a bucket/container name for the given provider.
-//
-// The rules are intentionally provider-specific:
-// - s3 and azure share the stricter DNS-style naming rules.
-// - gcs permits dots and underscores but still requires a DNS-safe shape.
-
 // ValidateBucketNameWithEndpoint validates a bucket/container name for the
 // given provider and endpoint. S3-compatible backends with a custom endpoint
-// may allow bucket names that would be invalid for AWS virtual-hosted DNS names.
+// may allow names that would be invalid for AWS virtual-hosted DNS names.
 func ValidateBucketNameWithEndpoint(providerName, bucketName, endpoint string) error {
 	bucketName = strings.TrimSpace(bucketName)
 	if bucketName == "" {

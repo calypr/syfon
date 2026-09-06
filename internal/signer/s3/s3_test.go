@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/common"
-	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/signer"
 	"github.com/calypr/syfon/internal/testutils"
 )
@@ -22,7 +22,7 @@ func TestResponseContentDisposition(t *testing.T) {
 
 func TestS3Signer_getClients(t *testing.T) {
 	db := &testutils.MockDatabase{
-		Credentials: map[string]models.S3Credential{
+		Credentials: map[string]buckets.Credential{
 			"test-bucket": {
 				Bucket:    "test-bucket",
 				Region:    "us-east-1",
@@ -71,7 +71,7 @@ func TestS3Signer_getClients(t *testing.T) {
 		}
 		for _, tc := range cases {
 			signer.cache.Delete("bucket-" + tc.raw)
-			signer.db.(*testutils.MockDatabase).Credentials = map[string]models.S3Credential{
+			signer.db.(*testutils.MockDatabase).Credentials = map[string]buckets.Credential{
 				"bucket-" + tc.raw: {
 					Bucket:   "bucket-" + tc.raw,
 					Endpoint: tc.raw,
@@ -93,7 +93,7 @@ func TestS3Signer_getClients(t *testing.T) {
 
 func TestS3Signer_SignURL_EmbedsDownloadFilename(t *testing.T) {
 	db := &testutils.MockDatabase{
-		Credentials: map[string]models.S3Credential{
+		Credentials: map[string]buckets.Credential{
 			"test-bucket": {
 				Bucket:    "test-bucket",
 				Region:    "us-east-1",
@@ -128,7 +128,7 @@ func TestS3Signer_SignURL_EmbedsDownloadFilename(t *testing.T) {
 
 func TestS3Signer_SignDownloadPart_IncludesRangeSignature(t *testing.T) {
 	db := &testutils.MockDatabase{
-		Credentials: map[string]models.S3Credential{
+		Credentials: map[string]buckets.Credential{
 			"test-bucket": {
 				Bucket:    "test-bucket",
 				Region:    "us-east-1",
@@ -154,7 +154,7 @@ func TestS3Signer_SignDownloadPart_IncludesRangeSignature(t *testing.T) {
 
 func TestS3Signer_SignMultipartPart_IncludesUploadParams(t *testing.T) {
 	db := &testutils.MockDatabase{
-		Credentials: map[string]models.S3Credential{
+		Credentials: map[string]buckets.Credential{
 			"test-bucket": {
 				Bucket:    "test-bucket",
 				Region:    "us-east-1",
@@ -193,4 +193,3 @@ func TestS3Signer_MultipartMethods_UnknownBucketError(t *testing.T) {
 		t.Fatal("expected complete multipart error for missing bucket")
 	}
 }
-

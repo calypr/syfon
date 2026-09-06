@@ -8,15 +8,16 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/gofiber/fiber/v3"
+
 	"github.com/calypr/syfon/apigen/server/drs"
+	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/core"
 	httpdrs "github.com/calypr/syfon/internal/httpapi/drs"
-	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/testutils"
 	"github.com/calypr/syfon/internal/urlmanager"
-	"github.com/gofiber/fiber/v3"
 )
 
 type captureURLManager struct {
@@ -138,7 +139,7 @@ func TestDRSHandlers(t *testing.T) {
 					}},
 				},
 			},
-			BucketScopes: map[string]models.BucketScope{
+			BucketScopes: map[string]buckets.Scope{
 				"HTAN_INT|BForePC": {
 					Organization: "HTAN_INT",
 					ProjectID:    "BForePC",

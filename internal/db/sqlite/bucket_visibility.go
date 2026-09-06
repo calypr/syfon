@@ -5,10 +5,10 @@ import (
 	"strings"
 
 	sycommon "github.com/calypr/syfon/common"
-	"github.com/calypr/syfon/internal/models"
+	"github.com/calypr/syfon/internal/buckets"
 )
 
-func (db *SqliteDB) ListBucketVisibilityRows(ctx context.Context, resources []string, includeUnscoped, restrictToResources bool) ([]models.BucketVisibilityRow, error) {
+func (db *SqliteDB) ListBucketVisibilityRows(ctx context.Context, resources []string, includeUnscoped, restrictToResources bool) ([]buckets.VisibilityRow, error) {
 	args := make([]any, 0, len(resources))
 	query := `
 		SELECT DISTINCT am.url, am.type, COALESCE(ca.resource, '')
@@ -18,7 +18,7 @@ func (db *SqliteDB) ListBucketVisibilityRows(ctx context.Context, resources []st
 	if restrictToResources {
 		resources = sycommon.NormalizeAccessResources(resources)
 		if len(resources) == 0 && !includeUnscoped {
-			return []models.BucketVisibilityRow{}, nil
+			return []buckets.VisibilityRow{}, nil
 		}
 		parts := make([]string, 0, 2)
 		if len(resources) > 0 {
@@ -48,9 +48,9 @@ func (db *SqliteDB) ListBucketVisibilityRows(ctx context.Context, resources []st
 	}
 	defer rows.Close()
 
-	out := make([]models.BucketVisibilityRow, 0)
+	out := make([]buckets.VisibilityRow, 0)
 	for rows.Next() {
-		var row models.BucketVisibilityRow
+		var row buckets.VisibilityRow
 		if err := rows.Scan(&row.AccessURL, &row.AccessType, &row.Resource); err != nil {
 			return nil, err
 		}

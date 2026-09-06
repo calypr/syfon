@@ -8,17 +8,19 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
+
+	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/testutils"
-	"github.com/gofiber/fiber/v3"
 )
 
 func TestLFSUploadProxyNoBucket507(t *testing.T) {
 	ResetLFSLimitersForTest()
 	router, db := newLFSRouter()
-	db.Credentials = map[string]models.S3Credential{}
+	db.Credentials = map[string]buckets.Credential{}
 	db.NoDefaultCreds = true
 	req := httptest.NewRequest(http.MethodPut, "/info/lfs/objects/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", bytes.NewReader([]byte("x")))
 	rr := httptest.NewRecorder()
@@ -82,10 +84,10 @@ func TestLFSUploadProxyUsesPendingScopedCanonicalLocation(t *testing.T) {
 	oid := strings.Repeat("b", 64)
 	db := &testutils.MockDatabase{
 		Objects: map[string]*objects.Record{},
-		Credentials: map[string]models.S3Credential{
+		Credentials: map[string]buckets.Credential{
 			"syfon-e2e-bucket": {Bucket: "syfon-e2e-bucket", Provider: "s3", Region: "us-west-2"},
 		},
-		BucketScopes: map[string]models.BucketScope{
+		BucketScopes: map[string]buckets.Scope{
 			"syfon|": {
 				Organization: "syfon",
 				Bucket:       "syfon-e2e-bucket",

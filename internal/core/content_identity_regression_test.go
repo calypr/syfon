@@ -4,14 +4,14 @@ import (
 	"context"
 	"testing"
 
-	"github.com/calypr/syfon/internal/models"
+	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/testutils"
 	"github.com/calypr/syfon/internal/urlmanager"
 )
 
 func TestMergedContentPreservesReplicaLocation(t *testing.T) {
-	db := &coreTestDB{MockDatabase: &testutils.MockDatabase{BucketScopes: map[string]models.BucketScope{
+	db := &coreTestDB{MockDatabase: &testutils.MockDatabase{BucketScopes: map[string]buckets.Scope{
 		"org|a": {Organization: "org", ProjectID: "a", Bucket: "bucket-a", PathPrefix: "a"},
 		"org|b": {Organization: "org", ProjectID: "b", Bucket: "bucket-b", PathPrefix: "b"},
 	}}}

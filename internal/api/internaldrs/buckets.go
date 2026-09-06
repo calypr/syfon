@@ -4,15 +4,17 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/gofiber/fiber/v3"
+
 	"github.com/calypr/syfon/apigen/server/bucketapi"
 	"github.com/calypr/syfon/internal/api/apiutil"
 	"github.com/calypr/syfon/internal/api/routeutil"
+	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/faults"
 	apimiddleware "github.com/calypr/syfon/internal/httpapi/middleware"
-	"github.com/calypr/syfon/internal/models"
-	"github.com/gofiber/fiber/v3"
+	"github.com/calypr/syfon/internal/storage/address"
 )
 
 func registerInternalBucketRoutes(router fiber.Router, om *core.ObjectManager) {
@@ -66,7 +68,7 @@ func handleInternalPutBucketFiber(c fiber.Ctx, om *core.ObjectManager) error {
 	}
 
 	rawProvider := strings.TrimSpace(common.StringVal(req.Provider))
-	bucketProvider, err := common.ParseBucketProvider(rawProvider)
+	bucketProvider, err := address.ParseBucketProvider(rawProvider)
 	if err != nil {
 		return apiutil.Reject(c, fiber.StatusBadRequest, "provider must be one of: s3, gcs, azure")
 	}
@@ -89,13 +91,13 @@ func handleInternalPutBucketFiber(c fiber.Ctx, om *core.ObjectManager) error {
 		return apiutil.HandleError(c, err)
 	}
 
-	prefix, err := common.NormalizeStoragePath(readOptionalPath(req.Path), req.Bucket)
+	prefix, err := address.NormalizeStoragePath(readOptionalPath(req.Path), req.Bucket)
 	if err != nil {
 		return apiutil.Reject(c, fiber.StatusBadRequest, err.Error())
 	}
 
 	credentialID := ""
-	var existingCred *models.S3Credential
+	var existingCred *buckets.Credential
 	var credErr error
 	existingCred, credErr = om.GetS3Credential(c.Context(), req.Bucket)
 	if credErr != nil && !isCredentialNotFoundError(credErr) {
@@ -105,7 +107,7 @@ func handleInternalPutBucketFiber(c fiber.Ctx, om *core.ObjectManager) error {
 		credentialID = existingCred.CredentialID
 	}
 	if credentialID == "" {
-		credentialID = common.DeriveCredentialID(req.Bucket, bucketProvider, region, endpoint, accessKey)
+		credentialID = buckets.DeriveCredentialID(req.Bucket, bucketProvider, region, endpoint, accessKey)
 	}
 	if existingCred == nil {
 		existingCred, credErr = om.GetS3Credential(c.Context(), credentialID)
@@ -123,13 +125,13 @@ func handleInternalPutBucketFiber(c fiber.Ctx, om *core.ObjectManager) error {
 		rawProvider == "" &&
 		req.Organization != ""
 
-	if !hasExistingCred && bucketProvider == common.S3Provider &&
+	if !hasExistingCred && bucketProvider == address.S3Provider &&
 		(accessKey == "" || secretKey == "") {
 		return apiutil.Reject(c, fiber.StatusBadRequest, "access_key and secret_key are required for new s3 credentials")
 	}
 
 	if req.Organization != "" {
-		if err := om.CreateBucketScope(c.Context(), &models.BucketScope{
+		if err := om.CreateBucketScope(c.Context(), &buckets.Scope{
 			Organization: req.Organization,
 			ProjectID:    req.ProjectId,
 			CredentialID: credentialID,
@@ -157,11 +159,11 @@ func handleInternalPutBucketFiber(c fiber.Ctx, om *core.ObjectManager) error {
 			endpoint = existingCred.Endpoint
 		}
 	}
-	if err := common.ValidateBucketNameWithEndpoint(bucketProvider, req.Bucket, endpoint); err != nil {
+	if err := address.ValidateBucketNameWithEndpoint(bucketProvider, req.Bucket, endpoint); err != nil {
 		return apiutil.Reject(c, fiber.StatusBadRequest, err.Error())
 	}
 
-	cred := &models.S3Credential{
+	cred := &buckets.Credential{
 		CredentialID: credentialID,
 		Bucket:       req.Bucket,
 		Provider:     bucketProvider,
@@ -170,7 +172,7 @@ func handleInternalPutBucketFiber(c fiber.Ctx, om *core.ObjectManager) error {
 		SecretKey:    secretKey,
 		Endpoint:     endpoint,
 	}
-	if bucketProvider == common.S3Provider && (strings.TrimSpace(cred.AccessKey) == "" || strings.TrimSpace(cred.SecretKey) == "") {
+	if bucketProvider == address.S3Provider && (strings.TrimSpace(cred.AccessKey) == "" || strings.TrimSpace(cred.SecretKey) == "") {
 		return apiutil.Reject(c, fiber.StatusBadRequest, "access_key and secret_key are required for s3 credentials")
 	}
 	if err := om.SaveS3Credential(c.Context(), cred); err != nil {
@@ -220,11 +222,11 @@ func handleInternalCreateBucketScopeFiber(c fiber.Ctx, om *core.ObjectManager) e
 		return apiutil.HandleError(c, err)
 	}
 
-	prefix, err := common.NormalizeStoragePath(readOptionalPath(req.Path), cred.Bucket)
+	prefix, err := address.NormalizeStoragePath(readOptionalPath(req.Path), cred.Bucket)
 	if err != nil {
 		return apiutil.Reject(c, fiber.StatusBadRequest, err.Error())
 	}
-	if err := om.CreateBucketScope(c.Context(), &models.BucketScope{
+	if err := om.CreateBucketScope(c.Context(), &buckets.Scope{
 		Organization: req.Organization,
 		ProjectID:    req.ProjectId,
 		CredentialID: cred.CredentialID,
@@ -257,7 +259,7 @@ func handleInternalDeleteBucketScopeFiber(c fiber.Ctx, om *core.ObjectManager) e
 		if err != nil {
 			return apiutil.HandleError(c, err)
 		}
-		pathPrefix, err = common.NormalizeStoragePath(scopePath, cred.Bucket)
+		pathPrefix, err = address.NormalizeStoragePath(scopePath, cred.Bucket)
 		if err != nil {
 			return apiutil.Reject(c, fiber.StatusBadRequest, err.Error())
 		}
@@ -364,7 +366,7 @@ func handleInternalListBucketScopesFiber(c fiber.Ctx, om *core.ObjectManager) er
 			}
 			scheme := "s3"
 			if cred, err := om.GetS3Credential(c.Context(), scope.CredentialID); err == nil && cred != nil {
-				scheme = common.ProviderToScheme(cred.Provider)
+				scheme = address.ProviderToScheme(cred.Provider)
 			}
 			path := fmt.Sprintf("%s://%s", scheme, scope.Bucket)
 			if strings.TrimSpace(scope.PathPrefix) != "" {

@@ -7,10 +7,9 @@ import (
 	"regexp"
 	"testing"
 
-	"github.com/calypr/syfon/internal/common"
+	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/crypto"
 	"github.com/calypr/syfon/internal/faults"
-	"github.com/calypr/syfon/internal/models"
 
 	"github.com/DATA-DOG/go-sqlmock"
 )
@@ -104,7 +103,7 @@ func TestSaveS3Credential(t *testing.T) {
 	t.Setenv(crypto.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
 	pg, mock, rawDB := newMockPostgresDB(t)
 	defer rawDB.Close()
-	derivedID := common.DeriveCredentialID("b1", "", "us-east-1", "https://s3.example", "ak")
+	derivedID := buckets.DeriveCredentialID("b1", "", "us-east-1", "https://s3.example", "ak")
 
 	mock.ExpectQuery(regexp.QuoteMeta(`
 		SELECT credential_id
@@ -127,7 +126,7 @@ func TestSaveS3Credential(t *testing.T) {
 		WithArgs(derivedID, "b1", "s3", "us-east-1", sqlmock.AnyArg(), sqlmock.AnyArg(), "https://s3.example").
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
-	err := pg.SaveS3Credential(context.Background(), &models.S3Credential{
+	err := pg.SaveS3Credential(context.Background(), &buckets.Credential{
 		Bucket:    "b1",
 		Provider:  "",
 		Region:    "us-east-1",
@@ -154,7 +153,7 @@ func TestSaveS3CredentialRejectsDuplicatePhysicalBucket(t *testing.T) {
 		WithArgs("shared-bucket", "org-b/default").
 		WillReturnRows(sqlmock.NewRows([]string{"credential_id"}).AddRow("org-a/default"))
 
-	err := pg.SaveS3Credential(context.Background(), &models.S3Credential{
+	err := pg.SaveS3Credential(context.Background(), &buckets.Credential{
 		CredentialID: "org-b/default",
 		Bucket:       "shared-bucket",
 		Provider:     "s3",
@@ -234,7 +233,7 @@ func TestCreateBucketScope(t *testing.T) {
 		if err := pg.CreateBucketScope(context.Background(), nil); err == nil {
 			t.Fatal("expected nil scope validation error")
 		}
-		if err := pg.CreateBucketScope(context.Background(), &models.BucketScope{}); err == nil {
+		if err := pg.CreateBucketScope(context.Background(), &buckets.Scope{}); err == nil {
 			t.Fatal("expected required field validation error")
 		}
 	})
@@ -253,7 +252,7 @@ func TestCreateBucketScope(t *testing.T) {
 			WithArgs("org", "proj").
 			WillReturnRows(rows)
 
-		err := pg.CreateBucketScope(context.Background(), &models.BucketScope{
+		err := pg.CreateBucketScope(context.Background(), &buckets.Scope{
 			Organization: "org",
 			ProjectID:    "proj",
 			Bucket:       "bucket-a",
@@ -286,7 +285,7 @@ func TestCreateBucketScope(t *testing.T) {
 			WithArgs("bucket-b", "bucket-b", "prefix-b", "org", "proj").
 			WillReturnResult(sqlmock.NewResult(0, 1))
 
-		err := pg.CreateBucketScope(context.Background(), &models.BucketScope{
+		err := pg.CreateBucketScope(context.Background(), &buckets.Scope{
 			Organization: "org",
 			ProjectID:    "proj",
 			Bucket:       "bucket-b",
@@ -316,7 +315,7 @@ func TestCreateBucketScope(t *testing.T) {
 			WithArgs("org", "proj", "bucket-a", "bucket-a", "nested/path").
 			WillReturnResult(sqlmock.NewResult(1, 1))
 
-		err := pg.CreateBucketScope(context.Background(), &models.BucketScope{
+		err := pg.CreateBucketScope(context.Background(), &buckets.Scope{
 			Organization: " org ",
 			ProjectID:    " proj ",
 			Bucket:       " bucket-a ",

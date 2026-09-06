@@ -16,12 +16,13 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/smithy-go"
+
 	syfoncommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/access"
-	"github.com/calypr/syfon/internal/common"
+	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/faults"
-	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/requestmeta"
+	"github.com/calypr/syfon/internal/storage/address"
 )
 
 type InspectStorageRequest struct {
@@ -120,7 +121,7 @@ type s3HeadObjectClient interface {
 var storageInspectCacheKey contextKey = "storageInspectCache"
 
 type storageInspectCredentialCacheEntry struct {
-	cred *models.S3Credential
+	cred *buckets.Credential
 	err  error
 }
 
@@ -159,7 +160,7 @@ func storageInspectCacheFromContext(ctx context.Context) *storageInspectRequestC
 	return cache
 }
 
-func (m *ObjectManager) SetS3ObjectInspector(fn func(context.Context, models.S3Credential, string, string) (*StorageObjectMetadata, error)) {
+func (m *ObjectManager) SetS3ObjectInspector(fn func(context.Context, buckets.Credential, string, string) (*StorageObjectMetadata, error)) {
 	if fn == nil {
 		m.inspectS3Object = defaultS3ObjectInspector
 		return
@@ -370,9 +371,9 @@ func (m *ObjectManager) inspectScopedStorageObject(ctx context.Context, req Insp
 	}
 	scheme := strings.ToLower(strings.TrimSpace(req.Scheme))
 	if scheme == "" {
-		scheme = common.S3Provider
+		scheme = address.S3Provider
 	}
-	if scheme != common.S3Provider {
+	if scheme != address.S3Provider {
 		return nil, &StorageInspectError{Kind: StorageInspectUnsupported, Message: fmt.Sprintf("provider scheme %q is not supported for server-backed add-url inspection", scheme)}
 	}
 
@@ -395,7 +396,7 @@ func (m *ObjectManager) inspectScopedStorageObject(ctx context.Context, req Insp
 	if err != nil {
 		return nil, err
 	}
-	if common.NormalizeProvider(cred.Provider, common.S3Provider) != common.S3Provider {
+	if address.NormalizeProvider(cred.Provider, address.S3Provider) != address.S3Provider {
 		return nil, &StorageInspectError{Kind: StorageInspectUnsupported, Message: fmt.Sprintf("provider %q is not supported for server-backed add-url inspection", cred.Provider)}
 	}
 	meta, err := m.inspectS3Object(ctx, *cred, target.Bucket, target.Key)
@@ -403,7 +404,7 @@ func (m *ObjectManager) inspectScopedStorageObject(ctx context.Context, req Insp
 		return nil, err
 	}
 	meta.ObjectURL = target.URL
-	meta.Provider = common.S3Provider
+	meta.Provider = address.S3Provider
 	meta.Bucket = target.Bucket
 	meta.Key = target.Key
 	if strings.TrimSpace(meta.Path) == "" {
@@ -414,7 +415,7 @@ func (m *ObjectManager) inspectScopedStorageObject(ctx context.Context, req Insp
 
 func (m *ObjectManager) inspectRawStorageObject(ctx context.Context, req InspectStorageRequest) (*StorageObjectMetadata, error) {
 	rawURL := strings.TrimSpace(req.ObjectURL)
-	bucket, key, ok := common.ParseS3URL(rawURL)
+	bucket, key, ok := address.ParseS3URL(rawURL)
 	if !ok {
 		return nil, &StorageInspectError{Kind: StorageInspectInvalidInput, Message: "object_url must be a valid s3://bucket/key URL"}
 	}
@@ -429,15 +430,15 @@ func (m *ObjectManager) inspectRawStorageObject(ctx context.Context, req Inspect
 	if !bucketVisibleToCaller(visible, bucket, m.bucketCatalog.credentialIDForCredential(*cred)) {
 		return nil, &StorageInspectError{Kind: StorageInspectPermissionDenied, Message: fmt.Sprintf("bucket %q is not visible to the caller", bucket)}
 	}
-	if common.NormalizeProvider(cred.Provider, common.S3Provider) != common.S3Provider {
+	if address.NormalizeProvider(cred.Provider, address.S3Provider) != address.S3Provider {
 		return nil, &StorageInspectError{Kind: StorageInspectUnsupported, Message: fmt.Sprintf("provider %q is not supported for server-backed add-url inspection", cred.Provider)}
 	}
 	meta, err := m.inspectS3Object(ctx, *cred, bucket, key)
 	if err != nil {
 		return nil, err
 	}
-	meta.ObjectURL = common.BucketToURL(bucket, key)
-	meta.Provider = common.S3Provider
+	meta.ObjectURL = address.BucketToURL(bucket, key)
+	meta.Provider = address.S3Provider
 	meta.Bucket = bucket
 	meta.Key = key
 	if strings.TrimSpace(meta.Path) == "" {
@@ -446,7 +447,7 @@ func (m *ObjectManager) inspectRawStorageObject(ctx context.Context, req Inspect
 	return meta, nil
 }
 
-func (m *ObjectManager) credentialForBucket(ctx context.Context, bucket string) (*models.S3Credential, error) {
+func (m *ObjectManager) credentialForBucket(ctx context.Context, bucket string) (*buckets.Credential, error) {
 	bucket = strings.TrimSpace(bucket)
 	if bucket == "" {
 		return nil, &StorageInspectError{Kind: StorageInspectInvalidInput, Message: "bucket is required"}
@@ -507,7 +508,7 @@ func (m *ObjectManager) listVisibleBucketsCached(ctx context.Context) (map[strin
 	return visible, err
 }
 
-func (c *storageInspectRequestCache) getCredential(bucket string) (*models.S3Credential, error, bool) {
+func (c *storageInspectRequestCache) getCredential(bucket string) (*buckets.Credential, error, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	entry, ok := c.credentials[strings.ToLower(strings.TrimSpace(bucket))]
@@ -521,7 +522,7 @@ func (c *storageInspectRequestCache) getCredential(bucket string) (*models.S3Cre
 	return &copy, entry.err, true
 }
 
-func (c *storageInspectRequestCache) setCredential(bucket string, cred *models.S3Credential, err error) {
+func (c *storageInspectRequestCache) setCredential(bucket string, cred *buckets.Credential, err error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	key := strings.ToLower(strings.TrimSpace(bucket))
@@ -582,7 +583,7 @@ func cloneVisibleBuckets(in map[string]VisibleBucket) map[string]VisibleBucket {
 	return out
 }
 
-func s3ClientFromContext(ctx context.Context, cred models.S3Credential) (*awss3.Client, error) {
+func s3ClientFromContext(ctx context.Context, cred buckets.Credential) (*awss3.Client, error) {
 	cacheKey := s3ClientCacheKey(cred)
 	if cache := storageInspectCacheFromContext(ctx); cache != nil {
 		if client, ok := cache.getS3Client(cacheKey); ok {
@@ -618,7 +619,7 @@ func s3ClientFromContext(ctx context.Context, cred models.S3Credential) (*awss3.
 	return client, nil
 }
 
-func s3ClientCacheKey(cred models.S3Credential) string {
+func s3ClientCacheKey(cred buckets.Credential) string {
 	return strings.ToLower(strings.TrimSpace(cred.Provider)) + "|" +
 		strings.TrimSpace(cred.Endpoint) + "|" +
 		strings.TrimSpace(cred.Region) + "|" +
@@ -627,7 +628,7 @@ func s3ClientCacheKey(cred models.S3Credential) string {
 		strings.TrimSpace(cred.CredentialID)
 }
 
-func defaultS3ObjectInspector(ctx context.Context, cred models.S3Credential, bucket string, key string) (*StorageObjectMetadata, error) {
+func defaultS3ObjectInspector(ctx context.Context, cred buckets.Credential, bucket string, key string) (*StorageObjectMetadata, error) {
 	client, err := s3ClientFromContext(ctx, cred)
 	if err != nil {
 		return nil, err
@@ -656,10 +657,10 @@ func defaultS3ObjectInspector(ctx context.Context, cred models.S3Credential, buc
 		lastMod = *out.LastModified
 	}
 	return &StorageObjectMetadata{
-		Provider:    common.S3Provider,
+		Provider:    address.S3Provider,
 		Bucket:      bucket,
 		Key:         key,
-		ObjectURL:   common.BucketToURL(bucket, key),
+		ObjectURL:   address.BucketToURL(bucket, key),
 		Path:        path.Base(key),
 		SizeBytes:   size,
 		ETag:        strings.Trim(strings.TrimSpace(aws.ToString(out.ETag)), "\""),

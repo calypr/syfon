@@ -9,6 +9,7 @@ import (
 
 	"github.com/calypr/syfon/apigen/server/drs"
 	sycommon "github.com/calypr/syfon/common"
+	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/faults"
 	"github.com/calypr/syfon/internal/models"
@@ -21,8 +22,8 @@ import (
 type MockDatabase struct {
 	Objects                map[string]*objects.Record
 	ObjectAuthz            map[string]map[string][]string
-	Credentials            map[string]models.S3Credential
-	BucketScopes           map[string]models.BucketScope
+	Credentials            map[string]buckets.Credential
+	BucketScopes           map[string]buckets.Scope
 	PendingMeta            map[string]models.PendingLFSMeta
 	Usage                  map[string]models.FileUsage
 	TransferEvents         []models.TransferAttributionEvent
@@ -422,7 +423,7 @@ func (m *MockDatabase) BulkUpdateAccessMethods(ctx context.Context, updates map[
 	return nil
 }
 
-func (m *MockDatabase) GetS3Credential(ctx context.Context, bucket string) (*models.S3Credential, error) {
+func (m *MockDatabase) GetS3Credential(ctx context.Context, bucket string) (*buckets.Credential, error) {
 	if m.Credentials != nil {
 		if cred, ok := m.Credentials[bucket]; ok {
 			c := cred
@@ -438,7 +439,7 @@ func (m *MockDatabase) GetS3Credential(ctx context.Context, bucket string) (*mod
 	if m.NoDefaultCreds {
 		return nil, nil
 	}
-	return &models.S3Credential{
+	return &buckets.Credential{
 		CredentialID: bucket,
 		Bucket:       bucket,
 		Provider:     "s3",
@@ -448,9 +449,9 @@ func (m *MockDatabase) GetS3Credential(ctx context.Context, bucket string) (*mod
 	}, nil
 }
 
-func (m *MockDatabase) SaveS3Credential(ctx context.Context, cred *models.S3Credential) error {
+func (m *MockDatabase) SaveS3Credential(ctx context.Context, cred *buckets.Credential) error {
 	if m.Credentials == nil {
-		m.Credentials = make(map[string]models.S3Credential)
+		m.Credentials = make(map[string]buckets.Credential)
 	}
 	key := strings.TrimSpace(cred.CredentialID)
 	if key == "" {
@@ -467,18 +468,18 @@ func (m *MockDatabase) DeleteS3Credential(ctx context.Context, bucket string) er
 	return nil
 }
 
-func (m *MockDatabase) ListS3Credentials(ctx context.Context) ([]models.S3Credential, error) {
+func (m *MockDatabase) ListS3Credentials(ctx context.Context) ([]buckets.Credential, error) {
 	if len(m.Credentials) > 0 {
-		out := make([]models.S3Credential, 0, len(m.Credentials))
+		out := make([]buckets.Credential, 0, len(m.Credentials))
 		for _, v := range m.Credentials {
 			out = append(out, v)
 		}
 		return out, nil
 	}
 	if m.NoDefaultCreds {
-		return []models.S3Credential{}, nil
+		return []buckets.Credential{}, nil
 	}
-	return []models.S3Credential{
+	return []buckets.Credential{
 		{CredentialID: "test-bucket-1", Bucket: "test-bucket-1", Provider: "s3", Region: "us-east-1"},
 	}, nil
 }
@@ -487,12 +488,12 @@ func bucketScopeKey(org, project string) string {
 	return strings.TrimSpace(org) + "|" + strings.TrimSpace(project)
 }
 
-func (m *MockDatabase) CreateBucketScope(ctx context.Context, scope *models.BucketScope) error {
+func (m *MockDatabase) CreateBucketScope(ctx context.Context, scope *buckets.Scope) error {
 	if scope == nil {
 		return fmt.Errorf("scope is required")
 	}
 	if m.BucketScopes == nil {
-		m.BucketScopes = make(map[string]models.BucketScope)
+		m.BucketScopes = make(map[string]buckets.Scope)
 	}
 	k := bucketScopeKey(scope.Organization, scope.ProjectID)
 	m.BucketScopes[k] = *scope
@@ -519,7 +520,7 @@ func (m *MockDatabase) DeleteBucketScope(ctx context.Context, organization, proj
 	return nil
 }
 
-func (m *MockDatabase) GetBucketScope(ctx context.Context, organization, projectID string) (*models.BucketScope, error) {
+func (m *MockDatabase) GetBucketScope(ctx context.Context, organization, projectID string) (*buckets.Scope, error) {
 	m.GetBucketScopeCalls++
 	if m.BucketScopes == nil {
 		return nil, fmt.Errorf("%w: bucket scope not found", faults.ErrNotFound)
@@ -533,8 +534,8 @@ func (m *MockDatabase) GetBucketScope(ctx context.Context, organization, project
 	return &cp, nil
 }
 
-func (m *MockDatabase) ListBucketScopes(ctx context.Context) ([]models.BucketScope, error) {
-	out := make([]models.BucketScope, 0, len(m.BucketScopes))
+func (m *MockDatabase) ListBucketScopes(ctx context.Context) ([]buckets.Scope, error) {
+	out := make([]buckets.Scope, 0, len(m.BucketScopes))
 	for _, s := range m.BucketScopes {
 		out = append(out, s)
 	}

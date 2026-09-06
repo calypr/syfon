@@ -1,13 +1,6 @@
 package config
 
-import "github.com/calypr/syfon/internal/common"
-
 const (
-	S3Prefix    = common.S3Prefix
-	GCSPrefix   = common.GCSPrefix
-	AzurePrefix = common.AzurePrefix
-	DRSPrefix   = common.DRSPrefix
-
 	// --- Route Constants ---
 	RouteHealthz = "/healthz"
 

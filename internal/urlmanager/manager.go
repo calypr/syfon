@@ -7,11 +7,11 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/calypr/syfon/internal/common"
+	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/config"
 	"github.com/calypr/syfon/internal/db"
-	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/signer"
+	"github.com/calypr/syfon/internal/storage/address"
 )
 
 // Manager is the unified implementation of UrlManager.
@@ -31,7 +31,7 @@ func NewManager(database db.CredentialStore, signing config.SigningConfig) *Mana
 	return &Manager{
 		database:        database,
 		signing:         signing,
-		defaultProvider: common.S3Provider,
+		defaultProvider: address.S3Provider,
 		signers:         make(map[string]signer.Signer),
 	}
 }
@@ -157,8 +157,8 @@ func (m *Manager) resolve(ctx context.Context, accessId string, urlStr string) (
 	}
 
 	// Fallback to URL scheme
-	schemeProvider := common.ProviderFromScheme(u.Scheme)
-	p = common.NormalizeProvider(schemeProvider, m.defaultProvider)
+	schemeProvider := address.ProviderFromScheme(u.Scheme)
+	p = address.NormalizeProvider(schemeProvider, m.defaultProvider)
 	return bucket, key, p, nil
 }
 
@@ -167,10 +167,10 @@ func (m *Manager) resolveProviderForBucket(ctx context.Context, bucket string) (
 	if err != nil {
 		return "", err
 	}
-	return common.NormalizeProvider(cred.Provider, m.defaultProvider), nil
+	return address.NormalizeProvider(cred.Provider, m.defaultProvider), nil
 }
 
-func (m *Manager) credentialForBucket(ctx context.Context, bucket string) (*models.S3Credential, error) {
+func (m *Manager) credentialForBucket(ctx context.Context, bucket string) (*buckets.Credential, error) {
 	key := strings.TrimSpace(bucket)
 	if key == "" {
 		return nil, fmt.Errorf("bucket is required")

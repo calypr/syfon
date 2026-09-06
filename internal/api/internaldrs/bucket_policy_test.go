@@ -6,12 +6,12 @@ import (
 	"testing"
 
 	sycommon "github.com/calypr/syfon/common"
+	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/faults"
-	"github.com/calypr/syfon/internal/models"
 )
 
 func TestBucketPolicyHelpers(t *testing.T) {
-	scope := models.BucketScope{
+	scope := buckets.Scope{
 		Organization: "org",
 		ProjectID:    "proj",
 		Bucket:       "bucket-a",
@@ -42,10 +42,10 @@ func TestBucketPolicyHelpers(t *testing.T) {
 			resource: {"read": true},
 		})
 
-		if !bucketsAllowedByNames(ctx, []models.BucketScope{scope}, "bucket-a", "read") {
+		if !bucketsAllowedByNames(ctx, []buckets.Scope{scope}, "bucket-a", "read") {
 			t.Fatal("expected bucket name match to be allowed")
 		}
-		if bucketsAllowedByNames(ctx, []models.BucketScope{scope}, "bucket-b", "read") {
+		if bucketsAllowedByNames(ctx, []buckets.Scope{scope}, "bucket-b", "read") {
 			t.Fatal("expected non-matching bucket to be denied")
 		}
 	})

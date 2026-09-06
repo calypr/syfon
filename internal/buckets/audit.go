@@ -1,16 +1,16 @@
-package common
+package buckets
 
 import (
 	"context"
 	"log/slog"
 
 	"github.com/calypr/syfon/internal/access"
-	"github.com/calypr/syfon/internal/requestmeta"
 )
 
-// AuditS3CredentialAccess logs credential access events with request/mode context.
-func AuditS3CredentialAccess(ctx context.Context, action string, bucket string, err error) {
-	requestID := requestmeta.GetRequestID(ctx)
+// AuditCredentialAccess logs credential access events with request and auth
+// mode context. The fields and result policy intentionally match the legacy
+// S3 credential audit contract.
+func AuditCredentialAccess(ctx context.Context, requestID string, action string, bucket string, err error) {
 	mode := "local"
 	if access.FromContext(ctx).Mode == "gen3" {
 		mode = "gen3"

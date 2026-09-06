@@ -8,10 +8,10 @@ import (
 
 	sycommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/access"
+	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/faults"
 	apimiddleware "github.com/calypr/syfon/internal/httpapi/middleware"
-	"github.com/calypr/syfon/internal/models"
 )
 
 func readOptionalPath(path *string) string {
@@ -34,7 +34,7 @@ func decodeStrictJSON(body []byte, dst any) error {
 	return nil
 }
 
-func bucketScopeAllowed(ctx context.Context, scope models.BucketScope, methods ...string) bool {
+func bucketScopeAllowed(ctx context.Context, scope buckets.Scope, methods ...string) bool {
 	resource, err := sycommon.ResourcePath(scope.Organization, scope.ProjectID)
 	if err != nil || resource == "" {
 		return false
@@ -50,7 +50,7 @@ func serviceResourceAllowed(ctx context.Context, resource, service string, metho
 	return access.HasAnyServiceMethodAccess(ctx, []string{resource}, service, methods...)
 }
 
-func bucketsAllowedByNames(ctx context.Context, scopes []models.BucketScope, bucket string, methods ...string) bool {
+func bucketsAllowedByNames(ctx context.Context, scopes []buckets.Scope, bucket string, methods ...string) bool {
 	for _, scope := range scopes {
 		if scope.Bucket != bucket {
 			continue

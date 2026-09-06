@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"github.com/calypr/syfon/internal/access"
+	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/core"
-	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/testutils"
 	"github.com/calypr/syfon/internal/urlmanager"
@@ -84,7 +84,7 @@ func TestPrepareDownloadActions_MapsLegacyReplicaURL(t *testing.T) {
 				}},
 			},
 		},
-		BucketScopes: map[string]models.BucketScope{
+		BucketScopes: map[string]buckets.Scope{
 			"HTAN_INT|BForePC": {
 				Organization: "HTAN_INT",
 				ProjectID:    "BForePC",

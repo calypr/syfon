@@ -1,10 +1,12 @@
-package common
+package buckets
 
 import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"strings"
+
+	"github.com/calypr/syfon/internal/storage/address"
 )
 
 const credentialIDHashLength = 12
@@ -13,7 +15,7 @@ const credentialIDHashLength = 12
 // credential identity. SecretKey is intentionally excluded so credential
 // rotation does not change the identity.
 func DeriveCredentialID(bucket, provider, region, endpoint, accessKey string) string {
-	normalizedProvider := NormalizeProvider(provider, S3Provider)
+	normalizedProvider := address.NormalizeProvider(provider, address.S3Provider)
 	normalizedEndpoint := strings.TrimRight(strings.ToLower(strings.TrimSpace(endpoint)), "/")
 	normalizedRegion := strings.ToLower(strings.TrimSpace(region))
 	normalizedBucket := strings.TrimSpace(bucket)

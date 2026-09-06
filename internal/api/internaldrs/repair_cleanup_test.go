@@ -9,8 +9,8 @@ import (
 	"testing"
 
 	sycommon "github.com/calypr/syfon/common"
+	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/core"
-	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/repair"
 	"github.com/calypr/syfon/internal/testutils"
 )
@@ -18,7 +18,7 @@ import (
 func TestStorageRepairInspectorReturnsCanonicalURL(t *testing.T) {
 	db := storageRepairTestDatabase()
 	om := core.NewObjectManager(db, &testutils.MockUrlManager{})
-	om.SetS3ObjectInspector(func(ctx context.Context, cred models.S3Credential, bucket, key string) (*core.StorageObjectMetadata, error) {
+	om.SetS3ObjectInspector(func(ctx context.Context, cred buckets.Credential, bucket, key string) (*core.StorageObjectMetadata, error) {
 		return &core.StorageObjectMetadata{Bucket: bucket, Key: key}, nil
 	})
 
@@ -37,7 +37,7 @@ func TestStorageRepairInspectorReturnsCanonicalURL(t *testing.T) {
 
 func TestStorageRepairInspectorClassifiesMissingObject(t *testing.T) {
 	om := core.NewObjectManager(storageRepairTestDatabase(), &testutils.MockUrlManager{})
-	om.SetS3ObjectInspector(func(ctx context.Context, cred models.S3Credential, bucket, key string) (*core.StorageObjectMetadata, error) {
+	om.SetS3ObjectInspector(func(ctx context.Context, cred buckets.Credential, bucket, key string) (*core.StorageObjectMetadata, error) {
 		return nil, &core.StorageInspectError{Kind: core.StorageInspectObjectNotFound, Message: "provider could not find object"}
 	})
 
@@ -50,7 +50,7 @@ func TestStorageRepairInspectorClassifiesMissingObject(t *testing.T) {
 func TestStorageRepairInspectorPreservesAuthorizationAndCredentialFailures(t *testing.T) {
 	t.Run("authorization", func(t *testing.T) {
 		om := core.NewObjectManager(storageRepairTestDatabase(), &testutils.MockUrlManager{})
-		om.SetS3ObjectInspector(func(ctx context.Context, cred models.S3Credential, bucket, key string) (*core.StorageObjectMetadata, error) {
+		om.SetS3ObjectInspector(func(ctx context.Context, cred buckets.Credential, bucket, key string) (*core.StorageObjectMetadata, error) {
 			return nil, &core.StorageInspectError{Kind: core.StorageInspectPermissionDenied, Message: "provider denied access"}
 		})
 		_, err := (storageRepairInspector{om: om}).Inspect(policyTestContext("gen3", true, nil), repair.StorageInspectRequest{ObjectURL: "s3://b1/prefix/object.bin"})
@@ -82,10 +82,10 @@ func TestStorageRepairInspectorRejectsMalformedTarget(t *testing.T) {
 
 func storageRepairTestDatabase() *testutils.MockDatabase {
 	return &testutils.MockDatabase{
-		Credentials: map[string]models.S3Credential{
+		Credentials: map[string]buckets.Credential{
 			"b1": {CredentialID: "b1", Bucket: "b1", Provider: "s3"},
 		},
-		BucketScopes: map[string]models.BucketScope{
+		BucketScopes: map[string]buckets.Scope{
 			"org|proj": {Organization: "org", ProjectID: "proj", Bucket: "b1"},
 		},
 	}

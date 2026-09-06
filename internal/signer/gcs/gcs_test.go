@@ -8,13 +8,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/calypr/syfon/internal/models"
+	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/signer"
 	"github.com/calypr/syfon/internal/testutils"
 )
 
 func TestGCSEndpointObjectURL(t *testing.T) {
-	cred := &models.S3Credential{Endpoint: "http://localhost:4443"}
+	cred := &buckets.Credential{Endpoint: "http://localhost:4443"}
 
 	uploadURL, ok := gcsEndpointObjectURL(cred, "test-bucket", "path/to/file.txt", http.MethodPut, "")
 	if !ok {
@@ -54,13 +54,13 @@ func TestGCSEndpointObjectURL(t *testing.T) {
 }
 
 func TestGCSEndpointObjectURL_RequiresEndpoint(t *testing.T) {
-	if _, ok := gcsEndpointObjectURL(&models.S3Credential{}, "bucket", "obj", http.MethodGet, ""); ok {
+	if _, ok := gcsEndpointObjectURL(&buckets.Credential{}, "bucket", "obj", http.MethodGet, ""); ok {
 		t.Fatal("expected false when endpoint is missing")
 	}
 }
 
 func TestGCSSignedURL_UsesEndpointWithoutServiceAccountKey(t *testing.T) {
-	cred := &models.S3Credential{Endpoint: "http://localhost:4443"}
+	cred := &buckets.Credential{Endpoint: "http://localhost:4443"}
 	s := &GCSSigner{}
 	signed, err := s.gcsSignedURL("test-bucket", "nested/file.txt", http.MethodGet, 5*time.Minute, "", "nested/report.txt", cred)
 	if err != nil {
@@ -78,7 +78,7 @@ func TestGCSSignedURL_UsesEndpointWithoutServiceAccountKey(t *testing.T) {
 }
 
 func TestGCSSigner_SignDownloadPart_EndpointMode(t *testing.T) {
-	s := NewGCSSigner(&testutils.MockDatabase{Credentials: map[string]models.S3Credential{
+	s := NewGCSSigner(&testutils.MockDatabase{Credentials: map[string]buckets.Credential{
 		"test-bucket": {
 			Bucket:   "test-bucket",
 			Endpoint: "http://localhost:4443",
@@ -98,7 +98,7 @@ func TestGCSSigner_SignDownloadPart_EndpointMode(t *testing.T) {
 }
 
 func TestGCSSigner_MultipartHelpers(t *testing.T) {
-	s := NewGCSSigner(&testutils.MockDatabase{Credentials: map[string]models.S3Credential{
+	s := NewGCSSigner(&testutils.MockDatabase{Credentials: map[string]buckets.Credential{
 		"test-bucket": {
 			Bucket:   "test-bucket",
 			Endpoint: "http://localhost:4443",
@@ -121,4 +121,3 @@ func TestGCSSigner_MultipartHelpers(t *testing.T) {
 		t.Fatalf("expected endpoint upload semantics in signed part URL: %s", partURL)
 	}
 }
-

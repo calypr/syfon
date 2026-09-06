@@ -14,11 +14,3 @@ type PendingLFSMeta struct {
 	CreatedAt time.Time
 	ExpiresAt time.Time
 }
-
-// BucketVisibilityRow is the minimum storage projection needed to build bucket
-// visibility responses without hydrating full objects.
-type BucketVisibilityRow struct {
-	AccessURL  string
-	AccessType string
-	Resource   string
-}

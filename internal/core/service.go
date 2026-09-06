@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
+	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/db"
-	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/urlmanager"
 )
 
@@ -36,13 +36,13 @@ type ObjectManager struct {
 	db              db.DatabaseInterface
 	uM              urlmanager.UrlManager
 	bucketCatalog   *bucketCatalog
-	inspectS3Object func(context.Context, models.S3Credential, string, string) (*StorageObjectMetadata, error)
-	listS3Prefix    func(context.Context, models.S3Credential, string, string, StoragePrefixListOptions) ([]StorageBucketObject, error)
+	inspectS3Object func(context.Context, buckets.Credential, string, string) (*StorageObjectMetadata, error)
+	listS3Prefix    func(context.Context, buckets.Credential, string, string, StoragePrefixListOptions) ([]StorageBucketObject, error)
 	s3ProbeLimiter  *s3ProbeLimiter
 }
 
 type VisibleBucket struct {
-	Credential models.S3Credential
+	Credential buckets.Credential
 	Programs   []string
 }
 

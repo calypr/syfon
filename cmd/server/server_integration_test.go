@@ -13,16 +13,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
+
 	"github.com/calypr/syfon/internal/api/internaldrs"
-	"github.com/calypr/syfon/internal/common"
+	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/config"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/crypto"
-	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/signer/s3"
+	"github.com/calypr/syfon/internal/storage/address"
 	"github.com/calypr/syfon/internal/testutils"
 	"github.com/calypr/syfon/internal/urlmanager"
-	"github.com/gofiber/fiber/v3"
 )
 
 var (
@@ -93,7 +94,7 @@ s3_credentials:
 
 	// Pre-load credentials from config (mimic server startup logic)
 	for _, c := range cfg.S3Credentials {
-		cred := &models.S3Credential{
+		cred := &buckets.Credential{
 			Bucket:    c.Bucket,
 			Provider:  c.Provider,
 			Region:    c.Region,
@@ -105,7 +106,7 @@ s3_credentials:
 			t.Fatalf("Failed to preload credential: %v", err)
 		}
 	}
-	if err := database.CreateBucketScope(context.Background(), &models.BucketScope{
+	if err := database.CreateBucketScope(context.Background(), &buckets.Scope{
 		Organization: organization,
 		ProjectID:    project,
 		Bucket:       bucketName,
@@ -114,7 +115,7 @@ s3_credentials:
 	}
 
 	uM := urlmanager.NewManager(database, cfg.Signing)
-	uM.RegisterSigner(common.S3Provider, s3.NewS3Signer(database))
+	uM.RegisterSigner(address.S3Provider, s3.NewS3Signer(database))
 	app := fiber.New()
 	om := core.NewObjectManager(database, uM)
 	internaldrs.RegisterInternalRoutes(app, om)
