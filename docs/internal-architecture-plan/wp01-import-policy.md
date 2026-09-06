@@ -1,0 +1,20 @@
+# WP01 import policy
+
+Run the direct production-import check from the repository root:
+
+```sh
+scripts/check_internal_import_policy.sh
+```
+
+The script uses `go list` and checks only direct imports in the target domain,
+HTTP, storage-provider, persistence, maintenance, and usage packages. It exits
+with status 0 and prints a pass line when no forbidden edge exists. It exits
+with status 1 and prints each `package -> import` edge when a forbidden import
+is found. A `go list` or environment failure prints a diagnostic and exits
+nonzero before evaluating policy edges.
+
+WP01 intentionally leaves existing `internal/core`, `internal/common`,
+`internal/models`, `internal/db`, and other legacy imports in place. The script
+does not reject those imports until the later migration packages exist; this
+keeps the characterization baseline useful and avoids turning WP01 into a
+runtime or package-move change.
