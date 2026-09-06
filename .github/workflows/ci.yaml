@@ -294,7 +294,7 @@ jobs:
         env:
           SYFON_E2E_MOCK_SERVERS: 1
         run: |
-          go test ./internal/urlmanager -run TestMVPMockServers_FakeGCSAndAzurite -count=1 -v
+          go test ./internal/storage -run TestStorageMockServers_FakeGCSAndAzurite -count=1 -v
 
   calypr-integration:
     name: Calypr git-drs integration
