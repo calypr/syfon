@@ -1,8 +1,8 @@
-package crypto
+package credentialcipher
 
 import (
-	"encoding/hex"
 	"encoding/base64"
+	"encoding/hex"
 	"os"
 	"strings"
 	"testing"

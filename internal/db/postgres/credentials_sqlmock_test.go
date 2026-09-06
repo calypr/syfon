@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/calypr/syfon/internal/buckets"
-	"github.com/calypr/syfon/internal/crypto"
+	"github.com/calypr/syfon/internal/credentialcipher"
 	"github.com/calypr/syfon/internal/faults"
 
 	"github.com/DATA-DOG/go-sqlmock"
@@ -48,12 +48,12 @@ func TestGetS3Credential(t *testing.T) {
 }
 
 func TestGetS3Credential_DecryptsEncryptedSecrets(t *testing.T) {
-	t.Setenv(crypto.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
-	encAK, err := crypto.EncryptCredentialField("ak")
+	t.Setenv(credentialcipher.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
+	encAK, err := credentialcipher.EncryptCredentialField("ak")
 	if err != nil {
 		t.Fatalf("encrypt access key: %v", err)
 	}
-	encSK, err := crypto.EncryptCredentialField("sk")
+	encSK, err := credentialcipher.EncryptCredentialField("sk")
 	if err != nil {
 		t.Fatalf("encrypt secret key: %v", err)
 	}
@@ -100,7 +100,7 @@ func TestGetS3CredentialNotFound(t *testing.T) {
 }
 
 func TestSaveS3Credential(t *testing.T) {
-	t.Setenv(crypto.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
+	t.Setenv(credentialcipher.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
 	pg, mock, rawDB := newMockPostgresDB(t)
 	defer rawDB.Close()
 	derivedID := buckets.DeriveCredentialID("b1", "", "us-east-1", "https://s3.example", "ak")
@@ -140,7 +140,7 @@ func TestSaveS3Credential(t *testing.T) {
 }
 
 func TestSaveS3CredentialRejectsDuplicatePhysicalBucket(t *testing.T) {
-	t.Setenv(crypto.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
+	t.Setenv(credentialcipher.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
 	pg, mock, rawDB := newMockPostgresDB(t)
 	defer rawDB.Close()
 

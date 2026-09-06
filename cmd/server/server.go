@@ -18,7 +18,7 @@ import (
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/config"
 	"github.com/calypr/syfon/internal/core"
-	"github.com/calypr/syfon/internal/crypto"
+	"github.com/calypr/syfon/internal/credentialcipher"
 	"github.com/calypr/syfon/internal/db"
 	"github.com/calypr/syfon/internal/db/postgres"
 	"github.com/calypr/syfon/internal/db/sqlite"
@@ -89,12 +89,12 @@ var Cmd = &cobra.Command{
 
 		// Load configured bucket credentials if present.
 		if len(cfg.Buckets) > 0 {
-			encryptionEnabled, encErr := crypto.CredentialEncryptionEnabled()
+			encryptionEnabled, encErr := credentialcipher.CredentialEncryptionEnabled()
 			if encErr != nil {
-				fatal("invalid credential encryption configuration", "env", crypto.CredentialMasterKeyEnv, "err", encErr)
+				fatal("invalid credential encryption configuration", "env", credentialcipher.CredentialMasterKeyEnv, "err", encErr)
 			}
 			if !encryptionEnabled {
-				fatal("s3 credential encryption key is required", "env", crypto.CredentialMasterKeyEnv)
+				fatal("s3 credential encryption key is required", "env", credentialcipher.CredentialMasterKeyEnv)
 			}
 
 			logger.Info("loading configured bucket credentials", "count", len(cfg.Buckets))
@@ -239,19 +239,19 @@ func applyCredentialEncryptionConfig(cfg *config.Config) {
 	if cfg == nil {
 		return
 	}
-	if strings.TrimSpace(os.Getenv(crypto.CredentialMasterKeyEnv)) == "" {
+	if strings.TrimSpace(os.Getenv(credentialcipher.CredentialMasterKeyEnv)) == "" {
 		if masterKey := strings.TrimSpace(cfg.CredentialEncryption.MasterKey); masterKey != "" {
-			os.Setenv(crypto.CredentialMasterKeyEnv, masterKey)
+			os.Setenv(credentialcipher.CredentialMasterKeyEnv, masterKey)
 		}
 	}
-	if strings.TrimSpace(os.Getenv(crypto.CredentialLocalKeyFileEnv)) == "" {
+	if strings.TrimSpace(os.Getenv(credentialcipher.CredentialLocalKeyFileEnv)) == "" {
 		if localKeyFile := strings.TrimSpace(cfg.CredentialEncryption.LocalKeyFile); localKeyFile != "" {
-			os.Setenv(crypto.CredentialLocalKeyFileEnv, localKeyFile)
+			os.Setenv(credentialcipher.CredentialLocalKeyFileEnv, localKeyFile)
 		}
 	}
-	if strings.TrimSpace(os.Getenv(crypto.DatabaseSQLiteFileEnv)) == "" && cfg.Database.Sqlite != nil {
+	if strings.TrimSpace(os.Getenv(credentialcipher.DatabaseSQLiteFileEnv)) == "" && cfg.Database.Sqlite != nil {
 		if sqliteFile := strings.TrimSpace(cfg.Database.Sqlite.File); sqliteFile != "" {
-			os.Setenv(crypto.DatabaseSQLiteFileEnv, sqliteFile)
+			os.Setenv(credentialcipher.DatabaseSQLiteFileEnv, sqliteFile)
 		}
 	}
 }

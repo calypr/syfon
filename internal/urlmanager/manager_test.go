@@ -9,7 +9,7 @@ import (
 
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/config"
-	"github.com/calypr/syfon/internal/crypto"
+	"github.com/calypr/syfon/internal/credentialcipher"
 	"github.com/calypr/syfon/internal/db/sqlite"
 	"github.com/calypr/syfon/internal/signer/azure"
 	"github.com/calypr/syfon/internal/signer/file"
@@ -17,7 +17,7 @@ import (
 )
 
 func TestManager_SignURL(t *testing.T) {
-	t.Setenv(crypto.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
+	t.Setenv(credentialcipher.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
 	ctx := context.Background()
 	database, err := sqlite.NewSqliteDB(":memory:")
 	if err != nil {
@@ -90,7 +90,7 @@ func TestManager_FileScheme(t *testing.T) {
 }
 
 func TestManager_MultipartMethods(t *testing.T) {
-	t.Setenv(crypto.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
+	t.Setenv(credentialcipher.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
 	ctx := context.Background()
 	database, err := sqlite.NewSqliteDB(":memory:")
 	if err != nil {
@@ -126,7 +126,7 @@ func TestManager_MultipartMethods(t *testing.T) {
 }
 
 func TestManager_ResolveFallbackFromAccessIDToURLBucket(t *testing.T) {
-	t.Setenv(crypto.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
+	t.Setenv(credentialcipher.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
 	ctx := context.Background()
 	database, err := sqlite.NewSqliteDB(":memory:")
 	if err != nil {
@@ -155,7 +155,7 @@ func TestManager_ResolveFallbackFromAccessIDToURLBucket(t *testing.T) {
 }
 
 func TestManager_AzureSignURLAndUploadURL(t *testing.T) {
-	t.Setenv(crypto.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
+	t.Setenv(credentialcipher.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
 	ctx := context.Background()
 	database, err := sqlite.NewSqliteDB(":memory:")
 	if err != nil {
@@ -206,7 +206,7 @@ func TestManager_AzureSignURLAndUploadURL(t *testing.T) {
 }
 
 func TestManager_SignDownloadPart_S3(t *testing.T) {
-	t.Setenv(crypto.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
+	t.Setenv(credentialcipher.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
 	ctx := context.Background()
 	database, err := sqlite.NewSqliteDB(":memory:")
 	if err != nil {
@@ -234,7 +234,7 @@ func TestManager_SignDownloadPart_S3(t *testing.T) {
 }
 
 func TestManager_CompleteMultipartUpload_FailsOnUnreachableS3(t *testing.T) {
-	t.Setenv(crypto.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
+	t.Setenv(credentialcipher.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
 	ctx := context.Background()
 	database, err := sqlite.NewSqliteDB(":memory:")
 	if err != nil {
@@ -260,7 +260,7 @@ func TestManager_CompleteMultipartUpload_FailsOnUnreachableS3(t *testing.T) {
 }
 
 func TestManager_InvalidateBucketRefreshesSignerCache(t *testing.T) {
-	t.Setenv(crypto.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
+	t.Setenv(credentialcipher.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
 	ctx := context.Background()
 	database, err := sqlite.NewSqliteDB(":memory:")
 	if err != nil {

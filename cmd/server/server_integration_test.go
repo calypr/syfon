@@ -19,7 +19,7 @@ import (
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/config"
 	"github.com/calypr/syfon/internal/core"
-	"github.com/calypr/syfon/internal/crypto"
+	"github.com/calypr/syfon/internal/credentialcipher"
 	"github.com/calypr/syfon/internal/signer/s3"
 	"github.com/calypr/syfon/internal/storage/address"
 	"github.com/calypr/syfon/internal/testutils"
@@ -36,7 +36,7 @@ func TestMain(m *testing.M) {
 }
 
 func TestS3Integration(t *testing.T) {
-	t.Setenv(crypto.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
+	t.Setenv(credentialcipher.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
 	configPath := *testConfigPath
 	if configPath == "" {
 		// Create a temporary config for testing if none provided
