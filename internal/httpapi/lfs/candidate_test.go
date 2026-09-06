@@ -32,9 +32,6 @@ func TestFromGeneratedCandidatePreservesLegacyFields(t *testing.T) {
 	}
 
 	got := FromGeneratedCandidate(candidate)
-	if got.Id != nil {
-		t.Fatalf("candidate id became persisted field: %v", *got.Id)
-	}
 	if got.Aliases == nil || len(*got.Aliases) != 1 || (*got.Aliases)[0] != "id:"+id {
 		t.Fatalf("explicit id alias = %#v", got.Aliases)
 	}
@@ -50,6 +47,14 @@ func TestFromGeneratedCandidatePreservesLegacyFields(t *testing.T) {
 	}
 	if method.AccessUrl == nil || method.AccessUrl.Url != url {
 		t.Fatalf("access URL mapping = %#v", method.AccessUrl)
+	}
+}
+
+func TestFromGeneratedCandidatePreservesExplicitZeroSize(t *testing.T) {
+	size := int64(0)
+	got := FromGeneratedCandidate(generated.DrsObjectCandidate{Size: &size})
+	if got.Size == nil || *got.Size != 0 {
+		t.Fatalf("explicit zero size = %#v, want nonnil pointer to zero", got.Size)
 	}
 }
 

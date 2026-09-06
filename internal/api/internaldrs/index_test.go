@@ -724,7 +724,7 @@ func TestHandleInternalList_ScopedFiltersKeepProjectPhysicalRecord(t *testing.T)
 	}
 }
 
-func TestInternalRecordToRecord_NormalizesSHA256(t *testing.T) {
+func TestFromInternalRecord_NormalizesSHA256(t *testing.T) {
 	upper := strings.ToUpper(strings.Repeat("ab", 32))
 	hashes := internalapi.HashInfo{"SHA-256": "sha256:" + upper}
 	obj, err := httprecords.FromInternalRecord(internalapi.InternalRecord{
@@ -732,7 +732,7 @@ func TestInternalRecordToRecord_NormalizesSHA256(t *testing.T) {
 		Hashes: &hashes,
 	}, time.Now().UTC())
 	if err != nil {
-		t.Fatalf("InternalRecordToRecord failed: %v", err)
+		t.Fatalf("FromInternalRecord failed: %v", err)
 	}
 	if len(obj.Checksums) != 1 || obj.Checksums[0].Type != "sha256" || obj.Checksums[0].Checksum != strings.ToLower(upper) {
 		t.Fatalf("checksum was not canonicalized: %+v", obj.Checksums)
@@ -1015,7 +1015,7 @@ func TestHandleInternalBulkCreate_AllowsCreateAccessForAnyControlledAccessScope(
 		ControlledAccess: &[]string{"/programs/test/projects/p1", "/programs/test/projects/p2"},
 	}, time.Now().UTC())
 	if err != nil {
-		t.Fatalf("InternalRecordToRecord failed: %v", err)
+		t.Fatalf("FromInternalRecord failed: %v", err)
 	}
 
 	mockDB := &testutils.MockDatabase{}

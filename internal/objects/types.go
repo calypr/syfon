@@ -67,7 +67,6 @@ type Candidate struct {
 	Contents         *[]Content      `json:"contents,omitempty"`
 	ControlledAccess *[]string       `json:"controlled_access,omitempty"`
 	Description      *string         `json:"description,omitempty"`
-	Id               *string         `json:"id,omitempty"`
 	MimeType         *string         `json:"mime_type,omitempty"`
 	Name             *string         `json:"name,omitempty"`
 	Size             *int64          `json:"size,omitempty"`
@@ -77,7 +76,7 @@ type Candidate struct {
 // while the value is in memory; SQL hydration preserves the historical
 // behavior and does not claim to persist unknown properties.
 type Record struct {
-	Id                    RecordID                  `json:"id"`
+	Id                    RecordID                   `json:"id"`
 	AccessMethods         *[]AccessMethod            `json:"access_methods,omitempty"`
 	Aliases               *[]string                  `json:"aliases,omitempty"`
 	Authorizations        map[string][]string        `json:"-"`

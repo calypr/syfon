@@ -105,6 +105,33 @@ func TestPendingMetaCandidateJSONPreservesLegacyLFSShape(t *testing.T) {
 	}
 }
 
+func TestPendingMetaCandidateJSONPreservesExplicitZeroSize(t *testing.T) {
+	db, err := NewSqliteDB(":memory:")
+	if err != nil {
+		t.Fatalf("NewSqliteDB failed: %v", err)
+	}
+
+	const oid = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+	size := int64(0)
+	candidate := httplfs.FromGeneratedCandidate(generated.DrsObjectCandidate{Size: &size})
+	now := time.Now().UTC().Truncate(time.Second)
+	if err := db.SavePendingLFSMeta(context.Background(), []models.PendingLFSMeta{{OID: oid, Candidate: candidate, CreatedAt: now, ExpiresAt: now.Add(time.Hour)}}); err != nil {
+		t.Fatalf("SavePendingLFSMeta failed: %v", err)
+	}
+
+	var raw string
+	if err := db.db.QueryRow(`SELECT candidate_json FROM lfs_pending_metadata WHERE oid = ?`, oid).Scan(&raw); err != nil {
+		t.Fatalf("read candidate_json: %v", err)
+	}
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		t.Fatalf("decode candidate_json: %v", err)
+	}
+	if sizeJSON, ok := payload["size"]; !ok || string(sizeJSON) != "0" {
+		t.Fatalf("candidate_json size = %s, want explicit zero", sizeJSON)
+	}
+}
+
 func stringPtr(value string) *string { return &value }
 
 func stringSlicePtr(value []string) *[]string { return &value }

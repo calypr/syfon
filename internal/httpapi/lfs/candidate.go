@@ -33,7 +33,7 @@ func FromGeneratedCandidate(value generated.DrsObjectCandidate) objects.Candidat
 		MimeType:    value.MimeType,
 		Name:        value.Name,
 	}
-	if value.Size != nil && *value.Size != 0 {
+	if value.Size != nil {
 		out.Size = value.Size
 	}
 	if value.Checksums != nil {
