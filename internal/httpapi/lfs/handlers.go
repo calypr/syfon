@@ -13,14 +13,14 @@ import (
 	apimiddleware "github.com/calypr/syfon/internal/httpapi/middleware"
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/storage"
-	"github.com/calypr/syfon/internal/transfers"
+	transferlfs "github.com/calypr/syfon/internal/transfers/lfs"
 )
 
 type LFSServer struct {
 	opts                Options
-	uploadWorkflow      *transfers.LFSUploadWorkflow
-	metadataWorkflow    *transfers.LFSMetadataWorkflow
-	preparationWorkflow *transfers.LFSPreparationWorkflow
+	uploadWorkflow      *transferlfs.UploadWorkflow
+	metadataWorkflow    *transferlfs.MetadataWorkflow
+	preparationWorkflow *transferlfs.PreparationWorkflow
 }
 
 func NewLFSServer(deps Dependencies, opts Options) *LFSServer {
@@ -30,9 +30,9 @@ func NewLFSServer(deps Dependencies, opts Options) *LFSServer {
 	}
 	return &LFSServer{
 		opts:                opts,
-		uploadWorkflow:      transfers.NewLFSUploadWorkflow(deps.TransferService, transfers.LFSUploadPartUploader(partUploader), deps.FileCounters),
-		metadataWorkflow:    transfers.NewLFSMetadataWorkflow(deps.TransferService, deps.ObjectService, deps.FileCounters),
-		preparationWorkflow: transfers.NewLFSPreparationWorkflow(deps.TransferService, deps.ObjectService, deps.Credentials, deps.FileCounters),
+		uploadWorkflow:      transferlfs.NewUploadWorkflow(deps.TransferService, transferlfs.PartUploader(partUploader), deps.FileCounters),
+		metadataWorkflow:    transferlfs.NewMetadataWorkflow(deps.TransferService, deps.PendingStore, deps.ObjectService, deps.FileCounters),
+		preparationWorkflow: transferlfs.NewPreparationWorkflow(deps.TransferService, deps.ObjectService, deps.Credentials, deps.PendingStore, deps.FileCounters),
 	}
 }
 
@@ -103,7 +103,7 @@ func (s *LFSServer) LfsVerify(ctx context.Context, request lfsapi.LfsVerifyReque
 	}
 
 	if err := s.metadataWorkflow.Verify(ctx, oid); err != nil {
-		var candidateErr *transfers.LFSMetadataCandidateError
+		var candidateErr *transferlfs.MetadataCandidateError
 		if errors.As(err, &candidateErr) {
 			return lfsapi.LfsVerify400ApplicationVndGitLfsPlusJSONResponse{Message: err.Error()}, nil
 		}
@@ -131,7 +131,7 @@ func (s *LFSServer) LfsStageMetadata(ctx context.Context, request lfsapi.LfsStag
 		candidates = append(candidates, FromGeneratedCandidate(candidate))
 	}
 	if err := s.metadataWorkflow.Stage(ctx, candidates); err != nil {
-		var stageErr *transfers.LFSMetadataStageError
+		var stageErr *transferlfs.MetadataStageError
 		if errors.As(err, &stageErr) {
 			if stageErr.MissingSHA {
 				return lfsapi.LfsStageMetadata400JSONResponse{Message: fmt.Sprintf("candidate[%d] missing canonical sha256", stageErr.Index)}, nil
@@ -150,7 +150,7 @@ func (s *LFSServer) LfsUploadProxy(ctx context.Context, request lfsapi.LfsUpload
 	}
 	target, err := s.preparationWorkflow.ResolveUploadTarget(ctx, oid)
 	if err != nil {
-		if errors.Is(err, transfers.ErrLFSNoBucketConfigured) {
+		if errors.Is(err, transferlfs.ErrNoBucketConfigured) {
 			return lfsapi.LfsUploadProxy507TextResponse(err.Error()), nil
 		}
 		return lfsapi.LfsUploadProxy500TextResponse(err.Error()), nil
@@ -162,10 +162,10 @@ func (s *LFSServer) LfsUploadProxy(ctx context.Context, request lfsapi.LfsUpload
 }
 
 func dbErrToBatchError(ctx context.Context, err error) *lfsapi.ObjectError {
-	if errors.Is(err, transfers.ErrLFSNoObjectLocation) {
+	if errors.Is(err, transferlfs.ErrNoObjectLocation) {
 		return &lfsapi.ObjectError{Code: 404, Message: "no object location available"}
 	}
-	if errors.Is(err, transfers.ErrLFSNoBucketConfigured) {
+	if errors.Is(err, transferlfs.ErrNoBucketConfigured) {
 		return &lfsapi.ObjectError{Code: 507, Message: "no bucket configured"}
 	}
 	if faults.IsNotFoundError(err) {
@@ -178,11 +178,11 @@ func dbErrToBatchError(ctx context.Context, err error) *lfsapi.ObjectError {
 }
 
 func downloadErrToBatchError(ctx context.Context, err error) *lfsapi.ObjectError {
-	var lookupErr *transfers.LFSDownloadLookupError
+	var lookupErr *transferlfs.DownloadLookupError
 	if errors.As(err, &lookupErr) {
 		return dbErrToBatchError(ctx, lookupErr.Err)
 	}
-	if errors.Is(err, transfers.ErrLFSNoObjectLocation) {
+	if errors.Is(err, transferlfs.ErrNoObjectLocation) {
 		return dbErrToBatchError(ctx, err)
 	}
 	return &lfsapi.ObjectError{Code: 500, Message: err.Error()}

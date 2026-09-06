@@ -1,4 +1,4 @@
-package transfers
+package lfs
 
 import (
 	"context"
@@ -6,27 +6,28 @@ import (
 	"io"
 
 	"github.com/calypr/syfon/internal/storage"
+	"github.com/calypr/syfon/internal/transfers"
 )
 
-const lfsMultipartPartSize = 64 * 1024 * 1024
+const multipartPartSize = 64 * 1024 * 1024
 
-type LFSUploadPartUploader func(context.Context, string, []byte) (string, error)
+type PartUploader func(context.Context, string, []byte) (string, error)
 
-type LFSUploadAccounting interface {
+type UploadAccounting interface {
 	RecordFileUpload(context.Context, string) error
 }
 
-type LFSUploadWorkflow struct {
-	transfer   *Service
-	uploader   LFSUploadPartUploader
-	accounting LFSUploadAccounting
+type UploadWorkflow struct {
+	transfer   *transfers.Service
+	uploader   PartUploader
+	accounting UploadAccounting
 }
 
-func NewLFSUploadWorkflow(transfer *Service, uploader LFSUploadPartUploader, accounting LFSUploadAccounting) *LFSUploadWorkflow {
-	return &LFSUploadWorkflow{transfer: transfer, uploader: uploader, accounting: accounting}
+func NewUploadWorkflow(transfer *transfers.Service, uploader PartUploader, accounting UploadAccounting) *UploadWorkflow {
+	return &UploadWorkflow{transfer: transfer, uploader: uploader, accounting: accounting}
 }
 
-func (w *LFSUploadWorkflow) Upload(ctx context.Context, body io.Reader, bucket, key, objectID string) error {
+func (w *UploadWorkflow) Upload(ctx context.Context, body io.Reader, bucket, key, objectID string) error {
 	uploadID, err := w.transfer.InitMultipartUpload(ctx, bucket, key)
 	if err != nil {
 		return fmt.Errorf("failed to initialize multipart upload: %w", err)
@@ -37,7 +38,7 @@ func (w *LFSUploadWorkflow) Upload(ctx context.Context, body io.Reader, bucket, 
 
 	parts := make([]storage.CompletedPart, 0, 16)
 	partNumber := int32(1)
-	buffer := make([]byte, lfsMultipartPartSize)
+	buffer := make([]byte, multipartPartSize)
 	for {
 		readCount, readErr := io.ReadFull(body, buffer)
 		if readErr == io.EOF {

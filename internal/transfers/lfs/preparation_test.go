@@ -1,4 +1,4 @@
-package transfers
+package lfs
 
 import (
 	"context"
@@ -10,6 +10,7 @@ import (
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/faults"
 	"github.com/calypr/syfon/internal/objects"
+	"github.com/calypr/syfon/internal/transfers"
 )
 
 type lfsPreparationObjectSpy struct {
@@ -47,7 +48,7 @@ func (s *lfsPreparationCredentialsSpy) GetS3Credential(context.Context, string) 
 func TestLFSPreparationWorkflowPreservesUploadPreflightAndSizeRules(t *testing.T) {
 	objectsPort := &lfsPreparationObjectSpy{getErr: fmt.Errorf("%w: missing", faults.ErrNotFound)}
 	credentials := &lfsPreparationCredentialsSpy{credentials: []buckets.Credential{{Bucket: "bucket"}}}
-	workflow := NewLFSPreparationWorkflow(NewService(Dependencies{}), objectsPort, credentials, nil)
+	workflow := NewPreparationWorkflow(transfers.NewService(transfers.Dependencies{}), objectsPort, credentials, nil, nil)
 
 	result, err := workflow.PrepareUpload(context.Background(), "oid", -3)
 	if err != nil {

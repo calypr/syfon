@@ -11,6 +11,7 @@ import (
 	"github.com/calypr/syfon/internal/objects"
 	objectrecords "github.com/calypr/syfon/internal/objects/records"
 	"github.com/calypr/syfon/internal/transfers"
+	transferlfs "github.com/calypr/syfon/internal/transfers/lfs"
 	"github.com/calypr/syfon/internal/usage"
 )
 
@@ -32,7 +33,7 @@ func newLFSTestPorts(records map[string]*objects.Record, credentials map[string]
 		contentReader: &lfsContentReaderFake{records: records},
 		aliases:       &lfsAliasStoreFake{aliases: map[string]string{}},
 		credentials:   &lfsCredentialReaderFake{credentials: credentials},
-		pending:       &lfsPendingStoreFake{entries: map[string]transfers.PendingMetadata{}},
+		pending:       &lfsPendingStoreFake{entries: map[string]transferlfs.PendingMetadata{}},
 		events:        &lfsEventRecorderFake{},
 		fileCounters:  &lfsFileCounterFake{},
 	}
@@ -198,19 +199,19 @@ func (f *lfsCredentialReaderFake) ListS3Credentials(_ context.Context) ([]bucket
 }
 
 type lfsPendingStoreFake struct {
-	entries map[string]transfers.PendingMetadata
+	entries map[string]transferlfs.PendingMetadata
 }
 
-var _ transfers.PendingStore = (*lfsPendingStoreFake)(nil)
+var _ transferlfs.PendingStore = (*lfsPendingStoreFake)(nil)
 
-func (f *lfsPendingStoreFake) SavePendingLFSMeta(_ context.Context, entries []transfers.PendingMetadata) error {
+func (f *lfsPendingStoreFake) SavePendingMetadata(_ context.Context, entries []transferlfs.PendingMetadata) error {
 	for _, entry := range entries {
 		f.entries[entry.OID] = entry
 	}
 	return nil
 }
 
-func (f *lfsPendingStoreFake) GetPendingLFSMeta(_ context.Context, oid string) (*transfers.PendingMetadata, error) {
+func (f *lfsPendingStoreFake) GetPendingMetadata(_ context.Context, oid string) (*transferlfs.PendingMetadata, error) {
 	entry, ok := f.entries[oid]
 	if !ok {
 		return nil, fmt.Errorf("%w: pending metadata not found", faults.ErrNotFound)
@@ -218,7 +219,7 @@ func (f *lfsPendingStoreFake) GetPendingLFSMeta(_ context.Context, oid string) (
 	return &entry, nil
 }
 
-func (f *lfsPendingStoreFake) PopPendingLFSMeta(_ context.Context, oid string) (*transfers.PendingMetadata, error) {
+func (f *lfsPendingStoreFake) PopPendingMetadata(_ context.Context, oid string) (*transferlfs.PendingMetadata, error) {
 	entry, ok := f.entries[oid]
 	if !ok {
 		return nil, fmt.Errorf("%w: pending metadata not found", faults.ErrNotFound)
@@ -260,7 +261,6 @@ func newLFSTransferService(storageFake *lfsTestStorage, ports *lfsTestServicePor
 		Access:      storageFake,
 		Multipart:   storageFake,
 		Credentials: ports.credentials,
-		Pending:     ports.pending,
 		Events:      ports.events,
 	})
 }

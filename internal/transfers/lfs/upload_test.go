@@ -1,4 +1,4 @@
-package transfers
+package lfs
 
 import (
 	"bytes"
@@ -10,6 +10,7 @@ import (
 	"github.com/calypr/syfon/internal/faults"
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/storage"
+	"github.com/calypr/syfon/internal/transfers"
 )
 
 type lfsUploadMultipartSpy struct {
@@ -57,13 +58,13 @@ func TestLFSUploadWorkflowPreservesPartSizeOrderAndAccountingOrder(t *testing.T)
 	multipart := &lfsUploadMultipartSpy{events: events}
 	accounting := &lfsUploadAccountingSpy{events: &multipart.events}
 	partLengths := make([]int, 0, 2)
-	workflow := NewLFSUploadWorkflow(NewService(Dependencies{Multipart: multipart}), func(_ context.Context, _ string, content []byte) (string, error) {
+	workflow := NewUploadWorkflow(transfers.NewService(transfers.Dependencies{Multipart: multipart}), func(_ context.Context, _ string, content []byte) (string, error) {
 		multipart.events = append(multipart.events, "upload")
 		partLengths = append(partLengths, len(content))
 		return fmt.Sprintf("etag-%d", len(partLengths)), nil
 	}, accounting)
 
-	body := bytes.NewReader(bytes.Repeat([]byte{'x'}, lfsMultipartPartSize+1))
+	body := bytes.NewReader(bytes.Repeat([]byte{'x'}, multipartPartSize+1))
 	if err := workflow.Upload(context.Background(), body, "bucket", "object", "record"); err != nil {
 		t.Fatalf("Upload() error = %v", err)
 	}
@@ -72,7 +73,7 @@ func TestLFSUploadWorkflowPreservesPartSizeOrderAndAccountingOrder(t *testing.T)
 	if strings.Join(multipart.events, ",") != strings.Join(wantEvents, ",") {
 		t.Fatalf("events = %v, want %v", multipart.events, wantEvents)
 	}
-	if len(partLengths) != 2 || partLengths[0] != lfsMultipartPartSize || partLengths[1] != 1 {
+	if len(partLengths) != 2 || partLengths[0] != multipartPartSize || partLengths[1] != 1 {
 		t.Fatalf("part lengths = %v", partLengths)
 	}
 	if len(multipart.partNumber) != 2 || multipart.partNumber[0] != 1 || multipart.partNumber[1] != 2 {
@@ -105,20 +106,20 @@ func (s *lfsMetadataObjectSpy) RegisterObjects(_ context.Context, records []obje
 	return s.registerErr
 }
 
-type lfsMetadataPendingSpy struct {
+type metadataPendingSpy struct {
 	events *[]string
 	entry  *PendingMetadata
 }
 
-func (s *lfsMetadataPendingSpy) SavePendingLFSMeta(context.Context, []PendingMetadata) error {
+func (s *metadataPendingSpy) SavePendingMetadata(context.Context, []PendingMetadata) error {
 	return nil
 }
 
-func (s *lfsMetadataPendingSpy) GetPendingLFSMeta(context.Context, string) (*PendingMetadata, error) {
+func (s *metadataPendingSpy) GetPendingMetadata(context.Context, string) (*PendingMetadata, error) {
 	return s.entry, nil
 }
 
-func (s *lfsMetadataPendingSpy) PopPendingLFSMeta(context.Context, string) (*PendingMetadata, error) {
+func (s *metadataPendingSpy) PopPendingMetadata(context.Context, string) (*PendingMetadata, error) {
 	*s.events = append(*s.events, "pop")
 	return s.entry, nil
 }
@@ -132,13 +133,13 @@ func TestLFSMetadataWorkflowConsumesRegistersThenAccounts(t *testing.T) {
 		Checksums:     &[]objects.Checksum{{Type: "sha256", Checksum: sha}},
 		AccessMethods: &methods,
 	}
-	pending := &lfsMetadataPendingSpy{
+	pending := &metadataPendingSpy{
 		events: &events,
 		entry:  &PendingMetadata{OID: sha, Candidate: candidate},
 	}
 	objectsPort := &lfsMetadataObjectSpy{events: &events, getErr: faults.ErrNotFound}
 	accounting := &lfsUploadAccountingSpy{events: &events}
-	workflow := NewLFSMetadataWorkflow(NewService(Dependencies{Pending: pending}), objectsPort, accounting)
+	workflow := NewMetadataWorkflow(transfers.NewService(transfers.Dependencies{}), pending, objectsPort, accounting)
 
 	if err := workflow.Verify(context.Background(), sha); err != nil {
 		t.Fatalf("Verify() error = %v", err)
@@ -161,7 +162,7 @@ func TestLFSMetadataWorkflowExistingObjectOnlyAccounts(t *testing.T) {
 	object := &objects.Record{Id: "existing"}
 	objectsPort := &lfsMetadataObjectSpy{events: &events, object: object}
 	accounting := &lfsUploadAccountingSpy{events: &events}
-	workflow := NewLFSMetadataWorkflow(NewService(Dependencies{}), objectsPort, accounting)
+	workflow := NewMetadataWorkflow(transfers.NewService(transfers.Dependencies{}), nil, objectsPort, accounting)
 
 	if err := workflow.Verify(context.Background(), "oid"); err != nil {
 		t.Fatalf("Verify() error = %v", err)

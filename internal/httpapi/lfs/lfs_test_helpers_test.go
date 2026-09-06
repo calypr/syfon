@@ -77,6 +77,7 @@ func newLFSTestDependencies(ports *lfsTestServicePorts, storageFake *lfsTestStor
 		TransferService: transferService,
 		FileCounters:    ports.fileCounters,
 		Credentials:     ports.credentials,
+		PendingStore:    ports.pending,
 	}
 }
 
