@@ -3,15 +3,15 @@ package drsapi
 import (
 	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/common"
-	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/objects"
+	"github.com/calypr/syfon/internal/transfers"
 	"github.com/gofiber/fiber/v3"
 )
 
-func RegisterDRSRoutes(router fiber.Router, objectService *objects.Service, accessManager *core.ObjectManager, serviceInfo drs.Service) {
+func RegisterDRSRoutes(router fiber.Router, objectService *objects.Service, accessService *transfers.Service, serviceInfo drs.Service) {
 	// Static routes first
 	router.Post("/objects/register", handleRegisterObjectsFiber(objectService))
-	router.Post("/objects/access", handleGetBulkAccessURLFiber(accessManager))
+	router.Post("/objects/access", handleGetBulkAccessURLFiber(objectService, accessService))
 	router.Post("/objects/delete", handleBulkDeleteObjectsFiber(objectService))
 	router.Put("/objects/delete", handleBulkDeleteObjectsFiber(objectService))
 	router.Put("/objects/checksums", handleUnsupportedChecksumAdditionFiber())
@@ -29,8 +29,8 @@ func RegisterDRSRoutes(router fiber.Router, objectService *objects.Service, acce
 	router.Post("/objects/:object_id/delete", handleDeleteObjectFiber(objectService))
 	router.Put("/objects/:object_id/delete", handleDeleteObjectFiber(objectService))
 	router.Put("/objects/:object_id/checksums", handleUnsupportedChecksumAdditionFiber())
-	router.Get("/objects/:object_id/access/:access_id", handleGetAccessURLFiber(accessManager))
-	router.Post("/objects/:object_id/access/:access_id", handleGetAccessURLFiber(accessManager))
+	router.Get("/objects/:object_id/access/:access_id", handleGetAccessURLFiber(objectService, accessService))
+	router.Post("/objects/:object_id/access/:access_id", handleGetAccessURLFiber(objectService, accessService))
 	router.Post("/objects/:object_id/access-methods", handleUpdateAccessMethodsFiber(objectService))
 	router.Put("/objects/:object_id/access-methods", handleUpdateAccessMethodsFiber(objectService))
 

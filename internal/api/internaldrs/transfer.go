@@ -15,7 +15,6 @@ import (
 
 	"github.com/calypr/syfon/apigen/server/internalapi"
 	"github.com/calypr/syfon/internal/api/apiutil"
-	"github.com/calypr/syfon/internal/api/attribution"
 	"github.com/calypr/syfon/internal/api/routeutil"
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/common"
@@ -26,16 +25,19 @@ import (
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/storage"
 	"github.com/calypr/syfon/internal/storage/address"
+	"github.com/calypr/syfon/internal/transfers"
 	"github.com/calypr/syfon/internal/usage"
 )
 
 var multipartUploadSessions sync.Map // uploadID -> multipartSession
 
-func registerInternalTransferRoutes(router fiber.Router, om *core.ObjectManager, bucketService *buckets.Service) {
-	router.Get(routeutil.FiberPath(common.RouteInternalDownload), func(c fiber.Ctx) error { return handleInternalDownloadFiber(c, om) })
-	router.Get(routeutil.FiberPath(common.RouteInternalDownloadPart), func(c fiber.Ctx) error { return handleInternalDownloadPartFiber(c, om) })
-	router.Post(common.RouteInternalUpload, handleInternalUploadBlankFiber(om))
-	router.Get(routeutil.FiberPath(common.RouteInternalUploadURL), handleInternalUploadURLFiber(om))
+func registerInternalTransferRoutes(router fiber.Router, om *core.ObjectManager, objectService *objects.Service, transferService *transfers.Service, fileCounters usage.FileCounterRecorder, bucketService *buckets.Service) {
+	router.Get(routeutil.FiberPath(common.RouteInternalDownload), func(c fiber.Ctx) error {
+		return handleInternalDownloadFiber(c, objectService, transferService, fileCounters)
+	})
+	router.Get(routeutil.FiberPath(common.RouteInternalDownloadPart), func(c fiber.Ctx) error { return handleInternalDownloadPartFiber(c, objectService, transferService) })
+	router.Post(common.RouteInternalUpload, handleInternalUploadBlankFiber(transferService))
+	router.Get(routeutil.FiberPath(common.RouteInternalUploadURL), handleInternalUploadURLFiber(objectService, transferService))
 	router.Post(common.RouteInternalInspectObject, handleInternalInspectObjectFiber(om))
 	router.Post(common.RouteInternalInspectObjectBulk, handleInternalInspectObjectBulkFiber(om))
 	router.Post(common.RouteInternalInspectObjectBulkList, handleInternalInspectObjectBulkListFiber(om))
@@ -45,24 +47,41 @@ func registerInternalTransferRoutes(router fiber.Router, om *core.ObjectManager,
 	router.Get(common.RouteInternalInspectProjectScopes, handleInternalInspectProjectScopesFiber(om))
 	router.Post(common.RouteInternalInspectProjectScopes, handleInternalInspectProjectScopesFiber(om))
 	router.Post(common.RouteInternalDeleteProjectBucketObjects, handleInternalDeleteProjectBucketObjectsFiber(om))
-	router.Post(common.RouteInternalUploadBulk, handleInternalUploadBulkFiber(om))
-	router.Post(common.RouteInternalMultipartInit, handleInternalMultipartInitFiber(om))
-	router.Post(common.RouteInternalMultipartUpload, handleInternalMultipartUploadFiber(om))
-	router.Post(common.RouteInternalMultipartComplete, handleInternalMultipartCompleteFiber(om))
+	router.Post(common.RouteInternalUploadBulk, handleInternalUploadBulkFiber(objectService, transferService))
+	router.Post(common.RouteInternalMultipartInit, handleInternalMultipartInitFiber(objectService, transferService))
+	router.Post(common.RouteInternalMultipartUpload, handleInternalMultipartUploadFiber(transferService))
+	router.Post(common.RouteInternalMultipartComplete, handleInternalMultipartCompleteFiber(transferService))
 
 	registerInternalBucketRoutes(router, om, bucketService)
 }
 
-func handleInternalDownloadFiber(c fiber.Ctx, om *core.ObjectManager) error {
+func firstSupportedAccessURL(obj *objects.Record) string {
+	if obj == nil || obj.AccessMethods == nil {
+		return ""
+	}
+	for _, method := range *obj.AccessMethods {
+		if method.AccessUrl == nil || strings.TrimSpace(method.AccessUrl.Url) == "" {
+			continue
+		}
+		scheme := address.SchemeFromURL(method.AccessUrl.Url)
+		if scheme != "" && address.ProviderFromScheme(scheme) == "" {
+			continue
+		}
+		return method.AccessUrl.Url
+	}
+	return ""
+}
+
+func handleInternalDownloadFiber(c fiber.Ctx, objectService *objects.Service, transferService *transfers.Service, fileCounters usage.FileCounterRecorder) error {
 	c.Set(fiber.HeaderCacheControl, "no-store")
 	fileID := c.Params("file_id")
 
-	obj, err := om.GetObject(c.Context(), fileID, "read")
+	obj, err := objectService.GetObject(c.Context(), fileID, "read")
 	if err != nil {
 		return apiutil.HandleError(c, err)
 	}
 
-	objectURL := core.FirstSupportedAccessURL(obj)
+	objectURL := firstSupportedAccessURL(obj)
 	if objectURL == "" {
 		return c.Status(fiber.StatusNotFound).SendString("No supported cloud location found for this file")
 	}
@@ -80,15 +99,19 @@ func handleInternalDownloadFiber(c fiber.Ctx, om *core.ObjectManager) error {
 		opts.ExpiresIn = time.Duration(config.DefaultSigningExpirySeconds) * time.Second
 	}
 
-	signedURL, err := om.SignObjectURL(c.Context(), obj, objectURL, opts)
+	signedURL, err := transferService.SignObjectURL(c.Context(), obj, objectURL, opts)
 	if err != nil {
 		return apiutil.HandleError(c, err)
 	}
 
-	if err := om.RecordDownload(c.Context(), string(obj.Id)); err != nil {
+	if fileCounters == nil {
+		return apiutil.HandleError(c, errors.New("file usage recorder is not configured"))
+	}
+	if err := fileCounters.RecordFileDownload(c.Context(), string(obj.Id)); err != nil {
 		return apiutil.HandleError(c, err)
 	}
-	if err := attribution.RecordAccessIssued(c.Context(), om, obj, attribution.AccessDetails{
+	if err := transferService.RecordAccessIssued(c.Context(), transfers.AccessRequest{
+		Object:     obj,
 		Direction:  usage.ProviderTransferDirectionDownload,
 		StorageURL: objectURL,
 	}); err != nil {
@@ -102,7 +125,7 @@ func handleInternalDownloadFiber(c fiber.Ctx, om *core.ObjectManager) error {
 	return c.JSON(internalapi.InternalSignedURL{Url: &signedURL})
 }
 
-func handleInternalDownloadPartFiber(c fiber.Ctx, om *core.ObjectManager) error {
+func handleInternalDownloadPartFiber(c fiber.Ctx, objectService *objects.Service, transferService *transfers.Service) error {
 	c.Set(fiber.HeaderCacheControl, "no-store")
 	fileID := c.Params("file_id")
 	startStr := c.Query("start")
@@ -121,12 +144,12 @@ func handleInternalDownloadPartFiber(c fiber.Ctx, om *core.ObjectManager) error 
 		return c.Status(fiber.StatusBadRequest).SendString("Invalid 'end' parameter")
 	}
 
-	obj, err := om.GetObject(c.Context(), fileID, "read")
+	obj, err := objectService.GetObject(c.Context(), fileID, "read")
 	if err != nil {
 		return apiutil.HandleError(c, err)
 	}
 
-	objectURL := core.FirstSupportedAccessURL(obj)
+	objectURL := firstSupportedAccessURL(obj)
 	if objectURL == "" {
 		return c.Status(fiber.StatusNotFound).SendString("No supported cloud location found for this file")
 	}
@@ -140,11 +163,12 @@ func handleInternalDownloadPartFiber(c fiber.Ctx, om *core.ObjectManager) error 
 	if obj.Name != nil {
 		opts.DownloadFilename = storage.DownloadFilename(*obj.Name)
 	}
-	signedURL, err := om.SignObjectDownloadPart(c.Context(), obj, bucketID, objectURL, start, end, opts)
+	signedURL, err := transferService.SignObjectDownloadPart(c.Context(), obj, bucketID, objectURL, start, end, opts)
 	if err != nil {
 		return apiutil.HandleError(c, err)
 	}
-	if err := attribution.RecordAccessIssued(c.Context(), om, obj, attribution.AccessDetails{
+	if err := transferService.RecordAccessIssued(c.Context(), transfers.AccessRequest{
+		Object:         obj,
 		Direction:      usage.ProviderTransferDirectionDownload,
 		StorageURL:     objectURL,
 		RangeStart:     &start,
@@ -157,7 +181,7 @@ func handleInternalDownloadPartFiber(c fiber.Ctx, om *core.ObjectManager) error 
 	return c.JSON(internalapi.InternalSignedURL{Url: &signedURL})
 }
 
-func handleInternalUploadBlankFiber(om *core.ObjectManager) fiber.Handler {
+func handleInternalUploadBlankFiber(transferService *transfers.Service) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		if apimiddleware.MissingGen3AuthHeader(c.Context()) {
 			return c.SendStatus(fiber.StatusUnauthorized)
@@ -178,12 +202,12 @@ func handleInternalUploadBlankFiber(om *core.ObjectManager) fiber.Handler {
 			guid = uuid.New().String()
 		}
 
-		target, err := resolveUploadTarget(c.Context(), om, common.StringVal(req.Organization), common.StringVal(req.Project), guid)
+		target, err := resolveUploadTarget(c.Context(), transferService, common.StringVal(req.Organization), common.StringVal(req.Project), guid)
 		if err != nil {
 			return apiutil.HandleError(c, err)
 		}
 
-		signedURL, err := om.SignURL(c.Context(), target.URL, storage.AccessOptions{Method: http.MethodPut})
+		signedURL, err := transferService.SignURL(c.Context(), target.URL, storage.AccessOptions{Method: http.MethodPut})
 		if err != nil {
 			return apiutil.HandleError(c, err)
 		}
@@ -196,7 +220,7 @@ func handleInternalUploadBlankFiber(om *core.ObjectManager) fiber.Handler {
 	}
 }
 
-func handleInternalUploadURLFiber(om *core.ObjectManager) fiber.Handler {
+func handleInternalUploadURLFiber(objectService *objects.Service, transferService *transfers.Service) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		if apimiddleware.MissingGen3AuthHeader(c.Context()) {
 			return c.SendStatus(fiber.StatusUnauthorized)
@@ -208,7 +232,7 @@ func handleInternalUploadURLFiber(om *core.ObjectManager) fiber.Handler {
 			return c.Status(fiber.StatusBadRequest).SendString("Invalid query parameters")
 		}
 
-		obj, err := om.GetObject(c.Context(), fileID, "update")
+		obj, err := objectService.GetObject(c.Context(), fileID, "update")
 		if err != nil && !errors.Is(err, faults.ErrNotFound) {
 			return apiutil.HandleError(c, err)
 		}
@@ -218,11 +242,11 @@ func handleInternalUploadURLFiber(om *core.ObjectManager) fiber.Handler {
 			key    = fileID
 		)
 		if obj != nil {
-			var target core.CanonicalStorageTarget
+			var target transfers.CanonicalStorageTarget
 			if strings.TrimSpace(common.StringVal(params.Organization)) != "" {
-				target, err = resolveUploadTarget(c.Context(), om, common.StringVal(params.Organization), common.StringVal(params.Project), uploadKeyForExistingObject(obj, params))
+				target, err = resolveUploadTarget(c.Context(), transferService, common.StringVal(params.Organization), common.StringVal(params.Project), uploadKeyForExistingObject(obj, params))
 			} else {
-				target, err = om.ResolveCanonicalStorageTarget(c.Context(), core.CanonicalStorageTargetRequest{
+				target, err = transferService.ResolveCanonicalStorageTarget(c.Context(), transfers.CanonicalStorageTargetRequest{
 					Object:         obj,
 					Key:            strings.TrimSpace(common.StringVal(params.Key)),
 					PreferChecksum: true,
@@ -231,11 +255,12 @@ func handleInternalUploadURLFiber(om *core.ObjectManager) fiber.Handler {
 			if err != nil {
 				return apiutil.HandleError(c, err)
 			}
-			signedURL, err := om.SignURL(c.Context(), target.URL, storage.AccessOptions{Method: http.MethodPut})
+			signedURL, err := transferService.SignURL(c.Context(), target.URL, storage.AccessOptions{Method: http.MethodPut})
 			if err != nil {
 				return apiutil.HandleError(c, err)
 			}
-			if err := attribution.RecordAccessIssued(c.Context(), om, obj, attribution.AccessDetails{
+			if err := transferService.RecordAccessIssued(c.Context(), transfers.AccessRequest{
+				Object:     obj,
 				Direction:  usage.ProviderTransferDirectionUpload,
 				StorageURL: target.URL,
 			}); err != nil {
@@ -246,7 +271,7 @@ func handleInternalUploadURLFiber(om *core.ObjectManager) fiber.Handler {
 			if requestedKey := strings.Trim(strings.TrimSpace(firstNonEmpty(common.StringVal(params.Key), c.Query("key"))), "/"); requestedKey != "" {
 				key = requestedKey
 			}
-			target, err := resolveUploadTarget(c.Context(), om, common.StringVal(params.Organization), common.StringVal(params.Project), key)
+			target, err := resolveUploadTarget(c.Context(), transferService, common.StringVal(params.Organization), common.StringVal(params.Project), key)
 			if err != nil {
 				return apiutil.HandleError(c, err)
 			}
@@ -255,12 +280,13 @@ func handleInternalUploadURLFiber(om *core.ObjectManager) fiber.Handler {
 		}
 
 		urlStr := address.BucketToURL(bucket, key)
-		signedURL, err := om.SignURL(c.Context(), urlStr, storage.AccessOptions{Method: http.MethodPut})
+		signedURL, err := transferService.SignURL(c.Context(), urlStr, storage.AccessOptions{Method: http.MethodPut})
 		if err != nil {
 			return apiutil.HandleError(c, err)
 		}
 		if obj != nil {
-			if err := attribution.RecordAccessIssued(c.Context(), om, obj, attribution.AccessDetails{
+			if err := transferService.RecordAccessIssued(c.Context(), transfers.AccessRequest{
+				Object:     obj,
 				Direction:  usage.ProviderTransferDirectionUpload,
 				StorageURL: urlStr,
 			}); err != nil {
@@ -284,9 +310,9 @@ func uploadKeyForExistingObject(obj *objects.Record, params internalapi.Internal
 	return ""
 }
 
-func resolveUploadTarget(ctx context.Context, om *core.ObjectManager, organization, project, key string) (core.CanonicalStorageTarget, error) {
+func resolveUploadTarget(ctx context.Context, transferService *transfers.Service, organization, project, key string) (transfers.CanonicalStorageTarget, error) {
 	key = strings.Trim(strings.TrimSpace(key), "/")
-	return om.ResolveScopedUploadTarget(ctx, organization, project, key)
+	return transferService.ResolveScopedUploadTarget(ctx, organization, project, key)
 }
 
 func firstNonEmpty(values ...string) string {
@@ -298,7 +324,7 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-func handleInternalUploadBulkFiber(om *core.ObjectManager) fiber.Handler {
+func handleInternalUploadBulkFiber(objectService *objects.Service, transferService *transfers.Service) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		var req internalapi.InternalUploadBulkRequest
 		if err := c.Bind().JSON(&req); err != nil && !errors.Is(err, io.EOF) {
@@ -320,7 +346,7 @@ func handleInternalUploadBulkFiber(om *core.ObjectManager) fiber.Handler {
 				continue
 			}
 
-			obj, err := om.GetObject(c.Context(), item.FileId, "update")
+			obj, err := objectService.GetObject(c.Context(), item.FileId, "update")
 			if err != nil {
 				errMsg := err.Error()
 				res.Error = &errMsg
@@ -336,7 +362,7 @@ func handleInternalUploadBulkFiber(om *core.ObjectManager) fiber.Handler {
 				continue
 			}
 
-			target, err := om.ResolveCanonicalStorageTarget(c.Context(), core.CanonicalStorageTargetRequest{
+			target, err := transferService.ResolveCanonicalStorageTarget(c.Context(), transfers.CanonicalStorageTargetRequest{
 				Object:         obj,
 				Key:            strings.TrimSpace(common.StringVal(item.Key)),
 				PreferChecksum: true,
@@ -353,12 +379,13 @@ func handleInternalUploadBulkFiber(om *core.ObjectManager) fiber.Handler {
 			if key == "" {
 				key = string(obj.Id)
 			}
-			signedURL, err := om.SignURL(c.Context(), target.URL, storage.AccessOptions{Method: http.MethodPut})
+			signedURL, err := transferService.SignURL(c.Context(), target.URL, storage.AccessOptions{Method: http.MethodPut})
 			if err != nil {
 				errMsg := err.Error()
 				res.Error = &errMsg
 				res.Status = http.StatusInternalServerError
-			} else if err := attribution.RecordAccessIssued(c.Context(), om, obj, attribution.AccessDetails{
+			} else if err := transferService.RecordAccessIssued(c.Context(), transfers.AccessRequest{
+				Object:     obj,
 				Direction:  usage.ProviderTransferDirectionUpload,
 				StorageURL: target.URL,
 			}); err != nil {
@@ -385,7 +412,7 @@ func handleInternalUploadBulkFiber(om *core.ObjectManager) fiber.Handler {
 	}
 }
 
-func handleInternalMultipartInitFiber(om *core.ObjectManager) fiber.Handler {
+func handleInternalMultipartInitFiber(objectService *objects.Service, transferService *transfers.Service) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		var req internalapi.InternalMultipartInitRequest
 		if err := c.Bind().JSON(&req); err != nil && !errors.Is(err, io.EOF) {
@@ -403,12 +430,12 @@ func handleInternalMultipartInitFiber(om *core.ObjectManager) fiber.Handler {
 		}
 
 		if strings.Contains(key, "/") {
-			target, err := resolveUploadTarget(c.Context(), om, common.StringVal(req.Organization), common.StringVal(req.Project), key)
+			target, err := resolveUploadTarget(c.Context(), transferService, common.StringVal(req.Organization), common.StringVal(req.Project), key)
 			if err != nil {
 				return apiutil.HandleError(c, err)
 			}
 			internalID := uuid.NewString()
-			uploadID, err := om.InitMultipartUpload(c.Context(), target.Bucket, target.Key)
+			uploadID, err := transferService.InitMultipartUpload(c.Context(), target.Bucket, target.Key)
 			if err != nil {
 				return apiutil.HandleError(c, err)
 			}
@@ -425,10 +452,10 @@ func handleInternalMultipartInitFiber(om *core.ObjectManager) fiber.Handler {
 			multipartKey string
 		)
 		if objects.LooksLikeSHA256(key) {
-			if existing, err := om.GetObjectsByChecksum(c.Context(), key, "read"); err == nil && len(existing) > 0 {
+			if existing, err := objectService.GetObjectsByChecksum(c.Context(), key, "read"); err == nil && len(existing) > 0 {
 				obj := &existing[0]
 				internalID = string(obj.Id)
-				target, err := om.ResolveCanonicalStorageTarget(c.Context(), core.CanonicalStorageTargetRequest{
+				target, err := transferService.ResolveCanonicalStorageTarget(c.Context(), transfers.CanonicalStorageTargetRequest{
 					Object:         obj,
 					PreferChecksum: true,
 				})
@@ -447,7 +474,7 @@ func handleInternalMultipartInitFiber(om *core.ObjectManager) fiber.Handler {
 		}
 
 		if bucket == "" {
-			target, err := resolveUploadTarget(c.Context(), om, common.StringVal(req.Organization), common.StringVal(req.Project), internalID)
+			target, err := resolveUploadTarget(c.Context(), transferService, common.StringVal(req.Organization), common.StringVal(req.Project), internalID)
 			if err != nil {
 				return apiutil.HandleError(c, err)
 			}
@@ -455,7 +482,7 @@ func handleInternalMultipartInitFiber(om *core.ObjectManager) fiber.Handler {
 			multipartKey = target.Key
 		}
 
-		uploadID, err := om.InitMultipartUpload(c.Context(), bucket, multipartKey)
+		uploadID, err := transferService.InitMultipartUpload(c.Context(), bucket, multipartKey)
 		if err != nil {
 			return apiutil.HandleError(c, err)
 		}
@@ -468,7 +495,7 @@ func handleInternalMultipartInitFiber(om *core.ObjectManager) fiber.Handler {
 	}
 }
 
-func handleInternalMultipartUploadFiber(om *core.ObjectManager) fiber.Handler {
+func handleInternalMultipartUploadFiber(transferService *transfers.Service) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		var req internalapi.InternalMultipartUploadRequest
 		if err := c.Bind().JSON(&req); err != nil && !errors.Is(err, io.EOF) {
@@ -484,7 +511,7 @@ func handleInternalMultipartUploadFiber(om *core.ObjectManager) fiber.Handler {
 		}
 		s := sess.(multipartSession)
 
-		urlStr, err := om.SignMultipartPart(c.Context(), s.Bucket, s.Key, req.UploadId, req.PartNumber)
+		urlStr, err := transferService.SignMultipartPart(c.Context(), s.Bucket, s.Key, req.UploadId, req.PartNumber)
 		if err != nil {
 			return apiutil.HandleError(c, err)
 		}
@@ -492,7 +519,7 @@ func handleInternalMultipartUploadFiber(om *core.ObjectManager) fiber.Handler {
 	}
 }
 
-func handleInternalMultipartCompleteFiber(om *core.ObjectManager) fiber.Handler {
+func handleInternalMultipartCompleteFiber(transferService *transfers.Service) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		var req internalapi.InternalMultipartCompleteRequest
 		if err := c.Bind().JSON(&req); err != nil && !errors.Is(err, io.EOF) {
@@ -512,7 +539,7 @@ func handleInternalMultipartCompleteFiber(om *core.ObjectManager) fiber.Handler 
 		for i, p := range req.Parts {
 			parts[i] = storage.CompletedPart{ETag: p.ETag, PartNumber: p.PartNumber}
 		}
-		if err := om.CompleteMultipartUpload(c.Context(), s.Bucket, s.Key, req.UploadId, parts); err != nil {
+		if err := transferService.CompleteMultipartUpload(c.Context(), s.Bucket, s.Key, req.UploadId, parts); err != nil {
 			return apiutil.HandleError(c, err)
 		}
 		return c.SendStatus(fiber.StatusOK)

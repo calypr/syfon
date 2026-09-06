@@ -10,6 +10,7 @@ import (
 	sycommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/access"
 	apimiddleware "github.com/calypr/syfon/internal/httpapi/middleware"
+	"github.com/calypr/syfon/internal/usage"
 )
 
 func (s *MetricsServer) checkAuth(ctx context.Context) (metricsAccess, int, bool) {
@@ -55,6 +56,25 @@ type metricsAccess struct {
 	organization string
 	project      string
 	scopes       []metricsScope
+}
+
+func (a metricsAccess) scopeQuery() usage.ScopeQuery {
+	query := usage.ScopeQuery{
+		Organization:    a.organization,
+		Project:         a.project,
+		IncludeUnscoped: false,
+	}
+	if a.hasScopeAggregate() {
+		query.Scopes = make([]usage.Scope, 0, len(a.scopes))
+		for _, scope := range a.scopes {
+			query.Scopes = append(query.Scopes, usage.Scope{
+				Organization: scope.organization,
+				Project:      scope.project,
+			})
+		}
+		query.Resources = metricsResources(a.scopes)
+	}
+	return query
 }
 
 func (a metricsAccess) isScoped() bool {

@@ -21,10 +21,10 @@ import (
 	"github.com/calypr/syfon/internal/api/docs"
 	"github.com/calypr/syfon/internal/api/drsapi"
 	"github.com/calypr/syfon/internal/api/internaldrs"
-	"github.com/calypr/syfon/internal/api/metrics"
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/config"
 	"github.com/calypr/syfon/internal/core"
+	"github.com/calypr/syfon/internal/httpapi/metrics"
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/storage"
 	"github.com/calypr/syfon/internal/testutils"
@@ -361,32 +361,20 @@ func newSyfonTestServer(t *testing.T) *fiberTestServer {
 	if err != nil {
 		t.Fatalf("construct bucket service: %v", err)
 	}
+	objectService := objects.NewService(objects.Dependencies{
+		Reader: objectPorts.Reader, Writer: objectPorts.Writer, AccessMethods: objectPorts.AccessMethods,
+		AccessPolicy: objectPorts.AccessPolicy, Aliases: objectPorts.Aliases, Content: objectPorts.Content,
+		ChecksumScope: objectPorts.ChecksumScope, Scope: objectPorts.Scope, Resources: objectPorts.Resources,
+		Pages: objectPorts.Pages, URLPages: objectPorts.URLPages, Authorized: objectPorts.Authorized,
+	})
+	usageService := usage.NewService(usage.Dependencies{Ingest: database, Reports: database, Objects: objectService})
+	transferService := transfers.NewService(transfers.Dependencies{
+		Access: cliFileStorageAccess{root: storageDir}, Scopes: bucketService, Credentials: bucketService,
+		Pending: database, Events: usageService.Ingest(),
+	})
 	om := core.NewObjectManager(core.Dependencies{
 		Objects:       objectPorts,
 		BucketService: bucketService,
-		Storage:       core.StoragePorts{Access: cliFileStorageAccess{root: storageDir}},
-		Transfers: core.TransferPorts{
-			Pending: database,
-			Events:  database,
-		},
-		Usage: core.UsagePorts{
-			Counters:       database,
-			ProviderEvents: database,
-		},
-	})
-	objectService := objects.NewService(objects.Dependencies{
-		Reader:        objectPorts.Reader,
-		Writer:        objectPorts.Writer,
-		AccessMethods: objectPorts.AccessMethods,
-		AccessPolicy:  objectPorts.AccessPolicy,
-		Aliases:       objectPorts.Aliases,
-		Content:       objectPorts.Content,
-		ChecksumScope: objectPorts.ChecksumScope,
-		Scope:         objectPorts.Scope,
-		Resources:     objectPorts.Resources,
-		Pages:         objectPorts.Pages,
-		URLPages:      objectPorts.URLPages,
-		Authorized:    objectPorts.Authorized,
 	})
 
 	drsAPI := api.Group("/ga4gh/drs/v1")
@@ -394,7 +382,7 @@ func newSyfonTestServer(t *testing.T) *fiberTestServer {
 	environment := "test"
 	createdAt := time.Date(2024, time.January, 2, 3, 4, 5, 0, time.UTC)
 	updatedAt := time.Date(2024, time.January, 3, 4, 5, 6, 0, time.UTC)
-	drsapi.RegisterDRSRoutes(drsAPI, objectService, om, drs.Service{
+	drsapi.RegisterDRSRoutes(drsAPI, objectService, transferService, drs.Service{
 		Id:          "drs-service-test",
 		Name:        "Calypr Test DRS Server",
 		Type:        drs.ServiceType{Group: "org.ga4gh", Artifact: "drs", Version: "1.2.0"},
@@ -405,8 +393,8 @@ func newSyfonTestServer(t *testing.T) *fiberTestServer {
 		Version:     "1.0.0",
 	})
 	docs.RegisterSwaggerRoutes(app)
-	metrics.RegisterMetricsRoutes(api, database, database, database, om)
-	internaldrs.RegisterInternalRoutes(api, objectService, om, bucketService)
+	metrics.RegisterMetricsRoutes(api, usageService.Reports(), usageService.Ingest())
+	internaldrs.RegisterInternalRoutes(api, objectService, om, transferService, usageService.Ingest(), bucketService)
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

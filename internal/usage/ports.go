@@ -13,6 +13,22 @@ type FileCounterRecorder interface {
 	RecordFileDownload(ctx context.Context, objectID string) error
 }
 
+type TransferEventWriter interface {
+	RecordTransferAttributionEvents(ctx context.Context, events []Event) error
+}
+
+type IngestStore interface {
+	FileCounterRecorder
+	TransferEventWriter
+	ProviderEventRecorder
+}
+
+type Ingestor interface {
+	FileCounterRecorder
+	TransferEventWriter
+	ProviderEventRecorder
+}
+
 // FileUsageReader reads per-object usage and unscoped reports.
 type FileUsageReader interface {
 	GetFileUsage(ctx context.Context, objectID string) (*FileUsage, error)
@@ -38,6 +54,11 @@ type ProviderEventRecorder interface {
 type TransferQuery interface {
 	GetTransferAttributionSummary(ctx context.Context, filter Filter) (Summary, error)
 	GetTransferAttributionBreakdown(ctx context.Context, filter Filter, groupBy string) ([]Breakdown, error)
+}
+
+type ReportStore interface {
+	FileUsageReader
+	TransferQuery
 }
 
 // OptionalScopedFileUsageQuery is an optional optimization for authorized

@@ -345,10 +345,6 @@ func TestCoreProjectDeleteMixedResultsPreserveOrder(t *testing.T) {
 }
 
 func TestCoreScopedStorageHelperContracts(t *testing.T) {
-	bucket, key, ok := parseS3Location("s3://bucket-name/path/to/object")
-	if !ok || bucket != "bucket-name" || key != "path/to/object" {
-		t.Fatalf("unexpected parsed location: bucket=%q key=%q ok=%v", bucket, key, ok)
-	}
 	scopes := []buckets.Scope{{PathPrefix: "org"}, {PathPrefix: "project"}}
 	if got := normalizeScopedStorageKey("org/project/object.txt", scopes); got != "org/project/object.txt" {
 		t.Fatalf("expected already-prefixed key to remain stable, got %q", got)

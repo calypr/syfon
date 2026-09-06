@@ -19,6 +19,8 @@ import (
 	"github.com/calypr/syfon/internal/httpapi/middleware"
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/testutils"
+	"github.com/calypr/syfon/internal/transfers"
+	"github.com/calypr/syfon/internal/usage"
 )
 
 type endpointCase struct {
@@ -197,14 +199,19 @@ func buildMockServerRouterWithRoutes(routes config.RoutesConfig) *fiber.App {
 	requestIDMiddleware := middleware.NewRequestIDMiddleware(logger)
 	cfg := &config.Config{Routes: routes}
 	dependencies := mockServerDependencies(database, core.StoragePorts{})
+	objectService := newServerObjectService(dependencies.Objects)
+	usageService := usage.NewService(usage.Dependencies{Ingest: database, Reports: database, Objects: objectService})
+	transferService := transfers.NewService(transfers.Dependencies{
+		Scopes: dependencies.BucketService, Credentials: dependencies.BucketService,
+		Pending: database, Events: usageService.Ingest(),
+	})
 	rt := &serverRuntime{
 		app:                 app,
 		cfg:                 cfg,
-		fileUsage:           database,
-		transferQuery:       database,
-		providerEvents:      database,
 		serviceInfo:         serviceInfoForBackend(true),
-		objectService:       newServerObjectService(dependencies.Objects),
+		objectService:       objectService,
+		transferService:     transferService,
+		usageService:        usageService,
 		om:                  core.NewObjectManager(dependencies),
 		bucketService:       dependencies.BucketService,
 		authzMiddleware:     authzMiddleware,

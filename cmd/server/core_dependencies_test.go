@@ -22,8 +22,6 @@ func mockServerDependencies(database *testutils.MockDatabase, storagePorts core.
 	return core.Dependencies{
 		Objects:       objectPorts,
 		BucketService: bucketService,
-		Transfers:     core.TransferPorts{Pending: database, Events: database},
-		Usage:         core.UsagePorts{Counters: database, ProviderEvents: database},
 		Storage:       storagePorts,
 	}
 }

@@ -6,21 +6,20 @@ import (
 
 	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/api/apiutil"
-	"github.com/calypr/syfon/internal/api/attribution"
 	"github.com/calypr/syfon/internal/common"
-	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/storage"
+	"github.com/calypr/syfon/internal/transfers"
 	"github.com/calypr/syfon/internal/usage"
 	"github.com/gofiber/fiber/v3"
 )
 
-func handleGetAccessURLFiber(om *core.ObjectManager) fiber.Handler {
+func handleGetAccessURLFiber(objectService *objects.Service, transferService *transfers.Service) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		id := c.Params("object_id")
 		accessID := c.Params("access_id")
 
-		obj, err := om.GetObject(c.Context(), id, "read")
+		obj, err := objectService.GetObject(c.Context(), id, "read")
 		if err != nil {
 			return apiutil.HandleError(c, err)
 		}
@@ -34,11 +33,12 @@ func handleGetAccessURLFiber(om *core.ObjectManager) fiber.Handler {
 		if obj.Name != nil {
 			opts.DownloadFilename = storage.DownloadFilename(*obj.Name)
 		}
-		signed, err := om.SignObjectURL(c.Context(), obj, targetURL, opts)
+		signed, err := transferService.SignObjectURL(c.Context(), obj, targetURL, opts)
 		if err != nil {
 			return apiutil.HandleError(c, err)
 		}
-		if err := attribution.RecordAccessIssued(c.Context(), om, obj, attribution.AccessDetails{
+		if err := transferService.RecordAccessIssued(c.Context(), transfers.AccessRequest{
+			Object:     obj,
 			Direction:  usage.ProviderTransferDirectionDownload,
 			AccessID:   accessID,
 			StorageURL: targetURL,
@@ -76,7 +76,7 @@ func accessURLForID(obj *objects.Record, accessID string) string {
 	return ""
 }
 
-func handleGetBulkAccessURLFiber(om *core.ObjectManager) fiber.Handler {
+func handleGetBulkAccessURLFiber(objectService *objects.Service, transferService *transfers.Service) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		var body drs.BulkObjectAccessId
 		if err := c.Bind().JSON(&body); err != nil || body.BulkObjectAccessIds == nil {
@@ -97,7 +97,7 @@ func handleGetBulkAccessURLFiber(om *core.ObjectManager) fiber.Handler {
 				continue
 			}
 
-			obj, err := om.GetObject(c.Context(), objectID, "read")
+			obj, err := objectService.GetObject(c.Context(), objectID, "read")
 			if err != nil {
 				requested += len(*item.BulkAccessIds)
 				unresolvedIDs = append(unresolvedIDs, objectID)
@@ -117,12 +117,13 @@ func handleGetBulkAccessURLFiber(om *core.ObjectManager) fiber.Handler {
 				if obj.Name != nil {
 					opts.DownloadFilename = storage.DownloadFilename(*obj.Name)
 				}
-				signed, err := om.SignObjectURL(c.Context(), obj, targetURL, opts)
+				signed, err := transferService.SignObjectURL(c.Context(), obj, targetURL, opts)
 				if err != nil {
 					unresolvedIDs = append(unresolvedIDs, objectID)
 					continue
 				}
-				if err := attribution.RecordAccessIssued(c.Context(), om, obj, attribution.AccessDetails{
+				if err := transferService.RecordAccessIssued(c.Context(), transfers.AccessRequest{
+					Object:     obj,
 					Direction:  usage.ProviderTransferDirectionDownload,
 					AccessID:   accessID,
 					StorageURL: targetURL,

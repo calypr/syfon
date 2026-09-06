@@ -3,7 +3,6 @@ package metrics
 import (
 	"context"
 	"net/http"
-	"sort"
 	"time"
 
 	"github.com/calypr/syfon/apigen/server/metricsapi"
@@ -20,12 +19,10 @@ func (s *MetricsServer) GetTransferSummary(ctx context.Context, request metricsa
 	if err != nil {
 		return metricsapi.GetTransferSummary500Response{}, nil
 	}
-	var summary usage.Summary
-	if access.hasScopeAggregate() && filter.Organization == "" {
-		summary, err = s.getScopedTransferAttributionSummary(ctx, filter, access.scopes)
-	} else {
-		summary, err = s.transferQuery.GetTransferAttributionSummary(ctx, filter)
-	}
+	summary, err := s.reporter.GetTransferAttributionSummary(ctx, usage.TransferSummaryQuery{
+		Filter: filter,
+		Scope:  access.scopeQuery(),
+	})
 	if err != nil {
 		return metricsapi.GetTransferSummary500Response{}, nil
 	}
@@ -53,12 +50,11 @@ func (s *MetricsServer) GetTransferBreakdown(ctx context.Context, request metric
 	default:
 		return metricsapi.GetTransferBreakdown400Response{}, nil
 	}
-	var items []usage.Breakdown
-	if access.hasScopeAggregate() && filter.Organization == "" {
-		items, err = s.getScopedTransferAttributionBreakdown(ctx, filter, groupBy, access.scopes)
-	} else {
-		items, err = s.transferQuery.GetTransferAttributionBreakdown(ctx, filter, groupBy)
-	}
+	items, err := s.reporter.GetTransferAttributionBreakdown(ctx, usage.TransferBreakdownQuery{
+		Filter:  filter,
+		GroupBy: groupBy,
+		Scope:   access.scopeQuery(),
+	})
 	if err != nil {
 		return metricsapi.GetTransferBreakdown500Response{}, nil
 	}
@@ -172,89 +168,16 @@ func toGeneratedTransferBreakdown(item usage.Breakdown) metricsapi.TransferAttri
 }
 
 func (s *MetricsServer) transferFreshness(ctx context.Context, filter usage.Filter) (metricsapi.TransferMetricsFreshness, bool, error) {
-	stale := false
-	missing := make([]string, 0)
-	freshness := metricsapi.TransferMetricsFreshness{
-		IsStale:        &stale,
-		MissingBuckets: &missing,
-		RequiredFrom:   filter.From,
-		RequiredTo:     filter.To,
+	domainFreshness, err := s.reporter.GetTransferFreshness(ctx, filter)
+	if err != nil {
+		return metricsapi.TransferMetricsFreshness{}, false, err
 	}
-	return freshness, stale, nil
-}
-
-func (s *MetricsServer) getScopedTransferAttributionSummary(ctx context.Context, filter usage.Filter, scopes []metricsScope) (usage.Summary, error) {
-	if scopedStore, ok := s.transferQuery.(usage.OptionalScopedTransferQuery); ok {
-		return scopedStore.GetTransferAttributionSummaryByResources(ctx, filter, metricsResources(scopes))
+	generated := metricsapi.TransferMetricsFreshness{
+		IsStale:             &domainFreshness.IsStale,
+		MissingBuckets:      &domainFreshness.MissingBuckets,
+		RequiredFrom:        domainFreshness.RequiredFrom,
+		RequiredTo:          domainFreshness.RequiredTo,
+		LatestCompletedSync: domainFreshness.LatestCompletedSync,
 	}
-
-	var out usage.Summary
-	for _, scope := range scopes {
-		scoped := filter
-		scoped.Organization = scope.organization
-		scoped.Project = scope.project
-		summary, err := s.transferQuery.GetTransferAttributionSummary(ctx, scoped)
-		if err != nil {
-			return usage.Summary{}, err
-		}
-		out.EventCount += summary.EventCount
-		out.AccessIssuedCount += summary.AccessIssuedCount
-		out.DownloadEventCount += summary.DownloadEventCount
-		out.UploadEventCount += summary.UploadEventCount
-		out.BytesRequested += summary.BytesRequested
-		out.BytesDownloaded += summary.BytesDownloaded
-		out.BytesUploaded += summary.BytesUploaded
-	}
-	return out, nil
-}
-
-func (s *MetricsServer) getScopedTransferAttributionBreakdown(ctx context.Context, filter usage.Filter, groupBy string, scopes []metricsScope) ([]usage.Breakdown, error) {
-	if scopedStore, ok := s.transferQuery.(usage.OptionalScopedTransferQuery); ok {
-		return scopedStore.GetTransferAttributionBreakdownByResources(ctx, filter, groupBy, metricsResources(scopes))
-	}
-
-	byKey := map[string]*usage.Breakdown{}
-	for _, scope := range scopes {
-		scoped := filter
-		scoped.Organization = scope.organization
-		scoped.Project = scope.project
-		items, err := s.transferQuery.GetTransferAttributionBreakdown(ctx, scoped, groupBy)
-		if err != nil {
-			return nil, err
-		}
-		for _, item := range items {
-			key := item.Key
-			if key == "" {
-				key = item.Organization + "/" + item.Project + "/" + item.Provider + "/" + item.Bucket + "/" + item.SHA256 + "/" + item.ActorEmail + "/" + item.ActorSubject
-			}
-			merged := byKey[key]
-			if merged == nil {
-				copy := item
-				byKey[key] = &copy
-				continue
-			}
-			merged.EventCount += item.EventCount
-			merged.BytesRequested += item.BytesRequested
-			merged.BytesDownloaded += item.BytesDownloaded
-			merged.BytesUploaded += item.BytesUploaded
-			if item.LastTransferTime != nil && (merged.LastTransferTime == nil || item.LastTransferTime.After(*merged.LastTransferTime)) {
-				t := *item.LastTransferTime
-				merged.LastTransferTime = &t
-			}
-		}
-	}
-	out := make([]usage.Breakdown, 0, len(byKey))
-	for _, item := range byKey {
-		out = append(out, *item)
-	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].LastTransferTime == nil || out[j].LastTransferTime == nil {
-			return out[i].Key < out[j].Key
-		}
-		if out[i].LastTransferTime.Equal(*out[j].LastTransferTime) {
-			return out[i].Key < out[j].Key
-		}
-		return out[i].LastTransferTime.After(*out[j].LastTransferTime)
-	})
-	return out, nil
+	return generated, domainFreshness.IsStale, nil
 }

@@ -19,6 +19,8 @@ import (
 	apimiddleware "github.com/calypr/syfon/internal/httpapi/middleware"
 	httprecords "github.com/calypr/syfon/internal/httpapi/records"
 	"github.com/calypr/syfon/internal/objects"
+	"github.com/calypr/syfon/internal/transfers"
+	"github.com/calypr/syfon/internal/usage"
 	"github.com/gofiber/fiber/v3"
 )
 
@@ -29,7 +31,7 @@ const (
 	maxInternalBulkOverwrite     = 1000
 )
 
-func RegisterInternalRoutes(router fiber.Router, objectService *objects.Service, om *core.ObjectManager, bucketService *buckets.Service) {
+func RegisterInternalRoutes(router fiber.Router, objectService *objects.Service, om *core.ObjectManager, transferService *transfers.Service, fileCounters usage.FileCounterRecorder, bucketService *buckets.Service) {
 	router.Get("/", handleInternalListFiber(objectService))
 	router.Get(common.RouteInternalIndex, handleInternalListFiber(objectService))
 	router.Get(routeutil.FiberPath(common.RouteInternalIndexDetail), handleInternalGetFiber(objectService))
@@ -51,7 +53,7 @@ func RegisterInternalRoutes(router fiber.Router, objectService *objects.Service,
 	router.Post(common.RouteInternalRepairScopeAudit, handleInternalScopeRepairAuditFiber(om))
 	router.Post(common.RouteInternalRepairScopeApply, handleInternalScopeRepairApplyFiber(om))
 
-	registerInternalTransferRoutes(router, om, bucketService)
+	registerInternalTransferRoutes(router, om, objectService, transferService, fileCounters, bucketService)
 }
 
 type bulkOverwriteRequest struct {

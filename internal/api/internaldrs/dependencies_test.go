@@ -10,8 +10,10 @@ import (
 
 type internalDRSTestFixture struct {
 	*core.ObjectManager
-	ObjectService *objects.Service
-	bucketService *buckets.Service
+	ObjectService   *objects.Service
+	TransferService *transfers.Service
+	FileCounters    usage.FileCounterRecorder
+	bucketService   *buckets.Service
 }
 
 func newInternalDRSObjectManager(store any, storageDependency any) internalDRSTestFixture {
@@ -31,6 +33,8 @@ func newInternalDRSObjectManager(store any, storageDependency any) internalDRSTe
 	}
 	bucketService := newInternalDRSBucketService(store, storageDependency, objectPorts)
 	storagePorts := internalDRSStoragePorts(storageDependency)
+	storageAccess, _ := storageDependency.(transfers.AccessPort)
+	storageMultipart, _ := storageDependency.(transfers.MultipartPort)
 	objectService := objects.NewService(objects.Dependencies{
 		Reader:        objectPorts.Reader,
 		Writer:        objectPorts.Writer,
@@ -45,54 +49,36 @@ func newInternalDRSObjectManager(store any, storageDependency any) internalDRSTe
 		URLPages:      objectPorts.URLPages,
 		Authorized:    objectPorts.Authorized,
 	})
+	transferService := transfers.NewService(transfers.Dependencies{
+		Access:      storageAccess,
+		Multipart:   storageMultipart,
+		Scopes:      bucketService,
+		Credentials: bucketService,
+		Pending:     store.(transfers.PendingStore),
+		Events:      store.(transfers.EventRecorder),
+	})
 	return internalDRSTestFixture{
 		ObjectManager: core.NewObjectManager(core.Dependencies{
 			Objects:       objectPorts,
 			BucketService: bucketService,
-			Transfers: core.TransferPorts{
-				Pending: store.(transfers.PendingStore),
-				Events:  store.(transfers.EventRecorder),
-			},
-			Usage: core.UsagePorts{
-				Counters:       store.(usage.FileCounterRecorder),
-				ProviderEvents: store.(usage.ProviderEventRecorder),
-			},
-			Storage: storagePorts,
+			Storage:       storagePorts,
 		}),
-		ObjectService: objectService,
-		bucketService: bucketService,
+		ObjectService:   objectService,
+		TransferService: transferService,
+		FileCounters:    store.(usage.FileCounterRecorder),
+		bucketService:   bucketService,
 	}
 }
 
 func internalDRSStoragePorts(dependency any) core.StoragePorts {
-	switch candidate := dependency.(type) {
-	case core.StoragePorts:
-		return candidate
-	case *internalDRSStorageFake:
-		return core.StoragePorts{
-			Access:    candidate,
-			Multipart: candidate,
-			Probe:     candidate,
-			Inventory: candidate,
-			Delete:    candidate,
-		}
-	case interface {
-		core.StorageAccess
-		core.StorageMultipart
-		core.StorageProbe
-		core.StorageInventory
-		core.StorageDelete
-	}:
-		return core.StoragePorts{
-			Access:    candidate,
-			Multipart: candidate,
-			Probe:     candidate,
-			Inventory: candidate,
-			Delete:    candidate,
-		}
-	default:
-		panic("internal DRS tests require a core.StoragePorts or internalDRSStorageFake dependency")
+	if ports, ok := dependency.(core.StoragePorts); ok {
+		return ports
 	}
+	ports := core.StoragePorts{}
+	ports.Probe, _ = dependency.(core.StorageProbe)
+	ports.Inventory, _ = dependency.(core.StorageInventory)
+	ports.Delete, _ = dependency.(core.StorageDelete)
+	return ports
 }
 
 func newInternalDRSBucketService(store any, storageDependency any, objectPorts core.ObjectPorts) *buckets.Service {
@@ -118,8 +104,8 @@ func optionalInternalDRSPort[T any](store any) T {
 	return value
 }
 
-var _ core.StorageAccess = (*internalDRSStorageFake)(nil)
-var _ core.StorageMultipart = (*internalDRSStorageFake)(nil)
+var _ transfers.AccessPort = (*internalDRSStorageFake)(nil)
+var _ transfers.MultipartPort = (*internalDRSStorageFake)(nil)
 var _ core.StorageProbe = (*internalDRSStorageFake)(nil)
 var _ core.StorageInventory = (*internalDRSStorageFake)(nil)
 var _ core.StorageDelete = (*internalDRSStorageFake)(nil)
