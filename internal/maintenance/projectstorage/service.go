@@ -166,6 +166,7 @@ type scopeTarget struct {
 	Provider   string
 	Bucket     string
 	Prefix     string
+	prefixes   []string
 	Credential buckets.Credential
 }
 
@@ -233,10 +234,12 @@ func (s *Service) resolveScope(ctx context.Context, organization, project, metho
 	if address.NormalizeProvider(credential.Provider, address.S3Provider) != address.S3Provider {
 		return scopeTarget{}, &Error{Kind: ErrorUnsupported, Message: fmt.Sprintf("provider %q is not supported for scoped bucket listing", credential.Provider)}
 	}
+	prefixes := normalizedPrefixes(scopes)
 	return scopeTarget{
 		Provider:   address.S3Provider,
 		Bucket:     bucket,
-		Prefix:     strings.Join(normalizedPrefixes(scopes), "/"),
+		Prefix:     strings.Join(prefixes, "/"),
+		prefixes:   prefixes,
 		Credential: *credential,
 	}, nil
 }

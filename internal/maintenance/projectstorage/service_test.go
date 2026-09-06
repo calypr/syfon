@@ -127,12 +127,19 @@ func (f fakePhysical) ListPhysicalObjectsByScope(context.Context, string, string
 }
 
 func projectService(inventory *fakeInventory, deletePort DeletePort) (*Service, *fakeVisibility) {
+	return projectServiceWithScopes(inventory, deletePort, map[string]buckets.Scope{
+		"org/":        {Organization: "org", Bucket: "bucket", PathPrefix: "prefix"},
+		"org/project": {Organization: "org", ProjectID: "project", Bucket: "bucket", PathPrefix: "prefix/project"},
+	})
+}
+
+func projectServiceWithScopes(inventory *fakeInventory, deletePort DeletePort, scopes map[string]buckets.Scope) (*Service, *fakeVisibility) {
 	credential := buckets.Credential{CredentialID: "cred", Bucket: "bucket", Provider: "s3"}
 	visibility := &fakeVisibility{values: map[string]buckets.VisibleBucket{
 		"cred": {Credential: credential},
 	}}
 	service := NewService(Dependencies{
-		Scopes:      fakeScopes{values: map[string]buckets.Scope{"org/": {Organization: "org", Bucket: "bucket", PathPrefix: "prefix"}, "org/project": {Organization: "org", ProjectID: "project", Bucket: "bucket", PathPrefix: "prefix/project"}}},
+		Scopes:      fakeScopes{values: scopes},
 		Credentials: fakeCredentials{values: map[string]buckets.Credential{"cred": credential}},
 		Visibility:  visibility,
 		Inventory:   inventory,
@@ -187,6 +194,26 @@ func TestProbeObjectNormalizesScopedKeyAgainstEffectivePrefix(t *testing.T) {
 				t.Fatalf("probe targets = %+v, want key %q", probe.targets, tt.want)
 			}
 		})
+	}
+}
+
+func TestProbeObjectNormalizesLegacyOrganizationPrefixAgainstComposedScope(t *testing.T) {
+	service, _ := projectServiceWithScopes(&fakeInventory{}, nil, map[string]buckets.Scope{
+		"org/":        {Organization: "org", Bucket: "bucket", PathPrefix: "prefix"},
+		"org/project": {Organization: "org", ProjectID: "project", Bucket: "bucket", PathPrefix: "project"},
+	})
+	probe := &recordingProbe{}
+	service.probe = probe
+
+	metadata, err := service.ProbeObject(context.Background(), InspectRequest{Organization: "org", Project: "project", Key: "prefix/file.bin"})
+	if err != nil {
+		t.Fatalf("ProbeObject() error = %v", err)
+	}
+	if metadata.Key != "prefix/project/file.bin" || metadata.ObjectURL != "s3://bucket/prefix/project/file.bin" {
+		t.Fatalf("metadata = %+v, want key %q", metadata, "prefix/project/file.bin")
+	}
+	if len(probe.targets) != 1 || probe.targets[0].Bucket != "bucket" || probe.targets[0].Key != "prefix/project/file.bin" {
+		t.Fatalf("probe targets = %+v, want key %q", probe.targets, "prefix/project/file.bin")
 	}
 }
 
