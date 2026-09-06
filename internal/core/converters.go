@@ -3,7 +3,6 @@ package core
 import (
 	"encoding/json"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -180,14 +179,9 @@ func normalizedObjectNamePtr(name *string) *string {
 	if name == nil {
 		return nil
 	}
-	trimmed := strings.TrimSpace(*name)
-	if trimmed == "" {
+	base := objects.CleanToBasename(*name)
+	if base == "" {
 		return nil
-	}
-	trimmed = strings.ReplaceAll(trimmed, "\\", "/")
-	base := filepath.Base(trimmed)
-	if base == "." || base == "/" || base == "" {
-		base = trimmed
 	}
 	return common.Ptr(base)
 }

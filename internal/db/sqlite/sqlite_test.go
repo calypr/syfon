@@ -11,12 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/crypto"
 	"github.com/calypr/syfon/internal/faults"
-	httpdrs "github.com/calypr/syfon/internal/httpapi/drs"
 	"github.com/calypr/syfon/internal/models"
 
 	"github.com/calypr/syfon/internal/objects"
@@ -29,30 +27,26 @@ func TestSqliteDB_CRUD(t *testing.T) {
 		t.Fatalf("failed to create db: %v", err)
 	}
 
-	obj := &drs.DrsObject{
+	obj := &objects.Record{
 		Id:          "abc",
 		Size:        123,
 		CreatedTime: time.Now(),
 		UpdatedTime: func() *time.Time { t := time.Now(); return &t }(),
 		Version:     common.Ptr("1.0"),
 		Name:        common.Ptr("testing"),
-		AccessMethods: &[]drs.AccessMethod{
+		AccessMethods: &[]objects.AccessMethod{
 			{
-				Type: drs.AccessMethodTypeS3,
-				AccessUrl: &struct {
-					Headers *[]string `json:"headers,omitempty"`
-					Url     string    `json:"url"`
-				}{Url: "s3://bucket/key"},
+				Type:      "s3",
+				AccessUrl: &objects.AccessURL{Url: "s3://bucket/key"},
 			},
 		},
-		Checksums: []drs.Checksum{
+		Checksums: []objects.Checksum{
 			{Type: "sha256", Checksum: "abc"},
 		},
 	}
 
 	// Create
-	converted := httpdrs.FromGenerated(*obj)
-	if err := db.CreateObject(ctx, &converted); err != nil {
+	if err := db.CreateObject(ctx, obj); err != nil {
 		t.Fatalf("CreateObject failed: %v", err)
 	}
 
@@ -213,28 +207,24 @@ func TestSqliteDB_GetObjectsByChecksum_WhenIDDiffers(t *testing.T) {
 	}
 	checksum := "47454ac45ec9e9d88d76ba2dc8dff527ba6899a0f4189eb67dfcb2da0aa7d125"
 
-	obj := &drs.DrsObject{
+	obj := &objects.Record{
 		Id:          "did-123",
 		Size:        10,
 		CreatedTime: time.Now(),
 		UpdatedTime: func() *time.Time { t := time.Now(); return &t }(),
 		Version:     common.Ptr("1.0"),
 		Name:        common.Ptr("oid-object"),
-		AccessMethods: &[]drs.AccessMethod{
+		AccessMethods: &[]objects.AccessMethod{
 			{
-				Type: drs.AccessMethodTypeS3,
-				AccessUrl: &struct {
-					Headers *[]string `json:"headers,omitempty"`
-					Url     string    `json:"url"`
-				}{Url: "s3://bucket/cbds/end_to_end_test/" + checksum},
+				Type:      "s3",
+				AccessUrl: &objects.AccessURL{Url: "s3://bucket/cbds/end_to_end_test/" + checksum},
 			},
 		},
-		Checksums: []drs.Checksum{
+		Checksums: []objects.Checksum{
 			{Type: "sha256", Checksum: checksum},
 		},
 	}
-	converted := httpdrs.FromGenerated(*obj)
-	if err := db.CreateObject(ctx, &converted); err != nil {
+	if err := db.CreateObject(ctx, obj); err != nil {
 		t.Fatalf("CreateObject failed: %v", err)
 	}
 
@@ -845,9 +835,8 @@ func TestSqliteDB_UpdateAccessMethods(t *testing.T) {
 	ctx := context.Background()
 	db, _ := NewSqliteDB(":memory:")
 
-	obj := &drs.DrsObject{Id: "update-me"}
-	converted := httpdrs.FromGenerated(*obj)
-	if err := db.CreateObject(ctx, &converted); err != nil {
+	obj := &objects.Record{Id: "update-me"}
+	if err := db.CreateObject(ctx, obj); err != nil {
 		t.Fatalf("CreateObject failed: %v", err)
 	}
 

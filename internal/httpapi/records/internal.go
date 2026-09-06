@@ -3,7 +3,6 @@ package records
 import (
 	"encoding/json"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -127,13 +126,9 @@ func normalizedRecordName(value *string) *string {
 	if value == nil {
 		return nil
 	}
-	trimmed := strings.TrimSpace(strings.ReplaceAll(*value, "\\", "/"))
-	if trimmed == "" {
+	base := objects.CleanToBasename(*value)
+	if base == "" {
 		return nil
-	}
-	base := filepath.Base(trimmed)
-	if base == "." || base == "/" || base == "" {
-		base = trimmed
 	}
 	return &base
 }

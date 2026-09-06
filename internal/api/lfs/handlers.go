@@ -13,7 +13,7 @@ import (
 	sycommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/faults"
-	httpdrs "github.com/calypr/syfon/internal/httpapi/drs"
+	httplfs "github.com/calypr/syfon/internal/httpapi/lfs"
 	"github.com/calypr/syfon/internal/models"
 
 	"github.com/calypr/syfon/internal/objects"
@@ -153,7 +153,7 @@ func (s *LFSServer) LfsStageMetadata(ctx context.Context, request lfsapi.LfsStag
 	now := time.Now().UTC()
 	entries := make([]models.PendingLFSMeta, 0, len(req.Candidates))
 	for i, c := range req.Candidates {
-		domainCandidate := httpdrs.FromLFSGeneratedCandidate(c)
+		domainCandidate := httplfs.FromGeneratedCandidate(c)
 		internalObj, err := core.CandidateToRecord(domainCandidate, now)
 		if err != nil {
 			return lfsapi.LfsStageMetadata400JSONResponse{Message: fmt.Sprintf("candidate[%d] invalid: %v", i, err)}, nil

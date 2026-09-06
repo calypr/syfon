@@ -157,14 +157,6 @@ func (m *ObjectManager) canonicalContentAndCheckAccess(ctx context.Context, obj 
 	return view, nil
 }
 
-func canonicalContentFromRecord(record objectdomain.Record) *objectdomain.CanonicalContent {
-	contentID := objectdomain.ContentID("")
-	if sha, ok := objectdomain.CanonicalSHA256(record.Checksums); ok {
-		contentID = objectdomain.ContentID(sha)
-	}
-	return &objectdomain.CanonicalContent{ContentID: contentID, Record: record, Records: []objectdomain.Record{record}}
-}
-
 func (m *ObjectManager) canonicalContentForObject(ctx context.Context, obj *objectdomain.Record) (*objectdomain.CanonicalContent, error) {
 	sha, ok := objectdomain.CanonicalSHA256(obj.Checksums)
 	if !ok {

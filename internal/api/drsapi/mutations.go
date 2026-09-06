@@ -79,7 +79,7 @@ func handleUpdateAccessMethodsFiber(om *core.ObjectManager) fiber.Handler {
 			if err != nil {
 				return apiutil.HandleError(c, err)
 			}
-			return c.JSON(drsObjectPayload(*obj))
+			return c.JSON(httpdrs.ObjectPayload(*obj))
 		}
 
 		var body drs.BulkAccessMethodUpdateRequest
@@ -110,7 +110,7 @@ func handleUpdateAccessMethodsFiber(om *core.ObjectManager) fiber.Handler {
 			if err != nil {
 				return apiutil.HandleError(c, err)
 			}
-			objects = append(objects, drsObjectPayload(*obj))
+			objects = append(objects, httpdrs.ObjectPayload(*obj))
 		}
 		return c.JSON(fiber.Map{"objects": objects})
 	}

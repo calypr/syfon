@@ -32,7 +32,7 @@ func handleRegisterObjectsFiber(om *core.ObjectManager) fiber.Handler {
 					return apiutil.HandleError(c, err)
 				}
 				return c.Status(fiber.StatusCreated).JSON(fiber.Map{
-					"objects": []any{drsObjectPayload(*finalObj)},
+					"objects": []any{httpdrs.ObjectPayload(*finalObj)},
 				})
 			}
 			return c.Status(fiber.StatusBadRequest).JSON(drs.Error{Msg: common.Ptr("Invalid request body")})
@@ -60,7 +60,7 @@ func handleRegisterObjectsFiber(om *core.ObjectManager) fiber.Handler {
 			if err != nil {
 				return apiutil.HandleError(c, err)
 			}
-			registered[i] = drsObjectPayload(*obj)
+			registered[i] = httpdrs.ObjectPayload(*obj)
 		}
 
 		return c.Status(fiber.StatusCreated).JSON(fiber.Map{"objects": registered})

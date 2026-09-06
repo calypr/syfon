@@ -51,6 +51,9 @@ func TestDRSHandlers(t *testing.T) {
 						AccessUrl: &objects.AccessURL{Url: "s3://bucket/key"},
 					},
 				},
+				Properties: map[string]json.RawMessage{
+					"large": json.RawMessage(`9007199254740993`),
+				},
 			},
 		},
 		ObjectAuthz: map[string]map[string][]string{
@@ -68,10 +71,14 @@ func TestDRSHandlers(t *testing.T) {
 		if resp.StatusCode != http.StatusOK {
 			t.Errorf("expected 200, got %d", resp.StatusCode)
 		}
-		var obj drs.DrsObject
-		json.NewDecoder(resp.Body).Decode(&obj)
-		if obj.Id != "test-obj" {
-			t.Errorf("expected test-obj, got %s", obj.Id)
+		var obj map[string]json.RawMessage
+		if err := json.NewDecoder(resp.Body).Decode(&obj); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		for key, want := range map[string]string{"id": `"test-obj"`, "did": `"test-obj"`, "large": `9007199254740993`} {
+			if got := string(obj[key]); got != want {
+				t.Errorf("%s = %s, want %s", key, got, want)
+			}
 		}
 	})
 
@@ -286,10 +293,18 @@ func TestAdditionalDRSHandlers(t *testing.T) {
 		if resp.StatusCode != http.StatusOK {
 			t.Errorf("expected 200, got %d", resp.StatusCode)
 		}
-		var list drs.N200OkDrsObjectsJSONResponse
-		json.NewDecoder(resp.Body).Decode(&list)
-		if list.Summary.Resolved == nil || *list.Summary.Resolved != 1 {
-			t.Errorf("expected 1 resolved object, got %v", list.Summary.Resolved)
+		var list struct {
+			Resolved []map[string]json.RawMessage `json:"resolved_drs_object"`
+			Summary  drs.Summary                  `json:"summary"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		if list.Summary.Resolved == nil || *list.Summary.Resolved != 1 || len(list.Resolved) != 1 {
+			t.Fatalf("expected one resolved object, got %+v", list)
+		}
+		if string(list.Resolved[0]["id"]) != `"checksum-obj"` || string(list.Resolved[0]["did"]) != `"checksum-obj"` {
+			t.Fatalf("compatibility IDs missing from checksum response: %+v", list.Resolved[0])
 		}
 	})
 
@@ -305,6 +320,15 @@ func TestAdditionalDRSHandlers(t *testing.T) {
 		resp, _ := app.Test(req)
 		if resp.StatusCode != http.StatusOK {
 			t.Errorf("expected 200, got %d", resp.StatusCode)
+		}
+		var list struct {
+			Resolved []map[string]json.RawMessage `json:"resolved_drs_object"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		if len(list.Resolved) != 1 || string(list.Resolved[0]["id"]) != `"checksum-obj"` || string(list.Resolved[0]["did"]) != `"checksum-obj"` {
+			t.Fatalf("compatibility IDs missing from bulk response: %+v", list.Resolved)
 		}
 	})
 

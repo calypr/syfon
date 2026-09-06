@@ -47,17 +47,24 @@ func TestRegisterObjects(t *testing.T) {
 			t.Fatalf("expected 201, got %d. check internal/api/apiutil/error.go for mapping", resp.StatusCode)
 		}
 
-		var created drs.N201ObjectsCreated
+		var created struct {
+			Objects []map[string]json.RawMessage `json:"objects"`
+		}
 		if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
 			t.Fatalf("failed to decode response: %v", err)
 		}
-		if len(created.Objects) != 1 || created.Objects[0].Id == "" {
+		if len(created.Objects) != 1 || string(created.Objects[0]["id"]) == "" {
 			t.Errorf("unexpected response: %+v", created)
 		}
-		if created.Objects[0].AccessMethods == nil || len(*created.Objects[0].AccessMethods) == 0 {
+		if string(created.Objects[0]["did"]) != string(created.Objects[0]["id"]) {
+			t.Errorf("expected id and did in response: %+v", created.Objects[0])
+		}
+		var methods []json.RawMessage
+		if err := json.Unmarshal(created.Objects[0]["access_methods"], &methods); err != nil || len(methods) == 0 {
 			t.Fatalf("expected access methods in response: %+v", created.Objects[0])
 		}
-		if created.Objects[0].ControlledAccess == nil || len(*created.Objects[0].ControlledAccess) == 0 {
+		var controlled []json.RawMessage
+		if err := json.Unmarshal(created.Objects[0]["controlled_access"], &controlled); err != nil || len(controlled) == 0 {
 			t.Fatalf("expected controlled access in response: %+v", created.Objects[0])
 		}
 	})
