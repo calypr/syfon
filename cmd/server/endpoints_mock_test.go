@@ -9,15 +9,15 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gofiber/fiber/v3"
-
 	"github.com/calypr/syfon/internal/access/authentication"
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/config"
 	"github.com/calypr/syfon/internal/httpapi/middleware"
 	"github.com/calypr/syfon/internal/objects"
+	objectrecords "github.com/calypr/syfon/internal/objects/records"
 	"github.com/calypr/syfon/internal/transfers"
 	"github.com/calypr/syfon/internal/usage"
+	"github.com/gofiber/fiber/v3"
 )
 
 type endpointCase struct {
@@ -193,7 +193,7 @@ func buildMockServerRouterWithRoutes(routes config.RoutesConfig) *fiber.App {
 	requestIDMiddleware := middleware.NewRequestIDMiddleware(logger)
 	cfg := &config.Config{Routes: routes}
 	dependencies := mockServerDependencies(objectStore, bucketStore)
-	objectService := objects.NewService(dependencies.objects)
+	objectService := objectrecords.NewService(dependencies.objects)
 	usageService := usage.NewService(usage.Dependencies{Reports: dependencies.usageReports, Objects: objectService})
 	transferService := transfers.NewService(transfers.Dependencies{
 		Scopes: dependencies.bucketService, Credentials: dependencies.bucketService,

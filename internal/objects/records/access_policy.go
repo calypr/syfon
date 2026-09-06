@@ -3,9 +3,10 @@ package records
 import (
 	"context"
 	"fmt"
-	objectmodel "github.com/calypr/syfon/internal/objects"
 	"sort"
 	"strings"
+
+	objectmodel "github.com/calypr/syfon/internal/objects"
 
 	syfoncommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/access"

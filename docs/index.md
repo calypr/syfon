@@ -49,7 +49,8 @@ syfon/
 ├── client/         # Go client SDK (separate Go module)
 ├── cmd/            # CLI commands (serve, upload, download, version, ...)
 ├── internal/httpapi/ # HTTP routes, handlers, middleware, and protocol adapters
-├── internal/objects/ # Catalog queries, mutations, and canonical content
+├── internal/objects/ # Record values, identity, and pure transformation rules
+│   └── records/     # Authorized record queries and mutations
 ├── internal/buckets/ # Bucket credentials, scopes, visibility, and cache policy
 ├── internal/storage/ # Provider-neutral storage and provider adapters
 ├── internal/transfers/ # Access issuance, upload workflows, and multipart sessions
@@ -60,7 +61,7 @@ syfon/
 ├── internal/faults/ # Shared error classifications
 ├── internal/persistence/ # SQLite and PostgreSQL adapters
 ├── internal/access/ # Authorization policy and authentication integrations
-├── internal/credentialcipher/ # Credential encryption
+├── internal/credentialcipher/ # Encryption of stored bucket credentials
 ├── internal/config/ # Config loading and validation
 └── internal/version/ # Build and version info
 ```

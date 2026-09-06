@@ -9,6 +9,7 @@ import (
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/faults"
 	"github.com/calypr/syfon/internal/objects"
+	objectrecords "github.com/calypr/syfon/internal/objects/records"
 	"github.com/calypr/syfon/internal/transfers"
 	"github.com/calypr/syfon/internal/usage"
 )
@@ -298,19 +299,19 @@ func cloneServerRecord(record *objects.Record) *objects.Record {
 }
 
 var (
-	_ objects.RecordReader          = (*serverObjectStore)(nil)
-	_ objects.RecordWriter          = (*serverObjectStore)(nil)
-	_ objects.AccessMethodWriter    = (*serverObjectStore)(nil)
-	_ objects.AccessPolicyWriter    = (*serverObjectStore)(nil)
-	_ objects.AliasStore            = (*serverObjectStore)(nil)
-	_ objects.ContentReader         = (*serverObjectStore)(nil)
-	_ objects.ChecksumScopeQuery    = (*serverObjectStore)(nil)
-	_ objects.ScopeQuery            = (*serverObjectStore)(nil)
-	_ objects.OptionalResourceQuery = (*serverObjectStore)(nil)
+	_ objectrecords.RecordReader          = (*serverObjectStore)(nil)
+	_ objectrecords.RecordWriter          = (*serverObjectStore)(nil)
+	_ objectrecords.AccessMethodWriter    = (*serverObjectStore)(nil)
+	_ objectrecords.AccessPolicyWriter    = (*serverObjectStore)(nil)
+	_ objectrecords.AliasStore            = (*serverObjectStore)(nil)
+	_ objectrecords.ContentReader         = (*serverObjectStore)(nil)
+	_ objectrecords.ChecksumScopeQuery    = (*serverObjectStore)(nil)
+	_ objectrecords.ScopeQuery            = (*serverObjectStore)(nil)
+	_ objectrecords.OptionalResourceQuery = (*serverObjectStore)(nil)
 )
 
 type serverTestDependencies struct {
-	objects       objects.Dependencies
+	objects       objectrecords.Dependencies
 	bucketService *buckets.Service
 	usageIngest   usage.Ingestor
 	usageReports  usage.ReportStore
@@ -318,7 +319,7 @@ type serverTestDependencies struct {
 }
 
 func mockServerDependencies(objectStore *serverObjectStore, bucketStore *serverBucketStore) serverTestDependencies {
-	objectDependencies := objects.Dependencies{
+	objectDependencies := objectrecords.Dependencies{
 		Reader: objectStore, Writer: objectStore, AccessMethods: objectStore,
 		AccessPolicy: objectStore, Aliases: objectStore, Content: objectStore,
 		ChecksumScope: objectStore, Scope: objectStore, Resources: objectStore,

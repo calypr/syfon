@@ -3,10 +3,11 @@ package records
 import (
 	"context"
 	"encoding/json"
-	objectmodel "github.com/calypr/syfon/internal/objects"
 	"sort"
 	"strings"
 	"time"
+
+	objectmodel "github.com/calypr/syfon/internal/objects"
 
 	syfoncommon "github.com/calypr/syfon/common"
 )

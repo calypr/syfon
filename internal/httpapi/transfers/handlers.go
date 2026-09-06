@@ -9,19 +9,19 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gofiber/fiber/v3"
-	"github.com/google/uuid"
-
 	"github.com/calypr/syfon/apigen/server/internalapi"
 	"github.com/calypr/syfon/internal/config"
 	"github.com/calypr/syfon/internal/faults"
 	apimiddleware "github.com/calypr/syfon/internal/httpapi/middleware"
 	"github.com/calypr/syfon/internal/httpapi/response"
 	"github.com/calypr/syfon/internal/objects"
+	objectrecords "github.com/calypr/syfon/internal/objects/records"
 	"github.com/calypr/syfon/internal/storage"
 	"github.com/calypr/syfon/internal/storage/address"
 	domaintransfers "github.com/calypr/syfon/internal/transfers"
 	"github.com/calypr/syfon/internal/usage"
+	"github.com/gofiber/fiber/v3"
+	"github.com/google/uuid"
 )
 
 func stringValue(value *string) string {
@@ -48,7 +48,7 @@ func firstSupportedAccessURL(obj *objects.Record) string {
 	return ""
 }
 
-func handleInternalDownloadFiber(c fiber.Ctx, objectService *objects.Service, transferService *domaintransfers.Service, fileCounters usage.FileCounterRecorder) error {
+func handleInternalDownloadFiber(c fiber.Ctx, objectService *objectrecords.Service, transferService *domaintransfers.Service, fileCounters usage.FileCounterRecorder) error {
 	c.Set(fiber.HeaderCacheControl, "no-store")
 	fileID := c.Params("file_id")
 
@@ -101,7 +101,7 @@ func handleInternalDownloadFiber(c fiber.Ctx, objectService *objects.Service, tr
 	return c.JSON(internalapi.InternalSignedURL{Url: &signedURL})
 }
 
-func handleInternalDownloadPartFiber(c fiber.Ctx, objectService *objects.Service, transferService *domaintransfers.Service) error {
+func handleInternalDownloadPartFiber(c fiber.Ctx, objectService *objectrecords.Service, transferService *domaintransfers.Service) error {
 	c.Set(fiber.HeaderCacheControl, "no-store")
 	fileID := c.Params("file_id")
 	startStr := c.Query("start")
@@ -196,7 +196,7 @@ func handleInternalUploadBlankFiber(transferService *domaintransfers.Service) fi
 	}
 }
 
-func handleInternalUploadURLFiber(objectService *objects.Service, transferService *domaintransfers.Service) fiber.Handler {
+func handleInternalUploadURLFiber(objectService *objectrecords.Service, transferService *domaintransfers.Service) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		if apimiddleware.MissingGen3AuthHeader(c.Context()) {
 			return c.SendStatus(fiber.StatusUnauthorized)
@@ -300,7 +300,7 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-func handleInternalUploadBulkFiber(objectService *objects.Service, transferService *domaintransfers.Service) fiber.Handler {
+func handleInternalUploadBulkFiber(objectService *objectrecords.Service, transferService *domaintransfers.Service) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		var req internalapi.InternalUploadBulkRequest
 		if err := c.Bind().JSON(&req); err != nil && !errors.Is(err, io.EOF) {
@@ -388,7 +388,7 @@ func handleInternalUploadBulkFiber(objectService *objects.Service, transferServi
 	}
 }
 
-func handleInternalMultipartInitFiber(objectService *objects.Service, transferService *domaintransfers.Service, lifecycle *domaintransfers.MultipartLifecycle) fiber.Handler {
+func handleInternalMultipartInitFiber(objectService *objectrecords.Service, transferService *domaintransfers.Service, lifecycle *domaintransfers.MultipartLifecycle) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		var req internalapi.InternalMultipartInitRequest
 		if err := c.Bind().JSON(&req); err != nil && !errors.Is(err, io.EOF) {

@@ -6,7 +6,7 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/calypr/syfon/internal/objects"
+	objectrecords "github.com/calypr/syfon/internal/objects/records"
 	"github.com/calypr/syfon/internal/storage"
 	"github.com/gofiber/fiber/v3"
 )
@@ -65,7 +65,7 @@ func (f *lfsTestStorage) CompleteMultipart(_ context.Context, request storage.Co
 }
 
 func newLFSTestDependencies(ports *lfsTestServicePorts, storageFake *lfsTestStorage) Dependencies {
-	objectService := objects.NewService(objects.Dependencies{
+	objectService := objectrecords.NewService(objectrecords.Dependencies{
 		Reader:  ports.objectReader,
 		Writer:  ports.objectWriter,
 		Aliases: ports.aliases,

@@ -4,9 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	objectmodel "github.com/calypr/syfon/internal/objects"
 	"sort"
 	"strings"
+
+	objectmodel "github.com/calypr/syfon/internal/objects"
 
 	sycommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/faults"

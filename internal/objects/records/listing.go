@@ -2,11 +2,12 @@ package records
 
 import (
 	"context"
-	objectmodel "github.com/calypr/syfon/internal/objects"
 	"log"
 	"sort"
 	"strings"
 	"time"
+
+	objectmodel "github.com/calypr/syfon/internal/objects"
 
 	syfoncommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/access"

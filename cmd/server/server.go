@@ -11,10 +11,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/gofiber/fiber/v3"
-	"github.com/gofiber/fiber/v3/middleware/recover"
-	"github.com/spf13/cobra"
-
 	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/access/authentication"
@@ -24,11 +20,15 @@ import (
 	"github.com/calypr/syfon/internal/httpapi/middleware"
 	"github.com/calypr/syfon/internal/maintenance/projectstorage"
 	"github.com/calypr/syfon/internal/objects"
+	objectrecords "github.com/calypr/syfon/internal/objects/records"
 	"github.com/calypr/syfon/internal/persistence/postgres"
 	"github.com/calypr/syfon/internal/persistence/sqlite"
 	"github.com/calypr/syfon/internal/storage"
 	"github.com/calypr/syfon/internal/transfers"
 	"github.com/calypr/syfon/internal/usage"
+	"github.com/gofiber/fiber/v3"
+	"github.com/gofiber/fiber/v3/middleware/recover"
+	"github.com/spf13/cobra"
 )
 
 var configFile string
@@ -54,7 +54,7 @@ func serviceInfoForBackend(sqlite bool) drs.Service {
 }
 
 type serverBackend struct {
-	objectDependencies objects.Dependencies
+	objectDependencies objectrecords.Dependencies
 	bucketDependencies buckets.Dependencies
 	pending            transfers.PendingStore
 	usageIngest        usage.Ingestor
@@ -66,7 +66,7 @@ var (
 	errBucketVisibilityRecordReader = errors.New("bucket visibility fallback requires an object record reader")
 )
 
-func newBucketVisibilityFallback(scope objects.ScopeQuery, reader objects.RecordReader) buckets.VisibilityFallback {
+func newBucketVisibilityFallback(scope objectrecords.ScopeQuery, reader objectrecords.RecordReader) buckets.VisibilityFallback {
 	return func(ctx context.Context) ([]buckets.VisibilityRow, error) {
 		if scope == nil {
 			return nil, errBucketVisibilityScopeQuery
@@ -140,7 +140,7 @@ func serverBucketVisibilityObjectReadable(ctx context.Context, obj *objects.Reco
 
 func sqliteServerBackend(database *sqlite.SqliteDB) serverBackend {
 	return serverBackend{
-		objectDependencies: objects.Dependencies{
+		objectDependencies: objectrecords.Dependencies{
 			Reader: database, Writer: database, AccessMethods: database, AccessPolicy: database,
 			Aliases: database, Content: database, ChecksumScope: database, Scope: database,
 			Resources: database, Pages: database, URLPages: database, Authorized: database,
@@ -156,7 +156,7 @@ func sqliteServerBackend(database *sqlite.SqliteDB) serverBackend {
 
 func postgresServerBackend(database *postgres.PostgresDB) serverBackend {
 	return serverBackend{
-		objectDependencies: objects.Dependencies{
+		objectDependencies: objectrecords.Dependencies{
 			Reader: database, Writer: database, AccessMethods: database, AccessPolicy: database,
 			Aliases: database, Content: database, ChecksumScope: database, Scope: database,
 			Resources: database, Pages: database, URLPages: database, Authorized: database,
@@ -287,7 +287,7 @@ var Cmd = &cobra.Command{
 			fatal("failed to load configured bucket scopes", "err", err)
 		}
 
-		objectService := objects.NewService(backend.objectDependencies)
+		objectService := objectrecords.NewService(backend.objectDependencies)
 		usageService := usage.NewService(usage.Dependencies{
 			Reports: backend.usageReports,
 			Objects: objectService,

@@ -2,8 +2,9 @@ package records
 
 import (
 	"context"
-	objectmodel "github.com/calypr/syfon/internal/objects"
 	"strings"
+
+	objectmodel "github.com/calypr/syfon/internal/objects"
 
 	"github.com/calypr/syfon/internal/faults"
 )

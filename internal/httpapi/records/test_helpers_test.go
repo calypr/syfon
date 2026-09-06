@@ -14,6 +14,7 @@ import (
 	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/faults"
 	"github.com/calypr/syfon/internal/objects"
+	objectrecords "github.com/calypr/syfon/internal/objects/records"
 	"github.com/calypr/syfon/internal/persistence/sqlite"
 	"github.com/gofiber/fiber/v3"
 )
@@ -27,15 +28,15 @@ type internalRecordStore struct {
 }
 
 var (
-	_ objects.RecordReader          = (*internalRecordStore)(nil)
-	_ objects.RecordWriter          = (*internalRecordStore)(nil)
-	_ objects.AccessMethodWriter    = (*internalRecordStore)(nil)
-	_ objects.AccessPolicyWriter    = (*internalRecordStore)(nil)
-	_ objects.AliasStore            = (*internalRecordStore)(nil)
-	_ objects.ContentReader         = (*internalRecordStore)(nil)
-	_ objects.ChecksumScopeQuery    = (*internalRecordStore)(nil)
-	_ objects.ScopeQuery            = (*internalRecordStore)(nil)
-	_ objects.OptionalResourceQuery = (*internalRecordStore)(nil)
+	_ objectrecords.RecordReader          = (*internalRecordStore)(nil)
+	_ objectrecords.RecordWriter          = (*internalRecordStore)(nil)
+	_ objectrecords.AccessMethodWriter    = (*internalRecordStore)(nil)
+	_ objectrecords.AccessPolicyWriter    = (*internalRecordStore)(nil)
+	_ objectrecords.AliasStore            = (*internalRecordStore)(nil)
+	_ objectrecords.ContentReader         = (*internalRecordStore)(nil)
+	_ objectrecords.ChecksumScopeQuery    = (*internalRecordStore)(nil)
+	_ objectrecords.ScopeQuery            = (*internalRecordStore)(nil)
+	_ objectrecords.OptionalResourceQuery = (*internalRecordStore)(nil)
 )
 
 func (m *internalRecordStore) GetObject(_ context.Context, id string) (*objects.Record, error) {

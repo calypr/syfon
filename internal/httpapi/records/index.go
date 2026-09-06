@@ -13,6 +13,7 @@ import (
 	apimiddleware "github.com/calypr/syfon/internal/httpapi/middleware"
 	"github.com/calypr/syfon/internal/httpapi/response"
 	"github.com/calypr/syfon/internal/objects"
+	objectrecords "github.com/calypr/syfon/internal/objects/records"
 	"github.com/gofiber/fiber/v3"
 )
 
@@ -37,7 +38,7 @@ type bulkOverwriteResponse struct {
 	ChecksumMatched int `json:"checksum_matched"`
 }
 
-func handleInternalBulkOverwriteFiber(objectService *objects.Service) fiber.Handler {
+func handleInternalBulkOverwriteFiber(objectService *objectrecords.Service) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		var req bulkOverwriteRequest
 		if err := c.Bind().JSON(&req); err != nil {
@@ -64,7 +65,7 @@ func handleInternalBulkOverwriteFiber(objectService *objects.Service) fiber.Hand
 
 		result, err := objectService.BulkOverwriteObjects(c.Context(), req.Organization, req.Project, candidates)
 		if err != nil {
-			if errors.Is(err, objects.ErrBulkOverwriteConflict) {
+			if errors.Is(err, objectrecords.ErrBulkOverwriteConflict) {
 				return c.Status(fiber.StatusConflict).SendString(err.Error())
 			}
 			return response.HandleError(c, err)
@@ -79,7 +80,7 @@ func handleInternalBulkOverwriteFiber(objectService *objects.Service) fiber.Hand
 	}
 }
 
-func handleInternalBulkMissingSHA256Fiber(objectService *objects.Service) fiber.Handler {
+func handleInternalBulkMissingSHA256Fiber(objectService *objectrecords.Service) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		var req internalapi.BulkMissingSHA256Request
 		if err := c.Bind().JSON(&req); err != nil {
@@ -132,7 +133,7 @@ func normalizeMissingSHA256(values []string) ([]string, error) {
 	return out, nil
 }
 
-func handleInternalGetFiber(objectService *objects.Service) fiber.Handler {
+func handleInternalGetFiber(objectService *objectrecords.Service) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		c.Set(fiber.HeaderCacheControl, "no-store")
 		id := c.Params("id")
@@ -149,7 +150,7 @@ func handleInternalGetFiber(objectService *objects.Service) fiber.Handler {
 	}
 }
 
-func handleInternalListFiber(objectService *objects.Service) fiber.Handler {
+func handleInternalListFiber(objectService *objectrecords.Service) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		hash := c.Query("hash")
 		hashType := c.Query("hash_type")
@@ -222,7 +223,7 @@ func handleInternalListFiber(objectService *objects.Service) fiber.Handler {
 	}
 }
 
-func handleInternalDeleteFiber(objectService *objects.Service) fiber.Handler {
+func handleInternalDeleteFiber(objectService *objectrecords.Service) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		id := c.Params("id")
 		if err := objectService.DeleteObject(c.Context(), id); err != nil {
@@ -232,7 +233,7 @@ func handleInternalDeleteFiber(objectService *objects.Service) fiber.Handler {
 	}
 }
 
-func handleInternalRemoveControlledAccessFiber(objectService *objects.Service) fiber.Handler {
+func handleInternalRemoveControlledAccessFiber(objectService *objectrecords.Service) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		id := strings.TrimSpace(c.Params("id"))
 		var req internalapi.ControlledAccessRemoveRequest
@@ -247,7 +248,7 @@ func handleInternalRemoveControlledAccessFiber(objectService *objects.Service) f
 	}
 }
 
-func handleInternalCreateFiber(objectService *objects.Service) fiber.Handler {
+func handleInternalCreateFiber(objectService *objectrecords.Service) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		candidates, err := decodeInternalCreateCandidates(c, time.Now().UTC())
 		if err != nil {
@@ -268,7 +269,7 @@ func handleInternalCreateFiber(objectService *objects.Service) fiber.Handler {
 	}
 }
 
-func handleInternalDeleteByQueryFiber(objectService *objects.Service) fiber.Handler {
+func handleInternalDeleteByQueryFiber(objectService *objectrecords.Service) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		if apimiddleware.MissingGen3AuthHeader(c.Context()) {
 			return c.SendStatus(fiber.StatusUnauthorized)
@@ -289,7 +290,7 @@ func handleInternalDeleteByQueryFiber(objectService *objects.Service) fiber.Hand
 	}
 }
 
-func handleInternalBulkHashesFiber(objectService *objects.Service) fiber.Handler {
+func handleInternalBulkHashesFiber(objectService *objectrecords.Service) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		var req internalapi.BulkHashesRequest
 		if err := c.Bind().JSON(&req); err != nil {
@@ -331,7 +332,7 @@ func handleInternalBulkHashesFiber(objectService *objects.Service) fiber.Handler
 	}
 }
 
-func handleInternalBulkSHA256ValidityFiber(objectService *objects.Service) fiber.Handler {
+func handleInternalBulkSHA256ValidityFiber(objectService *objectrecords.Service) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		var req internalapi.BulkSHA256ValidityRequest
 		if err := c.Bind().JSON(&req); err != nil {
@@ -371,11 +372,11 @@ func handleInternalBulkSHA256ValidityFiber(objectService *objects.Service) fiber
 	}
 }
 
-func handleInternalBulkCreateFiber(objectService *objects.Service) fiber.Handler {
+func handleInternalBulkCreateFiber(objectService *objectrecords.Service) fiber.Handler {
 	return handleInternalCreateFiber(objectService)
 }
 
-func handleInternalBulkDocumentsFiber(objectService *objects.Service) fiber.Handler {
+func handleInternalBulkDocumentsFiber(objectService *objectrecords.Service) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		var req internalapi.BulkDocumentsRequest
 		if err := c.Bind().JSON(&req); err != nil {
@@ -406,7 +407,7 @@ func handleInternalBulkDocumentsFiber(objectService *objects.Service) fiber.Hand
 	}
 }
 
-func handleInternalBulkDeleteFiber(objectService *objects.Service) fiber.Handler {
+func handleInternalBulkDeleteFiber(objectService *objectrecords.Service) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		if apimiddleware.MissingGen3AuthHeader(c.Context()) {
 			return c.SendStatus(fiber.StatusUnauthorized)
@@ -433,7 +434,7 @@ func handleInternalBulkDeleteFiber(objectService *objects.Service) fiber.Handler
 	}
 }
 
-func handleInternalUpdateFiber(objectService *objects.Service) fiber.Handler {
+func handleInternalUpdateFiber(objectService *objectrecords.Service) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		id := c.Params("id")
 		var req internalapi.InternalRecord

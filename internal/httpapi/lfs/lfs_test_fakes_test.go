@@ -9,6 +9,7 @@ import (
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/faults"
 	"github.com/calypr/syfon/internal/objects"
+	objectrecords "github.com/calypr/syfon/internal/objects/records"
 	"github.com/calypr/syfon/internal/transfers"
 	"github.com/calypr/syfon/internal/usage"
 )
@@ -41,7 +42,7 @@ type lfsObjectReaderFake struct {
 	records map[string]*objects.Record
 }
 
-var _ objects.RecordReader = (*lfsObjectReaderFake)(nil)
+var _ objectrecords.RecordReader = (*lfsObjectReaderFake)(nil)
 
 func (f *lfsObjectReaderFake) GetObject(_ context.Context, id string) (*objects.Record, error) {
 	record, ok := f.records[id]
@@ -68,7 +69,7 @@ type lfsObjectWriterFake struct {
 	records map[string]*objects.Record
 }
 
-var _ objects.RecordWriter = (*lfsObjectWriterFake)(nil)
+var _ objectrecords.RecordWriter = (*lfsObjectWriterFake)(nil)
 
 func (f *lfsObjectWriterFake) DeleteObject(_ context.Context, id string) error {
 	delete(f.records, id)
@@ -105,7 +106,7 @@ type lfsContentReaderFake struct {
 	records map[string]*objects.Record
 }
 
-var _ objects.ContentReader = (*lfsContentReaderFake)(nil)
+var _ objectrecords.ContentReader = (*lfsContentReaderFake)(nil)
 
 func (f *lfsContentReaderFake) GetObjectsByChecksum(_ context.Context, checksum string) ([]objects.Record, error) {
 	result := make([]objects.Record, 0)
@@ -148,7 +149,7 @@ type lfsAliasStoreFake struct {
 	aliases map[string]string
 }
 
-var _ objects.AliasStore = (*lfsAliasStoreFake)(nil)
+var _ objectrecords.AliasStore = (*lfsAliasStoreFake)(nil)
 
 func (f *lfsAliasStoreFake) DeleteObjectAlias(_ context.Context, aliasID string) error {
 	delete(f.aliases, aliasID)

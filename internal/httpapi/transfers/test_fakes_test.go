@@ -9,6 +9,7 @@ import (
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/faults"
 	"github.com/calypr/syfon/internal/objects"
+	objectrecords "github.com/calypr/syfon/internal/objects/records"
 	domaintransfers "github.com/calypr/syfon/internal/transfers"
 	"github.com/calypr/syfon/internal/usage"
 )
@@ -30,10 +31,10 @@ type transferObjectStoreFake struct {
 }
 
 var (
-	_ objects.RecordReader       = (*transferObjectStoreFake)(nil)
-	_ objects.ContentReader      = (*transferObjectStoreFake)(nil)
-	_ objects.ChecksumScopeQuery = (*transferObjectStoreFake)(nil)
-	_ objects.ScopeQuery         = (*transferObjectStoreFake)(nil)
+	_ objectrecords.RecordReader       = (*transferObjectStoreFake)(nil)
+	_ objectrecords.ContentReader      = (*transferObjectStoreFake)(nil)
+	_ objectrecords.ChecksumScopeQuery = (*transferObjectStoreFake)(nil)
+	_ objectrecords.ScopeQuery         = (*transferObjectStoreFake)(nil)
 )
 
 func (f *transferObjectStoreFake) GetObject(_ context.Context, id string) (*objects.Record, error) {
@@ -58,7 +59,7 @@ type transferAliasStoreFake struct {
 	fixture *transferHTTPFixture
 }
 
-var _ objects.AliasStore = (*transferAliasStoreFake)(nil)
+var _ objectrecords.AliasStore = (*transferAliasStoreFake)(nil)
 
 func (f *transferAliasStoreFake) DeleteObjectAlias(_ context.Context, aliasID string) error {
 	delete(f.fixture.Objects, aliasID)

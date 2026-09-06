@@ -14,7 +14,7 @@ import (
 	httptransfers "github.com/calypr/syfon/internal/httpapi/transfers"
 	"github.com/calypr/syfon/internal/maintenance/projectstorage"
 	"github.com/calypr/syfon/internal/maintenance/scoperepair"
-	"github.com/calypr/syfon/internal/objects"
+	objectrecords "github.com/calypr/syfon/internal/objects/records"
 	"github.com/calypr/syfon/internal/transfers"
 	"github.com/calypr/syfon/internal/usage"
 	"github.com/gofiber/fiber/v3"
@@ -24,7 +24,7 @@ const RouteHealthz = "/healthz"
 
 type Dependencies struct {
 	ServiceInfo      generated.Service
-	Objects          *objects.Service
+	Objects          *objectrecords.Service
 	Transfers        *transfers.Service
 	UsageIngest      usage.Ingestor
 	UsageReports     usage.Reporter

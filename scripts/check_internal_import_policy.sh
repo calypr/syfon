@@ -88,22 +88,27 @@ check_edge() {
 				github.com/calypr/syfon/internal/httpapi/drs) forbidden=1 ;;
 			esac
 		;;
-		github.com/calypr/syfon/internal/objects)
+		github.com/calypr/syfon/internal/objects|github.com/calypr/syfon/internal/objects/*)
 			if is_generated_or_http "$dep" || is_sql_dependency "$dep" || is_cloud_dependency "$dep"; then forbidden=1; fi
 			case "$dep" in
 				github.com/calypr/syfon/internal/api*|github.com/calypr/syfon/internal/httpapi*|github.com/calypr/syfon/internal/core*|github.com/calypr/syfon/internal/db*|github.com/calypr/syfon/internal/persistence*|github.com/calypr/syfon/internal/models*|github.com/calypr/syfon/internal/common*) forbidden=1 ;;
 			esac
+			if [[ "$pkg" == github.com/calypr/syfon/internal/objects ]]; then
+				case "$dep" in
+					github.com/calypr/syfon/internal/objects/*|github.com/calypr/syfon/internal/access|github.com/calypr/syfon/internal/access/*) forbidden=1 ;;
+				esac
+			fi
 		;;
 		github.com/calypr/syfon/internal/buckets)
 			if is_generated_or_http "$dep" || is_sql_dependency "$dep" || is_cloud_dependency "$dep"; then forbidden=1; fi
 			case "$dep" in
-				github.com/calypr/syfon/internal/api*|github.com/calypr/syfon/internal/httpapi*|github.com/calypr/syfon/internal/core*|github.com/calypr/syfon/internal/db*|github.com/calypr/syfon/internal/persistence*|github.com/calypr/syfon/internal/models*|github.com/calypr/syfon/internal/common*|github.com/calypr/syfon/internal/objects|github.com/calypr/syfon/internal/storage) forbidden=1 ;;
+				github.com/calypr/syfon/internal/api*|github.com/calypr/syfon/internal/httpapi*|github.com/calypr/syfon/internal/core*|github.com/calypr/syfon/internal/db*|github.com/calypr/syfon/internal/persistence*|github.com/calypr/syfon/internal/models*|github.com/calypr/syfon/internal/common*|github.com/calypr/syfon/internal/objects|github.com/calypr/syfon/internal/objects/*|github.com/calypr/syfon/internal/storage) forbidden=1 ;;
 			esac
 		;;
 		github.com/calypr/syfon/internal/storage)
 			if is_generated_or_http "$dep" || is_sql_dependency "$dep" || is_cloud_dependency "$dep"; then forbidden=1; fi
 			case "$dep" in
-				github.com/calypr/syfon/internal/api*|github.com/calypr/syfon/internal/httpapi*|github.com/calypr/syfon/internal/core*|github.com/calypr/syfon/internal/objects|github.com/calypr/syfon/internal/storage/*)
+				github.com/calypr/syfon/internal/api*|github.com/calypr/syfon/internal/httpapi*|github.com/calypr/syfon/internal/core*|github.com/calypr/syfon/internal/objects|github.com/calypr/syfon/internal/objects/*|github.com/calypr/syfon/internal/storage/*)
 					if [[ "$dep" != github.com/calypr/syfon/internal/storage/address ]]; then forbidden=1; fi
 				;;
 			esac
@@ -117,7 +122,7 @@ check_edge() {
 			# core, or objects.
 			if is_generated_or_http "$dep" || is_sql_dependency "$dep"; then forbidden=1; fi
 			case "$dep" in
-				github.com/calypr/syfon/internal/api*|github.com/calypr/syfon/internal/httpapi*|github.com/calypr/syfon/internal/core*|github.com/calypr/syfon/internal/objects) forbidden=1 ;;
+				github.com/calypr/syfon/internal/api*|github.com/calypr/syfon/internal/httpapi*|github.com/calypr/syfon/internal/core*|github.com/calypr/syfon/internal/objects|github.com/calypr/syfon/internal/objects/*) forbidden=1 ;;
 			esac
 		;;
 		github.com/calypr/syfon/internal/transfers)
@@ -186,6 +191,18 @@ run_self_tests() {
 	expect_allowed github.com/calypr/syfon/cmd/server github.com/calypr/syfon/internal/credentialcipher
 	expect_allowed github.com/calypr/syfon/internal/persistence/sqlite github.com/calypr/syfon/internal/objects
 	expect_forbidden github.com/calypr/syfon/internal/objects github.com/mattn/go-sqlite3
+	expect_allowed github.com/calypr/syfon/internal/objects/records github.com/calypr/syfon/internal/objects
+	expect_allowed github.com/calypr/syfon/internal/objects/records github.com/calypr/syfon/internal/access
+	expect_allowed github.com/calypr/syfon/internal/httpapi/records github.com/calypr/syfon/internal/objects/records
+	expect_forbidden github.com/calypr/syfon/internal/objects github.com/calypr/syfon/internal/objects/records
+	expect_forbidden github.com/calypr/syfon/internal/objects github.com/calypr/syfon/internal/access
+	expect_forbidden github.com/calypr/syfon/internal/objects/records github.com/mattn/go-sqlite3
+	expect_forbidden github.com/calypr/syfon/internal/objects/records github.com/aws/aws-sdk-go-v2/aws
+	expect_forbidden github.com/calypr/syfon/internal/objects/records github.com/calypr/syfon/internal/httpapi/records
+	expect_forbidden github.com/calypr/syfon/internal/objects/records github.com/calypr/syfon/internal/persistence/sqlite
+	expect_forbidden github.com/calypr/syfon/internal/buckets github.com/calypr/syfon/internal/objects/records
+	expect_forbidden github.com/calypr/syfon/internal/storage github.com/calypr/syfon/internal/objects/records
+	expect_forbidden github.com/calypr/syfon/internal/storage/s3 github.com/calypr/syfon/internal/objects/records
 	expect_forbidden github.com/calypr/syfon/internal/storage github.com/calypr/syfon/internal/storage/s3
 	expect_forbidden github.com/calypr/syfon/internal/storage/address github.com/google/uuid
 	expect_forbidden github.com/calypr/syfon/internal/buckets github.com/calypr/syfon/internal/storage

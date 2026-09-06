@@ -5,7 +5,7 @@ import (
 
 	"github.com/calypr/syfon/apigen/server/lfsapi"
 	"github.com/calypr/syfon/internal/buckets"
-	"github.com/calypr/syfon/internal/objects"
+	objectrecords "github.com/calypr/syfon/internal/objects/records"
 	"github.com/calypr/syfon/internal/transfers"
 	"github.com/calypr/syfon/internal/usage"
 	"github.com/gofiber/fiber/v3"
@@ -24,7 +24,7 @@ type Options struct {
 type PartUploader func(context.Context, string, []byte) (string, error)
 
 type Dependencies struct {
-	ObjectService   *objects.Service
+	ObjectService   *objectrecords.Service
 	TransferService *transfers.Service
 	FileCounters    usage.FileCounterRecorder
 	Credentials     buckets.CredentialReader

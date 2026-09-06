@@ -241,7 +241,8 @@ syfon download --did <did> --out /tmp/README.md
 
 The server composes focused domain and adapter packages:
 
-- `internal/objects` owns catalog records, checksum identity, and canonical content. Query and mutation components keep their persistence dependencies separate.
+- `internal/objects` owns record values, checksum identity, candidate conversion, and field-merge rules.
+- `internal/objects/records` owns authorized record lookup, listing, registration, updates, deletion, aliases, and canonical views. It imports the parent values package; the parent does not import record operations.
 - `internal/buckets` owns credentials, scopes, visibility, and cache policy.
 - `internal/storage` owns provider-neutral storage operations and the S3, GCS, Azure, and file adapters.
 - `internal/transfers` owns access issuance, upload workflows, multipart sessions, and pending metadata. HTTP adapters translate protocol requests and results.
@@ -251,7 +252,7 @@ The server composes focused domain and adapter packages:
 - `internal/httpapi` owns route registration, handlers, middleware, and protocol adapters.
 - `internal/persistence` owns the SQLite and PostgreSQL adapters.
 - `internal/access` owns authorization policy and authentication integrations.
-- `internal/credentialcipher` owns credential encryption.
+- `internal/credentialcipher` encrypts bucket credentials for database storage and decrypts them after reads.
 - `cmd/server` composes these packages into the server runtime.
 
 See persistence table details and relationships in [internal/persistence/README.md](internal/persistence/README.md).

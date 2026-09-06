@@ -5,12 +5,13 @@ import (
 
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/objects"
+	objectrecords "github.com/calypr/syfon/internal/objects/records"
 	domaintransfers "github.com/calypr/syfon/internal/transfers"
 	"github.com/calypr/syfon/internal/usage"
 )
 
 type internalDRSTestFixture struct {
-	ObjectService   *objects.Service
+	ObjectService   *objectrecords.Service
 	TransferService *domaintransfers.Service
 	FileCounters    usage.FileCounterRecorder
 	bucketService   *buckets.Service
@@ -31,7 +32,7 @@ func newInternalDRSObjectManager(store *transferHTTPFixture, storageDependency t
 	fileCounters := &transferFileCounterFake{fixture: store}
 	bucketService := newInternalDRSBucketService(bucketStore)
 
-	objectService := objects.NewService(objects.Dependencies{
+	objectService := objectrecords.NewService(objectrecords.Dependencies{
 		Reader:        objectStore,
 		Aliases:       aliasStore,
 		Content:       objectStore,
