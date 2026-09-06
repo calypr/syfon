@@ -66,7 +66,7 @@ func TestNewBucketVisibilityFallbackScansAndProjectsRows(t *testing.T) {
 		},
 	}}
 
-	rows, err := NewBucketVisibilityFallback(ObjectPorts{Scope: scope, Reader: reader})(context.Background())
+	rows, err := NewBucketVisibilityFallback(scope, reader)(context.Background())
 	if err != nil {
 		t.Fatalf("fallback returned error: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestNewBucketVisibilityFallbackFiltersRestrictedObjectsAndHonorsBroadAccess
 			AccessMethods:         &[]objects.AccessMethod{{Type: "s3", AccessUrl: &objects.AccessURL{Url: "s3://bucket/policy-denied"}}},
 		},
 	}}
-	fallback := NewBucketVisibilityFallback(ObjectPorts{Scope: scope, Reader: reader})
+	fallback := NewBucketVisibilityFallback(scope, reader)
 
 	restricted := access.NewSession("local")
 	restricted.SetAuthorizations(nil, map[string]map[string]bool{resource: {"read": true}}, true)
@@ -141,10 +141,7 @@ func TestNewBucketVisibilityFallbackFiltersRestrictedObjectsAndHonorsBroadAccess
 func TestNewBucketVisibilityFallbackPropagatesScanAndHydrationErrors(t *testing.T) {
 	scanErr := errors.New("scan failed")
 	reader := &bucketFallbackRecordReader{}
-	fallback := NewBucketVisibilityFallback(ObjectPorts{
-		Scope:  &bucketFallbackScopeQuery{err: scanErr},
-		Reader: reader,
-	})
+	fallback := NewBucketVisibilityFallback(&bucketFallbackScopeQuery{err: scanErr}, reader)
 	if _, err := fallback(context.Background()); !errors.Is(err, scanErr) {
 		t.Fatalf("scan error = %v, want %v", err, scanErr)
 	}
@@ -153,22 +150,22 @@ func TestNewBucketVisibilityFallbackPropagatesScanAndHydrationErrors(t *testing.
 	}
 
 	hydrateErr := errors.New("hydration failed")
-	fallback = NewBucketVisibilityFallback(ObjectPorts{
-		Scope:  &bucketFallbackScopeQuery{ids: []string{"obj"}},
-		Reader: &bucketFallbackRecordReader{err: hydrateErr},
-	})
+	fallback = NewBucketVisibilityFallback(
+		&bucketFallbackScopeQuery{ids: []string{"obj"}},
+		&bucketFallbackRecordReader{err: hydrateErr},
+	)
 	if _, err := fallback(context.Background()); !errors.Is(err, hydrateErr) {
 		t.Fatalf("hydration error = %v, want %v", err, hydrateErr)
 	}
 }
 
 func TestNewBucketVisibilityFallbackRejectsMissingObjectCapabilities(t *testing.T) {
-	fallback := NewBucketVisibilityFallback(ObjectPorts{})
+	fallback := NewBucketVisibilityFallback(nil, nil)
 	if _, err := fallback(context.Background()); !errors.Is(err, errBucketVisibilityScopeQuery) {
 		t.Fatalf("missing scope error = %v, want %v", err, errBucketVisibilityScopeQuery)
 	}
 
-	fallback = NewBucketVisibilityFallback(ObjectPorts{Scope: &bucketFallbackScopeQuery{ids: []string{"obj"}}})
+	fallback = NewBucketVisibilityFallback(&bucketFallbackScopeQuery{ids: []string{"obj"}}, nil)
 	if _, err := fallback(context.Background()); !errors.Is(err, errBucketVisibilityRecordReader) {
 		t.Fatalf("missing reader error = %v, want %v", err, errBucketVisibilityRecordReader)
 	}

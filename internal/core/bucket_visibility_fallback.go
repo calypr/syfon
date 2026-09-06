@@ -19,10 +19,10 @@ var (
 // projection from the two object capabilities it needs. The returned callback
 // owns no ObjectManager and returns only bucket-domain rows; object records and
 // object-specific authorization stay on this composition side of the seam.
-func NewBucketVisibilityFallback(ports ObjectPorts) buckets.VisibilityFallback {
+func NewBucketVisibilityFallback(scope objects.ScopeQuery, reader objects.RecordReader) buckets.VisibilityFallback {
 	fallback := bucketVisibilityFallback{
-		scope:  ports.Scope,
-		reader: ports.Reader,
+		scope:  scope,
+		reader: reader,
 	}
 	return fallback.rows
 }
