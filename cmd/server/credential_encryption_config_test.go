@@ -84,7 +84,7 @@ func TestLoadConfiguredBucketScopes(t *testing.T) {
 	database := &testutils.MockDatabase{}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-	err := loadConfiguredBucketScopes(context.Background(), database, []config.BucketScopeConfig{
+	err := loadConfiguredBucketScopes(context.Background(), database, database, []config.BucketScopeConfig{
 		{
 			Organization: "calypr",
 			ProjectID:    "training",

@@ -9,16 +9,18 @@ import (
 	"github.com/calypr/syfon/internal/api/metrics"
 	"github.com/calypr/syfon/internal/config"
 	"github.com/calypr/syfon/internal/core"
-	"github.com/calypr/syfon/internal/db"
 	"github.com/calypr/syfon/internal/httpapi/middleware"
 	"github.com/calypr/syfon/internal/urlmanager"
+	"github.com/calypr/syfon/internal/usage"
 	"github.com/gofiber/fiber/v3"
 )
 
 type serverRuntime struct {
 	app                 *fiber.App
 	cfg                 *config.Config
-	database            db.DatabaseInterface
+	fileUsage           usage.FileUsageReader
+	transferQuery       usage.TransferQuery
+	providerEvents      usage.ProviderEventRecorder
 	serviceInfo         drs.Service
 	om                  *core.ObjectManager
 	uM                  urlmanager.UrlManager
@@ -52,7 +54,7 @@ func WithGa4ghRoutes() ServerOption {
 
 func WithMetricsRoutes() ServerOption {
 	return func(rt *serverRuntime) {
-		metrics.RegisterMetricsRoutes(rt.ensureAPIGroup(), rt.database, rt.database, rt.database, rt.om)
+		metrics.RegisterMetricsRoutes(rt.ensureAPIGroup(), rt.fileUsage, rt.transferQuery, rt.providerEvents, rt.om)
 	}
 }
 

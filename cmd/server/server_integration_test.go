@@ -117,7 +117,7 @@ s3_credentials:
 	uM := urlmanager.NewManager(database, cfg.Signing)
 	uM.RegisterSigner(address.S3Provider, s3.NewS3Signer(database))
 	app := fiber.New()
-	om := core.NewObjectManager(database, uM)
+	om := core.NewObjectManager(sqliteServerBackend(database).dependencies, uM)
 	internaldrs.RegisterInternalRoutes(app, om)
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
