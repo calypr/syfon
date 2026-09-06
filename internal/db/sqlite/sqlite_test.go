@@ -1159,21 +1159,6 @@ func TestSqliteDB_BulkUpdateAccessMethodsTargetsPhysicalRowWithLegacyDuplicateSH
 	assertAccessMethodURL(t, db, objectB, "s3://bucket/original-b")
 }
 
-func TestSqliteDB_GetServiceInfo(t *testing.T) {
-	ctx := context.Background()
-	db, err := NewSqliteDB(":memory:")
-	if err != nil {
-		t.Fatalf("failed to create db: %v", err)
-	}
-	info, err := db.GetServiceInfo(ctx)
-	if err != nil {
-		t.Fatalf("GetServiceInfo failed: %v", err)
-	}
-	if info == nil || info.Name == "" {
-		t.Fatalf("expected non-empty service info, got %+v", info)
-	}
-}
-
 func TestSqliteDB_PendingLFSMetaLifecycle(t *testing.T) {
 	ctx := context.Background()
 	db, err := NewSqliteDB(":memory:")

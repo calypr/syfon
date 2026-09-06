@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gofiber/fiber/v3"
 
@@ -25,6 +26,23 @@ type captureURLManager struct {
 	lastOptions urlmanager.SignOptions
 	lastURL     string
 	lastAccess  string
+}
+
+func testServiceInfo() drs.Service {
+	description := "Calypr test DRS server"
+	environment := "test"
+	createdAt := time.Date(2024, time.January, 2, 3, 4, 5, 0, time.UTC)
+	updatedAt := time.Date(2024, time.January, 3, 4, 5, 6, 0, time.UTC)
+	return drs.Service{
+		Id:          "drs-service-test",
+		Name:        "Calypr Test DRS Server",
+		Type:        drs.ServiceType{Group: "org.ga4gh", Artifact: "drs", Version: "1.2.0"},
+		Description: &description,
+		CreatedAt:   &createdAt,
+		UpdatedAt:   &updatedAt,
+		Environment: &environment,
+		Version:     "1.0.0",
+	}
 }
 
 func (m *captureURLManager) SignURL(ctx context.Context, accessId string, url string, opts urlmanager.SignOptions) (string, error) {
@@ -64,7 +82,7 @@ func TestDRSHandlers(t *testing.T) {
 	um := &captureURLManager{}
 	om := core.NewObjectManager(db, um)
 	app := fiber.New()
-	RegisterDRSRoutes(app, om)
+	RegisterDRSRoutes(app, om, testServiceInfo())
 
 	t.Run("GetObject_Success", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/objects/test-obj", nil)
@@ -151,7 +169,7 @@ func TestDRSHandlers(t *testing.T) {
 		um := &captureURLManager{}
 		om := core.NewObjectManager(db, um)
 		app := fiber.New()
-		RegisterDRSRoutes(app, om)
+		RegisterDRSRoutes(app, om, testServiceInfo())
 
 		req := httptest.NewRequest("GET", "/objects/scoped-obj/access/s3", nil)
 		resp, _ := app.Test(req)
@@ -233,6 +251,26 @@ func TestDRSHandlers(t *testing.T) {
 		if resp.StatusCode != http.StatusOK {
 			t.Errorf("expected 200, got %d", resp.StatusCode)
 		}
+		var got drs.Service
+		if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+			t.Fatalf("decode service info response: %v", err)
+		}
+		want := testServiceInfo()
+		if got.Id != want.Id || got.Name != want.Name || got.Type != want.Type || got.Version != want.Version {
+			t.Fatalf("unexpected service info identity: got %+v want %+v", got, want)
+		}
+		if got.Description == nil || want.Description == nil || *got.Description != *want.Description {
+			t.Fatalf("unexpected service description: got %v want %v", got.Description, want.Description)
+		}
+		if got.Environment == nil || want.Environment == nil || *got.Environment != *want.Environment {
+			t.Fatalf("unexpected service environment: got %v want %v", got.Environment, want.Environment)
+		}
+		if got.CreatedAt == nil || got.UpdatedAt == nil || want.CreatedAt == nil || want.UpdatedAt == nil {
+			t.Fatalf("expected service timestamps: %+v", got)
+		}
+		if !got.CreatedAt.Equal(*want.CreatedAt) || !got.UpdatedAt.Equal(*want.UpdatedAt) {
+			t.Fatalf("unexpected service timestamps: got %v/%v want %v/%v", got.CreatedAt, got.UpdatedAt, want.CreatedAt, want.UpdatedAt)
+		}
 	})
 
 	t.Run("UpdateObjectAccessMethods_Success", func(t *testing.T) {
@@ -286,7 +324,7 @@ func TestAdditionalDRSHandlers(t *testing.T) {
 	um := &testutils.MockUrlManager{}
 	om := core.NewObjectManager(db, um)
 	app := fiber.New()
-	RegisterDRSRoutes(app, om)
+	RegisterDRSRoutes(app, om, testServiceInfo())
 
 	t.Run("GetObjectsByChecksum", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/objects/checksum/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", nil)
@@ -448,7 +486,7 @@ func TestChecksumRouteRegression_WithRealCoreAndDB(t *testing.T) {
 	}
 
 	app := fiber.New()
-	RegisterDRSRoutes(app, om)
+	RegisterDRSRoutes(app, om, testServiceInfo())
 
 	req := httptest.NewRequest("GET", "/objects/checksum/"+checksum, nil)
 	resp, err := app.Test(req)

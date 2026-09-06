@@ -19,7 +19,7 @@ func TestRegisterObjects(t *testing.T) {
 	um := &testutils.MockUrlManager{}
 	om := core.NewObjectManager(db, um)
 	app := fiber.New()
-	RegisterDRSRoutes(app, om)
+	RegisterDRSRoutes(app, om, testServiceInfo())
 
 	t.Run("Register_Single", func(t *testing.T) {
 		size := int64(50)

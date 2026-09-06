@@ -2,13 +2,12 @@ package drsapi
 
 import (
 	"github.com/calypr/syfon/apigen/server/drs"
-	"github.com/calypr/syfon/internal/api/apiutil"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/gofiber/fiber/v3"
 )
 
-func RegisterDRSRoutes(router fiber.Router, om *core.ObjectManager) {
+func RegisterDRSRoutes(router fiber.Router, om *core.ObjectManager, serviceInfo drs.Service) {
 	// Static routes first
 	router.Post("/objects/register", handleRegisterObjectsFiber(om))
 	router.Post("/objects/access", handleGetBulkAccessURLFiber(om))
@@ -19,7 +18,7 @@ func RegisterDRSRoutes(router fiber.Router, om *core.ObjectManager) {
 	router.Put("/objects/access-methods", handleUpdateAccessMethodsFiber(om))
 	router.Get("/objects/checksum/:checksum", handleGetObjectsByChecksumFiber(om))
 	router.Post("/objects", handleGetBulkObjectsFiber(om))
-	router.Get("/service-info", handleGetServiceInfoFiber(om))
+	router.Get("/service-info", handleGetServiceInfoFiber(serviceInfo))
 	router.Post("/upload-request", handleUploadRequestFiber(om))
 
 	// Dynamic routes with parameters last
@@ -45,13 +44,9 @@ func handleUnsupportedChecksumAdditionFiber() fiber.Handler {
 	}
 }
 
-func handleGetServiceInfoFiber(om *core.ObjectManager) fiber.Handler {
+func handleGetServiceInfoFiber(serviceInfo drs.Service) fiber.Handler {
 	return func(c fiber.Ctx) error {
-		info, err := om.GetServiceInfo(c.Context())
-		if err != nil {
-			return apiutil.HandleError(c, err)
-		}
-		return c.JSON(info)
+		return c.JSON(serviceInfo)
 	}
 }
 

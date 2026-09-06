@@ -203,15 +203,4 @@ func TestSchemaEnsurers(t *testing.T) {
 		}
 	})
 
-	t.Run("GetServiceInfo", func(t *testing.T) {
-		pg, _, rawDB := newMockPostgresDB(t)
-		defer rawDB.Close()
-		got, err := pg.GetServiceInfo(context.Background())
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if got == nil || got.Id == "" || got.Name == "" {
-			t.Fatalf("unexpected service info: %#v", got)
-		}
-	})
 }

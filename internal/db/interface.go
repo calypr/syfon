@@ -4,17 +4,11 @@ import (
 	"context"
 	"time"
 
-	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/transfers"
 	"github.com/calypr/syfon/internal/usage"
 )
-
-// ServiceInfoStore exposes service metadata reads.
-type ServiceInfoStore interface {
-	GetServiceInfo(ctx context.Context) (*drs.Service, error)
-}
 
 // ObjectStore groups the object lifecycle and lookup capabilities used by the API layers.
 type ObjectStore interface {
@@ -52,7 +46,6 @@ type CredentialStore interface {
 
 // ObjectsAPIServiceDatabase is the storage surface used by the object service package.
 type ObjectsAPIServiceDatabase interface {
-	ServiceInfoStore
 	ObjectStore
 	CredentialStore
 	UsageStore
@@ -103,7 +96,6 @@ type LFSStore interface {
 
 // DatabaseInterface defines the full database backend contract.
 type DatabaseInterface interface {
-	ServiceInfoStore
 	ObjectStore
 	CredentialStore
 	transfers.PendingStore

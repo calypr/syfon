@@ -1,12 +1,9 @@
 package postgres
 
 import (
-	"context"
 	"database/sql"
 	"fmt"
-	"time"
 
-	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/db"
 
 	// Postgres driver
@@ -51,22 +48,4 @@ func NewPostgresDB(dsn string) (*PostgresDB, error) {
 		return nil, err
 	}
 	return pg, nil
-}
-
-func (db *PostgresDB) GetServiceInfo(ctx context.Context) (*drs.Service, error) {
-	// Static info for now, or fetch from DB if stored there
-	description := "Calypr-backed DRS server"
-	createdAt := time.Now()
-	updatedAt := time.Now()
-	environment := "prod"
-	return &drs.Service{
-		Id:          "drs-service-calypr",
-		Name:        "Calypr DRS Server",
-		Type:        drs.ServiceType{Group: "org.ga4gh", Artifact: "drs", Version: "1.2.0"},
-		Description: &description,
-		CreatedAt:   &createdAt,
-		UpdatedAt:   &updatedAt,
-		Environment: &environment,
-		Version:     "1.0.0",
-	}, nil
 }

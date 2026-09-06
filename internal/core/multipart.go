@@ -3,7 +3,6 @@ package core
 import (
 	"context"
 
-	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/transfers"
 	"github.com/calypr/syfon/internal/urlmanager"
 )
@@ -30,8 +29,4 @@ func (m *ObjectManager) SignMultipartPart(ctx context.Context, bucket, key, uplo
 
 func (m *ObjectManager) CompleteMultipartUpload(ctx context.Context, bucket, key, uploadID string, parts []urlmanager.MultipartPart) error {
 	return m.uM.CompleteMultipartUpload(ctx, bucket, key, uploadID, parts)
-}
-
-func (m *ObjectManager) GetServiceInfo(ctx context.Context) (*drs.Service, error) {
-	return m.db.GetServiceInfo(ctx)
 }

@@ -1,13 +1,10 @@
 package sqlite
 
 import (
-	"context"
 	"database/sql"
 	"fmt"
 	"strings"
-	"time"
 
-	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/db"
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -67,21 +64,4 @@ func sqliteDSN(dsn string) string {
 		separator = "&"
 	}
 	return dsn + separator + strings.Join(params, "&")
-}
-
-func (db *SqliteDB) GetServiceInfo(ctx context.Context) (*drs.Service, error) {
-	name := "Calypr-backed DRS server (SQLite)"
-	createdAt := time.Now()
-	updatedAt := time.Now()
-	environment := "prod"
-	return &drs.Service{
-		Id:          "drs-service-calypr",
-		Name:        "Calypr DRS Server",
-		Type:        drs.ServiceType{Group: "org.ga4gh", Artifact: "drs", Version: "1.2.0"},
-		Description: &name,
-		CreatedAt:   &createdAt,
-		UpdatedAt:   &updatedAt,
-		Environment: &environment,
-		Version:     "1.0.0",
-	}, nil
 }

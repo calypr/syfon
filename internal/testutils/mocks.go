@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/calypr/syfon/apigen/server/drs"
 	sycommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/common"
@@ -31,10 +30,6 @@ type MockDatabase struct {
 	NoDefaultCreds         bool
 	GetObjectErr           error
 	GetBucketScopeCalls    int
-}
-
-func (m *MockDatabase) GetServiceInfo(ctx context.Context) (*drs.Service, error) {
-	return nil, nil
 }
 
 func (m *MockDatabase) GetObject(ctx context.Context, id string) (*objects.Record, error) {

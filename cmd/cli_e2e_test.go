@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
+	"github.com/calypr/syfon/apigen/server/drs"
 	clientservices "github.com/calypr/syfon/client/services"
 	"github.com/calypr/syfon/internal/api/docs"
 	"github.com/calypr/syfon/internal/api/drsapi"
@@ -321,7 +322,20 @@ func newSyfonTestServer(t *testing.T) *fiberTestServer {
 	om := core.NewObjectManager(database, uM)
 
 	drsAPI := api.Group("/ga4gh/drs/v1")
-	drsapi.RegisterDRSRoutes(drsAPI, om)
+	description := "Calypr test DRS server"
+	environment := "test"
+	createdAt := time.Date(2024, time.January, 2, 3, 4, 5, 0, time.UTC)
+	updatedAt := time.Date(2024, time.January, 3, 4, 5, 6, 0, time.UTC)
+	drsapi.RegisterDRSRoutes(drsAPI, om, drs.Service{
+		Id:          "drs-service-test",
+		Name:        "Calypr Test DRS Server",
+		Type:        drs.ServiceType{Group: "org.ga4gh", Artifact: "drs", Version: "1.2.0"},
+		Description: &description,
+		CreatedAt:   &createdAt,
+		UpdatedAt:   &updatedAt,
+		Environment: &environment,
+		Version:     "1.0.0",
+	})
 	docs.RegisterSwaggerRoutes(app)
 	metrics.RegisterMetricsRoutes(api, database)
 	internaldrs.RegisterInternalRoutes(api, om)
