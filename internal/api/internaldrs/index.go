@@ -332,7 +332,7 @@ func handleInternalBulkHashesFiber(om *core.ObjectManager) fiber.Handler {
 			return apiutil.HandleError(c, err)
 		}
 
-		finalRes := make(map[string][]objects.Record, len(req.Hashes))
+		finalRes := make(map[string][]internalapi.InternalRecord, len(req.Hashes))
 		for i, h := range req.Hashes {
 			typ, val := objects.ParseHashQuery(h, "")
 			matches := []objects.Record{}
@@ -348,11 +348,15 @@ func handleInternalBulkHashesFiber(om *core.ObjectManager) fiber.Handler {
 				}
 				matches = filtered
 			}
-			finalRes[h] = matches
+			compatibilityMatches := make([]internalapi.InternalRecord, 0, len(matches))
+			for _, match := range matches {
+				compatibilityMatches = append(compatibilityMatches, httprecords.ToInternalRecord(match))
+			}
+			finalRes[h] = compatibilityMatches
 		}
 
 		return c.JSON(struct {
-			Results map[string][]objects.Record
+			Results map[string][]internalapi.InternalRecord
 		}{Results: finalRes})
 	}
 }
