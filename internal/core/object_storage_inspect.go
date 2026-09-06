@@ -359,7 +359,7 @@ func (m *ObjectManager) inspectScopedStorageObject(ctx context.Context, req Insp
 		return nil, &access.AuthorizationError{Method: objectMethodRead, Resources: []string{resource}}
 	}
 
-	target, err := m.ResolveScopedUploadTarget(ctx, organization, project, key)
+	target, err := m.resolveScopedUploadTarget(ctx, organization, project, key)
 	if err != nil {
 		if errors.Is(err, faults.ErrInvalidInput) && strings.Contains(err.Error(), "no bucket scope configured") {
 			return nil, &StorageInspectError{Kind: StorageInspectScopeNotFound, Message: err.Error()}

@@ -1,11 +1,48 @@
 package core
 
 import (
+	"context"
+	"fmt"
+
 	"github.com/calypr/syfon/internal/buckets"
+	"github.com/calypr/syfon/internal/faults"
 	"github.com/calypr/syfon/internal/objects"
-	"github.com/calypr/syfon/internal/transfers"
-	"github.com/calypr/syfon/internal/usage"
+	"github.com/calypr/syfon/internal/testutils"
 )
+
+type coreTestDB struct {
+	*testutils.MockDatabase
+	aliases                map[string]string
+	creds                  []buckets.Credential
+	getS3CredentialCalls   int
+	listS3CredentialsCalls int
+}
+
+func (d *coreTestDB) ResolveObjectAlias(ctx context.Context, aliasID string) (string, error) {
+	if canonical, ok := d.aliases[aliasID]; ok {
+		return canonical, nil
+	}
+	return "", fmt.Errorf("%w: object not found", faults.ErrNotFound)
+}
+
+func (d *coreTestDB) ListS3Credentials(ctx context.Context) ([]buckets.Credential, error) {
+	d.listS3CredentialsCalls++
+	if d.creds != nil {
+		return append([]buckets.Credential(nil), d.creds...), nil
+	}
+	if d.MockDatabase == nil {
+		return nil, nil
+	}
+	return d.MockDatabase.ListS3Credentials(ctx)
+}
+
+func (d *coreTestDB) GetS3Credential(ctx context.Context, bucket string) (*buckets.Credential, error) {
+	d.getS3CredentialCalls++
+	if d.MockDatabase == nil {
+		return nil, nil
+	}
+	return d.MockDatabase.GetS3Credential(ctx, bucket)
+}
 
 func newTestObjectManager(backend any, storageDependency any) *ObjectManager {
 	deps := testDependencies(backend)
@@ -27,26 +64,11 @@ func newTestObjectManager(backend any, storageDependency any) *ObjectManager {
 		panic(err)
 	}
 	deps.BucketService = service
-	if candidate, ok := storageDependency.(*capturingURLManager); ok && candidate != nil {
-		deps.Storage = StoragePorts{
-			Access:    candidate,
-			Multipart: candidate,
-			Probe:     candidate,
-			Inventory: candidate,
-			Delete:    candidate,
-		}
-	}
 	if candidate, ok := storageDependency.(StoragePorts); ok {
 		deps.Storage = candidate
 	}
 	return NewObjectManager(deps)
 }
-
-var _ StorageAccess = (*capturingURLManager)(nil)
-var _ StorageMultipart = (*capturingURLManager)(nil)
-var _ StorageProbe = (*capturingURLManager)(nil)
-var _ StorageInventory = (*capturingURLManager)(nil)
-var _ StorageDelete = (*capturingURLManager)(nil)
 
 // testDependencies composes the capabilities needed by ObjectManager from the
 // concrete test backend. Optional interfaces stay nil when a test double does
@@ -62,14 +84,6 @@ func testDependencies(backend any) Dependencies {
 			Content:       backend.(objects.ContentReader),
 			ChecksumScope: backend.(objects.ChecksumScopeQuery),
 			Scope:         backend.(objects.ScopeQuery),
-		},
-		Transfers: TransferPorts{
-			Pending: backend.(transfers.PendingStore),
-			Events:  backend.(transfers.EventRecorder),
-		},
-		Usage: UsagePorts{
-			Counters:       backend.(usage.FileCounterRecorder),
-			ProviderEvents: backend.(usage.ProviderEventRecorder),
 		},
 	}
 	if optional, ok := backend.(objects.OptionalResourceQuery); ok {

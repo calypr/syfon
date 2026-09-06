@@ -3,8 +3,6 @@ package core
 import (
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/objects"
-	"github.com/calypr/syfon/internal/transfers"
-	"github.com/calypr/syfon/internal/usage"
 )
 
 const (
@@ -17,12 +15,6 @@ const (
 // ObjectManager standardizes object lifecycle operations across all API surfaces.
 type ObjectManager struct {
 	objectService    *objects.Service
-	pendingStore     transfers.PendingStore
-	transferEvents   transfers.EventRecorder
-	fileCounters     usage.FileCounterRecorder
-	providerEvents   usage.ProviderEventRecorder
-	storageAccess    StorageAccess
-	storageMultipart StorageMultipart
 	storageProbe     StorageProbe
 	storageInventory StorageInventory
 	storageDelete    StorageDelete
@@ -46,25 +38,11 @@ type ObjectPorts struct {
 	Authorized    objects.OptionalAuthorizedQuery
 }
 
-// TransferPorts contains pending metadata and transfer-event capabilities.
-type TransferPorts struct {
-	Pending transfers.PendingStore
-	Events  transfers.EventRecorder
-}
-
-// UsagePorts contains the accounting capabilities used by the facade.
-type UsagePorts struct {
-	Counters       usage.FileCounterRecorder
-	ProviderEvents usage.ProviderEventRecorder
-}
-
 // Dependencies is a concrete composition record, not a replacement database
 // interface. Each field is owned by the package that defines its port.
 type Dependencies struct {
 	Objects       ObjectPorts
 	BucketService *buckets.Service
-	Transfers     TransferPorts
-	Usage         UsagePorts
 	Storage       StoragePorts
 }
 
@@ -84,12 +62,6 @@ func NewObjectManager(deps Dependencies) *ObjectManager {
 			URLPages:      deps.Objects.URLPages,
 			Authorized:    deps.Objects.Authorized,
 		}),
-		pendingStore:     deps.Transfers.Pending,
-		transferEvents:   deps.Transfers.Events,
-		fileCounters:     deps.Usage.Counters,
-		providerEvents:   deps.Usage.ProviderEvents,
-		storageAccess:    deps.Storage.Access,
-		storageMultipart: deps.Storage.Multipart,
 		storageProbe:     deps.Storage.Probe,
 		storageInventory: deps.Storage.Inventory,
 		storageDelete:    deps.Storage.Delete,
