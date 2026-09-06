@@ -15,12 +15,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/apigen/server/internalapi"
 	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/db/sqlite"
+	httprecords "github.com/calypr/syfon/internal/httpapi/records"
 
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/testutils"
@@ -38,9 +38,9 @@ func indexTestAuthContext(base context.Context, mode string, authHeader bool, pr
 func TestHandleInternalList_ScopeFilteringByReadPrivilege(t *testing.T) {
 	now := time.Now().UTC()
 	mockDB := &testutils.MockDatabase{
-		Objects: map[string]*drs.DrsObject{
-			"obj-allow": {Id: "obj-allow", CreatedTime: now, UpdatedTime: &now, Checksums: []drs.Checksum{{Type: "sha256", Checksum: "h1"}}},
-			"obj-deny":  {Id: "obj-deny", CreatedTime: now, UpdatedTime: &now, Checksums: []drs.Checksum{{Type: "sha256", Checksum: "h2"}}},
+		Objects: map[string]*objects.Record{
+			"obj-allow": {Id: "obj-allow", CreatedTime: now, UpdatedTime: &now, Checksums: []objects.Checksum{{Type: "sha256", Checksum: "h1"}}},
+			"obj-deny":  {Id: "obj-deny", CreatedTime: now, UpdatedTime: &now, Checksums: []objects.Checksum{{Type: "sha256", Checksum: "h2"}}},
 		},
 		ObjectAuthz: map[string]map[string][]string{
 			"obj-allow": {"org": {"p1"}},
@@ -77,13 +77,13 @@ func TestHandleInternalList_ScopeFilteringByReadPrivilege(t *testing.T) {
 func TestHandleInternalList_ExactScopeListingDoesNotDependOnBrowseRows(t *testing.T) {
 	now := time.Now().UTC()
 	mockDB := &testutils.MockDatabase{
-		Objects: map[string]*drs.DrsObject{
+		Objects: map[string]*objects.Record{
 			"obj-scoped": {
 				Id:          "obj-scoped",
 				CreatedTime: now,
 				UpdatedTime: &now,
 				Name:        stringPtr("file.bin"),
-				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: "h1"}},
+				Checksums:   []objects.Checksum{{Type: "sha256", Checksum: "h1"}},
 			},
 		},
 		ObjectAuthz: map[string]map[string][]string{
@@ -361,10 +361,10 @@ func TestHandleInternalList_MergesSiblingAccessMethodsFromLegacyDuplicateRows(t 
 func TestHandleInternalList_PaginatesIDs(t *testing.T) {
 	now := time.Now().UTC()
 	mockDB := &testutils.MockDatabase{
-		Objects: map[string]*drs.DrsObject{
-			"obj-1": {Id: "obj-1", CreatedTime: now, UpdatedTime: &now, Checksums: []drs.Checksum{{Type: "sha256", Checksum: "h1"}}},
-			"obj-2": {Id: "obj-2", CreatedTime: now, UpdatedTime: &now, Checksums: []drs.Checksum{{Type: "sha256", Checksum: "h2"}}},
-			"obj-3": {Id: "obj-3", CreatedTime: now, UpdatedTime: &now, Checksums: []drs.Checksum{{Type: "sha256", Checksum: "h3"}}},
+		Objects: map[string]*objects.Record{
+			"obj-1": {Id: "obj-1", CreatedTime: now, UpdatedTime: &now, Checksums: []objects.Checksum{{Type: "sha256", Checksum: "h1"}}, Properties: map[string]json.RawMessage{"large": json.RawMessage(`9007199254740993`), "auth": json.RawMessage(`{"retired":true}`)}},
+			"obj-2": {Id: "obj-2", CreatedTime: now, UpdatedTime: &now, Checksums: []objects.Checksum{{Type: "sha256", Checksum: "h2"}}},
+			"obj-3": {Id: "obj-3", CreatedTime: now, UpdatedTime: &now, Checksums: []objects.Checksum{{Type: "sha256", Checksum: "h3"}}},
 		},
 	}
 	app := fiber.New()
@@ -399,33 +399,31 @@ func TestHandleInternalList_FiltersByAccessURL(t *testing.T) {
 	offsetsAccessID := "offsets-s3"
 	sourceAccessID := "source-s3"
 	mockDB := &testutils.MockDatabase{
-		Objects: map[string]*drs.DrsObject{
+		Objects: map[string]*objects.Record{
 			"offsets": {
 				Id:          "offsets",
 				CreatedTime: now,
 				UpdatedTime: &now,
-				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: "offsets-hash"}},
-				AccessMethods: &[]drs.AccessMethod{{
-					Type:     drs.AccessMethodType("s3"),
+				Checksums:   []objects.Checksum{{Type: "sha256", Checksum: "offsets-hash"}},
+				AccessMethods: &[]objects.AccessMethod{{
+					Type:     "s3",
 					AccessId: &offsetsAccessID,
-					AccessUrl: &struct {
-						Headers *[]string `json:"headers,omitempty"`
-						Url     string    `json:"url"`
-					}{Url: offsetsURL},
+					AccessUrl: &objects.AccessURL{
+
+						Url: offsetsURL},
 				}},
 			},
 			"source": {
 				Id:          "source",
 				CreatedTime: now,
 				UpdatedTime: &now,
-				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: "source-hash"}},
-				AccessMethods: &[]drs.AccessMethod{{
-					Type:     drs.AccessMethodType("s3"),
+				Checksums:   []objects.Checksum{{Type: "sha256", Checksum: "source-hash"}},
+				AccessMethods: &[]objects.AccessMethod{{
+					Type:     "s3",
 					AccessId: &sourceAccessID,
-					AccessUrl: &struct {
-						Headers *[]string `json:"headers,omitempty"`
-						Url     string    `json:"url"`
-					}{Url: sourceURL},
+					AccessUrl: &objects.AccessURL{
+
+						Url: sourceURL},
 				}},
 			},
 		},
@@ -458,10 +456,10 @@ func TestHandleInternalList_FiltersByAccessURL(t *testing.T) {
 func TestHandleInternalList_PagePaginatesIDs(t *testing.T) {
 	now := time.Now().UTC()
 	mockDB := &testutils.MockDatabase{
-		Objects: map[string]*drs.DrsObject{
-			"obj-1": {Id: "obj-1", CreatedTime: now, UpdatedTime: &now, Checksums: []drs.Checksum{{Type: "sha256", Checksum: "h1"}}},
-			"obj-2": {Id: "obj-2", CreatedTime: now, UpdatedTime: &now, Checksums: []drs.Checksum{{Type: "sha256", Checksum: "h2"}}},
-			"obj-3": {Id: "obj-3", CreatedTime: now, UpdatedTime: &now, Checksums: []drs.Checksum{{Type: "sha256", Checksum: "h3"}}},
+		Objects: map[string]*objects.Record{
+			"obj-1": {Id: "obj-1", CreatedTime: now, UpdatedTime: &now, Checksums: []objects.Checksum{{Type: "sha256", Checksum: "h1"}}},
+			"obj-2": {Id: "obj-2", CreatedTime: now, UpdatedTime: &now, Checksums: []objects.Checksum{{Type: "sha256", Checksum: "h2"}}},
+			"obj-3": {Id: "obj-3", CreatedTime: now, UpdatedTime: &now, Checksums: []objects.Checksum{{Type: "sha256", Checksum: "h3"}}},
 		},
 	}
 	app := fiber.New()
@@ -492,18 +490,18 @@ func TestHandleInternalList_PagePaginatesIDs(t *testing.T) {
 func TestHandleInternalList_LimitIsCappedAtTenThousand(t *testing.T) {
 	now := time.Now().UTC()
 	total := maxInternalListLimit + 1
-	objects := make(map[string]*drs.DrsObject, total)
+	records := make(map[string]*objects.Record, total)
 	for i := 0; i < total; i++ {
 		id := fmt.Sprintf("obj-%05d", i)
-		objects[id] = &drs.DrsObject{
-			Id:          id,
+		records[id] = &objects.Record{
+			Id:          objects.RecordID(id),
 			CreatedTime: now,
 			UpdatedTime: &now,
-			Checksums:   []drs.Checksum{{Type: "sha256", Checksum: id}},
+			Checksums:   []objects.Checksum{{Type: "sha256", Checksum: id}},
 		}
 	}
 
-	mockDB := &testutils.MockDatabase{Objects: objects}
+	mockDB := &testutils.MockDatabase{Objects: records}
 	app := fiber.New()
 	om := core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
 	RegisterInternalRoutes(app, om)
@@ -533,11 +531,11 @@ func TestHandleInternalList_LimitIsCappedAtTenThousand(t *testing.T) {
 func TestHandleInternalList_IgnoresLegacyPathQuery(t *testing.T) {
 	now := time.Now().UTC()
 	mockDB := &testutils.MockDatabase{
-		Objects: map[string]*drs.DrsObject{
-			"obj-a": {Id: "obj-a", Name: common.Ptr("nested/a.txt"), CreatedTime: now, UpdatedTime: &now, Checksums: []drs.Checksum{{Type: "sha256", Checksum: "a"}}},
-			"obj-b": {Id: "obj-b", Name: common.Ptr("nested/deep/b.txt"), CreatedTime: now, UpdatedTime: &now, Checksums: []drs.Checksum{{Type: "sha256", Checksum: "b"}}},
-			"obj-c": {Id: "obj-c", Name: common.Ptr("root.txt"), CreatedTime: now, UpdatedTime: &now, Checksums: []drs.Checksum{{Type: "sha256", Checksum: "c"}}},
-			"obj-d": {Id: "obj-d", Name: common.Ptr("nested/z.txt"), CreatedTime: now, UpdatedTime: &now, Checksums: []drs.Checksum{{Type: "sha256", Checksum: "d"}}},
+		Objects: map[string]*objects.Record{
+			"obj-a": {Id: "obj-a", Name: common.Ptr("nested/a.txt"), CreatedTime: now, UpdatedTime: &now, Checksums: []objects.Checksum{{Type: "sha256", Checksum: "a"}}},
+			"obj-b": {Id: "obj-b", Name: common.Ptr("nested/deep/b.txt"), CreatedTime: now, UpdatedTime: &now, Checksums: []objects.Checksum{{Type: "sha256", Checksum: "b"}}},
+			"obj-c": {Id: "obj-c", Name: common.Ptr("root.txt"), CreatedTime: now, UpdatedTime: &now, Checksums: []objects.Checksum{{Type: "sha256", Checksum: "c"}}},
+			"obj-d": {Id: "obj-d", Name: common.Ptr("nested/z.txt"), CreatedTime: now, UpdatedTime: &now, Checksums: []objects.Checksum{{Type: "sha256", Checksum: "d"}}},
 		},
 		ObjectAuthz: map[string]map[string][]string{
 			"obj-a": {"org-a": {"proj-a"}},
@@ -588,18 +586,18 @@ func TestHandleInternalList_IgnoresLegacyPathQuery(t *testing.T) {
 func TestHandleInternalList_HashTypeFiltering(t *testing.T) {
 	now := time.Now().UTC()
 	mockDB := &testutils.MockDatabase{
-		Objects: map[string]*drs.DrsObject{
+		Objects: map[string]*objects.Record{
 			"obj-sha": {
 				Id:          "obj-sha",
 				CreatedTime: now,
 				UpdatedTime: &now,
-				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: "samehash"}},
+				Checksums:   []objects.Checksum{{Type: "sha256", Checksum: "samehash"}},
 			},
 			"obj-md5": {
 				Id:          "obj-md5",
 				CreatedTime: now,
 				UpdatedTime: &now,
-				Checksums:   []drs.Checksum{{Type: "md5", Checksum: "samehash"}},
+				Checksums:   []objects.Checksum{{Type: "md5", Checksum: "samehash"}},
 			},
 		},
 	}
@@ -729,7 +727,7 @@ func TestHandleInternalList_ScopedFiltersKeepProjectPhysicalRecord(t *testing.T)
 func TestInternalRecordToRecord_NormalizesSHA256(t *testing.T) {
 	upper := strings.ToUpper(strings.Repeat("ab", 32))
 	hashes := internalapi.HashInfo{"SHA-256": "sha256:" + upper}
-	obj, err := core.InternalRecordToRecord(internalapi.InternalRecord{
+	obj, err := httprecords.FromInternalRecord(internalapi.InternalRecord{
 		Did:    "normalized-checksum",
 		Hashes: &hashes,
 	}, time.Now().UTC())
@@ -744,10 +742,10 @@ func TestInternalRecordToRecord_NormalizesSHA256(t *testing.T) {
 func TestHandleInternalList_HashPagination(t *testing.T) {
 	now := time.Now().UTC()
 	mockDB := &testutils.MockDatabase{
-		Objects: map[string]*drs.DrsObject{
-			"obj-1": {Id: "obj-1", CreatedTime: now, UpdatedTime: &now, Checksums: []drs.Checksum{{Type: "sha256", Checksum: "samehash"}}},
-			"obj-2": {Id: "obj-2", CreatedTime: now, UpdatedTime: &now, Checksums: []drs.Checksum{{Type: "sha256", Checksum: "samehash"}}},
-			"obj-3": {Id: "obj-3", CreatedTime: now, UpdatedTime: &now, Checksums: []drs.Checksum{{Type: "sha256", Checksum: "samehash"}}},
+		Objects: map[string]*objects.Record{
+			"obj-1": {Id: "obj-1", CreatedTime: now, UpdatedTime: &now, Checksums: []objects.Checksum{{Type: "sha256", Checksum: "samehash"}}},
+			"obj-2": {Id: "obj-2", CreatedTime: now, UpdatedTime: &now, Checksums: []objects.Checksum{{Type: "sha256", Checksum: "samehash"}}},
+			"obj-3": {Id: "obj-3", CreatedTime: now, UpdatedTime: &now, Checksums: []objects.Checksum{{Type: "sha256", Checksum: "samehash"}}},
 		},
 	}
 	app := fiber.New()
@@ -778,18 +776,18 @@ func TestHandleInternalList_HashPagination(t *testing.T) {
 func TestHandleInternalBulkHashes_HashTypeFiltering(t *testing.T) {
 	now := time.Now().UTC()
 	mockDB := &testutils.MockDatabase{
-		Objects: map[string]*drs.DrsObject{
+		Objects: map[string]*objects.Record{
 			"obj-sha": {
 				Id:          "obj-sha",
 				CreatedTime: now,
 				UpdatedTime: &now,
-				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: "samehash"}},
+				Checksums:   []objects.Checksum{{Type: "sha256", Checksum: "samehash"}},
 			},
 			"obj-md5": {
 				Id:          "obj-md5",
 				CreatedTime: now,
 				UpdatedTime: &now,
-				Checksums:   []drs.Checksum{{Type: "md5", Checksum: "samehash"}},
+				Checksums:   []objects.Checksum{{Type: "md5", Checksum: "samehash"}},
 			},
 		},
 	}
@@ -824,18 +822,18 @@ func TestHandleInternalBulkHashes_HashTypeFiltering(t *testing.T) {
 func TestHandleInternalBulkSHA256Validity(t *testing.T) {
 	now := time.Now().UTC()
 	mockDB := &testutils.MockDatabase{
-		Objects: map[string]*drs.DrsObject{
+		Objects: map[string]*objects.Record{
 			"obj-sha": {
 				Id:          "obj-sha",
 				CreatedTime: now,
 				UpdatedTime: &now,
-				Checksums:   []drs.Checksum{{Type: "sha256", Checksum: "present"}},
+				Checksums:   []objects.Checksum{{Type: "sha256", Checksum: "present"}},
 			},
 			"obj-md5": {
 				Id:          "obj-md5",
 				CreatedTime: now,
 				UpdatedTime: &now,
-				Checksums:   []drs.Checksum{{Type: "md5", Checksum: "md5-only"}},
+				Checksums:   []objects.Checksum{{Type: "md5", Checksum: "md5-only"}},
 			},
 		},
 	}
@@ -872,12 +870,12 @@ func TestHandleInternalBulkMissingSHA256(t *testing.T) {
 	present := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	missing := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	now := time.Now().UTC()
-	mockDB := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{
+	mockDB := &testutils.MockDatabase{Objects: map[string]*objects.Record{
 		"obj-sha": {
 			Id:          "obj-sha",
 			CreatedTime: now,
 			UpdatedTime: &now,
-			Checksums:   []drs.Checksum{{Type: "sha256", Checksum: present}},
+			Checksums:   []objects.Checksum{{Type: "sha256", Checksum: present}},
 		},
 	}, ObjectAuthz: map[string]map[string][]string{
 		"obj-sha": {"org": {"project"}},
@@ -922,7 +920,7 @@ func TestHandleInternalBulkMissingSHA256RejectsInvalidChecksum(t *testing.T) {
 }
 
 func TestHandleInternalCreate_PersistsControlledAccess(t *testing.T) {
-	mockDB := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}
+	mockDB := &testutils.MockDatabase{Objects: map[string]*objects.Record{}}
 	reqBody := `{"records":[{"did":"obj-1","size":42,"controlled_access":["https://calypr.org/program/test/project/p1"],"access_methods":[{"type":"s3","access_url":{"url":"s3://bucket/path/obj-1"}}]}]}`
 	req := httptest.NewRequest(http.MethodPost, "/index", strings.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
@@ -940,7 +938,7 @@ func TestHandleInternalCreate_PersistsControlledAccess(t *testing.T) {
 
 func TestHandleInternalCreate_RequiredFieldsFailAtDecode(t *testing.T) {
 	t.Run("missing records", func(t *testing.T) {
-		mockDB := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}
+		mockDB := &testutils.MockDatabase{Objects: map[string]*objects.Record{}}
 		reqBody := `{"size":42,"auth":{"test":{"p1":["s3://bucket/path/obj"]}}}`
 		req := httptest.NewRequest(http.MethodPost, "/index", strings.NewReader(reqBody))
 		req.Header.Set("Content-Type", "application/json")
@@ -954,7 +952,7 @@ func TestHandleInternalCreate_RequiredFieldsFailAtDecode(t *testing.T) {
 }
 
 func TestHandleInternalBulkCreate_PersistsControlledAccess(t *testing.T) {
-	mockDB := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}
+	mockDB := &testutils.MockDatabase{Objects: map[string]*objects.Record{}}
 	reqBody := `{"records":[{"did":"obj-bulk-1","size":7,"controlled_access":["/programs/test/projects/p1"],"access_methods":[{"type":"s3","access_url":{"url":"s3://bucket/path/obj-bulk-1"}}]}]}`
 	req := httptest.NewRequest(http.MethodPost, "/bulk/create", strings.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
@@ -971,7 +969,7 @@ func TestHandleInternalBulkCreate_PersistsControlledAccess(t *testing.T) {
 }
 
 func TestHandleInternalBulkCreate_OrganizationProjectAddsCanonicalControlledAccess(t *testing.T) {
-	mockDB := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}
+	mockDB := &testutils.MockDatabase{Objects: map[string]*objects.Record{}}
 	reqBody := `{"records":[{"did":"obj-bulk-2","organization":"test","project":"p2","size":7,"access_methods":[{"type":"s3","access_url":{"url":"s3://bucket/path/obj-bulk-2"}}]}]}`
 	req := httptest.NewRequest(http.MethodPost, "/index/bulk", strings.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
@@ -989,7 +987,7 @@ func TestHandleInternalBulkCreate_OrganizationProjectAddsCanonicalControlledAcce
 func TestHandleInternalUpdate_OrganizationProjectAddsCanonicalControlledAccess(t *testing.T) {
 	now := time.Now().UTC()
 	mockDB := &testutils.MockDatabase{
-		Objects: map[string]*drs.DrsObject{
+		Objects: map[string]*objects.Record{
 			"obj-update": {Id: "obj-update", CreatedTime: now, UpdatedTime: &now},
 		},
 	}
@@ -1011,7 +1009,7 @@ func TestHandleInternalBulkCreate_AllowsCreateAccessForAnyControlledAccessScope(
 	ctx := indexTestAuthContext(context.Background(), "gen3", true, map[string]map[string]bool{
 		"/programs/test/projects/p1": {"create": true},
 	})
-	obj, err := core.InternalRecordToRecord(internalapi.InternalRecord{
+	obj, err := httprecords.FromInternalRecord(internalapi.InternalRecord{
 		Did:              "obj-bulk-denied",
 		Size:             common.Ptr(int64(7)),
 		ControlledAccess: &[]string{"/programs/test/projects/p1", "/programs/test/projects/p2"},
@@ -1039,7 +1037,7 @@ func TestHandleInternalBulkCreate_ReportsDeniedCreateResources(t *testing.T) {
 	})
 	req = req.WithContext(ctx)
 
-	mockDB := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}
+	mockDB := &testutils.MockDatabase{Objects: map[string]*objects.Record{}}
 	om := core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
 	rr := doInternalDRSTestRequest(req, om)
 
@@ -1062,8 +1060,8 @@ func TestHandleInternalBulkOverwrite_ReplacesProjectChecksumSibling(t *testing.T
 	sha := "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
 	oldName := "old"
 	mockDB := &testutils.MockDatabase{
-		Objects: map[string]*drs.DrsObject{
-			"target-did": {Id: "target-did", Name: &oldName, Checksums: []drs.Checksum{{Type: "sha256", Checksum: sha}}},
+		Objects: map[string]*objects.Record{
+			"target-did": {Id: "target-did", Name: &oldName, Checksums: []objects.Checksum{{Type: "sha256", Checksum: sha}}},
 		},
 		ObjectAuthz: map[string]map[string][]string{"target-did": {"test": {"p1"}}},
 	}
@@ -1093,7 +1091,7 @@ func TestHandleInternalBulkOverwrite_AppliesTopLevelScope(t *testing.T) {
 	req = req.WithContext(indexTestAuthContext(req.Context(), "gen3", true, map[string]map[string]bool{
 		"/programs/test/projects/p1": {"create": true},
 	}))
-	mockDB := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}
+	mockDB := &testutils.MockDatabase{Objects: map[string]*objects.Record{}}
 	om := core.NewObjectManager(mockDB, &testutils.MockUrlManager{})
 	rr := doInternalDRSTestRequest(req, om)
 
@@ -1176,7 +1174,7 @@ func TestHandleInternalDeleteByQuery(t *testing.T) {
 	t.Run("deletes only authorized scoped records", func(t *testing.T) {
 		now := time.Now().UTC()
 		mockDB := &testutils.MockDatabase{
-			Objects: map[string]*drs.DrsObject{
+			Objects: map[string]*objects.Record{
 				"obj-1": {Id: "obj-1", CreatedTime: now, UpdatedTime: &now},
 				"obj-2": {Id: "obj-2", CreatedTime: now, UpdatedTime: &now},
 			},
@@ -1217,7 +1215,7 @@ func TestHandleInternalDeleteByQuery_AuthzParity(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			now := time.Now().UTC()
 			mockDB := &testutils.MockDatabase{
-				Objects: map[string]*drs.DrsObject{
+				Objects: map[string]*objects.Record{
 					"obj-1": {Id: "obj-1", CreatedTime: now, UpdatedTime: &now},
 					"obj-2": {Id: "obj-2", CreatedTime: now, UpdatedTime: &now},
 				},
@@ -1257,7 +1255,7 @@ func TestHandleInternalRemoveControlledAccess(t *testing.T) {
 	now := time.Now().UTC()
 	controlled := []string{"/organization/org/project/a", "/organization/org/project/b"}
 	mockDB := &testutils.MockDatabase{
-		Objects: map[string]*drs.DrsObject{
+		Objects: map[string]*objects.Record{
 			"obj-1": {Id: "obj-1", CreatedTime: now, UpdatedTime: &now, ControlledAccess: &controlled},
 		},
 		ObjectAuthz: map[string]map[string][]string{
@@ -1289,8 +1287,15 @@ func TestHandleInternalRemoveControlledAccess(t *testing.T) {
 func TestRegisterInternalIndexRoutes_LegacyAliases(t *testing.T) {
 	now := time.Now().UTC()
 	mockDB := &testutils.MockDatabase{
-		Objects: map[string]*drs.DrsObject{
-			"obj-1": {Id: "obj-1", CreatedTime: now, UpdatedTime: &now, Checksums: []drs.Checksum{{Type: "sha256", Checksum: "h1"}}},
+		Objects: map[string]*objects.Record{
+			"obj-1": {
+				Id: "obj-1", CreatedTime: now, UpdatedTime: &now,
+				Checksums: []objects.Checksum{{Type: "sha256", Checksum: "h1"}},
+				Properties: map[string]json.RawMessage{
+					"large": json.RawMessage(`9007199254740993`),
+					"auth":  json.RawMessage(`{"retired":true}`),
+				},
+			},
 		},
 	}
 
@@ -1322,6 +1327,16 @@ func TestRegisterInternalIndexRoutes_LegacyAliases(t *testing.T) {
 		}
 		if got := resp.Header.Get("Cache-Control"); got != "no-store" {
 			t.Fatalf("expected object detail response to disable caching, got %q", got)
+		}
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(body), `"did":"obj-1"`) || !strings.Contains(string(body), `"large":9007199254740993`) {
+			t.Fatalf("detail response lost compatibility/raw fields: %s", body)
+		}
+		if strings.Contains(string(body), `"auth"`) {
+			t.Fatalf("detail response emitted retired auth field: %s", body)
 		}
 	})
 

@@ -3,15 +3,130 @@
 package drs
 
 import (
+	"strings"
+
 	generated "github.com/calypr/syfon/apigen/server/drs"
+	lfsapi "github.com/calypr/syfon/apigen/server/lfsapi"
 	syfoncommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/objects"
 )
 
+// FromGeneratedCandidate translates the DRS registration request into the
+// domain candidate accepted by core.
+func FromGeneratedCandidate(value generated.DrsObjectCandidate) objects.Candidate {
+	out := objects.Candidate{
+		Aliases:          value.Aliases,
+		Description:      value.Description,
+		MimeType:         value.MimeType,
+		Name:             value.Name,
+		ControlledAccess: value.ControlledAccess,
+		Size:             int64Ptr(value.Size),
+	}
+	if value.Checksums != nil {
+		checksums := make([]objects.Checksum, 0, len(value.Checksums))
+		for _, checksum := range value.Checksums {
+			checksums = append(checksums, objects.Checksum{Type: checksum.Type, Checksum: checksum.Checksum})
+		}
+		out.Checksums = &checksums
+	}
+	if value.AccessMethods != nil {
+		methods := make([]objects.AccessMethod, 0, len(*value.AccessMethods))
+		for _, method := range *value.AccessMethods {
+			methods = append(methods, fromGeneratedAccessMethod(method))
+		}
+		out.AccessMethods = &methods
+	}
+	if value.Contents != nil {
+		contents := make([]objects.Content, 0, len(*value.Contents))
+		for _, content := range *value.Contents {
+			contents = append(contents, fromGeneratedContent(content))
+		}
+		out.Contents = &contents
+	}
+	return out
+}
+
+// FromLFSGeneratedCandidate translates the LFS metadata request into the
+// same domain candidate used by DRS registration.
+func FromLFSGeneratedCandidate(value lfsapi.DrsObjectCandidate) objects.Candidate {
+	aliases := append([]string(nil), stringSliceValue(value.Aliases)...)
+	explicitID := strings.TrimSpace(stringValue(value.Id))
+	if explicitID == "" {
+		for _, checksum := range checksumValues(value.Checksums) {
+			if strings.EqualFold(strings.TrimSpace(checksum.Type), "sha256") {
+				explicitID = syfoncommon.NormalizeOid(checksum.Checksum)
+				break
+			}
+		}
+	}
+	if explicitID != "" {
+		aliases = append([]string{"id:" + explicitID}, aliases...)
+	}
+	out := objects.Candidate{
+		Aliases:     stringSlicePointer(aliases),
+		Description: value.Description,
+		Id:          value.Id,
+		MimeType:    value.MimeType,
+		Name:        value.Name,
+		Size:        value.Size,
+	}
+	if value.Checksums != nil {
+		checksums := make([]objects.Checksum, 0, len(*value.Checksums))
+		for _, checksum := range *value.Checksums {
+			checksums = append(checksums, objects.Checksum{Type: checksum.Type, Checksum: checksum.Checksum})
+		}
+		out.Checksums = &checksums
+	}
+	if value.AccessMethods != nil {
+		methods := make([]objects.AccessMethod, 0, len(*value.AccessMethods))
+		for _, method := range *value.AccessMethods {
+			converted := objects.AccessMethod{AccessId: method.AccessId, Type: stringValue(method.Type), Region: method.Region}
+			if method.AccessUrl != nil && method.AccessUrl.Url != nil {
+				converted.AccessUrl = &objects.AccessURL{Url: *method.AccessUrl.Url}
+			}
+			if method.Authorizations != nil {
+				converted.Authorizations = &objects.AccessAuthorizations{BearerAuthIssuers: method.Authorizations.BearerAuthIssuers}
+			}
+			methods = append(methods, converted)
+		}
+		out.AccessMethods = &methods
+	}
+	return out
+}
+
+func checksumValues(value *[]lfsapi.Checksum) []lfsapi.Checksum {
+	if value == nil {
+		return nil
+	}
+	return *value
+}
+
+func stringSliceValue(value *[]string) []string {
+	if value == nil {
+		return nil
+	}
+	return *value
+}
+
+func stringSlicePointer(value []string) *[]string {
+	if value == nil {
+		return nil
+	}
+	return &value
+}
+
+func int64Ptr(value int64) *int64 { return &value }
+
+func stringValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
+
 func ToGenerated(record objects.Record) generated.DrsObject {
 	out := generated.DrsObject{
 		Id:               string(record.Id),
-		Checksums:        make([]generated.Checksum, 0, len(record.Checksums)),
 		ControlledAccess: record.ControlledAccess,
 		CreatedTime:      record.CreatedTime,
 		Description:      record.Description,
@@ -21,6 +136,9 @@ func ToGenerated(record objects.Record) generated.DrsObject {
 		Size:             record.Size,
 		UpdatedTime:      record.UpdatedTime,
 		Version:          record.Version,
+	}
+	if record.Checksums != nil {
+		out.Checksums = make([]generated.Checksum, 0, len(record.Checksums))
 	}
 	if out.ControlledAccess == nil && len(record.Authorizations) > 0 {
 		controlled := syfoncommon.AuthzMapToControlledAccess(record.Authorizations)
@@ -61,7 +179,9 @@ func FromGenerated(value generated.DrsObject) objects.Record {
 		Size:             value.Size,
 		UpdatedTime:      value.UpdatedTime,
 		Version:          value.Version,
-		Checksums:        make([]objects.Checksum, 0, len(value.Checksums)),
+	}
+	if value.Checksums != nil {
+		out.Checksums = make([]objects.Checksum, 0, len(value.Checksums))
 	}
 	for _, checksum := range value.Checksums {
 		out.Checksums = append(out.Checksums, objects.Checksum{Type: checksum.Type, Checksum: checksum.Checksum})
@@ -95,6 +215,19 @@ func FromGeneratedAccessMethods(methods []generated.AccessMethod) []objects.Acce
 		out = append(out, fromGeneratedAccessMethod(method))
 	}
 	return out
+}
+
+// ToGeneratedAccessMethods translates domain access methods for generated
+// request/response models that embed the DRS access contract.
+func ToGeneratedAccessMethods(methods *[]objects.AccessMethod) *[]generated.AccessMethod {
+	if methods == nil {
+		return nil
+	}
+	out := make([]generated.AccessMethod, 0, len(*methods))
+	for _, method := range *methods {
+		out = append(out, toGeneratedAccessMethod(method))
+	}
+	return &out
 }
 
 func FromGeneratedAccessMethodMap(updates map[string][]generated.AccessMethod) map[string][]objects.AccessMethod {

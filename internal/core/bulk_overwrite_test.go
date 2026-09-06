@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/calypr/syfon/apigen/server/drs"
 	sycommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/db/sqlite"
 	"github.com/calypr/syfon/internal/faults"
@@ -24,8 +23,8 @@ func TestBulkOverwriteObjects_ReplacesProjectChecksumSibling(t *testing.T) {
 	oldName := "old"
 	newName := "new"
 	db := &coreTestDB{MockDatabase: &testutils.MockDatabase{
-		Objects: map[string]*drs.DrsObject{
-			"target-did": {Id: "target-did", Name: &oldName, Checksums: []drs.Checksum{{Type: "sha256", Checksum: sha}}},
+		Objects: map[string]*objects.Record{
+			"target-did": {Id: "target-did", Name: &oldName, Checksums: []objects.Checksum{{Type: "sha256", Checksum: sha}}},
 		},
 		ObjectAuthz: map[string]map[string][]string{"target-did": {"org": {"project"}}},
 	}}
@@ -80,7 +79,7 @@ func TestBulkOverwriteObjects_ValidationAndConflicts(t *testing.T) {
 		{
 			name: "did exists outside project",
 			db: &testutils.MockDatabase{
-				Objects:     map[string]*drs.DrsObject{"did": {Id: "did"}},
+				Objects:     map[string]*objects.Record{"did": {Id: "did"}},
 				ObjectAuthz: map[string]map[string][]string{"did": {"org": {"other"}}},
 			},
 			candidates: []objects.Record{candidate("did")}, want: "outside project", conflict: true,
@@ -88,9 +87,9 @@ func TestBulkOverwriteObjects_ValidationAndConflicts(t *testing.T) {
 		{
 			name: "ambiguous checksum",
 			db: &testutils.MockDatabase{
-				Objects: map[string]*drs.DrsObject{
-					"one": {Id: "one", Checksums: []drs.Checksum{{Type: "sha256", Checksum: sha}}},
-					"two": {Id: "two", Checksums: []drs.Checksum{{Type: "sha256", Checksum: sha}}},
+				Objects: map[string]*objects.Record{
+					"one": {Id: "one", Checksums: []objects.Checksum{{Type: "sha256", Checksum: sha}}},
+					"two": {Id: "two", Checksums: []objects.Checksum{{Type: "sha256", Checksum: sha}}},
 				},
 				ObjectAuthz: map[string]map[string][]string{"one": {"org": {"project"}}, "two": {"org": {"project"}}},
 			},
@@ -127,7 +126,7 @@ func TestBulkOverwriteObjects_DoesNotMatchChecksumOutsideProject(t *testing.T) {
 	}
 	sha := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	db := &coreTestDB{MockDatabase: &testutils.MockDatabase{
-		Objects:     map[string]*drs.DrsObject{"other-project": {Id: "other-project", Checksums: []drs.Checksum{{Type: "sha256", Checksum: sha}}}},
+		Objects:     map[string]*objects.Record{"other-project": {Id: "other-project", Checksums: []objects.Checksum{{Type: "sha256", Checksum: sha}}}},
 		ObjectAuthz: map[string]map[string][]string{"other-project": {"org": {"other"}}},
 	}}
 	om := NewObjectManager(db, &capturingURLManager{})
@@ -224,8 +223,8 @@ func TestBulkOverwriteObjects_RequiresTargetProjectPermission(t *testing.T) {
 
 	t.Run("update", func(t *testing.T) {
 		database := &coreTestDB{MockDatabase: &testutils.MockDatabase{
-			Objects: map[string]*drs.DrsObject{
-				string(candidate.Id): {Id: string(candidate.Id)},
+			Objects: map[string]*objects.Record{
+				string(candidate.Id): {Id: candidate.Id},
 			},
 			ObjectAuthz: map[string]map[string][]string{
 				string(candidate.Id): {"org": {"target", "allowed"}},

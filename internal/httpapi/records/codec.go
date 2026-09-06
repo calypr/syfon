@@ -154,38 +154,8 @@ func Encode(record objects.Record) ([]byte, error) {
 			return nil, err
 		}
 	}
-	if record.MimeType != nil {
-		if err := put("mime_type", *record.MimeType); err != nil {
-			return nil, err
-		}
-	}
 	if record.Size > 0 {
 		if err := put("size", record.Size); err != nil {
-			return nil, err
-		}
-	}
-	if record.SelfUri != "" {
-		if err := put("self_uri", record.SelfUri); err != nil {
-			return nil, err
-		}
-	}
-	if record.Version != nil {
-		if err := put("version", record.Version); err != nil {
-			return nil, err
-		}
-	}
-	if record.Aliases != nil {
-		if err := put("aliases", record.Aliases); err != nil {
-			return nil, err
-		}
-	}
-	if record.Contents != nil {
-		if err := put("contents", record.Contents); err != nil {
-			return nil, err
-		}
-	}
-	if record.Project != "" {
-		if err := put("project", record.Project); err != nil {
 			return nil, err
 		}
 	}

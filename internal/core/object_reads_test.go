@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/db"
 	"github.com/calypr/syfon/internal/db/sqlite"
 
@@ -41,21 +40,18 @@ func (s *pageSpyDB) ListObjectIDsByScope(ctx context.Context, organization, proj
 func registerScopedCandidate(t *testing.T, om *ObjectManager, id, checksum, org, project string) {
 	t.Helper()
 	controlled := []string{"/organization/" + org + "/project/" + project}
-	_, err := om.RegisterBulk(context.Background(), []drs.DrsObjectCandidate{{
+	_, err := om.RegisterBulk(context.Background(), []objects.Candidate{{
 		Aliases:          ptr([]string{"id:" + id}),
 		ControlledAccess: &controlled,
-		Checksums: []drs.Checksum{{
+		Checksums: &[]objects.Checksum{{
 			Type:     "sha256",
 			Checksum: checksum,
 		}},
-		AccessMethods: &[]drs.AccessMethod{{
-			Type: "s3",
-			AccessUrl: &struct {
-				Headers *[]string `json:"headers,omitempty"`
-				Url     string    `json:"url"`
-			}{Url: "s3://bucket/" + id},
+		AccessMethods: &[]objects.AccessMethod{{
+			Type:      "s3",
+			AccessUrl: &objects.AccessURL{Url: "s3://bucket/" + id},
 		}},
-		Size: 1,
+		Size: ptr(int64(1)),
 	}})
 	if err != nil {
 		t.Fatalf("RegisterBulk(%s): %v", id, err)
@@ -220,10 +216,7 @@ func TestGetObjectPrefersSHAIdentityOverCollidingPhysicalID(t *testing.T) {
 }
 
 func TestGetBulkObjectsUsesGlobalSHAIdentity(t *testing.T) {
-	database, err := sqlite.NewSqliteDB(":memory:")
-	if err != nil {
-		t.Fatalf("NewSqliteDB failed: %v", err)
-	}
+	database := &testutils.MockDatabase{}
 	checksum := "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 	firstResource := "/organization/org/project/first"
 	secondResource := "/organization/org/project/second"
@@ -244,6 +237,13 @@ func TestGetBulkObjectsUsesGlobalSHAIdentity(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].Id != "bulk-a" || got[0].ControlledAccess == nil || len(*got[0].ControlledAccess) != 2 {
 		t.Fatalf("bulk read did not return the merged checksum identity: %+v", got)
+	}
+	view, err := NewObjectManager(database, nil).GetCanonicalContent(ctx, checksum, "read")
+	if err != nil {
+		t.Fatalf("GetCanonicalContent(checksum) failed: %v", err)
+	}
+	if len(view.Records) != 2 {
+		t.Fatalf("checksum lookup lost physical siblings: got %d records", len(view.Records))
 	}
 }
 

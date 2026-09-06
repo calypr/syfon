@@ -11,7 +11,6 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
-	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/faults"
 	"github.com/calypr/syfon/internal/models"
@@ -93,17 +92,14 @@ func TestBulkDeleteObjectsWithStorageRejectsWithoutSideEffects(t *testing.T) {
 	restore := replaceS3ObjectDeleterForTest(deleter)
 	defer restore()
 
-	accessMethodsDRS := func(rawURL string) *[]drs.AccessMethod {
-		return &[]drs.AccessMethod{{
-			Type: drs.AccessMethodTypeS3,
-			AccessUrl: &struct {
-				Headers *[]string `json:"headers,omitempty"`
-				Url     string    `json:"url"`
-			}{Url: rawURL},
+	accessMethodsDRS := func(rawURL string) *[]objects.AccessMethod {
+		return &[]objects.AccessMethod{{
+			Type:      "s3",
+			AccessUrl: &objects.AccessURL{Url: rawURL},
 		}}
 	}
 	db := &testutils.MockDatabase{
-		Objects: map[string]*drs.DrsObject{
+		Objects: map[string]*objects.Record{
 			"obj-1": {Id: "obj-1", AccessMethods: accessMethodsDRS("s3://bucket/path/a.txt")},
 			"obj-2": {Id: "obj-2", AccessMethods: accessMethodsDRS("s3://bucket/path/b.txt")},
 			"obj-3": {Id: "obj-3", AccessMethods: accessMethodsDRS("s3://bucket/path/a.txt")},

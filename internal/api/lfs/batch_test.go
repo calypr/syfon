@@ -7,11 +7,11 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/apigen/server/lfsapi"
 	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/models"
+	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/testutils"
 	"github.com/gofiber/fiber/v3"
 )
@@ -19,17 +19,14 @@ import (
 func TestLFSBatchDownloadFound(t *testing.T) {
 	router, db := newLFSRouter()
 	oid := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	db.Objects[oid] = &drs.DrsObject{
-		Id:   oid,
+	db.Objects[oid] = &objects.Record{
+		Id:   objects.RecordID(oid),
 		Size: 10,
-		Checksums: []drs.Checksum{
+		Checksums: []objects.Checksum{
 			{Type: "sha256", Checksum: oid},
 		},
-		AccessMethods: &[]drs.AccessMethod{
-			{Type: drs.AccessMethodTypeS3, AccessUrl: &struct {
-				Headers *[]string `json:"headers,omitempty"`
-				Url     string    `json:"url"`
-			}{Url: "s3://bucket/" + oid}},
+		AccessMethods: &[]objects.AccessMethod{
+			{Type: "s3", AccessUrl: &objects.AccessURL{Url: "s3://bucket/" + oid}},
 		},
 	}
 
@@ -131,16 +128,13 @@ func TestLFSBatchRejectsBadContentType(t *testing.T) {
 func TestLFSBatchGen3MissingAuthReturns401(t *testing.T) {
 	oid := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	db := &testutils.MockDatabase{
-		Objects: map[string]*drs.DrsObject{
-			oid: &drs.DrsObject{
-				Id: oid,
-				AccessMethods: &[]drs.AccessMethod{
+		Objects: map[string]*objects.Record{
+			oid: &objects.Record{
+				Id: objects.RecordID(oid),
+				AccessMethods: &[]objects.AccessMethod{
 					{
-						Type: drs.AccessMethodTypeS3,
-						AccessUrl: &struct {
-							Headers *[]string `json:"headers,omitempty"`
-							Url     string    `json:"url"`
-						}{Url: "s3://bucket/" + oid},
+						Type:      "s3",
+						AccessUrl: &objects.AccessURL{Url: "s3://bucket/" + oid},
 					},
 				},
 			},

@@ -9,17 +9,17 @@ import (
 	"testing"
 
 	"github.com/calypr/syfon/apigen/server/bucketapi"
-	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/models"
+	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/testutils"
 	"github.com/gofiber/fiber/v3"
 )
 
 func TestHandleInternalDeleteProject_RemovesGrantsAndBucketScopes(t *testing.T) {
 	mockDB := &testutils.MockDatabase{
-		Objects: map[string]*drs.DrsObject{
+		Objects: map[string]*objects.Record{
 			"delete-me": {Id: "delete-me", Name: common.Ptr("delete-me")},
 			"keep-me":   {Id: "keep-me", Name: common.Ptr("keep-me")},
 		},
@@ -78,16 +78,14 @@ func TestHandleInternalDeleteProject_RequiresGen3Auth(t *testing.T) {
 func TestHandleInternalBuckets_Gen3Auth(t *testing.T) {
 	mockDB := &testutils.MockDatabase{
 		Credentials: map[string]models.S3Credential{"b1": {Bucket: "b1", Region: "us-east-1"}, "b2": {Bucket: "b2", Region: "us-east-1"}},
-		Objects: map[string]*drs.DrsObject{
-			"obj-1": {Id: "obj-1", Name: common.Ptr("obj-1"), AccessMethods: &[]drs.AccessMethod{
-				{Type: drs.AccessMethodTypeS3, AccessUrl: &struct {
-					Headers *[]string `json:"headers,omitempty"`
-					Url     string    `json:"url"`
-				}{Url: "s3://b1/path/obj-1"}},
-				{Type: drs.AccessMethodTypeS3, AccessUrl: &struct {
-					Headers *[]string `json:"headers,omitempty"`
-					Url     string    `json:"url"`
-				}{Url: "s3://b2/path/obj-1"}},
+		Objects: map[string]*objects.Record{
+			"obj-1": {Id: "obj-1", Name: common.Ptr("obj-1"), AccessMethods: &[]objects.AccessMethod{
+				{Type: "s3", AccessUrl: &objects.AccessURL{
+
+					Url: "s3://b1/path/obj-1"}},
+				{Type: "s3", AccessUrl: &objects.AccessURL{
+
+					Url: "s3://b2/path/obj-1"}},
 			}},
 		},
 		ObjectAuthz: map[string]map[string][]string{"obj-1": {"cbds": {"proj1"}}},
@@ -143,13 +141,12 @@ func TestHandleInternalBuckets_PrefersExplicitScopeOverObjectDerivedDuplicate(t 
 				Bucket:       "EllrottLab",
 			},
 		},
-		Objects: map[string]*drs.DrsObject{
-			"obj-1": {Id: "obj-1", Name: common.Ptr("obj-1"), AccessMethods: &[]drs.AccessMethod{{
-				Type: drs.AccessMethodTypeS3,
-				AccessUrl: &struct {
-					Headers *[]string `json:"headers,omitempty"`
-					Url     string    `json:"url"`
-				}{Url: "s3://cbds/path/obj-1"},
+		Objects: map[string]*objects.Record{
+			"obj-1": {Id: "obj-1", Name: common.Ptr("obj-1"), AccessMethods: &[]objects.AccessMethod{{
+				Type: "s3",
+				AccessUrl: &objects.AccessURL{
+
+					Url: "s3://cbds/path/obj-1"},
 			}}},
 		},
 		ObjectAuthz: map[string]map[string][]string{
@@ -264,7 +261,7 @@ func TestHandleInternalPutBucket_ReusesExistingPhysicalBucketCredential(t *testi
 
 func TestRegisterInternalRoutes_Smoke(t *testing.T) {
 	app := fiber.New()
-	om := core.NewObjectManager(&testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}, Credentials: map[string]models.S3Credential{"b1": {Bucket: "b1"}}}, &testutils.MockUrlManager{})
+	om := core.NewObjectManager(&testutils.MockDatabase{Objects: map[string]*objects.Record{}, Credentials: map[string]models.S3Credential{"b1": {Bucket: "b1"}}}, &testutils.MockUrlManager{})
 	RegisterInternalRoutes(app, om)
 	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/data/upload/abc?bucket=b1", nil))
 	if err != nil {
@@ -278,14 +275,13 @@ func TestRegisterInternalRoutes_Smoke(t *testing.T) {
 
 func TestRegisteredRoutesByWorkflow(t *testing.T) {
 	db := &testutils.MockDatabase{
-		Objects: map[string]*drs.DrsObject{
-			"obj-1": {Id: "obj-1", Name: ptr("file"), Checksums: []drs.Checksum{{Type: "sha256", Checksum: "sha-1"}}, AccessMethods: &[]drs.AccessMethod{{
+		Objects: map[string]*objects.Record{
+			"obj-1": {Id: "obj-1", Name: ptr("file"), Checksums: []objects.Checksum{{Type: "sha256", Checksum: "sha-1"}}, AccessMethods: &[]objects.AccessMethod{{
 				AccessId: ptr("s3"),
-				Type:     drs.AccessMethodTypeS3,
-				AccessUrl: &struct {
-					Headers *[]string `json:"headers,omitempty"`
-					Url     string    `json:"url"`
-				}{Url: "s3://bucket-a/key"},
+				Type:     "s3",
+				AccessUrl: &objects.AccessURL{
+
+					Url: "s3://bucket-a/key"},
 			}}},
 		},
 		Credentials: map[string]models.S3Credential{"bucket-a": {Bucket: "bucket-a", Provider: "s3"}},

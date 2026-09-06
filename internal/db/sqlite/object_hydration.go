@@ -13,10 +13,18 @@ import (
 	sycommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/faults"
-	"github.com/calypr/syfon/internal/models"
-
 	"github.com/calypr/syfon/internal/objects"
 )
+
+type objectRow struct {
+	ID          string
+	Size        int64
+	CreatedTime time.Time
+	UpdatedTime time.Time
+	Name        string
+	Version     string
+	Description string
+}
 
 func (db *SqliteDB) GetObject(ctx context.Context, id string) (*objects.Record, error) {
 	requestID := strings.TrimSpace(id)
@@ -25,7 +33,7 @@ func (db *SqliteDB) GetObject(ctx context.Context, id string) (*objects.Record, 
 
 retryLookup:
 	// 1. Fetch main record
-	var r models.DrsObjectRecord
+	var r objectRow
 	var name, version, description sql.NullString
 	err := db.db.QueryRowContext(ctx, `
 		SELECT id, size, created_time, updated_time, name, version, description

@@ -16,6 +16,7 @@ import (
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/faults"
+	httprecords "github.com/calypr/syfon/internal/httpapi/records"
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/gofiber/fiber/v3"
 )
@@ -84,7 +85,7 @@ func handleInternalBulkOverwriteFiber(om *core.ObjectManager) fiber.Handler {
 		for i, record := range req.Records {
 			record.Organization = &req.Organization
 			record.Project = &req.Project
-			obj, err := core.InternalRecordToRecord(record, now)
+			obj, err := internalRecordToObject(record, now)
 			if err != nil {
 				return c.Status(fiber.StatusBadRequest).SendString(fmt.Sprintf("Invalid request body: record[%d] invalid: %v", i, err))
 			}
@@ -169,7 +170,12 @@ func handleInternalGetFiber(om *core.ObjectManager) fiber.Handler {
 		if err != nil {
 			return apiutil.HandleError(c, err)
 		}
-		return c.JSON(obj)
+		encoded, err := httprecords.Encode(*obj)
+		if err != nil {
+			return apiutil.HandleError(c, err)
+		}
+		c.Set(fiber.HeaderContentType, fiber.MIMEApplicationJSON)
+		return c.Send(encoded)
 	}
 }
 
@@ -196,7 +202,7 @@ func handleInternalListFiber(om *core.ObjectManager) fiber.Handler {
 			}
 			records := make([]internalapi.InternalRecord, 0, len(objs))
 			for _, o := range objs {
-				records = append(records, core.RecordToInternalRecord(o))
+				records = append(records, httprecords.ToInternalRecord(o))
 			}
 			return c.JSON(internalapi.ListRecordsResponse{Records: &records})
 		}
@@ -240,7 +246,7 @@ func handleInternalListFiber(om *core.ObjectManager) fiber.Handler {
 		}
 		records := make([]internalapi.InternalRecord, 0, len(objs))
 		for _, obj := range objs {
-			records = append(records, core.RecordToInternalRecord(obj))
+			records = append(records, httprecords.ToInternalRecord(obj))
 		}
 		return c.JSON(internalapi.ListRecordsResponse{Records: &records})
 	}
@@ -267,7 +273,7 @@ func handleInternalRemoveControlledAccessFiber(om *core.ObjectManager) fiber.Han
 		if err != nil {
 			return apiutil.HandleError(c, err)
 		}
-		return c.JSON(core.RecordToInternalRecordResponse(*obj))
+		return c.JSON(httprecords.ToInternalRecordResponse(*obj))
 	}
 }
 
@@ -284,11 +290,11 @@ func handleInternalCreateFiber(om *core.ObjectManager) fiber.Handler {
 		if strings.HasSuffix(c.Path(), "/bulk") {
 			records := make([]internalapi.InternalRecord, len(candidates))
 			for i, cand := range candidates {
-				records[i] = core.RecordToInternalRecord(cand)
+				records[i] = httprecords.ToInternalRecord(cand)
 			}
 			return c.Status(fiber.StatusCreated).JSON(internalapi.ListRecordsResponse{Records: &records})
 		}
-		return c.Status(fiber.StatusCreated).JSON(core.RecordToInternalRecordResponse(candidates[0]))
+		return c.Status(fiber.StatusCreated).JSON(httprecords.ToInternalRecordResponse(candidates[0]))
 	}
 }
 
@@ -420,7 +426,7 @@ func handleInternalBulkDocumentsFiber(om *core.ObjectManager) fiber.Handler {
 
 		out := make([]internalapi.InternalRecordResponse, 0, len(records))
 		for _, obj := range records {
-			out = append(out, core.RecordToInternalRecordResponse(obj))
+			out = append(out, httprecords.ToInternalRecordResponse(obj))
 		}
 		return c.JSON(out)
 	}
@@ -462,7 +468,7 @@ func handleInternalUpdateFiber(c fiber.Ctx, om *core.ObjectManager) error {
 	if strings.TrimSpace(req.Did) == "" {
 		req.Did = id
 	}
-	update, err := core.InternalRecordToRecord(req, time.Now().UTC())
+	update, err := internalRecordToObject(req, time.Now().UTC())
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).SendString("Invalid request body: " + err.Error())
 	}
@@ -487,7 +493,7 @@ func handleInternalUpdateFiber(c fiber.Ctx, om *core.ObjectManager) error {
 	if err := om.ReplaceObjects(c.Context(), []objects.Record{merged}); err != nil {
 		return apiutil.HandleError(c, err)
 	}
-	return c.JSON(core.RecordToInternalRecordResponse(merged))
+	return c.JSON(httprecords.ToInternalRecordResponse(merged))
 }
 
 func parseScopeQueryParts(organization, program, project string) (string, string, bool, error) {
@@ -545,7 +551,7 @@ func decodeInternalCreateCandidates(c fiber.Ctx, now time.Time) ([]objects.Recor
 	candidates := make([]objects.Record, 0)
 	if err := c.Bind().JSON(&bulkReq); err == nil && len(bulkReq.Records) > 0 {
 		for i, r := range bulkReq.Records {
-			obj, err := core.InternalRecordToRecord(r, now)
+			obj, err := internalRecordToObject(r, now)
 			if err != nil {
 				return nil, fmt.Errorf("record[%d] invalid: %w", i, err)
 			}
@@ -556,7 +562,7 @@ func decodeInternalCreateCandidates(c fiber.Ctx, now time.Time) ([]objects.Recor
 
 	var singleReq internalapi.InternalRecord
 	if err := c.Bind().JSON(&singleReq); err == nil && singleReq.Did != "" {
-		obj, err := core.InternalRecordToRecord(singleReq, now)
+		obj, err := internalRecordToObject(singleReq, now)
 		if err != nil {
 			return nil, fmt.Errorf("record invalid: %w", err)
 		}
@@ -566,6 +572,14 @@ func decodeInternalCreateCandidates(c fiber.Ctx, now time.Time) ([]objects.Recor
 		return nil, fmt.Errorf("no records found")
 	}
 	return candidates, nil
+}
+
+func internalRecordToObject(value internalapi.InternalRecord, now time.Time) (objects.Record, error) {
+	obj, err := httprecords.FromInternalRecord(value, now)
+	if err != nil {
+		return objects.Record{}, err
+	}
+	return core.EnforceCanonicalProjectScope(obj, common.StringVal(value.Organization), common.StringVal(value.Project))
 }
 
 func normalizeBulkHashes(hashes []string) []string {

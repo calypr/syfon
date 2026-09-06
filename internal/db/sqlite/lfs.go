@@ -10,8 +10,7 @@ import (
 
 	"github.com/calypr/syfon/internal/faults"
 	"github.com/calypr/syfon/internal/models"
-
-	"github.com/calypr/syfon/apigen/server/drs"
+	"github.com/calypr/syfon/internal/objects"
 )
 
 func (db *SqliteDB) SavePendingLFSMeta(ctx context.Context, entries []models.PendingLFSMeta) error {
@@ -68,7 +67,7 @@ func (db *SqliteDB) GetPendingLFSMeta(ctx context.Context, oid string) (*models.
 		return nil, fmt.Errorf("failed to load pending metadata for oid %s: %w", oid, err)
 	}
 
-	var c drs.DrsObjectCandidate
+	var c objects.Candidate
 	if err := json.Unmarshal([]byte(raw), &c); err != nil {
 		return nil, fmt.Errorf("failed to parse pending metadata candidate for oid %s: %w", oid, err)
 	}
@@ -112,7 +111,7 @@ func (db *SqliteDB) PopPendingLFSMeta(ctx context.Context, oid string) (*models.
 		return nil, fmt.Errorf("failed to consume pending metadata for oid %s: %w", oid, err)
 	}
 
-	var c drs.DrsObjectCandidate
+	var c objects.Candidate
 	if err := json.Unmarshal([]byte(raw), &c); err != nil {
 		return nil, fmt.Errorf("failed to parse pending metadata candidate for oid %s: %w", oid, err)
 	}

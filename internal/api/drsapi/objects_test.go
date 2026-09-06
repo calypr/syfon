@@ -11,7 +11,9 @@ import (
 	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/core"
+	httpdrs "github.com/calypr/syfon/internal/httpapi/drs"
 	"github.com/calypr/syfon/internal/models"
+	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/testutils"
 	"github.com/calypr/syfon/internal/urlmanager"
 	"github.com/gofiber/fiber/v3"
@@ -33,23 +35,20 @@ func (m *captureURLManager) SignURL(ctx context.Context, accessId string, url st
 
 func TestDRSHandlers(t *testing.T) {
 	db := &testutils.MockDatabase{
-		Objects: map[string]*drs.DrsObject{
+		Objects: map[string]*objects.Record{
 			"test-obj": {
 				Id:      "test-obj",
 				Name:    common.Ptr("test-file"),
 				Size:    100,
 				SelfUri: "drs://test-obj",
-				Checksums: []drs.Checksum{
+				Checksums: []objects.Checksum{
 					{Type: "sha256", Checksum: "sha-1"},
 				},
-				AccessMethods: &[]drs.AccessMethod{
+				AccessMethods: &[]objects.AccessMethod{
 					{
-						AccessId: common.Ptr("s3-access"),
-						Type:     drs.AccessMethodTypeS3,
-						AccessUrl: &struct {
-							Headers *[]string `json:"headers,omitempty"`
-							Url     string    `json:"url"`
-						}{Url: "s3://bucket/key"},
+						AccessId:  common.Ptr("s3-access"),
+						Type:      "s3",
+						AccessUrl: &objects.AccessURL{Url: "s3://bucket/key"},
 					},
 				},
 			},
@@ -118,20 +117,17 @@ func TestDRSHandlers(t *testing.T) {
 
 	t.Run("GetAccessURL_MapsLegacyReplica", func(t *testing.T) {
 		db := &testutils.MockDatabase{
-			Objects: map[string]*drs.DrsObject{
+			Objects: map[string]*objects.Record{
 				"scoped-obj": {
 					Id:               "scoped-obj",
 					Name:             common.Ptr("slide.ome.tiff"),
 					Size:             100,
 					SelfUri:          "drs://scoped-obj",
 					ControlledAccess: &[]string{"/organization/HTAN_INT/project/BForePC"},
-					AccessMethods: &[]drs.AccessMethod{{
-						AccessId: common.Ptr("s3"),
-						Type:     drs.AccessMethodTypeS3,
-						AccessUrl: &struct {
-							Headers *[]string `json:"headers,omitempty"`
-							Url     string    `json:"url"`
-						}{Url: "s3://bforepc-prod/OHSU/slide.ome.tiff"},
+					AccessMethods: &[]objects.AccessMethod{{
+						AccessId:  common.Ptr("s3"),
+						Type:      "s3",
+						AccessUrl: &objects.AccessURL{Url: "s3://bforepc-prod/OHSU/slide.ome.tiff"},
 					}},
 				},
 			},
@@ -269,11 +265,11 @@ func TestDRSHandlers(t *testing.T) {
 
 func TestAdditionalDRSHandlers(t *testing.T) {
 	db := &testutils.MockDatabase{
-		Objects: map[string]*drs.DrsObject{
+		Objects: map[string]*objects.Record{
 			"checksum-obj": {
 				Id:   "checksum-obj",
 				Size: 200,
-				Checksums: []drs.Checksum{
+				Checksums: []objects.Checksum{
 					{Type: "sha256", Checksum: "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"},
 				},
 			},
@@ -334,8 +330,8 @@ func TestAdditionalDRSHandlers(t *testing.T) {
 	})
 
 	t.Run("BulkDeleteObjects", func(t *testing.T) {
-		db.Objects["bulk-delete-a"] = &drs.DrsObject{Id: "bulk-delete-a", Size: 1}
-		db.Objects["bulk-delete-b"] = &drs.DrsObject{Id: "bulk-delete-b", Size: 1}
+		db.Objects["bulk-delete-a"] = &objects.Record{Id: "bulk-delete-a", Size: 1}
+		db.Objects["bulk-delete-b"] = &objects.Record{Id: "bulk-delete-b", Size: 1}
 		bodyObj := drs.BulkDeleteRequest{
 			BulkObjectIds: []string{"bulk-delete-a", "bulk-delete-b"},
 		}
@@ -355,8 +351,8 @@ func TestAdditionalDRSHandlers(t *testing.T) {
 	})
 
 	t.Run("BulkUpdateAccessMethods", func(t *testing.T) {
-		db.Objects["bulk-update-a"] = &drs.DrsObject{Id: "bulk-update-a", Size: 1}
-		db.Objects["bulk-update-b"] = &drs.DrsObject{Id: "bulk-update-b", Size: 1}
+		db.Objects["bulk-update-a"] = &objects.Record{Id: "bulk-update-a", Size: 1}
+		db.Objects["bulk-update-b"] = &objects.Record{Id: "bulk-update-b", Size: 1}
 		bodyObj := drs.BulkAccessMethodUpdateRequest{
 			Updates: []struct {
 				AccessMethods []drs.AccessMethod `json:"access_methods"`
@@ -406,7 +402,7 @@ func TestChecksumRouteRegression_WithRealCoreAndDB(t *testing.T) {
 	checksum := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 	controlled := []string{"/organization/testorg/project/testproj"}
-	_, err := om.RegisterBulk(context.Background(), []drs.DrsObjectCandidate{{
+	_, err := om.RegisterBulk(context.Background(), []objects.Candidate{httpdrs.FromGeneratedCandidate(drs.DrsObjectCandidate{
 		Aliases:          common.Ptr([]string{"id:checksum-regression-obj"}),
 		ControlledAccess: &controlled,
 		Checksums: []drs.Checksum{{
@@ -421,7 +417,7 @@ func TestChecksumRouteRegression_WithRealCoreAndDB(t *testing.T) {
 			}{Url: "s3://bucket/checksum-regression-obj"},
 		}},
 		Size: 123,
-	}})
+	})})
 	if err != nil {
 		t.Fatalf("seed register bulk failed: %v", err)
 	}

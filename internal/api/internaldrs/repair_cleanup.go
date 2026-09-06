@@ -18,6 +18,7 @@ import (
 	apimiddleware "github.com/calypr/syfon/internal/api/middleware"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/faults"
+	httprecords "github.com/calypr/syfon/internal/httpapi/records"
 
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/repair"
@@ -109,13 +110,13 @@ func (a scopeRepairIndexAdapter) List(ctx context.Context, opts repair.ListRecor
 	}
 	records := make([]clientinternalapi.InternalRecord, 0, len(objects))
 	for _, obj := range objects {
-		records = append(records, clientRecordFromServer(core.RecordToInternalRecord(obj)))
+		records = append(records, clientRecordFromServer(httprecords.ToInternalRecord(obj)))
 	}
 	return clientinternalapi.ListRecordsResponse{Records: &records}, nil
 }
 
 func (a scopeRepairIndexAdapter) Update(ctx context.Context, did string, rec clientinternalapi.InternalRecord) (clientinternalapi.InternalRecordResponse, error) {
-	update, err := core.InternalRecordToRecord(serverRecordFromClient(rec), time.Now().UTC())
+	update, err := httprecords.FromInternalRecord(serverRecordFromClient(rec), time.Now().UTC())
 	if err != nil {
 		return clientinternalapi.InternalRecordResponse{}, err
 	}
@@ -130,7 +131,7 @@ func (a scopeRepairIndexAdapter) Update(ctx context.Context, did string, rec cli
 	if err := a.om.ReplaceObjects(ctx, []objects.Record{merged}); err != nil {
 		return clientinternalapi.InternalRecordResponse{}, err
 	}
-	return clientRecordResponseFromServer(core.RecordToInternalRecordResponse(merged)), nil
+	return clientRecordResponseFromServer(httprecords.ToInternalRecordResponse(merged)), nil
 }
 
 type scopeRepairBucketsAdapter struct {

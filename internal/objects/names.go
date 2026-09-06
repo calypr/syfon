@@ -1,6 +1,7 @@
 package objects
 
 import (
+	"path/filepath"
 	"sort"
 	"strings"
 )
@@ -13,10 +14,9 @@ func CleanToBasename(name string) string {
 		return ""
 	}
 	trimmed = strings.ReplaceAll(trimmed, "\\", "/")
-	parts := strings.Split(trimmed, "/")
-	base := parts[len(parts)-1]
-	if base == "" {
-		return trimmed
+	base := filepath.Base(trimmed)
+	if base == "." || base == "/" || base == "" {
+		base = trimmed
 	}
 	return base
 }

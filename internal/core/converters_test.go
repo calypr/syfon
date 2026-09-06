@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/apigen/server/lfsapi"
 
+	httpdrs "github.com/calypr/syfon/internal/httpapi/drs"
 	"github.com/calypr/syfon/internal/objects"
 )
 
@@ -17,16 +17,13 @@ func TestConverters(t *testing.T) {
 		url := "https://storage.example/object.bin"
 		name := "object.bin"
 		size := int64(42)
-		candidate := drs.DrsObjectCandidate{
+		candidate := objects.Candidate{
 			Name:      &name,
-			Size:      size,
-			Checksums: []drs.Checksum{{Type: "sha256", Checksum: strings.Repeat("a", 64)}},
-			AccessMethods: &[]drs.AccessMethod{{
-				Type: "https",
-				AccessUrl: &struct {
-					Headers *[]string `json:"headers,omitempty"`
-					Url     string    `json:"url"`
-				}{Url: url},
+			Size:      &size,
+			Checksums: &[]objects.Checksum{{Type: "sha256", Checksum: strings.Repeat("a", 64)}},
+			AccessMethods: &[]objects.AccessMethod{{
+				Type:      "https",
+				AccessUrl: &objects.AccessURL{Url: url},
 			}},
 			ControlledAccess: &authz,
 		}
@@ -41,9 +38,10 @@ func TestConverters(t *testing.T) {
 	})
 
 	t.Run("candidate without access methods fails", func(t *testing.T) {
-		candidate := drs.DrsObjectCandidate{
-			Size:      42,
-			Checksums: []drs.Checksum{{Type: "sha256", Checksum: strings.Repeat("b", 64)}},
+		size := int64(42)
+		candidate := objects.Candidate{
+			Size:      &size,
+			Checksums: &[]objects.Checksum{{Type: "sha256", Checksum: strings.Repeat("b", 64)}},
 		}
 		if _, err := CandidateToRecord(candidate, time.Unix(123, 0)); err == nil || !strings.Contains(err.Error(), "access method") {
 			t.Fatalf("expected access-method validation error, got %v", err)
@@ -69,7 +67,7 @@ func TestConverters(t *testing.T) {
 			}},
 		}
 
-		got := LFSCandidateToDRS(candidate)
+		got := httpdrs.FromLFSGeneratedCandidate(candidate)
 		if got.AccessMethods == nil || len(*got.AccessMethods) != 1 {
 			t.Fatalf("expected one access method, got %+v", got.AccessMethods)
 		}
@@ -92,7 +90,7 @@ func TestConverters(t *testing.T) {
 			}},
 		}
 
-		got := LFSCandidateToDRS(candidate)
+		got := httpdrs.FromLFSGeneratedCandidate(candidate)
 		if got.Aliases == nil || len(*got.Aliases) == 0 || (*got.Aliases)[0] != "id:"+oid {
 			t.Fatalf("expected oid-derived id alias, got %+v", got.Aliases)
 		}

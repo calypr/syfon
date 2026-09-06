@@ -5,7 +5,6 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/core"
 
 	"github.com/calypr/syfon/internal/objects"
@@ -39,7 +38,7 @@ func (r *fiberTestRouter) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 func newLFSRouterWithOptions(opts Options) (*fiberTestRouter, *testutils.MockDatabase) {
 	db := &testutils.MockDatabase{
-		Objects: map[string]*drs.DrsObject{},
+		Objects: map[string]*objects.Record{},
 	}
 	uM := &testutils.MockUrlManager{}
 	app := fiber.New()

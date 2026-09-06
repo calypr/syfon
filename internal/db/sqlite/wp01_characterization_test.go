@@ -29,7 +29,7 @@ func TestPendingMetaLegacyJSON(t *testing.T) {
 	if got.Candidate.Name == nil || *got.Candidate.Name != "legacy-lfs.bin" {
 		t.Fatalf("legacy candidate name = %#v, want legacy-lfs.bin", got.Candidate.Name)
 	}
-	if len(got.Candidate.Checksums) != 1 || got.Candidate.Checksums[0].Checksum != oid {
+	if got.Candidate.Checksums == nil || len(*got.Candidate.Checksums) != 1 || (*got.Candidate.Checksums)[0].Checksum != oid {
 		t.Fatalf("legacy candidate checksums = %+v, want canonical checksum", got.Candidate.Checksums)
 	}
 	if got.Candidate.AccessMethods == nil || len(*got.Candidate.AccessMethods) != 1 {

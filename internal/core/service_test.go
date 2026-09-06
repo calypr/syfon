@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/faults"
@@ -149,11 +148,11 @@ func TestObjectManagerGetObjectLookupPaths(t *testing.T) {
 			name: "checksum lookup",
 			db: &coreTestDB{
 				MockDatabase: &testutils.MockDatabase{
-					Objects: map[string]*drs.DrsObject{
+					Objects: map[string]*objects.Record{
 						"obj-1": {
 							Id:      "obj-1",
 							SelfUri: "drs://obj-1",
-							Checksums: []drs.Checksum{
+							Checksums: []objects.Checksum{
 								{Type: "sha256", Checksum: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
 							},
 						},
@@ -173,7 +172,7 @@ func TestObjectManagerGetObjectLookupPaths(t *testing.T) {
 			name: "direct id lookup",
 			db: &coreTestDB{
 				MockDatabase: &testutils.MockDatabase{
-					Objects: map[string]*drs.DrsObject{
+					Objects: map[string]*objects.Record{
 						"obj-2": {Id: "obj-2", SelfUri: "drs://obj-2"},
 					},
 					ObjectAuthz: map[string]map[string][]string{
@@ -191,7 +190,7 @@ func TestObjectManagerGetObjectLookupPaths(t *testing.T) {
 			name: "alias fallback",
 			db: &coreTestDB{
 				MockDatabase: &testutils.MockDatabase{
-					Objects: map[string]*drs.DrsObject{
+					Objects: map[string]*objects.Record{
 						"canonical-1": {Id: "canonical-1", SelfUri: "drs://canonical-1"},
 					},
 					ObjectAuthz: map[string]map[string][]string{
@@ -212,7 +211,7 @@ func TestObjectManagerGetObjectLookupPaths(t *testing.T) {
 			name: "access denied",
 			db: &coreTestDB{
 				MockDatabase: &testutils.MockDatabase{
-					Objects: map[string]*drs.DrsObject{
+					Objects: map[string]*objects.Record{
 						"obj-3": {Id: "obj-3"},
 					},
 					ObjectAuthz: map[string]map[string][]string{
@@ -229,7 +228,7 @@ func TestObjectManagerGetObjectLookupPaths(t *testing.T) {
 			name: "not found",
 			db: &coreTestDB{
 				MockDatabase: &testutils.MockDatabase{
-					Objects: map[string]*drs.DrsObject{},
+					Objects: map[string]*objects.Record{},
 				},
 			},
 			ident:   "missing",
@@ -271,7 +270,7 @@ func TestObjectManagerGetObjectAuthzParity(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			db := &coreTestDB{
 				MockDatabase: &testutils.MockDatabase{
-					Objects: map[string]*drs.DrsObject{
+					Objects: map[string]*objects.Record{
 						"obj-1": {Id: "obj-1", SelfUri: "drs://obj-1"},
 					},
 					ObjectAuthz: map[string]map[string][]string{
@@ -382,16 +381,16 @@ func TestBucketCatalogDeleteScopeInvalidatesLookupCache(t *testing.T) {
 func TestObjectManagerBulkReadFiltering(t *testing.T) {
 	db := &coreTestDB{
 		MockDatabase: &testutils.MockDatabase{
-			Objects: map[string]*drs.DrsObject{
+			Objects: map[string]*objects.Record{
 				"obj-1": {
 					Id: "obj-1",
-					Checksums: []drs.Checksum{
+					Checksums: []objects.Checksum{
 						{Type: "sha256", Checksum: "sha-1"},
 					},
 				},
 				"obj-2": {
 					Id: "obj-2",
-					Checksums: []drs.Checksum{
+					Checksums: []objects.Checksum{
 						{Type: "sha256", Checksum: "sha-2"},
 					},
 				},
@@ -498,14 +497,14 @@ func TestObjectManagerLifecycleAuthorization(t *testing.T) {
 
 	t.Run("delete by checksum uses delete privilege without requiring read", func(t *testing.T) {
 		db := &coreTestDB{MockDatabase: &testutils.MockDatabase{
-			Objects: map[string]*drs.DrsObject{
+			Objects: map[string]*objects.Record{
 				"delete-me": {
 					Id:        "delete-me",
-					Checksums: []drs.Checksum{{Type: "sha256", Checksum: "sha-delete"}},
+					Checksums: []objects.Checksum{{Type: "sha256", Checksum: "sha-delete"}},
 				},
 				"keep-me": {
 					Id:        "keep-me",
-					Checksums: []drs.Checksum{{Type: "sha256", Checksum: "sha-keep"}},
+					Checksums: []objects.Checksum{{Type: "sha256", Checksum: "sha-keep"}},
 				},
 			},
 			ObjectAuthz: map[string]map[string][]string{
@@ -536,7 +535,7 @@ func TestObjectManagerLifecycleAuthorization(t *testing.T) {
 	t.Run("single mutations reject unauthorized access", func(t *testing.T) {
 		accessMethods := []objects.AccessMethod{{Type: "https"}}
 		db := &coreTestDB{MockDatabase: &testutils.MockDatabase{
-			Objects: map[string]*drs.DrsObject{
+			Objects: map[string]*objects.Record{
 				"obj": {Id: "obj"},
 			},
 			ObjectAuthz: map[string]map[string][]string{
@@ -574,9 +573,9 @@ func TestObjectManagerLifecycleAuthorization(t *testing.T) {
 
 	t.Run("scope list and single checksum lookup filter reads", func(t *testing.T) {
 		db := &coreTestDB{MockDatabase: &testutils.MockDatabase{
-			Objects: map[string]*drs.DrsObject{
-				"obj-1": {Id: "obj-1", Checksums: []drs.Checksum{{Type: "sha256", Checksum: "shared"}}},
-				"obj-2": {Id: "obj-2", Checksums: []drs.Checksum{{Type: "sha256", Checksum: "shared"}}},
+			Objects: map[string]*objects.Record{
+				"obj-1": {Id: "obj-1", Checksums: []objects.Checksum{{Type: "sha256", Checksum: "shared"}}},
+				"obj-2": {Id: "obj-2", Checksums: []objects.Checksum{{Type: "sha256", Checksum: "shared"}}},
 			},
 			ObjectAuthz: map[string]map[string][]string{
 				"obj-1": {"org": {"one"}},
@@ -610,7 +609,7 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 	t.Run("delete by scope filters unauthorized objects", func(t *testing.T) {
 		db := &coreTestDB{
 			MockDatabase: &testutils.MockDatabase{
-				Objects: map[string]*drs.DrsObject{
+				Objects: map[string]*objects.Record{
 					"obj-a": {Id: "obj-a"},
 					"obj-b": {Id: "obj-b"},
 				},
@@ -644,7 +643,7 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 	t.Run("bulk update access methods checks authorization in one bulk read", func(t *testing.T) {
 		db := &coreTestDB{
 			MockDatabase: &testutils.MockDatabase{
-				Objects: map[string]*drs.DrsObject{
+				Objects: map[string]*objects.Record{
 					"obj-a": {Id: "obj-a"},
 					"obj-b": {Id: "obj-b"},
 				},
@@ -896,20 +895,17 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 
 	t.Run("object storage target preserves stored key", func(t *testing.T) {
 		mockDB := &testutils.MockDatabase{
-			Objects: map[string]*drs.DrsObject{
+			Objects: map[string]*objects.Record{
 				"obj-delete": {
 					Id:               "obj-delete",
 					ControlledAccess: &[]string{"/organization/cbds/project/git_drs_test"},
-					Checksums: []drs.Checksum{{
+					Checksums: []objects.Checksum{{
 						Type:     "sha256",
 						Checksum: "6d1bf6c2-917d-545e-b44d-8e28f96ec170",
 					}},
-					AccessMethods: &[]drs.AccessMethod{{
-						Type: drs.AccessMethodTypeS3,
-						AccessUrl: &struct {
-							Headers *[]string `json:"headers,omitempty"`
-							Url     string    `json:"url"`
-						}{Url: "s3://cbds-minio/6d1bf6c2-917d-545e-b44d-8e28f96ec170"},
+					AccessMethods: &[]objects.AccessMethod{{
+						Type:      "s3",
+						AccessUrl: &objects.AccessURL{Url: "s3://cbds-minio/6d1bf6c2-917d-545e-b44d-8e28f96ec170"},
 					}},
 				},
 			},

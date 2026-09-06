@@ -52,3 +52,20 @@ func TestGeneratedRoundTripPreservesObjectValues(t *testing.T) {
 		t.Fatalf("round trip changed domain value: %#v", FromGenerated(ToGenerated(domain)))
 	}
 }
+
+func TestGeneratedChecksumNilAndEmptySlicesRemainDistinct(t *testing.T) {
+	nilValue := ToGenerated(objects.Record{})
+	if nilValue.Checksums != nil {
+		t.Fatalf("nil domain checksums became empty generated slice: %#v", nilValue.Checksums)
+	}
+	emptyValue := ToGenerated(objects.Record{Checksums: []objects.Checksum{}})
+	if emptyValue.Checksums == nil || len(emptyValue.Checksums) != 0 {
+		t.Fatalf("empty domain checksums changed: %#v", emptyValue.Checksums)
+	}
+	if FromGenerated(generated.DrsObject{}).Checksums != nil {
+		t.Fatal("nil generated checksums became empty domain slice")
+	}
+	if got := FromGenerated(generated.DrsObject{Checksums: []generated.Checksum{}}).Checksums; got == nil || len(got) != 0 {
+		t.Fatalf("empty generated checksums changed: %#v", got)
+	}
+}

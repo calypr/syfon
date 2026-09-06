@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/db/sqlite"
 	"github.com/calypr/syfon/internal/faults"
 
@@ -23,21 +22,18 @@ func TestRegisterBulk_RegistersCandidate(t *testing.T) {
 	database := testutils.NewInMemoryDB()
 	om := NewObjectManager(database, nil)
 
-	candidates := []drs.DrsObjectCandidate{
+	candidates := []objects.Candidate{
 		{
 			Aliases: ptr([]string{"id:test-register-bulk"}),
-			Checksums: []drs.Checksum{{
+			Checksums: &[]objects.Checksum{{
 				Type:     "sha256",
 				Checksum: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 			}},
-			AccessMethods: &[]drs.AccessMethod{{
-				Type: "s3",
-				AccessUrl: &struct {
-					Headers *[]string `json:"headers,omitempty"`
-					Url     string    `json:"url"`
-				}{Url: "s3://bucket/test-register-bulk"},
+			AccessMethods: &[]objects.AccessMethod{{
+				Type:      "s3",
+				AccessUrl: &objects.AccessURL{Url: "s3://bucket/test-register-bulk"},
 			}},
-			Size: 1,
+			Size: ptr(int64(1)),
 		},
 	}
 
@@ -62,13 +58,13 @@ func TestRegisterBulk_InvalidChecksum(t *testing.T) {
 	database := testutils.NewInMemoryDB()
 	om := NewObjectManager(database, nil)
 
-	candidates := []drs.DrsObjectCandidate{{
+	candidates := []objects.Candidate{{
 		Aliases: ptr([]string{"id:test-invalid-checksum"}),
-		Checksums: []drs.Checksum{{
+		Checksums: &[]objects.Checksum{{
 			Type:     "md5",
 			Checksum: "abc",
 		}},
-		Size: 1,
+		Size: ptr(int64(1)),
 	}}
 
 	if _, err := om.RegisterBulk(context.Background(), candidates); err == nil {
@@ -80,20 +76,17 @@ func TestBulkDeleteObjects_DeletesAuthorizedObjects(t *testing.T) {
 	database := testutils.NewInMemoryDB()
 	om := NewObjectManager(database, nil)
 
-	_, err := om.RegisterBulk(context.Background(), []drs.DrsObjectCandidate{{
+	_, err := om.RegisterBulk(context.Background(), []objects.Candidate{{
 		Aliases: ptr([]string{"id:test-delete-bulk"}),
-		Checksums: []drs.Checksum{{
+		Checksums: &[]objects.Checksum{{
 			Type:     "sha256",
 			Checksum: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
 		}},
-		AccessMethods: &[]drs.AccessMethod{{
-			Type: "s3",
-			AccessUrl: &struct {
-				Headers *[]string `json:"headers,omitempty"`
-				Url     string    `json:"url"`
-			}{Url: "s3://bucket/test-delete-bulk"},
+		AccessMethods: &[]objects.AccessMethod{{
+			Type:      "s3",
+			AccessUrl: &objects.AccessURL{Url: "s3://bucket/test-delete-bulk"},
 		}},
-		Size: 1,
+		Size: ptr(int64(1)),
 	}})
 	if err != nil {
 		t.Fatalf("seed RegisterBulk error: %v", err)

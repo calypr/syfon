@@ -57,6 +57,22 @@ type Content struct {
 	Name     string     `json:"name"`
 }
 
+// Candidate is the plain request value accepted by object registration and
+// LFS metadata staging. HTTP adapters translate generated request models into
+// this value before it crosses into core or persistence.
+type Candidate struct {
+	AccessMethods    *[]AccessMethod `json:"access_methods,omitempty"`
+	Aliases          *[]string       `json:"aliases,omitempty"`
+	Checksums        *[]Checksum     `json:"checksums,omitempty"`
+	Contents         *[]Content      `json:"contents,omitempty"`
+	ControlledAccess *[]string       `json:"controlled_access,omitempty"`
+	Description      *string         `json:"description,omitempty"`
+	Id               *string         `json:"id,omitempty"`
+	MimeType         *string         `json:"mime_type,omitempty"`
+	Name             *string         `json:"name,omitempty"`
+	Size             *int64          `json:"size,omitempty"`
+}
+
 // Record is one physical object record.  Extension fields are retained only
 // while the value is in memory; SQL hydration preserves the historical
 // behavior and does not claim to persist unknown properties.

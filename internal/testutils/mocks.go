@@ -11,7 +11,6 @@ import (
 	sycommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/faults"
-	httpdrs "github.com/calypr/syfon/internal/httpapi/drs"
 	"github.com/calypr/syfon/internal/models"
 
 	"github.com/calypr/syfon/internal/objects"
@@ -20,7 +19,7 @@ import (
 
 // MockDatabase implements db.DatabaseInterface for testing
 type MockDatabase struct {
-	Objects                map[string]*drs.DrsObject
+	Objects                map[string]*objects.Record
 	ObjectAuthz            map[string]map[string][]string
 	Credentials            map[string]models.S3Credential
 	BucketScopes           map[string]models.BucketScope
@@ -42,7 +41,7 @@ func (m *MockDatabase) GetObject(ctx context.Context, id string) (*objects.Recor
 		return nil, m.GetObjectErr
 	}
 	if obj, ok := m.Objects[id]; ok {
-		wrapped := httpdrs.FromGenerated(*obj)
+		wrapped := *obj
 		if authz, ok := m.ObjectAuthz[id]; ok {
 			wrapped.Authorizations = cloneAuthzMap(authz)
 		}
@@ -68,9 +67,9 @@ func (m *MockDatabase) DeleteObjectAlias(ctx context.Context, aliasID string) er
 
 func (m *MockDatabase) CreateObject(ctx context.Context, obj *objects.Record) error {
 	if m.Objects == nil {
-		m.Objects = make(map[string]*drs.DrsObject)
+		m.Objects = make(map[string]*objects.Record)
 	}
-	copyObj := httpdrs.ToGenerated(*obj)
+	copyObj := *obj
 	m.Objects[string(obj.Id)] = &copyObj
 	if len(obj.Authorizations) > 0 {
 		if m.ObjectAuthz == nil {
@@ -87,8 +86,8 @@ func (m *MockDatabase) GetObjectsByChecksum(ctx context.Context, checksum string
 	}
 	out := make([]objects.Record, 0, 1)
 	for id, obj := range m.Objects {
-		if id == checksum || obj.Id == checksum {
-			wrapped := httpdrs.FromGenerated(*obj)
+		if id == checksum || string(obj.Id) == checksum {
+			wrapped := *obj
 			if authz, ok := m.ObjectAuthz[id]; ok {
 				wrapped.Authorizations = cloneAuthzMap(authz)
 			}
@@ -98,7 +97,7 @@ func (m *MockDatabase) GetObjectsByChecksum(ctx context.Context, checksum string
 		}
 		for _, c := range obj.Checksums {
 			if strings.EqualFold(strings.TrimSpace(c.Checksum), strings.TrimSpace(checksum)) {
-				wrapped := httpdrs.FromGenerated(*obj)
+				wrapped := *obj
 				if authz, ok := m.ObjectAuthz[id]; ok {
 					wrapped.Authorizations = cloneAuthzMap(authz)
 				}
@@ -253,7 +252,7 @@ func (m *MockDatabase) CreateObjectAlias(ctx context.Context, aliasID, canonical
 		return fmt.Errorf("%w: object not found", faults.ErrNotFound)
 	}
 	copyObj := *obj
-	copyObj.Id = aliasID
+	copyObj.Id = objects.RecordID(aliasID)
 	m.Objects[aliasID] = &copyObj
 	if m.ObjectAuthz != nil {
 		if authz, ok := m.ObjectAuthz[canonicalObjectID]; ok {
@@ -272,12 +271,12 @@ func (m *MockDatabase) ResolveObjectAlias(ctx context.Context, aliasID string) (
 	return "", fmt.Errorf("%w: object not found", faults.ErrNotFound)
 }
 
-func (m *MockDatabase) RegisterObjects(ctx context.Context, objects []objects.Record) error {
+func (m *MockDatabase) RegisterObjects(ctx context.Context, records []objects.Record) error {
 	if m.Objects == nil {
-		m.Objects = make(map[string]*drs.DrsObject)
+		m.Objects = make(map[string]*objects.Record)
 	}
-	for _, obj := range objects {
-		copyObj := httpdrs.ToGenerated(obj)
+	for _, obj := range records {
+		copyObj := obj
 		m.Objects[string(obj.Id)] = &copyObj
 		if m.ObjectAuthz == nil {
 			m.ObjectAuthz = make(map[string]map[string][]string)
@@ -287,11 +286,11 @@ func (m *MockDatabase) RegisterObjects(ctx context.Context, objects []objects.Re
 	return nil
 }
 
-func (m *MockDatabase) ReplaceObjects(ctx context.Context, objects []objects.Record) error {
-	if err := m.RegisterObjects(ctx, objects); err != nil {
+func (m *MockDatabase) ReplaceObjects(ctx context.Context, records []objects.Record) error {
+	if err := m.RegisterObjects(ctx, records); err != nil {
 		return err
 	}
-	for _, obj := range objects {
+	for _, obj := range records {
 		if obj.AccessMethods == nil {
 			continue
 		}
@@ -306,7 +305,7 @@ func (m *MockDatabase) GetBulkObjects(ctx context.Context, ids []string) ([]obje
 	out := make([]objects.Record, 0, len(ids))
 	for _, id := range ids {
 		if obj, ok := m.Objects[id]; ok {
-			wrapped := httpdrs.FromGenerated(*obj)
+			wrapped := *obj
 			if authz, ok := m.ObjectAuthz[id]; ok {
 				wrapped.Authorizations = cloneAuthzMap(authz)
 			}
@@ -328,15 +327,14 @@ func (m *MockDatabase) BulkDeleteObjects(ctx context.Context, ids []string) erro
 
 func (m *MockDatabase) UpdateObjectAccessMethods(ctx context.Context, objectID string, accessMethods []objects.AccessMethod) error {
 	if m.Objects == nil {
-		m.Objects = make(map[string]*drs.DrsObject)
+		m.Objects = make(map[string]*objects.Record)
 	}
 	obj, ok := m.Objects[objectID]
 	if !ok {
-		obj = &drs.DrsObject{Id: objectID}
+		obj = &objects.Record{Id: objects.RecordID(objectID)}
 		m.Objects[objectID] = obj
 	}
-	converted := httpdrs.ToGenerated(objects.Record{AccessMethods: &accessMethods}).AccessMethods
-	obj.AccessMethods = converted
+	obj.AccessMethods = &accessMethods
 	return nil
 }
 
@@ -345,7 +343,7 @@ func (m *MockDatabase) RemoveObjectControlledAccess(ctx context.Context, objectI
 	if !ok {
 		return faults.ErrNotFound
 	}
-	wrapped := httpdrs.FromGenerated(*obj)
+	wrapped := *obj
 	if authz, ok := m.ObjectAuthz[objectID]; ok {
 		wrapped.Authorizations = cloneAuthzMap(authz)
 	}
@@ -394,7 +392,7 @@ func (m *MockDatabase) RemoveObjectControlledAccessBulk(ctx context.Context, obj
 		if !ok {
 			return count, faults.ErrNotFound
 		}
-		wrapped := httpdrs.FromGenerated(*obj)
+		wrapped := *obj
 		if objectAuthz, ok := m.ObjectAuthz[objectID]; ok {
 			wrapped.Authorizations = cloneAuthzMap(objectAuthz)
 		}

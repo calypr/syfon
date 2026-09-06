@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/calypr/syfon/apigen/server/drs"
 	syfoncommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/common"
@@ -21,7 +20,7 @@ import (
 const maxDeniedAccessResources = 25
 
 // RegisterBulk saves multiple internal objects as a single logical operation.
-func (m *ObjectManager) RegisterBulk(ctx context.Context, candidates []drs.DrsObjectCandidate) (int, error) {
+func (m *ObjectManager) RegisterBulk(ctx context.Context, candidates []objectdomain.Candidate) (int, error) {
 	now := time.Now().UTC()
 	toRegister := make([]objectdomain.Record, 0, len(candidates))
 	for _, c := range candidates {

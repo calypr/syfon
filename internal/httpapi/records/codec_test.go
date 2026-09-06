@@ -86,3 +86,47 @@ func TestCodecRejectsLegacyFileAliases(t *testing.T) {
 		}
 	}
 }
+
+func TestCodecChecksumsTakePrecedenceOverHashes(t *testing.T) {
+	record, err := Decode([]byte(`{"checksums":[{"type":"sha256","checksum":"explicit"}],"hashes":{"sha256":"legacy"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(record.Checksums, []objects.Checksum{{Type: "sha256", Checksum: "explicit"}}) {
+		t.Fatalf("checksums precedence lost: %+v", record.Checksums)
+	}
+}
+
+func TestCodecPreservesRawUnknownNumbersAndManualLegacyProperties(t *testing.T) {
+	record := objects.Record{Properties: map[string]json.RawMessage{
+		"large":     json.RawMessage(`9007199254740993`),
+		"file_name": json.RawMessage(`"legacy.txt"`),
+		"path":      json.RawMessage(`"legacy/path"`),
+		"auth":      json.RawMessage(`{"retired":true}`),
+	}}
+	encoded, err := Encode(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), `"large":9007199254740993`) {
+		t.Fatalf("raw number changed: %s", encoded)
+	}
+	if !strings.Contains(string(encoded), `"file_name":"legacy.txt"`) || !strings.Contains(string(encoded), `"path":"legacy/path"`) {
+		t.Fatalf("manual legacy properties should match MarshalJSON behavior: %s", encoded)
+	}
+	if strings.Contains(string(encoded), `"auth"`) {
+		t.Fatalf("retired auth property emitted: %s", encoded)
+	}
+}
+
+func TestCodecNullAndEmptyPayloads(t *testing.T) {
+	for _, payload := range []string{"null", "{}", `{"checksums":[],"hashes":{}}`} {
+		record, err := Decode([]byte(payload))
+		if err != nil {
+			t.Fatalf("Decode(%s): %v", payload, err)
+		}
+		if record.Id != "" {
+			t.Fatalf("Decode(%s) id = %q", payload, record.Id)
+		}
+	}
+}

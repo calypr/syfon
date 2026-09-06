@@ -7,10 +7,10 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/models"
+	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/testutils"
 	"github.com/calypr/syfon/internal/urlmanager"
 )
@@ -48,19 +48,16 @@ func TestUploadPartToSignedURLFaultInjection(t *testing.T) {
 
 func TestResolveObjectForOIDFallsBackToChecksum(t *testing.T) {
 	db := &testutils.MockDatabase{
-		Objects: map[string]*drs.DrsObject{},
+		Objects: map[string]*objects.Record{},
 	}
 	oid := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	did := "did:example:bbbb"
-	db.Objects[oid] = &drs.DrsObject{
-		Id: did,
-		AccessMethods: &[]drs.AccessMethod{
+	db.Objects[oid] = &objects.Record{
+		Id: objects.RecordID(did),
+		AccessMethods: &[]objects.AccessMethod{
 			{
-				Type: drs.AccessMethodTypeS3,
-				AccessUrl: &struct {
-					Headers *[]string `json:"headers,omitempty"`
-					Url     string    `json:"url"`
-				}{Url: "s3://test-bucket-1/cbds/end_to_end_test/" + oid},
+				Type:      "s3",
+				AccessUrl: &objects.AccessURL{Url: "s3://test-bucket-1/cbds/end_to_end_test/" + oid},
 			},
 		},
 	}
@@ -77,16 +74,13 @@ func TestResolveObjectForOIDFallsBackToChecksum(t *testing.T) {
 func TestPrepareDownloadActions_MapsLegacyReplicaURL(t *testing.T) {
 	oid := "download-scoped"
 	db := &testutils.MockDatabase{
-		Objects: map[string]*drs.DrsObject{
+		Objects: map[string]*objects.Record{
 			oid: {
-				Id:               oid,
+				Id:               objects.RecordID(oid),
 				ControlledAccess: &[]string{"/organization/HTAN_INT/project/BForePC"},
-				AccessMethods: &[]drs.AccessMethod{{
-					Type: drs.AccessMethodTypeS3,
-					AccessUrl: &struct {
-						Headers *[]string `json:"headers,omitempty"`
-						Url     string    `json:"url"`
-					}{Url: "s3://bforepc-prod/OHSU/slide.ome.tiff"},
+				AccessMethods: &[]objects.AccessMethod{{
+					Type:      "s3",
+					AccessUrl: &objects.AccessURL{Url: "s3://bforepc-prod/OHSU/slide.ome.tiff"},
 				}},
 			},
 		},
@@ -147,7 +141,7 @@ func TestPrepareUploadActionsRequiresGlobalDataFileCreate(t *testing.T) {
 			session.SetAuthorizations(nil, tc.privileges, true)
 			ctx := access.WithSession(context.Background(), session)
 
-			db := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}
+			db := &testutils.MockDatabase{Objects: map[string]*objects.Record{}}
 			om := core.NewObjectManager(db, &testutils.MockUrlManager{})
 			actions, size, objErr := prepareUploadActions(ctx, om, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", 123, "https://example.test")
 

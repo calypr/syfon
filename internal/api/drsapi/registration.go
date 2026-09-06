@@ -8,6 +8,7 @@ import (
 	"github.com/calypr/syfon/internal/api/apiutil"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/core"
+	httpdrs "github.com/calypr/syfon/internal/httpapi/drs"
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/gofiber/fiber/v3"
 )
@@ -75,5 +76,5 @@ type registerObjectCandidate struct {
 }
 
 func registerCandidateToRecord(c registerObjectCandidate, now time.Time) (objects.Record, error) {
-	return core.CandidateToRecord(c.DrsObjectCandidate, now)
+	return core.CandidateToRecord(httpdrs.FromGeneratedCandidate(c.DrsObjectCandidate), now)
 }

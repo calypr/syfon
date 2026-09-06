@@ -9,12 +9,13 @@ import (
 
 	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/core"
+	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/testutils"
 	"github.com/gofiber/fiber/v3"
 )
 
 func TestRegisterObjects(t *testing.T) {
-	db := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}}
+	db := &testutils.MockDatabase{Objects: map[string]*objects.Record{}}
 	um := &testutils.MockUrlManager{}
 	om := core.NewObjectManager(db, um)
 	app := fiber.New()

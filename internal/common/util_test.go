@@ -62,7 +62,7 @@ func TestCleanToBasename(t *testing.T) {
 		{"Windows path", `C:\foo\bar\baz.txt`, "baz.txt"},
 		{"Relative path", "foo/bar.txt", "bar.txt"},
 		{"No path", "baz.txt", "baz.txt"},
-		{"Slash end", "foo/bar/", "foo/bar/"},
+		{"Slash end", "foo/bar/", "bar"},
 	}
 
 	for _, tt := range tests {

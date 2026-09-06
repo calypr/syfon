@@ -34,12 +34,14 @@ func (m *ObjectManager) GetCanonicalContent(ctx context.Context, ident string, r
 		return nil, faults.ErrNotFound
 	}
 
-	_, checksumIdent := objectdomain.NormalizeSHA256Query(ident)
+	checksum, checksumIdent := objectdomain.NormalizeSHA256Query(ident)
 	if checksumIdent {
-		if obj, found, err := m.lookupObjectByChecksum(ctx, ident, requiredMethod); err != nil {
+		view, found, err := m.canonicalContentForChecksum(ctx, checksum, requiredMethod)
+		if err != nil {
 			return nil, err
-		} else if found {
-			return canonicalContentFromRecord(*obj), nil
+		}
+		if found {
+			return view, nil
 		}
 	}
 
@@ -59,11 +61,35 @@ func (m *ObjectManager) GetCanonicalContent(ctx context.Context, ident string, r
 		if obj, found, err := m.lookupObjectByChecksum(ctx, ident, requiredMethod); err != nil {
 			return nil, err
 		} else if found {
-			return canonicalContentFromRecord(*obj), nil
+			return m.canonicalContentAndCheckAccess(ctx, obj, requiredMethod)
 		}
 	}
 
 	return nil, faults.ErrNotFound
+}
+
+func (m *ObjectManager) canonicalContentForChecksum(ctx context.Context, checksum, method string) (*objectdomain.CanonicalContent, bool, error) {
+	physical, err := m.db.GetObjectsByChecksum(ctx, checksum)
+	if err != nil {
+		return nil, false, err
+	}
+	physical = objectsWithSHA256(physical, checksum)
+	if len(physical) == 0 {
+		return nil, false, nil
+	}
+	family := canonicalizeContentObjects(physical)
+	if len(family) == 0 {
+		return nil, false, nil
+	}
+	view := &objectdomain.CanonicalContent{
+		ContentID: objectdomain.ContentID(checksum),
+		Record:    family[0],
+		Records:   physical,
+	}
+	if err := m.requireObjectMethod(ctx, &view.Record, method); err != nil {
+		return nil, true, err
+	}
+	return view, true, nil
 }
 
 func (m *ObjectManager) lookupObjectByChecksum(ctx context.Context, ident string, requiredMethod string) (*objectdomain.Record, bool, error) {

@@ -1190,10 +1190,10 @@ func TestSqliteDB_PendingLFSMetaLifecycle(t *testing.T) {
 		t.Fatalf("failed to create db: %v", err)
 	}
 	now := time.Now().UTC()
-	candidate := drs.DrsObjectCandidate{
+	candidate := objects.Candidate{
 		Name: common.Ptr("candidate"),
-		Size: 123,
-		Checksums: []drs.Checksum{
+		Size: common.Ptr(int64(123)),
+		Checksums: &[]objects.Checksum{
 			{Type: "sha256", Checksum: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
 		},
 	}
@@ -1230,9 +1230,9 @@ func TestSqliteDB_PendingLFSMetaPrunesExpired(t *testing.T) {
 	}
 	now := time.Now().UTC()
 	oid := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-	candidate := drs.DrsObjectCandidate{
+	candidate := objects.Candidate{
 		Name: common.Ptr("expired"),
-		Checksums: []drs.Checksum{
+		Checksums: &[]objects.Checksum{
 			{Type: "sha256", Checksum: oid},
 		},
 	}
@@ -2047,9 +2047,9 @@ func TestSqliteDB_GetPendingLFSMeta(t *testing.T) {
 
 	now := time.Now().UTC()
 	oid := "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
-	candidate := drs.DrsObjectCandidate{
+	candidate := objects.Candidate{
 		Name: common.Ptr("candidate-get"),
-		Checksums: []drs.Checksum{
+		Checksums: &[]objects.Checksum{
 			{Type: "sha256", Checksum: oid},
 		},
 	}
