@@ -17,17 +17,17 @@ import (
 
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/common"
-	"github.com/calypr/syfon/internal/db"
 	"github.com/calypr/syfon/internal/signer"
+	storageports "github.com/calypr/syfon/internal/storage"
 )
 
 type GCSSigner struct {
-	db    db.CredentialStore
-	cache sync.Map // keyed by bucket name, stores *storage.Client
+	credentials storageports.CredentialLookup
+	cache       sync.Map // keyed by bucket name, stores *storage.Client
 }
 
-func NewGCSSigner(db db.CredentialStore) *GCSSigner {
-	return &GCSSigner{db: db}
+func NewGCSSigner(credentials storageports.CredentialLookup) *GCSSigner {
+	return &GCSSigner{credentials: credentials}
 }
 
 func (s *GCSSigner) InvalidateBucket(bucket string) {
@@ -39,7 +39,7 @@ func (s *GCSSigner) InvalidateBucket(bucket string) {
 }
 
 func (s *GCSSigner) SignURL(ctx context.Context, bucket, key string, opts signer.SignOptions) (string, error) {
-	cred, err := s.db.GetS3Credential(ctx, bucket)
+	cred, err := s.credentials.GetS3Credential(ctx, bucket)
 	if err != nil {
 		return "", err
 	}
@@ -61,7 +61,7 @@ func (s *GCSSigner) SignURL(ctx context.Context, bucket, key string, opts signer
 }
 
 func (s *GCSSigner) SignDownloadPart(ctx context.Context, bucket, key string, start, end int64, opts signer.SignOptions) (string, error) {
-	cred, err := s.db.GetS3Credential(ctx, bucket)
+	cred, err := s.credentials.GetS3Credential(ctx, bucket)
 	if err != nil {
 		return "", err
 	}
@@ -83,7 +83,7 @@ func (s *GCSSigner) InitMultipartUpload(ctx context.Context, bucket, key string)
 }
 
 func (s *GCSSigner) SignMultipartPart(ctx context.Context, bucket, key, uploadID string, partNumber int32) (string, error) {
-	cred, err := s.db.GetS3Credential(ctx, bucket)
+	cred, err := s.credentials.GetS3Credential(ctx, bucket)
 	if err != nil {
 		return "", err
 	}
@@ -233,7 +233,7 @@ func (s *GCSSigner) getClient(ctx context.Context, bucket string) (*storage.Clie
 		return val.(*storage.Client), nil
 	}
 
-	cred, err := s.db.GetS3Credential(ctx, bucket)
+	cred, err := s.credentials.GetS3Credential(ctx, bucket)
 	if err != nil {
 		return nil, err
 	}

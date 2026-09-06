@@ -9,15 +9,15 @@ import (
 
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/config"
-	"github.com/calypr/syfon/internal/db"
 	"github.com/calypr/syfon/internal/signer"
+	"github.com/calypr/syfon/internal/storage"
 	"github.com/calypr/syfon/internal/storage/address"
 )
 
 // Manager is the unified implementation of UrlManager.
 // It delegates to cloud-specific Signers resolved by provider metadata.
 type Manager struct {
-	database        db.CredentialStore
+	credentials     storage.CredentialLookup
 	signing         config.SigningConfig
 	defaultProvider string
 	signers         map[string]signer.Signer
@@ -27,9 +27,9 @@ type bucketInvalidatingSigner interface {
 	InvalidateBucket(bucket string)
 }
 
-func NewManager(database db.CredentialStore, signing config.SigningConfig) *Manager {
+func NewManager(credentials storage.CredentialLookup, signing config.SigningConfig) *Manager {
 	return &Manager{
-		database:        database,
+		credentials:     credentials,
 		signing:         signing,
 		defaultProvider: address.S3Provider,
 		signers:         make(map[string]signer.Signer),
@@ -176,7 +176,7 @@ func (m *Manager) credentialForBucket(ctx context.Context, bucket string) (*buck
 		return nil, fmt.Errorf("bucket is required")
 	}
 
-	cred, err := m.database.GetS3Credential(ctx, key)
+	cred, err := m.credentials.GetS3Credential(ctx, key)
 	if err != nil {
 		return nil, err
 	}
