@@ -9,7 +9,24 @@ import (
 )
 
 func newTestObjectManager(backend any, uM urlmanager.UrlManager) *ObjectManager {
-	return NewObjectManager(testDependencies(backend), uM)
+	deps := testDependencies(backend)
+	bucketDeps := buckets.Dependencies{
+		Credentials:     deps.Buckets.Credentials,
+		CredentialAdmin: deps.Buckets.CredentialAdmin,
+		Scopes:          deps.Buckets.Scopes,
+		Visibility:      deps.Buckets.Visibility,
+		Fallback:        NewBucketVisibilityFallback(deps.Objects.Scope, deps.Objects.Reader),
+	}
+	var invalidator interface{ InvalidateBucket(string) }
+	if candidate, ok := uM.(interface{ InvalidateBucket(string) }); ok {
+		invalidator = candidate
+	}
+	service, err := buckets.NewService(bucketDeps, invalidator)
+	if err != nil {
+		panic(err)
+	}
+	deps.BucketService = service
+	return NewObjectManager(deps, uM)
 }
 
 // testDependencies composes the capabilities needed by ObjectManager from the

@@ -53,6 +53,7 @@ type ObjectManager struct {
 	fileCounters     usage.FileCounterRecorder
 	providerEvents   usage.ProviderEventRecorder
 	uM               urlmanager.UrlManager
+	bucketService    *buckets.Service
 	bucketCatalog    *bucketCatalog
 	inspectS3Object  func(context.Context, buckets.Credential, string, string) (*StorageObjectMetadata, error)
 	listS3Prefix     func(context.Context, buckets.Credential, string, string, StoragePrefixListOptions) ([]StorageBucketObject, error)
@@ -100,10 +101,11 @@ type UsagePorts struct {
 // Dependencies is a concrete composition record, not a replacement database
 // interface. Each field is owned by the package that defines its port.
 type Dependencies struct {
-	Objects   ObjectPorts
-	Buckets   BucketPorts
-	Transfers TransferPorts
-	Usage     UsagePorts
+	Objects       ObjectPorts
+	Buckets       BucketPorts
+	BucketService *buckets.Service
+	Transfers     TransferPorts
+	Usage         UsagePorts
 }
 
 type VisibleBucket struct {
@@ -131,6 +133,7 @@ func NewObjectManager(deps Dependencies, uM urlmanager.UrlManager) *ObjectManage
 		fileCounters:     deps.Usage.Counters,
 		providerEvents:   deps.Usage.ProviderEvents,
 		uM:               uM,
+		bucketService:    deps.BucketService,
 		bucketCatalog:    newBucketCatalog(deps.Buckets.Credentials, deps.Buckets.CredentialAdmin, deps.Buckets.Scopes, uM, 30*time.Second),
 		inspectS3Object:  defaultS3ObjectInspector,
 		listS3Prefix:     defaultS3PrefixLister,
