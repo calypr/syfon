@@ -3,7 +3,6 @@ package server
 import (
 	"log/slog"
 
-	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/storage"
 	storageazure "github.com/calypr/syfon/internal/storage/azure"
 	storagefile "github.com/calypr/syfon/internal/storage/file"
@@ -36,15 +35,4 @@ func newStorageManager(credentials storage.CredentialLookup, fileRoot string, lo
 		registrations = append(registrations, fileRegistration)
 	}
 	return storage.NewManager(credentials, registrations...)
-}
-
-func storagePorts(manager *storage.Manager) core.StoragePorts {
-	if manager == nil {
-		return core.StoragePorts{}
-	}
-	return core.StoragePorts{
-		Probe:     manager,
-		Inventory: manager,
-		Delete:    manager,
-	}
 }

@@ -6,9 +6,9 @@ import (
 	"github.com/gofiber/fiber/v3"
 
 	"github.com/calypr/syfon/internal/api/apiutil"
-	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/faults"
 	apimiddleware "github.com/calypr/syfon/internal/httpapi/middleware"
+	"github.com/calypr/syfon/internal/maintenance/projectstorage"
 )
 
 type projectCleanupResponse struct {
@@ -18,7 +18,10 @@ type projectCleanupResponse struct {
 	DeletedBucketScopes int    `json:"deleted_bucket_scopes"`
 }
 
-func handleInternalDeleteProjectFiber(c fiber.Ctx, om *core.ObjectManager) error {
+func handleInternalDeleteProjectFiber(c fiber.Ctx, service *projectstorage.Service) error {
+	if service == nil {
+		return apiutil.HandleError(c, &projectstorage.Error{Kind: projectstorage.ErrorUnsupported, Message: "project storage service is not configured"})
+	}
 	organization := strings.TrimSpace(c.Params("organization"))
 	projectID := strings.TrimSpace(c.Params("project_id"))
 	if organization == "" || projectID == "" {
@@ -31,37 +34,15 @@ func handleInternalDeleteProjectFiber(c fiber.Ctx, om *core.ObjectManager) error
 		return apiutil.HandleError(c, err)
 	}
 
-	deletedObjects, err := om.DeleteBulkByScope(c.Context(), organization, projectID)
+	result, err := service.DeleteProjectData(c.Context(), organization, projectID)
 	if err != nil {
 		return apiutil.HandleError(c, err)
-	}
-
-	scopes, err := om.ListBucketScopes(c.Context())
-	if err != nil {
-		return apiutil.HandleError(c, err)
-	}
-	deletedScopes := 0
-	for _, scope := range scopes {
-		if strings.TrimSpace(scope.Organization) != organization || strings.TrimSpace(scope.ProjectID) != projectID {
-			continue
-		}
-		credentialID := strings.TrimSpace(scope.CredentialID)
-		if credentialID == "" {
-			credentialID = strings.TrimSpace(scope.Bucket)
-		}
-		if credentialID == "" {
-			continue
-		}
-		if err := om.DeleteBucketScope(c.Context(), organization, projectID, credentialID, scope.PathPrefix); err != nil {
-			return apiutil.HandleError(c, err)
-		}
-		deletedScopes++
 	}
 
 	return c.JSON(projectCleanupResponse{
-		Organization:        organization,
-		ProjectID:           projectID,
-		DeletedObjects:      deletedObjects,
-		DeletedBucketScopes: deletedScopes,
+		Organization:        result.Organization,
+		ProjectID:           result.ProjectID,
+		DeletedObjects:      result.DeletedObjects,
+		DeletedBucketScopes: result.DeletedBucketScopes,
 	})
 }

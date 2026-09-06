@@ -368,7 +368,7 @@ func TestHandleInternalList_PaginatesIDs(t *testing.T) {
 	}
 	app := fiber.New()
 	om := newInternalDRSObjectManager(mockDB, &internalDRSStorageFake{})
-	RegisterInternalRoutes(app, om.ObjectService, om.ObjectManager, om.TransferService, om.FileCounters, om.bucketService)
+	RegisterInternalRoutes(app, om.ObjectService, om.ObjectManager, om.TransferService, om.FileCounters, om.bucketService, om.projectService, om.scopeRepairService)
 
 	req := httptest.NewRequest(http.MethodGet, "/index?limit=1&start=obj-1", nil)
 	resp, err := app.Test(req)
@@ -429,7 +429,7 @@ func TestHandleInternalList_FiltersByAccessURL(t *testing.T) {
 	}
 	app := fiber.New()
 	om := newInternalDRSObjectManager(mockDB, &internalDRSStorageFake{})
-	RegisterInternalRoutes(app, om.ObjectService, om.ObjectManager, om.TransferService, om.FileCounters, om.bucketService)
+	RegisterInternalRoutes(app, om.ObjectService, om.ObjectManager, om.TransferService, om.FileCounters, om.bucketService, om.projectService, om.scopeRepairService)
 
 	req := httptest.NewRequest(http.MethodGet, "/index?url="+url.QueryEscape(offsetsURL), nil)
 	resp, err := app.Test(req)
@@ -463,7 +463,7 @@ func TestHandleInternalList_PagePaginatesIDs(t *testing.T) {
 	}
 	app := fiber.New()
 	om := newInternalDRSObjectManager(mockDB, &internalDRSStorageFake{})
-	RegisterInternalRoutes(app, om.ObjectService, om.ObjectManager, om.TransferService, om.FileCounters, om.bucketService)
+	RegisterInternalRoutes(app, om.ObjectService, om.ObjectManager, om.TransferService, om.FileCounters, om.bucketService, om.projectService, om.scopeRepairService)
 
 	req := httptest.NewRequest(http.MethodGet, "/index?limit=1&page=1", nil)
 	resp, err := app.Test(req)
@@ -503,7 +503,7 @@ func TestHandleInternalList_LimitIsCappedAtTenThousand(t *testing.T) {
 	mockDB := &testutils.MockDatabase{Objects: records}
 	app := fiber.New()
 	om := newInternalDRSObjectManager(mockDB, &internalDRSStorageFake{})
-	RegisterInternalRoutes(app, om.ObjectService, om.ObjectManager, om.TransferService, om.FileCounters, om.bucketService)
+	RegisterInternalRoutes(app, om.ObjectService, om.ObjectManager, om.TransferService, om.FileCounters, om.bucketService, om.projectService, om.scopeRepairService)
 
 	req := httptest.NewRequest(http.MethodGet, "/index?limit=999999", nil)
 	resp, err := app.Test(req)
@@ -545,7 +545,7 @@ func TestHandleInternalList_IgnoresLegacyPathQuery(t *testing.T) {
 	}
 	app := fiber.New()
 	om := newInternalDRSObjectManager(mockDB, &internalDRSStorageFake{})
-	RegisterInternalRoutes(app, om.ObjectService, om.ObjectManager, om.TransferService, om.FileCounters, om.bucketService)
+	RegisterInternalRoutes(app, om.ObjectService, om.ObjectManager, om.TransferService, om.FileCounters, om.bucketService, om.projectService, om.scopeRepairService)
 
 	req := httptest.NewRequest(http.MethodGet, "/index?organization=org-a&project=proj-a&path=nested&limit=1", nil)
 	resp, err := app.Test(req)
@@ -749,7 +749,7 @@ func TestHandleInternalList_HashPagination(t *testing.T) {
 	}
 	app := fiber.New()
 	om := newInternalDRSObjectManager(mockDB, &internalDRSStorageFake{})
-	RegisterInternalRoutes(app, om.ObjectService, om.ObjectManager, om.TransferService, om.FileCounters, om.bucketService)
+	RegisterInternalRoutes(app, om.ObjectService, om.ObjectManager, om.TransferService, om.FileCounters, om.bucketService, om.projectService, om.scopeRepairService)
 
 	req := httptest.NewRequest(http.MethodGet, "/index?hash=sha256:samehash&limit=1&page=1", nil)
 	resp, err := app.Test(req)
@@ -1307,7 +1307,7 @@ func TestRegisterInternalIndexRoutes_LegacyAliases(t *testing.T) {
 
 	app := fiber.New()
 	om := newInternalDRSObjectManager(mockDB, &internalDRSStorageFake{})
-	RegisterInternalRoutes(app, om.ObjectService, om.ObjectManager, om.TransferService, om.FileCounters, om.bucketService)
+	RegisterInternalRoutes(app, om.ObjectService, om.ObjectManager, om.TransferService, om.FileCounters, om.bucketService, om.projectService, om.scopeRepairService)
 
 	t.Run("collection alias /index", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/index?organization=org", nil)

@@ -1,37 +1,33 @@
-package repair
+package scoperepair
 
 import (
 	"context"
 	"errors"
 
-	"github.com/calypr/syfon/apigen/client/bucketapi"
-	"github.com/calypr/syfon/apigen/client/internalapi"
+	"github.com/calypr/syfon/internal/buckets"
+	"github.com/calypr/syfon/internal/objects"
 )
 
-type IndexAPI interface {
-	List(ctx context.Context, opts ListRecordsOptions) (internalapi.ListRecordsResponse, error)
-	Update(ctx context.Context, did string, rec internalapi.InternalRecord) (internalapi.InternalRecordResponse, error)
-}
-
-type ListRecordsOptions struct {
+type PreparedRecordQuery struct {
 	Limit        int
 	Start        string
 	Organization string
 	Project      string
 }
 
-type BucketsAPI interface {
-	List(ctx context.Context) (bucketapi.BucketsResponse, error)
-	ListScopes(ctx context.Context, bucket string) ([]bucketapi.BucketScopeResponse, error)
+type PreparedRecordReader interface {
+	ListPrepared(context.Context, PreparedRecordQuery) ([]objects.Record, error)
 }
 
-// StorageInspector probes one storage object for the repair workflow.
-//
-// The repair package owns this narrow contract so it can be implemented
-// directly by an in-process server adapter without carrying the internal API
-// transport contract into the repair service.
-type StorageInspector interface {
-	Inspect(ctx context.Context, req StorageInspectRequest) (StorageInspectResult, error)
+type ReferenceWriter interface {
+	Update(context.Context, objects.RecordID, objects.Record) error
+}
+
+// ScopeReader returns only S3 credentials and the scopes attached to each
+// credential. The adapter performs any credential-id/bucket alias resolution.
+type ScopeReader interface {
+	ListCredentials(context.Context) ([]buckets.Credential, error)
+	ListScopes(context.Context, string) ([]buckets.Scope, error)
 }
 
 type StorageInspectRequest struct {
@@ -44,9 +40,15 @@ type StorageInspectResult struct {
 	ObjectURL string
 }
 
-// ErrStorageObjectNotFound marks the one storage inspection failure that
-// repair reports separately from other probe failures.
+type StorageProbe interface {
+	Inspect(context.Context, StorageInspectRequest) (StorageInspectResult, error)
+}
+
 var ErrStorageObjectNotFound = errors.New("storage object not found")
+
+type DuplicateCollapser interface {
+	Collapse(context.Context, string, string) (int, error)
+}
 
 type Options struct {
 	Organization string
@@ -117,40 +119,4 @@ type ApplyResult struct {
 
 func (r Report) FindingCount() int {
 	return len(r.Objects)
-}
-
-type Service struct {
-	index     IndexAPI
-	buckets   BucketsAPI
-	inspector StorageInspector
-}
-
-func NewService(index IndexAPI, buckets BucketsAPI, inspector StorageInspector) *Service {
-	return &Service{index: index, buckets: buckets, inspector: inspector}
-}
-
-type scopeTarget struct {
-	Resource     string
-	Organization string
-	Project      string
-	Bucket       string
-	Prefix       string
-}
-
-type auditState struct {
-	report  Report
-	objects []*auditedObject
-}
-
-type auditedObject struct {
-	record         internalapi.InternalRecord
-	sha256         string
-	currentURLs    []string
-	scope          scopeTarget
-	scopeKnown     bool
-	scopeAmbiguous bool
-	inferredScope  string
-	canonicalURL   string
-	findings       []Finding
-	updated        *internalapi.InternalRecord
 }

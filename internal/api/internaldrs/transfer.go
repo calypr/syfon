@@ -22,6 +22,7 @@ import (
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/faults"
 	apimiddleware "github.com/calypr/syfon/internal/httpapi/middleware"
+	"github.com/calypr/syfon/internal/maintenance/projectstorage"
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/storage"
 	"github.com/calypr/syfon/internal/storage/address"
@@ -31,28 +32,28 @@ import (
 
 var multipartUploadSessions sync.Map // uploadID -> multipartSession
 
-func registerInternalTransferRoutes(router fiber.Router, om *core.ObjectManager, objectService *objects.Service, transferService *transfers.Service, fileCounters usage.FileCounterRecorder, bucketService *buckets.Service) {
+func registerInternalTransferRoutes(router fiber.Router, om *core.ObjectManager, objectService *objects.Service, transferService *transfers.Service, fileCounters usage.FileCounterRecorder, bucketService *buckets.Service, projectService *projectstorage.Service) {
 	router.Get(routeutil.FiberPath(common.RouteInternalDownload), func(c fiber.Ctx) error {
 		return handleInternalDownloadFiber(c, objectService, transferService, fileCounters)
 	})
 	router.Get(routeutil.FiberPath(common.RouteInternalDownloadPart), func(c fiber.Ctx) error { return handleInternalDownloadPartFiber(c, objectService, transferService) })
 	router.Post(common.RouteInternalUpload, handleInternalUploadBlankFiber(transferService))
 	router.Get(routeutil.FiberPath(common.RouteInternalUploadURL), handleInternalUploadURLFiber(objectService, transferService))
-	router.Post(common.RouteInternalInspectObject, handleInternalInspectObjectFiber(om))
-	router.Post(common.RouteInternalInspectObjectBulk, handleInternalInspectObjectBulkFiber(om))
-	router.Post(common.RouteInternalInspectObjectBulkList, handleInternalInspectObjectBulkListFiber(om))
-	router.Post(common.RouteInternalInspectProjectBucket, handleInternalInspectProjectBucketFiber(om))
-	router.Post(common.RouteInternalInspectProjectBucketInventory, handleInternalInspectProjectBucketInventoryFiber(om))
-	router.Post(common.RouteInternalInspectProjectRecords, handleInternalInspectProjectRecordsFiber(om))
-	router.Get(common.RouteInternalInspectProjectScopes, handleInternalInspectProjectScopesFiber(om))
-	router.Post(common.RouteInternalInspectProjectScopes, handleInternalInspectProjectScopesFiber(om))
-	router.Post(common.RouteInternalDeleteProjectBucketObjects, handleInternalDeleteProjectBucketObjectsFiber(om))
+	router.Post(common.RouteInternalInspectObject, handleInternalInspectObjectFiber(projectService))
+	router.Post(common.RouteInternalInspectObjectBulk, handleInternalInspectObjectBulkFiber(projectService))
+	router.Post(common.RouteInternalInspectObjectBulkList, handleInternalInspectObjectBulkListFiber(projectService))
+	router.Post(common.RouteInternalInspectProjectBucket, handleInternalInspectProjectBucketFiber(projectService))
+	router.Post(common.RouteInternalInspectProjectBucketInventory, handleInternalInspectProjectBucketInventoryFiber(projectService))
+	router.Post(common.RouteInternalInspectProjectRecords, handleInternalInspectProjectRecordsFiber(projectService))
+	router.Get(common.RouteInternalInspectProjectScopes, handleInternalInspectProjectScopesFiber(bucketService))
+	router.Post(common.RouteInternalInspectProjectScopes, handleInternalInspectProjectScopesFiber(bucketService))
+	router.Post(common.RouteInternalDeleteProjectBucketObjects, handleInternalDeleteProjectBucketObjectsFiber(projectService))
 	router.Post(common.RouteInternalUploadBulk, handleInternalUploadBulkFiber(objectService, transferService))
 	router.Post(common.RouteInternalMultipartInit, handleInternalMultipartInitFiber(objectService, transferService))
 	router.Post(common.RouteInternalMultipartUpload, handleInternalMultipartUploadFiber(transferService))
 	router.Post(common.RouteInternalMultipartComplete, handleInternalMultipartCompleteFiber(transferService))
 
-	registerInternalBucketRoutes(router, om, bucketService)
+	registerInternalBucketRoutes(router, om, bucketService, projectService)
 }
 
 func firstSupportedAccessURL(obj *objects.Record) string {

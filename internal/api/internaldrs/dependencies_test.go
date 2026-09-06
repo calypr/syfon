@@ -3,6 +3,8 @@ package internaldrs
 import (
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/core"
+	"github.com/calypr/syfon/internal/maintenance/projectstorage"
+	"github.com/calypr/syfon/internal/maintenance/scoperepair"
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/transfers"
 	"github.com/calypr/syfon/internal/usage"
@@ -10,10 +12,18 @@ import (
 
 type internalDRSTestFixture struct {
 	*core.ObjectManager
-	ObjectService   *objects.Service
-	TransferService *transfers.Service
-	FileCounters    usage.FileCounterRecorder
-	bucketService   *buckets.Service
+	ObjectService      *objects.Service
+	TransferService    *transfers.Service
+	FileCounters       usage.FileCounterRecorder
+	bucketService      *buckets.Service
+	projectService     *projectstorage.Service
+	scopeRepairService *scoperepair.Service
+}
+
+type internalDRSStorageCapabilities struct {
+	Probe     projectstorage.ProbePort
+	Inventory projectstorage.InventoryPort
+	Delete    projectstorage.DeletePort
 }
 
 func newInternalDRSObjectManager(store any, storageDependency any) internalDRSTestFixture {
@@ -61,23 +71,36 @@ func newInternalDRSObjectManager(store any, storageDependency any) internalDRSTe
 		ObjectManager: core.NewObjectManager(core.Dependencies{
 			Objects:       objectPorts,
 			BucketService: bucketService,
-			Storage:       storagePorts,
 		}),
 		ObjectService:   objectService,
 		TransferService: transferService,
 		FileCounters:    store.(usage.FileCounterRecorder),
 		bucketService:   bucketService,
+		projectService: projectstorage.NewService(
+			projectstorage.Dependencies{
+				Scopes:         bucketService,
+				Credentials:    bucketService,
+				Visibility:     bucketService,
+				Inventory:      storagePorts.Inventory,
+				Probe:          storagePorts.Probe,
+				Delete:         storagePorts.Delete,
+				Physical:       objectService,
+				CleanupObjects: objectService,
+				CleanupScopes:  bucketService,
+			},
+		),
+		scopeRepairService: NewScopeRepairService(objectService, bucketService, storagePorts.Probe),
 	}
 }
 
-func internalDRSStoragePorts(dependency any) core.StoragePorts {
-	if ports, ok := dependency.(core.StoragePorts); ok {
+func internalDRSStoragePorts(dependency any) internalDRSStorageCapabilities {
+	if ports, ok := dependency.(internalDRSStorageCapabilities); ok {
 		return ports
 	}
-	ports := core.StoragePorts{}
-	ports.Probe, _ = dependency.(core.StorageProbe)
-	ports.Inventory, _ = dependency.(core.StorageInventory)
-	ports.Delete, _ = dependency.(core.StorageDelete)
+	ports := internalDRSStorageCapabilities{}
+	ports.Probe, _ = dependency.(projectstorage.ProbePort)
+	ports.Inventory, _ = dependency.(projectstorage.InventoryPort)
+	ports.Delete, _ = dependency.(projectstorage.DeletePort)
 	return ports
 }
 
@@ -106,9 +129,9 @@ func optionalInternalDRSPort[T any](store any) T {
 
 var _ transfers.AccessPort = (*internalDRSStorageFake)(nil)
 var _ transfers.MultipartPort = (*internalDRSStorageFake)(nil)
-var _ core.StorageProbe = (*internalDRSStorageFake)(nil)
-var _ core.StorageInventory = (*internalDRSStorageFake)(nil)
-var _ core.StorageDelete = (*internalDRSStorageFake)(nil)
-var _ core.StorageProbe = (*internalDRSProbeFake)(nil)
-var _ core.StorageInventory = (*internalDRSInventoryFake)(nil)
-var _ core.StorageDelete = (*internalDRSDeleteFake)(nil)
+var _ projectstorage.ProbePort = (*internalDRSStorageFake)(nil)
+var _ projectstorage.InventoryPort = (*internalDRSStorageFake)(nil)
+var _ projectstorage.DeletePort = (*internalDRSStorageFake)(nil)
+var _ projectstorage.ProbePort = (*internalDRSProbeFake)(nil)
+var _ projectstorage.InventoryPort = (*internalDRSInventoryFake)(nil)
+var _ projectstorage.DeletePort = (*internalDRSDeleteFake)(nil)

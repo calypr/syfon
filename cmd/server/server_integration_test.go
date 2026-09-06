@@ -20,6 +20,7 @@ import (
 	"github.com/calypr/syfon/internal/config"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/credentialcipher"
+	"github.com/calypr/syfon/internal/maintenance/projectstorage"
 	"github.com/calypr/syfon/internal/testutils"
 	"github.com/calypr/syfon/internal/transfers"
 	"github.com/calypr/syfon/internal/usage"
@@ -130,7 +131,6 @@ s3_credentials:
 	}
 	invalidator.manager = storageManager
 	backend.dependencies.BucketService = bucketService
-	backend.dependencies.Storage = storagePorts(storageManager)
 	app := fiber.New()
 	objectService := newServerObjectService(backend.dependencies.Objects)
 	usageService := usage.NewService(usage.Dependencies{Ingest: backend.usageIngest, Reports: backend.usageReports, Objects: objectService})
@@ -139,7 +139,9 @@ s3_credentials:
 		Pending: backend.pending, Events: usageService.Ingest(),
 	})
 	om := core.NewObjectManager(backend.dependencies)
-	internaldrs.RegisterInternalRoutes(app, objectService, om, transferService, usageService.Ingest(), bucketService)
+	projectStorageService := projectstorage.NewService(projectstorage.Dependencies{Scopes: bucketService, Credentials: bucketService, Visibility: bucketService, Inventory: storageManager, Probe: storageManager, Delete: storageManager, Physical: objectService, CleanupObjects: objectService, CleanupScopes: bucketService})
+	scopeRepairService := internaldrs.NewScopeRepairService(objectService, bucketService, storageManager)
+	internaldrs.RegisterInternalRoutes(app, objectService, om, transferService, usageService.Ingest(), bucketService, projectStorageService, scopeRepairService)
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

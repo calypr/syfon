@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/calypr/syfon/internal/buckets"
-	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/storage"
 	"github.com/calypr/syfon/internal/testutils"
@@ -34,7 +33,7 @@ func TestHandleInternalInspectObjectScopedSuccess(t *testing.T) {
 	storageFake := &internalDRSProbeFake{probeFn: func(_ context.Context, targets []storage.ProbeTarget) []storage.ProbeResult {
 		return []storage.ProbeResult{{Target: targets[0].Target, Metadata: storage.ObjectMetadata{Bucket: targets[0].Target.Bucket, Key: targets[0].Target.Key, Path: "file.bin", SizeBytes: 17, ETag: "etag-1", LastModified: time.Date(2026, 6, 11, 1, 2, 3, 0, time.UTC)}}}
 	}}
-	om := newInternalDRSObjectManager(db, core.StoragePorts{Probe: storageFake})
+	om := newInternalDRSObjectManager(db, internalDRSStorageCapabilities{Probe: storageFake})
 	req := withTestAuthzContext(httptest.NewRequest(http.MethodPost, "/data/inspect", bytes.NewBuffer(body)), "gen3", map[string]map[string]bool{"/organization/syfon/project/e2e": {"read": true}})
 	rr := doInternalDRSTestRequest(req, om)
 	if rr.Code != http.StatusOK {
@@ -69,7 +68,7 @@ func TestHandleInternalInspectObjectRawSuccess(t *testing.T) {
 	storageFake := &internalDRSProbeFake{probeFn: func(_ context.Context, targets []storage.ProbeTarget) []storage.ProbeResult {
 		return []storage.ProbeResult{{Target: targets[0].Target, Metadata: storage.ObjectMetadata{Bucket: targets[0].Target.Bucket, Key: targets[0].Target.Key, Path: "file.bin", SizeBytes: 99, ETag: "etag-raw"}}}
 	}}
-	om := newInternalDRSObjectManager(db, core.StoragePorts{Probe: storageFake})
+	om := newInternalDRSObjectManager(db, internalDRSStorageCapabilities{Probe: storageFake})
 	req := withTestAuthzContext(httptest.NewRequest(http.MethodPost, "/data/inspect", bytes.NewBuffer(body)), "gen3", map[string]map[string]bool{"/organization/syfon": {"read": true}})
 	rr := doInternalDRSTestRequest(req, om)
 	if rr.Code != http.StatusOK {
@@ -101,7 +100,7 @@ func TestHandleInternalInspectObjectPermissionDenied(t *testing.T) {
 	storageFake := &internalDRSProbeFake{probeFn: func(_ context.Context, targets []storage.ProbeTarget) []storage.ProbeResult {
 		return []storage.ProbeResult{{Target: targets[0].Target, Err: &storage.OperationError{Kind: storage.ErrorForbidden, Provider: "s3", Capability: "probe"}}}
 	}}
-	om := newInternalDRSObjectManager(db, core.StoragePorts{Probe: storageFake})
+	om := newInternalDRSObjectManager(db, internalDRSStorageCapabilities{Probe: storageFake})
 	req := withTestAuthzContext(httptest.NewRequest(http.MethodPost, "/data/inspect", bytes.NewBuffer(body)), "gen3", map[string]map[string]bool{"/organization/syfon": {"read": true}})
 	rr := doInternalDRSTestRequest(req, om)
 	if rr.Code != http.StatusForbidden {
@@ -136,7 +135,7 @@ func TestHandleInternalInspectProjectRecords(t *testing.T) {
 				Id:   "obj-1",
 				Name: &name,
 				Checksums: []objects.Checksum{
-					{Type: "sha256", Checksum: "abc123"},
+					{Type: "sha256", Checksum: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
 				},
 				CreatedTime: created,
 				UpdatedTime: &updated,
@@ -168,7 +167,7 @@ func TestHandleInternalInspectProjectRecords(t *testing.T) {
 		t.Fatalf("expected 1 item, got %d", len(resp.Items))
 	}
 	item := resp.Items[0]
-	if item.ObjectID != "obj-1" || item.Checksum != "abc123" {
+	if item.ObjectID != "obj-1" || item.Checksum != "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
 		t.Fatalf("unexpected item identity: %+v", item)
 	}
 	if item.Name != "example.bin" {
@@ -341,7 +340,7 @@ func TestHandleInternalInspectProjectBucketModesUsePrefixList(t *testing.T) {
 			{Provider: "s3", Bucket: bucket, Key: prefix + "/b.bin", Path: "b.bin", SizeBytes: 15},
 		}, Complete: true}, nil
 	}
-	om := newInternalDRSObjectManager(db, core.StoragePorts{Inventory: storageFake})
+	om := newInternalDRSObjectManager(db, internalDRSStorageCapabilities{Inventory: storageFake})
 
 	existsBody, _ := json.Marshal(internalInspectProjectBucketRequest{Organization: "syfon", Project: "e2e", Mode: "exists"})
 	req := withTestAuthzContext(httptest.NewRequest(http.MethodPost, "/data/inspect/project-bucket", bytes.NewBuffer(existsBody)), "gen3", map[string]map[string]bool{
@@ -436,7 +435,7 @@ func TestHandleInternalInspectProjectBucketInventoryListsProjectScope(t *testing
 			{Provider: "s3", Bucket: bucket, Key: prefix + "/nested/b.bin", Path: "CONFIG/nested/b.bin", SizeBytes: 15},
 		}, Complete: true}, nil
 	}
-	om := newInternalDRSObjectManager(db, core.StoragePorts{Inventory: storageFake})
+	om := newInternalDRSObjectManager(db, internalDRSStorageCapabilities{Inventory: storageFake})
 
 	body, _ := json.Marshal(internalInspectProjectBucketRequest{Organization: "syfon", Project: "e2e", PathPrefix: "CONFIG"})
 	req := withTestAuthzContext(httptest.NewRequest(http.MethodPost, "/data/inspect/project-bucket/inventory", bytes.NewBuffer(body)), "gen3", map[string]map[string]bool{
@@ -493,7 +492,7 @@ func TestHandleInternalInspectProjectBucketInventoryReturnsPartialListing(t *tes
 				Cause:      fmt.Errorf("terminal replay returned different page content"),
 			}
 	}}
-	om := newInternalDRSObjectManager(db, core.StoragePorts{Inventory: storageFake})
+	om := newInternalDRSObjectManager(db, internalDRSStorageCapabilities{Inventory: storageFake})
 
 	body, _ := json.Marshal(internalInspectProjectBucketRequest{Organization: "syfon", Project: "e2e"})
 	req := withTestAuthzContext(httptest.NewRequest(http.MethodPost, "/data/inspect/project-bucket/inventory", bytes.NewBuffer(body)), "gen3", map[string]map[string]bool{
@@ -537,7 +536,7 @@ func TestHandleInternalDeleteProjectBucketObjectsPreservesPolicyOrderAndStatuses
 		}
 		return nil
 	}
-	om := newInternalDRSObjectManager(db, core.StoragePorts{Delete: storageFake})
+	om := newInternalDRSObjectManager(db, internalDRSStorageCapabilities{Delete: storageFake})
 	body, _ := json.Marshal(internalDeleteProjectBucketObjectsRequest{
 		Organization: "syfon",
 		Project:      "e2e",
@@ -607,7 +606,7 @@ func TestHandleInternalInspectObjectBulkListValidatesExactKeyWithoutHead(t *test
 			return storage.InventoryResult{Complete: true}, nil
 		}
 	}
-	om := newInternalDRSObjectManager(db, core.StoragePorts{Inventory: storageFake})
+	om := newInternalDRSObjectManager(db, internalDRSStorageCapabilities{Inventory: storageFake})
 	expectedSize := int64(17)
 	body, _ := json.Marshal(internalInspectObjectsBulkRequest{Items: []internalInspectObjectRequest{
 		{ID: "present", ObjectURL: "s3://bucket-a/project-root/file.bin", ExpectedSizeBytes: &expectedSize, ExpectedName: "file.bin"},
@@ -661,7 +660,7 @@ func TestHandleInternalInspectObjectBulkListDeduplicatesExactTargets(t *testing.
 		}
 		return storage.InventoryResult{Items: []storage.ObjectMetadata{{Provider: "s3", Bucket: bucket, Key: "project-root/file.bin", Path: "file.bin", SizeBytes: 17}}, Complete: true}, nil
 	}
-	om := newInternalDRSObjectManager(db, core.StoragePorts{Inventory: storageFake})
+	om := newInternalDRSObjectManager(db, internalDRSStorageCapabilities{Inventory: storageFake})
 	expectedSize := int64(17)
 	body, _ := json.Marshal(internalInspectObjectsBulkRequest{Items: []internalInspectObjectRequest{
 		{ID: "one", ObjectURL: "s3://bucket-a/project-root/file.bin", ExpectedSizeBytes: &expectedSize, ExpectedName: "file.bin"},
@@ -701,7 +700,7 @@ func TestHandleInternalInspectObjectBulkListSharesRemoteEvidenceAcrossValidation
 		listCalls++
 		return storage.InventoryResult{Items: []storage.ObjectMetadata{{Provider: "s3", Bucket: request.Target.Bucket, Key: "project-root/file.bin", Path: "file.bin", SizeBytes: 17}}, Complete: true}, nil
 	}
-	om := newInternalDRSObjectManager(db, core.StoragePorts{Inventory: storageFake})
+	om := newInternalDRSObjectManager(db, internalDRSStorageCapabilities{Inventory: storageFake})
 	size17 := int64(17)
 	size99 := int64(99)
 	body, _ := json.Marshal(internalInspectObjectsBulkRequest{Items: []internalInspectObjectRequest{
@@ -752,7 +751,7 @@ func TestHandleInternalInspectObjectBulkListCoalescesDensePrefixes(t *testing.T)
 		}
 		return storage.InventoryResult{Items: out, Complete: true}, nil
 	}
-	om := newInternalDRSObjectManager(db, core.StoragePorts{Inventory: storageFake})
+	om := newInternalDRSObjectManager(db, internalDRSStorageCapabilities{Inventory: storageFake})
 	items := make([]internalInspectObjectRequest, 0, 25)
 	for i := 0; i < 25; i++ {
 		size := int64(i + 1)
