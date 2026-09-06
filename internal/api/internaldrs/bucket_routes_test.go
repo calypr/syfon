@@ -8,13 +8,14 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/gofiber/fiber/v3"
+
 	"github.com/calypr/syfon/apigen/server/bucketapi"
 	"github.com/calypr/syfon/apigen/server/drs"
+	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/core"
-	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/testutils"
-	"github.com/gofiber/fiber/v3"
 )
 
 func TestHandleInternalDeleteProject_RemovesGrantsAndBucketScopes(t *testing.T) {
@@ -27,7 +28,7 @@ func TestHandleInternalDeleteProject_RemovesGrantsAndBucketScopes(t *testing.T) 
 			"delete-me": {"org-a": {"proj-a"}},
 			"keep-me":   {"org-a": {"proj-b"}},
 		},
-		BucketScopes: map[string]models.BucketScope{
+		BucketScopes: map[string]buckets.Scope{
 			"org-a|proj-a": {Organization: "org-a", ProjectID: "proj-a", CredentialID: "bucket-a", Bucket: "bucket-a"},
 			"org-a|proj-b": {Organization: "org-a", ProjectID: "proj-b", CredentialID: "bucket-b", Bucket: "bucket-b"},
 		},
@@ -77,7 +78,7 @@ func TestHandleInternalDeleteProject_RequiresGen3Auth(t *testing.T) {
 
 func TestHandleInternalBuckets_Gen3Auth(t *testing.T) {
 	mockDB := &testutils.MockDatabase{
-		Credentials: map[string]models.S3Credential{"b1": {Bucket: "b1", Region: "us-east-1"}, "b2": {Bucket: "b2", Region: "us-east-1"}},
+		Credentials: map[string]buckets.Credential{"b1": {Bucket: "b1", Region: "us-east-1"}, "b2": {Bucket: "b2", Region: "us-east-1"}},
 		Objects: map[string]*drs.DrsObject{
 			"obj-1": {Id: "obj-1", Name: common.Ptr("obj-1"), AccessMethods: &[]drs.AccessMethod{
 				{Type: drs.AccessMethodTypeS3, AccessUrl: &struct {
@@ -102,7 +103,7 @@ func TestHandleInternalBuckets_Gen3Auth(t *testing.T) {
 
 func TestHandleInternalBuckets_IncludesBucketsWithoutScopes(t *testing.T) {
 	mockDB := &testutils.MockDatabase{
-		Credentials: map[string]models.S3Credential{
+		Credentials: map[string]buckets.Credential{
 			"b1": {CredentialID: "b1", Bucket: "b1", Region: "us-east-1", Provider: "s3"},
 			"b2": {CredentialID: "b2", Bucket: "b2", Region: "us-east-1", Provider: "s3"},
 		},
@@ -131,11 +132,11 @@ func TestHandleInternalBuckets_IncludesBucketsWithoutScopes(t *testing.T) {
 
 func TestHandleInternalBuckets_PrefersExplicitScopeOverObjectDerivedDuplicate(t *testing.T) {
 	mockDB := &testutils.MockDatabase{
-		Credentials: map[string]models.S3Credential{
+		Credentials: map[string]buckets.Credential{
 			"EllrottLab": {CredentialID: "EllrottLab", Bucket: "EllrottLab", Region: "us-east-1", Provider: "s3"},
 			"cbds":       {CredentialID: "cbds", Bucket: "cbds", Region: "us-east-1", Provider: "s3"},
 		},
-		BucketScopes: map[string]models.BucketScope{
+		BucketScopes: map[string]buckets.Scope{
 			"Ellrott_Lab|hla2vec": {
 				Organization: "Ellrott_Lab",
 				ProjectID:    "hla2vec",
@@ -181,7 +182,7 @@ func TestHandleInternalBuckets_PrefersExplicitScopeOverObjectDerivedDuplicate(t 
 }
 
 func TestHandleInternalPutDeleteBucket_Gen3Auth(t *testing.T) {
-	mockDB := &testutils.MockDatabase{Credentials: map[string]models.S3Credential{}}
+	mockDB := &testutils.MockDatabase{Credentials: map[string]buckets.Credential{}}
 	region, accessKey, secretKey, endpoint, provider, path := "us-east-1", "ak", "sk", t.TempDir(), "file", "s3://bucket2/cbds/proj1"
 	putBody, _ := json.Marshal(bucketapi.PutBucketRequest{Bucket: "bucket2", Provider: &provider, Region: &region, AccessKey: &accessKey, SecretKey: &secretKey, Endpoint: &endpoint, Organization: "cbds", ProjectId: "proj1", Path: &path})
 	putReq401 := httptest.NewRequest(http.MethodPut, "/data/buckets", bytes.NewBuffer(putBody))
@@ -193,7 +194,7 @@ func TestHandleInternalPutDeleteBucket_Gen3Auth(t *testing.T) {
 }
 
 func TestHandleInternalPutBucket_RejectsInvalidGeneratedPayloads(t *testing.T) {
-	mockDB := &testutils.MockDatabase{Credentials: map[string]models.S3Credential{}}
+	mockDB := &testutils.MockDatabase{Credentials: map[string]buckets.Credential{}}
 	req := httptest.NewRequest(http.MethodPut, "/data/buckets", bytes.NewBufferString(`{"bucket":"b2","organization":"cbds","unexpected":"boom"}`))
 	req = req.WithContext(dataTestAuthContext(req.Context(), "gen3", true, map[string]map[string]bool{"/programs/cbds": {"arborist:create-descendant": true}}))
 	rr := doInternalDRSTestRequest(req, core.NewObjectManager(mockDB, &testutils.MockUrlManager{}))
@@ -204,7 +205,7 @@ func TestHandleInternalPutBucket_RejectsInvalidGeneratedPayloads(t *testing.T) {
 
 func TestHandleInternalPutBucket_ReusesExistingPhysicalBucketCredential(t *testing.T) {
 	mockDB := &testutils.MockDatabase{
-		Credentials: map[string]models.S3Credential{
+		Credentials: map[string]buckets.Credential{
 			"cbdscollab_1c102e76761b": {
 				CredentialID: "cbdscollab_1c102e76761b",
 				Bucket:       "cbdscollab",
@@ -250,7 +251,7 @@ func TestHandleInternalPutBucket_ReusesExistingPhysicalBucketCredential(t *testi
 	if updated.AccessKey != accessKey || updated.SecretKey != secretKey || updated.Endpoint != endpoint {
 		t.Fatalf("expected existing credential to be updated, got %+v", updated)
 	}
-	if _, exists := mockDB.Credentials[common.DeriveCredentialID("cbdscollab", provider, region, endpoint, accessKey)]; exists {
+	if _, exists := mockDB.Credentials[buckets.DeriveCredentialID("cbdscollab", provider, region, endpoint, accessKey)]; exists {
 		t.Fatalf("expected no replacement credential to be created, got %+v", mockDB.Credentials)
 	}
 	scope, ok := mockDB.BucketScopes["Ellrott_Lab|embedding_rotation"]
@@ -264,7 +265,7 @@ func TestHandleInternalPutBucket_ReusesExistingPhysicalBucketCredential(t *testi
 
 func TestRegisterInternalRoutes_Smoke(t *testing.T) {
 	app := fiber.New()
-	om := core.NewObjectManager(&testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}, Credentials: map[string]models.S3Credential{"b1": {Bucket: "b1"}}}, &testutils.MockUrlManager{})
+	om := core.NewObjectManager(&testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}, Credentials: map[string]buckets.Credential{"b1": {Bucket: "b1"}}}, &testutils.MockUrlManager{})
 	RegisterInternalRoutes(app, om)
 	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/data/upload/abc?bucket=b1", nil))
 	if err != nil {
@@ -288,7 +289,7 @@ func TestRegisteredRoutesByWorkflow(t *testing.T) {
 				}{Url: "s3://bucket-a/key"},
 			}}},
 		},
-		Credentials: map[string]models.S3Credential{"bucket-a": {Bucket: "bucket-a", Provider: "s3"}},
+		Credentials: map[string]buckets.Credential{"bucket-a": {Bucket: "bucket-a", Provider: "s3"}},
 	}
 	om := core.NewObjectManager(db, &testutils.MockUrlManager{})
 	for _, tc := range []struct {
@@ -310,10 +311,10 @@ func TestRegisteredRoutesByWorkflow(t *testing.T) {
 
 func TestHandleInternalListBucketScopes_Success(t *testing.T) {
 	mockDB := &testutils.MockDatabase{
-		Credentials: map[string]models.S3Credential{
+		Credentials: map[string]buckets.Credential{
 			"bucket-a": {CredentialID: "bucket-a", Bucket: "bucket-a", Provider: "s3"},
 		},
-		BucketScopes: map[string]models.BucketScope{
+		BucketScopes: map[string]buckets.Scope{
 			"org-a|proj-a": {Organization: "org-a", ProjectID: "proj-a", CredentialID: "bucket-a", Bucket: "bucket-a", PathPrefix: "path/to/a"},
 			"org-a|proj-b": {Organization: "org-a", ProjectID: "proj-b", CredentialID: "bucket-b", Bucket: "bucket-b"},
 		},
@@ -346,10 +347,10 @@ func TestHandleInternalListBucketScopes_Success(t *testing.T) {
 
 func TestHandleInternalListBucketScopes_FiltersUnauthorizedScopesOnSharedBucket(t *testing.T) {
 	mockDB := &testutils.MockDatabase{
-		Credentials: map[string]models.S3Credential{
+		Credentials: map[string]buckets.Credential{
 			"bucket-a": {CredentialID: "bucket-a", Bucket: "bucket-a", Provider: "s3"},
 		},
-		BucketScopes: map[string]models.BucketScope{
+		BucketScopes: map[string]buckets.Scope{
 			"org-a|proj-a": {Organization: "org-a", ProjectID: "proj-a", CredentialID: "bucket-a", Bucket: "bucket-a", PathPrefix: "path/to/a"},
 			"org-b|proj-b": {Organization: "org-b", ProjectID: "proj-b", CredentialID: "bucket-a", Bucket: "bucket-a", PathPrefix: "secret/path"},
 		},
@@ -381,10 +382,10 @@ func TestHandleInternalListBucketScopes_FiltersUnauthorizedScopesOnSharedBucket(
 
 func TestHandleInternalListBucketScopes_RendersRootScopeAsBucketURL(t *testing.T) {
 	mockDB := &testutils.MockDatabase{
-		Credentials: map[string]models.S3Credential{
+		Credentials: map[string]buckets.Credential{
 			"gdcdata": {CredentialID: "gdcdata", Bucket: "gdcdata", Provider: "s3"},
 		},
-		BucketScopes: map[string]models.BucketScope{
+		BucketScopes: map[string]buckets.Scope{
 			"gdc|": {Organization: "gdc", ProjectID: "", CredentialID: "gdcdata", Bucket: "gdcdata", PathPrefix: ""},
 		},
 	}
@@ -421,10 +422,10 @@ func TestHandleInternalListBucketScopes_RequiresGen3Auth(t *testing.T) {
 
 func TestHandleInternalDeleteBucketScope_RequiresExactPathMatch(t *testing.T) {
 	mockDB := &testutils.MockDatabase{
-		Credentials: map[string]models.S3Credential{
+		Credentials: map[string]buckets.Credential{
 			"bucket-a": {CredentialID: "bucket-a", Bucket: "bucket-a", Provider: "s3"},
 		},
-		BucketScopes: map[string]models.BucketScope{
+		BucketScopes: map[string]buckets.Scope{
 			"org-a|":       {Organization: "org-a", ProjectID: "", CredentialID: "bucket-a", Bucket: "bucket-a", PathPrefix: "lab"},
 			"org-a|proj-a": {Organization: "org-a", ProjectID: "proj-a", CredentialID: "bucket-a", Bucket: "bucket-a", PathPrefix: "lab/project-a"},
 		},
@@ -448,10 +449,10 @@ func TestHandleInternalDeleteBucketScope_RequiresExactPathMatch(t *testing.T) {
 
 func TestHandleInternalDeleteBucketScope_AllowsEmptyRootPath(t *testing.T) {
 	mockDB := &testutils.MockDatabase{
-		Credentials: map[string]models.S3Credential{
+		Credentials: map[string]buckets.Credential{
 			"bucket-a": {CredentialID: "bucket-a", Bucket: "bucket-a", Provider: "s3"},
 		},
-		BucketScopes: map[string]models.BucketScope{
+		BucketScopes: map[string]buckets.Scope{
 			"org-a|": {Organization: "org-a", ProjectID: "", CredentialID: "bucket-a", Bucket: "bucket-a", PathPrefix: ""},
 		},
 	}

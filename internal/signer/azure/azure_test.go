@@ -9,10 +9,11 @@ import (
 
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/sas"
-	"github.com/calypr/syfon/internal/models"
+	"github.com/google/uuid"
+
+	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/signer"
 	"github.com/calypr/syfon/internal/testutils"
-	"github.com/google/uuid"
 )
 
 func TestAzureSASProtocol(t *testing.T) {
@@ -84,7 +85,7 @@ func TestAzureSignedURL_UsesDownloadFilenameOverride(t *testing.T) {
 }
 
 func TestAzureSigner_SignDownloadPart(t *testing.T) {
-	db := &testutils.MockDatabase{Credentials: map[string]models.S3Credential{
+	db := &testutils.MockDatabase{Credentials: map[string]buckets.Credential{
 		"test-bucket": {
 			Bucket:    "test-bucket",
 			AccessKey: "acct",
@@ -104,7 +105,7 @@ func TestAzureSigner_SignDownloadPart(t *testing.T) {
 }
 
 func TestAzureSigner_MultipartHelpers(t *testing.T) {
-	db := &testutils.MockDatabase{Credentials: map[string]models.S3Credential{
+	db := &testutils.MockDatabase{Credentials: map[string]buckets.Credential{
 		"test-bucket": {
 			Bucket:    "test-bucket",
 			AccessKey: "acct",
@@ -130,4 +131,3 @@ func TestAzureSigner_MultipartHelpers(t *testing.T) {
 		t.Fatalf("expected block upload query params in signed part URL: %s", partURL)
 	}
 }
-

@@ -9,14 +9,15 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gofiber/fiber/v3"
+
 	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/api/middleware"
+	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/config"
 	"github.com/calypr/syfon/internal/core"
-	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/testutils"
-	"github.com/gofiber/fiber/v3"
 )
 
 type endpointCase struct {
@@ -181,7 +182,7 @@ func buildMockServerRouterWithRoutes(routes config.RoutesConfig) *fiber.App {
 		ObjectAuthz: map[string]map[string][]string{
 			"sha-1": {"data_file": {}},
 		},
-		Credentials: map[string]models.S3Credential{
+		Credentials: map[string]buckets.Credential{
 			"test-bucket-1": {
 				Bucket:    "test-bucket-1",
 				Region:    "us-east-1",

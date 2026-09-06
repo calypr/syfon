@@ -23,11 +23,12 @@ import (
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/smithy-go"
+
 	syfoncommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/access"
-	"github.com/calypr/syfon/internal/common"
-	"github.com/calypr/syfon/internal/models"
+	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/requestmeta"
+	"github.com/calypr/syfon/internal/storage/address"
 )
 
 type StorageBucketObject struct {
@@ -106,7 +107,7 @@ type ProjectStorageInspectOptions struct {
 type storageListTargetWork struct {
 	bucket         string
 	key            string
-	cred           models.S3Credential
+	cred           buckets.Credential
 	baseResult     StorageListValidationResult
 	requestIndexes []int
 }
@@ -160,7 +161,7 @@ type resolvedStorageScopeTarget struct {
 	provider string
 	bucket   string
 	prefix   string
-	cred     models.S3Credential
+	cred     buckets.Credential
 }
 
 type ProjectStorageDeleteResult struct {
@@ -189,17 +190,17 @@ type s3ListPageRetryPolicy struct {
 	MaxBackoff     time.Duration
 }
 
-func (m *ObjectManager) SetS3PrefixLister(fn func(context.Context, models.S3Credential, string, string, bool) ([]StorageBucketObject, error)) {
+func (m *ObjectManager) SetS3PrefixLister(fn func(context.Context, buckets.Credential, string, string, bool) ([]StorageBucketObject, error)) {
 	if fn == nil {
 		m.listS3Prefix = defaultS3PrefixLister
 		return
 	}
-	m.listS3Prefix = func(ctx context.Context, cred models.S3Credential, bucket string, prefix string, options StoragePrefixListOptions) ([]StorageBucketObject, error) {
+	m.listS3Prefix = func(ctx context.Context, cred buckets.Credential, bucket string, prefix string, options StoragePrefixListOptions) ([]StorageBucketObject, error) {
 		return fn(ctx, cred, bucket, prefix, options.IncludeHead)
 	}
 }
 
-func (m *ObjectManager) SetS3PrefixListerWithOptions(fn func(context.Context, models.S3Credential, string, string, StoragePrefixListOptions) ([]StorageBucketObject, error)) {
+func (m *ObjectManager) SetS3PrefixListerWithOptions(fn func(context.Context, buckets.Credential, string, string, StoragePrefixListOptions) ([]StorageBucketObject, error)) {
 	if fn == nil {
 		m.listS3Prefix = defaultS3PrefixLister
 		return
@@ -300,10 +301,10 @@ func normalizeStorageBucketObjects(items []StorageBucketObject, target *resolved
 	out := make([]StorageBucketObject, 0, len(items))
 	for _, item := range items {
 		entry := item
-		entry.Provider = common.S3Provider
+		entry.Provider = address.S3Provider
 		entry.Bucket = target.bucket
 		entry.Key = strings.Trim(strings.TrimSpace(entry.Key), "/")
-		entry.ObjectURL = common.BucketToURL(target.bucket, entry.Key)
+		entry.ObjectURL = address.BucketToURL(target.bucket, entry.Key)
 		if strings.TrimSpace(entry.Path) == "" {
 			entry.Path = path.Base(entry.Key)
 		}
@@ -320,7 +321,7 @@ func summarizeProjectStorageObjects(items []StorageBucketObject, target *resolve
 		Provider:          target.provider,
 		Bucket:            target.bucket,
 		Prefix:            strings.Trim(strings.TrimSpace(target.prefix), "/"),
-		ObjectURL:         common.BucketToURL(target.bucket, strings.Trim(strings.TrimSpace(target.prefix), "/")),
+		ObjectURL:         address.BucketToURL(target.bucket, strings.Trim(strings.TrimSpace(target.prefix), "/")),
 		Exists:            len(items) > 0,
 		ObjectCount:       len(items),
 		ComputedAt:        time.Now().UTC(),
@@ -351,7 +352,7 @@ func (m *ObjectManager) resolveProjectStorageScopeTargetForMethod(ctx context.Co
 		return nil, &access.AuthorizationError{Method: method, Resources: []string{resource}}
 	}
 
-	scopes := make([]models.BucketScope, 0, 2)
+	scopes := make([]buckets.Scope, 0, 2)
 	if scope, found, err := m.bucketCatalog.lookupBucketScope(ctx, organization, ""); err != nil {
 		return nil, err
 	} else if found {
@@ -384,11 +385,11 @@ func (m *ObjectManager) resolveProjectStorageScopeTargetForMethod(ctx context.Co
 	if err != nil {
 		return nil, err
 	}
-	if common.NormalizeProvider(cred.Provider, common.S3Provider) != common.S3Provider {
+	if address.NormalizeProvider(cred.Provider, address.S3Provider) != address.S3Provider {
 		return nil, &StorageInspectError{Kind: StorageInspectUnsupported, Message: fmt.Sprintf("provider %q is not supported for scoped bucket listing", cred.Provider)}
 	}
 	return &resolvedStorageScopeTarget{
-		provider: common.S3Provider,
+		provider: address.S3Provider,
 		bucket:   bucket,
 		prefix:   strings.Join(normalizedScopePrefixes(scopes), "/"),
 		cred:     *cred,
@@ -446,7 +447,7 @@ func projectStorageTargetAllowed(candidate storageTarget, target *resolvedStorag
 	if target == nil {
 		return false
 	}
-	if common.NormalizeProvider(candidate.provider, common.S3Provider) != common.S3Provider {
+	if address.NormalizeProvider(candidate.provider, address.S3Provider) != address.S3Provider {
 		return false
 	}
 	if strings.TrimSpace(candidate.bucket) != strings.TrimSpace(target.bucket) {
@@ -608,14 +609,14 @@ func (m *ObjectManager) resolveListValidationTarget(ctx context.Context, req Sto
 		result.ValidationStatus = storageListValidationStatusForError(req)
 		return result, nil, false
 	}
-	if !ok || target.provider != common.S3Provider {
+	if !ok || target.provider != address.S3Provider {
 		result.Status = StorageProbeStatusInvalid
 		result.ErrorKind = string(StorageInspectInvalidInput)
 		result.Error = "object_url must be a valid s3://bucket/key URL"
 		result.ValidationStatus = storageListValidationStatusForError(req)
 		return result, nil, false
 	}
-	result.Provider = common.S3Provider
+	result.Provider = address.S3Provider
 	result.Bucket = target.bucket
 	result.Key = target.key
 	result.Path = path.Base(target.key)
@@ -714,7 +715,7 @@ func (m *ObjectManager) runCoalescedStorageListGroup(ctx context.Context, group 
 		if !ok {
 			continue
 		}
-		normalized := normalizeStorageBucketObjects([]StorageBucketObject{item}, &resolvedStorageScopeTarget{provider: common.S3Provider, bucket: work.bucket, prefix: work.key})
+		normalized := normalizeStorageBucketObjects([]StorageBucketObject{item}, &resolvedStorageScopeTarget{provider: address.S3Provider, bucket: work.bucket, prefix: work.key})
 		if len(normalized) == 0 {
 			continue
 		}
@@ -792,7 +793,7 @@ func (m *ObjectManager) runExactStorageListTarget(ctx context.Context, work *sto
 		if key != work.key {
 			continue
 		}
-		normalized := normalizeStorageBucketObjects([]StorageBucketObject{item}, &resolvedStorageScopeTarget{provider: common.S3Provider, bucket: work.bucket, prefix: work.key})
+		normalized := normalizeStorageBucketObjects([]StorageBucketObject{item}, &resolvedStorageScopeTarget{provider: address.S3Provider, bucket: work.bucket, prefix: work.key})
 		if len(normalized) == 0 {
 			break
 		}
@@ -865,7 +866,7 @@ func validateStorageListResult(req StorageListValidationRequest, item StorageBuc
 	return StorageValidationMatched, sizeMatch, nameMatch, nil
 }
 
-func defaultS3PrefixLister(ctx context.Context, cred models.S3Credential, bucket string, prefix string, options StoragePrefixListOptions) ([]StorageBucketObject, error) {
+func defaultS3PrefixLister(ctx context.Context, cred buckets.Credential, bucket string, prefix string, options StoragePrefixListOptions) ([]StorageBucketObject, error) {
 	started := time.Now()
 	client, err := s3ClientFromContext(ctx, cred)
 	if err != nil {
@@ -1160,10 +1161,10 @@ func appendS3ListPageObjects(out *[]StorageBucketObject, page *awss3.ListObjects
 			lastMod = *item.LastModified
 		}
 		*out = append(*out, StorageBucketObject{
-			Provider:    common.S3Provider,
+			Provider:    address.S3Provider,
 			Bucket:      bucket,
 			Key:         key,
-			ObjectURL:   common.BucketToURL(bucket, key),
+			ObjectURL:   address.BucketToURL(bucket, key),
 			Path:        path.Base(key),
 			SizeBytes:   size,
 			ETag:        strings.Trim(strings.TrimSpace(aws.ToString(item.ETag)), "\""),

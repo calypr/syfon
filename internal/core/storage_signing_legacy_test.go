@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/calypr/syfon/apigen/server/drs"
+	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/faults"
 	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/testutils"
@@ -18,7 +19,7 @@ func TestObjectManagerLegacyS3DownloadCompatibility(t *testing.T) {
 		legacy   = "s3://bforepc-prod/OHSU/koei_chin/slide.ome.tiff"
 		physical = "s3://bforepc/bforepc-prod/OHSU/koei_chin/slide.ome.tiff"
 	)
-	scope := models.BucketScope{
+	scope := buckets.Scope{
 		Organization: "HTAN_INT",
 		ProjectID:    "BForePC",
 		Bucket:       "bforepc",
@@ -27,14 +28,14 @@ func TestObjectManagerLegacyS3DownloadCompatibility(t *testing.T) {
 	newObject := func(resources ...string) *models.InternalObject {
 		return &models.InternalObject{DrsObject: drs.DrsObject{ControlledAccess: &resources}}
 	}
-	newManager := func(scopes map[string]models.BucketScope, credentials map[string]models.S3Credential) (*ObjectManager, *capturingURLManager) {
+	newManager := func(scopes map[string]buckets.Scope, credentials map[string]buckets.Credential) (*ObjectManager, *capturingURLManager) {
 		db := &coreTestDB{MockDatabase: &testutils.MockDatabase{BucketScopes: scopes, Credentials: credentials}}
 		um := &capturingURLManager{}
 		return NewObjectManager(db, um), um
 	}
 
 	t.Run("maps full and ranged downloads", func(t *testing.T) {
-		om, um := newManager(map[string]models.BucketScope{"HTAN_INT|BForePC": scope}, nil)
+		om, um := newManager(map[string]buckets.Scope{"HTAN_INT|BForePC": scope}, nil)
 		obj := newObject(resource)
 
 		signed, err := om.SignObjectURL(context.Background(), obj, legacy, urlmanager.SignOptions{})
@@ -55,7 +56,7 @@ func TestObjectManagerLegacyS3DownloadCompatibility(t *testing.T) {
 	})
 
 	t.Run("preserves exact configured physical bucket", func(t *testing.T) {
-		om, um := newManager(map[string]models.BucketScope{"HTAN_INT|BForePC": scope}, map[string]models.S3Credential{
+		om, um := newManager(map[string]buckets.Scope{"HTAN_INT|BForePC": scope}, map[string]buckets.Credential{
 			"bforepc-prod": {CredentialID: "bforepc-prod", Bucket: "bforepc-prod", Provider: "s3"},
 		})
 		signed, err := om.SignObjectURL(context.Background(), newObject(resource), legacy, urlmanager.SignOptions{})
@@ -68,7 +69,7 @@ func TestObjectManagerLegacyS3DownloadCompatibility(t *testing.T) {
 	})
 
 	t.Run("maps credential identifier that is not the physical bucket", func(t *testing.T) {
-		om, um := newManager(map[string]models.BucketScope{"HTAN_INT|BForePC": scope}, map[string]models.S3Credential{
+		om, um := newManager(map[string]buckets.Scope{"HTAN_INT|BForePC": scope}, map[string]buckets.Credential{
 			"bforepc-prod": {CredentialID: "bforepc-prod", Bucket: "bforepc", Provider: "s3"},
 		})
 		signed, err := om.SignObjectURL(context.Background(), newObject(resource), legacy, urlmanager.SignOptions{})
@@ -81,14 +82,14 @@ func TestObjectManagerLegacyS3DownloadCompatibility(t *testing.T) {
 	})
 
 	t.Run("preserves physical bucket when its name equals the scope prefix", func(t *testing.T) {
-		physicalScope := models.BucketScope{
+		physicalScope := buckets.Scope{
 			Organization: "HTAN_INT",
 			ProjectID:    "BForePC",
 			Bucket:       "bforepc",
 			PathPrefix:   "bforepc",
 		}
 		physicalURL := "s3://bforepc/OHSU/koei_chin/slide.ome.tiff"
-		om, um := newManager(map[string]models.BucketScope{"HTAN_INT|BForePC": physicalScope}, map[string]models.S3Credential{
+		om, um := newManager(map[string]buckets.Scope{"HTAN_INT|BForePC": physicalScope}, map[string]buckets.Credential{
 			"physical": {CredentialID: "physical", Bucket: "bforepc", Provider: "s3"},
 		})
 		signed, err := om.SignObjectURL(context.Background(), newObject(resource), physicalURL, urlmanager.SignOptions{})
@@ -103,16 +104,16 @@ func TestObjectManagerLegacyS3DownloadCompatibility(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		url   string
-		scope models.BucketScope
+		scope buckets.Scope
 		want  string
 	}{
 		{name: "physical target bucket", url: physical, scope: scope, want: physical},
 		{name: "partial prefix host", url: "s3://bforepc-pro/OHSU/file", scope: scope, want: "s3://bforepc-pro/OHSU/file"},
-		{name: "empty prefix", url: legacy, scope: models.BucketScope{Organization: "HTAN_INT", ProjectID: "BForePC", Bucket: "bforepc", PathPrefix: ""}, want: legacy},
+		{name: "empty prefix", url: legacy, scope: buckets.Scope{Organization: "HTAN_INT", ProjectID: "BForePC", Bucket: "bforepc", PathPrefix: ""}, want: legacy},
 		{name: "preserves object key segments", url: "s3://bforepc-prod/OHSU/./slide//raw.tiff", scope: scope, want: "s3://bforepc/bforepc-prod/OHSU/./slide//raw.tiff"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			om, um := newManager(map[string]models.BucketScope{"HTAN_INT|BForePC": tc.scope}, nil)
+			om, um := newManager(map[string]buckets.Scope{"HTAN_INT|BForePC": tc.scope}, nil)
 			signed, err := om.SignObjectURL(context.Background(), newObject(resource), tc.url, urlmanager.SignOptions{})
 			if err != nil {
 				t.Fatalf("SignObjectURL failed: %v", err)
@@ -125,7 +126,7 @@ func TestObjectManagerLegacyS3DownloadCompatibility(t *testing.T) {
 
 	t.Run("rejects conflicting physical mappings", func(t *testing.T) {
 		obj := newObject("/organization/HTAN_INT/project/one", "/organization/HTAN_INT/project/two")
-		om, _ := newManager(map[string]models.BucketScope{
+		om, _ := newManager(map[string]buckets.Scope{
 			"HTAN_INT|one": {Organization: "HTAN_INT", ProjectID: "one", Bucket: "bforepc-a", PathPrefix: "bforepc-prod"},
 			"HTAN_INT|two": {Organization: "HTAN_INT", ProjectID: "two", Bucket: "bforepc-b", PathPrefix: "bforepc-prod"},
 		}, nil)
@@ -135,7 +136,7 @@ func TestObjectManagerLegacyS3DownloadCompatibility(t *testing.T) {
 	})
 
 	t.Run("leaves PUT behavior on canonical target path", func(t *testing.T) {
-		om, um := newManager(map[string]models.BucketScope{"HTAN_INT|BForePC": scope}, nil)
+		om, um := newManager(map[string]buckets.Scope{"HTAN_INT|BForePC": scope}, nil)
 		signed, err := om.SignObjectURL(context.Background(), newObject(resource), legacy, urlmanager.SignOptions{Method: "PUT"})
 		if err != nil {
 			t.Fatalf("SignObjectURL PUT failed: %v", err)
@@ -151,13 +152,13 @@ type credentialListErrorDB struct {
 	err error
 }
 
-func (db *credentialListErrorDB) ListS3Credentials(context.Context) ([]models.S3Credential, error) {
+func (db *credentialListErrorDB) ListS3Credentials(context.Context) ([]buckets.Credential, error) {
 	return nil, db.err
 }
 
 func TestObjectManagerLegacyS3DownloadCredentialErrorsPropagate(t *testing.T) {
 	wantErr := errors.New("credential list unavailable")
-	db := &credentialListErrorDB{MockDatabase: &testutils.MockDatabase{BucketScopes: map[string]models.BucketScope{
+	db := &credentialListErrorDB{MockDatabase: &testutils.MockDatabase{BucketScopes: map[string]buckets.Scope{
 		"HTAN_INT|BForePC": {
 			Organization: "HTAN_INT",
 			ProjectID:    "BForePC",
@@ -181,7 +182,7 @@ func TestObjectManagerScopedLogicalDownloadSigning(t *testing.T) {
 		physical = "s3://syfon-ci/project-a/" + sha
 	)
 
-	db := &coreTestDB{MockDatabase: &testutils.MockDatabase{BucketScopes: map[string]models.BucketScope{
+	db := &coreTestDB{MockDatabase: &testutils.MockDatabase{BucketScopes: map[string]buckets.Scope{
 		"ci|a": {
 			Organization: "ci",
 			ProjectID:    "a",

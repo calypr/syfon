@@ -10,6 +10,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
+	"github.com/google/uuid"
+
 	"github.com/calypr/syfon/apigen/server/internalapi"
 	"github.com/calypr/syfon/internal/api/apiutil"
 	"github.com/calypr/syfon/internal/api/attribution"
@@ -20,9 +23,8 @@ import (
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/faults"
 	"github.com/calypr/syfon/internal/models"
+	"github.com/calypr/syfon/internal/storage/address"
 	"github.com/calypr/syfon/internal/urlmanager"
-	"github.com/gofiber/fiber/v3"
-	"github.com/google/uuid"
 )
 
 var multipartUploadSessions sync.Map // uploadID -> multipartSession
@@ -128,7 +130,7 @@ func handleInternalDownloadPartFiber(c fiber.Ctx, om *core.ObjectManager) error 
 	}
 
 	bucketID := ""
-	if b, _, ok := common.ParseS3URL(objectURL); ok {
+	if b, _, ok := address.ParseS3URL(objectURL); ok {
 		bucketID = b
 	}
 
@@ -250,7 +252,7 @@ func handleInternalUploadURLFiber(om *core.ObjectManager) fiber.Handler {
 			key = target.Key
 		}
 
-		urlStr := common.BucketToURL(bucket, key)
+		urlStr := address.BucketToURL(bucket, key)
 		signedURL, err := om.SignURL(c.Context(), urlStr, urlmanager.SignOptions{Method: http.MethodPut})
 		if err != nil {
 			return apiutil.HandleError(c, err)

@@ -5,13 +5,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
+
 	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/api/apiutil"
 	apimiddleware "github.com/calypr/syfon/internal/api/middleware"
-	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/models"
-	"github.com/gofiber/fiber/v3"
+	"github.com/calypr/syfon/internal/storage/address"
 )
 
 type internalInspectObjectRequest struct {
@@ -428,7 +429,7 @@ func handleInternalInspectProjectScopesFiber(om *core.ObjectManager) fiber.Handl
 			}
 			scheme := "s3"
 			if cred, err := om.GetS3Credential(c.Context(), scope.CredentialID); err == nil && cred != nil {
-				scheme = common.ProviderToScheme(cred.Provider)
+				scheme = address.ProviderToScheme(cred.Provider)
 			}
 			row.Path = scheme + "://" + strings.TrimSpace(scope.Bucket)
 			if scope.PathPrefix != "" {
@@ -646,7 +647,7 @@ func projectRecordMatchesPathPrefix(record internalInspectProjectRecordItem, pat
 	}
 	prefixWithSlash := normalizedPrefix + "/"
 	for _, raw := range record.AccessURLs {
-		parsedBucket, parsedKey, ok := common.ParseS3URL(strings.TrimSpace(raw))
+		parsedBucket, parsedKey, ok := address.ParseS3URL(strings.TrimSpace(raw))
 		if !ok || strings.TrimSpace(parsedBucket) == "" {
 			continue
 		}
@@ -656,7 +657,7 @@ func projectRecordMatchesPathPrefix(record internalInspectProjectRecordItem, pat
 		}
 	}
 	for _, method := range record.AccessMethods {
-		parsedBucket, parsedKey, ok := common.ParseS3URL(strings.TrimSpace(method.URL))
+		parsedBucket, parsedKey, ok := address.ParseS3URL(strings.TrimSpace(method.URL))
 		if !ok || strings.TrimSpace(parsedBucket) == "" {
 			continue
 		}

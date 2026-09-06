@@ -20,10 +20,12 @@ import (
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/smithy-go"
-	"github.com/calypr/syfon/internal/common"
-	"github.com/calypr/syfon/internal/models"
 	"google.golang.org/api/googleapi"
 	"google.golang.org/api/option"
+
+	"github.com/calypr/syfon/internal/buckets"
+	"github.com/calypr/syfon/internal/models"
+	"github.com/calypr/syfon/internal/storage/address"
 )
 
 type storageTarget struct {
@@ -38,7 +40,7 @@ type s3ObjectDeleter interface {
 	DeleteObjects(context.Context, *awss3.DeleteObjectsInput, ...func(*awss3.Options)) (*awss3.DeleteObjectsOutput, error)
 }
 
-var newS3ObjectDeleter = func(ctx context.Context, cred *models.S3Credential) (s3ObjectDeleter, error) {
+var newS3ObjectDeleter = func(ctx context.Context, cred *buckets.Credential) (s3ObjectDeleter, error) {
 	cfg, err := awsConfigForStorageCredential(ctx, cred)
 	if err != nil {
 		return nil, err
@@ -81,7 +83,7 @@ func (m *ObjectManager) deleteObjectsStorage(ctx context.Context, objects []mode
 func (m *ObjectManager) deleteStorageTargets(ctx context.Context, targets []storageTarget) error {
 	s3ByBucket := make(map[string][]string)
 	for _, target := range targets {
-		if target.provider == common.S3Provider {
+		if target.provider == address.S3Provider {
 			bucket := strings.TrimSpace(target.bucket)
 			key := strings.Trim(strings.TrimSpace(target.key), "/")
 			if bucket == "" || key == "" {
@@ -149,7 +151,7 @@ func (m *ObjectManager) storageTargetFromURL(ctx context.Context, raw string) (s
 	if err != nil {
 		return storageTarget{}, false, fmt.Errorf("parse access url %q: %w", raw, err)
 	}
-	if provider := common.ProviderFromScheme(u.Scheme); provider != "" {
+	if provider := address.ProviderFromScheme(u.Scheme); provider != "" {
 		bucket := strings.TrimSpace(u.Host)
 		key := strings.Trim(strings.TrimSpace(u.Path), "/")
 		if bucket == "" || key == "" {
@@ -161,9 +163,9 @@ func (m *ObjectManager) storageTargetFromURL(ctx context.Context, raw string) (s
 		}
 		normalizedProvider := provider
 		if cred != nil {
-			normalizedProvider = common.NormalizeProvider(cred.Provider, provider)
+			normalizedProvider = address.NormalizeProvider(cred.Provider, provider)
 		}
-		if normalizedProvider == common.FileProvider {
+		if normalizedProvider == address.FileProvider {
 			if cred == nil {
 				return storageTarget{}, false, fmt.Errorf("file-backed bucket %s requires credential", bucket)
 			}
@@ -175,7 +177,7 @@ func (m *ObjectManager) storageTargetFromURL(ctx context.Context, raw string) (s
 				return storageTarget{}, false, fmt.Errorf("file-backed bucket %s missing storage root", bucket)
 			}
 			return storageTarget{
-				provider: common.FileProvider,
+				provider: address.FileProvider,
 				bucket:   bucket,
 				key:      key,
 				path:     filepath.Clean(filepath.Join(root, filepath.FromSlash(key))),
@@ -185,14 +187,14 @@ func (m *ObjectManager) storageTargetFromURL(ctx context.Context, raw string) (s
 	}
 
 	if filepath.IsAbs(raw) {
-		return storageTarget{provider: common.FileProvider, path: filepath.Clean(raw)}, true, nil
+		return storageTarget{provider: address.FileProvider, path: filepath.Clean(raw)}, true, nil
 	}
 	return storageTarget{}, false, nil
 }
 
 func (m *ObjectManager) deleteStorageTarget(ctx context.Context, target storageTarget) error {
 	switch target.provider {
-	case common.FileProvider:
+	case address.FileProvider:
 		if strings.TrimSpace(target.path) == "" {
 			return nil
 		}
@@ -200,11 +202,11 @@ func (m *ObjectManager) deleteStorageTarget(ctx context.Context, target storageT
 			return fmt.Errorf("delete file %s: %w", target.path, err)
 		}
 		return nil
-	case common.S3Provider:
+	case address.S3Provider:
 		return m.deleteS3Object(ctx, target.bucket, target.key)
-	case common.GCSProvider:
+	case address.GCSProvider:
 		return m.deleteGCSObject(ctx, target.bucket, target.key)
-	case common.AzureProvider:
+	case address.AzureProvider:
 		return m.deleteAzureObject(ctx, target.bucket, target.key)
 	default:
 		return fmt.Errorf("unsupported storage provider %q", target.provider)
@@ -268,7 +270,7 @@ func (m *ObjectManager) deleteS3Objects(ctx context.Context, bucket string, keys
 	return nil
 }
 
-func awsConfigForStorageCredential(ctx context.Context, cred *models.S3Credential) (aws.Config, error) {
+func awsConfigForStorageCredential(ctx context.Context, cred *buckets.Credential) (aws.Config, error) {
 	loadOpts := []func(*awsconfig.LoadOptions) error{
 		awsconfig.WithRegion(cred.Region),
 		awsconfig.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(cred.AccessKey, cred.SecretKey, "")),

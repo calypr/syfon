@@ -2,10 +2,11 @@ package db
 
 import (
 	"context"
-	"github.com/calypr/syfon/internal/models"
 	"time"
 
 	"github.com/calypr/syfon/apigen/server/drs"
+	"github.com/calypr/syfon/internal/buckets"
+	"github.com/calypr/syfon/internal/models"
 )
 
 // ServiceInfoStore exposes service metadata reads.
@@ -71,19 +72,19 @@ type TransferAttributionScopedStore interface {
 }
 
 type BucketVisibilityLister interface {
-	ListBucketVisibilityRows(ctx context.Context, resources []string, includeUnscoped, restrictToResources bool) ([]models.BucketVisibilityRow, error)
+	ListBucketVisibilityRows(ctx context.Context, resources []string, includeUnscoped, restrictToResources bool) ([]buckets.VisibilityRow, error)
 }
 
 // CredentialStore groups bucket credential and scope management.
 type CredentialStore interface {
-	GetS3Credential(ctx context.Context, bucket string) (*models.S3Credential, error)
-	ListS3Credentials(ctx context.Context) ([]models.S3Credential, error)
-	SaveS3Credential(ctx context.Context, cred *models.S3Credential) error
+	GetS3Credential(ctx context.Context, bucket string) (*buckets.Credential, error)
+	ListS3Credentials(ctx context.Context) ([]buckets.Credential, error)
+	SaveS3Credential(ctx context.Context, cred *buckets.Credential) error
 	DeleteS3Credential(ctx context.Context, bucket string) error
-	CreateBucketScope(ctx context.Context, scope *models.BucketScope) error
+	CreateBucketScope(ctx context.Context, scope *buckets.Scope) error
 	DeleteBucketScope(ctx context.Context, organization, projectID, credentialID, pathPrefix string) error
-	GetBucketScope(ctx context.Context, organization, projectID string) (*models.BucketScope, error)
-	ListBucketScopes(ctx context.Context) ([]models.BucketScope, error)
+	GetBucketScope(ctx context.Context, organization, projectID string) (*buckets.Scope, error)
+	ListBucketScopes(ctx context.Context) ([]buckets.Scope, error)
 }
 
 // ObjectsAPIServiceDatabase is the storage surface used by the object service package.
@@ -118,7 +119,7 @@ type UsageStore interface {
 // SHA256ValidityStore is the minimum storage surface needed by the SHA256 validity endpoint.
 type SHA256ValidityStore interface {
 	GetObjectsByChecksums(ctx context.Context, checksums []string) (map[string][]models.InternalObject, error)
-	ListS3Credentials(ctx context.Context) ([]models.S3Credential, error)
+	ListS3Credentials(ctx context.Context) ([]buckets.Credential, error)
 }
 
 // MetricsStore is the minimum storage surface needed by the metrics API.
@@ -127,7 +128,7 @@ type MetricsStore interface {
 	GetObject(ctx context.Context, id string) (*models.InternalObject, error)
 	RecordTransferAttributionEvents(ctx context.Context, events []models.TransferAttributionEvent) error
 	RecordProviderTransferEvents(ctx context.Context, events []models.ProviderTransferEvent) error
-	ListS3Credentials(ctx context.Context) ([]models.S3Credential, error)
+	ListS3Credentials(ctx context.Context) ([]buckets.Credential, error)
 	GetTransferAttributionSummary(ctx context.Context, filter models.TransferAttributionFilter) (models.TransferAttributionSummary, error)
 	GetTransferAttributionBreakdown(ctx context.Context, filter models.TransferAttributionFilter, groupBy string) ([]models.TransferAttributionBreakdown, error)
 	GetFileUsage(ctx context.Context, objectID string) (*models.FileUsage, error)

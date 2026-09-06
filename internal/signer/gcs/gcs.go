@@ -12,12 +12,13 @@ import (
 	"time"
 
 	"cloud.google.com/go/storage"
-	"github.com/calypr/syfon/internal/common"
-	"github.com/calypr/syfon/internal/db"
-	"github.com/calypr/syfon/internal/models"
-	"github.com/calypr/syfon/internal/signer"
 	"github.com/google/uuid"
 	"google.golang.org/api/option"
+
+	"github.com/calypr/syfon/internal/buckets"
+	"github.com/calypr/syfon/internal/common"
+	"github.com/calypr/syfon/internal/db"
+	"github.com/calypr/syfon/internal/signer"
 )
 
 type GCSSigner struct {
@@ -119,7 +120,7 @@ func (s *GCSSigner) CompleteMultipartUpload(ctx context.Context, bucket, key, up
 	return nil
 }
 
-func (s *GCSSigner) gcsSignedURL(bucket, key, method string, expiry time.Duration, rangeStr string, downloadName string, cred *models.S3Credential) (string, error) {
+func (s *GCSSigner) gcsSignedURL(bucket, key, method string, expiry time.Duration, rangeStr string, downloadName string, cred *buckets.Credential) (string, error) {
 	if endpointURL, ok := gcsEndpointObjectURL(cred, bucket, key, method, downloadName); ok {
 		return endpointURL, nil
 	}
@@ -146,7 +147,7 @@ func (s *GCSSigner) gcsSignedURL(bucket, key, method string, expiry time.Duratio
 	return storage.SignedURL(bucket, key, opts)
 }
 
-func gcsEndpointObjectURL(cred *models.S3Credential, bucket string, key string, method string, downloadName string) (string, bool) {
+func gcsEndpointObjectURL(cred *buckets.Credential, bucket string, key string, method string, downloadName string) (string, bool) {
 	if cred == nil {
 		return "", false
 	}
@@ -204,7 +205,7 @@ func gcsEndpointObjectURL(cred *models.S3Credential, bucket string, key string, 
 	}
 }
 
-func (s *GCSSigner) gcsGoogleAccessID(cred *models.S3Credential) string {
+func (s *GCSSigner) gcsGoogleAccessID(cred *buckets.Credential) string {
 	googleAccessID := strings.TrimSpace(cred.AccessKey)
 	privateKey := strings.TrimSpace(cred.SecretKey)
 	var keyJSON struct {
@@ -216,7 +217,7 @@ func (s *GCSSigner) gcsGoogleAccessID(cred *models.S3Credential) string {
 	return googleAccessID
 }
 
-func (s *GCSSigner) gcsPrivateKey(cred *models.S3Credential) string {
+func (s *GCSSigner) gcsPrivateKey(cred *buckets.Credential) string {
 	privateKey := strings.TrimSpace(cred.SecretKey)
 	var keyJSON struct {
 		PrivateKey string `json:"private_key"`

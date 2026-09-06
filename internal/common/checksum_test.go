@@ -57,21 +57,8 @@ func TestSHAHelpers(t *testing.T) {
 		t.Fatalf("CanonicalSHA256 mismatch: ok=%v sha=%q", ok, sha)
 	}
 
-
-
 	obj := models.InternalObject{DrsObject: drs.DrsObject{Checksums: []drs.Checksum{{Type: "md5", Checksum: "m"}}}}
 	if !ObjectHasChecksumTypeAndValue(obj, "md5", "m") {
 		t.Fatalf("expected checksum match")
 	}
 }
-
-func TestParseS3URL(t *testing.T) {
-	bucket, key, ok := ParseS3URL("s3://bucket/path/to/object")
-	if !ok || bucket != "bucket" || key != "path/to/object" {
-		t.Fatalf("ParseS3URL unexpected output: ok=%v bucket=%q key=%q", ok, bucket, key)
-	}
-	if _, _, ok := ParseS3URL("https://example.com"); ok {
-		t.Fatalf("expected non-s3 URL to fail")
-	}
-}
-

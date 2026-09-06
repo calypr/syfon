@@ -9,6 +9,7 @@ import (
 
 	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/access"
+	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/faults"
 	"github.com/calypr/syfon/internal/models"
@@ -19,7 +20,7 @@ import (
 type coreTestDB struct {
 	*testutils.MockDatabase
 	aliases                map[string]string
-	creds                  []models.S3Credential
+	creds                  []buckets.Credential
 	getS3CredentialCalls   int
 	listS3CredentialsCalls int
 }
@@ -33,10 +34,10 @@ func (d *coreTestDB) ResolveObjectAlias(ctx context.Context, aliasID string) (st
 	return "", fmt.Errorf("%w: object not found", faults.ErrNotFound)
 }
 
-func (d *coreTestDB) ListS3Credentials(ctx context.Context) ([]models.S3Credential, error) {
+func (d *coreTestDB) ListS3Credentials(ctx context.Context) ([]buckets.Credential, error) {
 	d.listS3CredentialsCalls++
 	if d.creds != nil {
-		out := make([]models.S3Credential, len(d.creds))
+		out := make([]buckets.Credential, len(d.creds))
 		copy(out, d.creds)
 		return out, nil
 	}
@@ -46,7 +47,7 @@ func (d *coreTestDB) ListS3Credentials(ctx context.Context) ([]models.S3Credenti
 	return d.MockDatabase.ListS3Credentials(ctx)
 }
 
-func (d *coreTestDB) GetS3Credential(ctx context.Context, bucket string) (*models.S3Credential, error) {
+func (d *coreTestDB) GetS3Credential(ctx context.Context, bucket string) (*buckets.Credential, error) {
 	d.getS3CredentialCalls++
 	if d.MockDatabase == nil {
 		return nil, nil
@@ -302,7 +303,7 @@ func TestObjectManagerCredentialWritesInvalidateSignerCache(t *testing.T) {
 	um := &capturingURLManager{}
 	om := NewObjectManager(db, um)
 
-	cred := &models.S3Credential{Bucket: "b1", Provider: "s3", Region: "us-east-1", AccessKey: "a", SecretKey: "s"}
+	cred := &buckets.Credential{Bucket: "b1", Provider: "s3", Region: "us-east-1", AccessKey: "a", SecretKey: "s"}
 	if err := om.SaveS3Credential(ctx, cred); err != nil {
 		t.Fatalf("SaveS3Credential failed: %v", err)
 	}
@@ -325,7 +326,7 @@ func TestBucketCatalogCachesMissingScopeLookup(t *testing.T) {
 
 	if scope, found, err := om.bucketCatalog.lookupBucketScope(ctx, "missing-org", "missing-project"); err != nil {
 		t.Fatalf("first scope lookup failed: %v", err)
-	} else if found || scope != (models.BucketScope{}) {
+	} else if found || scope != (buckets.Scope{}) {
 		t.Fatalf("expected missing scope, got scope=%+v found=%t", scope, found)
 	}
 	if scope, found, err := om.bucketCatalog.lookupBucketScope(ctx, "missing-org", "missing-project"); err != nil {
@@ -341,7 +342,7 @@ func TestBucketCatalogCachesMissingScopeLookup(t *testing.T) {
 func TestBucketCatalogDeleteScopeInvalidatesLookupCache(t *testing.T) {
 	ctx := context.Background()
 	mockDB := &testutils.MockDatabase{
-		BucketScopes: map[string]models.BucketScope{
+		BucketScopes: map[string]buckets.Scope{
 			"org|project": {
 				Organization: "org",
 				ProjectID:    "project",
@@ -358,7 +359,7 @@ func TestBucketCatalogDeleteScopeInvalidatesLookupCache(t *testing.T) {
 	if err := om.DeleteBucketScope(ctx, "org", "project", "old-bucket", "old-prefix"); err != nil {
 		t.Fatalf("delete bucket scope failed: %v", err)
 	}
-	mockDB.BucketScopes["org|project"] = models.BucketScope{
+	mockDB.BucketScopes["org|project"] = buckets.Scope{
 		Organization: "org",
 		ProjectID:    "project",
 		Bucket:       "new-bucket",
@@ -681,7 +682,7 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 	t.Run("resolve bucket uses configured credentials", func(t *testing.T) {
 		db := &coreTestDB{
 			MockDatabase: &testutils.MockDatabase{},
-			creds: []models.S3Credential{
+			creds: []buckets.Credential{
 				{Bucket: "default-bucket", Provider: "s3"},
 				{Bucket: "secondary", Provider: "s3"},
 			},
@@ -762,7 +763,7 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 
 	t.Run("object download preserves imported physical key", func(t *testing.T) {
 		mockDB := &testutils.MockDatabase{
-			BucketScopes: map[string]models.BucketScope{
+			BucketScopes: map[string]buckets.Scope{
 				"calypr|training": {
 					Organization: "calypr",
 					ProjectID:    "training",
@@ -801,7 +802,7 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 
 	t.Run("object download preserves stored bucket despite project scope", func(t *testing.T) {
 		mockDB := &testutils.MockDatabase{
-			BucketScopes: map[string]models.BucketScope{
+			BucketScopes: map[string]buckets.Scope{
 				"gdc_mirror|gdc_mirror": {
 					Organization: "gdc_mirror",
 					ProjectID:    "gdc_mirror",
@@ -832,7 +833,7 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 	t.Run("object signing does not double prepend existing bucket scope prefix", func(t *testing.T) {
 		db := &coreTestDB{
 			MockDatabase: &testutils.MockDatabase{
-				BucketScopes: map[string]models.BucketScope{
+				BucketScopes: map[string]buckets.Scope{
 					"calypr|training": {
 						Organization: "calypr",
 						ProjectID:    "training",
@@ -860,7 +861,7 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 	t.Run("object signing composes organization and project prefixes and repairs malformed s3 access urls", func(t *testing.T) {
 		db := &coreTestDB{
 			MockDatabase: &testutils.MockDatabase{
-				BucketScopes: map[string]models.BucketScope{
+				BucketScopes: map[string]buckets.Scope{
 					"syfon|": {
 						Organization: "syfon",
 						Bucket:       "syfon-e2e-bucket",
@@ -919,7 +920,7 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 					}},
 				},
 			},
-			BucketScopes: map[string]models.BucketScope{
+			BucketScopes: map[string]buckets.Scope{
 				"cbds|git_drs_test": {
 					Organization: "cbds",
 					ProjectID:    "git_drs_test",
@@ -952,7 +953,7 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 	t.Run("object signing scopes uploads and repairs legacy download replicas", func(t *testing.T) {
 		db := &coreTestDB{
 			MockDatabase: &testutils.MockDatabase{
-				BucketScopes: map[string]models.BucketScope{
+				BucketScopes: map[string]buckets.Scope{
 					"HTAN_INT|BForePC": {
 						Organization: "HTAN_INT",
 						ProjectID:    "BForePC",
@@ -1028,7 +1029,7 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 	t.Run("root bucket scope preserves existing physical storage key", func(t *testing.T) {
 		db := &coreTestDB{
 			MockDatabase: &testutils.MockDatabase{
-				BucketScopes: map[string]models.BucketScope{
+				BucketScopes: map[string]buckets.Scope{
 					"gdc_mirror|gdc_mirror": {
 						Organization: "gdc_mirror",
 						ProjectID:    "gdc_mirror",
@@ -1075,7 +1076,7 @@ func TestObjectManagerDeleteResolveAndSignDelegation(t *testing.T) {
 		db := &coreTestDB{MockDatabase: mockDB}
 		um := &capturingURLManager{}
 		om := NewObjectManager(db, um)
-		if err := om.CreateBucketScope(context.Background(), &models.BucketScope{
+		if err := om.CreateBucketScope(context.Background(), &buckets.Scope{
 			Organization: "calypr",
 			ProjectID:    "training",
 			Bucket:       "calypr",

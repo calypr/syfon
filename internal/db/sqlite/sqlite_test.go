@@ -13,6 +13,7 @@ import (
 
 	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/access"
+	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/crypto"
 	"github.com/calypr/syfon/internal/faults"
@@ -560,7 +561,7 @@ func TestSqliteDB_S3Credentials(t *testing.T) {
 		t.Fatalf("failed to create db: %v", err)
 	}
 
-	cred := &models.S3Credential{
+	cred := &buckets.Credential{
 		Bucket:    "test-bucket",
 		Region:    "us-east-1",
 		AccessKey: "key",
@@ -601,7 +602,7 @@ func TestSqliteDB_SaveS3CredentialRejectsDuplicatePhysicalBucket(t *testing.T) {
 		t.Fatalf("failed to create db: %v", err)
 	}
 
-	first := models.S3Credential{
+	first := buckets.Credential{
 		CredentialID: "org-a/default",
 		Bucket:       "shared-bucket",
 		Region:       "us-east-1",
@@ -612,7 +613,7 @@ func TestSqliteDB_SaveS3CredentialRejectsDuplicatePhysicalBucket(t *testing.T) {
 		t.Fatalf("SaveS3Credential(first) failed: %v", err)
 	}
 
-	second := models.S3Credential{
+	second := buckets.Credential{
 		CredentialID: "org-b/default",
 		Bucket:       "shared-bucket",
 		Region:       "us-east-1",
@@ -639,7 +640,7 @@ func TestSqliteDB_GetS3CredentialRejectsAmbiguousLegacyPhysicalBucket(t *testing
 		t.Fatalf("drop update trigger: %v", err)
 	}
 
-	for _, cred := range []models.S3Credential{
+	for _, cred := range []buckets.Credential{
 		{CredentialID: "org-a/default", Bucket: "shared-bucket", Region: "us-east-1", AccessKey: "key-a", SecretKey: "secret-a"},
 		{CredentialID: "org-b/default", Bucket: "shared-bucket", Region: "us-east-1", AccessKey: "key-b", SecretKey: "secret-b"},
 	} {
@@ -668,7 +669,7 @@ func TestSqliteDB_DirectInsertRejectsDuplicatePhysicalBucket(t *testing.T) {
 		t.Fatalf("failed to create db: %v", err)
 	}
 
-	first, err := crypto.PrepareS3CredentialForStorage(&models.S3Credential{
+	first, err := crypto.PrepareS3CredentialForStorage(&buckets.Credential{
 		CredentialID: "org-a/default",
 		Bucket:       "shared-bucket",
 		Provider:     "s3",
@@ -686,7 +687,7 @@ func TestSqliteDB_DirectInsertRejectsDuplicatePhysicalBucket(t *testing.T) {
 		t.Fatalf("raw first insert failed: %v", err)
 	}
 
-	second, err := crypto.PrepareS3CredentialForStorage(&models.S3Credential{
+	second, err := crypto.PrepareS3CredentialForStorage(&buckets.Credential{
 		CredentialID: "org-b/default",
 		Bucket:       "shared-bucket",
 		Provider:     "s3",
@@ -714,7 +715,7 @@ func TestSqliteDB_S3Credentials_EncryptedAtRest(t *testing.T) {
 		t.Fatalf("failed to create db: %v", err)
 	}
 
-	cred := &models.S3Credential{
+	cred := &buckets.Credential{
 		Bucket:    "enc-bucket",
 		Region:    "us-east-1",
 		AccessKey: "plain-ak",
@@ -2048,7 +2049,7 @@ func TestSqliteDB_BucketScopeLifecycle(t *testing.T) {
 		t.Fatalf("expected validation error for nil scope")
 	}
 
-	scope := &models.BucketScope{
+	scope := &buckets.Scope{
 		Organization: "calypr",
 		ProjectID:    "proj-a",
 		Bucket:       "bucket-a",
@@ -2066,7 +2067,7 @@ func TestSqliteDB_BucketScopeLifecycle(t *testing.T) {
 		t.Fatalf("unexpected scope: %+v", got)
 	}
 
-	if err := db.CreateBucketScope(ctx, &models.BucketScope{
+	if err := db.CreateBucketScope(ctx, &buckets.Scope{
 		Organization: "calypr",
 		ProjectID:    "proj-a",
 		Bucket:       "bucket-a",
@@ -2075,7 +2076,7 @@ func TestSqliteDB_BucketScopeLifecycle(t *testing.T) {
 		t.Fatalf("idempotent create should succeed, got: %v", err)
 	}
 
-	if err := db.CreateBucketScope(ctx, &models.BucketScope{
+	if err := db.CreateBucketScope(ctx, &buckets.Scope{
 		Organization: "calypr",
 		ProjectID:    "proj-a",
 		Bucket:       "bucket-b",
@@ -2099,7 +2100,7 @@ func TestSqliteDB_BucketScopeLifecycle(t *testing.T) {
 		t.Fatalf("expected 1 scope, got %d", len(all))
 	}
 
-	if err := db.CreateBucketScope(ctx, &models.BucketScope{
+	if err := db.CreateBucketScope(ctx, &buckets.Scope{
 		Organization: "calypr",
 		Bucket:       "bucket-root",
 		PathPrefix:   "",

@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/calypr/syfon/internal/models"
+	"github.com/calypr/syfon/internal/buckets"
 )
 
 func TestEncryptDecryptCredentialField_RoundTrip(t *testing.T) {
@@ -109,7 +109,7 @@ func TestDecryptCredentialField_LegacyV1Ciphertext(t *testing.T) {
 func TestPrepareAndParseS3CredentialForStorage(t *testing.T) {
 	t.Setenv(CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
 
-	cred := &models.S3Credential{
+	cred := &buckets.Credential{
 		Bucket:    "b",
 		Provider:  "s3",
 		Region:    "us-east-1",

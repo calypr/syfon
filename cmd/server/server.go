@@ -10,23 +10,24 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
+	"github.com/gofiber/fiber/v3/middleware/recover"
+	"github.com/spf13/cobra"
+
 	"github.com/calypr/syfon/internal/api/middleware"
-	"github.com/calypr/syfon/internal/common"
+	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/config"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/crypto"
 	"github.com/calypr/syfon/internal/db"
 	"github.com/calypr/syfon/internal/db/postgres"
 	"github.com/calypr/syfon/internal/db/sqlite"
-	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/signer/azure"
 	"github.com/calypr/syfon/internal/signer/file"
 	"github.com/calypr/syfon/internal/signer/gcs"
 	"github.com/calypr/syfon/internal/signer/s3"
+	"github.com/calypr/syfon/internal/storage/address"
 	"github.com/calypr/syfon/internal/urlmanager"
-	"github.com/gofiber/fiber/v3"
-	"github.com/gofiber/fiber/v3/middleware/recover"
-	"github.com/spf13/cobra"
 )
 
 var configFile string
@@ -98,7 +99,7 @@ var Cmd = &cobra.Command{
 			logger.Info("loading configured bucket credentials", "count", len(cfg.Buckets))
 			// Bucket credentials are encrypted before persistence and audited on read/write/delete/list.
 			for _, c := range cfg.Buckets {
-				cred := &models.S3Credential{
+				cred := &buckets.Credential{
 					CredentialID: c.CredentialID,
 					Bucket:       c.Bucket,
 					Provider:     c.Provider,
@@ -121,12 +122,12 @@ var Cmd = &cobra.Command{
 		var uM *urlmanager.Manager
 		if needsUrlManager {
 			uM = urlmanager.NewManager(database, cfg.Signing)
-			uM.RegisterSigner(common.S3Provider, s3.NewS3Signer(database))
-			uM.RegisterSigner(common.GCSProvider, gcs.NewGCSSigner(database))
-			uM.RegisterSigner(common.AzureProvider, azure.NewAzureSigner(database))
+			uM.RegisterSigner(address.S3Provider, s3.NewS3Signer(database))
+			uM.RegisterSigner(address.GCSProvider, gcs.NewGCSSigner(database))
+			uM.RegisterSigner(address.AzureProvider, azure.NewAzureSigner(database))
 			fSigner, fErr := file.NewFileSigner("/")
 			if fErr == nil {
-				uM.RegisterSigner(common.FileProvider, fSigner)
+				uM.RegisterSigner(address.FileProvider, fSigner)
 			} else {
 				logger.Warn("failed to initialize file signer", "err", fErr)
 			}
@@ -216,7 +217,7 @@ func loadConfiguredBucketScopes(ctx context.Context, database db.DatabaseInterfa
 		if cred == nil {
 			return fmt.Errorf("bucket_scopes[%d] bucket=%s credential not found", i, scope.Bucket)
 		}
-		if err := database.CreateBucketScope(ctx, &models.BucketScope{
+		if err := database.CreateBucketScope(ctx, &buckets.Scope{
 			Organization: scope.Organization,
 			ProjectID:    scope.ProjectID,
 			CredentialID: credentialID,

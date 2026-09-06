@@ -1,45 +1,12 @@
 package common
 
 import (
-	"bytes"
-	"context"
 	"encoding/json"
-	"errors"
-	"log/slog"
-	"strings"
 	"testing"
 
 	"github.com/calypr/syfon/apigen/server/drs"
-	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/models"
-	"github.com/calypr/syfon/internal/requestmeta"
 )
-
-func TestAuditS3CredentialAccess_LogsSuccessAndError(t *testing.T) {
-	orig := slog.Default()
-	var buf bytes.Buffer
-	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	slog.SetDefault(logger)
-	t.Cleanup(func() { slog.SetDefault(orig) })
-
-	ctx := requestmeta.WithRequestID(context.Background(), "req-abc")
-	AuditS3CredentialAccess(ctx, "read", "bucket-a", nil)
-
-	session := access.NewSession("gen3")
-	errCtx := access.WithSession(ctx, session)
-	AuditS3CredentialAccess(errCtx, "write", "bucket-b", errors.New("boom"))
-
-	out := buf.String()
-	if !strings.Contains(out, "s3 credential audit") || !strings.Contains(out, "request_id=req-abc") {
-		t.Fatalf("expected audit log with request id, got %q", out)
-	}
-	if !strings.Contains(out, "result=success") {
-		t.Fatalf("expected success audit log, got %q", out)
-	}
-	if !strings.Contains(out, "result=error") || !strings.Contains(out, "mode=gen3") {
-		t.Fatalf("expected gen3 error audit log, got %q", out)
-	}
-}
 
 func TestInternalObjectExternal(t *testing.T) {
 	obj := models.InternalObject{DrsObject: drs.DrsObject{Id: "obj-1", Name: Ptr("n")}}

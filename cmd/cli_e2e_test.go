@@ -10,21 +10,23 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
+
 	"github.com/calypr/syfon/internal/api/docs"
 	"github.com/calypr/syfon/internal/api/drsapi"
 	"github.com/calypr/syfon/internal/api/internaldrs"
 	"github.com/calypr/syfon/internal/api/metrics"
-	"github.com/calypr/syfon/internal/common"
+	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/config"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/db"
 	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/signer/file"
+	"github.com/calypr/syfon/internal/storage/address"
 	"github.com/calypr/syfon/internal/testutils"
 	"github.com/calypr/syfon/internal/urlmanager"
-	"github.com/gofiber/fiber/v3"
-	"github.com/spf13/cobra"
-	"github.com/spf13/pflag"
 )
 
 func executeRootCommand(t *testing.T, args ...string) (string, error) {
@@ -291,14 +293,14 @@ func newSyfonTestServer(t *testing.T) *fiberTestServer {
 	storageDir := t.TempDir()
 
 	database := testutils.NewInMemoryDB()
-	if err := database.SaveS3Credential(context.Background(), &models.S3Credential{
+	if err := database.SaveS3Credential(context.Background(), &buckets.Credential{
 		Bucket:   "syfon-bucket",
 		Provider: "file",
 		Endpoint: storageDir,
 	}); err != nil {
 		t.Fatalf("save test credential: %v", err)
 	}
-	if err := database.CreateBucketScope(context.Background(), &models.BucketScope{
+	if err := database.CreateBucketScope(context.Background(), &buckets.Scope{
 		Organization: "syfon",
 		ProjectID:    "e2e",
 		Bucket:       "syfon-bucket",
@@ -308,7 +310,7 @@ func newSyfonTestServer(t *testing.T) *fiberTestServer {
 
 	uM := urlmanager.NewManager(database, config.SigningConfig{DefaultExpirySeconds: 900})
 	fSigner, _ := file.NewFileSigner(storageDir)
-	uM.RegisterSigner(common.FileProvider, fSigner)
+	uM.RegisterSigner(address.FileProvider, fSigner)
 
 	app := fiber.New()
 	app.Get(config.RouteHealthz, func(c fiber.Ctx) error {

@@ -3,10 +3,10 @@ package crypto
 import (
 	"errors"
 
-	"github.com/calypr/syfon/internal/models"
+	"github.com/calypr/syfon/internal/buckets"
 )
 
-func PrepareS3CredentialForStorage(cred *models.S3Credential) (*models.S3Credential, error) {
+func PrepareS3CredentialForStorage(cred *buckets.Credential) (*buckets.Credential, error) {
 	if cred == nil {
 		return nil, errors.New("credential is required")
 	}
@@ -23,7 +23,7 @@ func PrepareS3CredentialForStorage(cred *models.S3Credential) (*models.S3Credent
 	return &out, nil
 }
 
-func ParseS3CredentialFromStorage(cred *models.S3Credential) (*models.S3Credential, error) {
+func ParseS3CredentialFromStorage(cred *buckets.Credential) (*buckets.Credential, error) {
 	if cred == nil {
 		return nil, errors.New("credential is required")
 	}

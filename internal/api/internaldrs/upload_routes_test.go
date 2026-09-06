@@ -9,14 +9,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/apigen/server/internalapi"
 	"github.com/calypr/syfon/internal/api/routeutil"
+	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/testutils"
-	"github.com/google/uuid"
 )
 
 func TestHandleInternalUploadBlank(t *testing.T) {
@@ -26,8 +28,8 @@ func TestHandleInternalUploadBlank(t *testing.T) {
 	body, _ := json.Marshal(internalapi.InternalUploadBlankRequest{Guid: &guid, Organization: &org, Project: &project})
 	rr := doInternalDRSTestRequest(httptest.NewRequest(http.MethodPost, "/data/upload", bytes.NewBuffer(body)), core.NewObjectManager(&testutils.MockDatabase{
 		Objects:     map[string]*drs.DrsObject{},
-		Credentials: map[string]models.S3Credential{"b1": {Bucket: "b1"}},
-		BucketScopes: map[string]models.BucketScope{
+		Credentials: map[string]buckets.Credential{"b1": {Bucket: "b1"}},
+		BucketScopes: map[string]buckets.Scope{
 			"syfon|e2e": {Organization: "syfon", ProjectID: "e2e", Bucket: "b1"},
 		},
 	}, &testutils.MockUrlManager{}))
@@ -49,8 +51,8 @@ func TestHandleInternalUploadBlank_ResolvesOrganizationProjectScope(t *testing.T
 	mockUM := &capturingMultipartURLManager{}
 	rr := doInternalDRSTestRequest(httptest.NewRequest(http.MethodPost, "/data/upload", bytes.NewBuffer(body)), core.NewObjectManager(&testutils.MockDatabase{
 		Objects:     map[string]*drs.DrsObject{},
-		Credentials: map[string]models.S3Credential{"b1": {Bucket: "b1"}},
-		BucketScopes: map[string]models.BucketScope{
+		Credentials: map[string]buckets.Credential{"b1": {Bucket: "b1"}},
+		BucketScopes: map[string]buckets.Scope{
 			"syfon|": {
 				Organization: "syfon",
 				Bucket:       "b1",
@@ -93,8 +95,8 @@ func TestHandleInternalUploadURL_MissingObjectResolvesOrganizationProjectScope(t
 	)
 	rr := doInternalDRSTestRequest(req, core.NewObjectManager(&testutils.MockDatabase{
 		Objects:     map[string]*drs.DrsObject{},
-		Credentials: map[string]models.S3Credential{"b1": {Bucket: "b1"}},
-		BucketScopes: map[string]models.BucketScope{
+		Credentials: map[string]buckets.Credential{"b1": {Bucket: "b1"}},
+		BucketScopes: map[string]buckets.Scope{
 			"syfon|": {
 				Organization: "syfon",
 				Bucket:       "b1",
@@ -125,8 +127,8 @@ func TestHandleInternalMultipartInit(t *testing.T) {
 	body, _ := json.Marshal(internalapi.InternalMultipartInitRequest{Guid: &guid, Key: &fileName, Organization: &org, Project: &project})
 	rr := doInternalDRSTestRequest(httptest.NewRequest(http.MethodPost, "/data/multipart/init", bytes.NewBuffer(body)), core.NewObjectManager(&testutils.MockDatabase{
 		Objects:     map[string]*drs.DrsObject{},
-		Credentials: map[string]models.S3Credential{"b1": {Bucket: "b1"}},
-		BucketScopes: map[string]models.BucketScope{
+		Credentials: map[string]buckets.Credential{"b1": {Bucket: "b1"}},
+		BucketScopes: map[string]buckets.Scope{
 			"syfon|e2e": {Organization: "syfon", ProjectID: "e2e", Bucket: "b1"},
 		},
 	}, &testutils.MockUrlManager{}))
@@ -153,8 +155,8 @@ func TestHandleInternalMultipartInit_ResolvesOrganizationProjectScope(t *testing
 	mockUM := &capturingMultipartURLManager{}
 	rr := doInternalDRSTestRequest(httptest.NewRequest(http.MethodPost, "/data/multipart/init", bytes.NewBuffer(body)), core.NewObjectManager(&testutils.MockDatabase{
 		Objects:     map[string]*drs.DrsObject{},
-		Credentials: map[string]models.S3Credential{"b1": {Bucket: "b1"}},
-		BucketScopes: map[string]models.BucketScope{
+		Credentials: map[string]buckets.Credential{"b1": {Bucket: "b1"}},
+		BucketScopes: map[string]buckets.Scope{
 			"syfon|": {
 				Organization: "syfon",
 				Bucket:       "b1",
@@ -184,8 +186,8 @@ func TestHandleInternalMultipartInit_PreservesRequestedKey(t *testing.T) {
 	mockUM := &capturingMultipartURLManager{}
 	rr := doInternalDRSTestRequest(httptest.NewRequest(http.MethodPost, "/data/multipart/init", bytes.NewBuffer(body)), core.NewObjectManager(&testutils.MockDatabase{
 		Objects:     map[string]*drs.DrsObject{},
-		Credentials: map[string]models.S3Credential{"b1": {Bucket: "b1"}},
-		BucketScopes: map[string]models.BucketScope{
+		Credentials: map[string]buckets.Credential{"b1": {Bucket: "b1"}},
+		BucketScopes: map[string]buckets.Scope{
 			"syfon|e2e": {Organization: "syfon", ProjectID: "e2e", Bucket: "b1"},
 		},
 	}, mockUM))
@@ -247,10 +249,10 @@ func TestHandleInternalMultipartInit_ExistingScopedObjectUsesMappedLocation(t *t
 				}},
 			},
 		},
-		Credentials: map[string]models.S3Credential{
+		Credentials: map[string]buckets.Credential{
 			"bforepc": {Bucket: "bforepc", Provider: "s3", Region: "us-west-2"},
 		},
-		BucketScopes: map[string]models.BucketScope{
+		BucketScopes: map[string]buckets.Scope{
 			"HTAN_INT|BForePC": {
 				Organization: "HTAN_INT",
 				ProjectID:    "BForePC",
@@ -298,8 +300,8 @@ func TestHandleInternalUploadURL_Gen3Unauthorized(t *testing.T) {
 func TestHandleInternalUploadURL_Branches(t *testing.T) {
 	db := &testutils.MockDatabase{
 		Objects:     map[string]*drs.DrsObject{},
-		Credentials: map[string]models.S3Credential{"b1": {Bucket: "b1"}},
-		BucketScopes: map[string]models.BucketScope{
+		Credentials: map[string]buckets.Credential{"b1": {Bucket: "b1"}},
+		BucketScopes: map[string]buckets.Scope{
 			"syfon|e2e": {Organization: "syfon", ProjectID: "e2e", Bucket: "b1"},
 		},
 	}
@@ -311,7 +313,7 @@ func TestHandleInternalUploadURL_Branches(t *testing.T) {
 }
 
 func TestHandleInternalUploadURL_MissingObjectRequiresScope(t *testing.T) {
-	db := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}, Credentials: map[string]models.S3Credential{"b1": {Bucket: "b1"}}}
+	db := &testutils.MockDatabase{Objects: map[string]*drs.DrsObject{}, Credentials: map[string]buckets.Credential{"b1": {Bucket: "b1"}}}
 	req := routeutil.WithPathParams(httptest.NewRequest(http.MethodGet, "/data/upload/abc", nil), map[string]string{"file_id": "abc"})
 	rr := doInternalDRSTestRequest(req, core.NewObjectManager(db, &testutils.MockUrlManager{}))
 	if rr.Code != http.StatusBadRequest {
@@ -334,10 +336,10 @@ func TestHandleInternalUploadURL_RewritesScopedObjectURL(t *testing.T) {
 				}},
 			},
 		},
-		Credentials: map[string]models.S3Credential{
+		Credentials: map[string]buckets.Credential{
 			"bforepc": {Bucket: "bforepc", Provider: "s3", Region: "us-west-2"},
 		},
-		BucketScopes: map[string]models.BucketScope{
+		BucketScopes: map[string]buckets.Scope{
 			"HTAN_INT|BForePC": {
 				Organization: "HTAN_INT",
 				ProjectID:    "BForePC",
@@ -365,10 +367,10 @@ func TestHandleInternalUploadURL_ResolvesRegisteredScopedObjectID(t *testing.T) 
 	ctx := t.Context()
 	database := testutils.NewInMemoryDB()
 	om := core.NewObjectManager(database, &capturingMultipartURLManager{})
-	if err := om.SaveS3Credential(ctx, &models.S3Credential{Bucket: "syfon-e2e-bucket", Provider: "s3", Region: "us-east-1"}); err != nil {
+	if err := om.SaveS3Credential(ctx, &buckets.Credential{Bucket: "syfon-e2e-bucket", Provider: "s3", Region: "us-east-1"}); err != nil {
 		t.Fatalf("SaveS3Credential failed: %v", err)
 	}
-	if err := om.CreateBucketScope(ctx, &models.BucketScope{
+	if err := om.CreateBucketScope(ctx, &buckets.Scope{
 		Organization: "syfon",
 		ProjectID:    "",
 		Bucket:       "syfon-e2e-bucket",
@@ -422,17 +424,17 @@ func TestHandleInternalUploadURL_ResolvesRegisteredProjectScopedObjectWithoutQue
 	ctx := t.Context()
 	database := testutils.NewInMemoryDB()
 	om := core.NewObjectManager(database, &capturingMultipartURLManager{})
-	if err := om.SaveS3Credential(ctx, &models.S3Credential{Bucket: "syfon-e2e-bucket", Provider: "s3", Region: "us-east-1"}); err != nil {
+	if err := om.SaveS3Credential(ctx, &buckets.Credential{Bucket: "syfon-e2e-bucket", Provider: "s3", Region: "us-east-1"}); err != nil {
 		t.Fatalf("SaveS3Credential failed: %v", err)
 	}
-	if err := om.CreateBucketScope(ctx, &models.BucketScope{
+	if err := om.CreateBucketScope(ctx, &buckets.Scope{
 		Organization: "syfon",
 		Bucket:       "syfon-e2e-bucket",
 		PathPrefix:   "program-root",
 	}); err != nil {
 		t.Fatalf("CreateBucketScope(org) failed: %v", err)
 	}
-	if err := om.CreateBucketScope(ctx, &models.BucketScope{
+	if err := om.CreateBucketScope(ctx, &buckets.Scope{
 		Organization: "syfon",
 		ProjectID:    "e2e",
 		Bucket:       "syfon-e2e-bucket",
@@ -500,10 +502,10 @@ func TestHandleInternalUploadURL_RepairsMalformedScopedObjectURL(t *testing.T) {
 				}},
 			},
 		},
-		Credentials: map[string]models.S3Credential{
+		Credentials: map[string]buckets.Credential{
 			"syfon-e2e-bucket": {Bucket: "syfon-e2e-bucket", Provider: "s3", Region: "us-west-2"},
 		},
-		BucketScopes: map[string]models.BucketScope{
+		BucketScopes: map[string]buckets.Scope{
 			"syfon|": {
 				Organization: "syfon",
 				Bucket:       "syfon-e2e-bucket",
@@ -551,10 +553,10 @@ func TestHandleInternalUploadURL_UsesScopedPathForMalformedObjectURL(t *testing.
 				}},
 			},
 		},
-		Credentials: map[string]models.S3Credential{
+		Credentials: map[string]buckets.Credential{
 			"syfon-e2e-bucket": {Bucket: "syfon-e2e-bucket", Provider: "s3", Region: "us-west-2"},
 		},
-		BucketScopes: map[string]models.BucketScope{
+		BucketScopes: map[string]buckets.Scope{
 			"syfon|": {
 				Organization: "syfon",
 				Bucket:       "syfon-e2e-bucket",
@@ -602,10 +604,10 @@ func TestHandleInternalUploadURL_UsesExplicitObjectKeyForExistingObject(t *testi
 				}},
 			},
 		},
-		Credentials: map[string]models.S3Credential{
+		Credentials: map[string]buckets.Credential{
 			"syfon-e2e-bucket": {Bucket: "syfon-e2e-bucket", Provider: "s3", Region: "us-west-2"},
 		},
-		BucketScopes: map[string]models.BucketScope{
+		BucketScopes: map[string]buckets.Scope{
 			"syfon|": {
 				Organization: "syfon",
 				Bucket:       "syfon-e2e-bucket",
@@ -650,10 +652,10 @@ func TestHandleInternalUploadURL_ExplicitScopeOverridesMalformedExistingObjectUR
 				}},
 			},
 		},
-		Credentials: map[string]models.S3Credential{
+		Credentials: map[string]buckets.Credential{
 			"syfon-e2e-bucket": {Bucket: "syfon-e2e-bucket", Provider: "s3", Region: "us-west-2"},
 		},
-		BucketScopes: map[string]models.BucketScope{
+		BucketScopes: map[string]buckets.Scope{
 			"syfon|": {
 				Organization: "syfon",
 				Bucket:       "syfon-e2e-bucket",
@@ -705,10 +707,10 @@ func TestHandleInternalUploadURL_ExplicitScopeIgnoresConflictingObjectMetadata(t
 				}},
 			},
 		},
-		Credentials: map[string]models.S3Credential{
+		Credentials: map[string]buckets.Credential{
 			"syfon-e2e-bucket": {Bucket: "syfon-e2e-bucket", Provider: "s3", Region: "us-west-2"},
 		},
-		BucketScopes: map[string]models.BucketScope{
+		BucketScopes: map[string]buckets.Scope{
 			"syfon|e2e": {
 				Organization: "syfon",
 				ProjectID:    "e2e",
@@ -753,7 +755,7 @@ func TestHandleInternalUploadURL_RejectsMalformedUnscopedObjectURL(t *testing.T)
 				}},
 			},
 		},
-		Credentials: map[string]models.S3Credential{
+		Credentials: map[string]buckets.Credential{
 			"syfon-e2e-bucket": {Bucket: "syfon-e2e-bucket", Provider: "s3", Region: "us-west-2"},
 		},
 	}
@@ -774,7 +776,7 @@ func TestHandleInternalUploadBulk_MixedResults(t *testing.T) {
 			Headers *[]string `json:"headers,omitempty"`
 			Url     string    `json:"url"`
 		}{Url: "s3://b1/prefix/from-existing.bin"}}}}},
-		Credentials: map[string]models.S3Credential{"b1": {Bucket: "b1", Provider: "s3", Region: "us-east-1"}},
+		Credentials: map[string]buckets.Credential{"b1": {Bucket: "b1", Provider: "s3", Region: "us-east-1"}},
 	}
 	body, _ := json.Marshal(internalapi.InternalUploadBulkRequest{Requests: []internalapi.InternalUploadBulkItem{{FileId: "obj-1"}, {FileId: ""}}})
 	rr := doInternalDRSTestRequest(httptest.NewRequest(http.MethodPost, "/data/upload/bulk", bytes.NewBuffer(body)), core.NewObjectManager(db, &testutils.MockUrlManager{}))

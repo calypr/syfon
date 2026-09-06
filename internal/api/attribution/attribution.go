@@ -11,10 +11,10 @@ import (
 
 	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/access"
-	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/requestmeta"
+	"github.com/calypr/syfon/internal/storage/address"
 )
 
 type AccessDetails struct {
@@ -210,7 +210,7 @@ func providerBucket(raw string) (string, string) {
 	if err != nil {
 		return "", ""
 	}
-	return common.ProviderFromScheme(u.Scheme), strings.TrimSpace(u.Host)
+	return address.ProviderFromScheme(u.Scheme), strings.TrimSpace(u.Host)
 }
 
 func sha256ForObject(obj *models.InternalObject) string {

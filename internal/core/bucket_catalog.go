@@ -12,10 +12,11 @@ import (
 	"github.com/calypr/syfon/apigen/server/drs"
 	syfoncommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/access"
-	"github.com/calypr/syfon/internal/common"
+	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/db"
 	"github.com/calypr/syfon/internal/faults"
 	"github.com/calypr/syfon/internal/models"
+	"github.com/calypr/syfon/internal/storage/address"
 	"github.com/calypr/syfon/internal/urlmanager"
 )
 
@@ -38,15 +39,15 @@ func newBucketCatalog(store db.CredentialStore, uM urlmanager.UrlManager, ttl ti
 	return catalog
 }
 
-func (c *bucketCatalog) listS3Credentials(ctx context.Context) ([]models.S3Credential, error) {
+func (c *bucketCatalog) listS3Credentials(ctx context.Context) ([]buckets.Credential, error) {
 	return c.db.ListS3Credentials(ctx)
 }
 
-func (c *bucketCatalog) getS3Credential(ctx context.Context, credentialID string) (*models.S3Credential, error) {
+func (c *bucketCatalog) getS3Credential(ctx context.Context, credentialID string) (*buckets.Credential, error) {
 	return c.db.GetS3Credential(ctx, credentialID)
 }
 
-func (c *bucketCatalog) saveS3Credential(ctx context.Context, cred *models.S3Credential) error {
+func (c *bucketCatalog) saveS3Credential(ctx context.Context, cred *buckets.Credential) error {
 	credentialID := c.credentialIDForCredential(*cred)
 	if err := c.db.SaveS3Credential(ctx, cred); err != nil {
 		return err
@@ -74,11 +75,11 @@ func (c *bucketCatalog) invalidateBucketSignerCache(bucket string) {
 	c.signerCacheInvalidator.InvalidateBucket(bucket)
 }
 
-func (c *bucketCatalog) listBucketScopes(ctx context.Context) ([]models.BucketScope, error) {
+func (c *bucketCatalog) listBucketScopes(ctx context.Context) ([]buckets.Scope, error) {
 	return c.db.ListBucketScopes(ctx)
 }
 
-func (c *bucketCatalog) createBucketScope(ctx context.Context, scope *models.BucketScope) error {
+func (c *bucketCatalog) createBucketScope(ctx context.Context, scope *buckets.Scope) error {
 	if err := c.db.CreateBucketScope(ctx, scope); err != nil {
 		return err
 	}
@@ -114,7 +115,7 @@ func (c *bucketCatalog) deleteBucketScope(ctx context.Context, organization, pro
 	return nil
 }
 
-func (c *bucketCatalog) lookupBucketScope(ctx context.Context, organization, project string) (models.BucketScope, bool, error) {
+func (c *bucketCatalog) lookupBucketScope(ctx context.Context, organization, project string) (buckets.Scope, bool, error) {
 	if scope, found, cached := c.bucketScopeCache.get(organization, project); cached {
 		return scope, found, nil
 	}
@@ -122,14 +123,14 @@ func (c *bucketCatalog) lookupBucketScope(ctx context.Context, organization, pro
 	scope, err := c.db.GetBucketScope(ctx, organization, project)
 	if err != nil {
 		if faults.IsNotFoundError(err) {
-			c.bucketScopeCache.set(models.BucketScope{Organization: organization, ProjectID: project}, false)
-			return models.BucketScope{}, false, nil
+			c.bucketScopeCache.set(buckets.Scope{Organization: organization, ProjectID: project}, false)
+			return buckets.Scope{}, false, nil
 		}
-		return models.BucketScope{}, false, err
+		return buckets.Scope{}, false, err
 	}
 	if scope == nil {
-		c.bucketScopeCache.set(models.BucketScope{Organization: organization, ProjectID: project}, false)
-		return models.BucketScope{}, false, nil
+		c.bucketScopeCache.set(buckets.Scope{Organization: organization, ProjectID: project}, false)
+		return buckets.Scope{}, false, nil
 	}
 
 	normalized := normalizeBucketScope(scope)
@@ -139,15 +140,15 @@ func (c *bucketCatalog) lookupBucketScope(ctx context.Context, organization, pro
 
 // The ObjectManager methods below preserve the core-facing operations used by
 // API packages while keeping catalog state private to this package.
-func (m *ObjectManager) ListS3Credentials(ctx context.Context) ([]models.S3Credential, error) {
+func (m *ObjectManager) ListS3Credentials(ctx context.Context) ([]buckets.Credential, error) {
 	return m.bucketCatalog.listS3Credentials(ctx)
 }
 
-func (m *ObjectManager) GetS3Credential(ctx context.Context, credentialID string) (*models.S3Credential, error) {
+func (m *ObjectManager) GetS3Credential(ctx context.Context, credentialID string) (*buckets.Credential, error) {
 	return m.bucketCatalog.getS3Credential(ctx, credentialID)
 }
 
-func (m *ObjectManager) SaveS3Credential(ctx context.Context, cred *models.S3Credential) error {
+func (m *ObjectManager) SaveS3Credential(ctx context.Context, cred *buckets.Credential) error {
 	return m.bucketCatalog.saveS3Credential(ctx, cred)
 }
 
@@ -155,7 +156,7 @@ func (m *ObjectManager) DeleteS3Credential(ctx context.Context, credentialID str
 	return m.bucketCatalog.deleteS3Credential(ctx, credentialID)
 }
 
-func (m *ObjectManager) ListBucketScopes(ctx context.Context) ([]models.BucketScope, error) {
+func (m *ObjectManager) ListBucketScopes(ctx context.Context) ([]buckets.Scope, error) {
 	return m.bucketCatalog.listBucketScopes(ctx)
 }
 
@@ -257,7 +258,7 @@ func (m *ObjectManager) listVisibleBucketsUncached(ctx context.Context) (map[str
 	return byCredential, nil
 }
 
-func (m *ObjectManager) listVisibleBucketsFromRows(ctx context.Context, lister db.BucketVisibilityLister, creds []models.S3Credential) (map[string]VisibleBucket, error) {
+func (m *ObjectManager) listVisibleBucketsFromRows(ctx context.Context, lister db.BucketVisibilityLister, creds []buckets.Credential) (map[string]VisibleBucket, error) {
 	restrictToResources := access.IsAuthzEnforced(ctx) &&
 		!access.HasMethodAccess(ctx, objectMethodRead, []string{"/programs"}) &&
 		!access.HasMethodAccess(ctx, objectMethodRead, []string{"/data_file"})
@@ -342,7 +343,7 @@ func (m *ObjectManager) listVisibleBucketsFromRows(ctx context.Context, lister d
 	return byCredential, nil
 }
 
-func (m *ObjectManager) CreateBucketScope(ctx context.Context, scope *models.BucketScope) error {
+func (m *ObjectManager) CreateBucketScope(ctx context.Context, scope *buckets.Scope) error {
 	return m.bucketCatalog.createBucketScope(ctx, scope)
 }
 
@@ -368,21 +369,21 @@ func (m *ObjectManager) listBucketsVisibleObjects(ctx context.Context) ([]models
 	return m.filterObjectsByMethod(ctx, objects, objectMethodRead), nil
 }
 
-func (c *bucketCatalog) credentialIDForCredential(cred models.S3Credential) string {
+func (c *bucketCatalog) credentialIDForCredential(cred buckets.Credential) string {
 	if credentialID := strings.TrimSpace(cred.CredentialID); credentialID != "" {
 		return credentialID
 	}
 	return strings.TrimSpace(cred.Bucket)
 }
 
-func (c *bucketCatalog) credentialIDForScope(scope models.BucketScope) string {
+func (c *bucketCatalog) credentialIDForScope(scope buckets.Scope) string {
 	if credentialID := strings.TrimSpace(scope.CredentialID); credentialID != "" {
 		return credentialID
 	}
 	return strings.TrimSpace(scope.Bucket)
 }
 
-func (c *bucketCatalog) credentialIDForAccessMethod(method drs.AccessMethod, creds []models.S3Credential) (string, bool) {
+func (c *bucketCatalog) credentialIDForAccessMethod(method drs.AccessMethod, creds []buckets.Credential) (string, bool) {
 	bucket, ok := c.bucketForAccessMethod(method, creds)
 	if !ok {
 		return "", false
@@ -395,7 +396,7 @@ func (c *bucketCatalog) credentialIDForAccessMethod(method drs.AccessMethod, cre
 	return bucket, true
 }
 
-func (c *bucketCatalog) bucketForAccessMethod(method drs.AccessMethod, creds []models.S3Credential) (string, bool) {
+func (c *bucketCatalog) bucketForAccessMethod(method drs.AccessMethod, creds []buckets.Credential) (string, bool) {
 	if method.AccessUrl == nil {
 		return "", false
 	}
@@ -403,18 +404,18 @@ func (c *bucketCatalog) bucketForAccessMethod(method drs.AccessMethod, creds []m
 	if raw == "" {
 		return "", false
 	}
-	if bucket, _, ok := common.ParseS3URL(raw); ok {
+	if bucket, _, ok := address.ParseS3URL(raw); ok {
 		return bucket, true
 	}
-	scheme := common.SchemeFromURL(raw)
-	if provider := common.ProviderFromScheme(scheme); provider == common.GCSProvider || provider == common.AzureProvider {
+	scheme := address.SchemeFromURL(raw)
+	if provider := address.ProviderFromScheme(scheme); provider == address.GCSProvider || provider == address.AzureProvider {
 		if parsed, err := url.Parse(raw); err == nil && strings.TrimSpace(parsed.Host) != "" {
 			return strings.TrimSpace(parsed.Host), true
 		}
 	}
 	cleanRaw := filepath.Clean(strings.TrimSpace(raw))
 	for _, cred := range creds {
-		if common.NormalizeProvider(cred.Provider, common.S3Provider) != common.FileProvider {
+		if address.NormalizeProvider(cred.Provider, address.S3Provider) != address.FileProvider {
 			continue
 		}
 		root := strings.TrimSpace(cred.Endpoint)
@@ -432,7 +433,7 @@ func (c *bucketCatalog) bucketForAccessMethod(method drs.AccessMethod, creds []m
 	return "", false
 }
 
-func (c *bucketCatalog) resolveBucketName(creds []models.S3Credential, bucketName string) (string, error) {
+func (c *bucketCatalog) resolveBucketName(creds []buckets.Credential, bucketName string) (string, error) {
 	if len(creds) == 0 {
 		return "", fmt.Errorf("no buckets configured")
 	}

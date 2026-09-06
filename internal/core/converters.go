@@ -12,6 +12,7 @@ import (
 	syfoncommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/models"
+	"github.com/calypr/syfon/internal/storage/address"
 )
 
 func EnforceCanonicalProjectScope(obj models.InternalObject, organization, project string) (models.InternalObject, error) {
@@ -105,8 +106,8 @@ func FirstSupportedAccessURL(obj *models.InternalObject) string {
 		if am.AccessUrl == nil || am.AccessUrl.Url == "" {
 			continue
 		}
-		scheme := common.SchemeFromURL(am.AccessUrl.Url)
-		if scheme != "" && common.ProviderFromScheme(scheme) == "" {
+		scheme := address.SchemeFromURL(am.AccessUrl.Url)
+		if scheme != "" && address.ProviderFromScheme(scheme) == "" {
 			continue
 		}
 		return am.AccessUrl.Url

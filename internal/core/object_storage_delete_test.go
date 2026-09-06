@@ -11,10 +11,12 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
+
 	"github.com/calypr/syfon/apigen/server/drs"
-	"github.com/calypr/syfon/internal/common"
+	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/faults"
 	"github.com/calypr/syfon/internal/models"
+	"github.com/calypr/syfon/internal/storage/address"
 	"github.com/calypr/syfon/internal/testutils"
 )
 
@@ -22,8 +24,8 @@ func TestStorageTargetFromURLVariants(t *testing.T) {
 	t.Run("file backed bucket resolves to local filesystem path", func(t *testing.T) {
 		root := t.TempDir()
 		om := NewObjectManager(&testutils.MockDatabase{
-			Credentials: map[string]models.S3Credential{
-				"bucket": {Bucket: "bucket", Provider: common.FileProvider, Endpoint: root},
+			Credentials: map[string]buckets.Credential{
+				"bucket": {Bucket: "bucket", Provider: address.FileProvider, Endpoint: root},
 			},
 		}, &capturingURLManager{})
 
@@ -34,7 +36,7 @@ func TestStorageTargetFromURLVariants(t *testing.T) {
 		if !ok {
 			t.Fatal("expected target to resolve")
 		}
-		if target.provider != common.FileProvider {
+		if target.provider != address.FileProvider {
 			t.Fatalf("unexpected provider: %+v", target)
 		}
 		if want := filepath.Join(root, "a", "b.txt"); target.path != want {
@@ -48,7 +50,7 @@ func TestStorageTargetFromURLVariants(t *testing.T) {
 		if err != nil {
 			t.Fatalf("storageTargetFromURL failed: %v", err)
 		}
-		if !ok || target.provider != common.FileProvider || target.path != "/tmp/example.txt" {
+		if !ok || target.provider != address.FileProvider || target.path != "/tmp/example.txt" {
 			t.Fatalf("unexpected target: %+v ok=%v", target, ok)
 		}
 	})
@@ -75,13 +77,13 @@ func TestDeleteStorageTargetFileProvider(t *testing.T) {
 	}
 
 	om := NewObjectManager(&testutils.MockDatabase{}, &capturingURLManager{})
-	if err := om.deleteStorageTarget(context.Background(), storageTarget{provider: common.FileProvider, path: targetPath}); err != nil {
+	if err := om.deleteStorageTarget(context.Background(), storageTarget{provider: address.FileProvider, path: targetPath}); err != nil {
 		t.Fatalf("deleteStorageTarget(existing) failed: %v", err)
 	}
 	if _, err := os.Stat(targetPath); !os.IsNotExist(err) {
 		t.Fatalf("expected file to be removed, stat err=%v", err)
 	}
-	if err := om.deleteStorageTarget(context.Background(), storageTarget{provider: common.FileProvider, path: targetPath}); err != nil {
+	if err := om.deleteStorageTarget(context.Background(), storageTarget{provider: address.FileProvider, path: targetPath}); err != nil {
 		t.Fatalf("deleteStorageTarget(missing) failed: %v", err)
 	}
 }
@@ -106,10 +108,10 @@ func TestBulkDeleteObjectsWithStorageRejectsWithoutSideEffects(t *testing.T) {
 			"obj-2": {Id: "obj-2", AccessMethods: accessMethods("s3://bucket/path/b.txt")},
 			"obj-3": {Id: "obj-3", AccessMethods: accessMethods("s3://bucket/path/a.txt")},
 		},
-		Credentials: map[string]models.S3Credential{
+		Credentials: map[string]buckets.Credential{
 			"bucket": {
 				Bucket:    "bucket",
-				Provider:  common.S3Provider,
+				Provider:  address.S3Provider,
 				Region:    "us-east-1",
 				AccessKey: "test-key",
 				SecretKey: "test-secret",
@@ -148,8 +150,8 @@ func TestDeleteS3ObjectsChunksLargeBatches(t *testing.T) {
 	}
 	keys = append(keys, keys[0])
 	om := NewObjectManager(&testutils.MockDatabase{
-		Credentials: map[string]models.S3Credential{
-			"bucket": {Bucket: "bucket", Provider: common.S3Provider, Region: "us-east-1"},
+		Credentials: map[string]buckets.Credential{
+			"bucket": {Bucket: "bucket", Provider: address.S3Provider, Region: "us-east-1"},
 		},
 	}, &capturingURLManager{})
 
@@ -170,10 +172,10 @@ func TestDeleteS3ObjectsChunksLargeBatches(t *testing.T) {
 func TestStorageTargetsForScopedObjectPreserveStoredLocation(t *testing.T) {
 	checksum := strings.Repeat("a", 64)
 	om := NewObjectManager(&testutils.MockDatabase{
-		Credentials: map[string]models.S3Credential{
+		Credentials: map[string]buckets.Credential{
 			"syfon-e2e-bucket": {Bucket: "syfon-e2e-bucket", Provider: "s3", Region: "us-west-2"},
 		},
-		BucketScopes: map[string]models.BucketScope{
+		BucketScopes: map[string]buckets.Scope{
 			"syfon|": {
 				Organization: "syfon",
 				Bucket:       "syfon-e2e-bucket",
@@ -239,7 +241,7 @@ func (f *fakeS3ObjectDeleter) DeleteObjects(_ context.Context, input *awss3.Dele
 
 func replaceS3ObjectDeleterForTest(deleter s3ObjectDeleter) func() {
 	previous := newS3ObjectDeleter
-	newS3ObjectDeleter = func(context.Context, *models.S3Credential) (s3ObjectDeleter, error) {
+	newS3ObjectDeleter = func(context.Context, *buckets.Credential) (s3ObjectDeleter, error) {
 		return deleter, nil
 	}
 	return func() {
@@ -253,21 +255,21 @@ func TestScopedStorageHelperUtilities(t *testing.T) {
 		t.Fatalf("unexpected parsed s3 location: bucket=%q key=%q ok=%v", bucket, key, ok)
 	}
 
-	if got := normalizeScopedStorageKey("org/project/object.txt", []models.BucketScope{
+	if got := normalizeScopedStorageKey("org/project/object.txt", []buckets.Scope{
 		{PathPrefix: "org"},
 		{PathPrefix: "project"},
 	}); got != "org/project/object.txt" {
 		t.Fatalf("expected already-prefixed key to remain stable, got %q", got)
 	}
 
-	if got := normalizeScopedStorageKey("", []models.BucketScope{
+	if got := normalizeScopedStorageKey("", []buckets.Scope{
 		{PathPrefix: "org"},
 		{PathPrefix: "project"},
 	}); got != "org/project" {
 		t.Fatalf("unexpected empty-key normalization: %q", got)
 	}
 
-	if got := normalizeScopedStorageKey("Lab_Projects/Embedding_Rotation/object.txt", []models.BucketScope{
+	if got := normalizeScopedStorageKey("Lab_Projects/Embedding_Rotation/object.txt", []buckets.Scope{
 		{PathPrefix: "Lab_Projects"},
 		{PathPrefix: "Lab_Projects/Embedding_Rotation"},
 	}); got != "Lab_Projects/Embedding_Rotation/object.txt" {

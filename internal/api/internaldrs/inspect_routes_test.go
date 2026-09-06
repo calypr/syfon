@@ -14,24 +14,24 @@ import (
 	"time"
 
 	"github.com/calypr/syfon/apigen/server/drs"
+	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/core"
-	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/testutils"
 )
 
 func TestHandleInternalInspectObjectScopedSuccess(t *testing.T) {
 	body, _ := json.Marshal(internalInspectObjectRequest{Organization: "syfon", Project: "e2e", Key: "nested/file.bin", Scheme: "s3"})
 	db := &testutils.MockDatabase{
-		Credentials: map[string]models.S3Credential{
+		Credentials: map[string]buckets.Credential{
 			"b1": {Bucket: "b1"},
 		},
-		BucketScopes: map[string]models.BucketScope{
+		BucketScopes: map[string]buckets.Scope{
 			"syfon|":    {Organization: "syfon", Bucket: "b1", PathPrefix: "program-root"},
 			"syfon|e2e": {Organization: "syfon", ProjectID: "e2e", Bucket: "b1", PathPrefix: "project-root"},
 		},
 	}
 	om := core.NewObjectManager(db, &testutils.MockUrlManager{})
-	om.SetS3ObjectInspector(func(ctx context.Context, cred models.S3Credential, bucket string, key string) (*core.StorageObjectMetadata, error) {
+	om.SetS3ObjectInspector(func(ctx context.Context, cred buckets.Credential, bucket string, key string) (*core.StorageObjectMetadata, error) {
 		return &core.StorageObjectMetadata{Bucket: bucket, Key: key, Path: "file.bin", SizeBytes: 17, ETag: "etag-1", LastModTime: time.Date(2026, 6, 11, 1, 2, 3, 0, time.UTC)}, nil
 	})
 	req := withTestAuthzContext(httptest.NewRequest(http.MethodPost, "/data/inspect", bytes.NewBuffer(body)), "gen3", map[string]map[string]bool{"/organization/syfon/project/e2e": {"read": true}})
@@ -60,13 +60,13 @@ func TestHandleInternalInspectObjectScopedSuccess(t *testing.T) {
 func TestHandleInternalInspectObjectRawSuccess(t *testing.T) {
 	body, _ := json.Marshal(internalInspectObjectRequest{ObjectURL: "s3://b1/program-root/raw/file.bin"})
 	db := &testutils.MockDatabase{
-		Credentials: map[string]models.S3Credential{"b1": {Bucket: "b1"}},
-		BucketScopes: map[string]models.BucketScope{
+		Credentials: map[string]buckets.Credential{"b1": {Bucket: "b1"}},
+		BucketScopes: map[string]buckets.Scope{
 			"syfon|": {Organization: "syfon", Bucket: "b1", PathPrefix: "program-root"},
 		},
 	}
 	om := core.NewObjectManager(db, &testutils.MockUrlManager{})
-	om.SetS3ObjectInspector(func(ctx context.Context, cred models.S3Credential, bucket string, key string) (*core.StorageObjectMetadata, error) {
+	om.SetS3ObjectInspector(func(ctx context.Context, cred buckets.Credential, bucket string, key string) (*core.StorageObjectMetadata, error) {
 		return &core.StorageObjectMetadata{Bucket: bucket, Key: key, Path: "file.bin", SizeBytes: 99, ETag: "etag-raw"}, nil
 	})
 	req := withTestAuthzContext(httptest.NewRequest(http.MethodPost, "/data/inspect", bytes.NewBuffer(body)), "gen3", map[string]map[string]bool{"/organization/syfon": {"read": true}})
@@ -92,13 +92,13 @@ func TestHandleInternalInspectObjectMissingScope(t *testing.T) {
 func TestHandleInternalInspectObjectPermissionDenied(t *testing.T) {
 	body, _ := json.Marshal(internalInspectObjectRequest{ObjectURL: "s3://b1/program-root/raw/file.bin"})
 	db := &testutils.MockDatabase{
-		Credentials: map[string]models.S3Credential{"b1": {Bucket: "b1"}},
-		BucketScopes: map[string]models.BucketScope{
+		Credentials: map[string]buckets.Credential{"b1": {Bucket: "b1"}},
+		BucketScopes: map[string]buckets.Scope{
 			"syfon|": {Organization: "syfon", Bucket: "b1", PathPrefix: "program-root"},
 		},
 	}
 	om := core.NewObjectManager(db, &testutils.MockUrlManager{})
-	om.SetS3ObjectInspector(func(ctx context.Context, cred models.S3Credential, bucket string, key string) (*core.StorageObjectMetadata, error) {
+	om.SetS3ObjectInspector(func(ctx context.Context, cred buckets.Credential, bucket string, key string) (*core.StorageObjectMetadata, error) {
 		return nil, &core.StorageInspectError{Kind: core.StorageInspectPermissionDenied, Message: "provider denied access to s3://b1/program-root/raw/file.bin"}
 	})
 	req := withTestAuthzContext(httptest.NewRequest(http.MethodPost, "/data/inspect", bytes.NewBuffer(body)), "gen3", map[string]map[string]bool{"/organization/syfon": {"read": true}})
@@ -124,10 +124,10 @@ func TestHandleInternalInspectProjectRecords(t *testing.T) {
 	created := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
 	updated := time.Date(2026, 7, 1, 12, 30, 0, 0, time.UTC)
 	db := &testutils.MockDatabase{
-		Credentials: map[string]models.S3Credential{
+		Credentials: map[string]buckets.Credential{
 			"cred-1": {CredentialID: "cred-1", Bucket: "bucket-a", Provider: "s3"},
 		},
-		BucketScopes: map[string]models.BucketScope{
+		BucketScopes: map[string]buckets.Scope{
 			"syfon|e2e": {Organization: "syfon", ProjectID: "e2e", Bucket: "bucket-a", CredentialID: "cred-1", PathPrefix: "project-root"},
 		},
 		Objects: map[string]*drs.DrsObject{
@@ -264,10 +264,10 @@ func TestProjectRecordMatchesAnyPathPrefixAvoidsFalsePrefixMatches(t *testing.T)
 
 func TestHandleInternalInspectProjectScopes(t *testing.T) {
 	db := &testutils.MockDatabase{
-		Credentials: map[string]models.S3Credential{
+		Credentials: map[string]buckets.Credential{
 			"cred-1": {CredentialID: "cred-1", Bucket: "bucket-a", Provider: "s3"},
 		},
-		BucketScopes: map[string]models.BucketScope{
+		BucketScopes: map[string]buckets.Scope{
 			"syfon|":    {Organization: "syfon", Bucket: "bucket-a", CredentialID: "cred-1", PathPrefix: "program-root"},
 			"syfon|e2e": {Organization: "syfon", ProjectID: "e2e", Bucket: "bucket-a", CredentialID: "cred-1", PathPrefix: "project-root"},
 		},
@@ -318,23 +318,23 @@ func TestHandleInternalInspectProjectScopes(t *testing.T) {
 
 func TestHandleInternalInspectProjectBucketModesUsePrefixList(t *testing.T) {
 	db := &testutils.MockDatabase{
-		Credentials: map[string]models.S3Credential{
+		Credentials: map[string]buckets.Credential{
 			"cred-1": {CredentialID: "cred-1", Bucket: "bucket-a", Provider: "s3"},
 		},
-		BucketScopes: map[string]models.BucketScope{
+		BucketScopes: map[string]buckets.Scope{
 			"syfon|":    {Organization: "syfon", Bucket: "bucket-a", CredentialID: "cred-1", PathPrefix: "program-root"},
 			"syfon|e2e": {Organization: "syfon", ProjectID: "e2e", Bucket: "bucket-a", CredentialID: "cred-1", PathPrefix: "project-root"},
 		},
 	}
 	om := core.NewObjectManager(db, &testutils.MockUrlManager{})
 	inspectCalls := 0
-	om.SetS3ObjectInspector(func(ctx context.Context, cred models.S3Credential, bucket string, key string) (*core.StorageObjectMetadata, error) {
+	om.SetS3ObjectInspector(func(ctx context.Context, cred buckets.Credential, bucket string, key string) (*core.StorageObjectMetadata, error) {
 		inspectCalls++
 		return nil, nil
 	})
 	var listCalls []core.StoragePrefixListOptions
 	var listedPrefixes []string
-	om.SetS3PrefixListerWithOptions(func(ctx context.Context, cred models.S3Credential, bucket string, prefix string, options core.StoragePrefixListOptions) ([]core.StorageBucketObject, error) {
+	om.SetS3PrefixListerWithOptions(func(ctx context.Context, cred buckets.Credential, bucket string, prefix string, options core.StoragePrefixListOptions) ([]core.StorageBucketObject, error) {
 		if bucket != "bucket-a" {
 			t.Fatalf("unexpected list target bucket=%q prefix=%q", bucket, prefix)
 		}
@@ -427,23 +427,23 @@ func TestHandleInternalInspectProjectBucketModesUsePrefixList(t *testing.T) {
 
 func TestHandleInternalInspectProjectBucketInventoryListsProjectScope(t *testing.T) {
 	db := &testutils.MockDatabase{
-		Credentials: map[string]models.S3Credential{
+		Credentials: map[string]buckets.Credential{
 			"cred-1": {CredentialID: "cred-1", Bucket: "bucket-a", Provider: "s3"},
 		},
-		BucketScopes: map[string]models.BucketScope{
+		BucketScopes: map[string]buckets.Scope{
 			"syfon|":    {Organization: "syfon", Bucket: "bucket-a", CredentialID: "cred-1", PathPrefix: "program-root"},
 			"syfon|e2e": {Organization: "syfon", ProjectID: "e2e", Bucket: "bucket-a", CredentialID: "cred-1", PathPrefix: "project-root"},
 		},
 	}
 	om := core.NewObjectManager(db, &testutils.MockUrlManager{})
 	inspectCalls := 0
-	om.SetS3ObjectInspector(func(ctx context.Context, cred models.S3Credential, bucket string, key string) (*core.StorageObjectMetadata, error) {
+	om.SetS3ObjectInspector(func(ctx context.Context, cred buckets.Credential, bucket string, key string) (*core.StorageObjectMetadata, error) {
 		inspectCalls++
 		return nil, nil
 	})
 	var listCalls []core.StoragePrefixListOptions
 	var listedPrefixes []string
-	om.SetS3PrefixListerWithOptions(func(ctx context.Context, cred models.S3Credential, bucket string, prefix string, options core.StoragePrefixListOptions) ([]core.StorageBucketObject, error) {
+	om.SetS3PrefixListerWithOptions(func(ctx context.Context, cred buckets.Credential, bucket string, prefix string, options core.StoragePrefixListOptions) ([]core.StorageBucketObject, error) {
 		if bucket != "bucket-a" {
 			t.Fatalf("unexpected list target bucket=%q prefix=%q", bucket, prefix)
 		}
@@ -491,16 +491,16 @@ func TestHandleInternalInspectProjectBucketInventoryListsProjectScope(t *testing
 
 func TestHandleInternalInspectProjectBucketInventoryReturnsPartialListing(t *testing.T) {
 	db := &testutils.MockDatabase{
-		Credentials: map[string]models.S3Credential{
+		Credentials: map[string]buckets.Credential{
 			"cred-1": {CredentialID: "cred-1", Bucket: "bucket-a", Provider: "s3"},
 		},
-		BucketScopes: map[string]models.BucketScope{
+		BucketScopes: map[string]buckets.Scope{
 			"syfon|":    {Organization: "syfon", Bucket: "bucket-a", CredentialID: "cred-1", PathPrefix: "program-root"},
 			"syfon|e2e": {Organization: "syfon", ProjectID: "e2e", Bucket: "bucket-a", CredentialID: "cred-1", PathPrefix: "project-root"},
 		},
 	}
 	om := core.NewObjectManager(db, &testutils.MockUrlManager{})
-	om.SetS3PrefixListerWithOptions(func(context.Context, models.S3Credential, string, string, core.StoragePrefixListOptions) ([]core.StorageBucketObject, error) {
+	om.SetS3PrefixListerWithOptions(func(context.Context, buckets.Credential, string, string, core.StoragePrefixListOptions) ([]core.StorageBucketObject, error) {
 		return []core.StorageBucketObject{{
 				Provider:  "s3",
 				Bucket:    "bucket-a",
@@ -538,22 +538,22 @@ func TestHandleInternalInspectProjectBucketInventoryReturnsPartialListing(t *tes
 
 func TestHandleInternalInspectObjectBulkListValidatesExactKeyWithoutHead(t *testing.T) {
 	db := &testutils.MockDatabase{
-		Credentials: map[string]models.S3Credential{
+		Credentials: map[string]buckets.Credential{
 			"cred-1": {CredentialID: "cred-1", Bucket: "bucket-a", Provider: "s3"},
 		},
-		BucketScopes: map[string]models.BucketScope{
+		BucketScopes: map[string]buckets.Scope{
 			"syfon|e2e": {Organization: "syfon", ProjectID: "e2e", Bucket: "bucket-a", CredentialID: "cred-1", PathPrefix: "project-root"},
 		},
 	}
 	om := core.NewObjectManager(db, &testutils.MockUrlManager{})
 	inspectCalls := 0
-	om.SetS3ObjectInspector(func(ctx context.Context, cred models.S3Credential, bucket string, key string) (*core.StorageObjectMetadata, error) {
+	om.SetS3ObjectInspector(func(ctx context.Context, cred buckets.Credential, bucket string, key string) (*core.StorageObjectMetadata, error) {
 		inspectCalls++
 		return nil, nil
 	})
 	var listedPrefixesMu sync.Mutex
 	var listedPrefixes []string
-	om.SetS3PrefixListerWithOptions(func(ctx context.Context, cred models.S3Credential, bucket string, prefix string, options core.StoragePrefixListOptions) ([]core.StorageBucketObject, error) {
+	om.SetS3PrefixListerWithOptions(func(ctx context.Context, cred buckets.Credential, bucket string, prefix string, options core.StoragePrefixListOptions) ([]core.StorageBucketObject, error) {
 		if bucket != "bucket-a" || !options.ExactPrefix || options.MaxKeys != 1 || options.IncludeHead {
 			t.Fatalf("unexpected bulk-list options bucket=%q options=%+v", bucket, options)
 		}
@@ -607,16 +607,16 @@ func TestHandleInternalInspectObjectBulkListValidatesExactKeyWithoutHead(t *test
 
 func TestHandleInternalInspectObjectBulkListDeduplicatesExactTargets(t *testing.T) {
 	db := &testutils.MockDatabase{
-		Credentials: map[string]models.S3Credential{
+		Credentials: map[string]buckets.Credential{
 			"cred-1": {CredentialID: "cred-1", Bucket: "bucket-a", Provider: "s3"},
 		},
-		BucketScopes: map[string]models.BucketScope{
+		BucketScopes: map[string]buckets.Scope{
 			"syfon|e2e": {Organization: "syfon", ProjectID: "e2e", Bucket: "bucket-a", CredentialID: "cred-1", PathPrefix: "project-root"},
 		},
 	}
 	om := core.NewObjectManager(db, &testutils.MockUrlManager{})
 	listCalls := 0
-	om.SetS3PrefixListerWithOptions(func(ctx context.Context, cred models.S3Credential, bucket string, prefix string, options core.StoragePrefixListOptions) ([]core.StorageBucketObject, error) {
+	om.SetS3PrefixListerWithOptions(func(ctx context.Context, cred buckets.Credential, bucket string, prefix string, options core.StoragePrefixListOptions) ([]core.StorageBucketObject, error) {
 		listCalls++
 		if bucket != "bucket-a" || prefix != "project-root/file.bin" || !options.ExactPrefix || options.MaxKeys != 1 {
 			t.Fatalf("unexpected bulk-list request bucket=%q prefix=%q options=%+v", bucket, prefix, options)
@@ -649,16 +649,16 @@ func TestHandleInternalInspectObjectBulkListDeduplicatesExactTargets(t *testing.
 
 func TestHandleInternalInspectObjectBulkListSharesRemoteEvidenceAcrossValidationExpectations(t *testing.T) {
 	db := &testutils.MockDatabase{
-		Credentials: map[string]models.S3Credential{
+		Credentials: map[string]buckets.Credential{
 			"cred-1": {CredentialID: "cred-1", Bucket: "bucket-a", Provider: "s3"},
 		},
-		BucketScopes: map[string]models.BucketScope{
+		BucketScopes: map[string]buckets.Scope{
 			"syfon|e2e": {Organization: "syfon", ProjectID: "e2e", Bucket: "bucket-a", CredentialID: "cred-1", PathPrefix: "project-root"},
 		},
 	}
 	om := core.NewObjectManager(db, &testutils.MockUrlManager{})
 	listCalls := 0
-	om.SetS3PrefixListerWithOptions(func(ctx context.Context, cred models.S3Credential, bucket string, prefix string, options core.StoragePrefixListOptions) ([]core.StorageBucketObject, error) {
+	om.SetS3PrefixListerWithOptions(func(ctx context.Context, cred buckets.Credential, bucket string, prefix string, options core.StoragePrefixListOptions) ([]core.StorageBucketObject, error) {
 		listCalls++
 		return []core.StorageBucketObject{{Provider: "s3", Bucket: bucket, Key: "project-root/file.bin", Path: "file.bin", SizeBytes: 17}}, nil
 	})
@@ -689,16 +689,16 @@ func TestHandleInternalInspectObjectBulkListSharesRemoteEvidenceAcrossValidation
 
 func TestHandleInternalInspectObjectBulkListCoalescesDensePrefixes(t *testing.T) {
 	db := &testutils.MockDatabase{
-		Credentials: map[string]models.S3Credential{
+		Credentials: map[string]buckets.Credential{
 			"cred-1": {CredentialID: "cred-1", Bucket: "bucket-a", Provider: "s3"},
 		},
-		BucketScopes: map[string]models.BucketScope{
+		BucketScopes: map[string]buckets.Scope{
 			"syfon|e2e": {Organization: "syfon", ProjectID: "e2e", Bucket: "bucket-a", CredentialID: "cred-1", PathPrefix: "project-root"},
 		},
 	}
 	om := core.NewObjectManager(db, &testutils.MockUrlManager{})
 	listCalls := 0
-	om.SetS3PrefixListerWithOptions(func(ctx context.Context, cred models.S3Credential, bucket string, prefix string, options core.StoragePrefixListOptions) ([]core.StorageBucketObject, error) {
+	om.SetS3PrefixListerWithOptions(func(ctx context.Context, cred buckets.Credential, bucket string, prefix string, options core.StoragePrefixListOptions) ([]core.StorageBucketObject, error) {
 		listCalls++
 		if bucket != "bucket-a" || prefix != "project-root/dense/" || !options.ExactPrefix || options.MaxKeys != 0 || options.IncludeHead {
 			t.Fatalf("unexpected coalesced LIST request bucket=%q prefix=%q options=%+v", bucket, prefix, options)

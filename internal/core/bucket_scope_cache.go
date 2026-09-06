@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/calypr/syfon/internal/models"
+	"github.com/calypr/syfon/internal/buckets"
 )
 
 type bucketScopeCache struct {
@@ -15,7 +15,7 @@ type bucketScopeCache struct {
 }
 
 type cachedBucketScope struct {
-	scope   models.BucketScope
+	scope   buckets.Scope
 	found   bool
 	expires time.Time
 }
@@ -27,9 +27,9 @@ func newBucketScopeCache(ttl time.Duration) *bucketScopeCache {
 	}
 }
 
-func (c *bucketScopeCache) get(organization, project string) (models.BucketScope, bool, bool) {
+func (c *bucketScopeCache) get(organization, project string) (buckets.Scope, bool, bool) {
 	if c == nil {
-		return models.BucketScope{}, false, false
+		return buckets.Scope{}, false, false
 	}
 	key := bucketScopeCacheKey(organization, project)
 	now := time.Now()
@@ -37,12 +37,12 @@ func (c *bucketScopeCache) get(organization, project string) (models.BucketScope
 	entry, ok := c.entries[key]
 	c.mu.RUnlock()
 	if !ok || now.After(entry.expires) {
-		return models.BucketScope{}, false, false
+		return buckets.Scope{}, false, false
 	}
 	return entry.scope, entry.found, true
 }
 
-func (c *bucketScopeCache) set(scope models.BucketScope, found bool) {
+func (c *bucketScopeCache) set(scope buckets.Scope, found bool) {
 	if c == nil {
 		return
 	}
@@ -69,11 +69,11 @@ func bucketScopeCacheKey(organization, project string) string {
 	return strings.TrimSpace(organization) + "\x00" + strings.TrimSpace(project)
 }
 
-func normalizeBucketScope(scope *models.BucketScope) models.BucketScope {
+func normalizeBucketScope(scope *buckets.Scope) buckets.Scope {
 	if scope == nil {
-		return models.BucketScope{}
+		return buckets.Scope{}
 	}
-	return models.BucketScope{
+	return buckets.Scope{
 		Organization: strings.TrimSpace(scope.Organization),
 		ProjectID:    strings.TrimSpace(scope.ProjectID),
 		CredentialID: strings.TrimSpace(scope.CredentialID),
