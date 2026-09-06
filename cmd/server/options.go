@@ -7,6 +7,7 @@ import (
 	"github.com/calypr/syfon/internal/api/internaldrs"
 	"github.com/calypr/syfon/internal/api/lfs"
 	"github.com/calypr/syfon/internal/api/metrics"
+	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/config"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/httpapi/middleware"
@@ -23,6 +24,7 @@ type serverRuntime struct {
 	providerEvents      usage.ProviderEventRecorder
 	serviceInfo         drs.Service
 	om                  *core.ObjectManager
+	bucketService       *buckets.Service
 	uM                  urlmanager.UrlManager
 	authzMiddleware     *middleware.AuthzMiddleware
 	requestIDMiddleware *middleware.RequestIDMiddleware
@@ -61,7 +63,7 @@ func WithMetricsRoutes() ServerOption {
 func WithInternalRoutes() ServerOption {
 	return func(rt *serverRuntime) {
 		api := rt.ensureAPIGroup()
-		internaldrs.RegisterInternalRoutes(api, rt.om)
+		internaldrs.RegisterInternalRoutes(api, rt.om, rt.bucketService)
 	}
 }
 

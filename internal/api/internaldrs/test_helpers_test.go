@@ -7,7 +7,6 @@ import (
 	"net/http/httptest"
 
 	"github.com/calypr/syfon/internal/access"
-	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/urlmanager"
 	"github.com/gofiber/fiber/v3"
 )
@@ -79,13 +78,13 @@ func (m *capturingMultipartURLManager) CompleteMultipartUpload(ctx context.Conte
 	return nil
 }
 
-func doInternalDRSTestRequest(req *http.Request, om *core.ObjectManager) *httptest.ResponseRecorder {
+func doInternalDRSTestRequest(req *http.Request, fixture internalDRSTestFixture) *httptest.ResponseRecorder {
 	app := fiber.New()
 	app.Use(func(c fiber.Ctx) error {
 		c.SetContext(req.Context())
 		return c.Next()
 	})
-	RegisterInternalRoutes(app, om)
+	RegisterInternalRoutes(app, fixture.ObjectManager, fixture.bucketService)
 
 	rr := httptest.NewRecorder()
 	resp, err := app.Test(req)
@@ -105,13 +104,13 @@ func doInternalDRSTestRequest(req *http.Request, om *core.ObjectManager) *httpte
 	return rr
 }
 
-func doInternalDRSTestRequestWithAlias(req *http.Request, om *core.ObjectManager, method string, pattern string, handler fiber.Handler) *httptest.ResponseRecorder {
+func doInternalDRSTestRequestWithAlias(req *http.Request, fixture internalDRSTestFixture, method string, pattern string, handler fiber.Handler) *httptest.ResponseRecorder {
 	app := fiber.New()
 	app.Use(func(c fiber.Ctx) error {
 		c.SetContext(req.Context())
 		return c.Next()
 	})
-	RegisterInternalRoutes(app, om)
+	RegisterInternalRoutes(app, fixture.ObjectManager, fixture.bucketService)
 	app.Add([]string{method}, pattern, handler)
 
 	rr := httptest.NewRecorder()

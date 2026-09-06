@@ -22,7 +22,7 @@ func TestStorageRepairInspectorReturnsCanonicalURL(t *testing.T) {
 		return &core.StorageObjectMetadata{Bucket: bucket, Key: key}, nil
 	})
 
-	got, err := (storageRepairInspector{om: om}).Inspect(context.Background(), repair.StorageInspectRequest{
+	got, err := (storageRepairInspector{om: om.ObjectManager}).Inspect(context.Background(), repair.StorageInspectRequest{
 		Organization: "org",
 		Project:      "proj",
 		ObjectURL:    " s3://b1/prefix/object.bin ",
@@ -41,7 +41,7 @@ func TestStorageRepairInspectorClassifiesMissingObject(t *testing.T) {
 		return nil, &core.StorageInspectError{Kind: core.StorageInspectObjectNotFound, Message: "provider could not find object"}
 	})
 
-	_, err := (storageRepairInspector{om: om}).Inspect(context.Background(), repair.StorageInspectRequest{ObjectURL: "s3://b1/prefix/object.bin"})
+	_, err := (storageRepairInspector{om: om.ObjectManager}).Inspect(context.Background(), repair.StorageInspectRequest{ObjectURL: "s3://b1/prefix/object.bin"})
 	if !errors.Is(err, repair.ErrStorageObjectNotFound) {
 		t.Fatalf("expected repair missing-object error, got %v", err)
 	}
@@ -53,7 +53,7 @@ func TestStorageRepairInspectorPreservesAuthorizationAndCredentialFailures(t *te
 		om.SetS3ObjectInspector(func(ctx context.Context, cred buckets.Credential, bucket, key string) (*core.StorageObjectMetadata, error) {
 			return nil, &core.StorageInspectError{Kind: core.StorageInspectPermissionDenied, Message: "provider denied access"}
 		})
-		_, err := (storageRepairInspector{om: om}).Inspect(policyTestContext("gen3", true, nil), repair.StorageInspectRequest{ObjectURL: "s3://b1/prefix/object.bin"})
+		_, err := (storageRepairInspector{om: om.ObjectManager}).Inspect(policyTestContext("gen3", true, nil), repair.StorageInspectRequest{ObjectURL: "s3://b1/prefix/object.bin"})
 		var inspectErr *core.StorageInspectError
 		if !errors.As(err, &inspectErr) || inspectErr.Kind != core.StorageInspectPermissionDenied {
 			t.Fatalf("expected permission-denied inspection error, got %v", err)
@@ -63,7 +63,7 @@ func TestStorageRepairInspectorPreservesAuthorizationAndCredentialFailures(t *te
 	t.Run("credential", func(t *testing.T) {
 		db := &testutils.MockDatabase{NoDefaultCreds: true}
 		om := newInternalDRSObjectManager(db, &testutils.MockUrlManager{})
-		_, err := (storageRepairInspector{om: om}).Inspect(context.Background(), repair.StorageInspectRequest{ObjectURL: "s3://missing/prefix/object.bin"})
+		_, err := (storageRepairInspector{om: om.ObjectManager}).Inspect(context.Background(), repair.StorageInspectRequest{ObjectURL: "s3://missing/prefix/object.bin"})
 		var inspectErr *core.StorageInspectError
 		if !errors.As(err, &inspectErr) || inspectErr.Kind != core.StorageInspectCredentialMissing {
 			t.Fatalf("expected credential-missing inspection error, got %v", err)
@@ -73,7 +73,7 @@ func TestStorageRepairInspectorPreservesAuthorizationAndCredentialFailures(t *te
 
 func TestStorageRepairInspectorRejectsMalformedTarget(t *testing.T) {
 	om := newInternalDRSObjectManager(storageRepairTestDatabase(), &testutils.MockUrlManager{})
-	_, err := (storageRepairInspector{om: om}).Inspect(context.Background(), repair.StorageInspectRequest{ObjectURL: "https://example.com/object.bin"})
+	_, err := (storageRepairInspector{om: om.ObjectManager}).Inspect(context.Background(), repair.StorageInspectRequest{ObjectURL: "https://example.com/object.bin"})
 	var inspectErr *core.StorageInspectError
 	if !errors.As(err, &inspectErr) || inspectErr.Kind != core.StorageInspectInvalidInput {
 		t.Fatalf("expected invalid-target inspection error, got %v", err)

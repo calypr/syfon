@@ -12,6 +12,7 @@ import (
 	"github.com/calypr/syfon/apigen/server/internalapi"
 	"github.com/calypr/syfon/internal/api/apiutil"
 	"github.com/calypr/syfon/internal/api/routeutil"
+	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/faults"
@@ -28,7 +29,7 @@ const (
 	maxInternalBulkOverwrite     = 1000
 )
 
-func RegisterInternalRoutes(router fiber.Router, om *core.ObjectManager) {
+func RegisterInternalRoutes(router fiber.Router, om *core.ObjectManager, bucketService *buckets.Service) {
 	router.Get("/", handleInternalListFiber(om))
 	router.Get(common.RouteInternalIndex, handleInternalListFiber(om))
 	router.Get(routeutil.FiberPath(common.RouteInternalIndexDetail), handleInternalGetFiber(om))
@@ -50,7 +51,7 @@ func RegisterInternalRoutes(router fiber.Router, om *core.ObjectManager) {
 	router.Post(common.RouteInternalRepairScopeAudit, handleInternalScopeRepairAuditFiber(om))
 	router.Post(common.RouteInternalRepairScopeApply, handleInternalScopeRepairApplyFiber(om))
 
-	registerInternalTransferRoutes(router, om)
+	registerInternalTransferRoutes(router, om, bucketService)
 }
 
 type bulkOverwriteRequest struct {

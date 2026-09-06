@@ -9,7 +9,12 @@ import (
 	"github.com/calypr/syfon/internal/usage"
 )
 
-func newInternalDRSObjectManager(store any, manager urlmanager.UrlManager) *core.ObjectManager {
+type internalDRSTestFixture struct {
+	*core.ObjectManager
+	bucketService *buckets.Service
+}
+
+func newInternalDRSObjectManager(store any, manager urlmanager.UrlManager) internalDRSTestFixture {
 	objectPorts := core.ObjectPorts{
 		Reader:        store.(objects.RecordReader),
 		Writer:        store.(objects.RecordWriter),
@@ -25,18 +30,21 @@ func newInternalDRSObjectManager(store any, manager urlmanager.UrlManager) *core
 		Authorized:    optionalInternalDRSPort[objects.OptionalAuthorizedQuery](store),
 	}
 	bucketService := newInternalDRSBucketService(store, manager, objectPorts)
-	return core.NewObjectManager(core.Dependencies{
-		Objects:       objectPorts,
-		BucketService: bucketService,
-		Transfers: core.TransferPorts{
-			Pending: store.(transfers.PendingStore),
-			Events:  store.(transfers.EventRecorder),
-		},
-		Usage: core.UsagePorts{
-			Counters:       store.(usage.FileCounterRecorder),
-			ProviderEvents: store.(usage.ProviderEventRecorder),
-		},
-	}, manager)
+	return internalDRSTestFixture{
+		ObjectManager: core.NewObjectManager(core.Dependencies{
+			Objects:       objectPorts,
+			BucketService: bucketService,
+			Transfers: core.TransferPorts{
+				Pending: store.(transfers.PendingStore),
+				Events:  store.(transfers.EventRecorder),
+			},
+			Usage: core.UsagePorts{
+				Counters:       store.(usage.FileCounterRecorder),
+				ProviderEvents: store.(usage.ProviderEventRecorder),
+			},
+		}, manager),
+		bucketService: bucketService,
+	}
 }
 
 func newInternalDRSBucketService(store any, manager urlmanager.UrlManager, objectPorts core.ObjectPorts) *buckets.Service {

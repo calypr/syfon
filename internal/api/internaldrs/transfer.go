@@ -17,6 +17,7 @@ import (
 	"github.com/calypr/syfon/internal/api/apiutil"
 	"github.com/calypr/syfon/internal/api/attribution"
 	"github.com/calypr/syfon/internal/api/routeutil"
+	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/config"
 	"github.com/calypr/syfon/internal/core"
@@ -30,7 +31,7 @@ import (
 
 var multipartUploadSessions sync.Map // uploadID -> multipartSession
 
-func registerInternalTransferRoutes(router fiber.Router, om *core.ObjectManager) {
+func registerInternalTransferRoutes(router fiber.Router, om *core.ObjectManager, bucketService *buckets.Service) {
 	router.Get(routeutil.FiberPath(common.RouteInternalDownload), func(c fiber.Ctx) error { return handleInternalDownloadFiber(c, om) })
 	router.Get(routeutil.FiberPath(common.RouteInternalDownloadPart), func(c fiber.Ctx) error { return handleInternalDownloadPartFiber(c, om) })
 	router.Post(common.RouteInternalUpload, handleInternalUploadBlankFiber(om))
@@ -49,7 +50,7 @@ func registerInternalTransferRoutes(router fiber.Router, om *core.ObjectManager)
 	router.Post(common.RouteInternalMultipartUpload, handleInternalMultipartUploadFiber(om))
 	router.Post(common.RouteInternalMultipartComplete, handleInternalMultipartCompleteFiber(om))
 
-	registerInternalBucketRoutes(router, om)
+	registerInternalBucketRoutes(router, om, bucketService)
 }
 
 func handleInternalDownloadFiber(c fiber.Ctx, om *core.ObjectManager) error {

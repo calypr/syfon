@@ -368,7 +368,7 @@ func TestHandleInternalList_PaginatesIDs(t *testing.T) {
 	}
 	app := fiber.New()
 	om := newInternalDRSObjectManager(mockDB, &testutils.MockUrlManager{})
-	RegisterInternalRoutes(app, om)
+	RegisterInternalRoutes(app, om.ObjectManager, om.bucketService)
 
 	req := httptest.NewRequest(http.MethodGet, "/index?limit=1&start=obj-1", nil)
 	resp, err := app.Test(req)
@@ -429,7 +429,7 @@ func TestHandleInternalList_FiltersByAccessURL(t *testing.T) {
 	}
 	app := fiber.New()
 	om := newInternalDRSObjectManager(mockDB, &testutils.MockUrlManager{})
-	RegisterInternalRoutes(app, om)
+	RegisterInternalRoutes(app, om.ObjectManager, om.bucketService)
 
 	req := httptest.NewRequest(http.MethodGet, "/index?url="+url.QueryEscape(offsetsURL), nil)
 	resp, err := app.Test(req)
@@ -463,7 +463,7 @@ func TestHandleInternalList_PagePaginatesIDs(t *testing.T) {
 	}
 	app := fiber.New()
 	om := newInternalDRSObjectManager(mockDB, &testutils.MockUrlManager{})
-	RegisterInternalRoutes(app, om)
+	RegisterInternalRoutes(app, om.ObjectManager, om.bucketService)
 
 	req := httptest.NewRequest(http.MethodGet, "/index?limit=1&page=1", nil)
 	resp, err := app.Test(req)
@@ -503,7 +503,7 @@ func TestHandleInternalList_LimitIsCappedAtTenThousand(t *testing.T) {
 	mockDB := &testutils.MockDatabase{Objects: records}
 	app := fiber.New()
 	om := newInternalDRSObjectManager(mockDB, &testutils.MockUrlManager{})
-	RegisterInternalRoutes(app, om)
+	RegisterInternalRoutes(app, om.ObjectManager, om.bucketService)
 
 	req := httptest.NewRequest(http.MethodGet, "/index?limit=999999", nil)
 	resp, err := app.Test(req)
@@ -545,7 +545,7 @@ func TestHandleInternalList_IgnoresLegacyPathQuery(t *testing.T) {
 	}
 	app := fiber.New()
 	om := newInternalDRSObjectManager(mockDB, &testutils.MockUrlManager{})
-	RegisterInternalRoutes(app, om)
+	RegisterInternalRoutes(app, om.ObjectManager, om.bucketService)
 
 	req := httptest.NewRequest(http.MethodGet, "/index?organization=org-a&project=proj-a&path=nested&limit=1", nil)
 	resp, err := app.Test(req)
@@ -749,7 +749,7 @@ func TestHandleInternalList_HashPagination(t *testing.T) {
 	}
 	app := fiber.New()
 	om := newInternalDRSObjectManager(mockDB, &testutils.MockUrlManager{})
-	RegisterInternalRoutes(app, om)
+	RegisterInternalRoutes(app, om.ObjectManager, om.bucketService)
 
 	req := httptest.NewRequest(http.MethodGet, "/index?hash=sha256:samehash&limit=1&page=1", nil)
 	resp, err := app.Test(req)
@@ -795,7 +795,7 @@ func TestHandleInternalBulkHashes_HashTypeFiltering(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/bulk/hashes", strings.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
 	om := newInternalDRSObjectManager(mockDB, &testutils.MockUrlManager{})
-	rr := doInternalDRSTestRequestWithAlias(req, om, http.MethodPost, "/bulk/hashes", handleInternalBulkHashesFiber(om))
+	rr := doInternalDRSTestRequestWithAlias(req, om, http.MethodPost, "/bulk/hashes", handleInternalBulkHashesFiber(om.ObjectManager))
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
@@ -841,7 +841,7 @@ func TestHandleInternalBulkSHA256Validity(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	app := fiber.New()
 	om := newInternalDRSObjectManager(mockDB, &testutils.MockUrlManager{})
-	app.Post("/index/bulk/sha256/validity", handleInternalBulkSHA256ValidityFiber(om))
+	app.Post("/index/bulk/sha256/validity", handleInternalBulkSHA256ValidityFiber(om.ObjectManager))
 	resp, err := app.Test(req)
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
@@ -881,7 +881,7 @@ func TestHandleInternalBulkMissingSHA256(t *testing.T) {
 	}}
 	om := newInternalDRSObjectManager(mockDB, &testutils.MockUrlManager{})
 	app := fiber.New()
-	app.Post("/index/bulk/sha256/missing", handleInternalBulkMissingSHA256Fiber(om))
+	app.Post("/index/bulk/sha256/missing", handleInternalBulkMissingSHA256Fiber(om.ObjectManager))
 	req := httptest.NewRequest(http.MethodPost, "/index/bulk/sha256/missing", strings.NewReader(`{"organization":"org","project":"project","sha256":["SHA256:`+present+`","`+missing+`","`+missing+`"]}`))
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := app.Test(req)
@@ -905,7 +905,7 @@ func TestHandleInternalBulkMissingSHA256(t *testing.T) {
 func TestHandleInternalBulkMissingSHA256RejectsInvalidChecksum(t *testing.T) {
 	om := newInternalDRSObjectManager(&testutils.MockDatabase{}, &testutils.MockUrlManager{})
 	app := fiber.New()
-	app.Post("/index/bulk/sha256/missing", handleInternalBulkMissingSHA256Fiber(om))
+	app.Post("/index/bulk/sha256/missing", handleInternalBulkMissingSHA256Fiber(om.ObjectManager))
 	req := httptest.NewRequest(http.MethodPost, "/index/bulk/sha256/missing", strings.NewReader(`{"organization":"org","project":"project","sha256":["not-a-sha256"]}`))
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := app.Test(req)
@@ -956,7 +956,7 @@ func TestHandleInternalBulkCreate_PersistsControlledAccess(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/bulk/create", strings.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
 	om := newInternalDRSObjectManager(mockDB, &testutils.MockUrlManager{})
-	rr := doInternalDRSTestRequestWithAlias(req, om, http.MethodPost, "/bulk/create", handleInternalBulkCreateFiber(om))
+	rr := doInternalDRSTestRequestWithAlias(req, om, http.MethodPost, "/bulk/create", handleInternalBulkCreateFiber(om.ObjectManager))
 
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d body=%s", rr.Code, rr.Body.String())
@@ -1300,7 +1300,7 @@ func TestRegisterInternalIndexRoutes_LegacyAliases(t *testing.T) {
 
 	app := fiber.New()
 	om := newInternalDRSObjectManager(mockDB, &testutils.MockUrlManager{})
-	RegisterInternalRoutes(app, om)
+	RegisterInternalRoutes(app, om.ObjectManager, om.bucketService)
 
 	t.Run("collection alias /index", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/index?organization=org", nil)

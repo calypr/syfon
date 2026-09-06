@@ -2,7 +2,9 @@ package internaldrs
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -16,6 +18,108 @@ import (
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/testutils"
 )
+
+type recordingBucketCredentialStore struct {
+	events *[]string
+}
+
+func (s *recordingBucketCredentialStore) GetS3Credential(_ context.Context, bucket string) (*buckets.Credential, error) {
+	*s.events = append(*s.events, "get:"+bucket)
+	return nil, errors.New("credential not found")
+}
+
+func (s *recordingBucketCredentialStore) ListS3Credentials(context.Context) ([]buckets.Credential, error) {
+	return nil, nil
+}
+
+func (s *recordingBucketCredentialStore) SaveS3Credential(_ context.Context, _ *buckets.Credential) error {
+	*s.events = append(*s.events, "save")
+	return nil
+}
+
+func (s *recordingBucketCredentialStore) DeleteS3Credential(context.Context, string) error {
+	return nil
+}
+
+type recordingBucketScopeStore struct {
+	events *[]string
+}
+
+func (s *recordingBucketScopeStore) CreateBucketScope(context.Context, *buckets.Scope) error {
+	*s.events = append(*s.events, "scope")
+	return nil
+}
+
+func (s *recordingBucketScopeStore) DeleteBucketScope(context.Context, string, string, string, string) error {
+	return nil
+}
+
+func (s *recordingBucketScopeStore) GetBucketScope(context.Context, string, string) (*buckets.Scope, error) {
+	return nil, nil
+}
+
+func (s *recordingBucketScopeStore) ListBucketScopes(context.Context) ([]buckets.Scope, error) {
+	return nil, nil
+}
+
+func TestHandleInternalPutBucket_CreatesScopeBeforeSavingCredential(t *testing.T) {
+	events := []string{}
+	credentials := &recordingBucketCredentialStore{events: &events}
+	scopes := &recordingBucketScopeStore{events: &events}
+	bucketService, err := buckets.NewService(buckets.Dependencies{
+		Credentials:     credentials,
+		CredentialAdmin: credentials,
+		Scopes:          scopes,
+		Fallback: func(context.Context) ([]buckets.VisibilityRow, error) {
+			return nil, nil
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("construct bucket service: %v", err)
+	}
+
+	provider := "file"
+	body, err := json.Marshal(bucketapi.PutBucketRequest{
+		Bucket:       "bucket-order",
+		Provider:     &provider,
+		Organization: "org",
+		ProjectId:    "project",
+	})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPut, "/data/buckets", bytes.NewReader(body))
+	req = req.WithContext(dataTestAuthContext(req.Context(), "gen3", true, map[string]map[string]bool{
+		"/programs/org/projects/project": {"create": true, "update": true},
+	}))
+
+	app := fiber.New()
+	app.Put("/data/buckets", func(c fiber.Ctx) error {
+		return handleInternalPutBucketFiber(c, bucketService)
+	})
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 201, got %d body=%s", resp.StatusCode, body)
+	}
+
+	var scopeIndex, saveIndex = -1, -1
+	for i, event := range events {
+		switch event {
+		case "scope":
+			scopeIndex = i
+		case "save":
+			saveIndex = i
+		}
+	}
+	if scopeIndex == -1 || saveIndex == -1 || scopeIndex >= saveIndex {
+		t.Fatalf("expected scope creation before credential save, events=%v", events)
+	}
+}
 
 func TestHandleInternalDeleteProject_RemovesGrantsAndBucketScopes(t *testing.T) {
 	mockDB := &testutils.MockDatabase{
@@ -260,7 +364,7 @@ func TestHandleInternalPutBucket_ReusesExistingPhysicalBucketCredential(t *testi
 func TestRegisterInternalRoutes_Smoke(t *testing.T) {
 	app := fiber.New()
 	om := newInternalDRSObjectManager(&testutils.MockDatabase{Objects: map[string]*objects.Record{}, Credentials: map[string]buckets.Credential{"b1": {Bucket: "b1"}}}, &testutils.MockUrlManager{})
-	RegisterInternalRoutes(app, om)
+	RegisterInternalRoutes(app, om.ObjectManager, om.bucketService)
 	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/data/upload/abc?bucket=b1", nil))
 	if err != nil {
 		t.Fatalf("request failed: %v", err)

@@ -261,6 +261,7 @@ var Cmd = &cobra.Command{
 			providerEvents:      backend.dependencies.Usage.ProviderEvents,
 			serviceInfo:         serviceInfoForBackend(cfg.Database.Sqlite != nil),
 			om:                  om,
+			bucketService:       bucketService,
 			uM:                  uM,
 			authzMiddleware:     authzMiddleware,
 			requestIDMiddleware: requestIDMiddleware,
