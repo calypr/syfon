@@ -3,6 +3,8 @@ package usage
 import (
 	"context"
 	"time"
+
+	"github.com/calypr/syfon/internal/objects"
 )
 
 // FileCounterRecorder records object upload and download counters.
@@ -17,6 +19,14 @@ type FileUsageReader interface {
 	ListFileUsageByObjectIDs(ctx context.Context, ids []string) ([]FileUsage, error)
 	ListFileUsage(ctx context.Context, limit, offset int, inactiveSince *time.Time) ([]FileUsage, error)
 	GetFileUsageSummary(ctx context.Context, inactiveSince *time.Time) (FileUsageSummary, error)
+}
+
+// ObjectReader reads objects for metrics authorization and fallback reports.
+// requiredMethod is supplied by callers so the object service can enforce the
+// same access method as the existing metrics paths.
+type ObjectReader interface {
+	GetObject(ctx context.Context, ident, requiredMethod string) (*objects.Record, error)
+	ListObjectIDsByScope(ctx context.Context, organization, project, requiredMethod string) ([]string, error)
 }
 
 // ProviderEventRecorder records provider-reported transfer events.

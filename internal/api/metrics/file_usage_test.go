@@ -22,6 +22,8 @@ type metricsObjectReaderAdapter struct {
 	db *testutils.MockDatabase
 }
 
+var _ usage.ObjectReader = metricsObjectReaderAdapter{}
+
 func (a metricsObjectReaderAdapter) ListObjectIDsByScope(ctx context.Context, organization, project, requiredMethod string) ([]string, error) {
 	return a.db.ListObjectIDsByScope(ctx, organization, project)
 }
@@ -60,7 +62,7 @@ func TestMetricsRoutes_ListAndSummary(t *testing.T) {
 	}
 
 	app := fiber.New()
-	RegisterMetricsRoutes(app, db)
+	registerMetricsRoutesForTest(app, db)
 
 	t.Run("list", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/index/v1/metrics/files?limit=10&offset=0&inactive_days=365", nil)
@@ -103,7 +105,7 @@ func TestMetricsRoutes_ListAndSummary(t *testing.T) {
 
 func TestMetricsRoutes_GetNotFoundAndValidation(t *testing.T) {
 	app := fiber.New()
-	RegisterMetricsRoutes(app, &testutils.MockDatabase{})
+	registerMetricsRoutesForTest(app, &testutils.MockDatabase{})
 
 	req := httptest.NewRequest(http.MethodGet, "/index/v1/metrics/files/missing", nil)
 	httpResp, err := app.Test(req)
@@ -176,7 +178,7 @@ func TestMetricsRoutes_BulkFiles(t *testing.T) {
 		}
 		return c.Next()
 	})
-	RegisterMetricsRoutes(app, db)
+	registerMetricsRoutesForTest(app, db)
 
 	req := httptest.NewRequest(http.MethodPost, "/index/v1/metrics/files/bulk?organization=cbds&project=end_to_end_test", strings.NewReader(`{"object_ids":["obj-a","obj-b","obj-c","missing","obj-a"],"inactive_days":30}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -243,7 +245,7 @@ func TestMetricsSummaryAuthzAndScope(t *testing.T) {
 		}
 		return c.Next()
 	})
-	RegisterMetricsRoutes(app, db)
+	registerMetricsRoutesForTest(app, db)
 
 	t.Run("scope reader can access scoped summary", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/index/v1/metrics/summary?organization=cbds&project=end_to_end_test", nil)
@@ -345,7 +347,7 @@ func TestMetricsFilesAuthzAndScope(t *testing.T) {
 		}
 		return c.Next()
 	})
-	RegisterMetricsRoutes(app, db)
+	registerMetricsRoutesForTest(app, db)
 
 	t.Run("scoped list returns only scoped objects", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/index/v1/metrics/files?organization=cbds&project=end_to_end_test&limit=10&offset=0", nil)
