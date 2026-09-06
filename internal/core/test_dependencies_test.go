@@ -9,7 +9,26 @@ import (
 )
 
 func newTestObjectManager(backend any, uM urlmanager.UrlManager) *ObjectManager {
-	return NewObjectManager(testDependencies(backend), uM)
+	deps := testDependencies(backend)
+	bucketDeps := buckets.Dependencies{
+		Credentials:     backend.(buckets.CredentialReader),
+		CredentialAdmin: backend.(buckets.CredentialAdmin),
+		Scopes:          backend.(buckets.ScopeStore),
+		Fallback:        NewBucketVisibilityFallback(deps.Objects.Scope, deps.Objects.Reader),
+	}
+	if optional, ok := backend.(buckets.VisibilityQuery); ok {
+		bucketDeps.Visibility = optional
+	}
+	var invalidator interface{ InvalidateBucket(string) }
+	if candidate, ok := uM.(interface{ InvalidateBucket(string) }); ok {
+		invalidator = candidate
+	}
+	service, err := buckets.NewService(bucketDeps, invalidator)
+	if err != nil {
+		panic(err)
+	}
+	deps.BucketService = service
+	return NewObjectManager(deps, uM)
 }
 
 // testDependencies composes the capabilities needed by ObjectManager from the
@@ -26,11 +45,6 @@ func testDependencies(backend any) Dependencies {
 			Content:       backend.(objects.ContentReader),
 			ChecksumScope: backend.(objects.ChecksumScopeQuery),
 			Scope:         backend.(objects.ScopeQuery),
-		},
-		Buckets: BucketPorts{
-			Credentials:     backend.(buckets.CredentialReader),
-			CredentialAdmin: backend.(buckets.CredentialAdmin),
-			Scopes:          backend.(buckets.ScopeStore),
 		},
 		Transfers: TransferPorts{
 			Pending: backend.(transfers.PendingStore),
@@ -52,9 +66,6 @@ func testDependencies(backend any) Dependencies {
 	}
 	if optional, ok := backend.(objects.OptionalAuthorizedQuery); ok {
 		deps.Objects.Authorized = optional
-	}
-	if optional, ok := backend.(buckets.OptionalVisibilityQuery); ok {
-		deps.Buckets.Visibility = optional
 	}
 	return deps
 }

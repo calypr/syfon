@@ -130,7 +130,7 @@ type storageInspectRequestCache struct {
 
 	credentials   map[string]storageInspectCredentialCacheEntry
 	s3Clients     map[string]*awss3.Client
-	visible       map[string]VisibleBucket
+	visible       map[string]buckets.VisibleBucket
 	visibleErr    error
 	visibleLoaded bool
 }
@@ -423,11 +423,11 @@ func (m *ObjectManager) inspectRawStorageObject(ctx context.Context, req Inspect
 	if err != nil {
 		return nil, err
 	}
-	visible, err := m.ListVisibleBuckets(ctx)
+	visible, err := m.listVisibleBucketsCached(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if !bucketVisibleToCaller(visible, bucket, m.bucketCatalog.credentialIDForCredential(*cred)) {
+	if !buckets.VisibleToCaller(visible, bucket, cred.CredentialID) {
 		return nil, &StorageInspectError{Kind: StorageInspectPermissionDenied, Message: fmt.Sprintf("bucket %q is not visible to the caller", bucket)}
 	}
 	if address.NormalizeProvider(cred.Provider, address.S3Provider) != address.S3Provider {
@@ -457,13 +457,13 @@ func (m *ObjectManager) credentialForBucket(ctx context.Context, bucket string) 
 			return cred, err
 		}
 	}
-	if cred, err := m.bucketCatalog.getS3Credential(ctx, bucket); err == nil && cred != nil {
+	if cred, err := m.bucketService.GetS3Credential(ctx, bucket); err == nil && cred != nil {
 		if cache := storageInspectCacheFromContext(ctx); cache != nil {
 			cache.setCredential(bucket, cred, nil)
 		}
 		return cred, nil
 	}
-	creds, err := m.bucketCatalog.listS3Credentials(ctx)
+	creds, err := m.bucketService.ListS3Credentials(ctx)
 	if err != nil {
 		if cache := storageInspectCacheFromContext(ctx); cache != nil {
 			cache.setCredential(bucket, nil, err)
@@ -486,16 +486,7 @@ func (m *ObjectManager) credentialForBucket(ctx context.Context, bucket string) 
 	return nil, err
 }
 
-func bucketVisibleToCaller(visible map[string]VisibleBucket, bucket string, credentialID string) bool {
-	for key, entry := range visible {
-		if strings.EqualFold(strings.TrimSpace(entry.Credential.Bucket), bucket) || strings.EqualFold(strings.TrimSpace(key), credentialID) || strings.EqualFold(strings.TrimSpace(entry.Credential.CredentialID), credentialID) {
-			return true
-		}
-	}
-	return false
-}
-
-func (m *ObjectManager) listVisibleBucketsCached(ctx context.Context) (map[string]VisibleBucket, error) {
+func (m *ObjectManager) listVisibleBucketsCached(ctx context.Context) (map[string]buckets.VisibleBucket, error) {
 	if cache := storageInspectCacheFromContext(ctx); cache != nil {
 		if visible, err, ok := cache.getVisible(); ok {
 			return visible, err
@@ -534,7 +525,7 @@ func (c *storageInspectRequestCache) setCredential(bucket string, cred *buckets.
 	c.credentials[key] = storageInspectCredentialCacheEntry{cred: &copy, err: err}
 }
 
-func (c *storageInspectRequestCache) getVisible() (map[string]VisibleBucket, error, bool) {
+func (c *storageInspectRequestCache) getVisible() (map[string]buckets.VisibleBucket, error, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if !c.visibleLoaded {
@@ -543,7 +534,7 @@ func (c *storageInspectRequestCache) getVisible() (map[string]VisibleBucket, err
 	return cloneVisibleBuckets(c.visible), c.visibleErr, true
 }
 
-func (c *storageInspectRequestCache) setVisible(visible map[string]VisibleBucket, err error) {
+func (c *storageInspectRequestCache) setVisible(visible map[string]buckets.VisibleBucket, err error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.visible = cloneVisibleBuckets(visible)
@@ -567,16 +558,16 @@ func (c *storageInspectRequestCache) setS3Client(key string, client *awss3.Clien
 	c.s3Clients[key] = client
 }
 
-func cloneVisibleBuckets(in map[string]VisibleBucket) map[string]VisibleBucket {
+func cloneVisibleBuckets(in map[string]buckets.VisibleBucket) map[string]buckets.VisibleBucket {
 	if in == nil {
 		return nil
 	}
-	out := make(map[string]VisibleBucket, len(in))
-	for key, bucket := range in {
-		programs := append([]string(nil), bucket.Programs...)
+	out := make(map[string]buckets.VisibleBucket, len(in))
+	for key, visible := range in {
+		programs := append([]string(nil), visible.Programs...)
 		sort.Strings(programs)
-		out[key] = VisibleBucket{
-			Credential: bucket.Credential,
+		out[key] = buckets.VisibleBucket{
+			Credential: visible.Credential,
 			Programs:   programs,
 		}
 	}

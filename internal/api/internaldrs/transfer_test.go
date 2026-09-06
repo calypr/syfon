@@ -17,7 +17,7 @@ func TestHandleInternalMultipartUpload_NotFound(t *testing.T) {
 	mockUM := &testutils.MockUrlManager{}
 	om := newInternalDRSObjectManager(mockDB, mockUM)
 	app := fiber.New()
-	app.Post("/multipart/upload", handleInternalMultipartUploadFiber(om))
+	app.Post("/multipart/upload", handleInternalMultipartUploadFiber(om.ObjectManager))
 
 	reqBody := internalapi.InternalMultipartUploadRequest{
 		UploadId:   "non-existent",
@@ -38,7 +38,7 @@ func TestHandleInternalMultipartComplete_NotFound(t *testing.T) {
 	mockUM := &testutils.MockUrlManager{}
 	om := newInternalDRSObjectManager(mockDB, mockUM)
 	app := fiber.New()
-	app.Post("/multipart/complete", handleInternalMultipartCompleteFiber(om))
+	app.Post("/multipart/complete", handleInternalMultipartCompleteFiber(om.ObjectManager))
 
 	reqBody := internalapi.InternalMultipartCompleteRequest{
 		UploadId: "non-existent",

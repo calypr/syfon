@@ -116,9 +116,24 @@ s3_credentials:
 
 	uM := urlmanager.NewManager(database, cfg.Signing)
 	uM.RegisterSigner(address.S3Provider, s3.NewS3Signer(database))
+	backend := sqliteServerBackend(database)
+	var invalidator interface{ InvalidateBucket(string) }
+	if candidate, ok := interface{}(uM).(interface{ InvalidateBucket(string) }); ok {
+		invalidator = candidate
+	}
+	bucketDependencies := backend.bucketDependencies
+	bucketDependencies.Fallback = core.NewBucketVisibilityFallback(
+		backend.dependencies.Objects.Scope,
+		backend.dependencies.Objects.Reader,
+	)
+	bucketService, err := buckets.NewService(bucketDependencies, invalidator)
+	if err != nil {
+		t.Fatalf("failed to initialize bucket service: %v", err)
+	}
+	backend.dependencies.BucketService = bucketService
 	app := fiber.New()
-	om := core.NewObjectManager(sqliteServerBackend(database).dependencies, uM)
-	internaldrs.RegisterInternalRoutes(app, om)
+	om := core.NewObjectManager(backend.dependencies, uM)
+	internaldrs.RegisterInternalRoutes(app, om, bucketService)
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

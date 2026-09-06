@@ -320,27 +320,30 @@ func newSyfonTestServer(t *testing.T) *fiberTestServer {
 		return c.SendString("OK")
 	})
 	api := app.Group("/")
+	objectPorts := core.ObjectPorts{
+		Reader:        database,
+		Writer:        database,
+		AccessMethods: database,
+		AccessPolicy:  database,
+		Aliases:       database,
+		Content:       database,
+		ChecksumScope: database,
+		Scope:         database,
+		Resources:     database,
+		Pages:         database,
+		URLPages:      database,
+		Authorized:    database,
+	}
+	bucketService, err := buckets.NewService(buckets.Dependencies{
+		Credentials: database, CredentialAdmin: database, Scopes: database, Visibility: database,
+		Fallback: core.NewBucketVisibilityFallback(objectPorts.Scope, objectPorts.Reader),
+	}, uM)
+	if err != nil {
+		t.Fatalf("construct bucket service: %v", err)
+	}
 	om := core.NewObjectManager(core.Dependencies{
-		Objects: core.ObjectPorts{
-			Reader:        database,
-			Writer:        database,
-			AccessMethods: database,
-			AccessPolicy:  database,
-			Aliases:       database,
-			Content:       database,
-			ChecksumScope: database,
-			Scope:         database,
-			Resources:     database,
-			Pages:         database,
-			URLPages:      database,
-			Authorized:    database,
-		},
-		Buckets: core.BucketPorts{
-			Credentials:     database,
-			CredentialAdmin: database,
-			Scopes:          database,
-			Visibility:      database,
-		},
+		Objects:       objectPorts,
+		BucketService: bucketService,
 		Transfers: core.TransferPorts{
 			Pending: database,
 			Events:  database,
@@ -368,7 +371,7 @@ func newSyfonTestServer(t *testing.T) *fiberTestServer {
 	})
 	docs.RegisterSwaggerRoutes(app)
 	metrics.RegisterMetricsRoutes(api, database, database, database, om)
-	internaldrs.RegisterInternalRoutes(api, om)
+	internaldrs.RegisterInternalRoutes(api, om, bucketService)
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

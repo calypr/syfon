@@ -9,7 +9,6 @@ import (
 	sycommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/buckets"
-	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/faults"
 	apimiddleware "github.com/calypr/syfon/internal/httpapi/middleware"
 )
@@ -93,11 +92,11 @@ func authorizeBucketScopeWrite(ctx context.Context, organization, project string
 	return faults.ErrUnauthorized
 }
 
-func authorizeBucketDelete(ctx context.Context, om *core.ObjectManager, bucket string) error {
+func authorizeBucketDelete(ctx context.Context, bucketService *buckets.Service, bucket string) error {
 	if apimiddleware.MissingGen3AuthHeader(ctx) {
 		return faults.ErrUnauthorized
 	}
-	scopes, err := om.ListBucketScopes(ctx)
+	scopes, err := bucketService.ListBucketScopes(ctx)
 	if err != nil {
 		return err
 	}

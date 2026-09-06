@@ -29,3 +29,10 @@ type VisibilityRow struct {
 	AccessType string
 	Resource   string
 }
+
+// VisibleBucket is the credential and resource projection exposed to callers
+// that need to authorize access to a physical bucket.
+type VisibleBucket struct {
+	Credential Credential
+	Programs   []string
+}

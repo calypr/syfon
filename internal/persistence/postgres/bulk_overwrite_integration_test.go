@@ -7,6 +7,7 @@ import (
 	"time"
 
 	sycommon "github.com/calypr/syfon/common"
+	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/core"
 	postgresdb "github.com/calypr/syfon/internal/persistence/postgres"
 
@@ -44,27 +45,30 @@ func TestPostgresBulkOverwriteObjects(t *testing.T) {
 	}
 
 	newName := "new"
+	objectPorts := core.ObjectPorts{
+		Reader:        db,
+		Writer:        db,
+		AccessMethods: db,
+		AccessPolicy:  db,
+		Aliases:       db,
+		Content:       db,
+		ChecksumScope: db,
+		Scope:         db,
+		Resources:     db,
+		Pages:         db,
+		URLPages:      db,
+		Authorized:    db,
+	}
+	bucketService, err := buckets.NewService(buckets.Dependencies{
+		Credentials: db, CredentialAdmin: db, Scopes: db, Visibility: db,
+		Fallback: core.NewBucketVisibilityFallback(objectPorts.Scope, objectPorts.Reader),
+	}, nil)
+	if err != nil {
+		t.Fatalf("construct bucket service: %v", err)
+	}
 	om := core.NewObjectManager(core.Dependencies{
-		Objects: core.ObjectPorts{
-			Reader:        db,
-			Writer:        db,
-			AccessMethods: db,
-			AccessPolicy:  db,
-			Aliases:       db,
-			Content:       db,
-			ChecksumScope: db,
-			Scope:         db,
-			Resources:     db,
-			Pages:         db,
-			URLPages:      db,
-			Authorized:    db,
-		},
-		Buckets: core.BucketPorts{
-			Credentials:     db,
-			CredentialAdmin: db,
-			Scopes:          db,
-			Visibility:      db,
-		},
+		Objects:       objectPorts,
+		BucketService: bucketService,
 		Transfers: core.TransferPorts{
 			Pending: db,
 			Events:  db,

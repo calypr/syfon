@@ -17,28 +17,21 @@ import (
 	"github.com/calypr/syfon/internal/storage/address"
 )
 
-func registerInternalBucketRoutes(router fiber.Router, om *core.ObjectManager) {
-	router.Get(common.RouteInternalBuckets, func(c fiber.Ctx) error { return handleInternalBucketsFiber(c, om) })
-	router.Put(common.RouteInternalBuckets, func(c fiber.Ctx) error { return handleInternalPutBucketFiber(c, om) })
-	router.Delete(routeutil.FiberPath(common.RouteInternalBucketDetail), func(c fiber.Ctx) error { return handleInternalDeleteBucketFiber(c, om) })
-	router.Get(routeutil.FiberPath(common.RouteInternalBucketScopes), func(c fiber.Ctx) error { return handleInternalListBucketScopesFiber(c, om) })
-	router.Post(routeutil.FiberPath(common.RouteInternalBucketScopes), func(c fiber.Ctx) error { return handleInternalCreateBucketScopeFiber(c, om) })
-	router.Delete(routeutil.FiberPath(common.RouteInternalBucketScopes), func(c fiber.Ctx) error { return handleInternalDeleteBucketScopeFiber(c, om) })
+func registerInternalBucketRoutes(router fiber.Router, om *core.ObjectManager, bucketService *buckets.Service) {
+	router.Get(common.RouteInternalBuckets, func(c fiber.Ctx) error { return handleInternalBucketsFiber(c, bucketService) })
+	router.Put(common.RouteInternalBuckets, func(c fiber.Ctx) error { return handleInternalPutBucketFiber(c, bucketService) })
+	router.Delete(routeutil.FiberPath(common.RouteInternalBucketDetail), func(c fiber.Ctx) error { return handleInternalDeleteBucketFiber(c, bucketService) })
+	router.Get(routeutil.FiberPath(common.RouteInternalBucketScopes), func(c fiber.Ctx) error { return handleInternalListBucketScopesFiber(c, bucketService) })
+	router.Post(routeutil.FiberPath(common.RouteInternalBucketScopes), func(c fiber.Ctx) error { return handleInternalCreateBucketScopeFiber(c, bucketService) })
+	router.Delete(routeutil.FiberPath(common.RouteInternalBucketScopes), func(c fiber.Ctx) error { return handleInternalDeleteBucketScopeFiber(c, bucketService) })
 	router.Delete(routeutil.FiberPath(common.RouteInternalProjectCleanup), func(c fiber.Ctx) error { return handleInternalDeleteProjectFiber(c, om) })
 }
 
-type projectCleanupResponse struct {
-	Organization        string `json:"organization"`
-	ProjectID           string `json:"project_id"`
-	DeletedObjects      int    `json:"deleted_objects"`
-	DeletedBucketScopes int    `json:"deleted_bucket_scopes"`
-}
-
-func handleInternalBucketsFiber(c fiber.Ctx, om *core.ObjectManager) error {
+func handleInternalBucketsFiber(c fiber.Ctx, bucketService *buckets.Service) error {
 	if apimiddleware.MissingGen3AuthHeader(c.Context()) {
 		return apiutil.HandleError(c, faults.ErrUnauthorized)
 	}
-	visible, err := om.ListVisibleBuckets(c.Context())
+	visible, err := bucketService.ListVisibleBuckets(c.Context())
 	if err != nil {
 		return apiutil.HandleError(c, err)
 	}
@@ -61,7 +54,7 @@ func handleInternalBucketsFiber(c fiber.Ctx, om *core.ObjectManager) error {
 	return c.JSON(resp)
 }
 
-func handleInternalPutBucketFiber(c fiber.Ctx, om *core.ObjectManager) error {
+func handleInternalPutBucketFiber(c fiber.Ctx, bucketService *buckets.Service) error {
 	var req bucketapi.PutBucketRequest
 	if err := decodeStrictJSON(c.Body(), &req); err != nil {
 		return apiutil.Reject(c, fiber.StatusBadRequest, "Invalid request body: "+err.Error())
@@ -99,7 +92,7 @@ func handleInternalPutBucketFiber(c fiber.Ctx, om *core.ObjectManager) error {
 	credentialID := ""
 	var existingCred *buckets.Credential
 	var credErr error
-	existingCred, credErr = om.GetS3Credential(c.Context(), req.Bucket)
+	existingCred, credErr = bucketService.GetS3Credential(c.Context(), req.Bucket)
 	if credErr != nil && !isCredentialNotFoundError(credErr) {
 		return apiutil.HandleError(c, credErr)
 	}
@@ -110,7 +103,7 @@ func handleInternalPutBucketFiber(c fiber.Ctx, om *core.ObjectManager) error {
 		credentialID = buckets.DeriveCredentialID(req.Bucket, bucketProvider, region, endpoint, accessKey)
 	}
 	if existingCred == nil {
-		existingCred, credErr = om.GetS3Credential(c.Context(), credentialID)
+		existingCred, credErr = bucketService.GetS3Credential(c.Context(), credentialID)
 	}
 	hasExistingCred := credErr == nil && existingCred != nil
 	if hasExistingCred && rawProvider == "" {
@@ -131,7 +124,7 @@ func handleInternalPutBucketFiber(c fiber.Ctx, om *core.ObjectManager) error {
 	}
 
 	if req.Organization != "" {
-		if err := om.CreateBucketScope(c.Context(), &buckets.Scope{
+		if err := bucketService.CreateBucketScope(c.Context(), &buckets.Scope{
 			Organization: req.Organization,
 			ProjectID:    req.ProjectId,
 			CredentialID: credentialID,
@@ -175,7 +168,7 @@ func handleInternalPutBucketFiber(c fiber.Ctx, om *core.ObjectManager) error {
 	if bucketProvider == address.S3Provider && (strings.TrimSpace(cred.AccessKey) == "" || strings.TrimSpace(cred.SecretKey) == "") {
 		return apiutil.Reject(c, fiber.StatusBadRequest, "access_key and secret_key are required for s3 credentials")
 	}
-	if err := om.SaveS3Credential(c.Context(), cred); err != nil {
+	if err := bucketService.SaveS3Credential(c.Context(), cred); err != nil {
 		return apiutil.HandleError(c, err)
 	}
 	return c.SendStatus(fiber.StatusCreated)
@@ -185,26 +178,26 @@ func isCredentialNotFoundError(err error) bool {
 	return err != nil && strings.EqualFold(strings.TrimSpace(err.Error()), "credential not found")
 }
 
-func handleInternalDeleteBucketFiber(c fiber.Ctx, om *core.ObjectManager) error {
+func handleInternalDeleteBucketFiber(c fiber.Ctx, bucketService *buckets.Service) error {
 	credentialID := strings.TrimSpace(c.Params("bucket"))
 	if credentialID == "" {
 		return apiutil.Reject(c, fiber.StatusBadRequest, "bucket name is required")
 	}
-	if err := authorizeBucketDelete(c.Context(), om, credentialID); err != nil {
+	if err := authorizeBucketDelete(c.Context(), bucketService, credentialID); err != nil {
 		return apiutil.HandleError(c, err)
 	}
-	if err := om.DeleteS3Credential(c.Context(), credentialID); err != nil {
+	if err := bucketService.DeleteS3Credential(c.Context(), credentialID); err != nil {
 		return apiutil.HandleError(c, err)
 	}
 	return c.SendStatus(fiber.StatusNoContent)
 }
 
-func handleInternalCreateBucketScopeFiber(c fiber.Ctx, om *core.ObjectManager) error {
+func handleInternalCreateBucketScopeFiber(c fiber.Ctx, bucketService *buckets.Service) error {
 	routeCredentialID := strings.TrimSpace(c.Params("bucket"))
 	if routeCredentialID == "" {
 		return apiutil.Reject(c, fiber.StatusBadRequest, "credential id is required")
 	}
-	cred, err := om.GetS3Credential(c.Context(), routeCredentialID)
+	cred, err := bucketService.GetS3Credential(c.Context(), routeCredentialID)
 	if err != nil {
 		return apiutil.HandleError(c, err)
 	}
@@ -226,7 +219,7 @@ func handleInternalCreateBucketScopeFiber(c fiber.Ctx, om *core.ObjectManager) e
 	if err != nil {
 		return apiutil.Reject(c, fiber.StatusBadRequest, err.Error())
 	}
-	if err := om.CreateBucketScope(c.Context(), &buckets.Scope{
+	if err := bucketService.CreateBucketScope(c.Context(), &buckets.Scope{
 		Organization: req.Organization,
 		ProjectID:    req.ProjectId,
 		CredentialID: cred.CredentialID,
@@ -238,7 +231,7 @@ func handleInternalCreateBucketScopeFiber(c fiber.Ctx, om *core.ObjectManager) e
 	return c.SendStatus(fiber.StatusCreated)
 }
 
-func handleInternalDeleteBucketScopeFiber(c fiber.Ctx, om *core.ObjectManager) error {
+func handleInternalDeleteBucketScopeFiber(c fiber.Ctx, bucketService *buckets.Service) error {
 	routeCredentialID := strings.TrimSpace(c.Params("bucket"))
 	if routeCredentialID == "" {
 		return apiutil.Reject(c, fiber.StatusBadRequest, "credential id is required")
@@ -255,7 +248,7 @@ func handleInternalDeleteBucketScopeFiber(c fiber.Ctx, om *core.ObjectManager) e
 	}
 	pathPrefix := ""
 	if scopePath != "" {
-		cred, err := om.GetS3Credential(c.Context(), routeCredentialID)
+		cred, err := bucketService.GetS3Credential(c.Context(), routeCredentialID)
 		if err != nil {
 			return apiutil.HandleError(c, err)
 		}
@@ -264,7 +257,7 @@ func handleInternalDeleteBucketScopeFiber(c fiber.Ctx, om *core.ObjectManager) e
 			return apiutil.Reject(c, fiber.StatusBadRequest, err.Error())
 		}
 	}
-	scopes, err := om.ListBucketScopes(c.Context())
+	scopes, err := bucketService.ListBucketScopes(c.Context())
 	if err != nil {
 		return apiutil.HandleError(c, err)
 	}
@@ -290,61 +283,13 @@ func handleInternalDeleteBucketScopeFiber(c fiber.Ctx, om *core.ObjectManager) e
 	if matchCount > 1 {
 		return apiutil.Reject(c, fiber.StatusConflict, "bucket scope delete matched multiple rows")
 	}
-	if err := om.DeleteBucketScope(c.Context(), organization, projectID, routeCredentialID, pathPrefix); err != nil {
+	if err := bucketService.DeleteBucketScope(c.Context(), organization, projectID, routeCredentialID, pathPrefix); err != nil {
 		return apiutil.HandleError(c, err)
 	}
 	return c.SendStatus(fiber.StatusNoContent)
 }
 
-func handleInternalDeleteProjectFiber(c fiber.Ctx, om *core.ObjectManager) error {
-	organization := strings.TrimSpace(c.Params("organization"))
-	projectID := strings.TrimSpace(c.Params("project_id"))
-	if organization == "" || projectID == "" {
-		return apiutil.Reject(c, fiber.StatusBadRequest, "organization and project_id are required")
-	}
-	if apimiddleware.MissingGen3AuthHeader(c.Context()) {
-		return apiutil.HandleError(c, faults.ErrUnauthorized)
-	}
-	if err := authorizeBucketScopeWrite(c.Context(), organization, projectID, "delete", "update"); err != nil {
-		return apiutil.HandleError(c, err)
-	}
-
-	deletedObjects, err := om.DeleteBulkByScope(c.Context(), organization, projectID)
-	if err != nil {
-		return apiutil.HandleError(c, err)
-	}
-
-	scopes, err := om.ListBucketScopes(c.Context())
-	if err != nil {
-		return apiutil.HandleError(c, err)
-	}
-	deletedScopes := 0
-	for _, scope := range scopes {
-		if strings.TrimSpace(scope.Organization) != organization || strings.TrimSpace(scope.ProjectID) != projectID {
-			continue
-		}
-		credentialID := strings.TrimSpace(scope.CredentialID)
-		if credentialID == "" {
-			credentialID = strings.TrimSpace(scope.Bucket)
-		}
-		if credentialID == "" {
-			continue
-		}
-		if err := om.DeleteBucketScope(c.Context(), organization, projectID, credentialID, scope.PathPrefix); err != nil {
-			return apiutil.HandleError(c, err)
-		}
-		deletedScopes++
-	}
-
-	return c.JSON(projectCleanupResponse{
-		Organization:        organization,
-		ProjectID:           projectID,
-		DeletedObjects:      deletedObjects,
-		DeletedBucketScopes: deletedScopes,
-	})
-}
-
-func handleInternalListBucketScopesFiber(c fiber.Ctx, om *core.ObjectManager) error {
+func handleInternalListBucketScopesFiber(c fiber.Ctx, bucketService *buckets.Service) error {
 	if apimiddleware.MissingGen3AuthHeader(c.Context()) {
 		return apiutil.HandleError(c, faults.ErrUnauthorized)
 	}
@@ -353,7 +298,7 @@ func handleInternalListBucketScopesFiber(c fiber.Ctx, om *core.ObjectManager) er
 		return apiutil.Reject(c, fiber.StatusBadRequest, "credential id is required")
 	}
 
-	scopes, err := om.ListBucketScopes(c.Context())
+	scopes, err := bucketService.ListBucketScopes(c.Context())
 	if err != nil {
 		return apiutil.HandleError(c, err)
 	}
@@ -365,7 +310,7 @@ func handleInternalListBucketScopesFiber(c fiber.Ctx, om *core.ObjectManager) er
 				continue
 			}
 			scheme := "s3"
-			if cred, err := om.GetS3Credential(c.Context(), scope.CredentialID); err == nil && cred != nil {
+			if cred, err := bucketService.GetS3Credential(c.Context(), scope.CredentialID); err == nil && cred != nil {
 				scheme = address.ProviderToScheme(cred.Provider)
 			}
 			path := fmt.Sprintf("%s://%s", scheme, scope.Bucket)

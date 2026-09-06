@@ -353,13 +353,13 @@ func (m *ObjectManager) resolveProjectStorageScopeTargetForMethod(ctx context.Co
 	}
 
 	scopes := make([]buckets.Scope, 0, 2)
-	if scope, found, err := m.bucketCatalog.lookupBucketScope(ctx, organization, ""); err != nil {
+	if scope, found, err := m.bucketService.LookupBucketScope(ctx, organization, ""); err != nil {
 		return nil, err
 	} else if found {
 		scopes = append(scopes, scope)
 	}
 	if project != "" {
-		if scope, found, err := m.bucketCatalog.lookupBucketScope(ctx, organization, project); err != nil {
+		if scope, found, err := m.bucketService.LookupBucketScope(ctx, organization, project); err != nil {
 			return nil, err
 		} else if found {
 			scopes = append(scopes, scope)
@@ -491,7 +491,7 @@ func (m *ObjectManager) ListValidateStorageObjects(ctx context.Context, items []
 		log.Printf("INFO: syfon_bulk_list_validate_done items=0 duration_ms=0")
 		return []StorageListValidationResult{}
 	}
-	visible, visibleErr := m.ListVisibleBuckets(ctx)
+	visible, visibleErr := m.listVisibleBucketsCached(ctx)
 	results := make([]StorageListValidationResult, len(items))
 	workByTarget := make(map[string]*storageListTargetWork)
 	buckets := map[string]struct{}{}
@@ -595,7 +595,7 @@ func (m *ObjectManager) ListValidateStorageObjects(ctx context.Context, items []
 	return results
 }
 
-func (m *ObjectManager) resolveListValidationTarget(ctx context.Context, req StorageListValidationRequest, index int, visible map[string]VisibleBucket, visibleErr error) (StorageListValidationResult, *storageListTargetWork, bool) {
+func (m *ObjectManager) resolveListValidationTarget(ctx context.Context, req StorageListValidationRequest, index int, visible map[string]buckets.VisibleBucket, visibleErr error) (StorageListValidationResult, *storageListTargetWork, bool) {
 	result := StorageListValidationResult{
 		ID:               strings.TrimSpace(req.ID),
 		ObjectURL:        strings.TrimSpace(req.ObjectURL),
@@ -636,7 +636,7 @@ func (m *ObjectManager) resolveListValidationTarget(ctx context.Context, req Sto
 		result.ValidationStatus = storageListValidationStatusForError(req)
 		return result, nil, false
 	}
-	if !bucketVisibleToCaller(visible, target.bucket, m.bucketCatalog.credentialIDForCredential(*cred)) {
+	if !buckets.VisibleToCaller(visible, target.bucket, cred.CredentialID) {
 		err := &StorageInspectError{Kind: StorageInspectPermissionDenied, Message: fmt.Sprintf("bucket %q is not visible to the caller", target.bucket)}
 		log.Printf("INFO: syfon_bulk_list_validate_visible id=%s bucket=%s key=%q visible_count=%d error=%q", result.ID, target.bucket, target.key, len(visible), err.Error())
 		result.Status, result.ErrorKind = classifyStorageProbeError(err)

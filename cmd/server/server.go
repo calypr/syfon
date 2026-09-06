@@ -55,9 +55,10 @@ func serviceInfoForBackend(sqlite bool) drs.Service {
 }
 
 type serverBackend struct {
-	dependencies  core.Dependencies
-	fileUsage     usage.FileUsageReader
-	transferQuery usage.TransferQuery
+	dependencies       core.Dependencies
+	bucketDependencies buckets.Dependencies
+	fileUsage          usage.FileUsageReader
+	transferQuery      usage.TransferQuery
 }
 
 func sqliteServerBackend(database *sqlite.SqliteDB) serverBackend {
@@ -68,11 +69,11 @@ func sqliteServerBackend(database *sqlite.SqliteDB) serverBackend {
 				Aliases: database, Content: database, ChecksumScope: database, Scope: database,
 				Resources: database, Pages: database, URLPages: database, Authorized: database,
 			},
-			Buckets: core.BucketPorts{
-				Credentials: database, CredentialAdmin: database, Scopes: database, Visibility: database,
-			},
 			Transfers: core.TransferPorts{Pending: database, Events: database},
 			Usage:     core.UsagePorts{Counters: database, ProviderEvents: database},
+		},
+		bucketDependencies: buckets.Dependencies{
+			Credentials: database, CredentialAdmin: database, Scopes: database, Visibility: database,
 		},
 		fileUsage:     database,
 		transferQuery: database,
@@ -87,11 +88,11 @@ func postgresServerBackend(database *postgres.PostgresDB) serverBackend {
 				Aliases: database, Content: database, ChecksumScope: database, Scope: database,
 				Resources: database, Pages: database, URLPages: database, Authorized: database,
 			},
-			Buckets: core.BucketPorts{
-				Credentials: database, CredentialAdmin: database, Scopes: database, Visibility: database,
-			},
 			Transfers: core.TransferPorts{Pending: database, Events: database},
 			Usage:     core.UsagePorts{Counters: database, ProviderEvents: database},
+		},
+		bucketDependencies: buckets.Dependencies{
+			Credentials: database, CredentialAdmin: database, Scopes: database, Visibility: database,
 		},
 		fileUsage:     database,
 		transferQuery: database,
@@ -160,6 +161,39 @@ var Cmd = &cobra.Command{
 
 		applyCredentialEncryptionConfig(cfg)
 
+		// Initialize storage signing before the bucket service so credential
+		// mutations can invalidate every registered provider cache.
+		needsUrlManager := cfg.Routes.Ga4gh || cfg.Routes.Internal || cfg.Routes.LFS
+		var uM *urlmanager.Manager
+		if needsUrlManager {
+			credentials := backend.bucketDependencies.Credentials
+			uM = urlmanager.NewManager(credentials, cfg.Signing)
+			uM.RegisterSigner(address.S3Provider, s3.NewS3Signer(credentials))
+			uM.RegisterSigner(address.GCSProvider, gcs.NewGCSSigner(credentials))
+			uM.RegisterSigner(address.AzureProvider, azure.NewAzureSigner(credentials))
+			fSigner, fErr := file.NewFileSigner("/")
+			if fErr == nil {
+				uM.RegisterSigner(address.FileProvider, fSigner)
+			} else {
+				logger.Warn("failed to initialize file signer", "err", fErr)
+			}
+		}
+
+		var invalidator interface{ InvalidateBucket(string) }
+		if uM != nil {
+			invalidator = uM
+		}
+		bucketDependencies := backend.bucketDependencies
+		bucketDependencies.Fallback = core.NewBucketVisibilityFallback(
+			backend.dependencies.Objects.Scope,
+			backend.dependencies.Objects.Reader,
+		)
+		bucketService, err := buckets.NewService(bucketDependencies, invalidator)
+		if err != nil {
+			fatal("failed to initialize bucket service", "err", err)
+		}
+		backend.dependencies.BucketService = bucketService
+
 		// Load configured bucket credentials if present.
 		if len(cfg.Buckets) > 0 {
 			encryptionEnabled, encErr := credentialcipher.CredentialEncryptionEnabled()
@@ -182,30 +216,13 @@ var Cmd = &cobra.Command{
 					SecretKey:    c.SecretKey,
 					Endpoint:     c.Endpoint,
 				}
-				if err := backend.dependencies.Buckets.CredentialAdmin.SaveS3Credential(cmd.Context(), cred); err != nil {
+				if err := bucketService.SaveS3Credential(cmd.Context(), cred); err != nil {
 					logger.Error("failed to save s3 credential", "bucket", c.Bucket, "err", err)
 				}
 			}
 		}
-		if err := loadConfiguredBucketScopes(cmd.Context(), backend.dependencies.Buckets.Credentials, backend.dependencies.Buckets.Scopes, cfg.BucketScopes, logger); err != nil {
+		if err := loadConfiguredBucketScopes(cmd.Context(), bucketService, bucketService, cfg.BucketScopes, logger); err != nil {
 			fatal("failed to load configured bucket scopes", "err", err)
-		}
-
-		// Init unified URL manager.
-		needsUrlManager := cfg.Routes.Ga4gh || cfg.Routes.Internal || cfg.Routes.LFS
-		var uM *urlmanager.Manager
-		if needsUrlManager {
-			credentials := backend.dependencies.Buckets.Credentials
-			uM = urlmanager.NewManager(credentials, cfg.Signing)
-			uM.RegisterSigner(address.S3Provider, s3.NewS3Signer(credentials))
-			uM.RegisterSigner(address.GCSProvider, gcs.NewGCSSigner(credentials))
-			uM.RegisterSigner(address.AzureProvider, azure.NewAzureSigner(credentials))
-			fSigner, fErr := file.NewFileSigner("/")
-			if fErr == nil {
-				uM.RegisterSigner(address.FileProvider, fSigner)
-			} else {
-				logger.Warn("failed to initialize file signer", "err", fErr)
-			}
 		}
 
 		// Init unified Object Manager.
@@ -244,6 +261,7 @@ var Cmd = &cobra.Command{
 			providerEvents:      backend.dependencies.Usage.ProviderEvents,
 			serviceInfo:         serviceInfoForBackend(cfg.Database.Sqlite != nil),
 			om:                  om,
+			bucketService:       bucketService,
 			uM:                  uM,
 			authzMiddleware:     authzMiddleware,
 			requestIDMiddleware: requestIDMiddleware,
@@ -282,7 +300,11 @@ var Cmd = &cobra.Command{
 	},
 }
 
-func loadConfiguredBucketScopes(ctx context.Context, credentials buckets.CredentialReader, scopeStore buckets.ScopeStore, scopes []config.BucketScopeConfig, logger *slog.Logger) error {
+type bucketScopeCreator interface {
+	CreateBucketScope(context.Context, *buckets.Scope) error
+}
+
+func loadConfiguredBucketScopes(ctx context.Context, credentials buckets.CredentialReader, scopeStore bucketScopeCreator, scopes []config.BucketScopeConfig, logger *slog.Logger) error {
 	if len(scopes) == 0 {
 		return nil
 	}
@@ -299,10 +321,14 @@ func loadConfiguredBucketScopes(ctx context.Context, credentials buckets.Credent
 		if cred == nil {
 			return fmt.Errorf("bucket_scopes[%d] bucket=%s credential not found", i, scope.Bucket)
 		}
+		resolvedCredentialID := strings.TrimSpace(cred.CredentialID)
+		if resolvedCredentialID == "" {
+			resolvedCredentialID = strings.TrimSpace(cred.Bucket)
+		}
 		if err := scopeStore.CreateBucketScope(ctx, &buckets.Scope{
 			Organization: scope.Organization,
 			ProjectID:    scope.ProjectID,
-			CredentialID: credentialID,
+			CredentialID: resolvedCredentialID,
 			Bucket:       cred.Bucket,
 			PathPrefix:   scope.PathPrefix,
 		}); err != nil {

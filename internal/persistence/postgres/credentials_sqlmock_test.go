@@ -14,6 +14,13 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 )
 
+var (
+	_ buckets.CredentialReader = (*PostgresDB)(nil)
+	_ buckets.CredentialAdmin  = (*PostgresDB)(nil)
+	_ buckets.ScopeStore       = (*PostgresDB)(nil)
+	_ buckets.VisibilityQuery  = (*PostgresDB)(nil)
+)
+
 func newMockPostgresDB(t *testing.T) (*PostgresDB, sqlmock.Sqlmock, *sql.DB) {
 	t.Helper()
 	db, mock, err := sqlmock.New()

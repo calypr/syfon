@@ -118,13 +118,13 @@ func (m *ObjectManager) ResolveScopedUploadTarget(ctx context.Context, organizat
 	}
 
 	scopes := make([]buckets.Scope, 0, 2)
-	if scope, found, err := m.bucketCatalog.lookupBucketScope(ctx, organization, ""); err != nil {
+	if scope, found, err := m.bucketService.LookupBucketScope(ctx, organization, ""); err != nil {
 		return CanonicalStorageTarget{}, err
 	} else if found {
 		scopes = append(scopes, scope)
 	}
 	if project != "" {
-		if scope, found, err := m.bucketCatalog.lookupBucketScope(ctx, organization, project); err != nil {
+		if scope, found, err := m.bucketService.LookupBucketScope(ctx, organization, project); err != nil {
 			return CanonicalStorageTarget{}, err
 		} else if found {
 			scopes = append(scopes, scope)
@@ -193,11 +193,7 @@ func newCanonicalStorageTarget(bucket string, key string) CanonicalStorageTarget
 
 // ResolveBucket validates a bucket name or returns the default one.
 func (m *ObjectManager) ResolveBucket(ctx context.Context, bucketName string) (string, error) {
-	creds, err := m.bucketCatalog.listS3Credentials(ctx)
-	if err != nil {
-		return "", err
-	}
-	return m.bucketCatalog.resolveBucketName(creds, bucketName)
+	return m.bucketService.ResolveBucket(ctx, bucketName)
 }
 
 func (m *ObjectManager) SignDownloadPart(ctx context.Context, bucket, accessURL string, start, end int64, options urlmanager.SignOptions) (string, error) {
@@ -280,7 +276,7 @@ func (m *ObjectManager) resolveLegacyS3DownloadURL(ctx context.Context, obj *obj
 		return accessURL, nil
 	}
 
-	credentials, err := m.bucketCatalog.listS3Credentials(ctx)
+	credentials, err := m.bucketService.ListS3Credentials(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -390,7 +386,7 @@ func (m *ObjectManager) bucketScopesForObject(ctx context.Context, obj *objects.
 	sort.Strings(orgs)
 	scopes := make([]buckets.Scope, 0, len(orgs)*2)
 	for _, org := range orgs {
-		if scope, found, err := m.bucketCatalog.lookupBucketScope(ctx, org, ""); err != nil {
+		if scope, found, err := m.bucketService.LookupBucketScope(ctx, org, ""); err != nil {
 			return nil, err
 		} else if found {
 			scopes = append(scopes, scope)
@@ -398,7 +394,7 @@ func (m *ObjectManager) bucketScopesForObject(ctx context.Context, obj *objects.
 		projects := append([]string(nil), authz[org]...)
 		sort.Strings(projects)
 		for _, project := range projects {
-			scope, found, err := m.bucketCatalog.lookupBucketScope(ctx, org, project)
+			scope, found, err := m.bucketService.LookupBucketScope(ctx, org, project)
 			if err != nil {
 				return nil, err
 			}
