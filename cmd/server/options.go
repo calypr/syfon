@@ -11,7 +11,6 @@ import (
 	"github.com/calypr/syfon/internal/config"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/httpapi/middleware"
-	"github.com/calypr/syfon/internal/urlmanager"
 	"github.com/calypr/syfon/internal/usage"
 	"github.com/gofiber/fiber/v3"
 )
@@ -25,7 +24,6 @@ type serverRuntime struct {
 	serviceInfo         drs.Service
 	om                  *core.ObjectManager
 	bucketService       *buckets.Service
-	uM                  urlmanager.UrlManager
 	authzMiddleware     *middleware.AuthzMiddleware
 	requestIDMiddleware *middleware.RequestIDMiddleware
 	apiGroup            fiber.Router

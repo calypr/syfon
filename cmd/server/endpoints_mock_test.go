@@ -189,7 +189,6 @@ func buildMockServerRouterWithRoutes(routes config.RoutesConfig) *fiber.App {
 			},
 		},
 	}
-	uM := &testutils.MockUrlManager{}
 	app := fiber.New()
 
 	logger := slog.New(slog.NewTextHandler(bytes.NewBuffer(nil), nil))
@@ -197,7 +196,7 @@ func buildMockServerRouterWithRoutes(routes config.RoutesConfig) *fiber.App {
 	authzMiddleware := middleware.NewAuthzMiddleware(logger, middleware.Options{Mode: "local", Evaluator: authRuntime})
 	requestIDMiddleware := middleware.NewRequestIDMiddleware(logger)
 	cfg := &config.Config{Routes: routes}
-	dependencies := mockServerDependencies(database, uM)
+	dependencies := mockServerDependencies(database, core.StoragePorts{})
 	rt := &serverRuntime{
 		app:                 app,
 		cfg:                 cfg,
@@ -205,9 +204,8 @@ func buildMockServerRouterWithRoutes(routes config.RoutesConfig) *fiber.App {
 		transferQuery:       database,
 		providerEvents:      database,
 		serviceInfo:         serviceInfoForBackend(true),
-		om:                  core.NewObjectManager(dependencies, uM),
+		om:                  core.NewObjectManager(dependencies),
 		bucketService:       dependencies.BucketService,
-		uM:                  uM,
 		authzMiddleware:     authzMiddleware,
 		requestIDMiddleware: requestIDMiddleware,
 	}
