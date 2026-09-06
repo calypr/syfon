@@ -10,7 +10,7 @@ import (
 
 	sycommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/faults"
-	"github.com/calypr/syfon/internal/models"
+	"github.com/calypr/syfon/internal/usage"
 )
 
 func (db *SqliteDB) flushObjectUsageEventsForIDsTx(ctx context.Context, tx *sql.Tx, ids []string) error {
@@ -80,11 +80,11 @@ func (db *SqliteDB) flushObjectUsageEventsForIDChunkTx(ctx context.Context, tx *
 	return execSQLiteDeleteByIDs(tx, "object_usage_event", ids)
 }
 
-func (db *SqliteDB) GetFileUsage(ctx context.Context, objectID string) (*models.FileUsage, error) {
+func (db *SqliteDB) GetFileUsage(ctx context.Context, objectID string) (*usage.FileUsage, error) {
 	if err := db.flushObjectUsageEvents(ctx); err != nil {
 		return nil, err
 	}
-	var usage models.FileUsage
+	var fileUsage usage.FileUsage
 	var lastUpload sql.NullTime
 	var lastDownload sql.NullTime
 	err := db.db.QueryRowContext(ctx, `
@@ -97,11 +97,11 @@ func (db *SqliteDB) GetFileUsage(ctx context.Context, objectID string) (*models.
 		LEFT JOIN object_usage u ON u.object_id = o.id
 		WHERE o.id = ?
 	`, objectID).Scan(
-		&usage.ObjectID,
-		&usage.Name,
-		&usage.Size,
-		&usage.UploadCount,
-		&usage.DownloadCount,
+		&fileUsage.ObjectID,
+		&fileUsage.Name,
+		&fileUsage.Size,
+		&fileUsage.UploadCount,
+		&fileUsage.DownloadCount,
 		&lastUpload,
 		&lastDownload,
 	)
@@ -113,25 +113,25 @@ func (db *SqliteDB) GetFileUsage(ctx context.Context, objectID string) (*models.
 	}
 	if lastUpload.Valid {
 		t := lastUpload.Time
-		usage.LastUploadTime = &t
+		fileUsage.LastUploadTime = &t
 	}
 	if lastDownload.Valid {
 		t := lastDownload.Time
-		usage.LastDownloadTime = &t
+		fileUsage.LastDownloadTime = &t
 	}
-	usage.LastAccessTime = latestTime(usage.LastUploadTime, usage.LastDownloadTime)
-	return &usage, nil
+	fileUsage.LastAccessTime = latestTime(fileUsage.LastUploadTime, fileUsage.LastDownloadTime)
+	return &fileUsage, nil
 }
 
-func (db *SqliteDB) ListFileUsageByObjectIDs(ctx context.Context, ids []string) ([]models.FileUsage, error) {
+func (db *SqliteDB) ListFileUsageByObjectIDs(ctx context.Context, ids []string) ([]usage.FileUsage, error) {
 	if len(ids) == 0 {
-		return []models.FileUsage{}, nil
+		return []usage.FileUsage{}, nil
 	}
 	if err := db.flushObjectUsageEvents(ctx); err != nil {
 		return nil, err
 	}
 
-	out := make([]models.FileUsage, 0, len(ids))
+	out := make([]usage.FileUsage, 0, len(ids))
 	for start := 0; start < len(ids); start += sqliteMaxParams {
 		end := start + sqliteMaxParams
 		if end > len(ids) {
@@ -166,7 +166,7 @@ func (db *SqliteDB) ListFileUsageByObjectIDs(ctx context.Context, ids []string) 
 	return out, nil
 }
 
-func (db *SqliteDB) ListFileUsage(ctx context.Context, limit, offset int, inactiveSince *time.Time) ([]models.FileUsage, error) {
+func (db *SqliteDB) ListFileUsage(ctx context.Context, limit, offset int, inactiveSince *time.Time) ([]usage.FileUsage, error) {
 	if err := db.flushObjectUsageEvents(ctx); err != nil {
 		return nil, err
 	}
@@ -206,7 +206,7 @@ func (db *SqliteDB) ListFileUsage(ctx context.Context, limit, offset int, inacti
 	return scanFileUsageRows(rows, limit)
 }
 
-func (db *SqliteDB) ListFileUsagePageByScope(ctx context.Context, organization, project string, limit, offset int, inactiveSince *time.Time) ([]models.FileUsage, error) {
+func (db *SqliteDB) ListFileUsagePageByScope(ctx context.Context, organization, project string, limit, offset int, inactiveSince *time.Time) ([]usage.FileUsage, error) {
 	resource, err := sycommon.ResourcePath(strings.TrimSpace(organization), strings.TrimSpace(project))
 	if err != nil {
 		return nil, err
@@ -214,35 +214,35 @@ func (db *SqliteDB) ListFileUsagePageByScope(ctx context.Context, organization, 
 	return db.listScopedFileUsagePage(ctx, []string{resource}, false, limit, offset, inactiveSince)
 }
 
-func (db *SqliteDB) ListFileUsagePageByResources(ctx context.Context, resources []string, includeUnscoped bool, limit, offset int, inactiveSince *time.Time) ([]models.FileUsage, error) {
+func (db *SqliteDB) ListFileUsagePageByResources(ctx context.Context, resources []string, includeUnscoped bool, limit, offset int, inactiveSince *time.Time) ([]usage.FileUsage, error) {
 	return db.listScopedFileUsagePage(ctx, resources, includeUnscoped, limit, offset, inactiveSince)
 }
 
-func (db *SqliteDB) GetFileUsageSummaryByScope(ctx context.Context, organization, project string, inactiveSince *time.Time) (models.FileUsageSummary, error) {
+func (db *SqliteDB) GetFileUsageSummaryByScope(ctx context.Context, organization, project string, inactiveSince *time.Time) (usage.FileUsageSummary, error) {
 	resource, err := sycommon.ResourcePath(strings.TrimSpace(organization), strings.TrimSpace(project))
 	if err != nil {
-		return models.FileUsageSummary{}, err
+		return usage.FileUsageSummary{}, err
 	}
 	return db.getScopedFileUsageSummary(ctx, []string{resource}, false, inactiveSince)
 }
 
-func (db *SqliteDB) GetFileUsageSummaryByResources(ctx context.Context, resources []string, includeUnscoped bool, inactiveSince *time.Time) (models.FileUsageSummary, error) {
+func (db *SqliteDB) GetFileUsageSummaryByResources(ctx context.Context, resources []string, includeUnscoped bool, inactiveSince *time.Time) (usage.FileUsageSummary, error) {
 	return db.getScopedFileUsageSummary(ctx, resources, includeUnscoped, inactiveSince)
 }
 
-func (db *SqliteDB) GetProjectRecordSummaryByScope(ctx context.Context, organization, project string) (models.FileUsageSummary, error) {
+func (db *SqliteDB) GetProjectRecordSummaryByScope(ctx context.Context, organization, project string) (usage.FileUsageSummary, error) {
 	resource, err := sycommon.ResourcePath(strings.TrimSpace(organization), strings.TrimSpace(project))
 	if err != nil {
-		return models.FileUsageSummary{}, err
+		return usage.FileUsageSummary{}, err
 	}
-	var summary models.FileUsageSummary
+	var summary usage.FileUsageSummary
 	var latest any
 	if err := db.db.QueryRowContext(ctx, `
 		SELECT COUNT(DISTINCT o.id), MAX(o.updated_time)
 		FROM drs_object o
 		INNER JOIN drs_object_controlled_access ca ON ca.object_id = o.id
 		WHERE ca.resource = ?`, resource).Scan(&summary.RecordCount, &latest); err != nil {
-		return models.FileUsageSummary{}, err
+		return usage.FileUsageSummary{}, err
 	}
 	if parsed, ok := parseSQLiteTransferTime(latest); ok {
 		t := parsed.UTC()
@@ -251,18 +251,18 @@ func (db *SqliteDB) GetProjectRecordSummaryByScope(ctx context.Context, organiza
 	return summary, nil
 }
 
-func scanFileUsageRows(rows *sql.Rows, capacity int) ([]models.FileUsage, error) {
-	out := make([]models.FileUsage, 0, capacity)
+func scanFileUsageRows(rows *sql.Rows, capacity int) ([]usage.FileUsage, error) {
+	out := make([]usage.FileUsage, 0, capacity)
 	for rows.Next() {
-		var usage models.FileUsage
+		var fileUsage usage.FileUsage
 		var lastUpload sql.NullTime
 		var lastDownload sql.NullTime
 		if err := rows.Scan(
-			&usage.ObjectID,
-			&usage.Name,
-			&usage.Size,
-			&usage.UploadCount,
-			&usage.DownloadCount,
+			&fileUsage.ObjectID,
+			&fileUsage.Name,
+			&fileUsage.Size,
+			&fileUsage.UploadCount,
+			&fileUsage.DownloadCount,
 			&lastUpload,
 			&lastDownload,
 		); err != nil {
@@ -270,14 +270,14 @@ func scanFileUsageRows(rows *sql.Rows, capacity int) ([]models.FileUsage, error)
 		}
 		if lastUpload.Valid {
 			t := lastUpload.Time
-			usage.LastUploadTime = &t
+			fileUsage.LastUploadTime = &t
 		}
 		if lastDownload.Valid {
 			t := lastDownload.Time
-			usage.LastDownloadTime = &t
+			fileUsage.LastDownloadTime = &t
 		}
-		usage.LastAccessTime = latestTime(usage.LastUploadTime, usage.LastDownloadTime)
-		out = append(out, usage)
+		fileUsage.LastAccessTime = latestTime(fileUsage.LastUploadTime, fileUsage.LastDownloadTime)
+		out = append(out, fileUsage)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -285,19 +285,19 @@ func scanFileUsageRows(rows *sql.Rows, capacity int) ([]models.FileUsage, error)
 	return out, nil
 }
 
-func (db *SqliteDB) listScopedFileUsagePage(ctx context.Context, resources []string, includeUnscoped bool, limit, offset int, inactiveSince *time.Time) ([]models.FileUsage, error) {
+func (db *SqliteDB) listScopedFileUsagePage(ctx context.Context, resources []string, includeUnscoped bool, limit, offset int, inactiveSince *time.Time) ([]usage.FileUsage, error) {
 	if err := db.flushObjectUsageEvents(ctx); err != nil {
 		return nil, err
 	}
 	if limit <= 0 {
-		return []models.FileUsage{}, nil
+		return []usage.FileUsage{}, nil
 	}
 	if offset < 0 {
 		offset = 0
 	}
 	resources = sycommon.NormalizeAccessResources(resources)
 	if len(resources) == 0 && !includeUnscoped {
-		return []models.FileUsage{}, nil
+		return []usage.FileUsage{}, nil
 	}
 
 	query, args := sqliteScopedFileUsageQuery(resources, includeUnscoped, inactiveSince, false)
@@ -311,24 +311,24 @@ func (db *SqliteDB) listScopedFileUsagePage(ctx context.Context, resources []str
 	return scanFileUsageRows(rows, limit)
 }
 
-func (db *SqliteDB) getScopedFileUsageSummary(ctx context.Context, resources []string, includeUnscoped bool, inactiveSince *time.Time) (models.FileUsageSummary, error) {
+func (db *SqliteDB) getScopedFileUsageSummary(ctx context.Context, resources []string, includeUnscoped bool, inactiveSince *time.Time) (usage.FileUsageSummary, error) {
 	if err := db.flushObjectUsageEvents(ctx); err != nil {
-		return models.FileUsageSummary{}, err
+		return usage.FileUsageSummary{}, err
 	}
 	resources = sycommon.NormalizeAccessResources(resources)
 	if len(resources) == 0 && !includeUnscoped {
-		return models.FileUsageSummary{}, nil
+		return usage.FileUsageSummary{}, nil
 	}
 
 	query, args := sqliteScopedFileUsageQuery(resources, includeUnscoped, inactiveSince, true)
-	var summary models.FileUsageSummary
+	var summary usage.FileUsageSummary
 	if err := db.db.QueryRowContext(ctx, query, args...).Scan(
 		&summary.TotalFiles,
 		&summary.TotalUploads,
 		&summary.TotalDownloads,
 		&summary.InactiveFileCount,
 	); err != nil {
-		return models.FileUsageSummary{}, err
+		return usage.FileUsageSummary{}, err
 	}
 	return summary, nil
 }
@@ -394,11 +394,11 @@ func sqliteScopedFileUsageQuery(resources []string, includeUnscoped bool, inacti
 	return query, args
 }
 
-func (db *SqliteDB) GetFileUsageSummary(ctx context.Context, inactiveSince *time.Time) (models.FileUsageSummary, error) {
+func (db *SqliteDB) GetFileUsageSummary(ctx context.Context, inactiveSince *time.Time) (usage.FileUsageSummary, error) {
 	if err := db.flushObjectUsageEvents(ctx); err != nil {
-		return models.FileUsageSummary{}, err
+		return usage.FileUsageSummary{}, err
 	}
-	summary := models.FileUsageSummary{}
+	summary := usage.FileUsageSummary{}
 	query := `
 		SELECT
 			COUNT(o.id) AS total_files,
@@ -418,7 +418,7 @@ func (db *SqliteDB) GetFileUsageSummary(ctx context.Context, inactiveSince *time
 		&summary.TotalDownloads,
 		&summary.InactiveFileCount,
 	); err != nil {
-		return models.FileUsageSummary{}, err
+		return usage.FileUsageSummary{}, err
 	}
 	return summary, nil
 }

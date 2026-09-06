@@ -7,14 +7,14 @@ import (
 	"strings"
 
 	sycommon "github.com/calypr/syfon/common"
-	"github.com/calypr/syfon/internal/models"
+	"github.com/calypr/syfon/internal/usage"
 
 	"github.com/lib/pq"
 )
 
-func (db *PostgresDB) GetTransferAttributionSummary(ctx context.Context, filter models.TransferAttributionFilter) (models.TransferAttributionSummary, error) {
+func (db *PostgresDB) GetTransferAttributionSummary(ctx context.Context, filter usage.Filter) (usage.Summary, error) {
 	where, args := transferAttributionWhere(filter)
-	var out models.TransferAttributionSummary
+	var out usage.Summary
 	err := db.db.QueryRowContext(ctx, `
 		SELECT
 			COUNT(*),
@@ -36,7 +36,7 @@ func (db *PostgresDB) GetTransferAttributionSummary(ctx context.Context, filter 
 	return out, err
 }
 
-func (db *PostgresDB) GetTransferAttributionBreakdown(ctx context.Context, filter models.TransferAttributionFilter, groupBy string) ([]models.TransferAttributionBreakdown, error) {
+func (db *PostgresDB) GetTransferAttributionBreakdown(ctx context.Context, filter usage.Filter, groupBy string) ([]usage.Breakdown, error) {
 	keyExpr, selectExpr := transferAttributionGroupExpr(groupBy)
 	where, args := transferAttributionWhere(filter)
 	query := fmt.Sprintf(`
@@ -59,9 +59,9 @@ func (db *PostgresDB) GetTransferAttributionBreakdown(ctx context.Context, filte
 	return scanTransferAttributionBreakdown(rows)
 }
 
-func (db *PostgresDB) GetTransferAttributionSummaryByResources(ctx context.Context, filter models.TransferAttributionFilter, resources []string) (models.TransferAttributionSummary, error) {
+func (db *PostgresDB) GetTransferAttributionSummaryByResources(ctx context.Context, filter usage.Filter, resources []string) (usage.Summary, error) {
 	where, args := transferAttributionWhereByResources(filter, resources)
-	var out models.TransferAttributionSummary
+	var out usage.Summary
 	err := db.db.QueryRowContext(ctx, `
 		SELECT
 			COUNT(*),
@@ -83,7 +83,7 @@ func (db *PostgresDB) GetTransferAttributionSummaryByResources(ctx context.Conte
 	return out, err
 }
 
-func (db *PostgresDB) GetTransferAttributionBreakdownByResources(ctx context.Context, filter models.TransferAttributionFilter, groupBy string, resources []string) ([]models.TransferAttributionBreakdown, error) {
+func (db *PostgresDB) GetTransferAttributionBreakdownByResources(ctx context.Context, filter usage.Filter, groupBy string, resources []string) ([]usage.Breakdown, error) {
 	keyExpr, selectExpr := transferAttributionGroupExpr(groupBy)
 	where, args := transferAttributionWhereByResources(filter, resources)
 	query := fmt.Sprintf(`
@@ -106,7 +106,7 @@ func (db *PostgresDB) GetTransferAttributionBreakdownByResources(ctx context.Con
 	return scanTransferAttributionBreakdown(rows)
 }
 
-func transferAttributionWhere(filter models.TransferAttributionFilter) (string, []any) {
+func transferAttributionWhere(filter usage.Filter) (string, []any) {
 	parts := make([]string, 0)
 	args := make([]any, 0)
 	add := func(column string, value any) {
@@ -125,10 +125,10 @@ func transferAttributionWhere(filter models.TransferAttributionFilter) (string, 
 	direction := strings.TrimSpace(filter.Direction)
 	if direction == "" {
 		switch strings.TrimSpace(filter.EventType) {
-		case models.ProviderTransferDirectionDownload:
-			direction = models.ProviderTransferDirectionDownload
-		case models.ProviderTransferDirectionUpload:
-			direction = models.ProviderTransferDirectionUpload
+		case usage.ProviderTransferDirectionDownload:
+			direction = usage.ProviderTransferDirectionDownload
+		case usage.ProviderTransferDirectionUpload:
+			direction = usage.ProviderTransferDirectionUpload
 		}
 	}
 	if direction != "" && direction != "all" {
@@ -162,7 +162,7 @@ func transferAttributionWhere(filter models.TransferAttributionFilter) (string, 
 	return " WHERE " + strings.Join(parts, " AND "), args
 }
 
-func transferAttributionWhereByResources(filter models.TransferAttributionFilter, resources []string) (string, []any) {
+func transferAttributionWhereByResources(filter usage.Filter, resources []string) (string, []any) {
 	where, args := transferAttributionWhere(filter)
 	clause, clauseArgs := postgresTransferResourceClause(resources, len(args)+1)
 	if clause == "" {
@@ -234,10 +234,10 @@ type transferRows interface {
 	Err() error
 }
 
-func scanTransferAttributionBreakdown(rows transferRows) ([]models.TransferAttributionBreakdown, error) {
-	out := make([]models.TransferAttributionBreakdown, 0)
+func scanTransferAttributionBreakdown(rows transferRows) ([]usage.Breakdown, error) {
+	out := make([]usage.Breakdown, 0)
 	for rows.Next() {
-		var item models.TransferAttributionBreakdown
+		var item usage.Breakdown
 		var last sql.NullTime
 		if err := rows.Scan(
 			&item.Key,

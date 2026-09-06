@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/calypr/syfon/internal/models"
+	"github.com/calypr/syfon/internal/usage"
 )
 
 func TestRecordFileUploadAndDownload(t *testing.T) {
@@ -37,7 +37,7 @@ func TestRecordFileUploadAndDownload(t *testing.T) {
 func TestTransferAttributionWhereHelpers(t *testing.T) {
 	from := time.Now().UTC().Add(-time.Hour)
 	to := time.Now().UTC()
-	where, args := transferAttributionWhere(models.TransferAttributionFilter{
+	where, args := transferAttributionWhere(usage.Filter{
 		Organization: "org",
 		Project:      "proj",
 		Direction:    "download",
@@ -55,7 +55,7 @@ func TestTransferAttributionWhereHelpers(t *testing.T) {
 		t.Fatalf("expected populated args, got %d (%+v)", len(args), args)
 	}
 
-	whereRes, argsRes := transferAttributionWhereByResources(models.TransferAttributionFilter{}, []string{"/organization/org/project/proj"})
+	whereRes, argsRes := transferAttributionWhereByResources(usage.Filter{}, []string{"/organization/org/project/proj"})
 	if !strings.Contains(whereRes, "organization") {
 		t.Fatalf("expected resource clause in whereByResources, got %q", whereRes)
 	}
@@ -63,7 +63,7 @@ func TestTransferAttributionWhereHelpers(t *testing.T) {
 		t.Fatalf("expected args for whereByResources")
 	}
 
-	whereNone, _ := transferAttributionWhereByResources(models.TransferAttributionFilter{}, nil)
+	whereNone, _ := transferAttributionWhereByResources(usage.Filter{}, nil)
 	if !strings.Contains(whereNone, "1 = 0") {
 		t.Fatalf("expected 1=0 guard for empty resources, got %q", whereNone)
 	}
@@ -74,10 +74,10 @@ func TestProviderTransferHelpers(t *testing.T) {
 		t.Fatalf("unexpected attribution group expression for provider: %q", key)
 	}
 
-	if got := normalizeTransferDirection("upload"); got != models.ProviderTransferDirectionUpload {
+	if got := normalizeTransferDirection("upload"); got != usage.ProviderTransferDirectionUpload {
 		t.Fatalf("expected upload direction to remain upload, got %q", got)
 	}
-	if got := normalizeTransferDirection("unknown"); got != models.ProviderTransferDirectionDownload {
+	if got := normalizeTransferDirection("unknown"); got != usage.ProviderTransferDirectionDownload {
 		t.Fatalf("expected unknown => download, got %q", got)
 	}
 }

@@ -2,17 +2,15 @@ package postgres
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"fmt"
 	"strings"
 	"time"
 
-	"github.com/calypr/syfon/internal/models"
+	"github.com/calypr/syfon/internal/usage"
 )
 
-func (db *PostgresDB) RecordTransferAttributionEvents(ctx context.Context, events []models.TransferAttributionEvent) error {
+func (db *PostgresDB) RecordTransferAttributionEvents(ctx context.Context, events []usage.Event) error {
 	if len(events) == 0 {
 		return nil
 	}
@@ -38,14 +36,14 @@ func (db *PostgresDB) RecordTransferAttributionEvents(ctx context.Context, event
 		if ev.EventID == "" || ev.EventType == "" {
 			continue
 		}
-		if ev.EventType != models.TransferEventAccessIssued {
+		if ev.EventType != usage.TransferEventAccessIssued {
 			continue
 		}
 		when := ev.EventTime
 		if when.IsZero() {
 			when = time.Now().UTC()
 		}
-		ev.AccessGrantID = accessGrantIDFromEvent(ev)
+		ev.AccessGrantID = usage.GrantID(ev)
 		ev.EventTime = when.UTC()
 		ev.Direction = normalizeTransferDirection(ev.Direction)
 		result, err := stmt.ExecContext(ctx,
@@ -66,7 +64,7 @@ func (db *PostgresDB) RecordTransferAttributionEvents(ctx context.Context, event
 	return tx.Commit()
 }
 
-func (db *PostgresDB) RecordProviderTransferEvents(ctx context.Context, events []models.ProviderTransferEvent) error {
+func (db *PostgresDB) RecordProviderTransferEvents(ctx context.Context, events []usage.ProviderEvent) error {
 	if len(events) == 0 {
 		return nil
 	}
@@ -142,9 +140,9 @@ func (db *PostgresDB) backfillAccessGrants(ctx context.Context) error {
 	}
 	defer rows.Close()
 
-	events := make([]models.TransferAttributionEvent, 0)
+	events := make([]usage.Event, 0)
 	for rows.Next() {
-		var ev models.TransferAttributionEvent
+		var ev usage.Event
 		if err := rows.Scan(
 			&ev.EventID, &ev.AccessGrantID, &ev.EventType, &ev.Direction, &ev.EventTime, &ev.RequestID, &ev.ObjectID, &ev.SHA256, &ev.ObjectSize,
 			&ev.Organization, &ev.Project, &ev.AccessID, &ev.Provider, &ev.Bucket, &ev.StorageURL, &ev.RangeStart, &ev.RangeEnd,
@@ -158,16 +156,16 @@ func (db *PostgresDB) backfillAccessGrants(ctx context.Context) error {
 	if err := rows.Err(); err != nil {
 		return err
 	}
-	grants := make(map[string]models.AccessGrant)
+	grants := make(map[string]usage.Grant)
 	for _, ev := range events {
-		ev.AccessGrantID = accessGrantIDFromEvent(ev)
+		ev.AccessGrantID = usage.GrantID(ev)
 		if _, err := tx.ExecContext(ctx, `UPDATE transfer_attribution_event SET access_grant_id = $1 WHERE event_id = $2`, ev.AccessGrantID, ev.EventID); err != nil {
 			return err
 		}
 		grant := grants[ev.AccessGrantID]
 		when := ev.EventTime.UTC()
 		if grant.AccessGrantID == "" {
-			grant = models.AccessGrant{
+			grant = usage.Grant{
 				AccessGrantID: ev.AccessGrantID,
 				FirstIssuedAt: when,
 				LastIssuedAt:  when,
@@ -220,34 +218,19 @@ func (db *PostgresDB) backfillAccessGrants(ctx context.Context) error {
 	return tx.Commit()
 }
 
-func accessGrantIDFromEvent(ev models.TransferAttributionEvent) string {
-	parts := []string{
-		ev.ObjectID,
-		ev.SHA256,
-		ev.Organization,
-		ev.Project,
-		ev.AccessID,
-		ev.Provider,
-		ev.Bucket,
-		ev.StorageURL,
-	}
-	sum := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
-	return hex.EncodeToString(sum[:])
-}
-
-func (db *PostgresDB) reconcileProviderTransferEvent(ctx context.Context, tx *sql.Tx, ev models.ProviderTransferEvent) (models.ProviderTransferEvent, error) {
+func (db *PostgresDB) reconcileProviderTransferEvent(ctx context.Context, tx *sql.Tx, ev usage.ProviderEvent) (usage.ProviderEvent, error) {
 	ev.Direction = normalizeProviderDirection(ev.Direction, ev.HTTPMethod)
 	ev.Provider = strings.TrimSpace(ev.Provider)
 	ev.Bucket = strings.TrimSpace(ev.Bucket)
 	ev.ObjectKey = strings.TrimLeft(strings.TrimSpace(ev.ObjectKey), "/")
 	ev.StorageURL = strings.TrimSpace(ev.StorageURL)
-	ev.ReconciliationStatus = models.ProviderTransferUnmatched
+	ev.ReconciliationStatus = usage.ProviderTransferUnmatched
 	if ev.AccessGrantID != "" {
 		if match, ok, err := postgresAccessGrantByID(ctx, tx, ev.AccessGrantID); err != nil {
 			return ev, err
 		} else if ok {
 			mergeAccessGrantIntoProviderEvent(&ev, match)
-			ev.ReconciliationStatus = models.ProviderTransferMatched
+			ev.ReconciliationStatus = usage.ProviderTransferMatched
 			return ev, nil
 		}
 	}
@@ -260,14 +243,14 @@ func (db *PostgresDB) reconcileProviderTransferEvent(ctx context.Context, tx *sq
 		return ev, nil
 	case 1:
 		mergeAccessGrantIntoProviderEvent(&ev, matches[0])
-		ev.ReconciliationStatus = models.ProviderTransferMatched
+		ev.ReconciliationStatus = usage.ProviderTransferMatched
 	default:
-		ev.ReconciliationStatus = models.ProviderTransferAmbiguous
+		ev.ReconciliationStatus = usage.ProviderTransferAmbiguous
 	}
 	return ev, nil
 }
 
-func postgresUpsertAccessGrant(ctx context.Context, tx *sql.Tx, ev models.TransferAttributionEvent) error {
+func postgresUpsertAccessGrant(ctx context.Context, tx *sql.Tx, ev usage.Event) error {
 	if ev.AccessGrantID == "" {
 		return nil
 	}
@@ -300,8 +283,8 @@ func postgresUpsertAccessGrant(ctx context.Context, tx *sql.Tx, ev models.Transf
 	return err
 }
 
-func postgresAccessGrantByID(ctx context.Context, tx *sql.Tx, grantID string) (models.AccessGrant, bool, error) {
-	var grant models.AccessGrant
+func postgresAccessGrantByID(ctx context.Context, tx *sql.Tx, grantID string) (usage.Grant, bool, error) {
+	var grant usage.Grant
 	err := tx.QueryRowContext(ctx, `
 		SELECT access_grant_id, first_issued_at, last_issued_at, issue_count,
 			object_id, sha256, object_size, organization, project, access_id,
@@ -314,12 +297,12 @@ func postgresAccessGrantByID(ctx context.Context, tx *sql.Tx, grantID string) (m
 		&grant.Provider, &grant.Bucket, &grant.StorageURL, &grant.ActorEmail, &grant.ActorSubject, &grant.AuthMode,
 	)
 	if err == sql.ErrNoRows {
-		return models.AccessGrant{}, false, nil
+		return usage.Grant{}, false, nil
 	}
 	return grant, err == nil, err
 }
 
-func postgresAccessGrantCandidates(ctx context.Context, tx *sql.Tx, ev models.ProviderTransferEvent) ([]models.AccessGrant, error) {
+func postgresAccessGrantCandidates(ctx context.Context, tx *sql.Tx, ev usage.ProviderEvent) ([]usage.Grant, error) {
 	args := []any{ev.Provider, ev.Bucket, ev.EventTime.UTC().Add(15 * time.Minute), ev.EventTime.UTC().Add(-24 * time.Hour)}
 	query := `
 		SELECT access_grant_id, first_issued_at, last_issued_at, issue_count,
@@ -344,9 +327,9 @@ func postgresAccessGrantCandidates(ctx context.Context, tx *sql.Tx, ev models.Pr
 		return nil, err
 	}
 	defer rows.Close()
-	var out []models.AccessGrant
+	var out []usage.Grant
 	for rows.Next() {
-		var match models.AccessGrant
+		var match usage.Grant
 		if err := rows.Scan(
 			&match.AccessGrantID, &match.FirstIssuedAt, &match.LastIssuedAt, &match.IssueCount,
 			&match.ObjectID, &match.SHA256, &match.ObjectSize, &match.Organization, &match.Project, &match.AccessID,
@@ -359,7 +342,7 @@ func postgresAccessGrantCandidates(ctx context.Context, tx *sql.Tx, ev models.Pr
 	return out, rows.Err()
 }
 
-func mergeAccessGrantIntoProviderEvent(ev *models.ProviderTransferEvent, grant models.AccessGrant) {
+func mergeAccessGrantIntoProviderEvent(ev *usage.ProviderEvent, grant usage.Grant) {
 	if ev.AccessGrantID == "" {
 		ev.AccessGrantID = grant.AccessGrantID
 	}
@@ -398,16 +381,16 @@ func mergeAccessGrantIntoProviderEvent(ev *models.ProviderTransferEvent, grant m
 
 func normalizeProviderDirection(direction, method string) string {
 	switch strings.ToLower(strings.TrimSpace(direction)) {
-	case models.ProviderTransferDirectionDownload, "get", "read":
-		return models.ProviderTransferDirectionDownload
-	case models.ProviderTransferDirectionUpload, "put", "write":
-		return models.ProviderTransferDirectionUpload
+	case usage.ProviderTransferDirectionDownload, "get", "read":
+		return usage.ProviderTransferDirectionDownload
+	case usage.ProviderTransferDirectionUpload, "put", "write":
+		return usage.ProviderTransferDirectionUpload
 	}
 	switch strings.ToUpper(strings.TrimSpace(method)) {
 	case "GET":
-		return models.ProviderTransferDirectionDownload
+		return usage.ProviderTransferDirectionDownload
 	case "PUT", "POST":
-		return models.ProviderTransferDirectionUpload
+		return usage.ProviderTransferDirectionUpload
 	default:
 		return strings.ToLower(strings.TrimSpace(direction))
 	}
@@ -426,9 +409,9 @@ func providerStorageURL(provider, bucket, key string) string {
 
 func normalizeTransferDirection(direction string) string {
 	switch strings.ToLower(strings.TrimSpace(direction)) {
-	case models.ProviderTransferDirectionUpload:
-		return models.ProviderTransferDirectionUpload
+	case usage.ProviderTransferDirectionUpload:
+		return usage.ProviderTransferDirectionUpload
 	default:
-		return models.ProviderTransferDirectionDownload
+		return usage.ProviderTransferDirectionDownload
 	}
 }

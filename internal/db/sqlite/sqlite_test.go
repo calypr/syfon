@@ -17,6 +17,7 @@ import (
 	"github.com/calypr/syfon/internal/crypto"
 	"github.com/calypr/syfon/internal/faults"
 	"github.com/calypr/syfon/internal/models"
+	"github.com/calypr/syfon/internal/usage"
 
 	"github.com/calypr/syfon/internal/objects"
 )
@@ -1584,12 +1585,12 @@ func TestSqliteDB_TransferAttributionByResources(t *testing.T) {
 		t.Fatalf("failed to create db: %v", err)
 	}
 	now := time.Now().UTC()
-	events := []models.TransferAttributionEvent{
+	events := []usage.Event{
 		{
 			EventID:        "ev-a",
 			AccessGrantID:  "grant-a",
-			EventType:      models.TransferEventAccessIssued,
-			Direction:      models.ProviderTransferDirectionDownload,
+			EventType:      usage.TransferEventAccessIssued,
+			Direction:      usage.ProviderTransferDirectionDownload,
 			EventTime:      now,
 			Organization:   "org",
 			Project:        "p1",
@@ -1603,8 +1604,8 @@ func TestSqliteDB_TransferAttributionByResources(t *testing.T) {
 		{
 			EventID:        "ev-b",
 			AccessGrantID:  "grant-b",
-			EventType:      models.TransferEventAccessIssued,
-			Direction:      models.ProviderTransferDirectionDownload,
+			EventType:      usage.TransferEventAccessIssued,
+			Direction:      usage.ProviderTransferDirectionDownload,
 			EventTime:      now.Add(time.Minute),
 			Organization:   "org",
 			Project:        "p2",
@@ -1620,7 +1621,7 @@ func TestSqliteDB_TransferAttributionByResources(t *testing.T) {
 		t.Fatalf("RecordTransferAttributionEvents failed: %v", err)
 	}
 
-	summary, err := db.GetTransferAttributionSummaryByResources(ctx, models.TransferAttributionFilter{}, []string{"/programs/org/projects/p1"})
+	summary, err := db.GetTransferAttributionSummaryByResources(ctx, usage.Filter{}, []string{"/programs/org/projects/p1"})
 	if err != nil {
 		t.Fatalf("GetTransferAttributionSummaryByResources failed: %v", err)
 	}
@@ -1628,7 +1629,7 @@ func TestSqliteDB_TransferAttributionByResources(t *testing.T) {
 		t.Fatalf("unexpected scoped transfer summary: %+v", summary)
 	}
 
-	breakdown, err := db.GetTransferAttributionBreakdownByResources(ctx, models.TransferAttributionFilter{}, "user", []string{"/programs/org/projects/p1"})
+	breakdown, err := db.GetTransferAttributionBreakdownByResources(ctx, usage.Filter{}, "user", []string{"/programs/org/projects/p1"})
 	if err != nil {
 		t.Fatalf("GetTransferAttributionBreakdownByResources failed: %v", err)
 	}
@@ -1705,12 +1706,12 @@ func TestSqliteDB_TransferAttributionMetrics(t *testing.T) {
 
 	rangeStart := int64(0)
 	rangeEnd := int64(41)
-	grants := []models.TransferAttributionEvent{
+	grants := []usage.Event{
 		{
 			EventID:           "grant-download-1",
 			AccessGrantID:     "grant-download-1",
-			EventType:         models.TransferEventAccessIssued,
-			Direction:         models.ProviderTransferDirectionDownload,
+			EventType:         usage.TransferEventAccessIssued,
+			Direction:         usage.ProviderTransferDirectionDownload,
 			EventTime:         now,
 			RequestID:         "request-1",
 			ObjectID:          "did-1",
@@ -1736,8 +1737,8 @@ func TestSqliteDB_TransferAttributionMetrics(t *testing.T) {
 		{
 			EventID:           "grant-upload-1",
 			AccessGrantID:     "grant-upload-1",
-			EventType:         models.TransferEventAccessIssued,
-			Direction:         models.ProviderTransferDirectionUpload,
+			EventType:         usage.TransferEventAccessIssued,
+			Direction:         usage.ProviderTransferDirectionUpload,
 			EventTime:         now.Add(time.Second),
 			RequestID:         "request-2",
 			ObjectID:          "did-1",
@@ -1764,10 +1765,10 @@ func TestSqliteDB_TransferAttributionMetrics(t *testing.T) {
 	if err := db.RecordTransferAttributionEvents(ctx, grants[:1]); err != nil {
 		t.Fatalf("duplicate RecordTransferAttributionEvents failed: %v", err)
 	}
-	providerEvents := []models.ProviderTransferEvent{
+	providerEvents := []usage.ProviderEvent{
 		{
 			ProviderEventID:  "provider-download-1",
-			Direction:        models.ProviderTransferDirectionDownload,
+			Direction:        usage.ProviderTransferDirectionDownload,
 			EventTime:        now.Add(2 * time.Second),
 			Provider:         "s3",
 			Bucket:           "bucket-a",
@@ -1781,7 +1782,7 @@ func TestSqliteDB_TransferAttributionMetrics(t *testing.T) {
 		},
 		{
 			ProviderEventID:  "provider-upload-1",
-			Direction:        models.ProviderTransferDirectionUpload,
+			Direction:        usage.ProviderTransferDirectionUpload,
 			EventTime:        now.Add(3 * time.Second),
 			Provider:         "s3",
 			Bucket:           "bucket-a",
@@ -1800,7 +1801,7 @@ func TestSqliteDB_TransferAttributionMetrics(t *testing.T) {
 		t.Fatalf("duplicate RecordProviderTransferEvents failed: %v", err)
 	}
 
-	summary, err := db.GetTransferAttributionSummary(ctx, models.TransferAttributionFilter{
+	summary, err := db.GetTransferAttributionSummary(ctx, usage.Filter{
 		Organization: "calypr",
 		Project:      "proj-a",
 	})
@@ -1811,21 +1812,21 @@ func TestSqliteDB_TransferAttributionMetrics(t *testing.T) {
 		t.Fatalf("unexpected transfer summary: %+v", summary)
 	}
 
-	userBreakdown, err := db.GetTransferAttributionBreakdown(ctx, models.TransferAttributionFilter{Organization: "calypr"}, "user")
+	userBreakdown, err := db.GetTransferAttributionBreakdown(ctx, usage.Filter{Organization: "calypr"}, "user")
 	if err != nil {
 		t.Fatalf("GetTransferAttributionBreakdown(user) failed: %v", err)
 	}
 	if len(userBreakdown) != 2 {
 		t.Fatalf("expected two user breakdown rows, got %+v", userBreakdown)
 	}
-	providerBreakdown, err := db.GetTransferAttributionBreakdown(ctx, models.TransferAttributionFilter{Provider: "s3", Bucket: "bucket-a"}, "provider")
+	providerBreakdown, err := db.GetTransferAttributionBreakdown(ctx, usage.Filter{Provider: "s3", Bucket: "bucket-a"}, "provider")
 	if err != nil {
 		t.Fatalf("GetTransferAttributionBreakdown(provider) failed: %v", err)
 	}
 	if len(providerBreakdown) != 1 || providerBreakdown[0].BytesDownloaded != 42 || providerBreakdown[0].BytesUploaded != 42 {
 		t.Fatalf("unexpected provider breakdown: %+v", providerBreakdown)
 	}
-	objectBreakdown, err := db.GetTransferAttributionBreakdown(ctx, models.TransferAttributionFilter{SHA256: oid}, "object")
+	objectBreakdown, err := db.GetTransferAttributionBreakdown(ctx, usage.Filter{SHA256: oid}, "object")
 	if err != nil {
 		t.Fatalf("GetTransferAttributionBreakdown(object) failed: %v", err)
 	}
@@ -1836,16 +1837,16 @@ func TestSqliteDB_TransferAttributionMetrics(t *testing.T) {
 	if err := db.DeleteObject(ctx, "did-1"); err != nil {
 		t.Fatalf("DeleteObject failed: %v", err)
 	}
-	afterDelete, err := db.GetTransferAttributionSummary(ctx, models.TransferAttributionFilter{SHA256: oid})
+	afterDelete, err := db.GetTransferAttributionSummary(ctx, usage.Filter{SHA256: oid})
 	if err != nil {
 		t.Fatalf("GetTransferAttributionSummary after delete failed: %v", err)
 	}
 	if afterDelete.EventCount != 2 || afterDelete.BytesDownloaded != 42 || afterDelete.BytesUploaded != 42 {
 		t.Fatalf("expected transfer events to survive object deletion, got %+v", afterDelete)
 	}
-	unmatched := models.ProviderTransferEvent{
+	unmatched := usage.ProviderEvent{
 		ProviderEventID:  "provider-unmatched-1",
-		Direction:        models.ProviderTransferDirectionDownload,
+		Direction:        usage.ProviderTransferDirectionDownload,
 		EventTime:        now,
 		Provider:         "s3",
 		Bucket:           "bucket-a",
@@ -1854,17 +1855,17 @@ func TestSqliteDB_TransferAttributionMetrics(t *testing.T) {
 		HTTPMethod:       "GET",
 		HTTPStatus:       200,
 	}
-	if err := db.RecordProviderTransferEvents(ctx, []models.ProviderTransferEvent{unmatched}); err != nil {
+	if err := db.RecordProviderTransferEvents(ctx, []usage.ProviderEvent{unmatched}); err != nil {
 		t.Fatalf("RecordProviderTransferEvents unmatched failed: %v", err)
 	}
-	defaultSummary, err := db.GetTransferAttributionSummary(ctx, models.TransferAttributionFilter{Bucket: "bucket-a"})
+	defaultSummary, err := db.GetTransferAttributionSummary(ctx, usage.Filter{Bucket: "bucket-a"})
 	if err != nil {
 		t.Fatalf("GetTransferAttributionSummary default failed: %v", err)
 	}
 	if defaultSummary.EventCount != 2 {
 		t.Fatalf("unmatched provider event should not be billed by default: %+v", defaultSummary)
 	}
-	allSummary, err := db.GetTransferAttributionSummary(ctx, models.TransferAttributionFilter{Bucket: "bucket-a", ReconciliationStatus: "all"})
+	allSummary, err := db.GetTransferAttributionSummary(ctx, usage.Filter{Bucket: "bucket-a", ReconciliationStatus: "all"})
 	if err != nil {
 		t.Fatalf("GetTransferAttributionSummary all failed: %v", err)
 	}
@@ -1888,10 +1889,10 @@ func TestSqliteDB_AccessGrantReconciliationAmbiguousOnlyForDifferentGrants(t *te
 		t.Fatalf("failed to create db: %v", err)
 	}
 	now := time.Now().UTC()
-	events := []models.TransferAttributionEvent{
+	events := []usage.Event{
 		{
 			EventID:        "access-root",
-			EventType:      models.TransferEventAccessIssued,
+			EventType:      usage.TransferEventAccessIssued,
 			EventTime:      now,
 			ObjectID:       "did-root",
 			SHA256:         "sha-root",
@@ -1906,7 +1907,7 @@ func TestSqliteDB_AccessGrantReconciliationAmbiguousOnlyForDifferentGrants(t *te
 		},
 		{
 			EventID:        "access-other",
-			EventType:      models.TransferEventAccessIssued,
+			EventType:      usage.TransferEventAccessIssued,
 			EventTime:      now.Add(time.Second),
 			ObjectID:       "did-other",
 			SHA256:         "sha-other",
@@ -1923,9 +1924,9 @@ func TestSqliteDB_AccessGrantReconciliationAmbiguousOnlyForDifferentGrants(t *te
 	if err := db.RecordTransferAttributionEvents(ctx, events); err != nil {
 		t.Fatalf("RecordTransferAttributionEvents failed: %v", err)
 	}
-	if err := db.RecordProviderTransferEvents(ctx, []models.ProviderTransferEvent{{
+	if err := db.RecordProviderTransferEvents(ctx, []usage.ProviderEvent{{
 		ProviderEventID:  "ambiguous-provider-event",
-		Direction:        models.ProviderTransferDirectionDownload,
+		Direction:        usage.ProviderTransferDirectionDownload,
 		EventTime:        now.Add(2 * time.Second),
 		Provider:         "s3",
 		Bucket:           "bucket-a",
@@ -1940,7 +1941,7 @@ func TestSqliteDB_AccessGrantReconciliationAmbiguousOnlyForDifferentGrants(t *te
 	if err := db.db.QueryRowContext(ctx, `SELECT reconciliation_status FROM provider_transfer_event WHERE provider_event_id = 'ambiguous-provider-event'`).Scan(&status); err != nil {
 		t.Fatalf("read provider event status: %v", err)
 	}
-	if status != models.ProviderTransferAmbiguous {
+	if status != usage.ProviderTransferAmbiguous {
 		t.Fatalf("expected ambiguous provider event, got %q", status)
 	}
 }

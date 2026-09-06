@@ -9,9 +9,9 @@ import (
 	"github.com/calypr/syfon/internal/api/attribution"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/core"
-	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/urlmanager"
+	"github.com/calypr/syfon/internal/usage"
 	"github.com/gofiber/fiber/v3"
 )
 
@@ -39,7 +39,7 @@ func handleGetAccessURLFiber(om *core.ObjectManager) fiber.Handler {
 			return apiutil.HandleError(c, err)
 		}
 		if err := attribution.RecordAccessIssued(c.Context(), om, obj, attribution.AccessDetails{
-			Direction:  models.ProviderTransferDirectionDownload,
+			Direction:  usage.ProviderTransferDirectionDownload,
 			AccessID:   accessID,
 			StorageURL: targetURL,
 		}); err != nil {
@@ -123,7 +123,7 @@ func handleGetBulkAccessURLFiber(om *core.ObjectManager) fiber.Handler {
 					continue
 				}
 				if err := attribution.RecordAccessIssued(c.Context(), om, obj, attribution.AccessDetails{
-					Direction:  models.ProviderTransferDirectionDownload,
+					Direction:  usage.ProviderTransferDirectionDownload,
 					AccessID:   accessID,
 					StorageURL: targetURL,
 				}); err != nil {

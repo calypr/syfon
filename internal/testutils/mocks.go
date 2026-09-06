@@ -13,6 +13,7 @@ import (
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/faults"
 	"github.com/calypr/syfon/internal/models"
+	"github.com/calypr/syfon/internal/usage"
 
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/urlmanager"
@@ -25,9 +26,9 @@ type MockDatabase struct {
 	Credentials            map[string]buckets.Credential
 	BucketScopes           map[string]buckets.Scope
 	PendingMeta            map[string]models.PendingLFSMeta
-	Usage                  map[string]models.FileUsage
-	TransferEvents         []models.TransferAttributionEvent
-	ProviderTransferEvents []models.ProviderTransferEvent
+	Usage                  map[string]usage.FileUsage
+	TransferEvents         []usage.Event
+	ProviderTransferEvents []usage.ProviderEvent
 	NoDefaultCreds         bool
 	GetObjectErr           error
 	GetBucketScopeCalls    int
@@ -577,7 +578,7 @@ func (m *MockDatabase) PopPendingLFSMeta(ctx context.Context, oid string) (*mode
 
 func (m *MockDatabase) RecordFileUpload(ctx context.Context, objectID string) error {
 	if m.Usage == nil {
-		m.Usage = make(map[string]models.FileUsage)
+		m.Usage = make(map[string]usage.FileUsage)
 	}
 	u := m.Usage[objectID]
 	u.ObjectID = objectID
@@ -598,7 +599,7 @@ func (m *MockDatabase) RecordFileUpload(ctx context.Context, objectID string) er
 
 func (m *MockDatabase) RecordFileDownload(ctx context.Context, objectID string) error {
 	if m.Usage == nil {
-		m.Usage = make(map[string]models.FileUsage)
+		m.Usage = make(map[string]usage.FileUsage)
 	}
 	u := m.Usage[objectID]
 	u.ObjectID = objectID
@@ -617,7 +618,7 @@ func (m *MockDatabase) RecordFileDownload(ctx context.Context, objectID string) 
 	return nil
 }
 
-func (m *MockDatabase) GetFileUsage(ctx context.Context, objectID string) (*models.FileUsage, error) {
+func (m *MockDatabase) GetFileUsage(ctx context.Context, objectID string) (*usage.FileUsage, error) {
 	if m.Usage == nil {
 		return nil, fmt.Errorf("%w: file usage not found", faults.ErrNotFound)
 	}
@@ -629,17 +630,17 @@ func (m *MockDatabase) GetFileUsage(ctx context.Context, objectID string) (*mode
 	return &copyUsage, nil
 }
 
-func (m *MockDatabase) ListFileUsageByObjectIDs(ctx context.Context, ids []string) ([]models.FileUsage, error) {
-	out := make([]models.FileUsage, 0, len(ids))
+func (m *MockDatabase) ListFileUsageByObjectIDs(ctx context.Context, ids []string) ([]usage.FileUsage, error) {
+	out := make([]usage.FileUsage, 0, len(ids))
 	for _, id := range ids {
 		if m.Usage != nil {
-			if usage, ok := m.Usage[id]; ok {
-				out = append(out, usage)
+			if fileUsage, ok := m.Usage[id]; ok {
+				out = append(out, fileUsage)
 				continue
 			}
 		}
 		if obj, ok := m.Objects[id]; ok {
-			out = append(out, models.FileUsage{
+			out = append(out, usage.FileUsage{
 				ObjectID: id,
 				Name:     common.StringVal(obj.Name),
 				Size:     obj.Size,
@@ -649,8 +650,8 @@ func (m *MockDatabase) ListFileUsageByObjectIDs(ctx context.Context, ids []strin
 	return out, nil
 }
 
-func (m *MockDatabase) ListFileUsage(ctx context.Context, limit, offset int, inactiveSince *time.Time) ([]models.FileUsage, error) {
-	out := make([]models.FileUsage, 0)
+func (m *MockDatabase) ListFileUsage(ctx context.Context, limit, offset int, inactiveSince *time.Time) ([]usage.FileUsage, error) {
+	out := make([]usage.FileUsage, 0)
 	if m.Usage == nil {
 		return out, nil
 	}
@@ -663,7 +664,7 @@ func (m *MockDatabase) ListFileUsage(ctx context.Context, limit, offset int, ina
 		out = append(out, u)
 	}
 	if offset >= len(out) {
-		return []models.FileUsage{}, nil
+		return []usage.FileUsage{}, nil
 	}
 	if limit <= 0 {
 		return out[offset:], nil
@@ -675,8 +676,8 @@ func (m *MockDatabase) ListFileUsage(ctx context.Context, limit, offset int, ina
 	return out[offset:end], nil
 }
 
-func (m *MockDatabase) GetFileUsageSummary(ctx context.Context, inactiveSince *time.Time) (models.FileUsageSummary, error) {
-	var s models.FileUsageSummary
+func (m *MockDatabase) GetFileUsageSummary(ctx context.Context, inactiveSince *time.Time) (usage.FileUsageSummary, error) {
+	var s usage.FileUsageSummary
 	s.TotalFiles = int64(len(m.Objects))
 	for _, u := range m.Usage {
 		s.TotalUploads += u.UploadCount
@@ -691,7 +692,7 @@ func (m *MockDatabase) GetFileUsageSummary(ctx context.Context, inactiveSince *t
 	return s, nil
 }
 
-func (m *MockDatabase) RecordTransferAttributionEvents(ctx context.Context, events []models.TransferAttributionEvent) error {
+func (m *MockDatabase) RecordTransferAttributionEvents(ctx context.Context, events []usage.Event) error {
 	if len(events) == 0 {
 		return nil
 	}
@@ -713,7 +714,7 @@ func (m *MockDatabase) RecordTransferAttributionEvents(ctx context.Context, even
 	return nil
 }
 
-func (m *MockDatabase) RecordProviderTransferEvents(ctx context.Context, events []models.ProviderTransferEvent) error {
+func (m *MockDatabase) RecordProviderTransferEvents(ctx context.Context, events []usage.ProviderEvent) error {
 	if len(events) == 0 {
 		return nil
 	}
@@ -737,30 +738,30 @@ func (m *MockDatabase) RecordProviderTransferEvents(ctx context.Context, events 
 	return nil
 }
 
-func (m *MockDatabase) reconcileProviderTransferEvent(ev models.ProviderTransferEvent) models.ProviderTransferEvent {
+func (m *MockDatabase) reconcileProviderTransferEvent(ev usage.ProviderEvent) usage.ProviderEvent {
 	if ev.ReconciliationStatus == "" {
-		ev.ReconciliationStatus = models.ProviderTransferUnmatched
+		ev.ReconciliationStatus = usage.ProviderTransferUnmatched
 	}
 	for _, grant := range m.TransferEvents {
-		if grant.EventType != models.TransferEventAccessIssued {
+		if grant.EventType != usage.TransferEventAccessIssued {
 			continue
 		}
 		if ev.AccessGrantID != "" && (ev.AccessGrantID == grant.AccessGrantID || ev.AccessGrantID == grant.EventID) {
 			mockMergeAccessGrantIntoProviderEvent(&ev, grant)
-			ev.ReconciliationStatus = models.ProviderTransferMatched
+			ev.ReconciliationStatus = usage.ProviderTransferMatched
 			return ev
 		}
 		if ev.AccessGrantID == "" && ev.Provider == grant.Provider && ev.Bucket == grant.Bucket &&
 			(ev.StorageURL == grant.StorageURL || ev.StorageURL == "" && strings.HasSuffix(grant.StorageURL, "/"+strings.TrimLeft(ev.ObjectKey, "/"))) {
 			mockMergeAccessGrantIntoProviderEvent(&ev, grant)
-			ev.ReconciliationStatus = models.ProviderTransferMatched
+			ev.ReconciliationStatus = usage.ProviderTransferMatched
 			return ev
 		}
 	}
 	return ev
 }
 
-func mockMergeAccessGrantIntoProviderEvent(ev *models.ProviderTransferEvent, grant models.TransferAttributionEvent) {
+func mockMergeAccessGrantIntoProviderEvent(ev *usage.ProviderEvent, grant usage.Event) {
 	if ev.AccessGrantID == "" {
 		ev.AccessGrantID = grant.AccessGrantID
 		if ev.AccessGrantID == "" {
@@ -800,22 +801,22 @@ func mockMergeAccessGrantIntoProviderEvent(ev *models.ProviderTransferEvent, gra
 	}
 }
 
-func (m *MockDatabase) GetTransferAttributionSummary(ctx context.Context, filter models.TransferAttributionFilter) (models.TransferAttributionSummary, error) {
-	var summary models.TransferAttributionSummary
+func (m *MockDatabase) GetTransferAttributionSummary(ctx context.Context, filter usage.Filter) (usage.Summary, error) {
+	var summary usage.Summary
 	for _, ev := range m.TransferEvents {
 		if !transferEventMatchesFilter(ev, filter) {
 			continue
 		}
 		summary.EventCount++
-		if ev.EventType == models.TransferEventAccessIssued {
+		if ev.EventType == usage.TransferEventAccessIssued {
 			summary.AccessIssuedCount++
 		}
 		summary.BytesRequested += ev.BytesRequested
 		switch ev.Direction {
-		case models.ProviderTransferDirectionDownload:
+		case usage.ProviderTransferDirectionDownload:
 			summary.DownloadEventCount++
 			summary.BytesDownloaded += ev.BytesRequested
-		case models.ProviderTransferDirectionUpload:
+		case usage.ProviderTransferDirectionUpload:
 			summary.UploadEventCount++
 			summary.BytesUploaded += ev.BytesRequested
 		}
@@ -823,8 +824,8 @@ func (m *MockDatabase) GetTransferAttributionSummary(ctx context.Context, filter
 	return summary, nil
 }
 
-func (m *MockDatabase) GetTransferAttributionBreakdown(ctx context.Context, filter models.TransferAttributionFilter, groupBy string) ([]models.TransferAttributionBreakdown, error) {
-	items := map[string]*models.TransferAttributionBreakdown{}
+func (m *MockDatabase) GetTransferAttributionBreakdown(ctx context.Context, filter usage.Filter, groupBy string) ([]usage.Breakdown, error) {
+	items := map[string]*usage.Breakdown{}
 	for _, ev := range m.TransferEvents {
 		if !transferEventMatchesFilter(ev, filter) {
 			continue
@@ -832,7 +833,7 @@ func (m *MockDatabase) GetTransferAttributionBreakdown(ctx context.Context, filt
 		key := transferBreakdownKey(ev, groupBy)
 		item := items[key]
 		if item == nil {
-			item = &models.TransferAttributionBreakdown{
+			item = &usage.Breakdown{
 				Key:          key,
 				Organization: ev.Organization,
 				Project:      ev.Project,
@@ -846,10 +847,10 @@ func (m *MockDatabase) GetTransferAttributionBreakdown(ctx context.Context, filt
 		}
 		item.EventCount++
 		item.BytesRequested += ev.BytesRequested
-		if ev.Direction == models.ProviderTransferDirectionDownload {
+		if ev.Direction == usage.ProviderTransferDirectionDownload {
 			item.BytesDownloaded += ev.BytesRequested
 		}
-		if ev.Direction == models.ProviderTransferDirectionUpload {
+		if ev.Direction == usage.ProviderTransferDirectionUpload {
 			item.BytesUploaded += ev.BytesRequested
 		}
 		t := ev.EventTime
@@ -857,14 +858,14 @@ func (m *MockDatabase) GetTransferAttributionBreakdown(ctx context.Context, filt
 			item.LastTransferTime = &t
 		}
 	}
-	out := make([]models.TransferAttributionBreakdown, 0, len(items))
+	out := make([]usage.Breakdown, 0, len(items))
 	for _, item := range items {
 		out = append(out, *item)
 	}
 	return out, nil
 }
 
-func transferEventMatchesFilter(ev models.TransferAttributionEvent, filter models.TransferAttributionFilter) bool {
+func transferEventMatchesFilter(ev usage.Event, filter usage.Filter) bool {
 	if filter.Organization != "" && ev.Organization != filter.Organization {
 		return false
 	}
@@ -877,10 +878,10 @@ func transferEventMatchesFilter(ev models.TransferAttributionEvent, filter model
 	direction := filter.Direction
 	if direction == "" {
 		switch filter.EventType {
-		case models.ProviderTransferDirectionDownload:
-			direction = models.ProviderTransferDirectionDownload
-		case models.ProviderTransferDirectionUpload:
-			direction = models.ProviderTransferDirectionUpload
+		case usage.ProviderTransferDirectionDownload:
+			direction = usage.ProviderTransferDirectionDownload
+		case usage.ProviderTransferDirectionUpload:
+			direction = usage.ProviderTransferDirectionUpload
 		}
 	}
 	if direction != "" && direction != "all" && ev.Direction != direction {
@@ -907,7 +908,7 @@ func transferEventMatchesFilter(ev models.TransferAttributionEvent, filter model
 	return true
 }
 
-func transferBreakdownKey(ev models.TransferAttributionEvent, groupBy string) string {
+func transferBreakdownKey(ev usage.Event, groupBy string) string {
 	switch groupBy {
 	case "user":
 		if ev.ActorEmail != "" {

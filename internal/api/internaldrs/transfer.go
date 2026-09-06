@@ -22,10 +22,10 @@ import (
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/faults"
 	apimiddleware "github.com/calypr/syfon/internal/httpapi/middleware"
-	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/storage/address"
 	"github.com/calypr/syfon/internal/urlmanager"
+	"github.com/calypr/syfon/internal/usage"
 )
 
 var multipartUploadSessions sync.Map // uploadID -> multipartSession
@@ -88,7 +88,7 @@ func handleInternalDownloadFiber(c fiber.Ctx, om *core.ObjectManager) error {
 		return apiutil.HandleError(c, err)
 	}
 	if err := attribution.RecordAccessIssued(c.Context(), om, obj, attribution.AccessDetails{
-		Direction:  models.ProviderTransferDirectionDownload,
+		Direction:  usage.ProviderTransferDirectionDownload,
 		StorageURL: objectURL,
 	}); err != nil {
 		return apiutil.HandleError(c, err)
@@ -144,7 +144,7 @@ func handleInternalDownloadPartFiber(c fiber.Ctx, om *core.ObjectManager) error 
 		return apiutil.HandleError(c, err)
 	}
 	if err := attribution.RecordAccessIssued(c.Context(), om, obj, attribution.AccessDetails{
-		Direction:      models.ProviderTransferDirectionDownload,
+		Direction:      usage.ProviderTransferDirectionDownload,
 		StorageURL:     objectURL,
 		RangeStart:     &start,
 		RangeEnd:       &end,
@@ -235,7 +235,7 @@ func handleInternalUploadURLFiber(om *core.ObjectManager) fiber.Handler {
 				return apiutil.HandleError(c, err)
 			}
 			if err := attribution.RecordAccessIssued(c.Context(), om, obj, attribution.AccessDetails{
-				Direction:  models.ProviderTransferDirectionUpload,
+				Direction:  usage.ProviderTransferDirectionUpload,
 				StorageURL: target.URL,
 			}); err != nil {
 				return apiutil.HandleError(c, err)
@@ -260,7 +260,7 @@ func handleInternalUploadURLFiber(om *core.ObjectManager) fiber.Handler {
 		}
 		if obj != nil {
 			if err := attribution.RecordAccessIssued(c.Context(), om, obj, attribution.AccessDetails{
-				Direction:  models.ProviderTransferDirectionUpload,
+				Direction:  usage.ProviderTransferDirectionUpload,
 				StorageURL: urlStr,
 			}); err != nil {
 				return apiutil.HandleError(c, err)
@@ -358,7 +358,7 @@ func handleInternalUploadBulkFiber(om *core.ObjectManager) fiber.Handler {
 				res.Error = &errMsg
 				res.Status = http.StatusInternalServerError
 			} else if err := attribution.RecordAccessIssued(c.Context(), om, obj, attribution.AccessDetails{
-				Direction:  models.ProviderTransferDirectionUpload,
+				Direction:  usage.ProviderTransferDirectionUpload,
 				StorageURL: target.URL,
 			}); err != nil {
 				errMsg := err.Error()

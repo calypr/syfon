@@ -8,7 +8,7 @@ import (
 
 	"github.com/calypr/syfon/apigen/server/metricsapi"
 	"github.com/calypr/syfon/internal/db"
-	"github.com/calypr/syfon/internal/models"
+	"github.com/calypr/syfon/internal/usage"
 )
 
 func (s *MetricsServer) GetTransferSummary(ctx context.Context, request metricsapi.GetTransferSummaryRequestObject) (metricsapi.GetTransferSummaryResponseObject, error) {
@@ -21,7 +21,7 @@ func (s *MetricsServer) GetTransferSummary(ctx context.Context, request metricsa
 	if err != nil {
 		return metricsapi.GetTransferSummary500Response{}, nil
 	}
-	var summary models.TransferAttributionSummary
+	var summary usage.Summary
 	if access.hasScopeAggregate() && filter.Organization == "" {
 		summary, err = s.getScopedTransferAttributionSummary(ctx, filter, access.scopes)
 	} else {
@@ -54,7 +54,7 @@ func (s *MetricsServer) GetTransferBreakdown(ctx context.Context, request metric
 	default:
 		return metricsapi.GetTransferBreakdown400Response{}, nil
 	}
-	var items []models.TransferAttributionBreakdown
+	var items []usage.Breakdown
 	if access.hasScopeAggregate() && filter.Organization == "" {
 		items, err = s.getScopedTransferAttributionBreakdown(ctx, filter, groupBy, access.scopes)
 	} else {
@@ -97,8 +97,8 @@ func getTransferBreakdownAuthResponse(statusCode int) metricsapi.GetTransferBrea
 	}
 }
 
-func transferSummaryParamsToFilter(params metricsapi.GetTransferSummaryParams) models.TransferAttributionFilter {
-	return models.TransferAttributionFilter{
+func transferSummaryParamsToFilter(params metricsapi.GetTransferSummaryParams) usage.Filter {
+	return usage.Filter{
 		Organization:         generatedString(params.Organization),
 		Project:              generatedString(params.Project),
 		Direction:            generatedString(params.Direction),
@@ -112,8 +112,8 @@ func transferSummaryParamsToFilter(params metricsapi.GetTransferSummaryParams) m
 	}
 }
 
-func transferBreakdownParamsToFilter(params metricsapi.GetTransferBreakdownParams) models.TransferAttributionFilter {
-	return models.TransferAttributionFilter{
+func transferBreakdownParamsToFilter(params metricsapi.GetTransferBreakdownParams) usage.Filter {
+	return usage.Filter{
 		Organization:         generatedString(params.Organization),
 		Project:              generatedString(params.Project),
 		Direction:            generatedString(params.Direction),
@@ -142,7 +142,7 @@ func generatedTime(v *time.Time) *time.Time {
 	return &t
 }
 
-func toGeneratedTransferSummary(summary models.TransferAttributionSummary) metricsapi.TransferAttributionSummary {
+func toGeneratedTransferSummary(summary usage.Summary) metricsapi.TransferAttributionSummary {
 	return metricsapi.TransferAttributionSummary{
 		EventCount:         &summary.EventCount,
 		AccessIssuedCount:  &summary.AccessIssuedCount,
@@ -154,7 +154,7 @@ func toGeneratedTransferSummary(summary models.TransferAttributionSummary) metri
 	}
 }
 
-func toGeneratedTransferBreakdown(item models.TransferAttributionBreakdown) metricsapi.TransferAttributionBreakdown {
+func toGeneratedTransferBreakdown(item usage.Breakdown) metricsapi.TransferAttributionBreakdown {
 	return metricsapi.TransferAttributionBreakdown{
 		Key:              &item.Key,
 		Organization:     &item.Organization,
@@ -172,7 +172,7 @@ func toGeneratedTransferBreakdown(item models.TransferAttributionBreakdown) metr
 	}
 }
 
-func (s *MetricsServer) transferFreshness(ctx context.Context, filter models.TransferAttributionFilter) (metricsapi.TransferMetricsFreshness, bool, error) {
+func (s *MetricsServer) transferFreshness(ctx context.Context, filter usage.Filter) (metricsapi.TransferMetricsFreshness, bool, error) {
 	stale := false
 	missing := make([]string, 0)
 	freshness := metricsapi.TransferMetricsFreshness{
@@ -184,19 +184,19 @@ func (s *MetricsServer) transferFreshness(ctx context.Context, filter models.Tra
 	return freshness, stale, nil
 }
 
-func (s *MetricsServer) getScopedTransferAttributionSummary(ctx context.Context, filter models.TransferAttributionFilter, scopes []metricsScope) (models.TransferAttributionSummary, error) {
+func (s *MetricsServer) getScopedTransferAttributionSummary(ctx context.Context, filter usage.Filter, scopes []metricsScope) (usage.Summary, error) {
 	if scopedStore, ok := s.database.(db.TransferAttributionScopedStore); ok {
 		return scopedStore.GetTransferAttributionSummaryByResources(ctx, filter, metricsResources(scopes))
 	}
 
-	var out models.TransferAttributionSummary
+	var out usage.Summary
 	for _, scope := range scopes {
 		scoped := filter
 		scoped.Organization = scope.organization
 		scoped.Project = scope.project
 		summary, err := s.database.GetTransferAttributionSummary(ctx, scoped)
 		if err != nil {
-			return models.TransferAttributionSummary{}, err
+			return usage.Summary{}, err
 		}
 		out.EventCount += summary.EventCount
 		out.AccessIssuedCount += summary.AccessIssuedCount
@@ -209,12 +209,12 @@ func (s *MetricsServer) getScopedTransferAttributionSummary(ctx context.Context,
 	return out, nil
 }
 
-func (s *MetricsServer) getScopedTransferAttributionBreakdown(ctx context.Context, filter models.TransferAttributionFilter, groupBy string, scopes []metricsScope) ([]models.TransferAttributionBreakdown, error) {
+func (s *MetricsServer) getScopedTransferAttributionBreakdown(ctx context.Context, filter usage.Filter, groupBy string, scopes []metricsScope) ([]usage.Breakdown, error) {
 	if scopedStore, ok := s.database.(db.TransferAttributionScopedStore); ok {
 		return scopedStore.GetTransferAttributionBreakdownByResources(ctx, filter, groupBy, metricsResources(scopes))
 	}
 
-	byKey := map[string]*models.TransferAttributionBreakdown{}
+	byKey := map[string]*usage.Breakdown{}
 	for _, scope := range scopes {
 		scoped := filter
 		scoped.Organization = scope.organization
@@ -244,7 +244,7 @@ func (s *MetricsServer) getScopedTransferAttributionBreakdown(ctx context.Contex
 			}
 		}
 	}
-	out := make([]models.TransferAttributionBreakdown, 0, len(byKey))
+	out := make([]usage.Breakdown, 0, len(byKey))
 	for _, item := range byKey {
 		out = append(out, *item)
 	}

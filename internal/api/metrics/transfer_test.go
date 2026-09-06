@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/testutils"
+	"github.com/calypr/syfon/internal/usage"
 	"github.com/gofiber/fiber/v3"
 )
 
@@ -26,12 +26,12 @@ func TestMetricsRoutes_TransferAttribution(t *testing.T) {
 		ObjectAuthz: map[string]map[string][]string{
 			"did-1": {"calypr": {"proj-a"}},
 		},
-		TransferEvents: []models.TransferAttributionEvent{
+		TransferEvents: []usage.Event{
 			{
 				EventID:        "grant-1",
 				AccessGrantID:  "grant-1",
-				EventType:      models.TransferEventAccessIssued,
-				Direction:      models.ProviderTransferDirectionDownload,
+				EventType:      usage.TransferEventAccessIssued,
+				Direction:      usage.ProviderTransferDirectionDownload,
 				EventTime:      time.Date(2026, 4, 26, 19, 59, 0, 0, time.UTC),
 				RequestID:      "request-1",
 				ObjectID:       "did-1",
@@ -112,7 +112,7 @@ func TestMetricsRoutes_TransferAttribution(t *testing.T) {
 	if summaryResp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", summaryResp.StatusCode, string(summaryBody))
 	}
-	var summary models.TransferAttributionSummary
+	var summary usage.Summary
 	if err := json.Unmarshal(summaryBody, &summary); err != nil {
 		t.Fatalf("decode summary: %v", err)
 	}
@@ -130,8 +130,8 @@ func TestMetricsRoutes_TransferAttribution(t *testing.T) {
 		t.Fatalf("expected 200, got %d body=%s", breakdownResp.StatusCode, string(breakdownBody))
 	}
 	var breakdown struct {
-		GroupBy string                                `json:"group_by"`
-		Data    []models.TransferAttributionBreakdown `json:"data"`
+		GroupBy string            `json:"group_by"`
+		Data    []usage.Breakdown `json:"data"`
 	}
 	if err := json.Unmarshal(breakdownBody, &breakdown); err != nil {
 		t.Fatalf("decode breakdown: %v", err)
@@ -143,11 +143,11 @@ func TestMetricsRoutes_TransferAttribution(t *testing.T) {
 
 func TestMetricsRoutes_TransferAttributionAuthz(t *testing.T) {
 	db := &testutils.MockDatabase{
-		TransferEvents: []models.TransferAttributionEvent{
+		TransferEvents: []usage.Event{
 			{
 				EventID:        "event-download-1",
-				EventType:      models.TransferEventAccessIssued,
-				Direction:      models.ProviderTransferDirectionDownload,
+				EventType:      usage.TransferEventAccessIssued,
+				Direction:      usage.ProviderTransferDirectionDownload,
 				EventTime:      time.Now().UTC(),
 				ObjectID:       "did-1",
 				SHA256:         "sha-1",
@@ -161,8 +161,8 @@ func TestMetricsRoutes_TransferAttributionAuthz(t *testing.T) {
 			},
 			{
 				EventID:        "event-download-2",
-				EventType:      models.TransferEventAccessIssued,
-				Direction:      models.ProviderTransferDirectionDownload,
+				EventType:      usage.TransferEventAccessIssued,
+				Direction:      usage.ProviderTransferDirectionDownload,
 				EventTime:      time.Now().UTC(),
 				ObjectID:       "did-2",
 				SHA256:         "sha-2",
@@ -211,7 +211,7 @@ func TestMetricsRoutes_TransferAttributionAuthz(t *testing.T) {
 			t.Fatalf("expected 200, got %d body=%s", httpResp.StatusCode, string(body))
 		}
 		var resp struct {
-			Data []models.TransferAttributionBreakdown `json:"data"`
+			Data []usage.Breakdown `json:"data"`
 		}
 		if err := json.Unmarshal(body, &resp); err != nil {
 			t.Fatalf("decode: %v", err)
@@ -250,7 +250,7 @@ func TestMetricsRoutes_TransferAttributionAuthz(t *testing.T) {
 			t.Fatalf("expected 200, got %d body=%s", httpResp.StatusCode, string(body))
 		}
 		var resp struct {
-			Data []models.TransferAttributionBreakdown `json:"data"`
+			Data []usage.Breakdown `json:"data"`
 		}
 		if err := json.Unmarshal(body, &resp); err != nil {
 			t.Fatalf("decode: %v", err)
@@ -273,7 +273,7 @@ func TestMetricsRoutes_TransferAttributionAuthz(t *testing.T) {
 		if httpResp.StatusCode != http.StatusOK {
 			t.Fatalf("expected 200, got %d body=%s", httpResp.StatusCode, string(body))
 		}
-		var summary models.TransferAttributionSummary
+		var summary usage.Summary
 		if err := json.Unmarshal(body, &summary); err != nil {
 			t.Fatalf("decode: %v", err)
 		}

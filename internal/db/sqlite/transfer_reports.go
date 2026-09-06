@@ -7,12 +7,12 @@ import (
 	"time"
 
 	sycommon "github.com/calypr/syfon/common"
-	"github.com/calypr/syfon/internal/models"
+	"github.com/calypr/syfon/internal/usage"
 )
 
-func (db *SqliteDB) GetTransferAttributionSummary(ctx context.Context, filter models.TransferAttributionFilter) (models.TransferAttributionSummary, error) {
+func (db *SqliteDB) GetTransferAttributionSummary(ctx context.Context, filter usage.Filter) (usage.Summary, error) {
 	where, args := transferAttributionWhere(filter)
-	var out models.TransferAttributionSummary
+	var out usage.Summary
 	err := db.db.QueryRowContext(ctx, `
 		SELECT
 			COUNT(*),
@@ -34,7 +34,7 @@ func (db *SqliteDB) GetTransferAttributionSummary(ctx context.Context, filter mo
 	return out, err
 }
 
-func (db *SqliteDB) GetTransferAttributionBreakdown(ctx context.Context, filter models.TransferAttributionFilter, groupBy string) ([]models.TransferAttributionBreakdown, error) {
+func (db *SqliteDB) GetTransferAttributionBreakdown(ctx context.Context, filter usage.Filter, groupBy string) ([]usage.Breakdown, error) {
 	keyExpr, selectExpr := transferAttributionGroupExpr(groupBy)
 	where, args := transferAttributionWhere(filter)
 	query := fmt.Sprintf(`
@@ -57,9 +57,9 @@ func (db *SqliteDB) GetTransferAttributionBreakdown(ctx context.Context, filter 
 	return scanTransferAttributionBreakdown(rows)
 }
 
-func (db *SqliteDB) GetTransferAttributionSummaryByResources(ctx context.Context, filter models.TransferAttributionFilter, resources []string) (models.TransferAttributionSummary, error) {
+func (db *SqliteDB) GetTransferAttributionSummaryByResources(ctx context.Context, filter usage.Filter, resources []string) (usage.Summary, error) {
 	where, args := transferAttributionWhereByResources(filter, resources)
-	var out models.TransferAttributionSummary
+	var out usage.Summary
 	err := db.db.QueryRowContext(ctx, `
 		SELECT
 			COUNT(*),
@@ -81,7 +81,7 @@ func (db *SqliteDB) GetTransferAttributionSummaryByResources(ctx context.Context
 	return out, err
 }
 
-func (db *SqliteDB) GetTransferAttributionBreakdownByResources(ctx context.Context, filter models.TransferAttributionFilter, groupBy string, resources []string) ([]models.TransferAttributionBreakdown, error) {
+func (db *SqliteDB) GetTransferAttributionBreakdownByResources(ctx context.Context, filter usage.Filter, groupBy string, resources []string) ([]usage.Breakdown, error) {
 	keyExpr, selectExpr := transferAttributionGroupExpr(groupBy)
 	where, args := transferAttributionWhereByResources(filter, resources)
 	query := fmt.Sprintf(`
@@ -104,7 +104,7 @@ func (db *SqliteDB) GetTransferAttributionBreakdownByResources(ctx context.Conte
 	return scanTransferAttributionBreakdown(rows)
 }
 
-func transferAttributionWhere(filter models.TransferAttributionFilter) (string, []any) {
+func transferAttributionWhere(filter usage.Filter) (string, []any) {
 	parts := make([]string, 0)
 	args := make([]any, 0)
 	add := func(clause string, value any) {
@@ -123,10 +123,10 @@ func transferAttributionWhere(filter models.TransferAttributionFilter) (string, 
 	direction := strings.TrimSpace(filter.Direction)
 	if direction == "" {
 		switch strings.TrimSpace(filter.EventType) {
-		case models.ProviderTransferDirectionDownload:
-			direction = models.ProviderTransferDirectionDownload
-		case models.ProviderTransferDirectionUpload:
-			direction = models.ProviderTransferDirectionUpload
+		case usage.ProviderTransferDirectionDownload:
+			direction = usage.ProviderTransferDirectionDownload
+		case usage.ProviderTransferDirectionUpload:
+			direction = usage.ProviderTransferDirectionUpload
 		}
 	}
 	if direction != "" && direction != "all" {
@@ -158,7 +158,7 @@ func transferAttributionWhere(filter models.TransferAttributionFilter) (string, 
 	return " WHERE " + strings.Join(parts, " AND "), args
 }
 
-func transferAttributionWhereByResources(filter models.TransferAttributionFilter, resources []string) (string, []any) {
+func transferAttributionWhereByResources(filter usage.Filter, resources []string) (string, []any) {
 	where, args := transferAttributionWhere(filter)
 	clause, clauseArgs := sqliteTransferResourceClause(resources)
 	if clause == "" {
@@ -230,10 +230,10 @@ func transferAttributionGroupExpr(groupBy string) (string, string) {
 
 func normalizeTransferDirection(direction string) string {
 	switch strings.ToLower(strings.TrimSpace(direction)) {
-	case models.ProviderTransferDirectionUpload:
-		return models.ProviderTransferDirectionUpload
+	case usage.ProviderTransferDirectionUpload:
+		return usage.ProviderTransferDirectionUpload
 	default:
-		return models.ProviderTransferDirectionDownload
+		return usage.ProviderTransferDirectionDownload
 	}
 }
 
@@ -243,10 +243,10 @@ type transferRows interface {
 	Err() error
 }
 
-func scanTransferAttributionBreakdown(rows transferRows) ([]models.TransferAttributionBreakdown, error) {
-	out := make([]models.TransferAttributionBreakdown, 0)
+func scanTransferAttributionBreakdown(rows transferRows) ([]usage.Breakdown, error) {
+	out := make([]usage.Breakdown, 0)
 	for rows.Next() {
-		var item models.TransferAttributionBreakdown
+		var item usage.Breakdown
 		var last any
 		if err := rows.Scan(
 			&item.Key,

@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
+	clientservices "github.com/calypr/syfon/client/services"
 	"github.com/calypr/syfon/internal/api/docs"
 	"github.com/calypr/syfon/internal/api/drsapi"
 	"github.com/calypr/syfon/internal/api/internaldrs"
@@ -22,11 +23,11 @@ import (
 	"github.com/calypr/syfon/internal/config"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/db"
-	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/signer/file"
 	"github.com/calypr/syfon/internal/storage/address"
 	"github.com/calypr/syfon/internal/testutils"
 	"github.com/calypr/syfon/internal/urlmanager"
+	"github.com/calypr/syfon/internal/usage"
 )
 
 func executeRootCommand(t *testing.T, args ...string) (string, error) {
@@ -47,12 +48,12 @@ func TestSyfonMetricsTransfersCLI(t *testing.T) {
 	defer server.Close()
 
 	now := time.Now().UTC()
-	if err := server.DB.RecordTransferAttributionEvents(context.Background(), []models.TransferAttributionEvent{
+	if err := server.DB.RecordTransferAttributionEvents(context.Background(), []usage.Event{
 		{
 			EventID:        "cli-grant-1",
 			AccessGrantID:  "cli-grant-1",
-			EventType:      models.TransferEventAccessIssued,
-			Direction:      models.ProviderTransferDirectionDownload,
+			EventType:      usage.TransferEventAccessIssued,
+			Direction:      usage.ProviderTransferDirectionDownload,
 			EventTime:      now.Add(-time.Minute),
 			ObjectID:       "did-cli-1",
 			SHA256:         "sha-cli-1",
@@ -70,8 +71,8 @@ func TestSyfonMetricsTransfersCLI(t *testing.T) {
 		{
 			EventID:        "cli-grant-2",
 			AccessGrantID:  "cli-grant-2",
-			EventType:      models.TransferEventAccessIssued,
-			Direction:      models.ProviderTransferDirectionUpload,
+			EventType:      usage.TransferEventAccessIssued,
+			Direction:      usage.ProviderTransferDirectionUpload,
 			EventTime:      now.Add(-30 * time.Second),
 			ObjectID:       "did-cli-2",
 			SHA256:         "sha-cli-2",
@@ -89,8 +90,8 @@ func TestSyfonMetricsTransfersCLI(t *testing.T) {
 		{
 			EventID:        "cli-grant-3",
 			AccessGrantID:  "cli-grant-3",
-			EventType:      models.TransferEventAccessIssued,
-			Direction:      models.ProviderTransferDirectionDownload,
+			EventType:      usage.TransferEventAccessIssued,
+			Direction:      usage.ProviderTransferDirectionDownload,
 			EventTime:      now.Add(-20 * time.Second),
 			ObjectID:       "did-cli-3",
 			SHA256:         "sha-cli-3",
@@ -108,11 +109,11 @@ func TestSyfonMetricsTransfersCLI(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("record access grant: %v", err)
 	}
-	if err := server.DB.RecordProviderTransferEvents(context.Background(), []models.ProviderTransferEvent{
+	if err := server.DB.RecordProviderTransferEvents(context.Background(), []usage.ProviderEvent{
 		{
 			ProviderEventID:      "cli-transfer-1",
 			AccessGrantID:        "cli-grant-1",
-			Direction:            models.ProviderTransferDirectionDownload,
+			Direction:            usage.ProviderTransferDirectionDownload,
 			EventTime:            now,
 			ObjectID:             "did-cli-1",
 			SHA256:               "sha-cli-1",
@@ -124,12 +125,12 @@ func TestSyfonMetricsTransfersCLI(t *testing.T) {
 			BytesTransferred:     123,
 			ActorEmail:           "user@example.com",
 			ActorSubject:         "user@example.com",
-			ReconciliationStatus: models.ProviderTransferMatched,
+			ReconciliationStatus: usage.ProviderTransferMatched,
 		},
 		{
 			ProviderEventID:      "cli-transfer-2",
 			AccessGrantID:        "cli-grant-3",
-			Direction:            models.ProviderTransferDirectionDownload,
+			Direction:            usage.ProviderTransferDirectionDownload,
 			EventTime:            now.Add(10 * time.Second),
 			ObjectID:             "did-cli-3",
 			SHA256:               "sha-cli-3",
@@ -141,7 +142,7 @@ func TestSyfonMetricsTransfersCLI(t *testing.T) {
 			BytesTransferred:     7,
 			ActorEmail:           "other@example.com",
 			ActorSubject:         "other@example.com",
-			ReconciliationStatus: models.ProviderTransferMatched,
+			ReconciliationStatus: usage.ProviderTransferMatched,
 		},
 	}); err != nil {
 		t.Fatalf("record transfer event: %v", err)
@@ -153,7 +154,7 @@ func TestSyfonMetricsTransfersCLI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("metrics transfers summary command failed: %v output=%s", err, out)
 	}
-	var summary models.TransferAttributionSummary
+	var summary clientservices.TransferAttributionSummary
 	if err := json.Unmarshal([]byte(out), &summary); err != nil {
 		t.Fatalf("decode summary output %q: %v", out, err)
 	}
@@ -169,9 +170,9 @@ func TestSyfonMetricsTransfersCLI(t *testing.T) {
 		t.Fatalf("metrics transfers breakdown command failed: %v output=%s", err, out)
 	}
 	var breakdown struct {
-		GroupBy   string                                `json:"group_by"`
-		Data      []models.TransferAttributionBreakdown `json:"data"`
-		Freshness *models.TransferMetricsFreshness      `json:"freshness"`
+		GroupBy   string                                        `json:"group_by"`
+		Data      []clientservices.TransferAttributionBreakdown `json:"data"`
+		Freshness *clientservices.TransferMetricsFreshness      `json:"freshness"`
 	}
 	if err := json.Unmarshal([]byte(out), &breakdown); err != nil {
 		t.Fatalf("decode breakdown output %q: %v", out, err)
@@ -188,15 +189,15 @@ func TestSyfonMetricsTransfersCLI(t *testing.T) {
 		t.Fatalf("metrics transfers users command failed: %v output=%s", err, out)
 	}
 	var users struct {
-		Summary models.TransferAttributionSummary `json:"summary"`
+		Summary clientservices.TransferAttributionSummary `json:"summary"`
 		Users   []struct {
 			User            string `json:"user"`
 			BytesDownloaded int64  `json:"bytes_downloaded"`
 			BytesUploaded   int64  `json:"bytes_uploaded"`
 		} `json:"users"`
-		SortBy    string                           `json:"sort_by"`
-		SortOrder string                           `json:"sort_order"`
-		Freshness *models.TransferMetricsFreshness `json:"freshness"`
+		SortBy    string                                   `json:"sort_by"`
+		SortOrder string                                   `json:"sort_order"`
+		Freshness *clientservices.TransferMetricsFreshness `json:"freshness"`
 	}
 	if err := json.Unmarshal([]byte(out), &users); err != nil {
 		t.Fatalf("decode users output %q: %v", out, err)
@@ -219,9 +220,9 @@ func TestSyfonMetricsTransfersCLI(t *testing.T) {
 		t.Fatalf("metrics transfers billing command failed: %v output=%s", err, out)
 	}
 	var billing struct {
-		Summary          models.TransferAttributionSummary     `json:"summary"`
-		StorageLocations []models.TransferAttributionBreakdown `json:"storage_locations"`
-		Files            []models.TransferAttributionBreakdown `json:"files"`
+		Summary          clientservices.TransferAttributionSummary     `json:"summary"`
+		StorageLocations []clientservices.TransferAttributionBreakdown `json:"storage_locations"`
+		Files            []clientservices.TransferAttributionBreakdown `json:"files"`
 	}
 	if err := json.Unmarshal([]byte(out), &billing); err != nil {
 		t.Fatalf("decode billing output %q: %v", out, err)
