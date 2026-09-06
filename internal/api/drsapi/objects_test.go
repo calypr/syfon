@@ -14,15 +14,15 @@ import (
 	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/common"
+	"github.com/calypr/syfon/internal/core"
 	httpdrs "github.com/calypr/syfon/internal/httpapi/drs"
 	"github.com/calypr/syfon/internal/objects"
+	"github.com/calypr/syfon/internal/storage"
 	"github.com/calypr/syfon/internal/testutils"
-	"github.com/calypr/syfon/internal/urlmanager"
 )
 
-type captureURLManager struct {
-	testutils.MockUrlManager
-	lastOptions urlmanager.SignOptions
+type captureStorageAccess struct {
+	lastOptions storage.AccessOptions
 	lastURL     string
 	lastAccess  string
 }
@@ -44,11 +44,15 @@ func testServiceInfo() drs.Service {
 	}
 }
 
-func (m *captureURLManager) SignURL(ctx context.Context, accessId string, url string, opts urlmanager.SignOptions) (string, error) {
-	m.lastOptions = opts
-	m.lastURL = url
-	m.lastAccess = accessId
-	return m.MockUrlManager.SignURL(ctx, accessId, url, opts)
+func (m *captureStorageAccess) Access(_ context.Context, request storage.AccessRequest) (storage.Access, error) {
+	m.lastOptions = request.Options
+	m.lastURL = request.Target.Location
+	m.lastAccess = request.Target.AccessID
+	suffix := "?signed=true"
+	if request.Options.Method == http.MethodPut || request.Options.Method == http.MethodPost {
+		suffix += "&upload=true"
+	}
+	return storage.Access{Location: request.Target.Location + suffix}, nil
 }
 
 func TestDRSHandlers(t *testing.T) {
@@ -78,8 +82,8 @@ func TestDRSHandlers(t *testing.T) {
 			"test-obj": {"calypr": {"proj-a"}},
 		},
 	}
-	um := &captureURLManager{}
-	om := testObjectManager(db, um)
+	storageAccess := &captureStorageAccess{}
+	om := testObjectManager(db, core.StoragePorts{Access: storageAccess})
 	app := fiber.New()
 	RegisterDRSRoutes(app, om, testServiceInfo())
 
@@ -110,8 +114,8 @@ func TestDRSHandlers(t *testing.T) {
 
 	t.Run("GetAccessURL_Success", func(t *testing.T) {
 		db.TransferEvents = nil
-		um.lastURL = ""
-		um.lastAccess = ""
+		storageAccess.lastURL = ""
+		storageAccess.lastAccess = ""
 		req := httptest.NewRequest("GET", "/objects/test-obj/access/s3-access", nil)
 		resp, _ := app.Test(req)
 		if resp.StatusCode != http.StatusOK {
@@ -122,10 +126,10 @@ func TestDRSHandlers(t *testing.T) {
 		if access.Url == "" {
 			t.Error("expected signed URL, got empty")
 		}
-		if got, want := um.lastOptions.DownloadFilename, "test-file"; got != want {
+		if got, want := storageAccess.lastOptions.DownloadFilename, "test-file"; got != want {
 			t.Fatalf("unexpected download filename override: got %q want %q", got, want)
 		}
-		if got, want := um.lastURL, "s3://bucket/key"; got != want {
+		if got, want := storageAccess.lastURL, "s3://bucket/key"; got != want {
 			t.Fatalf("unexpected signed storage URL: got %q want %q", got, want)
 		}
 		if len(db.TransferEvents) != 1 {
@@ -165,8 +169,8 @@ func TestDRSHandlers(t *testing.T) {
 				},
 			},
 		}
-		um := &captureURLManager{}
-		om := testObjectManager(db, um)
+		storageAccess := &captureStorageAccess{}
+		om := testObjectManager(db, core.StoragePorts{Access: storageAccess})
 		app := fiber.New()
 		RegisterDRSRoutes(app, om, testServiceInfo())
 
@@ -176,10 +180,10 @@ func TestDRSHandlers(t *testing.T) {
 			t.Fatalf("expected 200, got %d", resp.StatusCode)
 		}
 		wantURL := "s3://bforepc/bforepc-prod/OHSU/slide.ome.tiff"
-		if got := um.lastURL; got != wantURL {
+		if got := storageAccess.lastURL; got != wantURL {
 			t.Fatalf("expected stored replica URL %q, got %q", wantURL, got)
 		}
-		if got := um.lastAccess; got != "bforepc" {
+		if got := storageAccess.lastAccess; got != "bforepc" {
 			t.Fatalf("expected signer credential bucket %q, got %q", "bforepc", got)
 		}
 		var access drs.AccessURL
@@ -201,8 +205,8 @@ func TestDRSHandlers(t *testing.T) {
 
 	t.Run("GetBulkAccessURL_Success", func(t *testing.T) {
 		db.TransferEvents = nil
-		um.lastURL = ""
-		um.lastAccess = ""
+		storageAccess.lastURL = ""
+		storageAccess.lastAccess = ""
 		bodyObj := drs.BulkObjectAccessId{
 			BulkObjectAccessIds: &[]struct {
 				BulkAccessIds *[]string `json:"bulk_access_ids,omitempty"`
@@ -229,10 +233,10 @@ func TestDRSHandlers(t *testing.T) {
 		if access.ResolvedDrsObjectAccessUrls == nil || len(*access.ResolvedDrsObjectAccessUrls) != 1 || (*access.ResolvedDrsObjectAccessUrls)[0].Url == "" {
 			t.Fatalf("expected signed bulk access URL, got %+v", access.ResolvedDrsObjectAccessUrls)
 		}
-		if got, want := um.lastOptions.DownloadFilename, "test-file"; got != want {
+		if got, want := storageAccess.lastOptions.DownloadFilename, "test-file"; got != want {
 			t.Fatalf("unexpected bulk download filename override: got %q want %q", got, want)
 		}
-		if got, want := um.lastURL, "s3://bucket/key"; got != want {
+		if got, want := storageAccess.lastURL, "s3://bucket/key"; got != want {
 			t.Fatalf("unexpected bulk signed storage URL: got %q want %q", got, want)
 		}
 		if len(db.TransferEvents) != 1 {
@@ -320,8 +324,7 @@ func TestAdditionalDRSHandlers(t *testing.T) {
 			},
 		},
 	}
-	um := &testutils.MockUrlManager{}
-	om := testObjectManager(db, um)
+	om := testObjectManager(db, core.StoragePorts{})
 	app := fiber.New()
 	RegisterDRSRoutes(app, om, testServiceInfo())
 
@@ -460,7 +463,7 @@ func TestAdditionalDRSHandlers(t *testing.T) {
 
 func TestChecksumRouteRegression_WithRealCoreAndDB(t *testing.T) {
 	database := testutils.NewInMemoryDB()
-	om := testObjectManager(database, &testutils.MockUrlManager{})
+	om := testObjectManager(database, core.StoragePorts{})
 	checksum := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 	controlled := []string{"/organization/testorg/project/testproj"}
