@@ -11,7 +11,6 @@ import (
 	generated "github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/storage"
-	"github.com/calypr/syfon/internal/testutils"
 	"github.com/gofiber/fiber/v3"
 )
 
@@ -27,7 +26,7 @@ func (m *captureStorageAccess) Access(_ context.Context, request storage.AccessR
 }
 
 func TestGetObjectAndAccessURLAliases(t *testing.T) {
-	db := &testutils.MockDatabase{Objects: map[string]*objects.Record{
+	db := newDRSObjectStore(map[string]*objects.Record{
 		"object-1": {
 			Id:   "object-1",
 			Name: drsPtr("test-file"),
@@ -37,9 +36,9 @@ func TestGetObjectAndAccessURLAliases(t *testing.T) {
 				AccessUrl: &objects.AccessURL{Url: "s3://bucket/object-1"},
 			}},
 		},
-	}}
+	})
 	storageAccess := &captureStorageAccess{}
-	om := testObjectManager(db, storageAccess)
+	om := testDRSServices(db, storageAccess)
 	app := fiber.New()
 	RegisterDRSRoutes(app, om.objectService, om.transferService, generated.Service{})
 
@@ -86,10 +85,10 @@ func TestGetObjectAndAccessURLAliases(t *testing.T) {
 
 func TestBulkObjectAndChecksumHandlers(t *testing.T) {
 	checksum := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	db := &testutils.MockDatabase{Objects: map[string]*objects.Record{
+	db := newDRSObjectStore(map[string]*objects.Record{
 		"object-1": {Id: "object-1", Checksums: []objects.Checksum{{Type: "sha256", Checksum: checksum}}},
-	}}
-	om := testObjectManager(db, nil)
+	})
+	om := testDRSServices(db, nil)
 	app := fiber.New()
 	RegisterDRSRoutes(app, om.objectService, om.transferService, generated.Service{})
 
@@ -140,10 +139,10 @@ func TestDeleteAndAccessMethodAliases(t *testing.T) {
 		{method: http.MethodPost, path: "/objects/delete"},
 		{method: http.MethodPut, path: "/objects/delete"},
 	} {
-		db := &testutils.MockDatabase{Objects: map[string]*objects.Record{
+		db := newDRSObjectStore(map[string]*objects.Record{
 			"object-1": {Id: "object-1"},
-		}}
-		om := testObjectManager(db, nil)
+		})
+		om := testDRSServices(db, nil)
 		app := fiber.New()
 		RegisterDRSRoutes(app, om.objectService, om.transferService, generated.Service{})
 		var body []byte
@@ -159,10 +158,10 @@ func TestDeleteAndAccessMethodAliases(t *testing.T) {
 		}
 	}
 
-	db := &testutils.MockDatabase{Objects: map[string]*objects.Record{
+	db := newDRSObjectStore(map[string]*objects.Record{
 		"object-1": {Id: "object-1"},
-	}}
-	om := testObjectManager(db, nil)
+	})
+	om := testDRSServices(db, nil)
 	app := fiber.New()
 	RegisterDRSRoutes(app, om.objectService, om.transferService, generated.Service{})
 	body, err := json.Marshal(generated.AccessMethodUpdateRequest{AccessMethods: []generated.AccessMethod{{

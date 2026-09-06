@@ -14,9 +14,7 @@ import (
 
 	"github.com/calypr/syfon/apigen/server/bucketapi"
 	"github.com/calypr/syfon/internal/buckets"
-	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/objects"
-	"github.com/calypr/syfon/internal/testutils"
 )
 
 type recordingBucketCredentialStore struct {
@@ -122,10 +120,10 @@ func TestHandleInternalPutBucket_CreatesScopeBeforeSavingCredential(t *testing.T
 }
 
 func TestHandleInternalBuckets_Gen3Auth(t *testing.T) {
-	mockDB := &testutils.MockDatabase{
+	mockDB := &bucketTestStore{
 		Credentials: map[string]buckets.Credential{"b1": {Bucket: "b1", Region: "us-east-1"}, "b2": {Bucket: "b2", Region: "us-east-1"}},
 		Objects: map[string]*objects.Record{
-			"obj-1": {Id: "obj-1", Name: common.Ptr("obj-1"), AccessMethods: &[]objects.AccessMethod{
+			"obj-1": {Id: "obj-1", Name: ptr("obj-1"), AccessMethods: &[]objects.AccessMethod{
 				{Type: "s3", AccessUrl: &objects.AccessURL{
 					Url: "s3://b1/path/obj-1"}},
 				{Type: "s3", AccessUrl: &objects.AccessURL{
@@ -143,7 +141,7 @@ func TestHandleInternalBuckets_Gen3Auth(t *testing.T) {
 }
 
 func TestHandleInternalBuckets_IncludesBucketsWithoutScopes(t *testing.T) {
-	mockDB := &testutils.MockDatabase{
+	mockDB := &bucketTestStore{
 		Credentials: map[string]buckets.Credential{
 			"b1": {CredentialID: "b1", Bucket: "b1", Region: "us-east-1", Provider: "s3"},
 			"b2": {CredentialID: "b2", Bucket: "b2", Region: "us-east-1", Provider: "s3"},
@@ -172,7 +170,7 @@ func TestHandleInternalBuckets_IncludesBucketsWithoutScopes(t *testing.T) {
 }
 
 func TestHandleInternalBuckets_PrefersExplicitScopeOverObjectDerivedDuplicate(t *testing.T) {
-	mockDB := &testutils.MockDatabase{
+	mockDB := &bucketTestStore{
 		Credentials: map[string]buckets.Credential{
 			"EllrottLab": {CredentialID: "EllrottLab", Bucket: "EllrottLab", Region: "us-east-1", Provider: "s3"},
 			"cbds":       {CredentialID: "cbds", Bucket: "cbds", Region: "us-east-1", Provider: "s3"},
@@ -186,7 +184,7 @@ func TestHandleInternalBuckets_PrefersExplicitScopeOverObjectDerivedDuplicate(t 
 			},
 		},
 		Objects: map[string]*objects.Record{
-			"obj-1": {Id: "obj-1", Name: common.Ptr("obj-1"), AccessMethods: &[]objects.AccessMethod{{
+			"obj-1": {Id: "obj-1", Name: ptr("obj-1"), AccessMethods: &[]objects.AccessMethod{{
 				Type: "s3",
 				AccessUrl: &objects.AccessURL{
 
@@ -222,7 +220,7 @@ func TestHandleInternalBuckets_PrefersExplicitScopeOverObjectDerivedDuplicate(t 
 }
 
 func TestHandleInternalPutDeleteBucket_Gen3Auth(t *testing.T) {
-	mockDB := &testutils.MockDatabase{Credentials: map[string]buckets.Credential{}}
+	mockDB := &bucketTestStore{Credentials: map[string]buckets.Credential{}}
 	region, accessKey, secretKey, endpoint, provider, path := "us-east-1", "ak", "sk", t.TempDir(), "file", "s3://bucket2/cbds/proj1"
 	putBody, _ := json.Marshal(bucketapi.PutBucketRequest{Bucket: "bucket2", Provider: &provider, Region: &region, AccessKey: &accessKey, SecretKey: &secretKey, Endpoint: &endpoint, Organization: "cbds", ProjectId: "proj1", Path: &path})
 	putReq401 := httptest.NewRequest(http.MethodPut, "/data/buckets", bytes.NewBuffer(putBody))
@@ -234,7 +232,7 @@ func TestHandleInternalPutDeleteBucket_Gen3Auth(t *testing.T) {
 }
 
 func TestHandleInternalPutBucket_RejectsInvalidGeneratedPayloads(t *testing.T) {
-	mockDB := &testutils.MockDatabase{Credentials: map[string]buckets.Credential{}}
+	mockDB := &bucketTestStore{Credentials: map[string]buckets.Credential{}}
 	req := httptest.NewRequest(http.MethodPut, "/data/buckets", bytes.NewBufferString(`{"bucket":"b2","organization":"cbds","unexpected":"boom"}`))
 	req = req.WithContext(dataTestAuthContext(req.Context(), "gen3", true, map[string]map[string]bool{"/programs/cbds": {"arborist:create-descendant": true}}))
 	rr := doInternalDRSTestRequest(req, newInternalDRSObjectManager(mockDB, &internalDRSStorageFake{}))
@@ -244,7 +242,7 @@ func TestHandleInternalPutBucket_RejectsInvalidGeneratedPayloads(t *testing.T) {
 }
 
 func TestHandleInternalPutBucket_ReusesExistingPhysicalBucketCredential(t *testing.T) {
-	mockDB := &testutils.MockDatabase{
+	mockDB := &bucketTestStore{
 		Credentials: map[string]buckets.Credential{
 			"cbdscollab_1c102e76761b": {
 				CredentialID: "cbdscollab_1c102e76761b",
@@ -304,7 +302,7 @@ func TestHandleInternalPutBucket_ReusesExistingPhysicalBucketCredential(t *testi
 }
 
 func TestHandleInternalListBucketScopes_Success(t *testing.T) {
-	mockDB := &testutils.MockDatabase{
+	mockDB := &bucketTestStore{
 		Credentials: map[string]buckets.Credential{
 			"bucket-a": {CredentialID: "bucket-a", Bucket: "bucket-a", Provider: "s3"},
 		},
@@ -340,7 +338,7 @@ func TestHandleInternalListBucketScopes_Success(t *testing.T) {
 }
 
 func TestHandleInternalListBucketScopes_FiltersUnauthorizedScopesOnSharedBucket(t *testing.T) {
-	mockDB := &testutils.MockDatabase{
+	mockDB := &bucketTestStore{
 		Credentials: map[string]buckets.Credential{
 			"bucket-a": {CredentialID: "bucket-a", Bucket: "bucket-a", Provider: "s3"},
 		},
@@ -375,7 +373,7 @@ func TestHandleInternalListBucketScopes_FiltersUnauthorizedScopesOnSharedBucket(
 }
 
 func TestHandleInternalListBucketScopes_RendersRootScopeAsBucketURL(t *testing.T) {
-	mockDB := &testutils.MockDatabase{
+	mockDB := &bucketTestStore{
 		Credentials: map[string]buckets.Credential{
 			"gdcdata": {CredentialID: "gdcdata", Bucket: "gdcdata", Provider: "s3"},
 		},
@@ -408,14 +406,14 @@ func TestHandleInternalListBucketScopes_RendersRootScopeAsBucketURL(t *testing.T
 func TestHandleInternalListBucketScopes_RequiresGen3Auth(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/data/buckets/bucket-a/scopes", nil)
 	req = req.WithContext(dataTestAuthContext(req.Context(), "gen3", false, nil))
-	rr := doInternalDRSTestRequest(req, newInternalDRSObjectManager(&testutils.MockDatabase{}, &internalDRSStorageFake{}))
+	rr := doInternalDRSTestRequest(req, newInternalDRSObjectManager(&bucketTestStore{}, &internalDRSStorageFake{}))
 	if rr.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d body=%s", rr.Code, rr.Body.String())
 	}
 }
 
 func TestHandleInternalDeleteBucketScope_RequiresExactPathMatch(t *testing.T) {
-	mockDB := &testutils.MockDatabase{
+	mockDB := &bucketTestStore{
 		Credentials: map[string]buckets.Credential{
 			"bucket-a": {CredentialID: "bucket-a", Bucket: "bucket-a", Provider: "s3"},
 		},
@@ -442,7 +440,7 @@ func TestHandleInternalDeleteBucketScope_RequiresExactPathMatch(t *testing.T) {
 }
 
 func TestHandleInternalDeleteBucketScope_AllowsEmptyRootPath(t *testing.T) {
-	mockDB := &testutils.MockDatabase{
+	mockDB := &bucketTestStore{
 		Credentials: map[string]buckets.Credential{
 			"bucket-a": {CredentialID: "bucket-a", Bucket: "bucket-a", Provider: "s3"},
 		},

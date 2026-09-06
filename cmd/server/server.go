@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -15,10 +16,10 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/calypr/syfon/apigen/server/drs"
+	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/access/authentication"
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/config"
-	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/credentialcipher"
 	"github.com/calypr/syfon/internal/httpapi/middleware"
 	"github.com/calypr/syfon/internal/maintenance/projectstorage"
@@ -53,38 +54,96 @@ func serviceInfoForBackend(sqlite bool) drs.Service {
 }
 
 type serverBackend struct {
-	dependencies       core.Dependencies
+	objectDependencies objects.Dependencies
 	bucketDependencies buckets.Dependencies
 	pending            transfers.PendingStore
 	usageIngest        usage.IngestStore
 	usageReports       usage.ReportStore
 }
 
-func newServerObjectService(ports core.ObjectPorts) *objects.Service {
-	return objects.NewService(objects.Dependencies{
-		Reader:        ports.Reader,
-		Writer:        ports.Writer,
-		AccessMethods: ports.AccessMethods,
-		AccessPolicy:  ports.AccessPolicy,
-		Aliases:       ports.Aliases,
-		Content:       ports.Content,
-		ChecksumScope: ports.ChecksumScope,
-		Scope:         ports.Scope,
-		Resources:     ports.Resources,
-		Pages:         ports.Pages,
-		URLPages:      ports.URLPages,
-		Authorized:    ports.Authorized,
-	})
+var (
+	errBucketVisibilityScopeQuery   = errors.New("bucket visibility fallback requires an object scope query")
+	errBucketVisibilityRecordReader = errors.New("bucket visibility fallback requires an object record reader")
+)
+
+func newBucketVisibilityFallback(scope objects.ScopeQuery, reader objects.RecordReader) buckets.VisibilityFallback {
+	return func(ctx context.Context) ([]buckets.VisibilityRow, error) {
+		if scope == nil {
+			return nil, errBucketVisibilityScopeQuery
+		}
+		if reader == nil {
+			return nil, errBucketVisibilityRecordReader
+		}
+
+		ids, err := scope.ListObjectIDsByScope(ctx, "", "")
+		if err != nil {
+			return nil, err
+		}
+		if len(ids) == 0 {
+			return []buckets.VisibilityRow{}, nil
+		}
+
+		records, err := reader.GetBulkObjects(ctx, ids)
+		if err != nil {
+			return nil, err
+		}
+		rows := make([]buckets.VisibilityRow, 0)
+		for i := range records {
+			obj := &records[i]
+			if !serverBucketVisibilityObjectReadable(ctx, obj) {
+				continue
+			}
+			resources := objects.AccessResources(obj)
+			if len(resources) == 0 || obj.AccessMethods == nil {
+				continue
+			}
+			for _, method := range *obj.AccessMethods {
+				if method.AccessUrl == nil {
+					continue
+				}
+				accessURL := strings.TrimSpace(method.AccessUrl.Url)
+				if accessURL == "" {
+					continue
+				}
+				for _, resource := range resources {
+					resource = strings.TrimSpace(resource)
+					if resource == "" {
+						continue
+					}
+					rows = append(rows, buckets.VisibilityRow{
+						AccessURL:  accessURL,
+						AccessType: strings.TrimSpace(method.Type),
+						Resource:   resource,
+					})
+				}
+			}
+		}
+		return rows, nil
+	}
+}
+
+func serverBucketVisibilityObjectReadable(ctx context.Context, obj *objects.Record) bool {
+	if !access.IsAuthzEnforced(ctx) ||
+		access.HasMethodAccess(ctx, "read", []string{"/programs"}) ||
+		access.HasMethodAccess(ctx, "read", []string{"/data_file"}) {
+		return true
+	}
+	if obj != nil && obj.PublicRead {
+		return true
+	}
+	resources := objects.AccessResources(obj)
+	if obj != nil && obj.PublicReadPolicyKnown && len(resources) == 0 {
+		return false
+	}
+	return access.HasObjectMethodAccess(ctx, "read", resources)
 }
 
 func sqliteServerBackend(database *sqlite.SqliteDB) serverBackend {
 	return serverBackend{
-		dependencies: core.Dependencies{
-			Objects: core.ObjectPorts{
-				Reader: database, Writer: database, AccessMethods: database, AccessPolicy: database,
-				Aliases: database, Content: database, ChecksumScope: database, Scope: database,
-				Resources: database, Pages: database, URLPages: database, Authorized: database,
-			},
+		objectDependencies: objects.Dependencies{
+			Reader: database, Writer: database, AccessMethods: database, AccessPolicy: database,
+			Aliases: database, Content: database, ChecksumScope: database, Scope: database,
+			Resources: database, Pages: database, URLPages: database, Authorized: database,
 		},
 		bucketDependencies: buckets.Dependencies{
 			Credentials: database, CredentialAdmin: database, Scopes: database, Visibility: database,
@@ -97,12 +156,10 @@ func sqliteServerBackend(database *sqlite.SqliteDB) serverBackend {
 
 func postgresServerBackend(database *postgres.PostgresDB) serverBackend {
 	return serverBackend{
-		dependencies: core.Dependencies{
-			Objects: core.ObjectPorts{
-				Reader: database, Writer: database, AccessMethods: database, AccessPolicy: database,
-				Aliases: database, Content: database, ChecksumScope: database, Scope: database,
-				Resources: database, Pages: database, URLPages: database, Authorized: database,
-			},
+		objectDependencies: objects.Dependencies{
+			Reader: database, Writer: database, AccessMethods: database, AccessPolicy: database,
+			Aliases: database, Content: database, ChecksumScope: database, Scope: database,
+			Resources: database, Pages: database, URLPages: database, Authorized: database,
 		},
 		bucketDependencies: buckets.Dependencies{
 			Credentials: database, CredentialAdmin: database, Scopes: database, Visibility: database,
@@ -182,16 +239,14 @@ var Cmd = &cobra.Command{
 			invalidator = &storageInvalidator{}
 		}
 		bucketDependencies := backend.bucketDependencies
-		bucketDependencies.Fallback = core.NewBucketVisibilityFallback(
-			backend.dependencies.Objects.Scope,
-			backend.dependencies.Objects.Reader,
+		bucketDependencies.Fallback = newBucketVisibilityFallback(
+			backend.objectDependencies.Scope,
+			backend.objectDependencies.Reader,
 		)
 		bucketService, err := buckets.NewService(bucketDependencies, invalidator)
 		if err != nil {
 			fatal("failed to initialize bucket service", "err", err)
 		}
-		backend.dependencies.BucketService = bucketService
-
 		if needsStorage {
 			var storageErr error
 			storageManager, storageErr = newStorageManager(bucketService, "/", logger)
@@ -232,8 +287,7 @@ var Cmd = &cobra.Command{
 			fatal("failed to load configured bucket scopes", "err", err)
 		}
 
-		// Init unified Object Manager.
-		objectService := newServerObjectService(backend.dependencies.Objects)
+		objectService := objects.NewService(backend.objectDependencies)
 		usageService := usage.NewService(usage.Dependencies{
 			Ingest:  backend.usageIngest,
 			Reports: backend.usageReports,

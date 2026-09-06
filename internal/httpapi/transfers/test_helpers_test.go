@@ -11,43 +11,26 @@ import (
 
 	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/storage"
+	domaintransfers "github.com/calypr/syfon/internal/transfers"
 	"github.com/gofiber/fiber/v3"
 )
+
+var _ domaintransfers.AccessPort = (*internalDRSStorageFake)(nil)
+var _ domaintransfers.MultipartPort = (*internalDRSStorageFake)(nil)
 
 func ptr[T any](v T) *T { return &v }
 
 type internalDRSStorageFake struct {
 	mu sync.Mutex
 
-	bucket         string
-	key            string
-	signURL        string
-	signID         string
-	signOpts       storage.AccessOptions
-	uploadURL      string
-	probeFn        func(context.Context, []storage.ProbeTarget) []storage.ProbeResult
-	inventoryFn    func(context.Context, storage.InventoryRequest) (storage.InventoryResult, error)
-	deleteFn       func(context.Context, []storage.DeleteTarget) error
-	completeErr    error
-	inventoryCalls []storage.InventoryRequest
-	deleteCalls    [][]storage.DeleteTarget
-	completeParts  []storage.CompletedPart
-}
-
-type internalDRSProbeFake struct {
-	probeFn func(context.Context, []storage.ProbeTarget) []storage.ProbeResult
-}
-
-type internalDRSInventoryFake struct {
-	mu             sync.Mutex
-	inventoryFn    func(context.Context, storage.InventoryRequest) (storage.InventoryResult, error)
-	inventoryCalls []storage.InventoryRequest
-}
-
-type internalDRSDeleteFake struct {
-	mu          sync.Mutex
-	deleteFn    func(context.Context, []storage.DeleteTarget) error
-	deleteCalls [][]storage.DeleteTarget
+	bucket        string
+	key           string
+	signURL       string
+	signID        string
+	signOpts      storage.AccessOptions
+	uploadURL     string
+	completeErr   error
+	completeParts []storage.CompletedPart
 }
 
 func withTestAuthzContext(req *http.Request, mode string, privileges map[string]map[string]bool) *http.Request {
@@ -114,75 +97,6 @@ func (m *internalDRSStorageFake) CompleteMultipart(_ context.Context, request st
 	err := m.completeErr
 	m.mu.Unlock()
 	return err
-}
-
-func (m *internalDRSStorageFake) Probe(ctx context.Context, targets []storage.ProbeTarget) []storage.ProbeResult {
-	if m.probeFn != nil {
-		return m.probeFn(ctx, targets)
-	}
-	results := make([]storage.ProbeResult, len(targets))
-	for i, target := range targets {
-		results[i] = storage.ProbeResult{
-			ID:     target.ID,
-			Target: target.Target,
-			Metadata: storage.ObjectMetadata{
-				Provider: "s3",
-				Bucket:   target.Target.Bucket,
-				Key:      target.Target.Key,
-				Path:     target.Target.Key,
-			},
-		}
-	}
-	return results
-}
-
-func (m *internalDRSStorageFake) Inventory(ctx context.Context, request storage.InventoryRequest) (storage.InventoryResult, error) {
-	m.mu.Lock()
-	m.inventoryCalls = append(m.inventoryCalls, request)
-	m.mu.Unlock()
-	if m.inventoryFn != nil {
-		return m.inventoryFn(ctx, request)
-	}
-	return storage.InventoryResult{Complete: true}, nil
-}
-
-func (m *internalDRSStorageFake) DeleteExact(ctx context.Context, targets []storage.DeleteTarget) error {
-	m.mu.Lock()
-	m.deleteCalls = append(m.deleteCalls, append([]storage.DeleteTarget(nil), targets...))
-	m.mu.Unlock()
-	if m.deleteFn != nil {
-		return m.deleteFn(ctx, targets)
-	}
-	return nil
-}
-
-func (m *internalDRSStorageFake) InvalidateBucket(string) {}
-
-func (f *internalDRSProbeFake) Probe(ctx context.Context, targets []storage.ProbeTarget) []storage.ProbeResult {
-	if f.probeFn != nil {
-		return f.probeFn(ctx, targets)
-	}
-	return nil
-}
-
-func (f *internalDRSInventoryFake) Inventory(ctx context.Context, request storage.InventoryRequest) (storage.InventoryResult, error) {
-	f.mu.Lock()
-	f.inventoryCalls = append(f.inventoryCalls, request)
-	f.mu.Unlock()
-	if f.inventoryFn != nil {
-		return f.inventoryFn(ctx, request)
-	}
-	return storage.InventoryResult{Complete: true}, nil
-}
-
-func (f *internalDRSDeleteFake) DeleteExact(ctx context.Context, targets []storage.DeleteTarget) error {
-	f.mu.Lock()
-	f.deleteCalls = append(f.deleteCalls, append([]storage.DeleteTarget(nil), targets...))
-	f.mu.Unlock()
-	if f.deleteFn != nil {
-		return f.deleteFn(ctx, targets)
-	}
-	return nil
 }
 
 func doInternalDRSTestRequest(req *http.Request, fixture internalDRSTestFixture) *httptest.ResponseRecorder {

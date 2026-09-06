@@ -8,8 +8,6 @@ import (
 
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/storage"
-	"github.com/calypr/syfon/internal/testutils"
-	"github.com/calypr/syfon/internal/transfers"
 	"github.com/gofiber/fiber/v3"
 )
 
@@ -66,35 +64,24 @@ func (f *lfsTestStorage) CompleteMultipart(_ context.Context, request storage.Co
 	return nil
 }
 
-func newLFSTestDependencies(db *testutils.MockDatabase, storageFake *lfsTestStorage) Dependencies {
+func newLFSTestDependencies(ports *lfsTestServicePorts, storageFake *lfsTestStorage) Dependencies {
 	objectService := objects.NewService(objects.Dependencies{
-		Reader:        db,
-		Writer:        db,
-		AccessMethods: db,
-		AccessPolicy:  db,
-		Aliases:       db,
-		Content:       db,
-		ChecksumScope: db,
-		Scope:         db,
-		Resources:     db,
+		Reader:  ports.objectReader,
+		Writer:  ports.objectWriter,
+		Aliases: ports.aliases,
+		Content: ports.contentReader,
 	})
-	transferService := transfers.NewService(transfers.Dependencies{
-		Access:      storageFake,
-		Multipart:   storageFake,
-		Credentials: db,
-		Pending:     db,
-		Events:      db,
-	})
+	transferService := newLFSTransferService(storageFake, ports)
 	return Dependencies{
 		ObjectService:   objectService,
 		TransferService: transferService,
-		FileCounters:    db,
-		Credentials:     db,
+		FileCounters:    ports.fileCounters,
+		Credentials:     ports.credentials,
 	}
 }
 
-func newLFSTestRouter(db *testutils.MockDatabase, storageFake *lfsTestStorage, opts Options) *lfsTestRouter {
+func newLFSTestRouter(ports *lfsTestServicePorts, storageFake *lfsTestStorage, opts Options) *lfsTestRouter {
 	app := fiber.New()
-	RegisterLFSRoutes(app, newLFSTestDependencies(db, storageFake), opts)
+	RegisterLFSRoutes(app, newLFSTestDependencies(ports, storageFake), opts)
 	return &lfsTestRouter{app: app}
 }

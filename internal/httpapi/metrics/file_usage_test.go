@@ -12,29 +12,13 @@ import (
 	"time"
 
 	"github.com/calypr/syfon/apigen/server/metricsapi"
-	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/objects"
-	"github.com/calypr/syfon/internal/testutils"
 	"github.com/calypr/syfon/internal/usage"
 	"github.com/gofiber/fiber/v3"
 )
 
-type metricsObjectReaderAdapter struct {
-	db *testutils.MockDatabase
-}
-
-var _ usage.ObjectReader = metricsObjectReaderAdapter{}
-
-func (a metricsObjectReaderAdapter) ListObjectIDsByScope(ctx context.Context, organization, project, requiredMethod string) ([]string, error) {
-	return a.db.ListObjectIDsByScope(ctx, organization, project)
-}
-
-func (a metricsObjectReaderAdapter) GetObject(ctx context.Context, id, requiredMethod string) (*objects.Record, error) {
-	return a.db.GetObject(ctx, id)
-}
-
 type metricsOptimizedReportStore struct {
-	*testutils.MockDatabase
+	*metricsReportFake
 }
 
 func (s metricsOptimizedReportStore) ListFileUsagePageByScope(context.Context, string, string, int, int, *time.Time) ([]usage.FileUsage, error) {
@@ -59,35 +43,35 @@ func (s metricsOptimizedReportStore) GetProjectRecordSummaryByScope(context.Cont
 
 func TestMetricsRoutes_ListAndSummary(t *testing.T) {
 	now := time.Now().UTC()
-	db := &testutils.MockDatabase{
-		Objects: map[string]*objects.Record{
-			"sha-1": {Id: "sha-1", Name: common.Ptr("f1"), Size: 1},
-			"sha-2": {Id: "sha-2", Name: common.Ptr("f2"), Size: 2},
+	objectReader := newMetricsObjectReader(map[string]*objects.Record{
+		"sha-1": {Id: "sha-1", Name: metricsStringPtr("f1"), Size: 1},
+		"sha-2": {Id: "sha-2", Name: metricsStringPtr("f2"), Size: 2},
+	}, nil)
+	state := &metricsTransferState{}
+	ingest := &metricsIngestFake{state: state}
+	reports := newMetricsReport(objectReader, map[string]usage.FileUsage{
+		"sha-1": {
+			ObjectID:      "sha-1",
+			Name:          "f1",
+			Size:          1,
+			UploadCount:   1,
+			DownloadCount: 3,
+			LastDownloadTime: func() *time.Time {
+				t := now.AddDate(0, 0, -10)
+				return &t
+			}(),
 		},
-		Usage: map[string]usage.FileUsage{
-			"sha-1": {
-				ObjectID:      "sha-1",
-				Name:          "f1",
-				Size:          1,
-				UploadCount:   1,
-				DownloadCount: 3,
-				LastDownloadTime: func() *time.Time {
-					t := now.AddDate(0, 0, -10)
-					return &t
-				}(),
-			},
-			"sha-2": {
-				ObjectID:      "sha-2",
-				Name:          "f2",
-				Size:          2,
-				UploadCount:   1,
-				DownloadCount: 0,
-			},
+		"sha-2": {
+			ObjectID:      "sha-2",
+			Name:          "f2",
+			Size:          2,
+			UploadCount:   1,
+			DownloadCount: 0,
 		},
-	}
+	}, state)
 
 	app := fiber.New()
-	registerMetricsRoutesForTest(app, db)
+	registerMetricsRoutesForTest(app, ingest, reports, objectReader)
 
 	t.Run("list", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/index/v1/metrics/files?limit=10&offset=0&inactive_days=365", nil)
@@ -130,7 +114,9 @@ func TestMetricsRoutes_ListAndSummary(t *testing.T) {
 
 func TestMetricsRoutes_GetNotFoundAndValidation(t *testing.T) {
 	app := fiber.New()
-	registerMetricsRoutesForTest(app, &testutils.MockDatabase{})
+	objectReader := newMetricsObjectReader(nil, nil)
+	state := &metricsTransferState{}
+	registerMetricsRoutesForTest(app, &metricsIngestFake{state: state}, newMetricsReport(objectReader, nil, state), objectReader)
 
 	req := httptest.NewRequest(http.MethodGet, "/index/v1/metrics/files/missing", nil)
 	httpResp, err := app.Test(req)
@@ -156,40 +142,39 @@ func TestMetricsRoutes_GetNotFoundAndValidation(t *testing.T) {
 func TestMetricsRoutes_BulkFiles(t *testing.T) {
 	oldDownload := time.Now().UTC().AddDate(0, 0, -40)
 	recentDownload := time.Now().UTC().AddDate(0, 0, -2)
-	db := &testutils.MockDatabase{
-		Objects: map[string]*objects.Record{
-			"obj-a": {Id: "obj-a", Name: common.Ptr("a.txt"), Size: 10},
-			"obj-b": {Id: "obj-b", Name: common.Ptr("b.txt"), Size: 20},
-			"obj-c": {Id: "obj-c", Name: common.Ptr("c.txt"), Size: 30},
+	objectReader := newMetricsObjectReader(map[string]*objects.Record{
+		"obj-a": {Id: "obj-a", Name: metricsStringPtr("a.txt"), Size: 10},
+		"obj-b": {Id: "obj-b", Name: metricsStringPtr("b.txt"), Size: 20},
+		"obj-c": {Id: "obj-c", Name: metricsStringPtr("c.txt"), Size: 30},
+	}, map[string]map[string][]string{
+		"obj-a": {"cbds": {"end_to_end_test"}},
+		"obj-b": {"cbds": {"end_to_end_test"}},
+		"obj-c": {"other": {"project"}},
+	})
+	state := &metricsTransferState{}
+	ingest := &metricsIngestFake{state: state}
+	reports := newMetricsReport(objectReader, map[string]usage.FileUsage{
+		"obj-a": {
+			ObjectID:         "obj-a",
+			Name:             "a.txt",
+			Size:             10,
+			DownloadCount:    3,
+			LastDownloadTime: &oldDownload,
 		},
-		ObjectAuthz: map[string]map[string][]string{
-			"obj-a": {"cbds": {"end_to_end_test"}},
-			"obj-b": {"cbds": {"end_to_end_test"}},
-			"obj-c": {"other": {"project"}},
+		"obj-b": {
+			ObjectID:         "obj-b",
+			Name:             "b.txt",
+			Size:             20,
+			DownloadCount:    7,
+			LastDownloadTime: &recentDownload,
 		},
-		Usage: map[string]usage.FileUsage{
-			"obj-a": {
-				ObjectID:         "obj-a",
-				Name:             "a.txt",
-				Size:             10,
-				DownloadCount:    3,
-				LastDownloadTime: &oldDownload,
-			},
-			"obj-b": {
-				ObjectID:         "obj-b",
-				Name:             "b.txt",
-				Size:             20,
-				DownloadCount:    7,
-				LastDownloadTime: &recentDownload,
-			},
-			"obj-c": {
-				ObjectID:      "obj-c",
-				Name:          "c.txt",
-				Size:          30,
-				DownloadCount: 11,
-			},
+		"obj-c": {
+			ObjectID:      "obj-c",
+			Name:          "c.txt",
+			Size:          30,
+			DownloadCount: 11,
 		},
-	}
+	}, state)
 	app := fiber.New()
 	app.Use(func(c fiber.Ctx) error {
 		if mode := c.Get("X-Test-Auth-Mode"); mode != "" {
@@ -203,7 +188,7 @@ func TestMetricsRoutes_BulkFiles(t *testing.T) {
 		}
 		return c.Next()
 	})
-	registerMetricsRoutesForTest(app, db)
+	registerMetricsRoutesForTest(app, ingest, reports, objectReader)
 
 	req := httptest.NewRequest(http.MethodPost, "/index/v1/metrics/files/bulk?organization=cbds&project=end_to_end_test", strings.NewReader(`{"object_ids":["obj-a","obj-b","obj-c","missing","obj-a"],"inactive_days":30}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -234,31 +219,29 @@ func TestMetricsRoutes_BulkFiles(t *testing.T) {
 }
 
 func TestMetricsSummaryAuthzAndScope(t *testing.T) {
-	db := &testutils.MockDatabase{
-		Objects: map[string]*objects.Record{
-			"scoped-1": {Id: "scoped-1", Name: common.Ptr("f1"), Size: 1},
-			"other-1":  {Id: "other-1", Name: common.Ptr("f2"), Size: 2},
+	objectReader := newMetricsObjectReader(map[string]*objects.Record{
+		"scoped-1": {Id: "scoped-1", Name: metricsStringPtr("f1"), Size: 1},
+		"other-1":  {Id: "other-1", Name: metricsStringPtr("f2"), Size: 2},
+	}, map[string]map[string][]string{
+		"scoped-1": {"cbds": {"end_to_end_test"}},
+		"other-1":  {"other": {"other"}},
+	})
+	state := &metricsTransferState{}
+	ingest := &metricsIngestFake{state: state}
+	reports := newMetricsReport(objectReader, map[string]usage.FileUsage{
+		"scoped-1": {
+			ObjectID:      "scoped-1",
+			UploadCount:   2,
+			DownloadCount: 3,
 		},
-		ObjectAuthz: map[string]map[string][]string{
-			"scoped-1": {"cbds": {"end_to_end_test"}},
-			"other-1":  {"other": {"other"}},
+		"other-1": {
+			ObjectID:      "other-1",
+			UploadCount:   7,
+			DownloadCount: 11,
 		},
-		Usage: map[string]usage.FileUsage{
-			"scoped-1": {
-				ObjectID:      "scoped-1",
-				UploadCount:   2,
-				DownloadCount: 3,
-			},
-			"other-1": {
-				ObjectID:      "other-1",
-				UploadCount:   7,
-				DownloadCount: 11,
-			},
-		},
-	}
+	}, state)
 	app := fiber.New()
 	app.Use(func(c fiber.Ctx) error {
-		// Mock auth values from headers for testing
 		if mode := c.Get("X-Test-Auth-Mode"); mode != "" {
 			var privs map[string]map[string]bool
 			if privsJSON := c.Get("X-Test-Privileges"); privsJSON != "" {
@@ -270,7 +253,7 @@ func TestMetricsSummaryAuthzAndScope(t *testing.T) {
 		}
 		return c.Next()
 	})
-	registerMetricsRoutesForTest(app, db)
+	registerMetricsRoutesForTest(app, ingest, reports, objectReader)
 
 	t.Run("scope reader can access scoped summary", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/index/v1/metrics/summary?organization=cbds&project=end_to_end_test", nil)
@@ -334,32 +317,31 @@ func TestMetricsSummaryAuthzAndScope(t *testing.T) {
 }
 
 func TestMetricsFilesAuthzAndScope(t *testing.T) {
-	db := &testutils.MockDatabase{
-		Objects: map[string]*objects.Record{
-			"scoped-1": {Id: "scoped-1", Name: common.Ptr("f1"), Size: 1},
-			"other-1":  {Id: "other-1", Name: common.Ptr("f2"), Size: 2},
+	objectReader := newMetricsObjectReader(map[string]*objects.Record{
+		"scoped-1": {Id: "scoped-1", Name: metricsStringPtr("f1"), Size: 1},
+		"other-1":  {Id: "other-1", Name: metricsStringPtr("f2"), Size: 2},
+	}, map[string]map[string][]string{
+		"scoped-1": {"cbds": {"end_to_end_test"}},
+		"other-1":  {"other": {"other"}},
+	})
+	state := &metricsTransferState{}
+	ingest := &metricsIngestFake{state: state}
+	reports := newMetricsReport(objectReader, map[string]usage.FileUsage{
+		"scoped-1": {
+			ObjectID:      "scoped-1",
+			Name:          "f1",
+			Size:          1,
+			UploadCount:   2,
+			DownloadCount: 3,
 		},
-		ObjectAuthz: map[string]map[string][]string{
-			"scoped-1": {"cbds": {"end_to_end_test"}},
-			"other-1":  {"other": {"other"}},
+		"other-1": {
+			ObjectID:      "other-1",
+			Name:          "f2",
+			Size:          2,
+			UploadCount:   7,
+			DownloadCount: 11,
 		},
-		Usage: map[string]usage.FileUsage{
-			"scoped-1": {
-				ObjectID:      "scoped-1",
-				Name:          "f1",
-				Size:          1,
-				UploadCount:   2,
-				DownloadCount: 3,
-			},
-			"other-1": {
-				ObjectID:      "other-1",
-				Name:          "f2",
-				Size:          2,
-				UploadCount:   7,
-				DownloadCount: 11,
-			},
-		},
-	}
+	}, state)
 	app := fiber.New()
 	app.Use(func(c fiber.Ctx) error {
 		if mode := c.Get("X-Test-Auth-Mode"); mode != "" {
@@ -372,7 +354,7 @@ func TestMetricsFilesAuthzAndScope(t *testing.T) {
 		}
 		return c.Next()
 	})
-	registerMetricsRoutesForTest(app, db)
+	registerMetricsRoutesForTest(app, ingest, reports, objectReader)
 
 	t.Run("scoped list returns only scoped objects", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/index/v1/metrics/files?organization=cbds&project=end_to_end_test&limit=10&offset=0", nil)
@@ -449,21 +431,21 @@ func TestMetricsFilesAuthzAndScope(t *testing.T) {
 
 func TestFileUsageScopeHelpers(t *testing.T) {
 	now := time.Now().UTC()
-	objects := &testutils.MockDatabase{
-		Objects: map[string]*objects.Record{
-			"obj-a": {Id: "obj-a", CreatedTime: now, UpdatedTime: &now},
-			"obj-b": {Id: "obj-b", CreatedTime: now, UpdatedTime: &now},
-		},
-		ObjectAuthz: map[string]map[string][]string{
-			"obj-a": {"org1": {"p1"}},
-			"obj-b": {"org2": {"p2"}},
-		},
-	}
+	objectReader := newMetricsObjectReader(map[string]*objects.Record{
+		"obj-a": {Id: "obj-a", CreatedTime: now, UpdatedTime: &now},
+		"obj-b": {Id: "obj-b", CreatedTime: now, UpdatedTime: &now},
+	}, map[string]map[string][]string{
+		"obj-a": {"org1": {"p1"}},
+		"obj-b": {"org2": {"p2"}},
+	})
+	state := &metricsTransferState{}
+	ingest := &metricsIngestFake{state: state}
+	reports := newMetricsReport(objectReader, nil, state)
 
 	service := usage.NewService(usage.Dependencies{
-		Ingest:  objects,
-		Reports: objects,
-		Objects: metricsObjectReaderAdapter{db: objects},
+		Ingest:  ingest,
+		Reports: reports,
+		Objects: objectReader,
 	})
 	server := NewMetricsServer(service.Reports(), service.Ingest())
 	access := metricsAccess{organization: "org1", project: "p1"}
@@ -483,20 +465,20 @@ func TestFileUsageScopeHelpers(t *testing.T) {
 
 func TestFileUsageScopeHelpersUseUnpagedObjectMembership(t *testing.T) {
 	ids := make([]string, 1001)
-	db := &testutils.MockDatabase{
-		Objects:     make(map[string]*objects.Record, len(ids)),
-		ObjectAuthz: make(map[string]map[string][]string, len(ids)),
-		Usage:       make(map[string]usage.FileUsage, len(ids)),
-	}
+	records := make(map[string]*objects.Record, len(ids))
+	authorizations := make(map[string]map[string][]string, len(ids))
+	fileUsage := make(map[string]usage.FileUsage, len(ids))
 	for i := range ids {
 		ids[i] = fmt.Sprintf("object-%04d", i)
-		db.Objects[ids[i]] = &objects.Record{Id: objects.RecordID(ids[i])}
-		db.ObjectAuthz[ids[i]] = map[string][]string{"org": {"project"}}
-		db.Usage[ids[i]] = usage.FileUsage{ObjectID: ids[i]}
+		records[ids[i]] = &objects.Record{Id: objects.RecordID(ids[i])}
+		authorizations[ids[i]] = map[string][]string{"org": {"project"}}
+		fileUsage[ids[i]] = usage.FileUsage{ObjectID: ids[i]}
 	}
+	objectReader := newMetricsObjectReader(records, authorizations)
+	reports := newMetricsReport(objectReader, fileUsage, &metricsTransferState{})
 	service := usage.NewService(usage.Dependencies{
-		Reports: db,
-		Objects: metricsObjectReaderAdapter{db: db},
+		Reports: reports,
+		Objects: objectReader,
 	})
 	server := NewMetricsServer(service.Reports(), service.Ingest())
 	readable, err := server.readableBulkObjectIDs(context.Background(), metricsAccess{organization: "org", project: "project"}, []string{"object-1000"})
@@ -507,15 +489,16 @@ func TestFileUsageScopeHelpersUseUnpagedObjectMembership(t *testing.T) {
 		t.Fatalf("readable IDs = %v, want [object-1000]", readable)
 	}
 
-	orgDB := &testutils.MockDatabase{
-		Objects: map[string]*objects.Record{"project-object": {Id: "project-object"}},
-		ObjectAuthz: map[string]map[string][]string{
+	orgReader := newMetricsObjectReader(
+		map[string]*objects.Record{"project-object": {Id: "project-object"}},
+		map[string]map[string][]string{
 			"project-object": {"org": {"project"}},
 		},
-	}
+	)
+	orgReports := newMetricsReport(orgReader, nil, &metricsTransferState{})
 	optimized := usage.NewService(usage.Dependencies{
-		Reports: metricsOptimizedReportStore{MockDatabase: orgDB},
-		Objects: metricsObjectReaderAdapter{db: orgDB},
+		Reports: metricsOptimizedReportStore{metricsReportFake: orgReports},
+		Objects: orgReader,
 	})
 	orgServer := NewMetricsServer(optimized.Reports(), optimized.Ingest())
 	inside, err := orgServer.objectInScope(context.Background(), "project-object", metricsAccess{organization: "org"})
@@ -529,22 +512,21 @@ func TestFileUsageScopeHelpersUseUnpagedObjectMembership(t *testing.T) {
 
 func TestListMultiScopedFileUsage_DeduplicatesAcrossScopes(t *testing.T) {
 	now := time.Now().UTC()
-	objects := &testutils.MockDatabase{
-		Objects: map[string]*objects.Record{
-			"obj-a": {Id: "obj-a", CreatedTime: now, UpdatedTime: &now},
-		},
-		ObjectAuthz: map[string]map[string][]string{
-			"obj-a": {"org1": {"p1"}},
-		},
-		Usage: map[string]usage.FileUsage{
-			"obj-a": {ObjectID: "obj-a", UploadCount: 1, DownloadCount: 2},
-		},
-	}
+	objectReader := newMetricsObjectReader(map[string]*objects.Record{
+		"obj-a": {Id: "obj-a", CreatedTime: now, UpdatedTime: &now},
+	}, map[string]map[string][]string{
+		"obj-a": {"org1": {"p1"}},
+	})
+	state := &metricsTransferState{}
+	ingest := &metricsIngestFake{state: state}
+	reports := newMetricsReport(objectReader, map[string]usage.FileUsage{
+		"obj-a": {ObjectID: "obj-a", UploadCount: 1, DownloadCount: 2},
+	}, state)
 
 	service := usage.NewService(usage.Dependencies{
-		Ingest:  objects,
-		Reports: objects,
-		Objects: metricsObjectReaderAdapter{db: objects},
+		Ingest:  ingest,
+		Reports: reports,
+		Objects: objectReader,
 	})
 	usages, err := service.ListFileUsage(context.Background(), usage.FileUsageQuery{
 		Scope: usage.ScopeQuery{

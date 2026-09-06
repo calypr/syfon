@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"path"
 	"sort"
 	"strings"
 
@@ -543,7 +542,7 @@ func objectName(record objects.Record) string {
 	if record.Name == nil {
 		return ""
 	}
-	return path.Base(strings.Trim(strings.TrimSpace(*record.Name), "/"))
+	return strings.Trim(strings.TrimSpace(*record.Name), "/")
 }
 
 func canonicalAccessURL(target scopeTarget, did, sha string) string {

@@ -17,11 +17,11 @@ import (
 
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/config"
-	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/credentialcipher"
 	"github.com/calypr/syfon/internal/httpapi"
 	"github.com/calypr/syfon/internal/maintenance/projectstorage"
-	"github.com/calypr/syfon/internal/testutils"
+	"github.com/calypr/syfon/internal/objects"
+	sqlitetest "github.com/calypr/syfon/internal/testsupport/sqlite"
 	"github.com/calypr/syfon/internal/transfers"
 	"github.com/calypr/syfon/internal/usage"
 )
@@ -90,7 +90,7 @@ s3_credentials:
 	project := "test-project"
 
 	// Setup Server
-	database := testutils.NewInMemoryDB()
+	database := sqlitetest.New(t)
 
 	// Pre-load credentials from config (mimic server startup logic)
 	for _, c := range cfg.S3Credentials {
@@ -117,9 +117,9 @@ s3_credentials:
 	backend := sqliteServerBackend(database)
 	invalidator := &storageInvalidator{}
 	bucketDependencies := backend.bucketDependencies
-	bucketDependencies.Fallback = core.NewBucketVisibilityFallback(
-		backend.dependencies.Objects.Scope,
-		backend.dependencies.Objects.Reader,
+	bucketDependencies.Fallback = newBucketVisibilityFallback(
+		backend.objectDependencies.Scope,
+		backend.objectDependencies.Reader,
 	)
 	bucketService, err := buckets.NewService(bucketDependencies, invalidator)
 	if err != nil {
@@ -130,9 +130,8 @@ s3_credentials:
 		t.Fatalf("failed to initialize storage manager: %v", err)
 	}
 	invalidator.manager = storageManager
-	backend.dependencies.BucketService = bucketService
 	app := fiber.New()
-	objectService := newServerObjectService(backend.dependencies.Objects)
+	objectService := objects.NewService(backend.objectDependencies)
 	usageService := usage.NewService(usage.Dependencies{Ingest: backend.usageIngest, Reports: backend.usageReports, Objects: objectService})
 	transferService := transfers.NewService(transfers.Dependencies{
 		Access: storageManager, Multipart: storageManager, Scopes: bucketService, Credentials: bucketService,

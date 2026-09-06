@@ -7,9 +7,9 @@ import (
 	"os"
 	"testing"
 
+	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/config"
 	"github.com/calypr/syfon/internal/credentialcipher"
-	"github.com/calypr/syfon/internal/testutils"
 )
 
 func TestApplyCredentialEncryptionConfig(t *testing.T) {
@@ -81,7 +81,12 @@ func TestApplyCredentialEncryptionConfigDoesNotOverrideEnv(t *testing.T) {
 }
 
 func TestLoadConfiguredBucketScopes(t *testing.T) {
-	database := &testutils.MockDatabase{}
+	database := &configuredBucketStore{
+		credentials: map[string]buckets.Credential{
+			"calypr": {CredentialID: "calypr", Bucket: "calypr"},
+		},
+		scopes: make(map[string]buckets.Scope),
+	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	err := loadConfiguredBucketScopes(context.Background(), database, database, []config.BucketScopeConfig{
@@ -96,11 +101,40 @@ func TestLoadConfiguredBucketScopes(t *testing.T) {
 		t.Fatalf("loadConfiguredBucketScopes returned error: %v", err)
 	}
 
-	scope, err := database.GetBucketScope(context.Background(), "calypr", "training")
-	if err != nil {
-		t.Fatalf("expected bucket scope to be saved: %v", err)
+	scope, ok := database.scopes["calypr|training"]
+	if !ok {
+		t.Fatal("expected bucket scope to be saved")
 	}
 	if scope.Bucket != "calypr" || scope.PathPrefix != "008b435e-c1da-58b8-80f1-3ad2882c43cd" {
 		t.Fatalf("unexpected saved bucket scope: %+v", scope)
 	}
+}
+
+type configuredBucketStore struct {
+	credentials map[string]buckets.Credential
+	scopes      map[string]buckets.Scope
+}
+
+func (s *configuredBucketStore) GetS3Credential(_ context.Context, id string) (*buckets.Credential, error) {
+	credential, ok := s.credentials[id]
+	if !ok {
+		return nil, nil
+	}
+	return &credential, nil
+}
+
+func (s *configuredBucketStore) ListS3Credentials(context.Context) ([]buckets.Credential, error) {
+	credentials := make([]buckets.Credential, 0, len(s.credentials))
+	for _, credential := range s.credentials {
+		credentials = append(credentials, credential)
+	}
+	return credentials, nil
+}
+
+func (s *configuredBucketStore) CreateBucketScope(_ context.Context, scope *buckets.Scope) error {
+	if scope == nil {
+		return nil
+	}
+	s.scopes[scope.Organization+"|"+scope.ProjectID] = *scope
+	return nil
 }

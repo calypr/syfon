@@ -10,8 +10,7 @@ import (
 	"github.com/calypr/syfon/internal/objects"
 )
 
-// FromGeneratedCandidate translates the DRS registration request into the
-// domain candidate accepted by core.
+// FromGeneratedCandidate translates the DRS registration request into an object candidate.
 func FromGeneratedCandidate(value generated.DrsObjectCandidate) objects.Candidate {
 	out := objects.Candidate{
 		Aliases:          value.Aliases,

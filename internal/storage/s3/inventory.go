@@ -316,8 +316,6 @@ func classifyListError(bucket, prefix string, err error) error {
 }
 
 func storageLoggingEnabled(ctx context.Context) bool {
-	// The old implementation's logging flag is request policy owned by core.
-	// Raw storage keeps the flag opt-in through this private context seam.
 	value, _ := ctx.Value(storageLoggingContextKey{}).(bool)
 	return value
 }

@@ -9,12 +9,11 @@ import (
 	"testing"
 
 	"github.com/calypr/syfon/apigen/server/internalapi"
-	"github.com/calypr/syfon/internal/testutils"
 	"github.com/gofiber/fiber/v3"
 )
 
 func TestHandleInternalMultipartUpload_NotFound(t *testing.T) {
-	mockDB := &testutils.MockDatabase{}
+	mockDB := &transferHTTPFixture{}
 	mockUM := &internalDRSStorageFake{}
 	om := newInternalDRSObjectManager(mockDB, mockUM)
 	app := fiber.New()
@@ -35,7 +34,7 @@ func TestHandleInternalMultipartUpload_NotFound(t *testing.T) {
 }
 
 func TestHandleInternalMultipartComplete_NotFound(t *testing.T) {
-	mockDB := &testutils.MockDatabase{}
+	mockDB := &transferHTTPFixture{}
 	mockUM := &internalDRSStorageFake{}
 	om := newInternalDRSObjectManager(mockDB, mockUM)
 	app := fiber.New()
@@ -58,7 +57,7 @@ func TestHandleInternalMultipartComplete_NotFound(t *testing.T) {
 func TestHandleInternalMultipartCompletePreservesPartOrderAndOpaqueETags(t *testing.T) {
 	const uploadID = "provider-upload-order-test"
 	fake := &internalDRSStorageFake{}
-	om := newInternalDRSObjectManager(&testutils.MockDatabase{}, fake)
+	om := newInternalDRSObjectManager(&transferHTTPFixture{}, fake)
 	multipartUploadSessions.Store(uploadID, multipartSession{Bucket: "bucket-a", Key: "path/object.bin"})
 	t.Cleanup(func() { multipartUploadSessions.Delete(uploadID) })
 
@@ -89,7 +88,7 @@ func TestHandleInternalMultipartCompletePreservesPartOrderAndOpaqueETags(t *test
 func TestHandleInternalMultipartCompleteDeletesSessionBeforeProviderError(t *testing.T) {
 	const uploadID = "provider-upload-error-test"
 	fake := &internalDRSStorageFake{completeErr: errors.New("provider completion failed")}
-	om := newInternalDRSObjectManager(&testutils.MockDatabase{}, fake)
+	om := newInternalDRSObjectManager(&transferHTTPFixture{}, fake)
 	multipartUploadSessions.Store(uploadID, multipartSession{Bucket: "bucket-a", Key: "path/object.bin"})
 	t.Cleanup(func() { multipartUploadSessions.Delete(uploadID) })
 

@@ -10,7 +10,6 @@ import (
 	"github.com/calypr/syfon/apigen/server/metricsapi"
 	sycommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/access"
-	intcommon "github.com/calypr/syfon/internal/common"
 	apimiddleware "github.com/calypr/syfon/internal/httpapi/middleware"
 	"github.com/calypr/syfon/internal/usage"
 )
@@ -81,7 +80,7 @@ func checkProviderMetricsIngestAuth(ctx context.Context, body *metricsapi.Record
 		return http.StatusForbidden, false
 	}
 	for _, item := range body.Events {
-		resource, ok := providerTransferResource(strings.TrimSpace(intcommon.StringVal(item.Organization)), strings.TrimSpace(intcommon.StringVal(item.Project)))
+		resource, ok := providerTransferResource(strings.TrimSpace(generatedString(item.Organization)), strings.TrimSpace(generatedString(item.Project)))
 		if !ok {
 			return http.StatusForbidden, false
 		}

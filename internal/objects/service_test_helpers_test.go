@@ -2,10 +2,13 @@ package objects_test
 
 import (
 	"context"
+	"testing"
 	"time"
 
 	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/objects"
+	"github.com/calypr/syfon/internal/persistence/sqlite"
+	sqlitetest "github.com/calypr/syfon/internal/testsupport/sqlite"
 )
 
 func newTestService(backend any, _ ...any) *objects.Service {
@@ -63,4 +66,8 @@ func registerCandidates(ctx context.Context, service *objects.Service, candidate
 		return 0, err
 	}
 	return len(records), nil
+}
+
+func newSQLiteDatabase(t *testing.T) *sqlite.SqliteDB {
+	return sqlitetest.New(t)
 }
