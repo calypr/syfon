@@ -20,16 +20,18 @@ import (
 )
 
 type LFSServer struct {
-	om   *core.ObjectManager
-	opts Options
+	objectService *objects.Service
+	om            *core.ObjectManager
+	opts          Options
 }
 
 var errNoBucketConfigured = errors.New("no bucket configured")
 
-func NewLFSServer(om *core.ObjectManager, opts Options) *LFSServer {
+func NewLFSServer(objectService *objects.Service, om *core.ObjectManager, opts Options) *LFSServer {
 	return &LFSServer{
-		om:   om,
-		opts: opts,
+		objectService: objectService,
+		om:            om,
+		opts:          opts,
 	}
 }
 
@@ -66,7 +68,7 @@ func (s *LFSServer) LfsBatch(ctx context.Context, request lfsapi.LfsBatchRequest
 
 		switch req.Operation {
 		case "download":
-			actions, errResp := prepareDownloadActions(ctx, s.om, oid)
+			actions, errResp := prepareDownloadActions(ctx, s.objectService, s.om, oid)
 			if errResp != nil {
 				objResp.Error = errResp
 			} else {
@@ -74,7 +76,7 @@ func (s *LFSServer) LfsBatch(ctx context.Context, request lfsapi.LfsBatchRequest
 			}
 		case "upload":
 			baseURL := core.GetBaseURL(ctx)
-			actions, size, errResp := prepareUploadActions(ctx, s.om, oid, in.Size, baseURL)
+			actions, size, errResp := prepareUploadActions(ctx, s.objectService, s.om, oid, in.Size, baseURL)
 			objResp.Size = size
 			if errResp != nil {
 				objResp.Error = errResp
@@ -102,7 +104,7 @@ func (s *LFSServer) LfsVerify(ctx context.Context, request lfsapi.LfsVerifyReque
 		return lfsapi.LfsVerify400ApplicationVndGitLfsPlusJSONResponse{Message: "invalid oid"}, nil
 	}
 
-	obj, err := s.om.GetObject(ctx, oid, "read")
+	obj, err := s.objectService.GetObject(ctx, oid, "read")
 	if err == nil {
 		if err := s.om.RecordUpload(ctx, string(obj.Id)); err != nil {
 			return lfsapi.LfsVerify500ApplicationVndGitLfsPlusJSONResponse{Message: err.Error()}, nil
@@ -127,7 +129,7 @@ func (s *LFSServer) LfsVerify(ctx context.Context, request lfsapi.LfsVerifyReque
 		return lfsapi.LfsVerify400ApplicationVndGitLfsPlusJSONResponse{Message: err.Error()}, nil
 	}
 
-	if err := s.om.RegisterObjects(ctx, []objects.Record{internalObj}); err != nil {
+	if err := s.objectService.RegisterObjects(ctx, []objects.Record{internalObj}); err != nil {
 		return lfsapi.LfsVerify500ApplicationVndGitLfsPlusJSONResponse{Message: err.Error()}, nil
 	}
 
@@ -210,7 +212,7 @@ func (s *LFSServer) resolveUploadProxyTarget(ctx context.Context, oid string) (b
 		return "", "", "", errNoBucketConfigured
 	}
 
-	if obj, getErr := s.om.GetObject(ctx, oid, "read"); getErr == nil {
+	if obj, getErr := s.objectService.GetObject(ctx, oid, "read"); getErr == nil {
 		bucket, key, err := canonicalLFSUploadBucketKey(ctx, s.om, obj, defaultBucket)
 		return bucket, key, string(obj.Id), err
 	} else if !faults.IsNotFoundError(getErr) {

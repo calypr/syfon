@@ -5,6 +5,7 @@ import (
 
 	"github.com/calypr/syfon/apigen/server/lfsapi"
 	"github.com/calypr/syfon/internal/core"
+	"github.com/calypr/syfon/internal/objects"
 	"github.com/gofiber/fiber/v3"
 )
 
@@ -40,12 +41,12 @@ func DefaultOptions() Options {
 	}
 }
 
-func RegisterLFSRoutes(router fiber.Router, om *core.ObjectManager, opts ...Options) {
+func RegisterLFSRoutes(router fiber.Router, objectService *objects.Service, om *core.ObjectManager, opts ...Options) {
 	effective := DefaultOptions()
 	if len(opts) > 0 {
 		effective = opts[0]
 	}
-	server := NewLFSServer(om, effective)
+	server := NewLFSServer(objectService, om, effective)
 	strict := lfsapi.NewStrictHandler(server, []lfsapi.StrictMiddlewareFunc{
 		LFSRequestMiddleware(effective),
 	})

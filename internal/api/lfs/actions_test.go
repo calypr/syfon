@@ -98,9 +98,10 @@ func TestPrepareDownloadActions_MapsLegacyReplicaURL(t *testing.T) {
 	storageFake := &captureSigningStorage{}
 	deps := newLFSDependencies(db)
 	deps.Storage = core.StoragePorts{Access: storageFake}
+	objectService := newLFSObjectService(deps)
 	om := core.NewObjectManager(deps)
 
-	actions, objErr := prepareDownloadActions(context.Background(), om, oid)
+	actions, objErr := prepareDownloadActions(context.Background(), objectService, om, oid)
 	if objErr != nil {
 		t.Fatalf("expected download action, got error: %+v", objErr)
 	}
@@ -149,8 +150,10 @@ func TestPrepareUploadActionsRequiresGlobalDataFileCreate(t *testing.T) {
 			ctx := access.WithSession(context.Background(), session)
 
 			db := &testutils.MockDatabase{Objects: map[string]*objects.Record{}}
-			om := core.NewObjectManager(newLFSDependencies(db))
-			actions, size, objErr := prepareUploadActions(ctx, om, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", 123, "https://example.test")
+			deps := newLFSDependencies(db)
+			objectService := newLFSObjectService(deps)
+			om := core.NewObjectManager(deps)
+			actions, size, objErr := prepareUploadActions(ctx, objectService, om, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", 123, "https://example.test")
 
 			if tc.wantCode != 0 {
 				if objErr == nil || objErr.Code != tc.wantCode {

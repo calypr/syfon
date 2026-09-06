@@ -59,6 +59,23 @@ func newLFSDependencies(db *testutils.MockDatabase) core.Dependencies {
 	return deps
 }
 
+func newLFSObjectService(deps core.Dependencies) *objects.Service {
+	return objects.NewService(objects.Dependencies{
+		Reader:        deps.Objects.Reader,
+		Writer:        deps.Objects.Writer,
+		AccessMethods: deps.Objects.AccessMethods,
+		AccessPolicy:  deps.Objects.AccessPolicy,
+		Aliases:       deps.Objects.Aliases,
+		Content:       deps.Objects.Content,
+		ChecksumScope: deps.Objects.ChecksumScope,
+		Scope:         deps.Objects.Scope,
+		Resources:     deps.Objects.Resources,
+		Pages:         deps.Objects.Pages,
+		URLPages:      deps.Objects.URLPages,
+		Authorized:    deps.Objects.Authorized,
+	})
+}
+
 var _ transfers.PendingStore = (*testutils.MockDatabase)(nil)
 var _ transfers.EventRecorder = (*testutils.MockDatabase)(nil)
 var _ usage.FileCounterRecorder = (*testutils.MockDatabase)(nil)

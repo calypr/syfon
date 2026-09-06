@@ -45,8 +45,9 @@ func newLFSRouterWithOptions(opts Options) (*fiberTestRouter, *testutils.MockDat
 	app := fiber.New()
 	deps := newLFSDependencies(db)
 	deps.Storage = core.StoragePorts{Access: storageFake}
+	objectService := newLFSObjectService(deps)
 	om := core.NewObjectManager(deps)
-	RegisterLFSRoutes(app, om, opts)
+	RegisterLFSRoutes(app, objectService, om, opts)
 	return &fiberTestRouter{app: app}, db
 }
 
@@ -61,8 +62,8 @@ func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 }
 
 func resolveObjectForOID(ctx context.Context, database *testutils.MockDatabase, oid string) (*objects.Record, error) {
-	om := core.NewObjectManager(newLFSDependencies(database))
-	return om.GetObject(ctx, oid, "")
+	deps := newLFSDependencies(database)
+	return newLFSObjectService(deps).GetObject(ctx, oid, "")
 }
 
 type lfsStorageFake struct {
