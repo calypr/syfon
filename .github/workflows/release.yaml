@@ -25,13 +25,12 @@ concurrency:
 
 permissions:
   contents: read
-  actions: write
-  id-token: write
 
 jobs:
   prepare:
     name: Prepare release tag
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     if: |
       github.actor != 'nektos/act' &&
       (
@@ -50,7 +49,7 @@ jobs:
 
     steps:
       - name: Check out code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
           ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
@@ -240,29 +239,36 @@ jobs:
   build:
     name: Build (${{ matrix.os }}/${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
     needs: [prepare]
     if: needs.prepare.outputs.root_tag != ''
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { os: linux,  arch: amd64, runner: ubuntu-latest      }
-          - { os: linux,  arch: arm64, runner: ubuntu-24.04-arm   }
-          - { os: darwin, arch: amd64, runner: macos-latest       }
-          - { os: darwin, arch: arm64, runner: macos-latest       }
+          - { os: linux,  arch: amd64, native_arch: x86_64, runner: ubuntu-latest      }
+          - { os: linux,  arch: arm64, native_arch: aarch64, runner: ubuntu-24.04-arm   }
+          - { os: darwin, arch: amd64, native_arch: x86_64, runner: macos-15-intel    }
+          - { os: darwin, arch: arm64, native_arch: arm64, runner: macos-latest       }
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
           ref: ${{ needs.prepare.outputs.sha }}
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: go.mod
           cache: true
+
+      - name: Verify native runner architecture
+        shell: bash
+        env:
+          EXPECTED_ARCH: ${{ matrix.native_arch }}
+        run: test "$(uname -m)" = "$EXPECTED_ARCH"
 
       - name: Build
         env:
@@ -276,7 +282,7 @@ jobs:
 
       - name: Upload artifact
         if: github.actor != 'nektos/act'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: syfon-${{ matrix.os }}-${{ matrix.arch }}
           path: syfon-${{ matrix.os }}-${{ matrix.arch }}
@@ -287,6 +293,7 @@ jobs:
     name: Release
     needs: [prepare, build]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     if: needs.prepare.outputs.root_tag != ''
 
     permissions:
@@ -296,7 +303,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
           ref: ${{ needs.prepare.outputs.sha }}
@@ -305,7 +312,7 @@ jobs:
         run: git fetch --tags --force
 
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: dist
           pattern: syfon-*
@@ -367,6 +374,7 @@ jobs:
     name: Sync module versions
     needs: [prepare, release]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     if: needs.prepare.outputs.root_tag != ''
 
     permissions:
@@ -374,13 +382,13 @@ jobs:
 
     steps:
       - name: Checkout development
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
           ref: development
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: go.mod
           cache: true
