@@ -44,7 +44,36 @@ func TestPostgresBulkOverwriteObjects(t *testing.T) {
 	}
 
 	newName := "new"
-	om := core.NewObjectManager(db, &testutils.MockUrlManager{})
+	om := core.NewObjectManager(core.Dependencies{
+		Objects: core.ObjectPorts{
+			Reader:        db,
+			Writer:        db,
+			AccessMethods: db,
+			AccessPolicy:  db,
+			Aliases:       db,
+			Content:       db,
+			ChecksumScope: db,
+			Scope:         db,
+			Resources:     db,
+			Pages:         db,
+			URLPages:      db,
+			Authorized:    db,
+		},
+		Buckets: core.BucketPorts{
+			Credentials:     db,
+			CredentialAdmin: db,
+			Scopes:          db,
+			Visibility:      db,
+		},
+		Transfers: core.TransferPorts{
+			Pending: db,
+			Events:  db,
+		},
+		Usage: core.UsagePorts{
+			Counters:       db,
+			ProviderEvents: db,
+		},
+	}, &testutils.MockUrlManager{})
 	result, err := om.BulkOverwriteObjects(context.Background(), "ci-overwrite", "project", []objects.Record{{
 		Id:               "ci-overwrite-source",
 		Name:             &newName,

@@ -319,7 +319,36 @@ func newSyfonTestServer(t *testing.T) *fiberTestServer {
 		return c.SendString("OK")
 	})
 	api := app.Group("/")
-	om := core.NewObjectManager(database, uM)
+	om := core.NewObjectManager(core.Dependencies{
+		Objects: core.ObjectPorts{
+			Reader:        database,
+			Writer:        database,
+			AccessMethods: database,
+			AccessPolicy:  database,
+			Aliases:       database,
+			Content:       database,
+			ChecksumScope: database,
+			Scope:         database,
+			Resources:     database,
+			Pages:         database,
+			URLPages:      database,
+			Authorized:    database,
+		},
+		Buckets: core.BucketPorts{
+			Credentials:     database,
+			CredentialAdmin: database,
+			Scopes:          database,
+			Visibility:      database,
+		},
+		Transfers: core.TransferPorts{
+			Pending: database,
+			Events:  database,
+		},
+		Usage: core.UsagePorts{
+			Counters:       database,
+			ProviderEvents: database,
+		},
+	}, uM)
 
 	drsAPI := api.Group("/ga4gh/drs/v1")
 	description := "Calypr test DRS server"
