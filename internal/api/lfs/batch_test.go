@@ -9,7 +9,7 @@ import (
 
 	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/apigen/server/lfsapi"
-	internalauth "github.com/calypr/syfon/internal/auth"
+	internalauth "github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/testutils"

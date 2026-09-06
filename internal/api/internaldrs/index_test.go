@@ -17,7 +17,7 @@ import (
 
 	"github.com/calypr/syfon/apigen/server/drs"
 	"github.com/calypr/syfon/apigen/server/internalapi"
-	internalauth "github.com/calypr/syfon/internal/auth"
+	internalauth "github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/db/sqlite"

@@ -3,8 +3,8 @@ package middleware
 import (
 	"context"
 
-	internalauth "github.com/calypr/syfon/internal/auth"
-	"github.com/calypr/syfon/internal/common"
+	internalauth "github.com/calypr/syfon/internal/access"
+	"github.com/calypr/syfon/internal/requestmeta"
 	"github.com/calypr/syfon/plugin"
 	"github.com/gofiber/fiber/v3"
 )
@@ -16,7 +16,7 @@ func (m *AuthzMiddleware) handleLocalAuth(c fiber.Ctx, ctx context.Context, auth
 	}
 	if m.authnPluginManager != nil {
 		input := &plugin.AuthenticationInput{
-			RequestID:  common.GetRequestID(ctx),
+			RequestID:  requestmeta.GetRequestID(ctx),
 			AuthHeader: authHeader,
 			Metadata:   map[string]interface{}{},
 		}

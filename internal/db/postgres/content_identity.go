@@ -9,8 +9,9 @@ import (
 	"time"
 
 	sycommon "github.com/calypr/syfon/common"
-	"github.com/calypr/syfon/internal/authz"
+	authz "github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/common"
+	"github.com/calypr/syfon/internal/faults"
 	"github.com/calypr/syfon/internal/models"
 )
 
@@ -147,10 +148,10 @@ func (db *PostgresDB) registerContentTx(ctx context.Context, tx *sql.Tx, obj *mo
 		return "", err
 	}
 	if wasExisting && !publicRead && (postgresHasNewResource(resources, currentResources) || len(currentResources) == 0 || obj.AccessMethods != nil) && !postgresCanReadContent(ctx, currentResources) {
-		return "", common.ErrUnauthorized
+		return "", faults.ErrUnauthorized
 	}
 	if !postgresCanCreateResources(ctx, resources, currentResources) {
-		return "", common.ErrUnauthorized
+		return "", faults.ErrUnauthorized
 	}
 	if err := postgresMergeContentRowTx(ctx, tx, row, obj, resources, currentResources); err != nil {
 		return "", err
@@ -530,7 +531,7 @@ func postgresRequireContentMethodTx(ctx context.Context, tx *sql.Tx, id, method 
 		return err
 	}
 	if !authz.HasMethodAccess(ctx, method, resources) {
-		return common.ErrUnauthorized
+		return faults.ErrUnauthorized
 	}
 	return nil
 }
@@ -578,7 +579,7 @@ func normalizeChecksumLookup(value string) string {
 
 func postgresIdentityConflict(format string, args ...interface{}) error {
 	params := make([]interface{}, 0, len(args)+1)
-	params = append(params, common.ErrConflict)
+	params = append(params, faults.ErrConflict)
 	params = append(params, args...)
 	return fmt.Errorf("%w: "+format, params...)
 }

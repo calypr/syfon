@@ -10,8 +10,8 @@ import (
 
 	conf "github.com/calypr/syfon/client/config"
 	"github.com/calypr/syfon/client/request"
-	internalauth "github.com/calypr/syfon/internal/auth"
-	"github.com/calypr/syfon/internal/common"
+	internalauth "github.com/calypr/syfon/internal/access"
+	"github.com/calypr/syfon/internal/requestmeta"
 	"github.com/calypr/syfon/plugin"
 	"github.com/gofiber/fiber/v3"
 )
@@ -181,7 +181,7 @@ func (m *AuthzMiddleware) authorizeWithPlugin(ctx context.Context, session *inte
 		return nil
 	}
 	authzInput := &plugin.AuthorizationInput{
-		RequestID: common.GetRequestID(ctx),
+		RequestID: requestmeta.GetRequestID(ctx),
 		Subject:   session.Subject,
 		Action:    action,
 		Resource:  resource,

@@ -11,9 +11,10 @@ import (
 
 	"github.com/calypr/syfon/apigen/server/drs"
 	syfoncommon "github.com/calypr/syfon/common"
-	"github.com/calypr/syfon/internal/authz"
+	authz "github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/db"
+	"github.com/calypr/syfon/internal/faults"
 	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/urlmanager"
 )
@@ -120,7 +121,7 @@ func (c *bucketCatalog) lookupBucketScope(ctx context.Context, organization, pro
 
 	scope, err := c.db.GetBucketScope(ctx, organization, project)
 	if err != nil {
-		if common.IsNotFoundError(err) {
+		if faults.IsNotFoundError(err) {
 			c.bucketScopeCache.set(models.BucketScope{Organization: organization, ProjectID: project}, false)
 			return models.BucketScope{}, false, nil
 		}

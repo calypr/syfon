@@ -9,8 +9,8 @@ import (
 
 	"github.com/calypr/syfon/apigen/server/metricsapi"
 	sycommon "github.com/calypr/syfon/common"
+	authz "github.com/calypr/syfon/internal/access"
 	apimiddleware "github.com/calypr/syfon/internal/api/middleware"
-	"github.com/calypr/syfon/internal/authz"
 	intcommon "github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/models"
 )

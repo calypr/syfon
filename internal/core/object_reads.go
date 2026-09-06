@@ -8,16 +8,17 @@ import (
 	"time"
 
 	syfoncommon "github.com/calypr/syfon/common"
-	"github.com/calypr/syfon/internal/authz"
+	authz "github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/db"
+	"github.com/calypr/syfon/internal/faults"
 	"github.com/calypr/syfon/internal/models"
 )
 
 // GetObject retrieves an internal object by ID, Alias, or Checksum and validates access.
 func (m *ObjectManager) GetObject(ctx context.Context, ident string, requiredMethod string) (*models.InternalObject, error) {
 	if strings.TrimSpace(ident) == "" {
-		return nil, common.ErrNotFound
+		return nil, faults.ErrNotFound
 	}
 
 	checksumIdent := common.LooksLikeSHA256(ident)
@@ -49,7 +50,7 @@ func (m *ObjectManager) GetObject(ctx context.Context, ident string, requiredMet
 		}
 	}
 
-	return nil, common.ErrNotFound
+	return nil, faults.ErrNotFound
 }
 
 func (m *ObjectManager) lookupObjectByChecksum(ctx context.Context, ident string, requiredMethod string) (*models.InternalObject, bool, error) {
@@ -64,7 +65,7 @@ func (m *ObjectManager) lookupObjectByChecksum(ctx context.Context, ident string
 				return nil, false, err
 			}
 			if len(allMatches) > 0 {
-				return nil, true, common.ErrUnauthorized
+				return nil, true, faults.ErrUnauthorized
 			}
 		}
 		return nil, false, nil
@@ -77,7 +78,7 @@ func (m *ObjectManager) lookupObjectByID(ctx context.Context, ident string) (*mo
 	if err == nil {
 		return obj, true, nil
 	}
-	if common.IsNotFoundError(err) {
+	if faults.IsNotFoundError(err) {
 		return nil, false, nil
 	}
 	return nil, false, err
@@ -86,7 +87,7 @@ func (m *ObjectManager) lookupObjectByID(ctx context.Context, ident string) (*mo
 func (m *ObjectManager) lookupObjectByAlias(ctx context.Context, ident string) (*models.InternalObject, bool, error) {
 	canonicalID, aliasErr := m.db.ResolveObjectAlias(ctx, ident)
 	if aliasErr != nil {
-		if common.IsNotFoundError(aliasErr) {
+		if faults.IsNotFoundError(aliasErr) {
 			return nil, false, nil
 		}
 		return nil, false, aliasErr
@@ -97,7 +98,7 @@ func (m *ObjectManager) lookupObjectByAlias(ctx context.Context, ident string) (
 
 	obj, err := m.db.GetObject(ctx, canonicalID)
 	if err != nil {
-		if common.IsNotFoundError(err) {
+		if faults.IsNotFoundError(err) {
 			return nil, false, nil
 		}
 		return nil, false, err
@@ -129,7 +130,7 @@ func (m *ObjectManager) canonicalContentForObject(ctx context.Context, obj *mode
 	}
 	canonical := canonicalizeContentObjects(objectsWithSHA256(siblings, sha))
 	if len(canonical) == 0 {
-		return nil, common.ErrNotFound
+		return nil, faults.ErrNotFound
 	}
 	return &canonical[0], nil
 }
@@ -179,7 +180,7 @@ func (m *ObjectManager) GetBulkObjects(ctx context.Context, ids []string, requir
 			matching := objectsWithSHA256(siblingsByChecksum[sha], sha)
 			family := canonicalizeContentObjects(matching)
 			if len(family) == 0 {
-				return nil, common.ErrNotFound
+				return nil, faults.ErrNotFound
 			}
 			resolved = family[0]
 		}
@@ -491,7 +492,7 @@ func (m *ObjectManager) ListMissingScopedSHA256(ctx context.Context, organizatio
 	organization = strings.TrimSpace(organization)
 	project = strings.TrimSpace(project)
 	if organization == "" || project == "" || len(checksums) == 0 {
-		return nil, common.ErrUnauthorized
+		return nil, faults.ErrUnauthorized
 	}
 	if err := m.requireScopeMethod(ctx, organization, project, objectMethodRead); err != nil {
 		return nil, err

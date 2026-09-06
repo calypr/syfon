@@ -8,9 +8,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/calypr/syfon/internal/common"
+	"github.com/calypr/syfon/internal/requestmeta"
 	"github.com/gofiber/fiber/v3"
 )
+
+const RequestIDHeader = "X-Request-Id"
 
 type RequestIDMiddleware struct {
 	logger *slog.Logger
@@ -25,16 +27,16 @@ func NewRequestIDMiddleware(logger *slog.Logger) *RequestIDMiddleware {
 
 func (m *RequestIDMiddleware) FiberMiddleware() fiber.Handler {
 	return func(c fiber.Ctx) error {
-		requestID := strings.TrimSpace(c.Get(common.RequestIDHeader))
+		requestID := strings.TrimSpace(c.Get(RequestIDHeader))
 		if requestID == "" {
 			requestID = newRequestID()
 		}
 
 		// Inject into context for downstream usage
-		ctx := common.WithRequestID(c.Context(), requestID)
+		ctx := requestmeta.WithRequestID(c.Context(), requestID)
 		c.SetContext(ctx)
 
-		c.Set(common.RequestIDHeader, requestID)
+		c.Set(RequestIDHeader, requestID)
 
 		start := time.Now()
 		m.logger.Debug("request start", "request_id", requestID, "method", c.Method(), "path", c.Path())

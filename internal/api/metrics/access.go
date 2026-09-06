@@ -8,8 +8,8 @@ import (
 	"strings"
 
 	sycommon "github.com/calypr/syfon/common"
+	authz "github.com/calypr/syfon/internal/access"
 	apimiddleware "github.com/calypr/syfon/internal/api/middleware"
-	"github.com/calypr/syfon/internal/authz"
 )
 
 func (s *MetricsServer) checkAuth(ctx context.Context) (metricsAccess, int, bool) {

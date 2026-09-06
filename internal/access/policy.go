@@ -1,18 +1,16 @@
-package authz
+package access
 
 import (
 	"context"
 	"strings"
 
 	sycommon "github.com/calypr/syfon/common"
-	internalauth "github.com/calypr/syfon/internal/auth"
-	"github.com/calypr/syfon/internal/models"
 )
 
 // GetUserAuthz returns the list of resources the user is authorized to access.
 // If not found, returns empty list (no access to protected resources).
 func GetUserAuthz(ctx context.Context) []string {
-	return internalauth.FromContext(ctx).Resources
+	return FromContext(ctx).Resources
 }
 
 // CheckAccess verifies if a user has access to a record based on RBAC resources.
@@ -41,15 +39,15 @@ func CheckAccess(recordResources []string, userResources []string) bool {
 }
 
 func HasAuthHeader(ctx context.Context) bool {
-	return internalauth.FromContext(ctx).AuthHeaderPresent
+	return FromContext(ctx).AuthHeaderPresent
 }
 
 func IsGen3Mode(ctx context.Context) bool {
-	return internalauth.FromContext(ctx).Mode == "gen3"
+	return FromContext(ctx).Mode == "gen3"
 }
 
 func IsAuthzEnforced(ctx context.Context) bool {
-	session := internalauth.FromContext(ctx)
+	session := FromContext(ctx)
 	if session.Mode == "gen3" {
 		return true
 	}
@@ -57,7 +55,7 @@ func IsAuthzEnforced(ctx context.Context) bool {
 }
 
 func GetUserPrivileges(ctx context.Context) map[string]map[string]bool {
-	return internalauth.FromContext(ctx).Privileges
+	return FromContext(ctx).Privileges
 }
 
 func HasMethodAccess(ctx context.Context, method string, resources []string) bool {
@@ -67,7 +65,7 @@ func HasMethodAccess(ctx context.Context, method string, resources []string) boo
 	if IsGen3Mode(ctx) && !HasAuthHeader(ctx) {
 		return false
 	}
-	privs := normalizePrivileges(GetUserPrivileges(ctx))
+	privs := normalizePolicyPrivileges(GetUserPrivileges(ctx))
 	resources = sycommon.NormalizeAccessResources(resources)
 	if len(resources) == 0 {
 		return false
@@ -96,7 +94,7 @@ func HasObjectMethodAccess(ctx context.Context, method string, resources []strin
 	if len(resources) == 0 {
 		return strings.EqualFold(strings.TrimSpace(method), "read")
 	}
-	privs := normalizePrivileges(GetUserPrivileges(ctx))
+	privs := normalizePolicyPrivileges(GetUserPrivileges(ctx))
 	if len(privs) == 0 {
 		return CheckAccess(resources, GetUserAuthz(ctx))
 	}
@@ -143,7 +141,7 @@ func HasServiceMethodAccess(ctx context.Context, service, method string, resourc
 	if len(resources) == 0 {
 		return false
 	}
-	privs := normalizePrivileges(GetUserPrivileges(ctx))
+	privs := normalizePolicyPrivileges(GetUserPrivileges(ctx))
 	qualifiedMethod := service + ":" + method
 	serviceWildcard := service + ":*"
 	for _, resource := range resources {
@@ -174,7 +172,7 @@ func HasAnyServiceMethodAccess(ctx context.Context, resources []string, service 
 	return false
 }
 
-func normalizePrivileges(in map[string]map[string]bool) map[string]map[string]bool {
+func normalizePolicyPrivileges(in map[string]map[string]bool) map[string]map[string]bool {
 	out := make(map[string]map[string]bool, len(in))
 	for rawResource, methods := range in {
 		resource := sycommon.NormalizeAccessResource(rawResource)
@@ -198,13 +196,4 @@ func AuthStatusCode(ctx context.Context) int {
 		return 401
 	}
 	return 403
-}
-
-// HasScopedBucketAccess checks if a user has access to a specific bucket based on a project/org scope.
-func HasScopedBucketAccess(ctx context.Context, scope models.BucketScope, methods ...string) bool {
-	resource, err := sycommon.ResourcePath(scope.Organization, scope.ProjectID)
-	if err != nil || resource == "" {
-		return false
-	}
-	return HasAnyMethodAccess(ctx, []string{resource}, methods...)
 }

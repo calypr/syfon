@@ -10,10 +10,11 @@ import (
 	"time"
 
 	"github.com/calypr/syfon/apigen/server/drs"
-	internalauth "github.com/calypr/syfon/internal/auth"
+	internalauth "github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/models"
+	"github.com/calypr/syfon/internal/requestmeta"
 )
 
 type AccessDetails struct {
@@ -81,7 +82,7 @@ func EventFromObject(ctx context.Context, obj *models.InternalObject, eventType 
 		EventType:      eventType,
 		Direction:      direction,
 		EventTime:      when,
-		RequestID:      common.GetRequestID(ctx),
+		RequestID:      requestmeta.GetRequestID(ctx),
 		ObjectID:       obj.Id,
 		SHA256:         sha,
 		ObjectSize:     obj.Size,

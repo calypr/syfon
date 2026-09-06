@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 
-	internalauth "github.com/calypr/syfon/internal/auth"
+	internalauth "github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/urlmanager"
 	"github.com/gofiber/fiber/v3"

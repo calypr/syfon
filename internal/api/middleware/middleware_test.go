@@ -21,7 +21,7 @@ import (
 	conf "github.com/calypr/syfon/client/config"
 	"github.com/calypr/syfon/client/logs"
 	"github.com/calypr/syfon/client/request"
-	"github.com/calypr/syfon/internal/authz"
+	authz "github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/plugin"
 	"github.com/gofiber/fiber/v3"
 	"github.com/golang-jwt/jwt/v5"

@@ -3,7 +3,7 @@ package metrics
 import (
 	"context"
 
-	internalauth "github.com/calypr/syfon/internal/auth"
+	internalauth "github.com/calypr/syfon/internal/access"
 )
 
 func metricsTestContext(base context.Context, mode string, headerSet bool, headerValue bool, privileges map[string]map[string]bool) context.Context {
