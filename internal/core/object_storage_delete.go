@@ -343,7 +343,7 @@ func formatS3DeleteErrors(errors []s3types.Error) string {
 }
 
 func (m *ObjectManager) deleteGCSObject(ctx context.Context, bucket, key string) error {
-	cred, err := m.bucketCatalog.getS3Credential(ctx, bucket)
+	cred, err := m.bucketService.GetS3Credential(ctx, bucket)
 	if err != nil {
 		return fmt.Errorf("lookup gcs credential for bucket %s: %w", bucket, err)
 	}
@@ -377,7 +377,7 @@ func (m *ObjectManager) deleteGCSObject(ctx context.Context, bucket, key string)
 }
 
 func (m *ObjectManager) deleteAzureObject(ctx context.Context, bucket, key string) error {
-	cred, err := m.bucketCatalog.getS3Credential(ctx, bucket)
+	cred, err := m.bucketService.GetS3Credential(ctx, bucket)
 	if err != nil {
 		return fmt.Errorf("lookup azure credential for bucket %s: %w", bucket, err)
 	}
