@@ -139,7 +139,7 @@ func TestLFSMetadataWorkflowConsumesRegistersThenAccounts(t *testing.T) {
 	}
 	objectsPort := &lfsMetadataObjectSpy{events: &events, getErr: faults.ErrNotFound}
 	accounting := &lfsUploadAccountingSpy{events: &events}
-	workflow := NewMetadataWorkflow(transfers.NewService(transfers.Dependencies{}), pending, objectsPort, accounting)
+	workflow := NewMetadataWorkflow(pending, objectsPort, accounting)
 
 	if err := workflow.Verify(context.Background(), sha); err != nil {
 		t.Fatalf("Verify() error = %v", err)
@@ -162,7 +162,7 @@ func TestLFSMetadataWorkflowExistingObjectOnlyAccounts(t *testing.T) {
 	object := &objects.Record{Id: "existing"}
 	objectsPort := &lfsMetadataObjectSpy{events: &events, object: object}
 	accounting := &lfsUploadAccountingSpy{events: &events}
-	workflow := NewMetadataWorkflow(transfers.NewService(transfers.Dependencies{}), nil, objectsPort, accounting)
+	workflow := NewMetadataWorkflow(nil, objectsPort, accounting)
 
 	if err := workflow.Verify(context.Background(), "oid"); err != nil {
 		t.Fatalf("Verify() error = %v", err)

@@ -31,7 +31,7 @@ func NewLFSServer(deps Dependencies, opts Options) *LFSServer {
 	return &LFSServer{
 		opts:                opts,
 		uploadWorkflow:      transferlfs.NewUploadWorkflow(deps.TransferService, transferlfs.PartUploader(partUploader), deps.FileCounters),
-		metadataWorkflow:    transferlfs.NewMetadataWorkflow(deps.TransferService, deps.PendingStore, deps.ObjectService, deps.FileCounters),
+		metadataWorkflow:    transferlfs.NewMetadataWorkflow(deps.PendingStore, deps.ObjectService, deps.FileCounters),
 		preparationWorkflow: transferlfs.NewPreparationWorkflow(deps.TransferService, deps.ObjectService, deps.Credentials, deps.PendingStore, deps.FileCounters),
 	}
 }

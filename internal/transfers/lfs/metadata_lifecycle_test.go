@@ -8,7 +8,6 @@ import (
 
 	"github.com/calypr/syfon/internal/faults"
 	"github.com/calypr/syfon/internal/objects"
-	"github.com/calypr/syfon/internal/transfers"
 )
 
 type pendingFake struct {
@@ -30,7 +29,7 @@ func (f *pendingFake) PopPendingMetadata(context.Context, string) (*PendingMetad
 
 func TestStagePendingMetadataDefaultsCanonicalOIDAndTwentyMinuteTTL(t *testing.T) {
 	pending := &pendingFake{}
-	workflow := NewMetadataWorkflow(transfers.NewService(transfers.Dependencies{}), pending, nil, nil)
+	workflow := NewMetadataWorkflow(pending, nil, nil)
 	now := time.Date(2026, 9, 6, 12, 0, 0, 0, time.FixedZone("PDT", -7*60*60))
 	workflow.now = func() time.Time { return now }
 	sha := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
@@ -48,7 +47,7 @@ func TestStagePendingMetadataDefaultsCanonicalOIDAndTwentyMinuteTTL(t *testing.T
 }
 
 func TestStagePendingMetadataRejectsMissingOIDAndChecksum(t *testing.T) {
-	workflow := NewMetadataWorkflow(transfers.NewService(transfers.Dependencies{}), &pendingFake{}, nil, nil)
+	workflow := NewMetadataWorkflow(&pendingFake{}, nil, nil)
 	if err := workflow.StagePendingMetadata(context.Background(), PendingMetadata{}); !errors.Is(err, faults.ErrInvalidInput) {
 		t.Fatalf("StagePendingMetadata() error = %v, want invalid input", err)
 	}

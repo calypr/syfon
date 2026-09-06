@@ -9,7 +9,6 @@ import (
 
 	"github.com/calypr/syfon/internal/faults"
 	"github.com/calypr/syfon/internal/objects"
-	"github.com/calypr/syfon/internal/transfers"
 )
 
 type PendingMetadata struct {
@@ -74,16 +73,14 @@ func (e *MetadataStageError) Unwrap() error {
 }
 
 type MetadataWorkflow struct {
-	transfer   *transfers.Service
 	pending    PendingStore
 	objects    MetadataObjectPort
 	accounting UploadAccounting
 	now        func() time.Time
 }
 
-func NewMetadataWorkflow(transfer *transfers.Service, pending PendingStore, objectPort MetadataObjectPort, accounting UploadAccounting) *MetadataWorkflow {
+func NewMetadataWorkflow(pending PendingStore, objectPort MetadataObjectPort, accounting UploadAccounting) *MetadataWorkflow {
 	return &MetadataWorkflow{
-		transfer:   transfer,
 		pending:    pending,
 		objects:    objectPort,
 		accounting: accounting,
@@ -98,7 +95,7 @@ func (w *MetadataWorkflow) StagePendingMetadata(ctx context.Context, metadata Pe
 		if oid, ok := objects.CanonicalSHA256(candidateChecksums(metadata.Candidate)); ok {
 			metadata.OID = oid
 		} else {
-			return fmt.Errorf("%w: pending metadata requires an OID", faults.ErrInvalidInput)
+			return fmt.Errorf("%w: pending LFS metadata requires an OID", faults.ErrInvalidInput)
 		}
 	}
 	now := time.Now().UTC()
@@ -116,7 +113,7 @@ func (w *MetadataWorkflow) StagePendingMetadata(ctx context.Context, metadata Pe
 		metadata.ExpiresAt = metadata.ExpiresAt.UTC()
 	}
 	if w == nil || w.pending == nil {
-		return fmt.Errorf("pending metadata store is not configured")
+		return fmt.Errorf("pending LFS metadata store is not configured")
 	}
 	return w.pending.SavePendingMetadata(ctx, []PendingMetadata{metadata})
 }
@@ -141,7 +138,7 @@ func (w *MetadataWorkflow) Stage(ctx context.Context, candidates []objects.Candi
 		})
 	}
 	if w.pending == nil {
-		return fmt.Errorf("pending metadata store is not configured")
+		return fmt.Errorf("pending LFS metadata store is not configured")
 	}
 	return w.pending.SavePendingMetadata(ctx, entries)
 }
@@ -156,7 +153,7 @@ func (w *MetadataWorkflow) Verify(ctx context.Context, oid string) error {
 	}
 
 	if w.pending == nil {
-		return fmt.Errorf("pending metadata store is not configured")
+		return fmt.Errorf("pending LFS metadata store is not configured")
 	}
 	pending, err := w.pending.PopPendingMetadata(ctx, oid)
 	if err != nil {

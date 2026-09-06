@@ -174,7 +174,7 @@ func (w *PreparationWorkflow) ResolveUploadTarget(ctx context.Context, oid strin
 
 func (w *PreparationWorkflow) getPendingMetadata(ctx context.Context, oid string) (*PendingMetadata, error) {
 	if w.pending == nil {
-		return nil, errors.New("pending metadata store is not configured")
+		return nil, errors.New("pending LFS metadata store is not configured")
 	}
 	return w.pending.GetPendingMetadata(ctx, oid)
 }
