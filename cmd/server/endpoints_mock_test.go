@@ -17,7 +17,6 @@ import (
 	"github.com/calypr/syfon/internal/config"
 	"github.com/calypr/syfon/internal/httpapi/middleware"
 	"github.com/calypr/syfon/internal/objects"
-	"github.com/calypr/syfon/internal/testutils"
 	"github.com/calypr/syfon/internal/transfers"
 	"github.com/calypr/syfon/internal/usage"
 )
@@ -159,37 +158,32 @@ func TestHealthOnlyServerExposesNoOptionalRoutes(t *testing.T) {
 }
 
 func buildMockServerRouterWithRoutes(routes config.RoutesConfig) *fiber.App {
-	database := &testutils.MockDatabase{
-		Objects: map[string]*objects.Record{
-			"sha-1": {
-				Id:          "sha-1",
-				Name:        common.Ptr("mock-object"),
-				Size:        1,
-				Version:     common.Ptr("1"),
-				Description: common.Ptr("mock"),
-				Checksums:   []objects.Checksum{{Type: "sha256", Checksum: "sha-1"}},
-				AccessMethods: &[]objects.AccessMethod{
-					{
-						Type:      "s3",
-						AccessId:  common.Ptr("s3"),
-						AccessUrl: &objects.AccessURL{Url: "s3://test-bucket-1/sha-1"},
-					},
+	objectStore := newServerObjectStore(map[string]*objects.Record{
+		"sha-1": {
+			Id:          "sha-1",
+			Name:        common.Ptr("mock-object"),
+			Size:        1,
+			Version:     common.Ptr("1"),
+			Description: common.Ptr("mock"),
+			Checksums:   []objects.Checksum{{Type: "sha256", Checksum: "sha-1"}},
+			AccessMethods: &[]objects.AccessMethod{
+				{
+					Type:      "s3",
+					AccessId:  common.Ptr("s3"),
+					AccessUrl: &objects.AccessURL{Url: "s3://test-bucket-1/sha-1"},
 				},
-				ControlledAccess: &[]string{"/programs/data_file"},
 			},
+			ControlledAccess: &[]string{"/programs/data_file"},
 		},
-		ObjectAuthz: map[string]map[string][]string{
-			"sha-1": {"data_file": {}},
+	})
+	bucketStore := &serverBucketStore{credentials: map[string]buckets.Credential{
+		"test-bucket-1": {
+			Bucket:    "test-bucket-1",
+			Region:    "us-east-1",
+			AccessKey: "mock-key",
+			SecretKey: "mock-secret",
 		},
-		Credentials: map[string]buckets.Credential{
-			"test-bucket-1": {
-				Bucket:    "test-bucket-1",
-				Region:    "us-east-1",
-				AccessKey: "mock-key",
-				SecretKey: "mock-secret",
-			},
-		},
-	}
+	}}
 	app := fiber.New()
 
 	logger := slog.New(slog.NewTextHandler(bytes.NewBuffer(nil), nil))
@@ -197,12 +191,12 @@ func buildMockServerRouterWithRoutes(routes config.RoutesConfig) *fiber.App {
 	authzMiddleware := middleware.NewAuthzMiddleware(logger, middleware.Options{Mode: "local", Evaluator: authRuntime})
 	requestIDMiddleware := middleware.NewRequestIDMiddleware(logger)
 	cfg := &config.Config{Routes: routes}
-	dependencies := mockServerDependencies(database)
-	objectService := newServerObjectService(dependencies.Objects)
-	usageService := usage.NewService(usage.Dependencies{Ingest: database, Reports: database, Objects: objectService})
+	dependencies := mockServerDependencies(objectStore, bucketStore)
+	objectService := newServerObjectService(dependencies.objects)
+	usageService := usage.NewService(usage.Dependencies{Ingest: dependencies.usageIngest, Reports: dependencies.usageReports, Objects: objectService})
 	transferService := transfers.NewService(transfers.Dependencies{
-		Scopes: dependencies.BucketService, Credentials: dependencies.BucketService,
-		Pending: database, Events: usageService.Ingest(),
+		Scopes: dependencies.bucketService, Credentials: dependencies.bucketService,
+		Pending: dependencies.pending, Events: usageService.Ingest(),
 	})
 	rt := &serverRuntime{
 		app:                 app,
@@ -211,7 +205,7 @@ func buildMockServerRouterWithRoutes(routes config.RoutesConfig) *fiber.App {
 		objectService:       objectService,
 		transferService:     transferService,
 		usageService:        usageService,
-		bucketService:       dependencies.BucketService,
+		bucketService:       dependencies.bucketService,
 		authzMiddleware:     authzMiddleware,
 		requestIDMiddleware: requestIDMiddleware,
 	}

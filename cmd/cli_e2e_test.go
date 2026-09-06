@@ -19,12 +19,11 @@ import (
 	"github.com/calypr/syfon/apigen/server/drs"
 	clientservices "github.com/calypr/syfon/client/services"
 	"github.com/calypr/syfon/internal/buckets"
-	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/httpapi"
 	"github.com/calypr/syfon/internal/maintenance/projectstorage"
 	"github.com/calypr/syfon/internal/objects"
+	"github.com/calypr/syfon/internal/persistence/sqlite"
 	"github.com/calypr/syfon/internal/storage"
-	"github.com/calypr/syfon/internal/testutils"
 	"github.com/calypr/syfon/internal/transfers"
 	"github.com/calypr/syfon/internal/usage"
 )
@@ -316,7 +315,10 @@ func newSyfonTestServer(t *testing.T) *fiberTestServer {
 
 	storageDir := t.TempDir()
 
-	database := testutils.NewInMemoryDB()
+	database, err := sqlite.NewSqliteDB(":memory:")
+	if err != nil {
+		t.Fatalf("create in-memory database: %v", err)
+	}
 	if err := database.SaveS3Credential(context.Background(), &buckets.Credential{
 		Bucket:   "syfon-bucket",
 		Provider: "file",
@@ -333,7 +335,7 @@ func newSyfonTestServer(t *testing.T) *fiberTestServer {
 	}
 
 	app := fiber.New()
-	objectPorts := core.ObjectPorts{
+	objectDependencies := objects.Dependencies{
 		Reader:        database,
 		Writer:        database,
 		AccessMethods: database,
@@ -349,17 +351,11 @@ func newSyfonTestServer(t *testing.T) *fiberTestServer {
 	}
 	bucketService, err := buckets.NewService(buckets.Dependencies{
 		Credentials: database, CredentialAdmin: database, Scopes: database, Visibility: database,
-		Fallback: core.NewBucketVisibilityFallback(objectPorts.Scope, objectPorts.Reader),
 	}, nil)
 	if err != nil {
 		t.Fatalf("construct bucket service: %v", err)
 	}
-	objectService := objects.NewService(objects.Dependencies{
-		Reader: objectPorts.Reader, Writer: objectPorts.Writer, AccessMethods: objectPorts.AccessMethods,
-		AccessPolicy: objectPorts.AccessPolicy, Aliases: objectPorts.Aliases, Content: objectPorts.Content,
-		ChecksumScope: objectPorts.ChecksumScope, Scope: objectPorts.Scope, Resources: objectPorts.Resources,
-		Pages: objectPorts.Pages, URLPages: objectPorts.URLPages, Authorized: objectPorts.Authorized,
-	})
+	objectService := objects.NewService(objectDependencies)
 	usageService := usage.NewService(usage.Dependencies{Ingest: database, Reports: database, Objects: objectService})
 	transferService := transfers.NewService(transfers.Dependencies{
 		Access: cliFileStorageAccess{root: storageDir}, Scopes: bucketService, Credentials: bucketService,

@@ -8,13 +8,12 @@ import (
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/storage"
 	"github.com/calypr/syfon/internal/storage/address"
-	"github.com/calypr/syfon/internal/testutils"
 )
 
-func TestStorageCompositionSharesOneManagerAcrossCorePorts(t *testing.T) {
+func TestStorageCompositionSharesOneManagerAcrossConsumerPorts(t *testing.T) {
 	root := t.TempDir()
-	credentials := &testutils.MockDatabase{Credentials: map[string]buckets.Credential{
-		"bucket": {Bucket: "bucket", Provider: address.FileProvider, Endpoint: root},
+	credentials := storageTestCredentials{credential: buckets.Credential{
+		Bucket: "bucket", Provider: address.FileProvider, Endpoint: root,
 	}}
 	manager, err := newStorageManager(credentials, root, nil)
 	if err != nil {
@@ -34,4 +33,16 @@ func TestStorageCompositionSharesOneManagerAcrossCorePorts(t *testing.T) {
 	invalidator.InvalidateBucket("bucket")
 	invalidator.manager = manager
 	invalidator.InvalidateBucket("bucket")
+}
+
+type storageTestCredentials struct {
+	credential buckets.Credential
+}
+
+func (c storageTestCredentials) GetS3Credential(_ context.Context, bucket string) (*buckets.Credential, error) {
+	if bucket != c.credential.Bucket {
+		return nil, nil
+	}
+	credential := c.credential
+	return &credential, nil
 }
