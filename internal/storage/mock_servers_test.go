@@ -103,7 +103,7 @@ func testFakeGCSStorageProvider(t *testing.T) {
 		t.Fatalf("create GCS storage manager: %v", err)
 	}
 
-	const object = "smoke/object.txt"
+	const object = "smoke-object.txt"
 	payload := []byte("fake-gcs-server-storage-mvp")
 	upload, err := manager.Access(ctx, storage.AccessRequest{
 		Target:  storage.AccessTarget{Location: "s3://" + bucket + "/" + object},
