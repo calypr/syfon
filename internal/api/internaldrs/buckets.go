@@ -25,9 +25,7 @@ func registerInternalBucketRoutes(router fiber.Router, om *core.ObjectManager, b
 	router.Get(routeutil.FiberPath(common.RouteInternalBucketScopes), func(c fiber.Ctx) error { return handleInternalListBucketScopesFiber(c, bucketService) })
 	router.Post(routeutil.FiberPath(common.RouteInternalBucketScopes), func(c fiber.Ctx) error { return handleInternalCreateBucketScopeFiber(c, bucketService) })
 	router.Delete(routeutil.FiberPath(common.RouteInternalBucketScopes), func(c fiber.Ctx) error { return handleInternalDeleteBucketScopeFiber(c, bucketService) })
-	if projectService != nil {
-		router.Delete(routeutil.FiberPath(common.RouteInternalProjectCleanup), func(c fiber.Ctx) error { return handleInternalDeleteProjectFiber(c, projectService) })
-	}
+	router.Delete(routeutil.FiberPath(common.RouteInternalProjectCleanup), func(c fiber.Ctx) error { return handleInternalDeleteProjectFiber(c, projectService) })
 }
 
 func handleInternalBucketsFiber(c fiber.Ctx, bucketService *buckets.Service) error {

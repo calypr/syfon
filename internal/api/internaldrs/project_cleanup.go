@@ -19,6 +19,9 @@ type projectCleanupResponse struct {
 }
 
 func handleInternalDeleteProjectFiber(c fiber.Ctx, service *projectstorage.Service) error {
+	if service == nil {
+		return apiutil.HandleError(c, &projectstorage.Error{Kind: projectstorage.ErrorUnsupported, Message: "project storage service is not configured"})
+	}
 	organization := strings.TrimSpace(c.Params("organization"))
 	projectID := strings.TrimSpace(c.Params("project_id"))
 	if organization == "" || projectID == "" {
