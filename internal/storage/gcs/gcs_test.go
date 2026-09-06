@@ -65,8 +65,17 @@ func TestEndpointAccessPreservesPathAndOmitsRange(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse endpoint URL: %v", err)
 	}
-	if got, want := parsed.Path, "/storage/v1/b/test-bucket/o/nested%2Ffile.txt"; got != want {
+	if got, want := parsed.Path, "/storage/v1/b/test-bucket/o/nested/file.txt"; got != want {
 		t.Fatalf("endpoint object path = %q, want %q", got, want)
+	}
+	if got, want := parsed.RawPath, "/storage/v1/b/test-bucket/o/nested%2Ffile.txt"; got != want {
+		t.Fatalf("endpoint raw object path = %q, want %q", got, want)
+	}
+	if got, want := parsed.EscapedPath(), "/storage/v1/b/test-bucket/o/nested%2Ffile.txt"; got != want {
+		t.Fatalf("endpoint escaped object path = %q, want %q", got, want)
+	}
+	if strings.Contains(access.Location, "%252F") {
+		t.Fatalf("endpoint object URL double-escaped nested key: %s", access.Location)
 	}
 	if got := parsed.Query().Get("alt"); got != "media" {
 		t.Fatalf("endpoint alt query = %q, want media", got)

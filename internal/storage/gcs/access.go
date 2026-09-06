@@ -138,35 +138,46 @@ func endpointObjectURL(cred *buckets.Credential, bucket, key, method, downloadNa
 	cleanKey := strings.Trim(strings.TrimSpace(key), "/")
 	keyEscaped := url.PathEscape(cleanKey)
 	prefix := strings.TrimRight(strings.TrimSpace(base.Path), "/")
+	escapedPrefix := strings.TrimRight(strings.TrimSpace(base.EscapedPath()), "/")
 	base.RawQuery = ""
 	base.Fragment = ""
-
-	switch strings.ToUpper(strings.TrimSpace(method)) {
-	case http.MethodPut:
-		builtPath := strings.Join([]string{prefix, "upload", "storage", "v1", "b", bucketEscaped, "o"}, "/")
-		builtPath = strings.ReplaceAll(builtPath, "//", "/")
+	setPath := func(decodedParts, escapedParts []string) bool {
+		builtPath := strings.Join(decodedParts, "/")
+		escapedPath := strings.Join(escapedParts, "/")
 		if !strings.HasPrefix(builtPath, "/") {
 			builtPath = "/" + builtPath
 		}
+		if !strings.HasPrefix(escapedPath, "/") {
+			escapedPath = "/" + escapedPath
+		}
 		if len(builtPath) > 1 && (builtPath[1] == '/' || builtPath[1] == '\\') {
-			return "", false
+			return false
 		}
 		base.Path = builtPath
+		base.RawPath = escapedPath
+		return true
+	}
+
+	switch strings.ToUpper(strings.TrimSpace(method)) {
+	case http.MethodPut:
+		if !setPath(
+			[]string{prefix, "upload", "storage", "v1", "b", strings.TrimSpace(bucket), "o"},
+			[]string{escapedPrefix, "upload", "storage", "v1", "b", bucketEscaped, "o"},
+		) {
+			return "", false
+		}
 		query := base.Query()
 		query.Set("uploadType", "media")
 		query.Set("name", cleanKey)
 		base.RawQuery = query.Encode()
 		return base.String(), true
 	default:
-		builtPath := strings.Join([]string{prefix, "storage", "v1", "b", bucketEscaped, "o", keyEscaped}, "/")
-		builtPath = strings.ReplaceAll(builtPath, "//", "/")
-		if !strings.HasPrefix(builtPath, "/") {
-			builtPath = "/" + builtPath
-		}
-		if len(builtPath) > 1 && (builtPath[1] == '/' || builtPath[1] == '\\') {
+		if !setPath(
+			[]string{prefix, "storage", "v1", "b", strings.TrimSpace(bucket), "o", cleanKey},
+			[]string{escapedPrefix, "storage", "v1", "b", bucketEscaped, "o", keyEscaped},
+		) {
 			return "", false
 		}
-		base.Path = builtPath
 		query := base.Query()
 		query.Set("alt", "media")
 		if disposition := storageports.ContentDispositionAttachment(downloadName); disposition != "" {
