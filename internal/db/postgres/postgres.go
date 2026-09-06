@@ -4,18 +4,13 @@ import (
 	"database/sql"
 	"fmt"
 
-	"github.com/calypr/syfon/internal/db"
-
 	// Postgres driver
 	_ "github.com/lib/pq"
 )
 
-// PostgresDB implements db.DatabaseInterface.
 type PostgresDB struct {
 	db *sql.DB
 }
-
-var _ db.DatabaseInterface = (*PostgresDB)(nil)
 
 func NewPostgresDB(dsn string) (*PostgresDB, error) {
 	db, err := sql.Open("postgres", dsn)

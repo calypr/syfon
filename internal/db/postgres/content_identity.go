@@ -10,7 +10,6 @@ import (
 
 	sycommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/access"
-	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/faults"
 
 	"github.com/calypr/syfon/internal/objects"
@@ -240,8 +239,8 @@ func postgresLoadContentRowTx(ctx context.Context, tx *sql.Tx, id string) (postg
 func postgresInsertContentRowTx(ctx context.Context, tx *sql.Tx, id string, obj *objects.Record) error {
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO drs_object (id, size, created_time, updated_time, name, version, description)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)`, id, obj.Size, obj.CreatedTime, common.TimeVal(obj.UpdatedTime),
-		objects.CleanToBasename(common.StringVal(obj.Name)), common.StringVal(obj.Version), common.StringVal(obj.Description))
+		VALUES ($1, $2, $3, $4, $5, $6, $7)`, id, obj.Size, obj.CreatedTime, postgresTimeVal(obj.UpdatedTime),
+		objects.CleanToBasename(postgresStringVal(obj.Name)), postgresStringVal(obj.Version), postgresStringVal(obj.Description))
 	if err != nil {
 		return fmt.Errorf("insert canonical object: %w", err)
 	}
@@ -250,7 +249,7 @@ func postgresInsertContentRowTx(ctx context.Context, tx *sql.Tx, id string, obj 
 
 func postgresMergeContentRowTx(ctx context.Context, tx *sql.Tx, row postgresContentRow, obj *objects.Record, resources, currentResources []string) error {
 	allowReplacement := len(currentResources) == 1 && postgresHasResourceOverlap(resources, currentResources)
-	incomingName := objects.CleanToBasename(common.StringVal(obj.Name))
+	incomingName := objects.CleanToBasename(postgresStringVal(obj.Name))
 	if row.name != "" && incomingName != "" && row.name != incomingName {
 		alias := incomingName
 		if allowReplacement {
@@ -264,17 +263,17 @@ func postgresMergeContentRowTx(ctx context.Context, tx *sql.Tx, row postgresCont
 	}
 	name, version, description := row.name, row.version, row.description
 	if allowReplacement || strings.TrimSpace(name) == "" {
-		if incoming := objects.CleanToBasename(common.StringVal(obj.Name)); incoming != "" {
+		if incoming := objects.CleanToBasename(postgresStringVal(obj.Name)); incoming != "" {
 			name = incoming
 		}
 	}
 	if allowReplacement || strings.TrimSpace(version) == "" {
-		if incoming := strings.TrimSpace(common.StringVal(obj.Version)); incoming != "" {
+		if incoming := strings.TrimSpace(postgresStringVal(obj.Version)); incoming != "" {
 			version = incoming
 		}
 	}
 	if allowReplacement || strings.TrimSpace(description) == "" {
-		if incoming := strings.TrimSpace(common.StringVal(obj.Description)); incoming != "" {
+		if incoming := strings.TrimSpace(postgresStringVal(obj.Description)); incoming != "" {
 			description = incoming
 		}
 	}

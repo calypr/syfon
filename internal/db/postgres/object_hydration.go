@@ -10,7 +10,6 @@ import (
 	"time"
 
 	sycommon "github.com/calypr/syfon/common"
-	"github.com/calypr/syfon/internal/common"
 
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/lib/pq"
@@ -79,10 +78,10 @@ func (db *PostgresDB) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []st
 			Id:          objects.RecordID(id),
 			Size:        size,
 			CreatedTime: createdTime,
-			UpdatedTime: common.Ptr(updatedTime),
-			Name:        common.Ptr(strings.TrimSpace(name.String)),
-			Version:     common.Ptr(version.String),
-			Description: common.Ptr(description.String),
+			UpdatedTime: postgresPtr(updatedTime),
+			Name:        postgresPtr(strings.TrimSpace(name.String)),
+			Version:     postgresPtr(version.String),
+			Description: postgresPtr(description.String),
 			SelfUri:     "drs://" + id,
 			Properties:  map[string]json.RawMessage{},
 		}
@@ -147,7 +146,7 @@ func (db *PostgresDB) attachBulkAccessMethods(ctx context.Context, objectsByID m
 		am := objects.AccessMethod{
 			AccessUrl: &objects.AccessURL{Url: accessURL},
 			Type:      accessType,
-			AccessId:  common.Ptr(objects.AccessMethodID(accessType, accessURL)),
+			AccessId:  postgresPtr(objects.AccessMethodID(accessType, accessURL)),
 		}
 		*obj.AccessMethods = append(*obj.AccessMethods, am)
 	}
@@ -228,7 +227,7 @@ func normalizeObjectNameAliases(obj *objects.Record) []string {
 	if obj == nil {
 		return nil
 	}
-	return objects.NormalizeNameAliases(common.StringVal(obj.Name), obj.NameAliases)
+	return objects.NormalizeNameAliases(postgresStringVal(obj.Name), obj.NameAliases)
 }
 
 func (db *PostgresDB) controlledAccessForObject(ctx context.Context, objectID string) ([]string, error) {
@@ -384,7 +383,7 @@ func (db *PostgresDB) attachNameAliases(ctx context.Context, objectsByID map[str
 		if obj == nil {
 			continue
 		}
-		obj.NameAliases = objects.NormalizeNameAliases(common.StringVal(obj.Name), aliases)
+		obj.NameAliases = objects.NormalizeNameAliases(postgresStringVal(obj.Name), aliases)
 	}
 	return nil
 }

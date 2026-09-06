@@ -9,7 +9,6 @@ import (
 
 	sycommon "github.com/calypr/syfon/common"
 	"github.com/calypr/syfon/internal/access"
-	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/faults"
 
 	"github.com/calypr/syfon/internal/objects"
@@ -150,7 +149,7 @@ func (db *PostgresDB) createObjectLegacy(ctx context.Context, obj *objects.Recor
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO drs_object (id, size, created_time, updated_time, name, version, description)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-		string(obj.Id), obj.Size, obj.CreatedTime, common.TimeVal(obj.UpdatedTime), objects.CleanToBasename(common.StringVal(obj.Name)), common.StringVal(obj.Version), common.StringVal(obj.Description),
+		string(obj.Id), obj.Size, obj.CreatedTime, postgresTimeVal(obj.UpdatedTime), objects.CleanToBasename(postgresStringVal(obj.Name)), postgresStringVal(obj.Version), postgresStringVal(obj.Description),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to insert drs_object: %w", err)
@@ -232,10 +231,10 @@ func (db *PostgresDB) registerObjectsLegacy(ctx context.Context, records []objec
 		ids = append(ids, string(obj.Id))
 		sizes = append(sizes, obj.Size)
 		createdTimes = append(createdTimes, obj.CreatedTime)
-		updatedTimes = append(updatedTimes, common.TimeVal(obj.UpdatedTime))
-		names = append(names, objects.CleanToBasename(common.StringVal(obj.Name)))
-		versions = append(versions, common.StringVal(obj.Version))
-		descriptions = append(descriptions, common.StringVal(obj.Description))
+		updatedTimes = append(updatedTimes, postgresTimeVal(obj.UpdatedTime))
+		names = append(names, objects.CleanToBasename(postgresStringVal(obj.Name)))
+		versions = append(versions, postgresStringVal(obj.Version))
+		descriptions = append(descriptions, postgresStringVal(obj.Description))
 
 		seenAccess := make(map[string]struct{})
 		for _, resource := range objectAccessResources(&obj) {

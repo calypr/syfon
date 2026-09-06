@@ -14,6 +14,24 @@ func defaultProvider(provider string) string {
 	return provider
 }
 
+func postgresPtr[T any](value T) *T {
+	return &value
+}
+
+func postgresStringVal(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
+
+func postgresTimeVal(value *time.Time) time.Time {
+	if value == nil {
+		return time.Time{}
+	}
+	return *value
+}
+
 func uniqueObjectsByID(objs []objects.Record) []objects.Record {
 	seen := make(map[string]struct{}, len(objs))
 	out := make([]objects.Record, 0, len(objs))

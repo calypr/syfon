@@ -10,7 +10,6 @@ import (
 	"time"
 
 	sycommon "github.com/calypr/syfon/common"
-	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/faults"
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/lib/pq"
@@ -86,10 +85,10 @@ retryLookup:
 		Id:          objects.RecordID(objectID),
 		Size:        r.Size,
 		CreatedTime: r.CreatedTime,
-		UpdatedTime: common.Ptr(r.UpdatedTime),
-		Version:     common.Ptr(r.Version),
-		Description: common.Ptr(r.Description),
-		Name:        common.Ptr(r.Name),
+		UpdatedTime: postgresPtr(r.UpdatedTime),
+		Version:     postgresPtr(r.Version),
+		Description: postgresPtr(r.Description),
+		Name:        postgresPtr(r.Name),
 		SelfUri:     "drs://" + objectID,
 		NameAliases: nameAliases,
 		Properties:  map[string]json.RawMessage{},
@@ -117,7 +116,7 @@ retryLookup:
 		am := objects.AccessMethod{
 			AccessUrl: &objects.AccessURL{Url: u},
 			Type:      t,
-			AccessId:  common.Ptr(objects.AccessMethodID(t, u)),
+			AccessId:  postgresPtr(objects.AccessMethodID(t, u)),
 		}
 		*obj.AccessMethods = append(*obj.AccessMethods, am)
 	}
