@@ -12,9 +12,9 @@ import (
 
 	"github.com/calypr/syfon/apigen/server/metricsapi"
 	"github.com/calypr/syfon/internal/common"
-	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/testutils"
+	"github.com/calypr/syfon/internal/usage"
 	"github.com/gofiber/fiber/v3"
 )
 
@@ -37,7 +37,7 @@ func TestMetricsRoutes_ListAndSummary(t *testing.T) {
 			"sha-1": {Id: "sha-1", Name: common.Ptr("f1"), Size: 1},
 			"sha-2": {Id: "sha-2", Name: common.Ptr("f2"), Size: 2},
 		},
-		Usage: map[string]models.FileUsage{
+		Usage: map[string]usage.FileUsage{
 			"sha-1": {
 				ObjectID:      "sha-1",
 				Name:          "f1",
@@ -140,7 +140,7 @@ func TestMetricsRoutes_BulkFiles(t *testing.T) {
 			"obj-b": {"cbds": {"end_to_end_test"}},
 			"obj-c": {"other": {"project"}},
 		},
-		Usage: map[string]models.FileUsage{
+		Usage: map[string]usage.FileUsage{
 			"obj-a": {
 				ObjectID:         "obj-a",
 				Name:             "a.txt",
@@ -216,7 +216,7 @@ func TestMetricsSummaryAuthzAndScope(t *testing.T) {
 			"scoped-1": {"cbds": {"end_to_end_test"}},
 			"other-1":  {"other": {"other"}},
 		},
-		Usage: map[string]models.FileUsage{
+		Usage: map[string]usage.FileUsage{
 			"scoped-1": {
 				ObjectID:      "scoped-1",
 				UploadCount:   2,
@@ -316,7 +316,7 @@ func TestMetricsFilesAuthzAndScope(t *testing.T) {
 			"scoped-1": {"cbds": {"end_to_end_test"}},
 			"other-1":  {"other": {"other"}},
 		},
-		Usage: map[string]models.FileUsage{
+		Usage: map[string]usage.FileUsage{
 			"scoped-1": {
 				ObjectID:      "scoped-1",
 				Name:          "f1",
@@ -462,7 +462,7 @@ func TestListMultiScopedFileUsage_DeduplicatesAcrossScopes(t *testing.T) {
 		ObjectAuthz: map[string]map[string][]string{
 			"obj-a": {"org1": {"p1"}},
 		},
-		Usage: map[string]models.FileUsage{
+		Usage: map[string]usage.FileUsage{
 			"obj-a": {ObjectID: "obj-a", UploadCount: 1, DownloadCount: 2},
 		},
 	}

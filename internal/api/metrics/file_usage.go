@@ -13,7 +13,7 @@ import (
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/db"
 	"github.com/calypr/syfon/internal/faults"
-	"github.com/calypr/syfon/internal/models"
+	"github.com/calypr/syfon/internal/usage"
 )
 
 func (s *MetricsServer) ListMetricsFiles(ctx context.Context, request metricsapi.ListMetricsFilesRequestObject) (metricsapi.ListMetricsFilesResponseObject, error) {
@@ -47,7 +47,7 @@ func (s *MetricsServer) ListMetricsFiles(ctx context.Context, request metricsapi
 		}
 	}
 
-	var data []models.FileUsage
+	var data []usage.FileUsage
 	if access.isScoped() {
 		if scopedStore, ok := s.database.(db.FileUsageScopedLister); ok {
 			data, err = scopedStore.ListFileUsagePageByScope(ctx, access.organization, access.project, limit, offset, inactiveSince)
@@ -200,7 +200,7 @@ func (s *MetricsServer) GetMetricsSummary(ctx context.Context, request metricsap
 		}
 	}
 
-	var summary models.FileUsageSummary
+	var summary usage.FileUsageSummary
 	if access.isScoped() {
 		if scopedStore, ok := s.database.(db.FileUsageScopedLister); ok {
 			summary, err = scopedStore.GetFileUsageSummaryByScope(ctx, access.organization, access.project, inactiveSince)
@@ -273,7 +273,7 @@ func (s *MetricsServer) readableBulkObjectIDs(ctx context.Context, access metric
 	return out, nil
 }
 
-func usageMatchesInactiveFilter(usage models.FileUsage, inactiveSince *time.Time) bool {
+func usageMatchesInactiveFilter(usage usage.FileUsage, inactiveSince *time.Time) bool {
 	if inactiveSince == nil {
 		return true
 	}
@@ -323,7 +323,7 @@ func parseInactiveSince(inactiveDays *int) (*time.Time, error) {
 	return &t, nil
 }
 
-func toMetricsFileUsage(v models.FileUsage) metricsapi.FileUsage {
+func toMetricsFileUsage(v usage.FileUsage) metricsapi.FileUsage {
 	return metricsapi.FileUsage{
 		ObjectId:         &v.ObjectID,
 		Name:             &v.Name,
@@ -336,25 +336,25 @@ func toMetricsFileUsage(v models.FileUsage) metricsapi.FileUsage {
 	}
 }
 
-func collectScopedUsage(ctx context.Context, database db.MetricsStore, objects metricsObjectReader, organization, project string, inactiveSince *time.Time) ([]models.FileUsage, models.FileUsageSummary, error) {
+func collectScopedUsage(ctx context.Context, database db.MetricsStore, objects metricsObjectReader, organization, project string, inactiveSince *time.Time) ([]usage.FileUsage, usage.FileUsageSummary, error) {
 	ids, err := objects.ListObjectIDsByScope(ctx, organization, project, "read")
 	if err != nil {
-		return nil, models.FileUsageSummary{}, err
+		return nil, usage.FileUsageSummary{}, err
 	}
 	sort.Strings(ids)
 
-	summary := models.FileUsageSummary{TotalFiles: int64(len(ids))}
-	usages := make([]models.FileUsage, 0, len(ids))
+	summary := usage.FileUsageSummary{TotalFiles: int64(len(ids))}
+	usages := make([]usage.FileUsage, 0, len(ids))
 	bulkUsage, err := database.ListFileUsageByObjectIDs(ctx, ids)
 	if err != nil {
-		return nil, models.FileUsageSummary{}, err
+		return nil, usage.FileUsageSummary{}, err
 	}
-	usageByID := make(map[string]models.FileUsage, len(bulkUsage))
-	for _, usage := range bulkUsage {
-		usageByID[usage.ObjectID] = usage
+	usageByID := make(map[string]usage.FileUsage, len(bulkUsage))
+	for _, fileUsage := range bulkUsage {
+		usageByID[fileUsage.ObjectID] = fileUsage
 	}
 	for _, id := range ids {
-		usage, ok := usageByID[id]
+		fileUsage, ok := usageByID[id]
 		if !ok {
 			if inactiveSince != nil {
 				summary.InactiveFileCount++
@@ -364,38 +364,38 @@ func collectScopedUsage(ctx context.Context, database db.MetricsStore, objects m
 				if errors.Is(objErr, faults.ErrNotFound) || errors.Is(objErr, faults.ErrUnauthorized) {
 					continue
 				}
-				return nil, models.FileUsageSummary{}, objErr
+				return nil, usage.FileUsageSummary{}, objErr
 			}
-			usages = append(usages, models.FileUsage{
+			usages = append(usages, usage.FileUsage{
 				ObjectID: id,
 				Name:     common.StringVal(obj.Name),
 				Size:     obj.Size,
 			})
 			continue
 		}
-		summary.TotalUploads += usage.UploadCount
-		summary.TotalDownloads += usage.DownloadCount
-		if inactiveSince != nil && (usage.LastDownloadTime == nil || usage.LastDownloadTime.Before(*inactiveSince)) {
+		summary.TotalUploads += fileUsage.UploadCount
+		summary.TotalDownloads += fileUsage.DownloadCount
+		if inactiveSince != nil && (fileUsage.LastDownloadTime == nil || fileUsage.LastDownloadTime.Before(*inactiveSince)) {
 			summary.InactiveFileCount++
 		}
-		if inactiveSince != nil && usage.LastDownloadTime != nil && !usage.LastDownloadTime.Before(*inactiveSince) {
+		if inactiveSince != nil && fileUsage.LastDownloadTime != nil && !fileUsage.LastDownloadTime.Before(*inactiveSince) {
 			continue
 		}
-		usages = append(usages, usage)
+		usages = append(usages, fileUsage)
 	}
 	return usages, summary, nil
 }
 
-func listScopedFileUsage(ctx context.Context, database db.MetricsStore, objects metricsObjectReader, organization, project string, limit, offset int, inactiveSince *time.Time) ([]models.FileUsage, models.FileUsageSummary, error) {
+func listScopedFileUsage(ctx context.Context, database db.MetricsStore, objects metricsObjectReader, organization, project string, limit, offset int, inactiveSince *time.Time) ([]usage.FileUsage, usage.FileUsageSummary, error) {
 	usages, summary, err := collectScopedUsage(ctx, database, objects, organization, project, inactiveSince)
 	if err != nil {
-		return nil, models.FileUsageSummary{}, err
+		return nil, usage.FileUsageSummary{}, err
 	}
 	if limit <= 0 {
 		return usages, summary, nil
 	}
 	if offset >= len(usages) {
-		return []models.FileUsage{}, summary, nil
+		return []usage.FileUsage{}, summary, nil
 	}
 	end := offset + limit
 	if end > len(usages) {
@@ -404,13 +404,13 @@ func listScopedFileUsage(ctx context.Context, database db.MetricsStore, objects 
 	return usages[offset:end], summary, nil
 }
 
-func listMultiScopedFileUsage(ctx context.Context, database db.MetricsStore, objects metricsObjectReader, scopes []metricsScope, limit, offset int, inactiveSince *time.Time) ([]models.FileUsage, models.FileUsageSummary, error) {
-	byID := map[string]models.FileUsage{}
-	var summary models.FileUsageSummary
+func listMultiScopedFileUsage(ctx context.Context, database db.MetricsStore, objects metricsObjectReader, scopes []metricsScope, limit, offset int, inactiveSince *time.Time) ([]usage.FileUsage, usage.FileUsageSummary, error) {
+	byID := map[string]usage.FileUsage{}
+	var summary usage.FileUsageSummary
 	for _, scope := range scopes {
 		usages, scopedSummary, err := collectScopedUsage(ctx, database, objects, scope.organization, scope.project, inactiveSince)
 		if err != nil {
-			return nil, models.FileUsageSummary{}, err
+			return nil, usage.FileUsageSummary{}, err
 		}
 		summary.TotalFiles += scopedSummary.TotalFiles
 		summary.TotalUploads += scopedSummary.TotalUploads
@@ -420,7 +420,7 @@ func listMultiScopedFileUsage(ctx context.Context, database db.MetricsStore, obj
 			byID[usage.ObjectID] = usage
 		}
 	}
-	usages := make([]models.FileUsage, 0, len(byID))
+	usages := make([]usage.FileUsage, 0, len(byID))
 	for _, usage := range byID {
 		usages = append(usages, usage)
 	}
@@ -431,7 +431,7 @@ func listMultiScopedFileUsage(ctx context.Context, database db.MetricsStore, obj
 		return usages, summary, nil
 	}
 	if offset >= len(usages) {
-		return []models.FileUsage{}, summary, nil
+		return []usage.FileUsage{}, summary, nil
 	}
 	end := offset + limit
 	if end > len(usages) {

@@ -8,6 +8,7 @@ import (
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/objects"
+	"github.com/calypr/syfon/internal/usage"
 )
 
 // ServiceInfoStore exposes service metadata reads.
@@ -60,16 +61,16 @@ type ObjectAuthorizedLister interface {
 }
 
 type FileUsageScopedLister interface {
-	ListFileUsagePageByScope(ctx context.Context, organization, project string, limit, offset int, inactiveSince *time.Time) ([]models.FileUsage, error)
-	ListFileUsagePageByResources(ctx context.Context, resources []string, includeUnscoped bool, limit, offset int, inactiveSince *time.Time) ([]models.FileUsage, error)
-	GetFileUsageSummaryByScope(ctx context.Context, organization, project string, inactiveSince *time.Time) (models.FileUsageSummary, error)
-	GetFileUsageSummaryByResources(ctx context.Context, resources []string, includeUnscoped bool, inactiveSince *time.Time) (models.FileUsageSummary, error)
-	GetProjectRecordSummaryByScope(ctx context.Context, organization, project string) (models.FileUsageSummary, error)
+	ListFileUsagePageByScope(ctx context.Context, organization, project string, limit, offset int, inactiveSince *time.Time) ([]usage.FileUsage, error)
+	ListFileUsagePageByResources(ctx context.Context, resources []string, includeUnscoped bool, limit, offset int, inactiveSince *time.Time) ([]usage.FileUsage, error)
+	GetFileUsageSummaryByScope(ctx context.Context, organization, project string, inactiveSince *time.Time) (usage.FileUsageSummary, error)
+	GetFileUsageSummaryByResources(ctx context.Context, resources []string, includeUnscoped bool, inactiveSince *time.Time) (usage.FileUsageSummary, error)
+	GetProjectRecordSummaryByScope(ctx context.Context, organization, project string) (usage.FileUsageSummary, error)
 }
 
 type TransferAttributionScopedStore interface {
-	GetTransferAttributionSummaryByResources(ctx context.Context, filter models.TransferAttributionFilter, resources []string) (models.TransferAttributionSummary, error)
-	GetTransferAttributionBreakdownByResources(ctx context.Context, filter models.TransferAttributionFilter, groupBy string, resources []string) ([]models.TransferAttributionBreakdown, error)
+	GetTransferAttributionSummaryByResources(ctx context.Context, filter usage.Filter, resources []string) (usage.Summary, error)
+	GetTransferAttributionBreakdownByResources(ctx context.Context, filter usage.Filter, groupBy string, resources []string) ([]usage.Breakdown, error)
 }
 
 type BucketVisibilityLister interface {
@@ -107,14 +108,14 @@ type PendingLFSMetaStore interface {
 type UsageStore interface {
 	RecordFileUpload(ctx context.Context, objectID string) error
 	RecordFileDownload(ctx context.Context, objectID string) error
-	RecordTransferAttributionEvents(ctx context.Context, events []models.TransferAttributionEvent) error
-	RecordProviderTransferEvents(ctx context.Context, events []models.ProviderTransferEvent) error
-	GetTransferAttributionSummary(ctx context.Context, filter models.TransferAttributionFilter) (models.TransferAttributionSummary, error)
-	GetTransferAttributionBreakdown(ctx context.Context, filter models.TransferAttributionFilter, groupBy string) ([]models.TransferAttributionBreakdown, error)
-	GetFileUsage(ctx context.Context, objectID string) (*models.FileUsage, error)
-	ListFileUsageByObjectIDs(ctx context.Context, ids []string) ([]models.FileUsage, error)
-	ListFileUsage(ctx context.Context, limit, offset int, inactiveSince *time.Time) ([]models.FileUsage, error)
-	GetFileUsageSummary(ctx context.Context, inactiveSince *time.Time) (models.FileUsageSummary, error)
+	RecordTransferAttributionEvents(ctx context.Context, events []usage.Event) error
+	RecordProviderTransferEvents(ctx context.Context, events []usage.ProviderEvent) error
+	GetTransferAttributionSummary(ctx context.Context, filter usage.Filter) (usage.Summary, error)
+	GetTransferAttributionBreakdown(ctx context.Context, filter usage.Filter, groupBy string) ([]usage.Breakdown, error)
+	GetFileUsage(ctx context.Context, objectID string) (*usage.FileUsage, error)
+	ListFileUsageByObjectIDs(ctx context.Context, ids []string) ([]usage.FileUsage, error)
+	ListFileUsage(ctx context.Context, limit, offset int, inactiveSince *time.Time) ([]usage.FileUsage, error)
+	GetFileUsageSummary(ctx context.Context, inactiveSince *time.Time) (usage.FileUsageSummary, error)
 }
 
 // SHA256ValidityStore is the minimum storage surface needed by the SHA256 validity endpoint.
@@ -127,15 +128,15 @@ type SHA256ValidityStore interface {
 type MetricsStore interface {
 	ListObjectIDsByScope(ctx context.Context, organization, project string) ([]string, error)
 	GetObject(ctx context.Context, id string) (*objects.Record, error)
-	RecordTransferAttributionEvents(ctx context.Context, events []models.TransferAttributionEvent) error
-	RecordProviderTransferEvents(ctx context.Context, events []models.ProviderTransferEvent) error
+	RecordTransferAttributionEvents(ctx context.Context, events []usage.Event) error
+	RecordProviderTransferEvents(ctx context.Context, events []usage.ProviderEvent) error
 	ListS3Credentials(ctx context.Context) ([]buckets.Credential, error)
-	GetTransferAttributionSummary(ctx context.Context, filter models.TransferAttributionFilter) (models.TransferAttributionSummary, error)
-	GetTransferAttributionBreakdown(ctx context.Context, filter models.TransferAttributionFilter, groupBy string) ([]models.TransferAttributionBreakdown, error)
-	GetFileUsage(ctx context.Context, objectID string) (*models.FileUsage, error)
-	ListFileUsageByObjectIDs(ctx context.Context, ids []string) ([]models.FileUsage, error)
-	ListFileUsage(ctx context.Context, limit, offset int, inactiveSince *time.Time) ([]models.FileUsage, error)
-	GetFileUsageSummary(ctx context.Context, inactiveSince *time.Time) (models.FileUsageSummary, error)
+	GetTransferAttributionSummary(ctx context.Context, filter usage.Filter) (usage.Summary, error)
+	GetTransferAttributionBreakdown(ctx context.Context, filter usage.Filter, groupBy string) ([]usage.Breakdown, error)
+	GetFileUsage(ctx context.Context, objectID string) (*usage.FileUsage, error)
+	ListFileUsageByObjectIDs(ctx context.Context, ids []string) ([]usage.FileUsage, error)
+	ListFileUsage(ctx context.Context, limit, offset int, inactiveSince *time.Time) ([]usage.FileUsage, error)
+	GetFileUsageSummary(ctx context.Context, inactiveSince *time.Time) (usage.FileUsageSummary, error)
 }
 
 // LFSStore is the minimum storage surface needed by the LFS API.

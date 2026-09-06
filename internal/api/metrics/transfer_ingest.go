@@ -12,7 +12,7 @@ import (
 	"github.com/calypr/syfon/internal/access"
 	intcommon "github.com/calypr/syfon/internal/common"
 	apimiddleware "github.com/calypr/syfon/internal/httpapi/middleware"
-	"github.com/calypr/syfon/internal/models"
+	"github.com/calypr/syfon/internal/usage"
 )
 
 type providerTransferPayload struct {
@@ -55,9 +55,9 @@ func (s *MetricsServer) RecordProviderTransferEvents(ctx context.Context, reques
 	if request.Body == nil || len(request.Body.Events) == 0 {
 		return metricsapi.RecordProviderTransferEvents400Response{}, nil
 	}
-	events := make([]models.ProviderTransferEvent, 0, len(request.Body.Events))
+	events := make([]usage.ProviderEvent, 0, len(request.Body.Events))
 	for _, item := range request.Body.Events {
-		ev, err := providerTransferPayloadToModel(providerTransferGeneratedEventToPayload(item))
+		ev, err := providerTransferPayloadToUsage(providerTransferGeneratedEventToPayload(item))
 		if err != nil {
 			return metricsapi.RecordProviderTransferEvents400Response{}, nil
 		}
@@ -100,34 +100,34 @@ func providerTransferResource(organization, project string) (string, bool) {
 	return resource, true
 }
 
-func providerTransferPayloadToModel(item providerTransferPayload) (models.ProviderTransferEvent, error) {
+func providerTransferPayloadToUsage(item providerTransferPayload) (usage.ProviderEvent, error) {
 	direction := strings.ToLower(strings.TrimSpace(item.Direction))
 	switch direction {
-	case models.ProviderTransferDirectionDownload, models.ProviderTransferDirectionUpload:
+	case usage.ProviderTransferDirectionDownload, usage.ProviderTransferDirectionUpload:
 	default:
-		return models.ProviderTransferEvent{}, errors.New("invalid direction")
+		return usage.ProviderEvent{}, errors.New("invalid direction")
 	}
 	if strings.TrimSpace(item.ProviderEventID) == "" || strings.TrimSpace(item.Provider) == "" || strings.TrimSpace(item.Bucket) == "" {
-		return models.ProviderTransferEvent{}, errors.New("provider_event_id, provider, and bucket are required")
+		return usage.ProviderEvent{}, errors.New("provider_event_id, provider, and bucket are required")
 	}
 	if item.BytesTransferred < 0 {
-		return models.ProviderTransferEvent{}, errors.New("bytes_transferred cannot be negative")
+		return usage.ProviderEvent{}, errors.New("bytes_transferred cannot be negative")
 	}
 	status := strings.TrimSpace(item.ReconciliationStatus)
 	switch status {
-	case "", models.ProviderTransferMatched, models.ProviderTransferAmbiguous, models.ProviderTransferUnmatched:
+	case "", usage.ProviderTransferMatched, usage.ProviderTransferAmbiguous, usage.ProviderTransferUnmatched:
 	default:
-		return models.ProviderTransferEvent{}, errors.New("invalid reconciliation_status")
+		return usage.ProviderEvent{}, errors.New("invalid reconciliation_status")
 	}
 	when := time.Now().UTC()
 	if strings.TrimSpace(item.EventTime) != "" {
 		parsed, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(item.EventTime))
 		if err != nil {
-			return models.ProviderTransferEvent{}, errors.New("invalid event_time")
+			return usage.ProviderEvent{}, errors.New("invalid event_time")
 		}
 		when = parsed.UTC()
 	}
-	return models.ProviderTransferEvent{
+	return usage.ProviderEvent{
 		ProviderEventID:      strings.TrimSpace(item.ProviderEventID),
 		AccessGrantID:        strings.TrimSpace(item.AccessGrantID),
 		Direction:            direction,

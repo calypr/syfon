@@ -10,9 +10,9 @@ import (
 	"github.com/calypr/syfon/apigen/server/lfsapi"
 	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/core"
-	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/testutils"
+	"github.com/calypr/syfon/internal/usage"
 	"github.com/gofiber/fiber/v3"
 )
 
@@ -55,7 +55,7 @@ func TestLFSBatchDownloadFound(t *testing.T) {
 		t.Fatalf("expected one LFS access-issued event, got %+v", db.TransferEvents)
 	}
 	ev := db.TransferEvents[0]
-	if ev.EventType != models.TransferEventAccessIssued || ev.ObjectID != oid || ev.SHA256 != oid || ev.Provider != "s3" || ev.Bucket != "bucket" || ev.BytesRequested != 10 {
+	if ev.EventType != usage.TransferEventAccessIssued || ev.ObjectID != oid || ev.SHA256 != oid || ev.Provider != "s3" || ev.Bucket != "bucket" || ev.BytesRequested != 10 {
 		t.Fatalf("unexpected LFS access-issued event: %+v", ev)
 	}
 	if ev.AccessGrantID == "" || ev.AccessGrantID == ev.EventID {

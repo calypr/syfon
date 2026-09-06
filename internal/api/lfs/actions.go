@@ -13,8 +13,8 @@ import (
 	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/faults"
 	apimiddleware "github.com/calypr/syfon/internal/httpapi/middleware"
-	"github.com/calypr/syfon/internal/models"
 	"github.com/calypr/syfon/internal/urlmanager"
+	"github.com/calypr/syfon/internal/usage"
 )
 
 func prepareDownloadActions(ctx context.Context, om *core.ObjectManager, oid string) (*lfsapi.BatchActions, *lfsapi.ObjectError) {
@@ -51,7 +51,7 @@ func prepareDownloadActions(ctx context.Context, om *core.ObjectManager, oid str
 		return nil, &lfsapi.ObjectError{Code: int32(http.StatusInternalServerError), Message: err.Error()}
 	}
 	if err := attribution.RecordAccessIssued(ctx, om, obj, attribution.AccessDetails{
-		Direction:  models.ProviderTransferDirectionDownload,
+		Direction:  usage.ProviderTransferDirectionDownload,
 		AccessID:   accessID,
 		StorageURL: src,
 	}); err != nil {

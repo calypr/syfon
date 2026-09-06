@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/calypr/syfon/internal/models"
+	"github.com/calypr/syfon/internal/usage"
 )
 
 func TestRecordTransferAttributionEvents_PersistsGrantAndCommits(t *testing.T) {
@@ -15,9 +15,9 @@ func TestRecordTransferAttributionEvents_PersistsGrantAndCommits(t *testing.T) {
 
 	when := time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC)
 	start := int64(10)
-	event := models.TransferAttributionEvent{
+	event := usage.Event{
 		EventID:           "event-1",
-		EventType:         models.TransferEventAccessIssued,
+		EventType:         usage.TransferEventAccessIssued,
 		Direction:         "upload",
 		EventTime:         when,
 		RequestID:         "request-1",
@@ -40,7 +40,7 @@ func TestRecordTransferAttributionEvents_PersistsGrantAndCommits(t *testing.T) {
 		ClientVersion:     "1.0",
 		TransferSessionID: "session-1",
 	}
-	grantID := accessGrantIDFromEvent(event)
+	grantID := usage.GrantID(event)
 
 	mock.ExpectBegin()
 	mock.ExpectPrepare("INSERT INTO transfer_attribution_event").ExpectExec().
@@ -58,7 +58,7 @@ func TestRecordTransferAttributionEvents_PersistsGrantAndCommits(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 
-	if err := pg.RecordTransferAttributionEvents(context.Background(), []models.TransferAttributionEvent{
+	if err := pg.RecordTransferAttributionEvents(context.Background(), []usage.Event{
 		{},
 		{EventID: "ignored", EventType: "transfer_started"},
 		event,
@@ -75,7 +75,7 @@ func TestRecordProviderTransferEvents_NormalizesAndRecordsUnmatchedEvent(t *test
 	defer rawDB.Close()
 
 	when := time.Date(2026, time.February, 3, 4, 5, 6, 0, time.UTC)
-	event := models.ProviderTransferEvent{
+	event := usage.ProviderEvent{
 		ProviderEventID:    "provider-event-1",
 		Direction:          "GET",
 		EventTime:          when,
@@ -113,16 +113,16 @@ func TestRecordProviderTransferEvents_NormalizesAndRecordsUnmatchedEvent(t *test
 		}))
 	prepared.ExpectExec().
 		WithArgs(
-			event.ProviderEventID, "", models.ProviderTransferDirectionDownload, when, event.RequestID, event.ProviderRequestID,
+			event.ProviderEventID, "", usage.ProviderTransferDirectionDownload, when, event.RequestID, event.ProviderRequestID,
 			event.ObjectID, event.SHA256, event.ObjectSize, event.Organization, event.Project, event.AccessID, "s3", "bucket",
 			"object-1", "s3://bucket/object-1", nil, nil, event.BytesTransferred, event.HTTPMethod, event.HTTPStatus,
 			event.RequesterPrincipal, event.SourceIP, event.UserAgent, event.RawEventRef, event.ActorEmail, event.ActorSubject, event.AuthMode,
-			models.ProviderTransferUnmatched,
+			usage.ProviderTransferUnmatched,
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 
-	if err := pg.RecordProviderTransferEvents(context.Background(), []models.ProviderTransferEvent{event}); err != nil {
+	if err := pg.RecordProviderTransferEvents(context.Background(), []usage.ProviderEvent{event}); err != nil {
 		t.Fatalf("RecordProviderTransferEvents returned error: %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
