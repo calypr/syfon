@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
@@ -31,8 +30,6 @@ func stringValue(value *string) string {
 	}
 	return *value
 }
-
-var multipartUploadSessions sync.Map
 
 func firstSupportedAccessURL(obj *objects.Record) string {
 	if obj == nil || obj.AccessMethods == nil {
@@ -391,7 +388,7 @@ func handleInternalUploadBulkFiber(objectService *objects.Service, transferServi
 	}
 }
 
-func handleInternalMultipartInitFiber(objectService *objects.Service, transferService *domaintransfers.Service) fiber.Handler {
+func handleInternalMultipartInitFiber(objectService *objects.Service, transferService *domaintransfers.Service, lifecycle *domaintransfers.MultipartLifecycle) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		var req internalapi.InternalMultipartInitRequest
 		if err := c.Bind().JSON(&req); err != nil && !errors.Is(err, io.EOF) {
@@ -414,11 +411,10 @@ func handleInternalMultipartInitFiber(objectService *objects.Service, transferSe
 				return response.HandleError(c, err)
 			}
 			internalID := uuid.NewString()
-			uploadID, err := transferService.InitMultipartUpload(c.Context(), target.Bucket, target.Key)
+			uploadID, err := lifecycle.Begin(c.Context(), target.Bucket, target.Key)
 			if err != nil {
 				return response.HandleError(c, err)
 			}
-			multipartUploadSessions.Store(uploadID, multipartSession{Bucket: target.Bucket, Key: target.Key})
 			return c.Status(fiber.StatusOK).JSON(internalapi.InternalMultipartInitOutput{
 				UploadId: &uploadID,
 				Guid:     &internalID,
@@ -461,12 +457,11 @@ func handleInternalMultipartInitFiber(objectService *objects.Service, transferSe
 			multipartKey = target.Key
 		}
 
-		uploadID, err := transferService.InitMultipartUpload(c.Context(), bucket, multipartKey)
+		uploadID, err := lifecycle.Begin(c.Context(), bucket, multipartKey)
 		if err != nil {
 			return response.HandleError(c, err)
 		}
 
-		multipartUploadSessions.Store(uploadID, multipartSession{Bucket: bucket, Key: multipartKey})
 		return c.Status(fiber.StatusOK).JSON(internalapi.InternalMultipartInitOutput{
 			UploadId: &uploadID,
 			Guid:     &internalID,
@@ -474,7 +469,7 @@ func handleInternalMultipartInitFiber(objectService *objects.Service, transferSe
 	}
 }
 
-func handleInternalMultipartUploadFiber(transferService *domaintransfers.Service) fiber.Handler {
+func handleInternalMultipartUploadFiber(lifecycle *domaintransfers.MultipartLifecycle) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		var req internalapi.InternalMultipartUploadRequest
 		if err := c.Bind().JSON(&req); err != nil && !errors.Is(err, io.EOF) {
@@ -484,13 +479,10 @@ func handleInternalMultipartUploadFiber(transferService *domaintransfers.Service
 			return c.Status(fiber.StatusBadRequest).SendString("uploadId is required")
 		}
 
-		sess, ok := multipartUploadSessions.Load(req.UploadId)
-		if !ok {
+		urlStr, err := lifecycle.SignPart(c.Context(), req.UploadId, req.PartNumber)
+		if errors.Is(err, domaintransfers.ErrMultipartUploadNotFound) {
 			return c.Status(fiber.StatusNotFound).SendString("Upload ID not found")
 		}
-		s := sess.(multipartSession)
-
-		urlStr, err := transferService.SignMultipartPart(c.Context(), s.Bucket, s.Key, req.UploadId, req.PartNumber)
 		if err != nil {
 			return response.HandleError(c, err)
 		}
@@ -498,7 +490,7 @@ func handleInternalMultipartUploadFiber(transferService *domaintransfers.Service
 	}
 }
 
-func handleInternalMultipartCompleteFiber(transferService *domaintransfers.Service) fiber.Handler {
+func handleInternalMultipartCompleteFiber(lifecycle *domaintransfers.MultipartLifecycle) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		var req internalapi.InternalMultipartCompleteRequest
 		if err := c.Bind().JSON(&req); err != nil && !errors.Is(err, io.EOF) {
@@ -508,24 +500,15 @@ func handleInternalMultipartCompleteFiber(transferService *domaintransfers.Servi
 			return c.Status(fiber.StatusBadRequest).SendString("uploadId is required")
 		}
 
-		sess, ok := multipartUploadSessions.LoadAndDelete(req.UploadId)
-		if !ok {
-			return c.Status(fiber.StatusNotFound).SendString("Upload ID not found")
-		}
-		s := sess.(multipartSession)
-
 		parts := make([]storage.CompletedPart, len(req.Parts))
 		for i, p := range req.Parts {
 			parts[i] = storage.CompletedPart{ETag: p.ETag, PartNumber: p.PartNumber}
 		}
-		if err := transferService.CompleteMultipartUpload(c.Context(), s.Bucket, s.Key, req.UploadId, parts); err != nil {
+		if err := lifecycle.Complete(c.Context(), req.UploadId, parts); errors.Is(err, domaintransfers.ErrMultipartUploadNotFound) {
+			return c.Status(fiber.StatusNotFound).SendString("Upload ID not found")
+		} else if err != nil {
 			return response.HandleError(c, err)
 		}
 		return c.SendStatus(fiber.StatusOK)
 	}
-}
-
-type multipartSession struct {
-	Bucket string
-	Key    string
 }
