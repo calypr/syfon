@@ -13,15 +13,14 @@ import (
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/storage"
-	"github.com/calypr/syfon/internal/testutils"
 	"github.com/calypr/syfon/internal/transfers"
 	"github.com/calypr/syfon/internal/usage"
 )
 
 func TestLFSBatchDownloadUsesTransferAndUsagePorts(t *testing.T) {
 	oid := strings.Repeat("a", 64)
-	db := &testutils.MockDatabase{
-		Objects: map[string]*objects.Record{
+	ports := newLFSTestPorts(
+		map[string]*objects.Record{
 			oid: {
 				Id:        objects.RecordID(oid),
 				Size:      10,
@@ -32,10 +31,10 @@ func TestLFSBatchDownloadUsesTransferAndUsagePorts(t *testing.T) {
 				}},
 			},
 		},
-		Credentials: map[string]buckets.Credential{"bucket": {Bucket: "bucket"}},
-	}
+		map[string]buckets.Credential{"bucket": {Bucket: "bucket"}},
+	)
 	storageFake := &lfsTestStorage{}
-	router := newLFSTestRouter(db, storageFake, DefaultOptions())
+	router := newLFSTestRouter(ports, storageFake, DefaultOptions())
 	body, _ := json.Marshal(map[string]any{
 		"operation": "download",
 		"objects":   []map[string]any{{"oid": oid, "size": 10}},
@@ -55,15 +54,15 @@ func TestLFSBatchDownloadUsesTransferAndUsagePorts(t *testing.T) {
 	if len(payload.Objects) != 1 || payload.Objects[0].Actions == nil || payload.Objects[0].Actions.Download == nil {
 		t.Fatalf("download actions = %+v", payload.Objects)
 	}
-	if len(db.TransferEvents) != 1 || db.TransferEvents[0].EventType != usage.TransferEventAccessIssued {
-		t.Fatalf("transfer events = %+v", db.TransferEvents)
+	if len(ports.events.events) != 1 || ports.events.events[0].EventType != usage.TransferEventAccessIssued {
+		t.Fatalf("transfer events = %+v", ports.events.events)
 	}
 }
 
 func TestLFSMetadataVerifyPreservesPendingPopBeforeRegister(t *testing.T) {
 	oid := strings.Repeat("b", 64)
-	db := &testutils.MockDatabase{Objects: map[string]*objects.Record{}, Credentials: map[string]buckets.Credential{"bucket": {Bucket: "bucket"}}}
-	router := newLFSTestRouter(db, &lfsTestStorage{}, DefaultOptions())
+	ports := newLFSTestPorts(map[string]*objects.Record{}, map[string]buckets.Credential{"bucket": {Bucket: "bucket"}})
+	router := newLFSTestRouter(ports, &lfsTestStorage{}, DefaultOptions())
 	metadata, _ := json.Marshal(map[string]any{"candidates": []map[string]any{{
 		"name": "object.bin", "size": 12,
 		"checksums":      []map[string]any{{"type": "sha256", "checksum": oid}},
@@ -85,19 +84,16 @@ func TestLFSMetadataVerifyPreservesPendingPopBeforeRegister(t *testing.T) {
 	if response.Code != http.StatusOK {
 		t.Fatalf("verify status = %d body=%s", response.Code, response.Body.String())
 	}
-	if _, ok := db.PendingMeta[oid]; ok {
+	if _, ok := ports.pending.entries[oid]; ok {
 		t.Fatal("pending metadata was not consumed")
 	}
 }
 
 func TestLFSUploadProxyPreservesOpaqueMultipartAndPartOrder(t *testing.T) {
 	oid := strings.Repeat("c", 64)
-	db := &testutils.MockDatabase{
-		Objects:     map[string]*objects.Record{},
-		Credentials: map[string]buckets.Credential{"bucket": {Bucket: "bucket"}},
-	}
+	ports := newLFSTestPorts(map[string]*objects.Record{}, map[string]buckets.Credential{"bucket": {Bucket: "bucket"}})
 	storageFake := &lfsTestStorage{}
-	server := NewLFSServer(newLFSTestDependencies(db, storageFake), DefaultOptions())
+	server := NewLFSServer(newLFSTestDependencies(ports, storageFake), DefaultOptions())
 	server.partUploader = func(_ context.Context, _ string, content []byte) (string, error) {
 		if string(content) != "payload" {
 			t.Fatalf("multipart content = %q", content)
@@ -136,49 +132,45 @@ func (r lfsTestScopeReader) LookupBucketScope(_ context.Context, organization, p
 
 func TestLFSUploadProxyUsesCanonicalOIDForScopedTargets(t *testing.T) {
 	oid := strings.Repeat("d", 64)
-	newTransferService := func(db *testutils.MockDatabase, storageFake *lfsTestStorage) *transfers.Service {
+	newTransferService := func(ports *lfsTestServicePorts, storageFake *lfsTestStorage) *transfers.Service {
 		return transfers.NewService(transfers.Dependencies{
 			Access:      storageFake,
 			Multipart:   storageFake,
 			Scopes:      lfsTestScopeReader{scopes: map[string]buckets.Scope{"org|project": {Organization: "org", ProjectID: "project", Bucket: "physical", PathPrefix: "project-prefix"}}},
-			Credentials: db,
-			Pending:     db,
-			Events:      db,
+			Credentials: ports.credentials,
+			Pending:     ports.pending,
+			Events:      ports.events,
 		})
 	}
 
 	tests := []struct {
 		name     string
-		populate func(*testutils.MockDatabase)
+		populate func(*lfsTestServicePorts)
 	}{
 		{
 			name: "existing object",
-			populate: func(db *testutils.MockDatabase) {
+			populate: func(ports *lfsTestServicePorts) {
 				resources := []string{"/programs/org/projects/project"}
 				methods := []objects.AccessMethod{{Type: "s3", AccessUrl: &objects.AccessURL{Url: "s3://legacy/stale-key"}}}
-				db.Objects = map[string]*objects.Record{
-					"record-existing": {
-						Id:               "record-existing",
-						Checksums:        []objects.Checksum{{Type: "sha256", Checksum: oid}},
-						AccessMethods:    &methods,
-						ControlledAccess: &resources,
-					},
+				ports.objectReader.records["record-existing"] = &objects.Record{
+					Id:               "record-existing",
+					Checksums:        []objects.Checksum{{Type: "sha256", Checksum: oid}},
+					AccessMethods:    &methods,
+					ControlledAccess: &resources,
 				}
 			},
 		},
 		{
 			name: "pending metadata",
-			populate: func(db *testutils.MockDatabase) {
+			populate: func(ports *lfsTestServicePorts) {
 				resources := []string{"/programs/org/projects/project"}
 				methods := []objects.AccessMethod{{Type: "s3", AccessUrl: &objects.AccessURL{Url: "s3://legacy/stale-key"}}}
-				db.PendingMeta = map[string]transfers.PendingMetadata{
-					oid: {
-						OID: oid,
-						Candidate: objects.Candidate{
-							Checksums:        &[]objects.Checksum{{Type: "sha256", Checksum: oid}},
-							AccessMethods:    &methods,
-							ControlledAccess: &resources,
-						},
+				ports.pending.entries[oid] = transfers.PendingMetadata{
+					OID: oid,
+					Candidate: objects.Candidate{
+						Checksums:        &[]objects.Checksum{{Type: "sha256", Checksum: oid}},
+						AccessMethods:    &methods,
+						ControlledAccess: &resources,
 					},
 				}
 			},
@@ -187,11 +179,11 @@ func TestLFSUploadProxyUsesCanonicalOIDForScopedTargets(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			db := &testutils.MockDatabase{Credentials: map[string]buckets.Credential{"physical": {Bucket: "physical"}}}
-			tt.populate(db)
+			ports := newLFSTestPorts(map[string]*objects.Record{}, map[string]buckets.Credential{"physical": {Bucket: "physical"}})
+			tt.populate(ports)
 			storageFake := &lfsTestStorage{}
-			deps := newLFSTestDependencies(db, storageFake)
-			deps.TransferService = newTransferService(db, storageFake)
+			deps := newLFSTestDependencies(ports, storageFake)
+			deps.TransferService = newTransferService(ports, storageFake)
 			server := NewLFSServer(deps, DefaultOptions())
 			server.partUploader = func(context.Context, string, []byte) (string, error) { return "etag", nil }
 
