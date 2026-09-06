@@ -7,10 +7,11 @@ import (
 	"github.com/calypr/syfon/internal/httpapi"
 	"github.com/calypr/syfon/internal/httpapi/lfs"
 	"github.com/calypr/syfon/internal/httpapi/middleware"
-	"github.com/calypr/syfon/internal/maintenance/projectstorage"
-	"github.com/calypr/syfon/internal/maintenance/scoperepair"
 	objectrecords "github.com/calypr/syfon/internal/objects/records"
+	"github.com/calypr/syfon/internal/objects/scoperepair"
+	projectstorage "github.com/calypr/syfon/internal/projects/storage"
 	"github.com/calypr/syfon/internal/transfers"
+	transferlfs "github.com/calypr/syfon/internal/transfers/lfs"
 	"github.com/calypr/syfon/internal/usage"
 	"github.com/gofiber/fiber/v3"
 )
@@ -21,6 +22,7 @@ type serverRuntime struct {
 	serviceInfo         drs.Service
 	objectService       *objectrecords.Service
 	transferService     *transfers.Service
+	lfsPending          transferlfs.PendingStore
 	usageService        *usage.Service
 	usageIngest         usage.Ingestor
 	projectInspector    *projectstorage.Inspector
@@ -36,6 +38,7 @@ func registerServerRoutes(rt *serverRuntime) {
 		ServiceInfo:      rt.serviceInfo,
 		Objects:          rt.objectService,
 		Transfers:        rt.transferService,
+		LFSPending:       rt.lfsPending,
 		UsageIngest:      rt.usageIngest,
 		UsageReports:     rt.usageService.Reports(),
 		Buckets:          rt.bucketService,

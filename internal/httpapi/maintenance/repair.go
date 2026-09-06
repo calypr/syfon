@@ -9,7 +9,7 @@ import (
 	"github.com/calypr/syfon/internal/faults"
 	"github.com/calypr/syfon/internal/httpapi/middleware"
 	"github.com/calypr/syfon/internal/httpapi/response"
-	"github.com/calypr/syfon/internal/maintenance/scoperepair"
+	"github.com/calypr/syfon/internal/objects/scoperepair"
 	"github.com/gofiber/fiber/v3"
 )
 

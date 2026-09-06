@@ -27,7 +27,6 @@ func newInternalDRSObjectManager(store *transferHTTPFixture, storageDependency t
 	objectStore := &transferObjectStoreFake{fixture: store}
 	aliasStore := &transferAliasStoreFake{fixture: store}
 	bucketStore := &transferBucketStoreFake{fixture: store}
-	pendingStore := &transferPendingStoreFake{fixture: store}
 	eventStore := &transferEventStoreFake{fixture: store}
 	fileCounters := &transferFileCounterFake{fixture: store}
 	bucketService := newInternalDRSBucketService(bucketStore)
@@ -44,7 +43,6 @@ func newInternalDRSObjectManager(store *transferHTTPFixture, storageDependency t
 		Multipart:   storageDependency,
 		Scopes:      bucketService,
 		Credentials: bucketService,
-		Pending:     pendingStore,
 		Events:      eventStore,
 	})
 	return internalDRSTestFixture{

@@ -16,15 +16,16 @@ import (
 	"github.com/calypr/syfon/internal/access/authentication"
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/config"
-	"github.com/calypr/syfon/internal/credentialcipher"
 	"github.com/calypr/syfon/internal/httpapi/middleware"
-	"github.com/calypr/syfon/internal/maintenance/projectstorage"
 	"github.com/calypr/syfon/internal/objects"
 	objectrecords "github.com/calypr/syfon/internal/objects/records"
+	"github.com/calypr/syfon/internal/persistence/credentialcipher"
 	"github.com/calypr/syfon/internal/persistence/postgres"
 	"github.com/calypr/syfon/internal/persistence/sqlite"
+	projectstorage "github.com/calypr/syfon/internal/projects/storage"
 	"github.com/calypr/syfon/internal/storage"
 	"github.com/calypr/syfon/internal/transfers"
+	transferlfs "github.com/calypr/syfon/internal/transfers/lfs"
 	"github.com/calypr/syfon/internal/usage"
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/recover"
@@ -56,7 +57,7 @@ func serviceInfoForBackend(sqlite bool) drs.Service {
 type serverBackend struct {
 	objectDependencies objectrecords.Dependencies
 	bucketDependencies buckets.Dependencies
-	pending            transfers.PendingStore
+	pending            transferlfs.PendingStore
 	usageIngest        usage.Ingestor
 	usageReports       usage.ReportStore
 }
@@ -297,7 +298,6 @@ var Cmd = &cobra.Command{
 			Multipart:   storageManager,
 			Scopes:      bucketService,
 			Credentials: bucketService,
-			Pending:     backend.pending,
 			Events:      backend.usageIngest,
 		})
 		projectStorageService := projectstorage.NewService(
@@ -346,6 +346,7 @@ var Cmd = &cobra.Command{
 			serviceInfo:         serviceInfoForBackend(cfg.Database.Sqlite != nil),
 			objectService:       objectService,
 			transferService:     transferService,
+			lfsPending:          backend.pending,
 			usageService:        usageService,
 			usageIngest:         backend.usageIngest,
 			projectInspector:    projectStorageService.Inspector,

@@ -1,4 +1,4 @@
-package projectstorage
+package storage
 
 import (
 	"context"

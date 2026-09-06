@@ -10,7 +10,7 @@ import (
 	"github.com/calypr/syfon/internal/faults"
 	"github.com/calypr/syfon/internal/objects"
 	objectrecords "github.com/calypr/syfon/internal/objects/records"
-	"github.com/calypr/syfon/internal/transfers"
+	transferlfs "github.com/calypr/syfon/internal/transfers/lfs"
 	"github.com/calypr/syfon/internal/usage"
 )
 
@@ -315,7 +315,7 @@ type serverTestDependencies struct {
 	bucketService *buckets.Service
 	usageIngest   usage.Ingestor
 	usageReports  usage.ReportStore
-	pending       transfers.PendingStore
+	pending       transferlfs.PendingStore
 }
 
 func mockServerDependencies(objectStore *serverObjectStore, bucketStore *serverBucketStore) serverTestDependencies {
@@ -464,14 +464,14 @@ var (
 
 type serverPendingStore struct{}
 
-func (serverPendingStore) SavePendingLFSMeta(context.Context, []transfers.PendingMetadata) error {
+func (serverPendingStore) SavePendingMetadata(context.Context, []transferlfs.PendingMetadata) error {
 	return nil
 }
-func (serverPendingStore) GetPendingLFSMeta(context.Context, string) (*transfers.PendingMetadata, error) {
+func (serverPendingStore) GetPendingMetadata(context.Context, string) (*transferlfs.PendingMetadata, error) {
 	return nil, fmt.Errorf("%w: pending metadata not found", faults.ErrNotFound)
 }
-func (serverPendingStore) PopPendingLFSMeta(context.Context, string) (*transfers.PendingMetadata, error) {
+func (serverPendingStore) PopPendingMetadata(context.Context, string) (*transferlfs.PendingMetadata, error) {
 	return nil, fmt.Errorf("%w: pending metadata not found", faults.ErrNotFound)
 }
 
-var _ transfers.PendingStore = serverPendingStore{}
+var _ transferlfs.PendingStore = serverPendingStore{}

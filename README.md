@@ -245,14 +245,14 @@ The server composes focused domain and adapter packages:
 - `internal/objects/records` owns authorized record lookup, listing, registration, updates, deletion, aliases, and canonical views. It imports the parent values package; the parent does not import record operations.
 - `internal/buckets` owns credentials, scopes, visibility, and cache policy.
 - `internal/storage` owns provider-neutral storage operations and the S3, GCS, Azure, and file adapters.
-- `internal/transfers` owns access issuance, upload workflows, multipart sessions, and pending metadata. HTTP adapters translate protocol requests and results.
+- `internal/transfers` owns access issuance, target selection, and multipart sessions. `internal/transfers/lfs` owns LFS preparation, uploads, verification, and pending metadata. HTTP adapters translate protocol requests and results.
 - `internal/usage` defines the event writer contract and owns scoped accounting reports.
-- `internal/maintenance/projectstorage` separates storage inspection from project cleanup. `internal/maintenance/scoperepair` audits and repairs catalog references.
+- `internal/projects/storage` owns storage inspection and project cleanup. `internal/objects/scoperepair` audits and repairs object scope references.
 - `internal/requestid` carries a request ID through context for logs and audit events. `internal/faults` defines shared error classifications.
 - `internal/httpapi` owns route registration, handlers, middleware, and protocol adapters.
 - `internal/persistence` owns the SQLite and PostgreSQL adapters.
 - `internal/access` owns authorization policy and authentication integrations.
-- `internal/credentialcipher` encrypts bucket credentials for database storage and decrypts them after reads.
+- `internal/persistence/credentialcipher` encrypts bucket credentials for database storage and decrypts them after reads.
 - `cmd/server` composes these packages into the server runtime.
 
 See persistence table details and relationships in [internal/persistence/README.md](internal/persistence/README.md).

@@ -16,9 +16,9 @@ import (
 	clientservices "github.com/calypr/syfon/client/services"
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/httpapi"
-	"github.com/calypr/syfon/internal/maintenance/projectstorage"
 	objectrecords "github.com/calypr/syfon/internal/objects/records"
 	"github.com/calypr/syfon/internal/persistence/sqlite"
+	projectstorage "github.com/calypr/syfon/internal/projects/storage"
 	"github.com/calypr/syfon/internal/storage"
 	"github.com/calypr/syfon/internal/transfers"
 	"github.com/calypr/syfon/internal/usage"
@@ -364,7 +364,7 @@ func newSyfonTestServer(t *testing.T) *fiberTestServer {
 	usageService := usage.NewService(usage.Dependencies{Reports: database, Objects: objectService})
 	transferService := transfers.NewService(transfers.Dependencies{
 		Access: cliFileStorageAccess{root: storageDir}, Scopes: bucketService, Credentials: bucketService,
-		Pending: database, Events: database,
+		Events: database,
 	})
 	description := "Calypr test DRS server"
 	environment := "test"
@@ -382,6 +382,7 @@ func newSyfonTestServer(t *testing.T) *fiberTestServer {
 	}
 	projectStorageService := projectstorage.NewService(projectstorage.Dependencies{Scopes: bucketService, Credentials: bucketService, Visibility: bucketService, Physical: objectService, CleanupObjects: objectService, CleanupScopes: bucketService})
 	httpapi.RegisterRoutes(app, httpapi.Dependencies{
+		LFSPending:       database,
 		ServiceInfo:      serviceInfo,
 		Objects:          objectService,
 		Transfers:        transferService,

@@ -50,18 +50,19 @@ syfon/
 ├── cmd/            # CLI commands (serve, upload, download, version, ...)
 ├── internal/httpapi/ # HTTP routes, handlers, middleware, and protocol adapters
 ├── internal/objects/ # Record values, identity, and pure transformation rules
-│   └── records/     # Authorized record queries and mutations
+│   ├── records/     # Authorized record queries and mutations
+│   └── scoperepair/ # Object scope reference audit and repair
 ├── internal/buckets/ # Bucket credentials, scopes, visibility, and cache policy
 ├── internal/storage/ # Provider-neutral storage and provider adapters
-├── internal/transfers/ # Access issuance, upload workflows, and multipart sessions
+├── internal/transfers/ # Access issuance, target selection, and multipart sessions
+│   └── lfs/         # LFS preparation, upload, verification, and pending metadata
 ├── internal/usage/ # Event writer contracts and scoped accounting reports
-├── internal/maintenance/projectstorage/ # Storage inspection and project cleanup
-├── internal/maintenance/scoperepair/ # Catalog reference audit and repair
+├── internal/projects/storage/ # Storage inspection and project cleanup
 ├── internal/requestid/ # Request correlation through context
 ├── internal/faults/ # Shared error classifications
 ├── internal/persistence/ # SQLite and PostgreSQL adapters
+│   └── credentialcipher/ # Encryption of stored bucket credentials
 ├── internal/access/ # Authorization policy and authentication integrations
-├── internal/credentialcipher/ # Encryption of stored bucket credentials
 ├── internal/config/ # Config loading and validation
 └── internal/version/ # Build and version info
 ```

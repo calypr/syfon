@@ -8,7 +8,7 @@ import (
 	"github.com/calypr/syfon/internal/faults"
 	apimiddleware "github.com/calypr/syfon/internal/httpapi/middleware"
 	"github.com/calypr/syfon/internal/httpapi/response"
-	"github.com/calypr/syfon/internal/maintenance/projectstorage"
+	projectstorage "github.com/calypr/syfon/internal/projects/storage"
 )
 
 type projectCleanupResponse struct {
