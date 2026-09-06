@@ -6,13 +6,23 @@ import (
 
 	"github.com/calypr/syfon/apigen/server/bucketapi"
 	domainbuckets "github.com/calypr/syfon/internal/buckets"
-	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/faults"
 	apimiddleware "github.com/calypr/syfon/internal/httpapi/middleware"
 	"github.com/calypr/syfon/internal/httpapi/response"
 	"github.com/calypr/syfon/internal/storage/address"
 	"github.com/gofiber/fiber/v3"
 )
+
+func bucketPointer[T any](value T) *T {
+	return &value
+}
+
+func bucketStringValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
 
 func handleInternalBucketsFiber(c fiber.Ctx, bucketService *domainbuckets.Service) error {
 	if apimiddleware.MissingGen3AuthHeader(c.Context()) {
@@ -27,10 +37,10 @@ func handleInternalBucketsFiber(c fiber.Ctx, bucketService *domainbuckets.Servic
 	for _, entry := range visible {
 		cred := entry.Credential
 		meta := bucketapi.BucketMetadata{
-			Bucket:      common.Ptr(cred.Bucket),
-			EndpointUrl: common.Ptr(cred.Endpoint),
-			Provider:    common.Ptr(cred.Provider),
-			Region:      common.Ptr(cred.Region),
+			Bucket:      bucketPointer(cred.Bucket),
+			EndpointUrl: bucketPointer(cred.Endpoint),
+			Provider:    bucketPointer(cred.Provider),
+			Region:      bucketPointer(cred.Region),
 		}
 		if len(entry.Programs) > 0 {
 			programs := append([]string(nil), entry.Programs...)
@@ -47,20 +57,20 @@ func handleInternalPutBucketFiber(c fiber.Ctx, bucketService *domainbuckets.Serv
 		return response.Reject(c, fiber.StatusBadRequest, "Invalid request body: "+err.Error())
 	}
 
-	rawProvider := strings.TrimSpace(common.StringVal(req.Provider))
+	rawProvider := strings.TrimSpace(bucketStringValue(req.Provider))
 	bucketProvider, err := address.ParseBucketProvider(rawProvider)
 	if err != nil {
 		return response.Reject(c, fiber.StatusBadRequest, "provider must be one of: s3, gcs, azure")
 	}
-	req.Provider = common.Ptr(bucketProvider)
+	req.Provider = bucketPointer(bucketProvider)
 
 	req.Bucket = strings.TrimSpace(req.Bucket)
 	req.Organization = strings.TrimSpace(req.Organization)
 	req.ProjectId = strings.TrimSpace(req.ProjectId)
-	region := strings.TrimSpace(common.StringVal(req.Region))
-	accessKey := strings.TrimSpace(common.StringVal(req.AccessKey))
-	secretKey := strings.TrimSpace(common.StringVal(req.SecretKey))
-	endpoint := strings.TrimSpace(common.StringVal(req.Endpoint))
+	region := strings.TrimSpace(bucketStringValue(req.Region))
+	accessKey := strings.TrimSpace(bucketStringValue(req.AccessKey))
+	secretKey := strings.TrimSpace(bucketStringValue(req.SecretKey))
+	endpoint := strings.TrimSpace(bucketStringValue(req.Endpoint))
 	if req.Bucket == "" {
 		return response.Reject(c, fiber.StatusBadRequest, "bucket is required")
 	}
@@ -95,7 +105,7 @@ func handleInternalPutBucketFiber(c fiber.Ctx, bucketService *domainbuckets.Serv
 	hasExistingCred := credErr == nil && existingCred != nil
 	if hasExistingCred && rawProvider == "" {
 		bucketProvider = existingCred.Provider
-		req.Provider = common.Ptr(bucketProvider)
+		req.Provider = bucketPointer(bucketProvider)
 	}
 	scopeOnly := hasExistingCred && accessKey == "" && secretKey == "" && endpoint == "" && region == "" && rawProvider == "" && req.Organization != ""
 
