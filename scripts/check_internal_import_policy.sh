@@ -2,9 +2,6 @@
 set -euo pipefail
 
 # Check direct production imports for the target domain and adapter packages.
-# Run from the repository root (or set REPO_ROOT):
-#   scripts/check_internal_import_policy.sh
-
 repo_root="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 cd "${repo_root}"
 

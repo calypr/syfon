@@ -13,9 +13,6 @@ import (
 	"github.com/calypr/syfon/internal/objects"
 )
 
-// bucketTestStore contains only the bucket and object capabilities exercised by
-// these route tests. It deliberately does not model the repository's broader
-// transfer, usage, or maintenance interfaces.
 type bucketTestStore struct {
 	Credentials  map[string]domainbuckets.Credential
 	BucketScopes map[string]domainbuckets.Scope
