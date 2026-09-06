@@ -15,7 +15,6 @@ import (
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/common"
 	"github.com/calypr/syfon/internal/config"
-	"github.com/calypr/syfon/internal/core"
 	"github.com/calypr/syfon/internal/httpapi/middleware"
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/testutils"
@@ -212,12 +211,11 @@ func buildMockServerRouterWithRoutes(routes config.RoutesConfig) *fiber.App {
 		objectService:       objectService,
 		transferService:     transferService,
 		usageService:        usageService,
-		om:                  core.NewObjectManager(dependencies),
 		bucketService:       dependencies.BucketService,
 		authzMiddleware:     authzMiddleware,
 		requestIDMiddleware: requestIDMiddleware,
 	}
-	applyServerOptions(rt, buildServerOptions(cfg)...)
+	registerServerRoutes(rt)
 	return app
 }
 

@@ -18,13 +18,9 @@ import (
 
 	"github.com/calypr/syfon/apigen/server/drs"
 	clientservices "github.com/calypr/syfon/client/services"
-	"github.com/calypr/syfon/internal/api/docs"
-	"github.com/calypr/syfon/internal/api/drsapi"
-	"github.com/calypr/syfon/internal/api/internaldrs"
 	"github.com/calypr/syfon/internal/buckets"
-	"github.com/calypr/syfon/internal/config"
 	"github.com/calypr/syfon/internal/core"
-	"github.com/calypr/syfon/internal/httpapi/metrics"
+	"github.com/calypr/syfon/internal/httpapi"
 	"github.com/calypr/syfon/internal/maintenance/projectstorage"
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/storage"
@@ -337,10 +333,6 @@ func newSyfonTestServer(t *testing.T) *fiberTestServer {
 	}
 
 	app := fiber.New()
-	app.Get(config.RouteHealthz, func(c fiber.Ctx) error {
-		return c.SendString("OK")
-	})
-	api := app.Group("/")
 	objectPorts := core.ObjectPorts{
 		Reader:        database,
 		Writer:        database,
@@ -373,17 +365,11 @@ func newSyfonTestServer(t *testing.T) *fiberTestServer {
 		Access: cliFileStorageAccess{root: storageDir}, Scopes: bucketService, Credentials: bucketService,
 		Pending: database, Events: usageService.Ingest(),
 	})
-	om := core.NewObjectManager(core.Dependencies{
-		Objects:       objectPorts,
-		BucketService: bucketService,
-	})
-
-	drsAPI := api.Group("/ga4gh/drs/v1")
 	description := "Calypr test DRS server"
 	environment := "test"
 	createdAt := time.Date(2024, time.January, 2, 3, 4, 5, 0, time.UTC)
 	updatedAt := time.Date(2024, time.January, 3, 4, 5, 6, 0, time.UTC)
-	drsapi.RegisterDRSRoutes(drsAPI, objectService, transferService, drs.Service{
+	serviceInfo := drs.Service{
 		Id:          "drs-service-test",
 		Name:        "Calypr Test DRS Server",
 		Type:        drs.ServiceType{Group: "org.ga4gh", Artifact: "drs", Version: "1.2.0"},
@@ -392,12 +378,17 @@ func newSyfonTestServer(t *testing.T) *fiberTestServer {
 		UpdatedAt:   &updatedAt,
 		Environment: &environment,
 		Version:     "1.0.0",
-	})
-	docs.RegisterSwaggerRoutes(app)
-	metrics.RegisterMetricsRoutes(api, usageService.Reports(), usageService.Ingest())
+	}
 	projectStorageService := projectstorage.NewService(projectstorage.Dependencies{Scopes: bucketService, Credentials: bucketService, Visibility: bucketService, Physical: objectService, CleanupObjects: objectService, CleanupScopes: bucketService})
-	scopeRepairService := internaldrs.NewScopeRepairService(objectService, bucketService, nil)
-	internaldrs.RegisterInternalRoutes(api, objectService, om, transferService, usageService.Ingest(), bucketService, projectStorageService, scopeRepairService)
+	httpapi.RegisterRoutes(app, httpapi.Dependencies{
+		ServiceInfo:    serviceInfo,
+		Objects:        objectService,
+		Transfers:      transferService,
+		UsageIngest:    usageService.Ingest(),
+		UsageReports:   usageService.Reports(),
+		Buckets:        bucketService,
+		ProjectStorage: projectStorageService,
+	}, httpapi.Options{Docs: true, GA4GH: true, Metrics: true, Internal: true})
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
