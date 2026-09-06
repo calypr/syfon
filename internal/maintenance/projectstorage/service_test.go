@@ -68,6 +68,19 @@ func (f *fakeInventory) Inventory(_ context.Context, request storage.InventoryRe
 	return storage.InventoryResult{Items: f.items, Complete: true}, nil
 }
 
+type recordingProbe struct {
+	targets []storage.ObjectTarget
+}
+
+func (f *recordingProbe) Probe(_ context.Context, targets []storage.ProbeTarget) []storage.ProbeResult {
+	if len(targets) == 0 {
+		return nil
+	}
+	target := targets[0].Target
+	f.targets = append(f.targets, target)
+	return []storage.ProbeResult{{ID: targets[0].ID, Target: target, Metadata: storage.ObjectMetadata{Bucket: target.Bucket, Key: target.Key}}}
+}
+
 type fakeDelete struct {
 	locations []string
 }
@@ -146,6 +159,34 @@ func TestInspectProjectPreservesPartialInventoryAndCanonicalItems(t *testing.T) 
 	}
 	if len(inventory.requests) != 1 || inventory.requests[0].Target.Prefix != "prefix/project" || !inventory.requests[0].IncludeHead {
 		t.Fatalf("inventory requests = %+v", inventory.requests)
+	}
+}
+
+func TestProbeObjectNormalizesScopedKeyAgainstEffectivePrefix(t *testing.T) {
+	tests := []struct {
+		name string
+		key  string
+		want string
+	}{
+		{name: "unqualified", key: "file.bin", want: "prefix/project/file.bin"},
+		{name: "already qualified", key: "prefix/project/file.bin", want: "prefix/project/file.bin"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			service, _ := projectService(&fakeInventory{}, nil)
+			probe := &recordingProbe{}
+			service.probe = probe
+			metadata, err := service.ProbeObject(context.Background(), InspectRequest{Organization: "org", Project: "project", Key: tt.key})
+			if err != nil {
+				t.Fatalf("ProbeObject() error = %v", err)
+			}
+			if metadata.Key != tt.want || metadata.ObjectURL != "s3://bucket/"+tt.want {
+				t.Fatalf("metadata = %+v, want key %q", metadata, tt.want)
+			}
+			if len(probe.targets) != 1 || probe.targets[0].Bucket != "bucket" || probe.targets[0].Key != tt.want {
+				t.Fatalf("probe targets = %+v, want key %q", probe.targets, tt.want)
+			}
+		})
 	}
 }
 

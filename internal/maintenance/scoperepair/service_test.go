@@ -164,6 +164,34 @@ func TestAuditStorageFindingsDistinguishNotFoundFromProbeFailure(t *testing.T) {
 	}
 }
 
+func TestAuditPathStyleStorageProbePreservesDirectoryName(t *testing.T) {
+	record := repairRecord("did-1", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "s3://repair-bucket/legacy")
+	name := "dir/file.bin"
+	record.Name = &name
+	canonical := "s3://repair-bucket/prefix/did-1/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	pathStyle := "s3://repair-bucket/prefix/dir/file.bin"
+	prepared := &fakePrepared{pages: [][]objects.Record{{record}}}
+	probe := &fakeProbe{missing: map[string]bool{canonical: true}}
+	service := NewService(prepared, nil, repairScopeReader(), probe, nil)
+	report, err := service.Audit(context.Background(), Options{Organization: "org", Project: "project", CheckStorage: true})
+	if err != nil {
+		t.Fatalf("Audit() error = %v", err)
+	}
+	if len(report.Objects) != 1 || len(report.Objects[0].Findings) != 1 || report.Objects[0].Findings[0].ProposedCanonicalURL != pathStyle {
+		t.Fatalf("report = %+v, want path-style URL %q", report, pathStyle)
+	}
+	foundPathStyleProbe := false
+	for _, call := range probe.calls {
+		if call == pathStyle {
+			foundPathStyleProbe = true
+			break
+		}
+	}
+	if !foundPathStyleProbe {
+		t.Fatalf("probe calls = %v, want %q", probe.calls, pathStyle)
+	}
+}
+
 func TestApplyRequiresProjectScopeBeforeCallingPorts(t *testing.T) {
 	prepared := &fakePrepared{}
 	collapser := &fakeCollapser{}

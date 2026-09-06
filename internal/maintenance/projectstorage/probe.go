@@ -166,9 +166,7 @@ func (s *Service) inspectScoped(ctx context.Context, request InspectRequest) (*O
 	if err != nil {
 		return nil, err
 	}
-	if target.Prefix != "" {
-		key = path.Join(target.Prefix, key)
-	}
+	key = normalizeScopedStorageKey(target.Prefix, key)
 	metadata, err := s.probeStorage(ctx, target.Bucket, key)
 	if err != nil {
 		return nil, err
@@ -181,6 +179,15 @@ func (s *Service) inspectScoped(ctx context.Context, request InspectRequest) (*O
 		metadata.Path = path.Base(key)
 	}
 	return metadata, nil
+}
+
+func normalizeScopedStorageKey(prefix, key string) string {
+	prefix = strings.Trim(strings.TrimSpace(prefix), "/")
+	key = strings.Trim(strings.TrimSpace(key), "/")
+	if prefix == "" || key == prefix || strings.HasPrefix(key, prefix+"/") {
+		return key
+	}
+	return path.Join(prefix, key)
 }
 
 func (s *Service) probeStorage(ctx context.Context, bucket, key string) (*ObjectMetadata, error) {
