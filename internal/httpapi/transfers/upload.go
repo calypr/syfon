@@ -108,6 +108,7 @@ func handleInternalUploadURLFiber(objectService *objectrecords.Service, transfer
 			}
 			if err := transferService.RecordAccessIssued(c.Context(), domaintransfers.AccessRequest{
 				Object:     obj,
+				Scope:      uploadAttributionScope(params),
 				Direction:  usage.ProviderTransferDirectionUpload,
 				StorageURL: target.URL,
 			}); err != nil {
@@ -142,6 +143,16 @@ func handleInternalUploadURLFiber(objectService *objectrecords.Service, transfer
 		}
 
 		return c.JSON(internalapi.InternalSignedURL{Url: &signedURL})
+	}
+}
+
+func uploadAttributionScope(params internalapi.InternalUploadURLParams) *domaintransfers.AccessScope {
+	if params.Organization == nil && params.Project == nil {
+		return nil
+	}
+	return &domaintransfers.AccessScope{
+		Organization: stringValue(params.Organization),
+		Project:      stringValue(params.Project),
 	}
 }
 
