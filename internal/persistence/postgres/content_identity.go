@@ -248,46 +248,30 @@ func postgresInsertContentRowTx(ctx context.Context, tx *sql.Tx, id string, obj 
 }
 
 func postgresMergeContentRowTx(ctx context.Context, tx *sql.Tx, row postgresContentRow, obj *objects.Record, resources, currentResources []string) error {
-	allowReplacement := len(currentResources) == 1 && postgresHasResourceOverlap(resources, currentResources)
-	incomingName := objects.CleanToBasename(postgresStringVal(obj.Name))
-	if row.name != "" && incomingName != "" && row.name != incomingName {
-		alias := incomingName
-		if allowReplacement {
-			alias = row.name
-		}
+	merged := objects.MergeRegistrationMetadata(objects.RegistrationMergeInput{
+		ExistingName:        row.name,
+		ExistingVersion:     row.version,
+		ExistingDescription: row.description,
+		ExistingSize:        row.size,
+		ExistingUpdated:     row.updated,
+		IncomingName:        postgresStringVal(obj.Name),
+		IncomingVersion:     postgresStringVal(obj.Version),
+		IncomingDescription: postgresStringVal(obj.Description),
+		IncomingSize:        obj.Size,
+		IncomingUpdated:     postgresValueTime(obj.UpdatedTime),
+		IncomingResources:   resources,
+		CurrentResources:    currentResources,
+	})
+	if merged.NameAlias != "" {
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO drs_object_name_alias (object_id, name_alias) VALUES ($1, $2)
-			ON CONFLICT (object_id, name_alias) DO NOTHING`, row.id, alias); err != nil {
+			ON CONFLICT (object_id, name_alias) DO NOTHING`, row.id, merged.NameAlias); err != nil {
 			return fmt.Errorf("preserve object name alias: %w", err)
 		}
 	}
-	name, version, description := row.name, row.version, row.description
-	if allowReplacement || strings.TrimSpace(name) == "" {
-		if incoming := objects.CleanToBasename(postgresStringVal(obj.Name)); incoming != "" {
-			name = incoming
-		}
-	}
-	if allowReplacement || strings.TrimSpace(version) == "" {
-		if incoming := strings.TrimSpace(postgresStringVal(obj.Version)); incoming != "" {
-			version = incoming
-		}
-	}
-	if allowReplacement || strings.TrimSpace(description) == "" {
-		if incoming := strings.TrimSpace(postgresStringVal(obj.Description)); incoming != "" {
-			description = incoming
-		}
-	}
-	size := row.size
-	if size == 0 && obj.Size != 0 {
-		size = obj.Size
-	}
-	updated := row.updated
-	if incoming := postgresValueTime(obj.UpdatedTime); incoming.After(updated) {
-		updated = incoming
-	}
 	_, err := tx.ExecContext(ctx, `
 		UPDATE drs_object SET size = $1, updated_time = $2, name = $3,
-		version = $4, description = $5 WHERE id = $6`, size, updated, name, version, description, row.id)
+		version = $4, description = $5 WHERE id = $6`, merged.Size, merged.Updated, merged.Name, merged.Version, merged.Description, row.id)
 	if err != nil {
 		return fmt.Errorf("merge canonical metadata: %w", err)
 	}
@@ -484,19 +468,6 @@ func postgresIdentityAliases(obj *objects.Record) []string {
 	}
 	sort.Strings(aliases)
 	return aliases
-}
-
-func postgresHasResourceOverlap(left, right []string) bool {
-	set := make(map[string]struct{}, len(left))
-	for _, resource := range left {
-		set[resource] = struct{}{}
-	}
-	for _, resource := range right {
-		if _, ok := set[resource]; ok {
-			return true
-		}
-	}
-	return false
 }
 
 func postgresCanReadContent(ctx context.Context, resources []string) bool {

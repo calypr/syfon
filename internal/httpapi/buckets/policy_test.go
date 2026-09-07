@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	sycommon "github.com/calypr/syfon/common"
+	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/faults"
 )
@@ -19,7 +20,7 @@ func TestBucketPolicyHelpers(t *testing.T) {
 	resource, _ := sycommon.ResourcePath("org", "proj")
 
 	t.Run("global bucket control access", func(t *testing.T) {
-		if !resourceAllowed(context.Background(), resource, "read") {
+		if !access.HasAnyMethodAccess(context.Background(), []string{resource}, "read") {
 			t.Fatal("expected open access outside enforced authz")
 		}
 	})
@@ -29,10 +30,10 @@ func TestBucketPolicyHelpers(t *testing.T) {
 			resource: {"delete": true, "update": true},
 		})
 
-		if !bucketScopeAllowed(ctx, scope, "delete") {
+		if !buckets.ScopeAllowed(ctx, scope, "delete") {
 			t.Fatal("expected scoped bucket access")
 		}
-		if !resourceAllowed(ctx, resource, "delete") {
+		if !access.HasAnyMethodAccess(ctx, []string{resource}, "delete") {
 			t.Fatal("expected resource access")
 		}
 	})
@@ -42,10 +43,10 @@ func TestBucketPolicyHelpers(t *testing.T) {
 			resource: {"read": true},
 		})
 
-		if !bucketsAllowedByNames(ctx, []buckets.Scope{scope}, "bucket-a", "read") {
+		if !buckets.BucketsAllowedByNames(ctx, []buckets.Scope{scope}, "bucket-a", "read") {
 			t.Fatal("expected bucket name match to be allowed")
 		}
-		if bucketsAllowedByNames(ctx, []buckets.Scope{scope}, "bucket-b", "read") {
+		if buckets.BucketsAllowedByNames(ctx, []buckets.Scope{scope}, "bucket-b", "read") {
 			t.Fatal("expected non-matching bucket to be denied")
 		}
 	})
@@ -56,7 +57,7 @@ func TestBucketPolicyHelpers(t *testing.T) {
 			orgResource: {"arborist:create-descendant": true},
 		})
 
-		if err := authorizeBucketScopeWrite(ctx, "org", "new-project", "create", "update"); err != nil {
+		if err := buckets.AuthorizeScopeWrite(ctx, "org", "new-project", "create", "update"); err != nil {
 			t.Fatalf("expected org descendant creator to be allowed, got %v", err)
 		}
 	})
@@ -66,7 +67,7 @@ func TestBucketPolicyHelpers(t *testing.T) {
 			"/programs": {"arborist:create-descendant": true},
 		})
 
-		if err := authorizeBucketScopeWrite(ctx, "brand_new_org", "new-project", "create", "update"); err == nil {
+		if err := buckets.AuthorizeScopeWrite(ctx, "brand_new_org", "new-project", "create", "update"); err == nil {
 			t.Fatal("expected top-level program creator alone to be denied")
 		}
 	})
@@ -77,7 +78,7 @@ func TestBucketPolicyHelpers(t *testing.T) {
 			orgResource: {"requestor:create": true},
 		})
 
-		err := authorizeBucketScopeWrite(ctx, "org", "new-project", "create", "update")
+		err := buckets.AuthorizeScopeWrite(ctx, "org", "new-project", "create", "update")
 		if err == nil {
 			t.Fatal("expected requestor create alone to be denied")
 		}

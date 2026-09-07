@@ -145,7 +145,7 @@ func (db *SqliteDB) registerContentTx(ctx context.Context, tx *sql.Tx, obj *obje
 	if !sqliteCanCreateResources(ctx, resources, currentResources) {
 		return "", faults.ErrUnauthorized
 	}
-	if err := mergeContentRowTx(ctx, tx, row, obj, hasSHA, resources, currentResources); err != nil {
+	if err := mergeContentRowTx(ctx, tx, row, obj, resources, currentResources); err != nil {
 		return "", err
 	}
 	if err := mergeContentChildrenTx(ctx, tx, canonicalID, sha, hasSHA, resources, obj); err != nil {
@@ -239,49 +239,31 @@ func insertContentRowTx(ctx context.Context, tx *sql.Tx, id string, obj *objects
 	return nil
 }
 
-func mergeContentRowTx(ctx context.Context, tx *sql.Tx, row sqliteContentRow, obj *objects.Record, hasSHA bool, resources, currentResources []string) error {
-	allowReplacement := len(currentResources) == 1 && hasResourceOverlap(resources, currentResources)
-	incomingName := objects.CleanToBasename(sqliteStringVal(obj.Name))
-	if row.name != "" && incomingName != "" && row.name != incomingName {
-		alias := incomingName
-		if allowReplacement {
-			alias = row.name
-		}
+func mergeContentRowTx(ctx context.Context, tx *sql.Tx, row sqliteContentRow, obj *objects.Record, resources, currentResources []string) error {
+	merged := objects.MergeRegistrationMetadata(objects.RegistrationMergeInput{
+		ExistingName:        row.name,
+		ExistingVersion:     row.version,
+		ExistingDescription: row.description,
+		ExistingSize:        row.size,
+		ExistingUpdated:     row.updated,
+		IncomingName:        sqliteStringVal(obj.Name),
+		IncomingVersion:     sqliteStringVal(obj.Version),
+		IncomingDescription: sqliteStringVal(obj.Description),
+		IncomingSize:        obj.Size,
+		IncomingUpdated:     valueTime(obj.UpdatedTime),
+		IncomingResources:   resources,
+		CurrentResources:    currentResources,
+	})
+	if merged.NameAlias != "" {
 		if _, err := tx.ExecContext(ctx, `
-			INSERT OR IGNORE INTO drs_object_name_alias (object_id, name_alias) VALUES (?, ?)`, row.id, alias); err != nil {
+			INSERT OR IGNORE INTO drs_object_name_alias (object_id, name_alias) VALUES (?, ?)`, row.id, merged.NameAlias); err != nil {
 			return fmt.Errorf("preserve object name alias: %w", err)
 		}
-	}
-	name := row.name
-	version := row.version
-	description := row.description
-	if allowReplacement || strings.TrimSpace(name) == "" {
-		if incoming := objects.CleanToBasename(sqliteStringVal(obj.Name)); incoming != "" {
-			name = incoming
-		}
-	}
-	if allowReplacement || strings.TrimSpace(version) == "" {
-		if incoming := strings.TrimSpace(sqliteStringVal(obj.Version)); incoming != "" {
-			version = incoming
-		}
-	}
-	if allowReplacement || strings.TrimSpace(description) == "" {
-		if incoming := strings.TrimSpace(sqliteStringVal(obj.Description)); incoming != "" {
-			description = incoming
-		}
-	}
-	size := row.size
-	if size == 0 && obj.Size != 0 {
-		size = obj.Size
-	}
-	updated := row.updated
-	if incoming := valueTime(obj.UpdatedTime); incoming.After(updated) {
-		updated = incoming
 	}
 	_, err := tx.ExecContext(ctx, `
 		UPDATE drs_object
 		SET size = ?, updated_time = ?, name = ?, version = ?, description = ?
-		WHERE id = ?`, size, updated, name, version, description, row.id)
+		WHERE id = ?`, merged.Size, merged.Updated, merged.Name, merged.Version, merged.Description, row.id)
 	if err != nil {
 		return fmt.Errorf("merge canonical metadata: %w", err)
 	}
@@ -488,19 +470,6 @@ func identityAliases(obj *objects.Record) []string {
 	}
 	sort.Strings(aliases)
 	return aliases
-}
-
-func hasResourceOverlap(left, right []string) bool {
-	set := make(map[string]struct{}, len(left))
-	for _, resource := range left {
-		set[resource] = struct{}{}
-	}
-	for _, resource := range right {
-		if _, ok := set[resource]; ok {
-			return true
-		}
-	}
-	return false
 }
 
 func sqliteCanReadContent(ctx context.Context, resources []string) bool {

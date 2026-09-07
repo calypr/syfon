@@ -404,7 +404,7 @@ func handleInternalInspectProjectScopesFiber(bucketService *buckets.Service) fib
 			if scopeProject != "" && !strings.EqualFold(scopeProject, project) {
 				continue
 			}
-			if !bucketScopeAllowed(c.Context(), scope, "read") {
+			if !buckets.ScopeAllowed(c.Context(), scope, "read") {
 				continue
 			}
 			row := internalInspectProjectScopeItem{
