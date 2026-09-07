@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -29,7 +30,7 @@ func (s *IndexService) Get(ctx context.Context, did string) (internalapi.Interna
 		return internalapi.InternalRecordResponse{}, err
 	}
 	if resp.JSON200 == nil {
-		return internalapi.InternalRecordResponse{}, fmt.Errorf("unexpected response: %d", resp.StatusCode())
+		return internalapi.InternalRecordResponse{}, &responseStatusError{status: resp.StatusCode()}
 	}
 	return *resp.JSON200, nil
 }
@@ -278,6 +279,11 @@ func (s *IndexService) Upsert(ctx context.Context, did, objectURL, recordPath st
 		return err
 	}
 
+	var statusErr *responseStatusError
+	if !errors.As(err, &statusErr) || statusErr.status != http.StatusNotFound {
+		return err
+	}
+
 	payload := internalapi.InternalRecord{
 		Did: did,
 	}
@@ -335,5 +341,3 @@ func methodTypeForURL(rawURL string) string {
 	}
 	return "https"
 }
-
-// --- IndexService ---
