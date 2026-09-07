@@ -9,7 +9,7 @@ import (
 
 	objectmodel "github.com/calypr/syfon/internal/objects"
 
-	syfoncommon "github.com/calypr/syfon/common"
+	clientaccess "github.com/calypr/syfon/client/access"
 	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/faults"
 )
@@ -517,7 +517,7 @@ func (m *queryService) canPageScopeRead(ctx context.Context, organization, proje
 	if !access.IsAuthzEnforced(ctx) {
 		return true
 	}
-	resource, err := syfoncommon.ResourcePath(organization, project)
+	resource, err := clientaccess.ResourcePath(organization, project)
 	if err != nil {
 		return false
 	}
@@ -561,7 +561,7 @@ func objectMethodResourceFilter(ctx context.Context, method string) ([]string, b
 func authorizedResources(ctx context.Context, method string) []string {
 	privileges := access.GetUserPrivileges(ctx)
 	if len(privileges) == 0 {
-		return syfoncommon.NormalizeAccessResources(access.GetUserAuthz(ctx))
+		return clientaccess.NormalizeAccessResources(access.GetUserAuthz(ctx))
 	}
 	resources := make([]string, 0, len(privileges))
 	for resource, methods := range privileges {
@@ -569,7 +569,7 @@ func authorizedResources(ctx context.Context, method string) []string {
 			resources = append(resources, resource)
 		}
 	}
-	return syfoncommon.NormalizeAccessResources(resources)
+	return clientaccess.NormalizeAccessResources(resources)
 }
 
 func (m *queryService) authorizedChecksumIDs(ctx context.Context, checksum, requiredMethod string) ([]string, bool, error) {

@@ -8,7 +8,8 @@ import (
 	"strings"
 
 	"github.com/calypr/syfon/apigen/server/lfsapi"
-	syfoncommon "github.com/calypr/syfon/common"
+
+	clienthash "github.com/calypr/syfon/client/hash"
 	"github.com/calypr/syfon/internal/faults"
 	apimiddleware "github.com/calypr/syfon/internal/httpapi/middleware"
 	"github.com/calypr/syfon/internal/objects"
@@ -57,7 +58,7 @@ func (s *LFSServer) LfsBatch(ctx context.Context, request lfsapi.LfsBatchRequest
 	hashAlgorithm := "sha256"
 	for _, input := range req.Objects {
 		objectResponse := lfsapi.BatchResponseObject{Oid: input.Oid, Size: input.Size}
-		oid := syfoncommon.NormalizeOid(input.Oid)
+		oid := clienthash.NormalizeOid(input.Oid)
 		if oid == "" {
 			objectResponse.Error = &lfsapi.ObjectError{Code: int32(http.StatusBadRequest), Message: "invalid oid"}
 			responseObjects = append(responseObjects, objectResponse)
@@ -97,7 +98,7 @@ func (s *LFSServer) LfsVerify(ctx context.Context, request lfsapi.LfsVerifyReque
 	if request.Body == nil {
 		return lfsapi.LfsVerify400ApplicationVndGitLfsPlusJSONResponse{Message: "missing request body"}, nil
 	}
-	oid := syfoncommon.NormalizeOid(request.Body.Oid)
+	oid := clienthash.NormalizeOid(request.Body.Oid)
 	if oid == "" {
 		return lfsapi.LfsVerify400ApplicationVndGitLfsPlusJSONResponse{Message: "invalid oid"}, nil
 	}
@@ -144,7 +145,7 @@ func (s *LFSServer) LfsStageMetadata(ctx context.Context, request lfsapi.LfsStag
 }
 
 func (s *LFSServer) LfsUploadProxy(ctx context.Context, request lfsapi.LfsUploadProxyRequestObject) (lfsapi.LfsUploadProxyResponseObject, error) {
-	oid := syfoncommon.NormalizeOid(request.Oid)
+	oid := clienthash.NormalizeOid(request.Oid)
 	if oid == "" {
 		return lfsapi.LfsUploadProxy400TextResponse("invalid oid"), nil
 	}

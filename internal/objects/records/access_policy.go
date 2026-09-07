@@ -8,7 +8,7 @@ import (
 
 	objectmodel "github.com/calypr/syfon/internal/objects"
 
-	syfoncommon "github.com/calypr/syfon/common"
+	clientaccess "github.com/calypr/syfon/client/access"
 	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/faults"
 )
@@ -64,7 +64,7 @@ func (m *mutationService) RemoveObjectControlledAccess(ctx context.Context, obje
 		return nil, err
 	}
 
-	normalized := syfoncommon.NormalizeAccessResources([]string{resource})
+	normalized := clientaccess.NormalizeAccessResources([]string{resource})
 	if len(normalized) == 0 {
 		return nil, fmt.Errorf("resource is required")
 	}
@@ -103,7 +103,7 @@ func (m *mutationService) RequireObjectResources(ctx context.Context, method str
 }
 
 func requireScopeMethod(ctx context.Context, organization, project, method string) error {
-	resource, err := syfoncommon.ResourcePath(organization, project)
+	resource, err := clientaccess.ResourcePath(organization, project)
 	if err != nil {
 		return err
 	}

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	syfoncommon "github.com/calypr/syfon/common"
+	clientaccess "github.com/calypr/syfon/client/access"
 	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/requestid"
@@ -167,7 +167,7 @@ func scopeForAccess(ctx context.Context, obj *objects.Record, selected *AccessSc
 		if organization == "" {
 			return "", ""
 		}
-		resource, err := syfoncommon.ResourcePath(organization, project)
+		resource, err := clientaccess.ResourcePath(organization, project)
 		method := "read"
 		if direction == usage.ProviderTransferDirectionUpload {
 			method = "update"
@@ -182,7 +182,7 @@ func scopeForAccess(ctx context.Context, obj *objects.Record, selected *AccessSc
 	if len(resources) != 1 {
 		return "", ""
 	}
-	organization, project, ok := syfoncommon.ResourceScope(resources[0])
+	organization, project, ok := clientaccess.ResourceScope(resources[0])
 	if !ok {
 		return "", ""
 	}
@@ -190,11 +190,11 @@ func scopeForAccess(ctx context.Context, obj *objects.Record, selected *AccessSc
 }
 
 func explicitScopeForAccess(obj *objects.Record, selected AccessScope) (string, string) {
-	resource, err := syfoncommon.ResourcePath(selected.Organization, selected.Project)
+	resource, err := clientaccess.ResourcePath(selected.Organization, selected.Project)
 	if err != nil || resource == "" {
 		return "", ""
 	}
-	organization, project, ok := syfoncommon.ResourceScope(resource)
+	organization, project, ok := clientaccess.ResourceScope(resource)
 	if !ok {
 		return "", ""
 	}

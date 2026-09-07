@@ -1,4 +1,4 @@
-package common
+package hash
 
 import "strings"
 
@@ -16,4 +16,11 @@ func NormalizeOid(oid string) string {
 		}
 	}
 	return v
+}
+
+// NormalizeChecksum trims whitespace and an optional sha256: prefix.
+func NormalizeChecksum(raw string) string {
+	raw = strings.TrimSpace(raw)
+	raw = strings.TrimPrefix(raw, "sha256:")
+	return strings.TrimSpace(raw)
 }

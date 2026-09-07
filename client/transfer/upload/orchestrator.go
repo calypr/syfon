@@ -11,7 +11,8 @@ import (
 	drsapi "github.com/calypr/syfon/apigen/client/drs"
 	"github.com/calypr/syfon/client/common"
 	"github.com/calypr/syfon/client/transfer"
-	syfoncommon "github.com/calypr/syfon/common"
+
+	clientaccess "github.com/calypr/syfon/client/access"
 )
 
 type MetadataClient interface {
@@ -41,7 +42,7 @@ func RegisterFile(ctx context.Context, bk UploadBackend, dc MetadataClient, drsO
 		metadataControlledAccess = append([]string(nil), (*drsObject.ControlledAccess)...)
 	}
 	metadata := common.FileMetadata{
-		Authorizations: syfoncommon.ControlledAccessToAuthzMap(syfoncommon.NormalizeAccessResources(metadataControlledAccess)),
+		Authorizations: clientaccess.ControlledAccessToAuthzMap(clientaccess.NormalizeAccessResources(metadataControlledAccess)),
 	}
 
 	// 2. Determine upload filename/key

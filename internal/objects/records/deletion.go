@@ -8,7 +8,7 @@ import (
 
 	objectmodel "github.com/calypr/syfon/internal/objects"
 
-	syfoncommon "github.com/calypr/syfon/common"
+	clientaccess "github.com/calypr/syfon/client/access"
 	"github.com/calypr/syfon/internal/faults"
 )
 
@@ -37,7 +37,7 @@ func (m *mutationService) DeleteBulkByScope(ctx context.Context, organization, p
 		return 0, nil
 	}
 
-	resource, err := syfoncommon.ResourcePath(organization, project)
+	resource, err := clientaccess.ResourcePath(organization, project)
 	if err != nil {
 		return 0, err
 	}

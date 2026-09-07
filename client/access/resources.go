@@ -1,4 +1,4 @@
-package common
+package access
 
 import (
 	"fmt"
@@ -21,15 +21,6 @@ func ResourcePath(org, project string) (string, error) {
 		return "/organization/" + org, nil
 	}
 	return "/organization/" + org + "/project/" + project, nil
-}
-
-
-
-// NormalizeChecksum trims whitespace and an optional sha256: prefix.
-func NormalizeChecksum(raw string) string {
-	raw = strings.TrimSpace(raw)
-	raw = strings.TrimPrefix(raw, "sha256:")
-	return strings.TrimSpace(raw)
 }
 
 // AuthzMapFromScope builds the wire-format authorizations map from an org and project.
@@ -154,8 +145,6 @@ func ControlledAccessToAuthzMap(claims []string) map[string][]string {
 func AuthzMapToControlledAccess(authzMap map[string][]string) []string {
 	return NormalizeAccessResources(AuthzMapToList(authzMap))
 }
-
-
 
 // ResourceScope parses a canonical or raw access resource into
 // (organization, project). It accepts "/organization/org",

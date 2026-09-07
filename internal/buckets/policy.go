@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	sycommon "github.com/calypr/syfon/common"
+	clientaccess "github.com/calypr/syfon/client/access"
 	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/faults"
 )
@@ -13,7 +13,7 @@ import (
 // bucket scope. Transport authentication is checked by the HTTP handler; this
 // function owns the authorization policy shared by bucket endpoints.
 func ScopeAllowed(ctx context.Context, scope Scope, methods ...string) bool {
-	resource, err := sycommon.ResourcePath(scope.Organization, scope.ProjectID)
+	resource, err := clientaccess.ResourcePath(scope.Organization, scope.ProjectID)
 	if err != nil || resource == "" {
 		return false
 	}
@@ -45,7 +45,7 @@ func AuthorizeScopeWrite(ctx context.Context, organization, project string, meth
 		}
 		return faults.ErrUnauthorized
 	}
-	res, err := sycommon.ResourcePath(organization, project)
+	res, err := clientaccess.ResourcePath(organization, project)
 	if err != nil {
 		return err
 	}
@@ -53,7 +53,7 @@ func AuthorizeScopeWrite(ctx context.Context, organization, project string, meth
 		return nil
 	}
 
-	orgResource, err := sycommon.ResourcePath(organization, "")
+	orgResource, err := clientaccess.ResourcePath(organization, "")
 	if err != nil {
 		return err
 	}

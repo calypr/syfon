@@ -1,10 +1,10 @@
 package main
 
 import (
+	"crypto/subtle"
 	"encoding/base64"
 	"fmt"
 	"strings"
-	"crypto/subtle"
 )
 
 // ValidateBasicAuth is a copy of the original logic from middleware/local_auth.go
@@ -12,7 +12,7 @@ func ValidateBasicAuth(authHeader, expectedUser, expectedPass string) error {
 	if authHeader == "" || !strings.HasPrefix(strings.ToLower(authHeader), "basic ") {
 		return fmt.Errorf("missing basic auth header")
 	}
-	payload := authHeader[len("basic ") :]
+	payload := authHeader[len("basic "):]
 	decoded, err := base64.StdEncoding.DecodeString(payload)
 	if err != nil {
 		return fmt.Errorf("decode basic auth header: %w", err)
@@ -25,4 +25,3 @@ func ValidateBasicAuth(authHeader, expectedUser, expectedPass string) error {
 	}
 	return nil
 }
-

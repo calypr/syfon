@@ -2,8 +2,8 @@ package main
 
 import (
 	"context"
-	hplugin "github.com/hashicorp/go-plugin"
 	"github.com/calypr/syfon/plugin"
+	hplugin "github.com/hashicorp/go-plugin"
 	"net/rpc"
 	"os"
 )

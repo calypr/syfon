@@ -9,7 +9,7 @@ import (
 
 	objectmodel "github.com/calypr/syfon/internal/objects"
 
-	sycommon "github.com/calypr/syfon/common"
+	clientaccess "github.com/calypr/syfon/client/access"
 	"github.com/calypr/syfon/internal/faults"
 )
 
@@ -31,7 +31,7 @@ func (m *mutationService) BulkOverwriteObjects(ctx context.Context, organization
 	if len(candidates) == 0 {
 		return result, nil
 	}
-	resource, err := sycommon.ResourcePath(organization, project)
+	resource, err := clientaccess.ResourcePath(organization, project)
 	if err != nil {
 		return result, err
 	}

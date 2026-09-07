@@ -57,6 +57,10 @@ check_edge() {
 	local forbidden=0
 
 	case "$dep" in
+		github.com/calypr/syfon/common)
+			violations+=("${pkg} -> ${dep}")
+			return 0
+		;;
 		github.com/calypr/syfon/internal/testsupport*)
 			violations+=("${pkg} -> ${dep}")
 			return 0
@@ -198,6 +202,7 @@ expect_forbidden() {
 }
 
 run_self_tests() {
+	expect_forbidden github.com/calypr/syfon/client/services github.com/calypr/syfon/common
 	expect_allowed github.com/calypr/syfon/internal/storage/s3 github.com/aws/aws-sdk-go-v2/aws
 	expect_allowed github.com/calypr/syfon/internal/persistence/sqlite github.com/mattn/go-sqlite3
 	expect_allowed github.com/calypr/syfon/internal/storage github.com/calypr/syfon/internal/storage/address

@@ -6,14 +6,14 @@ import (
 	"strings"
 	"testing"
 
-	sycommon "github.com/calypr/syfon/common"
+	clientaccess "github.com/calypr/syfon/client/access"
 	"github.com/calypr/syfon/internal/faults"
 	"github.com/calypr/syfon/internal/objects"
 	objectrecords "github.com/calypr/syfon/internal/objects/records"
 )
 
 func TestBulkOverwriteObjects_ReplacesProjectChecksumSibling(t *testing.T) {
-	resource, err := sycommon.ResourcePath("org", "project")
+	resource, err := clientaccess.ResourcePath("org", "project")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +52,7 @@ func TestBulkOverwriteObjects_ReplacesProjectChecksumSibling(t *testing.T) {
 }
 
 func TestBulkOverwriteObjects_ValidationAndConflicts(t *testing.T) {
-	resource, err := sycommon.ResourcePath("org", "project")
+	resource, err := clientaccess.ResourcePath("org", "project")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +115,7 @@ func TestBulkOverwriteObjects_EmptyInput(t *testing.T) {
 }
 
 func TestBulkOverwriteObjects_DoesNotMatchChecksumOutsideProject(t *testing.T) {
-	resource, err := sycommon.ResourcePath("org", "project")
+	resource, err := clientaccess.ResourcePath("org", "project")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +141,7 @@ func TestBulkOverwriteObjects_DoesNotMatchChecksumOutsideProject(t *testing.T) {
 }
 
 func TestBulkOverwriteObjects_RejectsAliasTarget(t *testing.T) {
-	resource, err := sycommon.ResourcePath("org", "project")
+	resource, err := clientaccess.ResourcePath("org", "project")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,11 +188,11 @@ func TestBulkOverwriteObjects_RejectsAliasTarget(t *testing.T) {
 }
 
 func TestBulkOverwriteObjects_RequiresTargetProjectPermission(t *testing.T) {
-	targetResource, err := sycommon.ResourcePath("org", "target")
+	targetResource, err := clientaccess.ResourcePath("org", "target")
 	if err != nil {
 		t.Fatal(err)
 	}
-	allowedResource, err := sycommon.ResourcePath("org", "allowed")
+	allowedResource, err := clientaccess.ResourcePath("org", "allowed")
 	if err != nil {
 		t.Fatal(err)
 	}

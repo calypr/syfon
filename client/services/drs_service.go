@@ -11,7 +11,8 @@ import (
 	drsapi "github.com/calypr/syfon/apigen/client/drs"
 	"github.com/calypr/syfon/apigen/client/internalapi"
 	"github.com/calypr/syfon/client/transfer"
-	syfoncommon "github.com/calypr/syfon/common"
+
+	clientaccess "github.com/calypr/syfon/client/access"
 )
 
 var ErrNoRecordsForHash = errors.New("no records found for hash")
@@ -231,7 +232,7 @@ func internalRecordToDRSObject(rec *internalapi.InternalRecord) drsapi.DrsObject
 		}
 	}
 	if rec.ControlledAccess != nil {
-		controlled := syfoncommon.NormalizeAccessResources(*rec.ControlledAccess)
+		controlled := clientaccess.NormalizeAccessResources(*rec.ControlledAccess)
 		obj.ControlledAccess = &controlled
 	}
 	if rec.AccessMethods != nil {

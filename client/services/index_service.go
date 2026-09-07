@@ -12,7 +12,8 @@ import (
 	"github.com/calypr/syfon/apigen/client/drs"
 	"github.com/calypr/syfon/apigen/client/internalapi"
 	"github.com/calypr/syfon/client/request"
-	syfoncommon "github.com/calypr/syfon/common"
+
+	clientaccess "github.com/calypr/syfon/client/access"
 )
 
 type IndexService struct {
@@ -256,7 +257,7 @@ func (s *IndexService) Upsert(ctx context.Context, did, objectURL, recordPath st
 			if len(authorizations) == 0 {
 				return fmt.Errorf("authorizations are required to upsert record %s", did)
 			}
-			controlled := syfoncommon.AuthzMapToControlledAccess(authorizations)
+			controlled := clientaccess.AuthzMapToControlledAccess(authorizations)
 			req.ControlledAccess = &controlled
 		}
 		if recordName != "" {
@@ -290,7 +291,7 @@ func (s *IndexService) Upsert(ctx context.Context, did, objectURL, recordPath st
 	if len(authorizations) == 0 {
 		return fmt.Errorf("authorizations are required to create record %s", did)
 	}
-	controlled := syfoncommon.AuthzMapToControlledAccess(authorizations)
+	controlled := clientaccess.AuthzMapToControlledAccess(authorizations)
 	payload.ControlledAccess = &controlled
 	appendAccessMethod(&payload, objectURL)
 	if size > 0 {

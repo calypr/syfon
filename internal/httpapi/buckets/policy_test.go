@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	sycommon "github.com/calypr/syfon/common"
+	clientaccess "github.com/calypr/syfon/client/access"
 	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/faults"
@@ -17,7 +17,7 @@ func TestBucketPolicyHelpers(t *testing.T) {
 		ProjectID:    "proj",
 		Bucket:       "bucket-a",
 	}
-	resource, _ := sycommon.ResourcePath("org", "proj")
+	resource, _ := clientaccess.ResourcePath("org", "proj")
 
 	t.Run("global bucket control access", func(t *testing.T) {
 		if !access.HasAnyMethodAccess(context.Background(), []string{resource}, "read") {
@@ -52,7 +52,7 @@ func TestBucketPolicyHelpers(t *testing.T) {
 	})
 
 	t.Run("bucket scope write allows org descendant creators", func(t *testing.T) {
-		orgResource, _ := sycommon.ResourcePath("org", "")
+		orgResource, _ := clientaccess.ResourcePath("org", "")
 		ctx := policyTestContext("gen3", true, map[string]map[string]bool{
 			orgResource: {"arborist:create-descendant": true},
 		})
@@ -73,7 +73,7 @@ func TestBucketPolicyHelpers(t *testing.T) {
 	})
 
 	t.Run("bucket scope write does not treat requestor create as arborist create-descendant", func(t *testing.T) {
-		orgResource, _ := sycommon.ResourcePath("org", "")
+		orgResource, _ := clientaccess.ResourcePath("org", "")
 		ctx := policyTestContext("gen3", true, map[string]map[string]bool{
 			orgResource: {"requestor:create": true},
 		})

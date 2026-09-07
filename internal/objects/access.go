@@ -1,7 +1,7 @@
 package objects
 
 import (
-	syfoncommon "github.com/calypr/syfon/common"
+	clientaccess "github.com/calypr/syfon/client/access"
 )
 
 // AccessResources returns the normalized controlled-access resources attached
@@ -11,7 +11,7 @@ func AccessResources(obj *Record) []string {
 		return nil
 	}
 	if obj.ControlledAccess != nil {
-		return syfoncommon.NormalizeAccessResources(*obj.ControlledAccess)
+		return clientaccess.NormalizeAccessResources(*obj.ControlledAccess)
 	}
-	return syfoncommon.AuthzMapToList(obj.Authorizations)
+	return clientaccess.AuthzMapToList(obj.Authorizations)
 }

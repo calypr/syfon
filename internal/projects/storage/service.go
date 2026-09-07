@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	syfoncommon "github.com/calypr/syfon/common"
+	clientaccess "github.com/calypr/syfon/client/access"
 	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/storage"
@@ -196,7 +196,7 @@ func (s *Inspector) resolveScope(ctx context.Context, organization, project, met
 	if organization == "" {
 		return scopeTarget{}, &Error{Kind: ErrorInvalidInput, Message: "organization is required"}
 	}
-	resource, err := syfoncommon.ResourcePath(organization, project)
+	resource, err := clientaccess.ResourcePath(organization, project)
 	if err != nil {
 		return scopeTarget{}, &Error{Kind: ErrorInvalidInput, Message: err.Error()}
 	}

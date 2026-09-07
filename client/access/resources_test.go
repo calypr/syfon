@@ -1,4 +1,4 @@
-package common
+package access
 
 import (
 	"reflect"
@@ -38,14 +38,6 @@ func TestResourceAndAuthzHelpers(t *testing.T) {
 					t.Fatalf("ResourcePath(%q,%q) = %q, want %q", tc.org, tc.project, got, tc.want)
 				}
 			})
-		}
-	})
-
-
-
-	t.Run("checksum normalization", func(t *testing.T) {
-		if got := NormalizeChecksum("  sha256:ABC123  "); got != "ABC123" {
-			t.Fatalf("unexpected normalized checksum: %q", got)
 		}
 	})
 
@@ -111,6 +103,5 @@ func TestResourceAndAuthzHelpers(t *testing.T) {
 			t.Fatalf("AuthzMapToList mismatch:\n got: %+v\nwant: %+v", got, want)
 		}
 	})
-
 
 }

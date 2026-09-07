@@ -9,7 +9,8 @@ import (
 
 	objectmodel "github.com/calypr/syfon/internal/objects"
 
-	syfoncommon "github.com/calypr/syfon/common"
+	clientaccess "github.com/calypr/syfon/client/access"
+	clienthash "github.com/calypr/syfon/client/hash"
 )
 
 func recordStringPtr(value string) *string { return &value }
@@ -37,7 +38,7 @@ func canonicalizeProjectScopedObjects(objects []objectmodel.Record, organization
 	organization = strings.TrimSpace(organization)
 	project = strings.TrimSpace(project)
 	if organization != "" && project != "" {
-		if resource, err := syfoncommon.ResourcePath(organization, project); err == nil {
+		if resource, err := clientaccess.ResourcePath(organization, project); err == nil {
 			forcedResource = resource
 		}
 	}
@@ -96,13 +97,13 @@ func projectScopeResources(obj *objectmodel.Record) []string {
 	resources := objectmodel.AccessResources(obj)
 	out := make([]string, 0, len(resources))
 	for _, resource := range resources {
-		org, project, ok := syfoncommon.ResourceScope(resource)
+		org, project, ok := clientaccess.ResourceScope(resource)
 		if !ok || strings.TrimSpace(org) == "" || strings.TrimSpace(project) == "" {
 			continue
 		}
 		out = append(out, resource)
 	}
-	return syfoncommon.NormalizeAccessResources(out)
+	return clientaccess.NormalizeAccessResources(out)
 }
 
 func canonicalizeContentObjects(objects []objectmodel.Record) []objectmodel.Record {
@@ -129,7 +130,7 @@ func canonicalizeContentObjects(objects []objectmodel.Record) []objectmodel.Reco
 }
 
 func objectsWithSHA256(objects []objectmodel.Record, checksum string) []objectmodel.Record {
-	target := syfoncommon.NormalizeOid(checksum)
+	target := clienthash.NormalizeOid(checksum)
 	if target == "" {
 		return objects
 	}
@@ -179,7 +180,7 @@ func collapseCanonicalGroup(group []objectmodel.Record) objectmodel.Record {
 	}
 	if len(controlled) > 0 {
 		merged.ControlledAccess = &controlled
-		merged.Authorizations = syfoncommon.ControlledAccessToAuthzMap(controlled)
+		merged.Authorizations = clientaccess.ControlledAccessToAuthzMap(controlled)
 	} else {
 		merged.ControlledAccess = nil
 		merged.Authorizations = nil
@@ -333,7 +334,7 @@ func mergeControlledAccess(group []objectmodel.Record) ([]string, bool) {
 	for _, obj := range group {
 		public = public || obj.PublicRead
 	}
-	return syfoncommon.NormalizeAccessResources(resources), public
+	return clientaccess.NormalizeAccessResources(resources), public
 }
 
 func mergeNameAliases(primary *string, group []objectmodel.Record) []string {

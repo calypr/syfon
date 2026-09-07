@@ -13,7 +13,8 @@ import (
 
 	"github.com/calypr/syfon/apigen/client/drs"
 	internalapi "github.com/calypr/syfon/apigen/client/internalapi"
-	syfoncommon "github.com/calypr/syfon/common"
+
+	clientaccess "github.com/calypr/syfon/client/access"
 )
 
 func TestIndexServiceOperationsAndUpsert(t *testing.T) {
@@ -344,7 +345,7 @@ func TestIndexServiceRemoveControlledAccessRequiresJSON200(t *testing.T) {
 }
 
 func testRecordForURL(did, rawURL string, authorizations map[string][]string) internalapi.InternalRecord {
-	controlled := syfoncommon.AuthzMapToControlledAccess(authorizations)
+	controlled := clientaccess.AuthzMapToControlledAccess(authorizations)
 	methodType := methodTypeForURL(rawURL)
 	methods := []drs.AccessMethod{{
 		Type:     drs.AccessMethodType(methodType),

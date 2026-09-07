@@ -1,4 +1,4 @@
-package common
+package hash
 
 import (
 	"strings"
@@ -14,4 +14,12 @@ func TestNormalizeOidAndMintObjectIDFromChecksum(t *testing.T) {
 		t.Fatalf("expected invalid oid to normalize to empty string, got %q", got)
 	}
 
+}
+
+func TestNormalizeChecksum(t *testing.T) {
+	t.Run("checksum normalization", func(t *testing.T) {
+		if got := NormalizeChecksum("  sha256:ABC123  "); got != "ABC123" {
+			t.Fatalf("unexpected normalized checksum: %q", got)
+		}
+	})
 }

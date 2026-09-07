@@ -8,7 +8,8 @@ import (
 	"strings"
 	"time"
 
-	sycommon "github.com/calypr/syfon/common"
+	clientaccess "github.com/calypr/syfon/client/access"
+	clienthash "github.com/calypr/syfon/client/hash"
 	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/faults"
 
@@ -324,7 +325,7 @@ func postgresMergeContentChildrenTx(ctx context.Context, tx *sql.Tx, id string, 
 	}
 	for _, checksum := range obj.Checksums {
 		typ, value := strings.TrimSpace(checksum.Type), strings.TrimSpace(checksum.Checksum)
-		if typ == "" || value == "" || (objects.NormalizeChecksumType(typ) == "sha256" && sycommon.NormalizeOid(value) != "") {
+		if typ == "" || value == "" || (objects.NormalizeChecksumType(typ) == "sha256" && clienthash.NormalizeOid(value) != "") {
 			continue
 		}
 		if _, err := tx.ExecContext(ctx, `
@@ -352,7 +353,7 @@ func postgresResourcesTx(ctx context.Context, tx *sql.Tx, id string) ([]string, 
 		}
 		resources = append(resources, resource)
 	}
-	return sycommon.NormalizeAccessResources(resources), rows.Err()
+	return clientaccess.NormalizeAccessResources(resources), rows.Err()
 }
 
 func postgresPublicReadTx(ctx context.Context, tx *sql.Tx, id string, inferred bool) (bool, error) {
@@ -429,7 +430,7 @@ func postgresObjectSHAsTx(ctx context.Context, tx *sql.Tx, id string) ([]string,
 		if err := rows.Scan(&value); err != nil {
 			return nil, err
 		}
-		if normalized := sycommon.NormalizeOid(value); normalized != "" {
+		if normalized := clienthash.NormalizeOid(value); normalized != "" {
 			values = append(values, normalized)
 		}
 	}
@@ -441,9 +442,9 @@ func postgresObjectResources(obj *objects.Record) []string {
 		return nil
 	}
 	if obj.ControlledAccess != nil {
-		return sycommon.NormalizeAccessResources(*obj.ControlledAccess)
+		return clientaccess.NormalizeAccessResources(*obj.ControlledAccess)
 	}
-	return sycommon.NormalizeAccessResources(sycommon.AuthzMapToList(obj.Authorizations))
+	return clientaccess.NormalizeAccessResources(clientaccess.AuthzMapToList(obj.Authorizations))
 }
 
 func postgresIdentityAliases(obj *objects.Record) []string {

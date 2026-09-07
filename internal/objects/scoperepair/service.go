@@ -9,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	syfoncommon "github.com/calypr/syfon/common"
+	clientaccess "github.com/calypr/syfon/client/access"
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/storage/address"
@@ -182,7 +182,7 @@ func (s *Service) auditRecord(ctx context.Context, record objects.Record, scopes
 	}
 	targetResource := ""
 	if strings.TrimSpace(options.Organization) != "" && strings.TrimSpace(options.Project) != "" {
-		targetResource, _ = syfoncommon.ResourcePath(options.Organization, options.Project)
+		targetResource, _ = clientaccess.ResourcePath(options.Organization, options.Project)
 	}
 	if targetResource != "" && !recordMatchesResource(record, targetResource) && object.inferredScope != targetResource {
 		return object, false
@@ -191,7 +191,7 @@ func (s *Service) auditRecord(ctx context.Context, record objects.Record, scopes
 		object.findings = append(object.findings, newFinding(FindingMissingControlledAccess, SeverityWarn, record, sha, object.currentURLs, object.canonicalURL, true, "missing controlled_access row recoverable from deterministic scope"))
 		updated := cloneRecord(record)
 		updated.ControlledAccess = addControlledAccess(updated.ControlledAccess, targetResource)
-		updated.Authorizations = syfoncommon.ControlledAccessToAuthzMap(*updated.ControlledAccess)
+		updated.Authorizations = clientaccess.ControlledAccessToAuthzMap(*updated.ControlledAccess)
 		object.updated = &updated
 	}
 	if object.scopeKnown && object.canonicalURL != "" {
@@ -255,7 +255,7 @@ func (s *Service) classifyAccessMethods(ctx context.Context, object *auditedObje
 	if object.updated != nil && object.updated.ControlledAccess != nil {
 		controlled := append([]string(nil), (*object.updated.ControlledAccess)...)
 		updated.ControlledAccess = &controlled
-		updated.Authorizations = syfoncommon.ControlledAccessToAuthzMap(*updated.ControlledAccess)
+		updated.Authorizations = clientaccess.ControlledAccessToAuthzMap(*updated.ControlledAccess)
 	}
 	object.updated = &updated
 }
@@ -314,7 +314,7 @@ func (s *Service) loadScopeTargets(ctx context.Context) (map[string][]scopeTarge
 			if !scopeBelongsToCredential(scope, credential) {
 				continue
 			}
-			resource, err := syfoncommon.ResourcePath(strings.TrimSpace(scope.Organization), strings.TrimSpace(scope.ProjectID))
+			resource, err := clientaccess.ResourcePath(strings.TrimSpace(scope.Organization), strings.TrimSpace(scope.ProjectID))
 			if err != nil || resource == "" {
 				continue
 			}
@@ -399,7 +399,7 @@ func recordProjectResources(record objects.Record, inferred string) []string {
 	seen := make(map[string]struct{})
 	result := make([]string, 0)
 	for _, resource := range objects.AccessResources(&record) {
-		org, project, ok := syfoncommon.ResourceScope(resource)
+		org, project, ok := clientaccess.ResourceScope(resource)
 		if !ok || org == "" || project == "" {
 			continue
 		}
@@ -443,7 +443,7 @@ func (s *Service) addDuplicateFindings(objectsToAudit []*auditedObject) {
 			continue
 		}
 		resource := strings.SplitN(key, "|", 2)[0]
-		organization, project, _ := syfoncommon.ResourceScope(resource)
+		organization, project, _ := clientaccess.ResourceScope(resource)
 		for _, object := range group {
 			object.findings = append(object.findings, newFinding(FindingDuplicateSHA256Sibling, SeverityWarn, object.record, object.sha256, object.currentURLs, object.canonicalURL, false, "same sha256 appears in multiple DIDs for this scope"))
 			if object.scope.Organization == "" {
@@ -534,7 +534,7 @@ func addControlledAccess(controlled *[]string, resource string) *[]string {
 		values = append(values, (*controlled)...)
 	}
 	values = append(values, resource)
-	normalized := syfoncommon.NormalizeAccessResources(values)
+	normalized := clientaccess.NormalizeAccessResources(values)
 	return &normalized
 }
 
@@ -572,7 +572,7 @@ func pathStyleAccessURL(target scopeTarget, name string) string {
 func newFinding(kind FindingKind, severity Severity, record objects.Record, sha string, currentURLs []string, canonical string, autoFixable bool, message string) Finding {
 	finding := Finding{Kind: kind, Severity: severity, ObjectID: string(record.Id), SHA256: sha, CurrentAccessURLs: append([]string(nil), currentURLs...), ProposedCanonicalURL: canonical, AutoFixable: autoFixable, Message: message}
 	for _, resource := range objects.AccessResources(&record) {
-		organization, project, ok := syfoncommon.ResourceScope(resource)
+		organization, project, ok := clientaccess.ResourceScope(resource)
 		if ok && organization != "" {
 			finding.Organization = organization
 			finding.Project = project

@@ -24,9 +24,9 @@ We want a client architecture that is:
 
 - generated where possible,
 - maintainable in Go,
-- and not dependent on the old `apitypes` shim.
+- and not dependent on a handwritten alias layer.
 
-However, trying to force named field types through the overlay/codegen layer has not worked cleanly for this specific schema shape. The generated code still prefers anonymous inline structs for the `AccessMethod` nested fields.
+However, trying to force named field types through the overlay and code-generation layers has not worked cleanly for this schema shape. The generated code still prefers anonymous inline structs for the `AccessMethod` nested fields.
 
 Example of the mismatch:
 
@@ -68,4 +68,3 @@ In practice this means:
 ## Notes
 This decision is specific to `AccessMethod.access_url` and `AccessMethod.authorizations`.
 It does not imply the rest of the generated API needs to remain awkward; only this inline-field shape is being accepted as-is.
-
