@@ -1,3 +1,16 @@
+<div align="center">
+  <img src="docs/images/syfon-logo.png" alt="Syfon" width="520" />
+  <br><br>
+  <a href="https://pkg.go.dev/github.com/calypr/syfon/client"><img src="https://pkg.go.dev/badge/github.com/calypr/syfon/client.svg" alt="Go Client Reference"></a>
+  <a href="https://calypr.org/syfon/"><img src="https://img.shields.io/badge/docs-online-blue" alt="Documentation"></a>
+  <a href="https://github.com/calypr/syfon/actions/workflows/ci.yaml"><img src="https://github.com/calypr/syfon/actions/workflows/ci.yaml/badge.svg?branch=development" alt="CI"></a>
+  <a href="https://app.codecov.io/gh/calypr/syfon/tree/development"><img src="https://codecov.io/gh/calypr/syfon/branch/development/graph/badge.svg?flag=root" alt="Server Coverage"></a>
+  <a href="https://app.codecov.io/gh/calypr/syfon/tree/development"><img src="https://codecov.io/gh/calypr/syfon/branch/development/graph/badge.svg?flag=client" alt="Client Coverage"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+  <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs Welcome"></a>
+  <a href="https://github.com/calypr/syfon/releases"><img src="https://img.shields.io/github/v/release/calypr/syfon" alt="Latest Release"></a>
+</div>
+
 # Syfon
 
 Syfon is a Go implementation of the [GA4GH Data Repository Service (DRS)](https://ga4gh.github.io/data-repository-service-schemas/). It stores DRS metadata and gives clients short-lived access URLs for objects in S3, Google Cloud Storage, Azure Blob Storage, or a local file store.
