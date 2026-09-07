@@ -53,8 +53,3 @@ nav:
   - Advanced:
     - Ranged Downloads: multi-cloud-multipart.md
     - apigen Module Release: apigen-module-release.md
-  - Architecture Decisions:
-    - Internal vs GA4GH DRS API: adr-internal-vs-ga4gh-drs.md
-    - Mediate Data Transfer Through Syfon: adr-strictly-mediated-transfer.md
-    - OpenAPI Generation vs Middleware Boundaries: adr-openapi-generation-and-middleware-boundaries.md
-    - Anonymous Inline DRS Fields: adr-oapi-codegen-anonymous-inline-fields.md

@@ -13,7 +13,40 @@
 
 # Syfon
 
-Syfon is a Go implementation of the [GA4GH Data Repository Service (DRS)](https://ga4gh.github.io/data-repository-service-schemas/). It stores DRS metadata and gives clients short-lived access URLs for objects in S3, Google Cloud Storage, Azure Blob Storage, or a local file store.
+Syfon is a [GA4GH Data Repository Service (DRS)](https://ga4gh.github.io/data-repository-service-schemas/) in Go for indexing, authorizing access to, and transferring data across object stores, with a CLI and Go client SDK.
+
+**[Quick Start](docs/quickstart.md) · [Documentation](https://calypr.org/syfon/) · [Go Client SDK](https://pkg.go.dev/github.com/calypr/syfon/client) · [Releases](https://github.com/calypr/syfon/releases)**
+
+| Capability | Support |
+| --- | --- |
+| Metadata and discovery | GA4GH DRS object records and access methods, plus scoped indexing and listing |
+| Storage | S3 and S3-compatible services, Google Cloud Storage, Azure Blob Storage, and local files |
+| Transfers | Short-lived cloud access URLs, multipart uploads, and ranged downloads |
+| Authentication | Local Basic Auth or Gen3 bearer tokens with scoped authorization |
+| Metadata database | SQLite for local deployments; PostgreSQL for Gen3 deployments |
+| Clients | Command-line tools and a [Go SDK](client) for uploads, downloads, and metadata operations |
+
+## Architecture
+
+Syfon checks access, manages object metadata, and coordinates storage operations. For cloud transfers, it returns short-lived signed URLs so the client can upload or download directly from the storage provider.
+
+```mermaid
+flowchart LR
+    client["CLI / Go client SDK"]
+    syfon["Syfon<br/>DRS and transfer APIs"]
+    auth["Authentication and authorization<br/>Local Basic Auth or Gen3 / Fence"]
+    database[("Metadata database<br/>SQLite or PostgreSQL")]
+    storage["Cloud storage providers<br/>S3 / Google Cloud Storage / Azure Blob"]
+
+    client -->|Authenticated API requests| syfon
+    syfon -->|Metadata and access URLs| client
+    syfon <-->|Identity and permissions| auth
+    syfon <-->|Object metadata| database
+    syfon -->|Storage operations| storage
+    client <-->|Signed HTTPS uploads and downloads| storage
+```
+
+Cloud credentials stay on the server. The local file provider returns filesystem paths and requires the client to have access to the same files.
 
 ## Install
 
