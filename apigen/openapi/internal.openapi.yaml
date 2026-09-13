@@ -443,7 +443,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ListRecordsResponse'
+                $ref: '#/components/schemas/BulkHashesResponse'
         '400':
           description: Validation error
           content:
@@ -1686,6 +1686,17 @@ components:
           type: array
           items:
             type: string
+    BulkHashesResponse:
+      type: object
+      required:
+        - results
+      properties:
+        results:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              $ref: '#/components/schemas/InternalRecord'
     BulkSHA256ValidityRequest:
       type: object
       properties:

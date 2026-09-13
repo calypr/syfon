@@ -78,6 +78,12 @@ func RegisterRoutes(app fiber.Router, deps Dependencies, options Options) {
 		return
 	}
 
+	// Documentation is intentionally registered before the protected API group.
+	// The OpenAPI documents and UI are public metadata, like the health endpoints.
+	if options.Docs {
+		apidocs.RegisterSwaggerRoutes(app.Group("/"))
+	}
+
 	api := app.Group("/")
 	var middlewares []any
 	if deps.RequestIDs != nil {
@@ -90,9 +96,6 @@ func RegisterRoutes(app fiber.Router, deps Dependencies, options Options) {
 		api.Use(middlewares...)
 	}
 
-	if options.Docs {
-		apidocs.RegisterSwaggerRoutes(api)
-	}
 	if options.GA4GH {
 		registerDRSRoutes(api.Group("/ga4gh/drs/v1"), deps.Objects, deps.Transfers, deps.ServiceInfo, options.MaxBulkRequestLength)
 	}

@@ -37,7 +37,6 @@ func TestValidateConfigProductionRequiresStableOperationalSettings(t *testing.T)
 			cfg.Database.Postgres = nil
 			cfg.Database.Sqlite = &SqliteConfig{File: ":memory:"}
 		}},
-		{name: "docs", mutate: func(cfg *Config) { cfg.Routes.Docs = true }},
 		{name: "ephemeral encryption", mutate: func(cfg *Config) { cfg.CredentialEncryption.MasterKey = "" }},
 		{name: "pool", mutate: func(cfg *Config) { cfg.Database.Postgres.MaxOpenConnections = 0 }},
 		{name: "insecure transport", mutate: func(cfg *Config) { cfg.Database.Postgres.SSLMode = "disable" }},
@@ -54,12 +53,46 @@ func TestValidateConfigProductionRequiresStableOperationalSettings(t *testing.T)
 	}
 }
 
+func TestValidateConfigProductionAllowsDocs(t *testing.T) {
+	cfg := productionTestConfig()
+	cfg.Routes.Docs = true
+	if err := validateConfig(cfg); err != nil {
+		t.Fatalf("validateConfig() error = %v", err)
+	}
+}
+
 func TestValidateConfigProductionAllowsExplicitInsecureTransport(t *testing.T) {
 	cfg := productionTestConfig()
 	cfg.Database.Postgres.SSLMode = "disable"
 	cfg.Database.Postgres.AllowInsecureTransport = true
 	if err := validateConfig(cfg); err != nil {
 		t.Fatalf("validateConfig() error = %v", err)
+	}
+}
+
+func TestValidateConfigProductionRejectsUnsupportedSSLModeEvenWithOptOut(t *testing.T) {
+	for _, mode := range []string{"allow", "prefer"} {
+		t.Run(mode, func(t *testing.T) {
+			cfg := productionTestConfig()
+			cfg.Database.Postgres.SSLMode = mode
+			cfg.Database.Postgres.AllowInsecureTransport = true
+			if err := validateConfig(cfg); err == nil {
+				t.Fatalf("validateConfig() accepted lib/pq-unsupported sslmode %q", mode)
+			}
+		})
+	}
+}
+
+func TestValidateConfigProductionAcceptsEncryptedSSLModes(t *testing.T) {
+	for _, mode := range []string{"require", "verify-ca", "verify-full"} {
+		t.Run(mode, func(t *testing.T) {
+			cfg := productionTestConfig()
+			cfg.Database.Postgres.SSLMode = mode
+			cfg.Database.Postgres.AllowInsecureTransport = false
+			if err := validateConfig(cfg); err != nil {
+				t.Fatalf("validateConfig() error = %v", err)
+			}
+		})
 	}
 }
 

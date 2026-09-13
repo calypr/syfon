@@ -45,6 +45,11 @@ type BulkHashesRequest struct {
 	Hashes []string `json:"hashes"`
 }
 
+// BulkHashesResponse defines model for BulkHashesResponse.
+type BulkHashesResponse struct {
+	Results map[string][]InternalRecord `json:"results"`
+}
+
 // BulkMissingSHA256Request defines model for BulkMissingSHA256Request.
 type BulkMissingSHA256Request struct {
 	Organization string   `json:"organization"`
@@ -4447,7 +4452,7 @@ func (r InternalBulkDocumentsResp) StatusCode() int {
 type InternalBulkHashesResp struct {
 	Body         []byte
 	HTTPResponse *http.Response
-	JSON200      *ListRecordsResponse
+	JSON200      *BulkHashesResponse
 	JSON400      *APIError
 	JSON413      *APIError
 	JSON500      *APIError
@@ -6796,7 +6801,7 @@ func ParseInternalBulkHashesResp(rsp *http.Response) (*InternalBulkHashesResp, e
 	decoded, decodeErr := func() (*InternalBulkHashesResp, error) {
 		switch {
 		case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-			var dest ListRecordsResponse
+			var dest BulkHashesResponse
 			if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 				return nil, err
 			}
@@ -9798,7 +9803,7 @@ type InternalBulkHashesResponseObject interface {
 	VisitInternalBulkHashesResponse(ctx fiber.Ctx) error
 }
 
-type InternalBulkHashes200JSONResponse ListRecordsResponse
+type InternalBulkHashes200JSONResponse BulkHashesResponse
 
 func (response InternalBulkHashes200JSONResponse) VisitInternalBulkHashesResponse(ctx fiber.Ctx) error {
 	ctx.Response().Header.Set("Content-Type", "application/json")

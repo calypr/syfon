@@ -184,17 +184,21 @@ func validateConfig(cfg *Config) error {
 		if cfg.Auth.AllowUnauthenticated || cfg.Auth.Mock.Enabled || inheritedMockAuthEnabled() {
 			return fmt.Errorf("production profile forbids unauthenticated or mock authentication")
 		}
-		if cfg.Routes.Docs {
-			return fmt.Errorf("production profile requires routes.docs=false")
-		}
 		if cfg.Database.Postgres == nil {
 			return fmt.Errorf("production profile requires PostgreSQL")
 		}
 		pg := cfg.Database.Postgres
-		if strings.EqualFold(strings.TrimSpace(pg.SSLMode), "disable") || strings.TrimSpace(pg.SSLMode) == "" {
+		switch sslMode := strings.ToLower(strings.TrimSpace(pg.SSLMode)); sslMode {
+		case "disable":
 			if !pg.AllowInsecureTransport {
 				return fmt.Errorf("production profile requires PostgreSQL TLS; set database.postgres.allow_insecure_transport=true only for an explicit trusted network")
 			}
+		case "require", "verify-ca", "verify-full":
+			// These modes keep the PostgreSQL connection encrypted. `require`
+			// intentionally remains accepted for migrations from deployments that
+			// do not yet have a CA configured.
+		default:
+			return fmt.Errorf("production profile requires a lib/pq-supported PostgreSQL sslmode: disable, require, verify-ca, or verify-full; got %q", sslMode)
 		}
 		if pg.MaxOpenConnections < 1 {
 			return fmt.Errorf("production profile requires postgres.max_open_connections >= 1")
