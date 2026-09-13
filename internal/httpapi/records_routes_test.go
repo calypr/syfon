@@ -1,13 +1,16 @@
 package httpapi
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
+	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/calypr/syfon/apigen/internalapi"
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/persistence/sqlite"
 	"github.com/gofiber/fiber/v3"
@@ -126,5 +129,89 @@ func TestRecordBoundary(t *testing.T) {
 		if !reflect.DeepEqual(ids, test.ids) {
 			t.Fatalf("%s: IDs %v, want %v", test.name, ids, test.ids)
 		}
+	}
+}
+
+func TestInternalBulkHashesResponseUsesResultsMap(t *testing.T) {
+	database, err := sqlite.NewSqliteDB(":memory:", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+
+	app := fiber.New(fiber.Config{ErrorHandler: FiberErrorHandler})
+	RegisterRoutes(app, Dependencies{Objects: objects.NewService(database)}, Options{Internal: true, GA4GH: true})
+	hash := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+
+	createRequest := httptest.NewRequest(http.MethodPost, "/index", strings.NewReader(`{"did":"bulk-hash-record","hashes":{"sha256":"`+hash+`"}}`))
+	createRequest.Header.Set("Content-Type", "application/json")
+	createResponse, err := app.Test(createRequest)
+	if err != nil {
+		t.Fatalf("create request failed: %v", err)
+	}
+	if createResponse.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(createResponse.Body)
+		createResponse.Body.Close()
+		t.Fatalf("create status = %d, want %d: %s", createResponse.StatusCode, http.StatusCreated, body)
+	}
+	createResponse.Body.Close()
+
+	request := httptest.NewRequest(http.MethodPost, "/index/bulk/hashes", strings.NewReader(`{"hashes":["sha256:`+hash+`","missing-hash"]}`))
+	request.Header.Set("Content-Type", "application/json")
+	response, err := app.Test(request)
+	if err != nil {
+		t.Fatalf("bulk hashes request failed: %v", err)
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("bulk hashes status = %d, want %d: %s", response.StatusCode, http.StatusOK, body)
+	}
+
+	var payload map[string]map[string][]internalapi.InternalRecord
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("decode bulk hashes response: %v", err)
+	}
+	if _, found := payload["records"]; found {
+		t.Fatalf("bulk hashes response unexpectedly used records: %s", body)
+	}
+	if _, found := payload["Results"]; found {
+		t.Fatalf("bulk hashes response unexpectedly used uppercase Results: %s", body)
+	}
+	results, found := payload["results"]
+	if !found {
+		t.Fatalf("bulk hashes response missing lowercase results: %s", body)
+	}
+	if len(results) != 2 {
+		t.Fatalf("results keys = %d, want 2: %s", len(results), body)
+	}
+	matched, found := results["sha256:"+hash]
+	if !found || len(matched) != 1 {
+		t.Fatalf("matched records = %+v, want one record: %s", matched, body)
+	}
+	if matched[0].Did != "bulk-hash-record" {
+		t.Fatalf("matched did = %q, want %q", matched[0].Did, "bulk-hash-record")
+	}
+	if matched[0].Hashes == nil || (*matched[0].Hashes)["sha256"] != hash {
+		t.Fatalf("matched hashes = %+v, want sha256=%q", matched[0].Hashes, hash)
+	}
+	missing, found := results["missing-hash"]
+	if !found || len(missing) != 0 {
+		t.Fatalf("missing hash records = %+v, want empty array", missing)
+	}
+
+	parsed, err := internalapi.ParseInternalBulkHashesResp(&http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(bytes.NewReader(body)),
+	})
+	if err != nil {
+		t.Fatalf("parse generated bulk hashes response: %v", err)
+	}
+	if parsed.JSON200 == nil || len(parsed.JSON200.Results["sha256:"+hash]) != 1 {
+		t.Fatalf("generated response did not decode results: %+v", parsed.JSON200)
 	}
 }

@@ -115,9 +115,7 @@ func (s *internalServer) InternalBulkHashes(c fiber.Ctx) error {
 		}
 		result[hash] = converted
 	}
-	return c.JSON(struct {
-		Results map[string][]internalapi.InternalRecord
-	}{Results: result})
+	return c.JSON(internalapi.BulkHashesResponse{Results: result})
 }
 
 func (s *internalServer) InternalBulkSHA256Validity(c fiber.Ctx) error {
