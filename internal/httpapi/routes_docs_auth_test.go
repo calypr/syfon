@@ -47,6 +47,7 @@ func TestDocsRoutesBypassAuthorizationButProtectedRoutesDoNot(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPost, "/ga4gh/drs/v1/objects/register", nil)
 	request.Header.Set(requestIDHeader, "api-request-id")
 	resp, err := app.Test(request)
+
 	if err != nil {
 		t.Fatalf("protected request failed: %v", err)
 	}
