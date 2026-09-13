@@ -188,10 +188,17 @@ func validateConfig(cfg *Config) error {
 			return fmt.Errorf("production profile requires PostgreSQL")
 		}
 		pg := cfg.Database.Postgres
-		if strings.EqualFold(strings.TrimSpace(pg.SSLMode), "disable") || strings.TrimSpace(pg.SSLMode) == "" {
+		switch sslMode := strings.ToLower(strings.TrimSpace(pg.SSLMode)); sslMode {
+		case "", "disable", "allow", "prefer":
 			if !pg.AllowInsecureTransport {
-				return fmt.Errorf("production profile requires PostgreSQL TLS; set database.postgres.allow_insecure_transport=true only for an explicit trusted network")
+				return fmt.Errorf("production profile requires PostgreSQL TLS or an explicit insecure transport opt-out; sslmode %q can fall back to plaintext", sslMode)
 			}
+		case "require", "verify-ca", "verify-full":
+			// These modes keep the PostgreSQL connection encrypted. `require`
+			// intentionally remains accepted for migrations from deployments that
+			// do not yet have a CA configured.
+		default:
+			return fmt.Errorf("production profile requires PostgreSQL sslmode to be one of require, verify-ca, verify-full, disable, allow, or prefer; got %q", sslMode)
 		}
 		if pg.MaxOpenConnections < 1 {
 			return fmt.Errorf("production profile requires postgres.max_open_connections >= 1")
