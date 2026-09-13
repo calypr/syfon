@@ -37,7 +37,6 @@ func TestValidateConfigProductionRequiresStableOperationalSettings(t *testing.T)
 			cfg.Database.Postgres = nil
 			cfg.Database.Sqlite = &SqliteConfig{File: ":memory:"}
 		}},
-		{name: "docs", mutate: func(cfg *Config) { cfg.Routes.Docs = true }},
 		{name: "ephemeral encryption", mutate: func(cfg *Config) { cfg.CredentialEncryption.MasterKey = "" }},
 		{name: "pool", mutate: func(cfg *Config) { cfg.Database.Postgres.MaxOpenConnections = 0 }},
 		{name: "insecure transport", mutate: func(cfg *Config) { cfg.Database.Postgres.SSLMode = "disable" }},
@@ -51,6 +50,14 @@ func TestValidateConfigProductionRequiresStableOperationalSettings(t *testing.T)
 				t.Fatal("validateConfig() succeeded, want production profile error")
 			}
 		})
+	}
+}
+
+func TestValidateConfigProductionAllowsDocs(t *testing.T) {
+	cfg := productionTestConfig()
+	cfg.Routes.Docs = true
+	if err := validateConfig(cfg); err != nil {
+		t.Fatalf("validateConfig() error = %v", err)
 	}
 }
 

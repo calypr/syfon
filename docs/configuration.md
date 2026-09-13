@@ -237,6 +237,8 @@ routes:
 
 The groups are `docs`, `ga4gh`, `internal`, `lfs`, and `metrics`. Environment overrides are `DRS_ENABLE_DOCS`, `DRS_ENABLE_GA4GH`, `DRS_ENABLE_INTERNAL`, `DRS_ENABLE_LFS`, and `DRS_ENABLE_METRICS`.
 
+The docs group is supported in the production profile. Swagger UI and every OpenAPI document route are intentionally public so clients can discover the API before authenticating. Protect the surrounding API route groups with the configured authentication mode.
+
 ## `lfs`
 
 ```yaml

@@ -184,9 +184,6 @@ func validateConfig(cfg *Config) error {
 		if cfg.Auth.AllowUnauthenticated || cfg.Auth.Mock.Enabled || inheritedMockAuthEnabled() {
 			return fmt.Errorf("production profile forbids unauthenticated or mock authentication")
 		}
-		if cfg.Routes.Docs {
-			return fmt.Errorf("production profile requires routes.docs=false")
-		}
 		if cfg.Database.Postgres == nil {
 			return fmt.Errorf("production profile requires PostgreSQL")
 		}
