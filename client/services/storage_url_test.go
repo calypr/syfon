@@ -1,9 +1,8 @@
 package services
 
 import (
+	"net/url"
 	"testing"
-
-	"github.com/calypr/syfon/internal/storage/address"
 )
 
 func TestCanonicalObjectURLPreservesReservedObjectKeyBytes(t *testing.T) {
@@ -41,9 +40,12 @@ func TestCanonicalObjectURLPreservesReservedObjectKeyBytes(t *testing.T) {
 				t.Fatalf("CanonicalObjectURL() = %q, want %q", gotURL, testCase.wantURL)
 			}
 
-			bucket, objectKey, ok := address.ParseS3URL(gotURL)
-			if !ok || bucket != "bucket" || objectKey != testCase.wantObjectKey {
-				t.Fatalf("ParseS3URL() = (%q, %q, %v), want (%q, %q, true)", bucket, objectKey, ok, "bucket", testCase.wantObjectKey)
+			parsedURL, err := url.Parse(gotURL)
+			if err != nil {
+				t.Fatalf("url.Parse() error = %v", err)
+			}
+			if parsedURL.Scheme != "s3" || parsedURL.Host != "bucket" || parsedURL.Path != "/"+testCase.wantObjectKey {
+				t.Fatalf("parsed URL = (%q, %q, %q), want (%q, %q, %q)", parsedURL.Scheme, parsedURL.Host, parsedURL.Path, "s3", "bucket", "/"+testCase.wantObjectKey)
 			}
 		})
 	}
