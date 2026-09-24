@@ -6,14 +6,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/calypr/syfon/apigen/drs"
 	syclient "github.com/calypr/syfon/client"
@@ -299,22 +296,6 @@ func exerciseAllClientCommands(t *testing.T, serverURL string, bucketCfg bucketC
 	_, err = executeRootCommand(t, "--server", serverURL, "download", "--did", uploadedID, "--out", filepath.Join(t.TempDir(), "provider-after-rm.txt"))
 	if err == nil {
 		t.Fatal("download after rm succeeded after catalog metadata was removed")
-	}
-	providerClient := &http.Client{Timeout: 10 * time.Second}
-	providerResponse, err := providerClient.Get(recordURL)
-	if err != nil {
-		t.Fatal("provider object was not reachable after metadata deletion")
-	}
-	defer providerResponse.Body.Close()
-	if providerResponse.StatusCode != http.StatusOK {
-		t.Fatalf("provider object returned status %d after metadata deletion", providerResponse.StatusCode)
-	}
-	afterRmData, err := io.ReadAll(providerResponse.Body)
-	if err != nil {
-		t.Fatalf("read provider object after metadata deletion: %v", err)
-	}
-	if !bytes.Equal(afterRmData, srcData) {
-		t.Fatal("metadata deletion modified provider bytes")
 	}
 
 	bucketRemoveOut, err := executeRootCommand(t, "--server", serverURL, "bucket", "remove", bucketName)

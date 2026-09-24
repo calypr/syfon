@@ -3,6 +3,7 @@ package postgres_test
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -26,6 +27,10 @@ func TestPostgresContentIdentityRejectsAliasesThatNamePhysicalObjects(t *testing
 	createAlias := postgresUsageObject(createAliasID, "create-"+suffix, now)
 	if err := db.RegisterObjects(ctx, []drs.DrsObject{canonical, registerAlias, replaceAlias, createAlias}); err != nil {
 		t.Fatalf("register physical objects: %v", err)
+	}
+	canonicalBefore, err := db.GetObject(ctx, canonicalID)
+	if err != nil {
+		t.Fatalf("load canonical object before collision attempts: %v", err)
 	}
 
 	registration := postgresUsageObject("alias-collision-new-"+suffix, "canonical-"+suffix, now)
@@ -81,7 +86,7 @@ func TestPostgresContentIdentityRejectsAliasesThatNamePhysicalObjects(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if unchanged.Name != nil || (unchanged.AccessMethods != nil && len(*unchanged.AccessMethods) != 0) {
-		t.Fatalf("rejected operations changed canonical object: %+v", unchanged)
+	if !reflect.DeepEqual(unchanged, canonicalBefore) {
+		t.Fatalf("rejected operations changed canonical object: before=%+v after=%+v", canonicalBefore, unchanged)
 	}
 }

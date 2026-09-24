@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/calypr/syfon/apigen/drs"
@@ -135,13 +136,16 @@ func TestVisibleBucketContainsRequiresProgramsOnlyInRestrictedMode(t *testing.T)
 }
 
 type fakeInventory struct {
+	mu       sync.Mutex
 	items    []storage.ObjectMetadata
 	result   storage.InventoryResult
 	requests []storage.InventoryRequest
 }
 
 func (f *fakeInventory) Inventory(_ context.Context, request storage.InventoryRequest) (storage.InventoryResult, error) {
+	f.mu.Lock()
 	f.requests = append(f.requests, request)
+	f.mu.Unlock()
 	if f.result.Items != nil || !f.result.Complete {
 		return f.result, nil
 	}

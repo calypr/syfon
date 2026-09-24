@@ -299,7 +299,7 @@ func retryProductionSchemaCheck(err error) bool {
 		return true
 	}
 	var temporaryError net.Error
-	return errors.As(err, &temporaryError) && (temporaryError.Timeout() || temporaryError.Temporary())
+	return errors.As(err, &temporaryError) && temporaryError.Timeout()
 }
 
 const maxSigningExpirySeconds = int64((1<<63 - 1) / int64(time.Second))

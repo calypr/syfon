@@ -72,7 +72,7 @@ type contextProbeConnector struct {
 }
 
 func (c contextProbeConnector) Connect(context.Context) (driver.Conn, error) {
-	return contextProbeConn{exec: c.exec}, nil
+	return contextProbeConn(c), nil
 }
 
 func (contextProbeConnector) Driver() driver.Driver { return contextProbeDriver{} }

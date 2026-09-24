@@ -13,6 +13,7 @@ import (
 	"github.com/calypr/syfon/internal/config"
 	"github.com/calypr/syfon/internal/version"
 	"github.com/lib/pq"
+	"github.com/lib/pq/pqerror"
 )
 
 func TestRetryProductionSchemaCheckOnlyRetriesTransientSchemaState(t *testing.T) {
@@ -46,7 +47,7 @@ func TestRetryProductionSchemaCheckOnlyRetriesTransientSchemaState(t *testing.T)
 }
 
 func testPostgresError(code string) error {
-	return &pq.Error{Code: pq.ErrorCode(code), Message: "synthetic startup error"}
+	return &pq.Error{Code: pqerror.Code(code), Message: "synthetic startup error"}
 }
 
 func TestOpenPostgresDatabaseFailsFastOnAuthenticationFailure(t *testing.T) {

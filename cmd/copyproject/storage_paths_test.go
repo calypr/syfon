@@ -109,6 +109,19 @@ func TestStoragePathHelpers(t *testing.T) {
 	if got := pathOrEmpty(nil); got != "" {
 		t.Fatalf("pathOrEmpty(nil) = %q", got)
 	}
+	for _, tc := range []struct {
+		path string
+		want bool
+	}{
+		{path: "file://bucket", want: true},
+		{path: "s3://bucket", want: true},
+		{path: "s3://bucket/prefix", want: false},
+		{path: "ftp://bucket", want: false},
+	} {
+		if got := isBucketRootStoragePath(tc.path); got != tc.want {
+			t.Errorf("isBucketRootStoragePath(%q) = %t, want %t", tc.path, got, tc.want)
+		}
+	}
 
 	parsed, segments, ok := parseStorageURL(" s3://bucket/one/two/ ")
 	if !ok || parsed.Host != "bucket" || !reflect.DeepEqual(segments, []string{"one", "two"}) {

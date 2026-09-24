@@ -148,6 +148,7 @@ func ensureDestinationScopes(ctx context.Context, cmd *cobra.Command, buckets *s
 		if orgPath != "" {
 			projectPath = orgPath + "/" + resolved.target.Project
 		}
+		sourcePath := pathOrEmpty(resolved.sourceProject)
 		targetOrg := resolved.targetOrg
 		if targetOrg == nil {
 			targetOrg = &bucketapi.BucketScopeResponse{
@@ -157,8 +158,8 @@ func ensureDestinationScopes(ctx context.Context, cmd *cobra.Command, buckets *s
 		}
 		if remapped, ok := remapProjectScopePath(resolved.sourceProject, resolved.sourceOrg, targetOrg, resolved.source, resolved.target, resolved.targetBucket); ok {
 			projectPath = remapped
-		} else if resolved.sourceProject != nil && resolved.sourceProject.Path != nil && strings.TrimSpace(*resolved.sourceProject.Path) != "" {
-			return fmt.Errorf("cannot translate source project scope path %q to destination %s/%s", *resolved.sourceProject.Path, resolved.target.Organization, resolved.target.Project)
+		} else if sourcePath != "" && !isBucketRootStoragePath(sourcePath) {
+			return fmt.Errorf("cannot translate source project scope path %q to destination %s/%s", sourcePath, resolved.target.Organization, resolved.target.Project)
 		}
 	}
 

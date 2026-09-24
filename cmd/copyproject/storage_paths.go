@@ -100,6 +100,11 @@ func parseStorageURL(raw string) (*url.URL, []string, bool) {
 	return u, strings.Split(trimmed, "/"), true
 }
 
+func isBucketRootStoragePath(raw string) bool {
+	_, segments, ok := parseStorageURL(raw)
+	return ok && len(segments) == 0
+}
+
 func sameURLRoot(a, b *url.URL) bool {
 	if a == nil || b == nil {
 		return false
