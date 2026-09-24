@@ -80,6 +80,7 @@ func (s *Service) classifyAccessMethods(ctx context.Context, object *auditedObje
 		updated.ControlledAccess = &controlled
 	}
 	object.updated = &updated
+	object.accessMethodsChanged = true
 }
 
 func repairableS3URL(method drs.AccessMethod) (string, bool) {

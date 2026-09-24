@@ -119,6 +119,23 @@ func TestStorageAddressParsing(t *testing.T) {
 	}
 }
 
+func TestBucketURLRoundTripsReservedObjectKeyBytes(t *testing.T) {
+	const objectKey = "dir/slash?query#fragment%literal%2F"
+	gotURL := BucketToURL("bucket", objectKey)
+	if want := "s3://bucket/dir/slash%3Fquery%23fragment%25literal%252F"; gotURL != want {
+		t.Fatalf("BucketToURL() = %q, want %q", gotURL, want)
+	}
+
+	bucket, gotKey, ok := ParseS3URL(gotURL)
+	if !ok || bucket != "bucket" || gotKey != objectKey {
+		t.Fatalf("ParseS3URL() = (%q, %q, %v), want (%q, %q, true)", bucket, gotKey, ok, "bucket", objectKey)
+	}
+
+	if got := BucketToURL("bucket", "a/b"); got != "s3://bucket/a/b" {
+		t.Fatalf("BucketToURL() changed ordinary URL: %q", got)
+	}
+}
+
 func TestTrimLeadingStoragePrefix(t *testing.T) {
 	for _, tc := range []struct {
 		name, key, prefix, want string

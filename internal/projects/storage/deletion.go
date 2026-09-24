@@ -83,7 +83,7 @@ func (s *Service) DeleteProjectDataAuthorized(ctx context.Context, organization,
 
 func (s *Service) deleteProjectData(ctx context.Context, organization, project string) (ProjectCleanupResult, error) {
 	result := ProjectCleanupResult{Organization: organization, ProjectID: project}
-	if s.cleanupObjects == nil || s.cleanupScopes == nil {
+	if s.cleanupObjects == nil || s.scopeCatalog == nil {
 		return result, &Error{Kind: ErrorUnsupported, Message: "project cleanup dependencies are not configured"}
 	}
 	deletedObjects, err := s.cleanupObjects.DeleteBulkByScope(ctx, result.Organization, result.ProjectID)
@@ -91,7 +91,7 @@ func (s *Service) deleteProjectData(ctx context.Context, organization, project s
 		return result, err
 	}
 	result.DeletedObjects = deletedObjects
-	scopes, err := s.cleanupScopes.ListBucketScopes(ctx)
+	scopes, err := s.scopeCatalog.ListBucketScopes(ctx)
 	if err != nil {
 		return result, err
 	}
@@ -106,7 +106,7 @@ func (s *Service) deleteProjectData(ctx context.Context, organization, project s
 		if credentialID == "" {
 			continue
 		}
-		if err := s.cleanupScopes.DeleteBucketScope(ctx, result.Organization, result.ProjectID, credentialID, scope.PathPrefix); err != nil {
+		if err := s.scopeCatalog.DeleteBucketScope(ctx, result.Organization, result.ProjectID, credentialID, scope.PathPrefix); err != nil {
 			return result, err
 		}
 		result.DeletedBucketScopes++

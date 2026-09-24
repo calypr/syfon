@@ -13,6 +13,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/smithy-go"
 
+	"github.com/calypr/syfon/apigen/errorapi"
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/storage"
 )
@@ -192,6 +193,44 @@ func TestMultipartPreservesOpaqueIDETagsAndCallerOrder(t *testing.T) {
 	}
 	if got := client.completeInput.MultipartUpload.Parts; len(got) != 2 || aws.ToInt32(got[0].PartNumber) != 4 || aws.ToString(got[0].ETag) != "\"four\"" || aws.ToInt32(got[1].PartNumber) != 1 {
 		t.Fatalf("completed parts = %#v", got)
+	}
+}
+
+func TestSignMultipartPartEnforcesS3PartNumberRangeBeforePresigning(t *testing.T) {
+	binding := storage.ProviderBinding{Provider: "s3", LookupKey: "bucket", PhysicalBucket: "bucket"}
+	target := storage.Target{PhysicalBucket: "bucket", Key: "key"}
+	for _, testCase := range []struct {
+		name       string
+		partNumber int32
+		invalid    bool
+	}{
+		{name: "zero", partNumber: 0, invalid: true},
+		{name: "minimum", partNumber: 1},
+		{name: "maximum", partNumber: 10000},
+		{name: "above maximum", partNumber: 10001, invalid: true},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			presigner := &fakePresigner{partURL: "part"}
+			provider := cachedBackend(&fakeClient{}, presigner)
+			_, err := provider.SignMultipartPart(context.Background(), binding, storage.MultipartPartRequest{
+				Target: target, UploadID: "opaque", PartNumber: testCase.partNumber,
+			})
+			if testCase.invalid {
+				if !errors.Is(err, errorapi.ErrInvalidInput) {
+					t.Fatalf("SignMultipartPart error = %v, want invalid input", err)
+				}
+				if presigner.partInput != nil {
+					t.Fatalf("invalid part number reached presigner: %#v", presigner.partInput)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("SignMultipartPart(%d) error = %v", testCase.partNumber, err)
+			}
+			if presigner.partInput == nil || aws.ToInt32(presigner.partInput.PartNumber) != testCase.partNumber {
+				t.Fatalf("presigner input = %#v, want part %d", presigner.partInput, testCase.partNumber)
+			}
+		})
 	}
 }
 

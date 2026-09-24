@@ -34,7 +34,7 @@ func NewServerClient(cmd *cobra.Command) (*syclient.Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	opts, err := ServerClientOptions()
+	opts, err := ServerClientOptions(cmd.Context())
 	if err != nil {
 		return nil, err
 	}
@@ -63,7 +63,7 @@ func ResolveServerURL(cmd *cobra.Command) (string, error) {
 
 	resolvedProfile := strings.TrimSpace(profile)
 	if resolvedProfile != "" {
-		credential, err := loadProfileCredential(resolvedProfile)
+		credential, err := LoadProfileCredential(cmd.Context(), resolvedProfile)
 		if err != nil {
 			return "", err
 		}
@@ -81,7 +81,7 @@ func ResolveServerURL(cmd *cobra.Command) (string, error) {
 	return serverURL, nil
 }
 
-func ServerClientOptions() ([]syclient.Option, error) {
+func ServerClientOptions(ctx context.Context) ([]syclient.Option, error) {
 	resolvedProfile := strings.TrimSpace(profile)
 	resolvedToken := strings.TrimSpace(token)
 	resolvedUsername := strings.TrimSpace(username)
@@ -111,7 +111,7 @@ func ServerClientOptions() ([]syclient.Option, error) {
 		return nil, nil
 	}
 
-	credential, err := loadProfileCredential(resolvedProfile)
+	credential, err := LoadProfileCredential(ctx, resolvedProfile)
 	if err != nil {
 		return nil, err
 	}
@@ -124,11 +124,6 @@ func ServerClientOptions() ([]syclient.Option, error) {
 		return []syclient.Option{syclient.WithBasicAuth(keyID, apiKey)}, nil
 	}
 	return nil, fmt.Errorf("profile %q has no access_token or complete key_id/api_key pair", resolvedProfile)
-}
-
-func loadProfileCredential(profile string) (*conf.Credential, error) {
-	manager := conf.NewConfigure(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})))
-	return manager.Load(profile)
 }
 
 func LoadProfileCredential(ctx context.Context, profile string) (*conf.Credential, error) {

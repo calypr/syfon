@@ -29,7 +29,7 @@ type LocalAuthPluginRPC struct {
 }
 
 func (p *LocalAuthPluginRPC) Server(*hplugin.MuxBroker) (interface{}, error) {
-	return p.Impl, nil
+	return plugin.NewAuthenticationRPCServer(p.Impl), nil
 }
 
 func (p *LocalAuthPluginRPC) Client(b *hplugin.MuxBroker, c *rpc.Client) (interface{}, error) {

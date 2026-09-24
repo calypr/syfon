@@ -10,6 +10,8 @@ import (
 	"time"
 
 	internalapi "github.com/calypr/syfon/apigen/internalapi"
+	clientaccess "github.com/calypr/syfon/client/access"
+	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/storage"
 	"github.com/calypr/syfon/internal/storage/address"
 )
@@ -181,6 +183,15 @@ func (s *Service) inspectRaw(ctx context.Context, request internalapi.InternalIn
 	if !visibleBucketContains(ctx, visible, bucket, credential.CredentialID) {
 		return nil, &Error{Kind: ErrorPermissionDenied, Message: fmt.Sprintf("bucket %q is not visible to the caller", bucket)}
 	}
+	if restrictedBucketVisibility(ctx) {
+		allowed, err := s.rawStorageKeyVisible(ctx, bucket, key)
+		if err != nil {
+			return nil, err
+		}
+		if !allowed {
+			return nil, &Error{Kind: ErrorPermissionDenied, Message: "object key is outside the caller's authorized project storage scopes"}
+		}
+	}
 	if address.NormalizeProvider(credential.Provider, address.S3Provider) != address.S3Provider {
 		return nil, &Error{Kind: ErrorUnsupported, Message: fmt.Sprintf("provider %q is not supported for server-backed add-url inspection", credential.Provider)}
 	}
@@ -196,6 +207,33 @@ func (s *Service) inspectRaw(ctx context.Context, request internalapi.InternalIn
 		metadata.Path = path.Base(key)
 	}
 	return metadata, nil
+}
+
+func (s *Service) rawStorageKeyVisible(ctx context.Context, bucket, key string) (bool, error) {
+	if err := address.ValidateScopedKey(key); err != nil {
+		return false, &Error{Kind: ErrorInvalidInput, Message: err.Error(), Cause: err}
+	}
+	if s.scopeCatalog == nil {
+		return false, &Error{Kind: ErrorUnsupported, Message: "bucket scope catalog is not configured"}
+	}
+	scopes, err := s.scopeCatalog.ListBucketScopes(ctx)
+	if err != nil {
+		return false, err
+	}
+	for _, scope := range scopes {
+		if !strings.EqualFold(strings.TrimSpace(scope.Bucket), strings.TrimSpace(bucket)) {
+			continue
+		}
+		resource, err := clientaccess.ResourcePath(scope.Organization, scope.ProjectID)
+		if err != nil || resource == "" || !access.HasMethodAccess(ctx, readMethod, []string{resource}) {
+			continue
+		}
+		prefix := strings.Trim(strings.TrimSpace(scope.PathPrefix), "/")
+		if prefix == "" || key == prefix || strings.HasPrefix(key, prefix+"/") {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (s *Service) inspectScoped(ctx context.Context, request internalapi.InternalInspectObjectRequest) (*objectMetadata, error) {
@@ -219,7 +257,10 @@ func (s *Service) inspectScoped(ctx context.Context, request internalapi.Interna
 	if err != nil {
 		return nil, err
 	}
-	key = normalizeScopedStorageKey(target.Prefix, key, target.Prefixes...)
+	key, err = normalizeScopedStorageKey(target.Prefix, key, target.Prefixes...)
+	if err != nil {
+		return nil, &Error{Kind: ErrorInvalidInput, Message: err.Error(), Cause: err}
+	}
 	metadata, err := s.probeStorage(ctx, target.Bucket, key)
 	if err != nil {
 		return nil, err
@@ -234,25 +275,28 @@ func (s *Service) inspectScoped(ctx context.Context, request internalapi.Interna
 	return metadata, nil
 }
 
-func normalizeScopedStorageKey(prefix, key string, scopePrefixes ...string) string {
+func normalizeScopedStorageKey(prefix, key string, scopePrefixes ...string) (string, error) {
 	prefix = strings.Trim(strings.TrimSpace(prefix), "/")
 	key = strings.Trim(strings.TrimSpace(key), "/")
+	if err := address.ValidateScopedKey(key); err != nil {
+		return "", err
+	}
 	if len(scopePrefixes) > 0 {
 		for _, scopePrefix := range scopePrefixes {
 			key = address.TrimLeadingStoragePrefix(key, scopePrefix)
 		}
 		if prefix == "" {
-			return key
+			return key, nil
 		}
 		if key == "" {
-			return prefix
+			return prefix, nil
 		}
-		return path.Join(prefix, key)
+		return path.Join(prefix, key), nil
 	}
 	if prefix == "" || key == prefix || strings.HasPrefix(key, prefix+"/") {
-		return key
+		return key, nil
 	}
-	return path.Join(prefix, key)
+	return path.Join(prefix, key), nil
 }
 
 func (s *Service) probeStorage(ctx context.Context, bucket, key string) (*objectMetadata, error) {

@@ -14,15 +14,16 @@ import (
 	"strings"
 )
 
-type localKeyManager struct{}
+type localKeyManager struct {
+	masterKey string
+	keyPath   string
+}
 
-func credentialMasterKey() ([]byte, error) {
-	raw := strings.TrimSpace(os.Getenv(CredentialMasterKeyEnv))
-	if raw != "" {
-		return parseUserProvidedKey(raw, CredentialMasterKeyEnv)
+func (m *localKeyManager) key() ([]byte, error) {
+	if m.masterKey != "" {
+		return parseUserProvidedKey(m.masterKey, CredentialMasterKeyEnv)
 	}
-	// Default behavior: managed local KEK persisted on the server.
-	return loadOrCreateLocalCredentialKey()
+	return loadOrCreateLocalCredentialKey(m.keyPath)
 }
 
 func parseUserProvidedKey(raw string, envName string) ([]byte, error) {
@@ -34,32 +35,20 @@ func parseUserProvidedKey(raw string, envName string) ([]byte, error) {
 	}
 
 	decoded, err := base64.StdEncoding.DecodeString(raw)
-	if err == nil {
-		if len(decoded) != 32 {
-			return nil, fmt.Errorf("%s must decode to 32 bytes for AES-256", envName)
-		}
+	if err == nil && len(decoded) == 32 {
 		return decoded, nil
 	}
 
 	if len(raw) == 32 {
 		return []byte(raw), nil
 	}
+	if err == nil {
+		return nil, fmt.Errorf("%s must decode to 32 bytes for AES-256", envName)
+	}
 	return nil, fmt.Errorf("%s must be a 32-byte raw key, 64-char hex key, or base64-encoded 32-byte key", envName)
 }
 
-func localCredentialKeyPath() string {
-	if p := strings.TrimSpace(os.Getenv(CredentialLocalKeyFileEnv)); p != "" {
-		return p
-	}
-	if sqlitePath := strings.TrimSpace(os.Getenv(DatabaseSQLiteFileEnv)); sqlitePath != "" {
-		return filepath.Join(filepath.Dir(sqlitePath), ".syfon-credential-kek")
-	}
-	// SECURITY FIX HIGH-3: Default to /app instead of /tmp or user home directories
-	return "/app/.syfon-credential-kek"
-}
-
-func loadOrCreateLocalCredentialKey() ([]byte, error) {
-	keyPath := localCredentialKeyPath()
+func loadOrCreateLocalCredentialKey(keyPath string) ([]byte, error) {
 	if b, err := os.ReadFile(keyPath); err == nil {
 		return parseUserProvidedKey(strings.TrimSpace(string(b)), CredentialLocalKeyFileEnv)
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -147,7 +136,7 @@ func loadOrCreateLocalCredentialKey() ([]byte, error) {
 func (m *localKeyManager) Name() string { return defaultCredentialKeyManager }
 
 func (m *localKeyManager) WrapDataKey(_ context.Context, dataKey []byte) (*WrappedDataKey, error) {
-	kek, err := credentialMasterKey()
+	kek, err := m.key()
 	if err != nil {
 		return nil, err
 	}
@@ -173,7 +162,7 @@ func (m *localKeyManager) UnwrapDataKey(_ context.Context, wrapped *WrappedDataK
 	if wrapped == nil {
 		return nil, fmt.Errorf("wrapped data key is required")
 	}
-	kek, err := credentialMasterKey()
+	kek, err := m.key()
 	if err != nil {
 		return nil, err
 	}

@@ -2,8 +2,11 @@ package upload
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -36,16 +39,23 @@ func Upload(ctx context.Context, backend transfer.MultipartBackend, sourcePath, 
 	})
 }
 
-// RegisterFile orchestrates the full registration and upload flow:
-// 1. Build a DRS object from the local file (if not provided).
-// 2. Register metadata with the DRS server via the provided drs.Client.
-// 3. Upload the file content via the provided Backend.
-func RegisterFile(ctx context.Context, bk UploadBackend, dc MetadataClient, drsObject *drsapi.DrsObject, filePath string, bucketName string) (*drsapi.DrsObject, error) {
+// RegisterFile uploads filePath and registers drsObject with the DRS server.
+// canonicalLocation overrides URL resolution from the uploaded location.
+func RegisterFile(ctx context.Context, bk UploadBackend, dc MetadataClient, drsObject *drsapi.DrsObject, filePath, bucketName string, canonicalLocation ...string) (*drsapi.DrsObject, error) {
+	if len(canonicalLocation) > 1 {
+		return nil, fmt.Errorf("at most one canonical location may be provided")
+	}
 	// 1. Ensure we have a valid OID/metadata.
 	// (Logic ported and generalized from git-drs/client/local/local_client.go)
 
 	if drsObject == nil {
 		return nil, fmt.Errorf("drsObject must be provided (containing at least checksums/size)")
+	}
+	if drsObject.Contents != nil {
+		return nil, fmt.Errorf("%w: contents is not supported for object registration", errorapi.ErrInvalidInput)
+	}
+	if drsObject.MimeType != nil {
+		return nil, fmt.Errorf("%w: mime_type is not supported for object registration", errorapi.ErrInvalidInput)
 	}
 	requestedID := strings.TrimSpace(drsObject.Id)
 	if requestedID == "" {
@@ -95,6 +105,20 @@ func RegisterFile(ctx context.Context, bk UploadBackend, dc MetadataClient, drsO
 	if err != nil {
 		return nil, fmt.Errorf("failed to stat file: %w", err)
 	}
+	if expected := strings.TrimSpace(clienthash.ConvertDrsChecksumsToHashInfo(drsObject.Checksums).SHA256); expected != "" {
+		expected = clienthash.NormalizeOid(expected)
+		if expected == "" {
+			return nil, fmt.Errorf("%w: invalid SHA-256 checksum", errorapi.ErrInvalidInput)
+		}
+		hasher := sha256.New()
+		if _, err := io.Copy(hasher, file); err != nil {
+			return nil, fmt.Errorf("failed to compute file SHA-256: %w", err)
+		}
+		actual := hex.EncodeToString(hasher.Sum(nil))
+		if actual != expected {
+			return nil, fmt.Errorf("%w: SHA-256 mismatch: file has %s, metadata says %s", errorapi.ErrInvalidInput, actual, expected)
+		}
+	}
 
 	threshold := int64(4.5 * float64(common.GB)) // Default threshold with safety buffer
 	canonicalInput := ""
@@ -124,12 +148,19 @@ func RegisterFile(ctx context.Context, bk UploadBackend, dc MetadataClient, drsO
 	}
 
 	// 4. Finalize registration with a concrete access location.
-	canonical, err := bk.CanonicalObjectURL(canonicalInput, bucketName, storageID)
-	if err != nil || canonical == "" {
-		if err == nil {
-			err = fmt.Errorf("empty canonical URL returned")
+	canonical := ""
+	if len(canonicalLocation) == 1 {
+		canonical = strings.TrimSpace(canonicalLocation[0])
+	}
+	if canonical == "" {
+		var err error
+		canonical, err = bk.CanonicalObjectURL(canonicalInput, bucketName, storageID)
+		if err != nil || canonical == "" {
+			if err == nil {
+				err = fmt.Errorf("empty canonical URL returned")
+			}
+			return nil, fmt.Errorf("failed to derive canonical object URL: %w", err)
 		}
-		return nil, fmt.Errorf("failed to derive canonical object URL: %w", err)
 	}
 
 	current, getErr := dc.GetObject(ctx, drsObject.Id)

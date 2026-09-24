@@ -45,12 +45,10 @@ var Cmd = &cobra.Command{
 			return fmt.Errorf("empty download url for did %s", did)
 		}
 
-		data, err := readURLBytes(ctx, downloadURL, c)
+		sum, err := hashURL(ctx, downloadURL, c)
 		if err != nil {
 			return err
 		}
-		sumArr := sha256.Sum256(data)
-		sum := hex.EncodeToString(sumArr[:])
 
 		if err := c.Index().Upsert(ctx, did, "", "", 0, sum, nil); err != nil {
 			return fmt.Errorf("persist sha256: %w", err)
@@ -61,10 +59,10 @@ var Cmd = &cobra.Command{
 	},
 }
 
-func readURLBytes(ctx context.Context, rawURL string, c *syclient.Client) ([]byte, error) {
+func hashURL(ctx context.Context, rawURL string, c *syclient.Client) (string, error) {
 	parsed, err := url.Parse(strings.TrimSpace(rawURL))
 	if err != nil {
-		return nil, fmt.Errorf("parse download url: %w", err)
+		return "", fmt.Errorf("parse download url: %w", err)
 	}
 	switch strings.ToLower(parsed.Scheme) {
 	case "", "file":
@@ -72,38 +70,50 @@ func readURLBytes(ctx context.Context, rawURL string, c *syclient.Client) ([]byt
 		if srcPath == "" {
 			srcPath = rawURL
 		}
-		data, err := os.ReadFile(srcPath)
+		file, err := os.Open(srcPath)
 		if err != nil {
-			return nil, fmt.Errorf("read file source: %w", err)
+			return "", fmt.Errorf("read file source: %w", err)
 		}
-		return data, nil
+		defer file.Close()
+		sum, err := hashReader(file)
+		if err != nil {
+			return "", fmt.Errorf("read file source: %w", err)
+		}
+		return sum, nil
 	case "http", "https":
-		var resp *http.Response
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 		if err != nil {
-			return nil, fmt.Errorf("create download request: %w", err)
+			return "", fmt.Errorf("create download request: %w", err)
 		}
 		request.SkipAuth(req)
-		resp, err = c.Do(req)
+		resp, err := c.Do(req)
 		if err != nil {
-			return nil, fmt.Errorf("download request failed: %w", err)
+			return "", fmt.Errorf("download request failed: %w", err)
 		}
 		defer resp.Body.Close()
 		if resp.StatusCode >= 400 {
 			body, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
 			if err != nil {
-				return nil, fmt.Errorf("read error response body: %w", err)
+				return "", fmt.Errorf("read error response body: %w", err)
 			}
-			return nil, fmt.Errorf("download failed status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(body)))
+			return "", fmt.Errorf("download failed status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(body)))
 		}
-		data, err := io.ReadAll(resp.Body)
+		sum, err := hashReader(resp.Body)
 		if err != nil {
-			return nil, fmt.Errorf("read download response: %w", err)
+			return "", fmt.Errorf("read download response: %w", err)
 		}
-		return data, nil
+		return sum, nil
 	default:
-		return nil, fmt.Errorf("unsupported download url scheme %q", parsed.Scheme)
+		return "", fmt.Errorf("unsupported download url scheme %q", parsed.Scheme)
 	}
+}
+
+func hashReader(reader io.Reader) (string, error) {
+	hash := sha256.New()
+	if _, err := io.Copy(hash, reader); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
 func init() {

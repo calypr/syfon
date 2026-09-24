@@ -60,11 +60,12 @@ func TestResolveCopyScopes(t *testing.T) {
 	t.Run("resolves source and destination scopes", func(t *testing.T) {
 		sourceAPI := &copyBucketAPI{scopes: map[string][]bucketapi.BucketScopeResponse{"source-bucket": {sourceProject, sourceOrg}}, listErr: map[string]error{}}
 		targetAPI := &copyBucketAPI{scopes: map[string][]bucketapi.BucketScopeResponse{"target-bucket": {targetProject, targetOrg}}, listErr: map[string]error{}}
-		resolved, err := resolveCopyScopes(context.Background(), services.NewBucketsService(sourceAPI), services.NewBucketsService(targetAPI), map[string]bucketapi.BucketMetadata{"source-bucket": {}}, map[string]bucketapi.BucketMetadata{"target-bucket": {}}, srcScope, dstScope)
+		provider := "gcs"
+		resolved, err := resolveCopyScopes(context.Background(), services.NewBucketsService(sourceAPI), services.NewBucketsService(targetAPI), map[string]bucketapi.BucketMetadata{"source-bucket": {}}, map[string]bucketapi.BucketMetadata{"target-bucket": {Provider: &provider}}, srcScope, dstScope)
 		if err != nil {
 			t.Fatalf("resolveCopyScopes returned error: %v", err)
 		}
-		if resolved.sourceBucket != "source-bucket" || resolved.targetBucket != "target-bucket" || resolved.sourceProject == nil || resolved.sourceOrg == nil || resolved.targetProject == nil || resolved.targetOrg == nil {
+		if resolved.sourceBucket != "source-bucket" || resolved.targetBucket != "target-bucket" || resolved.targetProvider != "gcs" || resolved.sourceProject == nil || resolved.sourceOrg == nil || resolved.targetProject == nil || resolved.targetOrg == nil {
 			t.Fatalf("unexpected resolved scopes: %+v", resolved)
 		}
 	})
@@ -80,8 +81,9 @@ func TestResolveCopyScopes(t *testing.T) {
 	t.Run("falls back to source bucket when destination has no scope match", func(t *testing.T) {
 		sourceAPI := &copyBucketAPI{scopes: map[string][]bucketapi.BucketScopeResponse{"shared-bucket": {sourceProject}}, listErr: map[string]error{}}
 		targetAPI := &copyBucketAPI{scopes: map[string][]bucketapi.BucketScopeResponse{"shared-bucket": {}}, listErr: map[string]error{}}
-		resolved, err := resolveCopyScopes(context.Background(), services.NewBucketsService(sourceAPI), services.NewBucketsService(targetAPI), map[string]bucketapi.BucketMetadata{"shared-bucket": {}}, map[string]bucketapi.BucketMetadata{"shared-bucket": {}}, srcScope, dstScope)
-		if err != nil || resolved == nil || resolved.targetBucket != "shared-bucket" {
+		provider := "azure"
+		resolved, err := resolveCopyScopes(context.Background(), services.NewBucketsService(sourceAPI), services.NewBucketsService(targetAPI), map[string]bucketapi.BucketMetadata{"shared-bucket": {}}, map[string]bucketapi.BucketMetadata{"shared-bucket": {Provider: &provider}}, srcScope, dstScope)
+		if err != nil || resolved == nil || resolved.targetBucket != "shared-bucket" || resolved.targetProvider != "azure" {
 			t.Fatalf("resolveCopyScopes = %+v, %v; want source bucket fallback", resolved, err)
 		}
 	})
@@ -92,6 +94,25 @@ func TestResolveCopyScopes(t *testing.T) {
 		_, err := resolveCopyScopes(context.Background(), services.NewBucketsService(sourceAPI), services.NewBucketsService(targetAPI), map[string]bucketapi.BucketMetadata{"source-bucket": {}}, map[string]bucketapi.BucketMetadata{"other-bucket": {}}, srcScope, dstScope)
 		if err == nil || !strings.Contains(err.Error(), "source bucket \"source-bucket\" is not configured") {
 			t.Fatalf("missing destination bucket error = %v", err)
+		}
+	})
+
+	t.Run("defaults omitted target provider to S3", func(t *testing.T) {
+		sourceAPI := &copyBucketAPI{scopes: map[string][]bucketapi.BucketScopeResponse{"source-bucket": {sourceProject}}, listErr: map[string]error{}}
+		targetAPI := &copyBucketAPI{scopes: map[string][]bucketapi.BucketScopeResponse{"source-bucket": {}}, listErr: map[string]error{}}
+		resolved, err := resolveCopyScopes(context.Background(), services.NewBucketsService(sourceAPI), services.NewBucketsService(targetAPI), map[string]bucketapi.BucketMetadata{"source-bucket": {}}, map[string]bucketapi.BucketMetadata{"source-bucket": {}}, srcScope, dstScope)
+		if err != nil || resolved == nil || resolved.targetProvider != "s3" {
+			t.Fatalf("resolveCopyScopes target provider = %+v, %v; want S3 default", resolved, err)
+		}
+	})
+
+	t.Run("rejects unsupported explicit target provider", func(t *testing.T) {
+		sourceAPI := &copyBucketAPI{scopes: map[string][]bucketapi.BucketScopeResponse{"source-bucket": {sourceProject}}, listErr: map[string]error{}}
+		targetAPI := &copyBucketAPI{scopes: map[string][]bucketapi.BucketScopeResponse{"source-bucket": {}}, listErr: map[string]error{}}
+		provider := "unsupported"
+		_, err := resolveCopyScopes(context.Background(), services.NewBucketsService(sourceAPI), services.NewBucketsService(targetAPI), map[string]bucketapi.BucketMetadata{"source-bucket": {}}, map[string]bucketapi.BucketMetadata{"source-bucket": {Provider: &provider}}, srcScope, dstScope)
+		if err == nil || !strings.Contains(err.Error(), "unsupported provider") {
+			t.Fatalf("unsupported destination provider error = %v", err)
 		}
 	})
 
@@ -203,6 +224,102 @@ func TestEnsureDestinationScopes(t *testing.T) {
 			t.Fatalf("project write error = %v", err)
 		}
 	})
+}
+
+func TestEnsureDestinationScopesRejectsUntranslatableSourcePathBeforeWrites(t *testing.T) {
+	source := projectcopy.Scope{Organization: "source-org", Project: "source-project"}
+	target := projectcopy.Scope{Organization: "target-org", Project: "target-project"}
+	sourceProject := bucketapi.BucketScopeResponse{Organization: source.Organization, ProjectId: source.Project, Path: stringPtr("https://source.example/unmapped/project")}
+	sourceOrg := bucketapi.BucketScopeResponse{Organization: source.Organization, Path: stringPtr("s3://source-bucket/organizations/source-org")}
+	targetOrgA := bucketapi.BucketScopeResponse{Organization: target.Organization, Path: stringPtr("s3://target-a/organizations/target-org")}
+	targetOrgB := bucketapi.BucketScopeResponse{Organization: target.Organization, Path: stringPtr("s3://target-b/organizations/target-org")}
+	sourceAPI := &copyBucketAPI{
+		scopes:  map[string][]bucketapi.BucketScopeResponse{"source-bucket": {sourceProject, sourceOrg}},
+		listErr: map[string]error{},
+	}
+	targetAPI := &copyBucketAPI{
+		scopes: map[string][]bucketapi.BucketScopeResponse{
+			"target-a": {targetOrgA},
+			"target-b": {targetOrgB},
+		},
+		listErr: map[string]error{},
+	}
+	resolved, err := resolveCopyScopes(
+		context.Background(), services.NewBucketsService(sourceAPI), services.NewBucketsService(targetAPI),
+		map[string]bucketapi.BucketMetadata{"source-bucket": {}},
+		map[string]bucketapi.BucketMetadata{"target-a": {}, "target-b": {}},
+		source, target,
+	)
+	if err != nil {
+		t.Fatalf("resolveCopyScopes returned error: %v", err)
+	}
+
+	err = ensureDestinationScopes(context.Background(), &cobra.Command{}, services.NewBucketsService(targetAPI), resolved)
+	if err == nil || !strings.Contains(err.Error(), "cannot translate source project scope path") {
+		t.Fatalf("ensureDestinationScopes error = %v, want source path validation error", err)
+	}
+	if len(targetAPI.addCalls) != 0 {
+		t.Fatalf("AddScope calls = %d, want none before validation", len(targetAPI.addCalls))
+	}
+}
+
+func TestResolveCopyScopesKeepsDestinationBucketAndOrgPathPaired(t *testing.T) {
+	source := projectcopy.Scope{Organization: "source-org", Project: "source-project"}
+	target := projectcopy.Scope{Organization: "target-org", Project: "target-project"}
+	sourceProject := bucketapi.BucketScopeResponse{Organization: source.Organization, ProjectId: source.Project, Path: stringPtr("s3://source-bucket/organizations/source-org/projects/source-project")}
+	sourceOrg := bucketapi.BucketScopeResponse{Organization: source.Organization, Path: stringPtr("s3://source-bucket/organizations/source-org")}
+	pathA := "s3://target-a/custom/a/target-org"
+	pathB := "s3://target-b/custom/b/target-org"
+	sourceAPI := &copyBucketAPI{
+		scopes:  map[string][]bucketapi.BucketScopeResponse{"source-bucket": {sourceProject, sourceOrg}},
+		listErr: map[string]error{},
+	}
+	targetAPI := &copyBucketAPI{
+		scopes: map[string][]bucketapi.BucketScopeResponse{
+			"target-a": {{Organization: target.Organization, Path: &pathA}},
+			"target-b": {{Organization: target.Organization, Path: &pathB}},
+		},
+		listErr: map[string]error{},
+	}
+	targetBuckets := map[string]bucketapi.BucketMetadata{"target-a": {}, "target-b": {}}
+
+	var chosenBucket string
+	for range 20 {
+		resolved, err := resolveCopyScopes(
+			context.Background(), services.NewBucketsService(sourceAPI), services.NewBucketsService(targetAPI),
+			map[string]bucketapi.BucketMetadata{"source-bucket": {}}, targetBuckets, source, target,
+		)
+		if err != nil {
+			t.Fatalf("resolveCopyScopes returned error: %v", err)
+		}
+		if resolved.targetOrg == nil || resolved.targetOrg.Path == nil {
+			t.Fatalf("resolved destination organization scope is missing: %+v", resolved)
+		}
+		if chosenBucket == "" {
+			chosenBucket = resolved.targetBucket
+		} else if resolved.targetBucket != chosenBucket {
+			t.Fatalf("selected destination bucket changed from %q to %q across map iterations", chosenBucket, resolved.targetBucket)
+		}
+		wantPath := map[string]string{"target-a": pathA, "target-b": pathB}[resolved.targetBucket]
+		if wantPath == "" || *resolved.targetOrg.Path != wantPath {
+			t.Fatalf("destination bucket %q paired with organization path %q, want %q", resolved.targetBucket, *resolved.targetOrg.Path, wantPath)
+		}
+
+		targetAPI.addCalls = nil
+		if err := ensureDestinationScopes(context.Background(), &cobra.Command{}, services.NewBucketsService(targetAPI), resolved); err != nil {
+			t.Fatalf("ensureDestinationScopes returned error: %v", err)
+		}
+		if len(targetAPI.addCalls) != 1 {
+			t.Fatalf("AddScope calls = %d, want one project scope", len(targetAPI.addCalls))
+		}
+		call := targetAPI.addCalls[0]
+		if call.bucket != resolved.targetBucket || call.request.ProjectId != target.Project || call.request.Path == nil {
+			t.Fatalf("project AddScope call = %+v, inconsistent with selected bucket", call)
+		}
+		if got, want := *call.request.Path, strings.TrimRight(wantPath, "/")+"/projects/source-project"; got != want {
+			t.Fatalf("project scope path = %q, want paired path %q", got, want)
+		}
+	}
 }
 
 func stringPtr(value string) *string {

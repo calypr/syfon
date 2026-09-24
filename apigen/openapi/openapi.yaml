@@ -890,7 +890,7 @@ paths:
   /objects/register:
     post:
       summary: Register DRS objects
-      description: "**Optional Endpoint**: This endpoint is not required for DRS server implementations.  Not all DRS servers support object registration.    \nRegisters one or more \"candidate\" DRS objects with the server. If it accepts the request, the server will create  unique object IDs for each registered object and return them in fully-formed DRS objects in response.\nThis endpoint can be used after uploading files using methods negotiated with the `/upload-request` endpoint  to register the uploaded files as DRS objects, or to register existing data. The request body should contain candidate  DRS objects with all required metadata including access methods that correspond  to the upload methods used during file upload.\n**RECOMMENDED - Transactional Behavior**:  Registration operations SHOULD be atomic transactions. If ANY candidate object fails validation  or registration, the ENTIRE request SHOULD fail and NO objects SHOULD be registered. Servers SHOULD  implement this as an all-or-nothing operation to ensure data consistency, but MAY implement partial  registration with appropriate error reporting if transactional behavior is not feasible.\n**Authentication**: GA4GH Passports can be provided in the request body for authorization. Bearer tokens can be supplied in headers.\n**Server Responsibilities**: - SHOULD treat registration as an atomic transaction (all succeed or all fail) - SHOULD validate ALL candidate objects before registering ANY - Create unique object IDs for each registered object - Add timestamps (created_time, updated_time) - SHOULD roll back any partial changes if any candidate fails validation\n**Client Responsibilities**: - Provide required DRS object metadata for all candidates - Include access methods corresponding to uploaded file locations - Ensure checksums match uploaded file content - Handle potential failure of entire batch if any single object is invalid"
+      description: "**Optional Endpoint**: This endpoint is not required for DRS server implementations.  Not all DRS servers support object registration.    \nRegisters one or more \"candidate\" DRS objects with the server. If it accepts the request, the server will create  unique object IDs for each registered object and return them in fully-formed DRS objects in response.\nThis endpoint can be used after uploading files using methods negotiated with the `/upload-request` endpoint  to register the uploaded files as DRS objects, or to register existing data. The request body should contain candidate  DRS objects with all required metadata including access methods that correspond  to the upload methods used during file upload.\n**Syfon registration**: Syfon supports blob-only registration. Candidates with non-null `contents` or `mime_type` values receive HTTP 400 because Syfon cannot persist either field.\n**RECOMMENDED - Transactional Behavior**:  Registration operations SHOULD be atomic transactions. If ANY candidate object fails validation  or registration, the ENTIRE request SHOULD fail and NO objects SHOULD be registered. Servers SHOULD  implement this as an all-or-nothing operation to ensure data consistency, but MAY implement partial  registration with appropriate error reporting if transactional behavior is not feasible.\n**Authentication**: GA4GH Passports can be provided in the request body for authorization. Bearer tokens can be supplied in headers.\n**Server Responsibilities**: - SHOULD treat registration as an atomic transaction (all succeed or all fail) - SHOULD validate ALL candidate objects before registering ANY - Create unique object IDs for each registered object - Add timestamps (created_time, updated_time) - SHOULD roll back any partial changes if any candidate fails validation\n**Client Responsibilities**: - Provide required DRS object metadata for all candidates - Include access methods corresponding to uploaded file locations - Ensure checksums match uploaded file content - Handle potential failure of entire batch if any single object is invalid"
       operationId: RegisterObjects
       security:
         - {}
@@ -1132,7 +1132,7 @@ paths:
         **RECOMMENDED - Transactional Behavior**:  Deletion operations SHOULD be atomic transactions. If ANY object fails validation or deletion,  the ENTIRE request SHOULD fail and NO objects SHOULD be deleted. Servers SHOULD implement this as an  all-or-nothing operation to ensure data consistency, but MAY implement partial deletion with  appropriate error reporting if transactional behavior is not feasible.
         **Authentication**: GA4GH Passports can be provided in the request body for authorization.
         **Storage Data Deletion**: The `delete_storage_data` parameter controls whether the server will attempt to delete underlying storage files along with DRS metadata. This defaults to false for safety. Servers will make a best effort attempt to delete storage data, but success is not guaranteed.
-        **Server Responsibilities**: - SHOULD treat deletion as an atomic transaction (all succeed or all fail) - SHOULD validate ALL object IDs exist and are accessible before deleting ANY - SHOULD roll back any partial changes if any object fails deletion - SHOULD return 400 if any object ID is invalid or inaccessible when using transactional behavior
+        **Server Responsibilities**: - SHOULD treat deletion as an atomic transaction (all succeed or all fail) - SHOULD validate ALL object IDs exist and are accessible before deleting ANY - SHOULD roll back any partial changes if any object fails deletion - With transactional behavior, return 404 if any requested object ID does not exist, or 403 if the caller cannot delete any requested object. No object in a rejected batch is deleted.
         **Client Responsibilities**: - Provide valid object IDs for all objects to be deleted - Handle potential failure of entire batch if any single object cannot be deleted - Check service-info for `maxBulkDeleteLength` limits before making requests
       operationId: bulkDeleteObjects
       tags:
@@ -1720,6 +1720,10 @@ components:
           example: 'Authorization: Basic Z2E0Z2g6ZHJz'
     DrsObjectCandidate:
       type: object
+      description: |-
+        Syfon supports blob-only registration through `/objects/register`.
+        Any non-null `contents` or `mime_type` value submitted in a candidate is rejected
+        because Syfon cannot persist either field.
       required:
         - size
         - checksums
@@ -1742,7 +1746,9 @@ components:
             (Some systems may use checksum, a RFC3339 timestamp, or an incrementing version number.)
         mime_type:
           type: string
-          description: A string providing the mime-type of the `DrsObject`.
+          description: |-
+            A string providing the mime-type of the `DrsObject`.
+            Syfon rejects a non-null value because it cannot persist this field.
           example: application/json
         checksums:
           type: array
@@ -1773,8 +1779,8 @@ components:
         contents:
           type: array
           description: |-
-            If not set, this `DrsObject` is a single blob.
-            If set, this `DrsObject` is a bundle containing the listed `ContentsObject` s (some of which may be further nested).
+            DRS bundle contents. Syfon supports blob-only registration and rejects a non-null
+            value because it cannot persist this field.
           items:
             $ref: '#/components/schemas/ContentsObject'
         description:

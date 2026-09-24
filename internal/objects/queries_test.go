@@ -3,7 +3,9 @@ package objects_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
+	"reflect"
 	"slices"
 	"testing"
 	"time"
@@ -331,7 +333,7 @@ func TestListRecordsFiltersUnauthorizedScopes(t *testing.T) {
 	}
 }
 
-func TestListRecordsPreservesBroadWriteAuthorizationWithOptionalPager(t *testing.T) {
+func TestListRecordsPreservesBroadWriteAuthorizationWithPager(t *testing.T) {
 	database := newSQLiteDatabase(t)
 	service := objects.NewService(database)
 	registerScopedCandidate(t, service, "broad-write", "5656565656565656565656565656565656565656565656565656565656565656", "secure", "p1")
@@ -349,6 +351,33 @@ func TestListRecordsPreservesBroadWriteAuthorizationWithOptionalPager(t *testing
 	}
 	if len(records) != 1 || records[0].Id != "broad-write" {
 		t.Fatalf("ListObjects returned %+v, want broad-write", records)
+	}
+}
+
+func TestListRecordsBroadWriteCanonicalizesLegacySiblingsBeforePaging(t *testing.T) {
+	const siblingCount = 105
+	const checksum = "6666666666666666666666666666666666666666666666666666666666666666"
+	controlled := []string{"/programs/org/projects/project"}
+	store := &objectTestStore{Objects: make(map[string]*drs.DrsObject, siblingCount)}
+	for i := range siblingCount {
+		id := fmt.Sprintf("legacy-%03d", i)
+		store.Objects[id] = &drs.DrsObject{
+			Id:               id,
+			Checksums:        []drs.Checksum{{Type: "sha256", Checksum: checksum}},
+			ControlledAccess: &controlled,
+		}
+	}
+	service := objects.NewService(store)
+	ctx := buildLocalAuthzContext(map[string]map[string]bool{
+		"/programs": {"update": true},
+	})
+
+	records, err := service.ListObjects(ctx, objects.RecordListQuery{RequiredMethod: "update", Limit: 10})
+	if err != nil {
+		t.Fatalf("ListObjects returned an error: %v", err)
+	}
+	if len(records) != 1 || records[0].Id != "legacy-000" {
+		t.Fatalf("ListObjects returned %d legacy siblings, want canonical legacy-000", len(records))
 	}
 }
 
@@ -428,6 +457,41 @@ func TestListObjectIDsByScope_AuthzFiltering(t *testing.T) {
 	}
 	if len(ids) != 1 || ids[0] != "secure-obj" {
 		t.Fatalf("expected secure-obj, got %+v", ids)
+	}
+}
+
+func TestListReadableObjectIDsAmongFetchesOnlyRequestedRecords(t *testing.T) {
+	resource := "/organization/org/project/project"
+	tracked := &objectTestStore{Objects: map[string]*drs.DrsObject{
+		"requested": {Id: "requested", ControlledAccess: &[]string{resource}},
+		"unrelated": {Id: "unrelated", ControlledAccess: &[]string{resource}},
+	}}
+	service := objects.NewService(tracked)
+	ctx := buildLocalAuthzContext(map[string]map[string]bool{resource: {"read": true}})
+	ids, err := service.ListReadableObjectIDsAmong(ctx, "org", "project", []string{"requested", "missing"})
+	if err != nil || !slices.Equal(ids, []string{"requested"}) {
+		t.Fatalf("readable IDs = %v, err = %v", ids, err)
+	}
+	if !slices.Equal(tracked.BulkRequested, []string{"requested", "missing"}) || tracked.ScopeListCalls != 0 {
+		t.Fatalf("lookup fetched %v and listed scope %d times", tracked.BulkRequested, tracked.ScopeListCalls)
+	}
+}
+
+func TestResolveObjectIDsResolvesAliasesAndPhysicalIDsInBatch(t *testing.T) {
+	database := newSQLiteDatabase(t)
+	service := objects.NewService(database)
+	registerScopedCandidate(t, service, "canonical", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "org", "project")
+	if err := database.CreateObjectAlias(context.Background(), "legacy-alias", "canonical"); err != nil {
+		t.Fatalf("CreateObjectAlias: %v", err)
+	}
+
+	resolved, err := service.ResolveObjectIDs(context.Background(), []string{"legacy-alias", "canonical", "missing", "legacy-alias"})
+	if err != nil {
+		t.Fatalf("ResolveObjectIDs: %v", err)
+	}
+	want := map[string]string{"legacy-alias": "canonical", "canonical": "canonical"}
+	if !reflect.DeepEqual(resolved, want) {
+		t.Fatalf("resolved IDs = %v, want %v", resolved, want)
 	}
 }
 

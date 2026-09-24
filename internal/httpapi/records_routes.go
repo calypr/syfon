@@ -123,13 +123,33 @@ func (s *internalServer) InternalBulkSHA256Validity(c fiber.Ctx) error {
 	if err := c.Bind().JSON(&req); err != nil {
 		return Reject(c, fiber.StatusBadRequest, "Invalid request body")
 	}
-	if req.Sha256 == nil || len(*req.Sha256) == 0 {
-		return Reject(c, fiber.StatusBadRequest, "Invalid request body: sha256 values are required")
+
+	var requested []string
+	switch {
+	case req.Sha256 != nil && req.Hashes != nil:
+		if len(*req.Sha256) != len(*req.Hashes) {
+			return Reject(c, fiber.StatusBadRequest, "Invalid request body: sha256 and hashes must match when both are provided")
+		}
+		for i, hash := range *req.Sha256 {
+			if hash != (*req.Hashes)[i] {
+				return Reject(c, fiber.StatusBadRequest, "Invalid request body: sha256 and hashes must match when both are provided")
+			}
+		}
+		requested = *req.Sha256
+	case req.Sha256 != nil:
+		requested = *req.Sha256
+	case req.Hashes != nil:
+		requested = *req.Hashes
+	default:
+		return Reject(c, fiber.StatusBadRequest, "Invalid request body: sha256 or hashes values are required")
+	}
+	if len(requested) == 0 {
+		return Reject(c, fiber.StatusBadRequest, "Invalid request body: sha256 or hashes values are required")
 	}
 
-	hashes := make([]string, 0, len(*req.Sha256))
-	out := make(map[string]bool, len(*req.Sha256))
-	for _, raw := range *req.Sha256 {
+	hashes := make([]string, 0, len(requested))
+	out := make(map[string]bool, len(requested))
+	for _, raw := range requested {
 		hash := strings.TrimSpace(raw)
 		if hash == "" {
 			continue
@@ -138,7 +158,7 @@ func (s *internalServer) InternalBulkSHA256Validity(c fiber.Ctx) error {
 		out[hash] = false
 	}
 	if len(hashes) == 0 {
-		return Reject(c, fiber.StatusBadRequest, "Invalid request body: sha256 values are required")
+		return Reject(c, fiber.StatusBadRequest, "Invalid request body: sha256 or hashes values are required")
 	}
 
 	records, err := s.objects.GetObjectsByChecksums(c.Context(), hashes, "read")
@@ -171,7 +191,21 @@ func (s *internalServer) InternalDeleteByQuery(c fiber.Ctx, _ internalapi.Intern
 		return Reject(c, fiber.StatusBadRequest, "No scope specified")
 	}
 
-	count, err := s.objects.DeleteBulkByScope(c.Context(), scope.Organization, scope.Project)
+	hash := strings.TrimSpace(c.Query("hash"))
+	hashType := strings.TrimSpace(c.Query("hash_type"))
+	if hash == "" && hashType != "" {
+		return Reject(c, fiber.StatusBadRequest, "hash is required when hash_type is set")
+	}
+	var count int
+	if hash != "" {
+		checksumType, checksumValue := objects.ParseHashQuery(hash, hashType)
+		if checksumValue == "" {
+			return Reject(c, fiber.StatusBadRequest, "hash value is required")
+		}
+		count, err = s.objects.DeleteBulkByScopeMatchingChecksum(c.Context(), scope.Organization, scope.Project, objects.ChecksumQuery{Type: checksumType, Value: checksumValue})
+	} else {
+		count, err = s.objects.DeleteBulkByScope(c.Context(), scope.Organization, scope.Project)
+	}
 	if err != nil {
 		return HandleError(c, err)
 	}

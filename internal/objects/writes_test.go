@@ -218,6 +218,96 @@ func TestRegisterCandidatesReturnsMaterializedRecordsInRequestOrder(t *testing.T
 	}
 }
 
+func TestRegisterCandidatesSucceedsWithCreateWithoutRead(t *testing.T) {
+	database := newSQLiteDatabase(t)
+	service := objects.NewService(database)
+	resource := "/organization/org1/project/create-only"
+	id := "create-only-record"
+	candidate := drs.DrsObjectCandidate{
+		Aliases:          ptr([]string{"id:" + id}),
+		ControlledAccess: ptr([]string{resource}),
+		Size:             7,
+		Checksums:        []drs.Checksum{{Type: "sha256", Checksum: strings.Repeat("a", 64)}},
+		AccessMethods:    ptr([]drs.AccessMethod{drsAccessMethod("s3")}),
+	}
+	ctx := buildGen3Context(map[string]map[string]bool{resource: {"create": true}})
+
+	registered, err := service.RegisterCandidates(ctx, []drs.DrsObjectCandidate{candidate})
+	if err != nil {
+		stored, storeErr := database.GetObject(context.Background(), id)
+		if storeErr == nil {
+			t.Errorf("registration returned %v after persisting record %q", err, stored.Id)
+		}
+		t.Fatalf("RegisterCandidates() with create-only access: %v", err)
+	}
+	if len(registered) != 1 || registered[0].Id != id {
+		t.Fatalf("registered objects = %#v, want one durable record %q", registered, id)
+	}
+}
+
+func TestAccessMethodUpdatesSucceedWithUpdateWithoutRead(t *testing.T) {
+	resource := "/organization/org1/project/update-only"
+	seed := func(t *testing.T) (objects.ObjectStore, *objects.Service, context.Context) {
+		database := newSQLiteDatabase(t)
+		created := time.Now().UTC()
+		oldMethods := []drs.AccessMethod{drsAccessMethod("old")}
+		for i, id := range []string{"update-only-one", "update-only-two"} {
+			hash := strings.Repeat("b", 64)
+			if i == 1 {
+				hash = strings.Repeat("c", 64)
+			}
+			record := drs.DrsObject{
+				Id: id, Size: 7, CreatedTime: created, UpdatedTime: &created,
+				Checksums:        []drs.Checksum{{Type: "sha256", Checksum: hash}},
+				ControlledAccess: ptr([]string{resource}), AccessMethods: &oldMethods,
+			}
+			if err := database.RegisterObjects(context.Background(), []drs.DrsObject{record}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		ctx := buildGen3Context(map[string]map[string]bool{resource: {"update": true}})
+		return database, objects.NewService(database), ctx
+	}
+	assertUpdated := func(t *testing.T, database objects.ObjectStore, id, expectedURL string) {
+		t.Helper()
+		persisted, err := database.GetObject(context.Background(), id)
+		if err != nil {
+			t.Fatalf("GetObject(%q) after update: %v", id, err)
+		}
+		if persisted.AccessMethods == nil || len(*persisted.AccessMethods) != 1 || (*persisted.AccessMethods)[0].AccessUrl == nil || (*persisted.AccessMethods)[0].AccessUrl.Url != expectedURL {
+			t.Fatalf("persisted access methods for %q = %#v, want %q", id, persisted.AccessMethods, expectedURL)
+		}
+	}
+
+	t.Run("single", func(t *testing.T) {
+		database, service, ctx := seed(t)
+		updated, err := service.UpdateAccessMethodsAndRead(ctx, "update-only-one", []drs.AccessMethod{drsAccessMethod("new-single")})
+		if err != nil {
+			assertUpdated(t, database, "update-only-one", "s3://bucket/new-single")
+			t.Fatalf("single update returned an error after commit: %v", err)
+		}
+		if updated == nil || updated.AccessMethods == nil || (*updated.AccessMethods)[0].AccessUrl.Url != "s3://bucket/new-single" {
+			t.Fatalf("single update result = %#v", updated)
+		}
+	})
+
+	t.Run("bulk", func(t *testing.T) {
+		database, service, ctx := seed(t)
+		updated, err := service.BulkUpdateAccessMethodsAndRead(ctx, []drs.AccessMethodUpdate{
+			{ObjectId: "update-only-one", AccessMethods: []drs.AccessMethod{drsAccessMethod("new-one")}},
+			{ObjectId: "update-only-two", AccessMethods: []drs.AccessMethod{drsAccessMethod("new-two")}},
+		})
+		if err != nil {
+			assertUpdated(t, database, "update-only-one", "s3://bucket/new-one")
+			assertUpdated(t, database, "update-only-two", "s3://bucket/new-two")
+			t.Fatalf("bulk update returned an error after commit: %v", err)
+		}
+		if len(updated) != 2 || updated[0].Id != "update-only-one" || updated[1].Id != "update-only-two" {
+			t.Fatalf("bulk update results = %#v", updated)
+		}
+	})
+}
+
 func TestRegisterObjectsReturnsDurableCanonicalRecords(t *testing.T) {
 	database := newSQLiteDatabase(t)
 	service := objects.NewService(database)

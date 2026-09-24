@@ -515,6 +515,10 @@ paths:
       tags:
         - internal-index
       operationId: internalBulkSHA256Validity
+      description: >-
+        Provide sha256 or its hashes alias. If both fields are present, their arrays must be identical.
+        An empty request, an empty array, or values that are all empty or whitespace-only return 400.
+        Conflicting arrays also return 400.
       requestBody:
         required: true
         content:
@@ -870,7 +874,7 @@ paths:
       tags:
         - internal-maintenance
       operationId: internalInspectObject
-      description: Inspect one object in project storage.
+      description: Return storage metadata for one object. Validation fields are not accepted. Use /data/inspect/bulk to validate expected values.
       requestBody:
         required: true
         content:
@@ -913,7 +917,7 @@ paths:
       tags:
         - internal-maintenance
       operationId: internalInspectObjectBulk
-      description: Inspect multiple objects in project storage.
+      description: Inspect multiple objects in project storage and validate requested size, name, and SHA-256 values.
       requestBody:
         required: true
         content:
@@ -950,7 +954,7 @@ paths:
       tags:
         - internal-maintenance
       operationId: internalInspectObjectBulkList
-      description: Validate multiple object inventory records.
+      description: Validate multiple object inventory records. A requested SHA-256 check is unverifiable when inventory has no remote SHA-256 metadata.
       requestBody:
         required: true
         content:
@@ -1702,10 +1706,12 @@ components:
       properties:
         sha256:
           type: array
+          description: SHA-256 values to validate.
           items:
             type: string
         hashes:
           type: array
+          description: Alias for sha256. If both fields are present, this array must be identical to sha256.
           items:
             type: string
     BulkMissingSHA256Request:

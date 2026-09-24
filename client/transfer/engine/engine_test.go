@@ -705,7 +705,7 @@ func TestGenericDownloaderDownloadSingleVariants(t *testing.T) {
 			return nil
 		})
 
-		if err := d.downloadSingle(ctx, "guid-1", dst, 11); err != nil {
+		if err := d.downloadSingle(ctx, "guid-1", dst, 11, true); err != nil {
 			t.Fatalf("downloadSingle returned error: %v", err)
 		}
 		got, err := os.ReadFile(dst)
@@ -732,7 +732,7 @@ func TestGenericDownloaderDownloadSingleVariants(t *testing.T) {
 			t.Fatalf("WriteFile returned error: %v", err)
 		}
 
-		if err := d.downloadSingle(context.Background(), "guid-2", dst, 6); err != nil {
+		if err := d.downloadSingle(context.Background(), "guid-2", dst, 6, true); err != nil {
 			t.Fatalf("downloadSingle returned error: %v", err)
 		}
 		got, err := os.ReadFile(dst)
@@ -752,7 +752,7 @@ func TestGenericDownloaderDownloadSingleVariants(t *testing.T) {
 			t.Fatalf("WriteFile returned error: %v", err)
 		}
 
-		if err := d.downloadSingle(context.Background(), "guid-3", dst, 3); err != nil {
+		if err := d.downloadSingle(context.Background(), "guid-3", dst, 3, true); err != nil {
 			t.Fatalf("downloadSingle returned error: %v", err)
 		}
 		if len(backend.rangeCalls) != 0 {
@@ -763,7 +763,7 @@ func TestGenericDownloaderDownloadSingleVariants(t *testing.T) {
 	t.Run("short download returns error", func(t *testing.T) {
 		backend := &fakeBackend{data: []byte("abc")}
 		d := &downloader{Source: backend}
-		err := d.downloadSingle(context.Background(), "guid-4", filepath.Join(t.TempDir(), "short.bin"), 5)
+		err := d.downloadSingle(context.Background(), "guid-4", filepath.Join(t.TempDir(), "short.bin"), 5, true)
 		if err == nil || !strings.Contains(err.Error(), "short download") {
 			t.Fatalf("expected short download error, got %v", err)
 		}

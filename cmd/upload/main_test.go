@@ -2,6 +2,8 @@ package upload
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"os"
 	"path/filepath"
@@ -192,5 +194,50 @@ func TestUploadRecordPathFallsBackToBaseNameOutsideCWD(t *testing.T) {
 	}
 	if got != "file.tsv" {
 		t.Fatalf("expected basename fallback, got %q", got)
+	}
+}
+
+func TestHashFileSHA256HandlesLargeFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "large.bin")
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create test file: %v", err)
+	}
+
+	block := []byte("syfon upload checksum streaming test\n")
+	const size = 16 << 20
+	expected := sha256.New()
+	for written := 0; written < size; {
+		chunk := block
+		if remaining := size - written; remaining < len(chunk) {
+			chunk = chunk[:remaining]
+		}
+		n, err := file.Write(chunk)
+		if err != nil {
+			_ = file.Close()
+			t.Fatalf("write test file: %v", err)
+		}
+		if n != len(chunk) {
+			_ = file.Close()
+			t.Fatalf("short test file write: wrote %d of %d bytes", n, len(chunk))
+		}
+		_, _ = expected.Write(chunk)
+		written += n
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("close test file: %v", err)
+	}
+
+	got, err := hashFileSHA256(path)
+	if err != nil {
+		t.Fatalf("hashFileSHA256 returned error: %v", err)
+	}
+	if want := hex.EncodeToString(expected.Sum(nil)); got != want {
+		t.Fatalf("hashFileSHA256 = %s, want %s", got, want)
+	}
+	if gotSize, err := os.Stat(path); err != nil {
+		t.Fatalf("stat test file: %v", err)
+	} else if gotSize.Size() != size {
+		t.Fatalf("test file size = %d, want %d", gotSize.Size(), size)
 	}
 }

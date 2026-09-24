@@ -55,6 +55,20 @@ func testListPages(t *testing.T, provider *backend, client *fakeListClient, requ
 	return items, stats, err
 }
 
+func TestListPagesStopsAtTotalResultLimit(t *testing.T) {
+	client := &fakeListClient{pages: map[string][]fakeListPage{
+		"": {{output: testListPage("next-page", "prefix/one.txt")}},
+	}}
+	request := storage.InventoryRequest{Target: storage.Target{PhysicalBucket: "bucket"}, Prefix: "prefix", MaxKeys: 1, MaxResults: 1}
+	items, stats, err := testListPages(t, newTestBackend(), client, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].Key != "prefix/one.txt" || stats.Pages != 1 || len(client.calls) != 1 {
+		t.Fatalf("limited listing items=%v stats=%+v calls=%v", metadataKeys(items), stats, client.calls)
+	}
+}
+
 func TestListPagesRetriesTransientPageFailure(t *testing.T) {
 	restore := noRetrySleep(t)
 	defer restore()

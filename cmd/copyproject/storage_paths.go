@@ -9,7 +9,6 @@ import (
 	"github.com/calypr/syfon/apigen/bucketapi"
 	"github.com/calypr/syfon/cmd/projectcopy"
 
-	clientaccess "github.com/calypr/syfon/client/access"
 	"github.com/calypr/syfon/internal/storage/address"
 )
 
@@ -120,36 +119,22 @@ func hasPathPrefix(candidate, prefix []string) bool {
 	return true
 }
 
-func storageSchemeFromURL(raw string) string {
-	parsed, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil || strings.TrimSpace(parsed.Scheme) == "" {
-		return "s3"
-	}
-	return strings.TrimSpace(parsed.Scheme)
-}
-
-func scopedObjectURL(projectPath, bucket, key string) string {
+func scopedObjectURL(projectPath, bucket, key, provider string) string {
 	projectPath = strings.TrimSpace(projectPath)
 	key = strings.Trim(strings.TrimSpace(key), "/")
+	scheme := address.ProviderToScheme(provider)
 	if projectPath == "" {
-		return fmt.Sprintf("s3://%s/%s", bucket, key)
+		return fmt.Sprintf("%s://%s/%s", scheme, bucket, key)
 	}
 	parsed, err := url.Parse(projectPath)
 	if err != nil || strings.TrimSpace(parsed.Scheme) == "" || strings.TrimSpace(parsed.Host) == "" {
-		return fmt.Sprintf("s3://%s/%s", bucket, key)
+		return fmt.Sprintf("%s://%s/%s", scheme, bucket, key)
 	}
+	parsed.Scheme = scheme
 	if key != "" {
 		parsed.Path = "/" + path.Join(strings.Trim(strings.TrimSpace(parsed.Path), "/"), key)
 	}
 	return parsed.String()
-}
-
-func pathScope(resource string) (string, string) {
-	org, project, ok := clientaccess.ResourceScope(resource)
-	if !ok {
-		return "", ""
-	}
-	return org, project
 }
 
 func sameServerURL(left, right string) bool {

@@ -49,8 +49,7 @@ func buildServerRuntime(ctx context.Context, cfg *config.Config, logger *slog.Lo
 		return nil, err
 	}
 
-	applyCredentialEncryptionConfig(cfg)
-	cipher, cipherErr := credentialcipher.NewFromEnv()
+	cipher, cipherErr := credentialcipher.New(credentialEncryptionConfig(cfg))
 	if cipherErr != nil {
 		return nil, fmt.Errorf("invalid credential encryption configuration: %w", cipherErr)
 	}
@@ -170,12 +169,13 @@ func buildServerRuntime(ctx context.Context, cfg *config.Config, logger *slog.Lo
 
 	// Build the Fiber runtime and request handlers.
 	app := fiber.New(fiber.Config{
-		ReadTimeout:    30 * time.Second,
-		WriteTimeout:   120 * time.Second,
-		IdleTimeout:    120 * time.Second,
-		ReadBufferSize: 64 * 1024,
-		AppName:        "Syfon DRS Server",
-		ErrorHandler:   httpapi.FiberErrorHandler,
+		StreamRequestBody: true,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      120 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		ReadBufferSize:    64 * 1024,
+		AppName:           "Syfon DRS Server",
+		ErrorHandler:      httpapi.FiberErrorHandler,
 	})
 	app.Use(recover.New())
 
@@ -218,10 +218,11 @@ func openPostgresDatabase(ctx context.Context, cfg *config.Config, dsn string, c
 		ctx = context.Background()
 	}
 	options := postgres.OpenOptions{
-		SchemaMode:         postgres.SchemaModeAuto,
-		MaxOpenConnections: cfg.Database.Postgres.MaxOpenConnections,
-		MaxIdleConnections: cfg.Database.Postgres.MaxIdleConnections,
-		PingTimeout:        10 * time.Second,
+		SchemaMode:             postgres.SchemaModeAuto,
+		MaxOpenConnections:     cfg.Database.Postgres.MaxOpenConnections,
+		MaxIdleConnections:     cfg.Database.Postgres.MaxIdleConnections,
+		PingTimeout:            10 * time.Second,
+		SchemaBootstrapTimeout: 30 * time.Second,
 	}
 	if cfg.Database.Postgres.ConnectionMaxLifetimeSeconds > 0 {
 		options.ConnectionMaxLifetime = time.Duration(cfg.Database.Postgres.ConnectionMaxLifetimeSeconds) * time.Second
@@ -230,7 +231,7 @@ func openPostgresDatabase(ctx context.Context, cfg *config.Config, dsn string, c
 		options.ConnectionMaxIdleTime = time.Duration(cfg.Database.Postgres.ConnectionMaxIdleTimeSeconds) * time.Second
 	}
 	if cfg.Profile != config.ProfileProduction {
-		return postgres.NewPostgresDBWithOptions(dsn, cipher, options)
+		return postgres.NewPostgresDBWithOptions(ctx, dsn, cipher, options)
 	}
 
 	options.SchemaMode = postgres.SchemaModeCheck
@@ -247,7 +248,7 @@ func openPostgresDatabase(ctx context.Context, cfg *config.Config, dsn string, c
 				options.PingTimeout = remaining
 			}
 		}
-		database, err := postgres.NewPostgresDBWithOptions(dsn, cipher, options)
+		database, err := postgres.NewPostgresDBWithOptions(checkCtx, dsn, cipher, options)
 		if err == nil {
 			return database, nil
 		}
@@ -269,7 +270,6 @@ func retryProductionSchemaCheck(err error) bool {
 	}
 	message := strings.ToLower(err.Error())
 	for _, fragment := range []string{
-		"failed to ping database",
 		"schema migration ledger is missing",
 		"required schema relation",
 		"database schema is behind",
@@ -278,7 +278,28 @@ func retryProductionSchemaCheck(err error) bool {
 			return true
 		}
 	}
-	return false
+	if !strings.Contains(message, "failed to ping database") {
+		return false
+	}
+
+	var sqlStateError interface{ SQLState() string }
+	if errors.As(err, &sqlStateError) {
+		state := sqlStateError.SQLState()
+		return strings.HasPrefix(state, "08") || state == "57P03"
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var dnsError *net.DNSError
+	if errors.As(err, &dnsError) {
+		return dnsError.IsTemporary || dnsError.IsTimeout
+	}
+	var networkError *net.OpError
+	if errors.As(err, &networkError) {
+		return true
+	}
+	var temporaryError net.Error
+	return errors.As(err, &temporaryError) && (temporaryError.Timeout() || temporaryError.Temporary())
 }
 
 const maxSigningExpirySeconds = int64((1<<63 - 1) / int64(time.Second))
@@ -383,25 +404,18 @@ var Cmd = &cobra.Command{
 	},
 }
 
-func applyCredentialEncryptionConfig(cfg *config.Config) {
-	if cfg == nil {
-		return
+func credentialEncryptionConfig(cfg *config.Config) credentialcipher.Config {
+	resolved := credentialcipher.ConfigFromEnv()
+	if resolved.MasterKey == "" {
+		resolved.MasterKey = cfg.CredentialEncryption.MasterKey
 	}
-	if strings.TrimSpace(os.Getenv(credentialcipher.CredentialMasterKeyEnv)) == "" {
-		if masterKey := strings.TrimSpace(cfg.CredentialEncryption.MasterKey); masterKey != "" {
-			os.Setenv(credentialcipher.CredentialMasterKeyEnv, masterKey)
-		}
+	if resolved.LocalKeyFile == "" {
+		resolved.LocalKeyFile = cfg.CredentialEncryption.LocalKeyFile
 	}
-	if strings.TrimSpace(os.Getenv(credentialcipher.CredentialLocalKeyFileEnv)) == "" {
-		if localKeyFile := strings.TrimSpace(cfg.CredentialEncryption.LocalKeyFile); localKeyFile != "" {
-			os.Setenv(credentialcipher.CredentialLocalKeyFileEnv, localKeyFile)
-		}
+	if resolved.SQLiteFile == "" && cfg.Database.Sqlite != nil {
+		resolved.SQLiteFile = cfg.Database.Sqlite.File
 	}
-	if strings.TrimSpace(os.Getenv(credentialcipher.DatabaseSQLiteFileEnv)) == "" && cfg.Database.Sqlite != nil {
-		if sqliteFile := strings.TrimSpace(cfg.Database.Sqlite.File); sqliteFile != "" {
-			os.Setenv(credentialcipher.DatabaseSQLiteFileEnv, sqliteFile)
-		}
-	}
+	return resolved
 }
 
 func startMultipartReconciler(ctx context.Context, runtime *serverRuntime, service *transfers.Service, policy config.MultipartConfig) {

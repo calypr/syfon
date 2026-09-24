@@ -119,6 +119,7 @@ paths:
         - in: path
           name: object_id
           required: true
+          description: Canonical DRS object ID or one of its aliases. Scoped authorization is checked against the canonical object, and the response contains its canonical ID.
           schema:
             type: string
         - $ref: '#/components/parameters/Organization'
@@ -487,6 +488,7 @@ components:
         object_ids:
           type: array
           minItems: 1
+          description: Canonical DRS object IDs or aliases. Scoped authorization is checked against each canonical object, and results contain canonical IDs.
           items:
             type: string
         inactive_days:

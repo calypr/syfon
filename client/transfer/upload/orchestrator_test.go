@@ -2,6 +2,8 @@ package upload
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -15,6 +17,8 @@ import (
 	"github.com/calypr/syfon/client/common"
 	"github.com/calypr/syfon/client/transfer"
 )
+
+const payloadSHA256 = "239f59ed55e737c77147cf55ad0c1b030b6d7ee748a7426952f9b852d5a935e5"
 
 type completedLocationBackend struct{ uploaderStub }
 
@@ -148,7 +152,7 @@ func TestRegisterFileUploadsUsingRegisteredObjectID(t *testing.T) {
 		Size: 7,
 		Checksums: []drsapi.Checksum{{
 			Type:     "sha256",
-			Checksum: "3d71f043937a09b77826109db4f2b47c46f19923ef823f6a777a15fde0b2c9c7",
+			Checksum: payloadSHA256,
 		}},
 	}
 
@@ -158,8 +162,60 @@ func TestRegisterFileUploadsUsingRegisteredObjectID(t *testing.T) {
 	if uploader.lastResolve.guid != "requested-object-id" {
 		t.Fatalf("expected upload URL to use requested object id, got %q", uploader.lastResolve.guid)
 	}
-	if uploader.lastResolve.fileName != "3d71f043937a09b77826109db4f2b47c46f19923ef823f6a777a15fde0b2c9c7" {
+	if uploader.lastResolve.fileName != payloadSHA256 {
 		t.Fatalf("expected checksum upload key, got %q", uploader.lastResolve.fileName)
+	}
+}
+
+func TestRegisterFileRejectsUnsupportedMetadataBeforeUpload(t *testing.T) {
+	tests := []struct {
+		name  string
+		field string
+		set   func(*drsapi.DrsObject)
+	}{
+		{
+			name:  "contents",
+			field: "contents",
+			set: func(object *drsapi.DrsObject) {
+				object.Contents = &[]drsapi.ContentsObject{{Name: "part.bin"}}
+			},
+		},
+		{
+			name:  "mime_type",
+			field: "mime_type",
+			set: func(object *drsapi.DrsObject) {
+				mimeType := "application/octet-stream"
+				object.MimeType = &mimeType
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := createTempFileWithData(t, "payload")
+			defer file.Close()
+
+			object := &drsapi.DrsObject{
+				Id:   "requested-object-id",
+				Size: 7,
+				Checksums: []drsapi.Checksum{{
+					Type: "sha256", Checksum: payloadSHA256,
+				}},
+			}
+			test.set(object)
+
+			backend := &uploaderStub{}
+			metadata := &metadataClientStub{registeredID: "server-object-id"}
+			_, err := RegisterFile(context.Background(), backend, metadata, object, file.Name(), "bucket-a")
+			if err == nil {
+				t.Fatalf("RegisterFile accepted unsupported %s metadata", test.field)
+			}
+			if !errors.Is(err, errorapi.ErrInvalidInput) || !strings.Contains(err.Error(), test.field) {
+				t.Fatalf("RegisterFile error = %v, want invalid input naming %q", err, test.field)
+			}
+			if backend.lastResolve.guid != "" || backend.lastUpload.url != "" || metadata.registers != 0 || metadata.updates != 0 {
+				t.Fatalf("unsupported metadata caused side effects: resolve=%+v upload=%+v registers=%d updates=%d", backend.lastResolve, backend.lastUpload, metadata.registers, metadata.updates)
+			}
+		})
 	}
 }
 
@@ -168,7 +224,7 @@ func TestRegisterFileUsesSHA256AliasAsCASKey(t *testing.T) {
 
 	file := createTempFileWithData(t, "payload")
 	defer file.Close()
-	const checksum = "3d71f043937a09b77826109db4f2b47c46f19923ef823f6a777a15fde0b2c9c7"
+	const checksum = payloadSHA256
 	obj := &drsapi.DrsObject{
 		Id:   "requested-object-id",
 		Size: 7,
@@ -184,6 +240,79 @@ func TestRegisterFileUsesSHA256AliasAsCASKey(t *testing.T) {
 	}
 	if backend.lastResolve.fileName != checksum {
 		t.Fatalf("upload key = %q, want checksum %q", backend.lastResolve.fileName, checksum)
+	}
+}
+
+func TestRegisterFileRejectsContentChangedSinceSHA256BeforeUpload(t *testing.T) {
+	file := createTempFileWithData(t, "before")
+	defer file.Close()
+
+	original, err := os.ReadFile(file.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(original)
+	checksum := hex.EncodeToString(digest[:])
+
+	if err := os.WriteFile(file.Name(), []byte("change"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stat, err := os.Stat(file.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stat.Size() != int64(len(original)) {
+		t.Fatalf("replacement size = %d, want unchanged size %d", stat.Size(), len(original))
+	}
+
+	backend := &uploaderStub{}
+	metadata := &metadataClientStub{registeredID: "server-object-id"}
+	object := &drsapi.DrsObject{
+		Id:   "requested-object-id",
+		Size: stat.Size(),
+		Checksums: []drsapi.Checksum{{
+			Type:     "sha256",
+			Checksum: checksum,
+		}},
+	}
+	_, err = RegisterFile(context.Background(), backend, metadata, object, file.Name(), "bucket-a")
+	if err == nil || !strings.Contains(err.Error(), "SHA-256 mismatch") {
+		t.Fatalf("RegisterFile error = %v, want SHA-256 mismatch", err)
+	}
+	if backend.lastResolve.fileName != "" || backend.lastUpload.url != "" || metadata.registers != 0 || metadata.updates != 0 {
+		t.Fatalf("mismatched content caused side effects: resolve=%+v upload=%+v registers=%d updates=%d", backend.lastResolve, backend.lastUpload, metadata.registers, metadata.updates)
+	}
+}
+
+func TestRegisterFileAcceptsMatchingSHA256(t *testing.T) {
+	file := createTempFileWithData(t, "payload")
+	defer file.Close()
+
+	content, err := os.ReadFile(file.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(content)
+	checksum := hex.EncodeToString(digest[:])
+	backend := &uploaderStub{}
+	metadata := &metadataClientStub{registeredID: "server-object-id"}
+	object := &drsapi.DrsObject{
+		Id:   "requested-object-id",
+		Size: int64(len(content)),
+		Checksums: []drsapi.Checksum{{
+			Type:     "sha256",
+			Checksum: checksum,
+		}},
+	}
+
+	if _, err := RegisterFile(context.Background(), backend, metadata, object, file.Name(), "bucket-a"); err != nil {
+		t.Fatalf("RegisterFile returned error: %v", err)
+	}
+	if backend.lastResolve.fileName != checksum || backend.lastUpload.body != string(content) {
+		t.Fatalf("upload = resolve=%+v body=%q, want checksum key and unchanged content", backend.lastResolve, backend.lastUpload.body)
+	}
+	if metadata.registers != 1 {
+		t.Fatalf("RegisterObjects calls = %d, want 1", metadata.registers)
 	}
 }
 
@@ -242,7 +371,7 @@ func TestRegisterFilePreservesScopedRoutingMetadata(t *testing.T) {
 	controlledAccess := []string{"/organization/syfon/project/e2e"}
 	accessMethods := []drsapi.AccessMethod{{
 		Type:      "s3",
-		AccessUrl: &drsapi.AccessURL{Url: "s3://syfon-e2e-bucket/project-subpath/3d71f043937a09b77826109db4f2b47c46f19923ef823f6a777a15fde0b2c9c7"},
+		AccessUrl: &drsapi.AccessURL{Url: "s3://syfon-e2e-bucket/project-subpath/" + payloadSHA256},
 	}}
 	obj := &drsapi.DrsObject{
 		Id:               "requested-object-id",
@@ -252,7 +381,7 @@ func TestRegisterFilePreservesScopedRoutingMetadata(t *testing.T) {
 		AccessMethods:    &accessMethods,
 		Checksums: []drsapi.Checksum{{
 			Type:     "sha256",
-			Checksum: "3d71f043937a09b77826109db4f2b47c46f19923ef823f6a777a15fde0b2c9c7",
+			Checksum: payloadSHA256,
 		}},
 	}
 
@@ -306,7 +435,7 @@ func TestRegisterFilePrefersExplicitControlledAccessOverExistingObject(t *testin
 	sourceControlledAccess := []string{"/organization/src/project/original"}
 	accessMethods := []drsapi.AccessMethod{{
 		Type:      "s3",
-		AccessUrl: &drsapi.AccessURL{Url: "s3://syfon-bucket/original/3d71f043937a09db4f2b47c46f19923ef823f6a777a15fde0b2c9c7"},
+		AccessUrl: &drsapi.AccessURL{Url: "s3://syfon-bucket/original/" + payloadSHA256},
 	}}
 	obj := &drsapi.DrsObject{
 		Id:               "requested-object-id",
@@ -315,7 +444,7 @@ func TestRegisterFilePrefersExplicitControlledAccessOverExistingObject(t *testin
 		ControlledAccess: &targetControlledAccess,
 		Checksums: []drsapi.Checksum{{
 			Type:     "sha256",
-			Checksum: "3d71f043937a09b77826109db4f2b47c46f19923ef823f6a777a15fde0b2c9c7",
+			Checksum: payloadSHA256,
 		}},
 	}
 
@@ -357,6 +486,8 @@ func TestRegisterFileSinglePartStreamsProgress(t *testing.T) {
 
 	file := createTempFileWithData(t, string(payload))
 	defer file.Close()
+	digest := sha256.Sum256(payload)
+	checksum := hex.EncodeToString(digest[:])
 
 	uploader := &uploaderStub{
 		uploadFunc: func(_ context.Context, _ string, body io.Reader, _ int64) error {
@@ -380,12 +511,12 @@ func TestRegisterFileSinglePartStreamsProgress(t *testing.T) {
 		Size: int64(len(payload)),
 		Checksums: []drsapi.Checksum{{
 			Type:     "sha256",
-			Checksum: "3d71f043937a09b77826109db4f2b47c46f19923ef823f6a777a15fde0b2c9c7",
+			Checksum: checksum,
 		}},
 	}
 
 	var events []common.ProgressEvent
-	ctx := common.WithOid(context.Background(), obj.Checksums[0].Checksum)
+	ctx := common.WithOid(context.Background(), checksum)
 	ctx = common.WithProgress(ctx, func(ev common.ProgressEvent) error {
 		events = append(events, ev)
 		return nil

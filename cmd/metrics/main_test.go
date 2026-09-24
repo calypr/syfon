@@ -3,6 +3,7 @@ package metricscmd
 import (
 	"bytes"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -153,6 +154,32 @@ func TestTransferBreakdownSortingAndProjection(t *testing.T) {
 	}
 	if got := transferUserLabel(metricsapi.TransferAttributionBreakdown{}); got != "(unattributed)" {
 		t.Fatalf("empty label = %q", got)
+	}
+}
+
+func TestTransferUsersReportCountsMatchesBeforeLimit(t *testing.T) {
+	rows := []metricsapi.TransferAttributionBreakdown{
+		{Key: ptr("charlie"), EventCount: intPtr(1)},
+		{Key: ptr("alpha"), EventCount: intPtr(3)},
+		{Key: ptr("bravo"), EventCount: intPtr(2)},
+	}
+	breakdown := metricsapi.TransferBreakdownResponse{Data: &rows}
+
+	limited := buildTransferUsersReport(metricsapi.TransferAttributionSummary{}, breakdown, "key", "asc", 1)
+	if len(limited.Users) != 1 || limited.TotalUsers != 3 {
+		t.Fatalf("limited users report = %d users, total_users=%d; want 1 user and 3 total", len(limited.Users), limited.TotalUsers)
+	}
+	if limited.Users[0].User != "alpha" {
+		t.Fatalf("limited first user = %q, want alpha", limited.Users[0].User)
+	}
+
+	unlimited := buildTransferUsersReport(metricsapi.TransferAttributionSummary{}, breakdown, "key", "asc", 0)
+	if len(unlimited.Users) != 3 || unlimited.TotalUsers != 3 {
+		t.Fatalf("unlimited users report = %d users, total_users=%d; want 3 users and 3 total", len(unlimited.Users), unlimited.TotalUsers)
+	}
+	limitFlag := transfersUsersCmd.Flags().Lookup("limit")
+	if limitFlag == nil || !strings.Contains(limitFlag.Usage, "total_users counts all matching users before the limit") {
+		t.Fatalf("users --limit help = %v, want pre-limit total_users explanation", limitFlag)
 	}
 }
 

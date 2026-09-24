@@ -18,9 +18,10 @@ type multipartTerminalStorage struct {
 	beginIDs     []storage.UploadID
 	beginCalls   int
 	completeErrs []error
-	completeFn   func(int, storage.CompleteMultipartRequest) error
+	completeFn   func(context.Context, int, storage.CompleteMultipartRequest) error
 	complete     []storage.CompleteMultipartRequest
 	abortErrs    []error
+	abortFn      func(context.Context, int, storage.AbortMultipartRequest) error
 	abort        []storage.AbortMultipartRequest
 	parts        []storage.MultipartPartRequest
 	started      chan storage.CompleteMultipartRequest
@@ -48,7 +49,7 @@ func (s *multipartTerminalStorage) SignMultipartPart(_ context.Context, request 
 	return storage.SignedAccess{}, nil
 }
 
-func (s *multipartTerminalStorage) CompleteMultipart(_ context.Context, request storage.CompleteMultipartRequest) error {
+func (s *multipartTerminalStorage) CompleteMultipart(ctx context.Context, request storage.CompleteMultipartRequest) error {
 	s.mu.Lock()
 	s.complete = append(s.complete, request)
 	call := len(s.complete)
@@ -61,12 +62,12 @@ func (s *multipartTerminalStorage) CompleteMultipart(_ context.Context, request 
 		s.started <- request
 	}
 	if s.completeFn != nil {
-		return s.completeFn(call, request)
+		return s.completeFn(ctx, call, request)
 	}
 	return err
 }
 
-func (s *multipartTerminalStorage) AbortMultipart(_ context.Context, request storage.AbortMultipartRequest) error {
+func (s *multipartTerminalStorage) AbortMultipart(ctx context.Context, request storage.AbortMultipartRequest) error {
 	s.mu.Lock()
 	s.abort = append(s.abort, request)
 	call := len(s.abort)
@@ -74,7 +75,11 @@ func (s *multipartTerminalStorage) AbortMultipart(_ context.Context, request sto
 	if call <= len(s.abortErrs) {
 		err = s.abortErrs[call-1]
 	}
+	fn := s.abortFn
 	s.mu.Unlock()
+	if fn != nil {
+		return fn(ctx, call, request)
+	}
 	return err
 }
 
@@ -91,9 +96,10 @@ func (s *multipartTerminalStorage) abortCalls() []storage.AbortMultipartRequest 
 }
 
 func newMultipartTerminalService(storagePort StoragePort, uploadID string) *Service {
-	service := NewService(Dependencies{Storage: storagePort})
+	store := newMemoryMultipartSessionStore()
+	service := NewService(Dependencies{Storage: storagePort, MultipartSessions: store})
 	now := time.Now().UTC()
-	if err := service.multipartSessions.SaveMultipartSession(context.Background(), MultipartSession{UploadID: uploadID, CompletionID: "completion-" + uploadID, Target: storage.Target{PhysicalBucket: "bucket", LookupKey: "bucket", Key: "key", CanonicalURL: "s3://bucket/key"}, State: MultipartStateActive, CreatedAt: now, UpdatedAt: now}); err != nil {
+	if err := store.SaveMultipartSession(context.Background(), MultipartSession{UploadID: uploadID, CompletionID: "completion-" + uploadID, Target: storage.Target{PhysicalBucket: "bucket", LookupKey: "bucket", Key: "key", CanonicalURL: "s3://bucket/key"}, State: MultipartStateActive, CreatedAt: now, UpdatedAt: now}); err != nil {
 		panic(err)
 	}
 	return service
@@ -115,7 +121,7 @@ func multipartScopeContext(methods ...string) context.Context {
 
 func TestMultipartSessionReauthorizesPartAndCompletion(t *testing.T) {
 	provider := &multipartTerminalStorage{beginIDs: []storage.UploadID{"upload"}}
-	service := NewService(Dependencies{Objects: downloadObjectFake{object: testRecord()}, Storage: provider})
+	service := NewService(Dependencies{Objects: downloadObjectFake{object: testRecord()}, Storage: provider, MultipartSessions: newMemoryMultipartSessionStore()})
 	target := storage.Target{PhysicalBucket: "bucket", Key: "key"}
 	authorization := MultipartAuthorization{Scope: &AccessScope{Organization: "org", Project: "project"}, Methods: []string{"file_upload", "create", "update"}}
 	if _, err := service.BeginMultipart(multipartScopeContext("file_upload"), MultipartInitRequest{Target: &target, Authorization: &authorization}); err != nil {
@@ -137,7 +143,7 @@ func TestCompleteMultipartConcurrentRequestInvokesProviderOnce(t *testing.T) {
 	const uploadID = "queued-upload"
 	started := make(chan storage.CompleteMultipartRequest, 1)
 	release := make(chan struct{})
-	provider := &multipartTerminalStorage{started: started, completeFn: func(int, storage.CompleteMultipartRequest) error { <-release; return nil }}
+	provider := &multipartTerminalStorage{started: started, completeFn: func(context.Context, int, storage.CompleteMultipartRequest) error { <-release; return nil }}
 	service := newMultipartTerminalService(provider, uploadID)
 	first := make(chan error, 1)
 	go func() {
@@ -181,6 +187,75 @@ func TestCompleteMultipartProviderFailureLeavesSessionAvailable(t *testing.T) {
 	}
 	if location, err := service.CompleteMultipart(context.Background(), uploadID, oneCompletedPart); err != nil || location != "s3://bucket/key" {
 		t.Fatalf("completion after retry = %q, %v", location, err)
+	}
+}
+
+func TestCompleteMultipartReleasesClaimAfterCanceledProviderError(t *testing.T) {
+	const uploadID = "canceled-completion"
+	store := newMemoryMultipartSessionStore()
+	provider := &multipartTerminalStorage{}
+	service := NewService(Dependencies{Storage: provider, MultipartSessions: store})
+	now := time.Now().UTC()
+	if err := store.SaveMultipartSession(context.Background(), MultipartSession{
+		UploadID: uploadID, CompletionID: "completion-" + uploadID,
+		Target: storage.Target{PhysicalBucket: "bucket", Key: "key", CanonicalURL: "s3://bucket/key"},
+		State:  MultipartStateActive, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	providerErr := errors.New("provider rejected completion before commit")
+	ctx, cancel := context.WithCancel(context.Background())
+	provider.completeFn = func(_ context.Context, call int, _ storage.CompleteMultipartRequest) error {
+		if call == 1 {
+			cancel()
+			return providerErr
+		}
+		return nil
+	}
+	if _, err := service.CompleteMultipart(ctx, uploadID, oneCompletedPart); !errors.Is(err, providerErr) {
+		t.Fatalf("first completion error = %v, want provider error", err)
+	}
+	session, err := store.GetMultipartSession(context.Background(), uploadID)
+	if err != nil {
+		t.Fatalf("load session after failed completion: %v", err)
+	}
+	if session.State != MultipartStateActive || session.Operation != MultipartOperationNone || session.CompletionToken != "" {
+		t.Fatalf("session after failed completion = %+v, want active and unclaimed", session)
+	}
+	if location, err := service.CompleteMultipart(context.Background(), uploadID, oneCompletedPart); err != nil || location != "s3://bucket/key" {
+		t.Fatalf("immediate completion retry = %q, %v", location, err)
+	}
+}
+
+func TestCompleteMultipartPersistsSuccessAfterRequestCancellation(t *testing.T) {
+	const uploadID = "completed-after-cancel"
+	store := newMemoryMultipartSessionStore()
+	provider := &multipartTerminalStorage{}
+	service := NewService(Dependencies{Storage: provider, MultipartSessions: store})
+	now := time.Now().UTC()
+	if err := store.SaveMultipartSession(context.Background(), MultipartSession{
+		UploadID: uploadID, CompletionID: "completion-" + uploadID,
+		Target: storage.Target{PhysicalBucket: "bucket", Key: "key", CanonicalURL: "s3://bucket/key"},
+		State:  MultipartStateActive, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	provider.completeFn = func(context.Context, int, storage.CompleteMultipartRequest) error {
+		cancel()
+		return nil
+	}
+	if location, err := service.CompleteMultipart(ctx, uploadID, oneCompletedPart); err != nil || location != "s3://bucket/key" {
+		t.Fatalf("completion = %q, %v; want successful completed location", location, err)
+	}
+	session, err := store.GetMultipartSession(context.Background(), uploadID)
+	if err != nil {
+		t.Fatalf("load completed session: %v", err)
+	}
+	if session.State != MultipartStateCompleted || session.CompletedLocation != "s3://bucket/key" {
+		t.Fatalf("session after completion = %+v, want completed receipt", session)
 	}
 }
 
@@ -302,18 +377,19 @@ func TestCompleteMultipartDifferentSessionsCanRunConcurrently(t *testing.T) {
 	release := make(chan struct{})
 	provider := &multipartTerminalStorage{
 		started: started,
-		completeFn: func(int, storage.CompleteMultipartRequest) error {
+		completeFn: func(context.Context, int, storage.CompleteMultipartRequest) error {
 			<-release
 			return nil
 		},
 	}
-	service := NewService(Dependencies{Storage: provider})
+	store := newMemoryMultipartSessionStore()
+	service := NewService(Dependencies{Storage: provider, MultipartSessions: store})
 	now := time.Now().UTC()
 	for uploadID, target := range map[string]storage.Target{
 		"upload-one": {Key: "one"},
 		"upload-two": {Key: "two"},
 	} {
-		if err := service.multipartSessions.SaveMultipartSession(context.Background(), MultipartSession{UploadID: uploadID, CompletionID: "completion-" + uploadID, Target: target, State: MultipartStateActive, CreatedAt: now, UpdatedAt: now}); err != nil {
+		if err := store.SaveMultipartSession(context.Background(), MultipartSession{UploadID: uploadID, CompletionID: "completion-" + uploadID, Target: target, State: MultipartStateActive, CreatedAt: now, UpdatedAt: now}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -346,14 +422,14 @@ func TestBeginMultipartRejectsOpaqueProviderIDCollision(t *testing.T) {
 	provider := &multipartTerminalStorage{
 		beginIDs: []storage.UploadID{uploadID, uploadID},
 		started:  firstStarted,
-		completeFn: func(call int, _ storage.CompleteMultipartRequest) error {
+		completeFn: func(_ context.Context, call int, _ storage.CompleteMultipartRequest) error {
 			if call == 1 {
 				<-releaseFirst
 			}
 			return nil
 		},
 	}
-	service := NewService(Dependencies{Objects: downloadObjectFake{object: testRecord()}, Storage: provider})
+	service := NewService(Dependencies{Objects: downloadObjectFake{object: testRecord()}, Storage: provider, MultipartSessions: newMemoryMultipartSessionStore()})
 	oldTarget := storage.Target{PhysicalBucket: "old-bucket", LookupKey: "old-bucket", Key: "old-key"}
 	newTarget := storage.Target{PhysicalBucket: "new-bucket", LookupKey: "new-bucket", Key: "new-key"}
 	if _, err := service.BeginMultipart(context.Background(), MultipartInitRequest{Target: &oldTarget}); err != nil {
@@ -414,6 +490,62 @@ func TestMultipartRejectsInvalidInputsBeforeProviderDispatch(t *testing.T) {
 	}
 }
 
+func TestSignMultipartPartEnforcesS3PartNumberRangeAtTransferBoundary(t *testing.T) {
+	for _, testCase := range []struct {
+		name       string
+		partNumber int32
+		invalid    bool
+	}{
+		{name: "zero", partNumber: 0, invalid: true},
+		{name: "minimum", partNumber: 1},
+		{name: "maximum", partNumber: 10000},
+		{name: "above maximum", partNumber: 10001, invalid: true},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			provider := &multipartTerminalStorage{}
+			service := newMultipartTerminalService(provider, "upload")
+			_, err := service.SignMultipartPart(context.Background(), "upload", testCase.partNumber)
+			if testCase.invalid {
+				if !errors.Is(err, errorapi.ErrInvalidInput) {
+					t.Fatalf("SignMultipartPart error = %v, want invalid input", err)
+				}
+				if len(provider.parts) != 0 {
+					t.Fatalf("invalid part number reached provider: %+v", provider.parts)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("SignMultipartPart(%d) error = %v", testCase.partNumber, err)
+			}
+			if len(provider.parts) != 1 || provider.parts[0].PartNumber != testCase.partNumber {
+				t.Fatalf("provider requests = %+v, want one part %d", provider.parts, testCase.partNumber)
+			}
+		})
+	}
+}
+
+func TestSignMultipartPartKeepsOtherProviderPartRangeProviderDefined(t *testing.T) {
+	provider := &multipartTerminalStorage{}
+	store := newMemoryMultipartSessionStore()
+	target := storage.Target{
+		Provider:       "azure",
+		PhysicalBucket: "bucket",
+		Key:            "key",
+		CanonicalURL:   "azblob://bucket/key",
+	}
+	now := time.Now().UTC()
+	if err := store.SaveMultipartSession(context.Background(), MultipartSession{UploadID: "upload", Target: target, State: MultipartStateActive, CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(Dependencies{Storage: provider, MultipartSessions: store})
+	if _, err := service.SignMultipartPart(context.Background(), "upload", 10001); err != nil {
+		t.Fatalf("SignMultipartPart() for non-S3 part 10001 returned error: %v", err)
+	}
+	if len(provider.parts) != 1 || provider.parts[0].PartNumber != 10001 {
+		t.Fatalf("non-S3 provider requests = %+v, want one part 10001", provider.parts)
+	}
+}
+
 func TestAbortMultipartIsIdempotentAndAuthorizesBeforeProvider(t *testing.T) {
 	const uploadID = "abort-upload"
 	provider := &multipartTerminalStorage{}
@@ -432,9 +564,10 @@ func TestAbortMultipartIsIdempotentAndAuthorizesBeforeProvider(t *testing.T) {
 		t.Fatalf("missing abort error = %v, want nil", err)
 	}
 
-	protected := NewService(Dependencies{Storage: provider})
+	protectedStore := newMemoryMultipartSessionStore()
+	protected := NewService(Dependencies{Storage: provider, MultipartSessions: protectedStore})
 	authorized := MultipartAuthorization{Scope: &AccessScope{Organization: "org", Project: "project"}, Methods: []string{"update"}}
-	if err := protected.multipartSessions.SaveMultipartSession(context.Background(), MultipartSession{UploadID: "protected-upload", CompletionID: "completion", Target: storage.Target{Key: "key"}, Authorization: authorized, State: MultipartStateActive, CreatedAt: time.Now(), UpdatedAt: time.Now()}); err != nil {
+	if err := protectedStore.SaveMultipartSession(context.Background(), MultipartSession{UploadID: "protected-upload", CompletionID: "completion", Target: storage.Target{Key: "key"}, Authorization: authorized, State: MultipartStateActive, CreatedAt: time.Now(), UpdatedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
 	if err := protected.AbortMultipart(multipartScopeContext("read"), "protected-upload"); !errors.Is(err, errorapi.ErrAccessDenied) {
@@ -442,6 +575,75 @@ func TestAbortMultipartIsIdempotentAndAuthorizesBeforeProvider(t *testing.T) {
 	}
 	if got := len(provider.abortCalls()); got != 1 {
 		t.Fatalf("unauthorized abort reached provider, calls = %d", got)
+	}
+}
+
+func TestAbortMultipartReleasesClaimAfterCanceledProviderCall(t *testing.T) {
+	const uploadID = "retry-abort-upload"
+	store := newMemoryMultipartSessionStore()
+	provider := &multipartTerminalStorage{}
+	service := NewService(Dependencies{Storage: provider, MultipartSessions: store})
+	now := time.Now().UTC()
+	if err := store.SaveMultipartSession(context.Background(), MultipartSession{
+		UploadID: uploadID, CompletionID: "completion-" + uploadID,
+		Target: storage.Target{PhysicalBucket: "bucket", Key: "key"},
+		State:  MultipartStateActive, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	provider.abortFn = func(ctx context.Context, _ int, _ storage.AbortMultipartRequest) error {
+		cancel()
+		return ctx.Err()
+	}
+	if err := service.AbortMultipart(ctx, uploadID); !errors.Is(err, context.Canceled) {
+		t.Fatalf("first abort error = %v, want context canceled", err)
+	}
+	session, err := store.GetMultipartSession(context.Background(), uploadID)
+	if err != nil {
+		t.Fatalf("load session after failed abort: %v", err)
+	}
+	if session.State != MultipartStateActive || session.Operation != MultipartOperationNone || session.CompletionToken != "" {
+		t.Fatalf("session after failed abort = %+v, want active and unclaimed", session)
+	}
+
+	provider.abortFn = nil
+	if err := service.AbortMultipart(context.Background(), uploadID); err != nil {
+		t.Fatalf("immediate abort retry error = %v", err)
+	}
+	if got := len(provider.abortCalls()); got != 2 {
+		t.Fatalf("provider abort calls = %d, want 2", got)
+	}
+	if _, err := store.GetMultipartSession(context.Background(), uploadID); !errors.Is(err, errorapi.ErrMultipartUploadNotFound) {
+		t.Fatalf("session after successful retry error = %v, want not found", err)
+	}
+}
+
+func TestAbortMultipartFinishesAfterRequestCancellation(t *testing.T) {
+	const uploadID = "finish-abort-upload"
+	store := newMemoryMultipartSessionStore()
+	provider := &multipartTerminalStorage{}
+	service := NewService(Dependencies{Storage: provider, MultipartSessions: store})
+	now := time.Now().UTC()
+	if err := store.SaveMultipartSession(context.Background(), MultipartSession{
+		UploadID: uploadID, CompletionID: "completion-" + uploadID,
+		Target: storage.Target{PhysicalBucket: "bucket", Key: "key"},
+		State:  MultipartStateActive, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	provider.abortFn = func(context.Context, int, storage.AbortMultipartRequest) error {
+		cancel()
+		return nil
+	}
+	if err := service.AbortMultipart(ctx, uploadID); err != nil {
+		t.Fatalf("abort error = %v", err)
+	}
+	if _, err := store.GetMultipartSession(context.Background(), uploadID); !errors.Is(err, errorapi.ErrMultipartUploadNotFound) {
+		t.Fatalf("session after canceled request = %v, want not found", err)
 	}
 }
 
@@ -512,12 +714,13 @@ func TestSignMultipartPartTouchesSessionActivity(t *testing.T) {
 
 func TestBeginMultipartRejectsEmptyProviderUploadID(t *testing.T) {
 	provider := &multipartTerminalStorage{beginIDs: []storage.UploadID{""}}
-	service := NewService(Dependencies{Objects: downloadObjectFake{object: testRecord()}, Storage: provider})
+	store := newMemoryMultipartSessionStore()
+	service := NewService(Dependencies{Objects: downloadObjectFake{object: testRecord()}, Storage: provider, MultipartSessions: store})
 	target := storage.Target{PhysicalBucket: "bucket", Key: "key"}
 	if _, err := service.BeginMultipart(context.Background(), MultipartInitRequest{Target: &target}); err == nil {
 		t.Fatal("BeginMultipart accepted an empty provider upload ID")
 	}
-	if _, err := service.multipartSessions.GetMultipartSession(context.Background(), ""); !errors.Is(err, errorapi.ErrMultipartUploadNotFound) {
+	if _, err := store.GetMultipartSession(context.Background(), ""); !errors.Is(err, errorapi.ErrMultipartUploadNotFound) {
 		t.Fatalf("empty upload ID session lookup error = %v, want not found", err)
 	}
 }

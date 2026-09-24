@@ -165,6 +165,9 @@ func (s *backend) listPages(ctx context.Context, client s3ListClient, input *aws
 		if len(items) > 0 {
 			stats.LastKey = items[len(items)-1].Key
 		}
+		if request.MaxResults > 0 && len(items) >= int(request.MaxResults) {
+			return items[:request.MaxResults], stats, firstKeys, nil
+		}
 		if logging {
 			log.Printf("INFO: syfon_s3_prefix_list_page_done request_id=%s bucket=%s requested_prefix=%q input_prefix=%q page=%d token=%s objects_total=%d last_key=%q truncated=%t", requestid.GetRequestID(ctx), bucket, prefix, requestPrefix, pageNumber, tokenID, len(items), stats.LastKey, aws.ToBool(page.IsTruncated))
 		}

@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -213,5 +214,139 @@ func TestInternalBulkHashesResponseUsesResultsMap(t *testing.T) {
 	}
 	if parsed.JSON200 == nil || len(parsed.JSON200.Results["sha256:"+hash]) != 1 {
 		t.Fatalf("generated response did not decode results: %+v", parsed.JSON200)
+	}
+}
+
+func TestDeleteByQueryHonorsChecksumFilter(t *testing.T) {
+	database, err := sqlite.NewSqliteDB(":memory:", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	app := fiber.New(fiber.Config{ErrorHandler: FiberErrorHandler})
+	RegisterRoutes(app, Dependencies{Objects: objects.NewService(database)}, Options{Internal: true})
+	for _, seed := range []struct{ id, hash string }{
+		{"keep", strings.Repeat("a", 64)},
+		{"remove", strings.Repeat("b", 64)},
+	} {
+		body := `{"did":"` + seed.id + `","organization":"org","project":"project","hashes":{"sha256":"` + seed.hash + `"}}`
+		request := httptest.NewRequest(http.MethodPost, "/index", strings.NewReader(body))
+		request.Header.Set("Content-Type", "application/json")
+		response, err := app.Test(request)
+		if err != nil || response.StatusCode != http.StatusCreated {
+			t.Fatalf("create %s: response=%v err=%v", seed.id, response, err)
+		}
+		_ = response.Body.Close()
+	}
+
+	request := httptest.NewRequest(http.MethodDelete, "/index?organization=org&project=project&hash_type=sha256&hash="+strings.Repeat("b", 64), nil)
+	response, err := app.Test(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("delete status = %d, want 200", response.StatusCode)
+	}
+	var deleted internalapi.DeleteByQueryResponse
+	if err := json.NewDecoder(response.Body).Decode(&deleted); err != nil {
+		t.Fatal(err)
+	}
+	if deleted.Deleted == nil || *deleted.Deleted != 1 {
+		t.Fatalf("deleted = %v, want 1", deleted.Deleted)
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/index?organization=org&project=project", nil)
+	response, err = app.Test(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	var listed internalapi.ListRecordsResponse
+	if err := json.NewDecoder(response.Body).Decode(&listed); err != nil {
+		t.Fatal(err)
+	}
+	if listed.Records == nil || len(*listed.Records) != 1 || (*listed.Records)[0].Did != "keep" {
+		t.Fatalf("remaining records = %+v, want keep", listed.Records)
+	}
+}
+
+func TestInternalBulkSHA256ValidityGeneratedClient(t *testing.T) {
+	database, err := sqlite.NewSqliteDB(":memory:", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+
+	app := fiber.New(fiber.Config{ErrorHandler: FiberErrorHandler})
+	RegisterRoutes(app, Dependencies{Objects: objects.NewService(database)}, Options{Internal: true})
+	sha := strings.Repeat("a", 64)
+	missing := strings.Repeat("b", 64)
+	createRequest := httptest.NewRequest(http.MethodPost, "/index", strings.NewReader(`{"did":"bulk-validity-record","organization":"org","project":"project","hashes":{"sha256":"`+sha+`"}}`))
+	createRequest.Header.Set("Content-Type", "application/json")
+	createResponse, err := app.Test(createRequest)
+	if err != nil {
+		t.Fatalf("create request failed: %v", err)
+	}
+	if createResponse.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(createResponse.Body)
+		createResponse.Body.Close()
+		t.Fatalf("create status = %d, want %d: %s", createResponse.StatusCode, http.StatusCreated, body)
+	}
+	createResponse.Body.Close()
+
+	client, err := internalapi.NewClientWithResponses("http://syfon.test", internalapi.WithHTTPClient(multipartTestClient{app}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	values := []string{sha, missing}
+	want := map[string]bool{sha: true, missing: false}
+	requests := []struct {
+		name string
+		body internalapi.BulkSHA256ValidityRequest
+	}{
+		{name: "hashes alias", body: internalapi.BulkSHA256ValidityRequest{Hashes: &values}},
+		{name: "sha256 field", body: internalapi.BulkSHA256ValidityRequest{Sha256: &values}},
+		{name: "identical fields", body: internalapi.BulkSHA256ValidityRequest{Hashes: &values, Sha256: &values}},
+	}
+	for _, test := range requests {
+		t.Run(test.name, func(t *testing.T) {
+			response, err := client.InternalBulkSHA256ValidityWithResponse(context.Background(), test.body)
+			if err != nil {
+				t.Fatalf("validity request failed: %v", err)
+			}
+			if response.StatusCode() != http.StatusOK || response.JSON200 == nil {
+				t.Fatalf("validity status = %d, want %d: %s", response.StatusCode(), http.StatusOK, response.Body)
+			}
+			if !reflect.DeepEqual(*response.JSON200, want) {
+				t.Fatalf("validity map = %v, want %v", *response.JSON200, want)
+			}
+		})
+	}
+
+	emptyValues := []string{}
+	whitespaceValues := []string{" ", "\t\n"}
+	differentLengthValues := []string{missing}
+	conflictingValues := []string{missing, sha}
+	invalidRequests := []struct {
+		name string
+		body internalapi.BulkSHA256ValidityRequest
+	}{
+		{name: "empty request"},
+		{name: "empty hashes list", body: internalapi.BulkSHA256ValidityRequest{Hashes: &emptyValues}},
+		{name: "whitespace-only values", body: internalapi.BulkSHA256ValidityRequest{Hashes: &whitespaceValues}},
+		{name: "conflicting fields with different lengths", body: internalapi.BulkSHA256ValidityRequest{Hashes: &values, Sha256: &differentLengthValues}},
+		{name: "conflicting fields with different values", body: internalapi.BulkSHA256ValidityRequest{Hashes: &values, Sha256: &conflictingValues}},
+	}
+	for _, test := range invalidRequests {
+		t.Run(test.name, func(t *testing.T) {
+			response, err := client.InternalBulkSHA256ValidityWithResponse(context.Background(), test.body)
+			if err != nil {
+				t.Fatalf("validity request failed: %v", err)
+			}
+			if response.StatusCode() != http.StatusBadRequest || response.JSON400 == nil {
+				t.Fatalf("validity status = %d, want %d: %s", response.StatusCode(), http.StatusBadRequest, response.Body)
+			}
+		})
 	}
 }

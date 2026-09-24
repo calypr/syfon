@@ -88,15 +88,15 @@ func (s *Service) resolveScopedTarget(ctx context.Context, organization, project
 }
 
 // ResolveCanonicalStorageTarget selects the physical target for an object.
-// Scoped objects use the last non-empty bucket from their deterministic scope
-// order and compose nested path prefixes. Unscoped non-S3 URLs pass through.
+// Each controlled resource is resolved independently so sibling project
+// prefixes are never combined. Unscoped non-S3 URLs pass through.
 func (s *Service) ResolveCanonicalStorageTarget(ctx context.Context, req CanonicalStorageTargetRequest) (CanonicalStorageTarget, error) {
 	obj := req.Object
 	if obj == nil {
 		return CanonicalStorageTarget{}, fmt.Errorf("object is required")
 	}
 
-	scopes, err := s.bucketScopesForObject(ctx, obj)
+	candidates, err := s.storageScopeCandidatesForObject(ctx, obj)
 	if err != nil {
 		return CanonicalStorageTarget{}, err
 	}
@@ -107,25 +107,26 @@ func (s *Service) ResolveCanonicalStorageTarget(ctx context.Context, req Canonic
 	}
 	existingBucket, existingKey, existingOK := parseS3Location(existingURL)
 
-	if len(scopes) > 0 {
-		targetBucket := ""
-		for _, scope := range scopes {
-			if strings.TrimSpace(scope.Bucket) != "" {
-				targetBucket = strings.TrimSpace(scope.Bucket)
-			}
+	if len(candidates) > 0 {
+		candidate, err := selectObjectStorageScope(candidates, req.Bucket, existingBucket, req.Key, existingKey)
+		if err != nil {
+			return CanonicalStorageTarget{}, err
 		}
-		if targetBucket == "" {
+		if candidate.bucket == "" {
 			return CanonicalStorageTarget{}, fmt.Errorf("unable to resolve scoped storage bucket for object %s", obj.Id)
 		}
 		targetKey := canonicalObjectKey(obj, req.Key, existingKey, req.PreferChecksum)
-		if existingOK && strings.EqualFold(strings.TrimSpace(existingBucket), targetBucket) && len(buckets.NormalizedStoragePrefixes(scopes)) == 0 && strings.TrimSpace(existingKey) != "" {
+		if existingOK && strings.EqualFold(strings.TrimSpace(existingBucket), candidate.bucket) && candidate.prefix == "" && strings.TrimSpace(existingKey) != "" {
 			targetKey = existingKey
 		}
-		targetKey = normalizeScopedStorageKey(targetKey, scopes)
+		targetKey, err = normalizeScopedStorageKey(targetKey, candidate.scopes)
+		if err != nil {
+			return CanonicalStorageTarget{}, fmt.Errorf("%w: %v", errorapi.ErrInvalidInput, err)
+		}
 		if strings.TrimSpace(targetKey) == "" {
 			return CanonicalStorageTarget{}, fmt.Errorf("unable to resolve scoped storage key for object %s", obj.Id)
 		}
-		return newCanonicalStorageTarget(targetBucket, targetKey), nil
+		return newCanonicalStorageTarget(candidate.bucket, targetKey), nil
 	}
 
 	if strings.TrimSpace(existingURL) == "" {
@@ -184,14 +185,23 @@ func (s *Service) ResolveScopedUploadTarget(ctx context.Context, organization, p
 	if bucket == "" {
 		return CanonicalStorageTarget{}, fmt.Errorf("%w: unable to resolve scoped storage bucket for organization %q project %q", errorapi.ErrInvalidInput, organization, project)
 	}
-	key = normalizeScopedStorageKey(key, scopes)
+	key, err := normalizeScopedStorageKey(key, scopes)
+	if err != nil {
+		return CanonicalStorageTarget{}, fmt.Errorf("%w: %v", errorapi.ErrInvalidInput, err)
+	}
 	if key == "" {
 		return CanonicalStorageTarget{}, fmt.Errorf("%w: unable to resolve scoped storage key for organization %q project %q", errorapi.ErrInvalidInput, organization, project)
 	}
 	return newCanonicalStorageTarget(bucket, key), nil
 }
 
-func (s *Service) bucketScopesForObject(ctx context.Context, obj *drs.DrsObject) ([]buckets.Scope, error) {
+type objectStorageScopeCandidate struct {
+	scopes []buckets.Scope
+	bucket string
+	prefix string
+}
+
+func (s *Service) storageScopeCandidatesForObject(ctx context.Context, obj *drs.DrsObject) ([]objectStorageScopeCandidate, error) {
 	if obj == nil || s.scopes == nil {
 		return nil, nil
 	}
@@ -199,42 +209,202 @@ func (s *Service) bucketScopesForObject(ctx context.Context, obj *drs.DrsObject)
 	if len(resources) == 0 {
 		return nil, nil
 	}
-	orgProjects := make(map[string][]string)
+	orgProjects := make(map[string]map[string]struct{})
 	for _, resource := range resources {
 		organization, project, ok := parseResourceScope(resource)
 		if !ok {
 			continue
 		}
-		orgProjects[organization] = append(orgProjects[organization], project)
+		if orgProjects[organization] == nil {
+			orgProjects[organization] = make(map[string]struct{})
+		}
+		orgProjects[organization][project] = struct{}{}
 	}
 	organizations := make([]string, 0, len(orgProjects))
 	for organization := range orgProjects {
 		organizations = append(organizations, organization)
 	}
 	sort.Strings(organizations)
-	scopes := make([]buckets.Scope, 0, len(resources)*2)
+	candidates := make([]objectStorageScopeCandidate, 0, len(resources))
 	for _, organization := range organizations {
-		if scope, found, err := s.scopes.LookupBucketScope(ctx, organization, ""); err != nil {
+		organizationScope, hasOrganizationScope, err := s.scopes.LookupBucketScope(ctx, organization, "")
+		if err != nil {
 			return nil, err
-		} else if found {
-			scopes = append(scopes, scope)
 		}
-		projects := append([]string(nil), orgProjects[organization]...)
+		projects := make([]string, 0, len(orgProjects[organization]))
+		for project := range orgProjects[organization] {
+			projects = append(projects, project)
+		}
 		sort.Strings(projects)
 		for _, project := range projects {
-			if project == "" {
+			scopes := make([]buckets.Scope, 0, 2)
+			if hasOrganizationScope {
+				scopes = append(scopes, organizationScope)
+			}
+			if project != "" {
+				scope, found, err := s.scopes.LookupBucketScope(ctx, organization, project)
+				if err != nil {
+					return nil, err
+				}
+				if found {
+					scopes = append(scopes, scope)
+				}
+			}
+			if len(scopes) == 0 {
 				continue
 			}
-			scope, found, err := s.scopes.LookupBucketScope(ctx, organization, project)
-			if err != nil {
-				return nil, err
+			bucket := ""
+			for _, scope := range scopes {
+				if candidate := strings.TrimSpace(scope.Bucket); candidate != "" {
+					bucket = candidate
+				}
 			}
-			if found {
-				scopes = append(scopes, scope)
+			prefix := strings.Join(buckets.NormalizedStoragePrefixes(scopes), "/")
+			candidates = append(candidates, objectStorageScopeCandidate{
+				scopes: scopes,
+				bucket: bucket,
+				prefix: prefix,
+			})
+		}
+	}
+	return candidates, nil
+}
+
+func selectObjectStorageScope(candidates []objectStorageScopeCandidate, requestedBucket, existingBucket string, requestedKey, existingKey string) (objectStorageScopeCandidate, error) {
+	selected := make([]int, 0, len(candidates))
+	for i := range candidates {
+		selected = append(selected, i)
+	}
+	matched := false
+	applyMatch := func(matches []int) error {
+		if len(matches) == 0 {
+			return nil
+		}
+		if !matched {
+			selected = matches
+			matched = true
+			return nil
+		}
+		intersection := make([]int, 0, len(selected))
+		for _, current := range selected {
+			for _, match := range matches {
+				if current == match {
+					intersection = append(intersection, current)
+					break
+				}
+			}
+		}
+		if len(intersection) == 0 {
+			return fmt.Errorf("%w: storage bucket and key identify different object scopes", errorapi.ErrInvalidInput)
+		}
+		selected = intersection
+		return nil
+	}
+
+	requestedBucket = strings.TrimSpace(requestedBucket)
+	if requestedBucket != "" {
+		matches := matchingStorageBuckets(candidates, requestedBucket)
+		if len(matches) == 0 {
+			return objectStorageScopeCandidate{}, fmt.Errorf("%w: requested bucket %q is outside the object's storage scopes", errorapi.ErrInvalidInput, requestedBucket)
+		}
+		if err := applyMatch(matches); err != nil {
+			return objectStorageScopeCandidate{}, err
+		}
+	}
+	if existingBucket = strings.TrimSpace(existingBucket); existingBucket != "" {
+		if err := applyMatch(matchingStorageBuckets(candidates, existingBucket)); err != nil {
+			return objectStorageScopeCandidate{}, err
+		}
+	}
+	for _, key := range uniqueNonEmptyStrings(requestedKey, existingKey) {
+		if err := applyMatch(matchingStoragePrefixes(candidates, key)); err != nil {
+			return objectStorageScopeCandidate{}, err
+		}
+	}
+
+	unique := make([]int, 0, len(selected))
+	type targetIdentity struct {
+		bucket string
+		prefix string
+	}
+	seen := make(map[targetIdentity]struct{}, len(selected))
+	for _, index := range selected {
+		candidate := candidates[index]
+		identity := targetIdentity{bucket: candidate.bucket, prefix: candidate.prefix}
+		if _, ok := seen[identity]; ok {
+			continue
+		}
+		seen[identity] = struct{}{}
+		unique = append(unique, index)
+	}
+	if len(unique) != 1 {
+		return objectStorageScopeCandidate{}, fmt.Errorf("%w: ambiguous storage scope for object", errorapi.ErrInvalidInput)
+	}
+	return candidates[unique[0]], nil
+}
+
+func matchingStorageBuckets(candidates []objectStorageScopeCandidate, bucket string) []int {
+	matches := make([]int, 0, len(candidates))
+	for i, candidate := range candidates {
+		if strings.EqualFold(strings.TrimSpace(candidate.bucket), strings.TrimSpace(bucket)) {
+			matches = append(matches, i)
+		}
+	}
+	return matches
+}
+
+func matchingStoragePrefixes(candidates []objectStorageScopeCandidate, key string) []int {
+	key = strings.Trim(strings.TrimSpace(key), "/")
+	bestLength := 0
+	matches := make([]int, 0)
+	for i, candidate := range candidates {
+		bestCandidateLength := 0
+		prefixes := make([]string, 0, len(candidate.scopes)+1)
+		prefixes = append(prefixes, candidate.prefix)
+		for _, scope := range candidate.scopes {
+			prefixes = append(prefixes, scope.PathPrefix)
+		}
+		for _, rawPrefix := range prefixes {
+			prefix := strings.Trim(strings.TrimSpace(rawPrefix), "/")
+			if prefix != "" && (key == prefix || strings.HasPrefix(key, prefix+"/")) && len(prefix) > bestCandidateLength {
+				bestCandidateLength = len(prefix)
+			}
+		}
+		if bestCandidateLength > bestLength {
+			bestLength = bestCandidateLength
+			matches = matches[:0]
+		}
+		if bestCandidateLength > 0 && bestCandidateLength == bestLength {
+			matches = append(matches, i)
+		}
+	}
+	if bestLength == 0 {
+		// A bucket-wide scope remains a valid fallback when the existing object
+		// key does not match any more specific project prefix.
+		for i, candidate := range candidates {
+			if strings.Trim(strings.TrimSpace(candidate.prefix), "/") == "" {
+				matches = append(matches, i)
 			}
 		}
 	}
-	return scopes, nil
+	return matches
+}
+
+func uniqueNonEmptyStrings(values ...string) []string {
+	seen := make(map[string]struct{}, len(values))
+	unique := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.Trim(strings.TrimSpace(value), "/")
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		unique = append(unique, value)
+	}
+	return unique
 }
 
 func canonicalObjectKey(obj *drs.DrsObject, explicitKey, existingKey string, preferChecksum bool) string {
@@ -299,8 +469,11 @@ func parseS3Location(accessURL string) (bucket, key string, ok bool) {
 	return strings.TrimSpace(parsed.Host), strings.Trim(strings.TrimSpace(parsed.Path), "/"), true
 }
 
-func normalizeScopedStorageKey(key string, scopes []buckets.Scope) string {
+func normalizeScopedStorageKey(key string, scopes []buckets.Scope) (string, error) {
 	key = strings.Trim(strings.TrimSpace(key), "/")
+	if err := address.ValidateScopedKey(key); err != nil {
+		return "", err
+	}
 	prefixes := buckets.NormalizedStoragePrefixes(scopes)
 	remainder := key
 	for _, prefix := range prefixes {
@@ -309,11 +482,11 @@ func normalizeScopedStorageKey(key string, scopes []buckets.Scope) string {
 	composedPrefix := strings.Join(prefixes, "/")
 	switch {
 	case composedPrefix == "":
-		return remainder
+		return remainder, nil
 	case remainder == "":
-		return composedPrefix
+		return composedPrefix, nil
 	default:
-		return path.Join(composedPrefix, remainder)
+		return path.Join(composedPrefix, remainder), nil
 	}
 }
 

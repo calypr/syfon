@@ -85,11 +85,7 @@ func NewService(deps Dependencies) *Service {
 	if expires <= 0 {
 		expires = defaultSigningExpiry
 	}
-	multipartSessions := deps.MultipartSessions
-	if multipartSessions == nil {
-		multipartSessions = newMemoryMultipartSessionStore()
-	}
-	return &Service{objects: deps.Objects, storage: deps.Storage, fileCounters: deps.FileCounters, scopes: deps.Scopes, credentials: deps.Credentials, events: deps.Events, now: now, signingExpiry: expires, multipartSessions: multipartSessions}
+	return &Service{objects: deps.Objects, storage: deps.Storage, fileCounters: deps.FileCounters, scopes: deps.Scopes, credentials: deps.Credentials, events: deps.Events, now: now, signingExpiry: expires, multipartSessions: deps.MultipartSessions}
 }
 
 func (s *Service) Download(ctx context.Context, req DownloadRequest) (DownloadResult, error) {

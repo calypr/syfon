@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+
+	"github.com/calypr/syfon/internal/storage/address"
 )
 
 func (d *DataService) CanonicalObjectURL(signedURL, bucketHint, fallbackDID string) (string, error) {
@@ -20,10 +22,10 @@ func (d *DataService) CanonicalObjectURL(signedURL, bucketHint, fallbackDID stri
 		return parsed.String(), nil
 	case "http", "https":
 		if b, k, ok := parseGCSJSONUploadURL(&originalParsed); ok {
-			return "s3://" + b + "/" + k, nil
+			return address.BucketToURL(b, k), nil
 		}
 		if b, k, ok := parseAzureBlobSignedURL(&originalParsed); ok {
-			return "s3://" + b + "/" + k, nil
+			return address.BucketToURL(b, k), nil
 		}
 
 		bucketHint = strings.TrimSpace(bucketHint)
@@ -56,7 +58,7 @@ func (d *DataService) CanonicalObjectURL(signedURL, bucketHint, fallbackDID stri
 		if key == "" {
 			return "", fmt.Errorf("unable to derive object key from upload URL")
 		}
-		return "s3://" + bucketHint + "/" + key, nil
+		return address.BucketToURL(bucketHint, key), nil
 	default:
 		if parsed.Scheme != "" && parsed.Host != "" {
 			return parsed.String(), nil
@@ -71,7 +73,7 @@ func (d *DataService) CanonicalObjectURL(signedURL, bucketHint, fallbackDID stri
 		if key == "" {
 			return "", fmt.Errorf("unable to derive object key from upload URL")
 		}
-		return "s3://" + bucketHint + "/" + key, nil
+		return address.BucketToURL(bucketHint, key), nil
 	}
 }
 

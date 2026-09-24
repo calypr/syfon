@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -29,6 +30,12 @@ func (sqliteDialect) ListArgs(column string, values []string) (string, []any) {
 func (sqliteDialect) LockContentWrite(context.Context, *sql.Tx) error {
 	// sqliteDSN enables _txlock=immediate, so BeginTx already acquires the
 	// write reservation before the caller performs identity reads.
+	return nil
+}
+
+func (sqliteDialect) LockObjectUsageEventIDs(context.Context, *sql.Tx, []string) error {
+	// The immediate write transaction already serializes usage events with
+	// object repair and registration.
 	return nil
 }
 
@@ -343,7 +350,7 @@ func (db *sqliteSchemaBootstrap) initSchema() error {
 	return nil
 }
 
-func (db *sqliteSchemaBootstrap) ensureObjectTableShape() error {
+func (db *sqliteSchemaBootstrap) ensureObjectTableShape() (returnErr error) {
 	rows, err := db.db.Query(`PRAGMA table_info(drs_object)`)
 	if err != nil {
 		return err
@@ -366,15 +373,33 @@ func (db *sqliteSchemaBootstrap) ensureObjectTableShape() error {
 	if err := rows.Err(); err != nil {
 		return err
 	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
 	if !hasFileName {
 		return nil
 	}
 
-	tx, err := db.db.Begin()
+	ctx := context.Background()
+	conn, err := db.db.Conn(ctx)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, `PRAGMA foreign_keys = OFF`); err != nil {
+		return fmt.Errorf("disable SQLite foreign key enforcement for object migration: %w", err)
+	}
+	defer func() {
+		if _, err := conn.ExecContext(context.Background(), `PRAGMA foreign_keys = ON`); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("restore SQLite foreign key enforcement: %w", err))
+		}
+	}()
+
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
 
 	for _, stmt := range []string{
 		`CREATE TABLE drs_object_new (
@@ -395,8 +420,36 @@ func (db *sqliteSchemaBootstrap) ensureObjectTableShape() error {
 			return err
 		}
 	}
+	if err := checkSQLiteForeignKeys(ctx, tx); err != nil {
+		return err
+	}
 
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func checkSQLiteForeignKeys(ctx context.Context, tx *sql.Tx) error {
+	rows, err := tx.QueryContext(ctx, `PRAGMA foreign_key_check`)
+	if err != nil {
+		return fmt.Errorf("check SQLite foreign keys after object migration: %w", err)
+	}
+	defer rows.Close()
+	if rows.Next() {
+		var table string
+		var rowID sql.NullInt64
+		var parent string
+		var foreignKeyID int
+		if err := rows.Scan(&table, &rowID, &parent, &foreignKeyID); err != nil {
+			return fmt.Errorf("scan SQLite foreign key check: %w", err)
+		}
+		return fmt.Errorf("SQLite foreign key violation after object migration: table=%s row=%v parent=%s fk=%d", table, rowID, parent, foreignKeyID)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("read SQLite foreign key check: %w", err)
+	}
+	return rows.Close()
 }
 
 func (db *sqliteSchemaBootstrap) ensureCredentialIdentitySchema() error {

@@ -28,17 +28,18 @@ func TestPostgresMultipartCompletionClaimAndRetryState(t *testing.T) {
 	if err := database.SaveMultipartSession(ctx, session); err != nil {
 		t.Fatal(err)
 	}
-	claimed, ok, err := database.ClaimMultipartCompletion(ctx, session.UploadID, "claim", "parts", now.Add(time.Minute), now.Add(-time.Hour))
-	if err != nil || !ok || claimed.PartsFingerprint != "parts" {
+	parts := []transfers.CompletedPart{{PartNumber: 1, ETag: "etag"}}
+	claimed, ok, err := database.ClaimMultipartCompletionWithParts(ctx, session.UploadID, "claim", "parts", parts, now.Add(time.Minute), now.Add(-time.Hour))
+	if err != nil || !ok || claimed.PartsFingerprint != "parts" || len(claimed.CompletionParts) != len(parts) || claimed.CompletionParts[0] != parts[0] {
 		t.Fatalf("completion claim = %+v, %t, %v", claimed, ok, err)
 	}
-	if _, ok, err := database.ClaimMultipartCompletion(ctx, session.UploadID, "other", "different", now.Add(2*time.Minute), now.Add(-time.Hour)); err != nil || ok {
+	if _, ok, err := database.ClaimMultipartCompletionWithParts(ctx, session.UploadID, "other", "different", parts, now.Add(2*time.Minute), now.Add(-time.Hour)); err != nil || ok {
 		t.Fatalf("competing completion claim = %t, %v", ok, err)
 	}
-	if stale, ok, err := database.ClaimMultipartCompletion(ctx, session.UploadID, "wrong-stale", "different", now.Add(2*time.Hour), now.Add(time.Hour)); err != nil || ok || stale.PartsFingerprint != "parts" {
+	if stale, ok, err := database.ClaimMultipartCompletionWithParts(ctx, session.UploadID, "wrong-stale", "different", parts, now.Add(2*time.Hour), now.Add(time.Hour)); err != nil || ok || stale.PartsFingerprint != "parts" {
 		t.Fatalf("different-parts stale claim = %+v, %t, %v", stale, ok, err)
 	}
-	if _, ok, err := database.ClaimMultipartCompletion(ctx, session.UploadID, "same-stale", "parts", now.Add(2*time.Hour), now.Add(time.Hour)); err != nil || !ok {
+	if _, ok, err := database.ClaimMultipartCompletionWithParts(ctx, session.UploadID, "same-stale", "parts", parts, now.Add(2*time.Hour), now.Add(time.Hour)); err != nil || !ok {
 		t.Fatalf("same-parts stale claim = %t, %v", ok, err)
 	}
 	if ok, err := database.FinishMultipartCompletion(ctx, session.UploadID, "same-stale", session.Target.CanonicalURL, now.Add(2*time.Hour+time.Minute)); err != nil || !ok {

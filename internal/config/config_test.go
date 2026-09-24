@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestLoadConfig_NoDatabaseError(t *testing.T) {
@@ -69,6 +71,152 @@ func TestLoadConfig_EnvOverrides(t *testing.T) {
 	}
 	if cfg.CredentialEncryption.LocalKeyFile != "/tmp/test-env-kek" {
 		t.Errorf("expected credential local key file override, got %s", cfg.CredentialEncryption.LocalKeyFile)
+	}
+}
+
+func TestLoadConfigRejectsMultipartDurationOverflow(t *testing.T) {
+	if strconv.IntSize < 64 {
+		t.Skip("int cannot represent values above the maximum duration seconds")
+	}
+
+	maxSeconds := int64((1<<63 - 1) / int64(time.Second))
+	overMax := strconv.FormatInt(maxSeconds+1, 10)
+	wantLimit := strconv.FormatInt(maxSeconds, 10)
+	tests := []struct {
+		name              string
+		field             string
+		env               string
+		setInactiveToOver bool
+	}{
+		{
+			name:              "cleanup interval",
+			field:             "cleanup_interval_seconds",
+			env:               "DRS_MULTIPART_CLEANUP_INTERVAL_SECONDS",
+			setInactiveToOver: true,
+		},
+		{
+			name:  "inactive timeout",
+			field: "inactive_timeout_seconds",
+			env:   "DRS_MULTIPART_INACTIVE_TIMEOUT_SECONDS",
+		},
+		{
+			name:  "completed retention",
+			field: "completed_retention_seconds",
+			env:   "DRS_MULTIPART_COMPLETED_RETENTION_SECONDS",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("DRS_PROFILE", ProfileDevelopment)
+			t.Setenv("DRS_DB_SQLITE_FILE", "drs.db")
+			t.Setenv("DRS_DB_HOST", "")
+			t.Setenv("DRS_DB_DATABASE", "")
+			t.Setenv("DRS_AUTH_MODE", AuthModeLocal)
+			t.Setenv("DRS_BASIC_AUTH_USER", "drs-user")
+			t.Setenv("DRS_BASIC_AUTH_PASSWORD", "drs-pass")
+			t.Setenv("DRS_AUTH_MOCK_ENABLED", "false")
+			t.Setenv("DRS_MULTIPART_CLEANUP_INTERVAL_SECONDS", "60")
+			t.Setenv("DRS_MULTIPART_INACTIVE_TIMEOUT_SECONDS", "86400")
+			t.Setenv("DRS_MULTIPART_COMPLETED_RETENTION_SECONDS", "3600")
+			t.Setenv("DRS_MULTIPART_BATCH_SIZE", "100")
+			t.Setenv(test.env, overMax)
+			if test.setInactiveToOver {
+				t.Setenv("DRS_MULTIPART_INACTIVE_TIMEOUT_SECONDS", overMax)
+			}
+
+			_, err := LoadConfig("")
+			if err == nil || !strings.Contains(err.Error(), "multipart."+test.field) || !strings.Contains(err.Error(), wantLimit) {
+				t.Fatalf("LoadConfig() error = %v, want a field-specific maximum of %s", err, wantLimit)
+			}
+		})
+	}
+}
+
+func TestLoadConfigAcceptsMaximumMultipartDurationSeconds(t *testing.T) {
+	if strconv.IntSize < 64 {
+		t.Skip("int cannot represent the maximum duration seconds")
+	}
+
+	maxSeconds := strconv.FormatInt(int64((1<<63-1)/int64(time.Second)), 10)
+	t.Setenv("DRS_PROFILE", ProfileDevelopment)
+	t.Setenv("DRS_DB_SQLITE_FILE", "drs.db")
+	t.Setenv("DRS_DB_HOST", "")
+	t.Setenv("DRS_DB_DATABASE", "")
+	t.Setenv("DRS_AUTH_MODE", AuthModeLocal)
+	t.Setenv("DRS_BASIC_AUTH_USER", "drs-user")
+	t.Setenv("DRS_BASIC_AUTH_PASSWORD", "drs-pass")
+	t.Setenv("DRS_AUTH_MOCK_ENABLED", "false")
+	t.Setenv("DRS_MULTIPART_CLEANUP_INTERVAL_SECONDS", maxSeconds)
+	t.Setenv("DRS_MULTIPART_INACTIVE_TIMEOUT_SECONDS", maxSeconds)
+	t.Setenv("DRS_MULTIPART_COMPLETED_RETENTION_SECONDS", maxSeconds)
+	t.Setenv("DRS_MULTIPART_BATCH_SIZE", "1")
+
+	cfg, err := LoadConfig("")
+	if err != nil {
+		t.Fatalf("LoadConfig() rejected the maximum representable duration seconds: %v", err)
+	}
+	maxValue := int((1<<63 - 1) / int64(time.Second))
+	want := MultipartConfig{
+		CleanupIntervalSeconds:    maxValue,
+		InactiveTimeoutSeconds:    maxValue,
+		CompletedRetentionSeconds: maxValue,
+		BatchSize:                 1,
+	}
+	if cfg.Multipart != want {
+		t.Fatalf("LoadConfig() multipart settings = %+v, want %+v", cfg.Multipart, want)
+	}
+}
+
+func TestLoadConfigValidatesEffectiveFenceURLForBuiltInGen3Auth(t *testing.T) {
+	t.Setenv("DRS_AUTH_MODE", AuthModeGen3)
+	t.Setenv("DRS_FENCE_URL", "http://fence.example/user")
+	t.Setenv("SYFON_AUTHN_PLUGIN_PATH", "")
+	t.Setenv("DRS_AUTH_MOCK_ENABLED", "false")
+	content := `
+auth:
+  mode: gen3
+database:
+  postgres:
+    host: localhost
+    database: syfon
+`
+
+	_, err := LoadConfig(writeConfigTestFile(t, content))
+	if err == nil || !strings.Contains(err.Error(), "auth.fence_url") {
+		t.Fatalf("LoadConfig() error = %v, want invalid effective Fence URL config error", err)
+	}
+}
+
+func TestLoadConfigAcceptsHelmFenceURLAndCustomAuthPluginWithoutFence(t *testing.T) {
+	t.Setenv("DRS_AUTH_MODE", AuthModeGen3)
+	t.Setenv("DRS_FENCE_URL", "")
+	t.Setenv("SYFON_AUTHN_PLUGIN_PATH", "")
+	t.Setenv("DRS_AUTH_MOCK_ENABLED", "false")
+	helmConfig := `
+auth:
+  mode: gen3
+  fence_url: https://fence.example/user
+database:
+  postgres:
+    host: localhost
+    database: syfon
+`
+	if _, err := LoadConfig(writeConfigTestFile(t, helmConfig)); err != nil {
+		t.Fatalf("LoadConfig() rejected Helm-style HTTPS Fence URL: %v", err)
+	}
+
+	t.Setenv("DRS_FENCE_URL", "")
+	t.Setenv("SYFON_AUTHN_PLUGIN_PATH", "/custom/authn-plugin")
+	customPluginConfig := `
+auth:
+  mode: gen3
+database:
+  postgres:
+    host: localhost
+    database: syfon
+`
+	if _, err := LoadConfig(writeConfigTestFile(t, customPluginConfig)); err != nil {
+		t.Fatalf("LoadConfig() rejected custom authentication without Fence URL: %v", err)
 	}
 }
 
@@ -492,6 +640,7 @@ func TestLoadConfig_PostgresEnv(t *testing.T) {
 	t.Setenv("DRS_DB_HOST", "myhost")
 	t.Setenv("DRS_DB_DATABASE", "mydb")
 	t.Setenv("DRS_AUTH_MODE", "gen3")
+	t.Setenv("DRS_FENCE_URL", "https://fence.example/user")
 
 	cfg, err := LoadConfig("")
 	if err != nil {
@@ -626,6 +775,7 @@ func TestLoadConfig_PostgresEnvAppliesAllFieldsAfterSelection(t *testing.T) {
 	t.Setenv("DRS_DB_PASSWORD", "syfon-password")
 	t.Setenv("DRS_DB_SSLMODE", "verify-full")
 	t.Setenv("DRS_AUTH_MODE", "gen3")
+	t.Setenv("DRS_FENCE_URL", "https://fence.example/user")
 
 	cfg, err := LoadConfig("")
 	if err != nil {

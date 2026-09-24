@@ -30,6 +30,7 @@ type ObjectStore interface {
 	DeleteObject(context.Context, string) error
 	BulkDeleteObjects(context.Context, []string) error
 	RegisterObjects(context.Context, []drs.DrsObject) error
+	RegisterObjectsIfPending(context.Context, []drs.DrsObject, PendingRegistration) error
 	RepairCanonicalDuplicates(context.Context, []CanonicalRepair) error
 	ReplaceObjects(context.Context, []drs.DrsObject) error
 	UpdateObjectAccessMethods(context.Context, string, []drs.AccessMethod) error
@@ -38,18 +39,11 @@ type ObjectStore interface {
 	RemoveObjectControlledAccessBulk(context.Context, []string, string) (int, error)
 	CreateObjectAlias(context.Context, string, string) error
 	ResolveObjectAlias(context.Context, string) (string, error)
+	ResolveObjectIDs(context.Context, []string) (map[string]string, error)
 	GetObjectsByChecksums(context.Context, []string) (map[string][]drs.DrsObject, error)
 	GetPublicReadByIDs(context.Context, []string) (map[string]bool, error)
 	ListScopedObjectIDsByChecksums(context.Context, string, string, []string) (map[string][]string, error)
 	ListObjectIDsByScope(context.Context, string, string) ([]string, error)
 	ListObjectIDsByResources(context.Context, []string, bool) ([]string, error)
-	ListObjectIDsPageByScope(context.Context, string, string, string, int, int) ([]string, error)
-	ListObjectIDsPageByURL(context.Context, string, string, string, string, int, int, []string, bool, bool) ([]string, error)
-}
-
-// AuthorizedScopePager is an optional database capability. It allows the
-// production store to apply authorization filters before paging, while
-// alternate stores retain the materialized fallback in ListObjects.
-type AuthorizedScopePager interface {
-	ListObjectIDsPageByAuthorizedScope(context.Context, string, string, string, int, int, []string, bool, bool) ([]string, error)
+	ListObjectIDsPage(context.Context, ObjectIDPageQuery) ([]string, error)
 }

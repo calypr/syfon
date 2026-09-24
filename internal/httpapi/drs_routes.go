@@ -38,7 +38,18 @@ func (s *drsServer) GetBulkAccessURL(c fiber.Ctx) error {
 		return err
 	}
 
-	requests := make([]transfers.AccessLookupRequest, 0, len(*body.BulkObjectAccessIds))
+	requestCount := 0
+	for _, item := range *body.BulkObjectAccessIds {
+		if item.BulkAccessIds == nil || len(*item.BulkAccessIds) == 0 {
+			requestCount++
+		} else {
+			requestCount += len(*item.BulkAccessIds)
+		}
+		if err := s.rejectBulkTooLarge(c, requestCount); err != nil {
+			return err
+		}
+	}
+	requests := make([]transfers.AccessLookupRequest, 0, requestCount)
 	for _, item := range *body.BulkObjectAccessIds {
 		objectID := ""
 		if item.BulkObjectId != nil {

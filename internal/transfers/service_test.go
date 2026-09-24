@@ -2,11 +2,14 @@ package transfers
 
 import (
 	"context"
+	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/calypr/syfon/apigen/drs"
+	"github.com/calypr/syfon/apigen/errorapi"
 	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/requestid"
@@ -155,9 +158,10 @@ func TestDownloadWithoutOptionalAccountingStillSigns(t *testing.T) {
 func TestSigningExpiryUsesConfiguredDefaultAcrossOperations(t *testing.T) {
 	const configured = 37 * time.Second
 	for _, test := range []struct {
-		name string
-		call func(*Service, *accessFake) error
-		get  func(*accessFake) time.Duration
+		name                   string
+		call                   func(*Service, *accessFake) error
+		get                    func(*accessFake) time.Duration
+		requiresMultipartStore bool
 	}{
 		{
 			name: "download",
@@ -193,17 +197,22 @@ func TestSigningExpiryUsesConfiguredDefaultAcrossOperations(t *testing.T) {
 				_, err = service.SignMultipartPart(context.Background(), result.UploadID, 1)
 				return err
 			},
-			get: func(fake *accessFake) time.Duration { return fake.partRequest.ExpiresIn },
+			get:                    func(fake *accessFake) time.Duration { return fake.partRequest.ExpiresIn },
+			requiresMultipartStore: true,
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			storage := &accessFake{result: storage.SignedAccess{Location: "signed"}}
-			service := NewService(Dependencies{
+			deps := Dependencies{
 				Objects:              downloadObjectFake{object: testRecord()},
 				Storage:              storage,
 				Events:               &eventFake{},
 				DefaultSigningExpiry: configured,
-			})
+			}
+			if test.requiresMultipartStore {
+				deps.MultipartSessions = newMemoryMultipartSessionStore()
+			}
+			service := NewService(deps)
 			if err := test.call(service, storage); err != nil {
 				t.Fatalf("operation failed: %v", err)
 			}
@@ -282,9 +291,132 @@ func TestResolveCanonicalStorageTargetComposesScopesAndPrefixes(t *testing.T) {
 	}
 }
 
+func TestResolveCanonicalStorageTargetSelectsOneProjectScope(t *testing.T) {
+	service := NewService(Dependencies{Scopes: scopeFake{scopes: map[string]buckets.Scope{
+		"org|":         {Organization: "org", Bucket: "org-bucket", PathPrefix: "org-prefix"},
+		"org|project1": {Organization: "org", ProjectID: "project1", Bucket: "bucket-one", PathPrefix: "project-one"},
+		"org|project2": {Organization: "org", ProjectID: "project2", Bucket: "bucket-two", PathPrefix: "project-two"},
+	}}})
+	object := testRecord()
+	resources := []string{"/organization/org/project/project1", "/organization/org/project/project2"}
+	object.ControlledAccess = &resources
+	for _, test := range []struct {
+		name       string
+		accessURL  string
+		bucketHint string
+	}{
+		{name: "project prefix", accessURL: "s3://legacy/project-two/object"},
+		{name: "configured bucket", accessURL: "s3://bucket-two/object"},
+		{name: "requested bucket", accessURL: "s3://legacy/object", bucketHint: "bucket-two"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			target, err := service.ResolveCanonicalStorageTarget(context.Background(), CanonicalStorageTargetRequest{
+				Object:    object,
+				AccessURL: test.accessURL,
+				Bucket:    test.bucketHint,
+			})
+			if err != nil {
+				t.Fatalf("ResolveCanonicalStorageTarget: %v", err)
+			}
+			if target.Bucket != "bucket-two" || target.Key != "org-prefix/project-two/object" {
+				t.Fatalf("target = %+v, want bucket-two/org-prefix/project-two/object", target)
+			}
+		})
+	}
+}
+
+func TestIssueAccessSignsSelectedProjectStorageScope(t *testing.T) {
+	object := testRecord()
+	resources := []string{"/organization/org/project/project1", "/organization/org/project/project2"}
+	object.ControlledAccess = &resources
+	accessID := "s3"
+	methods := []drs.AccessMethod{{AccessId: &accessID, Type: "s3", AccessUrl: &drs.AccessURL{Url: "s3://legacy/org-prefix/project-two/object"}}}
+	object.AccessMethods = &methods
+	storage := &accessFake{result: storage.SignedAccess{Location: "signed"}}
+	service := NewService(Dependencies{
+		Objects: downloadObjectFake{object: object},
+		Storage: storage,
+		Events:  &eventFake{},
+		Scopes: scopeFake{scopes: map[string]buckets.Scope{
+			"org|":         {Organization: "org", Bucket: "org-bucket", PathPrefix: "org-prefix"},
+			"org|project1": {Organization: "org", ProjectID: "project1", Bucket: "bucket-one", PathPrefix: "org-prefix/project-one"},
+			"org|project2": {Organization: "org", ProjectID: "project2", Bucket: "bucket-two", PathPrefix: "org-prefix/project-two"},
+		}},
+	})
+
+	result, err := service.IssueAccess(context.Background(), AccessLookupRequest{ObjectID: object.Id, AccessID: "s3"})
+	if err != nil {
+		t.Fatalf("IssueAccess: %v", err)
+	}
+	if !result.Found || len(storage.requests) != 1 {
+		t.Fatalf("IssueAccess result = %+v, sign requests = %d", result, len(storage.requests))
+	}
+	target := storage.requests[0].Target
+	if target.PhysicalBucket != "bucket-two" || target.Key != "org-prefix/project-two/object" {
+		t.Fatalf("signed target = %+v, want bucket-two/org-prefix/project-two/object", target)
+	}
+}
+
+func TestResolveCanonicalStorageTargetRejectsAmbiguousProjectScopes(t *testing.T) {
+	service := NewService(Dependencies{Scopes: scopeFake{scopes: map[string]buckets.Scope{
+		"org|project1": {Organization: "org", ProjectID: "project1", Bucket: "bucket-one", PathPrefix: "project-one"},
+		"org|project2": {Organization: "org", ProjectID: "project2", Bucket: "bucket-two", PathPrefix: "project-two"},
+	}}})
+	object := testRecord()
+	resources := []string{"/organization/org/project/project1", "/organization/org/project/project2"}
+	object.ControlledAccess = &resources
+	_, err := service.ResolveCanonicalStorageTarget(context.Background(), CanonicalStorageTargetRequest{Object: object, AccessURL: "s3://legacy/object"})
+	if err == nil {
+		t.Fatal("ResolveCanonicalStorageTarget succeeded without selecting a project scope")
+	}
+	if !errors.Is(err, errorapi.ErrInvalidInput) {
+		t.Fatalf("ambiguous scope error = %v, want ErrInvalidInput", err)
+	}
+}
+
+func TestResolveCanonicalStorageTargetUsesBucketWideScopeWhenKeyMissesScopedPrefixes(t *testing.T) {
+	service := NewService(Dependencies{Scopes: scopeFake{scopes: map[string]buckets.Scope{
+		"org|project1": {Organization: "org", ProjectID: "project1", Bucket: "shared-bucket"},
+		"org|project2": {Organization: "org", ProjectID: "project2", Bucket: "shared-bucket", PathPrefix: "project-two"},
+	}}})
+	object := testRecord()
+	resources := []string{"/organization/org/project/project1", "/organization/org/project/project2"}
+	object.ControlledAccess = &resources
+	accessID := "s3"
+	methods := []drs.AccessMethod{{
+		AccessId:  &accessID,
+		Type:      "s3",
+		AccessUrl: &drs.AccessURL{Url: "s3://shared-bucket/legacy-object"},
+	}}
+	object.AccessMethods = &methods
+
+	target, err := service.ResolveCanonicalStorageTarget(context.Background(), CanonicalStorageTargetRequest{Object: object})
+	if err != nil {
+		t.Fatalf("ResolveCanonicalStorageTarget: %v", err)
+	}
+	if target.Bucket != "shared-bucket" || target.Key != "legacy-object" {
+		t.Fatalf("target = %+v, want bucket-wide legacy-object location", target)
+	}
+}
+
+func TestScopedStorageTargetsRejectTraversal(t *testing.T) {
+	service := NewService(Dependencies{Scopes: scopeFake{scopes: map[string]buckets.Scope{
+		"org|":        {Organization: "org", Bucket: "physical", PathPrefix: "org-prefix"},
+		"org|project": {Organization: "org", ProjectID: "project", Bucket: "physical", PathPrefix: "project-prefix"},
+	}}})
+	for _, key := range []string{"../victim", "../../victim", "org-prefix/project-prefix/../victim"} {
+		if target, err := service.ResolveScopedUploadTarget(context.Background(), "org", "project", key); err == nil {
+			t.Errorf("ResolveScopedUploadTarget(%q) signed outside scope: %+v", key, target)
+		}
+		if target, err := service.ResolveCanonicalStorageTarget(context.Background(), CanonicalStorageTargetRequest{Object: testRecord(), Key: key}); err == nil {
+			t.Errorf("ResolveCanonicalStorageTarget(%q) signed outside scope: %+v", key, target)
+		}
+	}
+}
+
 func TestMultipartDelegationPreservesOpaqueIDAndPartOrder(t *testing.T) {
 	port := &multipartFake{beginID: "provider/upload/id", partAccess: storage.SignedAccess{Location: "part-signed"}}
-	service := NewService(Dependencies{Objects: downloadObjectFake{object: testRecord()}, Storage: port})
+	service := NewService(Dependencies{Objects: downloadObjectFake{object: testRecord()}, Storage: port, MultipartSessions: newMemoryMultipartSessionStore()})
 	ctx := context.Background()
 	target := storage.Target{PhysicalBucket: "bucket", LookupKey: "bucket", Key: "key", LookupCandidates: []string{"bucket"}}
 	guid := "opaque-guid"
@@ -337,8 +469,33 @@ func TestEventFromObjectPreservesContextAndRangeProjection(t *testing.T) {
 }
 
 func TestUnconfiguredWorkflowsReturnConfigurationErrors(t *testing.T) {
-	service := NewService(Dependencies{})
-	if _, err := service.BeginMultipart(context.Background(), MultipartInitRequest{Target: &storage.Target{PhysicalBucket: "bucket", Key: "key"}}); err == nil {
-		t.Fatal("BeginMultipart() unexpectedly succeeded without multipart port")
+	service := NewService(Dependencies{Objects: downloadObjectFake{object: testRecord()}, Storage: &multipartFake{}})
+	checks := []struct {
+		name string
+		call func() error
+	}{
+		{name: "begin", call: func() error {
+			_, err := service.BeginMultipart(context.Background(), MultipartInitRequest{Target: &storage.Target{PhysicalBucket: "bucket", Key: "key"}})
+			return err
+		}},
+		{name: "sign part", call: func() error {
+			_, err := service.SignMultipartPart(context.Background(), "upload", 1)
+			return err
+		}},
+		{name: "complete", call: func() error {
+			_, err := service.CompleteMultipart(context.Background(), "upload", []CompletedPart{{PartNumber: 1, ETag: "etag"}})
+			return err
+		}},
+		{name: "abort", call: func() error { return service.AbortMultipart(context.Background(), "upload") }},
+		{name: "reconcile", call: func() error {
+			return service.ReconcileMultipartSessions(context.Background(), time.Hour, time.Hour, 10)
+		}},
+	}
+	for _, check := range checks {
+		t.Run(check.name, func(t *testing.T) {
+			if err := check.call(); err == nil || !strings.Contains(err.Error(), "transfer multipart is not configured") {
+				t.Fatalf("error = %v, want multipart configuration error", err)
+			}
+		})
 	}
 }

@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -345,6 +346,17 @@ func TestInspectProjectMarksCompleteInventoryItems(t *testing.T) {
 	}
 }
 
+func TestInspectProjectExistsLimitsTotalInventoryResults(t *testing.T) {
+	inventory := &fakeInventory{result: storage.InventoryResult{Items: []storage.ObjectMetadata{{Key: "prefix/project/a"}}, Complete: true}}
+	service, _ := projectService(inventory, nil)
+	if _, err := service.InspectProjectStorage(context.Background(), "org", "project", InspectionOptions{Mode: ModeExists}); err != nil {
+		t.Fatal(err)
+	}
+	if len(inventory.requests) != 1 || inventory.requests[0].MaxKeys != 1 || inventory.requests[0].MaxResults != 1 {
+		t.Fatalf("exists inventory request = %+v", inventory.requests)
+	}
+}
+
 func TestProbeObjectNormalizesScopedKeyAgainstEffectivePrefix(t *testing.T) {
 	tests := []struct {
 		name string
@@ -370,6 +382,21 @@ func TestProbeObjectNormalizesScopedKeyAgainstEffectivePrefix(t *testing.T) {
 				t.Fatalf("probe targets = %+v, want key %q", probe.targets, tt.want)
 			}
 		})
+	}
+}
+
+func TestProbeObjectRejectsKeyOutsideProjectPrefix(t *testing.T) {
+	service, _ := projectService(&fakeInventory{}, nil)
+	probe := &recordingProbe{}
+	service.probe = probe
+	_, err := service.ProbeObject(context.Background(), internalapi.InternalInspectObjectRequest{
+		Organization: "org", Project: "project", Key: "../../victim",
+	})
+	if err == nil {
+		t.Fatal("ProbeObject accepted a key outside the project prefix")
+	}
+	if len(probe.targets) != 0 {
+		t.Fatalf("ProbeObject sent a traversal key to storage: %+v", probe.targets)
 	}
 }
 
@@ -412,6 +439,58 @@ func TestProbeObjectRestrictedVisibilityRejectsCredentialBeforeProvider(t *testi
 	}
 	if metadata.Bucket != "bucket-b" || len(probe.targets) != 1 {
 		t.Fatalf("broad probe metadata=%+v targets=%+v", metadata, probe.targets)
+	}
+}
+
+func TestProbeObjectRestrictedVisibilityEnforcesProjectScopePrefix(t *testing.T) {
+	const allowedResource = "/organization/org/project/allowed"
+	credential := buckets.Credential{CredentialID: "cred", Bucket: "bucket", Provider: "s3"}
+	probe := &recordingProbe{}
+	inventory := &fakeInventory{}
+	service := NewService(Dependencies{
+		Credentials: fakeCredentials{values: map[string]buckets.Credential{"cred": credential}},
+		Visibility: &fakeVisibility{values: map[string]buckets.VisibleBucket{
+			"cred": {Credential: credential, Programs: []string{allowedResource}},
+		}},
+		ScopeCatalog: &fakeCleanupScopes{scopes: []buckets.Scope{
+			{Organization: "org", ProjectID: "allowed", CredentialID: "cred", Bucket: "bucket", PathPrefix: "allowed"},
+			{Organization: "org", ProjectID: "hidden", CredentialID: "cred", Bucket: "bucket", PathPrefix: "hidden"},
+		}},
+		Providers: Providers{Inventory: inventory, Probe: probe},
+	})
+	session := access.NewSession("gen3")
+	session.AuthHeaderPresent = true
+	session.SetAuthorizations(nil, map[string]map[string]bool{allowedResource: {"read": true}}, true)
+	ctx := access.WithSession(context.Background(), session)
+
+	_, err := service.ProbeObject(ctx, internalapi.InternalInspectObjectRequest{ObjectUrl: "s3://bucket/hidden/private"})
+	var storageErr *Error
+	if !errors.As(err, &storageErr) || storageErr.Kind != ErrorPermissionDenied {
+		t.Fatalf("ProbeObject for sibling prefix error=%v, want permission denied", err)
+	}
+	if len(probe.targets) != 0 {
+		t.Fatalf("unauthorized key reached provider: %+v", probe.targets)
+	}
+	bulk := service.ProbeObjects(ctx, []internalapi.InternalInspectObjectRequest{{ObjectUrl: "s3://bucket/hidden/private"}})
+	if len(bulk) != 1 || bulk[0].Status != string(probeForbidden) || bulk[0].ErrorKind != string(ErrorPermissionDenied) {
+		t.Fatalf("bulk probe result = %+v, want permission denied", bulk)
+	}
+	if len(probe.targets) != 0 {
+		t.Fatalf("unauthorized bulk key reached provider: %+v", probe.targets)
+	}
+	results := service.ValidateInventoryObjects(ctx, []internalapi.InternalInspectObjectRequest{{ObjectUrl: "s3://bucket/hidden/private"}})
+	if len(results) != 1 || results[0].Status != string(probeForbidden) || results[0].ErrorKind != string(ErrorPermissionDenied) {
+		t.Fatalf("bulk-list validation result = %+v, want permission denied", results)
+	}
+	if len(inventory.requests) != 0 {
+		t.Fatalf("unauthorized key reached inventory: %+v", inventory.requests)
+	}
+
+	if _, err := service.ProbeObject(ctx, internalapi.InternalInspectObjectRequest{ObjectUrl: "s3://bucket/allowed/object"}); err != nil {
+		t.Fatalf("ProbeObject for authorized prefix: %v", err)
+	}
+	if len(probe.targets) != 1 {
+		t.Fatalf("authorized key probe count = %d, want 1", len(probe.targets))
 	}
 }
 
@@ -484,6 +563,22 @@ func TestValidateInventoryDeduplicatesAndRestoresRequestOrder(t *testing.T) {
 	}
 	if results[2].Status != "invalid" || results[2].Id != "invalid" {
 		t.Fatalf("invalid result = %+v", results[2])
+	}
+}
+
+func TestValidateInventoryCapsCoalescedListing(t *testing.T) {
+	inventory := &fakeInventory{result: storage.InventoryResult{Items: []storage.ObjectMetadata{}, Complete: true}}
+	service, _ := projectService(inventory, nil)
+	requests := make([]internalapi.InternalInspectObjectRequest, listCoalesceThreshold)
+	for index := range requests {
+		requests[index].ObjectUrl = fmt.Sprintf("s3://bucket/dir/object-%d", index)
+	}
+	service.ValidateInventoryObjects(context.Background(), requests)
+	if len(inventory.requests) == 0 {
+		t.Fatal("coalesced listing did not query inventory")
+	}
+	if inventory.requests[0].MaxResults != listFallbackObjectLimit+1 {
+		t.Fatalf("coalesced listing MaxResults = %d, want %d", inventory.requests[0].MaxResults, listFallbackObjectLimit+1)
 	}
 }
 

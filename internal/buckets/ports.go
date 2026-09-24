@@ -13,8 +13,13 @@ type CredentialAdmin interface {
 	SaveS3Credential(ctx context.Context, cred *Credential) error
 	SaveBucketConfiguration(ctx context.Context, configuration BucketConfiguration) error
 	DeleteBucketScopeConfiguration(ctx context.Context, scope Scope) ([]string, error)
+	DeleteBucketCredential(ctx context.Context, bucket string, authorize ScopeDeletionPolicy) ([]string, error)
 	DeleteS3Credential(ctx context.Context, bucket string) error
 }
+
+// ScopeDeletionPolicy checks every scope attached to a credential while the
+// repository holds its content-write transaction.
+type ScopeDeletionPolicy func(scopes []Scope) error
 
 // ScopeStore owns bucket-scope lifecycle and lookup.
 type ScopeStore interface {

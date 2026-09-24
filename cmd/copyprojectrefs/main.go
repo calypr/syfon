@@ -2,9 +2,11 @@ package copyprojectrefs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
+	"github.com/calypr/syfon/apigen/errorapi"
 	"github.com/calypr/syfon/apigen/internalapi"
 	"github.com/calypr/syfon/client/services"
 	"github.com/calypr/syfon/cmd/projectcopy"
@@ -86,6 +88,9 @@ func upsertExactRecord(ctx context.Context, index *services.IndexService, rec in
 		rec.CreatedTime = existing.CreatedTime
 		rec.UpdatedTime = existing.UpdatedTime
 		_, err = index.Update(ctx, rec.Did, rec)
+		return err
+	}
+	if !errors.Is(err, errorapi.ErrNotFound) {
 		return err
 	}
 	return createRecord(ctx, index, rec)

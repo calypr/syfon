@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"math"
 	"net/http"
@@ -91,11 +92,68 @@ func (l *lfsLimiter) allowBandwidth(key string, now time.Time, bytes, limit int6
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	window := l.windowLocked(key, now)
-	if bytes > limit || window.bytes > limit-bytes {
-		return false
+	overflow := bytes > math.MaxInt64-window.bytes
+	if overflow {
+		window.bytes = math.MaxInt64
+	} else {
+		window.bytes += bytes
 	}
-	window.bytes += bytes
-	return true
+	return !overflow && window.bytes <= limit
+}
+
+var (
+	errLFSUploadTooLarge         = errors.New("LFS upload exceeds maximum object size")
+	errLFSBandwidthLimitExceeded = errors.New("LFS upload exceeds bandwidth limit")
+)
+
+type lfsUploadReader struct {
+	body      io.Reader
+	maxBytes  int64
+	readBytes int64
+	limiter   *lfsLimiter
+	clientKey string
+	bandwidth int64
+	now       func() time.Time
+	failure   error
+}
+
+func (r *lfsUploadReader) Read(buffer []byte) (int, error) {
+	if len(buffer) == 0 {
+		return 0, nil
+	}
+	if r.readBytes >= r.maxBytes {
+		buffer = buffer[:1]
+		n, err := r.body.Read(buffer)
+		if n > 0 {
+			r.readBytes += int64(n)
+			r.failure = errLFSUploadTooLarge
+			r.charge(n)
+			return n, r.failure
+		}
+		return n, err
+	}
+	remaining := r.maxBytes - r.readBytes
+	if int64(len(buffer)) > remaining {
+		buffer = buffer[:remaining]
+	}
+	n, err := r.body.Read(buffer)
+	r.readBytes += int64(n)
+	if n > 0 && !r.charge(n) {
+		r.failure = errLFSBandwidthLimitExceeded
+		return n, r.failure
+	}
+	return n, err
+}
+
+func (r *lfsUploadReader) charge(count int) bool {
+	if r.bandwidth <= 0 || count <= 0 {
+		return true
+	}
+	now := time.Now()
+	if r.now != nil {
+		now = r.now()
+	}
+	return r.limiter.allowBandwidth(r.clientKey, now, int64(count), r.bandwidth)
 }
 
 // lfsRequestMiddleware applies the legacy per-operation media and limiter
@@ -113,26 +171,6 @@ func lfsRequestMiddleware(opts LFSOptions) lfsapi.StrictMiddlewareFunc {
 					_ = writeLFSError(ctx, http.StatusRequestEntityTooLarge, "batch request body too large", false)
 					return nil, nil
 				}
-				if request, ok := args.(lfsapi.LfsBatchRequestObject); ok && request.Body != nil {
-					var totalBytes int64
-					overflow := false
-					for _, object := range request.Body.Objects {
-						if object.Size > 0 {
-							if object.Size > math.MaxInt64-totalBytes {
-								overflow = true
-								break
-							}
-							totalBytes += object.Size
-						}
-					}
-					if overflow {
-						_ = writeLFSError(ctx, 509, "bandwidth limit exceeded", false)
-						return nil, nil
-					}
-					if !enforceBandwidthLimit(ctx, opts, limiter, totalBytes) {
-						return nil, nil
-					}
-				}
 			case "LfsStageMetadata":
 				if !validateLFSMetadataHeaders(ctx) || !enforceRequestLimit(ctx, opts, limiter) {
 					return nil, nil
@@ -145,6 +183,40 @@ func lfsRequestMiddleware(opts LFSOptions) lfsapi.StrictMiddlewareFunc {
 				if !enforceRequestLimit(ctx, opts, limiter) {
 					return nil, nil
 				}
+				maxUploadBytes := opts.MaxUploadObjectBytes
+				if maxUploadBytes <= 0 {
+					maxUploadBytes = transferlfs.MaxUploadSizeBytes
+				}
+				if contentLength := int64(ctx.Request().Header.ContentLength()); contentLength > maxUploadBytes {
+					_ = writeLFSError(ctx, http.StatusRequestEntityTooLarge, "LFS object exceeds the maximum upload size", false)
+					return nil, nil
+				}
+				request, ok := args.(lfsapi.LfsUploadProxyRequestObject)
+				if !ok {
+					return next(ctx, args)
+				}
+				if request.Body == nil {
+					return next(ctx, request)
+				}
+				body := &lfsUploadReader{
+					body:      request.Body,
+					maxBytes:  maxUploadBytes,
+					limiter:   limiter,
+					clientKey: requestClientKey(ctx),
+					bandwidth: opts.BandwidthLimitBytesPerMinute,
+					now:       time.Now,
+				}
+				request.Body = body
+				response, err := next(ctx, request)
+				if errors.Is(body.failure, errLFSUploadTooLarge) {
+					_ = writeLFSError(ctx, http.StatusRequestEntityTooLarge, "LFS object exceeds the maximum upload size", false)
+					return nil, nil
+				}
+				if errors.Is(body.failure, errLFSBandwidthLimitExceeded) {
+					_ = writeLFSError(ctx, 509, "bandwidth limit exceeded", false)
+					return nil, nil
+				}
+				return response, err
 			}
 			return next(ctx, args)
 		}
@@ -170,17 +242,6 @@ func enforceRequestLimit(c fiber.Ctx, opts LFSOptions, limiter *lfsLimiter) bool
 	}
 	if !limiter.allowRequest(requestClientKey(c), time.Now(), opts.RequestLimitPerMinute) {
 		_ = writeLFSError(c, http.StatusTooManyRequests, "rate limit exceeded", false)
-		return false
-	}
-	return true
-}
-
-func enforceBandwidthLimit(c fiber.Ctx, opts LFSOptions, limiter *lfsLimiter, bytes int64) bool {
-	if opts.BandwidthLimitBytesPerMinute <= 0 || bytes <= 0 {
-		return true
-	}
-	if !limiter.allowBandwidth(requestClientKey(c), time.Now(), bytes, opts.BandwidthLimitBytesPerMinute) {
-		_ = writeLFSError(c, 509, "bandwidth limit exceeded", false)
 		return false
 	}
 	return true
@@ -236,6 +297,7 @@ func validateLFSRequestHeaders(c fiber.Ctx, requireAccept, requireContentType bo
 type LFSOptions struct {
 	MaxBatchObjects              int
 	MaxBatchBodyBytes            int64
+	MaxUploadObjectBytes         int64
 	RequestLimitPerMinute        int
 	BandwidthLimitBytesPerMinute int64
 }
@@ -354,12 +416,21 @@ func (s *lfsServer) LfsStageMetadata(ctx context.Context, request lfsapi.LfsStag
 	if input == nil || len(input.Candidates) == 0 {
 		return lfsapi.LfsStageMetadata400JSONResponse{Message: "candidates cannot be empty"}, nil
 	}
+	ttl := transferlfs.PendingMetadataTTL
+	if input.TtlSeconds != nil {
+		const minimumTTLSeconds = int64(1)
+		maximumTTLSeconds := int64(transferlfs.MaxPendingMetadataTTL / time.Second)
+		if *input.TtlSeconds < minimumTTLSeconds || *input.TtlSeconds > maximumTTLSeconds {
+			return lfsapi.LfsStageMetadata400JSONResponse{Message: fmt.Sprintf("ttl_seconds must be between %d and %d", minimumTTLSeconds, maximumTTLSeconds)}, nil
+		}
+		ttl = time.Duration(*input.TtlSeconds) * time.Second
+	}
 	for index, candidate := range input.Candidates {
 		if candidate.Size != nil && *candidate.Size < 0 {
 			return lfsapi.LfsStageMetadata400JSONResponse{Message: fmt.Sprintf("candidate[%d] size must be non-negative", index)}, nil
 		}
 	}
-	if err := s.service.Stage(ctx, input.Candidates); err != nil {
+	if err := s.service.Stage(ctx, input.Candidates, ttl); err != nil {
 		var stageErr *transferlfs.MetadataStageError
 		if errors.As(err, &stageErr) {
 			if stageErr.MissingSHA {
@@ -377,9 +448,20 @@ func (s *lfsServer) LfsUploadProxy(ctx context.Context, request lfsapi.LfsUpload
 	if oid == "" {
 		return lfsapi.LfsUploadProxy400TextResponse("invalid oid"), nil
 	}
+	if request.Body == nil {
+		return lfsapi.LfsUploadProxy400TextResponse("upload body is required"), nil
+	}
 	if err := s.service.UploadProxy(ctx, oid, request.Body); err != nil {
 		if errors.Is(err, errorapi.ErrBucketNotConfigured) {
 			return lfsapi.LfsUploadProxy507TextResponse(lfsInternalError(ctx, "upload", http.StatusInsufficientStorage, err)), nil
+		}
+		var integrityErr *transferlfs.UploadIntegrityError
+		if errors.As(err, &integrityErr) {
+			return lfsapi.LfsUploadProxy400TextResponse("uploaded content SHA-256 does not match requested OID"), nil
+		}
+		var sizeLimitErr *transferlfs.UploadSizeLimitError
+		if errors.As(err, &sizeLimitErr) {
+			return lfsapi.LfsUploadProxy400TextResponse("LFS object exceeds the maximum upload size"), nil
 		}
 		return lfsapi.LfsUploadProxy500TextResponse(lfsInternalError(ctx, "upload", http.StatusInternalServerError, err)), nil
 	}

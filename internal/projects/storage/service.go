@@ -51,7 +51,7 @@ type Service struct {
 	probe          ProbePort
 	delete         DeletePort
 	cleanupObjects ObjectScopeDeleter
-	cleanupScopes  ScopeCatalog
+	scopeCatalog   ScopeCatalog
 }
 
 func NewService(deps Dependencies) *Service {
@@ -64,7 +64,7 @@ func NewService(deps Dependencies) *Service {
 		probe:          deps.Providers.Probe,
 		delete:         deps.Providers.Delete,
 		cleanupObjects: deps.ObjectCleanup,
-		cleanupScopes:  deps.ScopeCatalog,
+		scopeCatalog:   deps.ScopeCatalog,
 	}
 }
 
@@ -81,6 +81,7 @@ func (s *Service) InspectProjectStorage(ctx context.Context, organization, proje
 	listOptions := inventoryOptions{IncludeHead: options.IncludeHead}
 	if mode == ModeExists {
 		listOptions.MaxKeys = 1
+		listOptions.MaxResults = 1
 	}
 	items, listErr := s.inventoryObjects(ctx, target.Bucket, target.Prefix, listOptions)
 	complete := listErr == nil
@@ -110,6 +111,7 @@ type inventoryOptions struct {
 	IncludeHead bool
 	ExactPrefix bool
 	MaxKeys     int32
+	MaxResults  int32
 }
 
 func (s *Service) inventoryObjects(ctx context.Context, bucket, prefix string, options inventoryOptions) ([]internalapi.InternalInspectProjectBucketItem, error) {
@@ -122,6 +124,7 @@ func (s *Service) inventoryObjects(ctx context.Context, bucket, prefix string, o
 		IncludeHead: options.IncludeHead,
 		ExactPrefix: options.ExactPrefix,
 		MaxKeys:     options.MaxKeys,
+		MaxResults:  options.MaxResults,
 	})
 	items := make([]internalapi.InternalInspectProjectBucketItem, 0, len(result.Items))
 	for _, metadata := range result.Items {

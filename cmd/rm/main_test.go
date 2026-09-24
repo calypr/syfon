@@ -126,7 +126,8 @@ func TestRmCommandDeletesSingleScopeRecord(t *testing.T) {
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 				t.Fatalf("decode delete request: %v", err)
 			}
-			if !body["delete_storage_data"] || !body["delete_object_metadata"] {
+			deleteStorageData, hasDeleteStorageData := body["delete_storage_data"]
+			if !hasDeleteStorageData || deleteStorageData || !body["delete_object_metadata"] {
 				t.Fatalf("unexpected delete body: %+v", body)
 			}
 			w.WriteHeader(http.StatusNoContent)
@@ -144,7 +145,7 @@ func TestRmCommandDeletesSingleScopeRecord(t *testing.T) {
 	if err := root.ExecuteContext(context.Background()); err != nil {
 		t.Fatalf("rm execute: %v output=%s", err, out.String())
 	}
-	if !strings.Contains(out.String(), "removed did-single and attempted storage purge") {
+	if !strings.Contains(out.String(), "removed metadata for did-single; storage data was preserved") {
 		t.Fatalf("unexpected output: %s", out.String())
 	}
 }

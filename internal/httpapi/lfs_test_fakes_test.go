@@ -1,7 +1,9 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -27,6 +29,7 @@ type lfsTestServicePorts struct {
 	*drsObjectStore
 	credentials    map[string]buckets.Credential
 	pending        map[string]transferlfs.PendingMetadata
+	receipts       map[string]transferlfs.UploadReceipt
 	transferEvents []usage.Event
 	uploads        []string
 	downloads      []string
@@ -43,7 +46,7 @@ func newLFSTestPorts(t testing.TB, records map[string]*drs.DrsObject, credential
 	}
 	return &lfsTestServicePorts{
 		drsObjectStore: newDRSObjectStore(t, records), credentials: credentials,
-		pending: map[string]transferlfs.PendingMetadata{},
+		pending: map[string]transferlfs.PendingMetadata{}, receipts: map[string]transferlfs.UploadReceipt{},
 	}
 }
 
@@ -78,6 +81,9 @@ func (p *lfsTestServicePorts) ListS3Credentials(_ context.Context) ([]buckets.Cr
 
 func (p *lfsTestServicePorts) SavePendingMetadata(_ context.Context, entries []transferlfs.PendingMetadata) error {
 	for _, entry := range entries {
+		if receipt, ok := p.receipts[entry.OID]; ok {
+			entry.UploadReceipt = &receipt
+		}
 		p.pending[entry.OID] = entry
 	}
 	return nil
@@ -104,6 +110,46 @@ func (p *lfsTestServicePorts) ConsumePendingMetadata(_ context.Context, expected
 	return true, nil
 }
 
+func (p *lfsTestServicePorts) SaveLFSUploadReceipt(_ context.Context, receipt transferlfs.UploadReceipt) error {
+	p.receipts[receipt.OID] = receipt
+	if pending, ok := p.pending[receipt.OID]; ok {
+		pending.UploadReceipt = &receipt
+		p.pending[receipt.OID] = pending
+	}
+	return nil
+}
+
+func (p *lfsTestServicePorts) GetLFSUploadReceipt(_ context.Context, oid string) (*transferlfs.UploadReceipt, error) {
+	receipt, ok := p.receipts[oid]
+	if !ok {
+		return nil, fmt.Errorf("%w: completed LFS upload not found", errorapi.ErrNotFound)
+	}
+	return &receipt, nil
+}
+
+func (p *lfsTestServicePorts) RegisterObjectsIfPending(ctx context.Context, records []drs.DrsObject, expected objects.PendingRegistration) error {
+	entry, ok := p.pending[expected.OID]
+	if !ok {
+		return errorapi.ErrConflict
+	}
+	candidateJSON, err := json.Marshal(entry.Candidate)
+	if err != nil {
+		return err
+	}
+	receipt, ok := p.receipts[expected.OID]
+	if !ok {
+		return errorapi.ErrConflict
+	}
+	receiptJSON, err := json.Marshal(&receipt)
+	if err != nil {
+		return err
+	}
+	if !entry.CreatedAt.Equal(expected.CreatedAt) || !entry.ExpiresAt.Equal(expected.ExpiresAt) || !bytes.Equal(candidateJSON, expected.CandidateJSON) || !bytes.Equal(receiptJSON, expected.ReceiptJSON) {
+		return errorapi.ErrConflict
+	}
+	return p.Store.RegisterObjects(ctx, records)
+}
+
 func (p *lfsTestServicePorts) RecordTransferAttributionEvents(_ context.Context, events []usage.Event) error {
 	p.transferEvents = append(p.transferEvents, events...)
 	return nil
@@ -126,11 +172,12 @@ var _ usage.FileCounterRecorder = (*lfsTestServicePorts)(nil)
 
 func newLFSTransferService(storageFake *lfsTestStorage, ports *lfsTestServicePorts) *transfers.Service {
 	return transfers.NewService(transfers.Dependencies{
-		Objects:      objects.NewService(ports),
-		Storage:      storageFake,
-		Credentials:  ports,
-		Events:       ports,
-		FileCounters: ports,
+		Objects:           objects.NewService(ports),
+		Storage:           storageFake,
+		Credentials:       ports,
+		Events:            ports,
+		FileCounters:      ports,
+		MultipartSessions: ports.Store,
 	})
 }
 
@@ -160,6 +207,7 @@ type lfsTestStorage struct {
 	initTarget     storage.Target
 	partRequest    storage.MultipartPartRequest
 	complete       storage.CompleteMultipartRequest
+	aborted        []storage.AbortMultipartRequest
 }
 
 func (f *lfsTestStorage) Sign(_ context.Context, request storage.SignRequest) (storage.SignedAccess, error) {
@@ -185,6 +233,11 @@ func (f *lfsTestStorage) SignMultipartPart(_ context.Context, request storage.Mu
 
 func (f *lfsTestStorage) CompleteMultipart(_ context.Context, request storage.CompleteMultipartRequest) error {
 	f.complete = request
+	return nil
+}
+
+func (f *lfsTestStorage) AbortMultipart(_ context.Context, request storage.AbortMultipartRequest) error {
+	f.aborted = append(f.aborted, request)
 	return nil
 }
 

@@ -182,6 +182,8 @@ func NewClient(
 		standard.Timeout = baseHTTPClient.Timeout
 		standard.Jar = baseHTTPClient.Jar
 		standard.CheckRedirect = baseHTTPClient.CheckRedirect
+		authTransport.refreshTimeout = baseHTTPClient.Timeout
+		authTransport.refreshCheckRedirect = baseHTTPClient.CheckRedirect
 	}
 
 	retry := retryablehttp.NewClient()
@@ -206,6 +208,9 @@ func NewClient(
 				return shouldRetry, retryErr
 			}
 			if resp.Request == nil {
+				return shouldRetry, retryErr
+			}
+			if !authTransport.isTrustedTarget(resp.Request.URL) {
 				return shouldRetry, retryErr
 			}
 			if authState, ok := resp.Request.Context().Value(authRequestContextKey{}).(authRequestContext); ok && (authState.skipAuth || authState.explicitAuth) {

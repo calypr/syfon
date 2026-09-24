@@ -95,6 +95,57 @@ func TestBucketScopeConfigurationDeletionKeepsCredentialWithSiblingScope(t *test
 	}
 }
 
+func TestBucketCredentialDeletionAuthorizesCurrentScopeSetAtomically(t *testing.T) {
+	database := seedBucketDeletion(t)
+	ctx := context.Background()
+	if err := database.CreateBucketScope(ctx, &buckets.Scope{
+		Organization: "org", ProjectID: "sibling", CredentialID: "credential-id", Bucket: "physical-bucket",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	denied := errors.New("scope is not authorized")
+	var checked []buckets.Scope
+	_, err := database.DeleteBucketCredential(ctx, "physical-bucket", func(scopes []buckets.Scope) error {
+		checked = append([]buckets.Scope(nil), scopes...)
+		return denied
+	})
+	if !errors.Is(err, denied) {
+		t.Fatalf("DeleteBucketCredential() error = %v, want policy error", err)
+	}
+	if len(checked) != 2 {
+		t.Fatalf("policy saw %d scopes, want both shared scopes: %+v", len(checked), checked)
+	}
+	for _, project := range []string{"project", "sibling"} {
+		if _, err := database.GetBucketScope(ctx, "org", project); err != nil {
+			t.Fatalf("scope %q changed after policy rejection: %v", project, err)
+		}
+	}
+	if _, err := database.GetS3Credential(ctx, "credential-id"); err != nil {
+		t.Fatalf("credential changed after policy rejection: %v", err)
+	}
+
+	aliases, err := database.DeleteBucketCredential(ctx, "physical-bucket", func(scopes []buckets.Scope) error {
+		if len(scopes) != 2 {
+			return errors.New("scope set changed before deletion")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("DeleteBucketCredential() with complete policy approval: %v", err)
+	}
+	if len(aliases) == 0 {
+		t.Fatal("DeleteBucketCredential() returned no invalidation aliases")
+	}
+	for _, project := range []string{"project", "sibling"} {
+		if _, err := database.GetBucketScope(ctx, "org", project); !errors.Is(err, errorapi.ErrBucketScopeNotFound) {
+			t.Fatalf("scope %q deletion error = %v", project, err)
+		}
+	}
+	if _, err := database.GetS3Credential(ctx, "credential-id"); !errors.Is(err, errorapi.ErrStorageCredentialMissing) {
+		t.Fatalf("credential deletion error = %v", err)
+	}
+}
+
 func seedBucketDeletion(t *testing.T) *store.Store {
 	t.Helper()
 	database, err := NewSqliteDB(":memory:", nil)

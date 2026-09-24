@@ -13,6 +13,7 @@ import (
 	internalapi "github.com/calypr/syfon/apigen/internalapi"
 	"github.com/calypr/syfon/client/apierror"
 	"github.com/calypr/syfon/client/common"
+	"github.com/calypr/syfon/client/request"
 	"github.com/calypr/syfon/client/transfer"
 )
 
@@ -40,7 +41,7 @@ func (r *downloadResponseRequester) Do(req *http.Request) (*http.Response, error
 	return r.response, nil
 }
 
-func newDownloadBoundaryService(t *testing.T, requester *downloadResponseRequester) *DataService {
+func newDownloadBoundaryService(t *testing.T, requester request.HTTPDoer) *DataService {
 	t.Helper()
 	transport := roundTripperFunc(func(req *http.Request) (*http.Response, error) {
 		payload, err := json.Marshal(internalapi.InternalSignedURL{Url: ptrString("https://storage.example/object?X-Amz-Signature=secret")})
@@ -118,6 +119,130 @@ func TestDataServiceReadersRejectNilResponsesAndBodies(t *testing.T) {
 	})
 }
 
+type redirectDownloadTransport struct {
+	hosts  []string
+	bodies []*closeTrackingReader
+}
+
+func (t *redirectDownloadTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	t.hosts = append(t.hosts, req.URL.Host)
+	status := http.StatusOK
+	body := "downloaded data"
+	header := make(http.Header)
+	if req.URL.Host == "storage.example" {
+		status = http.StatusFound
+		body = "redirect response"
+		header.Set("Location", "https://cdn.example/object")
+	}
+	responseBody := &closeTrackingReader{reader: strings.NewReader(body)}
+	t.bodies = append(t.bodies, responseBody)
+	return &http.Response{
+		StatusCode: status,
+		Header:     header,
+		Body:       responseBody,
+		Request:    req,
+	}, nil
+}
+
+func TestDataServiceGetReaderChecksFinalStatusAndKeepsRedirectPolicy(t *testing.T) {
+	t.Run("caller does not follow redirects", func(t *testing.T) {
+		transport := &redirectDownloadTransport{}
+		client := &http.Client{
+			Transport: transport,
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		}
+		service := newDownloadBoundaryService(t, client)
+
+		reader, err := service.GetReader(context.Background(), "object")
+		if reader != nil || err == nil {
+			t.Fatalf("GetReader returned reader=%v err=%v, want redirect error", reader, err)
+		}
+		if len(transport.hosts) != 1 || transport.hosts[0] != "storage.example" {
+			t.Fatalf("redirect policy made requests to %v, want only storage.example", transport.hosts)
+		}
+		if len(transport.bodies) != 1 || !transport.bodies[0].closed {
+			t.Fatal("no-follow redirect response body was not closed")
+		}
+	})
+
+	t.Run("caller follows redirects", func(t *testing.T) {
+		transport := &redirectDownloadTransport{}
+		service := newDownloadBoundaryService(t, &http.Client{Transport: transport})
+		reader, err := service.GetReader(context.Background(), "object")
+		if err != nil {
+			t.Fatalf("GetReader returned error: %v", err)
+		}
+		defer reader.Close()
+		data, err := io.ReadAll(reader)
+		if err != nil || string(data) != "downloaded data" {
+			t.Fatalf("followed response data=%q err=%v", data, err)
+		}
+		if len(transport.hosts) != 2 || transport.hosts[0] != "storage.example" || transport.hosts[1] != "cdn.example" {
+			t.Fatalf("redirect policy made requests to %v, want storage.example then cdn.example", transport.hosts)
+		}
+	})
+}
+
+func TestDataServiceRangeReaderRejectsInvalidContentRange(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		contentRange string
+	}{
+		{name: "missing"},
+		{name: "malformed", contentRange: "bytes 4-x/10"},
+		{name: "wrong unit", contentRange: "items 4-7/10"},
+		{name: "shifted start", contentRange: "bytes 3-6/10"},
+		{name: "incomplete before end", contentRange: "bytes 4-6/10"},
+		{name: "extends beyond requested end", contentRange: "bytes 4-8/10"},
+		{name: "total does not include end", contentRange: "bytes 4-7/7"},
+		{name: "unknown total", contentRange: "bytes 4-7/*"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			body := &closeTrackingReader{reader: strings.NewReader("part")}
+			header := make(http.Header)
+			if test.contentRange != "" {
+				header.Set("Content-Range", test.contentRange)
+			}
+			service := newDownloadBoundaryService(t, &downloadResponseRequester{response: &http.Response{
+				StatusCode: http.StatusPartialContent,
+				Header:     header,
+				Body:       body,
+			}})
+
+			reader, err := service.GetRangeReader(context.Background(), "object", 4, 4)
+			if reader != nil || err == nil || !strings.Contains(err.Error(), "Content-Range") {
+				t.Fatalf("GetRangeReader returned reader=%v err=%v, want Content-Range error", reader, err)
+			}
+			if !body.closed {
+				t.Fatal("invalid range response body was not closed")
+			}
+		})
+	}
+}
+
+func TestDataServiceRangeReaderAllowsRangeClampedAtKnownEOF(t *testing.T) {
+	body := &closeTrackingReader{reader: strings.NewReader("end")}
+	header := make(http.Header)
+	header.Set("Content-Range", "bytes 4-6/7")
+	service := newDownloadBoundaryService(t, &downloadResponseRequester{response: &http.Response{
+		StatusCode: http.StatusPartialContent,
+		Header:     header,
+		Body:       body,
+	}})
+
+	reader, err := service.GetRangeReader(context.Background(), "object", 4, 4)
+	if err != nil {
+		t.Fatalf("GetRangeReader returned error for a range clamped at known EOF: %v", err)
+	}
+	data, err := io.ReadAll(reader)
+	closeErr := reader.Close()
+	if err != nil || closeErr != nil || string(data) != "end" {
+		t.Fatalf("range response data=%q read error=%v close error=%v", data, err, closeErr)
+	}
+}
+
 func TestDataServiceRangeReaderChecksFailureBeforeRangeFallback(t *testing.T) {
 	failedBody := &closeTrackingReader{reader: strings.NewReader("error document")}
 	service := newDownloadBoundaryService(t, &downloadResponseRequester{response: &http.Response{
@@ -146,7 +271,9 @@ func TestDataServiceRangeReaderChecksFailureBeforeRangeFallback(t *testing.T) {
 	}
 
 	partialBody := &closeTrackingReader{reader: strings.NewReader("part")}
-	requester.response = &http.Response{StatusCode: http.StatusPartialContent, Header: make(http.Header), Body: partialBody}
+	partialHeaders := make(http.Header)
+	partialHeaders.Set("Content-Range", "bytes 0-3/4")
+	requester.response = &http.Response{StatusCode: http.StatusPartialContent, Header: partialHeaders, Body: partialBody}
 	reader, err = service.GetRangeReader(context.Background(), "object", 0, 4)
 	if err != nil || reader == nil {
 		t.Fatalf("206 range response returned reader=%v err=%v", reader, err)

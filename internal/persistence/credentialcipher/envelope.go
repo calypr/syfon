@@ -33,7 +33,7 @@ func (c *Cipher) EncryptField(ctx context.Context, plaintext string) (string, er
 		return plaintext, nil
 	}
 
-	manager, err := c.manager()
+	manager, err := c.manager(c.managerName)
 	if err != nil {
 		return "", err
 	}
@@ -98,7 +98,7 @@ func (c *Cipher) decryptFieldV2(ctx context.Context, value string) (string, erro
 		return "", fmt.Errorf("envelope manager is required")
 	}
 
-	manager, err := resolveCredentialKeyManager(envelope.Manager)
+	manager, err := c.manager(envelope.Manager)
 	if err != nil {
 		return "", err
 	}
@@ -128,7 +128,7 @@ func (c *Cipher) decryptFieldV2(ctx context.Context, value string) (string, erro
 }
 
 func (c *Cipher) decryptFieldV1(value string) (string, error) {
-	key, err := credentialMasterKey()
+	key, err := c.local.key()
 	if err != nil {
 		return "", err
 	}

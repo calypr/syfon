@@ -94,14 +94,10 @@ func (db *Store) replaceObjectTx(ctx context.Context, tx *sql.Tx, obj *drs.DrsOb
 	if err != nil {
 		return "", err
 	}
-	if hasNewResource(incomingResources, currentResources) {
-		if !publicRead && !canReadContent(ctx, currentResources) {
-			return "", errorapi.ErrAccessDenied
-		}
-		if !canCreateResources(ctx, incomingResources, currentResources) {
-			return "", errorapi.ErrAccessDenied
-		}
+	if err := objects.AuthorizeReplacementResources(ctx, incomingResources, objects.ContentAccess{Resources: currentResources, PublicRead: publicRead}); err != nil {
+		return "", err
 	}
+
 	row, exists, err := db.loadContentRowTx(ctx, tx, canonicalID)
 	if err != nil || !exists {
 		if err != nil {
@@ -302,32 +298,7 @@ func (db *Store) CreateObjectAlias(ctx context.Context, aliasID, canonicalObject
 		if err := db.requireContentMethodTx(ctx, tx, canonicalObjectID, "update"); err != nil {
 			return err
 		}
-		var physicalAlias string
-		physicalErr := db.txQueryRowContext(ctx, tx, "SELECT id FROM drs_object WHERE id = ?", aliasID).Scan(&physicalAlias)
-		if physicalErr == nil {
-			return fmt.Errorf("%w: alias %q is already a physical object", errorapi.ErrConflict, aliasID)
-		}
-		if physicalErr != sql.ErrNoRows {
-			return physicalErr
-		}
-
-		var aliasTarget string
-		aliasErr := db.txQueryRowContext(ctx, tx, "SELECT object_id FROM drs_object_alias WHERE alias_id = ?", aliasID).Scan(&aliasTarget)
-		if aliasErr == nil && aliasTarget != canonicalObjectID {
-			return fmt.Errorf("%w: alias %q already points to %q", errorapi.ErrConflict, aliasID, aliasTarget)
-		}
-		if aliasErr != nil && aliasErr != sql.ErrNoRows {
-			return aliasErr
-		}
-		_, err = db.txExecContext(ctx, tx, `
-			INSERT INTO drs_object_alias(alias_id, object_id)
-			VALUES (?, ?)
-			ON CONFLICT(alias_id) DO NOTHING
-		`, aliasID, canonicalObjectID)
-		if err != nil {
-			return err
-		}
-		return nil
+		return db.insertObjectAliasTx(ctx, tx, aliasID, canonicalObjectID)
 	})
 }
 
@@ -344,7 +315,7 @@ func (db *Store) BulkDeleteObjects(ctx context.Context, ids []string) error {
 				return resolveErr
 			}
 			if !found {
-				continue
+				return errorapi.ErrNotFound
 			}
 			if strings.TrimSpace(rawID) != canonicalID {
 				if err := db.ensureNoLegacyDuplicateTx(ctx, tx, canonicalID); err != nil {
@@ -369,8 +340,16 @@ func (db *Store) BulkDeleteObjects(ctx context.Context, ids []string) error {
 
 		condition, args := db.dialect.ListArgs("id", canonicalIDs)
 		query := "DELETE FROM drs_object WHERE " + condition
-		if _, err := db.txExecContext(ctx, tx, query, args...); err != nil {
+		result, err := db.txExecContext(ctx, tx, query, args...)
+		if err != nil {
 			return err
+		}
+		rowsAffected, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if rowsAffected != int64(len(canonicalIDs)) {
+			return errorapi.ErrNotFound
 		}
 		return nil
 	})
@@ -446,6 +425,59 @@ func (db *Store) RemoveObjectControlledAccess(ctx context.Context, objectID, res
 			return err
 		}
 		return nil
+	})
+}
+
+// AddObjectControlledAccess restores one project association after the object
+// service has verified that its deterministic ID belongs to that project.
+func (db *Store) AddObjectControlledAccess(ctx context.Context, objectID, resource string) error {
+	objectID = strings.TrimSpace(objectID)
+	normalized := clientaccess.NormalizeAccessResources([]string{resource})
+	if objectID == "" || len(normalized) == 0 {
+		return fmt.Errorf("object ID and resource are required")
+	}
+	resource = normalized[0]
+	organization, project, ok := clientaccess.ResourceScope(resource)
+	if !ok || organization == "" || project == "" {
+		return errorapi.ErrInvalidInput
+	}
+	canonicalResource, err := clientaccess.ResourcePath(organization, project)
+	if err != nil || canonicalResource != resource {
+		return errorapi.ErrInvalidInput
+	}
+	if !access.HasMethodAccess(ctx, "update", []string{resource}) &&
+		!access.HasMethodAccess(ctx, "update", []string{"/programs"}) &&
+		!access.HasMethodAccess(ctx, "update", []string{"/data_file"}) {
+		return errorapi.ErrAccessDenied
+	}
+	return db.withContentWrite(ctx, func(tx *sql.Tx) error {
+		var exists int
+		if err := db.txQueryRowContext(ctx, tx, `SELECT COUNT(1) FROM drs_object WHERE id = ?`, objectID).Scan(&exists); err != nil {
+			return err
+		}
+		if exists == 0 {
+			return errorapi.ErrObjectNotFound
+		}
+		shas, err := db.objectSHAsTx(ctx, tx, objectID)
+		if err != nil {
+			return err
+		}
+		if len(shas) == 0 {
+			return errorapi.ErrNoValidSHA256
+		}
+		if len(shas) > 1 {
+			return errorapi.ErrConflictingSHA256
+		}
+		derivedID, err := objects.MintRecordIDFromChecksum(shas[0], []string{resource})
+		if err != nil || derivedID != objectID {
+			return errorapi.ErrInvalidInput
+		}
+		_, err = db.txExecContext(ctx, tx, `
+			INSERT INTO drs_object_controlled_access (object_id, resource)
+			SELECT ?, ? WHERE NOT EXISTS (
+				SELECT 1 FROM drs_object_controlled_access WHERE object_id = ? AND resource = ?
+			)`, objectID, resource, objectID, resource)
+		return err
 	})
 }
 

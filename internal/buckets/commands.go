@@ -2,6 +2,7 @@ package buckets
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -140,23 +141,29 @@ func (s *Service) Put(ctx context.Context, request PutRequest) error {
 	return s.SaveS3Credential(ctx, credential)
 }
 
-// DeleteBucket authorizes deletion against the physical bucket name before
-// delegating alias resolution and credential cleanup to the credential policy.
+// DeleteBucket checks every attached scope in the same write transaction that
+// removes the shared credential and scopes.
 func (s *Service) DeleteBucket(ctx context.Context, bucket string) error {
-	scopes, err := s.ListBucketScopes(ctx)
+	aliases, err := s.credentialAdmin.DeleteBucketCredential(ctx, bucket, func(scopes []Scope) error {
+		if len(scopes) == 0 {
+			return errorapi.ErrAccessDenied
+		}
+		for _, scope := range scopes {
+			resource, resourceErr := clientaccess.ResourcePath(scope.Organization, scope.ProjectID)
+			if resourceErr != nil || resource == "" || !access.HasAnyMethodAccess(ctx, []string{resource}, "delete", "update") {
+				return errorapi.ErrAccessDenied
+			}
+		}
+		return nil
+	})
 	if err != nil {
+		if errors.Is(err, errorapi.ErrStorageCredentialMissing) {
+			return errorapi.ErrAccessDenied
+		}
 		return err
 	}
-	for _, scope := range scopes {
-		if scope.Bucket != bucket {
-			continue
-		}
-		resource, resourceErr := clientaccess.ResourcePath(scope.Organization, scope.ProjectID)
-		if resourceErr == nil && resource != "" && access.HasAnyMethodAccess(ctx, []string{resource}, "delete", "update") {
-			return s.DeleteS3Credential(ctx, bucket)
-		}
-	}
-	return errorapi.ErrAccessDenied
+	s.invalidateAliases(aliases...)
+	return nil
 }
 
 // CreateScopeForBucket resolves a physical or credential alias, normalizes its

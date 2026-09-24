@@ -305,6 +305,85 @@ func (db *Store) DeleteS3Credential(ctx context.Context, credentialID string) er
 	return nil
 }
 
+// DeleteBucketCredential applies the caller's policy to the current scope set
+// and removes that set with its credential under one content-write lock.
+func (db *Store) DeleteBucketCredential(ctx context.Context, bucket string, authorize buckets.ScopeDeletionPolicy) ([]string, error) {
+	requested := strings.TrimSpace(bucket)
+	if authorize == nil {
+		return nil, fmt.Errorf("bucket scope deletion policy is required")
+	}
+
+	var aliases []string
+	err := db.withContentWrite(ctx, func(tx *sql.Tx) error {
+		resolvedID, physicalBucket, found, err := db.resolveCredentialIdentityOn(ctx, tx, requested)
+		if err != nil {
+			return err
+		}
+		if !found {
+			return errorapi.ErrStorageCredentialMissing
+		}
+		if err := db.lockCredentialOn(ctx, tx, resolvedID); err != nil {
+			return err
+		}
+
+		scopes, err := db.listCredentialScopesOn(ctx, tx, resolvedID, physicalBucket)
+		if err != nil {
+			return err
+		}
+		if err := authorize(scopes); err != nil {
+			return err
+		}
+
+		if _, err := db.execOn(ctx, tx, `DELETE FROM bucket_scope WHERE credential_id = ? OR bucket = ?`, resolvedID, physicalBucket); err != nil {
+			return fmt.Errorf("failed to delete bucket scopes for %s: %w", requested, err)
+		}
+		result, err := db.execOn(ctx, tx, "DELETE FROM s3_credential WHERE credential_id = ?", resolvedID)
+		if err != nil {
+			return err
+		}
+		rows, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if rows == 0 {
+			return errorapi.ErrStorageCredentialMissing
+		}
+		aliases = []string{requested, resolvedID, physicalBucket}
+		return nil
+	})
+	if err != nil {
+		auditCredentialAccess(ctx, requestid.GetRequestID(ctx), "delete", requested, err)
+		return nil, err
+	}
+	auditCredentialAccess(ctx, requestid.GetRequestID(ctx), "delete", requested, nil)
+	return aliases, nil
+}
+
+func (db *Store) listCredentialScopesOn(ctx context.Context, tx *sql.Tx, credentialID, physicalBucket string) ([]buckets.Scope, error) {
+	rows, err := tx.QueryContext(ctx, db.dialect.Rebind(`
+		SELECT organization, project_id, credential_id, bucket, COALESCE(path_prefix, '')
+		FROM bucket_scope
+		WHERE credential_id = ? OR bucket = ?
+	`), credentialID, physicalBucket)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list bucket scopes for credential %s: %w", credentialID, err)
+	}
+	defer rows.Close()
+
+	scopes := make([]buckets.Scope, 0)
+	for rows.Next() {
+		var scope buckets.Scope
+		if err := rows.Scan(&scope.Organization, &scope.ProjectID, &scope.CredentialID, &scope.Bucket, &scope.PathPrefix); err != nil {
+			return nil, err
+		}
+		scopes = append(scopes, scope)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return scopes, nil
+}
+
 func (db *Store) resolveCredentialIdentityOn(ctx context.Context, executor sqlExecutor, raw string) (string, string, bool, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {

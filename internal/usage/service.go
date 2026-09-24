@@ -124,7 +124,38 @@ func (s *Service) GetFileUsage(ctx context.Context, objectID string) (*metricsap
 	if err := s.requireReports(); err != nil {
 		return nil, err
 	}
+	canonicalIDs, err := s.resolveObjectIDs(ctx, []string{objectID})
+	if err != nil {
+		return nil, err
+	}
+	if len(canonicalIDs) > 0 {
+		objectID = canonicalIDs[0]
+	}
 	return s.reports.GetFileUsage(ctx, objectID)
+}
+
+func (s *Service) resolveObjectIDs(ctx context.Context, requested []string) ([]string, error) {
+	requested = uniqueNonEmptyStrings(requested)
+	if s == nil || s.objects == nil || len(requested) == 0 {
+		return requested, nil
+	}
+	resolved, err := s.objects.ResolveObjectIDs(ctx, requested)
+	if err != nil {
+		return nil, err
+	}
+	canonical := make([]string, 0, len(requested))
+	seen := make(map[string]struct{}, len(requested))
+	for _, id := range requested {
+		if value := strings.TrimSpace(resolved[id]); value != "" {
+			id = value
+		}
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+		canonical = append(canonical, id)
+	}
+	return canonical, nil
 }
 
 func (s *Service) listReadableObjectIDs(ctx context.Context, scope ScopeQuery, requested []string) ([]string, error) {
@@ -137,7 +168,7 @@ func (s *Service) listReadableObjectIDs(ctx context.Context, scope ScopeQuery, r
 
 	readable := make(map[string]struct{})
 	addScope := func(organization, project string) error {
-		ids, err := s.objects.ListObjectIDsByScope(ctx, organization, project, "read")
+		ids, err := s.objects.ListReadableObjectIDsAmong(ctx, organization, project, requested)
 		if err != nil {
 			return err
 		}
@@ -174,7 +205,10 @@ func (s *Service) listReadableObjectIDs(ctx context.Context, scope ScopeQuery, r
 // authorized scope, queries persistence once, and applies inactivity filtering
 // without changing persistence order.
 func (s *Service) ListFileUsageBatch(ctx context.Context, query FileUsageBatchQuery) ([]metricsapi.FileUsage, error) {
-	requested := uniqueNonEmptyStrings(query.ObjectIDs)
+	requested, err := s.resolveObjectIDs(ctx, query.ObjectIDs)
+	if err != nil {
+		return nil, err
+	}
 	readable, err := s.listReadableObjectIDs(ctx, query.Scope, requested)
 	if err != nil {
 		return nil, err
@@ -201,6 +235,16 @@ func (s *Service) ListFileUsageBatch(ctx context.Context, query FileUsageBatchQu
 // GetScopedFileUsage enforces object membership before exposing a single
 // report. Inaccessible objects intentionally look absent at the HTTP boundary.
 func (s *Service) GetScopedFileUsage(ctx context.Context, objectID string, scope ScopeQuery) (*metricsapi.FileUsage, error) {
+	canonicalIDs, err := s.resolveObjectIDs(ctx, []string{objectID})
+	if err != nil {
+		if errorsIsNotFoundOrDenied(err) {
+			return nil, errorapi.ErrNotFound
+		}
+		return nil, err
+	}
+	if len(canonicalIDs) > 0 {
+		objectID = canonicalIDs[0]
+	}
 	if scope.isSingle() || scope.isAggregate() {
 		readable, err := s.listReadableObjectIDs(ctx, scope, []string{objectID})
 		if err != nil {
@@ -213,7 +257,10 @@ func (s *Service) GetScopedFileUsage(ctx context.Context, objectID string, scope
 			return nil, errorapi.ErrNotFound
 		}
 	}
-	return s.GetFileUsage(ctx, objectID)
+	if err := s.requireReports(); err != nil {
+		return nil, err
+	}
+	return s.reports.GetFileUsage(ctx, objectID)
 }
 
 func uniqueNonEmptyStrings(values []string) []string {

@@ -5,10 +5,13 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/storage/address"
 )
+
+const maxMultipartDurationSeconds = int64((1<<63 - 1) / int64(time.Second))
 
 func validateConfig(cfg *Config) error {
 	cfg.Profile = strings.ToLower(strings.TrimSpace(cfg.Profile))
@@ -23,6 +26,18 @@ func validateConfig(cfg *Config) error {
 	}
 	if cfg.Multipart.CleanupIntervalSeconds < 0 || cfg.Multipart.InactiveTimeoutSeconds < 0 || cfg.Multipart.CompletedRetentionSeconds < 0 || cfg.Multipart.BatchSize < 0 {
 		return fmt.Errorf("multipart cleanup values must be >= 0")
+	}
+	for _, duration := range []struct {
+		field   string
+		seconds int
+	}{
+		{field: "cleanup_interval_seconds", seconds: cfg.Multipart.CleanupIntervalSeconds},
+		{field: "inactive_timeout_seconds", seconds: cfg.Multipart.InactiveTimeoutSeconds},
+		{field: "completed_retention_seconds", seconds: cfg.Multipart.CompletedRetentionSeconds},
+	} {
+		if int64(duration.seconds) > maxMultipartDurationSeconds {
+			return fmt.Errorf("multipart.%s must be <= %d seconds", duration.field, maxMultipartDurationSeconds)
+		}
 	}
 	if cfg.Multipart.CleanupIntervalSeconds > 0 {
 		if cfg.Multipart.InactiveTimeoutSeconds == 0 {
@@ -156,6 +171,11 @@ func validateConfig(cfg *Config) error {
 	if inheritedMockAuthEnabled() && cfg.Auth.Mode != AuthModeGen3 {
 		return fmt.Errorf("mock auth (DRS_AUTH_MOCK_ENABLED) is only allowed in gen3 auth mode, not in %q", cfg.Auth.Mode)
 	}
+	if cfg.Auth.Mode == AuthModeGen3 && !cfg.Auth.Mock.Enabled && !inheritedMockAuthEnabled() && strings.TrimSpace(cfg.Auth.PluginPaths.Authn) == "" {
+		if err := validateBuiltInFenceURL(cfg.Auth.FenceURL); err != nil {
+			return err
+		}
+	}
 	if cfg.LFS.MaxBatchObjects < 0 {
 		return fmt.Errorf("lfs.max_batch_objects must be >= 0")
 	}
@@ -213,15 +233,35 @@ func validateConfig(cfg *Config) error {
 	return nil
 }
 
+func validateBuiltInFenceURL(raw string) error {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Scheme != "https" || u.Hostname() == "" {
+		return fmt.Errorf("auth.fence_url must be a valid HTTPS URL with a host when built-in Gen3 authentication is enabled")
+	}
+	return nil
+}
+
 func stableCredentialEncryptionConfigured(cfg *Config) bool {
-	if strings.TrimSpace(cfg.CredentialEncryption.MasterKey) != "" || strings.TrimSpace(cfg.CredentialEncryption.LocalKeyFile) != "" {
-		return true
-	}
-	if strings.TrimSpace(os.Getenv("DRS_CREDENTIAL_MASTER_KEY")) != "" || strings.TrimSpace(os.Getenv("DRS_CREDENTIAL_LOCAL_KEY_FILE")) != "" || strings.TrimSpace(os.Getenv("DRS_CREDENTIAL_KMS_KEY_ID")) != "" {
-		return true
-	}
 	manager := strings.ToLower(strings.TrimSpace(os.Getenv("DRS_CREDENTIAL_KEY_MANAGER")))
-	return manager != "" && manager != "local" && manager != "file"
+	kmsKeyID := strings.TrimSpace(os.Getenv("DRS_CREDENTIAL_KMS_KEY_ID"))
+	if manager == "" {
+		manager = "local"
+		if kmsKeyID != "" {
+			manager = "aws-kms"
+		}
+	}
+
+	switch manager {
+	case "local":
+		return strings.TrimSpace(cfg.CredentialEncryption.MasterKey) != "" ||
+			strings.TrimSpace(cfg.CredentialEncryption.LocalKeyFile) != "" ||
+			strings.TrimSpace(os.Getenv("DRS_CREDENTIAL_MASTER_KEY")) != "" ||
+			strings.TrimSpace(os.Getenv("DRS_CREDENTIAL_LOCAL_KEY_FILE")) != ""
+	case "aws-kms":
+		return kmsKeyID != ""
+	default:
+		return false
+	}
 }
 
 func normalizeBucketScope(scope BucketScopeConfig, source string, credentialIDsByBucket map[string][]string) (BucketScopeConfig, error) {

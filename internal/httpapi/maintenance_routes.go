@@ -57,8 +57,9 @@ func (s *internalServer) InternalInspectObject(c fiber.Ctx) error {
 	if err := decodeStrictJSON(c.Body(), &req); err != nil {
 		return Reject(c, fiber.StatusBadRequest, "Invalid request body: "+err.Error())
 	}
-	req.ExpectedName = ""
-	req.ExpectedSha256 = strings.TrimSpace(req.ExpectedSha256)
+	if req.ExpectedSizeBytes != nil || strings.TrimSpace(req.ExpectedName) != "" || strings.TrimSpace(req.ExpectedSha256) != "" {
+		return Reject(c, fiber.StatusBadRequest, "validation fields are not supported by single-object inspection")
+	}
 	resp, err := s.projectStorage.ProbeObject(c.Context(), req)
 	if err != nil {
 		return HandleError(c, err)
@@ -78,7 +79,6 @@ func (s *internalServer) InternalInspectObjectBulk(c fiber.Ctx) error {
 		return Reject(c, fiber.StatusBadRequest, "Invalid request body: items are required")
 	}
 	for index := range req.Items {
-		req.Items[index].ExpectedName = ""
 		req.Items[index].ExpectedSha256 = strings.TrimSpace(req.Items[index].ExpectedSha256)
 	}
 	results := s.projectStorage.ProbeObjects(c.Context(), req.Items)
@@ -104,6 +104,7 @@ func (s *internalServer) InternalInspectObjectBulkList(c fiber.Ctx) error {
 			ObjectUrl:         strings.TrimSpace(item.ObjectUrl),
 			ExpectedSizeBytes: item.ExpectedSizeBytes,
 			ExpectedName:      strings.TrimSpace(item.ExpectedName),
+			ExpectedSha256:    strings.TrimSpace(item.ExpectedSha256),
 		})
 	}
 	results := s.projectStorage.ValidateInventoryObjects(c.Context(), items)

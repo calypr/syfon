@@ -99,6 +99,7 @@ gen-api:
 	$(OAPI_CODEGEN) -config "$(OAPI_DRS_CONFIG)" "$(OPENAPI_DIR)/openapi.yaml" > apigen/drs/drs.gen.go; \
 	echo "Generating combined LFS client and Fiber server bindings..."; \
 	$(OAPI_CODEGEN) -config "$(OAPI_LFS_CONFIG)" "$(LFS_OPENAPI)" > apigen/lfsapi/lfs.gen.go; \
+	python3 scripts/patch-lfs-streaming.py apigen/lfsapi/lfs.gen.go; \
 	echo "Generating combined bucket client and Fiber server bindings..."; \
 	$(OAPI_CODEGEN) -config "$(OAPI_BUCKET_CONFIG)" "$(BUCKET_OPENAPI)" > apigen/bucketapi/bucket.gen.go; \
 	echo "Generating combined metrics client and Fiber server bindings..."; \

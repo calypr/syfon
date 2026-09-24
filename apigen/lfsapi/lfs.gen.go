@@ -1756,7 +1756,10 @@ func (sh *strictHandler) LfsUploadProxy(ctx fiber.Ctx, oid string) error {
 
 	request.Oid = oid
 
-	request.Body = bytes.NewReader(ctx.Request().Body())
+	request.Body = ctx.Request().BodyStream()
+	if request.Body == nil {
+		request.Body = bytes.NewReader(ctx.Request().Body())
+	}
 
 	handler := func(ctx fiber.Ctx, request interface{}) (interface{}, error) {
 		return sh.ssi.LfsUploadProxy(ctx.Context(), request.(LfsUploadProxyRequestObject))

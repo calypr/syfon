@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -72,12 +73,10 @@ var Cmd = &cobra.Command{
 		}
 
 		// Calculate SHA256 hash so omitted DIDs can be minted deterministically from content+scope.
-		fileBytes, err := os.ReadFile(srcPath)
+		checksum, err := hashFileSHA256(srcPath)
 		if err != nil {
 			return fmt.Errorf("read file for hashing: %w", err)
 		}
-		hash := sha256.Sum256(fileBytes)
-		checksum := hex.EncodeToString(hash[:])
 
 		recordPath, err := uploadRecordPath(srcPath)
 		if err != nil {
@@ -155,6 +154,20 @@ var Cmd = &cobra.Command{
 		fmt.Fprintf(cmd.OutOrStdout(), "requested DID: %s\n", did)
 		return nil
 	},
+}
+
+func hashFileSHA256(path string) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
 func init() {

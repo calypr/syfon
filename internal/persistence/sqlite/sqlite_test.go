@@ -18,6 +18,7 @@ import (
 	clientaccess "github.com/calypr/syfon/client/access"
 	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/buckets"
+	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/persistence/credentialcipher"
 	"github.com/calypr/syfon/internal/persistence/store"
 	transferlfs "github.com/calypr/syfon/internal/transfers/lfs"
@@ -73,6 +74,152 @@ func TestSqliteDB_InitializesControlledAccessTable(t *testing.T) {
 	}
 	if !slices.Contains(columns, "resource") {
 		t.Fatalf("expected resource column, got %v", columns)
+	}
+}
+
+func TestSqliteDB_LegacyFileNameMigrationPreservesChildRows(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "legacy-file-name.db")
+	seedLegacyFileNameDatabase(t, dbPath, false)
+
+	database, err := NewSqliteDB(dbPath, nil)
+	if err != nil {
+		t.Fatalf("NewSqliteDB: %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+
+	for _, check := range []struct {
+		table string
+		query string
+	}{
+		{table: "drs_object", query: `SELECT COUNT(*) FROM drs_object WHERE id = 'legacy-object'`},
+		{table: "drs_object_access_method", query: `SELECT COUNT(*) FROM drs_object_access_method WHERE object_id = 'legacy-object'`},
+		{table: "drs_object_controlled_access", query: `SELECT COUNT(*) FROM drs_object_controlled_access WHERE object_id = 'legacy-object'`},
+		{table: "drs_object_checksum", query: `SELECT COUNT(*) FROM drs_object_checksum WHERE object_id = 'legacy-object'`},
+		{table: "drs_object_alias", query: `SELECT COUNT(*) FROM drs_object_alias WHERE object_id = 'legacy-object'`},
+		{table: "drs_object_name_alias", query: `SELECT COUNT(*) FROM drs_object_name_alias WHERE object_id = 'legacy-object'`},
+		{table: "drs_object_read_policy", query: `SELECT COUNT(*) FROM drs_object_read_policy WHERE object_id = 'legacy-object'`},
+		{table: "object_usage", query: `SELECT COUNT(*) FROM object_usage WHERE object_id = 'legacy-object'`},
+		{table: "object_usage_event", query: `SELECT COUNT(*) FROM object_usage_event WHERE object_id = 'legacy-object'`},
+	} {
+		var count int
+		if err := database.DB().QueryRow(check.query).Scan(&count); err != nil {
+			t.Fatalf("count %s rows: %v", check.table, err)
+		}
+		if count != 1 {
+			t.Errorf("%s rows = %d, want 1", check.table, count)
+		}
+	}
+
+	var foreignKeysEnabled int
+	if err := database.DB().QueryRow(`PRAGMA foreign_keys`).Scan(&foreignKeysEnabled); err != nil {
+		t.Fatalf("read foreign_keys setting: %v", err)
+	}
+	if foreignKeysEnabled != 1 {
+		t.Fatalf("foreign_keys = %d, want 1", foreignKeysEnabled)
+	}
+	rows, err := database.DB().Query(`PRAGMA foreign_key_check`)
+	if err != nil {
+		t.Fatalf("foreign_key_check: %v", err)
+	}
+	if rows.Next() {
+		var table string
+		var rowID sql.NullInt64
+		var parent string
+		var foreignKeyID int
+		if err := rows.Scan(&table, &rowID, &parent, &foreignKeyID); err != nil {
+			t.Fatalf("scan foreign_key_check: %v", err)
+		}
+		_ = rows.Close()
+		t.Fatalf("foreign key violation: table=%s row=%v parent=%s fk=%d", table, rowID, parent, foreignKeyID)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		t.Fatalf("foreign_key_check rows: %v", err)
+	}
+	if err := rows.Close(); err != nil {
+		t.Fatalf("close foreign_key_check rows: %v", err)
+	}
+}
+
+func TestSqliteDB_LegacyFileNameMigrationFailureLeavesDatabaseUsable(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "legacy-file-name-failure.db")
+	seedLegacyFileNameDatabase(t, dbPath, true)
+
+	database, err := NewSqliteDB(dbPath, nil)
+	if err == nil {
+		_ = database.Close()
+		t.Fatal("NewSqliteDB succeeded despite a conflicting migration table")
+	}
+
+	checkDB, err := sql.Open("sqlite3", sqliteDSN(dbPath))
+	if err != nil {
+		t.Fatalf("open original database after migration failure: %v", err)
+	}
+	t.Cleanup(func() { _ = checkDB.Close() })
+	var parentRows, accessRows int
+	if err := checkDB.QueryRow(`SELECT COUNT(*) FROM drs_object WHERE id = 'legacy-object'`).Scan(&parentRows); err != nil {
+		t.Fatalf("query original parent row: %v", err)
+	}
+	if err := checkDB.QueryRow(`SELECT COUNT(*) FROM drs_object_access_method WHERE object_id = 'legacy-object'`).Scan(&accessRows); err != nil {
+		t.Fatalf("query original access row: %v", err)
+	}
+	if parentRows != 1 || accessRows != 1 {
+		t.Fatalf("original database rows after failed migration: parent=%d access=%d, want both 1", parentRows, accessRows)
+	}
+}
+
+func seedLegacyFileNameDatabase(t *testing.T, dbPath string, conflict bool) {
+	t.Helper()
+	raw, err := sql.Open("sqlite3", sqliteDSN(dbPath))
+	if err != nil {
+		t.Fatalf("open legacy database: %v", err)
+	}
+	raw.SetMaxOpenConns(1)
+	statements := []string{
+		`CREATE TABLE drs_object (id TEXT PRIMARY KEY, file_name TEXT, size INTEGER, created_time TIMESTAMP, updated_time TIMESTAMP, name TEXT, version TEXT, description TEXT)`,
+		`CREATE TABLE drs_object_access_method (object_id TEXT, url TEXT, type TEXT, access_method_json TEXT, FOREIGN KEY(object_id) REFERENCES drs_object(id) ON DELETE CASCADE)`,
+		`CREATE TABLE drs_object_controlled_access (object_id TEXT, resource TEXT, FOREIGN KEY(object_id) REFERENCES drs_object(id) ON DELETE CASCADE)`,
+		`CREATE TABLE drs_object_checksum (object_id TEXT, type TEXT, checksum TEXT, FOREIGN KEY(object_id) REFERENCES drs_object(id) ON DELETE CASCADE)`,
+		`CREATE TABLE drs_object_read_policy (object_id TEXT PRIMARY KEY, public_read BOOLEAN NOT NULL DEFAULT 0, FOREIGN KEY(object_id) REFERENCES drs_object(id) ON DELETE CASCADE)`,
+		`CREATE TABLE drs_object_alias (alias_id TEXT PRIMARY KEY, object_id TEXT NOT NULL, FOREIGN KEY(object_id) REFERENCES drs_object(id) ON DELETE CASCADE)`,
+		`CREATE TABLE drs_object_name_alias (object_id TEXT NOT NULL, name_alias TEXT NOT NULL, PRIMARY KEY (object_id, name_alias), FOREIGN KEY(object_id) REFERENCES drs_object(id) ON DELETE CASCADE)`,
+		`CREATE TABLE object_usage (object_id TEXT PRIMARY KEY, upload_count INTEGER NOT NULL DEFAULT 0, download_count INTEGER NOT NULL DEFAULT 0, last_upload_time TIMESTAMP NULL, last_download_time TIMESTAMP NULL, updated_time TIMESTAMP NOT NULL, FOREIGN KEY(object_id) REFERENCES drs_object(id) ON DELETE CASCADE)`,
+		`CREATE TABLE object_usage_event (id INTEGER PRIMARY KEY AUTOINCREMENT, object_id TEXT NOT NULL, event_type TEXT NOT NULL CHECK(event_type IN ('upload','download')), event_time TIMESTAMP NOT NULL)`,
+	}
+	for _, statement := range statements {
+		if _, err := raw.Exec(statement); err != nil {
+			_ = raw.Close()
+			t.Fatalf("create legacy schema: %v", err)
+		}
+	}
+	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	for _, seed := range []struct {
+		query string
+		args  []any
+	}{
+		{query: `INSERT INTO drs_object (id, file_name, size, created_time, updated_time, name, version, description) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, args: []any{"legacy-object", "old-name", 12, now, now, "legacy", "1", "description"}},
+		{query: `INSERT INTO drs_object_access_method (object_id, url, type, access_method_json) VALUES (?, ?, ?, ?)`, args: []any{"legacy-object", "s3://bucket/key", "s3", ""}},
+		{query: `INSERT INTO drs_object_controlled_access (object_id, resource) VALUES (?, ?)`, args: []any{"legacy-object", "/organization/org/project/p1"}},
+		{query: `INSERT INTO drs_object_checksum (object_id, type, checksum) VALUES (?, ?, ?)`, args: []any{"legacy-object", "sha256", strings.Repeat("a", 64)}},
+		{query: `INSERT INTO drs_object_read_policy (object_id, public_read) VALUES (?, ?)`, args: []any{"legacy-object", true}},
+		{query: `INSERT INTO drs_object_alias (alias_id, object_id) VALUES (?, ?)`, args: []any{"legacy-alias", "legacy-object"}},
+		{query: `INSERT INTO drs_object_name_alias (object_id, name_alias) VALUES (?, ?)`, args: []any{"legacy-object", "legacy-name"}},
+		{query: `INSERT INTO object_usage (object_id, upload_count, download_count, last_upload_time, last_download_time, updated_time) VALUES (?, ?, ?, ?, ?, ?)`, args: []any{"legacy-object", 3, 2, now, now, now}},
+		{query: `INSERT INTO object_usage_event (object_id, event_type, event_time) VALUES (?, ?, ?)`, args: []any{"legacy-object", "upload", now}},
+	} {
+		if _, err := raw.Exec(seed.query, seed.args...); err != nil {
+			_ = raw.Close()
+			t.Fatalf("seed legacy data: %v", err)
+		}
+	}
+	if conflict {
+		if _, err := raw.Exec(`CREATE TABLE drs_object_new (id TEXT PRIMARY KEY)`); err != nil {
+			_ = raw.Close()
+			t.Fatalf("create migration conflict table: %v", err)
+		}
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatalf("close legacy database: %v", err)
 	}
 }
 
@@ -746,6 +893,62 @@ func TestSqliteDB_GetBulkObjects_SplitHydrationPreservesOrderAndDedupes(t *testi
 	}
 }
 
+func TestSqliteDB_GetBulkObjectsAliasesUseBoundedQueries(t *testing.T) {
+	ctx := context.Background()
+	db, err := NewSqliteDB(":memory:", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	const canonicalID = "canonical-alias-target"
+	methods := []drs.AccessMethod{{Type: "s3", AccessUrl: &drs.AccessURL{Url: "s3://bucket/object"}}}
+	if err := db.RegisterObjects(ctx, []drs.DrsObject{{Id: canonicalID, AccessMethods: &methods}}); err != nil {
+		t.Fatalf("RegisterObjects: %v", err)
+	}
+	aliasIDs := make([]string, 32)
+	for i := range aliasIDs {
+		aliasIDs[i] = fmt.Sprintf("alias-%02d", i)
+		if err := db.CreateObjectAlias(ctx, aliasIDs[i], canonicalID); err != nil {
+			t.Fatalf("CreateObjectAlias(%q): %v", aliasIDs[i], err)
+		}
+	}
+
+	dialect := &queryCountingDialect{Dialect: sqliteDialect{}}
+	observed, err := store.OpenPrepared(db.DB(), dialect, nil)
+	if err != nil {
+		t.Fatalf("OpenPrepared: %v", err)
+	}
+	queryCount := func(ids []string) int {
+		t.Helper()
+		dialect.queries = 0
+		got, err := observed.GetBulkObjects(ctx, ids)
+		if err != nil {
+			t.Fatalf("GetBulkObjects(%d aliases): %v", len(ids), err)
+		}
+		if len(got) != 1 || got[0].Id != canonicalID || got[0].AccessMethods == nil || len(*got[0].AccessMethods) != 1 {
+			t.Fatalf("GetBulkObjects(%d aliases) = %+v, want hydrated canonical object", len(ids), got)
+		}
+		return dialect.queries
+	}
+
+	oneAliasQueries := queryCount(aliasIDs[:1])
+	allAliasQueries := queryCount(aliasIDs)
+	if allAliasQueries != oneAliasQueries {
+		t.Fatalf("query count grew with alias count: one alias used %d queries, %d aliases used %d", oneAliasQueries, len(aliasIDs), allAliasQueries)
+	}
+}
+
+type queryCountingDialect struct {
+	store.Dialect
+	queries int
+}
+
+func (d *queryCountingDialect) Rebind(query string) string {
+	d.queries++
+	return d.Dialect.Rebind(query)
+}
+
 func TestSqliteDB_UpdateAccessMethods(t *testing.T) {
 	ctx := context.Background()
 	db, _ := NewSqliteDB(":memory:", nil)
@@ -1282,7 +1485,7 @@ func TestSqliteDB_FileUsageMetrics_MissingObjectQueuedAndFlushedOnCreate(t *test
 	}
 }
 
-func TestSqliteDB_ListObjectIDsPageByURL(t *testing.T) {
+func TestSqliteDB_ListObjectIDsPage(t *testing.T) {
 	ctx := context.Background()
 	db, err := NewSqliteDB(":memory:", nil)
 	if err != nil {
@@ -1319,33 +1522,52 @@ func TestSqliteDB_ListObjectIDsPageByURL(t *testing.T) {
 		}
 	}
 
-	ids, err := db.ListObjectIDsPageByURL(ctx, targetURL, "org", "p1", "", 10, 0, nil, false, false)
+	ids, err := db.ListObjectIDsPage(ctx, objects.ObjectIDPageQuery{
+		Scope:     objects.Scope{Organization: "org", Project: "p1"},
+		ObjectURL: targetURL,
+		Limit:     10,
+	})
 	if err != nil {
-		t.Fatalf("ListObjectIDsPageByURL scope query failed: %v", err)
+		t.Fatalf("ListObjectIDsPage scope query failed: %v", err)
 	}
 	if !slices.Equal(ids, []string{"obj-a", "obj-e"}) {
 		t.Fatalf("unexpected scoped URL IDs: %v", ids)
 	}
 
-	ids, err = db.ListObjectIDsPageByURL(ctx, targetURL, "", "", "", 10, 0, []string{"/programs/org/projects/p2"}, false, true)
+	ids, err = db.ListObjectIDsPage(ctx, objects.ObjectIDPageQuery{
+		ObjectURL:                  targetURL,
+		Limit:                      10,
+		VisibleResources:           []string{"/programs/org/projects/p2"},
+		RestrictToVisibleResources: true,
+	})
 	if err != nil {
-		t.Fatalf("ListObjectIDsPageByURL resource query failed: %v", err)
+		t.Fatalf("ListObjectIDsPage resource query failed: %v", err)
 	}
 	if !slices.Equal(ids, []string{"obj-b"}) {
 		t.Fatalf("unexpected resource-filtered URL IDs: %v", ids)
 	}
 
-	ids, err = db.ListObjectIDsPageByURL(ctx, targetURL, "", "", "", 10, 0, []string{"/programs/org/projects/p2"}, true, true)
+	ids, err = db.ListObjectIDsPage(ctx, objects.ObjectIDPageQuery{
+		ObjectURL:                  targetURL,
+		Limit:                      10,
+		VisibleResources:           []string{"/programs/org/projects/p2"},
+		IncludeUnscoped:            true,
+		RestrictToVisibleResources: true,
+	})
 	if err != nil {
-		t.Fatalf("ListObjectIDsPageByURL unscoped resource query failed: %v", err)
+		t.Fatalf("ListObjectIDsPage unscoped resource query failed: %v", err)
 	}
 	if !slices.Equal(ids, []string{"obj-b", "obj-c"}) {
 		t.Fatalf("unexpected resource-filtered URL IDs with unscoped: %v", ids)
 	}
 
-	ids, err = db.ListObjectIDsPageByURL(ctx, targetURL, "", "", "obj-a", 1, 0, nil, false, false)
+	ids, err = db.ListObjectIDsPage(ctx, objects.ObjectIDPageQuery{
+		ObjectURL:  targetURL,
+		StartAfter: "obj-a",
+		Limit:      1,
+	})
 	if err != nil {
-		t.Fatalf("ListObjectIDsPageByURL paged query failed: %v", err)
+		t.Fatalf("ListObjectIDsPage paged query failed: %v", err)
 	}
 	if !slices.Equal(ids, []string{"obj-b"}) {
 		t.Fatalf("unexpected paged URL IDs: %v", ids)

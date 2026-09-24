@@ -8,6 +8,7 @@ import (
 	"time"
 
 	clientaccess "github.com/calypr/syfon/client/access"
+	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/usage"
 )
 
@@ -123,9 +124,16 @@ func TestLargeListQueriesPreserveBehavior(t *testing.T) {
 		t.Fatalf("visible object IDs = %v, want %v", visibleIDs, wantVisibleIDs)
 	}
 
-	page, err := database.ListObjectIDsPageByURL(ctx, sharedURL, "", "", "", 1, 1, resources, true, true)
+	page, err := database.ListObjectIDsPage(ctx, objects.ObjectIDPageQuery{
+		ObjectURL:                  sharedURL,
+		Limit:                      1,
+		Offset:                     1,
+		VisibleResources:           resources,
+		IncludeUnscoped:            true,
+		RestrictToVisibleResources: true,
+	})
 	if err != nil {
-		t.Fatalf("ListObjectIDsPageByURL: %v", err)
+		t.Fatalf("ListObjectIDsPage: %v", err)
 	}
 	if !slices.Equal(page, []string{ids[1]}) {
 		t.Fatalf("second object page = %v, want %s", page, ids[1])

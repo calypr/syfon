@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -12,6 +11,7 @@ import (
 	clientaccess "github.com/calypr/syfon/client/access"
 
 	"github.com/calypr/syfon/internal/objects"
+	"github.com/calypr/syfon/internal/storage/address"
 )
 
 func (db *Store) ResolveObjectAlias(ctx context.Context, aliasID string) (string, error) {
@@ -30,6 +30,64 @@ func (db *Store) ResolveObjectAlias(ctx context.Context, aliasID string) (string
 	return canonicalID, nil
 }
 
+// ResolveObjectIDs maps physical IDs and aliases to canonical physical IDs in
+// one batch, omitting identifiers that do not exist.
+func (db *Store) ResolveObjectIDs(ctx context.Context, ids []string) (map[string]string, error) {
+	requested := make([]string, 0, len(ids))
+	seen := make(map[string]struct{}, len(ids))
+	for _, rawID := range ids {
+		id := strings.TrimSpace(rawID)
+		if id == "" {
+			continue
+		}
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+		requested = append(requested, id)
+	}
+	resolved := make(map[string]string, len(requested))
+	if len(requested) == 0 {
+		return resolved, nil
+	}
+
+	condition, args := db.dialect.ListArgs("id", requested)
+	rows, err := db.queryContext(ctx, `SELECT id FROM drs_object WHERE `+condition, args...)
+	if err != nil {
+		return nil, err
+	}
+	physical := make(map[string]*drs.DrsObject, len(requested))
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		physical[id] = &drs.DrsObject{Id: id}
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	aliases, err := db.resolveObjectAliases(ctx, requested, physical)
+	if err != nil {
+		return nil, err
+	}
+	for _, id := range requested {
+		if object, ok := physical[id]; ok {
+			resolved[id] = object.Id
+			continue
+		}
+		if canonicalID, ok := aliases[id]; ok {
+			resolved[id] = canonicalID
+		}
+	}
+	return resolved, nil
+}
+
 func (db *Store) GetBulkObjects(ctx context.Context, ids []string) ([]drs.DrsObject, error) {
 	if len(ids) == 0 {
 		return nil, nil
@@ -38,23 +96,43 @@ func (db *Store) GetBulkObjects(ctx context.Context, ids []string) ([]drs.DrsObj
 	if err != nil {
 		return nil, err
 	}
+	aliasTargets, err := db.resolveObjectAliases(ctx, ids, objectsByID)
+	if err != nil {
+		return nil, err
+	}
+	canonicalIDs := make([]string, 0, len(aliasTargets))
+	seenCanonicalIDs := make(map[string]struct{}, len(aliasTargets))
+	for _, canonicalID := range aliasTargets {
+		if canonicalID == "" {
+			continue
+		}
+		if _, loaded := objectsByID[canonicalID]; loaded {
+			continue
+		}
+		if _, seen := seenCanonicalIDs[canonicalID]; seen {
+			continue
+		}
+		seenCanonicalIDs[canonicalID] = struct{}{}
+		canonicalIDs = append(canonicalIDs, canonicalID)
+	}
+	if len(canonicalIDs) > 0 {
+		canonicalObjects, fetchErr := db.fetchObjectsByIDsOrChecksums(ctx, canonicalIDs, nil)
+		if fetchErr != nil {
+			return nil, fetchErr
+		}
+		for canonicalID, obj := range canonicalObjects {
+			objectsByID[canonicalID] = obj
+		}
+	}
+
 	objects := make([]drs.DrsObject, 0, len(ids))
 	seen := make(map[string]struct{}, len(ids))
 	for _, id := range ids {
 		obj, ok := objectsByID[id]
 		if !ok {
-			resolved, resolveErr := db.ResolveObjectAlias(ctx, id)
-			if resolveErr == nil {
-				obj, ok = objectsByID[resolved]
-				if !ok {
-					obj, resolveErr = db.GetObject(ctx, resolved)
-					ok = resolveErr == nil
-				}
-			} else if !errors.Is(resolveErr, errorapi.ErrNotFound) {
-				return nil, resolveErr
-			}
-			if resolveErr != nil && !errors.Is(resolveErr, errorapi.ErrNotFound) {
-				return nil, resolveErr
+			canonicalID, aliased := aliasTargets[strings.TrimSpace(id)]
+			if aliased {
+				obj, ok = objectsByID[canonicalID]
 			}
 		}
 		if !ok || obj == nil {
@@ -67,6 +145,99 @@ func (db *Store) GetBulkObjects(ctx context.Context, ids []string) ([]drs.DrsObj
 		objects = append(objects, *obj)
 	}
 	return objects, nil
+}
+
+// ListRepairCandidateObjectIDs pages records stored under one S3 project
+// prefix that do not yet have the requested controlled-access association.
+func (db *Store) ListRepairCandidateObjectIDs(ctx context.Context, query objects.RepairCandidateQuery) ([]string, error) {
+	query.Scope.Organization = strings.TrimSpace(query.Scope.Organization)
+	query.Scope.Project = strings.TrimSpace(query.Scope.Project)
+	query.Bucket = strings.TrimSpace(query.Bucket)
+	query.Prefix = strings.Trim(strings.TrimSpace(query.Prefix), "/")
+	query.StartAfter = strings.TrimSpace(query.StartAfter)
+	if query.Scope.Organization == "" || query.Scope.Project == "" || query.Bucket == "" {
+		return nil, fmt.Errorf("repair candidate scope and bucket are required")
+	}
+	if query.Limit <= 0 {
+		return []string{}, nil
+	}
+	resource, err := clientaccess.ResourcePath(query.Scope.Organization, query.Scope.Project)
+	if err != nil {
+		return nil, err
+	}
+
+	root := strings.TrimRight(address.BucketToURL(query.Bucket, ""), "/")
+	if query.Prefix != "" {
+		root = address.BucketToURL(query.Bucket, query.Prefix)
+	}
+	args := []any{root, likeEscape(root+"/") + "%", resource}
+	conditions := []string{
+		"(am.url = ? OR am.url LIKE ? ESCAPE '\\')",
+		`NOT EXISTS (
+			SELECT 1
+			FROM drs_object_controlled_access ca
+			WHERE ca.object_id = o.id AND ca.resource = ?
+		)`,
+	}
+	if query.StartAfter != "" {
+		conditions = append(conditions, "o.id > ?")
+		args = append(args, query.StartAfter)
+	}
+	args = append(args, query.Limit)
+	rows, err := db.queryContext(ctx, `
+		SELECT DISTINCT o.id
+		FROM drs_object o
+		INNER JOIN drs_object_access_method am ON am.object_id = o.id
+		WHERE `+strings.Join(conditions, " AND ")+`
+		ORDER BY o.id
+		LIMIT ?`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanObjectIDs(rows)
+}
+
+func (db *Store) resolveObjectAliases(ctx context.Context, ids []string, objectsByID map[string]*drs.DrsObject) (map[string]string, error) {
+	aliasIDs := make([]string, 0, len(ids))
+	seen := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		aliasID := strings.TrimSpace(id)
+		if aliasID == "" {
+			continue
+		}
+		if _, exists := objectsByID[aliasID]; exists {
+			continue
+		}
+		if _, exists := seen[aliasID]; exists {
+			continue
+		}
+		seen[aliasID] = struct{}{}
+		aliasIDs = append(aliasIDs, aliasID)
+	}
+	if len(aliasIDs) == 0 {
+		return map[string]string{}, nil
+	}
+
+	condition, args := db.dialect.ListArgs("alias_id", aliasIDs)
+	rows, err := db.queryContext(ctx, `SELECT alias_id, object_id FROM drs_object_alias WHERE `+condition, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	resolved := make(map[string]string, len(aliasIDs))
+	for rows.Next() {
+		var aliasID, canonicalID string
+		if err := rows.Scan(&aliasID, &canonicalID); err != nil {
+			return nil, err
+		}
+		resolved[strings.TrimSpace(aliasID)] = strings.TrimSpace(canonicalID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return resolved, nil
 }
 
 func (db *Store) GetObjectsByChecksums(ctx context.Context, checksums []string) (map[string][]drs.DrsObject, error) {
@@ -265,85 +436,42 @@ func (db *Store) ListObjectIDsByResources(ctx context.Context, resources []strin
 	return scanObjectIDs(rows)
 }
 
-func (db *Store) ListObjectIDsPageByScope(ctx context.Context, organization, project, startAfter string, limit, offset int) ([]string, error) {
-	organization = strings.TrimSpace(organization)
-	project = strings.TrimSpace(project)
-	startAfter = strings.TrimSpace(startAfter)
-	if limit <= 0 {
-		return []string{}, nil
+func (db *Store) ListObjectIDsPage(ctx context.Context, query objects.ObjectIDPageQuery) ([]string, error) {
+	if strings.TrimSpace(query.ObjectURL) != "" {
+		return db.listObjectIDsPageByURL(ctx, query)
 	}
-	if offset < 0 {
-		offset = 0
-	}
-
-	args := make([]any, 0, 4)
-	conditions := make([]string, 0, 2)
-	baseQuery := `SELECT id FROM drs_object`
-	orderBy := ` ORDER BY id`
-	objectIDExpr := "id"
-
-	if organization != "" {
-		condition, scopeArgs, err := scopeResourceCondition("ca.resource", organization, project)
-		if err != nil {
-			return nil, err
-		}
-		args = append(args, scopeArgs...)
-		baseQuery = `
-			SELECT DISTINCT ca.object_id AS id
-			FROM drs_object_controlled_access ca
-			INNER JOIN drs_object o ON o.id = ca.object_id
-		`
-		objectIDExpr = "ca.object_id"
-		conditions = append(conditions, condition)
-		orderBy = ` ORDER BY ca.object_id`
-	}
-	if startAfter != "" {
-		args = append(args, startAfter)
-		conditions = append(conditions, objectIDExpr+" > ?")
-	}
-	query := baseQuery
-	if len(conditions) > 0 {
-		query += ` WHERE ` + strings.Join(conditions, ` AND `)
-	}
-	query += orderBy + ` LIMIT ? OFFSET ?`
-	args = append(args, limit, offset)
-	rows, err := db.queryContext(ctx, query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	return scanObjectIDs(rows)
+	return db.listObjectIDsPageByScope(ctx, query)
 }
 
-func (db *Store) ListObjectIDsPageByAuthorizedScope(ctx context.Context, organization, project, startAfter string, limit, offset int, resources []string, includeUnscoped, restrictToResources bool) ([]string, error) {
-	organization = strings.TrimSpace(organization)
-	project = strings.TrimSpace(project)
-	startAfter = strings.TrimSpace(startAfter)
-	if limit <= 0 {
+func (db *Store) listObjectIDsPageByScope(ctx context.Context, query objects.ObjectIDPageQuery) ([]string, error) {
+	query.Scope.Organization = strings.TrimSpace(query.Scope.Organization)
+	query.Scope.Project = strings.TrimSpace(query.Scope.Project)
+	query.StartAfter = strings.TrimSpace(query.StartAfter)
+	if query.Limit <= 0 {
 		return []string{}, nil
 	}
-	if offset < 0 {
-		offset = 0
+	if query.Offset < 0 {
+		query.Offset = 0
 	}
 	args := make([]any, 0, 8)
 	conditions := make([]string, 0, 4)
-	if organization != "" {
-		resourceCondition, resourceArgs, err := scopeResourceCondition("ca_scope.resource", organization, project)
+	if query.Scope.Organization != "" {
+		resourceCondition, resourceArgs, err := scopeResourceCondition("ca_scope.resource", query.Scope.Organization, query.Scope.Project)
 		if err != nil {
 			return nil, err
 		}
 		args = append(args, resourceArgs...)
 		conditions = append(conditions, `EXISTS (SELECT 1 FROM drs_object_controlled_access ca_scope WHERE ca_scope.object_id = o.id AND `+resourceCondition+`)`)
 	}
-	if restrictToResources {
-		resources = clientaccess.NormalizeAccessResources(resources)
+	if query.RestrictToVisibleResources {
+		resources := clientaccess.NormalizeAccessResources(query.VisibleResources)
 		parts := make([]string, 0, 2)
 		if len(resources) > 0 {
 			resourceCondition, resourceArgs := db.dialect.ListArgs("ca_auth.resource", resources)
 			parts = append(parts, `EXISTS (SELECT 1 FROM drs_object_controlled_access ca_auth WHERE ca_auth.object_id = o.id AND `+resourceCondition+`)`)
 			args = append(args, resourceArgs...)
 		}
-		if includeUnscoped {
+		if query.IncludeUnscoped {
 			parts = append(parts, `NOT EXISTS (SELECT 1 FROM drs_object_controlled_access ca_auth WHERE ca_auth.object_id = o.id)`)
 		}
 		if len(parts) == 0 {
@@ -351,17 +479,17 @@ func (db *Store) ListObjectIDsPageByAuthorizedScope(ctx context.Context, organiz
 		}
 		conditions = append(conditions, "("+strings.Join(parts, " OR ")+")")
 	}
-	if startAfter != "" {
-		args = append(args, startAfter)
+	if query.StartAfter != "" {
+		args = append(args, query.StartAfter)
 		conditions = append(conditions, "o.id > ?")
 	}
-	query := `SELECT DISTINCT o.id FROM drs_object o`
+	statement := `SELECT DISTINCT o.id FROM drs_object o`
 	if len(conditions) > 0 {
-		query += " WHERE " + strings.Join(conditions, " AND ")
+		statement += " WHERE " + strings.Join(conditions, " AND ")
 	}
-	query += " ORDER BY o.id LIMIT ? OFFSET ?"
-	args = append(args, limit, offset)
-	rows, err := db.queryContext(ctx, query, args...)
+	statement += " ORDER BY o.id LIMIT ? OFFSET ?"
+	args = append(args, query.Limit, query.Offset)
+	rows, err := db.queryContext(ctx, statement, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -369,22 +497,22 @@ func (db *Store) ListObjectIDsPageByAuthorizedScope(ctx context.Context, organiz
 	return scanObjectIDs(rows)
 }
 
-func (db *Store) ListObjectIDsPageByURL(ctx context.Context, objectURL, organization, project, startAfter string, limit, offset int, resources []string, includeUnscoped, restrictToResources bool) ([]string, error) {
-	objectURL = strings.TrimSpace(objectURL)
-	organization = strings.TrimSpace(organization)
-	project = strings.TrimSpace(project)
-	startAfter = strings.TrimSpace(startAfter)
-	if objectURL == "" || limit <= 0 {
+func (db *Store) listObjectIDsPageByURL(ctx context.Context, query objects.ObjectIDPageQuery) ([]string, error) {
+	query.ObjectURL = strings.TrimSpace(query.ObjectURL)
+	query.Scope.Organization = strings.TrimSpace(query.Scope.Organization)
+	query.Scope.Project = strings.TrimSpace(query.Scope.Project)
+	query.StartAfter = strings.TrimSpace(query.StartAfter)
+	if query.ObjectURL == "" || query.Limit <= 0 {
 		return []string{}, nil
 	}
-	if offset < 0 {
-		offset = 0
+	if query.Offset < 0 {
+		query.Offset = 0
 	}
 
-	args := []any{objectURL}
+	args := []any{query.ObjectURL}
 	conditions := []string{"am.url = ?"}
-	if organization != "" {
-		scopeCondition, scopeArgs, err := scopeResourceCondition("ca_scope.resource", organization, project)
+	if query.Scope.Organization != "" {
+		scopeCondition, scopeArgs, err := scopeResourceCondition("ca_scope.resource", query.Scope.Organization, query.Scope.Project)
 		if err != nil {
 			return nil, err
 		}
@@ -395,9 +523,9 @@ func (db *Store) ListObjectIDsPageByURL(ctx context.Context, objectURL, organiza
 			WHERE ca_scope.object_id = o.id AND `+scopeCondition+`
 		)`)
 	}
-	if restrictToResources {
-		resources = clientaccess.NormalizeAccessResources(resources)
-		if len(resources) == 0 && !includeUnscoped {
+	if query.RestrictToVisibleResources {
+		resources := clientaccess.NormalizeAccessResources(query.VisibleResources)
+		if len(resources) == 0 && !query.IncludeUnscoped {
 			return []string{}, nil
 		}
 		parts := make([]string, 0, 2)
@@ -410,7 +538,7 @@ func (db *Store) ListObjectIDsPageByURL(ctx context.Context, objectURL, organiza
 			)`)
 			args = append(args, resourceArgs...)
 		}
-		if includeUnscoped {
+		if query.IncludeUnscoped {
 			parts = append(parts, `NOT EXISTS (
 				SELECT 1
 				FROM drs_object_controlled_access ca_auth
@@ -419,20 +547,20 @@ func (db *Store) ListObjectIDsPageByURL(ctx context.Context, objectURL, organiza
 		}
 		conditions = append(conditions, "("+strings.Join(parts, " OR ")+")")
 	}
-	if startAfter != "" {
-		args = append(args, startAfter)
+	if query.StartAfter != "" {
+		args = append(args, query.StartAfter)
 		conditions = append(conditions, "o.id > ?")
 	}
 
-	query := `
+	statement := `
 		SELECT DISTINCT o.id
 		FROM drs_object o
 		INNER JOIN drs_object_access_method am ON am.object_id = o.id
 		WHERE ` + strings.Join(conditions, " AND ") + `
 		ORDER BY o.id
 		LIMIT ? OFFSET ?`
-	args = append(args, limit, offset)
-	rows, err := db.queryContext(ctx, query, args...)
+	args = append(args, query.Limit, query.Offset)
+	rows, err := db.queryContext(ctx, statement, args...)
 	if err != nil {
 		return nil, err
 	}

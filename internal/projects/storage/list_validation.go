@@ -212,6 +212,24 @@ func (s *Service) validationTarget(ctx context.Context, request internalapi.Inte
 		base.ValidationStatus = string(validationStatusForError(request))
 		return base, nil, false
 	}
+	if restrictedBucketVisibility(ctx) {
+		allowed, err := s.rawStorageKeyVisible(ctx, bucket, key)
+		if err != nil {
+			status, kind := classifyError(err)
+			base.Status, base.ErrorKind = string(status), kind
+			base.Error = safeStorageErrorMessage(err, "inventory")
+			base.ValidationStatus = string(validationStatusForError(request))
+			return base, nil, false
+		}
+		if !allowed {
+			err := &Error{Kind: ErrorPermissionDenied, Message: "object key is outside the caller's authorized project storage scopes"}
+			status, kind := classifyError(err)
+			base.Status, base.ErrorKind = string(status), kind
+			base.Error = err.Error()
+			base.ValidationStatus = string(validationStatusForError(request))
+			return base, nil, false
+		}
+	}
 	return base, &validationWork{bucket: bucket, key: key, base: base, requestIndexes: []int{index}}, true
 }
 
@@ -256,7 +274,7 @@ func (s *Service) runCoalescedValidation(ctx context.Context, group []*validatio
 		requested[validationTargetKey(work.bucket, work.key)] = work
 	}
 	prefix := validationDirectoryPrefix(group[0].key)
-	items, err := s.inventoryObjects(ctx, group[0].bucket, prefix, inventoryOptions{ExactPrefix: true})
+	items, err := s.inventoryObjects(ctx, group[0].bucket, prefix, inventoryOptions{ExactPrefix: true, MaxResults: listFallbackObjectLimit + 1})
 	if err != nil {
 		return
 	}
@@ -354,6 +372,7 @@ func presentValidationResult(request internalapi.InternalInspectObjectRequest, b
 	base.ErrorKind = ""
 	base.SizeBytes = int64Pointer(item.SizeBytes)
 	base.Etag = strings.TrimSpace(item.Etag)
+	base.MetaSha256 = strings.TrimSpace(item.MetaSha256)
 	base.LastModified = item.LastModified
 	status, sizeMatch, nameMatch, shaMatch, mismatches := validateObject(request, objectMetadata{
 		Key:        item.Key,

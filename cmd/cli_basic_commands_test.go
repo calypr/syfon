@@ -16,6 +16,23 @@ import (
 	syclient "github.com/calypr/syfon/client"
 )
 
+func accessURLContaining(t *testing.T, record internalapi.InternalRecordResponse, fragment string) string {
+	t.Helper()
+	urls := make([]string, 0)
+	if record.AccessMethods != nil {
+		for _, method := range *record.AccessMethods {
+			if method.AccessUrl != nil {
+				urls = append(urls, method.AccessUrl.Url)
+				if strings.Contains(method.AccessUrl.Url, fragment) {
+					return method.AccessUrl.Url
+				}
+			}
+		}
+	}
+	t.Fatalf("record %s has no access URL containing %q: %v", record.Did, fragment, urls)
+	return ""
+}
+
 func TestSyfonListAndRemoveCommands(t *testing.T) {
 	server := newSyfonTestServer(t)
 	defer server.Close()
@@ -416,13 +433,8 @@ func TestSyfonCopyProjectCommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to get updated index record: %v", err)
 	}
-	if rec.AccessMethods == nil || len(*rec.AccessMethods) != 1 {
-		t.Fatalf("expected exactly 1 access method, got: %+v", rec.AccessMethods)
-	}
-	targetURL := (*rec.AccessMethods)[0].AccessUrl.Url
-	if !strings.Contains(targetURL, "://target-bucket/copied-root/e2e/") {
-		t.Fatalf("expected access URL to be in target-bucket under copied-root/e2e, got: %s", targetURL)
-	}
+	targetURL := accessURLContaining(t, rec, "://target-bucket/copied-root/e2e/")
+	accessURLContaining(t, rec, "s3://syfon-bucket/"+fileName)
 
 	parsed, err := url.Parse(targetURL)
 	if err != nil {
@@ -526,13 +538,7 @@ func TestSyfonCopyProjectCommand_CreatesMissingDestinationScope(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to get updated index record 1: %v", err)
 	}
-	if rec1.AccessMethods == nil || len(*rec1.AccessMethods) != 1 {
-		t.Fatalf("expected exactly 1 access method for did1, got: %+v", rec1.AccessMethods)
-	}
-	targetURL1 := (*rec1.AccessMethods)[0].AccessUrl.Url
-	if !strings.Contains(targetURL1, "://syfon-bucket/organizations/syfon-clone/e2e/") {
-		t.Fatalf("expected did1 access URL to be rewritten into destination scope, got: %s", targetURL1)
-	}
+	accessURLContaining(t, rec1, "://syfon-bucket/organizations/syfon-clone/e2e/")
 
 	reader1, err := c.Data().GetReader(context.Background(), did1)
 	if err != nil {
@@ -551,13 +557,7 @@ func TestSyfonCopyProjectCommand_CreatesMissingDestinationScope(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to get index record 2: %v", err)
 	}
-	if rec2.AccessMethods == nil || len(*rec2.AccessMethods) != 1 {
-		t.Fatalf("expected exactly 1 access method for did2, got: %+v", rec2.AccessMethods)
-	}
-	targetURL2 := (*rec2.AccessMethods)[0].AccessUrl.Url
-	if !strings.Contains(targetURL2, "://syfon-bucket/organizations/syfon-clone/e2e/") {
-		t.Fatalf("expected did2 access URL to be rewritten into destination scope, got: %s", targetURL2)
-	}
+	accessURLContaining(t, rec2, "://syfon-bucket/organizations/syfon-clone/e2e/")
 }
 
 func TestSyfonCopyProjectCommand_Individual(t *testing.T) {
@@ -635,13 +635,7 @@ func TestSyfonCopyProjectCommand_Individual(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to get updated index record 1: %v", err)
 	}
-	if rec1.AccessMethods == nil || len(*rec1.AccessMethods) != 1 {
-		t.Fatalf("expected exactly 1 access method for did1, got: %+v", rec1.AccessMethods)
-	}
-	targetURL1 := (*rec1.AccessMethods)[0].AccessUrl.Url
-	if !strings.Contains(targetURL1, "://target-bucket/individual-root/e2e/") {
-		t.Fatalf("expected did1 access URL to be in target bucket destination scope, got: %s", targetURL1)
-	}
+	accessURLContaining(t, rec1, "://target-bucket/individual-root/e2e/")
 
 	reader1, err := c.Data().GetReader(context.Background(), did1)
 	if err != nil {
@@ -722,13 +716,8 @@ func TestSyfonCopyProjectCommand_SkipsBrokenRecords(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to get updated good record: %v", err)
 	}
-	if goodRec.AccessMethods == nil || len(*goodRec.AccessMethods) != 1 {
-		t.Fatalf("expected exactly 1 access method for good record, got: %+v", goodRec.AccessMethods)
-	}
-	goodTargetURL := (*goodRec.AccessMethods)[0].AccessUrl.Url
-	if !strings.Contains(goodTargetURL, "://syfon-bucket/organizations/syfon-skip/e2e/") {
-		t.Fatalf("expected good record to be rewritten into destination scope, got: %s", goodTargetURL)
-	}
+	accessURLContaining(t, goodRec, "://syfon-bucket/organizations/syfon-skip/e2e/")
+	accessURLContaining(t, goodRec, "s3://syfon-bucket/"+goodName)
 
 	reader, err := c.Data().GetReader(context.Background(), goodDID)
 	if err != nil {
@@ -815,9 +804,7 @@ func TestSyfonCopyProjectCommand_AcrossInstances(t *testing.T) {
 	if targetRec.Hashes == nil || (*targetRec.Hashes)["sha256"] != checksum {
 		t.Fatalf("unexpected target hashes: %+v", targetRec.Hashes)
 	}
-	if targetRec.AccessMethods == nil || len(*targetRec.AccessMethods) != 1 || !strings.Contains((*targetRec.AccessMethods)[0].AccessUrl.Url, "://syfon-bucket/copied-root/e2e/") {
-		t.Fatalf("unexpected target access methods: %+v", targetRec.AccessMethods)
-	}
+	accessURLContaining(t, targetRec, "://syfon-bucket/copied-root/e2e/")
 
 	reader, err := targetClient.Data().GetReader(context.Background(), did)
 	if err != nil {
