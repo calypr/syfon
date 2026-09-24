@@ -248,7 +248,7 @@ func (db *Store) GetObjectsByChecksums(ctx context.Context, checksums []string) 
 	if err != nil {
 		return nil, err
 	}
-	index := make(map[string][]drs.DrsObject, len(objectsByID)*2)
+	index := make(map[string][]drs.DrsObject, len(objectsByID))
 	for _, obj := range objectsByID {
 		index[obj.Id] = append(index[obj.Id], *obj)
 		for _, cs := range obj.Checksums {

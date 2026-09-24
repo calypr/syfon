@@ -6,11 +6,14 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/calypr/syfon/apigen/drs"
 	syclient "github.com/calypr/syfon/client"
@@ -275,41 +278,43 @@ func exerciseAllClientCommands(t *testing.T, serverURL string, bucketCfg bucketC
 		t.Fatalf("bucket list missing %s: %s", bucketName, bucketListOut)
 	}
 
-	rmOut, err := executeRootCommand(t, "--server", serverURL, "rm", "--did", uploadedID)
-	if err == nil || !strings.Contains(err.Error(), "409") {
-		t.Fatalf("rm(uploaded) should reject non-atomic storage deletion: err=%v output=%s", err, rmOut)
-	}
-	if !strings.Contains(err.Error(), "physical storage deletion is not atomic") {
-		t.Fatalf("rm(uploaded) returned the wrong conflict: %v", err)
-	}
-
-	rmOut2, err := executeRootCommand(t, "--server", serverURL, "rm", "--did", addURLDID)
-	if err == nil || !strings.Contains(err.Error(), "409") {
-		t.Fatalf("rm(add-url) should reject non-atomic storage deletion: err=%v output=%s", err, rmOut2)
-	}
-	if !strings.Contains(err.Error(), "physical storage deletion is not atomic") {
-		t.Fatalf("rm(add-url) returned the wrong conflict: %v", err)
+	for _, id := range []string{uploadedID, addURLDID} {
+		rmOut, err := executeRootCommand(t, "--server", serverURL, "rm", "--did", id)
+		if err != nil {
+			t.Fatalf("rm(%s) failed: %v output=%s", id, err, rmOut)
+		}
+		if !strings.Contains(rmOut, "removed metadata for "+id) || !strings.Contains(rmOut, "storage data was preserved") {
+			t.Fatalf("rm(%s) reported the wrong result: %s", id, rmOut)
+		}
 	}
 
 	lsAfterRm, err := executeRootCommand(t, "--server", serverURL, "ls")
 	if err != nil {
 		t.Fatalf("ls after rm failed: %v output=%s", err, lsAfterRm)
 	}
-	if !strings.Contains(lsAfterRm, fileName) || !strings.Contains(lsAfterRm, addURLDID) {
-		t.Fatalf("rejected rm removed catalog records: %s", lsAfterRm)
+	if strings.Contains(lsAfterRm, fileName) || strings.Contains(lsAfterRm, uploadedID) || strings.Contains(lsAfterRm, addURLDID) {
+		t.Fatalf("rm left catalog records behind: %s", lsAfterRm)
 	}
 
-	afterRmPath := filepath.Join(t.TempDir(), "provider-after-rejected-rm.txt")
-	afterRmOut, err := executeRootCommand(t, "--server", serverURL, "download", "--did", uploadedID, "--out", afterRmPath)
-	if err != nil {
-		t.Fatalf("download after rejected rm failed: %v output=%s", err, afterRmOut)
+	_, err = executeRootCommand(t, "--server", serverURL, "download", "--did", uploadedID, "--out", filepath.Join(t.TempDir(), "provider-after-rm.txt"))
+	if err == nil {
+		t.Fatal("download after rm succeeded after catalog metadata was removed")
 	}
-	afterRmData, err := os.ReadFile(afterRmPath)
+	providerClient := &http.Client{Timeout: 10 * time.Second}
+	providerResponse, err := providerClient.Get(recordURL)
 	if err != nil {
-		t.Fatalf("read download after rejected rm: %v", err)
+		t.Fatal("provider object was not reachable after metadata deletion")
+	}
+	defer providerResponse.Body.Close()
+	if providerResponse.StatusCode != http.StatusOK {
+		t.Fatalf("provider object returned status %d after metadata deletion", providerResponse.StatusCode)
+	}
+	afterRmData, err := io.ReadAll(providerResponse.Body)
+	if err != nil {
+		t.Fatalf("read provider object after metadata deletion: %v", err)
 	}
 	if !bytes.Equal(afterRmData, srcData) {
-		t.Fatalf("rejected rm modified provider bytes")
+		t.Fatal("metadata deletion modified provider bytes")
 	}
 
 	bucketRemoveOut, err := executeRootCommand(t, "--server", serverURL, "bucket", "remove", bucketName)

@@ -426,7 +426,9 @@ type DrsObject struct {
 	Version *string `json:"version,omitempty"`
 }
 
-// DrsObjectCandidate defines model for DrsObjectCandidate.
+// DrsObjectCandidate Syfon supports blob-only registration through `/objects/register`.
+// Any non-null `contents` or `mime_type` value submitted in a candidate is rejected
+// because Syfon cannot persist either field.
 type DrsObjectCandidate struct {
 	// AccessMethods The list of access methods that can be used to fetch the `DrsObject`.
 	// Required for single blobs; optional for bundles.
@@ -449,8 +451,8 @@ type DrsObjectCandidate struct {
 	// = f7a29a04
 	Checksums []Checksum `json:"checksums"`
 
-	// Contents If not set, this `DrsObject` is a single blob.
-	// If set, this `DrsObject` is a bundle containing the listed `ContentsObject` s (some of which may be further nested).
+	// Contents DRS bundle contents. Syfon supports blob-only registration and rejects a non-null
+	// value because it cannot persist this field.
 	Contents *[]ContentsObject `json:"contents,omitempty"`
 
 	// ControlledAccess A list of authorization claims representing controlled-access
@@ -475,6 +477,7 @@ type DrsObjectCandidate struct {
 	Description *string `json:"description,omitempty"`
 
 	// MimeType A string providing the mime-type of the `DrsObject`.
+	// Syfon rejects a non-null value because it cannot persist this field.
 	//
 	// Example: application/json
 	MimeType *string `json:"mime_type,omitempty"`
@@ -1224,7 +1227,7 @@ type ClientInterface interface {
 	// **RECOMMENDED - Transactional Behavior**:  Deletion operations SHOULD be atomic transactions. If ANY object fails validation or deletion,  the ENTIRE request SHOULD fail and NO objects SHOULD be deleted. Servers SHOULD implement this as an  all-or-nothing operation to ensure data consistency, but MAY implement partial deletion with  appropriate error reporting if transactional behavior is not feasible.
 	// **Authentication**: GA4GH Passports can be provided in the request body for authorization.
 	// **Storage Data Deletion**: The `delete_storage_data` parameter controls whether the server will attempt to delete underlying storage files along with DRS metadata. This defaults to false for safety. Servers will make a best effort attempt to delete storage data, but success is not guaranteed.
-	// **Server Responsibilities**: - SHOULD treat deletion as an atomic transaction (all succeed or all fail) - SHOULD validate ALL object IDs exist and are accessible before deleting ANY - SHOULD roll back any partial changes if any object fails deletion - SHOULD return 400 if any object ID is invalid or inaccessible when using transactional behavior
+	// **Server Responsibilities**: - SHOULD treat deletion as an atomic transaction (all succeed or all fail) - SHOULD validate ALL object IDs exist and are accessible before deleting ANY - SHOULD roll back any partial changes if any object fails deletion - With transactional behavior, return 404 if any requested object ID does not exist, or 403 if the caller cannot delete any requested object. No object in a rejected batch is deleted.
 	// **Client Responsibilities**: - Provide valid object IDs for all objects to be deleted - Handle potential failure of entire batch if any single object cannot be deleted - Check service-info for `maxBulkDeleteLength` limits before making requests
 	//
 	// Takes any type of body and a specified content type.
@@ -1239,7 +1242,7 @@ type ClientInterface interface {
 	// **RECOMMENDED - Transactional Behavior**:  Deletion operations SHOULD be atomic transactions. If ANY object fails validation or deletion,  the ENTIRE request SHOULD fail and NO objects SHOULD be deleted. Servers SHOULD implement this as an  all-or-nothing operation to ensure data consistency, but MAY implement partial deletion with  appropriate error reporting if transactional behavior is not feasible.
 	// **Authentication**: GA4GH Passports can be provided in the request body for authorization.
 	// **Storage Data Deletion**: The `delete_storage_data` parameter controls whether the server will attempt to delete underlying storage files along with DRS metadata. This defaults to false for safety. Servers will make a best effort attempt to delete storage data, but success is not guaranteed.
-	// **Server Responsibilities**: - SHOULD treat deletion as an atomic transaction (all succeed or all fail) - SHOULD validate ALL object IDs exist and are accessible before deleting ANY - SHOULD roll back any partial changes if any object fails deletion - SHOULD return 400 if any object ID is invalid or inaccessible when using transactional behavior
+	// **Server Responsibilities**: - SHOULD treat deletion as an atomic transaction (all succeed or all fail) - SHOULD validate ALL object IDs exist and are accessible before deleting ANY - SHOULD roll back any partial changes if any object fails deletion - With transactional behavior, return 404 if any requested object ID does not exist, or 403 if the caller cannot delete any requested object. No object in a rejected batch is deleted.
 	// **Client Responsibilities**: - Provide valid object IDs for all objects to be deleted - Handle potential failure of entire batch if any single object cannot be deleted - Check service-info for `maxBulkDeleteLength` limits before making requests
 	//
 	// Takes a body of the `application/json` content type.
@@ -1252,6 +1255,7 @@ type ClientInterface interface {
 	// **Optional Endpoint**: This endpoint is not required for DRS server implementations.  Not all DRS servers support object registration.
 	// Registers one or more "candidate" DRS objects with the server. If it accepts the request, the server will create  unique object IDs for each registered object and return them in fully-formed DRS objects in response.
 	// This endpoint can be used after uploading files using methods negotiated with the `/upload-request` endpoint  to register the uploaded files as DRS objects, or to register existing data. The request body should contain candidate  DRS objects with all required metadata including access methods that correspond  to the upload methods used during file upload.
+	// **Syfon registration**: Syfon supports blob-only registration. Candidates with non-null `contents` or `mime_type` values receive HTTP 400 because Syfon cannot persist either field.
 	// **RECOMMENDED - Transactional Behavior**:  Registration operations SHOULD be atomic transactions. If ANY candidate object fails validation  or registration, the ENTIRE request SHOULD fail and NO objects SHOULD be registered. Servers SHOULD  implement this as an all-or-nothing operation to ensure data consistency, but MAY implement partial  registration with appropriate error reporting if transactional behavior is not feasible.
 	// **Authentication**: GA4GH Passports can be provided in the request body for authorization. Bearer tokens can be supplied in headers.
 	// **Server Responsibilities**: - SHOULD treat registration as an atomic transaction (all succeed or all fail) - SHOULD validate ALL candidate objects before registering ANY - Create unique object IDs for each registered object - Add timestamps (created_time, updated_time) - SHOULD roll back any partial changes if any candidate fails validation
@@ -1267,6 +1271,7 @@ type ClientInterface interface {
 	// **Optional Endpoint**: This endpoint is not required for DRS server implementations.  Not all DRS servers support object registration.
 	// Registers one or more "candidate" DRS objects with the server. If it accepts the request, the server will create  unique object IDs for each registered object and return them in fully-formed DRS objects in response.
 	// This endpoint can be used after uploading files using methods negotiated with the `/upload-request` endpoint  to register the uploaded files as DRS objects, or to register existing data. The request body should contain candidate  DRS objects with all required metadata including access methods that correspond  to the upload methods used during file upload.
+	// **Syfon registration**: Syfon supports blob-only registration. Candidates with non-null `contents` or `mime_type` values receive HTTP 400 because Syfon cannot persist either field.
 	// **RECOMMENDED - Transactional Behavior**:  Registration operations SHOULD be atomic transactions. If ANY candidate object fails validation  or registration, the ENTIRE request SHOULD fail and NO objects SHOULD be registered. Servers SHOULD  implement this as an all-or-nothing operation to ensure data consistency, but MAY implement partial  registration with appropriate error reporting if transactional behavior is not feasible.
 	// **Authentication**: GA4GH Passports can be provided in the request body for authorization. Bearer tokens can be supplied in headers.
 	// **Server Responsibilities**: - SHOULD treat registration as an atomic transaction (all succeed or all fail) - SHOULD validate ALL candidate objects before registering ANY - Create unique object IDs for each registered object - Add timestamps (created_time, updated_time) - SHOULD roll back any partial changes if any candidate fails validation
@@ -1770,7 +1775,7 @@ func (c *Client) BulkAddChecksums(ctx context.Context, body BulkAddChecksumsJSON
 // **RECOMMENDED - Transactional Behavior**:  Deletion operations SHOULD be atomic transactions. If ANY object fails validation or deletion,  the ENTIRE request SHOULD fail and NO objects SHOULD be deleted. Servers SHOULD implement this as an  all-or-nothing operation to ensure data consistency, but MAY implement partial deletion with  appropriate error reporting if transactional behavior is not feasible.
 // **Authentication**: GA4GH Passports can be provided in the request body for authorization.
 // **Storage Data Deletion**: The `delete_storage_data` parameter controls whether the server will attempt to delete underlying storage files along with DRS metadata. This defaults to false for safety. Servers will make a best effort attempt to delete storage data, but success is not guaranteed.
-// **Server Responsibilities**: - SHOULD treat deletion as an atomic transaction (all succeed or all fail) - SHOULD validate ALL object IDs exist and are accessible before deleting ANY - SHOULD roll back any partial changes if any object fails deletion - SHOULD return 400 if any object ID is invalid or inaccessible when using transactional behavior
+// **Server Responsibilities**: - SHOULD treat deletion as an atomic transaction (all succeed or all fail) - SHOULD validate ALL object IDs exist and are accessible before deleting ANY - SHOULD roll back any partial changes if any object fails deletion - With transactional behavior, return 404 if any requested object ID does not exist, or 403 if the caller cannot delete any requested object. No object in a rejected batch is deleted.
 // **Client Responsibilities**: - Provide valid object IDs for all objects to be deleted - Handle potential failure of entire batch if any single object cannot be deleted - Check service-info for `maxBulkDeleteLength` limits before making requests
 //
 // Takes any type of body and a specified content type.
@@ -1795,7 +1800,7 @@ func (c *Client) BulkDeleteObjectsWithBody(ctx context.Context, contentType stri
 // **RECOMMENDED - Transactional Behavior**:  Deletion operations SHOULD be atomic transactions. If ANY object fails validation or deletion,  the ENTIRE request SHOULD fail and NO objects SHOULD be deleted. Servers SHOULD implement this as an  all-or-nothing operation to ensure data consistency, but MAY implement partial deletion with  appropriate error reporting if transactional behavior is not feasible.
 // **Authentication**: GA4GH Passports can be provided in the request body for authorization.
 // **Storage Data Deletion**: The `delete_storage_data` parameter controls whether the server will attempt to delete underlying storage files along with DRS metadata. This defaults to false for safety. Servers will make a best effort attempt to delete storage data, but success is not guaranteed.
-// **Server Responsibilities**: - SHOULD treat deletion as an atomic transaction (all succeed or all fail) - SHOULD validate ALL object IDs exist and are accessible before deleting ANY - SHOULD roll back any partial changes if any object fails deletion - SHOULD return 400 if any object ID is invalid or inaccessible when using transactional behavior
+// **Server Responsibilities**: - SHOULD treat deletion as an atomic transaction (all succeed or all fail) - SHOULD validate ALL object IDs exist and are accessible before deleting ANY - SHOULD roll back any partial changes if any object fails deletion - With transactional behavior, return 404 if any requested object ID does not exist, or 403 if the caller cannot delete any requested object. No object in a rejected batch is deleted.
 // **Client Responsibilities**: - Provide valid object IDs for all objects to be deleted - Handle potential failure of entire batch if any single object cannot be deleted - Check service-info for `maxBulkDeleteLength` limits before making requests
 //
 // Takes a body of the `application/json` content type.
@@ -1818,6 +1823,7 @@ func (c *Client) BulkDeleteObjects(ctx context.Context, body BulkDeleteObjectsJS
 // **Optional Endpoint**: This endpoint is not required for DRS server implementations.  Not all DRS servers support object registration.
 // Registers one or more "candidate" DRS objects with the server. If it accepts the request, the server will create  unique object IDs for each registered object and return them in fully-formed DRS objects in response.
 // This endpoint can be used after uploading files using methods negotiated with the `/upload-request` endpoint  to register the uploaded files as DRS objects, or to register existing data. The request body should contain candidate  DRS objects with all required metadata including access methods that correspond  to the upload methods used during file upload.
+// **Syfon registration**: Syfon supports blob-only registration. Candidates with non-null `contents` or `mime_type` values receive HTTP 400 because Syfon cannot persist either field.
 // **RECOMMENDED - Transactional Behavior**:  Registration operations SHOULD be atomic transactions. If ANY candidate object fails validation  or registration, the ENTIRE request SHOULD fail and NO objects SHOULD be registered. Servers SHOULD  implement this as an all-or-nothing operation to ensure data consistency, but MAY implement partial  registration with appropriate error reporting if transactional behavior is not feasible.
 // **Authentication**: GA4GH Passports can be provided in the request body for authorization. Bearer tokens can be supplied in headers.
 // **Server Responsibilities**: - SHOULD treat registration as an atomic transaction (all succeed or all fail) - SHOULD validate ALL candidate objects before registering ANY - Create unique object IDs for each registered object - Add timestamps (created_time, updated_time) - SHOULD roll back any partial changes if any candidate fails validation
@@ -1843,6 +1849,7 @@ func (c *Client) RegisterObjectsWithBody(ctx context.Context, contentType string
 // **Optional Endpoint**: This endpoint is not required for DRS server implementations.  Not all DRS servers support object registration.
 // Registers one or more "candidate" DRS objects with the server. If it accepts the request, the server will create  unique object IDs for each registered object and return them in fully-formed DRS objects in response.
 // This endpoint can be used after uploading files using methods negotiated with the `/upload-request` endpoint  to register the uploaded files as DRS objects, or to register existing data. The request body should contain candidate  DRS objects with all required metadata including access methods that correspond  to the upload methods used during file upload.
+// **Syfon registration**: Syfon supports blob-only registration. Candidates with non-null `contents` or `mime_type` values receive HTTP 400 because Syfon cannot persist either field.
 // **RECOMMENDED - Transactional Behavior**:  Registration operations SHOULD be atomic transactions. If ANY candidate object fails validation  or registration, the ENTIRE request SHOULD fail and NO objects SHOULD be registered. Servers SHOULD  implement this as an all-or-nothing operation to ensure data consistency, but MAY implement partial  registration with appropriate error reporting if transactional behavior is not feasible.
 // **Authentication**: GA4GH Passports can be provided in the request body for authorization. Bearer tokens can be supplied in headers.
 // **Server Responsibilities**: - SHOULD treat registration as an atomic transaction (all succeed or all fail) - SHOULD validate ALL candidate objects before registering ANY - Create unique object IDs for each registered object - Add timestamps (created_time, updated_time) - SHOULD roll back any partial changes if any candidate fails validation

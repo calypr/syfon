@@ -66,8 +66,10 @@ type FileUsage struct {
 
 // FileUsageBulkRequest defines model for FileUsageBulkRequest.
 type FileUsageBulkRequest struct {
-	InactiveDays *int     `json:"inactive_days,omitempty"`
-	ObjectIds    []string `json:"object_ids"`
+	InactiveDays *int `json:"inactive_days,omitempty"`
+
+	// ObjectIds Canonical DRS object IDs or aliases. Scoped authorization is checked against each canonical object, and results contain canonical IDs.
+	ObjectIds []string `json:"object_ids"`
 }
 
 // FileUsageSummary defines model for FileUsageSummary.

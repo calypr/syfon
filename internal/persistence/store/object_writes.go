@@ -761,10 +761,8 @@ func valueTime(value *time.Time) time.Time {
 }
 
 func identityConflict(format string, args ...interface{}) error {
-	params := make([]interface{}, 0, len(args)+1)
-	params = append(params, errorapi.ErrConflict)
-	params = append(params, args...)
-	return fmt.Errorf("%w: "+format, params...)
+	message := fmt.Sprintf(format, args...)
+	return fmt.Errorf("%w: %s", errorapi.ErrConflict, message)
 }
 
 func legacyDuplicateError(sha string, ids []string) error {

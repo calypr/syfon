@@ -124,7 +124,9 @@ type LFSErrorResponse struct {
 // MetadataSubmitRequest defines model for MetadataSubmitRequest.
 type MetadataSubmitRequest struct {
 	Candidates []DrsObjectCandidate `json:"candidates"`
-	TtlSeconds *int64               `json:"ttl_seconds,omitempty"`
+
+	// TtlSeconds Optional staged metadata lifetime in seconds. Defaults to 1200 seconds (20 minutes); valid values are 1 through 86400 seconds.
+	TtlSeconds *int64 `json:"ttl_seconds,omitempty"`
 }
 
 // MetadataSubmitResponse defines model for MetadataSubmitResponse.

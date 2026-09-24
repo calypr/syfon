@@ -81,7 +81,10 @@ type BulkOverwriteResponse struct {
 
 // BulkSHA256ValidityRequest defines model for BulkSHA256ValidityRequest.
 type BulkSHA256ValidityRequest struct {
+	// Hashes Alias for sha256. If both fields are present, this array must be identical to sha256.
 	Hashes *[]string `json:"hashes,omitempty"`
+
+	// Sha256 SHA-256 values to validate.
 	Sha256 *[]string `json:"sha256,omitempty"`
 }
 
@@ -748,37 +751,37 @@ type ClientInterface interface {
 	// InternalInspectObjectWithBody performs a POST /data/inspect (the `InternalInspectObject` operationId) request,
 	// with any type of body and a specified content type.
 	//
-	// Inspect one object in project storage.
+	// Return storage metadata for one object. Validation fields are not accepted. Use /data/inspect/bulk to validate expected values.
 	InternalInspectObjectWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// InternalInspectObject performs a POST /data/inspect (the `InternalInspectObject` operationId) request.
 	// Takes a body of the `application/json` content type.
 	//
-	// Inspect one object in project storage.
+	// Return storage metadata for one object. Validation fields are not accepted. Use /data/inspect/bulk to validate expected values.
 	InternalInspectObject(ctx context.Context, body InternalInspectObjectJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// InternalInspectObjectBulkWithBody performs a POST /data/inspect/bulk (the `InternalInspectObjectBulk` operationId) request,
 	// with any type of body and a specified content type.
 	//
-	// Inspect multiple objects in project storage.
+	// Inspect multiple objects in project storage and validate requested size, name, and SHA-256 values.
 	InternalInspectObjectBulkWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// InternalInspectObjectBulk performs a POST /data/inspect/bulk (the `InternalInspectObjectBulk` operationId) request.
 	// Takes a body of the `application/json` content type.
 	//
-	// Inspect multiple objects in project storage.
+	// Inspect multiple objects in project storage and validate requested size, name, and SHA-256 values.
 	InternalInspectObjectBulk(ctx context.Context, body InternalInspectObjectBulkJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// InternalInspectObjectBulkListWithBody performs a POST /data/inspect/bulk-list (the `InternalInspectObjectBulkList` operationId) request,
 	// with any type of body and a specified content type.
 	//
-	// Validate multiple object inventory records.
+	// Validate multiple object inventory records. A requested SHA-256 check is unverifiable when inventory has no remote SHA-256 metadata.
 	InternalInspectObjectBulkListWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// InternalInspectObjectBulkList performs a POST /data/inspect/bulk-list (the `InternalInspectObjectBulkList` operationId) request.
 	// Takes a body of the `application/json` content type.
 	//
-	// Validate multiple object inventory records.
+	// Validate multiple object inventory records. A requested SHA-256 check is unverifiable when inventory has no remote SHA-256 metadata.
 	InternalInspectObjectBulkList(ctx context.Context, body InternalInspectObjectBulkListJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// InternalInspectProjectBucketWithBody performs a POST /data/inspect/project-bucket (the `InternalInspectProjectBucket` operationId) request,
@@ -993,10 +996,14 @@ type ClientInterface interface {
 
 	// InternalBulkSHA256ValidityWithBody performs a POST /index/bulk/sha256/validity (the `InternalBulkSHA256Validity` operationId) request,
 	// with any type of body and a specified content type.
+	//
+	// Provide sha256 or its hashes alias. If both fields are present, their arrays must be identical. An empty request, an empty array, or values that are all empty or whitespace-only return 400. Conflicting arrays also return 400.
 	InternalBulkSHA256ValidityWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// InternalBulkSHA256Validity performs a POST /index/bulk/sha256/validity (the `InternalBulkSHA256Validity` operationId) request.
 	// Takes a body of the `application/json` content type.
+	//
+	// Provide sha256 or its hashes alias. If both fields are present, their arrays must be identical. An empty request, an empty array, or values that are all empty or whitespace-only return 400. Conflicting arrays also return 400.
 	InternalBulkSHA256Validity(ctx context.Context, body InternalBulkSHA256ValidityJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// InternalDelete performs a DELETE /index/{id} (the `InternalDelete` operationId) request.
@@ -1051,7 +1058,7 @@ func (c *Client) InternalDownloadPart(ctx context.Context, fileId string, params
 // InternalInspectObjectWithBody performs a POST /data/inspect (the `InternalInspectObject` operationId) request,
 // with any type of body and a specified content type.
 //
-// Inspect one object in project storage.
+// Return storage metadata for one object. Validation fields are not accepted. Use /data/inspect/bulk to validate expected values.
 func (c *Client) InternalInspectObjectWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewInternalInspectObjectRequestWithBody(c.Server, contentType, body)
 	if err != nil {
@@ -1067,7 +1074,7 @@ func (c *Client) InternalInspectObjectWithBody(ctx context.Context, contentType 
 // InternalInspectObject performs a POST /data/inspect (the `InternalInspectObject` operationId) request.
 // Takes a body of the `application/json` content type.
 //
-// Inspect one object in project storage.
+// Return storage metadata for one object. Validation fields are not accepted. Use /data/inspect/bulk to validate expected values.
 func (c *Client) InternalInspectObject(ctx context.Context, body InternalInspectObjectJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewInternalInspectObjectRequest(c.Server, body)
 	if err != nil {
@@ -1083,7 +1090,7 @@ func (c *Client) InternalInspectObject(ctx context.Context, body InternalInspect
 // InternalInspectObjectBulkWithBody performs a POST /data/inspect/bulk (the `InternalInspectObjectBulk` operationId) request,
 // with any type of body and a specified content type.
 //
-// Inspect multiple objects in project storage.
+// Inspect multiple objects in project storage and validate requested size, name, and SHA-256 values.
 func (c *Client) InternalInspectObjectBulkWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewInternalInspectObjectBulkRequestWithBody(c.Server, contentType, body)
 	if err != nil {
@@ -1099,7 +1106,7 @@ func (c *Client) InternalInspectObjectBulkWithBody(ctx context.Context, contentT
 // InternalInspectObjectBulk performs a POST /data/inspect/bulk (the `InternalInspectObjectBulk` operationId) request.
 // Takes a body of the `application/json` content type.
 //
-// Inspect multiple objects in project storage.
+// Inspect multiple objects in project storage and validate requested size, name, and SHA-256 values.
 func (c *Client) InternalInspectObjectBulk(ctx context.Context, body InternalInspectObjectBulkJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewInternalInspectObjectBulkRequest(c.Server, body)
 	if err != nil {
@@ -1115,7 +1122,7 @@ func (c *Client) InternalInspectObjectBulk(ctx context.Context, body InternalIns
 // InternalInspectObjectBulkListWithBody performs a POST /data/inspect/bulk-list (the `InternalInspectObjectBulkList` operationId) request,
 // with any type of body and a specified content type.
 //
-// Validate multiple object inventory records.
+// Validate multiple object inventory records. A requested SHA-256 check is unverifiable when inventory has no remote SHA-256 metadata.
 func (c *Client) InternalInspectObjectBulkListWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewInternalInspectObjectBulkListRequestWithBody(c.Server, contentType, body)
 	if err != nil {
@@ -1131,7 +1138,7 @@ func (c *Client) InternalInspectObjectBulkListWithBody(ctx context.Context, cont
 // InternalInspectObjectBulkList performs a POST /data/inspect/bulk-list (the `InternalInspectObjectBulkList` operationId) request.
 // Takes a body of the `application/json` content type.
 //
-// Validate multiple object inventory records.
+// Validate multiple object inventory records. A requested SHA-256 check is unverifiable when inventory has no remote SHA-256 metadata.
 func (c *Client) InternalInspectObjectBulkList(ctx context.Context, body InternalInspectObjectBulkListJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewInternalInspectObjectBulkListRequest(c.Server, body)
 	if err != nil {
@@ -1796,6 +1803,8 @@ func (c *Client) InternalBulkMissingSHA256(ctx context.Context, body InternalBul
 
 // InternalBulkSHA256ValidityWithBody performs a POST /index/bulk/sha256/validity (the `InternalBulkSHA256Validity` operationId) request,
 // with any type of body and a specified content type.
+//
+// Provide sha256 or its hashes alias. If both fields are present, their arrays must be identical. An empty request, an empty array, or values that are all empty or whitespace-only return 400. Conflicting arrays also return 400.
 func (c *Client) InternalBulkSHA256ValidityWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewInternalBulkSHA256ValidityRequestWithBody(c.Server, contentType, body)
 	if err != nil {
@@ -1810,6 +1819,8 @@ func (c *Client) InternalBulkSHA256ValidityWithBody(ctx context.Context, content
 
 // InternalBulkSHA256Validity performs a POST /index/bulk/sha256/validity (the `InternalBulkSHA256Validity` operationId) request.
 // Takes a body of the `application/json` content type.
+//
+// Provide sha256 or its hashes alias. If both fields are present, their arrays must be identical. An empty request, an empty array, or values that are all empty or whitespace-only return 400. Conflicting arrays also return 400.
 func (c *Client) InternalBulkSHA256Validity(ctx context.Context, body InternalBulkSHA256ValidityJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewInternalBulkSHA256ValidityRequest(c.Server, body)
 	if err != nil {
