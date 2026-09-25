@@ -284,7 +284,7 @@ func (db *Store) replaceObjectTx(ctx context.Context, tx *sql.Tx, obj *drs.DrsOb
 	if err := db.replaceChildrenTx(ctx, tx, canonicalID, obj, sha, hasSHA); err != nil {
 		return "", err
 	}
-	if err := db.replacePolicyTx(ctx, tx, canonicalID, currentResources, obj); err != nil {
+	if err := db.replacePolicyTx(ctx, tx, canonicalID, currentResources); err != nil {
 		return "", err
 	}
 	if id != canonicalID {
@@ -397,7 +397,7 @@ func (db *Store) replaceChildrenTx(ctx context.Context, tx *sql.Tx, id string, o
 	return nil
 }
 
-func (db *Store) replacePolicyTx(ctx context.Context, tx *sql.Tx, id string, currentResources []string, obj *drs.DrsObject) error {
+func (db *Store) replacePolicyTx(ctx context.Context, tx *sql.Tx, id string, currentResources []string) error {
 	public, err := db.publicReadTx(ctx, tx, id, len(currentResources) == 0)
 	if err != nil {
 		return err

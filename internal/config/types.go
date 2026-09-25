@@ -8,10 +8,12 @@ const (
 type Config struct {
 	// Profile selects stricter operational defaults at the application
 	// boundary. An empty profile preserves the historical development behavior.
-	Profile              string                     `json:"profile,omitempty" yaml:"profile,omitempty"`
-	Port                 int                        `json:"port" yaml:"port"`
-	Database             DatabaseConfig             `json:"database" yaml:"database"`
-	Buckets              []BucketConfig             `json:"buckets,omitempty" yaml:"buckets,omitempty"`
+	Profile  string         `json:"profile,omitempty" yaml:"profile,omitempty"`
+	Port     int            `json:"port" yaml:"port"`
+	Database DatabaseConfig `json:"database" yaml:"database"`
+	Buckets  []BucketConfig `json:"buckets,omitempty" yaml:"buckets,omitempty"`
+	// S3Credentials accepts the legacy s3_credentials config key. Validation
+	// migrates it into Buckets and clears it from the runtime config.
 	S3Credentials        []BucketConfig             `json:"s3_credentials,omitempty" yaml:"s3_credentials,omitempty"`
 	BucketScopes         []BucketScopeConfig        `json:"bucket_scopes" yaml:"bucket_scopes"`
 	CredentialEncryption CredentialEncryptionConfig `json:"credential_encryption" yaml:"credential_encryption"`

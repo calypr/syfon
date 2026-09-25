@@ -50,21 +50,6 @@ func validateConfig(cfg *Config) error {
 			return fmt.Errorf("multipart.batch_size must be >= 1 when cleanup is enabled")
 		}
 	}
-	// Final Validation: Exactly one DB must be specified
-	if cfg.Database.Sqlite != nil && cfg.Database.Postgres != nil {
-		// If both are set, but one is the default "drs.db" and the other was explicitly set by user,
-		// we can try to be smart, but user asked to "raise an error".
-		// Actually, if I load a file that has `postgres:`, the `sqlite:` default from line 52 is still there.
-		// So I must clear it if postgres is detected.
-
-		// If postgres was explicitly defined (either in file or via env), we clear the default sqlite.
-		// A better way is to check if it's the "default" value.
-		if cfg.Database.Sqlite.File == "drs.db" && (cfg.Database.Postgres.Host != "localhost" || cfg.Database.Postgres.Database != "") {
-			// This is risky. Let's just follow the user instruction: if both present, error.
-			// This means my LoadConfig must be careful not to leave defaults if others are set.
-		}
-	}
-
 	if cfg.Database.Sqlite != nil && cfg.Database.Postgres != nil {
 		return fmt.Errorf("multiple databases specified in config; only one of 'sqlite' or 'postgres' allowed")
 	}
@@ -78,6 +63,7 @@ func validateConfig(cfg *Config) error {
 	if len(cfg.Buckets) == 0 && len(cfg.S3Credentials) > 0 {
 		cfg.Buckets = append([]BucketConfig(nil), cfg.S3Credentials...)
 	}
+	cfg.S3Credentials = nil
 
 	// Validate configured bucket credentials.
 	for i := range cfg.Buckets {
@@ -146,9 +132,6 @@ func validateConfig(cfg *Config) error {
 	for i, definition := range accepted {
 		cfg.BucketScopes[i] = definition.scope
 	}
-	// Keep the legacy field populated for older call sites and tests.
-	cfg.S3Credentials = append([]BucketConfig(nil), cfg.Buckets...)
-
 	cfg.Auth.Mode = strings.ToLower(strings.TrimSpace(cfg.Auth.Mode))
 	if cfg.Auth.Mode == "" {
 		return fmt.Errorf("auth.mode is required and must be one of %q or %q", AuthModeLocal, AuthModeGen3)

@@ -2,7 +2,6 @@ package transfer
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,6 +14,7 @@ import (
 
 	"github.com/calypr/syfon/client/common"
 	"github.com/calypr/syfon/client/request"
+	"github.com/calypr/syfon/client/signedurl"
 )
 
 // DoUpload performs a presigned PUT request and returns ETag when available.
@@ -29,7 +29,7 @@ func DoUpload(ctx context.Context, client request.HTTPDoer, urlStr string, body 
 			dstPath = urlStr
 		}
 		if dstPath == "" {
-			return "", fmt.Errorf("invalid file upload url: %s", redactUploadURL(urlStr))
+			return "", fmt.Errorf("invalid file upload url: %s", signedurl.Redact(urlStr))
 		}
 		if size < 0 {
 			return "", fmt.Errorf("local upload size mismatch: declared size %d is negative", size)
@@ -122,7 +122,7 @@ func DoUpload(ctx context.Context, client request.HTTPDoer, urlStr string, body 
 
 	req, err := http.NewRequestWithContext(ctx, method, urlStr, body)
 	if err != nil {
-		return "", fmt.Errorf("create upload request: %w", redactUploadError(err, urlStr))
+		return "", fmt.Errorf("create upload request: %w", signedurl.RedactError(err, urlStr))
 	}
 	if skipAuth {
 		request.SkipAuth(req)
@@ -136,13 +136,13 @@ func DoUpload(ctx context.Context, client request.HTTPDoer, urlStr string, body 
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("upload to %s failed: %w", redactUploadURL(urlStr), redactUploadError(err, urlStr))
+		return "", fmt.Errorf("upload to %s failed: %w", signedurl.Redact(urlStr), signedurl.RedactError(err, urlStr))
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		err := common.ResponseBodyError(resp, fmt.Sprintf("upload to %s failed", redactUploadURL(urlStr)))
-		return "", redactUploadError(err, urlStr)
+		err := common.ResponseBodyError(resp, fmt.Sprintf("upload to %s failed", signedurl.Redact(urlStr)))
+		return "", signedurl.RedactError(err, urlStr)
 	}
 
 	return strings.Trim(resp.Header.Get("ETag"), `"`), nil
@@ -164,58 +164,6 @@ func (r uploadContextReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
-type redactedUploadError struct {
-	message string
-	cause   error
-}
-
-func (e *redactedUploadError) Error() string {
-	return e.message
-}
-
-func (e *redactedUploadError) Unwrap() error {
-	return e.cause
-}
-
-func redactUploadError(err error, rawURL string) error {
-	if err == nil {
-		return nil
-	}
-
-	message := err.Error()
-	safeURL := redactUploadURL(rawURL)
-	for _, candidate := range []string{rawURL, strings.TrimSpace(rawURL)} {
-		if candidate != "" {
-			message = strings.ReplaceAll(message, candidate, safeURL)
-		}
-	}
-	if parsed, parseErr := url.Parse(strings.TrimSpace(rawURL)); parseErr == nil {
-		message = strings.ReplaceAll(message, parsed.String(), safeURL)
-		if parsed.RawQuery != "" {
-			message = strings.ReplaceAll(message, parsed.RawQuery, "[redacted]")
-		}
-	}
-	if message == err.Error() {
-		return err
-	}
-	return &redactedUploadError{message: message, cause: err}
-}
-
-func redactUploadURL(rawURL string) string {
-	parsed, err := url.Parse(strings.TrimSpace(rawURL))
-	if err != nil {
-		if queryStart := strings.IndexAny(rawURL, "?#"); queryStart >= 0 {
-			return rawURL[:queryStart]
-		}
-		return rawURL
-	}
-	parsed.User = nil
-	parsed.RawQuery = ""
-	parsed.ForceQuery = false
-	parsed.Fragment = ""
-	return parsed.String()
-}
-
 // GenericDownload performs GET (optionally ranged) against a signed URL.
 func GenericDownload(ctx context.Context, client request.HTTPDoer, signedURL string, rangeStart, rangeEnd *int64) (*http.Response, error) {
 	parsed, parseErr := url.Parse(strings.TrimSpace(signedURL))
@@ -225,7 +173,7 @@ func GenericDownload(ctx context.Context, client request.HTTPDoer, signedURL str
 			srcPath = signedURL
 		}
 		if srcPath == "" {
-			return nil, fmt.Errorf("invalid file download url: %s", sanitizeDownloadURL(signedURL))
+			return nil, fmt.Errorf("invalid file download url: %s", signedurl.Redact(signedURL))
 		}
 		f, err := os.Open(srcPath)
 		if err != nil {
@@ -284,7 +232,7 @@ func GenericDownload(ctx context.Context, client request.HTTPDoer, signedURL str
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, signedURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("create download request for %s: %w", sanitizeDownloadURL(signedURL), sanitizeDownloadError(err, signedURL))
+		return nil, fmt.Errorf("create download request for %s: %w", signedurl.Redact(signedURL), signedurl.RedactError(err, signedURL))
 	}
 	if rangeStart != nil {
 		rangeHeader := "bytes=" + strconv.FormatInt(*rangeStart, 10) + "-"
@@ -300,111 +248,9 @@ func GenericDownload(ctx context.Context, client request.HTTPDoer, signedURL str
 
 	response, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("download from %s failed: %w", sanitizeDownloadURL(signedURL), sanitizeDownloadError(err, signedURL))
+		return nil, fmt.Errorf("download from %s failed: %w", signedurl.Redact(signedURL), signedurl.RedactError(err, signedURL))
 	}
 	return response, nil
-}
-
-type sanitizedDownloadError struct {
-	message string
-	cause   error
-}
-
-func (e *sanitizedDownloadError) Error() string { return e.message }
-
-func (e *sanitizedDownloadError) Unwrap() error { return e.cause }
-
-func sanitizeDownloadError(err error, signedURL string) error {
-	sanitized, _ := sanitizeDownloadErrorChain(err, signedURL)
-	return sanitized
-}
-
-func sanitizeDownloadErrorChain(err error, signedURL string) (error, bool) {
-	if err == nil {
-		return nil, false
-	}
-	if requestErr, ok := err.(*url.Error); ok {
-		sanitizedCause, causeChanged := sanitizeDownloadErrorChain(requestErr.Err, signedURL)
-		sanitizedURL := sanitizeDownloadURL(requestErr.URL)
-		if !causeChanged && sanitizedURL == requestErr.URL {
-			return err, false
-		}
-		return &url.Error{Op: requestErr.Op, URL: sanitizedURL, Err: sanitizedCause}, true
-	}
-
-	message := sanitizeDownloadErrorText(err.Error(), signedURL)
-	if many, ok := err.(interface{ Unwrap() []error }); ok {
-		causes := many.Unwrap()
-		sanitizedCauses := make([]error, len(causes))
-		changed := message != err.Error()
-		for i, cause := range causes {
-			var causeChanged bool
-			sanitizedCauses[i], causeChanged = sanitizeDownloadErrorChain(cause, signedURL)
-			changed = changed || causeChanged
-			if causeChanged && cause != nil && sanitizedCauses[i] != nil {
-				message = strings.ReplaceAll(message, cause.Error(), sanitizedCauses[i].Error())
-			}
-		}
-		if !changed {
-			return err, false
-		}
-		return &sanitizedDownloadError{message: message, cause: errors.Join(sanitizedCauses...)}, true
-	}
-	if wrapped, ok := err.(interface{ Unwrap() error }); ok {
-		originalCause := wrapped.Unwrap()
-		cause, causeChanged := sanitizeDownloadErrorChain(originalCause, signedURL)
-		if causeChanged && originalCause != nil && cause != nil {
-			message = strings.ReplaceAll(message, originalCause.Error(), cause.Error())
-		}
-		if !causeChanged && message == err.Error() {
-			return err, false
-		}
-		return &sanitizedDownloadError{message: message, cause: cause}, true
-	}
-	if message != err.Error() {
-		return &sanitizedDownloadError{message: message, cause: err}, true
-	}
-	return err, false
-}
-
-func sanitizeDownloadURL(rawURL string) string {
-	parsed, err := url.Parse(strings.TrimSpace(rawURL))
-	if err != nil {
-		if queryStart := strings.IndexAny(rawURL, "?#"); queryStart >= 0 {
-			return rawURL[:queryStart]
-		}
-		return rawURL
-	}
-	parsed.User = nil
-	parsed.RawQuery = ""
-	parsed.ForceQuery = false
-	parsed.Fragment = ""
-	parsed.RawFragment = ""
-	return parsed.String()
-}
-
-func sanitizeDownloadErrorText(message, rawURL string) string {
-	safeURL := sanitizeDownloadURL(rawURL)
-	for _, candidate := range []string{rawURL, strings.TrimSpace(rawURL)} {
-		if candidate != "" {
-			message = strings.ReplaceAll(message, candidate, safeURL)
-		}
-	}
-	parsed, err := url.Parse(strings.TrimSpace(rawURL))
-	if err != nil {
-		return message
-	}
-	message = strings.ReplaceAll(message, parsed.String(), safeURL)
-	if parsed.User != nil {
-		message = strings.ReplaceAll(message, parsed.User.String(), "[redacted]")
-	}
-	if parsed.RawQuery != "" {
-		message = strings.ReplaceAll(message, parsed.RawQuery, "[redacted]")
-	}
-	if parsed.Fragment != "" {
-		message = strings.ReplaceAll(message, parsed.Fragment, "[redacted]")
-	}
-	return message
 }
 
 type sectionReadCloser struct {
