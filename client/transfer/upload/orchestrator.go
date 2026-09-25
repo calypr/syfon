@@ -29,6 +29,9 @@ type MetadataClient interface {
 	UpdateObjectAccessMethods(ctx context.Context, objectID string, accessMethods []drsapi.AccessMethod) (drsapi.DrsObject, error)
 }
 
+// Upload forwards an upload to the transfer engine.
+// Deprecated: use engine.GenericUploader.Upload with a transfer.TransferRequest.
+// The unused boolean remains for compatibility with published client versions.
 func Upload(ctx context.Context, backend transfer.MultipartBackend, sourcePath, objectKey, guid, bucket string, metadata common.FileMetadata, _ bool, forceMultipart bool) error {
 	return (&engine.GenericUploader{Backend: backend}).Upload(ctx, transfer.TransferRequest{
 		SourcePath:     sourcePath,

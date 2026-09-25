@@ -10,13 +10,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
 	"github.com/calypr/syfon/apigen/drs"
 	"github.com/calypr/syfon/apigen/errorapi"
 	"github.com/calypr/syfon/apigen/lfsapi"
+	"github.com/calypr/syfon/client/signedurl"
 	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/objects"
@@ -96,108 +96,6 @@ func uploadSignedMultipartPart(ctx context.Context, signedURL string, content []
 		return "", fmt.Errorf("multipart part upload missing etag")
 	}
 	return etag, nil
-}
-
-type sanitizedSignedPartError struct {
-	message string
-	cause   error
-}
-
-func (e *sanitizedSignedPartError) Error() string { return e.message }
-
-func (e *sanitizedSignedPartError) Unwrap() error { return e.cause }
-
-func sanitizeSignedPartRequestError(err error, signedURL string) error {
-	sanitized, _ := sanitizeSignedPartErrorChain(err, signedURL)
-	return sanitized
-}
-
-func sanitizeSignedPartErrorChain(err error, signedURL string) (error, bool) {
-	if err == nil {
-		return nil, false
-	}
-	if requestErr, ok := err.(*url.Error); ok {
-		sanitizedCause, causeChanged := sanitizeSignedPartErrorChain(requestErr.Err, signedURL)
-		sanitizedURL := sanitizeSignedPartURL(requestErr.URL)
-		if !causeChanged && sanitizedURL == requestErr.URL {
-			return err, false
-		}
-		return &url.Error{Op: requestErr.Op, URL: sanitizedURL, Err: sanitizedCause}, true
-	}
-
-	message := sanitizeSignedPartErrorText(err.Error(), signedURL)
-	if many, ok := err.(interface{ Unwrap() []error }); ok {
-		causes := many.Unwrap()
-		sanitizedCauses := make([]error, len(causes))
-		changed := message != err.Error()
-		for i, cause := range causes {
-			var causeChanged bool
-			sanitizedCauses[i], causeChanged = sanitizeSignedPartErrorChain(cause, signedURL)
-			changed = changed || causeChanged
-			if causeChanged && cause != nil && sanitizedCauses[i] != nil {
-				message = strings.ReplaceAll(message, cause.Error(), sanitizedCauses[i].Error())
-			}
-		}
-		if !changed {
-			return err, false
-		}
-		return &sanitizedSignedPartError{message: message, cause: errors.Join(sanitizedCauses...)}, true
-	}
-	if wrapped, ok := err.(interface{ Unwrap() error }); ok {
-		originalCause := wrapped.Unwrap()
-		cause, causeChanged := sanitizeSignedPartErrorChain(originalCause, signedURL)
-		if causeChanged && originalCause != nil && cause != nil {
-			message = strings.ReplaceAll(message, originalCause.Error(), cause.Error())
-		}
-		if !causeChanged && message == err.Error() {
-			return err, false
-		}
-		return &sanitizedSignedPartError{message: message, cause: cause}, true
-	}
-	if message != err.Error() {
-		return &sanitizedSignedPartError{message: message, cause: err}, true
-	}
-	return err, false
-}
-
-func sanitizeSignedPartURL(rawURL string) string {
-	parsed, err := url.Parse(strings.TrimSpace(rawURL))
-	if err != nil {
-		if queryStart := strings.IndexAny(rawURL, "?#"); queryStart >= 0 {
-			return rawURL[:queryStart]
-		}
-		return rawURL
-	}
-	parsed.User = nil
-	parsed.RawQuery = ""
-	parsed.ForceQuery = false
-	parsed.Fragment = ""
-	parsed.RawFragment = ""
-	return parsed.String()
-}
-
-func sanitizeSignedPartErrorText(message, rawURL string) string {
-	safeURL := sanitizeSignedPartURL(rawURL)
-	for _, candidate := range []string{rawURL, strings.TrimSpace(rawURL)} {
-		if candidate != "" {
-			message = strings.ReplaceAll(message, candidate, safeURL)
-		}
-	}
-	parsed, err := url.Parse(strings.TrimSpace(rawURL))
-	if err != nil {
-		return message
-	}
-	message = strings.ReplaceAll(message, parsed.String(), safeURL)
-	if parsed.User != nil {
-		message = strings.ReplaceAll(message, parsed.User.String(), "[redacted]")
-	}
-	if parsed.RawQuery != "" {
-		message = strings.ReplaceAll(message, parsed.RawQuery, "[redacted]")
-	}
-	if parsed.Fragment != "" {
-		message = strings.ReplaceAll(message, parsed.Fragment, "[redacted]")
-	}
-	return message
 }
 
 type ObjectPort interface {
@@ -379,7 +277,7 @@ func (s *Service) UploadProxy(ctx context.Context, oid string, body io.Reader) (
 		}
 		etag, err := s.uploader(ctx, partURL, buffer[:readCount])
 		if err != nil {
-			return fmt.Errorf("failed uploading multipart part %d: %w", partNumber, sanitizeSignedPartRequestError(err, partURL))
+			return fmt.Errorf("failed uploading multipart part %d: %w", partNumber, signedurl.RedactError(err, partURL))
 		}
 		parts = append(parts, transfers.CompletedPart{PartNumber: partNumber, ETag: etag})
 		partNumber++
@@ -394,7 +292,7 @@ func (s *Service) UploadProxy(ctx context.Context, oid string, body io.Reader) (
 		}
 		etag, err := s.uploader(ctx, partURL, nil)
 		if err != nil {
-			return fmt.Errorf("failed uploading multipart part 1: %w", sanitizeSignedPartRequestError(err, partURL))
+			return fmt.Errorf("failed uploading multipart part 1: %w", signedurl.RedactError(err, partURL))
 		}
 		parts = append(parts, transfers.CompletedPart{PartNumber: 1, ETag: etag})
 	}

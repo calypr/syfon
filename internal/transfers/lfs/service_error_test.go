@@ -7,6 +7,8 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+
+	"github.com/calypr/syfon/client/signedurl"
 )
 
 func TestSanitizeSignedPartRequestErrorRedactsNestedURLAndPreservesCause(t *testing.T) {
@@ -18,7 +20,7 @@ func TestSanitizeSignedPartRequestErrorRedactsNestedURLAndPreservesCause(t *test
 		Err: sentinel,
 	})
 
-	err := sanitizeSignedPartRequestError(transportErr, signedURL)
+	err := signedurl.RedactError(transportErr, signedURL)
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("sanitized error lost transport cause: %v", err)
 	}

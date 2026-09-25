@@ -570,8 +570,11 @@ buckets:
 	if len(cfg.Buckets) != 1 {
 		t.Fatalf("expected 1 bucket, got %d", len(cfg.Buckets))
 	}
-	if len(cfg.S3Credentials) != 1 {
-		t.Fatalf("expected legacy s3_credentials alias to be populated, got %d", len(cfg.S3Credentials))
+	if len(cfg.S3Credentials) != 0 {
+		t.Fatalf("expected legacy s3_credentials alias to be cleared after validation, got %d", len(cfg.S3Credentials))
+	}
+	if err := validateConfig(cfg); err != nil {
+		t.Fatalf("revalidating normalized config failed: %v", err)
 	}
 	if len(cfg.BucketScopes) != 3 {
 		t.Fatalf("expected 3 derived bucket scopes, got %d", len(cfg.BucketScopes))
@@ -981,11 +984,17 @@ s3_credentials:
 			if err != nil {
 				t.Fatalf("unexpected error for provider=%q bucket=%q: %v", tc.provider, tc.bucket, err)
 			}
-			if len(cfg.S3Credentials) != 1 {
-				t.Fatalf("expected one credential, got %d", len(cfg.S3Credentials))
+			if len(cfg.Buckets) != 1 {
+				t.Fatalf("expected one credential, got %d", len(cfg.Buckets))
 			}
-			if cfg.S3Credentials[0].Provider != tc.wantProvider {
-				t.Fatalf("expected normalized provider %q, got %q", tc.wantProvider, cfg.S3Credentials[0].Provider)
+			if cfg.Buckets[0].Provider != tc.wantProvider {
+				t.Fatalf("expected normalized provider %q, got %q", tc.wantProvider, cfg.Buckets[0].Provider)
+			}
+			if len(cfg.S3Credentials) != 0 {
+				t.Fatalf("expected legacy s3_credentials alias to be cleared, got %d", len(cfg.S3Credentials))
+			}
+			if err := validateConfig(cfg); err != nil {
+				t.Fatalf("revalidating legacy config after migration failed: %v", err)
 			}
 		})
 	}
