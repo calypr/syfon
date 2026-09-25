@@ -1,0 +1,4 @@
+check	before	after	result
+Docker SQLite inode after container replacement	2750	2750	pass
+Docker credential key SHA-256 after container replacement	768b6ea763efd57262d612eba651f6fbd2c37ec8fab86425b96d602a893f4003	768b6ea763efd57262d612eba651f6fbd2c37ec8fab86425b96d602a893f4003	pass
+Helm chart from clean calypr/gen3-helm ohsu-develop clone	/tmp/syfon-gen3-helm-check/helm/syfon/Chart.yaml	name: syfon, version: 0.1.0	pass

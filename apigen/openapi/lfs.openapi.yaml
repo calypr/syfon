@@ -440,7 +440,10 @@ components:
         ttl_seconds:
           type: integer
           format: int64
+          description: Optional staged metadata lifetime in seconds. Defaults to 1200 seconds (20 minutes); valid values are 1 through 86400 seconds.
+          default: 1200
           minimum: 1
+          maximum: 86400
     MetadataSubmitResponse:
       type: object
       required:

@@ -83,7 +83,7 @@ func (s *Service) DeleteProjectDataAuthorized(ctx context.Context, organization,
 
 func (s *Service) deleteProjectData(ctx context.Context, organization, project string) (ProjectCleanupResult, error) {
 	result := ProjectCleanupResult{Organization: organization, ProjectID: project}
-	if s.cleanupObjects == nil || s.cleanupScopes == nil {
+	if s.cleanupObjects == nil || s.scopeCatalog == nil {
 		return result, &Error{Kind: ErrorUnsupported, Message: "project cleanup dependencies are not configured"}
 	}
 	deletedObjects, err := s.cleanupObjects.DeleteBulkByScope(ctx, result.Organization, result.ProjectID)
@@ -91,7 +91,7 @@ func (s *Service) deleteProjectData(ctx context.Context, organization, project s
 		return result, err
 	}
 	result.DeletedObjects = deletedObjects
-	scopes, err := s.cleanupScopes.ListBucketScopes(ctx)
+	scopes, err := s.scopeCatalog.ListBucketScopes(ctx)
 	if err != nil {
 		return result, err
 	}
@@ -106,7 +106,7 @@ func (s *Service) deleteProjectData(ctx context.Context, organization, project s
 		if credentialID == "" {
 			continue
 		}
-		if err := s.cleanupScopes.DeleteBucketScope(ctx, result.Organization, result.ProjectID, credentialID, scope.PathPrefix); err != nil {
+		if err := s.scopeCatalog.DeleteBucketScope(ctx, result.Organization, result.ProjectID, credentialID, scope.PathPrefix); err != nil {
 			return result, err
 		}
 		result.DeletedBucketScopes++
@@ -130,7 +130,7 @@ func parseDeleteURL(ctx context.Context, service *Service, raw string) (deleteCa
 		return deleteCandidate{}, "invalid", nil
 	}
 	bucket := strings.TrimSpace(parsed.Bucket)
-	key := strings.Trim(strings.TrimSpace(parsed.Key), "/")
+	key := parsed.Key
 	if bucket == "" || key == "" {
 		return deleteCandidate{}, "invalid", nil
 	}
@@ -148,7 +148,7 @@ func targetAllowed(candidate deleteCandidate, target buckets.StorageScope) bool 
 	if address.NormalizeProvider(candidate.provider, address.S3Provider) != address.S3Provider || !strings.EqualFold(candidate.bucket, target.Bucket) {
 		return false
 	}
-	key := strings.Trim(strings.TrimSpace(candidate.key), "/")
+	key := candidate.key
 	prefix := strings.Trim(strings.TrimSpace(target.Prefix), "/")
 	if prefix == "" {
 		return key != ""

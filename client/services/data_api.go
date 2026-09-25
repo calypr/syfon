@@ -13,7 +13,6 @@ import (
 type DataService struct {
 	gen        internalapi.ClientWithResponsesInterface
 	httpClient request.HTTPDoer
-	serverURL  string
 	logger     *logs.Gen3Logger
 	drs        *DRSService
 }
@@ -27,7 +26,6 @@ func NewDataService(gen internalapi.ClientWithResponsesInterface, client request
 	}
 	if generated, ok := gen.(*internalapi.ClientWithResponses); ok {
 		if raw, ok := generated.ClientInterface.(*internalapi.Client); ok {
-			service.serverURL = raw.Server
 			if service.httpClient == nil {
 				service.httpClient = raw.Client
 			}
@@ -63,10 +61,13 @@ func (d *DataService) UploadBulk(ctx context.Context, req internalapi.InternalUp
 	if err != nil {
 		return internalapi.InternalUploadBulkOutput{}, err
 	}
-	if resp.JSON200 == nil {
-		return internalapi.InternalUploadBulkOutput{}, apierror.FromResponse(resp.HTTPResponse, resp.Body)
+	if resp.JSON207 != nil {
+		return *resp.JSON207, nil
 	}
-	return *resp.JSON200, nil
+	if resp.JSON200 != nil {
+		return *resp.JSON200, nil
+	}
+	return internalapi.InternalUploadBulkOutput{}, apierror.FromResponse(resp.HTTPResponse, resp.Body)
 }
 
 func (d *DataService) DownloadURL(ctx context.Context, did string, expiresIn int, redirect bool) (internalapi.InternalSignedURL, error) {

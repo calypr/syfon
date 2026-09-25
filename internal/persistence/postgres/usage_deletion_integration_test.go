@@ -3,11 +3,13 @@ package postgres_test
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
 
 	"github.com/calypr/syfon/apigen/drs"
+	"github.com/calypr/syfon/apigen/errorapi"
 	"github.com/google/uuid"
 )
 
@@ -32,7 +34,13 @@ func TestPostgresObjectDeletionClearsPendingUsage(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := database.BulkDeleteObjects(ctx, []string{one, alias, uuid.NewString()}); err != nil {
+	if err := database.BulkDeleteObjects(ctx, []string{one, uuid.NewString()}); !errors.Is(err, errorapi.ErrNotFound) {
+		t.Fatalf("bulk delete with missing ID = %v, want not found", err)
+	}
+	if _, err := database.GetObject(ctx, one); err != nil {
+		t.Fatalf("missing-ID batch deleted valid object: %v", err)
+	}
+	if err := database.BulkDeleteObjects(ctx, []string{one, alias}); err != nil {
 		t.Fatal(err)
 	}
 	if err := database.RegisterObjects(ctx, []drs.DrsObject{

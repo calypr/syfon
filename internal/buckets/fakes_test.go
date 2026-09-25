@@ -2,6 +2,7 @@ package buckets
 
 import (
 	"context"
+	"strings"
 	"sync"
 
 	"github.com/calypr/syfon/apigen/errorapi"
@@ -174,6 +175,66 @@ func (f *fakeCredentialStore) DeleteS3Credential(_ context.Context, bucket strin
 		return f.deleteErr
 	}
 	return nil
+}
+
+func (f *fakeCredentialStore) DeleteBucketCredential(_ context.Context, bucket string, authorize ScopeDeletionPolicy) ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if authorize == nil {
+		return nil, errorapi.ErrAccessDenied
+	}
+	if f.configurationScopes == nil {
+		return nil, errorapi.ErrStorageCredentialMissing
+	}
+	f.configurationScopes.mu.Lock()
+	defer f.configurationScopes.mu.Unlock()
+	if f.configurationScopes.listErr != nil {
+		return nil, f.configurationScopes.listErr
+	}
+
+	requested := strings.TrimSpace(bucket)
+	credentialID, physicalBucket := "", ""
+	for _, credential := range f.credentials {
+		if credential.CredentialID == requested || credential.Bucket == requested {
+			credentialID, physicalBucket = credential.CredentialID, credential.Bucket
+			break
+		}
+	}
+	if credentialID == "" {
+		return nil, errorapi.ErrStorageCredentialMissing
+	}
+	current := make([]Scope, 0)
+	for _, scope := range f.configurationScopes.scopes {
+		if scope.CredentialID == credentialID || scope.Bucket == physicalBucket {
+			current = append(current, scope)
+		}
+	}
+	if err := authorize(current); err != nil {
+		return nil, err
+	}
+	if f.deleteErr != nil {
+		return nil, f.deleteErr
+	}
+
+	remaining := make([]Scope, 0, len(f.configurationScopes.scopes)-len(current))
+	for _, scope := range f.configurationScopes.scopes {
+		if scope.CredentialID == credentialID || scope.Bucket == physicalBucket {
+			continue
+		}
+		remaining = append(remaining, scope)
+	}
+	f.configurationScopes.scopes = remaining
+	credentials := make([]Credential, 0, len(f.credentials)-1)
+	for _, credential := range f.credentials {
+		if credential.CredentialID == credentialID {
+			continue
+		}
+		credentials = append(credentials, credential)
+	}
+	f.credentials = credentials
+	f.deleteCalls++
+	f.lastDeleted = requested
+	return []string{requested, credentialID, physicalBucket}, nil
 }
 
 type fakeScopeStore struct {

@@ -101,10 +101,30 @@ type contentRow struct {
 // registration is merged while the SQLite writer lock is held, so the parent
 // row, children, aliases, and public policy commit together.
 func (db *Store) RegisterObjects(ctx context.Context, objects []drs.DrsObject) error {
+	return db.registerObjects(ctx, objects, nil)
+}
+
+func (db *Store) RegisterObjectsIfPending(ctx context.Context, records []drs.DrsObject, pending objects.PendingRegistration) error {
+	return db.registerObjects(ctx, records, &pending)
+}
+
+func (db *Store) registerObjects(ctx context.Context, objects []drs.DrsObject, pending *objects.PendingRegistration) error {
 	if len(objects) == 0 {
 		return nil
 	}
+	if pending != nil && len(objects) != 1 {
+		return fmt.Errorf("pending registration requires exactly one object")
+	}
 	return db.withContentWrite(ctx, func(tx *sql.Tx) error {
+		if pending != nil {
+			usageEventIDs := append([]string{pending.OID, objects[0].Id}, identityAliases(&objects[0])...)
+			if err := db.lockObjectUsageEventIDsTx(ctx, tx, usageEventIDs); err != nil {
+				return fmt.Errorf("lock pending registration usage events: %w", err)
+			}
+			if err := db.requirePendingRegistrationTx(ctx, tx, *pending); err != nil {
+				return err
+			}
+		}
 		canonicalIDs := make([]string, 0, len(objects))
 		seenIDs := make(map[string]struct{})
 		for i := range objects {
@@ -117,11 +137,72 @@ func (db *Store) RegisterObjects(ctx context.Context, objects []drs.DrsObject) e
 				canonicalIDs = append(canonicalIDs, canonicalID)
 			}
 		}
+		if pending != nil {
+			if len(canonicalIDs) != 1 {
+				return fmt.Errorf("pending registration produced %d canonical objects, want 1", len(canonicalIDs))
+			}
+			if err := db.reassignPendingUploadEventsTx(ctx, tx, pending.OID, canonicalIDs[0]); err != nil {
+				return err
+			}
+		}
 		if err := db.flushObjectUsageEventsForIDsTx(ctx, tx, canonicalIDs); err != nil {
 			return fmt.Errorf("apply object usage events: %w", err)
 		}
 		return nil
 	})
+}
+
+func (db *Store) reassignPendingUploadEventsTx(ctx context.Context, tx *sql.Tx, sourceID, canonicalID string) error {
+	sourceID = strings.TrimSpace(sourceID)
+	canonicalID = strings.TrimSpace(canonicalID)
+	if sourceID == "" || canonicalID == "" {
+		return fmt.Errorf("pending upload and canonical object IDs are required")
+	}
+	if sourceID == canonicalID {
+		return nil
+	}
+	_, err := db.txExecContext(ctx, tx, `
+		UPDATE object_usage_event
+		SET object_id = ?
+		WHERE object_id = ? AND event_type = 'upload'
+	`, canonicalID, sourceID)
+	if err != nil {
+		return fmt.Errorf("reassign pending LFS upload usage events: %w", err)
+	}
+	return nil
+}
+
+func (db *Store) mergeObjectUsageHistoryTx(ctx context.Context, tx *sql.Tx, canonicalID string, duplicateIDs []string) error {
+	usageIDs := make([]string, 0, len(duplicateIDs)+1)
+	usageIDs = append(usageIDs, canonicalID)
+	usageIDs = append(usageIDs, duplicateIDs...)
+	condition, idArgs := db.dialect.ListArgs("object_id", usageIDs)
+	args := append([]any{canonicalID, time.Now().UTC()}, idArgs...)
+	_, err := db.txExecContext(ctx, tx, `
+		INSERT INTO object_usage (object_id, upload_count, download_count, last_upload_time, last_download_time, updated_time)
+		SELECT ?, SUM(upload_count), SUM(download_count), MAX(last_upload_time), MAX(last_download_time), ?
+		FROM object_usage
+		WHERE `+condition+`
+		HAVING COUNT(*) > 0
+		ON CONFLICT (object_id) DO UPDATE SET
+			upload_count = excluded.upload_count,
+			download_count = excluded.download_count,
+			last_upload_time = excluded.last_upload_time,
+			last_download_time = excluded.last_download_time,
+			updated_time = excluded.updated_time`, args...)
+	if err != nil {
+		return fmt.Errorf("merge durable object usage counters: %w", err)
+	}
+
+	eventCondition, eventArgs := db.dialect.ListArgs("object_id", duplicateIDs)
+	eventArgs = append([]any{canonicalID}, eventArgs...)
+	if _, err := db.txExecContext(ctx, tx, `
+		UPDATE object_usage_event
+		SET object_id = ?
+		WHERE `+eventCondition, eventArgs...); err != nil {
+		return fmt.Errorf("reassign pending object usage events: %w", err)
+	}
+	return nil
 }
 
 // RepairCanonicalDuplicates is the transactional repair boundary for legacy
@@ -216,7 +297,11 @@ func (db *Store) repairCanonicalDuplicatesTx(ctx context.Context, tx *sql.Tx, re
 		return "", fmt.Errorf("canonical object %q has no physical duplicates", canonicalID)
 	}
 
-	if err := db.deletePendingUsageEventsTx(ctx, tx, duplicateIDs); err != nil {
+	usageEventIDs := append([]string{canonicalID}, duplicateIDs...)
+	if err := db.lockObjectUsageEventIDsTx(ctx, tx, usageEventIDs); err != nil {
+		return "", fmt.Errorf("lock canonical repair usage events: %w", err)
+	}
+	if err := db.mergeObjectUsageHistoryTx(ctx, tx, canonicalID, duplicateIDs); err != nil {
 		return "", err
 	}
 	condition, args := db.dialect.ListArgs("id", duplicateIDs)
@@ -333,12 +418,14 @@ func (db *Store) registerContentTx(ctx context.Context, tx *sql.Tx, obj *drs.Drs
 	if err != nil {
 		return "", err
 	}
-	if wasExisting && !publicRead && (hasNewResource(resources, currentResources) || len(currentResources) == 0 || obj.AccessMethods != nil) && !canReadContent(ctx, currentResources) {
-		return "", errorapi.ErrAccessDenied
+	var currentAccess *objects.ContentAccess
+	if wasExisting {
+		currentAccess = &objects.ContentAccess{Resources: currentResources, PublicRead: publicRead}
 	}
-	if !canCreateResources(ctx, resources, currentResources) {
-		return "", errorapi.ErrAccessDenied
+	if err := objects.AuthorizeRegistration(ctx, obj, currentAccess); err != nil {
+		return "", err
 	}
+
 	if err := db.mergeContentRowTx(ctx, tx, row, obj, resources, currentResources); err != nil {
 		return "", err
 	}
@@ -552,19 +639,17 @@ func (db *Store) setPublicReadTx(ctx context.Context, tx *sql.Tx, id string, pub
 }
 
 func (db *Store) checkUUIDClaimTx(ctx context.Context, tx *sql.Tx, requested, canonical string) error {
-	if requested == canonical {
-		var aliasTarget string
-		err := db.txQueryRowContext(ctx, tx, `SELECT object_id FROM drs_object_alias WHERE alias_id = ?`, requested).Scan(&aliasTarget)
-		if err == nil && aliasTarget != canonical {
-			return identityConflict("UUID %q is already an alias for %q", requested, aliasTarget)
-		}
-		if err != nil && err != sql.ErrNoRows {
-			return err
-		}
-		return nil
+	var physicalID string
+	err := db.txQueryRowContext(ctx, tx, `SELECT id FROM drs_object WHERE id = ?`, requested).Scan(&physicalID)
+	if err == nil && physicalID != canonical {
+		return identityConflict("UUID %q is already a physical object", requested)
 	}
+	if err != nil && err != sql.ErrNoRows {
+		return err
+	}
+
 	var aliasTarget string
-	err := db.txQueryRowContext(ctx, tx, `SELECT object_id FROM drs_object_alias WHERE alias_id = ?`, requested).Scan(&aliasTarget)
+	err = db.txQueryRowContext(ctx, tx, `SELECT object_id FROM drs_object_alias WHERE alias_id = ?`, requested).Scan(&aliasTarget)
 	if err == nil && aliasTarget != canonical {
 		return identityConflict("UUID %q is already an alias for %q", requested, aliasTarget)
 	}
@@ -633,32 +718,6 @@ func identityAliases(obj *drs.DrsObject) []string {
 	return aliases
 }
 
-func canReadContent(ctx context.Context, resources []string) bool {
-	if !access.IsAuthzEnforced(ctx) {
-		return true
-	}
-	if len(resources) == 0 {
-		return false
-	}
-	return access.HasObjectMethodAccess(ctx, "read", resources)
-}
-
-func canCreateResources(ctx context.Context, resources, current []string) bool {
-	currentSet := make(map[string]struct{}, len(current))
-	for _, resource := range current {
-		currentSet[resource] = struct{}{}
-	}
-	for _, resource := range resources {
-		if _, exists := currentSet[resource]; exists {
-			continue
-		}
-		if !access.HasMethodAccess(ctx, "create", []string{resource}) {
-			return false
-		}
-	}
-	return true
-}
-
 func (db *Store) requireContentMethodTx(ctx context.Context, tx *sql.Tx, id, method string) error {
 	resources, err := db.resourcesTx(ctx, tx, id)
 	if err != nil {
@@ -687,19 +746,6 @@ func (db *Store) ensureNoLegacyDuplicateTx(ctx context.Context, tx *sql.Tx, id s
 	return nil
 }
 
-func hasNewResource(resources, current []string) bool {
-	set := make(map[string]struct{}, len(current))
-	for _, resource := range current {
-		set[resource] = struct{}{}
-	}
-	for _, resource := range resources {
-		if _, exists := set[resource]; !exists {
-			return true
-		}
-	}
-	return false
-}
-
 func timeVal(value *time.Time) time.Time {
 	if value == nil {
 		return time.Time{}
@@ -715,10 +761,8 @@ func valueTime(value *time.Time) time.Time {
 }
 
 func identityConflict(format string, args ...interface{}) error {
-	params := make([]interface{}, 0, len(args)+1)
-	params = append(params, errorapi.ErrConflict)
-	params = append(params, args...)
-	return fmt.Errorf("%w: "+format, params...)
+	message := fmt.Sprintf(format, args...)
+	return fmt.Errorf("%w: %s", errorapi.ErrConflict, message)
 }
 
 func legacyDuplicateError(sha string, ids []string) error {

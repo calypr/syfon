@@ -1,52 +1,19 @@
 package lfs
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/calypr/syfon/apigen/drs"
 	"github.com/calypr/syfon/apigen/errorapi"
 	"github.com/calypr/syfon/apigen/lfsapi"
-	"github.com/calypr/syfon/internal/storage"
-	"github.com/calypr/syfon/internal/transfers"
+	"github.com/calypr/syfon/internal/access"
+	"github.com/calypr/syfon/internal/objects"
 )
-
-type lfsUploadMultipartSpy struct {
-	events     []string
-	partURLs   []string
-	partNumber []int32
-	completed  storage.CompleteMultipartRequest
-}
-
-func (s *lfsUploadMultipartSpy) Sign(context.Context, storage.SignRequest) (storage.SignedAccess, error) {
-	return storage.SignedAccess{Location: "https://provider.invalid/object"}, nil
-}
-
-func (s *lfsUploadMultipartSpy) BeginMultipart(_ context.Context, request storage.BeginMultipartRequest) (storage.UploadID, error) {
-	s.events = append(s.events, "begin")
-	target := request.Target
-	if target.PhysicalBucket != "bucket" || target.Key != "object" {
-		return "", fmt.Errorf("unexpected target: %+v", target)
-	}
-	return "opaque-upload-id", nil
-}
-
-func (s *lfsUploadMultipartSpy) SignMultipartPart(_ context.Context, request storage.MultipartPartRequest) (storage.SignedAccess, error) {
-	s.events = append(s.events, "sign")
-	s.partURLs = append(s.partURLs, request.Target.PhysicalBucket+"/"+request.Target.Key)
-	s.partNumber = append(s.partNumber, request.PartNumber)
-	return storage.SignedAccess{Location: "https://provider.invalid/part"}, nil
-}
-
-func (s *lfsUploadMultipartSpy) CompleteMultipart(_ context.Context, request storage.CompleteMultipartRequest) error {
-	s.events = append(s.events, "complete")
-	s.completed = request
-	return nil
-}
 
 type lfsUploadAccountingSpy struct {
 	events *[]string
@@ -54,80 +21,10 @@ type lfsUploadAccountingSpy struct {
 	err    error
 }
 
-type lfsUploadObjectSpy struct{}
-
-func (lfsUploadObjectSpy) GetObject(context.Context, string, string) (*drs.DrsObject, error) {
-	url := "s3://bucket/object"
-	methods := []drs.AccessMethod{{Type: "s3", AccessUrl: &drs.AccessURL{Url: url}}}
-	return &drs.DrsObject{Id: "record", AccessMethods: &methods}, nil
-}
-func (lfsUploadObjectSpy) GetObjectsByChecksums(context.Context, []string, string) (map[string][]drs.DrsObject, error) {
-	return nil, nil
-}
-func (lfsUploadObjectSpy) RegisterObjects(context.Context, []drs.DrsObject) ([]drs.DrsObject, error) {
-	return nil, nil
-}
-
 func (s *lfsUploadAccountingSpy) RecordFileUpload(_ context.Context, objectID string) error {
 	*s.events = append(*s.events, "account")
 	s.object = objectID
 	return s.err
-}
-
-func TestLFSUploadWorkflowPreservesPartSizeOrderAndAccountingOrder(t *testing.T) {
-	events := make([]string, 0, 8)
-	multipart := &lfsUploadMultipartSpy{events: events}
-	accounting := &lfsUploadAccountingSpy{events: &multipart.events}
-	partLengths := make([]int, 0, 2)
-	transfer := transfers.NewService(transfers.Dependencies{Storage: multipart, Objects: lfsUploadObjectSpy{}})
-	service := NewService(transfer, lfsUploadObjectSpy{}, nil, nil, accounting, func(_ context.Context, _ string, content []byte) (string, error) {
-		multipart.events = append(multipart.events, "upload")
-		partLengths = append(partLengths, len(content))
-		return fmt.Sprintf("etag-%d", len(partLengths)), nil
-	})
-
-	body := bytes.NewReader(bytes.Repeat([]byte{'x'}, multipartPartSize+1))
-	if err := service.UploadProxy(context.Background(), "record", body); err != nil {
-		t.Fatalf("Upload() error = %v", err)
-	}
-
-	wantEvents := []string{"begin", "sign", "upload", "sign", "upload", "complete", "account"}
-	if strings.Join(multipart.events, ",") != strings.Join(wantEvents, ",") {
-		t.Fatalf("events = %v, want %v", multipart.events, wantEvents)
-	}
-	if len(partLengths) != 2 || partLengths[0] != multipartPartSize || partLengths[1] != 1 {
-		t.Fatalf("part lengths = %v", partLengths)
-	}
-	if len(multipart.partNumber) != 2 || multipart.partNumber[0] != 1 || multipart.partNumber[1] != 2 {
-		t.Fatalf("part numbers = %v", multipart.partNumber)
-	}
-	if len(multipart.completed.Parts) != 2 || multipart.completed.Parts[0].ETag != "etag-1" || multipart.completed.Parts[1].ETag != "etag-2" {
-		t.Fatalf("completed parts = %+v", multipart.completed.Parts)
-	}
-	if accounting.object != "record" {
-		t.Fatalf("accounted object = %q", accounting.object)
-	}
-}
-
-func TestLFSUploadEmptyBodyUsesOneZeroBytePart(t *testing.T) {
-	multipart := &lfsUploadMultipartSpy{}
-	accounting := &lfsUploadAccountingSpy{events: &multipart.events}
-	var uploaded []byte
-	transfer := transfers.NewService(transfers.Dependencies{Storage: multipart, Objects: lfsUploadObjectSpy{}})
-	service := NewService(transfer, lfsUploadObjectSpy{}, nil, nil, accounting, func(_ context.Context, _ string, content []byte) (string, error) {
-		uploaded = append([]byte(nil), content...)
-		return "empty-etag", nil
-	})
-
-	if err := service.UploadProxy(context.Background(), "record", bytes.NewReader(nil)); err != nil {
-		t.Fatal(err)
-	}
-	if len(uploaded) != 0 || len(multipart.partNumber) != 1 || multipart.partNumber[0] != 1 {
-		t.Fatalf("empty upload parts = %v bytes=%d", multipart.partNumber, len(uploaded))
-	}
-	if len(multipart.completed.Parts) != 1 || multipart.completed.Parts[0].ETag != "empty-etag" {
-		t.Fatalf("empty completion = %+v", multipart.completed.Parts)
-	}
 }
 
 type lfsMetadataObjectSpy struct {
@@ -157,16 +54,45 @@ func (s *lfsMetadataObjectSpy) RegisterObjects(_ context.Context, records []drs.
 	return records, nil
 }
 
+func (s *lfsMetadataObjectSpy) RegisterObjectsIfPending(ctx context.Context, records []drs.DrsObject, _ objects.PendingRegistration) ([]drs.DrsObject, error) {
+	return s.RegisterObjects(ctx, records)
+}
+
 type metadataPendingSpy struct {
-	events      *[]string
-	entry       *PendingMetadata
-	replacement *PendingMetadata
-	getErr      error
-	consumeErr  error
+	events           *[]string
+	saves            int
+	entry            *PendingMetadata
+	replacement      *PendingMetadata
+	getErr           error
+	consumeErr       error
+	uploadReceipt    *UploadReceipt
+	uploadReceiptErr error
 }
 
 func (s *metadataPendingSpy) SavePendingMetadata(context.Context, []PendingMetadata) error {
+	s.saves++
 	return nil
+}
+
+func TestAnonymousGen3CannotStageOrVerifyPendingMetadata(t *testing.T) {
+	var events []string
+	oid := strings.Repeat("a", 64)
+	pending := &metadataPendingSpy{events: &events, entry: &PendingMetadata{OID: oid}}
+	objectPort := &lfsMetadataObjectSpy{events: &events, getErr: errorapi.ErrNotFound}
+	service := NewService(nil, objectPort, nil, pending, nil, nil)
+	ctx := access.WithSession(context.Background(), access.NewSession("gen3"))
+	if err := service.Stage(ctx, []lfsapi.DrsObjectCandidate{{}}, PendingMetadataTTL); !errors.Is(err, errorapi.ErrAccessDenied) {
+		t.Fatalf("anonymous Stage error = %v, want access denied", err)
+	}
+	if pending.saves != 0 {
+		t.Fatal("anonymous request overwrote pending metadata")
+	}
+	if err := service.Verify(ctx, oid, 1); !errors.Is(err, errorapi.ErrAccessDenied) {
+		t.Fatalf("anonymous Verify error = %v, want access denied", err)
+	}
+	if len(objectPort.registered) != 0 {
+		t.Fatal("anonymous request registered pending metadata")
+	}
 }
 
 func (s *metadataPendingSpy) GetPendingMetadata(context.Context, string) (*PendingMetadata, error) {
@@ -193,22 +119,53 @@ func (s *metadataPendingSpy) ConsumePendingMetadata(_ context.Context, _ Pending
 	return true, nil
 }
 
-func TestLFSMetadataWorkflowReportsPendingLookupFailureForExistingObject(t *testing.T) {
+func (s *metadataPendingSpy) SaveLFSUploadReceipt(_ context.Context, receipt UploadReceipt) error {
+	s.uploadReceipt = &receipt
+	return nil
+}
+
+func (s *metadataPendingSpy) GetLFSUploadReceipt(_ context.Context, oid string) (*UploadReceipt, error) {
+	if s.uploadReceiptErr != nil {
+		return nil, s.uploadReceiptErr
+	}
+	if s.uploadReceipt == nil || s.uploadReceipt.OID != oid {
+		return nil, fmt.Errorf("%w: completed LFS upload not found", errorapi.ErrNotFound)
+	}
+	return s.uploadReceipt, nil
+}
+
+func seedLFSUploadReceipt(pending *metadataPendingSpy, oid string, size int64, storageURL ...string) {
+	now := time.Now().UTC()
+	target := "s3://bucket/" + oid
+	if len(storageURL) > 0 {
+		target = storageURL[0]
+	}
+	pending.uploadReceipt = &UploadReceipt{
+		OID:         oid,
+		Size:        size,
+		SHA256:      oid,
+		StorageURL:  target,
+		CompletedAt: now,
+		ExpiresAt:   now.Add(time.Hour),
+	}
+}
+
+func TestLFSVerifyExistingObjectIsIdempotentWithoutPendingCandidate(t *testing.T) {
 	events := make([]string, 0, 1)
-	pendingErr := fmt.Errorf("pending database unavailable")
+	sha := strings.Repeat("1", 64)
 	service := NewService(nil,
 		&lfsMetadataObjectSpy{events: &events, object: &drs.DrsObject{Id: "record"}},
 		nil,
-		&metadataPendingSpy{events: &events, getErr: pendingErr},
+		&metadataPendingSpy{events: &events},
 		&lfsUploadAccountingSpy{events: &events},
 		nil,
 	)
 
-	if err := service.Verify(context.Background(), "record", 0); err != pendingErr {
-		t.Fatalf("Verify() error = %v, want %v", err, pendingErr)
+	if err := service.Verify(context.Background(), sha, 0); err != nil {
+		t.Fatalf("Verify() error = %v", err)
 	}
 	if strings.Join(events, ",") != "get" {
-		t.Fatalf("events = %v, want pending failure before accounting", events)
+		t.Fatalf("events = %v, want existing object lookup only", events)
 	}
 }
 
@@ -227,6 +184,7 @@ func TestLFSVerifyRetainsPendingMetadataWhenRecordedSizeMismatches(t *testing.T)
 		events: &events,
 		entry:  &PendingMetadata{OID: sha, Candidate: candidate},
 	}
+	seedLFSUploadReceipt(pending, sha, 8)
 	objectsPort := &lfsMetadataObjectSpy{events: &events, getErr: errorapi.ErrNotFound}
 	accounting := &lfsUploadAccountingSpy{events: &events}
 	service := NewService(nil, objectsPort, nil, pending, accounting, nil)
@@ -274,7 +232,7 @@ func TestLFSVerifyRejectsExistingObjectSizeMismatchBeforePendingMutation(t *test
 	}
 }
 
-func TestLFSMetadataWorkflowConsumesRegistersThenAccounts(t *testing.T) {
+func TestLFSMetadataWorkflowConsumesAndRegistersWithoutRecountingUpload(t *testing.T) {
 	events := make([]string, 0, 5)
 	sha := strings.Repeat("a", 64)
 	typeName := "s3"
@@ -289,6 +247,7 @@ func TestLFSMetadataWorkflowConsumesRegistersThenAccounts(t *testing.T) {
 		events: &events,
 		entry:  &PendingMetadata{OID: sha, Candidate: candidate},
 	}
+	seedLFSUploadReceipt(pending, sha, 0)
 	objectsPort := &lfsMetadataObjectSpy{events: &events, getErr: errorapi.ErrNotFound}
 	accounting := &lfsUploadAccountingSpy{events: &events}
 	service := NewService(nil, objectsPort, nil, pending, accounting, nil)
@@ -297,15 +256,15 @@ func TestLFSMetadataWorkflowConsumesRegistersThenAccounts(t *testing.T) {
 		t.Fatalf("Verify() error = %v", err)
 	}
 
-	wantEvents := []string{"get", "register", "consume", "account"}
+	wantEvents := []string{"get", "register", "consume"}
 	if strings.Join(events, ",") != strings.Join(wantEvents, ",") {
 		t.Fatalf("events = %v, want %v", events, wantEvents)
 	}
 	if len(objectsPort.registered) != 1 {
 		t.Fatalf("registered records = %+v", objectsPort.registered)
 	}
-	if accounting.object != objectsPort.registered[0].Id {
-		t.Fatalf("accounted object = %q, registered object = %q", accounting.object, objectsPort.registered[0].Id)
+	if accounting.object != "" {
+		t.Fatalf("Verify recorded a second upload event for %q", accounting.object)
 	}
 	if pending.entry != nil {
 		t.Fatal("pending metadata was not consumed")
@@ -326,6 +285,7 @@ func TestLFSMetadataWorkflowRetainsPendingMetadataWhenRegistrationFails(t *testi
 		events: &events,
 		entry:  &PendingMetadata{OID: sha, Candidate: candidate},
 	}
+	seedLFSUploadReceipt(pending, sha, 0)
 	registerErr := fmt.Errorf("registration unavailable")
 	objectsPort := &lfsMetadataObjectSpy{events: &events, getErr: errorapi.ErrNotFound, registerErr: registerErr}
 	accounting := &lfsUploadAccountingSpy{events: &events}
@@ -348,15 +308,15 @@ func TestLFSMetadataWorkflowRetainsPendingMetadataWhenRegistrationFails(t *testi
 	if pending.entry != nil {
 		t.Fatal("pending metadata was not consumed after successful retry")
 	}
-	if strings.Join(events, ",") != "get,register,get,register,consume,account" {
+	if strings.Join(events, ",") != "get,register,get,register,consume" {
 		t.Fatalf("retry Verify() events = %v", events)
 	}
-	if accounting.object == "" {
-		t.Fatal("retry did not record upload")
+	if accounting.object != "" {
+		t.Fatalf("retry Verify recorded a second upload event for %q", accounting.object)
 	}
 }
 
-func TestLFSMetadataWorkflowProcessesPendingReplacementAfterObjectExists(t *testing.T) {
+func TestLFSVerifyDoesNotReregisterAnExistingObject(t *testing.T) {
 	events := make([]string, 0, 8)
 	sha := strings.Repeat("d", 64)
 	typeName := "s3"
@@ -379,6 +339,7 @@ func TestLFSMetadataWorkflowProcessesPendingReplacementAfterObjectExists(t *test
 			Candidate: candidate(replacementURL),
 		},
 	}
+	seedLFSUploadReceipt(pending, sha, 0, oldURL)
 	objectsPort := &lfsMetadataObjectSpy{
 		events:              &events,
 		getErr:              errorapi.ErrNotFound,
@@ -390,21 +351,21 @@ func TestLFSMetadataWorkflowProcessesPendingReplacementAfterObjectExists(t *test
 	if err := service.Verify(context.Background(), sha, 0); err != nil {
 		t.Fatalf("first Verify() error = %v", err)
 	}
-	if err := service.Verify(context.Background(), sha, 0); err != nil {
-		t.Fatalf("replacement Verify() error = %v", err)
+	if err := service.Verify(context.Background(), sha, 0); err == nil || !strings.Contains(err.Error(), "does not match staged metadata") {
+		t.Fatalf("replacement Verify() error = %v, want staged-target mismatch", err)
 	}
 
 	if len(objectsPort.registered) != 1 {
-		t.Fatalf("registered records = %d, want 1 final record", len(objectsPort.registered))
+		t.Fatalf("registered records = %d, want one initial registration", len(objectsPort.registered))
 	}
-	if methods := objectsPort.registered[0].AccessMethods; methods == nil || len(*methods) != 1 || (*methods)[0].AccessUrl == nil || (*methods)[0].AccessUrl.Url != replacementURL {
-		t.Fatalf("registered record did not use replacement metadata: %+v", objectsPort.registered[0])
+	if methods := objectsPort.registered[0].AccessMethods; methods == nil || len(*methods) != 1 || (*methods)[0].AccessUrl == nil || (*methods)[0].AccessUrl.Url != oldURL {
+		t.Fatalf("initial registration used unexpected metadata: %+v", objectsPort.registered[0])
 	}
-	if pending.entry != nil {
-		t.Fatal("replacement pending metadata was not consumed")
+	if pending.entry == nil || pending.entry.Candidate.AccessMethods == nil || (*pending.entry.Candidate.AccessMethods)[0].AccessUrl.Url == nil || *(*pending.entry.Candidate.AccessMethods)[0].AccessUrl.Url != replacementURL {
+		t.Fatal("verification of an existing object unexpectedly consumed replacement metadata")
 	}
-	if strings.Join(events, ",") != "get,register,consume,get,register,consume,account" {
-		t.Fatalf("events = %v, want replacement registration before accounting", events)
+	if strings.Join(events, ",") != "get,register,consume,get" {
+		t.Fatalf("events = %v, want existing-object candidate target validation after lookup", events)
 	}
 }
 
@@ -424,6 +385,7 @@ func TestLFSMetadataWorkflowReturnsConsumptionFailureAfterRegistration(t *testin
 		entry:      &PendingMetadata{OID: sha, Candidate: candidate},
 		consumeErr: consumeErr,
 	}
+	seedLFSUploadReceipt(pending, sha, 0)
 	objectsPort := &lfsMetadataObjectSpy{events: &events, getErr: errorapi.ErrNotFound}
 	accounting := &lfsUploadAccountingSpy{events: &events}
 	service := NewService(nil, objectsPort, nil, pending, accounting, nil)
@@ -447,9 +409,10 @@ func TestLFSMetadataWorkflowExistingObjectWithoutPendingMetadataIsAlreadyVerifie
 	object := &drs.DrsObject{Id: "existing"}
 	objectsPort := &lfsMetadataObjectSpy{events: &events, object: object}
 	accounting := &lfsUploadAccountingSpy{events: &events}
-	service := NewService(nil, objectsPort, nil, nil, accounting, nil)
+	pending := &metadataPendingSpy{events: &events}
+	service := NewService(nil, objectsPort, nil, pending, accounting, nil)
 
-	if err := service.Verify(context.Background(), "oid", 0); err != nil {
+	if err := service.Verify(context.Background(), strings.Repeat("2", 64), 0); err != nil {
 		t.Fatalf("Verify() error = %v", err)
 	}
 

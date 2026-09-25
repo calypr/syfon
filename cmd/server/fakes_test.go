@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -88,6 +89,10 @@ func (s *serverObjectStore) RegisterObjects(ctx context.Context, records []drs.D
 	return nil
 }
 
+func (s *serverObjectStore) RegisterObjectsIfPending(ctx context.Context, records []drs.DrsObject, _ objects.PendingRegistration) error {
+	return s.RegisterObjects(ctx, records)
+}
+
 func (s *serverObjectStore) RepairCanonicalDuplicates(_ context.Context, repairs []objects.CanonicalRepair) error {
 	for _, repair := range repairs {
 		if _, ok := s.records[repair.Canonical.Id]; !ok {
@@ -105,6 +110,19 @@ func (s *serverObjectStore) RepairCanonicalDuplicates(_ context.Context, repairs
 func (s *serverObjectStore) ReplaceObjects(ctx context.Context, records []drs.DrsObject) error {
 	s.records = make(map[string]*drs.DrsObject, len(records))
 	return s.RegisterObjects(ctx, records)
+}
+
+func (s *serverObjectStore) ReplaceObject(ctx context.Context, id, expectedOldSHA string, record drs.DrsObject) error {
+	current, err := s.GetObject(ctx, id)
+	if err != nil {
+		return err
+	}
+	sha, ok := objects.CanonicalSHA256(current.Checksums)
+	if !ok || sha != objects.NormalizeOID(expectedOldSHA) {
+		return errorapi.ErrConflict
+	}
+	s.records[id] = cloneServerRecord(&record)
+	return nil
 }
 
 func (s *serverObjectStore) UpdateObjectAccessMethods(_ context.Context, id string, methods []drs.AccessMethod) error {
@@ -184,6 +202,22 @@ func (s *serverObjectStore) ResolveObjectAlias(_ context.Context, aliasID string
 	return canonicalID, nil
 }
 
+func (s *serverObjectStore) ResolveObjectIDs(_ context.Context, ids []string) (map[string]string, error) {
+	resolved := make(map[string]string, len(ids))
+	for _, id := range ids {
+		if _, ok := s.records[id]; ok {
+			resolved[id] = id
+			continue
+		}
+		if canonicalID := s.aliases[id]; canonicalID != "" {
+			if _, ok := s.records[canonicalID]; ok {
+				resolved[id] = canonicalID
+			}
+		}
+	}
+	return resolved, nil
+}
+
 func (s *serverObjectStore) GetObjectsByChecksum(_ context.Context, checksum string) ([]drs.DrsObject, error) {
 	result := make([]drs.DrsObject, 0)
 	checksum = strings.TrimSpace(checksum)
@@ -257,23 +291,33 @@ func (s *serverObjectStore) ListObjectIDsByResources(_ context.Context, resource
 	return result, nil
 }
 
-func (s *serverObjectStore) ListObjectIDsPageByScope(ctx context.Context, organization, project, startAfter string, limit, offset int) ([]string, error) {
-	ids, err := s.ListObjectIDsByScope(ctx, organization, project)
-	return pageServerIDs(ids, startAfter, limit, offset), err
-}
-
-func (s *serverObjectStore) ListObjectIDsPageByURL(ctx context.Context, objectURL, organization, project, startAfter string, limit, offset int, resources []string, includeUnscoped, restrictToResources bool) ([]string, error) {
+func (s *serverObjectStore) ListObjectIDsPage(ctx context.Context, query objects.ObjectIDPageQuery) ([]string, error) {
+	var visible map[string]bool
+	if query.RestrictToVisibleResources {
+		ids, err := s.ListObjectIDsByResources(ctx, query.VisibleResources, query.IncludeUnscoped)
+		if err != nil {
+			return nil, err
+		}
+		visible = make(map[string]bool, len(ids))
+		for _, id := range ids {
+			visible[id] = true
+		}
+	}
 	ids := make([]string, 0)
 	for id, record := range s.records {
-		if organization != "" && !serverRecordInScope(record, organization, project) {
+		if query.Scope.Organization != "" && !serverRecordInScope(record, query.Scope.Organization, query.Scope.Project) {
 			continue
 		}
-		if !serverRecordHasURL(record, objectURL) {
+		if query.ObjectURL != "" && !serverRecordHasURL(record, query.ObjectURL) {
+			continue
+		}
+		if query.RestrictToVisibleResources && !visible[id] {
 			continue
 		}
 		ids = append(ids, id)
 	}
-	return pageServerIDs(ids, startAfter, limit, offset), nil
+	sort.Strings(ids)
+	return pageServerIDs(ids, query.StartAfter, query.Limit, query.Offset), nil
 }
 
 func serverRecordHasURL(record *drs.DrsObject, wanted string) bool {
@@ -456,6 +500,37 @@ func (s *serverBucketStore) DeleteS3Credential(_ context.Context, id string) err
 	return nil
 }
 
+func (s *serverBucketStore) DeleteBucketCredential(_ context.Context, bucket string, authorize buckets.ScopeDeletionPolicy) ([]string, error) {
+	requested := strings.TrimSpace(bucket)
+	var credential buckets.Credential
+	found := false
+	for _, current := range s.credentials {
+		if current.CredentialID == requested || current.Bucket == requested {
+			credential, found = current, true
+			break
+		}
+	}
+	if !found || authorize == nil {
+		return nil, errorapi.ErrStorageCredentialMissing
+	}
+	scopes := make([]buckets.Scope, 0)
+	for _, scope := range s.scopes {
+		if scope.CredentialID == credential.CredentialID || scope.Bucket == credential.Bucket {
+			scopes = append(scopes, scope)
+		}
+	}
+	if err := authorize(scopes); err != nil {
+		return nil, err
+	}
+	for key, scope := range s.scopes {
+		if scope.CredentialID == credential.CredentialID || scope.Bucket == credential.Bucket {
+			delete(s.scopes, key)
+		}
+	}
+	delete(s.credentials, credential.CredentialID)
+	return []string{requested, credential.CredentialID, credential.Bucket}, nil
+}
+
 func (s *serverBucketStore) CreateBucketScope(_ context.Context, scope *buckets.Scope) error {
 	if scope == nil {
 		return fmt.Errorf("scope is required")
@@ -540,7 +615,7 @@ func (serverUsageStore) GetProjectRecordSummaryByScope(context.Context, string, 
 func (serverUsageStore) QueryTransferSummary(context.Context, usage.Filter, []string) (metricsapi.TransferAttributionSummary, error) {
 	return metricsapi.TransferAttributionSummary{}, nil
 }
-func (serverUsageStore) QueryTransferBreakdown(context.Context, usage.Filter, string, []string) ([]metricsapi.TransferAttributionBreakdown, error) {
+func (serverUsageStore) QueryTransferBreakdown(context.Context, usage.Filter, string, []string, int, int) ([]metricsapi.TransferAttributionBreakdown, error) {
 	return []metricsapi.TransferAttributionBreakdown{}, nil
 }
 

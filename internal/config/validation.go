@@ -5,10 +5,13 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/storage/address"
 )
+
+const maxMultipartDurationSeconds = int64((1<<63 - 1) / int64(time.Second))
 
 func validateConfig(cfg *Config) error {
 	cfg.Profile = strings.ToLower(strings.TrimSpace(cfg.Profile))
@@ -24,6 +27,18 @@ func validateConfig(cfg *Config) error {
 	if cfg.Multipart.CleanupIntervalSeconds < 0 || cfg.Multipart.InactiveTimeoutSeconds < 0 || cfg.Multipart.CompletedRetentionSeconds < 0 || cfg.Multipart.BatchSize < 0 {
 		return fmt.Errorf("multipart cleanup values must be >= 0")
 	}
+	for _, duration := range []struct {
+		field   string
+		seconds int
+	}{
+		{field: "cleanup_interval_seconds", seconds: cfg.Multipart.CleanupIntervalSeconds},
+		{field: "inactive_timeout_seconds", seconds: cfg.Multipart.InactiveTimeoutSeconds},
+		{field: "completed_retention_seconds", seconds: cfg.Multipart.CompletedRetentionSeconds},
+	} {
+		if int64(duration.seconds) > maxMultipartDurationSeconds {
+			return fmt.Errorf("multipart.%s must be <= %d seconds", duration.field, maxMultipartDurationSeconds)
+		}
+	}
 	if cfg.Multipart.CleanupIntervalSeconds > 0 {
 		if cfg.Multipart.InactiveTimeoutSeconds == 0 {
 			return fmt.Errorf("multipart.inactive_timeout_seconds must be >= 1 when cleanup is enabled")
@@ -35,21 +50,6 @@ func validateConfig(cfg *Config) error {
 			return fmt.Errorf("multipart.batch_size must be >= 1 when cleanup is enabled")
 		}
 	}
-	// Final Validation: Exactly one DB must be specified
-	if cfg.Database.Sqlite != nil && cfg.Database.Postgres != nil {
-		// If both are set, but one is the default "drs.db" and the other was explicitly set by user,
-		// we can try to be smart, but user asked to "raise an error".
-		// Actually, if I load a file that has `postgres:`, the `sqlite:` default from line 52 is still there.
-		// So I must clear it if postgres is detected.
-
-		// If postgres was explicitly defined (either in file or via env), we clear the default sqlite.
-		// A better way is to check if it's the "default" value.
-		if cfg.Database.Sqlite.File == "drs.db" && (cfg.Database.Postgres.Host != "localhost" || cfg.Database.Postgres.Database != "") {
-			// This is risky. Let's just follow the user instruction: if both present, error.
-			// This means my LoadConfig must be careful not to leave defaults if others are set.
-		}
-	}
-
 	if cfg.Database.Sqlite != nil && cfg.Database.Postgres != nil {
 		return fmt.Errorf("multiple databases specified in config; only one of 'sqlite' or 'postgres' allowed")
 	}
@@ -63,6 +63,7 @@ func validateConfig(cfg *Config) error {
 	if len(cfg.Buckets) == 0 && len(cfg.S3Credentials) > 0 {
 		cfg.Buckets = append([]BucketConfig(nil), cfg.S3Credentials...)
 	}
+	cfg.S3Credentials = nil
 
 	// Validate configured bucket credentials.
 	for i := range cfg.Buckets {
@@ -131,9 +132,6 @@ func validateConfig(cfg *Config) error {
 	for i, definition := range accepted {
 		cfg.BucketScopes[i] = definition.scope
 	}
-	// Keep the legacy field populated for older call sites and tests.
-	cfg.S3Credentials = append([]BucketConfig(nil), cfg.Buckets...)
-
 	cfg.Auth.Mode = strings.ToLower(strings.TrimSpace(cfg.Auth.Mode))
 	if cfg.Auth.Mode == "" {
 		return fmt.Errorf("auth.mode is required and must be one of %q or %q", AuthModeLocal, AuthModeGen3)
@@ -155,6 +153,11 @@ func validateConfig(cfg *Config) error {
 	// Gen3 mock auth is the supported local integration-testing path for Gen3 mode.
 	if inheritedMockAuthEnabled() && cfg.Auth.Mode != AuthModeGen3 {
 		return fmt.Errorf("mock auth (DRS_AUTH_MOCK_ENABLED) is only allowed in gen3 auth mode, not in %q", cfg.Auth.Mode)
+	}
+	if cfg.Auth.Mode == AuthModeGen3 && !cfg.Auth.Mock.Enabled && !inheritedMockAuthEnabled() && strings.TrimSpace(cfg.Auth.PluginPaths.Authn) == "" {
+		if err := validateBuiltInFenceURL(cfg.Auth.FenceURL); err != nil {
+			return err
+		}
 	}
 	if cfg.LFS.MaxBatchObjects < 0 {
 		return fmt.Errorf("lfs.max_batch_objects must be >= 0")
@@ -184,17 +187,18 @@ func validateConfig(cfg *Config) error {
 		if cfg.Auth.AllowUnauthenticated || cfg.Auth.Mock.Enabled || inheritedMockAuthEnabled() {
 			return fmt.Errorf("production profile forbids unauthenticated or mock authentication")
 		}
-		if cfg.Routes.Docs {
-			return fmt.Errorf("production profile requires routes.docs=false")
-		}
 		if cfg.Database.Postgres == nil {
 			return fmt.Errorf("production profile requires PostgreSQL")
 		}
 		pg := cfg.Database.Postgres
-		if strings.EqualFold(strings.TrimSpace(pg.SSLMode), "disable") || strings.TrimSpace(pg.SSLMode) == "" {
+		switch sslMode := strings.ToLower(strings.TrimSpace(pg.SSLMode)); sslMode {
+		case "disable":
 			if !pg.AllowInsecureTransport {
-				return fmt.Errorf("production profile requires PostgreSQL TLS; set database.postgres.allow_insecure_transport=true only for an explicit trusted network")
+				return fmt.Errorf("production profile requires PostgreSQL sslmode=verify-full; set database.postgres.allow_insecure_transport=true only for an explicit trusted network")
 			}
+		case "verify-full":
+		default:
+			return fmt.Errorf("production profile requires PostgreSQL sslmode=verify-full, or disable with allow_insecure_transport=true; got %q", sslMode)
 		}
 		if pg.MaxOpenConnections < 1 {
 			return fmt.Errorf("production profile requires postgres.max_open_connections >= 1")
@@ -209,15 +213,35 @@ func validateConfig(cfg *Config) error {
 	return nil
 }
 
+func validateBuiltInFenceURL(raw string) error {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Scheme != "https" || u.Hostname() == "" {
+		return fmt.Errorf("auth.fence_url must be a valid HTTPS URL with a host when built-in Gen3 authentication is enabled")
+	}
+	return nil
+}
+
 func stableCredentialEncryptionConfigured(cfg *Config) bool {
-	if strings.TrimSpace(cfg.CredentialEncryption.MasterKey) != "" || strings.TrimSpace(cfg.CredentialEncryption.LocalKeyFile) != "" {
-		return true
-	}
-	if strings.TrimSpace(os.Getenv("DRS_CREDENTIAL_MASTER_KEY")) != "" || strings.TrimSpace(os.Getenv("DRS_CREDENTIAL_LOCAL_KEY_FILE")) != "" || strings.TrimSpace(os.Getenv("DRS_CREDENTIAL_KMS_KEY_ID")) != "" {
-		return true
-	}
 	manager := strings.ToLower(strings.TrimSpace(os.Getenv("DRS_CREDENTIAL_KEY_MANAGER")))
-	return manager != "" && manager != "local" && manager != "file"
+	kmsKeyID := strings.TrimSpace(os.Getenv("DRS_CREDENTIAL_KMS_KEY_ID"))
+	if manager == "" {
+		manager = "local"
+		if kmsKeyID != "" {
+			manager = "aws-kms"
+		}
+	}
+
+	switch manager {
+	case "local":
+		return strings.TrimSpace(cfg.CredentialEncryption.MasterKey) != "" ||
+			strings.TrimSpace(cfg.CredentialEncryption.LocalKeyFile) != "" ||
+			strings.TrimSpace(os.Getenv("DRS_CREDENTIAL_MASTER_KEY")) != "" ||
+			strings.TrimSpace(os.Getenv("DRS_CREDENTIAL_LOCAL_KEY_FILE")) != ""
+	case "aws-kms":
+		return kmsKeyID != ""
+	default:
+		return false
+	}
 }
 
 func normalizeBucketScope(scope BucketScopeConfig, source string, credentialIDsByBucket map[string][]string) (BucketScopeConfig, error) {

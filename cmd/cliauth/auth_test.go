@@ -9,9 +9,12 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
-	conf "github.com/calypr/syfon/client/config"
 	syclient "github.com/calypr/syfon/client"
+	conf "github.com/calypr/syfon/client/config"
+	syrequest "github.com/calypr/syfon/client/request"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/spf13/cobra"
 )
 
@@ -60,7 +63,7 @@ func TestServerClientOptionsBasicAuthValidation(t *testing.T) {
 	t.Cleanup(resetAuthState)
 
 	username = "alice"
-	if _, err := ServerClientOptions(); err == nil || !strings.Contains(err.Error(), "--username and --password must be set together") {
+	if _, err := ServerClientOptions(context.Background()); err == nil || !strings.Contains(err.Error(), "--username and --password must be set together") {
 		t.Fatalf("expected missing password error, got %v", err)
 	}
 }
@@ -71,7 +74,7 @@ func TestServerClientOptionsConflictValidation(t *testing.T) {
 
 	token = "tok"
 	profile = "profile"
-	if _, err := ServerClientOptions(); err == nil || !strings.Contains(err.Error(), "--token cannot be combined with --profile") {
+	if _, err := ServerClientOptions(context.Background()); err == nil || !strings.Contains(err.Error(), "--token cannot be combined with --profile") {
 		t.Fatalf("expected token/profile conflict, got %v", err)
 	}
 }
@@ -82,7 +85,7 @@ func TestServerClientOptionsUsesBasicAuth(t *testing.T) {
 
 	username = "alice"
 	password = "secret"
-	opts, err := ServerClientOptions()
+	opts, err := ServerClientOptions(context.Background())
 	if err != nil {
 		t.Fatalf("ServerClientOptions returned error: %v", err)
 	}
@@ -107,16 +110,14 @@ func TestServerClientOptionsLoadsProfileToken(t *testing.T) {
 		t.Fatalf("mkdir .gen3: %v", err)
 	}
 	configPath := filepath.Join(gen3Dir, "gen3_client_config.ini")
-	content := `[training]
-access_token = test-token
-api_endpoint = https://example.test
-`
+	accessToken := signedAuthTestToken(t, time.Now().Add(time.Hour), time.Now().Add(-time.Hour))
+	content := "[training]\naccess_token = " + accessToken + "\napi_endpoint = https://example.test\n"
 	if err := os.WriteFile(configPath, []byte(content), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 
 	profile = "training"
-	opts, err := ServerClientOptions()
+	opts, err := ServerClientOptions(context.Background())
 	if err != nil {
 		t.Fatalf("ServerClientOptions returned error: %v", err)
 	}
@@ -125,7 +126,7 @@ api_endpoint = https://example.test
 	for _, opt := range opts {
 		opt(cfg)
 	}
-	if got := strings.TrimSpace(cfg.Token); got != "test-token" {
+	if got := strings.TrimSpace(cfg.Token); got != accessToken {
 		t.Fatalf("expected token from profile, got %q", got)
 	}
 }
@@ -139,10 +140,7 @@ func TestResolveServerURLUsesProfileEndpoint(t *testing.T) {
 
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	writeProfileConfig(t, home, `[training]
-access_token = test-token
-api_endpoint = https://example.test/
-`)
+	writeProfileConfig(t, home, "[training]\naccess_token = "+signedAuthTestToken(t, time.Now().Add(time.Hour), time.Now().Add(-time.Hour))+"\napi_endpoint = https://example.test/\n")
 
 	profile = "training"
 	cmd := testCommand()
@@ -165,10 +163,7 @@ func TestResolveServerURLPrefersExplicitServer(t *testing.T) {
 
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	writeProfileConfig(t, home, `[training]
-access_token = test-token
-api_endpoint = https://example.test/
-`)
+	writeProfileConfig(t, home, "[training]\naccess_token = "+signedAuthTestToken(t, time.Now().Add(time.Hour), time.Now().Add(-time.Hour))+"\napi_endpoint = https://example.test/\n")
 
 	profile = "training"
 	cmd := testCommand()
@@ -191,10 +186,7 @@ func TestResolveServerURLPrefersEnvOverProfile(t *testing.T) {
 
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	writeProfileConfig(t, home, `[training]
-access_token = test-token
-api_endpoint = https://example.test/
-`)
+	writeProfileConfig(t, home, "[training]\naccess_token = "+signedAuthTestToken(t, time.Now().Add(time.Hour), time.Now().Add(-time.Hour))+"\napi_endpoint = https://example.test/\n")
 	t.Setenv("SYFON_SERVER_URL", "https://env.test/")
 	t.Setenv("DRS_SERVER_URL", "")
 
@@ -278,6 +270,137 @@ func TestEnsureUsableProfileCredentialRefreshesExpiredAccessToken(t *testing.T) 
 	}
 }
 
+func TestNewServerClientRefreshesExpiredProfileTokenBeforeConstruction(t *testing.T) {
+	resetAuthState()
+	t.Cleanup(resetAuthState)
+	t.Setenv("SYFON_SERVER_URL", "")
+	t.Setenv("DRS_SERVER_URL", "")
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	now := time.Now().UTC()
+	expiredToken := signedAuthTestToken(t, now.Add(-time.Hour), now.Add(-2*time.Hour))
+	apiKey := signedAuthTestToken(t, now.Add(24*time.Hour), now.Add(-time.Hour))
+	newToken := signedAuthTestToken(t, now.Add(24*time.Hour), now.Add(-time.Minute))
+	writeProfileConfig(t, home, "[training]\naccess_token = "+expiredToken+"\nkey_id = test-user\napi_key = "+apiKey+"\napi_endpoint = https://example.test\n")
+	profile = "training"
+
+	previousTransport := http.DefaultTransport
+	var refreshCalls int
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		refreshCalls++
+		if req.Method != http.MethodPost {
+			t.Fatalf("refresh method = %s, want POST", req.Method)
+		}
+		if got := req.URL.String(); got != "https://example.test/user/credentials/api/access_token" {
+			t.Fatalf("refresh URL = %s, unexpected", got)
+		}
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			t.Fatalf("read refresh request body: %v", err)
+		}
+		if !strings.Contains(string(body), `"api_key":"`+apiKey+`"`) {
+			t.Fatalf("refresh request omitted profile API key: %s", body)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Status:     "200 OK",
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(`{"access_token":"` + newToken + `"}`)),
+			Request:    req,
+		}, nil
+	})
+	t.Cleanup(func() { http.DefaultTransport = previousTransport })
+
+	cmd := testCommand()
+	cmd.SetContext(context.Background())
+	client, err := NewServerClient(cmd)
+	if err != nil {
+		t.Fatalf("NewServerClient returned error: %v", err)
+	}
+	if refreshCalls != 1 {
+		t.Fatalf("refresh calls = %d, want 1", refreshCalls)
+	}
+	auth, ok := client.HTTPClient().Transport.(*syrequest.AuthTransport)
+	if !ok {
+		t.Fatalf("client transport type = %T, want *request.AuthTransport", client.HTTPClient().Transport)
+	}
+	if auth.Cred == nil {
+		t.Fatal("constructed client has no profile credential")
+	}
+	if auth.Cred.AccessToken != newToken {
+		t.Fatalf("constructed client token = %q, want refreshed token", auth.Cred.AccessToken)
+	}
+	var authorization string
+	auth.Base = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		authorization = req.Header.Get("Authorization")
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Status:     "200 OK",
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader("ok")),
+			Request:    req,
+		}, nil
+	})
+	response, err := client.HTTPClient().Get("https://example.test/records")
+	if err != nil {
+		t.Fatalf("request through refreshed client: %v", err)
+	}
+	response.Body.Close()
+	if authorization != "Bearer "+newToken {
+		t.Fatalf("request Authorization = %q, want refreshed bearer token", authorization)
+	}
+
+	manager := conf.NewConfigure(nil)
+	saved, err := manager.Load("training")
+	if err != nil {
+		t.Fatalf("load refreshed profile: %v", err)
+	}
+	if saved.AccessToken != newToken {
+		t.Fatalf("persisted token = %q, want refreshed token", saved.AccessToken)
+	}
+}
+
+func TestNewServerClientKeepsValidProfileTokenWithoutRefreshing(t *testing.T) {
+	resetAuthState()
+	t.Cleanup(resetAuthState)
+	t.Setenv("SYFON_SERVER_URL", "")
+	t.Setenv("DRS_SERVER_URL", "")
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	now := time.Now().UTC()
+	accessToken := signedAuthTestToken(t, now.Add(time.Hour), now.Add(-time.Hour))
+	apiKey := signedAuthTestToken(t, now.Add(24*time.Hour), now.Add(-time.Hour))
+	writeProfileConfig(t, home, "[training]\naccess_token = "+accessToken+"\nkey_id = test-user\napi_key = "+apiKey+"\napi_endpoint = https://example.test\n")
+	profile = "training"
+
+	previousTransport := http.DefaultTransport
+	var refreshCalls int
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		refreshCalls++
+		return nil, fmt.Errorf("unexpected refresh request to %s", req.URL)
+	})
+	t.Cleanup(func() { http.DefaultTransport = previousTransport })
+
+	cmd := testCommand()
+	cmd.SetContext(context.Background())
+	client, err := NewServerClient(cmd)
+	if err != nil {
+		t.Fatalf("NewServerClient returned error: %v", err)
+	}
+	if refreshCalls != 0 {
+		t.Fatalf("refresh calls = %d, want 0", refreshCalls)
+	}
+	auth, ok := client.HTTPClient().Transport.(*syrequest.AuthTransport)
+	if !ok {
+		t.Fatalf("client transport type = %T, want *request.AuthTransport", client.HTTPClient().Transport)
+	}
+	if auth.Cred == nil || auth.Cred.AccessToken != accessToken {
+		t.Fatalf("constructed client did not keep valid profile token: credential=%+v", auth.Cred)
+	}
+}
+
 func resetAuthState() {
 	profile = ""
 	token = ""
@@ -304,4 +427,17 @@ func writeProfileConfig(t *testing.T, home, content string) {
 	if err := os.WriteFile(configPath, []byte(content), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
+}
+
+func signedAuthTestToken(t *testing.T, exp, iat time.Time) string {
+	t.Helper()
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"exp": exp.Unix(),
+		"iat": iat.Unix(),
+	})
+	encoded, err := token.SignedString([]byte("test-secret"))
+	if err != nil {
+		t.Fatalf("sign test token: %v", err)
+	}
+	return encoded
 }

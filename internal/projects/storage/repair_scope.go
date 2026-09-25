@@ -33,10 +33,10 @@ func (s *Service) loadScopeTargets(ctx context.Context) (map[string][]repairScop
 	if len(usable) == 0 {
 		return out, nil
 	}
-	if s.cleanupScopes == nil {
+	if s.scopeCatalog == nil {
 		return nil, fmt.Errorf("scope reader is not configured")
 	}
-	scopes, err := s.cleanupScopes.ListBucketScopes(ctx)
+	scopes, err := s.scopeCatalog.ListBucketScopes(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list bucket scopes: %w", err)
 	}

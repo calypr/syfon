@@ -1,0 +1,8 @@
+checked_at_utc	check	result	evidence
+2026-09-25T21:06:04Z	root Go module: go test -count=1 ./...	pass	All root packages completed, including cmd/metrics, internal/httpapi, internal/persistence/store, and internal/persistence/sqlite
+2026-09-25T21:06:04Z	client Go module: go test -count=1 ./...	pass	All client packages completed, including services and transfer packages
+2026-09-25T21:06:04Z	apigen Go module: go test -count=1 ./...	pass	All generated API packages completed, including metricsapi
+2026-09-25T21:06:04Z	go vet ./...	pass	No diagnostics
+2026-09-25T21:06:04Z	staticcheck ./...	pass	No diagnostics; run with approved access to its existing macOS cache
+2026-09-25T21:06:04Z	git diff --check	pass	No whitespace errors
+2026-09-25T21:06:04Z	GitHub issue state 143-164	pass	Fetched each issue after closing 163; all 22 closed

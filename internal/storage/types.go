@@ -48,6 +48,9 @@ type ByteRange struct {
 
 type UploadID string
 
+// MaxS3MultipartPartNumber is the highest part number accepted by S3 multipart uploads.
+const MaxS3MultipartPartNumber int32 = 10_000
+
 const MultipartCompletionMarkerMetadataKey = "syfon-multipart-id"
 
 var ErrMultipartCompletionIndeterminate = errors.New("multipart completion outcome is indeterminate")
@@ -128,7 +131,9 @@ type InventoryRequest struct {
 	Prefix      string
 	IncludeHead bool
 	ExactPrefix bool
-	MaxKeys     int32
+	// MaxKeys sizes each provider page; MaxResults bounds the whole listing.
+	MaxKeys    int32
+	MaxResults int32
 }
 
 type InventoryResult struct {

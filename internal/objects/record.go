@@ -283,8 +283,18 @@ func MintRecordIDFromChecksum(checksum string, authz []string) (string, error) {
 }
 
 func MaterializeCandidate(c drs.DrsObjectCandidate, now time.Time) (drs.DrsObject, error) {
+	if c.Contents != nil {
+		return drs.DrsObject{}, fmt.Errorf("%w: contents cannot be persisted; only blob registration is supported", errorapi.ErrInvalidInput)
+	}
+	if c.MimeType != nil {
+		return drs.DrsObject{}, fmt.Errorf("%w: mime_type cannot be persisted", errorapi.ErrInvalidInput)
+	}
+
 	checksums := append([]drs.Checksum(nil), c.Checksums...)
-	oid, ok := CanonicalSHA256(checksums)
+	oid, ok, err := ValidateCanonicalSHA256(checksums)
+	if err != nil {
+		return drs.DrsObject{}, err
+	}
 	if !ok {
 		return drs.DrsObject{}, errorapi.ErrNoValidSHA256
 	}
@@ -324,7 +334,7 @@ func MaterializeCandidate(c drs.DrsObjectCandidate, now time.Time) (drs.DrsObjec
 	if c.ControlledAccess != nil {
 		obj.ControlledAccess = &controlled
 	}
-	obj, err := NormalizeRecord(obj, now)
+	obj, err = NormalizeRecord(obj, now)
 	if err != nil {
 		return drs.DrsObject{}, err
 	}

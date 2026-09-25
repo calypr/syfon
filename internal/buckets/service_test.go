@@ -257,3 +257,51 @@ func TestDeleteBucketAuthorizesMatchingPhysicalScope(t *testing.T) {
 		t.Fatalf("unauthorized delete called credential store %d times", credentials.deleteCalls)
 	}
 }
+
+func TestDeleteBucketRequiresAuthorizationForEverySharedScope(t *testing.T) {
+	service, credentials, _ := newFakeService(
+		[]Credential{{CredentialID: "credential-id", Bucket: "physical-bucket"}},
+		[]Scope{
+			{Organization: "org", ProjectID: "project-a", Bucket: "physical-bucket"},
+			{Organization: "org", ProjectID: "project-b", Bucket: "physical-bucket"},
+		},
+		&fakeVisibilityQuery{}, nil,
+	)
+	session := access.NewSession("gen3")
+	session.AuthHeaderPresent = true
+	session.SetAuthorizations(nil, map[string]map[string]bool{
+		"/organization/org/project/project-a": {"delete": true},
+	}, true)
+
+	err := service.DeleteBucket(access.WithSession(context.Background(), session), "physical-bucket")
+	if !errors.Is(err, errorapi.ErrAccessDenied) {
+		t.Fatalf("DeleteBucket() error = %v, want access denied when a sibling scope is unauthorized", err)
+	}
+	if credentials.deleteCalls != 0 {
+		t.Fatalf("unauthorized shared bucket delete called credential store %d times", credentials.deleteCalls)
+	}
+}
+
+func TestDeleteBucketAllowsFullyAuthorizedSharedScopes(t *testing.T) {
+	service, credentials, scopes := newFakeService(
+		[]Credential{{CredentialID: "credential-id", Bucket: "physical-bucket"}},
+		[]Scope{
+			{Organization: "org", ProjectID: "project-a", Bucket: "physical-bucket", CredentialID: "credential-id"},
+			{Organization: "org", ProjectID: "project-b", Bucket: "physical-bucket", CredentialID: "credential-id"},
+		},
+		&fakeVisibilityQuery{}, nil,
+	)
+	session := access.NewSession("gen3")
+	session.AuthHeaderPresent = true
+	session.SetAuthorizations(nil, map[string]map[string]bool{
+		"/organization/org/project/project-a": {"delete": true},
+		"/organization/org/project/project-b": {"update": true},
+	}, true)
+
+	if err := service.DeleteBucket(access.WithSession(context.Background(), session), "physical-bucket"); err != nil {
+		t.Fatalf("DeleteBucket() error = %v", err)
+	}
+	if credentials.deleteCalls != 1 || len(scopes.scopes) != 0 {
+		t.Fatalf("deletion calls=%d remaining scopes=%+v, want one complete deletion", credentials.deleteCalls, scopes.scopes)
+	}
+}

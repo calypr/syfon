@@ -1,32 +1,99 @@
 package server
 
 import (
+	"context"
 	"errors"
+	"net"
+	"net/url"
+	"os"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/calypr/syfon/internal/config"
 	"github.com/calypr/syfon/internal/version"
+	"github.com/lib/pq"
+	"github.com/lib/pq/pqerror"
 )
 
 func TestRetryProductionSchemaCheckOnlyRetriesTransientSchemaState(t *testing.T) {
-	for _, message := range []string{
-		"failed to ping database: connection refused",
-		"schema migration ledger is missing; run the cluster DB-init Job",
-		"required schema relation \"drs_object\" is missing",
-		"database schema is behind supported version 2",
-	} {
-		if !retryProductionSchemaCheck(errors.New(message)) {
-			t.Fatalf("retryProductionSchemaCheck(%q) = false, want true", message)
+	transient := []error{
+		errors.Join(errors.New("failed to ping database"), &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connection refused")}),
+		errors.Join(errors.New("failed to ping database"), testPostgresError("08001")),
+		errors.Join(errors.New("failed to ping database"), context.DeadlineExceeded),
+		errors.New("schema migration ledger is missing; run the cluster DB-init Job"),
+		errors.New("required schema relation \"drs_object\" is missing"),
+		errors.New("database schema is behind supported version 2"),
+	}
+	for _, test := range transient {
+		if !retryProductionSchemaCheck(test) {
+			t.Errorf("retryProductionSchemaCheck(%v) = false, want true", test)
 		}
 	}
-	for _, message := range []string{
-		"database schema migration version 3 is newer than this binary",
-		"schema migration 1 checksum or name mismatch",
-		"schema migration ledger has a gap before version 2",
-	} {
-		if retryProductionSchemaCheck(errors.New(message)) {
-			t.Fatalf("retryProductionSchemaCheck(%q) = true, want false", message)
+	permanent := []error{
+		errors.Join(errors.New("failed to ping database"), testPostgresError("28P01")),
+		errors.Join(errors.New("failed to ping database"), testPostgresError("42501")),
+		errors.Join(errors.New("failed to ping database"), testPostgresError("3D000")),
+		errors.New("failed to ping database: unclassified driver error"),
+		errors.New("database schema migration version 3 is newer than this binary"),
+		errors.New("schema migration 1 checksum or name mismatch"),
+		errors.New("schema migration ledger has a gap before version 2"),
+	}
+	for _, test := range permanent {
+		if retryProductionSchemaCheck(test) {
+			t.Errorf("retryProductionSchemaCheck(%v) = true, want false", test)
 		}
+	}
+}
+
+func testPostgresError(code string) error {
+	return &pq.Error{Code: pqerror.Code(code), Message: "synthetic startup error"}
+}
+
+func TestOpenPostgresDatabaseFailsFastOnAuthenticationFailure(t *testing.T) {
+	dsn := os.Getenv("SYFON_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("SYFON_TEST_POSTGRES_DSN is not configured")
+	}
+	const rejectedPassword = "syfon-invalid-test-password"
+	badDSN := dsn
+	if strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
+		parsed, err := url.Parse(dsn)
+		if err != nil {
+			t.Fatalf("parse test PostgreSQL DSN: %v", err)
+		}
+		username := ""
+		if parsed.User != nil {
+			username = parsed.User.Username()
+		}
+		parsed.User = url.UserPassword(username, rejectedPassword)
+		badDSN = parsed.String()
+	} else {
+		badDSN += " password=" + rejectedPassword
+	}
+	parsedDSN, err := pq.NewConfig(badDSN)
+	if err != nil {
+		t.Fatalf("parse test PostgreSQL credentials: %v", err)
+	}
+	if parsedDSN.Password != rejectedPassword {
+		t.Fatal("test DSN did not apply the deliberately rejected password")
+	}
+
+	cfg := &config.Config{Profile: config.ProfileProduction}
+	cfg.Database.Postgres = &config.PostgresConfig{}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	started := time.Now()
+	_, err = openPostgresDatabase(ctx, cfg, badDSN, nil)
+	if err == nil {
+		t.Fatal("PostgreSQL accepted the deliberately invalid password")
+	}
+	var sqlStateError interface{ SQLState() string }
+	if !errors.As(err, &sqlStateError) || sqlStateError.SQLState() != "28P01" {
+		t.Fatalf("authentication failure = %v, want SQLSTATE 28P01", err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("permanent authentication failure retried for %s", elapsed)
 	}
 }
 

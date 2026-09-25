@@ -78,14 +78,14 @@ func (f *AuthFlags) NewTargetClient(ctx context.Context, cmd *cobra.Command, all
 
 func (f *AuthFlags) sourceClientOptions(ctx context.Context) ([]syclient.Option, error) {
 	if !f.hasExplicitSourceAuthInputs() {
-		return cliauth.ServerClientOptions()
+		return cliauth.ServerClientOptions(ctx)
 	}
 	return clientOptionsFromInputs(ctx, "source", f.SourceProfile, f.SourceToken, f.SourceBasicUser, f.SourceBasicPassword)
 }
 
 func (f *AuthFlags) targetClientOptions(ctx context.Context, allowRootAuth bool) ([]syclient.Option, error) {
 	if !f.hasExplicitTargetAuthInputs() && allowRootAuth {
-		return cliauth.ServerClientOptions()
+		return cliauth.ServerClientOptions(ctx)
 	}
 	return clientOptionsFromInputs(ctx, "target", f.TargetProfile, f.TargetToken, f.TargetBasicUser, f.TargetBasicPassword)
 }

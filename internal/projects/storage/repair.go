@@ -39,16 +39,17 @@ type repairScopeTarget struct {
 }
 
 type auditedObject struct {
-	record         drs.DrsObject
-	sha256         string
-	currentURLs    []string
-	scope          repairScopeTarget
-	scopeKnown     bool
-	scopeAmbiguous bool
-	inferredScope  string
-	canonicalURL   string
-	findings       []internalapi.ScopeRepairFinding
-	updated        *drs.DrsObject
+	record               drs.DrsObject
+	sha256               string
+	currentURLs          []string
+	scope                repairScopeTarget
+	scopeKnown           bool
+	scopeAmbiguous       bool
+	inferredScope        string
+	canonicalURL         string
+	findings             []internalapi.ScopeRepairFinding
+	updated              *drs.DrsObject
+	accessMethodsChanged bool
 }
 
 // AuditAuthorized checks read access for the requested scope before auditing it.
@@ -104,7 +105,27 @@ func (s *Service) apply(ctx context.Context, options internalapi.ScopeRepairOpti
 			result.Skipped++
 			continue
 		}
+		missingControlledAccess := false
+		for _, finding := range object.findings {
+			if finding.Kind == FindingMissingControlledAccess {
+				missingControlledAccess = true
+				break
+			}
+		}
+		if missingControlledAccess {
+			if err := s.records.RepairMissingControlledAccess(ctx, object.record.Id, object.sha256, objects.Scope{Organization: options.Organization, Project: options.Project}); err != nil {
+				result.Skipped++
+				continue
+			}
+			if !object.accessMethodsChanged {
+				result.Mutated++
+				continue
+			}
+		}
 		if _, err := s.records.UpdateObjectMetadata(ctx, object.record.Id, *object.updated, objects.Scope{}, nil); err != nil {
+			if missingControlledAccess {
+				result.Mutated++
+			}
 			result.Skipped++
 			continue
 		}
@@ -164,6 +185,48 @@ func (s *Service) audit(ctx context.Context, options internalapi.ScopeRepairOpti
 			break
 		}
 	}
+	targetResource, err := clientaccess.ResourcePath(options.Organization, options.Project)
+	if err != nil {
+		return internalapi.ScopeRepairReport{}, nil, err
+	}
+	seenRecords := make(map[string]struct{}, len(records))
+	for _, record := range records {
+		seenRecords[record.Id] = struct{}{}
+	}
+	for _, target := range scopes[targetResource] {
+		candidateStart := ""
+		for {
+			limit := pageSize
+			if options.Limit > 0 && options.Limit-scanned < limit {
+				limit = options.Limit - scanned
+			}
+			if limit <= 0 && options.Limit > 0 {
+				break
+			}
+			page, err := s.records.ListRepairCandidates(ctx, objects.RepairCandidateQuery{
+				Scope:      objects.Scope{Organization: options.Organization, Project: options.Project},
+				Bucket:     target.Bucket,
+				Prefix:     target.Prefix,
+				StartAfter: candidateStart,
+				Limit:      limit,
+			})
+			if err != nil {
+				return internalapi.ScopeRepairReport{}, nil, err
+			}
+			scanned += page.Scanned
+			for _, record := range page.Objects {
+				if _, exists := seenRecords[record.Id]; exists {
+					continue
+				}
+				seenRecords[record.Id] = struct{}{}
+				records = append(records, record)
+			}
+			if page.Scanned == 0 || page.NextStartAfter == "" || page.Scanned < limit {
+				break
+			}
+			candidateStart = page.NextStartAfter
+		}
+	}
 	report := internalapi.ScopeRepairReport{Organization: strings.TrimSpace(options.Organization), Project: strings.TrimSpace(options.Project), Scanned: scanned}
 	audited := make([]*auditedObject, 0, len(records))
 	for _, record := range records {
@@ -214,10 +277,18 @@ func (s *Service) auditRecord(ctx context.Context, record drs.DrsObject, scopes 
 			break
 		}
 	}
-	if targetResource != "" && !hasTargetResource && object.inferredScope != targetResource {
-		return object, false
-	}
-	if targetResource != "" && !hasTargetResource && object.inferredScope == targetResource && sha != "" {
+	if targetResource != "" && !hasTargetResource {
+		derivedID, err := objects.MintRecordIDFromChecksum(sha, []string{targetResource})
+		if err != nil || sha == "" || derivedID != record.Id {
+			return object, false
+		}
+		object.scopeKnown = true
+		object.scopeAmbiguous = false
+		object.inferredScope = targetResource
+		if len(scopes[targetResource]) > 0 {
+			object.scope = scopes[targetResource][0]
+			object.canonicalURL = canonicalAccessURL(object.scope, record.Id, sha)
+		}
 		object.findings = append(object.findings, newFinding(FindingMissingControlledAccess, SeverityWarn, record, sha, object.currentURLs, object.canonicalURL, true, "missing controlled_access row recoverable from deterministic scope"))
 		updated := cloneRecord(record)
 		controlled := make([]string, 0)

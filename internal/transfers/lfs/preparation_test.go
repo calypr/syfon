@@ -9,6 +9,7 @@ import (
 	"github.com/calypr/syfon/apigen/drs"
 	"github.com/calypr/syfon/apigen/errorapi"
 	"github.com/calypr/syfon/internal/buckets"
+	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/transfers"
 )
 
@@ -24,6 +25,10 @@ func (s *lfsPreparationObjectSpy) GetObject(_ context.Context, _, method string)
 }
 
 func (s *lfsPreparationObjectSpy) RegisterObjects(context.Context, []drs.DrsObject) ([]drs.DrsObject, error) {
+	return nil, nil
+}
+
+func (s *lfsPreparationObjectSpy) RegisterObjectsIfPending(context.Context, []drs.DrsObject, objects.PendingRegistration) ([]drs.DrsObject, error) {
 	return nil, nil
 }
 

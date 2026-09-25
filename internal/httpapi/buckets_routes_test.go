@@ -89,6 +89,14 @@ func (s *recordingBucketCredentialStore) DeleteBucketScopeConfiguration(context.
 	return nil, nil
 }
 
+func (s *recordingBucketCredentialStore) DeleteBucketCredential(_ context.Context, _ string, authorize buckets.ScopeDeletionPolicy) ([]string, error) {
+	*s.events = append(*s.events, "delete-bucket-credential")
+	if authorize == nil {
+		return nil, errorapi.ErrAccessDenied
+	}
+	return nil, authorize(nil)
+}
+
 func (s *recordingBucketCredentialStore) DeleteS3Credential(context.Context, string) error {
 	return nil
 }
@@ -305,12 +313,20 @@ func TestHandleInternalPutDeleteBucket_Gen3Auth(t *testing.T) {
 }
 
 func TestHandleInternalPutBucket_RejectsInvalidGeneratedPayloads(t *testing.T) {
-	mockDB := &bucketTestStore{Credentials: map[string]buckets.Credential{}}
-	req := httptest.NewRequest(http.MethodPut, "/data/buckets", bytes.NewBufferString(`{"bucket":"b2","organization":"cbds","unexpected":"boom"}`))
-	req = req.WithContext(dataTestAuthContext(req.Context(), "gen3", true, map[string]map[string]bool{"/programs/cbds": {"arborist:create-descendant": true}}))
-	rr := doInternalDRSTestRequest(req, newInternalDRSObjectManager(mockDB))
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d", rr.Code)
+	for _, body := range []string{
+		`{"bucket":"bucket2","organization":"cbds","unexpected":"boom"}`,
+		`{"bucket":"bucket2","organization":"cbds","provider":"s3","access_key":"ak","secret_key":"sk"}garbage`,
+	} {
+		mockDB := &bucketTestStore{Credentials: map[string]buckets.Credential{}, BucketScopes: map[string]buckets.Scope{}}
+		req := httptest.NewRequest(http.MethodPut, "/data/buckets", bytes.NewBufferString(body))
+		req = req.WithContext(dataTestAuthContext(req.Context(), "gen3", true, map[string]map[string]bool{"/programs/cbds": {"arborist:create-descendant": true}}))
+		rr := doInternalDRSTestRequest(req, newInternalDRSObjectManager(mockDB))
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("body %q: expected 400, got %d body=%s", body, rr.Code, rr.Body.String())
+		}
+		if len(mockDB.Credentials) != 0 || len(mockDB.BucketScopes) != 0 {
+			t.Fatalf("body %q mutated bucket state: credentials=%v scopes=%v", body, mockDB.Credentials, mockDB.BucketScopes)
+		}
 	}
 }
 

@@ -19,6 +19,8 @@ import (
 	_ "gocloud.dev/blob/azureblob"
 	_ "gocloud.dev/blob/gcsblob"
 	"gocloud.dev/blob/s3blob"
+
+	"github.com/calypr/syfon/client/signedurl"
 )
 
 // ObjectParameters contains provider-agnostic object lookup settings for
@@ -55,6 +57,7 @@ var (
 	virtualHostedS3RE  = regexp.MustCompile(`^(.+?)\.s3(?:[.-]|$)`)
 	virtualHostedGCSRE = regexp.MustCompile(`^(.+?)\.storage\.googleapis\.com$`)
 	azureBlobHostRE    = regexp.MustCompile(`^([^.]+)\.blob\.core\.windows\.net$`)
+	cloudURLInErrorRE  = regexp.MustCompile(`(?i)\b(?:https?|s3|gs|azblob)://[^\s]+`)
 )
 
 // InspectObject inspects object metadata for configured-bucket and raw cloud
@@ -71,13 +74,13 @@ func InspectObject(ctx context.Context, in ObjectParameters) (*ObjectInfo, error
 
 	cloudBucket, err := openBucketForLocation(ctx, loc, in)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open bucket via go-cloud string %s: %w", loc.bucketURL, err)
+		return nil, fmt.Errorf("failed to open bucket via go-cloud string %s: %w", signedurl.Redact(loc.bucketURL), sanitizeCloudError(err))
 	}
 	defer cloudBucket.Close()
 
 	attrs, err := cloudBucket.Attributes(ctx, loc.key)
 	if err != nil {
-		return nil, fmt.Errorf("blob attributes failed (bucket=%q key=%q): %w", loc.bucketURL, loc.key, err)
+		return nil, fmt.Errorf("blob attributes failed (bucket=%q key=%q): %w", signedurl.Redact(loc.bucketURL), loc.key, sanitizeCloudError(err))
 	}
 
 	metaSHA := extractSHA256FromMetadata(attrs.Metadata)
@@ -100,16 +103,17 @@ func InspectObject(ctx context.Context, in ObjectParameters) (*ObjectInfo, error
 
 func openBucketForLocation(ctx context.Context, loc *objectLocation, in ObjectParameters) (*blob.Bucket, error) {
 	if !strings.HasPrefix(loc.bucketURL, "s3://") {
-		return blob.OpenBucket(ctx, loc.bucketURL)
+		bucket, err := blob.OpenBucket(ctx, loc.bucketURL)
+		return bucket, sanitizeCloudError(err)
 	}
 
 	u, err := url.Parse(loc.bucketURL)
 	if err != nil {
-		return nil, fmt.Errorf("parse s3 bucket URL %q: %w", loc.bucketURL, err)
+		return nil, fmt.Errorf("parse s3 bucket URL %q: %w", signedurl.Redact(loc.bucketURL), sanitizeCloudError(err))
 	}
 	bucket := strings.TrimSpace(u.Host)
 	if bucket == "" {
-		return nil, fmt.Errorf("missing bucket in s3 URL %q", loc.bucketURL)
+		return nil, fmt.Errorf("missing bucket in s3 URL %q", signedurl.Redact(loc.bucketURL))
 	}
 
 	q := u.Query()
@@ -131,7 +135,7 @@ func openBucketForLocation(ctx context.Context, loc *objectLocation, in ObjectPa
 
 	awsCfg, err := awsconfig.LoadDefaultConfig(ctx, loadOpts...)
 	if err != nil {
-		return nil, fmt.Errorf("load aws config: %w", err)
+		return nil, fmt.Errorf("load aws config: %w", sanitizeCloudError(err))
 	}
 
 	clientOpts := make([]func(*s3.Options), 0, 1)
@@ -142,13 +146,14 @@ func openBucketForLocation(ctx context.Context, loc *objectLocation, in ObjectPa
 		})
 	}
 	client := s3.NewFromConfig(awsCfg, clientOpts...)
-	return s3blob.OpenBucketV2(ctx, client, bucket, nil)
+	cloudBucket, err := s3blob.OpenBucketV2(ctx, client, bucket, nil)
+	return cloudBucket, sanitizeCloudError(err)
 }
 
 func parseObjectLocation(raw, destinationPath string, cfg ObjectParameters) (*objectLocation, error) {
 	u, err := url.Parse(raw)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("invalid object URL %s: %w", signedurl.Redact(raw), sanitizeCloudError(err))
 	}
 
 	withPath := func(bucketURL, bucket, key string) (*objectLocation, error) {
@@ -174,17 +179,17 @@ func parseObjectLocation(raw, destinationPath string, cfg ObjectParameters) (*ob
 		bucket := u.Host
 		key := strings.TrimPrefix(u.Path, "/")
 		if bucket == "" {
-			return nil, fmt.Errorf("no bucket/container in URL: %s", raw)
+			return nil, fmt.Errorf("no bucket/container in URL: %s", signedurl.Redact(raw))
 		}
 		if key == "" {
-			return nil, fmt.Errorf("no object key/path in URL: %s", raw)
+			return nil, fmt.Errorf("no object key/path in URL: %s", signedurl.Redact(raw))
 		}
 		return withPath(normalizeCloudBucketURL(u, cfg), bucket, key)
 	case "http", "https":
 		host := u.Hostname()
 		key := strings.TrimPrefix(u.Path, "/")
 		if key == "" {
-			return nil, fmt.Errorf("no object path in URL: %s", raw)
+			return nil, fmt.Errorf("no object path in URL: %s", signedurl.Redact(raw))
 		}
 
 		if m := virtualHostedS3RE.FindStringSubmatch(host); m != nil {
@@ -198,14 +203,14 @@ func parseObjectLocation(raw, destinationPath string, cfg ObjectParameters) (*ob
 		if host == "storage.googleapis.com" {
 			parts := strings.SplitN(key, "/", 2)
 			if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
-				return nil, fmt.Errorf("invalid GCS path-style URL: %s", raw)
+				return nil, fmt.Errorf("invalid GCS path-style URL: %s", signedurl.Redact(raw))
 			}
 			return withPath(fmt.Sprintf("gs://%s", parts[0]), parts[0], parts[1])
 		}
 		if m := azureBlobHostRE.FindStringSubmatch(host); m != nil {
 			parts := strings.SplitN(key, "/", 2)
 			if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
-				return nil, fmt.Errorf("invalid Azure blob URL: %s", raw)
+				return nil, fmt.Errorf("invalid Azure blob URL: %s", signedurl.Redact(raw))
 			}
 			bucketURL := fmt.Sprintf("azblob://%s?account_name=%s", parts[0], m[1])
 			return withPath(bucketURL, parts[0], parts[1])
@@ -213,15 +218,43 @@ func parseObjectLocation(raw, destinationPath string, cfg ObjectParameters) (*ob
 		if strings.Contains(host, "s3") {
 			parts := strings.SplitN(key, "/", 2)
 			if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
-				return nil, fmt.Errorf("invalid S3 path-style URL: %s", raw)
+				return nil, fmt.Errorf("invalid S3 path-style URL: %s", signedurl.Redact(raw))
 			}
 			endpointHint := fmt.Sprintf("%s://%s", u.Scheme, u.Host)
 			return withPath(buildS3BucketURL(parts[0], cfg, endpointHint), parts[0], parts[1])
 		}
-		return nil, fmt.Errorf("unsupported http(s) cloud URL: %s", raw)
+		return nil, fmt.Errorf("unsupported http(s) cloud URL: %s", signedurl.Redact(raw))
 	default:
 		return nil, fmt.Errorf("unsupported scheme: %s", u.Scheme)
 	}
+}
+
+type sanitizedCloudError struct {
+	cause   error
+	message string
+}
+
+func (e sanitizedCloudError) Error() string { return e.message }
+
+func (e sanitizedCloudError) Unwrap() error { return e.cause }
+
+func sanitizeCloudError(err error) error {
+	if err == nil {
+		return nil
+	}
+
+	message := cloudURLInErrorRE.ReplaceAllStringFunc(err.Error(), func(candidate string) string {
+		suffix := ""
+		for len(candidate) > 0 && strings.ContainsRune(".,;:!?)]}\"'", rune(candidate[len(candidate)-1])) {
+			suffix = candidate[len(candidate)-1:] + suffix
+			candidate = candidate[:len(candidate)-1]
+		}
+		return signedurl.Redact(candidate) + suffix
+	})
+	if message == err.Error() {
+		return err
+	}
+	return sanitizedCloudError{cause: err, message: message}
 }
 
 func buildS3BucketURL(bucket string, cfg ObjectParameters, endpointHint string) string {

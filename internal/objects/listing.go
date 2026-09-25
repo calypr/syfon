@@ -7,8 +7,114 @@ import (
 	"strings"
 
 	"github.com/calypr/syfon/apigen/drs"
+	"github.com/calypr/syfon/apigen/errorapi"
+	clientaccess "github.com/calypr/syfon/client/access"
 	"github.com/calypr/syfon/internal/access"
 )
+
+type RepairCandidateQuery struct {
+	Scope      Scope
+	Bucket     string
+	Prefix     string
+	StartAfter string
+	Limit      int
+}
+
+type RepairCandidatePage struct {
+	Objects        []drs.DrsObject
+	Scanned        int
+	NextStartAfter string
+}
+
+type repairCandidateObjectStore interface {
+	ListRepairCandidateObjectIDs(context.Context, RepairCandidateQuery) ([]string, error)
+}
+
+// ObjectIDPageQuery selects one deterministic page of object IDs. An empty
+// ObjectURL pages by scope; a non-empty URL also filters by the access method.
+type ObjectIDPageQuery struct {
+	Scope                      Scope
+	ObjectURL                  string
+	StartAfter                 string
+	Limit                      int
+	Offset                     int
+	VisibleResources           []string
+	IncludeUnscoped            bool
+	RestrictToVisibleResources bool
+}
+
+// ListRepairCandidates returns checksum-identified records whose access rows
+// are missing but whose stored S3 URL belongs to the requested project scope.
+func (s *Service) ListRepairCandidates(ctx context.Context, query RepairCandidateQuery) (RepairCandidatePage, error) {
+	scope, err := NewScope(query.Scope.Organization, query.Scope.Project)
+	if err != nil {
+		return RepairCandidatePage{}, err
+	}
+	if scope.Organization == "" || scope.Project == "" {
+		return RepairCandidatePage{}, fmt.Errorf("%w: repair candidates require an organization and project", errorapi.ErrInvalidInput)
+	}
+	if query.Limit < 0 {
+		return RepairCandidatePage{}, fmt.Errorf("%w: repair candidate limit must be >= 0", errorapi.ErrInvalidInput)
+	}
+	if query.Limit == 0 {
+		return RepairCandidatePage{}, nil
+	}
+	query.Scope = scope
+	query.Bucket = strings.TrimSpace(query.Bucket)
+	query.Prefix = strings.Trim(strings.TrimSpace(query.Prefix), "/")
+	query.StartAfter = strings.TrimSpace(query.StartAfter)
+	if query.Bucket == "" {
+		return RepairCandidatePage{}, fmt.Errorf("%w: repair candidate bucket is required", errorapi.ErrInvalidInput)
+	}
+	resource, err := clientaccess.ResourcePath(scope.Organization, scope.Project)
+	if err != nil {
+		return RepairCandidatePage{}, err
+	}
+	if access.IsAuthzEnforced(ctx) &&
+		!access.HasObjectMethodAccess(ctx, objectMethodRead, []string{resource}) &&
+		!access.HasMethodAccess(ctx, objectMethodRead, []string{"/programs"}) &&
+		!access.HasMethodAccess(ctx, objectMethodRead, []string{"/data_file"}) {
+		return RepairCandidatePage{}, errorapi.ErrAccessDenied
+	}
+	store, ok := s.store.(repairCandidateObjectStore)
+	if !ok {
+		return RepairCandidatePage{}, fmt.Errorf("repair candidate persistence is not configured")
+	}
+	ids, err := store.ListRepairCandidateObjectIDs(ctx, query)
+	if err != nil {
+		return RepairCandidatePage{}, err
+	}
+	page := RepairCandidatePage{Scanned: len(ids)}
+	if len(ids) == 0 {
+		return page, nil
+	}
+	page.NextStartAfter = ids[len(ids)-1]
+	records, err := s.store.GetBulkObjects(ctx, ids)
+	if err != nil {
+		return RepairCandidatePage{}, err
+	}
+	for _, record := range records {
+		hasResource := false
+		for _, existing := range AccessResources(&record) {
+			if existing == resource {
+				hasResource = true
+				break
+			}
+		}
+		if hasResource {
+			continue
+		}
+		sha, ok := CanonicalSHA256(record.Checksums)
+		if !ok {
+			continue
+		}
+		id, err := MintRecordIDFromChecksum(sha, []string{resource})
+		if err == nil && id == record.Id {
+			page.Objects = append(page.Objects, record)
+		}
+	}
+	return page, nil
+}
 
 // ListObjects returns one authorized page after project checksum-family merging.
 func (s *Service) ListObjects(ctx context.Context, query RecordListQuery) ([]drs.DrsObject, error) {
@@ -82,7 +188,16 @@ func (s *Service) ListObjects(ctx context.Context, query RecordListQuery) ([]drs
 		if access.IsGen3Mode(ctx) && access.IsAuthzEnforced(ctx) && !access.HasAuthHeader(ctx) {
 			return []drs.DrsObject{}, nil
 		}
-		ids, err := s.store.ListObjectIDsPageByURL(ctx, query.ObjectURL, scope.Organization, scope.Project, query.StartAfter, query.Limit, offset, resources, unscoped, restricted)
+		ids, err := s.store.ListObjectIDsPage(ctx, ObjectIDPageQuery{
+			Scope:                      scope,
+			ObjectURL:                  query.ObjectURL,
+			StartAfter:                 query.StartAfter,
+			Limit:                      query.Limit,
+			Offset:                     offset,
+			VisibleResources:           resources,
+			IncludeUnscoped:            unscoped,
+			RestrictToVisibleResources: restricted,
+		})
 		if err != nil {
 			return nil, err
 		}
@@ -113,12 +228,13 @@ func (s *Service) prepareScopedRecords(ctx context.Context, records []drs.DrsObj
 
 func (s *Service) listScopeRecords(ctx context.Context, query RecordListQuery, offset int) ([]drs.DrsObject, error) {
 	resources, unscoped, restricted := objectMethodResourceFilter(ctx, query.RequiredMethod)
-	pageByAuthorization, canPageByAuthorization := s.store.(AuthorizedScopePager)
-	databasePage := (!restricted && len(resources) == 0 && unscoped) || (restricted && canPageByAuthorization)
-	var allIDs []string
-	if !databasePage {
+	// Broad write access has no row-level visibility filter, so canonicalize all
+	// matching checksum siblings before applying pagination.
+	materializeCanonicalIDs := !restricted && !unscoped
+	var canonicalIDs []string
+	if materializeCanonicalIDs {
 		var err error
-		allIDs, err = s.ListObjectIDsByScope(ctx, query.Scope.Organization, query.Scope.Project, query.RequiredMethod)
+		canonicalIDs, err = s.ListObjectIDsByScope(ctx, query.Scope.Organization, query.Scope.Project, query.RequiredMethod)
 		if err != nil {
 			return nil, err
 		}
@@ -133,16 +249,21 @@ func (s *Service) listScopeRecords(ctx context.Context, query RecordListQuery, o
 	seen := make(map[string]struct{})
 	for len(collected) < target {
 		var ids []string
-		var err error
-		if databasePage && restricted && canPageByAuthorization {
-			ids, err = pageByAuthorization.ListObjectIDsPageByAuthorizedScope(ctx, query.Scope.Organization, query.Scope.Project, rawStart, batchSize, 0, resources, unscoped, restricted)
-		} else if databasePage {
-			ids, err = s.store.ListObjectIDsPageByScope(ctx, query.Scope.Organization, query.Scope.Project, rawStart, batchSize, 0)
+		if materializeCanonicalIDs {
+			ids = pageIDs(canonicalIDs, rawStart, batchSize, 0)
 		} else {
-			ids = pageIDs(allIDs, rawStart, batchSize, 0)
-		}
-		if err != nil {
-			return nil, err
+			var err error
+			ids, err = s.store.ListObjectIDsPage(ctx, ObjectIDPageQuery{
+				Scope:                      query.Scope,
+				StartAfter:                 rawStart,
+				Limit:                      batchSize,
+				VisibleResources:           resources,
+				IncludeUnscoped:            unscoped,
+				RestrictToVisibleResources: restricted,
+			})
+			if err != nil {
+				return nil, err
+			}
 		}
 		if len(ids) == 0 {
 			break

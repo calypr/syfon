@@ -22,6 +22,8 @@ type reportStoreSpy struct {
 	summaries      metricsapi.FileUsageSummary
 	transfer       map[string]metricsapi.TransferAttributionSummary
 	breakdowns     map[string][]metricsapi.TransferAttributionBreakdown
+	usageRequests  []string
+	bulkRequests   [][]string
 	listCalls      int
 	summaryCalls   int
 	transferCalls  int
@@ -29,6 +31,7 @@ type reportStoreSpy struct {
 }
 
 func (s *reportStoreSpy) GetFileUsage(_ context.Context, objectID string) (*metricsapi.FileUsage, error) {
+	s.usageRequests = append(s.usageRequests, objectID)
 	for _, item := range s.files {
 		if item.ObjectId != nil && *item.ObjectId == objectID {
 			copy := item
@@ -39,6 +42,7 @@ func (s *reportStoreSpy) GetFileUsage(_ context.Context, objectID string) (*metr
 }
 
 func (s *reportStoreSpy) ListFileUsageByObjectIDs(_ context.Context, ids []string) ([]metricsapi.FileUsage, error) {
+	s.bulkRequests = append(s.bulkRequests, append([]string(nil), ids...))
 	if ids == nil {
 		return nil, nil
 	}
@@ -92,7 +96,7 @@ func (s *reportStoreSpy) QueryTransferSummary(_ context.Context, filter Filter, 
 	return s.transfer[filter.Organization], nil
 }
 
-func (s *reportStoreSpy) QueryTransferBreakdown(_ context.Context, filter Filter, _ string, _ []string) ([]metricsapi.TransferAttributionBreakdown, error) {
+func (s *reportStoreSpy) QueryTransferBreakdown(_ context.Context, filter Filter, _ string, _ []string, _, _ int) ([]metricsapi.TransferAttributionBreakdown, error) {
 	s.breakdownCalls++
 	return append([]metricsapi.TransferAttributionBreakdown(nil), s.breakdowns[filter.Organization]...), nil
 }
@@ -145,18 +149,43 @@ func (s *optimizedReportStore) QueryTransferSummary(_ context.Context, _ Filter,
 	return metricsapi.TransferAttributionSummary{EventCount: ptr(int64(9))}, nil
 }
 
-func (s *optimizedReportStore) QueryTransferBreakdown(_ context.Context, _ Filter, _ string, resources []string) ([]metricsapi.TransferAttributionBreakdown, error) {
+func (s *optimizedReportStore) QueryTransferBreakdown(_ context.Context, _ Filter, _ string, resources []string, _, _ int) ([]metricsapi.TransferAttributionBreakdown, error) {
 	s.breakdownByResources++
 	s.lastResources = append([]string(nil), resources...)
 	return []metricsapi.TransferAttributionBreakdown{{Key: ptr("resource-fast-path")}}, nil
 }
 
 type objectReaderSpy struct {
-	ids map[string][]string
+	ids               map[string][]string
+	canonicalIDs      map[string]string
+	requested         [][]string
+	resolutionRequest [][]string
 }
 
-func (s *objectReaderSpy) ListObjectIDsByScope(_ context.Context, organization, project, _ string) ([]string, error) {
-	return append([]string(nil), s.ids[organization+"/"+project]...), nil
+func (s *objectReaderSpy) ResolveObjectIDs(_ context.Context, ids []string) (map[string]string, error) {
+	s.resolutionRequest = append(s.resolutionRequest, append([]string(nil), ids...))
+	resolved := make(map[string]string)
+	for _, id := range ids {
+		if canonical, ok := s.canonicalIDs[id]; ok {
+			resolved[id] = canonical
+		}
+	}
+	return resolved, nil
+}
+
+func (s *objectReaderSpy) ListReadableObjectIDsAmong(_ context.Context, organization, project string, requested []string) ([]string, error) {
+	s.requested = append(s.requested, append([]string(nil), requested...))
+	wanted := make(map[string]struct{}, len(requested))
+	for _, id := range requested {
+		wanted[id] = struct{}{}
+	}
+	result := make([]string, 0, len(requested))
+	for _, id := range s.ids[organization+"/"+project] {
+		if _, ok := wanted[id]; ok {
+			result = append(result, id)
+		}
+	}
+	return result, nil
 }
 
 func TestServiceUsesScopedReportCapabilities(t *testing.T) {
@@ -232,8 +261,51 @@ func TestScopedFileUsageBatchPreservesOrderMembershipAndInactiveCutoff(t *testin
 	if !reflect.DeepEqual(items, []metricsapi.FileUsage{{ObjectId: ptr("a"), LastDownloadTime: &old}}) {
 		t.Fatalf("items = %+v", items)
 	}
+	if len(objects.requested) != 1 || !reflect.DeepEqual(objects.requested[0], []string{"b", "missing", "a"}) {
+		t.Fatalf("scoped lookup requested %v, want only batch IDs", objects.requested)
+	}
 	if _, err := service.GetScopedFileUsage(context.Background(), "missing", ScopeQuery{Organization: "org", Project: "project"}); !errors.Is(err, errorapi.ErrNotFound) {
 		t.Fatalf("missing scoped file error = %v", err)
+	}
+}
+
+func TestScopedFileUsageResolvesAliasesBeforeMembershipAndLookup(t *testing.T) {
+	canonicalUsage := metricsapi.FileUsage{ObjectId: ptr("canonical"), UploadCount: ptr(int64(4))}
+	objects := &objectReaderSpy{
+		ids:          map[string][]string{"org/project": {"canonical"}},
+		canonicalIDs: map[string]string{"alias": "canonical", "private-alias": "private"},
+	}
+	store := &reportStoreSpy{files: []metricsapi.FileUsage{canonicalUsage, {ObjectId: ptr("private")}}}
+	service := NewService(Dependencies{Reports: store, Objects: objects})
+	scope := ScopeQuery{Organization: "org", Project: "project"}
+
+	items, err := service.ListFileUsageBatch(context.Background(), FileUsageBatchQuery{
+		Scope:     scope,
+		ObjectIDs: []string{" alias ", "alias", ""},
+	})
+	if err != nil || !reflect.DeepEqual(items, []metricsapi.FileUsage{canonicalUsage}) {
+		t.Fatalf("ListFileUsageBatch() = %+v, %v; want canonical usage", items, err)
+	}
+	if !reflect.DeepEqual(objects.requested[0], []string{"canonical"}) || !reflect.DeepEqual(store.bulkRequests[0], []string{"canonical"}) {
+		t.Fatalf("batch membership=%v usage=%v; want canonical ID once", objects.requested, store.bulkRequests)
+	}
+
+	item, err := service.GetScopedFileUsage(context.Background(), "alias", scope)
+	if err != nil || item == nil || item.ObjectId == nil || *item.ObjectId != "canonical" {
+		t.Fatalf("GetScopedFileUsage(alias) = %+v, %v; want canonical usage", item, err)
+	}
+	if objects.requested[1][0] != "canonical" || store.usageRequests[0] != "canonical" {
+		t.Fatalf("single membership=%v usage=%v; want canonical ID", objects.requested[1], store.usageRequests)
+	}
+
+	if _, err := service.GetScopedFileUsage(context.Background(), "private-alias", scope); !errors.Is(err, errorapi.ErrNotFound) {
+		t.Fatalf("out-of-scope alias error = %v, want not found", err)
+	}
+	if len(store.usageRequests) != 1 {
+		t.Fatalf("out-of-scope alias reached report store: %v", store.usageRequests)
+	}
+	if !reflect.DeepEqual(objects.resolutionRequest, [][]string{{"alias"}, {"alias"}, {"private-alias"}}) {
+		t.Fatalf("alias resolution requests = %v", objects.resolutionRequest)
 	}
 }
 

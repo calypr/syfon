@@ -19,7 +19,7 @@ func (s *backend) Delete(ctx context.Context, binding storage.ProviderBinding, t
 	byBucket := make(map[string][]string)
 	for _, target := range targets {
 		bucket := strings.TrimSpace(target.PhysicalBucket)
-		key := strings.Trim(strings.TrimSpace(target.Key), "/")
+		key := target.Key
 		if bucket == "" || key == "" {
 			continue
 		}
@@ -81,7 +81,6 @@ func dedupeSorted(values []string) []string {
 	seen := make(map[string]struct{}, len(values))
 	result := make([]string, 0, len(values))
 	for _, value := range values {
-		value = strings.TrimSpace(value)
 		if value == "" {
 			continue
 		}

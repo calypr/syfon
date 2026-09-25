@@ -1,6 +1,7 @@
 package sqlite
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"strings"
@@ -13,7 +14,14 @@ import (
 func NewSqliteDB(dsn string, cipher store.CredentialCodec) (*store.Store, error) {
 	var err error
 	if cipher == nil {
-		cipher, err = credentialcipher.NewFromEnv()
+		cipherConfig := credentialcipher.ConfigFromEnv()
+		if cipherConfig.SQLiteFile == "" {
+			path, _, _ := strings.Cut(dsn, "?")
+			if path != ":memory:" && path != "file::memory:" {
+				cipherConfig.SQLiteFile = path
+			}
+		}
+		cipher, err = credentialcipher.New(cipherConfig)
 		if err != nil {
 			return nil, err
 		}
@@ -31,7 +39,7 @@ func NewSqliteDB(dsn string, cipher store.CredentialCodec) (*store.Store, error)
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
-	shared, err := store.Open(db, sqliteDialect{}, cipher)
+	shared, err := store.Open(context.Background(), db, sqliteDialect{}, cipher)
 	if err != nil {
 		return nil, err
 	}
@@ -39,29 +47,30 @@ func NewSqliteDB(dsn string, cipher store.CredentialCodec) (*store.Store, error)
 }
 
 func sqliteDSN(dsn string) string {
-	if marker := strings.Index(dsn, "_txlock="); marker >= 0 {
-		end := strings.IndexAny(dsn[marker:], "&")
-		if end < 0 {
-			end = len(dsn) - marker
-		}
-		dsn = dsn[:marker] + "_txlock=immediate" + dsn[marker+end:]
+	if dsn == ":memory:" {
+		dsn = "file::memory:"
 	}
+	path, query, _ := strings.Cut(dsn, "?")
 	params := make([]string, 0, 2)
-	if !strings.Contains(dsn, "_foreign_keys=") {
+	if query != "" {
+		params = strings.Split(query, "&")
+	}
+	foreignKeys, txLock := false, false
+	for i, param := range params {
+		key, _, _ := strings.Cut(param, "=")
+		switch key {
+		case "_foreign_keys":
+			foreignKeys = true
+		case "_txlock":
+			params[i] = "_txlock=immediate"
+			txLock = true
+		}
+	}
+	if !foreignKeys {
 		params = append(params, "_foreign_keys=on")
 	}
-	if !strings.Contains(dsn, "_txlock=") {
+	if !txLock {
 		params = append(params, "_txlock=immediate")
 	}
-	if dsn == ":memory:" {
-		return "file::memory:?" + strings.Join(params, "&")
-	}
-	if len(params) == 0 {
-		return dsn
-	}
-	separator := "?"
-	if strings.Contains(dsn, "?") {
-		separator = "&"
-	}
-	return dsn + separator + strings.Join(params, "&")
+	return path + "?" + strings.Join(params, "&")
 }

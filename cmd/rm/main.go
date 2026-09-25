@@ -36,10 +36,10 @@ var Cmd = &cobra.Command{
 
 		controlled := clientaccess.NormalizeAccessResources(derefStringSlice(rec.ControlledAccess))
 		if len(controlled) <= 1 {
-			if err := c.DRS().DeleteObject(cmd.Context(), did, true); err != nil {
+			if err := c.DRS().DeleteObject(cmd.Context(), did, false); err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "removed %s and attempted storage purge\n", did)
+			fmt.Fprintf(cmd.OutOrStdout(), "removed metadata for %s; storage data was preserved\n", did)
 			return nil
 		}
 

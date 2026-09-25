@@ -45,7 +45,10 @@ var Cmd = &cobra.Command{
 			if rec.Size != nil {
 				expectedSize = *rec.Size
 			}
-			outPath = name
+			outPath, err = safeDefaultOutputFilename(name)
+			if err != nil {
+				return fmt.Errorf("resolve output filename from record: %w", err)
+			}
 		} else {
 			rec, err := c.Index().Get(ctx, did)
 			if err == nil && rec.Size != nil {
@@ -74,6 +77,14 @@ var Cmd = &cobra.Command{
 		fmt.Fprintf(cmd.OutOrStdout(), "downloaded %s -> %s\n", did, outPath)
 		return nil
 	},
+}
+
+func safeDefaultOutputFilename(name string) (string, error) {
+	filename := filepath.Base(strings.TrimSpace(name))
+	if filename == "." || filename == ".." || !filepath.IsLocal(filename) {
+		return "", fmt.Errorf("record name %q does not produce a safe output filename", name)
+	}
+	return filename, nil
 }
 
 func init() {

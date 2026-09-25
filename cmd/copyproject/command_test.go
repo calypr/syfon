@@ -3,6 +3,8 @@ package copyproject
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -27,6 +29,7 @@ func TestCopyProjectContinuesAfterRecordErrorAndReportsCounts(t *testing.T) {
 	sourceURL := fileURL(t, sourcePath)
 	targetURL := fileURL(t, targetPath)
 	size := int64(len("copy-project payload"))
+	var registeredAccessMethods []drsapi.AccessMethod
 
 	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -63,7 +66,8 @@ func TestCopyProjectContinuesAfterRecordErrorAndReportsCounts(t *testing.T) {
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/data/buckets":
-			writeCommandJSON(w, http.StatusOK, bucketapi.BucketsResponse{S3BUCKETS: map[string]bucketapi.BucketMetadata{"target-bucket": {}}})
+			provider := "gcs"
+			writeCommandJSON(w, http.StatusOK, bucketapi.BucketsResponse{S3BUCKETS: map[string]bucketapi.BucketMetadata{"target-bucket": {Provider: &provider}}})
 		case r.Method == http.MethodGet && r.URL.Path == "/data/buckets/target-bucket/scopes":
 			writeCommandJSON(w, http.StatusOK, []bucketapi.BucketScopeResponse{
 				{Organization: "target-org", Path: stringPtr("s3://target-bucket/organizations/target-org")},
@@ -74,8 +78,20 @@ func TestCopyProjectContinuesAfterRecordErrorAndReportsCounts(t *testing.T) {
 		case r.Method == http.MethodGet && r.URL.Path == "/ga4gh/drs/v1/objects/did-copy":
 			http.NotFound(w, r)
 		case r.Method == http.MethodPost && r.URL.Path == "/ga4gh/drs/v1/objects/register":
+			var body drsapi.RegisterObjectsJSONRequestBody
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("decode DRS registration: %v", err)
+			}
+			if len(body.Candidates) == 1 && body.Candidates[0].AccessMethods != nil {
+				registeredAccessMethods = append([]drsapi.AccessMethod(nil), (*body.Candidates[0].AccessMethods)...)
+			}
 			writeCommandJSON(w, http.StatusCreated, drsapi.N201ObjectsCreated{})
 		case r.Method == http.MethodPut && r.URL.Path == "/ga4gh/drs/v1/objects/did-copy/access-methods":
+			var body drsapi.UpdateObjectAccessMethodsJSONRequestBody
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("decode access-method update: %v", err)
+			}
+			registeredAccessMethods = append([]drsapi.AccessMethod(nil), body.AccessMethods...)
 			writeCommandJSON(w, http.StatusOK, drsapi.DrsObject{Id: "did-copy"})
 		case r.Method == http.MethodGet && r.URL.Path == "/index/did-copy":
 			http.NotFound(w, r)
@@ -123,6 +139,11 @@ func TestCopyProjectContinuesAfterRecordErrorAndReportsCounts(t *testing.T) {
 	}
 	if !strings.Contains(errorsOutput.String(), "warning: skipping did-skip: failed to download file did-skip") {
 		t.Fatalf("copy errors = %q; want skip warning", errorsOutput.String())
+	}
+	digest := sha256.Sum256([]byte("copy-project payload"))
+	wantAccessURL := "gs://target-bucket/organizations/target-org/projects/target-project/" + hex.EncodeToString(digest[:])
+	if len(registeredAccessMethods) != 1 || registeredAccessMethods[0].Type != drsapi.AccessMethodType("gs") || registeredAccessMethods[0].AccessUrl == nil || registeredAccessMethods[0].AccessUrl.Url != wantAccessURL {
+		t.Fatalf("registered target access methods = %+v; want GCS URL %q", registeredAccessMethods, wantAccessURL)
 	}
 }
 

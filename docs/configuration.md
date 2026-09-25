@@ -38,7 +38,7 @@ database:
     user: syfon
     password: REDACTED
     database: syfon
-    sslmode: require
+    sslmode: verify-full
 ```
 
 Both modes need a storage entry when the server handles object transfers. Use `buckets` for new configs:
@@ -96,10 +96,12 @@ database:
     user: syfon
     password: REDACTED
     database: syfon
-    sslmode: require
+    sslmode: verify-full
 ```
 
 The fields map to `DRS_DB_HOST`, `DRS_DB_PORT`, `DRS_DB_USER`, `DRS_DB_PASSWORD`, `DRS_DB_DATABASE`, and `DRS_DB_SSLMODE`.
+
+`verify-full` is the default for PostgreSQL connections. Configure a trusted server certificate whose hostname matches `host`. Production accepts `sslmode: disable` only when `allow_insecure_transport: true` is set explicitly.
 
 `DRS_DB_HOST` or `DRS_DB_DATABASE` selects PostgreSQL when the file does not already define a backend. If no backend is selected, setting `DRS_DB_PORT`, `DRS_DB_USER`, `DRS_DB_PASSWORD`, or `DRS_DB_SSLMODE` alone returns an error. Set `DRS_DB_HOST` or `DRS_DB_DATABASE` to select PostgreSQL first.
 
@@ -236,6 +238,8 @@ routes:
 ```
 
 The groups are `docs`, `ga4gh`, `internal`, `lfs`, and `metrics`. Environment overrides are `DRS_ENABLE_DOCS`, `DRS_ENABLE_GA4GH`, `DRS_ENABLE_INTERNAL`, `DRS_ENABLE_LFS`, and `DRS_ENABLE_METRICS`.
+
+The docs group is supported in the production profile. Swagger UI and every OpenAPI document route are intentionally public so clients can discover the API before authenticating. Protect the surrounding API route groups with the configured authentication mode.
 
 ## `lfs`
 

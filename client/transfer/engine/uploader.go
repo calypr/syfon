@@ -303,6 +303,9 @@ func (u *GenericUploader) uploadMultipart(ctx context.Context, req transfer.Tran
 	}
 	close(chunks)
 
+	partCtx, cancelParts := context.WithCancel(ctx)
+	defer cancelParts()
+
 	var (
 		wg        sync.WaitGroup
 		mu        sync.Mutex
@@ -315,7 +318,26 @@ func (u *GenericUploader) uploadMultipart(ctx context.Context, req transfer.Tran
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for partNum := range chunks {
+			for {
+				if partCtx.Err() != nil {
+					return
+				}
+				var (
+					partNum int
+					ok      bool
+				)
+				select {
+				case <-partCtx.Done():
+					return
+				case partNum, ok = <-chunks:
+					if !ok {
+						return
+					}
+				}
+				if partCtx.Err() != nil {
+					return
+				}
+
 				offset := int64(partNum-1) * chunkSize
 				partSize := chunkSize
 				if offset+partSize > fileSize {
@@ -323,11 +345,14 @@ func (u *GenericUploader) uploadMultipart(ctx context.Context, req transfer.Tran
 				}
 
 				strategy := transfer.DefaultBackoff()
-				err := transfer.RetryAction(ctx, logger, strategy, common.MaxRetryCount, func() error {
+				err := transfer.RetryAction(partCtx, logger, strategy, common.MaxRetryCount, func() error {
+					if err := partCtx.Err(); err != nil {
+						return transfer.NonRetryable(err)
+					}
 					tracker.ResetPart(partNum)
 					section := io.NewSectionReader(file, offset, partSize)
 					partReader := newMultipartPartProgressReader(section, tracker, partNum, partSize)
-					etag, retryErr := u.Backend.MultipartPart(ctx, objectKey, state.UploadID, partNum, partReader)
+					etag, retryErr := u.Backend.MultipartPart(partCtx, objectKey, state.UploadID, partNum, partReader)
 					if retryErr != nil {
 						if isProgressCallbackError(retryErr) {
 							return transfer.NonRetryable(retryErr)
@@ -352,7 +377,10 @@ func (u *GenericUploader) uploadMultipart(ctx context.Context, req transfer.Tran
 				})
 				if err != nil {
 					mu.Lock()
-					uploadErr = err
+					if uploadErr == nil {
+						uploadErr = err
+						cancelParts()
+					}
 					mu.Unlock()
 					return
 				}
@@ -363,6 +391,9 @@ func (u *GenericUploader) uploadMultipart(ctx context.Context, req transfer.Tran
 
 	if uploadErr != nil {
 		return "", fmt.Errorf("multipart upload failed: %w", uploadErr)
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
 	}
 
 	parts := make([]transfer.MultipartPart, 0, len(state.Completed))

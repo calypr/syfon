@@ -17,4 +17,8 @@
 } |
 .components.schemas.DrsService.properties.drs.properties.controlledAccessDefault = {
   "$ref": "#/components/schemas/DrsServiceDrsControlledAccessDefault"
-}
+} |
+.components.schemas.DrsObjectCandidate.description = "Syfon supports blob-only registration through `/objects/register`. Any non-null `contents` or `mime_type` value submitted in a candidate is rejected because Syfon cannot persist either field." |
+.components.schemas.DrsObjectCandidate.properties.mime_type.description = "A string providing the mime-type of the `DrsObject`. Syfon rejects a non-null value because it cannot persist this field." |
+.components.schemas.DrsObjectCandidate.properties.contents.description = "DRS bundle contents. Syfon supports blob-only registration and rejects a non-null value because it cannot persist this field." |
+.paths."/objects/register".post.description += "\n\n**Syfon registration**: Syfon supports blob-only registration. Candidates with non-null `contents` or `mime_type` values receive HTTP 400 because Syfon cannot persist either field."

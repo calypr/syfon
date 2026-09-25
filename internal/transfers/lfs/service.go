@@ -3,6 +3,10 @@ package lfs
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +16,7 @@ import (
 	"github.com/calypr/syfon/apigen/drs"
 	"github.com/calypr/syfon/apigen/errorapi"
 	"github.com/calypr/syfon/apigen/lfsapi"
+	"github.com/calypr/syfon/client/signedurl"
 	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/objects"
@@ -21,19 +26,45 @@ import (
 )
 
 const multipartPartSize = 64 * 1024 * 1024
-const PendingMetadataTTL = 20 * time.Minute
+const maxMultipartParts = 10_000
+const MaxUploadSizeBytes = multipartPartSize * maxMultipartParts
+
+const (
+	PendingMetadataTTL    = 20 * time.Minute
+	MaxPendingMetadataTTL = 24 * time.Hour
+)
+
+const uploadReceiptTTL = 24 * time.Hour
+const multipartCleanupTimeout = 10 * time.Second
 
 type PendingMetadata struct {
-	OID       string
-	Candidate lfsapi.DrsObjectCandidate
-	CreatedAt time.Time
-	ExpiresAt time.Time
+	OID           string
+	Candidate     lfsapi.DrsObjectCandidate
+	UploadReceipt *UploadReceipt
+	CreatedAt     time.Time
+	ExpiresAt     time.Time
+}
+
+// UploadReceipt is durable evidence that the bytes for an LFS object were
+// fully received, matched its OID, and were committed to storage.
+type UploadReceipt struct {
+	OID         string    `json:"oid"`
+	Size        int64     `json:"size"`
+	SHA256      string    `json:"sha256"`
+	StorageURL  string    `json:"storage_url"`
+	CompletedAt time.Time `json:"completed_at"`
+	ExpiresAt   time.Time `json:"expires_at"`
 }
 
 type PendingStore interface {
 	SavePendingMetadata(context.Context, []PendingMetadata) error
 	GetPendingMetadata(context.Context, string) (*PendingMetadata, error)
 	ConsumePendingMetadata(context.Context, PendingMetadata) (bool, error)
+}
+
+type UploadEvidenceStore interface {
+	SaveLFSUploadReceipt(context.Context, UploadReceipt) error
+	GetLFSUploadReceipt(context.Context, string) (*UploadReceipt, error)
 }
 
 type UploadAccounting interface {
@@ -69,7 +100,7 @@ func uploadSignedMultipartPart(ctx context.Context, signedURL string, content []
 
 type ObjectPort interface {
 	GetObject(context.Context, string, string) (*drs.DrsObject, error)
-	RegisterObjects(context.Context, []drs.DrsObject) ([]drs.DrsObject, error)
+	RegisterObjectsIfPending(context.Context, []drs.DrsObject, objects.PendingRegistration) ([]drs.DrsObject, error)
 }
 
 type DownloadPreparation struct{ SignedURL string }
@@ -189,9 +220,17 @@ func (s *Service) PrepareUpload(ctx context.Context, oid string, size int64) (Up
 	return result, nil
 }
 
-func (s *Service) UploadProxy(ctx context.Context, oid string, body io.Reader) error {
+func (s *Service) UploadProxy(ctx context.Context, oid string, body io.Reader) (returnErr error) {
 	if s == nil || s.transfer == nil || s.objects == nil {
 		return fmt.Errorf("LFS upload service is not configured")
+	}
+	oid = objects.NormalizeOID(oid)
+	if oid == "" {
+		return fmt.Errorf("invalid LFS upload OID")
+	}
+	evidence, ok := s.pending.(UploadEvidenceStore)
+	if !ok {
+		return fmt.Errorf("LFS upload evidence store is not configured")
 	}
 	target, objectID, authorization, err := s.resolveUploadTarget(ctx, oid)
 	if err != nil {
@@ -201,10 +240,22 @@ func (s *Service) UploadProxy(ctx context.Context, oid string, body io.Reader) e
 	if err != nil {
 		return fmt.Errorf("failed to initialize multipart upload: %w", err)
 	}
-	_ = target
+	multipartCompleted := false
+	defer func() {
+		if multipartCompleted {
+			return
+		}
+		abortCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), multipartCleanupTimeout)
+		defer cancel()
+		if abortErr := s.transfer.AbortMultipart(abortCtx, init.UploadID); abortErr != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("failed to abort incomplete LFS multipart upload: %w", abortErr))
+		}
+	}()
 	parts := make([]transfers.CompletedPart, 0, 16)
 	partNumber := int32(1)
 	buffer := make([]byte, multipartPartSize)
+	hasher := sha256.New()
+	var uploadedBytes int64
 	for {
 		readCount, readErr := io.ReadFull(body, buffer)
 		if readErr == io.EOF || (readErr == io.ErrUnexpectedEOF && readCount == 0) {
@@ -213,13 +264,20 @@ func (s *Service) UploadProxy(ctx context.Context, oid string, body io.Reader) e
 		if readErr != nil && readErr != io.ErrUnexpectedEOF {
 			return fmt.Errorf("failed reading upload stream: %w", readErr)
 		}
+		uploadedBytes += int64(readCount)
+		if uploadedBytes > MaxUploadSizeBytes {
+			return &UploadSizeLimitError{Limit: MaxUploadSizeBytes}
+		}
+		if _, err := hasher.Write(buffer[:readCount]); err != nil {
+			return fmt.Errorf("failed hashing upload stream: %w", err)
+		}
 		partURL, err := s.transfer.SignMultipartPart(ctx, init.UploadID, partNumber)
 		if err != nil {
 			return fmt.Errorf("failed to sign multipart part: %w", err)
 		}
 		etag, err := s.uploader(ctx, partURL, buffer[:readCount])
 		if err != nil {
-			return fmt.Errorf("failed uploading multipart part: %w", err)
+			return fmt.Errorf("failed uploading multipart part %d: %w", partNumber, signedurl.RedactError(err, partURL))
 		}
 		parts = append(parts, transfers.CompletedPart{PartNumber: partNumber, ETag: etag})
 		partNumber++
@@ -234,17 +292,35 @@ func (s *Service) UploadProxy(ctx context.Context, oid string, body io.Reader) e
 		}
 		etag, err := s.uploader(ctx, partURL, nil)
 		if err != nil {
-			return fmt.Errorf("failed uploading multipart part: %w", err)
+			return fmt.Errorf("failed uploading multipart part 1: %w", signedurl.RedactError(err, partURL))
 		}
 		parts = append(parts, transfers.CompletedPart{PartNumber: 1, ETag: etag})
+	}
+	actualOID := hex.EncodeToString(hasher.Sum(nil))
+	if actualOID != oid {
+		return &UploadIntegrityError{ExpectedOID: oid, ActualOID: actualOID, Size: uploadedBytes}
 	}
 	if _, err := s.transfer.CompleteMultipart(ctx, init.UploadID, parts); err != nil {
 		return fmt.Errorf("failed to complete multipart upload: %w", err)
 	}
+	multipartCompleted = true
+	completedAt := s.currentTime()
+	finalizeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), multipartCleanupTimeout)
+	defer cancel()
+	if err := evidence.SaveLFSUploadReceipt(finalizeCtx, UploadReceipt{
+		OID:         oid,
+		Size:        uploadedBytes,
+		SHA256:      actualOID,
+		StorageURL:  target.CanonicalURL,
+		CompletedAt: completedAt,
+		ExpiresAt:   completedAt.Add(uploadReceiptTTL),
+	}); err != nil {
+		return fmt.Errorf("failed to record completed upload evidence: %w", err)
+	}
 	if s.accounting == nil {
 		return fmt.Errorf("failed to record upload usage: file counters are not configured")
 	}
-	if err := s.accounting.RecordFileUpload(ctx, objectID); err != nil {
+	if err := s.accounting.RecordFileUpload(finalizeCtx, objectID); err != nil {
 		return fmt.Errorf("failed to record upload usage: %w", err)
 	}
 	return nil
@@ -303,7 +379,13 @@ func (s *Service) firstConfiguredBucket(ctx context.Context) (string, error) {
 	return strings.TrimSpace(credentials[0].Bucket), nil
 }
 
-func (s *Service) Stage(ctx context.Context, candidates []lfsapi.DrsObjectCandidate) error {
+func (s *Service) Stage(ctx context.Context, candidates []lfsapi.DrsObjectCandidate, ttl time.Duration) error {
+	if !access.HasObjectMethodAccess(ctx, "create", []string{"/data_file"}) {
+		return errorapi.ErrAccessDenied
+	}
+	if ttl < time.Second || ttl > MaxPendingMetadataTTL {
+		return fmt.Errorf("pending metadata TTL must be between 1s and %s", MaxPendingMetadataTTL)
+	}
 	now := s.currentTime()
 	entries := make([]PendingMetadata, 0, len(candidates))
 	for index, candidate := range candidates {
@@ -315,7 +397,7 @@ func (s *Service) Stage(ctx context.Context, candidates []lfsapi.DrsObjectCandid
 		if !ok {
 			return &MetadataStageError{Index: index, MissingSHA: true}
 		}
-		entries = append(entries, PendingMetadata{OID: oid, Candidate: candidate, CreatedAt: now, ExpiresAt: now.Add(PendingMetadataTTL)})
+		entries = append(entries, PendingMetadata{OID: oid, Candidate: candidate, CreatedAt: now, ExpiresAt: now.Add(ttl)})
 	}
 	if s.pending == nil {
 		return fmt.Errorf("pending LFS metadata store is not configured")
@@ -324,50 +406,150 @@ func (s *Service) Stage(ctx context.Context, candidates []lfsapi.DrsObjectCandid
 }
 
 func (s *Service) Verify(ctx context.Context, oid string, expectedSize int64) error {
+	if expectedSize < 0 {
+		return &MetadataCandidateError{Err: fmt.Errorf("size must be non-negative")}
+	}
+	if s == nil {
+		return fmt.Errorf("LFS verify service is not configured")
+	}
+	if s.objects == nil {
+		return fmt.Errorf("LFS object service is not configured")
+	}
+	oid = objects.NormalizeOID(oid)
+	if oid == "" {
+		return &MetadataCandidateError{Err: fmt.Errorf("invalid OID")}
+	}
 	object, objectErr := s.objects.GetObject(ctx, oid, "read")
 	if objectErr != nil && !errorapi.IsNotFoundError(objectErr) {
 		return objectErr
 	}
-	if objectErr == nil && object != nil {
+	existingObject := objectErr == nil && object != nil
+	if existingObject {
 		if err := verifyRecordedSize(expectedSize, object.Size); err != nil {
 			return err
 		}
 	}
 	if s.pending == nil {
-		if objectErr == nil {
+		if existingObject {
 			return nil
 		}
 		return fmt.Errorf("pending LFS metadata store is not configured")
 	}
 	pending, err := s.pending.GetPendingMetadata(ctx, oid)
-	if err == nil {
-		internalObject, err := materializeCandidate(pending.Candidate, s.currentTime())
-		if err != nil {
-			return &MetadataCandidateError{Err: err}
-		}
-		if err := verifyRecordedSize(expectedSize, internalObject.Size); err != nil {
-			return err
-		}
-		registered, err := s.objects.RegisterObjects(ctx, []drs.DrsObject{internalObject})
-		if err != nil {
-			return err
-		}
-		if len(registered) != 1 {
-			return fmt.Errorf("registration returned %d records, want 1", len(registered))
-		}
-		owned, err := s.pending.ConsumePendingMetadata(ctx, *pending)
-		if err != nil {
-			return err
-		}
-		if !owned {
+	if errorapi.IsNotFoundError(err) {
+		if existingObject {
 			return nil
 		}
-		return s.recordUpload(ctx, registered[0].Id)
+		return objectErr
 	}
-	if objectErr == nil && errorapi.IsNotFoundError(err) {
+	if err != nil {
+		return err
+	}
+	if !access.HasObjectMethodAccess(ctx, "create", []string{"/data_file"}) {
+		return errorapi.ErrAccessDenied
+	}
+	evidence, ok := s.pending.(UploadEvidenceStore)
+	if !ok {
+		return fmt.Errorf("LFS upload evidence store is not configured")
+	}
+	receipt, err := evidence.GetLFSUploadReceipt(ctx, oid)
+	if err != nil {
+		return err
+	}
+	if receipt == nil || receipt.OID != oid || objects.NormalizeOID(receipt.SHA256) != oid || receipt.StorageURL == "" || receipt.CompletedAt.IsZero() {
+		return &MetadataCandidateError{Err: fmt.Errorf("completed upload evidence does not match OID %s", oid)}
+	}
+	if err := verifyRecordedSize(expectedSize, receipt.Size); err != nil {
+		return &MetadataCandidateError{Err: fmt.Errorf("uploaded size: %w", err)}
+	}
+	internalObject, err := materializeCandidate(pending.Candidate, s.currentTime())
+	if err != nil {
+		return &MetadataCandidateError{Err: err}
+	}
+	if err := verifyRecordedSize(expectedSize, internalObject.Size); err != nil {
+		return err
+	}
+	storageURL, err := s.candidateStorageURL(ctx, &internalObject)
+	if err != nil {
+		return &MetadataCandidateError{Err: err}
+	}
+	if receipt.StorageURL == "" || storageURL != receipt.StorageURL {
+		return &MetadataCandidateError{Err: fmt.Errorf("uploaded storage target does not match staged metadata")}
+	}
+	candidateJSON, err := json.Marshal(pending.Candidate)
+	if err != nil {
+		return fmt.Errorf("encode staged LFS candidate: %w", err)
+	}
+	receiptJSON, err := json.Marshal(pending.UploadReceipt)
+	if err != nil {
+		return fmt.Errorf("encode staged LFS receipt: %w", err)
+	}
+	registered, err := s.objects.RegisterObjectsIfPending(ctx, []drs.DrsObject{internalObject}, objects.PendingRegistration{
+		OID: oid, CandidateJSON: candidateJSON, ReceiptJSON: receiptJSON,
+		CreatedAt: pending.CreatedAt, ExpiresAt: pending.ExpiresAt,
+	})
+	if err != nil {
+		if errors.Is(err, errorapi.ErrConflict) {
+			if _, pendingErr := s.pending.GetPendingMetadata(ctx, oid); errorapi.IsNotFoundError(pendingErr) {
+				if current, lookupErr := s.objects.GetObject(ctx, oid, "read"); lookupErr == nil && current != nil {
+					return nil
+				}
+			}
+		}
+		return err
+	}
+	if len(registered) != 1 {
+		return fmt.Errorf("registration returned %d records, want 1", len(registered))
+	}
+	owned, err := s.pending.ConsumePendingMetadata(ctx, *pending)
+	if err != nil {
+		return err
+	}
+	if !owned {
 		return nil
 	}
-	return err
+	return nil
+}
+
+func (s *Service) candidateStorageURL(ctx context.Context, object *drs.DrsObject) (string, error) {
+	if s.transfer != nil {
+		target, err := s.targetForObject(ctx, object)
+		if err != nil {
+			return "", err
+		}
+		return target.CanonicalURL, nil
+	}
+	var methods []drs.AccessMethod
+	if object.AccessMethods != nil {
+		methods = *object.AccessMethods
+	}
+	for _, method := range methods {
+		if !strings.EqualFold(string(method.Type), "s3") || method.AccessUrl == nil {
+			continue
+		}
+		parsed, err := address.ParseLocation(method.AccessUrl.Url)
+		if err != nil {
+			return "", fmt.Errorf("staged LFS upload location is invalid: %w", err)
+		}
+		return parsed.URL, nil
+	}
+	return "", fmt.Errorf("staged LFS metadata has no s3 access method")
+}
+
+type UploadIntegrityError struct {
+	ExpectedOID string
+	ActualOID   string
+	Size        int64
+}
+
+func (e *UploadIntegrityError) Error() string {
+	return fmt.Sprintf("uploaded content SHA-256 %s does not match requested OID %s", e.ActualOID, e.ExpectedOID)
+}
+
+type UploadSizeLimitError struct{ Limit int64 }
+
+func (e *UploadSizeLimitError) Error() string {
+	return fmt.Sprintf("LFS upload exceeds maximum object size of %d bytes", e.Limit)
 }
 
 func verifyRecordedSize(expected, recorded int64) error {
@@ -443,13 +625,6 @@ func materializeCandidate(value lfsapi.DrsObjectCandidate, now time.Time) (drs.D
 		Name:             value.Name,
 		Size:             size,
 	}, now)
-}
-
-func (s *Service) recordUpload(ctx context.Context, objectID string) error {
-	if s.accounting == nil {
-		return fmt.Errorf("file counters are not configured")
-	}
-	return s.accounting.RecordFileUpload(ctx, objectID)
 }
 
 func (s *Service) currentTime() time.Time {

@@ -56,8 +56,7 @@ func (m *awsKMSKeyManager) UnwrapDataKey(ctx context.Context, wrapped *WrappedDa
 	return out.Plaintext, nil
 }
 
-func newAWSKMSKeyManagerFromEnv() (CredentialKeyManager, error) {
-	keyID := strings.TrimSpace(os.Getenv(CredentialKMSKeyIDEnv))
+func newAWSKMSKeyManager(keyID string) (CredentialKeyManager, error) {
 	if keyID == "" {
 		return nil, fmt.Errorf("%s is required for %s", CredentialKMSKeyIDEnv, awsKMSKeyManagerName)
 	}

@@ -48,10 +48,11 @@ type Options struct {
 }
 
 type internalServer struct {
-	objects        *objects.Service
-	transfers      *transfers.Service
-	projectStorage *projectstorage.Service
-	buckets        *buckets.Service
+	objects              *objects.Service
+	transfers            *transfers.Service
+	projectStorage       *projectstorage.Service
+	buckets              *buckets.Service
+	maxBulkRequestLength int
 }
 
 func valuePointer[T any](value T) *T { return &value }
@@ -78,6 +79,12 @@ func RegisterRoutes(app fiber.Router, deps Dependencies, options Options) {
 		return
 	}
 
+	// Documentation is intentionally registered before the protected API group.
+	// The OpenAPI documents and UI are public metadata, like the health endpoints.
+	if options.Docs {
+		apidocs.RegisterSwaggerRoutes(app.Group("/"))
+	}
+
 	api := app.Group("/")
 	var middlewares []any
 	if deps.RequestIDs != nil {
@@ -90,9 +97,6 @@ func RegisterRoutes(app fiber.Router, deps Dependencies, options Options) {
 		api.Use(middlewares...)
 	}
 
-	if options.Docs {
-		apidocs.RegisterSwaggerRoutes(api)
-	}
 	if options.GA4GH {
 		registerDRSRoutes(api.Group("/ga4gh/drs/v1"), deps.Objects, deps.Transfers, deps.ServiceInfo, options.MaxBulkRequestLength)
 	}
@@ -101,10 +105,11 @@ func RegisterRoutes(app fiber.Router, deps Dependencies, options Options) {
 	}
 	if options.Internal {
 		server := &internalServer{
-			objects:        deps.Objects,
-			transfers:      deps.Transfers,
-			projectStorage: deps.ProjectStorage,
-			buckets:        deps.Buckets,
+			objects:              deps.Objects,
+			transfers:            deps.Transfers,
+			projectStorage:       deps.ProjectStorage,
+			buckets:              deps.Buckets,
+			maxBulkRequestLength: options.MaxBulkRequestLength,
 		}
 		internalapi.RegisterHandlers(api, server)
 		registerBucketRoutes(api, deps.Buckets, deps.ProjectStorage)
@@ -121,8 +126,11 @@ func decodeStrictJSON(body []byte, dst any) error {
 		return err
 	}
 	var extra any
-	if err := dec.Decode(&extra); err == nil {
-		return io.ErrUnexpectedEOF
+	if err := dec.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return io.ErrUnexpectedEOF
+		}
+		return err
 	}
 	return nil
 }

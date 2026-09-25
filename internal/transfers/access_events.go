@@ -2,7 +2,6 @@ package transfers
 
 import (
 	"context"
-	"fmt"
 	"net/url"
 	"strings"
 	"time"
@@ -48,17 +47,7 @@ type AccessScope struct {
 // RecordAccessIssued assembles one usage event and sends it to the narrow
 // recorder. A nil object remains a no-op for new-object upload paths.
 func (s *Service) RecordAccessIssued(ctx context.Context, request AccessRequest) error {
-	if request.Object == nil {
-		return nil
-	}
-	if s == nil || s.events == nil {
-		return fmt.Errorf("transfer event recorder is not configured")
-	}
-	event := eventFromObject(ctx, request)
-	if event.EventID == "" {
-		return nil
-	}
-	return s.events.RecordTransferAttributionEvents(ctx, []usage.Event{event})
+	return s.recordAccessIssued(ctx, request)
 }
 
 func eventFromObject(ctx context.Context, request AccessRequest) usage.Event {

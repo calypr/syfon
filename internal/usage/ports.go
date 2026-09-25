@@ -31,11 +31,10 @@ type FileUsageReader interface {
 	GetFileUsageSummary(ctx context.Context, inactiveSince *time.Time) (metricsapi.FileUsageSummary, error)
 }
 
-// ObjectReader reads objects for metrics authorization.
-// requiredMethod is supplied by callers so the object service can enforce the
-// same access method as the existing metrics paths.
+// ObjectReader resolves IDs and checks scoped read access for metrics objects.
 type ObjectReader interface {
-	ListObjectIDsByScope(ctx context.Context, organization, project, requiredMethod string) ([]string, error)
+	ResolveObjectIDs(ctx context.Context, requested []string) (map[string]string, error)
+	ListReadableObjectIDsAmong(ctx context.Context, organization, project string, requested []string) ([]string, error)
 }
 
 // ProviderEventRecorder records provider-reported transfer events.
@@ -46,7 +45,7 @@ type ProviderEventRecorder interface {
 // TransferQuery reads transfer attribution reports.
 type TransferQuery interface {
 	QueryTransferSummary(ctx context.Context, filter Filter, resources []string) (metricsapi.TransferAttributionSummary, error)
-	QueryTransferBreakdown(ctx context.Context, filter Filter, groupBy string, resources []string) ([]metricsapi.TransferAttributionBreakdown, error)
+	QueryTransferBreakdown(ctx context.Context, filter Filter, groupBy string, resources []string, limit, offset int) ([]metricsapi.TransferAttributionBreakdown, error)
 }
 
 type ReportStore interface {

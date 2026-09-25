@@ -28,7 +28,7 @@ func openPostgresTestStore(t *testing.T) *store.Store {
 		t.Skip("SYFON_TEST_POSTGRES_DSN is not configured")
 	}
 	t.Setenv(credentialcipher.CredentialLocalKeyFileEnv, filepath.Join(t.TempDir(), "credential.key"))
-	db, err := postgresdb.NewPostgresDB(dsn, nil)
+	db, err := postgresdb.NewPostgresDB(context.Background(), dsn, nil)
 	if err != nil {
 		t.Fatalf("open postgres test database: %v", err)
 	}

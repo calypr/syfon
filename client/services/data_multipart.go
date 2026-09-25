@@ -139,32 +139,12 @@ func (d *DataService) MultipartComplete(ctx context.Context, guid string, upload
 // repeat and does not run automatically for transient upload failures, so
 // callers retain resumability until they explicitly abandon an upload.
 func (d *DataService) MultipartAbort(ctx context.Context, uploadID string) error {
-	payload, err := json.Marshal(struct {
-		UploadID string `json:"uploadId"`
-	}{UploadID: uploadID})
+	resp, err := d.gen.InternalMultipartAbortWithResponse(ctx, internalapi.InternalMultipartAbortJSONRequestBody{UploadId: uploadID})
 	if err != nil {
 		return err
 	}
-	if strings.TrimSpace(d.serverURL) == "" || d.httpClient == nil {
-		return fmt.Errorf("multipart abort requires a configured internal API client")
-	}
-	requestURL := strings.TrimRight(d.serverURL, "/") + "/data/multipart/abort"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, requestURL, bytes.NewReader(payload))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := d.httpClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("read multipart abort response: %w", err)
-	}
-	if resp.StatusCode != http.StatusNoContent {
-		return apierror.FromResponse(resp, body)
+	if resp.StatusCode() != http.StatusNoContent {
+		return apierror.FromResponse(resp.HTTPResponse, resp.Body)
 	}
 	return nil
 }

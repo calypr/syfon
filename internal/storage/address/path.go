@@ -7,8 +7,8 @@ import (
 )
 
 // ParsedLocation is the syntax and provider information extracted from a
-// storage location. Path retains the parsed URL path, while Key is the object
-// key with its leading slash removed.
+// storage location. Path retains the parsed URL path, while Key has only the
+// URL's structural leading slash removed.
 type ParsedLocation struct {
 	URL      string
 	Scheme   string
@@ -37,7 +37,7 @@ func ParseLocation(raw string) (ParsedLocation, error) {
 		Scheme:   scheme,
 		Provider: ProviderFromScheme(scheme),
 		Bucket:   strings.TrimSpace(u.Host),
-		Key:      strings.TrimPrefix(strings.TrimSpace(u.Path), "/"),
+		Key:      strings.TrimPrefix(u.Path, "/"),
 		Path:     u.Path,
 	}, nil
 }
@@ -74,7 +74,11 @@ func SchemeFromURL(raw string) string {
 
 // BucketToURL converts a bucket and key to an s3:// URL.
 func BucketToURL(bucket, key string) string {
-	return fmt.Sprintf("s3://%s/%s", strings.TrimPrefix(bucket, "s3://"), strings.TrimPrefix(key, "/"))
+	return (&url.URL{
+		Scheme: "s3",
+		Host:   strings.TrimPrefix(bucket, "s3://"),
+		Path:   "/" + key,
+	}).String()
 }
 
 // ParseS3URL extracts bucket/key pairs from an s3:// URL.
@@ -87,7 +91,7 @@ func ParseS3URL(raw string) (bucket string, key string, ok bool) {
 		return "", "", false
 	}
 	bucket = strings.TrimSpace(u.Host)
-	key = strings.TrimSpace(strings.TrimPrefix(u.Path, "/"))
+	key = strings.TrimPrefix(u.Path, "/")
 	if bucket == "" || key == "" {
 		return "", "", false
 	}
@@ -102,4 +106,15 @@ func TrimLeadingStoragePrefix(key, prefix string) string {
 		return ""
 	}
 	return strings.TrimPrefix(key, prefix+"/")
+}
+
+// ValidateScopedKey rejects path segments that would change the authorized
+// storage prefix when a caller joins the key to it.
+func ValidateScopedKey(key string) error {
+	for _, segment := range strings.Split(strings.TrimSpace(key), "/") {
+		if segment == "." || segment == ".." {
+			return fmt.Errorf("scoped storage key contains a dot path segment")
+		}
+	}
+	return nil
 }

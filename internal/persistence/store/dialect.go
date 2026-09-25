@@ -11,5 +11,6 @@ type Dialect interface {
 	Rebind(string) string
 	ListArgs(string, []string) (string, []any)
 	LockContentWrite(context.Context, *sql.Tx) error
+	LockObjectUsageEventIDs(context.Context, *sql.Tx, []string) error
 	Bootstrap(context.Context, *sql.DB) error
 }

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/calypr/syfon/apigen/drs"
@@ -25,13 +26,17 @@ func (d *DataService) Stat(ctx context.Context, guid string) (*transfer.ObjectMe
 		obj, err := d.drs.GetObject(ctx, guid)
 		if err == nil {
 			md := &transfer.ObjectMetadata{
-				Size:     obj.Size,
-				Identity: downloadObjectIdentity(&obj),
+				Size:      obj.Size,
+				SizeKnown: true,
+				Identity:  downloadObjectIdentity(&obj),
 			}
 			if obj.AccessMethods != nil && len(*obj.AccessMethods) > 0 {
 				md.AcceptRanges = true
 			}
 			return md, nil
+		}
+		if !errorapi.IsNotFoundError(err) {
+			return nil, fmt.Errorf("get DRS metadata for %s: %w", guid, err)
 		}
 	}
 	_, err := d.ResolveDownloadURL(ctx, guid, "")
@@ -70,14 +75,20 @@ func (d *DataService) GetReader(ctx context.Context, guid string) (io.ReadCloser
 }
 
 func (d *DataService) GetRangeReader(ctx context.Context, guid string, offset, length int64) (io.ReadCloser, error) {
-	signedURL, err := d.ResolveDownloadURL(ctx, guid, "")
-	if err != nil {
-		return nil, err
+	if offset < 0 || length < 0 {
+		return nil, fmt.Errorf("invalid range request: offset=%d length=%d", offset, length)
 	}
 	var end *int64
 	if length > 0 {
 		e := offset + length - 1
+		if e < offset {
+			return nil, fmt.Errorf("invalid range request: offset=%d length=%d overflows", offset, length)
+		}
 		end = &e
+	}
+	signedURL, err := d.ResolveDownloadURL(ctx, guid, "")
+	if err != nil {
+		return nil, err
 	}
 	resp, err := d.Download(ctx, signedURL, &offset, end)
 	if err != nil {
@@ -93,8 +104,18 @@ func (d *DataService) GetRangeReader(ctx context.Context, guid string, offset, l
 		return nil, failedDownloadResponse(resp)
 	}
 	if resp.StatusCode == http.StatusOK {
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		return nil, transfer.ErrRangeIgnored
+	}
+	if resp.StatusCode != http.StatusPartialContent {
+		return nil, failedDownloadResponse(resp)
+	}
+	if err := validateContentRange(resp.Header.Get("Content-Range"), offset, end); err != nil {
+		closeErr := resp.Body.Close()
+		if closeErr != nil {
+			return nil, fmt.Errorf("%w: close invalid range response: %v", err, closeErr)
+		}
+		return nil, err
 	}
 	return resp.Body, nil
 }
@@ -106,10 +127,68 @@ func readBackendResponse(resp *http.Response) (io.ReadCloser, error) {
 	if resp.Body == nil {
 		return nil, fmt.Errorf("download response body is nil")
 	}
-	if resp.StatusCode >= http.StatusBadRequest {
+	if resp.StatusCode != http.StatusOK {
 		return nil, failedDownloadResponse(resp)
 	}
 	return resp.Body, nil
+}
+
+func validateContentRange(value string, requestedStart int64, requestedEnd *int64) error {
+	invalid := func(reason string) error {
+		return fmt.Errorf("invalid Content-Range %q: %s", value, reason)
+	}
+	unit, rangeValue, ok := strings.Cut(strings.TrimSpace(value), " ")
+	if !ok || !strings.EqualFold(unit, "bytes") || strings.Contains(rangeValue, " ") {
+		return invalid("expected bytes start-end/total")
+	}
+	span, totalValue, ok := strings.Cut(rangeValue, "/")
+	if !ok || strings.Contains(totalValue, "/") || totalValue == "*" {
+		return invalid("a known total is required")
+	}
+	startValue, endValue, ok := strings.Cut(span, "-")
+	if !ok || strings.Contains(endValue, "-") {
+		return invalid("expected bytes start-end/total")
+	}
+	start, err := parseContentRangeNumber(startValue)
+	if err != nil {
+		return invalid("invalid start")
+	}
+	end, err := parseContentRangeNumber(endValue)
+	if err != nil || end < start {
+		return invalid("invalid end")
+	}
+	total, err := parseContentRangeNumber(totalValue)
+	if err != nil || total <= end {
+		return invalid("total must be greater than the returned end")
+	}
+	if start != requestedStart {
+		return invalid(fmt.Sprintf("returned start %d does not match requested start %d", start, requestedStart))
+	}
+	if requestedEnd == nil {
+		if end != total-1 {
+			return invalid("open-ended request did not reach the known total")
+		}
+		return nil
+	}
+	if end == *requestedEnd {
+		return nil
+	}
+	if end == total-1 && end < *requestedEnd {
+		return nil
+	}
+	return invalid(fmt.Sprintf("returned end %d does not match requested end %d or a proven EOF clamp", end, *requestedEnd))
+}
+
+func parseContentRangeNumber(value string) (int64, error) {
+	if value == "" {
+		return 0, fmt.Errorf("empty number")
+	}
+	for _, digit := range value {
+		if digit < '0' || digit > '9' {
+			return 0, fmt.Errorf("invalid decimal number")
+		}
+	}
+	return strconv.ParseInt(value, 10, 64)
 }
 
 func failedDownloadResponse(resp *http.Response) error {

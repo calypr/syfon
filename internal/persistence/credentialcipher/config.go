@@ -1,8 +1,11 @@
 package credentialcipher
 
 import (
+	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 )
 
 const (
@@ -13,44 +16,91 @@ const (
 	CredentialKMSKeyIDEnv     = "DRS_CREDENTIAL_KMS_KEY_ID"
 )
 
-func configuredCredentialKeyManagerName() string {
-	if name := strings.ToLower(strings.TrimSpace(os.Getenv(CredentialKeyManagerEnv))); name != "" {
-		return name
-	}
-	if strings.TrimSpace(os.Getenv(CredentialKMSKeyIDEnv)) != "" {
-		return awsKMSKeyManagerName
-	}
-	return defaultCredentialKeyManager
+type Config struct {
+	MasterKey    string
+	LocalKeyFile string
+	SQLiteFile   string
+	KeyManager   string
+	KMSKeyID     string
 }
 
-// Cipher encrypts and decrypts credential fields using the key manager selected
-// at construction time. Key material is still loaded by the manager when an
-// operation needs it.
+// ConfigFromEnv reads deployment settings once at the construction boundary.
+func ConfigFromEnv() Config {
+	return Config{
+		MasterKey:    strings.TrimSpace(os.Getenv(CredentialMasterKeyEnv)),
+		LocalKeyFile: strings.TrimSpace(os.Getenv(CredentialLocalKeyFileEnv)),
+		SQLiteFile:   strings.TrimSpace(os.Getenv(DatabaseSQLiteFileEnv)),
+		KeyManager:   strings.TrimSpace(os.Getenv(CredentialKeyManagerEnv)),
+		KMSKeyID:     strings.TrimSpace(os.Getenv(CredentialKMSKeyIDEnv)),
+	}
+}
+
+func (cfg Config) localKeyPath() string {
+	if p := strings.TrimSpace(cfg.LocalKeyFile); p != "" {
+		return p
+	}
+	if p := strings.TrimSpace(cfg.SQLiteFile); p != "" {
+		return filepath.Join(filepath.Dir(p), ".syfon-credential-kek")
+	}
+	return "/app/.syfon-credential-kek"
+}
+
 type Cipher struct {
 	managerName string
+	local       *localKeyManager
+	managers    map[string]func() (CredentialKeyManager, error)
 }
 
-func NewFromEnv() (*Cipher, error) {
-	return &Cipher{managerName: configuredCredentialKeyManagerName()}, nil
-}
-
-func (c *Cipher) manager() (CredentialKeyManager, error) {
-	name := defaultCredentialKeyManager
-	if c != nil && strings.TrimSpace(c.managerName) != "" {
-		name = c.managerName
+func New(cfg Config) (*Cipher, error) {
+	name := strings.ToLower(strings.TrimSpace(cfg.KeyManager))
+	keyID := strings.TrimSpace(cfg.KMSKeyID)
+	if name == "" {
+		name = defaultCredentialKeyManager
+		if keyID != "" {
+			name = awsKMSKeyManagerName
+		}
 	}
-	return resolveCredentialKeyManager(name)
+	if name != defaultCredentialKeyManager && name != awsKMSKeyManagerName {
+		return nil, fmt.Errorf("credential key manager %q is not registered", name)
+	}
+	if name == awsKMSKeyManagerName && keyID == "" {
+		return nil, fmt.Errorf("%s is required for %s", CredentialKMSKeyIDEnv, name)
+	}
+	local := &localKeyManager{masterKey: strings.TrimSpace(cfg.MasterKey), keyPath: cfg.localKeyPath()}
+	return &Cipher{
+		managerName: name,
+		local:       local,
+		managers: map[string]func() (CredentialKeyManager, error){
+			defaultCredentialKeyManager: func() (CredentialKeyManager, error) { return local, nil },
+			awsKMSKeyManagerName:        sync.OnceValues(func() (CredentialKeyManager, error) { return newAWSKMSKeyManager(keyID) }),
+		},
+	}, nil
+}
+
+func NewFromEnv() (*Cipher, error) { return New(ConfigFromEnv()) }
+
+func (c *Cipher) manager(name string) (CredentialKeyManager, error) {
+	name = strings.ToLower(strings.TrimSpace(name))
+	factory, ok := c.managers[name]
+	if !ok {
+		return nil, fmt.Errorf("credential key manager %q is not registered", name)
+	}
+	manager, err := factory()
+	if err != nil {
+		return nil, fmt.Errorf("initialize credential key manager %q: %w", name, err)
+	}
+	return manager, nil
 }
 
 func (c *Cipher) Enabled() (bool, error) {
-	manager, err := c.manager()
+	manager, err := c.manager(c.managerName)
 	if err != nil {
 		return false, err
 	}
 	if manager.Name() != defaultCredentialKeyManager {
 		return true, nil
 	}
-	key, err := credentialMasterKey()
+	key, err := c.local.key()
 	if err != nil {
 		return false, err
 	}

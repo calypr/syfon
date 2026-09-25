@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/calypr/syfon/internal/buckets"
@@ -13,7 +14,7 @@ import (
 	"github.com/calypr/syfon/internal/persistence/credentialcipher"
 )
 
-func TestApplyCredentialEncryptionConfig(t *testing.T) {
+func TestCredentialEncryptionConfig(t *testing.T) {
 	t.Setenv(credentialcipher.CredentialMasterKeyEnv, "")
 	t.Setenv(credentialcipher.CredentialLocalKeyFileEnv, "")
 	t.Setenv(credentialcipher.DatabaseSQLiteFileEnv, "")
@@ -27,18 +28,21 @@ func TestApplyCredentialEncryptionConfig(t *testing.T) {
 		},
 	}
 
-	applyCredentialEncryptionConfig(cfg)
+	resolved := credentialEncryptionConfig(cfg)
 
-	if got := os.Getenv(credentialcipher.CredentialLocalKeyFileEnv); got != ".syfon-credential-kek" {
-		t.Fatalf("expected local key file env to be set from config, got %q", got)
+	if got := resolved.LocalKeyFile; got != ".syfon-credential-kek" {
+		t.Fatalf("expected local key file from config, got %q", got)
 	}
-	if got := os.Getenv(credentialcipher.DatabaseSQLiteFileEnv); got != "drs.db" {
-		t.Fatalf("expected sqlite file env to be set from config, got %q", got)
+	if got := resolved.SQLiteFile; got != "drs.db" {
+		t.Fatalf("expected sqlite file from config, got %q", got)
+	}
+	if os.Getenv(credentialcipher.CredentialLocalKeyFileEnv) != "" || os.Getenv(credentialcipher.DatabaseSQLiteFileEnv) != "" {
+		t.Fatal("resolving configuration changed the process environment")
 	}
 }
 
-func TestNormalizedCredentialConfigurationReachesPersistence(t *testing.T) {
-	t.Setenv(credentialcipher.CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
+func TestNormalizedCredentialConfigurationReachesPersistenceWithRawMasterKey(t *testing.T) {
+	t.Setenv(credentialcipher.CredentialMasterKeyEnv, strings.Repeat("a", 32))
 	t.Setenv(credentialcipher.CredentialLocalKeyFileEnv, "")
 	configPath := filepath.Join(t.TempDir(), "config.yaml")
 	content := `
@@ -86,7 +90,7 @@ buckets:
 	}
 }
 
-func TestApplyCredentialEncryptionConfigSetsMasterKey(t *testing.T) {
+func TestCredentialEncryptionConfigSetsMasterKey(t *testing.T) {
 	t.Setenv(credentialcipher.CredentialMasterKeyEnv, "")
 
 	cfg := &config.Config{
@@ -95,14 +99,14 @@ func TestApplyCredentialEncryptionConfigSetsMasterKey(t *testing.T) {
 		},
 	}
 
-	applyCredentialEncryptionConfig(cfg)
+	resolved := credentialEncryptionConfig(cfg)
 
-	if got := os.Getenv(credentialcipher.CredentialMasterKeyEnv); got != "ee605db033f6992534def23f9594ffaa58142f8bd9b7ee8ae3de199aed435d97" {
-		t.Fatalf("expected master key env to be set from config, got %q", got)
+	if got := resolved.MasterKey; got != "ee605db033f6992534def23f9594ffaa58142f8bd9b7ee8ae3de199aed435d97" {
+		t.Fatalf("expected master key from config, got %q", got)
 	}
 }
 
-func TestApplyCredentialEncryptionConfigDoesNotOverrideEnv(t *testing.T) {
+func TestCredentialEncryptionConfigDoesNotOverrideEnv(t *testing.T) {
 	t.Setenv(credentialcipher.CredentialMasterKeyEnv, "existing-master-key")
 	t.Setenv(credentialcipher.CredentialLocalKeyFileEnv, "/existing/kek")
 	t.Setenv(credentialcipher.DatabaseSQLiteFileEnv, "/existing/drs.db")
@@ -117,15 +121,15 @@ func TestApplyCredentialEncryptionConfigDoesNotOverrideEnv(t *testing.T) {
 		},
 	}
 
-	applyCredentialEncryptionConfig(cfg)
+	resolved := credentialEncryptionConfig(cfg)
 
-	if got := os.Getenv(credentialcipher.CredentialMasterKeyEnv); got != "existing-master-key" {
+	if got := resolved.MasterKey; got != "existing-master-key" {
 		t.Fatalf("expected existing master key env to win, got %q", got)
 	}
-	if got := os.Getenv(credentialcipher.CredentialLocalKeyFileEnv); got != "/existing/kek" {
+	if got := resolved.LocalKeyFile; got != "/existing/kek" {
 		t.Fatalf("expected existing local key file env to win, got %q", got)
 	}
-	if got := os.Getenv(credentialcipher.DatabaseSQLiteFileEnv); got != "/existing/drs.db" {
+	if got := resolved.SQLiteFile; got != "/existing/drs.db" {
 		t.Fatalf("expected existing sqlite file env to win, got %q", got)
 	}
 }
