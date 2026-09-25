@@ -28,7 +28,7 @@ func (d *DataService) CanonicalObjectURL(signedURL, bucketHint, fallbackDID stri
 
 		bucketHint = strings.TrimSpace(bucketHint)
 
-		key := strings.Trim(strings.TrimSpace(parsed.Path), "/")
+		key := strings.TrimPrefix(parsed.Path, "/")
 
 		// If bucketHint is empty, try to infer it from the first segment of the path (Path-Style)
 		if bucketHint == "" {
@@ -79,7 +79,7 @@ func bucketToURL(bucket, key string) string {
 	return (&url.URL{
 		Scheme: "s3",
 		Host:   strings.TrimPrefix(bucket, "s3://"),
-		Path:   "/" + strings.TrimPrefix(key, "/"),
+		Path:   "/" + key,
 	}).String()
 }
 
@@ -91,11 +91,11 @@ func parseGCSJSONUploadURL(parsed *url.URL) (bucket string, key string, ok bool)
 	if strings.TrimSpace(q.Get("uploadType")) != "media" {
 		return "", "", false
 	}
-	key = strings.Trim(strings.TrimSpace(q.Get("name")), "/")
+	key = q.Get("name")
 	if key == "" {
 		return "", "", false
 	}
-	parts := strings.Split(strings.Trim(strings.TrimSpace(parsed.Path), "/"), "/")
+	parts := strings.Split(strings.TrimPrefix(parsed.Path, "/"), "/")
 	for i := 0; i+1 < len(parts); i++ {
 		if parts[i] == "b" {
 			bucket = strings.TrimSpace(parts[i+1])
@@ -116,7 +116,7 @@ func parseAzureBlobSignedURL(parsed *url.URL) (bucket string, key string, ok boo
 	if strings.TrimSpace(q.Get("sig")) == "" || !strings.EqualFold(strings.TrimSpace(q.Get("sr")), "b") {
 		return "", "", false
 	}
-	parts := strings.Split(strings.Trim(strings.TrimSpace(parsed.Path), "/"), "/")
+	parts := strings.Split(strings.TrimPrefix(parsed.Path, "/"), "/")
 	if len(parts) < 2 {
 		return "", "", false
 	}
@@ -133,7 +133,6 @@ func parseAzureBlobSignedURL(parsed *url.URL) (bucket string, key string, ok boo
 		key = strings.Join(parts[2:], "/")
 	}
 	bucket = strings.Trim(bucket, "/")
-	key = strings.Trim(key, "/")
 	if bucket == "" || key == "" {
 		return "", "", false
 	}

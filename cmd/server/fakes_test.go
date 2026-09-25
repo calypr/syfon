@@ -112,6 +112,19 @@ func (s *serverObjectStore) ReplaceObjects(ctx context.Context, records []drs.Dr
 	return s.RegisterObjects(ctx, records)
 }
 
+func (s *serverObjectStore) ReplaceObject(ctx context.Context, id, expectedOldSHA string, record drs.DrsObject) error {
+	current, err := s.GetObject(ctx, id)
+	if err != nil {
+		return err
+	}
+	sha, ok := objects.CanonicalSHA256(current.Checksums)
+	if !ok || sha != objects.NormalizeOID(expectedOldSHA) {
+		return errorapi.ErrConflict
+	}
+	s.records[id] = cloneServerRecord(&record)
+	return nil
+}
+
 func (s *serverObjectStore) UpdateObjectAccessMethods(_ context.Context, id string, methods []drs.AccessMethod) error {
 	record, ok := s.records[id]
 	if !ok {

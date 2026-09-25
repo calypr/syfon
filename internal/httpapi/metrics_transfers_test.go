@@ -164,6 +164,43 @@ func TestMetricsRoutes_ProviderTransferBoundaryErrors(t *testing.T) {
 	}
 }
 
+func TestMetricsRoutes_ProviderTransferEventsEnforcesLocalWriteAuthorization(t *testing.T) {
+	const body = `{"events":[{"provider_event_id":"event-1","direction":"download","provider":"s3","bucket":"bucket","organization":"org","project":"project"}]}`
+	for _, test := range []struct {
+		name        string
+		method      string
+		wantStatus  int
+		wantRecords int
+	}{
+		{name: "read-only", method: "read", wantStatus: http.StatusForbidden},
+		{name: "create access", method: "create", wantStatus: http.StatusCreated, wantRecords: 1},
+		{name: "update access", method: "update", wantStatus: http.StatusCreated, wantRecords: 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ingest := &metricsIngestFake{}
+			app := newMetricsTestApp(&metricsReporterFake{}, ingest)
+			req := httptest.NewRequest(http.MethodPost, "/index/v1/metrics/provider-transfer-events", strings.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			setMetricsAuthHeaders(req, "local", false, map[string]map[string]bool{
+				"/programs/org/projects/project": {test.method: true},
+			})
+
+			resp, err := app.Test(req)
+			if err != nil {
+				t.Fatalf("request failed: %v", err)
+			}
+			defer resp.Body.Close()
+			bodyBytes, _ := io.ReadAll(resp.Body)
+			if resp.StatusCode != test.wantStatus {
+				t.Fatalf("expected status %d, got %d body=%s", test.wantStatus, resp.StatusCode, bodyBytes)
+			}
+			if len(ingest.events) != test.wantRecords {
+				t.Fatalf("expected %d recorded provider transfer events, got %+v", test.wantRecords, ingest.events)
+			}
+		})
+	}
+}
+
 func TestMetricsRoutes_TransferReportBoundaryErrors(t *testing.T) {
 	assertServerError := func(t *testing.T, app *fiber.App, req *http.Request, requestID string) {
 		t.Helper()

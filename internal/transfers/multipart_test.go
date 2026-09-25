@@ -27,6 +27,17 @@ type multipartTerminalStorage struct {
 	started      chan storage.CompleteMultipartRequest
 }
 
+type failingMultipartSessionSaveStore struct {
+	MultipartSessionStore
+	cancel context.CancelFunc
+	err    error
+}
+
+func (s *failingMultipartSessionSaveStore) SaveMultipartSession(context.Context, MultipartSession) error {
+	s.cancel()
+	return s.err
+}
+
 func (s *multipartTerminalStorage) Sign(context.Context, storage.SignRequest) (storage.SignedAccess, error) {
 	return storage.SignedAccess{}, nil
 }
@@ -106,6 +117,44 @@ func newMultipartTerminalService(storagePort StoragePort, uploadID string) *Serv
 }
 
 var oneCompletedPart = []CompletedPart{{PartNumber: 1, ETag: "etag"}}
+
+func TestBeginMultipartAbortsUnpersistedUploadAfterRequestCancellation(t *testing.T) {
+	requestCtx, cancelRequest := context.WithCancel(context.Background())
+	provider := &multipartTerminalStorage{beginIDs: []storage.UploadID{"upload"}}
+	var abortContextErr error
+	var abortHasDeadline bool
+	provider.abortFn = func(ctx context.Context, _ int, _ storage.AbortMultipartRequest) error {
+		abortContextErr = ctx.Err()
+		_, abortHasDeadline = ctx.Deadline()
+		return ctx.Err()
+	}
+	persistErr := errors.New("session store unavailable")
+	sessions := &failingMultipartSessionSaveStore{
+		MultipartSessionStore: newMemoryMultipartSessionStore(),
+		cancel:                cancelRequest,
+		err:                   persistErr,
+	}
+	service := NewService(Dependencies{
+		Objects:           downloadObjectFake{object: testRecord()},
+		Storage:           provider,
+		MultipartSessions: sessions,
+	})
+	target := storage.Target{PhysicalBucket: "bucket", LookupKey: "bucket", Key: "key"}
+
+	_, err := service.BeginMultipart(requestCtx, MultipartInitRequest{Target: &target})
+	if !errors.Is(err, persistErr) || errors.Is(err, context.Canceled) {
+		t.Fatalf("BeginMultipart() error = %v, want only the persistence failure", err)
+	}
+	if requestCtx.Err() != context.Canceled {
+		t.Fatalf("request context error = %v, want canceled by session-store failure", requestCtx.Err())
+	}
+	if abortContextErr != nil || !abortHasDeadline {
+		t.Fatalf("abort cleanup context error=%v hasDeadline=%v, want live bounded context", abortContextErr, abortHasDeadline)
+	}
+	if calls := provider.abortCalls(); len(calls) != 1 || calls[0].UploadID != "upload" {
+		t.Fatalf("abort calls = %+v, want one abort for unpersisted upload", calls)
+	}
+}
 
 func multipartScopeContext(methods ...string) context.Context {
 	resource := "/organization/org/project/project"

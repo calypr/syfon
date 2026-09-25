@@ -69,6 +69,39 @@ func TestListPagesStopsAtTotalResultLimit(t *testing.T) {
 	}
 }
 
+func TestInventoryPreservesExactSlashKeysAndPrefix(t *testing.T) {
+	client := &fakeClient{listOutputs: []*awss3.ListObjectsV2Output{testFinalListPage("dir/")}}
+	provider := cachedBackend(client, &fakePresigner{})
+	result, err := provider.Inventory(context.Background(), storage.ProviderBinding{Provider: "s3", LookupKey: "bucket", PhysicalBucket: "bucket"}, storage.InventoryRequest{
+		Target:      storage.Target{PhysicalBucket: "bucket"},
+		Prefix:      "dir/",
+		ExactPrefix: true,
+		MaxKeys:     1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(client.listInputs) != 1 || aws.ToString(client.listInputs[0].Prefix) != "dir/" {
+		t.Fatalf("list prefixes = %v, want exact prefix %q", client.listInputs, "dir/")
+	}
+	if len(result.Items) != 1 || result.Items[0].Key != "dir/" {
+		t.Fatalf("inventory items = %+v, want exact key %q", result.Items, "dir/")
+	}
+}
+
+func TestAppendListPageObjectsDoesNotCollapseSlashDistinctKeys(t *testing.T) {
+	items := make([]storage.ObjectMetadata, 0)
+	firstKeys := make([]string, 0, 5)
+	seen := make(map[string]struct{})
+	added := appendListPageObjects(&items, testFinalListPage("dir", "dir/", "/dir", "dir//", "dir"), "bucket", &firstKeys, seen)
+	if added != 4 {
+		t.Fatalf("added %d objects, want 4 exact keys", added)
+	}
+	if got, want := strings.Join(metadataKeys(items), "|"), "dir|dir/|/dir|dir//"; got != want {
+		t.Fatalf("inventory keys = %q, want %q", got, want)
+	}
+}
+
 func TestListPagesRetriesTransientPageFailure(t *testing.T) {
 	restore := noRetrySleep(t)
 	defer restore()

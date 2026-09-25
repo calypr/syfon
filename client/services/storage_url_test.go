@@ -30,6 +30,12 @@ func TestCanonicalObjectURLPreservesReservedObjectKeyBytes(t *testing.T) {
 			wantURL:       "s3://bucket/a%252Fb",
 			wantObjectKey: "a%2Fb",
 		},
+		{
+			name:          "leading and trailing key slashes remain significant",
+			signedURL:     "https://upload.example/bucket//dir/?signature=secret",
+			wantURL:       "s3://bucket//dir/",
+			wantObjectKey: "/dir/",
+		},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			gotURL, err := (&DataService{}).CanonicalObjectURL(testCase.signedURL, "bucket", "")

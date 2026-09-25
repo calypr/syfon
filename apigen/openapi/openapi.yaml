@@ -916,6 +916,38 @@ paths:
         - Register Objects
       x-swagger-router-controller: ga4gh.drs.server
       x-codegen-request-body-name: body
+  /objects/{object_id}/replace:
+    post:
+      summary: Atomically replace a DRS object
+      description: |-
+        Syfon extension. Replaces the metadata and access methods for an existing object after its replacement bytes have been uploaded. The expected old SHA-256 is checked in the same transaction as the replacement; a mismatch leaves the current object unchanged. The caller must have delete access to the old object's controlled-access resources and create access to the replacement resources.
+      operationId: ReplaceObject
+      parameters:
+        - $ref: '#/components/parameters/ObjectId'
+      requestBody:
+        $ref: '#/components/requestBodies/ReplaceObjectBody'
+      responses:
+        '200':
+          $ref: '#/components/responses/200OkDrsObject'
+        '400':
+          $ref: '#/components/responses/400BadRequest'
+        '401':
+          $ref: '#/components/responses/401Unauthorized'
+        '403':
+          $ref: '#/components/responses/403Forbidden'
+        '404':
+          $ref: '#/components/responses/404NotFoundDrsObject'
+        '409':
+          $ref: '#/components/responses/409Conflict'
+        '500':
+          $ref: '#/components/responses/500InternalServerError'
+      security:
+        - {}
+        - BasicAuth: []
+        - BearerAuth: []
+        - PassportAuth: []
+      tags:
+        - Objects
   /objects/{object_id}/access-methods:
     put:
       summary: Update access methods for a DRS object
@@ -1812,6 +1844,18 @@ components:
             This field is required for write operations.
           example:
             - https://auth.example.org/datasets/phs000123
+    ReplaceObjectRequest:
+      type: object
+      required:
+        - expected_old_sha256
+        - candidate
+      properties:
+        expected_old_sha256:
+          type: string
+          pattern: '^[A-Fa-f0-9]{64}$'
+          description: SHA-256 observed during preflight; replacement fails if the current object has changed.
+        candidate:
+          $ref: '#/components/schemas/DrsObjectCandidate'
     AccessMethodUpdateRequest:
       type: object
       required:
@@ -2127,6 +2171,12 @@ components:
             $ref: '#/components/schemas/Error'
     403Forbidden:
       description: The requester is not authorized to perform this action.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    409Conflict:
+      description: The object changed since the caller read its current SHA-256, or the replacement conflicts with existing content identity.
       content:
         application/json:
           schema:
@@ -2773,6 +2823,13 @@ components:
                         - type: https
                           access_url:
                             url: https://data.example.org/public/public-reference.fa
+    ReplaceObjectBody:
+      description: Request body for atomically replacing an existing object after upload
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ReplaceObjectRequest'
     AccessMethodUpdateBody:
       description: Request body for updating access methods of a DRS object
       required: true

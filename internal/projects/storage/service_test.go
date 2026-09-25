@@ -327,7 +327,7 @@ func TestInspectProjectPreservesPartialInventoryAndCanonicalItems(t *testing.T) 
 	if result.Items[0].InventoryComplete || result.Items[1].InventoryComplete {
 		t.Fatalf("partial items should report incomplete inventory = %+v", result.Items)
 	}
-	if len(result.Items) != 2 || result.Items[0].Key != "prefix/project/a" || result.Items[1].ObjectUrl != "s3://bucket/prefix/project/z" {
+	if len(result.Items) != 2 || result.Items[0].Key != "/prefix/project/z" || result.Items[0].ObjectUrl != "s3://bucket//prefix/project/z" || result.Items[1].Key != "prefix/project/a" {
 		t.Fatalf("normalized items = %+v", result.Items)
 	}
 	if len(inventory.requests) != 1 || inventory.requests[0].Prefix != "prefix/project" || !inventory.requests[0].IncludeHead {
@@ -600,6 +600,65 @@ func TestDeleteProjectObjectsPreservesPolicyOrderAndConflictSafety(t *testing.T)
 	}
 	if len(deletePort.locations) != 1 || deletePort.locations[0] != "s3://bucket/prefix/project/a" {
 		t.Fatalf("delete locations = %+v", deletePort.locations)
+	}
+}
+
+func TestInventoryObjectsPreservesSlashDistinctKeys(t *testing.T) {
+	inventory := &fakeInventory{result: storage.InventoryResult{Items: []storage.ObjectMetadata{
+		{Provider: "s3", Bucket: "bucket", Key: "dir"},
+		{Provider: "s3", Bucket: "bucket", Key: "dir/"},
+		{Provider: "s3", Bucket: "bucket", Key: "/dir"},
+	}, Complete: true}}
+	service, _ := projectService(inventory, nil)
+
+	items, err := service.inventoryObjects(context.Background(), "bucket", "", inventoryOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 3 {
+		t.Fatalf("inventory item count = %d, want 3 exact keys", len(items))
+	}
+	for index, want := range []string{"dir", "dir/", "/dir"} {
+		if items[index].Key != want {
+			t.Fatalf("inventory key[%d] = %q, want %q", index, items[index].Key, want)
+		}
+	}
+	if got, want := []string{items[0].ObjectUrl, items[1].ObjectUrl, items[2].ObjectUrl}, []string{"s3://bucket/dir", "s3://bucket/dir/", "s3://bucket//dir"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("inventory URLs = %#v, want %#v", got, want)
+	}
+}
+
+func TestValidateInventoryDistinguishesSlashDistinctKeys(t *testing.T) {
+	inventory := &fakeInventory{result: storage.InventoryResult{Items: []storage.ObjectMetadata{
+		{Provider: "s3", Bucket: "bucket", Key: "dir"},
+		{Provider: "s3", Bucket: "bucket", Key: "dir/"},
+	}, Complete: true}}
+	service, _ := projectService(inventory, nil)
+	results := service.ValidateInventoryObjects(context.Background(), []internalapi.InternalInspectObjectRequest{
+		{ObjectUrl: "s3://bucket/dir"},
+		{ObjectUrl: "s3://bucket/dir/"},
+	})
+	if len(results) != 2 || results[0].Status != string(probePresent) || results[1].Status != string(probePresent) {
+		t.Fatalf("validation results = %+v, want both exact objects present", results)
+	}
+	if results[0].Key != "dir" || results[1].Key != "dir/" {
+		t.Fatalf("validated keys = %q and %q, want dir and dir/", results[0].Key, results[1].Key)
+	}
+	if len(inventory.requests) != 2 {
+		t.Fatalf("inventory request count = %d, want one exact probe per slash-distinct key", len(inventory.requests))
+	}
+}
+
+func TestDeleteProjectObjectsPreservesTrailingSlashInPhysicalKey(t *testing.T) {
+	deletePort := &fakeDelete{}
+	service, _ := projectService(&fakeInventory{}, deletePort)
+	const objectURL = "s3://bucket/prefix/project/dir/"
+	results := service.DeleteProjectObjects(context.Background(), "org", "project", []string{objectURL})
+	if len(results) != 1 || results[0].Status != "deleted" {
+		t.Fatalf("delete result = %+v, want one successful deletion", results)
+	}
+	if len(deletePort.locations) != 1 || deletePort.locations[0] != objectURL {
+		t.Fatalf("delete locations = %#v, want exact URL %q", deletePort.locations, objectURL)
 	}
 }
 

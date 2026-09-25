@@ -519,6 +519,17 @@ type DrsServiceDrsSupportedUploadMethodTypes string
 // Error A stable Syfon API error.
 type Error = externalRef0.APIError
 
+// ReplaceObjectRequest defines model for ReplaceObjectRequest.
+type ReplaceObjectRequest struct {
+	// Candidate Syfon supports blob-only registration through `/objects/register`.
+	// Any non-null `contents` or `mime_type` value submitted in a candidate is rejected
+	// because Syfon cannot persist either field.
+	Candidate DrsObjectCandidate `json:"candidate"`
+
+	// ExpectedOldSha256 SHA-256 observed during preflight; replacement fails if the current object has changed.
+	ExpectedOldSha256 string `json:"expected_old_sha256"`
+}
+
 // Service GA4GH service
 type Service struct {
 	// ContactUrl URL of the contact for the provider of this service, e.g. a link to a contact form (RFC 3986 format), or an email (RFC 2368 format).
@@ -888,6 +899,9 @@ type N404NotFoundDelete = Error
 // N404NotFoundDrsObject A stable Syfon API error.
 type N404NotFoundDrsObject = Error
 
+// N409Conflict A stable Syfon API error.
+type N409Conflict = Error
+
 // N413RequestTooLarge A stable Syfon API error.
 type N413RequestTooLarge = Error
 
@@ -948,6 +962,9 @@ type RegisterObjectsBody struct {
 	// Passports Optional array of GA4GH Passport JWTs for authorization
 	Passports *[]string `json:"passports,omitempty"`
 }
+
+// ReplaceObjectBody defines model for ReplaceObjectBody.
+type ReplaceObjectBody = ReplaceObjectRequest
 
 // UploadRequestBody defines model for UploadRequestBody.
 type UploadRequestBody = UploadRequest
@@ -1037,6 +1054,9 @@ type AddChecksumsJSONRequestBody = ChecksumAdditionRequest
 
 // DeleteObjectJSONRequestBody defines body for DeleteObject for application/json ContentType.
 type DeleteObjectJSONRequestBody = DeleteRequest
+
+// ReplaceObjectJSONRequestBody defines body for ReplaceObject for application/json ContentType.
+type ReplaceObjectJSONRequestBody = ReplaceObjectRequest
 
 // PostUploadRequestJSONRequestBody defines body for PostUploadRequest for application/json ContentType.
 type PostUploadRequestJSONRequestBody = UploadRequest
@@ -1417,6 +1437,24 @@ type ClientInterface interface {
 	//
 	// Corresponds with PUT /objects/{object_id}/delete (the `DeleteObject` operationId).
 	DeleteObject(ctx context.Context, objectId ObjectId, body DeleteObjectJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ReplaceObjectWithBody Atomically replace a DRS object
+	//
+	// Syfon extension. Replaces the metadata and access methods for an existing object after its replacement bytes have been uploaded. The expected old SHA-256 is checked in the same transaction as the replacement; a mismatch leaves the current object unchanged. The caller must have delete access to the old object's controlled-access resources and create access to the replacement resources.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /objects/{object_id}/replace (the `ReplaceObject` operationId).
+	ReplaceObjectWithBody(ctx context.Context, objectId ObjectId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ReplaceObject Atomically replace a DRS object
+	//
+	// Syfon extension. Replaces the metadata and access methods for an existing object after its replacement bytes have been uploaded. The expected old SHA-256 is checked in the same transaction as the replacement; a mismatch leaves the current object unchanged. The caller must have delete access to the old object's controlled-access resources and create access to the replacement resources.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /objects/{object_id}/replace (the `ReplaceObject` operationId).
+	ReplaceObject(ctx context.Context, objectId ObjectId, body ReplaceObjectJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetServiceInfo Retrieve information about this service
 	//
@@ -2126,6 +2164,44 @@ func (c *Client) DeleteObjectWithBody(ctx context.Context, objectId ObjectId, co
 // Corresponds with PUT /objects/{object_id}/delete (the `DeleteObject` operationId).
 func (c *Client) DeleteObject(ctx context.Context, objectId ObjectId, body DeleteObjectJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewDeleteObjectRequest(c.Server, objectId, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ReplaceObjectWithBody Atomically replace a DRS object
+//
+// Syfon extension. Replaces the metadata and access methods for an existing object after its replacement bytes have been uploaded. The expected old SHA-256 is checked in the same transaction as the replacement; a mismatch leaves the current object unchanged. The caller must have delete access to the old object's controlled-access resources and create access to the replacement resources.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /objects/{object_id}/replace (the `ReplaceObject` operationId).
+func (c *Client) ReplaceObjectWithBody(ctx context.Context, objectId ObjectId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewReplaceObjectRequestWithBody(c.Server, objectId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ReplaceObject Atomically replace a DRS object
+//
+// Syfon extension. Replaces the metadata and access methods for an existing object after its replacement bytes have been uploaded. The expected old SHA-256 is checked in the same transaction as the replacement; a mismatch leaves the current object unchanged. The caller must have delete access to the old object's controlled-access resources and create access to the replacement resources.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /objects/{object_id}/replace (the `ReplaceObject` operationId).
+func (c *Client) ReplaceObject(ctx context.Context, objectId ObjectId, body ReplaceObjectJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewReplaceObjectRequest(c.Server, objectId, body)
 	if err != nil {
 		return nil, err
 	}
@@ -3022,6 +3098,53 @@ func NewDeleteObjectRequestWithBody(server string, objectId ObjectId, contentTyp
 	return req, nil
 }
 
+// NewReplaceObjectRequest calls the generic ReplaceObject builder with application/json body
+func NewReplaceObjectRequest(server string, objectId ObjectId, body ReplaceObjectJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewReplaceObjectRequestWithBody(server, objectId, "application/json", bodyReader)
+}
+
+// NewReplaceObjectRequestWithBody constructs an http.Request for the ReplaceObject method, with any body, and a specified content type
+func NewReplaceObjectRequestWithBody(server string, objectId ObjectId, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "object_id", objectId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/objects/%s/replace", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewGetServiceInfoRequest constructs an http.Request for the GetServiceInfo method
 func NewGetServiceInfoRequest(server string) (*http.Request, error) {
 	var err error
@@ -3201,6 +3324,11 @@ type ClientWithResponsesInterface interface {
 	DeleteObjectWithBodyWithResponse(ctx context.Context, objectId ObjectId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*DeleteObjectResponse, error)
 
 	DeleteObjectWithResponse(ctx context.Context, objectId ObjectId, body DeleteObjectJSONRequestBody, reqEditors ...RequestEditorFn) (*DeleteObjectResponse, error)
+
+	// ReplaceObjectWithBodyWithResponse request with any body
+	ReplaceObjectWithBodyWithResponse(ctx context.Context, objectId ObjectId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ReplaceObjectResponse, error)
+
+	ReplaceObjectWithResponse(ctx context.Context, objectId ObjectId, body ReplaceObjectJSONRequestBody, reqEditors ...RequestEditorFn) (*ReplaceObjectResponse, error)
 
 	// GetServiceInfoWithResponse request
 	GetServiceInfoWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetServiceInfoResponse, error)
@@ -3644,6 +3772,34 @@ func (r DeleteObjectResponse) StatusCode() int {
 	return 0
 }
 
+type ReplaceObjectResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *N200OkDrsObject
+	JSON400      *N400BadRequest
+	JSON401      *N401Unauthorized
+	JSON403      *N403Forbidden
+	JSON404      *N404NotFoundDrsObject
+	JSON409      *N409Conflict
+	JSON500      *N500InternalServerError
+}
+
+// Status returns HTTPResponse.Status
+func (r ReplaceObjectResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ReplaceObjectResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type GetServiceInfoResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -3924,6 +4080,23 @@ func (c *ClientWithResponses) DeleteObjectWithResponse(ctx context.Context, obje
 		return nil, err
 	}
 	return ParseDeleteObjectResponse(rsp)
+}
+
+// ReplaceObjectWithBodyWithResponse request with arbitrary body returning *ReplaceObjectResponse
+func (c *ClientWithResponses) ReplaceObjectWithBodyWithResponse(ctx context.Context, objectId ObjectId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ReplaceObjectResponse, error) {
+	rsp, err := c.ReplaceObjectWithBody(ctx, objectId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseReplaceObjectResponse(rsp)
+}
+
+func (c *ClientWithResponses) ReplaceObjectWithResponse(ctx context.Context, objectId ObjectId, body ReplaceObjectJSONRequestBody, reqEditors ...RequestEditorFn) (*ReplaceObjectResponse, error) {
+	rsp, err := c.ReplaceObject(ctx, objectId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseReplaceObjectResponse(rsp)
 }
 
 // GetServiceInfoWithResponse request returning *GetServiceInfoResponse
@@ -5086,6 +5259,81 @@ func ParseDeleteObjectResponse(rsp *http.Response) (*DeleteObjectResponse, error
 	return decoded, decodeErr
 }
 
+// ParseReplaceObjectResponse parses an HTTP response from a ReplaceObjectWithResponse call
+func ParseReplaceObjectResponse(rsp *http.Response) (*ReplaceObjectResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ReplaceObjectResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	decoded, decodeErr := func() (*ReplaceObjectResponse, error) {
+		switch {
+		case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+			var dest N200OkDrsObject
+			if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+				return nil, err
+			}
+			response.JSON200 = &dest
+
+		case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+			var dest N400BadRequest
+			if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+				return nil, err
+			}
+			response.JSON400 = &dest
+
+		case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+			var dest N401Unauthorized
+			if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+				return nil, err
+			}
+			response.JSON401 = &dest
+
+		case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+			var dest N403Forbidden
+			if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+				return nil, err
+			}
+			response.JSON403 = &dest
+
+		case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+			var dest N404NotFoundDrsObject
+			if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+				return nil, err
+			}
+			response.JSON404 = &dest
+
+		case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+			var dest N409Conflict
+			if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+				return nil, err
+			}
+			response.JSON409 = &dest
+
+		case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+			var dest N500InternalServerError
+			if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+				return nil, err
+			}
+			response.JSON500 = &dest
+
+		}
+
+		return response, nil
+	}()
+	// Error responses may use legacy or proxy payloads outside the schema.
+	if decodeErr != nil && rsp.StatusCode/100 != 2 {
+		return response, nil
+	}
+	return decoded, decodeErr
+}
+
 // ParseGetServiceInfoResponse parses an HTTP response from a GetServiceInfoWithResponse call
 func ParseGetServiceInfoResponse(rsp *http.Response) (*GetServiceInfoResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -5244,6 +5492,9 @@ type ServerInterface interface {
 	// DeleteObject Delete a DRS object (optional endpoint)
 	// (PUT /objects/{object_id}/delete)
 	DeleteObject(c fiber.Ctx, objectId ObjectId) error
+	// ReplaceObject Atomically replace a DRS object
+	// (POST /objects/{object_id}/replace)
+	ReplaceObject(c fiber.Ctx, objectId ObjectId) error
 	// GetServiceInfo Retrieve information about this service
 	// (GET /service-info)
 	GetServiceInfo(c fiber.Ctx) error
@@ -5699,6 +5950,35 @@ func (siw *ServerInterfaceWrapper) DeleteObject(c fiber.Ctx) error {
 	return handler(c)
 }
 
+// ReplaceObject operation middleware
+func (siw *ServerInterfaceWrapper) ReplaceObject(c fiber.Ctx) error {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "object_id" -------------
+	var objectId ObjectId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "object_id", c.Params("object_id"), &objectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter object_id: %w", err).Error())
+	}
+
+	handler := func(c fiber.Ctx) error {
+		return siw.Handler.ReplaceObject(c, objectId)
+	}
+
+	for i := len(siw.HandlerMiddlewares) - 1; i >= 0; i-- {
+		m := siw.HandlerMiddlewares[i]
+		next := handler
+		handler = func(c fiber.Ctx) error {
+			return m(c, next)
+		}
+	}
+
+	return handler(c)
+}
+
 // GetServiceInfo operation middleware
 func (siw *ServerInterfaceWrapper) GetServiceInfo(c fiber.Ctx) error {
 
@@ -5789,6 +6069,8 @@ func RegisterHandlersWithOptions(router fiber.Router, si ServerInterface, option
 	router.Put(options.BaseURL+"/objects/:object_id/checksums", wrapper.AddChecksums)
 
 	router.Put(options.BaseURL+"/objects/:object_id/delete", wrapper.DeleteObject)
+
+	router.Post(options.BaseURL+"/objects/:object_id/replace", wrapper.ReplaceObject)
 
 	router.Get(options.BaseURL+"/service-info", wrapper.GetServiceInfo)
 
@@ -5945,6 +6227,8 @@ type N404NotFoundAccessJSONResponse Error
 type N404NotFoundDeleteJSONResponse Error
 
 type N404NotFoundDrsObjectJSONResponse Error
+
+type N409ConflictJSONResponse Error
 
 type N413RequestTooLargeJSONResponse Error
 
@@ -7162,6 +7446,82 @@ func (response DeleteObject500JSONResponse) VisitDeleteObjectResponse(ctx fiber.
 	return ctx.JSON(&response)
 }
 
+type ReplaceObjectRequestObject struct {
+	ObjectId ObjectId `json:"object_id"`
+	Body     *ReplaceObjectJSONRequestBody
+}
+
+type ReplaceObjectResponseObject interface {
+	VisitReplaceObjectResponse(ctx fiber.Ctx) error
+}
+
+type ReplaceObject200JSONResponse struct{ N200OkDrsObjectJSONResponse }
+
+func (response ReplaceObject200JSONResponse) VisitReplaceObjectResponse(ctx fiber.Ctx) error {
+	ctx.Response().Header.Set("Content-Type", "application/json")
+	ctx.Status(200)
+
+	return ctx.JSON(&response)
+}
+
+type ReplaceObject400JSONResponse struct{ N400BadRequestJSONResponse }
+
+func (response ReplaceObject400JSONResponse) VisitReplaceObjectResponse(ctx fiber.Ctx) error {
+	ctx.Response().Header.Set("Content-Type", "application/json")
+	ctx.Status(400)
+
+	return ctx.JSON(&response)
+}
+
+type ReplaceObject401JSONResponse struct{ N401UnauthorizedJSONResponse }
+
+func (response ReplaceObject401JSONResponse) VisitReplaceObjectResponse(ctx fiber.Ctx) error {
+	ctx.Response().Header.Set("Content-Type", "application/json")
+	ctx.Status(401)
+
+	return ctx.JSON(&response)
+}
+
+type ReplaceObject403JSONResponse struct{ N403ForbiddenJSONResponse }
+
+func (response ReplaceObject403JSONResponse) VisitReplaceObjectResponse(ctx fiber.Ctx) error {
+	ctx.Response().Header.Set("Content-Type", "application/json")
+	ctx.Status(403)
+
+	return ctx.JSON(&response)
+}
+
+type ReplaceObject404JSONResponse struct {
+	N404NotFoundDrsObjectJSONResponse
+}
+
+func (response ReplaceObject404JSONResponse) VisitReplaceObjectResponse(ctx fiber.Ctx) error {
+	ctx.Response().Header.Set("Content-Type", "application/json")
+	ctx.Status(404)
+
+	return ctx.JSON(&response)
+}
+
+type ReplaceObject409JSONResponse struct{ N409ConflictJSONResponse }
+
+func (response ReplaceObject409JSONResponse) VisitReplaceObjectResponse(ctx fiber.Ctx) error {
+	ctx.Response().Header.Set("Content-Type", "application/json")
+	ctx.Status(409)
+
+	return ctx.JSON(&response)
+}
+
+type ReplaceObject500JSONResponse struct {
+	N500InternalServerErrorJSONResponse
+}
+
+func (response ReplaceObject500JSONResponse) VisitReplaceObjectResponse(ctx fiber.Ctx) error {
+	ctx.Response().Header.Set("Content-Type", "application/json")
+	ctx.Status(500)
+
+	return ctx.JSON(&response)
+}
+
 type GetServiceInfoRequestObject struct {
 }
 
@@ -7305,6 +7665,9 @@ type StrictServerInterface interface {
 	// DeleteObject Delete a DRS object (optional endpoint)
 	// (PUT /objects/{object_id}/delete)
 	DeleteObject(ctx context.Context, request DeleteObjectRequestObject) (DeleteObjectResponseObject, error)
+	// ReplaceObject Atomically replace a DRS object
+	// (POST /objects/{object_id}/replace)
+	ReplaceObject(ctx context.Context, request ReplaceObjectRequestObject) (ReplaceObjectResponseObject, error)
 	// GetServiceInfo Retrieve information about this service
 	// (GET /service-info)
 	GetServiceInfo(ctx context.Context, request GetServiceInfoRequestObject) (GetServiceInfoResponseObject, error)
@@ -7807,6 +8170,39 @@ func (sh *strictHandler) DeleteObject(ctx fiber.Ctx, objectId ObjectId) error {
 		return err
 	} else if validResponse, ok := response.(DeleteObjectResponseObject); ok {
 		if err := validResponse.VisitDeleteObjectResponse(ctx); err != nil {
+			return err
+		}
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// ReplaceObject operation middleware
+func (sh *strictHandler) ReplaceObject(ctx fiber.Ctx, objectId ObjectId) error {
+	var request ReplaceObjectRequestObject
+
+	request.ObjectId = objectId
+
+	var body ReplaceObjectJSONRequestBody
+	if err := ctx.Bind().Body(&body); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	}
+	request.Body = &body
+
+	handler := func(ctx fiber.Ctx, request interface{}) (interface{}, error) {
+		return sh.ssi.ReplaceObject(ctx.Context(), request.(ReplaceObjectRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ReplaceObject")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(ReplaceObjectResponseObject); ok {
+		if err := validResponse.VisitReplaceObjectResponse(ctx); err != nil {
 			return err
 		}
 	} else if response != nil {

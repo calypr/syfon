@@ -252,11 +252,11 @@ func (s *metricsServer) RecordProviderTransferEvents(ctx context.Context, reques
 }
 
 func checkProviderMetricsIngestAuth(ctx context.Context, body *metricsapi.RecordProviderTransferEventsJSONRequestBody) (int, bool) {
-	if !access.IsGen3Mode(ctx) {
-		return 0, true
-	}
 	if access.MissingGen3AuthHeader(ctx) {
 		return http.StatusUnauthorized, false
+	}
+	if !access.IsAuthzEnforced(ctx) {
+		return 0, true
 	}
 	if body == nil || len(body.Events) == 0 {
 		return http.StatusForbidden, false

@@ -130,7 +130,7 @@ func parseDeleteURL(ctx context.Context, service *Service, raw string) (deleteCa
 		return deleteCandidate{}, "invalid", nil
 	}
 	bucket := strings.TrimSpace(parsed.Bucket)
-	key := strings.Trim(strings.TrimSpace(parsed.Key), "/")
+	key := parsed.Key
 	if bucket == "" || key == "" {
 		return deleteCandidate{}, "invalid", nil
 	}
@@ -148,7 +148,7 @@ func targetAllowed(candidate deleteCandidate, target buckets.StorageScope) bool 
 	if address.NormalizeProvider(candidate.provider, address.S3Provider) != address.S3Provider || !strings.EqualFold(candidate.bucket, target.Bucket) {
 		return false
 	}
-	key := strings.Trim(strings.TrimSpace(candidate.key), "/")
+	key := candidate.key
 	prefix := strings.Trim(strings.TrimSpace(target.Prefix), "/")
 	if prefix == "" {
 		return key != ""

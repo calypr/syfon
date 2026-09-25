@@ -144,6 +144,57 @@ func TestRegisterObjects(t *testing.T) {
 	}
 }
 
+func TestReplaceObjectAfterUploadUpdatesRequestedDID(t *testing.T) {
+	oldSHA := strings.Repeat("a", 64)
+	newSHA := strings.Repeat("b", 64)
+	old := &generated.DrsObject{
+		Id:        "replace-did",
+		Name:      valuePointer("old.bin"),
+		Size:      3,
+		Checksums: []generated.Checksum{{Type: "sha256", Checksum: oldSHA}},
+		AccessMethods: &[]generated.AccessMethod{{
+			Type:      generated.AccessMethodTypeS3,
+			AccessUrl: &generated.AccessURL{Url: "s3://bucket/old"},
+		}},
+	}
+	db := newDRSObjectStore(t, map[string]*generated.DrsObject{old.Id: old})
+	app := newDRSTestApp(testDRSServices(db, nil))
+	candidate := generated.DrsObjectCandidate{
+		Name:      valuePointer("new.bin"),
+		Size:      7,
+		Aliases:   valuePointer([]string{"id:replace-did"}),
+		Checksums: []generated.Checksum{{Type: "sha256", Checksum: newSHA}},
+		ControlledAccess: valuePointer([]string{
+			"/organization/org1/project/proj1",
+		}),
+		AccessMethods: &[]generated.AccessMethod{{
+			Type:      generated.AccessMethodTypeS3,
+			AccessUrl: &generated.AccessURL{Url: "s3://bucket/new"},
+		}},
+	}
+	body, err := json.Marshal(generated.ReplaceObjectJSONRequestBody{ExpectedOldSha256: oldSHA, Candidate: candidate})
+	if err != nil {
+		t.Fatalf("marshal replace body: %v", err)
+	}
+	response, err := app.Test(httptest.NewRequest(http.MethodPost, "/objects/replace-did/replace", bytes.NewReader(body)))
+	if err != nil {
+		t.Fatalf("replace request failed: %v", err)
+	}
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("replace status = %d, want 200", response.StatusCode)
+	}
+	var replaced generated.DrsObject
+	if err := json.NewDecoder(response.Body).Decode(&replaced); err != nil {
+		t.Fatalf("decode replacement response: %v", err)
+	}
+	if replaced.Id != "replace-did" || replaced.Checksums[0].Checksum != newSHA || replaced.Size != 7 {
+		t.Fatalf("replacement response = %+v", replaced)
+	}
+	if replaced.Did == nil || *replaced.Did != "replace-did" {
+		t.Fatalf("replacement did identity = %v", replaced.Did)
+	}
+}
+
 func TestRegisterObjectsRejectsUnsupportedMetadataThroughGeneratedClient(t *testing.T) {
 	newCandidate := func(id string) generated.DrsObjectCandidate {
 		return generated.DrsObjectCandidate{

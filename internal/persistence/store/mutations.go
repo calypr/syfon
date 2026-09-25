@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/calypr/syfon/apigen/drs"
 	"github.com/calypr/syfon/apigen/errorapi"
@@ -40,6 +41,175 @@ func (db *Store) ReplaceObjects(ctx context.Context, objects []drs.DrsObject) er
 		return nil
 	})
 }
+
+// ReplaceObject atomically replaces one requested DID after validating the
+// SHA captured by the caller's preflight lookup. Alias DIDs are detached from
+// their old content row before the new row is registered in the same txn.
+func (db *Store) ReplaceObject(ctx context.Context, objectID, expectedOldSHA string, obj drs.DrsObject) error {
+	requestedID := strings.TrimSpace(objectID)
+	if requestedID == "" || strings.TrimSpace(obj.Id) != requestedID {
+		return fmt.Errorf("object id is required and must match replacement record")
+	}
+	expectedOldSHA = objects.NormalizeOID(expectedOldSHA)
+	if expectedOldSHA == "" {
+		return fmt.Errorf("%w: expected old SHA-256 is required", errorapi.ErrInvalidInput)
+	}
+	newSHA, hasSHA, err := objects.ValidateCanonicalSHA256(obj.Checksums)
+	if err != nil {
+		return err
+	}
+	if !hasSHA {
+		return errorapi.ErrNoValidSHA256
+	}
+	return db.withContentWrite(ctx, func(tx *sql.Tx) error {
+		canonicalID, found, err := db.objectIDTx(ctx, tx, requestedID)
+		if err != nil {
+			return err
+		}
+		if !found {
+			return errorapi.ErrObjectNotFound
+		}
+		oldSHAs, err := db.objectSHAsTx(ctx, tx, canonicalID)
+		if err != nil {
+			return err
+		}
+		if len(oldSHAs) != 1 {
+			return identityConflict("DID %q must identify exactly one SHA-256 checksum before replacement", requestedID)
+		}
+		if !access.HasMethodAccess(ctx, "create", objects.AccessResources(&obj)) {
+			return errorapi.ErrAccessDenied
+		}
+		if err := db.requireContentMethodTx(ctx, tx, canonicalID, "delete"); err != nil {
+			return err
+		}
+		if oldSHAs[0] != expectedOldSHA {
+			if oldSHAs[0] == newSHA {
+				// A retry after a committed replacement is already at its target state.
+				return nil
+			}
+			return identityConflict("DID %q changed from expected SHA-256 %q to %q", requestedID, expectedOldSHA, oldSHAs[0])
+		}
+
+		row, physical, err := db.loadContentRowTx(ctx, tx, requestedID)
+		if err != nil {
+			return err
+		}
+		if physical {
+			var aliases int
+			if err := db.txQueryRowContext(ctx, tx, `SELECT COUNT(*) FROM drs_object_alias WHERE object_id = ?`, canonicalID).Scan(&aliases); err != nil {
+				return err
+			}
+			if aliases != 0 {
+				return identityConflict("physical DID %q has other aliases and cannot be replaced independently", requestedID)
+			}
+			owners, err := db.objectIDsBySHATx(ctx, tx, newSHA)
+			if err != nil {
+				return err
+			}
+			if len(owners) != 0 && !(len(owners) == 1 && owners[0] == canonicalID) {
+				return identityConflict("replacement SHA-256 %q already belongs to object %q", newSHA, owners[0])
+			}
+			if err := db.replaceDIDMetadataTx(ctx, tx, row, &obj); err != nil {
+				return err
+			}
+			if err := db.replaceDIDChildrenTx(ctx, tx, canonicalID, &obj, newSHA); err != nil {
+				return err
+			}
+			return db.flushObjectUsageEventsForIDsTx(ctx, tx, []string{canonicalID})
+		}
+		if oldSHAs[0] == newSHA {
+			// An alias cannot hold independent metadata, so an identical-content
+			// overwrite is already satisfied without changing its canonical row.
+			return nil
+		}
+
+		result, err := db.txExecContext(ctx, tx, `DELETE FROM drs_object_alias WHERE alias_id = ? AND object_id = ?`, requestedID, canonicalID)
+		if err != nil {
+			return fmt.Errorf("detach replacement DID from old object: %w", err)
+		}
+		affected, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if affected != 1 {
+			return errorapi.ErrObjectNotFound
+		}
+		newCanonicalID, err := db.registerContentTx(ctx, tx, &obj)
+		if err != nil {
+			return fmt.Errorf("register replacement object: %w", err)
+		}
+		return db.flushObjectUsageEventsForIDsTx(ctx, tx, []string{canonicalID, newCanonicalID})
+	})
+}
+
+func (db *Store) replaceDIDMetadataTx(ctx context.Context, tx *sql.Tx, row contentRow, obj *drs.DrsObject) error {
+	name := objects.CleanToBasename(stringVal(obj.Name))
+	if row.name != "" && name != "" && row.name != name {
+		if _, err := db.txExecContext(ctx, tx, `
+			INSERT INTO drs_object_name_alias (object_id, name_alias) VALUES (?, ?) ON CONFLICT (object_id, name_alias) DO NOTHING`, row.id, row.name); err != nil {
+			return fmt.Errorf("preserve replaced object name: %w", err)
+		}
+	}
+	updated := valueTime(obj.UpdatedTime)
+	if updated.IsZero() {
+		updated = time.Now().UTC()
+	}
+	_, err := db.txExecContext(ctx, tx, `
+		UPDATE drs_object SET size = ?, updated_time = ?, name = ?, version = ?, description = ?
+		WHERE id = ?`, obj.Size, updated, name, strings.TrimSpace(stringVal(obj.Version)), strings.TrimSpace(stringVal(obj.Description)), row.id)
+	if err != nil {
+		return fmt.Errorf("replace object metadata: %w", err)
+	}
+	return nil
+}
+
+func (db *Store) replaceDIDChildrenTx(ctx context.Context, tx *sql.Tx, id string, obj *drs.DrsObject, sha string) error {
+	if _, err := db.txExecContext(ctx, tx, `DELETE FROM drs_object_access_method WHERE object_id = ?`, id); err != nil {
+		return fmt.Errorf("replace access methods: %w", err)
+	}
+	if obj.AccessMethods != nil {
+		if err := db.upsertAccessMethodsTx(ctx, tx, id, *obj.AccessMethods, false); err != nil {
+			return fmt.Errorf("replace access methods: %w", err)
+		}
+	}
+	if _, err := db.txExecContext(ctx, tx, `DELETE FROM drs_object_controlled_access WHERE object_id = ?`, id); err != nil {
+		return fmt.Errorf("replace controlled access: %w", err)
+	}
+	for _, resource := range objects.AccessResources(obj) {
+		if _, err := db.txExecContext(ctx, tx, `INSERT INTO drs_object_controlled_access (object_id, resource) VALUES (?, ?)`, id, resource); err != nil {
+			return fmt.Errorf("replace controlled grant: %w", err)
+		}
+	}
+	if _, err := db.txExecContext(ctx, tx, `DELETE FROM drs_object_checksum WHERE object_id = ?`, id); err != nil {
+		return fmt.Errorf("replace checksums: %w", err)
+	}
+	if _, err := db.txExecContext(ctx, tx, `INSERT INTO drs_object_checksum (object_id, type, checksum) VALUES (?, 'sha256', ?)`, id, sha); err != nil {
+		return fmt.Errorf("replace SHA-256 checksum: %w", err)
+	}
+	for _, checksum := range obj.Checksums {
+		typ, value := strings.TrimSpace(checksum.Type), strings.TrimSpace(checksum.Checksum)
+		if typ == "" || value == "" || (objects.NormalizeChecksumType(typ) == "sha256" && objects.NormalizeOID(value) != "") {
+			continue
+		}
+		if _, err := db.txExecContext(ctx, tx, `INSERT INTO drs_object_checksum (object_id, type, checksum) VALUES (?, ?, ?)`, id, typ, value); err != nil {
+			return fmt.Errorf("replace checksum: %w", err)
+		}
+	}
+	resources := objects.AccessResources(obj)
+	publicRead := len(resources) == 0
+	if _, err := db.txExecContext(ctx, tx, `
+		INSERT INTO drs_object_read_policy (object_id, public_read) VALUES (?, ?)
+		ON CONFLICT(object_id) DO UPDATE SET public_read = excluded.public_read`, id, publicRead); err != nil {
+		return fmt.Errorf("replace public-read policy: %w", err)
+	}
+	for _, alias := range normalizeObjectNameAliases(obj) {
+		if _, err := db.txExecContext(ctx, tx, `INSERT INTO drs_object_name_alias (object_id, name_alias) VALUES (?, ?) ON CONFLICT (object_id, name_alias) DO NOTHING`, id, alias); err != nil {
+			return fmt.Errorf("replace name alias: %w", err)
+		}
+	}
+	return nil
+}
+
 func (db *Store) replaceObjectTx(ctx context.Context, tx *sql.Tx, obj *drs.DrsObject) (string, error) {
 	id := strings.TrimSpace(obj.Id)
 	if id == "" {

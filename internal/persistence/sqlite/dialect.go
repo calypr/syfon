@@ -112,28 +112,6 @@ func (db *sqliteSchemaBootstrap) initSchema() error {
 			secret_key TEXT,
 			endpoint TEXT
 		)`,
-		`CREATE TRIGGER IF NOT EXISTS s3_credential_unique_bucket_insert
-		BEFORE INSERT ON s3_credential
-		FOR EACH ROW
-		WHEN EXISTS (
-			SELECT 1
-			FROM s3_credential
-			WHERE bucket = NEW.bucket AND credential_id <> NEW.credential_id
-		)
-		BEGIN
-			SELECT RAISE(ABORT, 'physical bucket is already configured under another credential');
-		END`,
-		`CREATE TRIGGER IF NOT EXISTS s3_credential_unique_bucket_update
-		BEFORE UPDATE OF bucket, credential_id ON s3_credential
-		FOR EACH ROW
-		WHEN EXISTS (
-			SELECT 1
-			FROM s3_credential
-			WHERE bucket = NEW.bucket AND credential_id <> NEW.credential_id
-		)
-		BEGIN
-			SELECT RAISE(ABORT, 'physical bucket is already configured under another credential');
-		END`,
 		`CREATE TABLE IF NOT EXISTS bucket_scope (
 			organization TEXT NOT NULL,
 			project_id TEXT NOT NULL,
@@ -142,7 +120,6 @@ func (db *sqliteSchemaBootstrap) initSchema() error {
 			path_prefix TEXT,
 			PRIMARY KEY (organization, project_id)
 		)`,
-		`CREATE INDEX IF NOT EXISTS idx_bucket_scope_credential_id ON bucket_scope(credential_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_bucket_scope_bucket ON bucket_scope(bucket)`,
 		`CREATE TABLE IF NOT EXISTS lfs_pending_metadata (
 			oid TEXT PRIMARY KEY,
@@ -506,6 +483,34 @@ func (db *sqliteSchemaBootstrap) ensureCredentialIdentitySchema() error {
 	}
 	if _, err := db.db.Exec(`CREATE INDEX IF NOT EXISTS idx_s3_credential_bucket ON s3_credential(bucket)`); err != nil {
 		return err
+	}
+	for _, query := range []string{
+		`CREATE TRIGGER IF NOT EXISTS s3_credential_unique_bucket_insert
+		BEFORE INSERT ON s3_credential
+		FOR EACH ROW
+		WHEN EXISTS (
+			SELECT 1
+			FROM s3_credential
+			WHERE bucket = NEW.bucket AND credential_id <> NEW.credential_id
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'physical bucket is already configured under another credential');
+		END`,
+		`CREATE TRIGGER IF NOT EXISTS s3_credential_unique_bucket_update
+		BEFORE UPDATE OF bucket, credential_id ON s3_credential
+		FOR EACH ROW
+		WHEN EXISTS (
+			SELECT 1
+			FROM s3_credential
+			WHERE bucket = NEW.bucket AND credential_id <> NEW.credential_id
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'physical bucket is already configured under another credential');
+		END`,
+	} {
+		if _, err := db.db.Exec(query); err != nil {
+			return err
+		}
 	}
 	return nil
 }

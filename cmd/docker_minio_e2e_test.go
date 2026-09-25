@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	dockerE2EMinioImage     = "docker.io/bitnamilegacy/minio:2025.7.23-debian-12-r3"
+	dockerE2EMinioImage     = "quay.io/minio/minio:RELEASE.2025-03-12T18-04-18Z"
 	dockerE2EMinioBucket    = "syfon-e2e-bucket"
 	dockerE2EMinioRegion    = "us-east-1"
 	dockerE2EMinioAccessKey = "minioadmin"
@@ -144,6 +144,7 @@ func startMinIOContainer(ctx context.Context) (*minioContainer, error) {
 			"MINIO_ROOT_USER":     dockerE2EMinioAccessKey,
 			"MINIO_ROOT_PASSWORD": dockerE2EMinioSecretKey,
 		},
+		Cmd:        []string{"server", "/data", "--address", ":9000"},
 		WaitingFor: wait.ForHTTP("/minio/health/ready").WithPort("9000/tcp").WithStartupTimeout(2 * time.Minute),
 	}
 

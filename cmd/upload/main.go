@@ -110,12 +110,16 @@ var Cmd = &cobra.Command{
 			controlled := clientaccess.AuthzMapToControlledAccess(authzMap)
 			drsObj.ControlledAccess = &controlled
 		}
-		overwriteWarning, err := ensureWritableDID(ctx, c.DRS(), did, uploadOverwrite)
+		overwrite, err := ensureWritableDID(ctx, c.DRS(), did, uploadOverwrite)
 		if err != nil {
 			return err
 		}
-		if overwriteWarning != "" {
-			fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\n", overwriteWarning)
+		if overwrite.Warning != "" {
+			fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\n", overwrite.Warning)
+		}
+		if drsObj.ControlledAccess == nil && overwrite.Existing != nil && overwrite.Existing.ControlledAccess != nil {
+			controlled := append([]string(nil), (*overwrite.Existing.ControlledAccess)...)
+			drsObj.ControlledAccess = &controlled
 		}
 
 		// Register and upload using the SDK's orchestrator
@@ -125,7 +129,12 @@ var Cmd = &cobra.Command{
 		progress.Start()
 		uploadCtx := transferprogress.WithProgress(ctx, did, progress)
 
-		registered, err := upload.RegisterFile(uploadCtx, c.Data(), c.DRS(), drsObj, srcPath, bucketName)
+		var registered *drsapi.DrsObject
+		if overwrite.ExpectedOldSHA != "" {
+			registered, err = upload.ReplaceFile(uploadCtx, c.Data(), c.DRS(), drsObj, srcPath, bucketName, overwrite.ExpectedOldSHA)
+		} else {
+			registered, err = upload.RegisterFile(uploadCtx, c.Data(), c.DRS(), drsObj, srcPath, bucketName)
+		}
 		if err != nil {
 			progress.Abort()
 			return fmt.Errorf("upload failed: %w", err)
@@ -182,26 +191,32 @@ type didLookup interface {
 	GetObject(ctx context.Context, objectID string) (drsapi.DrsObject, error)
 }
 
-type didReplacer interface {
-	didLookup
-	DeleteObject(ctx context.Context, objectID string, deleteStorageData bool) error
+type overwriteInfo struct {
+	Warning        string
+	ExpectedOldSHA string
+	Existing       *drsapi.DrsObject
 }
 
-func ensureWritableDID(ctx context.Context, drs didReplacer, did string, overwrite bool) (string, error) {
-	_, err := drs.GetObject(ctx, did)
+func ensureWritableDID(ctx context.Context, drs didLookup, did string, overwrite bool) (overwriteInfo, error) {
+	object, err := drs.GetObject(ctx, did)
 	if err == nil {
-		if overwrite {
-			if err := drs.DeleteObject(ctx, did, false); err != nil {
-				return "", fmt.Errorf("delete existing DID %s for overwrite: %w", did, err)
-			}
-			return fmt.Sprintf("DID %s already existed; removing the existing record metadata and rewriting it with the new upload. Storage bytes are not deleted as part of this overwrite.", did), nil
+		if !overwrite {
+			return overwriteInfo{}, fmt.Errorf("object DID %s already exists; pass --overwrite to replace it", did)
 		}
-		return "", fmt.Errorf("object DID %s already exists; pass --overwrite to replace it", did)
+		sha, hasSHA := intobjects.CanonicalSHA256(object.Checksums)
+		if !hasSHA {
+			return overwriteInfo{}, fmt.Errorf("object DID %s has no valid SHA-256 checksum and cannot be safely replaced", did)
+		}
+		return overwriteInfo{
+			Warning:        fmt.Sprintf("DID %s already exists; its metadata will be replaced only after the new upload succeeds.", did),
+			ExpectedOldSHA: sha,
+			Existing:       &object,
+		}, nil
 	}
 	if errors.Is(err, errorapi.ErrNotFound) {
-		return "", nil
+		return overwriteInfo{}, nil
 	}
-	return "", fmt.Errorf("check existing DID %s: %w", did, err)
+	return overwriteInfo{}, fmt.Errorf("check existing DID %s: %w", did, err)
 }
 
 func resolveUploadBucketForScope(buckets bucketapi.BucketsResponse, org, project string) (string, error) {
