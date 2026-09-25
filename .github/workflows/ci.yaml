@@ -128,6 +128,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs: verify-generated
+    env:
+      DRS_CREDENTIAL_MASTER_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
     services:
       postgres:
         image: postgres:16
