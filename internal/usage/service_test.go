@@ -96,7 +96,7 @@ func (s *reportStoreSpy) QueryTransferSummary(_ context.Context, filter Filter, 
 	return s.transfer[filter.Organization], nil
 }
 
-func (s *reportStoreSpy) QueryTransferBreakdown(_ context.Context, filter Filter, _ string, _ []string) ([]metricsapi.TransferAttributionBreakdown, error) {
+func (s *reportStoreSpy) QueryTransferBreakdown(_ context.Context, filter Filter, _ string, _ []string, _, _ int) ([]metricsapi.TransferAttributionBreakdown, error) {
 	s.breakdownCalls++
 	return append([]metricsapi.TransferAttributionBreakdown(nil), s.breakdowns[filter.Organization]...), nil
 }
@@ -149,7 +149,7 @@ func (s *optimizedReportStore) QueryTransferSummary(_ context.Context, _ Filter,
 	return metricsapi.TransferAttributionSummary{EventCount: ptr(int64(9))}, nil
 }
 
-func (s *optimizedReportStore) QueryTransferBreakdown(_ context.Context, _ Filter, _ string, resources []string) ([]metricsapi.TransferAttributionBreakdown, error) {
+func (s *optimizedReportStore) QueryTransferBreakdown(_ context.Context, _ Filter, _ string, resources []string, _, _ int) ([]metricsapi.TransferAttributionBreakdown, error) {
 	s.breakdownByResources++
 	s.lastResources = append([]string(nil), resources...)
 	return []metricsapi.TransferAttributionBreakdown{{Key: ptr("resource-fast-path")}}, nil

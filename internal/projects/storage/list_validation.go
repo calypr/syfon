@@ -95,7 +95,6 @@ func projectRecordMatchesPrefix(record drs.DrsObject, prefixes ...string) bool {
 				continue
 			}
 			_, key, ok := address.ParseS3URL(method.AccessUrl.Url)
-			key = strings.Trim(strings.TrimSpace(key), "/")
 			if ok && (key == prefix || strings.HasPrefix(key, prefix+"/")) {
 				return true
 			}
@@ -234,7 +233,7 @@ func (s *Service) validationTarget(ctx context.Context, request internalapi.Inte
 }
 
 func validationTargetKey(bucket, key string) string {
-	return strings.TrimSpace(bucket) + "\x00" + strings.Trim(strings.TrimSpace(key), "/")
+	return strings.TrimSpace(bucket) + "\x00" + key
 }
 
 func validationDirectoryPrefix(key string) string {
@@ -333,7 +332,7 @@ func (s *Service) runExactValidation(ctx context.Context, unresolved map[string]
 					outcome.Error = safeStorageErrorMessage(err, "inventory")
 				} else {
 					for index := range items {
-						if strings.Trim(strings.TrimSpace(items[index].Key), "/") != work.key {
+						if items[index].Key != work.key {
 							continue
 						}
 						item := normalizeObjects([]internalapi.InternalInspectProjectBucketItem{items[index]}, buckets.StorageScope{Bucket: work.bucket})[0]

@@ -2,6 +2,7 @@ package metricscmd
 
 import (
 	"bytes"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -180,6 +181,31 @@ func TestTransferUsersReportCountsMatchesBeforeLimit(t *testing.T) {
 	limitFlag := transfersUsersCmd.Flags().Lookup("limit")
 	if limitFlag == nil || !strings.Contains(limitFlag.Usage, "total_users counts all matching users before the limit") {
 		t.Fatalf("users --limit help = %v, want pre-limit total_users explanation", limitFlag)
+	}
+}
+
+func TestTransferUsersReportCountsAllGroupsAboveStoreLimit(t *testing.T) {
+	const groupCount = 1001
+	rows := make([]metricsapi.TransferAttributionBreakdown, 0, groupCount)
+	for i := 0; i < groupCount; i++ {
+		rows = append(rows, metricsapi.TransferAttributionBreakdown{
+			Key:        ptr(fmt.Sprintf("user-%04d", i)),
+			EventCount: intPtr(int64(i + 1)),
+		})
+	}
+
+	report := buildTransferUsersReport(
+		metricsapi.TransferAttributionSummary{},
+		metricsapi.TransferBreakdownResponse{Data: &rows},
+		"key",
+		"asc",
+		25,
+	)
+	if len(report.Users) != 25 || report.TotalUsers != groupCount {
+		t.Fatalf("limited users report = %d users, total_users=%d; want 25 users and %d total", len(report.Users), report.TotalUsers, groupCount)
+	}
+	if report.Users[0].User != "user-0000" || report.Users[len(report.Users)-1].User != "user-0024" {
+		t.Fatalf("limited user range = %q through %q, want user-0000 through user-0024", report.Users[0].User, report.Users[len(report.Users)-1].User)
 	}
 }
 

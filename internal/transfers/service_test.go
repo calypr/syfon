@@ -85,7 +85,7 @@ type eventFake struct {
 }
 
 func (f *eventFake) RecordTransferAttributionEvents(_ context.Context, events []usage.Event) error {
-	f.events = append([]usage.Event(nil), events...)
+	f.events = append(f.events, events...)
 	return f.err
 }
 
@@ -465,6 +465,27 @@ func TestEventFromObjectPreservesContextAndRangeProjection(t *testing.T) {
 	}
 	if event.AccessGrantID != usage.GrantID(event) || event.EventID != usage.EventID(event) {
 		t.Fatalf("event identity was not projected through usage: %+v", event)
+	}
+}
+
+func TestRecordAccessIssuedCountsRepeatedGrantsWithSameRequestID(t *testing.T) {
+	recorder := &eventFake{}
+	service := NewService(Dependencies{Events: recorder})
+	ctx := requestid.WithRequestID(context.Background(), "client-reused-request-id")
+	request := AccessRequest{Object: testRecord(), AccessID: "s3"}
+	for range 2 {
+		if err := service.RecordAccessIssued(ctx, request); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(recorder.events) != 2 {
+		t.Fatalf("recorded %d events, want 2", len(recorder.events))
+	}
+	if recorder.events[0].EventID == recorder.events[1].EventID {
+		t.Fatal("separate grants received the same event ID")
+	}
+	if recorder.events[0].RequestID != "client-reused-request-id" || recorder.events[1].RequestID != "client-reused-request-id" {
+		t.Fatalf("request ID was lost: %+v", recorder.events)
 	}
 }
 

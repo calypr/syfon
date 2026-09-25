@@ -45,7 +45,7 @@ type ProviderEventRecorder interface {
 // TransferQuery reads transfer attribution reports.
 type TransferQuery interface {
 	QueryTransferSummary(ctx context.Context, filter Filter, resources []string) (metricsapi.TransferAttributionSummary, error)
-	QueryTransferBreakdown(ctx context.Context, filter Filter, groupBy string, resources []string) ([]metricsapi.TransferAttributionBreakdown, error)
+	QueryTransferBreakdown(ctx context.Context, filter Filter, groupBy string, resources []string, limit, offset int) ([]metricsapi.TransferAttributionBreakdown, error)
 }
 
 type ReportStore interface {

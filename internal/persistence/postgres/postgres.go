@@ -114,5 +114,5 @@ func openPostgresStore(ctx context.Context, db *sql.DB, cipher store.CredentialC
 		_ = db.Close()
 		return nil, fmt.Errorf("invalid postgres schema mode %q", mode)
 	}
-	return store.OpenPrepared(db, postgresDialect{}, cipher)
+	return store.OpenPrepared(ctx, db, postgresDialect{}, cipher)
 }

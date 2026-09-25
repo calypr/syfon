@@ -25,6 +25,7 @@ import (
 type MetadataClient interface {
 	GetObject(ctx context.Context, objectID string) (drsapi.DrsObject, error)
 	RegisterObjects(ctx context.Context, req drsapi.RegisterObjectsJSONRequestBody) (drsapi.N201ObjectsCreated, error)
+	ReplaceObject(ctx context.Context, objectID, expectedOldSHA string, candidate drsapi.DrsObjectCandidate) (drsapi.DrsObject, error)
 	UpdateObjectAccessMethods(ctx context.Context, objectID string, accessMethods []drsapi.AccessMethod) (drsapi.DrsObject, error)
 }
 
@@ -42,6 +43,20 @@ func Upload(ctx context.Context, backend transfer.MultipartBackend, sourcePath, 
 // RegisterFile uploads filePath and registers drsObject with the DRS server.
 // canonicalLocation overrides URL resolution from the uploaded location.
 func RegisterFile(ctx context.Context, bk UploadBackend, dc MetadataClient, drsObject *drsapi.DrsObject, filePath, bucketName string, canonicalLocation ...string) (*drsapi.DrsObject, error) {
+	return registerFile(ctx, bk, dc, drsObject, filePath, bucketName, nil, canonicalLocation...)
+}
+
+// ReplaceFile uploads bytes first, then atomically replaces the existing DID
+// only if its checksum still matches the preflight value.
+func ReplaceFile(ctx context.Context, bk UploadBackend, dc MetadataClient, drsObject *drsapi.DrsObject, filePath, bucketName, expectedOldSHA string, canonicalLocation ...string) (*drsapi.DrsObject, error) {
+	expectedOldSHA = clienthash.NormalizeOid(expectedOldSHA)
+	if expectedOldSHA == "" {
+		return nil, fmt.Errorf("expected old SHA-256 is required for replacement")
+	}
+	return registerFile(ctx, bk, dc, drsObject, filePath, bucketName, &expectedOldSHA, canonicalLocation...)
+}
+
+func registerFile(ctx context.Context, bk UploadBackend, dc MetadataClient, drsObject *drsapi.DrsObject, filePath, bucketName string, expectedOldSHA *string, canonicalLocation ...string) (*drsapi.DrsObject, error) {
 	if len(canonicalLocation) > 1 {
 		return nil, fmt.Errorf("at most one canonical location may be provided")
 	}
@@ -80,15 +95,17 @@ func RegisterFile(ctx context.Context, bk UploadBackend, dc MetadataClient, drsO
 	if drsObject.AccessMethods != nil && len(*drsObject.AccessMethods) > 0 {
 		for _, am := range *drsObject.AccessMethods {
 			if am.Type == "s3" || am.Type == "gs" {
-				if am.AccessUrl != nil && am.AccessUrl.Url == "" {
+				if am.AccessUrl == nil {
 					continue
 				}
-				if am.AccessUrl != nil {
-					parts := strings.Split(am.AccessUrl.Url, "/")
-					if candidate := parts[len(parts)-1]; candidate != "" {
-						uploadFilename = candidate
-						break
-					}
+				accessURL, err := url.Parse(am.AccessUrl.Url)
+				if err != nil {
+					continue
+				}
+				parts := strings.Split(accessURL.Path, "/")
+				if candidate := parts[len(parts)-1]; candidate != "" {
+					uploadFilename = candidate
+					break
 				}
 			}
 		}
@@ -184,6 +201,24 @@ func RegisterFile(ctx context.Context, bk UploadBackend, dc MetadataClient, drsO
 	am := drsapi.AccessMethod{
 		Type:      drsapi.AccessMethodType(pType),
 		AccessUrl: &drsapi.AccessURL{Url: canonical},
+	}
+	if expectedOldSHA != nil {
+		aliases := []string{"id:" + requestedID}
+		candidate := drsapi.DrsObjectCandidate{
+			Name:             drsObject.Name,
+			Size:             drsObject.Size,
+			Checksums:        drsObject.Checksums,
+			Aliases:          &aliases,
+			AccessMethods:    &[]drsapi.AccessMethod{am},
+			ControlledAccess: drsObject.ControlledAccess,
+			Description:      drsObject.Description,
+			Version:          drsObject.Version,
+		}
+		replaced, err := dc.ReplaceObject(ctx, requestedID, *expectedOldSHA, candidate)
+		if err != nil {
+			return nil, err
+		}
+		return &replaced, nil
 	}
 
 	found := false

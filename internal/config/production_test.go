@@ -178,16 +178,21 @@ func TestValidateConfigProductionRejectsUnsupportedSSLModeEvenWithOptOut(t *test
 	}
 }
 
-func TestValidateConfigProductionAcceptsEncryptedSSLModes(t *testing.T) {
-	for _, mode := range []string{"require", "verify-ca", "verify-full"} {
+func TestValidateConfigProductionRequiresVerifiedPostgresTLS(t *testing.T) {
+	for _, mode := range []string{"require", "verify-ca", "allow", "prefer"} {
 		t.Run(mode, func(t *testing.T) {
 			cfg := productionTestConfig()
 			cfg.Database.Postgres.SSLMode = mode
 			cfg.Database.Postgres.AllowInsecureTransport = false
-			if err := validateConfig(cfg); err != nil {
-				t.Fatalf("validateConfig() error = %v", err)
+			if err := validateConfig(cfg); err == nil {
+				t.Fatalf("validateConfig() accepted unauthenticated sslmode %q", mode)
 			}
 		})
+	}
+	cfg := productionTestConfig()
+	cfg.Database.Postgres.SSLMode = "verify-full"
+	if err := validateConfig(cfg); err != nil {
+		t.Fatalf("validateConfig() rejected verify-full: %v", err)
 	}
 }
 

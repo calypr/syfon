@@ -14,7 +14,14 @@ import (
 func NewSqliteDB(dsn string, cipher store.CredentialCodec) (*store.Store, error) {
 	var err error
 	if cipher == nil {
-		cipher, err = credentialcipher.NewFromEnv()
+		cipherConfig := credentialcipher.ConfigFromEnv()
+		if cipherConfig.SQLiteFile == "" {
+			path, _, _ := strings.Cut(dsn, "?")
+			if path != ":memory:" && path != "file::memory:" {
+				cipherConfig.SQLiteFile = path
+			}
+		}
+		cipher, err = credentialcipher.New(cipherConfig)
 		if err != nil {
 			return nil, err
 		}

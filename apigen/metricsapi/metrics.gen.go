@@ -171,6 +171,15 @@ type TransferBreakdownResponse struct {
 	Data      *[]TransferAttributionBreakdown   `json:"data,omitempty"`
 	Freshness *TransferMetricsFreshness         `json:"freshness,omitempty"`
 	GroupBy   *TransferBreakdownResponseGroupBy `json:"group_by,omitempty"`
+
+	// Limit Maximum number of groups returned on this page.
+	Limit *int `json:"limit,omitempty"`
+
+	// NextOffset Offset for the next page, or null when this is the last page.
+	NextOffset *int `json:"next_offset"`
+
+	// Offset Number of groups skipped before this page.
+	Offset *int `json:"offset,omitempty"`
 }
 
 // TransferBreakdownResponseGroupBy defines model for TransferBreakdownResponse.GroupBy.
@@ -294,8 +303,14 @@ type GetTransferBreakdownParams struct {
 
 	// AllowStale Deprecated. Transfer metrics always return persisted provider events with freshness metadata, including missing sync windows and latest completed sync time.
 	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
-	AllowStale *AllowStale                        `form:"allow_stale,omitempty" json:"allow_stale,omitempty"`
-	GroupBy    *GetTransferBreakdownParamsGroupBy `form:"group_by,omitempty" json:"group_by,omitempty"`
+	AllowStale *AllowStale `form:"allow_stale,omitempty" json:"allow_stale,omitempty"`
+
+	// Limit Maximum number of groups returned on this page.
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Offset Number of groups to skip before this page.
+	Offset  *int                               `form:"offset,omitempty" json:"offset,omitempty"`
+	GroupBy *GetTransferBreakdownParamsGroupBy `form:"group_by,omitempty" json:"group_by,omitempty"`
 }
 
 // GetTransferBreakdownParamsGroupBy defines parameters for GetTransferBreakdown.
@@ -1151,6 +1166,30 @@ func NewGetTransferBreakdownRequest(server string, params *GetTransferBreakdownP
 		if params.AllowStale != nil {
 
 			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "allow_stale", *params.AllowStale, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "boolean", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Offset != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "offset", *params.Offset, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
 				return nil, err
 			} else {
 				for _, qp := range strings.Split(queryFrag, "&") {
@@ -2505,6 +2544,20 @@ func (siw *ServerInterfaceWrapper) GetTransferBreakdown(c fiber.Ctx) error {
 	err = runtime.BindQueryParameterWithOptions("form", true, false, "allow_stale", query, &params.AllowStale, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter allow_stale: %w", err).Error())
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", query, &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter limit: %w", err).Error())
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", query, &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter offset: %w", err).Error())
 	}
 
 	// ------------- Optional query parameter "group_by" -------------

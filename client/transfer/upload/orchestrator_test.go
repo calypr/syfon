@@ -65,8 +65,12 @@ func TestRegisterLargeFileUsesCompletedMultipartLocation(t *testing.T) {
 type metadataClientStub struct {
 	registeredID string
 	registers    int
+	replacements int
 	updates      int
 	requests     []drsapi.RegisterObjectsJSONRequestBody
+	replaceID    string
+	replaceSHA   string
+	replaceBody  drsapi.DrsObjectCandidate
 	object       drsapi.DrsObject
 	getErr       error
 }
@@ -89,6 +93,15 @@ func (m *metadataClientStub) RegisterObjects(_ context.Context, req drsapi.Regis
 			Id: m.registeredID,
 		}},
 	}, nil
+}
+
+func (m *metadataClientStub) ReplaceObject(_ context.Context, objectID, expectedOldSHA string, candidate drsapi.DrsObjectCandidate) (drsapi.DrsObject, error) {
+	m.replacements++
+	m.replaceID = objectID
+	m.replaceSHA = expectedOldSHA
+	m.replaceBody = candidate
+	m.object = drsapi.DrsObject{Id: objectID, Checksums: candidate.Checksums, Name: candidate.Name, Size: candidate.Size, AccessMethods: candidate.AccessMethods, ControlledAccess: candidate.ControlledAccess}
+	return m.object, nil
 }
 
 func (m *metadataClientStub) UpdateObjectAccessMethods(_ context.Context, objectID string, accessMethods []drsapi.AccessMethod) (drsapi.DrsObject, error) {
@@ -240,6 +253,68 @@ func TestRegisterFileUsesSHA256AliasAsCASKey(t *testing.T) {
 	}
 	if backend.lastResolve.fileName != checksum {
 		t.Fatalf("upload key = %q, want checksum %q", backend.lastResolve.fileName, checksum)
+	}
+}
+
+func TestRegisterFileUsesPathFromSignedHTTPAccessURL(t *testing.T) {
+	t.Parallel()
+
+	file := createTempFileWithData(t, "payload")
+	defer file.Close()
+	accessMethods := []drsapi.AccessMethod{{
+		Type:      "s3",
+		AccessUrl: &drsapi.AccessURL{Url: "https://storage.example/bucket/project-subpath/payload.bin?X-Amz-Signature=abc123"},
+	}}
+	obj := &drsapi.DrsObject{
+		Id:            "requested-object-id",
+		AccessMethods: &accessMethods,
+		Checksums: []drsapi.Checksum{{
+			Type:     "sha256",
+			Checksum: payloadSHA256,
+		}},
+	}
+	backend := &uploaderStub{}
+	metadata := &metadataClientStub{registeredID: "server-object-id"}
+
+	if _, err := RegisterFile(context.Background(), backend, metadata, obj, file.Name(), "bucket-a"); err != nil {
+		t.Fatalf("RegisterFile returned error: %v", err)
+	}
+	if backend.lastResolve.fileName != "payload.bin" {
+		t.Fatalf("upload key = %q, want final URL path segment without signed query", backend.lastResolve.fileName)
+	}
+}
+
+func TestReplaceFileUploadFailurePreservesExistingDID(t *testing.T) {
+	oldChecksum := strings.Repeat("a", 64)
+	metadata := &metadataClientStub{object: drsapi.DrsObject{
+		Id:        "did-1",
+		Checksums: []drsapi.Checksum{{Type: "sha256", Checksum: oldChecksum}},
+	}}
+	backend := &uploaderStub{uploadFunc: func(context.Context, string, io.Reader, int64) error {
+		return errors.New("storage unavailable")
+	}}
+	file := createTempFileWithData(t, "replacement payload")
+	defer file.Close()
+	checksum := sha256.Sum256([]byte("replacement payload"))
+	newSHA := hex.EncodeToString(checksum[:])
+	name := "replacement.txt"
+	object := &drsapi.DrsObject{
+		Id:            "did-1",
+		Name:          &name,
+		Size:          int64(len("replacement payload")),
+		Checksums:     []drsapi.Checksum{{Type: "sha256", Checksum: newSHA}},
+		AccessMethods: &[]drsapi.AccessMethod{{Type: "s3"}},
+	}
+
+	_, err := ReplaceFile(context.Background(), backend, metadata, object, file.Name(), "bucket-a", oldChecksum)
+	if err == nil || !strings.Contains(err.Error(), "upload failed") {
+		t.Fatalf("ReplaceFile error = %v, want upload failure", err)
+	}
+	if metadata.object.Checksums[0].Checksum != oldChecksum {
+		t.Fatalf("existing DID checksum = %q, want preserved %q", metadata.object.Checksums[0].Checksum, oldChecksum)
+	}
+	if metadata.replacements != 0 || metadata.registers != 0 {
+		t.Fatalf("metadata writes after upload failure: replacements=%d registrations=%d", metadata.replacements, metadata.registers)
 	}
 }
 

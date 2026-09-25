@@ -915,7 +915,7 @@ func TestSqliteDB_GetBulkObjectsAliasesUseBoundedQueries(t *testing.T) {
 	}
 
 	dialect := &queryCountingDialect{Dialect: sqliteDialect{}}
-	observed, err := store.OpenPrepared(db.DB(), dialect, nil)
+	observed, err := store.OpenPrepared(context.Background(), db.DB(), dialect, nil)
 	if err != nil {
 		t.Fatalf("OpenPrepared: %v", err)
 	}
@@ -1699,7 +1699,7 @@ func TestSqliteDB_TransferAttributionByResources(t *testing.T) {
 		t.Fatalf("unexpected scoped transfer summary: %+v", summary)
 	}
 
-	breakdown, err := db.QueryTransferBreakdown(ctx, usage.Filter{}, "user", []string{"/programs/org/projects/p1"})
+	breakdown, err := db.QueryTransferBreakdown(ctx, usage.Filter{}, "user", []string{"/programs/org/projects/p1"}, 1000, 0)
 	if err != nil {
 		t.Fatalf("GetTransferAttributionBreakdownByResources failed: %v", err)
 	}
@@ -1882,21 +1882,21 @@ func TestSqliteDB_TransferAttributionMetrics(t *testing.T) {
 		t.Fatalf("unexpected transfer summary: %+v", summary)
 	}
 
-	userBreakdown, err := db.QueryTransferBreakdown(ctx, usage.Filter{Organization: "calypr"}, "user", nil)
+	userBreakdown, err := db.QueryTransferBreakdown(ctx, usage.Filter{Organization: "calypr"}, "user", nil, 1000, 0)
 	if err != nil {
 		t.Fatalf("GetTransferAttributionBreakdown(user) failed: %v", err)
 	}
 	if len(userBreakdown) != 2 {
 		t.Fatalf("expected two user breakdown rows, got %+v", userBreakdown)
 	}
-	providerBreakdown, err := db.QueryTransferBreakdown(ctx, usage.Filter{Provider: "s3", Bucket: "bucket-a"}, "provider", nil)
+	providerBreakdown, err := db.QueryTransferBreakdown(ctx, usage.Filter{Provider: "s3", Bucket: "bucket-a"}, "provider", nil, 1000, 0)
 	if err != nil {
 		t.Fatalf("GetTransferAttributionBreakdown(provider) failed: %v", err)
 	}
 	if len(providerBreakdown) != 1 || sqliteTestInt64Val(providerBreakdown[0].BytesDownloaded) != 42 || sqliteTestInt64Val(providerBreakdown[0].BytesUploaded) != 42 {
 		t.Fatalf("unexpected provider breakdown: %+v", providerBreakdown)
 	}
-	objectBreakdown, err := db.QueryTransferBreakdown(ctx, usage.Filter{SHA256: oid}, "object", nil)
+	objectBreakdown, err := db.QueryTransferBreakdown(ctx, usage.Filter{SHA256: oid}, "object", nil, 1000, 0)
 	if err != nil {
 		t.Fatalf("GetTransferAttributionBreakdown(object) failed: %v", err)
 	}

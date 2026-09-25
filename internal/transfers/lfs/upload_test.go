@@ -11,6 +11,7 @@ import (
 	"github.com/calypr/syfon/apigen/drs"
 	"github.com/calypr/syfon/apigen/errorapi"
 	"github.com/calypr/syfon/apigen/lfsapi"
+	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/objects"
 )
 
@@ -59,6 +60,7 @@ func (s *lfsMetadataObjectSpy) RegisterObjectsIfPending(ctx context.Context, rec
 
 type metadataPendingSpy struct {
 	events           *[]string
+	saves            int
 	entry            *PendingMetadata
 	replacement      *PendingMetadata
 	getErr           error
@@ -68,7 +70,29 @@ type metadataPendingSpy struct {
 }
 
 func (s *metadataPendingSpy) SavePendingMetadata(context.Context, []PendingMetadata) error {
+	s.saves++
 	return nil
+}
+
+func TestAnonymousGen3CannotStageOrVerifyPendingMetadata(t *testing.T) {
+	var events []string
+	oid := strings.Repeat("a", 64)
+	pending := &metadataPendingSpy{events: &events, entry: &PendingMetadata{OID: oid}}
+	objectPort := &lfsMetadataObjectSpy{events: &events, getErr: errorapi.ErrNotFound}
+	service := NewService(nil, objectPort, nil, pending, nil, nil)
+	ctx := access.WithSession(context.Background(), access.NewSession("gen3"))
+	if err := service.Stage(ctx, []lfsapi.DrsObjectCandidate{{}}, PendingMetadataTTL); !errors.Is(err, errorapi.ErrAccessDenied) {
+		t.Fatalf("anonymous Stage error = %v, want access denied", err)
+	}
+	if pending.saves != 0 {
+		t.Fatal("anonymous request overwrote pending metadata")
+	}
+	if err := service.Verify(ctx, oid, 1); !errors.Is(err, errorapi.ErrAccessDenied) {
+		t.Fatalf("anonymous Verify error = %v, want access denied", err)
+	}
+	if len(objectPort.registered) != 0 {
+		t.Fatal("anonymous request registered pending metadata")
+	}
 }
 
 func (s *metadataPendingSpy) GetPendingMetadata(context.Context, string) (*PendingMetadata, error) {

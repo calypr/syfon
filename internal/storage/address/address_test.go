@@ -72,7 +72,7 @@ func TestStorageAddressParsing(t *testing.T) {
 	if got := SchemeFromURL("HTTPS://example.com"); got != "https" {
 		t.Fatalf("SchemeFromURL=%q", got)
 	}
-	if got := BucketToURL("s3://my-bucket", "/my-key"); got != "s3://my-bucket/my-key" {
+	if got := BucketToURL("s3://my-bucket", "/my-key"); got != "s3://my-bucket//my-key" {
 		t.Fatalf("BucketToURL=%q", got)
 	}
 	bucket, key, ok := ParseS3URL("s3://bucket/path/to/object")
@@ -86,6 +86,9 @@ func TestStorageAddressParsing(t *testing.T) {
 		if _, _, ok := ParseS3URL(raw); ok {
 			t.Fatalf("legacy URL without a key should not parse: %q", raw)
 		}
+	}
+	if bucket, key, ok := ParseS3URL("s3://bucket//"); !ok || bucket != "bucket" || key != "/" {
+		t.Fatalf("ParseS3URL(s3://bucket//)=(%q,%q,%v), want (%q,%q,true)", bucket, key, ok, "bucket", "/")
 	}
 	if got, err := NormalizeStoragePath("", "bucket"); err != nil || got != "" {
 		t.Fatalf("NormalizeStoragePath(empty)=(%q,%v)", got, err)
@@ -101,6 +104,7 @@ func TestStorageAddressParsing(t *testing.T) {
 		raw, wantURL, wantScheme, wantProvider, wantBucket, wantKey, wantPath string
 	}{
 		{"s3://bucket/path/to/object", "s3://bucket/path/to/object", "s3", S3Provider, "bucket", "path/to/object", "/path/to/object"},
+		{"s3://bucket//physical/key/", "s3://bucket//physical/key/", "s3", S3Provider, "bucket", "/physical/key/", "//physical/key/"},
 		{"GS://bucket/path", "GS://bucket/path", "gs", GCSProvider, "bucket", "path", "/path"},
 		{"az://bucket/path", "az://bucket/path", "az", AzureProvider, "bucket", "path", "/path"},
 		{"file:///tmp/storage-root/object", "file:///tmp/storage-root/object", "file", FileProvider, "", "tmp/storage-root/object", "/tmp/storage-root/object"},
@@ -133,6 +137,24 @@ func TestBucketURLRoundTripsReservedObjectKeyBytes(t *testing.T) {
 
 	if got := BucketToURL("bucket", "a/b"); got != "s3://bucket/a/b" {
 		t.Fatalf("BucketToURL() changed ordinary URL: %q", got)
+	}
+}
+
+func TestBucketURLRoundTripsLeadingAndTrailingKeySlashes(t *testing.T) {
+	const objectKey = "/dir/"
+	gotURL := BucketToURL("bucket", objectKey)
+	if want := "s3://bucket//dir/"; gotURL != want {
+		t.Fatalf("BucketToURL() = %q, want %q", gotURL, want)
+	}
+
+	bucket, gotKey, ok := ParseS3URL(gotURL)
+	if !ok || bucket != "bucket" || gotKey != objectKey {
+		t.Fatalf("ParseS3URL() = (%q, %q, %v), want (%q, %q, true)", bucket, gotKey, ok, "bucket", objectKey)
+	}
+
+	parsed, err := ParseLocation(gotURL)
+	if err != nil || parsed.Key != objectKey {
+		t.Fatalf("ParseLocation() = (%+v, %v), want key %q", parsed, err, objectKey)
 	}
 }
 

@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"testing"
@@ -103,6 +104,8 @@ type fakeMetricsClient struct {
 	transferBreakdownResp   *metricsapi.GetTransferBreakdownResponse
 	transferBreakdownErr    error
 	transferBreakdownParams *metricsapi.GetTransferBreakdownParams
+	transferBreakdownPages  []*metricsapi.GetTransferBreakdownResponse
+	transferBreakdownCalls  []*metricsapi.GetTransferBreakdownParams
 }
 
 func (f *fakeMetricsClient) ListMetricsFilesWithResponse(ctx context.Context, params *metricsapi.ListMetricsFilesParams, reqEditors ...metricsapi.RequestEditorFn) (*metricsapi.ListMetricsFilesResponse, error) {
@@ -138,6 +141,12 @@ func (f *fakeMetricsClient) RecordProviderTransferEventsWithResponse(ctx context
 
 func (f *fakeMetricsClient) GetTransferBreakdownWithResponse(ctx context.Context, params *metricsapi.GetTransferBreakdownParams, reqEditors ...metricsapi.RequestEditorFn) (*metricsapi.GetTransferBreakdownResponse, error) {
 	f.transferBreakdownParams = params
+	f.transferBreakdownCalls = append(f.transferBreakdownCalls, params)
+	if len(f.transferBreakdownPages) > 0 {
+		resp := f.transferBreakdownPages[0]
+		f.transferBreakdownPages = f.transferBreakdownPages[1:]
+		return resp, nil
+	}
 	return f.transferBreakdownResp, f.transferBreakdownErr
 }
 
@@ -493,6 +502,68 @@ func TestMetricsService(t *testing.T) {
 		}
 	})
 
+}
+
+func TestMetricsServiceTransferBreakdownFetchesEveryPage(t *testing.T) {
+	firstRows := make([]metricsapi.TransferAttributionBreakdown, 1000)
+	secondRows := []metricsapi.TransferAttributionBreakdown{{}}
+	groupBy := metricsapi.TransferBreakdownResponseGroupBy("user")
+	limit, firstOffset, nextOffset, secondOffset := 1000, 0, 1000, 1000
+	fake := &fakeMetricsClient{
+		transferBreakdownPages: []*metricsapi.GetTransferBreakdownResponse{
+			{
+				HTTPResponse: &http.Response{StatusCode: http.StatusOK},
+				JSON200: &metricsapi.TransferBreakdownResponse{
+					GroupBy:    &groupBy,
+					Data:       &firstRows,
+					Limit:      &limit,
+					Offset:     &firstOffset,
+					NextOffset: &nextOffset,
+				},
+			},
+			{
+				HTTPResponse: &http.Response{StatusCode: http.StatusOK},
+				JSON200: &metricsapi.TransferBreakdownResponse{
+					GroupBy: &groupBy,
+					Data:    &secondRows,
+					Limit:   &limit,
+					Offset:  &secondOffset,
+				},
+			},
+		},
+	}
+
+	got, err := NewMetricsService(fake).TransferBreakdown(context.Background(), TransferMetricsOptions{GroupBy: "user"})
+	if err != nil {
+		t.Fatalf("TransferBreakdown returned error: %v", err)
+	}
+	if got.Data == nil || len(*got.Data) != 1001 || got.NextOffset != nil || got.Limit != nil || got.Offset != nil {
+		t.Fatalf("complete breakdown = data length %d, limit=%v offset=%v next=%v; want 1001 rows without page metadata", dataLength(got.Data), got.Limit, got.Offset, got.NextOffset)
+	}
+	if len(fake.transferBreakdownCalls) != 2 {
+		t.Fatalf("made %d page requests, want 2", len(fake.transferBreakdownCalls))
+	}
+	for i, wantOffset := range []int{0, 1000} {
+		params := fake.transferBreakdownCalls[i]
+		if params.Limit == nil || *params.Limit != 1000 || params.Offset == nil || *params.Offset != wantOffset {
+			t.Fatalf("page %d params = limit %v offset %v, want limit 1000 offset %d", i+1, params.Limit, params.Offset, wantOffset)
+		}
+		req, err := metricsapi.NewGetTransferBreakdownRequest("https://example.test", params)
+		if err != nil {
+			t.Fatalf("build page %d request: %v", i+1, err)
+		}
+		query := req.URL.Query()
+		if query.Get("limit") != "1000" || query.Get("offset") != fmt.Sprint(wantOffset) {
+			t.Fatalf("page %d encoded query = %v, want limit=1000 offset=%d", i+1, query, wantOffset)
+		}
+	}
+}
+
+func dataLength(data *[]metricsapi.TransferAttributionBreakdown) int {
+	if data == nil {
+		return 0
+	}
+	return len(*data)
 }
 
 func TestLFSService(t *testing.T) {

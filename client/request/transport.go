@@ -157,6 +157,7 @@ func NewClient(
 		baseTransport = baseHTTPClient.Transport
 	} else {
 		baseTransport = &http.Transport{
+			Proxy: http.ProxyFromEnvironment,
 			DialContext: (&net.Dialer{
 				Timeout:   5 * time.Second,
 				KeepAlive: 30 * time.Second,

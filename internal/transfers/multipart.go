@@ -90,7 +90,10 @@ func (s *Service) BeginMultipart(ctx context.Context, req MultipartInitRequest) 
 	if err := s.multipartSessions.SaveMultipartSession(ctx, MultipartSession{UploadID: string(uploadID), CompletionID: completionID, Target: target, Authorization: authorization, State: MultipartStateActive, Operation: MultipartOperationNone, CreatedAt: now, UpdatedAt: now}); err != nil {
 		persistErr := fmt.Errorf("persist multipart upload %s: %w", uploadID, err)
 		if aborter, ok := s.storage.(MultipartAborter); ok {
-			if abortErr := aborter.AbortMultipart(ctx, storage.AbortMultipartRequest{Target: target, UploadID: uploadID, CompletionID: completionID}); abortErr != nil {
+			cleanupCtx, cancel := newMultipartCleanupContext(ctx)
+			abortErr := aborter.AbortMultipart(cleanupCtx, storage.AbortMultipartRequest{Target: target, UploadID: uploadID, CompletionID: completionID})
+			cancel()
+			if abortErr != nil {
 				return MultipartInitResult{}, errors.Join(persistErr, fmt.Errorf("abort unpersisted multipart upload %s: %w", uploadID, abortErr))
 			}
 		}

@@ -7,8 +7,8 @@ import (
 )
 
 // ParsedLocation is the syntax and provider information extracted from a
-// storage location. Path retains the parsed URL path, while Key is the object
-// key with its leading slash removed.
+// storage location. Path retains the parsed URL path, while Key has only the
+// URL's structural leading slash removed.
 type ParsedLocation struct {
 	URL      string
 	Scheme   string
@@ -37,7 +37,7 @@ func ParseLocation(raw string) (ParsedLocation, error) {
 		Scheme:   scheme,
 		Provider: ProviderFromScheme(scheme),
 		Bucket:   strings.TrimSpace(u.Host),
-		Key:      strings.TrimPrefix(strings.TrimSpace(u.Path), "/"),
+		Key:      strings.TrimPrefix(u.Path, "/"),
 		Path:     u.Path,
 	}, nil
 }
@@ -77,7 +77,7 @@ func BucketToURL(bucket, key string) string {
 	return (&url.URL{
 		Scheme: "s3",
 		Host:   strings.TrimPrefix(bucket, "s3://"),
-		Path:   "/" + strings.TrimPrefix(key, "/"),
+		Path:   "/" + key,
 	}).String()
 }
 

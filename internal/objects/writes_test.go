@@ -218,6 +218,27 @@ func TestRegisterCandidatesReturnsMaterializedRecordsInRequestOrder(t *testing.T
 	}
 }
 
+func TestRegisterCandidatesRejectsConflictingSHA256BeforePersistence(t *testing.T) {
+	store := &objectTestStore{Objects: make(map[string]*drs.DrsObject)}
+	service := objects.NewService(store)
+	conflicting := drsCandidate("conflicting", "conflicting.tsv", strings.Repeat("b", 64))
+	conflicting.Checksums = []drs.Checksum{
+		{Type: "sha256", Checksum: strings.Repeat("b", 64)},
+		{Type: "SHA-256", Checksum: strings.Repeat("c", 64)},
+	}
+
+	_, err := service.RegisterCandidates(context.Background(), []drs.DrsObjectCandidate{
+		drsCandidate("valid", "valid.tsv", strings.Repeat("a", 64)),
+		conflicting,
+	})
+	if !errors.Is(err, errorapi.ErrConflictingSHA256) {
+		t.Fatalf("RegisterCandidates() error = %v, want ErrConflictingSHA256", err)
+	}
+	if len(store.Objects) != 0 {
+		t.Fatalf("RegisterCandidates() persisted %d records after rejecting a conflicting checksum", len(store.Objects))
+	}
+}
+
 func TestRegisterCandidatesSucceedsWithCreateWithoutRead(t *testing.T) {
 	database := newSQLiteDatabase(t)
 	service := objects.NewService(database)

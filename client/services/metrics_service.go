@@ -42,6 +42,8 @@ type MetricsService struct {
 	gen metricsapi.ClientWithResponsesInterface
 }
 
+const maxTransferBreakdownPageSize = 1000
+
 func NewMetricsService(gen metricsapi.ClientWithResponsesInterface) *MetricsService {
 	return &MetricsService{gen: gen}
 }
@@ -119,10 +121,47 @@ func (s *MetricsService) TransferSummary(ctx context.Context, opts TransferMetri
 }
 
 func (s *MetricsService) TransferBreakdown(ctx context.Context, opts TransferMetricsOptions) (metricsapi.TransferBreakdownResponse, error) {
+	all := make([]metricsapi.TransferAttributionBreakdown, 0)
+	var combined metricsapi.TransferBreakdownResponse
+	for offset := 0; ; {
+		page, err := s.TransferBreakdownPage(ctx, opts, maxTransferBreakdownPageSize, offset)
+		if err != nil {
+			return metricsapi.TransferBreakdownResponse{}, err
+		}
+		if offset == 0 {
+			combined = page
+		}
+		if page.Data != nil {
+			all = append(all, (*page.Data)...)
+		}
+		if page.NextOffset == nil {
+			break
+		}
+		next := *page.NextOffset
+		if next != offset+maxTransferBreakdownPageSize {
+			return metricsapi.TransferBreakdownResponse{}, fmt.Errorf("invalid transfer breakdown next_offset %d after offset %d", next, offset)
+		}
+		offset = next
+	}
+	combined.Data = &all
+	combined.Limit = nil
+	combined.Offset = nil
+	combined.NextOffset = nil
+	return combined, nil
+}
+
+// TransferBreakdownPage fetches one bounded page. TransferBreakdown follows
+// next_offset and collects every page for callers that need complete totals.
+func (s *MetricsService) TransferBreakdownPage(ctx context.Context, opts TransferMetricsOptions, limit, offset int) (metricsapi.TransferBreakdownResponse, error) {
+	if limit < 1 || limit > maxTransferBreakdownPageSize || offset < 0 {
+		return metricsapi.TransferBreakdownResponse{}, fmt.Errorf("invalid transfer breakdown page: limit=%d offset=%d", limit, offset)
+	}
 	params, err := transferBreakdownParams(opts)
 	if err != nil {
 		return metricsapi.TransferBreakdownResponse{}, err
 	}
+	params.Limit = &limit
+	params.Offset = &offset
 	resp, err := s.gen.GetTransferBreakdownWithResponse(ctx, params)
 	if err != nil {
 		return metricsapi.TransferBreakdownResponse{}, err

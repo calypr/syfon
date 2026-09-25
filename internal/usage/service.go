@@ -87,7 +87,14 @@ type TransferBreakdownQuery struct {
 	Filter  Filter
 	GroupBy string
 	Scope   ScopeQuery
+	Limit   int
+	Offset  int
 }
+
+const (
+	DefaultTransferBreakdownPageSize = 200
+	MaxTransferBreakdownPageSize     = 1000
+)
 
 type Reporter interface {
 	GetFileUsage(ctx context.Context, objectID string) (*metricsapi.FileUsage, error)
@@ -347,11 +354,17 @@ func (s *Service) GetTransferAttributionBreakdown(ctx context.Context, query Tra
 	if !validBreakdownGroup(query.GroupBy) {
 		return nil, ErrInvalidGroupBy
 	}
+	if query.Limit == 0 {
+		query.Limit = DefaultTransferBreakdownPageSize
+	}
+	if query.Limit < 1 || query.Limit > MaxTransferBreakdownPageSize+1 || query.Offset < 0 {
+		return nil, fmt.Errorf("invalid transfer breakdown page: limit=%d offset=%d", query.Limit, query.Offset)
+	}
 	var resources []string
 	if query.Scope.isAggregate() && strings.TrimSpace(query.Filter.Organization) == "" {
 		resources = query.Scope.resources()
 	}
-	return s.reports.QueryTransferBreakdown(ctx, query.Filter, query.GroupBy, resources)
+	return s.reports.QueryTransferBreakdown(ctx, query.Filter, query.GroupBy, resources, query.Limit, query.Offset)
 }
 
 func validBreakdownGroup(groupBy string) bool {

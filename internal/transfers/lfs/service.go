@@ -482,6 +482,9 @@ func (s *Service) firstConfiguredBucket(ctx context.Context) (string, error) {
 }
 
 func (s *Service) Stage(ctx context.Context, candidates []lfsapi.DrsObjectCandidate, ttl time.Duration) error {
+	if !access.HasObjectMethodAccess(ctx, "create", []string{"/data_file"}) {
+		return errorapi.ErrAccessDenied
+	}
 	if ttl < time.Second || ttl > MaxPendingMetadataTTL {
 		return fmt.Errorf("pending metadata TTL must be between 1s and %s", MaxPendingMetadataTTL)
 	}
@@ -543,6 +546,9 @@ func (s *Service) Verify(ctx context.Context, oid string, expectedSize int64) er
 	}
 	if err != nil {
 		return err
+	}
+	if !access.HasObjectMethodAccess(ctx, "create", []string{"/data_file"}) {
+		return errorapi.ErrAccessDenied
 	}
 	evidence, ok := s.pending.(UploadEvidenceStore)
 	if !ok {

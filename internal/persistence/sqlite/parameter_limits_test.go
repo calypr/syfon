@@ -182,7 +182,7 @@ func TestLargeListQueriesPreserveBehavior(t *testing.T) {
 		transferSummary.BytesRequested == nil || *transferSummary.BytesRequested != 7 {
 		t.Fatalf("transfer summary = %+v", transferSummary)
 	}
-	breakdown, err := database.QueryTransferBreakdown(ctx, usage.Filter{}, "project", resources)
+	breakdown, err := database.QueryTransferBreakdown(ctx, usage.Filter{}, "project", resources, 1000, 0)
 	if err != nil {
 		t.Fatalf("QueryTransferBreakdown: %v", err)
 	}

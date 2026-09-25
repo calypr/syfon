@@ -252,11 +252,11 @@ func (s *metricsServer) RecordProviderTransferEvents(ctx context.Context, reques
 }
 
 func checkProviderMetricsIngestAuth(ctx context.Context, body *metricsapi.RecordProviderTransferEventsJSONRequestBody) (int, bool) {
-	if !access.IsGen3Mode(ctx) {
-		return 0, true
-	}
 	if access.MissingGen3AuthHeader(ctx) {
 		return http.StatusUnauthorized, false
+	}
+	if !access.IsAuthzEnforced(ctx) {
+		return 0, true
 	}
 	if body == nil || len(body.Events) == 0 {
 		return http.StatusForbidden, false
@@ -310,6 +310,17 @@ func (s *metricsServer) GetTransferBreakdown(ctx context.Context, request metric
 	}
 	filter := transferBreakdownParamsToFilter(request.Params)
 	freshness := transferMetricsFreshness(filter)
+	limit := usage.DefaultTransferBreakdownPageSize
+	if request.Params.Limit != nil {
+		limit = *request.Params.Limit
+	}
+	offset := 0
+	if request.Params.Offset != nil {
+		offset = *request.Params.Offset
+	}
+	if limit < 1 || limit > usage.MaxTransferBreakdownPageSize || offset < 0 || offset > int(^uint(0)>>1)-limit {
+		return metricsapi.GetTransferBreakdown400JSONResponse(metricsAPIError(ctx, http.StatusBadRequest)), nil
+	}
 	groupBy := "scope"
 	if request.Params.GroupBy != nil {
 		groupBy = string(*request.Params.GroupBy)
@@ -323,15 +334,27 @@ func (s *metricsServer) GetTransferBreakdown(ctx context.Context, request metric
 		Filter:  filter,
 		GroupBy: groupBy,
 		Scope:   scope,
+		Limit:   limit + 1,
+		Offset:  offset,
 	})
 	if err != nil {
 		return nil, err
 	}
+	var nextOffset *int
+	if len(items) > limit {
+		items = items[:limit]
+		next := offset + limit
+		nextOffset = &next
+	}
 	generatedGroupBy := metricsapi.TransferBreakdownResponseGroupBy(groupBy)
+	responseLimit, responseOffset := limit, offset
 	return metricsapi.GetTransferBreakdown200JSONResponse{
-		Data:      &items,
-		Freshness: &freshness,
-		GroupBy:   &generatedGroupBy,
+		Data:       &items,
+		Freshness:  &freshness,
+		GroupBy:    &generatedGroupBy,
+		Limit:      &responseLimit,
+		Offset:     &responseOffset,
+		NextOffset: nextOffset,
 	}, nil
 }
 

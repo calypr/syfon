@@ -38,6 +38,27 @@ func (s *Service) RegisterCandidates(ctx context.Context, candidates []drs.DrsOb
 	return s.RegisterObjects(ctx, prepared)
 }
 
+// ReplaceCandidate replaces one DID after its bytes have been uploaded. The
+// store checks the preflight SHA and applies the metadata mutation atomically.
+func (s *Service) ReplaceCandidate(ctx context.Context, objectID, expectedOldSHA string, candidate drs.DrsObjectCandidate) (*drs.DrsObject, error) {
+	record, err := MaterializeCandidate(candidate, time.Now().UTC())
+	if err != nil {
+		return nil, err
+	}
+	objectID = strings.TrimSpace(objectID)
+	if objectID == "" {
+		return nil, errorapi.ErrInvalidInput
+	}
+	aliases := []string{"id:" + objectID}
+	record.Id = objectID
+	record.Aliases = &aliases
+	record.SelfUri = "drs://" + objectID
+	if err := s.store.ReplaceObject(ctx, objectID, expectedOldSHA, record); err != nil {
+		return nil, err
+	}
+	return s.store.GetObject(ctx, objectID)
+}
+
 // UpdateAccessMethodsAndRead updates one record and returns its durable DRS
 // representation. DRS object metadata is public, so write success does not
 // depend on a second read-authorization check after commit.

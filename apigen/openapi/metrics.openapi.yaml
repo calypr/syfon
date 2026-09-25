@@ -322,6 +322,21 @@ paths:
         - $ref: '#/components/parameters/User'
         - $ref: '#/components/parameters/AllowStale'
         - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 200
+          description: Maximum number of groups returned on this page.
+        - in: query
+          name: offset
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+          description: Number of groups to skip before this page.
+        - in: query
           name: group_by
           schema:
             type: string
@@ -700,6 +715,17 @@ components:
     TransferBreakdownResponse:
       type: object
       properties:
+        limit:
+          type: integer
+          description: Maximum number of groups returned on this page.
+        offset:
+          type: integer
+          description: Number of groups skipped before this page.
+        next_offset:
+          type: integer
+          nullable: true
+          x-omitempty: false
+          description: Offset for the next page, or null when this is the last page.
         group_by:
           type: string
           enum: [scope, user, provider, object]

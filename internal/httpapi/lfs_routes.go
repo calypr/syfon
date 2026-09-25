@@ -394,6 +394,9 @@ func (s *lfsServer) LfsVerify(ctx context.Context, request lfsapi.LfsVerifyReque
 		return lfsapi.LfsVerify400ApplicationVndGitLfsPlusJSONResponse{Message: "size must be non-negative"}, nil
 	}
 	if err := s.service.Verify(ctx, oid, request.Body.Size); err != nil {
+		if errors.Is(err, errorapi.ErrAccessDenied) {
+			return lfsapi.LfsVerify403ApplicationVndGitLfsPlusJSONResponse{Message: "forbidden"}, nil
+		}
 		var candidateErr *transferlfs.MetadataCandidateError
 		if errors.As(err, &candidateErr) {
 			return lfsapi.LfsVerify400ApplicationVndGitLfsPlusJSONResponse{Message: err.Error()}, nil
@@ -431,6 +434,9 @@ func (s *lfsServer) LfsStageMetadata(ctx context.Context, request lfsapi.LfsStag
 		}
 	}
 	if err := s.service.Stage(ctx, input.Candidates, ttl); err != nil {
+		if errors.Is(err, errorapi.ErrAccessDenied) {
+			return lfsapi.LfsStageMetadata403JSONResponse{Message: "forbidden"}, nil
+		}
 		var stageErr *transferlfs.MetadataStageError
 		if errors.As(err, &stageErr) {
 			if stageErr.MissingSHA {

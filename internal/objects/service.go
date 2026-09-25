@@ -33,6 +33,7 @@ type ObjectStore interface {
 	RegisterObjectsIfPending(context.Context, []drs.DrsObject, PendingRegistration) error
 	RepairCanonicalDuplicates(context.Context, []CanonicalRepair) error
 	ReplaceObjects(context.Context, []drs.DrsObject) error
+	ReplaceObject(context.Context, string, string, drs.DrsObject) error
 	UpdateObjectAccessMethods(context.Context, string, []drs.AccessMethod) error
 	BulkUpdateAccessMethods(context.Context, map[string][]drs.AccessMethod) error
 	RemoveObjectControlledAccess(context.Context, string, string) error
