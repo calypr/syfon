@@ -83,7 +83,7 @@ spec:
     spec:
       containers:
         - name: minio
-          image: docker.io/bitnamilegacy/minio:2025.7.23-debian-12-r3
+          image: quay.io/minio/minio:RELEASE.2025-03-12T18-04-18Z
           env:
             - name: MINIO_ROOT_USER
               valueFrom:
