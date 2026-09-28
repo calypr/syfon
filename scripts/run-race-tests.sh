@@ -13,4 +13,10 @@ CGO_ENABLED=1 GOCACHE="$cache_dir" go test -race -count=1 \
   ./internal/access/authentication
 
 cd "$repo_root/client"
-GOWORK=off CGO_ENABLED=1 GOCACHE="$cache_dir" go test -race -count=1 ./...
+client_mod_dir="$(mktemp -d "${TMPDIR:-/tmp}/syfon-race-client.XXXXXX")"
+trap 'rm -rf "$client_mod_dir"' EXIT
+client_modfile="$client_mod_dir/client.mod"
+cp go.mod "$client_modfile"
+cp go.sum "$client_mod_dir/client.sum"
+go mod edit -modfile="$client_modfile" -replace="github.com/calypr/syfon/apigen=$repo_root/apigen"
+GOWORK=off CGO_ENABLED=1 GOCACHE="$cache_dir" GOFLAGS="-modfile=$client_modfile" go test -race -count=1 ./...

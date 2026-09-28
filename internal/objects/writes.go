@@ -24,9 +24,8 @@ func materializeRecordTime(record drs.DrsObject, now time.Time) drs.DrsObject {
 	return record
 }
 
-// RegisterCandidates materializes DRS candidates, persists them through the
-// existing registration policy, and returns each durable record after applying
-// the DRS read policy in request order.
+// RegisterCandidates materializes DRS candidates and returns their durable
+// records in request order under the registration policy.
 func (s *Service) RegisterCandidates(ctx context.Context, candidates []drs.DrsObjectCandidate) ([]drs.DrsObject, error) {
 	prepared := make([]drs.DrsObject, 0, len(candidates))
 	for _, candidate := range candidates {
@@ -36,23 +35,33 @@ func (s *Service) RegisterCandidates(ctx context.Context, candidates []drs.DrsOb
 		}
 		prepared = append(prepared, record)
 	}
-	if _, err := s.RegisterObjects(ctx, prepared); err != nil {
-		return nil, err
-	}
-
-	registered := make([]drs.DrsObject, 0, len(prepared))
-	for _, record := range prepared {
-		read, err := s.GetObject(ctx, record.Id, objectMethodRead)
-		if err != nil {
-			return nil, err
-		}
-		registered = append(registered, *read)
-	}
-	return registered, nil
+	return s.RegisterObjects(ctx, prepared)
 }
 
-// UpdateAccessMethodsAndRead updates one record and returns its durable,
-// read-authorized representation.
+// ReplaceCandidate replaces one DID after its bytes have been uploaded. The
+// store checks the preflight SHA and applies the metadata mutation atomically.
+func (s *Service) ReplaceCandidate(ctx context.Context, objectID, expectedOldSHA string, candidate drs.DrsObjectCandidate) (*drs.DrsObject, error) {
+	record, err := MaterializeCandidate(candidate, time.Now().UTC())
+	if err != nil {
+		return nil, err
+	}
+	objectID = strings.TrimSpace(objectID)
+	if objectID == "" {
+		return nil, errorapi.ErrInvalidInput
+	}
+	aliases := []string{"id:" + objectID}
+	record.Id = objectID
+	record.Aliases = &aliases
+	record.SelfUri = "drs://" + objectID
+	if err := s.store.ReplaceObject(ctx, objectID, expectedOldSHA, record); err != nil {
+		return nil, err
+	}
+	return s.store.GetObject(ctx, objectID)
+}
+
+// UpdateAccessMethodsAndRead updates one record and returns its durable DRS
+// representation. DRS object metadata is public, so write success does not
+// depend on a second read-authorization check after commit.
 func (s *Service) UpdateAccessMethodsAndRead(ctx context.Context, objectID string, methods []drs.AccessMethod) (*drs.DrsObject, error) {
 	obj, err := s.store.GetObject(ctx, objectID)
 	if err != nil {
@@ -64,11 +73,11 @@ func (s *Service) UpdateAccessMethodsAndRead(ctx context.Context, objectID strin
 	if err := s.store.UpdateObjectAccessMethods(ctx, objectID, methods); err != nil {
 		return nil, err
 	}
-	return s.GetObject(ctx, objectID, objectMethodRead)
+	return s.store.GetObject(ctx, objectID)
 }
 
-// BulkUpdateAccessMethodsAndRead retains first-seen response order; the last
-// update for a duplicate object ID wins.
+// BulkUpdateAccessMethodsAndRead returns the durable DRS records in first-seen
+// request order; the last update for a duplicate object ID wins.
 func (s *Service) BulkUpdateAccessMethodsAndRead(ctx context.Context, updates []drs.AccessMethodUpdate) ([]drs.DrsObject, error) {
 	if len(updates) == 0 {
 		return nil, nil
@@ -104,15 +113,23 @@ func (s *Service) BulkUpdateAccessMethodsAndRead(ctx context.Context, updates []
 		return nil, err
 	}
 
-	read := make([]drs.DrsObject, 0, len(orderedIDs))
-	for _, objectID := range orderedIDs {
-		obj, err := s.GetObject(ctx, objectID, objectMethodRead)
-		if err != nil {
-			return nil, err
-		}
-		read = append(read, *obj)
+	stored, err := s.store.GetBulkObjects(ctx, orderedIDs)
+	if err != nil {
+		return nil, err
 	}
-	return read, nil
+	storedByID := make(map[string]drs.DrsObject, len(stored))
+	for _, obj := range stored {
+		storedByID[obj.Id] = obj
+	}
+	updated := make([]drs.DrsObject, 0, len(orderedIDs))
+	for _, objectID := range orderedIDs {
+		obj, ok := storedByID[objectID]
+		if !ok {
+			return nil, errorapi.ErrObjectNotFound
+		}
+		updated = append(updated, obj)
+	}
+	return updated, nil
 }
 
 func (s *Service) RemoveObjectControlledAccess(ctx context.Context, objectID, resource string) (*drs.DrsObject, error) {
@@ -177,13 +194,37 @@ func (s *Service) RegisterScopedObjects(ctx context.Context, candidates []Scoped
 // RegisterObjects persists objects and returns their durable records in the
 // same order as the submitted objects.
 func (s *Service) RegisterObjects(ctx context.Context, objs []drs.DrsObject) ([]drs.DrsObject, error) {
+	return s.registerObjects(ctx, objs, nil)
+}
+
+// PendingRegistration identifies the staged LFS metadata that must still own
+// an object when its catalog registration commits.
+type PendingRegistration struct {
+	OID           string
+	CandidateJSON []byte
+	ReceiptJSON   []byte
+	CreatedAt     time.Time
+	ExpiresAt     time.Time
+}
+
+func (s *Service) RegisterObjectsIfPending(ctx context.Context, objs []drs.DrsObject, pending PendingRegistration) ([]drs.DrsObject, error) {
+	return s.registerObjects(ctx, objs, &pending)
+}
+
+func (s *Service) registerObjects(ctx context.Context, objs []drs.DrsObject, pending *PendingRegistration) ([]drs.DrsObject, error) {
 	if err := s.validateExistingContentRead(ctx, objs); err != nil {
 		return nil, err
 	}
 	if err := bulkObjectMethodError(ctx, objs, objectMethodCreate, nil); err != nil {
 		return nil, err
 	}
-	if err := s.store.RegisterObjects(ctx, objs); err != nil {
+	var err error
+	if pending == nil {
+		err = s.store.RegisterObjects(ctx, objs)
+	} else {
+		err = s.store.RegisterObjectsIfPending(ctx, objs, *pending)
+	}
+	if err != nil {
 		return nil, err
 	}
 

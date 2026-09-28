@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -149,22 +150,18 @@ func TestMaintenanceInspectBoundaryCharacterization(t *testing.T) {
 		check            func(*testing.T, []byte)
 	}{
 		{
-			name:   "single trims URL and ignores expected name",
+			name:   "single rejects validation without a validation response",
 			path:   "/data/inspect",
 			body:   `{"id":"single","object_url":" s3://bucket/prefix/file.txt ","organization":"ignored","project":"ignored","key":"ignored","scheme":"ignored","expected_name":"wrong.txt","expected_sha256":" sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA "}`,
-			status: 200,
+			status: 400,
 			check: func(t *testing.T, payload []byte) {
-				var response internalapi.InternalInspectObjectResponse
-				if err := json.Unmarshal(payload, &response); err != nil {
-					t.Fatalf("decode response: %v", err)
-				}
-				if response.ObjectUrl != "s3://bucket/prefix/file.txt" || response.Key != "prefix/file.txt" {
-					t.Fatalf("response = %+v", response)
+				if !strings.Contains(string(payload), "validation fields") {
+					t.Fatalf("error response = %s", payload)
 				}
 			},
 		},
 		{
-			name:   "bulk ignores expected name and honors trimmed hash",
+			name:   "bulk validates expected name and trimmed hash",
 			path:   "/data/inspect/bulk",
 			body:   `{"items":[{"id":"bulk","object_url":" s3://bucket/prefix/file.txt ","organization":"ignored","project":"ignored","key":"ignored","scheme":"ignored","expected_name":"wrong.txt","expected_sha256":" sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA "}]}`,
 			status: 200,
@@ -177,8 +174,8 @@ func TestMaintenanceInspectBoundaryCharacterization(t *testing.T) {
 					t.Fatalf("items = %+v", response.Items)
 				}
 				item := response.Items[0]
-				if item.ValidationStatus != "matched" || item.Sha256Match == nil || !*item.Sha256Match || item.NameMatch != nil || item.SizeMatch != nil {
-					t.Fatalf("bulk item = %+v, want hash match without name or size validation", item)
+				if item.ValidationStatus != "mismatched" || item.Sha256Match == nil || !*item.Sha256Match || item.NameMatch == nil || *item.NameMatch || item.SizeMatch != nil {
+					t.Fatalf("bulk item = %+v, want hash match and name mismatch", item)
 				}
 			},
 		},
@@ -193,13 +190,13 @@ func TestMaintenanceInspectBoundaryCharacterization(t *testing.T) {
 					t.Fatalf("decode response: %v", err)
 				}
 				item := response.Items[0]
-				if item.ValidationStatus != "matched" || item.SizeMatch == nil || !*item.SizeMatch || item.NameMatch != nil {
-					t.Fatalf("bulk item = %+v, want explicit zero-size match without name validation", item)
+				if item.ValidationStatus != "mismatched" || item.SizeMatch == nil || !*item.SizeMatch || item.NameMatch == nil || *item.NameMatch {
+					t.Fatalf("bulk item = %+v, want explicit zero-size match and name mismatch", item)
 				}
 			},
 		},
 		{
-			name:   "bulk list ignores non-list fields",
+			name:   "bulk list validates expected SHA",
 			path:   "/data/inspect/bulk-list",
 			body:   `{"items":[{"id":"list","object_url":"s3://bucket/prefix/file.txt","organization":"invalid","project":"invalid","key":"invalid","scheme":"file","expected_name":"file.txt","expected_size_bytes":0,"expected_sha256":"sha256:not-the-remote-hash"}]}`,
 			status: 200,
@@ -209,8 +206,8 @@ func TestMaintenanceInspectBoundaryCharacterization(t *testing.T) {
 					t.Fatalf("decode response: %v", err)
 				}
 				item := response.Items[0]
-				if item.ValidationStatus != "matched" || item.SizeMatch == nil || !*item.SizeMatch || item.NameMatch == nil || !*item.NameMatch || item.Sha256Match != nil {
-					t.Fatalf("bulk-list item = %+v, want size/name matches without SHA validation", item)
+				if item.ValidationStatus != "mismatched" || item.SizeMatch == nil || !*item.SizeMatch || item.NameMatch == nil || !*item.NameMatch || item.Sha256Match == nil || *item.Sha256Match || item.MetaSha256 != maintenanceRouteSHA || !reflect.DeepEqual(item.ValidationMismatches, []string{"sha256_mismatch"}) {
+					t.Fatalf("bulk-list item = %+v, want size/name matches and SHA mismatch", item)
 				}
 			},
 		},

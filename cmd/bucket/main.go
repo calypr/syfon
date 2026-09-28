@@ -40,14 +40,37 @@ var addCmd = &cobra.Command{
 			return fmt.Errorf("bucket is required")
 		}
 
+		c, err := cliauth.NewServerClient(cmd)
+		if err != nil {
+			return err
+		}
+		configured, err := c.Buckets().List(cmd.Context())
+		if err != nil {
+			return fmt.Errorf("list configured buckets before add: %w", err)
+		}
+		metadata, exists := configured.S3BUCKETS[bucket]
+
 		provider := strings.TrimSpace(bucketProvider)
+		if exists && !cmd.Flags().Changed("provider") && metadata.Provider != nil {
+			provider = strings.TrimSpace(*metadata.Provider)
+		}
 		if provider == "" {
 			provider = "s3"
 		}
 
 		payload := bucketapi.PutBucketRequest{Bucket: bucket, Provider: &provider}
-		if v := strings.TrimSpace(bucketRegion); v != "" {
-			payload.Region = &v
+		if cmd.Flags().Changed("region") {
+			region := strings.TrimSpace(bucketRegion)
+			if region == "" {
+				return fmt.Errorf("--region cannot be empty")
+			}
+			payload.Region = &region
+		} else if !exists {
+			region := strings.TrimSpace(bucketRegion)
+			if region == "" {
+				region = "us-east-1"
+			}
+			payload.Region = &region
 		}
 		if v := strings.TrimSpace(bucketAccessKey); v != "" {
 			payload.AccessKey = &v
@@ -58,13 +81,26 @@ var addCmd = &cobra.Command{
 		if v := strings.TrimSpace(bucketEndpoint); v != "" {
 			payload.Endpoint = &v
 		}
-		if err := validateBucket(cmd.Context(), payload); err != nil {
-			return fmt.Errorf("local bucket validation failed: %w", err)
+		if (payload.AccessKey == nil) != (payload.SecretKey == nil) {
+			return fmt.Errorf("--access-key and --secret-key must be provided together")
+		}
+		if !exists && provider == "s3" && payload.AccessKey == nil {
+			return fmt.Errorf("--access-key and --secret-key are required for new s3 credentials")
 		}
 
-		c, err := cliauth.NewServerClient(cmd)
-		if err != nil {
-			return err
+		validationRequest := payload
+		if exists {
+			if validationRequest.Region == nil {
+				validationRequest.Region = metadata.Region
+			}
+			if validationRequest.Endpoint == nil {
+				validationRequest.Endpoint = metadata.EndpointUrl
+			}
+		}
+		if !exists || payload.AccessKey != nil {
+			if err := validateBucket(cmd.Context(), validationRequest); err != nil {
+				return fmt.Errorf("local bucket validation failed: %w", err)
+			}
 		}
 		if err := c.Buckets().Put(cmd.Context(), payload); err != nil {
 			return err

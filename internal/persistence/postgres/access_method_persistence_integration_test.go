@@ -128,7 +128,7 @@ func TestPostgresAccessMethodColumnMigratesLegacySchemaOnReopen(t *testing.T) {
 	if _, err := raw.ExecContext(context.Background(), fmt.Sprintf(`INSERT INTO %s.drs_object_access_method (object_id, url, type) VALUES ($1, 'https://example.test/legacy-pg', 'https')`, schema), legacyObjectID); err != nil {
 		t.Fatal(err)
 	}
-	legacyStore, err := postgresdb.NewPostgresDB(postgresTestSchemaDSN(t, dsn, schema), nil)
+	legacyStore, err := postgresdb.NewPostgresDB(context.Background(), postgresTestSchemaDSN(t, dsn, schema), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

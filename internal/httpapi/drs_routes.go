@@ -38,7 +38,18 @@ func (s *drsServer) GetBulkAccessURL(c fiber.Ctx) error {
 		return err
 	}
 
-	requests := make([]transfers.AccessLookupRequest, 0, len(*body.BulkObjectAccessIds))
+	requestCount := 0
+	for _, item := range *body.BulkObjectAccessIds {
+		if item.BulkAccessIds == nil || len(*item.BulkAccessIds) == 0 {
+			requestCount++
+		} else {
+			requestCount += len(*item.BulkAccessIds)
+		}
+		if err := s.rejectBulkTooLarge(c, requestCount); err != nil {
+			return err
+		}
+	}
+	requests := make([]transfers.AccessLookupRequest, 0, requestCount)
 	for _, item := range *body.BulkObjectAccessIds {
 		objectID := ""
 		if item.BulkObjectId != nil {
@@ -334,6 +345,19 @@ func (s *drsServer) RegisterObjects(c fiber.Ctx) error {
 		setDRSIdentity(&registered[i])
 	}
 	return c.Status(fiber.StatusCreated).JSON(generated.N201ObjectsCreated{Objects: registered})
+}
+
+func (s *drsServer) ReplaceObject(c fiber.Ctx, objectID generated.ObjectId) error {
+	var body generated.ReplaceObjectJSONRequestBody
+	if err := c.Bind().JSON(&body); err != nil || strings.TrimSpace(body.ExpectedOldSha256) == "" {
+		return Reject(c, fiber.StatusBadRequest, "Invalid request body")
+	}
+	obj, err := s.objectService.ReplaceCandidate(c.Context(), string(objectID), body.ExpectedOldSha256, body.Candidate)
+	if err != nil {
+		return HandleError(c, err)
+	}
+	setDRSIdentity(obj)
+	return c.JSON(*obj)
 }
 
 func registerDRSRoutes(router fiber.Router, objectService *objects.Service, accessService *transfers.Service, serviceInfo generated.N200ServiceInfo, maxBulkRequestLength ...int) {

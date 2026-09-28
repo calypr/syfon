@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/gofiber/fiber/v3"
+	"github.com/gofiber/fiber/v3/middleware/adaptor"
+	"github.com/swaggest/swgui/v5emb"
 )
 
 const (
@@ -18,37 +20,7 @@ const (
 	RouteErrorSpec    = "/index/error.openapi.yaml"
 )
 
-const swaggerUIHTML = `<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>DRS Server API Docs</title>
-  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
-</head>
-<body>
-  <div id="swagger-ui"></div>
-  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
-  <script>
-    window.onload = function() {
-      window.ui = SwaggerUIBundle({
-        url: "` + RouteOpenAPISpec + `",
-        dom_id: "#swagger-ui"
-      });
-    };
-  </script>
-</body>
-</html>
-`
-
-func handleSwaggerUI(c fiber.Ctx) error {
-	c.Set("Content-Type", "text/html; charset=utf-8")
-	if err := c.SendString(swaggerUIHTML); err != nil {
-		log.Printf("write swagger ui response: %v", err)
-		return err
-	}
-	return nil
-}
+var swaggerUIHandler = adaptor.HTTPHandler(v5emb.NewHandler("DRS Server API Docs", RouteOpenAPISpec, RouteSwaggerUI))
 
 func handleOpenAPISpec(c fiber.Ctx) error {
 	merged, err := buildMergedOpenAPISpec()
@@ -79,8 +51,9 @@ func handleNamedOpenAPISpec(name, label string) fiber.Handler {
 }
 
 func RegisterSwaggerRoutes(router fiber.Router) {
-	router.Get(RouteSwaggerUI, handleSwaggerUI)
-	router.Get(RouteSwaggerUIAlt, handleSwaggerUI)
+	router.Get(RouteSwaggerUI, swaggerUIHandler)
+	router.Get(RouteSwaggerUIAlt, swaggerUIHandler)
+	router.Get(RouteSwaggerUI+"/*", swaggerUIHandler)
 	router.Get(RouteOpenAPISpec, handleOpenAPISpec)
 	router.Get(RouteLFSSpec, handleNamedOpenAPISpec("lfs.openapi.yaml", "LFS"))
 	router.Get(RouteBucketSpec, handleNamedOpenAPISpec("bucket.openapi.yaml", "Bucket"))

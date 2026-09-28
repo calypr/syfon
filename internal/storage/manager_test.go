@@ -334,11 +334,14 @@ func TestDeleteExactPreservesPhysicalTargetsAndGroupsByProvider(t *testing.T) {
 	if err := manager.DeleteExact(context.Background(), []DeleteTarget{
 		{Location: "s3://s3-b/key-2"},
 		{Location: "gs://gcs-bucket/gcs-key"},
+		{Location: "gs://gcs-bucket//leading/trailing/"},
 		{Location: "s3://override-bucket//physical/key/"},
 		{Location: "s3://s3-a/key-2"},
 		{Location: filePath},
 		{Location: "azblob://azure-bucket/azure-key"},
+		{Location: "azblob://azure-bucket//leading/trailing/"},
 		{Location: "s3://s3-a/key-1"},
+		{Location: "s3://s3-a//leading/trailing/"},
 		{Location: "gs://gcs-bucket/gcs-key"},
 		{Location: filePath},
 		{Location: "s3://s3-b/key-1"},
@@ -347,19 +350,19 @@ func TestDeleteExactPreservesPhysicalTargetsAndGroupsByProvider(t *testing.T) {
 		t.Fatalf("DeleteExact returned error: %v", err)
 	}
 	if got, want := gcs.deletions, [][]PhysicalTarget{
-		{{Provider: "gcs", LookupKey: "gcs-bucket", PhysicalBucket: "gcs-bucket", Key: "gcs-key"}},
-		{{Provider: "gcs", LookupKey: "override-bucket", PhysicalBucket: "override-bucket", Key: "physical/key"}},
+		{{Provider: "gcs", LookupKey: "gcs-bucket", PhysicalBucket: "gcs-bucket", Key: "/leading/trailing/"}, {Provider: "gcs", LookupKey: "gcs-bucket", PhysicalBucket: "gcs-bucket", Key: "gcs-key"}},
+		{{Provider: "gcs", LookupKey: "override-bucket", PhysicalBucket: "override-bucket", Key: "/physical/key/"}},
 	}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("gcs targets = %#v, want %#v", got, want)
 	}
 	if got, want := file.deletions, [][]PhysicalTarget{{{Provider: "file", Path: filePath}}}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("file targets = %#v, want %#v", got, want)
 	}
-	if got, want := azure.deletions, [][]PhysicalTarget{{{Provider: "azure", LookupKey: "azure-bucket", PhysicalBucket: "azure-bucket", Key: "azure-key"}}}; !reflect.DeepEqual(got, want) {
+	if got, want := azure.deletions, [][]PhysicalTarget{{{Provider: "azure", LookupKey: "azure-bucket", PhysicalBucket: "azure-bucket", Key: "/leading/trailing/"}, {Provider: "azure", LookupKey: "azure-bucket", PhysicalBucket: "azure-bucket", Key: "azure-key"}}}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("azure targets = %#v, want %#v", got, want)
 	}
 	if got, want := s3.deletions, [][]PhysicalTarget{
-		{{Provider: "s3", LookupKey: "s3-a", PhysicalBucket: "s3-a", Key: "key-1"}, {Provider: "s3", LookupKey: "s3-a", PhysicalBucket: "s3-a", Key: "key-2"}},
+		{{Provider: "s3", LookupKey: "s3-a", PhysicalBucket: "s3-a", Key: "/leading/trailing/"}, {Provider: "s3", LookupKey: "s3-a", PhysicalBucket: "s3-a", Key: "key-1"}, {Provider: "s3", LookupKey: "s3-a", PhysicalBucket: "s3-a", Key: "key-2"}},
 		{{Provider: "s3", LookupKey: "s3-b", PhysicalBucket: "s3-b", Key: "key-1"}, {Provider: "s3", LookupKey: "s3-b", PhysicalBucket: "s3-b", Key: "key-2"}},
 	}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("s3 targets = %#v, want %#v", got, want)

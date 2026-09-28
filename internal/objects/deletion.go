@@ -12,18 +12,46 @@ import (
 )
 
 func (s *Service) DeleteBulkByScope(ctx context.Context, organization, project string) (int, error) {
+	return s.deleteBulkByScope(ctx, organization, project, nil)
+}
+
+func (s *Service) DeleteBulkByScopeMatchingChecksum(ctx context.Context, organization, project string, checksum ChecksumQuery) (int, error) {
+	return s.deleteBulkByScope(ctx, organization, project, &checksum)
+}
+
+func (s *Service) deleteBulkByScope(ctx context.Context, organization, project string, checksum *ChecksumQuery) (int, error) {
 	if err := requireScopeMethod(ctx, organization, project, objectMethodDelete); err != nil {
 		return 0, err
 	}
 
-	ids, err := s.store.ListObjectIDsByScope(ctx, organization, project)
-	if err != nil {
-		return 0, err
-	}
-
-	stored, err := s.store.GetBulkObjects(ctx, ids)
-	if err != nil {
-		return 0, err
+	var stored []drs.DrsObject
+	if checksum != nil {
+		checksumType, checksumValue := ParseHashQuery(checksum.Value, checksum.Type)
+		if checksumValue == "" {
+			return 0, fmt.Errorf("checksum value is required")
+		}
+		matches, err := s.store.GetObjectsByChecksums(ctx, []string{checksumValue})
+		if err != nil {
+			return 0, err
+		}
+		for _, obj := range matches[checksumValue] {
+			if !objectMatchesScope(&obj, organization, project) {
+				continue
+			}
+			if checksumType != "" && !RecordHasChecksumTypeAndValue(obj, checksumType, checksumValue) {
+				continue
+			}
+			stored = append(stored, obj)
+		}
+	} else {
+		ids, err := s.store.ListObjectIDsByScope(ctx, organization, project)
+		if err != nil {
+			return 0, err
+		}
+		stored, err = s.store.GetBulkObjects(ctx, ids)
+		if err != nil {
+			return 0, err
+		}
 	}
 	policy, err := s.publicReadPolicy(ctx, stored)
 	if err != nil {
@@ -83,7 +111,7 @@ func (s *Service) deletablePhysicalObjectIDsForBulk(ctx context.Context, ids []s
 	for _, rawID := range ids {
 		objectID := strings.TrimSpace(rawID)
 		if objectID == "" {
-			continue
+			return nil, errorapi.ErrInvalidInput
 		}
 		obj, ok := byID[objectID]
 		if !ok {
@@ -94,10 +122,10 @@ func (s *Service) deletablePhysicalObjectIDsForBulk(ctx context.Context, ids []s
 			if resolveErr != nil && !errors.Is(resolveErr, errorapi.ErrNotFound) {
 				return nil, resolveErr
 			}
-			continue
+			return nil, errorapi.ErrNotFound
 		}
 		if err := requireAllObjectMethod(ctx, obj, objectMethodDelete); err != nil {
-			continue
+			return nil, err
 		}
 		if _, alreadySeen := seen[objectID]; alreadySeen {
 			continue

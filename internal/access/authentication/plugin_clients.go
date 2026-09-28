@@ -72,9 +72,15 @@ type authnRPC struct {
 }
 
 func (a *authnRPC) Authenticate(ctx context.Context, in *plugin.AuthenticationInput) (*plugin.AuthenticationOutput, error) {
-	var out plugin.AuthenticationOutput
-	err := a.client.Call("Plugin.Authenticate", in, &out)
-	return &out, err
+	wireInput, err := in.ToRPC()
+	if err != nil {
+		return nil, err
+	}
+	var wireOutput plugin.AuthenticationRPCOutput
+	if err := a.client.Call("Plugin.Authenticate", wireInput, &wireOutput); err != nil {
+		return nil, err
+	}
+	return wireOutput.ToPlugin()
 }
 
 type pluginClient struct {
@@ -141,9 +147,15 @@ type authzRPC struct {
 }
 
 func (a *authzRPC) Authorize(ctx context.Context, in *plugin.AuthorizationInput) (*plugin.AuthorizationOutput, error) {
-	var out plugin.AuthorizationOutput
-	err := a.client.Call("Plugin.Authorize", in, &out)
-	return &out, err
+	wireInput, err := in.ToRPC()
+	if err != nil {
+		return nil, err
+	}
+	var wireOutput plugin.AuthorizationRPCOutput
+	if err := a.client.Call("Plugin.Authorize", wireInput, &wireOutput); err != nil {
+		return nil, err
+	}
+	return wireOutput.ToPlugin()
 }
 
 var _ plugin.AuthorizationPlugin = (*authorizationPluginManager)(nil)

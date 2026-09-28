@@ -41,7 +41,13 @@ class ReleasePreparationTests(unittest.TestCase):
         self.tools = self.root / "tools"
         self.tools.mkdir()
         gh = self.tools / "gh"
-        gh.write_text("#!/bin/sh\necho 129\n")
+        gh.write_text(
+            "#!/bin/sh\n"
+            "if [ \"${MOCK_GH_FAILURE:-false}\" = true ]; then\n"
+            "  echo 'simulated gh api failure' >&2\n"
+            "  exit 1\n"
+            "fi\n"
+            "printf '%s\\n' \"${MOCK_GH_OUTPUT-129}\"\n")
         gh.chmod(0o755)
         self.output = self.root / "outputs"
 
@@ -58,11 +64,13 @@ class ReleasePreparationTests(unittest.TestCase):
         self.git("push", "origin", "HEAD:development")
         self.git("checkout", "--detach", self.source)
 
-    def prepare(self, repo=None, success=True):
+    def prepare(self, repo=None, success=True, gh_output="129", gh_failure=False):
         self.output.write_text("")
         env = dict(os.environ, EVENT_NAME="workflow_run", HEAD_SHA=self.source,
                    GITHUB_REPOSITORY="calypr/syfon", GITHUB_OUTPUT=str(self.output),
-                   GOWORK="off", PATH=f"{self.tools}:{os.environ['PATH']}")
+                   GOWORK="off", MOCK_GH_OUTPUT=gh_output,
+                   MOCK_GH_FAILURE=str(gh_failure).lower(),
+                   PATH=f"{self.tools}:{os.environ['PATH']}")
         result = subprocess.run(["bash", str(SCRIPT)], cwd=repo or self.repo,
                                 env=env, text=True, capture_output=True)
         if success:
@@ -114,9 +122,13 @@ class ReleasePreparationTests(unittest.TestCase):
 
     def test_docs_only_change_does_not_release(self):
         self.change("README.md")
-        result = self.prepare()
+        result = self.prepare(gh_output="")
         self.assertEqual(result["root_tag"], "")
         self.assertEqual(result["sha"], self.source)
+
+    def test_merged_pr_lookup_failure_fails_release_preparation(self):
+        self.change()
+        self.prepare(success=False, gh_failure=True)
 
     def test_breaking_change_bumps_root_minor_before_v1(self):
         self.change()

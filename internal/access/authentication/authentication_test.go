@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -497,23 +498,31 @@ func (f *fakeRequester) Do(req *http.Request) (*http.Response, error) {
 	return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(body)), Header: make(http.Header), Request: req}, nil
 }
 
-type rpcTestService struct{}
+type rpcTestAuthenticationPlugin struct{}
 
-func (*rpcTestService) Authenticate(in *plugin.AuthenticationInput, out *plugin.AuthenticationOutput) error {
-	out.Authenticated = true
-	out.Subject = in.RequestID
-	return nil
+func (*rpcTestAuthenticationPlugin) Authenticate(_ context.Context, in *plugin.AuthenticationInput) (*plugin.AuthenticationOutput, error) {
+	return &plugin.AuthenticationOutput{Authenticated: true, Subject: in.RequestID, Claims: in.Metadata}, nil
 }
 
-func (*rpcTestService) Authorize(in *plugin.AuthorizationInput, out *plugin.AuthorizationOutput) error {
-	out.Allow = in.Subject == "alice"
-	return nil
+type rpcTestAuthorizationPlugin struct{}
+
+func (*rpcTestAuthorizationPlugin) Authorize(_ context.Context, in *plugin.AuthorizationInput) (*plugin.AuthorizationOutput, error) {
+	return &plugin.AuthorizationOutput{Allow: in.Subject == "alice", Obligations: in.Claims}, nil
+}
+
+type rpcTestService struct {
+	*plugin.AuthenticationRPCServer
+	*plugin.AuthorizationRPCServer
 }
 
 func TestPluginRPCDelegation(t *testing.T) {
 	serverConn, clientConn := net.Pipe()
 	server := rpc.NewServer()
-	if err := server.RegisterName("Plugin", &rpcTestService{}); err != nil {
+	service := &rpcTestService{
+		AuthenticationRPCServer: plugin.NewAuthenticationRPCServer(&rpcTestAuthenticationPlugin{}),
+		AuthorizationRPCServer:  plugin.NewAuthorizationRPCServer(&rpcTestAuthorizationPlugin{}),
+	}
+	if err := server.RegisterName("Plugin", service); err != nil {
 		t.Fatalf("register rpc service: %v", err)
 	}
 	go server.ServeConn(serverConn)
@@ -523,13 +532,24 @@ func TestPluginRPCDelegation(t *testing.T) {
 		_ = serverConn.Close()
 	})
 
-	authnOut, err := (&authnRPC{client: client}).Authenticate(context.Background(), &plugin.AuthenticationInput{RequestID: "rid"})
+	nested := map[string]interface{}{
+		"object": map[string]interface{}{
+			"items": []interface{}{map[string]interface{}{"name": "record"}, "read", float64(3)},
+		},
+	}
+	authnOut, err := (&authnRPC{client: client}).Authenticate(context.Background(), &plugin.AuthenticationInput{RequestID: "rid", Metadata: nested})
 	if err != nil || !authnOut.Authenticated || authnOut.Subject != "rid" {
 		t.Fatalf("unexpected authn rpc output: out=%+v err=%v", authnOut, err)
 	}
-	authzOut, err := (&authzRPC{client: client}).Authorize(context.Background(), &plugin.AuthorizationInput{Subject: "alice"})
+	if !reflect.DeepEqual(authnOut.Claims, nested) {
+		t.Fatalf("nested authn metadata round trip = %#v, want %#v", authnOut.Claims, nested)
+	}
+	authzOut, err := (&authzRPC{client: client}).Authorize(context.Background(), &plugin.AuthorizationInput{Subject: "alice", Claims: nested})
 	if err != nil || !authzOut.Allow {
 		t.Fatalf("unexpected authz rpc output: out=%+v err=%v", authzOut, err)
+	}
+	if !reflect.DeepEqual(authzOut.Obligations, nested) {
+		t.Fatalf("nested authz claim round trip = %#v, want %#v", authzOut.Obligations, nested)
 	}
 
 }

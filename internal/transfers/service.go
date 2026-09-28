@@ -14,6 +14,7 @@ import (
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/storage"
 	"github.com/calypr/syfon/internal/usage"
+	"github.com/google/uuid"
 )
 
 type AccountingMode string
@@ -85,11 +86,7 @@ func NewService(deps Dependencies) *Service {
 	if expires <= 0 {
 		expires = defaultSigningExpiry
 	}
-	multipartSessions := deps.MultipartSessions
-	if multipartSessions == nil {
-		multipartSessions = newMemoryMultipartSessionStore()
-	}
-	return &Service{objects: deps.Objects, storage: deps.Storage, fileCounters: deps.FileCounters, scopes: deps.Scopes, credentials: deps.Credentials, events: deps.Events, now: now, signingExpiry: expires, multipartSessions: multipartSessions}
+	return &Service{objects: deps.Objects, storage: deps.Storage, fileCounters: deps.FileCounters, scopes: deps.Scopes, credentials: deps.Credentials, events: deps.Events, now: now, signingExpiry: expires, multipartSessions: deps.MultipartSessions}
 }
 
 func (s *Service) Download(ctx context.Context, req DownloadRequest) (DownloadResult, error) {
@@ -231,15 +228,18 @@ func (s *Service) recordAccessIssued(ctx context.Context, req AccessRequest) err
 	if req.Object == nil {
 		return nil
 	}
-	if s.events == nil {
+	if s == nil || s.events == nil {
 		return fmt.Errorf("transfer event recorder is not configured")
 	}
 	event := eventFromObject(ctx, req)
 	if s.now != nil {
 		event.EventTime = s.now().UTC()
-		event.EventID = usage.EventID(event)
-		event.AccessGrantID = usage.GrantID(event)
 	}
+	issuanceID, err := uuid.NewRandom()
+	if err != nil {
+		return fmt.Errorf("create access issuance ID: %w", err)
+	}
+	event.EventID = issuanceID.String()
 	return s.events.RecordTransferAttributionEvents(ctx, []usage.Event{event})
 }
 

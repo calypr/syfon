@@ -109,6 +109,19 @@ func TestStoragePathHelpers(t *testing.T) {
 	if got := pathOrEmpty(nil); got != "" {
 		t.Fatalf("pathOrEmpty(nil) = %q", got)
 	}
+	for _, tc := range []struct {
+		path string
+		want bool
+	}{
+		{path: "file://bucket", want: true},
+		{path: "s3://bucket", want: true},
+		{path: "s3://bucket/prefix", want: false},
+		{path: "ftp://bucket", want: false},
+	} {
+		if got := isBucketRootStoragePath(tc.path); got != tc.want {
+			t.Errorf("isBucketRootStoragePath(%q) = %t, want %t", tc.path, got, tc.want)
+		}
+	}
 
 	parsed, segments, ok := parseStorageURL(" s3://bucket/one/two/ ")
 	if !ok || parsed.Host != "bucket" || !reflect.DeepEqual(segments, []string{"one", "two"}) {
@@ -132,35 +145,36 @@ func TestStoragePathHelpers(t *testing.T) {
 		t.Fatalf("hasPathPrefix returned an unexpected result")
 	}
 
-	if got := storageSchemeFromURL("https://bucket/path"); got != "https" {
-		t.Fatalf("storageSchemeFromURL = %q", got)
-	}
-	if got := storageSchemeFromURL("relative"); got != "s3" {
-		t.Fatalf("storageSchemeFromURL fallback = %q", got)
-	}
 	for _, tc := range []struct {
-		name, projectPath, bucket, key, want string
+		name, projectPath, bucket, key, provider, want string
 	}{
-		{name: "empty project path", bucket: "bucket", key: "key", want: "s3://bucket/key"},
-		{name: "invalid project path", projectPath: "not-a-url", bucket: "bucket", key: "key", want: "s3://bucket/key"},
-		{name: "scoped key", projectPath: "gs://bucket/prefix", bucket: "target", key: "/key/", want: "gs://bucket/prefix/key"},
-		{name: "empty key", projectPath: "s3://bucket/prefix", bucket: "target", want: "s3://bucket/prefix"},
+		{name: "empty project path", bucket: "bucket", key: "key", provider: "s3", want: "s3://bucket/key"},
+		{name: "invalid project path", projectPath: "not-a-url", bucket: "bucket", key: "key", provider: "s3", want: "s3://bucket/key"},
+		{name: "scoped key", projectPath: "gs://bucket/prefix", bucket: "target", key: "/key/", provider: "gcs", want: "gs://bucket/prefix/key"},
+		{name: "empty key", projectPath: "s3://bucket/prefix", bucket: "target", provider: "s3", want: "s3://bucket/prefix"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := scopedObjectURL(tc.projectPath, tc.bucket, tc.key); got != tc.want {
+			if got := scopedObjectURL(tc.projectPath, tc.bucket, tc.key, tc.provider); got != tc.want {
 				t.Fatalf("scopedObjectURL = %q; want %q", got, tc.want)
 			}
 		})
 	}
 
-	if org, project := pathScope("/organization/org/project/project"); org != "org" || project != "project" {
-		t.Fatalf("pathScope = %q/%q", org, project)
-	}
-	if org, project := pathScope("invalid"); org != "" || project != "" {
-		t.Fatalf("pathScope invalid = %q/%q", org, project)
-	}
 	if !sameServerURL(" https://example/ ", "https://example") || sameServerURL("https://one", "https://two") {
 		t.Fatalf("sameServerURL returned an unexpected result")
+	}
+}
+
+func TestScopedObjectURLUsesDestinationProvider(t *testing.T) {
+	got := scopedObjectURL("s3://target-bucket/organizations/target-org/projects/target-project", "target-bucket", "object-key", "gcs")
+	if got != "gs://target-bucket/organizations/target-org/projects/target-project/object-key" {
+		t.Fatalf("scopedObjectURL = %q; want destination GCS URL", got)
+	}
+	if got := scopedObjectURL("s3://target-bucket/organizations/target-org/projects/target-project", "target-bucket", "object-key", "s3"); got != "s3://target-bucket/organizations/target-org/projects/target-project/object-key" {
+		t.Fatalf("scopedObjectURL for S3 = %q; want existing S3 URL", got)
+	}
+	if got := scopedObjectURL("s3://target-bucket/organizations/target-org/projects/target-project", "target-bucket", "object-key", "azure"); got != "azblob://target-bucket/organizations/target-org/projects/target-project/object-key" {
+		t.Fatalf("scopedObjectURL for Azure = %q; want destination Azure URL", got)
 	}
 }
 

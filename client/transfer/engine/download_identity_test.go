@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/calypr/syfon/client/transfer"
@@ -18,16 +19,22 @@ func testDownloadIdentity(data []byte) string {
 }
 
 type downloadIdentitySource struct {
-	data     []byte
-	identity string
-	streams  int
-	ranges   int
+	data         []byte
+	identity     string
+	streams      int
+	ranges       int
+	reportedSize *int64
+	sizeKnown    bool
 }
 
 func (s *downloadIdentitySource) Logger() transfer.TransferLogger { return transfer.NoOpLogger{} }
 
 func (s *downloadIdentitySource) Stat(context.Context, string) (*transfer.ObjectMetadata, error) {
-	return &transfer.ObjectMetadata{Size: int64(len(s.data)), AcceptRanges: true, Identity: s.identity}, nil
+	size := int64(len(s.data))
+	if s.reportedSize != nil {
+		size = *s.reportedSize
+	}
+	return &transfer.ObjectMetadata{Size: size, SizeKnown: s.sizeKnown, AcceptRanges: true, Identity: s.identity}, nil
 }
 
 func (s *downloadIdentitySource) GetReader(context.Context, string) (io.ReadCloser, error) {
@@ -126,4 +133,69 @@ func TestDownloadEphemeralDestinationRemovesResumeState(t *testing.T) {
 	if _, err := os.Stat(downloadResumeStatePath(destination)); !os.IsNotExist(err) {
 		t.Fatalf("ephemeral download checkpoint stat error = %v, want not found", err)
 	}
+}
+
+func TestDownloadValidatesZeroAndUnknownSizes(t *testing.T) {
+	t.Run("known zero rejects a nonempty body", func(t *testing.T) {
+		destination := filepath.Join(t.TempDir(), "output.bin")
+		zero := int64(0)
+		source := &downloadIdentitySource{
+			data:         []byte("unexpected"),
+			reportedSize: &zero,
+			sizeKnown:    true,
+		}
+		if err := Download(context.Background(), source, "empty-object", destination, DownloadOptions{MultipartThreshold: 1024 * 1024}); err == nil {
+			t.Fatal("download accepted a nonempty body for a known empty object")
+		}
+		data, err := os.ReadFile(destination)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(data) != 0 {
+			t.Fatalf("known-empty download wrote %d bytes", len(data))
+		}
+	})
+
+	t.Run("unknown size still verifies a supplied checksum", func(t *testing.T) {
+		destination := filepath.Join(t.TempDir(), "output.bin")
+		zero := int64(0)
+		source := &downloadIdentitySource{
+			data:         []byte("unexpected"),
+			identity:     testDownloadIdentity([]byte("expected")),
+			reportedSize: &zero,
+		}
+		if err := Download(context.Background(), source, "unknown-size-object", destination, DownloadOptions{MultipartThreshold: 1024 * 1024}); err == nil || !strings.Contains(err.Error(), "checksum") {
+			t.Fatalf("download error = %v, want checksum mismatch", err)
+		}
+	})
+
+	t.Run("empty known object with its checksum succeeds", func(t *testing.T) {
+		destination := filepath.Join(t.TempDir(), "output.bin")
+		zero := int64(0)
+		source := &downloadIdentitySource{
+			identity:     testDownloadIdentity(nil),
+			reportedSize: &zero,
+			sizeKnown:    true,
+		}
+		if err := Download(context.Background(), source, "empty-object", destination, DownloadOptions{MultipartThreshold: 1024 * 1024}); err != nil {
+			t.Fatalf("Download returned error for empty object: %v", err)
+		}
+		data, err := os.ReadFile(destination)
+		if err != nil || len(data) != 0 {
+			t.Fatalf("downloaded empty object data=%q err=%v", data, err)
+		}
+	})
+
+	t.Run("known zero size still verifies a supplied checksum", func(t *testing.T) {
+		destination := filepath.Join(t.TempDir(), "output.bin")
+		zero := int64(0)
+		source := &downloadIdentitySource{
+			identity:     testDownloadIdentity([]byte("expected")),
+			reportedSize: &zero,
+			sizeKnown:    true,
+		}
+		if err := Download(context.Background(), source, "empty-object", destination, DownloadOptions{MultipartThreshold: 1024 * 1024}); err == nil || !strings.Contains(err.Error(), "checksum") {
+			t.Fatalf("download error = %v, want checksum mismatch", err)
+		}
+	})
 }

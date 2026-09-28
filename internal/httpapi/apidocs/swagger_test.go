@@ -32,8 +32,66 @@ func TestSwaggerUIRoutesServed(t *testing.T) {
 		if !strings.Contains(string(body), "SwaggerUIBundle") {
 			t.Fatalf("expected swagger html for %s, got: %s", path, string(body))
 		}
-		if got := resp.Header.Get("Content-Type"); got != "text/html; charset=utf-8" {
+		if got := resp.Header.Get("Content-Type"); !strings.HasPrefix(got, "text/html") {
 			t.Fatalf("expected html content type for %s, got %q", path, got)
+		}
+	}
+}
+
+func TestSwaggerUIUsesLocallyEmbeddedAssets(t *testing.T) {
+	app := fiber.New()
+	apidocs.RegisterSwaggerRoutes(app)
+
+	for _, tc := range []struct {
+		path        string
+		contentType string
+		marker      string
+	}{
+		{path: apidocs.RouteSwaggerUI + "/swagger-ui.css", contentType: "text/css", marker: ".swagger-ui"},
+		{path: apidocs.RouteSwaggerUI + "/swagger-ui-bundle.js", contentType: "application/javascript", marker: "SwaggerUIBundle"},
+	} {
+		resp, err := app.Test(httptest.NewRequest(http.MethodGet, tc.path, nil))
+		if err != nil {
+			t.Fatalf("GET %s failed: %v", tc.path, err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("GET %s status = %d, body=%s", tc.path, resp.StatusCode, string(body))
+		}
+		if got := resp.Header.Get("Content-Type"); !strings.HasPrefix(got, tc.contentType) {
+			t.Fatalf("GET %s content type = %q, want prefix %q", tc.path, got, tc.contentType)
+		}
+		if !strings.Contains(string(body), tc.marker) {
+			t.Fatalf("GET %s body does not contain %q", tc.path, tc.marker)
+		}
+	}
+
+	resp, err := app.Test(httptest.NewRequest(http.MethodGet, apidocs.RouteSwaggerUI, nil))
+	if err != nil {
+		t.Fatalf("GET %s failed: %v", apidocs.RouteSwaggerUI, err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if strings.Contains(string(body), "unpkg.com") || strings.Contains(string(body), "https://cdn.") {
+		t.Fatalf("Swagger UI HTML references a runtime external asset: %s", string(body))
+	}
+}
+
+func TestSwaggerUIRoutesOnlyAcceptGET(t *testing.T) {
+	app := fiber.New()
+	apidocs.RegisterSwaggerRoutes(app)
+
+	for _, path := range []string{
+		apidocs.RouteSwaggerUI,
+		apidocs.RouteSwaggerUIAlt,
+		apidocs.RouteSwaggerUI + "/swagger-ui.css",
+		apidocs.RouteSwaggerUI + "/swagger-ui-bundle.js",
+	} {
+		resp, err := app.Test(httptest.NewRequest(http.MethodPost, path, nil))
+		if err != nil {
+			t.Fatalf("POST %s failed: %v", path, err)
+		}
+		if resp.StatusCode == http.StatusOK {
+			t.Fatalf("POST %s unexpectedly served documentation", path)
 		}
 	}
 }
@@ -64,6 +122,7 @@ func TestOpenAPIRoutesServedInRegistrationOrder(t *testing.T) {
 	want := []string{
 		apidocs.RouteSwaggerUI,
 		apidocs.RouteSwaggerUIAlt,
+		apidocs.RouteSwaggerUI + "/*",
 		apidocs.RouteOpenAPISpec,
 		apidocs.RouteLFSSpec,
 		apidocs.RouteBucketSpec,

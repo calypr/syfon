@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/cookiejar"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -63,6 +64,46 @@ func TestClientPreservesStandardSettings(t *testing.T) {
 	}
 	if got.CheckRedirect == nil {
 		t.Fatal("redirect policy was not preserved")
+	}
+}
+
+func TestClientDefaultTransportUsesEnvironmentProxy(t *testing.T) {
+	t.Setenv("HTTP_PROXY", "http://http-proxy.example:8080")
+	t.Setenv("HTTPS_PROXY", "http://https-proxy.example:8081")
+	t.Setenv("NO_PROXY", "bypass.example.test")
+
+	client := NewClient(nil, nil, nil, "", nil, AuthModeBasic)
+	authTransport, ok := client.StandardClient().Transport.(*AuthTransport)
+	if !ok {
+		t.Fatalf("expected auth transport, got %T", client.StandardClient().Transport)
+	}
+	transport, ok := authTransport.Base.(*http.Transport)
+	if !ok {
+		t.Fatalf("expected default HTTP transport, got %T", authTransport.Base)
+	}
+
+	proxyURL, err := transport.Proxy(&http.Request{URL: &url.URL{Scheme: "http", Host: "storage.example.test"}})
+	if err != nil {
+		t.Fatalf("select HTTP proxy: %v", err)
+	}
+	if proxyURL == nil || proxyURL.String() != "http://http-proxy.example:8080" {
+		t.Fatalf("HTTP proxy = %v, want http://http-proxy.example:8080", proxyURL)
+	}
+
+	proxyURL, err = transport.Proxy(&http.Request{URL: &url.URL{Scheme: "https", Host: "storage.example.test"}})
+	if err != nil {
+		t.Fatalf("select HTTPS proxy: %v", err)
+	}
+	if proxyURL == nil || proxyURL.String() != "http://https-proxy.example:8081" {
+		t.Fatalf("HTTPS proxy = %v, want http://https-proxy.example:8081", proxyURL)
+	}
+
+	proxyURL, err = transport.Proxy(&http.Request{URL: &url.URL{Scheme: "https", Host: "bypass.example.test"}})
+	if err != nil {
+		t.Fatalf("select NO_PROXY route: %v", err)
+	}
+	if proxyURL != nil {
+		t.Fatalf("NO_PROXY host selected proxy %q", proxyURL)
 	}
 }
 

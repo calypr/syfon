@@ -6,12 +6,14 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/calypr/syfon/apigen/drs"
 	"github.com/calypr/syfon/apigen/errorapi"
+	objectdomain "github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/persistence/credentialcipher"
 	postgresdb "github.com/calypr/syfon/internal/persistence/postgres"
 	"github.com/calypr/syfon/internal/persistence/store"
@@ -229,6 +231,93 @@ func TestPostgresUsageFlushDoesNotDeleteConcurrentAppend(t *testing.T) {
 	}
 }
 
+func TestPostgresCanonicalRepairSerializesAndResolvesUsageEvents(t *testing.T) {
+	db := openPostgresUsageTestStore(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	suffix := uuid.NewString()
+	canonicalID := "usage-repair-canonical-" + suffix
+	duplicateID := "usage-repair-duplicate-" + suffix
+	now := time.Now().UTC()
+	if err := db.RegisterObjects(ctx, []drs.DrsObject{
+		{Id: canonicalID, CreatedTime: now, UpdatedTime: &now},
+		{Id: duplicateID, CreatedTime: now, UpdatedTime: &now},
+	}); err != nil {
+		t.Fatalf("register legacy duplicate records: %v", err)
+	}
+	const sharedSHA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	if _, err := db.DB().ExecContext(ctx, `DELETE FROM drs_object_checksum WHERE object_id IN ($1, $2)`, canonicalID, duplicateID); err != nil {
+		t.Fatalf("remove seed checksums: %v", err)
+	}
+	if _, err := db.DB().ExecContext(ctx, `
+		INSERT INTO drs_object_checksum (object_id, type, checksum)
+		VALUES ($1, 'sha256', $3), ($2, 'sha256', $3)
+	`, canonicalID, duplicateID, sharedSHA); err != nil {
+		t.Fatalf("seed duplicate checksums: %v", err)
+	}
+	canonical, err := db.GetObject(ctx, canonicalID)
+	if err != nil {
+		t.Fatalf("load canonical object: %v", err)
+	}
+	canonical.Checksums = []drs.Checksum{{Type: "sha256", Checksum: sharedSHA}}
+	repair := objectdomain.CanonicalRepair{Canonical: *canonical, DuplicateIDs: []string{duplicateID}}
+
+	gateKey := int64(73014)
+	triggerName := "syfon_test_gate_object_delete_" + strings.ReplaceAll(suffix, "-", "")
+	functionName := triggerName + "_fn"
+	if _, err := db.DB().ExecContext(ctx, `CREATE FUNCTION `+functionName+`() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM pg_advisory_xact_lock(`+strconv.FormatInt(gateKey, 10)+`); RETURN OLD; END; $$`); err != nil {
+		t.Fatalf("create object-delete gate function: %v", err)
+	}
+	if _, err := db.DB().ExecContext(ctx, `CREATE TRIGGER `+triggerName+` BEFORE DELETE ON drs_object FOR EACH ROW EXECUTE FUNCTION `+functionName+`() `); err != nil {
+		t.Fatalf("create object-delete gate trigger: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.DB().ExecContext(context.Background(), `DROP TRIGGER IF EXISTS `+triggerName+` ON drs_object`)
+		_, _ = db.DB().ExecContext(context.Background(), `DROP FUNCTION IF EXISTS `+functionName+`() `)
+	})
+	gateConn := holdUsageFlushBarrier(t, db, ctx, gateKey)
+
+	repairDone := make(chan error, 1)
+	go func() {
+		repairDone <- db.RepairCanonicalDuplicates(ctx, []objectdomain.CanonicalRepair{repair})
+	}()
+	waitForAdvisoryWait(t, db, ctx, gateKey)
+
+	eventDone := make(chan error, 1)
+	go func() {
+		eventDone <- db.RecordFileDownload(ctx, duplicateID)
+	}()
+	waitForObjectUsageEventLockBlock(t, db, ctx)
+	if _, err := gateConn.ExecContext(ctx, `SELECT pg_advisory_unlock($1)`, gateKey); err != nil {
+		t.Fatalf("release object-delete gate: %v", err)
+	}
+	if err := <-repairDone; err != nil {
+		t.Fatalf("repair legacy duplicate records: %v", err)
+	}
+	if err := <-eventDone; err != nil {
+		t.Fatalf("record download through repaired alias: %v", err)
+	}
+
+	usage, err := db.GetFileUsage(ctx, canonicalID)
+	if err != nil {
+		t.Fatalf("read canonical usage after concurrent repair: %v", err)
+	}
+	if postgresUsageCount(usage.DownloadCount) != 1 {
+		t.Fatalf("canonical download count = %d, want 1", postgresUsageCount(usage.DownloadCount))
+	}
+	resolved, err := db.ResolveObjectAlias(ctx, duplicateID)
+	if err != nil || resolved != canonicalID {
+		t.Fatalf("duplicate alias = %q, err=%v, want %q", resolved, err, canonicalID)
+	}
+	var orphanEvents int
+	if err := db.DB().QueryRowContext(ctx, `SELECT count(*) FROM object_usage_event WHERE object_id = $1`, duplicateID).Scan(&orphanEvents); err != nil {
+		t.Fatalf("count duplicate usage events: %v", err)
+	}
+	if orphanEvents != 0 {
+		t.Fatalf("pending events under removed duplicate ID = %d, want 0", orphanEvents)
+	}
+}
+
 func TestPostgresUsageFlushDoesNotDoubleCountConcurrentFlushes(t *testing.T) {
 	db := openPostgresUsageTestStore(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -362,7 +451,7 @@ func openPostgresUsageTestStore(t *testing.T) *store.Store {
 		_, _ = raw.Exec(`DROP SCHEMA IF EXISTS ` + schema + ` CASCADE`)
 		_ = raw.Close()
 	})
-	db, err := postgresdb.NewPostgresDB(postgresTestSchemaDSN(t, dsn, schema), nil)
+	db, err := postgresdb.NewPostgresDB(context.Background(), postgresTestSchemaDSN(t, dsn, schema), nil)
 	if err != nil {
 		t.Fatalf("open PostgreSQL usage test store: %v", err)
 	}
@@ -443,4 +532,21 @@ func waitForUsageFlushBlocker(t *testing.T, db *store.Store, ctx context.Context
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatal("second usage flush did not become blocked by the first")
+}
+
+func waitForObjectUsageEventLockBlock(t *testing.T, db *store.Store, ctx context.Context) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		var blocked int
+		if err := db.DB().QueryRowContext(ctx, `
+			SELECT count(*)
+			FROM pg_stat_activity a
+			WHERE a.query LIKE '%syfon-object-usage-event:%'
+			  AND cardinality(pg_blocking_pids(a.pid)) > 0`).Scan(&blocked); err == nil && blocked == 1 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("usage event writer did not block on the object event lock")
 }

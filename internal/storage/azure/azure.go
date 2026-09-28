@@ -26,9 +26,8 @@ type backend struct {
 }
 
 type azureCreds struct {
-	SharedKey        *azblob.SharedKeyCredential
-	ServiceURL       string
-	DeleteServiceURL string
+	SharedKey  *azblob.SharedKeyCredential
+	ServiceURL string
 }
 
 type cacheEntry struct {
@@ -175,9 +174,8 @@ func (b *backend) getCreds(binding storage.ProviderBinding) (*azureCreds, error)
 	}
 
 	value := &azureCreds{
-		SharedKey:        shared,
-		ServiceURL:       b.azureServiceURL(accountName, cred.Endpoint),
-		DeleteServiceURL: b.azureDeleteServiceURL(accountName, cred.Endpoint),
+		SharedKey:  shared,
+		ServiceURL: b.azureServiceURL(accountName, cred.Endpoint),
 	}
 	b.entries[cacheKey] = &cacheEntry{creds: value, credential: credential}
 	b.cache.Store(cacheKey, value)
@@ -231,17 +229,6 @@ func (b *backend) azureBlobURL(serviceURL, bucket, key string) string {
 }
 
 func (b *backend) azureServiceURL(accountName, endpoint string) string {
-	ep := strings.TrimSpace(endpoint)
-	if ep != "" {
-		if !strings.HasPrefix(ep, "http://") && !strings.HasPrefix(ep, "https://") {
-			ep = "https://" + ep
-		}
-		return strings.TrimRight(ep, "/")
-	}
-	return "https://" + strings.TrimSpace(accountName) + ".blob.db.windows.net"
-}
-
-func (b *backend) azureDeleteServiceURL(accountName, endpoint string) string {
 	ep := strings.TrimSpace(endpoint)
 	if ep != "" {
 		if !strings.HasPrefix(ep, "http://") && !strings.HasPrefix(ep, "https://") {

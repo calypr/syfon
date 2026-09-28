@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	conf "github.com/calypr/syfon/client/config"
 )
@@ -54,7 +55,7 @@ func TestAuthTransportRoundTrip(t *testing.T) {
 			}
 			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("ok")), Header: make(http.Header), Request: req}, nil
 		})
-		transport := &AuthTransport{Base: base, Mode: AuthModeBasic, Cred: &conf.Credential{KeyID: "user", APIKey: "pass"}}
+		transport := &AuthTransport{Base: base, Mode: AuthModeBasic, Cred: &conf.Credential{KeyID: "user", APIKey: "pass", APIEndpoint: "https://example.test"}}
 		req, _ := http.NewRequest(http.MethodGet, "https://example.test", nil)
 		if _, err := transport.RoundTrip(req); err != nil {
 			t.Fatalf("RoundTrip returned error: %v", err)
@@ -68,7 +69,7 @@ func TestAuthTransportRoundTrip(t *testing.T) {
 			}
 			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("ok")), Header: make(http.Header), Request: req}, nil
 		})
-		transport := &AuthTransport{Base: base, Mode: AuthModeBearer, Cred: &conf.Credential{AccessToken: "tok"}}
+		transport := &AuthTransport{Base: base, Mode: AuthModeBearer, Cred: &conf.Credential{AccessToken: "tok", APIEndpoint: "https://example.test"}}
 		req, _ := http.NewRequest(http.MethodGet, "https://example.test", nil)
 		if _, err := transport.RoundTrip(req); err != nil {
 			t.Fatalf("RoundTrip returned error: %v", err)
@@ -89,6 +90,141 @@ func TestAuthTransportRoundTrip(t *testing.T) {
 			t.Fatalf("RoundTrip returned error: %v", err)
 		}
 	})
+}
+
+func TestAuthTransportRestrictsAutomaticAuthToTrustedOrigin(t *testing.T) {
+	t.Parallel()
+
+	for _, authCase := range []struct {
+		name string
+		mode AuthMode
+		cred *conf.Credential
+		want string
+	}{
+		{name: "basic", mode: AuthModeBasic, cred: &conf.Credential{KeyID: "user", APIKey: "pass", APIEndpoint: "https://source.example/api"}, want: "Basic dXNlcjpwYXNz"},
+		{name: "bearer", mode: AuthModeBearer, cred: &conf.Credential{AccessToken: "token", APIEndpoint: "https://source.example/api"}, want: "Bearer token"},
+	} {
+		t.Run(authCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			t.Run("same origin remains authenticated", func(t *testing.T) {
+				base := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+					if got := req.Header.Get("Authorization"); got != authCase.want {
+						t.Fatalf("same-origin authorization = %q, want %q", got, authCase.want)
+					}
+					return testAuthResponse(req, http.StatusOK, nil), nil
+				})
+				client := &http.Client{Transport: &AuthTransport{Base: base, Mode: authCase.mode, Cred: authCase.cred}}
+				resp, err := client.Get("https://SOURCE.example:443/resource")
+				if err != nil {
+					t.Fatalf("same-origin request failed: %v", err)
+				}
+				_ = resp.Body.Close()
+			})
+
+			t.Run("different origins omit automatic authorization", func(t *testing.T) {
+				for _, target := range []string{
+					"https://target.example/resource",
+					"http://source.example/resource",
+					"https://source.example:444/resource",
+				} {
+					t.Run(target, func(t *testing.T) {
+						base := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+							if got := req.Header.Get("Authorization"); got != "" {
+								t.Fatalf("authorization for %s = %q, want empty", target, got)
+							}
+							return testAuthResponse(req, http.StatusOK, nil), nil
+						})
+						client := &http.Client{Transport: &AuthTransport{Base: base, Mode: authCase.mode, Cred: authCase.cred}}
+						resp, err := client.Get(target)
+						if err != nil {
+							t.Fatalf("request to %s failed: %v", target, err)
+						}
+						_ = resp.Body.Close()
+					})
+				}
+			})
+
+			t.Run("cross-host redirect omits automatic authorization", func(t *testing.T) {
+				var calls int
+				base := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+					calls++
+					switch calls {
+					case 1:
+						if got := req.Header.Get("Authorization"); got != authCase.want {
+							t.Fatalf("source authorization = %q, want %q", got, authCase.want)
+						}
+						return testAuthResponse(req, http.StatusFound, http.Header{"Location": []string{"https://target.example/resource"}}), nil
+					case 2:
+						if got := req.Header.Get("Authorization"); got != "" {
+							t.Fatalf("redirect target authorization = %q, want empty", got)
+						}
+						return testAuthResponse(req, http.StatusOK, nil), nil
+					default:
+						t.Fatalf("unexpected request %d to %s", calls, req.URL)
+						return nil, nil
+					}
+				})
+				client := &http.Client{Transport: &AuthTransport{Base: base, Mode: authCase.mode, Cred: authCase.cred}}
+				resp, err := client.Get("https://source.example/resource")
+				if err != nil {
+					t.Fatalf("redirected request failed: %v", err)
+				}
+				_ = resp.Body.Close()
+				if calls != 2 {
+					t.Fatalf("request count = %d, want 2", calls)
+				}
+			})
+		})
+	}
+
+	t.Run("automatic auth is off without trusted origin", func(t *testing.T) {
+		base := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			if got := req.Header.Get("Authorization"); got != "" {
+				t.Fatalf("authorization without trusted origin = %q, want empty", got)
+			}
+			return testAuthResponse(req, http.StatusOK, nil), nil
+		})
+		transport := &AuthTransport{Base: base, Mode: AuthModeBearer, Cred: &conf.Credential{AccessToken: "token"}}
+		resp, err := (&http.Client{Transport: transport}).Get("https://source.example/resource")
+		if err != nil {
+			t.Fatalf("request without trusted origin failed: %v", err)
+		}
+		_ = resp.Body.Close()
+	})
+
+	t.Run("explicit caller authorization is preserved on foreign URL", func(t *testing.T) {
+		base := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			if got := req.Header.Get("Authorization"); got != "Bearer caller-token" {
+				t.Fatalf("caller authorization = %q, want Bearer caller-token", got)
+			}
+			return testAuthResponse(req, http.StatusOK, nil), nil
+		})
+		transport := &AuthTransport{Base: base, Mode: AuthModeBearer, Cred: &conf.Credential{AccessToken: "managed-token", APIEndpoint: "https://source.example"}}
+		req, err := http.NewRequest(http.MethodGet, "https://target.example/resource", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer caller-token")
+		resp, err := transport.RoundTrip(req)
+		if err != nil {
+			t.Fatalf("foreign request with caller authorization failed: %v", err)
+		}
+		_ = resp.Body.Close()
+	})
+}
+
+func testAuthResponse(req *http.Request, status int, header http.Header) *http.Response {
+	if header == nil {
+		header = make(http.Header)
+	}
+	return &http.Response{
+		StatusCode: status,
+		Status:     http.StatusText(status),
+		Body:       io.NopCloser(strings.NewReader("")),
+		Header:     header,
+		Request:    req,
+	}
 }
 
 func TestRequestDoRefreshesRejectedBearerOnceForConcurrent401s(t *testing.T) {
@@ -181,6 +317,41 @@ func TestRequestDoPreservesExplicitBearerOn401(t *testing.T) {
 	_ = resp.Body.Close()
 	if calls != 1 || refreshCalls != 0 {
 		t.Fatalf("expected one request and no refresh, got requests=%d refreshes=%d", calls, refreshCalls)
+	}
+}
+
+func TestRequestDoDoesNotRefreshOrRetryForeign401(t *testing.T) {
+	var requestCalls int
+	var refreshCalls int
+	base := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.URL.Path == "/user/credentials/api/access_token" {
+			refreshCalls++
+			return testAuthResponse(req, http.StatusOK, nil), nil
+		}
+		requestCalls++
+		if got := req.Header.Get("Authorization"); got != "" {
+			t.Fatalf("foreign request authorization = %q, want empty", got)
+		}
+		return testAuthResponse(req, http.StatusUnauthorized, nil), nil
+	})
+	cred := &conf.Credential{APIKey: "api-key", APIEndpoint: "https://source.example", AccessToken: "managed-token"}
+	client := NewClient(nil, cred, &trackingManager{}, "ua", &http.Client{Transport: base}, AuthModeBearer)
+	client.retry.RetryWaitMin = 0
+	client.retry.RetryWaitMax = 0
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://target.example/data", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("foreign 401 request returned error: %v", err)
+	}
+	_ = resp.Body.Close()
+	if requestCalls != 1 || refreshCalls != 0 {
+		t.Fatalf("foreign 401 caused requests=%d refreshes=%d, want requests=1 refreshes=0", requestCalls, refreshCalls)
+	}
+	if cred.AccessToken != "managed-token" {
+		t.Fatalf("foreign 401 changed managed token to %q", cred.AccessToken)
 	}
 }
 
@@ -325,4 +496,136 @@ func TestAuthTransportNewAccessToken(t *testing.T) {
 			t.Fatalf("expected old token after save failure, got %q", cred.AccessToken)
 		}
 	})
+}
+
+func TestAuthTransportNewAccessTokenRedirects(t *testing.T) {
+	for _, redirect := range []struct {
+		name   string
+		status int
+	}{
+		{name: "307", status: http.StatusTemporaryRedirect},
+		{name: "308", status: http.StatusPermanentRedirect},
+	} {
+		t.Run(redirect.name+" cross-origin redirect is rejected", func(t *testing.T) {
+			var calls int
+			var targetReceivedAPIKey bool
+			transport := &AuthTransport{
+				Mode: AuthModeBearer,
+				Cred: &conf.Credential{APIKey: "synthetic-api-key", APIEndpoint: "https://source.invalid"},
+				Base: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+					calls++
+					if req.URL.Host == "target.invalid" {
+						body, err := io.ReadAll(req.Body)
+						if err != nil {
+							return nil, err
+						}
+						targetReceivedAPIKey = strings.Contains(string(body), "synthetic-api-key")
+						return testAuthResponse(req, http.StatusOK, nil), nil
+					}
+					return testAuthResponse(req, redirect.status, http.Header{
+						"Location": []string{"https://target.invalid/redirected"},
+					}), nil
+				}),
+			}
+
+			err := transport.NewAccessToken(context.Background())
+			if targetReceivedAPIKey {
+				t.Fatal("cross-origin redirect forwarded the refresh API key")
+			}
+			if calls != 1 {
+				t.Fatalf("cross-origin redirect sent %d requests, want 1", calls)
+			}
+			if err == nil {
+				t.Fatal("cross-origin refresh redirect should be rejected")
+			}
+		})
+
+		t.Run(redirect.name+" same-origin redirect is followed", func(t *testing.T) {
+			var calls int
+			transport := &AuthTransport{
+				Mode: AuthModeBearer,
+				Cred: &conf.Credential{APIKey: "synthetic-api-key", APIEndpoint: "https://source.invalid"},
+				Base: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+					calls++
+					if calls == 1 {
+						return testAuthResponse(req, redirect.status, http.Header{
+							"Location": []string{"https://source.invalid/redirected"},
+						}), nil
+					}
+					body, err := io.ReadAll(req.Body)
+					if err != nil {
+						return nil, err
+					}
+					if req.Method != http.MethodPost || !strings.Contains(string(body), "synthetic-api-key") {
+						t.Fatal("same-origin redirect did not preserve the refresh POST body")
+					}
+					response := testAuthResponse(req, http.StatusOK, nil)
+					response.Body = io.NopCloser(strings.NewReader(`{"access_token":"refreshed"}`))
+					return response, nil
+				}),
+			}
+
+			if err := transport.NewAccessToken(context.Background()); err != nil {
+				t.Fatalf("same-origin refresh redirect failed: %v", err)
+			}
+			if calls != 2 {
+				t.Fatalf("same-origin redirect sent %d requests, want 2", calls)
+			}
+			if transport.Cred.AccessToken != "refreshed" {
+				t.Fatal("same-origin redirect did not store the refreshed token")
+			}
+		})
+	}
+}
+
+func TestAuthTransportNewAccessTokenUsesConfiguredRedirectPolicy(t *testing.T) {
+	var calls int
+	var policyCalls int
+	base := &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			calls++
+			return testAuthResponse(req, http.StatusTemporaryRedirect, http.Header{
+				"Location": []string{"https://source.invalid/redirected"},
+			}), nil
+		}),
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			policyCalls++
+			return http.ErrUseLastResponse
+		},
+	}
+	client := NewClient(nil, &conf.Credential{APIKey: "synthetic-api-key", APIEndpoint: "https://source.invalid"}, nil, "", base, AuthModeBearer)
+	transport := client.standard.Transport.(*AuthTransport)
+
+	if err := transport.NewAccessToken(context.Background()); err == nil {
+		t.Fatal("configured redirect policy should stop the refresh redirect")
+	}
+	if calls != 1 || policyCalls != 1 {
+		t.Fatalf("refresh calls=%d redirect policy calls=%d, want 1 each", calls, policyCalls)
+	}
+}
+
+func TestAuthTransportNewAccessTokenUsesConfiguredTimeout(t *testing.T) {
+	deadlineSeen := make(chan bool, 1)
+	base := &http.Client{
+		Timeout: 50 * time.Millisecond,
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			_, hasDeadline := req.Context().Deadline()
+			deadlineSeen <- hasDeadline
+			select {
+			case <-req.Context().Done():
+				return nil, req.Context().Err()
+			case <-time.After(500 * time.Millisecond):
+				return nil, errors.New("refresh request context had no timeout")
+			}
+		}),
+	}
+	client := NewClient(nil, &conf.Credential{APIKey: "synthetic-api-key", APIEndpoint: "https://source.invalid"}, nil, "", base, AuthModeBearer)
+	transport := client.standard.Transport.(*AuthTransport)
+	err := transport.NewAccessToken(context.Background())
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("refresh did not end at the configured timeout: %v", err)
+	}
+	if !<-deadlineSeen {
+		t.Fatal("configured HTTP client timeout did not add a deadline to the refresh request")
+	}
 }

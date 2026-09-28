@@ -47,6 +47,27 @@ func TestCanonicalRepairRollsBackWhenDuplicateDeletionFails(t *testing.T) {
 func TestCanonicalRepairSuccessAndPublicRetryAreIdempotent(t *testing.T) {
 	db, canonicalID, duplicateID := seedLegacyCanonicalRepair(t)
 	ctx := context.Background()
+	base := time.Now().UTC().Add(-time.Hour)
+	canonicalUpload := base
+	canonicalDownload := base.Add(time.Minute)
+	duplicateUpload := base.Add(2 * time.Minute)
+	duplicateDownload := base.Add(3 * time.Minute)
+	pendingCanonicalUpload := base.Add(4 * time.Minute)
+	pendingDuplicateUpload := base.Add(5 * time.Minute)
+	pendingDuplicateDownload := base.Add(6 * time.Minute)
+	if _, err := db.DB().ExecContext(ctx, `
+		INSERT INTO object_usage (object_id, upload_count, download_count, last_upload_time, last_download_time, updated_time)
+		VALUES (?, 2, 1, ?, ?, ?), (?, 3, 4, ?, ?, ?);
+		INSERT INTO object_usage_event (object_id, event_type, event_time)
+		VALUES (?, 'upload', ?), (?, 'upload', ?), (?, 'download', ?)
+	`, canonicalID, canonicalUpload, canonicalDownload, base,
+		duplicateID, duplicateUpload, duplicateDownload, base,
+		canonicalID, pendingCanonicalUpload,
+		duplicateID, pendingDuplicateUpload,
+		duplicateID, pendingDuplicateDownload); err != nil {
+		t.Fatalf("seed usage history: %v", err)
+	}
+
 	service := objects.NewService(db)
 	if collapsed, err := service.CollapseProjectChecksumDuplicates(ctx, "org", "project"); err != nil {
 		t.Fatalf("CollapseProjectChecksumDuplicates() error = %v", err)
@@ -72,11 +93,60 @@ func TestCanonicalRepairSuccessAndPublicRetryAreIdempotent(t *testing.T) {
 	if merged.AccessMethods == nil || len(*merged.AccessMethods) != 2 {
 		t.Fatalf("merged access methods = %+v, want both physical methods", merged.AccessMethods)
 	}
+	usage, err := db.GetFileUsage(ctx, canonicalID)
+	if err != nil {
+		t.Fatalf("GetFileUsage() after repair: %v", err)
+	}
+	if got := sqliteTestInt64Val(usage.UploadCount); got != 7 {
+		t.Fatalf("upload count after repair = %d, want 7", got)
+	}
+	if got := sqliteTestInt64Val(usage.DownloadCount); got != 6 {
+		t.Fatalf("download count after repair = %d, want 6", got)
+	}
+	if usage.LastUploadTime == nil || !usage.LastUploadTime.Equal(pendingDuplicateUpload) {
+		t.Fatalf("last upload time after repair = %v, want %v", usage.LastUploadTime, pendingDuplicateUpload)
+	}
+	if usage.LastDownloadTime == nil || !usage.LastDownloadTime.Equal(pendingDuplicateDownload) {
+		t.Fatalf("last download time after repair = %v, want %v", usage.LastDownloadTime, pendingDuplicateDownload)
+	}
+	var remainingEvents int
+	if err := db.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM object_usage_event WHERE object_id IN (?, ?)`, canonicalID, duplicateID).Scan(&remainingEvents); err != nil {
+		t.Fatal(err)
+	}
+	if remainingEvents != 0 {
+		t.Fatalf("pending usage events after repair = %d, want 0", remainingEvents)
+	}
+	if err := db.RecordFileDownload(ctx, duplicateID); err != nil {
+		t.Fatalf("RecordFileDownload() through repaired alias: %v", err)
+	}
+	usage, err = db.GetFileUsage(ctx, canonicalID)
+	if err != nil {
+		t.Fatalf("GetFileUsage() after recording through repaired alias: %v", err)
+	}
+	if got := sqliteTestInt64Val(usage.DownloadCount); got != 7 {
+		t.Fatalf("download count after recording through repaired alias = %d, want 7", got)
+	}
+	if err := db.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM object_usage_event WHERE object_id = ?`, duplicateID).Scan(&remainingEvents); err != nil {
+		t.Fatal(err)
+	}
+	if remainingEvents != 0 {
+		t.Fatalf("pending events left under repaired alias = %d, want 0", remainingEvents)
+	}
 
 	if collapsed, err := service.CollapseProjectChecksumDuplicates(ctx, "org", "project"); err != nil {
 		t.Fatalf("public repair retry error = %v", err)
 	} else if collapsed != 0 {
 		t.Fatalf("public repair retry collapsed %d records, want 0", collapsed)
+	}
+	usageAfterRetry, err := db.GetFileUsage(ctx, canonicalID)
+	if err != nil {
+		t.Fatalf("GetFileUsage() after repair retry: %v", err)
+	}
+	if got := sqliteTestInt64Val(usageAfterRetry.UploadCount); got != 7 {
+		t.Fatalf("upload count after repair retry = %d, want 7", got)
+	}
+	if got := sqliteTestInt64Val(usageAfterRetry.DownloadCount); got != 7 {
+		t.Fatalf("download count after repair retry = %d, want 7", got)
 	}
 }
 

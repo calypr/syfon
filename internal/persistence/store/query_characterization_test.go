@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/calypr/syfon/apigen/drs"
+	"github.com/calypr/syfon/internal/objects"
 	postgresdb "github.com/calypr/syfon/internal/persistence/postgres"
 	sqlitedb "github.com/calypr/syfon/internal/persistence/sqlite"
 	"github.com/calypr/syfon/internal/persistence/store"
@@ -40,7 +41,7 @@ func TestQueryConstructionCharacterization(t *testing.T) {
 				if dsn == "" {
 					t.Skip("SYFON_TEST_POSTGRES_DSN is not configured")
 				}
-				db, err := postgresdb.NewPostgresDB(dsn, nil)
+				db, err := postgresdb.NewPostgresDB(context.Background(), dsn, nil)
 				if err != nil {
 					t.Fatalf("open postgres test store: %v", err)
 				}
@@ -127,16 +128,56 @@ func TestQueryConstructionCharacterization(t *testing.T) {
 			}
 			for _, testCase := range urlCases {
 				t.Run("URL/"+testCase.name, func(t *testing.T) {
-					ids, err := db.ListObjectIDsPageByURL(ctx, url, testCase.organization, testCase.project, testCase.after, testCase.limit, testCase.offset, testCase.resources, testCase.includeUnscoped, testCase.restrict)
+					ids, err := db.ListObjectIDsPage(ctx, objects.ObjectIDPageQuery{
+						Scope:                      objects.Scope{Organization: testCase.organization, Project: testCase.project},
+						ObjectURL:                  url,
+						StartAfter:                 testCase.after,
+						Limit:                      testCase.limit,
+						Offset:                     testCase.offset,
+						VisibleResources:           testCase.resources,
+						IncludeUnscoped:            testCase.includeUnscoped,
+						RestrictToVisibleResources: testCase.restrict,
+					})
 					if err != nil {
-						t.Fatalf("ListObjectIDsPageByURL: %v", err)
+						t.Fatalf("ListObjectIDsPage: %v", err)
 					}
 					if !slices.Equal(ids, testCase.want) {
-						t.Fatalf("ListObjectIDsPageByURL = %v, want %v", ids, testCase.want)
+						t.Fatalf("ListObjectIDsPage = %v, want %v", ids, testCase.want)
 					}
 				})
 			}
 		})
+	}
+}
+
+func TestBucketVisibilityReturnsOnlyAuthorizedResourceRows(t *testing.T) {
+	db, err := sqlitedb.NewSqliteDB(":memory:", nil)
+	if err != nil {
+		t.Fatalf("open sqlite test store: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	ctx := context.Background()
+	id := "visibility-" + uuid.NewString()
+	url := "s3://bucket/visibility/" + id
+	const allowed, hidden = "/organization/org/project/allowed", "/organization/org/project/hidden"
+	resources := []string{allowed, hidden}
+	record := drs.DrsObject{
+		Id:               id,
+		ControlledAccess: &resources,
+		AccessMethods:    &[]drs.AccessMethod{{Type: drs.AccessMethodTypeS3, AccessUrl: &drs.AccessURL{Url: url}}},
+	}
+	if err := db.RegisterObjects(ctx, []drs.DrsObject{record}); err != nil {
+		t.Fatalf("RegisterObjects: %v", err)
+	}
+	t.Cleanup(func() { _ = db.DeleteObject(ctx, id) })
+
+	rows, err := db.ListBucketVisibilityRows(ctx, []string{allowed}, false, true)
+	if err != nil {
+		t.Fatalf("ListBucketVisibilityRows: %v", err)
+	}
+	if len(rows) != 1 || rows[0].Resource != allowed {
+		t.Fatalf("visible rows = %+v, want only resource %q", rows, allowed)
 	}
 }
 

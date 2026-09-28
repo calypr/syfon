@@ -194,6 +194,9 @@ func (s *internalServer) InternalUploadBulk(c fiber.Ctx) error {
 		empty := []internalapi.InternalUploadBulkResult{}
 		return c.JSON(internalapi.InternalUploadBulkOutput{Results: &empty})
 	}
+	if s.maxBulkRequestLength > 0 && len(req.Requests) > s.maxBulkRequestLength {
+		return Reject(c, fiber.StatusRequestEntityTooLarge, "bulk request exceeds maxBulkRequestLength")
+	}
 	requests := make([]domaintransfers.UploadRequest, len(req.Requests))
 	for i, item := range req.Requests {
 		requests[i] = domaintransfers.UploadRequest{ObjectID: item.FileId, Key: generatedString(item.Key), Scope: uploadScope(item.Organization, item.Project)}

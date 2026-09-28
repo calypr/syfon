@@ -17,7 +17,10 @@ type TransferLogger interface {
 
 // ObjectMetadata carries provider-agnostic information about a storage target.
 type ObjectMetadata struct {
-	Size         int64
+	Size int64
+	// SizeKnown marks Size as authoritative when it is zero. Positive sizes are
+	// treated as known for compatibility with existing callers.
+	SizeKnown    bool
 	AcceptRanges bool
 	Provider     string
 	Identity     string

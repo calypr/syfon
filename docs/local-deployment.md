@@ -55,11 +55,26 @@ bin/syfon serve --config config.local.yaml
 ## Run With Docker
 
 ```bash
+mkdir -p data
 docker run \
   -p 8080:8080 \
-  -v $(pwd)/config.local.yaml:/config.yaml \
-  -v $(pwd)/data:/data \
+  --user "$(id -u):$(id -g)" \
+  --workdir / \
+  -v "$(pwd)/config.local.yaml:/config.yaml:ro" \
+  -v "$(pwd)/data:/data" \
   quay.io/ohsu-comp-bio/syfon:development serve --config /config.yaml
+```
+
+The working directory makes the config's `./data` paths resolve inside the mounted `/data` directory. Running as your host user lets Syfon write the SQLite database and local encryption key there.
+
+After the server has started, stop it and run this check. Run it again after starting and stopping a replacement container with the command above. The database inode and key hash must match. SQLite can update the database file during startup, so its file hash can change.
+
+```bash
+docker run --rm \
+  --entrypoint sh \
+  -v "$(pwd)/data:/data:ro" \
+  quay.io/ohsu-comp-bio/syfon:development \
+  -c 'test -s /data/drs_local.db && test -s /data/.syfon-credential-kek && stat -c %i /data/drs_local.db && sha256sum /data/.syfon-credential-kek'
 ```
 
 Use the published image from [Quay](https://quay.io/repository/ohsu-comp-bio/syfon?tab=tags) when you do not want to build locally.

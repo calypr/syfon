@@ -56,7 +56,7 @@ func TestLoadConfig_MockAuthAllowsGen3Mode(t *testing.T) {
 	}
 }
 
-// Test MED-2 fix: Postgres SSL mode defaults to "require"
+// PostgreSQL connections verify the server certificate and hostname by default.
 func TestLoadConfig_PostgresSSLModeDefault(t *testing.T) {
 	t.Setenv("DRS_AUTH_MODE", "local")
 	t.Setenv("DRS_BASIC_AUTH_USER", "drs-user")
@@ -73,8 +73,8 @@ func TestLoadConfig_PostgresSSLModeDefault(t *testing.T) {
 		t.Fatal("Database.Postgres is nil")
 	}
 
-	if cfg.Database.Postgres.SSLMode != "require" {
-		t.Errorf("Postgres.SSLMode = %q, want require", cfg.Database.Postgres.SSLMode)
+	if cfg.Database.Postgres.SSLMode != "verify-full" {
+		t.Errorf("Postgres.SSLMode = %q, want verify-full", cfg.Database.Postgres.SSLMode)
 	}
 }
 

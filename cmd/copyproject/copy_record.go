@@ -2,31 +2,34 @@ package copyproject
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"path"
 	"path/filepath"
 	"strings"
 
 	drsapi "github.com/calypr/syfon/apigen/drs"
+	"github.com/calypr/syfon/apigen/errorapi"
 	"github.com/calypr/syfon/apigen/internalapi"
 	"github.com/calypr/syfon/client/common"
+	clienthash "github.com/calypr/syfon/client/hash"
 	"github.com/calypr/syfon/client/services"
 	"github.com/calypr/syfon/client/transfer/engine"
 	"github.com/calypr/syfon/client/transfer/upload"
 	"github.com/calypr/syfon/cmd/transferprogress"
 
-	clientaccess "github.com/calypr/syfon/client/access"
 	"github.com/spf13/cobra"
 )
 
 type recordClient interface {
 	Data() *services.DataService
-	Index() *services.IndexService
 	DRS() *services.DRSService
 }
 
-func copyRecord(ctx context.Context, cmd *cobra.Command, sourceClient, targetClient recordClient, rec internalapi.InternalRecord, targetBucket, targetProjectPath string, dstResource string, current, total int, tempDir string) error {
+func copyRecord(ctx context.Context, cmd *cobra.Command, sourceClient, targetClient recordClient, rec internalapi.InternalRecord, targetBucket, targetProvider, targetProjectPath string, dstResource string, current, total int, tempDir string) error {
 	did := rec.Did
 	fileName := ""
 	if rec.Name != nil {
@@ -75,10 +78,26 @@ func copyRecord(ctx context.Context, cmd *cobra.Command, sourceClient, targetCli
 	}
 	downloadProgress.Finish()
 
+	expectedChecksum := ""
+	if strings.TrimSpace(checksum) != "" {
+		expectedChecksum = clienthash.NormalizeOid(checksum)
+		if expectedChecksum == "" {
+			return fmt.Errorf("%w: invalid source SHA-256 checksum", errorapi.ErrInvalidInput)
+		}
+	}
+	checksum, err = sha256File(tempPath)
+	if err != nil {
+		return fmt.Errorf("failed to compute SHA-256 for downloaded file %s: %w", did, err)
+	}
+	if expectedChecksum != "" && checksum != expectedChecksum {
+		return fmt.Errorf("%w: source SHA-256 mismatch: downloaded file has %s, record says %s", errorapi.ErrInvalidInput, checksum, expectedChecksum)
+	}
+
 	drsObj := &drsapi.DrsObject{
-		Id:   did,
-		Name: &fileName,
-		Size: size,
+		Id:          did,
+		Name:        &fileName,
+		Description: rec.Description,
+		Size:        size,
 		Checksums: []drsapi.Checksum{
 			{Type: "sha256", Checksum: checksum},
 		},
@@ -86,7 +105,7 @@ func copyRecord(ctx context.Context, cmd *cobra.Command, sourceClient, targetCli
 	}
 
 	uploadKey := preferredUploadKey(rec.AccessMethods, checksum, fileName, tempPath)
-	targetObjectURL := scopedObjectURL(targetProjectPath, targetBucket, uploadKey)
+	targetObjectURL := scopedObjectURL(targetProjectPath, targetBucket, uploadKey, targetProvider)
 
 	fmt.Fprintf(cmd.OutOrStdout(), "Uploading %s -> %s", did, targetObjectURL)
 	if size > 0 {
@@ -97,44 +116,27 @@ func copyRecord(ctx context.Context, cmd *cobra.Command, sourceClient, targetCli
 	uploadProgress := transferprogress.New(cmd.OutOrStdout(), filepath.Base(progressName), size)
 	uploadProgress.Start()
 	uploadCtx := transferprogress.WithProgress(ctx, did, uploadProgress)
-	if _, err := upload.RegisterFile(uploadCtx, targetClient.Data(), targetClient.DRS(), drsObj, tempPath, targetBucket); err != nil {
+	if _, err := upload.RegisterFile(uploadCtx, targetClient.Data(), targetClient.DRS(), drsObj, tempPath, targetBucket, targetObjectURL); err != nil {
 		uploadProgress.Abort()
 		return fmt.Errorf("failed to upload file %s to target bucket %q: %w", did, targetBucket, err)
 	}
 	uploadProgress.Finish()
 
-	targetAccessMethod := drsapi.AccessMethod{
-		Type:      drsapi.AccessMethodType(storageSchemeFromURL(targetObjectURL)),
-		AccessUrl: &drsapi.AccessURL{Url: targetObjectURL},
-	}
-
-	registerReq := drsapi.RegisterObjectsJSONRequestBody{
-		Candidates: []drsapi.DrsObjectCandidate{{
-			Name:             drsObj.Name,
-			Size:             drsObj.Size,
-			Checksums:        drsObj.Checksums,
-			Aliases:          &[]string{"id:" + did},
-			AccessMethods:    &[]drsapi.AccessMethod{targetAccessMethod},
-			ControlledAccess: &[]string{dstResource},
-			Description:      drsObj.Description,
-			MimeType:         drsObj.MimeType,
-			Version:          drsObj.Version,
-		}},
-	}
-	if _, err := targetClient.DRS().RegisterObjects(ctx, registerReq); err != nil {
-		return fmt.Errorf("failed to update DRS metadata for DID %s: %w", did, err)
-	}
-
-	authzOrg, authzProject := pathScope(dstResource)
-	authzMap := clientaccess.AuthzMapFromScope(authzOrg, authzProject)
-	if err := targetClient.Index().Upsert(ctx, did, targetObjectURL, fileName, size, checksum, authzMap); err != nil {
-		return fmt.Errorf("failed to sync index record for DID %s: %w", did, err)
-	}
-	if _, err := targetClient.DRS().UpdateObjectAccessMethods(ctx, did, []drsapi.AccessMethod{targetAccessMethod}); err != nil {
-		return fmt.Errorf("failed to replace access methods for DID %s: %w", did, err)
-	}
-
 	return nil
+}
+
+func sha256File(filePath string) (string, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	hasher := sha256.New()
+	if _, err := io.Copy(hasher, file); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(hasher.Sum(nil)), nil
 }
 
 func preferredUploadKey(accessMethods *[]drsapi.AccessMethod, checksum, fileName, filePath string) string {

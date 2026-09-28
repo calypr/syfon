@@ -132,30 +132,7 @@ var transfersUsersCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		rows := transferBreakdownRows(breakdown)
-		sortTransferBreakdowns(rows, sortBy, order)
-		rows = limitedTransferBreakdowns(rows, metricsLimit)
-		users := make([]transferUserMetrics, 0, len(rows))
-		for _, item := range rows {
-			users = append(users, transferUserMetrics{
-				User:             transferUserLabel(item),
-				ActorEmail:       stringValue(item.ActorEmail),
-				ActorSubject:     stringValue(item.ActorSubject),
-				EventCount:       int64Value(item.EventCount),
-				BytesRequested:   int64Value(item.BytesRequested),
-				BytesDownloaded:  int64Value(item.BytesDownloaded),
-				BytesUploaded:    int64Value(item.BytesUploaded),
-				LastTransferTime: item.LastTransferTime,
-			})
-		}
-		return writeJSON(cmd, transferUsersReport{
-			Summary:    summary,
-			Users:      users,
-			Freshness:  breakdown.Freshness,
-			SortBy:     sortBy,
-			SortOrder:  order,
-			TotalUsers: len(users),
-		})
+		return writeJSON(cmd, buildTransferUsersReport(summary, breakdown, sortBy, order, metricsLimit))
 	},
 }
 
@@ -225,7 +202,36 @@ func init() {
 		c.Flags().StringVar(&metricsSortOrder, "sort-order", "desc", "Sort order: asc or desc")
 		c.Flags().IntVar(&metricsLimit, "limit", 0, "Limit the number of returned rows")
 	}
+	transfersUsersCmd.Flags().Lookup("limit").Usage = "Limit returned users; total_users counts all matching users before the limit"
 	transfersBreakdownCmd.Flags().StringVar(&metricsGroupBy, "group-by", "user", "Breakdown grouping: user, scope, provider, or object")
+}
+
+func buildTransferUsersReport(summary metricsapi.TransferAttributionSummary, breakdown metricsapi.TransferBreakdownResponse, sortBy, order string, limit int) transferUsersReport {
+	rows := transferBreakdownRows(breakdown)
+	sortTransferBreakdowns(rows, sortBy, order)
+	totalUsers := len(rows)
+	rows = limitedTransferBreakdowns(rows, limit)
+	users := make([]transferUserMetrics, 0, len(rows))
+	for _, item := range rows {
+		users = append(users, transferUserMetrics{
+			User:             transferUserLabel(item),
+			ActorEmail:       stringValue(item.ActorEmail),
+			ActorSubject:     stringValue(item.ActorSubject),
+			EventCount:       int64Value(item.EventCount),
+			BytesRequested:   int64Value(item.BytesRequested),
+			BytesDownloaded:  int64Value(item.BytesDownloaded),
+			BytesUploaded:    int64Value(item.BytesUploaded),
+			LastTransferTime: item.LastTransferTime,
+		})
+	}
+	return transferUsersReport{
+		Summary:    summary,
+		Users:      users,
+		Freshness:  breakdown.Freshness,
+		SortBy:     sortBy,
+		SortOrder:  order,
+		TotalUsers: totalUsers,
+	}
 }
 
 func newMetricsClient(cmd *cobra.Command) (*syclient.Client, error) {

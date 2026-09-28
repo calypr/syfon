@@ -1,0 +1,8 @@
+ok  	github.com/calypr/syfon/internal/config	1.874s
+ok  	github.com/calypr/syfon/internal/persistence/sqlite	4.332s
+ok  	github.com/calypr/syfon/internal/persistence/store	0.802s
+ok  	github.com/calypr/syfon/internal/transfers	1.107s
+ok  	github.com/calypr/syfon/internal/transfers/lfs	0.978s
+ok  	github.com/calypr/syfon/internal/httpapi	1.572s
+ok  	github.com/calypr/syfon/cmd/bucket	1.762s
+ok  	github.com/calypr/syfon/cmd/metrics	0.850s

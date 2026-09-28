@@ -82,7 +82,7 @@ func azureCredential(endpoint string) *buckets.Credential {
 
 func TestAzureAccessSASPermissionsAndExpiry(t *testing.T) {
 	b := &backend{}
-	binding := storage.ProviderBinding{LookupKey: "test-bucket", PhysicalBucket: "test-bucket", Credential: azureCredential("https://acct.blob.db.windows.net")}
+	binding := storage.ProviderBinding{LookupKey: "test-bucket", PhysicalBucket: "test-bucket", Credential: azureCredential("")}
 
 	before := time.Now().UTC()
 	read, err := b.Sign(context.Background(), binding, storage.SignRequest{Target: storage.Target{PhysicalBucket: "test-bucket", Key: "path with spaces/object.txt"}})
@@ -92,6 +92,9 @@ func TestAzureAccessSASPermissionsAndExpiry(t *testing.T) {
 	readURL, err := url.Parse(read.Location)
 	if err != nil {
 		t.Fatalf("parse read URL: %v", err)
+	}
+	if got, want := readURL.Host, "acct.blob.core.windows.net"; got != want {
+		t.Fatalf("default Azure SAS host = %q, want %q", got, want)
 	}
 	if got := readURL.Query().Get("sp"); got != "r" {
 		t.Fatalf("read SAS permissions = %q, want r", got)
@@ -127,11 +130,14 @@ func TestAzureSASProtocolAndCredentialDerivation(t *testing.T) {
 	}
 
 	b := &backend{}
-	if got, want := b.azureServiceURL("acct", ""), "https://acct.blob.db.windows.net"; got != want {
+	if got, want := b.azureServiceURL("acct", ""), "https://acct.blob.core.windows.net"; got != want {
 		t.Fatalf("default service URL = %q, want %q", got, want)
 	}
 	if got, want := b.azureServiceURL("", "localhost:10000/devstoreaccount1"), "https://localhost:10000/devstoreaccount1"; got != want {
 		t.Fatalf("endpoint-normalized service URL = %q, want %q", got, want)
+	}
+	if got, want := b.azureServiceURL("acct", "https://custom.example/azure"), "https://custom.example/azure"; got != want {
+		t.Fatalf("explicit service URL = %q, want %q", got, want)
 	}
 	if got, want := b.azureAccountFromEndpoint("http://localhost:10000/devstoreaccount1"), "localhost"; got != want {
 		t.Fatalf("localhost account = %q, want %q", got, want)
@@ -355,14 +361,10 @@ func TestAzureEmptyMultipartCompletionCallsProvider(t *testing.T) {
 	}
 }
 
-func TestAzureDeleteUsesHistoricalEndpointAndNotFoundIsIdempotent(t *testing.T) {
-	if got, want := (&backend{}).azureServiceURL("acct", ""), "https://acct.blob.db.windows.net"; got != want {
+func TestAzureDeleteUsesDefaultEndpointAndNotFoundIsIdempotent(t *testing.T) {
+	if got, want := (&backend{}).azureServiceURL("acct", ""), "https://acct.blob.core.windows.net"; got != want {
 		t.Fatalf("signing default endpoint = %q, want %q", got, want)
 	}
-	if got, want := (&backend{}).azureDeleteServiceURL("acct", ""), "https://acct.blob.core.windows.net"; got != want {
-		t.Fatalf("deletion default endpoint = %q, want %q", got, want)
-	}
-
 	transport := &recordingTransport{status: http.StatusNotFound, header: http.Header{"X-Ms-Error-Code": []string{"BlobNotFound"}}}
 
 	b := &backend{transport: transport}

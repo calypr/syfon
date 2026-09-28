@@ -130,3 +130,19 @@ func TestSpecValidatorBadSpec(t *testing.T) {
 		t.Fatal("expected invalid spec error")
 	}
 }
+
+func TestCommandReturnsListenerErrorAfterParsingFlags(t *testing.T) {
+	t.Setenv("OPENAPI_SPEC", writeSpec(t, `openapi: 3.0.3
+info:
+  title: test
+  version: "1"
+paths: {}
+`))
+
+	cmd := newCommand()
+	cmd.SetArgs([]string{"--addr", "invalid:address", "--debug"})
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "validator server exited") {
+		t.Fatalf("command error = %v, want propagated listener error", err)
+	}
+}

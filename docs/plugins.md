@@ -7,6 +7,8 @@ The public Go contract lives in [`plugin/types.go`](https://github.com/calypr/sy
 - `AuthenticationPlugin.Authenticate` receives an `AuthenticationInput` and returns an `AuthenticationOutput`.
 - `AuthorizationPlugin.Authorize` receives an `AuthorizationInput` and returns an `AuthorizationOutput`.
 
+The NetRPC adapter encodes `Claims`, `Metadata`, and `Obligations` as JSON at the process boundary. Values in these maps must be JSON-marshalable. Objects and arrays arrive as `map[string]interface{}` and `[]interface{}`, and JSON numbers arrive as `float64`.
+
 The same handshake configuration is used for both plugin types. Register the RPC plugin under `authn` or `authz`, matching the interface it implements.
 
 ## Configure a plugin
@@ -68,7 +70,7 @@ type AuthorizationOutput struct {
 }
 ```
 
-The plugin binary must serve the RPC adapter expected by `go-plugin` and use the shared `plugin.Handshake` value. The examples under [`plugin/local_auth`](https://github.com/calypr/syfon/tree/development/plugin/local_auth) and [`plugin/gen3_auth`](https://github.com/calypr/syfon/tree/development/plugin/gen3_auth) show the registration shape.
+The plugin binary must serve the RPC adapter expected by `go-plugin` and use the shared `plugin.Handshake` value. The examples under [`plugin/local_auth`](https://github.com/calypr/syfon/tree/development/plugin/local_auth) and [`plugin/gen3_auth`](https://github.com/calypr/syfon/tree/development/plugin/gen3_auth) show the registration shape. Protocol version 2 changes the NetRPC wire representation; rebuild external plugin binaries against the matching Syfon plugin package before deploying them.
 
 ## Build the bundled examples
 

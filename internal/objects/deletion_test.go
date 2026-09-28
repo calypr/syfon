@@ -76,18 +76,38 @@ func TestDeleteObjectRequiresEveryResource(t *testing.T) {
 	}
 }
 
-func TestBulkDeleteFiltersUnauthorizedAndDuplicateIDs(t *testing.T) {
+func TestBulkDeleteValidatesEntireBatchBeforeMutation(t *testing.T) {
+	tests := []struct {
+		name    string
+		ids     []string
+		wantErr error
+	}{
+		{name: "missing object", ids: []string{"owned", "missing"}, wantErr: errorapi.ErrNotFound},
+		{name: "unauthorized object", ids: []string{"owned", "shared"}, wantErr: errorapi.ErrAccessDenied},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := seedDeletionRecords(t)
+			service := objects.NewService(db)
+			if err := service.BulkDeleteObjects(deletionContext(), tt.ids); !errors.Is(err, tt.wantErr) {
+				t.Errorf("BulkDeleteObjects() error = %v, want %v", err, tt.wantErr)
+			}
+			assertRecordExists(t, db, "owned", true)
+			assertRecordExists(t, db, "shared", true)
+			assertRecordExists(t, db, "other", true)
+		})
+	}
+}
+
+func TestBulkDeleteAcceptsDuplicateAuthorizedIDs(t *testing.T) {
 	db := seedDeletionRecords(t)
 	service := objects.NewService(db)
-	if err := service.BulkDeleteObjects(deletionContext(), []string{"owned", "owned", "shared", "other", "missing", " "}); err != nil {
+	if err := service.BulkDeleteObjects(deletionContext(), []string{"owned", "owned"}); err != nil {
 		t.Fatal(err)
 	}
 	assertRecordExists(t, db, "owned", false)
 	assertRecordExists(t, db, "shared", true)
 	assertRecordExists(t, db, "other", true)
-	if err := service.BulkDeleteObjects(deletionContext(), []string{"missing", "shared"}); err != nil {
-		t.Fatal(err)
-	}
 }
 
 func TestBulkDeleteRejectsAliasBeforeDeletingAnyRecord(t *testing.T) {
@@ -143,6 +163,27 @@ func TestDeleteByScopeRemovesOnlyThatProjectReference(t *testing.T) {
 	}
 	if _, err := service.DeleteBulkByScope(deletionContext(), "org", "other"); !errors.Is(err, errorapi.ErrAccessDenied) {
 		t.Fatalf("unauthorized scope delete: %v", err)
+	}
+}
+
+func TestDeleteByScopeMatchingChecksumKeepsOtherProjectReferences(t *testing.T) {
+	db := seedDeletionRecords(t)
+	service := objects.NewService(db)
+	count, err := service.DeleteBulkByScopeMatchingChecksum(deletionContext(), "org", "owned", objects.ChecksumQuery{Type: "md5", Value: strings.Repeat("b", 64)})
+	if err != nil || count != 0 {
+		t.Fatalf("wrong checksum type removed %d grants: %v", count, err)
+	}
+	count, err = service.DeleteBulkByScopeMatchingChecksum(deletionContext(), "org", "owned", objects.ChecksumQuery{Type: "sha256", Value: strings.Repeat("b", 64)})
+	if err != nil || count != 1 {
+		t.Fatalf("filtered scope delete = %d, %v, want 1", count, err)
+	}
+	owned, err := db.GetObject(context.Background(), "owned")
+	if err != nil || !slices.Equal(objects.AccessResources(owned), []string{deleteResource}) {
+		t.Fatalf("unmatched record changed: %v, %v", owned, err)
+	}
+	shared, err := db.GetObject(context.Background(), "shared")
+	if err != nil || !slices.Equal(objects.AccessResources(shared), []string{otherResource}) {
+		t.Fatalf("matched record kept scope grant: %v, %v", shared, err)
 	}
 }
 

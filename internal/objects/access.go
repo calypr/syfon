@@ -13,6 +13,68 @@ import (
 
 const maxDeniedAccessResources = 25
 
+// ContentAccess is the access policy read inside a content write transaction.
+type ContentAccess struct {
+	Resources  []string
+	PublicRead bool
+}
+
+// AuthorizeRegistration checks additions against the current stored policy.
+// A nil current policy means this registration creates a new content row.
+func AuthorizeRegistration(ctx context.Context, incoming *drs.DrsObject, current *ContentAccess) error {
+	resources := AccessResources(incoming)
+	var existing []string
+	if current != nil {
+		existing = current.Resources
+	}
+	added := addedResources(resources, existing)
+	if current != nil && !current.PublicRead && (len(added) > 0 || len(existing) == 0 || incoming.AccessMethods != nil) && !canReadContent(ctx, existing) {
+		return errorapi.ErrAccessDenied
+	}
+	return authorizeAddedResources(ctx, added)
+}
+
+func AuthorizeReplacementResources(ctx context.Context, incoming []string, current ContentAccess) error {
+	added := addedResources(incoming, current.Resources)
+	if len(added) == 0 {
+		return nil
+	}
+	if !current.PublicRead && !canReadContent(ctx, current.Resources) {
+		return errorapi.ErrAccessDenied
+	}
+	return authorizeAddedResources(ctx, added)
+}
+
+func addedResources(incoming, current []string) []string {
+	existing := make(map[string]struct{}, len(current))
+	for _, resource := range current {
+		existing[resource] = struct{}{}
+	}
+	var added []string
+	for _, resource := range incoming {
+		if _, ok := existing[resource]; !ok {
+			added = append(added, resource)
+		}
+	}
+	return added
+}
+
+func authorizeAddedResources(ctx context.Context, resources []string) error {
+	for _, resource := range resources {
+		if !access.HasMethodAccess(ctx, objectMethodCreate, []string{resource}) {
+			return errorapi.ErrAccessDenied
+		}
+	}
+	return nil
+}
+
+func canReadContent(ctx context.Context, resources []string) bool {
+	if !access.IsAuthzEnforced(ctx) {
+		return true
+	}
+	return len(resources) > 0 && access.HasObjectMethodAccess(ctx, objectMethodRead, resources)
+}
+
 func requireScopeMethod(ctx context.Context, organization, project, method string) error {
 	resource, err := clientaccess.ResourcePath(organization, project)
 	if err != nil {

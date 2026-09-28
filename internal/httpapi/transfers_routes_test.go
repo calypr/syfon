@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/calypr/syfon/apigen/errorapi"
@@ -36,8 +37,12 @@ func (s *multipartTestScope) LookupBucketScope(_ context.Context, _, project str
 func TestMultipartCompletionReturnsOriginalScopedLocationThroughClient(t *testing.T) {
 	provider := &lfsTestStorage{}
 	scope := &multipartTestScope{prefix: "original-prefix"}
+	objectStore := newDRSObjectStore(t, nil)
 	service := transfers.NewService(transfers.Dependencies{
-		Objects: objects.NewService(newDRSObjectStore(t, nil)), Storage: provider, Scopes: scope,
+		Objects:           objects.NewService(objectStore),
+		Storage:           provider,
+		Scopes:            scope,
+		MultipartSessions: objectStore.Store,
 	})
 	app := fiber.New()
 	internalapi.RegisterHandlers(app, &internalServer{transfers: service})
@@ -94,5 +99,19 @@ func TestMultipartRoutesRejectInvalidParts(t *testing.T) {
 				t.Fatalf("status=%d body=%s", response.StatusCode, payload)
 			}
 		})
+	}
+}
+
+func TestInternalUploadBulkRejectsOverLimitBeforeSigning(t *testing.T) {
+	app := fiber.New()
+	RegisterRoutes(app, Dependencies{Transfers: transfers.NewService(transfers.Dependencies{})}, Options{Internal: true, MaxBulkRequestLength: 1})
+	request := httptest.NewRequest(http.MethodPost, "/data/upload/bulk", strings.NewReader(`{"requests":[{"file_id":"a"},{"file_id":"b"}]}`))
+	response, err := app.Test(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Fatalf("bulk upload status = %d, want 413", response.StatusCode)
 	}
 }

@@ -3,8 +3,10 @@ package storage
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/calypr/syfon/apigen/drs"
@@ -134,13 +136,16 @@ func TestVisibleBucketContainsRequiresProgramsOnlyInRestrictedMode(t *testing.T)
 }
 
 type fakeInventory struct {
+	mu       sync.Mutex
 	items    []storage.ObjectMetadata
 	result   storage.InventoryResult
 	requests []storage.InventoryRequest
 }
 
 func (f *fakeInventory) Inventory(_ context.Context, request storage.InventoryRequest) (storage.InventoryResult, error) {
+	f.mu.Lock()
 	f.requests = append(f.requests, request)
+	f.mu.Unlock()
 	if f.result.Items != nil || !f.result.Complete {
 		return f.result, nil
 	}
@@ -322,7 +327,7 @@ func TestInspectProjectPreservesPartialInventoryAndCanonicalItems(t *testing.T) 
 	if result.Items[0].InventoryComplete || result.Items[1].InventoryComplete {
 		t.Fatalf("partial items should report incomplete inventory = %+v", result.Items)
 	}
-	if len(result.Items) != 2 || result.Items[0].Key != "prefix/project/a" || result.Items[1].ObjectUrl != "s3://bucket/prefix/project/z" {
+	if len(result.Items) != 2 || result.Items[0].Key != "/prefix/project/z" || result.Items[0].ObjectUrl != "s3://bucket//prefix/project/z" || result.Items[1].Key != "prefix/project/a" {
 		t.Fatalf("normalized items = %+v", result.Items)
 	}
 	if len(inventory.requests) != 1 || inventory.requests[0].Prefix != "prefix/project" || !inventory.requests[0].IncludeHead {
@@ -342,6 +347,17 @@ func TestInspectProjectMarksCompleteInventoryItems(t *testing.T) {
 	}
 	if !result.Summary.InventoryComplete || len(result.Items) != 1 || !result.Items[0].InventoryComplete {
 		t.Fatalf("complete inventory markers = summary:%v items:%+v", result.Summary.InventoryComplete, result.Items)
+	}
+}
+
+func TestInspectProjectExistsLimitsTotalInventoryResults(t *testing.T) {
+	inventory := &fakeInventory{result: storage.InventoryResult{Items: []storage.ObjectMetadata{{Key: "prefix/project/a"}}, Complete: true}}
+	service, _ := projectService(inventory, nil)
+	if _, err := service.InspectProjectStorage(context.Background(), "org", "project", InspectionOptions{Mode: ModeExists}); err != nil {
+		t.Fatal(err)
+	}
+	if len(inventory.requests) != 1 || inventory.requests[0].MaxKeys != 1 || inventory.requests[0].MaxResults != 1 {
+		t.Fatalf("exists inventory request = %+v", inventory.requests)
 	}
 }
 
@@ -370,6 +386,21 @@ func TestProbeObjectNormalizesScopedKeyAgainstEffectivePrefix(t *testing.T) {
 				t.Fatalf("probe targets = %+v, want key %q", probe.targets, tt.want)
 			}
 		})
+	}
+}
+
+func TestProbeObjectRejectsKeyOutsideProjectPrefix(t *testing.T) {
+	service, _ := projectService(&fakeInventory{}, nil)
+	probe := &recordingProbe{}
+	service.probe = probe
+	_, err := service.ProbeObject(context.Background(), internalapi.InternalInspectObjectRequest{
+		Organization: "org", Project: "project", Key: "../../victim",
+	})
+	if err == nil {
+		t.Fatal("ProbeObject accepted a key outside the project prefix")
+	}
+	if len(probe.targets) != 0 {
+		t.Fatalf("ProbeObject sent a traversal key to storage: %+v", probe.targets)
 	}
 }
 
@@ -412,6 +443,58 @@ func TestProbeObjectRestrictedVisibilityRejectsCredentialBeforeProvider(t *testi
 	}
 	if metadata.Bucket != "bucket-b" || len(probe.targets) != 1 {
 		t.Fatalf("broad probe metadata=%+v targets=%+v", metadata, probe.targets)
+	}
+}
+
+func TestProbeObjectRestrictedVisibilityEnforcesProjectScopePrefix(t *testing.T) {
+	const allowedResource = "/organization/org/project/allowed"
+	credential := buckets.Credential{CredentialID: "cred", Bucket: "bucket", Provider: "s3"}
+	probe := &recordingProbe{}
+	inventory := &fakeInventory{}
+	service := NewService(Dependencies{
+		Credentials: fakeCredentials{values: map[string]buckets.Credential{"cred": credential}},
+		Visibility: &fakeVisibility{values: map[string]buckets.VisibleBucket{
+			"cred": {Credential: credential, Programs: []string{allowedResource}},
+		}},
+		ScopeCatalog: &fakeCleanupScopes{scopes: []buckets.Scope{
+			{Organization: "org", ProjectID: "allowed", CredentialID: "cred", Bucket: "bucket", PathPrefix: "allowed"},
+			{Organization: "org", ProjectID: "hidden", CredentialID: "cred", Bucket: "bucket", PathPrefix: "hidden"},
+		}},
+		Providers: Providers{Inventory: inventory, Probe: probe},
+	})
+	session := access.NewSession("gen3")
+	session.AuthHeaderPresent = true
+	session.SetAuthorizations(nil, map[string]map[string]bool{allowedResource: {"read": true}}, true)
+	ctx := access.WithSession(context.Background(), session)
+
+	_, err := service.ProbeObject(ctx, internalapi.InternalInspectObjectRequest{ObjectUrl: "s3://bucket/hidden/private"})
+	var storageErr *Error
+	if !errors.As(err, &storageErr) || storageErr.Kind != ErrorPermissionDenied {
+		t.Fatalf("ProbeObject for sibling prefix error=%v, want permission denied", err)
+	}
+	if len(probe.targets) != 0 {
+		t.Fatalf("unauthorized key reached provider: %+v", probe.targets)
+	}
+	bulk := service.ProbeObjects(ctx, []internalapi.InternalInspectObjectRequest{{ObjectUrl: "s3://bucket/hidden/private"}})
+	if len(bulk) != 1 || bulk[0].Status != string(probeForbidden) || bulk[0].ErrorKind != string(ErrorPermissionDenied) {
+		t.Fatalf("bulk probe result = %+v, want permission denied", bulk)
+	}
+	if len(probe.targets) != 0 {
+		t.Fatalf("unauthorized bulk key reached provider: %+v", probe.targets)
+	}
+	results := service.ValidateInventoryObjects(ctx, []internalapi.InternalInspectObjectRequest{{ObjectUrl: "s3://bucket/hidden/private"}})
+	if len(results) != 1 || results[0].Status != string(probeForbidden) || results[0].ErrorKind != string(ErrorPermissionDenied) {
+		t.Fatalf("bulk-list validation result = %+v, want permission denied", results)
+	}
+	if len(inventory.requests) != 0 {
+		t.Fatalf("unauthorized key reached inventory: %+v", inventory.requests)
+	}
+
+	if _, err := service.ProbeObject(ctx, internalapi.InternalInspectObjectRequest{ObjectUrl: "s3://bucket/allowed/object"}); err != nil {
+		t.Fatalf("ProbeObject for authorized prefix: %v", err)
+	}
+	if len(probe.targets) != 1 {
+		t.Fatalf("authorized key probe count = %d, want 1", len(probe.targets))
 	}
 }
 
@@ -487,6 +570,22 @@ func TestValidateInventoryDeduplicatesAndRestoresRequestOrder(t *testing.T) {
 	}
 }
 
+func TestValidateInventoryCapsCoalescedListing(t *testing.T) {
+	inventory := &fakeInventory{result: storage.InventoryResult{Items: []storage.ObjectMetadata{}, Complete: true}}
+	service, _ := projectService(inventory, nil)
+	requests := make([]internalapi.InternalInspectObjectRequest, listCoalesceThreshold)
+	for index := range requests {
+		requests[index].ObjectUrl = fmt.Sprintf("s3://bucket/dir/object-%d", index)
+	}
+	service.ValidateInventoryObjects(context.Background(), requests)
+	if len(inventory.requests) == 0 {
+		t.Fatal("coalesced listing did not query inventory")
+	}
+	if inventory.requests[0].MaxResults != listFallbackObjectLimit+1 {
+		t.Fatalf("coalesced listing MaxResults = %d, want %d", inventory.requests[0].MaxResults, listFallbackObjectLimit+1)
+	}
+}
+
 func TestDeleteProjectObjectsPreservesPolicyOrderAndConflictSafety(t *testing.T) {
 	deletePort := &fakeDelete{}
 	service, _ := projectService(&fakeInventory{}, deletePort)
@@ -501,6 +600,65 @@ func TestDeleteProjectObjectsPreservesPolicyOrderAndConflictSafety(t *testing.T)
 	}
 	if len(deletePort.locations) != 1 || deletePort.locations[0] != "s3://bucket/prefix/project/a" {
 		t.Fatalf("delete locations = %+v", deletePort.locations)
+	}
+}
+
+func TestInventoryObjectsPreservesSlashDistinctKeys(t *testing.T) {
+	inventory := &fakeInventory{result: storage.InventoryResult{Items: []storage.ObjectMetadata{
+		{Provider: "s3", Bucket: "bucket", Key: "dir"},
+		{Provider: "s3", Bucket: "bucket", Key: "dir/"},
+		{Provider: "s3", Bucket: "bucket", Key: "/dir"},
+	}, Complete: true}}
+	service, _ := projectService(inventory, nil)
+
+	items, err := service.inventoryObjects(context.Background(), "bucket", "", inventoryOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 3 {
+		t.Fatalf("inventory item count = %d, want 3 exact keys", len(items))
+	}
+	for index, want := range []string{"dir", "dir/", "/dir"} {
+		if items[index].Key != want {
+			t.Fatalf("inventory key[%d] = %q, want %q", index, items[index].Key, want)
+		}
+	}
+	if got, want := []string{items[0].ObjectUrl, items[1].ObjectUrl, items[2].ObjectUrl}, []string{"s3://bucket/dir", "s3://bucket/dir/", "s3://bucket//dir"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("inventory URLs = %#v, want %#v", got, want)
+	}
+}
+
+func TestValidateInventoryDistinguishesSlashDistinctKeys(t *testing.T) {
+	inventory := &fakeInventory{result: storage.InventoryResult{Items: []storage.ObjectMetadata{
+		{Provider: "s3", Bucket: "bucket", Key: "dir"},
+		{Provider: "s3", Bucket: "bucket", Key: "dir/"},
+	}, Complete: true}}
+	service, _ := projectService(inventory, nil)
+	results := service.ValidateInventoryObjects(context.Background(), []internalapi.InternalInspectObjectRequest{
+		{ObjectUrl: "s3://bucket/dir"},
+		{ObjectUrl: "s3://bucket/dir/"},
+	})
+	if len(results) != 2 || results[0].Status != string(probePresent) || results[1].Status != string(probePresent) {
+		t.Fatalf("validation results = %+v, want both exact objects present", results)
+	}
+	if results[0].Key != "dir" || results[1].Key != "dir/" {
+		t.Fatalf("validated keys = %q and %q, want dir and dir/", results[0].Key, results[1].Key)
+	}
+	if len(inventory.requests) != 2 {
+		t.Fatalf("inventory request count = %d, want one exact probe per slash-distinct key", len(inventory.requests))
+	}
+}
+
+func TestDeleteProjectObjectsPreservesTrailingSlashInPhysicalKey(t *testing.T) {
+	deletePort := &fakeDelete{}
+	service, _ := projectService(&fakeInventory{}, deletePort)
+	const objectURL = "s3://bucket/prefix/project/dir/"
+	results := service.DeleteProjectObjects(context.Background(), "org", "project", []string{objectURL})
+	if len(results) != 1 || results[0].Status != "deleted" {
+		t.Fatalf("delete result = %+v, want one successful deletion", results)
+	}
+	if len(deletePort.locations) != 1 || deletePort.locations[0] != objectURL {
+		t.Fatalf("delete locations = %#v, want exact URL %q", deletePort.locations, objectURL)
 	}
 }
 

@@ -58,6 +58,79 @@ func TestContentIdentityRegistrationMergesAliasesGrantsAndLocations(t *testing.T
 	}
 }
 
+func TestContentIdentityRejectsAliasesThatNamePhysicalObjects(t *testing.T) {
+	db, err := NewSqliteDB(":memory:", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resource := "/organization/org/project/p"
+	admin := testIdentityAuth(resource, "create", "read", "update", "delete")
+	canonical := identityTestObject("alias-collision-canonical", strings.Repeat("a", 64), resource, "s3://bucket/canonical")
+	registerAlias := identityTestObject("alias-collision-register", strings.Repeat("b", 64), resource, "s3://bucket/register")
+	replaceAlias := identityTestObject("alias-collision-replace", strings.Repeat("c", 64), resource, "s3://bucket/replace")
+	createAlias := identityTestObject("alias-collision-create", strings.Repeat("d", 64), resource, "s3://bucket/create")
+	if err := db.RegisterObjects(admin, []drs.DrsObject{canonical, registerAlias, replaceAlias, createAlias}); err != nil {
+		t.Fatalf("register physical objects: %v", err)
+	}
+
+	registerCandidate := identityTestObject("alias-collision-new-id", strings.Repeat("a", 64), resource, "s3://bucket/new-registration")
+	registerCandidate.Aliases = &[]string{"id:" + registerAlias.Id}
+	if err := db.RegisterObjects(admin, []drs.DrsObject{registerCandidate}); !errors.Is(err, errorapi.ErrConflict) {
+		t.Fatalf("registration alias collision error = %v, want conflict", err)
+	}
+
+	replacement, err := db.GetObject(context.Background(), canonical.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacement.Name = sqliteTestPtr("should-not-commit")
+	replacement.Aliases = &[]string{"id:" + replaceAlias.Id}
+	if err := db.ReplaceObjects(admin, []drs.DrsObject{*replacement}); !errors.Is(err, errorapi.ErrConflict) {
+		t.Fatalf("replacement alias collision error = %v, want conflict", err)
+	}
+
+	if err := db.CreateObjectAlias(admin, createAlias.Id, canonical.Id); !errors.Is(err, errorapi.ErrConflict) {
+		t.Fatalf("CreateObjectAlias physical ID collision error = %v, want conflict", err)
+	}
+
+	var aliasRows, physicalRows int
+	if err := db.DB().QueryRow(`SELECT COUNT(*) FROM drs_object_alias`).Scan(&aliasRows); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.DB().QueryRow(`SELECT COUNT(*) FROM drs_object`).Scan(&physicalRows); err != nil {
+		t.Fatal(err)
+	}
+	if aliasRows != 0 || physicalRows != 4 {
+		t.Fatalf("after rejected collisions got %d aliases and %d physical rows, want 0 and 4", aliasRows, physicalRows)
+	}
+	for _, id := range []string{registerAlias.Id, replaceAlias.Id, createAlias.Id} {
+		resolved, err := db.ResolveObjectAlias(context.Background(), id)
+		if !errors.Is(err, errorapi.ErrNotFound) {
+			t.Fatalf("ResolveObjectAlias(%q) = %q, %v; physical IDs must not be aliases", id, resolved, err)
+		}
+		got, err := db.GetObject(context.Background(), id)
+		if err != nil || got.Id != id {
+			t.Fatalf("physical object %q lookup = %+v, %v", id, got, err)
+		}
+	}
+	if err := db.DeleteObject(admin, registerAlias.Id); err != nil {
+		t.Fatalf("delete unrelated physical object: %v", err)
+	}
+	if _, err := db.GetObject(context.Background(), registerAlias.Id); !errors.Is(err, errorapi.ErrObjectNotFound) {
+		t.Fatalf("deleted physical ID lookup error = %v, want object not found", err)
+	}
+	if _, err := db.ResolveObjectAlias(context.Background(), registerAlias.Id); !errors.Is(err, errorapi.ErrNotFound) {
+		t.Fatalf("deleted physical ID alias resolution error = %v, want not found", err)
+	}
+	unchanged, err := db.GetObject(context.Background(), canonical.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unchanged.Name == nil || *unchanged.Name == "should-not-commit" || unchanged.AccessMethods == nil || len(*unchanged.AccessMethods) != 1 || (*unchanged.AccessMethods)[0].AccessUrl.Url != "s3://bucket/canonical" {
+		t.Fatalf("rejected operations changed canonical object: %+v", unchanged)
+	}
+}
+
 func TestContentIdentityRejectsConflictingSHAAtomically(t *testing.T) {
 	db, err := NewSqliteDB(":memory:", nil)
 	if err != nil {

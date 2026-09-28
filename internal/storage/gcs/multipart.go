@@ -21,19 +21,23 @@ import (
 	storageports "github.com/calypr/syfon/internal/storage"
 )
 
-// newClient is kept as a narrow package seam for provider tests. Its default
-// intentionally ignores Credential.Endpoint, matching the existing native
-// client path used by completion and deletion.
-var newClient = func(ctx context.Context, cred *buckets.Credential) (*storage.Client, error) {
-	secret := strings.TrimSpace(cred.SecretKey)
-	if secret != "" && json.Valid([]byte(secret)) {
-		client, err := storage.NewClient(ctx, option.WithAuthCredentialsJSON(option.ServiceAccount, []byte(secret)))
-		if err != nil {
-			return nil, err
-		}
-		return client, nil
+func storageClientOptions(cred *buckets.Credential) []option.ClientOption {
+	var options []option.ClientOption
+	if endpoint, ok := storageAPIEndpointURL(cred); ok {
+		options = append(options, option.WithEndpoint(endpoint))
 	}
-	client, err := storage.NewClient(ctx)
+	if cred != nil {
+		secret := strings.TrimSpace(cred.SecretKey)
+		if secret != "" && json.Valid([]byte(secret)) {
+			options = append(options, option.WithAuthCredentialsJSON(option.ServiceAccount, []byte(secret)))
+		}
+	}
+	return options
+}
+
+// newClient is kept as a narrow package seam for provider tests.
+var newClient = func(ctx context.Context, cred *buckets.Credential) (*storage.Client, error) {
+	client, err := storage.NewClient(ctx, storageClientOptions(cred)...)
 	if err != nil {
 		return nil, err
 	}
@@ -194,6 +198,7 @@ func (b *backend) clientForLocked(ctx context.Context, binding storageports.Prov
 		}
 		current.retired = true
 		delete(b.clients, key)
+		b.cache.Delete(key)
 		if current.users == 0 {
 			b.closeEntryLocked(current)
 		}

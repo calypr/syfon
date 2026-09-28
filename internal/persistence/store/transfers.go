@@ -547,7 +547,11 @@ func (db *Store) QueryTransferSummary(ctx context.Context, filter usage.Filter, 
 	return out, err
 }
 
-func (db *Store) QueryTransferBreakdown(ctx context.Context, filter usage.Filter, groupBy string, resources []string) ([]metricsapi.TransferAttributionBreakdown, error) {
+// QueryTransferBreakdown returns one stable page of matching groups.
+func (db *Store) QueryTransferBreakdown(ctx context.Context, filter usage.Filter, groupBy string, resources []string, limit, offset int) ([]metricsapi.TransferAttributionBreakdown, error) {
+	if limit < 1 || offset < 0 {
+		return nil, fmt.Errorf("invalid transfer breakdown page: limit=%d offset=%d", limit, offset)
+	}
 	keyExpr, selectExpr := transferAttributionGroupExpr(groupBy)
 	where, args := db.transferAttributionWhere(filter, resources)
 	query := fmt.Sprintf(`
@@ -559,9 +563,10 @@ func (db *Store) QueryTransferBreakdown(ctx context.Context, filter usage.Filter
 			MAX(event_time)
 		FROM transfer_attribution_event%s
 		GROUP BY %s
-		ORDER BY MAX(event_time) DESC, key ASC
-		LIMIT 1000
+		ORDER BY key ASC, organization ASC, project ASC, provider ASC, bucket ASC, sha256 ASC, actor_email ASC, actor_subject ASC
+		LIMIT ? OFFSET ?
 	`, selectExpr, where, keyExpr)
+	args = append(args, limit, offset)
 	rows, err := db.queryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err

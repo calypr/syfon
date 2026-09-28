@@ -30,6 +30,34 @@ func TestDeleteSingleUsesDeleteObject(t *testing.T) {
 	}
 }
 
+func TestDeletePreservesSlashDistinctKeys(t *testing.T) {
+	client := &fakeClient{}
+	provider := cachedBackend(client, &fakePresigner{})
+	binding := storage.ProviderBinding{Provider: "s3", LookupKey: "bucket", PhysicalBucket: "bucket"}
+	targets := []storage.PhysicalTarget{
+		{PhysicalBucket: "bucket", Key: "dir"},
+		{PhysicalBucket: "bucket", Key: "dir/"},
+		{PhysicalBucket: "bucket", Key: "/dir"},
+		{PhysicalBucket: "bucket", Key: "dir//"},
+		{PhysicalBucket: "bucket", Key: "dir/"},
+	}
+	if err := provider.Delete(context.Background(), binding, targets); err != nil {
+		t.Fatal(err)
+	}
+	if len(client.deleteObjects) != 1 {
+		t.Fatalf("bulk delete calls = %d, want 1", len(client.deleteObjects))
+	}
+	objects := client.deleteObjects[0].Delete.Objects
+	if len(objects) != 4 {
+		t.Fatalf("deleted key count = %d, want 4 exact keys", len(objects))
+	}
+	for index, want := range []string{"/dir", "dir", "dir/", "dir//"} {
+		if got := aws.ToString(objects[index].Key); got != want {
+			t.Fatalf("deleted key[%d] = %q, want %q", index, got, want)
+		}
+	}
+}
+
 func TestDeleteSortsDeduplicatesAndChunksAt1000(t *testing.T) {
 	client := &fakeClient{}
 	provider := cachedBackend(client, &fakePresigner{})

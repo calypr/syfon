@@ -37,7 +37,7 @@ func TestProviderTransferReconciliationUsesPhysicalURLFallback(t *testing.T) {
 				if dsn == "" {
 					t.Skip("SYFON_TEST_POSTGRES_DSN is not configured")
 				}
-				db, err := postgresdb.NewPostgresDB(dsn, nil)
+				db, err := postgresdb.NewPostgresDB(context.Background(), dsn, nil)
 				if err != nil {
 					t.Fatalf("open postgres test store: %v", err)
 				}

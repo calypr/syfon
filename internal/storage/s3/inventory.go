@@ -43,8 +43,8 @@ func (s *backend) Inventory(ctx context.Context, binding storage.ProviderBinding
 		Bucket:  aws.String(request.Target.PhysicalBucket),
 		MaxKeys: aws.Int32(listPageSize),
 	}
-	if prefix := strings.Trim(strings.TrimSpace(request.Prefix), "/"); prefix != "" {
-		if request.ExactPrefix {
+	if prefix := request.Prefix; prefix != "" {
+		if request.ExactPrefix || strings.HasSuffix(prefix, "/") {
 			input.Prefix = aws.String(prefix)
 		} else {
 			input.Prefix = aws.String(prefix + "/")
@@ -165,6 +165,9 @@ func (s *backend) listPages(ctx context.Context, client s3ListClient, input *aws
 		if len(items) > 0 {
 			stats.LastKey = items[len(items)-1].Key
 		}
+		if request.MaxResults > 0 && len(items) >= int(request.MaxResults) {
+			return items[:request.MaxResults], stats, firstKeys, nil
+		}
 		if logging {
 			log.Printf("INFO: syfon_s3_prefix_list_page_done request_id=%s bucket=%s requested_prefix=%q input_prefix=%q page=%d token=%s objects_total=%d last_key=%q truncated=%t", requestid.GetRequestID(ctx), bucket, prefix, requestPrefix, pageNumber, tokenID, len(items), stats.LastKey, aws.ToBool(page.IsTruncated))
 		}
@@ -247,7 +250,7 @@ func (s *backend) listPageWithRetry(ctx context.Context, client s3ListClient, ba
 func appendListPageObjects(items *[]storage.ObjectMetadata, page *awss3.ListObjectsV2Output, bucket string, firstKeys *[]string, seen map[string]struct{}) int {
 	before := len(*items)
 	for _, object := range page.Contents {
-		key := strings.Trim(strings.TrimSpace(aws.ToString(object.Key)), "/")
+		key := aws.ToString(object.Key)
 		if key == "" {
 			continue
 		}
@@ -283,9 +286,8 @@ func cloneListInput(input *awss3.ListObjectsV2Input, continuationToken string) *
 }
 
 func hasExactListedKey(items []storage.ObjectMetadata, key string) bool {
-	want := strings.Trim(strings.TrimSpace(key), "/")
 	for _, item := range items {
-		if strings.Trim(strings.TrimSpace(item.Key), "/") == want {
+		if item.Key == key {
 			return true
 		}
 	}
