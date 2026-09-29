@@ -73,8 +73,10 @@ func (bulkAccessStorage) CompleteMultipart(context.Context, storage.CompleteMult
 type bulkAccessEvents struct{}
 
 func (bulkAccessEvents) RecordTransferAttributionEvents(_ context.Context, events []usage.Event) error {
-	if len(events) > 0 && events[0].ObjectID == "event" {
-		return errors.New("event recorder unavailable")
+	for _, event := range events {
+		if event.ObjectID == "event" {
+			return errors.New("event recorder unavailable")
+		}
 	}
 	return nil
 }

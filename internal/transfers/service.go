@@ -228,8 +228,16 @@ func (s *Service) recordAccessIssued(ctx context.Context, req AccessRequest) err
 	if req.Object == nil {
 		return nil
 	}
+	event, err := s.newAccessIssuedEvent(ctx, req)
+	if err != nil {
+		return err
+	}
+	return s.events.RecordTransferAttributionEvents(ctx, []usage.Event{event})
+}
+
+func (s *Service) newAccessIssuedEvent(ctx context.Context, req AccessRequest) (usage.Event, error) {
 	if s == nil || s.events == nil {
-		return fmt.Errorf("transfer event recorder is not configured")
+		return usage.Event{}, fmt.Errorf("transfer event recorder is not configured")
 	}
 	event := eventFromObject(ctx, req)
 	if s.now != nil {
@@ -237,10 +245,10 @@ func (s *Service) recordAccessIssued(ctx context.Context, req AccessRequest) err
 	}
 	issuanceID, err := uuid.NewRandom()
 	if err != nil {
-		return fmt.Errorf("create access issuance ID: %w", err)
+		return usage.Event{}, fmt.Errorf("create access issuance ID: %w", err)
 	}
 	event.EventID = issuanceID.String()
-	return s.events.RecordTransferAttributionEvents(ctx, []usage.Event{event})
+	return event, nil
 }
 
 func (s *Service) sign(ctx context.Context, request storage.SignRequest) (storage.SignedAccess, error) {

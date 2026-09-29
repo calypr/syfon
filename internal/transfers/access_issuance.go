@@ -55,13 +55,24 @@ func (s *Service) IssueAccess(ctx context.Context, request AccessLookupRequest) 
 }
 
 func (s *Service) issueResolvedAccess(ctx context.Context, request AccessLookupRequest, obj *drs.DrsObject) (AccessLookupResult, error) {
+	resolved, event, err := s.prepareResolvedAccess(ctx, request, obj)
+	if err != nil || !resolved.Found {
+		return resolved, err
+	}
+	if err := s.events.RecordTransferAttributionEvents(ctx, []usage.Event{event}); err != nil {
+		return AccessLookupResult{}, err
+	}
+	return resolved, nil
+}
+
+func (s *Service) prepareResolvedAccess(ctx context.Context, request AccessLookupRequest, obj *drs.DrsObject) (AccessLookupResult, usage.Event, error) {
 	sourceURL := accessURLForID(obj, request.AccessID)
 	if sourceURL == "" {
-		return AccessLookupResult{}, nil
+		return AccessLookupResult{}, usage.Event{}, nil
 	}
 	target, err := s.resolveDownloadTarget(ctx, obj, sourceURL)
 	if err != nil {
-		return AccessLookupResult{}, err
+		return AccessLookupResult{}, usage.Event{}, err
 	}
 	filename := ""
 	if obj.Name != nil {
@@ -69,12 +80,13 @@ func (s *Service) issueResolvedAccess(ctx context.Context, request AccessLookupR
 	}
 	signed, err := s.sign(ctx, storage.SignRequest{Target: target, Method: http.MethodGet, ExpiresIn: s.signingExpiry, DownloadFilename: filename})
 	if err != nil {
-		return AccessLookupResult{}, err
+		return AccessLookupResult{}, usage.Event{}, err
 	}
-	if err := s.recordAccessIssued(ctx, AccessRequest{Object: obj, Target: target, AccessID: request.AccessID, Direction: usage.ProviderTransferDirectionDownload, StorageURL: sourceURL}); err != nil {
-		return AccessLookupResult{}, err
+	event, err := s.newAccessIssuedEvent(ctx, AccessRequest{Object: obj, Target: target, AccessID: request.AccessID, Direction: usage.ProviderTransferDirectionDownload, StorageURL: sourceURL})
+	if err != nil {
+		return AccessLookupResult{}, usage.Event{}, err
 	}
-	return AccessLookupResult{Found: true, URL: signed.Location, Target: target, Object: obj}, nil
+	return AccessLookupResult{Found: true, URL: signed.Location, Target: target, Object: obj}, event, nil
 }
 
 func (s *Service) IssueAccessBulk(ctx context.Context, requests []AccessLookupRequest) BulkAccessLookupResult {
@@ -96,9 +108,14 @@ func (s *Service) IssueAccessBulk(ctx context.Context, requests []AccessLookupRe
 		}
 		lookups, lookupErr = s.objects.GetObjects(ctx, identifiers, "read")
 	}
-	result := BulkAccessLookupResult{Resolved: make([]ResolvedAccess, 0)}
-	for _, request := range requests {
-		result.Requested++
+	type accessOutcome struct {
+		resolved AccessLookupResult
+		err      error
+	}
+	outcomes := make([]accessOutcome, len(requests))
+	events := make([]usage.Event, 0, len(requests))
+	pending := make([]int, 0, len(requests))
+	for i, request := range requests {
 		lookup := lookups[strings.TrimSpace(request.ObjectID)]
 		err := lookupErr
 		if err == nil {
@@ -109,16 +126,40 @@ func (s *Service) IssueAccessBulk(ctx context.Context, requests []AccessLookupRe
 			err = errorapi.ErrObjectNotFound
 		}
 		if err == nil {
-			resolved, err = batch.issueResolvedAccess(ctx, request, lookup.Object)
+			var event usage.Event
+			resolved, event, err = batch.prepareResolvedAccess(ctx, request, lookup.Object)
+			if err == nil && resolved.Found {
+				pending = append(pending, i)
+				events = append(events, event)
+			}
 		}
 		if err == nil && !resolved.Found {
 			err = errorapi.ErrObjectLocationUnavailable
 		}
-		if err != nil {
+		outcomes[i] = accessOutcome{resolved: resolved, err: err}
+	}
+	if len(events) > 0 {
+		if err := ctx.Err(); err != nil {
+			for _, i := range pending {
+				outcomes[i].err = err
+			}
+		} else if err := batch.events.RecordTransferAttributionEvents(ctx, events); err != nil {
+			for eventIndex, i := range pending {
+				if ctxErr := ctx.Err(); ctxErr != nil {
+					outcomes[i].err = ctxErr
+					continue
+				}
+				outcomes[i].err = batch.events.RecordTransferAttributionEvents(ctx, []usage.Event{events[eventIndex]})
+			}
+		}
+	}
+	result := BulkAccessLookupResult{Requested: len(requests), Resolved: make([]ResolvedAccess, 0, len(requests))}
+	for i, request := range requests {
+		if err := outcomes[i].err; err != nil {
 			result.Failures = append(result.Failures, AccessFailure{ObjectID: strings.TrimSpace(request.ObjectID), Err: err})
 			continue
 		}
-		result.Resolved = append(result.Resolved, ResolvedAccess{ObjectID: strings.TrimSpace(request.ObjectID), AccessID: strings.TrimSpace(request.AccessID), URL: resolved.URL})
+		result.Resolved = append(result.Resolved, ResolvedAccess{ObjectID: strings.TrimSpace(request.ObjectID), AccessID: strings.TrimSpace(request.AccessID), URL: outcomes[i].resolved.URL})
 	}
 	return result
 }

@@ -3,6 +3,7 @@ package transfers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -11,7 +12,157 @@ import (
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/storage"
+	"github.com/calypr/syfon/internal/usage"
 )
+
+type selectiveBulkEvents struct {
+	calls      [][]usage.Event
+	stored     map[string]usage.Event
+	failObject string
+	failAll    bool
+	cancel     context.CancelFunc
+}
+
+func TestIssueAccessBulkRecordsOneEventBatchForHundredRequests(t *testing.T) {
+	objects := &bulkObjectsFake{objects: make(map[string]*drs.DrsObject)}
+	requests := make([]AccessLookupRequest, 100)
+	for i := 0; i < 99; i++ {
+		id := fmt.Sprintf("object-%03d", i)
+		objects.objects[id] = bulkAccessObject(id, "s3://shared/"+id)
+		requests[i] = AccessLookupRequest{ObjectID: id, AccessID: "s3"}
+	}
+	requests[99] = requests[0]
+	recorder := &selectiveBulkEvents{}
+	service := bulkAccessService(t, objects, &bulkCredentialLookup{credentials: map[string]*buckets.Credential{
+		"shared": {Provider: "s3", Bucket: "shared", AccessKey: "access"},
+	}}, &bulkAccessProvider{}, recorder)
+	result := service.IssueAccessBulk(context.Background(), requests)
+	if result.Requested != 100 || len(result.Resolved) != 100 || len(result.Failures) != 0 {
+		t.Fatalf("bulk result = %+v", result)
+	}
+	if len(recorder.calls) != 1 || len(recorder.calls[0]) != 100 || len(recorder.stored) != 100 {
+		t.Fatalf("recorder calls = %d, submitted events = %d, unique event IDs = %d", len(recorder.calls), len(recorder.calls[0]), len(recorder.stored))
+	}
+}
+
+func TestIssueAccessBulkRecoversPerItemEventFailuresInInputOrder(t *testing.T) {
+	objects := &bulkObjectsFake{objects: map[string]*drs.DrsObject{
+		"one":              bulkAccessObject("one", "s3://shared/one"),
+		"event-fail":       bulkAccessObject("event-fail", "s3://shared/event-fail"),
+		"sign-fail":        bulkAccessObject("sign-fail", "s3://shared/sign-fail"),
+		"two":              bulkAccessObject("two", "s3://shared/two"),
+		"missing-location": bulkAccessObject("missing-location", ""),
+	}, errors: map[string]error{"denied": errorapi.ErrAccessDenied}}
+	provider := &bulkAccessProvider{errors: map[string]error{"sign-fail": errors.New("signer unavailable")}}
+	recorder := &selectiveBulkEvents{failObject: "event-fail"}
+	service := bulkAccessService(t, objects, &bulkCredentialLookup{credentials: map[string]*buckets.Credential{
+		"shared": {Provider: "s3", Bucket: "shared", AccessKey: "access"},
+	}}, provider, recorder)
+	requests := []AccessLookupRequest{
+		{ObjectID: "one", AccessID: "s3"}, {ObjectID: "event-fail", AccessID: "s3"},
+		{ObjectID: "denied", AccessID: "s3"}, {ObjectID: "sign-fail", AccessID: "s3"},
+		{ObjectID: "two", AccessID: "s3"}, {ObjectID: "missing-location", AccessID: "s3"},
+	}
+	result := service.IssueAccessBulk(context.Background(), requests)
+	if result.Requested != 6 || len(result.Resolved) != 2 || len(result.Failures) != 4 {
+		t.Fatalf("bulk result = %+v", result)
+	}
+	if result.Resolved[0].ObjectID != "one" || result.Resolved[1].ObjectID != "two" {
+		t.Fatalf("resolved order = %+v", result.Resolved)
+	}
+	if got, want := []string{result.Failures[0].ObjectID, result.Failures[1].ObjectID, result.Failures[2].ObjectID, result.Failures[3].ObjectID}, []string{"event-fail", "denied", "sign-fail", "missing-location"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("failure order = %v, want %v", got, want)
+	}
+	if len(recorder.calls) != 4 || len(recorder.calls[0]) != 3 || len(recorder.stored) != 2 {
+		t.Fatalf("recorder calls = %d, grouped events = %d, stored = %d", len(recorder.calls), len(recorder.calls[0]), len(recorder.stored))
+	}
+	for i := 1; i < len(recorder.calls); i++ {
+		if recorder.calls[i][0].EventID != recorder.calls[0][i-1].EventID {
+			t.Fatalf("retry %d changed event ID", i)
+		}
+	}
+}
+
+func TestIssueAccessBulkRecorderOutageAndCancellation(t *testing.T) {
+	objects := &bulkObjectsFake{objects: map[string]*drs.DrsObject{
+		"one": bulkAccessObject("one", "s3://shared/one"),
+		"two": bulkAccessObject("two", "s3://shared/two"),
+	}}
+	requests := []AccessLookupRequest{{ObjectID: "one", AccessID: "s3"}, {ObjectID: "two", AccessID: "s3"}}
+	for _, canceled := range []bool{false, true} {
+		t.Run(fmt.Sprintf("canceled=%t", canceled), func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			recorder := &selectiveBulkEvents{failAll: true}
+			if canceled {
+				recorder.cancel = cancel
+			}
+			service := bulkAccessService(t, objects, &bulkCredentialLookup{credentials: map[string]*buckets.Credential{
+				"shared": {Provider: "s3", Bucket: "shared", AccessKey: "access"},
+			}}, &bulkAccessProvider{}, recorder)
+			result := service.IssueAccessBulk(ctx, requests)
+			if len(result.Resolved) != 0 || len(result.Failures) != 2 {
+				t.Fatalf("result = %+v", result)
+			}
+			wantCalls := 3
+			if canceled {
+				wantCalls = 1
+			}
+			if len(recorder.calls) != wantCalls {
+				t.Fatalf("recorder calls = %d, want %d", len(recorder.calls), wantCalls)
+			}
+			if canceled {
+				for _, failure := range result.Failures {
+					if !errors.Is(failure.Err, context.Canceled) {
+						t.Fatalf("failure = %v", failure.Err)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestIssueAccessBulkMissingRecorderFailsSignedEntries(t *testing.T) {
+	objects := &bulkObjectsFake{objects: map[string]*drs.DrsObject{
+		"one": bulkAccessObject("one", "s3://shared/one"),
+		"two": bulkAccessObject("two", "s3://shared/two"),
+	}}
+	provider := &bulkAccessProvider{}
+	service := bulkAccessService(t, objects, &bulkCredentialLookup{credentials: map[string]*buckets.Credential{
+		"shared": {Provider: "s3", Bucket: "shared", AccessKey: "access"},
+	}}, provider, nil)
+	result := service.IssueAccessBulk(context.Background(), []AccessLookupRequest{{ObjectID: "one", AccessID: "s3"}, {ObjectID: "two", AccessID: "s3"}})
+	if len(result.Resolved) != 0 || len(result.Failures) != 2 || len(provider.requests) != 2 {
+		t.Fatalf("result = %+v, sign requests = %d", result, len(provider.requests))
+	}
+	for _, failure := range result.Failures {
+		if failure.Err == nil || failure.Err.Error() != "transfer event recorder is not configured" {
+			t.Fatalf("failure = %v", failure.Err)
+		}
+	}
+}
+
+func (r *selectiveBulkEvents) RecordTransferAttributionEvents(_ context.Context, events []usage.Event) error {
+	r.calls = append(r.calls, append([]usage.Event(nil), events...))
+	if r.cancel != nil {
+		r.cancel()
+	}
+	if r.failAll {
+		return errors.New("recorder unavailable")
+	}
+	for _, event := range events {
+		if event.ObjectID == r.failObject {
+			return errors.New("event rejected")
+		}
+	}
+	if r.stored == nil {
+		r.stored = make(map[string]usage.Event)
+	}
+	for _, event := range events {
+		r.stored[event.EventID] = event
+	}
+	return nil
+}
 
 type bulkObjectRead struct {
 	objectID string
@@ -139,7 +290,7 @@ func bulkAccessObject(id, url string) *drs.DrsObject {
 	return object
 }
 
-func bulkAccessService(t *testing.T, objects *bulkObjectsFake, lookup *bulkCredentialLookup, provider *bulkAccessProvider, events *eventFake) *Service {
+func bulkAccessService(t *testing.T, objects *bulkObjectsFake, lookup *bulkCredentialLookup, provider *bulkAccessProvider, events EventRecorder) *Service {
 	t.Helper()
 	manager, err := storage.NewManager(lookup, storage.NewRegistration("s3", provider))
 	if err != nil {
