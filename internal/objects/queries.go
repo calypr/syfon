@@ -77,6 +77,10 @@ func (s *Service) ListReadableObjectIDsAmongScopes(ctx context.Context, scopes [
 	if err != nil {
 		return nil, err
 	}
+	policy := make(map[string]bool, len(objects))
+	if err := s.extendPublicReadPolicy(ctx, policy, objects); err != nil {
+		return nil, err
+	}
 	ids := make([]string, 0, len(objects))
 	seen := make(map[string]struct{}, len(objects))
 	for _, scope := range scopes {
@@ -86,10 +90,14 @@ func (s *Service) ListReadableObjectIDsAmongScopes(ctx context.Context, scopes [
 				scoped = append(scoped, obj)
 			}
 		}
-		filtered, err := s.prepareScopedRecords(ctx, scoped, scope, objectMethodRead)
+		expanded, err := s.expandProjectChecksumSiblingObjects(ctx, scoped, scope.Organization, scope.Project)
 		if err != nil {
 			return nil, err
 		}
+		if err := s.extendPublicReadPolicy(ctx, policy, expanded); err != nil {
+			return nil, err
+		}
+		filtered := canonicalizeProjectScopedObjects(filterObjectsByMethod(ctx, expanded, objectMethodRead, policy), scope.Organization, scope.Project, policy)
 		for _, obj := range filtered {
 			if _, ok := seen[obj.Id]; ok {
 				continue
@@ -99,6 +107,34 @@ func (s *Service) ListReadableObjectIDsAmongScopes(ctx context.Context, scopes [
 		}
 	}
 	return ids, nil
+}
+
+func (s *Service) extendPublicReadPolicy(ctx context.Context, policy map[string]bool, records []drs.DrsObject) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	missing := make([]string, 0)
+	for _, obj := range records {
+		if obj.Id == "" {
+			continue
+		}
+		if _, known := policy[obj.Id]; known {
+			continue
+		}
+		policy[obj.Id] = false
+		missing = append(missing, obj.Id)
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	flags, err := s.store.GetPublicReadByIDs(ctx, missing)
+	if err != nil {
+		return err
+	}
+	for _, id := range missing {
+		policy[id] = flags[id]
+	}
+	return nil
 }
 
 // ResolveObjectIDs maps physical IDs and aliases to their canonical physical

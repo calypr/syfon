@@ -58,7 +58,7 @@ func TestHillclimbAggregateUsageProfile(t *testing.T) {
 			if err != nil || !reflect.DeepEqual(ids, []string{"shared"}) {
 				t.Fatalf("scopes=%d sample=%d ids=%v err=%v", count, sample, ids, err)
 			}
-			if store.requestedLoads < 1 || store.requestedLoads > count || store.policyLoads != count {
+			if store.requestedLoads < 1 || store.requestedLoads > count || store.policyLoads < 1 || store.policyLoads > count {
 				t.Fatalf("scopes=%d sample=%d requested=%d policy=%d", count, sample, store.requestedLoads, store.policyLoads)
 			}
 			t.Logf("usage_profile scopes=%d sample=%d requested_loads=%d policy_loads=%d sibling_index_loads=%d", count, sample, store.requestedLoads, store.policyLoads, store.siblingIndexLoads)
