@@ -51,6 +51,10 @@ func (s *Service) IssueAccess(ctx context.Context, request AccessLookupRequest) 
 	if err != nil {
 		return AccessLookupResult{}, err
 	}
+	return s.issueResolvedAccess(ctx, request, obj)
+}
+
+func (s *Service) issueResolvedAccess(ctx context.Context, request AccessLookupRequest, obj *drs.DrsObject) (AccessLookupResult, error) {
 	sourceURL := accessURLForID(obj, request.AccessID)
 	if sourceURL == "" {
 		return AccessLookupResult{}, nil
@@ -76,15 +80,37 @@ func (s *Service) IssueAccess(ctx context.Context, request AccessLookupRequest) 
 func (s *Service) IssueAccessBulk(ctx context.Context, requests []AccessLookupRequest) BulkAccessLookupResult {
 	ctx = storage.WithCredentialCache(ctx)
 	batch := s
+	var lookups map[string]objects.LookupResult
+	var lookupErr error
 	if s != nil && s.scopes != nil {
 		copy := *s
 		copy.scopes = &batchScopeReader{source: s.scopes, entries: make(map[scopeKey]scopeLookup)}
 		batch = &copy
 	}
+	if s == nil || s.objects == nil || s.storage == nil {
+		lookupErr = fmt.Errorf("transfer service is not configured")
+	} else {
+		identifiers := make([]string, 0, len(requests))
+		for _, request := range requests {
+			identifiers = append(identifiers, strings.TrimSpace(request.ObjectID))
+		}
+		lookups, lookupErr = s.objects.GetObjects(ctx, identifiers, "read")
+	}
 	result := BulkAccessLookupResult{Resolved: make([]ResolvedAccess, 0)}
 	for _, request := range requests {
 		result.Requested++
-		resolved, err := batch.IssueAccess(ctx, request)
+		lookup := lookups[strings.TrimSpace(request.ObjectID)]
+		err := lookupErr
+		if err == nil {
+			err = lookup.Err
+		}
+		var resolved AccessLookupResult
+		if err == nil && lookup.Object == nil {
+			err = errorapi.ErrObjectNotFound
+		}
+		if err == nil {
+			resolved, err = batch.issueResolvedAccess(ctx, request, lookup.Object)
+		}
 		if err == nil && !resolved.Found {
 			err = errorapi.ErrObjectLocationUnavailable
 		}

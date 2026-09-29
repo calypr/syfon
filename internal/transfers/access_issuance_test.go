@@ -9,6 +9,7 @@ import (
 	"github.com/calypr/syfon/apigen/drs"
 	"github.com/calypr/syfon/apigen/errorapi"
 	"github.com/calypr/syfon/internal/buckets"
+	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/storage"
 )
 
@@ -18,9 +19,11 @@ type bulkObjectRead struct {
 }
 
 type bulkObjectsFake struct {
-	objects map[string]*drs.DrsObject
-	errors  map[string]error
-	reads   []bulkObjectRead
+	objects    map[string]*drs.DrsObject
+	errors     map[string]error
+	reads      []bulkObjectRead
+	batchCalls int
+	batchErr   error
 }
 
 func (f *bulkObjectsFake) GetObject(_ context.Context, objectID, action string) (*drs.DrsObject, error) {
@@ -29,6 +32,60 @@ func (f *bulkObjectsFake) GetObject(_ context.Context, objectID, action string) 
 		return nil, err
 	}
 	return f.objects[objectID], nil
+}
+
+func (f *bulkObjectsFake) GetObjects(ctx context.Context, identifiers []string, action string) (map[string]objects.LookupResult, error) {
+	f.batchCalls++
+	if f.batchErr != nil {
+		return nil, f.batchErr
+	}
+	result := make(map[string]objects.LookupResult, len(identifiers))
+	for _, identifier := range identifiers {
+		if _, seen := result[identifier]; seen {
+			continue
+		}
+		object, err := f.GetObject(ctx, identifier, action)
+		result[identifier] = objects.LookupResult{Object: object, Err: err}
+	}
+	return result, nil
+}
+
+func TestIssueAccessBulkPreservesDuplicateRequestsAndAccessIDs(t *testing.T) {
+	firstID, secondID := "first", "second"
+	methods := []drs.AccessMethod{
+		{AccessId: &firstID, Type: "s3", AccessUrl: &drs.AccessURL{Url: "s3://shared/first"}},
+		{AccessId: &secondID, Type: "s3", AccessUrl: &drs.AccessURL{Url: "s3://shared/second"}},
+	}
+	object := bulkAccessObject("same", "s3://shared/first")
+	object.AccessMethods = &methods
+	objects := &bulkObjectsFake{objects: map[string]*drs.DrsObject{"same": object}}
+	provider := &bulkAccessProvider{}
+	events := &eventFake{}
+	service := bulkAccessService(t, objects, &bulkCredentialLookup{credentials: map[string]*buckets.Credential{
+		"shared": {Provider: "s3", Bucket: "shared", AccessKey: "access"},
+	}}, provider, events)
+	requests := []AccessLookupRequest{{ObjectID: "same", AccessID: firstID}, {ObjectID: "same", AccessID: secondID}, {ObjectID: "same", AccessID: firstID}}
+	got := service.IssueAccessBulk(context.Background(), requests)
+	if got.Requested != 3 || len(got.Resolved) != 3 || len(got.Failures) != 0 || objects.batchCalls != 1 {
+		t.Fatalf("bulk result = %+v, batch calls = %d", got, objects.batchCalls)
+	}
+	if len(provider.requests) != 3 || len(events.events) != 3 {
+		t.Fatalf("sign requests = %d, events = %d", len(provider.requests), len(events.events))
+	}
+	if got, want := []string{provider.requests[0].Target.Key, provider.requests[1].Target.Key, provider.requests[2].Target.Key}, []string{"first", "second", "first"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("signed keys = %v, want %v", got, want)
+	}
+	batchErr := errors.New("catalog unavailable")
+	objects.batchErr = batchErr
+	failed := service.IssueAccessBulk(context.Background(), requests)
+	if len(failed.Failures) != 3 || len(failed.Resolved) != 0 {
+		t.Fatalf("failed batch = %+v", failed)
+	}
+	for _, failure := range failed.Failures {
+		if !errors.Is(failure.Err, batchErr) {
+			t.Fatalf("failure = %v", failure.Err)
+		}
+	}
 }
 
 func (*bulkObjectsFake) GetObjectsByChecksums(context.Context, []string, string) (map[string][]drs.DrsObject, error) {

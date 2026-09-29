@@ -10,6 +10,7 @@ import (
 
 	"github.com/calypr/syfon/apigen/drs"
 	"github.com/calypr/syfon/internal/buckets"
+	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/persistence/sqlite"
 	"github.com/calypr/syfon/internal/storage"
 	filestorage "github.com/calypr/syfon/internal/storage/file"
@@ -120,6 +121,10 @@ type multipartRecoveryObjects struct{}
 
 func (multipartRecoveryObjects) GetObject(context.Context, string, string) (*drs.DrsObject, error) {
 	return nil, errors.New("unexpected object lookup")
+}
+
+func (multipartRecoveryObjects) GetObjects(context.Context, []string, string) (map[string]objects.LookupResult, error) {
+	return nil, errors.New("unexpected bulk object lookup")
 }
 
 func (multipartRecoveryObjects) GetObjectsByChecksums(context.Context, []string, string) (map[string][]drs.DrsObject, error) {

@@ -57,6 +57,15 @@ func (uploadObjectSpy) GetObject(context.Context, string, string) (*drs.DrsObjec
 	return &drs.DrsObject{Id: "record", AccessMethods: &methods}, nil
 }
 
+func (s uploadObjectSpy) GetObjects(ctx context.Context, identifiers []string, method string) (map[string]objects.LookupResult, error) {
+	result := make(map[string]objects.LookupResult, len(identifiers))
+	for _, identifier := range identifiers {
+		object, err := s.GetObject(ctx, identifier, method)
+		result[identifier] = objects.LookupResult{Object: object, Err: err}
+	}
+	return result, nil
+}
+
 func (uploadObjectSpy) GetObjectsByChecksums(context.Context, []string, string) (map[string][]drs.DrsObject, error) {
 	return nil, nil
 }
