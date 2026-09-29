@@ -461,7 +461,7 @@ func TestBulkOverwriteObjects_ValidationAndConflicts(t *testing.T) {
 		conflict   bool
 	}{
 		{name: "missing did", db: &objectTestStore{}, candidates: []drs.DrsObject{candidate(" ")}, want: "did is required"},
-		{name: "duplicate source did", db: &objectTestStore{}, candidates: []drs.DrsObject{candidate("same"), candidate("same")}, want: "duplicate source did", conflict: true},
+		{name: "duplicate source did", db: &objectTestStore{}, candidates: []drs.DrsObject{candidate("same"), candidate(" same ")}, want: "duplicate source did", conflict: true},
 		{
 			name:       "did exists outside project",
 			db:         &objectTestStore{Objects: map[string]*drs.DrsObject{"did": {Id: "did", ControlledAccess: &[]string{"/organization/org/project/other"}}}},
@@ -550,6 +550,11 @@ func TestBulkOverwriteObjects_RejectsAliasTarget(t *testing.T) {
 	if !errors.Is(err, errorapi.ErrBulkOverwriteConflict) || !strings.Contains(err.Error(), "alias") {
 		t.Fatalf("expected alias conflict, got %v", err)
 	}
+	candidate.Id = " alias-did "
+	_, err = om.BulkOverwriteObjects(context.Background(), "org", "project", []drs.DrsObject{candidate})
+	if !errors.Is(err, errorapi.ErrBulkOverwriteConflict) || !strings.Contains(err.Error(), "alias") {
+		t.Fatalf("expected alias conflict for trimmed alias, got %v", err)
+	}
 
 	got, err := database.GetObject(context.Background(), canonical.Id)
 	if err != nil {
@@ -557,6 +562,61 @@ func TestBulkOverwriteObjects_RejectsAliasTarget(t *testing.T) {
 	}
 	if got.Name == nil || *got.Name != originalName {
 		t.Fatalf("alias overwrite changed canonical record: %+v", got)
+	}
+}
+
+func TestBulkOverwriteObjects_RejectsAliasCollidingWithPhysicalID(t *testing.T) {
+	resource, err := clientaccess.ResourcePath("org", "project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	database := newSQLiteDatabase(t)
+	physical := drs.DrsObject{
+		Id: "physical-did", Name: ptr("physical"),
+		Checksums:        []drs.Checksum{{Type: "sha256", Checksum: strings.Repeat("a", 64)}},
+		ControlledAccess: &[]string{resource},
+	}
+	canonical := drs.DrsObject{
+		Id: "other-did", Name: ptr("other"),
+		Checksums:        []drs.Checksum{{Type: "sha256", Checksum: strings.Repeat("b", 64)}},
+		ControlledAccess: &[]string{resource},
+	}
+	if err := database.RegisterObjects(context.Background(), []drs.DrsObject{physical, canonical}); err != nil {
+		t.Fatalf("RegisterObjects failed: %v", err)
+	}
+	// Legacy rows can contain an alias that collides with a physical DID.
+	if _, err := database.DB().Exec(`INSERT INTO drs_object_alias(alias_id, object_id) VALUES (?, ?)`, physical.Id, canonical.Id); err != nil {
+		t.Fatalf("seed colliding alias: %v", err)
+	}
+	aliases, err := database.ResolveObjectAliases(context.Background(), []string{" physical-did ", physical.Id, "missing", ""})
+	if err != nil || len(aliases) != 1 || aliases[physical.Id] != canonical.Id {
+		t.Fatalf("batch alias resolution = %v, %v", aliases, err)
+	}
+	replacement := physical
+	replacement.Name = ptr("replacement")
+	_, err = objects.NewService(database).BulkOverwriteObjects(context.Background(), "org", "project", []drs.DrsObject{replacement})
+	if !errors.Is(err, errorapi.ErrBulkOverwriteConflict) || !strings.Contains(err.Error(), "alias") {
+		t.Fatalf("expected alias conflict for physical DID collision, got %v", err)
+	}
+}
+
+func TestBulkOverwriteObjects_AliasLookupFailure(t *testing.T) {
+	resource, err := clientaccess.ResourcePath("org", "project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lookupErr := errors.New("alias catalog unavailable")
+	database := &objectTestStore{AliasLookupErr: lookupErr}
+	candidate := drs.DrsObject{
+		Id: "new-did", Checksums: []drs.Checksum{{Type: "sha256", Checksum: strings.Repeat("c", 64)}},
+		ControlledAccess: &[]string{resource},
+	}
+	_, err = objects.NewService(database).BulkOverwriteObjects(context.Background(), "org", "project", []drs.DrsObject{candidate})
+	if !errors.Is(err, lookupErr) {
+		t.Fatalf("expected alias lookup error, got %v", err)
+	}
+	if len(database.Objects) != 0 {
+		t.Fatalf("lookup failure wrote objects: %+v", database.Objects)
 	}
 }
 

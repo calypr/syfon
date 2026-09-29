@@ -391,6 +391,7 @@ func (s *Service) BulkOverwriteObjects(ctx context.Context, organization, projec
 	for did := range byDID {
 		ids = append(ids, did)
 	}
+	aliasIDs := append([]string(nil), ids...)
 	for _, matches := range checksumMatches {
 		ids = append(ids, matches...)
 	}
@@ -402,17 +403,17 @@ func (s *Service) BulkOverwriteObjects(ctx context.Context, organization, projec
 	for _, obj := range existingList {
 		existing[obj.Id] = obj
 	}
+	aliases, err := s.store.ResolveObjectAliases(ctx, aliasIDs)
+	if err != nil {
+		return result, err
+	}
 
 	resolved := make([]drs.DrsObject, len(candidates))
 	usedTargets := make(map[string]string, len(candidates))
 	for i, candidate := range candidates {
 		sourceDID := candidate.Id
-		canonicalID, aliasErr := s.store.ResolveObjectAlias(ctx, sourceDID)
-		if aliasErr == nil && canonicalID != sourceDID {
+		if canonicalID, ok := aliases[strings.TrimSpace(sourceDID)]; ok && canonicalID != sourceDID {
 			return result, fmt.Errorf("%w: target DID %q is an alias for %q", errorapi.ErrBulkOverwriteConflict, sourceDID, canonicalID)
-		}
-		if aliasErr != nil && !errorapi.IsNotFoundError(aliasErr) {
-			return result, aliasErr
 		}
 		targetDID := sourceDID
 		matched := false
