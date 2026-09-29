@@ -33,6 +33,12 @@ type MultipartInitResult struct {
 	GUID     string
 }
 
+type MultipartPartURL struct {
+	PartNumber int32
+	URL        string
+	ExpiresIn  time.Duration
+}
+
 // CompletedPart carries multipart completion metadata across the transfer
 // boundary. Provider-specific part values are created only by Service.
 type CompletedPart struct {
@@ -43,6 +49,7 @@ type CompletedPart struct {
 const (
 	multipartCompletionLease = time.Hour
 	multipartCleanupTimeout  = 10 * time.Second
+	maxMultipartPartURLBatch = 32
 )
 
 func newMultipartCleanupContext(ctx context.Context) (context.Context, context.CancelFunc) {
@@ -103,33 +110,73 @@ func (s *Service) BeginMultipart(ctx context.Context, req MultipartInitRequest) 
 }
 
 func (s *Service) SignMultipartPart(ctx context.Context, uploadID string, partNumber int32) (string, error) {
-	if partNumber <= 0 {
-		return "", fmt.Errorf("%w: multipart part number must be positive", errorapi.ErrInvalidInput)
+	parts, err := s.SignMultipartParts(ctx, uploadID, []int32{partNumber})
+	if err != nil {
+		return "", err
+	}
+	return parts[0].URL, nil
+}
+
+func (s *Service) SignMultipartParts(ctx context.Context, uploadID string, partNumbers []int32) ([]MultipartPartURL, error) {
+	if len(partNumbers) == 0 {
+		return nil, fmt.Errorf("%w: multipart part numbers are required", errorapi.ErrInvalidInput)
+	}
+	if len(partNumbers) > maxMultipartPartURLBatch {
+		return nil, fmt.Errorf("%w: multipart part batch exceeds %d parts", errorapi.ErrInvalidInput, maxMultipartPartURLBatch)
+	}
+	seen := make(map[int32]struct{}, len(partNumbers))
+	for _, partNumber := range partNumbers {
+		if partNumber <= 0 {
+			return nil, fmt.Errorf("%w: multipart part number must be positive", errorapi.ErrInvalidInput)
+		}
+		if _, exists := seen[partNumber]; exists {
+			return nil, fmt.Errorf("%w: multipart part number %d is duplicated", errorapi.ErrInvalidInput, partNumber)
+		}
+		seen[partNumber] = struct{}{}
 	}
 	if err := s.requireMultipart(); err != nil {
-		return "", err
+		return nil, err
 	}
 	session, err := s.multipartSessions.GetMultipartSession(ctx, uploadID)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if err := session.Authorization.Authorize(ctx); err != nil {
-		return "", err
+		return nil, err
 	}
 	if session.State != MultipartStateActive {
-		return "", multipartNotFound(uploadID)
+		return nil, multipartNotFound(uploadID)
 	}
-	if partNumber > storage.MaxS3MultipartPartNumber && multipartTargetProvider(session.Target) == address.S3Provider {
-		return "", fmt.Errorf("%w: s3 multipart part number must not exceed %d", errorapi.ErrInvalidInput, storage.MaxS3MultipartPartNumber)
+	for _, partNumber := range partNumbers {
+		if err := validateMultipartS3PartNumber(session.Target, partNumber); err != nil {
+			return nil, err
+		}
 	}
-	signed, err := s.storage.SignMultipartPart(ctx, storage.MultipartPartRequest{Target: session.Target, UploadID: storage.UploadID(uploadID), PartNumber: partNumber, ExpiresIn: s.signingExpiry})
-	if err != nil {
-		return "", err
+	ctx = storage.WithCredentialCache(ctx)
+	parts := make([]MultipartPartURL, 0, len(partNumbers))
+	for _, partNumber := range partNumbers {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		signed, err := s.storage.SignMultipartPart(ctx, storage.MultipartPartRequest{
+			Target: session.Target, UploadID: storage.UploadID(uploadID), PartNumber: partNumber, ExpiresIn: s.signingExpiry,
+		})
+		if err != nil {
+			return nil, err
+		}
+		parts = append(parts, MultipartPartURL{PartNumber: partNumber, URL: signed.Location, ExpiresIn: s.signingExpiry})
 	}
 	if err := s.multipartSessions.TouchMultipartSession(ctx, uploadID, s.now().UTC()); err != nil {
-		return "", err
+		return nil, err
 	}
-	return signed.Location, nil
+	return parts, nil
+}
+
+func validateMultipartS3PartNumber(target storage.Target, partNumber int32) error {
+	if partNumber > storage.MaxS3MultipartPartNumber && multipartTargetProvider(target) == address.S3Provider {
+		return fmt.Errorf("%w: s3 multipart part number must not exceed %d", errorapi.ErrInvalidInput, storage.MaxS3MultipartPartNumber)
+	}
+	return nil
 }
 
 func multipartTargetProvider(target storage.Target) string {

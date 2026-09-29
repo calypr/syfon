@@ -96,6 +96,17 @@ func (s *internalServer) InternalMultipartUpload(c fiber.Ctx) error {
 	if req.UploadId == "" {
 		return Reject(c, fiber.StatusBadRequest, "uploadId is required")
 	}
+	if req.PartNumbers != nil {
+		parts, err := s.transfers.SignMultipartParts(c.Context(), req.UploadId, *req.PartNumbers)
+		if err != nil {
+			return HandleError(c, err)
+		}
+		out := make([]internalapi.InternalMultipartUploadPartURL, len(parts))
+		for i, part := range parts {
+			out[i] = internalapi.InternalMultipartUploadPartURL{PartNumber: part.PartNumber, PresignedUrl: part.URL, ExpiresIn: int64(part.ExpiresIn / time.Second)}
+		}
+		return c.JSON(internalapi.InternalMultipartUploadOutput{Parts: &out})
+	}
 	urlStr, err := s.transfers.SignMultipartPart(c.Context(), req.UploadId, req.PartNumber)
 	if err != nil {
 		return HandleError(c, err)

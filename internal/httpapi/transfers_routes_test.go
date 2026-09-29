@@ -77,6 +77,7 @@ func TestMultipartRoutesRejectInvalidParts(t *testing.T) {
 		body any
 	}{
 		{name: "sign zero", path: "/data/multipart/upload", body: internalapi.InternalMultipartUploadRequest{UploadId: "missing", PartNumber: 0}},
+		{name: "sign empty batch", path: "/data/multipart/upload", body: internalapi.InternalMultipartUploadRequest{UploadId: "missing", PartNumbers: func() *[]int32 { values := []int32{}; return &values }()}},
 		{name: "complete empty", path: "/data/multipart/complete", body: internalapi.InternalMultipartCompleteRequest{UploadId: "missing", Parts: []internalapi.InternalMultipartPart{}}},
 		{name: "complete duplicate", path: "/data/multipart/complete", body: internalapi.InternalMultipartCompleteRequest{UploadId: "missing", Parts: []internalapi.InternalMultipartPart{{PartNumber: 1}, {PartNumber: 1}}}},
 	}
@@ -99,6 +100,51 @@ func TestMultipartRoutesRejectInvalidParts(t *testing.T) {
 				t.Fatalf("status=%d body=%s", response.StatusCode, payload)
 			}
 		})
+	}
+}
+
+func TestMultipartUploadBatchReturnsPartURLsThroughClient(t *testing.T) {
+	provider := &lfsTestStorage{partLocation: "https://storage.example/part"}
+	scope := &multipartTestScope{prefix: "batch-prefix"}
+	objectStore := newDRSObjectStore(t, nil)
+	service := transfers.NewService(transfers.Dependencies{
+		Objects:           objects.NewService(objectStore),
+		Storage:           provider,
+		Scopes:            scope,
+		MultipartSessions: objectStore.Store,
+	})
+	app := fiber.New()
+	internalapi.RegisterHandlers(app, &internalServer{transfers: service})
+	gen, err := internalapi.NewClientWithResponses("http://syfon.test", internalapi.WithHTTPClient(multipartTestClient{app}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := services.NewDataService(gen, nil, nil, nil)
+	uploadID, _, err := client.InitMultipartUploadWithMetadata(context.Background(), "requested-id", "payload.bin", "physical-bucket", common.FileMetadata{Authorizations: map[string][]string{"org": {"project"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	partNumbers := []int32{2, 1}
+	response, err := gen.InternalMultipartUploadWithResponse(context.Background(), internalapi.InternalMultipartUploadJSONRequestBody(internalapi.InternalMultipartUploadRequest{
+		Key: "payload.bin", UploadId: uploadID, PartNumber: partNumbers[0], PartNumbers: &partNumbers,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.JSON200 == nil || response.JSON200.Parts == nil {
+		t.Fatalf("multipart batch response = %+v", response)
+	}
+	parts := *response.JSON200.Parts
+	if len(parts) != len(partNumbers) {
+		t.Fatalf("multipart batch returned %d parts, want %d", len(parts), len(partNumbers))
+	}
+	for i, part := range parts {
+		if part.PartNumber != partNumbers[i] || part.PresignedUrl != provider.partLocation || part.ExpiresIn != 900 {
+			t.Fatalf("multipart part %d = %+v, want configured 900 second expiry", i, part)
+		}
+	}
+	if provider.partRequest.PartNumber != 1 {
+		t.Fatalf("provider last part number = %d, want 1", provider.partRequest.PartNumber)
 	}
 }
 
