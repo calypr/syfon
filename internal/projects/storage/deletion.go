@@ -27,6 +27,7 @@ type ProjectCleanupResult struct {
 // a time. This preserves per-item provider failures and retry ordering.
 func (s *Service) DeleteProjectObjects(ctx context.Context, organization, project string, objectURLs []string) []internalapi.InternalDeleteProjectBucketObjectsItem {
 	ctx = withRequestCache(ctx)
+	ctx = storage.WithCredentialCache(ctx)
 	unique := uniqueURLs(objectURLs)
 	if len(unique) == 0 {
 		return []internalapi.InternalDeleteProjectBucketObjectsItem{}

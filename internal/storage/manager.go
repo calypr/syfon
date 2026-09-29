@@ -221,6 +221,7 @@ func (m *Manager) DeleteExact(ctx context.Context, targets []DeleteTarget) error
 	if len(targets) == 0 {
 		return nil
 	}
+	ctx = withCredentialCacheIfAbsent(ctx)
 	resolved := make([]PhysicalTarget, 0, len(targets))
 	bindings := make(map[string]ProviderBinding, len(targets))
 	seen := make(map[string]struct{}, len(targets))

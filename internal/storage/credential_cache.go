@@ -34,6 +34,15 @@ func WithCredentialCache(ctx context.Context) context.Context {
 	})
 }
 
+// withCredentialCacheIfAbsent preserves an enclosing operation's cache while
+// giving standalone operations a fresh one.
+func withCredentialCacheIfAbsent(ctx context.Context) context.Context {
+	if _, ok := ctx.Value(credentialCacheContextKey{}).(*credentialCache); ok {
+		return ctx
+	}
+	return WithCredentialCache(ctx)
+}
+
 func (m *Manager) getCredential(ctx context.Context, candidate string) (*buckets.Credential, error) {
 	cache, ok := ctx.Value(credentialCacheContextKey{}).(*credentialCache)
 	if !ok {
