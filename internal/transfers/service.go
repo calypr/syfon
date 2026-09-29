@@ -214,9 +214,16 @@ func (s *Service) UploadURL(ctx context.Context, req UploadRequest) (UploadResul
 }
 
 func (s *Service) UploadBulk(ctx context.Context, requests []UploadRequest) []UploadResult {
+	ctx = storage.WithCredentialCache(ctx)
+	batch := s
+	if s != nil && s.scopes != nil {
+		copy := *s
+		copy.scopes = &batchScopeReader{source: s.scopes, entries: make(map[scopeKey]scopeLookup)}
+		batch = &copy
+	}
 	results := make([]UploadResult, len(requests))
 	for i, req := range requests {
-		result, err := s.UploadURL(ctx, req)
+		result, err := batch.UploadURL(ctx, req)
 		result.ObjectID = strings.TrimSpace(req.ObjectID)
 		result.Err = err
 		results[i] = result
