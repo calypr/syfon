@@ -35,7 +35,6 @@ func (db *Store) GetS3Credential(ctx context.Context, credentialID string) (*buc
 	if err == sql.ErrNoRows {
 		fallback, fallbackErr := db.getS3CredentialByPhysicalBucket(ctx, credentialID)
 		if fallbackErr == nil {
-			auditCredentialAccess(ctx, requestid.GetRequestID(ctx), "read", credentialID, nil)
 			return fallback, nil
 		}
 		auditCredentialAccess(ctx, requestid.GetRequestID(ctx), "read", credentialID, fallbackErr)
@@ -52,7 +51,6 @@ func (db *Store) GetS3Credential(ctx context.Context, credentialID string) (*buc
 		auditCredentialAccess(ctx, requestid.GetRequestID(ctx), "read", credentialID, wrapped)
 		return nil, wrapped
 	}
-	auditCredentialAccess(ctx, requestid.GetRequestID(ctx), "read", credentialID, nil)
 	return parsed, nil
 }
 
@@ -530,6 +528,27 @@ func (db *Store) ListS3Credentials(ctx context.Context) ([]buckets.Credential, e
 	}
 	auditCredentialAccess(ctx, requestid.GetRequestID(ctx), "list", "", nil)
 	return creds, nil
+}
+
+// ListCredentialMetadata reads only fields needed to assemble bucket visibility.
+func (db *Store) ListCredentialMetadata(ctx context.Context) ([]buckets.CredentialMetadata, error) {
+	rows, err := db.queryContext(ctx, "SELECT credential_id, bucket, provider, region, endpoint FROM s3_credential")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	metadata := make([]buckets.CredentialMetadata, 0)
+	for rows.Next() {
+		var item buckets.CredentialMetadata
+		if err := rows.Scan(&item.CredentialID, &item.Bucket, &item.Provider, &item.Region, &item.Endpoint); err != nil {
+			return nil, err
+		}
+		metadata = append(metadata, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return metadata, nil
 }
 
 func auditCredentialAccess(ctx context.Context, requestID, action, bucket string, err error) {

@@ -761,6 +761,69 @@ func TestSignMultipartPartTouchesSessionActivity(t *testing.T) {
 	}
 }
 
+func TestSignMultipartPartsSignsInOrderAndTouchesOnce(t *testing.T) {
+	provider := &multipartTerminalStorage{}
+	store := newMemoryMultipartSessionStore()
+	created := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
+	expires := 90*time.Second + 500*time.Millisecond
+	service := NewService(Dependencies{
+		Storage: provider, MultipartSessions: store, DefaultSigningExpiry: expires,
+		Now: func() time.Time { return created.Add(time.Minute) },
+	})
+	if err := store.SaveMultipartSession(context.Background(), MultipartSession{
+		UploadID: "active-upload", CompletionID: "completion",
+		Target: storage.Target{Provider: "s3", PhysicalBucket: "bucket", Key: "key"},
+		State:  MultipartStateActive, CreatedAt: created, UpdatedAt: created,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	partNumbers := []int32{7, 2}
+	parts, err := service.SignMultipartParts(context.Background(), "active-upload", partNumbers)
+	if err != nil {
+		t.Fatalf("SignMultipartParts() error = %v", err)
+	}
+	if len(parts) != len(partNumbers) || parts[0].PartNumber != 7 || parts[1].PartNumber != 2 {
+		t.Fatalf("signed parts = %+v, want input order %v", parts, partNumbers)
+	}
+	for _, part := range parts {
+		if part.ExpiresIn != expires {
+			t.Fatalf("part expiry = %s, want configured %s", part.ExpiresIn, expires)
+		}
+	}
+	if len(provider.parts) != 2 || provider.parts[0].PartNumber != 7 || provider.parts[1].PartNumber != 2 {
+		t.Fatalf("provider requests = %+v, want input order %v", provider.parts, partNumbers)
+	}
+	session, err := store.GetMultipartSession(context.Background(), "active-upload")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !session.UpdatedAt.Equal(created.Add(time.Minute)) {
+		t.Fatalf("updated_at = %s, want %s", session.UpdatedAt, created.Add(time.Minute))
+	}
+}
+
+func TestSignMultipartPartsValidatesEveryS3PartBeforeSigning(t *testing.T) {
+	provider := &multipartTerminalStorage{}
+	store := newMemoryMultipartSessionStore()
+	created := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
+	service := NewService(Dependencies{Storage: provider, MultipartSessions: store})
+	if err := store.SaveMultipartSession(context.Background(), MultipartSession{
+		UploadID: "active-upload", CompletionID: "completion",
+		Target: storage.Target{Provider: "s3", PhysicalBucket: "bucket", Key: "key"},
+		State:  MultipartStateActive, CreatedAt: created, UpdatedAt: created,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := service.SignMultipartParts(context.Background(), "active-upload", []int32{1, storage.MaxS3MultipartPartNumber + 1}); !errors.Is(err, errorapi.ErrInvalidInput) {
+		t.Fatalf("SignMultipartParts() error = %v, want invalid input", err)
+	}
+	if len(provider.parts) != 0 {
+		t.Fatalf("provider signed parts before full batch validation: %+v", provider.parts)
+	}
+}
+
 func TestBeginMultipartRejectsEmptyProviderUploadID(t *testing.T) {
 	provider := &multipartTerminalStorage{beginIDs: []storage.UploadID{""}}
 	store := newMemoryMultipartSessionStore()

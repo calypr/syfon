@@ -87,36 +87,20 @@ func (s *Service) ProbeObjects(ctx context.Context, requests []internalapi.Inter
 }
 
 func (s *Service) probeOne(ctx context.Context, request internalapi.InternalInspectObjectRequest) internalapi.InternalInspectObjectBulkItem {
-	key := probeCacheKey(request)
-	if cache := cacheFromContext(ctx); cache != nil {
-		if result, ok := cache.probe(key); ok {
-			result.Id = strings.TrimSpace(request.Id)
-			if result.ObjectUrl == "" {
-				result.ObjectUrl = strings.TrimSpace(request.ObjectUrl)
-			}
-			sizeBytes := int64(0)
-			if result.SizeBytes != nil {
-				sizeBytes = *result.SizeBytes
-			}
-			status, sizeMatch, nameMatch, shaMatch, mismatches := validateProbe(request, &objectMetadata{
-				Key:        result.Key,
-				SizeBytes:  sizeBytes,
-				MetaSHA256: result.MetaSha256,
-			})
-			result.ValidationStatus, result.SizeMatch, result.NameMatch, result.Sha256Match, result.ValidationMismatches = string(status), sizeMatch, nameMatch, shaMatch, mismatches
-			return result
-		}
-	}
 	result := internalapi.InternalInspectObjectBulkItem{Id: strings.TrimSpace(request.Id), ObjectUrl: strings.TrimSpace(request.ObjectUrl), Status: string(probeError), ValidationStatus: string(validationStatusForError(request))}
-	metadata, err := s.probeObject(ctx, request)
+	load := func() (*objectMetadata, error) { return s.probeObject(ctx, request) }
+	var metadata *objectMetadata
+	var err error
+	if cache := cacheFromContext(ctx); cache != nil {
+		metadata, err = cache.loadProbe(ctx, probeCacheKey(request), load)
+	} else {
+		metadata, err = load()
+	}
 	if err != nil {
 		status, kind := classifyError(err)
 		result.Status, result.ErrorKind = string(status), kind
 		logStorageDiagnostic(ctx, err, "probe")
 		result.Error = safeStorageErrorMessage(err, "probe")
-		if cache := cacheFromContext(ctx); cache != nil {
-			cache.setProbe(key, result)
-		}
 		return result
 	}
 	result.ObjectUrl = metadata.ObjectURL
@@ -134,9 +118,6 @@ func (s *Service) probeOne(ctx context.Context, request internalapi.InternalInsp
 	}
 	status, sizeMatch, nameMatch, shaMatch, mismatches := validateProbe(request, metadata)
 	result.ValidationStatus, result.SizeMatch, result.NameMatch, result.Sha256Match, result.ValidationMismatches = string(status), sizeMatch, nameMatch, shaMatch, mismatches
-	if cache := cacheFromContext(ctx); cache != nil {
-		cache.setProbe(key, result)
-	}
 	return result
 }
 
@@ -157,14 +138,19 @@ func inspectObjectResponse(metadata *objectMetadata) *internalapi.InternalInspec
 	return result
 }
 
-func probeCacheKey(request internalapi.InternalInspectObjectRequest) string {
-	key := strings.TrimSpace(request.ObjectUrl) + "|" + strings.TrimSpace(request.Organization) + "|" + strings.TrimSpace(request.Project) + "|" + strings.TrimSpace(request.Key) + "|" + strings.TrimSpace(request.Scheme)
-	if request.ExpectedSizeBytes != nil {
-		key += fmt.Sprintf("|%d", *request.ExpectedSizeBytes)
-	} else {
-		key += "|"
+func probeCacheKey(request internalapi.InternalInspectObjectRequest) probeRequestKey {
+	objectURL := strings.TrimSpace(request.ObjectUrl)
+	if bucket, key, ok := address.ParseS3URL(objectURL); ok {
+		objectURL = address.BucketToURL(bucket, key)
 	}
-	return key + "|" + strings.ToLower(strings.TrimSpace(strings.TrimPrefix(request.ExpectedSha256, "sha256:"))) + "|" + strings.TrimSpace(request.ExpectedName)
+	scheme := strings.ToLower(strings.TrimSpace(request.Scheme))
+	if scheme == "" {
+		scheme = address.S3Provider
+	}
+	return probeRequestKey{
+		objectURL: objectURL, organization: strings.TrimSpace(request.Organization), project: strings.TrimSpace(request.Project),
+		key: strings.Trim(strings.TrimSpace(request.Key), "/"), scheme: scheme,
+	}
 }
 
 func (s *Service) inspectRaw(ctx context.Context, request internalapi.InternalInspectObjectRequest) (*objectMetadata, error) {

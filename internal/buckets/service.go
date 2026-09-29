@@ -67,6 +67,11 @@ func (s *Service) ListS3Credentials(ctx context.Context) ([]Credential, error) {
 	return s.credentialReader.ListS3Credentials(ctx)
 }
 
+// ListCredentialMetadata returns configured credentials without reading secrets.
+func (s *Service) ListCredentialMetadata(ctx context.Context) ([]CredentialMetadata, error) {
+	return s.visibility.ListCredentialMetadata(ctx)
+}
+
 // GetS3Credential resolves a credential by its canonical ID or legacy physical
 // bucket alias according to the repository compatibility contract.
 func (s *Service) GetS3Credential(ctx context.Context, bucket string) (*Credential, error) {

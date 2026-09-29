@@ -17,7 +17,7 @@ const readMethod = "read"
 // ListVisibleBuckets assembles configured credentials, explicit scopes, and
 // object-derived rows supplied by persistence.
 func (s *Service) ListVisibleBuckets(ctx context.Context) (map[string]VisibleBucket, error) {
-	creds, err := s.ListS3Credentials(ctx)
+	creds, err := s.visibility.ListCredentialMetadata(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -36,11 +36,11 @@ func (s *Service) ListVisibleBuckets(ctx context.Context) (map[string]VisibleBuc
 	return s.mergeVisibleRows(ctx, creds, rows, restrictToResources)
 }
 
-func (s *Service) mergeVisibleRows(ctx context.Context, creds []Credential, rows []VisibilityRow, filterExplicitScopes bool) (map[string]VisibleBucket, error) {
+func (s *Service) mergeVisibleRows(ctx context.Context, creds []CredentialMetadata, rows []VisibilityRow, filterExplicitScopes bool) (map[string]VisibleBucket, error) {
 	byCredential := make(map[string]VisibleBucket, len(creds))
 	programsSeen := make(map[string]map[string]struct{}, len(creds))
 	for _, cred := range creds {
-		key := s.credentialIDForCredential(cred)
+		key := metadataCredentialID(cred)
 		byCredential[key] = VisibleBucket{Credential: cred}
 		programsSeen[key] = map[string]struct{}{}
 	}
@@ -51,7 +51,7 @@ func (s *Service) mergeVisibleRows(ctx context.Context, creds []Credential, rows
 	}
 	explicitScopeOwners := make(map[string]string, len(scopes))
 	for _, scope := range scopes {
-		credentialID := s.scopeCredentialIDForCredentials(scope, creds)
+		credentialID := s.scopeCredentialIDForMetadata(scope, creds)
 		entry, exists := byCredential[credentialID]
 		if !exists {
 			continue
@@ -107,20 +107,20 @@ func (s *Service) mergeVisibleRows(ctx context.Context, creds []Credential, rows
 	return byCredential, nil
 }
 
-func (s *Service) credentialIDForVisibilityRow(row VisibilityRow, creds []Credential) (string, bool) {
+func (s *Service) credentialIDForVisibilityRow(row VisibilityRow, creds []CredentialMetadata) (string, bool) {
 	bucket, ok := bucketForVisibilityRow(row, creds)
 	if !ok {
 		return "", false
 	}
 	for _, cred := range creds {
 		if strings.TrimSpace(cred.Bucket) == bucket {
-			return s.credentialIDForCredential(cred), true
+			return metadataCredentialID(cred), true
 		}
 	}
 	return bucket, true
 }
 
-func bucketForVisibilityRow(row VisibilityRow, creds []Credential) (string, bool) {
+func bucketForVisibilityRow(row VisibilityRow, creds []CredentialMetadata) (string, bool) {
 	raw := strings.TrimSpace(row.AccessURL)
 	if raw == "" {
 		return "", false

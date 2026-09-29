@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/calypr/syfon/client/common"
 	"github.com/calypr/syfon/client/transfer"
@@ -40,6 +41,17 @@ type uploaderResumeState struct {
 	CompletionParts       []transfer.MultipartPart `json:"completion_parts,omitempty"`
 	CompletionFingerprint string                   `json:"completion_fingerprint,omitempty"`
 	CompletedLocation     string                   `json:"completed_location"`
+}
+
+const (
+	multipartPartSigningWindow = 16
+	multipartPartExpiryMargin  = 30 * time.Second
+)
+
+type multipartPartTask struct {
+	partNumber int
+	url        string
+	expiresAt  time.Time
 }
 
 type GenericUploader struct {
@@ -295,13 +307,13 @@ func (u *GenericUploader) uploadMultipart(ctx context.Context, req transfer.Tran
 	}
 
 	numChunks := int((fileSize + chunkSize - 1) / chunkSize)
-	chunks := make(chan int, numChunks)
+	missingParts := make([]int, 0, numChunks)
 	for i := 1; i <= numChunks; i++ {
 		if _, ok := state.Completed[i]; !ok {
-			chunks <- i
+			missingParts = append(missingParts, i)
 		}
 	}
-	close(chunks)
+	chunks := make(chan multipartPartTask, multipartPartSigningWindow)
 
 	partCtx, cancelParts := context.WithCancel(ctx)
 	defer cancelParts()
@@ -311,8 +323,26 @@ func (u *GenericUploader) uploadMultipart(ctx context.Context, req transfer.Tran
 		mu        sync.Mutex
 		uploadErr error
 	)
+	setUploadError := func(err error) {
+		mu.Lock()
+		if uploadErr == nil {
+			uploadErr = err
+			cancelParts()
+		}
+		mu.Unlock()
+	}
 	tracker := newMultipartProgressTracker(ctx, common.GetOid(ctx), fileSize)
 	tracker.committed = completedMultipartBytes(state, fileSize, chunkSize)
+	partURLBackend, _ := u.Backend.(transfer.MultipartPartURLBackend)
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		defer close(chunks)
+		if err := enqueueMultipartPartTasks(partCtx, logger, u.Backend, objectKey, state.UploadID, missingParts, chunks); err != nil && partCtx.Err() == nil {
+			setUploadError(err)
+		}
+	}()
 
 	for i := 0; i < common.MaxConcurrentUploads; i++ {
 		wg.Add(1)
@@ -323,13 +353,13 @@ func (u *GenericUploader) uploadMultipart(ctx context.Context, req transfer.Tran
 					return
 				}
 				var (
-					partNum int
-					ok      bool
+					task multipartPartTask
+					ok   bool
 				)
 				select {
 				case <-partCtx.Done():
 					return
-				case partNum, ok = <-chunks:
+				case task, ok = <-chunks:
 					if !ok {
 						return
 					}
@@ -337,6 +367,7 @@ func (u *GenericUploader) uploadMultipart(ctx context.Context, req transfer.Tran
 				if partCtx.Err() != nil {
 					return
 				}
+				partNum := task.partNumber
 
 				offset := int64(partNum-1) * chunkSize
 				partSize := chunkSize
@@ -345,6 +376,7 @@ func (u *GenericUploader) uploadMultipart(ctx context.Context, req transfer.Tran
 				}
 
 				strategy := transfer.DefaultBackoff()
+				attempt := 0
 				err := transfer.RetryAction(partCtx, logger, strategy, common.MaxRetryCount, func() error {
 					if err := partCtx.Err(); err != nil {
 						return transfer.NonRetryable(err)
@@ -352,7 +384,18 @@ func (u *GenericUploader) uploadMultipart(ctx context.Context, req transfer.Tran
 					tracker.ResetPart(partNum)
 					section := io.NewSectionReader(file, offset, partSize)
 					partReader := newMultipartPartProgressReader(section, tracker, partNum, partSize)
-					etag, retryErr := u.Backend.MultipartPart(partCtx, objectKey, state.UploadID, partNum, partReader)
+					var etag string
+					var retryErr error
+					usePrefetchedURL := attempt == 0 && task.url != ""
+					if usePrefetchedURL && !task.expiresAt.IsZero() && time.Until(task.expiresAt) <= multipartPartExpiryMargin {
+						usePrefetchedURL = false
+					}
+					if usePrefetchedURL {
+						etag, retryErr = partURLBackend.UploadPart(partCtx, task.url, partReader, partSize)
+					} else {
+						etag, retryErr = u.Backend.MultipartPart(partCtx, objectKey, state.UploadID, partNum, partReader)
+					}
+					attempt++
 					if retryErr != nil {
 						if isProgressCallbackError(retryErr) {
 							return transfer.NonRetryable(retryErr)
@@ -376,12 +419,7 @@ func (u *GenericUploader) uploadMultipart(ctx context.Context, req transfer.Tran
 					return nil
 				})
 				if err != nil {
-					mu.Lock()
-					if uploadErr == nil {
-						uploadErr = err
-						cancelParts()
-					}
-					mu.Unlock()
+					setUploadError(err)
 					return
 				}
 			}
@@ -414,6 +452,88 @@ func (u *GenericUploader) uploadMultipart(ctx context.Context, req transfer.Tran
 		return location, err
 	}
 	return u.finishMultipart(checkpointPath, state, tracker)
+}
+
+func enqueueMultipartPartTasks(ctx context.Context, logger transfer.TransferLogger, backend transfer.MultipartBackend, objectKey, uploadID string, partNumbers []int, tasks chan<- multipartPartTask) error {
+	send := func(task multipartPartTask) bool {
+		select {
+		case tasks <- task:
+			return true
+		case <-ctx.Done():
+			return false
+		}
+	}
+
+	partURLBackend, canBatchSign := backend.(transfer.MultipartPartURLBackend)
+	if !canBatchSign || len(partNumbers) < 2 {
+		for _, partNumber := range partNumbers {
+			if !send(multipartPartTask{partNumber: partNumber}) {
+				return ctx.Err()
+			}
+		}
+		return nil
+	}
+
+	for start := 0; start < len(partNumbers); start += multipartPartSigningWindow {
+		end := start + multipartPartSigningWindow
+		if end > len(partNumbers) {
+			end = len(partNumbers)
+		}
+		requested := make([]int32, end-start)
+		for i, partNumber := range partNumbers[start:end] {
+			requested[i] = int32(partNumber)
+		}
+		var batch transfer.MultipartPartURLBatch
+		err := transfer.RetryAction(ctx, logger, transfer.DefaultBackoff(), common.MaxRetryCount, func() error {
+			if err := ctx.Err(); err != nil {
+				return transfer.NonRetryable(err)
+			}
+			var err error
+			batch, err = partURLBackend.MultipartPartURLs(ctx, objectKey, uploadID, requested)
+			return err
+		})
+		if err != nil {
+			return err
+		}
+
+		if !batch.BatchSupported {
+			if len(batch.Parts) != 1 || batch.Parts[0].PartNumber != requested[0] || strings.TrimSpace(batch.Parts[0].URL) == "" {
+				return fmt.Errorf("multipart signing backend returned an invalid legacy URL response")
+			}
+			if !send(multipartPartTask{partNumber: partNumbers[start], url: batch.Parts[0].URL, expiresAt: batch.Parts[0].ExpiresAt}) {
+				return ctx.Err()
+			}
+			for _, partNumber := range partNumbers[start+1:] {
+				if !send(multipartPartTask{partNumber: partNumber}) {
+					return ctx.Err()
+				}
+			}
+			return nil
+		}
+		if len(batch.Parts) != len(requested) {
+			return fmt.Errorf("multipart signing backend returned %d URLs for %d parts", len(batch.Parts), len(requested))
+		}
+		urls := make(map[int]transfer.MultipartPartURL, len(batch.Parts))
+		for _, part := range batch.Parts {
+			if part.PartNumber <= 0 || strings.TrimSpace(part.URL) == "" || part.ExpiresAt.IsZero() {
+				return fmt.Errorf("multipart signing backend returned an invalid URL response")
+			}
+			if _, exists := urls[int(part.PartNumber)]; exists {
+				return fmt.Errorf("multipart signing backend returned duplicate part %d", part.PartNumber)
+			}
+			urls[int(part.PartNumber)] = part
+		}
+		for _, partNumber := range partNumbers[start:end] {
+			url, ok := urls[partNumber]
+			if !ok {
+				return fmt.Errorf("multipart signing backend omitted part %d", partNumber)
+			}
+			if !send(multipartPartTask{partNumber: partNumber, url: url.URL, expiresAt: url.ExpiresAt}) {
+				return ctx.Err()
+			}
+		}
+	}
+	return nil
 }
 
 func (u *GenericUploader) completeMultipart(ctx context.Context, objectKey, checkpointPath string, state *uploaderResumeState, parts []transfer.MultipartPart) (string, error) {

@@ -33,8 +33,8 @@ func TestListVisibleBucketsUsesVisibilityQuery(t *testing.T) {
 		t.Fatalf("ListVisibleBuckets: %v", err)
 	}
 	want := map[string]VisibleBucket{
-		"id-a": {Credential: Credential{CredentialID: "id-a", Bucket: "bucket-a", Provider: "s3"}, Programs: []string{explicit}},
-		"id-b": {Credential: Credential{CredentialID: "id-b", Bucket: "bucket-b", Provider: "gcs"}, Programs: []string{other}},
+		"id-a": {Credential: CredentialMetadata{CredentialID: "id-a", Bucket: "bucket-a", Provider: "s3"}, Programs: []string{explicit}},
+		"id-b": {Credential: CredentialMetadata{CredentialID: "id-b", Bucket: "bucket-b", Provider: "gcs"}, Programs: []string{other}},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("visible buckets=%+v, want %+v", got, want)

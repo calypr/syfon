@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	internalapi "github.com/calypr/syfon/apigen/internalapi"
 	"github.com/calypr/syfon/client/apierror"
@@ -128,6 +129,130 @@ func (d *DataService) MultipartPart(ctx context.Context, guid string, uploadID s
 		return "", err
 	}
 	return d.UploadPart(ctx, url, bytes.NewReader(data), int64(len(data)))
+}
+
+type multipartPartURLsRequest struct {
+	Key         string  `json:"key"`
+	UploadID    string  `json:"uploadId"`
+	PartNumber  int32   `json:"partNumber"`
+	PartNumbers []int32 `json:"partNumbers,omitempty"`
+}
+
+type multipartPartURLResponse struct {
+	PresignedURL *string         `json:"presigned_url,omitempty"`
+	Parts        json.RawMessage `json:"parts"`
+}
+
+type multipartPartURLItem struct {
+	PartNumber   int32           `json:"partNumber"`
+	PresignedURL string          `json:"presigned_url"`
+	ExpiresIn    json.RawMessage `json:"expires_in"`
+}
+
+const maxMultipartPartExpirySeconds = int64((1<<63 - 1) / int64(time.Second))
+
+func (d *DataService) MultipartPartURLs(ctx context.Context, guid string, uploadID string, partNumbers []int32) (transfer.MultipartPartURLBatch, error) {
+	if len(partNumbers) == 0 {
+		return transfer.MultipartPartURLBatch{}, fmt.Errorf("multipart part numbers are required")
+	}
+	if len(partNumbers) > 32 {
+		return transfer.MultipartPartURLBatch{}, fmt.Errorf("multipart part batch exceeds 32 parts")
+	}
+	requested := make(map[int32]struct{}, len(partNumbers))
+	for _, partNumber := range partNumbers {
+		if partNumber <= 0 {
+			return transfer.MultipartPartURLBatch{}, fmt.Errorf("multipart part number must be positive")
+		}
+		if _, exists := requested[partNumber]; exists {
+			return transfer.MultipartPartURLBatch{}, fmt.Errorf("multipart part number %d is duplicated", partNumber)
+		}
+		requested[partNumber] = struct{}{}
+	}
+	payload, err := json.Marshal(multipartPartURLsRequest{
+		Key: guid, UploadID: uploadID, PartNumber: partNumbers[0], PartNumbers: partNumbers,
+	})
+	if err != nil {
+		return transfer.MultipartPartURLBatch{}, fmt.Errorf("encode multipart part batch: %w", err)
+	}
+	requestStarted := time.Now()
+	resp, err := d.gen.InternalMultipartUploadWithBodyWithResponse(ctx, common.MIMEApplicationJSON, bytes.NewReader(payload))
+	if err != nil {
+		return transfer.MultipartPartURLBatch{}, err
+	}
+	if resp.StatusCode() != http.StatusOK {
+		return transfer.MultipartPartURLBatch{}, apierror.FromResponse(resp.HTTPResponse, resp.Body)
+	}
+	var output multipartPartURLResponse
+	if err := json.Unmarshal(resp.Body, &output); err != nil {
+		return transfer.MultipartPartURLBatch{}, fmt.Errorf("decode multipart part batch: %w", err)
+	}
+	if len(bytes.TrimSpace(output.Parts)) > 0 {
+		var provided []multipartPartURLItem
+		if err := json.Unmarshal(output.Parts, &provided); err != nil {
+			return transfer.MultipartPartURLBatch{}, fmt.Errorf("decode multipart part URLs: %w", err)
+		}
+		if len(provided) != len(partNumbers) {
+			return transfer.MultipartPartURLBatch{}, fmt.Errorf("multipart part batch returned %d of %d parts", len(provided), len(partNumbers))
+		}
+		byPart := make(map[int32]multipartPartURLItem, len(provided))
+		expirySeconds := make(map[int32]int64, len(provided))
+		knownExpiry := make(map[int32]bool, len(provided))
+		for _, part := range provided {
+			if _, ok := requested[part.PartNumber]; !ok {
+				return transfer.MultipartPartURLBatch{}, fmt.Errorf("multipart part batch returned unexpected part %d", part.PartNumber)
+			}
+			if _, exists := byPart[part.PartNumber]; exists {
+				return transfer.MultipartPartURLBatch{}, fmt.Errorf("multipart part batch returned duplicate part %d", part.PartNumber)
+			}
+			if strings.TrimSpace(part.PresignedURL) == "" {
+				return transfer.MultipartPartURLBatch{}, fmt.Errorf("multipart part batch returned empty URL for part %d", part.PartNumber)
+			}
+			if rawExpiry := bytes.TrimSpace(part.ExpiresIn); len(rawExpiry) > 0 {
+				if bytes.Equal(rawExpiry, []byte("null")) {
+					return transfer.MultipartPartURLBatch{}, fmt.Errorf("multipart part %d has null expires_in", part.PartNumber)
+				}
+				var seconds int64
+				if err := json.Unmarshal(rawExpiry, &seconds); err != nil {
+					return transfer.MultipartPartURLBatch{}, fmt.Errorf("multipart part %d has invalid expires_in: %w", part.PartNumber, err)
+				}
+				if seconds < 0 || seconds > maxMultipartPartExpirySeconds {
+					return transfer.MultipartPartURLBatch{}, fmt.Errorf("multipart part %d has invalid expires_in %d", part.PartNumber, seconds)
+				}
+				expirySeconds[part.PartNumber] = seconds
+				knownExpiry[part.PartNumber] = true
+			}
+			byPart[part.PartNumber] = part
+		}
+		parts := make([]transfer.MultipartPartURL, len(partNumbers))
+		allHaveExpiry := true
+		for i, partNumber := range partNumbers {
+			part, ok := byPart[partNumber]
+			if !ok {
+				return transfer.MultipartPartURLBatch{}, fmt.Errorf("multipart part batch omitted part %d", partNumber)
+			}
+			parts[i] = transfer.MultipartPartURL{PartNumber: partNumber, URL: part.PresignedURL}
+			if !knownExpiry[partNumber] {
+				allHaveExpiry = false
+				continue
+			}
+			parts[i].ExpiresAt = requestStarted.Add(time.Duration(expirySeconds[partNumber]) * time.Second)
+		}
+		if !allHaveExpiry {
+			first := parts[0]
+			first.ExpiresAt = requestStarted
+			return transfer.MultipartPartURLBatch{
+				Parts: []transfer.MultipartPartURL{first}, BatchSupported: false,
+			}, nil
+		}
+		return transfer.MultipartPartURLBatch{Parts: parts, BatchSupported: true}, nil
+	}
+	if output.PresignedURL == nil || strings.TrimSpace(*output.PresignedURL) == "" {
+		return transfer.MultipartPartURLBatch{}, fmt.Errorf("multipart response missing presigned URL")
+	}
+	return transfer.MultipartPartURLBatch{
+		Parts:          []transfer.MultipartPartURL{{PartNumber: partNumbers[0], URL: *output.PresignedURL}},
+		BatchSupported: false,
+	}, nil
 }
 
 func (d *DataService) MultipartComplete(ctx context.Context, guid string, uploadID string, parts []transfer.MultipartPart) error {

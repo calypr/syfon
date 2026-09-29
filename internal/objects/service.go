@@ -40,6 +40,7 @@ type ObjectStore interface {
 	RemoveObjectControlledAccessBulk(context.Context, []string, string) (int, error)
 	CreateObjectAlias(context.Context, string, string) error
 	ResolveObjectAlias(context.Context, string) (string, error)
+	ResolveObjectAliases(context.Context, []string) (map[string]string, error)
 	ResolveObjectIDs(context.Context, []string) (map[string]string, error)
 	GetObjectsByChecksums(context.Context, []string) (map[string][]drs.DrsObject, error)
 	GetPublicReadByIDs(context.Context, []string) (map[string]bool, error)

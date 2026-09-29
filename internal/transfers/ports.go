@@ -6,6 +6,7 @@ import (
 
 	"github.com/calypr/syfon/apigen/drs"
 	"github.com/calypr/syfon/internal/buckets"
+	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/storage"
 	"github.com/calypr/syfon/internal/usage"
 )
@@ -13,6 +14,7 @@ import (
 // ObjectPort is the catalog capability required by transfer operations.
 type ObjectPort interface {
 	GetObject(context.Context, string, string) (*drs.DrsObject, error)
+	GetObjects(context.Context, []string, string) (map[string]objects.LookupResult, error)
 	GetObjectsByChecksums(context.Context, []string, string) (map[string][]drs.DrsObject, error)
 }
 

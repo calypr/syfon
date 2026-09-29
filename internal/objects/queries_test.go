@@ -460,7 +460,7 @@ func TestListObjectIDsByScope_AuthzFiltering(t *testing.T) {
 	}
 }
 
-func TestListReadableObjectIDsAmongFetchesOnlyRequestedRecords(t *testing.T) {
+func TestListReadableObjectIDsAmongScopesFetchesOnlyRequestedRecords(t *testing.T) {
 	resource := "/organization/org/project/project"
 	tracked := &objectTestStore{Objects: map[string]*drs.DrsObject{
 		"requested": {Id: "requested", ControlledAccess: &[]string{resource}},
@@ -468,12 +468,39 @@ func TestListReadableObjectIDsAmongFetchesOnlyRequestedRecords(t *testing.T) {
 	}}
 	service := objects.NewService(tracked)
 	ctx := buildLocalAuthzContext(map[string]map[string]bool{resource: {"read": true}})
-	ids, err := service.ListReadableObjectIDsAmong(ctx, "org", "project", []string{"requested", "missing"})
+	ids, err := service.ListReadableObjectIDsAmongScopes(ctx, []objects.Scope{{Organization: "org", Project: "project"}}, []string{"requested", "missing"})
 	if err != nil || !slices.Equal(ids, []string{"requested"}) {
 		t.Fatalf("readable IDs = %v, err = %v", ids, err)
 	}
 	if !slices.Equal(tracked.BulkRequested, []string{"requested", "missing"}) || tracked.ScopeListCalls != 0 {
 		t.Fatalf("lookup fetched %v and listed scope %d times", tracked.BulkRequested, tracked.ScopeListCalls)
+	}
+}
+
+func TestListReadableObjectIDsAmongScopesPreservesScopePolicyAndChecksumSiblings(t *testing.T) {
+	first := "/organization/org/project/first"
+	second := "/organization/org/project/second"
+	checksum := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	tracked := &objectTestStore{Objects: map[string]*drs.DrsObject{
+		"later":   {Id: "later", CreatedTime: drsISOTime("2026-01-02T00:00:00Z"), ControlledAccess: &[]string{first}, Checksums: []drs.Checksum{{Type: "sha256", Checksum: checksum}}},
+		"earlier": {Id: "earlier", CreatedTime: drsISOTime("2026-01-01T00:00:00Z"), ControlledAccess: &[]string{first}, Checksums: []drs.Checksum{{Type: "sha256", Checksum: checksum}}},
+		"second":  {Id: "second", ControlledAccess: &[]string{second}},
+	}}
+	service := objects.NewService(tracked)
+	scopes := []objects.Scope{{Organization: "org", Project: "first"}, {Organization: "org", Project: "second"}}
+	requested := []string{"later", "second", "missing"}
+	firstOnly := buildLocalAuthzContext(map[string]map[string]bool{first: {"read": true}})
+	ids, err := service.ListReadableObjectIDsAmongScopes(firstOnly, scopes, requested)
+	if err != nil || !slices.Equal(ids, []string{"earlier"}) {
+		t.Fatalf("first-scope readable IDs=%v error=%v, want canonical sibling only", ids, err)
+	}
+	if tracked.ScopeListCalls != 0 {
+		t.Fatalf("full scope list calls=%d, want 0", tracked.ScopeListCalls)
+	}
+	both := buildLocalAuthzContext(map[string]map[string]bool{first: {"read": true}, second: {"read": true}})
+	ids, err = service.ListReadableObjectIDsAmongScopes(both, scopes, requested)
+	if err != nil || !slices.Equal(ids, []string{"earlier", "second"}) {
+		t.Fatalf("both-scope readable IDs=%v error=%v", ids, err)
 	}
 }
 

@@ -12,6 +12,7 @@ import (
 	"github.com/calypr/syfon/apigen/errorapi"
 	"github.com/calypr/syfon/internal/access"
 	"github.com/calypr/syfon/internal/buckets"
+	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/requestid"
 	"github.com/calypr/syfon/internal/storage"
 	"github.com/calypr/syfon/internal/usage"
@@ -110,6 +111,14 @@ type downloadObjectFake struct {
 
 func (f downloadObjectFake) GetObject(context.Context, string, string) (*drs.DrsObject, error) {
 	return f.object, nil
+}
+
+func (f downloadObjectFake) GetObjects(_ context.Context, identifiers []string, _ string) (map[string]objects.LookupResult, error) {
+	result := make(map[string]objects.LookupResult, len(identifiers))
+	for _, identifier := range identifiers {
+		result[identifier] = objects.LookupResult{Object: f.object}
+	}
+	return result, nil
 }
 
 func (downloadObjectFake) GetObjectsByChecksums(context.Context, []string, string) (map[string][]drs.DrsObject, error) {

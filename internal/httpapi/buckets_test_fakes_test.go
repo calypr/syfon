@@ -46,6 +46,24 @@ func (f *bucketTestStore) ListS3Credentials(context.Context) ([]domainbuckets.Cr
 	return credentials, nil
 }
 
+func (f *bucketTestStore) ListCredentialMetadata(ctx context.Context) ([]domainbuckets.CredentialMetadata, error) {
+	credentials, err := f.ListS3Credentials(ctx)
+	if err != nil {
+		return nil, err
+	}
+	metadata := make([]domainbuckets.CredentialMetadata, 0, len(credentials))
+	for _, credential := range credentials {
+		metadata = append(metadata, domainbuckets.CredentialMetadata{
+			CredentialID: credential.CredentialID,
+			Bucket:       credential.Bucket,
+			Provider:     credential.Provider,
+			Region:       credential.Region,
+			Endpoint:     credential.Endpoint,
+		})
+	}
+	return metadata, nil
+}
+
 func (f *bucketTestStore) SaveS3Credential(_ context.Context, credential *domainbuckets.Credential) error {
 	if credential == nil {
 		return errors.New("credential is required")

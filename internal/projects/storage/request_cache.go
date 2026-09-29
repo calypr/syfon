@@ -2,10 +2,10 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 
-	internalapi "github.com/calypr/syfon/apigen/internalapi"
 	"github.com/calypr/syfon/internal/buckets"
 )
 
@@ -17,7 +17,21 @@ type requestCache struct {
 	visibleLoaded bool
 	visibleValue  map[string]buckets.VisibleBucket
 	visibleErr    error
-	probes        map[string]internalapi.InternalInspectObjectBulkItem
+	probes        map[probeRequestKey]*probeEntry
+}
+
+type probeRequestKey struct {
+	objectURL    string
+	organization string
+	project      string
+	key          string
+	scheme       string
+}
+
+type probeEntry struct {
+	ready    chan struct{}
+	metadata *objectMetadata
+	err      error
 }
 
 type credentialEntry struct {
@@ -29,7 +43,7 @@ func withRequestCache(ctx context.Context) context.Context {
 	if cacheFromContext(ctx) != nil {
 		return ctx
 	}
-	return context.WithValue(ctx, requestCacheKey{}, &requestCache{credentials: make(map[string]credentialEntry), probes: make(map[string]internalapi.InternalInspectObjectBulkItem)})
+	return context.WithValue(ctx, requestCacheKey{}, &requestCache{credentials: make(map[string]credentialEntry), probes: make(map[probeRequestKey]*probeEntry)})
 }
 
 func cacheFromContext(ctx context.Context) *requestCache {
@@ -95,17 +109,36 @@ func cloneVisible(input map[string]buckets.VisibleBucket) map[string]buckets.Vis
 	return output
 }
 
-func (cache *requestCache) probe(key string) (internalapi.InternalInspectObjectBulkItem, bool) {
+func (cache *requestCache) loadProbe(ctx context.Context, key probeRequestKey, load func() (*objectMetadata, error)) (*objectMetadata, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	cache.mu.Lock()
-	defer cache.mu.Unlock()
-	result, ok := cache.probes[key]
-	result.ValidationMismatches = append([]string(nil), result.ValidationMismatches...)
-	return result, ok
-}
+	if entry, ok := cache.probes[key]; ok {
+		cache.mu.Unlock()
+		select {
+		case <-entry.ready:
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			return entry.metadata, entry.err
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	entry := &probeEntry{ready: make(chan struct{})}
+	cache.probes[key] = entry
+	cache.mu.Unlock()
 
-func (cache *requestCache) setProbe(key string, result internalapi.InternalInspectObjectBulkItem) {
+	entry.metadata, entry.err = load()
+	if err := ctx.Err(); err != nil {
+		entry.metadata, entry.err = nil, err
+	}
 	cache.mu.Lock()
-	defer cache.mu.Unlock()
-	result.ValidationMismatches = append([]string(nil), result.ValidationMismatches...)
-	cache.probes[key] = result
+	if errors.Is(entry.err, context.Canceled) || errors.Is(entry.err, context.DeadlineExceeded) {
+		delete(cache.probes, key)
+	}
+	close(entry.ready)
+	cache.mu.Unlock()
+	return entry.metadata, entry.err
 }

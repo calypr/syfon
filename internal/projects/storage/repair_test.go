@@ -113,7 +113,7 @@ func (f fakeRepairBuckets) GetS3Credential(_ context.Context, bucket string) (*b
 func (f fakeRepairBuckets) ListVisibleBuckets(context.Context) (map[string]buckets.VisibleBucket, error) {
 	visible := make(map[string]buckets.VisibleBucket, len(f.credentials))
 	for _, credential := range f.credentials {
-		visible[credential.Bucket] = buckets.VisibleBucket{Credential: credential}
+		visible[credential.Bucket] = buckets.VisibleBucket{Credential: credentialMetadata(credential)}
 	}
 	return visible, nil
 }

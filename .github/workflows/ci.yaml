@@ -17,6 +17,9 @@ concurrency:
   group: syfon-${{ github.event.pull_request.head.ref || github.ref }}
   cancel-in-progress: true
 
+env:
+  GOCACHE: ${{ github.workspace }}/.gocache
+
 jobs:
   verify-generated:
     name: Verify generated bindings
@@ -27,10 +30,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache: true
+        uses: ./.github/actions/setup-go
 
       - name: Verify generated API bindings are up to date
         run: |
@@ -41,7 +41,6 @@ jobs:
     name: Unit, router, and endpoint tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: verify-generated
     permissions:
       contents: read
       id-token: write
@@ -50,10 +49,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache: true
+        uses: ./.github/actions/setup-go
 
       - name: Verify repository tooling
         run: |
@@ -66,15 +62,6 @@ jobs:
 
       - name: Compile the client README example
         run: scripts/check-client-readme.sh
-
-      - name: Test modules without the workspace
-        run: make test-modules
-
-      - name: Run server endpoint router tests
-        run: |
-          CGO_ENABLED=1 go test ./cmd/server \
-            -run 'Test(AllRegisteredEndpoints_WithMocks|RegisterAPIRoutes_StaticBeforeParamAcrossControllers|RegisterControllerRoutes_StaticBeforeParam)' \
-            -v
 
       - name: Run instrumented binary endpoint tests
         run: |
@@ -123,11 +110,30 @@ jobs:
           path: coverage/binary-endpoint.out
           if-no-files-found: error
 
+  independent-modules:
+    name: Independent module checks (${{ matrix.scope }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        scope: [root, client, apigen, consumers]
+    steps:
+      - name: Check out code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Go
+        uses: ./.github/actions/setup-go
+        with:
+          cache-scope: independent-${{ matrix.scope }}
+      - name: Test without the workspace
+        env:
+          MODULE_SCOPE: ${{ matrix.scope }}
+        run: scripts/check-independent-modules.sh "$MODULE_SCOPE"
+
   postgres-integration:
     name: PostgreSQL integration tests
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: verify-generated
     env:
       DRS_CREDENTIAL_MASTER_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
     services:
@@ -149,10 +155,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache: true
+        uses: ./.github/actions/setup-go
 
       - name: Run PostgreSQL integration tests
         env:
@@ -173,25 +176,24 @@ jobs:
     name: Stateful race detector
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: verify-generated
     steps:
       - name: Check out code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache: true
+        uses: ./.github/actions/setup-go
 
       - name: Run focused race tests
         run: make test-race
 
   coverage:
-    name: Root and client coverage
+    name: Root and client coverage (${{ matrix.scope }})
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: verify-generated
+    strategy:
+      fail-fast: false
+      matrix:
+        scope: [root, client]
     permissions:
       contents: read
       id-token: write
@@ -200,19 +202,20 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        uses: ./.github/actions/setup-go
         with:
-          go-version-file: go.mod
-          cache: true
+          cache-scope: coverage-${{ matrix.scope }}
 
       - name: Run coverage
+        if: matrix.scope == 'root'
         run: make coverage
 
       - name: Run client coverage
+        if: matrix.scope == 'client'
         run: make coverage-client
 
       - name: Upload root coverage to Codecov (OIDC)
-        if: github.actor != 'nektos/act'
+        if: matrix.scope == 'root' && github.actor != 'nektos/act'
         id: codecov_root_oidc
         continue-on-error: true
         uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
@@ -227,7 +230,7 @@ jobs:
           fail_ci_if_error: true
 
       - name: Upload root coverage to Codecov (token fallback)
-        if: github.actor != 'nektos/act' && steps.codecov_root_oidc.outcome == 'failure'
+        if: matrix.scope == 'root' && github.actor != 'nektos/act' && steps.codecov_root_oidc.outcome == 'failure'
         continue-on-error: true
         uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         env:
@@ -241,7 +244,7 @@ jobs:
           fail_ci_if_error: false
 
       - name: Upload client coverage to Codecov (OIDC)
-        if: github.actor != 'nektos/act'
+        if: matrix.scope == 'client' && github.actor != 'nektos/act'
         id: codecov_client_oidc
         continue-on-error: true
         uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
@@ -256,7 +259,7 @@ jobs:
           fail_ci_if_error: true
 
       - name: Upload client coverage to Codecov (token fallback)
-        if: github.actor != 'nektos/act' && steps.codecov_client_oidc.outcome == 'failure'
+        if: matrix.scope == 'client' && github.actor != 'nektos/act' && steps.codecov_client_oidc.outcome == 'failure'
         continue-on-error: true
         uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         env:
@@ -272,7 +275,7 @@ jobs:
         if: github.actor != 'nektos/act'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: coverage-${{ github.run_id }}
+          name: coverage-${{ matrix.scope }}-${{ github.run_id }}
           path: |
             coverage/coverage.out
             coverage/cross-package.out
@@ -286,16 +289,12 @@ jobs:
     name: Vet, Staticcheck, vuln, and plugins
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: verify-generated
     steps:
       - name: Check out code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache: true
+        uses: ./.github/actions/setup-go
 
       - name: Build plugin binaries (local_authn_plugin and gen3_authn_plugin)
         run: make build-plugins
@@ -330,10 +329,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache: true
+        uses: ./.github/actions/setup-go
 
       - name: Run Docker-backed CLI E2E tests (MinIO, fake-gcs-server, Azurite)
         env:
@@ -352,7 +348,6 @@ jobs:
   calypr-integration:
     name: Calypr git-drs integration
     runs-on: ubuntu-latest
-    needs: verify-generated
     timeout-minutes: 30
     steps:
       - name: Check out code
@@ -476,6 +471,7 @@ jobs:
     needs:
       - verify-generated
       - test
+      - independent-modules
       - postgres-integration
       - race
       - coverage
@@ -496,6 +492,7 @@ jobs:
 
   merge:
     name: Merge and Tag
+    if: ${{ !cancelled() && needs.ci-required.result == 'success' && needs.build-and-push.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs:

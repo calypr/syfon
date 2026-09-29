@@ -24,6 +24,9 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  GOCACHE: ${{ github.workspace }}/.gocache
+
 jobs:
   prepare:
     name: Prepare release tag
@@ -65,10 +68,7 @@ jobs:
         run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
 
       - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache: true
+        uses: ./.github/actions/setup-go
 
       - name: Fetch tags
         run: git fetch --tags --force
@@ -105,10 +105,7 @@ jobs:
           ref: ${{ needs.prepare.outputs.root_tag }}
 
       - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache: true
+        uses: ./.github/actions/setup-go
 
       - name: Verify native runner architecture
         shell: bash
@@ -262,10 +259,7 @@ jobs:
           ref: development
 
       - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache: true
+        uses: ./.github/actions/setup-go
 
       - name: Replace local module links with released versions
         env:

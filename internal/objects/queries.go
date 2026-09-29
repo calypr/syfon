@@ -67,28 +67,74 @@ func (s *Service) ListObjectIDsByScope(ctx context.Context, organization, projec
 	return out, nil
 }
 
-// ListReadableObjectIDsAmong applies scoped read policy to the requested IDs
-// without listing every object in the scope.
-func (s *Service) ListReadableObjectIDsAmong(ctx context.Context, organization, project string, requested []string) ([]string, error) {
+// ListReadableObjectIDsAmongScopes applies each scope's read policy to the
+// requested records while loading those records once.
+func (s *Service) ListReadableObjectIDsAmongScopes(ctx context.Context, scopes []Scope, requested []string) ([]string, error) {
+	if len(scopes) == 0 || len(requested) == 0 {
+		return []string{}, nil
+	}
 	objects, err := s.store.GetBulkObjects(ctx, requested)
 	if err != nil {
 		return nil, err
 	}
-	scoped := make([]drs.DrsObject, 0, len(objects))
-	for _, obj := range objects {
-		if objectMatchesScope(&obj, organization, project) {
-			scoped = append(scoped, obj)
-		}
-	}
-	filtered, err := s.prepareScopedRecords(ctx, scoped, Scope{Organization: organization, Project: project}, objectMethodRead)
-	if err != nil {
+	policy := make(map[string]bool, len(objects))
+	if err := s.extendPublicReadPolicy(ctx, policy, objects); err != nil {
 		return nil, err
 	}
-	ids := make([]string, 0, len(filtered))
-	for _, obj := range filtered {
-		ids = append(ids, obj.Id)
+	ids := make([]string, 0, len(objects))
+	seen := make(map[string]struct{}, len(objects))
+	for _, scope := range scopes {
+		scoped := make([]drs.DrsObject, 0, len(objects))
+		for _, obj := range objects {
+			if objectMatchesScope(&obj, scope.Organization, scope.Project) {
+				scoped = append(scoped, obj)
+			}
+		}
+		expanded, err := s.expandProjectChecksumSiblingObjects(ctx, scoped, scope.Organization, scope.Project)
+		if err != nil {
+			return nil, err
+		}
+		if err := s.extendPublicReadPolicy(ctx, policy, expanded); err != nil {
+			return nil, err
+		}
+		filtered := canonicalizeProjectScopedObjects(filterObjectsByMethod(ctx, expanded, objectMethodRead, policy), scope.Organization, scope.Project, policy)
+		for _, obj := range filtered {
+			if _, ok := seen[obj.Id]; ok {
+				continue
+			}
+			seen[obj.Id] = struct{}{}
+			ids = append(ids, obj.Id)
+		}
 	}
 	return ids, nil
+}
+
+func (s *Service) extendPublicReadPolicy(ctx context.Context, policy map[string]bool, records []drs.DrsObject) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	missing := make([]string, 0)
+	for _, obj := range records {
+		if obj.Id == "" {
+			continue
+		}
+		if _, known := policy[obj.Id]; known {
+			continue
+		}
+		policy[obj.Id] = false
+		missing = append(missing, obj.Id)
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	flags, err := s.store.GetPublicReadByIDs(ctx, missing)
+	if err != nil {
+		return err
+	}
+	for _, id := range missing {
+		policy[id] = flags[id]
+	}
+	return nil
 }
 
 // ResolveObjectIDs maps physical IDs and aliases to their canonical physical

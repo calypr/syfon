@@ -1,0 +1,31 @@
+name: Set up cached Go
+description: Share the Go cache across commands and isolate cache entries by validation job.
+inputs:
+  cache-scope:
+    description: Cache scope for matrix jobs.
+    required: false
+    default: ''
+runs:
+  using: composite
+  steps:
+    - name: Set up Go
+      id: go
+      uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      with:
+        go-version-file: go.mod
+        cache: false
+    - name: Locate Go caches
+      id: paths
+      shell: bash
+      run: |
+        printf 'build=%s\n' "$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
+        printf 'modules=%s\n' "$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
+    - name: Cache Go builds and modules
+      uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+      with:
+        path: |
+          ${{ steps.paths.outputs.build }}
+          ${{ steps.paths.outputs.modules }}
+        key: ${{ runner.os }}-${{ runner.arch }}-syfon-go-${{ inputs.cache-scope || github.job }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum', 'client/go.sum', 'apigen/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-${{ runner.arch }}-syfon-go-${{ inputs.cache-scope || github.job }}-${{ steps.go.outputs.go-version }}-

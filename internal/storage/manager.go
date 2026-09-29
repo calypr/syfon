@@ -221,6 +221,7 @@ func (m *Manager) DeleteExact(ctx context.Context, targets []DeleteTarget) error
 	if len(targets) == 0 {
 		return nil
 	}
+	ctx = withCredentialCacheIfAbsent(ctx)
 	resolved := make([]PhysicalTarget, 0, len(targets))
 	bindings := make(map[string]ProviderBinding, len(targets))
 	seen := make(map[string]struct{}, len(targets))
@@ -348,8 +349,11 @@ func (m *Manager) resolveTarget(ctx context.Context, target Target, capability s
 	candidates = uniqueStrings(candidates)
 	var lastErr error
 	for _, candidate := range candidates {
-		credential, err := m.credentials.GetS3Credential(ctx, candidate)
+		credential, err := m.getCredential(ctx, candidate)
 		if err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return ProviderBinding{}, Target{}, operationError(ErrorProvider, resolved.Provider, capability, err)
+			}
 			lastErr = operationError(ErrorProvider, resolved.Provider, capability, err)
 			continue
 		}

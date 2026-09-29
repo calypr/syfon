@@ -79,6 +79,21 @@ func (p *lfsTestServicePorts) ListS3Credentials(_ context.Context) ([]buckets.Cr
 	return result, nil
 }
 
+func (p *lfsTestServicePorts) ListCredentialMetadata(ctx context.Context) ([]buckets.CredentialMetadata, error) {
+	credentials, err := p.ListS3Credentials(ctx)
+	if err != nil {
+		return nil, err
+	}
+	metadata := make([]buckets.CredentialMetadata, 0, len(credentials))
+	for _, credential := range credentials {
+		metadata = append(metadata, buckets.CredentialMetadata{
+			CredentialID: credential.CredentialID, Bucket: credential.Bucket, Provider: credential.Provider,
+			Region: credential.Region, Endpoint: credential.Endpoint,
+		})
+	}
+	return metadata, nil
+}
+
 func (p *lfsTestServicePorts) SavePendingMetadata(_ context.Context, entries []transferlfs.PendingMetadata) error {
 	for _, entry := range entries {
 		if receipt, ok := p.receipts[entry.OID]; ok {

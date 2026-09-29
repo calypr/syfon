@@ -13,6 +13,7 @@ import (
 
 	generated "github.com/calypr/syfon/apigen/drs"
 	"github.com/calypr/syfon/apigen/errorapi"
+	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/storage"
 	"github.com/calypr/syfon/internal/transfers"
 	"github.com/calypr/syfon/internal/usage"
@@ -33,6 +34,15 @@ func (p bulkAccessObjectPort) GetObject(_ context.Context, objectID, _ string) (
 		return nil, errorapi.ErrObjectNotFound
 	}
 	return object, nil
+}
+
+func (p bulkAccessObjectPort) GetObjects(ctx context.Context, identifiers []string, method string) (map[string]objects.LookupResult, error) {
+	result := make(map[string]objects.LookupResult, len(identifiers))
+	for _, identifier := range identifiers {
+		object, err := p.GetObject(ctx, identifier, method)
+		result[identifier] = objects.LookupResult{Object: object, Err: err}
+	}
+	return result, nil
 }
 
 func (bulkAccessObjectPort) GetObjectsByChecksums(context.Context, []string, string) (map[string][]generated.DrsObject, error) {
@@ -63,8 +73,10 @@ func (bulkAccessStorage) CompleteMultipart(context.Context, storage.CompleteMult
 type bulkAccessEvents struct{}
 
 func (bulkAccessEvents) RecordTransferAttributionEvents(_ context.Context, events []usage.Event) error {
-	if len(events) > 0 && events[0].ObjectID == "event" {
-		return errors.New("event recorder unavailable")
+	for _, event := range events {
+		if event.ObjectID == "event" {
+			return errors.New("event recorder unavailable")
+		}
 	}
 	return nil
 }

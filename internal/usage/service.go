@@ -9,6 +9,7 @@ import (
 
 	"github.com/calypr/syfon/apigen/errorapi"
 	"github.com/calypr/syfon/apigen/metricsapi"
+	"github.com/calypr/syfon/internal/objects"
 )
 
 var (
@@ -173,29 +174,23 @@ func (s *Service) listReadableObjectIDs(ctx context.Context, scope ScopeQuery, r
 		return nil, ErrObjectsUnavailable
 	}
 
-	readable := make(map[string]struct{})
-	addScope := func(organization, project string) error {
-		ids, err := s.objects.ListReadableObjectIDsAmong(ctx, organization, project, requested)
-		if err != nil {
-			return err
-		}
-		for _, id := range ids {
-			id = strings.TrimSpace(id)
-			if id != "" {
-				readable[id] = struct{}{}
-			}
-		}
-		return nil
-	}
+	selected := scope.aggregateScopes()
 	if scope.isSingle() {
-		if err := addScope(scope.Organization, scope.Project); err != nil {
-			return nil, err
-		}
-	} else {
-		for _, selected := range scope.aggregateScopes() {
-			if err := addScope(selected.Organization, selected.Project); err != nil {
-				return nil, err
-			}
+		selected = []Scope{{Organization: scope.Organization, Project: scope.Project}}
+	}
+	objectScopes := make([]objects.Scope, len(selected))
+	for i, item := range selected {
+		objectScopes[i] = objects.Scope{Organization: item.Organization, Project: item.Project}
+	}
+	ids, err := s.objects.ListReadableObjectIDsAmongScopes(ctx, objectScopes, requested)
+	if err != nil {
+		return nil, err
+	}
+	readable := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id != "" {
+			readable[id] = struct{}{}
 		}
 	}
 

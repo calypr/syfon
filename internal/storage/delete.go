@@ -31,7 +31,7 @@ func (m *Manager) physicalTargetWithBinding(ctx context.Context, raw string) (Ph
 		if bucket == "" || key == "" {
 			return PhysicalTarget{}, ProviderBinding{}, false, nil
 		}
-		credential, lookupErr := m.credentials.GetS3Credential(ctx, bucket)
+		credential, lookupErr := m.getCredential(ctx, bucket)
 		if lookupErr != nil {
 			return PhysicalTarget{}, ProviderBinding{}, false, operationError(ErrorProvider, parsed.Provider, "delete", lookupErr)
 		}

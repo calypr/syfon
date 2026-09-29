@@ -30,6 +30,12 @@ func (db *Store) ResolveObjectAlias(ctx context.Context, aliasID string) (string
 	return canonicalID, nil
 }
 
+// ResolveObjectAliases returns aliases even when an alias ID also names a
+// physical object. Bulk overwrite must reject that collision.
+func (db *Store) ResolveObjectAliases(ctx context.Context, ids []string) (map[string]string, error) {
+	return db.resolveObjectAliases(ctx, ids, nil)
+}
+
 // ResolveObjectIDs maps physical IDs and aliases to canonical physical IDs in
 // one batch, omitting identifiers that do not exist.
 func (db *Store) ResolveObjectIDs(ctx context.Context, ids []string) (map[string]string, error) {

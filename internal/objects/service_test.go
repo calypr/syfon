@@ -47,6 +47,7 @@ type objectTestStore struct {
 	objects.ObjectStore
 	Objects        map[string]*drs.DrsObject
 	Aliases        map[string]string
+	AliasLookupErr error
 	BulkRequested  []string
 	ScopeListCalls int
 }
@@ -130,6 +131,20 @@ func (f *objectTestStore) ResolveObjectAlias(_ context.Context, aliasID string) 
 		return "", fmt.Errorf("%w: object not found", errorapi.ErrNotFound)
 	}
 	return canonicalID, nil
+}
+
+func (f *objectTestStore) ResolveObjectAliases(_ context.Context, ids []string) (map[string]string, error) {
+	if f.AliasLookupErr != nil {
+		return nil, f.AliasLookupErr
+	}
+	resolved := make(map[string]string, len(ids))
+	for _, rawID := range ids {
+		id := strings.TrimSpace(rawID)
+		if canonicalID, ok := f.Aliases[id]; ok {
+			resolved[id] = canonicalID
+		}
+	}
+	return resolved, nil
 }
 
 func (f *objectTestStore) ResolveObjectIDs(_ context.Context, ids []string) (map[string]string, error) {

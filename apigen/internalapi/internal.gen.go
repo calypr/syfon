@@ -309,15 +309,32 @@ type InternalMultipartPart struct {
 
 // InternalMultipartUploadOutput defines model for InternalMultipartUploadOutput.
 type InternalMultipartUploadOutput struct {
+	// Parts Ordered presigned URLs returned when a batch request is supported.
+	Parts *[]InternalMultipartUploadPartURL `json:"parts,omitempty"`
+
+	// PresignedUrl Presigned URL returned for the singleton request or by an older server.
 	PresignedUrl *string `json:"presigned_url,omitempty"`
+}
+
+// InternalMultipartUploadPartURL defines model for InternalMultipartUploadPartURL.
+type InternalMultipartUploadPartURL struct {
+	// ExpiresIn Configured presigned URL lifetime in seconds, rounded down.
+	ExpiresIn    int64  `json:"expires_in"`
+	PartNumber   int32  `json:"partNumber"`
+	PresignedUrl string `json:"presigned_url"`
 }
 
 // InternalMultipartUploadRequest defines model for InternalMultipartUploadRequest.
 type InternalMultipartUploadRequest struct {
-	Bucket     *string `json:"bucket,omitempty"`
-	Key        string  `json:"key"`
-	PartNumber int32   `json:"partNumber"`
-	UploadId   string  `json:"uploadId"`
+	Bucket *string `json:"bucket,omitempty"`
+	Key    string  `json:"key"`
+
+	// PartNumber Required singleton part number; when partNumbers is supplied, set this to its first value for compatibility with older servers.
+	PartNumber int32 `json:"partNumber"`
+
+	// PartNumbers Optional ordered batch of part numbers to sign in one request, up to 32 parts.
+	PartNumbers *[]int32 `json:"partNumbers,omitempty"`
+	UploadId    string   `json:"uploadId"`
 }
 
 // InternalProjectAccessMethod defines model for InternalProjectAccessMethod.

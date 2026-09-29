@@ -228,13 +228,50 @@ func (s *Service) registerObjects(ctx context.Context, objs []drs.DrsObject, pen
 		return nil, err
 	}
 
-	registered := make([]drs.DrsObject, 0, len(objs))
+	if len(objs) == 0 {
+		return []drs.DrsObject{}, nil
+	}
+	ids := make([]string, 0, len(objs))
+	seen := make(map[string]struct{}, len(objs))
 	for _, obj := range objs {
-		read, err := s.store.GetObject(ctx, obj.Id)
+		id := strings.TrimSpace(obj.Id)
+		if _, ok := seen[id]; !ok {
+			seen[id] = struct{}{}
+			ids = append(ids, id)
+		}
+	}
+	stored, err := s.store.GetBulkObjects(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	byID := make(map[string]drs.DrsObject, len(stored))
+	for _, obj := range stored {
+		byID[obj.Id] = obj
+	}
+	unresolved := make([]string, 0)
+	for _, id := range ids {
+		if _, ok := byID[id]; !ok {
+			unresolved = append(unresolved, id)
+		}
+	}
+	var aliases map[string]string
+	if len(unresolved) > 0 {
+		aliases, err = s.store.ResolveObjectAliases(ctx, unresolved)
 		if err != nil {
 			return nil, err
 		}
-		registered = append(registered, *read)
+	}
+	registered := make([]drs.DrsObject, 0, len(objs))
+	for _, obj := range objs {
+		id := strings.TrimSpace(obj.Id)
+		read, ok := byID[id]
+		if !ok {
+			read, ok = byID[aliases[id]]
+		}
+		if !ok {
+			return nil, errorapi.ErrObjectNotFound
+		}
+		registered = append(registered, read)
 	}
 	return registered, nil
 }
@@ -391,6 +428,7 @@ func (s *Service) BulkOverwriteObjects(ctx context.Context, organization, projec
 	for did := range byDID {
 		ids = append(ids, did)
 	}
+	aliasIDs := append([]string(nil), ids...)
 	for _, matches := range checksumMatches {
 		ids = append(ids, matches...)
 	}
@@ -402,17 +440,17 @@ func (s *Service) BulkOverwriteObjects(ctx context.Context, organization, projec
 	for _, obj := range existingList {
 		existing[obj.Id] = obj
 	}
+	aliases, err := s.store.ResolveObjectAliases(ctx, aliasIDs)
+	if err != nil {
+		return result, err
+	}
 
 	resolved := make([]drs.DrsObject, len(candidates))
 	usedTargets := make(map[string]string, len(candidates))
 	for i, candidate := range candidates {
 		sourceDID := candidate.Id
-		canonicalID, aliasErr := s.store.ResolveObjectAlias(ctx, sourceDID)
-		if aliasErr == nil && canonicalID != sourceDID {
+		if canonicalID, ok := aliases[strings.TrimSpace(sourceDID)]; ok && canonicalID != sourceDID {
 			return result, fmt.Errorf("%w: target DID %q is an alias for %q", errorapi.ErrBulkOverwriteConflict, sourceDID, canonicalID)
-		}
-		if aliasErr != nil && !errorapi.IsNotFoundError(aliasErr) {
-			return result, aliasErr
 		}
 		targetDID := sourceDID
 		matched := false

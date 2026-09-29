@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/calypr/syfon/client/common"
 )
@@ -47,6 +48,22 @@ type ReadBackend interface {
 type MultipartPart struct {
 	PartNumber int32
 	ETag       string
+}
+
+type MultipartPartURL struct {
+	PartNumber int32
+	URL        string
+	ExpiresAt  time.Time
+}
+
+type MultipartPartURLBatch struct {
+	Parts          []MultipartPartURL
+	BatchSupported bool
+}
+
+type MultipartPartURLBackend interface {
+	MultipartPartURLs(context.Context, string, string, []int32) (MultipartPartURLBatch, error)
+	UploadPart(context.Context, string, io.Reader, int64) (string, error)
 }
 
 type MultipartBackend interface {

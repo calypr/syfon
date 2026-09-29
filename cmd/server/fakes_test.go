@@ -202,6 +202,17 @@ func (s *serverObjectStore) ResolveObjectAlias(_ context.Context, aliasID string
 	return canonicalID, nil
 }
 
+func (s *serverObjectStore) ResolveObjectAliases(_ context.Context, ids []string) (map[string]string, error) {
+	resolved := make(map[string]string)
+	for _, rawID := range ids {
+		id := strings.TrimSpace(rawID)
+		if canonicalID := s.aliases[id]; canonicalID != "" {
+			resolved[id] = canonicalID
+		}
+	}
+	return resolved, nil
+}
+
 func (s *serverObjectStore) ResolveObjectIDs(_ context.Context, ids []string) (map[string]string, error) {
 	resolved := make(map[string]string, len(ids))
 	for _, id := range ids {
@@ -416,7 +427,7 @@ type serverTestDependencies struct {
 func mockServerDependencies(objectStore *serverObjectStore, bucketStore *serverBucketStore) serverTestDependencies {
 	bucketService, err := buckets.NewService(buckets.Dependencies{
 		Credentials: bucketStore, CredentialAdmin: bucketStore, Scopes: bucketStore,
-		Visibility: serverVisibilityQuery{},
+		Visibility: serverVisibilityQuery{store: bucketStore},
 	}, nil)
 	if err != nil {
 		panic(err)
@@ -430,7 +441,22 @@ func mockServerDependencies(objectStore *serverObjectStore, bucketStore *serverB
 	}
 }
 
-type serverVisibilityQuery struct{}
+type serverVisibilityQuery struct{ store *serverBucketStore }
+
+func (q serverVisibilityQuery) ListCredentialMetadata(ctx context.Context) ([]buckets.CredentialMetadata, error) {
+	credentials, err := q.store.ListS3Credentials(ctx)
+	if err != nil {
+		return nil, err
+	}
+	metadata := make([]buckets.CredentialMetadata, 0, len(credentials))
+	for _, credential := range credentials {
+		metadata = append(metadata, buckets.CredentialMetadata{
+			CredentialID: credential.CredentialID, Bucket: credential.Bucket, Provider: credential.Provider,
+			Region: credential.Region, Endpoint: credential.Endpoint,
+		})
+	}
+	return metadata, nil
+}
 
 func (serverVisibilityQuery) ListBucketVisibilityRows(context.Context, []string, bool, bool) ([]buckets.VisibilityRow, error) {
 	return nil, nil
