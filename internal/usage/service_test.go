@@ -9,6 +9,7 @@ import (
 
 	"github.com/calypr/syfon/apigen/errorapi"
 	"github.com/calypr/syfon/apigen/metricsapi"
+	"github.com/calypr/syfon/internal/objects"
 )
 
 var (
@@ -173,16 +174,18 @@ func (s *objectReaderSpy) ResolveObjectIDs(_ context.Context, ids []string) (map
 	return resolved, nil
 }
 
-func (s *objectReaderSpy) ListReadableObjectIDsAmong(_ context.Context, organization, project string, requested []string) ([]string, error) {
+func (s *objectReaderSpy) ListReadableObjectIDsAmongScopes(_ context.Context, scopes []objects.Scope, requested []string) ([]string, error) {
 	s.requested = append(s.requested, append([]string(nil), requested...))
 	wanted := make(map[string]struct{}, len(requested))
 	for _, id := range requested {
 		wanted[id] = struct{}{}
 	}
 	result := make([]string, 0, len(requested))
-	for _, id := range s.ids[organization+"/"+project] {
-		if _, ok := wanted[id]; ok {
-			result = append(result, id)
+	for _, scope := range scopes {
+		for _, id := range s.ids[scope.Organization+"/"+scope.Project] {
+			if _, ok := wanted[id]; ok {
+				result = append(result, id)
+			}
 		}
 	}
 	return result, nil
@@ -229,6 +232,9 @@ func TestServiceListsReadableObjectIDsByScopeInRequestOrder(t *testing.T) {
 	}
 	if want := []string{"c", "a", "b"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("readable IDs = %v, want %v", got, want)
+	}
+	if len(objects.requested) != 1 || !reflect.DeepEqual(objects.requested[0], requested) {
+		t.Fatalf("plural lookup requests = %v, want one ordered batch %v", objects.requested, requested)
 	}
 
 	unscoped, err := service.listReadableObjectIDs(context.Background(), ScopeQuery{}, requested)

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/calypr/syfon/apigen/metricsapi"
+	"github.com/calypr/syfon/internal/objects"
 )
 
 // FileCounterRecorder records object upload and download counters.
@@ -34,7 +35,7 @@ type FileUsageReader interface {
 // ObjectReader resolves IDs and checks scoped read access for metrics objects.
 type ObjectReader interface {
 	ResolveObjectIDs(ctx context.Context, requested []string) (map[string]string, error)
-	ListReadableObjectIDsAmong(ctx context.Context, organization, project string, requested []string) ([]string, error)
+	ListReadableObjectIDsAmongScopes(ctx context.Context, scopes []objects.Scope, requested []string) ([]string, error)
 }
 
 // ProviderEventRecorder records provider-reported transfer events.

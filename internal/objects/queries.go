@@ -67,26 +67,36 @@ func (s *Service) ListObjectIDsByScope(ctx context.Context, organization, projec
 	return out, nil
 }
 
-// ListReadableObjectIDsAmong applies scoped read policy to the requested IDs
-// without listing every object in the scope.
-func (s *Service) ListReadableObjectIDsAmong(ctx context.Context, organization, project string, requested []string) ([]string, error) {
+// ListReadableObjectIDsAmongScopes applies each scope's read policy to the
+// requested records while loading those records once.
+func (s *Service) ListReadableObjectIDsAmongScopes(ctx context.Context, scopes []Scope, requested []string) ([]string, error) {
+	if len(scopes) == 0 || len(requested) == 0 {
+		return []string{}, nil
+	}
 	objects, err := s.store.GetBulkObjects(ctx, requested)
 	if err != nil {
 		return nil, err
 	}
-	scoped := make([]drs.DrsObject, 0, len(objects))
-	for _, obj := range objects {
-		if objectMatchesScope(&obj, organization, project) {
-			scoped = append(scoped, obj)
+	ids := make([]string, 0, len(objects))
+	seen := make(map[string]struct{}, len(objects))
+	for _, scope := range scopes {
+		scoped := make([]drs.DrsObject, 0, len(objects))
+		for _, obj := range objects {
+			if objectMatchesScope(&obj, scope.Organization, scope.Project) {
+				scoped = append(scoped, obj)
+			}
 		}
-	}
-	filtered, err := s.prepareScopedRecords(ctx, scoped, Scope{Organization: organization, Project: project}, objectMethodRead)
-	if err != nil {
-		return nil, err
-	}
-	ids := make([]string, 0, len(filtered))
-	for _, obj := range filtered {
-		ids = append(ids, obj.Id)
+		filtered, err := s.prepareScopedRecords(ctx, scoped, scope, objectMethodRead)
+		if err != nil {
+			return nil, err
+		}
+		for _, obj := range filtered {
+			if _, ok := seen[obj.Id]; ok {
+				continue
+			}
+			seen[obj.Id] = struct{}{}
+			ids = append(ids, obj.Id)
+		}
 	}
 	return ids, nil
 }
