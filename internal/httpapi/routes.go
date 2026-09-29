@@ -79,29 +79,24 @@ func RegisterRoutes(app fiber.Router, deps Dependencies, options Options) {
 		return
 	}
 
-	// Documentation is intentionally registered before the protected API group.
-	// The OpenAPI documents and UI are public metadata, like the health endpoints.
+	api := app.Group("/")
+	if deps.RequestIDs != nil {
+		api.Use(deps.RequestIDs)
+	}
 	if options.Docs {
-		apidocs.RegisterSwaggerRoutes(app.Group("/"))
+		apidocs.RegisterSwaggerRoutes(api)
 	}
 
-	api := app.Group("/")
-	var middlewares []any
-	if deps.RequestIDs != nil {
-		middlewares = append(middlewares, deps.RequestIDs)
-	}
+	protected := api.Group("/")
 	if deps.Authorization != nil {
-		middlewares = append(middlewares, deps.Authorization)
-	}
-	if len(middlewares) > 0 {
-		api.Use(middlewares...)
+		protected.Use(deps.Authorization)
 	}
 
 	if options.GA4GH {
-		registerDRSRoutes(api.Group("/ga4gh/drs/v1"), deps.Objects, deps.Transfers, deps.ServiceInfo, options.MaxBulkRequestLength)
+		registerDRSRoutes(protected.Group("/ga4gh/drs/v1"), deps.Objects, deps.Transfers, deps.ServiceInfo, options.MaxBulkRequestLength)
 	}
 	if options.Metrics {
-		registerMetricsRoutes(api, deps.UsageReports, deps.UsageIngest)
+		registerMetricsRoutes(protected, deps.UsageReports, deps.UsageIngest)
 	}
 	if options.Internal {
 		server := &internalServer{
@@ -111,11 +106,11 @@ func RegisterRoutes(app fiber.Router, deps Dependencies, options Options) {
 			buckets:              deps.Buckets,
 			maxBulkRequestLength: options.MaxBulkRequestLength,
 		}
-		internalapi.RegisterHandlers(api, server)
-		registerBucketRoutes(api, deps.Buckets, deps.ProjectStorage)
+		internalapi.RegisterHandlers(protected, server)
+		registerBucketRoutes(protected, deps.Buckets, deps.ProjectStorage)
 	}
 	if options.LFS {
-		registerLFSRoutes(api, deps.LFS, options.LFSProtocol)
+		registerLFSRoutes(protected, deps.LFS, options.LFSProtocol)
 	}
 }
 
