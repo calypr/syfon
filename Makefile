@@ -122,7 +122,7 @@ test-race:
 
 .PHONY: test-unit
 test-unit:
-	@PKGS=$$(go list ./... ./client/... ./apigen/... | grep -Ev '/cmd/server$$|/tests/endpoints$$'); \
+	@PKGS=$$(go list ./... ./client/... ./apigen/... | grep -Ev '/tests/endpoints$$'); \
 	  CGO_ENABLED=1 GOCACHE="$(GOCACHE)" go test -v -count=1 $$PKGS
 
 .PHONY: coverage
