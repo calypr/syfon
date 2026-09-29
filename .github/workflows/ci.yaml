@@ -496,6 +496,7 @@ jobs:
 
   merge:
     name: Merge and Tag
+    if: ${{ !cancelled() && needs.ci-required.result == 'success' && needs.build-and-push.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs:
