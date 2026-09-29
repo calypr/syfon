@@ -26,7 +26,11 @@ GOFLAGS="-modfile=$root_modfile" "$go_cmd" test -mod=readonly ./...
 
 (
 	cd client
-	"$go_cmd" test -mod=readonly ./...
+	client_modfile="$fixture_root/client.mod"
+	cp go.mod "$client_modfile"
+	cp go.sum "${client_modfile%.mod}.sum"
+	"$go_cmd" mod edit -modfile="$client_modfile" -replace="github.com/calypr/syfon/apigen=$repo_root/apigen"
+	GOFLAGS="-modfile=$client_modfile" "$go_cmd" test -mod=readonly ./...
 )
 
 apigen_version="$("$go_cmd" list -m -f '{{.Version}}' github.com/calypr/syfon/apigen)"

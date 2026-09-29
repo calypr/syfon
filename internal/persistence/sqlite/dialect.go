@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -29,6 +30,12 @@ func (sqliteDialect) ListArgs(column string, values []string) (string, []any) {
 func (sqliteDialect) LockContentWrite(context.Context, *sql.Tx) error {
 	// sqliteDSN enables _txlock=immediate, so BeginTx already acquires the
 	// write reservation before the caller performs identity reads.
+	return nil
+}
+
+func (sqliteDialect) LockObjectUsageEventIDs(context.Context, *sql.Tx, []string) error {
+	// The immediate write transaction already serializes usage events with
+	// object repair and registration.
 	return nil
 }
 
@@ -105,28 +112,6 @@ func (db *sqliteSchemaBootstrap) initSchema() error {
 			secret_key TEXT,
 			endpoint TEXT
 		)`,
-		`CREATE TRIGGER IF NOT EXISTS s3_credential_unique_bucket_insert
-		BEFORE INSERT ON s3_credential
-		FOR EACH ROW
-		WHEN EXISTS (
-			SELECT 1
-			FROM s3_credential
-			WHERE bucket = NEW.bucket AND credential_id <> NEW.credential_id
-		)
-		BEGIN
-			SELECT RAISE(ABORT, 'physical bucket is already configured under another credential');
-		END`,
-		`CREATE TRIGGER IF NOT EXISTS s3_credential_unique_bucket_update
-		BEFORE UPDATE OF bucket, credential_id ON s3_credential
-		FOR EACH ROW
-		WHEN EXISTS (
-			SELECT 1
-			FROM s3_credential
-			WHERE bucket = NEW.bucket AND credential_id <> NEW.credential_id
-		)
-		BEGIN
-			SELECT RAISE(ABORT, 'physical bucket is already configured under another credential');
-		END`,
 		`CREATE TABLE IF NOT EXISTS bucket_scope (
 			organization TEXT NOT NULL,
 			project_id TEXT NOT NULL,
@@ -135,7 +120,6 @@ func (db *sqliteSchemaBootstrap) initSchema() error {
 			path_prefix TEXT,
 			PRIMARY KEY (organization, project_id)
 		)`,
-		`CREATE INDEX IF NOT EXISTS idx_bucket_scope_credential_id ON bucket_scope(credential_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_bucket_scope_bucket ON bucket_scope(bucket)`,
 		`CREATE TABLE IF NOT EXISTS lfs_pending_metadata (
 			oid TEXT PRIMARY KEY,
@@ -343,7 +327,7 @@ func (db *sqliteSchemaBootstrap) initSchema() error {
 	return nil
 }
 
-func (db *sqliteSchemaBootstrap) ensureObjectTableShape() error {
+func (db *sqliteSchemaBootstrap) ensureObjectTableShape() (returnErr error) {
 	rows, err := db.db.Query(`PRAGMA table_info(drs_object)`)
 	if err != nil {
 		return err
@@ -366,15 +350,33 @@ func (db *sqliteSchemaBootstrap) ensureObjectTableShape() error {
 	if err := rows.Err(); err != nil {
 		return err
 	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
 	if !hasFileName {
 		return nil
 	}
 
-	tx, err := db.db.Begin()
+	ctx := context.Background()
+	conn, err := db.db.Conn(ctx)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, `PRAGMA foreign_keys = OFF`); err != nil {
+		return fmt.Errorf("disable SQLite foreign key enforcement for object migration: %w", err)
+	}
+	defer func() {
+		if _, err := conn.ExecContext(context.Background(), `PRAGMA foreign_keys = ON`); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("restore SQLite foreign key enforcement: %w", err))
+		}
+	}()
+
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
 
 	for _, stmt := range []string{
 		`CREATE TABLE drs_object_new (
@@ -395,8 +397,36 @@ func (db *sqliteSchemaBootstrap) ensureObjectTableShape() error {
 			return err
 		}
 	}
+	if err := checkSQLiteForeignKeys(ctx, tx); err != nil {
+		return err
+	}
 
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func checkSQLiteForeignKeys(ctx context.Context, tx *sql.Tx) error {
+	rows, err := tx.QueryContext(ctx, `PRAGMA foreign_key_check`)
+	if err != nil {
+		return fmt.Errorf("check SQLite foreign keys after object migration: %w", err)
+	}
+	defer rows.Close()
+	if rows.Next() {
+		var table string
+		var rowID sql.NullInt64
+		var parent string
+		var foreignKeyID int
+		if err := rows.Scan(&table, &rowID, &parent, &foreignKeyID); err != nil {
+			return fmt.Errorf("scan SQLite foreign key check: %w", err)
+		}
+		return fmt.Errorf("SQLite foreign key violation after object migration: table=%s row=%v parent=%s fk=%d", table, rowID, parent, foreignKeyID)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("read SQLite foreign key check: %w", err)
+	}
+	return rows.Close()
 }
 
 func (db *sqliteSchemaBootstrap) ensureCredentialIdentitySchema() error {
@@ -418,13 +448,33 @@ func (db *sqliteSchemaBootstrap) ensureCredentialIdentitySchema() error {
 			hasCredentialID = true
 		}
 	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
 	if err := rows.Close(); err != nil {
 		return err
 	}
-	if !hasCredentialID {
-		if _, err := db.db.Exec(`
-			ALTER TABLE s3_credential RENAME TO s3_credential_legacy;
-			CREATE TABLE s3_credential (
+	var legacyName string
+	err = db.db.QueryRow(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 's3_credential_legacy'`).Scan(&legacyName)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	legacyExists := err == nil
+	if !hasCredentialID || legacyExists {
+		if !hasCredentialID && legacyExists {
+			return fmt.Errorf("credential identity migration found both old and legacy tables")
+		}
+		tx, err := db.db.BeginTx(context.Background(), nil)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = tx.Rollback() }()
+		if !hasCredentialID {
+			if _, err := tx.Exec(`ALTER TABLE s3_credential RENAME TO s3_credential_legacy`); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(`CREATE TABLE s3_credential (
 				credential_id TEXT PRIMARY KEY,
 				bucket TEXT NOT NULL,
 				provider TEXT NOT NULL DEFAULT 's3',
@@ -432,11 +482,44 @@ func (db *sqliteSchemaBootstrap) ensureCredentialIdentitySchema() error {
 				access_key TEXT,
 				secret_key TEXT,
 				endpoint TEXT
-			);
-			INSERT INTO s3_credential (credential_id, bucket, provider, region, access_key, secret_key, endpoint)
-				SELECT bucket, bucket, provider, region, access_key, secret_key, endpoint FROM s3_credential_legacy;
-			DROP TABLE s3_credential_legacy;
-		`); err != nil {
+			)`); err != nil {
+				return err
+			}
+		}
+		var conflictingRows int
+		if err := tx.QueryRow(`SELECT COUNT(*)
+			FROM s3_credential_legacy AS legacy
+			JOIN s3_credential AS current ON current.credential_id = legacy.bucket
+			WHERE current.bucket IS NOT legacy.bucket
+				OR current.provider IS NOT legacy.provider
+				OR current.region IS NOT legacy.region
+				OR current.access_key IS NOT legacy.access_key
+				OR current.secret_key IS NOT legacy.secret_key
+				OR current.endpoint IS NOT legacy.endpoint`).Scan(&conflictingRows); err != nil {
+			return err
+		}
+		if conflictingRows != 0 {
+			return fmt.Errorf("credential identity migration found %d conflicting legacy credentials", conflictingRows)
+		}
+		if err := tx.QueryRow(`SELECT COUNT(*)
+			FROM s3_credential_legacy AS legacy
+			JOIN s3_credential AS current ON current.bucket = legacy.bucket
+			WHERE current.credential_id <> legacy.bucket`).Scan(&conflictingRows); err != nil {
+			return err
+		}
+		if conflictingRows != 0 {
+			return fmt.Errorf("credential identity migration found %d conflicting bucket assignments", conflictingRows)
+		}
+		if _, err := tx.Exec(`INSERT INTO s3_credential (credential_id, bucket, provider, region, access_key, secret_key, endpoint)
+			SELECT bucket, bucket, provider, region, access_key, secret_key, endpoint
+			FROM s3_credential_legacy WHERE true
+			ON CONFLICT(credential_id) DO NOTHING`); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`DROP TABLE s3_credential_legacy`); err != nil {
+			return err
+		}
+		if err := tx.Commit(); err != nil {
 			return err
 		}
 	}
@@ -453,6 +536,34 @@ func (db *sqliteSchemaBootstrap) ensureCredentialIdentitySchema() error {
 	}
 	if _, err := db.db.Exec(`CREATE INDEX IF NOT EXISTS idx_s3_credential_bucket ON s3_credential(bucket)`); err != nil {
 		return err
+	}
+	for _, query := range []string{
+		`CREATE TRIGGER IF NOT EXISTS s3_credential_unique_bucket_insert
+		BEFORE INSERT ON s3_credential
+		FOR EACH ROW
+		WHEN EXISTS (
+			SELECT 1
+			FROM s3_credential
+			WHERE bucket = NEW.bucket AND credential_id <> NEW.credential_id
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'physical bucket is already configured under another credential');
+		END`,
+		`CREATE TRIGGER IF NOT EXISTS s3_credential_unique_bucket_update
+		BEFORE UPDATE OF bucket, credential_id ON s3_credential
+		FOR EACH ROW
+		WHEN EXISTS (
+			SELECT 1
+			FROM s3_credential
+			WHERE bucket = NEW.bucket AND credential_id <> NEW.credential_id
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'physical bucket is already configured under another credential');
+		END`,
+	} {
+		if _, err := db.db.Exec(query); err != nil {
+			return err
+		}
 	}
 	return nil
 }

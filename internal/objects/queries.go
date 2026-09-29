@@ -2,6 +2,7 @@ package objects
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strings"
 
@@ -64,6 +65,39 @@ func (s *Service) ListObjectIDsByScope(ctx context.Context, organization, projec
 		out = append(out, obj.Id)
 	}
 	return out, nil
+}
+
+// ListReadableObjectIDsAmong applies scoped read policy to the requested IDs
+// without listing every object in the scope.
+func (s *Service) ListReadableObjectIDsAmong(ctx context.Context, organization, project string, requested []string) ([]string, error) {
+	objects, err := s.store.GetBulkObjects(ctx, requested)
+	if err != nil {
+		return nil, err
+	}
+	scoped := make([]drs.DrsObject, 0, len(objects))
+	for _, obj := range objects {
+		if objectMatchesScope(&obj, organization, project) {
+			scoped = append(scoped, obj)
+		}
+	}
+	filtered, err := s.prepareScopedRecords(ctx, scoped, Scope{Organization: organization, Project: project}, objectMethodRead)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(filtered))
+	for _, obj := range filtered {
+		ids = append(ids, obj.Id)
+	}
+	return ids, nil
+}
+
+// ResolveObjectIDs maps physical IDs and aliases to their canonical physical
+// IDs for callers that need to query data keyed by the canonical ID.
+func (s *Service) ResolveObjectIDs(ctx context.Context, requested []string) (map[string]string, error) {
+	if s == nil || s.store == nil {
+		return nil, fmt.Errorf("object store is unavailable")
+	}
+	return s.store.ResolveObjectIDs(ctx, requested)
 }
 
 // ListPhysicalObjectsByScope returns stored rows without checksum-family merging.

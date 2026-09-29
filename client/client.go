@@ -125,6 +125,7 @@ func NewClient(cfg *Config) (*Client, error) {
 
 	cred := &conf.Credential{
 		AccessToken: cfg.Token,
+		APIEndpoint: bu,
 	}
 	if cfg.BasicAuth != nil {
 		cred.KeyID = cfg.BasicAuth.Username

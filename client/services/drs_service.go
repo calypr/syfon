@@ -67,6 +67,20 @@ func (s *DRSService) RegisterObjects(ctx context.Context, req drsapi.RegisterObj
 	return *resp.JSON201, nil
 }
 
+func (s *DRSService) ReplaceObject(ctx context.Context, objectID, expectedOldSHA string, candidate drsapi.DrsObjectCandidate) (drsapi.DrsObject, error) {
+	resp, err := s.gen.ReplaceObjectWithResponse(ctx, drsapi.ObjectId(objectID), drsapi.ReplaceObjectJSONRequestBody{
+		ExpectedOldSha256: expectedOldSHA,
+		Candidate:         candidate,
+	})
+	if err != nil {
+		return drsapi.DrsObject{}, err
+	}
+	if resp.JSON200 == nil {
+		return drsapi.DrsObject{}, apierror.FromResponse(resp.HTTPResponse, resp.Body)
+	}
+	return *resp.JSON200, nil
+}
+
 func (s *DRSService) UpdateObjectAccessMethods(ctx context.Context, objectID string, accessMethods []drsapi.AccessMethod) (drsapi.DrsObject, error) {
 	resp, err := s.gen.UpdateObjectAccessMethodsWithResponse(ctx, objectID, drsapi.UpdateObjectAccessMethodsJSONRequestBody{
 		AccessMethods: accessMethods,

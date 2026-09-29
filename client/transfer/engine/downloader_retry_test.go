@@ -6,12 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/calypr/syfon/client/apierror"
 	"github.com/calypr/syfon/client/common"
 	"github.com/calypr/syfon/client/transfer"
 )
@@ -51,6 +53,7 @@ type retryDownloadBackend struct {
 
 	mu             sync.Mutex
 	fullCalls      int
+	readerErrors   []error
 	rangeCalls     [][2]int64
 	failFullOnce   bool
 	failRangeOnce  bool
@@ -67,9 +70,13 @@ func (b *retryDownloadBackend) Stat(context.Context, string) (*transfer.ObjectMe
 func (b *retryDownloadBackend) GetReader(context.Context, string) (io.ReadCloser, error) {
 	b.mu.Lock()
 	b.fullCalls++
+	call := b.fullCalls
 	shouldFail := b.failFullOnce && b.fullCalls == 1
 	onFailure := b.onFailure
 	b.mu.Unlock()
+	if call <= len(b.readerErrors) && b.readerErrors[call-1] != nil {
+		return nil, b.readerErrors[call-1]
+	}
 	if shouldFail {
 		return &partialDownloadBody{reader: bytes.NewReader(b.data), failAfter: 3, failErr: errors.New("transient full read"), onFailure: onFailure}, nil
 	}
@@ -96,6 +103,13 @@ func (b *retryDownloadBackend) GetRangeReader(_ context.Context, _ string, offse
 
 func (b *retryDownloadBackend) GetWriter(context.Context, string) (io.WriteCloser, error) {
 	return nil, errors.New("unused")
+}
+
+type countingDownloadRetry struct{ waits int }
+
+func (s *countingDownloadRetry) WaitTime(int) time.Duration {
+	s.waits++
+	return 0
 }
 
 func progressEventsForDownload(t *testing.T, ctx context.Context) (context.Context, *[]common.ProgressEvent) {
@@ -139,7 +153,7 @@ func TestDownloaderRetriesPartialFullReadWithoutDuplicatingProgress(t *testing.T
 	destination := filepath.Join(t.TempDir(), "download.bin")
 	ctx, events := progressEventsForDownload(t, context.Background())
 
-	if err := (&downloader{Source: backend, RetryStrategy: instantDownloadRetry{}}).downloadSingle(ctx, "object", destination, int64(len(data))); err != nil {
+	if err := (&downloader{Source: backend, RetryStrategy: instantDownloadRetry{}}).downloadSingle(ctx, "object", destination, int64(len(data)), true); err != nil {
 		t.Fatalf("downloadSingle returned error: %v", err)
 	}
 	got, err := os.ReadFile(destination)
@@ -164,7 +178,7 @@ func TestDownloaderRetriesPartialRangeFromCurrentDestinationOffset(t *testing.T)
 	}
 	ctx, events := progressEventsForDownload(t, context.Background())
 
-	if err := (&downloader{Source: backend, RetryStrategy: instantDownloadRetry{}}).downloadSingle(ctx, "object", destination, int64(len(data))); err != nil {
+	if err := (&downloader{Source: backend, RetryStrategy: instantDownloadRetry{}}).downloadSingle(ctx, "object", destination, int64(len(data)), true); err != nil {
 		t.Fatalf("downloadSingle returned error: %v", err)
 	}
 	got, err := os.ReadFile(destination)
@@ -233,7 +247,7 @@ func TestDownloaderCancellationStopsBeforeAnotherFullAttempt(t *testing.T) {
 	backend := &retryDownloadBackend{data: []byte("download"), failFullOnce: true}
 	backend.onFailure = cancel
 	destination := filepath.Join(t.TempDir(), "download.bin")
-	err := (&downloader{Source: backend, RetryStrategy: instantDownloadRetry{}}).downloadSingle(ctx, "object", destination, int64(len(backend.data)))
+	err := (&downloader{Source: backend, RetryStrategy: instantDownloadRetry{}}).downloadSingle(ctx, "object", destination, int64(len(backend.data)), true)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("downloadSingle error = %v, want context cancellation", err)
 	}
@@ -247,11 +261,56 @@ func TestDownloaderProgressCallbackErrorDoesNotRetry(t *testing.T) {
 	wantErr := errors.New("progress sink failed")
 	ctx := common.WithProgress(context.Background(), func(common.ProgressEvent) error { return wantErr })
 	destination := filepath.Join(t.TempDir(), "download.bin")
-	err := (&downloader{Source: backend, RetryStrategy: instantDownloadRetry{}}).downloadSingle(ctx, "object", destination, int64(len(backend.data)))
+	err := (&downloader{Source: backend, RetryStrategy: instantDownloadRetry{}}).downloadSingle(ctx, "object", destination, int64(len(backend.data)), true)
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("downloadSingle error = %v, want %v", err, wantErr)
 	}
 	if backend.fullCalls != 1 {
 		t.Fatalf("full reader calls = %d, want one", backend.fullCalls)
+	}
+}
+
+func TestDownloaderPermanentHTTPErrorDoesNotRetry(t *testing.T) {
+	readerErrors := make([]error, common.MaxRetryCount+1)
+	for i := range readerErrors {
+		readerErrors[i] = &apierror.APIError{Status: http.StatusForbidden}
+	}
+	backend := &retryDownloadBackend{
+		data:         []byte("download"),
+		readerErrors: readerErrors,
+	}
+	strategy := &countingDownloadRetry{}
+	destination := filepath.Join(t.TempDir(), "download.bin")
+	err := (&downloader{Source: backend, RetryStrategy: strategy}).downloadSingle(context.Background(), "object", destination, int64(len(backend.data)), true)
+	var responseErr *apierror.APIError
+	if !errors.As(err, &responseErr) || responseErr.Status != http.StatusForbidden {
+		t.Fatalf("download error = %v, want typed HTTP 403", err)
+	}
+	if backend.fullCalls != 1 || strategy.waits != 0 {
+		t.Fatalf("HTTP 403 made %d reader calls and %d backoff waits, want one call and no wait", backend.fullCalls, strategy.waits)
+	}
+}
+
+func TestDownloaderRetriesTransientHTTPStatus(t *testing.T) {
+	for _, status := range []int{408, 429, 503} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			backend := &retryDownloadBackend{
+				data:         []byte("download"),
+				readerErrors: []error{&apierror.APIError{Status: status}},
+			}
+			strategy := &countingDownloadRetry{}
+			destination := filepath.Join(t.TempDir(), "download.bin")
+			err := (&downloader{Source: backend, RetryStrategy: strategy}).downloadSingle(context.Background(), "object", destination, int64(len(backend.data)), true)
+			if err != nil {
+				t.Fatalf("download error = %v, want retry to succeed", err)
+			}
+			if backend.fullCalls != 2 || strategy.waits != 1 {
+				t.Fatalf("HTTP %d made %d reader calls and %d backoff waits, want two calls and one wait", status, backend.fullCalls, strategy.waits)
+			}
+			got, readErr := os.ReadFile(destination)
+			if readErr != nil || !bytes.Equal(got, backend.data) {
+				t.Fatalf("downloaded bytes = %q, read error = %v; want %q", got, readErr, backend.data)
+			}
+		})
 	}
 }

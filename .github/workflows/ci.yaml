@@ -128,6 +128,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs: verify-generated
+    env:
+      DRS_CREDENTIAL_MASTER_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
     services:
       postgres:
         image: postgres:16
@@ -300,7 +302,7 @@ jobs:
         shell: bash
 
       - name: Install govulncheck
-        run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.3.0
 
       - name: Install Staticcheck
         run: go install honnef.co/go/tools/cmd/staticcheck@v0.8.1
@@ -316,6 +318,9 @@ jobs:
 
       - name: Check for Go CVEs - Client module
         run: cd client && $(go env GOPATH)/bin/govulncheck ./...
+
+      - name: Check for Go CVEs - API bindings module
+        run: cd apigen && $(go env GOPATH)/bin/govulncheck ./...
   integration-test:
     name: Docker Integration Test
     runs-on: ubuntu-latest
@@ -386,6 +391,7 @@ jobs:
 
   build-and-push:
     name: Build syfon
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ${{ matrix.arch == 'amd64' && 'ubuntu-latest' || 'ubuntu-24.04-arm' }}
     timeout-minutes: 20
     strategy:
@@ -442,6 +448,26 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  build-fork-pr:
+    name: Build fork pull request
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      - name: Build image without publishing
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          push: false
+
   ci-required:
     name: Required CI
     if: always()
@@ -456,11 +482,17 @@ jobs:
       - static-checks
       - integration-test
       - calypr-integration
+      - build-fork-pr
     steps:
       - name: Require every validation job
         env:
           NEEDS_JSON: ${{ toJSON(needs) }}
-        run: jq -e 'all(.[]; .result == "success")' <<<"$NEEDS_JSON"
+          FORK_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
+        run: |
+          jq -e --argjson fork "$FORK_PR" '
+            .["build-fork-pr"].result == (if $fork then "success" else "skipped" end)
+            and (to_entries | all(.[]; .key == "build-fork-pr" or .value.result == "success"))
+          ' <<<"$NEEDS_JSON"
 
   merge:
     name: Merge and Tag

@@ -110,7 +110,7 @@ The destination bucket is resolved on the destination Syfon instance when it alr
 		copiedCount := 0
 		skippedCount := 0
 		for i, rec := range records {
-			if err := copyRecord(ctx, cmd, sourceClient, targetClient, rec, resolved.targetBucket, targetProjectPath, dstResource, i+1, len(records), tempDir); err != nil {
+			if err := copyRecord(ctx, cmd, sourceClient, targetClient, rec, resolved.targetBucket, resolved.targetProvider, targetProjectPath, dstResource, i+1, len(records), tempDir); err != nil {
 				skippedCount++
 				fmt.Fprintf(cmd.ErrOrStderr(), "warning: skipping %s: %v\n", rec.Did, err)
 				continue

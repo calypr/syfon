@@ -61,30 +61,39 @@ func (postgresDialect) LockContentWrite(ctx context.Context, tx *sql.Tx) error {
 	return err
 }
 
+func (postgresDialect) LockObjectUsageEventIDs(ctx context.Context, tx *sql.Tx, ids []string) error {
+	for _, id := range ids {
+		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('syfon-object-usage-event:' || $1::text, 0))`, id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (postgresDialect) Bootstrap(ctx context.Context, db *sql.DB) error {
 	bootstrap := &postgresSchemaBootstrap{db: db}
-	if err := bootstrap.ensureObjectSchema(); err != nil {
+	if err := bootstrap.ensureObjectSchema(ctx); err != nil {
 		return err
 	}
-	if err := bootstrap.ensureBucketScopeSchema(); err != nil {
+	if err := bootstrap.ensureBucketScopeSchema(ctx); err != nil {
 		return err
 	}
-	if err := bootstrap.ensureS3CredentialSchema(); err != nil {
+	if err := bootstrap.ensureS3CredentialSchema(ctx); err != nil {
 		return err
 	}
-	if err := bootstrap.ensureLFSPendingSchema(); err != nil {
+	if err := bootstrap.ensureLFSPendingSchema(ctx); err != nil {
 		return err
 	}
-	if err := bootstrap.ensureMultipartUploadSchema(); err != nil {
+	if err := bootstrap.ensureMultipartUploadSchema(ctx); err != nil {
 		return err
 	}
-	if err := bootstrap.ensureObjectUsageSchema(); err != nil {
+	if err := bootstrap.ensureObjectUsageSchema(ctx); err != nil {
 		return err
 	}
-	if err := bootstrap.ensurePendingObjectUsageSchema(); err != nil {
+	if err := bootstrap.ensurePendingObjectUsageSchema(ctx); err != nil {
 		return err
 	}
-	if err := bootstrap.ensureTransferAttributionSchema(); err != nil {
+	if err := bootstrap.ensureTransferAttributionSchema(ctx); err != nil {
 		return err
 	}
 	return nil
@@ -115,17 +124,17 @@ type postgresSchemaBootstrap struct {
 	db *sql.DB
 }
 
-func (s *postgresSchemaBootstrap) ensureObjectSchema() error {
+func (s *postgresSchemaBootstrap) ensureObjectSchema(ctx context.Context) error {
 	queries, err := objectSchemaStatements()
 	if err != nil {
 		return fmt.Errorf("failed to load object schema: %w", err)
 	}
 	for _, q := range queries {
-		if _, err := s.db.Exec(q); err != nil {
+		if _, err := s.db.ExecContext(ctx, q); err != nil {
 			return fmt.Errorf("failed to initialize object schema: %w", err)
 		}
 	}
-	if err := s.validateLegacyAccessMethodScopes(context.Background()); err != nil {
+	if err := s.validateLegacyAccessMethodScopes(ctx); err != nil {
 		return fmt.Errorf("legacy object scope validation failed: %w", err)
 	}
 	return nil
@@ -185,7 +194,7 @@ func (s *postgresSchemaBootstrap) hasLegacyAccessMethodScopeColumns(ctx context.
 	return count == 2, nil
 }
 
-func (s *postgresSchemaBootstrap) ensureS3CredentialSchema() error {
+func (s *postgresSchemaBootstrap) ensureS3CredentialSchema(ctx context.Context) error {
 	queries := []string{
 		`CREATE TABLE IF NOT EXISTS s3_credential (
 			credential_id TEXT PRIMARY KEY,
@@ -222,14 +231,14 @@ func (s *postgresSchemaBootstrap) ensureS3CredentialSchema() error {
 		EXECUTE FUNCTION enforce_s3_credential_unique_bucket()`,
 	}
 	for _, q := range queries {
-		if _, err := s.db.Exec(q); err != nil {
+		if _, err := s.db.ExecContext(ctx, q); err != nil {
 			return fmt.Errorf("failed to initialize s3_credential credential identity schema: %w", err)
 		}
 	}
 	return nil
 }
 
-func (s *postgresSchemaBootstrap) ensureBucketScopeSchema() error {
+func (s *postgresSchemaBootstrap) ensureBucketScopeSchema(ctx context.Context) error {
 	queries := []string{
 		`CREATE TABLE IF NOT EXISTS bucket_scope (
 			organization TEXT NOT NULL,
@@ -249,14 +258,14 @@ func (s *postgresSchemaBootstrap) ensureBucketScopeSchema() error {
 		`CREATE INDEX IF NOT EXISTS idx_bucket_scope_bucket ON bucket_scope(bucket)`,
 	}
 	for _, q := range queries {
-		if _, err := s.db.Exec(q); err != nil {
+		if _, err := s.db.ExecContext(ctx, q); err != nil {
 			return fmt.Errorf("failed to initialize bucket scope schema: %w", err)
 		}
 	}
 	return nil
 }
 
-func (s *postgresSchemaBootstrap) ensureLFSPendingSchema() error {
+func (s *postgresSchemaBootstrap) ensureLFSPendingSchema(ctx context.Context) error {
 	queries := []string{
 		`CREATE TABLE IF NOT EXISTS lfs_pending_metadata (
 			oid TEXT PRIMARY KEY,
@@ -268,14 +277,14 @@ func (s *postgresSchemaBootstrap) ensureLFSPendingSchema() error {
 		`CREATE INDEX IF NOT EXISTS idx_lfs_pending_metadata_created ON lfs_pending_metadata(created_time)`,
 	}
 	for _, q := range queries {
-		if _, err := s.db.Exec(q); err != nil {
+		if _, err := s.db.ExecContext(ctx, q); err != nil {
 			return fmt.Errorf("failed to initialize lfs pending metadata schema: %w", err)
 		}
 	}
 	return nil
 }
 
-func (s *postgresSchemaBootstrap) ensureMultipartUploadSchema() error {
+func (s *postgresSchemaBootstrap) ensureMultipartUploadSchema(ctx context.Context) error {
 	queries := []string{
 		`CREATE TABLE IF NOT EXISTS multipart_upload_session (
 			upload_id TEXT PRIMARY KEY,
@@ -303,14 +312,14 @@ func (s *postgresSchemaBootstrap) ensureMultipartUploadSchema() error {
 		)`,
 	}
 	for _, query := range queries {
-		if _, err := s.db.Exec(query); err != nil {
+		if _, err := s.db.ExecContext(ctx, query); err != nil {
 			return fmt.Errorf("failed to initialize multipart upload schema: %w", err)
 		}
 	}
 	return nil
 }
 
-func (s *postgresSchemaBootstrap) ensureObjectUsageSchema() error {
+func (s *postgresSchemaBootstrap) ensureObjectUsageSchema(ctx context.Context) error {
 	queries := []string{
 		`CREATE TABLE IF NOT EXISTS object_usage (
 			object_id TEXT PRIMARY KEY REFERENCES drs_object(id) ON DELETE CASCADE,
@@ -325,14 +334,14 @@ func (s *postgresSchemaBootstrap) ensureObjectUsageSchema() error {
 		`CREATE INDEX IF NOT EXISTS idx_object_usage_last_upload_time ON object_usage(last_upload_time)`,
 	}
 	for _, q := range queries {
-		if _, err := s.db.Exec(q); err != nil {
+		if _, err := s.db.ExecContext(ctx, q); err != nil {
 			return fmt.Errorf("failed to initialize object usage schema: %w", err)
 		}
 	}
 	return nil
 }
 
-func (s *postgresSchemaBootstrap) ensurePendingObjectUsageSchema() error {
+func (s *postgresSchemaBootstrap) ensurePendingObjectUsageSchema(ctx context.Context) error {
 	queries := []string{
 		`CREATE TABLE IF NOT EXISTS object_usage_event (
 			id BIGSERIAL PRIMARY KEY,
@@ -344,14 +353,14 @@ func (s *postgresSchemaBootstrap) ensurePendingObjectUsageSchema() error {
 		`CREATE INDEX IF NOT EXISTS idx_object_usage_event_event_time ON object_usage_event(event_time)`,
 	}
 	for _, q := range queries {
-		if _, err := s.db.Exec(q); err != nil {
+		if _, err := s.db.ExecContext(ctx, q); err != nil {
 			return fmt.Errorf("failed to initialize object usage event schema: %w", err)
 		}
 	}
 	return nil
 }
 
-func (s *postgresSchemaBootstrap) ensureTransferAttributionSchema() error {
+func (s *postgresSchemaBootstrap) ensureTransferAttributionSchema(ctx context.Context) error {
 	queries := []string{
 		`CREATE TABLE IF NOT EXISTS transfer_attribution_event (
 			event_id TEXT PRIMARY KEY,
@@ -449,11 +458,11 @@ func (s *postgresSchemaBootstrap) ensureTransferAttributionSchema() error {
 		`CREATE INDEX IF NOT EXISTS idx_provider_transfer_grant ON provider_transfer_event(access_grant_id)`,
 	}
 	for _, q := range queries {
-		if _, err := s.db.Exec(q); err != nil {
+		if _, err := s.db.ExecContext(ctx, q); err != nil {
 			return fmt.Errorf("failed to initialize transfer attribution schema: %w", err)
 		}
 	}
-	if err := store.BackfillAccessGrants(context.Background(), s.db, postgresDialect{}); err != nil {
+	if err := store.BackfillAccessGrants(ctx, s.db, postgresDialect{}); err != nil {
 		return fmt.Errorf("failed to backfill access grants: %w", err)
 	}
 	return nil

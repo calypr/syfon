@@ -3,6 +3,7 @@ package transfer
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -21,9 +22,11 @@ type captureRequester struct {
 	request *http.Request
 	resp    *http.Response
 	err     error
+	calls   int
 }
 
 func (c *captureRequester) Do(req *http.Request) (*http.Response, error) {
+	c.calls++
 	c.request = req
 	c.method = req.Method
 	c.path = req.URL.String()
@@ -42,6 +45,12 @@ func TestDoUploadLocalPathAndFileScheme(t *testing.T) {
 	req := &captureRequester{}
 
 	rawPath := filepath.Join(tmp, "plain", "payload.txt")
+	if err := os.MkdirAll(filepath.Dir(rawPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(rawPath, []byte("old payload"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := DoUpload(ctx, req, rawPath, strings.NewReader(body), int64(len(body))); err != nil {
 		t.Fatalf("DoUpload raw path returned error: %v", err)
 	}
@@ -66,8 +75,128 @@ func TestDoUploadLocalPathAndFileScheme(t *testing.T) {
 		t.Fatalf("unexpected file URL payload %q", got)
 	}
 
+	emptyPath := filepath.Join(tmp, "empty", "payload.txt")
+	if _, err := DoUpload(ctx, req, emptyPath, strings.NewReader(""), 0); err != nil {
+		t.Fatalf("DoUpload returned error for an empty local upload: %v", err)
+	}
+	got, err = os.ReadFile(emptyPath)
+	if err != nil || len(got) != 0 {
+		t.Fatalf("empty local upload data=%q err=%v", got, err)
+	}
+
 	if _, err := DoUpload(ctx, req, "", strings.NewReader("x"), 1); err == nil || !strings.Contains(err.Error(), "invalid file upload url") {
 		t.Fatalf("expected invalid file upload url error, got %v", err)
+	}
+}
+
+func TestDoUploadLocalCanceledContextPreservesDestination(t *testing.T) {
+	destination := filepath.Join(t.TempDir(), "payload")
+	if err := os.WriteFile(destination, []byte("original"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	requester := &captureRequester{}
+	_, err := DoUpload(ctx, requester, destination, strings.NewReader("replacement"), int64(len("replacement")))
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("DoUpload error = %v, want context cancellation", err)
+	}
+	got, readErr := os.ReadFile(destination)
+	if readErr != nil || string(got) != "original" {
+		t.Fatalf("destination after canceled upload = %q, read error = %v; want original bytes", got, readErr)
+	}
+	if requester.calls != 0 {
+		t.Fatalf("HTTPDoer called %d times for local upload", requester.calls)
+	}
+}
+
+func TestDoUploadLocalStopsOnCancellationDuringCopy(t *testing.T) {
+	destination := filepath.Join(t.TempDir(), "payload")
+	if err := os.WriteFile(destination, []byte("original"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	body := &cancelAfterFirstRead{cancel: cancel}
+
+	_, err := DoUpload(ctx, &captureRequester{}, destination, body, int64(len("replacement")))
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("DoUpload error = %v, want context cancellation", err)
+	}
+	got, readErr := os.ReadFile(destination)
+	if readErr != nil || string(got) != "original" {
+		t.Fatalf("destination after canceled upload = %q, read error = %v; want original bytes", got, readErr)
+	}
+}
+
+type cancelAfterFirstRead struct {
+	cancel context.CancelFunc
+	done   bool
+}
+
+func (r *cancelAfterFirstRead) Read(p []byte) (int, error) {
+	if r.done {
+		return 0, io.EOF
+	}
+	r.done = true
+	n := copy(p, "replacement")
+	r.cancel()
+	return n, nil
+}
+
+func TestDoUploadLocalSizeMismatchPreservesDestination(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		body string
+		size int64
+	}{
+		{name: "short", body: "short", size: 10},
+		{name: "long", body: "longer than declared", size: 5},
+		{name: "long when zero was declared", body: "unexpected", size: 0},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			destination := filepath.Join(t.TempDir(), "payload")
+			if err := os.WriteFile(destination, []byte("original"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			_, err := DoUpload(context.Background(), &captureRequester{}, destination, strings.NewReader(test.body), test.size)
+			if err == nil || !strings.Contains(err.Error(), "size") {
+				t.Fatalf("DoUpload error = %v, want a size mismatch", err)
+			}
+			got, readErr := os.ReadFile(destination)
+			if readErr != nil || string(got) != "original" {
+				t.Fatalf("destination after mismatched upload = %q, read error = %v; want original bytes", got, readErr)
+			}
+		})
+	}
+}
+
+func TestDoUploadLocalNewDestinationUsesDefaultCreationMode(t *testing.T) {
+	directory := t.TempDir()
+	modeReference := filepath.Join(directory, "mode-reference")
+	reference, err := os.OpenFile(modeReference, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reference.Close(); err != nil {
+		t.Fatal(err)
+	}
+	referenceInfo, err := os.Stat(modeReference)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	destination := filepath.Join(directory, "payload")
+	if _, err := DoUpload(context.Background(), &captureRequester{}, destination, strings.NewReader("payload"), int64(len("payload"))); err != nil {
+		t.Fatalf("DoUpload returned error: %v", err)
+	}
+	destinationInfo, err := os.Stat(destination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := destinationInfo.Mode().Perm(), referenceInfo.Mode().Perm(); got != want {
+		t.Fatalf("new destination mode = %04o, want normal 0644-with-umask mode %04o", got, want)
 	}
 }
 
@@ -135,6 +264,48 @@ func TestDoUploadHTTPModesAndErrors(t *testing.T) {
 			t.Fatalf("expected status/body error, got %v", err)
 		}
 	})
+
+	t.Run("non-2xx redirects returned by doer are errors and signed query is redacted", func(t *testing.T) {
+		const signedURL = "https://upload.example/file?X-Goog-Signature=upload-secret"
+		for _, status := range []int{http.StatusFound, http.StatusTemporaryRedirect, http.StatusPermanentRedirect} {
+			t.Run(http.StatusText(status), func(t *testing.T) {
+				redirect := &captureRequester{resp: &http.Response{
+					StatusCode: status,
+					Header:     http.Header{"Location": []string{"https://upload.example/elsewhere"}},
+					Body:       io.NopCloser(strings.NewReader("redirected")),
+				}}
+
+				_, err := DoUpload(ctx, redirect, signedURL, strings.NewReader("x"), 1)
+				if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("status %d", status)) {
+					t.Fatalf("DoUpload error = %v, want status %d error", err, status)
+				}
+				if strings.Contains(err.Error(), "upload-secret") || strings.Contains(err.Error(), "X-Goog-Signature") {
+					t.Fatalf("DoUpload error leaked signed URL query: %v", err)
+				}
+				if redirect.calls != 1 {
+					t.Fatalf("HTTPDoer calls = %d, want the returned redirect response to be rejected without another request", redirect.calls)
+				}
+			})
+		}
+	})
+
+	t.Run("request errors redact signed query and preserve cause", func(t *testing.T) {
+		const signedURL = "https://upload.example/file?X-Goog-Signature=upload-secret"
+		cause := &url.Error{Op: http.MethodPut, URL: signedURL, Err: errors.New("connection refused")}
+		requester := &captureRequester{err: cause}
+
+		_, err := DoUpload(ctx, requester, signedURL, strings.NewReader("x"), 1)
+		if err == nil {
+			t.Fatal("DoUpload returned nil error for requester failure")
+		}
+		if strings.Contains(err.Error(), "upload-secret") || strings.Contains(err.Error(), "X-Goog-Signature") {
+			t.Fatalf("DoUpload error leaked signed URL query: %v", err)
+		}
+		var gotCause *url.Error
+		if !errors.As(err, &gotCause) || gotCause.Err.Error() != "connection refused" {
+			t.Fatalf("DoUpload error lost requester cause: %v", err)
+		}
+	})
 }
 
 func TestGenericDownloadOptions(t *testing.T) {
@@ -196,6 +367,47 @@ func TestGenericDownloadOptions(t *testing.T) {
 	}
 }
 
+func TestGenericDownloadRedactsTransportErrors(t *testing.T) {
+	const signedURL = "https://download-user:download-password@download.example/file?X-Amz-Signature=synthetic-download-secret#synthetic-fragment"
+	sentinel := errors.New("connection refused")
+	transportErr := fmt.Errorf("wrapped transport failure: %w", &url.Error{
+		Op:  http.MethodGet,
+		URL: signedURL,
+		Err: sentinel,
+	})
+	requester := &captureRequester{err: transportErr}
+
+	_, err := GenericDownload(context.Background(), requester, signedURL, nil, nil)
+	if err == nil {
+		t.Fatal("GenericDownload returned nil error for transport failure")
+	}
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("GenericDownload error lost transport cause: %v", err)
+	}
+	for _, secret := range []string{"download-user", "download-password", "X-Amz-Signature", "synthetic-download-secret", "synthetic-fragment"} {
+		if strings.Contains(err.Error(), secret) {
+			t.Fatalf("GenericDownload error leaked %q: %v", secret, err)
+		}
+	}
+	if !strings.Contains(err.Error(), "https://download.example/file") {
+		t.Fatalf("GenericDownload error omitted useful URL context: %v", err)
+	}
+	var requestErr *url.Error
+	if !errors.As(err, &requestErr) {
+		t.Fatalf("GenericDownload error lost url.Error context: %v", err)
+	}
+	if requestErr.URL != "https://download.example/file" {
+		t.Fatalf("sanitized url.Error URL = %q", requestErr.URL)
+	}
+
+	ordinary := errors.New("connection reset")
+	requester = &captureRequester{err: ordinary}
+	_, err = GenericDownload(context.Background(), requester, "https://download.example/ordinary", nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "download from https://download.example/ordinary failed") || !errors.Is(err, ordinary) {
+		t.Fatalf("ordinary transport error lost context or cause: %v", err)
+	}
+}
+
 func TestSectionReadCloserClosesUnderlyingFileOnce(t *testing.T) {
 	t.Parallel()
 
@@ -242,14 +454,30 @@ func TestGenericDownloadLocalRangeClosesBody(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(got) != "3456" || resp.ContentLength != 4 || resp.StatusCode != http.StatusPartialContent {
-		t.Fatalf("local range response bytes=%q length=%d status=%d", got, resp.ContentLength, resp.StatusCode)
+	if string(got) != "3456" || resp.ContentLength != 4 || resp.StatusCode != http.StatusPartialContent || resp.Header.Get("Content-Range") != "bytes 3-6/10" {
+		t.Fatalf("local range response bytes=%q length=%d status=%d Content-Range=%q", got, resp.ContentLength, resp.StatusCode, resp.Header.Get("Content-Range"))
 	}
 	if err := resp.Body.Close(); err != nil {
 		t.Fatal(err)
 	}
 	if err := resp.Body.Close(); err != nil {
 		t.Fatalf("second body close returned error: %v", err)
+	}
+}
+
+func TestGenericDownloadLocalRangeAtEOFIsUnsatisfiable(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "source")
+	if err := os.WriteFile(path, []byte("data"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	start, end := int64(4), int64(4)
+	resp, err := GenericDownload(context.Background(), &captureRequester{}, path, &start, &end)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusRequestedRangeNotSatisfiable || resp.Header.Get("Content-Range") != "bytes */4" {
+		t.Fatalf("unsatisfied local range status=%d Content-Range=%q", resp.StatusCode, resp.Header.Get("Content-Range"))
 	}
 }
 

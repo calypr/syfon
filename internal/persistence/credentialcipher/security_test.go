@@ -20,18 +20,18 @@ func TestLocalCredentialKeyPath_DefaultPath(t *testing.T) {
 	os.Unsetenv("DRS_CREDENTIAL_LOCAL_KEY_FILE")
 	os.Unsetenv("DRS_DB_SQLITE_FILE")
 
-	path := localCredentialKeyPath()
+	path := ConfigFromEnv().localKeyPath()
 
 	if !strings.HasPrefix(path, "/app") {
-		t.Errorf("localCredentialKeyPath() = %q, want to start with /app", path)
+		t.Errorf("ConfigFromEnv().localKeyPath() = %q, want to start with /app", path)
 	}
 
 	if strings.Contains(path, "/tmp") {
-		t.Errorf("localCredentialKeyPath() = %q, should not contain /tmp", path)
+		t.Errorf("ConfigFromEnv().localKeyPath() = %q, should not contain /tmp", path)
 	}
 
 	if !strings.HasSuffix(path, ".syfon-credential-kek") {
-		t.Errorf("localCredentialKeyPath() = %q, want to end with .syfon-credential-kek", path)
+		t.Errorf("ConfigFromEnv().localKeyPath() = %q, want to end with .syfon-credential-kek", path)
 	}
 }
 
@@ -42,10 +42,10 @@ func TestLocalCredentialKeyPath_ExplicitEnvVar(t *testing.T) {
 	}()
 
 	os.Setenv("DRS_CREDENTIAL_LOCAL_KEY_FILE", "/etc/syfon/kek")
-	path := localCredentialKeyPath()
+	path := ConfigFromEnv().localKeyPath()
 
 	if path != "/etc/syfon/kek" {
-		t.Errorf("localCredentialKeyPath() = %q, want /etc/syfon/kek", path)
+		t.Errorf("ConfigFromEnv().localKeyPath() = %q, want /etc/syfon/kek", path)
 	}
 }
 
@@ -59,18 +59,18 @@ func TestLocalCredentialKeyPath_SQLiteDir(t *testing.T) {
 	os.Unsetenv("DRS_CREDENTIAL_LOCAL_KEY_FILE")
 	os.Setenv("DRS_DB_SQLITE_FILE", "/data/drs.db")
 
-	path := localCredentialKeyPath()
+	path := ConfigFromEnv().localKeyPath()
 
 	if !strings.HasPrefix(path, "/data/") {
-		t.Errorf("localCredentialKeyPath() = %q, want to start with /data/", path)
+		t.Errorf("ConfigFromEnv().localKeyPath() = %q, want to start with /data/", path)
 	}
 
 	if !strings.HasSuffix(path, ".syfon-credential-kek") {
-		t.Errorf("localCredentialKeyPath() = %q, want to end with .syfon-credential-kek", path)
+		t.Errorf("ConfigFromEnv().localKeyPath() = %q, want to end with .syfon-credential-kek", path)
 	}
 
 	if strings.Contains(path, "/tmp") {
-		t.Errorf("localCredentialKeyPath() = %q, should not contain /tmp", path)
+		t.Errorf("ConfigFromEnv().localKeyPath() = %q, should not contain /tmp", path)
 	}
 }
 
@@ -87,7 +87,7 @@ func TestLocalKeyManager_KeyIDLength(t *testing.T) {
 	}
 	testKeyB64 := base64.StdEncoding.EncodeToString(testKeyBytes)
 	os.Setenv("DRS_CREDENTIAL_MASTER_KEY", testKeyB64)
-	manager := &localKeyManager{}
+	manager := newTestCipher(t).local
 
 	// Wrap a data key
 	dataKey := []byte("0123456789abcdef0123456789abcdef")

@@ -112,6 +112,53 @@ func TestMetricsRoutes_TransferAttribution(t *testing.T) {
 	}
 }
 
+func TestMetricsRoutes_TransferBreakdownPagination(t *testing.T) {
+	called := false
+	reporter := &metricsReporterFake{transferBreakdownFn: func(query usage.TransferBreakdownQuery) ([]metricsapi.TransferAttributionBreakdown, error) {
+		called = true
+		if query.Limit != 3 || query.Offset != 5 {
+			t.Fatalf("reporter page = limit %d offset %d, want limit 3 (sentinel) offset 5", query.Limit, query.Offset)
+		}
+		return []metricsapi.TransferAttributionBreakdown{{Key: metricsString("a")}, {Key: metricsString("b")}, {Key: metricsString("c")}}, nil
+	}}
+	app := newMetricsTestApp(reporter, &metricsIngestFake{})
+	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/index/v1/metrics/transfers/breakdown?group_by=user&limit=2&offset=5", nil))
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", resp.StatusCode, body)
+	}
+	var page struct {
+		Limit      int                                       `json:"limit"`
+		Offset     int                                       `json:"offset"`
+		NextOffset *int                                      `json:"next_offset"`
+		Data       []metricsapi.TransferAttributionBreakdown `json:"data"`
+	}
+	if err := json.Unmarshal(body, &page); err != nil {
+		t.Fatalf("decode page: %v", err)
+	}
+	if page.Limit != 2 || page.Offset != 5 || page.NextOffset == nil || *page.NextOffset != 7 || len(page.Data) != 2 {
+		t.Fatalf("unexpected page metadata or rows: %+v", page)
+	}
+	if !called {
+		t.Fatal("reporter was not called")
+	}
+
+	called = false
+	invalid, err := app.Test(httptest.NewRequest(http.MethodGet, "/index/v1/metrics/transfers/breakdown?limit=1001", nil))
+	if err != nil {
+		t.Fatalf("invalid page request failed: %v", err)
+	}
+	defer invalid.Body.Close()
+	if invalid.StatusCode != http.StatusBadRequest || called {
+		invalidBody, _ := io.ReadAll(invalid.Body)
+		t.Fatalf("invalid page returned status %d, reporter called=%v body=%s", invalid.StatusCode, called, invalidBody)
+	}
+}
+
 func TestMetricsRoutes_ProviderTransferBoundaryErrors(t *testing.T) {
 	const validBody = `{"events":[{"provider_event_id":"event-1","direction":"download","provider":"s3","bucket":"bucket","organization":"org","project":"project"}]}`
 
@@ -159,6 +206,43 @@ func TestMetricsRoutes_ProviderTransferBoundaryErrors(t *testing.T) {
 				if got := resp.Header.Get("X-Request-Id"); got != test.requestID {
 					t.Fatalf("expected request ID %q, got %q", test.requestID, got)
 				}
+			}
+		})
+	}
+}
+
+func TestMetricsRoutes_ProviderTransferEventsEnforcesLocalWriteAuthorization(t *testing.T) {
+	const body = `{"events":[{"provider_event_id":"event-1","direction":"download","provider":"s3","bucket":"bucket","organization":"org","project":"project"}]}`
+	for _, test := range []struct {
+		name        string
+		method      string
+		wantStatus  int
+		wantRecords int
+	}{
+		{name: "read-only", method: "read", wantStatus: http.StatusForbidden},
+		{name: "create access", method: "create", wantStatus: http.StatusCreated, wantRecords: 1},
+		{name: "update access", method: "update", wantStatus: http.StatusCreated, wantRecords: 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ingest := &metricsIngestFake{}
+			app := newMetricsTestApp(&metricsReporterFake{}, ingest)
+			req := httptest.NewRequest(http.MethodPost, "/index/v1/metrics/provider-transfer-events", strings.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			setMetricsAuthHeaders(req, "local", false, map[string]map[string]bool{
+				"/programs/org/projects/project": {test.method: true},
+			})
+
+			resp, err := app.Test(req)
+			if err != nil {
+				t.Fatalf("request failed: %v", err)
+			}
+			defer resp.Body.Close()
+			bodyBytes, _ := io.ReadAll(resp.Body)
+			if resp.StatusCode != test.wantStatus {
+				t.Fatalf("expected status %d, got %d body=%s", test.wantStatus, resp.StatusCode, bodyBytes)
+			}
+			if len(ingest.events) != test.wantRecords {
+				t.Fatalf("expected %d recorded provider transfer events, got %+v", test.wantRecords, ingest.events)
 			}
 		})
 	}

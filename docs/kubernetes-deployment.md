@@ -71,7 +71,7 @@ postgres:
     db_username: syfon_user
     db_password: REDACTED
     db_database: syfon_db
-    db_sslmode: disable
+    db_sslmode: verify-full
   admin:
     username: postgres
     password: REDACTED
@@ -92,6 +92,8 @@ The chart injects these into the Syfon container from the app DB secret:
 - `DRS_DB_SSLMODE`
 
 If you do not provide explicit app/admin DB hosts, the chart resolves them from `global.postgres.master.*` when present, or falls back to the release-local PostgreSQL service naming pattern.
+
+For production, the PostgreSQL server certificate must be trusted by the container and match `db_host`. Set `db_sslmode: disable` only for an explicitly trusted test network and set `config.database.postgres.allow_insecure_transport: true` with it.
 
 ## Reusing Existing Secrets
 
@@ -139,5 +141,8 @@ The chart configures both readiness and liveness probes against `GET /healthz` o
 ## Install
 
 ```bash
-helm upgrade --install syfon ./helm/syfon
+git clone --branch ohsu-develop https://github.com/calypr/gen3-helm.git
+helm upgrade --install syfon ./gen3-helm/helm/syfon -f values.yaml
 ```
+
+Run these commands from the directory containing your `values.yaml`. The chart is maintained in `calypr/gen3-helm`.

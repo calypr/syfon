@@ -2,11 +2,13 @@ package sqlite
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/calypr/syfon/apigen/drs"
+	"github.com/calypr/syfon/apigen/errorapi"
 )
 
 func TestDeletedObjectUsageDoesNotAttachToRecreatedObject(t *testing.T) {
@@ -64,7 +66,13 @@ func TestBulkDeleteClearsCanonicalUsageForAliasesOnly(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := database.BulkDeleteObjects(ctx, []string{"one", "two-alias", "missing"}); err != nil {
+	if err := database.BulkDeleteObjects(ctx, []string{"one", "missing"}); !errors.Is(err, errorapi.ErrNotFound) {
+		t.Errorf("bulk delete with missing ID = %v, want not found", err)
+	}
+	if _, err := database.GetObject(ctx, "one"); err != nil {
+		t.Fatalf("missing-ID batch deleted valid object: %v", err)
+	}
+	if err := database.BulkDeleteObjects(ctx, []string{"one", "two-alias"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := database.RegisterObjects(ctx, []drs.DrsObject{

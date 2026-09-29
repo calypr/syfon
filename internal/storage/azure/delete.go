@@ -19,7 +19,7 @@ func (b *backend) Delete(ctx context.Context, binding storage.ProviderBinding, t
 			return fmt.Errorf("lookup azure credential for bucket %s: %w", target.PhysicalBucket, err)
 		}
 
-		client, err := azblob.NewClientWithSharedKeyCredential(creds.DeleteServiceURL, creds.SharedKey, b.blobClientOptions())
+		client, err := azblob.NewClientWithSharedKeyCredential(creds.ServiceURL, creds.SharedKey, b.blobClientOptions())
 		if err != nil {
 			return fmt.Errorf("create azure client: %w", err)
 		}

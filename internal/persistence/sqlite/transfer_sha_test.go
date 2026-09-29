@@ -55,7 +55,7 @@ func TestTransferAttributionCanonicalizesSHAWritesAndFilters(t *testing.T) {
 		}
 	}
 
-	breakdown, err := database.QueryTransferBreakdown(ctx, usage.Filter{SHA256: canonical}, "object", nil)
+	breakdown, err := database.QueryTransferBreakdown(ctx, usage.Filter{SHA256: canonical}, "object", nil, 1000, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

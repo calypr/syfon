@@ -21,7 +21,10 @@ func (m *Manager) physicalTargetWithBinding(ctx context.Context, raw string) (Ph
 	}
 	if parsed.Provider != "" {
 		bucket := strings.TrimSpace(parsed.Bucket)
-		key := strings.Trim(strings.TrimSpace(parsed.Key), "/")
+		key := parsed.Key
+		if parsed.Provider == address.FileProvider {
+			key = strings.Trim(strings.TrimSpace(key), "/")
+		}
 		if parsed.Provider == address.FileProvider && bucket == "" && parsed.Path != "" {
 			return PhysicalTarget{Provider: address.FileProvider, Path: filepath.Clean(parsed.Path)}, ProviderBinding{Provider: address.FileProvider}, true, nil
 		}
@@ -41,6 +44,10 @@ func (m *Manager) physicalTargetWithBinding(ctx context.Context, raw string) (Ph
 		}
 		provider := address.NormalizeProvider(credential.Provider, parsed.Provider)
 		if provider == address.FileProvider {
+			fileKey := strings.Trim(strings.TrimSpace(key), "/")
+			if fileKey == "" {
+				return PhysicalTarget{}, ProviderBinding{}, false, nil
+			}
 			root := fileRootFromEndpoint(credential.Endpoint)
 			if root == "." || root == "" {
 				root = strings.TrimPrefix(strings.TrimSpace(credential.Bucket), "/")
@@ -49,7 +56,7 @@ func (m *Manager) physicalTargetWithBinding(ctx context.Context, raw string) (Ph
 				return PhysicalTarget{}, ProviderBinding{}, false, operationError(ErrorInvalid, provider, "delete", fmt.Errorf("file storage root is missing"))
 			}
 			binding := ProviderBinding{Provider: provider, LookupKey: bucket, PhysicalBucket: bucket, Credential: credential}
-			return PhysicalTarget{Provider: provider, LookupKey: bucket, PhysicalBucket: bucket, Key: key, Path: filepath.Clean(filepath.Join(root, filepath.FromSlash(key)))}, binding, true, nil
+			return PhysicalTarget{Provider: provider, LookupKey: bucket, PhysicalBucket: bucket, Key: fileKey, Path: filepath.Clean(filepath.Join(root, filepath.FromSlash(fileKey)))}, binding, true, nil
 		}
 		binding := ProviderBinding{Provider: provider, LookupKey: bucket, PhysicalBucket: bucket, Credential: credential}
 		return PhysicalTarget{Provider: provider, LookupKey: bucket, PhysicalBucket: bucket, Key: key}, binding, true, nil

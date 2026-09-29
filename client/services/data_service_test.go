@@ -245,6 +245,7 @@ func TestDataServiceOperationsAndTransferHelpers(t *testing.T) {
 		t.Fatalf("expected range header, got %s", transferRequester.request.Header.Get("Range"))
 	}
 
+	transferRequester.response = &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("payload"))}
 	reader, err := transferService.GetReader(ctx, "https://download.example/file-3")
 	if err != nil {
 		t.Fatalf("GetReader returned error: %v", err)
@@ -260,7 +261,9 @@ func TestDataServiceOperationsAndTransferHelpers(t *testing.T) {
 		t.Fatalf("expected ErrRangeIgnored, got %v", err)
 	}
 
-	transferRequester.response = &http.Response{StatusCode: http.StatusPartialContent, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("abc"))}
+	partialRangeHeaders := make(http.Header)
+	partialRangeHeaders.Set("Content-Range", "bytes 1-3/4")
+	transferRequester.response = &http.Response{StatusCode: http.StatusPartialContent, Header: partialRangeHeaders, Body: io.NopCloser(strings.NewReader("abc"))}
 	rc, err := transferService.GetRangeReader(ctx, "https://download.example/file-3", 1, 3)
 	if err != nil {
 		t.Fatalf("GetRangeReader returned error: %v", err)
@@ -273,6 +276,35 @@ func TestDataServiceOperationsAndTransferHelpers(t *testing.T) {
 
 	if service.Logger() == nil {
 		t.Fatal("expected logger")
+	}
+}
+
+func TestDataServiceUploadBulkAccepts207(t *testing.T) {
+	const signedURL = "https://upload.example/file-1?sig=bulk-secret"
+	requester := &recordingRequester{
+		response: &http.Response{
+			StatusCode: http.StatusMultiStatus,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"results":[{"file_id":"file-1","status":200,"url":"` + signedURL + `"}]}`)),
+		},
+	}
+	generated, err := internalapi.NewClientWithResponses("http://example.test", internalapi.WithHTTPClient(requester))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	output, err := NewDataService(generated, nil, nil, nil).UploadBulk(context.Background(), internalapi.InternalUploadBulkRequest{
+		Requests: []internalapi.InternalUploadBulkItem{{FileId: "file-1"}},
+	})
+	if err != nil {
+		t.Fatalf("UploadBulk returned error for 207 response: %v", err)
+	}
+	if output.Results == nil || len(*output.Results) != 1 {
+		t.Fatalf("UploadBulk results = %+v, want one item", output.Results)
+	}
+	result := (*output.Results)[0]
+	if result.FileId != "file-1" || result.Status != http.StatusOK || result.Url == nil || *result.Url != signedURL {
+		t.Fatalf("UploadBulk result = %+v, want file-1, status 200, and signed URL", result)
 	}
 }
 

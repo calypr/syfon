@@ -7,11 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 
+	"github.com/calypr/syfon/client/apierror"
 	"github.com/calypr/syfon/client/common"
 	"github.com/calypr/syfon/client/transfer"
 	"golang.org/x/sync/errgroup"
@@ -51,7 +53,11 @@ func (d *downloader) download(ctx context.Context, guid string, dstPath string, 
 	}
 
 	totalSize := meta.Size
-	complete, err := prepareDownloadDestination(dstPath, meta.Identity, totalSize)
+	sizeKnown := meta.SizeKnown || totalSize > 0
+	if totalSize < 0 {
+		return fmt.Errorf("stat returned negative object size: %d", totalSize)
+	}
+	complete, err := prepareDownloadDestination(dstPath, meta.Identity, totalSize, sizeKnown)
 	if err != nil {
 		return err
 	}
@@ -62,7 +68,7 @@ func (d *downloader) download(ctx context.Context, guid string, dstPath string, 
 		if err != nil {
 			return err
 		}
-		if totalSize > 0 {
+		if sizeKnown {
 			info, statErr := os.Stat(dstPath)
 			if statErr != nil {
 				return fmt.Errorf("stat completed download: %w", statErr)
@@ -70,15 +76,17 @@ func (d *downloader) download(ctx context.Context, guid string, dstPath string, 
 			if info.Size() != totalSize {
 				return fmt.Errorf("download size mismatch: got %d, expected %d", info.Size(), totalSize)
 			}
-			if strings.TrimSpace(meta.Identity) != "" {
-				matches, checksumErr := downloadMatchesIdentity(dstPath, meta.Identity)
-				if checksumErr != nil {
-					return checksumErr
-				}
-				if !matches {
-					_ = os.Remove(dstPath)
-					return fmt.Errorf("download checksum does not match %s", meta.Identity)
-				}
+		}
+		if strings.TrimSpace(meta.Identity) != "" {
+			matches, checksumErr := downloadMatchesIdentity(dstPath, meta.Identity)
+			if checksumErr != nil {
+				return checksumErr
+			}
+			if !matches {
+				_ = os.Remove(dstPath)
+				return fmt.Errorf("download checksum does not match %s", meta.Identity)
+			}
+			if sizeKnown {
 				if stateErr := saveDownloadResumeState(dstPath, downloadResumeState{Identity: meta.Identity, Size: totalSize, Complete: true}); stateErr != nil {
 					return stateErr
 				}
@@ -86,16 +94,16 @@ func (d *downloader) download(ctx context.Context, guid string, dstPath string, 
 		}
 		return nil
 	}
-	if totalSize <= 0 {
-		return finish(d.downloadSingle(ctx, guid, dstPath, totalSize))
+	if !sizeKnown || totalSize == 0 {
+		return finish(d.downloadSingle(ctx, guid, dstPath, totalSize, sizeKnown))
 	}
 
 	if multipartThreshold > 0 && totalSize < multipartThreshold {
-		return finish(d.downloadSingle(ctx, guid, dstPath, totalSize))
+		return finish(d.downloadSingle(ctx, guid, dstPath, totalSize, sizeKnown))
 	}
 
 	if totalSize < common.MB || !meta.AcceptRanges {
-		return finish(d.downloadSingle(ctx, guid, dstPath, totalSize))
+		return finish(d.downloadSingle(ctx, guid, dstPath, totalSize, sizeKnown))
 	}
 
 	err = d.downloadParallel(ctx, guid, dstPath, totalSize, concurrency, chunkSize)
@@ -108,12 +116,12 @@ func (d *downloader) download(ctx context.Context, guid string, dstPath string, 
 	if err := os.Remove(dstPath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("discard ranged download before restarting: %w", err)
 	}
-	return finish(d.downloadSingle(ctx, guid, dstPath, totalSize))
+	return finish(d.downloadSingle(ctx, guid, dstPath, totalSize, sizeKnown))
 }
 
-func prepareDownloadDestination(dstPath, identity string, expectedSize int64) (bool, error) {
+func prepareDownloadDestination(dstPath, identity string, expectedSize int64, sizeKnown bool) (bool, error) {
 	statePath := downloadResumeStatePath(dstPath)
-	if expectedSize <= 0 || strings.TrimSpace(identity) == "" {
+	if !sizeKnown || strings.TrimSpace(identity) == "" {
 		_ = os.Remove(statePath)
 		if err := os.Remove(dstPath); err != nil && !os.IsNotExist(err) {
 			return false, fmt.Errorf("discard unverified destination: %w", err)
@@ -180,7 +188,7 @@ func loadDownloadResumeState(path string) (downloadResumeState, bool) {
 		return downloadResumeState{}, false
 	}
 	var state downloadResumeState
-	if json.Unmarshal(data, &state) != nil || strings.TrimSpace(state.Identity) == "" || state.Size <= 0 {
+	if json.Unmarshal(data, &state) != nil || strings.TrimSpace(state.Identity) == "" || state.Size < 0 {
 		return downloadResumeState{}, false
 	}
 	return state, true
@@ -210,7 +218,7 @@ func saveDownloadResumeState(dstPath string, state downloadResumeState) error {
 	return nil
 }
 
-func (d *downloader) downloadSingle(ctx context.Context, guid string, dstPath string, expectedSize int64) error {
+func (d *downloader) downloadSingle(ctx context.Context, guid string, dstPath string, expectedSize int64, sizeKnown bool) error {
 	if dir := filepath.Dir(dstPath); dir != "." {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return err
@@ -283,7 +291,7 @@ func (d *downloader) downloadSingle(ctx context.Context, guid string, dstPath st
 				if body != nil {
 					_ = body.Close()
 				}
-				return err
+				return terminalHTTPDownloadError(err)
 			}
 
 			mode := os.O_CREATE | os.O_WRONLY | os.O_APPEND
@@ -297,7 +305,7 @@ func (d *downloader) downloadSingle(ctx context.Context, guid string, dstPath st
 			}
 
 			maxBytes := int64(-1)
-			if expectedSize > 0 {
+			if sizeKnown {
 				maxBytes = expectedSize - startOffset
 			}
 			attempt := progress.NewAttempt(startOffset)
@@ -352,6 +360,19 @@ func (d *downloader) downloadSingle(ctx context.Context, guid string, dstPath st
 	}
 
 	return progress.Flush()
+}
+
+func terminalHTTPDownloadError(err error) error {
+	var responseErr *apierror.APIError
+	if !errors.As(err, &responseErr) {
+		return err
+	}
+
+	status := responseErr.Status
+	if status == http.StatusRequestTimeout || status == http.StatusTooManyRequests || status >= http.StatusInternalServerError && status < 600 {
+		return err
+	}
+	return transfer.NonRetryable(err)
 }
 
 type downloadProgressLedger struct {
@@ -612,7 +633,7 @@ func (d *downloader) downloadParallel(ctx context.Context, guid string, dstPath 
 					if partBody != nil {
 						_ = partBody.Close()
 					}
-					return fmt.Errorf("range download [%d,%d]: %w", partStart, partEnd, err)
+					return terminalHTTPDownloadError(fmt.Errorf("range download [%d,%d]: %w", partStart, partEnd, err))
 				}
 
 				w := io.NewOffsetWriter(file, partStart+committed)

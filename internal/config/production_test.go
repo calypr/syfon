@@ -53,6 +53,101 @@ func TestValidateConfigProductionRequiresStableOperationalSettings(t *testing.T)
 	}
 }
 
+func TestValidateConfigProductionCredentialEncryptionManagerSelection(t *testing.T) {
+	tests := []struct {
+		name         string
+		manager      string
+		kmsKeyID     string
+		masterKey    string
+		localKeyFile string
+		envMasterKey string
+		envKeyFile   string
+		wantValid    bool
+	}{
+		{
+			name:     "explicit local with only KMS key ID",
+			manager:  "local",
+			kmsKeyID: "kms-key-id",
+		},
+		{
+			name:      "explicit local with configured master key",
+			manager:   "local",
+			kmsKeyID:  "kms-key-id",
+			masterKey: "stable-master-key",
+			wantValid: true,
+		},
+		{
+			name:         "explicit local with configured key file",
+			manager:      "local",
+			kmsKeyID:     "kms-key-id",
+			localKeyFile: "/persisted/credential-key",
+			wantValid:    true,
+		},
+		{
+			name:         "explicit local with environment master key",
+			manager:      "local",
+			kmsKeyID:     "kms-key-id",
+			envMasterKey: "stable-master-key",
+			wantValid:    true,
+		},
+		{
+			name:       "explicit local with environment key file",
+			manager:    "local",
+			kmsKeyID:   "kms-key-id",
+			envKeyFile: "/persisted/credential-key",
+			wantValid:  true,
+		},
+		{
+			name:      "explicit local without stable key",
+			manager:   "local",
+			kmsKeyID:  "",
+			wantValid: false,
+		},
+		{
+			name:      "explicit aws KMS with key ID",
+			manager:   "aws-kms",
+			kmsKeyID:  "kms-key-id",
+			wantValid: true,
+		},
+		{
+			name:      "unset manager selects aws KMS from key ID",
+			manager:   "",
+			kmsKeyID:  "kms-key-id",
+			wantValid: true,
+		},
+		{
+			name:     "explicit aws KMS without key ID",
+			manager:  "aws-kms",
+			kmsKeyID: "",
+		},
+		{
+			name:     "unknown manager with KMS key ID",
+			manager:  "unknown",
+			kmsKeyID: "kms-key-id",
+		},
+	}
+
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Setenv("DRS_CREDENTIAL_KEY_MANAGER", testCase.manager)
+			t.Setenv("DRS_CREDENTIAL_KMS_KEY_ID", testCase.kmsKeyID)
+			t.Setenv("DRS_CREDENTIAL_MASTER_KEY", testCase.envMasterKey)
+			t.Setenv("DRS_CREDENTIAL_LOCAL_KEY_FILE", testCase.envKeyFile)
+
+			cfg := productionTestConfig()
+			cfg.CredentialEncryption.MasterKey = testCase.masterKey
+			cfg.CredentialEncryption.LocalKeyFile = testCase.localKeyFile
+			err := validateConfig(cfg)
+			if testCase.wantValid && err != nil {
+				t.Fatalf("validateConfig() error = %v, want valid production config", err)
+			}
+			if !testCase.wantValid && err == nil {
+				t.Fatal("validateConfig() succeeded, want production credential encryption error")
+			}
+		})
+	}
+}
+
 func TestValidateConfigProductionAllowsDocs(t *testing.T) {
 	cfg := productionTestConfig()
 	cfg.Routes.Docs = true
@@ -62,41 +157,42 @@ func TestValidateConfigProductionAllowsDocs(t *testing.T) {
 }
 
 func TestValidateConfigProductionAllowsExplicitInsecureTransport(t *testing.T) {
-	for _, mode := range []string{"disable", "allow", "prefer"} {
+	cfg := productionTestConfig()
+	cfg.Database.Postgres.SSLMode = "disable"
+	cfg.Database.Postgres.AllowInsecureTransport = true
+	if err := validateConfig(cfg); err != nil {
+		t.Fatalf("validateConfig() error = %v", err)
+	}
+}
+
+func TestValidateConfigProductionRejectsUnsupportedSSLModeEvenWithOptOut(t *testing.T) {
+	for _, mode := range []string{"allow", "prefer"} {
 		t.Run(mode, func(t *testing.T) {
 			cfg := productionTestConfig()
 			cfg.Database.Postgres.SSLMode = mode
 			cfg.Database.Postgres.AllowInsecureTransport = true
-			if err := validateConfig(cfg); err != nil {
-				t.Fatalf("validateConfig() error = %v", err)
+			if err := validateConfig(cfg); err == nil {
+				t.Fatalf("validateConfig() accepted lib/pq-unsupported sslmode %q", mode)
 			}
 		})
 	}
 }
 
-func TestValidateConfigProductionRejectsFallbackSSLModeWithoutOptOut(t *testing.T) {
-	for _, mode := range []string{"allow", "prefer"} {
+func TestValidateConfigProductionRequiresVerifiedPostgresTLS(t *testing.T) {
+	for _, mode := range []string{"require", "verify-ca", "allow", "prefer"} {
 		t.Run(mode, func(t *testing.T) {
 			cfg := productionTestConfig()
 			cfg.Database.Postgres.SSLMode = mode
 			cfg.Database.Postgres.AllowInsecureTransport = false
 			if err := validateConfig(cfg); err == nil {
-				t.Fatalf("validateConfig() accepted plaintext-fallback sslmode %q", mode)
+				t.Fatalf("validateConfig() accepted unauthenticated sslmode %q", mode)
 			}
 		})
 	}
-}
-
-func TestValidateConfigProductionAcceptsEncryptedSSLModes(t *testing.T) {
-	for _, mode := range []string{"require", "verify-ca", "verify-full"} {
-		t.Run(mode, func(t *testing.T) {
-			cfg := productionTestConfig()
-			cfg.Database.Postgres.SSLMode = mode
-			cfg.Database.Postgres.AllowInsecureTransport = false
-			if err := validateConfig(cfg); err != nil {
-				t.Fatalf("validateConfig() error = %v", err)
-			}
-		})
+	cfg := productionTestConfig()
+	cfg.Database.Postgres.SSLMode = "verify-full"
+	if err := validateConfig(cfg); err != nil {
+		t.Fatalf("validateConfig() rejected verify-full: %v", err)
 	}
 }
 

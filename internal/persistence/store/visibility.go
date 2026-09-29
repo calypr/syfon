@@ -12,13 +12,20 @@ func (db *Store) ListBucketVisibilityRows(ctx context.Context, resources []strin
 	query := `
 		SELECT DISTINCT am.url, am.type, COALESCE(ca.resource, '')
 		FROM drs_object o
-		INNER JOIN drs_object_access_method am ON am.object_id = o.id
-		LEFT JOIN drs_object_controlled_access ca ON ca.object_id = o.id`
+		INNER JOIN drs_object_access_method am ON am.object_id = o.id`
 	var args []any
 	if restrictToResources {
 		resources = clientaccess.NormalizeAccessResources(resources)
 		if len(resources) == 0 && !includeUnscoped {
 			return []buckets.VisibilityRow{}, nil
+		}
+		query += ` LEFT JOIN drs_object_controlled_access ca ON ca.object_id = o.id`
+		if len(resources) > 0 {
+			clause, clauseArgs := db.dialect.ListArgs("ca.resource", resources)
+			query += ` AND ` + clause
+			args = append(args, clauseArgs...)
+		} else {
+			query += ` AND 1 = 0`
 		}
 		parts := make([]string, 0, 2)
 		if len(resources) > 0 {
@@ -39,6 +46,8 @@ func (db *Store) ListBucketVisibilityRows(ctx context.Context, resources []strin
 			args = append(args, includeUnscoped)
 		}
 		query += ` WHERE (` + strings.Join(parts, " OR ") + `)`
+	} else {
+		query += ` LEFT JOIN drs_object_controlled_access ca ON ca.object_id = o.id`
 	}
 	rows, err := db.queryContext(ctx, query, args...)
 	if err != nil {

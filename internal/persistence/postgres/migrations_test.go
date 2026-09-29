@@ -26,7 +26,7 @@ func TestPostgresProductionOpenUsesPreparedSchemaAndPoolLimits(t *testing.T) {
 		t.Skip("SYFON_TEST_POSTGRES_DSN is not configured")
 	}
 	preparePostgresCheckSchemaTest(t, dsn)
-	database, err := NewPostgresDBWithOptions(dsn, nil, OpenOptions{
+	database, err := NewPostgresDBWithOptions(context.Background(), dsn, nil, OpenOptions{
 		SchemaMode:            SchemaModeCheck,
 		MaxOpenConnections:    3,
 		MaxIdleConnections:    2,
@@ -87,7 +87,7 @@ func TestPostgresCheckSchemaIntegrationIsReadOnly(t *testing.T) {
 func preparePostgresCheckSchemaTest(t *testing.T, dsn string) {
 	t.Helper()
 	t.Setenv(credentialcipher.CredentialLocalKeyFileEnv, filepath.Join(t.TempDir(), "credential.key"))
-	database, err := NewPostgresDB(dsn, nil)
+	database, err := NewPostgresDB(context.Background(), dsn, nil)
 	if err != nil {
 		t.Fatalf("prepare PostgreSQL schema: %v", err)
 	}

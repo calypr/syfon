@@ -63,7 +63,8 @@ func TestDecryptField_MissingKeyForEncryptedData(t *testing.T) {
 	}
 	t.Setenv(CredentialMasterKeyEnv, "")
 
-	_, err = cipher.DecryptField(context.Background(), encrypted)
+	otherCipher := newTestCipher(t)
+	_, err = otherCipher.DecryptField(context.Background(), encrypted)
 	if err == nil {
 		t.Fatal("expected error when decrypting encrypted data without key")
 	}
@@ -72,7 +73,7 @@ func TestDecryptField_MissingKeyForEncryptedData(t *testing.T) {
 func TestCredentialMasterKeyAcceptsHexBeforeBase64(t *testing.T) {
 	t.Setenv(CredentialMasterKeyEnv, "13a53e671b318db3d417f602baa90fac3cd59f96c4cdb5e31ad8bc5c857f3a96")
 
-	key, err := credentialMasterKey()
+	key, err := testLocalKey(t)
 	if err != nil {
 		t.Fatalf("credentialMasterKey returned error: %v", err)
 	}
@@ -81,14 +82,55 @@ func TestCredentialMasterKeyAcceptsHexBeforeBase64(t *testing.T) {
 	}
 }
 
+func TestCredentialMasterKeyAcceptsRawKeyThatLooksLikeBase64(t *testing.T) {
+	rawKey := strings.Repeat("a", 32)
+	t.Setenv(CredentialMasterKeyEnv, rawKey)
+
+	codec := newTestCipher(t)
+	key, err := codec.local.key()
+	if err != nil {
+		t.Fatalf("local key: %v", err)
+	}
+	if !bytes.Equal(key, []byte(rawKey)) {
+		t.Fatalf("local key = %x, want the 32 raw bytes", key)
+	}
+
+	ciphertext, err := codec.EncryptField(context.Background(), "credential secret")
+	if err != nil {
+		t.Fatalf("EncryptField: %v", err)
+	}
+	plaintext, err := codec.DecryptField(context.Background(), ciphertext)
+	if err != nil || plaintext != "credential secret" {
+		t.Fatalf("DecryptField = %q, %v", plaintext, err)
+	}
+}
+
+func TestCredentialMasterKeyRejectsInvalidLengths(t *testing.T) {
+	tests := []struct {
+		name string
+		key  string
+	}{
+		{name: "short raw key", key: strings.Repeat("a", 31)},
+		{name: "long raw key", key: strings.Repeat("a", 33)},
+		{name: "base64 key with wrong decoded length", key: base64.StdEncoding.EncodeToString(make([]byte, 33))},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := parseUserProvidedKey(tt.key, CredentialMasterKeyEnv); err == nil {
+				t.Fatal("parseUserProvidedKey() accepted an invalid key length")
+			}
+		})
+	}
+}
+
 func TestEnabledValidatesSelectedKeyManager(t *testing.T) {
 	t.Setenv(CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
 	t.Setenv(CredentialKeyManagerEnv, "not-registered")
 	t.Setenv(CredentialKMSKeyIDEnv, "")
 
-	cipher := newTestCipher(t)
-	if enabled, err := cipher.Enabled(); err == nil || enabled || !strings.Contains(err.Error(), `credential key manager "not-registered" is not registered`) {
-		t.Fatalf("Enabled() = (%v, %v), want selected-manager error", enabled, err)
+	_, err := NewFromEnv()
+	if err == nil || !strings.Contains(err.Error(), `credential key manager "not-registered" is not registered`) {
+		t.Fatalf("NewFromEnv() error = %v, want selected-manager error", err)
 	}
 }
 
@@ -98,9 +140,9 @@ func TestEnabledRejectsAWSKMSWithoutKeyID(t *testing.T) {
 	t.Setenv(CredentialKMSKeyIDEnv, "")
 	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
 
-	cipher := newTestCipher(t)
-	if enabled, err := cipher.Enabled(); err == nil || enabled || !strings.Contains(err.Error(), CredentialKMSKeyIDEnv) {
-		t.Fatalf("Enabled() = (%v, %v), want missing KMS key ID error", enabled, err)
+	_, err := NewFromEnv()
+	if err == nil || !strings.Contains(err.Error(), CredentialKMSKeyIDEnv) {
+		t.Fatalf("NewFromEnv() error = %v, want missing KMS key ID error", err)
 	}
 }
 
@@ -108,7 +150,7 @@ func TestDecryptField_LegacyV1Ciphertext(t *testing.T) {
 	t.Setenv(CredentialMasterKeyEnv, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
 	codec := newTestCipher(t)
 
-	key, err := credentialMasterKey()
+	key, err := testLocalKey(t)
 	if err != nil {
 		t.Fatalf("credentialMasterKey setup failed: %v", err)
 	}
@@ -170,11 +212,11 @@ func TestCredentialMasterKey_LocalKeyFile_IsDeterministic(t *testing.T) {
 	t.Setenv(CredentialMasterKeyEnv, "")
 	t.Setenv(CredentialLocalKeyFileEnv, filepath.Join(t.TempDir(), "local-kek"))
 
-	key1, err := credentialMasterKey()
+	key1, err := testLocalKey(t)
 	if err != nil {
 		t.Fatalf("credentialMasterKey returned error: %v", err)
 	}
-	key2, err := credentialMasterKey()
+	key2, err := testLocalKey(t)
 	if err != nil {
 		t.Fatalf("credentialMasterKey returned error on second read: %v", err)
 	}
@@ -192,7 +234,7 @@ func TestCredentialMasterKey_LocalKeyFile_DefaultPathFromSqlite(t *testing.T) {
 	t.Setenv(DatabaseSQLiteFileEnv, filepath.Join(sqliteDir, "drs.db"))
 	t.Setenv(CredentialLocalKeyFileEnv, "")
 
-	path := localCredentialKeyPath()
+	path := ConfigFromEnv().localKeyPath()
 	if !strings.HasPrefix(path, sqliteDir) {
 		t.Fatalf("expected local key path under sqlite dir, got %q", path)
 	}
@@ -217,7 +259,7 @@ func TestCredentialMasterKey_LocalKeyFile_ConcurrentCreatorsConverge(t *testing.
 			defer done.Done()
 			ready.Done()
 			<-start
-			keys[i], errs[i] = loadOrCreateLocalCredentialKey()
+			keys[i], errs[i] = loadOrCreateLocalCredentialKey(keyPath)
 		}(i)
 	}
 	ready.Wait()
@@ -262,7 +304,7 @@ func TestCredentialMasterKey_LocalKeyFile_ExistingWinnerIsUnchanged(t *testing.T
 		t.Fatalf("write existing key: %v", err)
 	}
 
-	got, err := loadOrCreateLocalCredentialKey()
+	got, err := loadOrCreateLocalCredentialKey(keyPath)
 	if err != nil {
 		t.Fatalf("load existing key: %v", err)
 	}
@@ -288,7 +330,7 @@ func TestCredentialMasterKey_LocalKeyFile_MalformedWinnerIsUnchanged(t *testing.
 		t.Fatalf("write malformed key: %v", err)
 	}
 
-	if _, err := loadOrCreateLocalCredentialKey(); err == nil {
+	if _, err := loadOrCreateLocalCredentialKey(keyPath); err == nil {
 		t.Fatal("load malformed key succeeded")
 	}
 	contents, err := os.ReadFile(keyPath)
@@ -374,15 +416,14 @@ func TestEncryptField_UsesRandomDEKPerRecord(t *testing.T) {
 func TestConfiguredCredentialKeyManagerName_AutoSelectsAWSWhenKMSKeySet(t *testing.T) {
 	t.Setenv(CredentialKeyManagerEnv, "")
 	t.Setenv(CredentialKMSKeyIDEnv, "arn:aws:kms:us-east-1:123456789012:key/test")
-	if got := configuredCredentialKeyManagerName(); got != awsKMSKeyManagerName {
+	if got := newTestCipher(t).managerName; got != awsKMSKeyManagerName {
 		t.Fatalf("expected %q, got %q", awsKMSKeyManagerName, got)
 	}
 }
 
 func TestEncryptFieldPropagatesContextToKeyManager(t *testing.T) {
 	manager := &contextRecordingKeyManager{}
-	registerTestCredentialKeyManager(t, manager)
-	cipher := newTestCipher(t)
+	cipher := &Cipher{managerName: "test", managers: map[string]func() (CredentialKeyManager, error){"test": func() (CredentialKeyManager, error) { return manager, nil }}}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -397,8 +438,7 @@ func TestEncryptFieldPropagatesContextToKeyManager(t *testing.T) {
 
 func TestDecryptFieldPropagatesContextToKeyManager(t *testing.T) {
 	manager := &contextRecordingKeyManager{}
-	registerTestCredentialKeyManager(t, manager)
-	cipher := newTestCipher(t)
+	cipher := &Cipher{managerName: "test", managers: map[string]func() (CredentialKeyManager, error){"test": func() (CredentialKeyManager, error) { return manager, nil }}}
 
 	payload, err := json.Marshal(credentialEnvelopeV2{Manager: "test"})
 	if err != nil {
@@ -425,22 +465,9 @@ func newTestCipher(t *testing.T) *Cipher {
 	return cipher
 }
 
-func registerTestCredentialKeyManager(t *testing.T, manager CredentialKeyManager) {
+func testLocalKey(t *testing.T) ([]byte, error) {
 	t.Helper()
-	credentialKeyManagerRegistryMu.Lock()
-	original, exists := credentialKeyManagerRegistry["test"]
-	credentialKeyManagerRegistry["test"] = func() (CredentialKeyManager, error) { return manager, nil }
-	credentialKeyManagerRegistryMu.Unlock()
-	t.Cleanup(func() {
-		credentialKeyManagerRegistryMu.Lock()
-		if exists {
-			credentialKeyManagerRegistry["test"] = original
-		} else {
-			delete(credentialKeyManagerRegistry, "test")
-		}
-		credentialKeyManagerRegistryMu.Unlock()
-	})
-	t.Setenv(CredentialKeyManagerEnv, "test")
+	return newTestCipher(t).local.key()
 }
 
 type contextRecordingKeyManager struct {
@@ -458,4 +485,55 @@ func (m *contextRecordingKeyManager) WrapDataKey(ctx context.Context, _ []byte) 
 func (m *contextRecordingKeyManager) UnwrapDataKey(ctx context.Context, _ *WrappedDataKey) ([]byte, error) {
 	m.unwrapContext = ctx
 	return nil, ctx.Err()
+}
+
+func TestCipherConfigurationIsIsolatedFromEnvironment(t *testing.T) {
+	first, err := New(Config{MasterKey: "0101010101010101010101010101010101010101010101010101010101010101"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := New(Config{MasterKey: "abababababababababababababababababababababababababababababababab"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(CredentialMasterKeyEnv, "unrelated-invalid-environment-key")
+	for _, codec := range []*Cipher{first, second} {
+		encrypted, err := codec.EncryptField(context.Background(), "secret")
+		if err != nil {
+			t.Fatal(err)
+		}
+		plain, err := codec.DecryptField(context.Background(), encrypted)
+		if err != nil || plain != "secret" {
+			t.Fatalf("round trip = %q, %v", plain, err)
+		}
+		other := first
+		if codec == first {
+			other = second
+		}
+		if _, err := other.DecryptField(context.Background(), encrypted); err == nil {
+			t.Fatal("a different runtime key decrypted the credential")
+		}
+	}
+}
+
+func TestCipherRetainsLocalEnvelopeSupportWhenWriterChanges(t *testing.T) {
+	cfg := Config{MasterKey: "0101010101010101010101010101010101010101010101010101010101010101"}
+	first, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encrypted, err := first.EncryptField(context.Background(), "local-secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.KeyManager = awsKMSKeyManagerName
+	cfg.KMSKeyID = "test-key"
+	second, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain, err := second.DecryptField(context.Background(), encrypted)
+	if err != nil || plain != "local-secret" {
+		t.Fatalf("local envelope = %q, %v", plain, err)
+	}
 }

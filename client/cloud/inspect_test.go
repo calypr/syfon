@@ -1,6 +1,75 @@
 package cloud
 
-import "testing"
+import (
+	"context"
+	"errors"
+	"strings"
+	"testing"
+)
+
+func TestInspectObjectErrorsRedactProviderURLCredentials(t *testing.T) {
+	tests := []struct {
+		name    string
+		url     string
+		secrets []string
+	}{
+		{
+			name:    "AWS",
+			url:     "s3://bucket/path/%zz?X-Amz-Credential=aws-credential&X-Amz-Signature=aws-signature",
+			secrets: []string{"aws-credential", "aws-signature"},
+		},
+		{
+			name:    "GCS",
+			url:     "gs:///path/to/object?X-Goog-Credential=gcs-credential&X-Goog-Signature=gcs-signature",
+			secrets: []string{"gcs-credential", "gcs-signature"},
+		},
+		{
+			name:    "Azure",
+			url:     "https://account.blob.core.windows.net/container?sv=azure-version&sig=azure-signature",
+			secrets: []string{"azure-version", "azure-signature"},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := InspectObject(context.Background(), ObjectParameters{ObjectURL: test.url})
+			if err == nil {
+				t.Fatal("expected malformed signed URL to fail")
+			}
+			for _, secret := range test.secrets {
+				if strings.Contains(err.Error(), secret) {
+					t.Fatalf("error exposed signed URL credential %q: %v", secret, err)
+				}
+			}
+			if strings.Contains(err.Error(), "?") {
+				t.Fatalf("error exposed signed URL query: %v", err)
+			}
+		})
+	}
+}
+
+func TestSanitizeCloudErrorRedactsProviderURLsAndPreservesCause(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		url   string
+		token string
+	}{
+		{name: "AWS", url: "https://bucket.s3.us-west-2.amazonaws.com/key?X-Amz-Signature=aws-signed-token", token: "aws-signed-token"},
+		{name: "GCS", url: "https://storage.googleapis.com/bucket/key?X-Goog-Signature=gcs-signed-token", token: "gcs-signed-token"},
+		{name: "Azure", url: "https://account.blob.core.windows.net/container/key?sv=azure-version&sig=azure-signed-token", token: "azure-signed-token"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cause := errors.New("provider request failed for " + test.url)
+			err := sanitizeCloudError(cause)
+			if !errors.Is(err, cause) {
+				t.Fatal("sanitized error did not preserve its cause")
+			}
+			if strings.Contains(err.Error(), test.token) || strings.Contains(err.Error(), "?") {
+				t.Fatalf("provider error exposed signed URL credentials: %v", err)
+			}
+		})
+	}
+}
 
 func TestParseObjectLocation_S3Scheme(t *testing.T) {
 	loc, err := parseObjectLocation("s3://my-bucket/path/to/file.bam", "", ObjectParameters{})

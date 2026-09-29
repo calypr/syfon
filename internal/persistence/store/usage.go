@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -14,19 +16,46 @@ import (
 )
 
 func (db *Store) RecordFileUpload(ctx context.Context, objectID string) error {
-	_, err := db.execContext(ctx, `
-		INSERT INTO object_usage_event (object_id, event_type, event_time)
-		VALUES (?, 'upload', ?)
-	`, objectID, time.Now().UTC())
-	return err
+	return db.recordFileUsageEvent(ctx, objectID, "upload")
 }
 
 func (db *Store) RecordFileDownload(ctx context.Context, objectID string) error {
-	_, err := db.execContext(ctx, `
-		INSERT INTO object_usage_event (object_id, event_type, event_time)
-		VALUES (?, 'download', ?)
-	`, objectID, time.Now().UTC())
-	return err
+	return db.recordFileUsageEvent(ctx, objectID, "download")
+}
+
+func (db *Store) recordFileUsageEvent(ctx context.Context, objectID, eventType string) error {
+	return db.withWrite(ctx, func(tx *sql.Tx) error {
+		if err := db.lockObjectUsageEventIDsTx(ctx, tx, []string{objectID}); err != nil {
+			return fmt.Errorf("lock object usage event ID: %w", err)
+		}
+		canonicalID, found, err := db.objectIDTx(ctx, tx, objectID)
+		if err != nil {
+			return err
+		}
+		if found {
+			objectID = canonicalID
+		}
+		_, err = db.txExecContext(ctx, tx, `
+			INSERT INTO object_usage_event (object_id, event_type, event_time)
+			VALUES (?, ?, ?)
+		`, objectID, eventType, time.Now().UTC())
+		return err
+	})
+}
+
+func (db *Store) lockObjectUsageEventIDsTx(ctx context.Context, tx *sql.Tx, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	ordered := append([]string(nil), ids...)
+	sort.Strings(ordered)
+	unique := ordered[:0]
+	for _, id := range ordered {
+		if len(unique) == 0 || unique[len(unique)-1] != id {
+			unique = append(unique, id)
+		}
+	}
+	return db.dialect.LockObjectUsageEventIDs(ctx, tx, unique)
 }
 
 func (db *Store) GetFileUsage(ctx context.Context, objectID string) (*metricsapi.FileUsage, error) {

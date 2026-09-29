@@ -45,8 +45,10 @@ func newSQLiteDatabase(t *testing.T) *store.Store {
 
 type objectTestStore struct {
 	objects.ObjectStore
-	Objects map[string]*drs.DrsObject
-	Aliases map[string]string
+	Objects        map[string]*drs.DrsObject
+	Aliases        map[string]string
+	BulkRequested  []string
+	ScopeListCalls int
 }
 
 func (f *objectTestStore) GetObject(_ context.Context, id string) (*drs.DrsObject, error) {
@@ -61,6 +63,7 @@ func (f *objectTestStore) GetObject(_ context.Context, id string) (*drs.DrsObjec
 }
 
 func (f *objectTestStore) GetBulkObjects(_ context.Context, ids []string) ([]drs.DrsObject, error) {
+	f.BulkRequested = append([]string(nil), ids...)
 	result := make([]drs.DrsObject, 0, len(ids))
 	for _, id := range ids {
 		if obj, ok := f.Objects[id]; ok {
@@ -79,6 +82,10 @@ func (f *objectTestStore) RegisterObjects(_ context.Context, records []drs.DrsOb
 		f.Objects[copyObj.Id] = &copyObj
 	}
 	return nil
+}
+
+func (f *objectTestStore) RegisterObjectsIfPending(ctx context.Context, records []drs.DrsObject, _ objects.PendingRegistration) error {
+	return f.RegisterObjects(ctx, records)
 }
 
 func (f *objectTestStore) RepairCanonicalDuplicates(_ context.Context, repairs []objects.CanonicalRepair) error {
@@ -123,6 +130,22 @@ func (f *objectTestStore) ResolveObjectAlias(_ context.Context, aliasID string) 
 		return "", fmt.Errorf("%w: object not found", errorapi.ErrNotFound)
 	}
 	return canonicalID, nil
+}
+
+func (f *objectTestStore) ResolveObjectIDs(_ context.Context, ids []string) (map[string]string, error) {
+	resolved := make(map[string]string, len(ids))
+	for _, id := range ids {
+		if _, ok := f.Objects[id]; ok {
+			resolved[id] = id
+			continue
+		}
+		if canonicalID := f.Aliases[id]; canonicalID != "" {
+			if _, ok := f.Objects[canonicalID]; ok {
+				resolved[id] = canonicalID
+			}
+		}
+	}
+	return resolved, nil
 }
 
 func (f *objectTestStore) GetObjectsByChecksums(_ context.Context, checksums []string) (map[string][]drs.DrsObject, error) {
@@ -184,6 +207,7 @@ func (f *objectTestStore) ListScopedObjectIDsByChecksums(_ context.Context, orga
 }
 
 func (f *objectTestStore) ListObjectIDsByScope(_ context.Context, organization, project string) ([]string, error) {
+	f.ScopeListCalls++
 	ids := make([]string, 0, len(f.Objects))
 	for id, obj := range f.Objects {
 		if recordInScope(obj, organization, project) {
@@ -192,6 +216,68 @@ func (f *objectTestStore) ListObjectIDsByScope(_ context.Context, organization, 
 	}
 	sort.Strings(ids)
 	return ids, nil
+}
+
+func (f *objectTestStore) ListObjectIDsPage(_ context.Context, query objects.ObjectIDPageQuery) ([]string, error) {
+	query.Scope.Organization = strings.TrimSpace(query.Scope.Organization)
+	query.Scope.Project = strings.TrimSpace(query.Scope.Project)
+	query.ObjectURL = strings.TrimSpace(query.ObjectURL)
+	query.StartAfter = strings.TrimSpace(query.StartAfter)
+	ids := make([]string, 0, len(f.Objects))
+	visibleResources := clientaccess.NormalizeAccessResources(query.VisibleResources)
+	visibleSet := make(map[string]struct{}, len(visibleResources))
+	for _, resource := range visibleResources {
+		visibleSet[resource] = struct{}{}
+	}
+	for id, obj := range f.Objects {
+		if query.Scope.Organization != "" && !recordInScope(obj, query.Scope.Organization, query.Scope.Project) {
+			continue
+		}
+		if query.ObjectURL != "" && !recordHasAccessURL(obj, query.ObjectURL) {
+			continue
+		}
+		if query.RestrictToVisibleResources {
+			resources := objects.AccessResources(obj)
+			visible := false
+			for _, resource := range resources {
+				if _, ok := visibleSet[resource]; ok {
+					visible = true
+					break
+				}
+			}
+			if !visible && !(query.IncludeUnscoped && len(resources) == 0) {
+				continue
+			}
+		}
+		if query.StartAfter != "" && id <= query.StartAfter {
+			continue
+		}
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	if query.Offset < 0 {
+		query.Offset = 0
+	}
+	if query.Offset >= len(ids) || query.Limit <= 0 {
+		return []string{}, nil
+	}
+	end := query.Offset + query.Limit
+	if end > len(ids) {
+		end = len(ids)
+	}
+	return ids[query.Offset:end], nil
+}
+
+func recordHasAccessURL(obj *drs.DrsObject, targetURL string) bool {
+	if obj == nil || obj.AccessMethods == nil {
+		return false
+	}
+	for _, method := range *obj.AccessMethods {
+		if method.AccessUrl != nil && strings.TrimSpace(method.AccessUrl.Url) == targetURL {
+			return true
+		}
+	}
+	return false
 }
 
 func recordHasChecksum(obj *drs.DrsObject, checksum string) bool {
@@ -204,7 +290,11 @@ func recordHasChecksum(obj *drs.DrsObject, checksum string) bool {
 }
 
 func recordInScope(obj *drs.DrsObject, organization, project string) bool {
-	projects := clientaccess.ControlledAccessToAuthzMap(objects.AccessResources(obj))[strings.TrimSpace(organization)]
+	organization = strings.TrimSpace(organization)
+	if organization == "" {
+		return true
+	}
+	projects := clientaccess.ControlledAccessToAuthzMap(objects.AccessResources(obj))[organization]
 	if strings.TrimSpace(project) == "" || len(projects) == 0 {
 		return len(projects) > 0
 	}

@@ -4,11 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/calypr/syfon/client/common"
 	conf "github.com/calypr/syfon/client/config"
@@ -59,13 +63,28 @@ func (t *AuthTransport) NewAccessToken(ctx context.Context) error {
 		return fmt.Errorf("APIEndpoint is required to refresh access token")
 	}
 
-	refreshClient := &http.Client{Transport: t.Base}
 	payload, err := json.Marshal(map[string]string{"api_key": apiKey})
 	if err != nil {
 		return fmt.Errorf("encode token refresh request: %w", err)
 	}
 
 	refreshUrl := strings.TrimRight(apiEndpoint, "/") + common.DataAccessTokenEndpoint
+	refreshClient := &http.Client{
+		Transport: t.Base,
+		Timeout:   t.refreshTimeout,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if !sameHTTPOrigin(refreshUrl, req.URL) {
+				return http.ErrUseLastResponse
+			}
+			if t.refreshCheckRedirect != nil {
+				return t.refreshCheckRedirect(req, via)
+			}
+			if len(via) >= 10 {
+				return errors.New("stopped after 10 redirects")
+			}
+			return nil
+		},
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, refreshUrl, bytes.NewReader(payload))
 	if err != nil {
 		return err
@@ -113,12 +132,14 @@ func (t *AuthTransport) NewAccessToken(ctx context.Context) error {
 }
 
 type AuthTransport struct {
-	Manager   conf.ManagerInterface
-	Base      http.RoundTripper
-	Cred      *conf.Credential
-	Mode      AuthMode
-	mu        sync.RWMutex
-	refreshMu sync.Mutex
+	Manager              conf.ManagerInterface
+	Base                 http.RoundTripper
+	Cred                 *conf.Credential
+	Mode                 AuthMode
+	refreshTimeout       time.Duration
+	refreshCheckRedirect func(*http.Request, []*http.Request) error
+	mu                   sync.RWMutex
+	refreshMu            sync.Mutex
 }
 
 func (t *AuthTransport) apply(req *http.Request) {
@@ -136,6 +157,9 @@ func (t *AuthTransport) apply(req *http.Request) {
 
 	t.mu.RLock()
 	defer t.mu.RUnlock()
+	if !sameHTTPOrigin(t.Cred.APIEndpoint, req.URL) {
+		return
+	}
 
 	switch t.Mode {
 	case AuthModeBearer:
@@ -147,6 +171,49 @@ func (t *AuthTransport) apply(req *http.Request) {
 			req.SetBasicAuth(user, t.Cred.APIKey)
 		}
 	}
+}
+
+func sameHTTPOrigin(apiEndpoint string, target *url.URL) bool {
+	trusted, err := url.Parse(strings.TrimSpace(apiEndpoint))
+	if err != nil {
+		return false
+	}
+	trustedScheme, trustedHost, trustedPort, trustedOK := httpOrigin(trusted)
+	targetScheme, targetHost, targetPort, targetOK := httpOrigin(target)
+	return trustedOK && targetOK && trustedScheme == targetScheme && trustedHost == targetHost && trustedPort == targetPort
+}
+
+func (t *AuthTransport) isTrustedTarget(target *url.URL) bool {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.Cred != nil && sameHTTPOrigin(t.Cred.APIEndpoint, target)
+}
+
+func httpOrigin(u *url.URL) (scheme, host, port string, ok bool) {
+	if u == nil || u.Opaque != "" || u.User != nil {
+		return "", "", "", false
+	}
+	scheme = strings.ToLower(u.Scheme)
+	switch scheme {
+	case "http":
+		port = "80"
+	case "https":
+		port = "443"
+	default:
+		return "", "", "", false
+	}
+	host = strings.ToLower(u.Hostname())
+	if host == "" {
+		return "", "", "", false
+	}
+	if explicitPort := u.Port(); explicitPort != "" {
+		n, err := strconv.Atoi(explicitPort)
+		if err != nil || n < 0 || n > 65535 {
+			return "", "", "", false
+		}
+		port = strconv.Itoa(n)
+	}
+	return scheme, host, port, true
 }
 
 func (t *AuthTransport) RoundTrip(req *http.Request) (*http.Response, error) {

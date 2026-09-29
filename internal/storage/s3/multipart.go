@@ -11,6 +11,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 
 	"github.com/calypr/syfon/internal/storage"
+	"github.com/calypr/syfon/internal/storage/address"
 )
 
 func (s *backend) BeginMultipart(ctx context.Context, binding storage.ProviderBinding, request storage.BeginMultipartRequest) (storage.UploadID, error) {
@@ -38,6 +39,15 @@ func (s *backend) BeginMultipart(ctx context.Context, binding storage.ProviderBi
 }
 
 func (s *backend) SignMultipartPart(ctx context.Context, binding storage.ProviderBinding, request storage.MultipartPartRequest) (storage.SignedAccess, error) {
+	if request.PartNumber < 1 || request.PartNumber > storage.MaxS3MultipartPartNumber {
+		return storage.SignedAccess{}, &storage.OperationError{
+			Kind:       storage.ErrorInvalid,
+			Provider:   address.S3Provider,
+			Capability: "multipart",
+			Cause:      fmt.Errorf("part number must be between 1 and %d", storage.MaxS3MultipartPartNumber),
+		}
+	}
+
 	clients, err := s.getClients(ctx, binding)
 	if err != nil {
 		return storage.SignedAccess{}, err

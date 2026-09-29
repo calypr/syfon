@@ -33,10 +33,10 @@ func LoadConfig(configFile string) (*Config, error) {
 	if err := applyEnvironmentOverrides(cfg); err != nil {
 		return nil, err
 	}
+	resolveAuthEnvironment(cfg)
 	if err := validateConfig(cfg); err != nil {
 		return nil, err
 	}
-	resolveAuthEnvironment(cfg)
 	return cfg, nil
 }
 

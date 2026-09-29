@@ -2,6 +2,8 @@ package upload
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"os"
 	"path/filepath"
@@ -14,11 +16,8 @@ import (
 )
 
 type didLookupStub struct {
-	obj              drsapi.DrsObject
-	err              error
-	deletedObjectID  string
-	deleteStorageArg *bool
-	deleteErr        error
+	obj drsapi.DrsObject
+	err error
 }
 
 func (s didLookupStub) GetObject(context.Context, string) (drsapi.DrsObject, error) {
@@ -26,12 +25,6 @@ func (s didLookupStub) GetObject(context.Context, string) (drsapi.DrsObject, err
 		return drsapi.DrsObject{}, s.err
 	}
 	return s.obj, nil
-}
-
-func (s *didLookupStub) DeleteObject(_ context.Context, objectID string, deleteStorageData bool) error {
-	s.deletedObjectID = objectID
-	s.deleteStorageArg = &deleteStorageData
-	return s.deleteErr
 }
 
 func TestResolveUploadBucketForScopePrefersExactProjectMatch(t *testing.T) {
@@ -95,26 +88,35 @@ func TestEnsureWritableDIDRequiresOverwriteForExistingObject(t *testing.T) {
 }
 
 func TestEnsureWritableDIDAllowsOverwriteForExistingObject(t *testing.T) {
-	stub := &didLookupStub{obj: drsapi.DrsObject{Id: "did-1"}}
-	warning, err := ensureWritableDID(context.Background(), stub, "did-1", true)
+	oldSHA := strings.Repeat("a", 64)
+	controlled := []string{"/programs/demo/projects/test"}
+	stub := &didLookupStub{obj: drsapi.DrsObject{Id: "did-1", Checksums: []drsapi.Checksum{{Type: "sha256", Checksum: oldSHA}}, ControlledAccess: &controlled}}
+	info, err := ensureWritableDID(context.Background(), stub, "did-1", true)
 	if err != nil {
 		t.Fatalf("expected overwrite to allow existing DID, got %v", err)
 	}
-	if !strings.Contains(warning, "already existed") {
-		t.Fatalf("expected overwrite warning, got %q", warning)
+	if !strings.Contains(info.Warning, "already exists") {
+		t.Fatalf("expected overwrite warning, got %q", info.Warning)
 	}
-	if stub.deletedObjectID != "did-1" {
-		t.Fatalf("expected overwrite to delete did-1 first, got %q", stub.deletedObjectID)
+	if info.ExpectedOldSHA != oldSHA {
+		t.Fatalf("expected precondition %q, got %q", oldSHA, info.ExpectedOldSHA)
 	}
-	if stub.deleteStorageArg == nil || *stub.deleteStorageArg {
-		t.Fatalf("expected overwrite delete to preserve storage bytes, got deleteStorageData=%v", stub.deleteStorageArg)
+	if info.Existing == nil || info.Existing.Id != "did-1" {
+		t.Fatalf("expected existing object in overwrite info, got %+v", info.Existing)
+	}
+}
+
+func TestEnsureWritableDIDRejectsOverwriteWithoutSHA256(t *testing.T) {
+	_, err := ensureWritableDID(context.Background(), &didLookupStub{obj: drsapi.DrsObject{Id: "did-1"}}, "did-1", true)
+	if err == nil || !strings.Contains(err.Error(), "no valid SHA-256") {
+		t.Fatalf("expected safe replacement precondition error, got %v", err)
 	}
 }
 
 func TestEnsureWritableDIDAllowsMissingObject(t *testing.T) {
-	warning, err := ensureWritableDID(context.Background(), &didLookupStub{err: errorapi.ErrNotFound}, "did-1", false)
-	if err != nil || warning != "" {
-		t.Fatalf("expected missing DID to be writable without warning, got warning=%q err=%v", warning, err)
+	info, err := ensureWritableDID(context.Background(), &didLookupStub{err: errorapi.ErrNotFound}, "did-1", false)
+	if err != nil || info.Warning != "" || info.ExpectedOldSHA != "" {
+		t.Fatalf("expected missing DID to be writable without warning or precondition, got info=%+v err=%v", info, err)
 	}
 }
 
@@ -122,14 +124,6 @@ func TestEnsureWritableDIDPropagatesLookupFailure(t *testing.T) {
 	_, err := ensureWritableDID(context.Background(), &didLookupStub{err: errors.New("boom")}, "did-1", false)
 	if err == nil || !strings.Contains(err.Error(), "check existing DID") {
 		t.Fatalf("expected lookup failure, got %v", err)
-	}
-}
-
-func TestEnsureWritableDIDPropagatesOverwriteDeleteFailure(t *testing.T) {
-	stub := &didLookupStub{obj: drsapi.DrsObject{Id: "did-1"}, deleteErr: errors.New("delete boom")}
-	_, err := ensureWritableDID(context.Background(), stub, "did-1", true)
-	if err == nil || !strings.Contains(err.Error(), "delete existing DID") {
-		t.Fatalf("expected overwrite delete failure, got %v", err)
 	}
 }
 
@@ -192,5 +186,50 @@ func TestUploadRecordPathFallsBackToBaseNameOutsideCWD(t *testing.T) {
 	}
 	if got != "file.tsv" {
 		t.Fatalf("expected basename fallback, got %q", got)
+	}
+}
+
+func TestHashFileSHA256HandlesLargeFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "large.bin")
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create test file: %v", err)
+	}
+
+	block := []byte("syfon upload checksum streaming test\n")
+	const size = 16 << 20
+	expected := sha256.New()
+	for written := 0; written < size; {
+		chunk := block
+		if remaining := size - written; remaining < len(chunk) {
+			chunk = chunk[:remaining]
+		}
+		n, err := file.Write(chunk)
+		if err != nil {
+			_ = file.Close()
+			t.Fatalf("write test file: %v", err)
+		}
+		if n != len(chunk) {
+			_ = file.Close()
+			t.Fatalf("short test file write: wrote %d of %d bytes", n, len(chunk))
+		}
+		_, _ = expected.Write(chunk)
+		written += n
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("close test file: %v", err)
+	}
+
+	got, err := hashFileSHA256(path)
+	if err != nil {
+		t.Fatalf("hashFileSHA256 returned error: %v", err)
+	}
+	if want := hex.EncodeToString(expected.Sum(nil)); got != want {
+		t.Fatalf("hashFileSHA256 = %s, want %s", got, want)
+	}
+	if gotSize, err := os.Stat(path); err != nil {
+		t.Fatalf("stat test file: %v", err)
+	} else if gotSize.Size() != size {
+		t.Fatalf("test file size = %d, want %d", gotSize.Size(), size)
 	}
 }

@@ -120,6 +120,9 @@ func (iterationTestDialect) ListArgs(string, []string) (string, []any) {
 func (iterationTestDialect) LockContentWrite(context.Context, *sql.Tx) error {
 	return nil
 }
+func (iterationTestDialect) LockObjectUsageEventIDs(context.Context, *sql.Tx, []string) error {
+	return nil
+}
 func (iterationTestDialect) Bootstrap(context.Context, *sql.DB) error { return nil }
 
 type passthroughCredentialCodec struct{}

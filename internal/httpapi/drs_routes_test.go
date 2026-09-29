@@ -144,6 +144,162 @@ func TestRegisterObjects(t *testing.T) {
 	}
 }
 
+func TestReplaceObjectAfterUploadUpdatesRequestedDID(t *testing.T) {
+	oldSHA := strings.Repeat("a", 64)
+	newSHA := strings.Repeat("b", 64)
+	old := &generated.DrsObject{
+		Id:        "replace-did",
+		Name:      valuePointer("old.bin"),
+		Size:      3,
+		Checksums: []generated.Checksum{{Type: "sha256", Checksum: oldSHA}},
+		AccessMethods: &[]generated.AccessMethod{{
+			Type:      generated.AccessMethodTypeS3,
+			AccessUrl: &generated.AccessURL{Url: "s3://bucket/old"},
+		}},
+	}
+	db := newDRSObjectStore(t, map[string]*generated.DrsObject{old.Id: old})
+	app := newDRSTestApp(testDRSServices(db, nil))
+	candidate := generated.DrsObjectCandidate{
+		Name:      valuePointer("new.bin"),
+		Size:      7,
+		Aliases:   valuePointer([]string{"id:replace-did"}),
+		Checksums: []generated.Checksum{{Type: "sha256", Checksum: newSHA}},
+		ControlledAccess: valuePointer([]string{
+			"/organization/org1/project/proj1",
+		}),
+		AccessMethods: &[]generated.AccessMethod{{
+			Type:      generated.AccessMethodTypeS3,
+			AccessUrl: &generated.AccessURL{Url: "s3://bucket/new"},
+		}},
+	}
+	body, err := json.Marshal(generated.ReplaceObjectJSONRequestBody{ExpectedOldSha256: oldSHA, Candidate: candidate})
+	if err != nil {
+		t.Fatalf("marshal replace body: %v", err)
+	}
+	response, err := app.Test(httptest.NewRequest(http.MethodPost, "/objects/replace-did/replace", bytes.NewReader(body)))
+	if err != nil {
+		t.Fatalf("replace request failed: %v", err)
+	}
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("replace status = %d, want 200", response.StatusCode)
+	}
+	var replaced generated.DrsObject
+	if err := json.NewDecoder(response.Body).Decode(&replaced); err != nil {
+		t.Fatalf("decode replacement response: %v", err)
+	}
+	if replaced.Id != "replace-did" || replaced.Checksums[0].Checksum != newSHA || replaced.Size != 7 {
+		t.Fatalf("replacement response = %+v", replaced)
+	}
+	if replaced.Did == nil || *replaced.Did != "replace-did" {
+		t.Fatalf("replacement did identity = %v", replaced.Did)
+	}
+}
+
+func TestRegisterObjectsRejectsUnsupportedMetadataThroughGeneratedClient(t *testing.T) {
+	newCandidate := func(id string) generated.DrsObjectCandidate {
+		return generated.DrsObjectCandidate{
+			Name:      valuePointer("object.bin"),
+			Size:      50,
+			Aliases:   valuePointer([]string{"id:" + id}),
+			Checksums: []generated.Checksum{{Type: "sha256", Checksum: strings.Repeat("a", 64)}},
+			ControlledAccess: valuePointer([]string{
+				"/organization/org1/project/proj1",
+			}),
+			AccessMethods: &[]generated.AccessMethod{{
+				Type:      generated.AccessMethodTypeS3,
+				AccessUrl: &generated.AccessURL{Url: "s3://bucket/org1/proj1/object"},
+			}},
+		}
+	}
+	newClient := func(t *testing.T, app *fiber.App) *generated.ClientWithResponses {
+		t.Helper()
+		client, err := generated.NewClientWithResponses(
+			"http://syfon.test",
+			generated.WithHTTPClient(multipartTestClient{app}),
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return client
+	}
+
+	tests := []struct {
+		name  string
+		field string
+		set   func(*generated.DrsObjectCandidate)
+	}{
+		{
+			name:  "contents",
+			field: "contents",
+			set: func(candidate *generated.DrsObjectCandidate) {
+				candidate.Contents = valuePointer([]generated.ContentsObject{{Name: "part.bin"}})
+			},
+		},
+		{
+			name:  "mime_type",
+			field: "mime_type",
+			set: func(candidate *generated.DrsObjectCandidate) {
+				candidate.MimeType = valuePointer("application/octet-stream")
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			db := newDRSObjectStore(t, nil)
+			client := newClient(t, newDRSTestApp(testDRSServices(db, nil)))
+			candidate := newCandidate("rejected-" + test.name)
+			test.set(&candidate)
+
+			response, err := client.RegisterObjectsWithResponse(context.Background(), generated.RegisterObjectsJSONRequestBody{
+				Candidates: []generated.DrsObjectCandidate{candidate},
+			})
+			if err != nil {
+				t.Fatalf("register candidate: %v", err)
+			}
+			if response.StatusCode() != http.StatusBadRequest {
+				t.Fatalf("registration status = %d, want %d; body = %s", response.StatusCode(), http.StatusBadRequest, response.Body)
+			}
+			if !strings.Contains(string(response.Body), test.field) {
+				t.Fatalf("error response %s does not identify unsupported field %q", response.Body, test.field)
+			}
+
+			readback, err := client.GetObjectWithResponse(context.Background(), generated.ObjectId("rejected-"+test.name), nil)
+			if err != nil {
+				t.Fatalf("read rejected candidate: %v", err)
+			}
+			if readback.StatusCode() != http.StatusNotFound {
+				t.Fatalf("rejected candidate read status = %d, want %d", readback.StatusCode(), http.StatusNotFound)
+			}
+		})
+	}
+
+	t.Run("ordinary blob registers and reads back", func(t *testing.T) {
+		app := newDRSTestApp(testDRSServices(newDRSObjectStore(t, nil), nil))
+		client := newClient(t, app)
+		candidate := newCandidate("accepted-blob")
+		response, err := client.RegisterObjectsWithResponse(context.Background(), generated.RegisterObjectsJSONRequestBody{
+			Candidates: []generated.DrsObjectCandidate{candidate},
+		})
+		if err != nil {
+			t.Fatalf("register blob: %v", err)
+		}
+		if response.StatusCode() != http.StatusCreated || response.JSON201 == nil || len(response.JSON201.Objects) != 1 {
+			t.Fatalf("registration status/body = %d/%+v, want one created object", response.StatusCode(), response.JSON201)
+		}
+
+		readback, err := client.GetObjectWithResponse(context.Background(), generated.ObjectId(response.JSON201.Objects[0].Id), nil)
+		if err != nil {
+			t.Fatalf("read registered blob: %v", err)
+		}
+		if readback.StatusCode() != http.StatusOK || readback.JSON200 == nil {
+			t.Fatalf("blob read status/body = %d/%+v, want 200 object", readback.StatusCode(), readback.JSON200)
+		}
+		if readback.JSON200.Size != candidate.Size || readback.JSON200.MimeType != nil || readback.JSON200.Contents != nil {
+			t.Fatalf("blob readback = %+v, want size %d and no bundle fields", readback.JSON200, candidate.Size)
+		}
+	})
+}
+
 func TestRegisterObjectsRejectsMissingAccessMethods(t *testing.T) {
 	db := newDRSObjectStore(t, map[string]*generated.DrsObject{})
 	om := testDRSServices(db, nil)
@@ -309,6 +465,22 @@ func TestBulkAccessResponsePreservesResolutionContract(t *testing.T) {
 	}
 }
 
+func TestBulkAccessLimitCountsAccessIDs(t *testing.T) {
+	db := newDRSObjectStore(t, nil)
+	services := testDRSServices(db, &drsCaptureStorageAccess{})
+	app := fiber.New()
+	registerDRSRoutes(app, services.objectService, services.transferService, generated.N200ServiceInfo{}, 1)
+	request := httptest.NewRequest(http.MethodPost, "/objects/access", strings.NewReader(`{"bulk_object_access_ids":[{"bulk_object_id":"object-1","bulk_access_ids":["a","b"]}]}`))
+	response, err := app.Test(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Fatalf("bulk access status = %d, want 413", response.StatusCode)
+	}
+}
+
 func TestBulkObjectAndChecksumHandlers(t *testing.T) {
 	checksum := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	db := newDRSObjectStore(t, map[string]*generated.DrsObject{
@@ -455,6 +627,70 @@ func TestDeleteAndAccessMethodRoutes(t *testing.T) {
 	}
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("access method status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+}
+
+func TestBulkDeleteRouteRejectsPartialBatches(t *testing.T) {
+	allowedResource := "/organization/org/project/allowed"
+	deniedResource := "/organization/org/project/denied"
+	tests := []struct {
+		name        string
+		ids         []string
+		privileges  map[string]map[string]bool
+		wantStatus  int
+		wantDeleted bool
+	}{
+		{
+			name: "missing object", ids: []string{"allowed", "missing"}, wantStatus: http.StatusNotFound,
+			privileges: map[string]map[string]bool{allowedResource: {"delete": true}},
+		},
+		{
+			name: "unauthorized object", ids: []string{"allowed", "denied"}, wantStatus: http.StatusForbidden,
+			privileges: map[string]map[string]bool{allowedResource: {"delete": true}},
+		},
+		{
+			name: "all valid", ids: []string{"allowed", "denied"}, wantStatus: http.StatusNoContent, wantDeleted: true,
+			privileges: map[string]map[string]bool{
+				allowedResource: {"delete": true},
+				deniedResource:  {"delete": true},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := newDRSObjectStore(t, map[string]*generated.DrsObject{
+				"allowed": {Id: "allowed", ControlledAccess: &[]string{allowedResource}},
+				"denied":  {Id: "denied", ControlledAccess: &[]string{deniedResource}},
+			})
+			services := testDRSServices(db, nil)
+			requestContext := dataTestAuthContext(context.Background(), "gen3", true, tt.privileges)
+			app := fiber.New()
+			app.Use(func(c fiber.Ctx) error {
+				c.SetContext(requestContext)
+				return c.Next()
+			})
+			registerDRSRoutes(app, services.objectService, services.transferService, generated.N200ServiceInfo{})
+			body, err := json.Marshal(generated.BulkDeleteRequest{BulkObjectIds: tt.ids})
+			if err != nil {
+				t.Fatalf("marshal request: %v", err)
+			}
+			resp, err := app.Test(httptest.NewRequest(http.MethodPut, "/objects/delete", bytes.NewReader(body)))
+			if err != nil {
+				t.Fatalf("bulk delete request failed: %v", err)
+			}
+			if resp.StatusCode != tt.wantStatus {
+				t.Errorf("bulk delete status = %d, want %d", resp.StatusCode, tt.wantStatus)
+			}
+			for _, id := range []string{"allowed", "denied"} {
+				_, err := db.GetObject(context.Background(), id)
+				if tt.wantDeleted && err == nil {
+					t.Errorf("successful batch retained %q", id)
+				}
+				if !tt.wantDeleted && err != nil {
+					t.Errorf("rejected batch deleted %q: %v", id, err)
+				}
+			}
+		})
 	}
 }
 

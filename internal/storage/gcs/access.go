@@ -166,18 +166,8 @@ func (b *backend) signedURL(bucket, key, method string, expiry time.Duration, ra
 }
 
 func endpointObjectURL(cred *buckets.Credential, bucket, key, method, downloadName string) (string, bool) {
-	if cred == nil {
-		return "", false
-	}
-	endpoint := strings.TrimSpace(cred.Endpoint)
-	if endpoint == "" {
-		return "", false
-	}
-	if !strings.HasPrefix(endpoint, "http://") && !strings.HasPrefix(endpoint, "https://") {
-		endpoint = "http://" + endpoint
-	}
-	base, err := url.Parse(endpoint)
-	if err != nil || strings.TrimSpace(base.Host) == "" {
+	base, ok := parseCredentialEndpoint(cred)
+	if !ok {
 		return "", false
 	}
 	bucketEscaped := url.PathEscape(strings.TrimSpace(bucket))
@@ -185,28 +175,10 @@ func endpointObjectURL(cred *buckets.Credential, bucket, key, method, downloadNa
 	keyEscaped := url.PathEscape(cleanKey)
 	prefix := strings.TrimRight(strings.TrimSpace(base.Path), "/")
 	escapedPrefix := strings.TrimRight(strings.TrimSpace(base.EscapedPath()), "/")
-	base.RawQuery = ""
-	base.Fragment = ""
-	setPath := func(decodedParts, escapedParts []string) bool {
-		builtPath := strings.Join(decodedParts, "/")
-		escapedPath := strings.Join(escapedParts, "/")
-		if !strings.HasPrefix(builtPath, "/") {
-			builtPath = "/" + builtPath
-		}
-		if !strings.HasPrefix(escapedPath, "/") {
-			escapedPath = "/" + escapedPath
-		}
-		if len(builtPath) > 1 && (builtPath[1] == '/' || builtPath[1] == '\\') {
-			return false
-		}
-		base.Path = builtPath
-		base.RawPath = escapedPath
-		return true
-	}
 
 	switch strings.ToUpper(strings.TrimSpace(method)) {
 	case http.MethodPut:
-		if !setPath(
+		if !setEndpointPath(base,
 			[]string{prefix, "upload", "storage", "v1", "b", strings.TrimSpace(bucket), "o"},
 			[]string{escapedPrefix, "upload", "storage", "v1", "b", bucketEscaped, "o"},
 		) {
@@ -218,7 +190,7 @@ func endpointObjectURL(cred *buckets.Credential, bucket, key, method, downloadNa
 		base.RawQuery = query.Encode()
 		return base.String(), true
 	default:
-		if !setPath(
+		if !setEndpointPath(base,
 			[]string{prefix, "storage", "v1", "b", strings.TrimSpace(bucket), "o", cleanKey},
 			[]string{escapedPrefix, "storage", "v1", "b", bucketEscaped, "o", keyEscaped},
 		) {
@@ -232,6 +204,59 @@ func endpointObjectURL(cred *buckets.Credential, bucket, key, method, downloadNa
 		base.RawQuery = query.Encode()
 		return base.String(), true
 	}
+}
+
+func parseCredentialEndpoint(cred *buckets.Credential) (*url.URL, bool) {
+	if cred == nil {
+		return nil, false
+	}
+	endpoint := strings.TrimSpace(cred.Endpoint)
+	if endpoint == "" {
+		return nil, false
+	}
+	if !strings.HasPrefix(endpoint, "http://") && !strings.HasPrefix(endpoint, "https://") {
+		endpoint = "http://" + endpoint
+	}
+	base, err := url.Parse(endpoint)
+	if err != nil || strings.TrimSpace(base.Host) == "" {
+		return nil, false
+	}
+	base.RawQuery = ""
+	base.Fragment = ""
+	return base, true
+}
+
+func storageAPIEndpointURL(cred *buckets.Credential) (string, bool) {
+	base, ok := parseCredentialEndpoint(cred)
+	if !ok {
+		return "", false
+	}
+	prefix := strings.TrimRight(strings.TrimSpace(base.Path), "/")
+	escapedPrefix := strings.TrimRight(strings.TrimSpace(base.EscapedPath()), "/")
+	if !setEndpointPath(base,
+		[]string{prefix, "storage", "v1", ""},
+		[]string{escapedPrefix, "storage", "v1", ""},
+	) {
+		return "", false
+	}
+	return base.String(), true
+}
+
+func setEndpointPath(base *url.URL, decodedParts, escapedParts []string) bool {
+	builtPath := strings.Join(decodedParts, "/")
+	escapedPath := strings.Join(escapedParts, "/")
+	if !strings.HasPrefix(builtPath, "/") {
+		builtPath = "/" + builtPath
+	}
+	if !strings.HasPrefix(escapedPath, "/") {
+		escapedPath = "/" + escapedPath
+	}
+	if len(builtPath) > 1 && (builtPath[1] == '/' || builtPath[1] == '\\') {
+		return false
+	}
+	base.Path = builtPath
+	base.RawPath = escapedPath
+	return true
 }
 
 func googleAccessID(cred *buckets.Credential) string {

@@ -40,7 +40,9 @@ type ObjectScopeDeleter interface {
 
 type RecordRepairer interface {
 	ListObjects(context.Context, objects.RecordListQuery) ([]drs.DrsObject, error)
+	ListRepairCandidates(context.Context, objects.RepairCandidateQuery) (objects.RepairCandidatePage, error)
 	ListPhysicalObjectsByScope(context.Context, string, string, string) ([]drs.DrsObject, error)
+	RepairMissingControlledAccess(context.Context, string, string, objects.Scope) error
 	UpdateObjectMetadata(context.Context, string, drs.DrsObject, objects.Scope, *int64) (drs.DrsObject, error)
 	CollapseProjectChecksumDuplicates(context.Context, string, string) (int, error)
 }

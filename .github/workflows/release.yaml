@@ -198,8 +198,37 @@ jobs:
           RELEASE_TAG: ${{ needs.prepare.outputs.root_tag }}
         run: |
           set -euo pipefail
-          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            echo "Release already exists: $RELEASE_TAG"
+          if release_state="$(gh release view "$RELEASE_TAG" \
+            --json assets,isDraft \
+            --jq '[.isDraft, (.assets[].name)] | @tsv')"; then
+            IFS=$'\t' read -r -a release_details <<< "$release_state"
+            is_draft="${release_details[0]}"
+            existing_assets=("${release_details[@]:1}")
+            missing_assets=()
+
+            release_has_asset() {
+              local asset_name="$1"
+              local existing_name
+              for existing_name in "${existing_assets[@]}"; do
+                [[ "$existing_name" == "$asset_name" ]] && return 0
+              done
+              return 1
+            }
+
+            for asset in dist/*.tar.gz "dist/syfon-${RELEASE_TAG}-checksums.txt"; do
+              asset_name="${asset##*/}"
+              if ! release_has_asset "$asset_name"; then
+                missing_assets+=("$asset")
+              fi
+            done
+
+            if ((${#missing_assets[@]})); then
+              gh release upload "$RELEASE_TAG" "${missing_assets[@]}"
+            fi
+            if [[ "$is_draft" == true ]]; then
+              gh release edit "$RELEASE_TAG" --draft=false
+            fi
+            echo "Release assets reconciled: $RELEASE_TAG"
             exit 0
           fi
 

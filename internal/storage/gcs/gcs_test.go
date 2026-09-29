@@ -43,6 +43,15 @@ func testClient(ctx context.Context, transport roundTripperFunc) (*storage.Clien
 	)
 }
 
+func testClientForCredential(ctx context.Context, cred *buckets.Credential, transport roundTripperFunc) (*storage.Client, error) {
+	options := storageClientOptions(cred)
+	options = append(options,
+		option.WithoutAuthentication(),
+		option.WithHTTPClient(&http.Client{Transport: transport}),
+	)
+	return storage.NewClient(ctx, options...)
+}
+
 func responseFor(request *http.Request, status int, body string) *http.Response {
 	return &http.Response{
 		StatusCode: status,
@@ -140,6 +149,111 @@ func TestNewClientFallsBackToApplicationDefaultCredentials(t *testing.T) {
 	}
 }
 
+func TestStorageClientUsesCredentialEndpointOverEmulatorHost(t *testing.T) {
+	t.Setenv("STORAGE_EMULATOR_HOST", "emulator.test:9000")
+	cred := &buckets.Credential{Endpoint: "configured.test/proxy%20root"}
+	var gotScheme, gotHost, gotPath string
+	client, err := testClientForCredential(context.Background(), cred, func(request *http.Request) *http.Response {
+		gotScheme = request.URL.Scheme
+		gotHost = request.URL.Host
+		gotPath = request.URL.EscapedPath()
+		return responseFor(request, http.StatusNotFound, `{"error":{"code":404,"message":"not found"}}`)
+	})
+	if err != nil {
+		t.Fatalf("create storage client: %v", err)
+	}
+	defer client.Close()
+
+	_, err = client.Bucket("test-bucket").Attrs(context.Background())
+	if err == nil {
+		t.Fatal("Bucket.Attrs succeeded against a fake 404 response")
+	}
+	if got, want := gotScheme, "http"; got != want {
+		t.Fatalf("storage request scheme = %q, want %q", got, want)
+	}
+	if got, want := gotHost, "configured.test"; got != want {
+		t.Fatalf("storage request host = %q, want %q", got, want)
+	}
+	if got, want := gotPath, "/proxy%20root/storage/v1/b/test-bucket"; got != want {
+		t.Fatalf("storage request path = %q, want %q", got, want)
+	}
+
+	part, err := (&backend{}).SignMultipartPart(context.Background(), storageports.ProviderBinding{
+		PhysicalBucket: "test-bucket",
+		Credential:     cred,
+	}, storageports.MultipartPartRequest{
+		Target: storageports.Target{Key: "nested/file.txt"}, UploadID: "upload", PartNumber: 1,
+	})
+	if err != nil {
+		t.Fatalf("SignMultipartPart returned error: %v", err)
+	}
+	partURL, err := url.Parse(part.Location)
+	if err != nil {
+		t.Fatalf("parse part URL: %v", err)
+	}
+	if got, want := partURL.Scheme, gotScheme; got != want {
+		t.Fatalf("part URL scheme = %q, want SDK request scheme %q", got, want)
+	}
+	if got, want := partURL.Host, gotHost; got != want {
+		t.Fatalf("part URL host = %q, want SDK request host %q", got, want)
+	}
+	if got, want := partURL.EscapedPath(), "/proxy%20root/upload/storage/v1/b/test-bucket/o"; got != want {
+		t.Fatalf("part URL path = %q, want %q", got, want)
+	}
+}
+
+func TestStorageClientOptionsPreserveEmulatorEndpointWithoutCredentialEndpoint(t *testing.T) {
+	t.Setenv("STORAGE_EMULATOR_HOST", "emulator.test:9000")
+	var gotHost, gotPath string
+	client, err := storage.NewClient(context.Background(), append(storageClientOptions(&buckets.Credential{}),
+		option.WithHTTPClient(&http.Client{Transport: roundTripperFunc(func(request *http.Request) *http.Response {
+			gotHost = request.URL.Host
+			gotPath = request.URL.EscapedPath()
+			return responseFor(request, http.StatusNotFound, `{"error":{"code":404,"message":"not found"}}`)
+		})}),
+	)...)
+	if err != nil {
+		t.Fatalf("create storage client: %v", err)
+	}
+	defer client.Close()
+
+	_, err = client.Bucket("test-bucket").Attrs(context.Background())
+	if err == nil {
+		t.Fatal("Bucket.Attrs succeeded against a fake 404 response")
+	}
+	if got, want := gotHost, "emulator.test:9000"; got != want {
+		t.Fatalf("storage request host = %q, want %q", got, want)
+	}
+	if got, want := gotPath, "/storage/v1/b/test-bucket"; got != want {
+		t.Fatalf("storage request path = %q, want %q", got, want)
+	}
+}
+
+func TestStorageClientOptionsPreserveProductionEndpointWithoutCredentialEndpoint(t *testing.T) {
+	t.Setenv("STORAGE_EMULATOR_HOST", "")
+	var gotHost, gotPath string
+	client, err := testClientForCredential(context.Background(), &buckets.Credential{}, func(request *http.Request) *http.Response {
+		gotHost = request.URL.Host
+		gotPath = request.URL.EscapedPath()
+		return responseFor(request, http.StatusNotFound, `{"error":{"code":404,"message":"not found"}}`)
+	})
+	if err != nil {
+		t.Fatalf("create storage client: %v", err)
+	}
+	defer client.Close()
+
+	_, err = client.Bucket("test-bucket").Attrs(context.Background())
+	if err == nil {
+		t.Fatal("Bucket.Attrs succeeded against a fake 404 response")
+	}
+	if got, want := gotHost, "storage.googleapis.com"; got != want {
+		t.Fatalf("storage request host = %q, want %q", got, want)
+	}
+	if got, want := gotPath, "/storage/v1/b/test-bucket"; got != want {
+		t.Fatalf("storage request path = %q, want %q", got, want)
+	}
+}
+
 func TestNativeRangedAccessUsesV4RangeSignature(t *testing.T) {
 	key, err := rsa.GenerateKey(rand.Reader, 1024)
 	if err != nil {
@@ -196,7 +310,11 @@ func TestNativeMultipartAccessUsesRequestedExpiry(t *testing.T) {
 
 func TestAbortMultipartDeletesOnlyExactUploadPrefix(t *testing.T) {
 	var deleted []string
+	var requestHosts, requestPaths []string
+	t.Setenv("STORAGE_EMULATOR_HOST", "emulator.test:9000")
 	transport := roundTripperFunc(func(r *http.Request) *http.Response {
+		requestHosts = append(requestHosts, r.URL.Host)
+		requestPaths = append(requestPaths, r.URL.EscapedPath())
 		switch r.Method {
 		case http.MethodGet:
 			if got := r.URL.Query().Get("prefix"); got != ".syfon-multipart/upload/nested/file.txt/" {
@@ -211,18 +329,29 @@ func TestAbortMultipartDeletesOnlyExactUploadPrefix(t *testing.T) {
 		}
 	})
 	previous := newClient
-	newClient = func(ctx context.Context, _ *buckets.Credential) (*storage.Client, error) {
-		return testClient(ctx, transport)
+	newClient = func(ctx context.Context, cred *buckets.Credential) (*storage.Client, error) {
+		return testClientForCredential(ctx, cred, transport)
 	}
 	defer func() { newClient = previous }()
 
 	b := &backend{}
-	binding := storageports.ProviderBinding{LookupKey: "bucket", PhysicalBucket: "bucket", Credential: &buckets.Credential{Bucket: "bucket"}}
+	binding := storageports.ProviderBinding{LookupKey: "bucket", PhysicalBucket: "bucket", Credential: &buckets.Credential{Bucket: "bucket", Endpoint: "abort.fake.test/custom/root"}}
 	if err := b.AbortMultipart(context.Background(), binding, storageports.AbortMultipartRequest{Target: storageports.Target{Key: "nested/file.txt"}, UploadID: "upload"}); err != nil {
 		t.Fatalf("AbortMultipart returned error: %v", err)
 	}
 	if len(deleted) != 2 {
 		t.Fatalf("deleted paths = %d, want 2", len(deleted))
+	}
+	if len(requestHosts) != len(deleted)+1 {
+		t.Fatalf("storage request count = %d, want list plus deletes", len(requestHosts))
+	}
+	for i := range requestHosts {
+		if got, want := requestHosts[i], "abort.fake.test"; got != want {
+			t.Fatalf("storage request host = %q, want %q", got, want)
+		}
+		if !strings.HasPrefix(requestPaths[i], "/custom/root/storage/v1/") {
+			t.Fatalf("storage request path = %q, want configured API prefix", requestPaths[i])
+		}
 	}
 	if client, ok := b.cache.Load("bucket"); ok {
 		_ = client.(*storage.Client).Close()
@@ -232,7 +361,11 @@ func TestAbortMultipartDeletesOnlyExactUploadPrefix(t *testing.T) {
 func TestCompleteMultipartSortsComposesInBatchesAndCleansUp(t *testing.T) {
 	var composePaths []string
 	var deletePaths []string
+	var requestHosts, requestPaths []string
+	t.Setenv("STORAGE_EMULATOR_HOST", "emulator.test:9000")
 	transport := roundTripperFunc(func(r *http.Request) *http.Response {
+		requestHosts = append(requestHosts, r.URL.Host)
+		requestPaths = append(requestPaths, r.URL.EscapedPath())
 		switch r.Method {
 		case http.MethodPost:
 			composePaths = append(composePaths, r.URL.Path)
@@ -249,13 +382,13 @@ func TestCompleteMultipartSortsComposesInBatchesAndCleansUp(t *testing.T) {
 	})
 
 	previous := newClient
-	newClient = func(ctx context.Context, _ *buckets.Credential) (*storage.Client, error) {
-		return testClient(ctx, transport)
+	newClient = func(ctx context.Context, cred *buckets.Credential) (*storage.Client, error) {
+		return testClientForCredential(ctx, cred, transport)
 	}
 	defer func() { newClient = previous }()
 
 	b := &backend{}
-	binding := storageports.ProviderBinding{LookupKey: "bucket", PhysicalBucket: "bucket", Credential: &buckets.Credential{Bucket: "bucket"}}
+	binding := storageports.ProviderBinding{LookupKey: "bucket", PhysicalBucket: "bucket", Credential: &buckets.Credential{Bucket: "bucket", Endpoint: "complete.fake.test/custom/root"}}
 	parts := make([]storageports.CompletedPart, 33)
 	for i := range parts {
 		parts[i] = storageports.CompletedPart{PartNumber: int32(len(parts) - i), ETag: "ignored"}
@@ -277,6 +410,17 @@ func TestCompleteMultipartSortsComposesInBatchesAndCleansUp(t *testing.T) {
 	}
 	if !strings.Contains(deletePaths[len(deletePaths)-1], ".syfon-multipart") {
 		t.Fatalf("temporary compose object was not deleted last: %q", deletePaths[len(deletePaths)-1])
+	}
+	if len(requestHosts) != len(composePaths)+len(deletePaths) {
+		t.Fatalf("storage request count = %d, want compose and cleanup requests", len(requestHosts))
+	}
+	for i := range requestHosts {
+		if got, want := requestHosts[i], "complete.fake.test"; got != want {
+			t.Fatalf("storage request host = %q, want %q", got, want)
+		}
+		if !strings.HasPrefix(requestPaths[i], "/custom/root/storage/v1/") {
+			t.Fatalf("storage request path = %q, want configured API prefix", requestPaths[i])
+		}
 	}
 	if client, ok := b.cache.Load("bucket"); ok {
 		_ = client.(*storage.Client).Close()
@@ -395,6 +539,51 @@ func TestInvalidateBucketEvictsCachedNativeClientByLookupKey(t *testing.T) {
 	}
 	_ = first.Close()
 	_ = third.Close()
+}
+
+func TestCredentialEndpointChangeCreatesNewClient(t *testing.T) {
+	previous := newClient
+	var createdEndpoints []string
+	newClient = func(ctx context.Context, cred *buckets.Credential) (*storage.Client, error) {
+		createdEndpoints = append(createdEndpoints, cred.Endpoint)
+		return testClient(ctx, func(r *http.Request) *http.Response {
+			return responseFor(r, http.StatusNotFound, "")
+		})
+	}
+	defer func() { newClient = previous }()
+
+	b := &backend{}
+	defer func() {
+		if err := b.Close(); err != nil {
+			t.Errorf("close backend: %v", err)
+		}
+	}()
+
+	firstBinding := storageports.ProviderBinding{
+		LookupKey:      "bucket",
+		PhysicalBucket: "bucket",
+		Credential:     &buckets.Credential{Bucket: "bucket", Endpoint: "http://first.test"},
+	}
+	first, err := b.getClient(context.Background(), firstBinding)
+	if err != nil {
+		t.Fatalf("first getClient returned error: %v", err)
+	}
+
+	secondBinding := firstBinding
+	secondBinding.Credential = &buckets.Credential{Bucket: "bucket", Endpoint: "http://second.test"}
+	second, err := b.getClient(context.Background(), secondBinding)
+	if err != nil {
+		t.Fatalf("second getClient returned error: %v", err)
+	}
+	if first == second {
+		t.Fatal("endpoint change reused the previous client")
+	}
+	if len(createdEndpoints) != 2 {
+		t.Fatalf("client factory calls = %d, want 2", len(createdEndpoints))
+	}
+	if createdEndpoints[0] != "http://first.test" || createdEndpoints[1] != "http://second.test" {
+		t.Fatalf("client factory endpoints = %#v", createdEndpoints)
+	}
 }
 
 func TestInvalidateCannotPublishOldConfiguration(t *testing.T) {

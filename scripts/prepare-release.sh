@@ -18,8 +18,7 @@ fi
 merged_pr_number="$(gh api \
   -H 'Accept: application/vnd.github+json' \
   "/repos/${GITHUB_REPOSITORY}/commits/${HEAD_SHA}/pulls" \
-  --jq '.[] | select(.base.ref == "development" and .merged_at != null) | .number' \
-  | head -n1 || true)"
+  --jq '[.[] | select(.base.ref == "development" and .merged_at != null) | .number][0] // empty')"
 if [[ -z "$merged_pr_number" ]]; then
   {
     echo "root_tag="

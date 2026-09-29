@@ -44,6 +44,14 @@ func (f *fakeRepairRecords) ListObjects(_ context.Context, query objects.RecordL
 	return f.pages[index], nil
 }
 
+func (*fakeRepairRecords) ListRepairCandidates(context.Context, objects.RepairCandidateQuery) (objects.RepairCandidatePage, error) {
+	return objects.RepairCandidatePage{}, nil
+}
+
+func (*fakeRepairRecords) RepairMissingControlledAccess(context.Context, string, string, objects.Scope) error {
+	return nil
+}
+
 func (f *fakeRepairRecords) ListPhysicalObjectsByScope(context.Context, string, string, string) ([]drs.DrsObject, error) {
 	return nil, nil
 }

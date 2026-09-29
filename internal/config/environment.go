@@ -162,7 +162,7 @@ func applyEnvironmentOverrides(cfg *Config) error {
 			cfg.Database.Postgres = &PostgresConfig{
 				Host:    "localhost",
 				Port:    5432,
-				SSLMode: "require", // SECURITY FIX MED-2: Default to TLS required
+				SSLMode: "verify-full",
 			}
 		}
 		// If env vars specify postgres, we should probably disable the default sqlite if it was still active

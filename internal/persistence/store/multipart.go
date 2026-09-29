@@ -44,10 +44,6 @@ func (db *Store) GetMultipartSession(ctx context.Context, uploadID string) (tran
 	return db.readMultipartSession(ctx, db.db, uploadID)
 }
 
-func (db *Store) ClaimMultipartCompletion(ctx context.Context, uploadID, token, partsFingerprint string, now, staleBefore time.Time) (transfers.MultipartSession, bool, error) {
-	return db.claimMultipartCompletion(ctx, uploadID, token, partsFingerprint, "", now, staleBefore)
-}
-
 func (db *Store) ClaimMultipartCompletionWithParts(ctx context.Context, uploadID, token, partsFingerprint string, parts []transfers.CompletedPart, now, staleBefore time.Time) (transfers.MultipartSession, bool, error) {
 	partsJSON, err := json.Marshal(parts)
 	if err != nil {
@@ -125,6 +121,18 @@ func (db *Store) ClaimMultipartAbort(ctx context.Context, uploadID, token string
 		return transfers.MultipartSession{}, false, err
 	}
 	return session, affected == 1 && session.CompletionToken == token, nil
+}
+
+func (db *Store) ReleaseMultipartAbort(ctx context.Context, uploadID, token string, now time.Time) error {
+	_, err := db.execContext(ctx, `
+		UPDATE multipart_upload_session
+		SET state = ?, operation = '', completion_token = '', updated_time = ?
+		WHERE upload_id = ? AND state = ? AND operation = ? AND completion_token = ?
+	`, transfers.MultipartStateActive, now.UTC(), uploadID, transfers.MultipartStateCompleting, transfers.MultipartOperationAbort, token)
+	if err != nil {
+		return fmt.Errorf("release multipart abort %s: %w", uploadID, err)
+	}
+	return nil
 }
 
 func (db *Store) FinishMultipartAbort(ctx context.Context, uploadID, token string, _ time.Time) (bool, error) {

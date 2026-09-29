@@ -86,6 +86,39 @@ func (f *bucketTestStore) DeleteS3Credential(_ context.Context, bucket string) e
 	return nil
 }
 
+func (f *bucketTestStore) DeleteBucketCredential(_ context.Context, bucket string, authorize domainbuckets.ScopeDeletionPolicy) ([]string, error) {
+	var credential domainbuckets.Credential
+	found := false
+	for _, current := range f.Credentials {
+		if current.CredentialID == bucket || current.Bucket == bucket {
+			credential, found = current, true
+			break
+		}
+	}
+	if !found {
+		return nil, errorapi.ErrStorageCredentialMissing
+	}
+	scopes := make([]domainbuckets.Scope, 0)
+	for _, scope := range f.BucketScopes {
+		if scope.CredentialID == credential.CredentialID || scope.Bucket == credential.Bucket {
+			scopes = append(scopes, scope)
+		}
+	}
+	if authorize == nil {
+		return nil, errorapi.ErrAccessDenied
+	}
+	if err := authorize(scopes); err != nil {
+		return nil, err
+	}
+	for key, scope := range f.BucketScopes {
+		if scope.CredentialID == credential.CredentialID || scope.Bucket == credential.Bucket {
+			delete(f.BucketScopes, key)
+		}
+	}
+	delete(f.Credentials, credential.CredentialID)
+	return []string{bucket, credential.CredentialID, credential.Bucket}, nil
+}
+
 func (f *bucketTestStore) CreateBucketScope(_ context.Context, scope *domainbuckets.Scope) error {
 	if scope == nil {
 		return errors.New("scope is required")

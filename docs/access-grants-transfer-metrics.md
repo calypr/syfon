@@ -10,6 +10,7 @@ and download URLs.
 - Transfer summaries expose aggregate `bytes_downloaded` and `bytes_uploaded`.
 - Transfer breakdowns can group those bytes by scope, user, storage provider/bucket, or object SHA256.
 - For day-to-day triage, the CLI defaults `syfon metrics transfers breakdown` to user grouping and exposes a dedicated `users` report with client-side sorting and limits.
+- In `syfon metrics transfers users`, `total_users` counts all matching users before the client-side `--limit`; the `users` array is the sorted, limited result.
 
 ## Billing Report
 

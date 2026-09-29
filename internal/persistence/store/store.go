@@ -39,32 +39,42 @@ func (s *Store) queryRowOn(ctx context.Context, executor sqlExecutor, query stri
 
 // Open bootstraps db through dialect and returns the shared store. A nil codec
 // is accepted for callers that do not use credential persistence.
-func Open(db *sql.DB, dialect Dialect, cipher CredentialCodec) (*Store, error) {
+func Open(ctx context.Context, db *sql.DB, dialect Dialect, cipher CredentialCodec) (*Store, error) {
 	if db == nil {
 		return nil, fmt.Errorf("database is required")
 	}
 	if dialect == nil {
 		return nil, fmt.Errorf("database dialect is required")
 	}
-	if err := dialect.Bootstrap(context.Background(), db); err != nil {
+	if err := dialect.Bootstrap(ctx, db); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("database bootstrap failed: %w", err)
 	}
-	return &Store{db: db, dialect: dialect, cipher: cipher}, nil
+	shared := &Store{db: db, dialect: dialect, cipher: cipher}
+	if err := shared.encryptLegacyCredentials(ctx); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("credential encryption migration failed: %w", err)
+	}
+	return shared, nil
 }
 
 // OpenPrepared adopts an already validated database handle without running
 // dialect bootstrap. Production PostgreSQL startup uses this path after a
 // read-only schema check. Schema writes stay in the SQL mounted into the
-// cluster DB-init Job.
-func OpenPrepared(db *sql.DB, dialect Dialect, cipher CredentialCodec) (*Store, error) {
+// cluster DB-init Job; existing plaintext credentials are encrypted here.
+func OpenPrepared(ctx context.Context, db *sql.DB, dialect Dialect, cipher CredentialCodec) (*Store, error) {
 	if db == nil {
 		return nil, fmt.Errorf("database is required")
 	}
 	if dialect == nil {
 		return nil, fmt.Errorf("database dialect is required")
 	}
-	return &Store{db: db, dialect: dialect, cipher: cipher}, nil
+	shared := &Store{db: db, dialect: dialect, cipher: cipher}
+	if err := shared.encryptLegacyCredentials(ctx); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("credential encryption migration failed: %w", err)
+	}
+	return shared, nil
 }
 
 // Close closes the database handle owned by the store.
