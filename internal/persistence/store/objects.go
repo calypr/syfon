@@ -100,33 +100,24 @@ func (db *Store) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []string,
 		}
 	}
 	var args []any
-	conditions := make([]string, 0, 2)
-	if len(ids) > 0 {
-		idCondition, idArgs := db.dialect.ListArgs("o.id", ids)
-		conditions = append(conditions, idCondition)
+	candidates := make([]string, 0, 3)
+	lookupIDs := append(append([]string(nil), ids...), trimmedChecksums...)
+	if len(lookupIDs) > 0 {
+		idCondition, idArgs := db.dialect.ListArgs("id", lookupIDs)
+		candidates = append(candidates, "SELECT id FROM drs_object WHERE "+idCondition)
 		args = append(args, idArgs...)
 	}
-	if len(checksums) > 0 {
-		parts := make([]string, 0, 3)
-		checksumIDCondition, checksumIDArgs := db.dialect.ListArgs("o.id", trimmedChecksums)
-		parts = append(parts, checksumIDCondition)
-		args = append(args, checksumIDArgs...)
-		if len(shaQueries) > 0 {
-			shaCondition, shaArgs := db.dialect.ListArgs("replace(lower(trim(c2.checksum)), 'sha256:', '')", shaQueries)
-			parts = append(parts, `EXISTS (SELECT 1 FROM drs_object_checksum c2
-				WHERE c2.object_id = o.id AND replace(lower(trim(c2.type)), '-', '') = 'sha256'
-				AND `+shaCondition+")")
-			args = append(args, shaArgs...)
-		}
-		if len(genericQueries) > 0 {
-			genericCondition, genericArgs := db.dialect.ListArgs("c2.checksum", genericQueries)
-			parts = append(parts, `EXISTS (SELECT 1 FROM drs_object_checksum c2
-				WHERE c2.object_id = o.id AND `+genericCondition+")")
-			args = append(args, genericArgs...)
-		}
-		conditions = append(conditions, "("+strings.Join(parts, " OR ")+")")
+	if len(shaQueries) > 0 {
+		shaCondition, shaArgs := db.dialect.ListArgs("replace(lower(trim(c2.checksum)), 'sha256:', '')", shaQueries)
+		candidates = append(candidates, `SELECT c2.object_id FROM drs_object_checksum c2
+			WHERE replace(lower(trim(c2.type)), '-', '') = 'sha256' AND `+shaCondition)
+		args = append(args, shaArgs...)
 	}
-	condition := strings.Join(conditions, " OR ")
+	if len(genericQueries) > 0 {
+		genericCondition, genericArgs := db.dialect.ListArgs("c2.checksum", genericQueries)
+		candidates = append(candidates, "SELECT c2.object_id FROM drs_object_checksum c2 WHERE "+genericCondition)
+		args = append(args, genericArgs...)
+	}
 
 	query := fmt.Sprintf(`
 		SELECT
@@ -138,7 +129,7 @@ func (db *Store) fetchObjectsByIDsOrChecksums(ctx context.Context, ids []string,
 			o.version,
 			o.description
 		FROM drs_object o
-		WHERE %s`, condition)
+		WHERE o.id IN (%s)`, strings.Join(candidates, " UNION "))
 
 	rows, err := db.queryContext(ctx, query, args...)
 	if err != nil {
