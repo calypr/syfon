@@ -146,6 +146,30 @@ type BatchObjectResult struct {
 
 type BatchResult struct{ Objects []BatchObjectResult }
 
+type batchCredentialMetadataReader struct {
+	source buckets.CredentialMetadataReader
+	loaded bool
+	value  []buckets.CredentialMetadata
+	err    error
+}
+
+func (r *batchCredentialMetadataReader) ListCredentialMetadata(ctx context.Context) ([]buckets.CredentialMetadata, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if !r.loaded {
+		value, err := r.source.ListCredentialMetadata(ctx)
+		if contextErr := ctx.Err(); contextErr != nil {
+			return nil, contextErr
+		}
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, err
+		}
+		r.value, r.err, r.loaded = value, err, true
+	}
+	return r.value, r.err
+}
+
 type Service struct {
 	transfer    *transfers.Service
 	objects     ObjectPort
@@ -164,18 +188,24 @@ func NewService(transfer *transfers.Service, objectPort ObjectPort, credentials 
 }
 
 func (s *Service) Batch(ctx context.Context, request BatchRequest) (BatchResult, error) {
+	batch := s
+	if request.Operation != "download" && s != nil && s.credentials != nil {
+		copy := *s
+		copy.credentials = &batchCredentialMetadataReader{source: s.credentials}
+		batch = &copy
+	}
 	result := BatchResult{Objects: make([]BatchObjectResult, 0, len(request.Objects))}
 	for _, object := range request.Objects {
 		item := BatchObjectResult{OID: object.OID, Size: object.Size}
 		if request.Operation == "download" {
-			preparation, err := s.PrepareDownload(ctx, object.OID)
+			preparation, err := batch.PrepareDownload(ctx, object.OID)
 			if err != nil {
 				item.Err = err
 			} else {
 				item.DownloadURL = preparation.SignedURL
 			}
 		} else {
-			preparation, err := s.PrepareUpload(ctx, object.OID, object.Size)
+			preparation, err := batch.PrepareUpload(ctx, object.OID, object.Size)
 			item.Size = preparation.Size
 			item.Existing = preparation.Existing
 			item.Err = err
