@@ -73,6 +73,7 @@ func (s *Service) IssueAccess(ctx context.Context, request AccessLookupRequest) 
 }
 
 func (s *Service) IssueAccessBulk(ctx context.Context, requests []AccessLookupRequest) BulkAccessLookupResult {
+	ctx = storage.WithCredentialCache(ctx)
 	result := BulkAccessLookupResult{Resolved: make([]ResolvedAccess, 0)}
 	for _, request := range requests {
 		result.Requested++

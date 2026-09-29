@@ -35,7 +35,6 @@ func (db *Store) GetS3Credential(ctx context.Context, credentialID string) (*buc
 	if err == sql.ErrNoRows {
 		fallback, fallbackErr := db.getS3CredentialByPhysicalBucket(ctx, credentialID)
 		if fallbackErr == nil {
-			auditCredentialAccess(ctx, requestid.GetRequestID(ctx), "read", credentialID, nil)
 			return fallback, nil
 		}
 		auditCredentialAccess(ctx, requestid.GetRequestID(ctx), "read", credentialID, fallbackErr)
@@ -52,7 +51,6 @@ func (db *Store) GetS3Credential(ctx context.Context, credentialID string) (*buc
 		auditCredentialAccess(ctx, requestid.GetRequestID(ctx), "read", credentialID, wrapped)
 		return nil, wrapped
 	}
-	auditCredentialAccess(ctx, requestid.GetRequestID(ctx), "read", credentialID, nil)
 	return parsed, nil
 }
 
