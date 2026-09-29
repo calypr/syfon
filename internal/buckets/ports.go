@@ -28,9 +28,14 @@ type ScopeStore interface {
 	ListBucketScopes(ctx context.Context) ([]Scope, error)
 }
 
+// CredentialMetadataReader lists configured buckets without secret fields.
+type CredentialMetadataReader interface {
+	ListCredentialMetadata(ctx context.Context) ([]CredentialMetadata, error)
+}
+
 // VisibilityQuery supplies the object projection used to resolve bucket
 // visibility.
 type VisibilityQuery interface {
-	ListCredentialMetadata(ctx context.Context) ([]CredentialMetadata, error)
+	CredentialMetadataReader
 	ListBucketVisibilityRows(ctx context.Context, resources []string, includeUnscoped, restrictToResources bool) ([]VisibilityRow, error)
 }

@@ -149,14 +149,14 @@ type BatchResult struct{ Objects []BatchObjectResult }
 type Service struct {
 	transfer    *transfers.Service
 	objects     ObjectPort
-	credentials buckets.CredentialReader
+	credentials buckets.CredentialMetadataReader
 	pending     PendingStore
 	accounting  UploadAccounting
 	uploader    signedPartUploader
 	now         func() time.Time
 }
 
-func NewService(transfer *transfers.Service, objectPort ObjectPort, credentials buckets.CredentialReader, pending PendingStore, accounting UploadAccounting, uploader signedPartUploader) *Service {
+func NewService(transfer *transfers.Service, objectPort ObjectPort, credentials buckets.CredentialMetadataReader, pending PendingStore, accounting UploadAccounting, uploader signedPartUploader) *Service {
 	if uploader == nil {
 		uploader = uploadSignedMultipartPart
 	}
@@ -369,7 +369,7 @@ func (s *Service) firstConfiguredBucket(ctx context.Context) (string, error) {
 	if s.credentials == nil {
 		return "", errorapi.ErrBucketNotConfigured
 	}
-	credentials, err := s.credentials.ListS3Credentials(ctx)
+	credentials, err := s.credentials.ListCredentialMetadata(ctx)
 	if err != nil {
 		return "", err
 	}
