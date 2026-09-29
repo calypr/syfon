@@ -8,6 +8,7 @@ import (
 
 	"github.com/calypr/syfon/apigen/drs"
 	"github.com/calypr/syfon/apigen/errorapi"
+	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/objects"
 	"github.com/calypr/syfon/internal/storage"
 	"github.com/calypr/syfon/internal/usage"
@@ -74,10 +75,16 @@ func (s *Service) IssueAccess(ctx context.Context, request AccessLookupRequest) 
 
 func (s *Service) IssueAccessBulk(ctx context.Context, requests []AccessLookupRequest) BulkAccessLookupResult {
 	ctx = storage.WithCredentialCache(ctx)
+	batch := s
+	if s != nil && s.scopes != nil {
+		copy := *s
+		copy.scopes = &batchScopeReader{source: s.scopes, entries: make(map[scopeKey]scopeLookup)}
+		batch = &copy
+	}
 	result := BulkAccessLookupResult{Resolved: make([]ResolvedAccess, 0)}
 	for _, request := range requests {
 		result.Requested++
-		resolved, err := s.IssueAccess(ctx, request)
+		resolved, err := batch.IssueAccess(ctx, request)
 		if err == nil && !resolved.Found {
 			err = errorapi.ErrObjectLocationUnavailable
 		}
@@ -88,6 +95,35 @@ func (s *Service) IssueAccessBulk(ctx context.Context, requests []AccessLookupRe
 		result.Resolved = append(result.Resolved, ResolvedAccess{ObjectID: strings.TrimSpace(request.ObjectID), AccessID: strings.TrimSpace(request.AccessID), URL: resolved.URL})
 	}
 	return result
+}
+
+type scopeKey struct {
+	organization string
+	project      string
+}
+
+type scopeLookup struct {
+	scope buckets.Scope
+	found bool
+	err   error
+}
+
+type batchScopeReader struct {
+	source  ScopeReader
+	entries map[scopeKey]scopeLookup
+}
+
+func (r *batchScopeReader) LookupBucketScope(ctx context.Context, organization, project string) (buckets.Scope, bool, error) {
+	key := scopeKey{organization: strings.TrimSpace(organization), project: strings.TrimSpace(project)}
+	if cached, ok := r.entries[key]; ok {
+		if err := ctx.Err(); err != nil {
+			return buckets.Scope{}, false, err
+		}
+		return cached.scope, cached.found, cached.err
+	}
+	scope, found, err := r.source.LookupBucketScope(ctx, key.organization, key.project)
+	r.entries[key] = scopeLookup{scope: scope, found: found, err: err}
+	return scope, found, err
 }
 
 func accessURLForID(obj *drs.DrsObject, accessID string) string {
