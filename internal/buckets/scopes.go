@@ -71,14 +71,21 @@ func (s *Service) credentialIDForScope(scope Scope) string {
 	return strings.TrimSpace(scope.Bucket)
 }
 
-func (s *Service) scopeCredentialIDForCredentials(scope Scope, creds []Credential) string {
+func (s *Service) scopeCredentialIDForMetadata(scope Scope, creds []CredentialMetadata) string {
 	candidate := s.credentialIDForScope(scope)
 	for _, cred := range creds {
-		if strings.EqualFold(candidate, s.credentialIDForCredential(cred)) ||
+		if strings.EqualFold(candidate, metadataCredentialID(cred)) ||
 			strings.EqualFold(candidate, strings.TrimSpace(cred.Bucket)) ||
 			strings.EqualFold(candidate, strings.TrimSpace(cred.CredentialID)) {
-			return s.credentialIDForCredential(cred)
+			return metadataCredentialID(cred)
 		}
 	}
 	return candidate
+}
+
+func metadataCredentialID(credential CredentialMetadata) string {
+	if id := strings.TrimSpace(credential.CredentialID); id != "" {
+		return id
+	}
+	return strings.TrimSpace(credential.Bucket)
 }

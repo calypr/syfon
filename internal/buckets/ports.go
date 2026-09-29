@@ -31,5 +31,6 @@ type ScopeStore interface {
 // VisibilityQuery supplies the object projection used to resolve bucket
 // visibility.
 type VisibilityQuery interface {
+	ListCredentialMetadata(ctx context.Context) ([]CredentialMetadata, error)
 	ListBucketVisibilityRows(ctx context.Context, resources []string, includeUnscoped, restrictToResources bool) ([]VisibilityRow, error)
 }

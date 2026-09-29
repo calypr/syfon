@@ -331,12 +331,19 @@ func (f *fakeScopeStore) ListBucketScopes(context.Context) ([]Scope, error) {
 
 type fakeVisibilityQuery struct {
 	mu                  sync.Mutex
+	credentials         []CredentialMetadata
 	rows                []VisibilityRow
 	err                 error
 	calls               int
 	resources           []string
 	includeUnscoped     bool
 	restrictToResources bool
+}
+
+func (f *fakeVisibilityQuery) ListCredentialMetadata(context.Context) ([]CredentialMetadata, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]CredentialMetadata(nil), f.credentials...), nil
 }
 
 var _ VisibilityQuery = (*fakeVisibilityQuery)(nil)
@@ -372,6 +379,17 @@ func (r *recordingInvalidator) snapshot() []string {
 }
 
 func newFakeService(creds []Credential, scopes []Scope, visibility VisibilityQuery, invalidator cacheInvalidator) (*Service, *fakeCredentialStore, *fakeScopeStore) {
+	if query, ok := visibility.(*fakeVisibilityQuery); ok {
+		for _, credential := range creds {
+			query.credentials = append(query.credentials, CredentialMetadata{
+				CredentialID: credential.CredentialID,
+				Bucket:       credential.Bucket,
+				Provider:     credential.Provider,
+				Region:       credential.Region,
+				Endpoint:     credential.Endpoint,
+			})
+		}
+	}
 	credentialStore := &fakeCredentialStore{credentials: append([]Credential(nil), creds...)}
 	scopeStore := &fakeScopeStore{scopes: append([]Scope(nil), scopes...)}
 	credentialStore.configurationScopes = scopeStore

@@ -18,6 +18,16 @@ import (
 	"github.com/calypr/syfon/internal/storage"
 )
 
+func credentialMetadata(credential buckets.Credential) buckets.CredentialMetadata {
+	return buckets.CredentialMetadata{
+		CredentialID: credential.CredentialID,
+		Bucket:       credential.Bucket,
+		Provider:     credential.Provider,
+		Region:       credential.Region,
+		Endpoint:     credential.Endpoint,
+	}
+}
+
 type fakeScopeResolver struct {
 	scope  buckets.StorageScope
 	err    error
@@ -84,7 +94,7 @@ func (f *fakeVisibility) ListVisibleBuckets(context.Context) (map[string]buckets
 
 func TestVisibleBucketContainsMatchesPhysicalAndCredentialAliases(t *testing.T) {
 	visible := map[string]buckets.VisibleBucket{
-		"credential-id": {Credential: buckets.Credential{CredentialID: "credential-id", Bucket: "physical-bucket"}},
+		"credential-id": {Credential: buckets.CredentialMetadata{CredentialID: "credential-id", Bucket: "physical-bucket"}},
 	}
 	for _, tc := range []struct {
 		name         string
@@ -107,7 +117,7 @@ func TestVisibleBucketContainsMatchesPhysicalAndCredentialAliases(t *testing.T) 
 
 func TestVisibleBucketContainsRequiresProgramsOnlyInRestrictedMode(t *testing.T) {
 	visible := map[string]buckets.VisibleBucket{
-		"credential-id": {Credential: buckets.Credential{CredentialID: "credential-id", Bucket: "physical-bucket"}},
+		"credential-id": {Credential: buckets.CredentialMetadata{CredentialID: "credential-id", Bucket: "physical-bucket"}},
 	}
 	restricted := access.NewSession("gen3")
 	restricted.AuthHeaderPresent = true
@@ -212,7 +222,7 @@ func projectService(inventory *fakeInventory, deletePort DeletePort) (*Service, 
 func projectServiceWithTarget(inventory *fakeInventory, deletePort DeletePort, target buckets.StorageScope) (*Service, *fakeVisibility) {
 	credential := buckets.Credential{CredentialID: "cred", Bucket: "bucket", Provider: "s3"}
 	visibility := &fakeVisibility{values: map[string]buckets.VisibleBucket{
-		"cred": {Credential: credential},
+		"cred": {Credential: credentialMetadata(credential)},
 	}}
 	service := NewService(Dependencies{
 		ScopeResolver: fakeScopeResolver{scope: target},
@@ -415,8 +425,8 @@ func TestProbeObjectRestrictedVisibilityRejectsCredentialBeforeProvider(t *testi
 			"cred-b": credentialB,
 		}},
 		Visibility: &fakeVisibility{values: map[string]buckets.VisibleBucket{
-			"cred-a": {Credential: credentialA, Programs: []string{allowed}},
-			"cred-b": {Credential: credentialB},
+			"cred-a": {Credential: credentialMetadata(credentialA), Programs: []string{allowed}},
+			"cred-b": {Credential: credentialMetadata(credentialB)},
 		}},
 		Providers: Providers{Probe: probe},
 	})
@@ -454,7 +464,7 @@ func TestProbeObjectRestrictedVisibilityEnforcesProjectScopePrefix(t *testing.T)
 	service := NewService(Dependencies{
 		Credentials: fakeCredentials{values: map[string]buckets.Credential{"cred": credential}},
 		Visibility: &fakeVisibility{values: map[string]buckets.VisibleBucket{
-			"cred": {Credential: credential, Programs: []string{allowedResource}},
+			"cred": {Credential: credentialMetadata(credential), Programs: []string{allowedResource}},
 		}},
 		ScopeCatalog: &fakeCleanupScopes{scopes: []buckets.Scope{
 			{Organization: "org", ProjectID: "allowed", CredentialID: "cred", Bucket: "bucket", PathPrefix: "allowed"},
@@ -504,7 +514,7 @@ func TestValidateInventoryObjectsRestrictedVisibilityDeniesBeforeInventory(t *te
 	service := NewService(Dependencies{
 		Credentials: fakeCredentials{values: map[string]buckets.Credential{"cred-b": credential}},
 		Visibility: &fakeVisibility{values: map[string]buckets.VisibleBucket{
-			"cred-b": {Credential: credential},
+			"cred-b": {Credential: credentialMetadata(credential)},
 		}},
 		Providers: Providers{Inventory: inventory},
 	})

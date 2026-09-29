@@ -13,6 +13,15 @@ type Credential struct {
 	Endpoint     string `db:"endpoint"`
 }
 
+// CredentialMetadata is the public bucket projection without signing secrets.
+type CredentialMetadata struct {
+	CredentialID string
+	Bucket       string
+	Provider     string
+	Region       string
+	Endpoint     string
+}
+
 // Scope maps a Gen3 organization/project resource to a bucket credential.
 type Scope struct {
 	Organization string `db:"organization"`
@@ -41,6 +50,6 @@ type VisibilityRow struct {
 // VisibleBucket is the credential and resource projection exposed to callers
 // that need to authorize access to a physical bucket.
 type VisibleBucket struct {
-	Credential Credential
+	Credential CredentialMetadata
 	Programs   []string
 }
