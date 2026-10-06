@@ -106,8 +106,8 @@ func TestServiceInfoUsesLinkerProvidedVersion(t *testing.T) {
 	if info.Version != "v9.8.7-test" {
 		t.Fatalf("service version = %q, want linker-provided version", info.Version)
 	}
-	if info.Type.Version != "1.5.0" {
-		t.Fatalf("DRS type version = %q, want 1.5.0", info.Type.Version)
+	if info.Type.Version != "1.6.0" {
+		t.Fatalf("DRS type version = %q, want 1.6.0", info.Type.Version)
 	}
 }
 
@@ -144,7 +144,7 @@ func TestServiceInfoForConfigUsesCompositeIdentityAndAdvertisedLimit(t *testing.
 		Routes: config.RoutesConfig{Ga4gh: true},
 	}
 	info := serviceInfoForConfig(cfg)
-	if info.Id != "org.example.drs" || info.Type.Version != "1.5.0" || info.MaxBulkRequestLength != 7 {
+	if info.Id != "org.example.drs" || info.Type.Version != "1.6.0" || info.MaxBulkRequestLength != 7 {
 		t.Fatalf("unexpected service identity: %+v", info)
 	}
 	if info.Organization.Name != "Example Org" || info.Organization.Url != "https://example.org" {
