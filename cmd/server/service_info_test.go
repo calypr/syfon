@@ -111,6 +111,33 @@ func TestServiceInfoUsesLinkerProvidedVersion(t *testing.T) {
 	}
 }
 
+func TestParseDRSSpecVersion(t *testing.T) {
+	tests := []struct {
+		name    string
+		spec    string
+		want    string
+		wantErr string
+	}{
+		{name: "version", spec: "info:\n  version: 1.6.0\n", want: "1.6.0"},
+		{name: "malformed YAML", spec: "info: [", wantErr: "parse embedded DRS OpenAPI specification"},
+		{name: "missing version", spec: "info:\n  title: DRS\n", wantErr: "has no info.version"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseDRSSpecVersion([]byte(tc.spec))
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("parseDRSSpecVersion() error = %v, want %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil || got != tc.want {
+				t.Fatalf("parseDRSSpecVersion() = %q, %v; want %q, nil", got, err, tc.want)
+			}
+		})
+	}
+}
+
 func testServiceInfoConfig() *config.Config {
 	return &config.Config{
 		Profile: config.ProfileDevelopment,

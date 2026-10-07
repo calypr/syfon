@@ -24,19 +24,27 @@ var drsSpecVersion = func() string {
 	if err != nil {
 		panic(fmt.Errorf("read embedded DRS OpenAPI specification: %w", err))
 	}
+	version, err := parseDRSSpecVersion(data)
+	if err != nil {
+		panic(err)
+	}
+	return version
+}()
+
+func parseDRSSpecVersion(data []byte) (string, error) {
 	var spec struct {
 		Info struct {
 			Version string `yaml:"version"`
 		} `yaml:"info"`
 	}
 	if err := yaml.Unmarshal(data, &spec); err != nil {
-		panic(fmt.Errorf("parse embedded DRS OpenAPI specification: %w", err))
+		return "", fmt.Errorf("parse embedded DRS OpenAPI specification: %w", err)
 	}
 	if spec.Info.Version == "" {
-		panic("embedded DRS OpenAPI specification has no info.version")
+		return "", fmt.Errorf("embedded DRS OpenAPI specification has no info.version")
 	}
-	return spec.Info.Version
-}()
+	return spec.Info.Version, nil
+}
 
 func serviceInfoForConfig(cfg *config.Config) generated.N200ServiceInfo {
 	if cfg == nil {
