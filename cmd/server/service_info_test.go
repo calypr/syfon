@@ -106,8 +106,35 @@ func TestServiceInfoUsesLinkerProvidedVersion(t *testing.T) {
 	if info.Version != "v9.8.7-test" {
 		t.Fatalf("service version = %q, want linker-provided version", info.Version)
 	}
-	if info.Type.Version != "1.5.0" {
-		t.Fatalf("DRS type version = %q, want 1.5.0", info.Type.Version)
+	if info.Type.Version != "1.6.0" {
+		t.Fatalf("DRS type version = %q, want 1.6.0", info.Type.Version)
+	}
+}
+
+func TestParseDRSSpecVersion(t *testing.T) {
+	tests := []struct {
+		name    string
+		spec    string
+		want    string
+		wantErr string
+	}{
+		{name: "version", spec: "info:\n  version: 1.6.0\n", want: "1.6.0"},
+		{name: "malformed YAML", spec: "info: [", wantErr: "parse embedded DRS OpenAPI specification"},
+		{name: "missing version", spec: "info:\n  title: DRS\n", wantErr: "has no info.version"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseDRSSpecVersion([]byte(tc.spec))
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("parseDRSSpecVersion() error = %v, want %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil || got != tc.want {
+				t.Fatalf("parseDRSSpecVersion() = %q, %v; want %q, nil", got, err, tc.want)
+			}
+		})
 	}
 }
 
@@ -144,7 +171,7 @@ func TestServiceInfoForConfigUsesCompositeIdentityAndAdvertisedLimit(t *testing.
 		Routes: config.RoutesConfig{Ga4gh: true},
 	}
 	info := serviceInfoForConfig(cfg)
-	if info.Id != "org.example.drs" || info.Type.Version != "1.5.0" || info.MaxBulkRequestLength != 7 {
+	if info.Id != "org.example.drs" || info.Type.Version != "1.6.0" || info.MaxBulkRequestLength != 7 {
 		t.Fatalf("unexpected service identity: %+v", info)
 	}
 	if info.Organization.Name != "Example Org" || info.Organization.Url != "https://example.org" {

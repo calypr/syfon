@@ -72,6 +72,11 @@ func TestServiceInfoResponseMatchesServedOpenAPIContract(t *testing.T) {
 	if err := json.Unmarshal(request("/ga4gh/drs/v1/service-info"), &responseBody); err != nil {
 		t.Fatalf("decode service-info response: %v", err)
 	}
+	serviceInfo := responseBody.(map[string]any)
+	serviceType := serviceInfo["type"].(map[string]any)
+	if got := serviceType["version"]; got != spec.Info.Version {
+		t.Fatalf("service-info DRS version = %v, OpenAPI info.version = %q", got, spec.Info.Version)
+	}
 	if err := media.Schema.Value.VisitJSON(responseBody); err != nil {
 		t.Fatalf("service-info response violates served OpenAPI schema: %v", err)
 	}

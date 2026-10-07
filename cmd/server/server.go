@@ -8,6 +8,7 @@ import (
 	"time"
 
 	generated "github.com/calypr/syfon/apigen/drs"
+	"github.com/calypr/syfon/apigen/openapi"
 	"github.com/calypr/syfon/internal/buckets"
 	"github.com/calypr/syfon/internal/config"
 	"github.com/calypr/syfon/internal/objects"
@@ -15,7 +16,35 @@ import (
 	transferlfs "github.com/calypr/syfon/internal/transfers/lfs"
 	"github.com/calypr/syfon/internal/usage"
 	"github.com/calypr/syfon/internal/version"
+	"gopkg.in/yaml.v3"
 )
+
+var drsSpecVersion = func() string {
+	data, err := openapi.ReadSpec("openapi.yaml")
+	if err != nil {
+		panic(fmt.Errorf("read embedded DRS OpenAPI specification: %w", err))
+	}
+	version, err := parseDRSSpecVersion(data)
+	if err != nil {
+		panic(err)
+	}
+	return version
+}()
+
+func parseDRSSpecVersion(data []byte) (string, error) {
+	var spec struct {
+		Info struct {
+			Version string `yaml:"version"`
+		} `yaml:"info"`
+	}
+	if err := yaml.Unmarshal(data, &spec); err != nil {
+		return "", fmt.Errorf("parse embedded DRS OpenAPI specification: %w", err)
+	}
+	if spec.Info.Version == "" {
+		return "", fmt.Errorf("embedded DRS OpenAPI specification has no info.version")
+	}
+	return spec.Info.Version, nil
+}
 
 func serviceInfoForConfig(cfg *config.Config) generated.N200ServiceInfo {
 	if cfg == nil {
@@ -45,7 +74,7 @@ func serviceInfoForConfig(cfg *config.Config) generated.N200ServiceInfo {
 		Description:          &description,
 		Version:              version.Version,
 		Environment:          &environment,
-		Type:                 generated.ServiceType{Group: "org.ga4gh", Artifact: "drs", Version: "1.5.0"},
+		Type:                 generated.ServiceType{Group: "org.ga4gh", Artifact: "drs", Version: drsSpecVersion},
 		CreatedAt:            &now,
 		UpdatedAt:            &now,
 		MaxBulkRequestLength: maxBulk,

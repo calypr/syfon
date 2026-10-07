@@ -165,6 +165,19 @@ func TestValidateConfigProductionAllowsExplicitInsecureTransport(t *testing.T) {
 	}
 }
 
+func TestValidateConfigProductionRejectsFallbackSSLModeWithoutOptOut(t *testing.T) {
+	for _, mode := range []string{"allow", "prefer"} {
+		t.Run(mode, func(t *testing.T) {
+			cfg := productionTestConfig()
+			cfg.Database.Postgres.SSLMode = mode
+			cfg.Database.Postgres.AllowInsecureTransport = false
+			if err := validateConfig(cfg); err == nil {
+				t.Fatalf("validateConfig() accepted plaintext-fallback sslmode %q", mode)
+			}
+		})
+	}
+}
+
 func TestValidateConfigProductionRejectsUnsupportedSSLModeEvenWithOptOut(t *testing.T) {
 	for _, mode := range []string{"allow", "prefer"} {
 		t.Run(mode, func(t *testing.T) {
