@@ -1481,7 +1481,7 @@ type ClientInterface interface {
 	//     "type": {
 	//         "group": "org.ga4gh",
 	//         "artifact": "drs",
-	//         "version": "1.5"
+	//         "version": "1.6"
 	//     }
 	//     ...
 	//     "drs":{
@@ -1512,7 +1512,7 @@ type ClientInterface interface {
 	//     "type": {
 	//         "group": "org.ga4gh",
 	//         "artifact": "drs",
-	//         "version": "1.5"
+	//         "version": "1.6"
 	//     }
 	//     ...
 	//     "drs":{
@@ -1532,7 +1532,7 @@ type ClientInterface interface {
 	//     "type": {
 	//         "group": "org.ga4gh",
 	//         "artifact": "drs",
-	//         "version": "1.5"
+	//         "version": "1.6"
 	//     }
 	//     ...
 	//     "drs":{
@@ -2238,7 +2238,7 @@ func (c *Client) ReplaceObject(ctx context.Context, objectId ObjectId, body Repl
 //	    "type": {
 //	        "group": "org.ga4gh",
 //	        "artifact": "drs",
-//	        "version": "1.5"
+//	        "version": "1.6"
 //	    }
 //	    ...
 //	    "drs":{
@@ -2271,7 +2271,7 @@ func (c *Client) ReplaceObject(ctx context.Context, objectId ObjectId, body Repl
 //	    "type": {
 //	        "group": "org.ga4gh",
 //	        "artifact": "drs",
-//	        "version": "1.5"
+//	        "version": "1.6"
 //	    }
 //	    ...
 //	    "drs":{
@@ -2293,7 +2293,7 @@ func (c *Client) ReplaceObject(ctx context.Context, objectId ObjectId, body Repl
 //	    "type": {
 //	        "group": "org.ga4gh",
 //	        "artifact": "drs",
-//	        "version": "1.5"
+//	        "version": "1.6"
 //	    }
 //	    ...
 //	    "drs":{
