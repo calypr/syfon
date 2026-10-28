@@ -387,11 +387,17 @@ func TestLFSUploadStreamsBodiesLargerThanFiberDefaultLimit(t *testing.T) {
 		}
 		return c.Next()
 	})
-	registerLFSRoutes(app, newLFSTestDependencies(ports, storageFake), defaultLFSOptions())
 
-	request := httptest.NewRequest(http.MethodPut, "/info/lfs/objects/"+oid, bytes.NewReader(payload))
+	listener := httptest.NewServer(NewNativeHTTPHandler(app, func() {
+		registerLFSRoutes(app, newLFSTestDependencies(ports, storageFake), defaultLFSOptions())
+	}))
+	defer listener.Close()
+	request, err := http.NewRequest(http.MethodPut, listener.URL+"/info/lfs/objects/"+oid, bytes.NewReader(payload))
+	if err != nil {
+		t.Fatal(err)
+	}
 	request.Header.Set("Content-Type", "application/octet-stream")
-	response, err := app.Test(request)
+	response, err := listener.Client().Do(request)
 	if err != nil {
 		t.Fatal(err)
 	}

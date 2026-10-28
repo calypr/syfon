@@ -4,6 +4,12 @@ Syfon loads a YAML or JSON file passed to `syfon serve --config <file>`. Environ
 
 If a field in this page differs from the code, the types in `internal/config/types.go` and validation in `internal/config/validation.go` define the behavior.
 
+## HTTP request lifetime
+
+Syfon serves its Fiber routes through a native HTTP listener. Each request passes its HTTP context to Fiber before authorization and route middleware run. A client disconnect or server shutdown cancels that context, so storage handlers that pass `c.Context()` can stop their work.
+
+The server streams LFS object upload bodies. Other request bodies are limited to Fiber's 4 MiB default. The HTTP server has no whole-handler write timeout. Syfon starts a 120-second write deadline after a handler returns, so slow storage work does not consume the response delivery budget.
+
 ## Minimal configurations
 
 Local development needs one database and one auth mode:

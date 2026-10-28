@@ -3,8 +3,10 @@ package server
 import (
 	"context"
 	"errors"
+	"io"
 	"log/slog"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,6 +16,7 @@ import (
 	"time"
 
 	"github.com/calypr/syfon/internal/config"
+	"github.com/calypr/syfon/internal/httpapi"
 	"github.com/calypr/syfon/internal/persistence/credentialcipher"
 	"github.com/gofiber/fiber/v3"
 	"github.com/spf13/cobra"
@@ -160,16 +163,24 @@ func TestRuntimeCloseStopsOwnedListener(t *testing.T) {
 		t.Fatal(err)
 	}
 	ready := make(chan struct{})
+	_, requestCancel := context.WithCancel(context.Background())
+	app := fiber.New()
+	tracker := newRequestTracker()
 	runtime := &serverRuntime{
-		app:      fiber.New(),
-		listener: &firstAcceptListener{Listener: listener, ready: ready},
+		app:            app,
+		listener:       &firstAcceptListener{Listener: listener, ready: ready},
+		requestCancel:  requestCancel,
+		requestTracker: tracker,
+		httpServer: &http.Server{
+			Handler: tracker.track(httpapi.NewNativeHTTPHandler(app, nil)),
+		},
 	}
 	serveResult := make(chan error, 1)
-	go func() { serveResult <- runtime.app.Listener(runtime.listener) }()
+	go func() { serveResult <- runtime.httpServer.Serve(runtime.listener) }()
 	select {
 	case <-ready:
 	case <-time.After(5 * time.Second):
-		t.Fatal("Fiber did not enter its serving loop")
+		t.Fatal("HTTP server did not enter its serving loop")
 	}
 	shutdownContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -178,14 +189,96 @@ func TestRuntimeCloseStopsOwnedListener(t *testing.T) {
 	}
 	select {
 	case err := <-serveResult:
-		if err != nil && !errors.Is(err, net.ErrClosed) {
-			t.Fatalf("Listener() error = %v", err)
+		if err != nil && !errors.Is(err, http.ErrServerClosed) && !errors.Is(err, net.ErrClosed) {
+			t.Fatalf("Serve() error = %v", err)
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("Fiber listener did not stop")
+		t.Fatal("HTTP listener did not stop")
 	}
 	if err := runtime.Close(context.Background()); err != nil {
 		t.Fatalf("second Close() error = %v", err)
+	}
+}
+
+func TestRuntimeCloseCancelsAndDrainsActiveRequest(t *testing.T) {
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := make(chan struct{})
+	left := make(chan struct{})
+	app := fiber.New()
+	requestContext, requestCancel := context.WithCancel(context.Background())
+	ready := make(chan struct{})
+	tracker := newRequestTracker()
+	wrappedListener := &firstAcceptListener{Listener: listener, ready: ready}
+	runtime := &serverRuntime{
+		app:            app,
+		listener:       wrappedListener,
+		requestCancel:  requestCancel,
+		requestTracker: tracker,
+		httpServer: &http.Server{
+			Handler: tracker.track(httpapi.NewNativeHTTPHandler(app, func() {
+				app.Get("/active", func(c fiber.Ctx) error {
+					close(started)
+					<-c.Context().Done()
+					close(left)
+					return c.SendStatus(http.StatusNoContent)
+				})
+			})),
+			BaseContext: func(net.Listener) context.Context {
+				return requestContext
+			},
+		},
+	}
+	serveResult := make(chan error, 1)
+	go func() { serveResult <- runtime.httpServer.Serve(wrappedListener) }()
+	select {
+	case <-ready:
+	case <-time.After(5 * time.Second):
+		t.Fatal("HTTP listener did not start")
+	}
+	clientResult := make(chan error, 1)
+	go func() {
+		response, requestErr := http.Get("http://" + listener.Addr().String() + "/active")
+		if requestErr != nil {
+			clientResult <- requestErr
+			return
+		}
+		_, readErr := io.Copy(io.Discard, response.Body)
+		closeErr := response.Body.Close()
+		clientResult <- errors.Join(readErr, closeErr)
+	}()
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("active request did not enter its handler")
+	}
+	shutdownContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := runtime.Close(shutdownContext); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	select {
+	case <-left:
+	default:
+		t.Fatal("Close returned before the active handler left")
+	}
+	select {
+	case err := <-clientResult:
+		if err != nil {
+			t.Fatalf("client request error = %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("client request did not finish")
+	}
+	select {
+	case err := <-serveResult:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			t.Fatalf("Serve() error = %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("HTTP server did not stop")
 	}
 }
 

@@ -41,6 +41,19 @@ const (
 
 const maxProbeWorkers = 8
 
+type probeTargetIdentity struct {
+	objectURL    string
+	organization string
+	project      string
+	key          string
+	scheme       string
+}
+
+type probeBatchGroup struct {
+	request internalapi.InternalInspectObjectRequest
+	indexes []int
+}
+
 func (s *Service) ProbeObject(ctx context.Context, request internalapi.InternalInspectObjectRequest) (*internalapi.InternalInspectObjectResponse, error) {
 	metadata, err := s.probeObject(ctx, request)
 	if err != nil {
@@ -62,8 +75,21 @@ func (s *Service) ProbeObjects(ctx context.Context, requests []internalapi.Inter
 	if len(requests) == 0 {
 		return []internalapi.InternalInspectObjectBulkItem{}
 	}
+	groups := make([]probeBatchGroup, 0, len(requests))
+	groupByTarget := make(map[probeTargetIdentity]int, len(requests))
+	for index, request := range requests {
+		identity := probeTargetIdentityFor(request)
+		groupIndex, ok := groupByTarget[identity]
+		if !ok {
+			groupIndex = len(groups)
+			groupByTarget[identity] = groupIndex
+			groups = append(groups, probeBatchGroup{request: request})
+		}
+		groups[groupIndex].indexes = append(groups[groupIndex].indexes, index)
+	}
+
 	results := make([]internalapi.InternalInspectObjectBulkItem, len(requests))
-	workers := len(requests)
+	workers := len(groups)
 	if workers > maxProbeWorkers {
 		workers = maxProbeWorkers
 	}
@@ -73,29 +99,32 @@ func (s *Service) ProbeObjects(ctx context.Context, requests []internalapi.Inter
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for index := range workCh {
-				results[index] = s.probeOne(ctx, requests[index])
+			for groupIndex := range workCh {
+				group := groups[groupIndex]
+				var metadata *objectMetadata
+				err := ctx.Err()
+				if err == nil {
+					metadata, err = s.probeObject(ctx, group.request)
+					if ctxErr := ctx.Err(); ctxErr != nil {
+						metadata, err = nil, ctxErr
+					}
+				}
+				for _, index := range group.indexes {
+					results[index] = s.probeResult(ctx, requests[index], metadata, err)
+				}
 			}
 		}()
 	}
-	for index := range requests {
-		workCh <- index
+	for groupIndex := range groups {
+		workCh <- groupIndex
 	}
 	close(workCh)
 	wg.Wait()
 	return results
 }
 
-func (s *Service) probeOne(ctx context.Context, request internalapi.InternalInspectObjectRequest) internalapi.InternalInspectObjectBulkItem {
+func (s *Service) probeResult(ctx context.Context, request internalapi.InternalInspectObjectRequest, metadata *objectMetadata, err error) internalapi.InternalInspectObjectBulkItem {
 	result := internalapi.InternalInspectObjectBulkItem{Id: strings.TrimSpace(request.Id), ObjectUrl: strings.TrimSpace(request.ObjectUrl), Status: string(probeError), ValidationStatus: string(validationStatusForError(request))}
-	load := func() (*objectMetadata, error) { return s.probeObject(ctx, request) }
-	var metadata *objectMetadata
-	var err error
-	if cache := cacheFromContext(ctx); cache != nil {
-		metadata, err = cache.loadProbe(ctx, probeCacheKey(request), load)
-	} else {
-		metadata, err = load()
-	}
 	if err != nil {
 		status, kind := classifyError(err)
 		result.Status, result.ErrorKind = string(status), kind
@@ -138,7 +167,7 @@ func inspectObjectResponse(metadata *objectMetadata) *internalapi.InternalInspec
 	return result
 }
 
-func probeCacheKey(request internalapi.InternalInspectObjectRequest) probeRequestKey {
+func probeTargetIdentityFor(request internalapi.InternalInspectObjectRequest) probeTargetIdentity {
 	objectURL := strings.TrimSpace(request.ObjectUrl)
 	if bucket, key, ok := address.ParseS3URL(objectURL); ok {
 		objectURL = address.BucketToURL(bucket, key)
@@ -147,7 +176,7 @@ func probeCacheKey(request internalapi.InternalInspectObjectRequest) probeReques
 	if scheme == "" {
 		scheme = address.S3Provider
 	}
-	return probeRequestKey{
+	return probeTargetIdentity{
 		objectURL: objectURL, organization: strings.TrimSpace(request.Organization), project: strings.TrimSpace(request.Project),
 		key: strings.Trim(strings.TrimSpace(request.Key), "/"), scheme: scheme,
 	}

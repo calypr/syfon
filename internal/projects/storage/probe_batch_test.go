@@ -25,15 +25,17 @@ type staticProbeVisibility struct {
 	visible map[string]buckets.VisibleBucket
 }
 
-type waitSignalContext struct {
-	context.Context
-	entered chan struct{}
+type cancelableProbe struct {
+	calls   atomic.Int64
+	started chan struct{}
 	once    sync.Once
 }
 
-func (ctx *waitSignalContext) Done() <-chan struct{} {
-	ctx.once.Do(func() { close(ctx.entered) })
-	return ctx.Context.Done()
+func (p *cancelableProbe) Probe(ctx context.Context, targets []providerstorage.ProbeTarget) []providerstorage.ProbeResult {
+	p.calls.Add(1)
+	p.once.Do(func() { close(p.started) })
+	<-ctx.Done()
+	return []providerstorage.ProbeResult{{ID: targets[0].ID, Target: targets[0].Target, Err: ctx.Err()}}
 }
 
 func (v staticProbeVisibility) ListVisibleBuckets(context.Context) (map[string]buckets.VisibleBucket, error) {
@@ -61,7 +63,7 @@ func scopedProbeService(probe ProbePort) *Service {
 	})
 }
 
-func TestProbeObjectsCoalescesConcurrentMetadataAndValidatesEachInput(t *testing.T) {
+func TestProbeObjectsDeduplicatesTargetsAndValidatesEachInput(t *testing.T) {
 	probe := &blockingProbe{started: make(chan struct{}), release: make(chan struct{})}
 	service := scopedProbeService(probe)
 	size := int64(50)
@@ -131,7 +133,7 @@ func TestProbeObjectsSeparatesScopeIdentity(t *testing.T) {
 	}
 }
 
-func TestProbeObjectsCoalescesRawURLAndKeepsErrorValidation(t *testing.T) {
+func TestProbeObjectsDeduplicatesRawURLAndKeepsErrorValidation(t *testing.T) {
 	probe := &blockingProbe{err: &providerstorage.OperationError{Kind: providerstorage.ErrorUnavailable, Provider: "s3", Capability: "probe", Cause: errors.New("private provider detail")}}
 	credential := buckets.Credential{CredentialID: "cred", Bucket: "bucket", Provider: "s3"}
 	service := NewService(Dependencies{
@@ -159,100 +161,63 @@ func TestProbeObjectsCoalescesRawURLAndKeepsErrorValidation(t *testing.T) {
 	}
 }
 
-func TestProbeCacheWaiterCancellationDoesNotStopLeader(t *testing.T) {
-	cache := &requestCache{probes: make(map[probeRequestKey]*probeEntry)}
-	key := probeRequestKey{objectURL: "s3://bucket/file.bin"}
-	started := make(chan struct{})
-	release := make(chan struct{})
-	leader := make(chan error, 1)
-	go func() {
-		_, err := cache.loadProbe(context.Background(), key, func() (*objectMetadata, error) {
-			close(started)
-			<-release
-			return &objectMetadata{Key: "file.bin"}, nil
-		})
-		leader <- err
-	}()
-	select {
-	case <-started:
-	case <-time.After(5 * time.Second):
-		t.Fatal("leader did not start")
+func TestProbeObjectsCancellationReturnsResultsForEachDuplicateInput(t *testing.T) {
+	probe := &blockingProbe{started: make(chan struct{}), release: make(chan struct{})}
+	service := scopedProbeService(probe)
+	ctx, cancel := context.WithCancel(context.Background())
+	requests := []internalapi.InternalInspectObjectRequest{
+		{Id: "plain", Organization: "org", Project: "project", Key: "file.bin"},
+		{Id: "validated", Organization: "org", Project: "project", Key: "file.bin", ExpectedName: "file.bin"},
 	}
-	base, cancel := context.WithCancel(context.Background())
-	ctx := &waitSignalContext{Context: base, entered: make(chan struct{})}
-	waiter := make(chan error, 1)
-	var waiterLoaderCalls atomic.Int64
-	go func() {
-		_, err := cache.loadProbe(ctx, key, func() (*objectMetadata, error) {
-			waiterLoaderCalls.Add(1)
-			return nil, nil
-		})
-		waiter <- err
-	}()
+	done := make(chan []internalapi.InternalInspectObjectBulkItem, 1)
+	go func() { done <- service.ProbeObjects(ctx, requests) }()
 	select {
-	case <-ctx.entered:
+	case <-probe.started:
 	case <-time.After(5 * time.Second):
-		t.Fatal("waiter did not reach in-flight entry")
+		cancel()
+		t.Fatal("probe did not start")
 	}
 	cancel()
+	close(probe.release)
+	var results []internalapi.InternalInspectObjectBulkItem
 	select {
-	case err := <-waiter:
-		if !errors.Is(err, context.Canceled) {
-			t.Fatalf("waiter error=%v, want canceled", err)
-		}
+	case results = <-done:
 	case <-time.After(5 * time.Second):
-		t.Fatal("canceled waiter did not return")
+		t.Fatal("canceled bulk probe did not finish")
 	}
-	if got := waiterLoaderCalls.Load(); got != 0 {
-		t.Fatalf("waiter loader calls=%d, want 0", got)
+	if got := probe.calls.Load(); got != 1 {
+		t.Fatalf("physical probes=%d, want 1", got)
 	}
-	close(release)
-	select {
-	case err := <-leader:
-		if err != nil {
-			t.Fatalf("leader error=%v", err)
+	if len(results) != len(requests) {
+		t.Fatalf("results=%d, want %d", len(results), len(requests))
+	}
+	wantValidation := []string{"not_requested", "unverifiable"}
+	for index, result := range results {
+		if result.Id != requests[index].Id || result.Status != "error" || result.ValidationStatus != wantValidation[index] {
+			t.Fatalf("result[%d]=%+v", index, result)
 		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("leader did not finish")
 	}
 }
 
-func TestProbeCacheRetriesAfterCanceledLeader(t *testing.T) {
-	cache := &requestCache{probes: make(map[probeRequestKey]*probeEntry)}
-	key := probeRequestKey{objectURL: "s3://bucket/file.bin"}
-	started := make(chan struct{})
-	release := make(chan struct{})
+func TestProbeObjectsDoesNotStartProbeForCanceledCall(t *testing.T) {
+	probe := &cancelableProbe{started: make(chan struct{})}
+	service := scopedProbeService(probe)
 	ctx, cancel := context.WithCancel(context.Background())
-	leader := make(chan error, 1)
-	go func() {
-		_, err := cache.loadProbe(ctx, key, func() (*objectMetadata, error) {
-			close(started)
-			<-release
-			return &objectMetadata{Key: "stale.bin"}, nil
-		})
-		leader <- err
-	}()
-	select {
-	case <-started:
-	case <-time.After(5 * time.Second):
-		t.Fatal("leader did not start")
-	}
 	cancel()
-	close(release)
-	select {
-	case err := <-leader:
-		if !errors.Is(err, context.Canceled) {
-			t.Fatalf("leader error=%v, want canceled", err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("canceled leader did not finish")
+	requests := []internalapi.InternalInspectObjectRequest{
+		{Id: "plain", Organization: "org", Project: "project", Key: "file.bin"},
+		{Id: "validated", Organization: "org", Project: "project", Key: "file.bin", ExpectedName: "file.bin"},
 	}
-	called := false
-	metadata, err := cache.loadProbe(context.Background(), key, func() (*objectMetadata, error) {
-		called = true
-		return &objectMetadata{Key: "fresh.bin"}, nil
-	})
-	if err != nil || !called || metadata.Key != "fresh.bin" {
-		t.Fatalf("retry metadata=%+v error=%v called=%v", metadata, err, called)
+	results := service.ProbeObjects(ctx, requests)
+	if got := probe.calls.Load(); got != 0 {
+		t.Fatalf("physical probes=%d, want 0", got)
+	}
+	if len(results) != len(requests) {
+		t.Fatalf("results=%d, want %d", len(results), len(requests))
+	}
+	for index, result := range results {
+		if result.Id != requests[index].Id || result.Status != "error" {
+			t.Fatalf("result[%d]=%+v", index, result)
+		}
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"os/signal"
@@ -170,10 +171,6 @@ func buildServerRuntime(ctx context.Context, cfg *config.Config, logger *slog.Lo
 	// Build the Fiber runtime and request handlers.
 	app := fiber.New(fiber.Config{
 		StreamRequestBody: true,
-		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      120 * time.Second,
-		IdleTimeout:       120 * time.Second,
-		ReadBufferSize:    64 * 1024,
 		AppName:           "Syfon DRS Server",
 		ErrorHandler:      httpapi.FiberErrorHandler,
 	})
@@ -359,8 +356,6 @@ var Cmd = &cobra.Command{
 				logger.Info("server shutdown complete")
 			}
 		}()
-		registerServerRoutes(rt)
-
 		addr := fmt.Sprintf(":%d", cfg.Port)
 		logger.Info("server starting", "addr", addr)
 
@@ -370,12 +365,30 @@ var Cmd = &cobra.Command{
 		}
 		readyCh := make(chan struct{})
 		rt.listener = &firstAcceptListener{Listener: listener, ready: readyCh}
+		requestContext, requestCancel := context.WithCancel(context.Background())
+		rt.requestCancel = requestCancel
+		rt.requestTracker = newRequestTracker()
+		// WriteTimeout would cover Fiber handler work as well as response delivery.
+		// The native bridge starts a 120-second write deadline after each handler returns.
+		rt.httpServer = &http.Server{
+			Handler: rt.requestTracker.track(httpapi.NewNativeHTTPHandler(rt.app, func() {
+				registerServerRoutes(rt)
+			})),
+			ReadTimeout:    30 * time.Second,
+			IdleTimeout:    120 * time.Second,
+			MaxHeaderBytes: 64 * 1024,
+			BaseContext: func(net.Listener) context.Context {
+				return requestContext
+			},
+		}
 
 		errCh := make(chan error, 1)
 		go func() {
-			if err := rt.app.Listener(rt.listener); err != nil {
-				errCh <- err
+			err := rt.httpServer.Serve(rt.listener)
+			if errors.Is(err, http.ErrServerClosed) {
+				err = nil
 			}
+			errCh <- err
 		}()
 
 		sigCh := make(chan os.Signal, 1)
@@ -384,7 +397,7 @@ var Cmd = &cobra.Command{
 
 		select {
 		case <-readyCh:
-			// Fiber has entered its serving loop; shutdown can now be selected.
+			// The HTTP server has entered its serving loop; shutdown can now be selected.
 		case err := <-errCh:
 			return fmt.Errorf("server listen failed: %w", err)
 		}

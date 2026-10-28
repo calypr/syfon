@@ -4,14 +4,20 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/calypr/syfon/apigen/bucketapi"
 	internalapi "github.com/calypr/syfon/apigen/internalapi"
+	clientaccess "github.com/calypr/syfon/client/access"
+	"github.com/calypr/syfon/internal/access"
 	domainbuckets "github.com/calypr/syfon/internal/buckets"
 	projectstorage "github.com/calypr/syfon/internal/projects/storage"
 	providerstorage "github.com/calypr/syfon/internal/storage"
@@ -67,6 +73,102 @@ func newMaintenanceRouteApp(t *testing.T) *fiber.App {
 	app := fiber.New(fiber.Config{ErrorHandler: FiberErrorHandler})
 	RegisterRoutes(app, Dependencies{ProjectStorage: storageService}, Options{Internal: true})
 	return app
+}
+
+type nativeProbeResolver struct{}
+
+func (nativeProbeResolver) ResolveStorageScope(context.Context, string, string) (domainbuckets.StorageScope, error) {
+	return domainbuckets.StorageScope{Provider: "s3", Bucket: "bucket", Prefix: "project-prefix"}, nil
+}
+
+type nativeCancelableProbe struct {
+	started  chan struct{}
+	canceled chan struct{}
+	once     sync.Once
+}
+
+func (p *nativeCancelableProbe) Probe(ctx context.Context, targets []providerstorage.ProbeTarget) []providerstorage.ProbeResult {
+	p.once.Do(func() { close(p.started) })
+	<-ctx.Done()
+	close(p.canceled)
+	return []providerstorage.ProbeResult{{ID: targets[0].ID, Target: targets[0].Target, Err: ctx.Err()}}
+}
+
+type nativeProbeEvaluator struct{}
+
+func (nativeProbeEvaluator) Evaluate(request access.EvaluationRequest) access.EvaluationResult {
+	session := access.NewSession(request.Mode)
+	if request.AuthHeader != "Bearer probe" {
+		return access.EvaluationResult{Session: session, Decision: access.DecisionUnauthorized}
+	}
+	session.AuthHeaderPresent = true
+	resource, _ := clientaccess.ResourcePath("org", "project")
+	session.SetAuthorizations([]string{resource}, map[string]map[string]bool{resource: {"read": true}}, true)
+	return access.EvaluationResult{Session: session, Decision: access.DecisionContinue}
+}
+
+func TestNativeHTTPBridgeCancelsActualInspectProviderOnTCPAbort(t *testing.T) {
+	probe := &nativeCancelableProbe{started: make(chan struct{}), canceled: make(chan struct{})}
+	service := projectstorage.NewService(projectstorage.Dependencies{
+		ScopeResolver: nativeProbeResolver{},
+		Providers:     projectstorage.Providers{Probe: probe},
+	})
+	app := fiber.New(fiber.Config{ErrorHandler: FiberErrorHandler})
+	server := httptest.NewServer(NewNativeHTTPHandler(app, func() {
+		RegisterRoutes(app, Dependencies{
+			ProjectStorage: service,
+			Authorization:  AuthorizationHandler(AuthzOptions{Mode: "gen3", Evaluator: nativeProbeEvaluator{}}),
+			RequestIDs:     RequestIDHandler(nil),
+		}, Options{Internal: true})
+	}))
+	t.Cleanup(server.Close)
+
+	unauthorized, err := http.NewRequest(http.MethodPost, server.URL+"/data/inspect", strings.NewReader(`{"organization":"org","project":"project","key":"file.bin"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	unauthorized.Header.Set("Content-Type", "application/json")
+	unauthorized.Header.Set("X-Request-Id", "bridge-auth-check")
+	unauthorizedResponse, err := server.Client().Do(unauthorized)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = io.Copy(io.Discard, unauthorizedResponse.Body)
+	_ = unauthorizedResponse.Body.Close()
+	if unauthorizedResponse.StatusCode != http.StatusUnauthorized || unauthorizedResponse.Header.Get("X-Request-Id") != "bridge-auth-check" {
+		t.Fatalf("unauthorized response = (%d, %q), want 401 and propagated request ID", unauthorizedResponse.StatusCode, unauthorizedResponse.Header.Get("X-Request-Id"))
+	}
+
+	address := strings.TrimPrefix(server.URL, "http://")
+	connection, err := net.Dial("tcp", address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := `{"organization":"org","project":"project","key":"file.bin"}`
+	request := "POST /data/inspect HTTP/1.1\r\n" +
+		"Host: " + address + "\r\n" +
+		"Authorization: Bearer probe\r\n" +
+		"Content-Type: application/json\r\n" +
+		"Content-Length: " + strconv.Itoa(len(body)) + "\r\n" +
+		"Connection: close\r\n\r\n" + body
+	if _, err := io.WriteString(connection, request); err != nil {
+		_ = connection.Close()
+		t.Fatal(err)
+	}
+	select {
+	case <-probe.started:
+	case <-time.After(5 * time.Second):
+		_ = connection.Close()
+		t.Fatal("project storage provider did not receive the inspect request")
+	}
+	if err := connection.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-probe.canceled:
+	case <-time.After(5 * time.Second):
+		t.Fatal("TCP disconnect did not cancel the inspect provider context")
+	}
 }
 
 func TestProjectDeleteRouteHasOneGeneratedOwner(t *testing.T) {

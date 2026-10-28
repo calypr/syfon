@@ -3,7 +3,9 @@ package server
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net"
+	"net/http"
 	"sync"
 
 	generated "github.com/calypr/syfon/apigen/drs"
@@ -23,6 +25,9 @@ import (
 
 type serverRuntime struct {
 	app              *fiber.App
+	httpServer       *http.Server
+	requestCancel    context.CancelFunc
+	requestTracker   *requestTracker
 	cfg              *config.Config
 	database         *store.Store
 	storageManager   *storage.Manager
@@ -45,7 +50,7 @@ type serverRuntime struct {
 	multipartWG      sync.WaitGroup
 }
 
-// firstAcceptListener reports that the Fiber server has reached its serving
+// firstAcceptListener reports that the HTTP server has reached its serving
 // loop. Accept is intentionally notified before delegating to the owned
 // listener so startup cannot race an immediate shutdown.
 type firstAcceptListener struct {
@@ -72,13 +77,18 @@ func (rt *serverRuntime) Close(ctx context.Context) error {
 		if rt.health != nil {
 			rt.health.StopServing()
 		}
+		if rt.requestCancel != nil {
+			rt.requestCancel()
+		}
 		if rt.multipartCancel != nil {
 			rt.multipartCancel()
-			rt.multipartWG.Wait()
 		}
-		if rt.app != nil {
-			if err := rt.app.ShutdownWithContext(ctx); err != nil && !errors.Is(err, fiber.ErrNotRunning) {
+		if rt.httpServer != nil {
+			if err := rt.httpServer.Shutdown(ctx); err != nil {
 				cleanupErrors = append(cleanupErrors, err)
+				if closeErr := rt.httpServer.Close(); closeErr != nil && !errors.Is(closeErr, http.ErrServerClosed) {
+					cleanupErrors = append(cleanupErrors, closeErr)
+				}
 			}
 		}
 		if rt.listener != nil {
@@ -86,22 +96,41 @@ func (rt *serverRuntime) Close(ctx context.Context) error {
 				cleanupErrors = append(cleanupErrors, err)
 			}
 		}
-		if rt.authRuntime != nil {
-			rt.authRuntime.Close()
+		if rt.multipartCancel != nil {
+			rt.multipartWG.Wait()
 		}
-		if rt.storageManager != nil {
-			if err := rt.storageManager.Close(); err != nil {
-				cleanupErrors = append(cleanupErrors, err)
-			}
-		}
-		if rt.database != nil {
-			if err := rt.database.Close(); err != nil {
-				cleanupErrors = append(cleanupErrors, err)
-			}
+		if rt.requestTracker == nil || rt.requestTracker.stopAndWait(ctx) {
+			cleanupErrors = append(cleanupErrors, rt.closeOwnedResources())
+		} else {
+			cleanupErrors = append(cleanupErrors, ctx.Err())
+			go func() {
+				rt.requestTracker.stopAndWait(context.Background())
+				if err := rt.closeOwnedResources(); err != nil {
+					slog.Default().Error("deferred server resource cleanup failed", "err", err)
+				}
+			}()
 		}
 		rt.closeErr = errors.Join(cleanupErrors...)
 	})
 	return rt.closeErr
+}
+
+func (rt *serverRuntime) closeOwnedResources() error {
+	var cleanupErrors []error
+	if rt.authRuntime != nil {
+		rt.authRuntime.Close()
+	}
+	if rt.storageManager != nil {
+		if err := rt.storageManager.Close(); err != nil {
+			cleanupErrors = append(cleanupErrors, err)
+		}
+	}
+	if rt.database != nil {
+		if err := rt.database.Close(); err != nil {
+			cleanupErrors = append(cleanupErrors, err)
+		}
+	}
+	return errors.Join(cleanupErrors...)
 }
 
 func registerServerRoutes(rt *serverRuntime) {
